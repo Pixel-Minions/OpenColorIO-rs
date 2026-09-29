@@ -8,9 +8,12 @@
 //!   because OCIO's kernel choice and math library belong to the machine.
 //! - [`fixtures`]: committed, oracle-generated text fixtures, verified against
 //!   `fixtures/MANIFEST.toml` on every read.
-//! - [`compare`]: exact comparators. There is no tolerance anywhere in this crate: a check
-//!   that needs one needs a waiver in `waivers.toml`, approved by the owner.
+//! - [`compare`]: exact comparators. There is no tolerance anywhere in this crate except in
+//!   [`upstream`]; any other check that needs one needs a waiver in `waivers.toml`, approved
+//!   by the owner.
 //! - [`probe`]: deterministic probe inputs (all half bit patterns, specials, ramps, random).
+//! - [`upstream`]: upstream's own tolerance checks (`OCIO_CHECK_CLOSE`,
+//!   `EqualWithSafeRelError`, ...), for ported upstream tests only.
 //!
 //! Expected values come only from the oracle or from upstream's tests. Never from the port.
 #![deny(unsafe_code)]
@@ -20,6 +23,7 @@ pub mod fixtures;
 pub mod oracle;
 pub mod paths;
 pub mod probe;
+pub mod upstream;
 
 pub use compare::{assert_bytes_eq, assert_f32_bits_eq, assert_text_eq};
 pub use oracle::Oracle;
