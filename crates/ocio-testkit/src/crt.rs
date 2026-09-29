@@ -283,7 +283,7 @@ pub fn strtof_c(input: &[u8]) -> Strto<f32> {
 pub fn strtol_c(input: &[u8], base: i32) -> Strto<i64> {
     // SAFETY: as in `strtod_c`.
     strto(input, |s, end| {
-        i64::from(unsafe { ffi::strtol(s, end, base) })
+        widen_long(unsafe { ffi::strtol(s, end, base) })
     })
 }
 
@@ -343,14 +343,20 @@ pub fn strtol_l(input: &[u8], base: i32) -> Strto<i64> {
     #[cfg(target_os = "linux")]
     // SAFETY: as in `strtod_l`.
     let r = strto(input, |s, end| {
-        i64::from(unsafe { ffi::strtol_l(s, end, base, loc) })
+        widen_long(unsafe { ffi::strtol_l(s, end, base, loc) })
     });
     #[cfg(windows)]
     // SAFETY: as above.
     let r = strto(input, |s, end| {
-        i64::from(unsafe { ffi::_strtol_l(s, end, base, loc) })
+        widen_long(unsafe { ffi::_strtol_l(s, end, base, loc) })
     });
     r
+}
+
+/// C `long` widened to `i64` (a no-op on Linux, where `long` is already 64 bits).
+#[allow(clippy::useless_conversion)]
+fn widen_long(v: c_long) -> i64 {
+    i64::from(v)
 }
 
 /// The number of bits in C `long` on this platform (32 on Windows, 64 on Linux).
