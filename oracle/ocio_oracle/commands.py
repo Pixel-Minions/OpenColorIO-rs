@@ -160,3 +160,7 @@ def config_serialize(args, blobs):
             result, out = {"exception": exception_result(exc)}, []
     result["log"] = log
     return result, out
+
+
+# Command modules that register with @command; imported last so `command` exists.
+from . import text  # noqa: E402,F401
