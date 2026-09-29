@@ -1,6 +1,14 @@
 # OpenColorIO-rs — Porting Plan
 
-**Status:** v0.6, 2026-09-29. Phase 0 is in progress (§15).
+**Status:** v0.7, 2026-09-29. Phase 0 is in progress (§15).
+- **Changes in v0.7:**
+  - parity with OpenColorIO is the goal, and consumers align with the port (§1, §6);
+  - milestones are complete sections of OCIO, byte-exact on CPU and GPU in all 10 languages;
+  - GPU writers land with each op family, and the GPU infrastructure moves to Phase 1;
+  - Ultravioleta's replay corpus is no longer a release criterion;
+  - `LegacyViewingPipeline` joins the app helpers (M3);
+  - the exact Lut3D inverse moves to Phase 2;
+  - CLF reading in 2.5.2 has no SMPTE ST 2136-1 support.
 - **Changes in v0.6:** D13 decided (`PyOpenColorIO`); the public repository is fine for now; work lands as small mergeable chunks (§7, `CLAUDE.md`).
 - **Changes in v0.5:** Rust 1.98.1 pinned (D7); exact upstream test counts; the Phase 0 progress and findings; repository visibility added to the open questions.
 - **Changes in v0.4:**
@@ -11,7 +19,7 @@
 - **Changes in v0.3:** skip the audit of the existing port; keep the crate private; Windows and Linux only; match OCIO on each platform.
 - **Changes in v0.2:** pinned to OCIO 2.5.2; a byte-exact definition of done; an operating model for agents; Ultravioleta as the first consumer.
 
-**Target:** OpenColorIO **2.5.2**, exactly. This is the version Ultravioleta pins (`requirements-color.txt`). Later OCIO versions become new major versions of this crate (§2).
+**Target:** OpenColorIO **2.5.2**, exactly: the OCIO line of the VFX Reference Platform CY2026. Later OCIO versions become new major versions of this crate (§2).
 
 **Sources:**
 - the upstream `v2.5.2` tag and `main` (source, tests, release notes, CI);
@@ -24,7 +32,7 @@
 3. [Definition of done: byte by byte](#3-definition-of-done-byte-by-byte)
 4. [What we are porting](#4-what-we-are-porting-ocio-252)
 5. [Decisions](#5-decisions)
-6. [First consumer: Ultravioleta](#6-first-consumer-ultravioleta)
+6. [Consumers](#6-consumers)
 7. [How agents do the work](#7-how-agents-do-the-work)
 8. [Verification](#8-verification)
 9. [Architecture](#9-architecture)
@@ -46,9 +54,10 @@
   - Tags are ours (`v1.0.0`).
   - `ocio::version()` still reports `2.5.2`, exactly as OCIO does.
   - Porting a later OCIO version is a diff from one upstream tag to the next, released as a new major version (§12).
-- **First consumer: Ultravioleta.**
-  - The port replaces its Python worker (`scripts/ocio_worker.py`). That removes the Python runtime from the color path and the bridge costing 612 ms per UHD frame. Every op becomes byte-exact; today only six ops run natively, within 3e-5 of OCIO.
-  - Users' Python scripts get a module compatible with `PyOpenColorIO`, backed by the same Rust code, so scripts and the app always agree.
+- **Parity first.**
+  - The scope, the API and the order of work are OpenColorIO's.
+  - Consumers align with the port, not the other way around. The first is Ultravioleta, which will replace its Python worker with the port section by section (§6).
+  - Nothing in the port is tailored to one consumer.
 - **Size of OCIO 2.5.2:**
   - 96K lines of C++ in the core library, plus an 11K-line Python binding;
   - 66 public classes (~1,060 methods);
@@ -59,7 +68,7 @@
   - Upstream's tests: 1,191 C++ unit tests, 264 GPU tests, 384 Python tests (counted by `cargo xtask upstream-tests`).
 - **How.**
   - A clean port from source into idiomatic Rust, one module at a time, mirroring upstream's layout.
-  - Every module is checked against an *oracle*: the official `opencolorio==2.5.2` wheel, the same build Ultravioleta uses today.
+  - Every module is checked against an *oracle*: the official `opencolorio==2.5.2` wheel.
   - Upstream's Python suite runs unmodified against our Python module.
   - Agents never write expected values, and CI enforces that (§7).
 - **Byte-exact is achievable.**
@@ -68,24 +77,34 @@
   - MSVC's SVML math library is only used for PQ with fast math off.
   - On Windows and on Linux (Rocky 9), pixels will be bit-identical to the wheel on the same machine. Text is identical everywhere (§3).
 - **Effort.** About 133 person-weeks of conventional work. With 2–3 agents at a time:
-  - Ultravioleta runs natively on the built-in configs in about 3–4 months;
-  - the Python worker is gone in about 4–6 months;
-  - full 2.5.2 parity (`1.0.0`) arrives in about 6–10 months.
+  - M0 (analytic transforms, CPU and GPU) in about 5–8 weeks;
+  - M1 (LUTs, fixed functions, built-in configs) in about 3–4.5 months;
+  - full 2.5.2 parity (`1.0.0`) in about 6–10 months.
 
   Confidence is low until Phase 1 measures real velocity (§11).
 
-### Milestones
+### Milestones: complete sections of OCIO
 
-Every version below carries `+ocio.2.5.2`.
+The goal is parity with OpenColorIO 2.5.2 as a whole. The port is not a subset tailored to
+one application. It lands in **sections**, and each section is a complete slice of OCIO:
+- it has OCIO's public API for that slice;
+- it passes the upstream tests of the slice;
+- **CPU:** byte-exact with the wheel at every bit depth, layout and optimization level;
+- **GPU:** byte-exact shader text, uniforms and textures in all 10 shading languages.
 
-| Milestone | What works | Version |
+A section is never "CPU now, GPU later", and never a partial feature: an op family lands whole,
+forward and inverse. Every version below carries `+ocio.2.5.2`.
+
+| Milestone | Section | Version |
 |---|---|---|
-| **M0** | `ocio://default`: config queries, CPU color-space and display/view conversions, all byte-exact | `0.1.0` |
-| **M1** | **Ultravioleta runs natively on the 8 built-in configs.** All six worker operations are byte-exact: `info`, `convert`, `display`, `gpu_shader`, `cpu_ops`, `gpu_convert` | `0.2.0` |
-| **M2** | **Ultravioleta drops the Python worker.** Studio configs with LUT files, file rules, context variables, and CDL/look/file transforms all work | `0.3.0` |
-| **M3** | Compositor features: dynamic properties (exposure/gamma uniforms in the viewer), grading ops, color space menus, mixing | `0.4.0` |
-| **M4** | **Python scripting:** the `PyOpenColorIO`-compatible module is embedded in Ultravioleta, and upstream's Python suite passes | `0.5.0` |
-| **M5** | **Full OCIO 2.5.2 parity:** every applicable upstream test, all GPU targets, config merging, SIMD performance | `1.0.0` |
+| **M0** | **Analytic transforms.** The op engine and optimizer. Matrix, Range, Exponent, ExponentWithLinear, Log, LogAffine, LogCamera, CDL and Group transforms, with their ops. Processors from `Config::CreateRaw()`, CPU and GPU processors, and `GpuShaderDesc` for every language | `0.1.0` |
+| **M1** | **LUTs, fixed functions and the built-in configs.** Lut1D, Lut3D, every fixed function (including ACES 2.0), the 98 built-in transforms, the config model with YAML read and write, color-space, display/view, look and named-transform processors, `createGroupTransform`, and the 8 built-in configs | `0.2.0` |
+| **M2** | **Files.** All 24 file formats, `FileTransform`, config files and `.ocioz`, file rules, context variables and search paths, and the baker | `0.3.0` |
+| **M3** | **Dynamic, grading and app helpers.** Dynamic properties, the grading ops, the app helpers (`LegacyViewingPipeline`, menus, display/view helpers, mixing), and the exact Lut3D inverse | `0.4.0` |
+| **M4** | **Python.** The `PyOpenColorIO`-compatible module; upstream's Python suite passes unmodified | `0.5.0` |
+| **M5** | **Everything else.** The remaining upstream tests, ConfigUtils, config merging, the legacy GPU path, the GPU execution harness, and SIMD speed | `1.0.0` |
+
+Consumers adopt each section as it lands, through OCIO's API, and they align with the port. §6 covers Ultravioleta.
 
 ---
 
@@ -105,7 +124,7 @@ Every version below carries `+ocio.2.5.2`.
 | Upstream pin | Submodule at the matched tag; oracle wheel of the same version | `upstream/OpenColorIO` @ `v2.5.2`; `opencolorio==2.5.2` |
 | Runtime version | `ocio::version()` and Python's `__version__` report OCIO's version, as OCIO does; `ocio::PORT_VERSION` reports ours | `"2.5.2"` and `"1.0.0"` |
 | Accepted configs | Exactly the matched release's | `ocio_profile_version` ≤ 2.5; a 2.6 config fails with 2.5.2's error |
-| Distribution | A private git dependency | Ultravioleta pins `tag = "v1.0.0"` |
+| Distribution | A git dependency; not published to crates.io | Consumers pin `tag = "v1.0.0"` |
 
 If you ever publish to crates.io, this scheme works unchanged:
 - every release has its own number;
@@ -115,7 +134,7 @@ If you ever publish to crates.io, this scheme works unchanged:
 
 ## 3. Definition of done: byte by byte
 
-A release (e.g. `1.0.0+ocio.2.5.2`) ships only when all five conditions hold.
+A release (e.g. `1.0.0+ocio.2.5.2`) ships only when all four conditions hold.
 
 **1. Upstream's C++ and GPU tests pass.** Every test in upstream's v2.5.2 C++ suite (1,191) and GPU suite (264) is ported and passes, or is on a reviewed not-applicable list. That list covers tests of C++-only mechanics, such as `shared_ptr` identity.
 
@@ -129,8 +148,6 @@ A release (e.g. `1.0.0+ocio.2.5.2`) ships only when all five conditions hold.
 | CPU pixels, at all 6 bit depths, all optimization levels, and for every op; GPU texture data; LUT values computed while baking or composing | Bit for bit against the wheel on the same OS and CPU. The reference platforms are Windows x86-64 and Linux x86-64 (Rocky Linux 9) |
 
 **4. No unapproved waivers.** Every exception is listed in `docs/waivers.md` with its root cause and your sign-off. CI fails on any mismatch that isn't listed there.
-
-**5. Ultravioleta's replay corpus passes.** The corpus of captured real requests (§6) replays byte-identically.
 
 ### Why "same OS and CPU"
 
@@ -177,11 +194,11 @@ Line counts are non-blank, non-comment lines at `v2.5.2`. Difficulty runs from 1
 | **Processor pipeline:** op model, optimizer, caches, pixel packing, baker, `.ocioz`, logging | 6.9K | 4 | An 80-pass optimizer; tests pin XXH3-128 cache IDs |
 | **Transforms** (23 types) and op builders | 5.9K | 2–3 | — |
 | **Ops** (14 families), with CPU renderers and GPU writers | 33.6K | 2–5 | Hardest: Lut1D (half-domain, inversion), ACES 2.0, Lut3D inversion, grading curves |
-| **GPU shader infrastructure** | 3.0K | 3 | 10 targets, including `GLSL_VK_4_6`, which Ultravioleta uses |
+| **GPU shader infrastructure** | 3.0K | 3 | 10 targets |
 | **SIMD** (SSE2/AVX/AVX2/AVX-512/F16C; NEON via sse2neon) | ~6.6K raw | 4 | Chooses kernels at runtime, with CPU-specific exceptions |
 | **File formats:** 19 readers covering 24 formats; 12 can bake, 5 can write | 18.9K | 1–5 | CLF/CTF has a 6.5K-line reader and a 3.4K-line writer (raw lines) |
 | **Built-ins:** 98 transforms and 8 configs | 3.2K + 377 KB YAML | 2 | Upstream has expected values for all 98 transforms |
-| **App helpers:** menus, legacy viewing pipeline, mixing, display/view helpers | 2.5K | 2 | Ultravioleta uses `LegacyViewingPipeline` today |
+| **App helpers:** menus, legacy viewing pipeline, mixing, display/view helpers | 2.5K | 2 | — |
 | **Config merging** (a preview feature in 2.5) | 4.3K | 4 | — |
 | **Python binding** (pybind11) | ~10.8K raw | 3 | 1,414 `.def` calls. Our module must match its API and behavior |
 | **Tests** | C++ 70K · GPU 5.2K · Python 13.8K raw | — | 1,191 / 264 / 384 tests; 261 data files (34 MB) |
@@ -204,21 +221,29 @@ Line counts are non-blank, non-comment lines at `v2.5.2`. Difficulty runs from 1
 | **D4** | Equivalence | Byte-exact as defined in §3; waivers only with your sign-off | Decided |
 | **D5** | Existing port (`doubleailes/ocio-rs`) | Skip the audit for now and port independently. Note that it is MIT-licensed although derived from BSD-3 code | Decided (skipped for now) |
 | **D6** | Distribution | Not published to crates.io; consumed as a git dependency. The GitHub repository is public, which is fine for now | Decided |
-| **D7** | Toolchain | Rust 1.98.1 pinned in `rust-toolchain.toml`, the same as Ultravioleta; edition 2024; `rust-version = "1.98"` | Decided (Phase 0) |
+| **D7** | Toolchain | Rust 1.98.1 pinned in `rust-toolchain.toml`; edition 2024; `rust-version = "1.98"` | Decided (Phase 0) |
 | **D8** | `unsafe` policy | `#![forbid(unsafe_code)]` everywhere except the SIMD and Python-binding modules | Proposed |
 | **D9** | License | BSD-3-Clause, keeping upstream's notice ("Copyright Contributors to the OpenColorIO Project") | Required (the port is a derivative work) |
 | **D10** | Versioning | Our own semver; the matched OCIO version goes in build metadata (`1.0.0+ocio.2.5.2`) and in the release notes; tags `v1.0.0` (§2) | Decided |
 | **D11** | Platforms | Windows x86-64 and Linux x86-64 (Rocky Linux 9, glibc 2.34), both bit-exact reference platforms from Phase 0. ARM and macOS come later | Decided |
 | **D12** | Output across platforms | Do what OCIO does on each platform: where OCIO is byte-identical across Windows and Linux, so is the port; where OCIO differs, the port differs the same way | Decided |
-| **D13** | Python module | Import name `PyOpenColorIO`, so existing studio scripts run unchanged. It is built into Ultravioleta's embedded interpreter and shares the app's config and caches. A private standalone wheel serves pipeline scripts and CI. It can't share a Python environment with the official wheel, so the oracle gets its own | Decided |
+| **D13** | Python module | Import name `PyOpenColorIO`, so existing scripts run unchanged. A standalone wheel, which Rust applications can also embed (`append_to_inittab`), sharing objects with the host. It can't share a Python environment with the official wheel, so the oracle gets its own | Decided |
 
 ---
 
-## 6. First consumer: Ultravioleta
+## 6. Consumers
 
-### How Ultravioleta uses OCIO today
+**The rule:** consumers align with the port, never the other way around.
+- The port's scope, API and order of work are OpenColorIO 2.5.2's.
+- A consumer calls OCIO's API (Rust, or `PyOpenColorIO` in Python) and adopts each section (§1) as it lands.
+- Anything a consumer needs that OCIO 2.5.2 doesn't provide stays in the consumer.
+- Nothing in this repository depends on a consumer: no consumer-specific APIs, tests or release criteria.
 
-Based on `scripts/ocio_worker.py`, `src/color*.rs` and `planning/color-management.md`.
+### Ultravioleta, the first consumer
+
+Everything in this subsection is work in Ultravioleta, recorded here for context.
+
+**How Ultravioleta uses OCIO today**, based on its `scripts/ocio_worker.py`, `src/color*.rs` and `planning/color-management.md`:
 
 - **A Python worker.** `ColorManager` spawns a Python worker running `opencolorio==2.5.2`. They talk in length-prefixed JSON plus a binary payload, with six operations: `info`, `convert`, `display`, `gpu_shader`, `cpu_ops` and `gpu_convert`.
 - **About 60 OCIO calls, in five groups:**
@@ -230,38 +255,22 @@ Based on `scripts/ocio_worker.py`, `src/color*.rs` and `planning/color-managemen
 - **A native path.** `color_ops.rs` runs those six ops natively, taking ~28 ms per UHD frame instead of 612 ms through the bridge. It stays within 3e-5 of OCIO, but it isn't byte-exact.
 - **Fallbacks.** Everything else goes through the bridge: 3D LUTs, CDLs, most fixed functions, and ADX's `LogTransform`.
 
-### What the port changes
+**How Ultravioleta adopts the port:**
+- **The same calls.** It replaces the worker's OCIO calls with the same OCIO calls on the port: `Config`, processors, `CPUProcessor::apply`, `GpuShaderDesc`. The worker's Python translates call for call.
+- **Section by section.** Each section switches once Ultravioleta's own shadow mode (worker and port side by side) shows no byte differences. The worker stays as the fallback until the port covers everything Ultravioleta uses. `color_ops.rs` goes away as its ops' sections land.
+- **Its plan items map onto OCIO APIs:**
 
-- **No worker.** One in-process call replaces it, with no Python runtime to find for color processing. Your plan item C5 ("a portable bridge") becomes unnecessary.
-- **`color_ops.rs` becomes redundant.** The port's `CpuProcessor` is byte-exact for every op. It must also be at least as fast: rayon over strips, then SIMD.
-- **The viewer is unchanged.** Shader text is byte-identical, so `gpu_viewer.rs` keeps working. Dynamic properties later unlock uniforms (C7).
-- **Your color-management plan maps directly onto port APIs:**
-
-| Your plan item | Port API |
+| Ultravioleta plan item | OCIO API in the port |
 |---|---|
 | C1: canonical names and aliases | Config name resolution |
-| C2: file rules and `interop_id` | `color_space_from_filepath`, `ColorSpace::interop_id` |
-| C4: `$OCIO`, `ocio://`, built-in configs | `Config::from_env`, `Config::from_uri` |
+| C2: file rules and `interop_id` | `Config::getColorSpaceFromFilepath`, `ColorSpace::getInteropID` |
+| C4: `$OCIO`, `ocio://`, built-in configs | `Config::CreateFromEnv`, `CreateFromFile` with `ocio://` URIs |
 | C6: project variables | `Context` |
 | C7: viewer dynamic properties | Dynamic properties |
 | C8: transform nodes | `Transform` |
 | C9: color space menus | `ColorSpaceMenuHelper` |
 
-### Python scripting
-
-- **Registration.** Ultravioleta embeds Python 3.13 and registers our module as `PyOpenColorIO` before the interpreter starts. So `import PyOpenColorIO as OCIO` finds it ahead of any installed copy.
-- **Shared state.** Scripts and the app share the same Rust objects. `OCIO.GetCurrentConfig()` is the project's config, and a script's processor gives the same bytes as the app's.
-- **Performance.** `applyRGBA` works on NumPy arrays in place and releases the GIL while it processes.
-- **Compatibility.** Existing PyOpenColorIO scripts (for example, from Nuke) run unchanged, within OCIO 2.5.2's API.
-
-### Cut-over path
-
-This is work in Ultravioleta. The first three steps can start before the port is complete.
-1. Put `ColorManager` behind a backend trait with two implementations: `PythonWorker` and `Native`.
-2. **Capture mode:** record real worker requests and responses (config, operation, payload) into a corpus. OpenColorIO-rs replays that corpus in CI as byte-exact regression tests.
-3. **Shadow mode**, in dev builds: run both backends and diff the bytes. Each mismatch becomes a new replay case.
-4. Switch operations to `Native` as each reaches parity, keeping the worker as a fallback. This is the same native/bridge split you have today.
-5. Remove the worker at M2. Scripting arrives at M4.
+- **Scripting.** Users script Ultravioleta through the port's `PyOpenColorIO` module (M4), embedded in its interpreter. Existing PyOpenColorIO scripts, for example from Nuke, run unchanged within OCIO 2.5.2's API.
 
 ---
 
@@ -295,7 +304,7 @@ These exist so that no one can pass by weakening a check.
 
 | Agent | Role |
 |---|---|
-| Implementer A | The critical path: ops → config → Ultravioleta's calls |
+| Implementer A | The critical path: ops → transforms → config → processors |
 | Implementer B | Independent branches of the graph as they open up: file formats, GPU writers, the Python module |
 | Verifier C | Reviews every PR adversarially: reads the upstream code against the diff, hunts for divergences the tests miss, and adds oracle probes for them |
 
@@ -329,7 +338,7 @@ Done when:    tests ported and tagged; oracle green on both reference platforms;
 
 ### The oracle
 
-- **What it is.** `oracle/` is a uv project pinned to `opencolorio==2.5.2`, the same wheel Ultravioleta runs. It lives in its own Python environment, separate from our module. Its scripts drive the real library and record:
+- **What it is.** `oracle/` is a uv project pinned to `opencolorio==2.5.2`. It lives in its own Python environment, separate from our module. Its scripts drive the real library and record:
   - pixels from probe images;
   - serialized configs and cache IDs;
   - CLF/CTF and baked-LUT text;
@@ -361,7 +370,6 @@ Upstream's `tests/python` (384 tests) runs unmodified against our standalone whe
 - Legacy v1 configs: spi-vfx, spi-anim, nuke-default and aces_1.x.
 - Upstream's `tests/data/files` (261 files).
 - Transform chains and configs generated with `proptest`, run against the oracle.
-- Ultravioleta's replay corpus.
 - Your studio configs, run locally only.
 
 ### GPU
@@ -370,15 +378,14 @@ Upstream's `tests/python` (384 tests) runs unmodified against our standalone whe
 - **Compile checks:**
   - glslang for GLSL;
   - DXC for HLSL, on Windows;
-  - naga for Vulkan GLSL, which is how Ultravioleta already compiles `GLSL_VK_4_6`.
+  - naga for Vulkan GLSL.
 - **Execution:** headless wgpu on software GPU adapters, replaying upstream's 264 GPU test cases.
 
 ### Robustness and performance
 
 - **Fuzzing.** `cargo-fuzz` targets for every parser, plus differential fuzzing that checks we accept and reject the same inputs as the oracle. Upstream's size limits apply: 1D LUTs up to 300,000 entries, 3D LUTs up to 129³.
 - **Benchmarks.** criterion benchmarks, compared against:
-  - the wheel's `ocioperf` on the same machine;
-  - Ultravioleta's current native path (28 ms per UHD frame).
+  - the wheel's `ocioperf` on the same machine.
 
 ### CI
 
@@ -409,12 +416,12 @@ OpenColorIO-rs/
 │   ├── ocio-gpu/           shader generation per language, textures, uniforms
 │   ├── ocio/               public API: transforms, Config (YAML), Context, processors, built-ins,
 │   │                       baker, .ocioz, app helpers, config merging
-│   ├── ocio-py/            PyO3 module "PyOpenColorIO": embedded by Ultravioleta, also built as a wheel
+│   ├── ocio-py/            PyO3 module "PyOpenColorIO": a wheel, also embeddable in Rust apps
 │   ├── ocio-tools/         dev tools: ociocheck, ociochecklut, ociowrite, ociobakelut equivalents
 │   └── ocio-testkit/       dev-only: fixture loading, exact comparators, replay runner
 ├── oracle/                 uv project pinned to opencolorio==2.5.2 (its own environment)
 ├── fixtures/               generated by the oracle; hash manifest; read-only for agents
-├── corpus/ultravioleta/    captured requests, replayed byte-exactly
+├── corpus/               real-world configs (ACES releases, legacy v1), checked against the oracle
 ├── upstream/OpenColorIO/   git submodule @ v2.5.2 (also supplies tests/python)
 ├── xtask/                  oracle regen, parity dashboard, upstream diff → porting cards
 ├── upstream-map.toml       each upstream file → its Rust module (or not-applicable)
@@ -442,7 +449,7 @@ OpenColorIO-rs/
 
 ### API sketches
 
-Rust, as Ultravioleta will call it:
+Rust (the same calls as OCIO's C++ API):
 
 ```rust
 let config = ocio::Config::from_builtin("cg-config-v4.0.0_aces-v2.0_ocio-v2.5")?; // or from_file / from_env / from_uri
@@ -462,10 +469,10 @@ proc.default_gpu_processor()?.extract_gpu_shader_info(&mut desc)?;
 let text = desc.shader_text();                               // byte-identical to OCIO's
 ```
 
-Python, as a user script in Ultravioleta:
+Python (the same API as PyOpenColorIO):
 
 ```python
-import PyOpenColorIO as OCIO                  # Ultravioleta's built-in module
+import PyOpenColorIO as OCIO                  # the port's module
 config = OCIO.GetCurrentConfig()              # the project's config, shared with the app
 proc = config.getProcessor("ACEScg", "sRGB - Display").getDefaultCPUProcessor()
 proc.applyRGBA(pixels)                        # NumPy float32, in place; same bytes as the app
@@ -486,14 +493,14 @@ print(OCIO.__version__)                       # "2.5.2"
 | Regex | `regex`, `fancy-regex` | — |
 | ICC | A hand-written reader (~400 lines) | OCIO reads only matrix/TRC profiles |
 | Python | `pyo3` 0.29, `numpy` 0.29, `maturin` 1.15 | Embedded via `append_to_inittab`; a standalone wheel for Python 3.13 |
-| GPU checks | naga + wgpu 30 (same as Ultravioleta), glslang, DXC via `hassle-rs` | — |
+| GPU checks | naga + wgpu 30, glslang, DXC via `hassle-rs` | — |
 | Tests, benchmarks, CLI | `proptest`, `cargo-fuzz`, `cargo-mutants`, `criterion`, `clap` | No tolerance crates: comparisons are exact |
 
 ---
 
 ## 10. Roadmap
 
-The order serves Ultravioleta first, and the library still reaches full 2.5.2 parity. Sizes are in person-weeks (pw) of conventional work; §11 translates them into agent time.
+The order follows OCIO's own layering, and each milestone is a complete section of OCIO (§1). Sizes are in person-weeks (pw) of conventional work; §11 translates them into agent time.
 
 ### Phase 0 — Harness and guardrails, before any porting (~7 pw)
 
@@ -512,47 +519,52 @@ The order serves Ultravioleta first, and the library still reaches full 2.5.2 pa
 | S5 | Spike (3 days), on Windows: compare the exact-math paths (fast math off) against the MSVC wheel, looking for SVML or auto-vectorized math-library differences |
 | S6 | Deferred until ARM or macOS is in scope: map where C++ compilers fused multiply-adds, and where sse2neon's emulation differs |
 
-### Phase 1 — Op engine and analytic ops (~10 pw)
+Every op family lands whole in one phase: op data, CPU renderers for every profile, and its
+GPU writer for all 10 shading languages.
 
-- **1.1** Pixel formats, bit depths, packing and scanlines.
-- **1.2** `enum OpData`, the op list, finalize, op cache IDs, and the `CpuOp` trait.
-- **1.3** Matrix, Range, Exponent, Gamma (10 styles), Log (all styles), CDL, and the marker ops.
+### Phase 1 — Op engine, analytic transforms and GPU infrastructure (~18 pw)
+
+- **1.1** Pixel formats, bit depths, image descriptions, packing and scanlines.
+- **1.2** The op model: `OpData`, `Op`, the op list, finalize, op cache IDs, `CpuOp`, and the CPU engine.
+- **1.3** The analytic op families: Matrix, Range, Exponent, Gamma (10 styles), Log (all styles), CDL, and the no-op, allocation and reference ops. Each comes with op data, CPU renderers and GPU writers.
 - **1.4** Fast math, plus min/max/clamp/rounding helpers that behave like C++.
 - **1.5** Numeric profiles and dispatch.
-- **1.6** The optimizer.
+- **1.6** The optimizer: every pass except the bit-depth bake, which needs Lut1D (2.5).
+- **1.7** GPU infrastructure: `GpuShaderText` for all 10 languages, `GpuShaderCreator` and `GpuShaderDesc` (uniforms, textures, resource naming, descriptor sets), the class wrappers, and `GPUProcessor`.
+- **1.8** Transforms for these families plus `GroupTransform`: validation, equality, and `operator<<` (the basis of Python `repr`). Also `BuildOps` and `CreateTransform` for them, `Config::CreateRaw()`, and `Processor`, `CPUProcessor` and `GPUProcessor`.
 
-**Exit:** every op is bit-exact against the oracle at every bit depth, optimization level and profile.
+**Exit (M0):** through OCIO's API, the analytic transforms are byte-exact with the wheel:
+- on the CPU, at every bit depth, layout, optimization level and profile;
+- on the GPU, in all 10 languages.
 
-### Phase 2 — LUTs and fixed functions (~13 pw)
+Their upstream tests are ported.
 
-- **2.1** Lut1D forward: standard and half-domain, integer lookups, hue adjust, composition.
-- **2.2** Lut1D inverse, both exact and fast.
-- **2.3** Lut3D forward in every profile, plus the fast inverse.
-- **2.4** Fixed functions: 2.5.2's 23 public styles, except ACES 2.0.
-- **2.5** ACES 2.0 (output transform, JMh, tone scale, chroma and gamut compression, tables).
-- **2.6** B-spline evaluation for the ACES 1.x tone scale.
+### Phase 2 — LUTs and fixed functions (~16 pw)
 
-**Exit:** every op the built-in transforms use is bit-exact.
+- **2.1** Lut1D: forward (standard and half domain, integer lookups, hue adjust), inverse (exact and fast), and composition. Every profile, CPU and GPU.
+- **2.2** Lut3D: forward in every profile, plus the fast and exact inverses. CPU and GPU.
+- **2.3** Fixed functions: 2.5.2's 23 public styles, except ACES 2.0. CPU and GPU.
+- **2.4** ACES 2.0 (output transform, JMh, tone scale, chroma and gamut compression, and the tables, which the GPU gets as textures). Also B-spline evaluation for the ACES 1.x tone scale.
+- **2.5** The optimizer's LUT passes: `ReplaceInverseLuts` and the separable-prefix bit-depth bake.
 
-### Phase 3 — Config, transforms and Ultravioleta's calls (~25 pw)
+**Exit:** every op family is complete on CPU and GPU.
+
+### Phase 3 — Config, transforms and processors (~17 pw)
 
 | WP | Scope |
 |---|---|
-| 3.1 | `enum Transform` with 23 variants: validate, equality, and text identical to upstream's `operator<<` (the basis of Python `repr`) |
-| 3.2 | Op builders: leaf transforms, groups, the 98 built-ins, and the color-space / display-view / look / named-transform paths |
+| 3.1 | The remaining transforms (23 in all): validate, equality, `operator<<` |
+| 3.2 | Op builders: the remaining leaf transforms, the 98 built-ins, and the color-space, display-view, look and named-transform paths |
 | 3.3 | YAML reader: parse events into a tree that keeps tags and line numbers, then load; v1 and v2; yaml-cpp's scalar rules |
 | 3.4 | Config model: roles, color spaces (aliases, categories, encodings, interop IDs, inactive), displays and views, view transforms, looks, named transforms |
 | 3.5 | Context: variable resolution, environment modes, search paths |
-| 3.6 | Processor API and caches: `getProcessor`, default CPU and GPU processors |
+| 3.6 | Processor API and caches: the `getProcessor` overloads, the processor cache and its fallback, `createGroupTransform`, processor metadata |
 | 3.7 | YAML writer (byte-exact) and the config cache ID |
 | 3.8 | `validate()` and the version-consistency checks, with verbatim messages |
 | 3.9 | File rules (globs, ECMAScript regexes, upgrade from v1) and viewing rules |
 | 3.10 | Built-in configs and `ocio://` URIs; loading from env, file or string |
-| **3.11** | **`LegacyViewingPipeline`** (moved up because Ultravioleta uses it) |
-| **3.12** | **`createGroupTransform` and the transform getters** (Ultravioleta's `cpu_ops`) |
-| **3.13** | **GPU for `GLSL_VK_4_6`:** the shader-description model (descriptor sets, resource prefix, no 1D textures), shader writers for every op the built-in configs use, and textures |
 
-**M0** lands mid-phase. **M1** (Ultravioleta running natively on the built-in configs) lands at the end.
+**Exit (M1).**
 
 ### Phase 4 — File formats (~18 pw)
 
@@ -560,22 +572,21 @@ The order serves Ultravioleta first, and the library still reaches full 2.5.2 pa
 - **4.2** spi1d, spi3d, spimtx, Iridas cube, Resolve cube, ITX.
 - **4.3** 3DL, CSP, Houdini, Discreet 1DL, Truelight, Pandora, Nuke `.vf`.
 - **4.4** XML base; CDL/CC/CCC read and write; Iridas `.look`.
-- **4.5** CLF/CTF reader: CTF 1.2–2.5, CLF up to 3.0, SMPTE ST 2136-1.
+- **4.5** CLF/CTF reader: CTF 1.2–2.5 and CLF up to 3.0. SMPTE ST 2136-1 support is 2.6 and later.
 - **4.6** CLF/CTF writer, byte-exact.
 - **4.7** ICC reader.
 - **4.8** Baker: all 12 bake formats.
 - **4.9** `.ocioz` archives.
 
-**M2:** Ultravioleta drops the Python worker.
+**Exit (M2).**
 
-### Phase 5 — Compositor features (~10 pw)
+### Phase 5 — Dynamic properties, grading ops and app helpers (~10 pw)
 
-- **Dynamic properties.** Viewer exposure, contrast and gamma become uniforms (C7), so Ultravioleta no longer has to refuse uniforms.
-- **Grading ops:** ExposureContrast, GradingPrimary, GradingRGBCurve, GradingTone, GradingHueCurve.
-- **Helpers:** `ColorSpaceMenuHelper` (C9), the display/view helpers, and the mixing helpers (for the color picker).
-- **The exact Lut3D inverse.**
+- **Dynamic properties** of every type: in the CPU renderers, and as GPU uniforms.
+- **Grading ops:** ExposureContrast, GradingPrimary, GradingRGBCurve, GradingTone and GradingHueCurve. CPU and GPU.
+- **App helpers:** `LegacyViewingPipeline`, `ColorSpaceMenuHelper`, the display/view helpers, and the mixing helpers.
 
-**Exit (M3):** all of the above work.
+**Exit (M3).**
 
 ### Phase 6 — Python module (~12 pw)
 
@@ -583,31 +594,27 @@ This is a parallel track for implementer B. It starts after M1, binding each par
 
 | WP | Scope |
 |---|---|
-| 6.1 | The module skeleton; embedding in Ultravioleta (`append_to_inittab`); the standalone wheel; running upstream's Python suite in CI |
+| 6.1 | The module skeleton; the embedding API for Rust applications (`append_to_inittab`); the standalone wheel; running upstream's Python suite in CI |
 | 6.2 | 35 enums that behave like pybind11's: reachable both nested and at module level, with `__members__`, `.name` and `int()` |
 | 6.3 | About 65 classes and 56 iterator classes (supporting `len`, indexing and iteration), with upstream's keyword names and defaults |
 | 6.4 | Overload dispatch (for example, the 13 overloads of `Config.getProcessor`); pybind11's `TypeError` behavior; the `OCIO.Exception` and `OCIO.ExceptionMissingFile` types |
 | 6.5 | NumPy and the buffer protocol for float32, float16, uint8 and uint16: in place, releasing the GIL |
 | 6.6 | `ConfigIOProxy` subclassing from Python, and Python callbacks for logging and hashing |
 
-**Exit (M4):** upstream's Python suite passes unmodified, and Ultravioleta scripts can `import PyOpenColorIO`.
+**Exit (M4):** upstream's Python suite passes unmodified.
 
-### Phase 7 — Remaining GPU targets (~6 pw)
+### Phase 7 — Legacy GPU path and GPU execution (~3 pw)
 
-- GLSL 1.2, 1.3 and 4.0.
-- GLSL ES 1.0 and 3.0.
-- HLSL, MSL, OSL and Cg.
-- The legacy GPU path that bakes the whole chain into one 3D LUT.
-- A GPU execution harness replaying upstream's 264 GPU tests.
+All 10 shading languages already come with each op family (Phases 1–5). This phase adds:
+- the legacy GPU path, which bakes the whole chain into one 3D LUT;
+- a GPU execution harness replaying upstream's 264 GPU tests: headless wgpu, plus glslang and DXC compile checks.
 
 ### Phase 8 — SIMD speed and threading (~6 pw)
 
 - **SIMD kernels** for every numeric profile, each bit-identical to its scalar profile.
 - **Pixel packing:** SIMD pack/unpack.
 - **Parallel apply.**
-- **Speed targets:**
-  - at least as fast as Ultravioleta's current native path;
-  - within 10% of C++.
+- **Speed target:** within 10% of C++ OCIO on the same machine (`ocioperf`).
 
 ### Phase 9 — Remaining library surface (~9 pw)
 
@@ -628,13 +635,13 @@ This is a parallel track for implementer B. It starts after M1, binding each par
 | Phase | Person-weeks (conventional) |
 |---|---:|
 | 0 Harness and guardrails | 7 |
-| 1 Op engine | 10 |
-| 2 LUTs and fixed functions | 13 |
-| 3 Config, transforms, Ultravioleta's calls | 25 |
+| 1 Op engine, analytic transforms, GPU infrastructure | 18 |
+| 2 LUTs and fixed functions | 16 |
+| 3 Config, transforms and processors | 17 |
 | 4 File formats | 18 |
-| 5 Compositor features | 10 |
+| 5 Dynamic properties, grading ops, app helpers | 10 |
 | 6 Python module | 12 |
-| 7 Remaining GPU targets | 6 |
+| 7 Legacy GPU path and GPU execution | 3 |
 | 8 SIMD and threading | 6 |
 | 9 Remaining library | 9 |
 | 10 Release | 5 |
@@ -647,11 +654,11 @@ The assumption: the team delivers 3–5 conventional person-weeks of *verified* 
 
 | Milestone | Cumulative person-weeks | Calendar (low confidence) |
 |---|---:|---|
-| M0 — default config | ~30 | 6–10 weeks |
-| M1 — Ultravioleta native on built-in configs | ~55 | 3–4 months |
-| M2 — Python worker removed | ~73 | 4–6 months |
-| M3 — compositor features | ~83 | 4.5–6.5 months |
-| M4 — Python scripting | ~95 | 5–7.5 months |
+| M0 — analytic transforms, CPU and GPU | ~25 | 5–8 weeks |
+| M1 — LUTs, fixed functions, built-in configs | ~58 | 3–4.5 months |
+| M2 — files | ~76 | 4.5–6 months |
+| M3 — dynamic properties, grading, app helpers | ~86 | 5–7 months |
+| M4 — Python module | ~98 | 5.5–8 months |
 | M5 — `1.0.0`, full 2.5.2 parity | ~133 | 6–10 months |
 
 - **Re-estimate at the end of Phase 1,** from the measured person-weeks per calendar week.
@@ -695,9 +702,9 @@ Here is the process for moving from one OCIO release to the next (for example, 2
 | Byte-exact text (yaml-cpp's emitter, iostream floats, Python `repr`) is harder than expected | Medium | High | Spike S1 and WP 0.5 come before porting; reference-output tests over every corpus |
 | The Python surface is large (1,414 bindings; pybind11's enum, overload and `TypeError` behavior) | Medium | Medium | Upstream's Python suite is the gate; port each binding from upstream's pybind11 source |
 | Different CPUs pick different kernels, so committed pixel fixtures don't travel between machines | Certain | Medium | Live checks on each runner; fixtures record CPU flags; forced-profile runs |
-| Hidden behavior (env precedence, cache identity, error text) | Medium | Medium | Verbatim messages; behavior fixtures; the Ultravioleta replay corpus |
-| Performance falls below Ultravioleta's current native path | Medium | Medium | Benchmarks from Phase 1; SIMD profiles; rayon over strips |
-| 2–3 agents make the calendar long | Medium | Medium | Ultravioleta-first ordering, so value arrives at M1 and M2; re-estimate after Phase 1 |
+| Hidden behavior (env precedence, cache identity, error text) | Medium | Medium | Verbatim messages; behavior fixtures; real-world config corpora |
+| Performance falls well below C++ OCIO | Medium | Medium | Benchmarks from Phase 1 against `ocioperf`; SIMD profiles; rayon over strips |
+| 2–3 agents make the calendar long | Medium | Medium | Complete sections land in order, so consumers can adopt early; re-estimate after Phase 1 |
 | Review load | Low | Medium | You asked not to plan around your review time. Review stays narrow (API, waivers, deviations); the verifier agent reviews every chunk; chunks are small |
 | Licensing, if the code is ever shared | Low | Medium | BSD-3 with upstream's notice from day one (D9) |
 | Malicious configs or LUT files | Medium | High | Fuzzing, size limits, no `unsafe` in parsers |
@@ -732,7 +739,6 @@ None right now. Answered on 2026-09-29:
 **Then:**
 1. Verify and merge the spikes chunk by chunk. Decide on any waivers they propose.
 2. Generate the Phase 1 porting cards, each split into mergeable chunks. Start implementer A and verifier C; implementer B joins when the dependency graph branches (formats, then Python).
-3. In Ultravioleta, independently of the port: add the backend trait and capture mode, so the replay corpus starts growing now.
 
 ---
 
