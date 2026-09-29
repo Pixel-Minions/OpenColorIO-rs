@@ -1586,13 +1586,15 @@ status = "todo"
 path = "src/OpenColorIO/ops/log/LogOpData.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/log/log_op_data.rs"]
-status = "todo"
+status = "partial"
+note = "S2: parameters, accessors, style predicates, isInverse; validate, getCacheID, the string getters and getIdentityReplacement are WP 1.3l1"
 
 [[file]]
 path = "src/OpenColorIO/ops/log/LogOpData.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/log/log_op_data.rs"]
-status = "todo"
+status = "partial"
+note = "S2: parameters, accessors, style predicates, isInverse; validate, getCacheID, the string getters and getIdentityReplacement are WP 1.3l1"
 
 [[file]]
 path = "src/OpenColorIO/ops/log/LogOpGPU.cpp"
@@ -1610,13 +1612,15 @@ status = "todo"
 path = "src/OpenColorIO/ops/log/LogUtils.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/log/log_utils.rs"]
-status = "todo"
+status = "partial"
+note = "S2: GetLinearSlope, GetLogSideBreak (Windows and Linux variants), GetLinearOffset; the CTF conversion and style strings are WP 1.3l1"
 
 [[file]]
 path = "src/OpenColorIO/ops/log/LogUtils.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/log/log_utils.rs"]
-status = "todo"
+status = "partial"
+note = "S2: GetLinearSlope, GetLogSideBreak (Windows and Linux variants), GetLinearOffset; the CTF conversion and style strings are WP 1.3l1"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOp.cpp"
