@@ -496,7 +496,8 @@ status = "todo"
 path = "src/OpenColorIO/SSE.h"
 kind = "src"
 target = ["crates/ocio-ops/src/sse.rs"]
-status = "todo"
+status = "done"
+note = "S2: every x86 fast-math function and helper, as exact scalar lanes; not ported: ssePrintRegister (debug printing) and the sse2neon (ARM) min/max overrides"
 
 [[file]]
 path = "src/OpenColorIO/SSE2.h"
@@ -4169,7 +4170,8 @@ status = "todo"
 path = "tests/cpu/SSE_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/sse_tests.rs"]
-status = "todo"
+status = "done"
+note = "S2: all 11 tests"
 
 [[file]]
 path = "tests/cpu/UnitTestLogUtils.cpp"
