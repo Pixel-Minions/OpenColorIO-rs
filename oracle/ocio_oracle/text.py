@@ -19,9 +19,9 @@ from .commands import command, exception_result
 _file_counter = itertools.count()
 
 
-def _check_token(token):
-    if not token or len(token) > 63 or any(c.isspace() for c in token):
-        raise ValueError(f"token {token!r} must be 1-63 non-space characters")
+def _check_token(token, max_len=63):
+    if not token or any(c.isspace() for c in token) or (max_len and len(token) > max_len):
+        raise ValueError(f"token {token!r} must be non-space characters, at most {max_len}")
 
 
 def _load_file_transform(path):
@@ -78,45 +78,53 @@ def spi1d_values(args, blobs):
         return [_spi1d_lut(directory, tokens)], []
 
 
-def _clf_matrix(directory, tokens):
+def _clf_matrices(directory, tokens):
+    """One CLF file with a 3x3 Matrix per 9 tokens; the bits of every entry, in order."""
     path = _unique_path(directory, "clf")
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
         f.write('<ProcessList compCLFversion="3" id="probe">\n')
-        f.write('    <Matrix inBitDepth="32f" outBitDepth="32f">\n')
-        f.write('        <Array dim="3 3">\n')
-        f.write(" ".join(tokens) + "\n")
-        f.write("        </Array>\n    </Matrix>\n</ProcessList>\n")
+        for i in range(0, len(tokens), 9):
+            f.write('    <Matrix inBitDepth="32f" outBitDepth="32f">\n')
+            f.write('        <Array dim="3 3">\n')
+            f.write(" ".join(tokens[i:i + 9]) + "\n")
+            f.write("        </Array>\n    </Matrix>\n")
+        f.write("</ProcessList>\n")
     try:
         group = _load_file_transform(path)
     except OCIO.Exception as exc:
         return {"exception": exception_result(exc)}
     matrices = [t for t in group if isinstance(t, OCIO.MatrixTransform)]
-    if len(matrices) != 1:
+    if len(matrices) != len(tokens) // 9:
         return {"transforms": [type(t).__name__ for t in group]}
-    m44 = matrices[0].getMatrix()
-    m33 = [m44[i] for i in (0, 1, 2, 4, 5, 6, 8, 9, 10)]
-    return {"bits": [struct.unpack("<Q", struct.pack("<d", v))[0] for v in m33]}
+    bits = []
+    for matrix in matrices:
+        m44 = matrix.getMatrix()
+        for i in (0, 1, 2, 4, 5, 6, 8, 9, 10):
+            bits.append(struct.unpack("<Q", struct.pack("<d", m44[i]))[0])
+    return {"bits": bits}
 
 
 @command
 def clf_matrix_values(args, blobs):
-    """Reads tokens as the 3x3 Array of a CLF Matrix through a FileTransform.
+    """Reads tokens as the 3x3 Arrays of CLF Matrix ops through a FileTransform.
 
     Each token reaches XMLReaderUtils ParseNumber<double> and NumberUtils::from_chars(double)
-    (CTFReaderHelper.cpp:355-380, XMLReaderUtils.h:147-205).
+    (CTFReaderHelper.cpp:355-380, XMLReaderUtils.h:147-205). Tokens may be of any length.
 
     args: {"tokens": [str], "separately": bool}
-      separately=false: one Matrix per 9 tokens (the count must be a multiple of 9);
-      separately=true: one Matrix per token, followed by eight "0" entries.
-    result: one entry per Matrix: {"bits": [u64 x 9]} or {"exception": {...}}
+      separately=false: one file with a Matrix per 9 tokens (the count must be a multiple
+                        of 9), and one result for it;
+      separately=true: one file per token, as the first entry of a Matrix followed by eight
+                       "0" entries.
+    result: one entry per file: {"bits": [u64 per entry]} or {"exception": {...}}
     """
     tokens = args["tokens"]
     for token in tokens:
-        _check_token(token)
+        _check_token(token, max_len=None)
     with tempfile.TemporaryDirectory() as directory:
         if args.get("separately"):
-            return [_clf_matrix(directory, [t] + ["0"] * 8) for t in tokens], []
+            return [_clf_matrices(directory, [t] + ["0"] * 8) for t in tokens], []
         if len(tokens) % 9:
             raise ValueError("clf_matrix_values needs a multiple of 9 tokens")
-        return [_clf_matrix(directory, tokens[i:i + 9]) for i in range(0, len(tokens), 9)], []
+        return [_clf_matrices(directory, tokens)], []
