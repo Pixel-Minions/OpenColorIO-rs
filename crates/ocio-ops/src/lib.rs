@@ -11,6 +11,8 @@
 pub mod exception;
 pub mod hash_utils;
 pub mod math_utils;
+pub mod op;
+pub mod open_color_types;
 pub mod platform;
 pub mod sse;
 

@@ -35,8 +35,9 @@ status = "todo"
 [[file]]
 path = "include/OpenColorIO/OpenColorTypes.h"
 kind = "api"
-target = ["crates/ocio/src/lib.rs"]
-status = "todo"
+target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs"]
+status = "partial"
+note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data"
 
 [[file]]
 path = "src/CMakeLists.txt"
@@ -422,7 +423,8 @@ status = "todo"
 path = "src/OpenColorIO/Op.h"
 kind = "src"
 target = ["crates/ocio-ops/src/op.rs"]
-status = "todo"
+status = "partial"
+note = "S2: OpCPU (as the CpuOp trait, apply only); the rest is WP 1.2c"
 
 [[file]]
 path = "src/OpenColorIO/OpBuilders.h"
@@ -439,8 +441,9 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/ParseUtils.cpp"
 kind = "src"
-target = ["crates/ocio/src/parse_utils.rs"]
-status = "todo"
+target = ["crates/ocio/src/parse_utils.rs", "crates/ocio-ops/src/open_color_types.rs"]
+status = "partial"
+note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection"
 
 [[file]]
 path = "src/OpenColorIO/ParseUtils.h"
