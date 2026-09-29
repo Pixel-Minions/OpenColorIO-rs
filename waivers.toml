@@ -14,3 +14,11 @@
 # test = "Group/Name"    # an upstream test id, as `cargo xtask upstream-tests` prints it
 # reason = "why it can't apply to the port (e.g. it tests shared_ptr identity)"
 # approved_by = "owner"
+
+[[waiver]]
+id = "W0001"
+scope = "Windows only: the PQ fixed functions (LIN_TO_PQ, PQ_TO_LIN) on OCIO's exact-math path (fast math off), FixedFunctionOpCPU.cpp:2133-2194 and 2565-2590 @ v2.5.2. That includes OCIO's internal LUT bakes of PQ ops through Op::apply / EvalTransform (ops/OpTools.cpp). Linux is not waived: its wheel uses powf, and the port is bit-exact there"
+check = "Bit-exact pixel comparison with the Windows wheel. There, NaN positions must still match exactly, and finite values must stay within a bound taken from the spike measurements below. WP 2.3 writes that bound into this entry in the same chunk that ports PQ, and CI enforces it"
+reason = "The Windows wheel is built with MSVC, which compiles _mm_pow_ps to SVML's __vdecl_powf4. The port calls powf (the UCRT's) instead, which stable Rust calls directly and which doesn't depend on the MSVC toolset version. Spike S5 (docs/spikes/s2-s5.md) measured 1.7% of values differing. LIN_TO_PQ differs by up to 311 ulp, the maximum at a near-black input (1.49e-6), about 7e-8 of the PQ range. PQ_TO_LIN differs by up to 568,267 ulp only where the numerator cancels at black (absolute around 1e-12). NaN outputs differ only in sign and payload bits. Far below one 8-, 10- or 12-bit code value; at most a rare ±1 in 16-bit integer output. OCIO's own Linux build uses powf here, so OCIO already differs this much between platforms"
+approved_by = "Jose Enriquez (owner), in chat"
+date = "2026-09-29"

@@ -74,7 +74,7 @@
 - **Byte-exact is achievable.**
   - OCIO 2.5.2 uses no hardware-approximate instructions.
   - FMA appears only in the AVX2/AVX-512 LUT kernels, which can be reproduced exactly.
-  - MSVC's SVML math library is only used for PQ with fast math off.
+  - MSVC's SVML math library is only used for PQ with fast math off. On Windows the port uses `powf` there, under waiver W0001: an invisible difference (§3).
   - On Windows and on Linux (Rocky 9), pixels will be bit-identical to the wheel on the same machine. Text is identical everywhere (§3).
 - **Effort.** About 133 person-weeks of conventional work. With 2–3 agents at a time:
   - M0 (analytic transforms, CPU and GPU) in about 5–8 weeks;
@@ -179,7 +179,7 @@ These are the rules the agents port by.
 - **What was checked in 2.5.2:**
   - no hardware-approximate instructions (`rcp`, `rsqrt`);
   - FMA only in `Lut1DOpCPU_AVX2/AVX512` and `Lut3DOpCPU_AVX2/AVX512`;
-  - MSVC's SVML `_mm_pow_ps` only in PQ with fast math off (`FixedFunctionOpCPU.cpp:2133-2194`). Spike S5 decides whether to call the same MSVC routine or grant a waiver.
+  - MSVC's SVML `_mm_pow_ps` only in PQ with fast math off (`FixedFunctionOpCPU.cpp:2133-2194`). **Decided (waiver W0001):** on Windows the port calls `powf`. 1.7% of values differ, at most about 4e-5 relative and only near black beyond that, so there is no visible difference. It is not tied to the MSVC toolset version. Linux stays bit-exact.
 
 ---
 
@@ -543,7 +543,7 @@ Their upstream tests are ported.
 
 - **2.1** Lut1D: forward (standard and half domain, integer lookups, hue adjust), inverse (exact and fast), and composition. Every profile, CPU and GPU.
 - **2.2** Lut3D: forward in every profile, plus the fast and exact inverses. CPU and GPU.
-- **2.3** Fixed functions: 2.5.2's 23 public styles, except ACES 2.0. CPU and GPU.
+- **2.3** Fixed functions: 2.5.2's 23 public styles, except ACES 2.0. CPU and GPU. On Windows, PQ with fast math off calls `powf` under waiver W0001, and the PQ chunk writes W0001's bound.
 - **2.4** ACES 2.0 (output transform, JMh, tone scale, chroma and gamut compression, and the tables, which the GPU gets as textures). Also B-spline evaluation for the ACES 1.x tone scale.
 - **2.5** The optimizer's LUT passes: `ReplaceInverseLuts` and the separable-prefix bit-depth bake.
 
