@@ -3937,7 +3937,8 @@ note = "Both branches: std::from_chars (the Windows wheel, MSVC) and strtod_l/st
 path = "src/utils/StringUtils.h"
 kind = "src"
 target = ["crates/ocio-ops/src/utils/string_utils.rs"]
-status = "todo"
+status = "done"
+note = "On &str (every operation cuts or maps at ASCII bytes), plus byte-level trims."
 
 [[file]]
 path = "tests/CMakeLists.txt"
@@ -5479,8 +5480,9 @@ note = "Both tests, run on both NumberUtils branches."
 [[file]]
 path = "tests/utils/StringUtils_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio/src/utils/string_utils_tests.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/utils/string_utils_tests.rs"]
+status = "done"
+note = "All 8 tests."
 
 [[file]]
 path = "tests/utils/UnitTestMain.cpp"
