@@ -1274,13 +1274,15 @@ status = "todo"
 path = "src/OpenColorIO/ops/gamma/GammaOpData.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_data.rs"]
-status = "todo"
+status = "partial"
+note = "S2: styles, parameters, accessors, style conversions, identity, direction, isInverse; validate, getCacheID, style strings, mayCompose/compose and getIdentityReplacement are WP 1.3g1"
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOpData.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_data.rs"]
-status = "todo"
+status = "partial"
+note = "S2: styles, parameters, accessors, style conversions, identity, direction, isInverse; validate, getCacheID, style strings, mayCompose/compose and getIdentityReplacement are WP 1.3g1"
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOpGPU.cpp"
@@ -1298,13 +1300,15 @@ status = "todo"
 path = "src/OpenColorIO/ops/gamma/GammaOpUtils.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_utils.rs"]
-status = "todo"
+status = "done"
+note = "S2"
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOpUtils.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_utils.rs"]
-status = "todo"
+status = "done"
+note = "S2"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradinghuecurve/GradingHueCurve.cpp"
@@ -4492,7 +4496,8 @@ status = "todo"
 path = "tests/cpu/ops/gamma/GammaOpUtils_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_utils_tests.rs"]
-status = "todo"
+status = "done"
+note = "S2: both tests"
 
 [[file]]
 path = "tests/cpu/ops/gamma/GammaOp_tests.cpp"
