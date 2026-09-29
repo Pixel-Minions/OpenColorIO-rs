@@ -1,0 +1,21 @@
+[package]
+name = "ocio"
+description = "OpenColorIO 2.5.2, ported to Rust: configs, transforms, processors"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+ocio-ops.workspace = true
+ocio-formats.workspace = true
+ocio-gpu.workspace = true
+
+[dev-dependencies]
+ocio-testkit.workspace = true
+
+[lints]
+workspace = true

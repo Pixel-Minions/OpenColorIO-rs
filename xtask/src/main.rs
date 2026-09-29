@@ -1,0 +1,91 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright Contributors to the OpenColorIO Project.
+
+//! Repository automation (PLAN.md §7, WP 0.2–0.4). Run `cargo xtask help`.
+
+use std::process::ExitCode;
+
+mod fixtures;
+mod guards;
+mod parity;
+mod upstream;
+
+const USAGE: &str = "\
+cargo xtask <command>
+
+Oracle and fixtures (fixtures/ is written only by these commands):
+  oracle info                 versions and platform of the pinned oracle wheel
+  oracle regen <group>        regenerate fixtures/<group>/ and its manifest entries
+  oracle check <group>        regenerate into a temporary directory and compare with the
+                              committed fixtures (proves they are platform-independent)
+  oracle check-all            `oracle check` for every committed group
+  fixtures verify            every fixture matches fixtures/MANIFEST.toml, and vice versa
+
+Guardrails:
+  guards                      forbidden patterns, unsafe allowlist, waivers, headers
+  ratchet [--update]          ported upstream tests may only increase
+  ci                          guards + fixtures verify + ratchet + parity --check
+
+Upstream:
+  upstream-map update         add new upstream files to upstream-map.toml (keeps edits)
+  upstream-status             summary of upstream-map.toml
+  upstream-tests              list upstream tests and whether each is ported
+  parity [--check]            write docs/parity.md (--check: fail if it is stale)
+";
+
+fn main() -> ExitCode {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let result = match args.as_slice() {
+        ["oracle", "info"] => fixtures::oracle_info(),
+        ["oracle", "regen", group] => fixtures::regen(group),
+        ["oracle", "check", group] => fixtures::check(group),
+        ["oracle", "check-all"] => fixtures::check_all(),
+        ["fixtures", "verify"] => fixtures::verify(),
+        ["guards"] => guards::run(),
+        ["ratchet"] => parity::ratchet(false),
+        ["ratchet", "--update"] => parity::ratchet(true),
+        ["upstream-map", "update"] => upstream::update_map(),
+        ["upstream-status"] => upstream::status(),
+        ["upstream-tests"] => parity::list_tests(),
+        ["parity"] => parity::write_dashboard(false),
+        ["parity", "--check"] => parity::write_dashboard(true),
+        ["ci"] => guards::run()
+            .and_then(|()| fixtures::verify())
+            .and_then(|()| parity::ratchet(false))
+            .and_then(|()| parity::write_dashboard(true)),
+        ["help"] | [] => {
+            print!("{USAGE}");
+            Ok(())
+        }
+        _ => Err(format!("unknown command `{}`\n\n{USAGE}", args.join(" "))),
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Files under `dir` (recursively), as paths relative to `dir` with `/` separators, sorted.
+pub(crate) fn walk(dir: &std::path::Path) -> Vec<String> {
+    fn inner(root: &std::path::Path, dir: &std::path::Path, out: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                inner(root, &path, out);
+            } else if let Ok(rel) = path.strip_prefix(root) {
+                out.push(rel.to_string_lossy().replace('\\', "/"));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    inner(dir, dir, &mut out);
+    out.sort();
+    out
+}

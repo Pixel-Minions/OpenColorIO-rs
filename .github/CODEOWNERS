@@ -1,0 +1,10 @@
+# The owner reviews everything that defines what "correct" means (PLAN.md §7).
+*                        @Pixel-Minions
+/fixtures/               @Pixel-Minions
+/oracle/                 @Pixel-Minions
+/waivers.toml            @Pixel-Minions
+/docs/ratchet.toml       @Pixel-Minions
+/docs/deviations.md      @Pixel-Minions
+/upstream/               @Pixel-Minions
+/xtask/src/guards.rs     @Pixel-Minions
+/.github/                @Pixel-Minions

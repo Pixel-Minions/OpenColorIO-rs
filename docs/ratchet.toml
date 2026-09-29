@@ -1,0 +1,3 @@
+# Ported upstream tests may only go up (PLAN.md §7). Raise with `cargo xtask ratchet --update`.
+ported_cpu = 0
+ported_gpu = 0

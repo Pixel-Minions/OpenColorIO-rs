@@ -1,0 +1,3 @@
+[submodule "upstream/OpenColorIO"]
+	path = upstream/OpenColorIO
+	url = https://github.com/AcademySoftwareFoundation/OpenColorIO

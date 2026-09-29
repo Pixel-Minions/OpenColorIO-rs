@@ -1,0 +1,5 @@
+[toolchain]
+# Same toolchain as Ultravioleta, the first consumer. Each platform builds for its host.
+channel = "1.98.1"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

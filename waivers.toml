@@ -1,0 +1,16 @@
+# Owner-approved exceptions to the byte-exact definition of done (PLAN.md §3, §7).
+# Only the owner changes this file (CODEOWNERS). CI fails on any mismatch not listed here.
+#
+# [[waiver]]
+# id = "W0001"
+# scope = "what is affected (module, op, platform)"
+# check = "which check is relaxed, and how"
+# reason = "root cause, with a minimal reproduction"
+# approved_by = "owner"
+# date = "YYYY-MM-DD"
+# allow_patterns = [{ file = "crates/...", pattern = "#[ignore" }]   # optional
+#
+# [[not_applicable]]
+# test = "Group/Name"    # an upstream test id, as `cargo xtask upstream-tests` prints it
+# reason = "why it can't apply to the port (e.g. it tests shared_ptr identity)"
+# approved_by = "owner"

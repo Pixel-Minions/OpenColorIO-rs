@@ -1,0 +1,14 @@
+[project]
+name = "ocio-oracle"
+version = "0.0.0"
+description = "Reference outputs from the official OpenColorIO wheel, for OpenColorIO-rs"
+# The same wheel Ultravioleta runs today (requirements-color.txt), on Python 3.13
+# (VFX Reference Platform CY2027).
+requires-python = "==3.13.*"
+dependencies = [
+    "opencolorio==2.5.2",
+    "numpy==2.3.5",
+]
+
+[tool.uv]
+package = false

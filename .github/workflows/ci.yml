@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "ocio-*"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  # Both reference platforms (PLAN.md D11) run the live oracle: pixel checks compare the port
+  # with the opencolorio==2.5.2 wheel on the same machine.
+  windows:
+    name: Windows x86-64
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.11.7"
+      - name: Toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets
+      - name: Guardrails, fixtures, ratchet, parity
+        run: cargo xtask ci
+      - run: cargo test --workspace
+      - name: Committed fixtures are identical on this platform
+        run: cargo xtask oracle check-all
+
+  rocky9:
+    name: Linux x86-64 (Rocky Linux 9)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+      - name: Build the reference image
+        run: docker build -t ocio-rs-rocky9:1 docker/rocky9
+      - name: fmt, clippy, guardrails, tests, fixtures
+        run: |
+          scripts/rocky9.sh bash -ec '
+            git config --global --add safe.directory "*"
+            cargo fmt --all --check
+            cargo clippy --workspace --all-targets
+            cargo xtask ci
+            cargo test --workspace
+            cargo xtask oracle check-all
+          '
+
+  deny:
+    name: cargo-deny
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: EmbarkStudios/cargo-deny-action@v2

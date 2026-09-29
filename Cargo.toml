@@ -1,0 +1,73 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/ocio-ops",
+    "crates/ocio-formats",
+    "crates/ocio-gpu",
+    "crates/ocio",
+    "crates/ocio-py",
+    "crates/ocio-tools",
+    "crates/ocio-testkit",
+    "xtask",
+]
+default-members = [
+    "crates/ocio-ops",
+    "crates/ocio-formats",
+    "crates/ocio-gpu",
+    "crates/ocio",
+    "crates/ocio-tools",
+    "crates/ocio-testkit",
+    "xtask",
+]
+
+[workspace.package]
+# Our own semver, with the matched OCIO release as build metadata (PLAN.md §2).
+# 0.0.x is Phase 0; M0 is 0.1.0.
+version = "0.0.0+ocio.2.5.2"
+edition = "2024"
+rust-version = "1.98"
+license = "BSD-3-Clause"
+authors = ["Contributors to the OpenColorIO Project", "Pixel Minions"]
+repository = "https://github.com/Pixel-Minions/OpenColorIO-rs"
+publish = false
+
+[workspace.dependencies]
+ocio-ops = { path = "crates/ocio-ops" }
+ocio-formats = { path = "crates/ocio-formats" }
+ocio-gpu = { path = "crates/ocio-gpu" }
+ocio = { path = "crates/ocio" }
+ocio-testkit = { path = "crates/ocio-testkit" }
+
+# Third-party dependencies are pinned to exact versions: a dependency update is a reviewed change.
+half = "=2.7.1"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.151"
+sha2 = "=0.11.0"
+toml = "=1.1.6"
+xxhash-rust = { version = "=0.8.19", features = ["xxh3"] }
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+# Exactness: comparisons and casts are deliberate in a port that must match C++ bit for bit.
+float_cmp = "allow"
+excessive_precision = "allow"
+approx_constant = "allow"
+many_single_char_names = "allow"
+too_many_arguments = "allow"
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+
+[profile.dev]
+# Pixel checks run millions of values; keep tests fast without changing float semantics.
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+debug = "line-tables-only"
