@@ -7,3 +7,5 @@
 //!
 //! `unsafe` is denied here and allowed only in the SIMD modules (PLAN.md D8).
 #![deny(unsafe_code)]
+
+pub mod cfmt;
