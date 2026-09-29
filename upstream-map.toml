@@ -1262,13 +1262,15 @@ status = "todo"
 path = "src/OpenColorIO/ops/gamma/GammaOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_cpu.rs"]
-status = "todo"
+status = "done"
+note = "S2: every renderer, scalar and SSE2, bit-exact against the wheel on Windows and Rocky Linux 9 (tests/gamma_oracle.rs)"
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOpCPU.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_cpu.rs"]
-status = "todo"
+status = "done"
+note = "S2: every renderer, scalar and SSE2, bit-exact against the wheel on Windows and Rocky Linux 9 (tests/gamma_oracle.rs)"
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOpData.cpp"
@@ -4484,7 +4486,8 @@ status = "todo"
 path = "tests/cpu/ops/gamma/GammaOpCPU_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_cpu_tests.rs"]
-status = "todo"
+status = "done"
+note = "S2: all 10 tests; the optimizer step is replaced by its effect on one op (see the file)"
 
 [[file]]
 path = "tests/cpu/ops/gamma/GammaOpData_tests.cpp"

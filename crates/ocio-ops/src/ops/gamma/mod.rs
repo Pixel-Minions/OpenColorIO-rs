@@ -3,5 +3,6 @@
 
 //! The Gamma op family: a port of `src/OpenColorIO/ops/gamma/` @ v2.5.2.
 
+pub mod gamma_op_cpu;
 pub mod gamma_op_data;
 pub mod gamma_op_utils;
