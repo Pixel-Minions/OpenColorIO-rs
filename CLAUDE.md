@@ -22,9 +22,34 @@ truth: read §3 (definition of done), §7 (how agents work) and your card before
    - Never edit `fixtures/`, `oracle/uv.lock`, `waivers.toml` or `docs/ratchet.toml` to get green.
    - If you can't explain a mismatch, stop. Write a minimal reproduction (an oracle probe plus a failing test), leave it failing, and report it.
 5. **Match upstream's arithmetic exactly.** See "Bit-exact porting" below.
-6. **Stay in scope.**
-   - Change only the files your card names. Other agents are working in parallel.
-   - Don't commit, push, or change git config. The orchestrator merges.
+6. **Stay in scope.** Change only the files your card names. Other agents are working in parallel.
+7. **Work in small, mergeable chunks.** See "Chunks" below.
+   - Commit on your own branch only.
+   - Never push, rewrite earlier commits, touch other branches, or change git config.
+   - The orchestrator reviews and merges chunk by chunk.
+
+## Chunks
+
+Every card lands as a series of chunks. Each chunk is one commit that can be reviewed and merged on its own.
+
+- **One coherent unit.** A chunk is usually one upstream file or module, with the tests that cover it. Aim for under ~600 lines of non-test code. Tests travel with the code they test, never in a later chunk.
+- **Green on its own.** Before committing, all of these must be clean on Windows:
+  - `cargo fmt --all --check`
+  - `cargo clippy --workspace --all-targets` (0 warnings)
+  - `cargo xtask ci`
+  - `cargo test --workspace`
+
+  Chunks with platform-sensitive behavior (numerics, formatting, parsing) must also pass `scripts/rocky9.sh cargo test -p <crate>`.
+- **Bookkeeping travels with the port.** Update `upstream-map.toml`, `docs/parity.md` and `docs/ratchet.toml` in the same chunk as the port they describe.
+- **Oracle changes stand alone.** Changes to `oracle/` and new fixture groups get their own chunk, before the chunk that first uses them. The owner reviews them separately.
+- **Order and fixes.** Chunks are ordered by dependency. A later fix is a new chunk; never rewrite an earlier commit.
+- **Checking a chunk in isolation** while other work is in progress:
+  1. `git add <files>`
+  2. `git stash push --keep-index --include-untracked`
+  3. Run the checks.
+  4. `git commit`
+  5. `git stash pop`
+- **Commit messages.** The first line is `<card>: <what>`. The body lists the upstream files and line ranges ported, the tests, and the evidence (which checks ran and on which platforms). End with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Bit-exact porting
 
