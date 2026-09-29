@@ -51,7 +51,7 @@ Shared facts:
 | **Rust target** | `crates/ocio-ops/src/cpu_info.rs`; `crates/ocio-ops/src/ops/lut3d/` (forward renderers: tetrahedral and trilinear, one numeric profile per C++ kernel, written as exact scalar code first); half-conversion helpers in the SIMD modules (e.g. `sse2.rs`, `avx.rs`) |
 
 **Prove:**
-1. **CPU dispatch.** `CPUInfo` detects the same flags and quirks as upstream: AVX_SLOW, AVX2_SLOWGATHER, and AVX-512 blocked on EPYC 9V45. Dispatch picks the kernel the C++ would pick on this machine.
+1. **CPU dispatch.** `CPUInfo` detects the same flags and quirks as upstream 2.5.2: SSE2_SLOW, SSE3_SLOW, SSSE3_SLOW, AVX_SLOW and AVX2_SLOWGATHER. (The EPYC 9V45 AVX-512 exception is 2.6 and later: upstream `c2bd98f7`, not in v2.5.2.) Dispatch picks the kernel the C++ would pick on this machine.
    - Find out which kernel the wheel actually runs here, e.g. by comparing every Rust profile's output with the wheel's.
 2. **Lut3D is bit-exact.** Lut3D forward (tetrahedral and trilinear, F32 in and out, RGBA) is bit-identical to the wheel for the profile the wheel uses on this machine, on Windows and in Rocky Linux 9.
    - Sizes: 2, 3, 17, 33, 65 and 129.

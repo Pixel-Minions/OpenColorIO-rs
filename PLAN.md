@@ -171,7 +171,7 @@ These are the rules the agents port by.
   - the NaN behavior of C++ `std::min`/`max` and SSE `min`/`max`;
   - the same rounding: add 0.5 and truncate in scalar casts, round to nearest-even in SIMD stores.
 - **Kernel variants are numeric profiles.**
-  - Replicate OCIO's CPU dispatch (`CPUInfo`) exactly, including its exceptions for CPUs where AVX is slow, gathers are slow, or AVX-512 is blocked. Then the same variant runs as in C++ on the same machine.
+  - Replicate OCIO's CPU dispatch (`CPUInfo`) exactly, including its 2.5.2 quirk flags: SSE2_SLOW, SSE3_SLOW and SSSE3_SLOW on old AMD and Intel parts, AVX_SLOW on Bulldozer and Jaguar, and AVX2_SLOWGATHER on Zen 3 and earlier and on Haswell. (The EPYC 9V45 AVX-512 exception is 2.6 and later.) Then the same variant runs as in C++ on the same machine.
   - Implement each profile as exact scalar code first. `f32::mul_add` reproduces the AVX2/AVX-512 FMA results exactly.
   - Add SIMD later, with equality tests against the scalar profile.
 - **Port OCIO's fast approximations bit-exactly:** `sseLog2`, `sseExp2`, `ssePower`, `sseAtan2` and `sseSinCos`. The default optimization level uses them.
