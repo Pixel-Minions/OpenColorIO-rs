@@ -221,8 +221,8 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/Exception.cpp"
 kind = "src"
-target = ["crates/ocio/src/exception.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/exception.rs"]
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/FileRules.cpp"
@@ -294,13 +294,13 @@ status = "todo"
 path = "src/OpenColorIO/HashUtils.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/hash_utils.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/HashUtils.h"
 kind = "src"
 target = ["crates/ocio-ops/src/hash_utils.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/ImageDesc.cpp"
@@ -462,13 +462,15 @@ status = "todo"
 path = "src/OpenColorIO/Platform.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/platform.rs"]
-status = "todo"
+status = "partial"
+note = "Getenv, isEnvPresent, Strcasecmp, Strncasecmp; Setenv/Unsetenv, AlignedMalloc, CreateTempFilename, UTF-8/16 conversion pending"
 
 [[file]]
 path = "src/OpenColorIO/Platform.h"
 kind = "src"
 target = ["crates/ocio-ops/src/platform.rs"]
-status = "todo"
+status = "partial"
+note = "see Platform.cpp"
 
 [[file]]
 path = "src/OpenColorIO/PrivateTypes.h"

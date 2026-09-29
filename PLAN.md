@@ -1,6 +1,7 @@
 # OpenColorIO-rs — Porting Plan
 
-**Status:** draft v0.4, 2026-09-29.
+**Status:** v0.5, 2026-09-29. Phase 0 is in progress (§15).
+- **Changes in v0.5:** Rust 1.98.1 pinned (D7); exact upstream test counts; the Phase 0 progress and findings; repository visibility added to the open questions.
 - **Changes in v0.4:**
   - our own version numbers, each stating the OCIO version it matches;
   - a Python module compatible with PyOpenColorIO is back in scope, because users will script Ultravioleta in Python;
@@ -54,7 +55,7 @@
   - 24 file formats;
   - 98 built-in transforms and 8 built-in configs;
   - 10 GPU shading targets.
-  - Upstream's tests: 1,161 C++ unit tests, 265 GPU tests, 389 Python tests.
+  - Upstream's tests: 1,191 C++ unit tests, 264 GPU tests, 384 Python tests (counted by `cargo xtask upstream-tests`).
 - **How.**
   - A clean port from source into idiomatic Rust, one module at a time, mirroring upstream's layout.
   - Every module is checked against an *oracle*: the official `opencolorio==2.5.2` wheel, the same build Ultravioleta uses today.
@@ -115,9 +116,9 @@ If you ever publish to crates.io, this scheme works unchanged:
 
 A release (e.g. `1.0.0+ocio.2.5.2`) ships only when all five conditions hold.
 
-**1. Upstream's C++ and GPU tests pass.** Every test in upstream's v2.5.2 C++ suite (1,161) and GPU suite (265) is ported and passes, or is on a reviewed not-applicable list. That list covers tests of C++-only mechanics, such as `shared_ptr` identity.
+**1. Upstream's C++ and GPU tests pass.** Every test in upstream's v2.5.2 C++ suite (1,191) and GPU suite (264) is ported and passes, or is on a reviewed not-applicable list. That list covers tests of C++-only mechanics, such as `shared_ptr` identity.
 
-**2. Upstream's Python tests pass.** Upstream's Python suite (389 tests) passes **unmodified** against our Python module.
+**2. Upstream's Python tests pass.** Upstream's Python suite (384 tests) passes **unmodified** against our Python module.
 
 **3. Output is byte-exact against the oracle.**
 
@@ -182,7 +183,7 @@ Line counts are non-blank, non-comment lines at `v2.5.2`. Difficulty runs from 1
 | **App helpers:** menus, legacy viewing pipeline, mixing, display/view helpers | 2.5K | 2 | Ultravioleta uses `LegacyViewingPipeline` today |
 | **Config merging** (a preview feature in 2.5) | 4.3K | 4 | — |
 | **Python binding** (pybind11) | ~10.8K raw | 3 | 1,414 `.def` calls. Our module must match its API and behavior |
-| **Tests** | C++ 70K · GPU 5.2K · Python 13.8K raw | — | 1,161 / 265 / 389 tests; 261 data files (34 MB) |
+| **Tests** | C++ 70K · GPU 5.2K · Python 13.8K raw | — | 1,191 / 264 / 384 tests; 261 data files (34 MB) |
 
 **Out of scope:**
 - the Java binding and the vendor plugins;
@@ -202,7 +203,7 @@ Line counts are non-blank, non-comment lines at `v2.5.2`. Difficulty runs from 1
 | **D4** | Equivalence | Byte-exact as defined in §3; waivers only with your sign-off | Decided |
 | **D5** | Existing port (`doubleailes/ocio-rs`) | Skip the audit for now and port independently. Note that it is MIT-licensed although derived from BSD-3 code | Decided (skipped for now) |
 | **D6** | Distribution | Private: a git dependency, not published to crates.io | Decided |
-| **D7** | Toolchain | Edition 2024 (as Ultravioleta uses) with a minimum Rust version of 1.89. Confirm the dependencies' minimums in WP 0.1 | Proposed |
+| **D7** | Toolchain | Rust 1.98.1 pinned in `rust-toolchain.toml`, the same as Ultravioleta; edition 2024; `rust-version = "1.98"` | Decided (Phase 0) |
 | **D8** | `unsafe` policy | `#![forbid(unsafe_code)]` everywhere except the SIMD and Python-binding modules | Proposed |
 | **D9** | License | BSD-3-Clause, keeping upstream's notice ("Copyright Contributors to the OpenColorIO Project") | Required (the port is a derivative work) |
 | **D10** | Versioning | Our own semver; the matched OCIO version goes in build metadata (`1.0.0+ocio.2.5.2`) and in the release notes; tags `v1.0.0` (§2) | Decided |
@@ -342,7 +343,7 @@ Done when:    tests ported and tagged; oracle green on both reference platforms;
 
 ### Upstream's Python suite
 
-Upstream's `tests/python` (389 tests) runs unmodified against our standalone wheel. It is a black-box suite that needs only NumPy.
+Upstream's `tests/python` (384 tests) runs unmodified against our standalone wheel. It is a black-box suite that needs only NumPy.
 
 ### Probe inputs
 
@@ -369,7 +370,7 @@ Upstream's `tests/python` (389 tests) runs unmodified against our standalone whe
   - glslang for GLSL;
   - DXC for HLSL, on Windows;
   - naga for Vulkan GLSL, which is how Ultravioleta already compiles `GLSL_VK_4_6`.
-- **Execution:** headless wgpu on software GPU adapters, replaying upstream's 265 GPU test cases.
+- **Execution:** headless wgpu on software GPU adapters, replaying upstream's 264 GPU test cases.
 
 ### Robustness and performance
 
@@ -596,7 +597,7 @@ This is a parallel track for implementer B. It starts after M1, binding each par
 - GLSL ES 1.0 and 3.0.
 - HLSL, MSL, OSL and Cg.
 - The legacy GPU path that bakes the whole chain into one 3D LUT.
-- A GPU execution harness replaying upstream's 265 GPU tests.
+- A GPU execution harness replaying upstream's 264 GPU tests.
 
 ### Phase 8 — SIMD speed and threading (~6 pw)
 
@@ -706,16 +707,30 @@ Here is the process for moving from one OCIO release to the next (for example, 2
 
 1. **D13 — the Python module.** Import name `PyOpenColorIO` (so existing scripts run unchanged), built into Ultravioleta's interpreter and also shipped as a private standalone wheel? Or would you prefer a different module name?
 2. **Review time.** Roughly how much time per day can you give to reviewing the items agents flag (API shape, waivers, deviations)?
+3. **Repository visibility.** `github.com/Pixel-Minions/OpenColorIO-rs` exists, empty and **public**. D6 says private. Should it be made private before the first push? Nothing has been pushed yet.
 
 ---
 
 ## 15. Next steps
 
-1. Confirm D13.
-2. Phase 0: build the harness and guardrails before any porting, with CI on Windows and in a Rocky Linux 9 container.
-3. Run spikes S1, S2, S4 and S5. S4 runs on your Windows workstation and on Rocky Linux 9; S5 runs on Windows only.
-4. Generate the Phase 1 porting cards. Start implementer A and verifier C; implementer B joins when the dependency graph branches (formats, then Python).
-5. In Ultravioleta, independently of the port: add the backend trait and capture mode, so the replay corpus starts growing now.
+**Phase 0 progress (2026-09-29):**
+- **Harness done.** WP 0.1–0.4 and 0.6 (plumbing except `Error`/`Env`) are done on the local `phase0` branch:
+  - workspace;
+  - upstream submodule and map;
+  - oracle and test kit;
+  - fixtures with manifest;
+  - guardrails (`cargo xtask ci`);
+  - Rocky Linux 9 image;
+  - CI workflow;
+  - agent rules (`CLAUDE.md`).
+- **Fixtures travel.** The first fixtures (the built-in configs' `serialize()` output and cache IDs) are byte-identical on Windows and Rocky Linux 9.
+- **Spikes running.** S1/WP 0.5, S2/S5 and S4 run in parallel worktrees. Their reports land in `docs/spikes/`.
+
+**Then:**
+1. Confirm D13 and the repository visibility.
+2. Verify and merge the spikes. Decide on any waivers they propose.
+3. Generate the Phase 1 porting cards. Start implementer A and verifier C; implementer B joins when the dependency graph branches (formats, then Python).
+4. In Ultravioleta, independently of the port: add the backend trait and capture mode, so the replay corpus starts growing now.
 
 ---
 
@@ -739,6 +754,9 @@ OCIO 2.5.2 reads these 10 environment variables:
 A config with no `environment:` section also loads the whole process environment into its context, and into the context's cache ID.
 
 ## Appendix B — Upstream behaviors to preserve
+
+**Platform differences found in the wheel**
+- The Windows wheel embeds the built-in configs' YAML with CRLF line endings: its CI checked the sources out with autocrlf. Upstream's files and the Linux wheel use LF. So `BuiltinConfigRegistry()[name]` returns different bytes on each platform, and the port must match per platform (D12). Parsed configs, `serialize()` and cache IDs are identical on both.
 
 **Loading configs**
 - `CreateFromFile` recognizes `.ocioz` archives by the zip "PK" signature, and it accepts `ocio://` URIs.

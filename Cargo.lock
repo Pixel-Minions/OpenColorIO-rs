@@ -149,6 +149,7 @@ name = "ocio-ops"
 version = "0.0.0+ocio.2.5.2"
 dependencies = [
  "ocio-testkit",
+ "xxhash-rust",
 ]
 
 [[package]]
