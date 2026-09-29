@@ -10,6 +10,7 @@
 
 pub mod exception;
 pub mod hash_utils;
+pub mod math_utils;
 pub mod platform;
 
 pub use exception::{Exception, ExceptionKind, Result};

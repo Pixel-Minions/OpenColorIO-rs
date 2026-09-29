@@ -89,8 +89,9 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/BitDepthUtils.h"
 kind = "src"
-target = ["crates/ocio-ops/src/bit_depth_utils.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/bit_depth_utils.rs", "crates/ocio-ops/src/math_utils.rs"]
+status = "partial"
+note = "S2: the integer Converter<BD>::CastValue casts are in math_utils.rs; the rest is todo"
 
 [[file]]
 path = "src/OpenColorIO/CMakeLists.txt"
@@ -366,7 +367,8 @@ status = "todo"
 path = "src/OpenColorIO/MathUtils.h"
 kind = "src"
 target = ["crates/ocio-ops/src/math_utils.rs"]
-status = "todo"
+status = "partial"
+note = "S2: Clamp, FloatAsInt, IntAsFloat, AddULP, plus std::min/std::max and SSE lane semantics; the rest is todo"
 
 [[file]]
 path = "src/OpenColorIO/Mutex.h"
@@ -4100,7 +4102,8 @@ status = "todo"
 path = "tests/cpu/MathUtils_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/math_utils_tests.rs"]
-status = "todo"
+status = "partial"
+note = "S2: clamp"
 
 [[file]]
 path = "tests/cpu/NamedTransform_tests.cpp"
