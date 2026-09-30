@@ -838,7 +838,7 @@ fn extreme_finite_parameters_match_the_wheel() {
 /// port keeps the source order there. For that case (the first LogAffineTransform, inverse,
 /// fast math off), waiver W0002 applies: in the channels with a NaN parameter, a NaN from the
 /// wheel only has to be NaN in the port, and every other value is still compared bit for bit.
-/// (The battery's generated NaN and ±Inf cases take W0002 in every combination.)
+/// (The battery's generated NaN cases take W0002 in every combination.)
 #[test]
 fn nan_parameters_match_the_wheel_under_waiver_w0002() {
     let nan = f64::NAN;

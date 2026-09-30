@@ -35,8 +35,9 @@
 //!    [`Summary`], and panics with a report per failing case, combination and probe.
 //!
 //! Comparisons are exact. Waiver W0002 applies automatically, and only, to the channels of NaN
-//! and infinite parameters ([`params::Case::compare`]); a case can narrow it
-//! ([`params::Case::w0002_only_where`]), never widen it. Nothing else uses W0002.
+//! parameters ([`params::Case::compare`]); a case can narrow it
+//! ([`params::Case::w0002_only_where`]), never widen it. Infinite and extreme finite
+//! parameters compare bit for bit. Nothing else uses W0002.
 //!
 //! ```no_run
 //! use ocio_testkit::battery::params::{A, Case, Channels, Params, Precision, RGB, Slot};
@@ -116,7 +117,7 @@
 //! # Modules and types
 //!
 //! - [`params`]: parameter cases, their generators (extreme finite, NaN and ±Inf values), and
-//!   the comparison that applies waiver W0002 to the channels of NaN and infinite parameters
+//!   the comparison that applies waiver W0002 to the channels of NaN parameters
 //!   and nothing else.
 //! - The vocabulary of the battery's dimensions: [`Direction`], and [`Format`] ([`BitDepth`],
 //!   [`Layout`]) with [`Combo`] tying them together.

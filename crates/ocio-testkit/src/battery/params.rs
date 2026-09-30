@@ -5,16 +5,17 @@
 //!
 //! A family describes its transform's numeric parameters as [`Slot`]s (name, precision, and
 //! the channels each one applies to) by implementing [`Params`]. From that:
-//! - [`Case`]s know which channels carry a NaN or infinite parameter, and compare those
-//!   channels under waiver W0002 and everything else bit for bit ([`Case::compare`], the only
-//!   place the battery uses W0002);
+//! - [`Case`]s know which channels carry a NaN or infinite parameter, and compare the channels
+//!   of NaN parameters under waiver W0002 and everything else bit for bit ([`Case::compare`],
+//!   the only place the battery uses W0002);
 //! - [`mutations`] generates, from a typical case, one case per slot and value: extreme finite
 //!   values ([`extreme_values`]: ±1e38 and the smallest subnormals for `float` parameters,
 //!   ±1e300 and the smallest subnormals for `double` ones) and NaN, +Inf and -Inf
 //!   ([`NON_FINITE`]).
 //!
-//! Extreme finite parameters compare bit for bit like any other finite parameter: W0002
-//! covers only NaN and infinite parameters.
+//! W0002 covers the channels of NaN parameters, as the owner approved it (`waivers.toml`).
+//! Infinite parameters, like extreme finite ones that overflow to infinity in the renderers,
+//! compare bit for bit.
 
 use std::fmt::Debug;
 use std::sync::OnceLock;
@@ -125,7 +126,8 @@ pub enum Kind {
     /// Finite parameters at the edges of `float` or `double`: some magnitude at least 1e38,
     /// or a nonzero magnitude below FLT_MIN. Compared bit for bit.
     ExtremeFinite,
-    /// At least one NaN or infinite parameter: W0002 applies to the channels it affects.
+    /// At least one NaN or infinite parameter. W0002 applies to the channels of NaN
+    /// parameters.
     NonFinite,
 }
 
@@ -144,7 +146,7 @@ pub enum Origin {
     },
 }
 
-/// Where waiver W0002 applies to a case with a NaN or infinite parameter.
+/// Where waiver W0002 applies to a case with a NaN parameter.
 #[derive(Debug, Clone, Copy)]
 pub enum W0002Scope {
     /// In every combination (the default).
@@ -163,6 +165,7 @@ pub struct Case<P> {
     kind: Kind,
     origin: Origin,
     non_finite: Channels,
+    nan: Channels,
     w0002: W0002Scope,
 }
 
@@ -170,7 +173,7 @@ impl<P: Params> Case<P> {
     /// An explicit case. Its kind and the channels with a NaN or infinite parameter follow from
     /// its slots.
     pub fn new(label: impl Into<String>, params: P) -> Self {
-        let mut non_finite = [false; 4];
+        let (mut non_finite, mut nan) = ([false; 4], [false; 4]);
         let (mut any_non_finite, mut extreme) = (false, false);
         for (i, slot) in params.slots().iter().enumerate() {
             let v = params.get(i);
@@ -178,8 +181,9 @@ impl<P: Params> Case<P> {
                 extreme |= v.abs() >= 1e38 || (v != 0.0 && v.abs() < f64::from(f32::MIN_POSITIVE));
             } else {
                 any_non_finite = true;
-                for (c, on) in slot.channels.iter().enumerate() {
+                for (c, &on) in slot.channels.iter().enumerate() {
                     non_finite[c] |= on;
+                    nan[c] |= on && v.is_nan();
                 }
             }
         }
@@ -196,13 +200,14 @@ impl<P: Params> Case<P> {
             kind,
             origin: Origin::Explicit,
             non_finite,
+            nan,
             w0002: W0002Scope::Everywhere,
         }
     }
 
     /// Narrows W0002 for this case to the combinations `applies` accepts; elsewhere its NaN bits
     /// are compared exactly too. A case can only narrow the waiver: it never applies to a case
-    /// without a NaN or infinite parameter.
+    /// without a NaN parameter.
     pub fn w0002_only_where(mut self, applies: fn(&Combo) -> bool) -> Self {
         self.w0002 = W0002Scope::Only(applies);
         self
@@ -239,10 +244,15 @@ impl<P: Params> Case<P> {
         self.non_finite
     }
 
-    /// Whether W0002 applies to this case in `combo`: the case has a NaN or infinite parameter,
-    /// and its scope includes `combo`.
+    /// The channels that a NaN parameter applies to: the ones W0002 covers.
+    pub fn nan_channels(&self) -> Channels {
+        self.nan
+    }
+
+    /// Whether W0002 applies to this case in `combo`: the case has a NaN parameter, and its
+    /// scope includes `combo`.
     pub fn w0002_applies(&self, combo: &Combo) -> bool {
-        self.non_finite.contains(&true)
+        self.nan.contains(&true)
             && match self.w0002 {
                 W0002Scope::Everywhere => true,
                 W0002Scope::Nowhere => false,
@@ -253,8 +263,9 @@ impl<P: Params> Case<P> {
     /// Compares the port's `actual` RGBA pixels with the wheel's `expected` for `inputs`.
     ///
     /// Where W0002 applies ([`Case::w0002_applies`]), a value that is NaN in `expected`, in a
-    /// channel with a NaN or infinite parameter, only has to be NaN in `actual`. Every other
-    /// value compares bit for bit. This is the battery's only use of W0002.
+    /// channel with a NaN parameter, only has to be NaN in `actual`. Every other value,
+    /// including the channels of infinite parameters, compares bit for bit. This is the
+    /// battery's only use of W0002.
     pub fn compare(
         &self,
         combo: &Combo,
@@ -263,8 +274,7 @@ impl<P: Params> Case<P> {
         actual: &[f32],
     ) -> Comparison {
         if self.w0002_applies(combo) {
-            match pixels_report_except_nan_bits(w0002(), &self.non_finite, inputs, expected, actual)
-            {
+            match pixels_report_except_nan_bits(w0002(), &self.nan, inputs, expected, actual) {
                 Ok(0) => Comparison::Exact,
                 Ok(waived) => Comparison::W0002 { waived },
                 Err(report) => Comparison::Mismatch(report),
@@ -312,7 +322,7 @@ fn w0002() -> &'static str {
             .any(|w| w.get("id").and_then(|id| id.as_str()) == Some("W0002"));
         assert!(
             listed,
-            "waiver W0002 is not in {}: NaN bits in channels with NaN or infinite parameters \
+            "waiver W0002 is not in {}: NaN bits in channels with NaN parameters \
              must match exactly",
             path.display()
         );
@@ -322,8 +332,8 @@ fn w0002() -> &'static str {
 
 /// The generated cases of `base`: one per slot and value, where the slot takes one of its
 /// [`extreme_values`] or one of [`NON_FINITE`] and everything else stays as in `base`. They
-/// are labelled `"<base label>, <slot> = <value>"`. W0002 applies to the non-finite ones in
-/// every combination (a narrowing of `base` doesn't carry over).
+/// are labelled `"<base label>, <slot> = <value>"`. W0002 applies to the NaN ones in every
+/// combination (a narrowing of `base` doesn't carry over).
 pub fn mutations<P: Params>(base: &Case<P>) -> Vec<Case<P>> {
     let mut cases = Vec::new();
     for (i, slot) in base.params.slots().iter().enumerate() {
@@ -436,11 +446,17 @@ mod tests {
         let case = Case::new("NaN green slope", p);
         assert_eq!(case.kind(), Kind::NonFinite);
         assert_eq!(case.non_finite_channels(), G);
+        assert_eq!(case.nan_channels(), G);
 
         let mut p = toy();
         p.base = f64::INFINITY;
         p.gain = f64::NEG_INFINITY;
-        assert_eq!(Case::new("inf", p).non_finite_channels(), RGBA);
+        let case = Case::new("inf", p.clone());
+        assert_eq!(case.kind(), Kind::NonFinite);
+        assert_eq!(case.non_finite_channels(), RGBA);
+        assert_eq!(case.nan_channels(), [false; 4]);
+        p.slope[2] = f64::NAN;
+        assert_eq!(Case::new("inf and NaN", p).nan_channels(), B);
 
         for extreme in [1e38, -1e300, 1e-46, -5e-324] {
             let mut p = toy();
@@ -532,7 +548,7 @@ mod tests {
     }
 
     #[test]
-    fn w0002_covers_only_the_non_finite_channels() {
+    fn w0002_covers_only_the_channels_of_nan_parameters() {
         let inputs = px([0; 4]);
         let expected = px([NAN_A, NAN_A, 0x3f80_0000, NAN_A]);
         let differs_in_green = px([NAN_A, NAN_B, 0x3f80_0000, NAN_A]);
@@ -567,11 +583,17 @@ mod tests {
             typical.compare(&fwd, &inputs, &expected, &differs_in_green),
             Comparison::Mismatch(_)
         ));
-        // Nor does an extreme finite one.
-        let mut p = toy();
-        p.slope[1] = 1e300;
-        let extreme = Case::new("extreme", p);
-        assert!(!extreme.w0002_applies(&fwd));
+        // Nor does an extreme finite one, or one with an infinite parameter.
+        for v in [1e300, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut p = toy();
+            p.slope[1] = v;
+            let case = Case::new("extreme or infinite", p);
+            assert!(!case.w0002_applies(&fwd));
+            assert!(matches!(
+                case.compare(&fwd, &inputs, &expected, &differs_in_green),
+                Comparison::Mismatch(_)
+            ));
+        }
     }
 
     #[test]
@@ -607,7 +629,7 @@ mod tests {
 
     /// Nothing but the battery compares under W0002: outside `compare.rs`, which defines the
     /// comparison, only `Case::compare` here may call it. Oracle tests go through the battery,
-    /// which applies W0002 to the channels of NaN and infinite parameters and nothing else.
+    /// which applies W0002 to the channels of NaN parameters and nothing else.
     #[test]
     fn only_the_battery_uses_the_w0002_comparison() {
         fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
