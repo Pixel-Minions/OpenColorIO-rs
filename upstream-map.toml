@@ -104,13 +104,15 @@ note = "build system"
 path = "src/OpenColorIO/CPUInfo.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/cpu_info.rs"]
-status = "todo"
+status = "done"
+note = "S4: x86-64, ARM64 and unknown branches (x86-32 asm not needed). Identical to the wheels' ociocpuinfo on Windows and Rocky 9 (tests/cpu_info_oracle.rs). No EPYC 9V45 quirk: that is post-2.5.2 (upstream c2bd98f7)"
 
 [[file]]
 path = "src/OpenColorIO/CPUInfo.h"
 kind = "src"
 target = ["crates/ocio-ops/src/cpu_info.rs"]
-status = "todo"
+status = "done"
+note = "S4: flags and has*() accessors; the OCIO_USE_* switches are BuildConfig"
 
 [[file]]
 path = "src/OpenColorIO/CPUInfoConfig.h.in"

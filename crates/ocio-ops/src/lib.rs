@@ -41,6 +41,7 @@ compile_error!(
      been verified"
 );
 
+pub mod cpu_info;
 pub mod exception;
 pub mod hash_utils;
 pub mod math_utils;
