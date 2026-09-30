@@ -227,6 +227,20 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   port calls the platform's functions, as OCIO does). The review suspects these values may also
   depend on the CPU (SIMD renderers, glibc's ifunc variants). If so, their checks belong in
   `cpu-tests`.
+## Ops
+
+### I-40. A file no-op has no cache ID
+
+- **Upstream:** `FileNoOp::getCacheID` returns the op's `m_fileReference`, which the
+  constructor never sets: it gives the path to the op's `FileNoOpData` instead
+  (`ops/noop/NoOps.cpp:300-304, 358-361`). So the cache ID of the op that marks a loaded file
+  is empty. Processor cache IDs skip no-ops (`Op.cpp:448-465`), but `SerializeOpVec` prints
+  each op's cache ID (`Op.cpp:473-489`), in the optimizer's debug log
+  (`OpOptimizers.cpp:618-625, 636-646, 737-754`): the line of a file no-op has no file name,
+  while a look no-op's line names the look.
+- **Who notices:** people reading OCIO's debug log.
+- **A fix:** return the path, as `LookNoOp` returns the look.
+- **Status:** matched in `p1-engine` (1.2c).
 
 ## Transforms
 
