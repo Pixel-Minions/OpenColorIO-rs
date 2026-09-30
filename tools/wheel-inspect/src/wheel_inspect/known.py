@@ -7,7 +7,7 @@ hold only for the DLL whose SHA-256 is `WINDOWS_SHA256` (the one `oracle/uv.lock
 tool ignores this table for any other file. `wheel-inspect selftest` checks every entry.
 
 To add one: identify the function (usually from the Linux build's symbol, the imports it
-calls and its arithmetic), give its start address, and say how
+calls and its arithmetic, see docs/wheel-inspect.md), give its start address, and say how
 you know. Kinds: "function", "svml-entry" (an SVML entry point; `imports` lists its call
 sites), "svml-kernel".
 """

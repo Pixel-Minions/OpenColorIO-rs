@@ -79,6 +79,7 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
   - Scalar code comes first. Each profile (SSE2, AVX, AVX2, AVX-512) is its own renderer and replicates the C++ kernel's arithmetic.
   - `unsafe` is allowed only in SIMD modules and `ocio-py`; `cargo xtask guards` enforces this.
 - **Platform differences.** Where OCIO gives different bytes on Windows and on Linux, the port must too (PLAN.md D12). Check both platforms.
+- **Reading the wheel's machine code.** `docs/wheel-inspect.md` shows, in a few commands of `tools/wheel-inspect`, which operand order either wheel compiled, where it computes in float or double, and whether a path calls libm, SVML or an FMA.
 
 ## The oracle
 

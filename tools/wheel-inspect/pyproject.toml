@@ -1,7 +1,7 @@
 [project]
 name = "wheel-inspect"
 version = "0.1.0"
-description = "Reads the machine code of the pinned opencolorio==2.5.2 wheel"
+description = "Reads the machine code of the pinned opencolorio==2.5.2 wheel (see docs/wheel-inspect.md)"
 requires-python = "==3.13.*"
 dependencies = [
     # The disassembler. Its text is the tool's output, so it is pinned exactly, like

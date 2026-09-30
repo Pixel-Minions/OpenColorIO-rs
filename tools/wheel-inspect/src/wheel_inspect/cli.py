@@ -367,7 +367,7 @@ def cmd_selftest(args) -> int:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="wheel-inspect",
-        description="Read the machine code of the pinned opencolorio==2.5.2 wheel.",
+        description="Read the machine code of the pinned opencolorio==2.5.2 wheel (docs/wheel-inspect.md).",
     )
     sub = parser.add_subparsers(dest="cmd", required=True)
 
