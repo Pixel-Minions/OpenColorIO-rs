@@ -29,16 +29,16 @@ status = "todo"
 [[file]]
 path = "include/OpenColorIO/OpenColorTransforms.h"
 kind = "api"
-target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/format_metadata.rs"]
+target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/format_metadata.rs", "crates/ocio-ops/src/dynamic_property.rs"]
 status = "partial"
-note = "1.2a: the FormatMetadata interface (44-117) is FormatMetadataImpl's own methods in format_metadata.rs (upstream has no other implementation), and its operator<< is FormatMetadataImpl::write_to"
+note = "1.2a: the FormatMetadata interface (44-117) is FormatMetadataImpl's own methods in format_metadata.rs (upstream has no other implementation), and its operator<< is FormatMetadataImpl::write_to; 1.2b: DynamicProperty (766-779) is the DynamicPropertyRcPtr enum and DynamicPropertyDouble (810-824) is DynamicPropertyDoubleImpl, in dynamic_property.rs"
 
 [[file]]
 path = "include/OpenColorIO/OpenColorTypes.h"
 kind = "api"
 target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs", "crates/ocio-ops/src/format_metadata.rs"]
 status = "partial"
-note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does"
+note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does; 1.2b: DynamicPropertyType"
 
 [[file]]
 path = "src/CMakeLists.txt"
@@ -217,14 +217,16 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/DynamicProperty.cpp"
 kind = "src"
-target = ["crates/ocio/src/dynamic_property.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/dynamic_property.rs"]
+status = "partial"
+note = "1.2b, in ocio-ops because op data holds it: DynamicPropertyImpl, DynamicPropertyDoubleImpl, equals for two double properties, and operator== (on DynamicPropertyDoubleImpl and the DynamicPropertyRcPtr enum). The value is an AtomicU64 and the dynamic flag an AtomicBool, so an Arc handle can change them (PLAN.md §9). Checked by upstream's tests only. Phase 5: the grading properties and DynamicPropertyValue::As* (18-47)"
 
 [[file]]
 path = "src/OpenColorIO/DynamicProperty.h"
 kind = "src"
-target = ["crates/ocio/src/dynamic_property.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/dynamic_property.rs"]
+status = "partial"
+note = "see DynamicProperty.cpp"
 
 [[file]]
 path = "src/OpenColorIO/Exception.cpp"
@@ -4102,8 +4104,9 @@ status = "todo"
 [[file]]
 path = "tests/cpu/DynamicProperty_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio/src/dynamic_property_tests.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/dynamic_property_tests.rs"]
+status = "partial"
+note = "1.2b: basic and equal_double. The others need the grading properties (Phase 5), or a processor that reads CTF files"
 
 [[file]]
 path = "tests/cpu/Exception_tests.cpp"
