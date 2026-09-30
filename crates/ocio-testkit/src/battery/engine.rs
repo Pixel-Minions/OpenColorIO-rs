@@ -150,6 +150,9 @@ pub(super) fn run<F: Family>(family: &F, plan: &Plan) -> Summary {
 
     let mut jobs = Vec::new();
     let mut sweeps = Vec::new();
+    // Per case and combination, how many buffers the plan asks for: counted here from the
+    // plan, apart from the jobs, so that the checker can prove each one was compared.
+    let mut expected: HashMap<(usize, usize), usize> = HashMap::new();
     for (c, case) in cases.iter().enumerate() {
         let shared = match case.origin() {
             Origin::Explicit => &explicit_buffers,
@@ -179,6 +182,7 @@ pub(super) fn run<F: Family>(family: &F, plan: &Plan) -> Summary {
                         .map(|(name, pixels)| Buffer::new(name, pixels))
                 })
                 .clone();
+            let mut buffers_asked = shared.len() + usize::from(near.is_some());
             for buffer in shared.iter().chain(near.iter()) {
                 jobs.push(Job {
                     case: c,
@@ -195,6 +199,7 @@ pub(super) fn run<F: Family>(family: &F, plan: &Plan) -> Summary {
                     .chunks
                     .unwrap_or(u64::MAX)
                     .min(ALL_F32_PIXELS / pixels);
+                buffers_asked += chunks as usize;
                 sweeps.extend((0..chunks).map(|index| Job {
                     case: c,
                     combo: k,
@@ -202,6 +207,7 @@ pub(super) fn run<F: Family>(family: &F, plan: &Plan) -> Summary {
                     input: Input::Sweep { index, pixels },
                 }));
             }
+            expected.insert((c, k), buffers_asked);
         }
     }
     // The sweeps run last, so the probe buffers' batches stay the same with or without them.
@@ -216,6 +222,9 @@ pub(super) fn run<F: Family>(family: &F, plan: &Plan) -> Summary {
         reported: HashSet::new(),
         waived: HashMap::new(),
         refusals: HashMap::new(),
+        expected,
+        compared: HashMap::new(),
+        other_profiles_reported: false,
         summary: &mut summary,
     };
     let oracle = Oracle::get();
@@ -274,6 +283,12 @@ struct Checker<'a, F: Family> {
     waived: HashMap<(usize, usize), usize>,
     /// How many case and combination pairs the wheel refused with each text.
     refusals: HashMap<String, usize>,
+    /// Per case and combination, how many buffers the plan asks for.
+    expected: HashMap<(usize, usize), usize>,
+    /// Per case and combination, how many buffers were compared.
+    compared: HashMap<(usize, usize), usize>,
+    /// Whether other profiles without pass-through channels are already reported.
+    other_profiles_reported: bool,
     summary: &'a mut Summary,
 }
 
@@ -302,6 +317,18 @@ impl<F: Family> Checker<'_, F> {
                     "{}: a channel can't pass through and have a non-finite parameter",
                     self.label(group)
                 );
+            } else if !ports.others.is_empty() && !self.other_profiles_reported {
+                // Only pass-through channels of other profiles are compared: with none, the
+                // family would think its other profiles are checked when nothing is.
+                self.other_profiles_reported = true;
+                let message = format!(
+                    "{}: the family gives {} other profiles but no pass-through channels, so \
+                     none of them would be compared; declare `pass_through`, or give no other \
+                     profiles",
+                    self.label(group),
+                    ports.others.len()
+                );
+                self.fail(message);
             }
             self.current = Some((group, ports));
         }
@@ -429,6 +456,7 @@ impl<F: Family> Checker<'_, F> {
             }
         }
         self.summary.comparisons += 1;
+        *self.compared.entry(group).or_default() += 1;
         self.summary.values += input.len();
         self.summary.pass_through_checks += pass_through_checks;
         if case.w0002_applies(&combo) {
@@ -482,7 +510,29 @@ impl<F: Family> Checker<'_, F> {
         }
     }
 
-    fn finish(self) {
+    fn finish(mut self) {
+        // Every case and combination was compared on every buffer the plan asks for, or its
+        // refusal handled, or its failure reported; and something was compared at all.
+        let mut groups: Vec<((usize, usize), usize)> =
+            self.expected.iter().map(|(&g, &n)| (g, n)).collect();
+        groups.sort();
+        for (group, asked) in groups {
+            let compared = self.compared.get(&group).copied().unwrap_or(0);
+            if !self.reported.contains(&group) && compared != asked {
+                let message = format!(
+                    "{}: compared {compared} of the {asked} probe buffers the plan asks for",
+                    self.label(group)
+                );
+                self.fail(message);
+            }
+        }
+        if self.summary.comparisons + self.summary.refusals_compared == 0 {
+            self.fail(
+                "nothing was compared: every case was left out or failed, or the plan has no \
+                 probes"
+                    .to_string(),
+            );
+        }
         let mut waived: Vec<((usize, usize), usize)> =
             self.waived.into_iter().filter(|(_, n)| *n > 0).collect();
         waived.sort();

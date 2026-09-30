@@ -596,6 +596,36 @@ mod tests {
         }
     }
 
+    /// W0002 covers the channels of NaN parameters and no other, alpha included: for a NaN
+    /// green slope, a NaN-bit difference in red, blue or alpha is a mismatch; for a NaN base
+    /// (the three colour channels), one in alpha is.
+    #[test]
+    fn w0002_never_covers_a_channel_without_a_nan_parameter() {
+        let inputs = px([0; 4]);
+        let expected = px([NAN_A; 4]);
+        let fwd = combo(Direction::Forward, true);
+        let mut green = toy();
+        green.slope[1] = f64::NAN;
+        let mut base = toy();
+        base.base = f64::NAN;
+        for (params, covered) in [(green, G), (base, RGB)] {
+            let case = Case::new("NaN", params);
+            for c in 0..4 {
+                let mut actual = expected.clone();
+                actual[c] = f32::from_bits(NAN_B);
+                let result = case.compare(&fwd, &inputs, &expected, &actual);
+                if covered[c] {
+                    assert_eq!(result, Comparison::W0002 { waived: 1 }, "channel {c}");
+                } else {
+                    assert!(
+                        matches!(result, Comparison::Mismatch(_)),
+                        "channel {c}: {result:?}"
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn a_case_can_narrow_w0002_but_not_widen_it() {
         let inputs = px([0; 4]);

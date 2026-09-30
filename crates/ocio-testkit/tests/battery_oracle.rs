@@ -62,10 +62,32 @@ fn wheel(args: &Value, pixels: &[f32]) -> Result<Vec<f32>, String> {
 
 /// A port that is the wheel itself.
 fn oracle_port(args: Value) -> Port {
+    wheel_port(args, |_| {})
+}
+
+/// The wheel's output, then `after`.
+fn wheel_port(args: Value, after: fn(&mut [f32])) -> Port {
     Port::in_place(move |px| {
         let out = wheel(&args, px).expect("the wheel accepts it");
         px.copy_from_slice(&out);
+        after(px);
     })
+}
+
+/// Arithmetic on alpha, which quiets signalling NaNs.
+fn quiet_alpha(px: &mut [f32]) {
+    for alpha in px.iter_mut().skip(3).step_by(4) {
+        *alpha = std::hint::black_box(*alpha) * std::hint::black_box(1.0f32);
+    }
+}
+
+/// Flips the sign of every NaN in the channels `channels` selects.
+fn flip_nan_signs(px: &mut [f32], channels: [bool; 4]) {
+    for (i, v) in px.iter_mut().enumerate() {
+        if channels[i % 4] && v.is_nan() {
+            *v = -*v;
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -76,6 +98,12 @@ enum Kind {
     Identity,
     /// The wheel's output, then refusals with a different text.
     WrongRefusalText,
+    /// The wheel's output, then arithmetic on alpha.
+    QuietAlpha,
+    /// The wheel's output with the signs of its NaNs flipped in the colour channels.
+    FlipColourNans,
+    /// The wheel's output with the signs of its NaNs flipped in alpha.
+    FlipAlphaNans,
 }
 
 /// Deliberate bugs in the family's spec.
@@ -145,6 +173,9 @@ impl Family for LogFamily {
         let args = spec(params, combo.direction).cpu_apply_args(combo);
         match self.port {
             Kind::Identity => Ok(Port::in_place(|_| {})),
+            Kind::QuietAlpha => Ok(wheel_port(args, quiet_alpha)),
+            Kind::FlipColourNans => Ok(wheel_port(args, |px| flip_nan_signs(px, RGB))),
+            Kind::FlipAlphaNans => Ok(wheel_port(args, |px| flip_nan_signs(px, A))),
             Kind::Oracle | Kind::WrongRefusalText => {
                 // The wheel's refusal comes from any buffer.
                 match wheel(&args, &[0.5; 4]) {
@@ -160,19 +191,12 @@ impl Family for LogFamily {
             return Vec::new();
         }
         let args = spec(params, combo.direction).cpu_apply_args(combo);
-        let quiet_args = args.clone();
         vec![
-            ("the wheel".to_string(), oracle_port(args)),
+            ("the wheel".to_string(), oracle_port(args.clone())),
+            // Arithmetic on a pass-through channel quiets signalling NaNs.
             (
                 "alpha arithmetic".to_string(),
-                Port::in_place(move |px| {
-                    let out = wheel(&quiet_args, px).expect("the wheel accepts it");
-                    px.copy_from_slice(&out);
-                    for alpha in px.iter_mut().skip(3).step_by(4) {
-                        // Arithmetic on a pass-through channel quiets signalling NaNs.
-                        *alpha = std::hint::black_box(*alpha) * std::hint::black_box(1.0f32);
-                    }
-                }),
+                wheel_port(args, quiet_alpha),
             ),
         ]
     }
@@ -467,4 +491,86 @@ fn a_failing_oracle_call_fails_its_case_only() {
     assert!(message.contains("NoSuchTransform"), "{message}");
     // Base 2 in both combinations.
     assert!(message.contains("comparisons: 2 buffers"), "{message}");
+}
+
+/// Every buffer of the plan is compared, not only the first. A port that quiets signalling
+/// NaNs in alpha passes the halves (the plan's first buffer: their NaNs are quiet) and fails
+/// the specials; a correct port's comparisons add up to every case and combination times every
+/// buffer of the plan.
+#[test]
+fn every_probe_buffer_is_compared() {
+    let plan = Plan {
+        probes: vec![ProbeSet::Halves { stride: 61 }, ProbeSet::Specials],
+        ..small_plan()
+    };
+    let buffers = plan.probes.iter().flat_map(ProbeSet::rgba_buffers).count();
+    let family = LogFamily::new(vec![Case::new("base 2", Base(2.0))]);
+    let summary = run_with(&family, &plan);
+    assert_eq!(summary.comparisons, summary.groups * buffers);
+
+    let mut family = LogFamily::new(vec![Case::new("base 2", Base(2.0))]);
+    family.port = Kind::QuietAlpha;
+    let message = run_expecting_failure(&family, &plan);
+    assert!(message.contains("2 failures"), "{message}");
+    assert!(message.contains("probe \"specials\""), "{message}");
+    assert!(!message.contains("probe \"every 61st half\""), "{message}");
+}
+
+/// W0002 doesn't hide a wrong port: on a NaN-parameter case, the identity port fails in the
+/// channels W0002 covers (a NaN from the wheel must stay NaN).
+#[test]
+fn a_wrong_port_fails_under_w0002_too() {
+    let mut family = LogFamily::new(vec![Case::new("base NaN", Base(f64::NAN))]);
+    family.port = Kind::Identity;
+    let message = run_expecting_failure(&family, &small_plan());
+    assert!(message.contains("2 failures"), "{message}");
+    assert!(
+        message.contains("NaN bits waived by W0002 in channels [true, true, true, false]"),
+        "{message}"
+    );
+}
+
+/// W0002 lets NaN bits differ in the channels of a NaN parameter and nowhere else: with a NaN
+/// base, NaNs with flipped signs pass in the colour channels (and are counted), and fail in
+/// alpha.
+#[test]
+fn w0002_waives_nan_bits_in_the_nan_parameter_channels_only() {
+    let mut family = LogFamily::new(vec![Case::new("base NaN", Base(f64::NAN))]);
+    family.port = Kind::FlipColourNans;
+    let summary = run_with(&family, &small_plan());
+    assert_eq!(summary.w0002_comparisons, 2);
+    assert!(summary.w0002_waived.iter().all(|(_, n)| *n > 0));
+    assert_eq!(summary.w0002_waived.len(), 2);
+
+    let mut family = LogFamily::new(vec![Case::new("base NaN", Base(f64::NAN))]);
+    family.port = Kind::FlipAlphaNans;
+    let message = run_expecting_failure(&family, &small_plan());
+    assert!(message.contains("2 failures"), "{message}");
+}
+
+/// A run that compares nothing fails: here the plan has no probes.
+#[test]
+fn a_run_that_compares_nothing_fails() {
+    let plan = Plan {
+        probes: Vec::new(),
+        generated_probes: Vec::new(),
+        ..small_plan()
+    };
+    let family = LogFamily::new(vec![Case::new("base 2", Base(2.0))]);
+    let message = run_expecting_failure(&family, &plan);
+    assert!(message.contains("nothing was compared"), "{message}");
+}
+
+/// Other profiles are compared on the pass-through channels only; a family that gives other
+/// profiles without pass-through channels fails, rather than think they are checked.
+#[test]
+fn other_profiles_without_pass_through_channels_fail() {
+    let mut family = LogFamily::new(vec![Case::new("base 2", Base(2.0))]);
+    family.other_profiles = true;
+    let message = run_expecting_failure(&family, &small_plan());
+    assert!(message.contains("1 failures"), "{message}");
+    assert!(
+        message.contains("gives 2 other profiles but no pass-through channels"),
+        "{message}"
+    );
 }

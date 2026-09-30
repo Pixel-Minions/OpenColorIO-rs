@@ -60,15 +60,21 @@ impl Tier {
     /// Every tier, from the quickest.
     pub const ALL: [Tier; 3] = [Tier::Quick, Tier::Full, Tier::Exhaustive];
 
-    /// The tier `OCIO_RS_TIER` names: `quick` (the default when it is unset), `full` or
-    /// `exhaustive`. Panics on any other value, so a typo can't quietly run the quick tier.
+    /// The tier `OCIO_RS_TIER` names ([`Tier::from_env`]). Panics on any value but `quick`,
+    /// `full` or `exhaustive`, so a typo can't quietly run the quick tier.
     pub fn current() -> Tier {
-        match std::env::var("OCIO_RS_TIER") {
-            Err(std::env::VarError::NotPresent) => Tier::Quick,
-            Ok(name) => Tier::from_name(&name).unwrap_or_else(|| {
-                panic!("OCIO_RS_TIER={name:?}: expected quick, full or exhaustive")
+        Tier::from_env(std::env::var_os("OCIO_RS_TIER").as_deref())
+            .unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    /// The tier for a value of `OCIO_RS_TIER`: `quick` when it is unset, else the tier it
+    /// names. Any other value, empty or not Unicode included, is an error.
+    pub fn from_env(value: Option<&std::ffi::OsStr>) -> Result<Tier, String> {
+        match value {
+            None => Ok(Tier::Quick),
+            Some(value) => value.to_str().and_then(Tier::from_name).ok_or_else(|| {
+                format!("OCIO_RS_TIER={value:?}: expected quick, full or exhaustive")
             }),
-            Err(e) => panic!("OCIO_RS_TIER: {e}"),
         }
     }
 
@@ -204,6 +210,91 @@ mod tests {
             assert_eq!(tier.plan().name, tier.name());
         }
         assert_eq!(Tier::from_name("Full"), None);
+    }
+
+    /// Unset is quick; a tier's name is that tier; anything else is an error, never quick.
+    #[test]
+    fn the_environment_names_a_tier_or_fails() {
+        use std::ffi::OsStr;
+        assert_eq!(Tier::from_env(None), Ok(Tier::Quick));
+        for tier in Tier::ALL {
+            assert_eq!(Tier::from_env(Some(OsStr::new(tier.name()))), Ok(tier));
+        }
+        for bad in ["", "Full", "QUICK", " full", "full ", "fast", "exhaustive2"] {
+            let error = Tier::from_env(Some(OsStr::new(bad))).expect_err(bad);
+            assert!(
+                error.contains("expected quick, full or exhaustive"),
+                "{error}"
+            );
+        }
+    }
+
+    /// The tiers' probe sets, pinned: changing a tier is a deliberate edit of this test too.
+    /// Every tier probes the specials and the NaN buffers for explicit and generated cases.
+    #[test]
+    fn the_tiers_probe_sets_are_pinned() {
+        use RandomRange::{AllBits, Exponent, Finite, Hdr, Huge, Negative, Overshoot, Tiny, Unit};
+        let quick = vec![
+            ProbeSet::Halves { stride: 61 },
+            ProbeSet::Specials,
+            ProbeSet::Random {
+                name: "of every range",
+                seed: 0x0b47_7e27_0001,
+                ranges: RandomRange::ALL.iter().map(|&r| (r, 256)).collect(),
+            },
+            ProbeSet::NanBuffers { max_pixels: 24 },
+        ];
+        let full = vec![
+            ProbeSet::Halves { stride: 1 },
+            ProbeSet::Specials,
+            ProbeSet::Random {
+                name: "unit, overshoot, exponent, hdr",
+                seed: 0x5252_0001,
+                ranges: vec![
+                    (Unit, 200_000),
+                    (Overshoot, 200_000),
+                    (Exponent, 100_000),
+                    (Hdr, 100_000),
+                ],
+            },
+            ProbeSet::Random {
+                name: "finite, tiny, all-bits",
+                seed: 0x5252_0002,
+                ranges: vec![(Finite, 200_000), (Tiny, 100_000), (AllBits, 100_000)],
+            },
+            ProbeSet::Random {
+                name: "negative, huge",
+                seed: 0x5252_0003,
+                ranges: vec![(Negative, 100_000), (Huge, 100_000)],
+            },
+            ProbeSet::NanBuffers { max_pixels: 24 },
+        ];
+        let mut exhaustive = full[..5].to_vec();
+        exhaustive.push(ProbeSet::Random {
+            name: "ten million of every range",
+            seed: 0x5252_0004,
+            ranges: RandomRange::ALL.iter().map(|&r| (r, 1_111_111)).collect(),
+        });
+        exhaustive.push(ProbeSet::NanBuffers { max_pixels: 64 });
+
+        let plans = Tier::ALL.map(Tier::plan);
+        assert_eq!(plans[0].probes, quick);
+        assert_eq!(plans[0].generated_probes, quick);
+        assert_eq!(plans[1].probes, full);
+        assert_eq!(plans[1].generated_probes, quick);
+        assert_eq!(plans[2].probes, exhaustive);
+        assert_eq!(plans[2].generated_probes, full);
+        for plan in &plans {
+            for sets in [&plan.probes, &plan.generated_probes] {
+                assert!(sets.contains(&ProbeSet::Specials), "{}", plan.name);
+                assert!(
+                    sets.iter()
+                        .any(|s| matches!(s, ProbeSet::NanBuffers { .. })),
+                    "{}",
+                    plan.name
+                );
+            }
+        }
     }
 
     /// Each tier probes at least what the one below it probes.
