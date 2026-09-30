@@ -12,13 +12,16 @@
 
 ## Evidence
 
-- [ ] Every chunk passed the chunk gate on Windows (`CLAUDE.md` → "Chunks").
-- [ ] Numeric chunks: tests in release too, on Windows and in Rocky Linux 9 (`scripts/rocky9.sh`).
-- [ ] Formatting and parsing chunks: Rocky Linux 9.
+- [ ] Every chunk passed `cargo xtask gate` (`CLAUDE.md` → "Chunks").
+- [ ] Numeric, formatting and parsing chunks passed `cargo xtask gate --release --rocky`: tests in release too, on Windows and in Rocky Linux 9.
 - [ ] Oracle checks are exact.
 - [ ] Independent verifier pass.
 - [ ] No new waivers, `#[ignore]`, tolerances or `unsafe` outside the allowed modules.
-- [ ] `upstream-map.toml` statuses updated.
+- [ ] `upstream-map.toml` statuses updated. `docs/parity.md` and `docs/ratchet.toml` untouched: `cargo xtask land` regenerates them.
+
+<!-- CI runs `cargo xtask ci` in branch mode, against the PR base's `docs/ratchet.toml`; on a
+     land commit (the head `cargo xtask land` pushes) it runs `cargo xtask ci --main`, which also
+     requires both generated files to be current. -->
 
 ## Needs the owner
 

@@ -35,22 +35,21 @@ truth: read §3 (definition of done), §7 (how agents work) and your card before
 Every card lands as a series of chunks. Each chunk is one commit that can be reviewed and merged on its own.
 
 - **One coherent unit.** A chunk is usually one upstream file or module, with the tests that cover it. Aim for under ~600 lines of non-test code. Tests travel with the code they test, never in a later chunk.
-- **Green on its own.** Before committing, all of these must be clean on Windows:
-  - `cargo fmt --all --check`
-  - `cargo clippy --workspace --all-targets` (0 warnings)
-  - `cargo xtask ci`
-  - `cargo test --workspace`
-
-  Chunks with platform-sensitive behavior (numerics, formatting, parsing) must also pass `scripts/rocky9.sh cargo test -p <crate>`. Numeric chunks must pass their oracle tests in release builds too (`cargo test --release -p <crate>`, on both platforms). Optimization can change NaN results and other bits the debug build doesn't show.
-- **Bookkeeping travels with the port.** Update `upstream-map.toml`, `docs/parity.md` and `docs/ratchet.toml` in the same chunk as the port they describe.
+- **Green on its own.** Before committing, `cargo xtask gate` must pass. It runs `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo xtask ci` and `cargo test --workspace --no-fail-fast`, stops at the first failure, and keeps each step's full log in `target/gate-logs/<time>/`.
+  - Numeric or platform-sensitive chunks (numerics, formatting, parsing) run `cargo xtask gate --release --rocky`: the tests in release too, since optimization can change NaN results and other bits the debug build doesn't show, then every step again in Rocky Linux 9.
+  - While iterating, `--crates a,b` limits the test steps to those packages; fmt, clippy and `xtask ci` always cover the workspace.
+- **Bookkeeping travels with the port.** Update `upstream-map.toml` in the same chunk as the port it describes.
+- **Never commit the generated files** `docs/parity.md` and `docs/ratchet.toml`, so that chunks never conflict on them.
+  - `cargo xtask land` regenerates both into the merge commit.
+  - On a branch, `cargo xtask ci` (branch mode) only checks that the ported-test count is at least the base's `docs/ratchet.toml`: the gate's base is where the branch left `phase0`, CI's the PR's base. A branch can't lower it by editing its own copy.
+  - CI runs `cargo xtask ci --main` on `main` and on land commits, which checks that both files are current.
 - **Oracle changes stand alone.** Changes to `oracle/` and new fixture groups get their own chunk, before the chunk that first uses them. The owner reviews them separately.
 - **Order and fixes.** Chunks are ordered by dependency. A later fix is a new chunk; never rewrite an earlier commit.
 - **Checking a chunk in isolation** while other work is in progress:
-  1. `git add <files>`
-  2. `git stash push --keep-index --include-untracked`
-  3. Run the checks.
-  4. `git commit`
-  5. `git stash pop`
+  1. `git add <files>`: exactly the chunk.
+  2. `cargo xtask gate --staged`, with the options above. It gates what is staged and nothing else, in a scratch worktree (`target/gate-staged/wt`); your working tree, with its other changes and untracked files, is left alone.
+  3. `git commit`
+  - Never use `git stash` for this. `refs/stash` is shared by every worktree of the repository, so with agents in parallel, your `git stash pop` can apply someone else's stash.
 - **Commit messages.** The first line is `<card>: <what>`. The body lists the upstream files and line ranges ported, the tests, and the evidence (which checks ran and on which platforms). End with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Bit-exact porting
@@ -93,7 +92,9 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
 - Pixel checks always run live, because the kernel choice and the math library belong to the machine. Never commit pixel data.
 - Text that is identical on every platform is committed with `cargo xtask oracle regen <group>` (groups live in `oracle/ocio_oracle/regen.py`). Tests read it with `ocio_testkit::fixtures::read_text`.
 - **New oracle commands.**
-  - Add them in your own module under `oracle/ocio_oracle/`, registered in `commands.py`.
+  - Add them in your own module under `oracle/ocio_oracle/`, each decorated with `@command` (from `.commands`).
+  - `commands.py` imports every module of the package, in sorted order, so adding a command never edits a shared file.
+  - Command names are unique across modules: a duplicate stops the oracle with an error.
   - A command reports what the library does and never computes expected values.
   - The owner reviews every oracle change.
 - **Both reference platforms:**
@@ -131,16 +132,20 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
 - **Dependencies.** Pin them exactly in the root `Cargo.toml` `[workspace.dependencies]` (`=x.y.z`); crates use `workspace = true`. New dependencies need a reason in your report.
 - **Errors.** Upstream exception text is part of the output, so copy it verbatim.
 - **Non-ASCII data.** Write it as escapes in source (`\u{feff}` in Rust, `\ufeff` in Python), never as raw characters. The file-editing tools can turn a `\uXXXX` typed in their input into the raw, often invisible, character, and `sed` treats `\u` in a replacement as "uppercase the next letter". Check such files with a byte dump (`od -c`) before committing.
-- **Before reporting done:** `cargo fmt --all`, `cargo clippy --workspace --all-targets` (no warnings), `cargo xtask ci`, and `cargo test --workspace`, on Windows and in Rocky Linux 9.
+- **Before reporting done:** `cargo xtask gate --release --rocky` passes (fmt, clippy with no warnings, `cargo xtask ci`, and the tests in debug and release, on Windows and in Rocky Linux 9).
 
 ## Commands
 
 | Command | Purpose |
 |---|---|
-| `cargo xtask ci` | Guards, fixture hashes, ratchet, parity dashboard freshness |
+| `cargo xtask gate [--staged] [--crates a,b] [--release] [--rocky] [--quick\|--full]` | The chunk gate: fmt, clippy, `xtask ci`, tests; logs in `target/gate-logs/`. `--staged`: only what is staged |
+| `cargo xtask land <branch> [--no-rocky]` | Orchestrator: replay a card onto `phase0` gating every commit (Rocky Linux 9 too), merge `--no-ff`, regenerate the generated files, full gate; never pushes. Its full gate (`gate --main`) runs cargo-deny 0.20.2: `cargo install cargo-deny --version 0.20.2 --locked` |
+| `cargo xtask clean-scratch [--yes]` | List (with `--yes`, delete) `target/verify*` in every checkout, worktrees of landed branches, and this repository's Rocky build volumes whose checkout is gone |
+| `cargo xtask ci [--base <rev>]` | Guards, fixture hashes, ported tests at least `docs/ratchet.toml` at `<rev>` (branch mode; the gate passes its base) |
+| `cargo xtask ci --main` | Also: `docs/ratchet.toml` and `docs/parity.md` are current (`main` and land commits) |
 | `cargo xtask guards` | Forbidden patterns, the `unsafe` allowlist, headers, dependency pins, the upstream map |
-| `cargo xtask parity` | Regenerate `docs/parity.md` after porting tests |
-| `cargo xtask ratchet --update` | Record the new number of ported upstream tests |
+| `cargo xtask parity` | Regenerate `docs/parity.md` (`xtask land` does it; chunks don't commit it) |
+| `cargo xtask ratchet --update` | Record the number of ported upstream tests (`xtask land` does it) |
 | `cargo xtask upstream-tests` | Every upstream test and whether it is ported |
 | `cargo xtask oracle info` | The oracle's versions and this machine's CPU features |
 | `cargo xtask oracle regen <group>` | Regenerate committed fixtures (owner-reviewed) |

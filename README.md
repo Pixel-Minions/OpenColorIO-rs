@@ -142,14 +142,18 @@ The full plan is in [`PLAN.md`](PLAN.md).
 You need:
 - Rust 1.98.1 (pinned in `rust-toolchain.toml`);
 - [uv](https://docs.astral.sh/uv/), for the oracle's Python environment;
-- Docker, for the Linux reference container.
+- Docker, for the Linux reference container;
+- [cargo-deny](https://github.com/EmbarkStudios/cargo-deny) 0.20.2, for `cargo xtask gate --main`
+  and `cargo xtask land` (`cargo install cargo-deny --version 0.20.2 --locked`).
 
 ```sh
 git clone --recurse-submodules https://github.com/Pixel-Minions/OpenColorIO-rs
 cd OpenColorIO-rs
-cargo xtask ci                     # guardrails, fixture hashes, ratchet, parity dashboard
-cargo test --workspace             # includes live checks against the official package
-scripts/rocky9.sh cargo test --workspace   # the same on Rocky Linux 9
+cargo xtask gate                   # fmt, clippy, guardrails and the tests (live checks against
+                                   # the official package), stopping at the first failure
+cargo xtask gate --release --rocky # also in release, and all of it again on Rocky Linux 9
+cargo xtask ci                     # guardrails, fixture hashes, the ratchet (branch mode)
+cargo xtask ci --main              # also: the parity dashboard and the ratchet are current
 ```
 
 **Where things are:**

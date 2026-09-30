@@ -5,9 +5,16 @@
 
 Commands report what the library does, including the exceptions and log messages it
 produces, which are part of the byte-exact surface (PLAN.md §3).
+
+Any module of this package can define commands with ``@command``. This module imports every
+other module of the package when it loads, so adding a command module never edits a shared
+file.
 """
 
 import contextlib
+import importlib
+import os
+import pkgutil
 import platform
 import sys
 import traceback
@@ -21,6 +28,10 @@ COMMANDS = {}
 
 
 def command(fn):
+    """Registers fn as the oracle command named after it. Names are unique across modules."""
+    if fn.__name__ in COMMANDS:
+        raise ValueError(f"oracle command {fn.__name__!r} is defined twice: "
+                         f"in {COMMANDS[fn.__name__].__module__} and in {fn.__module__}")
     COMMANDS[fn.__name__] = fn
     return fn
 
@@ -184,6 +195,29 @@ def config_serialize(args, blobs):
     return result, out
 
 
-# Command modules register themselves with @command on import; keep these last.
-from . import numerics_lut  # noqa: E402, F401
-from . import text  # noqa: E402, F401
+def _import_package_modules():
+    """Imports every other module of this package, so that their @command functions register.
+
+    pkgutil finds the modules, and they are imported in sorted order, so the registry never
+    depends on the order a directory lists in. Only modules with Python source are imported:
+    those are the .py files the oracle identity in ocio_testkit hashes, so its cache key covers
+    every command that can run.
+    """
+    package_dir = os.path.dirname(os.path.abspath(__file__))
+    this_module = __name__.rpartition(".")[2]
+    names = []
+    for module in pkgutil.iter_modules([package_dir]):
+        if module.name in ("__main__", this_module):
+            continue
+        if module.ispkg:
+            source = os.path.join(package_dir, module.name, "__init__.py")
+        else:
+            source = os.path.join(package_dir, module.name + ".py")
+        if os.path.isfile(source):
+            names.append(module.name)
+    for name in sorted(names):
+        importlib.import_module(f"{__package__}.{name}")
+
+
+# Last, so that `command` and the helpers above exist when the modules import them.
+_import_package_modules()
