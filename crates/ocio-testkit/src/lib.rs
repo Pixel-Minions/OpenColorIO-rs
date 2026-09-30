@@ -6,6 +6,8 @@
 //! - [`oracle`]: runs the real OpenColorIO 2.5.2 (the `opencolorio==2.5.2` wheel, pinned in
 //!   `oracle/uv.lock`) on this machine and returns its output. Pixel checks always run live,
 //!   because OCIO's kernel choice and math library belong to the machine.
+//! - [`gpu`]: typed requests and replies of the oracle's `gpu_shader` command, a GPU
+//!   processor's shader with its uniforms and textures.
 //! - [`fixtures`]: committed, oracle-generated text fixtures, verified against
 //!   `fixtures/MANIFEST.toml` on every read.
 //! - [`compare`]: exact comparators. There is no tolerance anywhere in this crate except in
@@ -28,6 +30,7 @@ pub mod battery;
 pub mod compare;
 pub mod crt;
 pub mod fixtures;
+pub mod gpu;
 pub mod image;
 pub mod oracle;
 pub mod paths;
