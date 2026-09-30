@@ -59,3 +59,73 @@ fn batched_calls_return_what_single_calls_return() {
         assert!(batched[2].result.get("exception").is_none());
     }
 }
+
+/// A call that raises, here on a transform class that doesn't exist, reports its traceback
+/// and index in its own entry; the calls around it still run.
+#[test]
+fn a_failing_call_reports_its_error_and_the_others_still_run() {
+    let pixels = f32_to_bytes(&[0.25, 0.5, 1.0, 1.0]);
+    let args = json!({"calls": [
+        {"cmd": "cpu_apply", "args": log(2.0, true), "blobs": [0]},
+        {"cmd": "cpu_apply", "args": {"transform": {"class": "NoSuchTransform"}}, "blobs": [0]},
+        {"cmd": "cpu_apply", "args": log(10.0, true), "blobs": [0]},
+    ]});
+    let response = Oracle::get().call_uncached("batch", args, &[&pixels]);
+    let entries = response.result.as_array().expect("a list of entries");
+    assert_eq!(entries.len(), 3);
+    assert!(
+        entries[0]["result"].get("exception").is_none(),
+        "{}",
+        entries[0]
+    );
+    assert_eq!(entries[1]["call"], 1);
+    let error = entries[1]["error"].as_str().expect("an error");
+    assert!(error.contains("NoSuchTransform"), "{error}");
+    assert!(
+        entries[2]["result"].get("exception").is_none(),
+        "{}",
+        entries[2]
+    );
+    assert_eq!(response.blobs.len(), 2);
+}
+
+/// cpu_apply says where OCIO raised: while loading the config (a YAML number yaml-cpp can't
+/// parse), while building the transform (the Python bindings' constructors validate it), or in
+/// getProcessor (which validates the ops of a config's transform).
+#[test]
+fn cpu_apply_reports_the_stage_of_an_exception() {
+    let yaml = |transform: &str| {
+        json!({
+            "config": {"yaml": format!(
+                "ocio_profile_version: 2.1\nroles:\n  default: raw\ncolorspaces:\n  - !<ColorSpace>\n    \
+                 name: raw\n  - !<ColorSpace>\n    name: cs\n    from_scene_reference: {transform}\n"
+            )},
+            "src": "raw",
+            "dst": "cs",
+        })
+    };
+    let pixels = f32_to_bytes(&[0.25, 0.5, 1.0, 1.0]);
+    for (args, stage) in [
+        (yaml("!<LogTransform> {base: inf}"), "config"),
+        (log(1.0, true), "transform"),
+        (yaml("!<LogTransform> {base: 1}"), "processor"),
+    ] {
+        let response = Oracle::get().call("cpu_apply", args.clone(), &[&pixels]);
+        assert!(
+            response.result.get("exception").is_some(),
+            "{args}: {}",
+            response.result
+        );
+        assert_eq!(
+            response.result["stage"], stage,
+            "{args}: {}",
+            response.result
+        );
+    }
+    let accepted = Oracle::get().call("cpu_apply", log(2.0, true), &[&pixels]);
+    assert!(
+        accepted.result.get("stage").is_none(),
+        "{}",
+        accepted.result
+    );
+}
