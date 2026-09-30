@@ -329,10 +329,61 @@ pub(crate) fn log_engine(input: BitDepth, output: BitDepth) -> Engine {
     (first, ops, last)
 }
 
+/// The processor of the two-op tests: a GroupTransform of a LogTransform of base 2 then one of
+/// base 10, with the fast log and no other optimization, so that the wheel keeps both LogOps.
+/// With an F32 output, the second op converts to the output: it is the destination's op.
+pub(crate) fn two_log_processor(input: BitDepth, output: BitDepth) -> Value {
+    json!({
+        "transform": {
+            "class": "GroupTransform",
+            "children": [
+                {"class": "LogTransform", "args": {"base": 2.0}},
+                {"class": "LogTransform", "args": {"base": 10.0}},
+            ],
+        },
+        "optimization": "OPTIMIZATION_FAST_LOG_EXP_POW",
+        "in_bitdepth": depth_name(input),
+        "out_bitdepth": depth_name(output),
+    })
+}
+
+/// The CPU engine of [`two_log_processor`]. `CreateCPUEngine`
+/// (src/OpenColorIO/CPUProcessor.cpp:122-184 @ v2.5.2) gives the first op the input conversion
+/// when the input is F32, and otherwise puts `BitDepthCast<in, F32>` before it; it gives the
+/// last op the output conversion when the output is F32, and otherwise puts
+/// `BitDepthCast<F32, out>` after it. The renderers are those of `log_engine`, for the bases 2
+/// and 10.
+pub(crate) fn two_log_engine(input: BitDepth, output: BitDepth) -> Engine {
+    let renderer = |base| {
+        let data = LogOpData::new(base, TransformDirection::Forward);
+        get_log_renderer(&black_box(data), true)
+    };
+    let (log2, log10) = (renderer(2.0), renderer(10.0));
+    let cast = |from, to| create_generic_bit_depth_helper(from, to).expect("a supported depth");
+    let mut ops = Vec::new();
+    let first = if input == BitDepth::F32 {
+        log2
+    } else {
+        ops.push(log2);
+        cast(input, BitDepth::F32)
+    };
+    let last = if output == BitDepth::F32 {
+        log10
+    } else {
+        ops.push(log10);
+        cast(BitDepth::F32, output)
+    };
+    (first, ops, last)
+}
+
 /// `bytes` bytes of channel values of `depth`, seeded: floats of every kind for F32 (specials,
 /// and uniform values), any bits for F16 and 16-bit integers, and codes up to the maximum for
 /// 8, 10 and 12 bits (the oracle refuses larger 10- and 12-bit codes, which the wheel would look
 /// up outside a table).
+///
+/// Half the F32 values are specials, in turn: of each four values, the first and third, then
+/// the second and fourth. So in an RGBA image every channel gets them, the alpha that the ops
+/// pass through included, whatever the layout.
 pub(crate) fn source_bytes(depth: BitDepth, bytes: usize, seed: u64) -> Vec<u8> {
     let specials = ocio_testkit::probe::specials();
     let mut rng = ocio_testkit::probe::Rng::new(seed);
@@ -342,7 +393,7 @@ pub(crate) fn source_bytes(depth: BitDepth, bytes: usize, seed: u64) -> Vec<u8> 
         let bits = rng.next_u64();
         match depth {
             BitDepth::F32 => {
-                let value = if k.is_multiple_of(2) {
+                let value = if (k + k / 4).is_multiple_of(2) {
                     specials[(k / 2) % specials.len()]
                 } else {
                     rng.uniform(-0.5, 2.0)

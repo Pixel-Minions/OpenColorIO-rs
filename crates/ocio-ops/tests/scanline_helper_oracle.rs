@@ -18,8 +18,9 @@
 mod common;
 
 use common::image::{
-    Engine, GENERIC_SHAPES, PACKED_SHAPES, PAIRS, Shape, add_image, buffer_indices, log_engine,
-    log_processor, port_depth, port_image, with_channel_types,
+    DEPTHS, Engine, GENERIC_SHAPES, PACKED_SHAPES, PAIRS, Shape, add_image, buffer_indices,
+    log_engine, log_processor, port_depth, port_image, two_log_engine, two_log_processor,
+    with_channel_types,
 };
 use ocio_ops::Result;
 use ocio_ops::image_packing::Generic;
@@ -88,8 +89,9 @@ fn apply_scanlines<I: Generic, O: Generic>(
 /// A case: the bit depths, the images, and the request.
 type Case = (Depth, Depth, Apply, Request);
 
-/// Runs `cases` on the wheel and the port: each gives the same buffers, or the same error.
-fn check(cases: &[Case]) {
+/// Runs `cases` on the wheel and the port, whose engine for the cases' bit depths is `engine`:
+/// each gives the same buffers, or the same error.
+fn check(cases: &[Case], engine: fn(BitDepth, BitDepth) -> Engine) {
     let calls: Vec<_> = cases.iter().map(|case| case.3.call()).collect();
     let responses = Oracle::get().batch(&calls, true);
 
@@ -100,7 +102,7 @@ fn check(cases: &[Case]) {
 
         let (input, output) = (port_depth(*input), port_depth(*output));
         let mut buffers: Vec<Vec<u8>> = request.buffers.iter().map(Buffer::bytes).collect();
-        let engine = log_engine(input, output);
+        let engine = engine(input, output);
         let port = with_channel_types!(
             input,
             output,
@@ -160,7 +162,7 @@ fn src_to_dst_matches_the_wheel() {
             }
         }
     }
-    check(&cases);
+    check(&cases, log_engine);
 }
 
 /// In place: every layout, at every bit depth, as input and output.
@@ -182,7 +184,7 @@ fn in_place_matches_the_wheel() {
             }
         }
     }
-    check(&cases);
+    check(&cases, log_engine);
 }
 
 /// The helper's errors, with the wheel's messages: an image whose bit depth isn't the CPU
@@ -213,5 +215,86 @@ fn init_errors_match_the_wheel() {
         request.apply = vec![0, 1];
         cases.push((Depth::F32, Depth::F32, Apply::SrcDst(src, dst), request));
     }
-    check(&cases);
+    check(&cases, log_engine);
+}
+
+/// Two LogOps, from each bit depth into F32, from one image to another and in place: the second
+/// op is then the destination's, which the helper applies to an RGBA-packed F32 row in place
+/// and `Generic<float>::UnpackRGBAToImageDesc` to any other.
+#[test]
+fn two_ops_match_the_wheel() {
+    let shapes = shapes();
+    let mut cases = Vec::new();
+    for (d, input) in DEPTHS.into_iter().enumerate() {
+        let output = Depth::F32;
+        for size in [(1, 1), (17, 3)] {
+            for (k, &shape) in shapes.iter().enumerate() {
+                let seed = Some((d * 1000 + k) as u64);
+                for dst_shape in [shape, shapes[(k + 1) % shapes.len()]] {
+                    let processor = two_log_processor(port_depth(input), port_depth(output));
+                    let mut request = Request::new(processor);
+                    let src = add_image(&mut request, shape, input, size, seed);
+                    let dst = add_image(&mut request, dst_shape, output, size, None);
+                    request.apply = vec![0, 1];
+                    cases.push((input, output, Apply::SrcDst(src, dst), request));
+                }
+                if input == output {
+                    let processor = two_log_processor(port_depth(input), port_depth(output));
+                    let mut request = Request::new(processor);
+                    let img = add_image(&mut request, shape, input, size, seed);
+                    request.apply = vec![0];
+                    cases.push((input, output, Apply::InPlace(img), request));
+                }
+            }
+        }
+    }
+    check(&cases, two_log_engine);
+}
+
+/// Huge images on Windows (docs/improvements.md, I-1), through the helper: the case of
+/// `image_packing_oracle.rs`, a planar F32 image of 65,536 by 65,537 pixels, whose wrapped
+/// pixel count is 65,536. The helper processes the first row, and the second fails with
+/// "Invalid output image position.", in the wheel and in the port, which leave the same bytes.
+#[cfg(target_os = "windows")]
+#[test]
+fn huge_images_fail_on_windows() {
+    use ocio_testkit::image::{Data, Planar, Stride};
+
+    let (width, height) = (65_536, 65_537);
+    let wrapped_pixels = 65_536;
+    let mut request = Request::new(log_processor(BitDepth::F32, BitDepth::F32));
+    let plane = |request: &mut Request, seed: Option<u64>| {
+        let bytes = match seed {
+            Some(seed) => common::image::source_bytes(BitDepth::F32, 16, seed),
+            None => vec![0xa5; 16],
+        };
+        Data::at(request.buffer(Buffer::Bytes(bytes)), 4).entries(wrapped_pixels)
+    };
+    let zero = [Stride::Bytes(0), Stride::Bytes(0)];
+    let src_planes = (0..3).map(|k| plane(&mut request, Some(k))).collect();
+    let src = Planar::new(src_planes, width, height).layout(Depth::F32, zero);
+    let dst_planes = (0..3).map(|_| plane(&mut request, None)).collect();
+    let dst = Planar::new(dst_planes, width, height).layout(Depth::F32, zero);
+    request.image(src.clone());
+    request.image(dst.clone());
+    request.apply = vec![0, 1];
+    let reply = request.run();
+    let raised = reply.raised().expect("the wheel refuses the second row");
+    assert_eq!(raised.stage, "apply", "{raised:?}");
+
+    let mut buffers: Vec<Vec<u8>> = request.buffers.iter().map(Buffer::bytes).collect();
+    let engine = log_engine(BitDepth::F32, BitDepth::F32);
+    let apply = Apply::SrcDst(Image::Planar(src), Image::Planar(dst));
+    let port = apply_scanlines::<f32, f32>(
+        &engine,
+        (BitDepth::F32, BitDepth::F32),
+        &apply,
+        &mut buffers,
+    );
+    assert_eq!(
+        port.map_err(|e| e.message().to_string()),
+        Err(raised.message)
+    );
+    // The first row was written, as in the wheel.
+    assert_eq!(buffers, reply.buffers);
 }
