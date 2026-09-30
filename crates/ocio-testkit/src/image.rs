@@ -907,4 +907,25 @@ mod tests {
             vec![true, false, true, false, true, false, true, false]
         );
     }
+
+    /// A footprint reads back what it wrote, every byte of every channel of every pixel: with
+    /// channels of 4 bytes, a gap between them, two rows, and negative x and y strides.
+    #[test]
+    fn footprints_read_back_what_they_wrote() {
+        let (width, height, item) = (3, 2, 4);
+        // Pixel (0, 0) at byte 100, pixel (2, 1) at byte 0; each pixel 19 bytes.
+        let bgra = Footprint::packed(0, 100, width, height, ChannelOrder::Bgra, item, 5, -20, -60);
+        let pixels: Vec<u8> = (0..width * height * 4 * item)
+            .map(|i| (i % 251) as u8 + 1)
+            .collect();
+        let mut buffers = vec![vec![0u8; 120]];
+        bgra.write(&mut buffers, &pixels);
+        for c in 0..4 {
+            let channel: Vec<u8> = pixels
+                .chunks_exact(4 * item)
+                .flat_map(|pixel| pixel[c * item..(c + 1) * item].to_vec())
+                .collect();
+            assert_eq!(bgra.read(&buffers, c), Some(channel), "channel {c}");
+        }
+    }
 }

@@ -44,21 +44,24 @@
 //! | ImageDesc.cpp:297 `validate` | `PackedImageDesc Error: Invalid channel stride.` | yes: a channel stride below the channel size. The `AutoStride` half of the test is dead: the constructors resolve it |
 //! | ImageDesc.cpp:302 `validate` | `PackedImageDesc Error: Invalid channel number.` | no, nor from C++: the constructors raise `Invalid number of channels.` first |
 //! | ImageDesc.cpp:307 `validate` | `PackedImageDesc Error: The channel and x strides are inconsistent.` | yes |
-//! | ImageDesc.cpp:312 `validate` | `PackedImageDesc Error: Invalid x stride.` | Windows only: a channel stride of ±2^61 with 4 channels makes the derived x stride overflow to `AutoStride`. On Linux GCC dropped the check, since `std::abs` of the same value is evaluated before it (undefined for `INT64_MIN`), and the image is built with an x stride of `INT64_MIN` |
+//! | ImageDesc.cpp:312 `validate` | `PackedImageDesc Error: Invalid x stride.` | Windows only: a channel stride of ±2^61 with 4 channels makes the derived x stride overflow to `AutoStride` (`INT64_MIN`), whatever the width. On Linux GCC dropped the check, since `std::abs` of the same value is evaluated before it (undefined for `INT64_MIN`). There an odd width fails the y stride check (:317) instead, as the derived y stride, `INT64_MIN` times the width, is `AutoStride` too, and an even width builds, with an x stride of `INT64_MIN` and a y stride of 0 |
 //! | ImageDesc.cpp:317 `validate` | `PackedImageDesc Error: Invalid y stride.` | yes: an x stride of ±2^62 with a width of 2 makes the derived y stride overflow to `AutoStride` |
 //! | ImageDesc.cpp:322 `validate` | `PackedImageDesc Error: The x and y strides are inconsistent.` | yes |
 //! | ImageDesc.cpp:327 `validate` | `PackedImageDesc Error: Unknown bit-depth of the image buffer.` | no, nor from C++: `GetChannelSizeInBytes` raises first |
 //! | ImageDesc.cpp:354, 489 constructors | `PackedImageDesc Error: Invalid number of channels.` | yes: `numChannels` other than 3 or 4 |
 //! | ImageDesc.cpp:396, 442 constructors | `PackedImageDesc Error: Unknown channel ordering.` | no: `chanOrderToNumChannels` raises first |
-//! | BitDepthUtils.cpp:18-44 `GetBitDepthMaxValue`, :121-148 `GetChannelSizeInBytes` | `Bit depth is not supported: 14ui.` | not from a description (`bitDepthToDtype` raises first); yes from `getOptimizedCPUProcessor` with UINT14, UINT32 or UNKNOWN, while it builds the CPU processor. CPUProcessor.cpp's own `Unsupported bit-depth` (:93, :113, :215, :233) would come later, and nothing reaches it |
+//! | BitDepthUtils.cpp:90-117 `IsFloatBitDepth` | `Bit depth is not supported: 14ui.` | yes: `getOptimizedCPUProcessor` with UINT14, UINT32 or UNKNOWN in or out, and ops left after optimizing: `optimizeForBitdepth` asks it about both depths (OpOptimizers.cpp:764, 768) |
+//! | BitDepthUtils.cpp:18-44 `GetBitDepthMaxValue`, :121-148 `GetChannelSizeInBytes` | the same | no: `bitDepthToDtype` raises first for a description, and `IsFloatBitDepth` or CPUProcessor.cpp:93, 113 for a processor |
+//! | CPUProcessor.cpp:93, 113 `CreateGenericBitDepthHelper` | `Unsupported bit-depth` | yes: `getOptimizedCPUProcessor` with UINT14, UINT32 or UNKNOWN in (:113) or out (:93), and no op left (an empty group, or ops the optimizer removes). `optimizeForBitdepth` skips an empty list (OpOptimizers.cpp:762), and the CPU engine casts from or to the identity matrix it adds |
+//! | CPUProcessor.cpp:119, 215, 233, 239 | `Unsupported bit-depths`, `Unsupported bit-depth` | no, nor from C++: no CPU processor has those bit depths, and :119 and :239 follow switches whose cases all return or raise |
 //! | ImageDesc.cpp:618 `validate` | `PlanarImageDesc Error: Invalid x stride.` | no, nor from C++: `AutoStride` becomes the channel size |
 //! | ImageDesc.cpp:623 `validate` | `PlanarImageDesc Error: Invalid y stride.` | yes: as for packed images |
 //! | ImageDesc.cpp:628 `validate` | `PlanarImageDesc Error: The x and y strides are inconsistent.` | yes |
 //! | ImageDesc.cpp:633 `validate` | `PlanarImageDesc Error: Unknown bit-depth of the image buffer.` | no, nor from C++: `GetChannelSizeInBytes` raises first |
 //! | ImageDesc.cpp:645, 681 constructors | `PlanarImageDesc Error: Invalid image buffer.` | no: Python buffers are never null |
 //! | ImageDesc.cpp:650, 686 constructors | `PlanarImageDesc Error: Invalid image dimensions.` | yes |
-//! | ImagePacking.cpp:30, 100, 170, 240 | `Invalid output image buffer` (with a period at :100 only), `Invalid input image buffer` | no, nor from C++: `ScanlineHelper` always passes its own buffers |
-//! | ImagePacking.cpp:39, 109 | `Invalid output image position.` | no, nor from C++: `ScanlineHelper` only asks for rows of the image |
+//! | ImagePacking.cpp:30, 100, 170, 240 | `Invalid output image buffer` (with a period at :100 only), `Invalid input image buffer` | no: `ScanlineHelper` passes its own row buffers. On Windows a width of 2^30 leaves them empty, as 4 * width overflows a 32-bit C long (ScanlineHelper.cpp:72-108), and `&buffer[0]` of an empty vector is null: undefined behavior both, which reaches :100 (probed outside the oracle). The oracle refuses widths from 2^29 |
+//! | ImagePacking.cpp:39, 109 | `Invalid output image position.` | Windows only: an image that isn't RGBA-packed, whose pixel count overflows the 32-bit C long it is computed in (:35, :105), as does each row's first pixel index, y * width (ScanlineHelper.cpp:146). The apply raises at the first row whose index falls outside the wrapped count, after writing the rows before it: 65536 x 65536 (a count of 0) at row 0, 65536 x 65537 at row 1. With a 64-bit long it takes sizes the oracle refuses |
 //! | ScanlineHelper.cpp:60 `init` | `Dimension inconsistency between source and destination image buffers.` | yes |
 //!
 //! Python's `applyRGB` and `applyRGBA` never reach the C++ `CPUProcessor::applyRGB(float *)` and
@@ -69,8 +72,8 @@ use std::collections::HashMap;
 
 use ocio_testkit::battery::BitDepth;
 use ocio_testkit::image::{
-    Buffer, ChannelOrder, Channels, Data, Depth, Footprint, Image, Packed, Planar, Reply, Request,
-    RgbInput, RgbReply, RgbRequest, Stride, channel_bytes, dtype,
+    Buffer, ChannelOrder, Channels, Data, Depth, Footprint, Image, Packed, Planar, Raised, Reply,
+    Request, RgbInput, RgbReply, RgbRequest, Stride, channel_bytes, dtype,
 };
 use ocio_testkit::oracle::{BatchCall, Response, f32_to_bytes};
 use ocio_testkit::probe::{self, Rng};
@@ -156,6 +159,8 @@ struct Layout {
     flip_x: bool,
     /// Rows from bottom to top: a negative y stride.
     flip_y: bool,
+    /// A packed pixel's channels from last to first: a negative channel stride.
+    flip_chan: bool,
     /// A planar image's planes in one buffer.
     one_buffer: bool,
 }
@@ -169,6 +174,7 @@ const PACKED: Layout = Layout {
     pad: [0; 5],
     flip_x: false,
     flip_y: false,
+    flip_chan: false,
     one_buffer: false,
 };
 
@@ -294,6 +300,13 @@ fn layouts() -> Vec<Layout> {
             flip_x: true,
             ..PLANAR
         },
+        Layout {
+            name: "numChannels 4, padded, channels flipped",
+            style: Explicit,
+            pad: [1, 0, 1, 1, 1],
+            flip_chan: true,
+            ..PACKED
+        },
     ]);
     layouts
 }
@@ -321,7 +334,11 @@ fn add(
 ) -> (usize, Footprint) {
     assert!(
         layout.style == Style::Explicit
-            || (layout.pad == [0; 5] && !layout.flip_x && !layout.flip_y && !layout.one_buffer),
+            || (layout.pad == [0; 5]
+                && !layout.flip_x
+                && !layout.flip_y
+                && !layout.flip_chan
+                && !layout.one_buffer),
         "{}: only explicit strides can pad or flip",
         layout.name
     );
@@ -345,9 +362,19 @@ fn add(
         };
     let start = head
         + if layout.flip_x { (width - 1) * x } else { 0 }
-        + if layout.flip_y { (height - 1) * y } else { 0 };
+        + if layout.flip_y { (height - 1) * y } else { 0 }
+        + if layout.flip_chan {
+            (channels - 1) * chan
+        } else {
+            0
+        };
     let x_stride = if layout.flip_x { -(x as i64) } else { x as i64 };
     let y_stride = if layout.flip_y { -(y as i64) } else { y as i64 };
+    let chan_stride = if layout.flip_chan {
+        -(chan as i64)
+    } else {
+        chan as i64
+    };
 
     let region = head + extent + tail;
     let planes = if layout.planar { channels } else { 1 };
@@ -381,7 +408,7 @@ fn add(
             height,
             order,
             item,
-            chan as i64,
+            chan_stride,
             x_stride,
             y_stride,
         )
@@ -432,7 +459,7 @@ fn add(
             Style::Explicit => packed.layout(
                 depth,
                 [
-                    Stride::Bytes(chan as i64),
+                    Stride::Bytes(chan_stride),
                     Stride::Bytes(x_stride),
                     Stride::Bytes(y_stride),
                 ],
@@ -761,6 +788,25 @@ fn apply_rgb_is_apply_on_one_row_of_pixels() {
             ));
         }
     }
+    // An array whose first entry is 16 bytes into its memory, which keeps those bytes.
+    let bytes = pixels(BitDepth::F32, COUNT, 104);
+    let memory = [
+        PAD.iter().copied().cycle().take(16).collect(),
+        bytes.clone(),
+    ]
+    .concat();
+    inputs.push((
+        BitDepth::F32,
+        4,
+        RgbInput::Array {
+            bytes: memory,
+            dtype: "float32".into(),
+            shape: None,
+            strides: None,
+            offset: 16,
+        },
+        bytes,
+    ));
     // Finite values and infinities only: the binding converts each Python float to a C float
     // and back, which would quiet a signalling NaN.
     let mut values: Vec<f32> = probe::uniform(7, COUNT * 4 - 6, -0.5, 2.0);
@@ -789,10 +835,10 @@ fn apply_rgb_is_apply_on_one_row_of_pixels() {
             } else {
                 "applyRGB"
             },
-            if matches!(input, RgbInput::List(_)) {
-                "a list"
-            } else {
-                "an array"
+            match input {
+                RgbInput::List(_) => "a list",
+                RgbInput::Array { offset: 0, .. } => "an array",
+                RgbInput::Array { .. } => "an array at an offset",
             },
             depth.oracle_name()
         ));
@@ -828,7 +874,7 @@ fn apply_rgb_is_apply_on_one_row_of_pixels() {
         let rgb = RgbReply::from_response(rgb_response);
         assert!(image.raised().is_none(), "{label}: {}", image.result);
         assert!(rgb.raised().is_none(), "{label}: {}", rgb.result);
-        let expected: Vec<u8> = match rgbs[i].input {
+        let expected: Vec<u8> = match &rgbs[i].input {
             // The list comes back as Python floats: C floats widened to double.
             RgbInput::List(_) => image.buffers[0]
                 .as_chunks::<4>()
@@ -836,7 +882,10 @@ fn apply_rgb_is_apply_on_one_row_of_pixels() {
                 .iter()
                 .flat_map(|&b| f64::from(f32::from_le_bytes(b)).to_le_bytes())
                 .collect(),
-            RgbInput::Array { .. } => image.buffers[0].clone(),
+            // The array's whole memory: what precedes its first entry, then the pixels.
+            RgbInput::Array { bytes, offset, .. } => {
+                [&bytes[..*offset], &image.buffers[0][..]].concat()
+            }
         };
         assert_bytes_eq(label, &expected, rgb.output.as_deref().expect("an output"));
         assert_eq!(
@@ -895,7 +944,10 @@ fn rgb(rgba: bool, input: RgbInput, processor: Value) -> Probe {
 }
 
 /// Every error path of the table at the top that Python reaches, with its exception type,
-/// stage and message; nothing is written when a call raises.
+/// stage and message; a CPU processor's bit depths have their own test
+/// (`unsupported_bit_depths_raise_building_the_cpu_processor`). These calls raise before they
+/// write, so their buffers are unchanged; an apply can also raise after writing rows
+/// (`a_raising_apply_can_write`).
 #[test]
 fn every_error_path_python_reaches_raises() {
     use BitDepth::{F32, Uint8};
@@ -1115,6 +1167,20 @@ fn every_error_path_python_reaches_raises() {
             .into(),
         },
         Refusal {
+            label: "ImageDesc.cpp:312, an odd width",
+            call: construct(
+                rgba(at0(), 1, 1).layout(F32, [Stride::Bytes(1 << 61), Stride::Auto, Stride::Auto]),
+                16,
+            ),
+            raises: constructing("Exception"),
+            fragment: if windows {
+                "PackedImageDesc Error: Invalid x stride."
+            } else {
+                "PackedImageDesc Error: Invalid y stride."
+            }
+            .into(),
+        },
+        Refusal {
             label: "ImageDesc.cpp:317",
             call: construct(
                 rgba(at0(), 2, 1)
@@ -1182,14 +1248,27 @@ fn every_error_path_python_reaches_raises() {
                 .into(),
         },
         Refusal {
-            label: "BitDepthUtils.cpp, building the CPU processor",
-            call: apply(vec![rgba(at0(), 2, 2).into()], &[64], {
-                let mut p = f32();
-                p["in_bitdepth"] = json!("BIT_DEPTH_UINT14");
-                p
-            }),
-            raises: Some(("Exception", "cpu_processor", None)),
-            fragment: "Bit depth is not supported: 14ui.".into(),
+            label: "ImagePacking.cpp:109, a pixel count that wraps to 0 on Windows",
+            call: apply(
+                vec![
+                    Planar::new(vec![at0().entries(0); 3], 65536, 65536)
+                        .layout(F32, [Stride::Bytes(0); 2])
+                        .into(),
+                ],
+                &[4],
+                f32(),
+            ),
+            raises: if windows {
+                applied("Exception")
+            } else {
+                constructing("RuntimeError")
+            },
+            fragment: if windows {
+                "Invalid output image position."
+            } else {
+                "Incompatible buffer dimensions"
+            }
+            .into(),
         },
         Refusal {
             label: "ImageDesc.cpp:286, applyRGB([])",
@@ -1255,6 +1334,114 @@ fn every_error_path_python_reaches_raises() {
             }
             (expected, raised) => panic!("{label}: expected {expected:?}, got {raised:?}"),
         }
+    }
+}
+
+/// `getOptimizedCPUProcessor` takes any bit depth: the binding doesn't check them. UINT14,
+/// UINT32 and UNKNOWN, in or out, raise while it builds the CPU processor. With ops left after
+/// optimizing, `optimizeForBitdepth` asks `IsFloatBitDepth` of the input and output depths
+/// (OpOptimizers.cpp:764, 768; BitDepthUtils.cpp:90-117 @ v2.5.2). With none, it skips the
+/// empty list (OpOptimizers.cpp:762), and the CPU engine's cast to or from the identity matrix
+/// it adds raises (CPUProcessor.cpp:93, 113, 122-184 @ v2.5.2). An empty group has no op; an
+/// identity matrix has none left once the optimizer removes it. The messages name the depth as
+/// `BitDepthToString` does (ParseUtils.cpp:171-182 @ v2.5.2).
+#[test]
+fn unsupported_bit_depths_raise_building_the_cpu_processor() {
+    let transforms = [
+        (
+            "ops",
+            processor(BitDepth::F32, BitDepth::F32)["transform"].clone(),
+            true,
+        ),
+        ("an empty group", json!({"class": "GroupTransform"}), false),
+        (
+            "an identity matrix",
+            json!({"class": "MatrixTransform"}),
+            false,
+        ),
+    ];
+    let mut cases = Vec::new();
+    for (depth, name) in [
+        ("BIT_DEPTH_UINT14", "14ui"),
+        ("BIT_DEPTH_UINT32", "32ui"),
+        ("BIT_DEPTH_UNKNOWN", "unknown"),
+    ] {
+        for (input, output) in [(depth, "BIT_DEPTH_F32"), ("BIT_DEPTH_F32", depth)] {
+            for (what, transform, ops) in &transforms {
+                let mut request = Request::new(json!({
+                    "transform": transform,
+                    "in_bitdepth": input,
+                    "out_bitdepth": output,
+                }));
+                let buffer = request.buffer(Buffer::fill(16, &[0]));
+                let image =
+                    request.image(Packed::new(Data::at(buffer, 0), 1, 1, Channels::Count(4)));
+                request.apply = vec![image];
+                let message = if *ops {
+                    format!("Bit depth is not supported: {name}.")
+                } else {
+                    "Unsupported bit-depth".to_string()
+                };
+                cases.push((format!("{what}, {input} to {output}"), request, message));
+            }
+        }
+    }
+    let calls: Vec<BatchCall<'_>> = cases.iter().map(|(_, r, _)| r.call()).collect();
+    for ((label, request, message), response) in cases.iter().zip(batch(&calls)) {
+        let raised = request.reply(response).raised();
+        assert_eq!(
+            raised,
+            Some(Raised {
+                kind: "Exception".into(),
+                message: message.clone(),
+                stage: "cpu_processor".into(),
+                image: None,
+            }),
+            "{label}"
+        );
+    }
+}
+
+/// Windows only: an apply can raise after writing rows. A planar F32 image of 65536 x 65537
+/// pixels, each plane's pixels on one float (strides of 0), has 2^32 + 65536 pixels, a count
+/// PackRGBAFromImageDesc computes in a C long (ImagePacking.cpp:103-110 @ v2.5.2), 32 bits on
+/// Windows: it wraps to 65536 (a signed overflow). Row 0 is processed and written; row 1, whose
+/// first pixel index is 65536, raises. The binding expects the wrapped count of entries too
+/// (checkBufferSize). The reply has the buffers as the call left them: each plane's float holds
+/// what the same processor makes of the pixel on its own.
+#[cfg(windows)]
+#[test]
+fn a_raising_apply_can_write() {
+    let pixel = [0.75f32, 0.5, 0.25];
+    let planar = |width: i64, height: i64, entries: i64| {
+        let mut request = Request::new(processor(BitDepth::F32, BitDepth::F32));
+        let planes = pixel
+            .iter()
+            .map(|&v| {
+                Data::at(request.buffer(Buffer::Bytes(f32_to_bytes(&[v]))), 0).entries(entries)
+            })
+            .collect();
+        let image = request
+            .image(Planar::new(planes, width, height).layout(BitDepth::F32, [Stride::Bytes(0); 2]));
+        request.apply = vec![image];
+        request
+    };
+    let wide = planar(65536, 65537, 65536);
+    let one = planar(1, 1, 1);
+    let responses = batch(&[wide.call(), one.call()]);
+    let (wide_reply, one_reply) = (
+        wide.reply(responses[0].clone()),
+        one.reply(responses[1].clone()),
+    );
+    let raised = wide_reply.raised().expect("the apply raises");
+    assert_eq!(
+        (raised.stage.as_str(), raised.message.as_str()),
+        ("apply", "Invalid output image position.")
+    );
+    assert!(one_reply.raised().is_none(), "{}", one_reply.result);
+    for (plane, (before, after)) in wide.buffers.iter().zip(&wide_reply.buffers).enumerate() {
+        assert_ne!(&before.bytes(), after, "plane {plane} is written");
+        assert_bytes_eq(&format!("plane {plane}"), &one_reply.buffers[plane], after);
     }
 }
 
@@ -1403,6 +1590,252 @@ fn data_getters_copy_the_tight_buffers() {
         replies[3].data(0, "getData").is_none(),
         "getData reading past the last row"
     );
+}
+
+/// The getters the oracle reports describe the bytes the wheel wrote: a footprint built from a
+/// reply's own getters covers every byte the apply changed, and reads the same pixels as the
+/// layout the request described, for padded channel strides, negative x and y strides and
+/// several channel orders.
+#[test]
+fn getters_describe_the_written_bytes() {
+    use BitDepth::{F32, Uint16};
+    // (depth, order, channel, x and y strides, buffer bytes, data offset): 3 x 2 images.
+    let layouts = [
+        (F32, ChannelOrder::Bgra, [8i64, 36, 120], 240usize, 0usize),
+        (F32, ChannelOrder::Rgb, [4, -16, 56], 112, 32),
+        (Uint16, ChannelOrder::Abgr, [2, 10, -34], 68, 34),
+    ];
+    let requests: Vec<Request> = layouts
+        .iter()
+        .enumerate()
+        .map(|(i, &(depth, order, strides, size, offset))| {
+            let mut request = Request::new(processor(depth, depth));
+            // Pixel values in every byte, padding included.
+            let bytes = pixels(depth, size, 40 + i as u64)[..size].to_vec();
+            let buffer = request.buffer(Buffer::Bytes(bytes));
+            let image = request.image(
+                Packed::new(Data::at(buffer, offset), 3, 2, Channels::Order(order))
+                    .layout(depth, strides.map(Stride::Bytes)),
+            );
+            request.apply = vec![image];
+            request
+        })
+        .collect();
+    let calls: Vec<BatchCall<'_>> = requests.iter().map(Request::call).collect();
+    for ((&(depth, order, [chan, x, y], _, offset), request), response) in
+        layouts.iter().zip(&requests).zip(batch(&calls))
+    {
+        let reply = request.reply(response);
+        assert!(reply.raised().is_none(), "{order:?}: {}", reply.result);
+        let getters = reply.getters(0);
+        let number = |name: &str| getters[name].as_i64().expect(name);
+        let reported_order = ChannelOrder::ALL
+            .into_iter()
+            .find(|o| getters["getChannelOrder"] == o.oracle_name())
+            .expect("a channel order");
+        let reported = Footprint::packed(
+            0,
+            offset as i64,
+            number("getWidth") as usize,
+            number("getHeight") as usize,
+            reported_order,
+            channel_bytes(depth),
+            number("getChanStrideBytes"),
+            number("getXStrideBytes"),
+            number("getYStrideBytes"),
+        );
+        let requested = Footprint::packed(
+            0,
+            offset as i64,
+            3,
+            2,
+            order,
+            channel_bytes(depth),
+            chan,
+            x,
+            y,
+        );
+        let before = request.buffers[0].bytes();
+        let after = &reply.buffers[0];
+        let covered = &reported.covered(&[after.len()])[0];
+        let changed: Vec<usize> = (0..after.len())
+            .filter(|&i| before[i] != after[i])
+            .collect();
+        assert!(!changed.is_empty(), "{order:?}: the apply wrote nothing");
+        assert!(
+            changed.iter().all(|&i| covered[i]),
+            "{order:?}: bytes changed outside the reported layout"
+        );
+        for c in 0..4 {
+            assert_eq!(
+                reported.read(&reply.buffers, c),
+                requested.read(&reply.buffers, c),
+                "{order:?}: channel {c}"
+            );
+        }
+    }
+}
+
+/// Upstream's own tests of the image descriptions, which its Java binding runs, through the
+/// Python binding, with their pixels, calls and expected values:
+/// `PackedImageDescTest.test_interface` and `PlanarImageDescTest.test_interface`
+/// (upstream/OpenColorIO/tests/java/org/OpenColorIO/PackedImageDescTest.java:16-39 and
+/// PlanarImageDescTest.java:16-51 @ v2.5.2).
+#[test]
+fn upstreams_image_description_tests() {
+    let (width, height) = (2, 2);
+    let mut packed = Request::new(json!({}));
+    let buffer = packed.buffer(Buffer::Bytes(f32_to_bytes(&[
+        0.1, 0.1, 0.1, 1.0, 0.2, 0.2, 0.2, 1.0, 0.3, 0.3, 0.3, 1.0, 0.4, 0.4, 0.4, 1.0,
+    ])));
+    packed.image(Packed::new(
+        Data::at(buffer, 0),
+        width,
+        height,
+        Channels::Count(4),
+    ));
+    packed.data_getters = true;
+    let mut planar = Request::new(json!({}));
+    let planes = [
+        [0.1f32, 0.2, 0.3, 0.4],
+        [0.1, 0.2, 0.3, 0.4],
+        [0.1, 0.2, 0.3, 0.4],
+        [1.0, 1.0, 1.0, 1.0],
+    ]
+    .iter()
+    .map(|plane| Data::at(planar.buffer(Buffer::Bytes(f32_to_bytes(plane))), 0))
+    .collect();
+    planar.image(Planar::new(planes, width, height));
+    planar.data_getters = true;
+    let responses = batch(&[packed.call(), planar.call()]);
+    let (packed, planar) = (
+        packed.reply(responses[0].clone()),
+        planar.reply(responses[1].clone()),
+    );
+    let entry = |reply: &Reply, getter: &str, i: usize| {
+        let bytes = reply.data(0, getter).expect(getter);
+        f32::from_le_bytes(bytes[4 * i..4 * i + 4].try_into().unwrap())
+    };
+    // PackedImageDescTest.java:31-37.
+    assert_eq!(entry(&packed, "getData", 10).to_bits(), 0.3f32.to_bits());
+    let getters = packed.getters(0);
+    assert_eq!(getters["getWidth"], 2);
+    assert_eq!(getters["getHeight"], 2);
+    assert_eq!(getters["getNumChannels"], 4);
+    assert_eq!(getters["getChanStrideBytes"], 4);
+    assert_eq!(getters["getXStrideBytes"], 16);
+    assert_eq!(getters["getYStrideBytes"], 32);
+    // PlanarImageDescTest.java:43-49.
+    assert_eq!(entry(&planar, "getRData", 0).to_bits(), 0.1f32.to_bits());
+    assert_eq!(entry(&planar, "getGData", 1).to_bits(), 0.2f32.to_bits());
+    assert_eq!(entry(&planar, "getBData", 2).to_bits(), 0.3f32.to_bits());
+    assert_eq!(entry(&planar, "getAData", 3).to_bits(), 1.0f32.to_bits());
+    let getters = planar.getters(0);
+    assert_eq!(getters["getWidth"], 2);
+    assert_eq!(getters["getHeight"], 2);
+    assert_eq!(getters["getYStrideBytes"], 8);
+}
+
+/// The optimization flags reach the CPU processor: `image_apply` and `cpu_apply` give the same
+/// cache ID and pixels for the same processor spec, with flags other than the default ones.
+#[test]
+fn optimization_reaches_the_processor() {
+    let values = f32_to_bytes(&[
+        0.5, 0.25, 1.5, 1.0, -0.125, 2.0, 0.75, 0.5, 3.0, 0.0625, 0.3, 0.9,
+    ]);
+    let mut spec = processor(BitDepth::F32, BitDepth::F32);
+    spec["optimization"] = json!("OPTIMIZATION_NONE");
+    let mut request = Request::new(spec.clone());
+    let buffer = request.buffer(Buffer::Bytes(values.clone()));
+    let image = request.image(Packed::new(Data::at(buffer, 0), 3, 1, Channels::Count(4)));
+    request.apply = vec![image];
+    let calls = [
+        request.call(),
+        BatchCall {
+            cmd: "cpu_apply",
+            args: spec,
+            blobs: vec![&values],
+        },
+    ];
+    let responses = batch(&calls);
+    let reply = request.reply(responses[0].clone());
+    assert!(reply.raised().is_none(), "{}", reply.result);
+    let cache_id = reply.result["cpu_cache_id"].as_str().expect("a cache ID");
+    assert_eq!(cache_id, responses[1].result["cpu_cache_id"]);
+    assert_eq!(reply.buffers[0], responses[1].blobs[0]);
+}
+
+/// Data getter copies that aren't the whole buffer: rows with padding, where the copy of
+/// `width * height * channels` entries stops before the buffer does, and a padded channel
+/// stride with rows flipped, where the copy would run past the buffer, so the oracle doesn't
+/// make it.
+#[test]
+fn data_getter_copies_that_are_not_the_buffer() {
+    use BitDepth::F32;
+    let floats = |scale: f32| f32_to_bytes(&(0..32).map(|i| i as f32 * scale).collect::<Vec<_>>());
+    let mut padded = Request::new(processor(F32, F32));
+    let buffer = padded.buffer(Buffer::Bytes(floats(0.125)));
+    let image = padded.image(
+        Packed::new(Data::at(buffer, 0), 3, 2, Channels::Count(4))
+            .layout(F32, [Stride::Auto, Stride::Auto, Stride::Bytes(64)]),
+    );
+    padded.apply = vec![image];
+    padded.data_getters = true;
+    let mut flipped = Request::new(processor(F32, F32));
+    let buffer = flipped.buffer(Buffer::Bytes(floats(0.25)));
+    let image = flipped.image(
+        Packed::new(
+            Data::at(buffer, 64),
+            2,
+            2,
+            Channels::Order(ChannelOrder::Bgra),
+        )
+        .layout(
+            F32,
+            [Stride::Bytes(8), Stride::Bytes(32), Stride::Bytes(-64)],
+        ),
+    );
+    flipped.apply = vec![image];
+    flipped.data_getters = true;
+    let responses = batch(&[padded.call(), flipped.call()]);
+    let padded_reply = padded.reply(responses[0].clone());
+    assert!(padded_reply.raised().is_none(), "{}", padded_reply.result);
+    // 3 * 2 * 4 floats from the data pointer at the channel stride, 4 bytes: the first 96 of
+    // the buffer's 128 bytes, row 0's padding included and row 1's cut short.
+    assert_bytes_eq(
+        "padded rows",
+        &padded_reply.buffers[0][..96],
+        padded_reply.data(0, "getData").expect("the copy"),
+    );
+    let flipped_reply = flipped.reply(responses[1].clone());
+    assert!(flipped_reply.raised().is_none(), "{}", flipped_reply.result);
+    assert!(
+        flipped_reply.data(0, "getData").is_none(),
+        "a copy that would read past the buffer"
+    );
+}
+
+/// Bit depths and channel orders given as integers are the enum values they name
+/// (`BIT_DEPTH_F32` is 8 and `CHANNEL_ORDERING_BGRA` 1,
+/// upstream/OpenColorIO/include/OpenColorIO/OpenColorTypes.h:428-457 @ v2.5.2): the same
+/// getters as the names.
+#[test]
+fn integer_enum_values_are_the_named_ones() {
+    let mut request = Request::new(json!({}));
+    let buffer = request.buffer(Buffer::fill(96, &[0]));
+    for (depth, order) in [
+        (
+            Depth::Named("BIT_DEPTH_F32"),
+            Channels::Order(ChannelOrder::Bgra),
+        ),
+        (Depth::Value(8), Channels::OrderValue(1)),
+    ] {
+        request
+            .image(Packed::new(Data::at(buffer, 0), 3, 2, order).layout(depth, [Stride::Auto; 3]));
+    }
+    let reply = request.reply(batch(&[request.call()]).remove(0));
+    assert!(reply.raised().is_none(), "{}", reply.result);
+    assert_eq!(reply.getters(1), reply.getters(0));
 }
 
 /// What the oracle does with a request of [`applies_outside_the_wheels_memory_are_refused`].
