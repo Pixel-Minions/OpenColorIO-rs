@@ -9,8 +9,8 @@
 //! same value, so each check is made once.
 
 use super::*;
-use crate::math_utils::{add_ulp, float_as_int};
-use ocio_testkit::upstream::{check_close, equal_with_abs_error};
+use crate::math_utils::add_ulp;
+use ocio_testkit::upstream::{are_all_close, check_close, equal_with_abs_error};
 
 // ---------------------------------------------------------------------------------------------
 // Helpers of SSE_tests.cpp.
@@ -32,12 +32,6 @@ fn check_float(operation: &str, expected: f32, actual: f32, precision: u32) {
         equal_with_abs_error(expected, actual, rtol),
         "Output differs on {operation} : expected: {expected:e} != actual: {actual:e}"
     );
-}
-
-/// `GetULPDifference` (tests/cpu/SSE_tests.cpp:123-126 @ v2.5.2):
-/// `abs((int)(FloatAsInt(a) - FloatAsInt(b)))`.
-fn ulp_difference(a: f32, b: f32) -> u32 {
-    (float_as_int(a).wrapping_sub(float_as_int(b)) as i32).wrapping_abs() as u32
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -103,7 +97,7 @@ fn sse2_exp2_test() {
         let expected = 2.0f32.powf(v);
         let result = sse_exp2(v);
         assert!(
-            ulp_difference(result, expected) <= ulp_tolerance,
+            are_all_close(&[result], expected, ulp_tolerance),
             "exp2({v}): result {result:e}, expected {expected:e}"
         );
     }
@@ -113,7 +107,7 @@ fn sse2_exp2_test() {
         let expected = 2.0f32.powf(-v);
         let result = sse_exp2(-v);
         assert!(
-            ulp_difference(result, expected) <= ulp_tolerance,
+            are_all_close(&[result], expected, ulp_tolerance),
             "exp2({}): result {result:e}, expected {expected:e}",
             -v
         );

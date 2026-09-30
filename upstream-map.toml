@@ -4184,9 +4184,9 @@ status = "todo"
 [[file]]
 path = "tests/cpu/SSE_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-ops/src/sse_tests.rs"]
+target = ["crates/ocio-ops/src/sse_tests.rs", "crates/ocio-testkit/src/upstream/mod.rs"]
 status = "done"
-note = "S2: all 11 tests"
+note = "S2: all 11 tests; the ULP check (GetULPDifference, AreAllClose) is in ocio_testkit::upstream"
 
 [[file]]
 path = "tests/cpu/UnitTestLogUtils.cpp"
@@ -4227,8 +4227,9 @@ status = "todo"
 [[file]]
 path = "tests/cpu/UnitTestUtils.h"
 kind = "test-support"
-target = ["crates/ocio-testkit/src/upstream/unit_test_utils.rs"]
-status = "todo"
+target = ["crates/ocio-testkit/src/upstream/mod.rs"]
+status = "partial"
+note = "S2: EqualWithSafeRelError"
 
 [[file]]
 path = "tests/cpu/ViewTransform_tests.cpp"
@@ -4486,8 +4487,8 @@ status = "todo"
 path = "tests/cpu/ops/gamma/GammaOpCPU_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_cpu_tests.rs"]
-status = "done"
-note = "S2: all 10 tests; the optimizer step is replaced by its effect on one op (see the file)"
+status = "partial"
+note = "S2: all 10 tests, without upstream's finalize/optimize/size-1 checks, which wait for WP 1.6a and 1.3g1; they are replaced today by `!is_no_op() && !is_identity()`"
 
 [[file]]
 path = "tests/cpu/ops/gamma/GammaOpData_tests.cpp"
@@ -5484,8 +5485,9 @@ status = "todo"
 [[file]]
 path = "tests/testutils/UnitTest.h"
 kind = "test-support"
-target = ["crates/ocio-testkit/src/upstream/unit_test.rs"]
-status = "todo"
+target = ["crates/ocio-testkit/src/upstream/mod.rs"]
+status = "partial"
+note = "S2: OCIO_CHECK_CLOSE"
 
 [[file]]
 path = "tests/utils/CMakeLists.txt"

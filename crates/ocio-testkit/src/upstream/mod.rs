@@ -111,9 +111,42 @@ pub fn equal_with_safe_rel_error<T: UpstreamFloat>(
     err <= eps
 }
 
+/// `GetULPDifference(a, b)`: `abs((int)(FloatAsInt(a) - FloatAsInt(b)))`, the distance between
+/// the bit patterns. The unsigned difference wraps and the `int` cast reinterprets it, as in
+/// C++; `abs(INT_MIN)` stays `INT_MIN`, which the `unsigned` result reads as 2^31.
+///
+/// Port of `GetULPDifference` (tests/cpu/SSE_tests.cpp:123-126 @ v2.5.2).
+pub fn ulp_difference(a: f32, b: f32) -> u32 {
+    (a.to_bits().wrapping_sub(b.to_bits()) as i32).wrapping_abs() as u32
+}
+
+/// `AreAllClose(sseResult, reference, ulp_tolerance)`: every lane is at most `ulp_tolerance`
+/// ULPs from `reference` ([`ulp_difference`]).
+///
+/// Port of `AreAllClose` (tests/cpu/SSE_tests.cpp:157-168 @ v2.5.2), which checks the four
+/// lanes of an `__m128`; a port passes the lanes it computes.
+pub fn are_all_close(lanes: &[f32], reference: f32, ulp_tolerance: u32) -> bool {
+    lanes
+        .iter()
+        .all(|&lane| ulp_difference(lane, reference) <= ulp_tolerance)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ulp_difference_counts_bit_patterns() {
+        let one = 1.0f32;
+        let next = f32::from_bits(one.to_bits() + 1);
+        assert_eq!(ulp_difference(one, one), 0);
+        assert_eq!(ulp_difference(one, next), 1);
+        assert_eq!(ulp_difference(next, one), 1);
+        // -0 and +0 differ by the sign bit alone: 2^31, the `abs(INT_MIN)` case.
+        assert_eq!(ulp_difference(-0.0f32, 0.0f32), 1 << 31);
+        assert!(are_all_close(&[one, next], one, 1));
+        assert!(!are_all_close(&[one, next], one, 0));
+    }
 
     #[test]
     fn check_close_is_strict() {
