@@ -131,9 +131,128 @@ pub fn are_all_close(lanes: &[f32], reference: f32, ulp_tolerance: u32) -> bool 
         .all(|&lane| ulp_difference(lane, reference) <= ulp_tolerance)
 }
 
+/// `OCIO_CHECK_EQUAL(x, y)`: passes when `x == y`, with the type's own `==` (for floats,
+/// `-0.0 == 0.0` and a NaN never equals).
+///
+/// Port of `OCIO_CHECK_EQUAL` / `OCIO_CHECK_EQUAL_FROM`
+/// (tests/testutils/UnitTest.h:133-147 @ v2.5.2).
+#[track_caller]
+pub fn check_equal<T: PartialEq + Debug>(x: T, y: T) {
+    if x != y {
+        panic!("OCIO_CHECK_EQUAL failed: {x:?} == {y:?}");
+    }
+}
+
+/// Port of `FloatForCompare` (src/OpenColorIO/MathUtils.cpp:397-400 @ v2.5.2): maps a float's
+/// bits to an ordered integer, keeping denormals.
+fn float_for_compare(float_bits: u32) -> u32 {
+    if float_bits < 0x8000_0000 {
+        0x8000_0000u32.wrapping_add(float_bits)
+    } else {
+        0x8000_0000u32.wrapping_sub(float_bits & 0x7FFF_FFFF)
+    }
+}
+
+/// Port of `FloatForCompareCompressDenorms` (src/OpenColorIO/MathUtils.cpp:433-444 @ v2.5.2):
+/// maps a float's bits to an ordered integer, with denormals equal to zero.
+fn float_for_compare_compress_denorms(float_bits: u32) -> u32 {
+    let absi = float_bits & 0x7FFF_FFFF;
+    if absi < 0x0080_0000 {
+        0x8000_0000
+    } else if float_bits < 0x8000_0000 {
+        0x7F80_0001u32.wrapping_add(float_bits)
+    } else {
+        0x807F_FFFFu32.wrapping_sub(absi)
+    }
+}
+
+/// Port of `ExtractFloatComponents` (src/OpenColorIO/MathUtils.cpp:446-453 @ v2.5.2):
+/// `(sign, exponent, mantissa)`.
+fn extract_float_components(float_bits: u32) -> (u32, u32, u32) {
+    let mantissa = float_bits & 0x007F_FFFF;
+    let sign_exp = float_bits >> 23;
+    (sign_exp >> 8, sign_exp & 0xFF, mantissa)
+}
+
+/// `FloatsDiffer(expected, actual, tolerance, compressDenorms)`: whether `actual` differs from
+/// `expected` by more than `tolerance` ULPs. Any NaN equals any NaN; infinities must match in
+/// sign; `-0.0` equals `0.0`. Upstream's SIMD tests check with it
+/// (`OCIO_CHECK_ASSERT_MESSAGE(!OCIO::FloatsDiffer(...))`).
+///
+/// Port of `FloatsDiffer` (src/OpenColorIO/MathUtils.cpp:455-529 @ v2.5.2).
+pub fn floats_differ(expected: f32, actual: f32, tolerance: i32, compress_denorms: bool) -> bool {
+    let expected_bits = expected.to_bits();
+    let actual_bits = actual.to_bits();
+
+    let (es, ee, em) = extract_float_components(expected_bits);
+    let (as_, ae, am) = extract_float_components(actual_bits);
+
+    let is_expected_special = ee == 0xFF;
+    let is_actual_special = ae == 0xFF;
+    if is_expected_special {
+        // expected is a special float (-/+Inf or NaN)
+        if is_actual_special {
+            // Comparing special floats
+            let is_expected_inf = em == 0;
+            let is_actual_inf = am == 0;
+            if is_expected_inf {
+                // Comparing -/+Inf with -/+Inf, or -/+Inf with NaN.
+                return if is_actual_inf { es != as_ } else { true };
+            }
+            // Comparing NaN with a special float.
+            return is_actual_inf;
+        }
+        // Comparing a special float with a regular float.
+        return true;
+    } else if is_actual_special {
+        // Comparing a regular float with a special float.
+        return true;
+    }
+
+    // Comparing regular floats.
+    let (expected_comp, actual_comp) = if compress_denorms {
+        (
+            float_for_compare_compress_denorms(expected_bits),
+            float_for_compare_compress_denorms(actual_bits),
+        )
+    } else {
+        (
+            float_for_compare(expected_bits),
+            float_for_compare(actual_bits),
+        )
+    };
+
+    let diff = expected_comp.abs_diff(actual_comp);
+    diff > tolerance as u32
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn floats_differ_counts_ulps() {
+        let one = 1.0f32;
+        let next = f32::from_bits(one.to_bits() + 1);
+        assert!(!floats_differ(one, one, 0, false));
+        assert!(floats_differ(one, next, 0, false));
+        assert!(!floats_differ(one, next, 1, false));
+        // Signed zeros compare equal; NaNs equal each other but nothing else.
+        assert!(!floats_differ(0.0, -0.0, 0, false));
+        assert!(!floats_differ(f32::NAN, -f32::NAN, 0, false));
+        assert!(floats_differ(f32::NAN, f32::INFINITY, 0, false));
+        assert!(floats_differ(f32::INFINITY, f32::NEG_INFINITY, 0, false));
+        // With compressDenorms, a denormal equals zero.
+        assert!(floats_differ(0.0, f32::from_bits(1), 0, false));
+        assert!(!floats_differ(0.0, f32::from_bits(1), 0, true));
+    }
+
+    #[test]
+    fn check_equal_uses_eq() {
+        check_equal(0.0f32, -0.0f32);
+        let nan = std::panic::catch_unwind(|| check_equal(f32::NAN, f32::NAN));
+        assert!(nan.is_err(), "a NaN never equals");
+    }
 
     #[test]
     fn ulp_difference_counts_bit_patterns() {

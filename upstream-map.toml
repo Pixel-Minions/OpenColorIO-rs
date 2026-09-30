@@ -363,6 +363,7 @@ path = "src/OpenColorIO/MathUtils.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/math_utils.rs"]
 status = "todo"
+note = "S4: FloatsDiffer is ported as a test check in crates/ocio-testkit/src/upstream/mod.rs, for the SIMD tests; the library functions are todo"
 
 [[file]]
 path = "src/OpenColorIO/MathUtils.h"
@@ -5487,7 +5488,7 @@ path = "tests/testutils/UnitTest.h"
 kind = "test-support"
 target = ["crates/ocio-testkit/src/upstream/mod.rs"]
 status = "partial"
-note = "S2: OCIO_CHECK_CLOSE"
+note = "S2: OCIO_CHECK_CLOSE; S4: OCIO_CHECK_EQUAL"
 
 [[file]]
 path = "tests/utils/CMakeLists.txt"
