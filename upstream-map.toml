@@ -289,15 +289,15 @@ status = "todo"
 path = "src/OpenColorIO/GpuShaderUtils.cpp"
 kind = "src"
 target = ["crates/ocio-gpu/src/gpu_shader_utils.rs"]
-status = "partial"
-note = "1.7a: getFloatString, getVecKeyword, GpuShaderLine and GpuShaderText's lines, keywords, declarations and float2/3/4 builders; 1.7b: textures, uniforms, matrices, the other helpers"
+status = "done"
+note = "1.7a: getFloatString, getVecKeyword, GpuShaderLine and GpuShaderText's lines, keywords, declarations and float2/3/4 builders; 1.7b: textures, uniforms, matrices, the other helpers. BuildResourceName and the grading-log helpers take the creator's resource prefix or pixel name instead of the creator"
 
 [[file]]
 path = "src/OpenColorIO/GpuShaderUtils.h"
 kind = "src"
 target = ["crates/ocio-gpu/src/gpu_shader_utils.rs"]
-status = "partial"
-note = "1.7a: getFloatString, getVecKeyword, GpuShaderLine and GpuShaderText's lines, keywords, declarations and float2/3/4 builders; 1.7b: textures, uniforms, matrices, the other helpers"
+status = "done"
+note = "1.7a: getFloatString, getVecKeyword, GpuShaderLine and GpuShaderText's lines, keywords, declarations and float2/3/4 builders; 1.7b: textures, uniforms, matrices, the other helpers. BuildResourceName and the grading-log helpers take the creator's resource prefix or pixel name instead of the creator"
 
 [[file]]
 path = "src/OpenColorIO/HashUtils.cpp"
