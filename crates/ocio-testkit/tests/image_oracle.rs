@@ -1860,7 +1860,7 @@ enum Outcome {
 /// still run. A spec with a key the command doesn't know is refused.
 #[test]
 fn applies_outside_the_wheels_memory_are_refused() {
-    use BitDepth::{F32, Uint10, Uint12, Uint16};
+    use BitDepth::{F16, F32, Uint10, Uint12, Uint16};
     use Outcome::{Applies, Raises, Refused};
     let rgba = |offset: usize, strides: [Stride; 3]| {
         Packed::new(Data::at(0, offset), 2, 2, Channels::Count(4)).layout(F32, strides)
@@ -1962,6 +1962,39 @@ fn applies_outside_the_wheels_memory_are_refused() {
         let mut p = processor(Uint10, output);
         p["optimization"] = json!("OPTIMIZATION_NONE");
         p
+    };
+    // Two 2 x 2 planar descriptions of `src` and `dst` depths, of the same layout over the
+    // same 96 bytes of codes 100 to 570: planes at `offsets`, x and y strides of `strides`.
+    let planar_pair =
+        |src: BitDepth, dst: BitDepth, offsets: [usize; 3], strides: [i64; 2], processor| {
+            let mut request = Request::new(processor);
+            let codes: Vec<u16> = (0..48).map(|k| 100 + 10 * k).collect();
+            let buffer = request.buffer(Buffer::Bytes(
+                codes.iter().flat_map(|c| c.to_le_bytes()).collect(),
+            ));
+            let planes = || offsets.map(|o| Data::at(buffer, o)).to_vec();
+            let layout = strides.map(Stride::Bytes);
+            let a = request.image(Planar::new(planes(), 2, 2).layout(src, layout));
+            let b = request.image(Planar::new(planes(), 2, 2).layout(dst, layout));
+            request.apply = vec![a, b];
+            request
+        };
+    // A 2 x 2 RGBA 10-bit source and an F16 destination over the same bytes, alike but for
+    // their y strides.
+    let y_strides = |src_y: i64, dst_y: i64| {
+        let mut request = Request::new(processor(Uint10, F16));
+        let codes: Vec<u16> = (0..32).map(|k| 100 + 10 * k).collect();
+        let buffer = request.buffer(Buffer::Bytes(
+            codes.iter().flat_map(|c| c.to_le_bytes()).collect(),
+        ));
+        let image = |depth: BitDepth, y: i64| {
+            Packed::new(Data::at(buffer, 0), 2, 2, rgba_count)
+                .layout(depth, [Stride::Auto, Stride::Auto, Stride::Bytes(y)])
+        };
+        let a = request.image(image(Uint10, src_y));
+        let b = request.image(image(F16, dst_y));
+        request.apply = vec![a, b];
+        request
     };
     // A planar F32 image `width` pixels wide, every pixel of each plane on one float.
     let aliased = |width: i64| {
@@ -2136,6 +2169,67 @@ fn applies_outside_the_wheels_memory_are_refused() {
                 processor(Uint10, Uint10),
             ),
             Applies,
+        ),
+        // The same layout with rows that alias (the verifier's F1): every row of a plane on
+        // the same bytes, or a plane's row 1 on the next plane's row 0.
+        (
+            "planes whose rows alias, 10-bit to F16",
+            planar_pair(Uint10, F16, [0, 4, 8], [0, 0], processor(Uint10, F16)),
+            Refused("a destination row overlaps a later source row in buffers[0]"),
+        ),
+        (
+            "planes whose rows alias, 10-bit to 12-bit",
+            planar_pair(Uint10, Uint12, [0, 4, 8], [0, 0], processor(Uint10, Uint12)),
+            Refused("a destination row overlaps a later source row in buffers[0]"),
+        ),
+        (
+            "chained planes, 10-bit to 16-bit",
+            planar_pair(
+                Uint10,
+                Uint16,
+                [0, 16, 32],
+                [2, 16],
+                processor(Uint10, Uint16),
+            ),
+            Refused("a destination row overlaps a later source row in buffers[0]"),
+        ),
+        (
+            "planes whose rows alias, 12-bit to 10-bit: codes stay in range",
+            planar_pair(Uint12, Uint10, [0, 4, 8], [0, 0], processor(Uint12, Uint10)),
+            Applies,
+        ),
+        (
+            "planes whose rows alias, 10-bit to 10-bit: codes stay in range",
+            planar_pair(Uint10, Uint10, [0, 4, 8], [0, 0], processor(Uint10, Uint10)),
+            Applies,
+        ),
+        (
+            "planes of the same layout whose rows don't alias, 10-bit to F16",
+            planar_pair(Uint10, F16, [0, 32, 64], [2, 4], processor(Uint10, F16)),
+            Applies,
+        ),
+        (
+            "planes end to end, each row touching the next plane's, 10-bit to F16",
+            planar_pair(Uint10, F16, [0, 8, 16], [2, 4], processor(Uint10, F16)),
+            Applies,
+        ),
+        (
+            "planes whose rows run backwards, a plane's row 1 on the next plane's row 0",
+            planar_pair(Uint10, F16, [4, 8, 12], [2, -4], processor(Uint10, F16)),
+            Refused("a destination row overlaps a later source row in buffers[0]"),
+        ),
+        (
+            "planes whose rows alias, without a LUT first",
+            planar_pair(Uint10, F16, [0, 4, 8], [0, 0], unoptimized_to(F16)),
+            Applies,
+        ),
+        // Only the y stride differs, so the layouts differ: any overlap is refused, here the
+        // first rows, which cover each other. (The library refuses a y stride shorter than a
+        // row, so a source's rows can't overlap each other.)
+        (
+            "a 10-bit source and an F16 destination whose y strides alone differ",
+            y_strides(16, 32),
+            Refused("their bytes overlap in buffers[0]"),
         ),
         (
             "an image 2^30 + 1 pixels wide, past the scanline helper's integers",
@@ -2334,26 +2428,6 @@ fn applies_outside_the_wheels_memory_are_refused() {
     }
 }
 
-/// Runs `script` in the oracle's environment, as the oracle runs, with `args`; returns the lines
-/// it prints. For checks of the oracle's own refusals that no request can reach.
-fn oracle_python(script: &str, args: &[String]) -> Vec<String> {
-    let output = std::process::Command::new(Oracle::get().python())
-        .args(["-X", "utf8", "-c", script])
-        .args(args)
-        .current_dir(ocio_testkit::paths::oracle_dir())
-        .env("PYTHONDONTWRITEBYTECODE", "1")
-        .env_remove("PYTHONPATH")
-        .output()
-        .expect("the oracle's Python runs");
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        output.status.success(),
-        "{stdout}{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    stdout.lines().map(str::to_string).collect()
-}
-
 /// An image the library calls RGBA-packed is read and written a row at a time: 4 * width
 /// contiguous channels from the data pointer plus y * yStride (ScanlineHelper.cpp:129-136,
 /// 158-164 @ v2.5.2). isRGBAPacked tests the x stride truncated to an `int` (ImageDesc.cpp:264
@@ -2399,7 +2473,7 @@ for size in sizes:
     let pixels_end = offset + y_stride + 16;
     let rows_end = offset + y_stride + 2 * 16;
     let args = [x_stride, y_stride, offset, pixels_end, rows_end].map(|v| v.to_string());
-    let lines = oracle_python(SCRIPT, &args);
+    let lines = Oracle::get().run_script(SCRIPT, &args);
     assert_eq!(lines.len(), 3, "{lines:?}");
     assert_eq!(lines[0], "True", "the wheel calls the image packed");
     let span = format!("its packed rows span bytes [{offset}, {rows_end})");
@@ -2499,7 +2573,7 @@ for descs, apply in json.loads(sys.argv[1]):
         .iter()
         .map(|(_, request, _)| request.clone())
         .collect();
-    let lines = oracle_python(SCRIPT, &[json!(requests).to_string()]);
+    let lines = Oracle::get().run_script(SCRIPT, &[json!(requests).to_string()]);
     assert_eq!(lines.len(), cases.len(), "{lines:?}");
     for ((label, _, refused), line) in cases.iter().zip(&lines) {
         if *refused {
