@@ -223,3 +223,20 @@ fn bottom_up_planes() {
     assert_planar_outside(desc((height - 1) * row - 1));
     assert_planar_outside(desc((height - 1) * row + 1));
 }
+
+/// An empty alpha plane is a plane, not a missing one: only an empty R, G or B plane is upstream's
+/// null pointer ("Invalid image buffer."). An alpha plane without a byte can't hold the image's
+/// alpha, which D-2 refuses.
+#[test]
+fn an_empty_alpha_plane_reaches_outside() {
+    let (width, height) = (3, 2);
+    let bytes = vec![0u8; width * height * 4];
+    let full = || Bytes(&bytes[..]);
+    let empty = || Bytes(&bytes[..0]);
+    let desc = |r, g, b, a| PlanarImageDesc::new(r, g, b, a, width, height).map(|_| ());
+    assert_planar_outside(desc(full(), full(), full(), Some(empty())));
+    assert_error(
+        desc(empty(), full(), full(), Some(full())),
+        "PlanarImageDesc Error: Invalid image buffer.",
+    );
+}

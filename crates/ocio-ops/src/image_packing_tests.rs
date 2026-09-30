@@ -149,3 +149,55 @@ fn a_wrapped_index_that_leaves_the_plane_is_refused() {
     assert_eq!(result.unwrap_err().message(), WRAPPED_INDEX);
     assert!(bytes.iter().all(|&b| b == 0xa5), "nothing is written");
 }
+
+/// A scanline whose start isn't a pixel of the image (a wrapped index, I-1) is left unwritten:
+/// `UnpackRGBAToImageDesc` returns before converting or writing anything
+/// (src/OpenColorIO/ImagePacking.cpp:175-178, 245-248 @ v2.5.2), while packing raises.
+#[test]
+fn a_scanline_outside_the_image_is_left_unwritten() {
+    let f32_op = create_generic_bit_depth_helper(BitDepth::F32, BitDepth::F32).unwrap();
+    let img = plane(4, 2, 4, 16, 0, f32_op);
+    let mut bytes = [0xa5u8; 32];
+    let mut rgba = [1.0f32; 16];
+    let mut unused = [0.0f32; 16];
+    for start in [-1, 8, 9, c_long::MAX] {
+        <f32 as Generic>::unpack_rgba_to_image_desc(
+            &img,
+            &mut [&mut bytes[..]],
+            &mut rgba,
+            &mut unused,
+            4,
+            start,
+        )
+        .unwrap();
+        assert!(bytes.iter().all(|&b| b == 0xa5), "nothing is written");
+        let packed = <f32 as Generic>::pack_rgba_from_image_desc(
+            &img,
+            &[&bytes[..]],
+            &mut unused,
+            &mut rgba,
+            4,
+            start,
+        );
+        assert_eq!(
+            packed.unwrap_err().message(),
+            "Invalid output image position."
+        );
+    }
+
+    let u8_out = create_generic_bit_depth_helper(BitDepth::F32, BitDepth::Uint8).unwrap();
+    let img = plane(4, 2, 1, 4, 0, u8_out);
+    let mut bytes = [0xa5u8; 8];
+    let mut out = [0u8; 16];
+    <u8 as Generic>::unpack_rgba_to_image_desc(
+        &img,
+        &mut [&mut bytes[..]],
+        &mut rgba,
+        &mut out,
+        4,
+        8,
+    )
+    .unwrap();
+    assert!(bytes.iter().all(|&b| b == 0xa5), "nothing is written");
+    assert!(out.iter().all(|&v| v == 0), "nothing is converted");
+}

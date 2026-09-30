@@ -18,15 +18,17 @@ mod common;
 use core::ffi::{c_int, c_long};
 
 use common::image::{
-    Engine, GENERIC_SHAPES, PAIRS, add_image, buffer_indices, buffers_mut, log_engine,
-    log_processor, port_depth, port_image, with_channel_types,
+    DEPTHS, Engine, GENERIC_SHAPES, PAIRS, add_image, buffer_indices, buffers_mut, log_engine,
+    log_processor, port_depth, port_image, two_log_engine, two_log_processor, with_channel_types,
 };
 use ocio_ops::Result;
 use ocio_ops::image_desc::{Bytes, GenericImageDesc, ImageLayout};
 use ocio_ops::image_packing::Generic;
 use ocio_ops::open_color_types::BitDepth;
 use ocio_testkit::Oracle;
+use ocio_testkit::battery::BitDepth as Depth;
 use ocio_testkit::image::{Buffer, Image, Request};
+use serde_json::Value;
 
 /// The port's description of `image` over `buffers`, as its layout.
 fn port_layout(image: &Image, buffers: &[Vec<u8>]) -> ImageLayout {
@@ -83,17 +85,23 @@ fn apply_rows<I: Generic, O: Generic>(
     Ok(())
 }
 
-/// Every non-RGBA-packed layout, to itself and to the next one, at every pair of bit depths
-/// and several sizes: the port's buffers equal the wheel's after the apply.
-#[test]
-fn generic_packing_matches_the_wheel() {
+/// A processor spec and its CPU engine, for bit depths in and out.
+type Processor = (
+    fn(BitDepth, BitDepth) -> Value,
+    fn(BitDepth, BitDepth) -> Engine,
+);
+
+/// Every non-RGBA-packed layout, to itself and to the next one, at the pairs of bit depths
+/// `pairs` and several sizes, through `processor`: the port's buffers equal the wheel's after
+/// the apply.
+fn check_packing((processor_spec, engine): Processor, pairs: &[(Depth, Depth)]) {
     let mut cases = Vec::new();
-    for (pair, (input, output)) in PAIRS.into_iter().enumerate() {
+    for (pair, &(input, output)) in pairs.iter().enumerate() {
         for size in [(1, 1), (3, 2), (17, 3)] {
             for (k, &shape) in GENERIC_SHAPES.iter().enumerate() {
                 let next = GENERIC_SHAPES[(k + 1) % GENERIC_SHAPES.len()];
                 for dst_shape in [shape, next] {
-                    let processor = log_processor(port_depth(input), port_depth(output));
+                    let processor = processor_spec(port_depth(input), port_depth(output));
                     let mut request = Request::new(processor);
                     let seed = Some((pair * 1000 + k) as u64);
                     let src = add_image(&mut request, shape, input, size, seed);
@@ -115,7 +123,7 @@ fn generic_packing_matches_the_wheel() {
 
         let (input, output) = (port_depth(*input), port_depth(*output));
         let mut buffers: Vec<Vec<u8>> = request.buffers.iter().map(Buffer::bytes).collect();
-        let engine = log_engine(input, output);
+        let engine = engine(input, output);
         with_channel_types!(
             input,
             output,
@@ -138,6 +146,20 @@ fn generic_packing_matches_the_wheel() {
         cases.len(),
         failures[..failures.len().min(10)].join("\n")
     );
+}
+
+/// Every non-RGBA-packed layout through a LogTransform, at every pair of bit depths.
+#[test]
+fn generic_packing_matches_the_wheel() {
+    check_packing((log_processor, log_engine), &PAIRS);
+}
+
+/// Every non-RGBA-packed layout through two LogOps, from each bit depth into F32: the second op
+/// is then the destination's, which `Generic<float>::UnpackRGBAToImageDesc` applies.
+#[test]
+fn two_ops_match_the_wheel() {
+    let pairs: Vec<_> = DEPTHS.into_iter().map(|d| (d, Depth::F32)).collect();
+    check_packing((two_log_processor, two_log_engine), &pairs);
 }
 
 /// Huge images on Windows (docs/improvements.md, I-1): `PackRGBAFromImageDesc` counts the

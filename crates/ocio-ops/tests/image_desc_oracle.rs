@@ -387,3 +387,26 @@ fn an_empty_buffer_is_invalid() {
         Err(raised.message)
     );
 }
+
+/// Sizes past a C `long`, which has 32 bits on Windows, can't reach upstream: the port makes
+/// them -1, an invalid size that upstream's own check refuses (docs/architecture.md, "Image
+/// descriptions"), with the message the wheel gives for a width of 0. A size that truncated to
+/// 32 bits would be valid, 2^32 + 1 as 1, is refused too.
+#[cfg(target_os = "windows")]
+#[test]
+fn sizes_past_a_long_are_invalid() {
+    let (request, spec, _) = construct(&spec(0, 2, Channels::Count(4), None));
+    let reply = request.run();
+    let raised = wheel_raised(&spec, &reply);
+
+    let mut bytes = [0u8; 16];
+    let past = (1usize << 32) + 1;
+    for (width, height) in [(past, 1), (1, past), (1 << 32, 1)] {
+        let port = PackedImageDesc::new(Bytes(&mut bytes[..]), width, height, 4);
+        assert_eq!(
+            port.map(|_| ()).map_err(|e| e.message().to_string()),
+            Err(raised.message.clone()),
+            "{width} by {height}"
+        );
+    }
+}

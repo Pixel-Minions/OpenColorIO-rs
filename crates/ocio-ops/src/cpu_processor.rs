@@ -109,7 +109,7 @@ impl<I: BitDepthInfo + 'static, O: Converter + 'static> CpuOp for BitDepthCast<I
 /// The conversion between two bit depths, for the ends of a CPU processor's chain that no op
 /// absorbs: "Unsupported bit-depth" for the bit depths the CPU processor doesn't take.
 ///
-/// Port of `CreateGenericBitDepthHelper` (src/OpenColorIO/CPUProcessor.cpp:68-116 @ v2.5.2).
+/// Port of `CreateGenericBitDepthHelper` (src/OpenColorIO/CPUProcessor.cpp:68-120 @ v2.5.2).
 pub fn create_generic_bit_depth_helper(
     input: BitDepth,
     output: BitDepth,
