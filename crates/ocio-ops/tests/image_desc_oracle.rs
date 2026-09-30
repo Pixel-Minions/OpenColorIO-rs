@@ -21,7 +21,10 @@ mod common;
 
 use std::collections::HashMap;
 
-use common::image::{DEPTHS, channel_count, packed_getters, packed_reach, port_packed};
+use common::image::{
+    DEPTHS, channel_count, extent, long_product, packed_getters, packed_reach, port_packed,
+    span_union,
+};
 use ocio_ops::Exception;
 use ocio_ops::image_desc::{At, Bytes, PackedImageDesc, PixelData};
 use ocio_testkit::Oracle;
@@ -30,6 +33,7 @@ use ocio_testkit::image::{
     Buffer, ChannelOrder, Channels, Data, Packed, Raised, Reply, Request, RgbInput, RgbRequest,
     Stride, channel_bytes,
 };
+use ocio_testkit::probe::Rng;
 use serde_json::json;
 
 /// A request that constructs `spec` over a buffer holding every pixel, the first one in its
@@ -298,20 +302,23 @@ fn typed_slices_of_the_wrong_type_match_the_bindings_message() {
     // The numpy dtype of each port slice type.
     let types = ["uint8", "uint16", "float16", "float32"];
     let mut cases = Vec::new();
-    for depth in DEPTHS {
-        for dtype in types {
-            if dtype == ocio_testkit::image::dtype(depth) {
-                continue;
+    // With 2 channels, the library would also refuse the channel count: the type comes first.
+    for channels in [Channels::Count(4), Channels::Count(2)] {
+        for depth in DEPTHS {
+            for dtype in types {
+                if dtype == ocio_testkit::image::dtype(depth) {
+                    continue;
+                }
+                let mut request = Request::new(json!({}));
+                let buffer = request.buffer(Buffer::fill(64, &[0]));
+                let spec = Packed::new(Data::at(buffer, 0).dtype(dtype), 2, 1, channels)
+                    .layout(depth, [Stride::Auto; 3]);
+                request.image(spec.clone());
+                let reply = request.run();
+                let raised = wheel_raised(&spec, &reply);
+                assert_eq!(raised.kind, "RuntimeError", "{spec:?}: {raised:?}");
+                cases.push((depth, dtype, spec, raised.message));
             }
-            let mut request = Request::new(json!({}));
-            let buffer = request.buffer(Buffer::fill(64, &[0]));
-            let spec = Packed::new(Data::at(buffer, 0).dtype(dtype), 2, 1, Channels::Count(4))
-                .layout(depth, [Stride::Auto; 3]);
-            request.image(spec.clone());
-            let reply = request.run();
-            let raised = wheel_raised(&spec, &reply);
-            assert_eq!(raised.kind, "RuntimeError", "{spec:?}: {raised:?}");
-            cases.push((depth, dtype, spec, raised.message));
         }
     }
     // How the wheel names each numpy type it receives.
@@ -409,4 +416,218 @@ fn sizes_past_a_long_are_invalid() {
             "{width} by {height}"
         );
     }
+}
+
+/// The D-2 error of a packed image.
+const OUTSIDE: &str =
+    "PackedImageDesc Error: The strides and dimensions reach outside the image buffer.";
+
+/// One of `items`, at random.
+fn pick<T: Copy>(rng: &mut Rng, items: &[T]) -> T {
+    items[(rng.next_u64() % items.len() as u64) as usize]
+}
+
+/// The review's differential fuzz of `PackedImageDesc` (verifier C, p1-bitdepth): 6,000
+/// layouts, with channels of every count and order, sizes from 0 to 4 by 4, and strides small,
+/// automatic and past 2^32, 2^61 and 2^62, both signs, so that several checks fail at once and
+/// their order shows. Where the wheel raises, the port raises the same message. Where it builds
+/// the image, the port builds it over a buffer that holds exactly its bytes, with the same
+/// getters, and refuses the buffer one byte short at either end, or any buffer when the image
+/// spans more than a megabyte (D-2).
+#[test]
+fn packed_constructor_fuzz() {
+    let mut rng = Rng::new(0xC0FFEE);
+    let channel_specs = [
+        Channels::Count(3),
+        Channels::Count(4),
+        Channels::Count(2),
+        Channels::Count(5),
+        Channels::Order(ChannelOrder::Rgba),
+        Channels::Order(ChannelOrder::Bgra),
+        Channels::Order(ChannelOrder::Abgr),
+        Channels::Order(ChannelOrder::Rgb),
+        Channels::Order(ChannelOrder::Bgr),
+    ];
+    let sizes = [
+        (1i64, 1i64),
+        (2, 1),
+        (1, 2),
+        (3, 2),
+        (5, 3),
+        (0, 1),
+        (1, 0),
+        (4, 4),
+    ];
+    let mut cases = Vec::new();
+    for _ in 0..6000 {
+        let channels = pick(&mut rng, &channel_specs);
+        let (w, h) = pick(&mut rng, &sizes);
+        let depth = if rng.next_u64().is_multiple_of(8) {
+            None
+        } else {
+            Some(pick(&mut rng, &DEPTHS))
+        };
+        let n = match channels {
+            Channels::Count(n) => n,
+            Channels::Order(o) => o.channels() as i64,
+            _ => 4,
+        };
+        let item = depth.map_or(4, |d| channel_bytes(d) as i64);
+        let big = [
+            1i64 << 61,
+            -(1i64 << 61),
+            1i64 << 62,
+            -(1i64 << 62),
+            (1i64 << 61) + item,
+            i64::MAX,
+            i64::MIN + 1,
+            (1i64 << 32) + 4 * item,
+            (1i64 << 32) + n * item,
+            -(1i64 << 32) + 4 * item,
+            (1i64 << 63) / w.max(1),
+            -((1i64 << 62) / w.max(1)) * 2,
+        ];
+        let stride = |rng: &mut Rng, small: &[i64]| -> Stride {
+            match rng.next_u64() % 10 {
+                0..=1 => Stride::Auto,
+                2..=6 => Stride::Bytes(pick(rng, small)),
+                _ => Stride::Bytes(pick(rng, &big)),
+            }
+        };
+        let cs = stride(
+            &mut rng,
+            &[item, item + 1, 0, -item, 2 * item, 1, item - 1, 3],
+        );
+        let csv = match cs {
+            Stride::Bytes(c) => c,
+            Stride::Auto => item,
+        };
+        let xs = stride(
+            &mut rng,
+            &[
+                n.wrapping_mul(csv),
+                n.wrapping_mul(csv).wrapping_add(1),
+                n.wrapping_mul(csv).wrapping_neg(),
+                csv.wrapping_mul(4),
+                0,
+                csv.wrapping_mul(3),
+                n.wrapping_mul(csv).wrapping_sub(1),
+                1,
+            ],
+        );
+        let xsv = match xs {
+            Stride::Bytes(x) => x,
+            Stride::Auto => csv.wrapping_mul(n),
+        };
+        let ys = stride(
+            &mut rng,
+            &[
+                xsv.wrapping_mul(w),
+                xsv.wrapping_mul(w).wrapping_neg(),
+                xsv.wrapping_mul(w).wrapping_sub(1),
+                0,
+                256,
+                xsv.wrapping_mul(w).wrapping_abs().wrapping_add(8),
+                xsv.wrapping_mul(w).wrapping_abs().wrapping_neg(),
+                1,
+            ],
+        );
+        let mut request = Request::new(json!({}));
+        let buffer = request.buffer(Buffer::fill(64, &[0]));
+        let entries = long_product(w, h, n);
+        let mut spec = Packed::new(Data::at(buffer, 0).entries(entries), w, h, channels);
+        if let Some(d) = depth {
+            spec = spec.layout(d, [cs, xs, ys]);
+        }
+        request.image(spec.clone());
+        cases.push((spec, request));
+    }
+    let calls: Vec<_> = cases.iter().map(|(_, r)| r.call()).collect();
+    let responses = Oracle::get().batch(&calls, true);
+
+    let port = |spec: &Packed, bytes: &mut [u8], origin: usize| {
+        port_packed(spec, At(Bytes(bytes), origin))
+            .map(|_| ())
+            .map_err(|e| e.message().to_string())
+    };
+    let mut failures = Vec::new();
+    let mut built = 0;
+    for ((spec, request), response) in cases.iter().zip(responses) {
+        let reply = request.reply(response.unwrap_or_else(|e| panic!("{spec:?}: {e}")));
+        let item = match spec.layout {
+            Some((ocio_testkit::image::Depth::Supported(d), _)) => channel_bytes(d) as i64,
+            _ => 4,
+        };
+        if let Some(raised) = reply.raised() {
+            // Only the library's checks: the binding's own are Python's.
+            if raised.kind != "Exception" {
+                failures.push(format!("{spec:?}: the binding raised {raised:?}"));
+                continue;
+            }
+            let mut bytes = vec![0u8; 64];
+            let port = port(spec, &mut bytes, 0);
+            if port != Err(raised.message.clone()) {
+                failures.push(format!(
+                    "{spec:?}\n  wheel raised {:?}\n  port {port:?}",
+                    raised.message
+                ));
+            }
+            continue;
+        }
+        let g = reply.getters(0).clone();
+        let (w, h) = (spec.width, spec.height);
+        let cs = g["getChanStrideBytes"].as_i64().unwrap();
+        let xs = g["getXStrideBytes"].as_i64().unwrap();
+        let ys = g["getYStrideBytes"].as_i64().unwrap();
+        let nc = g["getNumChannels"].as_i64().unwrap();
+        let (lo, hi) = if g["isRGBAPacked"].as_bool().unwrap() {
+            extent(0, (1, h), (0, ys), 4 * item * w)
+        } else {
+            (0..nc)
+                .fold(None, |span, k| {
+                    let start = k.wrapping_mul(cs) as i128;
+                    span_union(span, extent(start, (w, h), (xs, ys), item))
+                })
+                .unwrap()
+        };
+        let size = hi - lo;
+        if size > (1 << 20) || lo < -(1 << 20) {
+            let mut bytes = vec![0u8; 64];
+            let port = port(spec, &mut bytes, 32);
+            if port != Err(OUTSIDE.to_string()) {
+                failures.push(format!(
+                    "{spec:?}\n  wheel built {g}, spanning [{lo}, {hi})\n  port {port:?}"
+                ));
+            }
+            continue;
+        }
+        built += 1;
+        let (size, origin) = (size as usize, (-lo) as usize);
+        let mut bytes = vec![0u8; size];
+        match port_packed(spec, At(Bytes(&mut bytes[..]), origin)) {
+            Ok(desc) => {
+                let pg = packed_getters(&desc);
+                if pg != g {
+                    failures.push(format!("{spec:?}\n  wheel {g}\n  port  {pg}"));
+                }
+            }
+            Err(e) => failures.push(format!(
+                "{spec:?}\n  wheel built {g} ({size} bytes from {origin})\n  port refused {:?}",
+                e.message()
+            )),
+        }
+        if port(spec, &mut bytes[..size - 1], origin) != Err(OUTSIDE.to_string()) {
+            failures.push(format!("{spec:?}: one byte short at the end is accepted"));
+        }
+        if origin > 0 && port(spec, &mut bytes[1..], origin - 1) != Err(OUTSIDE.to_string()) {
+            failures.push(format!("{spec:?}: one byte short at the start is accepted"));
+        }
+    }
+    assert!(built > 500, "only {built} layouts built");
+    assert!(
+        failures.is_empty(),
+        "{} failures:\n{}",
+        failures.len(),
+        failures[..failures.len().min(25)].join("\n")
+    );
 }
