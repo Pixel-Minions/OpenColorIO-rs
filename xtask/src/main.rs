@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
-use parity::RatchetMode;
+use parity::{Baseline, RatchetMode};
 
 mod fixtures;
 mod gate;
@@ -44,11 +44,17 @@ Oracle and fixtures (fixtures/ is written only by these commands):
 
 Guardrails:
   guards                      forbidden patterns, unsafe allowlist, waivers, headers
-  ratchet [--update]          ported upstream tests may only increase (--update records
+  ratchet [--update] [--base <rev>]
+                              ported upstream tests may only increase (--update records
                               the current counts; `xtask land` does it at merge time)
-  ci [--main]                 guards + fixtures verify + ported tests >= docs/ratchet.toml;
+  ci [--main] [--base <rev> | --base-file <path>]
+                              guards + fixtures verify + ported tests >= the baseline;
                               --main (main and land commits): docs/ratchet.toml and
                               docs/parity.md are current
+  The ratchet's baseline is docs/ratchet.toml at <rev> (the base: a PR's base, or where the
+  branch left phase0) or in <path>; without either, this checkout's own, which a branch
+  could lower. With a base, branch mode also requires this checkout's docs/ratchet.toml to
+  match it: chunks never edit it.
 
 Upstream:
   upstream-map update         add new upstream files to upstream-map.toml (keeps edits)
@@ -81,15 +87,21 @@ fn main() -> ExitCode {
         ["oracle", "check-all"] => fixtures::check_all(),
         ["fixtures", "verify"] => fixtures::verify(),
         ["guards"] => guards::run(),
-        ["ratchet"] => parity::ratchet(RatchetMode::AtLeast),
-        ["ratchet", "--update"] => parity::ratchet(RatchetMode::Update),
+        ["ratchet", rest @ ..] => parse_base(rest, &["--update"]).and_then(|(flags, base)| {
+            let mode = if flags.contains(&"--update") {
+                RatchetMode::Update
+            } else {
+                RatchetMode::AtLeast
+            };
+            parity::ratchet(mode, &base)
+        }),
         ["upstream-map", "update"] => upstream::update_map(),
         ["upstream-status"] => upstream::status(),
         ["upstream-tests"] => parity::list_tests(),
         ["parity"] => parity::write_dashboard(false),
         ["parity", "--check"] => parity::write_dashboard(true),
-        ["ci"] => ci(false),
-        ["ci", "--main"] => ci(true),
+        ["ci", rest @ ..] => parse_base(rest, &["--main"])
+            .and_then(|(flags, base)| ci(flags.contains(&"--main"), &base)),
         ["help"] | [] => {
             print!("{USAGE}");
             Ok(())
@@ -105,10 +117,36 @@ fn main() -> ExitCode {
     }
 }
 
+/// Splits `args` into the given `flags` and the ratchet baseline (`--base <rev>` or
+/// `--base-file <path>`; neither: this checkout's `docs/ratchet.toml`).
+fn parse_base<'a>(args: &[&'a str], flags: &[&str]) -> Result<(Vec<&'a str>, Baseline), String> {
+    let mut found = Vec::new();
+    let mut base = Baseline::Committed;
+    let mut it = args.iter();
+    while let Some(&arg) = it.next() {
+        match arg {
+            "--base" | "--base-file" => {
+                let value = it.next().ok_or_else(|| format!("{arg} needs a value"))?;
+                if base != Baseline::Committed {
+                    return Err("give one of --base and --base-file".into());
+                }
+                base = if arg == "--base" {
+                    Baseline::Rev(value.to_string())
+                } else {
+                    Baseline::File(PathBuf::from(value))
+                };
+            }
+            _ if flags.contains(&arg) => found.push(arg),
+            _ => return Err(format!("unknown option `{arg}`\n\n{USAGE}")),
+        }
+    }
+    Ok((found, base))
+}
+
 /// `cargo xtask ci`. Branch mode (the default) checks that the ported-test count is at least
-/// the committed `docs/ratchet.toml`; chunks never edit it or `docs/parity.md`. `--main`
-/// checks that both generated files are current, as `main` and land commits must be.
-fn ci(main: bool) -> Result<(), String> {
+/// the baseline; chunks never edit `docs/ratchet.toml` or `docs/parity.md`. `--main` checks
+/// that both generated files are current, as `main` and land commits must be.
+fn ci(main: bool, base: &Baseline) -> Result<(), String> {
     if main {
         println!("ci: main mode: docs/ratchet.toml and docs/parity.md must be current");
     } else {
@@ -118,11 +156,14 @@ fn ci(main: bool) -> Result<(), String> {
     }
     guards::run()?;
     fixtures::verify()?;
-    parity::ratchet(if main {
-        RatchetMode::Current
-    } else {
-        RatchetMode::AtLeast
-    })?;
+    parity::ratchet(
+        if main {
+            RatchetMode::Current
+        } else {
+            RatchetMode::AtLeast
+        },
+        base,
+    )?;
     if main {
         parity::write_dashboard(true)?;
     }

@@ -101,6 +101,23 @@ pub(crate) fn run(branch: &str, rocky: bool) -> Result<(), String> {
             "nothing to land: {INTEGRATION} already contains {branch}"
         ));
     }
+    // The generated files are land's to write: a branch that edits them could, for one, lower
+    // the ratchet (the changes it makes since it left phase0).
+    let generated = git(&[
+        "diff",
+        "--name-only",
+        &format!("{base}...{tip}"),
+        "--",
+        "docs/ratchet.toml",
+        "docs/parity.md",
+    ])?;
+    if !generated.is_empty() {
+        return Err(format!(
+            "{branch} edits the generated files ({}): chunks never commit them, and \
+             `cargo xtask land` regenerates them. Drop those edits from the branch",
+            generated.lines().collect::<Vec<_>>().join(", ")
+        ));
+    }
     println!(
         "land: {branch} ({}) onto {INTEGRATION} ({}):",
         short(&tip),
@@ -276,8 +293,12 @@ impl Landing<'_> {
         let _ = std::fs::remove_file(&self.message_file);
         merged?;
 
-        // 3. The generated files, regenerated into the merge commit.
-        for args in [&["parity"][..], &["ratchet", "--update"][..]] {
+        // 3. The generated files, regenerated into the merge commit. The ratchet's baseline is
+        // phase0's committed docs/ratchet.toml.
+        for args in [
+            &["parity"][..],
+            &["ratchet", "--update", "--base", base][..],
+        ] {
             let mut cmd = Command::new(cargo());
             cmd.current_dir(wt).arg("xtask").args(args);
             self.run(&mut cmd, &format!("cargo xtask {}", args.join(" ")))?;

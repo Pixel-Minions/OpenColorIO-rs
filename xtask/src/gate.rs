@@ -33,6 +33,9 @@ Runs, in order, stopping at the first failure:
   --auto         for `xtask land`: add --release, and keep --rocky, only when the HEAD commit
                  touches platform-sensitive files (Rust sources, the oracle, fixtures, scripts)
 
+The ci step's ratchet baseline is docs/ratchet.toml where HEAD left phase0 (their merge base;
+else origin/main's), saved as base-ratchet.toml next to the logs for the Rocky pass too.
+
 Logs: target/gate-logs/<UTC time>/<step>.log (the Rocky steps in .../rocky/).
 ";
 
@@ -52,6 +55,8 @@ pub(crate) struct Options {
     /// Write the step logs here instead of a new `target/gate-logs/<time>` (used for the Rocky
     /// pass, which writes next to the Windows logs). Relative paths are relative to the root.
     pub(crate) log_dir: Option<PathBuf>,
+    /// The ratchet baseline's file (the Rocky pass gets the one the host gate saved).
+    pub(crate) base_file: Option<PathBuf>,
 }
 
 pub(crate) fn parse(args: &[&str]) -> Result<Options, String> {
@@ -92,6 +97,9 @@ pub(crate) fn parse(args: &[&str]) -> Result<Options, String> {
             _ if arg == "--log-dir" || arg.starts_with("--log-dir=") => {
                 opts.log_dir = Some(PathBuf::from(value("--log-dir")?));
             }
+            _ if arg == "--base-file" || arg.starts_with("--base-file=") => {
+                opts.base_file = Some(PathBuf::from(value("--base-file")?));
+            }
             _ => return Err(format!("unknown gate option `{arg}`\n\n{USAGE}")),
         }
     }
@@ -122,6 +130,11 @@ pub(crate) fn run(mut opts: Options) -> Result<(), String> {
     if !nested {
         println!("gate: logs in {}", crate::display_path(&log_dir));
     }
+    let base_file = match opts.base_file.clone() {
+        Some(file) if file.is_absolute() => Some(file),
+        Some(file) => Some(root.join(file)),
+        None => save_ratchet_base(&root, &log_dir)?,
+    };
 
     let mut runner = Runner::new(log_dir.clone());
     runner.step(
@@ -148,6 +161,9 @@ pub(crate) fn run(mut opts: Options) -> Result<(), String> {
     ci.arg("ci").current_dir(&root);
     if opts.main {
         ci.arg("--main");
+    }
+    if let Some(file) = &base_file {
+        ci.arg("--base-file").arg(file);
     }
     runner.step("ci", ci, Kind::Plain)?;
     let tier = if opts.full { "full" } else { "quick" };
@@ -181,6 +197,10 @@ pub(crate) fn run(mut opts: Options) -> Result<(), String> {
         rocky
             .arg("--log-dir")
             .arg(crate::display_path(&log_dir.join("rocky")));
+        if let Some(file) = &base_file {
+            // Relative to the checkout, which the container mounts at /work.
+            rocky.arg("--base-file").arg(crate::display_path(file));
+        }
         runner.step("rocky", rocky, Kind::Nested)?;
     }
     if !nested {
@@ -191,6 +211,38 @@ pub(crate) fn run(mut opts: Options) -> Result<(), String> {
         );
     }
     Ok(())
+}
+
+/// Saves `docs/ratchet.toml` as it is where HEAD left phase0 (their merge base), or else
+/// origin/main, to `<log_dir>/base-ratchet.toml`: the ci step's ratchet baseline, which a
+/// branch can't lower by editing its own copy. None, with a note, when neither exists.
+fn save_ratchet_base(root: &Path, log_dir: &Path) -> Result<Option<PathBuf>, String> {
+    for (branch, what) in [
+        ("refs/heads/phase0", "where HEAD left phase0"),
+        ("refs/remotes/origin/main", "where HEAD left origin/main"),
+    ] {
+        if crate::git(root, &["rev-parse", "--verify", "--quiet", branch]).is_err() {
+            continue;
+        }
+        let base = crate::git(root, &["merge-base", "HEAD", branch])?;
+        let base = base.trim();
+        let Ok(text) = crate::git(root, &["show", &format!("{base}:docs/ratchet.toml")]) else {
+            println!("gate: {base} ({what}) has no docs/ratchet.toml");
+            continue;
+        };
+        let file = log_dir.join("base-ratchet.toml");
+        std::fs::write(&file, text).map_err(|e| format!("{}: {e}", file.display()))?;
+        println!(
+            "gate: ratchet baseline: docs/ratchet.toml at {} ({what})",
+            &base[..base.len().min(10)]
+        );
+        return Ok(Some(file));
+    }
+    println!(
+        "gate: no phase0 or origin/main here, so the ratchet baseline is this checkout's own \
+         docs/ratchet.toml"
+    );
+    Ok(None)
 }
 
 /// Sets `release`, and keeps `rocky`, only when HEAD touches platform-sensitive files.

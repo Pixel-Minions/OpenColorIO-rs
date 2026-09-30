@@ -233,7 +233,7 @@ pub(crate) fn ported_markers() -> Result<BTreeMap<(&'static str, String), Vec<St
     Ok(found)
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 struct Ratchet {
     ported_cpu: usize,
     ported_gpu: usize,
@@ -295,19 +295,58 @@ fn ratchet_path() -> std::path::PathBuf {
     paths::workspace_root().join("docs").join("ratchet.toml")
 }
 
-/// What `ratchet` checks against `docs/ratchet.toml`, the committed counts.
+/// What `ratchet` checks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RatchetMode {
-    /// Branches and PRs: the ported-test counts are at least the committed ones. Chunks don't
-    /// edit the file; `cargo xtask land` raises it when it merges them.
+    /// Branches and PRs: the ported-test counts are at least the baseline's. Chunks don't edit
+    /// `docs/ratchet.toml`; `cargo xtask land` raises it when it merges them.
     AtLeast,
-    /// `main`: the committed counts are the current ones.
+    /// `main`: at least the baseline's, and `docs/ratchet.toml` records the current counts.
     Current,
-    /// Write the current counts, which may not be below the committed ones.
+    /// Write the current counts, which may not be below the baseline's.
     Update,
 }
 
-pub(crate) fn ratchet(mode: RatchetMode) -> Result<(), String> {
+/// Where the baseline comes from: the counts the ported tests may not go below.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Baseline {
+    /// `docs/ratchet.toml` in this checkout: the tree under test, so only when nothing better
+    /// is known (a branch could lower it).
+    Committed,
+    /// `docs/ratchet.toml` at a git revision: the base the branch is compared with.
+    Rev(String),
+    /// A copy of the base's `docs/ratchet.toml` (the gate hands one to the Rocky container,
+    /// where git may not work).
+    File(std::path::PathBuf),
+}
+
+impl Baseline {
+    /// The baseline's counts, and where they come from.
+    fn load(&self) -> Result<(Ratchet, String), String> {
+        let (text, from) = match self {
+            Baseline::Committed => (
+                std::fs::read_to_string(ratchet_path())
+                    .map_err(|e| format!("docs/ratchet.toml: {e}"))?,
+                "docs/ratchet.toml".to_string(),
+            ),
+            Baseline::Rev(rev) => (
+                crate::git(
+                    &crate::root(),
+                    &["show", &format!("{rev}:docs/ratchet.toml")],
+                )?,
+                format!("docs/ratchet.toml at {}", &rev[..rev.len().min(10)]),
+            ),
+            Baseline::File(path) => (
+                std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?,
+                crate::display_path(path),
+            ),
+        };
+        let counts = toml::from_str(&text).map_err(|e| format!("{from}: {e}"))?;
+        Ok((counts, from))
+    }
+}
+
+pub(crate) fn ratchet(mode: RatchetMode, baseline: &Baseline) -> Result<(), String> {
     let c = counts()?;
     if !c.unknown_markers.is_empty() {
         return Err(c.unknown_markers.join("\n"));
@@ -316,20 +355,22 @@ pub(crate) fn ratchet(mode: RatchetMode) -> Result<(), String> {
         ported_cpu: c.ported.iter().filter(|(s, _)| *s == "cpu").count(),
         ported_gpu: c.ported.iter().filter(|(s, _)| *s == "gpu").count(),
     };
-    let base: Ratchet = match std::fs::read_to_string(ratchet_path()) {
-        Ok(text) => toml::from_str(&text).map_err(|e| format!("docs/ratchet.toml: {e}"))?,
-        Err(e) if mode == RatchetMode::Update && e.kind() == std::io::ErrorKind::NotFound => {
-            Ratchet::default()
-        }
+    // What this checkout commits, which only the base's baseline may be compared with.
+    let committed: Option<Ratchet> = match std::fs::read_to_string(ratchet_path()) {
+        Ok(text) => Some(toml::from_str(&text).map_err(|e| format!("docs/ratchet.toml: {e}"))?),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
         Err(e) => return Err(format!("docs/ratchet.toml: {e}")),
+    };
+    let (base, from) = match (baseline, mode, committed) {
+        (Baseline::Committed, RatchetMode::Update, None) => (Ratchet::default(), "none".into()),
+        _ => baseline.load()?,
     };
     if now.ported_cpu < base.ported_cpu || now.ported_gpu < base.ported_gpu {
         return Err(format!(
-            "ported upstream tests went down: cpu {} -> {}, gpu {} -> {}",
+            "ported upstream tests went down: cpu {} -> {}, gpu {} -> {} (baseline: {from})",
             base.ported_cpu, now.ported_cpu, base.ported_gpu, now.ported_gpu
         ));
     }
-    let raised = now.ported_cpu > base.ported_cpu || now.ported_gpu > base.ported_gpu;
     match mode {
         RatchetMode::Update => {
             let text = format!(
@@ -338,22 +379,33 @@ pub(crate) fn ratchet(mode: RatchetMode) -> Result<(), String> {
             );
             std::fs::write(ratchet_path(), text).map_err(|e| e.to_string())?;
         }
-        RatchetMode::Current if raised => {
-            return Err(format!(
-                "docs/ratchet.toml is stale: it records cpu {}, gpu {}; cpu {}, gpu {} are ported. \
-                 Run `cargo xtask ratchet --update` (`cargo xtask land` does)",
-                base.ported_cpu, base.ported_gpu, now.ported_cpu, now.ported_gpu
-            ));
+        RatchetMode::Current => match committed {
+            Some(committed) if committed == now => {}
+            Some(committed) => {
+                return Err(format!(
+                    "docs/ratchet.toml is stale: it records cpu {}, gpu {}; cpu {}, gpu {} are \
+                     ported. Run `cargo xtask ratchet --update` (`cargo xtask land` does)",
+                    committed.ported_cpu, committed.ported_gpu, now.ported_cpu, now.ported_gpu
+                ));
+            }
+            None => return Err("docs/ratchet.toml is missing".into()),
+        },
+        RatchetMode::AtLeast => {
+            if *baseline != Baseline::Committed && committed != Some(base) {
+                return Err(format!(
+                    "docs/ratchet.toml differs from {from}: chunks never edit it \
+                     (`cargo xtask land` regenerates it)"
+                ));
+            }
+            if now != base {
+                println!(
+                    "ratchet: more tests ported than {from} records; `cargo xtask land` records them"
+                );
+            }
         }
-        RatchetMode::AtLeast if raised => {
-            println!(
-                "ratchet: more tests ported than docs/ratchet.toml records; `cargo xtask land` records them"
-            );
-        }
-        RatchetMode::Current | RatchetMode::AtLeast => {}
     }
     println!(
-        "ratchet: cpu {} (baseline {}), gpu {} (baseline {})",
+        "ratchet: cpu {} (baseline {}), gpu {} (baseline {}); baseline: {from}",
         now.ported_cpu, base.ported_cpu, now.ported_gpu, base.ported_gpu
     );
     Ok(())
