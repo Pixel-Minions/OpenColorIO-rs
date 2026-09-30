@@ -31,7 +31,7 @@ fn builtin_configs_reemit_byte_identically() {
         let tree = yaml_tree::parse(&expected);
         let mut writer = OcioWriter::new();
         writer.save_config(&tree);
-        assert_text_eq(&path, &expected, writer.out.c_str());
+        assert_text_eq(&path, &expected, writer.text());
         // The luma coefficients and the transforms' parameters went through the emitter's
         // double formatting, not through as text.
         assert!(writer.numbers > 3, "{path}: {} numbers", writer.numbers);

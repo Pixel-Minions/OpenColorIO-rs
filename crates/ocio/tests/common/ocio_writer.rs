@@ -110,10 +110,15 @@ impl OcioWriter {
     }
 
     /// `Config::serialize`: `ostream << out.c_str()` after writing the whole config.
-    pub(crate) fn serialize(config: &Node) -> String {
+    pub(crate) fn serialize(config: &Node) -> Vec<u8> {
         let mut w = OcioWriter::new();
         w.save_config(config);
-        w.out.c_str().to_string()
+        w.out.c_str().to_vec()
+    }
+
+    /// The text written, which is UTF-8 whenever every string written was.
+    pub(crate) fn text(&self) -> &str {
+        std::str::from_utf8(self.out.c_str()).expect("the output is UTF-8")
     }
 
     fn scalar(&mut self, kind: Kind, node: &Node) {

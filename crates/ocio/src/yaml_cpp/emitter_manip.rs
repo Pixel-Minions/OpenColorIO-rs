@@ -66,13 +66,13 @@ pub enum EmitterManip {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Indent(pub i32);
 
-/// Port of `YAML::_Alias` (emittermanip.h:79-82).
+/// Port of `YAML::_Alias` (emittermanip.h:79-82). The name is a C++ `std::string`: bytes.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Alias(pub String);
+pub struct Alias(pub Vec<u8>);
 
-/// Port of `YAML::_Anchor` (emittermanip.h:86-89).
+/// Port of `YAML::_Anchor` (emittermanip.h:86-89). The name is bytes.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Anchor(pub String);
+pub struct Anchor(pub Vec<u8>);
 
 /// Port of `YAML::_Tag::Type` (emittermanip.h:94-96).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,57 +85,58 @@ pub enum TagType {
     NamedHandle,
 }
 
-/// Port of `YAML::_Tag` (emittermanip.h:93-104).
+/// Port of `YAML::_Tag` (emittermanip.h:93-104). Prefix and content are C++ `std::string`s:
+/// bytes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tag {
     /// The handle prefix (named handles only).
-    pub prefix: String,
+    pub prefix: Vec<u8>,
     /// The tag.
-    pub content: String,
+    pub content: Vec<u8>,
     /// How it is written.
     pub tag_type: TagType,
 }
 
 /// Port of `YAML::VerbatimTag` (emittermanip.h:106-108).
-pub fn verbatim_tag(content: &str) -> Tag {
+pub fn verbatim_tag(content: impl AsRef<[u8]>) -> Tag {
     Tag {
-        prefix: String::new(),
-        content: content.to_string(),
+        prefix: Vec::new(),
+        content: content.as_ref().to_vec(),
         tag_type: TagType::Verbatim,
     }
 }
 
 /// Port of `YAML::LocalTag(const std::string &)` (emittermanip.h:110-112).
-pub fn local_tag(content: &str) -> Tag {
+pub fn local_tag(content: impl AsRef<[u8]>) -> Tag {
     Tag {
-        prefix: String::new(),
-        content: content.to_string(),
+        prefix: Vec::new(),
+        content: content.as_ref().to_vec(),
         tag_type: TagType::PrimaryHandle,
     }
 }
 
 /// Port of `YAML::LocalTag(const std::string &, const std::string)` (emittermanip.h:
 /// 114-116).
-pub fn local_tag_with_prefix(prefix: &str, content: &str) -> Tag {
+pub fn local_tag_with_prefix(prefix: impl AsRef<[u8]>, content: impl AsRef<[u8]>) -> Tag {
     Tag {
-        prefix: prefix.to_string(),
-        content: content.to_string(),
+        prefix: prefix.as_ref().to_vec(),
+        content: content.as_ref().to_vec(),
         tag_type: TagType::NamedHandle,
     }
 }
 
 /// Port of `YAML::SecondaryTag` (emittermanip.h:118-120).
-pub fn secondary_tag(content: &str) -> Tag {
+pub fn secondary_tag(content: impl AsRef<[u8]>) -> Tag {
     Tag {
-        prefix: String::new(),
-        content: content.to_string(),
+        prefix: Vec::new(),
+        content: content.as_ref().to_vec(),
         tag_type: TagType::NamedHandle,
     }
 }
 
-/// Port of `YAML::_Comment` (emittermanip.h:122-125).
+/// Port of `YAML::_Comment` (emittermanip.h:122-125). The text is bytes.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Comment(pub String);
+pub struct Comment(pub Vec<u8>);
 
 /// Port of `YAML::_Precision` (emittermanip.h:129-135); a negative value leaves that
 /// precision alone.

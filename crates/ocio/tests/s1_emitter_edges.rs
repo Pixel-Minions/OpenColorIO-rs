@@ -75,7 +75,7 @@ fn reemit(label: &str, spec: &Value, expected: &str) {
     let mut writer = OcioWriter::new();
     writer.values = Some(spec_numbers(spec, &tree));
     writer.save_config(&tree);
-    assert_text_eq(label, expected, writer.out.c_str());
+    assert_text_eq(label, expected, writer.text());
     let left = writer.values.as_ref().map_or(0, VecDeque::len);
     assert_eq!(left, 0, "{label}: numbers of the spec not written");
 }

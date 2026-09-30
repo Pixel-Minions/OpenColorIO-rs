@@ -6,10 +6,15 @@
 //! include/yaml-cpp/stlemitter.h).
 //!
 //! `Emitter::put` is C++'s `operator<<`: [`Emittable`] maps each argument type to the
-//! overload C++ picks (`&str`/`String` to `Write(std::string)`, `u8` to `Write(char)`, `bool`,
-//! the integer types to `WriteIntegralType`, `f32`/`f64` to `WriteStreamable`, slices to
-//! `EmitSeq`, and the manipulators). yaml-cpp's `assert(false)` branches are no-ops, as in the
-//! release build OCIO ships.
+//! overload C++ picks (byte strings `&[u8]`, and `&str`/`String` for convenience, to
+//! `Write(std::string)`; `u8` to `Write(char)`; `bool`; the integer types to
+//! `WriteIntegralType`; `f32`/`f64` to `WriteStreamable`; other slices and vectors to
+//! `EmitSeq`; and the manipulators). yaml-cpp's `assert(false)` branches are no-ops, as in
+//! the release build OCIO ships.
+//!
+//! Strings are C++ `std::string`s, i.e. bytes: OCIO hands the emitter whatever bytes it was
+//! given (they need not be UTF-8), plain scalars pass them through, quoted and literal ones
+//! decode them leniently (see `emitter_utils`), and the output is bytes too.
 
 use ocio_ops::cfmt::{Base, Crt, OStringStream};
 
@@ -43,10 +48,11 @@ impl Emitter {
         Emitter::default()
     }
 
-    /// Port of `Emitter::c_str()` (emitter.cpp:21) read as a C string: the text up to the
-    /// first NUL byte, which is what OCIO's `ostream << out.c_str()` writes.
-    pub fn c_str(&self) -> &str {
-        std::str::from_utf8(self.stream.c_str()).expect("the emitter writes UTF-8")
+    /// Port of `Emitter::c_str()` (emitter.cpp:21) read as a C string: the bytes up to the
+    /// first NUL, which is what OCIO's `ostream << out.c_str()` writes (OCIOYaml.cpp:5447).
+    /// A NUL can reach the output raw, e.g. from an overlong `C0 80` in a literal block.
+    pub fn c_str(&self) -> &[u8] {
+        self.stream.c_str()
     }
 
     /// Every byte written, including any NUL.
@@ -659,17 +665,18 @@ impl Emitter {
 
     // overloads of Write
 
-    /// Port of `Emitter::Write(const std::string &)` (emitter.cpp:718-752): plain when
-    /// valid, else double-quoted (or the requested format). Literal strings and strings over
+    /// Port of `Emitter::Write(const std::string &)` (emitter.cpp:718-752) on the string's
+    /// bytes: plain when valid (the bytes as they are), else double-quoted (or the requested
+    /// format), both of which decode the bytes leniently. Literal strings and strings over
     /// 1024 bytes make a map key a long key.
-    pub fn write_str(&mut self, s: &str) -> &mut Self {
+    pub fn write_bytes(&mut self, s: &[u8]) -> &mut Self {
         if !self.good() {
             return self;
         }
 
         let escaping = string_escaping_style(self.state.output_charset());
         let format = utils::compute_string_format(
-            s.as_bytes(),
+            s,
             self.state.string_format(),
             self.state.cur_group_flow_type(),
             escaping == StringEscaping::NonAscii,
@@ -683,21 +690,26 @@ impl Emitter {
         self.prepare_node(EmitterNodeType::Scalar);
 
         match format {
-            StringFormat::Plain => self.stream.write_str(s),
+            StringFormat::Plain => self.stream.write_bytes(s),
             StringFormat::SingleQuoted => {
-                utils::write_single_quoted_string(&mut self.stream, s.as_bytes());
+                utils::write_single_quoted_string(&mut self.stream, s);
             }
             StringFormat::DoubleQuoted => {
-                utils::write_double_quoted_string(&mut self.stream, s.as_bytes(), escaping);
+                utils::write_double_quoted_string(&mut self.stream, s, escaping);
             }
             StringFormat::Literal => {
                 let indent = self.state.cur_indent() + self.state.indent();
-                utils::write_literal_string(&mut self.stream, s.as_bytes(), indent);
+                utils::write_literal_string(&mut self.stream, s, indent);
             }
         }
 
         self.started_scalar();
         self
+    }
+
+    /// [`Emitter::write_bytes`] for UTF-8 text.
+    pub fn write_str(&mut self, s: &str) -> &mut Self {
+        self.write_bytes(s.as_bytes())
     }
 
     /// Port of `Emitter::ComputeFullBoolName` (emitter.cpp:762-809).
@@ -780,7 +792,7 @@ impl Emitter {
 
         self.prepare_node(EmitterNodeType::Scalar);
 
-        if !utils::write_alias(&mut self.stream, alias.0.as_bytes()) {
+        if !utils::write_alias(&mut self.stream, &alias.0) {
             self.state.set_error(error_msg::INVALID_ALIAS);
             return self;
         }
@@ -803,7 +815,7 @@ impl Emitter {
 
         self.prepare_node(EmitterNodeType::Property);
 
-        if !utils::write_anchor(&mut self.stream, anchor.0.as_bytes()) {
+        if !utils::write_anchor(&mut self.stream, &anchor.0) {
             self.state.set_error(error_msg::INVALID_ANCHOR);
             return self;
         }
@@ -826,15 +838,11 @@ impl Emitter {
         self.prepare_node(EmitterNodeType::Property);
 
         let success = match tag.tag_type {
-            TagType::Verbatim => utils::write_tag(&mut self.stream, tag.content.as_bytes(), true),
-            TagType::PrimaryHandle => {
-                utils::write_tag(&mut self.stream, tag.content.as_bytes(), false)
+            TagType::Verbatim => utils::write_tag(&mut self.stream, &tag.content, true),
+            TagType::PrimaryHandle => utils::write_tag(&mut self.stream, &tag.content, false),
+            TagType::NamedHandle => {
+                utils::write_tag_with_prefix(&mut self.stream, &tag.prefix, &tag.content)
             }
-            TagType::NamedHandle => utils::write_tag_with_prefix(
-                &mut self.stream,
-                tag.prefix.as_bytes(),
-                tag.content.as_bytes(),
-            ),
         };
 
         if !success {
@@ -864,7 +872,7 @@ impl Emitter {
         }
         utils::write_comment(
             &mut self.stream,
-            comment.0.as_bytes(),
+            &comment.0,
             self.state.post_comment_indent(),
         );
 
@@ -1016,6 +1024,20 @@ impl Emittable for Indent {
 impl Emittable for Precision {
     fn emit(self, out: &mut Emitter) {
         out.set_local_precision(self);
+    }
+}
+
+/// A C++ `std::string` (or `const char *`): bytes, not a sequence of `char`s.
+impl Emittable for &[u8] {
+    fn emit(self, out: &mut Emitter) {
+        out.write_bytes(self);
+    }
+}
+
+/// A C++ string literal: bytes.
+impl<const N: usize> Emittable for &[u8; N] {
+    fn emit(self, out: &mut Emitter) {
+        out.write_bytes(self);
     }
 }
 

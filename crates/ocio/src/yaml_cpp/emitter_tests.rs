@@ -18,17 +18,26 @@ use super::super::emitter_manip::{
 use super::super::emitter_state::error_msg;
 use super::Emitter;
 
-/// `EmitterTest::ExpectEmit`: the text, and no error.
+/// `EmitterTest::ExpectEmit`: the text (as bytes), and no error.
 #[track_caller]
 fn expect_emit(out: &Emitter, expected: &str) {
-    assert_eq!(out.c_str(), expected);
+    assert_eq!(
+        out.c_str(),
+        expected.as_bytes(),
+        "emitted {:?}",
+        String::from_utf8_lossy(out.c_str())
+    );
     assert!(out.good(), "Emitter raised: {}", out.last_error());
 }
 
 /// `EmitterErrorTest::ExpectEmitError`.
 #[track_caller]
 fn expect_emit_error(out: &Emitter, expected: &str) {
-    assert!(!out.good(), "Emitter cleanly produced: {}", out.c_str());
+    assert!(
+        !out.good(),
+        "Emitter cleanly produced: {}",
+        String::from_utf8_lossy(out.c_str())
+    );
     assert_eq!(out.last_error(), expected);
 }
 
