@@ -595,6 +595,173 @@ pub fn halfs_differ(expected: half::f16, actual: half::f16, tolerance: i32) -> b
     false
 }
 
+// ---------------------------------------------------------------------------------------------
+// 4x4 matrices (row-major) and 4-vectors.
+//
+// OpenColorIO 2.5.2 calls none of these outside its tests, except `IsM44Identity`
+// (src/OpenColorIO/OCIOYaml.cpp:3071 @ v2.5.2): the matrix op has its own `double` math
+// (`MatrixOpData::MatrixArray::inverse`, `MatrixOpData::compose`). The Windows wheel doesn't
+// contain them (MSVC's linker drops unreferenced functions). The Linux wheel keeps unexported
+// copies, and GCC commutes some of their operations, for example the last addition of each
+// entry of `GetM44M44Product` (`p3 + ((p0 + p1) + p2)`, 0x2cc578 in libOpenColorIO.so), and in
+// the copies of `GetM44V4Product` it inlined, the first addition and the last product of each
+// entry in `GetMxbCombine` (0x2cc718, 0x2cc75f) and the products of the last entry in
+// `GetMxbInverse` (0x2cc88c); `GetM44Inverse` was not checked operation by operation. Operand
+// order only decides which NaN comes out where two NaNs meet, and no output of either wheel
+// depends on these functions' NaNs, so the port keeps the source's order, pinned with `sse_add`
+// and `sse_mul`. None of the copies use an FMA.
+
+/// `IsM44Identity(m44)`: the diagonal entries [are equal to one](is_scalar_equal_to_one) and the
+/// others [to zero](is_scalar_equal_to_zero), each converted to `float` and compared within 2
+/// ULPs.
+///
+/// Port of `IsM44Identity<T>` (src/OpenColorIO/MathUtils.cpp:162-191 @ v2.5.2).
+pub fn is_m44_identity<T: MathFloat>(m44: &[T; 16]) -> bool {
+    for j in 0..4 {
+        for i in 0..4 {
+            let index = 4 * j + i;
+            if i == j {
+                if !is_scalar_equal_to_one(m44[index]) {
+                    return false;
+                }
+            } else if !is_scalar_equal_to_zero(m44[index]) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// `GetM44Inverse(inverse_out, m)`: the inverse of a 4x4 matrix, from its cofactors, computed in
+/// `double` and converted back to `float`. `None` where upstream returns false (leaving
+/// `inverse_out` alone): the determinant, converted to `float`, [is equal to
+/// zero](is_scalar_equal_to_zero). The test is absolute, so a matrix whose determinant is
+/// below about 3e-45 counts as singular however well conditioned it is, and a singular matrix
+/// whose determinant rounds away from 0 is inverted into huge values. A NaN determinant is not
+/// zero: the inverse is all NaN.
+///
+/// Port of `GetM44Inverse` (src/OpenColorIO/MathUtils.cpp:193-261 @ v2.5.2).
+pub fn get_m44_inverse(m_: &[f32; 16]) -> Option<[f32; 16]> {
+    let m: [f64; 16] = m_.map(f64::from);
+    let mul = sse_mul::<f64>;
+    let add = sse_add::<f64>;
+
+    let d10_21 = mul(m[4], m[9]) - mul(m[5], m[8]);
+    let d10_22 = mul(m[4], m[10]) - mul(m[6], m[8]);
+    let d10_23 = mul(m[4], m[11]) - mul(m[7], m[8]);
+    let d11_22 = mul(m[5], m[10]) - mul(m[6], m[9]);
+    let d11_23 = mul(m[5], m[11]) - mul(m[7], m[9]);
+    let d12_23 = mul(m[6], m[11]) - mul(m[7], m[10]);
+
+    let a00 = add(mul(m[13], d12_23) - mul(m[14], d11_23), mul(m[15], d11_22));
+    let a10 = mul(m[14], d10_23) - mul(m[15], d10_22) - mul(m[12], d12_23);
+    let a20 = add(mul(m[12], d11_23) - mul(m[13], d10_23), mul(m[15], d10_21));
+    let a30 = mul(m[13], d10_22) - mul(m[14], d10_21) - mul(m[12], d11_22);
+
+    let det = add(
+        add(add(mul(a00, m[0]), mul(a10, m[1])), mul(a20, m[2])),
+        mul(a30, m[3]),
+    );
+
+    if is_scalar_equal_to_zero(det as f32) {
+        return None;
+    }
+
+    let det = 1.0 / det;
+
+    let d00_31 = mul(m[0], m[13]) - mul(m[1], m[12]);
+    let d00_32 = mul(m[0], m[14]) - mul(m[2], m[12]);
+    let d00_33 = mul(m[0], m[15]) - mul(m[3], m[12]);
+    let d01_32 = mul(m[1], m[14]) - mul(m[2], m[13]);
+    let d01_33 = mul(m[1], m[15]) - mul(m[3], m[13]);
+    let d02_33 = mul(m[2], m[15]) - mul(m[3], m[14]);
+
+    let a01 = add(mul(m[9], d02_33) - mul(m[10], d01_33), mul(m[11], d01_32));
+    let a11 = mul(m[10], d00_33) - mul(m[11], d00_32) - mul(m[8], d02_33);
+    let a21 = add(mul(m[8], d01_33) - mul(m[9], d00_33), mul(m[11], d00_31));
+    let a31 = mul(m[9], d00_32) - mul(m[10], d00_31) - mul(m[8], d01_32);
+
+    let a02 = mul(m[6], d01_33) - mul(m[7], d01_32) - mul(m[5], d02_33);
+    let a12 = add(mul(m[4], d02_33) - mul(m[6], d00_33), mul(m[7], d00_32));
+    let a22 = mul(m[5], d00_33) - mul(m[7], d00_31) - mul(m[4], d01_33);
+    let a32 = add(mul(m[4], d01_32) - mul(m[5], d00_32), mul(m[6], d00_31));
+
+    let a03 = mul(m[2], d11_23) - mul(m[3], d11_22) - mul(m[1], d12_23);
+    let a13 = add(mul(m[0], d12_23) - mul(m[2], d10_23), mul(m[3], d10_22));
+    let a23 = mul(m[1], d10_23) - mul(m[3], d10_21) - mul(m[0], d11_23);
+    let a33 = add(mul(m[0], d11_22) - mul(m[1], d10_22), mul(m[2], d10_21));
+
+    Some(
+        [
+            a00, a01, a02, a03, a10, a11, a12, a13, a20, a21, a22, a23, a30, a31, a32, a33,
+        ]
+        .map(|a| mul(a, det) as f32),
+    )
+}
+
+/// `GetM44M44Product(mout, m1, m2)`: the product `m1 m2`, in `float`. Entry `(r, c)` is
+/// `((m1[r][0]*m2[0][c] + m1[r][1]*m2[1][c]) + m1[r][2]*m2[2][c]) + m1[r][3]*m2[3][c]`.
+///
+/// Port of `GetM44M44Product` (src/OpenColorIO/MathUtils.cpp:263-286 @ v2.5.2).
+pub fn get_m44_m44_product(m1: &[f32; 16], m2: &[f32; 16]) -> [f32; 16] {
+    std::array::from_fn(|i| {
+        let (r, c) = (i / 4 * 4, i % 4);
+        let sum = sse_add(sse_mul(m1[r], m2[c]), sse_mul(m1[r + 1], m2[4 + c]));
+        let sum = sse_add(sum, sse_mul(m1[r + 2], m2[8 + c]));
+        sse_add(sum, sse_mul(m1[r + 3], m2[12 + c]))
+    })
+}
+
+/// `GetM44V4Product(vout, m, v)`: the product `m v`, in `float`. Entry `r` is
+/// `((m[r][0]*v[0] + m[r][1]*v[1]) + m[r][2]*v[2]) + m[r][3]*v[3]`.
+///
+/// Port of `GetM44V4Product` (src/OpenColorIO/MathUtils.cpp:291-300 @ v2.5.2), a function of an
+/// anonymous namespace that upstream's tests include.
+pub fn get_m44_v4_product(m: &[f32; 16], v: &[f32; 4]) -> [f32; 4] {
+    std::array::from_fn(|i| {
+        let r = 4 * i;
+        let sum = sse_add(sse_mul(m[r], v[0]), sse_mul(m[r + 1], v[1]));
+        let sum = sse_add(sum, sse_mul(m[r + 2], v[2]));
+        sse_add(sum, sse_mul(m[r + 3], v[3]))
+    })
+}
+
+/// `GetV4Sum(vout, v1, v2)`: `v1 + v2`, in `float`.
+///
+/// Port of `GetV4Sum` (src/OpenColorIO/MathUtils.cpp:302-308 @ v2.5.2), a function of an
+/// anonymous namespace that upstream's tests include.
+pub fn get_v4_sum(v1: &[f32; 4], v2: &[f32; 4]) -> [f32; 4] {
+    std::array::from_fn(|i| sse_add(v1[i], v2[i]))
+}
+
+/// `GetMxbCombine(mout, vout, m1, v1, m2, v2)`: the single `mout x + vout` that equals
+/// `m2 (m1 x + v1) + v2`: `mout = m2 m1` and `vout = m2 v1 + v2`.
+///
+/// Port of `GetMxbCombine` (src/OpenColorIO/MathUtils.cpp:312-332 @ v2.5.2).
+pub fn get_mxb_combine(
+    m1: &[f32; 16],
+    v1: &[f32; 4],
+    m2: &[f32; 16],
+    v2: &[f32; 4],
+) -> ([f32; 16], [f32; 4]) {
+    let mout = get_m44_m44_product(m2, m1);
+    let vout = get_m44_v4_product(m2, v1);
+    let vout = get_v4_sum(&vout, v2);
+    (mout, vout)
+}
+
+/// `GetMxbInverse(mout, vout, m, v)`: the inverse of `m x + v`, `mout x + vout` with
+/// `mout = m^-1` ([`get_m44_inverse`]) and `vout = mout (-v)`. `None` where upstream returns
+/// false, leaving `mout` and `vout` alone: `m` is singular.
+///
+/// Port of `GetMxbInverse` (src/OpenColorIO/MathUtils.cpp:334-351 @ v2.5.2).
+pub fn get_mxb_inverse(m: &[f32; 16], v: &[f32; 4]) -> Option<([f32; 16], [f32; 4])> {
+    let mout = get_m44_inverse(m)?;
+    let v = v.map(|x| -x);
+    let vout = get_m44_v4_product(&mout, &v);
+    Some((mout, vout))
+}
+
 #[cfg(test)]
 #[path = "math_utils_tests.rs"]
 mod tests;

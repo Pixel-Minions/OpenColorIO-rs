@@ -2,7 +2,7 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 use super::*;
-use ocio_testkit::upstream::check_equal;
+use ocio_testkit::upstream::{check_close, check_equal};
 
 /// Port of `OCIO_ADD_TEST(MathUtils, clamp)` @ v2.5.2.
 #[test]
@@ -55,6 +55,212 @@ fn is_scalar_equal_to_zero_test() {
 
     check_equal(is_scalar_equal_to_zero(-1.072883670794056e-01f32), false);
     check_equal(is_scalar_equal_to_zero(1.072883670794056e-01f32), false);
+}
+
+/// `GetMxbResult(vout, m, x, v)`: `m x + v` (tests/cpu/MathUtils_tests.cpp:14-21 @ v2.5.2).
+fn get_mxb_result(m: &[f32; 16], x: &[f32; 4], v: &[f32; 4]) -> [f32; 4] {
+    let vout = get_m44_v4_product(m, x);
+    get_v4_sum(&vout, v)
+}
+
+/// Port of `OCIO_ADD_TEST(MathUtils, get_m44_inverse)` @ v2.5.2.
+#[test]
+fn get_m44_inverse_test() {
+    // This is a degenerate matrix, and shouldn't be invertible.
+    #[rustfmt::skip]
+    let m: [f32; 16] = [0.3, 0.3, 0.3, 0.0,
+                        0.3, 0.3, 0.3, 0.0,
+                        0.3, 0.3, 0.3, 0.0,
+                        0.0, 0.0, 0.0, 1.0];
+
+    let invertsuccess = get_m44_inverse(&m).is_some();
+    check_equal(invertsuccess, false);
+}
+
+/// Port of `OCIO_ADD_TEST(MathUtils, m44_m44_product)` @ v2.5.2.
+#[test]
+fn m44_m44_product() {
+    #[rustfmt::skip]
+    let m1: [f32; 16] = [1.0, 2.0, 0.0, 0.0,
+                         0.0, 1.0, 1.0, 0.0,
+                         1.0, 0.0, 1.0, 0.0,
+                         0.0, 1.0, 3.0, 1.0];
+    #[rustfmt::skip]
+    let m2: [f32; 16] = [1.0, 1.0, 0.0, 0.0,
+                         0.0, 1.0, 0.0, 0.0,
+                         0.0, 0.0, 1.0, 0.0,
+                         2.0, 0.0, 0.0, 1.0];
+    let mout = get_m44_m44_product(&m1, &m2);
+
+    #[rustfmt::skip]
+    let mcorrect: [f32; 16] = [1.0, 3.0, 0.0, 0.0,
+                               0.0, 1.0, 1.0, 0.0,
+                               1.0, 1.0, 1.0, 0.0,
+                               2.0, 1.0, 3.0, 1.0];
+
+    for i in 0..16 {
+        check_equal(mout[i], mcorrect[i]);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(MathUtils, m44_v4_product)` @ v2.5.2.
+#[test]
+fn m44_v4_product() {
+    #[rustfmt::skip]
+    let m: [f32; 16] = [1.0, 2.0, 0.0, 0.0,
+                        0.0, 1.0, 1.0, 0.0,
+                        1.0, 0.0, 1.0, 0.0,
+                        0.0, 1.0, 3.0, 1.0];
+    let v: [f32; 4] = [1.0, 2.0, 3.0, 4.0];
+    let vout = get_m44_v4_product(&m, &v);
+
+    let vcorrect: [f32; 4] = [5.0, 5.0, 4.0, 15.0];
+
+    for i in 0..4 {
+        check_equal(vout[i], vcorrect[i]);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(MathUtils, v4_add)` @ v2.5.2.
+#[test]
+fn v4_add() {
+    let v1: [f32; 4] = [1.0, 2.0, 3.0, 4.0];
+    let v2: [f32; 4] = [3.0, 1.0, 4.0, 1.0];
+    let vout = get_v4_sum(&v1, &v2);
+
+    let vcorrect: [f32; 4] = [4.0, 3.0, 7.0, 5.0];
+
+    for i in 0..4 {
+        check_equal(vout[i], vcorrect[i]);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(MathUtils, mxb_eval)` @ v2.5.2.
+#[test]
+fn mxb_eval() {
+    #[rustfmt::skip]
+    let m: [f32; 16] = [1.0, 2.0, 0.0, 0.0,
+                        0.0, 1.0, 1.0, 0.0,
+                        1.0, 0.0, 1.0, 0.0,
+                        0.0, 1.0, 3.0, 1.0];
+    let x: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+    let v: [f32; 4] = [1.0, 2.0, 3.0, 4.0];
+    let vout = get_mxb_result(&m, &x, &v);
+
+    let vcorrect: [f32; 4] = [4.0, 4.0, 5.0, 9.0];
+
+    for i in 0..4 {
+        check_equal(vout[i], vcorrect[i]);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(MathUtils, combine_two_mxb)` @ v2.5.2.
+///
+/// `OCIO_CHECK_CLOSE(x, y, 1e-3)` subtracts the floats and compares with a `double`; the port's
+/// `check_close` takes one type, so the last block widens the floats to `double` first. The
+/// difference is then exact rather than rounded to `float`, which could change the check only
+/// within a `float` rounding of 1e-3.
+#[test]
+fn combine_two_mxb() {
+    #[rustfmt::skip]
+    let m1: [f32; 16] = [1.0, 0.0, 2.0, 0.0,
+                         2.0, 1.0, 0.0, 1.0,
+                         0.0, 1.0, 2.0, 0.0,
+                         1.0, 0.0, 0.0, 1.0];
+    let v1: [f32; 4] = [1.0, 2.0, 3.0, 4.0];
+    #[rustfmt::skip]
+    let m2: [f32; 16] = [2.0, 1.0, 0.0, 0.0,
+                         0.0, 1.0, 0.0, 0.0,
+                         1.0, 0.0, 3.0, 0.0,
+                         1.0, 1.0, 1.0, 1.0];
+    let v2: [f32; 4] = [0.0, 2.0, 1.0, 0.0];
+    let tolerance = 1e-9f32;
+
+    {
+        let x: [f32; 4] = [1.0, 1.0, 1.0, 1.0];
+
+        // Combine two mx+b operations, and apply to test point
+        let (mout, vout) = get_mxb_combine(&m1, &v1, &m2, &v2);
+        let vcombined = get_mxb_result(&mout, &x, &vout);
+
+        // Sequentially apply the two mx+b operations.
+        let vout = get_mxb_result(&m1, &x, &v1);
+        let vout = get_mxb_result(&m2, &vout, &v2);
+
+        // Compare outputs
+        for i in 0..4 {
+            check_close(vcombined[i], vout[i], tolerance);
+        }
+    }
+
+    {
+        let x: [f32; 4] = [6.0, 0.5, -2.0, -0.1];
+
+        let (mout, vout) = get_mxb_combine(&m1, &v1, &m2, &v2);
+        let vcombined = get_mxb_result(&mout, &x, &vout);
+
+        let vout = get_mxb_result(&m1, &x, &v1);
+        let vout = get_mxb_result(&m2, &vout, &v2);
+
+        for i in 0..4 {
+            check_close(vcombined[i], vout[i], tolerance);
+        }
+    }
+
+    {
+        let x: [f32; 4] = [26.0, -0.5, 0.005, 12.1];
+
+        let (mout, vout) = get_mxb_combine(&m1, &v1, &m2, &v2);
+        let vcombined = get_mxb_result(&mout, &x, &vout);
+
+        let vout = get_mxb_result(&m1, &x, &v1);
+        let vout = get_mxb_result(&m2, &vout, &v2);
+
+        // We pick a not so small tolerance, as we're dealing with
+        // large numbers, and the error for CHECK_CLOSE is absolute.
+        for i in 0..4 {
+            check_close(f64::from(vcombined[i]), f64::from(vout[i]), 1e-3);
+        }
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(MathUtils, mxb_invert)` @ v2.5.2.
+#[test]
+fn mxb_invert() {
+    {
+        #[rustfmt::skip]
+        let m: [f32; 16] = [1.0, 2.0, 0.0, 0.0,
+                            0.0, 1.0, 1.0, 0.0,
+                            1.0, 0.0, 1.0, 0.0,
+                            0.0, 1.0, 3.0, 1.0];
+        let x: [f32; 4] = [1.0, 0.5, -1.0, 60.0];
+        let v: [f32; 4] = [1.0, 2.0, 3.0, 4.0];
+
+        let vresult = get_mxb_result(&m, &x, &v);
+        let inverse = get_mxb_inverse(&m, &v);
+        let invertsuccess = inverse.is_some();
+        check_equal(invertsuccess, true);
+        let (mout, vout) = inverse.expect("invertible");
+
+        let vresult = get_mxb_result(&mout, &vresult, &vout);
+
+        let tolerance = 1e-9f32;
+        for i in 0..4 {
+            check_close(vresult[i], x[i], tolerance);
+        }
+    }
+
+    {
+        #[rustfmt::skip]
+        let m: [f32; 16] = [0.3, 0.3, 0.3, 0.0,
+                            0.3, 0.3, 0.3, 0.0,
+                            0.3, 0.3, 0.3, 0.0,
+                            0.0, 0.0, 0.0, 1.0];
+        let v: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
+
+        let invertsuccess = get_mxb_inverse(&m, &v).is_some();
+        check_equal(invertsuccess, false);
+    }
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -367,15 +367,15 @@ status = "todo"
 path = "src/OpenColorIO/MathUtils.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/math_utils.rs"]
-status = "partial"
-note = "1.4a: the scalar functions (IsScalarEqualToZero/One, IsVecEqualToZero/One, VecsEqualWithRelError, GetSafeScalarInverse, VecContainsZero/One, ClampToNormHalf, ConvertHalfBitsToFloat, SanitizeFloat, FloatsDiffer, HalfsDiffer and their helpers); the matrix math is todo (1.4b). FloatsDiffer also has an independent test-check copy in crates/ocio-testkit/src/upstream/mod.rs"
+status = "done"
+note = "1.4a: the scalar functions and their helpers; 1.4b: the matrix and vector math (GetM44Inverse, IsM44Identity, GetM44M44Product, GetM44V4Product, GetV4Sum, GetMxbCombine, GetMxbInverse) in the source's operand order; only IsM44Identity has a caller in 2.5.2 (math_utils.rs explains). FloatsDiffer also has an independent test-check copy in crates/ocio-testkit/src/upstream/mod.rs"
 
 [[file]]
 path = "src/OpenColorIO/MathUtils.h"
 kind = "src"
 target = ["crates/ocio-ops/src/math_utils.rs"]
-status = "partial"
-note = "S2: Clamp, FloatAsInt, IntAsFloat, AddULP, plus std::min/std::max and SSE lane semantics; 1.4a: IsNan, EqualWithAbsError, EqualWithRelError, lerpf, GetHalfMax/Min/NormMin and the scalar declarations; the matrix declarations are todo (1.4b)"
+status = "done"
+note = "S2: Clamp, FloatAsInt, IntAsFloat, AddULP, plus std::min/std::max and SSE lane semantics; 1.4a: IsNan, EqualWithAbsError, EqualWithRelError, lerpf, GetHalfMax/Min/NormMin and the scalar declarations; 1.4b: the matrix declarations"
 
 [[file]]
 path = "src/OpenColorIO/Mutex.h"
@@ -4142,8 +4142,8 @@ status = "todo"
 path = "tests/cpu/MathUtils_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/math_utils_tests.rs"]
-status = "partial"
-note = "S2: clamp; 1.4a: is_scalar_equal_to_zero, float_diff_keep_denorms_test, float_diff_compress_denorms_test, half_bits_test, halfs_differ_test; the matrix tests are todo (1.4b)"
+status = "done"
+note = "All 13 tests: clamp (S2); is_scalar_equal_to_zero, float_diff_keep_denorms_test, float_diff_compress_denorms_test, half_bits_test, halfs_differ_test (1.4a); get_m44_inverse, m44_m44_product, m44_v4_product, v4_add, mxb_eval, combine_two_mxb, mxb_invert (1.4b)"
 
 [[file]]
 path = "tests/cpu/NamedTransform_tests.cpp"
