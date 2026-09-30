@@ -245,10 +245,18 @@ fn check_dependency_pins(root: &Path) -> Vec<String> {
 }
 
 fn check_submodule(root: &Path, problems: &mut Vec<String>) {
+    let submodule = root.join("upstream").join("OpenColorIO");
+    if !submodule.join(".git").exists() {
+        problems.push("upstream/OpenColorIO is missing; run `git submodule update --init`".into());
+        return;
+    }
+    // `--work-tree=.` keeps git from following the submodule's `core.worktree`, a path relative
+    // to its git directory that doesn't resolve in the Rocky Linux 9 container when this
+    // checkout is a linked worktree (`scripts/rocky9.sh` mounts the git directory itself).
     let head = std::process::Command::new("git")
-        .args(["-C"])
-        .arg(root.join("upstream").join("OpenColorIO"))
-        .args(["rev-parse", "HEAD"])
+        .arg("-C")
+        .arg(&submodule)
+        .args(["--work-tree=.", "rev-parse", "HEAD"])
         .output();
     match head {
         Ok(out) if out.status.success() => {
@@ -260,7 +268,10 @@ fn check_submodule(root: &Path, problems: &mut Vec<String>) {
                 ));
             }
         }
-        _ => problems
-            .push("upstream/OpenColorIO is missing; run `git submodule update --init`".into()),
+        Ok(out) => problems.push(format!(
+            "upstream/OpenColorIO: `git rev-parse HEAD` failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )),
+        Err(e) => problems.push(format!("upstream/OpenColorIO: could not run git: {e}")),
     }
 }
