@@ -273,7 +273,29 @@ fn run_staged(root: &Path, others: &[String]) -> Result<(), String> {
         }
         Err(std::fs::TryLockError::Error(e)) => return Err(format!("gate-staged lock: {e}")),
     }
-    let tree = crate::git(root, &["write-tree"])?;
+    // `git write-tree` stores a cache tree in the index it reads (under index.lock): let it
+    // read a copy, so that the checkout's own index is never written.
+    let index = crate::git(
+        root,
+        &["rev-parse", "--path-format=absolute", "--git-path", "index"],
+    )?;
+    let copy = dir.join("index");
+    std::fs::copy(index.trim(), &copy).map_err(|e| format!("{}: {e}", index.trim()))?;
+    let out = crate::clear_git_env(&mut Command::new("git"))
+        .arg("-C")
+        .arg(root)
+        .arg("write-tree")
+        .env("GIT_INDEX_FILE", &copy)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| format!("could not run git write-tree: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "git write-tree failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let tree = String::from_utf8_lossy(&out.stdout).into_owned();
     let head = crate::git(root, &["rev-parse", "--verify", "HEAD"])?;
     let out = crate::clear_git_env(&mut Command::new("git"))
         .arg("-C")
@@ -297,18 +319,7 @@ fn run_staged(root: &Path, others: &[String]) -> Result<(), String> {
     let staged = crate::git(root, &["diff", "--cached", "--name-only"])?;
     let wt = dir.join("wt");
     crate::land::remove_worktree(root, &wt)?;
-    crate::git(
-        root,
-        &[
-            "worktree",
-            "add",
-            "--quiet",
-            "--detach",
-            crate::land::path_str(&wt)?,
-            &commit,
-        ],
-    )?;
-    crate::land::init_submodule(root, &wt)?;
+    crate::land::add_worktree(root, &wt, &commit)?;
     println!(
         "gate: the staged changes ({} files) on {}, checked out in {}",
         staged.lines().count(),

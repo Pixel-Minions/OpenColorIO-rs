@@ -148,18 +148,7 @@ pub(crate) fn run(branch: &str, rocky: bool) -> Result<(), String> {
     let wt = land_dir.join("wt");
     let build = land_dir.join("target");
     remove_worktree(&root, &wt)?;
-    crate::git(
-        &root,
-        &[
-            "worktree",
-            "add",
-            "--quiet",
-            "--detach",
-            path_str(&wt)?,
-            &tip,
-        ],
-    )?;
-    init_submodule(&root, &wt)?;
+    add_worktree(&root, &wt, &tip)?;
     println!(
         "land: worktree {}, build directory {}",
         crate::display_path(&wt),
@@ -548,8 +537,9 @@ fn check_clean(root: &Path) -> Result<(), String> {
     }
 }
 
-/// Removes land's temporary worktree, registered or not. `--force`: it holds the upstream
-/// submodule and may be stopped mid-rebase, and git refuses to remove either without it.
+/// Removes a scratch worktree (land's or `gate --staged`'s), registered or not. `--force`: it
+/// holds the upstream submodule and may be stopped mid-rebase, and git refuses to remove
+/// either without it.
 pub(crate) fn remove_worktree(root: &Path, wt: &Path) -> Result<(), String> {
     let list = crate::git(root, &["worktree", "list", "--porcelain"])?;
     let registered = list
@@ -557,7 +547,17 @@ pub(crate) fn remove_worktree(root: &Path, wt: &Path) -> Result<(), String> {
         .filter_map(|l| l.strip_prefix("worktree "))
         .any(|p| same_path(p, &wt.to_string_lossy()));
     if registered {
-        crate::git(root, &["worktree", "remove", "--force", path_str(wt)?])?;
+        crate::git(
+            root,
+            &[
+                LONG_PATHS[0],
+                LONG_PATHS[1],
+                "worktree",
+                "remove",
+                "--force",
+                path_str(wt)?,
+            ],
+        )?;
     }
     if wt.exists() {
         std::fs::remove_dir_all(wt).map_err(|e| format!("{}: {e}", wt.display()))?;
@@ -565,14 +565,38 @@ pub(crate) fn remove_worktree(root: &Path, wt: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Nested under a long checkout path, OCIO's longest file names (84 characters inside the
+/// submodule) pass Windows' 260: git needs `core.longpaths` to create or delete them.
+const LONG_PATHS: [&str; 2] = ["-c", "core.longpaths=true"];
+
+/// Checks out `commit`, detached, in a new scratch worktree at `wt`, with the upstream
+/// submodule.
+pub(crate) fn add_worktree(root: &Path, wt: &Path, commit: &str) -> Result<(), String> {
+    crate::git(
+        root,
+        &[
+            LONG_PATHS[0],
+            LONG_PATHS[1],
+            "worktree",
+            "add",
+            "--quiet",
+            "--detach",
+            path_str(wt)?,
+            commit,
+        ],
+    )?;
+    init_submodule(root, wt)
+}
+
 /// Checks out the upstream submodule in `wt` from the main checkout's copy (a local clone:
 /// no network).
-pub(crate) fn init_submodule(root: &Path, wt: &Path) -> Result<(), String> {
+fn init_submodule(root: &Path, wt: &Path) -> Result<(), String> {
     let source = root.join("upstream").join("OpenColorIO");
     let url = format!("submodule.upstream/OpenColorIO.url={}", path_str(&source)?);
-    let out = Command::new("git")
+    let out = crate::clear_git_env(&mut Command::new("git"))
         .current_dir(wt)
         .args(["-c", "protocol.file.allow=always", "-c", &url])
+        .args(LONG_PATHS)
         .args(["submodule", "--quiet", "update", "--init"])
         .stdin(Stdio::null())
         .output()
