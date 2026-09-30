@@ -186,30 +186,55 @@ impl Oracle {
             .spawn()
             .map_err(|e| format!("could not start {}: {e}", self.python.display()))?;
 
-        // Write on a separate thread so a large response can't deadlock a large request.
+        // Write on a separate thread so a large response can't deadlock a large request. Both
+        // directions move at most PIPE_PIECE bytes per call: on Windows, one pipe read or write
+        // of several megabytes can fail when the system is short of kernel memory, and a failed
+        // write left the oracle with an empty request ("EOFError: expected 4 bytes, got 0").
         let mut stdin = child.stdin.take().expect("piped stdin");
+        let request_len = request.len();
         let request = request.to_vec();
-        let writer = std::thread::spawn(move || stdin.write_all(&request));
-        let mut stdout = Vec::new();
-        child
-            .stdout
-            .take()
-            .expect("piped stdout")
-            .read_to_end(&mut stdout)
-            .map_err(|e| e.to_string())?;
-        let mut stderr = String::new();
-        child
-            .stderr
-            .take()
-            .expect("piped stderr")
-            .read_to_string(&mut stderr)
-            .ok();
+        let writer = std::thread::spawn(move || -> std::io::Result<()> {
+            for piece in request.chunks(PIPE_PIECE) {
+                stdin.write_all(piece)?;
+            }
+            Ok(())
+        });
+        let stdout = read_in_pieces(&mut child.stdout.take().expect("piped stdout"))
+            .map_err(|e| format!("reading the oracle's response failed: {e}"))?;
+        let stderr = read_in_pieces(&mut child.stderr.take().expect("piped stderr"))
+            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+            .unwrap_or_default();
         let status = child.wait().map_err(|e| e.to_string())?;
-        let _ = writer.join();
+        let written = writer
+            .join()
+            .unwrap_or_else(|_| Err(std::io::Error::other("the writer thread panicked")));
+        if let Err(e) = written {
+            return Err(format!(
+                "writing the {}-byte request to the oracle failed: {e}\n{stderr}",
+                request_len
+            ));
+        }
         if !status.success() {
             return Err(format!("oracle exited with {status}\n{stderr}"));
         }
         Ok(stdout)
+    }
+}
+
+/// The most bytes one read or write moves through a pipe to or from the oracle.
+const PIPE_PIECE: usize = 64 * 1024;
+
+/// Reads `stream` to its end, at most [`PIPE_PIECE`] bytes per read.
+fn read_in_pieces(stream: &mut impl Read) -> std::io::Result<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut piece = vec![0u8; PIPE_PIECE];
+    loop {
+        match stream.read(&mut piece) {
+            Ok(0) => return Ok(out),
+            Ok(n) => out.extend_from_slice(&piece[..n]),
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e),
+        }
     }
 }
 
