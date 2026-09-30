@@ -300,9 +300,12 @@ impl Oracle {
         let written = writer
             .join()
             .unwrap_or_else(|_| Err(std::io::Error::other("the writer thread panicked")));
+        // The exit status says how the oracle died when it stopped reading early: under Intel
+        // SDE on Windows, it has exited mid-request without writing anything to stderr.
         if let Err(e) = written {
             return Err(format!(
-                "writing the {}-byte request to the oracle failed: {e}\n{stderr}",
+                "writing the {}-byte request to the oracle failed: {e}; the oracle exited with \
+                 {status}\n{stderr}",
                 request_len
             ));
         }

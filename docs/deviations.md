@@ -5,7 +5,13 @@ owner's approval. A deviation must never change an output covered by the byte-ex
 definition of done (PLAN.md §3) unless it also has a waiver in `waivers.toml`.
 
 Upstream bugs that don't affect outputs (crashes, data races, deadlocks) are fixed in the
-port and listed here.
+port and listed here. Upstream bugs that do affect outputs are copied, and listed in
+`docs/improvements.md` for the owner to decide on at the end.
+
+**General rule (approved by the owner in chat, 2026-09-30):** where upstream reads or writes
+memory it doesn't own (a crash, or corrupted data), the port returns an error instead. Each
+case is a `U-` entry in `docs/improvements.md`, where an entry can make an exception (U-1).
+The first case is D-2: image layouts that reach outside their buffer.
 
 | Id | Upstream behavior | Port behavior | Affects outputs? | Approved |
 |---|---|---|---|---|

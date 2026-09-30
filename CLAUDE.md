@@ -10,6 +10,8 @@ truth: read §3 (definition of done), §7 (how agents work) and your card before
    - Read the upstream code in `upstream/OpenColorIO` (submodule pinned at `v2.5.2`) and translate it.
    - Every ported function's doc comment cites its source: `` Port of `Foo::bar` (src/OpenColorIO/Foo.cpp:120-188 @ v2.5.2). ``
    - Don't guess behavior, simplify it, or "fix" it. Upstream bugs that change outputs are ported too.
+   - List every upstream bug or limitation you port in `docs/improvements.md`, in the same chunk. That includes platform differences that exist only because of how the wheels were built. At the end of the port, the owner decides which to fix.
+   - Where upstream reads or writes memory it doesn't own, the port can't match it: return an error instead (the owner's general rule, `docs/deviations.md`), and list the case as a `U-` entry in `docs/improvements.md`. Where both wheels resolve undefined behavior the same predictable way (an integer overflow that wraps), match them and list it as an `I-` entry. If neither fits, stop and report it.
 2. **Expected values come only from the oracle, upstream's tests, or the platform itself.**
    - The oracle is the real OCIO 2.5.2 (`ocio_testkit::Oracle`, `fixtures/`).
    - Upstream tests are copied verbatim, with a citation. This includes the own tests of a library the wheel is built with, at the version it uses (yaml-cpp 0.8.0, Imath 3.2.1).
