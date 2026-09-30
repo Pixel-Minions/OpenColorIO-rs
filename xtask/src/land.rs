@@ -526,7 +526,7 @@ fn check_clean(root: &Path) -> Result<(), String> {
 
 /// Removes land's temporary worktree, registered or not. `--force`: it holds the upstream
 /// submodule and may be stopped mid-rebase, and git refuses to remove either without it.
-fn remove_worktree(root: &Path, wt: &Path) -> Result<(), String> {
+pub(crate) fn remove_worktree(root: &Path, wt: &Path) -> Result<(), String> {
     let list = crate::git(root, &["worktree", "list", "--porcelain"])?;
     let registered = list
         .lines()
@@ -543,7 +543,7 @@ fn remove_worktree(root: &Path, wt: &Path) -> Result<(), String> {
 
 /// Checks out the upstream submodule in `wt` from the main checkout's copy (a local clone:
 /// no network).
-fn init_submodule(root: &Path, wt: &Path) -> Result<(), String> {
+pub(crate) fn init_submodule(root: &Path, wt: &Path) -> Result<(), String> {
     let source = root.join("upstream").join("OpenColorIO");
     let url = format!("submodule.upstream/OpenColorIO.url={}", path_str(&source)?);
     let out = Command::new("git")
@@ -621,7 +621,7 @@ pub(crate) fn lock_file(path: &Path) -> Result<File, String> {
         .map_err(|e| format!("{}: {e}", path.display()))
 }
 
-fn path_str(path: &Path) -> Result<&str, String> {
+pub(crate) fn path_str(path: &Path) -> Result<&str, String> {
     path.to_str()
         .ok_or_else(|| format!("{} is not valid UTF-8", path.display()))
 }

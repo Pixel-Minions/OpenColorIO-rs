@@ -20,7 +20,7 @@ const USAGE: &str = "\
 cargo xtask <command>
 
 Checking and landing chunks:
-  gate [--crates a,b] [--release] [--rocky] [--quick|--full]
+  gate [--staged] [--crates a,b] [--release] [--rocky] [--quick|--full]
                               fmt, clippy, ci and tests, stopping at the first failure;
                               logs in target/gate-logs/ (`cargo xtask gate --help`)
   land <branch> [--no-rocky]  replay <branch> onto phase0 gating every commit (Rocky Linux 9

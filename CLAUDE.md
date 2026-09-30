@@ -40,16 +40,15 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
 - **Bookkeeping travels with the port.** Update `upstream-map.toml` in the same chunk as the port it describes.
 - **Never commit the generated files** `docs/parity.md` and `docs/ratchet.toml`, so that chunks never conflict on them.
   - `cargo xtask land` regenerates both into the merge commit.
-  - On a branch, `cargo xtask ci` (branch mode) only checks that the ported-test count is at least `docs/ratchet.toml`.
+  - On a branch, `cargo xtask ci` (branch mode) only checks that the ported-test count is at least the base's `docs/ratchet.toml`: the gate's base is where the branch left `phase0`, CI's the PR's base. A branch can't lower it by editing its own copy.
   - CI runs `cargo xtask ci --main` on `main` and on land commits, which checks that both files are current.
 - **Oracle changes stand alone.** Changes to `oracle/` and new fixture groups get their own chunk, before the chunk that first uses them. The owner reviews them separately.
 - **Order and fixes.** Chunks are ordered by dependency. A later fix is a new chunk; never rewrite an earlier commit.
 - **Checking a chunk in isolation** while other work is in progress:
-  1. `git add <files>`
-  2. `git stash push --keep-index --include-untracked`
-  3. Run the gate (`cargo xtask gate`, with the options above).
-  4. `git commit`
-  5. `git stash pop`
+  1. `git add <files>`: exactly the chunk.
+  2. `cargo xtask gate --staged`, with the options above. It gates what is staged and nothing else, in a scratch worktree (`target/gate-staged/wt`); your working tree, with its other changes and untracked files, is left alone.
+  3. `git commit`
+  - Never use `git stash` for this. `refs/stash` is shared by every worktree of the repository, so with agents in parallel, your `git stash pop` can apply someone else's stash.
 - **Commit messages.** The first line is `<card>: <what>`. The body lists the upstream files and line ranges ported, the tests, and the evidence (which checks ran and on which platforms). End with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Bit-exact porting
@@ -124,10 +123,10 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
 
 | Command | Purpose |
 |---|---|
-| `cargo xtask gate [--crates a,b] [--release] [--rocky] [--quick\|--full]` | The chunk gate: fmt, clippy, `xtask ci`, tests; logs in `target/gate-logs/` |
+| `cargo xtask gate [--staged] [--crates a,b] [--release] [--rocky] [--quick\|--full]` | The chunk gate: fmt, clippy, `xtask ci`, tests; logs in `target/gate-logs/`. `--staged`: only what is staged |
 | `cargo xtask land <branch> [--no-rocky]` | Orchestrator: replay a card onto `phase0` gating every commit (Rocky Linux 9 too), merge `--no-ff`, regenerate the generated files, full gate; never pushes |
 | `cargo xtask clean-scratch [--yes]` | List (with `--yes`, delete) `target/verify*` in every checkout, worktrees of landed branches, and this repository's Rocky build volumes whose checkout is gone |
-| `cargo xtask ci` | Guards, fixture hashes, ported tests at least `docs/ratchet.toml` (branch mode) |
+| `cargo xtask ci [--base <rev>]` | Guards, fixture hashes, ported tests at least `docs/ratchet.toml` at `<rev>` (branch mode; the gate passes its base) |
 | `cargo xtask ci --main` | Also: `docs/ratchet.toml` and `docs/parity.md` are current (`main` and land commits) |
 | `cargo xtask guards` | Forbidden patterns, the `unsafe` allowlist, headers, dependency pins, the upstream map |
 | `cargo xtask parity` | Regenerate `docs/parity.md` (`xtask land` does it; chunks don't commit it) |

@@ -14,7 +14,8 @@ use std::process::{Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub(crate) const USAGE: &str = "\
-cargo xtask gate [--crates a,b] [--release] [--rocky] [--quick|--full] [--main] [--auto]
+cargo xtask gate [--staged] [--crates a,b] [--release] [--rocky] [--quick|--full] [--main]
+                 [--auto]
 
 Runs, in order, stopping at the first failure:
   fmt            cargo fmt --all --check
@@ -25,6 +26,9 @@ Runs, in order, stopping at the first failure:
   test-release   the same in release, with --release
   rocky          with --rocky: this gate, same options, in Rocky Linux 9 (scripts/rocky9.sh)
 
+  --staged       gate exactly what is staged (`git add`), leaving unstaged changes and
+                 untracked files out: the index as a temporary commit on HEAD, checked out
+                 in target/gate-staged/wt (kept, with its logs, until the next --staged run)
   --crates a,b   run the test steps for these packages only (fmt, clippy and ci always cover
                  the workspace)
   --quick        tests run the quick tier (OCIO_RS_TIER=quick): the default, per chunk
@@ -60,11 +64,20 @@ pub(crate) struct Options {
     pub(crate) log_dir: Option<PathBuf>,
     /// The ratchet baseline's file (the Rocky pass gets the one the host gate saved).
     pub(crate) base_file: Option<PathBuf>,
+    /// Gate the staged changes in a scratch worktree.
+    pub(crate) staged: bool,
+    /// The arguments other than `--staged`, for the gate `--staged` runs.
+    pub(crate) others: Vec<String>,
 }
 
 pub(crate) fn parse(args: &[&str]) -> Result<Options, String> {
     let mut opts = Options::default();
     let mut tier = None;
+    opts.others = args
+        .iter()
+        .filter(|a| **a != "--staged")
+        .map(|a| a.to_string())
+        .collect();
     let mut it = args.iter();
     while let Some(&arg) = it.next() {
         let mut value = |name: &str| -> Result<String, String> {
@@ -81,6 +94,7 @@ pub(crate) fn parse(args: &[&str]) -> Result<Options, String> {
             "--rocky" => opts.rocky = true,
             "--main" => opts.main = true,
             "--auto" => opts.auto = true,
+            "--staged" => opts.staged = true,
             "--quick" | "--full" => {
                 if tier.is_some_and(|t| t != arg) {
                     return Err("--quick and --full are exclusive".into());
@@ -111,6 +125,9 @@ pub(crate) fn parse(args: &[&str]) -> Result<Options, String> {
 
 pub(crate) fn run(mut opts: Options) -> Result<(), String> {
     let root = crate::root();
+    if opts.staged {
+        return run_staged(&root, &opts.others);
+    }
     let packages = workspace_packages(&root)?;
     for name in &opts.crates {
         if !packages.contains(name) {
@@ -238,6 +255,81 @@ pub(crate) fn run(mut opts: Options) -> Result<(), String> {
         );
     }
     Ok(())
+}
+
+/// `--staged`: gates exactly the index. It becomes a temporary commit on HEAD (on no branch),
+/// checked out in `target/gate-staged/wt`, where `cargo xtask gate <others>` runs; the checkout
+/// itself, with its unstaged changes and untracked files, is not touched. Safe beside other
+/// agents, unlike `git stash`, whose `refs/stash` every worktree shares. The worktree stays,
+/// with its logs, until the next `--staged` run in this checkout.
+fn run_staged(root: &Path, others: &[String]) -> Result<(), String> {
+    let dir = root.join("target").join("gate-staged");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let lock = crate::land::lock_file(&dir.join("lock"))?;
+    match lock.try_lock() {
+        Ok(()) => {}
+        Err(std::fs::TryLockError::WouldBlock) => {
+            return Err("another `cargo xtask gate --staged` is running in this checkout".into());
+        }
+        Err(std::fs::TryLockError::Error(e)) => return Err(format!("gate-staged lock: {e}")),
+    }
+    let tree = crate::git(root, &["write-tree"])?;
+    let head = crate::git(root, &["rev-parse", "--verify", "HEAD"])?;
+    let out = crate::clear_git_env(&mut Command::new("git"))
+        .arg("-C")
+        .arg(root)
+        .args(["commit-tree", tree.trim(), "-p", head.trim()])
+        .args(["-m", "cargo xtask gate --staged"])
+        .env("GIT_AUTHOR_NAME", "cargo xtask gate")
+        .env("GIT_AUTHOR_EMAIL", "gate@localhost")
+        .env("GIT_COMMITTER_NAME", "cargo xtask gate")
+        .env("GIT_COMMITTER_EMAIL", "gate@localhost")
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| format!("could not run git commit-tree: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "git commit-tree failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let commit = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let staged = crate::git(root, &["diff", "--cached", "--name-only"])?;
+    let wt = dir.join("wt");
+    crate::land::remove_worktree(root, &wt)?;
+    crate::git(
+        root,
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            "--detach",
+            crate::land::path_str(&wt)?,
+            &commit,
+        ],
+    )?;
+    crate::land::init_submodule(root, &wt)?;
+    println!(
+        "gate: the staged changes ({} files) on {}, checked out in {}",
+        staged.lines().count(),
+        &head.trim()[..head.trim().len().min(10)],
+        crate::display_path(&wt)
+    );
+    let mut cmd = cargo(&wt, &["xtask", "gate"]);
+    cmd.args(others)
+        .env("CARGO_TARGET_DIR", dir.join("target"))
+        .env_remove("CARGO_TERM_COLOR");
+    let status = crate::clear_git_env(&mut cmd)
+        .status()
+        .map_err(|e| format!("could not run the gate: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "the gate failed on the staged changes; its logs are in {}/target/gate-logs/",
+            crate::display_path(&wt)
+        ))
+    }
 }
 
 /// Saves `docs/ratchet.toml` as it is where HEAD left phase0 (their merge base), or else
@@ -788,6 +880,9 @@ mod tests {
         assert_eq!(o.crates, ["ocio-ops", "ocio"]);
         assert!(o.release && o.rocky && o.full && !o.auto && !o.main);
         assert!(parse(&["--main", "--auto"]).is_ok_and(|o| o.main && o.auto));
+        let o = parse(&["--staged", "--release", "--crates", "xtask"]).unwrap();
+        assert!(o.staged && o.release);
+        assert_eq!(o.others, ["--release", "--crates", "xtask"]);
         let o = parse(&["--crates=ocio-ops", "--log-dir=target/x", "--quick"]).unwrap();
         assert_eq!(o.crates, ["ocio-ops"]);
         assert_eq!(o.log_dir, Some(PathBuf::from("target/x")));
