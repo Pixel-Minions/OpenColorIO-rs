@@ -620,8 +620,8 @@ pub fn halfs_differ(expected: half::f16, actual: half::f16, tolerance: i32) -> b
 // (`MatrixOpData::MatrixArray::inverse`, `MatrixOpData::compose`). The Windows wheel doesn't
 // contain them (MSVC's linker drops unreferenced functions). The Linux wheel keeps unexported
 // copies, and GCC commutes some of their operations (addresses in libOpenColorIO.so):
-// - `GetM44Inverse`: both products of `d10_21` (0x2cbf43, 0x2cbf51) and the three additions
-//   of `det` (0x2cc126, 0x2cc137, 0x2cc146);
+// - `GetM44Inverse`: 56 of its 76 scalar products (for example both products of `d10_21`,
+//   0x2cbf43 and 0x2cbf51) and the three additions of `det` (0x2cc126, 0x2cc137, 0x2cc146);
 // - `GetM44M44Product`: the last addition of each entry, `p3 + ((p0 + p1) + p2)` (0x2cc578);
 // - the copies of `GetM44V4Product` it inlined: the first addition and the last product of
 //   each entry in `GetMxbCombine` (0x2cc718, 0x2cc75f), and the products of the last entry in
