@@ -5,13 +5,22 @@
 //! the oracle's `image_apply` takes, as the port's constructors take them, and the port's
 //! getters as the oracle reports the wheel's.
 
+use std::hint::black_box;
+use std::sync::Arc;
+
 use ocio_ops::Result;
+use ocio_ops::cpu_processor::create_generic_bit_depth_helper;
 use ocio_ops::image_desc::{
-    AUTO_STRIDE, At, Bytes, ImageDesc, PackedImageDesc, PixelData, PlanarImageDesc,
+    AUTO_STRIDE, At, Bytes, ImageDesc, ImageDescMut, PackedImageDesc, PixelData, PlanarImageDesc,
 };
-use ocio_ops::open_color_types::{BitDepth, ChannelOrdering};
+use ocio_ops::op::CpuOp;
+use ocio_ops::open_color_types::{BitDepth, ChannelOrdering, TransformDirection};
+use ocio_ops::ops::log::log_op_cpu::get_log_renderer;
+use ocio_ops::ops::log::log_op_data::LogOpData;
 use ocio_testkit::battery::BitDepth as Depth;
-use ocio_testkit::image::{ChannelOrder, Channels, Packed, Planar, Stride, channel_bytes};
+use ocio_testkit::image::{
+    Buffer, ChannelOrder, Channels, Data, Image, Packed, Planar, Request, Stride, channel_bytes,
+};
 use serde_json::{Value, json};
 
 /// The bit depths the CPU processor takes.
@@ -277,5 +286,381 @@ pub(crate) fn port_planar<'a>(
             x,
             y,
         ),
+    }
+}
+
+/// The processor the pixel tests apply: a LogTransform of base 2 (one LogOp), with the fast
+/// log (`OPTIMIZATION_FAST_LOG_EXP_POW`) and no other optimization. So the wheel doesn't bake a
+/// Lut1D for integer inputs (the separable-prefix bake, WP 2.5), and its log is plain
+/// arithmetic, the same on every CPU.
+pub(crate) fn log_processor(input: BitDepth, output: BitDepth) -> Value {
+    json!({
+        "transform": {"class": "LogTransform", "args": {"base": 2.0}},
+        "optimization": "OPTIMIZATION_FAST_LOG_EXP_POW",
+        "in_bitdepth": depth_name(input),
+        "out_bitdepth": depth_name(output),
+    })
+}
+
+/// A CPU engine: the op that converts from the input bit depth, the ops between, and the op that
+/// converts to the output bit depth.
+pub(crate) type Engine = (Arc<dyn CpuOp>, Vec<Arc<dyn CpuOp>>, Arc<dyn CpuOp>);
+
+/// The CPU engine of [`log_processor`]: the op that converts from the input bit depth, the ops
+/// between, and the op that converts to the output bit depth.
+///
+/// `CreateCPUEngine` (src/OpenColorIO/CPUProcessor.cpp:122-184 @ v2.5.2) gives the first op the
+/// input conversion when the input is F32, and otherwise puts `BitDepthCast<in, F32>` before
+/// it; with one op, the output conversion is `BitDepthCast<F32, out>`. The LogOp's renderer is
+/// `GetLogRenderer(data, fastLogExpPow)` with the data `LogTransform(base=2.0)` holds
+/// (`LogOpData(2.0, TRANSFORM_DIR_FORWARD)`, src/OpenColorIO/transforms/LogTransform.cpp:25-28;
+/// `BuildLogOp` clones it, src/OpenColorIO/ops/log/LogOp.cpp:212-221 @ v2.5.2).
+pub(crate) fn log_engine(input: BitDepth, output: BitDepth) -> Engine {
+    let data = LogOpData::new(2.0, TransformDirection::Forward);
+    let log = get_log_renderer(&black_box(data), true);
+    let (first, ops) = if input == BitDepth::F32 {
+        (log, Vec::new())
+    } else {
+        let cast =
+            create_generic_bit_depth_helper(input, BitDepth::F32).expect("a supported depth");
+        (cast, vec![log])
+    };
+    let last = create_generic_bit_depth_helper(BitDepth::F32, output).expect("a supported depth");
+    (first, ops, last)
+}
+
+/// `bytes` bytes of channel values of `depth`, seeded: floats of every kind for F32 (specials,
+/// and uniform values), any bits for F16 and 16-bit integers, and codes up to the maximum for
+/// 8, 10 and 12 bits (the oracle refuses larger 10- and 12-bit codes, which the wheel would look
+/// up outside a table).
+pub(crate) fn source_bytes(depth: BitDepth, bytes: usize, seed: u64) -> Vec<u8> {
+    let specials = ocio_testkit::probe::specials();
+    let mut rng = ocio_testkit::probe::Rng::new(seed);
+    let mut out = Vec::with_capacity(bytes + 4);
+    let mut k = 0usize;
+    while out.len() < bytes {
+        let bits = rng.next_u64();
+        match depth {
+            BitDepth::F32 => {
+                let value = if k.is_multiple_of(2) {
+                    specials[(k / 2) % specials.len()]
+                } else {
+                    rng.uniform(-0.5, 2.0)
+                };
+                out.extend_from_slice(&value.to_ne_bytes());
+            }
+            BitDepth::F16 | BitDepth::Uint16 => out.extend_from_slice(&(bits as u16).to_ne_bytes()),
+            BitDepth::Uint10 => out.extend_from_slice(&(bits as u16 & 0x3ff).to_ne_bytes()),
+            BitDepth::Uint12 => out.extend_from_slice(&(bits as u16 & 0xfff).to_ne_bytes()),
+            BitDepth::Uint8 => out.push(bits as u8),
+            other => panic!("no channel values of {other:?}"),
+        }
+        k += 1;
+    }
+    out.truncate(bytes);
+    out
+}
+
+/// The buffers at `indices` of `all`, to write, in the order of `indices`, which must be
+/// distinct.
+pub(crate) fn buffers_mut<'a>(all: &'a mut [Vec<u8>], indices: &[usize]) -> Vec<&'a mut [u8]> {
+    let mut picked: Vec<(usize, &'a mut [u8])> = all
+        .iter_mut()
+        .enumerate()
+        .filter(|(index, _)| indices.contains(index))
+        .map(|(index, buffer)| (index, buffer.as_mut_slice()))
+        .collect();
+    indices
+        .iter()
+        .map(|index| {
+            let at = picked
+                .iter()
+                .position(|(i, _)| i == index)
+                .expect("distinct buffers");
+            picked.swap_remove(at).1
+        })
+        .collect()
+}
+
+/// Calls `$f::<I, O>($args...)` with the channel types `I` and `O` of bit depths `$input` and
+/// `$output`, as `CreateScanlineHelper` instantiates `GenericScanlineHelper`
+/// (src/OpenColorIO/CPUProcessor.cpp:187-238 @ v2.5.2).
+#[allow(unused_macros)] // Each test crate uses a subset.
+macro_rules! with_channel_types {
+    ($input:expr, $output:expr, $f:ident($($args:expr),*)) => {{
+        use ocio_ops::open_color_types::BitDepth as B;
+        macro_rules! out {
+            ($i:ty) => {
+                match $output {
+                    B::Uint8 => $f::<$i, u8>($($args),*),
+                    B::Uint10 | B::Uint12 | B::Uint16 => $f::<$i, u16>($($args),*),
+                    B::F16 => $f::<$i, half::f16>($($args),*),
+                    B::F32 => $f::<$i, f32>($($args),*),
+                    other => panic!("no channel type for {other:?}"),
+                }
+            };
+        }
+        match $input {
+            B::Uint8 => out!(u8),
+            B::Uint10 | B::Uint12 | B::Uint16 => out!(u16),
+            B::F16 => out!(half::f16),
+            B::F32 => out!(f32),
+            other => panic!("no channel type for {other:?}"),
+        }
+    }};
+}
+#[allow(unused_imports)]
+pub(crate) use with_channel_types;
+
+/// A port description of either kind.
+#[derive(Debug)]
+pub(crate) enum PortImage<B: AsRef<[u8]>> {
+    /// A packed image.
+    Packed(PackedImageDesc<B>),
+    /// A planar image.
+    Planar(PlanarImageDesc<B>),
+}
+
+impl<B: AsRef<[u8]>> PortImage<B> {
+    /// The description.
+    pub(crate) fn desc(&self) -> &dyn ImageDesc {
+        match self {
+            PortImage::Packed(desc) => desc,
+            PortImage::Planar(desc) => desc,
+        }
+    }
+}
+
+impl<B: AsRef<[u8]> + AsMut<[u8]>> PortImage<B> {
+    /// The description, for the CPU engine to write.
+    pub(crate) fn desc_mut(&mut self) -> &mut dyn ImageDescMut {
+        match self {
+            PortImage::Packed(desc) => desc,
+            PortImage::Planar(desc) => desc,
+        }
+    }
+}
+
+/// The port's description of `image`, whose request buffers `take` gives by index (each at
+/// most once): packed, planes in separate buffers, or planes in one buffer.
+pub(crate) fn port_image<B: AsRef<[u8]>>(
+    image: &Image,
+    mut take: impl FnMut(usize) -> Bytes<B>,
+) -> Result<PortImage<B>>
+where
+    Bytes<B>: PixelData<Bytes = B>,
+{
+    let spec = match image {
+        Image::Packed(spec) => {
+            let data = At(take(spec.data.buffer), spec.data.offset);
+            return port_packed(spec, data).map(PortImage::Packed);
+        }
+        Image::Planar(spec) => spec,
+    };
+    let (width, height) = (spec.width as usize, spec.height as usize);
+    let (bit_depth, [x, y]) = match spec.layout {
+        Some((depth, [x, y])) => (
+            port_depth(supported(depth)),
+            [port_stride(x), port_stride(y)],
+        ),
+        None => (BitDepth::F32, [AUTO_STRIDE; 2]),
+    };
+    let first = spec.planes[0].buffer;
+    let offset = |k: usize| spec.planes[k].offset;
+    let desc = if spec.planes.iter().all(|plane| plane.buffer == first) {
+        PlanarImageDesc::in_one_buffer(
+            take(first),
+            offset(0),
+            offset(1),
+            offset(2),
+            (spec.planes.len() == 4).then(|| offset(3)),
+            width,
+            height,
+            bit_depth,
+            x,
+            y,
+        )
+    } else {
+        let mut plane = |k: usize| At(take(spec.planes[k].buffer), offset(k));
+        let (r, g, b) = (plane(0), plane(1), plane(2));
+        let alpha = (spec.planes.len() == 4).then(|| plane(3));
+        match spec.layout {
+            None => PlanarImageDesc::new(r, g, b, alpha, width, height),
+            Some(_) => {
+                PlanarImageDesc::with_strides(r, g, b, alpha, width, height, bit_depth, x, y)
+            }
+        }
+    };
+    desc.map(PortImage::Planar)
+}
+
+/// What a destination buffer holds before an apply.
+pub(crate) const PREFILL: [u8; 5] = [0xa5, 0x5a, 0xc3, 0x3c, 0x96];
+
+/// The pairs of input and output bit depths of the pixel tests.
+pub(crate) const PAIRS: [(Depth, Depth); 12] = [
+    (Depth::F32, Depth::F32),
+    (Depth::Uint8, Depth::Uint8),
+    (Depth::Uint10, Depth::Uint10),
+    (Depth::Uint12, Depth::Uint12),
+    (Depth::Uint16, Depth::Uint16),
+    (Depth::F16, Depth::F16),
+    (Depth::F32, Depth::Uint8),
+    (Depth::Uint8, Depth::F32),
+    (Depth::F32, Depth::F16),
+    (Depth::F16, Depth::F32),
+    (Depth::Uint16, Depth::Uint10),
+    (Depth::Uint12, Depth::F16),
+];
+
+/// A layout, for any bit depth and size.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Shape {
+    /// A packed image in `channels`, with strides from the channel size plus padding: bytes
+    /// after each channel, pixel and row. A negative pixel padding flips the pixels (right to
+    /// left); a negative row padding flips the rows (bottom-up).
+    Packed(Channels, [i64; 3]),
+    /// Planes R, G, B (and A), separate or in one buffer, rows flipped or not.
+    Planar {
+        alpha: bool,
+        one_buffer: bool,
+        flipped: bool,
+    },
+}
+
+/// The layouts the CPU engine packs channel by channel: none is RGBA-packed.
+pub(crate) const GENERIC_SHAPES: [Shape; 12] = [
+    Shape::Packed(Channels::Count(3), [0, 0, 0]),
+    Shape::Packed(Channels::Order(ChannelOrder::Bgra), [0, 0, 0]),
+    Shape::Packed(Channels::Order(ChannelOrder::Abgr), [0, 0, 0]),
+    Shape::Packed(Channels::Order(ChannelOrder::Bgr), [0, 0, 0]),
+    // RGBA with bytes after each channel, or after each pixel, and padded rows.
+    Shape::Packed(Channels::Count(4), [2, 0, 8]),
+    Shape::Packed(Channels::Count(4), [0, 4, 0]),
+    // BGRA bottom-up; RGB right to left.
+    Shape::Packed(Channels::Order(ChannelOrder::Bgra), [0, 0, -1]),
+    Shape::Packed(Channels::Count(3), [0, -1, 0]),
+    Shape::Planar {
+        alpha: false,
+        one_buffer: false,
+        flipped: false,
+    },
+    Shape::Planar {
+        alpha: true,
+        one_buffer: false,
+        flipped: false,
+    },
+    Shape::Planar {
+        alpha: true,
+        one_buffer: true,
+        flipped: false,
+    },
+    Shape::Planar {
+        alpha: false,
+        one_buffer: false,
+        flipped: true,
+    },
+];
+
+/// RGBA-packed layouts, which the CPU engine processes a whole row at a time: tight, with
+/// padded rows, and bottom-up.
+pub(crate) const PACKED_SHAPES: [Shape; 3] = [
+    Shape::Packed(Channels::Count(4), [0, 0, 0]),
+    Shape::Packed(Channels::Order(ChannelOrder::Rgba), [0, 0, 24]),
+    Shape::Packed(Channels::Count(4), [0, 0, -1]),
+];
+
+/// Adds a buffer of `size` bytes: source values of `depth` (seeded by `seed`), or the prefill.
+fn add_buffer(request: &mut Request, depth: Depth, size: usize, seed: Option<u64>) -> usize {
+    request.buffer(match seed {
+        Some(seed) => Buffer::Bytes(source_bytes(port_depth(depth), size, seed)),
+        None => Buffer::fill(size, &PREFILL),
+    })
+}
+
+/// Adds an image of `shape` and `depth` to `request`, over new buffers that hold its pixels in
+/// their middle: source values when `seed` is given, the prefill otherwise.
+pub(crate) fn add_image(
+    request: &mut Request,
+    shape: Shape,
+    depth: Depth,
+    (width, height): (i64, i64),
+    seed: Option<u64>,
+) -> Image {
+    let item = channel_bytes(depth) as i64;
+    match shape {
+        Shape::Packed(channels, [chan_pad, pixel_pad, row_pad]) => {
+            let n = match channels {
+                Channels::Count(n) => n,
+                Channels::Order(order) => order.channels() as i64,
+                Channels::OrderValue(_) => 4,
+            };
+            let chan = item + chan_pad;
+            let x = if pixel_pad < 0 {
+                -(chan * n)
+            } else {
+                chan * n + pixel_pad
+            };
+            let y = if row_pad < 0 {
+                -(x.abs() * width)
+            } else {
+                x.abs() * width + row_pad
+            };
+            let mut spec = Packed::new(Data::at(0, 0), width, height, channels).layout(
+                depth,
+                [Stride::Bytes(chan), Stride::Bytes(x), Stride::Bytes(y)],
+            );
+            let reach = packed_reach(&spec) as usize;
+            let buffer = add_buffer(request, depth, 2 * reach + 64, seed);
+            spec.data = Data::at(buffer, reach + 32);
+            request.image(spec.clone());
+            Image::Packed(spec)
+        }
+        Shape::Planar {
+            alpha,
+            one_buffer,
+            flipped,
+        } => {
+            let y = if flipped {
+                -(item * width)
+            } else {
+                item * width
+            };
+            let mut spec = Planar::new(Vec::new(), width, height)
+                .layout(depth, [Stride::Auto, Stride::Bytes(y)]);
+            let reach = planar_reach(&spec) as usize;
+            let span = 2 * reach + 64;
+            let planes = if alpha { 4 } else { 3 };
+            spec.planes = if one_buffer {
+                let buffer = add_buffer(request, depth, planes * span, seed);
+                (0..planes)
+                    .map(|k| Data::at(buffer, k * span + reach + 32))
+                    .collect()
+            } else {
+                (0..planes)
+                    .map(|k| {
+                        let seed = seed.map(|s| s + k as u64);
+                        Data::at(add_buffer(request, depth, span, seed), reach + 32)
+                    })
+                    .collect()
+            };
+            request.image(spec.clone());
+            Image::Planar(spec)
+        }
+    }
+}
+
+/// The request buffers an image's channel positions index, in their order.
+pub(crate) fn buffer_indices(image: &Image) -> Vec<usize> {
+    match image {
+        Image::Packed(spec) => vec![spec.data.buffer],
+        Image::Planar(spec) => {
+            let first = spec.planes[0].buffer;
+            if spec.planes.iter().all(|p| p.buffer == first) {
+                vec![first]
+            } else {
+                spec.planes.iter().map(|p| p.buffer).collect()
+            }
+        }
     }
 }
