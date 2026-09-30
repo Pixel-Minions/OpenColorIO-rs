@@ -42,6 +42,8 @@ compile_error!(
 );
 
 pub mod avx;
+pub mod avx2;
+pub mod avx512;
 pub mod cpu_info;
 pub mod exception;
 pub mod hash_utils;

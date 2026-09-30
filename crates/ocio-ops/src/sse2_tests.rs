@@ -21,11 +21,23 @@ use crate::sse2::{PackDepth, sse2_rgba_pack_load, sse2_rgba_pack_store};
 pub(crate) struct Pack {
     pub(crate) load: fn(PackDepth, u32) -> f32,
     pub(crate) store: fn(PackDepth, f32) -> u32,
+    /// Whether the test runs `LoadMasked`/`StoreMasked` too (AVX-512).
+    pub(crate) masked: Option<Masked>,
+}
+
+/// The masked `Load`/`Store` of a pack (AVX-512): value `index` of a block, `pixel_count` pixels.
+#[derive(Clone, Copy)]
+pub(crate) struct Masked {
+    pub(crate) load: fn(PackDepth, u32, usize, usize) -> f32,
+    pub(crate) writes: fn(usize, usize) -> bool,
+    /// Values per masked call (64: 16 RGBA pixels).
+    pub(crate) values: usize,
 }
 
 const SSE2: Pack = Pack {
     load: sse2_rgba_pack_load,
     store: sse2_rgba_pack_store,
+    masked: None,
 };
 
 /// A stored value as C++ `(float)value`: integers exactly, halves through Imath's
@@ -50,7 +62,8 @@ fn scale_unsigned(depth: PackDepth, i: u32) -> u32 {
     }
 }
 
-/// Port of `testConvert_OutBitDepth<inBD, outBD>` (tests/cpu/SSE2_tests.cpp:76-120 @ v2.5.2).
+/// Port of `testConvert_OutBitDepth<inBD, outBD>` (tests/cpu/SSE2_tests.cpp:76-120 @ v2.5.2),
+/// with the masked part of tests/cpu/AVX512_tests.cpp:121-155 for AVX-512.
 fn test_convert_out_bit_depth(pack: Pack, in_bd: PackDepth, out_bd: PackDepth) {
     let max_value = if in_bd.is_float() {
         65536
@@ -89,6 +102,37 @@ fn test_convert_out_bit_depth(pack: Pack, in_bd: PackDepth, out_bd: PackDepth) {
             !floats_differ(v, actual, 0, false),
             "expected: {v} != actual: {actual} : {in_bd:?} -> {out_bd:?} (value {i})"
         );
+    }
+
+    // Test Load/Store Masked.
+    let Some(masked) = pack.masked else {
+        return;
+    };
+    for pixel_count in 0..=16 {
+        // reset all values to zero
+        let mut out_image = vec![0u32; in_image.len()];
+
+        for (j, out) in out_image.iter_mut().enumerate().take(masked.values) {
+            let loaded = (masked.load)(in_bd, in_image[j], j, pixel_count) * scale;
+            if (masked.writes)(j, pixel_count) {
+                *out = (pack.store)(out_bd, loaded);
+            }
+        }
+
+        for (i, (&raw_in, &raw_out)) in in_image.iter().zip(&out_image).enumerate() {
+            let mut v = to_float(in_bd, raw_in) * scale;
+
+            // values geater then the pixel count should not have been written to
+            if i >= pixel_count * 4 {
+                v = 0.0;
+            }
+            let v = expected(v);
+            let actual = to_float(out_bd, raw_out);
+            assert!(
+                !floats_differ(v, actual, 0, false),
+                "expected: {v} != actual: {actual} : {in_bd:?} -> {out_bd:?} (value {i}, {pixel_count} pixels)"
+            );
+        }
     }
 }
 

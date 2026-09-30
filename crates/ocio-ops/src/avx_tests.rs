@@ -13,6 +13,7 @@ use crate::sse2::tests::{
 const AVX: Pack = Pack {
     load: avx_rgba_pack_load,
     store: avx_rgba_pack_store,
+    masked: None,
 };
 
 /// Port of `OCIO_ADD_TEST(AVX, packed_uint8_to_float_test)` @ v2.5.2.

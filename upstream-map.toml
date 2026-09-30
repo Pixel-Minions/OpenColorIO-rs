@@ -55,14 +55,16 @@ note = "S4: scalar profile. F16C lanes proven against the hardware for all 2^32 
 [[file]]
 path = "src/OpenColorIO/AVX2.h"
 kind = "src"
-target = ["crates/ocio-ops/src/avx2.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/avx2.rs", "crates/ocio-ops/src/avx.rs"]
+status = "done"
+note = "S4: scalar profile. AVX2RGBAPack as per-value Load/Store, F16C lanes in avx.rs; the FMA lane (f32::mul_add) proven against _mm256_fmadd_ps"
 
 [[file]]
 path = "src/OpenColorIO/AVX512.h"
 kind = "src"
-target = ["crates/ocio-ops/src/avx512.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/avx512.rs", "crates/ocio-ops/src/avx.rs"]
+status = "done"
+note = "S4: scalar profile. AVX512RGBAPack as per-value Load/Store, with LoadMasked/StoreMasked; F16C lanes in avx.rs"
 
 [[file]]
 path = "src/OpenColorIO/Baker.cpp"
@@ -3991,13 +3993,15 @@ note = "tests of out-of-scope components"
 path = "tests/cpu/AVX2_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/avx2_tests.rs"]
-status = "todo"
+status = "done"
+note = "S4: all 7 tests (bodies in sse2_tests.rs)"
 
 [[file]]
 path = "tests/cpu/AVX512_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/avx512_tests.rs"]
-status = "todo"
+status = "done"
+note = "S4: all 7 tests, with the masked load/store checks (bodies in sse2_tests.rs)"
 
 [[file]]
 path = "tests/cpu/AVX_tests.cpp"
@@ -4178,9 +4182,9 @@ status = "todo"
 [[file]]
 path = "tests/cpu/SIMD_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-ops/src/sse2_tests.rs", "crates/ocio-ops/src/avx_tests.rs"]
-status = "partial"
-note = "S4: each OCIO_ADD_TEST_<SIMD>(name) registration is the test of that name in the matching *_tests.rs; SSE2 and AVX so far"
+target = ["crates/ocio-ops/src/sse2_tests.rs", "crates/ocio-ops/src/avx_tests.rs", "crates/ocio-ops/src/avx2_tests.rs", "crates/ocio-ops/src/avx512_tests.rs"]
+status = "done"
+note = "S4: each OCIO_ADD_TEST_<SIMD>(name) registration is the test of that name in the matching *_tests.rs"
 
 [[file]]
 path = "tests/cpu/SSE2_tests.cpp"
