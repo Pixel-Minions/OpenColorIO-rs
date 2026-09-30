@@ -61,6 +61,8 @@ pub mod imath_half;
 pub mod logging;
 pub mod math_utils;
 pub mod op;
+pub mod op_data;
+pub mod op_optimizers;
 pub mod open_color_types;
 pub mod ops;
 pub mod platform;
