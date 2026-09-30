@@ -24,8 +24,9 @@ use crate::open_color_types::BitDepth;
 /// copies, as upstream specializes it.
 ///
 /// Port of `BitDepthCast<inBD, outBD>` and `BitDepthCast<BIT_DEPTH_F32, BIT_DEPTH_F32>`
-/// (src/OpenColorIO/CPUProcessor.cpp:20-66 @ v2.5.2).
-pub struct BitDepthCast<I, O> {
+/// (src/OpenColorIO/CPUProcessor.cpp:20-66 @ v2.5.2). Internal to the CPU engine: its in-place
+/// `apply` serves F32 to F32 only.
+pub(crate) struct BitDepthCast<I, O> {
     /// `m_scale = float(BitDepthInfo<outBD>::maxValue) / float(BitDepthInfo<inBD>::maxValue)`.
     scale: f32,
     bit_depths: PhantomData<fn() -> (I, O)>,
@@ -43,7 +44,7 @@ impl<I: BitDepthInfo, O: BitDepthInfo> fmt::Debug for BitDepthCast<I, O> {
 
 impl<I: BitDepthInfo, O: Converter> BitDepthCast<I, O> {
     /// The conversion from `I` to `O`.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         BitDepthCast {
             scale: O::MAX_VALUE as f32 / I::MAX_VALUE as f32,
             bit_depths: PhantomData,
@@ -110,6 +111,9 @@ impl<I: BitDepthInfo + 'static, O: Converter + 'static> CpuOp for BitDepthCast<I
 /// absorbs: "Unsupported bit-depth" for the bit depths the CPU processor doesn't take.
 ///
 /// Port of `CreateGenericBitDepthHelper` (src/OpenColorIO/CPUProcessor.cpp:68-120 @ v2.5.2).
+/// Internal to the CPU engine: public for the port's tests only. The conversions it returns work
+/// between buffers ([`CpuOp::apply_bit_depth`]); in place, only F32 to F32.
+#[doc(hidden)]
 pub fn create_generic_bit_depth_helper(
     input: BitDepth,
     output: BitDepth,

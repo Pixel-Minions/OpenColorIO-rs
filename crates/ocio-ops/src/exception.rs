@@ -17,8 +17,10 @@ const BAD_ALLOC: &str = if cfg!(target_os = "windows") {
     "std::bad_alloc"
 };
 
-/// Which upstream exception type an error corresponds to.
+/// Which upstream exception type an error corresponds to. More may come, as the port reaches
+/// other C++ exceptions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum ExceptionKind {
     /// `OCIO::Exception`.
     Exception,
