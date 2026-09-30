@@ -11,6 +11,8 @@
 //! | Profile | C++ | Runs when |
 //! |---|---|---|
 //! | Generic tetrahedral | `Lut3DTetrahedralRenderer::apply`, scalar branch | no SIMD kernel, or a call with at most one pixel |
+//! | SSE2 tetrahedral | `applyTetrahedralSSE2` | `hasSSE2()` |
+//! | AVX tetrahedral | `applyTetrahedralAVX` | `hasAVX() && !AVXSlow()` |
 //! | AVX2 tetrahedral | `applyTetrahedralAVX2` (FMA) | `hasAVX2() && !AVX2SlowGather()` |
 //! | AVX-512 tetrahedral | `applyTetrahedralAVX512` (FMA) | `hasAVX512()` |
 //! | SSE2 trilinear | `Lut3DRenderer::apply`, `OCIO_USE_SSE2` branch | builds with SSE2 (every x86-64 wheel) |
@@ -25,11 +27,12 @@
 //! neighboring values are huge and of opposite signs, and can then compute `inf * 0` or
 //! `inf - inf`. Every NaN there is the x86 default NaN, so the order cannot change the bits.
 //!
-//! Not ported yet: the SSE2 and AVX tetrahedral kernels (until they are, a CPU without AVX2
-//! runs the scalar branch for every call), and `InvLut3DRenderer` (the exact inverse).
+//! Not ported yet: `InvLut3DRenderer` (the exact inverse).
 
+use super::lut3d_op_cpu_avx::apply_tetrahedral_avx;
 use super::lut3d_op_cpu_avx2::apply_tetrahedral_avx2;
 use super::lut3d_op_cpu_avx512::apply_tetrahedral_avx512;
+use super::lut3d_op_cpu_sse2::apply_tetrahedral_sse2;
 use super::lut3d_op_data::{Interpolation, Lut3DOpData};
 use crate::cpu_info::CpuInfo;
 use crate::math_utils::{clamp, sse_add, sse_cvttps_epi32, sse_max, sse_min, sse_mul};
@@ -38,6 +41,10 @@ use crate::math_utils::{clamp, sse_add, sse_cvttps_epi32, sse_max, sse_min, sse_
 /// (src/OpenColorIO/ops/lut3d/Lut3DOpCPU.cpp:386-416 @ v2.5.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TetrahedralKernel {
+    /// `applyTetrahedralSSE2`
+    Sse2,
+    /// `applyTetrahedralAVX`
+    Avx,
     /// `applyTetrahedralAVX2`
     Avx2,
     /// `applyTetrahedralAVX512`
@@ -49,6 +56,12 @@ pub enum TetrahedralKernel {
 /// The `#if OCIO_USE_*` guards are part of `CpuInfo::has_*`.
 pub fn tetrahedral_kernel(cpu: &CpuInfo) -> Option<TetrahedralKernel> {
     let mut kernel = None;
+    if cpu.has_sse2() {
+        kernel = Some(TetrahedralKernel::Sse2);
+    }
+    if cpu.has_avx() && !cpu.avx_slow() {
+        kernel = Some(TetrahedralKernel::Avx);
+    }
     if cpu.has_avx2() && !cpu.avx2_slow_gather() {
         kernel = Some(TetrahedralKernel::Avx2);
     }
@@ -161,6 +174,10 @@ impl Lut3DTetrahedralRenderer {
             Some(kernel) if num_pixels > 1 => {
                 let count = i32::try_from(num_pixels).expect("pixel count fits in an int");
                 match kernel {
+                    TetrahedralKernel::Sse2 => {
+                        apply_tetrahedral_sse2(lut, dim, input, output, count)
+                    }
+                    TetrahedralKernel::Avx => apply_tetrahedral_avx(lut, dim, input, output, count),
                     TetrahedralKernel::Avx2 => {
                         apply_tetrahedral_avx2(lut, dim, input, output, count)
                     }

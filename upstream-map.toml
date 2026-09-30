@@ -1750,7 +1750,7 @@ path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu.rs"]
 status = "partial"
-note = "S4: forward renderers (dispatch to the AVX2 and AVX-512 kernels, the scalar tetrahedral branch, the SSE2 and generic trilinear branches), bit-identical to the wheel on Windows and Rocky 9 for sizes 2-129; the SSE2 and AVX kernels and InvLut3DRenderer not ported"
+note = "S4: forward renderers (dispatch, generic tetrahedral, SSE2 and generic trilinear), bit-identical to the wheel on Windows and Rocky 9 for sizes 2-129; InvLut3DRenderer not ported"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU.h"
@@ -1763,20 +1763,22 @@ note = "S4: GetLut3DRenderer covers forward LUTs only"
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_AVX.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu_avx.rs"]
-status = "todo"
+status = "done"
+note = "S4: exact scalar profile of the F32 kernel (the only instantiation)"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_AVX.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu_avx.rs"]
-status = "todo"
+status = "done"
+note = "S4"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_AVX2.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu_avx2.rs"]
 status = "done"
-note = "S4: exact scalar profile of the F32 kernel (FMA as f32::mul_add)"
+note = "S4: exact scalar profile of the F32 kernel (FMA as f32::mul_add); lane-identical to AVX-512, which matches the wheel"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_AVX2.h"
@@ -1803,13 +1805,15 @@ note = "S4"
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_SSE2.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu_sse2.rs"]
-status = "todo"
+status = "done"
+note = "S4: exact scalar profile of the F32 kernel (the only instantiation). x86 only; SSE2NEON (ARM) variants not ported"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_SSE2.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu_sse2.rs"]
-status = "todo"
+status = "done"
+note = "S4"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpData.cpp"

@@ -21,11 +21,15 @@
 //! - The `nan_inf_*` tests use LUTs that hold NaNs and infinities, which only `lut3d_apply`
 //!   can send (as raw float32); OCIO sanitizes them when it builds the renderer.
 //! - [`partial_blocks`] checks pixel counts that leave a partial SIMD block.
+//! - [`profiles_against_the_wheel`] prints which numeric profile matches the wheel here.
 
-use ocio_ops::cpu_info::CpuInfo;
+use ocio_ops::cpu_info::{
+    BuildConfig, CpuInfo, X86_CPU_FLAG_AVX, X86_CPU_FLAG_AVX2, X86_CPU_FLAG_AVX512,
+    X86_CPU_FLAG_SSE2,
+};
 use ocio_ops::ops::lut3d::lut3d_op_cpu::{ForwardLut3DRenderer, get_forward_lut3d_renderer};
 use ocio_ops::ops::lut3d::lut3d_op_data::{Interpolation, Lut3DArray, Lut3DOpData};
-use ocio_testkit::compare::assert_pixels_bits_eq;
+use ocio_testkit::compare::{assert_pixels_bits_eq, f32_bits_report};
 use ocio_testkit::oracle::{bytes_to_f32, f32_to_bytes};
 use ocio_testkit::{Oracle, probe};
 use serde_json::{Value, json};
@@ -547,6 +551,123 @@ fn nan_inf_size_6() {
 #[test]
 fn nan_inf_size_33() {
     check_nan_inf(33);
+}
+
+/// Every numeric profile against the wheel on 33^3 random, identity and extreme LUTs, and the
+/// profiles against each other. Prints the tables (`--nocapture`); asserts that the profiles
+/// this machine dispatches to are the ones that match.
+#[test]
+fn profiles_against_the_wheel() {
+    let grid_size = 33;
+    let pixels = probe_pixels(0x5052_4f47);
+    let cpu = CpuInfo::instance();
+    let sse2 = X86_CPU_FLAG_SSE2;
+    let profiles = [
+        ("generic", cpu.with_flags(0)),
+        ("SSE2", cpu.with_flags(sse2)),
+        ("AVX", cpu.with_flags(sse2 | X86_CPU_FLAG_AVX)),
+        (
+            "AVX2",
+            cpu.with_flags(sse2 | X86_CPU_FLAG_AVX | X86_CPU_FLAG_AVX2),
+        ),
+        (
+            "AVX-512",
+            cpu.with_flags(sse2 | X86_CPU_FLAG_AVX | X86_CPU_FLAG_AVX2 | X86_CPU_FLAG_AVX512),
+        ),
+    ];
+    let summary = |report: &Option<String>| {
+        report.as_ref().map_or("identical".to_string(), |r| {
+            r.lines().next().unwrap_or_default().to_string()
+        })
+    };
+
+    for (kind, values) in [
+        ("random", random_lut(grid_size, 0x5052_4f46)),
+        ("identity", identity_lut(grid_size)),
+        ("extreme", extreme_lut(grid_size, 0x5052_4f48)),
+    ] {
+        let expected = wheel(
+            &lut_spec(grid_size, &values, Interpolation::Tetrahedral),
+            &pixels,
+        );
+        let dispatched = renderer(grid_size, &values, Interpolation::Tetrahedral, cpu);
+        let ForwardLut3DRenderer::Tetrahedral(t) = &dispatched else {
+            panic!("a tetrahedral renderer")
+        };
+        println!(
+            "{kind} 33^3 LUT, tetrahedral, {} pixels in one call; this machine dispatches to {:?}",
+            pixels.len() / 4,
+            t.kernel()
+        );
+        let mut outputs = Vec::new();
+        for (name, profile_cpu) in &profiles {
+            let r = renderer(grid_size, &values, Interpolation::Tetrahedral, profile_cpu);
+            let out = port(&r, &pixels);
+            let report = f32_bits_report(&expected, &out, Some(&pixels), 4);
+            println!("  {name:<8} vs wheel: {}", summary(&report));
+            outputs.push((*name, out));
+        }
+        for i in 0..outputs.len() {
+            for j in i + 1..outputs.len() {
+                let report = f32_bits_report(&outputs[i].1, &outputs[j].1, Some(&pixels), 4);
+                // How many of the differences are only the sign of a zero.
+                let signed_zeros = outputs[i]
+                    .1
+                    .iter()
+                    .zip(&outputs[j].1)
+                    .filter(|(a, b)| a.to_bits() != b.to_bits() && **a == 0.0 && **b == 0.0)
+                    .count();
+                println!(
+                    "  {:<8} vs {:<8}: {} ({signed_zeros} of them +0 vs -0)",
+                    outputs[i].0,
+                    outputs[j].0,
+                    summary(&report)
+                );
+                if let Some(r) = report {
+                    for line in r.lines().skip(1).take(2) {
+                        println!("      {line}");
+                    }
+                }
+            }
+        }
+        // The profile CPUInfo dispatches to on this machine matches the wheel.
+        assert_pixels_bits_eq(
+            &format!("{kind} LUT, dispatched tetrahedral profile"),
+            &pixels,
+            4,
+            &expected,
+            &port(&dispatched, &pixels),
+        );
+
+        let expected = wheel(
+            &lut_spec(grid_size, &values, Interpolation::Linear),
+            &pixels,
+        );
+        for (name, build) in [
+            ("SSE2", BuildConfig::X86_64_WHEEL),
+            ("generic", BuildConfig::NO_SIMD),
+        ] {
+            let r = renderer(
+                grid_size,
+                &values,
+                Interpolation::Linear,
+                &cpu.with_build(build),
+            );
+            let report = f32_bits_report(&expected, &port(&r, &pixels), Some(&pixels), 4);
+            println!("  trilinear {name:<8} vs wheel: {}", summary(&report));
+        }
+        // The trilinear code path of this build (SSE2) matches the wheel.
+        assert_pixels_bits_eq(
+            &format!("{kind} LUT, trilinear"),
+            &pixels,
+            4,
+            &expected,
+            &port(
+                &renderer(grid_size, &values, Interpolation::Linear, cpu),
+                &pixels,
+            ),
+        );
+    }
 }
 
 /// Calls whose pixel count leaves a partial SIMD block: the AVX-512 kernel's masked last block
