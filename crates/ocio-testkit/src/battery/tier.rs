@@ -343,4 +343,51 @@ mod tests {
             .sum();
         assert_eq!(random, 1_000_000);
     }
+
+    /// Fingerprints of what each tier actually probes (CLAUDE.md rule 2 allows pinning
+    /// generated inputs): a digest of every buffer of its explicit and generated probe sets,
+    /// names and bits, and the size of its break-point neighbourhoods. A change to a generator
+    /// or a plan that changes what a tier compares fails here; changing it on purpose means
+    /// updating the digest in the same commit and saying why. Every tier's neighbourhoods hold
+    /// at least the S2 tests' ±3 bit-pattern neighbours.
+    #[test]
+    fn the_tiers_buffers_are_pinned() {
+        fn digest(sets: &[ProbeSet]) -> u64 {
+            let mut h = xxhash_rust::xxh3::Xxh3::new();
+            for set in sets {
+                for (name, pixels) in set.rgba_buffers() {
+                    h.update(name.as_bytes());
+                    h.update(&(pixels.len() as u64).to_le_bytes());
+                    h.update(&crate::oracle::f32_to_bytes(&pixels));
+                }
+            }
+            h.digest()
+        }
+        let actual: Vec<(&str, u64, u64, u32)> = Tier::ALL
+            .iter()
+            .map(|tier| {
+                let plan = tier.plan();
+                (
+                    tier.name(),
+                    digest(&plan.probes),
+                    digest(&plan.generated_probes),
+                    plan.breakpoint_ulps,
+                )
+            })
+            .collect();
+        let expected: [(&str, u64, u64, u32); 3] = [
+            ("quick", 0x8f82_c648_5b9f_aa43, 0x8f82_c648_5b9f_aa43, 3),
+            ("full", 0x7ed6_f116_c709_c5d6, 0x8f82_c648_5b9f_aa43, 8),
+            (
+                "exhaustive",
+                0xc139_3fad_9be8_5d71,
+                0x7ed6_f116_c709_c5d6,
+                64,
+            ),
+        ];
+        assert_eq!(actual, expected, "{actual:#x?}");
+        for (tier, _, _, ulps) in actual {
+            assert!(ulps >= 3, "{tier}: neighbourhoods of {ulps} ulp");
+        }
+    }
 }
