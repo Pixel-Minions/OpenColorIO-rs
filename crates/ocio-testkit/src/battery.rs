@@ -38,7 +38,8 @@
 //!    oracle calls in batches (one process per test at the quick tier), prints a
 //!    [`Summary`], and panics with a report per failing case, combination and probe. A
 //!    warning OCIO logs for a case fails it too (a misspelled optional key is ignored with a
-//!    warning), unless the case allows it ([`params::Case::allow_log`]).
+//!    warning), unless the case allows it with a fragment of that message's own text
+//!    ([`params::Case::allow_log`]).
 //!
 //! Comparisons are exact. Waiver W0002 applies automatically, and only, to the channels of NaN
 //! parameters ([`params::Case::compare`]); a case can narrow it

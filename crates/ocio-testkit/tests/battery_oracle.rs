@@ -652,3 +652,31 @@ fn an_ocio_warning_fails_its_case_unless_allowed() {
     let summary = run_with(&family, &small_plan());
     assert_eq!(summary.comparisons, 2);
 }
+
+/// `Case::allow_log` takes only a fragment specific to the message. An empty fragment, or
+/// OCIO's `[OpenColorIO Warning]` prefix, would allow every warning, a misspelled key's
+/// included, and generated cases inherit it (the verifier's repro: with `allow_log("")`, a
+/// misspelled key in a case whose pixels match the default's passed). A fragment of the
+/// wheel's message, here with its prefix, still allows it.
+#[test]
+fn allow_log_needs_a_fragment_specific_to_the_wheels_message() {
+    for fragment in ["", "[OpenColorIO Warning]"] {
+        let result = catch_unwind(|| Case::new("base NaN", Base(f64::NAN)).allow_log(fragment));
+        let Err(payload) = result else {
+            panic!("allow_log({fragment:?}) took the fragment");
+        };
+        let message = payload
+            .downcast_ref::<String>()
+            .cloned()
+            .unwrap_or_default();
+        assert!(message.contains("is too broad"), "{fragment:?}: {message}");
+    }
+
+    let mut family =
+        LogFamily::new(vec![Case::new("base NaN", Base(f64::NAN)).allow_log(
+            "[OpenColorIO Warning]: Unknown key in LogTransform: 'bse'",
+        )]);
+    family.spec_bug = SpecBug::UnknownKey;
+    let summary = run_with(&family, &small_plan());
+    assert_eq!(summary.comparisons, 2);
+}

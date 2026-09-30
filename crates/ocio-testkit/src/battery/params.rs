@@ -224,8 +224,29 @@ impl<P: Params> Case<P> {
     /// Allows OCIO log messages that contain `fragment` for this case. Any other message the
     /// wheel logs fails the case: a warning usually means the spec isn't what the family meant
     /// (OCIO ignores a misspelled optional key with a warning). Generated cases inherit this.
+    ///
+    /// The fragment must be specific to the message: at least [`MIN_ALLOWED_LOG_TEXT`]
+    /// characters of the message's own text, past the `[OpenColorIO <level>]: ` prefix that
+    /// OCIO puts on every line it logs (surrounding whitespace doesn't count). Quote what the
+    /// message is about, such as the key and the transform
+    /// (`"Unknown key in LogTransform: 'bse'"`), not a phrase every warning of its kind shares.
+    ///
+    /// # Panics
+    ///
+    /// If the fragment has fewer characters of the message's own text: an empty fragment, or
+    /// the prefix alone (`"[OpenColorIO Warning]"`), would allow every message.
     pub fn allow_log(mut self, fragment: impl Into<String>) -> Self {
-        self.allowed_log.push(fragment.into());
+        let fragment = fragment.into();
+        let own = own_log_text(&fragment).chars().count();
+        assert!(
+            own >= MIN_ALLOWED_LOG_TEXT,
+            "case {:?}: allow_log({fragment:?}) is too broad: it has {own} characters of the \
+             message's own text, past OCIO's `[OpenColorIO <level>]: ` prefix, and needs at \
+             least {MIN_ALLOWED_LOG_TEXT}; quote what the message is about, such as the key \
+             and the transform",
+            self.label
+        );
+        self.allowed_log.push(fragment);
         self
     }
 
@@ -303,6 +324,37 @@ impl<P: Params> Case<P> {
             }
         }
     }
+}
+
+/// The fewest characters of a message's own text that a [`Case::allow_log`] fragment needs.
+pub const MIN_ALLOWED_LOG_TEXT: usize = 10;
+
+/// The prefixes OCIO puts on every line it logs, one per level (`LogError`, `LogWarning`,
+/// `LogInfo` and `LogDebug`, src/OpenColorIO/Logging.cpp:162-204 @ v2.5.2, through
+/// `LogMessage`, :75-88).
+const LOG_PREFIXES: [&str; 4] = [
+    "[OpenColorIO Error]: ",
+    "[OpenColorIO Warning]: ",
+    "[OpenColorIO Info]: ",
+    "[OpenColorIO Debug]: ",
+];
+
+/// The part of a log fragment that only a message's own text can match: the trimmed fragment
+/// without the longest end of a [`LOG_PREFIXES`] prefix that it starts with, trimmed again.
+/// Empty when the whole fragment fits in a prefix.
+fn own_log_text(fragment: &str) -> &str {
+    let fragment = fragment.trim();
+    if LOG_PREFIXES.iter().any(|prefix| prefix.contains(fragment)) {
+        return "";
+    }
+    let overlap = LOG_PREFIXES
+        .iter()
+        .flat_map(|prefix| (0..prefix.len()).map(move |start| &prefix[start..]))
+        .filter(|end| fragment.starts_with(*end))
+        .map(str::len)
+        .max()
+        .unwrap_or(0);
+    fragment[overlap..].trim()
 }
 
 /// The result of one comparison.
@@ -673,6 +725,55 @@ mod tests {
     #[test]
     fn w0002_is_an_approved_waiver() {
         assert_eq!(w0002(), "W0002");
+    }
+
+    /// `allow_log` takes only a fragment of a message's own text: an empty one, OCIO's prefix
+    /// (whole, or the end of it that a fragment starts with) or a few characters past it would
+    /// allow every message, or every message of a kind. Generated cases inherit what it takes.
+    #[test]
+    fn allow_log_takes_only_a_fragment_specific_to_the_message() {
+        for fragment in [
+            "",
+            " \n",
+            "[OpenColorIO Warning]",
+            "[OpenColorIO Warning]: ",
+            "[OpenColorIO Error]:",
+            "[OpenColorIO",
+            "OpenColorIO Warning",
+            "Warning]: ",
+            "]: At line",
+            "[OpenColorIO Warning]: At line",
+            "unknown",
+        ] {
+            let result =
+                std::panic::catch_unwind(|| Case::new("typical", toy()).allow_log(fragment));
+            let Err(payload) = result else {
+                panic!("allow_log({fragment:?}) took the fragment");
+            };
+            let message = payload
+                .downcast_ref::<String>()
+                .cloned()
+                .unwrap_or_default();
+            assert!(message.contains("is too broad"), "{fragment:?}: {message}");
+        }
+
+        // What the logging function receives for a key LogTransform doesn't know
+        // (`LogUnknownKeyWarning`, src/OpenColorIO/OCIOYaml.cpp:248-257 @ v2.5.2).
+        let message = "[OpenColorIO Warning]: Unknown key in LogTransform: 'bse'.\n";
+        let other_key = "[OpenColorIO Warning]: Unknown key in LogTransform: 'bas'.\n";
+        for fragment in [
+            "Unknown key in LogTransform: 'bse'",
+            "[OpenColorIO Warning]: Unknown key in LogTransform: 'bse'",
+            "in LogTransform: 'bse'",
+        ] {
+            let case = Case::new("typical", toy()).allow_log(fragment);
+            assert!(case.allows_log(message), "{fragment:?}");
+            assert!(!case.allows_log(other_key), "{fragment:?}");
+            for generated in sampled_mutations(&case) {
+                assert!(generated.allows_log(message), "{fragment:?}");
+                assert!(!generated.allows_log(other_key), "{fragment:?}");
+            }
+        }
     }
 
     /// Nothing but the battery compares under W0002: outside `compare.rs`, which defines the
