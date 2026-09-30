@@ -46,6 +46,7 @@ pub mod avx2;
 pub mod avx512;
 pub mod cfmt;
 pub mod cpu_info;
+pub mod dynamic_property;
 pub mod exception;
 pub mod format_metadata;
 pub mod hash_utils;

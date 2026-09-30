@@ -5,7 +5,7 @@
 //! their helpers from `src/OpenColorIO/ParseUtils.cpp`.
 //!
 //! They live in `ocio-ops` because op data uses them; the public `ocio` crate re-exports them.
-//! So far: `TransformDirection` and `NegativeStyle`.
+//! So far: `TransformDirection`, `NegativeStyle` and `DynamicPropertyType`.
 
 /// Port of `TransformDirection` (include/OpenColorIO/OpenColorTypes.h:355-359 @ v2.5.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -59,6 +59,28 @@ pub enum NegativeStyle {
     PassThru,
     /// `NEGATIVE_LINEAR`: linearly extrapolate the curve for negative values.
     Linear,
+}
+
+/// What a dynamic property holds: a double for the first three, a grading value for the
+/// others.
+///
+/// Port of `DynamicPropertyType` (include/OpenColorIO/OpenColorTypes.h:568-578 @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DynamicPropertyType {
+    /// `DYNAMIC_PROPERTY_EXPOSURE`: image exposure (a double).
+    Exposure = 0,
+    /// `DYNAMIC_PROPERTY_CONTRAST`: image contrast (a double).
+    Contrast,
+    /// `DYNAMIC_PROPERTY_GAMMA`: image gamma (a double).
+    Gamma,
+    /// `DYNAMIC_PROPERTY_GRADING_PRIMARY`: used by `GradingPrimaryTransform`.
+    GradingPrimary,
+    /// `DYNAMIC_PROPERTY_GRADING_RGBCURVE`: used by `GradingRGBCurveTransform`.
+    GradingRgbCurve,
+    /// `DYNAMIC_PROPERTY_GRADING_TONE`: used by `GradingToneTransform`.
+    GradingTone,
+    /// `DYNAMIC_PROPERTY_GRADING_HUECURVE`: used by `GradingHueCurveTransform`.
+    GradingHueCurve,
 }
 
 #[cfg(test)]
