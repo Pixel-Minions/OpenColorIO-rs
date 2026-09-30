@@ -26,16 +26,24 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-1. Huge images fail on Windows
 
 - **Upstream:** image sizes and positions are C `long`, which is 32 bits on Windows and 64 bits
-  on Linux. On Windows, the non-packed paths fail on images of 2^31 pixels or more (about
-  46,000 × 46,000) with "Invalid output image position." (`ImagePacking.cpp:35-39, 105-109`,
-  `ScanlineHelper.cpp` @ v2.5.2). The failure can come after the first rows are written:
-  through the Windows wheel, a planar F32 image of 65,536 × 65,537 pixels processes its first
-  row and then raises. Linux processes all of them (2^32 pixels of 65,536 × 65,536 in 17 s).
+  on Linux. On Windows, for images of 2^31 pixels or more (about 46,000 × 46,000), the paths
+  that pack channel by channel count the pixels as `width * height` and start each scanline at
+  pixel `y * width`, and both wrap (`ImagePacking.cpp:33-63, 103-133, 173-203, 243-273`,
+  `ScanlineHelper.cpp:142-146, 169-173` @ v2.5.2). Where a scanline's wrapped start falls
+  outside the wrapped count, reading it raises "Invalid output image position.", and writing
+  it silently writes nothing, so the row is left as it was. Where it falls inside, the scanline
+  is read or written from that pixel: for a top-down layout, that is the wrong pixels, from
+  the middle of a row on into the next one; it can also reach outside the image's memory
+  (U-15). Through the Windows wheel, a planar F32 image of 65,536 × 65,537 pixels processes its
+  first row and then raises. Linux processes all of them (2^32 pixels of 65,536 × 65,536 in
+  17 s).
 - **Who notices:** applications that process single images of over 2 gigapixels on Windows.
 - **A fix:** 64-bit sizes on every platform, so those images work on Windows too.
 - **Status:** matched in `p1-bitdepth` (1.1d): the message and every buffer byte, including the
   partly written output, checked against the Windows wheel
-  (`crates/ocio-ops/tests/image_packing_oracle.rs`). The owner chose to match it on 2026-09-30.
+  (`crates/ocio-ops/tests/image_packing_oracle.rs`), and wrapped starts on small buffers
+  (`crates/ocio-ops/src/image_packing_tests.rs`). The owner chose to match it on 2026-09-30.
+  Where a wrapped scanline would reach outside the memory, the port returns an error (U-15).
 
 ### I-2. "Invalid x stride." is checked on Windows only
 
@@ -350,3 +358,18 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
     RGBA-packed one returns "ScanlineHelper Error: The image is too tall: the scanline index
     overflows.".
   The oracle refuses these sizes, so `scanline_helper_tests.rs` defines the behaviour.
+
+### U-15. A wrapped scanline reaches outside the image
+
+- **Upstream:** on Windows, a scanline whose wrapped start (I-1) falls inside the image starts in
+  the middle of a row, and its `width` pixels run past the row's end
+  (`ImagePacking.cpp:65-85, 135-155, 208-228, 278-298`). For the last rows, and for right-to-left
+  or bottom-up layouts, that is outside the image's memory: row 87,382 of a right-to-left UINT8
+  plane of 49,152 × 87,383 pixels starts at pixel 32,768 of row 0, and is written up to 32,768
+  bytes before the plane.
+- **Decided** (general rule): the port returns an error instead, before reading or writing any
+  pixel of the scanline: "ImagePacking Error: The image has too many pixels: the scanline's
+  pixel index overflows." Scanlines that stay inside the buffers are read and written where
+  upstream reads and writes them (I-1).
+- **Status:** matched in `p1-bitdepth`, in `crates/ocio-ops/src/image_packing.rs`;
+  `image_packing_tests.rs` checks it on small buffers, with that row's wrapped start on Windows.
