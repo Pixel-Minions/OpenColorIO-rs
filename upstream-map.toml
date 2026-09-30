@@ -48,19 +48,22 @@ note = "build system"
 path = "src/OpenColorIO/AVX.h"
 kind = "src"
 target = ["crates/ocio-ops/src/avx.rs"]
-status = "todo"
+status = "done"
+note = "S4: scalar profile. F16C lanes proven against the hardware for all 2^32 floats and 65,536 halves; AVXRGBAPack as per-value Load/Store"
 
 [[file]]
 path = "src/OpenColorIO/AVX2.h"
 kind = "src"
-target = ["crates/ocio-ops/src/avx2.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/avx2.rs", "crates/ocio-ops/src/avx.rs"]
+status = "done"
+note = "S4: scalar profile. AVX2RGBAPack as per-value Load/Store, F16C lanes in avx.rs; the FMA lane (f32::mul_add) proven against _mm256_fmadd_ps"
 
 [[file]]
 path = "src/OpenColorIO/AVX512.h"
 kind = "src"
-target = ["crates/ocio-ops/src/avx512.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/avx512.rs", "crates/ocio-ops/src/avx.rs"]
+status = "done"
+note = "S4: scalar profile. AVX512RGBAPack as per-value Load/Store, with LoadMasked/StoreMasked; F16C lanes in avx.rs"
 
 [[file]]
 path = "src/OpenColorIO/Baker.cpp"
@@ -102,13 +105,15 @@ note = "build system"
 path = "src/OpenColorIO/CPUInfo.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/cpu_info.rs"]
-status = "todo"
+status = "done"
+note = "S4: x86-64, ARM64 and unknown branches (x86-32 asm not needed). Output identical to the wheels' ociocpuinfo on Windows and Rocky 9 (checked by hand; the automated test needs the cpu_info oracle command). No EPYC 9V45 quirk: that is post-2.5.2 (upstream c2bd98f7)"
 
 [[file]]
 path = "src/OpenColorIO/CPUInfo.h"
 kind = "src"
 target = ["crates/ocio-ops/src/cpu_info.rs"]
-status = "todo"
+status = "done"
+note = "S4: flags and has*() accessors; the OCIO_USE_* switches are BuildConfig"
 
 [[file]]
 path = "src/OpenColorIO/CPUInfoConfig.h.in"
@@ -498,7 +503,8 @@ status = "todo"
 path = "src/OpenColorIO/SSE2.h"
 kind = "src"
 target = ["crates/ocio-ops/src/sse2.rs"]
-status = "todo"
+status = "done"
+note = "S4: scalar profile. sse2_clamp, sse2_blendv and the software half conversions proven against the SSE2 intrinsics for all 2^32 floats and 65,536 halves; SSE2RGBAPack as per-value Load/Store (the transposes only move values). x86 only; SSE2NEON (ARM) variants not ported"
 
 [[file]]
 path = "src/OpenColorIO/ScanlineHelper.cpp"
@@ -1722,73 +1728,85 @@ status = "todo"
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu.rs"]
-status = "todo"
+status = "partial"
+note = "S4: forward renderers (dispatch, generic tetrahedral, SSE2 and generic trilinear), bit-identical to the wheel on Windows and Rocky 9 for sizes 2-129; InvLut3DRenderer not ported"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu.rs"]
-status = "todo"
+status = "partial"
+note = "S4: GetLut3DRenderer covers forward LUTs only"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_AVX.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu_avx.rs"]
-status = "todo"
+status = "done"
+note = "S4: exact scalar profile of the F32 kernel (the only instantiation)"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_AVX.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu_avx.rs"]
-status = "todo"
+status = "done"
+note = "S4"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_AVX2.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu_avx2.rs"]
-status = "todo"
+status = "done"
+note = "S4: exact scalar profile of the F32 kernel (FMA as f32::mul_add); lane-identical to AVX-512, which matches the wheel"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_AVX2.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu_avx2.rs"]
-status = "todo"
+status = "done"
+note = "S4"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_AVX512.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu_avx512.rs"]
-status = "todo"
+status = "done"
+note = "S4: exact scalar profile of the F32 kernel (FMA as f32::mul_add); the kernel the wheel runs on Zen 5, bit-identical on Windows and Rocky 9"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_AVX512.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu_avx512.rs"]
-status = "todo"
+status = "done"
+note = "S4"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_SSE2.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu_sse2.rs"]
-status = "todo"
+status = "done"
+note = "S4: exact scalar profile of the F32 kernel (the only instantiation). x86 only; SSE2NEON (ARM) variants not ported"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_SSE2.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu_sse2.rs"]
-status = "todo"
+status = "done"
+note = "S4"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpData.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs"]
-status = "todo"
+status = "partial"
+note = "S4: array (identity fill, size limit), interpolation and GetConcreteInterpolation; not composition, inversion, validation or cache IDs"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpData.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs"]
-status = "todo"
+status = "partial"
+note = "S4: see Lut3DOpData.cpp"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpGPU.cpp"
@@ -3966,19 +3984,22 @@ note = "tests of out-of-scope components"
 path = "tests/cpu/AVX2_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/avx2_tests.rs"]
-status = "todo"
+status = "done"
+note = "S4: all 7 tests (bodies in sse2_tests.rs)"
 
 [[file]]
 path = "tests/cpu/AVX512_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/avx512_tests.rs"]
-status = "todo"
+status = "done"
+note = "S4: all 7 tests, with the masked load/store checks (bodies in sse2_tests.rs)"
 
 [[file]]
 path = "tests/cpu/AVX_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/avx_tests.rs"]
-status = "todo"
+status = "done"
+note = "S4: all 7 tests (bodies in sse2_tests.rs)"
 
 [[file]]
 path = "tests/cpu/Baker_tests.cpp"
@@ -4151,14 +4172,16 @@ status = "todo"
 [[file]]
 path = "tests/cpu/SIMD_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio/src/simd_tests.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/sse2_tests.rs", "crates/ocio-ops/src/avx_tests.rs", "crates/ocio-ops/src/avx2_tests.rs", "crates/ocio-ops/src/avx512_tests.rs"]
+status = "done"
+note = "S4: each OCIO_ADD_TEST_<SIMD>(name) registration is the test of that name in the matching *_tests.rs"
 
 [[file]]
 path = "tests/cpu/SSE2_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/sse2_tests.rs"]
-status = "todo"
+status = "done"
+note = "S4: all 7 tests; the bodies are shared with the AVX files"
 
 [[file]]
 path = "tests/cpu/SSE_tests.cpp"
@@ -4638,7 +4661,8 @@ status = "todo"
 path = "tests/cpu/ops/lut3d/Lut3DOpCPU_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu_tests.rs"]
-status = "todo"
+status = "done"
+note = "S4: both tests, each run in every SIMD mode the CPU supports"
 
 [[file]]
 path = "tests/cpu/ops/lut3d/Lut3DOpData_tests.cpp"
@@ -5460,7 +5484,8 @@ status = "todo"
 path = "tests/testutils/UnitTest.h"
 kind = "test-support"
 target = ["crates/ocio-testkit/src/upstream/unit_test.rs"]
-status = "todo"
+status = "partial"
+note = "S4: OCIO_CHECK_CLOSE and OCIO_CHECK_EQUAL"
 
 [[file]]
 path = "tests/utils/CMakeLists.txt"

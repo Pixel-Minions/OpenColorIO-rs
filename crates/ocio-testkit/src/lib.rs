@@ -20,6 +20,7 @@ pub mod fixtures;
 pub mod oracle;
 pub mod paths;
 pub mod probe;
+pub mod upstream;
 
 pub use compare::{assert_bytes_eq, assert_f32_bits_eq, assert_text_eq};
 pub use oracle::Oracle;

@@ -114,11 +114,18 @@ fn write_manifest(manifest: &Manifest) -> Result<(), String> {
 
 pub(crate) fn check_all() -> Result<(), String> {
     let manifest = Manifest::load()?;
-    let mut groups: Vec<&str> =
-        manifest.files.iter().filter_map(|e| e.path.split('/').next()).collect();
+    let mut groups: Vec<&str> = manifest
+        .files
+        .iter()
+        .filter_map(|e| e.path.split('/').next())
+        .collect();
     groups.dedup();
     let failures: Vec<String> = groups.iter().filter_map(|g| check(g).err()).collect();
-    if failures.is_empty() { Ok(()) } else { Err(failures.join("\n")) }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("\n"))
+    }
 }
 
 pub(crate) fn check(group: &str) -> Result<(), String> {
