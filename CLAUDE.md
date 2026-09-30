@@ -67,6 +67,10 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
   - C++ compilers may commute scalar code (MSVC and GCC differ; check the wheel's machine code).
   - LLVM freely commutes Rust's `+` and `*`, and the order can change between debug and release builds.
   - Use `math_utils::sse_add`/`sse_mul` wherever two NaNs can meet, in the operand order the wheel's *machine code* uses, per platform where MSVC and GCC differ. That is usually, but not always, upstream's source order: both wheels compile `m_linsinv[i] * (in[i] + m_minuslino[i])` (`LogOpCPU.cpp:787`) as `(in + minuslino) * linsinv`. Check the disassembly when finite parameters can create a NaN coefficient. NaN parameters are covered by waiver W0002.
+- **Channels that pass through.** Never copy a channel the C++ passes through unchanged (`out[3] = in[3]`) in code that computes the other channels.
+  - In optimized builds, LLVM's SLP vectorizer may compute the copy as identity arithmetic (`a - 0.0`, `a * 1.0`) in a vector lane next to the computed channels. That quiets a signaling NaN, which the C++ copy keeps. It happened in the Lut3D SSE2 and AVX kernels with rustc 1.98.1, and only in release builds.
+  - Renderers work in place (`CpuOp::apply`) and never write a channel they pass through.
+  - Tests check pass-through channels on every numeric profile, not only the one this machine dispatches to.
 - **Rounding.**
   - Scalar integer conversions add 0.5 and truncate (`BitDepthUtils.h`).
   - SIMD stores round to nearest-even.

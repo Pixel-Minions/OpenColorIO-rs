@@ -27,6 +27,14 @@
 //! neighboring values are huge and of opposite signs, and can then compute `inf * 0` or
 //! `inf - inf`. Every NaN there is the x86 default NaN, so the order cannot change the bits.
 //!
+//! **Alpha.** Every renderer here works in place and writes only red, green and blue. OCIO's
+//! renderers copy alpha without arithmetic (`result.a = a` through the RGBA packs, which are
+//! shuffles; `out[3] = newAlpha` in the scalar paths), so it keeps every bit, signaling NaNs
+//! included. Copying it in Rust (`out[3] = in[3]`) is not safe: in optimized builds, LLVM's SLP
+//! vectorizer may compute the copy as identity arithmetic (`a - 0.0`, `a * 1.0`) in a vector
+//! lane next to the color channels, and that quiets a signaling NaN. With rustc 1.98.1 it did
+//! so in the SSE2 and AVX kernels.
+//!
 //! Not ported yet: `InvLut3DRenderer` (the exact inverse).
 
 use super::lut3d_op_cpu_avx::apply_tetrahedral_avx;
@@ -161,38 +169,31 @@ impl Lut3DTetrahedralRenderer {
         self.kernel
     }
 
-    /// Applies the LUT to packed RGBA pixels. Port of `Lut3DTetrahedralRenderer::apply`
+    /// Applies the LUT to packed RGBA pixels, in place. Port of `Lut3DTetrahedralRenderer::apply`
     /// (src/OpenColorIO/ops/lut3d/Lut3DOpCPU.cpp:422-624 @ v2.5.2): the SIMD kernel runs only
     /// when there is one and the call has more than one pixel.
-    pub fn apply(&self, input: &[f32], output: &mut [f32]) {
-        assert_eq!(input.len(), output.len());
-        assert_eq!(input.len() % 4, 0);
-        let num_pixels = input.len() / 4;
+    pub fn apply(&self, rgba: &mut [f32]) {
+        assert_eq!(rgba.len() % 4, 0);
+        let num_pixels = rgba.len() / 4;
         let lut = &self.base.opt_lut;
         let dim = self.base.dim as i32;
         match self.kernel {
             Some(kernel) if num_pixels > 1 => {
                 let count = i32::try_from(num_pixels).expect("pixel count fits in an int");
                 match kernel {
-                    TetrahedralKernel::Sse2 => {
-                        apply_tetrahedral_sse2(lut, dim, input, output, count)
-                    }
-                    TetrahedralKernel::Avx => apply_tetrahedral_avx(lut, dim, input, output, count),
-                    TetrahedralKernel::Avx2 => {
-                        apply_tetrahedral_avx2(lut, dim, input, output, count)
-                    }
-                    TetrahedralKernel::Avx512 => {
-                        apply_tetrahedral_avx512(lut, dim, input, output, count)
-                    }
+                    TetrahedralKernel::Sse2 => apply_tetrahedral_sse2(lut, dim, rgba, count),
+                    TetrahedralKernel::Avx => apply_tetrahedral_avx(lut, dim, rgba, count),
+                    TetrahedralKernel::Avx2 => apply_tetrahedral_avx2(lut, dim, rgba, count),
+                    TetrahedralKernel::Avx512 => apply_tetrahedral_avx512(lut, dim, rgba, count),
                 }
             }
-            _ => self.apply_generic(input, output),
+            _ => self.apply_generic(rgba),
         }
     }
 
     /// The scalar branch of `Lut3DTetrahedralRenderer::apply`
-    /// (src/OpenColorIO/ops/lut3d/Lut3DOpCPU.cpp:431-623 @ v2.5.2).
-    fn apply_generic(&self, input: &[f32], output: &mut [f32]) {
+    /// (src/OpenColorIO/ops/lut3d/Lut3DOpCPU.cpp:431-623 @ v2.5.2), in place.
+    fn apply_generic(&self, rgba: &mut [f32]) {
         let BaseLut3D {
             opt_lut: lut,
             dim,
@@ -202,19 +203,12 @@ impl Lut3DTetrahedralRenderer {
         let dim_minus_one = *dim as f32 - 1.0f32;
         let (dim, components) = (*dim as i32, *components as i32);
 
-        for (inp, out) in input
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .zip(output.as_chunks_mut::<4>().0.iter_mut())
-        {
-            let new_alpha = inp[3];
-
+        for px in rgba.as_chunks_mut::<4>().0.iter_mut() {
             // NaNs become 0.
             let idx = [
-                clamp(inp[0] * step, 0.0, dim_minus_one),
-                clamp(inp[1] * step, 0.0, dim_minus_one),
-                clamp(inp[2] * step, 0.0, dim_minus_one),
+                clamp(px[0] * step, 0.0, dim_minus_one),
+                clamp(px[1] * step, 0.0, dim_minus_one),
+                clamp(px[2] * step, 0.0, dim_minus_one),
             ];
 
             let low = idx.map(|v| v.floor() as i32);
@@ -258,10 +252,9 @@ impl Lut3DTetrahedralRenderer {
             } else {
                 ([1.0 - fy, fy - fx, fx - fz, fz], [n000, n010, n110, n111])
             };
-            out[0] = blend(w, n, 0);
-            out[1] = blend(w, n, 1);
-            out[2] = blend(w, n, 2);
-            out[3] = new_alpha;
+            px[0] = blend(w, n, 0);
+            px[1] = blend(w, n, 1);
+            px[2] = blend(w, n, 2);
         }
     }
 }
@@ -290,22 +283,22 @@ impl Lut3DRenderer {
         self.use_sse2
     }
 
-    /// Applies the LUT to packed RGBA pixels. Port of `Lut3DRenderer::apply`
+    /// Applies the LUT to packed RGBA pixels, in place. Port of `Lut3DRenderer::apply`
     /// (src/OpenColorIO/ops/lut3d/Lut3DOpCPU.cpp:635-820 @ v2.5.2).
-    pub fn apply(&self, input: &[f32], output: &mut [f32]) {
-        assert_eq!(input.len(), output.len());
-        assert_eq!(input.len() % 4, 0);
+    pub fn apply(&self, rgba: &mut [f32]) {
+        assert_eq!(rgba.len() % 4, 0);
         if self.use_sse2 {
-            self.apply_sse2(input, output);
+            self.apply_sse2(rgba);
         } else {
-            self.apply_generic(input, output);
+            self.apply_generic(rgba);
         }
     }
 
     /// The `OCIO_USE_SSE2` branch of `Lut3DRenderer::apply`
     /// (src/OpenColorIO/ops/lut3d/Lut3DOpCPU.cpp:640-739 @ v2.5.2), one lane at a time, with
-    /// `GetLut3DIndices` and `LookupNearest4` (Lut3DOpCPU.cpp:204-264).
-    fn apply_sse2(&self, input: &[f32], output: &mut [f32]) {
+    /// `GetLut3DIndices` and `LookupNearest4` (Lut3DOpCPU.cpp:204-264), in place. The C++ stores
+    /// all four lanes and then restores alpha; alpha is simply never written here.
+    fn apply_sse2(&self, rgba: &mut [f32]) {
         let lut = &self.base.opt_lut;
         let step = self.base.step;
         let max_idx = (self.base.dim - 1) as f32;
@@ -320,15 +313,8 @@ impl Lut3DRenderer {
             [lut[at], lut[at + 1], lut[at + 2], lut[at + 3]]
         };
 
-        for (inp, out) in input
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .zip(output.as_chunks_mut::<4>().0.iter_mut())
-        {
-            let new_alpha = inp[3];
-
-            let data = [inp[0], inp[1], inp[2], inp[3]];
+        for px in rgba.as_chunks_mut::<4>().0.iter_mut() {
+            let data = *px;
 
             // NaNs become 0.
             let idx = data.map(|v| sse_min(sse_max(v * step, 0.0), max_idx));
@@ -384,17 +370,16 @@ impl Lut3DRenderer {
 
             let result = lerp(green1, green2, one_minus_wr, wr);
 
-            out[0] = result[0];
-            out[1] = result[1];
-            out[2] = result[2];
-            out[3] = new_alpha;
+            px[0] = result[0];
+            px[1] = result[1];
+            px[2] = result[2];
         }
     }
 
     /// The `#else` (no SSE2) branch of `Lut3DRenderer::apply`
     /// (src/OpenColorIO/ops/lut3d/Lut3DOpCPU.cpp:741-818 @ v2.5.2), with `lerp_rgb`
-    /// (Lut3DOpCPU.cpp:268-299).
-    fn apply_generic(&self, input: &[f32], output: &mut [f32]) {
+    /// (Lut3DOpCPU.cpp:268-299), in place.
+    fn apply_generic(&self, rgba: &mut [f32]) {
         let BaseLut3D {
             opt_lut: lut,
             dim,
@@ -409,19 +394,12 @@ impl Lut3DRenderer {
             std::array::from_fn(|c| sse_add(sse_mul(b[c] - a[c], z), a[c]))
         };
 
-        for (inp, out) in input
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .zip(output.as_chunks_mut::<4>().0.iter_mut())
-        {
-            let new_alpha = inp[3];
-
+        for px in rgba.as_chunks_mut::<4>().0.iter_mut() {
             // NaNs become 0.
             let idx = [
-                clamp(inp[0] * step, 0.0, dim_minus_one),
-                clamp(inp[1] * step, 0.0, dim_minus_one),
-                clamp(inp[2] * step, 0.0, dim_minus_one),
+                clamp(px[0] * step, 0.0, dim_minus_one),
+                clamp(px[1] * step, 0.0, dim_minus_one),
+                clamp(px[2] * step, 0.0, dim_minus_one),
             ];
 
             let low = idx.map(|v| v.floor() as i32);
@@ -449,10 +427,9 @@ impl Lut3DRenderer {
             let v2 = lerp(lerp(n100, n101, z), lerp(n110, n111, z), y);
             let result = lerp(v1, v2, x);
 
-            out[0] = result[0];
-            out[1] = result[1];
-            out[2] = result[2];
-            out[3] = new_alpha;
+            px[0] = result[0];
+            px[1] = result[1];
+            px[2] = result[2];
         }
     }
 }
@@ -467,11 +444,11 @@ pub enum ForwardLut3DRenderer {
 }
 
 impl ForwardLut3DRenderer {
-    /// Applies the LUT to packed RGBA pixels (`input.len() / 4` pixels in one call).
-    pub fn apply(&self, input: &[f32], output: &mut [f32]) {
+    /// Applies the LUT to packed RGBA pixels in place (`rgba.len() / 4` pixels in one call).
+    pub fn apply(&self, rgba: &mut [f32]) {
         match self {
-            ForwardLut3DRenderer::Tetrahedral(r) => r.apply(input, output),
-            ForwardLut3DRenderer::Trilinear(r) => r.apply(input, output),
+            ForwardLut3DRenderer::Tetrahedral(r) => r.apply(rgba),
+            ForwardLut3DRenderer::Trilinear(r) => r.apply(rgba),
         }
     }
 }
