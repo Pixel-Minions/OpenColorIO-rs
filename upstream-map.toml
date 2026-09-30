@@ -336,7 +336,7 @@ path = "src/OpenColorIO/Logging.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/logging.rs"]
 status = "done"
-note = "1.2e. The logging function is called after the global lock is released (deviation D-3). The lines a logging function receives are checked against the wheel's (tests/logging_oracle.rs: line breaks, CR, empty lines, a NUL); upstream's test checks the level rules. Checked by reading only: the RightTrim before splitting (every wheel message the existing oracle commands can produce ends in punctuation), OCIO_LOGGING_LEVEL handling (the oracle never passes it) and its stderr messages, and the public LogMessage"
+note = "1.2e. The logging function is called after the global lock is released (deviation D-3). Checked against the wheel in tests/logging_oracle.rs: the lines of config warnings (line breaks, CR, empty lines, a NUL); LogMessage at every level for every level setting, with messages that exercise the trim, the line cutting and the C strings (log_message); LoggingLevelFromString and ToString (logging_level_strings); OCIO_LOGGING_LEVEL, read once, in a new process per case, with the levels, the lines, ResetToDefaultLoggingFunction, SetLoggingFunction(None) and the raw stderr (logging_environment); upstream's test checks the level rules. Not reachable through Python: LogError (only Config::validate logs errors)"
 
 [[file]]
 path = "src/OpenColorIO/Logging.h"
@@ -916,7 +916,7 @@ path = "src/OpenColorIO/fileformats/FormatMetadata.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/format_metadata.rs"]
 status = "done"
-note = "1.2a, in ocio-ops because op data holds it. Checked by upstream's tests only: no oracle command reads metadata yet. The case rules for attribute names (exact when adding, ASCII-insensitive when looking up and combining) and the misspelled 'reversed' message are copied (improvement candidates I-14, I-15)"
+note = "1.2a, in ocio-ops because op data holds it. Checked against the wheel in tests/format_metadata_oracle.rs: every call Python reaches, replayed on a transform's metadata (errors, repr() and every node's getters: format_metadata_ops), and combine through the optimizer's matrix composition (format_metadata_combine); and by upstream's tests. Python can't reach getFirstChildIndex, getAttributeValue(name) (only through getName and getID), operator== or getAttributeName past the end. The case rules for attribute names (exact when adding, ASCII-insensitive when looking up and combining) and the misspelled 'reversed' message are copied (improvement candidates I-14, I-15)"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FormatMetadata.h"
@@ -4229,7 +4229,7 @@ path = "tests/cpu/UnitTestLogUtils.cpp"
 kind = "test-support"
 target = ["crates/ocio-ops/src/unit_test_log_utils.rs"]
 status = "partial"
-note = "1.2e: LogGuard (both constructors, output, clear, empty), for ocio-ops's unit tests: it must set the logging state of the crate under test, which ocio-testkit can't reach. It holds a reentrant lock and keeps only its own thread's messages, because Rust runs tests in parallel. Still to port, with the first tests that use them: findAndRemove, findAllAndRemove, print, MuteLogging and the checkAndMute helpers"
+note = "1.2e: LogGuard (both constructors, output, clear, empty), for ocio-ops's unit tests: it must set the logging state of the crate under test, which ocio-testkit can't reach. It holds a reentrant lock and keeps only its own thread's messages, because Rust runs tests in parallel, and makes OCIO read OCIO_LOGGING_LEVEL from an empty environment, so no test depends on the developer's. Still to port, with the first tests that use them: findAndRemove, findAllAndRemove, print, MuteLogging and the checkAndMute helpers"
 
 [[file]]
 path = "tests/cpu/UnitTestLogUtils.h"
