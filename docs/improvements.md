@@ -197,6 +197,27 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **A fix:** the exact constants.
 - **Status:** matched in `p1-math` (1.4a).
 
+### I-24. Values computed with the math library differ between Windows and Linux
+
+- **Upstream:** OCIO computes some values with the platform's math library, the UCRT on Windows
+  and glibc on Linux, which round some results differently. Through the wheels:
+  - the ACES 2 output transform's GPU tables differ, and for its SDR 2.0 preset the shader text
+    too, which prints some of those values (the hues);
+  - the 1D LUTs that the optimizer bakes from ExponentTransform and ExponentWithLinearTransform
+    for UINT8, UINT10, UINT12, UINT16 and F16 input, at the default and DRAFT flags, differ,
+    and so does the optimized processor's cache ID, which hashes them.
+
+  Log, LogAffine, LogCamera, ExposureContrast, and the LUT and built-in bakes came out the same
+  on both, over 3309 cases (the p1-oracle review's survey).
+- **Who notices:** anyone comparing GPU textures, SDR 2.0 shaders, or renders of exponents at 8
+  to 16 bits between a Windows and a Linux machine.
+- **A fix:** one math library on every platform, which changes the port's results on at least
+  one of them.
+- **Status:** to be matched in Phase 2, with the Lut1D bakes and the ACES 2 tables (D12: the
+  port calls the platform's functions, as OCIO does). The review suspects these values may also
+  depend on the CPU (SIMD renderers, glibc's ifunc variants). If so, their checks belong in
+  `cpu-tests`.
+
 ## Transforms
 
 ### I-11. Copying a group transform shares its children
@@ -290,6 +311,17 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** to be matched in Phase 6 (D13). The Rust API's own error for a slice of the wrong
   type uses the clean names.
 
+### I-32. `repr()` of a GradingRGBCurve prints an address
+
+- **Upstream:** the binding gives GradingHueCurve's class its repr twice, and GradingRGBCurve's
+  none: `PyGradingData.cpp:470` calls `defRepr(clsGradingHueCurve)` where `clsGradingRGBCurve`
+  was meant. So a GradingRGBCurve's `repr()` is pybind11's default,
+  `<PyOpenColorIO.PyOpenColorIO.GradingRGBCurve object at 0x...>`, whose address changes from
+  run to run (seen through the wheel in the p1-oracle review).
+- **Who notices:** Python users who print a GradingRGBCurve.
+- **A fix:** the repr its values give, like the other grading classes'.
+- **Status:** to be matched in Phase 6 (D13).
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
@@ -336,3 +368,44 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Options:** release the function when Python shuts down, or keep it and never release it;
   either way the process exits cleanly.
 - **Status:** open; decided in Phase 6 (the Python module).
+
+### U-5. A 1D LUT that doesn't fit its GPU texture width
+
+- **Upstream:** a 1D LUT of L entries goes in a texture min(L, W) wide and L / W + 1 high, W being
+  the description's texture width limit (4096 by default). In more than one row, each row's
+  last entry is repeated at the start of the next (`ops/lut1d/Lut1DOpGPU.cpp:19-141, 153-177`).
+  - A width of 0 divides by zero.
+  - A width of 1 never advances along the LUT, and repeats entries forever.
+  - Otherwise the padded entries can outnumber the texture's texels. The count of texels left
+    to fill, an unsigned difference, then wraps, and the wheel appends entries until memory runs
+    out. Through the Linux wheel, capped, that ends in `std::bad_alloc`; the Windows wheel grew
+    to 23 GB before it was stopped.
+- **Who notices:** GPU shaders of 1D LUTs that don't fit the width limit: 8191, 12286 or 12287
+  entries at the default width (32,640 lengths up to 2^20 in all), and most lengths at small
+  widths.
+- **Options:** an error where the padding doesn't fit, or a layout that fits.
+- **Status:** open; decided in Phase 2, with the Lut1D GPU writer. The oracle refuses these
+  requests (`gpu_shader`, `_padding_fits`).
+
+### U-6. Resource prefixes the Metal class wrapper can't read
+
+- **Upstream:** in MSL, a class wrapper reads the shader's declarations back to build its class
+  (`GpuShaderClassWrapper.cpp:279-366`).
+  - It passes the resource prefix's first byte past white space to `std::isdigit` and
+    `std::isspace` (lines 157, 226, 325, 333, 348). They are undefined for a non-ASCII byte, a
+    negative `char`. glibc defines them there (neither a digit nor a space), so D12 may apply
+    on Linux; whether MSVC's release CRT stays inside its table is still to be checked.
+  - A line feed in the prefix cuts a texture's declaration in two. The wrapper then looks for
+    its sampler at `find("sampler") + 7`, which wraps past `npos` to 6 and can read past the end
+    of a short line (lines 330-333).
+  - The uid goes through `std::isalpha` and `std::isalnum` too (`GPUProcessor.cpp:180-188`), but
+    only in the `GpuShaderCreator` overload of `extractGpuShaderInfo`. Python takes the
+    `GpuShaderDesc` overload (lines 151-155), which skips it: through Python, the uid changes
+    nothing, not even the cache ID.
+- **Who notices:** MSL shaders whose resource prefix starts with a non-ASCII byte or holds a line
+  feed; C++ callers of the creator overload with a non-ASCII uid. Other names, and every name in
+  the other languages, are only written out, so they are well defined.
+- **Decided** (general rule): the port returns an error for those names. `p1-gpu-infra` settles
+  the scope: 1.7d for the wrapper, 1.7e for the uid.
+- **Status:** to be matched in `p1-gpu-infra`. The oracle refuses these MSL prefixes
+  (`gpu_shader`, `_check_names`).
