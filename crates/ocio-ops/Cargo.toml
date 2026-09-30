@@ -12,6 +12,7 @@ publish.workspace = true
 [dependencies]
 half.workspace = true
 xxhash-rust.workspace = true
+zerocopy.workspace = true
 
 [dev-dependencies]
 ocio-testkit.workspace = true

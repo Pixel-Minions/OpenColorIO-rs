@@ -23,8 +23,9 @@ status = "todo"
 [[file]]
 path = "include/OpenColorIO/OpenColorIO.h"
 kind = "api"
-target = ["crates/ocio/src/lib.rs"]
-status = "todo"
+target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/image_desc.rs"]
+status = "partial"
+note = "1.1b: AutoStride, ImageDesc and PackedImageDesc (image_desc.rs, for ocio to re-export); PlanarImageDesc is 1.1c"
 
 [[file]]
 path = "include/OpenColorIO/OpenColorTransforms.h"
@@ -37,7 +38,7 @@ path = "include/OpenColorIO/OpenColorTypes.h"
 kind = "api"
 target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs"]
 status = "partial"
-note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.1a: BitDepth, and BitDepthToString (defined in ParseUtils.cpp)"
+note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.1a: BitDepth, and BitDepthToString (defined in ParseUtils.cpp); 1.1b: ChannelOrdering"
 
 [[file]]
 path = "src/CMakeLists.txt"
@@ -313,8 +314,9 @@ status = "done"
 [[file]]
 path = "src/OpenColorIO/ImageDesc.cpp"
 kind = "src"
-target = ["crates/ocio/src/image_desc.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/image_desc.rs"]
+status = "partial"
+note = "1.1b: PackedImageDesc and GenericImageDesc, with the bounds check of deviation D-2; PlanarImageDesc is 1.1c. Not ported: operator<< (16-59), which prints buffer addresses that no test or oracle can compare (Python's repr() prints the binding's shared_ptr address instead)"
 
 [[file]]
 path = "src/OpenColorIO/ImagePacking.cpp"
@@ -325,8 +327,9 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/ImagePacking.h"
 kind = "src"
-target = ["crates/ocio-ops/src/image_packing.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/image_packing.rs", "crates/ocio-ops/src/image_desc.rs"]
+status = "partial"
+note = "1.1b: GenericImageDesc (16-47) is in image_desc.rs, next to its methods (ImageDesc.cpp:75-112); Generic<Type> is 1.1d"
 
 [[file]]
 path = "src/OpenColorIO/Logging.cpp"
@@ -514,7 +517,7 @@ path = "src/OpenColorIO/SSE2.h"
 kind = "src"
 target = ["crates/ocio-ops/src/sse2.rs"]
 status = "done"
-note = "S4: scalar profile. The software half conversions (with sse2_blendv) proven against the SSE2 intrinsics for all 2^32 floats and 65,536 halves; sse2_clamp and SSE2RGBAPack as per-value Load/Store (the transposes only move values), checked by the upstream SSE2 tests. x86 only; SSE2NEON (ARM) variants not ported"
+note = "S4: scalar profile. The software half conversions (with sse2_blendv) proven against the SSE2 intrinsics for all 2^32 floats and 65,536 halves; sse2_clamp and SSE2RGBAPack as per-value Load/Store (the transposes only move values), checked by the upstream SSE2 tests. x86 only; SSE2NEON (ARM) variants not ported. To do (p1-dispatch, 1.5b): PackDepth::max_value and is_float repeat BitDepthInfo's maxValue and isFloat (bit_depth_utils.rs); use BitDepthInfo"
 
 [[file]]
 path = "src/OpenColorIO/ScanlineHelper.cpp"
@@ -1589,7 +1592,7 @@ path = "src/OpenColorIO/ops/log/LogOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/log/log_op_cpu.rs"]
 status = "done"
-note = "S2: every renderer, scalar and SSE2, bit-exact against the wheel on Windows and Rocky Linux 9 (tests/log_oracle.rs)"
+note = "S2: every renderer, scalar and SSE2, bit-exact against the wheel on Windows and Rocky Linux 9 (tests/log_oracle.rs). To correct (p1-log): tests/log_oracle.rs's header says the separable-prefix bake applies only to integer input bit depths; it skips only F32 and UINT32 (OpOptimizers.cpp:562), so F16 inputs are baked too. Its F32 conclusion holds"
 
 [[file]]
 path = "src/OpenColorIO/ops/log/LogOpCPU.h"

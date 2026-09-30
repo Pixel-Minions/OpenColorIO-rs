@@ -49,6 +49,7 @@ pub mod cfmt;
 pub mod cpu_info;
 pub mod exception;
 pub mod hash_utils;
+pub mod image_desc;
 pub mod imath_half;
 pub mod math_utils;
 pub mod op;
