@@ -1,0 +1,108 @@
+name: SDE
+
+# The CPU-dependent tests (`cargo cpu-tests`) on emulated CPUs, with Intel SDE (scripts/sde.sh):
+# the official wheel and the port both dispatch to the SIMD kernels of that CPU, so every kernel
+# OCIO has is compared with the port's profile for it (PLAN.md §8). The workstation and GitHub's
+# runners only cover the kernels their own CPUs select.
+#
+#   nhm  Nehalem          SSE2 kernels
+#   snb  Sandy Bridge     AVX kernels
+#   hsw  Haswell          AVX2 with slow gather
+#   skl  Skylake          AVX2 kernels
+#   skx  Skylake server   AVX-512 kernels
+#
+# SDE is downloaded from Intel's mirror under Intel's license (accepted by the owner), and
+# scripts/sde.sh checks its SHA256 before using it. The archive is cached between runs.
+
+on:
+  schedule:
+    - cron: "23 6 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "crates/ocio-ops/**"
+      - "crates/ocio-testkit/**"
+      - "oracle/**"
+      - "scripts/sde.sh"
+      - ".cargo/config.toml"
+      - ".github/workflows/sde.yml"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  windows:
+    name: SDE ${{ matrix.cpu }} (Windows)
+    runs-on: windows-2025
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        cpu: [nhm, snb, hsw, skl, skx]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.11.7"
+      - name: Toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: sde
+      - name: Intel SDE archive
+        uses: actions/cache@v4
+        with:
+          path: target/sde-archives
+          key: sde-10.13.1-2026-07-28-windows
+      - name: Oracle environment and test build (native)
+        run: |
+          cargo xtask oracle info
+          cargo cpu-tests --release --no-run
+      - name: CPU tests on an emulated ${{ matrix.cpu }}
+        shell: bash
+        run: scripts/sde.sh ${{ matrix.cpu }} cargo cpu-tests --release --no-fail-fast
+      - name: SDE logs
+        if: failure()
+        shell: bash
+        run: find . -name 'pin-*log.txt' -not -path './target/*' -exec tail -n 40 {} +
+
+  rocky9:
+    name: SDE ${{ matrix.cpu }} (Rocky Linux 9)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        cpu: [nhm, snb, hsw, skl, skx]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+      - name: Intel SDE archive
+        uses: actions/cache@v4
+        with:
+          path: target/sde-archives
+          key: sde-10.13.1-2026-07-28-linux
+      - name: Build the reference image
+        run: docker build -t ocio-rs-rocky9:1 docker/rocky9
+      # SDE (Pin) traces the processes it emulates; Ubuntu's Yama default only lets a process
+      # trace its own descendants. This is a throwaway VM.
+      - name: Allow SDE to trace processes
+        run: sudo sysctl -w kernel.yama.ptrace_scope=0
+      - name: CPU tests on an emulated ${{ matrix.cpu }}
+        run: |
+          scripts/rocky9.sh bash -ec '
+            cargo xtask oracle info
+            cargo cpu-tests --release --no-run
+            scripts/sde.sh ${{ matrix.cpu }} cargo cpu-tests --release --no-fail-fast
+          '
+      - name: SDE logs
+        if: failure()
+        run: find . -name 'pin-*log.txt' -not -path './target/*' -exec tail -n 40 {} +

@@ -11,3 +11,7 @@ __pycache__/
 # Claude Code settings are per machine (permissions etc.); never commit them.
 .claude/settings.json
 .claude/settings.local.json
+
+# Intel SDE's Pin writes these into the working directory when it fails (scripts/sde.sh).
+pin-log.txt
+pin-tool-log.txt

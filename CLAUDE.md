@@ -67,6 +67,10 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
   - C++ compilers may commute scalar code (MSVC and GCC differ; check the wheel's machine code).
   - LLVM freely commutes Rust's `+` and `*`, and the order can change between debug and release builds.
   - Use `math_utils::sse_add`/`sse_mul` wherever two NaNs can meet, in the operand order the wheel's *machine code* uses, per platform where MSVC and GCC differ. That is usually, but not always, upstream's source order: both wheels compile `m_linsinv[i] * (in[i] + m_minuslino[i])` (`LogOpCPU.cpp:787`) as `(in + minuslino) * linsinv`. Check the disassembly when finite parameters can create a NaN coefficient. NaN parameters are covered by waiver W0002.
+- **Channels that pass through.** Never copy a channel the C++ passes through unchanged (`out[3] = in[3]`) in code that computes the other channels.
+  - In optimized builds, LLVM's SLP vectorizer may compute the copy as identity arithmetic (`a - 0.0`, `a * 1.0`) in a vector lane next to the computed channels. That quiets a signaling NaN, which the C++ copy keeps. It happened in the Lut3D SSE2 and AVX kernels with rustc 1.98.1, and only in release builds.
+  - Renderers work in place (`CpuOp::apply`) and never write a channel they pass through.
+  - Tests check pass-through channels on every numeric profile, not only the one this machine dispatches to.
 - **Rounding.**
   - Scalar integer conversions add 0.5 and truncate (`BitDepthUtils.h`).
   - SIMD stores round to nearest-even.
@@ -79,6 +83,7 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
   - Scalar code comes first. Each profile (SSE2, AVX, AVX2, AVX-512) is its own renderer and replicates the C++ kernel's arithmetic.
   - `unsafe` is allowed only in SIMD modules and `ocio-py`; `cargo xtask guards` enforces this.
 - **Platform differences.** Where OCIO gives different bytes on Windows and on Linux, the port must too (PLAN.md D12). Check both platforms.
+- **Reading the wheel's machine code.** `docs/wheel-inspect.md` shows, in a few commands of `tools/wheel-inspect`, which operand order either wheel compiled, where it computes in float or double, and whether a path calls libm, SVML or an FMA.
 
 ## The oracle
 
@@ -95,6 +100,10 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
 - **Both reference platforms:**
   - Windows: `cargo test ...`
   - Rocky Linux 9: `scripts/rocky9.sh cargo test ...`. It uses the `docker/rocky9` image, with the checkout mounted at `/work`.
+- **Emulated CPUs.** This machine and GitHub's runners only run the SIMD kernels their own CPUs select. `scripts/sde.sh <cpu> <cmd>` runs a command on a CPU emulated by Intel SDE, and the wheel and the port then both pick that CPU's kernels.
+  - Tests whose results depend on the CPU (SIMD kernels, CPUInfo, libm calls) belong to a test target in the `cpu-tests` alias (`.cargo/config.toml`). Add new targets of that kind there.
+  - CI runs `cargo cpu-tests --release` on `nhm` (SSE2 kernels), `snb` (AVX), `hsw` (AVX2 with slow gather), `skl` (AVX2) and `skx` (AVX-512), on both platforms.
+  - A chunk that adds or changes a SIMD kernel runs it locally too, on the CPUs whose kernel it touches: `scripts/sde.sh snb cargo cpu-tests --release`, and `scripts/rocky9.sh scripts/sde.sh snb cargo cpu-tests --release`.
 
 ## Layout and conventions
 
@@ -128,3 +137,5 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
 | `cargo xtask oracle regen <group>` | Regenerate committed fixtures (owner-reviewed) |
 | `cargo xtask oracle check-all` | Prove committed fixtures are identical on this platform |
 | `scripts/rocky9.sh <cmd>` | Run a command on the Linux reference platform |
+| `cargo cpu-tests` | The tests whose results depend on the CPU |
+| `scripts/sde.sh <cpu> <cmd>` | Run a command on an emulated CPU (`nhm`, `snb`, `hsw`, `skl`, `skx`, ...) |
