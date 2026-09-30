@@ -69,15 +69,21 @@ def transform_text(args, blobs):
     The binding exposes equals() for the CDL, Exponent, ExponentWithLinear, ExposureContrast,
     FixedFunction, LogAffine, LogCamera, Log, Lut1D, Lut3D, Matrix and Range transforms, each
     taking a transform of its own class; Python's == on a transform compares identity, so the
-    command doesn't report it. An unknown key, or a pair naming a transform that doesn't exist,
-    is refused.
+    command doesn't report it. An unknown key, transforms or pairs that aren't lists, or a pair
+    that doesn't name two transforms by integer index (true and false aren't indices), is
+    refused.
     """
     check_keys("transform_text", args, {"transforms", "pairs"})
-    specs = args.get("transforms") or []
-    pairs = args.get("pairs") or []
+    specs = args.get("transforms", [])
+    pairs = args.get("pairs", [])
+    for key, value in (("transforms", specs), ("pairs", pairs)):
+        if not isinstance(value, list):
+            raise ValueError(f"{key} must be a list, not {value!r}")
     for pair in pairs:
+        # A bool is an int in Python, but not an index here.
         if (not isinstance(pair, list) or len(pair) != 2
-                or any(not isinstance(i, int) or not 0 <= i < len(specs) for i in pair)):
+                or any(isinstance(i, bool) or not isinstance(i, int) or not 0 <= i < len(specs)
+                       for i in pair)):
             raise ValueError(f"pairs: {pair!r} doesn't name two of the {len(specs)} transforms")
     built, result = [], {"transforms": [], "pairs": []}
     with captured_log() as log:

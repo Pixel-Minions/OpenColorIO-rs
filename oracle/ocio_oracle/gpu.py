@@ -13,7 +13,8 @@ values.
 What it reports differs between the Windows and Linux wheels (D12) in two places, over 1230
 shaders compared in all 10 languages: a negative NaN prints "-nan(ind)" on Windows and "-nan"
 on Linux (the platform's iostream), and the ACES 2 output transform's tables, which libm
-computes, hold different values.
+computes, hold different values. For its SDR 2.0 preset the shader text differs too: it prints
+an array of those values (the hues).
 """
 
 import re
@@ -22,7 +23,8 @@ import numpy as np
 import PyOpenColorIO as OCIO
 
 from . import spec
-from .checks import PROCESSOR_KEYS, check_keys, f32_bits, f64_bits
+from .checks import (PROCESSOR_KEYS, check_bool, check_keys, check_member, check_uint, dump,
+                     f32_bits, f64_bits)
 from .commands import _processor, captured_log, command, exception_result
 
 # What OCIO raises (in PyOpenColorIO, ExceptionMissingFile doesn't derive from OCIO.Exception).
@@ -42,43 +44,93 @@ UNLIMITED_WIDTH = 2 ** 32 - 1
 UNPADDED = re.compile(r"(reach_m|gamut_cusp)_table_\d+$")
 
 
-def _check_name(what, value):
-    """Refuses a name holding a character outside printable ASCII. The wheel passes the names'
-    characters to std::isalpha, std::isalnum, std::isdigit and std::isspace
-    (GPUProcessor.cpp:180-188, GpuShaderClassWrapper.cpp:157, 226, 307-348 @ v2.5.2), which are
-    undefined for the negative `char` values of non-ASCII bytes. The MSL class wrapper also reads
-    the shader's declarations back a line at a time, and past the end of a line that a line
-    break in a name cuts short (GpuShaderClassWrapper.cpp:332-333)."""
-    if not isinstance(value, str) or any(not " " <= c <= "~" for c in value):
-        raise ValueError(f"gpu_shader refuses {what} {value!r}: only printable ASCII names are "
-                         f"defined in the wheel")
-    return value
+# The names a description takes, which the request gives as strings.
+NAMES = ["function_name", "pixel_name", "resource_prefix", "uid"]
+
+# The bytes C's std::isspace calls white space in the "C" locale.
+C_SPACE = " \t\n\v\f\r"
+
+
+def _check_names(settings):
+    """Refuses a name that isn't a string, and the names whose handling the wheel leaves
+    undefined. Python's extractGpuShaderInfo takes the GpuShaderDesc overload, which doesn't
+    read the uid (GPUProcessor.cpp:151-155 @ v2.5.2), and only the MSL class wrapper reads
+    names back (GpuShaderClassWrapper.cpp:279-366 @ v2.5.2), from the resource prefix: the
+    class name starts with it, and the declarations' names do.
+    - A non-ASCII byte is a negative `char`, for which std::isdigit and std::isspace are
+      undefined. The wrapper passes them the prefix's first byte and its leading white space
+      (lines 157, 226, 325, 333, 348): a prefix whose first byte past white space isn't ASCII
+      is refused.
+    - The wrapper reads the declarations a line at a time. A line feed in the prefix cuts a
+      texture's declaration in two, and the wrapper then looks for its sampler at
+      `find("sampler") + 7`, which wraps past npos to 6 and can read past a short line's end
+      (lines 330-333): a prefix with a line feed is refused.
+    Everything else in a name, control characters included, is well defined: the other
+    languages only write the names out."""
+    for key in NAMES:
+        if key in settings and not isinstance(settings[key], str):
+            raise ValueError(f"{key} must be a string, not {settings[key]!r}")
+    if settings.get("language") != "GPU_LANGUAGE_MSL_2_0":
+        return
+    prefix = settings.get("resource_prefix", "ocio")
+    if "\n" in prefix:
+        raise ValueError(
+            f"gpu_shader refuses resource_prefix {prefix!r} in MSL: the wheel's Metal class "
+            f"wrapper reads the declarations back a line at a time, and a line feed in their "
+            f"names can make it read past the end of a line")
+    first = prefix.lstrip(C_SPACE)[:1]
+    if first and ord(first) > 0x7F:
+        raise ValueError(
+            f"gpu_shader refuses resource_prefix {prefix!r} in MSL: the wheel's Metal class "
+            f"wrapper passes its first byte past white space to std::isdigit and std::isspace, "
+            f"which are undefined for a non-ASCII byte")
+
+
+def _check_settings(settings):
+    """Refuses settings the command can't read exactly: an unknown key, a value of the wrong
+    type (a bool that isn't true or false, a number that isn't an integer a C `unsigned` holds,
+    a language that isn't a GpuLanguage name), or a name _check_names refuses."""
+    check_keys("shader", settings, set(SETTINGS))
+    if "language" in settings:
+        check_member("language", settings["language"], OCIO.GpuLanguage)
+    _check_names(settings)
+    if "descriptor_set" in settings:
+        descriptor_set = settings["descriptor_set"]
+        check_keys("descriptor_set", descriptor_set, {"index", "texture_binding_start"})
+        for key in ("index", "texture_binding_start"):
+            if key not in descriptor_set:
+                raise ValueError(f"descriptor_set needs {key}")
+            check_uint(f"descriptor_set {key}", descriptor_set[key])
+    if "texture_max_width" in settings:
+        check_uint("texture_max_width", settings["texture_max_width"])
+    if "allow_texture_1d" in settings:
+        check_bool("allow_texture_1d", settings["allow_texture_1d"])
 
 
 def _shader_desc(settings, max_width=None):
     """A GpuShaderDesc with the default settings of CreateShaderDesc(), then each setting the
-    request gives, through its setter. With max_width, the texture width limit is that instead."""
+    request gives (checked by _check_settings), through its setter. With max_width, the texture
+    width limit is that instead."""
     desc = OCIO.GpuShaderDesc.CreateShaderDesc()
     if "language" in settings:
-        desc.setLanguage(getattr(OCIO.GpuLanguage, settings["language"]))
+        desc.setLanguage(OCIO.GpuLanguage.__members__[settings["language"]])
     if "function_name" in settings:
-        desc.setFunctionName(_check_name("function_name", settings["function_name"]))
+        desc.setFunctionName(settings["function_name"])
     if "pixel_name" in settings:
-        desc.setPixelName(_check_name("pixel_name", settings["pixel_name"]))
+        desc.setPixelName(settings["pixel_name"])
     if "resource_prefix" in settings:
-        desc.setResourcePrefix(_check_name("resource_prefix", settings["resource_prefix"]))
+        desc.setResourcePrefix(settings["resource_prefix"])
     if "uid" in settings:
-        desc.setUniqueID(_check_name("uid", settings["uid"]))
+        desc.setUniqueID(settings["uid"])
     if "descriptor_set" in settings:
         descriptor_set = settings["descriptor_set"]
-        check_keys("descriptor_set", descriptor_set, {"index", "texture_binding_start"})
-        desc.setDescriptorSetIndex(int(descriptor_set["index"]),
-                                   int(descriptor_set["texture_binding_start"]))
+        desc.setDescriptorSetIndex(descriptor_set["index"],
+                                   descriptor_set["texture_binding_start"])
     width = settings.get("texture_max_width") if max_width is None else max_width
     if width is not None:
-        desc.setTextureMaxWidth(int(width))
+        desc.setTextureMaxWidth(width)
     if "allow_texture_1d" in settings:
-        desc.setAllowTexture1D(bool(settings["allow_texture_1d"]))
+        desc.setAllowTexture1D(settings["allow_texture_1d"])
     return desc
 
 
@@ -106,18 +158,21 @@ def _padding_fits(length, max_width):
     return padded <= width * height
 
 
-def _check_textures(gpu, settings, max_width):
+def _check_textures(gpu, settings, max_width, log):
     """Refuses the request where the wheel's 1D LUT textures wouldn't fit the width limit
     `max_width` (see _padding_fits). A probe extraction with the request's settings but no width
     limit gives each texture's length: a 1D LUT then lays out in one row. If the probe raises,
     the textures registered before it are still checked: the real extraction stops there too,
     or sooner. Every 1D or 2D texture is taken for a 1D LUT's, but the ACES 2 tables
-    (UNPADDED)."""
+    (UNPADDED). What the probe logs is dropped from `log`: the real extraction logs it again."""
     probe = _shader_desc(settings, UNLIMITED_WIDTH)
+    logged = len(log)
     try:
         gpu.extractGpuShaderInfo(probe)
     except RAISED:
         pass
+    finally:
+        del log[logged:]
     for texture in probe.getTextures():
         if UNPADDED.search(texture.textureName):
             continue
@@ -160,10 +215,18 @@ GRADING_GETTERS = {
 
 
 def _dynamic_property(prop):
+    """A dynamic property's type and value, exact: a double as {"f64": its bits}, a grading
+    value written out by checks.dump. (The binding's repr() of a GradingRGBCurve is pybind11's
+    default, with an address: PyGradingData.cpp:470 @ v2.5.2 gives GradingHueCurve's class
+    its repr twice. The others print 6 digits.)"""
     kind = prop.getType()
     if kind in DOUBLE_PROPERTIES:
-        return {"type": kind.name, "double": f64_bits(prop.getDouble())}
-    return {"type": kind.name, "repr": repr(getattr(prop, GRADING_GETTERS[kind])())}
+        return {"type": kind.name, "value": {"f64": f64_bits(prop.getDouble())}}
+    arrays = []
+    value = dump(getattr(prop, GRADING_GETTERS[kind])(), arrays)
+    if arrays:
+        raise ValueError(f"gpu_shader can't report {kind.name}: its value holds arrays")
+    return {"type": kind.name, "value": value}
 
 
 def _shader(desc, blobs):
@@ -228,17 +291,18 @@ def gpu_shader(args, blobs):
                   language          GpuLanguage name, e.g. "GPU_LANGUAGE_GLSL_4_0",
                                     "GPU_LANGUAGE_HLSL_DX11" (HLSL SM 5.0), "LANGUAGE_OSL_1"
                   function_name, pixel_name, resource_prefix, uid
-                                    strings of printable ASCII (see _check_name)
+                                    strings (see _check_names for the ones refused)
                   descriptor_set    {"index": n, "texture_binding_start": n}
                                     (setDescriptorSetIndex)
                   texture_max_width setTextureMaxWidth
                   allow_texture_1d  setAllowTexture1D
 
     Before extracting, the command refuses the request (it raises, so the call fails) where
-    the wheel would do something undefined: a name outside printable ASCII (_check_name), or a
-    1D LUT that wouldn't fit its texture width limit, which divides by zero, loops forever or
-    exhausts memory (_padding_fits; the default limit of 4096 can't hold a LUT of 8191
-    entries). An unknown key is refused too.
+    the wheel would do something undefined: an MSL resource prefix the Metal class wrapper
+    can't read (_check_names), or a 1D LUT that wouldn't fit its texture width limit, which
+    divides by zero, loops forever or exhausts memory (_padding_fits; the default limit of 4096
+    can't hold a LUT of 8191 entries). An unknown key, or a setting of the wrong type, is
+    refused too (_check_settings).
 
     result:
       processor_cache_id, gpu_cache_id, gpu_processor (isNoOp, hasChannelCrosstalk)
@@ -263,9 +327,9 @@ def gpu_shader(args, blobs):
                   textures_3d       in order: {"name", "sampler_name", "edge_len",
                                     "interpolation", "binding_index", "values" (a blob index:
                                     edge_len^3 * 3 float32)}
-                  dynamic_properties  in order: {"type", "double": bits} for exposure, contrast
-                                    and gamma, {"type", "repr": repr() of the grading value}
-                                    for the grading properties
+                  dynamic_properties  in order: {"type", "value"}: a double as {"f64": bits}
+                                    (exposure, contrast, gamma), a grading value written out
+                                    by checks.dump, its floats as bits
       exception, stage   when OCIO raised: {"type", "message"}, and where: "config",
                 "transform", "processor" (as in cpu_apply), "gpu_processor", "shader_desc"
                 (the setters) or "extract"
@@ -274,12 +338,7 @@ def gpu_shader(args, blobs):
     """
     check_keys("gpu_shader", args, PROCESSOR_KEYS | {"optimization", "shader"})
     settings = args.get("shader") or {}
-    check_keys("shader", settings, set(SETTINGS))
-    if "language" in settings and not hasattr(OCIO.GpuLanguage, str(settings["language"])):
-        raise ValueError(f"unknown GpuLanguage {settings['language']!r}")
-    for key in ("function_name", "pixel_name", "resource_prefix", "uid"):
-        if key in settings:
-            _check_name(key, settings[key])
+    _check_settings(settings)
     stage, result, out = ["config"], {}, []
     with captured_log() as log:
         try:
@@ -297,7 +356,7 @@ def gpu_shader(args, blobs):
             })
             stage[0] = "shader_desc"
             desc = _shader_desc(settings)
-            _check_textures(gpu, settings, desc.getTextureMaxWidth())
+            _check_textures(gpu, settings, desc.getTextureMaxWidth(), log)
             stage[0] = "extract"
             gpu.extractGpuShaderInfo(desc)
             result["shader"] = _shader(desc, out)

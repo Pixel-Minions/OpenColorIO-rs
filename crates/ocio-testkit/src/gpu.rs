@@ -15,6 +15,7 @@ use serde_json::{Map, Value, json};
 
 use crate::Oracle;
 use crate::oracle::{BatchCall, Response, bytes_to_f32};
+use crate::processor_ops::Dumped;
 
 /// A shading language (`GpuLanguage`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -29,30 +30,31 @@ pub enum GpuLanguage {
     Glsl40,
     /// `GPU_LANGUAGE_GLSL_VK_4_6`.
     GlslVk46,
-    /// `GPU_LANGUAGE_GLSL_ES_1_0`.
-    GlslEs10,
-    /// `GPU_LANGUAGE_GLSL_ES_3_0`.
-    GlslEs30,
     /// `GPU_LANGUAGE_HLSL_SM_5_0`, which the Python binding names `GPU_LANGUAGE_HLSL_DX11`.
     HlslSm50,
     /// `LANGUAGE_OSL_1`.
     Osl1,
+    /// `GPU_LANGUAGE_GLSL_ES_1_0`.
+    GlslEs10,
+    /// `GPU_LANGUAGE_GLSL_ES_3_0`.
+    GlslEs30,
     /// `GPU_LANGUAGE_MSL_2_0`.
     Msl20,
 }
 
 impl GpuLanguage {
-    /// All 10 languages, in the enum's order.
+    /// All 10 languages, in upstream's enumerator order
+    /// (include/OpenColorIO/OpenColorTypes.h:466-481 @ v2.5.2).
     pub const ALL: [GpuLanguage; 10] = [
         GpuLanguage::Cg,
         GpuLanguage::Glsl12,
         GpuLanguage::Glsl13,
         GpuLanguage::Glsl40,
         GpuLanguage::GlslVk46,
-        GpuLanguage::GlslEs10,
-        GpuLanguage::GlslEs30,
         GpuLanguage::HlslSm50,
         GpuLanguage::Osl1,
+        GpuLanguage::GlslEs10,
+        GpuLanguage::GlslEs30,
         GpuLanguage::Msl20,
     ];
 
@@ -185,8 +187,8 @@ pub struct Raised {
     pub stage: String,
 }
 
-/// A uniform's value, read with the getter of its type.
-#[derive(Debug, Clone, PartialEq)]
+/// A uniform's value, read with the getter of its type. Floats compare by their bits.
+#[derive(Debug, Clone)]
 pub enum UniformValue {
     /// `UNIFORM_DOUBLE`.
     Double(f64),
@@ -203,6 +205,25 @@ pub enum UniformValue {
     Unknown,
 }
 
+/// The floats' bits.
+fn bits(values: &[f32]) -> Vec<u32> {
+    values.iter().map(|v| v.to_bits()).collect()
+}
+
+impl PartialEq for UniformValue {
+    fn eq(&self, other: &UniformValue) -> bool {
+        match (self, other) {
+            (UniformValue::Double(a), UniformValue::Double(b)) => a.to_bits() == b.to_bits(),
+            (UniformValue::Bool(a), UniformValue::Bool(b)) => a == b,
+            (UniformValue::Float3(a), UniformValue::Float3(b)) => bits(a) == bits(b),
+            (UniformValue::VectorFloat(a), UniformValue::VectorFloat(b)) => bits(a) == bits(b),
+            (UniformValue::VectorInt(a), UniformValue::VectorInt(b)) => a == b,
+            (UniformValue::Unknown, UniformValue::Unknown) => true,
+            _ => false,
+        }
+    }
+}
+
 /// A uniform of the shader.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Uniform {
@@ -216,8 +237,8 @@ pub struct Uniform {
     pub value: UniformValue,
 }
 
-/// A 1D or 2D texture of the shader.
-#[derive(Debug, Clone, PartialEq)]
+/// A 1D or 2D texture of the shader. Values compare by their bits.
+#[derive(Debug, Clone)]
 pub struct Texture {
     /// `textureName`.
     pub name: String,
@@ -239,8 +260,8 @@ pub struct Texture {
     pub values: Vec<f32>,
 }
 
-/// A 3D texture of the shader.
-#[derive(Debug, Clone, PartialEq)]
+/// A 3D texture of the shader. Values compare by their bits.
+#[derive(Debug, Clone)]
 pub struct Texture3d {
     /// `textureName`.
     pub name: String,
@@ -256,13 +277,29 @@ pub struct Texture3d {
     pub values: Vec<f32>,
 }
 
-/// A dynamic property's value.
-#[derive(Debug, Clone, PartialEq)]
-pub enum DynamicValue {
-    /// Exposure, contrast or gamma.
-    Double(f64),
-    /// A grading value: its `repr()`.
-    Repr(String),
+impl PartialEq for Texture {
+    fn eq(&self, other: &Texture) -> bool {
+        self.name == other.name
+            && self.sampler_name == other.sampler_name
+            && self.width == other.width
+            && self.height == other.height
+            && self.channel == other.channel
+            && self.dimensions == other.dimensions
+            && self.interpolation == other.interpolation
+            && self.binding_index == other.binding_index
+            && bits(&self.values) == bits(&other.values)
+    }
+}
+
+impl PartialEq for Texture3d {
+    fn eq(&self, other: &Texture3d) -> bool {
+        self.name == other.name
+            && self.sampler_name == other.sampler_name
+            && self.edge_len == other.edge_len
+            && self.interpolation == other.interpolation
+            && self.binding_index == other.binding_index
+            && bits(&self.values) == bits(&other.values)
+    }
 }
 
 /// A dynamic property of the shader description.
@@ -270,8 +307,9 @@ pub enum DynamicValue {
 pub struct DynamicProperty {
     /// Its `DynamicPropertyType` name.
     pub kind: String,
-    /// Its value at extraction.
-    pub value: DynamicValue,
+    /// Its value at extraction, exact: a double (exposure, contrast, gamma), or a grading
+    /// value written out.
+    pub value: Dumped,
 }
 
 /// What the description holds after the extraction.
@@ -405,12 +443,7 @@ impl GpuShaderReply {
                     .iter()
                     .map(|p| DynamicProperty {
                         kind: string(p, "type"),
-                        value: match p.get("double") {
-                            Some(bits) => {
-                                DynamicValue::Double(f64::from_bits(bits.as_u64().expect("bits")))
-                            }
-                            None => DynamicValue::Repr(string(p, "repr")),
-                        },
+                        value: Dumped::parse(&p["value"], &[]),
                     })
                     .collect(),
                 getters,
@@ -508,7 +541,7 @@ mod tests {
                               "values": 1}],
                 "textures_3d": [],
                 "dynamic_properties": [{"type": "DYNAMIC_PROPERTY_GAMMA",
-                                        "double": 0x4000_0000_0000_0000u64}],
+                                        "value": {"f64": 0x4000_0000_0000_0000u64}}],
             },
             "log": [],
         });
@@ -530,11 +563,59 @@ mod tests {
         );
         assert_eq!(shader.uniforms[3].value, UniformValue::Unknown);
         assert_eq!(shader.textures[0].values, vec![1.5, -2.0]);
-        assert_eq!(
-            shader.dynamic_properties[0].value,
-            DynamicValue::Double(2.0)
-        );
+        assert_eq!(shader.dynamic_properties[0].value, Dumped::F64(2.0));
         assert_eq!(shader.getters, json!({"language": "GPU_LANGUAGE_CG"}));
         assert!(reply.raised().is_none());
+    }
+
+    /// Uniform and texture values compare by their bits: the zeros of the two signs differ,
+    /// and a NaN equals the same NaN.
+    #[test]
+    fn floats_compare_by_their_bits() {
+        let nan = f32::from_bits(0x7FC0_1234);
+        for (a, b) in [
+            (UniformValue::Double(0.0), UniformValue::Double(-0.0)),
+            (
+                UniformValue::Float3([0.0; 3]),
+                UniformValue::Float3([0.0, -0.0, 0.0]),
+            ),
+            (
+                UniformValue::VectorFloat(vec![1.0, 0.0]),
+                UniformValue::VectorFloat(vec![1.0, -0.0]),
+            ),
+        ] {
+            assert_ne!(a, b);
+        }
+        assert_eq!(
+            UniformValue::Double(f64::from(nan)),
+            UniformValue::Double(f64::from(nan))
+        );
+        assert_eq!(
+            UniformValue::VectorFloat(vec![nan]),
+            UniformValue::VectorFloat(vec![nan])
+        );
+        let texture = |values: Vec<f32>| Texture {
+            name: "t".into(),
+            sampler_name: "s".into(),
+            width: 1,
+            height: 1,
+            channel: "TEXTURE_RED_CHANNEL".into(),
+            dimensions: "TEXTURE_1D".into(),
+            interpolation: "INTERP_LINEAR".into(),
+            binding_index: 1,
+            values,
+        };
+        assert_ne!(texture(vec![0.0]), texture(vec![-0.0]));
+        assert_eq!(texture(vec![nan]), texture(vec![nan]));
+        let texture_3d = |values: Vec<f32>| Texture3d {
+            name: "t".into(),
+            sampler_name: "s".into(),
+            edge_len: 1,
+            interpolation: "INTERP_LINEAR".into(),
+            binding_index: 1,
+            values,
+        };
+        assert_ne!(texture_3d(vec![0.0; 3]), texture_3d(vec![0.0, 0.0, -0.0]));
+        assert_eq!(texture_3d(vec![nan; 3]), texture_3d(vec![nan; 3]));
     }
 }

@@ -2,10 +2,15 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! The oracle's `gpu_shader` command (`oracle/ocio_oracle/gpu.py`, chunk O1.3) against the
-//! wheel itself: every language and setting reaches the shader description; uniforms,
-//! textures and dynamic properties come back with their values, each in its place; the default
-//! GPU processor is the optimized one with the default flags; every error path raises where the
-//! command says; the command's refusals; and replies that don't depend on the run.
+//! wheel itself:
+//! - every language and setting reaches the shader description;
+//! - uniforms, textures and dynamic properties come back with their values, each in its place,
+//!   and the grading values exact, as an independent read of the wheel gives them;
+//! - each message is logged once, as one extraction logs it;
+//! - the default GPU processor is the optimized one with the default flags;
+//! - every error path raises where the command says; the command's refusals, exactly the names
+//!   the wheel can't read and settings of the wrong type; and replies that don't depend on the
+//!   run.
 //!
 //! **Error paths**, by stage (paths relative to `upstream/OpenColorIO/src/OpenColorIO` @ v2.5.2):
 //! - `config`, `transform`, `processor`: as in `cpu_apply`.
@@ -21,10 +26,10 @@
 
 use ocio_testkit::Oracle;
 use ocio_testkit::gpu::{
-    DynamicValue, GpuLanguage, GpuShaderReply, GpuShaderRequest, Raised, ShaderSettings,
-    UniformValue,
+    GpuLanguage, GpuShaderReply, GpuShaderRequest, Raised, ShaderSettings, UniformValue,
 };
 use ocio_testkit::oracle::{BatchCall, Response};
+use ocio_testkit::processor_ops::Dumped;
 use serde_json::{Value, json};
 
 /// Runs `calls` in one oracle process; each must succeed.
@@ -216,7 +221,7 @@ fn uniforms_hold_their_values_at_extraction() {
             .dynamic_properties
             .iter()
             .map(|p| match &p.value {
-                DynamicValue::Double(d) => (p.kind.clone(), d.to_bits()),
+                Dumped::F64(d) => (p.kind.clone(), d.to_bits()),
                 other => panic!("{other:?}"),
             })
             .collect();
@@ -234,8 +239,8 @@ fn uniforms_hold_their_values_at_extraction() {
         let shader = reply.shader();
         assert_eq!(shader.dynamic_properties.len(), 1, "{:?}", reply.result);
         assert!(matches!(
-            shader.dynamic_properties[0].value,
-            DynamicValue::Repr(_)
+            &shader.dynamic_properties[0].value,
+            Dumped::Object(value) if value.class.starts_with("Grading")
         ));
         for uniform in &shader.uniforms {
             kinds.insert(uniform.kind.clone());
@@ -538,11 +543,15 @@ enum Outcome {
 }
 
 /// The oracle refuses a request where the wheel would do something undefined, and nothing next
-/// to it: names outside printable ASCII; 1D LUTs that don't fit the texture width limit
-/// (dividing by zero at a width of 0, looping forever at 1, exhausting memory when the padded
-/// rows outnumber the texels, as a LUT of 8191 entries does at the default width); and keys it
-/// doesn't know. The same LUTs at other widths, a width of 0 without a LUT, and ACES 2 tables,
-/// which the wheel refuses itself, go through.
+/// to it:
+/// - MSL resource prefixes the Metal class wrapper can't read back: a first byte past white
+///   space that isn't ASCII, or a line feed. Control characters, other names, a non-ASCII byte
+///   later in the prefix, and every name in the other languages go through;
+/// - 1D LUTs that don't fit the texture width limit (dividing by zero at a width of 0, looping
+///   forever at 1, exhausting memory when the padded rows outnumber the texels, as a LUT of
+///   8191 entries does at the default width). The same LUTs at other widths, a width of 0
+///   without a LUT, and ACES 2 tables, which the wheel refuses itself, go through;
+/// - keys it doesn't know, and settings of the wrong type.
 #[test]
 fn refusals_and_the_requests_next_to_them() {
     use Outcome::{Extracts, Raises, Refused};
@@ -567,19 +576,77 @@ fn refusals_and_the_requests_next_to_them() {
     // A second one of these raises at extraction, after the ops before it.
     let exposure = json!({"class": "ExposureContrastTransform", "args": {"exposure": 0.5},
         "calls": [["makeExposureDynamic"]]});
+    let msl = |settings: ShaderSettings| {
+        named(ShaderSettings {
+            language: Some(GpuLanguage::Msl20),
+            ..settings
+        })
+    };
+    let msl_lut = |p: &str| {
+        GpuShaderRequest::new(
+            json!({"transform": lut1d(&curve(5, false)), "optimization": "OPTIMIZATION_NONE"}),
+            ShaderSettings {
+                language: Some(GpuLanguage::Msl20),
+                resource_prefix: Some(p.into()),
+                ..ShaderSettings::default()
+            },
+        )
+    };
+    const CAN_T_READ: &str = "passes its first byte past white space to std::isdigit";
+    const LINE_FEED: &str = "a line feed in their names";
     let cases: Vec<(&str, GpuShaderRequest, Outcome)> = vec![
         (
-            "a non-ASCII prefix",
-            named(prefix("caf\u{e9}")),
-            Refused("only printable ASCII"),
+            "a non-ASCII byte later in an MSL prefix",
+            msl(prefix("caf\u{e9}")),
+            Extracts,
         ),
         (
-            "a line break in a function name",
+            "an MSL prefix starting with a non-ASCII byte",
+            msl(prefix("\u{e9}t\u{e9}")),
+            Refused(CAN_T_READ),
+        ),
+        (
+            "an MSL prefix starting with white space, then a non-ASCII byte",
+            msl(prefix(" \t\u{3c0}")),
+            Refused(CAN_T_READ),
+        ),
+        (
+            "an MSL prefix with a line feed",
+            msl(prefix("a\nb")),
+            Refused(LINE_FEED),
+        ),
+        (
+            "an MSL prefix with a line feed, for a texture",
+            msl_lut("x\ny\nz"),
+            Refused(LINE_FEED),
+        ),
+        (
+            "an MSL prefix with tab, carriage return and DEL",
+            msl(prefix("a\tb\rc\u{7f}d")),
+            Extracts,
+        ),
+        ("an MSL prefix of white space", msl(prefix(" \t")), Extracts),
+        (
+            "a non-ASCII MSL function name, and a line feed in its pixel name",
+            msl(ShaderSettings {
+                function_name: Some("f\u{e9}".into()),
+                pixel_name: Some("p\nx".into()),
+                ..ShaderSettings::default()
+            }),
+            Extracts,
+        ),
+        (
+            "a prefix starting with a non-ASCII byte in GLSL",
+            named(prefix("\u{e9}t\u{e9}")),
+            Extracts,
+        ),
+        (
+            "a line feed in a function name",
             named(ShaderSettings {
                 function_name: Some("a\nb".into()),
                 ..ShaderSettings::default()
             }),
-            Refused("only printable ASCII"),
+            Extracts,
         ),
         (
             "a tab in a uid",
@@ -587,7 +654,7 @@ fn refusals_and_the_requests_next_to_them() {
                 uid: Some("a\tb".into()),
                 ..ShaderSettings::default()
             }),
-            Refused("only printable ASCII"),
+            Extracts,
         ),
         (
             "a non-ASCII pixel name",
@@ -595,7 +662,7 @@ fn refusals_and_the_requests_next_to_them() {
                 pixel_name: Some("\u{3c0}".into()),
                 ..ShaderSettings::default()
             }),
-            Refused("only printable ASCII"),
+            Extracts,
         ),
         (
             "printable punctuation and a double underscore",
@@ -702,6 +769,59 @@ fn refusals_and_the_requests_next_to_them() {
                 "shader": {"language": "GPU_LANGUAGE_GLSL_9"}}),
             "unknown GpuLanguage",
         ),
+        (
+            "a language by number",
+            json!({"transform": {"class": "MatrixTransform"}, "shader": {"language": 5}}),
+            "language: unknown GpuLanguage 5",
+        ),
+        (
+            "a name that isn't a string",
+            json!({"transform": {"class": "MatrixTransform"}, "shader": {"uid": 5}}),
+            "uid must be a string, not 5",
+        ),
+        (
+            "a bool as a string",
+            json!({"transform": {"class": "MatrixTransform"},
+                "shader": {"allow_texture_1d": "false"}}),
+            "allow_texture_1d must be true or false, not 'false'",
+        ),
+        (
+            "a bool as a number",
+            json!({"transform": {"class": "MatrixTransform"},
+                "shader": {"allow_texture_1d": 0}}),
+            "allow_texture_1d must be true or false, not 0",
+        ),
+        (
+            "a fractional width",
+            json!({"transform": {"class": "MatrixTransform"},
+                "shader": {"texture_max_width": 4096.9}}),
+            "texture_max_width must be an integer from 0 to 4294967295, not 4096.9",
+        ),
+        (
+            "a width beyond an unsigned",
+            json!({"transform": {"class": "MatrixTransform"},
+                "shader": {"texture_max_width": 4294967296u64}}),
+            "texture_max_width must be an integer from 0 to 4294967295, not 4294967296",
+        ),
+        (
+            "a bool as an index",
+            json!({"transform": {"class": "MatrixTransform"},
+                "shader": {"descriptor_set": {"index": true, "texture_binding_start": 1}}}),
+            "descriptor_set index must be an integer from 0 to 4294967295, not True",
+        ),
+        (
+            "a fractional binding start",
+            json!({"transform": {"class": "MatrixTransform"},
+                "shader": {"descriptor_set": {"index": 1, "texture_binding_start": 2.5}}}),
+            "descriptor_set texture_binding_start must be an integer from 0 to 4294967295, \
+             not 2.5",
+        ),
+        (
+            "a descriptor set without its binding start",
+            json!({"transform": {"class": "MatrixTransform"},
+                "shader": {"descriptor_set": {"index": 1}}}),
+            "descriptor_set needs texture_binding_start",
+        ),
     ];
     let mut calls: Vec<BatchCall<'_>> = cases.iter().map(|(_, r, _)| r.call()).collect();
     calls.extend(raw.iter().map(|(_, args, _)| BatchCall {
@@ -738,8 +858,180 @@ fn refusals_and_the_requests_next_to_them() {
     }
 }
 
+/// The four grading transforms, dynamic, with the style each is built with.
+const GRADINGS: [(&str, &str); 4] = [
+    ("GradingPrimaryTransform", "GRADING_LOG"),
+    ("GradingRGBCurveTransform", "GRADING_LIN"),
+    ("GradingToneTransform", "GRADING_VIDEO"),
+    ("GradingHueCurveTransform", "GRADING_LOG"),
+];
+
+fn grading(class: &str, style: &str) -> Value {
+    json!({"class": class, "args": {"style": {"enum": style}, "dynamic": true}})
+}
+
+/// Reads the dynamic properties' grading values from a GLSL 4.0 extraction, written
+/// independently of the command: floats as their bits, curves as their control points and
+/// slopes, other values property by property.
+const GRADING_READ: &str = r#"
+import json, struct, sys
+import PyOpenColorIO as OCIO
+from ocio_oracle import spec
+
+def bits(v):
+    return struct.unpack("<Q", struct.pack("<d", v))[0]
+
+def read(v):
+    if isinstance(v, float):
+        return bits(v)
+    if isinstance(v, OCIO.GradingBSplineCurve):
+        return {"points": [[bits(p.x), bits(p.y)] for p in v.getControlPoints()],
+                "slopes": [bits(s) for s in v.getSlopes()]}
+    return {n: read(getattr(v, n)) for n in dir(type(v))
+            if isinstance(getattr(type(v), n), property)}
+
+GETTERS = {
+    OCIO.DYNAMIC_PROPERTY_GRADING_PRIMARY: "getGradingPrimary",
+    OCIO.DYNAMIC_PROPERTY_GRADING_RGBCURVE: "getGradingRGBCurve",
+    OCIO.DYNAMIC_PROPERTY_GRADING_TONE: "getGradingTone",
+    OCIO.DYNAMIC_PROPERTY_GRADING_HUECURVE: "getGradingHueCurve",
+}
+
+for transform in json.loads(sys.argv[1]):
+    proc = OCIO.Config.CreateRaw().getProcessor(spec.transform(transform),
+                                                OCIO.TRANSFORM_DIR_FORWARD)
+    desc = OCIO.GpuShaderDesc.CreateShaderDesc(language=OCIO.GPU_LANGUAGE_GLSL_4_0)
+    proc.getDefaultGPUProcessor().extractGpuShaderInfo(desc)
+    print(json.dumps([{"type": p.getType().name, "value": read(getattr(p, GETTERS[p.getType()])())}
+                      for p in desc.getDynamicProperties()]))
+"#;
+
+/// Checks a reported value against `GRADING_READ`'s reading of it, at `path`.
+fn check_grading_value(reported: &Dumped, expected: &Value, path: &str) {
+    match expected {
+        Value::Number(bits) => {
+            assert_eq!(Some(reported.f64().to_bits()), bits.as_u64(), "{path}");
+        }
+        Value::Object(fields) if fields.contains_key("points") => {
+            let curve = reported.object();
+            let Dumped::List(points) = curve.getter("getControlPoints") else {
+                panic!("{path}: {curve:?}");
+            };
+            let points: Vec<Value> = points
+                .iter()
+                .map(|p| {
+                    let p = p.object();
+                    json!([
+                        p.property("x").f64().to_bits(),
+                        p.property("y").f64().to_bits()
+                    ])
+                })
+                .collect();
+            assert_eq!(Value::from(points), fields["points"], "{path}.points");
+            let slopes: Vec<u64> = curve
+                .getter("getSlopes")
+                .f64s()
+                .iter()
+                .map(|s| s.to_bits())
+                .collect();
+            assert_eq!(json!(slopes), fields["slopes"], "{path}.slopes");
+        }
+        Value::Object(fields) => {
+            let object = reported.object();
+            for (name, value) in fields {
+                check_grading_value(object.property(name), value, &format!("{path}.{name}"));
+            }
+        }
+        other => panic!("{path}: {other}"),
+    }
+}
+
+/// The grading transforms' dynamic properties come back exact and whole: every float of the
+/// value, bit for bit, and every control point and slope of its curves, as an independent read
+/// of the wheel gives them (`GRADING_READ`). (The binding's `repr()` of these values, which the
+/// command reported before, prints 6 digits, and an address for a `GradingRGBCurve`.)
+#[test]
+fn grading_values_match_an_independent_read() {
+    let transforms: Vec<Value> = GRADINGS
+        .iter()
+        .map(|(class, style)| grading(class, style))
+        .collect();
+    let requests: Vec<GpuShaderRequest> = transforms
+        .iter()
+        .map(|t| {
+            GpuShaderRequest::new(
+                transform(t.clone()),
+                ShaderSettings::language(GpuLanguage::Glsl40),
+            )
+        })
+        .collect();
+    let lines = Oracle::get().run_script(
+        GRADING_READ,
+        &[serde_json::to_string(&transforms).expect("JSON")],
+    );
+    assert_eq!(lines.len(), transforms.len(), "{lines:?}");
+    for ((reply, line), (class, _)) in run(&requests).iter().zip(&lines).zip(GRADINGS) {
+        let expected: Value = serde_json::from_str(line).expect("the script's JSON");
+        let expected = expected.as_array().expect("properties");
+        let properties = &reply.shader().dynamic_properties;
+        assert_eq!(properties.len(), expected.len(), "{class}");
+        for (property, read) in properties.iter().zip(expected) {
+            assert_eq!(property.kind, read["type"], "{class}");
+            check_grading_value(&property.value, &read["value"], class);
+        }
+    }
+}
+
+/// Each OCIO message is logged once, as a single extraction logs it: the probe extraction that
+/// the texture width check runs first logs nothing into the reply. A dynamic exposure, contrast
+/// and gamma in OSL warn that they become local variables; the grading transforms, dynamic in
+/// OSL, log what they log.
+#[test]
+fn warnings_are_logged_once() {
+    const SCRIPT: &str = r#"
+import json, sys
+import PyOpenColorIO as OCIO
+from ocio_oracle import spec
+
+for transform in json.loads(sys.argv[1]):
+    messages = []
+    OCIO.SetLoggingFunction(messages.append)
+    proc = OCIO.Config.CreateRaw().getProcessor(spec.transform(transform),
+                                                OCIO.TRANSFORM_DIR_FORWARD)
+    desc = OCIO.GpuShaderDesc.CreateShaderDesc(language=OCIO.LANGUAGE_OSL_1)
+    proc.getDefaultGPUProcessor().extractGpuShaderInfo(desc)
+    OCIO.ResetToDefaultLoggingFunction()
+    print(json.dumps(messages))
+"#;
+    let mut transforms = vec![analytic(0.5, 1.25, 1.5)];
+    transforms.extend(GRADINGS.iter().map(|(class, style)| grading(class, style)));
+    let requests: Vec<GpuShaderRequest> = transforms
+        .iter()
+        .map(|t| {
+            GpuShaderRequest::new(
+                transform(t.clone()),
+                ShaderSettings::language(GpuLanguage::Osl1),
+            )
+        })
+        .collect();
+    let lines =
+        Oracle::get().run_script(SCRIPT, &[serde_json::to_string(&transforms).expect("JSON")]);
+    assert_eq!(lines.len(), transforms.len(), "{lines:?}");
+    for (i, ((reply, line), t)) in run(&requests)
+        .iter()
+        .zip(&lines)
+        .zip(&transforms)
+        .enumerate()
+    {
+        let once: Vec<String> = serde_json::from_str(line).expect("the script's JSON");
+        assert!(i > 0 || !once.is_empty(), "{t}: no warning to check");
+        assert_eq!(reply.log(), once, "{t}");
+    }
+}
+
 /// A request's reply is the same on every run, alone or in a batch, bytes included, so batching
-/// and the oracle's cache (keyed by the request) stay valid.
+/// and the oracle's cache (keyed by the request) stay valid: for MSL, with control characters
+/// in the resource prefix, and for the grading transforms' dynamic properties.
 #[test]
 fn replies_are_the_same_on_every_run() {
     let requests = [
@@ -755,7 +1047,23 @@ fn replies_are_the_same_on_every_run() {
             }),
             ShaderSettings::language(GpuLanguage::GlslVk46),
         ),
-    ];
+        GpuShaderRequest::new(
+            transform(analytic(0.5, 1.25, 1.5)),
+            ShaderSettings {
+                language: Some(GpuLanguage::Msl20),
+                resource_prefix: Some("a\tb\rc\u{7f}d".into()),
+                ..ShaderSettings::default()
+            },
+        ),
+    ]
+    .into_iter()
+    .chain(GRADINGS.iter().map(|(class, style)| {
+        GpuShaderRequest::new(
+            transform(grading(class, style)),
+            ShaderSettings::language(GpuLanguage::Glsl40),
+        )
+    }))
+    .collect::<Vec<_>>();
     let calls: Vec<BatchCall<'_>> = requests.iter().map(GpuShaderRequest::call).collect();
     let runs = [
         Oracle::get().batch(&calls, false),

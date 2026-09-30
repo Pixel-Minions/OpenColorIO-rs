@@ -315,6 +315,24 @@ fn unknown_keys_and_bad_pairs_are_refused() {
             json!({"transforms": one, "pairs": [[0]]}),
             "doesn't name two of the 1 transforms",
         ),
+        // Python takes true for 1 and false for 0; the command doesn't.
+        (
+            json!({"transforms": [{"class": "LogTransform"}, {"class": "LogTransform"}],
+                "pairs": [[true, false]]}),
+            "[True, False] doesn't name two of the 2 transforms",
+        ),
+        (
+            json!({"transforms": one, "pairs": [[0.0, 0]]}),
+            "doesn't name two of the 1 transforms",
+        ),
+        (
+            json!({"transforms": {"class": "LogTransform"}}),
+            "transforms must be a list",
+        ),
+        (
+            json!({"transforms": one, "pairs": null}),
+            "pairs must be a list, not None",
+        ),
     ];
     let calls: Vec<BatchCall<'_>> = cases
         .iter()
