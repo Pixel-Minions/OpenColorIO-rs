@@ -308,8 +308,28 @@ impl ImageLayout {
 }
 
 mod sealed {
-    /// Only this crate's image descriptions implement [`super::ImageDesc`].
-    pub trait Sealed {}
+    /// Only this crate's image descriptions implement [`super::ImageDesc`]; the CPU engine reads
+    /// their buffers through it.
+    pub trait Sealed {
+        /// The buffers that [`super::ChannelPos::buffer`] indexes.
+        fn buffers(&self) -> Vec<&[u8]>;
+    }
+
+    /// The buffers of a description the CPU engine can write.
+    pub trait SealedMut: Sealed {
+        /// The buffers that [`super::ChannelPos::buffer`] indexes, to write.
+        fn buffers_mut(&mut self) -> Vec<&mut [u8]>;
+    }
+}
+
+/// The buffers of `img`, which [`ChannelPos::buffer`] indexes: for the CPU engine to read.
+pub(crate) fn buffers<D: ImageDesc + ?Sized>(img: &D) -> Vec<&[u8]> {
+    sealed::Sealed::buffers(img)
+}
+
+/// The buffers of `img`, for the CPU engine to write.
+pub(crate) fn buffers_mut<D: ImageDescMut + ?Sized>(img: &mut D) -> Vec<&mut [u8]> {
+    sealed::SealedMut::buffers_mut(img)
 }
 
 /// What the CPU processor reads from any image description. Implemented by
@@ -379,7 +399,7 @@ pub trait ImageDesc: sealed::Sealed + fmt::Debug {
 
 /// An image description whose memory the CPU processor can write: the image of an in-place
 /// `apply`, or the destination of one. Descriptions of exclusive memory (`&mut`) implement it.
-pub trait ImageDescMut: ImageDesc {}
+pub trait ImageDescMut: ImageDesc + sealed::SealedMut {}
 
 /// Upstream's constructor argument for the channels: `numChannels` or `chanOrder`.
 #[derive(Debug, Clone, Copy)]
@@ -674,7 +694,17 @@ impl<B: AsRef<[u8]>> PackedImageDesc<B> {
     }
 }
 
-impl<B: AsRef<[u8]>> sealed::Sealed for PackedImageDesc<B> {}
+impl<B: AsRef<[u8]>> sealed::Sealed for PackedImageDesc<B> {
+    fn buffers(&self) -> Vec<&[u8]> {
+        vec![self.data.as_ref()]
+    }
+}
+
+impl<B: AsRef<[u8]> + AsMut<[u8]>> sealed::SealedMut for PackedImageDesc<B> {
+    fn buffers_mut(&mut self) -> Vec<&mut [u8]> {
+        vec![self.data.as_mut()]
+    }
+}
 
 impl<B: AsRef<[u8]>> ImageDesc for PackedImageDesc<B> {
     fn layout(&self) -> &ImageLayout {
@@ -1119,7 +1149,17 @@ impl<B: AsRef<[u8]>> PlanarImageDesc<B> {
     }
 }
 
-impl<B: AsRef<[u8]>> sealed::Sealed for PlanarImageDesc<B> {}
+impl<B: AsRef<[u8]>> sealed::Sealed for PlanarImageDesc<B> {
+    fn buffers(&self) -> Vec<&[u8]> {
+        self.buffers.iter().map(AsRef::as_ref).collect()
+    }
+}
+
+impl<B: AsRef<[u8]> + AsMut<[u8]>> sealed::SealedMut for PlanarImageDesc<B> {
+    fn buffers_mut(&mut self) -> Vec<&mut [u8]> {
+        self.buffers.iter_mut().map(AsMut::as_mut).collect()
+    }
+}
 
 impl<B: AsRef<[u8]>> ImageDesc for PlanarImageDesc<B> {
     fn layout(&self) -> &ImageLayout {

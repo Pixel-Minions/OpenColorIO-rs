@@ -1,0 +1,533 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright Contributors to the OpenColorIO Project.
+
+//! The scanline helper: a port of `src/OpenColorIO/ScanlineHelper.h` and `ScanlineHelper.cpp`
+//! @ v2.5.2. It feeds a CPU processor's ops one row of the image at a time, as packed RGBA F32,
+//! and writes each processed row back, converting between the images' bit depths and F32 with
+//! the ops at the ends of the chain.
+//!
+//! Upstream processes a packed RGBA F32 destination in its own memory, and reads a packed RGBA
+//! source row straight from the image. The port always processes in its scratch row, and
+//! copies whole rows in and out of the images: the values are the same, since a copy keeps
+//! every bit and the ops read each pixel before writing it. Processing in the image's memory
+//! is Phase 8 (speed).
+//!
+//! Very wide and very tall images (improvement candidate U-3): upstream sizes its scratch rows
+//! in a C `long` and counts rows in an `int`, which overflow. Where upstream then raises, the
+//! port raises the same; where it would write outside its buffers, the port returns an error
+//! instead (the general rule of `docs/deviations.md`).
+
+use core::ffi::{c_int, c_long};
+use std::any::TypeId;
+use std::fmt;
+use std::sync::Arc;
+
+use crate::bit_depth_utils::ChannelType;
+use crate::exception::{Exception, Result};
+use crate::image_desc::{self, GenericImageDesc, ImageDesc, ImageDescMut};
+use crate::image_packing::Generic;
+use crate::op::{CpuOp, Pixels, PixelsMut};
+use crate::open_color_types::BitDepth;
+
+/// The processing optimizations an image allows.
+///
+/// Port of `Optimizations` (src/OpenColorIO/ScanlineHelper.h:15-23 @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Optimizations(u32);
+
+impl Optimizations {
+    /// `NO_OPTIMIZATION`.
+    pub const NO_OPTIMIZATION: Optimizations = Optimizations(0x00);
+    /// `PACKED_OPTIMIZATION`: the image is a packed RGBA buffer.
+    pub const PACKED_OPTIMIZATION: Optimizations = Optimizations(0x01);
+    /// `FLOAT_OPTIMIZATION`: the image is F32, i.e. 32-bit float.
+    pub const FLOAT_OPTIMIZATION: Optimizations = Optimizations(0x02);
+    /// `PACKED_FLOAT_OPTIMIZATION`.
+    pub const PACKED_FLOAT_OPTIMIZATION: Optimizations = Optimizations(0x03);
+
+    /// `(self & flags) == flags`.
+    pub fn has(self, flags: Optimizations) -> bool {
+        self.0 & flags.0 == flags.0
+    }
+}
+
+/// The optimizations `img_desc` allows: packed if it is RGBA-packed, and packed float if it
+/// is also F32.
+///
+/// Port of `GetOptimizationMode` (src/OpenColorIO/ScanlineHelper.cpp:15-30 @ v2.5.2).
+pub fn get_optimization_mode(img_desc: &GenericImageDesc) -> Optimizations {
+    let mut optim = Optimizations::NO_OPTIMIZATION;
+
+    if img_desc.is_rgba_packed() {
+        optim = Optimizations::PACKED_OPTIMIZATION;
+
+        if img_desc.is_float() {
+            optim = Optimizations::PACKED_FLOAT_OPTIMIZATION;
+        }
+    }
+
+    optim
+}
+
+/// Row by row processing of an image, for a CPU processor.
+///
+/// Port of `ScanlineHelper` (src/OpenColorIO/ScanlineHelper.h:28-43 @ v2.5.2). The images'
+/// buffers are borrowed for `'a`, from `init` to the last row.
+pub trait ScanlineHelper<'a>: fmt::Debug {
+    /// Port of `init(const ImageDesc & srcImg, const ImageDesc & dstImg)`: from `src` to `dst`.
+    fn init_src_dst(&mut self, src: &'a dyn ImageDesc, dst: &'a mut dyn ImageDescMut)
+    -> Result<()>;
+
+    /// Port of `init(const ImageDesc & img)`: in place.
+    fn init(&mut self, img: &'a mut dyn ImageDescMut) -> Result<()>;
+
+    /// The next row, as packed RGBA F32 for the ops to process in place; `None` after the last
+    /// row.
+    ///
+    /// Port of `prepRGBAScanline(float ** buffer, long & numPixels)`, where no more rows is
+    /// `numPixels == 0`.
+    fn prep_rgba_scanline(&mut self) -> Result<Option<&mut [f32]>>;
+
+    /// Writes the processed row back.
+    ///
+    /// Port of `finishRGBAScanline()`.
+    fn finish_rgba_scanline(&mut self) -> Result<()>;
+}
+
+/// The message of the `std::length_error` that `std::vector::resize` raises for a size past
+/// its `max_size()`: `_Xlength_error("vector too long")` in MSVC's STL on Windows, and
+/// `vector::_M_default_append` in libstdc++ on Linux.
+const VECTOR_TOO_LONG: &str = if cfg!(target_os = "windows") {
+    "vector too long"
+} else {
+    "vector::_M_default_append"
+};
+
+/// The port's error where upstream's scratch rows, sized in a C `long`, are too small for a
+/// row of the image, and upstream would write outside them (improvement candidate U-3).
+const TOO_WIDE: &str =
+    "ScanlineHelper Error: The image is too wide: 4 * width overflows the scanline buffers.";
+
+/// The port's error where upstream's row index, an `int`, has overflowed and upstream would
+/// read and write outside the image (improvement candidate U-3).
+const TOO_TALL: &str = "ScanlineHelper Error: The image is too tall: the scanline index overflows.";
+
+/// What upstream's scratch rows allow for an image `width` pixels wide (improvement candidate
+/// U-3). Upstream sizes each one `const long bufferSize = 4 * m_dstImg.m_width;`, in a C `long`
+/// (32 bits on Windows), which wraps for very wide images
+/// (src/OpenColorIO/ScanlineHelper.cpp:70-81, 99-109 @ v2.5.2):
+/// - a negative size makes `std::vector::resize` raise `std::length_error`, which `init`
+///   raises: `Err`;
+/// - a size too small for a row makes the first row raise "Invalid output image buffer" (the
+///   RGBA F32 row is empty, `&m_rgbaFloatBuffer[0]` is null, and `PackRGBAFromImageDesc` checks
+///   it first, src/OpenColorIO/ImagePacking.cpp:26-29, 96-99), or write outside upstream's
+///   buffers, for which the port returns [`TOO_WIDE`]: `Ok(Some(the first row's error))`;
+/// - otherwise the rows fit: `Ok(None)`.
+///
+/// `in_packed`: the source is RGBA-packed. `use_dst_buffer`: the destination's own memory is
+/// the RGBA F32 row, and `m_rgbaFloatBuffer` is unused. `resize_in`: upstream sizes
+/// `m_inBitDepthBuffer` on this path. `float_input`: the input channel type is `float`, which
+/// `Generic<float>` packs straight into the RGBA row.
+fn scratch_rows(
+    width: c_long,
+    in_packed: bool,
+    use_dst_buffer: bool,
+    resize_in: bool,
+    float_input: bool,
+) -> Result<Option<Exception>> {
+    // `const long bufferSize = 4 * m_dstImg.m_width;`, wrapping as both wheels do.
+    let size = width.wrapping_mul(4);
+    if size < 0 {
+        if resize_in || !use_dst_buffer {
+            return Err(Exception::length_error(VECTOR_TOO_LONG));
+        }
+        return Ok(None);
+    }
+    let row = 4 * i128::from(width);
+    let size = i128::from(size);
+    if !use_dst_buffer {
+        // The rows are processed in `m_rgbaFloatBuffer`, of `size` values.
+        if size >= row {
+            return Ok(None);
+        }
+        if !in_packed && size == 0 {
+            let message = if float_input {
+                "Invalid output image buffer."
+            } else {
+                "Invalid output image buffer"
+            };
+            return Ok(Some(Exception::new(message)));
+        }
+        return Ok(Some(Exception::new(TOO_WIDE)));
+    }
+    // The rows are processed in the destination. A source packed channel by channel goes
+    // through `m_inBitDepthBuffer` first, except for `float`.
+    let in_size = if resize_in { size } else { 0 };
+    if in_packed || float_input || in_size >= row {
+        Ok(None)
+    } else {
+        Ok(Some(Exception::new(TOO_WIDE)))
+    }
+}
+
+/// The memory a helper reads its source rows from.
+enum Source<'a> {
+    /// Separate buffers.
+    Buffers(Vec<&'a [u8]>),
+    /// The destination's buffers: the image is processed in place.
+    Destination,
+}
+
+/// The scanline helper for images with channel types `I` (input) and `O` (output).
+///
+/// Port of `GenericScanlineHelper<InputType, OutType>`
+/// (src/OpenColorIO/ScanlineHelper.h:45-98, src/OpenColorIO/ScanlineHelper.cpp:33-204
+/// @ v2.5.2).
+pub struct GenericScanlineHelper<'a, I: Generic, O: Generic> {
+    input_bit_depth: BitDepth,
+    output_bit_depth: BitDepth,
+    in_bit_depth_op: Arc<dyn CpuOp>,
+    out_bit_depth_op: Arc<dyn CpuOp>,
+
+    /// Description of the source image.
+    src_img: Option<GenericImageDesc>,
+    /// Description of the destination image.
+    dst_img: Option<GenericImageDesc>,
+    src: Source<'a>,
+    dst: Vec<&'a mut [u8]>,
+
+    /// Optimization applicable to the input buffer.
+    in_optimized_mode: Optimizations,
+    /// Optimization applicable to the output buffer.
+    out_optimized_mode: Optimizations,
+
+    /// Processing needs an intermediate buffer as CPU Ops only process packed RGBA F32.
+    rgba_float_buffer: Vec<f32>,
+
+    /// Processing needs additional buffers of the same pixel type as the input/output in order
+    /// to convert arbitrary channel order from/to RGBA.
+    in_bit_depth_buffer: Vec<I>,
+    out_bit_depth_buffer: Vec<O>,
+
+    /// The index of the current line to process.
+    y_index: c_int,
+
+    /// Whether the destination is packed RGBA F32, which upstream processes in its own memory.
+    use_dst_buffer: bool,
+
+    /// What the first row raises, when upstream's scratch rows can't hold a row
+    /// ([`scratch_rows`], improvement candidate U-3).
+    row_error: Option<Exception>,
+}
+
+impl<I: Generic, O: Generic> fmt::Debug for GenericScanlineHelper<'_, I, O> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("GenericScanlineHelper")
+            .field("input_bit_depth", &self.input_bit_depth)
+            .field("output_bit_depth", &self.output_bit_depth)
+            .field("in_optimized_mode", &self.in_optimized_mode)
+            .field("out_optimized_mode", &self.out_optimized_mode)
+            .field("y_index", &self.y_index)
+            .field("use_dst_buffer", &self.use_dst_buffer)
+            .finish_non_exhaustive()
+    }
+}
+
+impl<'a, I: Generic, O: Generic> GenericScanlineHelper<'a, I, O> {
+    /// A helper for images of `input_bit_depth` and `output_bit_depth`, converted from and to
+    /// F32 by `in_bit_depth_op` and `out_bit_depth_op`.
+    ///
+    /// Port of the `GenericScanlineHelper` constructor
+    /// (src/OpenColorIO/ScanlineHelper.cpp:33-48 @ v2.5.2).
+    pub fn new(
+        input_bit_depth: BitDepth,
+        in_bit_depth_op: Arc<dyn CpuOp>,
+        output_bit_depth: BitDepth,
+        out_bit_depth_op: Arc<dyn CpuOp>,
+    ) -> Self {
+        GenericScanlineHelper {
+            input_bit_depth,
+            output_bit_depth,
+            in_bit_depth_op,
+            out_bit_depth_op,
+            src_img: None,
+            dst_img: None,
+            src: Source::Destination,
+            dst: Vec::new(),
+            in_optimized_mode: Optimizations::NO_OPTIMIZATION,
+            out_optimized_mode: Optimizations::NO_OPTIMIZATION,
+            rgba_float_buffer: Vec::new(),
+            in_bit_depth_buffer: Vec::new(),
+            out_bit_depth_buffer: Vec::new(),
+            y_index: 0,
+            use_dst_buffer: false,
+            row_error: None,
+        }
+    }
+
+    /// Checks upstream's scratch rows for rows of `width` pixels ([`scratch_rows`]), then sizes
+    /// the port's: all of them, as the port always processes in its own memory (see the
+    /// module's documentation). Upstream sizes only the ones its path uses
+    /// (src/OpenColorIO/ScanlineHelper.cpp:70-81, 99-109). A row that can't be processed isn't
+    /// given buffers: its error comes first.
+    fn size_buffers(&mut self, width: c_long, in_packed: bool, resize_in: bool) -> Result<()> {
+        let float_input = TypeId::of::<I>() == TypeId::of::<f32>();
+        self.row_error = scratch_rows(
+            width,
+            in_packed,
+            self.use_dst_buffer,
+            resize_in,
+            float_input,
+        )?;
+        if self.row_error.is_some() {
+            return Ok(());
+        }
+        // Upstream's rows fit, but the port's own could still be too long to allocate where
+        // upstream processes in the destination.
+        let values = usize::try_from(width)
+            .ok()
+            .and_then(|width| width.checked_mul(4))
+            .ok_or_else(|| Exception::new(TOO_WIDE))?;
+        self.rgba_float_buffer.resize(values, 0.0);
+        self.in_bit_depth_buffer.resize(values, I::default());
+        self.out_bit_depth_buffer.resize(values, O::default());
+        Ok(())
+    }
+}
+
+/// The bytes of row `y_index` of a packed RGBA image, `4 * width` channels of `size` bytes from
+/// its red channel: `m_rData + m_yStrideBytes * m_yIndex` in upstream's packed paths
+/// (src/OpenColorIO/ScanlineHelper.cpp:134, 160 @ v2.5.2).
+fn packed_row(img: &GenericImageDesc, y_index: c_int, size: usize) -> (usize, usize) {
+    let start = (img.r_data.offset as isize)
+        .wrapping_add(img.y_stride_bytes.wrapping_mul(y_index as isize));
+    let start = start as usize;
+    let len = 4 * usize::try_from(img.width).unwrap_or(0) * size;
+    (start, start + len)
+}
+
+impl<'a, I: Generic, O: Generic> ScanlineHelper<'a> for GenericScanlineHelper<'a, I, O> {
+    /// Port of `GenericScanlineHelper::init(const ImageDesc &, const ImageDesc &)`
+    /// (src/OpenColorIO/ScanlineHelper.cpp:50-82 @ v2.5.2).
+    fn init_src_dst(
+        &mut self,
+        src: &'a dyn ImageDesc,
+        dst: &'a mut dyn ImageDescMut,
+    ) -> Result<()> {
+        self.y_index = 0;
+
+        let src_img = GenericImageDesc::init(
+            src.layout(),
+            self.input_bit_depth,
+            self.in_bit_depth_op.clone(),
+        )?;
+        let dst_img = GenericImageDesc::init(
+            dst.layout(),
+            self.output_bit_depth,
+            self.out_bit_depth_op.clone(),
+        )?;
+
+        if src_img.width != dst_img.width || src_img.height != dst_img.height {
+            return Err(Exception::new(
+                "Dimension inconsistency between source and destination image buffers.",
+            ));
+        }
+
+        self.in_optimized_mode = get_optimization_mode(&src_img);
+        self.out_optimized_mode = get_optimization_mode(&dst_img);
+
+        // Can the output buffer be used as the internal RGBA F32 buffer?
+        self.use_dst_buffer = self
+            .out_optimized_mode
+            .has(Optimizations::PACKED_FLOAT_OPTIMIZATION);
+
+        // Upstream sizes m_inBitDepthBuffer for a source that isn't RGBA-packed.
+        let in_packed = self
+            .in_optimized_mode
+            .has(Optimizations::PACKED_OPTIMIZATION);
+        self.size_buffers(dst_img.width, in_packed, !in_packed)?;
+        self.src = Source::Buffers(image_desc::buffers(src));
+        self.dst = image_desc::buffers_mut(dst);
+        self.src_img = Some(src_img);
+        self.dst_img = Some(dst_img);
+        Ok(())
+    }
+
+    /// Port of `GenericScanlineHelper::init(const ImageDesc &)`
+    /// (src/OpenColorIO/ScanlineHelper.cpp:84-110 @ v2.5.2).
+    fn init(&mut self, img: &'a mut dyn ImageDescMut) -> Result<()> {
+        self.y_index = 0;
+
+        let src_img = GenericImageDesc::init(
+            img.layout(),
+            self.input_bit_depth,
+            self.in_bit_depth_op.clone(),
+        )?;
+        let dst_img = GenericImageDesc::init(
+            img.layout(),
+            self.output_bit_depth,
+            self.out_bit_depth_op.clone(),
+        )?;
+
+        self.in_optimized_mode = get_optimization_mode(&src_img);
+        self.out_optimized_mode = self.in_optimized_mode;
+
+        // Can the output buffer be used as the internal RGBA F32 buffer?
+        self.use_dst_buffer = self
+            .out_optimized_mode
+            .has(Optimizations::PACKED_FLOAT_OPTIMIZATION);
+
+        // Upstream sizes all its buffers, or none when the image is the RGBA F32 row.
+        let in_packed = self
+            .in_optimized_mode
+            .has(Optimizations::PACKED_OPTIMIZATION);
+        self.size_buffers(dst_img.width, in_packed, !self.use_dst_buffer)?;
+        self.src = Source::Destination;
+        self.dst = image_desc::buffers_mut(img);
+        self.src_img = Some(src_img);
+        self.dst_img = Some(dst_img);
+        Ok(())
+    }
+
+    /// Port of `GenericScanlineHelper::prepRGBAScanline`
+    /// (src/OpenColorIO/ScanlineHelper.cpp:117-150 @ v2.5.2).
+    fn prep_rgba_scanline(&mut self) -> Result<Option<&mut [f32]>> {
+        let GenericScanlineHelper {
+            src_img: Some(src_img),
+            dst_img: Some(dst_img),
+            src,
+            dst,
+            in_optimized_mode,
+            rgba_float_buffer,
+            in_bit_depth_buffer,
+            y_index,
+            row_error,
+            ..
+        } = self
+        else {
+            panic!("the scanline helper is used before init");
+        };
+
+        // Note that only a line-by-line processing is done on the image buffer.
+        if c_long::from(*y_index) >= dst_img.height {
+            return Ok(None);
+        }
+
+        // A row upstream's scratch rows can't hold (U-3).
+        if let Some(error) = row_error {
+            return Err(error.clone());
+        }
+
+        // After row `c_int::MAX` of an image with more rows, upstream's row index has wrapped
+        // (U-3): an RGBA-packed source row is then outside the image. Other sources raise
+        // "Invalid output image position." when packed, before touching any memory.
+        if *y_index < 0 && in_optimized_mode.has(Optimizations::PACKED_OPTIMIZATION) {
+            return Err(Exception::new(TOO_TALL));
+        }
+
+        let width = dst_img.width;
+        let values = 4 * usize::try_from(width).unwrap_or(0);
+        let src_buffers: Vec<&[u8]> = match src {
+            Source::Buffers(buffers) => buffers.clone(),
+            Source::Destination => dst.iter().map(|b| &**b).collect(),
+        };
+
+        if in_optimized_mode.has(Optimizations::PACKED_OPTIMIZATION) {
+            // The source row: 4 * width channels from the red one, read with the machine's byte
+            // order into the typed scratch row, then converted to F32 by the source's op.
+            let size = size_of::<I>();
+            let (start, end) = packed_row(src_img, *y_index, size);
+            let row = &src_buffers[src_img.r_data.buffer][start..end];
+            for (value, bytes) in in_bit_depth_buffer[..values]
+                .iter_mut()
+                .zip(row.chunks_exact(size))
+            {
+                *value = I::read_ne(bytes);
+            }
+            src_img.bit_depth_op.apply_bit_depth(
+                I::pixels(&in_bit_depth_buffer[..values]),
+                PixelsMut::F32(&mut rgba_float_buffer[..values]),
+            );
+        } else {
+            // Pack from any channel ordering & bit-depth to a packed RGBA F32 buffer.
+            I::pack_rgba_from_image_desc(
+                src_img,
+                &src_buffers,
+                in_bit_depth_buffer,
+                rgba_float_buffer,
+                width as c_int,
+                c_long::from(*y_index).wrapping_mul(width),
+            )?;
+        }
+
+        Ok(Some(&mut rgba_float_buffer[..values]))
+    }
+
+    /// Port of `GenericScanlineHelper::finishRGBAScanline`
+    /// (src/OpenColorIO/ScanlineHelper.cpp:152-177 @ v2.5.2).
+    fn finish_rgba_scanline(&mut self) -> Result<()> {
+        let GenericScanlineHelper {
+            dst_img: Some(dst_img),
+            dst,
+            out_optimized_mode,
+            rgba_float_buffer,
+            out_bit_depth_buffer,
+            y_index,
+            use_dst_buffer,
+            ..
+        } = self
+        else {
+            panic!("the scanline helper is used before init");
+        };
+        let width = dst_img.width;
+        let values = 4 * usize::try_from(width).unwrap_or(0);
+
+        // Note that only a line-by-line processing is done on the image buffer.
+        if out_optimized_mode.has(Optimizations::PACKED_OPTIMIZATION) {
+            if *use_dst_buffer {
+                // A packed RGBA F32 destination. Upstream converts the row in its own memory
+                // (`in == out`); here, in the scratch row, which then goes to the image.
+                dst_img.bit_depth_op.apply(&mut rgba_float_buffer[..values]);
+                let (start, end) = packed_row(dst_img, *y_index, size_of::<f32>());
+                let row = &mut dst[dst_img.r_data.buffer][start..end];
+                let (floats, _) = row.as_chunks_mut::<{ size_of::<f32>() }>();
+                for (bytes, &value) in floats.iter_mut().zip(&rgba_float_buffer[..values]) {
+                    value.write_ne(bytes);
+                }
+            } else {
+                dst_img.bit_depth_op.apply_bit_depth(
+                    Pixels::F32(&rgba_float_buffer[..values]),
+                    O::pixels_mut(&mut out_bit_depth_buffer[..values]),
+                );
+                let size = size_of::<O>();
+                let (start, end) = packed_row(dst_img, *y_index, size);
+                let row = &mut dst[dst_img.r_data.buffer][start..end];
+                for (bytes, &value) in row
+                    .chunks_exact_mut(size)
+                    .zip(&out_bit_depth_buffer[..values])
+                {
+                    value.write_ne(bytes);
+                }
+            }
+        } else {
+            // Unpack from packed RGBA F32 to any channel ordering & bit-depth.
+            O::unpack_rgba_to_image_desc(
+                dst_img,
+                dst,
+                rgba_float_buffer,
+                out_bit_depth_buffer,
+                width as c_int,
+                c_long::from(*y_index).wrapping_mul(width),
+            )?;
+        }
+
+        // `++m_yIndex`: an `int`, which wraps after row `c_int::MAX` of an image with more
+        // rows, as both wheels do (U-3); the next row is refused.
+        self.y_index = self.y_index.wrapping_add(1);
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+#[path = "scanline_helper_tests.rs"]
+mod tests;

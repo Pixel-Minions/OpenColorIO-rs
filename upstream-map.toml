@@ -236,6 +236,7 @@ path = "src/OpenColorIO/Exception.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/exception.rs"]
 status = "done"
+note = "1.1e: also std::length_error, which a C++ container raises for a size past its limit (ExceptionKind::LengthError; PyOpenColorIO raises it as ValueError), for the scanline helper (U-3)"
 
 [[file]]
 path = "src/OpenColorIO/FileRules.cpp"
@@ -530,13 +531,15 @@ note = "S4: scalar profile. The software half conversions (with sse2_blendv) pro
 path = "src/OpenColorIO/ScanlineHelper.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/scanline_helper.rs"]
-status = "todo"
+status = "done"
+note = "1.1e, checked against the wheel through image_apply (tests/scanline_helper_oracle.rs: RGBA-packed and other layouts, from one image to another and in place, every bit depth pair, and the init errors). The port processes every row in its scratch row, where upstream processes a packed RGBA F32 destination in its own memory; processing in the image is Phase 8. Very wide and very tall images follow the general rule (U-3)"
 
 [[file]]
 path = "src/OpenColorIO/ScanlineHelper.h"
 kind = "src"
 target = ["crates/ocio-ops/src/scanline_helper.rs"]
-status = "todo"
+status = "done"
+note = "see ScanlineHelper.cpp"
 
 [[file]]
 path = "src/OpenColorIO/SystemMonitor.cpp"
