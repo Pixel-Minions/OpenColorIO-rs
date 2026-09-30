@@ -66,7 +66,7 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
   - x86 `addps`/`mulps`/`addss`/`mulss` return the first operand's NaN, quieted. So SSE code follows the C++ source order.
   - C++ compilers may commute scalar code (MSVC and GCC differ; check the wheel's machine code).
   - LLVM freely commutes Rust's `+` and `*`, and the order can change between debug and release builds.
-  - In SSE-profile renderers, use `math_utils::sse_add`/`sse_mul` wherever two NaNs can meet (a NaN pixel with a NaN-producing parameter). In scalar renderers, pin the order the wheel uses.
+  - Use `math_utils::sse_add`/`sse_mul` wherever two NaNs can meet, in the operand order the wheel's *machine code* uses, per platform where MSVC and GCC differ. That is usually, but not always, upstream's source order: both wheels compile `m_linsinv[i] * (in[i] + m_minuslino[i])` (`LogOpCPU.cpp:787`) as `(in + minuslino) * linsinv`. Check the disassembly when finite parameters can create a NaN coefficient. NaN parameters are covered by waiver W0002.
 - **Rounding.**
   - Scalar integer conversions add 0.5 and truncate (`BitDepthUtils.h`).
   - SIMD stores round to nearest-even.
