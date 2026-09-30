@@ -724,7 +724,7 @@ None right now. Answered on 2026-09-29:
 ## 15. Next steps
 
 **Phase 0 progress (2026-09-29):**
-- **Harness done.** WP 0.1–0.4 and most of 0.6 (logging and the I/O trait are left) are done on the local `phase0` branch:
+- **Harness done.** WP 0.1–0.4 and most of 0.6 are done (logging moved to Phase 1 as chunk 1.2e; the I/O trait, `ConfigIOProxy`, belongs with config loading in 3.10) on the local `phase0` branch:
   - workspace;
   - upstream submodule and map;
   - oracle and test kit;

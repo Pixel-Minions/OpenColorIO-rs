@@ -50,6 +50,7 @@ from S4 are kept for Phase 2.
 | 1.2b | `DynamicProperty.h/.cpp`: the double property and its base (~200) | `dynamic_property.rs` | the double parts of `tests/cpu/DynamicProperty_tests.cpp` |
 | 1.2c | `Op.h/.cpp` (748): `OpData` base, `Op`, `OpRcPtrVec` → `OpVec`, `SerializeOpVec`, `CreateOpVecFromOpData`, `HasFlag` | `op.rs`, `op_data.rs` | `tests/cpu/Op_tests.cpp`, the tests that don't need unported families |
 | 1.2d | `CPUProcessor.h/.cpp` (477): `CreateCPUEngine`, generic bit-depth helpers, `apply` | `cpu_processor.rs` | `tests/cpu/CPUProcessor_tests.cpp`, the tests whose ops exist |
+| 1.2e | `Logging.h/.cpp` (from WP 0.6): levels, `OCIO_LOGGING_LEVEL` read once, the `[OpenColorIO Warning]: ` prefixes, line splitting (`StringUtils`), the callback called outside the lock (a no-output-change deviation of upstream's lock-held callback; `docs/architecture.md`) | `logging.rs` | `tests/cpu/Logging_tests.cpp`, and log capture through the oracle (`captured_log`) |
 
 - `OpData` variants are added family by family (WP 1.3). A match has no wildcard arm, so adding a family touches every match. That is intended.
 - 1.2d needs at least one op to test with: port the NoOps (1.3n1) and Matrix (1.3m1–m2) first, or together.
