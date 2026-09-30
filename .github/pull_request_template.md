@@ -17,6 +17,7 @@
 - [ ] Oracle checks are exact.
 - [ ] Independent verifier pass.
 - [ ] No new waivers, `#[ignore]`, tolerances or `unsafe` outside the allowed modules.
+- [ ] Upstream bugs and limitations the card copies are listed in `docs/improvements.md`.
 - [ ] `upstream-map.toml` statuses updated. `docs/parity.md` and `docs/ratchet.toml` untouched: `cargo xtask land` regenerates them.
 
 <!-- CI runs `cargo xtask ci` in branch mode, against the PR base's `docs/ratchet.toml`; on a

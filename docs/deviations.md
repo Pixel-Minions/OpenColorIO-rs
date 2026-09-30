@@ -5,7 +5,8 @@ owner's approval. A deviation must never change an output covered by the byte-ex
 definition of done (PLAN.md §3) unless it also has a waiver in `waivers.toml`.
 
 Upstream bugs that don't affect outputs (crashes, data races, deadlocks) are fixed in the
-port and listed here.
+port and listed here. Upstream bugs that do affect outputs are copied, and listed in
+`docs/improvements.md` for the owner to decide on at the end.
 
 | Id | Upstream behavior | Port behavior | Affects outputs? | Approved |
 |---|---|---|---|---|
