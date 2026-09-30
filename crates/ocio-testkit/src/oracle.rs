@@ -344,7 +344,7 @@ fn identity(oracle_dir: &Path) -> Result<u128, String> {
     for name in ["pyproject.toml", "uv.lock", ".python-version"] {
         files.push(oracle_dir.join(name));
     }
-    collect_py_files(&oracle_dir.join("ocio_oracle"), &mut files);
+    collect_files(&oracle_dir.join("ocio_oracle"), &mut files);
     files.sort();
 
     let mut h = Xxh3::new();
@@ -359,15 +359,19 @@ fn identity(oracle_dir: &Path) -> Result<u128, String> {
     Ok(h.digest128())
 }
 
-fn collect_py_files(dir: &Path, out: &mut Vec<PathBuf>) {
+/// Every file under `dir`, at any depth, except Python's bytecode caches (`__pycache__`),
+/// which the interpreter may write and which don't change what the oracle does.
+fn collect_files(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            collect_py_files(&path, out);
-        } else if path.extension().is_some_and(|e| e == "py") {
+            if path.file_name().is_some_and(|n| n != "__pycache__") {
+                collect_files(&path, out);
+            }
+        } else {
             out.push(path);
         }
     }
@@ -506,4 +510,47 @@ pub fn bytes_to_f32(bytes: &[u8]) -> Vec<f32> {
         .iter()
         .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The cache identity covers every file of the oracle's package, whatever its extension,
+    /// and not Python's bytecode caches.
+    #[test]
+    fn the_identity_covers_every_file_but_bytecode() {
+        let dir = paths::target_dir().join(format!("testkit-identity-{}", std::process::id()));
+        let package = dir.join("ocio_oracle");
+        std::fs::create_dir_all(package.join("__pycache__")).unwrap();
+        for (name, text) in [
+            ("pyproject.toml", "p"),
+            ("uv.lock", "l"),
+            (".python-version", "3.13"),
+        ] {
+            std::fs::write(dir.join(name), text).unwrap();
+        }
+        std::fs::write(package.join("commands.py"), "c").unwrap();
+        std::fs::write(package.join("table.json"), "[1]").unwrap();
+        std::fs::write(package.join("__pycache__").join("commands.pyc"), "b").unwrap();
+
+        let before = identity(&dir).unwrap();
+        std::fs::write(package.join("__pycache__").join("commands.pyc"), "b2").unwrap();
+        assert_eq!(
+            identity(&dir).unwrap(),
+            before,
+            "bytecode changed the identity"
+        );
+        std::fs::write(package.join("table.json"), "[2]").unwrap();
+        let data_changed = identity(&dir).unwrap();
+        std::fs::write(package.join("table.json"), "[1]").unwrap();
+        std::fs::write(package.join("commands.py"), "c2").unwrap();
+        let code_changed = identity(&dir).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_ne!(
+            data_changed, before,
+            "a data file didn't change the identity"
+        );
+        assert_ne!(code_changed, before, "a module didn't change the identity");
+    }
 }
