@@ -11,7 +11,7 @@
 //! Upstream's `OCIO_CHECK_*` macros record a failure and let the test continue; these
 //! functions panic at the first failure instead, which fails the same tests.
 
-use std::fmt::{Debug, LowerExp};
+use std::fmt::{Debug, Display, LowerExp};
 use std::ops::{Div, Neg, Sub};
 
 /// The float types upstream's checks are instantiated with.
@@ -140,6 +140,31 @@ pub fn are_all_close(lanes: &[f32], reference: f32, ulp_tolerance: u32) -> bool 
 pub fn check_equal<T: PartialEq + Debug>(x: T, y: T) {
     if x != y {
         panic!("OCIO_CHECK_EQUAL failed: {x:?} == {y:?}");
+    }
+}
+
+/// `OCIO_CHECK_THROW_WHAT(S, E, W)`: `S` fails with an error whose message contains `W`. An
+/// empty message, or an empty `W`, fails the check.
+///
+/// `result` is what the statement returned, and its error type stands for `E`. Upstream
+/// catches `E const &`, so a check on `OCIO::Exception` also accepts an
+/// `OCIO::ExceptionMissingFile`; a port of a check on the subclass must check the error's
+/// kind too.
+///
+/// Port of `OCIO_CHECK_THROW_WHAT` (tests/testutils/UnitTest.h:234-250 @ v2.5.2).
+#[track_caller]
+pub fn check_throw_what<T: Debug, E: Display>(result: Result<T, E>, what: &str) {
+    match result {
+        Ok(value) => panic!("OCIO_CHECK_THROW_WHAT failed: no error was raised, got {value:?}"),
+        Err(e) => {
+            let message = e.to_string();
+            if what.is_empty() || message.is_empty() || !message.contains(what) {
+                panic!(
+                    "OCIO_CHECK_THROW_WHAT failed: the error \"{message}\" was raised. Expecting \
+                     to contain \"{what}\""
+                );
+            }
+        }
     }
 }
 

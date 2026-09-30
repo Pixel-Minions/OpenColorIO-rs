@@ -139,6 +139,29 @@ entry here in the same chunk. Take the next free number in its section's series 
 - **A fix:** copy the children as well.
 - **Status:** to be matched when `GroupTransform` is ported (1.8a).
 
+### I-14. Metadata attribute names match exactly when set, but ignoring case when read
+
+- **Upstream:** in the metadata of transforms, ops and LUT files (`FormatMetadata`),
+  `addAttribute`, `setName` and `setID` replace an attribute only when its name is exactly the
+  same (`fileformats/FormatMetadata.cpp:94-112`), while `getAttributeValue(name)`, `getName`,
+  `getID` and `combine` use the first attribute whose name matches ignoring ASCII case
+  (`fileformats/FormatMetadata.cpp:140-179, 219-231, 303-332`). After
+  `addAttribute("Name", "a")`, `setName("b")` adds a second attribute, `name="b"`, and
+  `getName()` still returns `a`.
+- **Who notices:** code that spells an attribute name with different cases.
+- **A fix:** match names the same way everywhere, so that setting an attribute replaces the one
+  that reading returns.
+- **Status:** matched in `p1-foundations` (1.2a).
+
+### I-15. A misspelled error message
+
+- **Upstream:** renaming a metadata element to `ROOT`, or adding a child element named `ROOT`,
+  fails with "'ROOT' is reversed for root FormatMetadata elements."
+  (`fileformats/FormatMetadata.cpp:241`): "reversed" for "reserved".
+- **Who notices:** anyone who reads the message.
+- **A fix:** "reserved".
+- **Status:** matched in `p1-foundations` (1.2a).
+
 ## Python module (`ocio-py`)
 
 ### I-12. A channel order passed without its keyword is misread

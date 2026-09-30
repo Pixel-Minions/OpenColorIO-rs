@@ -29,15 +29,16 @@ status = "todo"
 [[file]]
 path = "include/OpenColorIO/OpenColorTransforms.h"
 kind = "api"
-target = ["crates/ocio/src/lib.rs"]
-status = "todo"
+target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/format_metadata.rs"]
+status = "partial"
+note = "1.2a: the FormatMetadata interface (44-117) is FormatMetadataImpl's own methods in format_metadata.rs (upstream has no other implementation), and its operator<< is FormatMetadataImpl::write_to"
 
 [[file]]
 path = "include/OpenColorIO/OpenColorTypes.h"
 kind = "api"
-target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs"]
+target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs", "crates/ocio-ops/src/format_metadata.rs"]
 status = "partial"
-note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs"
+note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does"
 
 [[file]]
 path = "src/CMakeLists.txt"
@@ -908,14 +909,16 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/fileformats/FormatMetadata.cpp"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/format_metadata.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/format_metadata.rs"]
+status = "done"
+note = "1.2a, in ocio-ops because op data holds it. Checked by upstream's tests only: no oracle command reads metadata yet. The case rules for attribute names (exact when adding, ASCII-insensitive when looking up and combining) and the misspelled 'reversed' message are copied (improvement candidates I-14, I-15)"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FormatMetadata.h"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/format_metadata.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/format_metadata.rs"]
+status = "done"
+note = "see FormatMetadata.cpp"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/cdl/CDLParser.cpp"
@@ -4428,8 +4431,8 @@ status = "todo"
 [[file]]
 path = "tests/cpu/fileformats/FormatMetadata_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-formats/src/fileformats/format_metadata_tests.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/format_metadata_tests.rs"]
+status = "done"
 
 [[file]]
 path = "tests/cpu/fileformats/ctf/CTFTransform_tests.cpp"
@@ -5514,7 +5517,7 @@ path = "tests/testutils/UnitTest.h"
 kind = "test-support"
 target = ["crates/ocio-testkit/src/upstream/mod.rs"]
 status = "partial"
-note = "S2: OCIO_CHECK_CLOSE; S4: OCIO_CHECK_EQUAL"
+note = "S2: OCIO_CHECK_CLOSE; S4: OCIO_CHECK_EQUAL; 1.2a: OCIO_CHECK_THROW_WHAT"
 
 [[file]]
 path = "tests/utils/CMakeLists.txt"
