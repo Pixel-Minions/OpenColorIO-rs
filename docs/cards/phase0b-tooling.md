@@ -48,6 +48,11 @@ below is a list of mergeable chunks (`CLAUDE.md` → "Chunks").
 | T5a | **One PR per card**, on a `card/<id>` branch, with its chunk commits (merged with a merge commit, never squashed, so the chunks stay reviewable).<br>• CI runs the gate on GitHub's Windows and Rocky machines. Their CPUs differ from the local machine, so they exercise other SIMD kernels.<br>• A PR template and labels mark "needs owner" items (waivers, deviations, API shape).<br>• Agents never push: the orchestrator pushes branches and opens PRs. |
 | T5b | **Nightly workflow:**<br>• the exhaustive tier;<br>• `cargo-mutants` on modules changed that day;<br>• Intel SDE emulation of older CPUs (`-p4p`, `-snb`, `-hsw`, `-skl`, `-skx`) for the oracle and the port.<br>SDE is downloaded from Intel's mirror, and its SHA256 is checked against the published value. |
 
+**T5a status (2026-09-30): done.**
+- The flow is in `PLAN.md` §7 "Pull requests".
+- The PR template is updated, and the labels `needs-owner`, `oracle`, `waiver`, `deviation`, `api` and `dependency` exist on GitHub.
+- The first PR fixed a bug that CI on GitHub's machines caught: the Lut3D SSE2 and AVX kernels quieted signaling-NaN alphas in release builds. The workstation never runs those kernels, and until SDE (T5b) checks them against the wheel, GitHub's assorted CPUs are the only machines that do.
+
 ## T6: housekeeping
 
 | Chunk | What |

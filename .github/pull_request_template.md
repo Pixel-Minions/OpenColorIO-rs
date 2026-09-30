@@ -1,18 +1,31 @@
+<!-- One PR per card. It holds the card's chunk commits and lands with a merge commit, never
+     squashed, so each chunk stays reviewable on its own (PLAN.md §7). -->
+
 ## Card
 
-<!-- The porting card (docs/cards/...) or WP this PR implements. -->
+<!-- The card (docs/cards/...) or fix this PR implements. -->
 
-## Upstream
+## Chunks
 
-<!-- Upstream files ported, at v2.5.2, and the upstream tests ported (they appear in `cargo xtask upstream-tests`). -->
+<!-- One line per commit, in order: the upstream files and line ranges it ports, and its tests
+     (they appear in `cargo xtask upstream-tests`). -->
 
 ## Evidence
 
-- [ ] `cargo xtask ci` passes (guards, fixtures, ratchet, parity).
-- [ ] Oracle checks are exact and pass on Windows and in Rocky Linux 9 (`scripts/rocky9.sh cargo test --workspace`).
+- [ ] Every chunk passed the chunk gate on Windows (`CLAUDE.md` → "Chunks").
+- [ ] Numeric chunks: tests in release too, on Windows and in Rocky Linux 9 (`scripts/rocky9.sh`).
+- [ ] Formatting and parsing chunks: Rocky Linux 9.
+- [ ] Oracle checks are exact.
+- [ ] Independent verifier pass.
 - [ ] No new waivers, `#[ignore]`, tolerances or `unsafe` outside the allowed modules.
 - [ ] `upstream-map.toml` statuses updated.
 
 ## Needs the owner
 
-<!-- Public API shape, waivers, deviations, n/a entries. Delete if none. -->
+<!-- Tick what applies, and add its label plus `needs-owner`. Delete this section if none. -->
+
+- [ ] Oracle or fixture change (`oracle`)
+- [ ] Waiver (`waiver`)
+- [ ] Deviation (`deviation`)
+- [ ] Public API shape (`api`)
+- [ ] New dependency (`dependency`)
