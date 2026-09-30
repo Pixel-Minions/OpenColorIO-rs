@@ -461,6 +461,8 @@ impl<F: Family> Checker<'_, F> {
         self.summary.pass_through_checks += pass_through_checks;
         if case.w0002_applies(&combo) {
             self.summary.w0002_comparisons += 1;
+            // Listed in the summary even when nothing needs the waiver.
+            self.waived.entry(group).or_default();
         }
         match comparison {
             Comparison::Exact => {}
@@ -533,12 +535,13 @@ impl<F: Family> Checker<'_, F> {
                     .to_string(),
             );
         }
-        let mut waived: Vec<((usize, usize), usize)> =
-            self.waived.into_iter().filter(|(_, n)| *n > 0).collect();
+        let mut waived: Vec<((usize, usize), usize)> = self.waived.into_iter().collect();
         waived.sort();
-        for (group, n) in waived {
-            let label = format!("{} ({})", self.cases[group.0].label(), self.combos[group.1]);
-            self.summary.w0002_waived.push((label, n));
+        for ((case, combo), n) in waived {
+            let label = self.cases[case].label().to_string();
+            self.summary
+                .w0002_waived
+                .push((label, self.combos[combo].to_string(), n));
         }
         let mut refusals: Vec<(String, usize)> = self.refusals.into_iter().collect();
         refusals.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));

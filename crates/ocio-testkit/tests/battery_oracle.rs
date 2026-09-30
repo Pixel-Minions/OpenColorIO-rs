@@ -242,8 +242,27 @@ fn a_port_that_reproduces_the_wheel_passes() {
     assert_eq!(summary.groups, 4);
     assert_eq!(summary.comparisons, 4);
     assert_eq!(summary.values, 4 * 4 * specials().len());
-    // The NaN base's colour channels compare under W0002.
+    // The NaN base's colour channels compare under W0002. The summary lists both combinations
+    // with what the waiver covered, nothing here, so that a count moving is visible.
     assert_eq!(summary.w0002_comparisons, 2);
+    let listed: Vec<(&str, &str, usize)> = summary
+        .w0002_waived
+        .iter()
+        .map(|(case, combo, n)| (case.as_str(), combo.as_str(), *n))
+        .collect();
+    assert_eq!(
+        listed,
+        [
+            ("base NaN", "forward, fast math on", 0),
+            ("base NaN", "forward, fast math off", 0)
+        ]
+    );
+    assert!(
+        summary
+            .to_string()
+            .contains("base NaN: forward, fast math on 0; forward, fast math off 0"),
+        "{summary}"
+    );
     assert_eq!(summary.oracle_batches, 1);
 }
 
@@ -539,7 +558,7 @@ fn w0002_waives_nan_bits_in_the_nan_parameter_channels_only() {
     family.port = Kind::FlipColourNans;
     let summary = run_with(&family, &small_plan());
     assert_eq!(summary.w0002_comparisons, 2);
-    assert!(summary.w0002_waived.iter().all(|(_, n)| *n > 0));
+    assert!(summary.w0002_waived.iter().all(|(_, _, n)| *n > 0));
     assert_eq!(summary.w0002_waived.len(), 2);
 
     let mut family = LogFamily::new(vec![Case::new("base NaN", Base(f64::NAN))]);

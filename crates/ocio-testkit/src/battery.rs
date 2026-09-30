@@ -610,8 +610,9 @@ pub struct Summary {
     pub validation_card: Option<&'static str>,
     /// Comparisons under waiver W0002.
     pub w0002_comparisons: usize,
-    /// NaN values that matched only as NaN under W0002, per case and combination.
-    pub w0002_waived: Vec<(String, usize)>,
+    /// For every case and combination W0002 applied to, zeros included: the case, the
+    /// combination, and how many NaN values matched only as NaN.
+    pub w0002_waived: Vec<(String, String, usize)>,
     /// Oracle calls.
     pub oracle_calls: usize,
     /// Oracle processes (batches).
@@ -624,7 +625,7 @@ pub struct Summary {
 
 impl fmt::Display for Summary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let waived: usize = self.w0002_waived.iter().map(|(_, n)| n).sum();
+        let waived: usize = self.w0002_waived.iter().map(|(_, _, n)| n).sum();
         writeln!(f, "battery {} (plan {}):", self.family, self.plan)?;
         writeln!(
             f,
@@ -676,8 +677,16 @@ impl fmt::Display for Summary {
                 writeln!(f, "    {n}: {text}")?;
             }
         }
-        for (label, n) in &self.w0002_waived {
-            writeln!(f, "  W0002: {label}: {n} NaN values")?;
+        if !self.w0002_waived.is_empty() {
+            writeln!(f, "  W0002, NaN values waived per case and combination:")?;
+            let mut rows = self.w0002_waived.iter().peekable();
+            while let Some((case, combo, n)) = rows.next() {
+                write!(f, "    {case}: {combo} {n}")?;
+                while let Some((_, combo, n)) = rows.next_if(|(next, _, _)| next == case) {
+                    write!(f, "; {combo} {n}")?;
+                }
+                writeln!(f)?;
+            }
         }
         write!(
             f,
