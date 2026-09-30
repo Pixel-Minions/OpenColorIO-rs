@@ -417,7 +417,11 @@ impl Runner {
     /// Runs `cmd` as step `name`; an error once it has printed why the step failed.
     pub(crate) fn step(&mut self, name: &str, mut cmd: Command, kind: Kind) -> Result<(), String> {
         self.steps += 1;
+        clear_git_env(&mut cmd);
         let log_path = self.log_dir.join(format!("{name}.log"));
+        if let Some(dir) = log_path.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+        }
         let shown = crate::display_path(&log_path);
         let mut log =
             File::create(&log_path).map_err(|e| format!("{}: {e}", log_path.display()))?;
@@ -463,6 +467,14 @@ impl Runner {
                 println!("    ... and {} more", failed.len() - 30);
             }
         }
+        let targets = failed_targets(&text);
+        if !targets.is_empty() {
+            // A test binary that crashes (an abort, running out of memory) reports no test.
+            println!("{}: failed test binaries:", self.label);
+            for t in &targets {
+                println!("    {t}");
+            }
+        }
         println!("{}: last lines of {shown}:", self.label);
         let lines: Vec<&str> = text.lines().collect();
         for line in &lines[lines.len().saturating_sub(25)..] {
@@ -477,6 +489,33 @@ impl Runner {
 
 /// Width of the step names in summary lines (`rocky/test-release` fits).
 const NAME_WIDTH: usize = 18;
+
+/// Git's repository-local variables (`git rev-parse --local-env-vars`, git 2.53).
+/// `git rebase --exec`, which `xtask land` runs the gate under, exports GIT_DIR: steps must
+/// find each repository, the upstream submodule too, the way a fresh shell does.
+const LOCAL_GIT_ENV: &[&str] = &[
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_CONFIG",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_IMPLICIT_WORK_TREE",
+    "GIT_GRAFT_FILE",
+    "GIT_INDEX_FILE",
+    "GIT_NO_REPLACE_OBJECTS",
+    "GIT_REPLACE_REF_BASE",
+    "GIT_PREFIX",
+    "GIT_SHALLOW_FILE",
+    "GIT_COMMON_DIR",
+];
+
+pub(crate) fn clear_git_env(cmd: &mut Command) {
+    for var in LOCAL_GIT_ENV {
+        cmd.env_remove(var);
+    }
+}
 
 /// Runs `cmd` with stdout and stderr in `log`. For a nested gate, stdout is read line by line
 /// and its step summary lines are printed as they arrive, renamed `<step>/<its step>`.
@@ -584,6 +623,28 @@ fn failed_tests(log: &str) -> Vec<String> {
         .collect()
 }
 
+/// The test binaries `cargo test` reports as failed (`to rerun pass `-p x --test y``), with how
+/// the process ended when it did not exit normally.
+fn failed_targets(log: &str) -> Vec<String> {
+    let lines: Vec<String> = log.lines().map(strip_ansi).collect();
+    let mut out = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        let Some(rest) = line.split("to rerun pass `").nth(1) else {
+            continue;
+        };
+        let target = rest.split('`').next().unwrap_or(rest);
+        let ended = lines[i + 1..]
+            .iter()
+            .take(4)
+            .find_map(|l| l.split("didn't exit successfully: ").nth(1))
+            .and_then(|l| l.rsplit_once(" ("))
+            .map(|(_, how)| format!(" ({how}"))
+            .unwrap_or_default();
+        out.push(format!("{target}{ended}"));
+    }
+    out
+}
+
 fn strip_ansi(line: &str) -> String {
     let mut out = String::with_capacity(line.len());
     let mut chars = line.chars();
@@ -640,6 +701,20 @@ mod tests {
         assert_eq!(test_counts(log), Some((144, 1, 2)));
         assert_eq!(failed_tests(log), ["b"]);
         assert_eq!(test_counts("error: could not compile"), None);
+        // The shape of a test binary that aborts (cargo 1.98.1 on Windows).
+        let crashed = "running 3 tests\n\
+            memory allocation of 17052710 bytes failed\n\
+            error: test failed, to rerun pass `-p ocio-ops --test gamma_oracle`\n\
+            \n\
+            Caused by:\n  process didn't exit successfully: `D:\\t\\gamma_oracle.exe` (exit code: 0xc0000409, STATUS_STACK_BUFFER_OVERRUN)\n\
+            error: test failed, to rerun pass `-p xtask --bin xtask`\n";
+        assert_eq!(
+            failed_targets(crashed),
+            [
+                "-p ocio-ops --test gamma_oracle (exit code: 0xc0000409, STATUS_STACK_BUFFER_OVERRUN)",
+                "-p xtask --bin xtask"
+            ]
+        );
     }
 
     #[test]

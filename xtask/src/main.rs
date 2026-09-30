@@ -11,16 +11,21 @@ use parity::RatchetMode;
 mod fixtures;
 mod gate;
 mod guards;
+mod land;
 mod parity;
 mod upstream;
 
 const USAGE: &str = "\
 cargo xtask <command>
 
-Checking a chunk:
+Checking and landing chunks:
   gate [--crates a,b] [--release] [--rocky] [--quick|--full]
                               fmt, clippy, ci and tests, stopping at the first failure;
                               logs in target/gate-logs/ (`cargo xtask gate --help`)
+  land <branch> [--rocky]     replay <branch> onto phase0 gating every commit, merge it
+                              with --no-ff, regenerate the generated files, gate the
+                              result and fast-forward phase0; never pushes
+                              (`cargo xtask land --help`)
 
 Oracle and fixtures (fixtures/ is written only by these commands):
   oracle info                 versions and platform of the pinned oracle wheel
@@ -55,6 +60,13 @@ fn main() -> ExitCode {
             Ok(())
         }
         ["gate", rest @ ..] => gate::parse(rest).and_then(gate::run),
+        ["land", "--help" | "-h"] => {
+            print!("{}", land::USAGE);
+            Ok(())
+        }
+        ["land", rest @ ..] => {
+            land::parse(rest).and_then(|(branch, rocky)| land::run(&branch, rocky))
+        }
         ["oracle", "info"] => fixtures::oracle_info(),
         ["oracle", "regen", group] => fixtures::regen(group),
         ["oracle", "check", group] => fixtures::check(group),
