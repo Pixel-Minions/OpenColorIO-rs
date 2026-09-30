@@ -172,7 +172,7 @@ All 10 languages from the start: Cg, GLSL 1.2 / 1.3 / 4.0, GLSL for Vulkan 4.6, 
 | Chunk | What |
 |---|---|
 | O1.1 | `processor_ops`: the optimized processor's `createGroupTransform()` as JSON (each child's class and getters) plus its cache ID, for any flags and bit depths. It shows what the wheel's optimizer produced |
-| O1.2 | `cpu_apply` with planar images and every channel order (`PlanarImageDesc`, `CHANNEL_ORDERING_*`), for 1.1c–1.1d |
+| O1.2 | `image_apply` and `image_apply_rgb` (`oracle/ocio_oracle/image.py`; `cpu_apply` is unchanged): a CPU processor applied to images described every way PyOpenColorIO allows (`PackedImageDesc` with every channel order, `PlanarImageDesc`, any strides and bit depths), in place or not, with every buffer returned in full, padding included; and Python's `applyRGB` and `applyRGBA`. For 1.1b–1.1e and 1.2d |
 | O1.3 | `gpu_shader`: the shader text, uniforms (names, types, values) and textures (names, sizes, channels, interpolation, values as a blob) from `extractGpuShaderInfo`. It takes any `GpuShaderDesc` settings: language, function name, resource prefix, pixel name, descriptor sets, 1D textures, texture limits. It works for the default and optimized GPU processors |
 | O1.4 | `transform_text`: `str(transform)` (upstream's `operator<<`), validation errors, and equality results |
 
