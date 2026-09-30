@@ -10,11 +10,15 @@
 //!   `_mm_max_ps`/`_mm_min_ps` return the *second* operand when either is NaN, and the
 //!   conversions return the "integer indefinite" value `0x80000000` for NaN and out-of-range
 //!   inputs.
+//! - x86 addition and multiplication with a fixed operand order ([`sse_add`], [`sse_mul`]):
+//!   when both operands are NaN, the result is the *first* one.
 //! - The scalar float→integer casts of `BitDepthUtils.h`: add 0.5, clamp, truncate.
 //! - The bit helpers of `MathUtils.h` (`FloatAsInt`, `IntAsFloat`, `AddULP`).
 //!
 //! Port of parts of `src/OpenColorIO/MathUtils.h` and `src/OpenColorIO/BitDepthUtils.h`
 //! @ v2.5.2.
+
+use std::ops::{Add, Mul};
 
 /// C++ `std::min(a, b)`: `(b < a) ? b : a`. Returns `a` when the comparison is false, so a
 /// NaN in `a` is returned and a NaN in `b` is not.
@@ -60,6 +64,59 @@ pub fn sse_max(a: f32, b: f32) -> f32 {
 #[inline]
 pub fn sse_min(a: f32, b: f32) -> f32 {
     if a < b { a } else { b }
+}
+
+/// The float types of x86 SSE arithmetic: `f32` (`ADDSS`, `ADDPS`, `MULSS`, `MULPS`) and `f64`
+/// (`ADDSD`, `MULSD`), which x86-64 compilers also emit for scalar `float` and `double` code.
+pub trait SseFloat: Copy + Add<Output = Self> + Mul<Output = Self> {
+    /// Whether the value is a NaN.
+    fn is_nan(self) -> bool;
+    /// The value with the quiet bit set: what the instructions return for a NaN operand.
+    fn quieted(self) -> Self;
+}
+
+impl SseFloat for f32 {
+    #[inline]
+    fn is_nan(self) -> bool {
+        f32::is_nan(self)
+    }
+    #[inline]
+    fn quieted(self) -> f32 {
+        f32::from_bits(self.to_bits() | 0x0040_0000)
+    }
+}
+
+impl SseFloat for f64 {
+    #[inline]
+    fn is_nan(self) -> bool {
+        f64::is_nan(self)
+    }
+    #[inline]
+    fn quieted(self) -> f64 {
+        f64::from_bits(self.to_bits() | 0x0008_0000_0000_0000)
+    }
+}
+
+/// `a + b` as x86 computes it with `a` as the first source operand: one lane of
+/// `_mm_add_ps(a, b)` (`ADDPS`), or the `ADDSS`/`ADDSD` of a scalar C++ `a + b`. When both
+/// values are NaN, the result is `a`, quieted; when only one is, it is that one, quieted
+/// (Intel SDM Vol. 1, 4.8.3.5, Table 4-7).
+///
+/// Rust's `a + b` leaves the choice between two NaN operands to LLVM, which may swap the
+/// operands of an addition, and does so differently in debug and release builds. The port
+/// writes the operand order of upstream's source with this function wherever two NaNs can
+/// meet. Subtraction and division need no helper: their operands cannot be swapped.
+#[inline]
+pub fn sse_add<T: SseFloat>(a: T, b: T) -> T {
+    if a.is_nan() { a.quieted() } else { a + b }
+}
+
+/// `a * b` as x86 computes it with `a` as the first source operand: one lane of
+/// `_mm_mul_ps(a, b)` (`MULPS`), or the `MULSS`/`MULSD` of a scalar C++ `a * b`. The NaN
+/// rules and the reason for this function are those of [`sse_add`].
+#[inline]
+pub fn sse_mul<T: SseFloat>(a: T, b: T) -> T {
+    if a.is_nan() { a.quieted() } else { a * b }
 }
 
 /// The value x86 float→int32 conversions return for NaN and out-of-range inputs (Intel's

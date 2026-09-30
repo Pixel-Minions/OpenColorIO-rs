@@ -21,12 +21,19 @@
 //!
 //! Both were read from the wheels' machine code (`docs/spikes/s2-s5.md`). The port does what
 //! each platform's wheel does (PLAN.md D12), channel by channel.
+//!
+//! # Two NaN operands
+//!
+//! With NaN parameters, which OCIO 2.5.2 accepts, a NaN pixel can meet a NaN coefficient of a
+//! moncurve renderer, and x86 returns the first operand's NaN. The moncurve renderers multiply
+//! and add with [`sse_mul`]/[`sse_add`], in the operand order of upstream's source; Rust's `*`
+//! and `+` would leave it to LLVM. (The sign factor of the scalar mirror styles is never NaN.)
 
 use std::sync::Arc;
 
 use super::gamma_op_data::{GammaOpData, GammaStyle};
 use super::gamma_op_utils::{RendererParams, compute_params_fwd, compute_params_rev};
-use crate::math_utils::std_max;
+use crate::math_utils::{sse_add, sse_mul, std_max};
 use crate::op::CpuOp;
 use crate::sse::{EABS_MASK, ESIGN_MASK, sse_power};
 
@@ -368,12 +375,12 @@ impl CpuOp for GammaMoncurveOpCpuFwd {
             let pixel = *px;
             let data: [f32; 4] = [0, 1, 2, 3].map(|c| {
                 let p = &self.params[c];
-                (pixel[c] * p.scale + p.offset).powf(p.gamma)
+                sse_add(sse_mul(pixel[c], p.scale), p.offset).powf(p.gamma)
             });
             for c in 0..4 {
                 let p = &self.params[c];
                 px[c] = if pixel[c] <= p.break_pnt {
-                    pixel[c] * p.slope
+                    sse_mul(pixel[c], p.slope)
                 } else {
                     data[c]
                 };
@@ -404,10 +411,10 @@ impl CpuOp for GammaMoncurveOpCpuFwdSse {
         for px in pixels(rgba) {
             for (v, p) in px.iter_mut().zip(&self.0.params) {
                 let pixel = *v;
-                let mut data = pixel * p.scale + p.offset;
+                let mut data = sse_add(sse_mul(pixel, p.scale), p.offset);
                 data = sse_power(data, p.gamma);
                 let flag = pixel > p.break_pnt;
-                *v = if flag { data } else { pixel * p.slope };
+                *v = if flag { data } else { sse_mul(pixel, p.slope) };
             }
         }
     }
@@ -441,12 +448,12 @@ impl CpuOp for GammaMoncurveOpCpuRev {
             let pixel = *px;
             let data: [f32; 4] = [0, 1, 2, 3].map(|c| {
                 let p = &self.params[c];
-                pixel[c].powf(p.gamma) * p.scale - p.offset
+                sse_mul(pixel[c].powf(p.gamma), p.scale) - p.offset
             });
             for c in 0..4 {
                 let p = &self.params[c];
                 px[c] = if pixel[c] <= p.break_pnt {
-                    pixel[c] * p.slope
+                    sse_mul(pixel[c], p.slope)
                 } else {
                     data[c]
                 };
@@ -478,9 +485,9 @@ impl CpuOp for GammaMoncurveOpCpuRevSse {
             for (v, p) in px.iter_mut().zip(&self.0.params) {
                 let pixel = *v;
                 let mut data = sse_power(pixel, p.gamma);
-                data = data * p.scale - p.offset;
+                data = sse_mul(data, p.scale) - p.offset;
                 let flag = pixel > p.break_pnt;
-                *v = if flag { data } else { pixel * p.slope };
+                *v = if flag { data } else { sse_mul(pixel, p.slope) };
             }
         }
     }
@@ -515,12 +522,12 @@ impl CpuOp for GammaMoncurveMirrorOpCpuFwd {
             let pixel = input.map(f32::abs);
             let data: [f32; 4] = [0, 1, 2, 3].map(|c| {
                 let p = &self.params[c];
-                (pixel[c] * p.scale + p.offset).powf(p.gamma)
+                sse_add(sse_mul(pixel[c], p.scale), p.offset).powf(p.gamma)
             });
             for c in 0..4 {
                 let p = &self.params[c];
                 let value = if pixel[c] <= p.break_pnt {
-                    pixel[c] * p.slope
+                    sse_mul(pixel[c], p.slope)
                 } else {
                     data[c]
                 };
@@ -554,11 +561,15 @@ impl CpuOp for GammaMoncurveMirrorOpCpuFwdSse {
                 let sign_pix = v.to_bits() & ESIGN_MASK;
                 let abs_pix = f32::from_bits(v.to_bits() & EABS_MASK);
 
-                let mut data = abs_pix * p.scale + p.offset;
+                let mut data = sse_add(sse_mul(abs_pix, p.scale), p.offset);
                 data = sse_power(data, p.gamma);
 
                 let flagbrk = abs_pix > p.break_pnt;
-                data = if flagbrk { data } else { abs_pix * p.slope };
+                data = if flagbrk {
+                    data
+                } else {
+                    sse_mul(abs_pix, p.slope)
+                };
 
                 *v = f32::from_bits(sign_pix | data.to_bits());
             }
@@ -595,12 +606,12 @@ impl CpuOp for GammaMoncurveMirrorOpCpuRev {
             let pixel = input.map(f32::abs);
             let data: [f32; 4] = [0, 1, 2, 3].map(|c| {
                 let p = &self.params[c];
-                pixel[c].powf(p.gamma) * p.scale - p.offset
+                sse_mul(pixel[c].powf(p.gamma), p.scale) - p.offset
             });
             for c in 0..4 {
                 let p = &self.params[c];
                 let value = if pixel[c] <= p.break_pnt {
-                    pixel[c] * p.slope
+                    sse_mul(pixel[c], p.slope)
                 } else {
                     data[c]
                 };
@@ -635,10 +646,14 @@ impl CpuOp for GammaMoncurveMirrorOpCpuRevSse {
                 let abs_pix = f32::from_bits(v.to_bits() & EABS_MASK);
 
                 let mut data = sse_power(abs_pix, p.gamma);
-                data = data * p.scale - p.offset;
+                data = sse_mul(data, p.scale) - p.offset;
 
                 let flagbrk = abs_pix > p.break_pnt;
-                data = if flagbrk { data } else { abs_pix * p.slope };
+                data = if flagbrk {
+                    data
+                } else {
+                    sse_mul(abs_pix, p.slope)
+                };
 
                 *v = f32::from_bits(sign_pix | data.to_bits());
             }

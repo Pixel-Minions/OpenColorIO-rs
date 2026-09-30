@@ -6,10 +6,13 @@
 //! the same value and slope. Computed in `double` (with the platform's `pow`) and rounded to
 //! `float` once.
 //!
+//! Where two NaN parameters can meet (a NaN gamma and a NaN offset), the products use
+//! [`sse_mul`] in the operand order of upstream's source, so every build gives the same NaN.
+//!
 //! Port of `src/OpenColorIO/ops/gamma/GammaOpUtils.h` and `GammaOpUtils.cpp` @ v2.5.2.
 
 use super::gamma_op_data::Params;
-use crate::math_utils::std_max;
+use crate::math_utils::{sse_mul, std_max};
 
 /// The coefficients of one channel of a moncurve renderer.
 ///
@@ -75,8 +78,8 @@ fn mon_curve_slope_fwd(p: &Params) -> f64 {
     let gamma = std_max(p[0], 1.0 + EPS);
     let offset = std_max(p[1], EPS);
     let a = (gamma - 1.0) / offset;
-    let b = offset * gamma / ((gamma - 1.0) * (1.0 + offset));
-    a * b.powf(gamma)
+    let b = sse_mul(offset, gamma) / sse_mul(gamma - 1.0, 1.0 + offset);
+    sse_mul(a, b.powf(gamma))
 }
 
 /// This just rearranges the equation a little so we can get by with a single multiply rather
@@ -102,8 +105,8 @@ fn mon_curve_offset_rev(p: &Params) -> f64 {
 fn mon_curve_break_rev(p: &Params) -> f64 {
     let gamma = std_max(p[0], 1.0 + EPS);
     let offset = std_max(p[1], EPS);
-    let a = offset * gamma;
-    let b = (gamma - 1.0) * (1.0 + offset);
+    let a = sse_mul(offset, gamma);
+    let b = sse_mul(gamma - 1.0, 1.0 + offset);
     (a / b).powf(gamma)
 }
 
@@ -113,7 +116,7 @@ fn mon_curve_slope_rev(p: &Params) -> f64 {
     let offset = std_max(p[1], EPS);
     let a = (gamma - 1.0) / offset;
     let b = (1.0 + offset) / gamma;
-    a.powf(gamma - 1.0) * b.powf(gamma)
+    sse_mul(a.powf(gamma - 1.0), b.powf(gamma))
 }
 
 /// Port of `monCurveScaleRev` (src/OpenColorIO/ops/gamma/GammaOpUtils.cpp:99-103 @ v2.5.2).

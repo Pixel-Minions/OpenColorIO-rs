@@ -22,11 +22,23 @@
 //!
 //! Both were read from the wheels' machine code (`docs/spikes/s2-s5.md`). The port does what
 //! each platform's wheel does (PLAN.md D12).
+//!
+//! The additions and multiplications use [`sse_add`]/[`sse_mul`], in the operand order of
+//! upstream's source, so that two NaN parameters give the same NaN in every build.
 
 use super::log_op_data::{
     LIN_SIDE_BREAK, LIN_SIDE_OFFSET, LIN_SIDE_SLOPE, LINEAR_SLOPE, LOG_SIDE_OFFSET, LOG_SIDE_SLOPE,
     Params,
 };
+use crate::math_utils::{sse_add, sse_mul};
+
+/// `linSlope * linBreak + linOffset`, in `double`: the argument of the logarithm at the break.
+fn log_argument_at_break(params: &Params) -> f64 {
+    sse_add(
+        sse_mul(params[LIN_SIDE_SLOPE], params[LIN_SIDE_BREAK]),
+        params[LIN_SIDE_OFFSET],
+    )
+}
 
 /// The slope of the camera style's linear segment: `LINEAR_SLOPE` if set, otherwise the
 /// slope of the log curve at the break, computed in `double`.
@@ -37,9 +49,9 @@ pub fn get_linear_slope(params: &Params, base: f64) -> f32 {
     if params.len() > LINEAR_SLOPE {
         params[LINEAR_SLOPE] as f32
     } else {
-        (params[LOG_SIDE_SLOPE] * params[LIN_SIDE_SLOPE]
-            / ((params[LIN_SIDE_SLOPE] * params[LIN_SIDE_BREAK] + params[LIN_SIDE_OFFSET])
-                * base.ln())) as f32
+        // logSlope * linSlope / ((linSlope * linBreak + linOffset) * log(base))
+        (sse_mul(params[LOG_SIDE_SLOPE], params[LIN_SIDE_SLOPE])
+            / sse_mul(log_argument_at_break(params), base.ln())) as f32
     }
 }
 
@@ -70,11 +82,12 @@ pub fn get_log_side_break(params: &Params, base: f64) -> f32 {
 /// Port of `LogUtil::GetLogSideBreak` (src/OpenColorIO/ops/log/LogUtils.cpp:270-281 @ v2.5.2),
 /// Windows wheel.
 pub fn get_log_side_break_msvc(params: &Params, base: f64) -> f32 {
-    let mut log_side_break =
-        ((params[LIN_SIDE_SLOPE] * params[LIN_SIDE_BREAK] + params[LIN_SIDE_OFFSET]) as f32).log2();
-    log_side_break *= params[LOG_SIDE_SLOPE] as f32 / (base as f32).log2();
-    log_side_break += params[LOG_SIDE_OFFSET] as f32;
-    log_side_break
+    let mut log_side_break = (log_argument_at_break(params) as f32).log2();
+    log_side_break = sse_mul(
+        log_side_break,
+        params[LOG_SIDE_SLOPE] as f32 / (base as f32).log2(),
+    );
+    sse_add(log_side_break, params[LOG_SIDE_OFFSET] as f32)
 }
 
 /// `GetLogSideBreak` as GCC and libstdc++ compile it: `log2` is `double log2(double)`, so the
@@ -90,13 +103,12 @@ pub fn get_log_side_break_msvc(params: &Params, base: f64) -> f32 {
 /// Port of `LogUtil::GetLogSideBreak` (src/OpenColorIO/ops/log/LogUtils.cpp:270-281 @ v2.5.2),
 /// Linux wheel.
 pub fn get_log_side_break_libstdcxx(params: &Params, base: f64) -> f32 {
-    let lin = (params[LIN_SIDE_SLOPE] * params[LIN_SIDE_BREAK] + params[LIN_SIDE_OFFSET]) as f32;
+    let lin = log_argument_at_break(params) as f32;
     let mut log_side_break = log2_glibc_2_2_5(f64::from(lin)) as f32;
     let factor =
         f64::from(params[LOG_SIDE_SLOPE] as f32) / log2_glibc_2_2_5(f64::from(base as f32));
-    log_side_break = (f64::from(log_side_break) * factor) as f32;
-    log_side_break += params[LOG_SIDE_OFFSET] as f32;
-    log_side_break
+    log_side_break = sse_mul(f64::from(log_side_break), factor) as f32;
+    sse_add(log_side_break, params[LOG_SIDE_OFFSET] as f32)
 }
 
 /// `log2` as the Linux wheel links it: `log2@GLIBC_2.2.5` (the wheel was built against a
@@ -120,5 +132,5 @@ fn log2_glibc_2_2_5(x: f64) -> f64 {
 ///
 /// Port of `LogUtil::GetLinearOffset` (src/OpenColorIO/ops/log/LogUtils.cpp:283-286 @ v2.5.2).
 pub fn get_linear_offset(params: &Params, linear_slope: f32, log_side_break: f32) -> f32 {
-    log_side_break - linear_slope * params[LIN_SIDE_BREAK] as f32
+    log_side_break - sse_mul(linear_slope, params[LIN_SIDE_BREAK] as f32)
 }

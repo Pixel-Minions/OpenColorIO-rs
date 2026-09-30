@@ -13,6 +13,12 @@
 //! same compare-and-select masks and the same float↔int conversions. So each function returns
 //! the bits one lane of the C++ returns, including for NaN, infinities and subnormals.
 //!
+//! Rust's `+` and `*` are enough here, although LLVM may swap their operands: `sseLog2` never
+//! returns NaN, and wherever else two NaNs meet in an addition or a multiplication, they are
+//! copies of one input NaN (quieted or not), so either order gives the same bits. (The
+//! renderers that call these functions use `math_utils::sse_add`/`sse_mul`, where a NaN pixel
+//! can meet a different NaN coefficient.)
+//!
 //! The functions with a `_scalar` suffix port the separate scalar overloads of `SSE.h`
 //! (`sseAtan(float)`, `sseAtan2(float, float)`, `sseSinCos(float, ...)`), whose control flow
 //! differs from the four-lane versions.

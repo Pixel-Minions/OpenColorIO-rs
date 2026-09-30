@@ -764,3 +764,210 @@ fn math_utils_lane_helpers_match_the_instructions() {
         assert_lanes("_mm_cvttps_epi32", &a, r, port);
     }
 }
+
+/// The x86 additions and multiplications, run through `asm!`: in Intel syntax,
+/// `addps x, y` computes `x + y` with `x` as the first source operand. (The `core::arch`
+/// intrinsics `_mm_add_ps`/`_mm_mul_ps` are plain additions and multiplications to LLVM, which
+/// may swap their operands: the behaviour `sse_add`/`sse_mul` exist to avoid.)
+#[cfg(target_arch = "x86_64")]
+mod instructions {
+    use std::arch::asm;
+    use std::arch::x86_64::__m128;
+
+    macro_rules! instruction {
+        ($name:ident, $mnemonic:literal, $t:ty) => {
+            pub(super) fn $name(a: $t, b: $t) -> $t {
+                let mut x = a;
+                // SAFETY: the instruction only reads and writes the two registers, and SSE2 is
+                // part of the x86-64 baseline.
+                unsafe {
+                    asm!(
+                        concat!($mnemonic, " {x}, {y}"),
+                        x = inout(xmm_reg) x,
+                        y = in(xmm_reg) b,
+                        options(pure, nomem, nostack, preserves_flags)
+                    );
+                }
+                x
+            }
+        };
+    }
+
+    instruction!(addps, "addps", __m128);
+    instruction!(mulps, "mulps", __m128);
+    instruction!(addss, "addss", f32);
+    instruction!(mulss, "mulss", f32);
+    instruction!(addsd, "addsd", f64);
+    instruction!(mulsd, "mulsd", f64);
+}
+
+/// `f32` operands for the NaN pairs: NaNs of both signs, quiet and signalling, with and
+/// without payloads, then the other special values.
+#[cfg(target_arch = "x86_64")]
+const NAN_PAIR_VALUES_F32: [u32; 23] = [
+    0x7fc0_0000, // quiet NaN
+    0xffc0_0000, // the x86 default NaN
+    0x7fc1_2345,
+    0xffc1_2345,
+    0x7f80_0001, // signalling NaNs
+    0xff80_0001,
+    0x7fbf_ffff,
+    0xffbf_ffff,
+    0x7fff_ffff,
+    0xffff_ffff,
+    0x7f80_0000, // infinities
+    0xff80_0000,
+    0x0000_0000, // zeros
+    0x8000_0000,
+    0x3f80_0000, // ±1
+    0xbf80_0000,
+    0x7f7f_ffff, // ±FLT_MAX
+    0xff7f_ffff,
+    0x0080_0000, // FLT_MIN
+    0x0000_0001, // subnormals
+    0x8000_0001,
+    0x3dcc_cccd, // 0.1
+    0xc060_0000, // -3.5
+];
+
+/// `f64` operands for the NaN pairs, as [`NAN_PAIR_VALUES_F32`].
+#[cfg(target_arch = "x86_64")]
+const NAN_PAIR_VALUES_F64: [u64; 23] = [
+    0x7ff8_0000_0000_0000, // quiet NaN
+    0xfff8_0000_0000_0000, // the x86 default NaN
+    0x7ff8_1234_5678_9abc,
+    0xfff8_1234_5678_9abc,
+    0x7ff0_0000_0000_0001, // signalling NaNs
+    0xfff0_0000_0000_0001,
+    0x7ff7_ffff_ffff_ffff,
+    0xfff7_ffff_ffff_ffff,
+    0x7fff_ffff_ffff_ffff,
+    0xffff_ffff_ffff_ffff,
+    0x7ff0_0000_0000_0000, // infinities
+    0xfff0_0000_0000_0000,
+    0x0000_0000_0000_0000, // zeros
+    0x8000_0000_0000_0000,
+    0x3ff0_0000_0000_0000, // ±1
+    0xbff0_0000_0000_0000,
+    0x7fef_ffff_ffff_ffff, // ±DBL_MAX
+    0xffef_ffff_ffff_ffff,
+    0x0010_0000_0000_0000, // DBL_MIN
+    0x0000_0000_0000_0001, // subnormals
+    0x8000_0000_0000_0001,
+    0x3fb9_9999_9999_999a, // 0.1
+    0xc00c_0000_0000_0000, // -3.5
+];
+
+#[cfg(target_arch = "x86_64")]
+#[track_caller]
+fn assert_same_bits(name: &str, a: u64, b: u64, instruction: u64, port: u64) {
+    assert_eq!(
+        port, instruction,
+        "{name}({a:#x}, {b:#x}): instruction {instruction:#x}, port {port:#x}"
+    );
+}
+
+/// `math_utils::sse_add` and `sse_mul` match `ADDPS`/`MULPS` and `ADDSS`/`MULSS` on `f32`, and
+/// `ADDSD`/`MULSD` on `f64`, bit for bit: for every ordered pair of the NaN and special values
+/// (for two NaNs, the result is the first operand's NaN, quieted), and for pairs of the
+/// cross-check inputs.
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn math_utils_arithmetic_helpers_match_the_instructions() {
+    use crate::math_utils::{sse_add, sse_mul};
+    use std::hint::black_box;
+
+    let specials = NAN_PAIR_VALUES_F32.map(f32::from_bits);
+    let mut pairs: Vec<(f32, f32)> = specials
+        .iter()
+        .flat_map(|&a| specials.map(|b| (a, b)))
+        .collect();
+    let inputs = cross_check_inputs();
+    pairs.extend(
+        inputs
+            .iter()
+            .zip(inputs.iter().rev())
+            .map(|(&a, &b)| (a, b)),
+    );
+
+    for chunk in pairs.as_chunks::<4>().0 {
+        let a = chunk.map(|p| p.0);
+        let b = chunk.map(|p| p.1);
+        // SAFETY: SSE2 is part of the x86-64 baseline.
+        let (va, vb) = unsafe { (reference::load(a), reference::load(b)) };
+        let sums = reference::store(instructions::addps(va, vb));
+        let products = reference::store(instructions::mulps(va, vb));
+        for l in 0..4 {
+            let (x, y) = (u64::from(a[l].to_bits()), u64::from(b[l].to_bits()));
+            let port = sse_add(black_box(a[l]), black_box(b[l]));
+            assert_same_bits(
+                "addps",
+                x,
+                y,
+                u64::from(sums[l].to_bits()),
+                u64::from(port.to_bits()),
+            );
+            let port = sse_mul(black_box(a[l]), black_box(b[l]));
+            assert_same_bits(
+                "mulps",
+                x,
+                y,
+                u64::from(products[l].to_bits()),
+                u64::from(port.to_bits()),
+            );
+        }
+    }
+    for &(a, b) in &pairs {
+        let (x, y) = (u64::from(a.to_bits()), u64::from(b.to_bits()));
+        let port = sse_add(black_box(a), black_box(b));
+        let sum = instructions::addss(a, b);
+        assert_same_bits(
+            "addss",
+            x,
+            y,
+            u64::from(sum.to_bits()),
+            u64::from(port.to_bits()),
+        );
+        let port = sse_mul(black_box(a), black_box(b));
+        let product = instructions::mulss(a, b);
+        assert_same_bits(
+            "mulss",
+            x,
+            y,
+            u64::from(product.to_bits()),
+            u64::from(port.to_bits()),
+        );
+    }
+
+    let specials = NAN_PAIR_VALUES_F64.map(f64::from_bits);
+    let mut pairs: Vec<(f64, f64)> = specials
+        .iter()
+        .flat_map(|&a| specials.map(|b| (a, b)))
+        .collect();
+    let mut rng = ocio_testkit::probe::Rng::new(0x5ee5_0005);
+    pairs.extend((0..200_000).map(|_| {
+        (
+            f64::from_bits(rng.next_u64()),
+            f64::from_bits(rng.next_u64()),
+        )
+    }));
+    for &(a, b) in &pairs {
+        let (x, y) = (a.to_bits(), b.to_bits());
+        let port = sse_add(black_box(a), black_box(b));
+        assert_same_bits(
+            "addsd",
+            x,
+            y,
+            instructions::addsd(a, b).to_bits(),
+            port.to_bits(),
+        );
+        let port = sse_mul(black_box(a), black_box(b));
+        assert_same_bits(
+            "mulsd",
+            x,
+            y,
+            instructions::mulsd(a, b).to_bits(),
+            port.to_bits(),
+        );
+    }
+}

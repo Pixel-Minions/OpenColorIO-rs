@@ -15,6 +15,8 @@
 
 mod common;
 
+use std::hint::black_box;
+
 use common::{Checks, Math, direction_enum, probe_rgba, probe_rgba_with};
 use ocio_ops::math_utils::{
     cast_value_uint8, cast_value_uint10, cast_value_uint12, cast_value_uint16,
@@ -320,19 +322,24 @@ fn camera_cases() -> Vec<Camera> {
             lin_side_offset: [0.01, 0.03, 0.005],
             linear_slope: None,
         },
-        // A negative break: log2 of a negative number. The break on the log side is NaN, with
-        // the sign each platform's log2 gives (see log_utils::log2_glibc_2_2_5).
-        Camera {
-            name: "negative break",
-            base: 2.0,
-            lin_side_break: [-0.05, -0.1, -0.2],
-            log_side_slope: [1.0; 3],
-            log_side_offset: [0.0; 3],
-            lin_side_slope: [1.0; 3],
-            lin_side_offset: [0.0; 3],
-            linear_slope: None,
-        },
+        negative_break(),
     ]
+}
+
+/// A negative break: log2 of a negative number. The break on the log side is NaN, with the
+/// sign each platform's log2 gives (see log_utils::log2_glibc_2_2_5), and so is the offset of
+/// the linear segment.
+fn negative_break() -> Camera {
+    Camera {
+        name: "negative break",
+        base: 2.0,
+        lin_side_break: [-0.05, -0.1, -0.2],
+        log_side_slope: [1.0; 3],
+        log_side_offset: [0.0; 3],
+        lin_side_slope: [1.0; 3],
+        lin_side_offset: [0.0; 3],
+        linear_slope: None,
+    }
 }
 
 /// The platform variants of `GetLogSideBreak` differ for some of the camera cases, so the
@@ -370,6 +377,34 @@ fn camera_cases_distinguish_the_log_side_break_variants() {
 "
         )
     );
+}
+
+/// NaN pixels meet the NaN offset of the negative break's linear segment, which the SSE
+/// renderers compute for every pixel: x86 returns the first operand's NaN, the pixel's in
+/// `_mm_add_ps(pixel, offset)` and `_mm_mul_ps(pixel, slope)`. Every buffer length from 1 to 24
+/// pixels, so that each part of the port's loops (in a release build, a vectorized body and a
+/// scalar remainder) meets the NaNs.
+#[test]
+fn nan_pixels_meet_nan_offsets_at_every_buffer_length() {
+    let case = negative_break();
+    let nans = [0xffc0_0000u32, 0xffc1_2345, 0x7fc1_2345, 0xff80_0001].map(f32::from_bits);
+    let mut checks = Checks::default();
+    for dir in DIRECTIONS {
+        // Opaque, so that the compiler cannot fold the constructor's log2 of a negative
+        // constant.
+        let data = black_box(case.op(dir));
+        for math in Math::BOTH {
+            let renderer = get_log_renderer(&data, math.fast());
+            for n in 1..=24usize {
+                let input: Vec<f32> = (0..n)
+                    .flat_map(|i| [nans[i % 4], nans[(i + 1) % 4], nans[(i + 2) % 4], 0.25])
+                    .collect();
+                let label = format!("LogCameraTransform {} {dir:?}, {n} pixels", case.name);
+                checks.check(&label, &case.spec(dir), math, &input, renderer.as_ref());
+            }
+        }
+    }
+    checks.finish();
 }
 
 #[test]

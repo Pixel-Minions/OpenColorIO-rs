@@ -13,6 +13,15 @@
 //! The SSE kernels load `(in[0], in[1], in[2], 0.0f)`, compute four lanes and store them before
 //! restoring the alpha, so the fourth lane is discarded; the port computes the three color
 //! lanes. Alpha is passed through unchanged, bit for bit.
+//!
+//! # Two NaN operands
+//!
+//! A NaN pixel can meet a NaN coefficient: the camera coefficients derived from a NaN break on
+//! the log side (a negative `linSideSlope * linSideBreak + linSideOffset`), or NaN parameters,
+//! which OCIO 2.5.2 accepts. x86 then returns the first operand's NaN, so the operand order
+//! decides the result. The renderers add and multiply their coefficients with
+//! [`sse_add`]/[`sse_mul`], in the operand order of upstream's source; Rust's `+` and `*`
+//! would leave it to LLVM. (The Log2/Log10 renderers only multiply by constants.)
 
 use std::sync::Arc;
 
@@ -21,7 +30,7 @@ use super::log_op_data::{
     Params,
 };
 use super::log_utils::{get_linear_offset, get_linear_slope, get_log_side_break};
-use crate::math_utils::{sse_max, std_max};
+use crate::math_utils::{sse_add, sse_max, sse_mul, std_max};
 use crate::op::CpuOp;
 use crate::open_color_types::TransformDirection;
 use crate::sse::{sse_exp2, sse_log2};
@@ -248,12 +257,13 @@ impl CpuOp for Log2LinRenderer {
     fn apply(&self, rgba: &mut [f32]) {
         for px in pixels(rgba) {
             for (c, v) in px[..3].iter_mut().enumerate() {
-                // ApplyAdd, ApplyScale, ApplyExp2, ApplyAdd, ApplyScale.
-                *v += self.minuskb[c];
-                *v *= self.kinv[c];
+                // ApplyAdd, ApplyScale, ApplyExp2, ApplyAdd, ApplyScale: `pix[i] = pix[i] + add[i]`
+                // and `pix[i] = pix[i] * scale[i]`.
+                *v = sse_add(*v, self.minuskb[c]);
+                *v = sse_mul(*v, self.kinv[c]);
                 *v = v.exp2();
-                *v += self.minusb[c];
-                *v *= self.minv[c];
+                *v = sse_add(*v, self.minusb[c]);
+                *v = sse_mul(*v, self.minv[c]);
             }
         }
     }
@@ -281,11 +291,11 @@ impl CpuOp for Log2LinRendererSse {
         let r = &self.0;
         for px in pixels(rgba) {
             for (c, v) in px[..3].iter_mut().enumerate() {
-                let mut pixel = *v + r.minuskb[c];
-                pixel *= r.kinv[c];
+                let mut pixel = sse_add(*v, r.minuskb[c]);
+                pixel = sse_mul(pixel, r.kinv[c]);
                 pixel = sse_exp2(pixel);
-                pixel += r.minusb[c];
-                *v = pixel * r.minv[c];
+                pixel = sse_add(pixel, r.minusb[c]);
+                *v = sse_mul(pixel, r.minv[c]);
             }
         }
     }
@@ -331,12 +341,12 @@ impl CpuOp for Lin2LogRenderer {
         for px in pixels(rgba) {
             for (c, v) in px[..3].iter_mut().enumerate() {
                 // ApplyScale, ApplyAdd, ApplyMax, ApplyLog2, ApplyScale, ApplyAdd.
-                *v *= self.m[c];
-                *v += self.b[c];
+                *v = sse_mul(*v, self.m[c]);
+                *v = sse_add(*v, self.b[c]);
                 *v = std_max(MIN_VALUE, *v);
                 *v = v.log2();
-                *v *= self.klog[c];
-                *v += self.kb[c];
+                *v = sse_mul(*v, self.klog[c]);
+                *v = sse_add(*v, self.kb[c]);
             }
         }
     }
@@ -364,12 +374,12 @@ impl CpuOp for Lin2LogRendererSse {
         let r = &self.0;
         for px in pixels(rgba) {
             for (c, v) in px[..3].iter_mut().enumerate() {
-                let mut pixel = *v * r.m[c];
-                pixel += r.b[c];
+                let mut pixel = sse_mul(*v, r.m[c]);
+                pixel = sse_add(pixel, r.b[c]);
                 pixel = sse_max(pixel, MIN_VALUE);
                 pixel = sse_log2(pixel);
-                pixel *= r.klog[c];
-                *v = pixel + r.kb[c];
+                pixel = sse_mul(pixel, r.klog[c]);
+                *v = sse_add(pixel, r.kb[c]);
             }
         }
     }
@@ -452,11 +462,12 @@ impl CpuOp for CameraLog2LinRenderer {
             for (i, v) in px[..3].iter_mut().enumerate() {
                 let x = *v;
                 *v = if x < self.base.log_side_break[i] {
-                    self.linsinv[i] * (x + self.minuslino[i])
+                    // m_linsinv[i] * (in[i] + m_minuslino[i])
+                    sse_mul(self.linsinv[i], sse_add(x, self.minuslino[i]))
                 } else {
-                    let mut out = (x + self.minuskb[i]) * self.kinv[i];
+                    let mut out = sse_mul(sse_add(x, self.minuskb[i]), self.kinv[i]);
                     out = out.exp2();
-                    (out + self.minusb[i]) * self.minv[i]
+                    sse_mul(sse_add(out, self.minusb[i]), self.minv[i])
                 };
             }
         }
@@ -489,14 +500,14 @@ impl CpuOp for CameraLog2LinRendererSse {
                 let pixel = *v;
                 let flag = pixel > r.base.log_side_break[c];
 
-                let mut pixel_lin = pixel + r.minuslino[c];
-                pixel_lin *= r.linsinv[c];
+                let mut pixel_lin = sse_add(pixel, r.minuslino[c]);
+                pixel_lin = sse_mul(pixel_lin, r.linsinv[c]);
 
-                let mut pixel_log = pixel + r.minuskb[c];
-                pixel_log *= r.kinv[c];
+                let mut pixel_log = sse_add(pixel, r.minuskb[c]);
+                pixel_log = sse_mul(pixel_log, r.kinv[c]);
                 pixel_log = sse_exp2(pixel_log);
-                pixel_log += r.minusb[c];
-                pixel_log *= r.minv[c];
+                pixel_log = sse_add(pixel_log, r.minusb[c]);
+                pixel_log = sse_mul(pixel_log, r.minv[c]);
 
                 *v = if flag { pixel_log } else { pixel_lin };
             }
@@ -544,12 +555,16 @@ impl CpuOp for CameraLin2LogRenderer {
             for (i, v) in px[..3].iter_mut().enumerate() {
                 let x = *v;
                 *v = if x < self.linb[i] {
-                    self.base.linear_slope[i] * x + self.base.linear_offset[i]
+                    // m_linearSlope[i] * in[i] + m_linearOffset[i]
+                    sse_add(
+                        sse_mul(self.base.linear_slope[i], x),
+                        self.base.linear_offset[i],
+                    )
                 } else {
-                    let mut out = x * self.m[i] + self.b[i];
+                    let mut out = sse_add(sse_mul(x, self.m[i]), self.b[i]);
                     out = std_max(MIN_VALUE, out);
                     out = out.log2();
-                    out * self.klog[i] + self.kb[i]
+                    sse_add(sse_mul(out, self.klog[i]), self.kb[i])
                 };
             }
         }
@@ -582,15 +597,15 @@ impl CpuOp for CameraLin2LogRendererSse {
                 let pixel = *v;
                 let flag = pixel > r.linb[c];
 
-                let mut pixel_lin = pixel * r.base.linear_slope[c];
-                pixel_lin += r.base.linear_offset[c];
+                let mut pixel_lin = sse_mul(pixel, r.base.linear_slope[c]);
+                pixel_lin = sse_add(pixel_lin, r.base.linear_offset[c]);
 
-                let mut pixel_log = pixel * r.m[c];
-                pixel_log += r.b[c];
+                let mut pixel_log = sse_mul(pixel, r.m[c]);
+                pixel_log = sse_add(pixel_log, r.b[c]);
                 pixel_log = sse_max(pixel_log, MIN_VALUE);
                 pixel_log = sse_log2(pixel_log);
-                pixel_log *= r.klog[c];
-                pixel_log += r.kb[c];
+                pixel_log = sse_mul(pixel_log, r.klog[c]);
+                pixel_log = sse_add(pixel_log, r.kb[c]);
 
                 *v = if flag { pixel_log } else { pixel_lin };
             }
