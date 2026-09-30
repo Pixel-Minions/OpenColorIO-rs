@@ -106,7 +106,7 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
 - **Headers.** Every `.rs` file starts with `// SPDX-License-Identifier: BSD-3-Clause` and `// Copyright Contributors to the OpenColorIO Project.`
 - **Dependencies.** Pin them exactly in the root `Cargo.toml` `[workspace.dependencies]` (`=x.y.z`); crates use `workspace = true`. New dependencies need a reason in your report.
 - **Errors.** Upstream exception text is part of the output, so copy it verbatim.
-- **Non-ASCII data.** Write it as escapes in source (`{feff}` in Rust, `Feff` in Python), never as raw characters. The file-editing tools can turn a `XXXX` typed in their input into the raw, often invisible, character. Check such files with a byte dump (`od -c`) before committing.
+- **Non-ASCII data.** Write it as escapes in source (`\u{feff}` in Rust, `\ufeff` in Python), never as raw characters. The file-editing tools can turn a `\uXXXX` typed in their input into the raw, often invisible, character, and `sed` treats `\u` in a replacement as "uppercase the next letter". Check such files with a byte dump (`od -c`) before committing.
 - **Before reporting done:** `cargo fmt --all`, `cargo clippy --workspace --all-targets` (no warnings), `cargo xtask ci`, and `cargo test --workspace`, on Windows and in Rocky Linux 9.
 
 ## Commands
