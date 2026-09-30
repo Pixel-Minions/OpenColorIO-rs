@@ -37,9 +37,9 @@ note = "1.2a: the FormatMetadata interface (44-117) is FormatMetadataImpl's own 
 [[file]]
 path = "include/OpenColorIO/OpenColorTypes.h"
 kind = "api"
-target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs", "crates/ocio-ops/src/format_metadata.rs", "crates/ocio-ops/src/logging.rs"]
+target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs", "crates/ocio-ops/src/format_metadata.rs", "crates/ocio-ops/src/logging.rs", "crates/ocio-gpu/src/open_color_types.rs"]
 status = "partial"
-note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does; 1.2b: DynamicPropertyType; 1.2e: LoggingLevel (288-297), in open_color_types.rs, and LoggingFunction (283-284), in logging.rs"
+note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does; 1.2b: DynamicPropertyType; 1.2e: LoggingLevel (288-297), in open_color_types.rs, and LoggingFunction (283-284), in logging.rs; 1.7a: GpuLanguage, in ocio-gpu/src/open_color_types.rs"
 
 [[file]]
 path = "src/CMakeLists.txt"
@@ -293,13 +293,15 @@ status = "todo"
 path = "src/OpenColorIO/GpuShaderUtils.cpp"
 kind = "src"
 target = ["crates/ocio-gpu/src/gpu_shader_utils.rs"]
-status = "todo"
+status = "partial"
+note = "1.7a: getFloatString, getVecKeyword, GpuShaderLine and GpuShaderText's lines, keywords, declarations and float2/3/4 builders; 1.7b: textures, uniforms, matrices, the other helpers"
 
 [[file]]
 path = "src/OpenColorIO/GpuShaderUtils.h"
 kind = "src"
 target = ["crates/ocio-gpu/src/gpu_shader_utils.rs"]
-status = "todo"
+status = "partial"
+note = "1.7a: getFloatString, getVecKeyword, GpuShaderLine and GpuShaderText's lines, keywords, declarations and float2/3/4 builders; 1.7b: textures, uniforms, matrices, the other helpers"
 
 [[file]]
 path = "src/OpenColorIO/HashUtils.cpp"
@@ -4127,7 +4129,7 @@ status = "todo"
 path = "tests/cpu/GpuShaderUtils_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-gpu/src/gpu_shader_utils_tests.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "tests/cpu/GpuShader_tests.cpp"
