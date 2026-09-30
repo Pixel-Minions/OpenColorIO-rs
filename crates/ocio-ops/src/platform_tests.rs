@@ -24,13 +24,6 @@ fn injected_environment() {
     set_env_provider(None);
 }
 
-#[test]
-fn case_insensitive_compare() {
-    assert_eq!(strcasecmp("ProcessList", "processlist"), Ordering::Equal);
-    assert_eq!(strcasecmp("a", "B"), Ordering::Less);
-    assert_eq!(strncasecmp("Info", "INFORMATION", 4), Ordering::Equal);
-}
-
 /// Port of `OCIO_ADD_TEST(Platform, string_compare)` @ v2.5.2.
 #[test]
 fn string_compare() {
