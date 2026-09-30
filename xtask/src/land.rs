@@ -31,6 +31,9 @@ const CO_AUTHOR: &str = "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 pub(crate) const LANDED_FROM: &str = "Landed-From:";
 /// Environment variable naming the running land's lock file, for the gates it starts.
 pub(crate) const LAND_LOCK_ENV: &str = "OCIO_RS_LAND_LOCK";
+/// Environment variable naming the running land itself (a nonce it writes to `lock.id` next to
+/// its lock): a later land holds the same lock path.
+pub(crate) const LAND_ID_ENV: &str = "OCIO_RS_LAND_ID";
 
 pub(crate) const USAGE: &str = "\
 cargo xtask land <branch> [--no-rocky]
@@ -519,6 +522,7 @@ fn land_env<'a>(cmd: &'a mut Command, build: &Path, lock: &Lock) -> &'a mut Comm
     cmd.env("CARGO_TARGET_DIR", build)
         .env("GIT_EDITOR", "true")
         .env(LAND_LOCK_ENV, &lock.path)
+        .env(LAND_ID_ENV, &lock.id)
         .stdin(Stdio::null())
 }
 
@@ -621,6 +625,9 @@ fn init_submodule(root: &Path, wt: &Path) -> Result<(), String> {
 #[derive(Debug)]
 pub(crate) struct Lock {
     path: PathBuf,
+    /// This land's nonce, also in `lock.id`: the gates it starts compare the two, since a land
+    /// started after a killed one holds the same lock path.
+    id: String,
     _file: File,
 }
 
@@ -654,8 +661,28 @@ impl Lock {
             Err(TryLockError::Error(e)) => return Err(format!("gate.lock: {e}")),
         }
         let _ = std::fs::write(&who, format!("pid {}\n", std::process::id()));
-        Ok(Lock { path, _file: file })
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_nanos());
+        let id = format!("{}-{nanos:x}", std::process::id());
+        let id_file = dir.join("lock.id");
+        std::fs::write(&id_file, &id).map_err(|e| format!("{}: {e}", id_file.display()))?;
+        Ok(Lock {
+            path,
+            id,
+            _file: file,
+        })
     }
+}
+
+/// Whether the land whose lock is `lock` and whose nonce is `id` still runs: some process holds
+/// that lock, and `lock.id` beside it names this land, not a later one.
+pub(crate) fn land_alive(lock: &Path, id: &str) -> bool {
+    let held = OpenOptions::new()
+        .read(true)
+        .open(lock)
+        .is_ok_and(|file| matches!(file.try_lock(), Err(TryLockError::WouldBlock)));
+    held && std::fs::read_to_string(lock.with_file_name("lock.id")).is_ok_and(|s| s.trim() == id)
 }
 
 /// Opens (creating it) a file used only for its OS lock.

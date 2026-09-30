@@ -582,13 +582,15 @@ pub(crate) enum Kind {
     Nested,
 }
 
-/// A gate that `cargo xtask land` started (it names its lock in `OCIO_RS_LAND_LOCK`): the
-/// gate holds `gate.lock` next to that lock while it runs, and before each step checks that
-/// land still holds its lock. A killed land leaves its rebase and gate running; they stop here,
-/// at the gate's next step.
+/// A gate that `cargo xtask land` started (it names its lock in `OCIO_RS_LAND_LOCK` and itself,
+/// a nonce, in `OCIO_RS_LAND_ID`): the gate holds `gate.lock` next to that lock while it runs,
+/// and before each step checks that the lock is held and `lock.id` still names its land. A
+/// killed land leaves its rebase and gate running; they stop here, at the gate's next step,
+/// even when a later land already holds the lock.
 #[derive(Debug)]
 pub(crate) struct LandWatch {
     land_lock: PathBuf,
+    land_id: String,
     _gate_lock: File,
 }
 
@@ -598,26 +600,31 @@ impl LandWatch {
             return Ok(None);
         };
         let land_lock = PathBuf::from(path);
+        let land_id = std::env::var(crate::land::LAND_ID_ENV).unwrap_or_default();
+        // Before waiting for gate.lock, and again once it is ours.
+        Self::check_land(&land_lock, &land_id)?;
         let gate_lock = crate::land::lock_file(&land_lock.with_file_name("gate.lock"))?;
         gate_lock.lock().map_err(|e| format!("gate.lock: {e}"))?;
+        Self::check_land(&land_lock, &land_id)?;
         Ok(Some(LandWatch {
             land_lock,
+            land_id,
             _gate_lock: gate_lock,
         }))
     }
 
     /// An error once the land that started this gate has exited.
     fn check(&self) -> Result<(), String> {
-        let alive = std::fs::OpenOptions::new()
-            .read(true)
-            .open(&self.land_lock)
-            .is_ok_and(|file| matches!(file.try_lock(), Err(std::fs::TryLockError::WouldBlock)));
-        if alive {
+        Self::check_land(&self.land_lock, &self.land_id)
+    }
+
+    fn check_land(lock: &Path, id: &str) -> Result<(), String> {
+        if crate::land::land_alive(lock, id) {
             Ok(())
         } else {
             Err(
-                "the `cargo xtask land` that started this gate has exited, so the gate stops \
-                 here (and the replay with it)"
+                "the `cargo xtask land` that started this gate has exited (its lock is free, or a \
+                 later land holds it now), so the gate stops here (and the replay with it)"
                     .into(),
             )
         }
