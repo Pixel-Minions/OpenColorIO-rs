@@ -209,6 +209,57 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **A fix:** copy the children as well.
 - **Status:** to be matched when `GroupTransform` is ported (1.8a).
 
+### I-14. Metadata attribute names match exactly when set, but ignoring case when read
+
+- **Upstream:** in the metadata of transforms, ops and LUT files (`FormatMetadata`),
+  `addAttribute`, `setName` and `setID` replace an attribute only when its name is exactly the
+  same (`fileformats/FormatMetadata.cpp:94-112`), while `getAttributeValue(name)`, `getName`,
+  `getID` and `combine` use the first attribute whose name matches ignoring ASCII case
+  (`fileformats/FormatMetadata.cpp:140-179, 219-231, 303-332`). After
+  `addAttribute("Name", "a")`, `setName("b")` adds a second attribute, `name="b"`, and
+  `getName()` still returns `a`. Under Python on Windows, the lookups also match names that
+  differ in the case of non-ASCII bytes, by the ANSI code page; the port folds `A`-`Z` only
+  (D-4), so there `combine` keeps apart attributes that the Windows wheel joins.
+- **Who notices:** code that spells an attribute name with different cases.
+- **A fix:** match names the same way everywhere, so that setting an attribute replaces the one
+  that reading returns.
+- **Status:** matched in `p1-foundations` (1.2a), with ASCII case folding (D-4); checked against
+  the wheel in `crates/ocio-ops/tests/format_metadata_oracle.rs`.
+
+### I-15. A misspelled error message
+
+- **Upstream:** renaming a metadata element to `ROOT`, or adding a child element named `ROOT`,
+  fails with "'ROOT' is reversed for root FormatMetadata elements."
+  (`fileformats/FormatMetadata.cpp:241`): "reversed" for "reserved".
+- **Who notices:** anyone who reads the message.
+- **A fix:** "reserved".
+- **Status:** matched in `p1-foundations` (1.2a), checked against the wheel in
+  `crates/ocio-ops/tests/format_metadata_oracle.rs`.
+
+## Logging
+
+### I-16. Two messages bypass the logging function
+
+- **Upstream:** the warning about an invalid `OCIO_LOGGING_LEVEL`, and the version line logged
+  when that variable asks for debug messages, are written straight to stderr
+  (`Logging.cpp:45-50, 57-61`), even when the application has set its own logging function.
+- **Who notices:** applications that show or collect OCIO's log through a logging function.
+- **A fix:** send them through the logging function, like every other message.
+- **Status:** matched in `p1-foundations` (1.2e), checked against the wheel (stderr bytes
+  included) in `crates/ocio-ops/tests/logging_oracle.rs`.
+
+### I-17. A NUL in a logged message cuts its line
+
+- **Upstream:** the logging function receives each line as a C string (`Logging.cpp:86`), so a
+  line that holds a NUL byte stops there, and loses the rest of its text and its line break.
+  A warning about a key or name with a NUL shows this (seen through the wheel in 1.2e); I-6
+  describes one way such names arise.
+- **Who notices:** applications that log messages about names with NUL bytes; the next line of
+  their log continues on the same line.
+- **A fix:** pass the whole line, with its length.
+- **Status:** matched in `p1-foundations` (1.2e), checked against the wheel in
+  `crates/ocio-ops/tests/logging_oracle.rs`.
+
 ## Python module (`ocio-py`)
 
 ### I-12. A channel order passed without its keyword is misread
@@ -288,3 +339,14 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
     RGBA-packed one returns "ScanlineHelper Error: The image is too tall: the scanline index
     overflows.".
   The oracle refuses these sizes, so `scanline_helper_tests.rs` defines the behaviour.
+
+### U-4. A Python logging function crashes the interpreter's exit
+
+- **Upstream:** a logging function set from Python is held in a C++ global
+  (`Logging.cpp:71`), which outlives the Python interpreter. A process that exits with one
+  still set crashes (a segmentation fault on both platforms, seen through the wheel in
+  `p1-foundations`); `ResetToDefaultLoggingFunction()` before exit avoids it, and the oracle's
+  commands do so.
+- **Options:** release the function when Python shuts down, or keep it and never release it;
+  either way the process exits cleanly.
+- **Status:** open; decided in Phase 6 (the Python module).
