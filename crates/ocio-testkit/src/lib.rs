@@ -22,6 +22,7 @@
 //! Expected values come only from the oracle or from upstream's tests. Never from the port.
 #![deny(unsafe_code)]
 
+pub mod battery;
 pub mod compare;
 pub mod crt;
 pub mod fixtures;
