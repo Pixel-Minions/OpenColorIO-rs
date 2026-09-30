@@ -98,7 +98,7 @@ path = "src/OpenColorIO/BitDepthUtils.h"
 kind = "src"
 target = ["crates/ocio-ops/src/bit_depth_utils.rs"]
 status = "done"
-note = "1.1a: BitDepthInfo<BD> and Converter<BD> are traits implemented by marker types (Uint8 ... F32); CLAMP is clamp_macro; F16's channel type is half::f16, converted through imath_half. The integer casts moved here from math_utils.rs (S2)"
+note = "1.1a: BitDepthInfo<BD> and Converter<BD> are traits implemented by marker types (Uint8 ... F32); CLAMP is clamp_macro; F16's channel type is half::f16, converted through imath_half. The integer casts moved here from math_utils.rs (S2); 1.1d: ChannelType, what C++ does with a channel type implicitly (conversions to float, bytes in the machine's order), for the typed apply"
 
 [[file]]
 path = "src/OpenColorIO/CMakeLists.txt"
@@ -130,7 +130,8 @@ note = "build system"
 path = "src/OpenColorIO/CPUProcessor.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/cpu_processor.rs"]
-status = "todo"
+status = "partial"
+note = "1.1d: BitDepthCast (20-66) and CreateGenericBitDepthHelper (68-116), the conversions at the ends of a CPU processor, which the scanline helper runs; the rest is 1.2d"
 
 [[file]]
 path = "src/OpenColorIO/CPUProcessor.h"
@@ -325,14 +326,15 @@ note = "1.1b-1.1c: PackedImageDesc, PlanarImageDesc and GenericImageDesc, with t
 path = "src/OpenColorIO/ImagePacking.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/image_packing.rs"]
-status = "todo"
+status = "done"
+note = "1.1d: Generic<Type>::PackRGBAFromImageDesc and UnpackRGBAToImageDesc, checked against the wheel through image_apply (tests/image_packing_oracle.rs), with the Windows failure of huge images (I-1)"
 
 [[file]]
 path = "src/OpenColorIO/ImagePacking.h"
 kind = "src"
 target = ["crates/ocio-ops/src/image_packing.rs", "crates/ocio-ops/src/image_desc.rs"]
-status = "partial"
-note = "1.1b: GenericImageDesc (16-47) is in image_desc.rs, next to its methods (ImageDesc.cpp:75-112); Generic<Type> is 1.1d"
+status = "done"
+note = "1.1b: GenericImageDesc (16-47) is in image_desc.rs, next to its methods (ImageDesc.cpp:75-112); 1.1d: Generic<Type>, as a trait of the channel types"
 
 [[file]]
 path = "src/OpenColorIO/Logging.cpp"
@@ -439,7 +441,7 @@ path = "src/OpenColorIO/Op.h"
 kind = "src"
 target = ["crates/ocio-ops/src/op.rs"]
 status = "partial"
-note = "S2: OpCPU (as the CpuOp trait, apply only); the rest is WP 1.2c"
+note = "S2: OpCPU (as the CpuOp trait); 1.1d: its typed apply(const void *, void *, long) as CpuOp::apply_bit_depth, over the Pixels and PixelsMut enums of the channel types; the rest is WP 1.2c"
 
 [[file]]
 path = "src/OpenColorIO/OpBuilders.h"

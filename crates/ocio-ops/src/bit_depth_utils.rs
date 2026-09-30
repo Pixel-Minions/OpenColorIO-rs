@@ -25,6 +25,7 @@ use std::fmt::Debug;
 use crate::exception::{Exception, Result};
 use crate::imath_half;
 use crate::math_utils::sse_cvttps_epi32;
+use crate::op::{Pixels, PixelsMut};
 use crate::open_color_types::{BitDepth, bit_depth_to_string};
 
 /// Port of `errBDNotSupported` (src/OpenColorIO/BitDepthUtils.cpp:12 @ v2.5.2).
@@ -104,6 +105,85 @@ pub fn get_channel_size_in_bytes(bit_depth: BitDepth) -> Result<u32> {
     }
 }
 
+/// A channel type of the CPU processor, `BitDepthInfo<BD>::Type`: `u8`, `u16`, `half::f16`
+/// (Imath's `half`) or `f32`. What C++ does with such a value implicitly, the port does through
+/// these methods.
+pub trait ChannelType: Copy + Default + Debug + Send + Sync + 'static {
+    /// The value as `float`, as C++ converts it (`in[0] * m_scale` in `BitDepthCast`): integers
+    /// exactly, a half through Imath's `half::operator float`.
+    fn to_float(self) -> f32;
+
+    /// The value in the first `size_of::<Self>()` bytes, in the machine's byte order: C++
+    /// dereferences a `Type *` into an image buffer, at any alignment.
+    fn read_ne(bytes: &[u8]) -> Self;
+
+    /// Writes the value into the first `size_of::<Self>()` bytes, in the machine's byte order.
+    fn write_ne(self, bytes: &mut [u8]);
+
+    /// The values as the input of a bit-depth conversion.
+    fn pixels(values: &[Self]) -> Pixels<'_>;
+
+    /// The values as the output of a bit-depth conversion.
+    fn pixels_mut(values: &mut [Self]) -> PixelsMut<'_>;
+
+    /// The values of `pixels`, if they have this type.
+    fn from_pixels(pixels: Pixels<'_>) -> Option<&[Self]>;
+
+    /// The values of `pixels`, if they have this type.
+    fn from_pixels_mut(pixels: PixelsMut<'_>) -> Option<&mut [Self]>;
+}
+
+macro_rules! channel_type {
+    ($t:ty, $variant:ident, |$v:ident| $to_float:expr) => {
+        impl ChannelType for $t {
+            #[inline]
+            fn to_float(self) -> f32 {
+                let $v = self;
+                $to_float
+            }
+
+            #[inline]
+            fn read_ne(bytes: &[u8]) -> Self {
+                let mut raw = [0u8; size_of::<$t>()];
+                raw.copy_from_slice(&bytes[..size_of::<$t>()]);
+                <$t>::from_ne_bytes(raw)
+            }
+
+            #[inline]
+            fn write_ne(self, bytes: &mut [u8]) {
+                bytes[..size_of::<$t>()].copy_from_slice(&self.to_ne_bytes());
+            }
+
+            fn pixels(values: &[Self]) -> Pixels<'_> {
+                Pixels::$variant(values)
+            }
+
+            fn pixels_mut(values: &mut [Self]) -> PixelsMut<'_> {
+                PixelsMut::$variant(values)
+            }
+
+            fn from_pixels(pixels: Pixels<'_>) -> Option<&[Self]> {
+                match pixels {
+                    Pixels::$variant(values) => Some(values),
+                    _ => None,
+                }
+            }
+
+            fn from_pixels_mut(pixels: PixelsMut<'_>) -> Option<&mut [Self]> {
+                match pixels {
+                    PixelsMut::$variant(values) => Some(values),
+                    _ => None,
+                }
+            }
+        }
+    };
+}
+
+channel_type!(u8, U8, |v| f32::from(v));
+channel_type!(u16, U16, |v| f32::from(v));
+channel_type!(half::f16, F16, |v| imath_half::half_to_float(v.to_bits()));
+channel_type!(f32, F32, |v| v);
+
 /// What OCIO knows about a supported bit depth at compile time. Implemented by one marker type
 /// per bit depth ([`Uint8`], [`Uint10`], [`Uint12`], [`Uint16`], [`F16`], [`F32`]); upstream
 /// leaves `BitDepthInfo` incomplete for the others, so that using one fails to compile.
@@ -111,7 +191,7 @@ pub fn get_channel_size_in_bytes(bit_depth: BitDepth) -> Result<u32> {
 /// Port of `BitDepthInfo<BD>` (src/OpenColorIO/BitDepthUtils.h:27-74 @ v2.5.2).
 pub trait BitDepthInfo {
     /// `BitDepthInfo<BD>::Type`: how one channel is stored.
-    type Type: Copy + Default + Debug + Send + Sync + 'static;
+    type Type: ChannelType;
     /// `BitDepthInfo<BD>::isFloat`.
     const IS_FLOAT: bool;
     /// `BitDepthInfo<BD>::maxValue`.
