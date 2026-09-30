@@ -207,15 +207,9 @@ def _channel_starts(desc, image, colors_only=False):
     return [(plane["buffer"], int(plane.get("offset", 0))) for plane in planes]
 
 
-def _check_inside(index, desc, image, buffers):
-    """Refuses an image whose pixels aren't all in its buffers: channel c of pixel (x, y) is
-    at the channel's start + x * xStride + y * yStride, AutoStride resolved by the library.
-
-    An image the library calls RGBA-packed is read and written a row at a time instead: 4 *
-    width contiguous channels from the data pointer plus y * yStride (ScanlineHelper.cpp:129-136,
-    158-164; the ops work in a packed float destination's rows directly). Those rows are checked
-    too: isRGBAPacked tests the x stride truncated to an int (ImageDesc.cpp:264), so an x stride
-    of 4 channels plus a multiple of 2^32 is packed, and its rows are not where its pixels are."""
+def _regions(desc, image):
+    """The bytes an image's channels span, per channel (what, buffer, lo, hi), and for an
+    image the library calls RGBA-packed its rows too (see _check_inside)."""
     item = CHANNEL_BYTES[desc.getBitDepth().name]
     width, height, y_stride = desc.getWidth(), desc.getHeight(), desc.getYStrideBytes()
     regions = [("pixels", buffer,
@@ -226,7 +220,19 @@ def _check_inside(index, desc, image, buffers):
         regions.append(("packed rows", data["buffer"],
                         *_extent(int(data.get("offset", 0)), 1, height, 0, y_stride,
                                  4 * item * width)))
-    for what, buffer, lo, hi in regions:
+    return regions
+
+
+def _check_inside(index, desc, image, buffers):
+    """Refuses an image whose pixels aren't all in its buffers: channel c of pixel (x, y) is
+    at the channel's start + x * xStride + y * yStride, AutoStride resolved by the library.
+
+    An image the library calls RGBA-packed is read and written a row at a time instead: 4 *
+    width contiguous channels from the data pointer plus y * yStride (ScanlineHelper.cpp:129-136,
+    158-164; the ops work in a packed float destination's rows directly). Those rows are checked
+    too: isRGBAPacked tests the x stride truncated to an int (ImageDesc.cpp:264), so an x stride
+    of 4 channels plus a multiple of 2^32 is packed, and its rows are not where its pixels are."""
+    for what, buffer, lo, hi in _regions(desc, image):
         if lo < 0 or hi > buffers[buffer].nbytes:
             raise ValueError(
                 f"image_apply refuses to apply to images[{index}]: its {what} span bytes "
@@ -314,6 +320,41 @@ def _check_codes(index, desc, image, buffers, looks_up):
                 f"{code}, above {top}, the largest of {desc.getBitDepth().name}, and the "
                 f"processor starts with a forward 1D LUT, which the wheel would index with it "
                 f"outside its table")
+
+
+def _layout(desc, image):
+    """What decides which bytes each channel of each pixel takes."""
+    return (_channel_starts(desc, image), desc.getWidth(), desc.getHeight(),
+            desc.getXStrideBytes(), desc.getYStrideBytes(),
+            CHANNEL_BYTES[desc.getBitDepth().name], desc.isRGBAPacked())
+
+
+def _check_overlap(descs, images, apply, looks_up):
+    """Refuses apply(src, dst) from a 10- or 12-bit source to another description whose bytes
+    overlap the source's, when the processor starts with a forward 1D LUT. The wheel applies
+    a row at a time: it reads source row y, then writes destination row y
+    (CPUProcessor.cpp:407-432, ScanlineHelper.cpp:119-177), so a destination row over source
+    rows not read yet puts its own bytes there, and the LUT then looks up codes _check_codes
+    never saw, outside its table (the verifier's finding G1: it crashed the wheel). Two
+    descriptions of the same layout write each row over itself only, and an apply in place
+    ([i] or [i, i]) has one description: both are allowed. Any other overlap is refused, also
+    where the destination's rows cover only rows already read."""
+    if len(apply) != 2 or apply[0] == apply[1]:
+        return
+    i, j = apply
+    src, dst, src_image, dst_image = descs[i], descs[j], images[i], images[j]
+    if src.getBitDepth().name not in TOP_CODE:
+        return
+    if _layout(src, src_image) == _layout(dst, dst_image):
+        return
+    for _, b1, lo1, hi1 in _regions(src, src_image):
+        for _, b2, lo2, hi2 in _regions(dst, dst_image):
+            if b1 == b2 and lo1 < hi2 and lo2 < hi1 and looks_up():
+                raise ValueError(
+                    f"image_apply refuses to apply images[{i}] to images[{j}]: "
+                    f"their bytes overlap in buffers[{b1}], so the destination's rows would "
+                    f"overwrite source codes before they are read, and the processor starts "
+                    f"with a forward 1D LUT, which the wheel would index with them")
 
 
 def _starts_with_forward_lut1d(proc, key):
@@ -454,6 +495,9 @@ def image_apply(args, blobs):
     - an image it applies to is 2^29 or more pixels wide or has 2^31 or more rows, or an
       RGBA-packed source of 2^31 or more pixels goes to an image that isn't: the wheel's
       integers would overflow where it sizes or indexes rows (see _check_sizes);
+    - a 10- or 12-bit source and a destination of another layout overlap, and the processor
+      starts with a forward 1D LUT: the destination's rows would overwrite source codes before
+      the wheel reads them (see _check_overlap);
     - the source is a 10- or 12-bit image holding a red, green or blue code above 1023 or
       4095, and the processor starts with a forward 1D LUT, which the wheel would index with
       the code outside its table (see _check_codes).
@@ -511,6 +555,7 @@ def image_apply(args, blobs):
                 if _reads_source(descs, apply, cpu):
                     looks_up = functools.cache(lambda: _starts_with_forward_lut1d(proc, key))
                     _check_codes(apply[0], descs[apply[0]], images[apply[0]], buffers, looks_up)
+                    _check_overlap(descs, images, apply, looks_up)
                 stage[0] = "apply"
                 cpu.apply(*[descs[i] for i in apply])
             if args.get("data_getters"):

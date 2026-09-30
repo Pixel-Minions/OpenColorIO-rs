@@ -1860,7 +1860,7 @@ enum Outcome {
 /// still run. A spec with a key the command doesn't know is refused.
 #[test]
 fn applies_outside_the_wheels_memory_are_refused() {
-    use BitDepth::{F32, Uint10, Uint12};
+    use BitDepth::{F32, Uint10, Uint12, Uint16};
     use Outcome::{Applies, Raises, Refused};
     let rgba = |offset: usize, strides: [Stride; 3]| {
         Packed::new(Data::at(0, offset), 2, 2, Channels::Count(4)).layout(F32, strides)
@@ -1932,6 +1932,36 @@ fn applies_outside_the_wheels_memory_are_refused() {
         let dst = request.image(Packed::new(Data::at(dst, 0), 2, 2, rgba_count));
         request.apply = vec![src, dst];
         request
+    };
+    // A 2 x 2 RGBA source of `src` depth holding the codes 100 to 810 from the start of a
+    // 128-byte buffer, and a 2 x 2 destination of `dst` depth and `order`: `at` that offset in
+    // the same buffer, or in a buffer of its own. The verifier's G1 probe is the destination
+    // at 0.
+    let overlapping =
+        |src: BitDepth, dst: BitDepth, order: ChannelOrder, at: Option<usize>, processor: Value| {
+            let mut request = Request::new(processor);
+            let codes: Vec<u16> = (0..16).map(|k| 100 * (k % 8 + 1) + 10 * (k / 8)).collect();
+            let mut bytes: Vec<u8> = codes.iter().flat_map(|c| c.to_le_bytes()).collect();
+            bytes.resize(128, 0);
+            let first = request.buffer(Buffer::Bytes(bytes));
+            let (second, offset) = match at {
+                Some(offset) => (first, offset),
+                None => (request.buffer(Buffer::fill(128, &[0])), 0),
+            };
+            let src = request.image(
+                Packed::new(Data::at(first, 0), 2, 2, rgba_count).layout(src, [Stride::Auto; 3]),
+            );
+            let dst = request.image(
+                Packed::new(Data::at(second, offset), 2, 2, Channels::Order(order))
+                    .layout(dst, [Stride::Auto; 3]),
+            );
+            request.apply = vec![src, dst];
+            request
+        };
+    let unoptimized_to = |output: BitDepth| {
+        let mut p = processor(Uint10, output);
+        p["optimization"] = json!("OPTIMIZATION_NONE");
+        p
     };
     // A planar F32 image `width` pixels wide, every pixel of each plane on one float.
     let aliased = |width: i64| {
@@ -2019,6 +2049,94 @@ fn applies_outside_the_wheels_memory_are_refused() {
             Refused("refuses to apply to images[1]"),
         ),
         ("a destination that fits exactly", into_bytes(64), Applies),
+        (
+            "a 10-bit source under an F32 destination, over the same bytes (G1)",
+            overlapping(
+                Uint10,
+                F32,
+                ChannelOrder::Rgba,
+                Some(0),
+                processor(Uint10, F32),
+            ),
+            Refused("their bytes overlap in buffers[0]"),
+        ),
+        (
+            "a 12-bit source under a 10-bit destination of another order, over the same bytes",
+            overlapping(
+                Uint12,
+                Uint10,
+                ChannelOrder::Bgra,
+                Some(0),
+                processor(Uint12, Uint10),
+            ),
+            Refused("their bytes overlap in buffers[0]"),
+        ),
+        (
+            "a 10-bit source whose last byte is an F32 destination's first",
+            overlapping(
+                Uint10,
+                F32,
+                ChannelOrder::Rgba,
+                Some(31),
+                processor(Uint10, F32),
+            ),
+            Refused("their bytes overlap in buffers[0]"),
+        ),
+        (
+            "a 10-bit source right before an F32 destination, in one buffer",
+            overlapping(
+                Uint10,
+                F32,
+                ChannelOrder::Rgba,
+                Some(32),
+                processor(Uint10, F32),
+            ),
+            Applies,
+        ),
+        (
+            "a 10-bit source and an F32 destination in two buffers",
+            overlapping(
+                Uint10,
+                F32,
+                ChannelOrder::Rgba,
+                None,
+                processor(Uint10, F32),
+            ),
+            Applies,
+        ),
+        (
+            "a 10-bit source under an F32 destination, without a LUT first",
+            overlapping(
+                Uint10,
+                F32,
+                ChannelOrder::Rgba,
+                Some(0),
+                unoptimized_to(F32),
+            ),
+            Applies,
+        ),
+        (
+            "a 16-bit source under an F32 destination: its LUT holds every code",
+            overlapping(
+                Uint16,
+                F32,
+                ChannelOrder::Rgba,
+                Some(0),
+                processor(Uint16, F32),
+            ),
+            Applies,
+        ),
+        (
+            "two 10-bit descriptions of the same layout, over the same bytes",
+            overlapping(
+                Uint10,
+                Uint10,
+                ChannelOrder::Rgba,
+                Some(0),
+                processor(Uint10, Uint10),
+            ),
+            Applies,
+        ),
         (
             "an image 2^30 + 1 pixels wide, past the scanline helper's integers",
             aliased((1 << 30) + 1),
@@ -2390,6 +2508,81 @@ for descs, apply in json.loads(sys.argv[1]):
             assert_eq!(line, "accepted", "{label}");
         }
     }
+}
+
+/// The processor keys reach both commands (the verifier's N15 and N16): a config with a source
+/// and a destination color space gives the pixels of the transform between them, and a
+/// direction inverts a transform, for `image_apply` and for `image_apply_rgb`.
+#[test]
+fn processor_keys_reach_both_commands() {
+    let matrix =
+        json!({"class": "MatrixTransform", "args": {"offset": [0.125, -0.25, 0.0625, 0.5]}});
+    let log = json!({"class": "LogTransform", "args": {"base": 2.0}});
+    let config = json!({"yaml": "ocio_profile_version: 2
+roles:
+  default: ref
+colorspaces:
+  - !<ColorSpace>
+    name: ref
+  - !<ColorSpace>
+    name: graded
+    from_scene_reference: !<MatrixTransform> {offset: [0.125, -0.25, 0.0625, 0.5]}
+"});
+    let processors = [
+        json!({"config": config, "src": "ref", "dst": "graded"}),
+        json!({"transform": matrix}),
+        json!({"transform": log, "direction": "TRANSFORM_DIR_INVERSE"}),
+        json!({"transform": log}),
+    ];
+    let values = [0.5f32, 0.25, 1.5, 1.0, -0.125, 2.0, 0.75, 0.5];
+    let images: Vec<Request> = processors
+        .iter()
+        .map(|p| {
+            let mut request = Request::new(p.clone());
+            let buffer = request.buffer(Buffer::Bytes(f32_to_bytes(&values)));
+            let image = request.image(Packed::new(Data::at(buffer, 0), 2, 1, Channels::Count(4)));
+            request.apply = vec![image];
+            request
+        })
+        .collect();
+    let rgbs: Vec<RgbRequest> = processors
+        .iter()
+        .map(|p| RgbRequest {
+            processor: p.clone(),
+            rgba: true,
+            input: RgbInput::array(f32_to_bytes(&values), "float32"),
+        })
+        .collect();
+    let mut calls: Vec<BatchCall<'_>> = images.iter().map(Request::call).collect();
+    calls.extend(rgbs.iter().map(RgbRequest::call));
+    let mut responses = batch(&calls);
+    let rgb_responses = responses.split_off(images.len());
+    let image_outputs: Vec<Vec<u8>> = responses
+        .into_iter()
+        .zip(&images)
+        .map(|(response, request)| {
+            let reply = request.reply(response);
+            assert!(reply.raised().is_none(), "{}", reply.result);
+            reply.buffers[0].clone()
+        })
+        .collect();
+    let rgb_outputs: Vec<Vec<u8>> = rgb_responses
+        .into_iter()
+        .map(|response| {
+            let reply = RgbReply::from_response(response);
+            assert!(reply.raised().is_none(), "{}", reply.result);
+            reply.output.expect("an output")
+        })
+        .collect();
+    for outputs in [&image_outputs, &rgb_outputs] {
+        assert_bytes_eq(
+            "the config's source and destination",
+            &outputs[1],
+            &outputs[0],
+        );
+        assert_ne!(outputs[2], outputs[3], "the inverse direction");
+    }
+    assert_eq!(image_outputs, rgb_outputs);
 }
 
 /// A request's reply is the same on every run, alone or in a batch, bytes included: nothing
