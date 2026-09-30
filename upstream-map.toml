@@ -25,7 +25,7 @@ path = "include/OpenColorIO/OpenColorIO.h"
 kind = "api"
 target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/image_desc.rs"]
 status = "partial"
-note = "1.1b: AutoStride, ImageDesc and PackedImageDesc (image_desc.rs, for ocio to re-export); PlanarImageDesc is 1.1c"
+note = "1.1b-1.1c: AutoStride, ImageDesc, PackedImageDesc and PlanarImageDesc (image_desc.rs, for ocio to re-export)"
 
 [[file]]
 path = "include/OpenColorIO/OpenColorTransforms.h"
@@ -315,8 +315,8 @@ status = "done"
 path = "src/OpenColorIO/ImageDesc.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/image_desc.rs"]
-status = "partial"
-note = "1.1b: PackedImageDesc and GenericImageDesc, with the bounds check of deviation D-2, checked against the wheel (tests/image_desc_oracle.rs: every getter, isFloat included, and every error Python reaches); PlanarImageDesc is 1.1c. Not ported: operator<< (16-59), which prints buffer addresses that no test or oracle can compare (Python's repr() prints the binding's shared_ptr address instead)"
+status = "done"
+note = "1.1b-1.1c: PackedImageDesc, PlanarImageDesc and GenericImageDesc, with the bounds check of deviation D-2, checked against the wheel (tests/image_desc_oracle.rs, tests/planar_image_desc_oracle.rs: every getter, isFloat included, and every error Python reaches). Not ported: operator<< (16-59), which prints buffer addresses that no test or oracle can compare (Python's repr() prints the binding's shared_ptr address instead)"
 
 [[file]]
 path = "src/OpenColorIO/ImagePacking.cpp"

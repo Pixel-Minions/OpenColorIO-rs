@@ -6,10 +6,12 @@
 //! getters as the oracle reports the wheel's.
 
 use ocio_ops::Result;
-use ocio_ops::image_desc::{AUTO_STRIDE, ImageDesc, PackedImageDesc, PixelData};
+use ocio_ops::image_desc::{
+    AUTO_STRIDE, At, Bytes, ImageDesc, PackedImageDesc, PixelData, PlanarImageDesc,
+};
 use ocio_ops::open_color_types::{BitDepth, ChannelOrdering};
 use ocio_testkit::battery::BitDepth as Depth;
-use ocio_testkit::image::{ChannelOrder, Channels, Packed, Stride, channel_bytes};
+use ocio_testkit::image::{ChannelOrder, Channels, Packed, Planar, Stride, channel_bytes};
 use serde_json::{Value, json};
 
 /// The bit depths the CPU processor takes.
@@ -194,4 +196,86 @@ pub(crate) fn packed_reach(spec: &Packed) -> i64 {
         (height - 1).saturating_mul(y.saturating_abs()),
         item,
     ])
+}
+
+/// The bytes of a channel of a planar spec's bit depth (F32 without a layout).
+pub(crate) fn planar_item(spec: &Planar) -> i64 {
+    spec.layout
+        .map_or(4, |(depth, _)| channel_bytes(supported(depth)) as i64)
+}
+
+/// How far a planar spec's pixels can reach from a plane's first pixel, in bytes, either way,
+/// as [`packed_reach`] says it for a packed spec.
+pub(crate) fn planar_reach(spec: &Planar) -> i64 {
+    let item = planar_item(spec);
+    let [x, y] = spec
+        .layout
+        .map_or([Stride::Auto; 2], |(_, strides)| strides);
+    let x = match x {
+        Stride::Auto => item,
+        Stride::Bytes(x) => x,
+    };
+    let y = match y {
+        Stride::Auto => x.saturating_mul(spec.width),
+        Stride::Bytes(y) => y,
+    };
+    let (width, height) = (spec.width.max(1), spec.height.max(1));
+    saturating_sum(&[
+        (width - 1).saturating_mul(x.saturating_abs()),
+        (height - 1).saturating_mul(y.saturating_abs()),
+        item,
+    ])
+}
+
+/// The port's description of `spec`, whose planes are in `buffers` (the request's, by index):
+/// separate planes, or planes in one buffer when they all name the same one.
+pub(crate) fn port_planar<'a>(
+    spec: &Planar,
+    buffers: &'a [Vec<u8>],
+) -> Result<PlanarImageDesc<&'a [u8]>> {
+    let (width, height) = (spec.width as usize, spec.height as usize);
+    let (bit_depth, [x, y]) = match spec.layout {
+        Some((depth, [x, y])) => (
+            port_depth(supported(depth)),
+            [port_stride(x), port_stride(y)],
+        ),
+        None => (BitDepth::F32, [AUTO_STRIDE; 2]),
+    };
+    let first = spec.planes[0].buffer;
+    if spec.planes.iter().all(|plane| plane.buffer == first) {
+        let offset = |k: usize| spec.planes[k].offset;
+        return PlanarImageDesc::in_one_buffer(
+            Bytes(&buffers[first][..]),
+            offset(0),
+            offset(1),
+            offset(2),
+            (spec.planes.len() == 4).then(|| offset(3)),
+            width,
+            height,
+            bit_depth,
+            x,
+            y,
+        );
+    }
+    let plane = |k: usize| {
+        At(
+            Bytes(&buffers[spec.planes[k].buffer][..]),
+            spec.planes[k].offset,
+        )
+    };
+    let alpha = (spec.planes.len() == 4).then(|| plane(3));
+    match spec.layout {
+        None => PlanarImageDesc::new(plane(0), plane(1), plane(2), alpha, width, height),
+        Some(_) => PlanarImageDesc::with_strides(
+            plane(0),
+            plane(1),
+            plane(2),
+            alpha,
+            width,
+            height,
+            bit_depth,
+            x,
+            y,
+        ),
+    }
 }
