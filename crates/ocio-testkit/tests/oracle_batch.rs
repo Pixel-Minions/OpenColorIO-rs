@@ -45,7 +45,11 @@ fn batched_calls_return_what_single_calls_return() {
         })
         .collect();
     for cache in [false, true] {
-        let batched = Oracle::get().batch(&calls, cache);
+        let batched: Vec<_> = Oracle::get()
+            .batch(&calls, cache)
+            .into_iter()
+            .map(|r| r.unwrap_or_else(|e| panic!("{e}")))
+            .collect();
         assert_eq!(batched.len(), calls.len());
         for (call, batched) in calls.iter().zip(&batched) {
             let single = Oracle::get().call(call.cmd, call.args.clone(), &call.blobs);
@@ -127,5 +131,28 @@ fn cpu_apply_reports_the_stage_of_an_exception() {
         accepted.result.get("stage").is_none(),
         "{}",
         accepted.result
+    );
+}
+
+/// `Oracle::batch` returns the failing call's error, with its index, and the other calls'
+/// responses.
+#[test]
+fn batch_returns_the_error_of_the_failing_call_only() {
+    let pixels = f32_to_bytes(&[0.25, 0.5, 1.0, 1.0]);
+    let bad = json!({"transform": {"class": "NoSuchTransform"}});
+    let calls: Vec<BatchCall<'_>> = [log(2.0, true), bad, log(10.0, true)]
+        .into_iter()
+        .map(|args| BatchCall {
+            cmd: "cpu_apply",
+            args,
+            blobs: vec![pixels.as_slice()],
+        })
+        .collect();
+    let results = Oracle::get().batch(&calls, false);
+    assert!(results[0].is_ok() && results[2].is_ok());
+    let error = results[1].as_ref().expect_err("the bad call fails");
+    assert!(
+        error.contains("call 1 of 3") && error.contains("NoSuchTransform"),
+        "{error}"
     );
 }

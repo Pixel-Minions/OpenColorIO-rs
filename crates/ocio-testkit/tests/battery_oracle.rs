@@ -78,10 +78,21 @@ enum Kind {
     WrongRefusalText,
 }
 
+/// Deliberate bugs in the family's spec.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum SpecBug {
+    None,
+    /// Non-finite parameters written as Rust prints them (`inf`, `NaN`): not YAML numbers.
+    RustNumbers,
+    /// The case with this base names a transform class that doesn't exist.
+    BadClassFor(f64),
+}
+
 struct LogFamily {
     cases: Vec<Case<Base>>,
     bases: Vec<Case<Base>>,
     port: Kind,
+    spec_bug: SpecBug,
     /// Other profiles: the wheel itself, and one that quiets signalling NaNs in alpha.
     other_profiles: bool,
     pass_through: Channels,
@@ -94,6 +105,7 @@ impl LogFamily {
             cases,
             bases: Vec::new(),
             port: Kind::Oracle,
+            spec_bug: SpecBug::None,
             other_profiles: false,
             pass_through: [false; 4],
             validation: Validation::Ported,
@@ -117,7 +129,17 @@ impl Family for LogFamily {
         vec![Direction::Forward]
     }
     fn spec(&self, params: &Base, direction: Direction) -> Spec {
-        spec(params, direction)
+        match self.spec_bug {
+            SpecBug::RustNumbers if !params.0.is_finite() => Spec::Yaml(format!(
+                "!<LogTransform> {{base: {}, direction: {}}}",
+                params.0,
+                direction.yaml()
+            )),
+            SpecBug::BadClassFor(base) if params.0 == base => {
+                Spec::Transform(json!({"class": "NoSuchTransform", "args": {}}))
+            }
+            _ => spec(params, direction),
+        }
     }
     fn port(&self, params: &Base, combo: &Combo) -> Result<Port, String> {
         let args = spec(params, combo.direction).cpu_apply_args(combo);
@@ -245,6 +267,17 @@ fn refusals_are_compared_or_left_out() {
     }
     assert!(!left_out.contains(&"base 2, base = NaN"));
     assert_eq!(summary.validation_card, Some("WP 1.3l1"));
+    // The summary counts the refusal texts: every left-out case in both combinations.
+    let refused: usize = summary.refusals.iter().map(|(_, n)| n).sum();
+    assert_eq!(refused, 2 * summary.left_out.len());
+    for (label, text) in &summary.left_out {
+        assert!(
+            summary.refusals.iter().any(|(t, _)| t == text),
+            "{label}: {text} is not among {:?}",
+            summary.refusals
+        );
+    }
+    assert!(summary.to_string().contains("refused by the wheel"));
 
     let mut family = LogFamily::new(vec![Case::new("base 1", Base(1.0))]);
     family.validation = Validation::NotPorted { card: "WP 1.3l1" };
@@ -277,13 +310,20 @@ fn pass_through_channels_are_checked_on_every_profile() {
     assert!(message.contains("the wheel changes channels"), "{message}");
 }
 
-/// A YAML spec and a JSON spec with the same parameters give identical pixels, for ordinary,
-/// huge, tiny and subnormal values. (The Log renderers narrow parameters to `float`, so this
-/// can't see differences below `float` precision. Reading the values back with
-/// PyOpenColorIO's getters showed identical doubles on both platforms.)
+/// A YAML spec loads, and reads its numbers back as a JSON spec does:
+/// - ordinary, huge, tiny and subnormal values give the JSON spec's pixels;
+/// - `.inf` and `-.inf` give the pixels of JSON's ±1e300, which the Log renderers also narrow
+///   to ±Inf;
+/// - `.nan` makes its channels NaN for every pixel and leaves the others as a finite spec does.
+///
+/// A number yaml-cpp can't parse (`inf` instead of `.inf`) fails while loading the config. (The
+/// Log renderers narrow parameters to `float`, so pixels can't show differences below `float`
+/// precision; reading the values back with PyOpenColorIO's getters showed identical doubles on
+/// both platforms.)
 #[test]
 fn yaml_specs_read_numbers_back_exactly() {
-    let values = [
+    // (the YAML spec's value, the JSON spec's value)
+    let mut values: Vec<(f64, f64)> = [
         2.2,
         0.293255132,
         -0.0,
@@ -294,7 +334,14 @@ fn yaml_specs_read_numbers_back_exactly() {
         1e-46,
         1e-310,
         f64::from_bits(1),
-    ];
+    ]
+    .map(|v| (v, v))
+    .to_vec();
+    values.extend([
+        (f64::INFINITY, 1e300),
+        (f64::NEG_INFINITY, -1e300),
+        (f64::NAN, 0.0),
+    ]);
     let combo = Combo {
         direction: Direction::Inverse,
         fast_math: false,
@@ -302,15 +349,18 @@ fn yaml_specs_read_numbers_back_exactly() {
     };
     let input = f32_to_bytes(&ocio_testkit::probe::to_rgba_cycled(&specials()));
     let mut calls = Vec::new();
-    for v in values {
+    for &(yaml_value, json_value) in &values {
         let json = Spec::Transform(json!({
             "class": "LogAffineTransform",
-            "args": {"linSideOffset": [v, 0.5, v], "direction": combo.direction.oracle_enum()},
+            "args": {
+                "linSideOffset": [json_value, 0.5, json_value],
+                "direction": combo.direction.oracle_enum(),
+            },
         }));
         let yaml = Spec::Yaml(format!(
             "!<LogAffineTransform> {{lin_side_offset: [{}, 0.5, {}], direction: inverse}}",
-            yaml_number(v),
-            yaml_number(v)
+            yaml_number(yaml_value),
+            yaml_number(yaml_value)
         ));
         for spec in [json, yaml] {
             calls.push(ocio_testkit::oracle::BatchCall {
@@ -321,16 +371,29 @@ fn yaml_specs_read_numbers_back_exactly() {
         }
     }
     let responses = Oracle::get().batch(&calls, true);
-    for (v, pair) in values.iter().zip(responses.chunks(2)) {
-        assert!(
-            pair[0].result.get("exception").is_none(),
-            "{}",
-            pair[0].result
-        );
-        assert_eq!(
-            pair[0].blobs, pair[1].blobs,
-            "{v:e}: JSON and YAML specs give different pixels"
-        );
+    for (&(yaml_value, _), pair) in values.iter().zip(responses.chunks(2)) {
+        let label = yaml_number(yaml_value);
+        let [json, yaml] = [&pair[0], &pair[1]].map(|r| match r {
+            Ok(response) if response.result.get("exception").is_none() => response,
+            Ok(response) => panic!("{label}: the wheel refused it: {}", response.result),
+            Err(e) => panic!("{label}: {e}"),
+        });
+        if !yaml_value.is_nan() {
+            assert_eq!(
+                json.blobs, yaml.blobs,
+                "{label}: JSON and YAML specs give different pixels"
+            );
+            continue;
+        }
+        let (finite, nan) = (json.blob_f32(0), yaml.blob_f32(0));
+        assert_eq!(finite.len(), nan.len());
+        for (i, (f, n)) in finite.iter().zip(&nan).enumerate() {
+            if i % 4 == 0 || i % 4 == 2 {
+                assert!(n.is_nan(), "{label}: value {i} is {n:e}, not NaN");
+            } else {
+                assert_eq!(f.to_bits(), n.to_bits(), "{label}: value {i}");
+            }
+        }
     }
 }
 
@@ -356,4 +419,52 @@ fn the_f32_sweep_runs_its_chunks() {
     assert_eq!(summary.comparisons, 4 + 4);
     assert_eq!(summary.values, 4 * 4 * specials().len() + 4 * 4 * (1 << 12));
     assert_eq!(summary.oracle_batches, 1);
+}
+
+/// A spec the wheel can't load is a bug, not a refusal. The verifier's B6 wrote `inf` for
+/// `.inf`, and the generated ±Inf cases vanished from the comparisons as "left out"; each of
+/// them now fails.
+#[test]
+fn a_spec_the_wheel_cant_load_fails_instead_of_being_left_out() {
+    let mut family = LogFamily::new(vec![Case::new("base 2", Base(2.0))]);
+    family.bases = vec![Case::new("base 2", Base(2.0))];
+    family.validation = Validation::NotPorted { card: "WP 1.3l1" };
+    family.spec_bug = SpecBug::RustNumbers;
+    let plan = Plan {
+        mutations: Mutations::All,
+        ..small_plan()
+    };
+    let message = run_expecting_failure(&family, &plan);
+    // NaN, +Inf and -Inf, each in both combinations.
+    assert!(message.contains("6 failures"), "{message}");
+    assert!(
+        message.contains("OCIO raised while loading the config"),
+        "{message}"
+    );
+    for label in ["base = NaN", "base = inf", "base = -inf"] {
+        assert!(
+            message.contains(&format!("case \"base 2, {label}\"")),
+            "{label}: {message}"
+        );
+    }
+}
+
+/// A call the oracle can't run (a misspelled transform class) fails its own case, labelled
+/// with its combination and probe; the other cases are still compared.
+#[test]
+fn a_failing_oracle_call_fails_its_case_only() {
+    let mut family = LogFamily::new(vec![
+        Case::new("base 2", Base(2.0)),
+        Case::new("base 3", Base(3.0)),
+    ]);
+    family.spec_bug = SpecBug::BadClassFor(3.0);
+    let message = run_expecting_failure(&family, &small_plan());
+    assert!(message.contains("2 failures"), "{message}");
+    assert!(
+        message.contains("case \"base 3\" (forward, fast math on), probe \"specials\""),
+        "{message}"
+    );
+    assert!(message.contains("NoSuchTransform"), "{message}");
+    // Base 2 in both combinations.
+    assert!(message.contains("comparisons: 2 buffers"), "{message}");
 }

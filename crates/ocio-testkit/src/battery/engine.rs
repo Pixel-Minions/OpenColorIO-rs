@@ -215,6 +215,7 @@ pub(super) fn run<F: Family>(family: &F, plan: &Plan) -> Summary {
         refused: HashMap::new(),
         reported: HashSet::new(),
         waived: HashMap::new(),
+        refusals: HashMap::new(),
         summary: &mut summary,
     };
     let oracle = Oracle::get();
@@ -271,6 +272,8 @@ struct Checker<'a, F: Family> {
     reported: HashSet<(usize, usize)>,
     /// NaN values W0002 covered, per case and combination.
     waived: HashMap<(usize, usize), usize>,
+    /// How many case and combination pairs the wheel refused with each text.
+    refusals: HashMap<String, usize>,
     summary: &'a mut Summary,
 }
 
@@ -316,14 +319,52 @@ impl<F: Family> Checker<'_, F> {
         }
     }
 
-    fn check(&mut self, job: &Job, buffer: &Buffer, response: Response) {
+    fn check(&mut self, job: &Job, buffer: &Buffer, response: Result<Response, String>) {
         let group = (job.case, job.combo);
+        let probe = format!(
+            "probe \"{}\" ({} pixels)",
+            buffer.name,
+            buffer.pixels.len() / 4
+        );
+        let response = match response {
+            Ok(response) => response,
+            Err(error) => {
+                // The oracle raised on this call: a bug in the family's spec or the harness.
+                if self.reported.insert(group) {
+                    let message = format!("{}, {probe}: {error}", self.label(group));
+                    self.fail(message);
+                }
+                return;
+            }
+        };
         let refusal = response.result.get("exception").map(|e| {
             e.get("message")
                 .and_then(Value::as_str)
                 .unwrap_or_default()
                 .to_string()
         });
+        if let Some(message) = &refusal {
+            // The wheel refuses parameters while building the transform (the Python bindings
+            // validate it), the processor or the CPU processor. OCIO raising while loading the
+            // config or applying the processor is a bug in the spec or the harness.
+            let stage = response.result.get("stage").and_then(Value::as_str);
+            if !matches!(stage, Some("transform" | "processor" | "cpu_processor")) {
+                if self.reported.insert(group) {
+                    let when = match stage {
+                        Some("config") => "while loading the config".to_string(),
+                        Some("apply") => "while applying the processor".to_string(),
+                        Some(other) => format!("at stage {other:?}"),
+                        None => "without a stage".to_string(),
+                    };
+                    let label = self.label(group);
+                    self.fail(format!(
+                        "{label}, {probe}: OCIO raised {when}, so the spec or the harness is \
+                         wrong: {message}"
+                    ));
+                }
+                return;
+            }
+        }
         match self.refused.get(&group) {
             Some(before) if before.is_some() != refusal.is_some() => {
                 if self.reported.insert(group) {
@@ -368,7 +409,6 @@ impl<F: Family> Checker<'_, F> {
         let pass_through = ports.pass_through;
         let mut failures = Vec::new();
         let mut pass_through_checks = 0;
-        let probe = format!("probe \"{}\" ({} pixels)", buffer.name, input.len() / 4);
         if pass_through.iter().any(|&p| p) {
             if let Some(report) = channels_report(pass_through, input, input, &expected) {
                 failures.push(format!(
@@ -410,6 +450,7 @@ impl<F: Family> Checker<'_, F> {
         if !self.reported.insert(group) {
             return;
         }
+        *self.refusals.entry(wheel.clone()).or_default() += 1;
         let label = self.label(group);
         let case = &self.cases[group.0];
         match self.family.validation() {
@@ -449,6 +490,9 @@ impl<F: Family> Checker<'_, F> {
             let label = format!("{} ({})", self.cases[group.0].label(), self.combos[group.1]);
             self.summary.w0002_waived.push((label, n));
         }
+        let mut refusals: Vec<(String, usize)> = self.refusals.into_iter().collect();
+        refusals.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        self.summary.refusals = refusals;
     }
 }
 

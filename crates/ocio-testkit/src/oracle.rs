@@ -168,10 +168,11 @@ impl Oracle {
     }
 
     /// Runs `calls` in one oracle process with the `batch` command and returns their
-    /// responses, in order. Identical input blobs are sent once. With `cache`, the whole batch
-    /// is one cache entry. Panics on a protocol error.
+    /// responses, in order: a call that raised in the oracle gives `Err` with its traceback,
+    /// and the other calls still run. Identical input blobs are sent once. With `cache`, the
+    /// whole batch is one cache entry. Panics on a protocol error.
     #[track_caller]
-    pub fn batch(&self, calls: &[BatchCall<'_>], cache: bool) -> Vec<Response> {
+    pub fn batch(&self, calls: &[BatchCall<'_>], cache: bool) -> Vec<Result<Response, String>> {
         // Deduplicate by address first (the usual case: one probe buffer, many calls), then
         // by content, so the request doesn't depend on where the buffers live.
         let mut by_address: HashMap<(usize, usize), usize> = HashMap::new();
@@ -210,7 +211,16 @@ impl Oracle {
         let mut out_blobs: Vec<Option<Vec<u8>>> = response.blobs.into_iter().map(Some).collect();
         results
             .iter()
-            .map(|entry| {
+            .enumerate()
+            .map(|(i, entry)| {
+                if let Some(error) = entry.get("error") {
+                    return Err(format!(
+                        "oracle call {i} of {} (`{}`) failed: {}",
+                        calls.len(),
+                        calls[i].cmd,
+                        error.as_str().unwrap_or_default()
+                    ));
+                }
                 let blobs = entry["blobs"]
                     .as_array()
                     .into_iter()
@@ -222,10 +232,10 @@ impl Oracle {
                             .expect("each response blob belongs to one call")
                     })
                     .collect();
-                Response {
+                Ok(Response {
                     result: entry["result"].clone(),
                     blobs,
-                }
+                })
             })
             .collect()
     }

@@ -449,6 +449,11 @@ pub enum Validation {
     /// The family's op data has no `validate` yet; `card` ports it. A generated case the
     /// wheel refuses is left out (the [`Summary`] lists it); an explicit case the wheel
     /// refuses fails.
+    ///
+    /// Under either variant, only refusals raised while building the transform, the processor
+    /// or the CPU processor count as the wheel refusing the parameters. OCIO raising while
+    /// loading the config (a YAML spec it can't parse) or applying the processor, and the
+    /// oracle failing on a call, are bugs in the spec or the harness, and fail.
     NotPorted {
         /// The card that ports the validation, for the summary.
         card: &'static str,
@@ -598,6 +603,9 @@ pub struct Summary {
     /// Generated cases the wheel refuses, left out while the family's validation isn't ported,
     /// with the wheel's exception text.
     pub left_out: Vec<(String, String)>,
+    /// The distinct texts the wheel refused with, and how many case and combination pairs
+    /// gave each, most frequent first.
+    pub refusals: Vec<(String, usize)>,
     /// The card that ports the family's validation, when it isn't ported.
     pub validation_card: Option<&'static str>,
     /// Comparisons under waiver W0002.
@@ -658,6 +666,15 @@ impl fmt::Display for Summary {
                     ""
                 }
             )?;
+        }
+        if !self.refusals.is_empty() {
+            writeln!(
+                f,
+                "  refused by the wheel, in case/combination pairs per text:"
+            )?;
+            for (text, n) in &self.refusals {
+                writeln!(f, "    {n}: {text}")?;
+            }
         }
         for (label, n) in &self.w0002_waived {
             writeln!(f, "  W0002: {label}: {n} NaN values")?;

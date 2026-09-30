@@ -954,6 +954,7 @@ fn integer_output_casts_match_the_wheel() {
     let responses = Oracle::get().batch(&calls, true);
     let mut failures = Vec::new();
     for ((depth, max_value, cast), resp) in depths.into_iter().zip(responses) {
+        let resp = resp.unwrap_or_else(|e| panic!("{depth}: {e}"));
         assert!(resp.result.get("exception").is_none(), "{}", resp.result);
         let expected: Vec<u16> = if max_value == 255 {
             resp.blobs[0].iter().map(|&b| u16::from(b)).collect()
