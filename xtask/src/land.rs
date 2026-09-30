@@ -6,8 +6,9 @@
 //! From the main checkout, on `phase0`, with a clean tree:
 //! 1. replays the branch's commits onto `phase0` in a temporary worktree (`target/land/wt`)
 //!    with `git rebase --exec "cargo xtask gate --auto --rocky"`, which gates every commit
-//!    (release and Rocky Linux 9 for commits that touch platform-sensitive files), and checks
-//!    that the replay dropped nothing the branch's merge commits carry;
+//!    (release and Rocky Linux 9 for commits that touch platform-sensitive files); a branch
+//!    with merge commits is first replayed without gates, to check that the replay drops
+//!    nothing they carry;
 //! 2. merges the result with `--no-ff`, listing each chunk's subject;
 //! 3. regenerates `docs/parity.md` and `docs/ratchet.toml` into that merge commit;
 //! 4. runs the full gate on it (debug and release, `xtask ci --main`, cargo-deny, Rocky) and
@@ -38,8 +39,9 @@ Lands <branch> on phase0, from the main checkout on phase0 with a clean tree:
   1. replays its commits onto phase0 in target/land/wt with
      `git rebase --exec \"cargo xtask gate --auto --rocky\"`: every commit is gated, in
      release and in Rocky Linux 9 too when it touches platform-sensitive files; commits
-     already on top of phase0 keep their hashes. It stops if the replayed tree differs from
-     merging the branch as it is (content only its merge commits carry).
+     already on top of phase0 keep their hashes. For a branch with merge commits, a first
+     replay without gates must give the tree that merging the branch as it is gives (a
+     replay drops merge commits, and what only they carry); otherwise it stops at once.
   2. merges the result with --no-ff; the message lists each chunk's subject
   3. regenerates docs/parity.md and docs/ratchet.toml into the merge commit
   4. runs `cargo xtask gate --full --release --main --rocky` (with cargo-deny) and
@@ -164,6 +166,34 @@ pub(crate) fn run(branch: &str, rocky: bool) -> Result<(), String> {
         crate::display_path(&build)
     );
 
+    // A replay drops merge commits, and with them anything only they carry. Before any gate
+    // runs, replay once without gates and compare that tree with merging the branch as it is.
+    // (Only with merge commits: for a linear branch the check has nothing to find, and it would
+    // refuse a follow-up land whose earlier chunks landed already, rewritten.)
+    if merges != "0" {
+        let mut plain = Command::new("git");
+        plain
+            .current_dir(&wt)
+            .args(["rebase", "--quiet", "--no-autosquash", "--no-update-refs"])
+            .arg(&base);
+        let replayed = land_env(&mut plain, &build, &lock)
+            .status()
+            .map_err(|e| format!("could not run git rebase: {e}"))?;
+        if !replayed.success() {
+            return Err(replay_failure(&wt));
+        }
+        let rebased = crate::git(&wt, &["rev-parse", "HEAD"])?;
+        check_replay(&root, &base, &tip, rebased.trim()).map_err(|e| {
+            format!(
+                "{e}\nland stopped before any gate ran: {INTEGRATION} and {branch} are \
+                 untouched; the plain replay is in {}",
+                crate::display_path(&wt)
+            )
+        })?;
+        crate::git(&wt, &["checkout", "--quiet", "--detach", &tip])?;
+        println!("land: replaying drops nothing the branch's merge commits carry");
+    }
+
     // 1. Replay, gating every commit.
     let exec = if rocky {
         "cargo xtask gate --auto --rocky"
@@ -195,12 +225,6 @@ pub(crate) fn run(branch: &str, rocky: bool) -> Result<(), String> {
              already in {INTEGRATION}"
         ));
     }
-    check_replay(&root, &base, &tip, &rebased).map_err(|e| {
-        format!(
-            "{e}\nland stopped: {INTEGRATION} and {branch} are untouched; the replay is in {}",
-            crate::display_path(&wt)
-        )
-    })?;
     let kept = rebased == tip;
     let chunks = crate::git(
         &wt,
