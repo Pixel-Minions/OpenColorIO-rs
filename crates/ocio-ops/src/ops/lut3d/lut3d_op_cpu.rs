@@ -15,11 +15,11 @@
 //! | Generic trilinear | `Lut3DRenderer::apply`, `#else` branch | builds without SSE2 |
 //!
 //! **NaN operand order** (CLAUDE.md). The tetrahedral paths never create a NaN: the inputs are
-//! clamped (NaN becomes 0), the LUT values are sanitized, and the weights are in `[0, 1]`, so
-//! their sums can overflow to an infinity but never become NaN. The trilinear paths can: once a
-//! partial interpolation overflows, the next one can compute `inf * 0` or `inf - inf`. They use
-//! [`sse_add`] and [`sse_mul`] in upstream's source order. Every NaN there is the x86 default
-//! NaN, so the order cannot change the bits.
+//! clamped (NaN becomes 0), the LUT values are sanitized, and the weights are in `[0, 1]`, so a
+//! sum can at most overflow to an infinity. The trilinear paths use [`sse_add`] and [`sse_mul`]
+//! in upstream's source order. The generic one computes `b - a`, which overflows when
+//! neighboring values are huge and of opposite signs, and can then compute `inf * 0` or
+//! `inf - inf`. Every NaN there is the x86 default NaN, so the order cannot change the bits.
 //!
 //! Not ported yet: the tetrahedral SIMD kernels, which OCIO runs for calls with more than one
 //! pixel (until they are, every tetrahedral call runs the scalar branch), and
