@@ -74,6 +74,11 @@ buffer of `m_width` pixels).
 
 `ImageDesc`, `PackedImageDesc` and `PlanarImageDesc` are public API in `ocio-ops`
 (`image_desc.rs`), re-exported by `ocio`. The owner approved this design on 2026-09-30.
+- **What `ocio` re-exports.** The description types only: `ImageDesc`, `ImageDescMut`,
+  `PackedImageDesc`, `PlanarImageDesc`, `ImageLayout`, `ChannelPos`, `PixelData`, `Bytes`, `At`,
+  `AUTO_STRIDE`, and `half` for the F16 channel type. The CPU engine's internals
+  (`GenericImageDesc`, `image_packing`, `scanline_helper`, `create_generic_bit_depth_helper`)
+  are public in `ocio-ops` for the port's tests only, `#[doc(hidden)]`: they panic on misuse.
 - **Memory.** A description borrows its memory as bytes: typed slices (`&[T]` or `&mut [T]`,
   `T` one of `u8`, `u16`, `half::f16`, `f32`, and `&Vec<T>`) are viewed as bytes without
   copying, through `zerocopy`; `Bytes(..)` takes raw bytes of any bit depth; `At(data, offset)`

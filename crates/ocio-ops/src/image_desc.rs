@@ -1209,6 +1209,9 @@ fn planar_validate(
 /// Port of `GenericImageDesc` (declared in src/OpenColorIO/ImagePacking.h:16-47, defined in
 /// src/OpenColorIO/ImageDesc.cpp:75-112 @ v2.5.2). Upstream keeps the channels' pointers; the
 /// port keeps their positions, and the scanline code borrows the buffers from the description.
+///
+/// Internal to the CPU engine: public for the port's tests only.
+#[doc(hidden)]
 #[derive(Debug, Clone)]
 pub struct GenericImageDesc {
     /// `m_width`.
