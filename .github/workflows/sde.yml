@@ -34,6 +34,8 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
+  # The battery's quick tier: SDE checks which kernels are dispatched; full is too slow emulated.
+  OCIO_RS_TIER: quick
 
 jobs:
   windows:
@@ -99,6 +101,7 @@ jobs:
       - name: CPU tests on an emulated ${{ matrix.cpu }}
         run: |
           scripts/rocky9.sh bash -ec '
+            export OCIO_RS_TIER=quick
             cargo xtask oracle info
             cargo cpu-tests --release --no-run
             scripts/sde.sh ${{ matrix.cpu }} cargo cpu-tests --release --no-fail-fast

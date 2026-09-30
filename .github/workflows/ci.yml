@@ -23,7 +23,8 @@ env:
 
 jobs:
   # Both reference platforms (PLAN.md D11) run the live oracle: pixel checks compare the port
-  # with the opencolorio==2.5.2 wheel on the same machine.
+  # with the opencolorio==2.5.2 wheel on the same machine. The oracle test battery runs its
+  # full tier here (OCIO_RS_TIER, ocio_testkit::battery::Tier); quick is the local default.
   windows:
     name: Windows x86-64
     runs-on: windows-2025
@@ -52,8 +53,12 @@ jobs:
       - name: Guardrails, fixtures, ratchet (--main also parity)
         run: cargo xtask ci ${{ steps.mode.outputs.flags }}
       - run: cargo test --workspace --no-fail-fast
+        env:
+          OCIO_RS_TIER: full
       - name: Tests in release (optimization must not change any bit)
         run: cargo test --workspace --release --no-fail-fast
+        env:
+          OCIO_RS_TIER: full
       - name: Committed fixtures are identical on this platform
         run: cargo xtask oracle check-all
 
@@ -82,6 +87,7 @@ jobs:
             cargo fmt --all --check
             cargo clippy --workspace --all-targets
             cargo xtask ci ${{ steps.mode.outputs.flags }}
+            export OCIO_RS_TIER=full
             cargo test --workspace --no-fail-fast
             cargo test --workspace --release --no-fail-fast
             cargo xtask oracle check-all

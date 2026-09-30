@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! The Log renderers against the wheel, bit for bit, with fast math on and off.
+//! The Log renderers against the wheel, bit for bit, through the oracle test battery
+//! (`ocio_testkit::battery`): every case in both directions, with fast math on and off, on
+//! the tier's probe sets (`OCIO_RS_TIER`).
 //!
 //! The oracle builds a LogTransform, LogAffineTransform or LogCameraTransform in a raw config
-//! and applies its CPU processor to F32 RGBA pixels. The test builds the op data that
+//! and applies its CPU processor to F32 RGBA pixels. The families build the op data that
 //! upstream's transform and `BuildLogOp` produce (each helper cites them) and the renderer
 //! that `GetLogRenderer` picks.
 //!
@@ -17,30 +19,66 @@
 //! renderers' constructors on the tests' constant parameters: it folds, for example, `log2` of
 //! a negative constant to a positive NaN, where the math library returns the negative x86
 //! default NaN at run time.
-
-mod common;
+//!
+//! The Log renderers never write alpha (they work in place), so alpha is a pass-through
+//! channel for the battery.
 
 use std::hint::black_box;
 
-use common::{
-    Checks, Math, direction_enum, oracle_apply_yaml, probe_rgba, probe_rgba_with, yaml_direction,
-    yaml_list, yaml_number,
-};
 use ocio_ops::math_utils::{
     cast_value_uint8, cast_value_uint10, cast_value_uint12, cast_value_uint16,
 };
-use ocio_ops::open_color_types::TransformDirection::{self, Forward, Inverse};
+use ocio_ops::open_color_types::TransformDirection;
 use ocio_ops::ops::log::log_op_cpu::get_log_renderer;
 use ocio_ops::ops::log::log_op_data::{LogAffineParameter, LogOpData};
 use ocio_ops::ops::log::log_utils::{
     get_log_side_break, get_log_side_break_libstdcxx, get_log_side_break_msvc,
 };
 use ocio_testkit::Oracle;
-use ocio_testkit::compare::{assert_pixels_bits_eq, assert_pixels_bits_eq_except_nan_bits};
-use ocio_testkit::oracle::f32_to_bytes;
-use serde_json::{Value, json};
+use ocio_testkit::battery::params::{A, Case, Channels, Params, Precision, RGB, Slot};
+use ocio_testkit::battery::{
+    self, Combo, Direction, Family, Mutations, Plan, Port, Spec, Validation, yaml_list, yaml_number,
+};
+use ocio_testkit::oracle::{BatchCall, f32_to_bytes};
+use ocio_testkit::probe::{self, ProbeSet, RandomRange};
+use serde_json::json;
 
-const DIRECTIONS: [TransformDirection; 2] = [Forward, Inverse];
+/// The port's direction for the battery's.
+fn port_direction(direction: Direction) -> TransformDirection {
+    match direction {
+        Direction::Forward => TransformDirection::Forward,
+        Direction::Inverse => TransformDirection::Inverse,
+    }
+}
+
+/// The renderer `GetLogRenderer` picks for `data`, as a battery port.
+fn log_port(data: LogOpData, combo: &Combo) -> Result<Port, String> {
+    let renderer = get_log_renderer(&black_box(data), combo.fast_math);
+    Ok(Port::in_place(move |px| renderer.apply(px)))
+}
+
+/// Whether every slot of `params` is finite: then a JSON transform spec can hold them.
+fn all_finite<P: Params>(params: &P) -> bool {
+    (0..params.slots().len()).all(|i| params.get(i).is_finite())
+}
+
+/// The parameters of a LogTransform.
+#[derive(Debug, Clone, PartialEq)]
+struct LogBase {
+    base: f64,
+}
+
+impl Params for LogBase {
+    fn slots(&self) -> Vec<Slot> {
+        vec![Slot::new("base", Precision::F64AsF32, RGB)]
+    }
+    fn get(&self, _: usize) -> f64 {
+        self.base
+    }
+    fn set(&mut self, _: usize, value: f64) {
+        self.base = value;
+    }
+}
 
 /// The op data of `LogTransform(base, direction)` in a forward processor: default parameters.
 ///
@@ -50,34 +88,73 @@ const DIRECTIONS: [TransformDirection; 2] = [Forward, Inverse];
 /// `BuildLogOp` clones the data, inverting it only for an inverse processor
 /// (src/OpenColorIO/ops/log/LogOp.cpp:142-153, 212-221).
 fn log_transform_op(base: f64, dir: TransformDirection) -> LogOpData {
-    let mut data = LogOpData::new(2.0, Forward);
+    let mut data = LogOpData::new(2.0, TransformDirection::Forward);
     data.set_base(base);
     data.set_direction(dir);
     data
 }
 
-#[test]
-fn log_transform_matches_the_wheel() {
-    let mut checks = Checks::default();
-    // 2 and 10 are the Log2/Log10 renderers; others use LinToLog and LogToLin.
-    for base in [2.0, 10.0, std::f64::consts::E, 3.7, 0.5] {
-        for dir in DIRECTIONS {
-            let spec = json!({
+/// LogTransform.
+struct LogFamily {
+    cases: Vec<Case<LogBase>>,
+    bases: Vec<Case<LogBase>>,
+}
+
+impl Family for LogFamily {
+    type Params = LogBase;
+
+    fn name(&self) -> String {
+        "LogTransform".to_string()
+    }
+    fn cases(&self) -> Vec<Case<LogBase>> {
+        self.cases.clone()
+    }
+    fn mutation_bases(&self) -> Vec<Case<LogBase>> {
+        self.bases.clone()
+    }
+    fn spec(&self, p: &LogBase, direction: Direction) -> Spec {
+        if all_finite(p) {
+            Spec::Transform(json!({
                 "class": "LogTransform",
-                "args": {"base": base, "direction": direction_enum(dir)},
-            });
-            let data = black_box(log_transform_op(base, dir));
-            for math in Math::BOTH {
-                let renderer = get_log_renderer(&data, math.fast());
-                let label = format!("LogTransform base {base} {dir:?}");
-                checks.check(&label, &spec, math, probe_rgba(), renderer.as_ref());
-            }
+                "args": {"base": p.base, "direction": direction.oracle_enum()},
+            }))
+        } else {
+            Spec::Yaml(format!(
+                "!<LogTransform> {{base: {}, direction: {}}}",
+                yaml_number(p.base),
+                direction.yaml()
+            ))
         }
     }
-    checks.finish();
+    fn port(&self, p: &LogBase, combo: &Combo) -> Result<Port, String> {
+        log_port(
+            log_transform_op(p.base, port_direction(combo.direction)),
+            combo,
+        )
+    }
+    fn pass_through(&self, _: &LogBase, _: &Combo) -> Channels {
+        A
+    }
+    fn validation(&self) -> Validation {
+        Validation::NotPorted { card: "WP 1.3l1" }
+    }
+}
+
+#[test]
+fn log_transform_matches_the_wheel() {
+    // 2 and 10 are the Log2/Log10 renderers; others use LinToLog and LogToLin.
+    let mut cases: Vec<Case<LogBase>> = [2.0, 10.0, std::f64::consts::E, 3.7, 0.5]
+        .map(|base| Case::new(format!("base {base}"), LogBase { base }))
+        .to_vec();
+    let bases = vec![cases[3].clone()];
+    // A NaN base takes the YAML spec, as the generated NaN and ±Inf cases do: an explicit case
+    // there makes a bug in that spec fail rather than show as refusals.
+    cases.push(Case::new("base NaN", LogBase { base: f64::NAN }).w0002_nowhere());
+    battery::run(&LogFamily { cases, bases });
 }
 
 /// The parameters of a LogAffineTransform.
+#[derive(Debug, Clone, PartialEq)]
 struct Affine {
     base: f64,
     log_side_slope: [f64; 3],
@@ -86,23 +163,60 @@ struct Affine {
     lin_side_offset: [f64; 3],
 }
 
+impl Params for Affine {
+    fn slots(&self) -> Vec<Slot> {
+        let p = Precision::F64AsF32;
+        let mut s = vec![Slot::new("base", p, RGB)];
+        for name in [
+            "log_side_slope",
+            "log_side_offset",
+            "lin_side_slope",
+            "lin_side_offset",
+        ] {
+            s.extend(Slot::rgb(name, p));
+        }
+        s
+    }
+    fn get(&self, i: usize) -> f64 {
+        match i {
+            0 => self.base,
+            1..=3 => self.log_side_slope[i - 1],
+            4..=6 => self.log_side_offset[i - 4],
+            7..=9 => self.lin_side_slope[i - 7],
+            _ => self.lin_side_offset[i - 10],
+        }
+    }
+    fn set(&mut self, i: usize, v: f64) {
+        match i {
+            0 => self.base = v,
+            1..=3 => self.log_side_slope[i - 1] = v,
+            4..=6 => self.log_side_offset[i - 4] = v,
+            7..=9 => self.lin_side_slope[i - 7] = v,
+            _ => self.lin_side_offset[i - 10] = v,
+        }
+    }
+}
+
 impl Affine {
-    fn spec(&self, dir: TransformDirection) -> Value {
-        json!({
+    fn spec(&self, dir: Direction) -> Spec {
+        if !all_finite(self) {
+            return Spec::Yaml(self.yaml(dir));
+        }
+        Spec::Transform(json!({
             "class": "LogAffineTransform",
             "args": {
                 "logSideSlope": self.log_side_slope,
                 "logSideOffset": self.log_side_offset,
                 "linSideSlope": self.lin_side_slope,
                 "linSideOffset": self.lin_side_offset,
-                "direction": direction_enum(dir),
+                "direction": dir.oracle_enum(),
             },
             "calls": [["setBase", self.base]],
-        })
+        }))
     }
 
-    /// The transform in the config's YAML syntax, which can hold NaN parameters.
-    fn yaml(&self, dir: TransformDirection) -> String {
+    /// The transform in the config's YAML syntax, which can hold NaN and infinite parameters.
+    fn yaml(&self, dir: Direction) -> String {
         format!(
             "!<LogAffineTransform> {{base: {}, log_side_slope: {}, log_side_offset: {}, \
              lin_side_slope: {}, lin_side_offset: {}, direction: {}}}",
@@ -111,7 +225,7 @@ impl Affine {
             yaml_list(&self.log_side_offset),
             yaml_list(&self.lin_side_slope),
             yaml_list(&self.lin_side_offset),
-            yaml_direction(dir)
+            dir.yaml()
         )
     }
 
@@ -122,7 +236,7 @@ impl Affine {
     /// (LogAffineTransform.cpp:78-81), and `BuildLogOp` clones the data
     /// (src/OpenColorIO/ops/log/LogOp.cpp:190-199).
     fn op(&self, dir: TransformDirection) -> LogOpData {
-        let mut data = LogOpData::new(2.0, Forward);
+        let mut data = LogOpData::new(2.0, TransformDirection::Forward);
         for (param, values) in [
             (LogAffineParameter::LogSideSlope, &self.log_side_slope),
             (LogAffineParameter::LogSideOffset, &self.log_side_offset),
@@ -137,9 +251,40 @@ impl Affine {
     }
 }
 
-#[test]
-fn log_affine_transform_matches_the_wheel() {
-    let cases = [
+/// LogAffineTransform.
+struct AffineFamily {
+    cases: Vec<Case<Affine>>,
+    bases: Vec<Case<Affine>>,
+}
+
+impl Family for AffineFamily {
+    type Params = Affine;
+
+    fn name(&self) -> String {
+        "LogAffineTransform".to_string()
+    }
+    fn cases(&self) -> Vec<Case<Affine>> {
+        self.cases.clone()
+    }
+    fn mutation_bases(&self) -> Vec<Case<Affine>> {
+        self.bases.clone()
+    }
+    fn spec(&self, p: &Affine, direction: Direction) -> Spec {
+        p.spec(direction)
+    }
+    fn port(&self, p: &Affine, combo: &Combo) -> Result<Port, String> {
+        log_port(p.op(port_direction(combo.direction)), combo)
+    }
+    fn pass_through(&self, _: &Affine, _: &Combo) -> Channels {
+        A
+    }
+    fn validation(&self) -> Validation {
+        Validation::NotPorted { card: "WP 1.3l1" }
+    }
+}
+
+fn affine_cases() -> Vec<Case<Affine>> {
+    [
         // Different parameters per channel.
         Affine {
             base: 10.0,
@@ -187,30 +332,26 @@ fn log_affine_transform_matches_the_wheel() {
             lin_side_slope: [1.0; 3],
             lin_side_offset: [0.0; 3],
         },
-    ];
-    let mut checks = Checks::default();
-    for (i, case) in cases.iter().enumerate() {
-        for dir in DIRECTIONS {
-            let data = black_box(case.op(dir));
-            for math in Math::BOTH {
-                let renderer = get_log_renderer(&data, math.fast());
-                let label = format!("LogAffineTransform case {i} {dir:?}");
-                checks.check(
-                    &label,
-                    &case.spec(dir),
-                    math,
-                    probe_rgba(),
-                    renderer.as_ref(),
-                );
-            }
-        }
-    }
-    checks.finish();
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(i, a)| Case::new(format!("case {i}"), a))
+    .collect()
+}
+
+#[test]
+fn log_affine_transform_matches_the_wheel() {
+    let mut cases = affine_cases();
+    let bases = vec![cases[0].clone()];
+    // An explicit case on the YAML spec the generated NaN and ±Inf cases take.
+    let [_, nan_base] = affine_nan_cases();
+    cases.push(nan_base);
+    battery::run(&AffineFamily { cases, bases });
 }
 
 /// The parameters of a LogCameraTransform.
+#[derive(Debug, Clone, PartialEq)]
 struct Camera {
-    name: &'static str,
     base: f64,
     lin_side_break: [f64; 3],
     log_side_slope: [f64; 3],
@@ -220,9 +361,54 @@ struct Camera {
     linear_slope: Option<[f64; 3]>,
 }
 
+impl Params for Camera {
+    fn slots(&self) -> Vec<Slot> {
+        let p = Precision::F64AsF32;
+        let mut s = vec![Slot::new("base", p, RGB)];
+        for name in [
+            "lin_side_break",
+            "log_side_slope",
+            "log_side_offset",
+            "lin_side_slope",
+            "lin_side_offset",
+        ] {
+            s.extend(Slot::rgb(name, p));
+        }
+        if self.linear_slope.is_some() {
+            s.extend(Slot::rgb("linear_slope", p));
+        }
+        s
+    }
+    fn get(&self, i: usize) -> f64 {
+        match i {
+            0 => self.base,
+            1..=3 => self.lin_side_break[i - 1],
+            4..=6 => self.log_side_slope[i - 4],
+            7..=9 => self.log_side_offset[i - 7],
+            10..=12 => self.lin_side_slope[i - 10],
+            13..=15 => self.lin_side_offset[i - 13],
+            _ => self.linear_slope.expect("a linear slope")[i - 16],
+        }
+    }
+    fn set(&mut self, i: usize, v: f64) {
+        match i {
+            0 => self.base = v,
+            1..=3 => self.lin_side_break[i - 1] = v,
+            4..=6 => self.log_side_slope[i - 4] = v,
+            7..=9 => self.log_side_offset[i - 7] = v,
+            10..=12 => self.lin_side_slope[i - 10] = v,
+            13..=15 => self.lin_side_offset[i - 13] = v,
+            _ => self.linear_slope.as_mut().expect("a linear slope")[i - 16] = v,
+        }
+    }
+}
+
 impl Camera {
-    fn spec(&self, dir: TransformDirection) -> Value {
-        json!({
+    fn spec(&self, dir: Direction) -> Spec {
+        if !all_finite(self) {
+            return Spec::Yaml(self.yaml(dir));
+        }
+        Spec::Transform(json!({
             "class": "LogCameraTransform",
             "args": {
                 "linSideBreak": self.lin_side_break,
@@ -232,13 +418,13 @@ impl Camera {
                 "linSideSlope": self.lin_side_slope,
                 "linSideOffset": self.lin_side_offset,
                 "linearSlope": self.linear_slope.map_or(json!([]), |s| json!(s)),
-                "direction": direction_enum(dir),
+                "direction": dir.oracle_enum(),
             },
-        })
+        }))
     }
 
-    /// The transform in the config's YAML syntax, which can hold NaN parameters.
-    fn yaml(&self, dir: TransformDirection) -> String {
+    /// The transform in the config's YAML syntax, which can hold NaN and infinite parameters.
+    fn yaml(&self, dir: Direction) -> String {
         let linear_slope = self.linear_slope.map_or(String::new(), |s| {
             format!("linear_slope: {}, ", yaml_list(&s))
         });
@@ -252,7 +438,7 @@ impl Camera {
             yaml_list(&self.log_side_offset),
             yaml_list(&self.lin_side_slope),
             yaml_list(&self.lin_side_offset),
-            yaml_direction(dir)
+            dir.yaml()
         )
     }
 
@@ -262,7 +448,7 @@ impl Camera {
     /// the direction (src/bindings/python/transforms/PyLogCameraTransform.cpp:37-63); and
     /// `BuildLogOp` clones the data (src/OpenColorIO/ops/log/LogOp.cpp:201-210).
     fn op(&self, dir: TransformDirection) -> LogOpData {
-        let mut data = LogOpData::new(2.0, Forward);
+        let mut data = LogOpData::new(2.0, TransformDirection::Forward);
         data.set_value(LogAffineParameter::LinSideBreak, &self.lin_side_break)
             .unwrap();
         data.set_base(self.base);
@@ -282,29 +468,58 @@ impl Camera {
         data
     }
 
-    /// The break points on both sides and their neighbours, to add to the probe.
+    /// The break points on both sides, per channel: the battery probes their neighbourhoods.
     fn break_points(&self) -> Vec<f32> {
-        let data = black_box(self.op(Forward));
+        let data = black_box(self.op(TransformDirection::Forward));
         let base = self.base as f32;
         let params = [data.red_params(), data.green_params(), data.blue_params()];
         let mut v = Vec::new();
         for (lin_side_break, p) in self.lin_side_break.iter().zip(params) {
-            let lin = *lin_side_break as f32;
-            let log = get_log_side_break(p, f64::from(base));
-            for x in [lin, log] {
-                for d in -3i32..=3 {
-                    v.push(f32::from_bits(x.to_bits().wrapping_add_signed(d)));
-                }
-            }
+            v.push(*lin_side_break as f32);
+            v.push(get_log_side_break(p, f64::from(base)));
         }
         v
     }
 }
 
-fn camera_cases() -> Vec<Camera> {
+/// LogCameraTransform.
+struct CameraFamily {
+    cases: Vec<Case<Camera>>,
+    bases: Vec<Case<Camera>>,
+}
+
+impl Family for CameraFamily {
+    type Params = Camera;
+
+    fn name(&self) -> String {
+        "LogCameraTransform".to_string()
+    }
+    fn cases(&self) -> Vec<Case<Camera>> {
+        self.cases.clone()
+    }
+    fn mutation_bases(&self) -> Vec<Case<Camera>> {
+        self.bases.clone()
+    }
+    fn spec(&self, p: &Camera, direction: Direction) -> Spec {
+        p.spec(direction)
+    }
+    fn port(&self, p: &Camera, combo: &Combo) -> Result<Port, String> {
+        log_port(p.op(port_direction(combo.direction)), combo)
+    }
+    fn pass_through(&self, _: &Camera, _: &Combo) -> Channels {
+        A
+    }
+    fn breakpoints(&self, p: &Camera, _: Direction) -> Vec<f32> {
+        p.break_points()
+    }
+    fn validation(&self) -> Validation {
+        Validation::NotPorted { card: "WP 1.3l1" }
+    }
+}
+
+fn camera_cases() -> Vec<Case<Camera>> {
     // ARRI LogC3 (EI 800) as a LogCameraTransform.
     let logc3 = Camera {
-        name: "LogC3 EI800",
         base: 10.0,
         lin_side_break: [0.010591; 3],
         log_side_slope: [0.247190; 3],
@@ -314,7 +529,6 @@ fn camera_cases() -> Vec<Camera> {
         linear_slope: Some([5.367655; 3]),
     };
     let rgb = Camera {
-        name: "per channel",
         base: 2.0,
         lin_side_break: [0.1, 0.05, 0.2],
         log_side_slope: [0.2, 0.25, 0.18],
@@ -326,7 +540,6 @@ fn camera_cases() -> Vec<Camera> {
     // Base 10, where GetLogSideBreak's float (Windows) and double (Linux) computations give
     // different breaks on every channel (camera_cases_distinguish_the_log_side_break_variants).
     let rgb10 = Camera {
-        name: "per channel, base 10",
         base: 10.0,
         lin_side_break: [0.010591; 3],
         log_side_slope: [0.24719; 3],
@@ -336,34 +549,42 @@ fn camera_cases() -> Vec<Camera> {
         linear_slope: Some([5.367655, 1.1, 0.9]),
     };
     vec![
-        Camera {
-            name: "LogC3 EI800, computed linear slope",
-            linear_slope: None,
-            ..logc3
-        },
-        logc3,
-        Camera {
-            name: "per channel, computed linear slope",
-            linear_slope: None,
-            ..rgb
-        },
-        rgb,
-        Camera {
-            name: "per channel, base 10, computed linear slope",
-            linear_slope: None,
-            ..rgb10
-        },
-        rgb10,
-        Camera {
-            name: "base e",
-            base: std::f64::consts::E,
-            lin_side_break: [0.18, 0.02, 0.3],
-            log_side_slope: [0.3, 0.3, 0.3],
-            log_side_offset: [0.5, 0.45, 0.55],
-            lin_side_slope: [3.0, 2.5, 4.0],
-            lin_side_offset: [0.01, 0.03, 0.005],
-            linear_slope: None,
-        },
+        Case::new(
+            "LogC3 EI800, computed linear slope",
+            Camera {
+                linear_slope: None,
+                ..logc3.clone()
+            },
+        ),
+        Case::new("LogC3 EI800", logc3),
+        Case::new(
+            "per channel, computed linear slope",
+            Camera {
+                linear_slope: None,
+                ..rgb.clone()
+            },
+        ),
+        Case::new("per channel", rgb),
+        Case::new(
+            "per channel, base 10, computed linear slope",
+            Camera {
+                linear_slope: None,
+                ..rgb10.clone()
+            },
+        ),
+        Case::new("per channel, base 10", rgb10),
+        Case::new(
+            "base e",
+            Camera {
+                base: std::f64::consts::E,
+                lin_side_break: [0.18, 0.02, 0.3],
+                log_side_slope: [0.3, 0.3, 0.3],
+                log_side_offset: [0.5, 0.45, 0.55],
+                lin_side_slope: [3.0, 2.5, 4.0],
+                lin_side_offset: [0.01, 0.03, 0.005],
+                linear_slope: None,
+            },
+        ),
         negative_break(),
     ]
 }
@@ -371,17 +592,19 @@ fn camera_cases() -> Vec<Camera> {
 /// A negative break: log2 of a negative number. The break on the log side is NaN, with the
 /// sign each platform's log2 gives (see log_utils::log2_glibc_2_2_5), and so is the offset of
 /// the linear segment.
-fn negative_break() -> Camera {
-    Camera {
-        name: "negative break",
-        base: 2.0,
-        lin_side_break: [-0.05, -0.1, -0.2],
-        log_side_slope: [1.0; 3],
-        log_side_offset: [0.0; 3],
-        lin_side_slope: [1.0; 3],
-        lin_side_offset: [0.0; 3],
-        linear_slope: None,
-    }
+fn negative_break() -> Case<Camera> {
+    Case::new(
+        "negative break",
+        Camera {
+            base: 2.0,
+            lin_side_break: [-0.05, -0.1, -0.2],
+            log_side_slope: [1.0; 3],
+            log_side_offset: [0.0; 3],
+            lin_side_slope: [1.0; 3],
+            lin_side_offset: [0.0; 3],
+            linear_slope: None,
+        },
+    )
 }
 
 /// The platform variants of `GetLogSideBreak` differ for some of the camera cases, so the
@@ -390,8 +613,8 @@ fn negative_break() -> Camera {
 fn camera_cases_distinguish_the_log_side_break_variants() {
     let mut differ = Vec::new();
     for case in camera_cases() {
-        let data = black_box(case.op(Forward));
-        let base = f64::from(case.base as f32);
+        let data = black_box(case.params().op(TransformDirection::Forward));
+        let base = f64::from(case.params().base as f32);
         for (c, params) in [data.red_params(), data.green_params(), data.blue_params()]
             .into_iter()
             .enumerate()
@@ -401,7 +624,7 @@ fn camera_cases_distinguish_the_log_side_break_variants() {
             if msvc.to_bits() != libstdcxx.to_bits() {
                 differ.push(format!(
                     "{} channel {c}: {msvc:e} ({:#010x}) vs {libstdcxx:e} ({:#010x})",
-                    case.name,
+                    case.label(),
                     msvc.to_bits(),
                     libstdcxx.to_bits()
                 ));
@@ -412,61 +635,45 @@ fn camera_cases_distinguish_the_log_side_break_variants() {
         differ.iter().any(|d| !d.contains("NaN")),
         "no camera case distinguishes the variants with finite breaks: {differ:?}"
     );
-    println!(
-        "{}",
-        differ.join(
-            "
-"
-        )
-    );
+    println!("{}", differ.join("\n"));
 }
 
 /// NaN pixels meet the NaN offset of the negative break's linear segment, which the SSE
 /// renderers compute for every pixel: x86 returns the first operand's NaN, the pixel's in
 /// `_mm_add_ps(pixel, offset)` and `_mm_mul_ps(pixel, slope)`. Every buffer length from 1 to 24
 /// pixels, so that each part of the port's loops (in a release build, a vectorized body and a
-/// scalar remainder) meets the NaNs.
+/// scalar remainder) meets the NaNs. (Every battery run probes these buffers for every case;
+/// this test runs them alone for the case that needs them.)
 #[test]
 fn nan_pixels_meet_nan_offsets_at_every_buffer_length() {
-    let case = negative_break();
-    let nans = [0xffc0_0000u32, 0xffc1_2345, 0x7fc1_2345, 0xff80_0001].map(f32::from_bits);
-    let mut checks = Checks::default();
-    for dir in DIRECTIONS {
-        let data = black_box(case.op(dir));
-        for math in Math::BOTH {
-            let renderer = get_log_renderer(&data, math.fast());
-            for n in 1..=24usize {
-                let input: Vec<f32> = (0..n)
-                    .flat_map(|i| [nans[i % 4], nans[(i + 1) % 4], nans[(i + 2) % 4], 0.25])
-                    .collect();
-                let label = format!("LogCameraTransform {} {dir:?}, {n} pixels", case.name);
-                checks.check(&label, &case.spec(dir), math, &input, renderer.as_ref());
-            }
-        }
-    }
-    checks.finish();
+    let plan = Plan {
+        name: "NaN buffers".to_string(),
+        probes: vec![ProbeSet::NanBuffers { max_pixels: 24 }],
+        generated_probes: Vec::new(),
+        breakpoint_ulps: 0,
+        mutations: Mutations::None,
+        sweep: None,
+        ..ocio_testkit::battery::Tier::Quick.plan()
+    };
+    let family = CameraFamily {
+        cases: vec![negative_break()],
+        bases: Vec::new(),
+    };
+    battery::run_with(&family, &plan);
 }
 
 #[test]
 fn log_camera_transform_matches_the_wheel() {
-    let mut checks = Checks::default();
-    for case in camera_cases() {
-        let input = probe_rgba_with(&case.break_points());
-        for dir in DIRECTIONS {
-            let data = black_box(case.op(dir));
-            for math in Math::BOTH {
-                let renderer = get_log_renderer(&data, math.fast());
-                let label = format!("LogCameraTransform {} {dir:?}", case.name);
-                checks.check(&label, &case.spec(dir), math, &input, renderer.as_ref());
-            }
-        }
-    }
-    checks.finish();
+    let mut cases = camera_cases();
+    let bases = vec![cases[3].clone()];
+    // An explicit case on the YAML spec the generated NaN and ±Inf cases take.
+    cases.push(camera_nan_case());
+    battery::run(&CameraFamily { cases, bases });
 }
 
 /// LogAffineTransforms whose finite parameters overflow `float` (|value| >= FLT_MAX, or a base
 /// below the smallest subnormal), so that coefficients are infinite or NaN (`inf / inf`).
-fn extreme_affine_cases() -> [Affine; 3] {
+fn extreme_affine_cases() -> Vec<Case<Affine>> {
     [
         Affine {
             base: 1e39,
@@ -490,29 +697,37 @@ fn extreme_affine_cases() -> [Affine; 3] {
             lin_side_offset: [-1e39, 1e39, 0.03],
         },
     ]
+    .into_iter()
+    .enumerate()
+    .map(|(i, a)| Case::new(format!("extreme {i}"), a))
+    .collect()
 }
 
 /// LogCameraTransforms whose finite parameters overflow `float` or `double`, so that the
 /// break, the linear slope and the linear offset are infinite or NaN, with different NaN
 /// signs: the default NaN of `inf / inf` is negative, a negated one positive, and on Linux
 /// glibc's `log2` of a negative number positive.
-fn extreme_camera_cases() -> Vec<Camera> {
-    let camera = |name,
+fn extreme_camera_cases() -> Vec<Case<Camera>> {
+    let camera = |name: &str,
                   base,
                   lin_side_break,
                   log_side_slope,
                   log_side_offset,
                   lin_side_slope,
                   lin_side_offset,
-                  linear_slope| Camera {
-        name,
-        base,
-        lin_side_break,
-        log_side_slope,
-        log_side_offset,
-        lin_side_slope,
-        lin_side_offset,
-        linear_slope,
+                  linear_slope| {
+        Case::new(
+            name,
+            Camera {
+                base,
+                lin_side_break,
+                log_side_slope,
+                log_side_offset,
+                lin_side_slope,
+                lin_side_offset,
+                linear_slope,
+            },
+        )
     };
     vec![
         camera(
@@ -594,40 +809,31 @@ fn extreme_camera_cases() -> Vec<Camera> {
 }
 
 /// Finite parameters that overflow, against the wheel, bit for bit (W0002 covers NaN
-/// parameters only). Their NaN coefficients reach the sites where the wheels' machine code
-/// does not use upstream's source order: the camera log-to-lin linear segment (both wheels)
-/// and `GetLogSideBreak` (Linux).
+/// parameters only). Their NaN coefficients reach the sites where the wheels' machine
+/// code does not use upstream's source order: the camera log-to-lin linear segment (both
+/// wheels) and `GetLogSideBreak` (Linux).
 #[test]
 fn extreme_finite_parameters_match_the_wheel() {
-    let mut checks = Checks::default();
-    for (i, case) in extreme_affine_cases().iter().enumerate() {
-        for dir in DIRECTIONS {
-            let data = black_box(case.op(dir));
-            for math in Math::BOTH {
-                let renderer = get_log_renderer(&data, math.fast());
-                let label = format!("extreme LogAffineTransform {i} {dir:?}");
-                checks.check(
-                    &label,
-                    &case.spec(dir),
-                    math,
-                    probe_rgba(),
-                    renderer.as_ref(),
-                );
-            }
-        }
-    }
-    for case in extreme_camera_cases() {
-        let input = probe_rgba_with(&case.break_points());
-        for dir in DIRECTIONS {
-            let data = black_box(case.op(dir));
-            for math in Math::BOTH {
-                let renderer = get_log_renderer(&data, math.fast());
-                let label = format!("extreme LogCameraTransform {} {dir:?}", case.name);
-                checks.check(&label, &case.spec(dir), math, &input, renderer.as_ref());
-            }
-        }
-    }
-    checks.finish();
+    let cases = extreme_affine_cases();
+    assert!(
+        cases
+            .iter()
+            .all(|c| c.kind() == battery::params::Kind::ExtremeFinite)
+    );
+    battery::run(&AffineFamily {
+        cases,
+        bases: Vec::new(),
+    });
+    let cases = extreme_camera_cases();
+    assert!(
+        cases
+            .iter()
+            .all(|c| c.kind() == battery::params::Kind::ExtremeFinite)
+    );
+    battery::run(&CameraFamily {
+        cases,
+        bases: Vec::new(),
+    });
 }
 
 /// NaN parameters, which OCIO 2.5.2 accepts (YAML `.nan`), against the wheel.
@@ -640,84 +846,106 @@ fn extreme_finite_parameters_match_the_wheel() {
 /// port keeps the source order there. For that case (the first LogAffineTransform, inverse,
 /// fast math off), waiver W0002 applies: in the channels with a NaN parameter, a NaN from the
 /// wheel only has to be NaN in the port, and every other value is still compared bit for bit.
+/// (The battery's generated NaN cases take W0002 in every combination.)
 #[test]
 fn nan_parameters_match_the_wheel_under_waiver_w0002() {
-    let nan = f64::NAN;
-    let affine = [
-        Affine {
-            base: 10.0,
-            log_side_slope: [nan, 0.5, 1.0],
-            log_side_offset: [0.1, nan, 0.2],
-            lin_side_slope: [1.0, 1.0, nan],
-            lin_side_offset: [nan, 0.01, 0.1],
-        },
-        Affine {
-            base: nan,
-            log_side_slope: [0.3, 0.5, 1.0],
-            log_side_offset: [0.1, 0.2, 0.3],
-            lin_side_slope: [1.0; 3],
-            lin_side_offset: [0.0; 3],
-        },
-    ];
-    let camera = Camera {
-        name: "NaN parameters",
-        base: 2.0,
-        lin_side_break: [0.1, nan, 0.2],
-        log_side_slope: [0.25, 0.3, nan],
-        log_side_offset: [0.5, nan, 0.6],
-        lin_side_slope: [1.0; 3],
-        lin_side_offset: [nan, 0.02, 0.01],
-        linear_slope: Some([1.2, 1.0, nan]),
-    };
-    // (label, YAML, op data, whether W0002 applies with fast math off)
-    let mut cases: Vec<(String, String, LogOpData, bool)> = Vec::new();
-    for dir in DIRECTIONS {
-        for (i, a) in affine.iter().enumerate() {
-            let w0002 = i == 0 && dir == Inverse;
-            let label = format!("LogAffineTransform {i} {dir:?}");
-            cases.push((label, a.yaml(dir), a.op(dir), w0002));
-        }
-        let label = format!("LogCameraTransform {dir:?}");
-        cases.push((label, camera.yaml(dir), camera.op(dir), false));
-    }
+    battery::run(&AffineFamily {
+        cases: affine_nan_cases().to_vec(),
+        bases: Vec::new(),
+    });
+    battery::run(&CameraFamily {
+        cases: vec![camera_nan_case()],
+        bases: Vec::new(),
+    });
+}
 
-    let input = probe_rgba();
-    for (label, yaml, data, w0002) in cases {
-        // The channels with a NaN parameter or a NaN base; the op passes alpha through.
-        let params = [data.red_params(), data.green_params(), data.blue_params()];
-        let nan_channel = |c: usize| data.base().is_nan() || params[c].iter().any(|p| p.is_nan());
-        let waived_channels = [nan_channel(0), nan_channel(1), nan_channel(2), false];
-        for math in Math::BOTH {
-            let expected = oracle_apply_yaml(&yaml, math, input);
-            let mut actual = input.to_vec();
-            get_log_renderer(&black_box(data.clone()), math.fast()).apply(&mut actual);
-            let label = format!("{label} ({math:?}), {yaml}");
-            if w0002 && math == Math::Exact {
-                let waived = assert_pixels_bits_eq_except_nan_bits(
-                    &label,
-                    "W0002",
-                    &waived_channels,
-                    input,
-                    &expected,
-                    &actual,
-                );
-                println!("{label}: {waived} NaN values differ in their bits only (W0002)");
-            } else {
-                assert_pixels_bits_eq(&label, input, 4, &expected, &actual);
-            }
-        }
-    }
+/// The LogAffineTransforms with NaN parameters (YAML `.nan`): the first compares under W0002
+/// only where MSVC swapped operands (inverse, fast math off; see
+/// `nan_parameters_match_the_wheel_under_waiver_w0002`), the second bit for bit everywhere.
+fn affine_nan_cases() -> [Case<Affine>; 2] {
+    let nan = f64::NAN;
+    let inverse_exact = |c: &Combo| c.direction == Direction::Inverse && !c.fast_math;
+    [
+        Case::new(
+            "NaN parameters",
+            Affine {
+                base: 10.0,
+                log_side_slope: [nan, 0.5, 1.0],
+                log_side_offset: [0.1, nan, 0.2],
+                lin_side_slope: [1.0, 1.0, nan],
+                lin_side_offset: [nan, 0.01, 0.1],
+            },
+        )
+        .w0002_only_where(inverse_exact),
+        Case::new(
+            "NaN base",
+            Affine {
+                base: nan,
+                log_side_slope: [0.3, 0.5, 1.0],
+                log_side_offset: [0.1, 0.2, 0.3],
+                lin_side_slope: [1.0; 3],
+                lin_side_offset: [0.0; 3],
+            },
+        )
+        .w0002_nowhere(),
+    ]
+}
+
+/// The LogCameraTransform with NaN parameters, bit for bit everywhere.
+fn camera_nan_case() -> Case<Camera> {
+    let nan = f64::NAN;
+    Case::new(
+        "NaN parameters",
+        Camera {
+            base: 2.0,
+            lin_side_break: [0.1, nan, 0.2],
+            log_side_slope: [0.25, 0.3, nan],
+            log_side_offset: [0.5, nan, 0.6],
+            lin_side_slope: [1.0; 3],
+            lin_side_offset: [nan, 0.02, 0.01],
+            linear_slope: Some([1.2, 1.0, nan]),
+        },
+    )
+    .w0002_nowhere()
+}
+
+/// The S2 oracle tests' probe values: all halves, the specials, and 1,000,000 seeded random
+/// values in several ranges, as RGBA pixels with each value in each channel.
+fn s2_probe_rgba() -> Vec<f32> {
+    let mut values = probe::all_half_values();
+    values.extend(probe::specials());
+    values.extend(probe::random(
+        0x5252_0001,
+        &[
+            (RandomRange::Unit, 200_000),
+            (RandomRange::Overshoot, 200_000),
+            (RandomRange::Exponent, 100_000),
+            (RandomRange::Hdr, 100_000),
+        ],
+    ));
+    values.extend(probe::random(
+        0x5252_0002,
+        &[
+            (RandomRange::Finite, 200_000),
+            (RandomRange::Tiny, 100_000),
+            (RandomRange::AllBits, 100_000),
+        ],
+    ));
+    probe::to_rgba_cycled(&values)
 }
 
 /// The scalar integer casts (`Converter<BD>::CastValue`), against the wheel: a LogTransform's
 /// processor at F32 in and an integer bit depth out ends with `BitDepthCast<F32, BD>`, which
 /// converts `value * maxValue` (src/OpenColorIO/CPUProcessor.cpp:20-48 @ v2.5.2). The Log op
 /// passes alpha through, so alpha shows the cast alone, and RGB shows it after the log.
+///
+/// Not a battery run yet: the battery's integer formats need the port's CPU engine (WP 1.2d).
+/// Its four oracle calls go in one batch.
 #[test]
 fn integer_output_casts_match_the_wheel() {
-    let input = probe_rgba();
-    let data = black_box(log_transform_op(2.0, Forward));
-    let mut log_out = input.to_vec();
+    let input = s2_probe_rgba();
+    let data = black_box(log_transform_op(2.0, TransformDirection::Forward));
+    let mut log_out = input.clone();
     get_log_renderer(&data, true).apply(&mut log_out);
 
     // (bit depth, maxValue from BitDepthUtils.h:34-60, cast)
@@ -728,11 +956,22 @@ fn integer_output_casts_match_the_wheel() {
         ("BIT_DEPTH_UINT12", 4095, cast_value_uint12),
         ("BIT_DEPTH_UINT16", 65535, cast_value_uint16),
     ];
-    let mut checks = Checks::default();
-    for (depth, max_value, cast) in depths {
-        let spec = json!({"class": "LogTransform", "args": {"base": 2.0}});
-        let args = json!({"transform": spec, "out_bitdepth": depth});
-        let resp = Oracle::get().call("cpu_apply", args, &[&f32_to_bytes(input)]);
+    let input_bytes = f32_to_bytes(&input);
+    let calls: Vec<BatchCall<'_>> = depths
+        .iter()
+        .map(|(depth, _, _)| BatchCall {
+            cmd: "cpu_apply",
+            args: json!({
+                "transform": {"class": "LogTransform", "args": {"base": 2.0}},
+                "out_bitdepth": depth,
+            }),
+            blobs: vec![&input_bytes],
+        })
+        .collect();
+    let responses = Oracle::get().batch(&calls, true);
+    let mut failures = Vec::new();
+    for ((depth, max_value, cast), resp) in depths.into_iter().zip(responses) {
+        let resp = resp.unwrap_or_else(|e| panic!("{depth}: {e}"));
         assert!(resp.result.get("exception").is_none(), "{}", resp.result);
         let expected: Vec<u16> = if max_value == 255 {
             resp.blobs[0].iter().map(|&b| u16::from(b)).collect()
@@ -763,15 +1002,14 @@ fn integer_output_casts_match_the_wheel() {
                 )
             })
             .collect();
-        let failure = (expected.len() != actual.len() || !mismatches.is_empty()).then(|| {
-            format!(
+        if expected.len() != actual.len() || !mismatches.is_empty() {
+            failures.push(format!(
                 "{depth}: {} of {} values differ\n{}",
                 expected.iter().zip(&actual).filter(|(e, a)| e != a).count(),
                 expected.len(),
                 mismatches.join("\n")
-            )
-        });
-        checks.record(failure);
+            ));
+        }
     }
-    checks.finish();
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

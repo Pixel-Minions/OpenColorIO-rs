@@ -17,6 +17,7 @@ import os
 import pkgutil
 import platform
 import sys
+import traceback
 
 import numpy as np
 import PyOpenColorIO as OCIO
@@ -79,23 +80,38 @@ def info(args, blobs):
 def batch(args, blobs):
     """Runs several commands in one process.
 
+    A call that raises doesn't stop the others: its entry reports the error instead.
+
     args: {"calls": [{"cmd": str, "args": object, "blobs": [index into request blobs]}]}
-    result: [{"result": any, "blobs": [index into response blobs]}]
+    result: per call, in order, {"result": any, "blobs": [index into response blobs]}, or
+            {"error": the traceback, "call": its index, "blobs": []}
     """
     results, out = [], []
-    for call in args["calls"]:
-        result, call_blobs = COMMANDS[call["cmd"]](call.get("args") or {}, [blobs[i] for i in call.get("blobs", [])])
+    for index, call in enumerate(args["calls"]):
+        try:
+            result, call_blobs = COMMANDS[call["cmd"]](
+                call.get("args") or {}, [blobs[i] for i in call.get("blobs", [])]
+            )
+        except Exception:  # noqa: BLE001 - reported per call, so the other calls still run
+            results.append({"error": traceback.format_exc(), "call": index, "blobs": []})
+            continue
         results.append({"result": result, "blobs": list(range(len(out), len(out) + len(call_blobs)))})
         out.extend(call_blobs)
     return results, out
 
 
-def _processor(args):
+def _processor(args, stage):
+    """The config and processor of a cpu_apply call. `stage[0]` names the step in progress."""
+    stage[0] = "config"
     config = spec.config(args.get("config"))
+    stage[0] = "transform"
     direction = getattr(OCIO, args.get("direction", "TRANSFORM_DIR_FORWARD"))
     if "transform" in args:
-        return config, config.getProcessor(spec.transform(args["transform"]), direction)
+        transform = spec.transform(args["transform"])
+        stage[0] = "processor"
+        return config, config.getProcessor(transform, direction)
     if "src" in args:
+        stage[0] = "processor"
         return config, config.getProcessor(args["src"], args["dst"])
     raise ValueError("cpu_apply needs a transform or src/dst color spaces")
 
@@ -112,12 +128,17 @@ def cpu_apply(args, blobs):
       in_bitdepth, out_bitdepth   BIT_DEPTH_* names (default F32)
       channels      3 or 4 (default 4)
     blobs: [input pixels, little-endian, in in_bitdepth's storage type]
-    result: {"processor_cache_id", "cpu_cache_id", "log"} or {"exception", "log"}
+    result: {"processor_cache_id", "cpu_cache_id", "log"} or {"exception", "stage", "log"}
+      stage  where OCIO raised: "config" (loading the config), "transform" (building the
+             transform: the Python bindings' constructors validate it), "processor"
+             (getProcessor, which validates the ops), "cpu_processor" or "apply"
     blobs: [output pixels in out_bitdepth's storage type]
     """
+    stage = ["config"]
     with captured_log() as log:
         try:
-            _, proc = _processor(args)
+            _, proc = _processor(args, stage)
+            stage[0] = "cpu_processor"
             in_bd = args.get("in_bitdepth", "BIT_DEPTH_F32")
             out_bd = args.get("out_bitdepth", "BIT_DEPTH_F32")
             if "optimization" in args or in_bd != "BIT_DEPTH_F32" or out_bd != "BIT_DEPTH_F32":
@@ -126,6 +147,7 @@ def cpu_apply(args, blobs):
                 )
             else:
                 cpu = proc.getDefaultCPUProcessor()
+            stage[0] = "apply"
             channels = int(args.get("channels", 4))
             src = np.frombuffer(blobs[0], dtype=DTYPES[in_bd]).copy()
             npix = src.size // channels
@@ -138,7 +160,7 @@ def cpu_apply(args, blobs):
             result = {"processor_cache_id": proc.getCacheID(), "cpu_cache_id": cpu.getCacheID()}
             out = [dst.tobytes()]
         except OCIO.Exception as exc:
-            result, out = {"exception": exception_result(exc)}, []
+            result, out = {"exception": exception_result(exc), "stage": stage[0]}, []
     result["log"] = log
     return result, out
 

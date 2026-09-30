@@ -15,6 +15,7 @@ truth: read §3 (definition of done), §7 (how agents work) and your card before
    - Upstream tests are copied verbatim, with a citation. This includes the own tests of a library the wheel is built with, at the version it uses (yaml-cpp 0.8.0, Imath 3.2.1).
    - The platform C runtime is the reference for C and C++ runtime behavior (`ocio-testkit` `crt.rs`), and the CPU for instruction semantics.
    - Never use the port's own output as an expected value. Never type a number into a test that didn't come from one of those places.
+   - A test may pin a digest of the inputs it generates itself (probe values, parameter cases, plans), so they can't change unnoticed. Expected *outputs* still come only from the oracle, upstream's tests or the platform.
 3. **Comparisons are exact.**
    - Floats compare bitwise (`assert_f32_bits_eq`, `assert_pixels_bits_eq`); text compares byte for byte (`assert_text_eq`).
    - The only tolerances allowed are upstream's own, in ported upstream tests, through `ocio_testkit::upstream` helpers.
@@ -103,6 +104,20 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
   - Tests whose results depend on the CPU (SIMD kernels, CPUInfo, libm calls) belong to a test target in the `cpu-tests` alias (`.cargo/config.toml`). Add new targets of that kind there.
   - CI runs `cargo cpu-tests --release` on `nhm` (SSE2 kernels), `snb` (AVX), `hsw` (AVX2 with slow gather), `skl` (AVX2) and `skx` (AVX-512), on both platforms.
   - A chunk that adds or changes a SIMD kernel runs it locally too, on the CPUs whose kernel it touches: `scripts/sde.sh snb cargo cpu-tests --release`, and `scripts/rocky9.sh scripts/sde.sh snb cargo cpu-tests --release`.
+
+## Oracle tests: use `ocio_testkit::battery`
+
+- **Every op family's renderers are checked through the battery.** Implement `battery::Family` (parameter cases, the oracle's `Spec`, the port's `Port`) and call `battery::run` in a test. The how-to is at the top of `crates/ocio-testkit/src/battery.rs`; `crates/ocio-ops/tests/log_oracle.rs` is a complete example.
+- **What it runs.** Every case in both directions, with fast math on and off, on the probe sets of the tier that `OCIO_RS_TIER` names:
+  - `quick` (default, per chunk): sampled, seconds per family;
+  - `full` (per land): all halves, the specials, 1.2 million random values, every generated case;
+  - `exhaustive` (nightly): more random values, and every `f32` bit pattern.
+
+  It sends its oracle calls in batches, a handful of processes per test. Hand-written oracle checks outside the battery batch their calls too (`Oracle::batch`).
+- **Generated cases.** Give the battery a typical case per code path (`mutation_bases`), and it generates extreme finite, NaN and ±Inf parameters. Until the op data's `validate` is ported, declare `Validation::NotPorted`: generated cases the wheel refuses are then left out and listed. For each spec route the generated cases take (JSON transform or YAML), include an explicit case on that route that the wheel accepts; the battery fails otherwise.
+- **Warnings.** An OCIO warning in the wheel's log fails the case (a misspelled optional key is ignored with a warning), unless the case allows it (`Case::allow_log`) with a fragment of that message's own text, such as `"Unknown key in LogTransform: 'bse'"`. `allow_log` panics on a fragment with fewer than 10 characters past the `[OpenColorIO <level>]: ` prefix, such as an empty one or the prefix alone.
+- **W0002 only through the battery.** It applies automatically to the channels of NaN parameters (the scope the owner approved), and a case may narrow it but not widen it. Infinite and extreme finite parameters compare bit for bit. Nothing else may use the W0002 comparison; a test enforces this.
+- **Pass-through channels.** Declare the channels your renderers never write (`pass_through`), and hand the battery the renderers of numeric profiles this machine doesn't dispatch (`other_profiles`). Their pass-through channels are then compared with the wheel on every profile; other profiles without pass-through channels are an error.
 
 ## Layout and conventions
 

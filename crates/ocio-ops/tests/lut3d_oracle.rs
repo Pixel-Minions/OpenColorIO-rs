@@ -91,6 +91,11 @@ fn wheel_one_pixel_calls(spec: &Value, pixels: &[f32]) -> Vec<f32> {
     let resp = Oracle::get().call("batch", json!({"calls": calls}), &refs);
     let mut out = Vec::with_capacity(pixels.len());
     for call in resp.result.as_array().expect("batch results") {
+        assert!(
+            call.get("error").is_none(),
+            "{}",
+            call["error"].as_str().unwrap_or_default()
+        );
         assert!(call["result"].get("exception").is_none(), "{call}");
         let blob = call["blobs"][0].as_u64().expect("an output blob") as usize;
         out.extend(bytes_to_f32(&resp.blobs[blob]));
@@ -729,6 +734,11 @@ fn partial_blocks() {
                 .zip(&blobs)
                 .zip(counts)
             {
+                assert!(
+                    call.get("error").is_none(),
+                    "{}",
+                    call["error"].as_str().unwrap_or_default()
+                );
                 assert!(call["result"].get("exception").is_none(), "{call}");
                 let blob = call["blobs"][0].as_u64().expect("an output blob") as usize;
                 let expected = bytes_to_f32(&resp.blobs[blob]);

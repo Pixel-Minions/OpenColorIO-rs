@@ -144,6 +144,26 @@ pub fn assert_pixels_bits_eq_except_nan_bits(
     actual: &[f32],
 ) -> usize {
     assert!(!waived_channels.is_empty(), "{label}: no channels");
+    match pixels_report_except_nan_bits(waiver, waived_channels, inputs, expected, actual) {
+        Ok(waived) => waived,
+        Err(report) => panic!("{label} {report}"),
+    }
+}
+
+/// The comparison of [`assert_pixels_bits_eq_except_nan_bits`], without the panic: how many
+/// values matched only as NaN, or a report that starts with
+/// `(NaN bits waived by <waiver> in channels [...]):`.
+///
+/// Only the battery calls it (`battery::params::Case::compare`), for the channels of NaN
+/// parameters (waiver W0002).
+pub(crate) fn pixels_report_except_nan_bits(
+    waiver: &str,
+    waived_channels: &[bool],
+    inputs: &[f32],
+    expected: &[f32],
+    actual: &[f32],
+) -> Result<usize, String> {
+    assert!(!waived_channels.is_empty(), "no channels");
     let channels = waived_channels.len();
     let mut compared = actual.to_vec();
     let mut waived = 0;
@@ -153,10 +173,12 @@ pub fn assert_pixels_bits_eq_except_nan_bits(
             waived += 1;
         }
     }
-    if let Some(report) = f32_bits_report(expected, &compared, Some(inputs), channels) {
-        panic!("{label} (NaN bits waived by {waiver} in channels {waived_channels:?}): {report}");
+    match f32_bits_report(expected, &compared, Some(inputs), channels) {
+        None => Ok(waived),
+        Some(report) => Err(format!(
+            "(NaN bits waived by {waiver} in channels {waived_channels:?}): {report}"
+        )),
     }
-    waived
 }
 
 /// Asserts that two byte strings are identical.
