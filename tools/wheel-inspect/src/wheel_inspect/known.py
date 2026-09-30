@@ -4,7 +4,7 @@
 
 The DLL has no symbols, so these were identified by hand; each entry says how. The addresses
 hold only for the DLL whose SHA-256 is `WINDOWS_SHA256` (the one `oracle/uv.lock` pins); the
-tool ignores this table for any other file.
+tool ignores this table for any other file. `wheel-inspect selftest` checks every entry.
 
 To add one: identify the function (usually from the Linux build's symbol, the imports it
 calls and its arithmetic), give its start address, and say how

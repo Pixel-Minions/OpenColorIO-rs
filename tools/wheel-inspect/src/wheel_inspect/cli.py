@@ -358,6 +358,12 @@ def cmd_scan(args) -> int:
     return 0
 
 
+def cmd_selftest(args) -> int:
+    from . import selftest
+
+    return selftest.run(image, selected(args))
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="wheel-inspect",
@@ -404,6 +410,8 @@ def main(argv=None) -> int:
     )
     p.add_argument("--list", action="store_true", help="print each instruction")
     platform_flags(p)
+    p = sub.add_parser("selftest", help="reproduce the spikes' findings from the wheels")
+    platform_flags(p)
 
     args = parser.parse_args(argv)
     commands = {
@@ -412,6 +420,7 @@ def main(argv=None) -> int:
         "disasm": cmd_disasm,
         "imports": cmd_imports,
         "scan": cmd_scan,
+        "selftest": cmd_selftest,
     }
     try:
         return commands[args.cmd](args)
