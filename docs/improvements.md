@@ -33,8 +33,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   row and then raises. Linux processes all of them (2^32 pixels of 65,536 × 65,536 in 17 s).
 - **Who notices:** applications that process single images of over 2 gigapixels on Windows.
 - **A fix:** 64-bit sizes on every platform, so those images work on Windows too.
-- **Status:** to be matched in `p1-bitdepth` (1.1d): the message and every buffer byte,
-  including the partly written output. The owner chose to match it on 2026-09-30.
+- **Status:** matched in `p1-bitdepth` (1.1d): the message and every buffer byte, including the
+  partly written output, checked against the Windows wheel
+  (`crates/ocio-ops/tests/image_packing_oracle.rs`). The owner chose to match it on 2026-09-30.
 
 ### I-2. "Invalid x stride." is checked on Windows only
 
@@ -274,4 +275,16 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
     rows or more overflows it.
 - **Decided** (general rule): the port gives the wheel's messages where the wheel raises, and an
   error where it would overrun.
-- **Status:** to be matched in `p1-bitdepth` (1.1e).
+- **Status:** matched in `p1-bitdepth` (1.1e), in `crates/ocio-ops/src/scanline_helper.rs`:
+  - where upstream's resize gets a negative size, `init` raises the C++ library's
+    `std::length_error`: "vector too long" on Windows, "vector::_M_default_append" on Linux
+    (where a C `long` wraps from a width of 2^61);
+  - where upstream's RGBA row is empty and the source is packed channel by channel, the first
+    row raises "Invalid output image buffer" (with a period for F32 sources);
+  - where upstream would write outside its rows, the first row returns "ScanlineHelper Error:
+    The image is too wide: 4 * width overflows the scanline buffers.";
+  - after row 2^31 - 1 (Linux only: a Windows `long` can't count more rows), a source packed
+    channel by channel raises "Invalid output image position.", as upstream's does, and an
+    RGBA-packed one returns "ScanlineHelper Error: The image is too tall: the scanline index
+    overflows.".
+  The oracle refuses these sizes, so `scanline_helper_tests.rs` defines the behaviour.

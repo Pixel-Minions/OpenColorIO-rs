@@ -161,6 +161,7 @@ dependencies = [
  "ocio-testkit",
  "serde_json",
  "xxhash-rust",
+ "zerocopy",
 ]
 
 [[package]]

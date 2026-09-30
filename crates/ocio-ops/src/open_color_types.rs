@@ -5,7 +5,7 @@
 //! their helpers from `src/OpenColorIO/ParseUtils.cpp`.
 //!
 //! They live in `ocio-ops` because op data uses them; the public `ocio` crate re-exports them.
-//! So far: `TransformDirection` and `NegativeStyle`.
+//! So far: `TransformDirection`, `NegativeStyle`, `BitDepth` and `ChannelOrdering`.
 
 /// Port of `TransformDirection` (include/OpenColorIO/OpenColorTypes.h:355-359 @ v2.5.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -59,6 +59,70 @@ pub enum NegativeStyle {
     PassThru,
     /// `NEGATIVE_LINEAR`: linearly extrapolate the curve for negative values.
     Linear,
+}
+
+/// The bit depth of a color space, or of the images a CPU processor reads and writes. The
+/// processor supports only `Uint8`, `Uint10`, `Uint12`, `Uint16`, `F16` and `F32`; the other
+/// enumerators exist for upstream's API and are rejected where a supported one is needed.
+///
+/// The discriminants are upstream's enumerator values.
+///
+/// Port of `BitDepth` (include/OpenColorIO/OpenColorTypes.h:422-439 @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BitDepth {
+    /// `BIT_DEPTH_UNKNOWN`.
+    Unknown = 0,
+    /// `BIT_DEPTH_UINT8`.
+    Uint8,
+    /// `BIT_DEPTH_UINT10`.
+    Uint10,
+    /// `BIT_DEPTH_UINT12`.
+    Uint12,
+    /// `BIT_DEPTH_UINT14`.
+    Uint14,
+    /// `BIT_DEPTH_UINT16`.
+    Uint16,
+    /// `BIT_DEPTH_UINT32`: here for historical reasons, but not supported.
+    Uint32,
+    /// `BIT_DEPTH_F16`.
+    F16,
+    /// `BIT_DEPTH_F32`.
+    F32,
+}
+
+/// The order of the channels in the pixels of a packed image.
+///
+/// Port of `ChannelOrdering` (include/OpenColorIO/OpenColorTypes.h:450-457 @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ChannelOrdering {
+    /// `CHANNEL_ORDERING_RGBA`.
+    Rgba = 0,
+    /// `CHANNEL_ORDERING_BGRA`.
+    Bgra,
+    /// `CHANNEL_ORDERING_ABGR`.
+    Abgr,
+    /// `CHANNEL_ORDERING_RGB`.
+    Rgb,
+    /// `CHANNEL_ORDERING_BGR`.
+    Bgr,
+}
+
+/// The bit depth's name in configs and error messages: `8ui`, `10ui`, `12ui`, `14ui`, `16ui`,
+/// `32ui`, `16f`, `32f`, or `unknown`.
+///
+/// Port of `BitDepthToString` (src/OpenColorIO/ParseUtils.cpp:171-182 @ v2.5.2).
+pub fn bit_depth_to_string(bit_depth: BitDepth) -> &'static str {
+    match bit_depth {
+        BitDepth::Uint8 => "8ui",
+        BitDepth::Uint10 => "10ui",
+        BitDepth::Uint12 => "12ui",
+        BitDepth::Uint14 => "14ui",
+        BitDepth::Uint16 => "16ui",
+        BitDepth::Uint32 => "32ui",
+        BitDepth::F16 => "16f",
+        BitDepth::F32 => "32f",
+        BitDepth::Unknown => "unknown",
+    }
 }
 
 #[cfg(test)]

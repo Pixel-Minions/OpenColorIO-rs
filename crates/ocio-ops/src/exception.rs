@@ -2,7 +2,8 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Errors: a port of `OCIO::Exception` and `OCIO::ExceptionMissingFile`
-//! (`src/OpenColorIO/Exception.cpp`, `include/OpenColorIO/OpenColorIO.h` @ v2.5.2).
+//! (`src/OpenColorIO/Exception.cpp`, `include/OpenColorIO/OpenColorIO.h` @ v2.5.2), and of the
+//! C++ standard exceptions that reach OCIO's callers (`std::length_error`).
 //!
 //! Messages are part of the byte-exact surface (PLAN.md §3): every error carries upstream's
 //! text verbatim, and `Display` prints exactly that text.
@@ -16,6 +17,10 @@ pub enum ExceptionKind {
     Exception,
     /// `OCIO::ExceptionMissingFile`, a subclass of `OCIO::Exception`.
     MissingFile,
+    /// `std::length_error`, which a C++ standard container raises for a size past its limit
+    /// (`std::vector::resize`, improvement candidate U-3). PyOpenColorIO raises it as
+    /// `ValueError`.
+    LengthError,
 }
 
 /// An OpenColorIO error: upstream's exception type and its message, verbatim.
@@ -38,6 +43,14 @@ impl Exception {
     pub fn missing_file(message: impl Into<String>) -> Self {
         Exception {
             kind: ExceptionKind::MissingFile,
+            message: message.into(),
+        }
+    }
+
+    /// A `std::length_error` with `what()` = `msg`.
+    pub fn length_error(message: impl Into<String>) -> Self {
+        Exception {
+            kind: ExceptionKind::LengthError,
             message: message.into(),
         }
     }
