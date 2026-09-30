@@ -56,16 +56,16 @@ pub fn get_linear_slope(params: &Params, base: f64) -> f32 {
 }
 
 /// The break on the log side: the log curve at `LIN_SIDE_BREAK`, as each platform's wheel
-/// computes it ([`get_log_side_break_msvc`] on Windows, [`get_log_side_break_libstdcxx`]
-/// elsewhere).
+/// computes it ([`get_log_side_break_msvc`] on Windows, [`get_log_side_break_libstdcxx`] on
+/// Linux; the crate does not build for other targets).
 ///
 /// Port of `LogUtil::GetLogSideBreak` (src/OpenColorIO/ops/log/LogUtils.cpp:270-281 @ v2.5.2).
 pub fn get_log_side_break(params: &Params, base: f64) -> f32 {
-    #[cfg(windows)]
+    #[cfg(target_os = "windows")]
     {
         get_log_side_break_msvc(params, base)
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
     {
         get_log_side_break_libstdcxx(params, base)
     }

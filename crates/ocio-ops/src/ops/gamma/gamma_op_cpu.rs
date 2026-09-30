@@ -93,21 +93,22 @@ enum SignOp {
     /// `copysign(1.0f, in) * value`.
     Multiply,
     /// `value` with its sign bit XOR-ed with `in`'s. (Only the Linux tables use it.)
-    #[cfg_attr(windows, allow(dead_code))]
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     XorSign,
 }
 
-/// `GammaBasicMirrorOpCPU::apply`, per channel (R, G, B, A), on this platform's wheel.
-#[cfg(windows)]
+/// `GammaBasicMirrorOpCPU::apply`, per channel (R, G, B, A), on this platform's wheel. (The
+/// crate does not build for targets other than Windows and Linux.)
+#[cfg(target_os = "windows")]
 const BASIC_MIRROR_SIGN: [SignOp; 4] = [SignOp::Multiply; 4];
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
 const BASIC_MIRROR_SIGN: [SignOp; 4] = [SignOp::XorSign; 4];
 
 /// `GammaMoncurveMirrorOpCPUFwd::apply` and `GammaMoncurveMirrorOpCPURev::apply`, per channel
 /// (R, G, B, A), on this platform's wheel.
-#[cfg(windows)]
+#[cfg(target_os = "windows")]
 const MONCURVE_MIRROR_SIGN: [SignOp; 4] = [SignOp::Multiply; 4];
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
 const MONCURVE_MIRROR_SIGN: [SignOp; 4] = [
     SignOp::XorSign,
     SignOp::XorSign,
