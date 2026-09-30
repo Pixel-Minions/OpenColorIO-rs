@@ -6,10 +6,12 @@ Each group writes files under ``<out_dir>/<group>/`` and returns their paths rel
 ``<out_dir>``. Only platform-independent text goes here (PLAN.md §8); pixel checks run live.
 """
 
+import json
 import os
 
 import PyOpenColorIO as OCIO
 
+from . import text
 from .commands import captured_log
 
 GROUPS = {}
@@ -47,6 +49,20 @@ def builtin_configs(out_dir):
             written.append(_write(out_dir, f"{base}/serialize.ocio", config.serialize()))
             written.append(_write(out_dir, f"{base}/cache_id.txt", config.getCacheID()))
         written.append(_write(out_dir, f"{base}/log.txt", "".join(m if m.endswith("\n") else m + "\n" for m in log)))
+    return written
+
+
+@group
+def yaml_emitter(out_dir):
+    """S1 edge cases for the YAML emitter: for each case of text.emitter_cases(), its spec
+    (spec.json, the inputs, see text.serialize_built_config) and serialize() of the config built
+    from it (serialize.ocio)."""
+    written = []
+    for name, spec in text.emitter_cases().items():
+        base = f"yaml_emitter/{name}"
+        spec_json = json.dumps(spec, ensure_ascii=True, indent=1, sort_keys=True) + "\n"
+        written.append(_write(out_dir, f"{base}/spec.json", spec_json))
+        written.append(_write(out_dir, f"{base}/serialize.ocio", text.build_config(spec).serialize()))
     return written
 
 
