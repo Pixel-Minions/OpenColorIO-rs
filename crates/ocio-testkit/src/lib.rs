@@ -8,6 +8,8 @@
 //!   because OCIO's kernel choice and math library belong to the machine.
 //! - [`gpu`]: typed requests and replies of the oracle's `gpu_shader` command, a GPU
 //!   processor's shader with its uniforms and textures.
+//! - [`processor_ops`]: typed requests and replies of the oracle's `processor_ops` command,
+//!   what the optimizer makes of a processor, each transform with all its getters.
 //! - [`fixtures`]: committed, oracle-generated text fixtures, verified against
 //!   `fixtures/MANIFEST.toml` on every read.
 //! - [`compare`]: exact comparators. There is no tolerance anywhere in this crate except in
@@ -35,6 +37,7 @@ pub mod image;
 pub mod oracle;
 pub mod paths;
 pub mod probe;
+pub mod processor_ops;
 pub mod upstream;
 
 pub use compare::{assert_bytes_eq, assert_f32_bits_eq, assert_text_eq};
