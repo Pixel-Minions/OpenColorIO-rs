@@ -49,9 +49,8 @@ fn lut3d_renderer_nan_test(interpol: Interpolation, cpu: &CpuInfo) {
                                   inf,  inf,  inf,  inf,
                                  -inf, -inf, -inf, -inf ];
 
-    // renderer->apply(pixels, pixels, 4): the kernels read each pixel before writing it.
-    let input = pixels;
-    renderer.apply(&input, &mut pixels);
+    // renderer->apply(pixels, pixels, 4)
+    renderer.apply(&mut pixels);
 
     check_close(pixels[0], values[0], 1e-7f32);
     check_close(pixels[1], values[1], 1e-7f32);

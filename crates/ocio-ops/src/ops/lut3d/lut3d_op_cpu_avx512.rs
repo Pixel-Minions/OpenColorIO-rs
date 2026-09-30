@@ -138,15 +138,10 @@ fn interp_tetrahedral_avx512(ctx: &Lut3DContextAvx512<'_>, r: f32, g: f32, b: f3
 }
 
 /// Port of `applyTetrahedralAVX512` and `applyTetrahedralAVX512Func<F32, F32>`
-/// (src/OpenColorIO/ops/lut3d/Lut3DOpCPU_AVX512.cpp:176-255 @ v2.5.2). `lut3d` holds 4 floats
-/// per entry; alpha passes through unchanged.
-pub(crate) fn apply_tetrahedral_avx512(
-    lut3d: &[f32],
-    dim: i32,
-    src: &[f32],
-    dst: &mut [f32],
-    num_pixels: i32,
-) {
+/// (src/OpenColorIO/ops/lut3d/Lut3DOpCPU_AVX512.cpp:176-255 @ v2.5.2), in place. `lut3d` holds
+/// 4 floats per entry. Alpha is never written, so it keeps every bit (see "Alpha" in
+/// [`super::lut3d_op_cpu`]).
+pub(crate) fn apply_tetrahedral_avx512(lut3d: &[f32], dim: i32, rgba: &mut [f32], num_pixels: i32) {
     let lutmax = dim as f32 - 1.0;
     let scale = lutmax;
     let zero = 0.0f32;
@@ -159,22 +154,15 @@ pub(crate) fn apply_tetrahedral_avx512(
     };
 
     let pixels = num_pixels as usize;
-    for (inp, out) in src
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .zip(dst.as_chunks_mut::<4>().0.iter_mut())
-        .take(pixels)
-    {
+    for px in rgba.as_chunks_mut::<4>().0.iter_mut().take(pixels) {
         // scale and clamp values
         let [r, g, b] =
-            [inp[0], inp[1], inp[2]].map(|v| sse_min(sse_max(v * scale, zero), ctx.lutmax));
+            [px[0], px[1], px[2]].map(|v| sse_min(sse_max(v * scale, zero), ctx.lutmax));
 
         let c = interp_tetrahedral_avx512(&ctx, r, g, b);
 
-        out[0] = c[0];
-        out[1] = c[1];
-        out[2] = c[2];
-        out[3] = inp[3];
+        px[0] = c[0];
+        px[1] = c[1];
+        px[2] = c[2];
     }
 }
