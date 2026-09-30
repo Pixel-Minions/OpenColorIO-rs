@@ -87,7 +87,9 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
 - Pixel checks always run live, because the kernel choice and the math library belong to the machine. Never commit pixel data.
 - Text that is identical on every platform is committed with `cargo xtask oracle regen <group>` (groups live in `oracle/ocio_oracle/regen.py`). Tests read it with `ocio_testkit::fixtures::read_text`.
 - **New oracle commands.**
-  - Add them in your own module under `oracle/ocio_oracle/`, registered in `commands.py`.
+  - Add them in your own module under `oracle/ocio_oracle/`, each decorated with `@command` (from `.commands`).
+  - `commands.py` imports every module of the package, in sorted order, so adding a command never edits a shared file.
+  - Command names are unique across modules: a duplicate stops the oracle with an error.
   - A command reports what the library does and never computes expected values.
   - The owner reviews every oracle change.
 - **Both reference platforms:**
