@@ -5,8 +5,8 @@
 //! their helpers from `src/OpenColorIO/ParseUtils.cpp`.
 //!
 //! They live in `ocio-ops` because op data uses them; the public `ocio` crate re-exports them.
-//! So far: `LoggingLevel`, `TransformDirection`, `NegativeStyle`, `DynamicPropertyType`, `BitDepth`
-//! and `ChannelOrdering`.
+//! So far: `LoggingLevel`, `TransformDirection`, `NegativeStyle`, `DynamicPropertyType`, `BitDepth`,
+//! `ChannelOrdering` and `Allocation`.
 
 use crate::utils::string_utils::lower_c_str;
 
@@ -198,6 +198,31 @@ pub fn bit_depth_to_string(bit_depth: BitDepth) -> &'static str {
         BitDepth::F16 => "16f",
         BitDepth::F32 => "32f",
         BitDepth::Unknown => "unknown",
+    }
+}
+
+/// How a color space's values are spread over the range the GPU's legacy 3D LUT samples:
+/// uniformly, or on a log2 scale.
+///
+/// Port of `Allocation` (include/OpenColorIO/OpenColorTypes.h:459-463 @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Allocation {
+    /// `ALLOCATION_UNKNOWN`.
+    Unknown = 0,
+    /// `ALLOCATION_UNIFORM`.
+    Uniform,
+    /// `ALLOCATION_LG2`.
+    Lg2,
+}
+
+/// The allocation's name in configs: `uniform`, `lg2` or `unknown`.
+///
+/// Port of `AllocationToString` (src/OpenColorIO/ParseUtils.cpp:218-223 @ v2.5.2).
+pub fn allocation_to_string(allocation: Allocation) -> &'static str {
+    match allocation {
+        Allocation::Uniform => "uniform",
+        Allocation::Lg2 => "lg2",
+        Allocation::Unknown => "unknown",
     }
 }
 

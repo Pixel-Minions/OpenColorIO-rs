@@ -6,4 +6,7 @@
 
 pub mod no_ops;
 
-pub use no_ops::{FileNoOpData, NoOpData, NoOpKind, create_file_no_op, create_look_no_op};
+pub use no_ops::{
+    FileNoOpData, NoOpData, NoOpKind, create_file_no_op, create_gpu_allocation_no_op,
+    create_look_no_op,
+};

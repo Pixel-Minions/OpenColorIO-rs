@@ -301,3 +301,18 @@ fn ops_can_be_shared_between_threads() {
     send_sync::<Op>();
     send_sync::<OpVec>();
 }
+
+#[test]
+fn reference_data_makes_no_op() {
+    let data: OpDataRcPtr = Arc::new(OpData::Reference(
+        crate::ops::reference::ReferenceOpData::new(),
+    ));
+    let no_op = looks(1)[0].data().clone();
+    let mut result = OpVec::new();
+    for dir in [TransformDirection::Forward, TransformDirection::Inverse] {
+        let reference_error = create_op_vec_from_op_data(&mut result, &data, dir).unwrap_err();
+        let no_op_error = create_op_vec_from_op_data(&mut result, &no_op, dir).unwrap_err();
+        assert_ne!(reference_error, no_op_error);
+    }
+    assert!(result.is_empty());
+}
