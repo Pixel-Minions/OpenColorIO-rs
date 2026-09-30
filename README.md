@@ -142,7 +142,9 @@ The full plan is in [`PLAN.md`](PLAN.md).
 You need:
 - Rust 1.98.1 (pinned in `rust-toolchain.toml`);
 - [uv](https://docs.astral.sh/uv/), for the oracle's Python environment;
-- Docker, for the Linux reference container.
+- Docker, for the Linux reference container;
+- [cargo-deny](https://github.com/EmbarkStudios/cargo-deny) 0.20.2, for `cargo xtask gate --main`
+  and `cargo xtask land` (`cargo install cargo-deny --version 0.20.2 --locked`).
 
 ```sh
 git clone --recurse-submodules https://github.com/Pixel-Minions/OpenColorIO-rs

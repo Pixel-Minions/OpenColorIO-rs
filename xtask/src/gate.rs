@@ -35,8 +35,8 @@ Runs, in order, stopping at the first failure:
   --full         tests run the full tier (OCIO_RS_TIER=full), as `xtask land` does
   --main         check what `main` requires: the ci step also checks that
                  docs/ratchet.toml and docs/parity.md are current, and cargo-deny runs (it
-                 must be installed: `cargo install cargo-deny --locked`); `xtask land` uses it
-                 on the merge commit
+                 must be installed: `cargo install cargo-deny --version 0.20.2 --locked`);
+                 `xtask land` uses it on the merge commit
   --auto         for `xtask land`: add --release, and keep --rocky, only when the HEAD commit
                  touches platform-sensitive files (Rust sources, the oracle, fixtures, scripts)
 
@@ -152,7 +152,7 @@ pub(crate) fn run(mut opts: Options) -> Result<(), String> {
         if !found {
             return Err(
                 "cargo-deny is not installed, and `--main` runs it (it is CI's cargo-deny \
-                 check): `cargo install cargo-deny --locked`"
+                 check): `cargo install cargo-deny --version 0.20.2 --locked`"
                     .into(),
             );
         }

@@ -27,6 +27,7 @@ if [ "$EVENT" = pull_request ]; then
 elif [ "$REF" = refs/heads/main ]; then
     flags="--main"
     if [ -n "${BEFORE:-}" ] && [ "$BEFORE" != 0000000000000000000000000000000000000000 ]; then
+        # Only a force push could leave `before` unreachable, and main's protection blocks those.
         fetch "$BEFORE"
         flags="--main --base $BEFORE"
     fi
