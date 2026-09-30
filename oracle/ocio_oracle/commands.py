@@ -160,3 +160,7 @@ def config_serialize(args, blobs):
             result, out = {"exception": exception_result(exc)}, []
     result["log"] = log
     return result, out
+
+
+# Command modules of the spikes register themselves on import; keep these last.
+from . import numerics_lut  # noqa: E402, F401

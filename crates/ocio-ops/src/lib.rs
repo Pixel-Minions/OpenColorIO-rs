@@ -41,13 +41,19 @@ compile_error!(
      been verified"
 );
 
+pub mod avx;
+pub mod avx2;
+pub mod avx512;
+pub mod cpu_info;
 pub mod exception;
 pub mod hash_utils;
+pub mod imath_half;
 pub mod math_utils;
 pub mod op;
 pub mod open_color_types;
 pub mod ops;
 pub mod platform;
 pub mod sse;
+pub mod sse2;
 
 pub use exception::{Exception, ExceptionKind, Result};
