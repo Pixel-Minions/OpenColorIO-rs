@@ -141,8 +141,8 @@ fn is_scalar_equal_to_zero_is_the_wheels_zero_slope_test() {
 }
 
 /// `IsVecEqualToOne<double>` is the wheel's no-op test for a version 1 config's
-/// ExponentTransform: the ExponentOp is removed exactly for the exponents that round to a float
-/// within 2 ULPs of 1.
+/// ExponentTransform: the ExponentOp is removed exactly when each of its four exponents rounds
+/// to a float within 2 ULPs of 1. Each channel in turn holds the probes, the others 1.
 #[test]
 fn is_vec_equal_to_one_is_the_wheels_exponent_no_op_test() {
     // Above 1 the floats step by 2^-23, below it by 2^-24.
@@ -150,39 +150,49 @@ fn is_vec_equal_to_one_is_the_wheels_exponent_no_op_test() {
     let mut values = probes_around(1.0, above, 4);
     values.extend(probes_around(1.0, -above / 2.0, 4));
     values.extend([0.0, 2.0, 1e-300, 1e300]);
+    let exponents: Vec<(usize, [f64; 4])> = (0..4)
+        .flat_map(|channel| {
+            values.iter().map(move |&v| {
+                let mut exponent = [1.0; 4];
+                exponent[channel] = v;
+                (channel, exponent)
+            })
+        })
+        .collect();
 
-    let args = values
+    let args = exponents
         .iter()
-        .map(|&v| {
+        .map(|(_, exponent)| {
+            let list: Vec<String> = exponent.iter().map(|&v| yaml_number(v)).collect();
             let yaml = format!(
                 "ocio_profile_version: 1\nroles:\n  default: raw\ncolorspaces:\n  - !<ColorSpace>\n    \
                  name: raw\n  - !<ColorSpace>\n    name: cs\n    from_reference: \
-                 !<ExponentTransform> {{value: [{}, 1, 1, 1]}}\n",
-                yaml_number(v)
+                 !<ExponentTransform> {{value: [{}]}}\n",
+                list.join(", ")
             );
             json!({"config": {"yaml": yaml}, "src": "raw", "dst": "cs"})
         })
         .collect();
     let results = run(args);
-    let mut no_ops = 0;
-    for (&v, result) in values.iter().zip(&results) {
-        assert!(result.get("exception").is_none(), "{v:e}: {result}");
+    let mut no_ops = [0; 4];
+    for ((channel, exponent), result) in exponents.iter().zip(&results) {
+        let label = format!("channel {channel} {:e}", exponent[*channel]);
+        assert!(result.get("exception").is_none(), "{label}: {result}");
         let kept = result["cpu_cache_id"]
             .as_str()
             .expect("a cache ID")
             .contains("<ExponentOp");
-        assert_eq!(
-            is_vec_equal_to_one(&[v, 1.0, 1.0, 1.0]),
-            !kept,
-            "{v:e}: {result}"
-        );
-        no_ops += usize::from(!kept);
+        assert_eq!(is_vec_equal_to_one(exponent), !kept, "{label}: {result}");
+        no_ops[*channel] += usize::from(!kept);
     }
-    assert!(
-        no_ops > 0 && no_ops < values.len(),
-        "{no_ops} of {}",
-        values.len()
-    );
+    // Both answers occur in every channel.
+    for (channel, &count) in no_ops.iter().enumerate() {
+        assert!(
+            count > 0 && count < values.len(),
+            "channel {channel}: {count} of {}",
+            values.len()
+        );
+    }
 }
 
 /// `IsM44Identity<double>` and `IsVecEqualToZero<double>` are the wheel's tests for leaving a
