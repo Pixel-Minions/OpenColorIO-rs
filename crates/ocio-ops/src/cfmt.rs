@@ -188,7 +188,8 @@ fn exact_decimal(value: f64) -> Exact {
 
 /// The exact decimal expansion of `m * 2^e` (`m != 0`): the significant digits (values
 /// 0-9, no leading or trailing zeros) and `exp10` such that the value is
-/// `0.d[0] d[1] ... * 10^exp10`.
+/// `0.d[0] d[1] ... * 10^exp10`. Also used by `utils::number_utils` to decide whether a
+/// parsed decimal is exact.
 pub(crate) fn exact_digits(m: u64, e: i32) -> (Vec<u8>, i32) {
     let (mut m, mut e) = (m, e);
     debug_assert!(m != 0, "exact_digits of zero");
