@@ -201,8 +201,9 @@ rows can run in parallel.
 
 | Card | Chunks | Who | Needs |
 |---|---|---|---|
-| `p1-oracle` | O1.1–O1.4, each its own chunk; the owner reviews them, labelled `oracle` | B | — |
-| `p1-bitdepth` | 1.1a–1.1e | A | O1.2 |
+| `p1-oracle-image` | O1.2, its own chunk; the owner reviews it, labelled `oracle` | B | — |
+| `p1-oracle` | O1.1, O1.3, O1.4, each its own chunk; the owner reviews them, labelled `oracle` | B | — |
+| `p1-bitdepth` | 1.1a–1.1e | A | `p1-oracle-image` |
 | `p1-math` | 1.4a–1.4c | B | — |
 | `p1-dispatch` | 1.5a–1.5c | B | — |
 | `p1-engine` | 1.2a–1.2e, with 1.3n1 and 1.3m1–m2 so 1.2d has ops to run | A | `p1-bitdepth`, `p1-math` |
