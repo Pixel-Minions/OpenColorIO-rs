@@ -38,8 +38,9 @@ pub fn is_space(c: u8) -> bool {
     c <= b' '
 }
 
-/// The part of `s` a C++ `const char *` sees: up to the first NUL.
-fn c_str(s: &[u8]) -> &[u8] {
+/// The part of `s` a C++ `const char *` sees: up to the first NUL (all of `s` if it has none).
+/// This is what `std::string::c_str()` gives a function that takes a `const char *`.
+pub fn c_str(s: &[u8]) -> &[u8] {
     s.split(|&c| c == 0).next().unwrap_or(&[])
 }
 

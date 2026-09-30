@@ -66,14 +66,17 @@ pub fn is_env_present(name: &str) -> bool {
 }
 
 /// Port of `Platform::Strcasecmp` (Platform.cpp @ v2.5.2): `_stricmp` / `strcasecmp` in the
-/// "C" locale, i.e. bytes compared as unsigned after ASCII lowercasing.
-pub fn strcasecmp(a: &str, b: &str) -> Ordering {
-    let lower = |s: &str| {
-        s.bytes()
+/// "C" locale, i.e. bytes compared as unsigned after ASCII lowercasing. The C functions take
+/// `const char *`, so each side ends at its first NUL. (Upstream throws for a null pointer;
+/// a slice is never null.)
+pub fn strcasecmp(a: impl AsRef<[u8]>, b: impl AsRef<[u8]>) -> Ordering {
+    let lower = |s: &[u8]| {
+        crate::utils::string_utils::c_str(s)
+            .iter()
             .map(|c| c.to_ascii_lowercase())
             .collect::<Vec<u8>>()
     };
-    lower(a).cmp(&lower(b))
+    lower(a.as_ref()).cmp(&lower(b.as_ref()))
 }
 
 /// Port of `Platform::Strncasecmp` (Platform.cpp @ v2.5.2).
