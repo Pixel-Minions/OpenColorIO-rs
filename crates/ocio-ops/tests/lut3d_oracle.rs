@@ -5,9 +5,9 @@
 //!
 //! The wheel builds each LUT with `Lut3DTransform.setValue` calls through the `cpu_apply`
 //! command and applies it to one row of RGBA F32 pixels, so its renderers see every pixel in
-//! one call (`numPixels > 1`): trilinear LUTs run the SSE2 code path. The port runs the same
-//! rows through the renderer [`get_forward_lut3d_renderer`] builds for this machine.
-//! Tetrahedral LUTs run a SIMD kernel in such calls; those checks come with the kernels.
+//! one call (`numPixels > 1`): tetrahedral LUTs run the SIMD kernel `CPUInfo` picks, trilinear
+//! LUTs the SSE2 code path. The port runs the same rows through the renderer
+//! [`get_forward_lut3d_renderer`] builds for this machine.
 //!
 //! - Sizes 2, 3, 5, 6, 17, 32, 33, 64, 65 and 129; seeded random, identity and extreme LUTs
 //!   (finite values: `cpu_apply` sends LUT values as JSON numbers, which have no NaN or
@@ -20,6 +20,7 @@
 //!   wheel's own scanline loop, on images one pixel wide (the `lut3d_apply` command).
 //! - The `nan_inf_*` tests use LUTs that hold NaNs and infinities, which only `lut3d_apply`
 //!   can send (as raw float32); OCIO sanitizes them when it builds the renderer.
+//! - [`partial_blocks`] checks pixel counts that leave a partial SIMD block.
 
 use ocio_ops::cpu_info::CpuInfo;
 use ocio_ops::ops::lut3d::lut3d_op_cpu::{ForwardLut3DRenderer, get_forward_lut3d_renderer};
@@ -248,7 +249,7 @@ fn probe_pixels(seed: u64) -> Vec<f32> {
     pixels
 }
 
-/// Every LUT kind for `grid_size`, against the wheel, trilinear.
+/// Every LUT kind for `grid_size`, against the wheel, for both interpolations.
 fn check_size(grid_size: u32) {
     let pixels = probe_pixels(0x4c55_5433 + u64::from(grid_size));
     let luts = [
@@ -260,17 +261,18 @@ fn check_size(grid_size: u32) {
         ),
     ];
     for (kind, values) in &luts {
-        let interp = Interpolation::Linear;
-        let expected = wheel(&lut_spec(grid_size, values, interp), &pixels);
-        let r = renderer(grid_size, values, interp, CpuInfo::instance());
-        let actual = port(&r, &pixels);
-        assert_pixels_bits_eq(
-            &format!("{kind} {grid_size}^3 LUT, {interp:?}"),
-            &pixels,
-            4,
-            &expected,
-            &actual,
-        );
+        for interp in [Interpolation::Tetrahedral, Interpolation::Linear] {
+            let expected = wheel(&lut_spec(grid_size, values, interp), &pixels);
+            let r = renderer(grid_size, values, interp, CpuInfo::instance());
+            let actual = port(&r, &pixels);
+            assert_pixels_bits_eq(
+                &format!("{kind} {grid_size}^3 LUT, {interp:?}"),
+                &pixels,
+                4,
+                &expected,
+                &actual,
+            );
+        }
     }
 }
 
@@ -503,8 +505,8 @@ fn nan_inf_lut(grid_size: u32, seed: u64) -> Vec<f32> {
         .collect()
 }
 
-/// A LUT with NaNs and infinities: one pixel per call for both interpolations, and all pixels
-/// in one call for trilinear.
+/// A LUT with NaNs and infinities, all pixels in one call and one pixel per call, for both
+/// interpolations.
 fn check_nan_inf(grid_size: u32) {
     let values = nan_inf_lut(grid_size, 0x4e41_4e49 + u64::from(grid_size));
     let pixels = [
@@ -514,15 +516,13 @@ fn check_nan_inf(grid_size: u32) {
     .concat();
     for interp in [Interpolation::Tetrahedral, Interpolation::Linear] {
         let r = renderer(grid_size, &values, interp, CpuInfo::instance());
-        if interp == Interpolation::Linear {
-            assert_pixels_bits_eq(
-                &format!("NaN/Inf {grid_size}^3 LUT, {interp:?}, all pixels in one call"),
-                &pixels,
-                4,
-                &wheel_lut3d_apply(&values, interp, &pixels, None),
-                &port(&r, &pixels),
-            );
-        }
+        assert_pixels_bits_eq(
+            &format!("NaN/Inf {grid_size}^3 LUT, {interp:?}, all pixels in one call"),
+            &pixels,
+            4,
+            &wheel_lut3d_apply(&values, interp, &pixels, None),
+            &port(&r, &pixels),
+        );
         let actual: Vec<f32> = pixels.chunks(4).flat_map(|px| port(&r, px)).collect();
         assert_pixels_bits_eq(
             &format!("NaN/Inf {grid_size}^3 LUT, {interp:?}, an image one pixel wide"),
@@ -547,4 +547,92 @@ fn nan_inf_size_6() {
 #[test]
 fn nan_inf_size_33() {
     check_nan_inf(33);
+}
+
+/// Calls whose pixel count leaves a partial SIMD block: the AVX-512 kernel's masked last block
+/// (and the zero-padded last block of the SSE2, AVX and AVX2 kernels).
+#[test]
+fn partial_blocks() {
+    let grid_size = 17;
+    for (kind, values) in [
+        ("random", random_lut(grid_size, 0x5041_5254)),
+        ("extreme", extreme_lut(grid_size, 0x5041_5255)),
+    ] {
+        for interp in [Interpolation::Tetrahedral, Interpolation::Linear] {
+            let spec = lut_spec(grid_size, &values, interp);
+            let r = renderer(grid_size, &values, interp, CpuInfo::instance());
+            let counts = [2usize, 3, 5, 7, 15, 17, 31, 33, 47, 63, 65];
+            let blobs: Vec<Vec<f32>> = counts
+                .iter()
+                .map(|&n| one_pixel_probes(n, 0x5041 + n as u64))
+                .collect();
+            let bytes: Vec<Vec<u8>> = blobs.iter().map(|b| f32_to_bytes(b)).collect();
+            let calls: Vec<Value> = (0..bytes.len())
+                .map(|i| json!({"cmd": "cpu_apply", "args": {"transform": spec}, "blobs": [i]}))
+                .collect();
+            let refs: Vec<&[u8]> = bytes.iter().map(Vec::as_slice).collect();
+            let resp = Oracle::get().call("batch", json!({"calls": calls}), &refs);
+            for ((call, pixels), n) in resp
+                .result
+                .as_array()
+                .expect("batch results")
+                .iter()
+                .zip(&blobs)
+                .zip(counts)
+            {
+                assert!(call["result"].get("exception").is_none(), "{call}");
+                let blob = call["blobs"][0].as_u64().expect("an output blob") as usize;
+                let expected = bytes_to_f32(&resp.blobs[blob]);
+                assert_pixels_bits_eq(
+                    &format!("{kind} LUT, {interp:?}, {n} pixels in one call"),
+                    pixels,
+                    4,
+                    &expected,
+                    &port(&r, pixels),
+                );
+            }
+        }
+    }
+}
+
+/// A zero result whose sign depends on the path: on a 2^3 LUT, the input (0.5, 0.25, 0.5) ties
+/// `fx == fz > fy`. The scalar path gives zero weight to n001
+/// (src/OpenColorIO/ops/lut3d/Lut3DOpCPU.cpp:533-552 @ v2.5.2) and the SIMD kernels to n100
+/// (Lut3DOpCPU_SSE2.cpp:140-161), so with these LUT values a single-pixel call gives -0 and a
+/// two-pixel call +0, in the wheel and in the port. Found by the verifier
+/// (`target/verify/zero_tie.py`).
+#[test]
+fn fractional_tie_signed_zero() {
+    let grid_size = 2;
+    let mut values = vec![0.5f32; 2 * 2 * 2 * 3];
+    // Red of v000, v001, v100, v101 and v111 (index 3 * ((r * 2 + g) * 2 + b)).
+    values[0] = -0.0;
+    values[3] = -1.0;
+    values[12] = 1.0;
+    values[15] = -0.0;
+    values[21] = -0.0;
+    let spec = lut_spec(grid_size, &values, Interpolation::Tetrahedral);
+    let r = renderer(
+        grid_size,
+        &values,
+        Interpolation::Tetrahedral,
+        CpuInfo::instance(),
+    );
+
+    let one = [0.5f32, 0.25, 0.5, 1.0];
+    let two = [one, one].concat();
+    assert_pixels_bits_eq(
+        "one pixel per call (scalar path)",
+        &one,
+        4,
+        &wheel(&spec, &one),
+        &port(&r, &one),
+    );
+    assert_pixels_bits_eq(
+        "two pixels in one call (SIMD kernel)",
+        &two,
+        4,
+        &wheel(&spec, &two),
+        &port(&r, &two),
+    );
 }

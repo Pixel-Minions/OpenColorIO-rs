@@ -11,8 +11,12 @@
 //! | Profile | C++ | Runs when |
 //! |---|---|---|
 //! | Generic tetrahedral | `Lut3DTetrahedralRenderer::apply`, scalar branch | no SIMD kernel, or a call with at most one pixel |
+//! | AVX2 tetrahedral | `applyTetrahedralAVX2` (FMA) | `hasAVX2() && !AVX2SlowGather()` |
+//! | AVX-512 tetrahedral | `applyTetrahedralAVX512` (FMA) | `hasAVX512()` |
 //! | SSE2 trilinear | `Lut3DRenderer::apply`, `OCIO_USE_SSE2` branch | builds with SSE2 (every x86-64 wheel) |
 //! | Generic trilinear | `Lut3DRenderer::apply`, `#else` branch | builds without SSE2 |
+//!
+//! The later tetrahedral kernels win: the dispatch overwrites the choice in that order.
 //!
 //! **NaN operand order** (CLAUDE.md). The tetrahedral paths never create a NaN: the inputs are
 //! clamped (NaN becomes 0), the LUT values are sanitized, and the weights are in `[0, 1]`, so a
@@ -21,13 +25,38 @@
 //! neighboring values are huge and of opposite signs, and can then compute `inf * 0` or
 //! `inf - inf`. Every NaN there is the x86 default NaN, so the order cannot change the bits.
 //!
-//! Not ported yet: the tetrahedral SIMD kernels, which OCIO runs for calls with more than one
-//! pixel (until they are, every tetrahedral call runs the scalar branch), and
-//! `InvLut3DRenderer` (the exact inverse).
+//! Not ported yet: the SSE2 and AVX tetrahedral kernels (until they are, a CPU without AVX2
+//! runs the scalar branch for every call), and `InvLut3DRenderer` (the exact inverse).
 
+use super::lut3d_op_cpu_avx2::apply_tetrahedral_avx2;
+use super::lut3d_op_cpu_avx512::apply_tetrahedral_avx512;
 use super::lut3d_op_data::{Interpolation, Lut3DOpData};
 use crate::cpu_info::CpuInfo;
 use crate::math_utils::{clamp, sse_add, sse_cvttps_epi32, sse_max, sse_min, sse_mul};
+
+/// A tetrahedral SIMD kernel: the functions `m_applyLutFunc` can point to
+/// (src/OpenColorIO/ops/lut3d/Lut3DOpCPU.cpp:386-416 @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TetrahedralKernel {
+    /// `applyTetrahedralAVX2`
+    Avx2,
+    /// `applyTetrahedralAVX512`
+    Avx512,
+}
+
+/// The kernel a tetrahedral renderer picks on `cpu`. Port of the
+/// `Lut3DTetrahedralRenderer` constructor (src/OpenColorIO/ops/lut3d/Lut3DOpCPU.cpp:386-416 @ v2.5.2).
+/// The `#if OCIO_USE_*` guards are part of `CpuInfo::has_*`.
+pub fn tetrahedral_kernel(cpu: &CpuInfo) -> Option<TetrahedralKernel> {
+    let mut kernel = None;
+    if cpu.has_avx2() && !cpu.avx2_slow_gather() {
+        kernel = Some(TetrahedralKernel::Avx2);
+    }
+    if cpu.has_avx512() {
+        kernel = Some(TetrahedralKernel::Avx512);
+    }
+    kernel
+}
 
 /// Maps special values into the float domain: -Inf to -FLT_MAX, Inf to FLT_MAX, NaN to 0.
 /// Port of `SanitizeFloat` (src/OpenColorIO/MathUtils.cpp:145-160 @ v2.5.2).
@@ -96,24 +125,52 @@ impl BaseLut3D {
 #[derive(Debug, Clone)]
 pub struct Lut3DTetrahedralRenderer {
     base: BaseLut3D,
+    kernel: Option<TetrahedralKernel>,
 }
 
 impl Lut3DTetrahedralRenderer {
     /// The renderer OCIO builds for `lut` on `cpu`.
     pub fn new(lut: &Lut3DOpData, cpu: &CpuInfo) -> Lut3DTetrahedralRenderer {
+        let kernel = tetrahedral_kernel(cpu);
+        // The kernels read 4 floats per entry; every build with a SIMD kernel has SSE2.
+        assert!(
+            kernel.is_none() || cpu.build().use_sse2,
+            "a SIMD Lut3D kernel needs a build with OCIO_USE_SSE2"
+        );
         Lut3DTetrahedralRenderer {
             base: BaseLut3D::new(lut, cpu.build().use_sse2),
+            kernel,
         }
     }
 
-    /// Applies the LUT to packed RGBA pixels. Port of the scalar branch of
-    /// `Lut3DTetrahedralRenderer::apply` (src/OpenColorIO/ops/lut3d/Lut3DOpCPU.cpp:422-624
-    /// @ v2.5.2). The SIMD kernels, which OCIO runs for calls with more than one pixel, are not
-    /// ported yet.
+    /// The SIMD kernel used for calls with more than one pixel.
+    pub fn kernel(&self) -> Option<TetrahedralKernel> {
+        self.kernel
+    }
+
+    /// Applies the LUT to packed RGBA pixels. Port of `Lut3DTetrahedralRenderer::apply`
+    /// (src/OpenColorIO/ops/lut3d/Lut3DOpCPU.cpp:422-624 @ v2.5.2): the SIMD kernel runs only
+    /// when there is one and the call has more than one pixel.
     pub fn apply(&self, input: &[f32], output: &mut [f32]) {
         assert_eq!(input.len(), output.len());
         assert_eq!(input.len() % 4, 0);
-        self.apply_generic(input, output);
+        let num_pixels = input.len() / 4;
+        let lut = &self.base.opt_lut;
+        let dim = self.base.dim as i32;
+        match self.kernel {
+            Some(kernel) if num_pixels > 1 => {
+                let count = i32::try_from(num_pixels).expect("pixel count fits in an int");
+                match kernel {
+                    TetrahedralKernel::Avx2 => {
+                        apply_tetrahedral_avx2(lut, dim, input, output, count)
+                    }
+                    TetrahedralKernel::Avx512 => {
+                        apply_tetrahedral_avx512(lut, dim, input, output, count)
+                    }
+                }
+            }
+            _ => self.apply_generic(input, output),
+        }
     }
 
     /// The scalar branch of `Lut3DTetrahedralRenderer::apply`

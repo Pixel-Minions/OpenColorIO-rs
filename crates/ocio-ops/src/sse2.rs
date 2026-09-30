@@ -2,10 +2,10 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! The SSE2 helpers of `SSE2.h` (src/OpenColorIO/SSE2.h @ v2.5.2), as exact scalar code for one
-//! SIMD lane: `sse2_clamp`, the software half-float conversions that OCIO's SSE2 kernels use on
-//! x86 (`!OCIO_USE_SSE2NEON`), and the per-value semantics of the RGBA packs. The SSE min/max
-//! and conversion lanes are [`crate::math_utils::sse_min`],
-//! [`sse_max`](crate::math_utils::sse_max) and
+//! SIMD lane: the compare and mask lanes the kernels use, `sse2_clamp`, the software half-float
+//! conversions that OCIO's SSE2 kernels use on x86 (`!OCIO_USE_SSE2NEON`), and the per-value
+//! semantics of the RGBA packs. The SSE min/max and conversion lanes are
+//! [`crate::math_utils::sse_min`], [`sse_max`](crate::math_utils::sse_max) and
 //! [`sse_cvttps_epi32`](crate::math_utils::sse_cvttps_epi32).
 //!
 //! Each `__m128` operation works on its four lanes independently, so one lane reproduces the
@@ -16,6 +16,19 @@
 #![allow(unsafe_code)]
 
 use crate::math_utils::{sse_cvtps_epi32, sse_max, sse_min};
+
+/// One lane of `_mm_cmpgt_ps(a, b)` (and of `_CMP_GT_OQ` compares): all ones when `a > b`,
+/// zero otherwise, including when either value is NaN.
+#[inline]
+pub fn mm_cmpgt_ps(a: f32, b: f32) -> u32 {
+    if a > b { u32::MAX } else { 0 }
+}
+
+/// One lane of `_mm_andnot_ps(a, b)` on mask bits: `!a & b`.
+#[inline]
+pub fn mm_andnot_ps(a: u32, b: u32) -> u32 {
+    !a & b
+}
 
 /// One lane of `sse2_clamp` (src/OpenColorIO/SSE2.h:85-89 @ v2.5.2): NaN becomes 0.
 #[inline]

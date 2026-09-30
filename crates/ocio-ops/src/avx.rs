@@ -14,6 +14,14 @@
 //! `unsafe` is allowed in this module for SIMD intrinsics only.
 #![allow(unsafe_code)]
 
+/// One lane of `_mm256_blendv_ps(a, b, mask)`: `b` where the mask's sign bit is set, `a`
+/// otherwise. Also `blendv_avx` (src/OpenColorIO/ops/lut3d/Lut3DOpCPU_AVX.cpp:61-73 @ v2.5.2),
+/// whose inline-assembly form for GCC 12.0-12.2 is the same `vblendvps` instruction.
+#[inline]
+pub fn avx_blendv_ps(a: f32, b: f32, mask: u32) -> f32 {
+    if mask & 0x8000_0000 != 0 { b } else { a }
+}
+
 /// One lane of `_mm256_cvtps_ph(a, 0)`: float to half bits, rounding to nearest even.
 #[inline]
 pub fn f16c_cvtps_ph(a: f32) -> u16 {
