@@ -105,7 +105,7 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
   It sends its oracle calls in batches, a handful of processes per test. Hand-written oracle checks outside the battery batch their calls too (`Oracle::batch`).
 - **Generated cases.** Give the battery a typical case per code path (`mutation_bases`), and it generates extreme finite, NaN and ±Inf parameters. Until the op data's `validate` is ported, declare `Validation::NotPorted`: generated cases the wheel refuses are then left out and listed.
 - **W0002 only through the battery.** It applies automatically to the channels of NaN parameters (the scope the owner approved), and a case may narrow it but not widen it. Infinite and extreme finite parameters compare bit for bit. Nothing else may use the W0002 comparison; a test enforces this.
-- **Pass-through channels.** Declare the channels your renderers never write (`pass_through`), and hand the battery the renderers of numeric profiles this machine doesn't dispatch (`other_profiles`). Their pass-through channels are then compared with the wheel on every profile.
+- **Pass-through channels.** Declare the channels your renderers never write (`pass_through`), and hand the battery the renderers of numeric profiles this machine doesn't dispatch (`other_profiles`). Their pass-through channels are then compared with the wheel on every profile; other profiles without pass-through channels are an error.
 
 ## Layout and conventions
 

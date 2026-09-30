@@ -504,8 +504,9 @@ pub trait Family {
     /// example the SSE2, AVX and AVX2 Lut3D kernels on an AVX-512 machine), with their names.
     /// Their [`Family::pass_through`] channels are compared with the wheel's output bit for
     /// bit: those channels don't depend on the kernel, so the wheel's dispatched kernel is an
-    /// oracle for them. Their other channels need the CPU emulation of card T5b. None by
-    /// default.
+    /// oracle for them. Their other channels need the CPU emulation of card T5b. Other
+    /// profiles without pass-through channels are an error, since nothing of them would be
+    /// compared. None by default.
     fn other_profiles(&self, params: &Self::Params, combo: &Combo) -> Vec<(String, Port)> {
         let _ = (params, combo);
         Vec::new()
