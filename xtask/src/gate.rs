@@ -1,0 +1,674 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright Contributors to the OpenColorIO Project.
+
+//! `cargo xtask gate`: the check a chunk passes before it is committed (CLAUDE.md "Chunks").
+//!
+//! Every step is a child process whose exit status is checked. Its full output goes to
+//! `target/gate-logs/<UTC time>/<step>.log`; the gate prints one summary line per step and stops
+//! at the first failure, with a non-zero exit code.
+
+use std::fs::File;
+use std::io::{BufRead, BufReader, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitStatus, Stdio};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+pub(crate) const USAGE: &str = "\
+cargo xtask gate [--crates a,b] [--release] [--rocky] [--quick|--full] [--auto]
+
+Runs, in order, stopping at the first failure:
+  fmt            cargo fmt --all --check
+  clippy         cargo clippy --workspace --all-targets -- -D warnings
+  ci             cargo xtask ci
+  test           cargo test --workspace --no-fail-fast (debug)
+  test-release   the same in release, with --release
+  rocky          with --rocky: this gate, same options, in Rocky Linux 9 (scripts/rocky9.sh)
+
+  --crates a,b   run the test steps for these packages only (fmt, clippy and ci always cover
+                 the workspace)
+  --quick        tests run the quick tier (OCIO_RS_TIER=quick): the default, per chunk
+  --full         tests run the full tier (OCIO_RS_TIER=full), as `xtask land` does
+  --auto         for `xtask land`: add --release, and keep --rocky, only when the HEAD commit
+                 touches platform-sensitive files (Rust sources, the oracle, fixtures, scripts)
+
+Logs: target/gate-logs/<UTC time>/<step>.log (the Rocky steps in .../rocky/).
+";
+
+/// What the gate runs.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct Options {
+    /// Packages the test steps are limited to (empty: the whole workspace).
+    pub(crate) crates: Vec<String>,
+    pub(crate) release: bool,
+    pub(crate) rocky: bool,
+    /// The full test tier instead of the quick one.
+    pub(crate) full: bool,
+    /// Decide `release` and `rocky` from the files the HEAD commit touches.
+    pub(crate) auto: bool,
+    /// Write the step logs here instead of a new `target/gate-logs/<time>` (used for the Rocky
+    /// pass, which writes next to the Windows logs). Relative paths are relative to the root.
+    pub(crate) log_dir: Option<PathBuf>,
+}
+
+pub(crate) fn parse(args: &[&str]) -> Result<Options, String> {
+    let mut opts = Options::default();
+    let mut tier = None;
+    let mut it = args.iter();
+    while let Some(&arg) = it.next() {
+        let mut value = |name: &str| -> Result<String, String> {
+            match arg.strip_prefix(name).and_then(|v| v.strip_prefix('=')) {
+                Some(v) => Ok(v.to_string()),
+                None => it
+                    .next()
+                    .map(|v| v.to_string())
+                    .ok_or_else(|| format!("{name} needs a value")),
+            }
+        };
+        match arg {
+            "--release" => opts.release = true,
+            "--rocky" => opts.rocky = true,
+            "--auto" => opts.auto = true,
+            "--quick" | "--full" => {
+                if tier.is_some_and(|t| t != arg) {
+                    return Err("--quick and --full are exclusive".into());
+                }
+                tier = Some(arg);
+                opts.full = arg == "--full";
+            }
+            _ if arg == "--crates" || arg.starts_with("--crates=") => {
+                let list = value("--crates")?;
+                opts.crates.extend(
+                    list.split(',')
+                        .map(str::trim)
+                        .filter(|c| !c.is_empty())
+                        .map(String::from),
+                );
+            }
+            _ if arg == "--log-dir" || arg.starts_with("--log-dir=") => {
+                opts.log_dir = Some(PathBuf::from(value("--log-dir")?));
+            }
+            _ => return Err(format!("unknown gate option `{arg}`\n\n{USAGE}")),
+        }
+    }
+    Ok(opts)
+}
+
+pub(crate) fn run(mut opts: Options) -> Result<(), String> {
+    let root = crate::root();
+    let packages = workspace_packages(&root)?;
+    for name in &opts.crates {
+        if !packages.contains(name) {
+            return Err(format!(
+                "--crates: `{name}` is not a workspace package ({})",
+                packages.join(", ")
+            ));
+        }
+    }
+    let nested = opts.log_dir.is_some();
+    if opts.auto {
+        resolve_auto(&root, &mut opts)?;
+    }
+    let log_dir = match &opts.log_dir {
+        Some(dir) if dir.is_absolute() => dir.clone(),
+        Some(dir) => root.join(dir),
+        None => new_log_dir(&root.join("target").join("gate-logs"))?,
+    };
+    std::fs::create_dir_all(&log_dir).map_err(|e| format!("{}: {e}", log_dir.display()))?;
+    if !nested {
+        println!("gate: logs in {}", crate::display_path(&log_dir));
+    }
+
+    let mut runner = Runner::new(log_dir.clone());
+    runner.step(
+        "fmt",
+        cargo(&root, &["fmt", "--all", "--check", "--", "--color=never"]),
+        Kind::Plain,
+    )?;
+    runner.step(
+        "clippy",
+        cargo(
+            &root,
+            &[
+                "clippy",
+                "--workspace",
+                "--all-targets",
+                "--",
+                "-D",
+                "warnings",
+            ],
+        ),
+        Kind::Plain,
+    )?;
+    let mut ci = Command::new(std::env::current_exe().map_err(|e| e.to_string())?);
+    ci.arg("ci").current_dir(&root);
+    runner.step("ci", ci, Kind::Plain)?;
+    let tier = if opts.full { "full" } else { "quick" };
+    runner.step(
+        "test",
+        test_command(&root, &opts.crates, false, tier),
+        Kind::Tests,
+    )?;
+    if opts.release {
+        runner.step(
+            "test-release",
+            test_command(&root, &opts.crates, true, tier),
+            Kind::Tests,
+        )?;
+    }
+    if opts.rocky {
+        let mut rocky = Command::new(bash()?);
+        rocky
+            .current_dir(&root)
+            .args(["scripts/rocky9.sh", "cargo", "xtask", "gate"]);
+        if !opts.crates.is_empty() {
+            rocky.args(["--crates", &opts.crates.join(",")]);
+        }
+        if opts.release {
+            rocky.arg("--release");
+        }
+        rocky.arg(if opts.full { "--full" } else { "--quick" });
+        rocky
+            .arg("--log-dir")
+            .arg(crate::display_path(&log_dir.join("rocky")));
+        runner.step("rocky", rocky, Kind::Nested)?;
+    }
+    if !nested {
+        println!(
+            "gate: pass, {} steps in {}",
+            runner.steps,
+            duration(runner.started.elapsed())
+        );
+    }
+    Ok(())
+}
+
+/// Sets `release`, and keeps `rocky`, only when HEAD touches platform-sensitive files.
+fn resolve_auto(root: &Path, opts: &mut Options) -> Result<(), String> {
+    let files = crate::git(
+        root,
+        &[
+            "diff-tree",
+            "--no-commit-id",
+            "--name-only",
+            "-r",
+            "--root",
+            "-m",
+            "--first-parent",
+            "HEAD",
+        ],
+    )?;
+    let subject = crate::git(root, &["log", "-1", "--format=%h %s", "HEAD"])?;
+    let sensitive: Vec<&str> = files
+        .lines()
+        .filter(|f| platform_sensitive(f))
+        .take(3)
+        .collect();
+    if sensitive.is_empty() {
+        opts.rocky = false;
+        println!(
+            "gate: {}: no platform-sensitive files; debug on this platform only",
+            subject.trim()
+        );
+    } else {
+        opts.release = true;
+        println!(
+            "gate: {}: touches {}{}; adding --release{}",
+            subject.trim(),
+            sensitive.join(", "),
+            if files.lines().filter(|f| platform_sensitive(f)).count() > 3 {
+                ", ..."
+            } else {
+                ""
+            },
+            if opts.rocky { " --rocky" } else { "" }
+        );
+    }
+    Ok(())
+}
+
+/// Files whose changes can change what builds or what the tests see on each platform.
+pub(crate) fn platform_sensitive(path: &str) -> bool {
+    const DIRS: &[&str] = &[
+        "crates/",
+        "xtask/",
+        "oracle/",
+        "fixtures/",
+        "corpus/",
+        "scripts/",
+        "docker/",
+        "upstream/",
+        ".cargo/",
+    ];
+    const FILES: &[&str] = &["Cargo.toml", "Cargo.lock", "rust-toolchain.toml"];
+    DIRS.iter().any(|d| path.starts_with(d)) || FILES.contains(&path)
+}
+
+fn cargo(root: &Path, args: &[&str]) -> Command {
+    let mut cmd = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
+    cmd.args(args)
+        .current_dir(root)
+        .env("CARGO_TERM_COLOR", "never");
+    cmd
+}
+
+fn test_command(root: &Path, crates: &[String], release: bool, tier: &str) -> Command {
+    let mut cmd = cargo(root, &["test"]);
+    if crates.is_empty() {
+        cmd.arg("--workspace");
+    }
+    for name in crates {
+        cmd.args(["-p", name]);
+    }
+    if release {
+        cmd.arg("--release");
+    }
+    cmd.arg("--no-fail-fast").env("OCIO_RS_TIER", tier);
+    cmd
+}
+
+/// Git for Windows' bash on Windows (the `bash` on PATH there is often WSL's, which can't run
+/// `scripts/rocky9.sh` against Docker Desktop); `bash` elsewhere. `OCIO_RS_BASH` overrides.
+pub(crate) fn bash() -> Result<PathBuf, String> {
+    if let Some(bash) = std::env::var_os("OCIO_RS_BASH") {
+        return Ok(bash.into());
+    }
+    if !cfg!(windows) {
+        return Ok("bash".into());
+    }
+    let exec_path = crate::git(Path::new("."), &["--exec-path"])?;
+    Path::new(exec_path.trim())
+        .ancestors()
+        .map(|dir| dir.join("bin").join("bash.exe"))
+        .find(|bash| bash.is_file())
+        .ok_or_else(|| {
+            format!(
+                "Git Bash not found above `git --exec-path` ({}); set OCIO_RS_BASH",
+                exec_path.trim()
+            )
+        })
+}
+
+/// Package names of the workspace members.
+fn workspace_packages(root: &Path) -> Result<Vec<String>, String> {
+    let read = |path: PathBuf| -> Result<toml::Table, String> {
+        let text =
+            std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        text.parse::<toml::Table>()
+            .map_err(|e| format!("{}: {e}", path.display()))
+    };
+    let manifest = read(root.join("Cargo.toml"))?;
+    let members = manifest
+        .get("workspace")
+        .and_then(|w| w.get("members"))
+        .and_then(|m| m.as_array())
+        .ok_or("Cargo.toml has no [workspace] members")?;
+    let mut names = Vec::new();
+    for member in members.iter().filter_map(|m| m.as_str()) {
+        let package = read(root.join(member).join("Cargo.toml"))?;
+        if let Some(name) = package
+            .get("package")
+            .and_then(|p| p.get("name"))
+            .and_then(|n| n.as_str())
+        {
+            names.push(name.to_string());
+        }
+    }
+    Ok(names)
+}
+
+/// A new, empty `<parent>/<UTC time>` directory.
+fn new_log_dir(parent: &Path) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+    let stamp = utc_stamp(SystemTime::now());
+    let mut dir = parent.join(&stamp);
+    let mut n = 1;
+    loop {
+        match std::fs::create_dir(&dir) {
+            Ok(()) => return Ok(dir),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                n += 1;
+                dir = parent.join(format!("{stamp}-{n}"));
+            }
+            Err(e) => return Err(format!("{}: {e}", dir.display())),
+        }
+    }
+}
+
+/// `20260930T051209Z`: the UTC date and time, to the second.
+pub(crate) fn utc_stamp(time: SystemTime) -> String {
+    let secs = time.duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let (y, m, d) = civil_from_days((secs / 86_400) as i64);
+    let s = secs % 86_400;
+    format!(
+        "{y:04}{m:02}{d:02}T{:02}{:02}{:02}Z",
+        s / 3600,
+        s % 3600 / 60,
+        s % 60
+    )
+}
+
+/// Days since 1970-01-01 to (year, month, day) in the proleptic Gregorian calendar
+/// (H. Hinnant, "chrono-Compatible Low-Level Date Algorithms", `civil_from_days`).
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = (if mp < 10 { mp + 3 } else { mp - 9 }) as u32;
+    (yoe + era * 400 + i64::from(m <= 2), m, d)
+}
+
+pub(crate) fn duration(d: Duration) -> String {
+    let secs = d.as_secs();
+    if secs < 60 {
+        format!("{:.1}s", d.as_secs_f64())
+    } else if secs < 3600 {
+        format!("{}m{:02}s", secs / 60, secs % 60)
+    } else {
+        format!("{}h{:02}m", secs / 3600, secs % 3600 / 60)
+    }
+}
+
+/// How a step's output is read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Kind {
+    /// Everything goes to the log.
+    Plain,
+    /// `cargo test`: also count the results.
+    Tests,
+    /// Another gate (the Rocky pass): its summary lines are shown as they arrive.
+    Nested,
+}
+
+/// Runs steps, logging each to `<log_dir>/<name>.log`.
+#[derive(Debug)]
+pub(crate) struct Runner {
+    log_dir: PathBuf,
+    pub(crate) started: Instant,
+    pub(crate) steps: usize,
+    /// Prefix of the summary lines.
+    pub(crate) label: &'static str,
+}
+
+impl Runner {
+    pub(crate) fn new(log_dir: PathBuf) -> Runner {
+        Runner {
+            log_dir,
+            started: Instant::now(),
+            steps: 0,
+            label: "gate",
+        }
+    }
+
+    /// Runs `cmd` as step `name`; an error once it has printed why the step failed.
+    pub(crate) fn step(&mut self, name: &str, mut cmd: Command, kind: Kind) -> Result<(), String> {
+        self.steps += 1;
+        let log_path = self.log_dir.join(format!("{name}.log"));
+        let shown = crate::display_path(&log_path);
+        let mut log =
+            File::create(&log_path).map_err(|e| format!("{}: {e}", log_path.display()))?;
+        let _ = writeln!(log, "$ {}\n", describe(&cmd));
+        if kind != Kind::Nested {
+            print!("{}: {name:<NAME_WIDTH$} ", self.label);
+            let _ = std::io::stdout().flush();
+        }
+        let start = Instant::now();
+        let status = run_logged(&mut cmd, &log, kind == Kind::Nested, name, self.label);
+        let elapsed = duration(start.elapsed());
+        drop(log);
+        let text = std::fs::read(&log_path)
+            .map(|b| String::from_utf8_lossy(&b).into_owned())
+            .unwrap_or_default();
+        let counts = if kind == Kind::Tests {
+            test_counts(&text)
+                .map(|(p, f, i)| format!("{p} passed, {f} failed, {i} ignored  "))
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+        let (ok, why) = match &status {
+            Ok(s) if s.success() => (true, String::new()),
+            Ok(s) => (false, format!("exited with {s}")),
+            Err(e) => (false, e.clone()),
+        };
+        let verdict = if ok { "pass" } else { "FAIL" };
+        if kind == Kind::Nested {
+            print!("{}: {name:<NAME_WIDTH$} ", self.label);
+        }
+        println!("{verdict} {elapsed:>7}  {counts}{shown}");
+        if ok {
+            return Ok(());
+        }
+        let failed = failed_tests(&text);
+        if !failed.is_empty() {
+            println!("{}: failed tests:", self.label);
+            for t in failed.iter().take(30) {
+                println!("    {t}");
+            }
+            if failed.len() > 30 {
+                println!("    ... and {} more", failed.len() - 30);
+            }
+        }
+        println!("{}: last lines of {shown}:", self.label);
+        let lines: Vec<&str> = text.lines().collect();
+        for line in &lines[lines.len().saturating_sub(25)..] {
+            println!("    | {line}");
+        }
+        Err(format!(
+            "{} failed at step `{name}` ({why}); full log: {shown}",
+            self.label
+        ))
+    }
+}
+
+/// Width of the step names in summary lines (`rocky/test-release` fits).
+const NAME_WIDTH: usize = 18;
+
+/// Runs `cmd` with stdout and stderr in `log`. For a nested gate, stdout is read line by line
+/// and its step summary lines are printed as they arrive, renamed `<step>/<its step>`.
+fn run_logged(
+    cmd: &mut Command,
+    log: &File,
+    nested: bool,
+    step: &str,
+    label: &str,
+) -> Result<ExitStatus, String> {
+    let handle = |log: &File| log.try_clone().map_err(|e| e.to_string());
+    cmd.stdin(Stdio::null()).stderr(handle(log)?);
+    if !nested {
+        cmd.stdout(handle(log)?);
+        return cmd
+            .status()
+            .map_err(|e| format!("could not start {}: {e}", describe(cmd)));
+    }
+    cmd.stdout(Stdio::piped());
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("could not start {}: {e}", describe(cmd)))?;
+    let mut copy = handle(log)?;
+    let stdout = child.stdout.take().expect("piped stdout");
+    for line in BufReader::new(stdout).split(b'\n') {
+        let Ok(line) = line else { break };
+        let _ = copy.write_all(&line);
+        let _ = copy.write_all(b"\n");
+        let text = String::from_utf8_lossy(&line);
+        if let Some((name, rest)) = summary_line(&text, label) {
+            println!("{label}: {:<NAME_WIDTH$} {rest}", format!("{step}/{name}"));
+        }
+    }
+    child.wait().map_err(|e| e.to_string())
+}
+
+/// `(step, "pass ...")` when `line` is a step summary line of a gate labelled `label`.
+fn summary_line<'a>(line: &'a str, label: &str) -> Option<(&'a str, &'a str)> {
+    let rest = line
+        .trim_end_matches('\r')
+        .strip_prefix(label)?
+        .strip_prefix(": ")?;
+    let (name, rest) = rest.split_once(' ')?;
+    let rest = rest.trim_start();
+    (rest.starts_with("pass ") || rest.starts_with("FAIL ")).then_some((name, rest))
+}
+
+/// The command line and the variables it sets, for the log header and errors.
+fn describe(cmd: &Command) -> String {
+    let mut s = String::new();
+    for (key, value) in cmd.get_envs() {
+        if let Some(value) = value {
+            s.push_str(&format!(
+                "{}={} ",
+                key.to_string_lossy(),
+                value.to_string_lossy()
+            ));
+        }
+    }
+    s.push_str(&cmd.get_program().to_string_lossy());
+    for arg in cmd.get_args() {
+        s.push(' ');
+        s.push_str(&arg.to_string_lossy());
+    }
+    s
+}
+
+/// Passed, failed and ignored tests over every `test result:` line of a `cargo test` log.
+pub(crate) fn test_counts(log: &str) -> Option<(u64, u64, u64)> {
+    let mut found = false;
+    let (mut passed, mut failed, mut ignored) = (0, 0, 0);
+    for line in log.lines() {
+        let line = strip_ansi(line);
+        let Some(rest) = line.trim_start().strip_prefix("test result:") else {
+            continue;
+        };
+        found = true;
+        for part in rest.split(';') {
+            let mut words = part.split_whitespace().rev();
+            let (Some(kind), Some(n)) = (words.next(), words.next()) else {
+                continue;
+            };
+            let Ok(n) = n.parse::<u64>() else { continue };
+            match kind {
+                "passed" => passed += n,
+                "failed" => failed += n,
+                "ignored" => ignored += n,
+                _ => {}
+            }
+        }
+    }
+    found.then_some((passed, failed, ignored))
+}
+
+/// Names of the tests a `cargo test` log reports as failed.
+fn failed_tests(log: &str) -> Vec<String> {
+    log.lines()
+        .map(strip_ansi)
+        .filter_map(|l| {
+            l.trim_start()
+                .strip_prefix("test ")?
+                .strip_suffix(" ... FAILED")
+                .map(String::from)
+        })
+        .collect()
+}
+
+fn strip_ansi(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut chars = line.chars();
+    while let Some(c) = chars.next() {
+        if c == '\u{1b}' {
+            // CSI: ESC [ parameters final-byte
+            if chars.next() == Some('[') {
+                for c in chars.by_ref() {
+                    if ('@'..='~').contains(&c) {
+                        break;
+                    }
+                }
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_options() {
+        let o = parse(&[
+            "--crates",
+            "ocio-ops,ocio",
+            "--release",
+            "--rocky",
+            "--full",
+        ])
+        .unwrap();
+        assert_eq!(o.crates, ["ocio-ops", "ocio"]);
+        assert!(o.release && o.rocky && o.full && !o.auto);
+        let o = parse(&["--crates=ocio-ops", "--log-dir=target/x", "--quick"]).unwrap();
+        assert_eq!(o.crates, ["ocio-ops"]);
+        assert_eq!(o.log_dir, Some(PathBuf::from("target/x")));
+        assert!(!o.full);
+        assert!(parse(&["--quick", "--full"]).is_err());
+        assert!(parse(&["--crates"]).is_err());
+        assert!(parse(&["--bogus"]).is_err());
+    }
+
+    #[test]
+    fn counts_tests_across_binaries() {
+        let log = "running 2 tests\n\
+            test a ... ok\n\
+            test b ... FAILED\n\
+            test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s\n\
+            \u{1b}[0mtest result: \u{1b}[32mok\u{1b}[0m. 143 passed; 0 failed; 2 ignored; 0 measured; 0 filtered out; finished in 0.06s\n";
+        assert_eq!(test_counts(log), Some((144, 1, 2)));
+        assert_eq!(failed_tests(log), ["b"]);
+        assert_eq!(test_counts("error: could not compile"), None);
+    }
+
+    #[test]
+    fn utc_stamps() {
+        // 2000-02-29 00:00:00 UTC is 951782400 s after the epoch; 2026-09-30 05:12:09 UTC is
+        // 1790745129 s.
+        let at = |s| utc_stamp(UNIX_EPOCH + Duration::from_secs(s));
+        assert_eq!(at(0), "19700101T000000Z");
+        assert_eq!(at(951_782_400), "20000229T000000Z");
+        assert_eq!(at(1_790_745_129), "20260930T051209Z");
+        assert_eq!(at(1_790_745_129 - 86_400 * 273), "20251231T051209Z");
+    }
+
+    #[test]
+    fn nested_summary_lines() {
+        let line =
+            "gate: test-release pass   29.8s  328 passed, 0 failed, 0 ignored  target/x.log\r";
+        assert_eq!(
+            summary_line(line, "gate"),
+            Some((
+                "test-release",
+                "pass   29.8s  328 passed, 0 failed, 0 ignored  target/x.log"
+            ))
+        );
+        assert_eq!(
+            summary_line("gate: fmt          FAIL    0.3s  f.log", "gate"),
+            Some(("fmt", "FAIL    0.3s  f.log"))
+        );
+        assert_eq!(summary_line("gate: failed tests:", "gate"), None);
+        assert_eq!(summary_line("gate: last lines of x.log:", "gate"), None);
+        assert_eq!(summary_line("    | gate: fmt pass 1s", "gate"), None);
+    }
+
+    #[test]
+    fn platform_sensitive_paths() {
+        assert!(platform_sensitive("crates/ocio-ops/src/lib.rs"));
+        assert!(platform_sensitive("oracle/ocio_oracle/text.py"));
+        assert!(platform_sensitive("Cargo.lock"));
+        assert!(platform_sensitive("upstream/OpenColorIO"));
+        assert!(!platform_sensitive("docs/parity.md"));
+        assert!(!platform_sensitive("CLAUDE.md"));
+        assert!(!platform_sensitive(".github/workflows/ci.yml"));
+    }
+}

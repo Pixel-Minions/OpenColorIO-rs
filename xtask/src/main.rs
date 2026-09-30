@@ -3,15 +3,22 @@
 
 //! Repository automation (PLAN.md §7, WP 0.2–0.4). Run `cargo xtask help`.
 
-use std::process::ExitCode;
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitCode};
 
 mod fixtures;
+mod gate;
 mod guards;
 mod parity;
 mod upstream;
 
 const USAGE: &str = "\
 cargo xtask <command>
+
+Checking a chunk:
+  gate [--crates a,b] [--release] [--rocky] [--quick|--full]
+                              fmt, clippy, ci and tests, stopping at the first failure;
+                              logs in target/gate-logs/ (`cargo xtask gate --help`)
 
 Oracle and fixtures (fixtures/ is written only by these commands):
   oracle info                 versions and platform of the pinned oracle wheel
@@ -37,6 +44,11 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let result = match args.as_slice() {
+        ["gate", "--help" | "-h"] => {
+            print!("{}", gate::USAGE);
+            Ok(())
+        }
+        ["gate", rest @ ..] => gate::parse(rest).and_then(gate::run),
         ["oracle", "info"] => fixtures::oracle_info(),
         ["oracle", "regen", group] => fixtures::regen(group),
         ["oracle", "check", group] => fixtures::check(group),
@@ -88,4 +100,44 @@ pub(crate) fn walk(dir: &std::path::Path) -> Vec<String> {
     inner(dir, dir, &mut out);
     out.sort();
     out
+}
+
+/// The workspace root, without the `\\?\` prefix `canonicalize` adds on Windows, which
+/// other programs (bash, git, cmd) don't all accept.
+pub(crate) fn root() -> PathBuf {
+    plain_path(ocio_testkit::paths::workspace_root())
+}
+
+/// `path` without a Windows verbatim (`\\?\`) prefix.
+pub(crate) fn plain_path(path: &Path) -> PathBuf {
+    match path.to_str() {
+        Some(s) if s.starts_with(r"\\?\UNC\") => PathBuf::from(format!(r"\\{}", &s[8..])),
+        Some(s) if s.starts_with(r"\\?\") => PathBuf::from(&s[4..]),
+        _ => path.to_path_buf(),
+    }
+}
+
+/// `path` for messages: relative to the workspace root when it is inside it, with `/`.
+pub(crate) fn display_path(path: &Path) -> String {
+    let path = plain_path(path);
+    let shown = path.strip_prefix(root()).unwrap_or(&path);
+    shown.to_string_lossy().replace('\\', "/")
+}
+
+/// Runs `git <args>` in `dir` and returns its standard output.
+pub(crate) fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .map_err(|e| format!("could not run git: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "`git {}` failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }

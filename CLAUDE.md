@@ -34,20 +34,16 @@ truth: read §3 (definition of done), §7 (how agents work) and your card before
 Every card lands as a series of chunks. Each chunk is one commit that can be reviewed and merged on its own.
 
 - **One coherent unit.** A chunk is usually one upstream file or module, with the tests that cover it. Aim for under ~600 lines of non-test code. Tests travel with the code they test, never in a later chunk.
-- **Green on its own.** Before committing, all of these must be clean on Windows:
-  - `cargo fmt --all --check`
-  - `cargo clippy --workspace --all-targets` (0 warnings)
-  - `cargo xtask ci`
-  - `cargo test --workspace`
-
-  Chunks with platform-sensitive behavior (numerics, formatting, parsing) must also pass `scripts/rocky9.sh cargo test -p <crate>`. Numeric chunks must pass their oracle tests in release builds too (`cargo test --release -p <crate>`, on both platforms). Optimization can change NaN results and other bits the debug build doesn't show.
+- **Green on its own.** Before committing, `cargo xtask gate` must pass. It runs `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo xtask ci` and `cargo test --workspace --no-fail-fast`, stops at the first failure, and keeps each step's full log in `target/gate-logs/<time>/`.
+  - Numeric or platform-sensitive chunks (numerics, formatting, parsing) run `cargo xtask gate --release --rocky`: the tests in release too, since optimization can change NaN results and other bits the debug build doesn't show, then every step again in Rocky Linux 9.
+  - While iterating, `--crates a,b` limits the test steps to those packages; fmt, clippy and `xtask ci` always cover the workspace.
 - **Bookkeeping travels with the port.** Update `upstream-map.toml`, `docs/parity.md` and `docs/ratchet.toml` in the same chunk as the port they describe.
 - **Oracle changes stand alone.** Changes to `oracle/` and new fixture groups get their own chunk, before the chunk that first uses them. The owner reviews them separately.
 - **Order and fixes.** Chunks are ordered by dependency. A later fix is a new chunk; never rewrite an earlier commit.
 - **Checking a chunk in isolation** while other work is in progress:
   1. `git add <files>`
   2. `git stash push --keep-index --include-untracked`
-  3. Run the checks.
+  3. Run the gate (`cargo xtask gate`, with the options above).
   4. `git commit`
   5. `git stash pop`
 - **Commit messages.** The first line is `<card>: <what>`. The body lists the upstream files and line ranges ported, the tests, and the evidence (which checks ran and on which platforms). End with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
@@ -109,12 +105,13 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
 - **Dependencies.** Pin them exactly in the root `Cargo.toml` `[workspace.dependencies]` (`=x.y.z`); crates use `workspace = true`. New dependencies need a reason in your report.
 - **Errors.** Upstream exception text is part of the output, so copy it verbatim.
 - **Non-ASCII data.** Write it as escapes in source (`\u{feff}` in Rust, `\ufeff` in Python), never as raw characters. The file-editing tools can turn a `\uXXXX` typed in their input into the raw, often invisible, character, and `sed` treats `\u` in a replacement as "uppercase the next letter". Check such files with a byte dump (`od -c`) before committing.
-- **Before reporting done:** `cargo fmt --all`, `cargo clippy --workspace --all-targets` (no warnings), `cargo xtask ci`, and `cargo test --workspace`, on Windows and in Rocky Linux 9.
+- **Before reporting done:** `cargo xtask gate --release --rocky` passes (fmt, clippy with no warnings, `cargo xtask ci`, and the tests in debug and release, on Windows and in Rocky Linux 9).
 
 ## Commands
 
 | Command | Purpose |
 |---|---|
+| `cargo xtask gate [--crates a,b] [--release] [--rocky] [--quick\|--full]` | The chunk gate: fmt, clippy, `xtask ci`, tests; logs in `target/gate-logs/` |
 | `cargo xtask ci` | Guards, fixture hashes, ratchet, parity dashboard freshness |
 | `cargo xtask guards` | Forbidden patterns, the `unsafe` allowlist, headers, dependency pins, the upstream map |
 | `cargo xtask parity` | Regenerate `docs/parity.md` after porting tests |
