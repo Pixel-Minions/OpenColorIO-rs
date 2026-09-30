@@ -185,8 +185,21 @@ def _build_colorspace(spec):
     return cs
 
 
+def _with_bytes(value):
+    """The spec with each {"hex": h} replaced by bytes.fromhex(h): the binding passes
+    bytes to std::string and const char * parameters unchanged, like a C++ caller."""
+    if isinstance(value, dict):
+        if set(value) == {"hex"}:
+            return bytes.fromhex(value["hex"])
+        return {k: _with_bytes(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_with_bytes(v) for v in value]
+    return value
+
+
 def build_config(spec):
     """A config built through the Python API from a spec (see serialize_built_config)."""
+    spec = _with_bytes(spec)
     config = OCIO.Config()
     if "name" in spec:
         config.setName(spec["name"])
@@ -215,6 +228,23 @@ def build_config(spec):
         config.setActiveViews(spec["active_views"])
     if "inactive_colorspaces" in spec:
         config.setInactiveColorSpaces(spec["inactive_colorspaces"])
+    if "file_rules" in spec:
+        rules = OCIO.FileRules()
+        for i, rule in enumerate(spec["file_rules"]):
+            rules.insertRule(i, rule["name"], rule["colorspace"], rule["pattern"],
+                             rule["extension"])
+            for key, value in rule.get("custom", []):
+                rules.setCustomKey(i, key, value)
+        config.setFileRules(rules)
+    if "viewing_rules" in spec:
+        rules = OCIO.ViewingRules()
+        for i, rule in enumerate(spec["viewing_rules"]):
+            rules.insertRule(i, rule["name"])
+            for colorspace in rule.get("colorspaces", []):
+                rules.addColorSpace(i, colorspace)
+            for key, value in rule.get("custom", []):
+                rules.setCustomKey(i, key, value)
+        config.setViewingRules(rules)
     return config
 
 
@@ -239,6 +269,10 @@ def serialize_built_config(args, blobs):
       roles: [[role, colorspace]]
       displays: [[display, [{name, colorspace, description}]]]
       active_displays, active_views, inactive_colorspaces: comma-separated str
+      file_rules: [{name, colorspace, pattern, extension: str; custom: [[key, value]]}],
+        inserted before the default rule
+      viewing_rules: [{name: str; colorspaces: [str]; custom: [[key, value]]}]
+    Any string may be given as {"hex": "..."}: those bytes, which need not be UTF-8.
     result: {"bytes": n} with the UTF-8 text as blob 0, or {"exception": {...}}
     """
     try:
@@ -246,6 +280,33 @@ def serialize_built_config(args, blobs):
     except OCIO.Exception as exc:
         return {"exception": exception_result(exc)}, []
     return {"bytes": len(text)}, [text]
+
+
+@command
+def serialize_built_config_to_file(args, blobs):
+    """Config.serialize(fileName) and Config.getCacheID() of a config built from a spec (as
+    serialize_built_config), for strings that are not UTF-8.
+
+    serialize() returns a Python str, so it raises on output that is not UTF-8. The
+    serialize(fileName) binding writes to a std::ofstream opened in text mode
+    (PyConfig.cpp:243-249), so on Windows every "\\n" becomes "\\r\\n"; getCacheID() hashes
+    the serialized text itself (Config.cpp:5264-5271).
+
+    args: {"spec": {...}}
+    result: {"cache_id": str, "bytes": n} with the file's bytes as blob 0, or
+            {"exception": {...}}
+    """
+    with tempfile.TemporaryDirectory() as directory:
+        path = os.path.join(directory, "config.ocio")
+        try:
+            config = build_config(args["spec"])
+            config.serialize(path)
+            cache_id = config.getCacheID()
+        except OCIO.Exception as exc:
+            return {"exception": exception_result(exc)}, []
+        with open(path, "rb") as f:
+            data = f.read()
+    return {"cache_id": cache_id, "bytes": len(data)}, [data]
 
 
 # The fixture cases of the `yaml_emitter` regen group: inputs only; the expected text is
@@ -402,4 +463,97 @@ def emitter_cases():
                 {"name": "empty group", "matrices_bits": []},
             ],
         },
+    }
+
+
+# Cases whose serialize() text can't be read back into the strings the config held: a flow
+# map's long key is written `{ ?key: v}`, which reads back as the key "?key"; quoted and
+# literal scalars replace noncharacters with U+FFFD; a literal block whose first line
+# starts with a space does not parse, and one with a CR reads back as a plain line break.
+# Each case is a spec with placeholders, the same config with the placeholders replaced by
+# the strings; the test reads the placeholder text and writes it with the strings put back.
+
+def _placeholder(i):
+    return f"phxq{i:04d}"
+
+
+def substitute(value, substitutions):
+    """`value` with every string equal to a placeholder replaced by its string."""
+    if isinstance(value, dict):
+        return {k: substitute(v, substitutions) for k, v in value.items()}
+    if isinstance(value, list):
+        return [substitute(v, substitutions) for v in value]
+    return substitutions.get(value, value) if isinstance(value, str) else value
+
+
+_LONG_KEYS = [
+    "k" * 1024, "k" * 1025, "\u00e9" * 512, "\u00e9" * 513, "a: b" * 300, "- " + "x" * 1100,
+]
+
+_NONCHARACTERS = [
+    "\ufdd0", "\ufdef", "\ufffe", "\uffff", "\U0001fffe", "\U0001ffff", "\U0010fffe",
+    "\U0010ffff",
+]
+
+_UNREADABLE_LITERALS = [
+    " a\nb", "  a\n b", "\ta\nb", "a\r\nb", "a\rb\nc", "\r\na", "a\n\r", "x\n\u2028y\r",
+]
+
+
+def substitution_cases():
+    """The `yaml_emitter` cases that need substitution: {"spec", "substitutions"} by name."""
+    def case(spec_of, strings):
+        subs = [[_placeholder(i), s] for i, s in enumerate(strings)]
+        return {"spec": spec_of([p for p, _ in subs]), "substitutions": subs}
+
+    def rules(keys):
+        return {
+            "colorspaces": [{"name": "cs0"}],
+            "file_rules": [
+                {"name": f"r{i}", "colorspace": "cs0", "pattern": "*", "extension": "*",
+                 "custom": [[k, "v"]]}
+                for i, k in enumerate(keys)
+            ],
+            "viewing_rules": [
+                {"name": f"vr{i}", "colorspaces": ["cs0"], "custom": [[k, "v"]]}
+                for i, k in enumerate(keys)
+            ],
+        }
+
+    def noncharacters(slots):
+        n = len(_NONCHARACTERS)
+        family, quoted, literal, view = slots[:n], slots[n:2 * n], slots[2 * n:3 * n], slots[3 * n:]
+        return {
+            "colorspaces": [
+                {"name": f"cs{i}", "family": family[i], "encoding": quoted[i],
+                 "description": literal[i]}
+                for i in range(n)
+            ],
+            "displays": [["d", [{"name": f"v{i}", "colorspace": "cs0", "description": view[i]}
+                                for i in range(n)]]],
+        }
+
+    def literals(slots):
+        n = len(_UNREADABLE_LITERALS)
+        return {
+            "description": slots[0],
+            "colorspaces": [
+                {"name": f"cs{i}", "description": slots[1 + i],
+                 "interchange": [["amf_transform_ids", slots[1 + n + i]]]}
+                for i in range(n)
+            ],
+        }
+
+    return {
+        # A flow map's long key, `{ ?key: v}` (emitter.cpp:410-439): FileRules and ViewingRules
+        # custom keys, one per rule, since a rule's keys are sorted.
+        "subst_flow_long_keys": case(rules, _LONG_KEYS),
+        # Noncharacters: raw in a plain scalar (family), U+FFFD in double quotes (encoding,
+        # quoted by its leading "- "; view descriptions in a flow map) and in literal blocks.
+        "subst_noncharacters": case(noncharacters, (
+            [f"a{c}" for c in _NONCHARACTERS] + [f"- {c}" for c in _NONCHARACTERS]
+            + [f"a\n{c}" for c in _NONCHARACTERS] + [f"a\n{c}" for c in _NONCHARACTERS])),
+        # Literal blocks that no reader reads back.
+        "subst_literal_blocks": case(literals, (
+            _UNREADABLE_LITERALS[:1] + _UNREADABLE_LITERALS + _UNREADABLE_LITERALS)),
     }
