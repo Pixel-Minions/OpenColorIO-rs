@@ -26,6 +26,18 @@ pub fn f16c_cvtph_ps(h: u16) -> f32 {
     half::f16::from_bits(h).to_f32_const()
 }
 
+/// One value of `AVXRGBAPack<BD>::Load` (src/OpenColorIO/AVX.h:94-332 @ v2.5.2): as
+/// [`crate::sse2::rgba_pack_load`], with F16C for halves.
+pub fn avx_rgba_pack_load(depth: crate::sse2::PackDepth, raw: u32) -> f32 {
+    crate::sse2::rgba_pack_load(depth, raw, crate::sse2::HalfConversion::F16c)
+}
+
+/// One value of `AVXRGBAPack<BD>::Store` (src/OpenColorIO/AVX.h:94-332 @ v2.5.2): as
+/// [`crate::sse2::rgba_pack_store`], with F16C for halves.
+pub fn avx_rgba_pack_store(depth: crate::sse2::PackDepth, value: f32) -> u32 {
+    crate::sse2::rgba_pack_store(depth, value, crate::sse2::HalfConversion::F16c)
+}
+
 /// The F16C instructions themselves, to prove the scalar lanes against the hardware.
 #[cfg(target_arch = "x86_64")]
 pub mod hardware {
@@ -84,3 +96,7 @@ pub mod hardware {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "avx_tests.rs"]
+mod simd_tests;

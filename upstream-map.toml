@@ -49,8 +49,8 @@ note = "build system"
 path = "src/OpenColorIO/AVX.h"
 kind = "src"
 target = ["crates/ocio-ops/src/avx.rs"]
-status = "partial"
-note = "S4: the F16C half conversions as exact scalar lanes (the half crate), proven against the hardware for all 2^32 floats and 65,536 halves; the rest is todo"
+status = "done"
+note = "S4: scalar profile. F16C lanes proven against the hardware for all 2^32 floats and 65,536 halves; AVXRGBAPack as per-value Load/Store"
 
 [[file]]
 path = "src/OpenColorIO/AVX2.h"
@@ -510,8 +510,8 @@ note = "S2: every x86 fast-math function and helper, as exact scalar lanes; not 
 path = "src/OpenColorIO/SSE2.h"
 kind = "src"
 target = ["crates/ocio-ops/src/sse2.rs"]
-status = "partial"
-note = "S4: the software half conversions (sse2_cvtps_ph, sse2_cvtph_ps, with sse2_blendv) as exact scalar lanes, proven against the SSE2 intrinsics for all 2^32 floats and 65,536 halves; the rest is todo"
+status = "done"
+note = "S4: scalar profile. The software half conversions (with sse2_blendv) proven against the SSE2 intrinsics for all 2^32 floats and 65,536 halves; sse2_clamp and SSE2RGBAPack as per-value Load/Store (the transposes only move values), checked by the upstream SSE2 tests. x86 only; SSE2NEON (ARM) variants not ported"
 
 [[file]]
 path = "src/OpenColorIO/ScanlineHelper.cpp"
@@ -4003,7 +4003,8 @@ status = "todo"
 path = "tests/cpu/AVX_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/avx_tests.rs"]
-status = "todo"
+status = "done"
+note = "S4: all 7 tests (bodies in sse2_tests.rs)"
 
 [[file]]
 path = "tests/cpu/Baker_tests.cpp"
@@ -4177,14 +4178,16 @@ status = "todo"
 [[file]]
 path = "tests/cpu/SIMD_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio/src/simd_tests.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/sse2_tests.rs", "crates/ocio-ops/src/avx_tests.rs"]
+status = "partial"
+note = "S4: each OCIO_ADD_TEST_<SIMD>(name) registration is the test of that name in the matching *_tests.rs; SSE2 and AVX so far"
 
 [[file]]
 path = "tests/cpu/SSE2_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/sse2_tests.rs"]
-status = "todo"
+status = "done"
+note = "S4: all 7 tests; the bodies are shared with the AVX files"
 
 [[file]]
 path = "tests/cpu/SSE_tests.cpp"

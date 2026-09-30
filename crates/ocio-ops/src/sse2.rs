@@ -2,9 +2,10 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! The SSE2 helpers of `SSE2.h` (src/OpenColorIO/SSE2.h @ v2.5.2), as exact scalar code for one
-//! SIMD lane: the software half-float conversions that OCIO's SSE2 kernels use on x86
-//! (`!OCIO_USE_SSE2NEON`). The SSE min/max and conversion lanes are
-//! [`crate::math_utils::sse_min`], [`sse_max`](crate::math_utils::sse_max) and
+//! SIMD lane: `sse2_clamp`, the software half-float conversions that OCIO's SSE2 kernels use on
+//! x86 (`!OCIO_USE_SSE2NEON`), and the per-value semantics of the RGBA packs. The SSE min/max
+//! and conversion lanes are [`crate::math_utils::sse_min`],
+//! [`sse_max`](crate::math_utils::sse_max) and
 //! [`sse_cvttps_epi32`](crate::math_utils::sse_cvttps_epi32).
 //!
 //! Each `__m128` operation works on its four lanes independently, so one lane reproduces the
@@ -14,7 +15,13 @@
 //! `unsafe` is allowed in this module for SIMD intrinsics only.
 #![allow(unsafe_code)]
 
-use crate::math_utils::sse_max;
+use crate::math_utils::{sse_cvtps_epi32, sse_max, sse_min};
+
+/// One lane of `sse2_clamp` (src/OpenColorIO/SSE2.h:85-89 @ v2.5.2): NaN becomes 0.
+#[inline]
+pub fn sse2_clamp(value: f32, max_value: f32) -> f32 {
+    sse_min(sse_max(value, 0.0), max_value)
+}
 
 /// One lane of `sse2_blendv` (src/OpenColorIO/SSE2.h:106-109 @ v2.5.2):
 /// `((a ^ b) & mask) ^ a`.
@@ -110,6 +117,95 @@ pub fn sse2_cvtph_ps(h: u16) -> f32 {
     }
 
     f32::from_bits(o.to_bits() | sign)
+}
+
+/// A channel storage type of the RGBA packs: the `BitDepth` template argument of
+/// `SSE2RGBAPack<BD>` and its AVX, AVX2 and AVX-512 counterparts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PackDepth {
+    /// `BIT_DEPTH_UINT8`: `uint8_t`
+    Uint8,
+    /// `BIT_DEPTH_UINT10`: `uint16_t`
+    Uint10,
+    /// `BIT_DEPTH_UINT12`: `uint16_t`
+    Uint12,
+    /// `BIT_DEPTH_UINT16`: `uint16_t`
+    Uint16,
+    /// `BIT_DEPTH_F16`: half bits
+    F16,
+    /// `BIT_DEPTH_F32`: float bits
+    F32,
+}
+
+impl PackDepth {
+    /// `BitDepthInfo<BD>::maxValue` (src/OpenColorIO/BitDepthUtils.h:28-62 @ v2.5.2).
+    pub fn max_value(self) -> u32 {
+        match self {
+            PackDepth::Uint8 => 255,
+            PackDepth::Uint10 => 1023,
+            PackDepth::Uint12 => 4095,
+            PackDepth::Uint16 => 65535,
+            PackDepth::F16 | PackDepth::F32 => 1,
+        }
+    }
+
+    /// `BitDepthInfo<BD>::isFloat`.
+    pub fn is_float(self) -> bool {
+        matches!(self, PackDepth::F16 | PackDepth::F32)
+    }
+}
+
+/// The half-float conversion a pack uses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HalfConversion {
+    /// `sse2_cvtph_ps` / `sse2_cvtps_ph` (SSE2 packs, without SSE2NEON).
+    Sse2,
+    /// F16C (`_mm256_cvtph_ps`, `_mm256_cvtps_ph(x, 0)` and their AVX-512 forms).
+    F16c,
+}
+
+/// One value of an RGBA pack's `Load`: a stored channel value (`raw`, the integer, or the bits
+/// of a half or float) as the float the kernels compute with.
+///
+/// The packs load 4 (SSE2), 8 (AVX, AVX2) or 16 (AVX-512) pixels and transpose them into R, G, B
+/// and A registers; the transposes only move values, so each value converts on its own:
+/// integers exactly (`_mm_cvtepi32_ps` of the zero-extended value), halves with `half`, floats
+/// unchanged.
+pub fn rgba_pack_load(depth: PackDepth, raw: u32, half: HalfConversion) -> f32 {
+    match depth {
+        PackDepth::Uint8 | PackDepth::Uint10 | PackDepth::Uint12 | PackDepth::Uint16 => raw as f32,
+        PackDepth::F16 => match half {
+            HalfConversion::Sse2 => sse2_cvtph_ps(raw as u16),
+            HalfConversion::F16c => crate::avx::f16c_cvtph_ps(raw as u16),
+        },
+        PackDepth::F32 => f32::from_bits(raw),
+    }
+}
+
+/// One value of an RGBA pack's `Store`: the inverse of [`rgba_pack_load`]. Integers are clamped
+/// to `[0, maxValue]` (NaN becomes 0), then rounded to nearest even by `_mm_cvtps_epi32` with the
+/// default MXCSR, then narrowed; halves use `half`; floats are stored unchanged.
+pub fn rgba_pack_store(depth: PackDepth, value: f32, half: HalfConversion) -> u32 {
+    match depth {
+        PackDepth::Uint8 | PackDepth::Uint10 | PackDepth::Uint12 | PackDepth::Uint16 => {
+            sse_cvtps_epi32(sse2_clamp(value, depth.max_value() as f32)) as u32
+        }
+        PackDepth::F16 => u32::from(match half {
+            HalfConversion::Sse2 => sse2_cvtps_ph(value),
+            HalfConversion::F16c => crate::avx::f16c_cvtps_ph(value),
+        }),
+        PackDepth::F32 => value.to_bits(),
+    }
+}
+
+/// One value of `SSE2RGBAPack<BD>::Load` (src/OpenColorIO/SSE2.h:198-401 @ v2.5.2).
+pub fn sse2_rgba_pack_load(depth: PackDepth, raw: u32) -> f32 {
+    rgba_pack_load(depth, raw, HalfConversion::Sse2)
+}
+
+/// One value of `SSE2RGBAPack<BD>::Store` (src/OpenColorIO/SSE2.h:198-401 @ v2.5.2).
+pub fn sse2_rgba_pack_store(depth: PackDepth, value: f32) -> u32 {
+    rgba_pack_store(depth, value, HalfConversion::Sse2)
 }
 
 /// The same functions written with SSE2 intrinsics, instruction for instruction as in
@@ -252,3 +348,7 @@ pub mod intrinsics {
         out
     }
 }
+
+#[cfg(test)]
+#[path = "sse2_tests.rs"]
+pub(crate) mod tests;
