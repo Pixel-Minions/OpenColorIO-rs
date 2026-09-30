@@ -162,6 +162,28 @@ entry here in the same chunk. Take the next free number in its section's series 
 - **A fix:** "reserved".
 - **Status:** matched in `p1-foundations` (1.2a).
 
+## Logging
+
+### I-16. Two messages bypass the logging function
+
+- **Upstream:** the warning about an invalid `OCIO_LOGGING_LEVEL`, and the version line logged
+  when that variable asks for debug messages, are written straight to stderr
+  (`Logging.cpp:45-50, 57-61`), even when the application has set its own logging function.
+- **Who notices:** applications that show or collect OCIO's log through a logging function.
+- **A fix:** send them through the logging function, like every other message.
+- **Status:** matched in `p1-foundations` (1.2e).
+
+### I-17. A NUL in a logged message cuts its line
+
+- **Upstream:** the logging function receives each line as a C string (`Logging.cpp:86`), so a
+  line that holds a NUL byte stops there, and loses the rest of its text and its line break.
+  A warning about a key or name with a NUL shows this (seen through the wheel in 1.2e); I-6
+  describes one way such names arise.
+- **Who notices:** applications that log messages about names with NUL bytes; the next line of
+  their log continues on the same line.
+- **A fix:** pass the whole line, with its length.
+- **Status:** matched in `p1-foundations` (1.2e).
+
 ## Python module (`ocio-py`)
 
 ### I-12. A channel order passed without its keyword is misread
