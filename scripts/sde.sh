@@ -72,6 +72,9 @@ if [ ! -f "$kit/$exe" ]; then
 fi
 
 sde="$kit/$exe"
+# Each emulated oracle process takes about 1 GB of memory. With one test thread per core, a
+# 16-core machine ran out ("Pin is out of memory") and oracle processes crashed.
+export RUST_TEST_THREADS="${RUST_TEST_THREADS:-4}"
 flags=("-$cpu")
 if [ "$os" = win ]; then
     sde="$(cygpath -m "$sde")"

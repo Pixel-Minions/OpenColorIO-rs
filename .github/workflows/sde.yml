@@ -39,7 +39,7 @@ jobs:
   windows:
     name: SDE ${{ matrix.cpu }} (Windows)
     runs-on: windows-2025
-    timeout-minutes: 120
+    timeout-minutes: 240
     strategy:
       fail-fast: false
       matrix:
@@ -68,11 +68,15 @@ jobs:
       - name: CPU tests on an emulated ${{ matrix.cpu }}
         shell: bash
         run: scripts/sde.sh ${{ matrix.cpu }} cargo cpu-tests --release --no-fail-fast
+      - name: SDE logs
+        if: failure()
+        shell: bash
+        run: find . -name 'pin-*log.txt' -not -path './target/*' -exec tail -n 40 {} +
 
   rocky9:
     name: SDE ${{ matrix.cpu }} (Rocky Linux 9)
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 240
     strategy:
       fail-fast: false
       matrix:
@@ -99,3 +103,6 @@ jobs:
             cargo cpu-tests --release --no-run
             scripts/sde.sh ${{ matrix.cpu }} cargo cpu-tests --release --no-fail-fast
           '
+      - name: SDE logs
+        if: failure()
+        run: find . -name 'pin-*log.txt' -not -path './target/*' -exec tail -n 40 {} +
