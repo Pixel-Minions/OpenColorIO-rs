@@ -1196,17 +1196,16 @@ pub struct GenericImageDesc {
 }
 
 impl GenericImageDesc {
-    /// The description of `img` for a CPU processor whose bit depth on this side is
-    /// `bit_depth`, with its conversion `bit_depth_op`.
+    /// The description of an image with `layout` ([`ImageDesc::layout`]), for a CPU processor
+    /// whose bit depth on this side is `bit_depth`, with its conversion `bit_depth_op`.
     ///
     /// Port of `GenericImageDesc::init` (src/OpenColorIO/ImageDesc.cpp:75-97 @ v2.5.2), as a
-    /// constructor: upstream fills a default-constructed struct.
+    /// constructor: upstream fills a default-constructed struct from the description's getters.
     pub fn init(
-        img: &(impl ImageDesc + ?Sized),
+        layout: &ImageLayout,
         bit_depth: BitDepth,
         bit_depth_op: Arc<dyn CpuOp>,
     ) -> Result<Self> {
-        let layout = img.layout();
         let desc = GenericImageDesc {
             width: layout.width_long(),
             height: layout.height_long(),

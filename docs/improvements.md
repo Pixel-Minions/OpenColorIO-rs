@@ -33,8 +33,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   row and then raises. Linux processes all of them (2^32 pixels of 65,536 × 65,536 in 17 s).
 - **Who notices:** applications that process single images of over 2 gigapixels on Windows.
 - **A fix:** 64-bit sizes on every platform, so those images work on Windows too.
-- **Status:** to be matched in `p1-bitdepth` (1.1d): the message and every buffer byte,
-  including the partly written output. The owner chose to match it on 2026-09-30.
+- **Status:** matched in `p1-bitdepth` (1.1d): the message and every buffer byte, including the
+  partly written output, checked against the Windows wheel
+  (`crates/ocio-ops/tests/image_packing_oracle.rs`). The owner chose to match it on 2026-09-30.
 
 ### I-2. "Invalid x stride." is checked on Windows only
 
