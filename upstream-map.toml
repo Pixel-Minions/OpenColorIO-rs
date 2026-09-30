@@ -319,7 +319,7 @@ path = "src/OpenColorIO/ImageDesc.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/image_desc.rs"]
 status = "partial"
-note = "1.1b: PackedImageDesc and GenericImageDesc, with the bounds check of deviation D-2; PlanarImageDesc is 1.1c. Not ported: operator<< (16-59), which prints buffer addresses that no test or oracle can compare (Python's repr() prints the binding's shared_ptr address instead)"
+note = "1.1b: PackedImageDesc and GenericImageDesc, with the bounds check of deviation D-2, checked against the wheel (tests/image_desc_oracle.rs: every getter, isFloat included, and every error Python reaches); PlanarImageDesc is 1.1c. Not ported: operator<< (16-59), which prints buffer addresses that no test or oracle can compare (Python's repr() prints the binding's shared_ptr address instead)"
 
 [[file]]
 path = "src/OpenColorIO/ImagePacking.cpp"
@@ -3663,6 +3663,7 @@ path = "src/bindings/python/PyUtils.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_utils.rs"]
 status = "todo"
+note = "checkBufferType (165-180): ocio-ops image_desc.rs gives its message for a typed slice of the wrong type, naming the expected type cleanly (uint16, where the binding writes 'u' (16-bit): improvement candidate I-23)"
 
 [[file]]
 path = "src/bindings/python/PyUtils.h"
