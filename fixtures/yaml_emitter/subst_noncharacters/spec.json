@@ -1,0 +1,231 @@
+{
+ "spec": {
+  "colorspaces": [
+   {
+    "description": "phxq0016",
+    "encoding": "phxq0008",
+    "family": "phxq0000",
+    "name": "cs0"
+   },
+   {
+    "description": "phxq0017",
+    "encoding": "phxq0009",
+    "family": "phxq0001",
+    "name": "cs1"
+   },
+   {
+    "description": "phxq0018",
+    "encoding": "phxq0010",
+    "family": "phxq0002",
+    "name": "cs2"
+   },
+   {
+    "description": "phxq0019",
+    "encoding": "phxq0011",
+    "family": "phxq0003",
+    "name": "cs3"
+   },
+   {
+    "description": "phxq0020",
+    "encoding": "phxq0012",
+    "family": "phxq0004",
+    "name": "cs4"
+   },
+   {
+    "description": "phxq0021",
+    "encoding": "phxq0013",
+    "family": "phxq0005",
+    "name": "cs5"
+   },
+   {
+    "description": "phxq0022",
+    "encoding": "phxq0014",
+    "family": "phxq0006",
+    "name": "cs6"
+   },
+   {
+    "description": "phxq0023",
+    "encoding": "phxq0015",
+    "family": "phxq0007",
+    "name": "cs7"
+   }
+  ],
+  "displays": [
+   [
+    "d",
+    [
+     {
+      "colorspace": "cs0",
+      "description": "phxq0024",
+      "name": "v0"
+     },
+     {
+      "colorspace": "cs0",
+      "description": "phxq0025",
+      "name": "v1"
+     },
+     {
+      "colorspace": "cs0",
+      "description": "phxq0026",
+      "name": "v2"
+     },
+     {
+      "colorspace": "cs0",
+      "description": "phxq0027",
+      "name": "v3"
+     },
+     {
+      "colorspace": "cs0",
+      "description": "phxq0028",
+      "name": "v4"
+     },
+     {
+      "colorspace": "cs0",
+      "description": "phxq0029",
+      "name": "v5"
+     },
+     {
+      "colorspace": "cs0",
+      "description": "phxq0030",
+      "name": "v6"
+     },
+     {
+      "colorspace": "cs0",
+      "description": "phxq0031",
+      "name": "v7"
+     }
+    ]
+   ]
+  ]
+ },
+ "substitutions": [
+  [
+   "phxq0000",
+   "a\ufdd0"
+  ],
+  [
+   "phxq0001",
+   "a\ufdef"
+  ],
+  [
+   "phxq0002",
+   "a\ufffe"
+  ],
+  [
+   "phxq0003",
+   "a\uffff"
+  ],
+  [
+   "phxq0004",
+   "a\ud83f\udffe"
+  ],
+  [
+   "phxq0005",
+   "a\ud83f\udfff"
+  ],
+  [
+   "phxq0006",
+   "a\udbff\udffe"
+  ],
+  [
+   "phxq0007",
+   "a\udbff\udfff"
+  ],
+  [
+   "phxq0008",
+   "- \ufdd0"
+  ],
+  [
+   "phxq0009",
+   "- \ufdef"
+  ],
+  [
+   "phxq0010",
+   "- \ufffe"
+  ],
+  [
+   "phxq0011",
+   "- \uffff"
+  ],
+  [
+   "phxq0012",
+   "- \ud83f\udffe"
+  ],
+  [
+   "phxq0013",
+   "- \ud83f\udfff"
+  ],
+  [
+   "phxq0014",
+   "- \udbff\udffe"
+  ],
+  [
+   "phxq0015",
+   "- \udbff\udfff"
+  ],
+  [
+   "phxq0016",
+   "a\n\ufdd0"
+  ],
+  [
+   "phxq0017",
+   "a\n\ufdef"
+  ],
+  [
+   "phxq0018",
+   "a\n\ufffe"
+  ],
+  [
+   "phxq0019",
+   "a\n\uffff"
+  ],
+  [
+   "phxq0020",
+   "a\n\ud83f\udffe"
+  ],
+  [
+   "phxq0021",
+   "a\n\ud83f\udfff"
+  ],
+  [
+   "phxq0022",
+   "a\n\udbff\udffe"
+  ],
+  [
+   "phxq0023",
+   "a\n\udbff\udfff"
+  ],
+  [
+   "phxq0024",
+   "a\n\ufdd0"
+  ],
+  [
+   "phxq0025",
+   "a\n\ufdef"
+  ],
+  [
+   "phxq0026",
+   "a\n\ufffe"
+  ],
+  [
+   "phxq0027",
+   "a\n\uffff"
+  ],
+  [
+   "phxq0028",
+   "a\n\ud83f\udffe"
+  ],
+  [
+   "phxq0029",
+   "a\n\ud83f\udfff"
+  ],
+  [
+   "phxq0030",
+   "a\n\udbff\udffe"
+  ],
+  [
+   "phxq0031",
+   "a\n\udbff\udfff"
+  ]
+ ]
+}

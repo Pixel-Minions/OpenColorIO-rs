@@ -10,11 +10,15 @@
 //! `Literal` for multi-line descriptions and interchange attributes (after
 //! `SanitizeNewlines`), and each value written with the C++ type OCIO writes it as: `bool`,
 //! `char` (`family_separator`), `float` (allocation variables and curve points) at precision
-//! 7, `double` (every other number) at precision 15, and strings. Collection styles come
-//! from the tree, which records what OCIO requested. The config model itself is Phase 3;
-//! this proves the emitter.
+//! 7, `double` (every other number) at precision 15, and strings (as bytes). Collection
+//! styles come from the tree, which records what OCIO requested. The config model itself is
+//! Phase 3; this proves the emitter.
+//!
+//! Strings whose text can't be read back into what the config held (not UTF-8, or written
+//! in a way no reader undoes) are replayed by substitution: the tree comes from the same
+//! config with a placeholder in their place, and the writer puts the string back.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeSet, VecDeque};
 
 use ocio::yaml_cpp::{Emitter, EmitterManip::*, verbatim_tag};
 
@@ -52,8 +56,9 @@ fn number<T: std::str::FromStr>(text: &str) -> T {
 }
 
 /// Port of `SanitizeNewlines` (OCIOYaml.cpp:37-61): drops trailing newlines.
-pub(crate) fn sanitize_newlines(input: &str) -> String {
-    input.trim_end_matches('\n').to_string()
+pub(crate) fn sanitize_newlines(input: &[u8]) -> Vec<u8> {
+    let end = input.iter().rposition(|&c| c != b'\n').map_or(0, |i| i + 1);
+    input[..end].to_vec()
 }
 
 /// The type OCIO writes a transform's key with (the transforms' `save` functions).
@@ -79,6 +84,10 @@ pub(crate) struct OcioWriter {
     /// The exact numbers the config holds, in the order OCIO writes them; without them the
     /// tree's text is read back.
     pub(crate) values: Option<VecDeque<Number>>,
+    /// The strings the config holds in place of placeholders, by placeholder.
+    pub(crate) substitutions: Vec<(String, Vec<u8>)>,
+    /// The placeholders replaced so far.
+    pub(crate) substituted: BTreeSet<String>,
 }
 
 impl Default for OcioWriter {
@@ -98,7 +107,27 @@ impl OcioWriter {
             out,
             numbers: 0,
             values: None,
+            substitutions: Vec::new(),
+            substituted: BTreeSet::new(),
         }
+    }
+
+    /// The bytes the config holds where the text shows `text`: the string a placeholder
+    /// stands for, or the text itself.
+    fn resolve(&mut self, text: &str) -> Vec<u8> {
+        match self.substitutions.iter().find(|(p, _)| p == text) {
+            Some((placeholder, string)) => {
+                self.substituted.insert(placeholder.clone());
+                string.clone()
+            }
+            None => text.as_bytes().to_vec(),
+        }
+    }
+
+    /// A string the config holds, as a value or a map key.
+    fn string(&mut self, text: &str) {
+        let bytes = self.resolve(text);
+        self.out.put(bytes.as_slice());
     }
 
     /// The next exact number, if they were given.
@@ -124,9 +153,7 @@ impl OcioWriter {
     fn scalar(&mut self, kind: Kind, node: &Node) {
         let text = node.text();
         match kind {
-            Kind::Str => {
-                self.out.put(text);
-            }
+            Kind::Str => self.string(text),
             Kind::Bool => {
                 let b = match text {
                     "true" => true,
@@ -190,12 +217,12 @@ impl OcioWriter {
     /// The tree holds a description only where OCIO's `desc && *desc` held, and after
     /// `SanitizeNewlines`: a description of newlines alone was written as `""`.
     fn save_description(&mut self, desc: &str) {
-        let desc = sanitize_newlines(desc);
+        let desc = sanitize_newlines(&self.resolve(desc));
         self.out.put(Key).put("description").put(Value);
-        if desc.contains('\n') {
+        if desc.contains(&b'\n') {
             self.out.put(Literal);
         }
-        self.out.put(&desc);
+        self.out.put(desc.as_slice());
     }
 
     /// `saveInterchangeAttributes` (OCIOYaml.cpp:350-372).
@@ -209,12 +236,12 @@ impl OcioWriter {
             .put(Value)
             .put(BeginMap);
         for (k, v) in map.entries() {
-            let value = sanitize_newlines(v.text());
+            let value = sanitize_newlines(&self.resolve(v.text()));
             self.out.put(Key).put(k).put(Value);
-            if value.contains('\n') {
+            if value.contains(&b'\n') {
                 self.out.put(Literal);
             }
-            self.out.put(&value);
+            self.out.put(value.as_slice());
         }
         self.out.put(EndMap);
     }
@@ -318,7 +345,10 @@ impl OcioWriter {
             if key == "custom" {
                 self.out.put(Key).put("custom").put(Value).put(BeginMap);
                 for (k, v) in value.entries() {
-                    self.out.put(Key).put(k).put(Value).put(v.text());
+                    self.out.put(Key);
+                    self.string(k);
+                    self.out.put(Value);
+                    self.string(v.text());
                 }
                 self.out.put(EndMap);
             } else {
@@ -402,8 +432,10 @@ impl OcioWriter {
             self.out.put(Key).put("environment");
             self.out.put(Value).put(BeginMap);
             for (name, value) in env.entries() {
-                self.out.put(Key).put(name.as_str());
-                self.out.put(Value).put(value.text());
+                self.out.put(Key);
+                self.string(name);
+                self.out.put(Value);
+                self.string(value.text());
             }
             self.out.put(EndMap);
             self.out.put(Newline);
@@ -453,8 +485,10 @@ impl OcioWriter {
         self.out.put(Key).put("roles");
         self.out.put(Value).put(BeginMap);
         for (role, cs) in roles.entries() {
-            self.out.put(Key).put(role.as_str());
-            self.out.put(Value).put(cs.text());
+            self.out.put(Key);
+            self.string(role);
+            self.out.put(Value);
+            self.string(cs.text());
         }
         self.out.put(EndMap);
         self.out.put(Newline);
@@ -501,7 +535,8 @@ impl OcioWriter {
         self.out.put(Key).put("displays");
         self.out.put(Value).put(BeginMap);
         for (display, views) in displays.entries() {
-            self.out.put(Key).put(display.as_str());
+            self.out.put(Key);
+            self.string(display);
             self.out.put(Value);
             self.save_view_list(views);
         }

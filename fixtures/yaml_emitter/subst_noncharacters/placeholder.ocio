@@ -1,0 +1,108 @@
+ocio_profile_version: 2.5
+
+environment:
+  {}
+search_path: ""
+strictparsing: true
+luma: [0.2126, 0.7152, 0.0722]
+
+roles:
+  {}
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+
+displays:
+  d:
+    - !<View> {name: v0, colorspace: cs0, description: phxq0024}
+    - !<View> {name: v1, colorspace: cs0, description: phxq0025}
+    - !<View> {name: v2, colorspace: cs0, description: phxq0026}
+    - !<View> {name: v3, colorspace: cs0, description: phxq0027}
+    - !<View> {name: v4, colorspace: cs0, description: phxq0028}
+    - !<View> {name: v5, colorspace: cs0, description: phxq0029}
+    - !<View> {name: v6, colorspace: cs0, description: phxq0030}
+    - !<View> {name: v7, colorspace: cs0, description: phxq0031}
+
+active_displays: []
+active_views: []
+
+colorspaces:
+  - !<ColorSpace>
+    name: cs0
+    family: phxq0000
+    equalitygroup: ""
+    bitdepth: unknown
+    description: phxq0016
+    isdata: false
+    encoding: phxq0008
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs1
+    family: phxq0001
+    equalitygroup: ""
+    bitdepth: unknown
+    description: phxq0017
+    isdata: false
+    encoding: phxq0009
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs2
+    family: phxq0002
+    equalitygroup: ""
+    bitdepth: unknown
+    description: phxq0018
+    isdata: false
+    encoding: phxq0010
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs3
+    family: phxq0003
+    equalitygroup: ""
+    bitdepth: unknown
+    description: phxq0019
+    isdata: false
+    encoding: phxq0011
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs4
+    family: phxq0004
+    equalitygroup: ""
+    bitdepth: unknown
+    description: phxq0020
+    isdata: false
+    encoding: phxq0012
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs5
+    family: phxq0005
+    equalitygroup: ""
+    bitdepth: unknown
+    description: phxq0021
+    isdata: false
+    encoding: phxq0013
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs6
+    family: phxq0006
+    equalitygroup: ""
+    bitdepth: unknown
+    description: phxq0022
+    isdata: false
+    encoding: phxq0014
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs7
+    family: phxq0007
+    equalitygroup: ""
+    bitdepth: unknown
+    description: phxq0023
+    isdata: false
+    encoding: phxq0015
+    allocation: uniform

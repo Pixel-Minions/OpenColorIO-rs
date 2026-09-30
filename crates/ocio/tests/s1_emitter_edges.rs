@@ -9,6 +9,11 @@
 //! `serialize_built_config`) and returns `serialize()`. The test reads that text into a tree and
 //! writes it again with the calls OCIO makes (`common::ocio_writer`), giving the emitter the
 //! exact numbers of the spec, and the output must equal OCIO's byte for byte.
+//!
+//! Texts that can't be read back into the strings the config held (flow-map long keys,
+//! noncharacters in quoted and literal scalars, literal blocks with a CR or a leading space)
+//! are replayed by substitution: the tree comes from the same config with placeholders
+//! (`placeholder.ocio`), and the writer puts the strings back.
 
 mod common;
 
@@ -71,13 +76,45 @@ fn spec_numbers(spec: &Value, tree: &Node) -> VecDeque<Number> {
 
 /// Writes `expected` again from its tree and `spec`'s numbers, and compares.
 fn reemit(label: &str, spec: &Value, expected: &str) {
-    let tree = yaml_tree::parse(expected);
+    reemit_substituted(label, spec, expected, Vec::new(), expected);
+}
+
+/// Writes the config of `source` (a text with placeholders) with `substitutions` put back
+/// and `spec`'s numbers, and compares with `expected`.
+fn reemit_substituted(
+    label: &str,
+    spec: &Value,
+    source: &str,
+    substitutions: Vec<(String, Vec<u8>)>,
+    expected: &str,
+) {
+    let tree = yaml_tree::parse(source);
     let mut writer = OcioWriter::new();
     writer.values = Some(spec_numbers(spec, &tree));
+    let count = substitutions.len();
+    writer.substitutions = substitutions;
     writer.save_config(&tree);
     assert_text_eq(label, expected, writer.text());
     let left = writer.values.as_ref().map_or(0, VecDeque::len);
     assert_eq!(left, 0, "{label}: numbers of the spec not written");
+    assert_eq!(
+        writer.substituted.len(),
+        count,
+        "{label}: placeholders put back"
+    );
+}
+
+/// A case's `[[placeholder, string], ...]`.
+fn substitutions(case: &Value) -> Vec<(String, Vec<u8>)> {
+    case["substitutions"]
+        .as_array()
+        .expect("substitutions")
+        .iter()
+        .map(|pair| {
+            let text = |v: &Value| v.as_str().expect("a string").to_string();
+            (text(&pair[0]), text(&pair[1]).into_bytes())
+        })
+        .collect()
 }
 
 #[test]
@@ -86,13 +123,23 @@ fn edge_cases_reemit_byte_identically() {
         .into_iter()
         .filter(|p| p.ends_with("/spec.json"))
         .collect();
-    assert_eq!(specs.len(), 8, "the yaml_emitter cases: {specs:?}");
+    assert_eq!(specs.len(), 11, "the yaml_emitter cases: {specs:?}");
+    let mut substituted = 0;
     for spec_path in specs {
-        let spec: Value = serde_json::from_str(&fixtures::read_text(&spec_path))
+        let case: Value = serde_json::from_str(&fixtures::read_text(&spec_path))
             .unwrap_or_else(|e| panic!("{spec_path}: {e}"));
         let text_path = spec_path.replace("/spec.json", "/serialize.ocio");
-        reemit(&text_path, &spec, &fixtures::read_text(&text_path));
+        let expected = fixtures::read_text(&text_path);
+        if case.get("substitutions").is_some() {
+            let source = fixtures::read_text(&spec_path.replace("/spec.json", "/placeholder.ocio"));
+            let subs = substitutions(&case);
+            reemit_substituted(&text_path, &case["spec"], &source, subs, &expected);
+            substituted += 1;
+        } else {
+            reemit(&text_path, &case, &expected);
+        }
     }
+    assert_eq!(substituted, 3, "the substitution cases");
 }
 
 /// Numbers per kind in `random_numbers_serialize_like_the_wheel`: `OCIO_RS_S1_SWEEP`, or
