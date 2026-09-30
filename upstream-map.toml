@@ -3933,7 +3933,7 @@ path = "src/utils/NumberUtils.h"
 kind = "src"
 target = ["crates/ocio-ops/src/utils/number_utils.rs"]
 status = "done"
-note = "Both branches: std::from_chars (the Windows wheel, MSVC) and strtod_l/strtof_l/strtol_l in the C locale (the Linux wheel, GCC 14); Flavor::NATIVE picks the platform's."
+note = "Both branches: std::from_chars (the Windows wheel, MSVC) and strtod_l/strtof_l/strtol_l in the C locale (the Linux wheel, GCC 14); Flavor::NATIVE picks the platform's. Checked against glibc, UCRT and both wheels."
 
 [[file]]
 path = "src/utils/StringUtils.h"
