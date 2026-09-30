@@ -36,7 +36,7 @@ use ocio_ops::ops::log::log_utils::{
     get_log_side_break, get_log_side_break_libstdcxx, get_log_side_break_msvc,
 };
 use ocio_testkit::Oracle;
-use ocio_testkit::compare::assert_pixels_bits_eq_except_nan_bits;
+use ocio_testkit::compare::{assert_pixels_bits_eq, assert_pixels_bits_eq_except_nan_bits};
 use ocio_testkit::oracle::f32_to_bytes;
 use serde_json::{Value, json};
 
@@ -464,13 +464,182 @@ fn log_camera_transform_matches_the_wheel() {
     checks.finish();
 }
 
+/// LogAffineTransforms whose finite parameters overflow `float` (|value| >= FLT_MAX, or a base
+/// below the smallest subnormal), so that coefficients are infinite or NaN (`inf / inf`).
+fn extreme_affine_cases() -> [Affine; 3] {
+    [
+        Affine {
+            base: 1e39,
+            log_side_slope: [1e39, 0.5, -1e39],
+            log_side_offset: [0.1, 0.2, 0.3],
+            lin_side_slope: [1.0; 3],
+            lin_side_offset: [0.01, 0.02, 0.03],
+        },
+        Affine {
+            base: 1e-46,
+            log_side_slope: [1e39, 0.5, -1e39],
+            log_side_offset: [0.1, 0.2, 0.3],
+            lin_side_slope: [1.0; 3],
+            lin_side_offset: [0.01, 0.02, 0.03],
+        },
+        Affine {
+            base: 10.0,
+            log_side_slope: [0.3; 3],
+            log_side_offset: [1e39, -1e39, 0.3],
+            lin_side_slope: [1e39, -1e39, 1.0],
+            lin_side_offset: [-1e39, 1e39, 0.03],
+        },
+    ]
+}
+
+/// LogCameraTransforms whose finite parameters overflow `float` or `double`, so that the
+/// break, the linear slope and the linear offset are infinite or NaN, with different NaN
+/// signs: the default NaN of `inf / inf` is negative, a negated one positive, and on Linux
+/// glibc's `log2` of a negative number positive.
+fn extreme_camera_cases() -> Vec<Camera> {
+    let camera = |name,
+                  base,
+                  lin_side_break,
+                  log_side_slope,
+                  log_side_offset,
+                  lin_side_slope,
+                  lin_side_offset,
+                  linear_slope| Camera {
+        name,
+        base,
+        lin_side_break,
+        log_side_slope,
+        log_side_offset,
+        lin_side_slope,
+        lin_side_offset,
+        linear_slope,
+    };
+    vec![
+        camera(
+            "base 1e39, log slope 1e39, negative break",
+            1e39,
+            [-0.05, -0.1, -0.2],
+            [1e39; 3],
+            [0.0; 3],
+            [1.0; 3],
+            [0.0; 3],
+            None,
+        ),
+        camera(
+            "base 1e39, log slope 1e39, positive break",
+            1e39,
+            [0.1, 0.2, 0.3],
+            [1e39; 3],
+            [0.5; 3],
+            [1.0; 3],
+            [0.01; 3],
+            None,
+        ),
+        camera(
+            "base 1e-46, log slope -1e39, negative break",
+            1e-46,
+            [-0.05, -0.1, -0.2],
+            [-1e39; 3],
+            [0.0; 3],
+            [1.0; 3],
+            [0.0; 3],
+            None,
+        ),
+        // The computed linear slope is inf / inf in `double`, and the break on the log side
+        // +Inf: the linear segment covers every finite input, with two NaN coefficients.
+        camera(
+            "overflowing computed slope",
+            10.0,
+            [1e200, 1e200, 0.1],
+            [1e200, 1e200, 0.3],
+            [0.5; 3],
+            [1e200, 1e200, 1.0],
+            [0.0; 3],
+            None,
+        ),
+        camera(
+            "linear slope 1e39, zero break",
+            2.0,
+            [0.0; 3],
+            [0.25; 3],
+            [0.5; 3],
+            [1.0; 3],
+            [0.0; 3],
+            Some([1e39, -1e39, 1e39]),
+        ),
+        camera(
+            "negative lin side to -inf",
+            2.0,
+            [-1e300, -0.1, 0.1],
+            [1e39, 1.0, 1.0],
+            [0.0; 3],
+            [1e10, 1.0, 1.0],
+            [0.0; 3],
+            None,
+        ),
+        // `linSlope * linBreak` overflows to -Inf in `double` with a finite break: the linear
+        // slope is NaN (inf / -inf), and on Linux so is the break on the log side (glibc's
+        // `log2(-inf)`, positive), so the lin-to-log linear segment adds two different NaNs.
+        camera(
+            "overflowing lin side, finite break",
+            2.0,
+            [-2.0, -2.0, -2.0],
+            [2.0; 3],
+            [0.0; 3],
+            [1.7e308; 3],
+            [0.0; 3],
+            None,
+        ),
+    ]
+}
+
+/// Finite parameters that overflow, against the wheel, bit for bit (W0002 covers NaN
+/// parameters only). Their NaN coefficients reach the sites where the wheels' machine code
+/// does not use upstream's source order: the camera log-to-lin linear segment (both wheels)
+/// and `GetLogSideBreak` (Linux).
+#[test]
+fn extreme_finite_parameters_match_the_wheel() {
+    let mut checks = Checks::default();
+    for (i, case) in extreme_affine_cases().iter().enumerate() {
+        for dir in DIRECTIONS {
+            let data = black_box(case.op(dir));
+            for math in Math::BOTH {
+                let renderer = get_log_renderer(&data, math.fast());
+                let label = format!("extreme LogAffineTransform {i} {dir:?}");
+                checks.check(
+                    &label,
+                    &case.spec(dir),
+                    math,
+                    probe_rgba(),
+                    renderer.as_ref(),
+                );
+            }
+        }
+    }
+    for case in extreme_camera_cases() {
+        let input = probe_rgba_with(&case.break_points());
+        for dir in DIRECTIONS {
+            let data = black_box(case.op(dir));
+            for math in Math::BOTH {
+                let renderer = get_log_renderer(&data, math.fast());
+                let label = format!("extreme LogCameraTransform {} {dir:?}", case.name);
+                checks.check(&label, &case.spec(dir), math, &input, renderer.as_ref());
+            }
+        }
+    }
+    checks.finish();
+}
+
 /// NaN parameters, which OCIO 2.5.2 accepts (YAML `.nan`), against the wheel.
 ///
-/// Waiver W0002: where a NaN parameter meets a NaN pixel value in one operation, the NaN that
-/// comes out depends on the operand order that MSVC or GCC chose for the expression; the port
-/// follows upstream's source order (`math_utils::sse_add`/`sse_mul`). In the channels with a
-/// NaN parameter, a NaN from the wheel only has to be NaN in the port. Every other value,
-/// alpha included, is compared bit for bit.
+/// Where a NaN parameter meets a NaN pixel value in one operation, the NaN that comes out
+/// depends on the operand order in the wheel's machine code. The port follows it where MSVC
+/// and GCC agree (`math_utils::sse_add`/`sse_mul`), so every case is compared bit for bit but
+/// one. In `Log2LinRenderer`, MSVC swapped the operands of the red and green `+ minusb` and of
+/// the blue `+ minuskb` (at 0x180211650, 0x18021165f and 0x1802115fb) and GCC did not, so the
+/// port keeps the source order there. For that case (the first LogAffineTransform, inverse,
+/// fast math off), waiver W0002 applies: in the channels with a NaN parameter, a NaN from the
+/// wheel only has to be NaN in the port, and every other value is still compared bit for bit.
 #[test]
 fn nan_parameters_match_the_wheel_under_waiver_w0002() {
     let nan = f64::NAN;
@@ -500,21 +669,20 @@ fn nan_parameters_match_the_wheel_under_waiver_w0002() {
         lin_side_offset: [nan, 0.02, 0.01],
         linear_slope: Some([1.2, 1.0, nan]),
     };
-    let mut cases: Vec<(String, String, LogOpData)> = Vec::new();
+    // (label, YAML, op data, whether W0002 applies with fast math off)
+    let mut cases: Vec<(String, String, LogOpData, bool)> = Vec::new();
     for dir in DIRECTIONS {
         for (i, a) in affine.iter().enumerate() {
-            cases.push((
-                format!("LogAffineTransform {i} {dir:?}"),
-                a.yaml(dir),
-                a.op(dir),
-            ));
+            let w0002 = i == 0 && dir == Inverse;
+            let label = format!("LogAffineTransform {i} {dir:?}");
+            cases.push((label, a.yaml(dir), a.op(dir), w0002));
         }
         let label = format!("LogCameraTransform {dir:?}");
-        cases.push((label, camera.yaml(dir), camera.op(dir)));
+        cases.push((label, camera.yaml(dir), camera.op(dir), false));
     }
 
     let input = probe_rgba();
-    for (label, yaml, data) in cases {
+    for (label, yaml, data, w0002) in cases {
         // The channels with a NaN parameter or a NaN base; the op passes alpha through.
         let params = [data.red_params(), data.green_params(), data.blue_params()];
         let nan_channel = |c: usize| data.base().is_nan() || params[c].iter().any(|p| p.is_nan());
@@ -523,15 +691,20 @@ fn nan_parameters_match_the_wheel_under_waiver_w0002() {
             let expected = oracle_apply_yaml(&yaml, math, input);
             let mut actual = input.to_vec();
             get_log_renderer(&black_box(data.clone()), math.fast()).apply(&mut actual);
-            let waived = assert_pixels_bits_eq_except_nan_bits(
-                &format!("{label} ({math:?}), {yaml}"),
-                "W0002",
-                &waived_channels,
-                input,
-                &expected,
-                &actual,
-            );
-            println!("{label} ({math:?}): {waived} NaN values differ in their bits only (W0002)");
+            let label = format!("{label} ({math:?}), {yaml}");
+            if w0002 && math == Math::Exact {
+                let waived = assert_pixels_bits_eq_except_nan_bits(
+                    &label,
+                    "W0002",
+                    &waived_channels,
+                    input,
+                    &expected,
+                    &actual,
+                );
+                println!("{label}: {waived} NaN values differ in their bits only (W0002)");
+            } else {
+                assert_pixels_bits_eq(&label, input, 4, &expected, &actual);
+            }
         }
     }
 }

@@ -23,8 +23,11 @@
 //! Both were read from the wheels' machine code (`docs/spikes/s2-s5.md`). The port does what
 //! each platform's wheel does (PLAN.md D12).
 //!
-//! The additions and multiplications use [`sse_add`]/[`sse_mul`], in the operand order of
-//! upstream's source, so that two NaN parameters give the same NaN in every build.
+//! The additions and multiplications use [`sse_add`]/[`sse_mul`], so that two NaN operands
+//! give the same NaN in every build, in the order the wheels' machine code uses. That is
+//! upstream's source order except at the sites whose comments cite the wheels' addresses.
+//! Where the two compilers chose different orders and only NaN parameters can reach the site,
+//! the port keeps the source order (waiver W0002).
 
 use super::log_op_data::{
     LIN_SIDE_BREAK, LIN_SIDE_OFFSET, LIN_SIDE_SLOPE, LINEAR_SLOPE, LOG_SIDE_OFFSET, LOG_SIDE_SLOPE,
@@ -49,9 +52,11 @@ pub fn get_linear_slope(params: &Params, base: f64) -> f32 {
     if params.len() > LINEAR_SLOPE {
         params[LINEAR_SLOPE] as f32
     } else {
-        // logSlope * linSlope / ((linSlope * linBreak + linOffset) * log(base))
+        // logSlope * linSlope / ((linSlope * linBreak + linOffset) * log(base)). Both wheels
+        // multiply `log(base) * (...)` (Windows at 0x18021abf1, Linux at 0x40178b); the
+        // numerator's order differs between them, and only NaN parameters reach it.
         (sse_mul(params[LOG_SIDE_SLOPE], params[LIN_SIDE_SLOPE])
-            / sse_mul(log_argument_at_break(params), base.ln())) as f32
+            / sse_mul(base.ln(), log_argument_at_break(params))) as f32
     }
 }
 
@@ -96,9 +101,14 @@ pub fn get_log_side_break_msvc(params: &Params, base: f64) -> f32 {
 ///
 /// ```text
 /// float logSideBreak = (float)log2((double)(float)(linSlope * linBreak + linOffset));
-/// logSideBreak = (float)((double)logSideBreak * ((double)(float)logSlope / log2((double)(float)base)));
-/// logSideBreak += (float)logOffset;
+/// double factor = (double)(float)logSlope / log2((double)(float)base);
+/// logSideBreak = (float)(factor * (double)logSideBreak);
+/// logSideBreak = (float)logOffset + logSideBreak;
 /// ```
+///
+/// GCC swapped the operands of `*=` and `+=` (the Linux wheel's `LogUtil::GetLogSideBreak` at
+/// 0x4017b0). It matters when two NaNs meet: the glibc `log2` below returns a positive NaN for
+/// a negative argument, and finite parameters that overflow make the factor a negative NaN.
 ///
 /// Port of `LogUtil::GetLogSideBreak` (src/OpenColorIO/ops/log/LogUtils.cpp:270-281 @ v2.5.2),
 /// Linux wheel.
@@ -107,8 +117,8 @@ pub fn get_log_side_break_libstdcxx(params: &Params, base: f64) -> f32 {
     let mut log_side_break = log2_glibc_2_2_5(f64::from(lin)) as f32;
     let factor =
         f64::from(params[LOG_SIDE_SLOPE] as f32) / log2_glibc_2_2_5(f64::from(base as f32));
-    log_side_break = sse_mul(f64::from(log_side_break), factor) as f32;
-    sse_add(log_side_break, params[LOG_SIDE_OFFSET] as f32)
+    log_side_break = sse_mul(factor, f64::from(log_side_break)) as f32;
+    sse_add(params[LOG_SIDE_OFFSET] as f32, log_side_break)
 }
 
 /// `log2` as the Linux wheel links it: `log2@GLIBC_2.2.5` (the wheel was built against a
@@ -128,9 +138,10 @@ fn log2_glibc_2_2_5(x: f64) -> f64 {
 }
 
 /// The offset of the camera style's linear segment, in `float`:
-/// `logSideBreak - linearSlope * (float)linSideBreak`.
+/// `logSideBreak - linearSlope * (float)linSideBreak`. Both wheels multiply
+/// `(float)linSideBreak * linearSlope` (Windows at 0x18021ab8c, Linux at 0x40185f).
 ///
 /// Port of `LogUtil::GetLinearOffset` (src/OpenColorIO/ops/log/LogUtils.cpp:283-286 @ v2.5.2).
 pub fn get_linear_offset(params: &Params, linear_slope: f32, log_side_break: f32) -> f32 {
-    log_side_break - sse_mul(linear_slope, params[LIN_SIDE_BREAK] as f32)
+    log_side_break - sse_mul(params[LIN_SIDE_BREAK] as f32, linear_slope)
 }

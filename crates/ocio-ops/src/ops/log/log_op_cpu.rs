@@ -16,12 +16,14 @@
 //!
 //! # Two NaN operands
 //!
-//! A NaN pixel can meet a NaN coefficient: the camera coefficients derived from a NaN break on
-//! the log side (a negative `linSideSlope * linSideBreak + linSideOffset`), or NaN parameters,
-//! which OCIO 2.5.2 accepts. x86 then returns the first operand's NaN, so the operand order
-//! decides the result. The renderers add and multiply their coefficients with
-//! [`sse_add`]/[`sse_mul`], in the operand order of upstream's source; Rust's `+` and `*`
-//! would leave it to LLVM. (The Log2/Log10 renderers only multiply by constants.)
+//! A NaN pixel can meet a NaN coefficient, or two NaN coefficients can meet: coefficients
+//! derived from a NaN break on the log side (a negative `linSideSlope * linSideBreak +
+//! linSideOffset`) or from finite parameters that overflow (`inf / inf`, `inf * 0`), or NaN
+//! parameters, which OCIO 2.5.2 accepts. x86 then returns the first operand's NaN, so the
+//! operand order decides the result. The renderers add and multiply their coefficients with
+//! [`sse_add`]/[`sse_mul`], in the order the wheels' machine code uses: upstream's source order,
+//! except where the comments say otherwise. Rust's `+` and `*` would leave it to LLVM. (The
+//! Log2/Log10 renderers only multiply by constants.)
 
 use std::sync::Arc;
 
@@ -462,8 +464,11 @@ impl CpuOp for CameraLog2LinRenderer {
             for (i, v) in px[..3].iter_mut().enumerate() {
                 let x = *v;
                 *v = if x < self.base.log_side_break[i] {
-                    // m_linsinv[i] * (in[i] + m_minuslino[i])
-                    sse_mul(self.linsinv[i], sse_add(x, self.minuslino[i]))
+                    // `m_linsinv[i] * (in[i] + m_minuslino[i])`, which both wheels compile as
+                    // `(in[i] + m_minuslino[i]) * m_linsinv[i]` (Windows at 0x180210d18,
+                    // Linux at 0x3f26c0). Finite parameters that overflow can make both
+                    // coefficients NaN, with different signs.
+                    sse_mul(sse_add(x, self.minuslino[i]), self.linsinv[i])
                 } else {
                     let mut out = sse_mul(sse_add(x, self.minuskb[i]), self.kinv[i]);
                     out = out.exp2();

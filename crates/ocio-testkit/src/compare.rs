@@ -129,6 +129,10 @@ pub fn assert_pixels_bits_eq(
 /// channels that is not NaN in `expected`, must match bit for bit. `waived_channels` has one
 /// entry per channel of a pixel.
 ///
+/// The relaxation covers every NaN output of a waived channel, whatever produced it: not only
+/// where a NaN parameter meets a NaN pixel, but also, for example, where a finite pixel meets
+/// two NaN parameters in turn. Callers waive only the channels (and cases) that need it.
+///
 /// Returns how many values matched only as NaN, so a test can show what the waiver covered.
 #[track_caller]
 pub fn assert_pixels_bits_eq_except_nan_bits(

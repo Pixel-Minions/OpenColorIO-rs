@@ -25,9 +25,12 @@
 //! # Two NaN operands
 //!
 //! With NaN parameters, which OCIO 2.5.2 accepts, a NaN pixel can meet a NaN coefficient of a
-//! moncurve renderer, and x86 returns the first operand's NaN. The moncurve renderers multiply
-//! and add with [`sse_mul`]/[`sse_add`], in the operand order of upstream's source; Rust's `*`
-//! and `+` would leave it to LLVM. (The sign factor of the scalar mirror styles is never NaN.)
+//! moncurve renderer, and x86 returns the first operand's NaN. (Parameters that are not NaN
+//! give finite coefficients: `GammaOpData` bounds them.) The moncurve renderers multiply and
+//! add with [`sse_mul`]/[`sse_add`], in upstream's source order, except where both wheels'
+//! machine code uses another order (a comment cites it). Where the two compilers chose
+//! different orders, the port keeps the source order (waiver W0002). Rust's `*` and `+` would
+//! leave the order to LLVM. (The sign factor of the scalar mirror styles is never NaN.)
 
 use std::sync::Arc;
 
@@ -523,7 +526,9 @@ impl CpuOp for GammaMoncurveMirrorOpCpuFwd {
             let pixel = input.map(f32::abs);
             let data: [f32; 4] = [0, 1, 2, 3].map(|c| {
                 let p = &self.params[c];
-                sse_add(sse_mul(pixel[c], p.scale), p.offset).powf(p.gamma)
+                // `pixel * scale + offset`: both wheels multiply `scale * pixel`, in every
+                // channel (Windows at 0x1801bdeb4, Linux at 0x384ea5).
+                sse_add(sse_mul(p.scale, pixel[c]), p.offset).powf(p.gamma)
             });
             for c in 0..4 {
                 let p = &self.params[c];

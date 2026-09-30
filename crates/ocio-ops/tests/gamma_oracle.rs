@@ -27,7 +27,7 @@ use ocio_ops::open_color_types::TransformDirection::{self, Forward, Inverse};
 use ocio_ops::ops::gamma::gamma_op_cpu::get_gamma_renderer;
 use ocio_ops::ops::gamma::gamma_op_data::{GammaOpData, GammaStyle};
 use ocio_ops::ops::gamma::gamma_op_utils::{compute_params_fwd, compute_params_rev};
-use ocio_testkit::compare::assert_pixels_bits_eq_except_nan_bits;
+use ocio_testkit::compare::{assert_pixels_bits_eq, assert_pixels_bits_eq_except_nan_bits};
 use serde_json::{Value, json};
 
 const DIRECTIONS: [TransformDirection; 2] = [Forward, Inverse];
@@ -213,15 +213,19 @@ fn yaml_style(style: NegativeStyle) -> &'static str {
 
 /// NaN parameters, which OCIO 2.5.2 accepts (YAML `.nan`), against the wheel.
 ///
-/// Waiver W0002: where a NaN parameter meets a NaN pixel value in one operation, the NaN that
-/// comes out depends on the operand order that MSVC or GCC chose for the expression; the port
-/// follows upstream's source order (`math_utils::sse_add`/`sse_mul`). In the channels with a
-/// NaN parameter, a NaN from the wheel only has to be NaN in the port. Every other value is
-/// compared bit for bit.
+/// Where a NaN parameter meets a NaN pixel value in one operation, the NaN that comes out
+/// depends on the operand order in the wheel's machine code. The port follows it where MSVC
+/// and GCC agree (`math_utils::sse_add`/`sse_mul`), so every case is compared bit for bit but
+/// one. In `GammaMoncurveOpCPUFwd`, GCC multiplies `scale * pixel` in every channel (at
+/// 0x384695) and MSVC `pixel * scale` (at 0x1801bea9e), so the port keeps the source order
+/// there. For that case (ExponentWithLinearTransform, linear style, forward, fast math off),
+/// waiver W0002 applies: in the channels with a NaN parameter, a NaN from the wheel only has
+/// to be NaN in the port, and every other value is still compared bit for bit.
 #[test]
 fn nan_parameters_match_the_wheel_under_waiver_w0002() {
     let nan = f64::NAN;
-    let mut cases: Vec<(String, String, GammaOpData)> = Vec::new();
+    // (label, YAML, op data, whether W0002 applies with fast math off)
+    let mut cases: Vec<(String, String, GammaOpData, bool)> = Vec::new();
     for dir in DIRECTIONS {
         let value = [2.2, nan, 1.8, 1.0];
         for neg in [
@@ -236,7 +240,7 @@ fn nan_parameters_match_the_wheel_under_waiver_w0002() {
                 yaml_direction(dir)
             );
             let label = format!("ExponentTransform {neg:?} {dir:?}");
-            cases.push((label, yaml, exponent_op(value, neg, dir)));
+            cases.push((label, yaml, exponent_op(value, neg, dir), false));
         }
         let (gamma, offset) = ([2.4, nan, 2.2, 1.8], [0.055, 0.1, nan, 0.2]);
         for neg in [NegativeStyle::Linear, NegativeStyle::Mirror] {
@@ -249,16 +253,14 @@ fn nan_parameters_match_the_wheel_under_waiver_w0002() {
                 yaml_direction(dir)
             );
             let label = format!("ExponentWithLinearTransform {neg:?} {dir:?}");
-            cases.push((
-                label,
-                yaml,
-                exponent_with_linear_op(gamma, offset, neg, dir),
-            ));
+            let data = exponent_with_linear_op(gamma, offset, neg, dir);
+            let w0002 = neg == NegativeStyle::Linear && dir == Forward;
+            cases.push((label, yaml, data, w0002));
         }
     }
 
     let input = probe_rgba();
-    for (label, yaml, data) in cases {
+    for (label, yaml, data, w0002) in cases {
         let params = [
             data.red_params(),
             data.green_params(),
@@ -270,15 +272,20 @@ fn nan_parameters_match_the_wheel_under_waiver_w0002() {
             let expected = oracle_apply_yaml(&yaml, math, input);
             let mut actual = input.to_vec();
             get_gamma_renderer(&black_box(data.clone()), math.fast()).apply(&mut actual);
-            let waived = assert_pixels_bits_eq_except_nan_bits(
-                &format!("{label} ({math:?}), {yaml}"),
-                "W0002",
-                &waived_channels,
-                input,
-                &expected,
-                &actual,
-            );
-            println!("{label} ({math:?}): {waived} NaN values differ in their bits only (W0002)");
+            let label = format!("{label} ({math:?}), {yaml}");
+            if w0002 && math == Math::Exact {
+                let waived = assert_pixels_bits_eq_except_nan_bits(
+                    &label,
+                    "W0002",
+                    &waived_channels,
+                    input,
+                    &expected,
+                    &actual,
+                );
+                println!("{label}: {waived} NaN values differ in their bits only (W0002)");
+            } else {
+                assert_pixels_bits_eq(&label, input, 4, &expected, &actual);
+            }
         }
     }
 }
