@@ -70,6 +70,22 @@ engine (`CreateCPUEngine`: the first and last ops absorb the bit-depth conversio
 is special-cased) → `ScanlineHelper` (packing and unpacking per scanline, with a scratch
 buffer of `m_width` pixels).
 
+## Strings are bytes
+
+OCIO's strings are C byte strings (`std::string`, `const char *`). They are usually UTF-8, but
+not always. The S1 review showed this through the wheel:
+- a config loaded from a Latin-1 file keeps and re-serializes its raw bytes;
+- Python `bytes` arguments are accepted as they are;
+- yaml-cpp's lenient decoding turns an overlong `C0 80` into a NUL, and `serialize()` and the
+  config cache ID are truncated at that NUL.
+
+So OCIO string data (names, descriptions, families, categories, paths, environment values,
+metadata) is stored as bytes with no interior NUL, never as Rust `String`. The emitter and
+hashing take bytes. Public Rust getters and setters work on bytes, with `&str` conveniences.
+The exact API shape is decided with the owner in Phase 3, where the config model is built.
+Python follows pybind11: `str` arguments become UTF-8 bytes, and `bytes` arguments pass through
+unchanged.
+
 ## Errors, logging and environment
 
 - `ocio_ops::Exception` holds upstream's message verbatim and whether it is
