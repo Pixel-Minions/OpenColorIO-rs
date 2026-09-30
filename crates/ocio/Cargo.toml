@@ -16,6 +16,9 @@ ocio-gpu.workspace = true
 
 [dev-dependencies]
 ocio-testkit.workspace = true
+saphyr-parser.workspace = true
+serde_json.workspace = true
+xxhash-rust.workspace = true
 
 [lints]
 workspace = true

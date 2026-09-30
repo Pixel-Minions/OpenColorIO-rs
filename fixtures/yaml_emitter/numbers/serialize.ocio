@@ -1,0 +1,196 @@
+ocio_profile_version: 2.5
+
+environment:
+  {}
+search_path: ""
+strictparsing: true
+luma: [.nan, .inf, 0.0722]
+
+roles:
+  {}
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+
+displays:
+  {}
+
+active_displays: []
+active_views: []
+
+colorspaces:
+  - !<ColorSpace>
+    name: vars0
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    allocationvars: [.inf, -.inf, .nan]
+
+  - !<ColorSpace>
+    name: vars1
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    allocationvars: [.nan, .nan, 0]
+
+  - !<ColorSpace>
+    name: vars2
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    allocationvars: [-0, 1.401298e-45, 1.175494e-38]
+
+  - !<ColorSpace>
+    name: vars3
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    allocationvars: [1.175494e-38, 3.402823e+38, -1.401298e-45]
+
+  - !<ColorSpace>
+    name: vars4
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    allocationvars: [-3.402823e+38, 1234568, 1234568]
+
+  - !<ColorSpace>
+    name: vars5
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    allocationvars: [123456.8, 123456.2, 1.234568e+07]
+
+  - !<ColorSpace>
+    name: vars6
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    allocationvars: [1.234566e+07, 9999999, 1e+07]
+
+  - !<ColorSpace>
+    name: vars7
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    allocationvars: [1.677722e+07, 1.677722e+07, 1e-05]
+
+  - !<ColorSpace>
+    name: vars8
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    allocationvars: [0.0001, 0.1, 0.2]
+
+  - !<ColorSpace>
+    name: vars9
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    allocationvars: [0.3333333, 3.402823e+38, 1.175494e-38]
+
+  - !<ColorSpace>
+    name: vars10
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    allocationvars: [1.401298e-45, 0.2126, 0.5]
+
+  - !<ColorSpace>
+    name: vars11
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    allocationvars: [1, 100, 1e+10]
+
+  - !<ColorSpace>
+    name: vars12
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    allocationvars: [1e-10, 3.141593, 1e+07]
+
+  - !<ColorSpace>
+    name: vars13
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    allocationvars: [1000000, 999999.9, 0.09999999]
+
+  - !<ColorSpace>
+    name: vars14
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    allocationvars: [1, 0.9999999, 0.5]
+
+  - !<ColorSpace>
+    name: matrices
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GroupTransform>
+      children:
+        - !<MatrixTransform> {matrix: [.inf, -.inf, .nan, .nan, .nan, .nan, 0, -0, 4.94065645841247e-324, 2.2250738585072e-308, 2.2250738585072e-308, 1.79769313486232e+308, -4.94065645841247e-324, -1.79769313486232e+308, 123456789012344, 123456789012346], offset: [12345678901234.2, 12345678901234.8, 1.23456789012346e+15, 1.23456789012346e+15]}
+        - !<MatrixTransform> {matrix: [1e+15, 999999999999999, 100000000000000, 1e+15, 1e+16, 1e+17, 1.23456789012346e+17, 1e-05, 0.0001, 9.99999999999999e-05, 0.0001, 0.1, 0.2, 0.3, 0.333333333333333, 0.666666666666667], offset: [0.5, 1, -1, 3.14159265358979]}
+        - !<MatrixTransform> {matrix: [2.71828182845905, 0.2126, 0.7152, 0.0722, 1e+22, 1e+23, 9.00719925474099e+15, 4.5035996273705e+15, 0.3, 1, 1, 100, 1e+100, 1e-100, 1e+300, 1e-300], offset: [123.456, -0.001234, 0.5, 0.5]}
+    from_scene_reference: !<GroupTransform>
+      children:
+        - !<AllocationTransform> {allocation: lg2, vars: [.inf, -.inf, .nan]}
+        - !<AllocationTransform> {allocation: lg2, vars: [.nan, .nan, 0]}
+        - !<AllocationTransform> {allocation: lg2, vars: [-0, 1.401298e-45, 1.175494e-38]}
+        - !<AllocationTransform> {allocation: lg2, vars: [1.175494e-38, 3.402823e+38, -1.401298e-45]}
+        - !<AllocationTransform> {allocation: lg2, vars: [-3.402823e+38, 1234568, 1234568]}
+        - !<AllocationTransform> {allocation: lg2, vars: [123456.8, 123456.2, 1.234568e+07]}
+        - !<AllocationTransform> {allocation: lg2, vars: [1.234566e+07, 9999999, 1e+07]}
+        - !<AllocationTransform> {allocation: lg2, vars: [1.677722e+07, 1.677722e+07, 1e-05]}
+        - !<AllocationTransform> {allocation: lg2, vars: [0.0001, 0.1, 0.2]}
+        - !<AllocationTransform> {allocation: lg2, vars: [0.3333333, 3.402823e+38, 1.175494e-38]}
+        - !<AllocationTransform> {allocation: lg2, vars: [1.401298e-45, 0.2126, 0.5]}
+        - !<AllocationTransform> {allocation: lg2, vars: [1, 100, 1e+10]}
+        - !<AllocationTransform> {allocation: lg2, vars: [1e-10, 3.141593, 1e+07]}
+        - !<AllocationTransform> {allocation: lg2, vars: [1000000, 999999.9, 0.09999999]}
+        - !<AllocationTransform> {allocation: lg2, vars: [1, 0.9999999, 0.5]}
+
+  - !<ColorSpace>
+    name: empty group
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GroupTransform>
+      children:
+        []

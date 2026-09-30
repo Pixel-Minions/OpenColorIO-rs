@@ -1,0 +1,109 @@
+ocio_profile_version: 2.5
+
+environment:
+  {}
+search_path: ""
+strictparsing: true
+luma: [0.2126, 0.7152, 0.0722]
+description: phxq0000
+
+roles:
+  {}
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+
+displays:
+  {}
+
+active_displays: []
+active_views: []
+
+colorspaces:
+  - !<ColorSpace>
+    name: cs0
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: phxq0001
+    isdata: false
+    interchange:
+      amf_transform_ids: phxq0009
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs1
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: phxq0002
+    isdata: false
+    interchange:
+      amf_transform_ids: phxq0010
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs2
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: phxq0003
+    isdata: false
+    interchange:
+      amf_transform_ids: phxq0011
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs3
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: phxq0004
+    isdata: false
+    interchange:
+      amf_transform_ids: phxq0012
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs4
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: phxq0005
+    isdata: false
+    interchange:
+      amf_transform_ids: phxq0013
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs5
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: phxq0006
+    isdata: false
+    interchange:
+      amf_transform_ids: phxq0014
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs6
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: phxq0007
+    isdata: false
+    interchange:
+      amf_transform_ids: phxq0015
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs7
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: phxq0008
+    isdata: false
+    interchange:
+      amf_transform_ids: phxq0016
+    allocation: uniform

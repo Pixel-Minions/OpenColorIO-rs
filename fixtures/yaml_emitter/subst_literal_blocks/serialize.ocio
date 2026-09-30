@@ -1,0 +1,143 @@
+ocio_profile_version: 2.5
+
+environment:
+  {}
+search_path: ""
+strictparsing: true
+luma: [0.2126, 0.7152, 0.0722]
+description: |
+   a
+  b
+
+roles:
+  {}
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+
+displays:
+  {}
+
+active_displays: []
+active_views: []
+
+colorspaces:
+  - !<ColorSpace>
+    name: cs0
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+       a
+      b
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+         a
+        b
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs1
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+        a
+       b
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+          a
+         b
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs2
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+      	a
+      b
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+        	a
+        b
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs3
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+      a
+      b
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+        a
+        b
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs4
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+      ab
+      c
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+        ab
+        c
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs5
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+      
+      a
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+        
+        a
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs6
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+      a
+      
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+        a
+        
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs7
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+      x
+       y
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+        x
+         y
+    allocation: uniform

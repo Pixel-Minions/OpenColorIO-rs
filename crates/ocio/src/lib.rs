@@ -5,6 +5,8 @@
 //! (PLAN.md §2): results, text output, errors and accepted configs.
 #![forbid(unsafe_code)]
 
+pub mod yaml_cpp;
+
 /// The OpenColorIO version this port matches, as `OCIO::GetVersion()` reports it.
 pub const fn version() -> &'static str {
     "2.5.2"

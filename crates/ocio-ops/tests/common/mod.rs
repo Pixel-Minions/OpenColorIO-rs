@@ -9,6 +9,8 @@
 
 #![allow(dead_code)] // Each test crate uses a subset.
 
+pub(crate) mod numbers;
+
 use std::sync::OnceLock;
 
 use ocio_ops::op::CpuOp;

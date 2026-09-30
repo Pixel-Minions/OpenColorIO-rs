@@ -1,0 +1,333 @@
+ocio_profile_version: 2.5
+
+environment:
+  {}
+search_path: ""
+strictparsing: true
+family_separator: "~"
+luma: [0.2126, 0.7152, 0.0722]
+name: café 日本
+
+roles:
+  role0 café: cs0
+  role1 été: cs0
+  role10 a b: cs0
+  role11 a­b: cs0
+  role12 a b: cs0
+  role13 a b: cs0
+  "role14 a\ufeffb": cs0
+  "role15 \ufeff": cs0
+  role16 �: cs0
+  role17 ab: cs0
+  role18 􏿿: cs0
+  role19 Αβγ: cs0
+  role2 日本語: cs0
+  role20 مرحبا: cs0
+  "role21 a: é": cs0
+  "role22 é: a": cs0
+  role23 - é: cs0
+  "role24 é #x": cs0
+  role25 é,é: cs0
+  role3 😀: cs0
+  role4 a😀b: cs0
+  role5  lead: cs0
+  role6 trail : cs0
+  "role7 a\x80b": cs0
+  role8 ab: cs0
+  "role9 a\x9fb": cs0
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+
+displays:
+  {}
+
+active_displays: []
+active_views: []
+
+colorspaces:
+  - !<ColorSpace>
+    name: cs0
+    aliases: [alias0 café]
+    family: café
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    interchange:
+      icc_profile_name: café
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs1
+    aliases: [alias1 été]
+    family: été
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    interchange:
+      icc_profile_name: été
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs2
+    aliases: [alias2 日本語]
+    family: 日本語
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    interchange:
+      icc_profile_name: 日本語
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs3
+    aliases: [alias3 😀]
+    family: 😀
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    interchange:
+      icc_profile_name: 😀
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs4
+    aliases: [alias4 a😀b]
+    family: a😀b
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    interchange:
+      icc_profile_name: a😀b
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs5
+    aliases: [alias5  lead]
+    family:  lead
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    interchange:
+      icc_profile_name:  lead
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs6
+    aliases: [alias6 trail ]
+    family: trail 
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    interchange:
+      icc_profile_name: trail 
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs7
+    aliases: ["alias7 a\x80b"]
+    family: "a\x80b"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    interchange:
+      icc_profile_name: "a\x80b"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs8
+    aliases: [alias8 ab]
+    family: ab
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    interchange:
+      icc_profile_name: ab
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs9
+    aliases: ["alias9 a\x9fb"]
+    family: "a\x9fb"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    interchange:
+      icc_profile_name: "a\x9fb"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs10
+    aliases: [alias10 a b]
+    family: a b
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    interchange:
+      icc_profile_name: a b
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs11
+    aliases: [alias11 a­b]
+    family: a­b
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    interchange:
+      icc_profile_name: a­b
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs12
+    aliases: [alias12 a b]
+    family: a b
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    interchange:
+      icc_profile_name: a b
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs13
+    aliases: [alias13 a b]
+    family: a b
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    interchange:
+      icc_profile_name: a b
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs14
+    aliases: ["alias14 a\ufeffb"]
+    family: "a\ufeffb"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    interchange:
+      icc_profile_name: "a\ufeffb"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs15
+    aliases: ["alias15 \ufeff"]
+    family: "\ufeff"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    interchange:
+      icc_profile_name: "\ufeff"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs16
+    aliases: [alias16 �]
+    family: �
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    interchange:
+      icc_profile_name: �
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs17
+    aliases: [alias17 ab]
+    family: ab
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    interchange:
+      icc_profile_name: ab
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs18
+    aliases: [alias18 􏿿]
+    family: 􏿿
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    interchange:
+      icc_profile_name: 􏿿
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs19
+    aliases: [alias19 Αβγ]
+    family: Αβγ
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    interchange:
+      icc_profile_name: Αβγ
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs20
+    aliases: [alias20 مرحبا]
+    family: مرحبا
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    interchange:
+      icc_profile_name: مرحبا
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs21
+    aliases: ["alias21 a: é"]
+    family: "a: é"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    interchange:
+      icc_profile_name: "a: é"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs22
+    aliases: ["alias22 é: a"]
+    family: "é: a"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    interchange:
+      icc_profile_name: "é: a"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs23
+    aliases: [alias23 - é]
+    family: "- é"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    interchange:
+      icc_profile_name: "- é"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs24
+    aliases: ["alias24 é #x"]
+    family: "é #x"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    interchange:
+      icc_profile_name: "é #x"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs25
+    aliases: ["alias25 é,é"]
+    family: é,é
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    interchange:
+      icc_profile_name: é,é
+    allocation: uniform

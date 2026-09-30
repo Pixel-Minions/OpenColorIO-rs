@@ -1,0 +1,531 @@
+ocio_profile_version: 2.5
+
+environment:
+  {}
+search_path: ""
+strictparsing: true
+family_separator: a
+luma: [0.2126, 0.7152, 0.0722]
+description: |
+  Config description
+
+  Second paragraph: with a colon.
+
+roles:
+  {}
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+
+displays:
+  d:
+    - !<View> {name: v0, colorspace: cs0, description: one line}
+    - !<View> {name: v1, colorspace: cs0, description: "a\nb"}
+    - !<View> {name: v2, colorspace: cs0, description: "a\nb"}
+    - !<View> {name: v3, colorspace: cs0, description: "a\nb"}
+    - !<View> {name: v4, colorspace: cs0, description: "\na"}
+    - !<View> {name: v5, colorspace: cs0, description: "\n\na"}
+    - !<View> {name: v6, colorspace: cs0, description: "a\n\n\nb"}
+    - !<View> {name: v7, colorspace: cs0, description: "a \nb"}
+    - !<View> {name: v8, colorspace: cs0, description: "a\n \nb"}
+    - !<View> {name: v9, colorspace: cs0, description: "\t\nx"}
+    - !<View> {name: v10, colorspace: cs0, description: "x\n\ty"}
+    - !<View> {name: v11, colorspace: cs0, description: "tab\there\nx"}
+    - !<View> {name: v12, colorspace: cs0, description: "a\n  b\n    c"}
+    - !<View> {name: v13, colorspace: cs0, description: "- item\n- item2"}
+    - !<View> {name: v14, colorspace: cs0, description: "k: v\nx"}
+    - !<View> {name: v15, colorspace: cs0, description: "# not a comment\nx"}
+    - !<View> {name: v16, colorspace: cs0, description: "x\n#hash"}
+    - !<View> {name: v17, colorspace: cs0, description: "x\n---\ny"}
+    - !<View> {name: v18, colorspace: cs0, description: "x\n...\ny"}
+    - !<View> {name: v19, colorspace: cs0, description: x}
+    - !<View> {name: v20, colorspace: cs0, description: ""}
+    - !<View> {name: v21, colorspace: cs0, description: ""}
+    - !<View> {name: v22, colorspace: cs0, description: "trailing space "}
+    - !<View> {name: v23, colorspace: cs0, description: " "}
+    - !<View> {name: v24, colorspace: cs0, description: a\nb}
+    - !<View> {name: v25, colorspace: cs0, description: "café\n日本"}
+    - !<View> {name: v26, colorspace: cs0, description: "a b\nc"}
+    - !<View> {name: v27, colorspace: cs0, description: "x\n\xa0nbsp"}
+    - !<View> {name: v28, colorspace: cs0, description: "x\n\x01ctl"}
+    - !<View> {name: v29, colorspace: cs0, description: "k: v"}
+    - !<View> {name: v30, colorspace: cs0, description: "# c"}
+    - !<View> {name: v31, colorspace: cs0, description: "line with \"quotes\"\nand 'single'"}
+    - !<View> {name: v32, colorspace: cs0, description: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\ny"}
+
+active_displays: []
+active_views: []
+
+colorspaces:
+  - !<ColorSpace>
+    name: cs0
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: one line
+    isdata: false
+    interchange:
+      amf_transform_ids: one line
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs1
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+      a
+      b
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+        a
+        b
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs2
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+      a
+      b
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+        a
+        b
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs3
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+      a
+      b
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+        a
+        b
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs4
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+
+      a
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+
+        a
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs5
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+
+
+      a
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+
+
+        a
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs6
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+      a
+
+
+      b
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+        a
+
+
+        b
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs7
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+      a 
+      b
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+        a 
+        b
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs8
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+      a
+       
+      b
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+        a
+         
+        b
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs9
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+      	
+      x
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+        	
+        x
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs10
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+      x
+      	y
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+        x
+        	y
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs11
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+      tab	here
+      x
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+        tab	here
+        x
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs12
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+      a
+        b
+          c
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+        a
+          b
+            c
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs13
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+      - item
+      - item2
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+        - item
+        - item2
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs14
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+      k: v
+      x
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+        k: v
+        x
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs15
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+      # not a comment
+      x
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+        # not a comment
+        x
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs16
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+      x
+      #hash
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+        x
+        #hash
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs17
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+      x
+      ---
+      y
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+        x
+        ---
+        y
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs18
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+      x
+      ...
+      y
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+        x
+        ...
+        y
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs19
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: x
+    isdata: false
+    interchange:
+      amf_transform_ids: x
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs20
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: ""
+    isdata: false
+    interchange:
+      amf_transform_ids: ""
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs21
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: ""
+    isdata: false
+    interchange:
+      amf_transform_ids: ""
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs22
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: "trailing space "
+    isdata: false
+    interchange:
+      amf_transform_ids: "trailing space "
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs23
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: " "
+    isdata: false
+    interchange:
+      amf_transform_ids: " "
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs24
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: a\nb
+    isdata: false
+    interchange:
+      amf_transform_ids: a\nb
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs25
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+      café
+      日本
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+        café
+        日本
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs26
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+      a b
+      c
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+        a b
+        c
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs27
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+      x
+       nbsp
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+        x
+         nbsp
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs28
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+      x
+      ctl
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+        x
+        ctl
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs29
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: "k: v"
+    isdata: false
+    interchange:
+      amf_transform_ids: "k: v"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs30
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: "# c"
+    isdata: false
+    interchange:
+      amf_transform_ids: "# c"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs31
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+      line with "quotes"
+      and 'single'
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+        line with "quotes"
+        and 'single'
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs32
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+      xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+      y
+    isdata: false
+    interchange:
+      amf_transform_ids: |
+        xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+        y
+    allocation: uniform

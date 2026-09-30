@@ -162,5 +162,6 @@ def config_serialize(args, blobs):
     return result, out
 
 
-# Command modules of the spikes register themselves on import; keep these last.
+# Command modules register themselves with @command on import; keep these last.
 from . import numerics_lut  # noqa: E402, F401
+from . import text  # noqa: E402, F401
