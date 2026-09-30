@@ -294,7 +294,7 @@ Everything in this subsection is work in Ultravioleta, recorded here for context
 
 These exist so that no one can pass by weakening a check.
 - **Fixtures are locked.** Only `xtask oracle regen` can regenerate them, from the pinned wheel. A manifest records each fixture's hash, oracle version and CPU flags, and CI verifies it.
-- **You own the checks.** CODEOWNERS assigns `fixtures/`, `oracle/`, `waivers.toml` and the vendored upstream Python tests to you, so agent PRs can't change them.
+- **You own the checks.** CODEOWNERS assigns `fixtures/`, `oracle/`, `waivers.toml` and the vendored upstream Python tests to you. Agents never push: the orchestrator opens every PR, and a PR that touches them carries the `needs-owner` label until you approve it.
 - **Exact by default.** Comparisons are exact unless a waiver in `waivers.toml` says otherwise, and every waiver needs your approval.
 - **No hidden gaps.** The main branch may not contain `#[ignore]`, `todo!()` or `unimplemented!()` without a tracked waiver.
 - **Coverage only goes up.** The count of ported upstream tests can only increase. Every upstream test and source file is either mapped or marked not-applicable with a reason.
@@ -310,7 +310,7 @@ These exist so that no one can pass by weakening a check.
 | Verifier C | Reviews every PR adversarially: reads the upstream code against the diff, hunts for divergences the tests miss, and adds oracle probes for them |
 
 - With only 2 agents, run one implementer plus the verifier.
-- Each agent works in its own git worktree and commits its card as a series of mergeable chunks. The orchestrator merges them chunk by chunk, gated by CI.
+- Each agent works in its own git worktree and commits its card as a series of mergeable chunks. The orchestrator lands each card through a pull request, gated by CI (below).
 - **Your review is narrow:** public API shape, waivers and deviations only.
 - **Stuck on a mismatch.** An agent that can't explain a byte mismatch writes a minimal reproduction (an oracle script plus a failing test) and escalates. It never loosens a check.
 - **One progress metric.** A generated parity dashboard (`docs/parity.md`) shows:
@@ -318,6 +318,26 @@ These exist so that no one can pass by weakening a check.
   - oracle checks passing, per subsystem;
   - upstream files mapped;
   - open waivers.
+
+### Pull requests
+
+Each card lands as one PR from its `card/<id>` branch, with its chunk commits. It lands as a
+merge commit and is never squashed, so every chunk stays reviewable. Agents commit; only the
+orchestrator pushes.
+
+1. **Review.** The agent reports the card done. The orchestrator reviews it, and the verifier
+   checks it.
+2. **Open the PR.** The orchestrator pushes the branch and opens the PR with the template in
+   `.github/`. CI runs on GitHub's Windows and Linux machines. Their CPUs differ from the
+   workstation's, so they run SIMD kernels the workstation doesn't.
+3. **Owner items.** Oracle and fixture changes, waivers, deviations, public API shape and new
+   dependencies get their label plus `needs-owner`, and wait for your OK.
+4. **Land.** `cargo xtask land` builds the merge commit locally and runs the full gate. It
+   regenerates the generated files and replays the branch onto `main` first if other cards
+   landed in the meantime. The orchestrator pushes that merge commit to the PR branch, so CI
+   checks exactly what will land.
+5. **Merge.** When CI passes, `main` moves forward to that commit with a fast-forward push, and
+   GitHub marks the PR merged. The branch is then deleted.
 
 ### Porting card template
 
@@ -395,6 +415,7 @@ Upstream's `tests/python` (384 tests) runs unmodified against our standalone whe
   - Linux x86-64 runs in a Rocky Linux 9 container (glibc 2.34).
   - Both run the live oracle and Python 3.13.
   - ARM and macOS come later. Official wheels exist for both, so either can become a reference platform when needed.
+- **Pull requests.** Every card lands through a PR (§7), and CI runs on the exact merge commit that will land. GitHub's runners have assorted CPUs, so over many runs they dispatch SIMD kernels the workstation doesn't (the first catch: an alpha bug in the Lut3D SSE2 and AVX kernels).
 - **Forced numeric profiles.** Every profile (scalar, SSE2, AVX, AVX2, AVX-512) is exercised, just as upstream reruns its tests for each SIMD mode.
 - **Also in CI:**
   - the minimum Rust version;
