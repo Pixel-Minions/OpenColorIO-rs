@@ -5,6 +5,116 @@
 //! bit for bit, over the same parameter cases, probe sets, directions and fast-math settings
 //! for every family.
 //!
+//! # How to test an op family
+//!
+//! 1. **Parameters.** Put the transform's parameters in a struct and implement
+//!    [`params::Params`]: its numeric slots ([`params::Slot::new`], [`params::Slot::rgb`],
+//!    [`params::Slot::rgba`]), each with the precision the renderers use and the channels it
+//!    applies to, and `get`/`set` by slot. Styles and other non-numeric parameters stay plain
+//!    fields.
+//! 2. **Family.** Implement [`Family`]:
+//!    - `cases`: the explicit cases, [`params::Case::new`]`(label, params)`: upstream's test
+//!      values, and hand-written extreme or NaN cases where you know a code path needs them;
+//!    - `mutation_bases`: one typical case per code path (per style), from which the battery
+//!      generates extreme finite, NaN and ±Inf cases ([`params::mutations`]);
+//!    - `spec`: the processor the wheel builds: [`Spec::Transform`] with a JSON transform
+//!      spec for finite parameters, [`Spec::Yaml`] (with [`yaml_number`], [`yaml_list`]) when a
+//!      parameter is NaN or infinite;
+//!    - `port`: build the op data as upstream's transform and `BuildXxxOp` do (cite them), put
+//!      it through `std::hint::black_box`, and return the renderer upstream's `GetXxxRenderer`
+//!      picks for `combo.fast_math` as [`Port::in_place`]; or `Err(text)` with the exception
+//!      text when the port refuses the parameters;
+//!    - as needed: `breakpoints` (their ±N ulp neighbourhoods are probed), `pass_through` (the
+//!      channels the renderers never write), `other_profiles` (renderers of numeric profiles
+//!      this machine doesn't dispatch: their pass-through channels are compared on every
+//!      profile), `directions`, and `validation` ([`Validation::NotPorted`] until the op
+//!      data's `validate` is ported).
+//! 3. **Test.** Call [`run`] in a `#[test]`. It runs every case in every direction with fast
+//!    math on and off, on the probes of the tier `OCIO_RS_TIER` names ([`Tier`]), sends the
+//!    oracle calls in batches (one process per test at the quick tier), prints a
+//!    [`Summary`], and panics with a report per failing case, combination and probe.
+//!
+//! Comparisons are exact. Waiver W0002 applies automatically, and only, to the channels of NaN
+//! and infinite parameters ([`params::Case::compare`]); a case can narrow it
+//! ([`params::Case::w0002_only_where`]), never widen it. Nothing else uses W0002.
+//!
+//! ```no_run
+//! use ocio_testkit::battery::params::{A, Case, Channels, Params, Precision, RGB, Slot};
+//! use ocio_testkit::battery::{self, Combo, Direction, Family, Port, Spec, Validation};
+//! use serde_json::json;
+//! # mod ocio_ops {
+//! #     pub fn log_renderer(_: f64, _: bool, _: bool) -> impl Fn(&mut [f32]) + Send + Sync {
+//! #         |_| {}
+//! #     }
+//! # }
+//!
+//! /// A LogTransform's parameters.
+//! #[derive(Debug, Clone)]
+//! struct LogBase {
+//!     base: f64,
+//! }
+//!
+//! impl Params for LogBase {
+//!     fn slots(&self) -> Vec<Slot> {
+//!         vec![Slot::new("base", Precision::F64AsF32, RGB)]
+//!     }
+//!     fn get(&self, _: usize) -> f64 {
+//!         self.base
+//!     }
+//!     fn set(&mut self, _: usize, value: f64) {
+//!         self.base = value;
+//!     }
+//! }
+//!
+//! struct LogFamily;
+//!
+//! impl Family for LogFamily {
+//!     type Params = LogBase;
+//!
+//!     fn name(&self) -> String {
+//!         "LogTransform".to_string()
+//!     }
+//!     fn cases(&self) -> Vec<Case<LogBase>> {
+//!         [2.0, 10.0, 0.5]
+//!             .map(|base| Case::new(format!("base {base}"), LogBase { base }))
+//!             .to_vec()
+//!     }
+//!     fn mutation_bases(&self) -> Vec<Case<LogBase>> {
+//!         self.cases()[..1].to_vec()
+//!     }
+//!     fn spec(&self, p: &LogBase, direction: Direction) -> Spec {
+//!         if p.base.is_finite() {
+//!             Spec::Transform(json!({
+//!                 "class": "LogTransform",
+//!                 "args": {"base": p.base, "direction": direction.oracle_enum()},
+//!             }))
+//!         } else {
+//!             let base = battery::yaml_number(p.base);
+//!             Spec::Yaml(format!("!<LogTransform> {{base: {base}, direction: {}}}", direction.yaml()))
+//!         }
+//!     }
+//!     fn port(&self, p: &LogBase, combo: &Combo) -> Result<Port, String> {
+//!         // The op data as upstream builds it, and the renderer upstream picks.
+//!         let inverse = combo.direction == Direction::Inverse;
+//!         let render = ocio_ops::log_renderer(std::hint::black_box(p.base), inverse, combo.fast_math);
+//!         Ok(Port::in_place(render))
+//!     }
+//!     fn pass_through(&self, _: &LogBase, _: &Combo) -> Channels {
+//!         A
+//!     }
+//!     fn validation(&self) -> Validation {
+//!         Validation::NotPorted { card: "WP 1.3l1" }
+//!     }
+//! }
+//!
+//! battery::run(&LogFamily);
+//! ```
+//!
+//! The migrated families in `crates/ocio-ops/tests/log_oracle.rs` and `gamma_oracle.rs` are
+//! complete examples; their costs per tier are in [`tier`].
+//!
+//! # Modules and types
+//!
 //! - [`params`]: parameter cases, their generators (extreme finite, NaN and ±Inf values), and
 //!   the comparison that applies waiver W0002 to the channels of NaN and infinite parameters
 //!   and nothing else.
@@ -14,6 +124,19 @@
 //!   [`Port`]); [`run`] and [`run_with`] run every combination against the wheel, batching
 //!   the oracle calls, and report failures per case ([`Summary`]).
 //! - [`tier`]: how much a run probes ([`Plan`]), chosen with `OCIO_RS_TIER`.
+//!
+//! # Extension points for Phase 1
+//!
+//! - **Bit depths and layouts.** [`Family::formats`] lists [`Format`]s (input and output
+//!   [`BitDepth`], packed or planar RGB or RGBA [`Layout`]); [`Spec::cpu_apply_args`] already
+//!   passes them to the oracle. The battery refuses anything but [`Format::F32_RGBA`] until the
+//!   port's CPU engine and packing exist (WP 1.1, 1.2d) and the oracle takes planar images
+//!   (O1.2). Then [`Port`] gets a variant that applies typed buffers, and the engine compares
+//!   the output in its bit depth.
+//! - **Optimization levels.** A [`Combo`] holds `fast_math`; other levels become another field
+//!   and another dimension in the engine.
+//! - **Logs.** The oracle's `cpu_apply` also returns OCIO's log messages; the port's logging
+//!   (WP 1.2e) can be compared there.
 
 mod engine;
 pub mod params;
@@ -207,7 +330,7 @@ impl Spec {
                 if let Some(path) = null_path(transform, "") {
                     panic!(
                         "transform spec {transform} has null at {path}: JSON can't hold NaN or \
-                         ±Inf parameters (serde_json writes them as null); use Spec::Yaml"
+                         infinite parameters (serde_json writes them as null); use Spec::Yaml"
                     );
                 }
                 json!({ "transform": transform })

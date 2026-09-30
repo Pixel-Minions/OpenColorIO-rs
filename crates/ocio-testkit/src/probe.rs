@@ -446,7 +446,7 @@ impl ProbeSet {
             ProbeSet::Halves { stride } => format!("every {stride}th half"),
             ProbeSet::Specials => "specials".to_string(),
             ProbeSet::Random { name, .. } => format!("random {name}"),
-            ProbeSet::Neighbourhoods { ulps, .. } => format!("±{ulps} ulp neighbourhoods"),
+            ProbeSet::Neighbourhoods { ulps, .. } => format!("neighbourhoods of {ulps} ulp"),
             ProbeSet::Values { name, .. } => name.clone(),
             ProbeSet::NanBuffers { max_pixels } => {
                 format!("NaN buffers of 1 to {max_pixels} pixels")
@@ -742,7 +742,7 @@ mod tests {
         };
         let buffers = set.rgba_buffers();
         assert_eq!(buffers.len(), 1);
-        assert_eq!(buffers[0].0, "±3 ulp neighbourhoods");
+        assert_eq!(buffers[0].0, "neighbourhoods of 3 ulp");
         assert_eq!(buffers[0].1.len(), 7 * 4);
         let empty = ProbeSet::Neighbourhoods {
             points: Vec::new(),

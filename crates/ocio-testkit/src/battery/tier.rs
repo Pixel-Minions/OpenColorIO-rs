@@ -12,16 +12,30 @@
 //! Every tier runs every explicit case, in both directions (or the family's), with fast math
 //! on and off.
 //!
-//! **Runtimes** (development machine: Ryzen 9 9950X3D, Windows; the migrated Log and Gamma
-//! families' numbers are in the battery's how-to):
-//! - `quick`: one oracle process per family run, seconds.
-//! - `full`: one process per 256 MiB of pixels; tens of seconds per family without the cache,
-//!   seconds with it.
-//! - `exhaustive`: minutes per family, plus the sweep: 2^30 pixels per combination, 1,024
-//!   calls in 256 processes, about 5.5 minutes per swept case (four combinations) in a release
-//!   build and 6.5 minutes in debug, nearly all of it in the oracle and the pipes. Each running
-//!   sweep holds about 1.5 GB (256 MiB batches, both sides); run the tier with
-//!   `--test-threads=2` or fewer on machines under 16 GB.
+//! **Costs** of the Log and Gamma families (`crates/ocio-ops/tests/log_oracle.rs` and
+//! `gamma_oracle.rs`, 11 tests; before the battery they made 308 comparisons of 903.7 million
+//! values in 308 oracle processes), measured on the development machine (Ryzen 9 9950X3D),
+//! wall time of both test binaries with cargo's parallel tests, without the oracle cache
+//! (cold) and with it (warm):
+//!
+//! | Tier | Cases (generated) | Comparisons | Values | Oracle processes | Windows debug | Rocky debug | Windows release | Rocky release |
+//! |---|---|---|---|---|---|---|---|---|
+//! | before | 54 (0) | 308 | 903.7 M | 308 | 37.0 s / 4.0 s | 57.3 s / 4.3 s | 41.8 s / 3.7 s | 58.7 s / 4.2 s |
+//! | `quick` | 176 (122) | 26,240 | 25.5 M | 13 | 4.2 s / 0.9 s | 3.7 s / 0.9 s | 4.6 s / 1.0 s | 3.7 s / 1.0 s |
+//! | `full` | 725 (671) | 82,436 | 1,093.9 M | 27 | 24.2 s / 5.8 s | 19.2 s / 6.4 s | 23.8 s / 5.4 s | 20.4 s / 5.0 s |
+//!
+//! Comparisons are pixel buffers; the integer-cast test (4 buffers, 17.1 M values) runs the
+//! S2 probe values at every tier. Generated cases that the wheel refuses (while a family's
+//! validation isn't ported) are counted in the cases but not compared. At `full`, the explicit
+//! cases see every value the old tests saw. A family run with many generated cases makes
+//! tens of thousands of small calls: about 0.13 ms each inside one oracle process, against
+//! 0.3 s to start a process natively (about 10 s under Intel SDE).
+//!
+//! `exhaustive` adds minutes per family, plus the sweep: 2^30 pixels per combination in 256
+//! calls, 64 processes, about 5.5 minutes per swept case (four combinations) in a release build
+//! and 6.5 minutes in debug, nearly all of it in the oracle and the pipes. A running sweep
+//! holds several copies of its 256 MiB batch on each side of the pipe; run the tier with
+//! `--test-threads=2` or fewer on machines with 16 GB or less.
 
 use super::{Mutations, Plan, Sweep};
 use crate::probe::{ProbeSet, RandomRange};
