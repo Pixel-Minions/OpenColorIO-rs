@@ -172,7 +172,7 @@ All 10 languages from the start: Cg, GLSL 1.2 / 1.3 / 4.0, GLSL for Vulkan 4.6, 
 | Chunk | What |
 |---|---|
 | O1.1 | `processor_ops`: the optimized processor's `createGroupTransform()` as JSON (each child's class and getters) plus its cache ID, for any flags and bit depths. It shows what the wheel's optimizer produced |
-| O1.2 | `cpu_apply` with planar images and every channel order (`PlanarImageDesc`, `CHANNEL_ORDERING_*`), for 1.1c–1.1d |
+| O1.2 | `image_apply` and `image_apply_rgb` (`oracle/ocio_oracle/image.py`; `cpu_apply` is unchanged): a CPU processor applied to images described every way PyOpenColorIO allows (`PackedImageDesc` with every channel order, `PlanarImageDesc`, any strides and bit depths), in place or not, with every buffer returned in full, padding included; and Python's `applyRGB` and `applyRGBA`. For 1.1b–1.1e and 1.2d |
 | O1.3 | `gpu_shader`: the shader text, uniforms (names, types, values) and textures (names, sizes, channels, interpolation, values as a blob) from `extractGpuShaderInfo`. It takes any `GpuShaderDesc` settings: language, function name, resource prefix, pixel name, descriptor sets, 1D textures, texture limits. It works for the default and optimized GPU processors |
 | O1.4 | `transform_text`: `str(transform)` (upstream's `operator<<`), validation errors, and equality results |
 
@@ -201,8 +201,9 @@ rows can run in parallel.
 
 | Card | Chunks | Who | Needs |
 |---|---|---|---|
-| `p1-oracle` | O1.1–O1.4, each its own chunk; the owner reviews them, labelled `oracle` | B | — |
-| `p1-bitdepth` | 1.1a–1.1e | A | O1.2 |
+| `p1-oracle-image` | O1.2, its own chunk; the owner reviews it, labelled `oracle` | B | — |
+| `p1-oracle` | O1.1, O1.3, O1.4, each its own chunk; the owner reviews them, labelled `oracle` | B | — |
+| `p1-bitdepth` | 1.1a–1.1e | A | `p1-oracle-image` |
 | `p1-math` | 1.4a–1.4c | B | — |
 | `p1-dispatch` | 1.5a–1.5c | B | — |
 | `p1-engine` | 1.2a–1.2e, with 1.3n1 and 1.3m1–m2 so 1.2d has ops to run | A | `p1-bitdepth`, `p1-math` |

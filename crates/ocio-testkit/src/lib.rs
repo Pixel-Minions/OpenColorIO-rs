@@ -11,6 +11,8 @@
 //! - [`compare`]: exact comparators. There is no tolerance anywhere in this crate except in
 //!   [`upstream`]; any other check that needs one needs a waiver in `waivers.toml`, approved
 //!   by the owner.
+//! - [`image`]: requests for the oracle's image commands: images described every way
+//!   PyOpenColorIO allows, a CPU processor applied to them, every buffer returned byte for byte.
 //! - [`probe`]: deterministic probe inputs and the battery's probe sets (all half bit
 //!   patterns, specials, seeded random values in named ranges, ±N ulp neighbourhoods, NaN
 //!   buffers of every length, the sweep of every `f32`).
@@ -26,6 +28,7 @@ pub mod battery;
 pub mod compare;
 pub mod crt;
 pub mod fixtures;
+pub mod image;
 pub mod oracle;
 pub mod paths;
 pub mod probe;
