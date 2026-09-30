@@ -25,9 +25,7 @@
 
 use std::hint::black_box;
 
-use ocio_ops::math_utils::{
-    cast_value_uint8, cast_value_uint10, cast_value_uint12, cast_value_uint16,
-};
+use ocio_ops::bit_depth_utils::{Converter, Uint8, Uint10, Uint12, Uint16};
 use ocio_ops::open_color_types::TransformDirection;
 use ocio_ops::ops::log::log_op_cpu::get_log_renderer;
 use ocio_ops::ops::log::log_op_data::{LogAffineParameter, LogOpData};
@@ -951,10 +949,10 @@ fn integer_output_casts_match_the_wheel() {
     // (bit depth, maxValue from BitDepthUtils.h:34-60, cast)
     type Cast = fn(f32) -> u16;
     let depths: [(&str, u16, Cast); 4] = [
-        ("BIT_DEPTH_UINT8", 255, |v| u16::from(cast_value_uint8(v))),
-        ("BIT_DEPTH_UINT10", 1023, cast_value_uint10),
-        ("BIT_DEPTH_UINT12", 4095, cast_value_uint12),
-        ("BIT_DEPTH_UINT16", 65535, cast_value_uint16),
+        ("BIT_DEPTH_UINT8", 255, |v| u16::from(Uint8::cast_value(v))),
+        ("BIT_DEPTH_UINT10", 1023, Uint10::cast_value),
+        ("BIT_DEPTH_UINT12", 4095, Uint12::cast_value),
+        ("BIT_DEPTH_UINT16", 65535, Uint16::cast_value),
     ];
     let input_bytes = f32_to_bytes(&input);
     let calls: Vec<BatchCall<'_>> = depths
