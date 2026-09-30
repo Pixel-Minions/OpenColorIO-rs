@@ -30,10 +30,12 @@ compile_error!(
 use std::ffi::{c_char, c_int, c_long, c_void};
 use std::sync::OnceLock;
 
-/// `errno` value for a result out of range (the same on UCRT and glibc).
+/// `errno` value for a result out of range: 34 in both UCRT's `errno.h` (Windows SDK
+/// 10.0.22000.0, ucrt/errno.h:79) and glibc's (asm-generic/errno-base.h:38).
 pub const ERANGE: i32 = 34;
 
-/// `errno` value for an invalid argument (the same on UCRT and glibc).
+/// `errno` value for an invalid argument: 22 in both (ucrt/errno.h:78,
+/// asm-generic/errno-base.h:26).
 pub const EINVAL: i32 = 22;
 
 /// The raw C declarations. The safe wrappers below are the only callers.
@@ -380,6 +382,10 @@ mod tests {
     //! compared with the C runtime in `ocio-ops`.
     use super::*;
 
+    /// `%.17g` keeps DBL_DECIMAL_DIG (17 for IEEE double) significant digits, enough for any
+    /// double to come back unchanged (C17 5.2.4.2.2), and strtod rounds text of up to
+    /// DECIMAL_DIG digits correctly (C17 7.22.1.3p9; 17 on UCRT, 21 on glibc x86-64); the
+    /// whole text is read (p5).
     #[test]
     fn format_round_trips_through_strtod() {
         let mut rng = crate::probe::Rng::new(1);
@@ -395,6 +401,8 @@ mod tests {
         }
     }
 
+    /// A test process never calls `setlocale`, so the "C" locale is in effect (C17
+    /// 7.11.1.1p4), and the plain functions must agree with the "C"-locale variants.
     #[test]
     fn locale_variants_agree_with_plain_ones() {
         for text in [
@@ -427,28 +435,41 @@ mod tests {
         }
     }
 
+    /// C17 7.22.1.3: all of "1e999" is the subject sequence (p2-p4), so the end is after it
+    /// (p5); the value overflows, so strtod returns HUGE_VAL and stores ERANGE in errno
+    /// (p10); HUGE_VAL is positive infinity on IEC 60559 platforms (C17 F.10p2).
     #[test]
     fn overflow_sets_erange() {
-        // C17 7.22.1.3p10: an overflowing strtod returns HUGE_VAL and sets errno to ERANGE.
-        let r = strtod_c(b"1e999");
-        assert_eq!(r.value, f64::INFINITY);
+        let input = b"1e999";
+        let r = strtod_c(input);
+        assert_eq!(r.value.to_bits(), f64::INFINITY.to_bits());
         assert_eq!(r.errno, ERANGE);
-        assert_eq!(r.end, 5);
+        assert_eq!(r.end, input.len());
     }
 
+    /// C17 7.22.1.3: "x1" does not begin with a subject sequence (p3-p4), so no conversion is
+    /// performed and the end is the start of the input (p7), and zero is returned (p10).
     #[test]
     fn no_conversion_leaves_end_at_start() {
-        // C17 7.22.1.3p8: when no conversion is performed, *endptr is the start of the input.
         let r = strtod_c(b"x1");
-        assert_eq!((r.value, r.end), (0.0, 0));
+        assert_eq!((r.value.to_bits(), r.end), (0.0f64.to_bits(), 0));
     }
 
+    /// The input is a C string, which ends at its first null character (C17 7.1.1p1): what
+    /// follows a NUL is never read, so the result is that of the text before it.
     #[test]
     fn input_stops_at_nul() {
-        let r = strtod_c(b"12\x003");
-        assert_eq!((r.value, r.end), (12.0, 2));
+        let with_tail = strtod_c(b"12\x003");
+        let alone = strtod_c(b"12");
+        assert_eq!(
+            (with_tail.value.to_bits(), with_tail.end, with_tail.errno),
+            (alone.value.to_bits(), alone.end, alone.errno)
+        );
     }
 
+    /// C17 7.21.6.1p8: `u` and `x` write an unsigned value in decimal and lowercase
+    /// hexadecimal, `d` a signed value in decimal; `0` pads with leading zeros to the width
+    /// (p6, p4). Rust's `Display` and `LowerHex` define the same digits.
     #[test]
     fn integer_formats_agree_with_rust() {
         let mut rng = crate::probe::Rng::new(2);
