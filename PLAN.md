@@ -763,20 +763,30 @@ None right now. Answered on 2026-09-29:
   - OCIO strings are bytes;
   - platform differences are reproduced per platform (D12): camera-log break in float vs double, NaN signs and text, the Windows wheel's CRLF built-ins, old glibc `log2`;
   - W0002 (NaN parameters) and D-1 (classic locale) are approved.
-- **Open item:** one unexplained, one-time failure of 3 tests right after the S1 merge. Ten clean reruns followed, covering cold and live cache, and running after a heavy Rocky run. CI now runs with `--no-fail-fast`, and the gate will keep full logs.
+- **The one-time failure after the S1 merge** was almost certainly the oracle pipe problem found in Phase 0b (below), since fixed.
 - **Actuals:** Phase 0 was budgeted at about 7 person-weeks and took about one day of wall-clock time with 3 agents plus reviewers. The calendar in §11 is likely pessimistic; it gets re-estimated after Phase 1 from measured throughput.
 
-**Then:**
-1. **Phase 0b tooling round** (`docs/cards/phase0b-tooling.md`):
-   - gate and land commands;
-   - generated files that never conflict;
-   - a standard oracle test battery;
-   - shared machine-code inspection tools;
-   - PR-based CI;
-   - cleanup.
+**Phase 0b, the tooling round: complete (2026-09-30).** Card `docs/cards/phase0b-tooling.md`.
+- **Pull requests (T5a):**
+  - every card lands through a PR, and CI runs on the exact commit that lands;
+  - `main` is protected: all three CI checks are required, admins included, and force pushes are blocked;
+  - labels mark the owner's items.
+- **Merge tooling (T1, T2, T6):**
+  - `cargo xtask gate` (with `--staged`), `cargo xtask land` and `cargo xtask clean-scratch`;
+  - generated files are regenerated at landing, so chunks never conflict on them;
+  - the ratchet's baseline comes from the base commit;
+  - oracle commands register themselves.
+- **The test battery (T3):** one engine tests every op family, with tiers (quick locally, full in CI), generated extreme, NaN and ±Inf parameters, and pass-through checks on every numeric profile. Log and Gamma moved onto it: 1.09 billion comparisons at full, in 27 oracle processes instead of 308.
+- **Emulated CPUs (T5b, the SDE part):** Intel SDE runs the CPU-dependent tests on Nehalem, Sandy Bridge, Haswell, Skylake and Skylake server, on both platforms, nightly and on kernel PRs, so every kernel the wheel has is checked.
+- **Machine-code inspection (T4):** `tools/wheel-inspect`.
+- **Verification:** each tooling card got two or three adversarial verifier rounds (mutation testing in scratch clones), and every finding was fixed before landing.
+- **Bugs found on the way, all fixed:**
+  - the Lut3D SSE2/AVX kernels quieted signaling-NaN alphas in release builds. LLVM had turned a copy into arithmetic, which led to the "Channels that pass through" rule;
+  - an oracle pipe failure under load: large requests are now written in pieces, and writer errors are reported;
+  - the oracle cache mixing up emulated CPUs.
+- **Still open from T5b:** the nightly exhaustive tier and `cargo-mutants` on changed modules. They are built during Phase 1, not before it.
 
-   Owner decisions are pending: the agent commit permission, PRs, and SDE in nightly CI.
-2. **Phase 1**, following `docs/cards/phase1.md` rewritten for the new tooling. M0 is the analytic transforms, CPU and GPU.
+**Then: Phase 1**, following `docs/cards/phase1.md`. M0 is the analytic transforms, CPU and GPU.
 
 ---
 
