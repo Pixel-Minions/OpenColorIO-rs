@@ -12,6 +12,8 @@ use super::*;
 
 #[test]
 fn injected_environment() {
+    // The provider is global: hold it against the other tests that replace it.
+    let _environment = crate::unit_test_log_utils::environment_lock();
     let mut vars = BTreeMap::new();
     vars.insert("OCIO_TEST_EMPTY".to_string(), String::new());
     set_env_provider(Some(Arc::new(MapEnv(vars))));

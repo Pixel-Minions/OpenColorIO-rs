@@ -5,22 +5,47 @@
 //! (`tests/cpu/UnitTestLogUtils.h`, `UnitTestLogUtils.cpp` @ v2.5.2).
 //!
 //! Upstream runs its tests one at a time. Rust runs them on parallel threads, and the logging
-//! state is global, so two things are added:
+//! state is global, so three things are added:
 //! - a [`LogGuard`] holds [`logging_test_lock`] while it lives. A test that reads the logging
 //!   state before it creates its guard takes the lock first; the lock is reentrant, so the
 //!   guard can take it again;
 //! - a guard keeps only the messages logged on the thread that created it. Messages logged
 //!   on other threads, by tests that don't hold the lock, go to stderr, as they would with the
-//!   default logging function.
+//!   default logging function;
+//! - the first time either is used, OCIO's one-time read of `OCIO_LOGGING_LEVEL` happens
+//!   in an empty environment ([`init_logging_with_empty_environment`]), so no test depends on
+//!   the developer's environment. A test that logs must use one of them, so that no logging
+//!   call reads the variable earlier.
 
 use crate::logging::{
     get_logging_level, reset_to_default_logging_function, set_logging_function, set_logging_level,
 };
 use crate::open_color_types::LoggingLevel;
+use crate::platform::{self, MapEnv};
 use std::io::Write;
 use std::marker::PhantomData;
-use std::sync::{Arc, Condvar, Mutex, PoisonError};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, Once, PoisonError};
 use std::thread::{self, ThreadId};
+
+static ENVIRONMENT: Mutex<()> = Mutex::new(());
+
+/// Held by the tests that replace the environment provider (`platform::set_env_provider`),
+/// so that they can't change it under each other.
+pub(crate) fn environment_lock() -> MutexGuard<'static, ()> {
+    ENVIRONMENT.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Runs OCIO's one-time logging initialization, which reads `OCIO_LOGGING_LEVEL`, with an
+/// empty environment. It does it once per test process; later calls do nothing.
+pub(crate) fn init_logging_with_empty_environment() {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        let _environment = environment_lock();
+        platform::set_env_provider(Some(Arc::new(MapEnv::default())));
+        let _ = get_logging_level();
+        platform::set_env_provider(None);
+    });
+}
 
 /// Which thread holds the lock, and how many times.
 struct Owner {
@@ -41,8 +66,10 @@ pub(crate) struct LoggingTestLock {
     _not_send: PhantomData<*const ()>,
 }
 
-/// Waits until no other thread holds the lock, and takes it.
+/// Waits until no other thread holds the lock, and takes it; initializes logging first
+/// ([`init_logging_with_empty_environment`]).
 pub(crate) fn logging_test_lock() -> LoggingTestLock {
+    init_logging_with_empty_environment();
     let me = thread::current().id();
     let mut owner = OWNER.lock().unwrap_or_else(PoisonError::into_inner);
     loop {
@@ -79,6 +106,10 @@ impl Drop for LoggingTestLock {
 
 /// Traps the log messages of its thread while keeping the original logging settings: they
 /// are restored when it is dropped.
+///
+/// Only the thread that creates the guard is trapped. Messages logged on any other thread go
+/// to stderr, including those of threads the test itself spawns: such a test must collect
+/// them with a logging function of its own.
 ///
 /// Port of `LogGuard` (tests/cpu/UnitTestLogUtils.h:12-34, UnitTestLogUtils.cpp:17-67 @
 /// v2.5.2). Not ported yet: `findAndRemove`, `findAllAndRemove` and `print`.
