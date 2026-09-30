@@ -147,9 +147,11 @@ You need:
 ```sh
 git clone --recurse-submodules https://github.com/Pixel-Minions/OpenColorIO-rs
 cd OpenColorIO-rs
-cargo xtask ci                     # guardrails, fixture hashes, ratchet, parity dashboard
-cargo test --workspace             # includes live checks against the official package
-scripts/rocky9.sh cargo test --workspace   # the same on Rocky Linux 9
+cargo xtask gate                   # fmt, clippy, guardrails and the tests (live checks against
+                                   # the official package), stopping at the first failure
+cargo xtask gate --release --rocky # also in release, and all of it again on Rocky Linux 9
+cargo xtask ci                     # guardrails, fixture hashes, the ratchet (branch mode)
+cargo xtask ci --main              # also: the parity dashboard and the ratchet are current
 ```
 
 **Where things are:**
