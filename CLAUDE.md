@@ -39,7 +39,7 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
   - `cargo xtask ci`
   - `cargo test --workspace`
 
-  Chunks with platform-sensitive behavior (numerics, formatting, parsing) must also pass `scripts/rocky9.sh cargo test -p <crate>`.
+  Chunks with platform-sensitive behavior (numerics, formatting, parsing) must also pass `scripts/rocky9.sh cargo test -p <crate>`. Numeric chunks must pass their oracle tests in release builds too (`cargo test --release -p <crate>`, on both platforms). Optimization can change NaN results and other bits the debug build doesn't show.
 - **Bookkeeping travels with the port.** Update `upstream-map.toml`, `docs/parity.md` and `docs/ratchet.toml` in the same chunk as the port they describe.
 - **Oracle changes stand alone.** Changes to `oracle/` and new fixture groups get their own chunk, before the chunk that first uses them. The owner reviews them separately.
 - **Order and fixes.** Chunks are ordered by dependency. A later fix is a new chunk; never rewrite an earlier commit.
@@ -61,6 +61,11 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
   - C++ `std::min(a, b)` is `(b < a) ? b : a`, and `std::max(a, b)` is `(a < b) ? b : a`.
   - SSE `_mm_min_ps(a, b)` is `a < b ? a : b`, and `_mm_max_ps(a, b)` is `a > b ? a : b`.
   - They treat NaN differently from each other and from Rust's `f32::min`/`f32::max`. Use the helpers that match the C++ you are porting.
+- **NaN operand order.** When both operands of one operation can be NaN, the result's bits depend on operand order.
+  - x86 `addps`/`mulps`/`addss`/`mulss` return the first operand's NaN, quieted. So SSE code follows the C++ source order.
+  - C++ compilers may commute scalar code (MSVC and GCC differ; check the wheel's machine code).
+  - LLVM freely commutes Rust's `+` and `*`, and the order can change between debug and release builds.
+  - In SSE-profile renderers, use `math_utils::sse_add`/`sse_mul` wherever two NaNs can meet (a NaN pixel with a NaN-producing parameter). In scalar renderers, pin the order the wheel uses.
 - **Rounding.**
   - Scalar integer conversions add 0.5 and truncate (`BitDepthUtils.h`).
   - SIMD stores round to nearest-even.
