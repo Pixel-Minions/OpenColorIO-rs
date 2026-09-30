@@ -28,7 +28,7 @@
 //! of calls to it (`OCIOYaml.cpp` `save` functions), so its layout, quoting and number
 //! formatting are part of OCIO's byte-exact output.
 //!
-//! The files mirror yaml-cpp's: `emitterstate.cpp`, `emittermanip.h`,
+//! The files mirror yaml-cpp's: `emitterstate.cpp`, `emitterutils.cpp`, `emittermanip.h`,
 //! `ostream_wrapper.cpp`, `regex_yaml.cpp`/`regeximpl.h` and `exp.h`.
 //! Each item cites the yaml-cpp source it translates. The emitter writes to its own
 //! buffer (the `Emitter()` constructor OCIO uses); yaml-cpp's `std::ostream` mode is not
@@ -38,6 +38,7 @@
 
 pub mod emitter_manip;
 pub mod emitter_state;
+pub mod emitter_utils;
 pub mod exp;
 pub mod ostream_wrapper;
 pub mod regex_yaml;
