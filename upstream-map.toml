@@ -35,8 +35,9 @@ status = "todo"
 [[file]]
 path = "include/OpenColorIO/OpenColorTypes.h"
 kind = "api"
-target = ["crates/ocio/src/lib.rs"]
-status = "todo"
+target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs"]
+status = "partial"
+note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data"
 
 [[file]]
 path = "src/CMakeLists.txt"
@@ -89,8 +90,9 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/BitDepthUtils.h"
 kind = "src"
-target = ["crates/ocio-ops/src/bit_depth_utils.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/bit_depth_utils.rs", "crates/ocio-ops/src/math_utils.rs"]
+status = "partial"
+note = "S2: the integer Converter<BD>::CastValue casts are in math_utils.rs; the rest is todo"
 
 [[file]]
 path = "src/OpenColorIO/CMakeLists.txt"
@@ -366,7 +368,8 @@ status = "todo"
 path = "src/OpenColorIO/MathUtils.h"
 kind = "src"
 target = ["crates/ocio-ops/src/math_utils.rs"]
-status = "todo"
+status = "partial"
+note = "S2: Clamp, FloatAsInt, IntAsFloat, AddULP, plus std::min/std::max and SSE lane semantics; the rest is todo"
 
 [[file]]
 path = "src/OpenColorIO/Mutex.h"
@@ -420,7 +423,8 @@ status = "todo"
 path = "src/OpenColorIO/Op.h"
 kind = "src"
 target = ["crates/ocio-ops/src/op.rs"]
-status = "todo"
+status = "partial"
+note = "S2: OpCPU (as the CpuOp trait, apply only); the rest is WP 1.2c"
 
 [[file]]
 path = "src/OpenColorIO/OpBuilders.h"
@@ -437,8 +441,9 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/ParseUtils.cpp"
 kind = "src"
-target = ["crates/ocio/src/parse_utils.rs"]
-status = "todo"
+target = ["crates/ocio/src/parse_utils.rs", "crates/ocio-ops/src/open_color_types.rs"]
+status = "partial"
+note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection"
 
 [[file]]
 path = "src/OpenColorIO/ParseUtils.h"
@@ -494,7 +499,8 @@ status = "todo"
 path = "src/OpenColorIO/SSE.h"
 kind = "src"
 target = ["crates/ocio-ops/src/sse.rs"]
-status = "todo"
+status = "done"
+note = "S2: every x86 fast-math function and helper, as exact scalar lanes; not ported: ssePrintRegister (debug printing) and the sse2neon (ARM) min/max overrides"
 
 [[file]]
 path = "src/OpenColorIO/SSE2.h"
@@ -1256,25 +1262,29 @@ status = "todo"
 path = "src/OpenColorIO/ops/gamma/GammaOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_cpu.rs"]
-status = "todo"
+status = "done"
+note = "S2: every renderer, scalar and SSE2, bit-exact against the wheel on Windows and Rocky Linux 9 (tests/gamma_oracle.rs)"
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOpCPU.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_cpu.rs"]
-status = "todo"
+status = "done"
+note = "S2: every renderer, scalar and SSE2, bit-exact against the wheel on Windows and Rocky Linux 9 (tests/gamma_oracle.rs)"
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOpData.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_data.rs"]
-status = "todo"
+status = "partial"
+note = "S2: styles, parameters, accessors, style conversions, identity, direction, isInverse; validate, getCacheID, style strings, mayCompose/compose and getIdentityReplacement are WP 1.3g1"
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOpData.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_data.rs"]
-status = "todo"
+status = "partial"
+note = "S2: styles, parameters, accessors, style conversions, identity, direction, isInverse; validate, getCacheID, style strings, mayCompose/compose and getIdentityReplacement are WP 1.3g1"
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOpGPU.cpp"
@@ -1292,13 +1302,15 @@ status = "todo"
 path = "src/OpenColorIO/ops/gamma/GammaOpUtils.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_utils.rs"]
-status = "todo"
+status = "done"
+note = "S2"
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOpUtils.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_utils.rs"]
-status = "todo"
+status = "done"
+note = "S2"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradinghuecurve/GradingHueCurve.cpp"
@@ -1568,25 +1580,29 @@ status = "todo"
 path = "src/OpenColorIO/ops/log/LogOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/log/log_op_cpu.rs"]
-status = "todo"
+status = "done"
+note = "S2: every renderer, scalar and SSE2, bit-exact against the wheel on Windows and Rocky Linux 9 (tests/log_oracle.rs)"
 
 [[file]]
 path = "src/OpenColorIO/ops/log/LogOpCPU.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/log/log_op_cpu.rs"]
-status = "todo"
+status = "done"
+note = "S2: every renderer, scalar and SSE2, bit-exact against the wheel on Windows and Rocky Linux 9 (tests/log_oracle.rs)"
 
 [[file]]
 path = "src/OpenColorIO/ops/log/LogOpData.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/log/log_op_data.rs"]
-status = "todo"
+status = "partial"
+note = "S2: parameters, accessors, style predicates, isInverse; validate, getCacheID, the string getters and getIdentityReplacement are WP 1.3l1"
 
 [[file]]
 path = "src/OpenColorIO/ops/log/LogOpData.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/log/log_op_data.rs"]
-status = "todo"
+status = "partial"
+note = "S2: parameters, accessors, style predicates, isInverse; validate, getCacheID, the string getters and getIdentityReplacement are WP 1.3l1"
 
 [[file]]
 path = "src/OpenColorIO/ops/log/LogOpGPU.cpp"
@@ -1604,13 +1620,15 @@ status = "todo"
 path = "src/OpenColorIO/ops/log/LogUtils.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/log/log_utils.rs"]
-status = "todo"
+status = "partial"
+note = "S2: GetLinearSlope, GetLogSideBreak (Windows and Linux variants), GetLinearOffset; the CTF conversion and style strings are WP 1.3l1"
 
 [[file]]
 path = "src/OpenColorIO/ops/log/LogUtils.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/log/log_utils.rs"]
-status = "todo"
+status = "partial"
+note = "S2: GetLinearSlope, GetLogSideBreak (Windows and Linux variants), GetLinearOffset; the CTF conversion and style strings are WP 1.3l1"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOp.cpp"
@@ -4100,7 +4118,8 @@ status = "todo"
 path = "tests/cpu/MathUtils_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/math_utils_tests.rs"]
-status = "todo"
+status = "partial"
+note = "S2: clamp"
 
 [[file]]
 path = "tests/cpu/NamedTransform_tests.cpp"
@@ -4165,8 +4184,9 @@ status = "todo"
 [[file]]
 path = "tests/cpu/SSE_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-ops/src/sse_tests.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/sse_tests.rs", "crates/ocio-testkit/src/upstream/mod.rs"]
+status = "done"
+note = "S2: all 11 tests; the ULP check (GetULPDifference, AreAllClose) is in ocio_testkit::upstream"
 
 [[file]]
 path = "tests/cpu/UnitTestLogUtils.cpp"
@@ -4207,8 +4227,9 @@ status = "todo"
 [[file]]
 path = "tests/cpu/UnitTestUtils.h"
 kind = "test-support"
-target = ["crates/ocio-testkit/src/upstream/unit_test_utils.rs"]
-status = "todo"
+target = ["crates/ocio-testkit/src/upstream/mod.rs"]
+status = "partial"
+note = "S2: EqualWithSafeRelError"
 
 [[file]]
 path = "tests/cpu/ViewTransform_tests.cpp"
@@ -4466,7 +4487,8 @@ status = "todo"
 path = "tests/cpu/ops/gamma/GammaOpCPU_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_cpu_tests.rs"]
-status = "todo"
+status = "partial"
+note = "S2: all 10 tests, without upstream's finalize/optimize/size-1 checks, which wait for WP 1.6a and 1.3g1; they are replaced today by `!is_no_op() && !is_identity()`"
 
 [[file]]
 path = "tests/cpu/ops/gamma/GammaOpData_tests.cpp"
@@ -4478,7 +4500,8 @@ status = "todo"
 path = "tests/cpu/ops/gamma/GammaOpUtils_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_utils_tests.rs"]
-status = "todo"
+status = "done"
+note = "S2: both tests"
 
 [[file]]
 path = "tests/cpu/ops/gamma/GammaOp_tests.cpp"
@@ -4592,7 +4615,8 @@ status = "todo"
 path = "tests/cpu/ops/log/LogOpCPU_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/log/log_op_cpu_tests.rs"]
-status = "todo"
+status = "partial"
+note = "S2: log_test, anti_log_test, cameralin2log_test, cameralog2lin_test; log2lin_test and lin2log_test need ConvertLogParameters (WP 1.3l1)"
 
 [[file]]
 path = "tests/cpu/ops/log/LogOpData_tests.cpp"
@@ -5461,8 +5485,9 @@ status = "todo"
 [[file]]
 path = "tests/testutils/UnitTest.h"
 kind = "test-support"
-target = ["crates/ocio-testkit/src/upstream/unit_test.rs"]
-status = "todo"
+target = ["crates/ocio-testkit/src/upstream/mod.rs"]
+status = "partial"
+note = "S2: OCIO_CHECK_CLOSE"
 
 [[file]]
 path = "tests/utils/CMakeLists.txt"
