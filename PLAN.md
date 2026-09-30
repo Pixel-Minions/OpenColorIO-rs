@@ -1,6 +1,7 @@
 # OpenColorIO-rs — Porting Plan
 
-**Status:** v0.7, 2026-09-29. Phase 0 is in progress (§15).
+**Status:** v0.8, 2026-09-30. Phase 0 is complete; Phase 0b (tooling) comes next (§15).
+- **Changes in v0.8:** Phase 0 results; W0001, W0002 and D-1 approved; the tooling round before Phase 1.
 - **Changes in v0.7:**
   - parity with OpenColorIO is the goal, and consumers align with the port (§1, §6);
   - milestones are complete sections of OCIO, byte-exact on CPU and GPU in all 10 languages;
@@ -723,22 +724,35 @@ None right now. Answered on 2026-09-29:
 
 ## 15. Next steps
 
-**Phase 0 progress (2026-09-29):**
-- **Harness done.** WP 0.1–0.4 and most of 0.6 are done (logging moved to Phase 1 as chunk 1.2e; the I/O trait, `ConfigIOProxy`, belongs with config loading in 3.10) on the local `phase0` branch:
-  - workspace;
-  - upstream submodule and map;
-  - oracle and test kit;
-  - fixtures with manifest;
-  - guardrails (`cargo xtask ci`);
-  - Rocky Linux 9 image;
-  - CI workflow;
-  - agent rules (`CLAUDE.md`).
-- **Fixtures travel.** The first fixtures (the built-in configs' `serialize()` output and cache IDs) are byte-identical on Windows and Rocky Linux 9.
-- **Spikes running.** S1/WP 0.5, S2/S5 and S4 run in parallel worktrees. Their reports land in `docs/spikes/`.
+**Phase 0: complete (2026-09-30).** Everything is merged to `main` on GitHub and green in CI on Windows, Rocky Linux 9 and cargo-deny.
+- **Harness.**
+  - WP 0.1–0.4 and most of 0.6: workspace, upstream submodule and map, oracle and test kit, hash-locked fixtures, guardrails (`cargo xtask ci`), the Rocky Linux 9 image, CI, and the agent rules (`CLAUDE.md`).
+  - Logging moved to Phase 1 chunk 1.2e; the I/O trait belongs with config loading in 3.10.
+- **Spikes.** Each is bit-exact against the wheel on both platforms, in debug and release, and was reviewed independently. The reports are in `docs/spikes/`.
+  - **S2 + S5:** fast math, and the Log and Gamma CPU renderers. S5 found SVML only in PQ with fast math off (waiver W0001, invisible).
+  - **S4:** CPU dispatch identical to the wheel's `ociocpuinfo`; the Lut3D forward kernels in every SIMD profile, including FMA; three half-float conversions compared on every input.
+  - **S1 + WP 0.5:** C/C++ number formatting and parsing; a yaml-cpp 0.8.0 emitter port that re-emits the 8 built-in configs byte for byte, with byte-string semantics.
+- **Upstream tests ported:** 68 C++ (ratchet 68).
+- **Findings that became rules:**
+  - pin the NaN operand order the wheel compiled;
+  - test in release builds too;
+  - OCIO strings are bytes;
+  - platform differences are reproduced per platform (D12): camera-log break in float vs double, NaN signs and text, the Windows wheel's CRLF built-ins, old glibc `log2`;
+  - W0002 (NaN parameters) and D-1 (classic locale) are approved.
+- **Open item:** one unexplained, one-time failure of 3 tests right after the S1 merge. Ten clean reruns followed, covering cold and live cache, and running after a heavy Rocky run. CI now runs with `--no-fail-fast`, and the gate will keep full logs.
+- **Actuals:** Phase 0 was budgeted at about 7 person-weeks and took about one day of wall-clock time with 3 agents plus reviewers. The calendar in §11 is likely pessimistic; it gets re-estimated after Phase 1 from measured throughput.
 
 **Then:**
-1. Verify and merge the spikes chunk by chunk. Decide on any waivers they propose.
-2. Generate the Phase 1 porting cards, each split into mergeable chunks. Start implementer A and verifier C; implementer B joins when the dependency graph branches (formats, then Python).
+1. **Phase 0b tooling round** (`docs/cards/phase0b-tooling.md`):
+   - gate and land commands;
+   - generated files that never conflict;
+   - a standard oracle test battery;
+   - shared machine-code inspection tools;
+   - PR-based CI;
+   - cleanup.
+
+   Owner decisions are pending: the agent commit permission, PRs, and SDE in nightly CI.
+2. **Phase 1**, following `docs/cards/phase1.md` rewritten for the new tooling. M0 is the analytic transforms, CPU and GPU.
 
 ---
 

@@ -8,8 +8,8 @@ project ports it to Rust one upstream release at a time. The current line matche
 2.5.2**: the same results, the same text output, the same errors and the same accepted configs,
 from Rust and, later, from Python.
 
-> **Status: early development (Phase 0 of 10).** Nothing is usable end to end yet. See
-> [Progress](#progress).
+> **Status: early development.** Phase 0 (test harness and feasibility proofs) is complete.
+> Nothing is usable end to end yet. See [Progress](#progress).
 
 ## How precise: byte for byte
 
@@ -80,10 +80,11 @@ one.
 
 ## Progress
 
-Status as of 2026-09-29: **Phase 0 (test harness and feasibility spikes)**, about 5% of the
-planned work.
+Status as of 2026-09-30: **Phase 0 complete** (test harness and feasibility proofs), about 5%
+of the planned work. Phase 1 (the op engine and analytic transforms) is next.
 
-**Done and merged:**
+**Done:** everything below is bit-exact against the official library on Windows and Linux, in
+debug and release builds, and was reviewed independently before merging.
 - **Test harness:**
   - the live oracle;
   - hash-locked reference fixtures;
@@ -95,25 +96,29 @@ planned work.
   configs.
 - **OCIO's fast-math functions** (the approximations of `log2`, `exp2` and `pow` used by
   default), ported operation for operation.
-- **The Log and Gamma CPU renderers.** They are bit-exact against the official library on
-  Windows and Linux, in debug and release builds, with fast math on and off.
+- **The Log and Gamma CPU renderers**, with fast math on and off.
+- **CPU feature detection**, identical to OCIO's own (`ociocpuinfo`).
+- **The 3D LUT forward kernels in every SIMD variant** (SSE2, AVX, AVX2, AVX-512, including
+  the FMA kernels), identical to the official library's own kernels.
+- **All three half-float conversions OCIO uses**, compared on every possible input.
+- **C and C++ number formatting and parsing** as OCIO uses them, identical to each platform's
+  runtime.
+- **A port of the yaml-cpp emitter.** It writes the `serialize()` output of all 8 built-in
+  configs byte for byte, with OCIO's byte-string semantics.
 
-**Proven bit-exact, being merged:**
-- CPU feature detection, identical to OCIO's own (`ociocpuinfo`).
-- The 3D LUT kernels in every SIMD variant, including the FMA kernels. They are bit-exact
-  against the official library's own kernels.
-- All three half-float conversions OCIO uses, compared on every possible input.
-- C and C++ number formatting and parsing, identical to each platform's runtime.
-- A port of the yaml-cpp emitter. It writes the `serialize()` output of all 8 built-in configs
-  byte for byte.
+Along the way, the checks found platform differences inside the official library itself. The
+port reproduces each of them per platform:
+- camera-log math in float on Windows and double on Linux;
+- NaN signs and text;
+- the Windows build's CRLF built-in configs.
 
 **Upstream tests ported:**
 
-| Suite | Merged | Including pending | Total |
-|---|---:|---:|---:|
-| C++ | 28 | 68 | 1,191 |
-| GPU | 0 | 0 | 264 |
-| Python | 0 | 0 | 384 |
+| Suite | Ported | Total |
+|---|---:|---:|
+| C++ | 68 | 1,191 |
+| GPU | 0 | 264 |
+| Python | 0 | 384 |
 
 The live numbers are in [`docs/parity.md`](docs/parity.md).
 

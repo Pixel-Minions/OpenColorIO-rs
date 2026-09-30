@@ -34,9 +34,9 @@ jobs:
       - run: cargo clippy --workspace --all-targets
       - name: Guardrails, fixtures, ratchet, parity
         run: cargo xtask ci
-      - run: cargo test --workspace
+      - run: cargo test --workspace --no-fail-fast
       - name: Tests in release (optimization must not change any bit)
-        run: cargo test --workspace --release
+        run: cargo test --workspace --release --no-fail-fast
       - name: Committed fixtures are identical on this platform
         run: cargo xtask oracle check-all
 
@@ -56,8 +56,8 @@ jobs:
             cargo fmt --all --check
             cargo clippy --workspace --all-targets
             cargo xtask ci
-            cargo test --workspace
-            cargo test --workspace --release
+            cargo test --workspace --no-fail-fast
+            cargo test --workspace --release --no-fail-fast
             cargo xtask oracle check-all
           '
 
