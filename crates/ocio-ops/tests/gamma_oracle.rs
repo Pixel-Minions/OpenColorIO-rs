@@ -18,12 +18,16 @@ mod common;
 
 use std::hint::black_box;
 
-use common::{Checks, Math, direction_enum, probe_rgba_with};
+use common::{
+    Checks, Math, direction_enum, oracle_apply_yaml, probe_rgba, probe_rgba_with, yaml_direction,
+    yaml_list,
+};
 use ocio_ops::open_color_types::NegativeStyle;
 use ocio_ops::open_color_types::TransformDirection::{self, Forward, Inverse};
 use ocio_ops::ops::gamma::gamma_op_cpu::get_gamma_renderer;
 use ocio_ops::ops::gamma::gamma_op_data::{GammaOpData, GammaStyle};
 use ocio_ops::ops::gamma::gamma_op_utils::{compute_params_fwd, compute_params_rev};
+use ocio_testkit::compare::assert_pixels_bits_eq_except_nan_bits;
 use serde_json::{Value, json};
 
 const DIRECTIONS: [TransformDirection; 2] = [Forward, Inverse];
@@ -195,4 +199,86 @@ fn exponent_with_linear_transform_matches_the_wheel() {
         }
     }
     checks.finish();
+}
+
+/// The negative style in the config's YAML syntax.
+fn yaml_style(style: NegativeStyle) -> &'static str {
+    match style {
+        NegativeStyle::Clamp => "clamp",
+        NegativeStyle::Mirror => "mirror",
+        NegativeStyle::PassThru => "pass_thru",
+        NegativeStyle::Linear => "linear",
+    }
+}
+
+/// NaN parameters, which OCIO 2.5.2 accepts (YAML `.nan`), against the wheel.
+///
+/// Waiver W0002: where a NaN parameter meets a NaN pixel value in one operation, the NaN that
+/// comes out depends on the operand order that MSVC or GCC chose for the expression; the port
+/// follows upstream's source order (`math_utils::sse_add`/`sse_mul`). In the channels with a
+/// NaN parameter, a NaN from the wheel only has to be NaN in the port. Every other value is
+/// compared bit for bit.
+#[test]
+fn nan_parameters_match_the_wheel_under_waiver_w0002() {
+    let nan = f64::NAN;
+    let mut cases: Vec<(String, String, GammaOpData)> = Vec::new();
+    for dir in DIRECTIONS {
+        let value = [2.2, nan, 1.8, 1.0];
+        for neg in [
+            NegativeStyle::Clamp,
+            NegativeStyle::Mirror,
+            NegativeStyle::PassThru,
+        ] {
+            let yaml = format!(
+                "!<ExponentTransform> {{value: {}, style: {}, direction: {}}}",
+                yaml_list(&value),
+                yaml_style(neg),
+                yaml_direction(dir)
+            );
+            let label = format!("ExponentTransform {neg:?} {dir:?}");
+            cases.push((label, yaml, exponent_op(value, neg, dir)));
+        }
+        let (gamma, offset) = ([2.4, nan, 2.2, 1.8], [0.055, 0.1, nan, 0.2]);
+        for neg in [NegativeStyle::Linear, NegativeStyle::Mirror] {
+            let yaml = format!(
+                "!<ExponentWithLinearTransform> {{gamma: {}, offset: {}, style: {}, \
+                 direction: {}}}",
+                yaml_list(&gamma),
+                yaml_list(&offset),
+                yaml_style(neg),
+                yaml_direction(dir)
+            );
+            let label = format!("ExponentWithLinearTransform {neg:?} {dir:?}");
+            cases.push((
+                label,
+                yaml,
+                exponent_with_linear_op(gamma, offset, neg, dir),
+            ));
+        }
+    }
+
+    let input = probe_rgba();
+    for (label, yaml, data) in cases {
+        let params = [
+            data.red_params(),
+            data.green_params(),
+            data.blue_params(),
+            data.alpha_params(),
+        ];
+        let waived_channels = params.map(|p| p.iter().any(|v| v.is_nan()));
+        for math in Math::BOTH {
+            let expected = oracle_apply_yaml(&yaml, math, input);
+            let mut actual = input.to_vec();
+            get_gamma_renderer(&black_box(data.clone()), math.fast()).apply(&mut actual);
+            let waived = assert_pixels_bits_eq_except_nan_bits(
+                &format!("{label} ({math:?}), {yaml}"),
+                "W0002",
+                &waived_channels,
+                input,
+                &expected,
+                &actual,
+            );
+            println!("{label} ({math:?}): {waived} NaN values differ in their bits only (W0002)");
+        }
+    }
 }

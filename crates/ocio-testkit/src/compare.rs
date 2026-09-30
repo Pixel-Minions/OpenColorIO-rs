@@ -122,6 +122,39 @@ pub fn assert_pixels_bits_eq(
     }
 }
 
+/// Asserts that two pixel buffers are bitwise identical, except for the NaN bits that the
+/// owner-approved waiver `waiver` (`waivers.toml`) lets differ: in the channels where
+/// `waived_channels` is true, a value that is NaN in `expected` only has to be NaN in
+/// `actual`, with any sign and payload. Every other value, including every value of those
+/// channels that is not NaN in `expected`, must match bit for bit. `waived_channels` has one
+/// entry per channel of a pixel.
+///
+/// Returns how many values matched only as NaN, so a test can show what the waiver covered.
+#[track_caller]
+pub fn assert_pixels_bits_eq_except_nan_bits(
+    label: &str,
+    waiver: &str,
+    waived_channels: &[bool],
+    inputs: &[f32],
+    expected: &[f32],
+    actual: &[f32],
+) -> usize {
+    assert!(!waived_channels.is_empty(), "{label}: no channels");
+    let channels = waived_channels.len();
+    let mut compared = actual.to_vec();
+    let mut waived = 0;
+    for (i, (e, a)) in expected.iter().zip(actual).enumerate() {
+        if waived_channels[i % channels] && e.is_nan() && a.is_nan() && e.to_bits() != a.to_bits() {
+            compared[i] = *e;
+            waived += 1;
+        }
+    }
+    if let Some(report) = f32_bits_report(expected, &compared, Some(inputs), channels) {
+        panic!("{label} (NaN bits waived by {waiver} in channels {waived_channels:?}): {report}");
+    }
+    waived
+}
+
 /// Asserts that two byte strings are identical.
 #[track_caller]
 pub fn assert_bytes_eq(label: &str, expected: &[u8], actual: &[u8]) {
@@ -240,5 +273,64 @@ mod tests {
     #[should_panic(expected = "text differs at line 2")]
     fn text_diff_line() {
         assert_text_eq("t", "a\nb\nc", "a\nb \nc");
+    }
+
+    const NAN_A: u32 = 0x7fc0_0000;
+    const NAN_B: u32 = 0xffc1_2345;
+
+    fn pixel(bits: [u32; 4]) -> [f32; 4] {
+        bits.map(f32::from_bits)
+    }
+
+    #[test]
+    fn nan_bits_are_waived_in_the_given_channels() {
+        let waived = assert_pixels_bits_eq_except_nan_bits(
+            "t",
+            "W-test",
+            &[false, true, false, false],
+            &[0.0; 4],
+            &pixel([0, NAN_A, NAN_A, 0x3f80_0000]),
+            &pixel([0, NAN_B, NAN_A, 0x3f80_0000]),
+        );
+        assert_eq!(waived, 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "NaN bits waived by W-test in channels [false, true, false, false]")]
+    fn nan_bits_are_exact_in_the_other_channels() {
+        assert_pixels_bits_eq_except_nan_bits(
+            "t",
+            "W-test",
+            &[false, true, false, false],
+            &[0.0; 4],
+            &pixel([0, NAN_A, NAN_A, 0]),
+            &pixel([0, NAN_A, NAN_B, 0]),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "1 of 4 values differ bitwise")]
+    fn a_waived_nan_must_stay_nan() {
+        assert_pixels_bits_eq_except_nan_bits(
+            "t",
+            "W-test",
+            &[true; 4],
+            &[0.0; 4],
+            &pixel([0, NAN_A, 0, 0]),
+            &pixel([0, 0, 0, 0]),
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "1 of 4 values differ bitwise")]
+    fn values_that_are_not_nan_stay_exact_in_waived_channels() {
+        assert_pixels_bits_eq_except_nan_bits(
+            "t",
+            "W-test",
+            &[true; 4],
+            &[0.0; 4],
+            &pixel([0, 0x3f80_0000, 0, 0]),
+            &pixel([0, NAN_A, 0, 0]),
+        );
     }
 }

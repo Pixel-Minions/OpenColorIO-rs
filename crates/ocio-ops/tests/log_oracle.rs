@@ -17,7 +17,10 @@ mod common;
 
 use std::hint::black_box;
 
-use common::{Checks, Math, direction_enum, probe_rgba, probe_rgba_with};
+use common::{
+    Checks, Math, direction_enum, oracle_apply_yaml, probe_rgba, probe_rgba_with, yaml_direction,
+    yaml_list, yaml_number,
+};
 use ocio_ops::math_utils::{
     cast_value_uint8, cast_value_uint10, cast_value_uint12, cast_value_uint16,
 };
@@ -28,6 +31,7 @@ use ocio_ops::ops::log::log_utils::{
     get_log_side_break, get_log_side_break_libstdcxx, get_log_side_break_msvc,
 };
 use ocio_testkit::Oracle;
+use ocio_testkit::compare::assert_pixels_bits_eq_except_nan_bits;
 use ocio_testkit::oracle::f32_to_bytes;
 use serde_json::{Value, json};
 
@@ -90,6 +94,20 @@ impl Affine {
             },
             "calls": [["setBase", self.base]],
         })
+    }
+
+    /// The transform in the config's YAML syntax, which can hold NaN parameters.
+    fn yaml(&self, dir: TransformDirection) -> String {
+        format!(
+            "!<LogAffineTransform> {{base: {}, log_side_slope: {}, log_side_offset: {}, \
+             lin_side_slope: {}, lin_side_offset: {}, direction: {}}}",
+            yaml_number(self.base),
+            yaml_list(&self.log_side_slope),
+            yaml_list(&self.log_side_offset),
+            yaml_list(&self.lin_side_slope),
+            yaml_list(&self.lin_side_offset),
+            yaml_direction(dir)
+        )
     }
 
     /// `LogAffineTransformImpl()` holds `LogOpData(2.0f, TRANSFORM_DIR_FORWARD)`
@@ -212,6 +230,25 @@ impl Camera {
                 "direction": direction_enum(dir),
             },
         })
+    }
+
+    /// The transform in the config's YAML syntax, which can hold NaN parameters.
+    fn yaml(&self, dir: TransformDirection) -> String {
+        let linear_slope = self.linear_slope.map_or(String::new(), |s| {
+            format!("linear_slope: {}, ", yaml_list(&s))
+        });
+        format!(
+            "!<LogCameraTransform> {{base: {}, lin_side_break: {}, log_side_slope: {}, \
+             log_side_offset: {}, lin_side_slope: {}, lin_side_offset: {}, {linear_slope}\
+             direction: {}}}",
+            yaml_number(self.base),
+            yaml_list(&self.lin_side_break),
+            yaml_list(&self.log_side_slope),
+            yaml_list(&self.log_side_offset),
+            yaml_list(&self.lin_side_slope),
+            yaml_list(&self.lin_side_offset),
+            yaml_direction(dir)
+        )
     }
 
     /// `LogCameraTransformImpl(linSideBreak)` holds `LogOpData(2.0f, TRANSFORM_DIR_FORWARD)`
@@ -422,6 +459,78 @@ fn log_camera_transform_matches_the_wheel() {
         }
     }
     checks.finish();
+}
+
+/// NaN parameters, which OCIO 2.5.2 accepts (YAML `.nan`), against the wheel.
+///
+/// Waiver W0002: where a NaN parameter meets a NaN pixel value in one operation, the NaN that
+/// comes out depends on the operand order that MSVC or GCC chose for the expression; the port
+/// follows upstream's source order (`math_utils::sse_add`/`sse_mul`). In the channels with a
+/// NaN parameter, a NaN from the wheel only has to be NaN in the port. Every other value,
+/// alpha included, is compared bit for bit.
+#[test]
+fn nan_parameters_match_the_wheel_under_waiver_w0002() {
+    let nan = f64::NAN;
+    let affine = [
+        Affine {
+            base: 10.0,
+            log_side_slope: [nan, 0.5, 1.0],
+            log_side_offset: [0.1, nan, 0.2],
+            lin_side_slope: [1.0, 1.0, nan],
+            lin_side_offset: [nan, 0.01, 0.1],
+        },
+        Affine {
+            base: nan,
+            log_side_slope: [0.3, 0.5, 1.0],
+            log_side_offset: [0.1, 0.2, 0.3],
+            lin_side_slope: [1.0; 3],
+            lin_side_offset: [0.0; 3],
+        },
+    ];
+    let camera = Camera {
+        name: "NaN parameters",
+        base: 2.0,
+        lin_side_break: [0.1, nan, 0.2],
+        log_side_slope: [0.25, 0.3, nan],
+        log_side_offset: [0.5, nan, 0.6],
+        lin_side_slope: [1.0; 3],
+        lin_side_offset: [nan, 0.02, 0.01],
+        linear_slope: Some([1.2, 1.0, nan]),
+    };
+    let mut cases: Vec<(String, String, LogOpData)> = Vec::new();
+    for dir in DIRECTIONS {
+        for (i, a) in affine.iter().enumerate() {
+            cases.push((
+                format!("LogAffineTransform {i} {dir:?}"),
+                a.yaml(dir),
+                a.op(dir),
+            ));
+        }
+        let label = format!("LogCameraTransform {dir:?}");
+        cases.push((label, camera.yaml(dir), camera.op(dir)));
+    }
+
+    let input = probe_rgba();
+    for (label, yaml, data) in cases {
+        // The channels with a NaN parameter or a NaN base; the op passes alpha through.
+        let params = [data.red_params(), data.green_params(), data.blue_params()];
+        let nan_channel = |c: usize| data.base().is_nan() || params[c].iter().any(|p| p.is_nan());
+        let waived_channels = [nan_channel(0), nan_channel(1), nan_channel(2), false];
+        for math in Math::BOTH {
+            let expected = oracle_apply_yaml(&yaml, math, input);
+            let mut actual = input.to_vec();
+            get_log_renderer(&black_box(data.clone()), math.fast()).apply(&mut actual);
+            let waived = assert_pixels_bits_eq_except_nan_bits(
+                &format!("{label} ({math:?}), {yaml}"),
+                "W0002",
+                &waived_channels,
+                input,
+                &expected,
+                &actual,
+            );
+            println!("{label} ({math:?}): {waived} NaN values differ in their bits only (W0002)");
+        }
+    }
 }
 
 /// The scalar integer casts (`Converter<BD>::CastValue`), against the wheel: a LogTransform's

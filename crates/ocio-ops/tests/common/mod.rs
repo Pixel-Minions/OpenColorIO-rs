@@ -76,6 +76,66 @@ pub(crate) fn oracle_apply(transform: &Value, math: Math, input: &[f32]) -> Vec<
     resp.blob_f32(0)
 }
 
+/// A version 2.1 config with one colour space, `raw`, the processor's source. The YAML
+/// oracle adds the destination colour space.
+const RAW_CONFIG_HEAD: &str = "ocio_profile_version: 2.1
+roles:
+  default: raw
+file_rules:
+  - !<Rule> {name: Default, colorspace: raw}
+displays:
+  sRGB:
+    - !<View> {name: Raw, colorspace: raw}
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+";
+
+/// The wheel's F32 RGBA output for `transform_yaml`, one transform in the config's YAML syntax
+/// (with its direction), applied to `input`: the processor from `raw` to a colour space whose
+/// `from_scene_reference` is the transform. Unlike the JSON specs of [`oracle_apply`], YAML
+/// can hold NaN parameters (`.nan`).
+pub(crate) fn oracle_apply_yaml(transform_yaml: &str, math: Math, input: &[f32]) -> Vec<f32> {
+    let yaml = format!(
+        "{RAW_CONFIG_HEAD}  - !<ColorSpace>\n    name: cs\n    from_scene_reference: {transform_yaml}\n"
+    );
+    let mut args = json!({"config": {"yaml": yaml}, "src": "raw", "dst": "cs"});
+    if math == Math::Exact {
+        args["optimization"] = json!(DEFAULT_WITHOUT_FAST_MATH);
+    }
+    let resp = Oracle::get().call("cpu_apply", args, &[&f32_to_bytes(input)]);
+    assert!(
+        resp.result.get("exception").is_none(),
+        "the wheel refused {transform_yaml}: {}",
+        resp.result
+    );
+    resp.blob_f32(0)
+}
+
+/// `value` as a YAML number: `.nan` for NaN, else the shortest decimal that reads back as
+/// the same `double`.
+pub(crate) fn yaml_number(value: f64) -> String {
+    if value.is_nan() {
+        ".nan".to_string()
+    } else {
+        value.to_string()
+    }
+}
+
+/// `values` as a YAML flow sequence of [`yaml_number`]s.
+pub(crate) fn yaml_list(values: &[f64]) -> String {
+    let items: Vec<String> = values.iter().map(|&v| yaml_number(v)).collect();
+    format!("[{}]", items.join(", "))
+}
+
+/// A transform direction in the config's YAML syntax.
+pub(crate) fn yaml_direction(dir: ocio_ops::open_color_types::TransformDirection) -> &'static str {
+    match dir {
+        ocio_ops::open_color_types::TransformDirection::Forward => "forward",
+        ocio_ops::open_color_types::TransformDirection::Inverse => "inverse",
+    }
+}
+
 /// Values that each renderer must get right: signed NaN payloads (quiet and signalling), the
 /// neighbours of FLT_MIN and of the fast-math range limits (±126, ±128, ±149), and of small
 /// integers and halves (where `sseExp2`'s floor adjusts).
