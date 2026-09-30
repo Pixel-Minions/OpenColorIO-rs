@@ -174,35 +174,12 @@ impl Oracle {
     /// Runs `calls` in one oracle process with the `batch` command and returns their
     /// responses, in order: a call that raised in the oracle gives `Err` with its traceback,
     /// and the other calls still run. Identical input blobs are sent once. With `cache`, the
-    /// whole batch is one cache entry. Panics on a protocol error.
+    /// whole batch is one cache entry, but never a batch with a call that raised: the failure
+    /// may be transient (a `MemoryError`), and a cached one would replay on every later run.
+    /// Panics on a protocol error.
     #[track_caller]
     pub fn batch(&self, calls: &[BatchCall<'_>], cache: bool) -> Vec<Result<Response, String>> {
-        // Deduplicate by address first (the usual case: one probe buffer, many calls), then
-        // by content, so the request doesn't depend on where the buffers live.
-        let mut by_address: HashMap<(usize, usize), usize> = HashMap::new();
-        let mut by_content: HashMap<u128, Vec<usize>> = HashMap::new();
-        let mut blobs: Vec<&[u8]> = Vec::new();
-        let mut entries = Vec::with_capacity(calls.len());
-        for call in calls {
-            let mut indices = Vec::with_capacity(call.blobs.len());
-            for &blob in &call.blobs {
-                let address = (blob.as_ptr() as usize, blob.len());
-                let index = *by_address.entry(address).or_insert_with(|| {
-                    let same = by_content
-                        .entry(xxhash_rust::xxh3::xxh3_128(blob))
-                        .or_default();
-                    if let Some(&i) = same.iter().find(|&&i| blobs[i] == blob) {
-                        return i;
-                    }
-                    blobs.push(blob);
-                    same.push(blobs.len() - 1);
-                    blobs.len() - 1
-                });
-                indices.push(index);
-            }
-            entries.push(json!({"cmd": call.cmd, "args": call.args, "blobs": indices}));
-        }
-        let args = json!({ "calls": entries });
+        let (args, blobs) = batch_request(calls);
         let response = match self.try_call_with("batch", args, &blobs, cache) {
             Ok(r) => r,
             Err(e) => panic!("oracle `batch` of {} calls failed: {e}", calls.len()),
@@ -251,32 +228,34 @@ impl Oracle {
         blobs: &[&[u8]],
         cache: bool,
     ) -> Result<Response, String> {
-        let header = json!({
-            "cmd": cmd,
-            "args": args,
-            "blobs": blobs.iter().map(|b| b.len()).collect::<Vec<_>>(),
-        });
-        let request = frame(&header, blobs);
-
-        let cache_file = self.cache_dir.as_ref().filter(|_| cache).map(|dir| {
-            let mut h = Xxh3::new();
-            h.update(&self.identity.to_le_bytes());
-            h.update(&request);
-            dir.join(format!("{:032x}.bin", h.digest128()))
-        });
+        let request = request(cmd, args, blobs);
+        let cache_file = self.cache_file(&request).filter(|_| cache);
         if let Some(file) = &cache_file
             && let Ok(bytes) = std::fs::read(file)
             && let Ok(response) = parse_response(&bytes)
+            && cacheable(cmd, &response)
         {
             return Ok(response);
         }
 
         let bytes = self.run(&request)?;
         let response = parse_response(&bytes)?;
-        if let Some(file) = &cache_file {
+        if let Some(file) = &cache_file
+            && cacheable(cmd, &response)
+        {
             write_atomically(file, &bytes);
         }
         Ok(response)
+    }
+
+    /// Where the response to `request` is cached, unless the cache is off.
+    fn cache_file(&self, request: &[u8]) -> Option<PathBuf> {
+        self.cache_dir.as_ref().map(|dir| {
+            let mut h = Xxh3::new();
+            h.update(&self.identity.to_le_bytes());
+            h.update(request);
+            dir.join(format!("{:032x}.bin", h.digest128()))
+        })
     }
 
     fn run(&self, request: &[u8]) -> Result<Vec<u8>, String> {
@@ -478,6 +457,57 @@ fn cpu_model() -> Option<String> {
     ))
 }
 
+/// The framed request for `cmd` with `args` and `blobs`.
+fn request(cmd: &str, args: Value, blobs: &[&[u8]]) -> Vec<u8> {
+    let header = json!({
+        "cmd": cmd,
+        "args": args,
+        "blobs": blobs.iter().map(|b| b.len()).collect::<Vec<_>>(),
+    });
+    frame(&header, blobs)
+}
+
+/// The `batch` command's arguments for `calls`, and its blobs. Identical blobs are sent once,
+/// deduplicated by address first (the usual case: one probe buffer, many calls), then by
+/// content, so the request doesn't depend on where the buffers live.
+fn batch_request<'a>(calls: &[BatchCall<'a>]) -> (Value, Vec<&'a [u8]>) {
+    let mut by_address: HashMap<(usize, usize), usize> = HashMap::new();
+    let mut by_content: HashMap<u128, Vec<usize>> = HashMap::new();
+    let mut blobs: Vec<&'a [u8]> = Vec::new();
+    let mut entries = Vec::with_capacity(calls.len());
+    for call in calls {
+        let mut indices = Vec::with_capacity(call.blobs.len());
+        for &blob in &call.blobs {
+            let address = (blob.as_ptr() as usize, blob.len());
+            let index = *by_address.entry(address).or_insert_with(|| {
+                let same = by_content
+                    .entry(xxhash_rust::xxh3::xxh3_128(blob))
+                    .or_default();
+                if let Some(&i) = same.iter().find(|&&i| blobs[i] == blob) {
+                    return i;
+                }
+                blobs.push(blob);
+                same.push(blobs.len() - 1);
+                blobs.len() - 1
+            });
+            indices.push(index);
+        }
+        entries.push(json!({"cmd": call.cmd, "args": call.args, "blobs": indices}));
+    }
+    (json!({ "calls": entries }), blobs)
+}
+
+/// Whether a response may be cached, or replayed from the cache: every one but a batch in
+/// which a call raised, whose failure may be transient. (A command that raises outside a
+/// batch fails the whole call, and a failed call is never cached.)
+fn cacheable(cmd: &str, response: &Response) -> bool {
+    cmd != "batch"
+        || !response
+            .result
+            .as_array()
+            .is_some_and(|calls| calls.iter().any(|call| call.get("error").is_some()))
+}
+
 fn frame(header: &Value, blobs: &[&[u8]]) -> Vec<u8> {
     let header = serde_json::to_vec(header).expect("JSON header");
     let len = u32::try_from(header.len()).expect("header under 4 GiB");
@@ -562,6 +592,65 @@ pub fn bytes_to_f32(bytes: &[u8]) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A batch in which a call raised is never cached, and never replayed from the cache: the
+    /// failure may be transient (a `MemoryError`), so the next run must ask the oracle again. A
+    /// batch without failures is cached as before. (With `OCIO_RS_ORACLE_NO_CACHE` set there is
+    /// no cache to check.)
+    #[test]
+    fn a_batch_with_a_failed_call_is_never_cached() {
+        let oracle = Oracle::get();
+        let pixels = f32_to_bytes(&[0.25, 0.5, 1.0, 1.0]);
+        let log =
+            |base: f64| json!({"transform": {"class": "LogTransform", "args": {"base": base}}});
+        let calls = |args: Vec<Value>| -> Vec<BatchCall<'_>> {
+            args.into_iter()
+                .map(|args| BatchCall {
+                    cmd: "cpu_apply",
+                    args,
+                    blobs: vec![pixels.as_slice()],
+                })
+                .collect()
+        };
+        let cache_file = |calls: &[BatchCall<'_>]| {
+            let (args, blobs) = batch_request(calls);
+            oracle.cache_file(&request("batch", args, &blobs))
+        };
+
+        // A call that raises: the batch isn't written to the cache.
+        let failing = calls(vec![
+            log(2.0),
+            json!({"transform": {"class": "NoSuchTransform"}}),
+        ]);
+        let Some(failing_file) = cache_file(&failing) else {
+            return;
+        };
+        let _ = std::fs::remove_file(&failing_file);
+        let results = oracle.batch(&failing, true);
+        assert!(results[0].is_ok() && results[1].is_err(), "{results:?}");
+        assert!(
+            !failing_file.exists(),
+            "a batch with a failed call was cached"
+        );
+
+        // A cached batch with failed calls (an earlier version wrote them) isn't replayed: the
+        // oracle runs again, and its good response replaces the entry.
+        let passing = calls(vec![log(2.0), log(10.0)]);
+        let passing_file = cache_file(&passing).expect("the cache is on");
+        let stale = json!({
+            "ok": true,
+            "result": [
+                {"error": "MemoryError (a stale entry)", "call": 0, "blobs": []},
+                {"error": "MemoryError (a stale entry)", "call": 1, "blobs": []},
+            ],
+            "blobs": [],
+        });
+        write_atomically(&passing_file, &frame(&stale, &[]));
+        let results = oracle.batch(&passing, true);
+        assert!(results.iter().all(Result::is_ok), "{results:?}");
+        let cached = parse_response(&std::fs::read(&passing_file).expect("cached")).unwrap();
+        assert!(cacheable("batch", &cached), "{}", cached.result);
+    }
 
     /// The cache identity covers every file of the oracle's package, whatever its extension,
     /// and not Python's bytecode caches.
