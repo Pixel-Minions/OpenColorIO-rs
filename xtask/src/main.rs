@@ -27,9 +27,12 @@ Checking and landing chunks:
                               with --no-ff, regenerate the generated files, gate the
                               result and fast-forward phase0; never pushes
                               (`cargo xtask land --help`)
-  clean-scratch [--yes]       list, and with --yes delete: target/verify* in every
-                              checkout, worktrees of landed branches, and Rocky build
-                              volumes (ocio-rs-target-*) of no remaining worktree
+  clean-scratch [--yes] [--unlabelled]
+                              list, and with --yes delete: target/verify* in every
+                              checkout (in use or not), worktrees of landed branches, and
+                              Rocky build volumes (ocio-rs-target-*) that scripts/rocky9.sh
+                              labelled with this repository and whose checkout is gone;
+                              --unlabelled: also unlabelled volumes no checkout still uses
 
 Oracle and fixtures (fixtures/ is written only by these commands):
   oracle info                 versions and platform of the pinned oracle wheel

@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! `cargo xtask clean-scratch [--yes]`: lists, and with `--yes` deletes, scratch that piles up
-//! as cards land:
-//! - verifier and probe output, `target/verify*`, in the main checkout and every worktree;
+//! `cargo xtask clean-scratch [--yes] [--unlabelled]`: lists, and with `--yes` deletes, scratch
+//! that piles up as cards land:
+//! - verifier and probe output, `target/verify*`, in the main checkout and every worktree,
+//!   including worktrees still in use (it is output, never input);
 //! - worktrees whose branch has landed on `phase0`, when they have nothing uncommitted;
 //! - Docker volumes `ocio-rs-target-<id>` (the Rocky Linux 9 build directories of
-//!   `scripts/rocky9.sh`) whose id matches no worktree that remains.
+//!   `scripts/rocky9.sh`) labelled with this repository whose checkout is gone.
 //!
-//! It never deletes anything else.
+//! `scripts/rocky9.sh` labels each volume with its checkout and repository. Volumes of other
+//! repositories, and volumes without those labels (made by an older `scripts/rocky9.sh`, which
+//! can't be attributed), are kept; `--unlabelled` also deletes the unlabelled ones that no
+//! checkout of this repository still uses. It never deletes anything else.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -18,13 +22,22 @@ use crate::land::{LANDED_FROM, same_path};
 
 const INTEGRATION: &str = "phase0";
 const VOLUME_PREFIX: &str = "ocio-rs-target-";
+/// Labels `scripts/rocky9.sh` gives the volumes it creates.
+const CHECKOUT_LABEL: &str = "ocio-rs.checkout";
+const REPOSITORY_LABEL: &str = "ocio-rs.git-common-dir";
+
+pub(crate) const USAGE: &str = "usage: cargo xtask clean-scratch [--yes] [--unlabelled]";
 
 pub(crate) fn run(args: &[&str]) -> Result<(), String> {
-    let yes = match args {
-        [] => false,
-        ["--yes"] => true,
-        _ => return Err("usage: cargo xtask clean-scratch [--yes]".into()),
-    };
+    let mut yes = false;
+    let mut unlabelled = false;
+    for &arg in args {
+        match arg {
+            "--yes" => yes = true,
+            "--unlabelled" => unlabelled = true,
+            _ => return Err(USAGE.into()),
+        }
+    }
     let root = crate::root();
     let worktrees = worktrees(&root)?;
     if yes {
@@ -118,35 +131,18 @@ pub(crate) fn run(args: &[&str]) -> Result<(), String> {
         }
     }
 
-    // 3. Docker volumes of no remaining worktree.
+    // 3. Docker volumes: this repository's, whose checkout is gone.
     println!("\nDocker volumes {VOLUME_PREFIX}* (scripts/rocky9.sh build directories):");
     match volumes() {
         Err(e) => println!("  not checked: {e}"),
-        Ok(mut volumes) => {
-            // Volume id -> (worktree, whether it is gone: deleted in this run, or its
-            // directory no longer exists).
-            let mut ids: Vec<(String, &Worktree, bool)> = Vec::new();
-            for wt in &worktrees {
-                let going = gone.iter().any(|g| g.path == wt.path) || !Path::new(&wt.path).is_dir();
-                for form in path_forms(&wt.path) {
-                    ids.push((volume_id(&form), wt, going));
-                }
-            }
-            volumes.sort_by(|a, b| a.name.cmp(&b.name));
-            for v in volumes.iter().filter(|v| v.name.starts_with(VOLUME_PREFIX)) {
-                let id = &v.name[VOLUME_PREFIX.len()..];
-                let owner = ids.iter().find(|(i, _, going)| i == id && !going);
-                if let Some((_, wt, _)) = owner {
-                    println!("  keep   {:>10}  {}  {}", v.size, v.name, wt.path);
+        Ok(volumes) => {
+            let owners = Owners::new(&root, &worktrees, &gone)?;
+            for v in &volumes {
+                let (delete, why) = owners.verdict(v, unlabelled);
+                if !delete {
+                    println!("  keep   {:>10}  {}  {why}", v.size, v.name);
                     continue;
                 }
-                let why = match ids.iter().find(|(i, _, _)| i == id) {
-                    Some((_, wt, _)) if gone.iter().any(|g| g.path == wt.path) => {
-                        format!("its worktree {} is deleted above", wt.path)
-                    }
-                    Some((_, wt, _)) => format!("its worktree {} no longer exists", wt.path),
-                    None => "no worktree of this repository has this id".to_string(),
-                };
                 let in_use = if v.links > 0 {
                     format!(" (used by {} container(s): deleting it will fail)", v.links)
                 } else {
@@ -309,8 +305,8 @@ fn parse_worktrees(list: &str) -> Vec<Worktree> {
     out
 }
 
-/// A Docker volume from `docker system df -v`.
-#[derive(Debug)]
+/// A Docker volume `ocio-rs-target-*`, with its size and the labels `scripts/rocky9.sh` gives it.
+#[derive(Debug, Default)]
 struct Volume {
     name: String,
     /// As Docker prints it, e.g. `2.103GB`.
@@ -318,14 +314,21 @@ struct Volume {
     bytes: u64,
     /// Containers using it.
     links: u64,
+    /// The checkout it was created for (`ocio-rs.checkout`).
+    checkout: Option<String>,
+    /// That checkout's git common directory (`ocio-rs.git-common-dir`): the repository.
+    repository: Option<String>,
 }
 
+/// The `ocio-rs-target-*` volumes, sorted by name: sizes from `docker system df -v`, labels
+/// from `docker volume inspect`.
 fn volumes() -> Result<Vec<Volume>, String> {
     let out = docker(&["system", "df", "-v", "--format", "{{json .Volumes}}"])?;
     let list: Vec<serde_json::Value> =
         serde_json::from_str(out.trim()).map_err(|e| format!("docker system df: {e}"))?;
-    Ok(list
+    let mut volumes: Vec<Volume> = list
         .iter()
+        .filter(|v| v["Name"].as_str().unwrap_or("").starts_with(VOLUME_PREFIX))
         .map(|v| {
             let field = |k: &str| v[k].as_str().unwrap_or("").to_string();
             let size = field("Size");
@@ -334,9 +337,135 @@ fn volumes() -> Result<Vec<Volume>, String> {
                 bytes: docker_bytes(&size),
                 size,
                 links: field("Links").parse().unwrap_or(0),
+                ..Volume::default()
             }
         })
-        .collect())
+        .collect();
+    if volumes.is_empty() {
+        return Ok(volumes);
+    }
+    let mut args = vec!["volume", "inspect"];
+    let names: Vec<String> = volumes.iter().map(|v| v.name.clone()).collect();
+    args.extend(names.iter().map(String::as_str));
+    let inspected: Vec<serde_json::Value> = serde_json::from_str(docker(&args)?.trim())
+        .map_err(|e| format!("docker volume inspect: {e}"))?;
+    for info in &inspected {
+        let label = |k: &str| info["Labels"][k].as_str().map(str::to_string);
+        if let Some(v) = volumes.iter_mut().find(|v| info["Name"] == v.name.as_str()) {
+            v.checkout = label(CHECKOUT_LABEL);
+            v.repository = label(REPOSITORY_LABEL);
+        }
+    }
+    volumes.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(volumes)
+}
+
+/// What decides whose a volume is.
+struct Owners {
+    /// This repository's git common directory, canonical.
+    repository: String,
+    /// Canonical paths of the worktrees that stay.
+    remaining: HashSet<String>,
+    /// Canonical paths of the worktrees deleted in this run.
+    gone: HashSet<String>,
+    /// `xtask land`'s worktree: its volume stays warm between lands, while the worktree is gone.
+    land: String,
+    /// Legacy volume ids (see `legacy_forms`) of the worktrees whose `scripts/rocky9.sh` still
+    /// makes unlabelled volumes, and those worktrees.
+    legacy_users: Vec<(String, String)>,
+}
+
+impl Owners {
+    fn new(root: &Path, worktrees: &[Worktree], gone: &[&Worktree]) -> Result<Owners, String> {
+        let repository = crate::git(
+            root,
+            &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+        )?;
+        let is_gone = |w: &Worktree| gone.iter().any(|g| g.path == w.path);
+        let stays = |w: &&Worktree| !is_gone(w) && Path::new(&w.path).is_dir();
+        let mut legacy_users = Vec::new();
+        for wt in worktrees.iter().filter(stays) {
+            let script = std::fs::read_to_string(Path::new(&wt.path).join("scripts/rocky9.sh"))
+                .unwrap_or_default();
+            if !script.is_empty() && !script.contains(CHECKOUT_LABEL) {
+                for form in legacy_forms(&wt.path) {
+                    legacy_users.push((volume_id(&form), wt.path.clone()));
+                }
+            }
+        }
+        Ok(Owners {
+            repository: canonical_path(repository.trim()),
+            remaining: worktrees
+                .iter()
+                .filter(stays)
+                .map(|w| canonical_path(&w.path))
+                .collect(),
+            gone: gone.iter().map(|w| canonical_path(&w.path)).collect(),
+            land: canonical_path(&format!(
+                "{}/target/land/wt",
+                worktrees.first().map_or("", |w| w.path.as_str())
+            )),
+            legacy_users,
+        })
+    }
+
+    /// Whether to delete `v`, and why.
+    fn verdict(&self, v: &Volume, unlabelled: bool) -> (bool, String) {
+        match (&v.checkout, &v.repository) {
+            (Some(checkout), Some(repo)) if canonical_path(repo) == self.repository => {
+                let c = canonical_path(checkout);
+                if c == self.land {
+                    (false, format!("xtask land's build volume ({checkout})"))
+                } else if self.remaining.contains(&c) {
+                    (false, checkout.clone())
+                } else if self.gone.contains(&c) {
+                    (true, format!("its worktree {checkout} is deleted above"))
+                } else if !Path::new(checkout).is_dir() {
+                    (true, format!("its checkout {checkout} no longer exists"))
+                } else {
+                    (
+                        false,
+                        format!("{checkout} exists but is not a worktree of this repository"),
+                    )
+                }
+            }
+            (Some(checkout), Some(repo)) if !repo.is_empty() => {
+                let note = if Path::new(repo).exists() {
+                    ""
+                } else {
+                    "; that repository no longer exists (`docker volume rm` it if it is not coming back)"
+                };
+                (false, format!("another repository's: {checkout}{note}"))
+            }
+            (Some(checkout), _) => (
+                false,
+                format!("labelled without a repository, not attributable: {checkout}"),
+            ),
+            (None, _) => {
+                let id = &v.name[VOLUME_PREFIX.len()..];
+                if let Some((_, user)) = self.legacy_users.iter().find(|(i, _)| i == id) {
+                    (
+                        false,
+                        format!("unlabelled: {user}'s older scripts/rocky9.sh still uses it"),
+                    )
+                } else if unlabelled {
+                    (
+                        true,
+                        "unlabelled, and no checkout of this repository still uses it \
+                         (a volume of another clone would look the same)"
+                            .to_string(),
+                    )
+                } else {
+                    (
+                        false,
+                        "unlabelled (an older scripts/rocky9.sh made it), so not attributable; \
+                         no checkout of this repository still uses it: --unlabelled deletes it"
+                            .to_string(),
+                    )
+                }
+            }
+        }
+    }
 }
 
 fn docker(args: &[&str]) -> Result<String, String> {
@@ -372,12 +501,32 @@ fn docker_bytes(size: &str) -> u64 {
     (number.parse::<f64>().unwrap_or(0.0) * scale) as u64
 }
 
-/// The forms of a worktree path that `scripts/rocky9.sh` may have hashed: as git lists it and
-/// as the file system spells it (Windows paths are case-insensitive).
-fn path_forms(path: &str) -> Vec<String> {
-    let mut forms = vec![rocky_path(path)];
+/// A path in the canonical form `scripts/rocky9.sh` hashes into volume ids: forward slashes, no
+/// trailing slash, and Windows paths (a drive letter or `//`) in ASCII lower case, since Windows
+/// ignores case.
+pub(crate) fn canonical_path(path: &str) -> String {
+    let path = crate::plain_path(Path::new(path))
+        .to_string_lossy()
+        .replace('\\', "/");
+    let bytes = path.as_bytes();
+    let drive = bytes.len() >= 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic();
+    let mut path = path.as_str();
+    if !(drive && path.len() == 3) {
+        path = path.trim_end_matches('/');
+    }
+    if drive || path.starts_with("//") {
+        path.to_ascii_lowercase()
+    } else {
+        path.to_string()
+    }
+}
+
+/// The forms of a worktree path that an older `scripts/rocky9.sh` hashed into unlabelled volume
+/// ids (Git Bash's `pwd`): as git lists it and as the file system spells it.
+fn legacy_forms(path: &str) -> Vec<String> {
+    let mut forms = vec![legacy_path(path)];
     if let Ok(canonical) = std::fs::canonicalize(path) {
-        let canonical = rocky_path(&crate::plain_path(&canonical).to_string_lossy());
+        let canonical = legacy_path(&crate::plain_path(&canonical).to_string_lossy());
         if !forms.contains(&canonical) {
             forms.push(canonical);
         }
@@ -385,9 +534,9 @@ fn path_forms(path: &str) -> Vec<String> {
     forms
 }
 
-/// A checkout path as `scripts/rocky9.sh` sees it: `pwd` in Git Bash on Windows
+/// A checkout path as an older `scripts/rocky9.sh` hashed it: `pwd` in Git Bash on Windows
 /// (`D:\Projects\x` -> `/d/Projects/x`), the path itself elsewhere.
-fn rocky_path(path: &str) -> String {
+fn legacy_path(path: &str) -> String {
     let path = crate::plain_path(Path::new(path))
         .to_string_lossy()
         .replace('\\', "/");
@@ -404,9 +553,9 @@ fn rocky_path(path: &str) -> String {
     }
 }
 
-/// `scripts/rocky9.sh`: `printf '%s' "$root" | md5sum | cut -c1-12`.
-fn volume_id(rocky_path: &str) -> String {
-    md5(rocky_path.as_bytes())
+/// `scripts/rocky9.sh`: `printf '%s' "$path" | md5sum | cut -c1-12`.
+fn volume_id(path: &str) -> String {
+    md5(path.as_bytes())
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect::<String>()[..12]
@@ -538,21 +687,81 @@ mod tests {
 
     #[test]
     fn volume_ids_match_rocky9_sh() {
-        // `printf '%s' /d/Projects/OpenColorIO-rs | md5sum | cut -c1-12` in Git Bash.
+        // scripts/rocky9.sh in Git Bash, from D:\Projects\OpenColorIO-rs-wt\tooling-xtask, typed
+        // in either case: `pwd -W` is D:/Projects/... (or d:/projects/...), its canonical form
+        // d:/projects/opencolorio-rs-wt/tooling-xtask, and md5sum gives 76d19c61b038.
+        for typed in [
+            r"D:\Projects\OpenColorIO-rs-wt\tooling-xtask",
+            "d:/projects/opencolorio-rs-wt/tooling-xtask",
+            r"\\?\D:\Projects\OpenColorIO-rs-wt\tooling-xtask\",
+        ] {
+            assert_eq!(
+                canonical_path(typed),
+                "d:/projects/opencolorio-rs-wt/tooling-xtask"
+            );
+        }
+        assert_eq!(
+            volume_id(&canonical_path(
+                "D:/Projects/OpenColorIO-rs-wt/tooling-xtask"
+            )),
+            "76d19c61b038"
+        );
+        assert_eq!(canonical_path("D:/"), "d:/");
+        assert_eq!(canonical_path("//Server/Share/x/"), "//server/share/x");
+        assert_eq!(canonical_path("/home/U/ocio/"), "/home/U/ocio");
+        // The older scripts/rocky9.sh hashed Git Bash's `pwd`: `printf '%s'
+        // /d/Projects/OpenColorIO-rs | md5sum | cut -c1-12` is b6a2d90b5ed0.
         assert_eq!(volume_id("/d/Projects/OpenColorIO-rs"), "b6a2d90b5ed0");
         if cfg!(windows) {
             assert_eq!(
-                rocky_path(r"D:\Projects\OpenColorIO-rs-wt\commit-s1"),
+                legacy_path(r"D:\Projects\OpenColorIO-rs-wt\commit-s1"),
                 "/d/Projects/OpenColorIO-rs-wt/commit-s1"
             );
-            assert_eq!(
-                rocky_path("D:/Projects/OpenColorIO-rs"),
-                "/d/Projects/OpenColorIO-rs"
-            );
-            assert_eq!(rocky_path(r"\\?\D:\Projects\x\"), "/d/Projects/x");
+            assert_eq!(legacy_path(r"\\?\D:\Projects\x\"), "/d/Projects/x");
         } else {
-            assert_eq!(rocky_path("/home/u/ocio/"), "/home/u/ocio");
+            assert_eq!(legacy_path("/home/u/ocio/"), "/home/u/ocio");
         }
+    }
+
+    #[test]
+    fn volumes_are_deleted_only_when_this_repository_labels_them_and_their_checkout_is_gone() {
+        let owners = Owners {
+            repository: canonical_path("D:/r/.git"),
+            remaining: [canonical_path("D:/r"), canonical_path("D:/wt/a")].into(),
+            gone: [canonical_path("D:/wt/landed")].into(),
+            land: canonical_path("D:/r/target/land/wt"),
+            legacy_users: vec![("0123456789ab".into(), "D:/wt/old".into())],
+        };
+        let volume = |name: &str, checkout: Option<&str>, repository: Option<&str>| Volume {
+            name: name.into(),
+            checkout: checkout.map(String::from),
+            repository: repository.map(String::from),
+            ..Volume::default()
+        };
+        let delete = |v: &Volume, unlabelled: bool| owners.verdict(v, unlabelled).0;
+        let ours = |checkout: &str| volume("ocio-rs-target-x", Some(checkout), Some("d:/R/.GIT"));
+        // This repository's: kept while the checkout is a worktree, and for land's worktree.
+        assert!(!delete(&ours("D:/R"), false));
+        assert!(!delete(&ours("d:/wt/A"), false));
+        assert!(!delete(&ours("D:/r/target/land/wt"), false));
+        // Deleted with its worktree, or once the checkout no longer exists.
+        assert!(delete(&ours("D:/wt/landed"), false));
+        assert!(delete(&ours("Z:/no/such/checkout/ocio-rs-test"), false));
+        // Another repository's, unlabelled or unattributable: kept.
+        let other = volume("ocio-rs-target-y", Some("Z:/gone"), Some("Z:/gone/.git"));
+        assert!(!delete(&other, true));
+        assert!(!delete(
+            &volume("ocio-rs-target-z", Some("Z:/gone"), None),
+            true
+        ));
+        let legacy = volume("ocio-rs-target-fedcba987654", None, None);
+        assert!(!delete(&legacy, false));
+        // --unlabelled deletes unlabelled volumes, except one an older script still uses.
+        assert!(delete(&legacy, true));
+        assert!(!delete(
+            &volume("ocio-rs-target-0123456789ab", None, None),
+            true
+        ));
     }
 
     #[test]

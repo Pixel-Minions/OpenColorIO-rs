@@ -126,7 +126,7 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
 |---|---|
 | `cargo xtask gate [--crates a,b] [--release] [--rocky] [--quick\|--full]` | The chunk gate: fmt, clippy, `xtask ci`, tests; logs in `target/gate-logs/` |
 | `cargo xtask land <branch> [--rocky]` | Orchestrator: replay a card onto `phase0` gating every commit, merge `--no-ff`, regenerate the generated files, full gate; never pushes |
-| `cargo xtask clean-scratch [--yes]` | List (with `--yes`, delete) `target/verify*`, worktrees of landed branches, and Rocky build volumes of no worktree |
+| `cargo xtask clean-scratch [--yes]` | List (with `--yes`, delete) `target/verify*` in every checkout, worktrees of landed branches, and this repository's Rocky build volumes whose checkout is gone |
 | `cargo xtask ci` | Guards, fixture hashes, ported tests at least `docs/ratchet.toml` (branch mode) |
 | `cargo xtask ci --main` | Also: `docs/ratchet.toml` and `docs/parity.md` are current (`main` and land commits) |
 | `cargo xtask guards` | Forbidden patterns, the `unsafe` allowlist, headers, dependency pins, the upstream map |
