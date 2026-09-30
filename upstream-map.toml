@@ -434,15 +434,16 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/Op.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/op.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/op.rs", "crates/ocio-ops/src/op_data.rs"]
+status = "partial"
+note = "1.2c: OpCPU's defaults, OpData, GetTypeName, Op, OpRcPtrVec (as OpVec), SerializeOpVec and CreateOpVecFromOpData, with each family's arms added with the family; Op::getIdentityReplacement comes with the Matrix op"
 
 [[file]]
 path = "src/OpenColorIO/Op.h"
 kind = "src"
-target = ["crates/ocio-ops/src/op.rs"]
+target = ["crates/ocio-ops/src/op.rs", "crates/ocio-ops/src/op_data.rs"]
 status = "partial"
-note = "S2: OpCPU (as the CpuOp trait); 1.1d: its typed apply(const void *, void *, long) as CpuOp::apply_bit_depth, over the Pixels and PixelsMut enums of the channel types; the rest is WP 1.2c"
+note = "S2, 1.1d: OpCPU (as the CpuOp trait, with the typed apply_bit_depth); 1.2c: OpData (an enum with a variant per family), Op, OpRcPtrVec (as OpVec); not yet: Op::getIdentityReplacement (Matrix op), dumpMetadata (WP 1.8), optimize and optimizeForBitdepth (WP 1.6), HasFlag (1.2d)"
 
 [[file]]
 path = "src/OpenColorIO/OpBuilders.h"
@@ -454,7 +455,8 @@ status = "todo"
 path = "src/OpenColorIO/OpOptimizers.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/op_optimizers.rs"]
-status = "todo"
+status = "partial"
+note = "1.2c: FinalizeOps (132-139) and OpRcPtrVec::finalize (598-609); the optimizer is WP 1.6"
 
 [[file]]
 path = "src/OpenColorIO/ParseUtils.cpp"
@@ -1909,13 +1911,15 @@ status = "todo"
 path = "src/OpenColorIO/ops/noop/NoOps.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/noop/no_ops.rs"]
-status = "todo"
+status = "partial"
+note = "1.2c: FileNoOp, LookNoOp, CreateFileNoOp and CreateLookNoOp, CPU side (the op class is kept in the data, NoOpKind); not yet: AllocationNoOp (1.3n1), dumpMetadata (WP 1.8), PartitionGPUOps and Create3DLut (they need the Lut3D op)"
 
 [[file]]
 path = "src/OpenColorIO/ops/noop/NoOps.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/noop/no_ops.rs"]
-status = "todo"
+status = "partial"
+note = "1.2c: NoOpData, FileNoOpData, CreateFileNoOp, CreateLookNoOp; not yet: PartitionGPUOps and Create3DLut"
 
 [[file]]
 path = "src/OpenColorIO/ops/range/RangeOp.cpp"

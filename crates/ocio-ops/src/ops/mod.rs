@@ -6,3 +6,4 @@
 pub mod gamma;
 pub mod log;
 pub mod lut3d;
+pub mod noop;
