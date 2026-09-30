@@ -1,0 +1,474 @@
+{
+ "active_displays": "d, a: b, x#y",
+ "active_views": "a: b, [x], {y}, ?z",
+ "colorspaces": [
+  {
+   "aliases": [
+    "plain",
+    " lead",
+    "trail ",
+    "a: b",
+    "a #b",
+    "a#b",
+    "e#",
+    "x#",
+    "x #",
+    "#",
+    "-dash",
+    "- x",
+    "-",
+    "--",
+    "? q",
+    "?",
+    "?x",
+    ": colon",
+    ":",
+    ":x",
+    "k:v",
+    "x: ",
+    "x :y",
+    ",comma",
+    "a,b",
+    "[br",
+    "a[b",
+    "]br",
+    "{br",
+    "}br",
+    "#hash",
+    "&amp",
+    "x&y",
+    "*star",
+    "!bang",
+    "a!b",
+    "|pipe",
+    ">gt",
+    "'sq",
+    "a'b",
+    "\"dq",
+    "a\"b",
+    "@at",
+    "`bt",
+    "=",
+    "<<",
+    "null",
+    "Null",
+    "NULL",
+    "nULL",
+    "~",
+    "~x",
+    "true",
+    "False",
+    "yes",
+    "No",
+    "on",
+    "OFF",
+    "y",
+    "n",
+    "1.5",
+    "-2",
+    "0x10",
+    "1e3",
+    ".inf",
+    "-.inf",
+    ".nan",
+    "0o17",
+    "a\tb",
+    "\ttab",
+    "tab\t",
+    "a\nb",
+    "a\\b",
+    "\\",
+    "a\bb",
+    "a\fb",
+    "a\rb",
+    "a\u0000b",
+    "a\u0001b",
+    "a\u001fb",
+    "a\u007fb",
+    "a  b",
+    "...",
+    "---",
+    "--- x",
+    "... x",
+    "a - b",
+    "a -b"
+   ],
+   "categories": [
+    "plain",
+    "a: b",
+    "a,b",
+    "[x]",
+    "{x}",
+    "#x",
+    "x#",
+    "caf\u00e9"
+   ],
+   "name": "cs0"
+  }
+ ],
+ "displays": [
+  [
+   "d",
+   [
+    {
+     "colorspace": "plain",
+     "name": "plain"
+    },
+    {
+     "colorspace": " lead",
+     "name": " lead"
+    },
+    {
+     "colorspace": "trail ",
+     "name": "trail "
+    },
+    {
+     "colorspace": "a: b",
+     "name": "a: b"
+    },
+    {
+     "colorspace": "a #b",
+     "name": "a #b"
+    },
+    {
+     "colorspace": "a#b",
+     "name": "a#b"
+    },
+    {
+     "colorspace": "e#",
+     "name": "e#"
+    },
+    {
+     "colorspace": "x#",
+     "name": "x#"
+    },
+    {
+     "colorspace": "x #",
+     "name": "x #"
+    },
+    {
+     "colorspace": "#",
+     "name": "#"
+    },
+    {
+     "colorspace": "-dash",
+     "name": "-dash"
+    },
+    {
+     "colorspace": "- x",
+     "name": "- x"
+    },
+    {
+     "colorspace": "-",
+     "name": "-"
+    },
+    {
+     "colorspace": "--",
+     "name": "--"
+    },
+    {
+     "colorspace": "? q",
+     "name": "? q"
+    },
+    {
+     "colorspace": "?",
+     "name": "?"
+    },
+    {
+     "colorspace": "?x",
+     "name": "?x"
+    },
+    {
+     "colorspace": ": colon",
+     "name": ": colon"
+    },
+    {
+     "colorspace": ":",
+     "name": ":"
+    },
+    {
+     "colorspace": ":x",
+     "name": ":x"
+    },
+    {
+     "colorspace": "k:v",
+     "name": "k:v"
+    },
+    {
+     "colorspace": "x: ",
+     "name": "x: "
+    },
+    {
+     "colorspace": "x :y",
+     "name": "x :y"
+    },
+    {
+     "colorspace": ",comma",
+     "name": ",comma"
+    },
+    {
+     "colorspace": "a,b",
+     "name": "a,b"
+    },
+    {
+     "colorspace": "[br",
+     "name": "[br"
+    },
+    {
+     "colorspace": "a[b",
+     "name": "a[b"
+    },
+    {
+     "colorspace": "]br",
+     "name": "]br"
+    },
+    {
+     "colorspace": "{br",
+     "name": "{br"
+    },
+    {
+     "colorspace": "}br",
+     "name": "}br"
+    },
+    {
+     "colorspace": "#hash",
+     "name": "#hash"
+    },
+    {
+     "colorspace": "&amp",
+     "name": "&amp"
+    },
+    {
+     "colorspace": "x&y",
+     "name": "x&y"
+    },
+    {
+     "colorspace": "*star",
+     "name": "*star"
+    },
+    {
+     "colorspace": "!bang",
+     "name": "!bang"
+    },
+    {
+     "colorspace": "a!b",
+     "name": "a!b"
+    },
+    {
+     "colorspace": "|pipe",
+     "name": "|pipe"
+    },
+    {
+     "colorspace": ">gt",
+     "name": ">gt"
+    },
+    {
+     "colorspace": "'sq",
+     "name": "'sq"
+    },
+    {
+     "colorspace": "a'b",
+     "name": "a'b"
+    },
+    {
+     "colorspace": "\"dq",
+     "name": "\"dq"
+    },
+    {
+     "colorspace": "a\"b",
+     "name": "a\"b"
+    },
+    {
+     "colorspace": "%pc",
+     "name": "%pc"
+    },
+    {
+     "colorspace": "@at",
+     "name": "@at"
+    },
+    {
+     "colorspace": "`bt",
+     "name": "`bt"
+    },
+    {
+     "colorspace": "=",
+     "name": "="
+    },
+    {
+     "colorspace": "<<",
+     "name": "<<"
+    },
+    {
+     "colorspace": "null",
+     "name": "null"
+    },
+    {
+     "colorspace": "Null",
+     "name": "Null"
+    },
+    {
+     "colorspace": "NULL",
+     "name": "NULL"
+    },
+    {
+     "colorspace": "nULL",
+     "name": "nULL"
+    },
+    {
+     "colorspace": "~",
+     "name": "~"
+    },
+    {
+     "colorspace": "~x",
+     "name": "~x"
+    },
+    {
+     "colorspace": "true",
+     "name": "true"
+    },
+    {
+     "colorspace": "False",
+     "name": "False"
+    },
+    {
+     "colorspace": "yes",
+     "name": "yes"
+    },
+    {
+     "colorspace": "No",
+     "name": "No"
+    },
+    {
+     "colorspace": "on",
+     "name": "on"
+    },
+    {
+     "colorspace": "OFF",
+     "name": "OFF"
+    },
+    {
+     "colorspace": "y",
+     "name": "y"
+    },
+    {
+     "colorspace": "n",
+     "name": "n"
+    },
+    {
+     "colorspace": "1.5",
+     "name": "1.5"
+    },
+    {
+     "colorspace": "-2",
+     "name": "-2"
+    },
+    {
+     "colorspace": "0x10",
+     "name": "0x10"
+    },
+    {
+     "colorspace": "1e3",
+     "name": "1e3"
+    },
+    {
+     "colorspace": ".inf",
+     "name": ".inf"
+    },
+    {
+     "colorspace": "-.inf",
+     "name": "-.inf"
+    },
+    {
+     "colorspace": ".nan",
+     "name": ".nan"
+    },
+    {
+     "colorspace": "0o17",
+     "name": "0o17"
+    },
+    {
+     "colorspace": "a\tb",
+     "name": "a\tb"
+    },
+    {
+     "colorspace": "\ttab",
+     "name": "\ttab"
+    },
+    {
+     "colorspace": "tab\t",
+     "name": "tab\t"
+    },
+    {
+     "colorspace": "a\nb",
+     "name": "a\nb"
+    },
+    {
+     "colorspace": "a\\b",
+     "name": "a\\b"
+    },
+    {
+     "colorspace": "\\",
+     "name": "\\"
+    },
+    {
+     "colorspace": "a\bb",
+     "name": "a\bb"
+    },
+    {
+     "colorspace": "a\fb",
+     "name": "a\fb"
+    },
+    {
+     "colorspace": "a\rb",
+     "name": "a\rb"
+    },
+    {
+     "colorspace": "a\u0000b",
+     "name": "a\u0000b"
+    },
+    {
+     "colorspace": "a\u0001b",
+     "name": "a\u0001b"
+    },
+    {
+     "colorspace": "a\u001fb",
+     "name": "a\u001fb"
+    },
+    {
+     "colorspace": "a\u007fb",
+     "name": "a\u007fb"
+    },
+    {
+     "colorspace": "a  b",
+     "name": "a  b"
+    },
+    {
+     "colorspace": "...",
+     "name": "..."
+    },
+    {
+     "colorspace": "---",
+     "name": "---"
+    },
+    {
+     "colorspace": "--- x",
+     "name": "--- x"
+    },
+    {
+     "colorspace": "... x",
+     "name": "... x"
+    },
+    {
+     "colorspace": "a - b",
+     "name": "a - b"
+    },
+    {
+     "colorspace": "a -b",
+     "name": "a -b"
+    }
+   ]
+  ]
+ ],
+ "family_separator": "\"",
+ "inactive_colorspaces": "cs0, a#b, !x"
+}

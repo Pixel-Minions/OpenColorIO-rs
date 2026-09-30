@@ -1,0 +1,861 @@
+ocio_profile_version: 2.5
+
+environment:
+  {}
+search_path:
+  - plain
+  - " lead"
+  - "trail "
+  - "a: b"
+  - "a #b"
+  - a#b
+  - e#
+  - x#
+  - "x #"
+  - "#"
+  - -dash
+  - "- x"
+strictparsing: true
+family_separator: " "
+luma: [0.2126, 0.7152, 0.0722]
+name: "a: config #1"
+
+roles:
+  {}
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+
+displays:
+  {}
+
+active_displays: []
+active_views: []
+
+colorspaces:
+  - !<ColorSpace>
+    name: cs0
+    family: plain
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: plain
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs1
+    family: " lead"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: " lead"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs2
+    family: "trail "
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "trail "
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs3
+    family: "a: b"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "a: b"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs4
+    family: "a #b"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "a #b"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs5
+    family: a#b
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: a#b
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs6
+    family: e#
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: e#
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs7
+    family: x#
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: x#
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs8
+    family: "x #"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "x #"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs9
+    family: "#"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "#"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs10
+    family: -dash
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: -dash
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs11
+    family: "- x"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "- x"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs12
+    family: "-"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "-"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs13
+    family: --
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: --
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs14
+    family: "? q"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "? q"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs15
+    family: "?"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "?"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs16
+    family: ?x
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: ?x
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs17
+    family: ": colon"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: ": colon"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs18
+    family: ":"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: ":"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs19
+    family: :x
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: :x
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs20
+    family: k:v
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: k:v
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs21
+    family: "x: "
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "x: "
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs22
+    family: x :y
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: x :y
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs23
+    family: ",comma"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: ",comma"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs24
+    family: a,b
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: a,b
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs25
+    family: "[br"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "[br"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs26
+    family: a[b
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: a[b
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs27
+    family: "]br"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "]br"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs28
+    family: "{br"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "{br"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs29
+    family: "}br"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "}br"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs30
+    family: "#hash"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "#hash"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs31
+    family: "&amp"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "&amp"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs32
+    family: "x&y"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "x&y"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs33
+    family: "*star"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "*star"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs34
+    family: "!bang"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "!bang"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs35
+    family: a!b
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: a!b
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs36
+    family: "|pipe"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "|pipe"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs37
+    family: ">gt"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: ">gt"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs38
+    family: "'sq"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "'sq"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs39
+    family: a'b
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: a'b
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs40
+    family: "\"dq"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "\"dq"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs41
+    family: a"b
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: a"b
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs42
+    family: "%pc"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "%pc"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs43
+    family: "@at"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "@at"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs44
+    family: "`bt"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "`bt"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs45
+    family: =
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: =
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs46
+    family: <<
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: <<
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs47
+    family: "null"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "null"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs48
+    family: "Null"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "Null"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs49
+    family: "NULL"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "NULL"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs50
+    family: nULL
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: nULL
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs51
+    family: "~"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "~"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs52
+    family: ~x
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: ~x
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs53
+    family: true
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: true
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs54
+    family: False
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: False
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs55
+    family: yes
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: yes
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs56
+    family: No
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: No
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs57
+    family: on
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: on
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs58
+    family: OFF
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: OFF
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs59
+    family: y
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: y
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs60
+    family: n
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: n
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs61
+    family: 1.5
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: 1.5
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs62
+    family: -2
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: -2
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs63
+    family: 0x10
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: 0x10
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs64
+    family: 1e3
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: 1e3
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs65
+    family: .inf
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: .inf
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs66
+    family: -.inf
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: -.inf
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs67
+    family: .nan
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: .nan
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs68
+    family: 0o17
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: 0o17
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs69
+    family: "a\tb"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "a\tb"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs70
+    family: "\ttab"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "\ttab"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs71
+    family: "tab\t"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "tab\t"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs72
+    family: "a\nb"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "a\nb"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs73
+    family: a\b
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: a\b
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs74
+    family: \
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: \
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs75
+    family: "a\bb"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "a\bb"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs76
+    family: "a\fb"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "a\fb"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs77
+    family: "a\rb"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "a\rb"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs78
+    family: a
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: a
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs79
+    family: "a\x01b"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "a\x01b"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs80
+    family: "a\x1fb"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "a\x1fb"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs81
+    family: "ab"
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "ab"
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs82
+    family: a  b
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: a  b
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs83
+    family: ...
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: ...
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs84
+    family: ---
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: ---
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs85
+    family: --- x
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: --- x
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs86
+    family: ... x
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: ... x
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs87
+    family: a - b
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: a - b
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs88
+    family: a -b
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: a -b
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs89
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs90
+    family: "  "
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: "  "
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: cs91
+    family: " "
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    encoding: " "
+    allocation: uniform

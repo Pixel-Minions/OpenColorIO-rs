@@ -1,0 +1,118 @@
+ocio_profile_version: 2.5
+
+environment:
+  {}
+search_path: ""
+strictparsing: true
+family_separator: "\""
+luma: [0.2126, 0.7152, 0.0722]
+
+roles:
+  {}
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+
+displays:
+  d:
+    - !<View> {name: plain, colorspace: plain}
+    - !<View> {name: " lead", colorspace: " lead"}
+    - !<View> {name: "trail ", colorspace: "trail "}
+    - !<View> {name: "a: b", colorspace: "a: b"}
+    - !<View> {name: "a #b", colorspace: "a #b"}
+    - !<View> {name: a#b, colorspace: a#b}
+    - !<View> {name: e#, colorspace: e#}
+    - !<View> {name: x#, colorspace: x#}
+    - !<View> {name: "x #", colorspace: "x #"}
+    - !<View> {name: "#", colorspace: "#"}
+    - !<View> {name: -dash, colorspace: -dash}
+    - !<View> {name: "- x", colorspace: "- x"}
+    - !<View> {name: "-", colorspace: "-"}
+    - !<View> {name: --, colorspace: --}
+    - !<View> {name: "? q", colorspace: "? q"}
+    - !<View> {name: "?", colorspace: "?"}
+    - !<View> {name: "?x", colorspace: "?x"}
+    - !<View> {name: ": colon", colorspace: ": colon"}
+    - !<View> {name: ":", colorspace: ":"}
+    - !<View> {name: :x, colorspace: :x}
+    - !<View> {name: k:v, colorspace: k:v}
+    - !<View> {name: "x: ", colorspace: "x: "}
+    - !<View> {name: x :y, colorspace: x :y}
+    - !<View> {name: ",comma", colorspace: ",comma"}
+    - !<View> {name: "a,b", colorspace: "a,b"}
+    - !<View> {name: "[br", colorspace: "[br"}
+    - !<View> {name: "a[b", colorspace: "a[b"}
+    - !<View> {name: "]br", colorspace: "]br"}
+    - !<View> {name: "{br", colorspace: "{br"}
+    - !<View> {name: "}br", colorspace: "}br"}
+    - !<View> {name: "#hash", colorspace: "#hash"}
+    - !<View> {name: "&amp", colorspace: "&amp"}
+    - !<View> {name: "x&y", colorspace: "x&y"}
+    - !<View> {name: "*star", colorspace: "*star"}
+    - !<View> {name: "!bang", colorspace: "!bang"}
+    - !<View> {name: a!b, colorspace: a!b}
+    - !<View> {name: "|pipe", colorspace: "|pipe"}
+    - !<View> {name: ">gt", colorspace: ">gt"}
+    - !<View> {name: "'sq", colorspace: "'sq"}
+    - !<View> {name: a'b, colorspace: a'b}
+    - !<View> {name: "\"dq", colorspace: "\"dq"}
+    - !<View> {name: a"b, colorspace: a"b}
+    - !<View> {name: "%pc", colorspace: "%pc"}
+    - !<View> {name: "@at", colorspace: "@at"}
+    - !<View> {name: "`bt", colorspace: "`bt"}
+    - !<View> {name: =, colorspace: =}
+    - !<View> {name: <<, colorspace: <<}
+    - !<View> {name: "null", colorspace: nULL}
+    - !<View> {name: "~", colorspace: "~"}
+    - !<View> {name: ~x, colorspace: ~x}
+    - !<View> {name: true, colorspace: true}
+    - !<View> {name: False, colorspace: False}
+    - !<View> {name: yes, colorspace: yes}
+    - !<View> {name: No, colorspace: No}
+    - !<View> {name: on, colorspace: on}
+    - !<View> {name: OFF, colorspace: OFF}
+    - !<View> {name: y, colorspace: y}
+    - !<View> {name: n, colorspace: n}
+    - !<View> {name: 1.5, colorspace: 1.5}
+    - !<View> {name: -2, colorspace: -2}
+    - !<View> {name: 0x10, colorspace: 0x10}
+    - !<View> {name: 1e3, colorspace: 1e3}
+    - !<View> {name: .inf, colorspace: .inf}
+    - !<View> {name: -.inf, colorspace: -.inf}
+    - !<View> {name: .nan, colorspace: .nan}
+    - !<View> {name: 0o17, colorspace: 0o17}
+    - !<View> {name: "a\tb", colorspace: "a\tb"}
+    - !<View> {name: "\ttab", colorspace: "\ttab"}
+    - !<View> {name: "tab\t", colorspace: "tab\t"}
+    - !<View> {name: "a\nb", colorspace: "a\nb"}
+    - !<View> {name: a\b, colorspace: a\b}
+    - !<View> {name: \, colorspace: \}
+    - !<View> {name: "a\bb", colorspace: "a\bb"}
+    - !<View> {name: "a\fb", colorspace: "a\fb"}
+    - !<View> {name: "a\rb", colorspace: "a\rb"}
+    - !<View> {name: a, colorspace: a}
+    - !<View> {name: "a\x01b", colorspace: "a\x01b"}
+    - !<View> {name: "a\x1fb", colorspace: "a\x1fb"}
+    - !<View> {name: "ab", colorspace: "ab"}
+    - !<View> {name: a  b, colorspace: a  b}
+    - !<View> {name: ..., colorspace: ...}
+    - !<View> {name: ---, colorspace: ---}
+    - !<View> {name: --- x, colorspace: --- x}
+    - !<View> {name: ... x, colorspace: ... x}
+    - !<View> {name: a - b, colorspace: a - b}
+    - !<View> {name: a -b, colorspace: a -b}
+
+active_displays: [d, "a: b", x#y]
+active_views: ["a: b", "[x]", "{y}", "?z"]
+inactive_colorspaces: [cs0, a#b, "!x"]
+
+colorspaces:
+  - !<ColorSpace>
+    name: cs0
+    aliases: [plain, " lead", "trail ", "a: b", "a #b", a#b, e#, x#, "x #", "#", -dash, "- x", "-", --, "? q", "?", "?x", ": colon", ":", :x, k:v, "x: ", x :y, ",comma", "a,b", "[br", "a[b", "]br", "{br", "}br", "#hash", "&amp", "x&y", "*star", "!bang", a!b, "|pipe", ">gt", "'sq", a'b, "\"dq", a"b, "@at", "`bt", =, <<, "null", "~", ~x, true, False, yes, No, on, OFF, y, n, 1.5, -2, 0x10, 1e3, .inf, -.inf, .nan, 0o17, "a\tb", "\ttab", "tab\t", "a\nb", a\b, \, "a\bb", "a\fb", "a\rb", a, "a\x01b", "a\x1fb", "ab", a  b, ..., ---, --- x, ... x, a - b, a -b]
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    categories: [plain, "a: b", "a,b", "[x]", "{x}", "#x", x#, café]
+    allocation: uniform

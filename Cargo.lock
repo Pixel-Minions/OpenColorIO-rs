@@ -133,6 +133,7 @@ dependencies = [
  "ocio-ops",
  "ocio-testkit",
  "saphyr-parser",
+ "serde_json",
 ]
 
 [[package]]
