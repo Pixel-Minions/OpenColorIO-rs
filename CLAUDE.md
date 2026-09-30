@@ -10,10 +10,11 @@ truth: read §3 (definition of done), §7 (how agents work) and your card before
    - Read the upstream code in `upstream/OpenColorIO` (submodule pinned at `v2.5.2`) and translate it.
    - Every ported function's doc comment cites its source: `` Port of `Foo::bar` (src/OpenColorIO/Foo.cpp:120-188 @ v2.5.2). ``
    - Don't guess behavior, simplify it, or "fix" it. Upstream bugs that change outputs are ported too.
-2. **Expected values come only from the oracle or from upstream's tests.**
+2. **Expected values come only from the oracle, upstream's tests, or the platform itself.**
    - The oracle is the real OCIO 2.5.2 (`ocio_testkit::Oracle`, `fixtures/`).
-   - Upstream tests are copied verbatim, with a citation.
-   - Never use the port's own output as an expected value. Never type a number into a test that didn't come from one of those two places.
+   - Upstream tests are copied verbatim, with a citation. This includes the own tests of a library the wheel is built with, at the version it uses (yaml-cpp 0.8.0, Imath 3.2.1).
+   - The platform C runtime is the reference for C and C++ runtime behavior (`ocio-testkit` `crt.rs`), and the CPU for instruction semantics.
+   - Never use the port's own output as an expected value. Never type a number into a test that didn't come from one of those places.
 3. **Comparisons are exact.**
    - Floats compare bitwise (`assert_f32_bits_eq`, `assert_pixels_bits_eq`); text compares byte for byte (`assert_text_eq`).
    - The only tolerances allowed are upstream's own, in ported upstream tests, through `ocio_testkit::upstream` helpers.
