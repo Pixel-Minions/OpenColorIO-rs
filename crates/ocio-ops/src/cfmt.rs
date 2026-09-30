@@ -17,9 +17,18 @@
 //!
 //! UCRT and glibc both convert exactly and round half to even on exact ties (UCRT does so for
 //! programs built with VS 2019 16.2 or later, including `msvcp140.dll`: the "standard
-//! rounding" printf option). They differ in how they spell NaN, in `#` with precision 0, and
-//! in `%a` (which OCIO never uses and this module does not provide). [`Crt`] selects the
-//! platform; [`Crt::NATIVE`] is the one the port runs on.
+//! rounding" printf option). They differ in how they spell NaN, which this module follows.
+//! [`Crt`] selects the platform; [`Crt::NATIVE`] is the one the port runs on.
+//!
+//! Only what OCIO uses is provided. Left out on purpose, because OCIO never asks for them
+//! and the libraries disagree on them:
+//! - the alternative form (`#`, `std::showpoint`): UCRT writes `i.nf` for `%#.0f` of
+//!   infinity, MSVC's streams drop `showpoint` for non-finite values, and glibc's `%#g`
+//!   loses a digit when rounding carries into a new power of ten (`%#.2g` of 99.5 is
+//!   `1.e+02`, not `1.0e+02`);
+//! - `std::showpos` (which C++ ignores for unsigned values);
+//! - `%a`;
+//! - padding text that is not ASCII (C++ counts bytes; a fill is one byte).
 //!
 //! The conversion here is exact by construction: a finite binary value `m * 2^e` is expanded
 //! to all of its decimal digits with integer arithmetic (`m << e`, or `m * 5^-e` scaled by
@@ -289,8 +298,6 @@ pub struct Spec {
     pub plus: bool,
     /// ` `: print a space where a `+` would go.
     pub space: bool,
-    /// `#`: the alternative form (keep the decimal point, and trailing zeros for `%g`).
-    pub alt: bool,
     /// `0`: pad with zeros after the sign.
     pub zero: bool,
 }
@@ -305,14 +312,13 @@ impl Spec {
             left: false,
             plus: false,
             space: false,
-            alt: false,
             zero: false,
         }
     }
 
     /// Parses a format with exactly one floating-point conversion, e.g. `"%.7g"` or
-    /// `"%-+#012.3e"`. Returns `None` for anything else (including `*`, length modifiers and
-    /// surrounding text).
+    /// `"%-+012.3e"`. Returns `None` for anything else, including `*`, length modifiers,
+    /// surrounding text and the `#` flag, which this module does not provide.
     pub fn parse(format: &str) -> Option<Spec> {
         let mut rest = format.strip_prefix('%')?.as_bytes();
         let mut spec = Spec::new(Conv::G, 0);
@@ -322,7 +328,6 @@ impl Spec {
                 b'-' => spec.left = true,
                 b'+' => spec.plus = true,
                 b' ' => spec.space = true,
-                b'#' => spec.alt = true,
                 b'0' => spec.zero = true,
                 _ => break,
             }
@@ -364,7 +369,7 @@ fn push_digits(out: &mut String, digits: &[u8]) {
 }
 
 /// `%e` of a finite magnitude: returns the body without sign.
-fn body_e(exact: Option<&Exact>, precision: usize, upper: bool, alt: bool) -> String {
+fn body_e(exact: Option<&Exact>, precision: usize, upper: bool) -> String {
     let (digits, x) = match exact {
         None => (vec![0; precision + 1], 0),
         Some(ex) => {
@@ -381,7 +386,7 @@ fn body_e(exact: Option<&Exact>, precision: usize, upper: bool, alt: bool) -> St
     };
     let mut out = String::new();
     push_digits(&mut out, &digits[..1]);
-    if precision > 0 || alt {
+    if precision > 0 {
         out.push('.');
     }
     push_digits(&mut out, &digits[1..]);
@@ -390,7 +395,7 @@ fn body_e(exact: Option<&Exact>, precision: usize, upper: bool, alt: bool) -> St
 }
 
 /// `%f` of a finite magnitude: returns the body without sign.
-fn body_f(exact: Option<&Exact>, precision: usize, alt: bool) -> String {
+fn body_f(exact: Option<&Exact>, precision: usize) -> String {
     let q = match exact {
         None => Vec::new(),
         Some(ex) => round_to_unit(ex, -(precision as i32)),
@@ -401,7 +406,7 @@ fn body_f(exact: Option<&Exact>, precision: usize, alt: bool) -> String {
     } else {
         out.push('0');
     }
-    if precision > 0 || alt {
+    if precision > 0 {
         out.push('.');
     }
     let frac_len = q.len().min(precision);
@@ -411,7 +416,7 @@ fn body_f(exact: Option<&Exact>, precision: usize, alt: bool) -> String {
 }
 
 /// `%g` of a finite magnitude before trailing-zero removal: returns the body without sign.
-fn body_g(exact: Option<&Exact>, precision: usize, upper: bool, alt: bool) -> String {
+fn body_g(exact: Option<&Exact>, precision: usize, upper: bool) -> String {
     let p = precision.max(1);
     // The exponent X of the `%e` conversion with precision P - 1, after rounding.
     let x = match exact {
@@ -422,9 +427,9 @@ fn body_g(exact: Option<&Exact>, precision: usize, upper: bool, alt: bool) -> St
         }
     };
     if (p as i32) > x && x >= -4 {
-        body_f(exact, (p as i32 - 1 - x) as usize, alt)
+        body_f(exact, (p as i32 - 1 - x) as usize)
     } else {
-        body_e(exact, p - 1, upper, alt)
+        body_e(exact, p - 1, upper)
     }
 }
 
@@ -442,23 +447,6 @@ fn crop_zeroes(body: &mut String) {
         frac_end
     };
     body.replace_range(frac_end..exp, "");
-}
-
-/// UCRT `force_decimal_point`: inserts a '.' after the leading digits (or after the first
-/// character when there are none, e.g. `inf` becomes `i.nf`), for `#` with precision 0.
-fn ucrt_force_decimal_point(text: &mut String) {
-    let bytes = text.as_bytes();
-    let mut i = 0;
-    if bytes.first().map(u8::to_ascii_lowercase) != Some(b'e') {
-        loop {
-            i += 1;
-            if !bytes.get(i).is_some_and(u8::is_ascii_digit) {
-                break;
-            }
-        }
-    }
-    let i = i.min(text.len());
-    text.insert(i, '.');
 }
 
 /// The NaN/infinity spelling, without sign.
@@ -486,8 +474,8 @@ pub fn sprintf(crt: Crt, spec: &Spec, value: f64) -> String {
     let bits = value.to_bits();
     let negative = bits >> 63 == 1;
     let finite = value.is_finite();
-    // UCRT raises a precision of 0 to 1 for %g before formatting, so its `#` rule for
-    // precision 0 never applies to %g; the default is 6 for every conversion here.
+    // A precision of 0 means 1 for %g (C17 7.21.6.1p8); the default is 6 for every
+    // conversion here.
     let mut precision = spec.precision.unwrap_or(6);
     let is_g = matches!(spec.conv, Conv::G | Conv::UpperG);
     if is_g && precision == 0 {
@@ -499,44 +487,20 @@ pub fn sprintf(crt: Crt, spec: &Spec, value: f64) -> String {
     } else {
         let exact = (value != 0.0).then(|| exact_decimal(value));
         match spec.conv {
-            Conv::E | Conv::UpperE => body_e(exact.as_ref(), precision, upper, spec.alt),
-            Conv::F | Conv::UpperF => body_f(exact.as_ref(), precision, spec.alt),
-            Conv::G | Conv::UpperG => body_g(exact.as_ref(), precision, upper, spec.alt),
+            Conv::E | Conv::UpperE => body_e(exact.as_ref(), precision, upper),
+            Conv::F | Conv::UpperF => body_f(exact.as_ref(), precision),
+            Conv::G | Conv::UpperG => body_g(exact.as_ref(), precision, upper),
         }
     };
-    if is_g && !spec.alt {
+    if is_g {
         crop_zeroes(&mut body);
     }
 
-    let mut sign_negative = negative;
-    let mut zero_pad = spec.zero && !spec.left;
-    match crt {
-        Crt::Glibc => {
-            if !finite {
-                zero_pad = false;
-            }
-        }
-        Crt::Ucrt => {
-            // corecrt_internal_stdio_output.h type_case_a (10.0.22000.0): the '#' rule runs
-            // on the converted text including its '-', then the sign is split off, and
-            // special strings are padded with spaces.
-            if spec.alt && precision == 0 && !finite {
-                let mut text = if negative {
-                    format!("-{body}")
-                } else {
-                    body.clone()
-                };
-                ucrt_force_decimal_point(&mut text);
-                sign_negative = text.starts_with('-');
-                body = text.strip_prefix('-').unwrap_or(&text).to_string();
-            }
-            if body.starts_with(['i', 'I', 'n', 'N']) {
-                zero_pad = false;
-            }
-        }
-    }
+    // Both libraries pad infinities and NaNs with spaces, even under '0' (glibc
+    // printf_fp.c; UCRT corecrt_internal_stdio_output.h type_case_a @ 10.0.22000.0).
+    let zero_pad = spec.zero && !spec.left && finite;
 
-    let sign = if sign_negative {
+    let sign = if negative {
         "-"
     } else if spec.plus {
         "+"
@@ -620,8 +584,9 @@ pub enum Base {
 
 /// A `std::ostringstream` imbued with the classic ("C") locale, as OCIO creates them, limited
 /// to the operations OCIO uses: numbers and strings, with precision, `floatfield`,
-/// `showpoint`, `showpos`, `uppercase`, `basefield`, `showbase`, width, fill and
-/// `adjustfield`. Width resets to 0 after every insertion, as in C++.
+/// `uppercase`, `basefield`, `showbase`, width, fill and `adjustfield`. Width resets to 0
+/// after every insertion, as in C++. `showpoint` and `showpos` are left out (see the module
+/// documentation), and only ASCII text is padded.
 #[derive(Debug, Clone)]
 pub struct OStringStream {
     crt: Crt,
@@ -630,10 +595,6 @@ pub struct OStringStream {
     pub precision: i64,
     /// The `floatfield` flags.
     pub float_field: FloatField,
-    /// `std::showpoint`.
-    pub showpoint: bool,
-    /// `std::showpos`.
-    pub showpos: bool,
     /// `std::uppercase`.
     pub uppercase: bool,
     /// The `basefield` flags.
@@ -642,7 +603,7 @@ pub struct OStringStream {
     pub showbase: bool,
     /// `width()`: applies to the next insertion only.
     pub width: i64,
-    /// `fill()`; a new stream has `' '`.
+    /// `fill()`, a C++ `char`; a new stream has `' '`. Only ASCII fills are supported.
     pub fill: char,
     /// The `adjustfield` flags.
     pub adjust: Adjust,
@@ -656,8 +617,6 @@ impl OStringStream {
             buf: String::new(),
             precision: 6,
             float_field: FloatField::Default,
-            showpoint: false,
-            showpos: false,
             uppercase: false,
             base: Base::Dec,
             showbase: false,
@@ -684,10 +643,16 @@ impl OStringStream {
 
     /// Appends `text` padded to `width()` (the stream's `_M_pad` / `_Rep`), with the fill
     /// inserted after `prefix_len` bytes for `std::internal`; then resets the width.
+    ///
+    /// C++ counts `char`s, i.e. bytes. OCIO pads only numbers and ASCII words (`nan`, `inf`)
+    /// with ASCII fills, so padding anything else is refused rather than modeled.
     fn put_padded(&mut self, text: &str, prefix_len: usize) {
-        let len = text.chars().count();
         let width = usize::try_from(self.width).unwrap_or(0);
-        let pad = width.saturating_sub(len);
+        let pad = width.saturating_sub(text.len());
+        assert!(
+            pad == 0 || (text.is_ascii() && self.fill.is_ascii()),
+            "OStringStream pads ASCII text with an ASCII fill only"
+        );
         let fill = std::iter::repeat_n(self.fill, pad);
         match self.adjust {
             Adjust::Left => {
@@ -710,9 +675,10 @@ impl OStringStream {
     /// `os << value` for a `double`.
     ///
     /// libstdc++ `num_put::_M_insert_float` / `__num_base::_S_format_float`, and MSVC
-    /// `num_put::do_put(double)` / `_Ffmt` / `_Fput`: the format is `%[+][#].*<conv>` with the
-    /// stream's precision (6 when negative), conv `f` for fixed (MSVC: `F` with
-    /// `uppercase`), `e`/`E` for scientific and `g`/`G` otherwise.
+    /// `num_put::do_put(double)` / `_Ffmt` / `_Fput`: the format is `%.*<conv>` (without
+    /// `showpos` and `showpoint`, which add `+` and `#`) with the stream's precision (6 when
+    /// negative), conv `f` for fixed (MSVC: `F` with `uppercase`), `e`/`E` for scientific
+    /// and `g`/`G` otherwise.
     pub fn put_f64(&mut self, value: f64) {
         let conv = match (self.float_field, self.uppercase) {
             (FloatField::Fixed, true) if self.crt == Crt::Ucrt => Conv::UpperF,
@@ -723,13 +689,8 @@ impl OStringStream {
             (FloatField::Default, true) => Conv::UpperG,
         };
         let precision = usize::try_from(self.precision).unwrap_or(6);
-        let spec = Spec {
-            plus: self.showpos,
-            alt: self.showpoint,
-            ..Spec::new(conv, precision)
-        };
-        let text = sprintf(self.crt, &spec, value);
-        let prefix = usize::from(text.starts_with(['+', '-']));
+        let text = sprintf(self.crt, &Spec::new(conv, precision), value);
+        let prefix = usize::from(text.starts_with('-'));
         self.put_padded(&text, prefix);
     }
 
@@ -751,7 +712,6 @@ impl OStringStream {
                 (if self.uppercase { "0X" } else { "0x" }, 2)
             }
             Base::Oct if self.showbase && value != 0 => ("0", 0),
-            Base::Dec if self.showpos => ("+", 1),
             _ => ("", 0),
         };
         self.put_padded(&format!("{prefix}{text}"), prefix_len);
@@ -761,12 +721,8 @@ impl OStringStream {
     /// complement bit pattern of that width, as C++ does).
     fn put_signed(&mut self, value: i64, bits: u32) {
         if self.base == Base::Dec {
-            let text = if value < 0 || !self.showpos {
-                value.to_string()
-            } else {
-                format!("+{value}")
-            };
-            let prefix = usize::from(text.starts_with(['+', '-']));
+            let text = value.to_string();
+            let prefix = usize::from(text.starts_with('-'));
             self.put_padded(&text, prefix);
         } else {
             let mask = if bits == 64 {
@@ -848,17 +804,45 @@ mod tests {
         }
     }
 
+    /// The parts of a conversion specification as C17 7.21.6.1 defines them; each expected
+    /// value is read off the format text by the clause cited.
     #[test]
     fn parse_reads_every_part_of_the_spec() {
-        let spec = Spec::parse("%-+ #012.7e").expect("valid");
+        // p4: flags, then the field width, then the precision, then the conversion
+        // specifier. p6: the flags `-`, `+`, space and `0`, in any order; a width is a
+        // decimal integer, so in `012` the `0` is a flag and the width is 12.
+        let spec = Spec::parse("%-+ 012.7e").expect("valid");
         assert_eq!(spec.conv, Conv::E);
         assert_eq!(spec.precision, Some(7));
         assert_eq!(spec.width, 12);
-        assert!(spec.left && spec.plus && spec.space && spec.alt && spec.zero);
+        assert!(spec.left && spec.plus && spec.space && spec.zero);
+        // p4: without a period the precision is the conversion's default (p8: 6); a period
+        // alone means precision zero.
         assert_eq!(Spec::parse("%g").map(|s| s.precision), Some(None));
         assert_eq!(Spec::parse("%.g").map(|s| s.precision), Some(Some(0)));
+        // Not provided: `*` (p5), length modifiers (p7), text around the conversion, and the
+        // `#` flag (p6), which OCIO never uses (see the module documentation).
         assert!(Spec::parse("%.*g").is_none());
         assert!(Spec::parse("%lf").is_none());
         assert!(Spec::parse("x%g").is_none());
+        assert!(Spec::parse("%#g").is_none());
+        assert!(Spec::parse("%-#012.7e").is_none());
+    }
+
+    #[test]
+    #[should_panic(expected = "pads ASCII text with an ASCII fill only")]
+    fn padding_text_that_is_not_ascii_is_refused() {
+        let mut os = OStringStream::new(Crt::NATIVE);
+        os.width = 6;
+        os.put_str("\u{e9}");
+    }
+
+    #[test]
+    fn text_that_is_not_ascii_passes_unpadded() {
+        // Two bytes reach a width of 2, as C++ counts them: nothing to pad.
+        let mut os = OStringStream::new(Crt::NATIVE);
+        os.width = 2;
+        os.put_str("\u{e9}");
+        assert_eq!(os.str(), "\u{e9}");
     }
 }

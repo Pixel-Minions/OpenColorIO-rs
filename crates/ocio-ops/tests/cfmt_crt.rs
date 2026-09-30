@@ -265,9 +265,8 @@ fn flags_widths_and_precisions_match_the_crt() {
     values.extend([
         0.5, 1.5, 2.5, 9.5, 99.5, 0.05, 1e-5, 1e-4, 123456.0, 1e15, 1e16, 1e17,
     ]);
-    let flag_sets = [
-        "", "-", "+", " ", "#", "0", "-+", "+0", " 0", "#0", "-#", "+#0", "- #",
-    ];
+    // Every flag but `#`, which cfmt does not provide (see its module documentation).
+    let flag_sets = ["", "-", "+", " ", "0", "-+", "+0", " 0", "- ", "-0", "+ 0"];
     for conv in ["e", "E", "f", "F", "g", "G"] {
         for flags in flag_sets {
             for width in ["", "1", "8", "25"] {
@@ -299,7 +298,8 @@ fn to_string_is_percent_f() {
 
 /// The stream's padding against printf's own width handling, where the two are defined to
 /// agree: right adjustment with ' ' fill is `%W`, left is `%-W`, internal with '0' fill is
-/// `%0W` for finite values; showpos is `+` and showpoint is `#`.
+/// `%0W` for finite values. (The stream checks against the wheel's real iostreams are in
+/// `cfmt_stream_oracle.rs`.)
 #[test]
 fn stream_padding_matches_printf_width() {
     let mut rng = Rng::new(0x05f7);
@@ -326,22 +326,16 @@ fn stream_padding_matches_printf_width() {
                         if adjust == Adjust::Internal && !v.is_finite() {
                             continue;
                         }
-                        for (showpos, showpoint, extra) in
-                            [(false, false, ""), (true, false, "+"), (true, true, "+#")]
-                        {
-                            let mut os = OStringStream::new(Crt::NATIVE);
-                            os.precision = precision;
-                            os.float_field = field;
-                            os.width = width;
-                            os.fill = fill;
-                            os.adjust = adjust;
-                            os.showpos = showpos;
-                            os.showpoint = showpoint;
-                            os.put_f64(v);
-                            let format = format!("%{flag}{extra}{width}.{precision}{conv}");
-                            assert_eq!(os.str(), crt::format_f64(&format, v), "{format} {v:e}");
-                            assert_eq!(os.width, 0, "width resets");
-                        }
+                        let mut os = OStringStream::new(Crt::NATIVE);
+                        os.precision = precision;
+                        os.float_field = field;
+                        os.width = width;
+                        os.fill = fill;
+                        os.adjust = adjust;
+                        os.put_f64(v);
+                        let format = format!("%{flag}{width}.{precision}{conv}");
+                        assert_eq!(os.str(), crt::format_f64(&format, v), "{format} {v:e}");
+                        assert_eq!(os.width, 0, "width resets");
                     }
                 }
             }
