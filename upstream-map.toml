@@ -480,7 +480,7 @@ path = "src/OpenColorIO/Platform.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/platform.rs"]
 status = "partial"
-note = "Getenv, isEnvPresent, Strcasecmp, Strncasecmp; Setenv/Unsetenv, AlignedMalloc, CreateTempFilename, UTF-8/16 conversion pending"
+note = "Getenv, isEnvPresent, Strcasecmp, Strncasecmp; Setenv/Unsetenv, AlignedMalloc, CreateTempFilename, UTF-8/16 conversion pending. Strcasecmp and Strncasecmp take bytes that end at a NUL and fold A-Z only, as the classic C locale does (deviation D-4), checked against _stricmp/_strnicmp (UCRT) and strcasecmp/strncasecmp (glibc) for every pair of bytes (tests/platform_crt.rs)"
 
 [[file]]
 path = "src/OpenColorIO/Platform.h"
@@ -4194,7 +4194,8 @@ status = "todo"
 path = "tests/cpu/Platform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/platform_tests.rs"]
-status = "todo"
+status = "partial"
+note = "string_compare. The others need Setenv/Unsetenv, AlignedMalloc, CreateTempFilename or the UTF-8/16 conversions"
 
 [[file]]
 path = "tests/cpu/Processor_tests.cpp"
