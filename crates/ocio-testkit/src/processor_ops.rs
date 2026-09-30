@@ -100,8 +100,6 @@ pub enum Dumped {
     List(Vec<Dumped>),
     /// An object, written out.
     Object(Dump),
-    /// An object too deep to write out: its class.
-    ClassOnly(String),
 }
 
 impl PartialEq for Dumped {
@@ -111,7 +109,6 @@ impl PartialEq for Dumped {
             (Dumped::Bool(a), Dumped::Bool(b)) => a == b,
             (Dumped::Int(a), Dumped::Int(b)) => a == b,
             (Dumped::Str(a), Dumped::Str(b)) | (Dumped::Enum(a), Dumped::Enum(b)) => a == b,
-            (Dumped::ClassOnly(a), Dumped::ClassOnly(b)) => a == b,
             (Dumped::F64(a), Dumped::F64(b)) => a.to_bits() == b.to_bits(),
             (
                 Dumped::Array {
@@ -133,7 +130,8 @@ impl PartialEq for Dumped {
 }
 
 impl Dumped {
-    fn parse(value: &Value, blobs: &[Vec<u8>]) -> Dumped {
+    /// Reads a value of the oracle's `checks.dump` format, arrays from `blobs`.
+    pub(crate) fn parse(value: &Value, blobs: &[Vec<u8>]) -> Dumped {
         match value {
             Value::Null => Dumped::Null,
             Value::Bool(b) => Dumped::Bool(*b),
@@ -160,10 +158,8 @@ impl Dumped {
                             .collect(),
                         bytes: blobs[blob.as_u64().expect("a blob index") as usize].clone(),
                     }
-                } else if object.contains_key("getters") {
-                    Dumped::Object(Dump::parse(object, blobs))
                 } else {
-                    Dumped::ClassOnly(object["class"].as_str().expect("a class").to_string())
+                    Dumped::Object(Dump::parse(object, blobs))
                 }
             }
         }
@@ -283,15 +279,40 @@ impl Dump {
 pub struct ProcessorDump {
     /// `getCacheID()`.
     pub cache_id: String,
+    /// `isNoOp()`.
+    pub is_no_op: bool,
+    /// `hasChannelCrosstalk()`.
+    pub has_channel_crosstalk: bool,
+    /// `isDynamic()`.
+    pub is_dynamic: bool,
+    /// `getProcessorMetadata()`: the files and looks the processor read.
+    pub processor_metadata: Dump,
     /// `createGroupTransform()`.
     pub group: Dump,
 }
 
 impl ProcessorDump {
     fn parse(value: &Value, blobs: &[Vec<u8>]) -> ProcessorDump {
+        let flag = |key: &str| {
+            value[key]
+                .as_bool()
+                .unwrap_or_else(|| panic!("{key} in {value}"))
+        };
+        let object = |key: &str| {
+            Dump::parse(
+                value[key]
+                    .as_object()
+                    .unwrap_or_else(|| panic!("{key} in {value}")),
+                blobs,
+            )
+        };
         ProcessorDump {
             cache_id: value["cache_id"].as_str().expect("a cache ID").to_string(),
-            group: Dump::parse(value["group"].as_object().expect("a group"), blobs),
+            is_no_op: flag("isNoOp"),
+            has_channel_crosstalk: flag("hasChannelCrosstalk"),
+            is_dynamic: flag("isDynamic"),
+            processor_metadata: object("processor_metadata"),
+            group: object("group"),
         }
     }
 
@@ -391,13 +412,20 @@ mod tests {
     }
 
     /// Dumps read every kind of value: floats from their bits, arrays from their blobs,
-    /// objects with their getters, properties and children.
+    /// objects with their getters, properties and children; and each processor's flags and
+    /// metadata.
     #[test]
     fn dumps_read_every_kind_of_value() {
+        let metadata = json!({"class": "ProcessorMetadata", "getters": {"getFiles": ["f"]},
+            "properties": {}, "uncalled": ["getFile"]});
         let result = json!({
-            "processor": {"cache_id": "p", "group": {"class": "GroupTransform",
+            "processor": {"cache_id": "p", "isNoOp": true, "hasChannelCrosstalk": false,
+                "isDynamic": true, "processor_metadata": metadata,
+                "group": {"class": "GroupTransform",
                 "getters": {}, "properties": {}, "uncalled": [], "children": []}},
-            "optimized": {"cache_id": "o", "group": {"class": "GroupTransform",
+            "optimized": {"cache_id": "o", "isNoOp": false, "hasChannelCrosstalk": true,
+                "isDynamic": false, "processor_metadata": metadata,
+                "group": {"class": "GroupTransform",
                 "getters": {"getDirection": {"enum": "TRANSFORM_DIR_FORWARD"}},
                 "properties": {}, "uncalled": [],
                 "children": [{"class": "Lut1DTransform",
@@ -406,14 +434,35 @@ mod tests {
                                 "getOffset": [{"f64": 0x3FF0_0000_0000_0000u64}],
                                 "getValue": {"class": "GradingRGBM", "getters": {},
                                     "properties": {"red": {"f64": 0}}, "uncalled": []},
-                                "getName": "n", "getMissing": null, "getDeep": {"class": "X"}},
+                                "getName": "n", "getMissing": null},
                     "properties": {}, "uncalled": ["getValue"]}]}},
             "log": [],
         });
         let blobs = vec![[0.5f32, -1.0].map(f32::to_le_bytes).concat()];
         let reply = ProcessorOpsReply::from_response(Response { result, blobs });
-        assert_eq!(reply.processor().cache_id, "p");
+        let processor = reply.processor();
+        assert_eq!(processor.cache_id, "p");
+        assert_eq!(
+            (
+                processor.is_no_op,
+                processor.has_channel_crosstalk,
+                processor.is_dynamic
+            ),
+            (true, false, true)
+        );
+        assert_eq!(
+            processor.processor_metadata.getter("getFiles"),
+            &Dumped::List(vec![Dumped::Str("f".into())])
+        );
         let optimized = reply.optimized();
+        assert_eq!(
+            (
+                optimized.is_no_op,
+                optimized.has_channel_crosstalk,
+                optimized.is_dynamic
+            ),
+            (false, true, false)
+        );
         assert_eq!(optimized.classes(), vec!["Lut1DTransform"]);
         assert_eq!(
             optimized.group.getter("getDirection").name(),
@@ -434,7 +483,6 @@ mod tests {
         );
         assert_eq!(lut.getter("getName"), &Dumped::Str("n".into()));
         assert_eq!(lut.getter("getMissing"), &Dumped::Null);
-        assert_eq!(lut.getter("getDeep"), &Dumped::ClassOnly("X".into()));
         assert_eq!(lut.uncalled, vec!["getValue"]);
         assert!(reply.raised().is_none());
         // Floats compare by their bits.

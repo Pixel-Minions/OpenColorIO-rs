@@ -2,11 +2,16 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! The oracle's `processor_ops` command (`oracle/ocio_oracle/processor_ops.py`, chunk O1.1)
-//! against the wheel itself: every transform class a processor's ops turn back into comes out
-//! with the values it went in with; the bit depths and flags reach `getOptimizedProcessor`;
-//! getters that need arguments are listed, and their values are elsewhere in the dump; every
-//! error path raises where the command says; its refusals; and replies that don't depend on the
-//! run.
+//! against the wheel itself:
+//! - every transform class a processor's ops turn back into comes out with the values it went
+//!   in with;
+//! - the bit depths and flags reach `getOptimizedProcessor`, in their order: upstream's
+//!   OpOptimizers `multi_op_prefix` expectations hold for 8-bit input;
+//! - the processors' getters, the files and looks they read, metadata trees at any depth, the
+//!   transforms' directions and deep values agree with an independent read of the wheel;
+//! - getters that need arguments are listed, and their values are elsewhere in the dump;
+//! - every error path raises where the command says; its refusals; and replies that don't
+//!   depend on the run.
 //!
 //! **Error paths**, by stage (paths relative to `upstream/OpenColorIO/src/OpenColorIO` @ v2.5.2):
 //! - `config`, `transform`, `processor`: as in `cpu_apply`.
@@ -19,7 +24,9 @@
 use ocio_testkit::Oracle;
 use ocio_testkit::battery::BitDepth;
 use ocio_testkit::oracle::{BatchCall, Response};
-use ocio_testkit::processor_ops::{Dump, Dumped, ProcessorOpsReply, ProcessorOpsRequest};
+use ocio_testkit::processor_ops::{
+    Dump, Dumped, ProcessorDump, ProcessorOpsReply, ProcessorOpsRequest,
+};
 use serde_json::{Value, json};
 
 /// Runs `requests` in one oracle process; each must succeed.
@@ -302,6 +309,307 @@ fn getters_that_need_arguments_are_listed() {
     }
 }
 
+/// Reads processors the command's way, written independently of it: the processor's getters,
+/// the files and looks it read, the group's metadata tree, and each transform's class,
+/// direction, metadata and, for a curve transform, its control points (floats as bits). The
+/// cases are JSON: the processor keys, "in" and "out" bit depths, and "optimization".
+const INDEPENDENT_READ: &str = r#"
+import json, struct, sys
+import PyOpenColorIO as OCIO
+from ocio_oracle import spec
+
+def bits(v):
+    return struct.unpack("<Q", struct.pack("<d", v))[0]
+
+def metadata(md):
+    return {"name": md.getElementName(), "value": md.getElementValue(),
+            "attributes": [[name, value] for name, value in md.getAttributes()],
+            "children": [metadata(child) for child in md.getChildElements()]}
+
+def transform(t):
+    out = {"class": type(t).__name__, "direction": t.getDirection().name,
+           "metadata": metadata(t.getFormatMetadata())}
+    if isinstance(t, OCIO.GradingRGBCurveTransform):
+        curves = t.getValue()
+        out["curves"] = [[[bits(p.x), bits(p.y)] for p in getattr(curves, c).getControlPoints()]
+                         for c in ("red", "green", "blue", "master")]
+    return out
+
+def summary(p):
+    group = p.createGroupTransform()
+    meta = p.getProcessorMetadata()
+    return {"cache_id": p.getCacheID(), "isNoOp": p.isNoOp(),
+            "hasChannelCrosstalk": p.hasChannelCrosstalk(), "isDynamic": p.isDynamic(),
+            "files": list(meta.getFiles()), "looks": list(meta.getLooks()),
+            "metadata": metadata(group.getFormatMetadata()),
+            "children": [transform(t) for t in group]}
+
+for case in json.loads(sys.argv[1]):
+    config = spec.config(case.get("config"))
+    if "transform" in case:
+        direction = getattr(OCIO, case.get("direction", "TRANSFORM_DIR_FORWARD"))
+        proc = config.getProcessor(spec.transform(case["transform"]), direction)
+    else:
+        proc = config.getProcessor(case["src"], case["dst"])
+    optimized = proc.getOptimizedProcessor(getattr(OCIO, case["in"]), getattr(OCIO, case["out"]),
+                                           spec.flags(case["optimization"]))
+    print(json.dumps({"processor": summary(proc), "optimized": summary(optimized)}))
+"#;
+
+/// A metadata tree from the command's dump, in `INDEPENDENT_READ`'s form.
+fn metadata_tree(dump: &Dump) -> Value {
+    let text = |name: &str| match dump.getter(name) {
+        Dumped::Str(s) => json!(s),
+        other => panic!("{name}: {other:?}"),
+    };
+    let list = |name: &str| match dump.getter(name) {
+        Dumped::List(items) => items.clone(),
+        other => panic!("{name}: {other:?}"),
+    };
+    let attributes: Vec<Value> = list("getAttributes")
+        .iter()
+        .map(|pair| match pair {
+            Dumped::List(kv) => json!(
+                kv.iter()
+                    .map(|s| match s {
+                        Dumped::Str(s) => s.clone(),
+                        other => panic!("an attribute: {other:?}"),
+                    })
+                    .collect::<Vec<_>>()
+            ),
+            other => panic!("an attribute: {other:?}"),
+        })
+        .collect();
+    let children: Vec<Value> = list("getChildElements")
+        .iter()
+        .map(|child| metadata_tree(child.object()))
+        .collect();
+    json!({"name": text("getElementName"), "value": text("getElementValue"),
+        "attributes": attributes, "children": children})
+}
+
+/// A processor from the command's reply, in `INDEPENDENT_READ`'s form.
+fn processor_summary(p: &ProcessorDump) -> Value {
+    let strings = |name: &str| match p.processor_metadata.getter(name) {
+        Dumped::List(items) => items
+            .iter()
+            .map(|s| match s {
+                Dumped::Str(s) => s.clone(),
+                other => panic!("{name}: {other:?}"),
+            })
+            .collect::<Vec<_>>(),
+        other => panic!("{name}: {other:?}"),
+    };
+    let children: Vec<Value> = p
+        .group
+        .children
+        .iter()
+        .map(|t| {
+            let mut out = json!({"class": t.class, "direction": t.getter("getDirection").name(),
+                "metadata": metadata_tree(t.getter("getFormatMetadata").object())});
+            if t.class == "GradingRGBCurveTransform" {
+                let curves = t.getter("getValue").object();
+                let points = |channel: &str| -> Vec<[u64; 2]> {
+                    match curves.property(channel).object().getter("getControlPoints") {
+                        Dumped::List(points) => points
+                            .iter()
+                            .map(|point| {
+                                let point = point.object();
+                                [
+                                    point.property("x").f64().to_bits(),
+                                    point.property("y").f64().to_bits(),
+                                ]
+                            })
+                            .collect(),
+                        other => panic!("{other:?}"),
+                    }
+                };
+                out["curves"] = json!(["red", "green", "blue", "master"].map(points));
+            }
+            out
+        })
+        .collect();
+    json!({"cache_id": p.cache_id, "isNoOp": p.is_no_op,
+        "hasChannelCrosstalk": p.has_channel_crosstalk, "isDynamic": p.is_dynamic,
+        "files": strings("getFiles"), "looks": strings("getLooks"),
+        "metadata": metadata_tree(p.group.getter("getFormatMetadata").object()),
+        "children": children})
+}
+
+/// The command agrees with an independent read of the wheel (`INDEPENDENT_READ`), for:
+/// - a CLF file whose Info element nests 4 levels deep (upstream's `clf/info_example.clf`);
+/// - a log inverted by the `direction` key;
+/// - a config's source and destination color spaces, optimized for 8-bit input;
+/// - dynamic exposure and a curve transform, whose control points are 6 levels down;
+/// - a processor that does nothing.
+#[test]
+fn processors_match_an_independent_read() {
+    let clf = ocio_testkit::paths::upstream_dir().join("tests/data/files/clf/info_example.clf");
+    let config = json!({"yaml": "ocio_profile_version: 2
+roles:
+  default: ref
+colorspaces:
+  - !<ColorSpace>
+    name: ref
+  - !<ColorSpace>
+    name: graded
+    from_scene_reference: !<MatrixTransform> {offset: [0.125, -0.25, 0.0625, 0.5]}
+"});
+    let cases = [
+        (
+            json!({"transform": {"class": "FileTransform", "args": {"src": clf}}}),
+            "BIT_DEPTH_F32",
+            "BIT_DEPTH_F32",
+            "OPTIMIZATION_NONE",
+        ),
+        (
+            json!({"transform": {"class": "LogTransform", "args": {"base": 2.0}},
+                "direction": "TRANSFORM_DIR_INVERSE"}),
+            "BIT_DEPTH_F32",
+            "BIT_DEPTH_UINT16",
+            "OPTIMIZATION_DEFAULT",
+        ),
+        (
+            json!({"config": config, "src": "ref", "dst": "graded"}),
+            "BIT_DEPTH_UINT8",
+            "BIT_DEPTH_F32",
+            "OPTIMIZATION_DEFAULT",
+        ),
+        (
+            group(vec![
+                json!({"class": "ExposureContrastTransform", "args": {"exposure": 0.5},
+                    "calls": [["makeExposureDynamic"]]}),
+                json!({"class": "GradingRGBCurveTransform",
+                    "args": {"style": {"enum": "GRADING_LIN"}}}),
+            ]),
+            "BIT_DEPTH_F32",
+            "BIT_DEPTH_F32",
+            "OPTIMIZATION_NONE",
+        ),
+        (
+            json!({"transform": {"class": "MatrixTransform"}}),
+            "BIT_DEPTH_F32",
+            "BIT_DEPTH_F32",
+            "OPTIMIZATION_DEFAULT",
+        ),
+    ];
+    let depth = |name: &str| match name {
+        "BIT_DEPTH_F32" => BitDepth::F32,
+        "BIT_DEPTH_UINT8" => BitDepth::Uint8,
+        "BIT_DEPTH_UINT16" => BitDepth::Uint16,
+        other => panic!("{other}"),
+    };
+    let requests: Vec<ProcessorOpsRequest> = cases
+        .iter()
+        .map(|(processor, in_bd, out_bd, flags)| {
+            let mut request = ProcessorOpsRequest::new(processor.clone());
+            request.in_bitdepth = Some(depth(in_bd));
+            request.out_bitdepth = Some(depth(out_bd));
+            request.optimization = Some(json!(flags));
+            request
+        })
+        .collect();
+    let script_cases: Vec<Value> = cases
+        .iter()
+        .map(|(processor, in_bd, out_bd, flags)| {
+            let mut case = processor.clone();
+            case["in"] = json!(in_bd);
+            case["out"] = json!(out_bd);
+            case["optimization"] = json!(flags);
+            case
+        })
+        .collect();
+    let lines = Oracle::get().run_script(
+        INDEPENDENT_READ,
+        &[serde_json::to_string(&script_cases).expect("JSON")],
+    );
+    assert_eq!(lines.len(), cases.len(), "{lines:?}");
+    for (i, (reply, line)) in run(&requests).iter().zip(&lines).enumerate() {
+        let expected: Value = serde_json::from_str(line).expect("the script's JSON");
+        let got = json!({"processor": processor_summary(reply.processor()),
+            "optimized": processor_summary(reply.optimized())});
+        assert_eq!(got, expected, "case {i}");
+    }
+}
+
+/// Upstream's OpOptimizers test `multi_op_prefix` (tests/cpu/OpOptimizers_tests.cpp:1403-1485
+/// @ v2.5.2), run on the wheel through `getOptimizedProcessor(UINT8, F32, DEFAULT)`, whose
+/// default flags include the separable prefix that the test optimizes for:
+/// - a matrix scaling red by 2 and a range: nothing to optimize, the ops are unchanged;
+/// - with an ASC CDL after them: one 1D LUT of 256 entries, baked for the 8-bit input.
+///
+/// (Upstream's last check, a render against the unbaked ops, is the port's to run.)
+#[test]
+fn an_8_bit_input_bakes_a_separable_prefix_as_upstream_expects() {
+    let matrix = json!({"class": "MatrixTransform", "args": {"matrix":
+        [2.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]}});
+    let range = json!({"class": "RangeTransform", "args": {"minInValue": 0.0, "maxInValue": 1.0,
+        "minOutValue": -1000.0 / 65535.0, "maxOutValue": 66000.0 / 65535.0}});
+    let cdl = json!({"class": "CDLTransform", "args": {"slope": [1.35, 1.1, 0.071],
+        "offset": [0.05, -0.23, 0.11], "power": [1.27, 0.81, 0.2], "sat": 1.0},
+        "calls": [["setStyle", {"enum": "CDL_ASC"}]]});
+    let request = |children: Vec<Value>| {
+        let mut request = ProcessorOpsRequest::new(group(children));
+        request.in_bitdepth = Some(BitDepth::Uint8);
+        request.out_bitdepth = Some(BitDepth::F32);
+        request
+    };
+    let replies = run(&[
+        request(vec![matrix.clone(), range.clone()]),
+        request(vec![matrix, range, cdl]),
+    ]);
+
+    // "Validate ops are unchanged."
+    assert_eq!(
+        replies[0].optimized().classes(),
+        vec!["MatrixTransform", "RangeTransform"]
+    );
+    assert_eq!(
+        replies[0].optimized().group.children,
+        replies[0].processor().group.children
+    );
+
+    // "OCIO_REQUIRE_EQUAL(optimizedOps.size(), 1U)", a Lut1D of length 256.
+    assert_eq!(replies[1].optimized().classes(), vec!["Lut1DTransform"]);
+    assert_eq!(
+        replies[1].optimized().group.children[0].getter("getLength"),
+        &Dumped::Int(256)
+    );
+}
+
+/// The dump raises for an object below its depth limit rather than leave it out unseen. A
+/// processor's values never go that deep, so this runs the dump itself, in the oracle's
+/// environment, on groups nested in groups: each is a level down from its parent.
+#[test]
+fn the_dump_refuses_objects_too_deep_to_write_out() {
+    const SCRIPT: &str = r#"
+import PyOpenColorIO as OCIO
+from ocio_oracle.checks import MAX_DEPTH, dump
+
+def nested(levels):
+    group = OCIO.GroupTransform()
+    for _ in range(levels):
+        outer = OCIO.GroupTransform()
+        outer.appendTransform(group)
+        group = outer
+    return group
+
+dump(nested(MAX_DEPTH - 1), [])
+print("written")
+try:
+    dump(nested(MAX_DEPTH), [])
+    print("written")
+except ValueError as exc:
+    print(exc)
+"#;
+    let lines = Oracle::get().run_script(SCRIPT, &[]);
+    assert_eq!(lines[0], "written");
+    assert!(
+        lines[1].starts_with("the dump refuses a GroupTransform 8 levels down"),
+        "{lines:?}"
+    );
+}
+
 /// Where a request raises and a fragment of the message.
 type Expected = (&'static str, &'static str);
 
@@ -395,6 +703,15 @@ fn unknown_keys_and_bit_depths_are_refused() {
         (
             json!({"transform": {"class": "LogTransform"}, "out_bitdepth": "name"}),
             "out_bitdepth: unknown BitDepth 'name'",
+        ),
+        // A bit depth is a name, not its number.
+        (
+            json!({"transform": {"class": "LogTransform"}, "in_bitdepth": 8}),
+            "in_bitdepth: unknown BitDepth 8",
+        ),
+        (
+            json!({"transform": {"class": "LogTransform"}, "out_bitdepth": true}),
+            "out_bitdepth: unknown BitDepth True",
         ),
     ];
     let calls: Vec<BatchCall<'_>> = cases
