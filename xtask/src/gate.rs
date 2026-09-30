@@ -14,12 +14,12 @@ use std::process::{Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub(crate) const USAGE: &str = "\
-cargo xtask gate [--crates a,b] [--release] [--rocky] [--quick|--full] [--auto]
+cargo xtask gate [--crates a,b] [--release] [--rocky] [--quick|--full] [--main] [--auto]
 
 Runs, in order, stopping at the first failure:
   fmt            cargo fmt --all --check
   clippy         cargo clippy --workspace --all-targets -- -D warnings
-  ci             cargo xtask ci
+  ci             cargo xtask ci (branch mode; with --main, cargo xtask ci --main)
   test           cargo test --workspace --no-fail-fast (debug)
   test-release   the same in release, with --release
   rocky          with --rocky: this gate, same options, in Rocky Linux 9 (scripts/rocky9.sh)
@@ -28,6 +28,8 @@ Runs, in order, stopping at the first failure:
                  the workspace)
   --quick        tests run the quick tier (OCIO_RS_TIER=quick): the default, per chunk
   --full         tests run the full tier (OCIO_RS_TIER=full), as `xtask land` does
+  --main         the ci step also checks that docs/ratchet.toml and docs/parity.md are
+                 current, as on `main` (`xtask land` uses it on the merge commit)
   --auto         for `xtask land`: add --release, and keep --rocky, only when the HEAD commit
                  touches platform-sensitive files (Rust sources, the oracle, fixtures, scripts)
 
@@ -43,6 +45,8 @@ pub(crate) struct Options {
     pub(crate) rocky: bool,
     /// The full test tier instead of the quick one.
     pub(crate) full: bool,
+    /// `xtask ci --main` instead of branch mode.
+    pub(crate) main: bool,
     /// Decide `release` and `rocky` from the files the HEAD commit touches.
     pub(crate) auto: bool,
     /// Write the step logs here instead of a new `target/gate-logs/<time>` (used for the Rocky
@@ -67,6 +71,7 @@ pub(crate) fn parse(args: &[&str]) -> Result<Options, String> {
         match arg {
             "--release" => opts.release = true,
             "--rocky" => opts.rocky = true,
+            "--main" => opts.main = true,
             "--auto" => opts.auto = true,
             "--quick" | "--full" => {
                 if tier.is_some_and(|t| t != arg) {
@@ -141,6 +146,9 @@ pub(crate) fn run(mut opts: Options) -> Result<(), String> {
     )?;
     let mut ci = Command::new(std::env::current_exe().map_err(|e| e.to_string())?);
     ci.arg("ci").current_dir(&root);
+    if opts.main {
+        ci.arg("--main");
+    }
     runner.step("ci", ci, Kind::Plain)?;
     let tier = if opts.full { "full" } else { "quick" };
     runner.step(
@@ -165,6 +173,9 @@ pub(crate) fn run(mut opts: Options) -> Result<(), String> {
         }
         if opts.release {
             rocky.arg("--release");
+        }
+        if opts.main {
+            rocky.arg("--main");
         }
         rocky.arg(if opts.full { "--full" } else { "--quick" });
         rocky
@@ -608,7 +619,8 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(o.crates, ["ocio-ops", "ocio"]);
-        assert!(o.release && o.rocky && o.full && !o.auto);
+        assert!(o.release && o.rocky && o.full && !o.auto && !o.main);
+        assert!(parse(&["--main", "--auto"]).is_ok_and(|o| o.main && o.auto));
         let o = parse(&["--crates=ocio-ops", "--log-dir=target/x", "--quick"]).unwrap();
         assert_eq!(o.crates, ["ocio-ops"]);
         assert_eq!(o.log_dir, Some(PathBuf::from("target/x")));

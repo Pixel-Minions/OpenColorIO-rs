@@ -37,7 +37,11 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
 - **Green on its own.** Before committing, `cargo xtask gate` must pass. It runs `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo xtask ci` and `cargo test --workspace --no-fail-fast`, stops at the first failure, and keeps each step's full log in `target/gate-logs/<time>/`.
   - Numeric or platform-sensitive chunks (numerics, formatting, parsing) run `cargo xtask gate --release --rocky`: the tests in release too, since optimization can change NaN results and other bits the debug build doesn't show, then every step again in Rocky Linux 9.
   - While iterating, `--crates a,b` limits the test steps to those packages; fmt, clippy and `xtask ci` always cover the workspace.
-- **Bookkeeping travels with the port.** Update `upstream-map.toml`, `docs/parity.md` and `docs/ratchet.toml` in the same chunk as the port they describe.
+- **Bookkeeping travels with the port.** Update `upstream-map.toml` in the same chunk as the port it describes.
+- **Never commit the generated files** `docs/parity.md` and `docs/ratchet.toml`, so that chunks never conflict on them.
+  - `cargo xtask land` regenerates both into the merge commit.
+  - On a branch, `cargo xtask ci` (branch mode) only checks that the ported-test count is at least `docs/ratchet.toml`.
+  - CI runs `cargo xtask ci --main` on `main` and on land commits, which checks that both files are current.
 - **Oracle changes stand alone.** Changes to `oracle/` and new fixture groups get their own chunk, before the chunk that first uses them. The owner reviews them separately.
 - **Order and fixes.** Chunks are ordered by dependency. A later fix is a new chunk; never rewrite an earlier commit.
 - **Checking a chunk in isolation** while other work is in progress:
@@ -112,10 +116,11 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
 | Command | Purpose |
 |---|---|
 | `cargo xtask gate [--crates a,b] [--release] [--rocky] [--quick\|--full]` | The chunk gate: fmt, clippy, `xtask ci`, tests; logs in `target/gate-logs/` |
-| `cargo xtask ci` | Guards, fixture hashes, ratchet, parity dashboard freshness |
+| `cargo xtask ci` | Guards, fixture hashes, ported tests at least `docs/ratchet.toml` (branch mode) |
+| `cargo xtask ci --main` | Also: `docs/ratchet.toml` and `docs/parity.md` are current (`main` and land commits) |
 | `cargo xtask guards` | Forbidden patterns, the `unsafe` allowlist, headers, dependency pins, the upstream map |
-| `cargo xtask parity` | Regenerate `docs/parity.md` after porting tests |
-| `cargo xtask ratchet --update` | Record the new number of ported upstream tests |
+| `cargo xtask parity` | Regenerate `docs/parity.md` (`xtask land` does it; chunks don't commit it) |
+| `cargo xtask ratchet --update` | Record the number of ported upstream tests (`xtask land` does it) |
 | `cargo xtask upstream-tests` | Every upstream test and whether it is ported |
 | `cargo xtask oracle info` | The oracle's versions and this machine's CPU features |
 | `cargo xtask oracle regen <group>` | Regenerate committed fixtures (owner-reviewed) |

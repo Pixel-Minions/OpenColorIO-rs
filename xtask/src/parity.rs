@@ -295,7 +295,19 @@ fn ratchet_path() -> std::path::PathBuf {
     paths::workspace_root().join("docs").join("ratchet.toml")
 }
 
-pub(crate) fn ratchet(update: bool) -> Result<(), String> {
+/// What `ratchet` checks against `docs/ratchet.toml`, the committed counts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RatchetMode {
+    /// Branches and PRs: the ported-test counts are at least the committed ones. Chunks don't
+    /// edit the file; `cargo xtask land` raises it when it merges them.
+    AtLeast,
+    /// `main`: the committed counts are the current ones.
+    Current,
+    /// Write the current counts, which may not be below the committed ones.
+    Update,
+}
+
+pub(crate) fn ratchet(mode: RatchetMode) -> Result<(), String> {
     let c = counts()?;
     if !c.unknown_markers.is_empty() {
         return Err(c.unknown_markers.join("\n"));
@@ -306,7 +318,10 @@ pub(crate) fn ratchet(update: bool) -> Result<(), String> {
     };
     let base: Ratchet = match std::fs::read_to_string(ratchet_path()) {
         Ok(text) => toml::from_str(&text).map_err(|e| format!("docs/ratchet.toml: {e}"))?,
-        Err(_) => Ratchet::default(),
+        Err(e) if mode == RatchetMode::Update && e.kind() == std::io::ErrorKind::NotFound => {
+            Ratchet::default()
+        }
+        Err(e) => return Err(format!("docs/ratchet.toml: {e}")),
     };
     if now.ported_cpu < base.ported_cpu || now.ported_gpu < base.ported_gpu {
         return Err(format!(
@@ -314,14 +329,28 @@ pub(crate) fn ratchet(update: bool) -> Result<(), String> {
             base.ported_cpu, now.ported_cpu, base.ported_gpu, now.ported_gpu
         ));
     }
-    if update {
-        let text = format!(
-            "# Ported upstream tests may only go up (PLAN.md §7). Raise with `cargo xtask ratchet --update`.\n{}",
-            toml::to_string(&now).map_err(|e| e.to_string())?
-        );
-        std::fs::write(ratchet_path(), text).map_err(|e| e.to_string())?;
-    } else if now.ported_cpu > base.ported_cpu || now.ported_gpu > base.ported_gpu {
-        println!("ratchet: more tests ported than recorded; run `cargo xtask ratchet --update`");
+    let raised = now.ported_cpu > base.ported_cpu || now.ported_gpu > base.ported_gpu;
+    match mode {
+        RatchetMode::Update => {
+            let text = format!(
+                "# Ported upstream tests may only go up (PLAN.md §7). `cargo xtask land` raises this with `cargo xtask ratchet --update`.\n{}",
+                toml::to_string(&now).map_err(|e| e.to_string())?
+            );
+            std::fs::write(ratchet_path(), text).map_err(|e| e.to_string())?;
+        }
+        RatchetMode::Current if raised => {
+            return Err(format!(
+                "docs/ratchet.toml is stale: it records cpu {}, gpu {}; cpu {}, gpu {} are ported. \
+                 Run `cargo xtask ratchet --update` (`cargo xtask land` does)",
+                base.ported_cpu, base.ported_gpu, now.ported_cpu, now.ported_gpu
+            ));
+        }
+        RatchetMode::AtLeast if raised => {
+            println!(
+                "ratchet: more tests ported than docs/ratchet.toml records; `cargo xtask land` records them"
+            );
+        }
+        RatchetMode::Current | RatchetMode::AtLeast => {}
     }
     println!(
         "ratchet: cpu {} (baseline {}), gpu {} (baseline {})",

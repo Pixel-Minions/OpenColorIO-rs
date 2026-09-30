@@ -6,6 +6,8 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
+use parity::RatchetMode;
+
 mod fixtures;
 mod gate;
 mod guards;
@@ -30,14 +32,18 @@ Oracle and fixtures (fixtures/ is written only by these commands):
 
 Guardrails:
   guards                      forbidden patterns, unsafe allowlist, waivers, headers
-  ratchet [--update]          ported upstream tests may only increase
-  ci                          guards + fixtures verify + ratchet + parity --check
+  ratchet [--update]          ported upstream tests may only increase (--update records
+                              the current counts; `xtask land` does it at merge time)
+  ci [--main]                 guards + fixtures verify + ported tests >= docs/ratchet.toml;
+                              --main (main and land commits): docs/ratchet.toml and
+                              docs/parity.md are current
 
 Upstream:
   upstream-map update         add new upstream files to upstream-map.toml (keeps edits)
   upstream-status             summary of upstream-map.toml
   upstream-tests              list upstream tests and whether each is ported
-  parity [--check]            write docs/parity.md (--check: fail if it is stale)
+  parity [--check]            write docs/parity.md (--check: fail if it is stale); `xtask land`
+                              writes it at merge time
 ";
 
 fn main() -> ExitCode {
@@ -55,17 +61,15 @@ fn main() -> ExitCode {
         ["oracle", "check-all"] => fixtures::check_all(),
         ["fixtures", "verify"] => fixtures::verify(),
         ["guards"] => guards::run(),
-        ["ratchet"] => parity::ratchet(false),
-        ["ratchet", "--update"] => parity::ratchet(true),
+        ["ratchet"] => parity::ratchet(RatchetMode::AtLeast),
+        ["ratchet", "--update"] => parity::ratchet(RatchetMode::Update),
         ["upstream-map", "update"] => upstream::update_map(),
         ["upstream-status"] => upstream::status(),
         ["upstream-tests"] => parity::list_tests(),
         ["parity"] => parity::write_dashboard(false),
         ["parity", "--check"] => parity::write_dashboard(true),
-        ["ci"] => guards::run()
-            .and_then(|()| fixtures::verify())
-            .and_then(|()| parity::ratchet(false))
-            .and_then(|()| parity::write_dashboard(true)),
+        ["ci"] => ci(false),
+        ["ci", "--main"] => ci(true),
         ["help"] | [] => {
             print!("{USAGE}");
             Ok(())
@@ -79,6 +83,30 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// `cargo xtask ci`. Branch mode (the default) checks that the ported-test count is at least
+/// the committed `docs/ratchet.toml`; chunks never edit it or `docs/parity.md`. `--main`
+/// checks that both generated files are current, as `main` and land commits must be.
+fn ci(main: bool) -> Result<(), String> {
+    if main {
+        println!("ci: main mode: docs/ratchet.toml and docs/parity.md must be current");
+    } else {
+        println!(
+            "ci: branch mode: docs/parity.md is not checked (`cargo xtask ci --main` checks it)"
+        );
+    }
+    guards::run()?;
+    fixtures::verify()?;
+    parity::ratchet(if main {
+        RatchetMode::Current
+    } else {
+        RatchetMode::AtLeast
+    })?;
+    if main {
+        parity::write_dashboard(true)?;
+    }
+    Ok(())
 }
 
 /// Files under `dir` (recursively), as paths relative to `dir` with `/` separators, sorted.
