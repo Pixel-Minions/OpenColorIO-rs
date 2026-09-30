@@ -16,6 +16,17 @@
 //! buffers.
 #![allow(unsafe_code)]
 
+// The declarations and conventions below (errno values, `long` width, the locale functions,
+// legacy_stdio_definitions) are those of the two reference platforms (PLAN.md D11).
+#[cfg(not(any(
+    all(target_arch = "x86_64", target_os = "windows", target_env = "msvc"),
+    all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"),
+)))]
+compile_error!(
+    "ocio-testkit's C runtime reference supports x86_64 Windows (MSVC, UCRT) and x86_64 \
+     Linux (glibc) only"
+);
+
 use std::ffi::{c_char, c_int, c_long, c_void};
 use std::sync::OnceLock;
 

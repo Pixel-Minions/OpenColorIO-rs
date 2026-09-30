@@ -39,13 +39,26 @@ pub enum Flavor {
 }
 
 impl Flavor {
-    /// The branch the wheel for the platform being compiled for uses.
-    pub const NATIVE: Flavor = if cfg!(windows) {
-        Flavor::FromChars
-    } else {
-        Flavor::Strtod
-    };
+    /// The branch the wheel for the platform being compiled for uses: `std::from_chars` on
+    /// x86_64 Windows (MSVC).
+    #[cfg(all(target_arch = "x86_64", target_os = "windows", target_env = "msvc"))]
+    pub const NATIVE: Flavor = Flavor::FromChars;
+
+    /// The branch the wheel for the platform being compiled for uses: `strtod_l` and friends
+    /// on x86_64 Linux (GCC, glibc).
+    #[cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"))]
+    pub const NATIVE: Flavor = Flavor::Strtod;
 }
+
+// Only the two reference platforms (PLAN.md D11) have a known branch.
+#[cfg(not(any(
+    all(target_arch = "x86_64", target_os = "windows", target_env = "msvc"),
+    all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"),
+)))]
+compile_error!(
+    "NumberUtils knows the branches of x86_64 Windows (MSVC) and x86_64 Linux (GCC, glibc) \
+     only"
+);
 
 /// The `std::errc` values NumberUtils returns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

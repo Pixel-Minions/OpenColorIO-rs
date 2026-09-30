@@ -38,9 +38,23 @@ pub enum Crt {
 }
 
 impl Crt {
-    /// The C runtime of the platform being compiled for.
-    pub const NATIVE: Crt = if cfg!(windows) { Crt::Ucrt } else { Crt::Glibc };
+    /// The C runtime of the platform being compiled for: the UCRT on x86_64 Windows (MSVC).
+    #[cfg(all(target_arch = "x86_64", target_os = "windows", target_env = "msvc"))]
+    pub const NATIVE: Crt = Crt::Ucrt;
+
+    /// The C runtime of the platform being compiled for: glibc on x86_64 Linux.
+    #[cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"))]
+    pub const NATIVE: Crt = Crt::Glibc;
 }
+
+// Only the two reference platforms (PLAN.md D11) have a known C runtime.
+#[cfg(not(any(
+    all(target_arch = "x86_64", target_os = "windows", target_env = "msvc"),
+    all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"),
+)))]
+compile_error!(
+    "cfmt knows the C runtimes of x86_64 Windows (MSVC, UCRT) and x86_64 Linux (glibc) only"
+);
 
 // ---------------------------------------------------------------------------------------
 // Exact decimal expansion
