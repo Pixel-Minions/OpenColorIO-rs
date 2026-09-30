@@ -5,7 +5,11 @@
 //! wheel itself:
 //! - every language and setting reaches the shader description;
 //! - uniforms, textures and dynamic properties come back with their values, each in its place,
-//!   and the grading values exact, as an independent read of the wheel gives them;
+//!   and the grading values exact;
+//! - every field agrees with an independent read of the wheel, bit for bit, the processor keys
+//!   (`direction`, a config's `src` and `dst`) included; upstream's `VulkanSupport` holds;
+//! - a 3D texture holds its LUT in `getData()` order; a missing file raises
+//!   `ExceptionMissingFile`;
 //! - each message is logged once, as one extraction logs it;
 //! - the default GPU processor is the optimized one with the default flags;
 //! - every error path raises where the command says; the command's refusals, exactly the names
@@ -29,7 +33,7 @@ use ocio_testkit::gpu::{
     GpuLanguage, GpuShaderReply, GpuShaderRequest, Raised, ShaderSettings, UniformValue,
 };
 use ocio_testkit::oracle::{BatchCall, Response};
-use ocio_testkit::processor_ops::Dumped;
+use ocio_testkit::processor_ops::{Dumped, ProcessorOpsReply, ProcessorOpsRequest};
 use serde_json::{Value, json};
 
 /// Runs `calls` in one oracle process; each must succeed.
@@ -1082,4 +1086,441 @@ fn replies_are_the_same_on_every_run() {
             assert_eq!(batched.blobs, alone.blobs, "call {i}");
         }
     }
+}
+
+/// Reads shaders the command's way, written independently of it: the processor's and the GPU
+/// processor's cache IDs and flags, the description's cache ID and text, each uniform's name,
+/// type, offset and value read with its type's getter, each texture's names, size, channel,
+/// dimensions, interpolation, binding index and values, and the dynamic properties' types.
+/// Floats as bits. The cases are JSON: the processor keys, "optimization", and "shader" with
+/// the settings the cases use.
+const SHADER_READ: &str = r#"
+import json, struct, sys
+import numpy as np
+import PyOpenColorIO as OCIO
+from ocio_oracle import spec
+
+def bits64(v):
+    return struct.unpack("<Q", struct.pack("<d", v))[0]
+
+def bits32(values):
+    return [struct.unpack("<I", struct.pack("<f", v))[0] for v in values]
+
+def uniform(name, data):
+    kind = data.type
+    if kind == OCIO.UNIFORM_DOUBLE:
+        value = bits64(data.getDouble())
+    elif kind == OCIO.UNIFORM_BOOL:
+        value = data.getBool()
+    elif kind == OCIO.UNIFORM_FLOAT3:
+        value = bits32(data.getFloat3())
+    elif kind == OCIO.UNIFORM_VECTOR_FLOAT:
+        value = bits32(np.asarray(data.getVectorFloat(), dtype=np.float32).tolist())
+    elif kind == OCIO.UNIFORM_VECTOR_INT:
+        value = [int(i) for i in data.getVectorInt()]
+    else:
+        value = None
+    return {"name": name, "type": kind.name, "offset": data.bufferOffset, "value": value}
+
+for case in json.loads(sys.argv[1]):
+    config = spec.config(case.get("config"))
+    if "transform" in case:
+        direction = getattr(OCIO, case.get("direction", "TRANSFORM_DIR_FORWARD"))
+        proc = config.getProcessor(spec.transform(case["transform"]), direction)
+    else:
+        proc = config.getProcessor(case["src"], case["dst"])
+    if "optimization" in case:
+        gpu = proc.getOptimizedGPUProcessor(spec.flags(case["optimization"]))
+    else:
+        gpu = proc.getDefaultGPUProcessor()
+    settings = case.get("shader", {})
+    desc = OCIO.GpuShaderDesc.CreateShaderDesc()
+    if "language" in settings:
+        desc.setLanguage(getattr(OCIO.GpuLanguage, settings["language"]))
+    if "descriptor_set" in settings:
+        desc.setDescriptorSetIndex(settings["descriptor_set"]["index"],
+                                   settings["descriptor_set"]["texture_binding_start"])
+    if "texture_max_width" in settings:
+        desc.setTextureMaxWidth(settings["texture_max_width"])
+    gpu.extractGpuShaderInfo(desc)
+    values = lambda t: bits32(np.asarray(t.getValues(), dtype=np.float32).tolist())
+    print(json.dumps({
+        "processor_cache_id": proc.getCacheID(), "gpu_cache_id": gpu.getCacheID(),
+        "isNoOp": gpu.isNoOp(), "hasChannelCrosstalk": gpu.hasChannelCrosstalk(),
+        "cache_id": desc.getCacheID(), "text": desc.getShaderText(),
+        "uniforms": [uniform(name, data) for name, data in desc.getUniforms()],
+        "textures": [{"name": t.textureName, "sampler": t.samplerName, "width": t.width,
+                      "height": t.height, "channel": t.channel.name,
+                      "dimensions": t.dimensions.name, "interpolation": t.interpolation.name,
+                      "binding": t.textureShaderBindingIndex, "values": values(t)}
+                     for t in desc.getTextures()],
+        "textures_3d": [{"name": t.textureName, "sampler": t.samplerName, "edge": t.edgeLen,
+                         "interpolation": t.interpolation.name,
+                         "binding": t.textureShaderBindingIndex, "values": values(t)}
+                        for t in desc.get3DTextures()],
+        "dynamic": [p.getType().name for p in desc.getDynamicProperties()],
+    }))
+"#;
+
+/// A reply in `SHADER_READ`'s form.
+fn shader_summary(reply: &GpuShaderReply) -> Value {
+    let shader = reply.shader();
+    let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<u32>>();
+    let uniforms: Vec<Value> = shader
+        .uniforms
+        .iter()
+        .map(|u| {
+            let value = match &u.value {
+                UniformValue::Double(d) => json!(d.to_bits()),
+                UniformValue::Bool(b) => json!(b),
+                UniformValue::Float3(f) => json!(bits(f)),
+                UniformValue::VectorFloat(v) => json!(bits(v)),
+                UniformValue::VectorInt(v) => json!(v),
+                UniformValue::Unknown => Value::Null,
+            };
+            json!({"name": u.name, "type": u.kind, "offset": u.buffer_offset, "value": value})
+        })
+        .collect();
+    let textures: Vec<Value> = shader
+        .textures
+        .iter()
+        .map(|t| {
+            json!({"name": t.name, "sampler": t.sampler_name, "width": t.width,
+                "height": t.height, "channel": t.channel, "dimensions": t.dimensions,
+                "interpolation": t.interpolation, "binding": t.binding_index,
+                "values": bits(&t.values)})
+        })
+        .collect();
+    let textures_3d: Vec<Value> = shader
+        .textures_3d
+        .iter()
+        .map(|t| {
+            json!({"name": t.name, "sampler": t.sampler_name, "edge": t.edge_len,
+                "interpolation": t.interpolation, "binding": t.binding_index,
+                "values": bits(&t.values)})
+        })
+        .collect();
+    let dynamic: Vec<&str> = shader
+        .dynamic_properties
+        .iter()
+        .map(|p| p.kind.as_str())
+        .collect();
+    json!({
+        "processor_cache_id": reply.result["processor_cache_id"],
+        "gpu_cache_id": reply.result["gpu_cache_id"],
+        "isNoOp": reply.result["gpu_processor"]["isNoOp"],
+        "hasChannelCrosstalk": reply.result["gpu_processor"]["hasChannelCrosstalk"],
+        "cache_id": shader.cache_id, "text": shader.text,
+        "uniforms": uniforms, "textures": textures, "textures_3d": textures_3d,
+        "dynamic": dynamic,
+    })
+}
+
+/// The command agrees with an independent read of the wheel (`SHADER_READ`), field by field
+/// and bit for bit, for:
+/// - every dynamic property at once, which gives uniforms of every type;
+/// - three LUTs in Vulkan GLSL with a descriptor set: a 1D texture, a 2D texture of two rows
+///   (a width limit of 4), and a 3D texture, their binding indices from 10;
+/// - a log inverted by the `direction` key, in MSL;
+/// - a config's source and destination color spaces, in HLSL;
+/// - a matrix with crosstalk, in OSL, and a no-op, in Cg.
+#[test]
+fn shaders_match_an_independent_read() {
+    let config = json!({"yaml": "ocio_profile_version: 2
+roles:
+  default: ref
+colorspaces:
+  - !<ColorSpace>
+    name: ref
+  - !<ColorSpace>
+    name: graded
+    from_scene_reference: !<MatrixTransform> {offset: [0.125, -0.25, 0.0625, 0.5]}
+"});
+    let mut dynamic = vec![analytic(0.5, 1.25, 1.5)];
+    dynamic.extend(GRADINGS.iter().map(|(class, style)| grading(class, style)));
+    // A curve that isn't the identity: its knots and coefficients (vectors of floats) are then
+    // uniforms of their own values, which the identity leaves empty.
+    dynamic[2]["calls"] = json!([["setSlope", {"enum": "RGB_RED"}, 1, 0.5]]);
+    let lut3d = {
+        let calls: Vec<Value> = (0..8)
+            .map(|i| {
+                let (r, g, b) = (i / 4, (i / 2) % 2, i % 2);
+                json!([
+                    "setValue",
+                    r,
+                    g,
+                    b,
+                    0.1 + 0.3 * f64::from(r),
+                    0.2 + 0.25 * f64::from(g),
+                    0.05 + 0.5 * f64::from(b) + 0.01 * f64::from(i)
+                ])
+            })
+            .collect();
+        json!({"class": "Lut3DTransform", "args": {"gridSize": 2}, "calls": calls})
+    };
+    let cases: Vec<(Value, ShaderSettings)> = vec![
+        (
+            json!({"transform": {"class": "GroupTransform", "children": dynamic}}),
+            ShaderSettings::language(GpuLanguage::Glsl40),
+        ),
+        (
+            json!({"transform": {"class": "GroupTransform", "children": [
+                    lut1d(&curve(9, false)), lut1d(&curve(6, false)), lut3d]},
+                "optimization": "OPTIMIZATION_NONE"}),
+            ShaderSettings {
+                language: Some(GpuLanguage::GlslVk46),
+                descriptor_set: Some((2, 10)),
+                texture_max_width: Some(4),
+                ..ShaderSettings::default()
+            },
+        ),
+        (
+            json!({"transform": {"class": "LogTransform", "args": {"base": 2.0}},
+                "direction": "TRANSFORM_DIR_INVERSE"}),
+            ShaderSettings::language(GpuLanguage::Msl20),
+        ),
+        (
+            json!({"config": config, "src": "ref", "dst": "graded"}),
+            ShaderSettings::language(GpuLanguage::HlslSm50),
+        ),
+        (
+            json!({"transform": {"class": "MatrixTransform", "args": {"matrix":
+                [1.0, 0.25, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0]}}}),
+            ShaderSettings::language(GpuLanguage::Osl1),
+        ),
+        (
+            json!({"transform": {"class": "MatrixTransform"}}),
+            ShaderSettings::language(GpuLanguage::Cg),
+        ),
+    ];
+    let requests: Vec<GpuShaderRequest> = cases
+        .iter()
+        .map(|(processor, settings)| GpuShaderRequest::new(processor.clone(), settings.clone()))
+        .collect();
+    let script_cases: Vec<Value> = requests.iter().map(GpuShaderRequest::args).collect();
+    let lines = Oracle::get().run_script(
+        SHADER_READ,
+        &[serde_json::to_string(&script_cases).expect("JSON")],
+    );
+    assert_eq!(lines.len(), cases.len(), "{lines:?}");
+    for (i, (reply, line)) in run(&requests).iter().zip(&lines).enumerate() {
+        let expected: Value = serde_json::from_str(line).expect("the script's JSON");
+        assert_eq!(shader_summary(reply), expected, "case {i}");
+    }
+}
+
+/// Upstream's GpuShader test `VulkanSupport` (tests/cpu/GpuShader_tests.cpp:1368-1531
+/// @ v2.5.2), run on the wheel through the command: upstream's `lut1d_lut3d_lut1d.clf` without
+/// optimization, in Vulkan GLSL with the descriptor set (2, 10), gives upstream's textures,
+/// binding indices and shader text. (Upstream builds the processor from `Config::Create()`; a
+/// file's ops don't depend on the config, and this uses the raw one.)
+#[test]
+fn vulkan_bindings_as_upstream_expects() {
+    // tests/cpu/GpuShader_tests.cpp:1462-1528 @ v2.5.2, verbatim.
+    const EXPECTED: &str = r#"
+// Declaration of all textures
+
+layout(set=2, binding = 10) uniform sampler1D ocio_lut1d_0Sampler; 
+layout(set=2, binding = 11) uniform sampler3D ocio_lut3d_1Sampler; 
+layout(set=2, binding = 12) uniform sampler2D ocio_lut1d_2Sampler; 
+
+// Declaration of all helper methods
+
+vec2 ocio_lut1d_2_computePos(float f)
+{
+  float dep;
+  float abs_f = abs(f);
+  if (abs_f > 6.10351562e-05)
+  {
+    vec3 fComp = vec3(15., 15., 15.);
+    float absarr = min( abs_f, 65504.);
+    fComp.x = floor( log2( absarr ) );
+    float lower = pow( 2.0, fComp.x );
+    fComp.y = ( absarr - lower ) / lower;
+    vec3 scale = vec3(1024., 1024., 1024.);
+    dep = dot( fComp, scale );
+  }
+  else
+  {
+    dep = abs_f * 16777216.;
+  }
+  dep += (f < 0.) ? 32768.0 : 0.0;
+  vec2 retVal;
+  retVal.y = floor(dep / 4095.);
+  retVal.x = dep - retVal.y * 4095.;
+  retVal.x = (retVal.x + 0.5) / 4096.;
+  retVal.y = (retVal.y + 0.5) / 17.;
+  return retVal;
+}
+
+// Declaration of the OCIO shader function
+
+vec4 OCIOMain(vec4 inPixel)
+{
+  vec4 outColor = inPixel;
+  
+  // Add LUT 1D processing for ocio_lut1d_0
+  
+  {
+    vec3 ocio_lut1d_0_coords = (outColor.rgb * vec3(64., 64., 64.) + vec3(0.5, 0.5, 0.5) ) / vec3(65., 65., 65.);
+    outColor.r = texture(ocio_lut1d_0Sampler, ocio_lut1d_0_coords.r).r;
+    outColor.g = texture(ocio_lut1d_0Sampler, ocio_lut1d_0_coords.g).r;
+    outColor.b = texture(ocio_lut1d_0Sampler, ocio_lut1d_0_coords.b).r;
+  }
+  
+  // Add LUT 3D processing for ocio_lut3d_1
+  
+  vec3 ocio_lut3d_1_coords = (outColor.zyx * vec3(2., 2., 2.) + vec3(0.5, 0.5, 0.5)) / vec3(3., 3., 3.);
+  outColor.rgb = texture(ocio_lut3d_1Sampler, ocio_lut3d_1_coords).rgb;
+  
+  // Add LUT 1D processing for ocio_lut1d_2
+  
+  {
+    outColor.r = texture(ocio_lut1d_2Sampler, ocio_lut1d_2_computePos(outColor.r)).r;
+    outColor.g = texture(ocio_lut1d_2Sampler, ocio_lut1d_2_computePos(outColor.g)).r;
+    outColor.b = texture(ocio_lut1d_2Sampler, ocio_lut1d_2_computePos(outColor.b)).r;
+  }
+
+  return outColor;
+}
+"#;
+    let clf =
+        ocio_testkit::paths::upstream_dir().join("tests/data/files/clf/lut1d_lut3d_lut1d.clf");
+    let request = GpuShaderRequest::new(
+        json!({"transform": {"class": "FileTransform", "args": {"src": clf}},
+            "optimization": "OPTIMIZATION_NONE"}),
+        ShaderSettings {
+            language: Some(GpuLanguage::GlslVk46),
+            descriptor_set: Some((2, 10)),
+            ..ShaderSettings::default()
+        },
+    );
+    let reply = &run(&[request])[0];
+    let shader = reply.shader();
+    assert_eq!(shader.getters["descriptor_set_index"], 2);
+    assert_eq!(shader.textures.len(), 2);
+    assert_eq!(shader.textures_3d.len(), 1);
+    let texture = |t: &ocio_testkit::gpu::Texture| {
+        (
+            t.name.clone(),
+            t.sampler_name.clone(),
+            t.width,
+            t.height,
+            t.channel.clone(),
+            t.dimensions.clone(),
+            t.interpolation.clone(),
+            t.binding_index,
+        )
+    };
+    let text = String::from;
+    assert_eq!(
+        texture(&shader.textures[0]),
+        (
+            text("ocio_lut1d_0"),
+            text("ocio_lut1d_0Sampler"),
+            65,
+            1,
+            text("TEXTURE_RED_CHANNEL"),
+            text("TEXTURE_1D"),
+            text("INTERP_LINEAR"),
+            10
+        )
+    );
+    assert_eq!(
+        texture(&shader.textures[1]),
+        (
+            text("ocio_lut1d_2"),
+            text("ocio_lut1d_2Sampler"),
+            4096,
+            17,
+            text("TEXTURE_RED_CHANNEL"),
+            text("TEXTURE_2D"),
+            text("INTERP_LINEAR"),
+            12
+        )
+    );
+    let cube = &shader.textures_3d[0];
+    assert_eq!(
+        (
+            cube.name.as_str(),
+            cube.sampler_name.as_str(),
+            cube.edge_len,
+            cube.interpolation.as_str(),
+            cube.binding_index
+        ),
+        (
+            "ocio_lut3d_1",
+            "ocio_lut3d_1Sampler",
+            3,
+            "INTERP_LINEAR",
+            11
+        )
+    );
+    assert_eq!(shader.text, EXPECTED);
+}
+
+/// A missing file raises `ExceptionMissingFile`, which in PyOpenColorIO isn't an
+/// `OCIO.Exception`, where and as the wheel raises it (an independent read gives the type and
+/// the message).
+#[test]
+fn a_missing_file_raises_exception_missing_file() {
+    const SCRIPT: &str = r#"
+import sys
+import PyOpenColorIO as OCIO
+try:
+    OCIO.Config.CreateRaw().getProcessor(OCIO.FileTransform(src=sys.argv[1]))
+    print("nothing raised")
+except Exception as exc:
+    print(type(exc).__name__)
+    print(str(exc))
+"#;
+    let missing = ocio_testkit::paths::target_dir().join("gpu-oracle-no-such-file.clf");
+    assert!(!missing.exists(), "{}", missing.display());
+    let request = GpuShaderRequest::new(
+        json!({"transform": {"class": "FileTransform", "args": {"src": missing}}}),
+        ShaderSettings::default(),
+    );
+    let raised = run(&[request])[0].raised().expect("an exception");
+    let lines = Oracle::get().run_script(SCRIPT, &[missing.display().to_string()]);
+    assert_eq!(raised.kind, lines[0]);
+    assert_eq!(raised.message, lines[1..].join("\n"));
+    assert_eq!(raised.stage, "processor");
+}
+
+/// A 3D texture holds a Lut3D's values in the order its `getData()` gives them: the bytes the
+/// `processor_ops` command reports for the same transform, entry by entry distinct.
+#[test]
+fn a_3d_texture_holds_the_lut_in_get_data_order() {
+    let calls: Vec<Value> = (0..27)
+        .map(|i| {
+            let (r, g, b) = (i / 9, (i / 3) % 3, i % 3);
+            json!([
+                "setValue",
+                r,
+                g,
+                b,
+                0.01 * f64::from(i),
+                0.5 + 0.01 * f64::from(i),
+                1.0 - 0.02 * f64::from(i)
+            ])
+        })
+        .collect();
+    let lut = json!({"class": "Lut3DTransform", "args": {"gridSize": 3}, "calls": calls});
+    let gpu = GpuShaderRequest::new(
+        json!({"transform": lut, "optimization": "OPTIMIZATION_NONE"}),
+        ShaderSettings::language(GpuLanguage::Glsl40),
+    );
+    let mut ops = ProcessorOpsRequest::new(json!({"transform": lut}));
+    ops.optimization = Some(json!("OPTIMIZATION_NONE"));
+    let responses = batch(&[gpu.call(), ops.call()]);
+    let mut responses = responses.into_iter();
+    let shader_reply = GpuShaderReply::from_response(responses.next().expect("two"));
+    let ops_reply = ProcessorOpsReply::from_response(responses.next().expect("two"));
+    let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<u32>>();
+    let texture = &shader_reply.shader().textures_3d[0].values;
+    let data = ops_reply.processor().group.children[0]
+        .getter("getData")
+        .f32s();
+    assert_eq!(texture.len(), 27 * 3);
+    assert_eq!(bits(texture), bits(&data));
 }

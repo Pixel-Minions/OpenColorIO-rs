@@ -4,8 +4,9 @@
 //! The oracle's `transform_text` command (`oracle/ocio_oracle/transform_text.py`, chunk O1.4)
 //! against the wheel itself: every transform class prints itself, and its text follows its
 //! values; `validate()` reports what the transform holds, and a constructor that validates is
-//! reported apart; `equals()` follows the values for the classes the binding gives it, and is
-//! absent for the others; the command's refusals; and replies that don't depend on the run.
+//! reported apart; upstream's tests' validation messages come through; `equals()` follows the
+//! values for the classes the binding gives it, and is absent for the others; the command's
+//! refusals; and replies that don't depend on the run.
 
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle::BatchCall;
@@ -345,6 +346,97 @@ fn unknown_keys_and_bad_pairs_are_refused() {
     for ((args, fragment), result) in cases.iter().zip(Oracle::get().batch(&calls, false)) {
         let error = result.expect_err(&format!("{args}: refused"));
         assert!(error.contains(fragment), "{args}: {error}");
+    }
+}
+
+/// Upstream's transform tests' validation messages, run on the wheel through the command: each
+/// reported message holds upstream's expected text, for the fixed functions the whole message.
+/// The transforms are built the way upstream's tests build them, through setters: the binding's
+/// constructors validate before a direction applies.
+/// - FixedFunctionTransform_tests.cpp:37-70 @ v2.5.2, from `validate()`;
+/// - ExponentTransform_tests.cpp:145-146 and ExponentWithLinearTransform_tests.cpp:58-61
+///   @ v2.5.2, from `setNegativeStyle`, which raises while the transform is built;
+/// - Lut1DTransform_tests.cpp:88-89 @ v2.5.2, from `validate()`.
+#[test]
+fn upstream_validation_messages_come_through() {
+    let set = |name: &str, value: Value| json!([name, value]);
+    let e = |name: &str| json!({"enum": name});
+    let fixed = |calls: Vec<Value>| {
+        json!({"class": "FixedFunctionTransform",
+            "args": {"style": e("FIXED_FUNCTION_ACES_RED_MOD_03")}, "calls": calls})
+    };
+    let inverse = set("setDirection", e("TRANSFORM_DIR_INVERSE"));
+    let one = set("setParams", json!([1.0]));
+    let cases: Vec<(Value, &str)> = vec![
+        (
+            fixed(vec![
+                inverse.clone(),
+                set("setStyle", e("FIXED_FUNCTION_ACES_GAMUT_COMP_13")),
+            ]),
+            "The style 'ACES_GamutComp13 (Inverse)' must have seven parameters but 0 found.",
+        ),
+        (
+            fixed(vec![
+                inverse.clone(),
+                set("setStyle", e("FIXED_FUNCTION_REC2100_SURROUND")),
+            ]),
+            "The style 'REC2100_Surround (Inverse)' must have one parameter but 0 found.",
+        ),
+        (
+            fixed(vec![
+                inverse.clone(),
+                one.clone(),
+                set("setStyle", e("FIXED_FUNCTION_ACES_DARK_TO_DIM_10")),
+            ]),
+            "The style 'ACES_DarkToDim10 (Inverse)' must have zero parameters but 1 found.",
+        ),
+        (
+            fixed(vec![
+                inverse.clone(),
+                one,
+                set("setStyle", e("FIXED_FUNCTION_RGB_TO_HSV")),
+            ]),
+            "The style 'RGB_TO_HSV' must have zero parameters but 1 found.",
+        ),
+        (
+            json!({"class": "ExponentTransform",
+                "calls": [set("setNegativeStyle", e("NEGATIVE_LINEAR"))]}),
+            "Linear negative extrapolation is not valid for basic exponent style",
+        ),
+        (
+            json!({"class": "ExponentWithLinearTransform",
+                "calls": [set("setNegativeStyle", e("NEGATIVE_PASS_THRU"))]}),
+            "Pass thru negative extrapolation is not valid for MonCurve",
+        ),
+        (
+            json!({"class": "ExponentWithLinearTransform",
+                "calls": [set("setNegativeStyle", e("NEGATIVE_CLAMP"))]}),
+            "Clamp negative extrapolation is not valid",
+        ),
+        (
+            json!({"class": "Lut1DTransform", "args": {"length": 3},
+                "calls": [inverse, set("setInputHalfDomain", json!(true))]}),
+            "65536 required for halfDomain 1D LUT",
+        ),
+    ];
+    let request = TransformTextRequest {
+        transforms: cases.iter().map(|(spec, _)| spec.clone()).collect(),
+        pairs: Vec::new(),
+    };
+    let reply = run(&request);
+    assert_eq!(reply.transforms.len(), cases.len());
+    for (built, (spec, expected)) in reply.transforms.iter().zip(&cases) {
+        let message = match built {
+            Built::Text(text) => {
+                &text
+                    .validate
+                    .as_ref()
+                    .unwrap_or_else(|| panic!("{spec}: valid"))
+                    .message
+            }
+            Built::Raised(exception) => &exception.message,
+        };
+        assert!(message.contains(expected), "{spec}: {message}");
     }
 }
 
