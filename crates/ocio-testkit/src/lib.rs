@@ -11,7 +11,9 @@
 //! - [`compare`]: exact comparators. There is no tolerance anywhere in this crate except in
 //!   [`upstream`]; any other check that needs one needs a waiver in `waivers.toml`, approved
 //!   by the owner.
-//! - [`probe`]: deterministic probe inputs (all half bit patterns, specials, ramps, random).
+//! - [`probe`]: deterministic probe inputs and the battery's probe sets (all half bit
+//!   patterns, specials, seeded random values in named ranges, ±N ulp neighbourhoods, NaN
+//!   buffers of every length, the sweep of every `f32`).
 //! - [`crt`]: the platform C runtime (UCRT or glibc) through FFI, the reference for C and
 //!   iostream number formatting and for `strtod`-style parsing.
 //! - [`upstream`]: upstream's own tolerance checks (`OCIO_CHECK_CLOSE`,
@@ -20,6 +22,7 @@
 //! Expected values come only from the oracle or from upstream's tests. Never from the port.
 #![deny(unsafe_code)]
 
+pub mod battery;
 pub mod compare;
 pub mod crt;
 pub mod fixtures;
