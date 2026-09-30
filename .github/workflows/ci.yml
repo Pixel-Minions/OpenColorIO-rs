@@ -15,10 +15,11 @@ env:
   RUSTFLAGS: -D warnings
 
 # `cargo xtask ci` runs in branch mode (ported tests at least the base's docs/ratchet.toml)
-# except on `main`, and on a pull request whose head is a land commit (`cargo xtask land`),
-# which `main` then fast-forwards to. Those run `cargo xtask ci --main`, which also checks that
-# docs/ratchet.toml and docs/parity.md are current. The "xtask ci mode" step in each job runs
-# scripts/ci-mode.sh, which decides and fetches the base commit.
+# except on `main`, and on a pull request whose head is a land commit (`cargo xtask land`'s
+# merge, with its `Landed-From:` trailer), which `main` then fast-forwards to. Those run
+# `cargo xtask ci --main`, which also checks that docs/ratchet.toml and docs/parity.md are
+# current. The "xtask ci mode" step in each job runs scripts/ci-mode.sh, which decides and
+# fetches the base commit.
 
 jobs:
   # Both reference platforms (PLAN.md D11) run the live oracle: pixel checks compare the port
