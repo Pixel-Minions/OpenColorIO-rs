@@ -35,9 +35,9 @@ status = "todo"
 [[file]]
 path = "include/OpenColorIO/OpenColorTypes.h"
 kind = "api"
-target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs"]
+target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs", "crates/ocio-gpu/src/open_color_types.rs"]
 status = "partial"
-note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs"
+note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.7a: GpuLanguage, in ocio-gpu/src/open_color_types.rs"
 
 [[file]]
 path = "src/CMakeLists.txt"
@@ -289,13 +289,15 @@ status = "todo"
 path = "src/OpenColorIO/GpuShaderUtils.cpp"
 kind = "src"
 target = ["crates/ocio-gpu/src/gpu_shader_utils.rs"]
-status = "todo"
+status = "partial"
+note = "1.7a: getFloatString, getVecKeyword, GpuShaderLine and GpuShaderText's lines, keywords, declarations and float2/3/4 builders; 1.7b: textures, uniforms, matrices, the other helpers"
 
 [[file]]
 path = "src/OpenColorIO/GpuShaderUtils.h"
 kind = "src"
 target = ["crates/ocio-gpu/src/gpu_shader_utils.rs"]
-status = "todo"
+status = "partial"
+note = "1.7a: getFloatString, getVecKeyword, GpuShaderLine and GpuShaderText's lines, keywords, declarations and float2/3/4 builders; 1.7b: textures, uniforms, matrices, the other helpers"
 
 [[file]]
 path = "src/OpenColorIO/HashUtils.cpp"
@@ -4118,7 +4120,7 @@ status = "todo"
 path = "tests/cpu/GpuShaderUtils_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-gpu/src/gpu_shader_utils_tests.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "tests/cpu/GpuShader_tests.cpp"
