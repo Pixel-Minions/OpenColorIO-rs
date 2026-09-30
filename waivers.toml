@@ -22,3 +22,11 @@ check = "Bit-exact pixel comparison with the Windows wheel. There, NaN positions
 reason = "The Windows wheel is built with MSVC, which compiles _mm_pow_ps to SVML's __vdecl_powf4. The port calls powf (the UCRT's) instead, which stable Rust calls directly and which doesn't depend on the MSVC toolset version. Spike S5 (docs/spikes/s2-s5.md) measured 1.7% of values differing. LIN_TO_PQ differs by up to 311 ulp, the maximum at a near-black input (1.49e-6), about 7e-8 of the PQ range. PQ_TO_LIN differs by up to 568,267 ulp only where the numerator cancels at black (absolute around 1e-12). NaN outputs differ only in sign and payload bits. Far below one 8-, 10- or 12-bit code value; at most a rare ±1 in 16-bit integer output. OCIO's own Linux build uses powf here, so OCIO already differs this much between platforms"
 approved_by = "Jose Enriquez (owner), in chat"
 date = "2026-09-29"
+
+[[waiver]]
+id = "W0002"
+scope = "Every op, both platforms: a NaN transform parameter meeting a NaN pixel in the same operation. OCIO 2.5.2 accepts NaN parameters, for example YAML `.nan`"
+check = "Bit-exact comparison of that operation's NaN result. Where the wheel returns NaN the port must return NaN, but the NaN's sign and payload bits may differ. Everything else stays exact, including NaN bits from NaN pixels with ordinary parameters"
+reason = "Which NaN comes out depends on the operand order MSVC and GCC chose for each expression, and the two compilers differ; the S2 review found 2-5 of 32 NaN-parameter cases where the port's bits differ from a wheel. Matching exactly would mean reading every such expression out of both wheels' machine code. There is no visible difference (NaN in, NaN out), and only a config with NaN parameters can reach it. The port pins upstream's source operand order, so debug and release builds agree"
+approved_by = "Jose Enriquez (owner), in chat"
+date = "2026-09-29"
