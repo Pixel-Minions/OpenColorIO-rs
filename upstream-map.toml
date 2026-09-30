@@ -23,8 +23,9 @@ status = "todo"
 [[file]]
 path = "include/OpenColorIO/OpenColorIO.h"
 kind = "api"
-target = ["crates/ocio/src/lib.rs"]
-status = "todo"
+target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/logging.rs"]
+status = "partial"
+note = "1.2e: the logging functions (155-177: GetLoggingLevel, SetLoggingLevel, SetLoggingFunction, ResetToDefaultLoggingFunction, LogMessage) in logging.rs"
 
 [[file]]
 path = "include/OpenColorIO/OpenColorTransforms.h"
@@ -36,9 +37,9 @@ note = "1.2a: the FormatMetadata interface (44-117) is FormatMetadataImpl's own 
 [[file]]
 path = "include/OpenColorIO/OpenColorTypes.h"
 kind = "api"
-target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs", "crates/ocio-ops/src/format_metadata.rs"]
+target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs", "crates/ocio-ops/src/format_metadata.rs", "crates/ocio-ops/src/logging.rs"]
 status = "partial"
-note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does; 1.2b: DynamicPropertyType"
+note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does; 1.2b: DynamicPropertyType; 1.2e: LoggingLevel, and LoggingFunction (283-284), in logging.rs"
 
 [[file]]
 path = "src/CMakeLists.txt"
@@ -334,13 +335,15 @@ status = "todo"
 path = "src/OpenColorIO/Logging.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/logging.rs"]
-status = "todo"
+status = "done"
+note = "1.2e. The logging function is called after the global lock is released (deviation D-3). The lines a logging function receives are checked against the wheel's (tests/logging_oracle.rs: line breaks, CR, empty lines, a NUL); upstream's test checks the level rules. Checked by reading only: the RightTrim before splitting (every wheel message the existing oracle commands can produce ends in punctuation), OCIO_LOGGING_LEVEL handling (the oracle never passes it) and its stderr messages, and the public LogMessage"
 
 [[file]]
 path = "src/OpenColorIO/Logging.h"
 kind = "src"
 target = ["crates/ocio-ops/src/logging.rs"]
-status = "todo"
+status = "done"
+note = "see Logging.cpp"
 
 [[file]]
 path = "src/OpenColorIO/Look.cpp"
@@ -452,7 +455,7 @@ path = "src/OpenColorIO/ParseUtils.cpp"
 kind = "src"
 target = ["crates/ocio/src/parse_utils.rs", "crates/ocio-ops/src/open_color_types.rs"]
 status = "partial"
-note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection"
+note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection; 1.2e: LoggingLevelToString and LoggingLevelFromString, next to LoggingLevel"
 
 [[file]]
 path = "src/OpenColorIO/ParseUtils.h"
@@ -4136,7 +4139,7 @@ status = "todo"
 path = "tests/cpu/Logging_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/logging_tests.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "tests/cpu/LookParse_tests.cpp"
@@ -4223,14 +4226,16 @@ note = "S2: all 11 tests; the ULP check (GetULPDifference, AreAllClose) is in oc
 [[file]]
 path = "tests/cpu/UnitTestLogUtils.cpp"
 kind = "test-support"
-target = ["crates/ocio-testkit/src/upstream/unit_test_log_utils.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/unit_test_log_utils.rs"]
+status = "partial"
+note = "1.2e: LogGuard (both constructors, output, clear, empty), for ocio-ops's unit tests: it must set the logging state of the crate under test, which ocio-testkit can't reach. It holds a reentrant lock and keeps only its own thread's messages, because Rust runs tests in parallel. Still to port, with the first tests that use them: findAndRemove, findAllAndRemove, print, MuteLogging and the checkAndMute helpers"
 
 [[file]]
 path = "tests/cpu/UnitTestLogUtils.h"
 kind = "test-support"
-target = ["crates/ocio-testkit/src/upstream/unit_test_log_utils.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/unit_test_log_utils.rs"]
+status = "partial"
+note = "see UnitTestLogUtils.cpp"
 
 [[file]]
 path = "tests/cpu/UnitTestMain.cpp"

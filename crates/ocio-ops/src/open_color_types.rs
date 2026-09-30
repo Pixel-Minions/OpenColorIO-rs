@@ -5,7 +5,60 @@
 //! their helpers from `src/OpenColorIO/ParseUtils.cpp`.
 //!
 //! They live in `ocio-ops` because op data uses them; the public `ocio` crate re-exports them.
-//! So far: `TransformDirection`, `NegativeStyle` and `DynamicPropertyType`.
+//! So far: `LoggingLevel`, `TransformDirection`, `NegativeStyle` and `DynamicPropertyType`.
+
+use crate::utils::string_utils::lower_c_str;
+
+/// How much OCIO logs (`crate::logging`). The discriminants are upstream's, and levels
+/// compare by them: `Unknown` (255) logs everything, as `Debug` does.
+///
+/// Port of `LoggingLevel` (include/OpenColorIO/OpenColorTypes.h:288-297 @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LoggingLevel {
+    /// `LOGGING_LEVEL_NONE`.
+    None = 0,
+    /// `LOGGING_LEVEL_WARNING`: warnings and errors.
+    Warning = 1,
+    /// `LOGGING_LEVEL_INFO`: and information.
+    Info = 2,
+    /// `LOGGING_LEVEL_DEBUG`: and debugging messages.
+    Debug = 3,
+    /// `LOGGING_LEVEL_UNKNOWN`.
+    Unknown = 255,
+}
+
+impl LoggingLevel {
+    /// `LOGGING_LEVEL_DEFAULT`.
+    pub const DEFAULT: LoggingLevel = LoggingLevel::Info;
+}
+
+/// The level's name: `none`, `warning`, `info`, `debug` or `unknown`.
+///
+/// Port of `LoggingLevelToString` (src/OpenColorIO/ParseUtils.cpp:113-120 @ v2.5.2).
+pub fn logging_level_to_string(level: LoggingLevel) -> &'static str {
+    match level {
+        LoggingLevel::None => "none",
+        LoggingLevel::Warning => "warning",
+        LoggingLevel::Info => "info",
+        LoggingLevel::Debug => "debug",
+        LoggingLevel::Unknown => "unknown",
+    }
+}
+
+/// The level named `s` (`none`, `warning`, `info` or `debug`, in any ASCII case, or `0` to `3`),
+/// or `Unknown`. `None` is a null pointer, which gives `Unknown`.
+///
+/// Port of `LoggingLevelFromString` (src/OpenColorIO/ParseUtils.cpp:122-131 @ v2.5.2).
+pub fn logging_level_from_string(s: Option<&[u8]>) -> LoggingLevel {
+    let s = lower_c_str(s);
+    match s.as_slice() {
+        b"0" | b"none" => LoggingLevel::None,
+        b"1" | b"warning" => LoggingLevel::Warning,
+        b"2" | b"info" => LoggingLevel::Info,
+        b"3" | b"debug" => LoggingLevel::Debug,
+        _ => LoggingLevel::Unknown,
+    }
+}
 
 /// Port of `TransformDirection` (include/OpenColorIO/OpenColorTypes.h:355-359 @ v2.5.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
