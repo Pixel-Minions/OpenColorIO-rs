@@ -289,6 +289,20 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **A fix:** pass the whole line, with its length.
 - **Status:** matched in `p1-foundations` (1.2e), checked against the wheel in
   `crates/ocio-ops/tests/logging_oracle.rs`.
+## GPU shaders
+
+### I-30. Large whole numbers become invalid shader literals
+
+- **Upstream:** `getFloatString` writes a `float` with 9 significant digits (`%.9g`) or a
+  `double` with 17 (`%.17g`). It then adds a `.` after any finite whole number, so that the shader
+  reads it as floating point (`GpuShaderUtils.cpp:21-35`). From 1e9 (`float`) or 1e17 (`double`)
+  up, `%g` switches to exponent notation, and the `.` lands after the exponent. Through the wheel,
+  a matrix offset of 1e10 is written `vec4(1e+10., ...)` in GLSL, and the same way in every
+  language but Cg, which clamps to the half range first.
+- **Who notices:** shaders for transforms with a whole-number parameter of a billion or more. In
+  C-style shading languages, a literal's `.` must come before its exponent.
+- **A fix:** put the `.` in the mantissa (`1.e+10`), or leave it out when there is an exponent.
+- **Status:** matched in `p1-gpu-infra` (1.7a).
 
 ## Python module (`ocio-py`)
 
@@ -331,6 +345,19 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Who notices:** Python users who print a GradingRGBCurve.
 - **A fix:** the repr its values give, like the other grading classes'.
 - **Status:** to be matched in Phase 6 (D13).
+### I-31. A shading language made from a number can abort the process
+
+- **Upstream:** Python turns any integer into a `GpuLanguage` (`OCIO.GpuLanguage(42)`), and
+  `GpuShaderDesc.setLanguage` accepts it. Extraction then raises "Unknown GPU shader language.".
+  `getCacheID()`, however, ends the process. It is `noexcept` (`OpenColorIO.h:3410`), and the
+  `GpuLanguageToString` it calls throws "Unsupported GPU shader language."
+  (`GpuShaderDesc.cpp:263-282`, `ParseUtils.cpp:258-275`), so C++ calls `std::terminate`.
+  Through the wheels, the Python process ends with SIGABRT (exit 134) on Rocky Linux 9 and with
+  `0xC0000409` on Windows.
+- **Who notices:** Python code that makes a language from a number outside 0-9.
+- **A fix:** refuse the number when the language is set, with "Unsupported GPU shader language.".
+- **Status:** open; decided in Phase 6. The Rust `GpuLanguage` holds only upstream's languages,
+  so only the Python module can meet it.
 
 ## Undefined behaviour upstream
 
