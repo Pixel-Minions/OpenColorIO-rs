@@ -72,7 +72,7 @@ use ocio_testkit::image::{
     Buffer, ChannelOrder, Channels, Data, Depth, Footprint, Image, Packed, Planar, Reply, Request,
     RgbInput, RgbReply, RgbRequest, Stride, channel_bytes, dtype,
 };
-use ocio_testkit::oracle::{BatchCall, Response};
+use ocio_testkit::oracle::{BatchCall, Response, f32_to_bytes};
 use ocio_testkit::probe::{self, Rng};
 use ocio_testkit::{Oracle, assert_bytes_eq};
 use serde_json::{Value, json};
@@ -94,8 +94,9 @@ fn processor(input: BitDepth, output: BitDepth) -> Value {
 
 /// `count` RGBA pixels of `depth`, in its storage type's little-endian bytes: specials and
 /// seeded values for F32, seeded bit patterns for F16, seeded codes for the integers. The 10-
-/// and 12-bit codes stay within the bit depth: the wheel looks larger ones up outside its
-/// tables, and the oracle refuses them.
+/// and 12-bit codes stay within the bit depth: the forward 1D LUT that starts these processors
+/// at those depths would look larger color codes up outside its tables, and the oracle refuses
+/// them.
 fn pixels(depth: BitDepth, count: usize, seed: u64) -> Vec<u8> {
     let specials = probe::specials();
     let mut rng = Rng::new(seed);
@@ -1404,25 +1405,124 @@ fn data_getters_copy_the_tight_buffers() {
     );
 }
 
+/// What the oracle does with a request of [`applies_outside_the_wheels_memory_are_refused`].
+#[derive(Debug, Clone, Copy)]
+enum Outcome {
+    /// The command refuses the request, with this fragment in its message.
+    Refused(&'static str),
+    /// The wheel applies without raising.
+    Applies,
+    /// The wheel raises, with this fragment in its message, before its apply reads a pixel.
+    Raises(&'static str),
+}
+
 /// The oracle refuses to apply where the wheel would read or write outside its memory: an
 /// image reaching outside its buffer, whatever the direction of its strides; a data pointer
-/// outside its buffer; 10- and 12-bit source codes above the bit depth's largest. Constructing
-/// the same image reads no pixels and is allowed, and the other calls of the batch still run.
+/// outside its buffer; 10- and 12-bit color codes above the bit depth's largest, which the
+/// forward 1D LUT that starts these processors would look up. Alpha codes are scaled, not
+/// looked up, an inverse 1D LUT searches, a processor without a LUT first multiplies, and an
+/// apply that raises before it reads the source reads no code: those aren't refused.
+/// Constructing the same image reads no pixels and is allowed, and the other calls of the batch
+/// still run. A spec with a key the command doesn't know is refused.
 #[test]
 fn applies_outside_the_wheels_memory_are_refused() {
     use BitDepth::{F32, Uint10, Uint12};
+    use Outcome::{Applies, Raises, Refused};
     let rgba = |offset: usize, strides: [Stride; 3]| {
         Packed::new(Data::at(0, offset), 2, 2, Channels::Count(4)).layout(F32, strides)
     };
-    let one_pixel = |depth: BitDepth, codes: [u16; 4]| {
-        let mut request = Request::new(processor(depth, depth));
-        let bytes = codes.iter().flat_map(|c| c.to_le_bytes()).collect();
-        let buffer = request.buffer(Buffer::Bytes(bytes));
-        let image = Packed::new(Data::at(buffer, 0), 1, 1, Channels::Count(4))
-            .layout(depth, [Stride::Auto; 3]);
+    let codes_buffer = |request: &mut Request, codes: &[u16]| {
+        request.buffer(Buffer::Bytes(
+            codes.iter().flat_map(|c| c.to_le_bytes()).collect(),
+        ))
+    };
+    let pixel = |depth: BitDepth, channels: Channels, codes: [u16; 4], processor: Value| {
+        let mut request = Request::new(processor);
+        let buffer = codes_buffer(&mut request, &codes);
+        let image =
+            Packed::new(Data::at(buffer, 0), 1, 1, channels).layout(depth, [Stride::Auto; 3]);
         request.apply = vec![request.image(image)];
         request
     };
+    let one_pixel = |depth: BitDepth, codes: [u16; 4]| {
+        pixel(depth, Channels::Count(4), codes, processor(depth, depth))
+    };
+    let rgba_count = Channels::Count(4);
+    // A 10-bit pixel applied to an RGBA image of `depth` and `width` pixels.
+    let onto = |depth: BitDepth, width: i64, codes: [u16; 4]| {
+        let mut request = Request::new(processor(Uint10, Uint10));
+        let src = codes_buffer(&mut request, &codes);
+        let bytes = width as usize * 4 * channel_bytes(depth);
+        let dst = request.buffer(Buffer::fill(bytes, &[0]));
+        let src = request.image(
+            Packed::new(Data::at(src, 0), 1, 1, rgba_count).layout(Uint10, [Stride::Auto; 3]),
+        );
+        let dst = request.image(
+            Packed::new(Data::at(dst, 0), width, 1, rgba_count).layout(depth, [Stride::Auto; 3]),
+        );
+        request.apply = vec![src, dst];
+        request
+    };
+    // A 3 x 2 10-bit RGBA image whose last pixel of its last row has a red code of 1024, with
+    // its rows in order or flipped (row 1 first in the buffer).
+    let last_pixel = |flipped: bool| {
+        let mut codes = [7u16; 24];
+        codes[if flipped { 8 } else { 20 }] = 1024;
+        let mut request = Request::new(processor(Uint10, Uint10));
+        let buffer = codes_buffer(&mut request, &codes);
+        let (offset, y_stride) = if flipped {
+            (24, Stride::Bytes(-24))
+        } else {
+            (0, Stride::Auto)
+        };
+        let image = Packed::new(Data::at(buffer, offset), 3, 2, rgba_count)
+            .layout(Uint10, [Stride::Auto, Stride::Auto, y_stride]);
+        request.apply = vec![request.image(image)];
+        request
+    };
+    // A 10-bit pixel in four planes.
+    let planes = |codes: [u16; 4]| {
+        let mut request = Request::new(processor(Uint10, Uint10));
+        let buffer = codes_buffer(&mut request, &codes);
+        let planes = (0..4).map(|c| Data::at(buffer, 2 * c)).collect();
+        let image = Planar::new(planes, 1, 1).layout(Uint10, [Stride::Auto; 2]);
+        request.apply = vec![request.image(image)];
+        request
+    };
+    // A 2 x 2 RGBA F32 image applied to a destination of `bytes` bytes, which needs 64.
+    let into_bytes = |bytes: usize| {
+        let mut request = Request::new(processor(F32, F32));
+        let src = request.buffer(Buffer::Bytes(f32_to_bytes(&[0.5; 16])));
+        let dst = request.buffer(Buffer::fill(bytes, &[0]));
+        let src = request.image(Packed::new(Data::at(src, 0), 2, 2, rgba_count));
+        let dst = request.image(Packed::new(Data::at(dst, 0), 2, 2, rgba_count));
+        request.apply = vec![src, dst];
+        request
+    };
+    let abgr = Channels::Order(ChannelOrder::Abgr);
+    let unoptimized = |transform: Value| {
+        json!({
+            "transform": transform,
+            "optimization": "OPTIMIZATION_NONE",
+            "in_bitdepth": Uint10.oracle_name(),
+            "out_bitdepth": Uint10.oracle_name(),
+        })
+    };
+    let lut =
+        |calls: Value| json!({"class": "Lut1DTransform", "args": {"length": 3}, "calls": calls});
+    let matrix =
+        json!({"class": "MatrixTransform", "args": {"offset": [0.125, -0.25, 0.0625, 0.5]}});
+    // Unoptimized, a processor keeps its ops: the default optimization would bake the matrix
+    // and the LUT into one forward LUT, and replace an inverse LUT with a forward one.
+    let without_lut = unoptimized(matrix.clone());
+    let lut_second = unoptimized(json!({"class": "GroupTransform", "children": [
+        matrix,
+        lut(json!([["setValue", 1, 0.25, 0.25, 0.25]])),
+    ]}));
+    let inverse_lut = unoptimized(lut(json!([
+        ["setValue", 1, 0.25, 0.25, 0.25],
+        ["setDirection", {"enum": "TRANSFORM_DIR_INVERSE"}],
+    ])));
     let in_64_bytes = |image: Image, apply: bool| {
         let mut request = Request::new(processor(F32, F32));
         request.buffer(Buffer::fill(64, &[0]));
@@ -1433,16 +1533,16 @@ fn applies_outside_the_wheels_memory_are_refused() {
         request
     };
     let auto = Stride::Auto;
-    let cases: Vec<(&str, Request, Option<&str>)> = vec![
+    let cases: Vec<(&str, Request, Outcome)> = vec![
         (
             "rows too far apart",
             in_64_bytes(rgba(0, [auto, auto, Stride::Bytes(64)]).into(), true),
-            Some("refuses to apply"),
+            Refused("refuses to apply"),
         ),
         (
             "rows flipped from the first",
             in_64_bytes(rgba(0, [auto, auto, Stride::Bytes(-32)]).into(), true),
-            Some("refuses to apply"),
+            Refused("refuses to apply"),
         ),
         (
             "pixels flipped from the first",
@@ -1450,12 +1550,12 @@ fn applies_outside_the_wheels_memory_are_refused() {
                 rgba(0, [auto, Stride::Bytes(-16), Stride::Bytes(32)]).into(),
                 true,
             ),
-            Some("refuses to apply"),
+            Refused("refuses to apply"),
         ),
         (
             "channels too far apart",
             in_64_bytes(rgba(0, [Stride::Bytes(8), auto, auto]).into(), true),
-            Some("refuses to apply"),
+            Refused("refuses to apply"),
         ),
         (
             "a plane past the end",
@@ -1463,53 +1563,275 @@ fn applies_outside_the_wheels_memory_are_refused() {
                 Planar::new(vec![Data::at(0, 0), Data::at(0, 16), Data::at(0, 52)], 2, 2).into(),
                 true,
             ),
-            Some("refuses to apply"),
+            Refused("refuses to apply"),
         ),
         (
             "a data pointer past the end",
             in_64_bytes(rgba(64, [auto; 3]).into(), false),
-            Some("isn't inside"),
+            Refused("isn't inside"),
         ),
         (
-            "a 10-bit code of 1024",
+            "a destination one byte short",
+            into_bytes(63),
+            Refused("refuses to apply to images[1]"),
+        ),
+        ("a destination that fits exactly", into_bytes(64), Applies),
+        (
+            "a 10-bit green code of 1024",
             one_pixel(Uint10, [0, 1024, 0, 0]),
-            Some("the code 1024"),
+            Refused("the color code 1024"),
         ),
         (
-            "a 12-bit code of 4096",
-            one_pixel(Uint12, [0, 0, 0, 4096]),
-            Some("the code 4096"),
+            "a 10-bit code of 1024 in the last pixel of the last row",
+            last_pixel(false),
+            Refused("the color code 1024"),
+        ),
+        (
+            "a 10-bit code of 1024 in the last pixel of the last row, rows flipped",
+            last_pixel(true),
+            Refused("the color code 1024"),
+        ),
+        (
+            "a 10-bit blue plane code of 1024",
+            planes([0, 0, 1024, 0]),
+            Refused("the color code 1024"),
+        ),
+        (
+            "a 12-bit blue code of 4096",
+            one_pixel(Uint12, [0, 0, 4096, 0]),
+            Refused("the color code 4096"),
+        ),
+        (
+            "a 10-bit red code of 2000, last in an ABGR pixel",
+            pixel(Uint10, abgr, [0, 0, 0, 2000], processor(Uint10, Uint10)),
+            Refused("the color code 2000"),
+        ),
+        (
+            "a 10-bit code of 2000, applied to another image",
+            onto(Uint10, 1, [0, 2000, 0, 0]),
+            Refused("the color code 2000"),
         ),
         (
             "a 10-bit code of 1023",
             one_pixel(Uint10, [1023, 0, 1023, 1023]),
-            None,
+            Applies,
         ),
         (
             "a 12-bit code of 4095",
             one_pixel(Uint12, [4095, 0, 0, 0]),
-            None,
+            Applies,
+        ),
+        (
+            "a 12-bit alpha code of 4096, which is scaled, not looked up",
+            one_pixel(Uint12, [0, 0, 0, 4096]),
+            Applies,
+        ),
+        (
+            "a 10-bit alpha code of 2000, first in an ABGR pixel",
+            pixel(Uint10, abgr, [2000, 0, 0, 0], processor(Uint10, Uint10)),
+            Applies,
+        ),
+        (
+            "a 10-bit alpha plane code of 2000",
+            planes([0, 0, 0, 2000]),
+            Applies,
+        ),
+        (
+            "a 10-bit red code of 2000, without a LUT to look it up",
+            pixel(Uint10, rgba_count, [2000, 0, 0, 0], without_lut),
+            Applies,
+        ),
+        (
+            "a 10-bit red code of 2000, with a 1D LUT after the first op",
+            pixel(Uint10, rgba_count, [2000, 0, 0, 0], lut_second),
+            Applies,
+        ),
+        (
+            "a 10-bit red code of 2000, into an inverse 1D LUT, which searches",
+            pixel(Uint10, rgba_count, [2000, 0, 0, 0], inverse_lut),
+            Applies,
+        ),
+        (
+            "a 10-bit code of 2000, for a 12-bit processor",
+            pixel(
+                Uint10,
+                Channels::Count(4),
+                [0, 2000, 0, 0],
+                processor(Uint12, Uint12),
+            ),
+            Raises("Bit-depth mismatch"),
+        ),
+        (
+            "a 10-bit code of 2000, applied to a 12-bit image",
+            onto(Uint12, 1, [0, 2000, 0, 0]),
+            Raises("Bit-depth mismatch"),
+        ),
+        (
+            "a 10-bit code of 2000, applied to a wider image",
+            onto(Uint10, 2, [0, 2000, 0, 0]),
+            Raises("Dimension inconsistency"),
         ),
         (
             "rows too far apart, constructed",
             in_64_bytes(rgba(0, [auto, auto, Stride::Bytes(64)]).into(), false),
-            None,
+            Applies,
         ),
     ];
-    let calls: Vec<BatchCall<'_>> = cases.iter().map(|(_, r, _)| r.call()).collect();
-    for ((label, _, refused), result) in cases.iter().zip(Oracle::get().batch(&calls, false)) {
-        match (refused, result) {
-            (Some(fragment), Err(e)) => assert!(e.contains(fragment), "{label}: {e}"),
-            (None, Ok(response)) => {
+    // Specs the typed builders can't write.
+    let packed = json!({"kind": "packed", "data": {"buffer": 0}, "width": 1, "height": 1,
+        "num_channels": 4});
+    let with = |key: &str, value: Value| {
+        let mut spec = packed.clone();
+        spec[key] = value;
+        spec
+    };
+    let floats = f32_to_bytes(&[0.5; 3]);
+    let raw: Vec<(&str, &str, Value, &'static str)> = vec![
+        (
+            "a misspelled fill",
+            "image_apply",
+            json!({"buffers": [{"size": 16, "fil": [1]}]}),
+            "unknown keys ['fil']",
+        ),
+        (
+            "an unknown image key",
+            "image_apply",
+            json!({"buffers": [{"size": 16}], "images": [with("stride", json!(4))]}),
+            "unknown keys ['stride']",
+        ),
+        (
+            "an unknown data key",
+            "image_apply",
+            json!({"buffers": [{"size": 32}],
+                "images": [with("data", json!({"buffer": 0, "ofset": 16}))]}),
+            "unknown keys ['ofset']",
+        ),
+        (
+            "an unknown top-level key",
+            "image_apply",
+            json!({"buffers": [{"size": 16}], "channels": 4}),
+            "unknown keys ['channels']",
+        ),
+        (
+            "both num_channels and chan_order",
+            "image_apply",
+            json!({"buffers": [{"size": 16}],
+                "images": [with("chan_order", json!("CHANNEL_ORDERING_RGBA"))]}),
+            "takes num_channels or chan_order",
+        ),
+        (
+            "a misspelled array key",
+            "image_apply_rgb",
+            json!({"call": "applyRGB", "dtyp": "float32"}),
+            "unknown keys ['dtyp']",
+        ),
+        (
+            "an array key with a list",
+            "image_apply_rgb",
+            json!({"call": "applyRGB", "list": true, "dtype": "float32"}),
+            "unknown keys ['dtype']",
+        ),
+    ];
+    let mut calls: Vec<BatchCall<'_>> = cases.iter().map(|(_, r, _)| r.call()).collect();
+    calls.extend(raw.iter().map(|(_, cmd, args, _)| BatchCall {
+        cmd,
+        args: args.clone(),
+        blobs: if *cmd == "image_apply_rgb" {
+            vec![&floats]
+        } else {
+            Vec::new()
+        },
+    }));
+    let expected = cases
+        .iter()
+        .map(|(label, _, outcome)| (*label, *outcome))
+        .chain(
+            raw.iter()
+                .map(|(label, _, _, fragment)| (*label, Refused(fragment))),
+        );
+    for ((label, outcome), result) in expected.zip(Oracle::get().batch(&calls, false)) {
+        let raised = result.as_ref().ok().map(|r| r.result.get("exception"));
+        match (outcome, &result, raised) {
+            (Refused(fragment), Err(e), _) => assert!(e.contains(fragment), "{label}: {e}"),
+            (Applies, Ok(_), Some(None)) => {}
+            (Raises(fragment), Ok(response), Some(Some(exception))) => {
                 assert!(
-                    response.result.get("exception").is_none(),
-                    "{label}: {}",
-                    response.result
-                )
+                    exception["message"]
+                        .as_str()
+                        .is_some_and(|m| m.contains(fragment)),
+                    "{label}: {exception}"
+                );
+                assert_eq!(response.result["stage"], "apply", "{label}");
             }
-            (refused, result) => panic!("{label}: expected a refusal {refused:?}, got {result:?}"),
+            _ => panic!("{label}: expected {outcome:?}, got {result:?}"),
         }
     }
+}
+
+/// An image the library calls RGBA-packed is read and written a row at a time: 4 * width
+/// contiguous channels from the data pointer plus y * yStride (ScanlineHelper.cpp:129-136,
+/// 158-164 @ v2.5.2). isRGBAPacked tests the x stride truncated to an `int` (ImageDesc.cpp:264
+/// @ v2.5.2), so the wheel calls an RGBA F32 image with an x stride of 16 - 2^32 packed: its
+/// second pixel is 2^32 - 16 bytes before its first, and its rows reach 16 bytes past the first.
+/// The oracle checks the rows too. A request can't show it, as its buffer would need 12 GiB:
+/// this runs the oracle's check itself, in the oracle's environment, on a 2 x 2 description the
+/// wheel builds, against stand-ins for a buffer that ends with the pixels, which is refused,
+/// and one that ends with the last row.
+#[test]
+fn packed_rows_are_checked_where_the_library_reads_them() {
+    const SCRIPT: &str = r#"
+import sys
+import numpy as np
+import PyOpenColorIO as OCIO
+from ocio_oracle import commands, image
+
+x_stride, y_stride, offset, *sizes = map(int, sys.argv[1:])
+desc = OCIO.PackedImageDesc(np.zeros(16, np.float32), width=2, height=2, numChannels=4,
+                            bitDepth=OCIO.BIT_DEPTH_F32, chanStrideBytes=OCIO.AutoStride,
+                            xStrideBytes=x_stride, yStrideBytes=y_stride)
+print(desc.isRGBAPacked())
+
+class Buffer:
+    def __init__(self, nbytes):
+        self.nbytes = nbytes
+
+spec = {"kind": "packed", "data": {"buffer": 0, "offset": offset}}
+for size in sizes:
+    try:
+        image._check_inside(0, desc, spec, [Buffer(size)])
+        print("accepted")
+    except ValueError as exc:
+        print(exc)
+"#;
+    // Row 1 is after row 0, as close as the x and y strides allow (ImageDesc.cpp:320), and the
+    // first pixel is as close to the buffer's start as the second allows.
+    let x_stride: i64 = 16 - (1 << 32);
+    let y_stride = 2 * -x_stride;
+    let offset = -x_stride;
+    // The pixels end with the alpha of pixel (0, 1); its row, of 2 pixels of 16 bytes, goes 16
+    // bytes further.
+    let pixels_end = offset + y_stride + 16;
+    let rows_end = offset + y_stride + 2 * 16;
+    let output = std::process::Command::new(Oracle::get().python())
+        .args(["-X", "utf8", "-c", SCRIPT])
+        .args([x_stride, y_stride, offset, pixels_end, rows_end].map(|v| v.to_string()))
+        .current_dir(ocio_testkit::paths::oracle_dir())
+        .env("PYTHONDONTWRITEBYTECODE", "1")
+        .env_remove("PYTHONPATH")
+        .output()
+        .expect("the oracle's Python runs");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "{stdout}{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let lines: Vec<&str> = stdout.lines().collect();
+    assert_eq!(lines.len(), 3, "{stdout}");
+    assert_eq!(lines[0], "True", "the wheel calls the image packed");
+    let span = format!("its packed rows span bytes [{offset}, {rows_end})");
+    assert!(lines[1].contains(&span), "{}", lines[1]);
+    assert_eq!(lines[2], "accepted");
 }
 
 /// A request's reply is the same on every run, alone or in a batch, bytes included: nothing

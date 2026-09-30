@@ -16,6 +16,8 @@ never compute expected values. Two things they leave out:
   (PyCPUProcessor.cpp:94-249).
 """
 
+import functools
+
 import numpy as np
 import PyOpenColorIO as OCIO
 
@@ -33,10 +35,27 @@ CHANNEL_BYTES = {name: np.dtype(dtype).itemsize for name, dtype in DTYPES.items(
 RAISED = (OCIO.Exception, OCIO.ExceptionMissingFile, RuntimeError)
 
 
+def _check_keys(what, spec, allowed):
+    """Refuses a spec with a key the command doesn't know, so that a misspelled key can't pass
+    unnoticed (a misspelled "fill" would otherwise fill with zeros)."""
+    if not isinstance(spec, dict):
+        raise ValueError(f"{what} must be an object, not {spec!r}")
+    unknown = sorted(set(spec) - set(allowed))
+    if unknown:
+        raise ValueError(f"{what}: unknown keys {unknown}; it takes {sorted(allowed)}")
+
+
+# The keys of the processor, as cpu_apply takes them.
+PROCESSOR_KEYS = {"config", "transform", "src", "dst", "direction", "optimization",
+                  "in_bitdepth", "out_bitdepth"}
+
+
 def _buffers(specs, blobs):
     """Fresh writable uint8 arrays, each starting on an ALIGNMENT boundary."""
     out = []
     for index, buffer in enumerate(specs):
+        _check_keys(f"buffers[{index}]", buffer,
+                    {"blob"} if isinstance(buffer, dict) and "blob" in buffer else {"size", "fill"})
         if "blob" in buffer:
             data = np.frombuffer(blobs[buffer["blob"]], dtype=np.uint8)
         elif "size" in buffer:
@@ -74,6 +93,7 @@ def _vehicle(buffers, data, dtype, entries):
     Every entry aliases the first (a stride of 0), so the object reaches no byte past its first
     entry, whatever its entry count: the binding reads only its pointer, format and entry count.
     """
+    _check_keys("data", data, {"buffer", "offset", "entries", "dtype"})
     memory = buffers[data["buffer"]]
     offset = int(data.get("offset", 0))
     dt = np.dtype(data.get("dtype", dtype))
@@ -101,6 +121,14 @@ ORDER_CHANNELS = {
 def _prepare(image, buffers):
     """A function constructing the description of one image spec. Its arguments are built
     here, in the constructor's order, so that only the constructor runs when it is called."""
+    common = {"kind", "width", "height", "bitdepth", "x_stride", "y_stride", "positional"}
+    if image.get("kind") == "packed":
+        _check_keys("a packed image", image, common | {"data", "num_channels", "chan_order",
+                                                       "chan_stride"})
+        if ("num_channels" in image) == ("chan_order" in image):
+            raise ValueError(f"a packed image takes num_channels or chan_order: {image!r}")
+    elif image.get("kind") == "planar":
+        _check_keys("a planar image", image, common | {"planes"})
     width, height = int(image["width"]), int(image["height"])
     bitdepth = _enum(OCIO.BitDepth, image["bitdepth"]) if "bitdepth" in image else None
     dtype = _storage_dtype(bitdepth)
@@ -161,26 +189,47 @@ def _extent(start, width, height, x_stride, y_stride, item):
     return start + min(0, dx) + min(0, dy), start + max(0, dx) + max(0, dy) + item
 
 
-def _channel_starts(desc, image):
+# Where alpha is in a packed pixel, per channel ordering (ImageDesc.cpp:143-186 @ v2.5.2).
+ALPHA_POSITION = {OCIO.CHANNEL_ORDERING_RGBA: 3, OCIO.CHANNEL_ORDERING_BGRA: 3,
+                  OCIO.CHANNEL_ORDERING_ABGR: 0}
+
+
+def _channel_starts(desc, image, colors_only=False):
     """(buffer, byte offset) of each channel of pixel (0, 0), from the description's getters:
-    data + k * chanStride for channel k of a packed image, or each plane of a planar one."""
+    data + k * chanStride for channel k of a packed image, or each plane of a planar one.
+    With colors_only, alpha is left out."""
     if image["kind"] == "packed":
         data = image["data"]
+        alpha = ALPHA_POSITION.get(desc.getChannelOrder()) if colors_only else None
         return [(data["buffer"], int(data.get("offset", 0)) + k * desc.getChanStrideBytes())
-                for k in range(desc.getNumChannels())]
-    return [(plane["buffer"], int(plane.get("offset", 0))) for plane in image["planes"]]
+                for k in range(desc.getNumChannels()) if k != alpha]
+    planes = image["planes"][:3] if colors_only else image["planes"]
+    return [(plane["buffer"], int(plane.get("offset", 0))) for plane in planes]
 
 
 def _check_inside(index, desc, image, buffers):
     """Refuses an image whose pixels aren't all in its buffers: channel c of pixel (x, y) is
-    at the channel's start + x * xStride + y * yStride, AutoStride resolved by the library."""
+    at the channel's start + x * xStride + y * yStride, AutoStride resolved by the library.
+
+    An image the library calls RGBA-packed is read and written a row at a time instead: 4 *
+    width contiguous channels from the data pointer plus y * yStride (ScanlineHelper.cpp:129-136,
+    158-164; the ops work in a packed float destination's rows directly). Those rows are checked
+    too: isRGBAPacked tests the x stride truncated to an int (ImageDesc.cpp:264), so an x stride
+    of 4 channels plus a multiple of 2^32 is packed, and its rows are not where its pixels are."""
     item = CHANNEL_BYTES[desc.getBitDepth().name]
-    size = (desc.getWidth(), desc.getHeight(), desc.getXStrideBytes(), desc.getYStrideBytes(), item)
-    for buffer, start in _channel_starts(desc, image):
-        lo, hi = _extent(start, *size)
+    width, height, y_stride = desc.getWidth(), desc.getHeight(), desc.getYStrideBytes()
+    regions = [("pixels", buffer,
+                *_extent(start, width, height, desc.getXStrideBytes(), y_stride, item))
+               for buffer, start in _channel_starts(desc, image)]
+    if desc.isRGBAPacked():
+        data = image["data"]
+        regions.append(("packed rows", data["buffer"],
+                        *_extent(int(data.get("offset", 0)), 1, height, 0, y_stride,
+                                 4 * item * width)))
+    for what, buffer, lo, hi in regions:
         if lo < 0 or hi > buffers[buffer].nbytes:
             raise ValueError(
-                f"image_apply refuses to apply to images[{index}]: its pixels span bytes "
+                f"image_apply refuses to apply to images[{index}]: its {what} span bytes "
                 f"[{lo}, {hi}) of buffers[{buffer}], which has {buffers[buffer].nbytes} bytes, "
                 f"so the library would read or write outside it")
 
@@ -189,25 +238,52 @@ def _check_inside(index, desc, image, buffers):
 TOP_CODE = {"BIT_DEPTH_UINT10": 1023, "BIT_DEPTH_UINT12": 4095}
 
 
-def _check_codes(index, desc, image, buffers):
-    """Refuses a 10- or 12-bit source image holding a larger code. A 1D LUT that starts the
-    processing (as the default optimization makes for integer inputs) is resampled to 1024 or
-    4096 entries and indexed with each code, unchecked (CPUProcessor.cpp:140-146;
-    ops/lut1d/Lut1DOpCPU.cpp:58-64, 388-409, 635-650): a larger code reads outside the table,
-    which is undefined behavior (it crashed the oracle)."""
+def _check_codes(index, desc, image, buffers, looks_up):
+    """Refuses a 10- or 12-bit source image holding a red, green or blue code above the bit
+    depth's largest, when the wheel would look the code up in a table of 1024 or 4096 entries,
+    unchecked: that reads outside the table, which is undefined behavior (it crashed the
+    oracle). It does so when the processor's first op is a forward 1D LUT, which
+    CreateCPUEngine renders from the input bit depth (CPUProcessor.cpp:140-146), and which the
+    default optimization makes for integer inputs: the forward renderers resample the LUT to
+    the input's codes and index it with each color code (ops/lut1d/Lut1DOpCPU.cpp:58-64,
+    388-409, 635-650). Alpha is scaled, not looked up (:646); the inverse renderers search the
+    LUT (:1241-1284); every other first op converts codes with a multiply. `looks_up()` says
+    whether the processor starts with a forward 1D LUT; it is asked only for a code above the
+    largest.
+
+    Each channel is read through a view with the image's strides, which _check_inside has kept
+    inside the buffer; a stride of 0 (every pixel of a row or column the same bytes) is read
+    once."""
     top = TOP_CODE.get(desc.getBitDepth().name)
     if top is None:
         return
-    rows = np.arange(desc.getHeight())[:, None] * desc.getYStrideBytes()
-    offsets = (rows + np.arange(desc.getWidth())[None, :] * desc.getXStrideBytes()).ravel()
-    for buffer, start in _channel_starts(desc, image):
-        memory, at = buffers[buffer], offsets + start
-        code = int((memory[at].astype(np.uint16) | memory[at + 1].astype(np.uint16) << 8).max())
-        if code > top:
+    strides = (desc.getYStrideBytes(), desc.getXStrideBytes())
+    shape = tuple(1 if stride == 0 else n
+                  for n, stride in zip((desc.getHeight(), desc.getWidth()), strides))
+    for buffer, start in _channel_starts(desc, image, colors_only=True):
+        codes = np.ndarray(shape=shape, dtype="<u2", buffer=buffers[buffer], offset=start,
+                           strides=strides)
+        code = int(codes.max())
+        if code > top and looks_up():
             raise ValueError(
-                f"image_apply refuses to apply to images[{index}]: it holds the code {code}, "
-                f"above {top}, the largest of {desc.getBitDepth().name}, and the wheel would "
-                f"read outside its lookup table")
+                f"image_apply refuses to apply to images[{index}]: it holds the color code "
+                f"{code}, above {top}, the largest of {desc.getBitDepth().name}, and the "
+                f"processor starts with a forward 1D LUT, which the wheel would index with it "
+                f"outside its table")
+
+
+def _starts_with_forward_lut1d(proc, key):
+    """Whether the processor that `proc.getOptimizedCPUProcessor(*key)` renders starts with a
+    forward 1D LUT. getOptimizedProcessor(in, out, flags) runs the same finalize, optimize and
+    bit-depth steps as the CPU processor's (Processor.cpp:382-401 and CPUProcessor.cpp:311-339);
+    the CPU processor only adds an identity matrix when that leaves no op, which isn't a LUT.
+    If OCIO raises here, where the CPU processor didn't, the command refuses rather than guess."""
+    try:
+        group = proc.getOptimizedProcessor(*key).createGroupTransform()
+    except RAISED as exc:
+        raise ValueError(f"image_apply can't tell which op the processor starts with: {exc}")
+    return (len(group) > 0 and isinstance(group[0], OCIO.Lut1DTransform)
+            and group[0].getDirection() == OCIO.TRANSFORM_DIR_FORWARD)
 
 
 def _data_getters(desc, image, buffers, first_blob, out):
@@ -236,18 +312,30 @@ def _data_getters(desc, image, buffers, first_blob, out):
 
 def _cpu_processor(args, stage):
     """The processor and CPU processor of a request, chosen as cpu_apply chooses them: the
-    default CPU processor, or getOptimizedCPUProcessor with optimization or non-F32 depths."""
+    default CPU processor, or getOptimizedCPUProcessor with optimization or non-F32 depths;
+    and the (in, out, flags) the CPU processor was made with (the default one's are F32, F32
+    and OPTIMIZATION_DEFAULT, Processor.cpp:527-535)."""
     _, proc = _processor(args, stage)
     stage[0] = "cpu_processor"
     in_bd = args.get("in_bitdepth", "BIT_DEPTH_F32")
     out_bd = args.get("out_bitdepth", "BIT_DEPTH_F32")
     if "optimization" in args or in_bd != "BIT_DEPTH_F32" or out_bd != "BIT_DEPTH_F32":
-        cpu = proc.getOptimizedCPUProcessor(
-            getattr(OCIO, in_bd), getattr(OCIO, out_bd), spec.flags(args.get("optimization"))
-        )
+        key = (getattr(OCIO, in_bd), getattr(OCIO, out_bd), spec.flags(args.get("optimization")))
+        cpu = proc.getOptimizedCPUProcessor(*key)
     else:
+        key = (OCIO.BIT_DEPTH_F32, OCIO.BIT_DEPTH_F32, OCIO.OPTIMIZATION_DEFAULT)
         cpu = proc.getDefaultCPUProcessor()
-    return proc, cpu
+    return proc, cpu, key
+
+
+def _reads_source(descs, apply, cpu):
+    """Whether cpu.apply(*[descs[i] for i in apply]) gets as far as reading the source: the
+    scanline helper first checks both images' bit depths and dimensions
+    (ImageDesc.cpp:93-96, ScanlineHelper.cpp:51-61, 85-90)."""
+    src, dst = descs[apply[0]], descs[apply[-1]]
+    return (src.getBitDepth() == cpu.getInputBitDepth()
+            and dst.getBitDepth() == cpu.getOutputBitDepth()
+            and (src.getWidth(), src.getHeight()) == (dst.getWidth(), dst.getHeight()))
 
 
 def _processor_result(proc, cpu):
@@ -317,10 +405,17 @@ def image_apply(args, blobs):
     - an image it applies to reaches outside its buffer: channel k of pixel (x, y) is at data +
       k * chanStride + x * xStride + y * yStride (packed) or plane + x * xStride + y * yStride
       (planar), from the description's own getters, so the library resolves AutoStride itself;
-    - the source is a 10- or 12-bit image holding a code above 1023 or 4095, which the wheel
-      would look up outside its table (see _check_codes).
+      and an image the library calls RGBA-packed, which it reads and writes a row at a time,
+      also has its rows of 4 * width contiguous channels checked (see _check_inside);
+    - the source is a 10- or 12-bit image holding a red, green or blue code above 1023 or
+      4095, and the processor starts with a forward 1D LUT, which the wheel would index with
+      the code outside its table (see _check_codes).
     Constructing a description reads no pixels, so a request that only constructs is never
-    refused.
+    refused. Nor is a request whose apply raises before it reads the source (bit depths or
+    dimensions that don't match).
+
+    A spec with a key the command doesn't know is refused too, so a misspelled key can't pass
+    unnoticed.
 
     result:
       images    per constructed image, its getters: getBitDepth, getWidth, getHeight,
@@ -340,6 +435,8 @@ def image_apply(args, blobs):
     blobs: every buffer after the call, in order, also when OCIO raised; then the copies of the
            data getters
     """
+    _check_keys("image_apply", args, PROCESSOR_KEYS | {"buffers", "images", "apply",
+                                                       "data_getters"})
     buffers = _buffers(args.get("buffers") or [], blobs)
     images = args.get("images") or []
     makers = [_prepare(image, buffers) for image in images]
@@ -351,7 +448,7 @@ def image_apply(args, blobs):
     with captured_log() as log:
         try:
             if apply:
-                proc, cpu = _cpu_processor(args, stage)
+                proc, cpu, key = _cpu_processor(args, stage)
                 result.update(_processor_result(proc, cpu))
             stage[0] = "image"
             for make in makers:
@@ -363,7 +460,9 @@ def image_apply(args, blobs):
             if apply:
                 for i in sorted(set(apply)):
                     _check_inside(i, descs[i], images[i], buffers)
-                _check_codes(apply[0], descs[apply[0]], images[apply[0]], buffers)
+                if _reads_source(descs, apply, cpu):
+                    looks_up = functools.cache(lambda: _starts_with_forward_lut1d(proc, key))
+                    _check_codes(apply[0], descs[apply[0]], images[apply[0]], buffers, looks_up)
                 stage[0] = "apply"
                 cpu.apply(*[descs[i] for i in apply])
             if args.get("data_getters"):
@@ -410,6 +509,8 @@ def image_apply_rgb(args, blobs):
     blobs: [the array's whole memory after the call, also when OCIO raised; or the returned
             list as little-endian float64, when nothing raised]
     """
+    array_keys = set() if args.get("list") else {"dtype", "shape", "strides", "offset"}
+    _check_keys("image_apply_rgb", args, PROCESSOR_KEYS | {"call", "list"} | array_keys)
     call = args["call"]
     if call not in ("applyRGB", "applyRGBA"):
         raise ValueError(f"call {call!r}: applyRGB or applyRGBA")
@@ -426,7 +527,7 @@ def image_apply_rgb(args, blobs):
     stage, result, out = ["config"], {}, []
     with captured_log() as log:
         try:
-            proc, cpu = _cpu_processor(args, stage)
+            proc, cpu, _ = _cpu_processor(args, stage)
             result.update(_processor_result(proc, cpu))
             stage[0] = "apply"
             returned = getattr(cpu, call)(data)
