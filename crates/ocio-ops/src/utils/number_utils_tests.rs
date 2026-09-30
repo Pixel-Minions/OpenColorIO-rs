@@ -2,11 +2,11 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Port of `tests/utils/NumberUtils_tests.cpp` @ v2.5.2. Upstream runs these on whichever
-//! branch of NumberUtils.h the build compiled; the port checks every branch it has.
+//! branch of NumberUtils.h the build compiled; the port checks both.
 
 use super::*;
 
-const FLAVORS: [Flavor; 1] = [Flavor::Strtod];
+const FLAVORS: [Flavor; 2] = [Flavor::FromChars, Flavor::Strtod];
 
 /// `TEST_FROM_CHARS` of `from_chars_float`: the whole string converts.
 #[track_caller]

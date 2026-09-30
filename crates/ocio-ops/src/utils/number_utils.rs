@@ -14,9 +14,10 @@
 //!   (`libOpenColorIO.so` imports `strtod_l`, `strtof_l`, `strtol_l` and `newlocale`, and
 //!   contains no `from_chars`).
 //!
-//! This module implements the `strtod_l` branch, [`Flavor::Strtod`], with glibc 2.34's
-//! behavior: C17 subject sequences, `ERANGE` on overflow and on tiny inexact results,
-//! `nan(n-char-sequence)` payloads, base-0 (octal) integers and a 64-bit `long`.
+//! The branches agree on ordinary numbers and differ on edge cases, and the port reproduces
+//! each on its platform (PLAN.md D12): a sign before `0x`, `0x` in a longer buffer, subnormal
+//! floats, out-of-range values, NaN payloads, octal integers and the width of `long`.
+//! [`Flavor::NATIVE`] is the branch of the platform being compiled for.
 //!
 //! Inputs are byte buffers that start at `first`: `last` is an offset into them, and the
 //! `strtod` branch reads the buffer as a C string (up to its first NUL, or its end), which
@@ -29,10 +30,35 @@ use crate::cfmt::exact_digits;
 /// Which implementation of `NumberUtils.h` to follow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Flavor {
+    /// `std::from_chars` from the MSVC STL (`USE_CHARCONV_FROM_CHARS`): the Windows wheel.
+    /// `long` is 32 bits.
+    FromChars,
     /// `strtod_l`, `strtof_l` and `strtol_l` from glibc in the "C" locale: the Linux wheel.
     /// `long` is 64 bits.
     Strtod,
 }
+
+impl Flavor {
+    /// The branch the wheel for the platform being compiled for uses: `std::from_chars` on
+    /// x86_64 Windows (MSVC).
+    #[cfg(all(target_arch = "x86_64", target_os = "windows", target_env = "msvc"))]
+    pub const NATIVE: Flavor = Flavor::FromChars;
+
+    /// The branch the wheel for the platform being compiled for uses: `strtod_l` and friends
+    /// on x86_64 Linux (GCC, glibc).
+    #[cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"))]
+    pub const NATIVE: Flavor = Flavor::Strtod;
+}
+
+// Only the two reference platforms (PLAN.md D11) have a known branch.
+#[cfg(not(any(
+    all(target_arch = "x86_64", target_os = "windows", target_env = "msvc"),
+    all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"),
+)))]
+compile_error!(
+    "NumberUtils knows the branches of x86_64 Windows (MSVC) and x86_64 Linux (GCC, glibc) \
+     only"
+);
 
 /// The `std::errc` values NumberUtils returns.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -160,10 +186,12 @@ fn negate<F: Float>(v: F, negative: bool) -> F {
     }
 }
 
-/// A magnitude converted to `F` (correctly rounded, half to even), with what glibc
-/// reports on it.
+/// A magnitude converted to `F` (correctly rounded, half to even), with the facts both
+/// libraries report on.
 struct Converted<F> {
     value: F,
+    /// The value was nonzero and rounded to zero, or rounded to infinity.
+    out_of_range: bool,
     /// glibc's underflow: tiny (after rounding, x86 `TININESS_AFTER_ROUNDING`) and inexact,
     /// or overflow (strtod_l.c `round_and_return`).
     glibc_erange: bool,
@@ -216,18 +244,21 @@ fn decimal_to_float<F: Float>(d: &Decimal) -> Converted<F> {
     if d.digits.is_empty() {
         return Converted {
             value: zero,
+            out_of_range: false,
             glibc_erange: false,
         };
     }
     if d.exp10 > F::DEC_OVERFLOW {
         return Converted {
             value: inf,
+            out_of_range: true,
             glibc_erange: true,
         };
     }
     if d.exp10 < F::DEC_UNDERFLOW {
         return Converted {
             value: zero,
+            out_of_range: true,
             glibc_erange: true,
         };
     }
@@ -240,12 +271,14 @@ fn decimal_to_float<F: Float>(d: &Decimal) -> Converted<F> {
     if value.is_inf() {
         return Converted {
             value,
+            out_of_range: true,
             glibc_erange: true,
         };
     }
     if value.is_zero() {
         return Converted {
             value,
+            out_of_range: true,
             glibc_erange: true,
         };
     }
@@ -267,6 +300,7 @@ fn decimal_to_float<F: Float>(d: &Decimal) -> Converted<F> {
     };
     Converted {
         value,
+        out_of_range: false,
         glibc_erange,
     }
 }
@@ -307,6 +341,7 @@ fn hex_to_float<F: Float>(h: &Hex) -> Converted<F> {
     if h.mant == 0 {
         return Converted {
             value: zero,
+            out_of_range: false,
             glibc_erange: false,
         };
     }
@@ -319,6 +354,7 @@ fn hex_to_float<F: Float>(h: &Hex) -> Converted<F> {
     if e > max_exp {
         return Converted {
             value: inf,
+            out_of_range: true,
             glibc_erange: true,
         };
     }
@@ -338,6 +374,7 @@ fn hex_to_float<F: Float>(h: &Hex) -> Converted<F> {
     if q != 0 && q >> (F::MANT_DIG - 1) != 0 && msb_exp > max_exp {
         return Converted {
             value: inf,
+            out_of_range: true,
             glibc_erange: true,
         };
     }
@@ -352,6 +389,7 @@ fn hex_to_float<F: Float>(h: &Hex) -> Converted<F> {
     };
     Converted {
         value: F::from_bits_u64(bits),
+        out_of_range: q == 0,
         glibc_erange: tiny && inexact,
     }
 }
@@ -687,8 +725,189 @@ fn glibc_strtol_base0(s: &[u8]) -> Strto<i64> {
 }
 
 // ---------------------------------------------------------------------------------------
+// MSVC std::from_chars
+// ---------------------------------------------------------------------------------------
+
+/// MSVC `std::from_chars(first, last, value, fmt)` for floating point (`<charconv>`
+/// `_Floating_from_chars`, `_Ordinary_floating_from_chars`, `_Infinity_from_chars`,
+/// `_Nan_from_chars`; MSVC 14.44). Returns the value to store (MSVC stores infinity or zero
+/// on `result_out_of_range` too) and the result.
+fn msvc_from_chars_float<F: Float>(s: &[u8], hex: bool) -> (Option<F>, FromCharsResult) {
+    let invalid = (
+        None,
+        FromCharsResult {
+            ptr: 0,
+            ec: Errc::InvalidArgument,
+        },
+    );
+    let mut i = 0;
+    let mut negative = false;
+    if s.first() == Some(&b'-') {
+        negative = true;
+        i += 1;
+    }
+    let Some(&start) = s.get(i) else {
+        return invalid;
+    };
+    let folded = start | 0x20;
+    if folded == b'i' {
+        if !starts_with_ci(&s[i + 1..], b"nf") {
+            return invalid;
+        }
+        let mut end = i + 3;
+        if starts_with_ci(&s[end..], b"inity") {
+            end += 5;
+        }
+        let value = negate(F::from_bits_u64(F::EXP_MASK), negative);
+        return (
+            Some(value),
+            FromCharsResult {
+                ptr: end,
+                ec: Errc::Ok,
+            },
+        );
+    }
+    if folded == b'n' {
+        if !starts_with_ci(&s[i + 1..], b"an") {
+            return invalid;
+        }
+        let mut end = i + 3;
+        let mut quiet = true;
+        if s.get(end) == Some(&b'(') {
+            let seq = end + 1;
+            let mut k = seq;
+            while k < s.len() {
+                let c = s[k];
+                if c == b')' {
+                    end = k + 1;
+                    let body = &s[seq..k];
+                    if body.len() == 3 && starts_with_ci(body, b"ind") {
+                        // UCRT's "indeterminate": negative quiet NaN, parsed with or
+                        // without a '-'.
+                        negative = true;
+                    } else if body.len() == 4 && starts_with_ci(body, b"snan") {
+                        quiet = false;
+                    }
+                    break;
+                } else if c == b'_' || c.is_ascii_alphanumeric() {
+                    k += 1;
+                } else {
+                    break;
+                }
+            }
+        }
+        let mut bits = F::EXP_MASK | if quiet { F::QUIET } else { 1 };
+        if negative {
+            bits |= F::SIGN;
+        }
+        return (
+            Some(F::from_bits_u64(bits)),
+            FromCharsResult {
+                ptr: end,
+                ec: Errc::Ok,
+            },
+        );
+    }
+    if folded > b'f' {
+        return invalid;
+    }
+    let Some((end, d, h)) = scan_number(s, i, hex) else {
+        return invalid;
+    };
+    let c = if hex {
+        hex_to_float::<F>(&h)
+    } else {
+        decimal_to_float::<F>(&d)
+    };
+    let ec = if c.out_of_range {
+        Errc::ResultOutOfRange
+    } else {
+        Errc::Ok
+    };
+    (
+        Some(negate(c.value, negative)),
+        FromCharsResult { ptr: end, ec },
+    )
+}
+
+/// MSVC `std::from_chars(first, last, long&, base)` (`_Integer_from_chars`) with a 32-bit
+/// `long` (LLP64). The value is stored only on success.
+fn msvc_from_chars_long(s: &[u8], base: u32) -> (Option<i32>, FromCharsResult) {
+    let mut i = 0;
+    let negative = s.first() == Some(&b'-');
+    if negative {
+        i += 1;
+    }
+    let limit: u64 = if negative { 1 << 31 } else { (1 << 31) - 1 };
+    let mut value: u64 = 0;
+    let mut overflow = false;
+    let digits_start = i;
+    while let Some(d) = s.get(i).copied().and_then(hex_value) {
+        let d = u64::from(d);
+        if d >= u64::from(base) {
+            break;
+        }
+        let next = value * u64::from(base) + d;
+        if next > limit {
+            overflow = true;
+        } else {
+            value = next;
+        }
+        i += 1;
+    }
+    if i == digits_start {
+        return (
+            None,
+            FromCharsResult {
+                ptr: 0,
+                ec: Errc::InvalidArgument,
+            },
+        );
+    }
+    if overflow {
+        return (
+            None,
+            FromCharsResult {
+                ptr: i,
+                ec: Errc::ResultOutOfRange,
+            },
+        );
+    }
+    let v = if negative {
+        (value as i64).wrapping_neg() as i32
+    } else {
+        value as i32
+    };
+    (
+        Some(v),
+        FromCharsResult {
+            ptr: i,
+            ec: Errc::Ok,
+        },
+    )
+}
+
+// ---------------------------------------------------------------------------------------
 // NumberUtils::from_chars
 // ---------------------------------------------------------------------------------------
+
+/// `from_chars_skip_prefix` and `from_chars_hex_prefix` (NumberUtils.h:79-101): the offset
+/// where `std::from_chars` starts and whether it parses hexadecimal.
+fn skip_prefix(buf: &[u8], last: usize) -> (usize, bool) {
+    let mut first = 0;
+    while first < last && is_c_space(buf[first]) {
+        first += 1;
+    }
+    if first < last && buf[first] == b'+' {
+        first += 1;
+    }
+    if first + 2 < last && buf[first] == b'0' && (buf[first + 1] == b'x' || buf[first + 1] == b'X')
+    {
+        (first + 2, true)
+    } else {
+        (first, false)
+    }
+}
 
 /// The C string starting at `first`: up to its first NUL, or the whole buffer.
 fn c_string(buf: &[u8]) -> &[u8] {
@@ -709,6 +928,17 @@ fn from_chars_float<F: Float>(
         };
     }
     match flavor {
+        Flavor::FromChars => {
+            let (first, hex) = skip_prefix(buf, last);
+            let (stored, r) = msvc_from_chars_float::<F>(&buf[first..last], hex);
+            if let Some(v) = stored {
+                *value = v;
+            }
+            FromCharsResult {
+                ptr: first + r.ptr,
+                ec: r.ec,
+            }
+        }
         Flavor::Strtod => {
             let r = glibc_strtof::<F>(c_string(buf));
             // NumberUtils.h:132 (double) checks `errno != 0 && errno != EINVAL`, and :188
@@ -741,7 +971,8 @@ fn from_chars_float<F: Float>(
 
 /// Port of `NumberUtils::from_chars(const char*, const char*, double&)`
 /// (src/utils/NumberUtils.h:104-150 @ v2.5.2). `buf` starts at `first`; `last` is an offset
-/// into it. On error the value is left unchanged.
+/// into it. On error the value is left unchanged, except that the MSVC branch stores
+/// infinity or zero with `ResultOutOfRange`, as MSVC's `std::from_chars` does.
 pub fn from_chars_f64(flavor: Flavor, buf: &[u8], last: usize, value: &mut f64) -> FromCharsResult {
     from_chars_float(flavor, buf, last, value)
 }
@@ -753,8 +984,10 @@ pub fn from_chars_f32(flavor: Flavor, buf: &[u8], last: usize, value: &mut f32) 
 }
 
 /// Port of `NumberUtils::from_chars(const char*, const char*, long int&)`
-/// (src/utils/NumberUtils.h:208-256 @ v2.5.2). `long` is 64 bits for [`Flavor::Strtod`]
-/// (Linux). The `strtol_l` branch uses base 0, so a leading `0` means octal there.
+/// (src/utils/NumberUtils.h:208-256 @ v2.5.2). `long` is 32 bits for
+/// [`Flavor::FromChars`] (Windows) and 64 bits for [`Flavor::Strtod`] (Linux); the value
+/// is stored widened to `i64`. The `strtol_l` branch uses base 0, so a leading `0` means
+/// octal there.
 pub fn from_chars_long(
     flavor: Flavor,
     buf: &[u8],
@@ -769,6 +1002,17 @@ pub fn from_chars_long(
         };
     }
     match flavor {
+        Flavor::FromChars => {
+            let (first, hex) = skip_prefix(buf, last);
+            let (stored, r) = msvc_from_chars_long(&buf[first..last], if hex { 16 } else { 10 });
+            if let Some(v) = stored {
+                *value = i64::from(v);
+            }
+            FromCharsResult {
+                ptr: first + r.ptr,
+                ec: r.ec,
+            }
+        }
         Flavor::Strtod => {
             let r = glibc_strtol_base0(c_string(buf));
             if r.erange {

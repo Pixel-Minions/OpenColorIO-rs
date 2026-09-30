@@ -3932,8 +3932,8 @@ note = "build system"
 path = "src/utils/NumberUtils.h"
 kind = "src"
 target = ["crates/ocio-ops/src/utils/number_utils.rs"]
-status = "partial"
-note = "The strtod_l/strtof_l/strtol_l branch in the C locale (the Linux wheel, GCC 14); the std::from_chars branch (the Windows wheel, MSVC) is pending."
+status = "done"
+note = "Both branches: std::from_chars (the Windows wheel, MSVC) and strtod_l/strtof_l/strtol_l in the C locale (the Linux wheel, GCC 14); Flavor::NATIVE picks the platform's."
 
 [[file]]
 path = "src/utils/StringUtils.h"
@@ -5476,7 +5476,7 @@ path = "tests/utils/NumberUtils_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/utils/number_utils_tests.rs"]
 status = "done"
-note = "Both tests, run on the strtod branch."
+note = "Both tests, run on both NumberUtils branches."
 
 [[file]]
 path = "tests/utils/StringUtils_tests.cpp"
