@@ -134,6 +134,7 @@ dependencies = [
  "ocio-testkit",
  "saphyr-parser",
  "serde_json",
+ "xxhash-rust",
 ]
 
 [[package]]
