@@ -191,6 +191,7 @@ impl Op {
     /// overrides.
     pub fn clone_op(&self) -> Op {
         match &*self.data {
+            OpData::Reference(_) => no_reference_op(),
             OpData::NoOp(data) => data.clone_op(),
         }
     }
@@ -202,6 +203,7 @@ impl Op {
     /// overrides.
     pub fn get_info(&self) -> &'static str {
         match &*self.data {
+            OpData::Reference(_) => no_reference_op(),
             OpData::NoOp(data) => data.get_info(),
         }
     }
@@ -220,6 +222,7 @@ impl Op {
     /// Port of `Op::isNoOp` (src/OpenColorIO/Op.h:194-198 @ v2.5.2), and its overrides.
     pub fn is_no_op(&self) -> bool {
         match &*self.data {
+            OpData::Reference(_) => no_reference_op(),
             // The Op default: the data's.
             OpData::NoOp(_) => self.data.is_no_op(),
         }
@@ -230,6 +233,7 @@ impl Op {
     /// Port of `Op::isIdentity` (src/OpenColorIO/Op.h:200 @ v2.5.2), and its overrides.
     pub fn is_identity(&self) -> bool {
         match &*self.data {
+            OpData::Reference(_) => no_reference_op(),
             // The Op default: the data's.
             OpData::NoOp(_) => self.data.is_identity(),
         }
@@ -254,6 +258,7 @@ impl Op {
     /// overrides.
     pub fn is_same_type(&self, op: &Op) -> bool {
         match &*self.data {
+            OpData::Reference(_) => no_reference_op(),
             OpData::NoOp(data) => data.is_same_type(op),
         }
     }
@@ -264,6 +269,7 @@ impl Op {
     /// overrides.
     pub fn is_inverse(&self, op: &Op) -> bool {
         match &*self.data {
+            OpData::Reference(_) => no_reference_op(),
             OpData::NoOp(data) => data.is_inverse(op),
         }
     }
@@ -275,6 +281,7 @@ impl Op {
     /// its overrides.
     pub fn can_combine_with(&self, _op: &Op) -> Result<bool> {
         match &*self.data {
+            OpData::Reference(_) => no_reference_op(),
             // The Op default.
             OpData::NoOp(_) => Ok(false),
         }
@@ -287,6 +294,7 @@ impl Op {
     /// its overrides.
     pub fn combine_with(&self, _ops: &mut OpVec, _second_op: &Op) -> Result<()> {
         match &*self.data {
+            OpData::Reference(_) => no_reference_op(),
             // The Op default.
             OpData::NoOp(_) => Err(self.cannot_combine()),
         }
@@ -306,6 +314,7 @@ impl Op {
     /// overrides.
     pub fn has_channel_crosstalk(&self) -> bool {
         match &*self.data {
+            OpData::Reference(_) => no_reference_op(),
             // The Op default: the data's.
             OpData::NoOp(_) => self.data.has_channel_crosstalk(),
         }
@@ -324,6 +333,7 @@ impl Op {
     /// Port of `Op::finalize` (src/OpenColorIO/Op.h:226-227 @ v2.5.2), and its overrides.
     pub fn finalize(&mut self) -> Result<()> {
         match &*self.data {
+            OpData::Reference(_) => no_reference_op(),
             // The Op default: nothing.
             OpData::NoOp(_) => Ok(()),
         }
@@ -335,6 +345,7 @@ impl Op {
     /// overrides.
     pub fn get_cache_id(&self) -> Vec<u8> {
         match &*self.data {
+            OpData::Reference(_) => no_reference_op(),
             OpData::NoOp(data) => data.get_op_cache_id(),
         }
     }
@@ -346,6 +357,7 @@ impl Op {
     /// overrides.
     pub fn apply(&self, _rgba: &mut [f32]) -> Result<()> {
         match &*self.data {
+            OpData::Reference(_) => no_reference_op(),
             // AllocationNoOp, FileNoOp and LookNoOp::apply do nothing
             // (src/OpenColorIO/ops/noop/NoOps.cpp:49, 320, 406 @ v2.5.2).
             OpData::NoOp(_) => Ok(()),
@@ -360,6 +372,7 @@ impl Op {
     /// v2.5.2), and its overrides.
     pub fn apply_in_out(&self, input: &[f32], output: &mut [f32]) -> Result<()> {
         match &*self.data {
+            OpData::Reference(_) => no_reference_op(),
             // The no-ops copy (src/OpenColorIO/ops/noop/NoOps.cpp:51-52, 322-323, 408-409 @
             // v2.5.2).
             OpData::NoOp(_) => {
@@ -375,6 +388,7 @@ impl Op {
     /// overrides.
     pub fn supported_by_legacy_shader(&self) -> bool {
         match &*self.data {
+            OpData::Reference(_) => no_reference_op(),
             // The Op default.
             OpData::NoOp(_) => true,
         }
@@ -385,6 +399,7 @@ impl Op {
     /// Port of `Op::isDynamic` (src/OpenColorIO/Op.cpp:163-166 @ v2.5.2), and its overrides.
     pub fn is_dynamic(&self) -> bool {
         match &*self.data {
+            OpData::Reference(_) => no_reference_op(),
             // The Op default.
             OpData::NoOp(_) => false,
         }
@@ -396,6 +411,7 @@ impl Op {
     /// overrides.
     pub fn has_dynamic_property(&self, _type: DynamicPropertyType) -> bool {
         match &*self.data {
+            OpData::Reference(_) => no_reference_op(),
             // The Op default.
             OpData::NoOp(_) => false,
         }
@@ -407,6 +423,7 @@ impl Op {
     /// overrides.
     pub fn get_dynamic_property(&self, _type: DynamicPropertyType) -> Result<DynamicPropertyRcPtr> {
         match &*self.data {
+            OpData::Reference(_) => no_reference_op(),
             // The Op default.
             OpData::NoOp(_) => Err(Exception::new(NO_DYNAMIC_PROPERTY)),
         }
@@ -423,6 +440,7 @@ impl Op {
         prop: &DynamicPropertyRcPtr,
     ) -> Result<()> {
         match &*self.data {
+            OpData::Reference(_) => no_reference_op(),
             // The Op default: each overload's error.
             OpData::NoOp(_) => Err(cannot_replace(prop)),
         }
@@ -434,6 +452,7 @@ impl Op {
     /// overrides.
     pub fn remove_dynamic_properties(&mut self) {
         match &*self.data {
+            OpData::Reference(_) => no_reference_op(),
             // The Op default: nothing.
             OpData::NoOp(_) => {}
         }
@@ -447,11 +466,18 @@ impl Op {
     /// overrides.
     pub fn get_cpu_op(&self, _fast_log_exp_pow: bool) -> Result<Option<Arc<dyn CpuOp>>> {
         match &*self.data {
+            OpData::Reference(_) => no_reference_op(),
             // AllocationNoOp, FileNoOp and LookNoOp::getCPUOp return nullptr
             // (src/OpenColorIO/ops/noop/NoOps.cpp:47, 318, 404 @ v2.5.2).
             OpData::NoOp(_) => Ok(None),
         }
     }
+}
+
+/// The arm of an [`Op`] method for a `ReferenceOpData`, which an op never holds: no op class
+/// takes one, and [`create_op_vec_from_op_data`] refuses it.
+fn no_reference_op() -> ! {
+    unreachable!("an op never holds a ReferenceOpData")
 }
 
 /// The error of the base `Op::replaceDynamicProperty` overload for `prop`'s class
@@ -769,6 +795,9 @@ pub fn create_op_vec_from_op_data(
     _dir: TransformDirection,
 ) -> Result<()> {
     match &**op_data {
+        OpData::Reference(_) => Err(Exception::new(
+            "ReferenceOpData should have been replaced by referenced ops",
+        )),
         OpData::NoOp(_) => Err(Exception::new("OpData is not supported")),
     }
 }

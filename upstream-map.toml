@@ -39,7 +39,7 @@ path = "include/OpenColorIO/OpenColorTypes.h"
 kind = "api"
 target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs", "crates/ocio-ops/src/format_metadata.rs", "crates/ocio-ops/src/logging.rs"]
 status = "partial"
-note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.1a: BitDepth, and BitDepthToString (defined in ParseUtils.cpp); 1.1b: ChannelOrdering; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does; 1.2b: DynamicPropertyType; 1.2e: LoggingLevel (288-297), in open_color_types.rs, and LoggingFunction (283-284), in logging.rs"
+note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.1a: BitDepth, and BitDepthToString (defined in ParseUtils.cpp); 1.1b: ChannelOrdering; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does; 1.2b: DynamicPropertyType; 1.2e: LoggingLevel (288-297), in open_color_types.rs, and LoggingFunction (283-284), in logging.rs; 1.3n1: Allocation (459-463)"
 
 [[file]]
 path = "src/CMakeLists.txt"
@@ -463,7 +463,7 @@ path = "src/OpenColorIO/ParseUtils.cpp"
 kind = "src"
 target = ["crates/ocio/src/parse_utils.rs", "crates/ocio-ops/src/open_color_types.rs"]
 status = "partial"
-note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection; 1.1a: BitDepthToString, next to BitDepth; 1.2e: LoggingLevelToString and LoggingLevelFromString, next to LoggingLevel"
+note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection; 1.1a: BitDepthToString, next to BitDepth; 1.2e: LoggingLevelToString and LoggingLevelFromString, next to LoggingLevel; 1.3n1: AllocationToString, next to Allocation"
 
 [[file]]
 path = "src/OpenColorIO/ParseUtils.h"
@@ -1077,13 +1077,15 @@ status = "todo"
 path = "src/OpenColorIO/ops/allocation/AllocationOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/allocation/allocation_op.rs"]
-status = "todo"
+status = "partial"
+note = "1.3n1: AllocationData::getCacheID and operator<<; CreateAllocationOps needs CreateFitOp (Matrix op) and the Log op"
 
 [[file]]
 path = "src/OpenColorIO/ops/allocation/AllocationOp.h"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/allocation/allocation_op.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/ops/allocation/allocation_op.rs", "crates/ocio-ops/src/ops/noop/no_ops.rs"]
+status = "partial"
+note = "1.3n1: AllocationData; CreateGpuAllocationNoOp in no_ops.rs, where NoOps.cpp defines it; not yet: CreateAllocationOps"
 
 [[file]]
 path = "src/OpenColorIO/ops/cdl/CDLOp.cpp"
@@ -1912,7 +1914,7 @@ path = "src/OpenColorIO/ops/noop/NoOps.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/noop/no_ops.rs"]
 status = "partial"
-note = "1.2c: FileNoOp, LookNoOp, CreateFileNoOp and CreateLookNoOp, CPU side (the op class is kept in the data, NoOpKind); not yet: AllocationNoOp (1.3n1), dumpMetadata (WP 1.8), PartitionGPUOps and Create3DLut (they need the Lut3D op)"
+note = "1.2c: FileNoOp, LookNoOp, CreateFileNoOp and CreateLookNoOp, CPU side (the op class is kept in the data, NoOpKind); 1.3n1: AllocationNoOp and CreateGpuAllocationNoOp; not yet: dumpMetadata (WP 1.8), PartitionGPUOps and Create3DLut with their helpers (they need the Lut3D op)"
 
 [[file]]
 path = "src/OpenColorIO/ops/noop/NoOps.h"
@@ -1973,13 +1975,13 @@ status = "todo"
 path = "src/OpenColorIO/ops/reference/ReferenceOpData.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/reference/reference_op_data.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/ops/reference/ReferenceOpData.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/reference/reference_op_data.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/res/OpenColorIO.pc.in"

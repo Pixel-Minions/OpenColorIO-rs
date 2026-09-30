@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use super::*;
 use crate::op_data::OpDataType;
-use crate::open_color_types::DynamicPropertyType;
+use crate::open_color_types::{Allocation, DynamicPropertyType};
 
 const ALL_DYNAMIC_TYPES: [DynamicPropertyType; 7] = [
     DynamicPropertyType::Exposure,
@@ -20,34 +20,60 @@ const ALL_DYNAMIC_TYPES: [DynamicPropertyType; 7] = [
     DynamicPropertyType::GradingHueCurve,
 ];
 
-fn file_and_look() -> OpVec {
+/// The allocation of upstream's `CreateGenericAllocationOp` (NoOps_tests.cpp:17-24 @ v2.5.2).
+fn lg2_allocation() -> AllocationData {
+    AllocationData {
+        allocation: Allocation::Lg2,
+        vars: vec![-8.0, 8.0],
+    }
+}
+
+/// An `AllocationNoOp`, a `FileNoOp` and a `LookNoOp`.
+fn the_no_ops() -> OpVec {
     let mut ops = OpVec::new();
+    create_gpu_allocation_no_op(&mut ops, &lg2_allocation());
     create_file_no_op(&mut ops, b"dir/file.clf");
     create_look_no_op(&mut ops, b"-look");
     ops
 }
 
+fn no_op_data(op: &Op) -> &NoOpData {
+    match &**op.data() {
+        OpData::NoOp(data) => data,
+        OpData::Reference(_) => panic!("{op} holds a reference"),
+    }
+}
+
 #[test]
 fn create_appends_one_op_each() {
-    let ops = file_and_look();
-    assert_eq!(ops.len(), 2);
+    let ops = the_no_ops();
+    assert_eq!(ops.len(), 3);
     // The FileNoOp info appears in upstream's file format tests, e.g.
     // tests/cpu/fileformats/FileFormatIridasCube_tests.cpp:267 @ v2.5.2.
-    assert_eq!(ops[0].get_info(), "<FileNoOp>");
-    assert_ne!(ops[1].get_info(), ops[0].get_info());
+    assert_eq!(ops[1].get_info(), "<FileNoOp>");
+    assert_ne!(ops[0].get_info(), ops[1].get_info());
+    assert_ne!(ops[0].get_info(), ops[2].get_info());
+    assert_ne!(ops[1].get_info(), ops[2].get_info());
 
-    let OpData::NoOp(file) = &**ops[0].data();
+    let allocation = no_op_data(&ops[0]);
+    assert_eq!(allocation.get_gpu_allocation(), Some(&lg2_allocation()));
+    assert!(allocation.file_data().is_none());
+
+    let file = no_op_data(&ops[1]);
     assert_eq!(file.file_data().unwrap().get_path(), b"dir/file.clf");
     assert!(!file.file_data().unwrap().get_complete());
-    let OpData::NoOp(look) = &**ops[1].data();
+    assert!(file.get_gpu_allocation().is_none());
+
+    let look = no_op_data(&ops[2]);
     assert!(look.file_data().is_none());
+    assert!(look.get_gpu_allocation().is_none());
     assert!(matches!(look.kind(), NoOpKind::Look(name) if name == b"-look"));
 }
 
 #[test]
 fn the_no_ops_leave_pixels_alone() {
     // What upstream's NoOps tests check of each no-op (NoOps_tests.cpp:284-345 @ v2.5.2).
-    for op in file_and_look().iter() {
+    for op in the_no_ops().iter() {
         assert!(op.is_no_op_type());
         assert_eq!(op.data().get_type(), OpDataType::NoOp);
         assert!(op.is_no_op());
@@ -71,8 +97,9 @@ fn the_no_ops_leave_pixels_alone() {
 
 #[test]
 fn same_type_and_inverse_mean_the_same_class() {
-    let ops = file_and_look();
+    let ops = the_no_ops();
     let mut more = OpVec::new();
+    create_gpu_allocation_no_op(&mut more, &AllocationData::default());
     create_file_no_op(&mut more, b"other.clf");
     create_look_no_op(&mut more, b"other");
 
@@ -88,7 +115,7 @@ fn same_type_and_inverse_mean_the_same_class() {
 
 #[test]
 fn the_no_ops_do_not_combine() {
-    let ops = file_and_look();
+    let ops = the_no_ops();
     for op in ops.iter() {
         for other in ops.iter() {
             assert!(!op.can_combine_with(other).unwrap());
@@ -102,7 +129,7 @@ fn the_no_ops_do_not_combine() {
 
 #[test]
 fn the_no_ops_have_no_dynamic_property() {
-    for mut op in file_and_look().to_vec() {
+    for mut op in the_no_ops().to_vec() {
         assert!(!op.is_dynamic());
         for type_ in ALL_DYNAMIC_TYPES {
             assert!(!op.has_dynamic_property(type_));
@@ -133,7 +160,7 @@ fn the_no_ops_have_no_dynamic_property() {
 
 #[test]
 fn finalize_keeps_the_data() {
-    for mut op in file_and_look().to_vec() {
+    for mut op in the_no_ops().to_vec() {
         let data = Arc::clone(op.data());
         op.finalize().unwrap();
         assert!(Arc::ptr_eq(&data, op.data()));
@@ -141,16 +168,27 @@ fn finalize_keeps_the_data() {
 }
 
 #[test]
-fn the_cache_id_of_a_look_is_its_name_and_a_file_has_none() {
-    let ops = file_and_look();
+fn the_cache_ids() {
+    let ops = the_no_ops();
+    // An allocation's cache ID is its data's.
+    assert_eq!(
+        ops[0].get_cache_id(),
+        lg2_allocation().get_cache_id().into_bytes()
+    );
     // FileNoOp::getCacheID returns m_fileReference, which is never set (I-40).
-    assert_eq!(ops[0].get_cache_id(), b"");
-    assert_eq!(ops[1].get_cache_id(), b"-look");
+    assert_eq!(ops[1].get_cache_id(), b"");
+    // A look's is its name.
+    assert_eq!(ops[2].get_cache_id(), b"-look");
 
     // Bytes pass through, NUL included: upstream's std::string keeps them.
     let mut odd = OpVec::new();
     create_look_no_op(&mut odd, b"a\0\xff");
     assert_eq!(odd[0].get_cache_id(), b"a\0\xff");
+
+    // The data's cache ID is empty for each.
+    for op in ops.iter() {
+        assert_eq!(op.data().get_cache_id().unwrap(), b"");
+    }
 }
 
 #[test]
@@ -161,12 +199,13 @@ fn clone_op_makes_new_data_of_the_same_class() {
         Op::new(data)
     };
     let ops = [
+        named(NoOpKind::Allocation(lg2_allocation())),
         named(NoOpKind::File(FileNoOpData::new(b"dir/file.clf"))),
         named(NoOpKind::Look(b"-look".to_vec())),
     ];
-    let OpData::NoOp(file) = &**ops[0].data();
-    file.file_data().unwrap().set_complete();
-    assert!(file.file_data().unwrap().get_complete());
+    let file = no_op_data(&ops[1]).file_data().unwrap();
+    file.set_complete();
+    assert!(file.get_complete());
 
     for op in ops.iter() {
         assert_eq!(op.data().get_name(), b"named");
@@ -179,21 +218,26 @@ fn clone_op_makes_new_data_of_the_same_class() {
         assert_eq!(clone.data().get_name(), b"");
     }
 
-    // A new FileNoOpData is still being loaded, and has the path.
+    // The allocation is copied.
     let clone = ops[0].clone_op();
-    let OpData::NoOp(cloned) = &**clone.data();
-    assert_eq!(cloned.file_data().unwrap().get_path(), b"dir/file.clf");
-    assert!(!cloned.file_data().unwrap().get_complete());
+    assert_eq!(
+        no_op_data(&clone).get_gpu_allocation(),
+        Some(&lg2_allocation())
+    );
+
+    // A new FileNoOpData is still being loaded, and has the path.
+    let clone = ops[1].clone_op();
+    let cloned = no_op_data(&clone).file_data().unwrap();
+    assert_eq!(cloned.get_path(), b"dir/file.clf");
+    assert!(!cloned.get_complete());
 }
 
 #[test]
 fn set_complete_reaches_every_op_sharing_the_data() {
     // FileTransform keeps the op it appends and marks its data complete once the file is
     // loaded (src/OpenColorIO/transforms/FileTransform.cpp:944-961 @ v2.5.2).
-    let ops = file_and_look();
-    let kept = ops[0].clone();
-    let OpData::NoOp(data) = &**kept.data();
-    data.file_data().unwrap().set_complete();
-    let OpData::NoOp(in_list) = &**ops[0].data();
-    assert!(in_list.file_data().unwrap().get_complete());
+    let ops = the_no_ops();
+    let kept = ops[1].clone();
+    no_op_data(&kept).file_data().unwrap().set_complete();
+    assert!(no_op_data(&ops[1]).file_data().unwrap().get_complete());
 }

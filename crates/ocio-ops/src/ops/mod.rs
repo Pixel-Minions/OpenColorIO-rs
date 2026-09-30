@@ -3,7 +3,9 @@
 
 //! The op families: a port of `src/OpenColorIO/ops/` @ v2.5.2.
 
+pub mod allocation;
 pub mod gamma;
 pub mod log;
 pub mod lut3d;
 pub mod noop;
+pub mod reference;
