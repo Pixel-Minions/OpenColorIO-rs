@@ -72,29 +72,44 @@ impl Oracle {
     fn setup() -> Result<Oracle, String> {
         let oracle_dir = paths::oracle_dir();
         let venv = paths::target_dir().join("oracle-venv");
-        let status = Command::new(uv_program())
-            .arg("sync")
-            .arg("--project")
-            .arg(&oracle_dir)
-            .args(["--frozen", "--quiet", "--no-install-project"])
-            .env("UV_PROJECT_ENVIRONMENT", &venv)
-            .env_remove("VIRTUAL_ENV")
-            .stdin(Stdio::null())
-            .status()
-            .map_err(|e| {
-                format!("could not run `uv` ({e}); install it: https://docs.astral.sh/uv/")
-            })?;
+        let python = if cfg!(windows) {
+            venv.join("Scripts").join("python.exe")
+        } else {
+            venv.join("bin").join("python")
+        };
+        // A target directory restored from a build cache, or a moved uv Python install, can
+        // leave an environment whose interpreter no longer runs; uv refuses to reuse it.
+        // Rebuild it from the lock file instead.
+        if venv.exists() && !python_runs(&python) {
+            std::fs::remove_dir_all(&venv)
+                .map_err(|e| format!("could not remove the broken {}: {e}", venv.display()))?;
+        }
+        let sync = || {
+            Command::new(uv_program())
+                .arg("sync")
+                .arg("--project")
+                .arg(&oracle_dir)
+                .args(["--frozen", "--quiet", "--no-install-project"])
+                .env("UV_PROJECT_ENVIRONMENT", &venv)
+                .env_remove("VIRTUAL_ENV")
+                .stdin(Stdio::null())
+                .status()
+                .map_err(|e| {
+                    format!("could not run `uv` ({e}); install it: https://docs.astral.sh/uv/")
+                })
+        };
+        let mut status = sync()?;
+        if !status.success() && venv.exists() {
+            // One retry from scratch, for any other kind of stale environment.
+            let _ = std::fs::remove_dir_all(&venv);
+            status = sync()?;
+        }
         if !status.success() {
             return Err(format!(
                 "`uv sync` for {} failed: {status}",
                 oracle_dir.display()
             ));
         }
-        let python = if cfg!(windows) {
-            venv.join("Scripts").join("python.exe")
-        } else {
-            venv.join("bin").join("python")
-        };
         let cache_dir = if std::env::var_os("OCIO_RS_ORACLE_NO_CACHE").is_some() {
             None
         } else {
@@ -196,6 +211,18 @@ impl Oracle {
         }
         Ok(stdout)
     }
+}
+
+/// Whether `python` exists and starts.
+fn python_runs(python: &Path) -> bool {
+    python.is_file()
+        && Command::new(python)
+            .args(["-c", "pass"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
 }
 
 fn uv_program() -> PathBuf {
