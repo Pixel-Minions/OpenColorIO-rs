@@ -20,7 +20,12 @@
 //! sources and lock file, and this machine's OS and CPU. Set `OCIO_RS_ORACLE_NO_CACHE=1` to
 //! bypass the cache. Environment variables named `OCIO` or `OCIO_*` are never passed to the
 //! oracle, so its results don't depend on the caller's environment.
+//!
+//! Starting the oracle costs about a third of a second; a small `cpu_apply` inside it, about
+//! a tenth of a millisecond. [`Oracle::batch`] runs many calls in one process (the `batch`
+//! command), and the battery (`crate::battery`) sends all its calls that way.
 
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -50,6 +55,17 @@ impl Response {
     pub fn blob_text(&self, index: usize) -> &str {
         std::str::from_utf8(&self.blobs[index]).expect("oracle blob is not UTF-8")
     }
+}
+
+/// One call of an [`Oracle::batch`].
+#[derive(Debug, Clone)]
+pub struct BatchCall<'a> {
+    /// The command.
+    pub cmd: &'a str,
+    /// Its JSON arguments.
+    pub args: Value,
+    /// Its binary inputs.
+    pub blobs: Vec<&'a [u8]>,
 }
 
 /// Handle to the oracle environment. Use [`Oracle::get`].
@@ -138,6 +154,89 @@ impl Oracle {
 
     /// Runs `cmd` with JSON `args` and binary inputs.
     pub fn try_call(&self, cmd: &str, args: Value, blobs: &[&[u8]]) -> Result<Response, String> {
+        self.try_call_with(cmd, args, blobs, true)
+    }
+
+    /// Runs `cmd` without the response cache: for large one-off requests (the battery's
+    /// exhaustive tier), whose responses would only fill the disk. Panics on a protocol error.
+    #[track_caller]
+    pub fn call_uncached(&self, cmd: &str, args: Value, blobs: &[&[u8]]) -> Response {
+        match self.try_call_with(cmd, args, blobs, false) {
+            Ok(r) => r,
+            Err(e) => panic!("oracle `{cmd}` failed: {e}"),
+        }
+    }
+
+    /// Runs `calls` in one oracle process with the `batch` command and returns their
+    /// responses, in order. Identical input blobs are sent once. With `cache`, the whole batch
+    /// is one cache entry. Panics on a protocol error.
+    #[track_caller]
+    pub fn batch(&self, calls: &[BatchCall<'_>], cache: bool) -> Vec<Response> {
+        // Deduplicate by address first (the usual case: one probe buffer, many calls), then
+        // by content, so the request doesn't depend on where the buffers live.
+        let mut by_address: HashMap<(usize, usize), usize> = HashMap::new();
+        let mut by_content: HashMap<u128, Vec<usize>> = HashMap::new();
+        let mut blobs: Vec<&[u8]> = Vec::new();
+        let mut entries = Vec::with_capacity(calls.len());
+        for call in calls {
+            let mut indices = Vec::with_capacity(call.blobs.len());
+            for &blob in &call.blobs {
+                let address = (blob.as_ptr() as usize, blob.len());
+                let index = *by_address.entry(address).or_insert_with(|| {
+                    let same = by_content
+                        .entry(xxhash_rust::xxh3::xxh3_128(blob))
+                        .or_default();
+                    if let Some(&i) = same.iter().find(|&&i| blobs[i] == blob) {
+                        return i;
+                    }
+                    blobs.push(blob);
+                    same.push(blobs.len() - 1);
+                    blobs.len() - 1
+                });
+                indices.push(index);
+            }
+            entries.push(json!({"cmd": call.cmd, "args": call.args, "blobs": indices}));
+        }
+        let args = json!({ "calls": entries });
+        let response = match self.try_call_with("batch", args, &blobs, cache) {
+            Ok(r) => r,
+            Err(e) => panic!("oracle `batch` of {} calls failed: {e}", calls.len()),
+        };
+        let results = response
+            .result
+            .as_array()
+            .unwrap_or_else(|| panic!("oracle `batch` returned {}", response.result));
+        assert_eq!(results.len(), calls.len(), "oracle `batch` result count");
+        let mut out_blobs: Vec<Option<Vec<u8>>> = response.blobs.into_iter().map(Some).collect();
+        results
+            .iter()
+            .map(|entry| {
+                let blobs = entry["blobs"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|i| {
+                        let i = i.as_u64().expect("blob index") as usize;
+                        out_blobs[i]
+                            .take()
+                            .expect("each response blob belongs to one call")
+                    })
+                    .collect();
+                Response {
+                    result: entry["result"].clone(),
+                    blobs,
+                }
+            })
+            .collect()
+    }
+
+    fn try_call_with(
+        &self,
+        cmd: &str,
+        args: Value,
+        blobs: &[&[u8]],
+        cache: bool,
+    ) -> Result<Response, String> {
         let header = json!({
             "cmd": cmd,
             "args": args,
@@ -145,7 +244,7 @@ impl Oracle {
         });
         let request = frame(&header, blobs);
 
-        let cache_file = self.cache_dir.as_ref().map(|dir| {
+        let cache_file = self.cache_dir.as_ref().filter(|_| cache).map(|dir| {
             let mut h = Xxh3::new();
             h.update(&self.identity.to_le_bytes());
             h.update(&request);
