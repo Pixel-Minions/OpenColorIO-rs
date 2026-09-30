@@ -4,3 +4,4 @@
 //! Ports of `src/utils/` @ v2.5.2: string and number helpers shared by the whole library.
 
 pub mod number_utils;
+pub mod string_utils;
