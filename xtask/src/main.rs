@@ -13,6 +13,7 @@ mod gate;
 mod guards;
 mod land;
 mod parity;
+mod scratch;
 mod upstream;
 
 const USAGE: &str = "\
@@ -26,6 +27,9 @@ Checking and landing chunks:
                               with --no-ff, regenerate the generated files, gate the
                               result and fast-forward phase0; never pushes
                               (`cargo xtask land --help`)
+  clean-scratch [--yes]       list, and with --yes delete: target/verify* in every
+                              checkout, worktrees of landed branches, and Rocky build
+                              volumes (ocio-rs-target-*) of no remaining worktree
 
 Oracle and fixtures (fixtures/ is written only by these commands):
   oracle info                 versions and platform of the pinned oracle wheel
@@ -67,6 +71,7 @@ fn main() -> ExitCode {
         ["land", rest @ ..] => {
             land::parse(rest).and_then(|(branch, rocky)| land::run(&branch, rocky))
         }
+        ["clean-scratch", rest @ ..] => scratch::run(rest),
         ["oracle", "info"] => fixtures::oracle_info(),
         ["oracle", "regen", group] => fixtures::regen(group),
         ["oracle", "check", group] => fixtures::check(group),
