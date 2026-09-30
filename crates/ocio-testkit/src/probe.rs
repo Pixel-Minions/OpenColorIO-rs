@@ -10,8 +10,8 @@
 //! - [`ProbeSet::Specials`]: [`specials`], the values that break renderers;
 //! - [`ProbeSet::Random`]: seeded values in named ranges ([`RandomRange`]: unit, HDR,
 //!   negative, tiny, huge, every bit pattern, ...);
-//! - [`ProbeSet::Neighbourhoods`]: every value within ±N ulp of given points, such as an op's
-//!   break points ([`neighbourhoods`]);
+//! - [`ProbeSet::Neighbourhoods`]: every value within ±N ulp, and every bit pattern within ±N
+//!   steps, of given points, such as an op's break points ([`neighbourhoods`]);
 //! - [`ProbeSet::NanBuffers`]: NaN pixels in buffers of every length from one pixel up
 //!   ([`nan_buffers`]), so that each part of a renderer's loops meets them.
 //!
@@ -301,26 +301,35 @@ fn from_order_key(key: i64) -> f32 {
     }
 }
 
-/// For each point, every value within `ulps` units in the last place, in value order: the
-/// neighbours of `0.0` are `-0.0` and the subnormals of both signs, those of `1.0` the floats
-/// just below and above it. The steps stop at ±Inf and never reach NaN. A NaN point has no
-/// neighbours in value order: its neighbours are the `2 * ulps` nearby bit patterns, other NaN
-/// payloads (which may be signalling).
+/// For each point, every value within `ulps` units in the last place in value order, and every
+/// bit pattern within `ulps` steps.
 ///
-/// The points come out in order, each with its `2 * ulps + 1` values from lowest to highest
-/// (fewer next to ±Inf).
+/// In value order, the neighbours of `0.0` are `-0.0` and the subnormals of both signs, those
+/// of `1.0` the floats just below and above it, and the steps stop at ±Inf. For finite nonzero
+/// points the bit-pattern steps give the same values; around ±0 and ±Inf they add NaNs
+/// (`0.0` minus one step is 0xffffffff, `+Inf` plus one is a signalling NaN), which are
+/// probes too. A NaN point has no value-order neighbours: its neighbours are the nearby bit
+/// patterns, other payloads, some signalling.
+///
+/// The points come out in order: each point's value-order neighbours from lowest to highest,
+/// then the bit patterns they don't already hold.
 pub fn neighbourhoods(points: &[f32], ulps: u32) -> Vec<f32> {
     let n = i64::from(ulps);
     let mut v = Vec::with_capacity(points.len() * (2 * ulps as usize + 1));
     for &x in points {
-        if x.is_nan() {
-            let d = ulps as i32;
-            v.extend((-d..=d).map(|d| f32::from_bits(x.to_bits().wrapping_add_signed(d))));
-            continue;
+        let start = v.len();
+        if !x.is_nan() {
+            let key = order_key(x);
+            let (lo, hi) = (order_key(f32::NEG_INFINITY), order_key(f32::INFINITY));
+            v.extend(((key - n).max(lo)..=(key + n).min(hi)).map(from_order_key));
         }
-        let key = order_key(x);
-        let (lo, hi) = (order_key(f32::NEG_INFINITY), order_key(f32::INFINITY));
-        v.extend(((key - n).max(lo)..=(key + n).min(hi)).map(from_order_key));
+        for d in -n..=n {
+            // Two's complement: adding `d as u32` steps `d` bit patterns, wrapping.
+            let bits = x.to_bits().wrapping_add(d as u32);
+            if !v[start..].iter().any(|y| y.to_bits() == bits) {
+                v.push(f32::from_bits(bits));
+            }
+        }
     }
     v
 }
@@ -398,6 +407,18 @@ pub fn all_f32_chunk(index: u64, pixels: u64) -> Vec<f32> {
         .collect()
 }
 
+/// `n` as an English ordinal: 1st, 2nd, 3rd, 4th, 11th, 21st, 61st, ...
+fn ordinal(n: usize) -> String {
+    let suffix = match (n % 10, n % 100) {
+        (_, 11..=13) => "th",
+        (1, _) => "st",
+        (2, _) => "nd",
+        (3, _) => "rd",
+        _ => "th",
+    };
+    format!("{n}{suffix}")
+}
+
 /// A named set of probe inputs for the battery.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProbeSet {
@@ -443,7 +464,7 @@ impl ProbeSet {
     pub fn name(&self) -> String {
         match self {
             ProbeSet::Halves { stride: 1 } => "all halves".to_string(),
-            ProbeSet::Halves { stride } => format!("every {stride}th half"),
+            ProbeSet::Halves { stride } => format!("every {} half", ordinal(*stride)),
             ProbeSet::Specials => "specials".to_string(),
             ProbeSet::Random { name, .. } => format!("random {name}"),
             ProbeSet::Neighbourhoods { ulps, .. } => format!("neighbourhoods of {ulps} ulp"),
@@ -621,38 +642,90 @@ mod tests {
     }
 
     #[test]
-    fn neighbourhoods_follow_value_order() {
+    fn neighbourhoods_hold_value_and_bit_pattern_neighbours() {
         let tiny = f32::from_bits(1);
-        assert_eq!(
-            bits(&neighbourhoods(&[0.0], 2)),
-            bits(&[-tiny, -0.0, 0.0, tiny, 2.0 * tiny])
-        );
-        assert_eq!(bits(&neighbourhoods(&[-0.0], 1)), bits(&[-tiny, -0.0, 0.0]));
+        // Value order through -0.0, then the NaNs just below +0.0 in bit-pattern order.
+        let mut expected = bits(&[-tiny, -0.0, 0.0, tiny, 2.0 * tiny]);
+        expected.extend([0xffff_fffe, 0xffff_ffff]);
+        assert_eq!(bits(&neighbourhoods(&[0.0], 2)), expected);
+        let mut expected = bits(&[-tiny, -0.0, 0.0]);
+        expected.push(0x7fff_ffff);
+        assert_eq!(bits(&neighbourhoods(&[-0.0], 1)), expected);
+        // Finite nonzero points: both orders give the same values.
         let below_one = f32::from_bits(1.0f32.to_bits() - 1);
         let above_one = f32::from_bits(1.0f32.to_bits() + 1);
         assert_eq!(
             bits(&neighbourhoods(&[1.0, -1.0], 1)),
             bits(&[below_one, 1.0, above_one, -above_one, -1.0, -below_one])
         );
-        // Stops at the infinities.
-        assert_eq!(
-            bits(&neighbourhoods(&[f32::MAX], 2)),
-            bits(&[
-                f32::from_bits(0x7f7f_fffd),
-                f32::from_bits(0x7f7f_fffe),
-                f32::MAX,
-                f32::INFINITY
-            ])
-        );
-        assert_eq!(
-            bits(&neighbourhoods(&[f32::NEG_INFINITY], 1)),
-            bits(&[f32::NEG_INFINITY, f32::MIN])
-        );
+        // Value order stops at the infinities; bit patterns go on into the NaNs.
+        let mut expected = bits(&[
+            f32::from_bits(0x7f7f_fffd),
+            f32::from_bits(0x7f7f_fffe),
+            f32::MAX,
+            f32::INFINITY,
+        ]);
+        expected.push(0x7f80_0001);
+        assert_eq!(bits(&neighbourhoods(&[f32::MAX], 2)), expected);
+        let mut expected = bits(&[f32::NEG_INFINITY, f32::MIN]);
+        expected.push(0xff80_0001);
+        assert_eq!(bits(&neighbourhoods(&[f32::NEG_INFINITY], 1)), expected);
         // A NaN's neighbours are the nearby payloads.
         assert_eq!(
             bits(&neighbourhoods(&[f32::from_bits(0x7fc0_0000)], 1)),
             vec![0x7fbf_ffff, 0x7fc0_0000, 0x7fc0_0001]
         );
+    }
+
+    /// The S2 oracle tests probed the bit patterns within 3 steps of each break point; the
+    /// neighbourhoods hold them all, and every value within 3 ulps in value order, for points
+    /// at zero, the infinities and NaN too.
+    #[test]
+    fn neighbourhoods_hold_the_s2_bit_pattern_neighbours() {
+        let points = [
+            0.0,
+            -0.0,
+            1.0,
+            -0.05,
+            1e-40,
+            f32::MIN_POSITIVE,
+            f32::MAX,
+            f32::MIN,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+            f32::from_bits(0xffc0_0000),
+        ];
+        for x in points {
+            let held = bits(&neighbourhoods(&[x], 3));
+            for d in -3i32..=3 {
+                let pattern = x.to_bits().wrapping_add_signed(d);
+                assert!(held.contains(&pattern), "{x:e}: {pattern:#010x}");
+            }
+            if !x.is_nan() {
+                for d in -3i64..=3 {
+                    let key = order_key(x) + d;
+                    if (order_key(f32::NEG_INFINITY)..=order_key(f32::INFINITY)).contains(&key) {
+                        let value = from_order_key(key).to_bits();
+                        assert!(held.contains(&value), "{x:e}: {value:#010x}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn ordinals() {
+        let names: Vec<String> = [1, 2, 3, 4, 11, 12, 13, 21, 22, 23, 61, 101, 111, 112]
+            .map(ordinal)
+            .to_vec();
+        assert_eq!(
+            names,
+            [
+                "1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "21st", "22nd", "23rd", "61st",
+                "101st", "111th", "112th"
+            ]
+        );
+        assert_eq!(ProbeSet::Halves { stride: 61 }.name(), "every 61st half");
     }
 
     #[test]
@@ -780,7 +853,7 @@ mod tests {
             ("every 61st half", 0x790f_f6d5_11dd_1e9f),
             ("specials", 0xd36e_7d82_fe87_5fc3),
             ("random", 0x0e44_d267_2a56_3dc6),
-            ("neighbourhoods", 0x4bd0_3bd1_100b_39e2),
+            ("neighbourhoods", 0x1636_2655_412e_6ab6),
         ];
         assert_eq!(digests, expected, "{digests:#018x?}");
     }

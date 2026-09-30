@@ -27,7 +27,10 @@
 //! Comparisons are pixel buffers; the integer-cast test (4 buffers, 17.1 M values) runs the
 //! S2 probe values at every tier. Generated cases that the wheel refuses (while a family's
 //! validation isn't ported) are counted in the cases but not compared. At `full`, the explicit
-//! cases see every value the old tests saw. A family run with many generated cases makes
+//! cases see every value the old tests saw: all halves, the specials, the S2 random values,
+//! and around each break point every bit pattern within 3 steps (the neighbourhoods hold both
+//! the value-order and the bit-pattern neighbours, so the old neighbours of zero, 0xfffffffd
+//! to 0xffffffff, are there). A family run with many generated cases makes
 //! tens of thousands of small calls: about 0.13 ms each inside one oracle process, against
 //! 0.3 s to start a process natively (about 10 s under Intel SDE).
 //!

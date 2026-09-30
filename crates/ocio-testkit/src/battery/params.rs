@@ -58,8 +58,8 @@ pub struct Slot {
     pub name: String,
     /// How the op uses it.
     pub precision: Precision,
-    /// The output channels it applies to: a NaN or infinite value makes these channels
-    /// compare under W0002.
+    /// The output channels it applies to: a NaN value makes these channels compare under
+    /// W0002.
     pub channels: Channels,
 }
 
@@ -576,7 +576,7 @@ mod tests {
             assert!(report.contains("1 of 4 values differ bitwise"), "{report}");
         }
 
-        // A case without NaN or infinite parameters never uses W0002.
+        // A case without NaN parameters never uses W0002.
         let typical = Case::new("typical", toy());
         assert!(!typical.w0002_applies(&fwd));
         assert!(matches!(

@@ -800,8 +800,8 @@ fn extreme_camera_cases() -> Vec<Case<Camera>> {
     ]
 }
 
-/// Finite parameters that overflow, against the wheel, bit for bit (W0002 covers NaN and
-/// infinite parameters only). Their NaN coefficients reach the sites where the wheels' machine
+/// Finite parameters that overflow, against the wheel, bit for bit (W0002 covers NaN
+/// parameters only). Their NaN coefficients reach the sites where the wheels' machine
 /// code does not use upstream's source order: the camera log-to-lin linear segment (both
 /// wheels) and `GetLogSideBreak` (Linux).
 #[test]
