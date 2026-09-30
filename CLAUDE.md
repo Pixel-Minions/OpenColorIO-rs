@@ -15,6 +15,7 @@ truth: read §3 (definition of done), §7 (how agents work) and your card before
    - Upstream tests are copied verbatim, with a citation. This includes the own tests of a library the wheel is built with, at the version it uses (yaml-cpp 0.8.0, Imath 3.2.1).
    - The platform C runtime is the reference for C and C++ runtime behavior (`ocio-testkit` `crt.rs`), and the CPU for instruction semantics.
    - Never use the port's own output as an expected value. Never type a number into a test that didn't come from one of those places.
+   - A test may pin a digest of the inputs it generates itself (probe values, parameter cases, plans), so they can't change unnoticed. Expected *outputs* still come only from the oracle, upstream's tests or the platform.
 3. **Comparisons are exact.**
    - Floats compare bitwise (`assert_f32_bits_eq`, `assert_pixels_bits_eq`); text compares byte for byte (`assert_text_eq`).
    - The only tolerances allowed are upstream's own, in ported upstream tests, through `ocio_testkit::upstream` helpers.
