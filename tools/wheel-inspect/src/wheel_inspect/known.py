@@ -51,8 +51,8 @@ WINDOWS = [
         0x18034BA20,
         "__sse2_powf4",
         "svml-kernel",
-        "MSVC 14.44.35211's svml_spowf4_sse2.obj: a program linked with `cl /O2 /MD` has the "
-        "same 594 instructions (addresses aside) and the same constants (the DLL's _RDATA "
-        "section). It is the only function that reads _RDATA.",
+        "svml_spowf4_sse2.obj of MSVC 14.44.35207's msvcrt.lib: a program linked with cl "
+        "19.44.35211 `/O2 /MD` has the same 594 instructions (addresses aside) and the same "
+        "constants (the DLL's _RDATA section). It is the only function that reads _RDATA.",
     ),
 ]

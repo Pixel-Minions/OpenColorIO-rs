@@ -67,7 +67,8 @@ def matches(query: str, demangled: str) -> bool:
     or without template arguments (`CameraLog2LinRenderer::apply`, `GetLogSideBreak`). A query
     with a parameter list compares the parameters too."""
     q = canonical(query)
-    if "(" in query:
+    # Parentheses in `(anonymous namespace)` or in template arguments are not parameters.
+    if "(" in strip_templates(query).replace("(anonymous namespace)", ""):
         candidates = [canonical(demangled)]
     else:
         full = canonical(strip_params(demangled))
