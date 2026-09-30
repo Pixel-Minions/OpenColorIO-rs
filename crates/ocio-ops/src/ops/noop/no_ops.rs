@@ -12,15 +12,17 @@
 //! keeps the op class, and its state, in the data's [`NoOpKind`], since an [`Op`] is only its
 //! data (`docs/architecture.md`, "Op data and ops").
 //!
-//! So far: `FileNoOp` and `LookNoOp`. Not yet ported: `AllocationNoOp` (chunk 1.3n1), the
-//! legacy GPU partition (`PartitionGPUOps`, `Create3DLut`), which needs the Lut3D op, and
-//! `dumpMetadata`, which needs the processor's metadata (WP 1.8).
+//! Not yet ported: the legacy GPU partition (`PartitionGPUOps`, `Create3DLut` and their
+//! helpers), which needs the Lut3D op, and `dumpMetadata`, which needs the processor's
+//! metadata (WP 1.8).
 
+use std::mem::discriminant;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::format_metadata::FormatMetadataImpl;
 use crate::op::{Op, OpVec};
 use crate::op_data::OpData;
+use crate::ops::allocation::AllocationData;
 
 /// The data of a `FileNoOp`: the path of the file a `FileTransform` loads, and whether it is
 /// loaded. It lets the `FileTransform` of a file that references itself, directly or not, be
@@ -78,6 +80,9 @@ impl Clone for FileNoOpData {
 /// Which no-op class holds the data, with that class's own state.
 #[derive(Debug, Clone)]
 pub enum NoOpKind {
+    /// `AllocationNoOp`: the allocation of a color space, for the legacy GPU path (its
+    /// `m_allocationData`).
+    Allocation(AllocationData),
     /// `FileNoOp`: the file a `FileTransform` loads. Its data is a `FileNoOpData`.
     File(FileNoOpData),
     /// `LookNoOp`: the look a `LookTransform` applies (its `m_look`), `-` first when the
@@ -118,7 +123,16 @@ impl NoOpData {
     pub fn file_data(&self) -> Option<&FileNoOpData> {
         match &self.kind {
             NoOpKind::File(file) => Some(file),
-            NoOpKind::Look(_) => None,
+            NoOpKind::Allocation(_) | NoOpKind::Look(_) => None,
+        }
+    }
+
+    /// The allocation of an `AllocationNoOp`: what upstream's `AllocationNoOp::getGpuAllocation`
+    /// gives (src/OpenColorIO/ops/noop/NoOps.cpp:88-91 @ v2.5.2).
+    pub fn get_gpu_allocation(&self) -> Option<&AllocationData> {
+        match &self.kind {
+            NoOpKind::Allocation(allocation) => Some(allocation),
+            NoOpKind::File(_) | NoOpKind::Look(_) => None,
         }
     }
 
@@ -162,15 +176,17 @@ impl NoOpData {
     /// A new op of the same class with the same state: new data, so empty metadata, and a
     /// `FileNoOpData` still being loaded.
     ///
-    /// Port of `FileNoOp::clone` and `LookNoOp::clone` (src/OpenColorIO/ops/noop/NoOps.cpp:
-    /// 334-338, 420-423 @ v2.5.2).
+    /// Port of `AllocationNoOp::clone`, `FileNoOp::clone` and `LookNoOp::clone`
+    /// (src/OpenColorIO/ops/noop/NoOps.cpp:65-68, 334-338, 420-423 @ v2.5.2).
     pub(crate) fn clone_op(&self) -> Op {
         Op::new(OpData::NoOp(NoOpData::new(self.kind.clone())))
     }
 
-    /// Port of `FileNoOp::getInfo` and `LookNoOp::getInfo` (NoOps.cpp:310, 396 @ v2.5.2).
+    /// Port of `AllocationNoOp::getInfo`, `FileNoOp::getInfo` and `LookNoOp::getInfo`
+    /// (NoOps.cpp:40, 310, 396 @ v2.5.2).
     pub(crate) fn get_info(&self) -> &'static str {
         match self.kind {
+            NoOpKind::Allocation(_) => "<AllocationNoOp>",
             NoOpKind::File(_) => "<FileNoOp>",
             NoOpKind::Look(_) => "<LookNoOp>",
         }
@@ -179,41 +195,49 @@ impl NoOpData {
     /// Whether `op` is of the same class: what upstream's `DynamicPtrCast` to the class
     /// finds.
     ///
-    /// Port of `FileNoOp::isSameType` and `LookNoOp::isSameType` (NoOps.cpp:340-345,
-    /// 425-430 @ v2.5.2).
+    /// Port of `AllocationNoOp::isSameType`, `FileNoOp::isSameType` and
+    /// `LookNoOp::isSameType` (NoOps.cpp:70-75, 340-345, 425-430 @ v2.5.2).
     pub(crate) fn is_same_type(&self, op: &Op) -> bool {
-        let OpData::NoOp(other) = &**op.data();
-        match (&self.kind, &other.kind) {
-            (NoOpKind::File(_), NoOpKind::File(_)) | (NoOpKind::Look(_), NoOpKind::Look(_)) => true,
-            (NoOpKind::File(_), NoOpKind::Look(_)) | (NoOpKind::Look(_), NoOpKind::File(_)) => {
-                false
-            }
+        match &**op.data() {
+            OpData::NoOp(other) => discriminant(&self.kind) == discriminant(&other.kind),
+            OpData::Reference(_) => false,
         }
     }
 
     /// Whether `op` undoes this op: whether it is of the same class.
     ///
-    /// Port of `FileNoOp::isInverse` and `LookNoOp::isInverse` (NoOps.cpp:347-350, 432-435 @
-    /// v2.5.2).
+    /// Port of `AllocationNoOp::isInverse`, `FileNoOp::isInverse` and `LookNoOp::isInverse`
+    /// (NoOps.cpp:77-81, 347-350, 432-435 @ v2.5.2).
     pub(crate) fn is_inverse(&self, op: &Op) -> bool {
         self.is_same_type(op)
     }
 
-    /// The op's cache ID: the look's name for a `LookNoOp`, and nothing for a `FileNoOp`.
+    /// The op's cache ID: the allocation's for an `AllocationNoOp`, the look's name for a
+    /// `LookNoOp`, and nothing for a `FileNoOp`.
     ///
     /// `FileNoOp::getCacheID` returns its `m_fileReference`, which its constructor never sets:
     /// it gives the path to its `FileNoOpData` instead. So the cache ID is empty
     /// (improvement candidate I-40). A processor's cache ID skips no-ops, but
     /// [`serialize_op_vec`](crate::op::serialize_op_vec) prints it.
     ///
-    /// Port of `FileNoOp::getCacheID` and `LookNoOp::getCacheID` (NoOps.cpp:300-304, 358-361,
-    /// 442-445 @ v2.5.2).
+    /// Port of `AllocationNoOp::getCacheID`, `FileNoOp::getCacheID` and `LookNoOp::getCacheID`
+    /// (NoOps.cpp:83-86, 300-304, 358-361, 442-445 @ v2.5.2).
     pub(crate) fn get_op_cache_id(&self) -> Vec<u8> {
         match &self.kind {
+            NoOpKind::Allocation(allocation) => allocation.get_cache_id().into_bytes(),
             NoOpKind::File(_) => Vec::new(),
             NoOpKind::Look(look) => look.clone(),
         }
     }
+}
+
+/// Appends an `AllocationNoOp` that carries `allocation_data`.
+///
+/// Port of `CreateGpuAllocationNoOp` (src/OpenColorIO/ops/noop/NoOps.cpp:104-107 @ v2.5.2),
+/// which `ops/allocation/AllocationOp.h` declares.
+pub fn create_gpu_allocation_no_op(ops: &mut OpVec, allocation_data: &AllocationData) {
+    let data = NoOpData::new(NoOpKind::Allocation(allocation_data.clone()));
+    ops.push_back(Op::new(OpData::NoOp(data)));
 }
 
 /// Appends a `FileNoOp` for the file at `file_reference`, still being loaded.

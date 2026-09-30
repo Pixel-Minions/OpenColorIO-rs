@@ -16,6 +16,7 @@ use std::sync::Arc;
 use crate::exception::{Exception, Result};
 use crate::format_metadata::{FormatMetadataImpl, METADATA_ID, METADATA_NAME};
 use crate::ops::noop::NoOpData;
+use crate::ops::reference::ReferenceOpData;
 
 /// The type of an op's data.
 ///
@@ -91,6 +92,8 @@ pub fn get_type_name(op_type: OpDataType) -> Result<&'static str> {
 /// Port of `OpData` (src/OpenColorIO/Op.h:93-171, Op.cpp:44-104 @ v2.5.2).
 #[derive(Debug, Clone)]
 pub enum OpData {
+    /// `ReferenceOpData`.
+    Reference(ReferenceOpData),
     /// `NoOpData` and its subclass `FileNoOpData`.
     NoOp(NoOpData),
 }
@@ -107,6 +110,7 @@ impl OpData {
     /// Port of `OpData::getType`, pure virtual (src/OpenColorIO/Op.h:136 @ v2.5.2).
     pub fn get_type(&self) -> OpDataType {
         match self {
+            OpData::Reference(_) => OpDataType::Reference,
             OpData::NoOp(_) => OpDataType::NoOp,
         }
     }
@@ -116,6 +120,10 @@ impl OpData {
     /// Port of `OpData::validate`, pure virtual (src/OpenColorIO/Op.h:134 @ v2.5.2).
     pub fn validate(&self) -> Result<()> {
         match self {
+            OpData::Reference(data) => {
+                data.validate();
+                Ok(())
+            }
             OpData::NoOp(data) => {
                 data.validate();
                 Ok(())
@@ -128,6 +136,7 @@ impl OpData {
     /// Port of `OpData::isNoOp`, pure virtual (src/OpenColorIO/Op.h:138-139 @ v2.5.2).
     pub fn is_no_op(&self) -> bool {
         match self {
+            OpData::Reference(data) => data.is_no_op(),
             OpData::NoOp(data) => data.is_no_op(),
         }
     }
@@ -138,6 +147,7 @@ impl OpData {
     /// Port of `OpData::isIdentity`, pure virtual (src/OpenColorIO/Op.h:141-143 @ v2.5.2).
     pub fn is_identity(&self) -> bool {
         match self {
+            OpData::Reference(data) => data.is_identity(),
             OpData::NoOp(data) => data.is_identity(),
         }
     }
@@ -150,7 +160,7 @@ impl OpData {
     pub fn get_simpler_replacement(&self, _ops: &mut OpDataVec) -> Result<()> {
         match self {
             // The OpData default: nothing.
-            OpData::NoOp(_) => Ok(()),
+            OpData::Reference(_) | OpData::NoOp(_) => Ok(()),
         }
     }
 
@@ -161,6 +171,7 @@ impl OpData {
     /// v2.5.2).
     pub fn has_channel_crosstalk(&self) -> bool {
         match self {
+            OpData::Reference(data) => data.has_channel_crosstalk(),
             OpData::NoOp(data) => data.has_channel_crosstalk(),
         }
     }
@@ -172,6 +183,9 @@ impl OpData {
     /// also covers); each override then compares its parameters.
     pub fn equals(&self, other: &OpData) -> bool {
         match self {
+            OpData::Reference(data) => {
+                matches!(other, OpData::Reference(other) if data.equals(other))
+            }
             // NoOpData keeps the OpData base: the type only.
             OpData::NoOp(_) => other.get_type() == OpDataType::NoOp,
         }
@@ -182,6 +196,7 @@ impl OpData {
     /// Port of `OpData::getCacheID`, pure virtual (src/OpenColorIO/Op.h:159-160 @ v2.5.2).
     pub fn get_cache_id(&self) -> Result<Vec<u8>> {
         match self {
+            OpData::Reference(data) => data.get_cache_id(),
             OpData::NoOp(data) => Ok(data.get_cache_id()),
         }
     }
@@ -191,6 +206,7 @@ impl OpData {
     /// Port of `OpData::getFormatMetadata() const` (src/OpenColorIO/Op.h:164 @ v2.5.2).
     pub fn get_format_metadata(&self) -> &FormatMetadataImpl {
         match self {
+            OpData::Reference(data) => data.get_format_metadata(),
             OpData::NoOp(data) => data.get_format_metadata(),
         }
     }
@@ -200,6 +216,7 @@ impl OpData {
     /// Port of `OpData::getFormatMetadata()` (src/OpenColorIO/Op.h:163 @ v2.5.2).
     pub fn get_format_metadata_mut(&mut self) -> &mut FormatMetadataImpl {
         match self {
+            OpData::Reference(data) => data.get_format_metadata_mut(),
             OpData::NoOp(data) => data.get_format_metadata_mut(),
         }
     }
