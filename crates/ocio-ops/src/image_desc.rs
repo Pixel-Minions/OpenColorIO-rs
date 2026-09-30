@@ -63,26 +63,13 @@ impl Element {
         }
     }
 
-    /// How the binding names a buffer of this type:
+    /// The type's NumPy name, as the Python binding names a buffer it receives:
     /// `formatCodeToDtypeName(info.format, info.itemsize * 8)` of its format code, `B`, `H`,
     /// `e` or `f` (src/bindings/python/PyUtils.cpp:26-54 @ v2.5.2).
-    fn received_name(self) -> &'static str {
+    fn name(self) -> &'static str {
         match self {
             Element::U8 => "uint8",
             Element::U16 => "uint16",
-            Element::F16 => "float16",
-            Element::F32 => "float32",
-        }
-    }
-
-    /// How the binding names the type it expects:
-    /// `formatCodeToDtypeName(std::string(1, dt.kind()), dt.itemsize() * 8)`
-    /// (src/bindings/python/PyUtils.cpp:165-175 @ v2.5.2). The kind of the unsigned types, `u`,
-    /// is not one of the format codes that function knows, so they print as `'u' (16-bit)`.
-    fn expected_name(self) -> &'static str {
-        match self {
-            Element::U8 => "'u' (8-bit)",
-            Element::U16 => "'u' (16-bit)",
             Element::F16 => "float16",
             Element::F32 => "float32",
         }
@@ -91,13 +78,15 @@ impl Element {
 
 /// The Python binding's `checkBufferType` (src/bindings/python/PyUtils.cpp:165-180 @ v2.5.2),
 /// for a typed slice: its channel type must be the bit depth's. Raw bytes pass; so do the bit
-/// depths the binding refuses, for which the library's own check raises later.
+/// depths the binding refuses, for which the library's own check raises later. The message names
+/// both types as NumPy does; the binding prints an expected unsigned type as `'u' (16-bit)`
+/// (improvement candidate I-23).
 fn check_buffer_type(element: Option<Element>, bit_depth: BitDepth) -> Result<()> {
     match (element, Element::for_bit_depth(bit_depth)) {
         (Some(received), Some(expected)) if received != expected => Err(Exception::new(format!(
             "Incompatible buffer format: expected {}, but received {}",
-            expected.expected_name(),
-            received.received_name()
+            expected.name(),
+            received.name()
         ))),
         _ => Ok(()),
     }
