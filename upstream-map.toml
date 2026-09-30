@@ -49,7 +49,8 @@ note = "build system"
 path = "src/OpenColorIO/AVX.h"
 kind = "src"
 target = ["crates/ocio-ops/src/avx.rs"]
-status = "todo"
+status = "partial"
+note = "S4: the F16C half conversions, as exact scalar lanes (the half crate); the rest is todo"
 
 [[file]]
 path = "src/OpenColorIO/AVX2.h"
@@ -509,7 +510,8 @@ note = "S2: every x86 fast-math function and helper, as exact scalar lanes; not 
 path = "src/OpenColorIO/SSE2.h"
 kind = "src"
 target = ["crates/ocio-ops/src/sse2.rs"]
-status = "todo"
+status = "partial"
+note = "S4: the software half conversions (sse2_cvtps_ph, sse2_cvtph_ps) with sse2_blendv, as exact scalar lanes; the rest is todo"
 
 [[file]]
 path = "src/OpenColorIO/ScanlineHelper.cpp"
