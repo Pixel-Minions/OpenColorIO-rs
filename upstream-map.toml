@@ -3938,7 +3938,7 @@ path = "src/utils/StringUtils.h"
 kind = "src"
 target = ["crates/ocio-ops/src/utils/string_utils.rs"]
 status = "done"
-note = "On &str (every operation cuts or maps at ASCII bytes), plus byte-level trims."
+note = "On byte strings (&[u8] in, Vec<u8> out), as C++ std::string: OCIO passes these functions arbitrary bytes. SplitByWhiteSpaces assumes the classic global locale."
 
 [[file]]
 path = "tests/CMakeLists.txt"
