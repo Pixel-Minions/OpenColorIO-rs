@@ -172,3 +172,117 @@ fn rows_past_the_int_range_fail() {
     helper.y_index = c_int::MIN;
     assert_eq!(helper.prep_rgba_scanline().unwrap_err().message(), TOO_TALL);
 }
+
+#[test]
+fn a_row_past_max_size_is_a_length_error() {
+    // `std::vector<T>::resize` past `max_size()`, `PTRDIFF_MAX / sizeof(T)` values in libstdc++.
+    let limit = isize::MAX as usize / size_of::<f32>();
+    let mut rows = Vec::<f32>::new();
+    let error = std_resize(&mut rows, limit + 1, 0.0).unwrap_err();
+    assert_eq!(error.kind(), ExceptionKind::LengthError);
+    assert_eq!(error.message(), VECTOR_TOO_LONG);
+    let mut bytes = Vec::<u8>::new();
+    let error = std_resize(&mut bytes, isize::MAX as usize + 1, 0).unwrap_err();
+    assert_eq!(error.kind(), ExceptionKind::LengthError);
+    // Within it, the values are there.
+    std_resize(&mut rows, 3, 0.5).unwrap();
+    assert_eq!(rows, [0.5; 3]);
+}
+
+/// The review's probe: a planar F32 image of 2^60 by 1 pixels with zero strides. Through the
+/// Linux wheel, `init` raises `ValueError` "vector::_M_default_append", the libstdc++ message
+/// of the rows' resize (`4 * width` floats are past `max_size()`). A Windows `long` can't hold
+/// the width.
+#[cfg(target_os = "linux")]
+#[test]
+fn rows_past_max_size_raise_at_init() {
+    let mut values = [0u8; 12];
+    let mut img = one_value_planes(&mut values, 1 << 60, 1);
+    let mut helper = f32_helper();
+    let error = helper.init(&mut img).unwrap_err();
+    assert_eq!(error.kind(), ExceptionKind::LengthError);
+    assert_eq!(error.message(), "vector::_M_default_append");
+}
+
+/// The environment variable that makes [`rows_that_cant_be_allocated_raise_bad_alloc`] run as
+/// its child, under a memory limit.
+#[cfg(target_os = "linux")]
+const BAD_ALLOC_CHILD: &str = "OCIO_RS_SCANLINE_BAD_ALLOC_CHILD";
+
+/// The review's probe: a planar F32 image of 2^32 by 1 pixels with zero strides, under
+/// `ulimit -v 4000000`. Through the Linux wheel, `init` raises `MemoryError` "std::bad_alloc":
+/// the rows' 64 GiB can't be had. The test runs itself again under that limit (Linux
+/// overcommits memory otherwise), where the helper raises the same.
+#[cfg(target_os = "linux")]
+#[test]
+fn rows_that_cant_be_allocated_raise_bad_alloc() {
+    if std::env::var_os(BAD_ALLOC_CHILD).is_some() {
+        let mut values = [0u8; 12];
+        let mut img = one_value_planes(&mut values, 1 << 32, 1);
+        let mut helper = f32_helper();
+        let error = helper.init(&mut img).unwrap_err();
+        println!("child: {:?} {:?}", error.kind(), error.message());
+        return;
+    }
+    let exe = std::env::current_exe().unwrap();
+    let command = format!(
+        "ulimit -v 4000000 && exec \"{}\" --exact \
+         scanline_helper::tests::rows_that_cant_be_allocated_raise_bad_alloc --nocapture \
+         --test-threads 1",
+        exe.display()
+    );
+    let output = std::process::Command::new("sh")
+        .args(["-c", &command])
+        .env(BAD_ALLOC_CHILD, "1")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "{stdout}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        stdout.contains("child: BadAlloc \"std::bad_alloc\""),
+        "{stdout}"
+    );
+}
+
+#[test]
+fn rows_are_sized_only_where_upstream_sizes_them() {
+    // In place, an RGBA-packed F32 image is its own RGBA row: no row at all.
+    let mut pixels = [0f32; 8];
+    let mut img = crate::image_desc::PackedImageDesc::new(&mut pixels[..], 2, 1, 4).unwrap();
+    let mut helper = f32_helper();
+    helper.init(&mut img).unwrap();
+    assert_eq!(helper.rgba_float_buffer.capacity(), 0);
+    assert_eq!(helper.in_bit_depth_buffer.capacity(), 0);
+    assert_eq!(helper.out_bit_depth_buffer.capacity(), 0);
+    // Processing it doesn't size any either (the rows are aligned).
+    while helper.prep_rgba_scanline().unwrap().is_some() {
+        helper.finish_rgba_scanline().unwrap();
+    }
+    assert_eq!(helper.own_rgba.capacity(), 0);
+
+    // From planes into an RGBA-packed F32 image: m_inBitDepthBuffer only.
+    let mut values = [0u8; 12];
+    let src = one_value_planes(&mut values, 2, 1);
+    let mut pixels = [0f32; 8];
+    let mut dst = crate::image_desc::PackedImageDesc::new(&mut pixels[..], 2, 1, 4).unwrap();
+    let mut helper = f32_helper();
+    helper.init_src_dst(&src, &mut dst).unwrap();
+    assert_eq!(helper.in_bit_depth_buffer.len(), 8);
+    assert_eq!(helper.rgba_float_buffer.capacity(), 0);
+    assert_eq!(helper.out_bit_depth_buffer.capacity(), 0);
+
+    // From an RGBA-packed image into planes: m_rgbaFloatBuffer and m_outBitDepthBuffer.
+    let pixels = [0f32; 8];
+    let src = crate::image_desc::PackedImageDesc::new(&pixels[..], 2, 1, 4).unwrap();
+    let mut values = [0u8; 12];
+    let mut dst = one_value_planes(&mut values, 2, 1);
+    let mut helper = f32_helper();
+    helper.init_src_dst(&src, &mut dst).unwrap();
+    assert_eq!(helper.in_bit_depth_buffer.capacity(), 0);
+    assert_eq!(helper.rgba_float_buffer.len(), 8);
+    assert_eq!(helper.out_bit_depth_buffer.len(), 8);
+}

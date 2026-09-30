@@ -120,6 +120,15 @@ pub trait ChannelType: Copy + Default + Debug + Send + Sync + 'static {
     /// Writes the value into the first `size_of::<Self>()` bytes, in the machine's byte order.
     fn write_ne(self, bytes: &mut [u8]);
 
+    /// The values `bytes` hold, in the machine's byte order, without a copy: `None` when the
+    /// bytes aren't aligned for the type (C++ reads a `Type *` at any alignment; the port then
+    /// copies them with [`read_ne`](Self::read_ne)). `bytes` holds a whole number of values.
+    fn view(bytes: &[u8]) -> Option<&[Self]>;
+
+    /// The values `bytes` hold, to write, without a copy: `None` when the bytes aren't aligned
+    /// for the type. `bytes` holds a whole number of values.
+    fn view_mut(bytes: &mut [u8]) -> Option<&mut [Self]>;
+
     /// The values as the input of a bit-depth conversion.
     fn pixels(values: &[Self]) -> Pixels<'_>;
 
@@ -152,6 +161,14 @@ macro_rules! channel_type {
             #[inline]
             fn write_ne(self, bytes: &mut [u8]) {
                 bytes[..size_of::<$t>()].copy_from_slice(&self.to_ne_bytes());
+            }
+
+            fn view(bytes: &[u8]) -> Option<&[Self]> {
+                <[$t] as zerocopy::FromBytes>::ref_from_bytes(bytes).ok()
+            }
+
+            fn view_mut(bytes: &mut [u8]) -> Option<&mut [Self]> {
+                <[$t] as zerocopy::FromBytes>::mut_from_bytes(bytes).ok()
             }
 
             fn pixels(values: &[Self]) -> Pixels<'_> {
