@@ -563,11 +563,14 @@ pub(crate) const GENERIC_SHAPES: [Shape; 12] = [
 ];
 
 /// RGBA-packed layouts, which the CPU engine processes a whole row at a time: tight, with
-/// padded rows, and bottom-up.
-pub(crate) const PACKED_SHAPES: [Shape; 3] = [
+/// padded rows, bottom-up, and with rows one byte apart, so that every other row isn't aligned
+/// for a 16- or 32-bit channel type (the port copies those, and processes the others in
+/// place).
+pub(crate) const PACKED_SHAPES: [Shape; 4] = [
     Shape::Packed(Channels::Count(4), [0, 0, 0]),
     Shape::Packed(Channels::Order(ChannelOrder::Rgba), [0, 0, 24]),
     Shape::Packed(Channels::Count(4), [0, 0, -1]),
+    Shape::Packed(Channels::Count(4), [0, 0, 1]),
 ];
 
 /// Adds a buffer of `size` bytes: source values of `depth` (seeded by `seed`), or the prefill.

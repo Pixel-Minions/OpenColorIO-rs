@@ -3,12 +3,19 @@
 
 //! Errors: a port of `OCIO::Exception` and `OCIO::ExceptionMissingFile`
 //! (`src/OpenColorIO/Exception.cpp`, `include/OpenColorIO/OpenColorIO.h` @ v2.5.2), and of the
-//! C++ standard exceptions that reach OCIO's callers (`std::length_error`).
+//! C++ standard exceptions that reach OCIO's callers (`std::length_error`, `std::bad_alloc`).
 //!
 //! Messages are part of the byte-exact surface (PLAN.md §3): every error carries upstream's
 //! text verbatim, and `Display` prints exactly that text.
 
 use std::fmt;
+
+/// `std::bad_alloc::what()` of the C++ library the wheel uses.
+const BAD_ALLOC: &str = if cfg!(target_os = "windows") {
+    "bad allocation"
+} else {
+    "std::bad_alloc"
+};
 
 /// Which upstream exception type an error corresponds to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -21,6 +28,10 @@ pub enum ExceptionKind {
     /// (`std::vector::resize`, improvement candidate U-3). PyOpenColorIO raises it as
     /// `ValueError`.
     LengthError,
+    /// `std::bad_alloc`, which `operator new` raises when the memory can't be had (a
+    /// `std::vector::resize` of the scanline rows, U-3). PyOpenColorIO raises it as
+    /// `MemoryError`.
+    BadAlloc,
 }
 
 /// An OpenColorIO error: upstream's exception type and its message, verbatim.
@@ -52,6 +63,15 @@ impl Exception {
         Exception {
             kind: ExceptionKind::LengthError,
             message: message.into(),
+        }
+    }
+
+    /// A `std::bad_alloc`, with the C++ library's `what()`: "bad allocation" in MSVC's (both
+    /// modules of the Windows wheel hold the text), "std::bad_alloc" in libstdc++.
+    pub fn bad_alloc() -> Self {
+        Exception {
+            kind: ExceptionKind::BadAlloc,
+            message: BAD_ALLOC.to_string(),
         }
     }
 
