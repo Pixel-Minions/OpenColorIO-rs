@@ -17,9 +17,13 @@
 //! its `result`, not a protocol error.
 //!
 //! Responses are cached under `<target>/oracle-cache`, keyed by the request, the oracle's
-//! sources and lock file, and this machine's OS and CPU. Set `OCIO_RS_ORACLE_NO_CACHE=1` to
-//! bypass the cache. Environment variables named `OCIO` or `OCIO_*` are never passed to the
-//! oracle, so its results don't depend on the caller's environment.
+//! sources and lock file, and this machine's OS and CPU ([`machine_description`]). Set
+//! `OCIO_RS_ORACLE_NO_CACHE=1` to bypass the cache. Environment variables named `OCIO` or
+//! `OCIO_*` are never passed to the oracle, so its results don't depend on the caller's
+//! environment.
+//!
+//! Under Intel SDE (`scripts/sde.sh`), the test process and the oracle it starts both see the
+//! emulated CPU, so the wheel and the port dispatch to the SIMD kernels of that CPU.
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -289,7 +293,13 @@ fn collect_py_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// OS, architecture, CPU model and the SIMD features OCIO's `CPUInfo` looks at.
+/// OS, architecture, CPU model, and what OCIO's `CPUInfo` reads: the CPUID vendor and
+/// signature (family, model and stepping, which decide the "slow" flags such as AVX2
+/// slow-gather on Haswell) and the SIMD features.
+///
+/// The CPUID values are what this process sees. Under Intel SDE they describe the emulated CPU,
+/// while the OS still reports the host's CPU model. That keeps the cache of each emulated CPU
+/// apart, even for two CPUs with the same features (Haswell and Skylake).
 pub fn machine_description() -> String {
     let mut s = format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH);
     if let Some(cpu) = cpu_model() {
@@ -298,6 +308,18 @@ pub fn machine_description() -> String {
     }
     #[cfg(target_arch = "x86_64")]
     {
+        use std::arch::x86_64::__cpuid;
+        let leaf0 = __cpuid(0);
+        let vendor: Vec<u8> = [leaf0.ebx, leaf0.edx, leaf0.ecx]
+            .iter()
+            .flat_map(|r| r.to_le_bytes())
+            .collect();
+        s.push_str(&format!(
+            " cpuid={}:{:08x}",
+            String::from_utf8_lossy(&vendor),
+            __cpuid(1).eax
+        ));
+
         let features = [
             ("sse2", std::arch::is_x86_feature_detected!("sse2")),
             ("sse3", std::arch::is_x86_feature_detected!("sse3")),

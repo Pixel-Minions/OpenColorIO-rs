@@ -98,6 +98,10 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
 - **Both reference platforms:**
   - Windows: `cargo test ...`
   - Rocky Linux 9: `scripts/rocky9.sh cargo test ...`. It uses the `docker/rocky9` image, with the checkout mounted at `/work`.
+- **Emulated CPUs.** This machine and GitHub's runners only run the SIMD kernels their own CPUs select. `scripts/sde.sh <cpu> <cmd>` runs a command on a CPU emulated by Intel SDE, and the wheel and the port then both pick that CPU's kernels.
+  - Tests whose results depend on the CPU (SIMD kernels, CPUInfo, libm calls) belong to a test target in the `cpu-tests` alias (`.cargo/config.toml`). Add new targets of that kind there.
+  - CI runs `cargo cpu-tests --release` on `nhm` (SSE2 kernels), `snb` (AVX), `hsw` (AVX2 with slow gather), `skl` (AVX2) and `skx` (AVX-512), on both platforms.
+  - A chunk that adds or changes a SIMD kernel runs it locally too, on the CPUs whose kernel it touches: `scripts/sde.sh snb cargo cpu-tests --release`, and `scripts/rocky9.sh scripts/sde.sh snb cargo cpu-tests --release`.
 
 ## Layout and conventions
 
@@ -127,3 +131,5 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
 | `cargo xtask oracle regen <group>` | Regenerate committed fixtures (owner-reviewed) |
 | `cargo xtask oracle check-all` | Prove committed fixtures are identical on this platform |
 | `scripts/rocky9.sh <cmd>` | Run a command on the Linux reference platform |
+| `cargo cpu-tests` | The tests whose results depend on the CPU |
+| `scripts/sde.sh <cpu> <cmd>` | Run a command on an emulated CPU (`nhm`, `snb`, `hsw`, `skl`, `skx`, ...) |

@@ -53,6 +53,13 @@ below is a list of mergeable chunks (`CLAUDE.md` → "Chunks").
 - The PR template is updated, and the labels `needs-owner`, `oracle`, `waiver`, `deviation`, `api` and `dependency` exist on GitHub.
 - The first PR fixed a bug that CI on GitHub's machines caught: the Lut3D SSE2 and AVX kernels quieted signaling-NaN alphas in release builds. The workstation never runs those kernels, and until SDE (T5b) checks them against the wheel, GitHub's assorted CPUs are the only machines that do.
 
+**T5b status (2026-09-30): the SDE part is done; the exhaustive tier and `cargo-mutants` are still open.**
+- `scripts/sde.sh <cpu> <cmd>` runs a command on a CPU emulated by Intel SDE 10.13.1. On first use it downloads SDE from Intel's mirror, checks the pinned SHA256 and unpacks it.
+- `cargo cpu-tests` (an alias in `.cargo/config.toml`) is the set of tests whose results depend on the CPU.
+- `.github/workflows/sde.yml` runs them on `nhm`, `snb`, `hsw`, `skl` and `skx`, on Windows and in Rocky Linux 9. It runs nightly, by hand, and on PRs that touch the kernels, the test kit or the oracle.
+- The oracle cache key now includes the CPUID vendor and signature, so emulated CPUs with the same features (Haswell and Skylake) get separate caches.
+- On Windows, SDE's chip check is off. The MSVC runtime that ships with Python picks AVX code from the features Windows reports, not from CPUID. CPUID, which SDE emulates, still decides every OCIO and port kernel.
+
 ## T6: housekeeping
 
 | Chunk | What |

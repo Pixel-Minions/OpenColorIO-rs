@@ -417,6 +417,9 @@ Upstream's `tests/python` (384 tests) runs unmodified against our standalone whe
   - ARM and macOS come later. Official wheels exist for both, so either can become a reference platform when needed.
 - **Pull requests.** Every card lands through a PR (§7), and CI runs on the exact merge commit that will land. GitHub's runners have assorted CPUs, so over many runs they dispatch SIMD kernels the workstation doesn't (the first catch: an alpha bug in the Lut3D SSE2 and AVX kernels).
 - **Forced numeric profiles.** Every profile (scalar, SSE2, AVX, AVX2, AVX-512) is exercised, just as upstream reruns its tests for each SIMD mode.
+  - The port can run any profile on any CPU, but the wheel only runs the kernel its CPU selects.
+  - So the CPU-dependent tests (`cargo cpu-tests`) also run under Intel SDE, on emulated Nehalem (SSE2 kernels), Sandy Bridge (AVX), Haswell (AVX2 with slow gather), Skylake (AVX2) and Skylake server (AVX-512), on both platforms (`scripts/sde.sh`, `.github/workflows/sde.yml`).
+  - They run nightly and on PRs that touch the kernels, the test kit or the oracle.
 - **Also in CI:**
   - the minimum Rust version;
   - Miri (Rust's undefined-behavior checker) on `unsafe` modules;
