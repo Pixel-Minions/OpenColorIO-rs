@@ -604,4 +604,57 @@ mod tests {
     fn w0002_is_an_approved_waiver() {
         assert_eq!(w0002(), "W0002");
     }
+
+    /// Nothing but the battery compares under W0002: outside `compare.rs`, which defines the
+    /// comparison, only `Case::compare` here may call it. Oracle tests go through the battery,
+    /// which applies W0002 to the channels of NaN and infinite parameters and nothing else.
+    #[test]
+    fn only_the_battery_uses_the_w0002_comparison() {
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    if path.file_name().is_some_and(|n| n != "target") {
+                        walk(&path, out);
+                    }
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+        let root = crate::paths::workspace_root();
+        let mut files = Vec::new();
+        for dir in ["crates", "xtask"] {
+            walk(&root.join(dir), &mut files);
+        }
+        let allowed: [&[&str]; 2] = [
+            &["crates", "ocio-testkit", "src", "compare.rs"],
+            &["crates", "ocio-testkit", "src", "battery", "params.rs"],
+        ];
+        let calls = [
+            "assert_pixels_bits_eq_except_nan_bits",
+            "pixels_report_except_nan_bits",
+        ];
+        let mut offenders = Vec::new();
+        for file in &files {
+            let rel: Vec<String> = file
+                .strip_prefix(root)
+                .unwrap_or(file)
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                .collect();
+            if allowed.iter().any(|a| rel.iter().eq(a.iter())) {
+                continue;
+            }
+            let text = std::fs::read_to_string(file).unwrap_or_default();
+            if calls.iter().any(|call| text.contains(call)) {
+                offenders.push(rel.join("/"));
+            }
+        }
+        assert!(files.len() > 20, "found only {} sources", files.len());
+        assert!(
+            offenders.is_empty(),
+            "the W0002 comparison is used outside the battery: {offenders:?}"
+        );
+    }
 }
