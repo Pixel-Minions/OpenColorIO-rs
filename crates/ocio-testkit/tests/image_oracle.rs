@@ -1418,8 +1418,9 @@ enum Outcome {
 
 /// The oracle refuses to apply where the wheel would read or write outside its memory: an
 /// image reaching outside its buffer, whatever the direction of its strides; a data pointer
-/// outside its buffer; 10- and 12-bit color codes above the bit depth's largest, which the
-/// forward 1D LUT that starts these processors would look up. Alpha codes are scaled, not
+/// outside its buffer; an image too wide for the scanline helper's integers; 10- and 12-bit
+/// color codes above the bit depth's largest, which the forward 1D LUT that starts these
+/// processors would look up. Alpha codes are scaled, not
 /// looked up, an inverse 1D LUT searches, a processor without a LUT first multiplies, and an
 /// apply that raises before it reads the source reads no code: those aren't refused.
 /// Constructing the same image reads no pixels and is allowed, and the other calls of the batch
@@ -1499,6 +1500,15 @@ fn applies_outside_the_wheels_memory_are_refused() {
         request.apply = vec![src, dst];
         request
     };
+    // A planar F32 image `width` pixels wide, every pixel of each plane on one float.
+    let aliased = |width: i64| {
+        let mut request = Request::new(processor(F32, F32));
+        let buffer = request.buffer(Buffer::fill(4, &[0]));
+        let planes = vec![Data::at(buffer, 0).entries(width); 3];
+        let image = Planar::new(planes, width, 1).layout(F32, [Stride::Bytes(0); 2]);
+        request.apply = vec![request.image(image)];
+        request
+    };
     let abgr = Channels::Order(ChannelOrder::Abgr);
     let unoptimized = |transform: Value| {
         json!({
@@ -1576,6 +1586,11 @@ fn applies_outside_the_wheels_memory_are_refused() {
             Refused("refuses to apply to images[1]"),
         ),
         ("a destination that fits exactly", into_bytes(64), Applies),
+        (
+            "an image 2^30 + 1 pixels wide, past the scanline helper's integers",
+            aliased((1 << 30) + 1),
+            Refused("pixels wide"),
+        ),
         (
             "a 10-bit green code of 1024",
             one_pixel(Uint10, [0, 1024, 0, 0]),
@@ -1768,6 +1783,26 @@ fn applies_outside_the_wheels_memory_are_refused() {
     }
 }
 
+/// Runs `script` in the oracle's environment, as the oracle runs, with `args`; returns the lines
+/// it prints. For checks of the oracle's own refusals that no request can reach.
+fn oracle_python(script: &str, args: &[String]) -> Vec<String> {
+    let output = std::process::Command::new(Oracle::get().python())
+        .args(["-X", "utf8", "-c", script])
+        .args(args)
+        .current_dir(ocio_testkit::paths::oracle_dir())
+        .env("PYTHONDONTWRITEBYTECODE", "1")
+        .env_remove("PYTHONPATH")
+        .output()
+        .expect("the oracle's Python runs");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "{stdout}{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    stdout.lines().map(str::to_string).collect()
+}
+
 /// An image the library calls RGBA-packed is read and written a row at a time: 4 * width
 /// contiguous channels from the data pointer plus y * yStride (ScanlineHelper.cpp:129-136,
 /// 158-164 @ v2.5.2). isRGBAPacked tests the x stride truncated to an `int` (ImageDesc.cpp:264
@@ -1812,26 +1847,116 @@ for size in sizes:
     // bytes further.
     let pixels_end = offset + y_stride + 16;
     let rows_end = offset + y_stride + 2 * 16;
-    let output = std::process::Command::new(Oracle::get().python())
-        .args(["-X", "utf8", "-c", SCRIPT])
-        .args([x_stride, y_stride, offset, pixels_end, rows_end].map(|v| v.to_string()))
-        .current_dir(ocio_testkit::paths::oracle_dir())
-        .env("PYTHONDONTWRITEBYTECODE", "1")
-        .env_remove("PYTHONPATH")
-        .output()
-        .expect("the oracle's Python runs");
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        output.status.success(),
-        "{stdout}{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let lines: Vec<&str> = stdout.lines().collect();
-    assert_eq!(lines.len(), 3, "{stdout}");
+    let args = [x_stride, y_stride, offset, pixels_end, rows_end].map(|v| v.to_string());
+    let lines = oracle_python(SCRIPT, &args);
+    assert_eq!(lines.len(), 3, "{lines:?}");
     assert_eq!(lines[0], "True", "the wheel calls the image packed");
     let span = format!("its packed rows span bytes [{offset}, {rows_end})");
     assert!(lines[1].contains(&span), "{}", lines[1]);
     assert_eq!(lines[2], "accepted");
+}
+
+/// The scanline helper sizes its row buffers with 4 * width in a C long, indexes rows with an
+/// `int`, and computes a row's first pixel index y * width in a C long (ScanlineHelper.cpp:72,
+/// 78, 104, 146, 173; ScanlineHelper.h:92 @ v2.5.2). The oracle refuses the applies that would
+/// overflow them, and nothing short of that: images 2^29 or more pixels wide, images of 2^31
+/// or more rows, and RGBA-packed sources of 2^31 or more pixels into images that aren't. The
+/// refusal test sends a width past the limit (it crashed the wheel on Windows); the other
+/// sizes need a 64-bit C long or 8 GiB of pixels, so this runs the oracle's check itself, in
+/// the oracle's environment, on stand-ins for descriptions, at each limit and one short of it.
+#[test]
+fn sizes_past_the_scanline_helpers_integers_are_refused() {
+    const SCRIPT: &str = r#"
+import json
+import sys
+from ocio_oracle import commands, image
+
+class Desc:
+    def __init__(self, width, height, packed):
+        self.width, self.height, self.packed = width, height, packed
+
+    def getWidth(self):
+        return self.width
+
+    def getHeight(self):
+        return self.height
+
+    def isRGBAPacked(self):
+        return self.packed
+
+for descs, apply in json.loads(sys.argv[1]):
+    try:
+        image._check_sizes([Desc(*desc) for desc in descs], apply)
+        print("accepted")
+    except ValueError as exc:
+        print(exc)
+"#;
+    let (wide, tall, pixels) = (1i64 << 29, 1i64 << 31, 1i64 << 31);
+    // Two images, the first applied to the second.
+    let onto = |src: (i64, i64, bool), dst: (i64, i64, bool)| (vec![src, dst], vec![0, 1]);
+    let in_place = |image: (i64, i64, bool)| (vec![image], vec![0]);
+    let cases = [
+        (
+            "one pixel short of the width limit",
+            in_place((wide - 1, 1, false)),
+            false,
+        ),
+        ("at the width limit", in_place((wide, 1, false)), true),
+        (
+            "a destination at the width limit",
+            onto((1, 1, false), (wide, 1, false)),
+            true,
+        ),
+        (
+            "one row short of the row limit",
+            in_place((1, tall - 1, false)),
+            false,
+        ),
+        ("at the row limit", in_place((1, tall, false)), true),
+        (
+            "a packed source one pixel short of the limit, into a planar image",
+            onto((1, pixels - 1, true), (1, pixels - 1, false)),
+            false,
+        ),
+        (
+            "a packed source at the limit, into a planar image",
+            onto((2, pixels / 2, true), (2, pixels / 2, false)),
+            true,
+        ),
+        (
+            "a packed source at the limit, into a packed image",
+            onto((2, pixels / 2, true), (2, pixels / 2, true)),
+            false,
+        ),
+        (
+            "a planar source at the limit, into a planar image",
+            onto((2, pixels / 2, false), (2, pixels / 2, false)),
+            false,
+        ),
+        (
+            "a planar source at the limit, into a packed image",
+            onto((2, pixels / 2, false), (2, pixels / 2, true)),
+            false,
+        ),
+        (
+            "a packed image at the limit, in place",
+            in_place((2, pixels / 2, true)),
+            false,
+        ),
+    ];
+    let requests: Vec<_> = cases
+        .iter()
+        .map(|(_, request, _)| request.clone())
+        .collect();
+    let lines = oracle_python(SCRIPT, &[json!(requests).to_string()]);
+    assert_eq!(lines.len(), cases.len(), "{lines:?}");
+    for ((label, _, refused), line) in cases.iter().zip(&lines) {
+        if *refused {
+            assert!(line.contains("refuses to apply"), "{label}: {line}");
+        } else {
+            assert_eq!(line, "accepted", "{label}");
+        }
+    }
 }
 
 /// A request's reply is the same on every run, alone or in a batch, bytes included: nothing

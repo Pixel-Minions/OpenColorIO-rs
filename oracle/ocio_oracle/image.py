@@ -234,6 +234,50 @@ def _check_inside(index, desc, image, buffers):
                 f"so the library would read or write outside it")
 
 
+# Where the scanline helper's integers overflow (see _check_sizes).
+WIDTH_LIMIT = 2 ** 29
+HEIGHT_LIMIT = 2 ** 31
+PACKED_SOURCE_LIMIT = 2 ** 31
+
+
+def _check_sizes(descs, apply):
+    """Refuses an apply whose images the scanline helper would size or index past its
+    integers, which is undefined behavior:
+    - an image 2^29 or more pixels wide. The helper's row buffers hold 4 * width channels,
+      counted in a C long (ScanlineHelper.cpp:72, 78, 104), which has 32 bits on Windows: from
+      2^29 the count overflows. The wheel then raises "vector too long", or at 2^30 "Invalid
+      output image buffer." (ImagePacking.cpp:100) for the empty buffer's null data, and past
+      2^30 it writes rows into buffers too small for them (it crashed). With a 64-bit long,
+      those buffers take 8 GiB or more each.
+    - an image of 2^31 or more rows, which only a 64-bit C long (Linux) can describe: the
+      helper's row index is an int (ScanlineHelper.h:92).
+    - an RGBA-packed source of 2^31 or more pixels, into a destination that isn't. On Windows
+      a row's first pixel index, y * width, overflows the 32-bit long it is computed in
+      (ScanlineHelper.cpp:146, 173). A source that isn't RGBA-packed raises at the first such
+      index (ImagePacking.cpp:37-40, 107-110), before its row is written, but a packed one is
+      read by the row index, and the destination's row is then unpacked at the overflowed
+      pixel index (ImagePacking.cpp:175-203), wherever it points. Such a source spans 8 GiB or
+      more.
+    The sizes of every image applied to are checked, though the apply raises before sizing
+    anything when the source's and the destination's differ (ScanlineHelper.cpp:58-61)."""
+    images = [descs[i] for i in sorted(set(apply))]
+    width = max(desc.getWidth() for desc in images)
+    height = max(desc.getHeight() for desc in images)
+    src, dst = descs[apply[0]], descs[apply[-1]]
+    pixels = src.getWidth() * src.getHeight()
+    if width >= WIDTH_LIMIT:
+        what = f"an image {width} pixels wide, from {WIDTH_LIMIT}"
+    elif height >= HEIGHT_LIMIT:
+        what = f"an image of {height} rows, from {HEIGHT_LIMIT}"
+    elif src.isRGBAPacked() and not dst.isRGBAPacked() and pixels >= PACKED_SOURCE_LIMIT:
+        what = (f"an RGBA-packed source of {pixels} pixels into an image that isn't, "
+                f"from {PACKED_SOURCE_LIMIT}")
+    else:
+        return
+    raise ValueError(f"image_apply refuses to apply to {what}: the scanline helper's integers "
+                     f"would overflow")
+
+
 # The largest code of the integer bit depths stored in wider types.
 TOP_CODE = {"BIT_DEPTH_UINT10": 1023, "BIT_DEPTH_UINT12": 4095}
 
@@ -407,6 +451,9 @@ def image_apply(args, blobs):
       (planar), from the description's own getters, so the library resolves AutoStride itself;
       and an image the library calls RGBA-packed, which it reads and writes a row at a time,
       also has its rows of 4 * width contiguous channels checked (see _check_inside);
+    - an image it applies to is 2^29 or more pixels wide or has 2^31 or more rows, or an
+      RGBA-packed source of 2^31 or more pixels goes to an image that isn't: the wheel's
+      integers would overflow where it sizes or indexes rows (see _check_sizes);
     - the source is a 10- or 12-bit image holding a red, green or blue code above 1023 or
       4095, and the processor starts with a forward 1D LUT, which the wheel would index with
       the code outside its table (see _check_codes).
@@ -460,6 +507,7 @@ def image_apply(args, blobs):
             if apply:
                 for i in sorted(set(apply)):
                     _check_inside(i, descs[i], images[i], buffers)
+                _check_sizes(descs, apply)
                 if _reads_source(descs, apply, cpu):
                     looks_up = functools.cache(lambda: _starts_with_forward_lut1d(proc, key))
                     _check_codes(apply[0], descs[apply[0]], images[apply[0]], buffers, looks_up)
