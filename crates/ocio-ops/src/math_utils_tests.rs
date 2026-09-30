@@ -157,9 +157,9 @@ fn mxb_eval() {
 /// Port of `OCIO_ADD_TEST(MathUtils, combine_two_mxb)` @ v2.5.2.
 ///
 /// `OCIO_CHECK_CLOSE(x, y, 1e-3)` subtracts the floats and compares with a `double`; the port's
-/// `check_close` takes one type, so the last block widens the floats to `double` first. The
-/// difference is then exact rather than rounded to `float`, which could change the check only
-/// within a `float` rounding of 1e-3.
+/// `check_close` takes one type, so the last block widens the floats to `double` first. That is
+/// equivalent: the two results are within a factor of 2 of each other, so their `float`
+/// difference is already exact (Sterbenz's lemma).
 #[test]
 fn combine_two_mxb() {
     #[rustfmt::skip]

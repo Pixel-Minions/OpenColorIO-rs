@@ -368,14 +368,14 @@ path = "src/OpenColorIO/MathUtils.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/math_utils.rs"]
 status = "done"
-note = "1.4a: the scalar functions and their helpers; 1.4b: the matrix and vector math (GetM44Inverse, IsM44Identity, GetM44M44Product, GetM44V4Product, GetV4Sum, GetMxbCombine, GetMxbInverse) in the source's operand order; only IsM44Identity has a caller in 2.5.2 (math_utils.rs explains). FloatsDiffer also has an independent test-check copy in crates/ocio-testkit/src/upstream/mod.rs"
+note = "1.4a: the scalar functions and their helpers; 1.4b: the matrix and vector math (GetM44Inverse, IsM44Identity, GetM44M44Product, GetM44V4Product, GetV4Sum, GetMxbCombine, GetMxbInverse) in the source's operand order; only IsM44Identity has a caller in 2.5.2 (math_utils.rs explains). FloatsDiffer also has an independent test-check copy in crates/ocio-testkit/src/upstream/mod.rs. Pinned against the wheel by later cards, since nothing in this one can reach them: ClampToNormHalf by the Cg literals of gpu_shader (1.7a); SanitizeFloat when lut3d_op_cpu.rs switches to math_utils::sanitize_float (the Lut3D card); HalfsDiffer by the half-domain Lut1D no-op removal (Phase 2)"
 
 [[file]]
 path = "src/OpenColorIO/MathUtils.h"
 kind = "src"
 target = ["crates/ocio-ops/src/math_utils.rs"]
 status = "done"
-note = "S2: Clamp, FloatAsInt, IntAsFloat, AddULP, plus std::min/std::max and SSE lane semantics; 1.4a: IsNan, EqualWithAbsError, EqualWithRelError, lerpf, GetHalfMax/Min/NormMin and the scalar declarations; 1.4b: the matrix declarations"
+note = "S2: Clamp, FloatAsInt, IntAsFloat, AddULP, plus std::min/std::max and SSE lane semantics; 1.4a: IsNan, EqualWithAbsError, EqualWithRelError, lerpf, GetHalfMax/Min/NormMin and the scalar declarations; 1.4b: the matrix declarations. Pinned against the wheel by later cards: the <= of EqualWithAbsError by CDL equality at exactly |delta| = 1e-9 (1.3c1); lerpf by the Lut1D and ACES2 cards"
 
 [[file]]
 path = "src/OpenColorIO/Mutex.h"

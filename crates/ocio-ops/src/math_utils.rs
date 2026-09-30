@@ -17,9 +17,14 @@
 //! - The other scalar helpers of `MathUtils.h` and `MathUtils.cpp`: the tolerance tests
 //!   (`EqualWithAbsError`, `FloatsDiffer`, `IsScalarEqualToZero`, ...), `SanitizeFloat`,
 //!   `lerpf` and the half helpers.
+//! - The matrix and vector math of `MathUtils.cpp` (`GetM44Inverse`, `GetM44M44Product`,
+//!   `GetMxbCombine`, ...), in the source's operand order. That order is a deliberate choice:
+//!   nothing in 2.5.2 calls these functions but `IsM44Identity`, and the Windows wheel
+//!   doesn't contain them. The Linux wheel's unused copies commute some operations (listed
+//!   above the functions), which would only change which NaN comes out where two NaNs meet.
 //!
-//! Port of parts of `src/OpenColorIO/MathUtils.h` and `src/OpenColorIO/BitDepthUtils.h`
-//! @ v2.5.2.
+//! Port of parts of `src/OpenColorIO/MathUtils.h`, `src/OpenColorIO/MathUtils.cpp` and
+//! `src/OpenColorIO/BitDepthUtils.h` @ v2.5.2.
 
 use std::ops::{Add, Mul};
 
@@ -323,8 +328,9 @@ pub fn sanitize_float(f: f32) -> f32 {
 
 /// `IsScalarEqualToZero(v)`: `v`, converted to `float`, is within 2 ULPs of 0 (keeping
 /// denormals): 0, -0 and the four denormals nearest to 0. A `double` is compared after its
-/// conversion to `float`, so any `double` smaller than half the smallest `float` denormal
-/// counts as 0.
+/// conversion to `float` (to nearest, ties to even), so it counts as 0 exactly when
+/// |v| <= 2.5 * 2^-149, about 3.50e-45: a LogAffine slope of 2.1e-45 is refused as 0, and one
+/// of 3.6e-45 is accepted.
 ///
 /// Port of `IsScalarEqualToZero<T>` (src/OpenColorIO/MathUtils.cpp:17-27 @ v2.5.2).
 #[inline]
@@ -332,7 +338,10 @@ pub fn is_scalar_equal_to_zero<T: MathFloat>(v: T) -> bool {
     !floats_differ(0.0, v.to_f32(), 2, false)
 }
 
-/// `IsScalarEqualToOne(v)`: `v`, converted to `float`, is within 2 ULPs of 1.
+/// `IsScalarEqualToOne(v)`: `v`, converted to `float`, is within 2 ULPs of 1. A `double`
+/// counts as 1 exactly in [1 - 2.5 * 2^-24, 1 + 2.5 * 2^-23], about [1 - 1.49e-7,
+/// 1 + 2.98e-7]: 1 + 2.98e-7 is one and 1 + 2.99e-7 isn't; 1 - 1.49e-7 is one and
+/// 1 - 1.50e-7 isn't.
 ///
 /// Port of `IsScalarEqualToOne<T>` (src/OpenColorIO/MathUtils.cpp:29-39 @ v2.5.2).
 #[inline]
@@ -410,6 +419,10 @@ pub fn get_half_norm_min() -> f64 {
 /// `ClampToNormHalf(val)`: values below `-GetHalfMax()` become `-GetHalfMax()`, values above
 /// `GetHalfMax()` become `GetHalfMax()`, and values strictly between `-GetHalfNormMin()` and
 /// `GetHalfNormMin()` become `+0.0` (`-0.0` too). NaN is returned unchanged.
+///
+/// `GetHalfNormMin()` is just below 2^-14, so the values in [6.10351562e-05, 2^-14), which
+/// aren't normal halves, are kept. No `float` lies in that band: only `double` values, such
+/// as literals, can fall in it.
 ///
 /// Port of `ClampToNormHalf` (src/OpenColorIO/MathUtils.cpp:118-136 @ v2.5.2).
 pub fn clamp_to_norm_half(val: f64) -> f64 {
@@ -543,15 +556,19 @@ pub fn floats_differ(expected: f32, actual: f32, tolerance: i32, compress_denorm
     diff > tolerance as u32
 }
 
-/// Imath's `half::isNan()`: the exponent is 31 and the mantissa is not 0 (Imath 3.2.1,
-/// src/Imath/half.h).
+/// Imath's `half::isNan()`: the exponent is 31 and the mantissa is not 0.
+///
+/// Port of `half::isNan` (src/Imath/half.h:837-841, with `half::mantissa` and
+/// `half::exponent` at :801-811 @ Imath v3.2.1).
 #[inline]
 fn half_is_nan(h: u16) -> bool {
     (h >> 10) & 0x001F == 31 && h & 0x03FF != 0
 }
 
-/// Imath's `half::isInfinity()`: the exponent is 31 and the mantissa is 0 (Imath 3.2.1,
-/// src/Imath/half.h).
+/// Imath's `half::isInfinity()`: the exponent is 31 and the mantissa is 0.
+///
+/// Port of `half::isInfinity` (src/Imath/half.h:843-847, with `half::mantissa` and
+/// `half::exponent` at :801-811 @ Imath v3.2.1).
 #[inline]
 fn half_is_infinity(h: u16) -> bool {
     (h >> 10) & 0x001F == 31 && h & 0x03FF == 0
@@ -602,14 +619,17 @@ pub fn halfs_differ(expected: half::f16, actual: half::f16, tolerance: i32) -> b
 // (src/OpenColorIO/OCIOYaml.cpp:3071 @ v2.5.2): the matrix op has its own `double` math
 // (`MatrixOpData::MatrixArray::inverse`, `MatrixOpData::compose`). The Windows wheel doesn't
 // contain them (MSVC's linker drops unreferenced functions). The Linux wheel keeps unexported
-// copies, and GCC commutes some of their operations, for example the last addition of each
-// entry of `GetM44M44Product` (`p3 + ((p0 + p1) + p2)`, 0x2cc578 in libOpenColorIO.so), and in
-// the copies of `GetM44V4Product` it inlined, the first addition and the last product of each
-// entry in `GetMxbCombine` (0x2cc718, 0x2cc75f) and the products of the last entry in
-// `GetMxbInverse` (0x2cc88c); `GetM44Inverse` was not checked operation by operation. Operand
-// order only decides which NaN comes out where two NaNs meet, and no output of either wheel
-// depends on these functions' NaNs, so the port keeps the source's order, pinned with `sse_add`
-// and `sse_mul`. None of the copies use an FMA.
+// copies, and GCC commutes some of their operations (addresses in libOpenColorIO.so):
+// - `GetM44Inverse`: both products of `d10_21` (0x2cbf43, 0x2cbf51) and the three additions
+//   of `det` (0x2cc126, 0x2cc137, 0x2cc146);
+// - `GetM44M44Product`: the last addition of each entry, `p3 + ((p0 + p1) + p2)` (0x2cc578);
+// - the copies of `GetM44V4Product` it inlined: the first addition and the last product of
+//   each entry in `GetMxbCombine` (0x2cc718, 0x2cc75f), and the products of the last entry in
+//   `GetMxbInverse` (0x2cc88c).
+// Operand order only decides which NaN comes out where two NaNs meet. Nothing in 2.5.2 calls
+// these functions and the Windows wheel has none of them, so no output of either wheel depends
+// on their NaNs: the port deliberately keeps the source's order, pinned with `sse_add` and
+// `sse_mul`, rather than the Linux copies'. None of the copies use an FMA.
 
 /// `IsM44Identity(m44)`: the diagonal entries [are equal to one](is_scalar_equal_to_one) and the
 /// others [to zero](is_scalar_equal_to_zero), each converted to `float` and compared within 2
@@ -635,10 +655,10 @@ pub fn is_m44_identity<T: MathFloat>(m44: &[T; 16]) -> bool {
 /// `GetM44Inverse(inverse_out, m)`: the inverse of a 4x4 matrix, from its cofactors, computed in
 /// `double` and converted back to `float`. `None` where upstream returns false (leaving
 /// `inverse_out` alone): the determinant, converted to `float`, [is equal to
-/// zero](is_scalar_equal_to_zero). The test is absolute, so a matrix whose determinant is
-/// below about 3e-45 counts as singular however well conditioned it is, and a singular matrix
-/// whose determinant rounds away from 0 is inverted into huge values. A NaN determinant is not
-/// zero: the inverse is all NaN.
+/// zero](is_scalar_equal_to_zero). The test is absolute, so a matrix whose determinant is at
+/// most 2.5 * 2^-149 (about 3.50e-45) in magnitude counts as singular however well conditioned
+/// it is, and a singular matrix whose determinant rounds away from 0 is inverted into huge
+/// values. A NaN determinant is not zero: the inverse is all NaN.
 ///
 /// Port of `GetM44Inverse` (src/OpenColorIO/MathUtils.cpp:193-261 @ v2.5.2).
 pub fn get_m44_inverse(m_: &[f32; 16]) -> Option<[f32; 16]> {
