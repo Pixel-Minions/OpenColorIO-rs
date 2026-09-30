@@ -11,11 +11,14 @@
 //! - [`compare`]: exact comparators. There is no tolerance anywhere in this crate: a check
 //!   that needs one needs a waiver in `waivers.toml`, approved by the owner.
 //! - [`probe`]: deterministic probe inputs (all half bit patterns, specials, ramps, random).
+//! - [`crt`]: the platform C runtime (UCRT or glibc) through FFI, the reference for C and
+//!   iostream number formatting and for `strtod`-style parsing.
 //!
 //! Expected values come only from the oracle or from upstream's tests. Never from the port.
 #![deny(unsafe_code)]
 
 pub mod compare;
+pub mod crt;
 pub mod fixtures;
 pub mod oracle;
 pub mod paths;
