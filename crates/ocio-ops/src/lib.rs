@@ -51,6 +51,7 @@ pub mod dynamic_property;
 pub mod exception;
 pub mod format_metadata;
 pub mod hash_utils;
+pub mod image_desc;
 pub mod imath_half;
 pub mod logging;
 pub mod math_utils;
