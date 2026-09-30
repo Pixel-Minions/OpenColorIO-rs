@@ -21,7 +21,8 @@
 //! - The `nan_inf_*` tests use LUTs that hold NaNs and infinities, which only `lut3d_apply`
 //!   can send (as raw float32); OCIO sanitizes them when it builds the renderer.
 //! - [`partial_blocks`] checks pixel counts that leave a partial SIMD block.
-//! - [`profiles_against_the_wheel`] prints which numeric profile matches the wheel here.
+//! - [`profiles_against_the_wheel`] prints which numeric profile matches the wheel here, and
+//!   checks every profile's alpha channel against the wheel's (every kernel copies it).
 
 use ocio_ops::cpu_info::{
     BuildConfig, CpuInfo, X86_CPU_FLAG_AVX, X86_CPU_FLAG_AVX2, X86_CPU_FLAG_AVX512,
@@ -139,9 +140,14 @@ fn renderer(
 
 /// Applies `renderer` to all `pixels` in one call, as one image row.
 fn port(renderer: &ForwardLut3DRenderer, pixels: &[f32]) -> Vec<f32> {
-    let mut out = vec![0f32; pixels.len()];
-    renderer.apply(pixels, &mut out);
+    let mut out = pixels.to_vec();
+    renderer.apply(&mut out);
     out
+}
+
+/// The alpha channel of packed RGBA `pixels`.
+fn alpha(pixels: &[f32]) -> Vec<f32> {
+    pixels.iter().skip(3).step_by(4).copied().collect()
 }
 
 /// Seeded random LUT values in [-0.5, 1.5).
@@ -638,6 +644,19 @@ fn profiles_against_the_wheel() {
             &expected,
             &port(&dispatched, &pixels),
         );
+        // Every kernel moves alpha without arithmetic (`result.a = a`; the RGBA packs are
+        // shuffles), so every profile's alpha matches the wheel's, whichever kernel the wheel
+        // runs here. The color channels of the kernels the wheel doesn't run here need an
+        // emulated CPU (Intel SDE).
+        for (name, out) in &outputs {
+            assert_pixels_bits_eq(
+                &format!("{kind} LUT, {name} tetrahedral profile, alpha"),
+                &alpha(&pixels),
+                1,
+                &alpha(&expected),
+                &alpha(out),
+            );
+        }
 
         let expected = wheel(
             &lut_spec(grid_size, &values, Interpolation::Linear),
@@ -653,8 +672,17 @@ fn profiles_against_the_wheel() {
                 Interpolation::Linear,
                 &cpu.with_build(build),
             );
-            let report = f32_bits_report(&expected, &port(&r, &pixels), Some(&pixels), 4);
+            let out = port(&r, &pixels);
+            let report = f32_bits_report(&expected, &out, Some(&pixels), 4);
             println!("  trilinear {name:<8} vs wheel: {}", summary(&report));
+            // Both code paths copy alpha (`out[3] = newAlpha`).
+            assert_pixels_bits_eq(
+                &format!("{kind} LUT, {name} trilinear, alpha"),
+                &alpha(&pixels),
+                1,
+                &alpha(&expected),
+                &alpha(&out),
+            );
         }
         // The trilinear code path of this build (SSE2) matches the wheel.
         assert_pixels_bits_eq(

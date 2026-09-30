@@ -153,13 +153,13 @@ fn interp_tetrahedral_sse2(ctx: &Lut3DContextSse2<'_>, r: f32, g: f32, b: f32) -
 }
 
 /// Port of `applyTetrahedralSSE2` and `applyTetrahedralSSE2Func<F32, F32>`
-/// (src/OpenColorIO/ops/lut3d/Lut3DOpCPU_SSE2.cpp:218-317 @ v2.5.2). `lut3d` holds 4 floats
-/// per entry; alpha passes through unchanged.
+/// (src/OpenColorIO/ops/lut3d/Lut3DOpCPU_SSE2.cpp:218-317 @ v2.5.2), in place. `lut3d` holds 4
+/// floats per entry. Alpha is never written, so it keeps every bit (see "Alpha" in
+/// [`super::lut3d_op_cpu`]).
 pub(crate) fn apply_tetrahedral_sse2(
     lut3d: &[f32],
     dim: i32,
-    src: &[f32],
-    dst: &mut [f32],
+    rgba: &mut [f32],
     total_pixel_count: i32,
 ) {
     let lutmax = dim as f32 - 1.0;
@@ -174,22 +174,15 @@ pub(crate) fn apply_tetrahedral_sse2(
     };
 
     let pixels = total_pixel_count as usize;
-    for (inp, out) in src
-        .as_chunks::<4>()
-        .0
-        .iter()
-        .zip(dst.as_chunks_mut::<4>().0.iter_mut())
-        .take(pixels)
-    {
+    for px in rgba.as_chunks_mut::<4>().0.iter_mut().take(pixels) {
         // scale and clamp values
         let [r, g, b] =
-            [inp[0], inp[1], inp[2]].map(|v| sse_min(sse_max(v * scale, zero), ctx.lutmax));
+            [px[0], px[1], px[2]].map(|v| sse_min(sse_max(v * scale, zero), ctx.lutmax));
 
         let c = interp_tetrahedral_sse2(&ctx, r, g, b);
 
-        out[0] = c[0];
-        out[1] = c[1];
-        out[2] = c[2];
-        out[3] = inp[3];
+        px[0] = c[0];
+        px[1] = c[1];
+        px[2] = c[2];
     }
 }
