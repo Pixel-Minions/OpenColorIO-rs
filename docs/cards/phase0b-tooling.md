@@ -83,3 +83,10 @@ below is a list of mergeable chunks (`CLAUDE.md` → "Chunks").
 
 T2b → T1a → T2a → T1b (the merge tooling). T3 and T4 run in parallel. Then T5 and T6. After
 that, Phase 1 starts with its cards rewritten to use the gate, the battery and PRs.
+
+## Result (2026-09-30)
+
+Phase 0b is complete.
+- **Landed:** T1a, T1b, T2a, T2b, T3a–T3d, T4a, T5a, the SDE part of T5b, and T6a. Each tooling card went through two or three adversarial verifier rounds (mutation testing in scratch clones), and every finding was fixed before it landed.
+- **Carried into Phase 1:** T5b's nightly exhaustive tier and `cargo-mutants`. They don't block Phase 1.
+- **Owner cleanup after landing:** `cargo xtask clean-scratch` (dry run first), and once, from the main checkout, `--unlabelled` for the Docker volumes made before volumes carried labels.

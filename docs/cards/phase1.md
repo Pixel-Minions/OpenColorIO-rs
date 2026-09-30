@@ -12,20 +12,41 @@ byte-exact with the wheel, through OCIO's own API (PLAN.md §1, §10). The secti
 - **CPU:** every bit depth, pixel layout, optimization level, and every numeric profile the machine can run;
 - **GPU:** shader text, uniforms and textures in all 10 shading languages.
 
-An op family lands whole: op data, CPU renderers, GPU writer, transform and glue.
+An op family is complete when all of it is in: op data, CPU renderers, GPU writer, transform and
+glue. Its parts land as separate cards as their dependencies allow (see "Cards" at the end).
 
-Each card below is a list of **chunks**. A chunk is one commit and is mergeable on its own
-(`CLAUDE.md` → "Chunks"). Line counts are upstream's non-blank, non-comment lines at v2.5.2.
+Each work package below is a list of **chunks**. A chunk is one commit and is mergeable on its
+own (`CLAUDE.md` → "Chunks"). Line counts are upstream's non-blank, non-comment lines at v2.5.2.
 Paths are relative to `src/OpenColorIO/` unless they start with `tests/`.
 
-**Testing.**
+## How this phase works
+
+The rules are in `CLAUDE.md`; this is where each one applies in Phase 1.
+
+- **Cards and PRs.**
+  - Each card in "Cards" at the end is one branch, `card/<id>`, and lands as one PR (PLAN.md §7).
+  - Agents commit chunks and never push. The orchestrator lands a card with `cargo xtask land`, which replays and gates each chunk, regenerates the generated files and runs the full gate. The orchestrator then pushes the result and opens the PR.
+- **The chunk gate.** `cargo xtask gate` before every commit, or `--staged` to check exactly what is staged. Numeric and platform-sensitive chunks (every renderer, every text writer) use `gate --release --rocky`. Never commit `docs/parity.md` or `docs/ratchet.toml`.
+- **Oracle tests go through the battery.** Every op family's renderers are tested with `ocio_testkit::battery` (`CLAUDE.md` → "Oracle tests").
+  - Families already exist for Log, LogAffine, LogCamera, Exponent and ExponentWithLinear (`crates/ocio-ops/tests/log_oracle.rs`, `gamma_oracle.rs`). Extend them rather than replace them.
+  - Declare pass-through channels and the renderers of every numeric profile (SSE2/AVX/AVX2/AVX-512 where the family has them).
+  - Ported upstream tests stay separate: `*_tests.rs` files with their markers.
+- **CPU-dependent tests.**
+  - Put every test target for SIMD kernels, `CPUInfo` or libm-dependent math in the `cpu-tests` alias (`.cargo/config.toml`).
+  - A chunk that adds or changes a kernel also runs `scripts/sde.sh <cpu> cargo cpu-tests --release` on the emulated CPUs whose kernel it touches: `nhm` SSE2, `snb` AVX, `hsw`/`skl` AVX2, `skx` AVX-512.
+  - CI runs all five nightly and on kernel PRs.
+- **Machine-code questions** go to `tools/wheel-inspect` (`docs/wheel-inspect.md`): operand order, float or double, libm, SVML or FMA. Don't write new disassembly scripts.
+- **Owner items** stop at the owner and carry a label: oracle changes (their own chunk, `oracle`), waivers, deviations, public API shape (`api`) and new dependencies (`dependency`).
+
+**Testing through the API.**
 - **Until 1.8 lands:** `ocio-ops` tests build ops directly from op data, and the oracle builds the equivalent transform (`cpu_apply` / `gpu_shader` with a transform spec). The test helper that maps transform parameters to op data cites upstream's op data constructors and `BuildXxxOp`.
 - **After 1.8:** every check also runs through the real API, `Transform → Config::CreateRaw() → Processor`, with the same spec on both sides.
 
-**Spike code.** S2/S5 (fast math, Log, Gamma), S4 (CPUInfo, Lut3D, half) and WP 0.5
-(cfmt, NumberUtils, StringUtils) land first as their own chunks. The cards below refactor that
-code into the architecture of `docs/architecture.md` rather than redo it. The Lut3D renderers
-from S4 are kept for Phase 2.
+**Code already on `main`.** Phase 0 landed S2/S5 (fast math, the Log and Gamma renderers), S4
+(CPUInfo, the Lut3D forward renderers, half conversions) and WP 0.5 (cfmt, NumberUtils,
+StringUtils, the yaml-cpp emitter). The cards below refactor that code into the architecture of
+`docs/architecture.md` rather than redo it. The Lut3D renderers are kept for Phase 2. They already
+work in place and never write alpha (`CLAUDE.md` → "Channels that pass through").
 
 ---
 
@@ -63,7 +84,10 @@ One family at a time, each landing whole. Each family's chunks are, in order:
 3. the op: combine, inverse, identity replacement, `getInfo`;
 4. the GPU writer (needs WP 1.7).
 
-Every chunk comes with its ported upstream tests and exact oracle checks.
+Every chunk comes with its ported upstream tests and exact oracle checks. The oracle checks are the
+family's `battery::Family`: cases from upstream's tests and the card, plus generated extreme,
+NaN and ±Inf parameters. Every numeric profile the family has is covered through
+`other_profiles`, and the SIMD ones also under SDE.
 
 | Chunk | Upstream | Rust | Port tests |
 |---|---|---|---|
@@ -104,6 +128,8 @@ Every chunk comes with its ported upstream tests and exact oracle checks.
 | 1.5a | `CPUInfo.*`, from the S4 spike | `cpu_info.rs` | the S4 dispatch tests; the test-only flag override (`docs/architecture.md`) |
 | 1.5b | `SSE2.h` helpers used by the ported renderers (pack/unpack, software half) | `sse2.rs` | `tests/cpu/SSE2_tests.cpp` |
 | 1.5c | `AVX.h`, `AVX2.h`, `AVX512.h` helpers used by the ported renderers | `avx.rs`, `avx2.rs`, `avx512.rs` | `AVX_tests.cpp`, `AVX2_tests.cpp`, `AVX512_tests.cpp` |
+
+- `cpu_info_oracle` already runs on all five emulated CPUs in CI. It compares the port's `CPUInfo` with the wheel's `ociocpuinfo`, including the slow-gather rules for Haswell and AMD Zen 3 and older. Keep every dispatch-dependent test in `cargo cpu-tests`.
 
 ## WP 1.6: optimizer (`ocio-ops`)
 
@@ -164,7 +190,36 @@ spike chunks ─┬─ 1.1a → 1.1b → 1.1c → 1.1d → 1.1e ─┐
 - **Implementer A:** 1.1 → 1.2 → the families' data, CPU and op chunks (the critical path).
 - **Implementer B:** 1.4 and 1.5, then the GPU infrastructure (1.7), then the families' GPU chunks.
 - **Implementer A or B:** WP 1.8 as the families land.
-- **Verifier C:** reviews every chunk as it lands.
+- **Verifier C:** reviews every card before it lands, adversarially and in scratch clones only.
+  - It mutates the port and the tests to prove the checks catch changes.
+  - Its findings go back to the card's implementer as new commits, and it re-checks them.
+
+## Cards
+
+Each card is one branch and one PR. The order follows the graph above, and cards in different
+rows can run in parallel.
+
+| Card | Chunks | Who | Needs |
+|---|---|---|---|
+| `p1-oracle` | O1.1–O1.4, each its own chunk; the owner reviews them, labelled `oracle` | B | — |
+| `p1-bitdepth` | 1.1a–1.1e | A | O1.2 |
+| `p1-math` | 1.4a–1.4c | B | — |
+| `p1-dispatch` | 1.5a–1.5c | B | — |
+| `p1-engine` | 1.2a–1.2e, with 1.3n1 and 1.3m1–m2 so 1.2d has ops to run | A | `p1-bitdepth`, `p1-math` |
+| `p1-matrix` | 1.3m3 | A | `p1-engine` |
+| `p1-range` | 1.3r1–r2 | A | `p1-engine` |
+| `p1-exponent` | 1.3e1, its CPU part | A | `p1-engine` |
+| `p1-gamma` | 1.3g1–g3 | A | `p1-engine` |
+| `p1-log` | 1.3l1–l3 | A | `p1-engine` |
+| `p1-cdl` | 1.3c1–c3 | A | `p1-engine` |
+| `p1-optimizer` | 1.6a | A | the families above |
+| `p1-gpu-infra` | 1.7a–1.7e | B | O1.3 |
+| `p1-gpu-ops` | 1.3m4, r3, e1 (its GPU part), g4, l4, c4 | B | `p1-gpu-infra`, each family's op card |
+| `p1-transforms` | 1.8a–1.8f | A or B | the families' op cards |
+| `p1-processor` | 1.8g–1.8h | A or B | `p1-transforms`, `p1-optimizer`, `p1-gpu-infra` |
+
+Small cards land sooner and are easier to verify. When a card grows past about 6 chunks, split it
+at a dependency boundary.
 
 **Phase 1 exit (M0):** through OCIO's API, every analytic transform is byte-exact with the wheel:
 - on Windows and Rocky Linux 9;

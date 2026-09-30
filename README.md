@@ -8,8 +8,9 @@ project ports it to Rust one upstream release at a time. The current line matche
 2.5.2**: the same results, the same text output, the same errors and the same accepted configs,
 from Rust and, later, from Python.
 
-> **Status: early development.** Phase 0 (test harness and feasibility proofs) is complete.
-> Nothing is usable end to end yet. See [Progress](#progress).
+> **Status: early development.** Phase 0 (test harness and feasibility proofs) and Phase 0b
+> (tooling) are complete; Phase 1 is next. Nothing is usable end to end yet. See
+> [Progress](#progress).
 
 ## How precise: byte for byte
 
@@ -80,8 +81,9 @@ one.
 
 ## Progress
 
-Status as of 2026-09-30: **Phase 0 complete** (test harness and feasibility proofs), about 5%
-of the planned work. Phase 1 (the op engine and analytic transforms) is next.
+Status as of 2026-09-30: **Phase 0 and Phase 0b complete** (test harness, feasibility proofs
+and tooling), about 5% of the planned work. Phase 1 (the op engine and analytic transforms) is
+next.
 
 **Done:** everything below is bit-exact against the official library on Windows and Linux, in
 debug and release builds, and was reviewed independently before merging.
@@ -91,7 +93,13 @@ debug and release builds, and was reviewed independently before merging.
   - guardrails (`cargo xtask ci`);
   - the parity dashboard;
   - a Rocky Linux 9 reference container;
-  - CI on Windows and Linux.
+  - CI on Windows and Linux on every pull request, with `main` accepting only commits that passed it.
+- **Checks on emulated CPUs.** The CPU-dependent tests also run under Intel's CPU emulator, as
+  Nehalem, Sandy Bridge, Haswell, Skylake and Skylake server. So every SIMD kernel the official
+  library has (SSE2, AVX, AVX2, AVX-512) is compared with the port's, whatever CPU the tests run on.
+- **A shared test battery.** Every op family is tested the same way against the official
+  library: probe sets, generated extreme and non-finite parameters, and every numeric profile.
+  Its own tests were mutation-tested to prove they catch deliberate breakage.
 - **Cache-ID hashing (XXH3-128).** It reproduces the official cache IDs of all 8 built-in
   configs.
 - **OCIO's fast-math functions** (the approximations of `log2`, `exp2` and `pow` used by
