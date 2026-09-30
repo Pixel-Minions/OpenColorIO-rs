@@ -1,0 +1,480 @@
+{
+ "colorspaces": [
+  {
+   "encoding": "plain",
+   "family": "plain",
+   "name": "cs0"
+  },
+  {
+   "encoding": " lead",
+   "family": " lead",
+   "name": "cs1"
+  },
+  {
+   "encoding": "trail ",
+   "family": "trail ",
+   "name": "cs2"
+  },
+  {
+   "encoding": "a: b",
+   "family": "a: b",
+   "name": "cs3"
+  },
+  {
+   "encoding": "a #b",
+   "family": "a #b",
+   "name": "cs4"
+  },
+  {
+   "encoding": "a#b",
+   "family": "a#b",
+   "name": "cs5"
+  },
+  {
+   "encoding": "e#",
+   "family": "e#",
+   "name": "cs6"
+  },
+  {
+   "encoding": "x#",
+   "family": "x#",
+   "name": "cs7"
+  },
+  {
+   "encoding": "x #",
+   "family": "x #",
+   "name": "cs8"
+  },
+  {
+   "encoding": "#",
+   "family": "#",
+   "name": "cs9"
+  },
+  {
+   "encoding": "-dash",
+   "family": "-dash",
+   "name": "cs10"
+  },
+  {
+   "encoding": "- x",
+   "family": "- x",
+   "name": "cs11"
+  },
+  {
+   "encoding": "-",
+   "family": "-",
+   "name": "cs12"
+  },
+  {
+   "encoding": "--",
+   "family": "--",
+   "name": "cs13"
+  },
+  {
+   "encoding": "? q",
+   "family": "? q",
+   "name": "cs14"
+  },
+  {
+   "encoding": "?",
+   "family": "?",
+   "name": "cs15"
+  },
+  {
+   "encoding": "?x",
+   "family": "?x",
+   "name": "cs16"
+  },
+  {
+   "encoding": ": colon",
+   "family": ": colon",
+   "name": "cs17"
+  },
+  {
+   "encoding": ":",
+   "family": ":",
+   "name": "cs18"
+  },
+  {
+   "encoding": ":x",
+   "family": ":x",
+   "name": "cs19"
+  },
+  {
+   "encoding": "k:v",
+   "family": "k:v",
+   "name": "cs20"
+  },
+  {
+   "encoding": "x: ",
+   "family": "x: ",
+   "name": "cs21"
+  },
+  {
+   "encoding": "x :y",
+   "family": "x :y",
+   "name": "cs22"
+  },
+  {
+   "encoding": ",comma",
+   "family": ",comma",
+   "name": "cs23"
+  },
+  {
+   "encoding": "a,b",
+   "family": "a,b",
+   "name": "cs24"
+  },
+  {
+   "encoding": "[br",
+   "family": "[br",
+   "name": "cs25"
+  },
+  {
+   "encoding": "a[b",
+   "family": "a[b",
+   "name": "cs26"
+  },
+  {
+   "encoding": "]br",
+   "family": "]br",
+   "name": "cs27"
+  },
+  {
+   "encoding": "{br",
+   "family": "{br",
+   "name": "cs28"
+  },
+  {
+   "encoding": "}br",
+   "family": "}br",
+   "name": "cs29"
+  },
+  {
+   "encoding": "#hash",
+   "family": "#hash",
+   "name": "cs30"
+  },
+  {
+   "encoding": "&amp",
+   "family": "&amp",
+   "name": "cs31"
+  },
+  {
+   "encoding": "x&y",
+   "family": "x&y",
+   "name": "cs32"
+  },
+  {
+   "encoding": "*star",
+   "family": "*star",
+   "name": "cs33"
+  },
+  {
+   "encoding": "!bang",
+   "family": "!bang",
+   "name": "cs34"
+  },
+  {
+   "encoding": "a!b",
+   "family": "a!b",
+   "name": "cs35"
+  },
+  {
+   "encoding": "|pipe",
+   "family": "|pipe",
+   "name": "cs36"
+  },
+  {
+   "encoding": ">gt",
+   "family": ">gt",
+   "name": "cs37"
+  },
+  {
+   "encoding": "'sq",
+   "family": "'sq",
+   "name": "cs38"
+  },
+  {
+   "encoding": "a'b",
+   "family": "a'b",
+   "name": "cs39"
+  },
+  {
+   "encoding": "\"dq",
+   "family": "\"dq",
+   "name": "cs40"
+  },
+  {
+   "encoding": "a\"b",
+   "family": "a\"b",
+   "name": "cs41"
+  },
+  {
+   "encoding": "%pc",
+   "family": "%pc",
+   "name": "cs42"
+  },
+  {
+   "encoding": "@at",
+   "family": "@at",
+   "name": "cs43"
+  },
+  {
+   "encoding": "`bt",
+   "family": "`bt",
+   "name": "cs44"
+  },
+  {
+   "encoding": "=",
+   "family": "=",
+   "name": "cs45"
+  },
+  {
+   "encoding": "<<",
+   "family": "<<",
+   "name": "cs46"
+  },
+  {
+   "encoding": "null",
+   "family": "null",
+   "name": "cs47"
+  },
+  {
+   "encoding": "Null",
+   "family": "Null",
+   "name": "cs48"
+  },
+  {
+   "encoding": "NULL",
+   "family": "NULL",
+   "name": "cs49"
+  },
+  {
+   "encoding": "nULL",
+   "family": "nULL",
+   "name": "cs50"
+  },
+  {
+   "encoding": "~",
+   "family": "~",
+   "name": "cs51"
+  },
+  {
+   "encoding": "~x",
+   "family": "~x",
+   "name": "cs52"
+  },
+  {
+   "encoding": "true",
+   "family": "true",
+   "name": "cs53"
+  },
+  {
+   "encoding": "False",
+   "family": "False",
+   "name": "cs54"
+  },
+  {
+   "encoding": "yes",
+   "family": "yes",
+   "name": "cs55"
+  },
+  {
+   "encoding": "No",
+   "family": "No",
+   "name": "cs56"
+  },
+  {
+   "encoding": "on",
+   "family": "on",
+   "name": "cs57"
+  },
+  {
+   "encoding": "OFF",
+   "family": "OFF",
+   "name": "cs58"
+  },
+  {
+   "encoding": "y",
+   "family": "y",
+   "name": "cs59"
+  },
+  {
+   "encoding": "n",
+   "family": "n",
+   "name": "cs60"
+  },
+  {
+   "encoding": "1.5",
+   "family": "1.5",
+   "name": "cs61"
+  },
+  {
+   "encoding": "-2",
+   "family": "-2",
+   "name": "cs62"
+  },
+  {
+   "encoding": "0x10",
+   "family": "0x10",
+   "name": "cs63"
+  },
+  {
+   "encoding": "1e3",
+   "family": "1e3",
+   "name": "cs64"
+  },
+  {
+   "encoding": ".inf",
+   "family": ".inf",
+   "name": "cs65"
+  },
+  {
+   "encoding": "-.inf",
+   "family": "-.inf",
+   "name": "cs66"
+  },
+  {
+   "encoding": ".nan",
+   "family": ".nan",
+   "name": "cs67"
+  },
+  {
+   "encoding": "0o17",
+   "family": "0o17",
+   "name": "cs68"
+  },
+  {
+   "encoding": "a\tb",
+   "family": "a\tb",
+   "name": "cs69"
+  },
+  {
+   "encoding": "\ttab",
+   "family": "\ttab",
+   "name": "cs70"
+  },
+  {
+   "encoding": "tab\t",
+   "family": "tab\t",
+   "name": "cs71"
+  },
+  {
+   "encoding": "a\nb",
+   "family": "a\nb",
+   "name": "cs72"
+  },
+  {
+   "encoding": "a\\b",
+   "family": "a\\b",
+   "name": "cs73"
+  },
+  {
+   "encoding": "\\",
+   "family": "\\",
+   "name": "cs74"
+  },
+  {
+   "encoding": "a\bb",
+   "family": "a\bb",
+   "name": "cs75"
+  },
+  {
+   "encoding": "a\fb",
+   "family": "a\fb",
+   "name": "cs76"
+  },
+  {
+   "encoding": "a\rb",
+   "family": "a\rb",
+   "name": "cs77"
+  },
+  {
+   "encoding": "a\u0000b",
+   "family": "a\u0000b",
+   "name": "cs78"
+  },
+  {
+   "encoding": "a\u0001b",
+   "family": "a\u0001b",
+   "name": "cs79"
+  },
+  {
+   "encoding": "a\u001fb",
+   "family": "a\u001fb",
+   "name": "cs80"
+  },
+  {
+   "encoding": "a\u007fb",
+   "family": "a\u007fb",
+   "name": "cs81"
+  },
+  {
+   "encoding": "a  b",
+   "family": "a  b",
+   "name": "cs82"
+  },
+  {
+   "encoding": "...",
+   "family": "...",
+   "name": "cs83"
+  },
+  {
+   "encoding": "---",
+   "family": "---",
+   "name": "cs84"
+  },
+  {
+   "encoding": "--- x",
+   "family": "--- x",
+   "name": "cs85"
+  },
+  {
+   "encoding": "... x",
+   "family": "... x",
+   "name": "cs86"
+  },
+  {
+   "encoding": "a - b",
+   "family": "a - b",
+   "name": "cs87"
+  },
+  {
+   "encoding": "a -b",
+   "family": "a -b",
+   "name": "cs88"
+  },
+  {
+   "encoding": "",
+   "family": "",
+   "name": "cs89"
+  },
+  {
+   "encoding": "  ",
+   "family": "  ",
+   "name": "cs90"
+  },
+  {
+   "encoding": " ",
+   "family": " ",
+   "name": "cs91"
+  }
+ ],
+ "family_separator": " ",
+ "name": "a: config #1",
+ "search_paths": [
+  "plain",
+  " lead",
+  "trail ",
+  "a: b",
+  "a #b",
+  "a#b",
+  "e#",
+  "x#",
+  "x #",
+  "#",
+  "-dash",
+  "- x"
+ ]
+}

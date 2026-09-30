@@ -170,3 +170,115 @@ sha256 = "3a48b0421e51d4284ec07187f86b74387321550b65f5a2f237885bf269dbc99e"
 generator = "ocio_oracle regen builtin_configs"
 ocio_version = "2.5.2"
 machine = "windows-x86_64 cpu=AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD features=sse2,sse3,ssse3,sse4.1,sse4.2,avx,avx2,fma,f16c,avx512f,avx512dq,avx512bw,avx512vl"
+
+[[file]]
+path = "yaml_emitter/block_strings/serialize.ocio"
+sha256 = "1117c3eb952eae263ea4a40e7d0689a4b6dac3302c55fbf2abcf358d4f9b6593"
+generator = "ocio_oracle regen yaml_emitter"
+ocio_version = "2.5.2"
+machine = "windows-x86_64 cpu=AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD features=sse2,sse3,ssse3,sse4.1,sse4.2,avx,avx2,fma,f16c,avx512f,avx512dq,avx512bw,avx512vl"
+
+[[file]]
+path = "yaml_emitter/block_strings/spec.json"
+sha256 = "58ff0e70d54a41d1be54f7113135bd34ab926481ec643f5e65fba9cb3ff67c2b"
+generator = "ocio_oracle regen yaml_emitter"
+ocio_version = "2.5.2"
+machine = "windows-x86_64 cpu=AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD features=sse2,sse3,ssse3,sse4.1,sse4.2,avx,avx2,fma,f16c,avx512f,avx512dq,avx512bw,avx512vl"
+
+[[file]]
+path = "yaml_emitter/descriptions/serialize.ocio"
+sha256 = "04b0af5b09e3faf8f83d23a298c38b8836f060cc3b7647736b6d763209ad7ee5"
+generator = "ocio_oracle regen yaml_emitter"
+ocio_version = "2.5.2"
+machine = "windows-x86_64 cpu=AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD features=sse2,sse3,ssse3,sse4.1,sse4.2,avx,avx2,fma,f16c,avx512f,avx512dq,avx512bw,avx512vl"
+
+[[file]]
+path = "yaml_emitter/descriptions/spec.json"
+sha256 = "b049dd96d9278751071483287e290f0a7ccb282d3a80eeb876b1381ae81542c7"
+generator = "ocio_oracle regen yaml_emitter"
+ocio_version = "2.5.2"
+machine = "windows-x86_64 cpu=AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD features=sse2,sse3,ssse3,sse4.1,sse4.2,avx,avx2,fma,f16c,avx512f,avx512dq,avx512bw,avx512vl"
+
+[[file]]
+path = "yaml_emitter/empty/serialize.ocio"
+sha256 = "e58318279fff95e4b1c9659fa9c1ccb980076c744e357d621bc2763666f61aec"
+generator = "ocio_oracle regen yaml_emitter"
+ocio_version = "2.5.2"
+machine = "windows-x86_64 cpu=AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD features=sse2,sse3,ssse3,sse4.1,sse4.2,avx,avx2,fma,f16c,avx512f,avx512dq,avx512bw,avx512vl"
+
+[[file]]
+path = "yaml_emitter/empty/spec.json"
+sha256 = "ca3d163bab055381827226140568f3bef7eaac187cebd76878e0b63e9e442356"
+generator = "ocio_oracle regen yaml_emitter"
+ocio_version = "2.5.2"
+machine = "windows-x86_64 cpu=AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD features=sse2,sse3,ssse3,sse4.1,sse4.2,avx,avx2,fma,f16c,avx512f,avx512dq,avx512bw,avx512vl"
+
+[[file]]
+path = "yaml_emitter/flow_strings/serialize.ocio"
+sha256 = "001a45ceb3d367a302f67c07eaa11056fe7d7f7646ccf63d61356e222f0dff1d"
+generator = "ocio_oracle regen yaml_emitter"
+ocio_version = "2.5.2"
+machine = "windows-x86_64 cpu=AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD features=sse2,sse3,ssse3,sse4.1,sse4.2,avx,avx2,fma,f16c,avx512f,avx512dq,avx512bw,avx512vl"
+
+[[file]]
+path = "yaml_emitter/flow_strings/spec.json"
+sha256 = "86887378fd4dbc050e09b1576ddab289d2c73bc2bcbe983da112a4f521d96c3b"
+generator = "ocio_oracle regen yaml_emitter"
+ocio_version = "2.5.2"
+machine = "windows-x86_64 cpu=AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD features=sse2,sse3,ssse3,sse4.1,sse4.2,avx,avx2,fma,f16c,avx512f,avx512dq,avx512bw,avx512vl"
+
+[[file]]
+path = "yaml_emitter/keys/serialize.ocio"
+sha256 = "c8eeac4b5291879b6050969fe60f13a2e3f5812075c7379cbae262449ba7473d"
+generator = "ocio_oracle regen yaml_emitter"
+ocio_version = "2.5.2"
+machine = "windows-x86_64 cpu=AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD features=sse2,sse3,ssse3,sse4.1,sse4.2,avx,avx2,fma,f16c,avx512f,avx512dq,avx512bw,avx512vl"
+
+[[file]]
+path = "yaml_emitter/keys/spec.json"
+sha256 = "9d5f29594fbe858f57fad44f68f89ae98f5ed2595769272aaead33ff21dc3752"
+generator = "ocio_oracle regen yaml_emitter"
+ocio_version = "2.5.2"
+machine = "windows-x86_64 cpu=AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD features=sse2,sse3,ssse3,sse4.1,sse4.2,avx,avx2,fma,f16c,avx512f,avx512dq,avx512bw,avx512vl"
+
+[[file]]
+path = "yaml_emitter/long_strings/serialize.ocio"
+sha256 = "cf3caa28de2cb1c9f4769e3a33d5af7b35a73770a2b90b37460f2cf606c64006"
+generator = "ocio_oracle regen yaml_emitter"
+ocio_version = "2.5.2"
+machine = "windows-x86_64 cpu=AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD features=sse2,sse3,ssse3,sse4.1,sse4.2,avx,avx2,fma,f16c,avx512f,avx512dq,avx512bw,avx512vl"
+
+[[file]]
+path = "yaml_emitter/long_strings/spec.json"
+sha256 = "dc5e96ed6db80d1fb88fb4f9b37a1a6b38eba9eda28a41b5feb95946910f5f3a"
+generator = "ocio_oracle regen yaml_emitter"
+ocio_version = "2.5.2"
+machine = "windows-x86_64 cpu=AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD features=sse2,sse3,ssse3,sse4.1,sse4.2,avx,avx2,fma,f16c,avx512f,avx512dq,avx512bw,avx512vl"
+
+[[file]]
+path = "yaml_emitter/non_ascii/serialize.ocio"
+sha256 = "0953459320182c226ca6b17445341f05f103c73e4f596f53b0f8019e96862e64"
+generator = "ocio_oracle regen yaml_emitter"
+ocio_version = "2.5.2"
+machine = "windows-x86_64 cpu=AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD features=sse2,sse3,ssse3,sse4.1,sse4.2,avx,avx2,fma,f16c,avx512f,avx512dq,avx512bw,avx512vl"
+
+[[file]]
+path = "yaml_emitter/non_ascii/spec.json"
+sha256 = "a89289f8dae8eac8a31f5c8000d87a015c3f7b75ed31533d99dd718851d1c746"
+generator = "ocio_oracle regen yaml_emitter"
+ocio_version = "2.5.2"
+machine = "windows-x86_64 cpu=AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD features=sse2,sse3,ssse3,sse4.1,sse4.2,avx,avx2,fma,f16c,avx512f,avx512dq,avx512bw,avx512vl"
+
+[[file]]
+path = "yaml_emitter/numbers/serialize.ocio"
+sha256 = "d47d07c05e663bc2709f1ad3e708188865cdf133bd6486c05a4ca182d5037ff5"
+generator = "ocio_oracle regen yaml_emitter"
+ocio_version = "2.5.2"
+machine = "windows-x86_64 cpu=AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD features=sse2,sse3,ssse3,sse4.1,sse4.2,avx,avx2,fma,f16c,avx512f,avx512dq,avx512bw,avx512vl"
+
+[[file]]
+path = "yaml_emitter/numbers/spec.json"
+sha256 = "ddb22ce59a52a9ed60a332ee7218e47c9040a94ff99e9b1b3b991bcbaff89bef"
+generator = "ocio_oracle regen yaml_emitter"
+ocio_version = "2.5.2"
+machine = "windows-x86_64 cpu=AMD64 Family 26 Model 68 Stepping 0, AuthenticAMD features=sse2,sse3,ssse3,sse4.1,sse4.2,avx,avx2,fma,f16c,avx512f,avx512dq,avx512bw,avx512vl"

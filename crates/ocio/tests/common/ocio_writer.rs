@@ -14,6 +14,8 @@
 //! from the tree, which records what OCIO requested. The config model itself is Phase 3;
 //! this proves the emitter.
 
+use std::collections::VecDeque;
+
 use ocio::yaml_cpp::{Emitter, EmitterManip::*, verbatim_tag};
 
 use super::yaml_tree::{Node, Style};
@@ -28,9 +30,15 @@ enum Kind {
     Double,
 }
 
+/// A number with the C++ type OCIO writes it as.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Number {
+    F32(f32),
+    F64(f64),
+}
+
 /// A number as yaml-cpp writes it (`.nan`, `.inf`, `-.inf` or decimal text), read back as
-/// the nearest value of its type. Precision 15 round-trips every double's text; a float's
-/// 7-digit text maps back to a float with the same text (see the S1 report).
+/// the nearest value of its type: the value written when the exact ones are not given.
 fn number<T: std::str::FromStr>(text: &str) -> T {
     let rust = match text {
         ".nan" => "NaN",
@@ -68,6 +76,9 @@ pub(crate) struct OcioWriter {
     pub(crate) out: Emitter,
     /// How many numbers went through the emitter's float and double formatting.
     pub(crate) numbers: usize,
+    /// The exact numbers the config holds, in the order OCIO writes them; without them the
+    /// tree's text is read back.
+    pub(crate) values: Option<VecDeque<Number>>,
 }
 
 impl Default for OcioWriter {
@@ -83,7 +94,19 @@ impl OcioWriter {
         let mut out = Emitter::new();
         out.set_double_precision(15);
         out.set_float_precision(7);
-        OcioWriter { out, numbers: 0 }
+        OcioWriter {
+            out,
+            numbers: 0,
+            values: None,
+        }
+    }
+
+    /// The next exact number, if they were given.
+    fn next_value(&mut self, text: &str) -> Option<Number> {
+        let values = self.values.as_mut()?;
+        let value = values.pop_front();
+        assert!(value.is_some(), "no exact number left for {text:?}");
+        value
     }
 
     /// `Config::serialize`: `ostream << out.c_str()` after writing the whole config.
@@ -112,11 +135,21 @@ impl OcioWriter {
                 self.out.put(text.as_bytes()[0]);
             }
             Kind::Float => {
-                self.out.put(number::<f32>(text));
+                let v = match self.next_value(text) {
+                    None => number::<f32>(text),
+                    Some(Number::F32(v)) => v,
+                    Some(other) => panic!("{text:?} is a float, the exact value is {other:?}"),
+                };
+                self.out.put(v);
                 self.numbers += 1;
             }
             Kind::Double => {
-                self.out.put(number::<f64>(text));
+                let v = match self.next_value(text) {
+                    None => number::<f64>(text),
+                    Some(Number::F64(v)) => v,
+                    Some(other) => panic!("{text:?} is a double, the exact value is {other:?}"),
+                };
+                self.out.put(v);
                 self.numbers += 1;
             }
         }
@@ -148,10 +181,10 @@ impl OcioWriter {
     }
 
     /// `saveDescription` (OCIOYaml.cpp:219-230).
+    ///
+    /// The tree holds a description only where OCIO's `desc && *desc` held, and after
+    /// `SanitizeNewlines`: a description of newlines alone was written as `""`.
     fn save_description(&mut self, desc: &str) {
-        if desc.is_empty() {
-            return;
-        }
         let desc = sanitize_newlines(desc);
         self.out.put(Key).put("description").put(Value);
         if desc.contains('\n') {

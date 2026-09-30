@@ -1,0 +1,450 @@
+{
+ "colorspaces": [
+  {
+   "aliases": [
+    "alias0 caf\u00e9"
+   ],
+   "family": "caf\u00e9",
+   "interchange": [
+    [
+     "icc_profile_name",
+     "caf\u00e9"
+    ]
+   ],
+   "name": "cs0"
+  },
+  {
+   "aliases": [
+    "alias1 \u00e9t\u00e9"
+   ],
+   "family": "\u00e9t\u00e9",
+   "interchange": [
+    [
+     "icc_profile_name",
+     "\u00e9t\u00e9"
+    ]
+   ],
+   "name": "cs1"
+  },
+  {
+   "aliases": [
+    "alias2 \u65e5\u672c\u8a9e"
+   ],
+   "family": "\u65e5\u672c\u8a9e",
+   "interchange": [
+    [
+     "icc_profile_name",
+     "\u65e5\u672c\u8a9e"
+    ]
+   ],
+   "name": "cs2"
+  },
+  {
+   "aliases": [
+    "alias3 \ud83d\ude00"
+   ],
+   "family": "\ud83d\ude00",
+   "interchange": [
+    [
+     "icc_profile_name",
+     "\ud83d\ude00"
+    ]
+   ],
+   "name": "cs3"
+  },
+  {
+   "aliases": [
+    "alias4 a\ud83d\ude00b"
+   ],
+   "family": "a\ud83d\ude00b",
+   "interchange": [
+    [
+     "icc_profile_name",
+     "a\ud83d\ude00b"
+    ]
+   ],
+   "name": "cs4"
+  },
+  {
+   "aliases": [
+    "alias5 \u00a0lead"
+   ],
+   "family": "\u00a0lead",
+   "interchange": [
+    [
+     "icc_profile_name",
+     "\u00a0lead"
+    ]
+   ],
+   "name": "cs5"
+  },
+  {
+   "aliases": [
+    "alias6 trail\u00a0"
+   ],
+   "family": "trail\u00a0",
+   "interchange": [
+    [
+     "icc_profile_name",
+     "trail\u00a0"
+    ]
+   ],
+   "name": "cs6"
+  },
+  {
+   "aliases": [
+    "alias7 a\u0080b"
+   ],
+   "family": "a\u0080b",
+   "interchange": [
+    [
+     "icc_profile_name",
+     "a\u0080b"
+    ]
+   ],
+   "name": "cs7"
+  },
+  {
+   "aliases": [
+    "alias8 a\u0085b"
+   ],
+   "family": "a\u0085b",
+   "interchange": [
+    [
+     "icc_profile_name",
+     "a\u0085b"
+    ]
+   ],
+   "name": "cs8"
+  },
+  {
+   "aliases": [
+    "alias9 a\u009fb"
+   ],
+   "family": "a\u009fb",
+   "interchange": [
+    [
+     "icc_profile_name",
+     "a\u009fb"
+    ]
+   ],
+   "name": "cs9"
+  },
+  {
+   "aliases": [
+    "alias10 a\u00a0b"
+   ],
+   "family": "a\u00a0b",
+   "interchange": [
+    [
+     "icc_profile_name",
+     "a\u00a0b"
+    ]
+   ],
+   "name": "cs10"
+  },
+  {
+   "aliases": [
+    "alias11 a\u00adb"
+   ],
+   "family": "a\u00adb",
+   "interchange": [
+    [
+     "icc_profile_name",
+     "a\u00adb"
+    ]
+   ],
+   "name": "cs11"
+  },
+  {
+   "aliases": [
+    "alias12 a\u2028b"
+   ],
+   "family": "a\u2028b",
+   "interchange": [
+    [
+     "icc_profile_name",
+     "a\u2028b"
+    ]
+   ],
+   "name": "cs12"
+  },
+  {
+   "aliases": [
+    "alias13 a\u2029b"
+   ],
+   "family": "a\u2029b",
+   "interchange": [
+    [
+     "icc_profile_name",
+     "a\u2029b"
+    ]
+   ],
+   "name": "cs13"
+  },
+  {
+   "aliases": [
+    "alias14 a\ufeffb"
+   ],
+   "family": "a\ufeffb",
+   "interchange": [
+    [
+     "icc_profile_name",
+     "a\ufeffb"
+    ]
+   ],
+   "name": "cs14"
+  },
+  {
+   "aliases": [
+    "alias15 \ufeff"
+   ],
+   "family": "\ufeff",
+   "interchange": [
+    [
+     "icc_profile_name",
+     "\ufeff"
+    ]
+   ],
+   "name": "cs15"
+  },
+  {
+   "aliases": [
+    "alias16 \ufffd"
+   ],
+   "family": "\ufffd",
+   "interchange": [
+    [
+     "icc_profile_name",
+     "\ufffd"
+    ]
+   ],
+   "name": "cs16"
+  },
+  {
+   "aliases": [
+    "alias17 a\ue000b"
+   ],
+   "family": "a\ue000b",
+   "interchange": [
+    [
+     "icc_profile_name",
+     "a\ue000b"
+    ]
+   ],
+   "name": "cs17"
+  },
+  {
+   "aliases": [
+    "alias18 \udbff\udfff"
+   ],
+   "family": "\udbff\udfff",
+   "interchange": [
+    [
+     "icc_profile_name",
+     "\udbff\udfff"
+    ]
+   ],
+   "name": "cs18"
+  },
+  {
+   "aliases": [
+    "alias19 \u0391\u03b2\u03b3"
+   ],
+   "family": "\u0391\u03b2\u03b3",
+   "interchange": [
+    [
+     "icc_profile_name",
+     "\u0391\u03b2\u03b3"
+    ]
+   ],
+   "name": "cs19"
+  },
+  {
+   "aliases": [
+    "alias20 \u0645\u0631\u062d\u0628\u0627"
+   ],
+   "family": "\u0645\u0631\u062d\u0628\u0627",
+   "interchange": [
+    [
+     "icc_profile_name",
+     "\u0645\u0631\u062d\u0628\u0627"
+    ]
+   ],
+   "name": "cs20"
+  },
+  {
+   "aliases": [
+    "alias21 a: \u00e9"
+   ],
+   "family": "a: \u00e9",
+   "interchange": [
+    [
+     "icc_profile_name",
+     "a: \u00e9"
+    ]
+   ],
+   "name": "cs21"
+  },
+  {
+   "aliases": [
+    "alias22 \u00e9: a"
+   ],
+   "family": "\u00e9: a",
+   "interchange": [
+    [
+     "icc_profile_name",
+     "\u00e9: a"
+    ]
+   ],
+   "name": "cs22"
+  },
+  {
+   "aliases": [
+    "alias23 - \u00e9"
+   ],
+   "family": "- \u00e9",
+   "interchange": [
+    [
+     "icc_profile_name",
+     "- \u00e9"
+    ]
+   ],
+   "name": "cs23"
+  },
+  {
+   "aliases": [
+    "alias24 \u00e9 #x"
+   ],
+   "family": "\u00e9 #x",
+   "interchange": [
+    [
+     "icc_profile_name",
+     "\u00e9 #x"
+    ]
+   ],
+   "name": "cs24"
+  },
+  {
+   "aliases": [
+    "alias25 \u00e9,\u00e9"
+   ],
+   "family": "\u00e9,\u00e9",
+   "interchange": [
+    [
+     "icc_profile_name",
+     "\u00e9,\u00e9"
+    ]
+   ],
+   "name": "cs25"
+  }
+ ],
+ "family_separator": "~",
+ "name": "caf\u00e9 \u65e5\u672c",
+ "roles": [
+  [
+   "role0 caf\u00e9",
+   "cs0"
+  ],
+  [
+   "role1 \u00e9t\u00e9",
+   "cs0"
+  ],
+  [
+   "role2 \u65e5\u672c\u8a9e",
+   "cs0"
+  ],
+  [
+   "role3 \ud83d\ude00",
+   "cs0"
+  ],
+  [
+   "role4 a\ud83d\ude00b",
+   "cs0"
+  ],
+  [
+   "role5 \u00a0lead",
+   "cs0"
+  ],
+  [
+   "role6 trail\u00a0",
+   "cs0"
+  ],
+  [
+   "role7 a\u0080b",
+   "cs0"
+  ],
+  [
+   "role8 a\u0085b",
+   "cs0"
+  ],
+  [
+   "role9 a\u009fb",
+   "cs0"
+  ],
+  [
+   "role10 a\u00a0b",
+   "cs0"
+  ],
+  [
+   "role11 a\u00adb",
+   "cs0"
+  ],
+  [
+   "role12 a\u2028b",
+   "cs0"
+  ],
+  [
+   "role13 a\u2029b",
+   "cs0"
+  ],
+  [
+   "role14 a\ufeffb",
+   "cs0"
+  ],
+  [
+   "role15 \ufeff",
+   "cs0"
+  ],
+  [
+   "role16 \ufffd",
+   "cs0"
+  ],
+  [
+   "role17 a\ue000b",
+   "cs0"
+  ],
+  [
+   "role18 \udbff\udfff",
+   "cs0"
+  ],
+  [
+   "role19 \u0391\u03b2\u03b3",
+   "cs0"
+  ],
+  [
+   "role20 \u0645\u0631\u062d\u0628\u0627",
+   "cs0"
+  ],
+  [
+   "role21 a: \u00e9",
+   "cs0"
+  ],
+  [
+   "role22 \u00e9: a",
+   "cs0"
+  ],
+  [
+   "role23 - \u00e9",
+   "cs0"
+  ],
+  [
+   "role24 \u00e9 #x",
+   "cs0"
+  ],
+  [
+   "role25 \u00e9,\u00e9",
+   "cs0"
+  ]
+ ]
+}
