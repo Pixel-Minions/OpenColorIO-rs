@@ -320,3 +320,13 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Decided** (general rule): the port gives the wheel's messages where the wheel raises, and an
   error where it would overrun.
 - **Status:** to be matched in `p1-bitdepth` (1.1e).
+### U-4. A Python logging function crashes the interpreter's exit
+
+- **Upstream:** a logging function set from Python is held in a C++ global
+  (`Logging.cpp:71`), which outlives the Python interpreter. A process that exits with one
+  still set crashes (a segmentation fault on both platforms, seen through the wheel in
+  `p1-foundations`); `ResetToDefaultLoggingFunction()` before exit avoids it, and the oracle's
+  commands do so.
+- **Options:** release the function when Python shuts down, or keep it and never release it;
+  either way the process exits cleanly.
+- **Status:** open; decided in Phase 6 (the Python module).
