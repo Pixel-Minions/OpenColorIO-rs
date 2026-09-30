@@ -12,7 +12,9 @@
 //! `scripts/rocky9.sh` labels each volume with its checkout and repository. Volumes of other
 //! repositories, and volumes without those labels (made by an older `scripts/rocky9.sh`, which
 //! can't be attributed), are kept; `--unlabelled` also deletes the unlabelled ones that no
-//! checkout of this repository still uses. It never deletes anything else.
+//! checkout of this repository still uses. It runs only from the project's main checkout: from
+//! a linked worktree or a local clone, the checkouts still using unlabelled volumes may not be
+//! visible. It never deletes anything else.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -39,6 +41,9 @@ pub(crate) fn run(args: &[&str]) -> Result<(), String> {
         }
     }
     let root = crate::root();
+    if unlabelled {
+        project_main_checkout(&root)?;
+    }
     let worktrees = worktrees(&root)?;
     if yes {
         println!("clean-scratch: deleting what is marked `delete`");
@@ -177,6 +182,54 @@ pub(crate) fn run(args: &[&str]) -> Result<(), String> {
             failures.join("\n  ")
         ))
     }
+}
+
+/// `--unlabelled` needs the project's main checkout: the one whose worktrees include every
+/// checkout that may still use an unlabelled volume. Not a linked worktree, and not a clone of
+/// a checkout on this machine (its origin a local path): from a scratch clone, the main
+/// checkout's own unlabelled volume would look unused.
+fn project_main_checkout(root: &Path) -> Result<(), String> {
+    let git_dir = crate::git(root, &["rev-parse", "--path-format=absolute", "--git-dir"])?;
+    let common = crate::git(
+        root,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )?;
+    if !same_path(git_dir.trim(), common.trim()) {
+        let main = crate::git(root, &["worktree", "list", "--porcelain"])?
+            .lines()
+            .find_map(|l| l.strip_prefix("worktree ").map(str::to_string))
+            .unwrap_or_default();
+        return Err(format!(
+            "--unlabelled runs only from the project's main checkout ({main}), not from a \
+             linked worktree"
+        ));
+    }
+    let origin = crate::git(root, &["config", "--get", "remote.origin.url"]).unwrap_or_default();
+    let origin = origin.trim();
+    if origin.is_empty() || is_local_path(origin) {
+        return Err(format!(
+            "--unlabelled runs only from the project's main checkout; this checkout's origin is \
+             {}, so it looks like a clone of another checkout, whose unlabelled volumes it \
+             can't see in use",
+            if origin.is_empty() { "missing" } else { origin }
+        ));
+    }
+    Ok(())
+}
+
+/// Whether a git remote URL is a path on this machine rather than a server.
+fn is_local_path(url: &str) -> bool {
+    let b = url.as_bytes();
+    let drive = b.len() >= 3
+        && b[0].is_ascii_alphabetic()
+        && b[1] == b':'
+        && (b[2] == b'/' || b[2] == b'\\');
+    drive
+        || url.starts_with("file://")
+        || url.starts_with('/')
+        || url.starts_with('\\')
+        || url.starts_with('.')
+        || url.starts_with('~')
 }
 
 /// Why `wt` may be removed, or why it stays.
@@ -874,6 +927,27 @@ mod tests {
         assert!(out[1].branch.is_none() && out[1].locked && !out[1].prunable);
         assert_eq!(out[2].branch.as_deref(), Some("card/x"));
         assert!(out[2].prunable && !out[2].locked);
+    }
+
+    #[test]
+    fn remote_urls_and_local_clones() {
+        for local in [
+            "D:/Projects/OpenColorIO-rs",
+            r"D:\Projects\OpenColorIO-rs",
+            "file:///d/Projects/OpenColorIO-rs",
+            "/home/u/OpenColorIO-rs",
+            "../OpenColorIO-rs",
+            r"\\server\share\OpenColorIO-rs",
+        ] {
+            assert!(is_local_path(local), "{local}");
+        }
+        for remote in [
+            "https://github.com/Pixel-Minions/OpenColorIO-rs",
+            "git@github.com:Pixel-Minions/OpenColorIO-rs.git",
+            "ssh://git@github.com/Pixel-Minions/OpenColorIO-rs",
+        ] {
+            assert!(!is_local_path(remote), "{remote}");
+        }
     }
 
     #[test]
