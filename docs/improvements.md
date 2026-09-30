@@ -41,7 +41,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **A fix:** 64-bit sizes on every platform, so those images work on Windows too.
 - **Status:** matched in `p1-bitdepth` (1.1d): the message and every buffer byte, including the
   partly written output, checked against the Windows wheel
-  (`crates/ocio-ops/tests/image_packing_oracle.rs`), and wrapped starts on small buffers
+  (`crates/ocio-ops/tests/image_packing_oracle.rs`, and through the scanline helper in
+  `scanline_helper_oracle.rs`), and wrapped starts on small buffers
   (`crates/ocio-ops/src/image_packing_tests.rs`). The owner chose to match it on 2026-09-30.
   Where a wrapped scanline would reach outside the memory, the port returns an error (U-15).
 
