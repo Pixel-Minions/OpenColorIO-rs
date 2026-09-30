@@ -182,7 +182,9 @@ impl Emitter {
     }
 
     /// Port of `Emitter::SetLocalIndent` (emitter.cpp:139-142). The `int` converts to
-    /// `size_t` as in C++ (a negative value becomes huge and is refused).
+    /// `size_t` as in C++: a negative value wraps to a huge indent, which
+    /// `EmitterState::SetIndent` accepts (it refuses only 0 and 1, emitterstate.cpp:328-334),
+    /// so the next indentation would write that many spaces. OCIO never sets an indent.
     pub fn set_local_indent(&mut self, indent: Indent) -> &mut Self {
         self.state.set_indent(indent.0 as usize, FmtScope::Local);
         self
