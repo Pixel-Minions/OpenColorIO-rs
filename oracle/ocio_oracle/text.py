@@ -309,6 +309,40 @@ def serialize_built_config_to_file(args, blobs):
     return {"cache_id": cache_id, "bytes": len(data)}, [data]
 
 
+@command
+def stream_reprs(args, blobs):
+    """repr() of transforms holding the given numbers: the C++ operator<< into a fresh
+    std::ostringstream (PyUtils.h defRepr), so the platform's iostream float output, NaN and
+    infinity spellings included. MatrixTransform sets precision 16
+    (MatrixTransform.cpp:340-364); ExponentTransform and AllocationTransform keep the
+    default 6.
+
+    args: {"doubles_bits": [u64], "floats_bits": [u32]}
+      doubles (a multiple of 20): one MatrixTransform per 20 (16 matrix values, then 4
+        offsets), and one ExponentTransform per 4 (setValue, which does not validate);
+      floats (a multiple of 3): one lg2 AllocationTransform per 3 (setVars).
+    result: {"matrix": [str], "exponent": [str], "allocation": [str]}
+    """
+    doubles = [_f64(b) for b in args["doubles_bits"]]
+    floats = [_f32(b) for b in args["floats_bits"]]
+    if len(doubles) % 20 or len(floats) % 3:
+        raise ValueError("stream_reprs needs a multiple of 20 doubles and of 3 floats")
+    matrix, exponent, allocation = [], [], []
+    for i in range(0, len(doubles), 20):
+        transform = OCIO.MatrixTransform(matrix=doubles[i:i + 16], offset=doubles[i + 16:i + 20])
+        matrix.append(repr(transform))
+    for i in range(0, len(doubles), 4):
+        transform = OCIO.ExponentTransform()
+        transform.setValue(doubles[i:i + 4])
+        exponent.append(repr(transform))
+    for i in range(0, len(floats), 3):
+        transform = OCIO.AllocationTransform()
+        transform.setAllocation(OCIO.ALLOCATION_LG2)
+        transform.setVars(floats[i:i + 3])
+        allocation.append(repr(transform))
+    return {"matrix": matrix, "exponent": exponent, "allocation": allocation}, []
+
+
 # The fixture cases of the `yaml_emitter` regen group: inputs only; the expected text is
 # what serialize() returns for them.
 
