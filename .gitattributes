@@ -9,3 +9,10 @@ corpus/** -text -diff
 *.png binary
 *.icc binary
 *.icm binary
+
+# Append-only registers: cards that run in parallel add entries at the same places, and
+# `cargo xtask land` replays each card's commits one by one onto phase0. A union merge keeps
+# both sides' lines, so those replays don't stop on the registers. Check the result when a card
+# lands: if two cards edited the same existing line, both versions are kept.
+docs/improvements.md merge=union
+docs/deviations.md merge=union
