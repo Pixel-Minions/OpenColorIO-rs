@@ -12,6 +12,11 @@
 //! is never a no-op or an identity (`LogOpData::isNoOp`/`isIdentity` return false), has no
 //! simpler replacement, and the separable-prefix bake only applies to integer input bit
 //! depths (`OptimizeSeparablePrefix`, src/OpenColorIO/OpOptimizers.cpp:559-563 @ v2.5.2).
+//!
+//! The op data goes through `std::hint::black_box`, so that the compiler cannot evaluate the
+//! renderers' constructors on the tests' constant parameters: it folds, for example, `log2` of
+//! a negative constant to a positive NaN, where the math library returns the negative x86
+//! default NaN at run time.
 
 mod common;
 
@@ -61,7 +66,7 @@ fn log_transform_matches_the_wheel() {
                 "class": "LogTransform",
                 "args": {"base": base, "direction": direction_enum(dir)},
             });
-            let data = log_transform_op(base, dir);
+            let data = black_box(log_transform_op(base, dir));
             for math in Math::BOTH {
                 let renderer = get_log_renderer(&data, math.fast());
                 let label = format!("LogTransform base {base} {dir:?}");
@@ -186,7 +191,7 @@ fn log_affine_transform_matches_the_wheel() {
     let mut checks = Checks::default();
     for (i, case) in cases.iter().enumerate() {
         for dir in DIRECTIONS {
-            let data = case.op(dir);
+            let data = black_box(case.op(dir));
             for math in Math::BOTH {
                 let renderer = get_log_renderer(&data, math.fast());
                 let label = format!("LogAffineTransform case {i} {dir:?}");
@@ -279,7 +284,7 @@ impl Camera {
 
     /// The break points on both sides and their neighbours, to add to the probe.
     fn break_points(&self) -> Vec<f32> {
-        let data = self.op(Forward);
+        let data = black_box(self.op(Forward));
         let base = self.base as f32;
         let params = [data.red_params(), data.green_params(), data.blue_params()];
         let mut v = Vec::new();
@@ -385,7 +390,7 @@ fn negative_break() -> Camera {
 fn camera_cases_distinguish_the_log_side_break_variants() {
     let mut differ = Vec::new();
     for case in camera_cases() {
-        let data = case.op(Forward);
+        let data = black_box(case.op(Forward));
         let base = f64::from(case.base as f32);
         for (c, params) in [data.red_params(), data.green_params(), data.blue_params()]
             .into_iter()
@@ -427,8 +432,6 @@ fn nan_pixels_meet_nan_offsets_at_every_buffer_length() {
     let nans = [0xffc0_0000u32, 0xffc1_2345, 0x7fc1_2345, 0xff80_0001].map(f32::from_bits);
     let mut checks = Checks::default();
     for dir in DIRECTIONS {
-        // Opaque, so that the compiler cannot fold the constructor's log2 of a negative
-        // constant.
         let data = black_box(case.op(dir));
         for math in Math::BOTH {
             let renderer = get_log_renderer(&data, math.fast());
@@ -450,7 +453,7 @@ fn log_camera_transform_matches_the_wheel() {
     for case in camera_cases() {
         let input = probe_rgba_with(&case.break_points());
         for dir in DIRECTIONS {
-            let data = case.op(dir);
+            let data = black_box(case.op(dir));
             for math in Math::BOTH {
                 let renderer = get_log_renderer(&data, math.fast());
                 let label = format!("LogCameraTransform {} {dir:?}", case.name);
@@ -540,7 +543,7 @@ fn nan_parameters_match_the_wheel_under_waiver_w0002() {
 #[test]
 fn integer_output_casts_match_the_wheel() {
     let input = probe_rgba();
-    let data = log_transform_op(2.0, Forward);
+    let data = black_box(log_transform_op(2.0, Forward));
     let mut log_out = input.to_vec();
     get_log_renderer(&data, true).apply(&mut log_out);
 
