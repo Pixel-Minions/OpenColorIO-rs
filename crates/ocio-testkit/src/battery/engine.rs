@@ -14,7 +14,7 @@ use super::params::{Case, Channels, Comparison, Origin, mutations, sampled_mutat
 use super::{Combo, Family, Format, Mutations, Plan, Port, Summary, Validation};
 use crate::compare::f32_bits_report;
 use crate::oracle::{BatchCall, Oracle, Response, f32_to_bytes};
-use crate::probe::ProbeSet;
+use crate::probe::{ALL_F32_PIXELS, ProbeSet, all_f32_chunk};
 
 /// Most calls per oracle process, to keep the request's JSON header small.
 const MAX_CALLS_PER_BATCH: usize = 20_000;
@@ -48,12 +48,49 @@ fn buffers(sets: &[ProbeSet]) -> Vec<Arc<Buffer>> {
         .collect()
 }
 
+/// The input pixels of a job.
+enum Input {
+    /// A probe buffer.
+    Buffer(Arc<Buffer>),
+    /// A chunk of the sweep of every `f32`, made when its batch runs.
+    Sweep {
+        /// The chunk.
+        index: u64,
+        /// Its pixels.
+        pixels: u64,
+    },
+}
+
+impl Input {
+    /// The input's size in bytes.
+    fn bytes(&self) -> usize {
+        match self {
+            Input::Buffer(buffer) => buffer.bytes.len(),
+            Input::Sweep { pixels, .. } => *pixels as usize * 16,
+        }
+    }
+
+    fn buffer(&self) -> Arc<Buffer> {
+        match self {
+            Input::Buffer(buffer) => Arc::clone(buffer),
+            Input::Sweep { index, pixels } => Buffer::new(
+                format!(
+                    "every f32, chunk {} of {}",
+                    index + 1,
+                    ALL_F32_PIXELS / pixels
+                ),
+                all_f32_chunk(*index, *pixels),
+            ),
+        }
+    }
+}
+
 /// One oracle call and its comparison.
 struct Job {
     case: usize,
     combo: usize,
     args: Arc<Value>,
-    buffer: Arc<Buffer>,
+    input: Input,
 }
 
 /// The port's renderers for one case and combination.
@@ -112,6 +149,7 @@ pub(super) fn run<F: Family>(family: &F, plan: &Plan) -> Summary {
     let generated_buffers = buffers(&plan.generated_probes);
 
     let mut jobs = Vec::new();
+    let mut sweeps = Vec::new();
     for (c, case) in cases.iter().enumerate() {
         let shared = match case.origin() {
             Origin::Explicit => &explicit_buffers,
@@ -146,11 +184,28 @@ pub(super) fn run<F: Family>(family: &F, plan: &Plan) -> Summary {
                     case: c,
                     combo: k,
                     args: Arc::clone(&args),
-                    buffer: Arc::clone(buffer),
+                    input: Input::Buffer(Arc::clone(buffer)),
                 });
+            }
+            if let Some(sweep) = plan.sweep
+                && c < sweep.cases.min(summary.explicit_cases)
+            {
+                let pixels = sweep.chunk_pixels;
+                let chunks = sweep
+                    .chunks
+                    .unwrap_or(u64::MAX)
+                    .min(ALL_F32_PIXELS / pixels);
+                sweeps.extend((0..chunks).map(|index| Job {
+                    case: c,
+                    combo: k,
+                    args: Arc::clone(&args),
+                    input: Input::Sweep { index, pixels },
+                }));
             }
         }
     }
+    // The sweeps run last, so the probe buffers' batches stay the same with or without them.
+    jobs.extend(sweeps);
 
     let mut checker = Checker {
         family,
@@ -169,26 +224,32 @@ pub(super) fn run<F: Family>(family: &F, plan: &Plan) -> Summary {
         let mut bytes = 0;
         while end < jobs.len()
             && end - start_job < MAX_CALLS_PER_BATCH
-            && (end == start_job || bytes + jobs[end].buffer.bytes.len() <= plan.batch_bytes)
+            && (end == start_job || bytes + jobs[end].input.bytes() <= plan.batch_bytes)
         {
-            bytes += jobs[end].buffer.bytes.len();
+            bytes += jobs[end].input.bytes();
             end += 1;
         }
         let batch = &jobs[start_job..end];
+        let inputs: Vec<Arc<Buffer>> = batch.iter().map(|job| job.input.buffer()).collect();
         let calls: Vec<BatchCall<'_>> = batch
             .iter()
-            .map(|job| BatchCall {
+            .zip(&inputs)
+            .map(|(job, input)| BatchCall {
                 cmd: "cpu_apply",
                 args: (*job.args).clone(),
-                blobs: vec![&job.buffer.bytes],
+                blobs: vec![&input.bytes],
             })
             .collect();
-        let responses = oracle.batch(&calls, plan.cache);
+        // A sweep's responses would only fill the disk.
+        let sweeping = batch
+            .iter()
+            .any(|job| matches!(job.input, Input::Sweep { .. }));
+        let responses = oracle.batch(&calls, plan.cache && !sweeping);
         checker.summary.oracle_calls += calls.len();
         checker.summary.oracle_batches += 1;
         drop(calls);
-        for (job, response) in batch.iter().zip(responses) {
-            checker.check(job, response);
+        for ((job, input), response) in batch.iter().zip(&inputs).zip(responses) {
+            checker.check(job, input, response);
         }
         start_job = end;
     }
@@ -255,7 +316,7 @@ impl<F: Family> Checker<'_, F> {
         }
     }
 
-    fn check(&mut self, job: &Job, response: Response) {
+    fn check(&mut self, job: &Job, buffer: &Buffer, response: Response) {
         let group = (job.case, job.combo);
         let refusal = response.result.get("exception").map(|e| {
             e.get("message")
@@ -287,7 +348,7 @@ impl<F: Family> Checker<'_, F> {
         let case = &self.cases[job.case];
         let combo = self.combos[job.combo];
         let label = self.label(group);
-        let input = &job.buffer.pixels;
+        let input = &buffer.pixels;
         let expected = response.blob_f32(0);
         let ports = self.ports(group);
         let port = match &ports.port {
@@ -307,7 +368,7 @@ impl<F: Family> Checker<'_, F> {
         let pass_through = ports.pass_through;
         let mut failures = Vec::new();
         let mut pass_through_checks = 0;
-        let probe = format!("probe \"{}\" ({} pixels)", job.buffer.name, input.len() / 4);
+        let probe = format!("probe \"{}\" ({} pixels)", buffer.name, input.len() / 4);
         if pass_through.iter().any(|&p| p) {
             if let Some(report) = channels_report(pass_through, input, input, &expected) {
                 failures.push(format!(

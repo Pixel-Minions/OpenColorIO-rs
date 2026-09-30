@@ -13,7 +13,7 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use ocio_testkit::Oracle;
 use ocio_testkit::battery::params::{A, Case, Channels, Params, Precision, R, RGB, Slot};
 use ocio_testkit::battery::{
-    Combo, Direction, Family, Mutations, Plan, Port, Spec, Summary, Validation, run_with,
+    Combo, Direction, Family, Mutations, Plan, Port, Spec, Summary, Sweep, Validation, run_with,
     yaml_number,
 };
 use ocio_testkit::oracle::f32_to_bytes;
@@ -170,6 +170,7 @@ fn small_plan() -> Plan {
         generated_probes: vec![ProbeSet::Specials],
         breakpoint_ulps: 0,
         mutations: Mutations::None,
+        sweep: None,
         batch_bytes: 256 << 20,
         cache: true,
     }
@@ -331,4 +332,28 @@ fn yaml_specs_read_numbers_back_exactly() {
             "{v:e}: JSON and YAML specs give different pixels"
         );
     }
+}
+
+/// The sweep of every `f32` streams its chunks through the batch like any probe: here its
+/// first two chunks, in both combinations, for the first case only.
+#[test]
+fn the_f32_sweep_runs_its_chunks() {
+    let family = LogFamily::new(vec![
+        Case::new("base 2", Base(2.0)),
+        Case::new("base 10", Base(10.0)),
+    ]);
+    let plan = Plan {
+        sweep: Some(Sweep {
+            cases: 1,
+            chunk_pixels: 1 << 12,
+            chunks: Some(2),
+        }),
+        ..small_plan()
+    };
+    let summary = run_with(&family, &plan);
+    assert_eq!(summary.failures, Vec::<String>::new());
+    // 2 cases x 2 combinations of specials, then 2 combinations x 2 chunks for the first.
+    assert_eq!(summary.comparisons, 4 + 4);
+    assert_eq!(summary.values, 4 * 4 * specials().len() + 4 * 4 * (1 << 12));
+    assert_eq!(summary.oracle_batches, 1);
 }

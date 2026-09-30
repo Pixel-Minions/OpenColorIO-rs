@@ -379,8 +379,10 @@ pub fn nan_buffers(max_pixels: usize) -> Vec<(String, Vec<f32>)> {
 pub const ALL_F32_PIXELS: u64 = 1 << 30;
 
 /// Chunk `index` of the sweep of every `f32` bit pattern: `pixels` RGBA pixels, where pixel `j`
-/// of the sweep holds the bit patterns `4j`, `4j + 1`, `4j + 2` and `4j + 3`. Every pattern
-/// appears once, in one channel. `pixels` must divide [`ALL_F32_PIXELS`].
+/// of the sweep holds the bit patterns `4j` to `4j + 3`, rotated by `j`: channel `c` holds
+/// `4j + (j + c) % 4`. Every pattern appears once, in one channel, and each channel sees a
+/// quarter of the patterns with every value of the two lowest bits. `pixels` must divide
+/// [`ALL_F32_PIXELS`].
 pub fn all_f32_chunk(index: u64, pixels: u64) -> Vec<f32> {
     assert!(
         pixels > 0 && ALL_F32_PIXELS.is_multiple_of(pixels),
@@ -390,9 +392,9 @@ pub fn all_f32_chunk(index: u64, pixels: u64) -> Vec<f32> {
         index < ALL_F32_PIXELS / pixels,
         "chunk {index} is past the sweep"
     );
-    let first = index * pixels * 4;
-    (first..first + pixels * 4)
-        .map(|bits| f32::from_bits(bits as u32))
+    let first = index * pixels;
+    (first..first + pixels)
+        .flat_map(|j| (0..4).map(move |c| f32::from_bits((4 * j + (j + c) % 4) as u32)))
         .collect()
 }
 
@@ -710,11 +712,26 @@ mod tests {
         let pixels = 1u64 << 20;
         let first = all_f32_chunk(0, pixels);
         assert_eq!(first.len() as u64, pixels * 4);
-        assert_eq!(first[0].to_bits(), 0);
-        assert_eq!(first[5].to_bits(), 5);
+        // Pixel 0 holds 0, 1, 2, 3; pixel 1 holds 4..=7 rotated by one: 5, 6, 7, 4.
+        assert_eq!(bits(&first[..8]), vec![0, 1, 2, 3, 5, 6, 7, 4]);
+        // Each chunk holds its patterns once, and each channel every low-bit value.
+        let mut seen = bits(&first);
+        let low_bits: Vec<Vec<u32>> = (0..4)
+            .map(|c| {
+                let mut v: Vec<u32> = seen.iter().skip(c).step_by(4).map(|b| b % 4).collect();
+                v.sort_unstable();
+                v.dedup();
+                v
+            })
+            .collect();
+        assert!(low_bits.iter().all(|v| *v == vec![0, 1, 2, 3]));
+        seen.sort_unstable();
+        assert!(seen.iter().enumerate().all(|(i, &b)| b == i as u32));
         let last = all_f32_chunk(ALL_F32_PIXELS / pixels - 1, pixels);
-        assert_eq!(last.last().map(|x| x.to_bits()), Some(u32::MAX));
-        assert_eq!(last[0].to_bits(), u32::MAX - (pixels * 4 - 1) as u32);
+        let mut last = bits(&last);
+        last.sort_unstable();
+        assert_eq!(last.first(), Some(&(u32::MAX - (pixels * 4 - 1) as u32)));
+        assert_eq!(last.last(), Some(&u32::MAX));
     }
 
     #[test]

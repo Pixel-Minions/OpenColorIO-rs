@@ -13,17 +13,20 @@
 //! - [`Family`]: what an op family supplies (cases, the oracle's [`Spec`], the port's
 //!   [`Port`]); [`run`] and [`run_with`] run every combination against the wheel, batching
 //!   the oracle calls, and report failures per case ([`Summary`]).
+//! - [`tier`]: how much a run probes ([`Plan`]), chosen with `OCIO_RS_TIER`.
 
 mod engine;
 pub mod params;
+pub mod tier;
 
 use std::fmt;
 use std::time::Duration;
 
 use serde_json::{Value, json};
 
-use crate::probe::{ProbeSet, RandomRange};
+use crate::probe::ProbeSet;
 use params::{Case, Channels, Params};
+pub use tier::Tier;
 
 /// A transform direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -425,6 +428,8 @@ pub struct Plan {
     pub breakpoint_ulps: u32,
     /// Which generated cases to run.
     pub mutations: Mutations,
+    /// The sweep of every `f32` bit pattern, if any.
+    pub sweep: Option<Sweep>,
     /// The most pixel bytes one oracle process returns; calls beyond it go to the next
     /// process.
     pub batch_bytes: usize,
@@ -432,31 +437,16 @@ pub struct Plan {
     pub cache: bool,
 }
 
-impl Plan {
-    /// A small plan that runs in seconds: every 61st half value, the specials, 256 random
-    /// values of every [`RandomRange`], ±3 ulp around the break points, NaN buffers of 1 to
-    /// 24 pixels, and two generated cases per parameter slot.
-    pub fn quick() -> Plan {
-        let probes = vec![
-            ProbeSet::Halves { stride: 61 },
-            ProbeSet::Specials,
-            ProbeSet::Random {
-                name: "of every range",
-                seed: 0x0b47_7e27_0001,
-                ranges: RandomRange::ALL.iter().map(|&r| (r, 256)).collect(),
-            },
-            ProbeSet::NanBuffers { max_pixels: 24 },
-        ];
-        Plan {
-            name: "quick".to_string(),
-            generated_probes: probes.clone(),
-            probes,
-            breakpoint_ulps: 3,
-            mutations: Mutations::Sampled,
-            batch_bytes: 256 << 20,
-            cache: true,
-        }
-    }
+/// The sweep of every `f32` bit pattern ([`probe::all_f32_chunk`](crate::probe::all_f32_chunk):
+/// 2^30 RGBA pixels, each pattern once, in one channel), streamed in chunks, never cached.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Sweep {
+    /// How many explicit cases sweep, from the first: each in every combination.
+    pub cases: usize,
+    /// Pixels per oracle call; a power of two up to 2^30.
+    pub chunk_pixels: u64,
+    /// `None` for the whole sweep; `Some(n)` for its first `n` chunks only (tests, timing).
+    pub chunks: Option<u64>,
 }
 
 /// What a battery run compared, and the failures.
@@ -559,10 +549,11 @@ impl fmt::Display for Summary {
     }
 }
 
-/// Runs `family` with [`Plan::quick`]. See [`run_with`].
+/// Runs `family` with the plan of the tier `OCIO_RS_TIER` names ([`Tier::current`]). See
+/// [`run_with`].
 #[track_caller]
 pub fn run<F: Family>(family: &F) -> Summary {
-    run_with(family, &Plan::quick())
+    run_with(family, &Tier::current().plan())
 }
 
 /// Runs every case of `family` in every combination on every probe buffer of `plan`, against

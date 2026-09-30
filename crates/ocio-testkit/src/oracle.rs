@@ -287,6 +287,7 @@ impl Oracle {
 
         // Write on a separate thread so a large response can't deadlock a large request.
         let mut stdin = child.stdin.take().expect("piped stdin");
+        let request_len = request.len();
         let request = request.to_vec();
         let writer = std::thread::spawn(move || stdin.write_all(&request));
         let mut stdout = Vec::new();
@@ -304,11 +305,20 @@ impl Oracle {
             .read_to_string(&mut stderr)
             .ok();
         let status = child.wait().map_err(|e| e.to_string())?;
-        let _ = writer.join();
+        let written = writer.join();
         if !status.success() {
             return Err(format!("oracle exited with {status}\n{stderr}"));
         }
-        Ok(stdout)
+        // A request that didn't reach the oracle whole makes it fail with an EOFError; say why.
+        match written {
+            Ok(Ok(())) => Ok(stdout),
+            Ok(Err(e)) => Err(format!(
+                "writing the {}-byte request to the oracle failed: {e} ({:?})\n{stderr}",
+                request_len,
+                e.kind()
+            )),
+            Err(_) => Err("the thread writing the oracle request panicked".to_string()),
+        }
     }
 }
 
