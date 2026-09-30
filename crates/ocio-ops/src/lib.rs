@@ -61,6 +61,7 @@ pub mod op;
 pub mod open_color_types;
 pub mod ops;
 pub mod platform;
+pub mod scanline_helper;
 pub mod sse;
 pub mod sse2;
 #[cfg(test)]
