@@ -53,8 +53,7 @@ Guardrails:
                               docs/parity.md are current
   The ratchet's baseline is docs/ratchet.toml at <rev> (the base: a PR's base, or where the
   branch left phase0) or in <path>; without either, this checkout's own, which a branch
-  could lower. With a base, branch mode also requires this checkout's docs/ratchet.toml to
-  match it: chunks never edit it.
+  could lower.
 
 Upstream:
   upstream-map update         add new upstream files to upstream-map.toml (keeps edits)

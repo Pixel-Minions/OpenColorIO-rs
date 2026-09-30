@@ -355,7 +355,7 @@ pub(crate) fn ratchet(mode: RatchetMode, baseline: &Baseline) -> Result<(), Stri
         ported_cpu: c.ported.iter().filter(|(s, _)| *s == "cpu").count(),
         ported_gpu: c.ported.iter().filter(|(s, _)| *s == "gpu").count(),
     };
-    // What this checkout commits, which only the base's baseline may be compared with.
+    // What this checkout commits: `--main` requires it current, and `--update` rewrites it.
     let committed: Option<Ratchet> = match std::fs::read_to_string(ratchet_path()) {
         Ok(text) => Some(toml::from_str(&text).map_err(|e| format!("docs/ratchet.toml: {e}"))?),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
@@ -390,13 +390,11 @@ pub(crate) fn ratchet(mode: RatchetMode, baseline: &Baseline) -> Result<(), Stri
             }
             None => return Err("docs/ratchet.toml is missing".into()),
         },
+        // Only the counts: the checkout's own docs/ratchet.toml may legitimately differ from
+        // the base's, when the branch contains a land commit that main doesn't have yet.
+        // Lowering it can't pass (the baseline is the base's), and `cargo xtask land` refuses a
+        // branch whose own changes edit it.
         RatchetMode::AtLeast => {
-            if *baseline != Baseline::Committed && committed != Some(base) {
-                return Err(format!(
-                    "docs/ratchet.toml differs from {from}: chunks never edit it \
-                     (`cargo xtask land` regenerates it)"
-                ));
-            }
             if now != base {
                 println!(
                     "ratchet: more tests ported than {from} records; `cargo xtask land` records them"
