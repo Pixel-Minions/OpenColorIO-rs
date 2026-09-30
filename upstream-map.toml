@@ -37,7 +37,7 @@ path = "include/OpenColorIO/OpenColorTypes.h"
 kind = "api"
 target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs"]
 status = "partial"
-note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs"
+note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.1a: BitDepth, and BitDepthToString (defined in ParseUtils.cpp)"
 
 [[file]]
 path = "src/CMakeLists.txt"
@@ -88,14 +88,15 @@ status = "todo"
 path = "src/OpenColorIO/BitDepthUtils.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/bit_depth_utils.rs"]
-status = "todo"
+status = "done"
+note = "1.1a. The queries' accept/reject sets and messages, and BitDepthToString, are checked against the wheel (tests/bit_depth_utils_oracle.rs). GetBitdepthFromMaxValue has only upstream's one Pandora value (out 256 -> 8ui); its breakpoints need a Pandora probe (a file's out value -> Lut3DTransform.getFileOutputBitDepth())"
 
 [[file]]
 path = "src/OpenColorIO/BitDepthUtils.h"
 kind = "src"
-target = ["crates/ocio-ops/src/bit_depth_utils.rs", "crates/ocio-ops/src/math_utils.rs"]
-status = "partial"
-note = "S2: the integer Converter<BD>::CastValue casts are in math_utils.rs; the rest is todo"
+target = ["crates/ocio-ops/src/bit_depth_utils.rs"]
+status = "done"
+note = "1.1a: BitDepthInfo<BD> and Converter<BD> are traits implemented by marker types (Uint8 ... F32); CLAMP is clamp_macro; F16's channel type is half::f16, converted through imath_half. The integer casts moved here from math_utils.rs (S2)"
 
 [[file]]
 path = "src/OpenColorIO/CMakeLists.txt"
@@ -449,7 +450,7 @@ path = "src/OpenColorIO/ParseUtils.cpp"
 kind = "src"
 target = ["crates/ocio/src/parse_utils.rs", "crates/ocio-ops/src/open_color_types.rs"]
 status = "partial"
-note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection"
+note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection; 1.1a: BitDepthToString, next to BitDepth"
 
 [[file]]
 path = "src/OpenColorIO/ParseUtils.h"
@@ -4034,7 +4035,7 @@ status = "todo"
 path = "tests/cpu/BitDepthUtils_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/bit_depth_utils_tests.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "tests/cpu/CMakeLists.txt"

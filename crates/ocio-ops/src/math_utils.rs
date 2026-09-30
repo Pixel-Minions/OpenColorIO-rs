@@ -12,11 +12,10 @@
 //!   inputs.
 //! - x86 addition and multiplication with a fixed operand order ([`sse_add`], [`sse_mul`]):
 //!   when both operands are NaN, the result is the *first* one.
-//! - The scalar float→integer casts of `BitDepthUtils.h`: add 0.5, clamp, truncate.
 //! - The bit helpers of `MathUtils.h` (`FloatAsInt`, `IntAsFloat`, `AddULP`).
 //!
-//! Port of parts of `src/OpenColorIO/MathUtils.h` and `src/OpenColorIO/BitDepthUtils.h`
-//! @ v2.5.2.
+//! Port of parts of `src/OpenColorIO/MathUtils.h` @ v2.5.2. The scalar float→integer casts of
+//! `BitDepthUtils.h` are in [`crate::bit_depth_utils`].
 
 use std::ops::{Add, Mul};
 
@@ -149,67 +148,6 @@ pub fn sse_cvtps_epi32(x: f32) -> i32 {
     } else {
         INTEGER_INDEFINITE
     }
-}
-
-/// The shared body of the integer `Converter<BD>::CastValue` specializations:
-/// `v = value + 0.5f`, then `CLAMP(v, 0.0f, maxValue)` (whose result is a float, since the
-/// comparisons promote the unsigned `maxValue` to float), then the cast to the integer type.
-///
-/// The cast truncates toward zero. A NaN reaches the cast unclamped (both `CLAMP`
-/// comparisons are false); converting it is undefined behaviour in C++, and x86-64 compilers
-/// emit a 32-bit `cvttss2si`, which gives [`INTEGER_INDEFINITE`]. The callers keep its low
-/// 8 or 16 bits, which are 0.
-///
-/// Port of `CLAMP` and the `CastValue` bodies (src/OpenColorIO/BitDepthUtils.h:79-140
-/// @ v2.5.2).
-#[inline]
-fn cast_value_uint(value: f32, max_value: u16) -> i32 {
-    let v = value + 0.5f32;
-    let max = f32::from(max_value);
-    let clamped = if v > max {
-        max
-    } else if 0.0f32 > v {
-        0.0f32
-    } else {
-        v
-    };
-    sse_cvttps_epi32(clamped)
-}
-
-/// `Converter<BIT_DEPTH_UINT8>::CastValue`: add 0.5, clamp to [0, 255], truncate.
-///
-/// Port of `Converter<BIT_DEPTH_UINT8>::CastValue` (src/OpenColorIO/BitDepthUtils.h:90-101
-/// @ v2.5.2).
-#[inline]
-pub fn cast_value_uint8(value: f32) -> u8 {
-    cast_value_uint(value, 255) as u8
-}
-
-/// `Converter<BIT_DEPTH_UINT10>::CastValue`: add 0.5, clamp to [0, 1023], truncate.
-///
-/// Port of `Converter<BIT_DEPTH_UINT10>::CastValue` (src/OpenColorIO/BitDepthUtils.h:103-114
-/// @ v2.5.2).
-#[inline]
-pub fn cast_value_uint10(value: f32) -> u16 {
-    cast_value_uint(value, 1023) as u16
-}
-
-/// `Converter<BIT_DEPTH_UINT12>::CastValue`: add 0.5, clamp to [0, 4095], truncate.
-///
-/// Port of `Converter<BIT_DEPTH_UINT12>::CastValue` (src/OpenColorIO/BitDepthUtils.h:116-127
-/// @ v2.5.2).
-#[inline]
-pub fn cast_value_uint12(value: f32) -> u16 {
-    cast_value_uint(value, 4095) as u16
-}
-
-/// `Converter<BIT_DEPTH_UINT16>::CastValue`: add 0.5, clamp to [0, 65535], truncate.
-///
-/// Port of `Converter<BIT_DEPTH_UINT16>::CastValue` (src/OpenColorIO/BitDepthUtils.h:129-140
-/// @ v2.5.2).
-#[inline]
-pub fn cast_value_uint16(value: f32) -> u16 {
-    cast_value_uint(value, 65535) as u16
 }
 
 /// The bits of a float, as an unsigned integer.
