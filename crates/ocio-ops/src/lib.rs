@@ -44,6 +44,7 @@ compile_error!(
 pub mod avx;
 pub mod avx2;
 pub mod avx512;
+pub mod bit_depth_utils;
 pub mod cfmt;
 pub mod cpu_info;
 pub mod dynamic_property;
