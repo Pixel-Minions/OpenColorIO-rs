@@ -2,8 +2,8 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! The platform C runtime, called through FFI: the reference that `ocio_ops::cfmt` (C and
-//! iostream number formatting) and `ocio_ops::utils::number_utils` (number parsing) are
-//! checked against.
+//! iostream number formatting), `ocio_ops::utils::number_utils` (number parsing) and
+//! `ocio_ops::platform`'s case-insensitive comparisons are checked against.
 //!
 //! On Windows this is the Universal CRT (`ucrtbase.dll`); on Linux it is glibc. These are the
 //! libraries OCIO 2.5.2 itself calls: MSVC's `num_put` formats through UCRT `sprintf_s`, and
@@ -75,10 +75,14 @@ mod ffi {
             base: c_int,
             loc: *mut c_void,
         ) -> c_long;
+        pub(super) fn _stricmp(a: *const c_char, b: *const c_char) -> c_int;
+        pub(super) fn _strnicmp(a: *const c_char, b: *const c_char, n: usize) -> c_int;
     }
 
     #[cfg(target_os = "linux")]
     unsafe extern "C" {
+        pub(super) fn strcasecmp(a: *const c_char, b: *const c_char) -> c_int;
+        pub(super) fn strncasecmp(a: *const c_char, b: *const c_char, n: usize) -> c_int;
         pub(super) fn __errno_location() -> *mut c_int;
         pub(super) fn newlocale(
             mask: c_int,
@@ -370,6 +374,49 @@ pub fn strtol_l(input: &[u8], base: i32) -> Strto<i64> {
 #[allow(clippy::useless_conversion)]
 fn widen_long(v: c_long) -> i64 {
     i64::from(v)
+}
+
+/// `bytes` with a NUL appended: a C string that the C function reads up to the first NUL,
+/// which may be inside `bytes`.
+fn nul_terminated(bytes: &[u8]) -> Vec<u8> {
+    let mut v = Vec::with_capacity(bytes.len() + 1);
+    v.extend_from_slice(bytes);
+    v.push(0);
+    v
+}
+
+/// `_stricmp(a, b)` (UCRT) or `strcasecmp(a, b)` (glibc) in the process's locale, which is
+/// "C" (Rust never calls `setlocale`): `Platform::Strcasecmp` as OCIO calls it. Each side is
+/// the C string `bytes` + NUL, so it ends at its first NUL. Only the sign of the result is
+/// specified.
+pub fn strcasecmp_c(a: &[u8], b: &[u8]) -> i32 {
+    let (a, b) = (nul_terminated(a), nul_terminated(b));
+    #[cfg(windows)]
+    // SAFETY: both arguments are NUL-terminated buffers that outlive the call.
+    let r = unsafe { ffi::_stricmp(a.as_ptr().cast(), b.as_ptr().cast()) };
+    #[cfg(target_os = "linux")]
+    // SAFETY: as above.
+    let r = unsafe { ffi::strcasecmp(a.as_ptr().cast(), b.as_ptr().cast()) };
+    r
+}
+
+/// `_strnicmp(a, b, n)` (UCRT) or `strncasecmp(a, b, n)` (glibc) in the "C" locale, as
+/// [`strcasecmp_c`]: `Platform::Strncasecmp` as OCIO calls it. `n` must be at most
+/// `i32::MAX`, which UCRT requires.
+pub fn strncasecmp_c(a: &[u8], b: &[u8], n: usize) -> i32 {
+    assert!(
+        n <= i32::MAX as usize,
+        "UCRT's _strnicmp refuses a count of {n}"
+    );
+    let (a, b) = (nul_terminated(a), nul_terminated(b));
+    #[cfg(windows)]
+    // SAFETY: both arguments are NUL-terminated buffers that outlive the call; the functions
+    // stop at a NUL, so `n` may exceed their lengths.
+    let r = unsafe { ffi::_strnicmp(a.as_ptr().cast(), b.as_ptr().cast(), n) };
+    #[cfg(target_os = "linux")]
+    // SAFETY: as above.
+    let r = unsafe { ffi::strncasecmp(a.as_ptr().cast(), b.as_ptr().cast(), n) };
+    r
 }
 
 /// The number of bits in C `long` on this platform (32 on Windows, 64 on Linux).

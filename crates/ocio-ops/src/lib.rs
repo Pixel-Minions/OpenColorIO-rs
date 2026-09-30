@@ -46,9 +46,12 @@ pub mod avx2;
 pub mod avx512;
 pub mod cfmt;
 pub mod cpu_info;
+pub mod dynamic_property;
 pub mod exception;
+pub mod format_metadata;
 pub mod hash_utils;
 pub mod imath_half;
+pub mod logging;
 pub mod math_utils;
 pub mod op;
 pub mod open_color_types;
@@ -56,6 +59,8 @@ pub mod ops;
 pub mod platform;
 pub mod sse;
 pub mod sse2;
+#[cfg(test)]
+mod unit_test_log_utils;
 pub mod utils;
 
 pub use exception::{Exception, ExceptionKind, Result};

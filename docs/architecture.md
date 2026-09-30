@@ -93,7 +93,7 @@ unchanged.
 - Logging is a port of `Logging.cpp`: the same prefixes (`[OpenColorIO Warning]: `), the
   same line splitting, and the same level rules (`OCIO_LOGGING_LEVEL` read once). The
   callback is called *outside* the global lock (upstream calls it under the lock and can
-  deadlock); this is a deviation that doesn't change outputs.
+  deadlock): deviation D-3, which changes nothing that one thread logs.
 - The environment is read through `ocio_ops::platform::getenv`, which uses an injectable
   provider. Tests never mutate the process environment.
 

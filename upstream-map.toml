@@ -23,21 +23,23 @@ status = "todo"
 [[file]]
 path = "include/OpenColorIO/OpenColorIO.h"
 kind = "api"
-target = ["crates/ocio/src/lib.rs"]
-status = "todo"
+target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/logging.rs"]
+status = "partial"
+note = "1.2e: the logging functions (155-177: GetLoggingLevel, SetLoggingLevel, SetLoggingFunction, ResetToDefaultLoggingFunction, LogMessage) in logging.rs"
 
 [[file]]
 path = "include/OpenColorIO/OpenColorTransforms.h"
 kind = "api"
-target = ["crates/ocio/src/lib.rs"]
-status = "todo"
+target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/format_metadata.rs", "crates/ocio-ops/src/dynamic_property.rs"]
+status = "partial"
+note = "1.2a: the FormatMetadata interface (44-117) is FormatMetadataImpl's own methods in format_metadata.rs (upstream has no other implementation), and its operator<< is FormatMetadataImpl::write_to; 1.2b: DynamicProperty (766-779) is the DynamicPropertyRcPtr enum and DynamicPropertyDouble (810-824) is DynamicPropertyDoubleImpl, in dynamic_property.rs"
 
 [[file]]
 path = "include/OpenColorIO/OpenColorTypes.h"
 kind = "api"
-target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs"]
+target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs", "crates/ocio-ops/src/format_metadata.rs", "crates/ocio-ops/src/logging.rs"]
 status = "partial"
-note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs"
+note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does; 1.2b: DynamicPropertyType; 1.2e: LoggingLevel (288-297), in open_color_types.rs, and LoggingFunction (283-284), in logging.rs"
 
 [[file]]
 path = "src/CMakeLists.txt"
@@ -216,14 +218,16 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/DynamicProperty.cpp"
 kind = "src"
-target = ["crates/ocio/src/dynamic_property.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/dynamic_property.rs"]
+status = "partial"
+note = "1.2b, in ocio-ops because op data holds it: DynamicPropertyImpl, DynamicPropertyDoubleImpl, equals for two double properties, and operator== (on DynamicPropertyDoubleImpl and the DynamicPropertyRcPtr enum). The value is an AtomicU64 and the dynamic flag an AtomicBool, so an Arc handle can change them (PLAN.md §9). Checked by upstream's tests only. A mutation that drops the same-dynamic-state test in equals (D4 in the p1-foundations review) survives them: it changes only a comparison of a non-dynamic left operand with a dynamic right one, which upstream's test doesn't make; ExposureContrast (Phase 5) will pin it through the wheel. Phase 5: the grading properties and DynamicPropertyValue::As* (18-47)"
 
 [[file]]
 path = "src/OpenColorIO/DynamicProperty.h"
 kind = "src"
-target = ["crates/ocio/src/dynamic_property.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/dynamic_property.rs"]
+status = "partial"
+note = "see DynamicProperty.cpp"
 
 [[file]]
 path = "src/OpenColorIO/Exception.cpp"
@@ -331,13 +335,15 @@ status = "todo"
 path = "src/OpenColorIO/Logging.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/logging.rs"]
-status = "todo"
+status = "done"
+note = "1.2e. The logging function is called after the global lock is released (deviation D-3). Checked against the wheel in tests/logging_oracle.rs: the lines of config warnings (line breaks, CR, empty lines, a NUL); LogMessage at every level for every level setting, with messages that exercise the trim, the line cutting and the C strings (log_message); LoggingLevelFromString and ToString (logging_level_strings); OCIO_LOGGING_LEVEL, read once, in a new process per case, with the levels, the lines, ResetToDefaultLoggingFunction, SetLoggingFunction(None) and the raw stderr (logging_environment); upstream's test checks the level rules. Not reachable through Python: LogError (only Config::validate logs errors)"
 
 [[file]]
 path = "src/OpenColorIO/Logging.h"
 kind = "src"
 target = ["crates/ocio-ops/src/logging.rs"]
-status = "todo"
+status = "done"
+note = "see Logging.cpp"
 
 [[file]]
 path = "src/OpenColorIO/Look.cpp"
@@ -449,7 +455,7 @@ path = "src/OpenColorIO/ParseUtils.cpp"
 kind = "src"
 target = ["crates/ocio/src/parse_utils.rs", "crates/ocio-ops/src/open_color_types.rs"]
 status = "partial"
-note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection"
+note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection; 1.2e: LoggingLevelToString and LoggingLevelFromString, next to LoggingLevel"
 
 [[file]]
 path = "src/OpenColorIO/ParseUtils.h"
@@ -474,7 +480,7 @@ path = "src/OpenColorIO/Platform.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/platform.rs"]
 status = "partial"
-note = "Getenv, isEnvPresent, Strcasecmp, Strncasecmp; Setenv/Unsetenv, AlignedMalloc, CreateTempFilename, UTF-8/16 conversion pending"
+note = "Getenv, isEnvPresent, Strcasecmp, Strncasecmp; Setenv/Unsetenv, AlignedMalloc, CreateTempFilename, UTF-8/16 conversion pending. Strcasecmp and Strncasecmp take bytes that end at a NUL and fold A-Z only, as the classic C locale does (deviation D-4), checked against _stricmp/_strnicmp (UCRT) and strcasecmp/strncasecmp (glibc) for every pair of bytes (tests/platform_crt.rs)"
 
 [[file]]
 path = "src/OpenColorIO/Platform.h"
@@ -908,14 +914,16 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/fileformats/FormatMetadata.cpp"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/format_metadata.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/format_metadata.rs"]
+status = "done"
+note = "1.2a, in ocio-ops because op data holds it. Checked against the wheel in tests/format_metadata_oracle.rs: every call Python reaches, replayed on a transform's metadata (errors, repr() and every node's getters: format_metadata_ops), and combine through the optimizer's matrix composition (format_metadata_combine); and by upstream's tests. Python can't reach getFirstChildIndex, getAttributeValue(name) (only through getName and getID), operator== or getAttributeName past the end. The case rules for attribute names (exact when adding, ASCII-insensitive when looking up and combining) and the misspelled 'reversed' message are copied (improvement candidates I-14, I-15)"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FormatMetadata.h"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/format_metadata.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/format_metadata.rs"]
+status = "done"
+note = "see FormatMetadata.cpp"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/cdl/CDLParser.cpp"
@@ -4099,8 +4107,9 @@ status = "todo"
 [[file]]
 path = "tests/cpu/DynamicProperty_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio/src/dynamic_property_tests.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/dynamic_property_tests.rs"]
+status = "partial"
+note = "1.2b: basic and equal_double. The others need the grading properties (Phase 5), or a processor that reads CTF files"
 
 [[file]]
 path = "tests/cpu/Exception_tests.cpp"
@@ -4130,7 +4139,7 @@ status = "todo"
 path = "tests/cpu/Logging_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/logging_tests.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "tests/cpu/LookParse_tests.cpp"
@@ -4185,7 +4194,8 @@ status = "todo"
 path = "tests/cpu/Platform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/platform_tests.rs"]
-status = "todo"
+status = "partial"
+note = "string_compare. The others need Setenv/Unsetenv, AlignedMalloc, CreateTempFilename or the UTF-8/16 conversions"
 
 [[file]]
 path = "tests/cpu/Processor_tests.cpp"
@@ -4217,14 +4227,16 @@ note = "S2: all 11 tests; the ULP check (GetULPDifference, AreAllClose) is in oc
 [[file]]
 path = "tests/cpu/UnitTestLogUtils.cpp"
 kind = "test-support"
-target = ["crates/ocio-testkit/src/upstream/unit_test_log_utils.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/unit_test_log_utils.rs"]
+status = "partial"
+note = "1.2e: LogGuard (both constructors, output, clear, empty), for ocio-ops's unit tests: it must set the logging state of the crate under test, which ocio-testkit can't reach. It holds a reentrant lock and keeps only its own thread's messages, because Rust runs tests in parallel, and makes OCIO read OCIO_LOGGING_LEVEL from an empty environment, so no test depends on the developer's. Still to port, with the first tests that use them: findAndRemove, findAllAndRemove, print, MuteLogging and the checkAndMute helpers"
 
 [[file]]
 path = "tests/cpu/UnitTestLogUtils.h"
 kind = "test-support"
-target = ["crates/ocio-testkit/src/upstream/unit_test_log_utils.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/unit_test_log_utils.rs"]
+status = "partial"
+note = "see UnitTestLogUtils.cpp"
 
 [[file]]
 path = "tests/cpu/UnitTestMain.cpp"
@@ -4428,8 +4440,8 @@ status = "todo"
 [[file]]
 path = "tests/cpu/fileformats/FormatMetadata_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-formats/src/fileformats/format_metadata_tests.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/format_metadata_tests.rs"]
+status = "done"
 
 [[file]]
 path = "tests/cpu/fileformats/ctf/CTFTransform_tests.cpp"
@@ -5514,7 +5526,7 @@ path = "tests/testutils/UnitTest.h"
 kind = "test-support"
 target = ["crates/ocio-testkit/src/upstream/mod.rs"]
 status = "partial"
-note = "S2: OCIO_CHECK_CLOSE; S4: OCIO_CHECK_EQUAL"
+note = "S2: OCIO_CHECK_CLOSE; S4: OCIO_CHECK_EQUAL; 1.2a: OCIO_CHECK_THROW_WHAT"
 
 [[file]]
 path = "tests/utils/CMakeLists.txt"

@@ -66,47 +66,32 @@ pub fn is_env_present(name: &str) -> bool {
 }
 
 /// Port of `Platform::Strcasecmp` (Platform.cpp @ v2.5.2): `_stricmp` / `strcasecmp` in the
-/// "C" locale, i.e. bytes compared as unsigned after ASCII lowercasing.
-pub fn strcasecmp(a: &str, b: &str) -> Ordering {
-    let lower = |s: &str| {
-        s.bytes()
-            .map(|c| c.to_ascii_lowercase())
-            .collect::<Vec<u8>>()
-    };
-    lower(a).cmp(&lower(b))
+/// classic "C" locale, i.e. bytes compared as unsigned after folding `A`-`Z` to lowercase. The
+/// C functions take `const char *`, so each side ends at its first NUL. (Upstream throws for
+/// a null pointer; a slice is never null.)
+///
+/// Deviation D-4 (`docs/deviations.md`): upstream folds case by the process's C locale, and
+/// Python sets that locale at startup, so under Python the Windows wheel also folds non-ASCII
+/// bytes by the ANSI code page. The port folds `A`-`Z` only, whatever the locale.
+/// `tests/platform_crt.rs` checks this against the C runtime in the "C" locale.
+pub fn strcasecmp(a: impl AsRef<[u8]>, b: impl AsRef<[u8]>) -> Ordering {
+    strncasecmp(a, b, usize::MAX)
 }
 
-/// Port of `Platform::Strncasecmp` (Platform.cpp @ v2.5.2).
-pub fn strncasecmp(a: &str, b: &str, n: usize) -> Ordering {
-    let lower = |s: &str| {
-        s.bytes()
+/// Port of `Platform::Strncasecmp` (Platform.cpp @ v2.5.2): [`strcasecmp`] on at most the
+/// first `n` bytes of each side, as `_strnicmp` / `strncasecmp` in the classic "C" locale
+/// (deviation D-4).
+pub fn strncasecmp(a: impl AsRef<[u8]>, b: impl AsRef<[u8]>, n: usize) -> Ordering {
+    let lower = |s: &[u8]| {
+        crate::utils::string_utils::c_str(s)
+            .iter()
             .take(n)
             .map(|c| c.to_ascii_lowercase())
             .collect::<Vec<u8>>()
     };
-    lower(a).cmp(&lower(b))
+    lower(a.as_ref()).cmp(&lower(b.as_ref()))
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn injected_environment() {
-        let mut vars = BTreeMap::new();
-        vars.insert("OCIO_TEST_EMPTY".to_string(), String::new());
-        set_env_provider(Some(Arc::new(MapEnv(vars))));
-        assert_eq!(getenv("OCIO_TEST_EMPTY"), Some(String::new()));
-        assert!(is_env_present("OCIO_TEST_EMPTY"));
-        assert_eq!(getenv("OCIO_TEST_MISSING"), None);
-        assert_eq!(getenv(""), None);
-        set_env_provider(None);
-    }
-
-    #[test]
-    fn case_insensitive_compare() {
-        assert_eq!(strcasecmp("ProcessList", "processlist"), Ordering::Equal);
-        assert_eq!(strcasecmp("a", "B"), Ordering::Less);
-        assert_eq!(strncasecmp("Info", "INFORMATION", 4), Ordering::Equal);
-    }
-}
+#[path = "platform_tests.rs"]
+mod tests;
