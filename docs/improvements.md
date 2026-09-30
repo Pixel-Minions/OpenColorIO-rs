@@ -224,3 +224,14 @@ Out-of-bounds image layouts are already decided: the port returns an error (D-2,
   returns uninitialized memory (seen through the wheel in O1.2).
 - **Options:** return `None`, or an empty array.
 - **Status:** open; decided in Phase 6.
+
+### U-4. A Python logging function crashes the interpreter's exit
+
+- **Upstream:** a logging function set from Python is held in a C++ global
+  (`Logging.cpp:71`), which outlives the Python interpreter. A process that exits with one
+  still set crashes (a segmentation fault on both platforms, seen through the wheel in
+  `p1-foundations`); `ResetToDefaultLoggingFunction()` before exit avoids it, and the oracle's
+  commands do so.
+- **Options:** release the function when Python shuts down, or keep it and never release it;
+  either way the process exits cleanly.
+- **Status:** open; decided in Phase 6 (the Python module).
