@@ -8,6 +8,11 @@
 
 Like every oracle command, it reports what the library does and never computes expected
 values.
+
+What it reports differs between the Windows and Linux wheels (D12) where the optimizer
+computes values with the platform's libm: over 42 cases compared, the LUTs baked from
+ExponentTransform and ExponentWithLinearTransform for integer and half inputs, their values
+and the optimized processor's cache ID, which hashes them.
 """
 
 import numpy as np

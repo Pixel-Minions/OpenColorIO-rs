@@ -9,6 +9,11 @@
 
 Like every oracle command, it reports what the library does and never computes expected
 values.
+
+What it reports differs between the Windows and Linux wheels (D12) in two places, over 1230
+shaders compared in all 10 languages: a negative NaN prints "-nan(ind)" on Windows and "-nan"
+on Linux (the platform's iostream), and the ACES 2 output transform's tables, which libm
+computes, hold different values.
 """
 
 import re
