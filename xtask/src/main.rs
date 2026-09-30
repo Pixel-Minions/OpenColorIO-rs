@@ -222,9 +222,40 @@ pub(crate) const STATUS_ALL: &[&str] = &[
     "--ignore-submodules=none",
 ];
 
+/// Git's repository-local variables (`git rev-parse --local-env-vars`, git 2.53).
+/// `git rebase --exec`, which `xtask land` runs the gate under, exports GIT_DIR, which would
+/// point every git command at that one repository: xtask's git commands and the steps it runs
+/// find each repository, the upstream submodule too, from their directory, as a fresh shell
+/// does.
+const LOCAL_GIT_ENV: &[&str] = &[
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_CONFIG",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_IMPLICIT_WORK_TREE",
+    "GIT_GRAFT_FILE",
+    "GIT_INDEX_FILE",
+    "GIT_NO_REPLACE_OBJECTS",
+    "GIT_REPLACE_REF_BASE",
+    "GIT_PREFIX",
+    "GIT_SHALLOW_FILE",
+    "GIT_COMMON_DIR",
+];
+
+/// Removes git's repository-local variables from `cmd`'s environment.
+pub(crate) fn clear_git_env(cmd: &mut Command) -> &mut Command {
+    for var in LOCAL_GIT_ENV {
+        cmd.env_remove(var);
+    }
+    cmd
+}
+
 /// Runs `git <args>` in `dir` and returns its standard output.
 pub(crate) fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
-    let out = Command::new("git")
+    let out = clear_git_env(&mut Command::new("git"))
         .arg("-C")
         .arg(dir)
         .args(args)

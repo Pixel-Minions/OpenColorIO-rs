@@ -20,6 +20,7 @@ Runs, in order, stopping at the first failure:
   fmt            cargo fmt --all --check
   clippy         cargo clippy --workspace --all-targets -- -D warnings
   ci             cargo xtask ci (branch mode; with --main, cargo xtask ci --main)
+  deny           with --main: cargo deny check, CI's third check (not in the Rocky pass)
   test           cargo test --workspace --no-fail-fast (debug)
   test-release   the same in release, with --release
   rocky          with --rocky: this gate, same options, in Rocky Linux 9 (scripts/rocky9.sh)
@@ -28,8 +29,10 @@ Runs, in order, stopping at the first failure:
                  the workspace)
   --quick        tests run the quick tier (OCIO_RS_TIER=quick): the default, per chunk
   --full         tests run the full tier (OCIO_RS_TIER=full), as `xtask land` does
-  --main         the ci step also checks that docs/ratchet.toml and docs/parity.md are
-                 current, as on `main` (`xtask land` uses it on the merge commit)
+  --main         check what `main` requires: the ci step also checks that
+                 docs/ratchet.toml and docs/parity.md are current, and cargo-deny runs (it
+                 must be installed: `cargo install cargo-deny --locked`); `xtask land` uses it
+                 on the merge commit
   --auto         for `xtask land`: add --release, and keep --rocky, only when the HEAD commit
                  touches platform-sensitive files (Rust sources, the oracle, fixtures, scripts)
 
@@ -121,6 +124,22 @@ pub(crate) fn run(mut opts: Options) -> Result<(), String> {
     if opts.auto {
         resolve_auto(&root, &mut opts)?;
     }
+    // cargo-deny is CI's third check; the Rocky image doesn't have it, and CI runs it once.
+    let deny = opts.main && !nested;
+    if deny {
+        let found = cargo(&root, &["deny", "--version"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success());
+        if !found {
+            return Err(
+                "cargo-deny is not installed, and `--main` runs it (it is CI's cargo-deny \
+                 check): `cargo install cargo-deny --locked`"
+                    .into(),
+            );
+        }
+    }
     let log_dir = match &opts.log_dir {
         Some(dir) if dir.is_absolute() => dir.clone(),
         Some(dir) => root.join(dir),
@@ -167,6 +186,13 @@ pub(crate) fn run(mut opts: Options) -> Result<(), String> {
         ci.arg("--base-file").arg(file);
     }
     runner.step("ci", ci, Kind::Plain)?;
+    if deny {
+        runner.step(
+            "deny",
+            cargo(&root, &["deny", "--color", "never", "check"]),
+            Kind::Plain,
+        )?;
+    }
     let tier = if opts.full { "full" } else { "quick" };
     runner.step(
         "test",
@@ -303,7 +329,13 @@ pub(crate) fn platform_sensitive(path: &str) -> bool {
         "upstream/",
         ".cargo/",
     ];
-    const FILES: &[&str] = &["Cargo.toml", "Cargo.lock", "rust-toolchain.toml"];
+    // .gitattributes decides line endings, and with them the bytes of fixtures and sources.
+    const FILES: &[&str] = &[
+        "Cargo.toml",
+        "Cargo.lock",
+        "rust-toolchain.toml",
+        ".gitattributes",
+    ];
     DIRS.iter().any(|d| path.starts_with(d)) || FILES.contains(&path)
 }
 
@@ -518,7 +550,7 @@ impl Runner {
             watch.check()?;
         }
         self.steps += 1;
-        clear_git_env(&mut cmd);
+        crate::clear_git_env(&mut cmd);
         let log_path = self.log_dir.join(format!("{name}.log"));
         if let Some(dir) = log_path.parent() {
             std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
@@ -590,33 +622,6 @@ impl Runner {
 
 /// Width of the step names in summary lines (`rocky/test-release` fits).
 const NAME_WIDTH: usize = 18;
-
-/// Git's repository-local variables (`git rev-parse --local-env-vars`, git 2.53).
-/// `git rebase --exec`, which `xtask land` runs the gate under, exports GIT_DIR: steps must
-/// find each repository, the upstream submodule too, the way a fresh shell does.
-const LOCAL_GIT_ENV: &[&str] = &[
-    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-    "GIT_CONFIG",
-    "GIT_CONFIG_PARAMETERS",
-    "GIT_CONFIG_COUNT",
-    "GIT_OBJECT_DIRECTORY",
-    "GIT_DIR",
-    "GIT_WORK_TREE",
-    "GIT_IMPLICIT_WORK_TREE",
-    "GIT_GRAFT_FILE",
-    "GIT_INDEX_FILE",
-    "GIT_NO_REPLACE_OBJECTS",
-    "GIT_REPLACE_REF_BASE",
-    "GIT_PREFIX",
-    "GIT_SHALLOW_FILE",
-    "GIT_COMMON_DIR",
-];
-
-pub(crate) fn clear_git_env(cmd: &mut Command) {
-    for var in LOCAL_GIT_ENV {
-        cmd.env_remove(var);
-    }
-}
 
 /// Runs `cmd` with stdout and stderr in `log`. For a nested gate, stdout is read line by line
 /// and its step summary lines are printed as they arrive, renamed `<step>/<its step>`.
@@ -854,6 +859,7 @@ mod tests {
         assert!(platform_sensitive("crates/ocio-ops/src/lib.rs"));
         assert!(platform_sensitive("oracle/ocio_oracle/text.py"));
         assert!(platform_sensitive("Cargo.lock"));
+        assert!(platform_sensitive(".gitattributes"));
         assert!(platform_sensitive("upstream/OpenColorIO"));
         assert!(!platform_sensitive("docs/parity.md"));
         assert!(!platform_sensitive("CLAUDE.md"));

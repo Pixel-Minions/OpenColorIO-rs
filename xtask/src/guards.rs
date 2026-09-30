@@ -253,7 +253,9 @@ fn check_submodule(root: &Path, problems: &mut Vec<String>) {
     // `--work-tree=.` keeps git from following the submodule's `core.worktree`, a path relative
     // to its git directory that doesn't resolve in the Rocky Linux 9 container when this
     // checkout is a linked worktree (`scripts/rocky9.sh` mounts the git directory itself).
-    let head = std::process::Command::new("git")
+    // Without git's repository-local variables: under `git rebase --exec`, GIT_DIR names the
+    // superproject, and git would report its commit instead of the submodule's.
+    let head = crate::clear_git_env(&mut std::process::Command::new("git"))
         .arg("-C")
         .arg(&submodule)
         .args(["--work-tree=.", "rev-parse", "HEAD"])

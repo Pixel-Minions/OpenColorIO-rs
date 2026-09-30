@@ -502,7 +502,7 @@ fn replay_failure(wt: &Path) -> String {
 /// (third-party crates and the oracle cache stay warm), no editor, and the lock the gates
 /// watch.
 fn land_env<'a>(cmd: &'a mut Command, build: &Path, lock: &Lock) -> &'a mut Command {
-    gate::clear_git_env(cmd);
+    crate::clear_git_env(cmd);
     cmd.env("CARGO_TARGET_DIR", build)
         .env("GIT_EDITOR", "true")
         .env(LAND_LOCK_ENV, &lock.path)
