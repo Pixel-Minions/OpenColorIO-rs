@@ -1203,3 +1203,7 @@ where
         out.set_local_value(EmitterManip::EndMap);
     }
 }
+
+#[cfg(test)]
+#[path = "emitter_tests.rs"]
+mod tests;
