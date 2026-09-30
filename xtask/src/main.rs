@@ -172,6 +172,15 @@ pub(crate) fn display_path(path: &Path) -> String {
     shown.to_string_lossy().replace('\\', "/")
 }
 
+/// `git status` arguments that list every uncommitted change and every untracked file, whatever
+/// `status.showUntrackedFiles` says.
+pub(crate) const STATUS_ALL: &[&str] = &[
+    "status",
+    "--porcelain",
+    "--untracked-files=all",
+    "--ignore-submodules=none",
+];
+
 /// Runs `git <args>` in `dir` and returns its standard output.
 pub(crate) fn git(dir: &Path, args: &[&str]) -> Result<String, String> {
     let out = Command::new("git")

@@ -50,6 +50,9 @@ pub(crate) fn run(args: &[&str]) -> Result<(), String> {
 
     // Which worktrees go: those whose branch landed and that have nothing uncommitted.
     let landed = Landed::load(&root)?;
+    if !landed.available {
+        println!("clean-scratch: no {INTEGRATION} branch here, so no worktree counts as landed");
+    }
     let decisions: Vec<Result<String, String>> = worktrees
         .iter()
         .enumerate()
@@ -187,15 +190,14 @@ fn removable(root: &Path, wt: &Worktree, landed: &Landed) -> Result<String, Stri
     if wt.prunable || !Path::new(&wt.path).is_dir() {
         return Err("its directory is missing (`git worktree prune` forgets it)".into());
     }
-    if wt.branch.is_none() {
+    let Some(branch) = &wt.branch else {
         return Err("detached HEAD: no branch to have landed".into());
-    }
-    let why = landed.why(&wt.head)?.ok_or("not landed")?;
-    let status = crate::git(
-        Path::new(&wt.path),
-        &["status", "--porcelain", "--ignore-submodules=none"],
-    )?;
-    if !status.trim().is_empty() {
+    };
+    let why = landed.why(branch, &wt.head).ok_or("not landed")?;
+    if !crate::git(Path::new(&wt.path), crate::STATUS_ALL)?
+        .trim()
+        .is_empty()
+    {
         return Err(format!(
             "{why}, but it has uncommitted changes or untracked files"
         ));
@@ -203,65 +205,122 @@ fn removable(root: &Path, wt: &Worktree, landed: &Landed) -> Result<String, Stri
     Ok(why)
 }
 
-/// What says a branch tip has landed on phase0.
+/// Which branch tips have landed on phase0, and how. A worktree counts as landed only when its
+/// branch's name and tip both match: a new branch that merely starts at a landed commit has
+/// not landed.
 struct Landed {
-    root: PathBuf,
-    /// Commits of phase0's own line (first parents): a branch tip there never landed as a
-    /// card, it is just where a new branch starts.
-    first_parent: HashSet<String>,
-    /// Branch tips named by `Landed-From:` trailers of phase0's merges (`xtask land` replays
-    /// branches, so their own commits are not in phase0 when phase0 had moved).
-    trailers: HashSet<String>,
+    /// Whether this repository has a phase0 branch at all.
+    available: bool,
+    /// (branch, tip) named by `Landed-From:` trailers of phase0's merges (`xtask land`
+    /// replays branches, so their commits are not in phase0 when phase0 had moved).
+    trailers: HashSet<(String, String)>,
+    /// (tip merged, merge commit, merge subject) for every non-first parent of phase0's own
+    /// merges (on its first-parent line).
+    merges: Vec<(String, String, String)>,
 }
 
 impl Landed {
     fn load(root: &Path) -> Result<Landed, String> {
-        let first_parent = crate::git(root, &["rev-list", "--first-parent", INTEGRATION])?
-            .lines()
-            .map(str::to_string)
-            .collect();
-        let trailers = crate::git(
+        let exists = crate::git(
+            root,
+            &[
+                "rev-parse",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{INTEGRATION}"),
+            ],
+        )
+        .is_ok();
+        if !exists {
+            return Ok(Landed {
+                available: false,
+                trailers: HashSet::new(),
+                merges: Vec::new(),
+            });
+        }
+        let log = crate::git(
             root,
             &[
                 "log",
                 "--first-parent",
                 "--merges",
-                "--format=%B",
+                "--format=%H %P%x00%B%x01",
                 INTEGRATION,
             ],
-        )?
-        .lines()
-        .filter_map(|l| l.trim().strip_prefix(LANDED_FROM))
-        .filter_map(|v| v.split_whitespace().nth(1))
-        .map(str::to_string)
-        .collect();
-        Ok(Landed {
-            root: root.to_path_buf(),
-            first_parent,
-            trailers,
-        })
+        )?;
+        Ok(parse_landed(&log))
     }
 
-    fn why(&self, tip: &str) -> Result<Option<String>, String> {
-        if self.trailers.contains(tip) {
-            return Ok(Some(format!(
-                "landed by `xtask land` ({LANDED_FROM} trailer)"
-            )));
+    /// How `branch` at `tip` landed, if it did.
+    fn why(&self, branch: &str, tip: &str) -> Option<String> {
+        if self
+            .trailers
+            .contains(&(branch.to_string(), tip.to_string()))
+        {
+            return Some(format!("landed by `xtask land` ({LANDED_FROM} trailer)"));
         }
-        if self.first_parent.contains(tip) {
-            return Ok(None);
-        }
-        let merged = Command::new("git")
-            .arg("-C")
-            .arg(&self.root)
-            .args(["merge-base", "--is-ancestor", tip, INTEGRATION])
-            .stdin(Stdio::null())
-            .status()
-            .map_err(|e| format!("could not run git: {e}"))?;
-        Ok(merged
-            .success()
-            .then(|| format!("merged into {INTEGRATION}")))
+        self.merges
+            .iter()
+            .find(|(merged, _, subject)| merged == tip && names_branch(subject, branch))
+            .map(|(_, merge, subject)| {
+                format!(
+                    "merged into {INTEGRATION} by {} \"{subject}\"",
+                    &merge[..merge.len().min(10)]
+                )
+            })
     }
+}
+
+/// `git log --format=%H %P%x00%B%x01` of phase0's first-parent merges.
+fn parse_landed(log: &str) -> Landed {
+    let mut trailers = HashSet::new();
+    let mut merges = Vec::new();
+    for record in log.split('\u{1}') {
+        let Some((commits, message)) = record.trim_start().split_once('\0') else {
+            continue;
+        };
+        let mut shas = commits.split_whitespace();
+        let Some(merge) = shas.next() else { continue };
+        let subject = message.lines().next().unwrap_or("").trim().to_string();
+        for merged in shas.skip(1) {
+            merges.push((merged.to_string(), merge.to_string(), subject.clone()));
+        }
+        for line in message.lines() {
+            let mut value = match line.trim().strip_prefix(LANDED_FROM) {
+                Some(v) => v.split_whitespace(),
+                None => continue,
+            };
+            if let (Some(branch), Some(tip)) = (value.next(), value.next()) {
+                trailers.insert((branch.to_string(), tip.to_string()));
+            }
+        }
+    }
+    Landed {
+        available: true,
+        trailers,
+        merges,
+    }
+}
+
+/// Whether a merge subject names `branch` as the branch it merges: `Merge <branch>` (then the
+/// end, a space, `:` or `(`), git's `Merge branch '<branch>'`, or GitHub's
+/// `Merge pull request #<n> from <owner>/<branch>`.
+fn names_branch(subject: &str, branch: &str) -> bool {
+    if let Some(rest) = subject
+        .strip_prefix("Merge ")
+        .and_then(|s| s.strip_prefix(branch))
+        && (rest.is_empty() || rest.starts_with([' ', ':', '(']))
+    {
+        return true;
+    }
+    if subject.starts_with(&format!("Merge branch '{branch}'")) {
+        return true;
+    }
+    subject.starts_with("Merge pull request #")
+        && subject
+            .split_once(" from ")
+            .and_then(|(_, from)| from.split_once('/'))
+            .is_some_and(|(_, b)| b == branch)
 }
 
 /// An entry of `git worktree list --porcelain`.
@@ -721,6 +780,32 @@ mod tests {
         } else {
             assert_eq!(legacy_path("/home/u/ocio/"), "/home/u/ocio");
         }
+    }
+
+    #[test]
+    fn a_branch_landed_only_when_its_name_and_tip_match() {
+        // The shape of `git log --first-parent --merges --format=%H %P%x00%B%x01`.
+        let log = "m1 p1 t1\0Merge card/a (2 chunks)\n\n- one\n\nLanded-From: card/a o1\n\
+                   Co-Authored-By: x\n\u{1}\n\
+                   m2 p2 t2\0Merge card/sde-ci: the CPU tests\n\u{1}\n\
+                   m3 p3 t3\0Merge branch 'fix/x' into phase0\n\u{1}\n\
+                   m4 p4 t4\0Merge pull request #7 from Pixel-Minions/card/pr\n\u{1}\n\
+                   m5 p5 t5\0Merge S4: CPU dispatch\n\u{1}\n";
+        let landed = parse_landed(log);
+        let landed_as = |branch: &str, tip: &str| landed.why(branch, tip).is_some();
+        // land's trailer names the branch and its original tip.
+        assert!(landed_as("card/a", "o1"));
+        assert!(!landed_as("vt/chain", "o1"));
+        assert!(!landed_as("card/a", "t9"));
+        // A merge commit's non-first parent, and a subject naming that branch.
+        assert!(landed_as("card/sde-ci", "t2"));
+        assert!(!landed_as("vt/chain", "t2"));
+        assert!(!landed_as("card/sde", "t2"));
+        assert!(landed_as("fix/x", "t3"));
+        assert!(landed_as("card/pr", "t4"));
+        // A subject that doesn't name the branch, or the first parent: not landed.
+        assert!(!landed_as("chunks/s4", "t5"));
+        assert!(!landed_as("card/sde-ci", "p2"));
     }
 
     #[test]

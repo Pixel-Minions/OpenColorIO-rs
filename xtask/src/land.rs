@@ -282,7 +282,7 @@ impl Landing<'_> {
             cmd.current_dir(wt).arg("xtask").args(args);
             self.run(&mut cmd, &format!("cargo xtask {}", args.join(" ")))?;
         }
-        let changed = crate::git(wt, &["status", "--porcelain", "--ignore-submodules=none"])?;
+        let changed = crate::git(wt, crate::STATUS_ALL)?;
         let unexpected: Vec<&str> = changed
             .lines()
             .filter(|l| !l.ends_with(" docs/parity.md") && !l.ends_with(" docs/ratchet.toml"))
@@ -433,7 +433,7 @@ fn cargo() -> std::ffi::OsString {
 }
 
 fn check_clean(root: &Path) -> Result<(), String> {
-    let status = crate::git(root, &["status", "--porcelain", "--ignore-submodules=none"])?;
+    let status = crate::git(root, crate::STATUS_ALL)?;
     if status.trim().is_empty() {
         Ok(())
     } else {
