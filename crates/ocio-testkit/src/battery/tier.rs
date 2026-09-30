@@ -390,4 +390,59 @@ mod tests {
             assert!(ulps >= 3, "{tier}: neighbourhoods of {ulps} ulp");
         }
     }
+
+    /// `Tier::current()` reads OCIO_RS_TIER: quick when unset, the named tier, and a panic for
+    /// any other value rather than a quiet quick run. It runs in a child process, the
+    /// `current_tier_in_a_child` test of this binary, since a test doesn't change its own
+    /// environment.
+    #[test]
+    fn current_reads_the_environment_and_panics_on_a_bad_value() {
+        let exe = std::env::current_exe().expect("the test binary");
+        let run = |value: Option<&str>| {
+            let mut child = std::process::Command::new(&exe);
+            child
+                .args([
+                    "--exact",
+                    "battery::tier::tests::current_tier_in_a_child",
+                    "--nocapture",
+                    "--test-threads=1",
+                ])
+                .env("OCIO_RS_TIER_CHILD", "1");
+            match value {
+                Some(value) => child.env("OCIO_RS_TIER", value),
+                None => child.env_remove("OCIO_RS_TIER"),
+            };
+            let output = child.output().expect("the child runs");
+            let text = String::from_utf8_lossy(&output.stdout).into_owned()
+                + &String::from_utf8_lossy(&output.stderr);
+            (output.status.success(), text)
+        };
+        for (value, tier) in [
+            (None, "quick"),
+            (Some("quick"), "quick"),
+            (Some("full"), "full"),
+            (Some("exhaustive"), "exhaustive"),
+        ] {
+            let (ok, text) = run(value);
+            let line = format!("current tier: {tier}\n");
+            assert!(ok && text.contains(&line), "{value:?}:\n{text}");
+        }
+        for bad in ["Full", "fast", ""] {
+            let (ok, text) = run(Some(bad));
+            assert!(!ok, "OCIO_RS_TIER={bad:?} ran:\n{text}");
+            assert!(
+                text.contains("expected quick, full or exhaustive"),
+                "{bad:?}:\n{text}"
+            );
+        }
+    }
+
+    /// The child process of `current_reads_the_environment_and_panics_on_a_bad_value`: prints
+    /// the current tier. Does nothing in an ordinary run.
+    #[test]
+    fn current_tier_in_a_child() {
+        if std::env::var_os("OCIO_RS_TIER_CHILD").is_some() {
+            println!("current tier: {}", Tier::current().name());
+        }
+    }
 }
