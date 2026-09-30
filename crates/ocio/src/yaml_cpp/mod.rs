@@ -44,7 +44,7 @@ pub mod exp;
 pub mod ostream_wrapper;
 pub mod regex_yaml;
 
-pub use emitter::Emitter;
+pub use emitter::{Emittable, Emitter};
 pub use emitter_manip::{
     Alias, Anchor, Binary, Comment, EmitterManip, Indent, Null, Precision, Tag, TagType,
     double_precision, float_precision, local_tag, local_tag_with_prefix, precision, secondary_tag,
