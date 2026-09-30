@@ -718,3 +718,37 @@ pub(crate) fn buffer_indices(image: &Image) -> Vec<usize> {
         }
     }
 }
+
+/// The C `long` product `a * b * c`, as the binding's `checkBufferSize` computes the entries it
+/// requires: 32 bits on Windows, 64 on Linux, wrapping.
+pub(crate) fn long_product(a: i64, b: i64, c: i64) -> i64 {
+    if cfg!(target_os = "windows") {
+        (a as i32).wrapping_mul(b as i32).wrapping_mul(c as i32) as i64
+    } else {
+        a.wrapping_mul(b).wrapping_mul(c)
+    }
+}
+
+/// The bytes `[lo, hi)` that `width` by `height` items of `item` bytes, `x_stride` and
+/// `y_stride` apart, cover from `start`.
+pub(crate) fn extent(
+    start: i128,
+    (width, height): (i64, i64),
+    (x_stride, y_stride): (i64, i64),
+    item: i64,
+) -> (i128, i128) {
+    let dx = (width as i128 - 1) * x_stride as i128;
+    let dy = (height as i128 - 1) * y_stride as i128;
+    (
+        start + dx.min(0) + dy.min(0),
+        start + dx.max(0) + dy.max(0) + item as i128,
+    )
+}
+
+/// The smallest range holding `a` and `b`.
+pub(crate) fn span_union(a: Option<(i128, i128)>, b: (i128, i128)) -> Option<(i128, i128)> {
+    Some(match a {
+        None => b,
+        Some((lo, hi)) => (lo.min(b.0), hi.max(b.1)),
+    })
+}
