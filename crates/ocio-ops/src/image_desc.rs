@@ -2,8 +2,8 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Image descriptions: a port of `src/OpenColorIO/ImageDesc.cpp` @ v2.5.2, with `AutoStride`
-//! and the `ImageDesc` and `PackedImageDesc` classes of `include/OpenColorIO/OpenColorIO.h`,
-//! and `GenericImageDesc` (declared in `ImagePacking.h`).
+//! and the `ImageDesc`, `PackedImageDesc` and `PlanarImageDesc` classes of
+//! `include/OpenColorIO/OpenColorIO.h`, and `GenericImageDesc` (declared in `ImagePacking.h`).
 //!
 //! Upstream describes an image with `void *` pointers and byte strides, and never checks them
 //! against a buffer. The port describes the same layouts over borrowed memory
@@ -207,8 +207,9 @@ impl<S: PixelData> PixelData for At<S> {
     }
 }
 
-/// Where a channel of an image's first pixel is: which of the description's buffers (0 for a
-/// packed image) and the byte offset in it. It stands for the pointer that upstream's
+/// Where a channel of an image's first pixel is: which of the description's buffers and the
+/// byte offset in it. A packed image has one buffer, 0; a planar image has one per plane (R, G,
+/// B, A: 0 to 3), or one for all of them. It stands for the pointer that upstream's
 /// `getRData()`, `getGData()`, `getBData()` and `getAData()` return.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ChannelPos {
@@ -312,7 +313,7 @@ mod sealed {
 }
 
 /// What the CPU processor reads from any image description. Implemented by
-/// [`PackedImageDesc`] (and, from chunk 1.1c, `PlanarImageDesc`) only.
+/// [`PackedImageDesc`] and [`PlanarImageDesc`] only.
 ///
 /// Port of `ImageDesc` (include/OpenColorIO/OpenColorIO.h:3094-3146 @ v2.5.2). Upstream lets
 /// C++ code derive its own descriptions; the port doesn't, for now.
@@ -399,7 +400,7 @@ fn item_size<BD: BitDepthInfo>() -> isize {
     size_of::<BD::Type>() as isize
 }
 
-/// Port of `PackedImageDesc` (include/OpenColorIO/OpenColorIO.h:3151-3244,
+/// Port of `PackedImageDesc` (include/OpenColorIO/OpenColorIO.h:3154-3237,
 /// src/OpenColorIO/ImageDesc.cpp:118-588 @ v2.5.2): an image whose pixels hold their 3 or 4
 /// channels side by side, in one buffer.
 ///
@@ -597,19 +598,20 @@ impl<B: AsRef<[u8]>> PackedImageDesc<B> {
             y_stride,
         )?;
 
-        // Deviation D-2: the bytes the CPU engine will touch must be in the buffer.
+        // Deviation D-2: the bytes the CPU engine will touch must be in the buffer. An RGBA-packed
+        // image is read and written in whole rows from its red channel.
         let item = get_channel_size_in_bytes(bit_depth)? as usize;
+        let len = bytes.as_ref().len();
         let starts = channels.map(|offset| offset.map(|o| origin as i128 + o as i128));
-        if reaches_outside(
-            bytes.as_ref().len(),
-            &starts,
-            item,
-            width,
-            height,
-            x_stride,
-            y_stride,
-            is_rgba_packed,
-        ) {
+        let outside = if is_rgba_packed {
+            let red = starts[0].expect("a packed image has red");
+            rows_reach_outside(len, red, item, width, height, y_stride)
+        } else {
+            starts.iter().flatten().any(|&start| {
+                channel_reaches_outside(len, start, item, width, height, x_stride, y_stride)
+            })
+        };
+        if outside {
             return Err(Exception::new(
                 "PackedImageDesc Error: The strides and dimensions reach outside the image buffer.",
             ));
@@ -845,43 +847,320 @@ fn packed_validate(
     Ok(())
 }
 
-/// Deviation D-2 (`docs/deviations.md`): whether the CPU engine would touch a byte outside a
-/// buffer of `len` bytes. `starts` are the byte offsets of the first pixel's channels in the
-/// buffer (`None` for a missing alpha), `item` the bytes of a channel.
-///
-/// An RGBA-packed image is read and written in whole rows of `4 * width` channels from its red
-/// channel (src/OpenColorIO/ScanlineHelper.cpp:129-136, 158-164 @ v2.5.2); any other image
-/// channel by channel, at `start + x * x_stride + y * y_stride`
-/// (src/OpenColorIO/ImagePacking.cpp:21-299 @ v2.5.2). The arithmetic is in `i128`, where it
-/// can't overflow.
-fn reaches_outside(
+/// The lowest and highest of `k * stride` for `k` in `0..count`, for a count of at least 1.
+fn span(stride: isize, count: c_long) -> (i128, i128) {
+    let last = (i128::from(count) - 1) * stride as i128;
+    (last.min(0), last.max(0))
+}
+
+/// Deviation D-2 (`docs/deviations.md`) for one channel of an image the CPU engine reads and
+/// writes channel by channel (src/OpenColorIO/ImagePacking.cpp:21-299 @ v2.5.2): whether the
+/// `item` bytes at `start + x * x_stride + y * y_stride`, for every `x < width` and
+/// `y < height`, leave a buffer of `len` bytes. `start` is the channel of the first pixel, in
+/// bytes from the buffer's start. The arithmetic is in `i128`, where it can't overflow.
+fn channel_reaches_outside(
     len: usize,
-    starts: &[Option<i128>; 4],
+    start: i128,
     item: usize,
     width: c_long,
     height: c_long,
     x_stride: isize,
     y_stride: isize,
-    rgba_packed: bool,
 ) -> bool {
-    // The lowest and highest of `k * stride` for `k` in `0..count`.
-    let span = |stride: isize, count: c_long| {
-        let last = (i128::from(count) - 1) * stride as i128;
-        (last.min(0), last.max(0))
-    };
-    let (y_low, y_high) = span(y_stride, height);
-    let len = len as i128;
-    let item = item as i128;
-    if rgba_packed {
-        let start = starts[0].expect("a packed image has red");
-        let row = 4 * item * i128::from(width);
-        return start + y_low < 0 || start + y_high + row > len;
-    }
     let (x_low, x_high) = span(x_stride, width);
-    starts
-        .iter()
-        .flatten()
-        .any(|&start| start + x_low + y_low < 0 || start + x_high + y_high + item > len)
+    let (y_low, y_high) = span(y_stride, height);
+    start + x_low + y_low < 0 || start + x_high + y_high + item as i128 > len as i128
+}
+
+/// Deviation D-2 for an RGBA-packed image, which the CPU engine reads and writes in whole rows
+/// of `4 * width` channels from its red channel (src/OpenColorIO/ScanlineHelper.cpp:129-136,
+/// 158-164 @ v2.5.2): whether those rows, `y_stride` bytes apart from `start`, leave a buffer of
+/// `len` bytes.
+fn rows_reach_outside(
+    len: usize,
+    start: i128,
+    item: usize,
+    width: c_long,
+    height: c_long,
+    y_stride: isize,
+) -> bool {
+    let (y_low, y_high) = span(y_stride, height);
+    let row = 4 * item as i128 * i128::from(width);
+    start + y_low < 0 || start + y_high + row > len as i128
+}
+
+/// Port of `PlanarImageDesc` (include/OpenColorIO/OpenColorIO.h:3243-3300,
+/// src/OpenColorIO/ImageDesc.cpp:592-771 @ v2.5.2): an image whose red, green, blue and
+/// (optional) alpha channels are in separate planes, with one bit depth and one pair of strides
+/// for all of them.
+///
+/// The planes are separate buffers ([`new`](Self::new), [`with_strides`](Self::with_strides)) or
+/// places in one buffer ([`in_one_buffer`](Self::in_one_buffer)), as C++ can pass four pointers
+/// into one allocation. `B` is `&[u8]` or `&mut [u8]`, as for [`PackedImageDesc`].
+pub struct PlanarImageDesc<B> {
+    /// R, G, B and A (3 or 4 buffers), or the one buffer of `in_one_buffer`.
+    buffers: Vec<B>,
+    layout: ImageLayout,
+}
+
+impl<B: AsRef<[u8]>> fmt::Debug for PlanarImageDesc<B> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let lengths: Vec<usize> = self.buffers.iter().map(|b| b.as_ref().len()).collect();
+        f.debug_struct("PlanarImageDesc")
+            .field("buffer_bytes", &lengths)
+            .field("layout", &self.layout)
+            .finish()
+    }
+}
+
+/// Where a planar image's channels are before the checks: the channel's buffer and the byte
+/// offset of its first pixel in it.
+type PlanarStarts = [Option<(usize, i128)>; 4];
+
+impl<B: AsRef<[u8]>> PlanarImageDesc<B> {
+    /// `PlanarImageDesc(rData, gData, bData, aData, width, height)`: F32 planes with nothing
+    /// between pixels and rows; `a` is `None` for an image without alpha.
+    ///
+    /// Port of `PlanarImageDesc::PlanarImageDesc(void *, void *, void *, void *, long, long)`
+    /// (src/OpenColorIO/ImageDesc.cpp:638-669 @ v2.5.2).
+    pub fn new<S: PixelData<Bytes = B>>(
+        r: S,
+        g: S,
+        b: S,
+        a: Option<S>,
+        width: usize,
+        height: usize,
+    ) -> Result<Self> {
+        Self::separate(r, g, b, a, long(width), long(height), None)
+    }
+
+    /// `PlanarImageDesc(rData, gData, bData, aData, width, height, bitDepth, xStrideBytes,
+    /// yStrideBytes)`: planes of `bit_depth`, with the bytes between pixels and rows given, each
+    /// [`AUTO_STRIDE`] or a byte count (negative ones included); `a` is `None` for an image
+    /// without alpha.
+    ///
+    /// Port of `PlanarImageDesc::PlanarImageDesc(void *, void *, void *, void *, long, long,
+    /// BitDepth, ptrdiff_t, ptrdiff_t)` (src/OpenColorIO/ImageDesc.cpp:671-710 @ v2.5.2).
+    pub fn with_strides<S: PixelData<Bytes = B>>(
+        r: S,
+        g: S,
+        b: S,
+        a: Option<S>,
+        width: usize,
+        height: usize,
+        bit_depth: BitDepth,
+        x_stride_bytes: isize,
+        y_stride_bytes: isize,
+    ) -> Result<Self> {
+        Self::separate(
+            r,
+            g,
+            b,
+            a,
+            long(width),
+            long(height),
+            Some((bit_depth, [x_stride_bytes, y_stride_bytes])),
+        )
+    }
+
+    /// Planes inside one buffer, as C++ passes four pointers into one allocation: the first
+    /// pixel of the R, G, B and (optional) A planes is `r`, `g`, `b` and `a` bytes after the
+    /// data's first pixel. Otherwise as [`with_strides`](Self::with_strides).
+    pub fn in_one_buffer<S: PixelData<Bytes = B>>(
+        data: S,
+        r: usize,
+        g: usize,
+        b: usize,
+        a: Option<usize>,
+        width: usize,
+        height: usize,
+        bit_depth: BitDepth,
+        x_stride_bytes: isize,
+        y_stride_bytes: isize,
+    ) -> Result<Self> {
+        let PixelParts {
+            bytes,
+            origin,
+            element,
+        } = data.into_parts();
+        let start = |offset: usize| Some((0, origin as i128 + offset as i128));
+        let starts = [start(r), start(g), start(b), a.and_then(start)];
+        let null = bytes.as_ref().is_empty();
+        Self::construct(
+            vec![bytes],
+            element,
+            starts,
+            null,
+            long(width),
+            long(height),
+            Some((bit_depth, [x_stride_bytes, y_stride_bytes])),
+        )
+    }
+
+    /// The constructors with separate planes.
+    fn separate<S: PixelData<Bytes = B>>(
+        r: S,
+        g: S,
+        b: S,
+        a: Option<S>,
+        width: c_long,
+        height: c_long,
+        strides: Option<(BitDepth, [isize; 2])>,
+    ) -> Result<Self> {
+        let mut buffers = Vec::with_capacity(4);
+        let mut starts: PlanarStarts = [None; 4];
+        let mut element = None;
+        let mut null = false;
+        for (channel, plane) in [Some(r), Some(g), Some(b), a].into_iter().enumerate() {
+            let Some(plane) = plane else { continue };
+            let parts = plane.into_parts();
+            // Null for R, G or B; a null A means no alpha, which `None` says.
+            null |= channel < 3 && parts.bytes.as_ref().is_empty();
+            element = parts.element;
+            starts[channel] = Some((buffers.len(), parts.origin as i128));
+            buffers.push(parts.bytes);
+        }
+        Self::construct(buffers, element, starts, null, width, height, strides)
+    }
+
+    /// The two constructors (src/OpenColorIO/ImageDesc.cpp:638-710 @ v2.5.2) and
+    /// `PlanarImageDesc::Impl::isFloat` (609-612). `strides` is `None` for the one without a bit
+    /// depth: F32, and the strides `AutoStride` gives.
+    fn construct(
+        buffers: Vec<B>,
+        element: Option<Element>,
+        starts: PlanarStarts,
+        null: bool,
+        width: c_long,
+        height: c_long,
+        strides: Option<(BitDepth, [isize; 2])>,
+    ) -> Result<Self> {
+        let bit_depth = strides.map_or(BitDepth::F32, |(bit_depth, _)| bit_depth);
+
+        // The Python binding checks each plane's type before the library sees them; the planes
+        // of one call all have the same type here.
+        check_buffer_type(element, bit_depth)?;
+
+        if null {
+            return Err(Exception::new(
+                "PlanarImageDesc Error: Invalid image buffer.",
+            ));
+        }
+
+        if width <= 0 || height <= 0 {
+            return Err(Exception::new(
+                "PlanarImageDesc Error: Invalid image dimensions.",
+            ));
+        }
+
+        // The constructor without a bit depth uses `sizeof(BitDepthInfo<BIT_DEPTH_F32>::Type)`
+        // and derives both strides; the other asks `GetChannelSizeInBytes`, which refuses the bit
+        // depths the CPU processor doesn't take, and derives the `AutoStride` ones.
+        let (one_channel_in_bytes, [x, y]) = match strides {
+            None => (item_size::<F32>(), [AUTO_STRIDE; 2]),
+            Some((bit_depth, strides)) => (get_channel_size_in_bytes(bit_depth)? as isize, strides),
+        };
+        let x_stride = if x == AUTO_STRIDE {
+            one_channel_in_bytes
+        } else {
+            x
+        };
+        let y_stride = if y == AUTO_STRIDE {
+            x_stride.wrapping_mul(width as isize)
+        } else {
+            y
+        };
+
+        let is_float = x_stride == item_size::<F32>() && bit_depth == BitDepth::F32;
+
+        planar_validate(bit_depth, width, x_stride, y_stride)?;
+
+        // Deviation D-2: the bytes the CPU engine will touch must be in the buffers. A planar
+        // image is never RGBA-packed, so it is read and written channel by channel.
+        let item = get_channel_size_in_bytes(bit_depth)? as usize;
+        let outside = starts.iter().flatten().any(|&(buffer, start)| {
+            let len = buffers[buffer].as_ref().len();
+            channel_reaches_outside(len, start, item, width, height, x_stride, y_stride)
+        });
+        if outside {
+            return Err(Exception::new(
+                "PlanarImageDesc Error: The strides and dimensions reach outside the image buffer.",
+            ));
+        }
+
+        // Inside their buffers, so every start is an offset in its buffer.
+        let pos = |(buffer, start): (usize, i128)| ChannelPos {
+            buffer,
+            offset: start as usize,
+        };
+        let [r, g, b, a] = starts;
+        let layout = ImageLayout {
+            bit_depth,
+            width,
+            height,
+            x_stride_bytes: x_stride,
+            y_stride_bytes: y_stride,
+            r: pos(r.expect("a planar image has red")),
+            g: pos(g.expect("a planar image has green")),
+            b: pos(b.expect("a planar image has blue")),
+            a: a.map(pos),
+            // Port of `PlanarImageDesc::isRGBAPacked` (src/OpenColorIO/ImageDesc.cpp:763-766).
+            is_rgba_packed: false,
+            is_float,
+        };
+        Ok(PlanarImageDesc { buffers, layout })
+    }
+
+    /// The buffer `index` that [`ImageDesc::r_data`] and the other channel positions point into:
+    /// R, G, B and A in that order for separate planes, or the one buffer of
+    /// [`in_one_buffer`](Self::in_one_buffer).
+    pub fn buffer(&self, index: usize) -> Option<&[u8]> {
+        self.buffers.get(index).map(AsRef::as_ref)
+    }
+}
+
+impl<B: AsRef<[u8]>> sealed::Sealed for PlanarImageDesc<B> {}
+
+impl<B: AsRef<[u8]>> ImageDesc for PlanarImageDesc<B> {
+    fn layout(&self) -> &ImageLayout {
+        &self.layout
+    }
+}
+
+impl<B: AsRef<[u8]> + AsMut<[u8]>> ImageDescMut for PlanarImageDesc<B> {}
+
+/// Upstream's checks of a planar image, in its order and with its messages; the product wraps
+/// as the wheels' machine code does where C++ overflows.
+///
+/// Port of `PlanarImageDesc::Impl::validate` (src/OpenColorIO/ImageDesc.cpp:614-635 @ v2.5.2).
+/// "Invalid x stride." can't be reached (`AutoStride` becomes the channel size), nor can
+/// "Unknown bit-depth of the image buffer." (the constructor raises "Bit depth is not
+/// supported" first).
+fn planar_validate(
+    bit_depth: BitDepth,
+    width: c_long,
+    x_stride: isize,
+    y_stride: isize,
+) -> Result<()> {
+    let fail = |message: &str| Err(Exception::new(format!("PlanarImageDesc Error: {message}")));
+
+    if x_stride == AUTO_STRIDE {
+        return fail("Invalid x stride.");
+    }
+
+    if y_stride == AUTO_STRIDE {
+        return fail("Invalid y stride.");
+    }
+
+    if x_stride.wrapping_mul(width as isize).wrapping_abs() > y_stride.wrapping_abs() {
+        return fail("The x and y strides are inconsistent.");
+    }
+
+    if bit_depth == BitDepth::Unknown {
+        return fail("Unknown bit-depth of the image buffer.");
+    }
+
+    Ok(())
 }
 
 /// An image description as the CPU engine reads it: its size and strides, where its channels
