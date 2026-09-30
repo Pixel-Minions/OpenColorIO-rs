@@ -332,6 +332,12 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
     2^30 + 1 overruns the heap (a crash).
   - On both platforms, the row index is an `int` (`ScanlineHelper.h:92`), so an image of 2^31
     rows or more overflows it.
+  - The rows are sized with `std::vector::resize` (`ScanlineHelper.cpp:69-81, 99-109`), which
+    raises `std::length_error` past `max_size()` and `std::bad_alloc` for memory it can't have:
+    through the Linux wheel, a planar F32 image of 2^60 × 1 pixels raises `ValueError`
+    "vector::_M_default_append", and one of 2^32 × 1 under `ulimit -v 4000000` raises
+    `MemoryError` "std::bad_alloc". Upstream sizes no row for an RGBA-packed F32 image in place,
+    which it processes in its own memory.
 - **Decided** (general rule): the port gives the wheel's messages where the wheel raises, and an
   error where it would overrun.
 - **Status:** to be matched in `p1-bitdepth` (1.1e).
@@ -356,7 +362,16 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   - after row 2^31 - 1 (Linux only: a Windows `long` can't count more rows), a source packed
     channel by channel raises "Invalid output image position.", as upstream's does, and an
     RGBA-packed one returns "ScanlineHelper Error: The image is too tall: the scanline index
-    overflows.".
+    overflows.". With a y stride of 0, upstream reads the same row again instead, and never
+    stops, since the negative index never reaches the height; the error is right there too;
+  - the port sizes the rows upstream sizes, in its order, and raises `std::length_error` past
+    libstdc++'s `max_size()` ("vector::_M_default_append" on Linux; a Windows `long` can't
+    reach MSVC's, whose message is "vector too long") and `std::bad_alloc` where the memory
+    can't be had ("std::bad_alloc" on Linux, "bad allocation" in MSVC's library, which both
+    modules of the Windows wheel hold), instead of aborting. It sizes rows of its own only for
+    the rows of RGBA-packed images that aren't aligned for their channel type, which upstream
+    reads and writes in place; so there, and only there, it may raise `std::bad_alloc` where
+    upstream wouldn't.
   The oracle refuses these sizes, so `scanline_helper_tests.rs` defines the behaviour.
 
 ### U-15. A wrapped scanline reaches outside the image
