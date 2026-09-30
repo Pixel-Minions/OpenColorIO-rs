@@ -137,6 +137,7 @@ pub(crate) fn run(mut opts: Options) -> Result<(), String> {
     };
 
     let mut runner = Runner::new(log_dir.clone());
+    runner.watch = LandWatch::from_env()?;
     runner.step(
         "fmt",
         cargo(&root, &["fmt", "--all", "--check", "--", "--color=never"]),
@@ -446,6 +447,48 @@ pub(crate) enum Kind {
     Nested,
 }
 
+/// A gate that `cargo xtask land` started (it names its lock in `OCIO_RS_LAND_LOCK`): the
+/// gate holds `gate.lock` next to that lock while it runs, and before each step checks that
+/// land still holds its lock. A killed land leaves its rebase and gate running; they stop here,
+/// at the gate's next step.
+#[derive(Debug)]
+pub(crate) struct LandWatch {
+    land_lock: PathBuf,
+    _gate_lock: File,
+}
+
+impl LandWatch {
+    fn from_env() -> Result<Option<LandWatch>, String> {
+        let Some(path) = std::env::var_os(crate::land::LAND_LOCK_ENV) else {
+            return Ok(None);
+        };
+        let land_lock = PathBuf::from(path);
+        let gate_lock = crate::land::lock_file(&land_lock.with_file_name("gate.lock"))?;
+        gate_lock.lock().map_err(|e| format!("gate.lock: {e}"))?;
+        Ok(Some(LandWatch {
+            land_lock,
+            _gate_lock: gate_lock,
+        }))
+    }
+
+    /// An error once the land that started this gate has exited.
+    fn check(&self) -> Result<(), String> {
+        let alive = std::fs::OpenOptions::new()
+            .read(true)
+            .open(&self.land_lock)
+            .is_ok_and(|file| matches!(file.try_lock(), Err(std::fs::TryLockError::WouldBlock)));
+        if alive {
+            Ok(())
+        } else {
+            Err(
+                "the `cargo xtask land` that started this gate has exited, so the gate stops \
+                 here (and the replay with it)"
+                    .into(),
+            )
+        }
+    }
+}
+
 /// Runs steps, logging each to `<log_dir>/<name>.log`.
 #[derive(Debug)]
 pub(crate) struct Runner {
@@ -454,6 +497,8 @@ pub(crate) struct Runner {
     pub(crate) steps: usize,
     /// Prefix of the summary lines.
     pub(crate) label: &'static str,
+    /// Set when `cargo xtask land` runs this gate.
+    watch: Option<LandWatch>,
 }
 
 impl Runner {
@@ -463,11 +508,15 @@ impl Runner {
             started: Instant::now(),
             steps: 0,
             label: "gate",
+            watch: None,
         }
     }
 
     /// Runs `cmd` as step `name`; an error once it has printed why the step failed.
     pub(crate) fn step(&mut self, name: &str, mut cmd: Command, kind: Kind) -> Result<(), String> {
+        if let Some(watch) = &self.watch {
+            watch.check()?;
+        }
         self.steps += 1;
         clear_git_env(&mut cmd);
         let log_path = self.log_dir.join(format!("{name}.log"));

@@ -1,23 +1,23 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! `cargo xtask land <branch> [--rocky]`: lands a card branch on `phase0`.
+//! `cargo xtask land <branch> [--no-rocky]`: lands a card branch on `phase0`.
 //!
 //! From the main checkout, on `phase0`, with a clean tree:
 //! 1. replays the branch's commits onto `phase0` in a temporary worktree (`target/land/wt`)
-//!    with `git rebase --exec "cargo xtask gate --auto"`, which gates every commit (release,
-//!    and Rocky Linux 9 with `--rocky`, for commits that touch platform-sensitive files);
+//!    with `git rebase --exec "cargo xtask gate --auto --rocky"`, which gates every commit
+//!    (release and Rocky Linux 9 for commits that touch platform-sensitive files), and checks
+//!    that the replay dropped nothing the branch's merge commits carry;
 //! 2. merges the result with `--no-ff`, listing each chunk's subject;
 //! 3. regenerates `docs/parity.md` and `docs/ratchet.toml` into that merge commit;
-//! 4. runs the full gate on it (debug and release, `xtask ci --main`, plus Rocky with
-//!    `--rocky`) and `xtask oracle check-all`;
+//! 4. runs the full gate on it (debug and release, `xtask ci --main`, cargo-deny, Rocky) and
+//!    `xtask oracle check-all`;
 //! 5. fast-forwards `phase0` to it and prints the push steps. It never pushes.
 //!
 //! `phase0` only moves once every step has passed. On a failure the temporary worktree stays
 //! as it stopped, for inspection; the next run removes it.
 
-use std::fs::OpenOptions;
-use std::io::Write;
+use std::fs::{File, OpenOptions, TryLockError};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -28,28 +28,38 @@ const INTEGRATION: &str = "phase0";
 const CO_AUTHOR: &str = "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>";
 /// Trailer naming the branch and the commit a merge landed (`xtask clean-scratch` reads it).
 pub(crate) const LANDED_FROM: &str = "Landed-From:";
+/// Environment variable naming the running land's lock file, for the gates it starts.
+pub(crate) const LAND_LOCK_ENV: &str = "OCIO_RS_LAND_LOCK";
 
 pub(crate) const USAGE: &str = "\
-cargo xtask land <branch> [--rocky]
+cargo xtask land <branch> [--no-rocky]
 
 Lands <branch> on phase0, from the main checkout on phase0 with a clean tree:
   1. replays its commits onto phase0 in target/land/wt with
-     `git rebase --exec \"cargo xtask gate --auto [--rocky]\"`: every commit is gated, in
-     release too (and in Rocky Linux 9 with --rocky) when it touches platform-sensitive files;
-     commits already on top of phase0 keep their hashes
+     `git rebase --exec \"cargo xtask gate --auto --rocky\"`: every commit is gated, in
+     release and in Rocky Linux 9 too when it touches platform-sensitive files; commits
+     already on top of phase0 keep their hashes. It stops if the replayed tree differs from
+     merging the branch as it is (content only its merge commits carry).
   2. merges the result with --no-ff; the message lists each chunk's subject
   3. regenerates docs/parity.md and docs/ratchet.toml into the merge commit
-  4. runs `cargo xtask gate --full --release --main [--rocky]` and `xtask oracle check-all`
-     on the merge commit
+  4. runs `cargo xtask gate --full --release --main --rocky` (with cargo-deny) and
+     `xtask oracle check-all` on the merge commit
   5. fast-forwards phase0 to it, and prints the push steps. It never pushes.
+
+  --no-rocky   skip Rocky Linux 9 everywhere (Docker unavailable); CI still runs it
+
+One land runs at a time (an OS lock on target/land/lock). If a land is killed, the rebase and
+gate it started carry on until the gate's next step, which sees that land has exited and
+stops; a new land waits for no one, but refuses to start while such a gate still runs.
 ";
 
 pub(crate) fn parse(args: &[&str]) -> Result<(String, bool), String> {
     let mut branch = None;
-    let mut rocky = false;
+    let mut rocky = true;
     for &arg in args {
         match arg {
             "--rocky" => rocky = true,
+            "--no-rocky" => rocky = false,
             _ if arg.starts_with('-') => return Err(format!("unknown land option `{arg}`")),
             _ if branch.is_none() => branch = Some(arg.to_string()),
             _ => return Err(format!("land takes one branch\n\n{USAGE}")),
@@ -132,7 +142,7 @@ pub(crate) fn run(branch: &str, rocky: bool) -> Result<(), String> {
     }
 
     let land_dir = root.join("target").join("land");
-    let _lock = Lock::take(&land_dir)?;
+    let lock = Lock::take(&land_dir)?;
     let wt = land_dir.join("wt");
     let build = land_dir.join("target");
     remove_worktree(&root, &wt)?;
@@ -172,7 +182,7 @@ pub(crate) fn run(branch: &str, rocky: bool) -> Result<(), String> {
             exec,
         ])
         .arg(&base);
-    let replayed = land_env(&mut rebase, &build)
+    let replayed = land_env(&mut rebase, &build, &lock)
         .status()
         .map_err(|e| format!("could not run git rebase: {e}"))?;
     if !replayed.success() {
@@ -185,6 +195,12 @@ pub(crate) fn run(branch: &str, rocky: bool) -> Result<(), String> {
              already in {INTEGRATION}"
         ));
     }
+    check_replay(&root, &base, &tip, &rebased).map_err(|e| {
+        format!(
+            "{e}\nland stopped: {INTEGRATION} and {branch} are untouched; the replay is in {}",
+            crate::display_path(&wt)
+        )
+    })?;
     let kept = rebased == tip;
     let chunks = crate::git(
         &wt,
@@ -212,6 +228,7 @@ pub(crate) fn run(branch: &str, rocky: bool) -> Result<(), String> {
         build: &build,
         message_file: land_dir.join("MERGE_MSG"),
         rocky,
+        lock: &lock,
     };
     let landed = landing
         .merge_and_gate(&base, &rebased, &merge_message(branch, &tip, &chunks))
@@ -239,8 +256,8 @@ pub(crate) fn run(branch: &str, rocky: bool) -> Result<(), String> {
     }
     check_clean(&root)?;
     crate::git(&root, &["merge", "--quiet", "--ff-only", &landed])?;
-    remove_worktree(&root, &wt)?;
 
+    // phase0 has moved: report that first, whatever happens next.
     println!(
         "land: {INTEGRATION} is now {} (was {}). Nothing was pushed.",
         short(&landed),
@@ -264,7 +281,47 @@ pub(crate) fn run(branch: &str, rocky: bool) -> Result<(), String> {
         "     main accepts only commits whose Windows, Rocky Linux 9 and cargo-deny checks passed,"
     );
     println!("     so this works only after CI has passed on that exact SHA.");
+    if let Err(e) = remove_worktree(&root, &wt) {
+        println!(
+            "land: warning: could not remove {} ({e}); the next `cargo xtask land` removes it",
+            crate::display_path(&wt)
+        );
+    }
     Ok(())
+}
+
+/// Stops when the replayed tree differs from merging the branch as it is: content that only
+/// the branch's merge commits carry, which the replay drops, or a replay that resolved
+/// something differently.
+fn check_replay(root: &Path, base: &str, tip: &str, rebased: &str) -> Result<(), String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args(["merge-tree", "--write-tree", base, tip])
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| format!("could not run git merge-tree: {e}"))?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let merged = text.lines().next().unwrap_or("").trim().to_string();
+    if !out.status.success() || merged.is_empty() {
+        return Err(format!(
+            "merging the branch as it is ({}) conflicts with {INTEGRATION}, although replaying \
+             its commits did not, so the replay can't be checked: rebase the branch onto \
+             {INTEGRATION} yourself\n{}",
+            short(tip),
+            text.trim()
+        ));
+    }
+    let replayed = crate::git(root, &["rev-parse", &format!("{rebased}^{{tree}}")])?;
+    if merged == replayed.trim() {
+        return Ok(());
+    }
+    let stat = crate::git(root, &["diff", "--stat", &merged, replayed.trim()]).unwrap_or_default();
+    Err(format!(
+        "the replayed branch differs from merging it as it is: the replay would drop what \
+         these files carry in the branch's merge commits (or resolve them differently):\n{}",
+        stat.trim_end()
+    ))
 }
 
 /// Where the merge commit is made and gated.
@@ -273,6 +330,7 @@ struct Landing<'a> {
     build: &'a Path,
     message_file: PathBuf,
     rocky: bool,
+    lock: &'a Lock,
 }
 
 impl Landing<'_> {
@@ -371,7 +429,7 @@ impl Landing<'_> {
 
     /// Runs `cmd` with land's environment and its output on the console.
     fn run(&self, cmd: &mut Command, what: &str) -> Result<(), String> {
-        let status = land_env(cmd, self.build)
+        let status = land_env(cmd, self.build, self.lock)
             .status()
             .map_err(|e| format!("could not run {what}: {e}"))?;
         if status.success() {
@@ -441,11 +499,13 @@ fn replay_failure(wt: &Path) -> String {
 }
 
 /// The environment of land's git and cargo commands: a build directory shared by every land
-/// (third-party crates and the oracle cache stay warm), and no editor.
-fn land_env<'a>(cmd: &'a mut Command, build: &Path) -> &'a mut Command {
+/// (third-party crates and the oracle cache stay warm), no editor, and the lock the gates
+/// watch.
+fn land_env<'a>(cmd: &'a mut Command, build: &Path, lock: &Lock) -> &'a mut Command {
     gate::clear_git_env(cmd);
     cmd.env("CARGO_TARGET_DIR", build)
         .env("GIT_EDITOR", "true")
+        .env(LAND_LOCK_ENV, &lock.path)
         .stdin(Stdio::null())
 }
 
@@ -503,34 +563,62 @@ fn init_submodule(root: &Path, wt: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// A lock file, so that two lands don't share the temporary worktree.
+/// One land at a time: an OS lock on `target/land/lock`, held for the whole run and released
+/// by the OS when the process ends, however it ends, so a lock is never stale.
+///
+/// A killed land's rebase and gate aren't killed with it (that needs a job object or `unsafe`
+/// code, which xtask may not use). Instead the gates a land starts watch its lock before each
+/// step, and stop at the first step after it is released (`gate::LandWatch`); while they run
+/// they hold `target/land/gate.lock`, and a new land doesn't start under them.
 #[derive(Debug)]
-struct Lock(PathBuf);
+pub(crate) struct Lock {
+    path: PathBuf,
+    _file: File,
+}
 
 impl Lock {
     fn take(dir: &Path) -> Result<Lock, String> {
         std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
         let path = dir.join("lock");
-        match OpenOptions::new().write(true).create_new(true).open(&path) {
-            Ok(mut file) => {
-                let _ = writeln!(file, "pid {}", std::process::id());
-                Ok(Lock(path))
+        let who = dir.join("lock.pid");
+        let file = lock_file(&path)?;
+        match file.try_lock() {
+            Ok(()) => {}
+            Err(TryLockError::WouldBlock) => {
+                return Err(format!(
+                    "another `cargo xtask land` is running ({})",
+                    std::fs::read_to_string(&who).unwrap_or_default().trim()
+                ));
             }
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(format!(
-                "another `cargo xtask land` is running ({}), or one was killed; if none is \
-                 running, delete {}",
-                std::fs::read_to_string(&path).unwrap_or_default().trim(),
-                crate::display_path(&path)
-            )),
-            Err(e) => Err(format!("{}: {e}", path.display())),
+            Err(TryLockError::Error(e)) => return Err(format!("{}: {e}", path.display())),
         }
+        let gate = lock_file(&dir.join("gate.lock"))?;
+        match gate.try_lock() {
+            Ok(()) => drop(gate),
+            Err(TryLockError::WouldBlock) => {
+                return Err(format!(
+                    "a gate that an earlier `cargo xtask land` started is still running in {} \
+                     (that land was killed); it stops at its next step: wait for it, then try \
+                     again",
+                    crate::display_path(&dir.join("wt"))
+                ));
+            }
+            Err(TryLockError::Error(e)) => return Err(format!("gate.lock: {e}")),
+        }
+        let _ = std::fs::write(&who, format!("pid {}\n", std::process::id()));
+        Ok(Lock { path, _file: file })
     }
 }
 
-impl Drop for Lock {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
-    }
+/// Opens (creating it) a file used only for its OS lock.
+pub(crate) fn lock_file(path: &Path) -> Result<File, String> {
+    OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
+        .map_err(|e| format!("{}: {e}", path.display()))
 }
 
 fn path_str(path: &Path) -> Result<&str, String> {
@@ -560,10 +648,15 @@ mod tests {
 
     #[test]
     fn parses_arguments() {
-        assert_eq!(parse(&["card/x"]).unwrap(), ("card/x".to_string(), false));
+        // Rocky Linux 9 is the default; --no-rocky opts out.
+        assert_eq!(parse(&["card/x"]).unwrap(), ("card/x".to_string(), true));
         assert_eq!(
             parse(&["--rocky", "card/x"]).unwrap(),
             ("card/x".to_string(), true)
+        );
+        assert_eq!(
+            parse(&["card/x", "--no-rocky"]).unwrap(),
+            ("card/x".to_string(), false)
         );
         assert!(parse(&[]).is_err());
         assert!(parse(&["a", "b"]).is_err());
