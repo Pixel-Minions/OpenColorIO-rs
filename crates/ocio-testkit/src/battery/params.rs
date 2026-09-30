@@ -167,6 +167,7 @@ pub struct Case<P> {
     non_finite: Channels,
     nan: Channels,
     w0002: W0002Scope,
+    allowed_log: Vec<String>,
 }
 
 impl<P: Params> Case<P> {
@@ -202,6 +203,7 @@ impl<P: Params> Case<P> {
             non_finite,
             nan,
             w0002: W0002Scope::Everywhere,
+            allowed_log: Vec::new(),
         }
     }
 
@@ -217,6 +219,21 @@ impl<P: Params> Case<P> {
     pub fn w0002_nowhere(mut self) -> Self {
         self.w0002 = W0002Scope::Nowhere;
         self
+    }
+
+    /// Allows OCIO log messages that contain `fragment` for this case. Any other message the
+    /// wheel logs fails the case: a warning usually means the spec isn't what the family meant
+    /// (OCIO ignores a misspelled optional key with a warning). Generated cases inherit this.
+    pub fn allow_log(mut self, fragment: impl Into<String>) -> Self {
+        self.allowed_log.push(fragment.into());
+        self
+    }
+
+    /// Whether OCIO may log `message` for this case ([`Case::allow_log`]).
+    pub fn allows_log(&self, message: &str) -> bool {
+        self.allowed_log
+            .iter()
+            .any(|fragment| message.contains(fragment.as_str()))
     }
 
     /// The label, for reports.
@@ -371,6 +388,7 @@ fn mutation<P: Params>(base: &Case<P>, slot: usize, info: &Slot, value: usize, v
     let label = format!("{}, {} = {}", base.label, info.name, describe(v));
     let mut case = Case::new(label, params);
     case.origin = Origin::Generated { slot, value };
+    case.allowed_log = base.allowed_log.clone();
     case
 }
 

@@ -114,6 +114,8 @@ enum SpecBug {
     RustNumbers,
     /// The case with this base names a transform class that doesn't exist.
     BadClassFor(f64),
+    /// Non-finite parameters' YAML has a key LogTransform doesn't know (`bse`).
+    UnknownKey,
 }
 
 struct LogFamily {
@@ -161,6 +163,11 @@ impl Family for LogFamily {
             SpecBug::RustNumbers if !params.0.is_finite() => Spec::Yaml(format!(
                 "!<LogTransform> {{base: {}, direction: {}}}",
                 params.0,
+                direction.yaml()
+            )),
+            SpecBug::UnknownKey if !params.0.is_finite() => Spec::Yaml(format!(
+                "!<LogTransform> {{base: {}, bse: 2, direction: {}}}",
+                yaml_number(params.0),
                 direction.yaml()
             )),
             SpecBug::BadClassFor(base) if params.0 == base => {
@@ -295,8 +302,12 @@ fn refusals_are_compared_or_left_out() {
         "{message}"
     );
 
-    // Not ported: a generated case the wheel refuses is left out, an explicit one fails.
-    let mut family = LogFamily::new(vec![Case::new("base 2", Base(2.0))]);
+    // Not ported: a generated case the wheel refuses is left out, an explicit one fails. (The
+    // NaN base is an explicit case on the YAML spec the generated NaN and ±Inf cases take.)
+    let mut family = LogFamily::new(vec![
+        Case::new("base 2", Base(2.0)),
+        Case::new("base NaN", Base(f64::NAN)),
+    ]);
     family.bases = vec![Case::new("base 2", Base(2.0))];
     family.validation = Validation::NotPorted { card: "WP 1.3l1" };
     let plan = Plan {
@@ -478,8 +489,12 @@ fn a_spec_the_wheel_cant_load_fails_instead_of_being_left_out() {
         ..small_plan()
     };
     let message = run_expecting_failure(&family, &plan);
-    // NaN, +Inf and -Inf, each in both combinations.
-    assert!(message.contains("6 failures"), "{message}");
+    // NaN, +Inf and -Inf, each in both combinations, and no explicit case on the YAML route.
+    assert!(message.contains("7 failures"), "{message}");
+    assert!(
+        message.contains("generated cases use YAML specs, but no explicit case"),
+        "{message}"
+    );
     assert!(
         message.contains("OCIO raised while loading the config"),
         "{message}"
@@ -592,4 +607,48 @@ fn other_profiles_without_pass_through_channels_fail() {
         message.contains("gives 2 other profiles but no pass-through channels"),
         "{message}"
     );
+}
+
+/// Every spec route the generated cases take needs an explicit case on that route that the
+/// wheel accepts and the battery compares: otherwise a bug in that spec (the verifier's F2a,
+/// gamma and offset swapped in a YAML template) only shows as refusals, which are left out
+/// while validation isn't ported. The generated NaN and ±Inf cases take the YAML route here.
+#[test]
+fn generated_cases_need_a_compared_explicit_case_on_their_spec_route() {
+    let plan = Plan {
+        mutations: Mutations::Sampled,
+        ..small_plan()
+    };
+    let mut family = LogFamily::new(vec![Case::new("base 2", Base(2.0))]);
+    family.bases = vec![Case::new("base 2", Base(2.0))];
+    family.validation = Validation::NotPorted { card: "WP 1.3l1" };
+    let message = run_expecting_failure(&family, &plan);
+    assert!(message.contains("1 failures"), "{message}");
+    assert!(
+        message.contains("generated cases use YAML specs, but no explicit case on that route"),
+        "{message}"
+    );
+
+    family.cases.push(Case::new("base NaN", Base(f64::NAN)));
+    let summary = run_with(&family, &plan);
+    assert!(summary.generated_cases > 0);
+}
+
+/// OCIO logging a warning fails the case, unless the case allows it: a misspelled optional
+/// key is ignored with a warning, and the case would silently run the default.
+#[test]
+fn an_ocio_warning_fails_its_case_unless_allowed() {
+    let mut family = LogFamily::new(vec![Case::new("base NaN", Base(f64::NAN))]);
+    family.spec_bug = SpecBug::UnknownKey;
+    let message = run_expecting_failure(&family, &small_plan());
+    assert!(message.contains("2 failures"), "{message}");
+    assert!(message.contains("OCIO logged"), "{message}");
+    assert!(message.contains("'bse'"), "{message}");
+
+    let mut family = LogFamily::new(vec![
+        Case::new("base NaN", Base(f64::NAN)).allow_log("Unknown key in LogTransform: 'bse'"),
+    ]);
+    family.spec_bug = SpecBug::UnknownKey;
+    let summary = run_with(&family, &small_plan());
+    assert_eq!(summary.comparisons, 2);
 }

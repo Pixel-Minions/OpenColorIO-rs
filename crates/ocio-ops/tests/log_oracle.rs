@@ -143,10 +143,13 @@ impl Family for LogFamily {
 #[test]
 fn log_transform_matches_the_wheel() {
     // 2 and 10 are the Log2/Log10 renderers; others use LinToLog and LogToLin.
-    let cases: Vec<Case<LogBase>> = [2.0, 10.0, std::f64::consts::E, 3.7, 0.5]
+    let mut cases: Vec<Case<LogBase>> = [2.0, 10.0, std::f64::consts::E, 3.7, 0.5]
         .map(|base| Case::new(format!("base {base}"), LogBase { base }))
         .to_vec();
     let bases = vec![cases[3].clone()];
+    // A NaN base takes the YAML spec, as the generated NaN and ±Inf cases do: an explicit case
+    // there makes a bug in that spec fail rather than show as refusals.
+    cases.push(Case::new("base NaN", LogBase { base: f64::NAN }).w0002_nowhere());
     battery::run(&LogFamily { cases, bases });
 }
 
@@ -338,8 +341,11 @@ fn affine_cases() -> Vec<Case<Affine>> {
 
 #[test]
 fn log_affine_transform_matches_the_wheel() {
-    let cases = affine_cases();
+    let mut cases = affine_cases();
     let bases = vec![cases[0].clone()];
+    // An explicit case on the YAML spec the generated NaN and ±Inf cases take.
+    let [_, nan_base] = affine_nan_cases();
+    cases.push(nan_base);
     battery::run(&AffineFamily { cases, bases });
 }
 
@@ -658,8 +664,10 @@ fn nan_pixels_meet_nan_offsets_at_every_buffer_length() {
 
 #[test]
 fn log_camera_transform_matches_the_wheel() {
-    let cases = camera_cases();
+    let mut cases = camera_cases();
     let bases = vec![cases[3].clone()];
+    // An explicit case on the YAML spec the generated NaN and ±Inf cases take.
+    cases.push(camera_nan_case());
     battery::run(&CameraFamily { cases, bases });
 }
 
@@ -841,9 +849,23 @@ fn extreme_finite_parameters_match_the_wheel() {
 /// (The battery's generated NaN cases take W0002 in every combination.)
 #[test]
 fn nan_parameters_match_the_wheel_under_waiver_w0002() {
+    battery::run(&AffineFamily {
+        cases: affine_nan_cases().to_vec(),
+        bases: Vec::new(),
+    });
+    battery::run(&CameraFamily {
+        cases: vec![camera_nan_case()],
+        bases: Vec::new(),
+    });
+}
+
+/// The LogAffineTransforms with NaN parameters (YAML `.nan`): the first compares under W0002
+/// only where MSVC swapped operands (inverse, fast math off; see
+/// `nan_parameters_match_the_wheel_under_waiver_w0002`), the second bit for bit everywhere.
+fn affine_nan_cases() -> [Case<Affine>; 2] {
     let nan = f64::NAN;
     let inverse_exact = |c: &Combo| c.direction == Direction::Inverse && !c.fast_math;
-    let affine = vec![
+    [
         Case::new(
             "NaN parameters",
             Affine {
@@ -866,30 +888,25 @@ fn nan_parameters_match_the_wheel_under_waiver_w0002() {
             },
         )
         .w0002_nowhere(),
-    ];
-    battery::run(&AffineFamily {
-        cases: affine,
-        bases: Vec::new(),
-    });
-    let camera = vec![
-        Case::new(
-            "NaN parameters",
-            Camera {
-                base: 2.0,
-                lin_side_break: [0.1, nan, 0.2],
-                log_side_slope: [0.25, 0.3, nan],
-                log_side_offset: [0.5, nan, 0.6],
-                lin_side_slope: [1.0; 3],
-                lin_side_offset: [nan, 0.02, 0.01],
-                linear_slope: Some([1.2, 1.0, nan]),
-            },
-        )
-        .w0002_nowhere(),
-    ];
-    battery::run(&CameraFamily {
-        cases: camera,
-        bases: Vec::new(),
-    });
+    ]
+}
+
+/// The LogCameraTransform with NaN parameters, bit for bit everywhere.
+fn camera_nan_case() -> Case<Camera> {
+    let nan = f64::NAN;
+    Case::new(
+        "NaN parameters",
+        Camera {
+            base: 2.0,
+            lin_side_break: [0.1, nan, 0.2],
+            log_side_slope: [0.25, 0.3, nan],
+            log_side_offset: [0.5, nan, 0.6],
+            lin_side_slope: [1.0; 3],
+            lin_side_offset: [nan, 0.02, 0.01],
+            linear_slope: Some([1.2, 1.0, nan]),
+        },
+    )
+    .w0002_nowhere()
 }
 
 /// The S2 oracle tests' probe values: all halves, the specials, and 1,000,000 seeded random

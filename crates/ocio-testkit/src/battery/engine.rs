@@ -11,7 +11,7 @@ use std::time::Instant;
 use serde_json::Value;
 
 use super::params::{Case, Channels, Comparison, Origin, mutations, sampled_mutations};
-use super::{Combo, Family, Format, Mutations, Plan, Port, Summary, Validation};
+use super::{Combo, Family, Format, Mutations, Plan, Port, Spec, Summary, Validation};
 use crate::compare::f32_bits_report;
 use crate::oracle::{BatchCall, Oracle, Response, f32_to_bytes};
 use crate::probe::{ALL_F32_PIXELS, ProbeSet, all_f32_chunk};
@@ -85,6 +85,31 @@ impl Input {
     }
 }
 
+/// How a spec reaches the wheel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+enum Route {
+    /// A JSON transform spec (`Spec::Transform`).
+    Transform,
+    /// One transform in a config's YAML (`Spec::Yaml`).
+    Yaml,
+}
+
+impl Route {
+    fn of(spec: &Spec) -> Route {
+        match spec {
+            Spec::Transform(_) => Route::Transform,
+            Spec::Yaml(_) => Route::Yaml,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Route::Transform => "JSON transform",
+            Route::Yaml => "YAML",
+        }
+    }
+}
+
 /// One oracle call and its comparison.
 struct Job {
     case: usize,
@@ -153,6 +178,8 @@ pub(super) fn run<F: Family>(family: &F, plan: &Plan) -> Summary {
     // Per case and combination, how many buffers the plan asks for: counted here from the
     // plan, apart from the jobs, so that the checker can prove each one was compared.
     let mut expected: HashMap<(usize, usize), usize> = HashMap::new();
+    // Per case, the spec routes (JSON transform or YAML) its combinations use.
+    let mut routes: Vec<HashSet<Route>> = vec![HashSet::new(); cases.len()];
     for (c, case) in cases.iter().enumerate() {
         let shared = match case.origin() {
             Origin::Explicit => &explicit_buffers,
@@ -164,6 +191,7 @@ pub(super) fn run<F: Family>(family: &F, plan: &Plan) -> Summary {
             let spec = specs
                 .entry(combo.direction)
                 .or_insert_with(|| family.spec(case.params(), combo.direction));
+            routes[c].insert(Route::of(spec));
             let args = Arc::new(spec.cpu_apply_args(combo));
             let near = neighbourhoods
                 .entry(combo.direction)
@@ -223,6 +251,8 @@ pub(super) fn run<F: Family>(family: &F, plan: &Plan) -> Summary {
         waived: HashMap::new(),
         refusals: HashMap::new(),
         expected,
+        routes,
+        log_reported: HashSet::new(),
         compared: HashMap::new(),
         other_profiles_reported: false,
         summary: &mut summary,
@@ -285,6 +315,10 @@ struct Checker<'a, F: Family> {
     refusals: HashMap<String, usize>,
     /// Per case and combination, how many buffers the plan asks for.
     expected: HashMap<(usize, usize), usize>,
+    /// Per case, the spec routes its combinations use.
+    routes: Vec<HashSet<Route>>,
+    /// Case and combination pairs whose unexpected OCIO log messages are already reported.
+    log_reported: HashSet<(usize, usize)>,
     /// Per case and combination, how many buffers were compared.
     compared: HashMap<(usize, usize), usize>,
     /// Whether other profiles without pass-through channels are already reported.
@@ -364,6 +398,26 @@ impl<F: Family> Checker<'_, F> {
                 return;
             }
         };
+        // OCIO logging a warning usually means the spec isn't what the family meant: a
+        // misspelled optional key is ignored with a warning, and the case runs the default.
+        let unexpected: Vec<String> = response
+            .result
+            .get("log")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .filter(|message| !self.cases[job.case].allows_log(message))
+            .map(|message| message.trim_end().to_string())
+            .collect();
+        if !unexpected.is_empty() && self.log_reported.insert(group) {
+            let message = format!(
+                "{}, {probe}: OCIO logged {unexpected:?}; if the case expects it, allow it with \
+                 `Case::allow_log`",
+                self.label(group)
+            );
+            self.fail(message);
+        }
         let refusal = response.result.get("exception").map(|e| {
             e.get("message")
                 .and_then(Value::as_str)
@@ -534,6 +588,36 @@ impl<F: Family> Checker<'_, F> {
                  probes"
                     .to_string(),
             );
+        }
+        // Every spec route the generated cases take has an explicit case on it that the wheel
+        // accepted and the battery compared. Otherwise a bug in that route's spec (for
+        // example two parameters swapped in the YAML) only shows as refusals, and those are
+        // left out while the family's validation isn't ported.
+        let generated_routes: HashSet<Route> = self
+            .cases
+            .iter()
+            .zip(&self.routes)
+            .filter(|(case, _)| matches!(case.origin(), Origin::Generated { .. }))
+            .flat_map(|(_, routes)| routes.iter().copied())
+            .collect();
+        let mut generated_routes: Vec<Route> = generated_routes.into_iter().collect();
+        generated_routes.sort();
+        for route in generated_routes {
+            let covered = (0..self.cases.len()).any(|c| {
+                self.cases[c].origin() == Origin::Explicit
+                    && self.routes[c].contains(&route)
+                    && (0..self.combos.len())
+                        .any(|k| self.compared.get(&(c, k)).is_some_and(|&n| n > 0))
+            });
+            if !covered {
+                self.fail(format!(
+                    "generated cases use {} specs, but no explicit case on that route was \
+                     compared: a bug in the family's {} spec would only show as refusals. Add \
+                     an explicit case the wheel accepts on that route",
+                    route.name(),
+                    route.name()
+                ));
+            }
         }
         let mut waived: Vec<((usize, usize), usize)> = self.waived.into_iter().collect();
         waived.sort();

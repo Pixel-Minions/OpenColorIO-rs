@@ -183,6 +183,9 @@ fn exponent_transform_matches_the_wheel() {
         }
         bases.push(cases[cases.len() - 3].clone());
     }
+    // An explicit case on the YAML spec the generated NaN and ±Inf cases take.
+    let [nan_clamp, _, _] = exponent_nan_cases();
+    cases.push(nan_clamp);
     battery::run(&ExponentFamily { cases, bases });
 }
 
@@ -348,6 +351,9 @@ fn exponent_with_linear_transform_matches_the_wheel() {
         }
         bases.push(cases[cases.len() - 3].clone());
     }
+    // An explicit case on the YAML spec the generated NaN and ±Inf cases take.
+    let [_, nan_mirror] = exponent_with_linear_nan_cases();
+    cases.push(nan_mirror);
     battery::run(&ExponentWithLinearFamily { cases, bases });
 }
 
@@ -364,8 +370,19 @@ fn exponent_with_linear_transform_matches_the_wheel() {
 /// generated NaN cases take W0002 in every combination.)
 #[test]
 fn nan_parameters_match_the_wheel_under_waiver_w0002() {
-    let nan = f64::NAN;
-    let exponent = [
+    battery::run(&ExponentFamily {
+        cases: exponent_nan_cases().to_vec(),
+        bases: Vec::new(),
+    });
+    battery::run(&ExponentWithLinearFamily {
+        cases: exponent_with_linear_nan_cases().to_vec(),
+        bases: Vec::new(),
+    });
+}
+
+/// ExponentTransforms with a NaN value, one per negative style, bit for bit everywhere.
+fn exponent_nan_cases() -> [Case<Exponent>; 3] {
+    [
         NegativeStyle::Clamp,
         NegativeStyle::Mirror,
         NegativeStyle::PassThru,
@@ -374,21 +391,23 @@ fn nan_parameters_match_the_wheel_under_waiver_w0002() {
         Case::new(
             format!("NaN value {style:?}"),
             Exponent {
-                value: [2.2, nan, 1.8, 1.0],
+                value: [2.2, f64::NAN, 1.8, 1.0],
                 style,
             },
         )
         .w0002_nowhere()
     })
-    .to_vec();
-    battery::run(&ExponentFamily {
-        cases: exponent,
-        bases: Vec::new(),
-    });
+}
 
+/// ExponentWithLinearTransforms with a NaN gamma and a NaN offset: the linear style compares
+/// under W0002 only where GCC and MSVC multiply in different orders (forward, fast math off;
+/// see `nan_parameters_match_the_wheel_under_waiver_w0002`), the mirror style bit for bit
+/// everywhere.
+fn exponent_with_linear_nan_cases() -> [Case<ExponentWithLinear>; 2] {
+    let nan = f64::NAN;
     let (gamma, offset) = ([2.4, nan, 2.2, 1.8], [0.055, 0.1, nan, 0.2]);
     let forward_exact = |c: &Combo| c.direction == Direction::Forward && !c.fast_math;
-    let with_linear = vec![
+    [
         Case::new(
             "NaN gamma and offset Linear",
             ExponentWithLinear {
@@ -407,9 +426,5 @@ fn nan_parameters_match_the_wheel_under_waiver_w0002() {
             },
         )
         .w0002_nowhere(),
-    ];
-    battery::run(&ExponentWithLinearFamily {
-        cases: with_linear,
-        bases: Vec::new(),
-    });
+    ]
 }

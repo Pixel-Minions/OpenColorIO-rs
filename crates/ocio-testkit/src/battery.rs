@@ -14,7 +14,11 @@
 //!    fields.
 //! 2. **Family.** Implement [`Family`]:
 //!    - `cases`: the explicit cases, [`params::Case::new`]`(label, params)`: upstream's test
-//!      values, and hand-written extreme or NaN cases where you know a code path needs them;
+//!      values, and hand-written extreme or NaN cases where you know a code path needs them.
+//!      For each spec route the generated cases take (JSON transform or YAML), include an
+//!      explicit case on that route that the wheel accepts, typically a NaN parameter for
+//!      YAML: the battery fails otherwise, since a bug in that spec would only show as
+//!      refusals;
 //!    - `mutation_bases`: one typical case per code path (per style), from which the battery
 //!      generates extreme finite, NaN and ±Inf cases ([`params::mutations`]);
 //!    - `spec`: the processor the wheel builds: [`Spec::Transform`] with a JSON transform
@@ -32,7 +36,9 @@
 //! 3. **Test.** Call [`run`] in a `#[test]`. It runs every case in every direction with fast
 //!    math on and off, on the probes of the tier `OCIO_RS_TIER` names ([`Tier`]), sends the
 //!    oracle calls in batches (one process per test at the quick tier), prints a
-//!    [`Summary`], and panics with a report per failing case, combination and probe.
+//!    [`Summary`], and panics with a report per failing case, combination and probe. A
+//!    warning OCIO logs for a case fails it too (a misspelled optional key is ignored with a
+//!    warning), unless the case allows it ([`params::Case::allow_log`]).
 //!
 //! Comparisons are exact. Waiver W0002 applies automatically, and only, to the channels of NaN
 //! parameters ([`params::Case::compare`]); a case can narrow it
