@@ -35,9 +35,9 @@ status = "todo"
 [[file]]
 path = "include/OpenColorIO/OpenColorTypes.h"
 kind = "api"
-target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs"]
+target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs"]
 status = "partial"
-note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data"
+note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs"
 
 [[file]]
 path = "src/CMakeLists.txt"
@@ -1749,13 +1749,15 @@ status = "todo"
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu.rs"]
-status = "todo"
+status = "partial"
+note = "S4: forward renderers without the tetrahedral SIMD kernels: the scalar tetrahedral branch, and the SSE2 and generic trilinear branches; InvLut3DRenderer not ported"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu.rs"]
-status = "todo"
+status = "partial"
+note = "S4: GetLut3DRenderer covers forward LUTs only"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_AVX.cpp"
@@ -1809,13 +1811,15 @@ status = "todo"
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpData.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs"]
-status = "todo"
+status = "partial"
+note = "S4: array (identity fill, size limit), interpolation and GetConcreteInterpolation; not composition, inversion, validation or cache IDs"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpData.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs"]
-status = "todo"
+status = "partial"
+note = "S4: see Lut3DOpData.cpp"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpGPU.cpp"
@@ -4676,7 +4680,8 @@ status = "todo"
 path = "tests/cpu/ops/lut3d/Lut3DOpCPU_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu_tests.rs"]
-status = "todo"
+status = "done"
+note = "S4: both tests, each run in every SIMD mode the CPU supports"
 
 [[file]]
 path = "tests/cpu/ops/lut3d/Lut3DOpData_tests.cpp"

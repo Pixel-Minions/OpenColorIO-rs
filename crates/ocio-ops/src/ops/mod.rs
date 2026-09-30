@@ -5,3 +5,4 @@
 
 pub mod gamma;
 pub mod log;
+pub mod lut3d;
