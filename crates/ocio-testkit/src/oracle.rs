@@ -299,8 +299,18 @@ impl Oracle {
 /// writes (`PYTHONPATH`, `PYTHONHOME`, `PYTHONVERBOSE`, `PYTHONWARNINGS`, ...); then sets
 /// `PYTHONDONTWRITEBYTECODE=1`, so the oracle leaves no `__pycache__` in the checkout.
 pub fn isolate(command: &mut Command) -> &mut Command {
-    for (key, _) in std::env::vars_os() {
-        let name = key.to_string_lossy();
+    isolate_from(command, std::env::vars_os().map(|(key, _)| key))
+}
+
+/// [`isolate`], for the variable names `names`. Names compare in ASCII upper case: Windows
+/// looks variables up whatever their case (`pythonoptimize` sets Python's `-O` there), and on
+/// Linux removing a lower-case name changes nothing the oracle reads.
+fn isolate_from(
+    command: &mut Command,
+    names: impl IntoIterator<Item = std::ffi::OsString>,
+) -> &mut Command {
+    for key in names {
+        let name = key.to_string_lossy().to_ascii_uppercase();
         if name == "OCIO" || name.starts_with("OCIO_") || name.starts_with("PYTHON") {
             command.env_remove(&key);
         }
@@ -398,6 +408,14 @@ fn uv_program() -> PathBuf {
 
 /// Hash of everything that determines the oracle's answers on this machine.
 fn identity(oracle_dir: &Path) -> Result<u128, String> {
+    identity_with(
+        oracle_dir,
+        &paths::upstream_dir().join("tests").join("data"),
+    )
+}
+
+/// [`identity`], with upstream's test files in `test_data`.
+fn identity_with(oracle_dir: &Path, test_data: &Path) -> Result<u128, String> {
     let mut files = Vec::new();
     for name in ["pyproject.toml", "uv.lock", ".python-version"] {
         files.push(oracle_dir.join(name));
@@ -413,7 +431,7 @@ fn identity(oracle_dir: &Path) -> Result<u128, String> {
         h.update(&(bytes.len() as u64).to_le_bytes());
         h.update(&bytes);
     }
-    hash_test_data(&mut h, &paths::upstream_dir().join("tests").join("data"));
+    hash_test_data(&mut h, test_data);
     h.update(machine_description().as_bytes());
     Ok(h.digest128())
 }
@@ -703,9 +721,27 @@ mod tests {
     }
 
     /// A process that writes more to stderr than a pipe holds before it closes stdout still
-    /// gives its stdout back: stderr is drained while stdout is read.
+    /// gives its stdout back: stderr is drained while stdout is read. A hang fails the test
+    /// after two minutes rather than stalling the run.
     #[test]
     fn a_large_stderr_does_not_block_the_exchange() {
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            large_stderr_exchange();
+            let _ = done.send(());
+        });
+        match finished.recv_timeout(std::time::Duration::from_secs(120)) {
+            Ok(()) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                panic!("the exchange didn't return in 120 s: blocked on stderr")
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                panic!("the exchange failed (its panic is printed above)")
+            }
+        }
+    }
+
+    fn large_stderr_exchange() {
         let mut command = super::Oracle::get().command();
         command.args([
             "-c",
@@ -818,5 +854,67 @@ mod tests {
             "a data file didn't change the identity"
         );
         assert_ne!(code_changed, before, "a module didn't change the identity");
+    }
+
+    /// The cache identity takes upstream's test files: the same oracle with and without a test
+    /// file, or with other bytes in it, has another identity.
+    #[test]
+    fn the_identity_covers_upstream_test_data() {
+        let dir = paths::target_dir().join(format!("testkit-identity-data-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("ocio_oracle")).unwrap();
+        for name in ["pyproject.toml", "uv.lock", ".python-version"] {
+            std::fs::write(dir.join(name), "x").unwrap();
+        }
+        let data = dir.join("data");
+        let missing = identity_with(&dir, &data).unwrap();
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::write(data.join("a.clf"), "one").unwrap();
+        let one = identity_with(&dir, &data).unwrap();
+        std::fs::write(data.join("a.clf"), "two").unwrap();
+        let two = identity_with(&dir, &data).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_ne!(missing, one, "a test file didn't change the identity");
+        assert_ne!(one, two, "a test file's bytes didn't change the identity");
+    }
+
+    /// `isolate` removes `OCIO`, `OCIO_*` and `PYTHON*` in any case (Windows finds a variable
+    /// whatever its case), keeps the others, and sets `PYTHONDONTWRITEBYTECODE`.
+    #[test]
+    fn isolate_removes_ocio_and_python_variables_in_any_case() {
+        let names = [
+            "OCIO",
+            "OCIO_LOGGING_LEVEL",
+            "ocio_lut_cache",
+            "PYTHONVERBOSE",
+            "pythonoptimize",
+            "PythonPath",
+            "OCIOX",
+            "PATH",
+            "MY_PYTHON",
+        ];
+        let mut command = Command::new("x");
+        isolate_from(&mut command, names.iter().map(std::ffi::OsString::from));
+        let envs: Vec<(String, Option<String>)> = command
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().into_owned(),
+                    v.map(|v| v.to_string_lossy().into_owned()),
+                )
+            })
+            .collect();
+        let removed = |name: &str| envs.iter().any(|(k, v)| k == name && v.is_none());
+        for name in &names[..6] {
+            assert!(removed(name), "{name} was kept: {envs:?}");
+        }
+        for name in &names[6..] {
+            assert!(!removed(name), "{name} was removed: {envs:?}");
+        }
+        assert!(
+            envs.iter()
+                .any(|(k, v)| k == "PYTHONDONTWRITEBYTECODE" && v.as_deref() == Some("1")),
+            "{envs:?}"
+        );
     }
 }
