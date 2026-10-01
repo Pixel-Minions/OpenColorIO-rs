@@ -462,9 +462,11 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   the creator overload with a non-ASCII uid. Other names, and every name in the other
   languages, are only written out, so they are well defined.
 - **Decided** (general rule): the port returns an error where the wrapper would read past a
-  line. `p1-gpu-infra` settles the scope: 1.7d for the wrapper, 1.7e for the uid.
-- **Status:** the wrapper's part matched in `p1-gpu-infra` (1.7d, U-10); the uid's to be matched
-  in 1.7e. The oracle refuses these MSL prefixes whatever the processor (`gpu_shader`,
+  line. `p1-gpu-infra` settles the scope: 1.7d for the wrapper, 1.7e for the uid. The uid's
+  key reaches only the creator's `begin`, which does nothing in the one description there is,
+  so it changes no output in C++ either: the port doesn't compute it (1.7e).
+- **Status:** the wrapper's part matched in `p1-gpu-infra` (1.7d, U-10); the uid's key not
+  ported (1.7e). The oracle refuses these MSL prefixes whatever the processor (`gpu_shader`,
   `_check_names`): being exact would need the declarations, which only the extraction makes.
 
 ### U-10. A texture declared without a sampler after it, in MSL

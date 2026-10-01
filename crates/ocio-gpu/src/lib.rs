@@ -10,10 +10,12 @@
 //!   function.
 //! - [`gpu_shader_desc`]: [`GpuShaderDesc`], the description of a shader program that a GPU
 //!   processor fills in; [`gpu_shader`]: its uniforms and textures.
+//! - [`gpu_processor`]: what a GPU processor writes around the ops' code.
 //! - [`open_color_types`]: the public enums only the GPU side uses ([`GpuLanguage`],
 //!   [`UniformDataType`]).
 #![forbid(unsafe_code)]
 
+pub mod gpu_processor;
 pub mod gpu_shader;
 pub mod gpu_shader_class_wrapper;
 pub mod gpu_shader_desc;
