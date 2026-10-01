@@ -448,6 +448,17 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
     upstream wouldn't.
   The oracle refuses these sizes, so `scanline_helper_tests.rs` defines the behaviour.
 
+### U-4. A Python logging function crashes the interpreter's exit
+
+- **Upstream:** a logging function set from Python is held in a C++ global
+  (`Logging.cpp:71`), which outlives the Python interpreter. A process that exits with one
+  still set crashes (a segmentation fault on both platforms, seen through the wheel in
+  `p1-foundations`); `ResetToDefaultLoggingFunction()` before exit avoids it, and the oracle's
+  commands do so.
+- **Options:** release the function when Python shuts down, or keep it and never release it;
+  either way the process exits cleanly.
+- **Status:** open; decided in Phase 6 (the Python module).
+
 ### U-15. A wrapped scanline reaches outside the image
 
 - **Upstream:** on Windows, a scanline whose wrapped start (I-1) falls inside the image starts in
