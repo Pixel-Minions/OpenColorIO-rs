@@ -21,6 +21,7 @@ pub mod gpu_shader_class_wrapper;
 pub mod gpu_shader_desc;
 pub mod gpu_shader_utils;
 pub mod open_color_types;
+pub mod ops;
 
 pub use gpu_shader_desc::GpuShaderDesc;
 pub use open_color_types::{GpuLanguage, UniformDataType};
