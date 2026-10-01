@@ -334,6 +334,37 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **A fix:** stop at 80 passes, and log when the cap stops the loop.
 - **Status:** matched in `p1-engine` (1.2d).
 
+### I-55. Exponents that differ past 7 digits share a cache ID
+
+- **Upstream:** an Exponent op's cache ID writes each exponent with 7 significant digits
+  (`ExponentOpData::getCacheID`, `ops/exponent/ExponentOp.cpp:72-90`), and the processors'
+  cache IDs are made of their ops'. Exponents that differ past the 7th digit give the same
+  cache IDs though they give different pixels. Through the wheel, ExponentTransforms of
+  `[2.0000001, 2, 2, 1]` and `[2.0000003, 2, 2, 1]` in a version 1 config share the
+  processor's, the CPU processor's and the GPU processor's cache IDs (`<ExponentOp 2 2 2 1 >`);
+  their CPU outputs differ (0.7 becomes 0.48999998 and 0.48999995), and so do their shaders
+  (`vec4(2.0000000999999998, ...)` and `vec4(2.0000003, ...)`).
+- **Who notices:** applications that cache processors or shaders by these cache IDs, with
+  version 1 configs (or CDL and CTF files, which build Exponent ops too).
+- **A fix:** write the exponents with all their digits (17), or hash them.
+- **Status:** matched in `p1-exponent` (1.3e1), checked against the wheel in
+  `crates/ocio-ops/tests/exponent_oracle.rs`.
+
+### I-56. A tiny exponent can't be inverted
+
+- **Upstream:** inverting an Exponent op refuses an exponent that is 0, "Cannot apply
+  ExponentOp op, Cannot apply 0.0 exponent in the inverse." (`CreateExponentOp`,
+  `ops/exponent/ExponentOp.cpp:307-337`). The test is `IsScalarEqualToZero`, which converts the
+  `double` to `float` and compares within 2 ULPs (`MathUtils.cpp:17-27`), so a nonzero exponent
+  up to 2 float ULPs (about 2.8e-45), or one that underflows a float, is refused too, though
+  `1.0 / e` is finite. Through the wheel, the inverses of exponents of 1e-46 and 1e-300 are
+  refused, and 5e-45 is inverted (2e+44). A NaN exponent isn't 0 and is inverted to NaN.
+- **Who notices:** inverse ExponentTransforms (version 1 configs) and inverse CDLs with such
+  powers.
+- **A fix:** test the `double` against 0.
+- **Status:** matched in `p1-exponent` (1.3e1), checked against the wheel in
+  `crates/ocio-ops/tests/exponent_oracle.rs`.
+
 ## Transforms
 
 ### I-11. Copying a group transform shares its children

@@ -48,7 +48,9 @@ fn the_no_ops() -> OpVec {
 fn no_op_data(op: &Op) -> &NoOpData {
     match &**op.data() {
         OpData::NoOp(data) => data,
-        OpData::Matrix(_) | OpData::Reference(_) => panic!("{op} isn't a no-op"),
+        OpData::Matrix(_) | OpData::Exponent(_) | OpData::Reference(_) => {
+            panic!("{op} isn't a no-op")
+        }
     }
 }
 

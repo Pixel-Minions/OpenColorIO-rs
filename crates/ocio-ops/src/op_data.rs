@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use crate::exception::{Exception, Result};
 use crate::format_metadata::{FormatMetadataImpl, METADATA_ID, METADATA_NAME};
+use crate::ops::exponent::ExponentOpData;
 use crate::ops::matrix::MatrixOpData;
 use crate::ops::noop::NoOpData;
 use crate::ops::reference::ReferenceOpData;
@@ -95,6 +96,8 @@ pub fn get_type_name(op_type: OpDataType) -> Result<&'static str> {
 pub enum OpData {
     /// `MatrixOpData`.
     Matrix(MatrixOpData),
+    /// `ExponentOpData`.
+    Exponent(ExponentOpData),
     /// `ReferenceOpData`.
     Reference(ReferenceOpData),
     /// `NoOpData` and its subclass `FileNoOpData`.
@@ -114,6 +117,7 @@ impl OpData {
     pub fn get_type(&self) -> OpDataType {
         match self {
             OpData::Matrix(data) => data.get_type(),
+            OpData::Exponent(data) => data.get_type(),
             OpData::Reference(_) => OpDataType::Reference,
             OpData::NoOp(_) => OpDataType::NoOp,
         }
@@ -127,6 +131,10 @@ impl OpData {
             // On a shared reference: a 3x3 matrix is checked as its 4x4 form, which upstream's
             // `const` validate keeps through a `const_cast` (`MatrixOpData::validate_ref`).
             OpData::Matrix(data) => data.validate_ref(),
+            OpData::Exponent(data) => {
+                data.validate();
+                Ok(())
+            }
             OpData::Reference(data) => {
                 data.validate();
                 Ok(())
@@ -144,6 +152,7 @@ impl OpData {
     pub fn is_no_op(&self) -> bool {
         match self {
             OpData::Matrix(data) => data.is_no_op(),
+            OpData::Exponent(data) => data.is_no_op(),
             OpData::Reference(data) => data.is_no_op(),
             OpData::NoOp(data) => data.is_no_op(),
         }
@@ -156,6 +165,7 @@ impl OpData {
     pub fn is_identity(&self) -> bool {
         match self {
             OpData::Matrix(data) => data.is_identity(),
+            OpData::Exponent(data) => data.is_identity(),
             OpData::Reference(data) => data.is_identity(),
             OpData::NoOp(data) => data.is_identity(),
         }
@@ -169,7 +179,9 @@ impl OpData {
     pub fn get_simpler_replacement(&self, _ops: &mut OpDataVec) -> Result<()> {
         match self {
             // The OpData default: nothing.
-            OpData::Matrix(_) | OpData::Reference(_) | OpData::NoOp(_) => Ok(()),
+            OpData::Matrix(_) | OpData::Exponent(_) | OpData::Reference(_) | OpData::NoOp(_) => {
+                Ok(())
+            }
         }
     }
 
@@ -181,7 +193,7 @@ impl OpData {
     pub fn get_identity_replacement(&self) -> OpData {
         match self {
             // The OpData default: `std::make_shared<MatrixOpData>()`, the identity.
-            OpData::Matrix(_) | OpData::Reference(_) | OpData::NoOp(_) => {
+            OpData::Matrix(_) | OpData::Exponent(_) | OpData::Reference(_) | OpData::NoOp(_) => {
                 OpData::Matrix(MatrixOpData::new())
             }
         }
@@ -195,6 +207,7 @@ impl OpData {
     pub fn has_channel_crosstalk(&self) -> bool {
         match self {
             OpData::Matrix(data) => data.has_channel_crosstalk(),
+            OpData::Exponent(data) => data.has_channel_crosstalk(),
             OpData::Reference(data) => data.has_channel_crosstalk(),
             OpData::NoOp(data) => data.has_channel_crosstalk(),
         }
@@ -211,7 +224,9 @@ impl OpData {
             OpData::Reference(data) => {
                 matches!(other, OpData::Reference(other) if data.equals(other))
             }
-            // NoOpData keeps the OpData base: the type only.
+            // ExponentOpData and NoOpData keep the OpData base: the type only (ExponentOp.h
+            // declares no equals).
+            OpData::Exponent(_) => other.get_type() == OpDataType::Exponent,
             OpData::NoOp(_) => other.get_type() == OpDataType::NoOp,
         }
     }
@@ -222,6 +237,7 @@ impl OpData {
     pub fn get_cache_id(&self) -> Result<Vec<u8>> {
         match self {
             OpData::Matrix(data) => Ok(data.get_cache_id()),
+            OpData::Exponent(data) => Ok(data.get_cache_id()),
             OpData::Reference(data) => data.get_cache_id(),
             OpData::NoOp(data) => Ok(data.get_cache_id()),
         }
@@ -233,6 +249,7 @@ impl OpData {
     pub fn get_format_metadata(&self) -> &FormatMetadataImpl {
         match self {
             OpData::Matrix(data) => data.get_format_metadata(),
+            OpData::Exponent(data) => data.get_format_metadata(),
             OpData::Reference(data) => data.get_format_metadata(),
             OpData::NoOp(data) => data.get_format_metadata(),
         }
@@ -244,6 +261,7 @@ impl OpData {
     pub fn get_format_metadata_mut(&mut self) -> &mut FormatMetadataImpl {
         match self {
             OpData::Matrix(data) => data.get_format_metadata_mut(),
+            OpData::Exponent(data) => data.get_format_metadata_mut(),
             OpData::Reference(data) => data.get_format_metadata_mut(),
             OpData::NoOp(data) => data.get_format_metadata_mut(),
         }
