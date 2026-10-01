@@ -677,6 +677,14 @@ fn dynamic(class: &str, style: &str) -> serde_json::Value {
 /// the port adds the uniforms each of the wheel's shaders holds, in its order and with the
 /// array sizes it declares, and gets the wheel's buffer offsets and buffer size. (The values
 /// come from the ops' writers, ported with the ops.)
+///
+/// On the way, before each uniform, one of its type with an empty name is refused, and the
+/// buffer then ends at the wheel's offset for that uniform: upstream aligns the buffer before
+/// the `Uniform` constructor refuses the name (GpuShader.cpp:380-449, 178-185 @ v2.5.2).
+/// After each uniform, every name taken so far, added again with its type, is refused
+/// (`uniformNameUsed`, lines 460-470) and moves nothing, so the layout stays the wheel's. The
+/// wheel's processors never add an empty or a taken name, so these refusals are checked by
+/// the layout they leave.
 #[test]
 fn uniform_buffer_layouts_match_the_wheel() {
     let exposure_contrast = serde_json::json!({"class": "ExposureContrastTransform",
@@ -707,26 +715,52 @@ fn uniform_buffer_layouts_match_the_wheel() {
         let reply = GpuShaderReply::from_response(response.expect("the oracle"));
         let shader = reply.shader();
         let mut desc = GpuShaderDesc::new(GpuLanguage::Glsl4_0);
-        for u in &shader.uniforms {
-            let added = match u.kind.as_str() {
-                "UNIFORM_DOUBLE" => desc.add_uniform_double(&u.name, Arc::new(|| 0.0)),
-                "UNIFORM_BOOL" => desc.add_uniform_bool(&u.name, Arc::new(|| false)),
-                "UNIFORM_FLOAT3" => desc.add_uniform_float3(&u.name, Arc::new(|| [0.0; 3])),
+        // Adds a uniform of the type and array size of the wheel's uniform `u`, named `name`.
+        let add =
+            |desc: &mut GpuShaderDesc, u: &oracle_gpu::Uniform, name: &str| match u.kind.as_str() {
+                "UNIFORM_DOUBLE" => desc.add_uniform_double(name, Arc::new(|| 0.0)),
+                "UNIFORM_BOOL" => desc.add_uniform_bool(name, Arc::new(|| false)),
+                "UNIFORM_FLOAT3" => desc.add_uniform_float3(name, Arc::new(|| [0.0; 3])),
                 "UNIFORM_VECTOR_FLOAT" => desc.add_uniform_vector_float(
-                    &u.name,
+                    name,
                     Arc::new(|| 0),
                     Arc::new(Vec::new),
                     array_size(&shader.text, &u.name),
                 ),
                 "UNIFORM_VECTOR_INT" => desc.add_uniform_vector_int(
-                    &u.name,
+                    name,
                     Arc::new(|| 0),
                     Arc::new(Vec::new),
                     array_size(&shader.text, &u.name),
                 ),
                 other => panic!("{other}"),
             };
-            assert_eq!(added, Ok(true), "case {i}: {}", u.name);
+        for (k, u) in shader.uniforms.iter().enumerate() {
+            // An empty name is refused, after the buffer is aligned for the uniform's type:
+            // the buffer then ends where the wheel puts the uniform.
+            assert!(add(&mut desc, u, "").is_err(), "case {i}: an empty name");
+            assert_eq!(desc.num_uniforms() as usize, k, "case {i}");
+            assert_eq!(
+                desc.uniform_buffer_size() as u64,
+                u.buffer_offset,
+                "case {i}: the buffer after an empty name of the type of {}",
+                u.name
+            );
+
+            assert_eq!(add(&mut desc, u, &u.name), Ok(true), "case {i}: {}", u.name);
+
+            // A name taken, with any type, adds nothing and leaves the buffer as it is.
+            let buffer_size = desc.uniform_buffer_size();
+            for taken in &shader.uniforms[..=k] {
+                assert_eq!(
+                    add(&mut desc, u, &taken.name),
+                    Ok(false),
+                    "case {i}: {} again",
+                    taken.name
+                );
+            }
+            assert_eq!(desc.num_uniforms() as usize, k + 1, "case {i}");
+            assert_eq!(desc.uniform_buffer_size(), buffer_size, "case {i}");
         }
         let offsets: Vec<u64> = desc
             .uniforms()
