@@ -8,11 +8,17 @@
 //!   language, and the helpers the writers share.
 //! - [`gpu_shader_class_wrapper`]: the class wrappers OSL and MSL shaders put around OCIO's
 //!   function.
-//! - [`open_color_types`]: the public enums only the GPU side uses ([`GpuLanguage`]).
+//! - [`gpu_shader_desc`]: [`GpuShaderDesc`], the description of a shader program that a GPU
+//!   processor fills in; [`gpu_shader`]: its uniforms and textures.
+//! - [`open_color_types`]: the public enums only the GPU side uses ([`GpuLanguage`],
+//!   [`UniformDataType`]).
 #![forbid(unsafe_code)]
 
+pub mod gpu_shader;
 pub mod gpu_shader_class_wrapper;
+pub mod gpu_shader_desc;
 pub mod gpu_shader_utils;
 pub mod open_color_types;
 
-pub use open_color_types::GpuLanguage;
+pub use gpu_shader_desc::GpuShaderDesc;
+pub use open_color_types::{GpuLanguage, UniformDataType};

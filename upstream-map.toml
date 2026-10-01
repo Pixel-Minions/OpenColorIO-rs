@@ -23,9 +23,9 @@ status = "todo"
 [[file]]
 path = "include/OpenColorIO/OpenColorIO.h"
 kind = "api"
-target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/image_desc.rs", "crates/ocio-ops/src/logging.rs"]
+target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/image_desc.rs", "crates/ocio-ops/src/logging.rs", "crates/ocio-gpu/src/gpu_shader_desc.rs", "crates/ocio-gpu/src/gpu_shader.rs"]
 status = "partial"
-note = "1.1b-1.1c: AutoStride, ImageDesc, PackedImageDesc and PlanarImageDesc (image_desc.rs, for ocio to re-export); 1.2e: the logging functions (155-177: GetLoggingLevel, SetLoggingLevel, SetLoggingFunction, ResetToDefaultLoggingFunction, LogMessage) in logging.rs"
+note = "1.1b-1.1c: AutoStride, ImageDesc, PackedImageDesc and PlanarImageDesc (image_desc.rs, for ocio to re-export); 1.2e: the logging functions (155-177: GetLoggingLevel, SetLoggingLevel, SetLoggingFunction, ResetToDefaultLoggingFunction, LogMessage) in logging.rs; 1.7c: GpuShaderCreator (3361-3573) and GpuShaderDesc (3725-3825) are GpuShaderDesc in gpu_shader_desc.rs, with TextureType, TextureDimensions, UniformData and the getter types in gpu_shader.rs"
 
 [[file]]
 path = "include/OpenColorIO/OpenColorTransforms.h"
@@ -265,14 +265,16 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/GpuShader.cpp"
 kind = "src"
-target = ["crates/ocio-gpu/src/gpu_shader.rs"]
-status = "todo"
+target = ["crates/ocio-gpu/src/gpu_shader.rs", "crates/ocio-gpu/src/gpu_shader_desc.rs"]
+status = "done"
+note = "1.7c: GpuShaderCreator, GpuShaderDesc and GenericGpuShaderDesc are one type, GpuShaderDesc (the owner's decision): names and code are bytes that end at a NUL, uniforms are live getters, textures take slices (a short one is an error, U-11; the float count wraps as upstream's, I-33). Checked against the wheel call by call (tests/gpu_shader_desc_oracle.rs, the oracle's gpu_shader_desc), the uniform buffer layouts and the dynamic property errors through gpu_shader, the debug log (tests/gpu_shader_desc_log_oracle.rs), and upstream's generic_shader test"
 
 [[file]]
 path = "src/OpenColorIO/GpuShader.h"
 kind = "src"
-target = ["crates/ocio-gpu/src/gpu_shader.rs"]
-status = "todo"
+target = ["crates/ocio-gpu/src/gpu_shader.rs", "crates/ocio-gpu/src/gpu_shader_desc.rs"]
+status = "done"
+note = "see GpuShader.cpp"
 
 [[file]]
 path = "src/OpenColorIO/GpuShaderClassWrapper.cpp"
@@ -292,7 +294,8 @@ note = "see GpuShaderClassWrapper.cpp"
 path = "src/OpenColorIO/GpuShaderDesc.cpp"
 kind = "src"
 target = ["crates/ocio-gpu/src/gpu_shader_desc.rs"]
-status = "todo"
+status = "done"
+note = "see GpuShader.cpp"
 
 [[file]]
 path = "src/OpenColorIO/GpuShaderUtils.cpp"
@@ -463,9 +466,9 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/ParseUtils.cpp"
 kind = "src"
-target = ["crates/ocio/src/parse_utils.rs", "crates/ocio-ops/src/open_color_types.rs"]
+target = ["crates/ocio/src/parse_utils.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-gpu/src/open_color_types.rs"]
 status = "partial"
-note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection; 1.1a: BitDepthToString, next to BitDepth; 1.2e: LoggingLevelToString and LoggingLevelFromString, next to LoggingLevel"
+note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection; 1.1a: BitDepthToString, next to BitDepth; 1.2e: LoggingLevelToString and LoggingLevelFromString, next to LoggingLevel; 1.7c: GpuLanguageToString, next to GpuLanguage"
 
 [[file]]
 path = "src/OpenColorIO/ParseUtils.h"
@@ -4146,7 +4149,8 @@ status = "done"
 path = "tests/cpu/GpuShader_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-gpu/src/gpu_shader_tests.rs"]
-status = "todo"
+status = "partial"
+note = "1.7c: generic_shader (its uniform too). The Metal and Vulkan tests extract processors' shaders, and come with the ops' GPU writers; gpu_shader_class_wrapper_tests.rs checks the class wrapper's part of the Metal ones"
 
 [[file]]
 path = "tests/cpu/Logging_tests.cpp"

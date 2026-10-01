@@ -305,6 +305,22 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **A fix:** put the `.` in the mantissa (`1.e+10`), or leave it out when there is an exponent.
 - **Status:** matched in `p1-gpu-infra` (1.7a).
 
+### I-33. A texture of 2^32 floats or more keeps a wrapped count
+
+- **Upstream:** a texture's float count, `w * h * d` times 1 or 3 channels, is taken in C
+  `unsigned` arithmetic, which wraps at 2^32, and that many floats are copied
+  (`CreateArray`, `GpuShader.cpp:24-37`). A 1D LUT's texture as wide as the width limit allows
+  (`setTextureMaxWidth` takes up to 2^32 - 1) and high enough keeps fewer values than it has
+  texels. Python's binding counts `width * height` in `unsigned` too, but times the channels in
+  64 bits (`PyGpuShaderDesc.cpp:116-160, 259-283`): `getValues` then reads past the values
+  kept, which is undefined. A 3D texture can't reach the count: the wheel refuses an edge of
+  130 texels or more before copying anything.
+- **Who notices:** textures of 2^32 floats (16 GiB) or more.
+- **A fix:** count in 64 bits, and refuse a texture that doesn't fit.
+- **Status:** matched in `p1-gpu-infra` (1.7c): the port copies the wrapped count. The oracle
+  refuses these textures (`gpu_shader_desc`, `_check_texture_size`); Phase 6 decides for
+  Python's `getValues`.
+
 ## Python module (`ocio-py`)
 
 ### I-12. A channel order passed without its keyword is misread
@@ -510,6 +526,20 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   terminating NUL, and a non-ASCII byte is neither white space nor a digit, as in both wheels
   (U-6). This settles the class wrapper's part of U-6.
 - **Status:** matched in `p1-gpu-infra` (1.7d).
+
+### U-11. Texture values shorter than the texture
+
+- **Upstream:** `addTexture` and `add3DTexture` take the values as a `const float *`, and copy
+  the texture's float count from it (`CreateArray`, `GpuShader.cpp:24-37`), so a shorter buffer
+  is read past its end. Python's binding checks the buffer's length first
+  (`PyGpuShaderDesc.cpp:116-202`).
+- **Who notices:** callers of the Rust API, which takes the values as a slice: a slice shorter
+  than the texture.
+- **Decided** (the owner, 2026-09-30: the general rule, with a clear message): after upstream's
+  own checks (the width limit, the names, a size of 0), the port returns the error "The texture
+  'NAME' needs N values, but only M were given.". A longer slice is read up to the count, as
+  upstream reads the buffer.
+- **Status:** matched in `p1-gpu-infra` (1.7c).
 
 ### U-15. A wrapped scanline reaches outside the image
 
