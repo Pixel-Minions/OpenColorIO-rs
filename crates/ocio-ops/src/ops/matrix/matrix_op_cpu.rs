@@ -246,11 +246,16 @@ impl CpuOp for MatrixRenderer {
 /// The renderer for `mat`, a forward matrix: "Op::finalize has to be called." for an inverse
 /// one.
 ///
+/// The renderers read the 16 values of a 4x4 matrix, so a 3x3 matrix that `validate` hasn't
+/// made 4x4 yet (from a CLF or CTF file) has them read past its 9 values upstream; the port
+/// returns an error instead (docs/improvements.md, U-16).
+///
 /// Port of `GetMatrixRenderer` (src/OpenColorIO/ops/matrix/MatrixOpCPU.cpp:400-428 @ v2.5.2).
 pub fn get_matrix_renderer(mat: &MatrixOpData) -> Result<Arc<dyn CpuOp>> {
     if mat.get_direction() == TransformDirection::Inverse {
         return Err(Exception::new("Op::finalize has to be called."));
     }
+    mat.require_4x4()?;
     Ok(if mat.is_diagonal() {
         if mat.has_offsets() {
             Arc::new(ScaleWithOffsetRenderer::new(mat))

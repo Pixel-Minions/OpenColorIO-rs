@@ -838,7 +838,7 @@ impl MatrixOpData {
 
     /// The error of a query that reads a 4x4 matrix's positions on a 3x3 one, which `validate`
     /// hasn't made 4x4 yet (docs/improvements.md, U-16).
-    fn require_4x4(&self) -> Result<()> {
+    pub(crate) fn require_4x4(&self) -> Result<()> {
         if self.array.get_length() != 4 {
             return Err(Exception::new(
                 "Matrix: a 3x3 matrix has to be validated before this query: upstream reads \
