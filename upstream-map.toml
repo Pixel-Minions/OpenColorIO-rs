@@ -1968,13 +1968,15 @@ status = "todo"
 path = "src/OpenColorIO/ops/range/RangeOpData.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/range/range_op_data.rs"]
-status = "todo"
+status = "partial"
+note = "1.3r1: everything but the constructor from a CTF IndexMapping (67-103), which comes with the CTF reader in ocio-formats; checked against the wheel through RangeTransform (tests/range_op_data_oracle.rs: validation messages, the scale, offset and inverse bit for bit through convertToMatrix, equality)"
 
 [[file]]
 path = "src/OpenColorIO/ops/range/RangeOpData.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/range/range_op_data.rs"]
-status = "todo"
+status = "partial"
+note = "see RangeOpData.cpp"
 
 [[file]]
 path = "src/OpenColorIO/ops/range/RangeOpGPU.cpp"
