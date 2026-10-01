@@ -20,6 +20,10 @@ use ocio_testkit::Oracle;
 use ocio_testkit::oracle::BatchCall;
 use serde_json::{Value, json};
 
+/// Held by each test: the debug-log test sets the process's logging level and function, and
+/// the other tests' processors would log into it.
+static LOGGING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// A matrix and its offsets.
 type Matrix = ([f64; 16], [f64; 4]);
 
@@ -99,6 +103,7 @@ fn pixel_bytes(bit_depth: BitDepth) -> Vec<u8> {
 
 #[test]
 fn the_cache_id_matches_the_wheel() {
+    let _logging = LOGGING.lock().unwrap_or_else(|e| e.into_inner());
     let chains = chains();
     let mut cases = Vec::new();
     for chain in &chains {
@@ -164,6 +169,98 @@ fn the_cache_id_matches_the_wheel() {
             ));
         }
     }
+    assert!(
+        failures.is_empty(),
+        "{} of {} cases differ:\n{}",
+        failures.len(),
+        cases.len(),
+        failures.join("\n")
+    );
+}
+
+/// The debug log of building the CPU processor, the optimizer's lists of ops before and after
+/// with its pass counts (`OpRcPtrVec::optimize`, src/OpenColorIO/OpOptimizers.cpp:611-756 @
+/// v2.5.2), against the wheel's, through the oracle's `processor_debug_log`, message for
+/// message, for every list and level and a few bit depths. The test changes the process's
+/// logging level and function, so it holds `LOGGING`, as the other tests do.
+#[test]
+fn the_debug_log_matches_the_wheel() {
+    let _logging = LOGGING.lock().unwrap_or_else(|e| e.into_inner());
+    use ocio_ops::logging::{
+        LoggingFunction, get_logging_level, reset_to_default_logging_function,
+        set_logging_function, set_logging_level,
+    };
+    use ocio_ops::open_color_types::LoggingLevel;
+    use std::sync::{Arc, Mutex};
+
+    let chains = chains();
+    let bit_depths = [&BIT_DEPTHS[0], &BIT_DEPTHS[4], &BIT_DEPTHS[5]];
+    let mut cases = Vec::new();
+    for chain in &chains {
+        for flags in &FLAGS {
+            for input in bit_depths {
+                cases.push((chain, flags, input));
+            }
+        }
+    }
+    let calls: Vec<BatchCall<'_>> = cases
+        .iter()
+        .map(|(chain, (flags, _), (in_name, _))| {
+            let children: Vec<Value> = chain.iter().map(|(m, dir)| transform(m, *dir)).collect();
+            BatchCall {
+                cmd: "processor_debug_log",
+                args: json!({
+                    "transform": {"class": "GroupTransform", "children": children},
+                    "optimization": flags,
+                    "in_bitdepth": in_name,
+                }),
+                blobs: vec![],
+            }
+        })
+        .collect();
+    let results = Oracle::get().batch(&calls, true);
+
+    let messages = Arc::new(Mutex::new(Vec::<String>::new()));
+    let sink = messages.clone();
+    let function: LoggingFunction = Arc::new(move |m: &[u8]| {
+        sink.lock()
+            .unwrap()
+            .push(String::from_utf8(m.to_vec()).unwrap());
+    });
+    let level = get_logging_level();
+    set_logging_function(Some(function)).unwrap();
+    set_logging_level(LoggingLevel::Debug);
+
+    let mut failures = Vec::new();
+    for ((chain, (name, flags), (_, input)), result) in cases.iter().zip(results) {
+        let result = result.unwrap_or_else(|e| panic!("{e}")).result;
+        let wheel: Vec<String> = result["cpu_processor"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m.as_str().unwrap().to_string())
+            .collect();
+        let mut raw = OpVec::new();
+        for ((m, o), dir) in chain.iter() {
+            let mut data = MatrixOpData::new();
+            data.set_rgba(m);
+            data.set_rgba_offsets(o);
+            data.set_direction(*dir);
+            create_matrix_op(&mut raw, data, TransformDirection::Forward);
+        }
+        raw.finalize().unwrap();
+        messages.lock().unwrap().clear();
+        CpuProcessor::new(&raw, *input, BitDepth::F32, *flags).unwrap();
+        let port = messages.lock().unwrap().clone();
+        if port != wheel {
+            failures.push(format!(
+                "{chain:?} {name} {input:?}\n  wheel {wheel:#?}\n  port  {port:#?}"
+            ));
+        }
+    }
+
+    set_logging_level(level);
+    reset_to_default_logging_function();
     assert!(
         failures.is_empty(),
         "{} of {} cases differ:\n{}",
