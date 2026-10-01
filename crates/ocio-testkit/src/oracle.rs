@@ -24,7 +24,12 @@
 //! results and output don't depend on the caller's environment.
 //!
 //! Under Intel SDE (`scripts/sde.sh`), the test process and the oracle it starts both see the
-//! emulated CPU, so the wheel and the port dispatch to the SIMD kernels of that CPU.
+//! emulated CPU, so the wheel and the port dispatch to the SIMD kernels of that CPU. On
+//! Windows, SDE now and then crashes the oracle (`0xC0000005`) while it starts, before it reads
+//! the request: importing `PyOpenColorIO` calls `platform.system()`, which under SDE falls back
+//! to starting `cmd /c ver`, and Pin's injection into that child crashes. Such a crash is
+//! started again, at most twice; it can't hide a bug of the wheel, since no command ran
+//! ([`crashed_unread`]).
 //!
 //! Starting the oracle costs about a third of a second; a small `cpu_apply` inside it, about
 //! a tenth of a millisecond. [`Oracle::batch`] runs many calls in one process (the `batch`
@@ -319,11 +324,89 @@ fn isolate_from(
 }
 
 /// Starts `command`, writes `request` to its stdin, and returns its stdout once it exits
+/// successfully, starting it again (at most [`SPAWN_RETRIES`] times) when it crashed as the
+/// oracle crashes under Intel SDE on Windows before it reads a request ([`crashed_unread`]).
+/// The final error says how many attempts were made, with each attempt's message and stderr.
+fn exchange(mut command: Command, request: &[u8]) -> Result<Vec<u8>, String> {
+    let mut failures = Vec::new();
+    loop {
+        match exchange_once(&mut command, request) {
+            Ok(stdout) => return Ok(stdout),
+            Err(failure) => {
+                let retry = failure.crashed_unread && failures.len() < SPAWN_RETRIES;
+                failures.push(failure.message);
+                if !retry {
+                    break;
+                }
+            }
+        }
+    }
+    if failures.len() == 1 {
+        return Err(failures.pop().unwrap_or_default());
+    }
+    let attempts: Vec<String> = failures
+        .iter()
+        .enumerate()
+        .map(|(i, message)| format!("attempt {}: {message}", i + 1))
+        .collect();
+    Err(format!(
+        "the oracle failed after {} attempts (it crashed before reading the request, and was \
+         started again):\n{}",
+        failures.len(),
+        attempts.join("\n")
+    ))
+}
+
+/// How many times [`exchange`] starts the oracle again after [`crashed_unread`].
+const SPAWN_RETRIES: usize = 2;
+
+/// Windows' `STATUS_ACCESS_VIOLATION` (0xC0000005), as [`std::process::ExitStatus::code`]
+/// gives it.
+const STATUS_ACCESS_VIOLATION: i32 = 0xC000_0005_u32 as i32;
+
+/// Whether an oracle process that failed crashed before it read its whole request, the way it
+/// does under Intel SDE on Windows: on Windows only, writing the request failed, the process
+/// exited with `STATUS_ACCESS_VIOLATION`, and it wrote nothing to stdout.
+///
+/// The cause (seen with `faulthandler`, 2026-10-01): `PyOpenColorIO/__init__.py:10` calls
+/// `platform.system()`. Natively, Python 3.13 asks WMI for the Windows version; under SDE the
+/// WMI query raises `OSError('not supported')`, so `platform._syscmd_ver` starts `cmd /c ver`,
+/// and Pin, injecting itself into that child of an instrumented process, now and then crashes
+/// the oracle. The crash comes before the wheel's native module is even loaded.
+///
+/// Starting the oracle again can't hide a bug of the wheel: the oracle reads the whole request
+/// before it runs any command (`serve_one`, `oracle/ocio_oracle/__main__.py`, which reads the
+/// header and every blob before it looks the command up), so a request it didn't take whole
+/// ran nothing. A crash after the request is read leaves the write complete, and is reported
+/// at once; a crash at every start, such as one in the wheel's import, is reported after the
+/// last attempt.
+fn crashed_unread(
+    write_failed: bool,
+    code: Option<i32>,
+    stdout_empty: bool,
+    windows: bool,
+) -> bool {
+    windows && write_failed && code == Some(STATUS_ACCESS_VIOLATION) && stdout_empty
+}
+
+/// One attempt of [`exchange`] that failed.
+struct Failure {
+    /// What went wrong, with the oracle's stderr.
+    message: String,
+    /// [`crashed_unread`] holds.
+    crashed_unread: bool,
+}
+
+/// Starts `command`, writes `request` to its stdin, and returns its stdout once it exits
 /// successfully. Each pipe has its own thread or loop, so the process never waits on a full
 /// pipe: the request is written on a thread (a large response can't deadlock a large
 /// request), stderr is read on another (a process that writes more than a pipe holds to
 /// stderr before it closes stdout can't hang), and stdout is read here.
-fn exchange(mut command: Command, request: &[u8]) -> Result<Vec<u8>, String> {
+fn exchange_once(command: &mut Command, request: &[u8]) -> Result<Vec<u8>, Failure> {
+    let fail = |message: String| Failure {
+        message,
+        crashed_unread: false,
+    };
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -331,7 +414,7 @@ fn exchange(mut command: Command, request: &[u8]) -> Result<Vec<u8>, String> {
     let program = command.get_program().to_string_lossy().into_owned();
     let mut child = command
         .spawn()
-        .map_err(|e| format!("could not start {program}: {e}"))?;
+        .map_err(|e| fail(format!("could not start {program}: {e}")))?;
 
     // Both directions move at most PIPE_PIECE bytes per call: on Windows, one pipe read or
     // write of several megabytes can fail when the system is short of kernel memory, and a
@@ -354,21 +437,25 @@ fn exchange(mut command: Command, request: &[u8]) -> Result<Vec<u8>, String> {
         .and_then(Result::ok)
         .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
         .unwrap_or_default();
-    let status = child.wait().map_err(|e| e.to_string())?;
-    let stdout = stdout.map_err(|e| format!("reading the oracle's response failed: {e}"))?;
+    let status = child.wait().map_err(|e| fail(e.to_string()))?;
+    let stdout = stdout.map_err(|e| fail(format!("reading the oracle's response failed: {e}")))?;
     let written = writer
         .join()
         .unwrap_or_else(|_| Err(std::io::Error::other("the writer thread panicked")));
     // The exit status says how the oracle died when it stopped reading early: under Intel
-    // SDE on Windows, it has exited mid-request without writing anything to stderr.
+    // SDE on Windows, it has exited mid-request without writing anything to stderr
+    // (crashed_unread).
     if let Err(e) = written {
-        return Err(format!(
-            "writing the {request_len}-byte request to the oracle failed: {e}; the oracle \
-             exited with {status}\n{stderr}"
-        ));
+        return Err(Failure {
+            message: format!(
+                "writing the {request_len}-byte request to the oracle failed: {e}; the oracle \
+                 exited with {status}\n{stderr}"
+            ),
+            crashed_unread: crashed_unread(true, status.code(), stdout.is_empty(), cfg!(windows)),
+        });
     }
     if !status.success() {
-        return Err(format!("oracle exited with {status}\n{stderr}"));
+        return Err(fail(format!("oracle exited with {status}\n{stderr}")));
     }
     Ok(stdout)
 }
@@ -739,6 +826,115 @@ mod tests {
                 panic!("the exchange failed (its panic is printed above)")
             }
         }
+    }
+
+    /// The oracle is started again only after a crash before it read its request, and only on
+    /// Windows: writing failed, the exit code is `STATUS_ACCESS_VIOLATION`, stdout is empty.
+    #[test]
+    fn only_a_crash_before_the_request_is_read_is_retried() {
+        let av = Some(super::STATUS_ACCESS_VIOLATION);
+        assert!(super::crashed_unread(true, av, true, true));
+        // Never off Windows.
+        assert!(!super::crashed_unread(true, av, true, false));
+        // The request was taken whole: a command may have run.
+        assert!(!super::crashed_unread(false, av, true, true));
+        // Another exit code, or a response begun.
+        assert!(!super::crashed_unread(true, Some(1), true, true));
+        assert!(!super::crashed_unread(true, None, true, true));
+        assert!(!super::crashed_unread(true, av, false, true));
+    }
+
+    /// A fake oracle for the retry tests: it counts its starts in `counter`, and for the first
+    /// `crashes` starts exits with `STATUS_ACCESS_VIOLATION`, without reading stdin (`unread`)
+    /// or after reading all of it (`read`); later starts echo the request reversed.
+    #[cfg(windows)]
+    fn fake_oracle(counter: &Path, crashes: u32, mode: &str) -> Command {
+        let mut command = super::Oracle::get().command();
+        command.args([
+            "-c",
+            "import os, sys\n\
+             path, crashes, mode = sys.argv[1], int(sys.argv[2]), sys.argv[3]\n\
+             n = (int(open(path).read()) if os.path.exists(path) else 0) + 1\n\
+             open(path, 'w').write(str(n))\n\
+             data = sys.stdin.buffer.read() if mode == 'read' else None\n\
+             if n <= crashes:\n\
+             \x20   sys.stderr.write(f'crash at start {n}\\n')\n\
+             \x20   sys.stderr.flush()\n\
+             \x20   os._exit(0xC0000005 - 2**32)\n\
+             data = data if data is not None else sys.stdin.buffer.read()\n\
+             sys.stdout.buffer.write(data[::-1])\n",
+        ]);
+        command.arg(counter).arg(crashes.to_string()).arg(mode);
+        command
+    }
+
+    /// A request larger than any pipe holds, so a process that exits without reading it makes
+    /// the write fail.
+    #[cfg(windows)]
+    fn large_request() -> Vec<u8> {
+        (0..=255u8).cycle().take(4 << 20).collect()
+    }
+
+    /// A counter file of its own for each test, absent.
+    #[cfg(windows)]
+    fn counter(name: &str) -> PathBuf {
+        let path = paths::target_dir().join(format!("oracle-retry-{name}.txt"));
+        let _ = std::fs::remove_file(&path);
+        path
+    }
+
+    #[cfg(windows)]
+    fn starts(counter: &Path) -> String {
+        std::fs::read_to_string(counter).expect("the counter")
+    }
+
+    /// The process exits with `STATUS_ACCESS_VIOLATION` (as Windows reports it) before it
+    /// reads the request, once: it is started again, and the second start answers.
+    #[cfg(windows)]
+    #[test]
+    fn a_crash_before_the_request_is_read_is_retried() {
+        let counter = counter("once");
+        let request = large_request();
+        let stdout = super::exchange(fake_oracle(&counter, 1, "unread"), &request)
+            .expect("the second start answers");
+        assert_eq!(stdout, request.iter().rev().copied().collect::<Vec<u8>>());
+        assert_eq!(starts(&counter), "2");
+    }
+
+    /// A process that crashes at every start is started 3 times (2 retries), and the error says
+    /// so, with every attempt's stderr.
+    #[cfg(windows)]
+    #[test]
+    fn a_crash_at_every_start_gives_the_attempt_count() {
+        let counter = counter("always");
+        let error = super::exchange(fake_oracle(&counter, 99, "unread"), &large_request())
+            .expect_err("every start crashes");
+        assert_eq!(starts(&counter), "3");
+        assert!(
+            error.starts_with("the oracle failed after 3 attempts"),
+            "{error}"
+        );
+        for n in 1..=3 {
+            assert!(
+                error.contains(&format!("attempt {n}: writing the")),
+                "{error}"
+            );
+            assert!(error.contains(&format!("crash at start {n}")), "{error}");
+        }
+        assert!(error.contains("0xc0000005"), "{error}");
+    }
+
+    /// A process that reads the whole request and then crashes may have run a command: it is
+    /// not started again.
+    #[cfg(windows)]
+    #[test]
+    fn a_crash_after_the_request_is_read_is_not_retried() {
+        let counter = counter("read");
+        let error = super::exchange(fake_oracle(&counter, 99, "read"), &large_request())
+            .expect_err("the start crashes");
+        assert_eq!(starts(&counter), "1");
+        assert!(error.starts_with("oracle exited with"), "{error}");
+        assert!(!error.contains("attempts"), "{error}");
     }
 
     fn large_stderr_exchange() {
