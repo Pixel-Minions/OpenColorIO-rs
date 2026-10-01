@@ -3,4 +3,5 @@
 
 //! The ops' GPU writers, by family: a port of `src/OpenColorIO/ops/*/*OpGPU.*` @ v2.5.2.
 
+pub mod exponent;
 pub mod matrix;
