@@ -728,8 +728,14 @@ impl GpuShaderText {
         }
     }
 
-    /// A constant array of floats, on one line. The size is the slice's length (upstream's
-    /// callers pass their vector's size as `int`).
+    /// A constant array of floats, on one line. The size is the slice's length.
+    ///
+    /// Upstream takes a count and a pointer (`int size, const float * v`) and reads `size`
+    /// values; here the caller passes exactly those values, `&values[..count]`. A caller that
+    /// holds its count apart from its values (as upstream's grading curves do: `getNumKnots()`
+    /// with `getKnotsArray()`) must check that the count fits before slicing, and return an
+    /// error where upstream would read past the values' end: slicing past it panics (U-12,
+    /// docs/improvements.md).
     ///
     /// Port of `GpuShaderText::declareFloatArrayConst` (GpuShaderUtils.cpp:520-581 @ v2.5.2).
     pub fn declare_float_array_const(&self, name: impl AsRef<[u8]>, v: &[f32]) -> Result<()> {
@@ -784,7 +790,9 @@ impl GpuShaderText {
         Ok(())
     }
 
-    /// A constant array of ints, on one line. The size is the slice's length.
+    /// A constant array of ints, on one line. The size is the slice's length. As for
+    /// [`GpuShaderText::declare_float_array_const`], a caller that holds its count apart from
+    /// its values must check that the count fits before slicing them (U-12).
     ///
     /// Port of `GpuShaderText::declareIntArrayConst` (GpuShaderUtils.cpp:583-648 @ v2.5.2).
     pub fn declare_int_array_const(&self, name: impl AsRef<[u8]>, v: &[i32]) -> Result<()> {
