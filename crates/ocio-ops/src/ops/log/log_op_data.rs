@@ -69,7 +69,7 @@ mod default_values {
 /// The error where upstream reads or writes past a channel's parameters (U-20): only a log
 /// whose channels have fewer than 4 parameters, or different numbers of them, gets there;
 /// validation refuses both.
-const SHORT_PARAMS: &str =
+pub(super) const SHORT_PARAMS: &str =
     "Log: the channels have fewer parameters than this needs: upstream accesses past them.";
 
 /// Checks one channel's parameters: 4 to 6 of them, and slopes that aren't 0.
@@ -111,8 +111,9 @@ fn validate_params(params: &Params, _direction: TransformDirection) -> Result<()
 
 /// The Log op's data.
 ///
-/// Port of `LogOpData` (src/OpenColorIO/ops/log/LogOpData.h:30-155 @ v2.5.2). `Clone` is
-/// upstream's `clone()`: the parameters, the direction and the metadata.
+/// Port of `LogOpData` (src/OpenColorIO/ops/log/LogOpData.h:30-155 @ v2.5.2). `Clone` copies
+/// every field, as upstream's implicit copy constructor and assignment do; upstream's `clone()` is
+/// [`LogOpData::try_clone`], which refuses channels of mixed styles.
 #[derive(Debug, Clone)]
 pub struct LogOpData {
     /// The `OpData` base's `m_metadata`.
@@ -292,19 +293,25 @@ impl LogOpData {
         }
     }
 
-    /// One parameter of the three channels, or `None` if it is not defined.
+    /// One parameter of the three channels, or `None` if the red channel doesn't have it.
+    ///
+    /// A green or blue channel without it, where the red one has it, is an error (U-20):
+    /// upstream reads past that channel's parameters.
     ///
     /// Port of `LogOpData::getValue` (src/OpenColorIO/ops/log/LogOpData.cpp:160-170 @ v2.5.2).
-    pub fn value(&self, val: LogAffineParameter) -> Option<[f64; 3]> {
+    pub fn value(&self, val: LogAffineParameter) -> Result<Option<[f64; 3]>> {
         let i = val as usize;
         if i >= self.red_params.len() {
-            return None;
+            return Ok(None);
         }
-        Some([
+        if i >= self.green_params.len() || i >= self.blue_params.len() {
+            return Err(Exception::new(SHORT_PARAMS));
+        }
+        Ok(Some([
             self.red_params[i],
             self.green_params[i],
             self.blue_params[i],
-        ])
+        ]))
     }
 
     /// Resets every channel to the four affine parameters.
@@ -395,8 +402,9 @@ impl LogOpData {
         self.is_log_base(10.0)
     }
 
-    /// The four affine parameters, one value per channel. A parameter the channels don't have
-    /// leaves its array as it is.
+    /// The four affine parameters, one value per channel. A parameter the red channel doesn't
+    /// have leaves its array as it is. One the red channel has and the green or blue one
+    /// doesn't is [`LogOpData::value`]'s error (U-20), once the arrays before it are set.
     ///
     /// Port of `LogOpData::getParameters` (src/OpenColorIO/ops/log/LogOpData.cpp:187-196 @
     /// v2.5.2).
@@ -406,17 +414,18 @@ impl LogOpData {
         log_offset: &mut [f64; 3],
         lin_slope: &mut [f64; 3],
         lin_offset: &mut [f64; 3],
-    ) {
+    ) -> Result<()> {
         for (param, values) in [
             (LogAffineParameter::LogSideSlope, log_slope),
             (LogAffineParameter::LogSideOffset, log_offset),
             (LogAffineParameter::LinSideSlope, lin_slope),
             (LogAffineParameter::LinSideOffset, lin_offset),
         ] {
-            if let Some(v) = self.value(param) {
+            if let Some(v) = self.value(param)? {
                 *values = v;
             }
         }
+        Ok(())
     }
 
     /// Checks the parameters of each channel, their sizes, and the base: "Log: Invalid base
@@ -588,11 +597,29 @@ impl LogOpData {
             && self.blue_params == log.blue_params
     }
 
-    /// The same log in the other direction, validated.
+    /// A copy of the data, built with the constructor from the three channels' parameters
+    /// ([`LogOpData::from_channel_params`]), which refuses channels of mixed styles ("Cannot
+    /// create Log op, all channels need to have the same style."); then the metadata is copied.
+    ///
+    /// Port of `LogOpData::clone` (src/OpenColorIO/ops/log/LogOpData.cpp:340-349 @ v2.5.2).
+    pub fn try_clone(&self) -> Result<LogOpData> {
+        let mut clone = LogOpData::from_channel_params(
+            self.base(),
+            self.red_params().clone(),
+            self.green_params().clone(),
+            self.blue_params().clone(),
+            self.direction,
+        )?;
+        *clone.get_format_metadata_mut() = self.get_format_metadata().clone();
+        Ok(clone)
+    }
+
+    /// The same log in the other direction, validated. The copy is [`LogOpData::try_clone`]'s,
+    /// so channels of mixed styles are its error, which comes before validation's.
     ///
     /// Port of `LogOpData::inverse` (src/OpenColorIO/ops/log/LogOpData.cpp:351-362 @ v2.5.2).
     pub fn inverse(&self) -> Result<LogOpData> {
-        let mut inv_op = self.clone();
+        let mut inv_op = self.try_clone()?;
 
         inv_op.set_direction(get_inverse_transform_direction(self.direction));
         inv_op.validate()?;

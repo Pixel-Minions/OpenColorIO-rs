@@ -198,18 +198,18 @@ impl Op {
         &self.data
     }
 
-    /// A copy of the op that shares nothing it could change.
+    /// A copy of the op that shares nothing it could change. Some overrides raise: a Log op's
+    /// copy refuses channels of mixed styles, and a Range op's copy is validated.
     ///
     /// Port of `Op::clone`, pure virtual (src/OpenColorIO/Op.h:186 @ v2.5.2), and its
     /// overrides.
-    pub fn clone_op(&self) -> Op {
+    pub fn clone_op(&self) -> Result<Op> {
         match &*self.data {
             OpData::Log(data) => data.clone_op(),
-            OpData::Matrix(data) => data.clone_op(),
-            // The op's data was validated when the op was made, so the copy is valid too.
-            OpData::Range(data) => data.clone_op().expect("an op's range is valid"),
+            OpData::Matrix(data) => Ok(data.clone_op()),
+            OpData::Range(data) => data.clone_op(),
             OpData::Reference(_) => no_reference_op(),
-            OpData::NoOp(data) => data.clone_op(),
+            OpData::NoOp(data) => Ok(data.clone_op()),
         }
     }
 
@@ -457,7 +457,7 @@ impl Op {
         match &*self.data {
             // The Op default: `getCPUOp(false)->apply(img, img, numPixels)`.
             OpData::Log(data) => {
-                data.get_cpu_op(false).apply(rgba);
+                data.get_cpu_op(false)?.apply(rgba);
                 Ok(())
             }
             OpData::Matrix(data) => {
@@ -486,7 +486,7 @@ impl Op {
             // The Op default: `getCPUOp(false)->apply(inImg, outImg, numPixels)`. The matrix
             // renderers read a pixel before writing it, so they render a copy in place.
             OpData::Log(data) => {
-                let renderer = data.get_cpu_op(false);
+                let renderer = data.get_cpu_op(false)?;
                 output.copy_from_slice(input);
                 renderer.apply(output);
                 Ok(())
@@ -602,7 +602,7 @@ impl Op {
     /// overrides.
     pub fn get_cpu_op(&self, fast_log_exp_pow: bool) -> Result<Option<Arc<dyn CpuOp>>> {
         match &*self.data {
-            OpData::Log(data) => Ok(Some(data.get_cpu_op(fast_log_exp_pow))),
+            OpData::Log(data) => Ok(Some(data.get_cpu_op(fast_log_exp_pow)?)),
             OpData::Matrix(data) => Ok(Some(data.get_cpu_op()?)),
             OpData::Range(data) => Ok(Some(data.get_cpu_op()?)),
             OpData::Reference(_) => no_reference_op(),
@@ -808,16 +808,16 @@ impl OpVec {
         Ok(())
     }
 
-    /// A list of copies of the ops ([`Op::clone_op`]), with empty metadata: upstream doesn't
-    /// copy it.
+    /// A list of copies of the ops ([`Op::clone_op`], whose errors it raises), with empty
+    /// metadata: upstream doesn't copy it.
     ///
     /// Port of `OpRcPtrVec::clone` (src/OpenColorIO/Op.cpp:328-338 @ v2.5.2).
-    pub fn clone_ops(&self) -> OpVec {
+    pub fn clone_ops(&self) -> Result<OpVec> {
         let mut cloned = OpVec::new();
         for op in &self.ops {
-            cloned.push_back(op.clone_op());
+            cloned.push_back(op.clone_op()?);
         }
-        cloned
+        Ok(cloned)
     }
 
     /// The ops that undo these, in reverse order, with empty metadata. A no-op type is kept, as
@@ -830,7 +830,7 @@ impl OpVec {
         for op in self.ops.iter().rev() {
             if op.is_no_op_type() {
                 // Keep track of the information.
-                inverted.push_back(op.clone_op());
+                inverted.push_back(op.clone_op()?);
             } else {
                 create_op_vec_from_op_data(&mut inverted, op.data(), TransformDirection::Inverse)?;
             }

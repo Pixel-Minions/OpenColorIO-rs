@@ -317,7 +317,7 @@ pub(crate) type Engine = (Arc<dyn CpuOp>, Vec<Arc<dyn CpuOp>>, Arc<dyn CpuOp>);
 /// `BuildLogOp` clones it, src/OpenColorIO/ops/log/LogOp.cpp:212-221 @ v2.5.2).
 pub(crate) fn log_engine(input: BitDepth, output: BitDepth) -> Engine {
     let data = LogOpData::new(2.0, TransformDirection::Forward);
-    let log = get_log_renderer(&black_box(data), true);
+    let log = get_log_renderer(&black_box(data), true).expect("a plain log renders");
     let (first, ops) = if input == BitDepth::F32 {
         (log, Vec::new())
     } else {
@@ -356,7 +356,7 @@ pub(crate) fn two_log_processor(input: BitDepth, output: BitDepth) -> Value {
 pub(crate) fn two_log_engine(input: BitDepth, output: BitDepth) -> Engine {
     let renderer = |base| {
         let data = LogOpData::new(base, TransformDirection::Forward);
-        get_log_renderer(&black_box(data), true)
+        get_log_renderer(&black_box(data), true).expect("a plain log renders")
     };
     let (log2, log10) = (renderer(2.0), renderer(10.0));
     let cast = |from, to| create_generic_bit_depth_helper(from, to).expect("a supported depth");

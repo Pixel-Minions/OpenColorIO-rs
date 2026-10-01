@@ -80,7 +80,7 @@ fn an_empty_list() {
     assert!(ops.get_cache_id().unwrap().is_empty());
     assert!(ops.validate().is_ok());
     assert!(serialize_op_vec(&ops, 4).unwrap().is_empty());
-    assert!(ops.clone_ops().is_empty());
+    assert!(ops.clone_ops().unwrap().is_empty());
     assert!(ops.invert().unwrap().is_empty());
     let mut finalized = ops.clone();
     finalized.finalize().unwrap();
@@ -221,7 +221,7 @@ fn no_dynamic_property_in_a_list_of_no_ops() {
 fn clone_ops_copies_the_ops_but_not_the_metadata() {
     let mut ops = looks(3);
     ops.get_format_metadata_mut().set_name(Some(b"list"));
-    let cloned = ops.clone_ops();
+    let cloned = ops.clone_ops().unwrap();
     assert_eq!(cloned.len(), 3);
     for (op, copy) in ops.iter().zip(cloned.iter()) {
         assert!(!Arc::ptr_eq(op.data(), copy.data()));

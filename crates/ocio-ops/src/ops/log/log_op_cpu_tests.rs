@@ -66,7 +66,7 @@ fn apply(renderer: &dyn CpuOp, image: &[f32]) -> Vec<f32> {
 fn test_log(log_base: f32) {
     let log_op = LogOpData::new(f64::from(log_base), TransformDirection::Forward);
 
-    let renderer = get_log_renderer(&log_op, true);
+    let renderer = get_log_renderer(&log_op, true).unwrap();
     let rgba = apply(renderer.as_ref(), &RGBA_IMAGE);
 
     let min_value = f32::MIN_POSITIVE;
@@ -133,7 +133,7 @@ fn log_test() {
 fn test_anti_log(log_base: f32) {
     let log_op = LogOpData::new(f64::from(log_base), TransformDirection::Inverse);
 
-    let renderer = get_log_renderer(&log_op, true);
+    let renderer = get_log_renderer(&log_op, true).unwrap();
     let rgba = apply(renderer.as_ref(), &RGBA_IMAGE);
 
     // Relative error tolerance for the log2 approximation.
@@ -266,7 +266,7 @@ fn log2lin_test() {
     let params = legacy_params(LogStyle::LogToLin);
     let log_op = legacy_log_op(&params);
 
-    let renderer = get_log_renderer(&log_op, true);
+    let renderer = get_log_renderer(&log_op, true).unwrap();
     let rgba = apply(renderer.as_ref(), &RGBA_IMAGE);
 
     // Relative error tolerance for the log2 approximation.
@@ -347,7 +347,7 @@ fn lin2log_test() {
     let params = legacy_params(LogStyle::LinToLog);
     let log_op = legacy_log_op(&params);
 
-    let renderer = get_log_renderer(&log_op, true);
+    let renderer = get_log_renderer(&log_op, true).unwrap();
     let rgba = apply(renderer.as_ref(), &RGBA_IMAGE);
 
     let error = 1e-4f32;
@@ -419,7 +419,7 @@ fn cameralin2log_test() {
         LogOpData::from_channel_params(base, params.clone(), params.clone(), params.clone(), dir)
             .unwrap();
 
-    let renderer = get_log_renderer(&log_op, true);
+    let renderer = get_log_renderer(&log_op, true).unwrap();
     let rgba = apply(renderer.as_ref(), &rgba_image);
 
     let error = 1e-6f32;
@@ -445,7 +445,7 @@ fn cameralin2log_test() {
         LogOpData::from_channel_params(base, params.clone(), params.clone(), params.clone(), dir)
             .unwrap();
 
-    let renderer_no_ls = get_log_renderer(&lognols, true);
+    let renderer_no_ls = get_log_renderer(&lognols, true).unwrap();
     let rgba_nols = apply(renderer_no_ls.as_ref(), &rgba_image);
 
     // Evaluating output for input rgbaImage[0-2] = { -0.1f, 0.f, 0.01f, ... }.
@@ -468,7 +468,7 @@ fn cameralin2log_test() {
     let lognobreak =
         LogOpData::from_channel_params(base, params.clone(), params.clone(), params, dir).unwrap();
 
-    let renderer_no_break = get_log_renderer(&lognobreak, true);
+    let renderer_no_break = get_log_renderer(&lognobreak, true).unwrap();
     let rgba_nobreak = apply(renderer_no_break.as_ref(), &rgba_image);
 
     let error2 = 1e-5f32;
@@ -519,7 +519,7 @@ fn cameralog2lin_test() {
     let log_op =
         LogOpData::from_channel_params(base, params.clone(), params.clone(), params, dir).unwrap();
 
-    let renderer = get_log_renderer(&log_op, true);
+    let renderer = get_log_renderer(&log_op, true).unwrap();
     let rgba = apply(renderer.as_ref(), &rgba_image);
 
     let error = 1e-6f32;

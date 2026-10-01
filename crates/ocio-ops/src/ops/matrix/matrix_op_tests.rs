@@ -149,7 +149,7 @@ fn clone_op_copies_the_data_and_metadata() {
     data.set_name(b"mat1");
     let mut ops = OpVec::new();
     create_matrix_op(&mut ops, data, TransformDirection::Forward);
-    let cloned = ops[0].clone_op();
+    let cloned = ops[0].clone_op().unwrap();
     assert!(!Arc::ptr_eq(cloned.data(), ops[0].data()));
     assert!(*matrix(&cloned) == *matrix(&ops[0]));
     assert_eq!(cloned.data().get_name(), b"mat1");
@@ -453,7 +453,7 @@ fn arbitrary() {
     let op_info1 = ops[1].get_info();
     assert_eq!(op_info0, op_info1);
 
-    let cloned_op = ops[1].clone_op();
+    let cloned_op = ops[1].clone_op().unwrap();
     let cache_id = ops[1].get_cache_id().unwrap();
     let cache_id_cloned = cloned_op.get_cache_id().unwrap();
 
