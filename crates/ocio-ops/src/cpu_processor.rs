@@ -6,8 +6,8 @@
 //! - the generic bit-depth conversions, `BitDepthCast` and `CreateGenericBitDepthHelper`,
 //!   which image packing and the scanline helper call (chunks 1.1d, 1.1e);
 //! - [`CpuProcessor`]: the processor's ops and their renderers (`FinalizeOpsForCPU`,
-//!   `CreateCPUEngine`), its cache ID and its queries, and its image `apply` methods with
-//!   `CreateScanlineHelper` (chunk 1.2d).
+//!   `CreateCPUEngine`), its cache ID and its queries, its image `apply` methods with
+//!   `CreateScanlineHelper`, and `applyRGB` and `applyRGBA` (chunk 1.2d).
 
 use std::fmt;
 use std::hint::black_box;
@@ -34,7 +34,8 @@ use crate::scanline_helper::{GenericScanlineHelper, ScanlineHelper};
 ///
 /// Port of `BitDepthCast<inBD, outBD>` and `BitDepthCast<BIT_DEPTH_F32, BIT_DEPTH_F32>`
 /// (src/OpenColorIO/CPUProcessor.cpp:20-66 @ v2.5.2). Internal to the CPU engine: its in-place
-/// `apply` serves F32 to F32 only.
+/// `apply` serves F32 to F32 only, and `apply_pixel_in_place` the one pixel of `applyRGB` and
+/// `applyRGBA`.
 pub(crate) struct BitDepthCast<I, O> {
     /// `m_scale = float(BitDepthInfo<outBD>::maxValue) / float(BitDepthInfo<inBD>::maxValue)`.
     scale: f32,
@@ -80,6 +81,77 @@ impl<I: BitDepthInfo + 'static, O: Converter + 'static> CpuOp for BitDepthCast<I
             Self::copies(),
             "{self:?} converts between channel types; it can't work in place"
         );
+    }
+
+    /// `apply(pixel, pixel, 1)` with `inImg == outImg`, as `applyRGB` and `applyRGBA` call it
+    /// (src/OpenColorIO/CPUProcessor.cpp:28-43, 433-465 @ v2.5.2; docs/improvements.md, I-41).
+    /// The CPU engine converts from F32 or to F32 only:
+    /// - F32 to F32 copies nothing, as `inImg == outImg` skips the `memcpy`;
+    /// - from F32, each wheel reads every float before it stores a value over its bytes, so the
+    ///   conversion gives what it gives between separate buffers. Windows (MSVC) stores each
+    ///   value after reading its float (0x18008c710 UINT8, 0x18008ca60 UINT10, 0x18008cdc0
+    ///   UINT12, 0x18008d120 UINT16, 0x18008d480 F16); Linux (GCC) reads the four floats before
+    ///   one store for the integers (0x1d6250 UINT8, 0x1d6020 UINT10, 0x1d5df0 UINT12, 0x1d5be0
+    ///   UINT16) and each float before the store of the value before it for F16 (0x1e45e0);
+    /// - to F32, the floats it stores overwrite input values it hasn't read yet, in the order
+    ///   each wheel compiled. Windows reads each value after storing the float before it
+    ///   (0x180089c30 UINT8; 0x18008b220 UINT10, UINT12 and UINT16; 0x18008c4c0 F16). Linux does
+    ///   so for UINT8 (0x1df730), but for UINT10, UINT12, UINT16 (0x1dcad8, 0x1d9dc0, 0x1d7650)
+    ///   and F16 (0x1e2ed0) GCC reads each value one step ahead, before the store of the float
+    ///   two values back: red and green, store red, blue, store green, alpha, store blue and
+    ///   alpha. Its loads of 16-bit values may move past stores of `float`, which can't alias
+    ///   them (the strict aliasing rule); its loads of `uint8_t` can't.
+    fn apply_pixel_in_place(&self, pixel: &mut [f32; 4]) {
+        if Self::copies() {
+            return;
+        }
+
+        let mut bytes = [0u8; 16];
+        for (k, value) in pixel.iter().enumerate() {
+            bytes[4 * k..4 * k + 4].copy_from_slice(&value.to_ne_bytes());
+        }
+
+        let in_size = size_of::<I::Type>();
+        let out_size = size_of::<O::Type>();
+        // See `apply_bit_depth` for `black_box`.
+        let scale = black_box(self.scale);
+        let read = |bytes: &[u8; 16], k: usize| {
+            O::cast_value(I::Type::read_ne(&bytes[k * in_size..]).to_float() * scale)
+        };
+        let write = |bytes: &mut [u8; 16], k: usize, value: O::Type| {
+            value.write_ne(&mut bytes[k * out_size..]);
+        };
+
+        if I::BIT_DEPTH == BitDepth::F32 {
+            let values = [0, 1, 2, 3].map(|k| read(&bytes, k));
+            for (k, value) in values.into_iter().enumerate() {
+                write(&mut bytes, k, value);
+            }
+        } else if O::BIT_DEPTH == BitDepth::F32 {
+            if cfg!(target_os = "windows") || in_size == 1 {
+                for k in 0..4 {
+                    let value = read(&bytes, k);
+                    write(&mut bytes, k, value);
+                }
+            } else {
+                let r = read(&bytes, 0);
+                let g = read(&bytes, 1);
+                write(&mut bytes, 0, r);
+                let b = read(&bytes, 2);
+                write(&mut bytes, 1, g);
+                let a = read(&bytes, 3);
+                write(&mut bytes, 2, b);
+                write(&mut bytes, 3, a);
+            }
+        } else {
+            panic!(
+                "{self:?} converts between two channel types other than float; the CPU engine never runs it in place"
+            );
+        }
+
+        for (k, value) in pixel.iter_mut().enumerate() {
+            *value = f32::from_ne_bytes(bytes[4 * k..4 * k + 4].try_into().expect("4 bytes"));
+        }
     }
 
     fn apply_bit_depth(&self, input: Pixels<'_>, output: PixelsMut<'_>) {
@@ -529,6 +601,42 @@ impl CpuProcessor {
         scanline_builder.init_same(img)?;
 
         self.process(&mut *scanline_builder)
+    }
+
+    /// Applies the processor to one RGB pixel: `pixel` and an alpha of 0, as an RGBA pixel
+    /// ([`CpuProcessor::apply_rgba`]), of which the RGB values are kept.
+    ///
+    /// Port of `CPUProcessor::applyRGB` (src/OpenColorIO/CPUProcessor.cpp:433-449, 551-554 @
+    /// v2.5.2).
+    pub fn apply_rgb(&self, pixel: &mut [f32; 3]) {
+        let mut v = [pixel[0], pixel[1], pixel[2], 0.0];
+
+        self.engine.in_bit_depth_op.apply_pixel_in_place(&mut v);
+
+        for op in &self.engine.cpu_ops {
+            op.apply(&mut v);
+        }
+
+        self.engine.out_bit_depth_op.apply_pixel_in_place(&mut v);
+
+        pixel.copy_from_slice(&v[..3]);
+    }
+
+    /// Applies the processor to one RGBA pixel, in place. Upstream applies the conversions to
+    /// the processor's bit depths to the pixel's own bytes: with an input bit depth other than
+    /// F32, its first bytes are read as that channel type, and with an output bit depth other
+    /// than F32, the result is in its first bytes as that type (docs/improvements.md, I-41).
+    ///
+    /// Port of `CPUProcessor::applyRGBA` (src/OpenColorIO/CPUProcessor.cpp:451-465, 556-559 @
+    /// v2.5.2).
+    pub fn apply_rgba(&self, pixel: &mut [f32; 4]) {
+        self.engine.in_bit_depth_op.apply_pixel_in_place(pixel);
+
+        for op in &self.engine.cpu_ops {
+            op.apply(pixel);
+        }
+
+        self.engine.out_bit_depth_op.apply_pixel_in_place(pixel);
     }
 
     /// Whether a renderer has a dynamic property that is dynamic.
