@@ -163,3 +163,67 @@ fn combined_flags_have_the_wheels_value() {
         }
     }
 }
+
+/// Flags above bit 31 (docs/improvements.md, I-45): on Linux, where the flags are a 64-bit
+/// `unsigned long`, the wheel takes `2**32 + 1`, and the CPU processor's cache ID is the port's,
+/// which prints the same number.
+#[cfg(target_os = "linux")]
+#[test]
+fn flags_above_32_bits_are_kept_on_linux() {
+    use ocio_ops::cpu_processor::CpuProcessor;
+    use ocio_ops::op::OpVec;
+    use ocio_ops::open_color_types::{BitDepth, TransformDirection};
+    use ocio_ops::ops::matrix::MatrixOpData;
+    use ocio_ops::ops::matrix::matrix_op::create_matrix_op;
+
+    let value: u64 = (1 << 32) + 1;
+    let wheel = wheel_cache_id(json!(value)).expect("the wheel takes it");
+
+    let mut raw = OpVec::new();
+    let mut data = MatrixOpData::new();
+    data.set_rgba_offsets(&[0.1, 0.2, 0.3, 0.0]);
+    create_matrix_op(&mut raw, data, TransformDirection::Forward);
+    raw.finalize().unwrap();
+    // `c_ulong` is `u64` on Linux.
+    let flags = OptimizationFlags(value);
+    let cpu = CpuProcessor::new(&raw, BitDepth::F32, BitDepth::F32, flags).unwrap();
+    assert_eq!(
+        String::from_utf8(cpu.get_cache_id().to_vec()).unwrap(),
+        wheel
+    );
+}
+
+/// Flags above bit 31 on Windows (docs/improvements.md, I-45): the flags are a 32-bit
+/// `unsigned long`, which the binding can't make from `2**32 + 1`, and the port's `c_ulong`
+/// can't hold it either.
+#[cfg(target_os = "windows")]
+#[test]
+fn flags_above_32_bits_are_refused_on_windows() {
+    let value: u64 = (1 << 32) + 1;
+    assert!(c_ulong::try_from(value).is_err());
+    let error = wheel_cache_id(json!(value)).expect_err("the wheel refuses it");
+    assert!(error.contains("TypeError"), "{error}");
+}
+
+/// The wheel's CPU processor cache ID for the `optimization` argument, or the oracle's error.
+fn wheel_cache_id(optimization: Value) -> Result<String, String> {
+    let pixel: Vec<u8> = [0.5f32, 0.25, 0.125, 1.0]
+        .iter()
+        .flat_map(|v| v.to_ne_bytes())
+        .collect();
+    let calls = [BatchCall {
+        cmd: "cpu_apply",
+        args: json!({
+            "transform": {
+                "class": "MatrixTransform",
+                "args": {"offset": [0.1, 0.2, 0.3, 0.0]},
+            },
+            "optimization": optimization,
+        }),
+        blobs: vec![&pixel],
+    }];
+    let response = Oracle::get().batch(&calls, false).remove(0);
+    response
+        .map(|r| r.result["cpu_cache_id"].as_str().unwrap().to_string())
+        .map_err(|e| e.to_string())
+}
