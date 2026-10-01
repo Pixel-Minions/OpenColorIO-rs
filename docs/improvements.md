@@ -94,6 +94,29 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p1-bitdepth` (1.1b). The port wraps the same way, then D-2 refuses
   any such image that reaches outside its buffer.
 
+### I-41. `applyRGB` and `applyRGBA` convert the pixel's bytes in place
+
+- **Upstream:** `CPUProcessor::applyRGB` and `applyRGBA` (`CPUProcessor.cpp:433-465`) pass the
+  one float pixel as both the input and the output of every op, the bit-depth conversions
+  included. With an input bit depth other than F32, the conversion reads the pixel's first
+  bytes as 8- or 16-bit values and writes four floats over the same 16 bytes, so it reads some
+  values after it has overwritten them with floats. With an output bit depth other than F32,
+  the result is the pixel's first 4 or 8 bytes, as that type, and the bytes after them keep the
+  ops' floats. Which values are overwritten before they are read depends on the compiler, so
+  the wheels differ for 10-, 12-, 16-bit and half input: MSVC (Windows) reads each value after
+  storing the float before it; GCC (Linux) reads each one step ahead, so only alpha is read
+  after a store. 8-bit input is read in order on both. Seen in each wheel's machine code
+  (`BitDepthCast<inBD, BIT_DEPTH_F32>::apply`: Windows 0x180089c30, 0x18008b220, 0x18008c4c0;
+  Linux 0x1df730, 0x1dcad8, 0x1d9dc0, 0x1d7650, 0x1e2ed0) and through the oracle: UINT16 codes
+  1000, 2000, 3000, 4000 give different floats on the two platforms. The conversions from F32
+  read every float before storing over it, on both.
+- **Who notices:** C++ and Rust callers of `applyRGB` or `applyRGBA` on a CPU processor whose
+  input or output bit depth isn't F32. Python's `applyRGB` and `applyRGBA` build an image and
+  call `apply`, so they don't see this.
+- **A fix:** convert through a separate pixel, as `apply` does; or refuse other bit depths.
+  Either changes the results for those processors, and makes them the same on both platforms.
+- **Status:** matched in `p1-engine` (1.2d), each platform as its wheel compiled it.
+
 ## Configs and cache IDs
 
 ### I-5. Different transforms can share a cached processor
@@ -227,6 +250,89 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   port calls the platform's functions, as OCIO does). The review suspects these values may also
   depend on the CPU (SIMD renderers, glibc's ifunc variants). If so, their checks belong in
   `cpu-tests`.
+
+## Ops
+
+### I-40. A file no-op has no cache ID
+
+- **Upstream:** `FileNoOp::getCacheID` returns the op's `m_fileReference`, which the
+  constructor never sets: it gives the path to the op's `FileNoOpData` instead
+  (`ops/noop/NoOps.cpp:300-304, 358-361`). So the cache ID of the op that marks a loaded file
+  is empty. Processor cache IDs skip no-ops (`Op.cpp:448-465`), but `SerializeOpVec` prints
+  each op's cache ID (`Op.cpp:473-489`), in the optimizer's debug log
+  (`OpOptimizers.cpp:618-625, 636-646, 737-754`): the line of a file no-op has no file name,
+  while a look no-op's line names the look.
+- **Who notices:** people reading OCIO's debug log.
+- **A fix:** return the path, as `LookNoOp` returns the look.
+- **Status:** matched in `p1-engine` (1.2c).
+
+### I-42. Matrix renderers' NaNs depend on the platform and, on Windows, on the pixel's position
+
+- **Upstream:** the Matrix renderers (`ops/matrix/MatrixOpCPU.cpp`) multiply and add the
+  pixel's values with the matrix's. Where two NaNs meet in a product or a sum, x86 returns the
+  first operand's, and the two compilers ordered the operands differently: GCC computes
+  `(b*m2 + a*m3) + (r*m0 + g*m1)` (Linux wheel 0x4e4140, 0x4e40c0), MSVC
+  `(a*m3 + b*m2) + (g*m1 + r*m0)` in its four-pixel loop (Windows wheel 0x1802b24f4,
+  0x1802b26b4) and `(g*m1 + r*m0) + (a*m3 + b*m2)` in the loop that finishes the last
+  `numPixels % 4` pixels (0x1802b260b, 0x1802b27db). `ScaleRenderer` and
+  `ScaleWithOffsetRenderer` compute blue as `in * scale` everywhere except MSVC's remainder
+  loop, which computes `scale * in` (0x1802b29c2, 0x1802b2be4). So the NaN a pixel gets depends
+  on the platform and, on Windows, on where the pixel sits in its row.
+- **Who notices:** images whose pixels have NaNs of different signs or payloads in two or
+  more channels, through any non-diagonal matrix (GCC's `r*m0 + g*m1` keeps red's NaN, MSVC's
+  four-pixel loop `g*m1 + r*m0` green's); and NaN pixels through a matrix with NaN
+  coefficients (blue, for diagonal matrices). The NaN's sign and payload differ.
+- **A fix:** one operand order for every platform and loop.
+- **Status:** matched in `p1-engine` (1.3m2), each wheel's order per platform and loop.
+
+### I-43. Inverting a matrix flips a NaN offset's sign on Linux only
+
+- **Upstream:** `MatrixOpData::getAsForward` negates the inverse's offsets with
+  `invOffsets.scale(-1.)` (`ops/matrix/MatrixOpData.cpp`). MSVC multiplies by -1 (Windows
+  wheel 0x1802b3b5f, `mulpd`), which keeps a NaN's sign; GCC folds `x * -1.0` into a negation
+  (Linux wheel 0x4e8303, `xorpd` with -0.0), which flips it. Every other value gives the same
+  bits.
+- **Who notices:** inverse matrices whose offsets come out NaN: the NaN's sign, in the cache
+  ID and the pixels, differs between Windows and Linux.
+- **A fix:** negate on both, or multiply on both.
+- **Status:** matched in `p1-engine` (1.3m1), each wheel's operation.
+
+### I-44. Inverting a matrix orders its NaNs per platform
+
+- **Upstream:** `MatrixArray::inverse` (Imath's Gauss-Jordan elimination,
+  `ops/matrix/MatrixOpData.cpp`) subtracts `f * t[..]` in each step. MSVC keeps the source's
+  `f * x` (Windows wheel 0x1802b4758); GCC computes `x * f`, except for the last product of
+  each step, whose register it reuses (Linux wheel, its 9 unrolled steps, e.g. 0x4e673e and
+  0x4e67de). When both are NaN, the first operand's NaN comes out.
+- **Who notices:** inverse matrices with NaN coefficients: the inverse's NaNs, in the cache
+  ID and the pixels, differ between Windows and Linux.
+- **A fix:** one operand order for both platforms.
+- **Status:** matched in `p1-engine` (1.3m1), each wheel's order.
+
+### I-45. Optimization flags are 32 bits on Windows and 64 on Linux
+
+- **Upstream:** `OptimizationFlags` is an `enum : unsigned long`
+  (`include/OpenColorIO/OpenColorTypes.h:634`), 32 bits with MSVC and 64 with GCC. The binding
+  converts a Python integer to it: on Linux `OptimizationFlags(2**32 + 1)` is accepted, and the
+  CPU processor's cache ID prints `oFlags 4294967297`; on Windows the same call raises
+  `TypeError`.
+- **Who notices:** callers passing flags above bit 31, which no flag uses.
+- **A fix:** a 32-bit type on every platform, or refusing unknown bits.
+- **Status:** matched in `p1-engine` (1.2d): the port's `OptimizationFlags` holds a
+  `c_ulong`.
+
+### I-46. The optimizer stops after 81 passes, and logs its cap at exactly 80
+
+- **Upstream:** `OpRcPtrVec::optimize` (`OpOptimizers.cpp:628-735`) loops
+  `while (passes <= MAX_OPTIMIZATION_PASSES)`, with `MAX_OPTIMIZATION_PASSES = 80`, so it makes
+  up to 81 passes, and then logs "The max number of passes, 80, was reached" only when
+  `passes == 80`: when the 81st pass found nothing left to do, not when the cap stopped it.
+  Seen through the wheel with the default optimization: lists of 80, 81 and 82 Matrix ops
+  keep one op, 83 keep two, 84 three and 90 nine, and the message appears at 81 ops only.
+- **Who notices:** very long lists of ops that combine one pair per pass; people reading the
+  debug log.
+- **A fix:** stop at 80 passes, and log when the cap stops the loop.
+- **Status:** matched in `p1-engine` (1.2d).
 
 ## Transforms
 

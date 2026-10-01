@@ -39,7 +39,7 @@ path = "include/OpenColorIO/OpenColorTypes.h"
 kind = "api"
 target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs", "crates/ocio-ops/src/format_metadata.rs", "crates/ocio-ops/src/logging.rs", "crates/ocio-gpu/src/open_color_types.rs"]
 status = "partial"
-note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.1a: BitDepth, and BitDepthToString (defined in ParseUtils.cpp); 1.1b: ChannelOrdering; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does; 1.2b: DynamicPropertyType; 1.2e: LoggingLevel (288-297), in open_color_types.rs, and LoggingFunction (283-284), in logging.rs; 1.7a: GpuLanguage, in ocio-gpu/src/open_color_types.rs"
+note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.1a: BitDepth, and BitDepthToString (defined in ParseUtils.cpp); 1.1b: ChannelOrdering; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does; 1.2b: DynamicPropertyType; 1.2e: LoggingLevel (288-297), in open_color_types.rs, and LoggingFunction (283-284), in logging.rs; 1.7a: GpuLanguage, in ocio-gpu/src/open_color_types.rs; 1.3n1: Allocation (459-463); 1.2d: OptimizationFlags (634-722), a bit-flags type over a C unsigned long"
 
 [[file]]
 path = "src/CMakeLists.txt"
@@ -131,13 +131,14 @@ path = "src/OpenColorIO/CPUProcessor.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/cpu_processor.rs"]
 status = "partial"
-note = "1.1d: BitDepthCast (20-66) and CreateGenericBitDepthHelper (68-116), the conversions at the ends of a CPU processor, which the scanline helper runs; the rest is 1.2d"
+note = "1.1d: BitDepthCast (20-66) and CreateGenericBitDepthHelper (68-116), the conversions at the ends of a CPU processor, which the scanline helper runs; 1.2d: CreateCPUEngine (122-184; its Lut1D ends come with the Lut1D op), FinalizeOpsForCPU (311-338), CPUProcessor::Impl::finalize (341-377) as CpuProcessor::new, the queries and the dynamic properties (242-309, 491-534), CreateScanlineHelper (187-238) and the image apply methods (379-431, 541-549; apply(img, img) as apply_same), checked against the wheel through image_apply (tests/cpu_processor_apply_oracle.rs), and applyRGB and applyRGBA (433-465, 551-559), each wheel's in-place conversions (I-41), checked through image_apply identities (tests/cpu_processor_apply_rgb_oracle.rs); the Lut1D ends of CreateCPUEngine come with the Lut1D op"
 
 [[file]]
 path = "src/OpenColorIO/CPUProcessor.h"
 kind = "src"
 target = ["crates/ocio-ops/src/cpu_processor.rs"]
-status = "todo"
+status = "done"
+note = "1.2d: CPUProcessor::Impl as CpuProcessor, with its apply methods, applyRGB and applyRGBA"
 
 [[file]]
 path = "src/OpenColorIO/Caching.cpp"
@@ -443,15 +444,16 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/Op.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/op.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/op.rs", "crates/ocio-ops/src/op_data.rs"]
+status = "partial"
+note = "1.2c: OpCPU's defaults, OpData, GetTypeName, Op, OpRcPtrVec (as OpVec), SerializeOpVec and CreateOpVecFromOpData, with each family's arms added with the family; the Matrix op (before 1.2d): its arms, Op::getIdentityReplacement and OpData::getIdentityReplacement (an identity Matrix op; the Range branch and the overrides that return a range come with their families)"
 
 [[file]]
 path = "src/OpenColorIO/Op.h"
 kind = "src"
-target = ["crates/ocio-ops/src/op.rs"]
+target = ["crates/ocio-ops/src/op.rs", "crates/ocio-ops/src/op_data.rs"]
 status = "partial"
-note = "S2: OpCPU (as the CpuOp trait); 1.1d: its typed apply(const void *, void *, long) as CpuOp::apply_bit_depth, over the Pixels and PixelsMut enums of the channel types; the rest is WP 1.2c"
+note = "S2, 1.1d: OpCPU (as the CpuOp trait, with the typed apply_bit_depth); 1.2c: OpData (an enum with a variant per family), Op, OpRcPtrVec (as OpVec); getIdentityReplacement with the Matrix op; not yet: dumpMetadata (WP 1.8), optimize and optimizeForBitdepth (1.2d); 1.2d: HasFlag, as OptimizationFlags::has_flag"
 
 [[file]]
 path = "src/OpenColorIO/OpBuilders.h"
@@ -463,14 +465,15 @@ status = "todo"
 path = "src/OpenColorIO/OpOptimizers.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/op_optimizers.rs"]
-status = "todo"
+status = "partial"
+note = "1.2c: FinalizeOps (132-139) and OpRcPtrVec::finalize (598-609); 1.2d (the owner's Option A): the optimizer's core, optimize (the pass loop, RemoveNoOpTypes, RemoveDynamicProperties, RemoveNoOps, ReplaceOps, ReplaceIdentityOps, RemoveInverseOps, CombineOps, IsPairInverseEnabled, IsCombineEnabled, the debug log) and optimizeForBitdepth (the clamp identities, FindSeparablePrefix). p1-optimizer (WP 2.5): the LUT arms of ReplaceInverseLuts, RemoveInverseOps and FindSeparablePrefix, and OptimizeSeparablePrefix's Lut1D bake, which the port refuses until then"
 
 [[file]]
 path = "src/OpenColorIO/ParseUtils.cpp"
 kind = "src"
 target = ["crates/ocio/src/parse_utils.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-gpu/src/open_color_types.rs"]
 status = "partial"
-note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection; 1.1a: BitDepthToString, next to BitDepth; 1.2e: LoggingLevelToString and LoggingLevelFromString, next to LoggingLevel; 1.7c: GpuLanguageToString, next to GpuLanguage"
+note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection; 1.1a: BitDepthToString, next to BitDepth; 1.2e: LoggingLevelToString and LoggingLevelFromString, next to LoggingLevel; 1.7c: GpuLanguageToString, next to GpuLanguage; 1.3n1: AllocationToString, next to Allocation; 1.3m1: TransformDirectionToString, next to TransformDirection"
 
 [[file]]
 path = "src/OpenColorIO/ParseUtils.h"
@@ -541,7 +544,7 @@ path = "src/OpenColorIO/ScanlineHelper.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/scanline_helper.rs"]
 status = "done"
-note = "1.1e, checked against the wheel through image_apply (tests/scanline_helper_oracle.rs: RGBA-packed and other layouts, from one image to another and in place, every bit depth pair, and the init errors). As upstream, an RGBA-packed F32 destination is processed in its own memory, and the scratch rows are sized only where upstream sizes them; the rows of RGBA-packed images are read and written through typed views, with a copy only for a row that isn't aligned for its channel type. Very wide and very tall images follow the general rule (U-3)"
+note = "1.1e, checked against the wheel through image_apply (tests/scanline_helper_oracle.rs: RGBA-packed and other layouts, from one image to another and in place, every bit depth pair, and the init errors; from an image to itself, init_same, through the CPU processor's apply_same in tests/cpu_processor_apply_oracle.rs). As upstream, an RGBA-packed F32 destination is processed in its own memory, and the scratch rows are sized only where upstream sizes them; the rows of RGBA-packed images are read and written through typed views, with a copy only for a row that isn't aligned for its channel type. Very wide and very tall images follow the general rule (U-3)"
 
 [[file]]
 path = "src/OpenColorIO/ScanlineHelper.h"
@@ -1066,7 +1069,8 @@ status = "todo"
 path = "src/OpenColorIO/ops/OpArray.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/op_array.rs"]
-status = "todo"
+status = "partial"
+note = "1.3m1: ArrayT (the constructor, resize, getLength, getNumColorComponents, getValues, operator[], validate, operator== and scale) and ArrayDouble, what the Matrix op uses; getNumValues is the subclass's, so resize and validate take its value. ArrayBase, Array (ArrayT<float>), setLength, setDoubleValue, getDoubleValue, setMaxColorComponents, getMaxColorComponents, setNumColorComponents and adjustColorComponentNumber come with the LUT ops"
 
 [[file]]
 path = "src/OpenColorIO/ops/OpTools.cpp"
@@ -1084,13 +1088,15 @@ status = "todo"
 path = "src/OpenColorIO/ops/allocation/AllocationOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/allocation/allocation_op.rs"]
-status = "todo"
+status = "partial"
+note = "1.3n1: AllocationData::getCacheID and operator<<; CreateAllocationOps needs CreateFitOp (Matrix op) and the Log op"
 
 [[file]]
 path = "src/OpenColorIO/ops/allocation/AllocationOp.h"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/allocation/allocation_op.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/ops/allocation/allocation_op.rs", "crates/ocio-ops/src/ops/noop/no_ops.rs"]
+status = "partial"
+note = "1.3n1: AllocationData; CreateGpuAllocationNoOp in no_ops.rs, where NoOps.cpp defines it; not yet: CreateAllocationOps"
 
 [[file]]
 path = "src/OpenColorIO/ops/cdl/CDLOp.cpp"
@@ -1870,37 +1876,43 @@ status = "todo"
 path = "src/OpenColorIO/ops/matrix/MatrixOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/matrix/matrix_op.rs"]
-status = "todo"
+status = "partial"
+note = "p1-engine, before 1.2d: MatrixOffsetOp's methods (clone, getInfo, isSameType, isInverse, canCombineWith, combineWith, finalize, getCacheID, getCPUOp; the op is OpData::Matrix), CreateMatrixOp(ops, MatrixOpDataRcPtr, direction) and CreateIdentityMatrixOp(ops). 1.3m3 (p1-matrix): the factories from values (CreateScaleOp, CreateMatrixOp(m44), CreateOffsetOp, CreateScaleOffsetOp, CreateSaturationOp, CreateMatrixOffsetOp, CreateFitOp, CreateIdentityMatrixOp(ops, direction), CreateMinMaxOp, CreateMatrixOp(MatrixArrayPtr)), the MatrixOffsetOp(m44, offset4, direction) constructor and CreateMatrixTransform; extractGpuShaderInfo is 1.3m4's"
 
 [[file]]
 path = "src/OpenColorIO/ops/matrix/MatrixOp.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/matrix/matrix_op.rs"]
-status = "todo"
+status = "partial"
+note = "see MatrixOp.cpp"
 
 [[file]]
 path = "src/OpenColorIO/ops/matrix/MatrixOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/matrix/matrix_op_cpu.rs"]
-status = "todo"
+status = "done"
+note = "1.3m2: the four renderers, the matrix ones in their SSE2 form (OCIO_USE_SSE2, set in both wheels), with each wheel's operand orders: MSVC's differ between its four-pixel loop and the loop that finishes the last numPixels % 4 pixels (matrix_op_cpu.rs notes the addresses)"
 
 [[file]]
 path = "src/OpenColorIO/ops/matrix/MatrixOpCPU.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/matrix/matrix_op_cpu.rs"]
-status = "todo"
+status = "done"
+note = "1.3m2"
 
 [[file]]
 path = "src/OpenColorIO/ops/matrix/MatrixOpData.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/matrix/matrix_op_data.rs"]
-status = "todo"
+status = "done"
+note = "1.3m1: the products, sums and inverse with each wheel's operand orders, and getAsForward's scale(-1.) as each wheel compiled it (a negation in the Linux wheel); matrix_op_data.rs notes the addresses. Not ported: MatrixArray::operator=(const ArrayDouble &) (98-107), which nothing calls (compose assigns through getArray(), an ArrayDouble &), and the inner(const MatrixArrayPtr &) overload, the same as inner(const MatrixArray &) for Rust. MatrixArray::validate takes &mut self for its const_cast 3x3 expansion; validate_ref runs it on a shared reference"
 
 [[file]]
 path = "src/OpenColorIO/ops/matrix/MatrixOpData.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/matrix/matrix_op_data.rs"]
-status = "todo"
+status = "done"
+note = "1.3m1"
 
 [[file]]
 path = "src/OpenColorIO/ops/matrix/MatrixOpGPU.cpp"
@@ -1918,13 +1930,15 @@ status = "todo"
 path = "src/OpenColorIO/ops/noop/NoOps.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/noop/no_ops.rs"]
-status = "todo"
+status = "partial"
+note = "1.2c: FileNoOp, LookNoOp, CreateFileNoOp and CreateLookNoOp, CPU side (the op class is kept in the data, NoOpKind); 1.3n1: AllocationNoOp and CreateGpuAllocationNoOp; not yet: dumpMetadata (WP 1.8), PartitionGPUOps and Create3DLut with their helpers (they need the Lut3D op)"
 
 [[file]]
 path = "src/OpenColorIO/ops/noop/NoOps.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/noop/no_ops.rs"]
-status = "todo"
+status = "partial"
+note = "1.2c: NoOpData, FileNoOpData, CreateFileNoOp, CreateLookNoOp; not yet: PartitionGPUOps and Create3DLut"
 
 [[file]]
 path = "src/OpenColorIO/ops/range/RangeOp.cpp"
@@ -1978,13 +1992,13 @@ status = "todo"
 path = "src/OpenColorIO/ops/reference/ReferenceOpData.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/reference/reference_op_data.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/ops/reference/ReferenceOpData.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/reference/reference_op_data.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/res/OpenColorIO.pc.in"
