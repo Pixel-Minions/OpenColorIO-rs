@@ -2,4 +2,4 @@
 xtask = "run --quiet --package xtask --"
 # The tests whose results depend on the CPU: the SIMD kernels, CPUInfo and the math library
 # (libm picks its own code path per CPU). CI also runs them on emulated CPUs (scripts/sde.sh).
-cpu-tests = "test --package ocio-ops --lib --test cpu_info_oracle --test half_conversions --test cdl_oracle --test gamma_oracle --test gamma_op_oracle --test log_oracle --test lut3d_oracle"
+cpu-tests = "test --package ocio-ops --lib --test cpu_info_oracle --test half_conversions --test cdl_oracle --test cdl_op_oracle --test gamma_oracle --test gamma_op_oracle --test log_oracle --test lut3d_oracle"

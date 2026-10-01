@@ -12,9 +12,9 @@
 //!   `RemoveInverseOps` has no Lut1D pair to replace.
 //! - `OptimizeSeparablePrefix` bakes a prefix into a Lut1D, so it refuses a prefix to bake
 //!   until the Lut1D op exists. A prefix needs an op other than a Matrix or a Range (the no-op
-//!   types are gone by then): a Gamma op (1.3g3) is one, so for integer and half input, with
-//!   `OPTIMIZATION_COMP_SEPARABLE_PREFIX`, a CPU processor whose separable prefix holds a
-//!   Gamma op is refused until then.
+//!   types are gone by then): a Gamma op (1.3g3) and a CDL op without saturation (1.3c3) are,
+//!   so for integer and half input, with `OPTIMIZATION_COMP_SEPARABLE_PREFIX`, a CPU processor
+//!   whose separable prefix holds one is refused until then.
 
 use crate::bit_depth_utils::is_float_bit_depth;
 use crate::exception::{Exception, Result};
@@ -207,7 +207,8 @@ fn replace_identity_ops(op_vec: &mut OpVec, o_flags: OptimizationFlags) -> Resul
 /// v2.5.2).
 fn pair_identity_replacement(op1: &Op) -> Result<Op> {
     match &**op1.data() {
-        OpData::Gamma(_)
+        OpData::Cdl(_)
+        | OpData::Gamma(_)
         | OpData::Matrix(_)
         | OpData::Range(_)
         | OpData::Reference(_)
@@ -345,7 +346,8 @@ fn replace_inverse_luts(op_vec: &mut OpVec) -> i32 {
     for op in op_vec.iter() {
         match &**op.data() {
             // (The Lut1D and Lut3D arms: an inverse LUT becomes a fast forward one, counted.)
-            OpData::Gamma(_)
+            OpData::Cdl(_)
+            | OpData::Gamma(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Reference(_)
@@ -398,7 +400,8 @@ fn remove_trailing_clamp_identity(op_vec: &mut OpVec) -> Result<usize> {
 /// Whether the op is a Lut1D evaluated forward. The Lut1D arm comes with its variant.
 fn is_forward_lut1d(op: &Op) -> bool {
     match &**op.data() {
-        OpData::Gamma(_)
+        OpData::Cdl(_)
+        | OpData::Gamma(_)
         | OpData::Matrix(_)
         | OpData::Range(_)
         | OpData::Reference(_)
@@ -468,7 +471,7 @@ fn find_separable_prefix(ops: &OpVec) -> Result<usize> {
 
 /// Replaces the separable prefix of the ops with one Lut1D sampled for the input bit depth,
 /// for integer and half input. The bake needs the Lut1D op (WP 2.5): until then a prefix to
-/// bake is refused: one with a Gamma op (module docs).
+/// bake is refused: one with a Gamma or CDL op (module docs).
 ///
 /// Port of `OptimizeSeparablePrefix` (src/OpenColorIO/OpOptimizers.cpp:553-596 @ v2.5.2), up
 /// to the bake.
