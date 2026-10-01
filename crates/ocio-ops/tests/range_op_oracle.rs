@@ -39,6 +39,7 @@ use ocio_testkit::Oracle;
 use ocio_testkit::battery::BitDepth as Depth;
 use ocio_testkit::image::{Buffer, Request};
 use ocio_testkit::oracle::BatchCall;
+use ocio_testkit::probe::Rng;
 use serde_json::{Map, Value, json};
 
 /// An empty bound.
@@ -70,6 +71,9 @@ fn chains() -> Vec<Vec<T>> {
     let r10 = [-1.1, -0.1, 1.1, 1.9];
     let neg = [0., E, 0., E];
     let wide = [-0.1, 1.1, -0.1, 1.1];
+    // Offsets either side of the 1e-6 that `scales()` takes for none.
+    let off_lo = [0., 1., 0.5e-6, 1. + 0.5e-6];
+    let off_hi = [0., 1., 1.5e-6, 1. + 1.5e-6];
     vec![
         vec![T::Range(r1, F)],
         vec![T::Range(r4, F)],
@@ -93,6 +97,11 @@ fn chains() -> Vec<Vec<T>> {
         vec![T::Range(neg, F), T::Matrix, T::Range(wide, F)],
         vec![T::Range(r1, F), T::Matrix, T::Range(r1, F)],
         vec![T::Matrix, T::Range(neg, F)],
+        vec![T::Range(off_lo, F)],
+        vec![T::Range(off_hi, F)],
+        vec![T::Range(off_hi, I)],
+        vec![T::Range(r1, F), T::Range(off_lo, F)],
+        vec![T::Range(off_hi, F), T::Range(r1, F)],
     ]
 }
 
@@ -205,9 +214,11 @@ fn cases() -> Vec<(Vec<T>, usize, (Depth, Depth))> {
     cases
 }
 
-#[test]
-fn the_cache_id_matches_the_wheel() {
-    let cases = cases();
+/// A case: a list of transforms, an index into [`FLAGS`], and the bit depths.
+type Case = (Vec<T>, usize, (Depth, Depth));
+
+/// The cases whose CPU processor cache IDs, or messages, differ between the port and the wheel.
+fn cache_id_failures(cases: &[Case]) -> Vec<String> {
     let pixels: Vec<Vec<u8>> = cases
         .iter()
         .map(|(_, _, (input, _))| {
@@ -249,18 +260,11 @@ fn the_cache_id_matches_the_wheel() {
             ));
         }
     }
-    assert!(
-        failures.is_empty(),
-        "{} of {} cases differ:\n{}",
-        failures.len(),
-        cases.len(),
-        failures.join("\n")
-    );
+    failures
 }
 
-#[test]
-fn the_pixels_match_the_wheel() {
-    let cases = cases();
+/// The cases whose processed pixels, or messages, differ between the port and the wheel.
+fn pixel_failures(cases: &[Case]) -> Vec<String> {
     let shape = common::image::PACKED_SHAPES[0];
     let requests: Vec<Request> = cases
         .iter()
@@ -306,11 +310,100 @@ fn the_pixels_match_the_wheel() {
             )),
         }
     }
+    failures
+}
+
+#[track_caller]
+fn assert_none(failures: Vec<String>, total: usize) {
     assert!(
         failures.is_empty(),
         "{} of {} cases differ:\n{}",
         failures.len(),
-        cases.len(),
+        total,
         failures.join("\n")
     );
+}
+
+#[test]
+fn the_cache_id_matches_the_wheel() {
+    let cases = cases();
+    assert_none(cache_id_failures(&cases), cases.len());
+}
+
+#[test]
+fn the_pixels_match_the_wheel() {
+    let cases = cases();
+    assert_none(pixel_failures(&cases), cases.len());
+}
+
+/// A random valid range on a grid of a few values, so that bounds of the two ranges often
+/// meet (`self.minOut == r.minIn` and the like, where `compose` changes branch): both bounds
+/// (half the time; equal outputs make a constant), the minimum only, or the maximum only, in
+/// either direction.
+fn random_range(rng: &mut Rng) -> T {
+    const GRID: [f64; 8] = [-0.3, 0.0, 0.1, 0.2, 0.3, 0.7, 1.0, 1.3];
+    let mut pick = || GRID[(rng.next_u64() % GRID.len() as u64) as usize];
+    let shape = pick();
+    let bounds = if shape < 0.5 {
+        let (mut a, mut b) = (pick(), pick());
+        while a == b {
+            b = pick();
+        }
+        if a > b {
+            std::mem::swap(&mut a, &mut b);
+        }
+        let (mut c, mut d) = (pick(), pick());
+        if c > d {
+            std::mem::swap(&mut c, &mut d);
+        }
+        [a, b, c, d]
+    } else if shape < 0.75 {
+        let v = pick();
+        [v, E, v, E]
+    } else {
+        let v = pick();
+        [E, v, E, v]
+    };
+    let dir = if rng.next_u64().is_multiple_of(4) {
+        I
+    } else {
+        F
+    };
+    T::Range(bounds, dir)
+}
+
+/// Pairs of random ranges, which the default optimization composes (`RangeOpData::compose`,
+/// src/OpenColorIO/ops/range/RangeOpData.cpp:352-431 @ v2.5.2), F32 in and out, and some from
+/// 8-bit integers: their cache IDs and pixels.
+#[test]
+fn random_compositions_match_the_wheel() {
+    let mut rng = Rng::new(0x434f_4d50);
+    let mut cases = Vec::new();
+    while cases.len() < 1000 {
+        let pair = vec![random_range(&mut rng), random_range(&mut rng)];
+        // Each range valid on its own (the inverse of a constant one isn't).
+        if port_processor(&pair[..1], OptimizationFlags::NONE, Depth::F32, Depth::F32).is_err()
+            || port_processor(&pair[1..], OptimizationFlags::NONE, Depth::F32, Depth::F32).is_err()
+        {
+            continue;
+        }
+        let depths = if cases.len().is_multiple_of(5) {
+            (Depth::Uint8, Depth::F32)
+        } else {
+            (Depth::F32, Depth::F32)
+        };
+        cases.push((pair, 1, depths));
+    }
+    // Both pass, and the composition takes each branch: some outputs meet the next input.
+    let meets = cases
+        .iter()
+        .filter(|(pair, _, _)| match (&pair[0], &pair[1]) {
+            (T::Range(a, _), T::Range(b, _)) => a[2] == b[0] || a[3] == b[1],
+            _ => false,
+        })
+        .count();
+    assert!(meets > 20, "{meets}");
+    let mut failures = cache_id_failures(&cases);
+    failures.extend(pixel_failures(&cases));
+    assert_none(failures, 2 * cases.len());
 }

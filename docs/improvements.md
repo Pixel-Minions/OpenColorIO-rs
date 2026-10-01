@@ -347,9 +347,32 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `[-, 0.5] -> [-, 0.5]` then `[0.5, -] -> [0.5, -]`, and the reverse.
 - **Who notices:** a processor with such a pair of ranges, which raises instead of clamping
   every value to 0.5.
-- **A fix:** compose into the constant range over the combined input bounds (`minInNew`,
-  `maxInNew`).
+- **A fix:** when the composition outputs a constant, make a range that outputs it for every
+  input: two distinct input bounds, and the constant as both output bounds (such as
+  `[0, 1] -> [0.5, 0.5]`, which the wheel accepts: it clamps every value below 0 and above 1 to
+  0.5 too). The input bounds of the two ranges don't do: here they combine into `[0.5, 0.5]`,
+  which `validate` refuses as too close, or into one-sided bounds.
 - **Status:** matched in `p1-range` (1.3r2).
+
+### I-51. Range bounds and ranges compare differently in each order
+
+- **Upstream:** `RangeOpData::FloatsDiffer(x1, x2)` (`ops/range/RangeOpData.cpp:313-330`)
+  compares with an absolute tolerance of 1e-6 when `|x1| < 1e-3` and a relative one otherwise,
+  chosen by the first argument only. So the result depends on the order: `FloatsDiffer(9.995e-4,
+  1e-3)` is false (absolute, 5e-7 apart) and `FloatsDiffer(1e-3, 9.995e-4)` true (relative,
+  5e-4). `validate` compares a one-sided range's output bound with its input bound
+  (`FloatsDiffer(minOut, minIn)`, `RangeOpData.cpp:244-258`): the wheel accepts
+  `[1e-3, -] -> [9.995e-4, -]` and refuses `[9.995e-4, -] -> [1e-3, -]` ("In and out minimum
+  limits must be equal"), and likewise for the maximum-only pair. `equals` compares each bound
+  with the other range's (`RangeOpData.cpp:515-546`), so it isn't symmetric: a range with
+  bounds 9.995e-4 equals one with bounds 1e-3, but not the other way round, and so do the
+  `RangeTransform`s that hold them.
+- **Who notices:** one-sided ranges with bounds near 1e-3 that differ by less than 1e-6, and
+  code that compares ranges or `RangeTransform`s with `equals`.
+- **A fix:** choose the tolerance from both values (for example, absolute when both are below
+  1e-3), so that the comparison is symmetric.
+- **Status:** matched in `p1-range` (1.3r1); `range_op_data_oracle.rs` checks both orders of
+  validation and equality against the wheel.
 
 ## Transforms
 

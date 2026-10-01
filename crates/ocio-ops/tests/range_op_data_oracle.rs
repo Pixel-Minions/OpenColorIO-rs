@@ -255,6 +255,14 @@ fn finite_bounds() -> Vec<Bounds> {
         out.push([None, Some(a), None, Some(b)]);
         out.push([Some(b), None, Some(a), None]);
     }
+    // `FloatsDiffer` picks its tolerance from its first argument (docs/improvements.md, I-51):
+    // one-sided bounds near 1e-3 in each order, and ranges that are equal one way only.
+    for (a, b) in [(1e-3, 9.995e-4), (9.995e-4, 1e-3)] {
+        out.push([Some(a), None, Some(b), None]);
+        out.push([None, Some(a), None, Some(b)]);
+        out.push([Some(a), None, Some(a), None]);
+        out.push([None, Some(a), None, Some(a)]);
+    }
     out.extend([
         [Some(1.0), Some(0.0), Some(0.0), Some(1.0)],
         [Some(0.0), Some(1.0), Some(1.0), Some(0.0)],
@@ -331,8 +339,10 @@ fn equality_matches_the_wheel() {
     .run();
 
     let mut failures = Vec::new();
+    let mut wheel_equals = std::collections::HashMap::new();
     for ((i, j), wheel) in pairs.iter().zip(&reply.pairs) {
         let wheel = wheel.unwrap_or_else(|| panic!("no equals for {:?} {:?}", data[*i], data[*j]));
+        wheel_equals.insert((*i, *j), wheel);
         let a = port_data(&data[*i].0, data[*i].1);
         let b = port_data(&data[*j].0, data[*j].1);
         if a.equals(&b) != wheel {
@@ -346,4 +356,10 @@ fn equality_matches_the_wheel() {
         pairs.len(),
         failures.join("\n")
     );
+    // Some pairs are equal in one order only (docs/improvements.md, I-51).
+    let asymmetric = wheel_equals
+        .iter()
+        .filter(|((i, j), equal)| wheel_equals.get(&(*j, *i)).is_some_and(|e| e != *equal))
+        .count();
+    assert!(asymmetric > 0);
 }
