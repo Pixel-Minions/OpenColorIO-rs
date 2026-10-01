@@ -39,7 +39,7 @@ path = "include/OpenColorIO/OpenColorTypes.h"
 kind = "api"
 target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs", "crates/ocio-ops/src/format_metadata.rs", "crates/ocio-ops/src/logging.rs", "crates/ocio-gpu/src/open_color_types.rs"]
 status = "partial"
-note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.1a: BitDepth, and BitDepthToString (defined in ParseUtils.cpp); 1.1b: ChannelOrdering; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does; 1.2b: DynamicPropertyType; 1.2e: LoggingLevel (288-297), in open_color_types.rs, and LoggingFunction (283-284), in logging.rs; 1.7a: GpuLanguage, in ocio-gpu/src/open_color_types.rs; 1.3n1: Allocation (459-463)"
+note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.1a: BitDepth, and BitDepthToString (defined in ParseUtils.cpp); 1.1b: ChannelOrdering; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does; 1.2b: DynamicPropertyType; 1.2e: LoggingLevel (288-297), in open_color_types.rs, and LoggingFunction (283-284), in logging.rs; 1.7a: GpuLanguage, in ocio-gpu/src/open_color_types.rs; 1.3n1: Allocation (459-463); 1.2d: OptimizationFlags (634-722), a bit-flags type over a C unsigned long"
 
 [[file]]
 path = "src/CMakeLists.txt"
@@ -452,7 +452,7 @@ path = "src/OpenColorIO/Op.h"
 kind = "src"
 target = ["crates/ocio-ops/src/op.rs", "crates/ocio-ops/src/op_data.rs"]
 status = "partial"
-note = "S2, 1.1d: OpCPU (as the CpuOp trait, with the typed apply_bit_depth); 1.2c: OpData (an enum with a variant per family), Op, OpRcPtrVec (as OpVec); getIdentityReplacement with the Matrix op; not yet: dumpMetadata (WP 1.8), optimize and optimizeForBitdepth (WP 1.6), HasFlag (1.2d)"
+note = "S2, 1.1d: OpCPU (as the CpuOp trait, with the typed apply_bit_depth); 1.2c: OpData (an enum with a variant per family), Op, OpRcPtrVec (as OpVec); getIdentityReplacement with the Matrix op; not yet: dumpMetadata (WP 1.8), optimize and optimizeForBitdepth (1.2d); 1.2d: HasFlag, as OptimizationFlags::has_flag"
 
 [[file]]
 path = "src/OpenColorIO/OpBuilders.h"
