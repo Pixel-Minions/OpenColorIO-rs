@@ -5,14 +5,11 @@
 //! `src/OpenColorIO/OpOptimizers.cpp` @ v2.5.2.
 //!
 //! The optimizer's core: `OpRcPtrVec::finalize`, `optimize` (the pass loop and its generic
-//! steps, which ask the ops only through [`Op`]'s methods) and `optimizeForBitdepth`. The
-//! steps that act on LUT data come with the LUT families (WP 2.5, card `p1-optimizer`): each
-//! matches over [`OpData`] without a wildcard, so the LUT arms join it with their variants.
-//! - `ReplaceInverseLuts` and `FindSeparablePrefix` find nothing to act on among the variants
-//!   so far, and `RemoveInverseOps` has no Lut1D pair to replace.
-//! - `OptimizeSeparablePrefix` bakes a prefix into a Lut1D, so it refuses a prefix to bake
-//!   until the Lut1D op exists. None qualifies so far: a prefix needs an op other than a
-//!   Matrix or a Range, and the no-op types are gone by then.
+//! steps, which ask the ops only through [`Op`]'s methods) and `optimizeForBitdepth`, with
+//! `OptimizeSeparablePrefix`, which bakes a prefix of separable ops into a Lut1D for integer
+//! and half input. The steps that act on LUT data match over [`OpData`] without a wildcard:
+//! - `ReplaceInverseLuts` and `RemoveInverseOps` refuse an inverse Lut1D, whose set-up is
+//!   Phase 2's (WP 2.1); only Phase 2's sources make one. The Lut3D arms come with Lut3D.
 
 use crate::bit_depth_utils::is_float_bit_depth;
 use crate::exception::{Exception, Result};
@@ -20,6 +17,8 @@ use crate::logging::{is_debug_logging_enabled, log_debug};
 use crate::op::{Op, OpVec, serialize_op_vec};
 use crate::op_data::{OpData, OpDataType};
 use crate::open_color_types::{BitDepth, OptimizationFlags, TransformDirection};
+use crate::ops::lut1d::Lut1DOpData;
+use crate::ops::lut1d::lut1d_op::create_lut1d_op;
 
 /// Whether `flags` let the optimizer remove a pair of inverse ops of type `op_type`.
 ///
@@ -482,11 +481,11 @@ fn find_separable_prefix(ops: &OpVec) -> Result<usize> {
 }
 
 /// Replaces the separable prefix of the ops with one Lut1D sampled for the input bit depth,
-/// for integer and half input. The bake needs the Lut1D op (WP 2.5): until then a prefix to
-/// bake is refused, and none qualifies (module docs).
+/// for integer and half input: copies of the prefix's ops render the lookup domain
+/// ([`Lut1DOpData::make_lookup_domain`], [`Lut1DOpData::compose_vec`]), and the LUT replaces
+/// them.
 ///
-/// Port of `OptimizeSeparablePrefix` (src/OpenColorIO/OpOptimizers.cpp:553-596 @ v2.5.2), up
-/// to the bake.
+/// Port of `OptimizeSeparablePrefix` (src/OpenColorIO/OpOptimizers.cpp:553-596 @ v2.5.2).
 fn optimize_separable_prefix(ops: &mut OpVec, in_bit_depth: BitDepth) -> Result<()> {
     if ops.is_empty() {
         return Ok(());
@@ -503,10 +502,28 @@ fn optimize_separable_prefix(ops: &mut OpVec, in_bit_depth: BitDepth) -> Result<
         return Ok(()); // Nothing to do.
     }
 
-    Err(Exception::new(format!(
-        "OpOptimizers: baking a separable prefix of {prefix_len} ops needs the Lut1D op, which \
-         is not ported yet."
-    )))
+    let mut prefix_ops = OpVec::new();
+    for op in &ops[..prefix_len] {
+        prefix_ops.push_back(op.clone_op());
+    }
+
+    // Make a domain for the LUT. (Will be half-domain for target == 16f.)
+    let mut new_domain = Lut1DOpData::make_lookup_domain(in_bit_depth)?;
+
+    // Send the domain through the prefix ops.
+    // Note: This sets the outBitDepth of newDomain to match prefixOps.
+    Lut1DOpData::compose_vec(&mut new_domain, &mut prefix_ops)?;
+
+    // Remove the prefix ops.
+    ops.erase_range(0, prefix_len);
+
+    // Insert the new LUT to replace the prefix ops.
+    let mut lut_ops = OpVec::new();
+    create_lut1d_op(&mut lut_ops, new_domain, TransformDirection::Forward);
+    finalize_ops(&mut lut_ops)?;
+
+    ops.insert(0, &lut_ops[..]);
+    Ok(())
 }
 
 impl OpVec {
