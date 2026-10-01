@@ -102,6 +102,24 @@ fn chains() -> Vec<Vec<T>> {
         vec![T::Range(off_hi, I)],
         vec![T::Range(r1, F), T::Range(off_lo, F)],
         vec![T::Range(off_hi, F), T::Range(r1, F)],
+        // compose's min side where the bounds meet: a tiny minIn next to a larger minOut makes
+        // the offset cancel, so which branch composes shows in the cache ID's 7 digits.
+        vec![
+            T::Range([1e-12, 1., 0.3, 0.7], F),
+            T::Range([0.3, 0.9, 0.3, 0.9], F),
+        ],
+        vec![
+            T::Range([1e-12, 1., 0.3, 0.7], F),
+            T::Range([0.30000000001, 0.9, 0.30000000001, 0.9], F),
+        ],
+        vec![
+            T::Range([0., 1., 0.30000000001, 0.9], F),
+            T::Range([0.3, 0.9, 1e-12, 0.6], F),
+        ],
+        vec![
+            T::Range([-1., 1e-12, 0.3, 0.7], F),
+            T::Range([0.3, 0.7, 0.3, 0.7], F),
+        ],
     ]
 }
 
