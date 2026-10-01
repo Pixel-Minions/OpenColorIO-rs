@@ -88,8 +88,10 @@ buffer of `m_width` pixels).
 - **Upstream's layouts.** Strides are `isize` bytes, `AUTO_STRIDE` (`isize::MIN`) or explicit,
   negative ones included. A channel's position is a byte offset in its buffer (`ChannelPos`)
   instead of a pointer. Offsets and strides use upstream's integer arithmetic, and wrap where C++
-  overflows. Values are read and written with `from_ne_bytes`/`to_ne_bytes`, so any stride works
-  for any buffer.
+  overflows. The CPU engine reads and writes the rows of an RGBA-packed image in place, through
+  typed views (`zerocopy`), and copies only a row that isn't aligned for its channel type; other
+  layouts are read and written channel by channel with `from_ne_bytes`/`to_ne_bytes`, so any
+  stride works for any buffer.
 - **Checks.** The constructors make upstream's checks in upstream's order, with its messages.
   Before them, a typed slice must hold the bit depth's channel type (the Python binding's
   `checkBufferType` and its message). After them, the bounds check of deviation D-2
