@@ -1877,7 +1877,6 @@ path = "src/OpenColorIO/ops/matrix/MatrixOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/matrix/matrix_op.rs", "crates/ocio-gpu/src/gpu_processor.rs"]
 status = "partial"
-note = "p1-engine, before 1.2d: MatrixOffsetOp's methods (clone, getInfo, isSameType, isInverse, canCombineWith, combineWith, finalize, getCacheID, getCPUOp; the op is OpData::Matrix), CreateMatrixOp(ops, MatrixOpDataRcPtr, direction) and CreateIdentityMatrixOp(ops). 1.3m3 (p1-matrix): the factories from values (CreateScaleOp, CreateMatrixOp(m44), CreateOffsetOp, CreateScaleOffsetOp, CreateSaturationOp, CreateMatrixOffsetOp, CreateFitOp, CreateIdentityMatrixOp(ops, direction), CreateMinMaxOp, CreateMatrixOp(MatrixArrayPtr)), the MatrixOffsetOp(m44, offset4, direction) constructor and CreateMatrixTransform; extractGpuShaderInfo is 1.3m4's (p1-gpu-ops): MatrixOffsetOp::extractGpuShaderInfo, in ocio-gpu's extract_op_gpu_shader_info (gpu_processor.rs)."
 
 [[file]]
 path = "src/OpenColorIO/ops/matrix/MatrixOp.h"
@@ -2251,8 +2250,9 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/transforms/MatrixTransform.cpp"
 kind = "src"
-target = ["crates/ocio/src/transforms/matrix_transform.rs"]
-status = "todo"
+target = ["crates/ocio/src/transforms/matrix_transform.rs", "crates/ocio-ops/src/ops/matrix/matrix_op.rs"]
+status = "partial"
+note = "1.3m3: MatrixTransform::Fit and Sat (162-245), which CreateFitOp and CreateSaturationOp call, as ocio-ops' matrix_transform_fit and matrix_transform_sat (doc(hidden), for the transform to reuse); the rest with the transforms (WP 1.8)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/MatrixTransform.h"
