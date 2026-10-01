@@ -17,7 +17,8 @@
 //! its `result`, not a protocol error.
 //!
 //! Responses are cached under `<target>/oracle-cache`, keyed by the request, the oracle's
-//! sources and lock file, and this machine's OS and CPU ([`machine_description`]). Set
+//! sources and lock file, upstream's test files (which requests name by path), and this
+//! machine's OS and CPU ([`machine_description`]). Set
 //! `OCIO_RS_ORACLE_NO_CACHE=1` to bypass the cache. Environment variables named `OCIO`,
 //! `OCIO_*` or `PYTHON*` are never passed to the oracle's processes ([`isolate`]), so their
 //! results and output don't depend on the caller's environment.
@@ -412,8 +413,33 @@ fn identity(oracle_dir: &Path) -> Result<u128, String> {
         h.update(&(bytes.len() as u64).to_le_bytes());
         h.update(&bytes);
     }
+    hash_test_data(&mut h, &paths::upstream_dir().join("tests").join("data"));
     h.update(machine_description().as_bytes());
     Ok(h.digest128())
+}
+
+/// Hashes upstream's test files (`upstream/OpenColorIO/tests/data`), which requests name by
+/// path (a CLF to load, a config's search path), into the cache key: each file's path, length
+/// and bytes, in path order. Without the submodule checked out, the key differs from any with
+/// it, so a response made then (an `ExceptionMissingFile`) is never replayed once the files
+/// are there. About 260 files, 33 MB, hashed once per process.
+fn hash_test_data(h: &mut Xxh3, data: &Path) {
+    let mut files = Vec::new();
+    collect_files(data, &mut files);
+    files.sort();
+    h.update(b"upstream test data");
+    h.update(&(files.len() as u64).to_le_bytes());
+    for file in &files {
+        let rel = file.strip_prefix(data).unwrap_or(file);
+        h.update(rel.to_string_lossy().replace('\\', "/").as_bytes());
+        match std::fs::read(file) {
+            Ok(bytes) => {
+                h.update(&(bytes.len() as u64).to_le_bytes());
+                h.update(&bytes);
+            }
+            Err(_) => h.update(b"unreadable"),
+        }
+    }
 }
 
 /// Every file under `dir`, at any depth, except Python's bytecode caches (`__pycache__`),
@@ -640,6 +666,42 @@ pub fn bytes_to_f32(bytes: &[u8]) -> Vec<f32> {
 
 #[cfg(test)]
 mod tests {
+
+    /// The test data's hash, as the cache key takes it.
+    fn data_hash(dir: &Path) -> u128 {
+        let mut h = Xxh3::new();
+        hash_test_data(&mut h, dir);
+        h.digest128()
+    }
+
+    /// Test data that is missing, added, or changed in its bytes or path gives another key, so
+    /// a response made without upstream's files (or with others) is never replayed.
+    #[test]
+    fn the_cache_key_follows_the_test_data() {
+        let dir = paths::target_dir().join(format!("oracle_key_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let missing = data_hash(&dir);
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        let empty = data_hash(&dir);
+        std::fs::write(dir.join("sub").join("a.clf"), b"one").unwrap();
+        let one = data_hash(&dir);
+        std::fs::write(dir.join("sub").join("a.clf"), b"two").unwrap();
+        let two = data_hash(&dir);
+        std::fs::rename(dir.join("sub").join("a.clf"), dir.join("sub").join("b.clf")).unwrap();
+        let renamed = data_hash(&dir);
+        std::fs::write(dir.join("sub").join("b.clf"), b"two").unwrap();
+        assert_eq!(data_hash(&dir), renamed);
+        std::fs::remove_dir_all(&dir).unwrap();
+        let keys = [missing, one, two, renamed];
+        for (i, a) in keys.iter().enumerate() {
+            for b in &keys[i + 1..] {
+                assert_ne!(a, b);
+            }
+        }
+        // An empty directory and a missing one have no file either way.
+        assert_eq!(missing, empty);
+    }
+
     /// A process that writes more to stderr than a pipe holds before it closes stdout still
     /// gives its stdout back: stderr is drained while stdout is read.
     #[test]
