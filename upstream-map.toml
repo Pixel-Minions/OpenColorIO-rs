@@ -1126,13 +1126,15 @@ status = "todo"
 path = "src/OpenColorIO/ops/cdl/CDLOpData.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/cdl/cdl_op_data.rs"]
-status = "todo"
+status = "done"
+note = "1.3c1: the whole class, with ChannelParams; getSimplerReplacement and getIdentityReplacement reach the optimizer with OpData::Cdl (1.3c3)"
 
 [[file]]
 path = "src/OpenColorIO/ops/cdl/CDLOpData.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/cdl/cdl_op_data.rs"]
-status = "todo"
+status = "done"
+note = "1.3c1: the whole class, with ChannelParams; getSimplerReplacement and getIdentityReplacement reach the optimizer with OpData::Cdl (1.3c3)"
 
 [[file]]
 path = "src/OpenColorIO/ops/cdl/CDLOpGPU.cpp"
@@ -4515,7 +4517,8 @@ status = "todo"
 path = "tests/cpu/ops/cdl/CDLOpData_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/cdl/cdl_op_data_tests.rs"]
-status = "todo"
+status = "done"
+note = "1.3c1: all 7 tests"
 
 [[file]]
 path = "tests/cpu/ops/cdl/CDLOp_tests.cpp"
