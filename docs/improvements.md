@@ -344,6 +344,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   debug log.
 - **A fix:** stop at 80 passes, and log when the cap stops the loop.
 - **Status:** matched in `p1-engine` (1.2d).
+
 ### I-50. A max-only range followed by a min-only one can't be optimized
 
 - **Upstream:** `RangeOpData::compose` (`ops/range/RangeOpData.cpp:352-431`) keeps the first
