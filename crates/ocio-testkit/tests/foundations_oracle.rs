@@ -266,6 +266,36 @@ fn requests_with_unknown_keys_or_names_are_refused() {
                               "messages": ["ab"], "messages_after_reset": []}]}),
             "must be a list of two items",
         ),
+        // The guards no other case reaches: a child given as a two-character string, and an
+        // empty string where a list is expected (it would iterate as an empty list).
+        (
+            "format_metadata_combine",
+            json!({"cases": [{"first": {"attributes": [], "children": ["ab"]},
+                              "second": {"attributes": [], "children": []}}]}),
+            "must be a list of two items",
+        ),
+        (
+            "format_metadata_combine",
+            json!({"cases": [{"first": {"attributes": "", "children": []},
+                              "second": {"attributes": [], "children": []}}]}),
+            "attributes must be a list",
+        ),
+        (
+            "log_message",
+            json!({"settings": [], "levels": "", "messages": []}),
+            "levels must be a list",
+        ),
+        (
+            "logging_level_strings",
+            json!({"from_string": [], "to_string": ""}),
+            "to_string must be a list",
+        ),
+        (
+            "logging_environment",
+            json!({"cases": [{"env": null, "custom_function": false, "set_level": null,
+                              "messages": "", "messages_after_reset": []}]}),
+            "messages must be a list",
+        ),
     ];
     let calls: Vec<BatchCall<'_>> = refused
         .iter()
