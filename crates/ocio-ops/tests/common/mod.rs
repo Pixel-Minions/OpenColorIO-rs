@@ -7,4 +7,5 @@
 #![allow(dead_code)] // Each test crate uses a subset.
 
 pub(crate) mod image;
+pub(crate) mod matrix;
 pub(crate) mod numbers;

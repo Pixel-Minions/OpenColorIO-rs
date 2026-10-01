@@ -94,6 +94,29 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p1-bitdepth` (1.1b). The port wraps the same way, then D-2 refuses
   any such image that reaches outside its buffer.
 
+### I-41. `applyRGB` and `applyRGBA` convert the pixel's bytes in place
+
+- **Upstream:** `CPUProcessor::applyRGB` and `applyRGBA` (`CPUProcessor.cpp:433-465`) pass the
+  one float pixel as both the input and the output of every op, the bit-depth conversions
+  included. With an input bit depth other than F32, the conversion reads the pixel's first
+  bytes as 8- or 16-bit values and writes four floats over the same 16 bytes, so it reads some
+  values after it has overwritten them with floats. With an output bit depth other than F32,
+  the result is the pixel's first 4 or 8 bytes, as that type, and the bytes after them keep the
+  ops' floats. Which values are overwritten before they are read depends on the compiler, so
+  the wheels differ for 10-, 12-, 16-bit and half input: MSVC (Windows) reads each value after
+  storing the float before it; GCC (Linux) reads each one step ahead, so only alpha is read
+  after a store. 8-bit input is read in order on both. Seen in each wheel's machine code
+  (`BitDepthCast<inBD, BIT_DEPTH_F32>::apply`: Windows 0x180089c30, 0x18008b220, 0x18008c4c0;
+  Linux 0x1df730, 0x1dcad8, 0x1d9dc0, 0x1d7650, 0x1e2ed0) and through the oracle: UINT16 codes
+  1000, 2000, 3000, 4000 give different floats on the two platforms. The conversions from F32
+  read every float before storing over it, on both.
+- **Who notices:** C++ and Rust callers of `applyRGB` or `applyRGBA` on a CPU processor whose
+  input or output bit depth isn't F32. Python's `applyRGB` and `applyRGBA` build an image and
+  call `apply`, so they don't see this.
+- **A fix:** convert through a separate pixel, as `apply` does; or refuse other bit depths.
+  Either changes the results for those processors, and makes them the same on both platforms.
+- **Status:** matched in `p1-engine` (1.2d), each platform as its wheel compiled it.
+
 ## Configs and cache IDs
 
 ### I-5. Different transforms can share a cached processor
