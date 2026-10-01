@@ -1619,7 +1619,7 @@ path = "src/OpenColorIO/ops/log/LogOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/log/log_op_cpu.rs"]
 status = "done"
-note = "S2: every renderer, scalar and SSE2, bit-exact against the wheel on Windows and Rocky Linux 9 (tests/log_oracle.rs). To correct (p1-log): tests/log_oracle.rs's header says the separable-prefix bake applies only to integer input bit depths; it skips only F32 and UINT32 (OpOptimizers.cpp:562), so F16 inputs are baked too. Its F32 conclusion holds"
+note = "S2: every renderer, scalar and SSE2, bit-exact against the wheel on Windows and Rocky Linux 9 (tests/log_oracle.rs)"
 
 [[file]]
 path = "src/OpenColorIO/ops/log/LogOpCPU.h"
@@ -1632,15 +1632,15 @@ note = "S2: every renderer, scalar and SSE2, bit-exact against the wheel on Wind
 path = "src/OpenColorIO/ops/log/LogOpData.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/log/log_op_data.rs"]
-status = "partial"
-note = "S2: parameters, accessors, style predicates, isInverse; validate, getCacheID, the string getters and getIdentityReplacement are WP 1.3l1"
+status = "done"
+note = "Validation and equality against the wheel through the Log transforms (tests/log_op_data_oracle.rs); the cache ID through the Log op (1.3l3). U-20: short channels are errors"
 
 [[file]]
 path = "src/OpenColorIO/ops/log/LogOpData.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/log/log_op_data.rs"]
-status = "partial"
-note = "S2: parameters, accessors, style predicates, isInverse; validate, getCacheID, the string getters and getIdentityReplacement are WP 1.3l1"
+status = "done"
+note = "Validation and equality against the wheel through the Log transforms (tests/log_op_data_oracle.rs); the cache ID through the Log op (1.3l3). U-20: short channels are errors"
 
 [[file]]
 path = "src/OpenColorIO/ops/log/LogOpGPU.cpp"
@@ -1658,15 +1658,15 @@ status = "todo"
 path = "src/OpenColorIO/ops/log/LogUtils.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/log/log_utils.rs"]
-status = "partial"
-note = "S2: GetLinearSlope, GetLogSideBreak (Windows and Linux variants), GetLinearOffset; the CTF conversion and style strings are WP 1.3l1"
+status = "done"
+note = "S2: GetLinearSlope, GetLogSideBreak (Windows and Linux variants), GetLinearOffset. 1.3l1: the CTF conversion, bit-exact against the wheel through CTF files (tests/log_utils_oracle.rs), and the style strings (I-52); the CTF reader that uses them is WP 1.6"
 
 [[file]]
 path = "src/OpenColorIO/ops/log/LogUtils.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/log/log_utils.rs"]
-status = "partial"
-note = "S2: GetLinearSlope, GetLogSideBreak (Windows and Linux variants), GetLinearOffset; the CTF conversion and style strings are WP 1.3l1"
+status = "done"
+note = "S2: GetLinearSlope, GetLogSideBreak (Windows and Linux variants), GetLinearOffset. 1.3l1: the CTF parameters, the conversion and the style strings"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOp.cpp"
@@ -4693,14 +4693,13 @@ status = "todo"
 path = "tests/cpu/ops/log/LogOpCPU_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/log/log_op_cpu_tests.rs"]
-status = "partial"
-note = "S2: log_test, anti_log_test, cameralin2log_test, cameralog2lin_test; log2lin_test and lin2log_test need ConvertLogParameters (WP 1.3l1)"
+status = "done"
 
 [[file]]
 path = "tests/cpu/ops/log/LogOpData_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/log/log_op_data_tests.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "tests/cpu/ops/log/LogOp_tests.cpp"
@@ -4712,7 +4711,7 @@ status = "todo"
 path = "tests/cpu/ops/log/LogUtils_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/log/log_utils_tests.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "tests/cpu/ops/lut1d/Lut1DOpCPU_tests.cpp"
