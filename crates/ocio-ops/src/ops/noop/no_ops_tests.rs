@@ -84,8 +84,8 @@ fn the_no_ops_leave_pixels_alone() {
     for op in the_no_ops().iter_mut() {
         assert!(op.is_no_op_type());
         assert_eq!(op.data().get_type(), OpDataType::NoOp);
-        assert!(op.is_no_op());
-        assert!(op.is_identity());
+        assert!(op.is_no_op().unwrap());
+        assert!(op.is_identity().unwrap());
         assert!(!op.has_channel_crosstalk());
         assert!(op.supported_by_legacy_shader());
         assert!(op.validate().is_ok());
@@ -180,18 +180,18 @@ fn the_cache_ids() {
     let ops = the_no_ops();
     // An allocation's cache ID is its data's.
     assert_eq!(
-        ops[0].get_cache_id(),
+        ops[0].get_cache_id().unwrap(),
         lg2_allocation().get_cache_id().into_bytes()
     );
     // FileNoOp::getCacheID returns m_fileReference, which is never set (I-40).
-    assert_eq!(ops[1].get_cache_id(), b"");
+    assert_eq!(ops[1].get_cache_id().unwrap(), b"");
     // A look's is its name.
-    assert_eq!(ops[2].get_cache_id(), b"-look");
+    assert_eq!(ops[2].get_cache_id().unwrap(), b"-look");
 
     // Bytes pass through, NUL included: upstream's std::string keeps them.
     let mut odd = OpVec::new();
     create_look_no_op(&mut odd, b"a\0\xff");
-    assert_eq!(odd[0].get_cache_id(), b"a\0\xff");
+    assert_eq!(odd[0].get_cache_id().unwrap(), b"a\0\xff");
 
     // The data's cache ID is empty for each.
     for op in ops.iter() {
@@ -263,7 +263,7 @@ fn check_clone_of_first(ops: &OpVec) {
     assert!(cloned_op.is_inverse(op0));
     assert!(!cloned_op.is_inverse(op1));
 
-    assert!(cloned_op.is_no_op());
+    assert!(cloned_op.is_no_op().unwrap());
     assert!(!cloned_op.has_channel_crosstalk());
     assert!(cloned_op.supported_by_legacy_shader());
 }

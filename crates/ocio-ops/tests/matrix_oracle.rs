@@ -114,7 +114,7 @@ fn port_renderer(
     }
     data.validate().map_err(|e| e.message().to_string())?;
     let forward = data.get_as_forward().map_err(|e| e.message().to_string())?;
-    let rendered = if forward.is_no_op() {
+    let rendered = if forward.is_no_op().unwrap() {
         MatrixOpData::create_diagonal_matrix(1.0)
     } else {
         forward
