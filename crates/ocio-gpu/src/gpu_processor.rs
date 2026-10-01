@@ -99,7 +99,10 @@ pub fn write_shader_footer(shader_creator: &mut GpuShaderDesc) {
 ///
 /// Port of `Op::extractGpuShaderInfo`, pure virtual (src/OpenColorIO/Op.h:251 @ v2.5.2), and
 /// its overrides.
-pub fn extract_op_gpu_shader_info(op: &Op, shader_creator: &mut GpuShaderDesc) -> Result<()> {
+pub(crate) fn extract_op_gpu_shader_info(
+    op: &Op,
+    shader_creator: &mut GpuShaderDesc,
+) -> Result<()> {
     match &**op.data() {
         OpData::Matrix(data) => {
             if data.get_direction() == TransformDirection::Inverse {

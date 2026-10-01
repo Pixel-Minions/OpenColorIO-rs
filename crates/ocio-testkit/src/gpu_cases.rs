@@ -131,26 +131,123 @@ pub fn matrix_cases() -> Vec<MatrixCase> {
 mod tests {
     use super::*;
 
-    /// The table has upstream's ten tests, and their specs build as `AddMatrixTest` does.
+    /// Each of upstream's ten tests, in the file's order, builds the spec `AddMatrixTest`
+    /// builds from its arguments (tests/gpu/MatrixOp_test.cpp:38-145 @ v2.5.2): its name, its
+    /// direction, its matrix and offsets when it passes them, and the generic shader (not the
+    /// legacy one) for the last two only.
     #[test]
     fn matrix_cases_are_upstreams() {
+        let m = MATRIX.to_vec();
+        let s = SCALE.to_vec();
+        // (name, direction, matrix, offsets, legacy)
+        type Expected = (
+            &'static str,
+            &'static str,
+            Option<Vec<f64>>,
+            Option<Vec<f64>>,
+            bool,
+        );
+        let expected: Vec<Expected> = vec![
+            (
+                "matrix",
+                "TRANSFORM_DIR_FORWARD",
+                Some(m.clone()),
+                None,
+                true,
+            ),
+            (
+                "scale",
+                "TRANSFORM_DIR_FORWARD",
+                Some(s.clone()),
+                None,
+                true,
+            ),
+            (
+                "offset",
+                "TRANSFORM_DIR_FORWARD",
+                None,
+                Some(vec![-0.5, 0.25, -0.25, 0.0]),
+                true,
+            ),
+            (
+                "matrix_offset",
+                "TRANSFORM_DIR_FORWARD",
+                Some(m.clone()),
+                Some(vec![-0.5, -0.25, 0.25, 0.0]),
+                true,
+            ),
+            (
+                "matrix_inverse",
+                "TRANSFORM_DIR_INVERSE",
+                Some(m.clone()),
+                None,
+                true,
+            ),
+            (
+                "scale_inverse",
+                "TRANSFORM_DIR_INVERSE",
+                Some(s),
+                None,
+                true,
+            ),
+            (
+                "offset_inverse",
+                "TRANSFORM_DIR_INVERSE",
+                None,
+                Some(vec![-0.5, 0.25, -0.25, 0.0]),
+                true,
+            ),
+            (
+                "matrix_offset_inverse",
+                "TRANSFORM_DIR_INVERSE",
+                Some(m.clone()),
+                Some(vec![-0.5, -0.25, 0.25, 0.0]),
+                true,
+            ),
+            (
+                "matrix_offset_generic_shader",
+                "TRANSFORM_DIR_FORWARD",
+                Some(m.clone()),
+                Some(vec![-0.0, -0.25, 0.25, 0.0]),
+                false,
+            ),
+            (
+                "matrix_offset_inverse_generic_shader",
+                "TRANSFORM_DIR_INVERSE",
+                Some(m),
+                Some(vec![-0.5, -0.25, 0.25, 0.0]),
+                false,
+            ),
+        ];
         let cases = matrix_cases();
-        assert_eq!(cases.len(), 10);
-        assert_eq!(
-            cases[8].transform(),
-            json!({"class": "MatrixTransform", "calls": [
-                ["setDirection", {"enum": "TRANSFORM_DIR_FORWARD"}],
-                ["setMatrix", MATRIX.to_vec()],
-                ["setOffset", [-0.0, -0.25, 0.25, 0.0]],
-            ]})
+        assert_eq!(cases.len(), expected.len());
+        for (case, (name, direction, matrix, offset, legacy)) in cases.iter().zip(expected) {
+            let mut calls = vec![json!(["setDirection", {"enum": direction}])];
+            if let Some(matrix) = matrix {
+                calls.push(json!(["setMatrix", matrix]));
+            }
+            if let Some(offset) = offset {
+                calls.push(json!(["setOffset", offset]));
+            }
+            assert_eq!(case.name, name);
+            assert_eq!(
+                case.transform(),
+                json!({"class": "MatrixTransform", "calls": calls}),
+                "{name}"
+            );
+            assert_eq!(case.legacy_shader, legacy, "{name}");
+            assert_eq!(
+                case.error_threshold.to_bits(),
+                MATRIX_EPSILON.to_bits(),
+                "{name}"
+            );
+        }
+        // The generic shader's -0 offset keeps its sign through the spec.
+        assert!(
+            cases[8].transform()["calls"][2][1][0]
+                .as_f64()
+                .unwrap()
+                .is_sign_negative()
         );
-        assert_eq!(
-            cases[6].transform(),
-            json!({"class": "MatrixTransform", "calls": [
-                ["setDirection", {"enum": "TRANSFORM_DIR_INVERSE"}],
-                ["setOffset", [-0.5, 0.25, -0.25, 0.0]],
-            ]})
-        );
-        assert_eq!(cases.iter().filter(|c| !c.legacy_shader).count(), 2);
     }
 }

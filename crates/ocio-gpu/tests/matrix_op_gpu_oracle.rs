@@ -40,14 +40,17 @@ const IDENTITY: [f64; 16] = [
     1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
 ];
 
-/// The optimization levels; `None` is `getDefaultGPUProcessor`.
-const FLAGS: [(Option<&str>, OptimizationFlags); 5] = [
-    (None, OptimizationFlags::DEFAULT),
-    (Some("OPTIMIZATION_NONE"), OptimizationFlags::NONE),
-    (Some("OPTIMIZATION_LOSSLESS"), OptimizationFlags::LOSSLESS),
-    (Some("OPTIMIZATION_DEFAULT"), OptimizationFlags::DEFAULT),
-    (Some("OPTIMIZATION_ALL"), OptimizationFlags::ALL),
-];
+/// The optimization levels, as the oracle takes them; `None` is `getDefaultGPUProcessor`.
+fn levels() -> Vec<(Option<Value>, OptimizationFlags)> {
+    let name = |n: &str| Some(json!(n));
+    vec![
+        (None, OptimizationFlags::DEFAULT),
+        (name("OPTIMIZATION_NONE"), OptimizationFlags::NONE),
+        (name("OPTIMIZATION_LOSSLESS"), OptimizationFlags::LOSSLESS),
+        (name("OPTIMIZATION_DEFAULT"), OptimizationFlags::DEFAULT),
+        (name("OPTIMIZATION_ALL"), OptimizationFlags::ALL),
+    ]
+}
 
 /// The shader description's names; `None` keeps the default.
 #[derive(Debug, Clone, Copy, Default)]
@@ -64,7 +67,7 @@ struct Case {
     chain: Vec<(Matrix, TransformDirection)>,
     /// The processor, as the oracle takes it.
     processor: Value,
-    flags: (Option<&'static str>, OptimizationFlags),
+    flags: (Option<Value>, OptimizationFlags),
     language: GpuLanguage,
     oracle_language: oracle_gpu::GpuLanguage,
     names: Names,
@@ -73,8 +76,8 @@ struct Case {
 impl Case {
     fn request(&self) -> GpuShaderRequest {
         let mut processor = self.processor.clone();
-        if let Some(flags) = self.flags.0 {
-            processor["optimization"] = json!(flags);
+        if let Some(flags) = &self.flags.0 {
+            processor["optimization"] = flags.clone();
         }
         GpuShaderRequest::new(
             processor,
@@ -146,7 +149,8 @@ colorspaces:
     name: raw
 ";
 
-/// The processor's ops, as the wheel builds them (see the module notes).
+/// The processor's ops, as `BuildMatrixOp` makes them (see the module notes), before the
+/// processor finalizes them.
 fn raw_ops(chain: &[(Matrix, TransformDirection)]) -> ocio_ops::Result<OpVec> {
     let mut raw = OpVec::new();
     for ((m, o), dir) in chain {
@@ -157,12 +161,11 @@ fn raw_ops(chain: &[(Matrix, TransformDirection)]) -> ocio_ops::Result<OpVec> {
         data.validate()?;
         create_matrix_op(&mut raw, data, TransformDirection::Forward);
     }
-    raw.finalize()?;
     Ok(raw)
 }
 
 /// What the wheel and the port give for a case, to compare as a whole.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 enum Outcome {
     Raised(String),
     Extracted {
@@ -211,12 +214,30 @@ fn wheel(reply: &GpuShaderReply) -> Outcome {
     }
 }
 
-fn port(case: &Case) -> Outcome {
+/// The port's outcome, from the raw ops as `BuildMatrixOp` makes them, or, when
+/// `finalize_first`, from ops the processor finalized first, as the wheel's processor does
+/// (Processor.cpp:618-641): `GpuProcessor::new` takes either, and finalizes them itself.
+///
+/// An error carries the wheel's stage: the data's validation is the transform's on the JSON
+/// route (the binding builds the transform; its message would start "MatrixTransform
+/// validation failed: ", which the cases don't reach) and the processor's on the YAML route.
+fn port(case: &Case, finalize_first: bool) -> Outcome {
     let text = |b: &[u8]| String::from_utf8(b.to_vec()).unwrap();
-    let gpu = match raw_ops(&case.chain).and_then(|raw| GpuProcessor::new(&raw, case.flags.1)) {
+    let validation_stage = if case.processor.get("transform").is_some() {
+        "transform"
+    } else {
+        "processor"
+    };
+    let mut raw = match raw_ops(&case.chain) {
+        Ok(raw) => raw,
+        Err(e) => return Outcome::Raised(format!("{validation_stage}: {}", e.message())),
+    };
+    if finalize_first && let Err(e) = raw.finalize() {
+        return Outcome::Raised(format!("processor: {}", e.message()));
+    }
+    let gpu = match GpuProcessor::new(&raw, case.flags.1) {
         Ok(gpu) => gpu,
-        // The wheel's stage for an error of the processor or of the GPU processor.
-        Err(e) => return Outcome::Raised(format!("processor: {}", e.message())),
+        Err(e) => return Outcome::Raised(format!("gpu_processor: {}", e.message())),
     };
     let mut desc = GpuShaderDesc::new(case.language);
     if let Some(p) = case.names.pixel {
@@ -253,14 +274,19 @@ fn port(case: &Case) -> Outcome {
 fn check(cases: &[Case]) {
     let requests: Vec<GpuShaderRequest> = cases.iter().map(Case::request).collect();
     let calls: Vec<_> = requests.iter().map(GpuShaderRequest::call).collect();
-    let mut failures = Vec::new();
+    let mut failures: Vec<(&Case, Outcome, Outcome)> = Vec::new();
     for (case, response) in cases.iter().zip(Oracle::get().batch(&calls, true)) {
         let reply = GpuShaderReply::from_response(
             response.unwrap_or_else(|e| panic!("{}: the oracle failed: {e}", case.label)),
         );
-        let (wheel, port) = (wheel(&reply), port(case));
-        if wheel != port {
-            failures.push((case, wheel, port));
+        let wheel = wheel(&reply);
+        // The raw ops, and ops finalized first: both must give the wheel's outcome.
+        for finalize_first in [false, true] {
+            let port = port(case, finalize_first);
+            if wheel != port {
+                failures.push((case, wheel, port));
+                break;
+            }
         }
     }
     if let Some((case, wheel, port)) = failures.first() {
@@ -268,11 +294,12 @@ fn check(cases: &[Case]) {
         if let (
             Outcome::Extracted { shader: Ok(w), .. },
             Outcome::Extracted { shader: Ok(p), .. },
-        ) = (wheel, port)
+        ) = (&wheel, &port)
         {
             assert_text_eq(&case.label, &w[0], &p[0]);
         }
         let labels: Vec<&str> = failures.iter().map(|(c, _, _)| c.label.as_str()).collect();
+        let (wheel, port) = (wheel.clone(), port.clone());
         panic!(
             "{} of {} cases differ; the first, {}:\n  wheel {wheel:?}\n  port  {port:?}\nall: {labels:#?}",
             failures.len(),
@@ -293,7 +320,7 @@ fn languages() -> impl Iterator<Item = (GpuLanguage, oracle_gpu::GpuLanguage)> {
 fn cases_of(
     label: &str,
     chain: Vec<(Matrix, TransformDirection)>,
-    flags: &[(Option<&'static str>, OptimizationFlags)],
+    flags: &[(Option<Value>, OptimizationFlags)],
     names: Names,
 ) -> Vec<Case> {
     let processor = processor(&chain);
@@ -304,7 +331,7 @@ fn cases_of(
                 label: format!("{label} {:?} {language:?} {names:?}", flags.0),
                 chain: chain.clone(),
                 processor: processor.clone(),
-                flags: *flags,
+                flags: flags.clone(),
                 language,
                 oracle_language,
                 names,
@@ -332,13 +359,13 @@ fn upstreams_gpu_tests_write_the_wheels_shaders() {
             upstream.offset.unwrap_or([0.0; 4]),
         );
         let processor = json!({ "transform": upstream.transform() });
-        for flags in &FLAGS {
+        for flags in &levels() {
             for (language, oracle_language) in languages() {
                 cases.push(Case {
                     label: format!("{} {:?} {language:?}", upstream.name, flags.0),
                     chain: vec![(matrix, dir)],
                     processor: processor.clone(),
-                    flags: *flags,
+                    flags: flags.clone(),
                     language,
                     oracle_language,
                     names: Names::default(),
@@ -401,7 +428,7 @@ fn every_path_writes_the_wheels_shader() {
     ];
     let mut cases = Vec::new();
     for (label, chain) in chains {
-        cases.extend(cases_of(label, chain, &FLAGS, Names::default()));
+        cases.extend(cases_of(label, chain, &levels(), Names::default()));
     }
     let names = [
         Names {
@@ -415,7 +442,24 @@ fn every_path_writes_the_wheels_shader() {
         },
     ];
     for names in names {
-        cases.extend(cases_of("both", vec![(both, Forward)], &FLAGS[1..2], names));
+        cases.extend(cases_of(
+            "both",
+            vec![(both, Forward)],
+            &levels()[1..2],
+            names,
+        ));
+    }
+    // Flags above bit 31, which only Linux's 64-bit flags hold: the GPU processor's cache ID
+    // prints them whole (docs/improvements.md, I-45).
+    #[cfg(not(windows))]
+    {
+        let high = (1 << 32) | OptimizationFlags::DEFAULT.0;
+        cases.extend(cases_of(
+            "both, flags above bit 31",
+            vec![(both, Forward)],
+            &[(Some(json!(high)), OptimizationFlags(high))],
+            Names::default(),
+        ));
     }
     check(&cases);
 }
@@ -458,7 +502,7 @@ fn extreme_parameters_write_the_wheels_shader() {
                 cases.extend(cases_of(
                     &format!("{base_label} slot {slot} = {v:e}"),
                     vec![(matrix, TransformDirection::Forward)],
-                    &FLAGS[1..2],
+                    &levels()[1..2],
                     Names::default(),
                 ));
             }
