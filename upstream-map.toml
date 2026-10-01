@@ -336,7 +336,7 @@ path = "src/OpenColorIO/Logging.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/logging.rs"]
 status = "done"
-note = "1.2e. The logging function is called after the global lock is released (deviation D-3). Checked against the wheel in tests/logging_oracle.rs: the lines of config warnings (line breaks, CR, empty lines, a NUL); LogMessage at every level for every level setting, with messages that exercise the trim, the line cutting and the C strings (log_message); LoggingLevelFromString and ToString (logging_level_strings); OCIO_LOGGING_LEVEL, read once, in a new process per case, with the levels, the lines, ResetToDefaultLoggingFunction, SetLoggingFunction(None) and the raw stderr (logging_environment); upstream's test checks the level rules. Not reachable through Python: LogError (only Config::validate logs errors)"
+note = "1.2e. The logging function is called after the global lock is released (deviation D-3). Checked against the wheel in tests/logging_oracle.rs: the lines of config warnings (line breaks, CR, empty lines, a NUL); LogMessage at every level for every level setting, with messages that exercise the trim, the line cutting and the C strings (log_message); LoggingLevelFromString and ToString (logging_level_strings); OCIO_LOGGING_LEVEL, read once, in a new process per case, with the levels, the lines, ResetToDefaultLoggingFunction, SetLoggingFunction(None) and the raw stderr (logging_environment); upstream's test checks the level rules. LogError is reached through Python only by Config.validate, the only caller that logs errors: to be pinned against the wheel in Phase 3, or with a validate command"
 
 [[file]]
 path = "src/OpenColorIO/Logging.h"
@@ -916,7 +916,7 @@ path = "src/OpenColorIO/fileformats/FormatMetadata.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/format_metadata.rs"]
 status = "done"
-note = "1.2a, in ocio-ops because op data holds it. Checked against the wheel in tests/format_metadata_oracle.rs: every call Python reaches, replayed on a transform's metadata (errors, repr() and every node's getters: format_metadata_ops), and combine through the optimizer's matrix composition (format_metadata_combine); and by upstream's tests. Python can't reach getFirstChildIndex, getAttributeValue(name) (only through getName and getID), operator== or getAttributeName past the end. The case rules for attribute names (exact when adding, ASCII-insensitive when looking up and combining) and the misspelled 'reversed' message are copied (improvement candidates I-14, I-15)"
+note = "1.2a, in ocio-ops because op data holds it. Checked against the wheel in tests/format_metadata_oracle.rs: every call Python reaches, replayed on a transform's metadata (errors, repr() and every node's getters: format_metadata_ops), and combine through the optimizer's matrix composition (format_metadata_combine); and by upstream's tests. Python can't reach getAttributeValue(name) (only through getName and getID), operator== or getAttributeName past the end, and reaches getFirstChildIndex only through CDLTransform's getFirstSOPDescription and setFirstSOPDescription (CDLTransform.cpp:331-357), to be pinned against the wheel with the CDL transform (p1-cdl). The case rules for attribute names (exact when adding, ASCII-insensitive when looking up and combining) and the misspelled 'reversed' message are copied (improvement candidates I-14, I-15)"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FormatMetadata.h"
