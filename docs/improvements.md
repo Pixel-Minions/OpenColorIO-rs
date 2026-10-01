@@ -775,13 +775,19 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Upstream:** a CLF or CTF file gives a Matrix op a 3x3 array, 9 values, which
   `MatrixArray::validate` turns into the canonical 4x4 form (`ops/matrix/MatrixOpData.cpp:
   413-436`). Before that, `MatrixOpData::hasAlpha` (and so `isIdentity` and `isNoOp`) reads
-  the values at the 4x4 positions 3 to 15, and `getCacheID` hashes 16 values
-  (`MatrixOpData.cpp:529-614, 846-869`): reads past the 9 values. The processors validate
-  their ops first, so only code that queries such an op directly gets there.
+  the values at the 4x4 positions 3 to 15, `getCacheID` hashes 16 values
+  (`MatrixOpData.cpp:529-614, 846-869`), and the op's `getCPUOp` builds a renderer from 16
+  values (`GetMatrixRenderer`, `ops/matrix/MatrixOpCPU.cpp:400-428`): reads past the 9 values.
+  `isIdentity` returns false first when the matrix has offsets (`MatrixOpData.cpp:534-539`),
+  without the read. The processors validate their ops first, so only code that queries or
+  renders such an op directly gets there.
 - **Decided** (general rule): the port returns an error from those queries instead: "Matrix: a
   3x3 matrix has to be validated before this query: upstream reads past its 9 values."
-  `MatrixOpData::{has_alpha, is_identity, is_no_op, get_cache_id}`, `OpData::{is_no_op,
-  is_identity}`, `Op::{is_no_op, is_identity, get_cache_id}`, `OpVec::{is_no_op,
-  get_cache_id}` and `serialize_op_vec` return `Result`s for it.
-- **Status:** matched in `p1-range` (before 1.3r1); `matrix_op_tests.rs` checks the errors and
-  that validating clears them.
+  `MatrixOpData::{has_alpha, is_identity, is_no_op, get_cache_id}`, `get_matrix_renderer`,
+  `OpData::{is_no_op, is_identity}`, `Op::{is_no_op, is_identity, get_cache_id, get_cpu_op,
+  apply, apply_in_out}`, `OpVec::{is_no_op, get_cache_id}` and `serialize_op_vec` return
+  `Result`s for it. `is_identity` and `is_no_op` answer false for a matrix with offsets, as
+  upstream does.
+- **Status:** matched in `p1-range` (before 1.3r1), the renderer in `p1-matrix`;
+  `matrix_op_tests.rs` checks the errors, the answers with offsets, and that validating clears
+  them.
