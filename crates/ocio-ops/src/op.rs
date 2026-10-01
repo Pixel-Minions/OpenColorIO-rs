@@ -12,9 +12,9 @@
 //!   upstream's is in `OpOptimizers.cpp`.
 //!
 //! Not yet ported: `Op::dumpMetadata`, which needs the processor's metadata (WP 1.8),
-//! `OpRcPtrVec::optimize` and `optimizeForBitdepth` (the optimizer, WP 1.6), and `HasFlag`,
-//! which needs `OptimizationFlags` (chunk 1.2d). The GPU side, `extractGpuShaderInfo`, is
-//! `ocio-gpu`'s.
+//! and `OpRcPtrVec::optimize` and `optimizeForBitdepth` (the optimizer, chunk 1.2d). `HasFlag`
+//! is [`OptimizationFlags::has_flag`](crate::open_color_types::OptimizationFlags::has_flag).
+//! The GPU side, `extractGpuShaderInfo`, is `ocio-gpu`'s.
 
 use std::fmt::{self, Debug};
 use std::ops::{Deref, DerefMut};
