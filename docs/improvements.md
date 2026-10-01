@@ -385,6 +385,29 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p1-range` (1.3r1); `range_op_data_oracle.rs` checks both orders of
   validation and equality against the wheel.
 
+### I-60. The mirror Gamma styles give a negative NaN pixel a different sign per platform
+
+- **Upstream:** without fast math, `GammaBasicMirrorOpCPU::apply` and the two
+  `GammaMoncurveMirrorOpCPU` renderers compute `std::copysign(1.0f, in) * value`
+  (`ops/gamma/GammaOpCPU.cpp:394-414, 707-741, 803-838`), where `value` comes from `|in|`, so
+  for a NaN pixel it is a positive NaN. MSVC builds `±1.0f` and multiplies (Windows wheel
+  `0x1801bd3d0`, the moncurve mirror loop at `0x1801bde60`): the NaN keeps its positive sign.
+  GCC turns the product into its `xorsign` pattern, `value ^ signbit(in)` (Linux wheel
+  `GammaBasicMirrorOpCPU::apply` at `0x384be0`, `GammaMoncurveMirrorOpCPUFwd::apply` at
+  `0x384d30`, `...Rev::apply` at `0x385030`): the NaN takes the input's sign, except in the
+  alpha channel of the two moncurve mirror renderers, where GCC builds `±1.0f` and multiplies
+  too (`docs/spikes/s2-s5.md`, "Windows and Linux differences" 2). Every value other than a
+  NaN gives the same bits on both. The fast-math renderers OR the sign bit back on both
+  platforms.
+- **Who notices:** images with negative NaNs (the sign bit set) through an `ExponentTransform`
+  or `ExponentWithLinearTransform` of the mirror style, with ordinary parameters and fast math
+  off: the output NaN is positive on Windows, negative on Linux (but positive in a moncurve
+  mirror's alpha).
+- **A fix:** one rule for every platform and channel, e.g. always the input's sign.
+- **Status:** matched in `p1-gamma` (S2, 1.3g2): `gamma_op_cpu.rs` reproduces each wheel per
+  renderer and channel (`BASIC_MIRROR_SIGN`, `MONCURVE_MIRROR_SIGN`), and the battery's NaN
+  probes compare it bit for bit on both platforms.
+
 ## Transforms
 
 ### I-11. Copying a group transform shares its children
