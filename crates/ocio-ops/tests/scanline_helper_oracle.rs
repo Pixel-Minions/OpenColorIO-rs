@@ -13,7 +13,8 @@
 //! for byte. Also the helper's errors, from `init`.
 //!
 //! Upstream's `apply(src, dst)` also takes one image as both source and destination; the port's
-//! borrows don't, and that case comes with the CPU processor (chunk 1.2d).
+//! borrows don't, and the helper's `init_same` serves that case, which
+//! `cpu_processor_apply_oracle.rs` checks through the CPU processor's `apply_same`.
 
 mod common;
 
