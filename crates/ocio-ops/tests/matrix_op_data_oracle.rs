@@ -318,7 +318,7 @@ fn check(
 ) {
     match (result.get("exception"), port) {
         (None, Ok(data)) => {
-            let port = String::from_utf8(data.get_cache_id()).unwrap();
+            let port = String::from_utf8(data.get_cache_id().unwrap()).unwrap();
             let wheel = matrix_cache_id(result);
             if port != wheel {
                 failures.push(format!("{}\n  wheel {wheel}\n  port  {port}", what()));
@@ -408,7 +408,10 @@ fn the_composition_matches_the_wheel() {
         let b_data = port_data(b, TransformDirection::Forward);
         let composed = a_data.compose(&b_data).unwrap();
         // `combineWith` makes no op of an identity composition.
-        assert!(!composed.is_no_op(), "{a:?} then {b:?} is the identity");
+        assert!(
+            !composed.is_no_op().unwrap(),
+            "{a:?} then {b:?} is the identity"
+        );
         check(
             || format!("{a:?}\n  then {b:?}"),
             Ok(composed),
@@ -500,7 +503,10 @@ fn nan_and_infinities_compose_as_in_the_wheel() {
             let b_data = port_data(b, b_dir).get_as_forward()?;
             let composed = a_data.compose(&b_data)?;
             // `combineWith` makes no op of an identity composition.
-            assert!(!composed.is_no_op(), "{a:?} then {b:?} is the identity");
+            assert!(
+                !composed.is_no_op().unwrap(),
+                "{a:?} then {b:?} is the identity"
+            );
             Ok(composed)
         });
         check(

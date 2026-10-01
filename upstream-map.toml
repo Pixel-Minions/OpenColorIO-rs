@@ -446,7 +446,7 @@ path = "src/OpenColorIO/Op.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/op.rs", "crates/ocio-ops/src/op_data.rs"]
 status = "partial"
-note = "1.2c: OpCPU's defaults, OpData, GetTypeName, Op, OpRcPtrVec (as OpVec), SerializeOpVec and CreateOpVecFromOpData, with each family's arms added with the family; the Matrix op (before 1.2d): its arms, Op::getIdentityReplacement and OpData::getIdentityReplacement (an identity Matrix op; the Range branch and the overrides that return a range come with their families)"
+note = "1.2c: OpCPU's defaults, OpData, GetTypeName, Op, OpRcPtrVec (as OpVec), SerializeOpVec and CreateOpVecFromOpData, with each family's arms added with the family; the Matrix op (before 1.2d): its arms, Op::getIdentityReplacement and OpData::getIdentityReplacement (an identity Matrix op; the overrides that return a range come with their families); the Range op (1.3r2): its arms, getIdentityReplacement's Range branch, CreateOpVecFromOpData's"
 
 [[file]]
 path = "src/OpenColorIO/Op.h"
@@ -1877,7 +1877,7 @@ path = "src/OpenColorIO/ops/matrix/MatrixOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/matrix/matrix_op.rs", "crates/ocio-gpu/src/gpu_processor.rs"]
 status = "partial"
-note = "p1-engine, before 1.2d: MatrixOffsetOp's methods (clone, getInfo, isSameType, isInverse, canCombineWith, combineWith, finalize, getCacheID, getCPUOp; the op is OpData::Matrix), CreateMatrixOp(ops, MatrixOpDataRcPtr, direction) and CreateIdentityMatrixOp(ops). 1.3m3 (p1-matrix): the factories from values (CreateScaleOp, CreateMatrixOp(m44), CreateOffsetOp, CreateScaleOffsetOp, CreateSaturationOp, CreateMatrixOffsetOp, CreateFitOp, CreateIdentityMatrixOp(ops, direction), CreateMinMaxOp, CreateMatrixOp(MatrixArrayPtr)), the MatrixOffsetOp(m44, offset4, direction) constructor and CreateMatrixTransform; extractGpuShaderInfo is 1.3m4's (p1-gpu-ops): MatrixOffsetOp::extractGpuShaderInfo, in ocio-gpu's extract_op_gpu_shader_info (gpu_processor.rs)."
+note = "p1-engine, before 1.2d: MatrixOffsetOp's methods (clone, getInfo, isSameType, isInverse, canCombineWith, combineWith, finalize, getCacheID, getCPUOp; the op is OpData::Matrix), CreateMatrixOp(ops, MatrixOpDataRcPtr, direction) and CreateIdentityMatrixOp(ops). 1.3m3 (p1-matrix): the factories from values (CreateScaleOp, CreateMatrixOp(m44), CreateOffsetOp, CreateScaleOffsetOp, CreateSaturationOp, CreateMatrixOffsetOp, CreateFitOp, CreateIdentityMatrixOp(ops, direction), CreateMinMaxOp, CreateMatrixOp(MatrixArrayPtr)) and the MatrixOffsetOp(m44, offset4, direction) constructor, checked against the wheel through AllocationTransform, a v1 CDLTransform and .spi1d files (tests/matrix_factories_oracle.rs). Not yet: CreateMatrixTransform and BuildMatrixOp (the MatrixTransform, WP 1.8); the float overloads of CreateMatrixOffsetOp and CreateFitOp are declared in MatrixOp.h and never defined. extractGpuShaderInfo is 1.3m4's (p1-gpu-ops): MatrixOffsetOp::extractGpuShaderInfo, in ocio-gpu's extract_op_gpu_shader_info (gpu_processor.rs)."
 
 [[file]]
 path = "src/OpenColorIO/ops/matrix/MatrixOp.h"
@@ -1946,37 +1946,43 @@ note = "1.2c: NoOpData, FileNoOpData, CreateFileNoOp, CreateLookNoOp; not yet: P
 path = "src/OpenColorIO/ops/range/RangeOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/range/range_op.rs"]
-status = "todo"
+status = "partial"
+note = "1.3r2: RangeOp (the op's behaviors on OpData::Range, its finalize in Op::finalize) and both CreateRangeOp; checked against the wheel through CPU processor cache IDs and pixels (tests/range_op_oracle.rs: combinations, identities, bit depths). Not yet: BuildRangeOp and CreateRangeTransform (the RangeTransform, WP 1.8), extractGpuShaderInfo (1.3r3)"
 
 [[file]]
 path = "src/OpenColorIO/ops/range/RangeOp.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/range/range_op.rs"]
-status = "todo"
+status = "partial"
+note = "see RangeOp.cpp"
 
 [[file]]
 path = "src/OpenColorIO/ops/range/RangeOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/range/range_op_cpu.rs"]
-status = "todo"
+status = "done"
+note = "1.3r2, checked through the battery (tests/range_oracle.rs). The wheels' operand orders for in * scale differ by platform and loop, and don't show: the clamp turns every NaN into the lower bound"
 
 [[file]]
 path = "src/OpenColorIO/ops/range/RangeOpCPU.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/range/range_op_cpu.rs"]
-status = "todo"
+status = "done"
+note = "see RangeOpCPU.cpp"
 
 [[file]]
 path = "src/OpenColorIO/ops/range/RangeOpData.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/range/range_op_data.rs"]
-status = "todo"
+status = "partial"
+note = "1.3r1: everything but the constructor from a CTF IndexMapping (67-103), which comes with the CTF reader in ocio-formats; checked against the wheel through RangeTransform (tests/range_op_data_oracle.rs: validation messages, the scale, offset and inverse bit for bit through convertToMatrix, equality)"
 
 [[file]]
 path = "src/OpenColorIO/ops/range/RangeOpData.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/range/range_op_data.rs"]
-status = "todo"
+status = "partial"
+note = "see RangeOpData.cpp"
 
 [[file]]
 path = "src/OpenColorIO/ops/range/RangeOpGPU.cpp"
@@ -2245,8 +2251,9 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/transforms/MatrixTransform.cpp"
 kind = "src"
-target = ["crates/ocio/src/transforms/matrix_transform.rs"]
-status = "todo"
+target = ["crates/ocio/src/transforms/matrix_transform.rs", "crates/ocio-ops/src/ops/matrix/matrix_op.rs"]
+status = "partial"
+note = "1.3m3: MatrixTransform::Fit and Sat (162-245), which CreateFitOp and CreateSaturationOp call, as ocio-ops' matrix_transform_fit and matrix_transform_sat (doc(hidden), for the transform to reuse); the rest with the transforms (WP 1.8)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/MatrixTransform.h"

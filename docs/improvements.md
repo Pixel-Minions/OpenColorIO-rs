@@ -345,6 +345,46 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **A fix:** stop at 80 passes, and log when the cap stops the loop.
 - **Status:** matched in `p1-engine` (1.2d).
 
+### I-50. A max-only range followed by a min-only one can't be optimized
+
+- **Upstream:** `RangeOpData::compose` (`ops/range/RangeOpData.cpp:352-431`) keeps the first
+  range's input bounds when the composition outputs a constant. For a range with only a
+  maximum followed by one with only a minimum at or above it (or the other way round), the
+  result has an output bound set where its input bound is empty, and its constructor's
+  `validate` raises ("In and out minimum limits must be both set or both missing in Range.",
+  or the maximum's). So the optimizer, which combines neighbouring Range ops
+  (`RangeOp::combineWith`, `ops/range/RangeOp.cpp:150-174`), can't build the CPU processor,
+  at every optimization level that combines ranges. Seen through the wheel, for
+  `[-, 0.5] -> [-, 0.5]` then `[0.5, -] -> [0.5, -]`, and the reverse.
+- **Who notices:** a processor with such a pair of ranges, which raises instead of clamping
+  every value to 0.5.
+- **A fix:** when the composition outputs a constant, make a range that outputs it for every
+  input: two distinct input bounds, and the constant as both output bounds (such as
+  `[0, 1] -> [0.5, 0.5]`, which the wheel accepts: it clamps every value below 0 and above 1 to
+  0.5 too). The input bounds of the two ranges don't do: here they combine into `[0.5, 0.5]`,
+  which `validate` refuses as too close, or into one-sided bounds.
+- **Status:** matched in `p1-range` (1.3r2).
+
+### I-51. Range bounds and ranges compare differently in each order
+
+- **Upstream:** `RangeOpData::FloatsDiffer(x1, x2)` (`ops/range/RangeOpData.cpp:313-330`)
+  compares with an absolute tolerance of 1e-6 when `|x1| < 1e-3` and a relative one otherwise,
+  chosen by the first argument only. So the result depends on the order: `FloatsDiffer(9.995e-4,
+  1e-3)` is false (absolute, 5e-7 apart) and `FloatsDiffer(1e-3, 9.995e-4)` true (relative,
+  5e-4). `validate` compares a one-sided range's output bound with its input bound
+  (`FloatsDiffer(minOut, minIn)`, `RangeOpData.cpp:244-258`): the wheel accepts
+  `[1e-3, -] -> [9.995e-4, -]` and refuses `[9.995e-4, -] -> [1e-3, -]` ("In and out minimum
+  limits must be equal"), and likewise for the maximum-only pair. `equals` compares each bound
+  with the other range's (`RangeOpData.cpp:515-546`), so it isn't symmetric: a range with
+  bounds 9.995e-4 equals one with bounds 1e-3, but not the other way round, and so do the
+  `RangeTransform`s that hold them.
+- **Who notices:** one-sided ranges with bounds near 1e-3 that differ by less than 1e-6, and
+  code that compares ranges or `RangeTransform`s with `equals`.
+- **A fix:** choose the tolerance from both values (for example, absolute when both are below
+  1e-3), so that the comparison is symmetric.
+- **Status:** matched in `p1-range` (1.3r1); `range_op_data_oracle.rs` checks both orders of
+  validation and equality against the wheel.
+
 ## Transforms
 
 ### I-11. Copying a group transform shares its children
@@ -752,3 +792,25 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   upstream reads and writes them (I-1).
 - **Status:** matched in `p1-bitdepth`, in `crates/ocio-ops/src/image_packing.rs`;
   `image_packing_tests.rs` checks it on small buffers, with that row's wrapped start on Windows.
+
+### U-16. Queries of a 3x3 matrix before it is validated
+
+- **Upstream:** a CLF or CTF file gives a Matrix op a 3x3 array, 9 values, which
+  `MatrixArray::validate` turns into the canonical 4x4 form (`ops/matrix/MatrixOpData.cpp:
+  413-436`). Before that, `MatrixOpData::hasAlpha` (and so `isIdentity` and `isNoOp`) reads
+  the values at the 4x4 positions 3 to 15, `getCacheID` hashes 16 values
+  (`MatrixOpData.cpp:529-614, 846-869`), and the op's `getCPUOp` builds a renderer from 16
+  values (`GetMatrixRenderer`, `ops/matrix/MatrixOpCPU.cpp:400-428`): reads past the 9 values.
+  `isIdentity` returns false first when the matrix has offsets (`MatrixOpData.cpp:534-539`),
+  without the read. The processors validate their ops first, so only code that queries or
+  renders such an op directly gets there.
+- **Decided** (general rule): the port returns an error from those queries instead: "Matrix: a
+  3x3 matrix has to be validated before this query: upstream reads past its 9 values."
+  `MatrixOpData::{has_alpha, is_identity, is_no_op, get_cache_id}`, `get_matrix_renderer`,
+  `OpData::{is_no_op, is_identity}`, `Op::{is_no_op, is_identity, get_cache_id, get_cpu_op,
+  apply, apply_in_out}`, `OpVec::{is_no_op, get_cache_id}` and `serialize_op_vec` return
+  `Result`s for it. `is_identity` and `is_no_op` answer false for a matrix with offsets, as
+  upstream does.
+- **Status:** matched in `p1-range` (before 1.3r1), the renderer in `p1-matrix`;
+  `matrix_op_tests.rs` checks the errors, the answers with offsets, and that validating clears
+  them.

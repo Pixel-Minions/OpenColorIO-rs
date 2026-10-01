@@ -41,6 +41,11 @@ fn matrix_processor(
     super::CpuProcessor::new(&ops, input, output, OptimizationFlags::DEFAULT).unwrap()
 }
 
+/// A matrix processor has no dynamic property, and asking for one gives upstream's message.
+/// `is_dynamic` is checked against the wheel in `tests/cpu_processor_oracle.rs`
+/// (`is_dynamic_matches_the_wheel`).
+///
+/// Hand-derived: the oracle doesn't expose hasDynamicProperty; pinned in p1-processor.
 #[test]
 fn a_matrix_processor_has_no_dynamic_property() {
     let cpu = matrix_processor(
@@ -48,7 +53,6 @@ fn a_matrix_processor_has_no_dynamic_property() {
         BitDepth::F16,
         BitDepth::Uint10,
     );
-    assert!(!cpu.is_dynamic());
     assert!(!cpu.has_dynamic_property(DynamicPropertyType::Exposure));
     // The message of upstream's `CPUProcessor, dynamic_properties` test.
     assert_eq!(

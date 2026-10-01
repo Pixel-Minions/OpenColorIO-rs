@@ -357,7 +357,7 @@ fn create_cpu_engine(
     for (idx, op) in ops.iter().enumerate() {
         // (A Lut1D at either end: `GetLut1DRenderer` converts the bit depths.)
         match &**op.data() {
-            OpData::Matrix(_) | OpData::Reference(_) | OpData::NoOp(_) => {}
+            OpData::Matrix(_) | OpData::Range(_) | OpData::Reference(_) | OpData::NoOp(_) => {}
         }
 
         if idx == 0 {
@@ -446,7 +446,7 @@ impl CpuProcessor {
 
         let ops = finalize_ops_for_cpu(raw_ops, in_bit_depth, out_bit_depth, o_flags)?;
 
-        let is_identity = ops.is_no_op();
+        let is_identity = ops.is_no_op()?;
         let is_no_op = is_identity && in_bit_depth == out_bit_depth;
 
         // Does the color processing introduce crosstalk between the pixel channels?
@@ -465,7 +465,7 @@ impl CpuProcessor {
             o_flags.0
         )
         .into_bytes();
-        cache_id.extend_from_slice(&ops.get_cache_id());
+        cache_id.extend_from_slice(&ops.get_cache_id()?);
 
         Ok(CpuProcessor {
             engine,

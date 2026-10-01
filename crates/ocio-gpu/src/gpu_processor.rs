@@ -158,14 +158,14 @@ impl GpuProcessor {
         ops.validate_dynamic_properties()?;
 
         // Is NoOp ?
-        let is_no_op = ops.is_no_op();
+        let is_no_op = ops.is_no_op()?;
 
         // Does the color processing introduce crosstalk between the pixel channels?
         let has_channel_crosstalk = ops.has_channel_crosstalk();
 
         // Calculate and assemble the GPU cache ID from the ops.
         let mut cache_id = format!("GPU Processor: oFlags {} ops : ", o_flags.0).into_bytes();
-        cache_id.extend_from_slice(&ops.get_cache_id());
+        cache_id.extend_from_slice(&ops.get_cache_id()?);
 
         Ok(GpuProcessor {
             ops,

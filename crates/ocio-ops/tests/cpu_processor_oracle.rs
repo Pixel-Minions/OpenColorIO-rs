@@ -728,3 +728,61 @@ fn unsupported_bit_depths_match_the_wheel() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// `isDynamic` against the wheel's, through the oracle's `processor_ops`: the processor's is its
+/// ops' (`Processor::Impl::isDynamic`, src/OpenColorIO/Processor.cpp:316-319 @ v2.5.2), which
+/// the port's [`OpVec::is_dynamic`] of the processor's ops gives; and the optimized processor's,
+/// for the ops a CPU processor renders with the same flags, which
+/// [`CpuProcessor::is_dynamic`] asks of their renderers (CPUProcessor.cpp:242-263), at F32.
+///
+/// Vacuous for now: every op ported so far (Matrix, Range, the no-ops) is static, so both sides
+/// are false for every chain. Extend the chains with a dynamic op (ExposureContrast, the
+/// grading ops) when one is ported.
+#[test]
+fn is_dynamic_matches_the_wheel() {
+    use ocio_testkit::processor_ops::ProcessorOpsRequest;
+
+    let _logging = LOGGING.lock().unwrap_or_else(|e| e.into_inner());
+    let chains = chains();
+    let mut cases = Vec::new();
+    for chain in &chains {
+        for flags in &FLAGS {
+            cases.push((chain, flags));
+        }
+    }
+    let requests: Vec<ProcessorOpsRequest> = cases
+        .iter()
+        .map(|(chain, (flags, _))| {
+            let children: Vec<Value> = chain.iter().map(|(m, dir)| transform(m, *dir)).collect();
+            let mut request = ProcessorOpsRequest::new(json!({
+                "transform": {"class": "GroupTransform", "children": children},
+            }));
+            request.optimization = Some(json!(flags));
+            request
+        })
+        .collect();
+    let calls: Vec<BatchCall<'_>> = requests.iter().map(ProcessorOpsRequest::call).collect();
+    let responses = Oracle::get().batch(&calls, true);
+
+    let mut failures = Vec::new();
+    for ((chain, (name, flags)), response) in cases.iter().zip(responses) {
+        let reply = ocio_testkit::processor_ops::ProcessorOpsReply::from_response(
+            response.unwrap_or_else(|e| panic!("{e}")),
+        );
+        let wheel = (
+            reply.processor.as_ref().expect("a processor").is_dynamic,
+            reply
+                .optimized
+                .as_ref()
+                .expect("an optimized processor")
+                .is_dynamic,
+        );
+        let raw = raw_ops(chain);
+        let cpu = CpuProcessor::new(&raw, BitDepth::F32, BitDepth::F32, *flags).unwrap();
+        let port = (raw.is_dynamic(), cpu.is_dynamic());
+        if port != wheel {
+            failures.push(format!("{chain:?} {name}: wheel {wheel:?}, port {port:?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}

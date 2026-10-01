@@ -58,8 +58,8 @@ fn no_op_data() {
     for data in [file_data(b"file.clf"), look_data(b"look")] {
         assert_eq!(data.get_type(), OpDataType::NoOp);
         assert!(data.validate().is_ok());
-        assert!(data.is_no_op());
-        assert!(data.is_identity());
+        assert!(data.is_no_op().unwrap());
+        assert!(data.is_identity().unwrap());
         assert!(!data.has_channel_crosstalk());
         assert_eq!(data.get_cache_id().unwrap(), b"");
 
