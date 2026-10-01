@@ -2,8 +2,8 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 use super::*;
-use ocio_testkit::crt;
 use ocio_testkit::probe::{self, Rng};
+use ocio_testkit::{assert_text_eq, crt};
 
 /// Port of `OCIO_ADD_TEST(GpuShaderUtils, float_to_string)` @ v2.5.2.
 #[test]
@@ -22,8 +22,10 @@ fn float_to_string() {
 /// A literal's digits are what the platform's C runtime writes for `%.9g` (a `float`, which
 /// `std::ostream` promotes to `double`) or `%.17g` (a `double`): upstream's
 /// `oss.precision(std::numeric_limits<T>::max_digits10); oss << value`. The C runtime spells
-/// infinities and NaNs too. Finite whole numbers get a `.`. Every language but Cg writes the
-/// value as it is (Cg clamps it to the half range first; the oracle checks that).
+/// infinities and NaNs too, with every sign and payload. In every language but Cg, which
+/// clamps the value first, the literal is those digits, with or without a `.` after them.
+/// Whether the `.` is there, and Cg's literals, are checked against the wheel's shaders in
+/// `tests/gpu_shader_utils_oracle.rs` (`literals_are_the_wheels`).
 #[test]
 fn literals_are_the_c_runtime_digits() {
     let mut floats = probe::specials();
@@ -40,31 +42,19 @@ fn literals_are_the_c_runtime_digits() {
             continue;
         }
         for &v in &floats {
-            let dot = if v.is_finite() && v.fract() == 0.0 {
-                "."
-            } else {
-                ""
-            };
-            let expected = crt::format_f64("%.9g", f64::from(v)) + dot;
-            assert_eq!(
-                get_float_string(v, lang),
-                expected,
-                "{:#010x} {lang:?}",
-                v.to_bits()
+            let literal = get_float_string(v, lang);
+            assert_text_eq(
+                &format!("{:#010x} {lang:?}", v.to_bits()),
+                &crt::format_f64("%.9g", f64::from(v)),
+                literal.strip_suffix('.').unwrap_or(&literal),
             );
         }
         for &v in &doubles {
-            let dot = if v.is_finite() && v.fract() == 0.0 {
-                "."
-            } else {
-                ""
-            };
-            let expected = crt::format_f64("%.17g", v) + dot;
-            assert_eq!(
-                get_float_string(v, lang),
-                expected,
-                "{:#018x} {lang:?}",
-                v.to_bits()
+            let literal = get_float_string(v, lang);
+            assert_text_eq(
+                &format!("{:#018x} {lang:?}", v.to_bits()),
+                &crt::format_f64("%.17g", v),
+                literal.strip_suffix('.').unwrap_or(&literal),
             );
         }
     }
