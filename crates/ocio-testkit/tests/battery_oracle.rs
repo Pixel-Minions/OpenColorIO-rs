@@ -680,3 +680,52 @@ fn allow_log_needs_a_fragment_specific_to_the_wheels_message() {
     let summary = run_with(&family, &small_plan());
     assert_eq!(summary.comparisons, 2);
 }
+
+/// A version 1 config spec reaches the wheel: a LogTransform gives the same pixels through it
+/// as through the JSON spec (both build a Log op), and an ExponentTransform builds an
+/// Exponent op in it, where the version 2 YAML spec builds a Gamma op (`BuildExponentOp`,
+/// src/OpenColorIO/ops/gamma/GammaOp.cpp:190-215 @ v2.5.2).
+#[test]
+fn a_version_1_spec_builds_version_1_ops() {
+    let combo = Combo {
+        direction: Direction::Forward,
+        fast_math: false,
+        format: ocio_testkit::battery::Format::F32_RGBA,
+    };
+    let input = f32_to_bytes(&ocio_testkit::probe::to_rgba_cycled(&specials()));
+    let specs = [
+        Spec::Transform(json!({"class": "LogTransform", "args": {"base": 10.0}})),
+        Spec::YamlV1("!<LogTransform> {base: 10}".to_string()),
+        Spec::Yaml("!<ExponentTransform> {value: [2.2, 2.2, 2.2, 1]}".to_string()),
+        Spec::YamlV1("!<ExponentTransform> {value: [2.2, 2.2, 2.2, 1]}".to_string()),
+    ];
+    let calls: Vec<_> = specs
+        .iter()
+        .map(|spec| ocio_testkit::oracle::BatchCall {
+            cmd: "cpu_apply",
+            args: spec.cpu_apply_args(&combo),
+            blobs: vec![input.as_slice()],
+        })
+        .collect();
+    let responses: Vec<_> = Oracle::get()
+        .batch(&calls, true)
+        .into_iter()
+        .map(|r| {
+            let r = r.expect("the oracle");
+            assert!(r.result.get("exception").is_none(), "{}", r.result);
+            r
+        })
+        .collect();
+    assert_eq!(
+        responses[0].blobs, responses[1].blobs,
+        "a Log op through JSON and through a version 1 config"
+    );
+    let cache_id = |i: usize| {
+        responses[i].result["cpu_cache_id"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert!(cache_id(2).contains("<GammaOp "), "{}", cache_id(2));
+    assert!(cache_id(3).contains("<ExponentOp "), "{}", cache_id(3));
+}
