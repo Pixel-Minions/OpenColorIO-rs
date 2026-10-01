@@ -90,7 +90,7 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
 ## The oracle
 
 - `ocio_testkit::Oracle::get().call(cmd, json_args, &[blobs])` runs a command of `oracle/ocio_oracle/` in the pinned wheel on this machine.
-- Responses are cached under `<target>/oracle-cache`. The cache key covers the oracle sources, the lock file and this machine's CPU.
+- Responses are cached under `<target>/oracle-cache`. The cache key covers the oracle sources, the lock file, upstream's test files (`upstream/OpenColorIO/tests/data`) and this machine's CPU.
 - Pixel checks always run live, because the kernel choice and the math library belong to the machine. Never commit pixel data.
 - Text that is identical on every platform is committed with `cargo xtask oracle regen <group>` (groups live in `oracle/ocio_oracle/regen.py`). Tests read it with `ocio_testkit::fixtures::read_text`.
 - **New oracle commands.**

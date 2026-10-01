@@ -17,10 +17,11 @@
 //! its `result`, not a protocol error.
 //!
 //! Responses are cached under `<target>/oracle-cache`, keyed by the request, the oracle's
-//! sources and lock file, and this machine's OS and CPU ([`machine_description`]). Set
-//! `OCIO_RS_ORACLE_NO_CACHE=1` to bypass the cache. Environment variables named `OCIO` or
-//! `OCIO_*` are never passed to the oracle, so its results don't depend on the caller's
-//! environment.
+//! sources and lock file, upstream's test files (which requests name by path), and this
+//! machine's OS and CPU ([`machine_description`]). Set
+//! `OCIO_RS_ORACLE_NO_CACHE=1` to bypass the cache. Environment variables named `OCIO`,
+//! `OCIO_*` or `PYTHON*` are never passed to the oracle's processes ([`isolate`]), so their
+//! results and output don't depend on the caller's environment.
 //!
 //! Under Intel SDE (`scripts/sde.sh`), the test process and the oracle it starts both see the
 //! emulated CPU, so the wheel and the port dispatch to the SIMD kernels of that CPU.
@@ -147,25 +148,24 @@ impl Oracle {
         &self.python
     }
 
+    /// A command that runs the oracle environment's Python as the oracle runs: from the oracle's
+    /// directory, so `ocio_oracle` imports, in the caller's environment less what [`isolate`]
+    /// removes. Every process of the oracle starts this way.
+    pub fn command(&self) -> Command {
+        let mut command = Command::new(&self.python);
+        command.current_dir(paths::oracle_dir());
+        isolate(&mut command);
+        command
+    }
+
     /// Runs `script` in the oracle's environment, as the oracle runs (from its directory, so
     /// `ocio_oracle` imports, and without the caller's `OCIO` variables), with `args`, and
     /// returns the lines it prints. For tests that read the wheel independently of a command,
     /// or reach a check no request can. Panics if the script fails. Nothing is cached.
     #[track_caller]
     pub fn run_script(&self, script: &str, args: &[String]) -> Vec<String> {
-        let mut command = Command::new(&self.python);
-        command
-            .args(["-X", "utf8", "-c", script])
-            .args(args)
-            .current_dir(paths::oracle_dir())
-            .env("PYTHONDONTWRITEBYTECODE", "1")
-            .env_remove("PYTHONPATH");
-        for (key, _) in std::env::vars_os() {
-            let key_str = key.to_string_lossy();
-            if key_str == "OCIO" || key_str.starts_with("OCIO_") {
-                command.env_remove(&key);
-            }
-        }
+        let mut command = self.command();
+        command.args(["-X", "utf8", "-c", script]).args(args);
         let output = command.output().expect("the oracle's Python runs");
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(
@@ -288,61 +288,89 @@ impl Oracle {
     }
 
     fn run(&self, request: &[u8]) -> Result<Vec<u8>, String> {
-        let mut command = Command::new(&self.python);
-        command
-            .args(["-X", "utf8", "-m", "ocio_oracle"])
-            .current_dir(paths::oracle_dir())
-            .env("PYTHONDONTWRITEBYTECODE", "1")
-            .env_remove("PYTHONPATH")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        for (key, _) in std::env::vars_os() {
-            let key_str = key.to_string_lossy();
-            if key_str == "OCIO" || key_str.starts_with("OCIO_") {
-                command.env_remove(&key);
-            }
-        }
-        let mut child = command
-            .spawn()
-            .map_err(|e| format!("could not start {}: {e}", self.python.display()))?;
-
-        // Write on a separate thread so a large response can't deadlock a large request. Both
-        // directions move at most PIPE_PIECE bytes per call: on Windows, one pipe read or write
-        // of several megabytes can fail when the system is short of kernel memory, and a failed
-        // write left the oracle with an empty request ("EOFError: expected 4 bytes, got 0").
-        let mut stdin = child.stdin.take().expect("piped stdin");
-        let request_len = request.len();
-        let request = request.to_vec();
-        let writer = std::thread::spawn(move || -> std::io::Result<()> {
-            for piece in request.chunks(PIPE_PIECE) {
-                stdin.write_all(piece)?;
-            }
-            Ok(())
-        });
-        let stdout = read_in_pieces(&mut child.stdout.take().expect("piped stdout"))
-            .map_err(|e| format!("reading the oracle's response failed: {e}"))?;
-        let stderr = read_in_pieces(&mut child.stderr.take().expect("piped stderr"))
-            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-            .unwrap_or_default();
-        let status = child.wait().map_err(|e| e.to_string())?;
-        let written = writer
-            .join()
-            .unwrap_or_else(|_| Err(std::io::Error::other("the writer thread panicked")));
-        // The exit status says how the oracle died when it stopped reading early: under Intel
-        // SDE on Windows, it has exited mid-request without writing anything to stderr.
-        if let Err(e) = written {
-            return Err(format!(
-                "writing the {}-byte request to the oracle failed: {e}; the oracle exited with \
-                 {status}\n{stderr}",
-                request_len
-            ));
-        }
-        if !status.success() {
-            return Err(format!("oracle exited with {status}\n{stderr}"));
-        }
-        Ok(stdout)
+        let mut command = self.command();
+        command.args(["-X", "utf8", "-m", "ocio_oracle"]);
+        exchange(command, request)
     }
+}
+
+/// Removes from `command`'s environment the variables named `OCIO` or `OCIO_*`, which would
+/// change what OCIO does, and every `PYTHON*` variable, which would change what Python does or
+/// writes (`PYTHONPATH`, `PYTHONHOME`, `PYTHONVERBOSE`, `PYTHONWARNINGS`, ...); then sets
+/// `PYTHONDONTWRITEBYTECODE=1`, so the oracle leaves no `__pycache__` in the checkout.
+pub fn isolate(command: &mut Command) -> &mut Command {
+    isolate_from(command, std::env::vars_os().map(|(key, _)| key))
+}
+
+/// [`isolate`], for the variable names `names`. Names compare in ASCII upper case: Windows
+/// looks variables up whatever their case (`pythonoptimize` sets Python's `-O` there), and on
+/// Linux removing a lower-case name changes nothing the oracle reads.
+fn isolate_from(
+    command: &mut Command,
+    names: impl IntoIterator<Item = std::ffi::OsString>,
+) -> &mut Command {
+    for key in names {
+        let name = key.to_string_lossy().to_ascii_uppercase();
+        if name == "OCIO" || name.starts_with("OCIO_") || name.starts_with("PYTHON") {
+            command.env_remove(&key);
+        }
+    }
+    command.env("PYTHONDONTWRITEBYTECODE", "1")
+}
+
+/// Starts `command`, writes `request` to its stdin, and returns its stdout once it exits
+/// successfully. Each pipe has its own thread or loop, so the process never waits on a full
+/// pipe: the request is written on a thread (a large response can't deadlock a large
+/// request), stderr is read on another (a process that writes more than a pipe holds to
+/// stderr before it closes stdout can't hang), and stdout is read here.
+fn exchange(mut command: Command, request: &[u8]) -> Result<Vec<u8>, String> {
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let program = command.get_program().to_string_lossy().into_owned();
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("could not start {program}: {e}"))?;
+
+    // Both directions move at most PIPE_PIECE bytes per call: on Windows, one pipe read or
+    // write of several megabytes can fail when the system is short of kernel memory, and a
+    // failed write left the oracle with an empty request ("EOFError: expected 4 bytes, got 0").
+    let mut stdin = child.stdin.take().expect("piped stdin");
+    let request_len = request.len();
+    let request = request.to_vec();
+    let writer = std::thread::spawn(move || -> std::io::Result<()> {
+        for piece in request.chunks(PIPE_PIECE) {
+            stdin.write_all(piece)?;
+        }
+        Ok(())
+    });
+    let mut stderr_pipe = child.stderr.take().expect("piped stderr");
+    let stderr_reader = std::thread::spawn(move || read_in_pieces(&mut stderr_pipe));
+    let stdout = read_in_pieces(&mut child.stdout.take().expect("piped stdout"));
+    let stderr = stderr_reader
+        .join()
+        .ok()
+        .and_then(Result::ok)
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+        .unwrap_or_default();
+    let status = child.wait().map_err(|e| e.to_string())?;
+    let stdout = stdout.map_err(|e| format!("reading the oracle's response failed: {e}"))?;
+    let written = writer
+        .join()
+        .unwrap_or_else(|_| Err(std::io::Error::other("the writer thread panicked")));
+    // The exit status says how the oracle died when it stopped reading early: under Intel
+    // SDE on Windows, it has exited mid-request without writing anything to stderr.
+    if let Err(e) = written {
+        return Err(format!(
+            "writing the {request_len}-byte request to the oracle failed: {e}; the oracle \
+             exited with {status}\n{stderr}"
+        ));
+    }
+    if !status.success() {
+        return Err(format!("oracle exited with {status}\n{stderr}"));
+    }
+    Ok(stdout)
 }
 
 /// The most bytes one read or write moves through a pipe to or from the oracle.
@@ -365,7 +393,7 @@ fn read_in_pieces(stream: &mut impl Read) -> std::io::Result<Vec<u8>> {
 /// Whether `python` exists and starts.
 fn python_runs(python: &Path) -> bool {
     python.is_file()
-        && Command::new(python)
+        && isolate(&mut Command::new(python))
             .args(["-c", "pass"])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -380,6 +408,14 @@ fn uv_program() -> PathBuf {
 
 /// Hash of everything that determines the oracle's answers on this machine.
 fn identity(oracle_dir: &Path) -> Result<u128, String> {
+    identity_with(
+        oracle_dir,
+        &paths::upstream_dir().join("tests").join("data"),
+    )
+}
+
+/// [`identity`], with upstream's test files in `test_data`.
+fn identity_with(oracle_dir: &Path, test_data: &Path) -> Result<u128, String> {
     let mut files = Vec::new();
     for name in ["pyproject.toml", "uv.lock", ".python-version"] {
         files.push(oracle_dir.join(name));
@@ -395,8 +431,33 @@ fn identity(oracle_dir: &Path) -> Result<u128, String> {
         h.update(&(bytes.len() as u64).to_le_bytes());
         h.update(&bytes);
     }
+    hash_test_data(&mut h, test_data);
     h.update(machine_description().as_bytes());
     Ok(h.digest128())
+}
+
+/// Hashes upstream's test files (`upstream/OpenColorIO/tests/data`), which requests name by
+/// path (a CLF to load, a config's search path), into the cache key: each file's path, length
+/// and bytes, in path order. Without the submodule checked out, the key differs from any with
+/// it, so a response made then (an `ExceptionMissingFile`) is never replayed once the files
+/// are there. About 260 files, 33 MB, hashed once per process.
+fn hash_test_data(h: &mut Xxh3, data: &Path) {
+    let mut files = Vec::new();
+    collect_files(data, &mut files);
+    files.sort();
+    h.update(b"upstream test data");
+    h.update(&(files.len() as u64).to_le_bytes());
+    for file in &files {
+        let rel = file.strip_prefix(data).unwrap_or(file);
+        h.update(rel.to_string_lossy().replace('\\', "/").as_bytes());
+        match std::fs::read(file) {
+            Ok(bytes) => {
+                h.update(&(bytes.len() as u64).to_le_bytes());
+                h.update(&bytes);
+            }
+            Err(_) => h.update(b"unreadable"),
+        }
+    }
 }
 
 /// Every file under `dir`, at any depth, except Python's bytecode caches (`__pycache__`),
@@ -623,6 +684,79 @@ pub fn bytes_to_f32(bytes: &[u8]) -> Vec<f32> {
 
 #[cfg(test)]
 mod tests {
+
+    /// The test data's hash, as the cache key takes it.
+    fn data_hash(dir: &Path) -> u128 {
+        let mut h = Xxh3::new();
+        hash_test_data(&mut h, dir);
+        h.digest128()
+    }
+
+    /// Test data that is missing, added, or changed in its bytes or path gives another key, so
+    /// a response made without upstream's files (or with others) is never replayed.
+    #[test]
+    fn the_cache_key_follows_the_test_data() {
+        let dir = paths::target_dir().join(format!("oracle_key_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let missing = data_hash(&dir);
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        let empty = data_hash(&dir);
+        std::fs::write(dir.join("sub").join("a.clf"), b"one").unwrap();
+        let one = data_hash(&dir);
+        std::fs::write(dir.join("sub").join("a.clf"), b"two").unwrap();
+        let two = data_hash(&dir);
+        std::fs::rename(dir.join("sub").join("a.clf"), dir.join("sub").join("b.clf")).unwrap();
+        let renamed = data_hash(&dir);
+        std::fs::write(dir.join("sub").join("b.clf"), b"two").unwrap();
+        assert_eq!(data_hash(&dir), renamed);
+        std::fs::remove_dir_all(&dir).unwrap();
+        let keys = [missing, one, two, renamed];
+        for (i, a) in keys.iter().enumerate() {
+            for b in &keys[i + 1..] {
+                assert_ne!(a, b);
+            }
+        }
+        // An empty directory and a missing one have no file either way.
+        assert_eq!(missing, empty);
+    }
+
+    /// A process that writes more to stderr than a pipe holds before it closes stdout still
+    /// gives its stdout back: stderr is drained while stdout is read. A hang fails the test
+    /// after two minutes rather than stalling the run.
+    #[test]
+    fn a_large_stderr_does_not_block_the_exchange() {
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            large_stderr_exchange();
+            let _ = done.send(());
+        });
+        match finished.recv_timeout(std::time::Duration::from_secs(120)) {
+            Ok(()) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                panic!("the exchange didn't return in 120 s: blocked on stderr")
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                panic!("the exchange failed (its panic is printed above)")
+            }
+        }
+    }
+
+    fn large_stderr_exchange() {
+        let mut command = super::Oracle::get().command();
+        command.args([
+            "-c",
+            "import sys\n\
+             request = sys.stdin.buffer.read()\n\
+             sys.stderr.write('e' * (1 << 20))\n\
+             sys.stderr.flush()\n\
+             sys.stdout.buffer.write(request[::-1])\n",
+        ]);
+        let request: Vec<u8> = (0..=255u8).cycle().take(200_000).collect();
+        let stdout = super::exchange(command, &request).expect("the exchange");
+        let reversed: Vec<u8> = request.iter().rev().copied().collect();
+        assert_eq!(stdout, reversed);
+    }
+
     use super::*;
 
     /// A batch in which a call raised is never cached, and never replayed from the cache: the
@@ -720,5 +854,67 @@ mod tests {
             "a data file didn't change the identity"
         );
         assert_ne!(code_changed, before, "a module didn't change the identity");
+    }
+
+    /// The cache identity takes upstream's test files: the same oracle with and without a test
+    /// file, or with other bytes in it, has another identity.
+    #[test]
+    fn the_identity_covers_upstream_test_data() {
+        let dir = paths::target_dir().join(format!("testkit-identity-data-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("ocio_oracle")).unwrap();
+        for name in ["pyproject.toml", "uv.lock", ".python-version"] {
+            std::fs::write(dir.join(name), "x").unwrap();
+        }
+        let data = dir.join("data");
+        let missing = identity_with(&dir, &data).unwrap();
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::write(data.join("a.clf"), "one").unwrap();
+        let one = identity_with(&dir, &data).unwrap();
+        std::fs::write(data.join("a.clf"), "two").unwrap();
+        let two = identity_with(&dir, &data).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_ne!(missing, one, "a test file didn't change the identity");
+        assert_ne!(one, two, "a test file's bytes didn't change the identity");
+    }
+
+    /// `isolate` removes `OCIO`, `OCIO_*` and `PYTHON*` in any case (Windows finds a variable
+    /// whatever its case), keeps the others, and sets `PYTHONDONTWRITEBYTECODE`.
+    #[test]
+    fn isolate_removes_ocio_and_python_variables_in_any_case() {
+        let names = [
+            "OCIO",
+            "OCIO_LOGGING_LEVEL",
+            "ocio_lut_cache",
+            "PYTHONVERBOSE",
+            "pythonoptimize",
+            "PythonPath",
+            "OCIOX",
+            "PATH",
+            "MY_PYTHON",
+        ];
+        let mut command = Command::new("x");
+        isolate_from(&mut command, names.iter().map(std::ffi::OsString::from));
+        let envs: Vec<(String, Option<String>)> = command
+            .get_envs()
+            .map(|(k, v)| {
+                (
+                    k.to_string_lossy().into_owned(),
+                    v.map(|v| v.to_string_lossy().into_owned()),
+                )
+            })
+            .collect();
+        let removed = |name: &str| envs.iter().any(|(k, v)| k == name && v.is_none());
+        for name in &names[..6] {
+            assert!(removed(name), "{name} was kept: {envs:?}");
+        }
+        for name in &names[6..] {
+            assert!(!removed(name), "{name} was removed: {envs:?}");
+        }
+        assert!(
+            envs.iter()
+                .any(|(k, v)| k == "PYTHONDONTWRITEBYTECODE" && v.as_deref() == Some("1")),
+            "{envs:?}"
+        );
     }
 }
