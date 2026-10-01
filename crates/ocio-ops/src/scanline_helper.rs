@@ -578,6 +578,9 @@ impl<'a, I: Generic, O: Generic> ScanlineHelper<'a> for GenericScanlineHelper<'a
                         let (start, end) = packed_row(src_img, *y_index, size_of::<I>());
                         let src_row = &src_buffers[src_img.r_data.buffer][start..end];
                         let src_values = row_values(src_row, own_in)?;
+                        // The codes a 1D LUT lookup can't take are an error first
+                        // (docs/improvements.md, U-1).
+                        src_img.bit_depth_op.check_input(I::pixels(src_values))?;
                         src_img
                             .bit_depth_op
                             .apply_bit_depth(I::pixels(src_values), PixelsMut::F32(rgba));
@@ -607,6 +610,9 @@ impl<'a, I: Generic, O: Generic> ScanlineHelper<'a> for GenericScanlineHelper<'a
                 let (start, end) = packed_row(src_img, *y_index, size_of::<I>());
                 let src_row = &src_buffers[src_img.r_data.buffer][start..end];
                 let src_values = row_values(src_row, own_in)?;
+                // The codes a 1D LUT lookup can't take are an error first
+                // (docs/improvements.md, U-1).
+                src_img.bit_depth_op.check_input(I::pixels(src_values))?;
                 src_img
                     .bit_depth_op
                     .apply_bit_depth(I::pixels(src_values), PixelsMut::F32(rgba));

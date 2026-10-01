@@ -131,7 +131,7 @@ path = "src/OpenColorIO/CPUProcessor.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/cpu_processor.rs"]
 status = "partial"
-note = "1.1d: BitDepthCast (20-66) and CreateGenericBitDepthHelper (68-116), the conversions at the ends of a CPU processor, which the scanline helper runs; 1.2d: CreateCPUEngine (122-184; its Lut1D ends come with the Lut1D op), FinalizeOpsForCPU (311-338), CPUProcessor::Impl::finalize (341-377) as CpuProcessor::new, the queries and the dynamic properties (242-309, 491-534), CreateScanlineHelper (187-238) and the image apply methods (379-431, 541-549; apply(img, img) as apply_same), checked against the wheel through image_apply (tests/cpu_processor_apply_oracle.rs), and applyRGB and applyRGBA (433-465, 551-559), each wheel's in-place conversions (I-41), checked through image_apply identities (tests/cpu_processor_apply_rgb_oracle.rs); the Lut1D ends of CreateCPUEngine come with the Lut1D op"
+note = "1.1d: BitDepthCast (20-66) and CreateGenericBitDepthHelper (68-116), the conversions at the ends of a CPU processor, which the scanline helper runs; 1.2d: CreateCPUEngine (122-184; its Lut1D ends come with the Lut1D op), FinalizeOpsForCPU (311-338), CPUProcessor::Impl::finalize (341-377) as CpuProcessor::new, the queries and the dynamic properties (242-309, 491-534), CreateScanlineHelper (187-238) and the image apply methods (379-431, 541-549; apply(img, img) as apply_same), checked against the wheel through image_apply (tests/cpu_processor_apply_oracle.rs), and applyRGB and applyRGBA (433-465, 551-559), each wheel's in-place conversions (I-41), checked through image_apply identities (tests/cpu_processor_apply_rgb_oracle.rs); p1-optimizer C: the Lut1D ends of CreateCPUEngine (GetLut1DRenderer), and applyRGB and applyRGBA return a Result for U-1 (owner-approved API change)"
 
 [[file]]
 path = "src/OpenColorIO/CPUProcessor.h"
@@ -1688,13 +1688,15 @@ note = "p1-optimizer B: CreateLut1DOp and GenerateIdentityLut1D"
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu.rs"]
-status = "todo"
+status = "partial"
+note = "p1-optimizer C: the lookups of a forward LUT without hue adjust from 8-, 10-, 12-, 16-bit and half codes to F32 (LookupLut, BaseLut1DRenderer::updateData's lookup branch, the lookup branches of Lut1DRenderer and Lut1DRendererHalfCode), GetLut1DRenderer for them, each wheel's in-place order (I-41) and U-1's error; every code against the wheel (tests/lut1d_op_cpu_oracle.rs). Float input, resampling, hue adjust, the inverse renderers, other output bit depths and the SIMD kernels are Phase 2 (WP 2.5), errors until then"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu.rs"]
-status = "todo"
+status = "partial"
+note = "p1-optimizer C: GetLut1DRenderer"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_AVX.cpp"

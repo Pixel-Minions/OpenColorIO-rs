@@ -120,15 +120,26 @@ pub trait CpuOp: Send + Sync + Debug {
         }
     }
 
+    /// Checks the input of [`apply_bit_depth`](Self::apply_bit_depth) where upstream's
+    /// renderer would read or write memory it doesn't own on it: an error instead (the general
+    /// rule, docs/deviations.md). Only the 1D LUT lookups have such inputs (docs/improvements.md,
+    /// U-1); the default accepts every input.
+    fn check_input(&self, _input: Pixels<'_>) -> Result<()> {
+        Ok(())
+    }
+
     /// Port of `OpCPU::apply(pixel, pixel, 1)` on the one pixel of `CPUProcessor::applyRGB` and
     /// `applyRGBA` (src/OpenColorIO/CPUProcessor.cpp:433-465 @ v2.5.2): the op reads the
     /// pixel's bytes as its input channel type and writes its output channel type over the same
     /// bytes, whatever the bit depths.
     ///
     /// The default serves the renderers that process `float` only: [`apply`](Self::apply) in
-    /// place. The bit-depth conversions override it (docs/improvements.md, I-41).
-    fn apply_pixel_in_place(&self, pixel: &mut [f32; 4]) {
+    /// place. The bit-depth conversions override it (docs/improvements.md, I-41). An error
+    /// where upstream's op would read or write memory it doesn't own (a 1D LUT lookup,
+    /// docs/improvements.md U-1), leaving the pixel as it was.
+    fn apply_pixel_in_place(&self, pixel: &mut [f32; 4]) -> Result<()> {
         self.apply(pixel);
+        Ok(())
     }
 
     /// Whether the renderer has a dynamic property that is dynamic.

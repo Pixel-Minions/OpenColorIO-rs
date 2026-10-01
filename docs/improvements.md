@@ -572,9 +572,18 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   table: garbage, or a crash (it crashed the oracle). Alpha is scaled, not looked up
   (`Lut1DOpCPU.cpp:646`), and other processors convert codes with a multiply, which is well
   defined: a UINT10 red of 2000 with `OPTIMIZATION_NONE` gives 1023.
-- **Options:** clamp to the largest code, ignore the extra bits, or return an error.
-- **Status:** open; decided in Phase 2, with the Lut1D bake. The general rule doesn't apply
-  here until then.
+  `applyRGB` and `applyRGBA` look up the pixel's own bytes as codes (I-41), so with 10- or
+  12-bit input they read past the table whenever those bytes exceed the maximum.
+- **Decided** (owner, 2026-10-01): the port returns an error: "Lut1D: a 10ui value above 1023
+  can't be looked up: upstream reads past the 1D LUT's 1024 entries." (and the 12-bit one).
+  The CPU processor checks the codes before the lookup (`CpuOp::check_input`), and
+  `CpuProcessor::apply_rgb` and `apply_rgba` return a `Result` for it (an API change the
+  owner approved), leaving the pixel as it was.
+- **Future improvement** (owner, 2026-10-01): a candidate for the end-of-port review, which
+  picks one of the alternatives considered: clamp the code to the largest one, or mask the
+  extra high bits.
+- **Status:** matched with an error in `p1-optimizer` (chunk C); `lut1d_op_cpu_tests.rs`
+  checks the errors.
 
 ### U-2. `getAData()` without an alpha plane
 
