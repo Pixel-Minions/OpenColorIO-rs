@@ -23,7 +23,9 @@
 //!      generates extreme finite, NaN and ±Inf cases ([`params::mutations`]);
 //!    - `spec`: the processor the wheel builds: [`Spec::Transform`] with a JSON transform
 //!      spec for finite parameters, [`Spec::Yaml`] (with [`yaml_number`], [`yaml_list`]) when a
-//!      parameter is NaN or infinite;
+//!      parameter is NaN or infinite. An op that only a version 1 config builds (the Exponent
+//!      op: a version 2 config's `ExponentTransform` becomes a Gamma op) takes
+//!      [`Spec::YamlV1`] for every case, finite or not;
 //!    - `port`: build the op data as upstream's transform and `BuildXxxOp` do (cite them), put
 //!      it through `std::hint::black_box`, and return the renderer upstream's `GetXxxRenderer`
 //!      picks for `combo.fast_math` as [`Port::in_place`]; or `Err(text)` with the exception
@@ -314,6 +316,20 @@ colorspaces:
     name: raw
 ";
 
+/// A version 1 config with one colour space, `raw`, the processor's source; a
+/// [`Spec::YamlV1`] adds the destination colour space `cs`. Version 1 has no file rules, and a
+/// colour space's transform from the reference is `from_reference`.
+const RAW_CONFIG_V1_HEAD: &str = "ocio_profile_version: 1
+roles:
+  default: raw
+displays:
+  sRGB:
+    - !<View> {name: Raw, colorspace: raw}
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+";
+
 /// The oracle's side of a case: the processor the wheel builds.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Spec {
@@ -326,6 +342,11 @@ pub enum Spec {
     /// processor from `raw` to `cs`. YAML can hold NaN and infinite parameters (`.nan`,
     /// `.inf`, `-.inf`; see [`yaml_number`]).
     Yaml(String),
+    /// One transform in the config's YAML syntax, as the `from_reference` of a colour space
+    /// `cs` in a raw version 1 config: the processor from `raw` to `cs`. For the ops only a
+    /// version 1 config builds, such as the Exponent op (`BuildExponentOp`,
+    /// src/OpenColorIO/ops/gamma/GammaOp.cpp:190-215 @ v2.5.2).
+    YamlV1(String),
 }
 
 impl Spec {
@@ -346,6 +367,13 @@ impl Spec {
             Spec::Yaml(transform) => json!({
                 "config": {"yaml": format!(
                     "{RAW_CONFIG_HEAD}  - !<ColorSpace>\n    name: cs\n    from_scene_reference: {transform}\n"
+                )},
+                "src": "raw",
+                "dst": "cs",
+            }),
+            Spec::YamlV1(transform) => json!({
+                "config": {"yaml": format!(
+                    "{RAW_CONFIG_V1_HEAD}  - !<ColorSpace>\n    name: cs\n    from_reference: {transform}\n"
                 )},
                 "src": "raw",
                 "dst": "cs",
