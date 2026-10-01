@@ -426,14 +426,16 @@ fn code(language: oracle_gpu::GpuLanguage, declarations: &str) -> Vec<DescCall> 
 
 /// The port's description agrees with the wheel's after every call:
 /// - names with a NUL and double underscores, every setter, the cache ID kept stale by
-///   `getNextResourceIndex`, `begin`, `end` and a clone;
+///   `getNextResourceIndex` and cleared by the setters, `begin`, `end` and a clone (with the
+///   unique ID, and without the shader text of a finalize);
 /// - the code sections in the 10 languages, finalized (the OSL and Metal class wrappers
-///   included) and rebuilt by `createShaderText`; the Metal wrapper reading declarations with
-///   a texture's sampler, an array, a comment, a sampler line of 6 bytes, a texture on the last
-///   line without a line feed, a short sampler line;
+///   included) and rebuilt by `createShaderText`, and two parameter declarations; the Metal
+///   wrapper reading declarations with a texture's sampler, an array, a comment, a sampler
+///   line of 6 bytes, a texture on the last line without a line feed, a short sampler line, a
+///   line starting with one `/`, and every white-space character before a type;
 /// - finalizes in turn in several languages;
-/// - textures in 1D, 2D and 3D, with every error, the binding start added after them, and a
-///   clone, which has none.
+/// - textures in 1D, 2D and 3D, with every error, the binding start added after them, a
+///   clone, which has none, and a 3D texture of the largest edge.
 #[test]
 fn descriptions_match_the_wheel_call_by_call() {
     let mut cases: Vec<(String, Vec<DescCall>)> = vec![(
@@ -477,12 +479,51 @@ fn descriptions_match_the_wheel_call_by_call() {
             GetShaderText,
         ],
     ));
+    cases.push((
+        "a clone after a finalize".into(),
+        vec![
+            AddToFunctionShaderCode("x;\n".into()),
+            Finalize,
+            Clone,
+            GetShaderText,
+            SetLanguage(oracle_gpu::GpuLanguage::Glsl12),
+            GetCacheId,
+        ],
+    ));
+    cases.push((
+        "a clone's unique ID".into(),
+        vec![SetUniqueId("u__1".into()), Clone, GetCacheId],
+    ));
+    cases.push((
+        "setters clear a cache ID left stale by getNextResourceIndex".into(),
+        vec![
+            GetCacheId,
+            GetNextResourceIndex,
+            GetCacheId,
+            SetUniqueId("u".into()),
+            GetCacheId,
+            GetNextResourceIndex,
+            GetCacheId,
+            SetFunctionName("OCIOMain".into()),
+            GetCacheId,
+        ],
+    ));
+    cases.push((
+        "two parameter declarations".into(),
+        vec![
+            AddToParameterDeclareShaderCode("float p;\n".into()),
+            AddToParameterDeclareShaderCode("float q;\n".into()),
+            Finalize,
+            GetShaderText,
+        ],
+    ));
     let declarations = [
         "texture2d<float> t;\nsampler s;\n  // a comment\nint u[4];\n",
         "texture1d<float> t;\n123456\n",
         "texture1d<float> t;",
         "texture2d<float> t;\nsampler\n",
         "  \ttexture3d<float> c;\nsampler   cS ;\nfloat\tf;\nbool b;\n",
+        "texture2d<float> t;\nsampler s;\n/x y;\n\u{b}float v;\n \u{c}\u{b}\rint w;\n",
     ];
     for language in oracle_gpu::GpuLanguage::ALL {
         for (i, d) in declarations.iter().enumerate() {
@@ -589,6 +630,18 @@ fn descriptions_match_the_wheel_call_by_call() {
             Clone,
             GetTexture(0),
         ],
+    ));
+    cases.push((
+        "a 3D texture of the largest edge".into(),
+        vec![Add3dTexture {
+            name: "c".into(),
+            sampler_name: "cS".into(),
+            edge_len: 129,
+            interpolation: "INTERP_LINEAR".into(),
+            values: (0..129 * 129 * 129 * 3)
+                .map(|i| (i % 1000) as f32)
+                .collect(),
+        }],
     ));
 
     let requests: Vec<GpuShaderDescRequest> = cases
