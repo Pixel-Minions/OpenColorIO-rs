@@ -199,25 +199,30 @@ spike chunks ─┬─ 1.1a → 1.1b → 1.1c → 1.1d → 1.1e ─┐
 Each card is one branch and one PR. The order follows the graph above, and cards in different
 rows can run in parallel.
 
-| Card | Chunks | Who | Needs |
-|---|---|---|---|
-| `p1-oracle-image` | O1.2, its own chunk; the owner reviews it, labelled `oracle` | B | — |
-| `p1-oracle` | O1.1, O1.3, O1.4, each its own chunk; the owner reviews them, labelled `oracle` | B | — |
-| `p1-bitdepth` | 1.1a–1.1e | A | `p1-oracle-image` |
-| `p1-math` | 1.4a–1.4c | B | — |
-| `p1-dispatch` | 1.5a–1.5c | B | — |
-| `p1-engine` | 1.2a–1.2e, with 1.3n1 and 1.3m1–m2 so 1.2d has ops to run | A | `p1-bitdepth`, `p1-math` |
-| `p1-matrix` | 1.3m3 | A | `p1-engine` |
-| `p1-range` | 1.3r1–r2 | A | `p1-engine` |
-| `p1-exponent` | 1.3e1, its CPU part | A | `p1-engine` |
-| `p1-gamma` | 1.3g1–g3 | A | `p1-engine` |
-| `p1-log` | 1.3l1–l3 | A | `p1-engine` |
-| `p1-cdl` | 1.3c1–c3 | A | `p1-engine` |
-| `p1-optimizer` | 1.6a | A | the families above |
-| `p1-gpu-infra` | 1.7a–1.7e | B | O1.3 |
-| `p1-gpu-ops` | 1.3m4, r3, e1 (its GPU part), g4, l4, c4 | B | `p1-gpu-infra`, each family's op card |
-| `p1-transforms` | 1.8a–1.8f | A or B | the families' op cards |
-| `p1-processor` | 1.8g–1.8h | A or B | `p1-transforms`, `p1-optimizer`, `p1-gpu-infra` |
+| Card | Chunks | Who | Needs | Status |
+|---|---|---|---|---|
+| `p1-oracle-image` | O1.2, its own chunk; the owner reviews it, labelled `oracle` | B | — | done |
+| `p1-oracle` | O1.1, O1.3, O1.4, each its own chunk; the owner reviews them, labelled `oracle` | B | — | done |
+| `p1-bitdepth` | 1.1a–1.1e | A | `p1-oracle-image` | done |
+| `p1-math` | 1.4a–1.4c | B | — | done |
+| `p1-dispatch` | 1.5a–1.5c, finished in spike S4: `CPUInfo` with `with_flags`/`with_build`, `SSE2.h`, the `AVX*.h` headers and their tests | B | — | done |
+| `p1-foundations` | 1.2a, 1.2b, 1.2e | A | — | done |
+| `p1-foundations-fix` | review follow-ups of `p1-foundations` | B | `p1-foundations` | done |
+| `p1-engine` | 1.2c, 1.2d (with the optimizer's generic core, owner decision 2026-10-01: Option A), 1.3n1, 1.3m1–m2 | A | `p1-bitdepth`, `p1-math`, `p1-foundations` | |
+| `p1-matrix` | 1.3m3 | A | `p1-engine` | |
+| `p1-range` | 1.3r1–r2 | A or C | `p1-engine` | |
+| `p1-exponent` | 1.3e1, its CPU part | A or C | `p1-engine` | |
+| `p1-gamma` | 1.3g1–g3 | A or C | `p1-engine` | |
+| `p1-log` | 1.3l1–l3 | A or C | `p1-engine` | |
+| `p1-cdl` | 1.3c1–c3 | A or C | `p1-engine` | |
+| `p1-optimizer` | 1.6a: only the LUT steps remain (the generic core moved to 1.2d, in `p1-engine`) | A | the families above | |
+| `p1-gpu-infra` | 1.7a–1.7e | B | O1.3 | |
+| `p1-gpu-ops` | 1.3m4, r3, e1 (its GPU part), g4, l4, c4 | B | `p1-gpu-infra`, each family's op card | |
+| `p1-transforms` | 1.8a–1.8f | A or B | the families' op cards | |
+| `p1-processor` | 1.8g–1.8h | A or B | `p1-transforms`, `p1-optimizer`, `p1-gpu-infra` | |
+
+The op-family cards from `p1-range` to `p1-cdl` can go to a third implementer, C (the owner
+approved one on 2026-10-01).
 
 Small cards land sooner and are easier to verify. When a card grows past about 6 chunks, split it
 at a dependency boundary.
