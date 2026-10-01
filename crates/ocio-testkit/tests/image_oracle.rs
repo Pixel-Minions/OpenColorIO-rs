@@ -1860,7 +1860,7 @@ enum Outcome {
 /// still run. A spec with a key the command doesn't know is refused.
 #[test]
 fn applies_outside_the_wheels_memory_are_refused() {
-    use BitDepth::{F32, Uint10, Uint12};
+    use BitDepth::{F16, F32, Uint10, Uint12, Uint16};
     use Outcome::{Applies, Raises, Refused};
     let rgba = |offset: usize, strides: [Stride; 3]| {
         Packed::new(Data::at(0, offset), 2, 2, Channels::Count(4)).layout(F32, strides)
@@ -1931,6 +1931,69 @@ fn applies_outside_the_wheels_memory_are_refused() {
         let src = request.image(Packed::new(Data::at(src, 0), 2, 2, rgba_count));
         let dst = request.image(Packed::new(Data::at(dst, 0), 2, 2, rgba_count));
         request.apply = vec![src, dst];
+        request
+    };
+    // A 2 x 2 RGBA source of `src` depth holding the codes 100 to 810 from the start of a
+    // 128-byte buffer, and a 2 x 2 destination of `dst` depth and `order`: `at` that offset in
+    // the same buffer, or in a buffer of its own. The verifier's G1 probe is the destination
+    // at 0.
+    let overlapping =
+        |src: BitDepth, dst: BitDepth, order: ChannelOrder, at: Option<usize>, processor: Value| {
+            let mut request = Request::new(processor);
+            let codes: Vec<u16> = (0..16).map(|k| 100 * (k % 8 + 1) + 10 * (k / 8)).collect();
+            let mut bytes: Vec<u8> = codes.iter().flat_map(|c| c.to_le_bytes()).collect();
+            bytes.resize(128, 0);
+            let first = request.buffer(Buffer::Bytes(bytes));
+            let (second, offset) = match at {
+                Some(offset) => (first, offset),
+                None => (request.buffer(Buffer::fill(128, &[0])), 0),
+            };
+            let src = request.image(
+                Packed::new(Data::at(first, 0), 2, 2, rgba_count).layout(src, [Stride::Auto; 3]),
+            );
+            let dst = request.image(
+                Packed::new(Data::at(second, offset), 2, 2, Channels::Order(order))
+                    .layout(dst, [Stride::Auto; 3]),
+            );
+            request.apply = vec![src, dst];
+            request
+        };
+    let unoptimized_to = |output: BitDepth| {
+        let mut p = processor(Uint10, output);
+        p["optimization"] = json!("OPTIMIZATION_NONE");
+        p
+    };
+    // Two 2 x 2 planar descriptions of `src` and `dst` depths, of the same layout over the
+    // same 96 bytes of codes 100 to 570: planes at `offsets`, x and y strides of `strides`.
+    let planar_pair =
+        |src: BitDepth, dst: BitDepth, offsets: [usize; 3], strides: [i64; 2], processor| {
+            let mut request = Request::new(processor);
+            let codes: Vec<u16> = (0..48).map(|k| 100 + 10 * k).collect();
+            let buffer = request.buffer(Buffer::Bytes(
+                codes.iter().flat_map(|c| c.to_le_bytes()).collect(),
+            ));
+            let planes = || offsets.map(|o| Data::at(buffer, o)).to_vec();
+            let layout = strides.map(Stride::Bytes);
+            let a = request.image(Planar::new(planes(), 2, 2).layout(src, layout));
+            let b = request.image(Planar::new(planes(), 2, 2).layout(dst, layout));
+            request.apply = vec![a, b];
+            request
+        };
+    // A 2 x 2 RGBA 10-bit source and an F16 destination over the same bytes, alike but for
+    // their y strides.
+    let y_strides = |src_y: i64, dst_y: i64| {
+        let mut request = Request::new(processor(Uint10, F16));
+        let codes: Vec<u16> = (0..32).map(|k| 100 + 10 * k).collect();
+        let buffer = request.buffer(Buffer::Bytes(
+            codes.iter().flat_map(|c| c.to_le_bytes()).collect(),
+        ));
+        let image = |depth: BitDepth, y: i64| {
+            Packed::new(Data::at(buffer, 0), 2, 2, rgba_count)
+                .layout(depth, [Stride::Auto, Stride::Auto, Stride::Bytes(y)])
+        };
+        let a = request.image(image(Uint10, src_y));
+        let b = request.image(image(F16, dst_y));
+        request.apply = vec![a, b];
         request
     };
     // A planar F32 image `width` pixels wide, every pixel of each plane on one float.
@@ -2019,6 +2082,155 @@ fn applies_outside_the_wheels_memory_are_refused() {
             Refused("refuses to apply to images[1]"),
         ),
         ("a destination that fits exactly", into_bytes(64), Applies),
+        (
+            "a 10-bit source under an F32 destination, over the same bytes (G1)",
+            overlapping(
+                Uint10,
+                F32,
+                ChannelOrder::Rgba,
+                Some(0),
+                processor(Uint10, F32),
+            ),
+            Refused("their bytes overlap in buffers[0]"),
+        ),
+        (
+            "a 12-bit source under a 10-bit destination of another order, over the same bytes",
+            overlapping(
+                Uint12,
+                Uint10,
+                ChannelOrder::Bgra,
+                Some(0),
+                processor(Uint12, Uint10),
+            ),
+            Refused("their bytes overlap in buffers[0]"),
+        ),
+        (
+            "a 10-bit source whose last byte is an F32 destination's first",
+            overlapping(
+                Uint10,
+                F32,
+                ChannelOrder::Rgba,
+                Some(31),
+                processor(Uint10, F32),
+            ),
+            Refused("their bytes overlap in buffers[0]"),
+        ),
+        (
+            "a 10-bit source right before an F32 destination, in one buffer",
+            overlapping(
+                Uint10,
+                F32,
+                ChannelOrder::Rgba,
+                Some(32),
+                processor(Uint10, F32),
+            ),
+            Applies,
+        ),
+        (
+            "a 10-bit source and an F32 destination in two buffers",
+            overlapping(
+                Uint10,
+                F32,
+                ChannelOrder::Rgba,
+                None,
+                processor(Uint10, F32),
+            ),
+            Applies,
+        ),
+        (
+            "a 10-bit source under an F32 destination, without a LUT first",
+            overlapping(
+                Uint10,
+                F32,
+                ChannelOrder::Rgba,
+                Some(0),
+                unoptimized_to(F32),
+            ),
+            Applies,
+        ),
+        (
+            "a 16-bit source under an F32 destination: its LUT holds every code",
+            overlapping(
+                Uint16,
+                F32,
+                ChannelOrder::Rgba,
+                Some(0),
+                processor(Uint16, F32),
+            ),
+            Applies,
+        ),
+        (
+            "two 10-bit descriptions of the same layout, over the same bytes",
+            overlapping(
+                Uint10,
+                Uint10,
+                ChannelOrder::Rgba,
+                Some(0),
+                processor(Uint10, Uint10),
+            ),
+            Applies,
+        ),
+        // The same layout with rows that alias (the verifier's F1): every row of a plane on
+        // the same bytes, or a plane's row 1 on the next plane's row 0.
+        (
+            "planes whose rows alias, 10-bit to F16",
+            planar_pair(Uint10, F16, [0, 4, 8], [0, 0], processor(Uint10, F16)),
+            Refused("a destination row overlaps a later source row in buffers[0]"),
+        ),
+        (
+            "planes whose rows alias, 10-bit to 12-bit",
+            planar_pair(Uint10, Uint12, [0, 4, 8], [0, 0], processor(Uint10, Uint12)),
+            Refused("a destination row overlaps a later source row in buffers[0]"),
+        ),
+        (
+            "chained planes, 10-bit to 16-bit",
+            planar_pair(
+                Uint10,
+                Uint16,
+                [0, 16, 32],
+                [2, 16],
+                processor(Uint10, Uint16),
+            ),
+            Refused("a destination row overlaps a later source row in buffers[0]"),
+        ),
+        (
+            "planes whose rows alias, 12-bit to 10-bit: codes stay in range",
+            planar_pair(Uint12, Uint10, [0, 4, 8], [0, 0], processor(Uint12, Uint10)),
+            Applies,
+        ),
+        (
+            "planes whose rows alias, 10-bit to 10-bit: codes stay in range",
+            planar_pair(Uint10, Uint10, [0, 4, 8], [0, 0], processor(Uint10, Uint10)),
+            Applies,
+        ),
+        (
+            "planes of the same layout whose rows don't alias, 10-bit to F16",
+            planar_pair(Uint10, F16, [0, 32, 64], [2, 4], processor(Uint10, F16)),
+            Applies,
+        ),
+        (
+            "planes end to end, each row touching the next plane's, 10-bit to F16",
+            planar_pair(Uint10, F16, [0, 8, 16], [2, 4], processor(Uint10, F16)),
+            Applies,
+        ),
+        (
+            "planes whose rows run backwards, a plane's row 1 on the next plane's row 0",
+            planar_pair(Uint10, F16, [4, 8, 12], [2, -4], processor(Uint10, F16)),
+            Refused("a destination row overlaps a later source row in buffers[0]"),
+        ),
+        (
+            "planes whose rows alias, without a LUT first",
+            planar_pair(Uint10, F16, [0, 4, 8], [0, 0], unoptimized_to(F16)),
+            Applies,
+        ),
+        // Only the y stride differs, so the layouts differ: any overlap is refused, here the
+        // first rows, which cover each other. (The library refuses a y stride shorter than a
+        // row, so a source's rows can't overlap each other.)
+        (
+            "a 10-bit source and an F16 destination whose y strides alone differ",
+            y_strides(16, 32),
+            Refused("their bytes overlap in buffers[0]"),
+        ),
         (
             "an image 2^30 + 1 pixels wide, past the scanline helper's integers",
             aliased((1 << 30) + 1),
@@ -2216,26 +2428,6 @@ fn applies_outside_the_wheels_memory_are_refused() {
     }
 }
 
-/// Runs `script` in the oracle's environment, as the oracle runs, with `args`; returns the lines
-/// it prints. For checks of the oracle's own refusals that no request can reach.
-fn oracle_python(script: &str, args: &[String]) -> Vec<String> {
-    let output = std::process::Command::new(Oracle::get().python())
-        .args(["-X", "utf8", "-c", script])
-        .args(args)
-        .current_dir(ocio_testkit::paths::oracle_dir())
-        .env("PYTHONDONTWRITEBYTECODE", "1")
-        .env_remove("PYTHONPATH")
-        .output()
-        .expect("the oracle's Python runs");
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        output.status.success(),
-        "{stdout}{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    stdout.lines().map(str::to_string).collect()
-}
-
 /// An image the library calls RGBA-packed is read and written a row at a time: 4 * width
 /// contiguous channels from the data pointer plus y * yStride (ScanlineHelper.cpp:129-136,
 /// 158-164 @ v2.5.2). isRGBAPacked tests the x stride truncated to an `int` (ImageDesc.cpp:264
@@ -2281,7 +2473,7 @@ for size in sizes:
     let pixels_end = offset + y_stride + 16;
     let rows_end = offset + y_stride + 2 * 16;
     let args = [x_stride, y_stride, offset, pixels_end, rows_end].map(|v| v.to_string());
-    let lines = oracle_python(SCRIPT, &args);
+    let lines = Oracle::get().run_script(SCRIPT, &args);
     assert_eq!(lines.len(), 3, "{lines:?}");
     assert_eq!(lines[0], "True", "the wheel calls the image packed");
     let span = format!("its packed rows span bytes [{offset}, {rows_end})");
@@ -2381,7 +2573,7 @@ for descs, apply in json.loads(sys.argv[1]):
         .iter()
         .map(|(_, request, _)| request.clone())
         .collect();
-    let lines = oracle_python(SCRIPT, &[json!(requests).to_string()]);
+    let lines = Oracle::get().run_script(SCRIPT, &[json!(requests).to_string()]);
     assert_eq!(lines.len(), cases.len(), "{lines:?}");
     for ((label, _, refused), line) in cases.iter().zip(&lines) {
         if *refused {
@@ -2390,6 +2582,81 @@ for descs, apply in json.loads(sys.argv[1]):
             assert_eq!(line, "accepted", "{label}");
         }
     }
+}
+
+/// The processor keys reach both commands (the verifier's N15 and N16): a config with a source
+/// and a destination color space gives the pixels of the transform between them, and a
+/// direction inverts a transform, for `image_apply` and for `image_apply_rgb`.
+#[test]
+fn processor_keys_reach_both_commands() {
+    let matrix =
+        json!({"class": "MatrixTransform", "args": {"offset": [0.125, -0.25, 0.0625, 0.5]}});
+    let log = json!({"class": "LogTransform", "args": {"base": 2.0}});
+    let config = json!({"yaml": "ocio_profile_version: 2
+roles:
+  default: ref
+colorspaces:
+  - !<ColorSpace>
+    name: ref
+  - !<ColorSpace>
+    name: graded
+    from_scene_reference: !<MatrixTransform> {offset: [0.125, -0.25, 0.0625, 0.5]}
+"});
+    let processors = [
+        json!({"config": config, "src": "ref", "dst": "graded"}),
+        json!({"transform": matrix}),
+        json!({"transform": log, "direction": "TRANSFORM_DIR_INVERSE"}),
+        json!({"transform": log}),
+    ];
+    let values = [0.5f32, 0.25, 1.5, 1.0, -0.125, 2.0, 0.75, 0.5];
+    let images: Vec<Request> = processors
+        .iter()
+        .map(|p| {
+            let mut request = Request::new(p.clone());
+            let buffer = request.buffer(Buffer::Bytes(f32_to_bytes(&values)));
+            let image = request.image(Packed::new(Data::at(buffer, 0), 2, 1, Channels::Count(4)));
+            request.apply = vec![image];
+            request
+        })
+        .collect();
+    let rgbs: Vec<RgbRequest> = processors
+        .iter()
+        .map(|p| RgbRequest {
+            processor: p.clone(),
+            rgba: true,
+            input: RgbInput::array(f32_to_bytes(&values), "float32"),
+        })
+        .collect();
+    let mut calls: Vec<BatchCall<'_>> = images.iter().map(Request::call).collect();
+    calls.extend(rgbs.iter().map(RgbRequest::call));
+    let mut responses = batch(&calls);
+    let rgb_responses = responses.split_off(images.len());
+    let image_outputs: Vec<Vec<u8>> = responses
+        .into_iter()
+        .zip(&images)
+        .map(|(response, request)| {
+            let reply = request.reply(response);
+            assert!(reply.raised().is_none(), "{}", reply.result);
+            reply.buffers[0].clone()
+        })
+        .collect();
+    let rgb_outputs: Vec<Vec<u8>> = rgb_responses
+        .into_iter()
+        .map(|response| {
+            let reply = RgbReply::from_response(response);
+            assert!(reply.raised().is_none(), "{}", reply.result);
+            reply.output.expect("an output")
+        })
+        .collect();
+    for outputs in [&image_outputs, &rgb_outputs] {
+        assert_bytes_eq(
+            "the config's source and destination",
+            &outputs[1],
+            &outputs[0],
+        );
+        assert_ne!(outputs[2], outputs[3], "the inverse direction");
+    }
+    assert_eq!(image_outputs, rgb_outputs);
 }
 
 /// A request's reply is the same on every run, alone or in a batch, bytes included: nothing

@@ -147,6 +147,35 @@ impl Oracle {
         &self.python
     }
 
+    /// Runs `script` in the oracle's environment, as the oracle runs (from its directory, so
+    /// `ocio_oracle` imports, and without the caller's `OCIO` variables), with `args`, and
+    /// returns the lines it prints. For tests that read the wheel independently of a command,
+    /// or reach a check no request can. Panics if the script fails. Nothing is cached.
+    #[track_caller]
+    pub fn run_script(&self, script: &str, args: &[String]) -> Vec<String> {
+        let mut command = Command::new(&self.python);
+        command
+            .args(["-X", "utf8", "-c", script])
+            .args(args)
+            .current_dir(paths::oracle_dir())
+            .env("PYTHONDONTWRITEBYTECODE", "1")
+            .env_remove("PYTHONPATH");
+        for (key, _) in std::env::vars_os() {
+            let key_str = key.to_string_lossy();
+            if key_str == "OCIO" || key_str.starts_with("OCIO_") {
+                command.env_remove(&key);
+            }
+        }
+        let output = command.output().expect("the oracle's Python runs");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success(),
+            "{stdout}{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        stdout.lines().map(str::to_string).collect()
+    }
+
     /// Runs `cmd` with JSON `args` and binary inputs. Panics on a protocol error.
     #[track_caller]
     pub fn call(&self, cmd: &str, args: Value, blobs: &[&[u8]]) -> Response {

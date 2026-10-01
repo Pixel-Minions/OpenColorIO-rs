@@ -207,6 +207,29 @@ def _channel_starts(desc, image, colors_only=False):
     return [(plane["buffer"], int(plane.get("offset", 0))) for plane in planes]
 
 
+def _row_regions(desc, image):
+    """The regions of _regions, row by row: (what, buffer, lo, hi, step), row y of the region
+    spanning the bytes [lo + y * step, hi + y * step)."""
+    item = CHANNEL_BYTES[desc.getBitDepth().name]
+    width, y_stride = desc.getWidth(), desc.getYStrideBytes()
+    rows = [("pixels", buffer, *_extent(start, width, 1, desc.getXStrideBytes(), 0, item),
+             y_stride)
+            for buffer, start in _channel_starts(desc, image)]
+    if desc.isRGBAPacked():
+        data = image["data"]
+        offset = int(data.get("offset", 0))
+        rows.append(("packed rows", data["buffer"], offset, offset + 4 * item * width, y_stride))
+    return rows
+
+
+def _regions(desc, image):
+    """The bytes an image's channels span, per channel (what, buffer, lo, hi), and for an
+    image the library calls RGBA-packed its rows too (see _check_inside)."""
+    down = desc.getHeight() - 1
+    return [(what, buffer, lo + min(0, down * step), hi + max(0, down * step))
+            for what, buffer, lo, hi, step in _row_regions(desc, image)]
+
+
 def _check_inside(index, desc, image, buffers):
     """Refuses an image whose pixels aren't all in its buffers: channel c of pixel (x, y) is
     at the channel's start + x * xStride + y * yStride, AutoStride resolved by the library.
@@ -216,17 +239,7 @@ def _check_inside(index, desc, image, buffers):
     158-164; the ops work in a packed float destination's rows directly). Those rows are checked
     too: isRGBAPacked tests the x stride truncated to an int (ImageDesc.cpp:264), so an x stride
     of 4 channels plus a multiple of 2^32 is packed, and its rows are not where its pixels are."""
-    item = CHANNEL_BYTES[desc.getBitDepth().name]
-    width, height, y_stride = desc.getWidth(), desc.getHeight(), desc.getYStrideBytes()
-    regions = [("pixels", buffer,
-                *_extent(start, width, height, desc.getXStrideBytes(), y_stride, item))
-               for buffer, start in _channel_starts(desc, image)]
-    if desc.isRGBAPacked():
-        data = image["data"]
-        regions.append(("packed rows", data["buffer"],
-                        *_extent(int(data.get("offset", 0)), 1, height, 0, y_stride,
-                                 4 * item * width)))
-    for what, buffer, lo, hi in regions:
+    for what, buffer, lo, hi in _regions(desc, image):
         if lo < 0 or hi > buffers[buffer].nbytes:
             raise ValueError(
                 f"image_apply refuses to apply to images[{index}]: its {what} span bytes "
@@ -314,6 +327,84 @@ def _check_codes(index, desc, image, buffers, looks_up):
                 f"{code}, above {top}, the largest of {desc.getBitDepth().name}, and the "
                 f"processor starts with a forward 1D LUT, which the wheel would index with it "
                 f"outside its table")
+
+
+def _layout(desc, image):
+    """What decides which bytes each channel of each pixel takes."""
+    return (_channel_starts(desc, image), desc.getWidth(), desc.getHeight(),
+            desc.getXStrideBytes(), desc.getYStrideBytes(),
+            CHANNEL_BYTES[desc.getBitDepth().name], desc.isRGBAPacked())
+
+
+def _some_multiple_between(step, low, high, most):
+    """Whether k * step lies strictly between low and high for an integer k from 1 to most."""
+    if most < 1:
+        return False
+    if step == 0:
+        return low < 0 < high
+    if step < 0:
+        step, low, high = -step, -high, -low
+    first = low // step + 1          # the smallest k with k * step > low
+    last = -(-high // step) - 1      # the largest k with k * step < high
+    return max(first, 1) <= min(last, most)
+
+
+def _row_ahead(src, src_image, dst, dst_image):
+    """The buffer where a destination row y overlaps a source row y + k (k >= 1) of any region,
+    or None. The two share a layout, so their rows step alike: destination row y spans
+    [lo1 + y s, hi1 + y s), source row y + k spans [lo2 + (y + k) s, hi2 + (y + k) s), and they
+    overlap when lo1 - hi2 < k s < hi1 - lo2."""
+    for _, b1, lo1, hi1, step in _row_regions(dst, dst_image):
+        for _, b2, lo2, hi2, _ in _row_regions(src, src_image):
+            if b1 == b2 and _some_multiple_between(step, lo1 - hi2, hi1 - lo2,
+                                                   src.getHeight() - 1):
+                return b1
+    return None
+
+
+def _check_overlap(descs, images, apply, looks_up):
+    """Refuses apply(src, dst) from a 10- or 12-bit source to a destination that would write
+    where the wheel reads source codes later, when the processor starts with a forward 1D LUT.
+    The wheel applies a row at a time: it reads source row y, then writes destination row y
+    (CPUProcessor.cpp:407-432, ScanlineHelper.cpp:119-177), so a destination row over a source
+    row not read yet puts its own values there, and the LUT then looks up codes _check_codes
+    never saw, outside its table (the verifier's findings G1 and F1: it crashed the wheel).
+    - An apply in place ([i] or [i, i]) has one description and one bit depth: its codes stay
+      in range. It is allowed.
+    - Two descriptions of the same layout are allowed when the destination can't write a code
+      above the source's largest (a 10-bit destination, or a 12-bit one for a 12-bit source),
+      or when no destination row overlaps a later source row, of any plane. x and y strides of
+      0 put every row on the same bytes, and a plane's row y + 1 can sit on another plane's
+      row y: those rows are refused.
+    - Any other overlap is refused, also where the destination's rows cover only rows already
+      read."""
+    if len(apply) != 2 or apply[0] == apply[1]:
+        return
+    i, j = apply
+    src, dst, src_image, dst_image = descs[i], descs[j], images[i], images[j]
+    if src.getBitDepth().name not in TOP_CODE:
+        return
+    if _layout(src, src_image) == _layout(dst, dst_image):
+        top = TOP_CODE.get(dst.getBitDepth().name)
+        if top is not None and top <= TOP_CODE[src.getBitDepth().name]:
+            return
+        buffer = _row_ahead(src, src_image, dst, dst_image)
+        if buffer is not None and looks_up():
+            raise ValueError(
+                f"image_apply refuses to apply images[{i}] to images[{j}]: a destination row "
+                f"overlaps a later source row in buffers[{buffer}], so the wheel would read "
+                f"the destination's {dst.getBitDepth().name} values as "
+                f"{src.getBitDepth().name} codes, and the processor starts with a forward 1D "
+                f"LUT, which the wheel would index with them")
+        return
+    for _, b1, lo1, hi1 in _regions(src, src_image):
+        for _, b2, lo2, hi2 in _regions(dst, dst_image):
+            if b1 == b2 and lo1 < hi2 and lo2 < hi1 and looks_up():
+                raise ValueError(
+                    f"image_apply refuses to apply images[{i}] to images[{j}]: "
+                    f"their bytes overlap in buffers[{b1}], so the destination's rows would "
+                    f"overwrite source codes before they are read, and the processor starts "
+                    f"with a forward 1D LUT, which the wheel would index with them")
 
 
 def _starts_with_forward_lut1d(proc, key):
@@ -454,6 +545,10 @@ def image_apply(args, blobs):
     - an image it applies to is 2^29 or more pixels wide or has 2^31 or more rows, or an
       RGBA-packed source of 2^31 or more pixels goes to an image that isn't: the wheel's
       integers would overflow where it sizes or indexes rows (see _check_sizes);
+    - a 10- or 12-bit source and a destination overlap, of another layout or of the same
+      layout with rows that alias, and the processor starts with a forward 1D LUT: the
+      destination's rows would overwrite source codes before the wheel reads them (see
+      _check_overlap);
     - the source is a 10- or 12-bit image holding a red, green or blue code above 1023 or
       4095, and the processor starts with a forward 1D LUT, which the wheel would index with
       the code outside its table (see _check_codes).
@@ -511,6 +606,7 @@ def image_apply(args, blobs):
                 if _reads_source(descs, apply, cpu):
                     looks_up = functools.cache(lambda: _starts_with_forward_lut1d(proc, key))
                     _check_codes(apply[0], descs[apply[0]], images[apply[0]], buffers, looks_up)
+                    _check_overlap(descs, images, apply, looks_up)
                 stage[0] = "apply"
                 cpu.apply(*[descs[i] for i in apply])
             if args.get("data_getters"):
