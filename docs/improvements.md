@@ -279,6 +279,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **A fix:** pass the whole line, with its length.
 - **Status:** matched in `p1-foundations` (1.2e), checked against the wheel in
   `crates/ocio-ops/tests/logging_oracle.rs`.
+
 ## GPU shaders
 
 ### I-30. Large whole numbers become invalid shader literals
@@ -303,12 +304,38 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   texels. Python's binding counts `width * height` in `unsigned` too, but times the channels in
   64 bits (`PyGpuShaderDesc.cpp:116-160, 259-283`): `getValues` then reads past the values
   kept, which is undefined. A 3D texture can't reach the count: the wheel refuses an edge of
-  130 texels or more before copying anything.
+  130 texels or more before copying anything. A count that wraps to exactly 0 leaves the vector
+  empty, and `std::memcpy(&res[0], buf, 0)` then takes the address of its element 0
+  (`GpuShader.cpp:36`), which is undefined for an empty vector, though the copy is of 0 bytes.
 - **Who notices:** textures of 2^32 floats (16 GiB) or more.
 - **A fix:** count in 64 bits, and refuse a texture that doesn't fit.
-- **Status:** matched in `p1-gpu-infra` (1.7c): the port copies the wrapped count. The oracle
-  refuses these textures (`gpu_shader_desc`, `_check_texture_size`); Phase 6 decides for
-  Python's `getValues`.
+- **Status:** matched in `p1-gpu-infra` (1.7c): the port copies the wrapped count, and keeps no
+  values when it wraps to 0. The oracle refuses these textures (`gpu_shader_desc`,
+  `_check_texture_size`); Phase 6 decides for Python's `getValues`.
+
+### I-34. The Metal class wrapper misreads declarations that line feeds split
+
+- **Upstream:** in MSL, the class wrapper reads the shader's declarations back line by line to
+  build its class (`GpuShaderClassWrapper.cpp:285-372`). It takes the line after each line that
+  starts with `texture` for that texture's sampler, and reads the sampler's name from
+  `find("sampler") + 7` (line 332): without `sampler`, from offset 6 of that line. Every other
+  line becomes a parameter, its first word the type and the next one the name (lines 342-353).
+  Line feeds in the resource prefix, or in declaration code a caller adds
+  (`addToParameterDeclareShaderCode`, `addToTextureDeclareShaderCode`), cut declarations into
+  such lines: the class gets a sampler with a wrong name, and parameters that are pieces of
+  declarations. A texture declared on the last line, without a line feed, does the same:
+  `std::getline` then fails at the end of the text and leaves the texture's line in the buffer,
+  which is read as the sampler's line. Through the wheel, `texture1d<float> t;` alone gives the
+  class a sampler named `e1d<float>`. A line shorter than 6 bytes there is read past its end
+  (U-10).
+- **Who notices:** MSL shaders whose resource prefix holds line feeds, or whose added
+  declaration code declares a texture without a sampler on the next line. The class doesn't
+  compile.
+- **A fix:** read declarations, not lines: refuse line feeds in names, and a texture without
+  its sampler.
+- **Status:** matched in `p1-gpu-infra` (1.7d), checked against the wheel in
+  `crates/ocio-gpu/src/gpu_shader_class_wrapper_tests.rs` and
+  `crates/ocio-gpu/tests/gpu_shader_desc_oracle.rs`.
 
 ## Python module (`ocio-py`)
 
@@ -341,16 +368,6 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** to be matched in Phase 6 (D13). The Rust API's own error for a slice of the wrong
   type uses the clean names.
 
-### I-32. `repr()` of a GradingRGBCurve prints an address
-
-- **Upstream:** the binding gives GradingHueCurve's class its repr twice, and GradingRGBCurve's
-  none: `PyGradingData.cpp:470` calls `defRepr(clsGradingHueCurve)` where `clsGradingRGBCurve`
-  was meant. So a GradingRGBCurve's `repr()` is pybind11's default,
-  `<PyOpenColorIO.PyOpenColorIO.GradingRGBCurve object at 0x...>`, whose address changes from
-  run to run (seen through the wheel in the p1-oracle review).
-- **Who notices:** Python users who print a GradingRGBCurve.
-- **A fix:** the repr its values give, like the other grading classes'.
-- **Status:** to be matched in Phase 6 (D13).
 ### I-31. A shading language made from a number can abort the process
 
 - **Upstream:** Python turns any integer into a `GpuLanguage` (`OCIO.GpuLanguage(42)`), and
@@ -364,6 +381,17 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **A fix:** refuse the number when the language is set, with "Unsupported GPU shader language.".
 - **Status:** open; decided in Phase 6. The Rust `GpuLanguage` holds only upstream's languages,
   so only the Python module can meet it.
+
+### I-32. `repr()` of a GradingRGBCurve prints an address
+
+- **Upstream:** the binding gives GradingHueCurve's class its repr twice, and GradingRGBCurve's
+  none: `PyGradingData.cpp:470` calls `defRepr(clsGradingHueCurve)` where `clsGradingRGBCurve`
+  was meant. So a GradingRGBCurve's `repr()` is pybind11's default,
+  `<PyOpenColorIO.PyOpenColorIO.GradingRGBCurve object at 0x...>`, whose address changes from
+  run to run (seen through the wheel in the p1-oracle review).
+- **Who notices:** Python users who print a GradingRGBCurve.
+- **A fix:** the repr its values give, like the other grading classes'.
+- **Status:** to be matched in Phase 6 (D13).
 
 ## Undefined behaviour upstream
 
@@ -479,15 +507,24 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `std::out_of_range`. OCIO's own writers always declare a sampler after its texture, but the
   declarations also hold the code a caller adds (`addToParameterDeclareShaderCode`,
   `addToTextureDeclareShaderCode`, both in Python) and the resource prefix, whose line feeds cut
-  them into lines (U-6). A texture declared last, with nothing after it, is enough: the next
-  line is empty.
+  them into lines (U-6). A texture declared last is enough when a line feed ends it: the next
+  line is then empty. (Without that line feed, `std::getline` fails at the end of the text and
+  leaves the texture's line in the buffer, which is long enough: I-34.)
+
+  The error is `std::out_of_range`, not an OCIO `Exception`. Python sees an `IndexError`, whose
+  message is the C++ library's, so it differs by platform ("invalid string position" through
+  the Windows wheel). It also escapes the `catch (const Exception &)` of
+  `GPUProcessor.cpp:197-201`, so an extraction that meets it doesn't call the creator's
+  `end()`.
 - **Who notices:** MSL shaders whose added declaration code declares a texture without a sampler
   after it, or whose resource prefix holds line feeds like U-6's.
 - **Decided** (general rule): the port returns an error exactly where the read would pass the
   line's end, and otherwise parses as upstream does: a line of 6 bytes is read up to its
   terminating NUL, and a non-ASCII byte is neither white space nor a digit, as in both wheels
   (U-6). This settles the class wrapper's part of U-6.
-- **Status:** matched in `p1-gpu-infra` (1.7d).
+- **Status:** matched in `p1-gpu-infra` (1.7d): the port's error is an OCIO `Exception` with
+  its own message. Phase 6 decides what Python raises there (an `IndexError`, as the wheel
+  does, or the `Exception`).
 
 ### U-11. Texture values shorter than the texture
 
@@ -502,3 +539,22 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   'NAME' needs N values, but only M were given.". A longer slice is read up to the count, as
   upstream reads the buffer.
 - **Status:** matched in `p1-gpu-infra` (1.7c).
+
+### U-12. Constant arrays written from a count and a pointer
+
+- **Upstream:** `declareFloatArrayConst` and `declareIntArrayConst` take a count and a pointer
+  (`int size, const float * v`) and write `size` values from it (`GpuShaderUtils.cpp:520-648`).
+  Their callers pass a count kept apart from the values: the grading curves' `getNumKnots()`
+  with `getKnotsArray()`, `getNumCoefs()` with `getCoefsArray()`
+  (`ops/gradingrgbcurve/GradingRGBCurveOpGPU.cpp:227-230`,
+  `ops/gradinghuecurve/GradingHueCurveOpGPU.cpp:267-270`), and ACES 2 its table's
+  `total_size` with its data (`ops/fixedfunction/FixedFunctionOpGPU.cpp:864`). A count past
+  the values reads past their end.
+- **Who notices:** no one yet: none of the writers ported so far calls these helpers. The
+  port's helpers take the values as a slice, so a writer ported later slices its values by its
+  count, and a count past their end would panic there.
+- **Decided** (general rule): a writer that ports one of these calls checks that the count
+  fits before slicing, and returns an error where it doesn't. The helpers' doc comments say so
+  (`crates/ocio-gpu/src/gpu_shader_utils.rs`).
+- **Status:** the helpers ported in `p1-gpu-infra` (1.7a); each caller's check comes with its
+  writer (2.4 for ACES 2, Phase 5 for the grading curves).
