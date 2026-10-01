@@ -4,7 +4,8 @@
 //! The public enums of `include/OpenColorIO/OpenColorTypes.h` @ v2.5.2 that only the GPU side
 //! uses. The public `ocio` crate re-exports them.
 //!
-//! So far: `GpuLanguage`.
+//! So far: `GpuLanguage`, with `GpuLanguageToString` from `src/OpenColorIO/ParseUtils.cpp`,
+//! and `UniformDataType`.
 
 /// A language OCIO writes shader programs in.
 ///
@@ -53,6 +54,45 @@ impl GpuLanguage {
         GpuLanguage::GlslEs3_0,
         GpuLanguage::Msl2_0,
     ];
+}
+
+/// The name of a language in cache IDs and config files.
+///
+/// Port of `GpuLanguageToString` (src/OpenColorIO/ParseUtils.cpp:258-274 @ v2.5.2), whose
+/// "Unsupported GPU shader language." for a value outside the enumerators can't be reached
+/// with [`GpuLanguage`].
+pub fn gpu_language_to_string(language: GpuLanguage) -> &'static str {
+    match language {
+        GpuLanguage::Cg => "cg",
+        GpuLanguage::Glsl1_2 => "glsl_1.2",
+        GpuLanguage::Glsl1_3 => "glsl_1.3",
+        GpuLanguage::Glsl4_0 => "glsl_4.0",
+        GpuLanguage::GlslVk4_6 => "glsl_vk_4.6",
+        GpuLanguage::GlslEs1_0 => "glsl_es_1.0",
+        GpuLanguage::GlslEs3_0 => "glsl_es_3.0",
+        GpuLanguage::HlslSm5_0 => "hlsl_sm_5.0",
+        GpuLanguage::Msl2_0 => "msl_2",
+        GpuLanguage::Osl1 => "osl_1",
+    }
+}
+
+/// The type of a uniform's value.
+///
+/// Port of `UniformDataType` (include/OpenColorIO/OpenColorTypes.h:623-631 @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum UniformDataType {
+    /// `UNIFORM_DOUBLE`.
+    Double = 0,
+    /// `UNIFORM_BOOL`.
+    Bool,
+    /// `UNIFORM_FLOAT3`: an array of 3 floats.
+    Float3,
+    /// `UNIFORM_VECTOR_FLOAT`: a vector of floats (its size is set by the uniform).
+    VectorFloat,
+    /// `UNIFORM_VECTOR_INT`: a vector of ints (its size is set by the uniform).
+    VectorInt,
+    /// `UNIFORM_UNKNOWN`.
+    Unknown,
 }
 
 #[cfg(test)]
