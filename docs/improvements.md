@@ -278,8 +278,10 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `ScaleWithOffsetRenderer` compute blue as `in * scale` everywhere except MSVC's remainder
   loop, which computes `scale * in` (0x1802b29c2, 0x1802b2be4). So the NaN a pixel gets depends
   on the platform and, on Windows, on where the pixel sits in its row.
-- **Who notices:** images with NaN pixels through a matrix with NaN or infinite coefficients;
-  the NaN's sign and payload differ.
+- **Who notices:** images whose pixels have NaNs of different signs or payloads in two or
+  more channels, through any non-diagonal matrix (GCC's `r*m0 + g*m1` keeps red's NaN, MSVC's
+  four-pixel loop `g*m1 + r*m0` green's); and NaN pixels through a matrix with NaN
+  coefficients (blue, for diagonal matrices). The NaN's sign and payload differ.
 - **A fix:** one operand order for every platform and loop.
 - **Status:** matched in `p1-engine` (1.3m2), each wheel's order per platform and loop.
 
