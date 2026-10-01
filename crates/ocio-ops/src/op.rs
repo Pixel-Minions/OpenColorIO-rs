@@ -26,6 +26,7 @@ use crate::format_metadata::FormatMetadataImpl;
 use crate::logging::log_warning;
 use crate::op_data::{OpData, OpDataRcPtr, OpDataType, OpDataVec, get_type_name};
 use crate::open_color_types::{DynamicPropertyType, TransformDirection};
+use crate::ops::exponent::exponent_op::create_exponent_op;
 use crate::ops::matrix::matrix_op::create_matrix_op;
 use crate::ops::range::range_op::create_range_op;
 
@@ -206,6 +207,7 @@ impl Op {
             OpData::Matrix(data) => data.clone_op(),
             // The op's data was validated when the op was made, so the copy is valid too.
             OpData::Range(data) => data.clone_op().expect("an op's range is valid"),
+            OpData::Exponent(data) => data.clone_op(),
             OpData::Reference(_) => no_reference_op(),
             OpData::NoOp(data) => data.clone_op(),
         }
@@ -220,6 +222,7 @@ impl Op {
         match &*self.data {
             OpData::Matrix(data) => data.get_info(),
             OpData::Range(data) => data.get_info(),
+            OpData::Exponent(data) => data.get_info(),
             OpData::Reference(_) => no_reference_op(),
             OpData::NoOp(data) => data.get_info(),
         }
@@ -241,7 +244,9 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default: the data's.
-            OpData::Matrix(_) | OpData::Range(_) | OpData::NoOp(_) => self.data.is_no_op(),
+            OpData::Matrix(_) | OpData::Range(_) | OpData::Exponent(_) | OpData::NoOp(_) => {
+                self.data.is_no_op()
+            }
         }
     }
 
@@ -252,7 +257,9 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default: the data's.
-            OpData::Matrix(_) | OpData::Range(_) | OpData::NoOp(_) => self.data.is_identity(),
+            OpData::Matrix(_) | OpData::Range(_) | OpData::Exponent(_) | OpData::NoOp(_) => {
+                self.data.is_identity()
+            }
         }
     }
 
@@ -273,7 +280,7 @@ impl Op {
                 // Clamping op.
                 create_range_op(&mut ops, range, TransformDirection::Forward)?;
             }
-            OpData::Reference(_) | OpData::NoOp(_) => {
+            OpData::Exponent(_) | OpData::Reference(_) | OpData::NoOp(_) => {
                 return Err(Exception::new(format!(
                     "Unexpected type in getIdentityReplacement. Expecting Matrix or Range, \
                      got :{}.",
@@ -305,6 +312,7 @@ impl Op {
         match &*self.data {
             OpData::Matrix(data) => data.is_same_type(op),
             OpData::Range(data) => data.is_same_type(op),
+            OpData::Exponent(data) => data.is_same_type(op),
             OpData::Reference(_) => no_reference_op(),
             OpData::NoOp(data) => data.is_same_type(op),
         }
@@ -318,6 +326,7 @@ impl Op {
         match &*self.data {
             OpData::Matrix(data) => data.is_inverse(op),
             OpData::Range(data) => data.is_inverse(op),
+            OpData::Exponent(data) => data.is_inverse(op),
             OpData::Reference(_) => no_reference_op(),
             OpData::NoOp(data) => data.is_inverse(op),
         }
@@ -332,6 +341,7 @@ impl Op {
         match &*self.data {
             OpData::Matrix(data) => data.can_combine_with(op),
             OpData::Range(data) => data.can_combine_with(op),
+            OpData::Exponent(data) => Ok(data.can_combine_with(op)),
             OpData::Reference(_) => no_reference_op(),
             // The Op default.
             OpData::NoOp(_) => Ok(false),
@@ -347,6 +357,7 @@ impl Op {
         match &*self.data {
             OpData::Matrix(data) => data.combine_with(ops, second_op),
             OpData::Range(data) => data.combine_with(ops, second_op),
+            OpData::Exponent(data) => data.combine_with(ops, second_op),
             OpData::Reference(_) => no_reference_op(),
             // The Op default.
             OpData::NoOp(_) => Err(self.cannot_combine()),
@@ -369,7 +380,7 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default: the data's.
-            OpData::Matrix(_) | OpData::Range(_) | OpData::NoOp(_) => {
+            OpData::Matrix(_) | OpData::Range(_) | OpData::Exponent(_) | OpData::NoOp(_) => {
                 self.data.has_channel_crosstalk()
             }
         }
@@ -421,7 +432,7 @@ impl Op {
             }
             OpData::Reference(_) => no_reference_op(),
             // The Op default: nothing.
-            OpData::NoOp(_) => Ok(()),
+            OpData::Exponent(_) | OpData::NoOp(_) => Ok(()),
         }
     }
 
@@ -433,6 +444,7 @@ impl Op {
         match &*self.data {
             OpData::Matrix(data) => data.get_op_cache_id(),
             OpData::Range(data) => Ok(data.get_op_cache_id()),
+            OpData::Exponent(data) => Ok(data.get_op_cache_id()),
             OpData::Reference(_) => no_reference_op(),
             OpData::NoOp(data) => Ok(data.get_op_cache_id()),
         }
@@ -452,6 +464,10 @@ impl Op {
             }
             OpData::Range(data) => {
                 data.get_cpu_op()?.apply(rgba);
+                Ok(())
+            }
+            OpData::Exponent(data) => {
+                data.get_cpu_op().apply(rgba);
                 Ok(())
             }
             OpData::Reference(_) => no_reference_op(),
@@ -484,6 +500,13 @@ impl Op {
                 renderer.apply(output);
                 Ok(())
             }
+            // The Exponent renderer reads each value before writing it too.
+            OpData::Exponent(data) => {
+                let renderer = data.get_cpu_op();
+                output.copy_from_slice(input);
+                renderer.apply(output);
+                Ok(())
+            }
             OpData::Reference(_) => no_reference_op(),
             // The no-ops copy (src/OpenColorIO/ops/noop/NoOps.cpp:51-52, 322-323, 408-409 @
             // v2.5.2).
@@ -502,7 +525,7 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default.
-            OpData::Matrix(_) | OpData::Range(_) | OpData::NoOp(_) => true,
+            OpData::Matrix(_) | OpData::Range(_) | OpData::Exponent(_) | OpData::NoOp(_) => true,
         }
     }
 
@@ -513,7 +536,7 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default.
-            OpData::Matrix(_) | OpData::Range(_) | OpData::NoOp(_) => false,
+            OpData::Matrix(_) | OpData::Range(_) | OpData::Exponent(_) | OpData::NoOp(_) => false,
         }
     }
 
@@ -525,7 +548,7 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default.
-            OpData::Matrix(_) | OpData::Range(_) | OpData::NoOp(_) => false,
+            OpData::Matrix(_) | OpData::Range(_) | OpData::Exponent(_) | OpData::NoOp(_) => false,
         }
     }
 
@@ -537,7 +560,7 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default.
-            OpData::Matrix(_) | OpData::Range(_) | OpData::NoOp(_) => {
+            OpData::Matrix(_) | OpData::Range(_) | OpData::Exponent(_) | OpData::NoOp(_) => {
                 Err(Exception::new(NO_DYNAMIC_PROPERTY))
             }
         }
@@ -556,7 +579,9 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default: each overload's error.
-            OpData::Matrix(_) | OpData::Range(_) | OpData::NoOp(_) => Err(cannot_replace(prop)),
+            OpData::Matrix(_) | OpData::Range(_) | OpData::Exponent(_) | OpData::NoOp(_) => {
+                Err(cannot_replace(prop))
+            }
         }
     }
 
@@ -568,7 +593,7 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default: nothing.
-            OpData::Matrix(_) | OpData::Range(_) | OpData::NoOp(_) => {}
+            OpData::Matrix(_) | OpData::Range(_) | OpData::Exponent(_) | OpData::NoOp(_) => {}
         }
     }
 
@@ -582,6 +607,7 @@ impl Op {
         match &*self.data {
             OpData::Matrix(data) => Ok(Some(data.get_cpu_op()?)),
             OpData::Range(data) => Ok(Some(data.get_cpu_op()?)),
+            OpData::Exponent(data) => Ok(Some(data.get_cpu_op())),
             OpData::Reference(_) => no_reference_op(),
             // AllocationNoOp, FileNoOp and LookNoOp::getCPUOp return nullptr
             // (src/OpenColorIO/ops/noop/NoOps.cpp:47, 318, 404 @ v2.5.2).
@@ -924,6 +950,10 @@ pub fn create_op_vec_from_op_data(
         OpData::Range(range_src) => {
             let range = range_src.clone();
             create_range_op(ops, range, dir)
+        }
+        OpData::Exponent(exp_src) => {
+            let exp = exp_src.clone();
+            create_exponent_op(ops, exp, dir)
         }
         OpData::Reference(_) => Err(Exception::new(
             "ReferenceOpData should have been replaced by referenced ops",
