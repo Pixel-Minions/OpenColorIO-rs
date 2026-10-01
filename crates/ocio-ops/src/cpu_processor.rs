@@ -358,6 +358,7 @@ fn create_cpu_engine(
         // (A Lut1D at either end: `GetLut1DRenderer` converts the bit depths.)
         match &**op.data() {
             OpData::Log(_)
+            | OpData::Lut1D(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Reference(_)

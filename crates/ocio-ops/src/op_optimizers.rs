@@ -19,7 +19,7 @@ use crate::exception::{Exception, Result};
 use crate::logging::{is_debug_logging_enabled, log_debug};
 use crate::op::{Op, OpVec, serialize_op_vec};
 use crate::op_data::{OpData, OpDataType};
-use crate::open_color_types::{BitDepth, OptimizationFlags};
+use crate::open_color_types::{BitDepth, OptimizationFlags, TransformDirection};
 
 /// Whether `flags` let the optimizer remove a pair of inverse ops of type `op_type`.
 ///
@@ -199,12 +199,18 @@ fn replace_identity_ops(op_vec: &mut OpVec, o_flags: OptimizationFlags) -> Resul
 
 /// The op that replaces a pair of inverse ops: the first one's identity replacement, which
 /// keeps any clamping the pair does. A pair of Lut1D ops gets its own
-/// (`Lut1DOpData::getPairIdentityReplacement`), with the Lut1D variant.
+/// (`Lut1DOpData::getPairIdentityReplacement`), which needs the inverse LUT's set-up (Phase 2,
+/// WP 2.1): until then such a pair is an error. A pair holds an inverse LUT, which only Phase
+/// 2's sources make, and which `finalize` refuses.
 ///
 /// Port of the replacement of `RemoveInverseOps` (src/OpenColorIO/OpOptimizers.cpp:249-276 @
 /// v2.5.2).
 fn pair_identity_replacement(op1: &Op) -> Result<Op> {
     match &**op1.data() {
+        OpData::Lut1D(_) => Err(Exception::new(
+            "Lut1D: the identity replacement of a pair of inverse 1D LUTs is not ported yet \
+             (Phase 2, WP 2.1).",
+        )),
         OpData::Log(_)
         | OpData::Matrix(_)
         | OpData::Range(_)
@@ -335,14 +341,24 @@ fn combine_ops(op_vec: &mut OpVec, o_flags: OptimizationFlags) -> Result<i32> {
 }
 
 /// Replaces each Lut1D or Lut3D evaluated inverse with a faster forward approximation, and
-/// returns how many. The LUT arms come with the LUT variants; no other op is replaced.
+/// returns how many. The fast forward Lut1D (`MakeFastLut1DFromInverse`) is Phase 2's (WP
+/// 2.1): until then an inverse Lut1D is an error. Only Phase 2's sources make one, and
+/// `finalize` refuses it. The Lut3D arm comes with its variant; no other op is replaced.
 ///
 /// Port of `ReplaceInverseLuts` (src/OpenColorIO/OpOptimizers.cpp:369-408 @ v2.5.2).
-fn replace_inverse_luts(op_vec: &mut OpVec) -> i32 {
+fn replace_inverse_luts(op_vec: &mut OpVec) -> Result<i32> {
     let count = 0;
     for op in op_vec.iter() {
         match &**op.data() {
-            // (The Lut1D and Lut3D arms: an inverse LUT becomes a fast forward one, counted.)
+            OpData::Lut1D(lut) => {
+                if lut.get_direction() == TransformDirection::Inverse {
+                    return Err(Exception::new(
+                        "Lut1D: the fast forward LUT of an inverse 1D LUT is not ported yet \
+                         (Phase 2, WP 2.1).",
+                    ));
+                }
+            }
+            // (The Lut3D arm: an inverse LUT becomes a fast forward one, counted.)
             OpData::Log(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
@@ -350,7 +366,7 @@ fn replace_inverse_luts(op_vec: &mut OpVec) -> i32 {
             | OpData::NoOp(_) => {}
         }
     }
-    count
+    Ok(count)
 }
 
 /// Removes the leading Range ops that are identities, and returns how many.
@@ -393,9 +409,10 @@ fn remove_trailing_clamp_identity(op_vec: &mut OpVec) -> Result<usize> {
     Ok(count)
 }
 
-/// Whether the op is a Lut1D evaluated forward. The Lut1D arm comes with its variant.
+/// Whether the op is a Lut1D evaluated forward.
 fn is_forward_lut1d(op: &Op) -> bool {
     match &**op.data() {
+        OpData::Lut1D(lut) => lut.get_direction() == TransformDirection::Forward,
         OpData::Log(_)
         | OpData::Matrix(_)
         | OpData::Range(_)
@@ -602,7 +619,7 @@ impl OpVec {
                 // any inverse LUTs with faster forward LUTs and do another pass to see if more
                 // optimization is possible.
                 if fast_lut {
-                    let inverses = replace_inverse_luts(self);
+                    let inverses = replace_inverse_luts(self)?;
                     if inverses == 0 {
                         break;
                     }

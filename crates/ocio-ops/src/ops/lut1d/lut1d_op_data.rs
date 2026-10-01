@@ -638,6 +638,24 @@ impl Lut1DOpData {
         inv_lut
     }
 
+    /// Whether `other` undoes this LUT: the other direction, and the same half flags, hue
+    /// adjust and values.
+    ///
+    /// Port of `Lut1DOpData::isInverse` (Lut1DOpData.cpp:570-584 @ v2.5.2).
+    pub fn is_inverse(&self, other: &Lut1DOpData) -> bool {
+        if (self.direction == TransformDirection::Forward
+            && other.direction == TransformDirection::Inverse)
+            || (self.direction == TransformDirection::Inverse
+                && other.direction == TransformDirection::Forward)
+        {
+            // Note: The inverse LUT 1D finalize modifies the array to make it monotonic, hence,
+            // this could return false in unexpected cases. However, one could argue that those
+            // LUTs should not be optimized out as an identity anyway.
+            return self.have_equal_basics(other);
+        }
+        false
+    }
+
     /// Whether both LUTs may compose: neither adjusts hue.
     ///
     /// Port of `Lut1DOpData::mayCompose` (Lut1DOpData.cpp:586-589 @ v2.5.2).
