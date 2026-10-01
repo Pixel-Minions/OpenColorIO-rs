@@ -11,8 +11,7 @@
 //!   [`create_op_vec_from_op_data`]. Its `finalize` is in [`crate::op_optimizers`], as
 //!   upstream's is in `OpOptimizers.cpp`.
 //!
-//! Not yet ported: `Op::getIdentityReplacement`, which builds Matrix and Range ops (it comes
-//! with the Matrix op), `Op::dumpMetadata`, which needs the processor's metadata (WP 1.8),
+//! Not yet ported: `Op::dumpMetadata`, which needs the processor's metadata (WP 1.8),
 //! `OpRcPtrVec::optimize` and `optimizeForBitdepth` (the optimizer, WP 1.6), and `HasFlag`,
 //! which needs `OptimizationFlags` (chunk 1.2d). The GPU side, `extractGpuShaderInfo`, is
 //! `ocio-gpu`'s.
@@ -25,8 +24,9 @@ use crate::dynamic_property::DynamicPropertyRcPtr;
 use crate::exception::{Exception, Result};
 use crate::format_metadata::FormatMetadataImpl;
 use crate::logging::log_warning;
-use crate::op_data::{OpData, OpDataRcPtr, OpDataType, OpDataVec};
+use crate::op_data::{OpData, OpDataRcPtr, OpDataType, OpDataVec, get_type_name};
 use crate::open_color_types::{DynamicPropertyType, TransformDirection};
+use crate::ops::matrix::matrix_op::create_matrix_op;
 
 /// RGBA pixels in one of the CPU processor's channel types (`BitDepthInfo<BD>::Type`): the
 /// input of an op that converts from an image's bit depth.
@@ -191,6 +191,7 @@ impl Op {
     /// overrides.
     pub fn clone_op(&self) -> Op {
         match &*self.data {
+            OpData::Matrix(data) => data.clone_op(),
             OpData::Reference(_) => no_reference_op(),
             OpData::NoOp(data) => data.clone_op(),
         }
@@ -203,6 +204,7 @@ impl Op {
     /// overrides.
     pub fn get_info(&self) -> &'static str {
         match &*self.data {
+            OpData::Matrix(data) => data.get_info(),
             OpData::Reference(_) => no_reference_op(),
             OpData::NoOp(data) => data.get_info(),
         }
@@ -224,7 +226,7 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default: the data's.
-            OpData::NoOp(_) => self.data.is_no_op(),
+            OpData::Matrix(_) | OpData::NoOp(_) => self.data.is_no_op(),
         }
     }
 
@@ -235,8 +237,33 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default: the data's.
-            OpData::NoOp(_) => self.data.is_identity(),
+            OpData::Matrix(_) | OpData::NoOp(_) => self.data.is_identity(),
         }
+    }
+
+    /// The op that replaces this one where the optimizer finds it to be an identity: an
+    /// identity Matrix op, which the optimizer then removes, or a clamping Range op, as the
+    /// data's [`OpData::get_identity_replacement`] says.
+    ///
+    /// Port of `Op::getIdentityReplacement` (src/OpenColorIO/Op.cpp:178-202 @ v2.5.2). The
+    /// Range op comes with its family.
+    pub fn get_identity_replacement(&self) -> Result<Op> {
+        let op_data = self.data.get_identity_replacement();
+        let mut ops = OpVec::new();
+        match op_data {
+            OpData::Matrix(mat) => {
+                // No-op that will be optimized.
+                create_matrix_op(&mut ops, mat, TransformDirection::Forward);
+            }
+            OpData::Reference(_) | OpData::NoOp(_) => {
+                return Err(Exception::new(format!(
+                    "Unexpected type in getIdentityReplacement. Expecting Matrix or Range, \
+                     got :{}.",
+                    get_type_name(op_data.get_type())?
+                )));
+            }
+        }
+        Ok(ops[0].clone())
     }
 
     /// Appends to `ops` the simpler ops that replace this one, if its data has any
@@ -258,6 +285,7 @@ impl Op {
     /// overrides.
     pub fn is_same_type(&self, op: &Op) -> bool {
         match &*self.data {
+            OpData::Matrix(data) => data.is_same_type(op),
             OpData::Reference(_) => no_reference_op(),
             OpData::NoOp(data) => data.is_same_type(op),
         }
@@ -269,6 +297,7 @@ impl Op {
     /// overrides.
     pub fn is_inverse(&self, op: &Op) -> bool {
         match &*self.data {
+            OpData::Matrix(data) => data.is_inverse(op),
             OpData::Reference(_) => no_reference_op(),
             OpData::NoOp(data) => data.is_inverse(op),
         }
@@ -279,8 +308,9 @@ impl Op {
     ///
     /// Port of `Op::canCombineWith` (src/OpenColorIO/Op.h:209, Op.cpp:145-148 @ v2.5.2), and
     /// its overrides.
-    pub fn can_combine_with(&self, _op: &Op) -> Result<bool> {
+    pub fn can_combine_with(&self, op: &Op) -> Result<bool> {
         match &*self.data {
+            OpData::Matrix(data) => data.can_combine_with(op),
             OpData::Reference(_) => no_reference_op(),
             // The Op default.
             OpData::NoOp(_) => Ok(false),
@@ -292,8 +322,9 @@ impl Op {
     ///
     /// Port of `Op::combineWith` (src/OpenColorIO/Op.h:211-217, Op.cpp:150-156 @ v2.5.2), and
     /// its overrides.
-    pub fn combine_with(&self, _ops: &mut OpVec, _second_op: &Op) -> Result<()> {
+    pub fn combine_with(&self, ops: &mut OpVec, second_op: &Op) -> Result<()> {
         match &*self.data {
+            OpData::Matrix(data) => data.combine_with(ops, second_op),
             OpData::Reference(_) => no_reference_op(),
             // The Op default.
             OpData::NoOp(_) => Err(self.cannot_combine()),
@@ -316,7 +347,7 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default: the data's.
-            OpData::NoOp(_) => self.data.has_channel_crosstalk(),
+            OpData::Matrix(_) | OpData::NoOp(_) => self.data.has_channel_crosstalk(),
         }
     }
 
@@ -333,6 +364,15 @@ impl Op {
     /// Port of `Op::finalize` (src/OpenColorIO/Op.h:226-227 @ v2.5.2), and its overrides.
     pub fn finalize(&mut self) -> Result<()> {
         match &*self.data {
+            // An inverse matrix becomes its forward equivalent: new data.
+            // Port of `MatrixOffsetOp::finalize` (src/OpenColorIO/ops/matrix/MatrixOp.cpp:
+            // 164-171 @ v2.5.2).
+            OpData::Matrix(mat) => {
+                if mat.get_direction() == TransformDirection::Inverse {
+                    self.data = Arc::new(OpData::Matrix(mat.get_as_forward()?));
+                }
+                Ok(())
+            }
             OpData::Reference(_) => no_reference_op(),
             // The Op default: nothing.
             OpData::NoOp(_) => Ok(()),
@@ -345,6 +385,7 @@ impl Op {
     /// overrides.
     pub fn get_cache_id(&self) -> Vec<u8> {
         match &*self.data {
+            OpData::Matrix(data) => data.get_op_cache_id(),
             OpData::Reference(_) => no_reference_op(),
             OpData::NoOp(data) => data.get_op_cache_id(),
         }
@@ -355,8 +396,13 @@ impl Op {
     ///
     /// Port of `Op::apply(void *, long)` (src/OpenColorIO/Op.h:232-241 @ v2.5.2), and its
     /// overrides.
-    pub fn apply(&self, _rgba: &mut [f32]) -> Result<()> {
+    pub fn apply(&self, rgba: &mut [f32]) -> Result<()> {
         match &*self.data {
+            // The Op default: `getCPUOp(false)->apply(img, img, numPixels)`.
+            OpData::Matrix(data) => {
+                data.get_cpu_op()?.apply(rgba);
+                Ok(())
+            }
             OpData::Reference(_) => no_reference_op(),
             // AllocationNoOp, FileNoOp and LookNoOp::apply do nothing
             // (src/OpenColorIO/ops/noop/NoOps.cpp:49, 320, 406 @ v2.5.2).
@@ -372,6 +418,14 @@ impl Op {
     /// v2.5.2), and its overrides.
     pub fn apply_in_out(&self, input: &[f32], output: &mut [f32]) -> Result<()> {
         match &*self.data {
+            // The Op default: `getCPUOp(false)->apply(inImg, outImg, numPixels)`. The matrix
+            // renderers read a pixel before writing it, so they render a copy in place.
+            OpData::Matrix(data) => {
+                let renderer = data.get_cpu_op()?;
+                output.copy_from_slice(input);
+                renderer.apply(output);
+                Ok(())
+            }
             OpData::Reference(_) => no_reference_op(),
             // The no-ops copy (src/OpenColorIO/ops/noop/NoOps.cpp:51-52, 322-323, 408-409 @
             // v2.5.2).
@@ -390,7 +444,7 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default.
-            OpData::NoOp(_) => true,
+            OpData::Matrix(_) | OpData::NoOp(_) => true,
         }
     }
 
@@ -401,7 +455,7 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default.
-            OpData::NoOp(_) => false,
+            OpData::Matrix(_) | OpData::NoOp(_) => false,
         }
     }
 
@@ -413,7 +467,7 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default.
-            OpData::NoOp(_) => false,
+            OpData::Matrix(_) | OpData::NoOp(_) => false,
         }
     }
 
@@ -425,7 +479,7 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default.
-            OpData::NoOp(_) => Err(Exception::new(NO_DYNAMIC_PROPERTY)),
+            OpData::Matrix(_) | OpData::NoOp(_) => Err(Exception::new(NO_DYNAMIC_PROPERTY)),
         }
     }
 
@@ -442,7 +496,7 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default: each overload's error.
-            OpData::NoOp(_) => Err(cannot_replace(prop)),
+            OpData::Matrix(_) | OpData::NoOp(_) => Err(cannot_replace(prop)),
         }
     }
 
@@ -454,7 +508,7 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default: nothing.
-            OpData::NoOp(_) => {}
+            OpData::Matrix(_) | OpData::NoOp(_) => {}
         }
     }
 
@@ -466,6 +520,7 @@ impl Op {
     /// overrides.
     pub fn get_cpu_op(&self, _fast_log_exp_pow: bool) -> Result<Option<Arc<dyn CpuOp>>> {
         match &*self.data {
+            OpData::Matrix(data) => Ok(Some(data.get_cpu_op()?)),
             OpData::Reference(_) => no_reference_op(),
             // AllocationNoOp, FileNoOp and LookNoOp::getCPUOp return nullptr
             // (src/OpenColorIO/ops/noop/NoOps.cpp:47, 318, 404 @ v2.5.2).
@@ -790,11 +845,16 @@ pub fn serialize_op_vec(ops: &OpVec, indent: i32) -> Vec<u8> {
 ///
 /// Port of `CreateOpVecFromOpData` (src/OpenColorIO/Op.cpp:491-620 @ v2.5.2).
 pub fn create_op_vec_from_op_data(
-    _ops: &mut OpVec,
+    ops: &mut OpVec,
     op_data: &OpDataRcPtr,
-    _dir: TransformDirection,
+    dir: TransformDirection,
 ) -> Result<()> {
     match &**op_data {
+        OpData::Matrix(matrix_src) => {
+            let matrix = matrix_src.clone();
+            create_matrix_op(ops, matrix, dir);
+            Ok(())
+        }
         OpData::Reference(_) => Err(Exception::new(
             "ReferenceOpData should have been replaced by referenced ops",
         )),
