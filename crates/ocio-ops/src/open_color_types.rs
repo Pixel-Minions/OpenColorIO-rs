@@ -6,7 +6,10 @@
 //!
 //! They live in `ocio-ops` because op data uses them; the public `ocio` crate re-exports them.
 //! So far: `LoggingLevel`, `TransformDirection`, `NegativeStyle`, `DynamicPropertyType`, `BitDepth`,
-//! `ChannelOrdering` and `Allocation`.
+//! `ChannelOrdering`, `Allocation` and `OptimizationFlags`.
+
+use core::ffi::c_ulong;
+use std::ops::{BitAnd, BitOr};
 
 use crate::utils::string_utils::lower_c_str;
 
@@ -234,6 +237,159 @@ pub fn allocation_to_string(allocation: Allocation) -> &'static str {
         Allocation::Uniform => "uniform",
         Allocation::Lg2 => "lg2",
         Allocation::Unknown => "unknown",
+    }
+}
+
+/// Which optimizations a processor applies: a set of flags, combined with `|` and queried with
+/// [`has_flag`](Self::has_flag). The number underneath is upstream's enum's type, a C
+/// `unsigned long` (32 bits on Windows, 64 on Linux), which the CPU processor's cache ID prints.
+///
+/// Port of `OptimizationFlags` (include/OpenColorIO/OpenColorTypes.h:634-722 @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct OptimizationFlags(pub c_ulong);
+
+impl OptimizationFlags {
+    /// `OPTIMIZATION_NONE`: do not optimize.
+    pub const NONE: OptimizationFlags = OptimizationFlags(0x0000_0000);
+
+    /// `OPTIMIZATION_IDENTITY`: replace identity ops (other than gamma).
+    pub const IDENTITY: OptimizationFlags = OptimizationFlags(0x0000_0001);
+
+    /// `OPTIMIZATION_IDENTITY_GAMMA`: replace identity gamma ops.
+    pub const IDENTITY_GAMMA: OptimizationFlags = OptimizationFlags(0x0000_0002);
+
+    /// `OPTIMIZATION_PAIR_IDENTITY_CDL`: replace a pair of CDL ops where one is the inverse
+    /// of the other.
+    pub const PAIR_IDENTITY_CDL: OptimizationFlags = OptimizationFlags(0x0000_0040);
+
+    /// `OPTIMIZATION_PAIR_IDENTITY_EXPOSURE_CONTRAST`: likewise for exposure-contrast ops.
+    pub const PAIR_IDENTITY_EXPOSURE_CONTRAST: OptimizationFlags = OptimizationFlags(0x0000_0080);
+
+    /// `OPTIMIZATION_PAIR_IDENTITY_FIXED_FUNCTION`: likewise for fixed-function ops.
+    pub const PAIR_IDENTITY_FIXED_FUNCTION: OptimizationFlags = OptimizationFlags(0x0000_0100);
+
+    /// `OPTIMIZATION_PAIR_IDENTITY_GAMMA`: likewise for gamma ops.
+    pub const PAIR_IDENTITY_GAMMA: OptimizationFlags = OptimizationFlags(0x0000_0200);
+
+    /// `OPTIMIZATION_PAIR_IDENTITY_LUT1D`: likewise for 1D LUTs.
+    pub const PAIR_IDENTITY_LUT1D: OptimizationFlags = OptimizationFlags(0x0000_0400);
+
+    /// `OPTIMIZATION_PAIR_IDENTITY_LUT3D`: likewise for 3D LUTs.
+    pub const PAIR_IDENTITY_LUT3D: OptimizationFlags = OptimizationFlags(0x0000_0800);
+
+    /// `OPTIMIZATION_PAIR_IDENTITY_LOG`: likewise for log ops.
+    pub const PAIR_IDENTITY_LOG: OptimizationFlags = OptimizationFlags(0x0000_1000);
+
+    /// `OPTIMIZATION_PAIR_IDENTITY_GRADING`: likewise for grading ops.
+    pub const PAIR_IDENTITY_GRADING: OptimizationFlags = OptimizationFlags(0x0000_2000);
+
+    /// `OPTIMIZATION_COMP_EXPONENT`: compose a pair of exponent ops into a single op.
+    pub const COMP_EXPONENT: OptimizationFlags = OptimizationFlags(0x0004_0000);
+
+    /// `OPTIMIZATION_COMP_GAMMA`: likewise for gamma ops.
+    pub const COMP_GAMMA: OptimizationFlags = OptimizationFlags(0x0008_0000);
+
+    /// `OPTIMIZATION_COMP_MATRIX`: likewise for matrix ops.
+    pub const COMP_MATRIX: OptimizationFlags = OptimizationFlags(0x0010_0000);
+
+    /// `OPTIMIZATION_COMP_LUT1D`: likewise for 1D LUTs.
+    pub const COMP_LUT1D: OptimizationFlags = OptimizationFlags(0x0020_0000);
+
+    /// `OPTIMIZATION_COMP_LUT3D`: likewise for 3D LUTs.
+    pub const COMP_LUT3D: OptimizationFlags = OptimizationFlags(0x0040_0000);
+
+    /// `OPTIMIZATION_COMP_RANGE`: likewise for range ops.
+    pub const COMP_RANGE: OptimizationFlags = OptimizationFlags(0x0080_0000);
+
+    /// `OPTIMIZATION_COMP_SEPARABLE_PREFIX`: for integer and half bit depths only, replace
+    /// separable ops (ops without channel crosstalk) by a single 1D LUT of the input bit
+    /// depth's domain.
+    pub const COMP_SEPARABLE_PREFIX: OptimizationFlags = OptimizationFlags(0x0100_0000);
+
+    /// `OPTIMIZATION_LUT_INV_FAST`: evaluate inverse 1D and 3D LUTs with a forward LUT (faster
+    /// but less accurate; GPU evaluations always do).
+    pub const LUT_INV_FAST: OptimizationFlags = OptimizationFlags(0x0200_0000);
+
+    /// `OPTIMIZATION_FAST_LOG_EXP_POW`: in SSE mode, the CPU processor uses faster
+    /// approximations of log, exp and pow.
+    pub const FAST_LOG_EXP_POW: OptimizationFlags = OptimizationFlags(0x0400_0000);
+
+    /// `OPTIMIZATION_SIMPLIFY_OPS`: break certain ops down into simpler ones where possible,
+    /// such as a CDL into a matrix.
+    pub const SIMPLIFY_OPS: OptimizationFlags = OptimizationFlags(0x0800_0000);
+
+    /// `OPTIMIZATION_NO_DYNAMIC_PROPERTIES`: turn off the dynamic control of the ops that
+    /// offer it after finalization (e.g. exposure-contrast).
+    pub const NO_DYNAMIC_PROPERTIES: OptimizationFlags = OptimizationFlags(0x1000_0000);
+
+    /// `OPTIMIZATION_ALL`: apply all possible optimizations.
+    pub const ALL: OptimizationFlags = OptimizationFlags(0xFFFF_FFFF);
+
+    // The following groupings of flags are provided as a convenient way to select an overall
+    // optimization level.
+
+    /// `OPTIMIZATION_LOSSLESS`: the identities, the inverse pairs, the compositions of
+    /// exponents, gammas, matrices and ranges, and the simpler ops.
+    pub const LOSSLESS: OptimizationFlags = OptimizationFlags(
+        Self::IDENTITY.0
+            | Self::IDENTITY_GAMMA.0
+            | Self::PAIR_IDENTITY_CDL.0
+            | Self::PAIR_IDENTITY_EXPOSURE_CONTRAST.0
+            | Self::PAIR_IDENTITY_FIXED_FUNCTION.0
+            | Self::PAIR_IDENTITY_GAMMA.0
+            | Self::PAIR_IDENTITY_GRADING.0
+            | Self::PAIR_IDENTITY_LOG.0
+            | Self::PAIR_IDENTITY_LUT1D.0
+            | Self::PAIR_IDENTITY_LUT3D.0
+            | Self::COMP_EXPONENT.0
+            | Self::COMP_GAMMA.0
+            | Self::COMP_MATRIX.0
+            | Self::COMP_RANGE.0
+            | Self::SIMPLIFY_OPS.0,
+    );
+
+    /// `OPTIMIZATION_VERY_GOOD`: lossless, and the compositions of 1D LUTs, the fast inverse
+    /// LUTs, the fast log, exp and pow, and the separable prefix.
+    pub const VERY_GOOD: OptimizationFlags = OptimizationFlags(
+        Self::LOSSLESS.0
+            | Self::COMP_LUT1D.0
+            | Self::LUT_INV_FAST.0
+            | Self::FAST_LOG_EXP_POW.0
+            | Self::COMP_SEPARABLE_PREFIX.0,
+    );
+
+    /// `OPTIMIZATION_GOOD`: very good, and the compositions of 3D LUTs.
+    pub const GOOD: OptimizationFlags = OptimizationFlags(Self::VERY_GOOD.0 | Self::COMP_LUT3D.0);
+
+    /// `OPTIMIZATION_DRAFT`: for quite lossy optimizations, all of them.
+    pub const DRAFT: OptimizationFlags = Self::ALL;
+
+    /// `OPTIMIZATION_DEFAULT`: very good.
+    pub const DEFAULT: OptimizationFlags = Self::VERY_GOOD;
+
+    /// Whether every flag of `query_flag` is set.
+    ///
+    /// Port of `HasFlag` (src/OpenColorIO/Op.h:418-421 @ v2.5.2).
+    pub fn has_flag(self, query_flag: OptimizationFlags) -> bool {
+        (self & query_flag) == query_flag
+    }
+}
+
+impl BitOr for OptimizationFlags {
+    type Output = OptimizationFlags;
+
+    /// The flags of both.
+    fn bitor(self, rhs: OptimizationFlags) -> OptimizationFlags {
+        OptimizationFlags(self.0 | rhs.0)
+    }
+}
+
+impl BitAnd for OptimizationFlags {
+    type Output = OptimizationFlags;
+
+    /// The flags set in both.
+    fn bitand(self, rhs: OptimizationFlags) -> OptimizationFlags {
+        OptimizationFlags(self.0 & rhs.0)
     }
 }
 

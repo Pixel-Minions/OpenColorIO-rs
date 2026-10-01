@@ -142,3 +142,7 @@ pub fn create_generic_bit_depth_helper(
         BitDepth::Uint14 | BitDepth::Uint32 | BitDepth::Unknown => return Err(unsupported()),
     })
 }
+
+#[cfg(test)]
+#[path = "cpu_processor_tests.rs"]
+mod tests;
