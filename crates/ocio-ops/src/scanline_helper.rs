@@ -523,9 +523,17 @@ impl<'a, I: Generic, O: Generic> ScanlineHelper<'a> for GenericScanlineHelper<'a
 
         // After row `c_int::MAX` of an image with more rows, upstream's row index has wrapped
         // (U-3): an RGBA-packed source row is then outside the image. Other sources raise
-        // "Invalid output image position." when packed, before touching any memory.
-        if *y_index < 0 && in_packed {
-            return Err(Exception::new(TOO_TALL));
+        // "Invalid output image position." when packed, before touching any memory
+        // (src/OpenColorIO/ImagePacking.cpp:37-40, 107-110 @ v2.5.2). Where the destination's
+        // row is the RGBA row, upstream only computes its address, outside the image, before
+        // packing; the port can't take that row, so it raises the packing's error first.
+        if *y_index < 0 {
+            if in_packed {
+                return Err(Exception::new(TOO_TALL));
+            }
+            if *use_dst_buffer {
+                return Err(Exception::new("Invalid output image position."));
+            }
         }
 
         let width = dst_img.width;

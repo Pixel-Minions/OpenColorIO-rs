@@ -171,6 +171,24 @@ fn rows_past_the_int_range_fail() {
     helper.dst_img.as_mut().unwrap().height = rows;
     helper.y_index = c_int::MIN;
     assert_eq!(helper.prep_rgba_scanline().unwrap_err().message(), TOO_TALL);
+
+    // Packed channel by channel into an RGBA-packed F32 destination, whose row is the RGBA
+    // row: upstream computes that row's address, before the image, and the packing raises for
+    // the negative position before touching any memory.
+    let mut values = [0u8; 12];
+    let src = one_value_planes(&mut values, 1, 1);
+    let mut pixels = [0f32; 4];
+    let mut dst = crate::image_desc::PackedImageDesc::new(&mut pixels[..], 1, 1, 4).unwrap();
+    let mut helper = f32_helper();
+    helper.init_src_dst(&src, &mut dst).unwrap();
+    assert!(helper.use_dst_buffer);
+    helper.src_img.as_mut().unwrap().height = rows;
+    helper.dst_img.as_mut().unwrap().height = rows;
+    helper.y_index = c_int::MIN;
+    assert_eq!(
+        helper.prep_rgba_scanline().unwrap_err().message(),
+        "Invalid output image position."
+    );
 }
 
 #[test]
