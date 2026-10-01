@@ -1878,13 +1878,15 @@ status = "todo"
 path = "src/OpenColorIO/ops/matrix/MatrixOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/matrix/matrix_op_cpu.rs"]
-status = "todo"
+status = "done"
+note = "1.3m2: the four renderers, the matrix ones in their SSE2 form (OCIO_USE_SSE2, set in both wheels), with each wheel's operand orders: MSVC's differ between its four-pixel loop and the loop that finishes the last numPixels % 4 pixels (matrix_op_cpu.rs notes the addresses)"
 
 [[file]]
 path = "src/OpenColorIO/ops/matrix/MatrixOpCPU.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/matrix/matrix_op_cpu.rs"]
-status = "todo"
+status = "done"
+note = "1.3m2"
 
 [[file]]
 path = "src/OpenColorIO/ops/matrix/MatrixOpData.cpp"
