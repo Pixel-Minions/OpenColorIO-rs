@@ -360,6 +360,7 @@ fn create_cpu_engine(
             OpData::Gamma(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
+            | OpData::Exponent(_)
             | OpData::Reference(_)
             | OpData::NoOp(_) => {}
         }

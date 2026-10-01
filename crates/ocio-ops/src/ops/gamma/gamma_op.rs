@@ -47,7 +47,11 @@ impl GammaOpData {
     pub(crate) fn is_inverse_op(&self, op: &Op) -> bool {
         match &**op.data() {
             OpData::Gamma(gamma2) => self.is_inverse(gamma2),
-            OpData::Matrix(_) | OpData::Range(_) | OpData::Reference(_) | OpData::NoOp(_) => false,
+            OpData::Matrix(_)
+            | OpData::Range(_)
+            | OpData::Exponent(_)
+            | OpData::Reference(_)
+            | OpData::NoOp(_) => false,
         }
     }
 
@@ -58,7 +62,11 @@ impl GammaOpData {
     pub(crate) fn can_combine_with(&self, op: &Op) -> bool {
         match &**op.data() {
             OpData::Gamma(gamma2) => self.may_compose(gamma2),
-            OpData::Matrix(_) | OpData::Range(_) | OpData::Reference(_) | OpData::NoOp(_) => false,
+            OpData::Matrix(_)
+            | OpData::Range(_)
+            | OpData::Exponent(_)
+            | OpData::Reference(_)
+            | OpData::NoOp(_) => false,
         }
     }
 

@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use crate::exception::{Exception, Result};
 use crate::format_metadata::{FormatMetadataImpl, METADATA_ID, METADATA_NAME};
+use crate::ops::exponent::ExponentOpData;
 use crate::ops::gamma::GammaOpData;
 use crate::ops::matrix::MatrixOpData;
 use crate::ops::noop::NoOpData;
@@ -101,6 +102,8 @@ pub enum OpData {
     Matrix(MatrixOpData),
     /// `RangeOpData`.
     Range(RangeOpData),
+    /// `ExponentOpData`.
+    Exponent(ExponentOpData),
     /// `ReferenceOpData`.
     Reference(ReferenceOpData),
     /// `NoOpData` and its subclass `FileNoOpData`.
@@ -122,6 +125,7 @@ impl OpData {
             OpData::Gamma(data) => data.get_type(),
             OpData::Matrix(data) => data.get_type(),
             OpData::Range(data) => data.get_type(),
+            OpData::Exponent(data) => data.get_type(),
             OpData::Reference(_) => OpDataType::Reference,
             OpData::NoOp(_) => OpDataType::NoOp,
         }
@@ -138,6 +142,10 @@ impl OpData {
             OpData::Matrix(data) => data.validate_ref(),
             // `const`, and fills the `mutable` scale and offset.
             OpData::Range(data) => data.validate(),
+            OpData::Exponent(data) => {
+                data.validate();
+                Ok(())
+            }
             OpData::Reference(data) => {
                 data.validate();
                 Ok(())
@@ -157,6 +165,7 @@ impl OpData {
             OpData::Gamma(data) => data.is_no_op(),
             OpData::Matrix(data) => data.is_no_op(),
             OpData::Range(data) => Ok(data.is_no_op()),
+            OpData::Exponent(data) => Ok(data.is_no_op()),
             OpData::Reference(data) => Ok(data.is_no_op()),
             OpData::NoOp(data) => Ok(data.is_no_op()),
         }
@@ -171,6 +180,7 @@ impl OpData {
             OpData::Gamma(data) => data.is_identity(),
             OpData::Matrix(data) => data.is_identity(),
             OpData::Range(data) => Ok(data.is_identity()),
+            OpData::Exponent(data) => Ok(data.is_identity()),
             OpData::Reference(data) => Ok(data.is_identity()),
             OpData::NoOp(data) => Ok(data.is_identity()),
         }
@@ -187,6 +197,7 @@ impl OpData {
             OpData::Gamma(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
+            | OpData::Exponent(_)
             | OpData::Reference(_)
             | OpData::NoOp(_) => Ok(()),
         }
@@ -202,9 +213,11 @@ impl OpData {
             // Port of `GammaOpData::getIdentityReplacement`.
             OpData::Gamma(data) => data.get_identity_replacement(),
             // The OpData default: `std::make_shared<MatrixOpData>()`, the identity.
-            OpData::Matrix(_) | OpData::Range(_) | OpData::Reference(_) | OpData::NoOp(_) => {
-                OpData::Matrix(MatrixOpData::new())
-            }
+            OpData::Matrix(_)
+            | OpData::Range(_)
+            | OpData::Exponent(_)
+            | OpData::Reference(_)
+            | OpData::NoOp(_) => OpData::Matrix(MatrixOpData::new()),
         }
     }
 
@@ -218,6 +231,7 @@ impl OpData {
             OpData::Gamma(data) => data.has_channel_crosstalk(),
             OpData::Matrix(data) => data.has_channel_crosstalk(),
             OpData::Range(data) => data.has_channel_crosstalk(),
+            OpData::Exponent(data) => data.has_channel_crosstalk(),
             OpData::Reference(data) => data.has_channel_crosstalk(),
             OpData::NoOp(data) => data.has_channel_crosstalk(),
         }
@@ -236,7 +250,9 @@ impl OpData {
             OpData::Reference(data) => {
                 matches!(other, OpData::Reference(other) if data.equals(other))
             }
-            // NoOpData keeps the OpData base: the type only.
+            // ExponentOpData and NoOpData keep the OpData base: the type only (ExponentOp.h
+            // declares no equals).
+            OpData::Exponent(_) => other.get_type() == OpDataType::Exponent,
             OpData::NoOp(_) => other.get_type() == OpDataType::NoOp,
         }
     }
@@ -249,6 +265,7 @@ impl OpData {
             OpData::Gamma(data) => data.get_cache_id(),
             OpData::Matrix(data) => data.get_cache_id(),
             OpData::Range(data) => Ok(data.get_cache_id()),
+            OpData::Exponent(data) => Ok(data.get_cache_id()),
             OpData::Reference(data) => data.get_cache_id(),
             OpData::NoOp(data) => Ok(data.get_cache_id()),
         }
@@ -262,6 +279,7 @@ impl OpData {
             OpData::Gamma(data) => data.get_format_metadata(),
             OpData::Matrix(data) => data.get_format_metadata(),
             OpData::Range(data) => data.get_format_metadata(),
+            OpData::Exponent(data) => data.get_format_metadata(),
             OpData::Reference(data) => data.get_format_metadata(),
             OpData::NoOp(data) => data.get_format_metadata(),
         }
@@ -275,6 +293,7 @@ impl OpData {
             OpData::Gamma(data) => data.get_format_metadata_mut(),
             OpData::Matrix(data) => data.get_format_metadata_mut(),
             OpData::Range(data) => data.get_format_metadata_mut(),
+            OpData::Exponent(data) => data.get_format_metadata_mut(),
             OpData::Reference(data) => data.get_format_metadata_mut(),
             OpData::NoOp(data) => data.get_format_metadata_mut(),
         }
