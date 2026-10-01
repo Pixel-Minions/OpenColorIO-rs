@@ -26,7 +26,7 @@ use std::sync::Arc;
 
 use crate::bit_depth_utils::ChannelType;
 use crate::exception::{Exception, Result};
-use crate::image_desc::{self, GenericImageDesc, ImageDesc, ImageDescMut};
+use crate::image_desc::{self, GenericImageDesc, ImageDesc, ImageDescMut, ImageLayout};
 use crate::image_packing::Generic;
 use crate::op::{CpuOp, Pixels, PixelsMut};
 use crate::open_color_types::BitDepth;
@@ -82,6 +82,11 @@ pub trait ScanlineHelper<'a>: fmt::Debug {
 
     /// Port of `init(const ImageDesc & img)`: in place.
     fn init(&mut self, img: &'a mut dyn ImageDescMut) -> Result<()>;
+
+    /// Port of `init(const ImageDesc & srcImg, const ImageDesc & dstImg)` with one image as
+    /// both: the path from one image to another, reading the rows from the image it writes.
+    /// Rust's borrows can't pass the image as both `src` and `dst`.
+    fn init_same(&mut self, img: &'a mut dyn ImageDescMut) -> Result<()>;
 
     /// The next row, as packed RGBA F32 for the ops to process in place; `None` after the last
     /// row.
@@ -349,6 +354,40 @@ impl<'a, I: Generic, O: Generic> GenericScanlineHelper<'a, I, O> {
         }
     }
 
+    /// The part of `init(const ImageDesc & srcImg, const ImageDesc & dstImg)` that the two
+    /// images' descriptions decide: the generic descriptions, their sizes, the optimization
+    /// modes and the scratch rows (src/OpenColorIO/ScanlineHelper.cpp:50-82 @ v2.5.2).
+    fn init_images(&mut self, src: &ImageLayout, dst: &ImageLayout) -> Result<()> {
+        self.y_index = 0;
+
+        let src_img =
+            GenericImageDesc::init(src, self.input_bit_depth, self.in_bit_depth_op.clone())?;
+        let dst_img =
+            GenericImageDesc::init(dst, self.output_bit_depth, self.out_bit_depth_op.clone())?;
+
+        if src_img.width != dst_img.width || src_img.height != dst_img.height {
+            return Err(Exception::new(
+                "Dimension inconsistency between source and destination image buffers.",
+            ));
+        }
+
+        self.in_optimized_mode = get_optimization_mode(&src_img);
+        self.out_optimized_mode = get_optimization_mode(&dst_img);
+
+        // Can the output buffer be used as the internal RGBA F32 buffer?
+        self.use_dst_buffer = self
+            .out_optimized_mode
+            .has(Optimizations::PACKED_FLOAT_OPTIMIZATION);
+
+        let in_packed = self
+            .in_optimized_mode
+            .has(Optimizations::PACKED_OPTIMIZATION);
+        self.size_buffers(dst_img.width, in_packed, false)?;
+        self.src_img = Some(src_img);
+        self.dst_img = Some(dst_img);
+        Ok(())
+    }
+
     /// Checks upstream's scratch rows for rows of `width` pixels ([`scratch_rows`]), then sizes
     /// the ones upstream's path sizes, in its order, with the C++ library's exceptions
     /// ([`std_resize`]). From one image to another (`in_place` false):
@@ -414,41 +453,20 @@ impl<'a, I: Generic, O: Generic> ScanlineHelper<'a> for GenericScanlineHelper<'a
         src: &'a dyn ImageDesc,
         dst: &'a mut dyn ImageDescMut,
     ) -> Result<()> {
-        self.y_index = 0;
-
-        let src_img = GenericImageDesc::init(
-            src.layout(),
-            self.input_bit_depth,
-            self.in_bit_depth_op.clone(),
-        )?;
-        let dst_img = GenericImageDesc::init(
-            dst.layout(),
-            self.output_bit_depth,
-            self.out_bit_depth_op.clone(),
-        )?;
-
-        if src_img.width != dst_img.width || src_img.height != dst_img.height {
-            return Err(Exception::new(
-                "Dimension inconsistency between source and destination image buffers.",
-            ));
-        }
-
-        self.in_optimized_mode = get_optimization_mode(&src_img);
-        self.out_optimized_mode = get_optimization_mode(&dst_img);
-
-        // Can the output buffer be used as the internal RGBA F32 buffer?
-        self.use_dst_buffer = self
-            .out_optimized_mode
-            .has(Optimizations::PACKED_FLOAT_OPTIMIZATION);
-
-        let in_packed = self
-            .in_optimized_mode
-            .has(Optimizations::PACKED_OPTIMIZATION);
-        self.size_buffers(dst_img.width, in_packed, false)?;
+        self.init_images(src.layout(), dst.layout())?;
         self.src = Source::Buffers(image_desc::buffers(src));
         self.dst = image_desc::buffers_mut(dst);
-        self.src_img = Some(src_img);
-        self.dst_img = Some(dst_img);
+        Ok(())
+    }
+
+    /// Port of `GenericScanlineHelper::init(const ImageDesc &, const ImageDesc &)`
+    /// (src/OpenColorIO/ScanlineHelper.cpp:50-82 @ v2.5.2) with one image as both: the rows
+    /// are read from the image they are written to.
+    fn init_same(&mut self, img: &'a mut dyn ImageDescMut) -> Result<()> {
+        let layout = img.layout();
+        self.init_images(layout, layout)?;
+        self.src = Source::Destination;
+        self.dst = image_desc::buffers_mut(img);
         Ok(())
     }
 

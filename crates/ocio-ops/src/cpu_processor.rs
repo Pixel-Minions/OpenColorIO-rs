@@ -6,8 +6,8 @@
 //! - the generic bit-depth conversions, `BitDepthCast` and `CreateGenericBitDepthHelper`,
 //!   which image packing and the scanline helper call (chunks 1.1d, 1.1e);
 //! - [`CpuProcessor`]: the processor's ops and their renderers (`FinalizeOpsForCPU`,
-//!   `CreateCPUEngine`), its cache ID and its queries (chunk 1.2d). Its `apply` methods, with
-//!   `CreateScanlineHelper`, come next.
+//!   `CreateCPUEngine`), its cache ID and its queries, and its image `apply` methods with
+//!   `CreateScanlineHelper` (chunk 1.2d).
 
 use std::fmt;
 use std::hint::black_box;
@@ -19,12 +19,14 @@ use crate::bit_depth_utils::{
 };
 use crate::dynamic_property::DynamicPropertyRcPtr;
 use crate::exception::{Exception, Result};
+use crate::image_desc::{ImageDesc, ImageDescMut};
 use crate::op::{CpuOp, OpVec, Pixels, PixelsMut};
 use crate::op_data::OpData;
 use crate::open_color_types::{
     BitDepth, DynamicPropertyType, OptimizationFlags, bit_depth_to_string,
 };
 use crate::ops::matrix::matrix_op::create_identity_matrix_op;
+use crate::scanline_helper::{GenericScanlineHelper, ScanlineHelper};
 
 /// The conversion of RGBA pixels from bit depth `I` to bit depth `O`: each value is scaled by
 /// `maxValue(O) / maxValue(I)`, then cast (`Converter<O>::CastValue`). From F32 to F32 it only
@@ -150,6 +152,59 @@ pub fn create_generic_bit_depth_helper(
         BitDepth::Uint16 => to_output!(Uint16),
         BitDepth::F16 => to_output!(F16),
         BitDepth::F32 => to_output!(F32),
+        BitDepth::Uint14 | BitDepth::Uint32 | BitDepth::Unknown => return Err(unsupported()),
+    })
+}
+
+/// The scanline helper for images of the bit depths `in` and `out`, converted from and to F32
+/// by `in_bit_depth_op` and `out_bit_depth_op`: "Unsupported bit-depth" for the bit depths the
+/// CPU processor doesn't take.
+///
+/// Port of `CreateScanlineHelper` (src/OpenColorIO/CPUProcessor.cpp:187-238 @ v2.5.2). Its
+/// last `throw Exception("Unsupported bit-depths")` can't be reached: every case of its
+/// switches returns or throws.
+fn create_scanline_helper<'a>(
+    input: BitDepth,
+    in_bit_depth_op: &Arc<dyn CpuOp>,
+    output: BitDepth,
+    out_bit_depth_op: &Arc<dyn CpuOp>,
+) -> Result<Box<dyn ScanlineHelper<'a> + 'a>> {
+    let unsupported = || Exception::new("Unsupported bit-depth");
+
+    macro_rules! helper {
+        ($in:ty, $out:ty) => {
+            Box::new(GenericScanlineHelper::<$in, $out>::new(
+                input,
+                in_bit_depth_op.clone(),
+                output,
+                out_bit_depth_op.clone(),
+            )) as Box<dyn ScanlineHelper<'a> + 'a>
+        };
+    }
+
+    macro_rules! to_output {
+        ($in:ty) => {
+            match output {
+                BitDepth::Uint8 => helper!($in, u8),
+                BitDepth::Uint10 => helper!($in, u16),
+                BitDepth::Uint12 => helper!($in, u16),
+                BitDepth::Uint16 => helper!($in, u16),
+                BitDepth::F16 => helper!($in, half::f16),
+                BitDepth::F32 => helper!($in, f32),
+                BitDepth::Uint14 | BitDepth::Uint32 | BitDepth::Unknown => {
+                    return Err(unsupported());
+                }
+            }
+        };
+    }
+
+    Ok(match input {
+        BitDepth::Uint8 => to_output!(u8),
+        BitDepth::Uint10 => to_output!(u16),
+        BitDepth::Uint12 => to_output!(u16),
+        BitDepth::Uint16 => to_output!(u16),
+        BitDepth::F16 => to_output!(half::f16),
+        BitDepth::F32 => to_output!(f32),
         BitDepth::Uint14 | BitDepth::Uint32 | BitDepth::Unknown => return Err(unsupported()),
     })
 }
@@ -400,6 +455,80 @@ impl CpuProcessor {
         std::iter::once(&self.engine.in_bit_depth_op)
             .chain(&self.engine.cpu_ops)
             .chain(std::iter::once(&self.engine.out_bit_depth_op))
+    }
+
+    /// A scanline helper for this processor's bit depths and conversions, "for this thread".
+    fn scanline_helper<'a>(&self) -> Result<Box<dyn ScanlineHelper<'a> + 'a>> {
+        create_scanline_helper(
+            self.in_bit_depth,
+            &self.engine.in_bit_depth_op,
+            self.out_bit_depth,
+            &self.engine.out_bit_depth_op,
+        )
+    }
+
+    /// The loop of both `apply` methods: each row, as packed RGBA F32, through the renderers
+    /// between the conversions, until the helper has no rows left (`numPixels == 0`).
+    fn process<'a>(&self, helper: &mut dyn ScanlineHelper<'a>) -> Result<()> {
+        while let Some(rgba) = helper.prep_rgba_scanline()? {
+            if rgba.is_empty() {
+                break;
+            }
+
+            for op in &self.engine.cpu_ops {
+                op.apply(rgba);
+            }
+
+            helper.finish_rgba_scanline()?;
+        }
+        Ok(())
+    }
+
+    /// Applies the processor to `img`, in place. The image has the input bit depth and the
+    /// output bit depth, which must then be the same.
+    ///
+    /// Port of `CPUProcessor::apply(const ImageDesc &)` (src/OpenColorIO/CPUProcessor.cpp:
+    /// 379-404, 541-544 @ v2.5.2).
+    pub fn apply(&self, img: &mut dyn ImageDescMut) -> Result<()> {
+        // Get the ScanlineHelper for this thread (no significant performance impact).
+        let mut scanline_builder = self.scanline_helper()?;
+
+        // Prepare the processing.
+        scanline_builder.init(img)?;
+
+        self.process(&mut *scanline_builder)
+    }
+
+    /// Applies the processor from `src`, of the input bit depth, to `dst`, of the output bit
+    /// depth and the same size.
+    ///
+    /// Port of `CPUProcessor::apply(const ImageDesc &, ImageDesc &)`
+    /// (src/OpenColorIO/CPUProcessor.cpp:406-431, 546-549 @ v2.5.2).
+    pub fn apply_src_dst(&self, src: &dyn ImageDesc, dst: &mut dyn ImageDescMut) -> Result<()> {
+        // Get the ScanlineHelper for this thread (no significant performance impact).
+        let mut scanline_builder = self.scanline_helper()?;
+
+        // Prepare the processing.
+        scanline_builder.init_src_dst(src, dst)?;
+
+        self.process(&mut *scanline_builder)
+    }
+
+    /// Applies the processor from `img` to `img`: upstream's path from one image to another,
+    /// with the one image as both, which reads each row from the image it writes. Rust's
+    /// borrows can't pass the image to [`CpuProcessor::apply_src_dst`] as both.
+    ///
+    /// Port of `CPUProcessor::apply(const ImageDesc &, ImageDesc &)`
+    /// (src/OpenColorIO/CPUProcessor.cpp:406-431, 546-549 @ v2.5.2) called as
+    /// `apply(img, img)`.
+    pub fn apply_same(&self, img: &mut dyn ImageDescMut) -> Result<()> {
+        // Get the ScanlineHelper for this thread (no significant performance impact).
+        let mut scanline_builder = self.scanline_helper()?;
+
+        // Prepare the processing.
+        scanline_builder.init_same(img)?;
+
+        self.process(&mut *scanline_builder)
     }
 
     /// Whether a renderer has a dynamic property that is dynamic.
