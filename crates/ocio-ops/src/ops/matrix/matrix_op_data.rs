@@ -767,18 +767,20 @@ impl MatrixOpData {
         self.array.is_unity_diagonal()
     }
 
-    /// Port of `MatrixOpData::isNoOp` (MatrixOpData.cpp:529-532 @ v2.5.2).
-    pub fn is_no_op(&self) -> bool {
+    /// Port of `MatrixOpData::isNoOp` (MatrixOpData.cpp:529-532 @ v2.5.2); an error for an
+    /// unvalidated 3x3 matrix ([`has_alpha`](Self::has_alpha), docs/improvements.md U-16).
+    pub fn is_no_op(&self) -> Result<bool> {
         self.is_identity()
     }
 
     /// Whether the op is the identity: no offset, alpha passed through, a diagonal matrix, and
     /// each diagonal value within 1e-6 of 1.
     ///
-    /// Port of `MatrixOpData::isIdentity` (MatrixOpData.cpp:534-564 @ v2.5.2).
-    pub fn is_identity(&self) -> bool {
-        if self.has_offsets() || self.has_alpha() || !self.is_diagonal() {
-            return false;
+    /// Port of `MatrixOpData::isIdentity` (MatrixOpData.cpp:534-564 @ v2.5.2); an error for an
+    /// unvalidated 3x3 matrix ([`has_alpha`](Self::has_alpha), docs/improvements.md U-16).
+    pub fn is_identity(&self) -> Result<bool> {
+        if self.has_offsets() || self.has_alpha()? || !self.is_diagonal() {
+            return Ok(false);
         }
 
         // Now check the diagonal elements.
@@ -792,12 +794,12 @@ impl MatrixOpData {
         for i in 0..dim {
             for j in 0..dim {
                 if i == j && !equal_with_abs_error(m[i * dim + j], 1.0, max_diff) {
-                    return false;
+                    return Ok(false);
                 }
             }
         }
 
-        true
+        Ok(true)
     }
 
     /// Whether the op mixes channels: whether the matrix isn't diagonal.
@@ -834,11 +836,28 @@ impl MatrixOpData {
         self.offsets.is_not_null()
     }
 
+    /// The error of a query that reads a 4x4 matrix's positions on a 3x3 one, which `validate`
+    /// hasn't made 4x4 yet (docs/improvements.md, U-16).
+    fn require_4x4(&self) -> Result<()> {
+        if self.array.get_length() != 4 {
+            return Err(Exception::new(
+                "Matrix: a 3x3 matrix has to be validated before this query: upstream reads \
+                 past its 9 values.",
+            ));
+        }
+        Ok(())
+    }
+
     /// Whether alpha isn't passed through: the last row or column isn't the identity's (within
     /// 1e-6 on the diagonal), or alpha has an offset.
     ///
+    /// Upstream reads the 4x4 positions of the values, so a 3x3 matrix that `validate` hasn't
+    /// made 4x4 yet (from a CLF or CTF file) has it read past its 9 values; the port returns an
+    /// error instead (docs/improvements.md, U-16).
+    ///
     /// Port of `MatrixOpData::hasAlpha` (MatrixOpData.cpp:587-614 @ v2.5.2).
-    pub fn has_alpha(&self) -> bool {
+    pub fn has_alpha(&self) -> Result<bool> {
+        self.require_4x4()?;
         let a = self.get_array();
         let m = a.get_values();
 
@@ -847,7 +866,7 @@ impl MatrixOpData {
         let max_diff = 1e-6;
 
         // Last column.
-        (m[3] != 0.0) || // Strict comparison intended
+        Ok((m[3] != 0.0) || // Strict comparison intended
         (m[7] != 0.0) ||
         (m[11] != 0.0) ||
 
@@ -860,7 +879,7 @@ impl MatrixOpData {
         (m[14] != 0.0) ||
 
         // Alpha offset
-        (self.offsets[3] != 0.0)
+        (self.offsets[3] != 0.0))
     }
 
     /// The op doing this one then `b`, both forward: the matrix `b * self` and the offsets
@@ -1096,8 +1115,12 @@ impl MatrixOpData {
     /// The data's cache ID: its id and a space, if it has an id, then its direction, a space,
     /// and the hash of the hashes of the 16 matrix values and the 4 offsets.
     ///
+    /// Upstream hashes 16 values, so it reads past the 9 values of a 3x3 matrix that `validate`
+    /// hasn't made 4x4 yet; the port returns an error instead (docs/improvements.md, U-16).
+    ///
     /// Port of `MatrixOpData::getCacheID` (MatrixOpData.cpp:846-869 @ v2.5.2).
-    pub fn get_cache_id(&self) -> Vec<u8> {
+    pub fn get_cache_id(&self) -> Result<Vec<u8>> {
+        self.require_4x4()?;
         let mut cache_id_stream = Vec::new();
         if !self.get_id().is_empty() {
             cache_id_stream.extend_from_slice(self.get_id());
@@ -1115,7 +1138,7 @@ impl MatrixOpData {
 
         cache_id_stream.extend_from_slice(cache_id_hash(hash.as_bytes()).as_bytes());
 
-        cache_id_stream
+        Ok(cache_id_stream)
     }
 
     /// Port of `OpData::getFormatMetadata() const` (src/OpenColorIO/Op.h:164 @ v2.5.2).

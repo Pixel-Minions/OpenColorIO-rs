@@ -70,8 +70,8 @@ fn as_op_data() {
     let data = OpData::Reference(reference.clone());
     assert_eq!(data.get_type(), OpDataType::Reference);
     assert!(data.validate().is_ok());
-    assert!(!data.is_no_op());
-    assert!(!data.is_identity());
+    assert!(!data.is_no_op().unwrap());
+    assert!(!data.is_identity().unwrap());
     assert!(data.has_channel_crosstalk());
     assert!(data.get_cache_id().is_err());
 

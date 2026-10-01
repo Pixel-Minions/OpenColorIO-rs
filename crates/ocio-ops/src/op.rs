@@ -233,7 +233,7 @@ impl Op {
     /// Whether the op leaves every pixel as it is. It is valid before optimization.
     ///
     /// Port of `Op::isNoOp` (src/OpenColorIO/Op.h:194-198 @ v2.5.2), and its overrides.
-    pub fn is_no_op(&self) -> bool {
+    pub fn is_no_op(&self) -> Result<bool> {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default: the data's.
@@ -244,7 +244,7 @@ impl Op {
     /// Whether the op leaves pixels as they are in its intended domain.
     ///
     /// Port of `Op::isIdentity` (src/OpenColorIO/Op.h:200 @ v2.5.2), and its overrides.
-    pub fn is_identity(&self) -> bool {
+    pub fn is_identity(&self) -> Result<bool> {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default: the data's.
@@ -407,11 +407,11 @@ impl Op {
     ///
     /// Port of `Op::getCacheID`, pure virtual (src/OpenColorIO/Op.h:229-230 @ v2.5.2), and its
     /// overrides.
-    pub fn get_cache_id(&self) -> Vec<u8> {
+    pub fn get_cache_id(&self) -> Result<Vec<u8>> {
         match &*self.data {
             OpData::Matrix(data) => data.get_op_cache_id(),
             OpData::Reference(_) => no_reference_op(),
-            OpData::NoOp(data) => data.get_op_cache_id(),
+            OpData::NoOp(data) => Ok(data.get_op_cache_id()),
         }
     }
 
@@ -680,8 +680,13 @@ impl OpVec {
     /// Whether every op is a no-op; `true` for an empty list.
     ///
     /// Port of `OpRcPtrVec::isNoOp` (src/OpenColorIO/Op.cpp:284-292 @ v2.5.2).
-    pub fn is_no_op(&self) -> bool {
-        self.ops.iter().all(Op::is_no_op)
+    pub fn is_no_op(&self) -> Result<bool> {
+        for op in &self.ops {
+            if !op.is_no_op()? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     /// Whether an op mixes channels.
@@ -787,18 +792,18 @@ impl OpVec {
     /// cache IDs.
     ///
     /// Port of `OpRcPtrVec::getCacheID` (src/OpenColorIO/Op.cpp:448-465 @ v2.5.2).
-    pub fn get_cache_id(&self) -> Vec<u8> {
+    pub fn get_cache_id(&self) -> Result<Vec<u8>> {
         let mut stream = Vec::new();
         for op in &self.ops {
             if !op.is_no_op_type() {
-                let id = op.get_cache_id();
+                let id = op.get_cache_id()?;
                 if !id.is_empty() {
                     stream.push(b' ');
                     stream.extend_from_slice(&id);
                 }
             }
         }
-        stream
+        Ok(stream)
     }
 }
 
@@ -849,18 +854,18 @@ fn is_class_of(dp: &DynamicPropertyRcPtr, type_: DynamicPropertyType) -> bool {
 /// (none when `indent` is 0 or less, as `pystring::mul`).
 ///
 /// Port of `SerializeOpVec` (src/OpenColorIO/Op.cpp:473-489 @ v2.5.2).
-pub fn serialize_op_vec(ops: &OpVec, indent: i32) -> Vec<u8> {
+pub fn serialize_op_vec(ops: &OpVec, indent: i32) -> Result<Vec<u8>> {
     let mut oss = Vec::new();
 
     for (idx, op) in ops.iter().enumerate() {
         oss.extend(std::iter::repeat_n(b' ', indent.max(0) as usize));
         oss.extend_from_slice(format!("Op {idx}: {op} ").as_bytes());
-        oss.extend_from_slice(&op.get_cache_id());
+        oss.extend_from_slice(&op.get_cache_id()?);
 
         oss.push(b'\n');
     }
 
-    oss
+    Ok(oss)
 }
 
 /// Appends to `ops` the op that renders `op_data` in the direction `dir`, from a copy of the
