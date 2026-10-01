@@ -131,14 +131,14 @@ path = "src/OpenColorIO/CPUProcessor.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/cpu_processor.rs"]
 status = "partial"
-note = "1.1d: BitDepthCast (20-66) and CreateGenericBitDepthHelper (68-116), the conversions at the ends of a CPU processor, which the scanline helper runs; 1.2d: CreateCPUEngine (122-184; its Lut1D ends come with the Lut1D op), FinalizeOpsForCPU (311-338), CPUProcessor::Impl::finalize (341-377) as CpuProcessor::new, the queries and the dynamic properties (242-309, 491-534), CreateScanlineHelper (187-238) and the image apply methods (379-431, 541-549; apply(img, img) as apply_same), checked against the wheel through image_apply (tests/cpu_processor_apply_oracle.rs); next: applyRGB and applyRGBA (433-465)"
+note = "1.1d: BitDepthCast (20-66) and CreateGenericBitDepthHelper (68-116), the conversions at the ends of a CPU processor, which the scanline helper runs; 1.2d: CreateCPUEngine (122-184; its Lut1D ends come with the Lut1D op), FinalizeOpsForCPU (311-338), CPUProcessor::Impl::finalize (341-377) as CpuProcessor::new, the queries and the dynamic properties (242-309, 491-534), CreateScanlineHelper (187-238) and the image apply methods (379-431, 541-549; apply(img, img) as apply_same), checked against the wheel through image_apply (tests/cpu_processor_apply_oracle.rs), and applyRGB and applyRGBA (433-465, 551-559), each wheel's in-place conversions (I-41), checked through image_apply identities (tests/cpu_processor_apply_rgb_oracle.rs); the Lut1D ends of CreateCPUEngine come with the Lut1D op"
 
 [[file]]
 path = "src/OpenColorIO/CPUProcessor.h"
 kind = "src"
 target = ["crates/ocio-ops/src/cpu_processor.rs"]
-status = "partial"
-note = "1.2d: CPUProcessor::Impl as CpuProcessor, with its image apply methods; applyRGB and applyRGBA come next"
+status = "done"
+note = "1.2d: CPUProcessor::Impl as CpuProcessor, with its apply methods, applyRGB and applyRGBA"
 
 [[file]]
 path = "src/OpenColorIO/Caching.cpp"

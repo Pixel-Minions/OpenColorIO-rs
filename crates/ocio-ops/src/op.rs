@@ -117,6 +117,17 @@ pub trait CpuOp: Send + Sync + Debug {
         }
     }
 
+    /// Port of `OpCPU::apply(pixel, pixel, 1)` on the one pixel of `CPUProcessor::applyRGB` and
+    /// `applyRGBA` (src/OpenColorIO/CPUProcessor.cpp:433-465 @ v2.5.2): the op reads the
+    /// pixel's bytes as its input channel type and writes its output channel type over the same
+    /// bytes, whatever the bit depths.
+    ///
+    /// The default serves the renderers that process `float` only: [`apply`](Self::apply) in
+    /// place. The bit-depth conversions override it (docs/improvements.md, I-41).
+    fn apply_pixel_in_place(&self, pixel: &mut [f32; 4]) {
+        self.apply(pixel);
+    }
+
     /// Whether the renderer has a dynamic property that is dynamic.
     ///
     /// Port of `OpCPU::isDynamic` (src/OpenColorIO/Op.cpp:29-32 @ v2.5.2): `false` unless the
