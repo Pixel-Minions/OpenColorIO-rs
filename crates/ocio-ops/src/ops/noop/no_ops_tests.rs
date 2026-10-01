@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Tests of the no-ops. Upstream's `NoOps` tests (tests/cpu/ops/noop/NoOps_tests.cpp @ v2.5.2)
-//! compare each no-op with a Matrix op; they come with the Matrix op.
+//! Tests of the no-ops, with upstream's `file_op` and `look_op` tests
+//! (tests/cpu/ops/noop/NoOps_tests.cpp @ v2.5.2). Its `allocation_op` test compares the
+//! allocation no-op with `CreateScaleOp`'s op (chunk 1.3m3), and `throw` and
+//! `partition_gpu_ops` test `PartitionGPUOps`, which needs the Lut3D op.
 
 use std::sync::Arc;
 
@@ -40,7 +42,7 @@ fn the_no_ops() -> OpVec {
 fn no_op_data(op: &Op) -> &NoOpData {
     match &**op.data() {
         OpData::NoOp(data) => data,
-        OpData::Reference(_) => panic!("{op} holds a reference"),
+        OpData::Matrix(_) | OpData::Reference(_) => panic!("{op} isn't a no-op"),
     }
 }
 
@@ -240,4 +242,42 @@ fn set_complete_reaches_every_op_sharing_the_data() {
     let kept = ops[1].clone();
     no_op_data(&kept).file_data().unwrap().set_complete();
     assert!(no_op_data(&ops[1]).file_data().unwrap().get_complete());
+}
+
+/// The clone of a no-op compared with that no-op and with an allocation no-op, as upstream's
+/// `file_op` and `look_op` tests do.
+fn check_clone_of_first(ops: &OpVec) {
+    assert_eq!(ops.len(), 2);
+    let op0 = &ops[0];
+    let op1 = &ops[1];
+    let cloned_op = ops[0].clone_op();
+
+    assert!(cloned_op.is_same_type(op0));
+    assert!(!cloned_op.is_same_type(op1));
+    assert!(cloned_op.is_inverse(op0));
+    assert!(!cloned_op.is_inverse(op1));
+
+    assert!(cloned_op.is_no_op());
+    assert!(!cloned_op.has_channel_crosstalk());
+    assert!(cloned_op.supported_by_legacy_shader());
+}
+
+/// Port of `OCIO_ADD_TEST(NoOps, file_op)` @ v2.5.2.
+#[test]
+fn file_op() {
+    let mut ops = OpVec::new();
+    create_file_no_op(&mut ops, b"");
+    create_gpu_allocation_no_op(&mut ops, &lg2_allocation());
+
+    check_clone_of_first(&ops);
+}
+
+/// Port of `OCIO_ADD_TEST(NoOps, look_op)` @ v2.5.2.
+#[test]
+fn look_op() {
+    let mut ops = OpVec::new();
+    create_look_no_op(&mut ops, b"");
+    create_gpu_allocation_no_op(&mut ops, &lg2_allocation());
+
+    check_clone_of_first(&ops);
 }
