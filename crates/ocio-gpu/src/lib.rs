@@ -6,9 +6,12 @@
 //!
 //! - [`gpu_shader_utils`]: `GpuShaderText`, which writes shader code line by line in each
 //!   language, and the helpers the writers share.
+//! - [`gpu_shader_class_wrapper`]: the class wrappers OSL and MSL shaders put around OCIO's
+//!   function.
 //! - [`open_color_types`]: the public enums only the GPU side uses ([`GpuLanguage`]).
 #![forbid(unsafe_code)]
 
+pub mod gpu_shader_class_wrapper;
 pub mod gpu_shader_utils;
 pub mod open_color_types;
 

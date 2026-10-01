@@ -447,6 +447,26 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   languages, are only written out, so they are well defined.
 - **Decided** (general rule): the port returns an error where the wrapper would read past a
   line. `p1-gpu-infra` settles the scope: 1.7d for the wrapper, 1.7e for the uid.
-- **Status:** to be matched in `p1-gpu-infra`. The oracle refuses these MSL prefixes whatever
-  the processor (`gpu_shader`, `_check_names`): being exact would need the declarations, which
-  only the extraction makes.
+- **Status:** the wrapper's part matched in `p1-gpu-infra` (1.7d, U-10); the uid's to be matched
+  in 1.7e. The oracle refuses these MSL prefixes whatever the processor (`gpu_shader`,
+  `_check_names`): being exact would need the declarations, which only the extraction makes.
+
+### U-10. A texture declared without a sampler after it, in MSL
+
+- **Upstream:** in MSL, the class wrapper reads the shader's declarations back to build its
+  class (`GpuShaderClassWrapper.cpp:285-372`). It takes the line after each line that starts
+  with `texture` for that texture's sampler, and reads the sampler's name from
+  `find("sampler") + 7` (lines 330-335). When that line has no `sampler`, `npos + 7` wraps to 6,
+  and a line shorter than 6 bytes is read past its end; `substr` then throws
+  `std::out_of_range`. OCIO's own writers always declare a sampler after its texture, but the
+  declarations also hold the code a caller adds (`addToParameterDeclareShaderCode`,
+  `addToTextureDeclareShaderCode`, both in Python) and the resource prefix, whose line feeds cut
+  them into lines (U-6). A texture declared last, with nothing after it, is enough: the next
+  line is empty.
+- **Who notices:** MSL shaders whose added declaration code declares a texture without a sampler
+  after it, or whose resource prefix holds line feeds like U-6's.
+- **Decided** (general rule): the port returns an error exactly where the read would pass the
+  line's end, and otherwise parses as upstream does: a line of 6 bytes is read up to its
+  terminating NUL, and a non-ASCII byte is neither white space nor a digit, as in both wheels
+  (U-6). This settles the class wrapper's part of U-6.
+- **Status:** matched in `p1-gpu-infra` (1.7d).
