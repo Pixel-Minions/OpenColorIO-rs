@@ -4,8 +4,8 @@
 //! Port of `src/OpenColorIO/ops/matrix/MatrixOpGPU.h` and `MatrixOpGPU.cpp` @ v2.5.2: the
 //! Matrix op's GPU writer.
 
-use ocio_ops::Result;
 use ocio_ops::ops::matrix::MatrixOpData;
+use ocio_ops::{Exception, Result};
 
 use crate::gpu_shader_desc::GpuShaderDesc;
 use crate::gpu_shader_utils::GpuShaderText;
@@ -66,10 +66,14 @@ pub fn get_matrix_gpu_shader_program(
             // a temporary variable is needed.
             let tmp_decl = ss.float4_decl("tmp")?;
             ss.new_line().put(tmp_decl).put(" = res;");
-            let m4x4: &[f64; 16] = values
-                .as_slice()
-                .try_into()
-                .expect("a validated matrix has 16 values");
+            // A matrix that wasn't validated may still be 3x3 (from a file); upstream reads
+            // 16 values from its 9 there. It is the port's error (the owner's general rule).
+            let m4x4: &[f64; 16] = values.as_slice().try_into().map_err(|_| {
+                Exception::new(format!(
+                    "The GPU writer of a Matrix op needs 16 values, not {}.",
+                    values.len()
+                ))
+            })?;
             let product = ss.mat4f_mul_f64(m4x4, "tmp")?;
             ss.new_line().put("res = ").put(product).put(";");
         }
