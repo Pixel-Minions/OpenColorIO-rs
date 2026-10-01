@@ -3,13 +3,16 @@
 
 //! Tests of the op list. Upstream's `Op`, `OpData`, `OpRcPtrVec` and `FinalizeOpVec` tests
 //! (tests/cpu/Op_tests.cpp @ v2.5.2) all use Matrix ops, and most also other families; each
-//! comes with the ops it needs. These use the no-ops.
+//! comes with the ops it needs. `channel_crosstalk` and `serialize` need only the Matrix op
+//! and the no-ops; the others use the no-ops.
 
 use std::sync::Arc;
 
 use super::*;
 use crate::bit_depth_utils::{F32, Uint8};
 use crate::cpu_processor::BitDepthCast;
+use crate::ops::matrix::MatrixOpData;
+use crate::ops::matrix::matrix_op::{create_identity_matrix_op, create_matrix_op};
 use crate::ops::noop::{create_file_no_op, create_look_no_op};
 use crate::unit_test_log_utils::LogGuard;
 
@@ -315,4 +318,35 @@ fn reference_data_makes_no_op() {
         assert_ne!(reference_error, no_op_error);
     }
     assert!(result.is_empty());
+}
+
+/// Port of `OCIO_ADD_TEST(OpRcPtrVec, channel_crosstalk)` @ v2.5.2.
+#[test]
+fn channel_crosstalk() {
+    let mut ops = OpVec::new();
+
+    let mut mat = MatrixOpData::create_diagonal_matrix(1.2);
+    create_matrix_op(&mut ops, mat.clone(), TransformDirection::Forward);
+
+    assert!(!ops.has_channel_crosstalk());
+
+    // (Upstream's first op shares `mat` and sees the change too; here it keeps its copy. The
+    // list has crosstalk either way.)
+    mat.set_array_value(4, 0.1);
+    create_matrix_op(&mut ops, mat, TransformDirection::Forward);
+
+    assert!(ops.has_channel_crosstalk());
+}
+
+/// Port of `OCIO_ADD_TEST(OpRcPtrVec, serialize)` @ v2.5.2.
+#[test]
+fn serialize() {
+    // The test validates that SerializeOpVec() does not throw.
+
+    let mut ops = OpVec::new();
+    create_file_no_op(&mut ops, b"NoOp");
+    create_identity_matrix_op(&mut ops);
+
+    // Serialize not optimized OpVec i.e. contains some NoOps.
+    serialize_op_vec(&ops, 0);
 }
