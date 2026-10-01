@@ -278,13 +278,15 @@ status = "todo"
 path = "src/OpenColorIO/GpuShaderClassWrapper.cpp"
 kind = "src"
 target = ["crates/ocio-gpu/src/gpu_shader_class_wrapper.rs"]
-status = "todo"
+status = "done"
+note = "1.7d: the default, OSL and Metal wrappers, one type over upstream's three subclasses. The Metal wrapper's parse returns an error where upstream reads past a line (U-10). Checked against the wheel's MSL and OSL shaders (gpu_shader) and the class wrapper's part of upstream's Metal tests"
 
 [[file]]
 path = "src/OpenColorIO/GpuShaderClassWrapper.h"
 kind = "src"
 target = ["crates/ocio-gpu/src/gpu_shader_class_wrapper.rs"]
-status = "todo"
+status = "done"
+note = "see GpuShaderClassWrapper.cpp"
 
 [[file]]
 path = "src/OpenColorIO/GpuShaderDesc.cpp"
