@@ -131,14 +131,14 @@ path = "src/OpenColorIO/CPUProcessor.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/cpu_processor.rs"]
 status = "partial"
-note = "1.1d: BitDepthCast (20-66) and CreateGenericBitDepthHelper (68-116), the conversions at the ends of a CPU processor, which the scanline helper runs; 1.2d: CreateCPUEngine (122-184; its Lut1D ends come with the Lut1D op), FinalizeOpsForCPU (311-338), CPUProcessor::Impl::finalize (341-377) as CpuProcessor::new, the queries and the dynamic properties (242-309, 491-534); next: CreateScanlineHelper and the apply methods"
+note = "1.1d: BitDepthCast (20-66) and CreateGenericBitDepthHelper (68-116), the conversions at the ends of a CPU processor, which the scanline helper runs; 1.2d: CreateCPUEngine (122-184; its Lut1D ends come with the Lut1D op), FinalizeOpsForCPU (311-338), CPUProcessor::Impl::finalize (341-377) as CpuProcessor::new, the queries and the dynamic properties (242-309, 491-534), CreateScanlineHelper (187-238) and the image apply methods (379-431, 541-549; apply(img, img) as apply_same), checked against the wheel through image_apply (tests/cpu_processor_apply_oracle.rs); next: applyRGB and applyRGBA (433-465)"
 
 [[file]]
 path = "src/OpenColorIO/CPUProcessor.h"
 kind = "src"
 target = ["crates/ocio-ops/src/cpu_processor.rs"]
 status = "partial"
-note = "1.2d: CPUProcessor::Impl as CpuProcessor; its apply methods come next"
+note = "1.2d: CPUProcessor::Impl as CpuProcessor, with its image apply methods; applyRGB and applyRGBA come next"
 
 [[file]]
 path = "src/OpenColorIO/Caching.cpp"
@@ -535,7 +535,7 @@ path = "src/OpenColorIO/ScanlineHelper.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/scanline_helper.rs"]
 status = "done"
-note = "1.1e, checked against the wheel through image_apply (tests/scanline_helper_oracle.rs: RGBA-packed and other layouts, from one image to another and in place, every bit depth pair, and the init errors). As upstream, an RGBA-packed F32 destination is processed in its own memory, and the scratch rows are sized only where upstream sizes them; the rows of RGBA-packed images are read and written through typed views, with a copy only for a row that isn't aligned for its channel type. Very wide and very tall images follow the general rule (U-3)"
+note = "1.1e, checked against the wheel through image_apply (tests/scanline_helper_oracle.rs: RGBA-packed and other layouts, from one image to another and in place, every bit depth pair, and the init errors; from an image to itself, init_same, through the CPU processor's apply_same in tests/cpu_processor_apply_oracle.rs). As upstream, an RGBA-packed F32 destination is processed in its own memory, and the scratch rows are sized only where upstream sizes them; the rows of RGBA-packed images are read and written through typed views, with a copy only for a row that isn't aligned for its channel type. Very wide and very tall images follow the general rule (U-3)"
 
 [[file]]
 path = "src/OpenColorIO/ScanlineHelper.h"
