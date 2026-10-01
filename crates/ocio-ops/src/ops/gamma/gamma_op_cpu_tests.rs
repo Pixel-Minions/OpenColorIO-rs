@@ -6,28 +6,34 @@
 //! The wheel is built with `OCIO_USE_SSE2`, so the ports keep the `#if OCIO_USE_SSE2` expected
 //! values, and render with `getCPUOp(true)`.
 //!
-//! Each upstream test builds the op, finalizes it, optimizes the list with
-//! `OPTIMIZATION_DEFAULT` and requires one op left. The optimizer is WP 1.6a; for one Gamma op
-//! that is neither a no-op nor an identity it keeps the op unchanged (`RemoveNoOps`,
-//! `ReplaceIdentityOps`; there is no pair to combine or cancel), so the ports check those two
-//! conditions and render the op data directly.
+//! Each upstream test builds the op with `CreateGammaOp` (forward), finalizes the list,
+//! optimizes it with `OPTIMIZATION_DEFAULT` and requires one op left, which `ApplyGamma`
+//! renders; [`apply_gamma`] does all of that.
 
 use super::*;
+use crate::op::OpVec;
+use crate::open_color_types::{OptimizationFlags, TransformDirection};
+use crate::ops::gamma::gamma_op::create_gamma_op;
 use crate::ops::gamma::gamma_op_data::Params;
 use ocio_testkit::upstream::equal_with_safe_rel_error;
 
 const QNAN: f32 = f32::NAN;
 const INF: f32 = f32::INFINITY;
 
+/// The op of `gamma` as each test makes it (`CreateGammaOp`, `ops.finalize()`,
+/// `ops.optimize(OPTIMIZATION_DEFAULT)`, `OCIO_REQUIRE_EQUAL(ops.size(), 1)`), rendered by
 /// `ApplyGamma` (tests/cpu/ops/gamma/GammaOpCPU_tests.cpp:18-53 @ v2.5.2): renders `image` in
 /// place and compares with `result`: NaN must stay NaN; otherwise a relative error with a
 /// minimum expected value of 1 (so an absolute error below 1).
 #[track_caller]
-fn apply_gamma(op: &GammaOpData, image: &mut [f32], result: &[f32], error_threshold: f32) {
-    // ops.finalize(); ops.optimize(OPTIMIZATION_DEFAULT); OCIO_REQUIRE_EQUAL(ops.size(), 1).
-    assert!(!op.is_no_op().unwrap() && !op.is_identity().unwrap());
+fn apply_gamma(gamma: &GammaOpData, image: &mut [f32], result: &[f32], error_threshold: f32) {
+    let mut ops = OpVec::new();
+    create_gamma_op(&mut ops, gamma.clone(), TransformDirection::Forward);
+    ops.finalize().unwrap();
+    ops.optimize(OptimizationFlags::DEFAULT).unwrap();
+    assert_eq!(ops.len(), 1);
 
-    let cpu = get_gamma_renderer(op, true).unwrap();
+    let cpu = ops[0].get_cpu_op(true).unwrap().expect("a renderer");
     cpu.apply(image);
 
     for (idx, (&value, &expected)) in image.iter().zip(result).enumerate() {

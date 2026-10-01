@@ -831,7 +831,10 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Decided** (general rule): the port returns an error from those queries instead, where
   upstream would read past the end and only there: "GammaOp: a channel has fewer parameters
   than its style uses: upstream reads past them." `GammaOpData::{is_identity, is_no_op,
-  get_cache_id, compose}` and `get_gamma_renderer` return it.
-- **Status:** matched in `p1-gamma` (1.3g1, the renderers in 1.3g2); `gamma_op_data_tests.rs`
-  and `gamma_op_cpu_tests.rs` check the errors, and that the reads upstream doesn't make (a
-  moncurve gamma other than 1, channels that differ) are answered.
+  get_cache_id, compose}` and `get_gamma_renderer` return it, and so do `Op::{is_no_op,
+  is_identity, get_cache_id, get_cpu_op}` for a Gamma op (1.3g3), which `CreateGammaOp`
+  doesn't validate either.
+- **Status:** matched in `p1-gamma` (1.3g1, the renderers in 1.3g2, the op in 1.3g3);
+  `gamma_op_data_tests.rs`, `gamma_op_cpu_tests.rs` and `gamma_op_tests.rs` check the errors,
+  and that the reads upstream doesn't make (a moncurve gamma other than 1, channels that
+  differ) are answered.
