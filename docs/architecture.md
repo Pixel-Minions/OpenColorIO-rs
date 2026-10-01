@@ -70,6 +70,41 @@ engine (`CreateCPUEngine`: the first and last ops absorb the bit-depth conversio
 is special-cased) → `ScanlineHelper` (packing and unpacking per scanline, with a scratch
 buffer of `m_width` pixels).
 
+## Image descriptions
+
+`ImageDesc`, `PackedImageDesc` and `PlanarImageDesc` are public API in `ocio-ops`
+(`image_desc.rs`), re-exported by `ocio`. The owner approved this design on 2026-09-30.
+- **What `ocio` re-exports.** The description types only: `ImageDesc`, `ImageDescMut`,
+  `PackedImageDesc`, `PlanarImageDesc`, `ImageLayout`, `ChannelPos`, `PixelData`, `Bytes`, `At`,
+  `AUTO_STRIDE`, and `half` for the F16 channel type. The CPU engine's internals
+  (`GenericImageDesc`, `image_packing`, `scanline_helper`, `create_generic_bit_depth_helper`)
+  are public in `ocio-ops` for the port's tests only, `#[doc(hidden)]`: they panic on misuse.
+- **Memory.** A description borrows its memory as bytes: typed slices (`&[T]` or `&mut [T]`,
+  `T` one of `u8`, `u16`, `half::f16`, `f32`, and `&Vec<T>`) are viewed as bytes without
+  copying, through `zerocopy`; `Bytes(..)` takes raw bytes of any bit depth; `At(data, offset)`
+  puts the first pixel `offset` bytes into the memory, as a C++ pointer into an array does.
+  `PackedImageDesc<B>` is generic over the byte borrow: `&[u8]` describes a source, `&mut [u8]` an
+  image the CPU processor can write (`ImageDescMut`).
+- **Upstream's layouts.** Strides are `isize` bytes, `AUTO_STRIDE` (`isize::MIN`) or explicit,
+  negative ones included. A channel's position is a byte offset in its buffer (`ChannelPos`)
+  instead of a pointer. Offsets and strides use upstream's integer arithmetic, and wrap where C++
+  overflows. The CPU engine reads and writes the rows of an RGBA-packed image in place, through
+  typed views (`zerocopy`), and copies only a row that isn't aligned for its channel type; other
+  layouts are read and written channel by channel with `from_ne_bytes`/`to_ne_bytes`, so any
+  stride works for any buffer.
+- **Checks.** The constructors make upstream's checks in upstream's order, with its messages.
+  Before them, a typed slice must hold the bit depth's channel type (the Python binding's
+  `checkBufferType` and its message). After them, the bounds check of deviation D-2
+  (`docs/deviations.md`) refuses a layout that would make the CPU engine touch a byte outside its
+  memory: for an RGBA-packed image, whole rows of `4 * width` channels; for any other, each
+  channel at `start + x * x_stride + y * y_stride`.
+- **Sizes** are `usize` in the API and C++'s `long` (`c_long`) inside, as the CPU engine computes
+  with them. A size beyond `long` (Windows) becomes an invalid size, which upstream's checks
+  refuse.
+- **No `unsafe`.** The crate stays `#![deny(unsafe_code)]` outside the SIMD modules. `ocio-py`
+  keeps a description's layout (`ImageLayout`, plain data) with the NumPy buffers, and borrows the
+  buffers only while `apply` runs.
+
 ## Strings are bytes
 
 OCIO's strings are C byte strings (`std::string`, `const char *`). They are usually UTF-8, but

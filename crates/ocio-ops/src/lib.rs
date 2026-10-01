@@ -44,12 +44,19 @@ compile_error!(
 pub mod avx;
 pub mod avx2;
 pub mod avx512;
+pub mod bit_depth_utils;
 pub mod cfmt;
 pub mod cpu_info;
+pub mod cpu_processor;
 pub mod dynamic_property;
 pub mod exception;
 pub mod format_metadata;
 pub mod hash_utils;
+pub mod image_desc;
+// The CPU engine's internals: public for the port's own tests, not for applications. They
+// panic on misuse; `ocio` re-exports only the image description types.
+#[doc(hidden)]
+pub mod image_packing;
 pub mod imath_half;
 pub mod logging;
 pub mod math_utils;
@@ -57,6 +64,8 @@ pub mod op;
 pub mod open_color_types;
 pub mod ops;
 pub mod platform;
+#[doc(hidden)]
+pub mod scanline_helper;
 pub mod sse;
 pub mod sse2;
 #[cfg(test)]
@@ -64,3 +73,6 @@ mod unit_test_log_utils;
 pub mod utils;
 
 pub use exception::{Exception, ExceptionKind, Result};
+/// The `half` crate, whose `f16` is the F16 channel type of image descriptions: applications
+/// use this one, of the exact version the port was built with.
+pub use half;
