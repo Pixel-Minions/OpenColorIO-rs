@@ -255,14 +255,14 @@ status = "todo"
 path = "src/OpenColorIO/GPUProcessor.cpp"
 kind = "src"
 target = ["crates/ocio-gpu/src/gpu_processor.rs"]
-status = "partial"
-note = "1.7e: WriteShaderHeader and WriteShaderFooter, checked against the wheel's shaders of processors with no op (gpu_shader, 10 languages). The resource key of the creator overload reaches only begin(), which does nothing, and isn't ported (U-6). GPUProcessor::Impl (finalize, the per-op extraction, the cache ID) waits for the op model (1.2c) and the optimizer"
+status = "done"
+note = "1.7e: WriteShaderHeader and WriteShaderFooter; GPUProcessor::Impl::finalize, the per-op extraction and the queries (isNoOp, hasChannelCrosstalk, getCacheID) as GpuProcessor, the ops' extractGpuShaderInfo as extract_op_gpu_shader_info; checked against the wheel (gpu_shader, 10 languages, every optimization level). The resource key of the creator overload reaches only begin(), which does nothing, and isn't ported (U-6)."
 
 [[file]]
 path = "src/OpenColorIO/GPUProcessor.h"
 kind = "src"
 target = ["crates/ocio-gpu/src/gpu_processor.rs"]
-status = "partial"
+status = "done"
 note = "see GPUProcessor.cpp"
 
 [[file]]
@@ -451,9 +451,9 @@ note = "1.2c: OpCPU's defaults, OpData, GetTypeName, Op, OpRcPtrVec (as OpVec), 
 [[file]]
 path = "src/OpenColorIO/Op.h"
 kind = "src"
-target = ["crates/ocio-ops/src/op.rs", "crates/ocio-ops/src/op_data.rs"]
+target = ["crates/ocio-ops/src/op.rs", "crates/ocio-ops/src/op_data.rs", "crates/ocio-gpu/src/gpu_processor.rs"]
 status = "partial"
-note = "S2, 1.1d: OpCPU (as the CpuOp trait, with the typed apply_bit_depth); 1.2c: OpData (an enum with a variant per family), Op, OpRcPtrVec (as OpVec); getIdentityReplacement with the Matrix op; not yet: dumpMetadata (WP 1.8), optimize and optimizeForBitdepth (1.2d); 1.2d: HasFlag, as OptimizationFlags::has_flag"
+note = "S2, 1.1d: OpCPU (as the CpuOp trait, with the typed apply_bit_depth); 1.2c: OpData (an enum with a variant per family), Op, OpRcPtrVec (as OpVec); getIdentityReplacement with the Matrix op; not yet: dumpMetadata (WP 1.8), optimize and optimizeForBitdepth (1.2d); 1.2d: HasFlag, as OptimizationFlags::has_flag; 1.7e: extractGpuShaderInfo, in ocio-gpu (extract_op_gpu_shader_info, gpu_processor.rs), which matches on the op data's variant"
 
 [[file]]
 path = "src/OpenColorIO/OpBuilders.h"
@@ -1875,9 +1875,9 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/ops/matrix/MatrixOp.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/matrix/matrix_op.rs"]
+target = ["crates/ocio-ops/src/ops/matrix/matrix_op.rs", "crates/ocio-gpu/src/gpu_processor.rs"]
 status = "partial"
-note = "p1-engine, before 1.2d: MatrixOffsetOp's methods (clone, getInfo, isSameType, isInverse, canCombineWith, combineWith, finalize, getCacheID, getCPUOp; the op is OpData::Matrix), CreateMatrixOp(ops, MatrixOpDataRcPtr, direction) and CreateIdentityMatrixOp(ops). 1.3m3 (p1-matrix): the factories from values (CreateScaleOp, CreateMatrixOp(m44), CreateOffsetOp, CreateScaleOffsetOp, CreateSaturationOp, CreateMatrixOffsetOp, CreateFitOp, CreateIdentityMatrixOp(ops, direction), CreateMinMaxOp, CreateMatrixOp(MatrixArrayPtr)), the MatrixOffsetOp(m44, offset4, direction) constructor and CreateMatrixTransform; extractGpuShaderInfo is 1.3m4's"
+note = "p1-engine, before 1.2d: MatrixOffsetOp's methods (clone, getInfo, isSameType, isInverse, canCombineWith, combineWith, finalize, getCacheID, getCPUOp; the op is OpData::Matrix), CreateMatrixOp(ops, MatrixOpDataRcPtr, direction) and CreateIdentityMatrixOp(ops). 1.3m3 (p1-matrix): the factories from values (CreateScaleOp, CreateMatrixOp(m44), CreateOffsetOp, CreateScaleOffsetOp, CreateSaturationOp, CreateMatrixOffsetOp, CreateFitOp, CreateIdentityMatrixOp(ops, direction), CreateMinMaxOp, CreateMatrixOp(MatrixArrayPtr)), the MatrixOffsetOp(m44, offset4, direction) constructor and CreateMatrixTransform; extractGpuShaderInfo is 1.3m4's 1.3m4 (p1-gpu-ops): MatrixOffsetOp::extractGpuShaderInfo, in ocio-gpu's extract_op_gpu_shader_info (gpu_processor.rs)."
 
 [[file]]
 path = "src/OpenColorIO/ops/matrix/MatrixOp.h"
@@ -1918,13 +1918,15 @@ note = "1.3m1"
 path = "src/OpenColorIO/ops/matrix/MatrixOpGPU.cpp"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/matrix/matrix_op_gpu.rs"]
-status = "todo"
+status = "done"
+note = "1.3m4: GetMatrixGPUShaderProgram, checked against the wheel's shaders (matrix_op_gpu_oracle.rs: upstream's GPU test cases, every path, extreme parameters; 10 languages)"
 
 [[file]]
 path = "src/OpenColorIO/ops/matrix/MatrixOpGPU.h"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/matrix/matrix_op_gpu.rs"]
-status = "todo"
+status = "done"
+note = "see MatrixOpGPU.cpp"
 
 [[file]]
 path = "src/OpenColorIO/ops/noop/NoOps.cpp"
@@ -5037,6 +5039,7 @@ path = "tests/gpu/MatrixOp_test.cpp"
 kind = "test-gpu"
 target = ["crates/ocio-gpu/tests/matrix_op_test.rs"]
 status = "todo"
+note = "Phase 7 (GPU execution). Its cases are data in crates/ocio-testkit/src/gpu_cases.rs (matrix_cases); 1.3m4 checks their shaders' text against the wheel (crates/ocio-gpu/tests/matrix_op_gpu_oracle.rs)"
 
 [[file]]
 path = "tests/gpu/RangeOp_test.cpp"
