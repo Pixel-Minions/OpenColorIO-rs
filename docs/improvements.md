@@ -290,6 +290,63 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p1-foundations` (1.2e), checked against the wheel in
   `crates/ocio-ops/tests/logging_oracle.rs`.
 
+## GPU shaders
+
+### I-30. Large whole numbers become invalid shader literals
+
+- **Upstream:** `getFloatString` writes a `float` with 9 significant digits (`%.9g`) or a
+  `double` with 17 (`%.17g`). It then adds a `.` after any finite whole number, so that the shader
+  reads it as floating point (`GpuShaderUtils.cpp:21-35`). From 1e9 (`float`) or 1e17 (`double`)
+  up, `%g` switches to exponent notation, and the `.` lands after the exponent. Through the wheel,
+  a matrix offset of 1e10 is written `vec4(1e+10., ...)` in GLSL, and the same way in every
+  language but Cg, which clamps to the half range first.
+- **Who notices:** shaders for transforms with a whole-number parameter of a billion or more. In
+  C-style shading languages, a literal's `.` must come before its exponent.
+- **A fix:** put the `.` in the mantissa (`1.e+10`), or leave it out when there is an exponent.
+- **Status:** matched in `p1-gpu-infra` (1.7a).
+
+### I-33. A texture of 2^32 floats or more keeps a wrapped count
+
+- **Upstream:** a texture's float count, `w * h * d` times 1 or 3 channels, is taken in C
+  `unsigned` arithmetic, which wraps at 2^32, and that many floats are copied
+  (`CreateArray`, `GpuShader.cpp:24-37`). A 1D LUT's texture as wide as the width limit allows
+  (`setTextureMaxWidth` takes up to 2^32 - 1) and high enough keeps fewer values than it has
+  texels. Python's binding counts `width * height` in `unsigned` too, but times the channels in
+  64 bits (`PyGpuShaderDesc.cpp:116-160, 259-283`): `getValues` then reads past the values
+  kept, which is undefined. A 3D texture can't reach the count: the wheel refuses an edge of
+  130 texels or more before copying anything. A count that wraps to exactly 0 leaves the vector
+  empty, and `std::memcpy(&res[0], buf, 0)` then takes the address of its element 0
+  (`GpuShader.cpp:36`), which is undefined for an empty vector, though the copy is of 0 bytes.
+- **Who notices:** textures of 2^32 floats (16 GiB) or more.
+- **A fix:** count in 64 bits, and refuse a texture that doesn't fit.
+- **Status:** matched in `p1-gpu-infra` (1.7c): the port copies the wrapped count, and keeps no
+  values when it wraps to 0. The oracle refuses these textures (`gpu_shader_desc`,
+  `_check_texture_size`); Phase 6 decides for Python's `getValues`.
+
+### I-34. The Metal class wrapper misreads declarations that line feeds split
+
+- **Upstream:** in MSL, the class wrapper reads the shader's declarations back line by line to
+  build its class (`GpuShaderClassWrapper.cpp:285-372`). It takes the line after each line that
+  starts with `texture` for that texture's sampler, and reads the sampler's name from
+  `find("sampler") + 7` (line 332): without `sampler`, from offset 6 of that line. Every other
+  line becomes a parameter, its first word the type and the next one the name (lines 342-353).
+  Line feeds in the resource prefix, or in declaration code a caller adds
+  (`addToParameterDeclareShaderCode`, `addToTextureDeclareShaderCode`), cut declarations into
+  such lines: the class gets a sampler with a wrong name, and parameters that are pieces of
+  declarations. A texture declared on the last line, without a line feed, does the same:
+  `std::getline` then fails at the end of the text and leaves the texture's line in the buffer,
+  which is read as the sampler's line. Through the wheel, `texture1d<float> t;` alone gives the
+  class a sampler named `e1d<float>`. A line shorter than 6 bytes there is read past its end
+  (U-10).
+- **Who notices:** MSL shaders whose resource prefix holds line feeds, or whose added
+  declaration code declares a texture without a sampler on the next line. The class doesn't
+  compile.
+- **A fix:** read declarations, not lines: refuse line feeds in names, and a texture without
+  its sampler.
+- **Status:** matched in `p1-gpu-infra` (1.7d), checked against the wheel in
+  `crates/ocio-gpu/src/gpu_shader_class_wrapper_tests.rs` and
+  `crates/ocio-gpu/tests/gpu_shader_desc_oracle.rs`.
+
 ## Python module (`ocio-py`)
 
 ### I-12. A channel order passed without its keyword is misread
@@ -320,6 +377,20 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **A fix:** name the expected type as `uint16`, like the received one.
 - **Status:** to be matched in Phase 6 (D13). The Rust API's own error for a slice of the wrong
   type uses the clean names.
+
+### I-31. A shading language made from a number can abort the process
+
+- **Upstream:** Python turns any integer into a `GpuLanguage` (`OCIO.GpuLanguage(42)`), and
+  `GpuShaderDesc.setLanguage` accepts it. Extraction then raises "Unknown GPU shader language.".
+  `getCacheID()`, however, ends the process. It is `noexcept` (`OpenColorIO.h:3410`), and the
+  `GpuLanguageToString` it calls throws "Unsupported GPU shader language."
+  (`GpuShaderDesc.cpp:263-282`, `ParseUtils.cpp:258-275`), so C++ calls `std::terminate`.
+  Through the wheels, the Python process ends with SIGABRT (exit 134) on Rocky Linux 9 and with
+  `0xC0000409` on Windows.
+- **Who notices:** Python code that makes a language from a number outside 0-9.
+- **A fix:** refuse the number when the language is set, with "Unsupported GPU shader language.".
+- **Status:** open; decided in Phase 6. The Rust `GpuLanguage` holds only upstream's languages,
+  so only the Python module can meet it.
 
 ### I-32. `repr()` of a GradingRGBCurve prints an address
 
@@ -373,58 +444,6 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
     which it processes in its own memory.
 - **Decided** (general rule): the port gives the wheel's messages where the wheel raises, and an
   error where it would overrun.
-- **Status:** to be matched in `p1-bitdepth` (1.1e).
-### U-4. A Python logging function crashes the interpreter's exit
-
-- **Upstream:** a logging function set from Python is held in a C++ global
-  (`Logging.cpp:71`), which outlives the Python interpreter. A process that exits with one
-  still set crashes (a segmentation fault on both platforms, seen through the wheel in
-  `p1-foundations`); `ResetToDefaultLoggingFunction()` before exit avoids it, and the oracle's
-  commands do so.
-- **Options:** release the function when Python shuts down, or keep it and never release it;
-  either way the process exits cleanly.
-- **Status:** open; decided in Phase 6 (the Python module).
-
-### U-5. A 1D LUT that doesn't fit its GPU texture width
-
-- **Upstream:** a 1D LUT of L entries goes in a texture min(L, W) wide and L / W + 1 high, W being
-  the description's texture width limit (4096 by default). In more than one row, each row's
-  last entry is repeated at the start of the next (`ops/lut1d/Lut1DOpGPU.cpp:19-141, 153-177`).
-  - A width of 0 divides by zero.
-  - A width of 1 never advances along the LUT, and repeats entries forever.
-  - Otherwise the padded entries can outnumber the texture's texels. The count of texels left
-    to fill, an unsigned difference, then wraps, and the wheel appends entries until memory runs
-    out. Through the Linux wheel, capped, that ends in `std::bad_alloc`; the Windows wheel grew
-    to 23 GB before it was stopped.
-- **Who notices:** GPU shaders of 1D LUTs that don't fit the width limit: 8191, 12286 or 12287
-  entries at the default width (32,640 lengths up to 2^20 in all), and most lengths at small
-  widths.
-- **Options:** an error where the padding doesn't fit, or a layout that fits.
-- **Status:** open; decided in Phase 2, with the Lut1D GPU writer. The oracle refuses these
-  requests (`gpu_shader`, `_padding_fits`).
-
-### U-6. Resource prefixes the Metal class wrapper can't read
-
-- **Upstream:** in MSL, a class wrapper reads the shader's declarations back to build its class
-  (`GpuShaderClassWrapper.cpp:279-366`).
-  - It passes the resource prefix's first byte past white space to `std::isdigit` and
-    `std::isspace` (lines 157, 226, 325, 333, 348). They are undefined for a non-ASCII byte, a
-    negative `char`. glibc defines them there (neither a digit nor a space), so D12 may apply
-    on Linux; whether MSVC's release CRT stays inside its table is still to be checked.
-  - A line feed in the prefix cuts a texture's declaration in two. The wrapper then looks for
-    its sampler at `find("sampler") + 7`, which wraps past `npos` to 6 and can read past the end
-    of a short line (lines 330-333).
-  - The uid goes through `std::isalpha` and `std::isalnum` too (`GPUProcessor.cpp:180-188`), but
-    only in the `GpuShaderCreator` overload of `extractGpuShaderInfo`. Python takes the
-    `GpuShaderDesc` overload (lines 151-155), which skips it: through Python, the uid changes
-    nothing, not even the cache ID.
-- **Who notices:** MSL shaders whose resource prefix starts with a non-ASCII byte or holds a line
-  feed; C++ callers of the creator overload with a non-ASCII uid. Other names, and every name in
-  the other languages, are only written out, so they are well defined.
-- **Decided** (general rule): the port returns an error for those names. `p1-gpu-infra` settles
-  the scope: 1.7d for the wrapper, 1.7e for the uid.
-- **Status:** to be matched in `p1-gpu-infra`. The oracle refuses these MSL prefixes
-  (`gpu_shader`, `_check_names`).
 - **Status:** matched in `p1-bitdepth` (1.1e), in `crates/ocio-ops/src/scanline_helper.rs`:
   - where upstream's resize gets a negative size, `init` raises the C++ library's
     `std::length_error`: "vector too long" on Windows, "vector::_M_default_append" on Linux
@@ -458,6 +477,131 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Options:** release the function when Python shuts down, or keep it and never release it;
   either way the process exits cleanly.
 - **Status:** open; decided in Phase 6 (the Python module).
+
+### U-5. A 1D LUT that doesn't fit its GPU texture width
+
+- **Upstream:** a 1D LUT of L entries goes in a texture min(L, W) wide and L / W + 1 high, W being
+  the description's texture width limit (4096 by default). In more than one row, each row's
+  last entry is repeated at the start of the next (`ops/lut1d/Lut1DOpGPU.cpp:19-141, 153-177`).
+  - A width of 0 divides by zero.
+  - A width of 1 never advances along the LUT, and repeats entries forever.
+  - Otherwise the padded entries can outnumber the texture's texels. The count of texels left
+    to fill, an unsigned difference, then wraps, and the wheel appends entries until memory runs
+    out. Through the Linux wheel, capped, that ends in `std::bad_alloc`; the Windows wheel grew
+    to 23 GB before it was stopped.
+- **Who notices:** GPU shaders of 1D LUTs that don't fit the width limit: 8191, 12286 or 12287
+  entries at the default width (32,640 lengths up to 2^20 in all), and most lengths at small
+  widths.
+- **Options:** an error where the padding doesn't fit, or a layout that fits.
+- **Status:** open; decided in Phase 2, with the Lut1D GPU writer. The oracle refuses these
+  requests (`gpu_shader`, `_padding_fits`).
+
+### U-6. Resource prefixes the Metal class wrapper reads past
+
+- **Upstream:** in MSL, a class wrapper reads the shader's declarations back to build its class
+  (`GpuShaderClassWrapper.cpp:285-372`), and their names start with the resource prefix.
+  - After a line that starts with `texture` past white space, it takes the next line for the
+    texture's sampler and reads from `find("sampler") + 7` (lines 330-335). Without `sampler`,
+    that wraps past `npos` to 6, past the end of a shorter line. A line feed in the prefix cuts
+    each declaration into lines, so this happens when the prefix's first segment between two
+    line feeds is shorter than 6 bytes (it is the line after a texture's declaration), or when
+    a segment after a line feed starts with `texture` past white space (the wrapper takes its
+    line for a texture's declaration, and the line after the last declaration is empty).
+  - The wrapper also passes the declarations' bytes to `std::isspace`, and the class name's
+    first byte to `std::isdigit` (lines 157, 226, 307, 325, 333, 348). The C++ standard leaves
+    them undefined for a non-ASCII byte, a negative `char`, but both wheels define them and give
+    such a byte neither class, so there is no undefined behaviour there, and no D12 split:
+    - Windows: the UCRT's `isspace` and `isdigit` return 0 below -1 in a single-byte locale
+      (`ucrt/convert/_ctype.cpp:28-56`, Windows SDK 10.0.22000.0), and classify the byte
+      through the code page in a multibyte one (`_isctype_l`).
+    - Linux: glibc's `isspace` reads the locale's table, which covers -128 to 255. GCC inlines
+      `isdigit` as `(unsigned)(c - '0') <= 9` (wheel-inspect, `generateClassWrapperHeader`).
+    - Through `ctypes`, no byte from 0x80 to 0xFE gets either class: in the UCRT under the C,
+      single-byte (874, 1251 to 1256) and multibyte (932, 936, 949, 950, UTF-8) locales, and in
+      glibc under every locale of the Rocky Linux 9 image (C, POSIX, C.UTF-8). Python starts in
+      the user's locale (`English_United States.1252` here) and in C.UTF-8 there.
+  - The uid goes through `std::isalpha` and `std::isalnum` (`GPUProcessor.cpp:180-188`), but
+    only in the `GpuShaderCreator` overload of `extractGpuShaderInfo`. Python takes the
+    `GpuShaderDesc` overload (lines 151-155), which skips it: through Python, the uid changes
+    nothing, not even the cache ID.
+- **Who notices:** MSL shaders whose resource prefix holds line feeds like those; C++ callers of
+  the creator overload with a non-ASCII uid. Other names, and every name in the other
+  languages, are only written out, so they are well defined.
+- **Decided** (general rule): the port returns an error where the wrapper would read past a
+  line. `p1-gpu-infra` settles the scope: 1.7d for the wrapper, 1.7e for the uid. The uid's
+  key reaches only the creator's `begin`, which does nothing in the one description there is,
+  so it changes no output in C++ either: the port doesn't compute it (1.7e).
+- **Status:** the wrapper's part matched in `p1-gpu-infra` (1.7d, U-10); the uid's key not
+  ported (1.7e). The oracle refuses these MSL prefixes whatever the processor (`gpu_shader`,
+  `_check_names`): being exact would need the declarations, which only the extraction makes.
+
+### U-10. A texture declared without a sampler after it, in MSL
+
+- **Upstream:** in MSL, the class wrapper reads the shader's declarations back to build its
+  class (`GpuShaderClassWrapper.cpp:285-372`). It takes the line after each line that starts
+  with `texture` for that texture's sampler, and reads the sampler's name from
+  `find("sampler") + 7` (lines 330-335). When that line has no `sampler`, `npos + 7` wraps to 6,
+  and a line shorter than 6 bytes is read past its end; `substr` then throws
+  `std::out_of_range`. OCIO's own writers always declare a sampler after its texture, but the
+  declarations also hold the code a caller adds (`addToParameterDeclareShaderCode`,
+  `addToTextureDeclareShaderCode`, both in Python) and the resource prefix, whose line feeds cut
+  them into lines (U-6). A texture declared last is enough when a line feed ends it: the next
+  line is then empty. (Without that line feed, `std::getline` fails at the end of the text and
+  leaves the texture's line in the buffer, which is long enough: I-34.)
+
+  The error is `std::out_of_range`, not an OCIO `Exception`. Python sees an `IndexError`, whose
+  message is the C++ library's, so it differs by platform:
+  - through the Windows wheel, `invalid string position`;
+  - through the Rocky Linux 9 wheel (the verifier's probe), `basic_string::substr: __pos (which
+    is 6) > this->size() (which is 0)` for the declarations `"texture2d<float> t;\n"`, and
+    `(which is 2)` for `"texture2d<float> t;\nab\n"`. `__pos` can exceed 6: before `substr`
+    throws, the loop that skips spaces (line 333) reads the bytes past the line's end, stale
+    ones of the string's buffer, and steps over any that are white space.
+
+  It also escapes the `catch (const Exception &)` of `GPUProcessor.cpp:197-201`, so an
+  extraction that meets it doesn't call the creator's `end()`.
+- **Who notices:** MSL shaders whose added declaration code declares a texture without a sampler
+  after it, or whose resource prefix holds line feeds like U-6's.
+- **Decided** (general rule): the port returns an error exactly where the read would pass the
+  line's end, and otherwise parses as upstream does: a line of 6 bytes is read up to its
+  terminating NUL, and a non-ASCII byte is neither white space nor a digit, as in both wheels
+  (U-6). This settles the class wrapper's part of U-6.
+- **Status:** matched in `p1-gpu-infra` (1.7d): the port's error is an OCIO `Exception` with
+  its own message. Phase 6 decides what Python raises there (an `IndexError`, as the wheel
+  does, or the `Exception`).
+
+### U-11. Texture values shorter than the texture
+
+- **Upstream:** `addTexture` and `add3DTexture` take the values as a `const float *`, and copy
+  the texture's float count from it (`CreateArray`, `GpuShader.cpp:24-37`), so a shorter buffer
+  is read past its end. Python's binding checks the buffer's length first
+  (`PyGpuShaderDesc.cpp:116-202`).
+- **Who notices:** callers of the Rust API, which takes the values as a slice: a slice shorter
+  than the texture.
+- **Decided** (the owner, 2026-09-30: the general rule, with a clear message): after upstream's
+  own checks (the width limit, the names, a size of 0), the port returns the error "The texture
+  'NAME' needs N values, but only M were given.". A longer slice is read up to the count, as
+  upstream reads the buffer.
+- **Status:** matched in `p1-gpu-infra` (1.7c).
+
+### U-12. Constant arrays written from a count and a pointer
+
+- **Upstream:** `declareFloatArrayConst` and `declareIntArrayConst` take a count and a pointer
+  (`int size, const float * v`) and write `size` values from it (`GpuShaderUtils.cpp:520-648`).
+  Their callers pass a count kept apart from the values: the grading curves' `getNumKnots()`
+  with `getKnotsArray()`, `getNumCoefs()` with `getCoefsArray()`
+  (`ops/gradingrgbcurve/GradingRGBCurveOpGPU.cpp:227-230`,
+  `ops/gradinghuecurve/GradingHueCurveOpGPU.cpp:267-270`), and ACES 2 its table's
+  `total_size` with its data (`ops/fixedfunction/FixedFunctionOpGPU.cpp:864`). A count past
+  the values reads past their end.
+- **Who notices:** no one yet: none of the writers ported so far calls these helpers. The
+  port's helpers take the values as a slice, so a writer ported later slices its values by its
+  count, and a count past their end would panic there.
+- **Decided** (general rule): a writer that ports one of these calls checks that the count
+  fits before slicing, and returns an error where it doesn't. The helpers' doc comments say so
+  (`crates/ocio-gpu/src/gpu_shader_utils.rs`).
+- **Status:** the helpers ported in `p1-gpu-infra` (1.7a); each caller's check comes with its
+  writer (2.4 for ACES 2, Phase 5 for the grading curves).
 
 ### U-15. A wrapped scanline reaches outside the image
 

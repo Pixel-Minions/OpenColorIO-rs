@@ -391,64 +391,77 @@ fn uniform(value: &Value) -> Uniform {
     }
 }
 
+/// A 1D or 2D texture, as the command reports it; its values are in `response`'s blobs.
+pub(crate) fn texture(t: &Value, response: &Response) -> Texture {
+    Texture {
+        name: string(t, "name"),
+        sampler_name: string(t, "sampler_name"),
+        width: number(t, "width"),
+        height: number(t, "height"),
+        channel: string(t, "channel"),
+        dimensions: string(t, "dimensions"),
+        interpolation: string(t, "interpolation"),
+        binding_index: number(t, "binding_index"),
+        values: bytes_to_f32(&response.blobs[number(t, "values") as usize]),
+    }
+}
+
+/// A 3D texture, as the command reports it; its values are in `response`'s blobs.
+pub(crate) fn texture_3d(t: &Value, response: &Response) -> Texture3d {
+    Texture3d {
+        name: string(t, "name"),
+        sampler_name: string(t, "sampler_name"),
+        edge_len: number(t, "edge_len"),
+        interpolation: string(t, "interpolation"),
+        binding_index: number(t, "binding_index"),
+        values: bytes_to_f32(&response.blobs[number(t, "values") as usize]),
+    }
+}
+
+/// What a description holds, as the command reports it in `s`; the text and the texture
+/// values are in `response`'s blobs.
+pub(crate) fn shader(s: &Value, response: &Response) -> Shader {
+    let list = |key: &str| s[key].as_array().cloned().unwrap_or_default();
+    let mut getters = s.clone();
+    if let Some(object) = getters.as_object_mut() {
+        for key in [
+            "cache_id",
+            "text",
+            "uniforms",
+            "textures",
+            "textures_3d",
+            "dynamic_properties",
+        ] {
+            object.remove(key);
+        }
+    }
+    Shader {
+        cache_id: string(s, "cache_id"),
+        text: response.blob_text(number(s, "text") as usize).to_string(),
+        uniforms: list("uniforms").iter().map(uniform).collect(),
+        textures: list("textures")
+            .iter()
+            .map(|t| texture(t, response))
+            .collect(),
+        textures_3d: list("textures_3d")
+            .iter()
+            .map(|t| texture_3d(t, response))
+            .collect(),
+        dynamic_properties: list("dynamic_properties")
+            .iter()
+            .map(|p| DynamicProperty {
+                kind: string(p, "type"),
+                value: Dumped::parse(&p["value"], &[]),
+            })
+            .collect(),
+        getters,
+    }
+}
+
 impl GpuShaderReply {
     /// Reads the command's response.
     pub fn from_response(response: Response) -> GpuShaderReply {
-        let shader = response.result.get("shader").map(|s| {
-            let values = |t: &Value| bytes_to_f32(&response.blobs[number(t, "values") as usize]);
-            let list = |key: &str| s[key].as_array().cloned().unwrap_or_default();
-            let mut getters = s.clone();
-            if let Some(object) = getters.as_object_mut() {
-                for key in [
-                    "cache_id",
-                    "text",
-                    "uniforms",
-                    "textures",
-                    "textures_3d",
-                    "dynamic_properties",
-                ] {
-                    object.remove(key);
-                }
-            }
-            Shader {
-                cache_id: string(s, "cache_id"),
-                text: response.blob_text(number(s, "text") as usize).to_string(),
-                uniforms: list("uniforms").iter().map(uniform).collect(),
-                textures: list("textures")
-                    .iter()
-                    .map(|t| Texture {
-                        name: string(t, "name"),
-                        sampler_name: string(t, "sampler_name"),
-                        width: number(t, "width"),
-                        height: number(t, "height"),
-                        channel: string(t, "channel"),
-                        dimensions: string(t, "dimensions"),
-                        interpolation: string(t, "interpolation"),
-                        binding_index: number(t, "binding_index"),
-                        values: values(t),
-                    })
-                    .collect(),
-                textures_3d: list("textures_3d")
-                    .iter()
-                    .map(|t| Texture3d {
-                        name: string(t, "name"),
-                        sampler_name: string(t, "sampler_name"),
-                        edge_len: number(t, "edge_len"),
-                        interpolation: string(t, "interpolation"),
-                        binding_index: number(t, "binding_index"),
-                        values: values(t),
-                    })
-                    .collect(),
-                dynamic_properties: list("dynamic_properties")
-                    .iter()
-                    .map(|p| DynamicProperty {
-                        kind: string(p, "type"),
-                        value: Dumped::parse(&p["value"], &[]),
-                    })
-                    .collect(),
-                getters,
-            }
-        });
+        let shader = response.result.get("shader").map(|s| shader(s, &response));
         GpuShaderReply {
             result: response.result,
             shader,

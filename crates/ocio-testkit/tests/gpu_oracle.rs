@@ -12,9 +12,9 @@
 //!   `ExceptionMissingFile`;
 //! - each message is logged once, as one extraction logs it;
 //! - the default GPU processor is the optimized one with the default flags;
-//! - every error path raises where the command says; the command's refusals, exactly the names
-//!   the wheel can't read and settings of the wrong type; and replies that don't depend on the
-//!   run.
+//! - every error path raises where the command says; the command's refusals: the names that
+//!   would make the wheel read past a line, and settings of the wrong type; and replies that
+//!   don't depend on the run.
 //!
 //! **Error paths**, by stage (paths relative to `upstream/OpenColorIO/src/OpenColorIO` @ v2.5.2):
 //! - `config`, `transform`, `processor`: as in `cpu_apply`.
@@ -548,9 +548,14 @@ enum Outcome {
 
 /// The oracle refuses a request where the wheel would do something undefined, and nothing next
 /// to it:
-/// - MSL resource prefixes the Metal class wrapper can't read back: a first byte past white
-///   space that isn't ASCII, or a line feed. Control characters, other names, a non-ASCII byte
-///   later in the prefix, and every name in the other languages go through;
+/// - MSL resource prefixes whose line feeds make the Metal class wrapper read past a line
+///   (`_check_names`), with or without a texture: a first segment between two line feeds
+///   shorter than 6 bytes as the declarations hold it (the setter and the resource name each
+///   make `__` `_`), or a segment after a line feed that starts with `texture` past white
+///   space. A segment of 6 bytes in 3 characters or left by a double underscore, a later short
+///   segment, a no-break space before `texture`, `textur`, non-ASCII bytes anywhere (both C
+///   runtimes give them no class), control characters, other names, and every name in the
+///   other languages go through;
 /// - 1D LUTs that don't fit the texture width limit (dividing by zero at a width of 0, looping
 ///   forever at 1, exhausting memory when the padded rows outnumber the texels, as a LUT of
 ///   8191 entries does at the default width). The same LUTs at other widths, a width of 0
@@ -596,8 +601,8 @@ fn refusals_and_the_requests_next_to_them() {
             },
         )
     };
-    const CAN_T_READ: &str = "passes its first byte past white space to std::isdigit";
-    const LINE_FEED: &str = "a line feed in their names";
+    const SHORT_LINE: &str = "the line after a texture's declaration";
+    const TEXTURE_LINE: &str = "starts a line with 'texture'";
     let cases: Vec<(&str, GpuShaderRequest, Outcome)> = vec![
         (
             "a non-ASCII byte later in an MSL prefix",
@@ -606,23 +611,95 @@ fn refusals_and_the_requests_next_to_them() {
         ),
         (
             "an MSL prefix starting with a non-ASCII byte",
-            msl(prefix("\u{e9}t\u{e9}")),
-            Refused(CAN_T_READ),
+            msl_lut("\u{e9}t\u{e9}"),
+            Extracts,
         ),
         (
             "an MSL prefix starting with white space, then a non-ASCII byte",
-            msl(prefix(" \t\u{3c0}")),
-            Refused(CAN_T_READ),
-        ),
-        (
-            "an MSL prefix with a line feed",
-            msl(prefix("a\nb")),
-            Refused(LINE_FEED),
+            msl_lut(" \t\u{3c0}"),
+            Extracts,
         ),
         (
             "an MSL prefix with a line feed, for a texture",
-            msl_lut("x\ny\nz"),
-            Refused(LINE_FEED),
+            msl_lut("a\nb"),
+            Extracts,
+        ),
+        (
+            "5 bytes between two line feeds of an MSL prefix, for a texture",
+            msl_lut("x\n12345\nz"),
+            Refused(SHORT_LINE),
+        ),
+        (
+            "6 bytes between two line feeds of an MSL prefix, for a texture",
+            msl_lut("x\n123456\nz"),
+            Extracts,
+        ),
+        (
+            "5 bytes in 3 characters between two line feeds",
+            msl_lut("x\n\u{e9}\u{e9}a\nz"),
+            Refused(SHORT_LINE),
+        ),
+        (
+            "6 bytes in 3 characters between two line feeds",
+            msl_lut("x\n\u{e9}\u{e9}\u{e9}\nz"),
+            Extracts,
+        ),
+        (
+            "6 bytes with a double underscore between two line feeds, which leaves 5",
+            msl_lut("x\na__bcd\nz"),
+            Refused(SHORT_LINE),
+        ),
+        (
+            "7 bytes with a double underscore between two line feeds, which leaves 6",
+            msl_lut("x\na__bcde\nz"),
+            Extracts,
+        ),
+        (
+            "7 bytes with a triple underscore between two line feeds: the setter leaves 6, the \
+             resource name 5",
+            msl_lut("x\na___bcd\nz"),
+            Refused(SHORT_LINE),
+        ),
+        (
+            "a short segment after 6 bytes between line feeds",
+            msl_lut("x\n123456\n1\nz"),
+            Extracts,
+        ),
+        (
+            "a short segment between two line feeds, without a texture",
+            msl(prefix("a\nb\nc")),
+            Refused(SHORT_LINE),
+        ),
+        (
+            "texture after a line feed, for a texture",
+            msl_lut("a\ntexture"),
+            Refused(TEXTURE_LINE),
+        ),
+        (
+            "texture after a line feed, without a texture",
+            msl(prefix("a\ntextures")),
+            Refused(TEXTURE_LINE),
+        ),
+        (
+            "texture between two line feeds, before a short segment",
+            msl_lut("a\ntexture1\nb\nc"),
+            Refused(TEXTURE_LINE),
+        ),
+        (
+            "vertical tab, form feed, carriage return, tab and space before texture",
+            msl_lut("a\n\u{b}\u{c}\r\t texture"),
+            Refused(TEXTURE_LINE),
+        ),
+        (
+            "a no-break space before texture after a line feed",
+            msl_lut("a\n\u{a0}texture"),
+            Extracts,
+        ),
+        ("textur after a line feed", msl_lut("a\ntextur"), Extracts),
+        (
+            "texture after a line feed, not at the start of its line",
+            msl_lut("a\nxtexture"),
+            Extracts,
         ),
         (
             "an MSL prefix with tab, carriage return and DEL",

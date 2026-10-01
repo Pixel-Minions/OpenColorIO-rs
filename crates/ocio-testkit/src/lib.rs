@@ -8,6 +8,8 @@
 //!   because OCIO's kernel choice and math library belong to the machine.
 //! - [`gpu`]: typed requests and replies of the oracle's `gpu_shader` command, a GPU
 //!   processor's shader with its uniforms and textures.
+//! - [`gpu_desc`]: typed requests and replies of the oracle's `gpu_shader_desc` command, a
+//!   shader description driven through the calls Python has.
 //! - [`processor_ops`]: typed requests and replies of the oracle's `processor_ops` command,
 //!   what the optimizer makes of a processor, each transform with all its getters.
 //! - [`transform_text`]: typed requests and replies of the oracle's `transform_text` command,
@@ -35,6 +37,7 @@ pub mod compare;
 pub mod crt;
 pub mod fixtures;
 pub mod gpu;
+pub mod gpu_desc;
 pub mod image;
 pub mod oracle;
 pub mod paths;

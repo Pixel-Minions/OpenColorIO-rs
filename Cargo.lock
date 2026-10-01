@@ -151,6 +151,7 @@ version = "0.0.0+ocio.2.5.2"
 dependencies = [
  "ocio-ops",
  "ocio-testkit",
+ "serde_json",
 ]
 
 [[package]]
