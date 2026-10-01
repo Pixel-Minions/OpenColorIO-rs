@@ -472,7 +472,7 @@ path = "src/OpenColorIO/ParseUtils.cpp"
 kind = "src"
 target = ["crates/ocio/src/parse_utils.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-gpu/src/open_color_types.rs"]
 status = "partial"
-note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection; 1.1a: BitDepthToString, next to BitDepth; 1.2e: LoggingLevelToString and LoggingLevelFromString, next to LoggingLevel; 1.7c: GpuLanguageToString, next to GpuLanguage; 1.3n1: AllocationToString, next to Allocation"
+note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection; 1.1a: BitDepthToString, next to BitDepth; 1.2e: LoggingLevelToString and LoggingLevelFromString, next to LoggingLevel; 1.7c: GpuLanguageToString, next to GpuLanguage; 1.3n1: AllocationToString, next to Allocation; 1.3m1: TransformDirectionToString, next to TransformDirection"
 
 [[file]]
 path = "src/OpenColorIO/ParseUtils.h"
@@ -1068,7 +1068,8 @@ status = "todo"
 path = "src/OpenColorIO/ops/OpArray.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/op_array.rs"]
-status = "todo"
+status = "partial"
+note = "1.3m1: ArrayT (the constructor, resize, getLength, getNumColorComponents, getValues, operator[], validate, operator== and scale) and ArrayDouble, what the Matrix op uses; getNumValues is the subclass's, so resize and validate take its value. ArrayBase, Array (ArrayT<float>), setLength, setDoubleValue, getDoubleValue, setMaxColorComponents, getMaxColorComponents, setNumColorComponents and adjustColorComponentNumber come with the LUT ops"
 
 [[file]]
 path = "src/OpenColorIO/ops/OpTools.cpp"
@@ -1898,13 +1899,15 @@ status = "todo"
 path = "src/OpenColorIO/ops/matrix/MatrixOpData.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/matrix/matrix_op_data.rs"]
-status = "todo"
+status = "done"
+note = "1.3m1: the products, sums and inverse with each wheel's operand orders, and getAsForward's scale(-1.) as each wheel compiled it (a negation in the Linux wheel); matrix_op_data.rs notes the addresses. Not ported: MatrixArray::operator=(const ArrayDouble &) (98-107), which nothing calls (compose assigns through getArray(), an ArrayDouble &), and the inner(const MatrixArrayPtr &) overload, the same as inner(const MatrixArray &) for Rust. MatrixArray::validate takes &mut self for its const_cast 3x3 expansion; validate_ref runs it on a shared reference"
 
 [[file]]
 path = "src/OpenColorIO/ops/matrix/MatrixOpData.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/matrix/matrix_op_data.rs"]
-status = "todo"
+status = "done"
+note = "1.3m1"
 
 [[file]]
 path = "src/OpenColorIO/ops/matrix/MatrixOpGPU.cpp"

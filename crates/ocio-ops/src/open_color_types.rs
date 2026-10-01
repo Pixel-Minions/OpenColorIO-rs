@@ -100,6 +100,17 @@ pub fn combine_transform_directions(
     TransformDirection::Inverse
 }
 
+/// The direction's name in configs and cache IDs: `forward` or `inverse`.
+///
+/// Port of `TransformDirectionToString` (src/OpenColorIO/ParseUtils.cpp:133-138 @ v2.5.2).
+pub fn transform_direction_to_string(dir: TransformDirection) -> &'static str {
+    if dir == TransformDirection::Forward {
+        return "forward";
+    }
+    // TRANSFORM_DIR_INVERSE
+    "inverse"
+}
+
 /// How an exponent or curve handles negative values.
 ///
 /// Port of `NegativeStyle` (include/OpenColorIO/OpenColorTypes.h:552-558 @ v2.5.2).
