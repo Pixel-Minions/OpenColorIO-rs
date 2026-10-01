@@ -326,7 +326,8 @@ fn isolate_from(
 /// Starts `command`, writes `request` to its stdin, and returns its stdout once it exits
 /// successfully, starting it again (at most [`SPAWN_RETRIES`] times) when it crashed as the
 /// oracle crashes under Intel SDE on Windows before it reads a request ([`crashed_unread`]).
-/// The final error says how many attempts were made, with each attempt's message and stderr.
+/// The final error says how many attempts were made, with each attempt's message and stderr;
+/// each retry also prints a line to the process's stderr.
 fn exchange(mut command: Command, request: &[u8]) -> Result<Vec<u8>, String> {
     let mut failures = Vec::new();
     loop {
@@ -338,6 +339,15 @@ fn exchange(mut command: Command, request: &[u8]) -> Result<Vec<u8>, String> {
                 if !retry {
                     break;
                 }
+                // Straight to the process's stderr, past the test harness's capture, so that
+                // CI logs show every retry, of passing tests too.
+                let _ = writeln!(
+                    std::io::stderr(),
+                    "ocio-testkit: the oracle crashed before reading its request (attempt {} \
+                     of {}, exit code 0xc0000005); starting it again",
+                    failures.len(),
+                    SPAWN_RETRIES + 1
+                );
             }
         }
     }
