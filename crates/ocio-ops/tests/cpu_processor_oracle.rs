@@ -734,6 +734,10 @@ fn unsupported_bit_depths_match_the_wheel() {
 /// the port's [`OpVec::is_dynamic`] of the processor's ops gives; and the optimized processor's,
 /// for the ops a CPU processor renders with the same flags, which
 /// [`CpuProcessor::is_dynamic`] asks of their renderers (CPUProcessor.cpp:242-263), at F32.
+///
+/// Vacuous for now: every op ported so far (Matrix, Range, the no-ops) is static, so both sides
+/// are false for every chain. Extend the chains with a dynamic op (ExposureContrast, the
+/// grading ops) when one is ported.
 #[test]
 fn is_dynamic_matches_the_wheel() {
     use ocio_testkit::processor_ops::ProcessorOpsRequest;
