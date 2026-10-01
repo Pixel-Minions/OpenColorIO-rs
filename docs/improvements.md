@@ -301,7 +301,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   (Linux wheel 0x4e8303, `xorpd` with -0.0), which flips it. Every other value gives the same
   bits.
 - **Who notices:** inverse matrices whose offsets come out NaN: the NaN's sign, in the cache
-  ID and the pixels, differs between Windows and Linux.
+  ID, the pixels and the shader text, differs between Windows and Linux. In shaders, the
+  flipped sign adds Linux's `-nan` where Windows writes `nan` (I-7, I-35).
 - **A fix:** negate on both, or multiply on both.
 - **Status:** matched in `p1-engine` (1.3m1), each wheel's operation.
 
@@ -313,7 +314,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   each step, whose register it reuses (Linux wheel, its 9 unrolled steps, e.g. 0x4e673e and
   0x4e67de). When both are NaN, the first operand's NaN comes out.
 - **Who notices:** inverse matrices with NaN coefficients: the inverse's NaNs, in the cache
-  ID and the pixels, differ between Windows and Linux.
+  ID, the pixels and the shader text, differ between Windows and Linux.
 - **A fix:** one operand order for both platforms.
 - **Status:** matched in `p1-engine` (1.3m1), each wheel's order.
 
@@ -323,7 +324,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   (`include/OpenColorIO/OpenColorTypes.h:634`), 32 bits with MSVC and 64 with GCC. The binding
   converts a Python integer to it: on Linux `OptimizationFlags(2**32 + 1)` is accepted, and the
   CPU processor's cache ID prints `oFlags 4294967297`; on Windows the same call raises
-  `TypeError`.
+  `TypeError`. The GPU processor's cache ID prints them whole too (`GPU Processor: oFlags
+  <flags> ops : ...`), which `crates/ocio-gpu/tests/matrix_op_gpu_oracle.rs` checks on Linux
+  against the wheel with `(1 << 32) | OPTIMIZATION_DEFAULT`.
 - **Who notices:** callers passing flags above bit 31, which no flag uses.
 - **A fix:** a 32-bit type on every platform, or refusing unknown bits.
 - **Status:** matched in `p1-engine` (1.2d): the port's `OptimizationFlags` holds a
@@ -460,6 +463,24 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p1-gpu-infra` (1.7d), checked against the wheel in
   `crates/ocio-gpu/src/gpu_shader_class_wrapper_tests.rs` and
   `crates/ocio-gpu/tests/gpu_shader_desc_oracle.rs`.
+
+### I-35. Non-finite and float-overflowing parameters become invalid shader literals
+
+- **Upstream:** `getFloatString` writes a literal with the C++ library's `%g`
+  (`GpuShaderUtils.cpp:21-35`), so infinities and NaNs come out as `inf`, `-inf`, `nan`, and
+  `-nan(ind)` on Windows or `-nan` on Linux (I-7), which no shading language reads as numbers.
+  The Matrix writer also rounds a diagonal's values and the offsets to `float` first
+  (`ops/matrix/MatrixOpGPU.cpp:37-62`), so a finite `double` above `FLT_MAX` becomes `inf` there,
+  while a full matrix keeps it as a 17-digit `double`. Through the wheel, in GLSL: a diagonal
+  of 1e39 gives `vec4(inf, 1., 1., 1.) * res`; the same value in a full matrix gives
+  `mat4(9.9999999999999994e+38., ...)` (I-30's `.`); offsets of 1e39 and -1e39 give
+  `vec4(inf, -inf, 0., 0.)`; NaN parameters give `nan`.
+- **Who notices:** shaders for transforms with NaN or infinite parameters, or diagonal matrices
+  and offsets beyond the float range: the shader doesn't compile. The CPU renders them.
+- **A fix:** write non-finite values in a form each language accepts (`1.0/0.0`,
+  `uintBitsToFloat(...)`), or refuse such parameters on the GPU.
+- **Status:** matched in `p1-gpu-ops` (1.3m4), checked against the wheel in
+  `crates/ocio-gpu/tests/matrix_op_gpu_oracle.rs` (`extreme_parameters_write_the_wheels_shader`).
 
 ## Python module (`ocio-py`)
 

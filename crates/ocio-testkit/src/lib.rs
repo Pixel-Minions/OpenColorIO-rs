@@ -37,6 +37,7 @@ pub mod compare;
 pub mod crt;
 pub mod fixtures;
 pub mod gpu;
+pub mod gpu_cases;
 pub mod gpu_desc;
 pub mod image;
 pub mod oracle;
