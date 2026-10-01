@@ -92,6 +92,8 @@ enum Route {
     Transform,
     /// One transform in a config's YAML (`Spec::Yaml`).
     Yaml,
+    /// One transform in a version 1 config's YAML (`Spec::YamlV1`).
+    YamlV1,
 }
 
 impl Route {
@@ -99,6 +101,7 @@ impl Route {
         match spec {
             Spec::Transform(_) => Route::Transform,
             Spec::Yaml(_) => Route::Yaml,
+            Spec::YamlV1(_) => Route::YamlV1,
         }
     }
 
@@ -106,6 +109,7 @@ impl Route {
         match self {
             Route::Transform => "JSON transform",
             Route::Yaml => "YAML",
+            Route::YamlV1 => "YAML in a version 1 config",
         }
     }
 }
