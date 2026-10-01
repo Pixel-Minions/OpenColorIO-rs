@@ -18,9 +18,9 @@
 //!
 //! Responses are cached under `<target>/oracle-cache`, keyed by the request, the oracle's
 //! sources and lock file, and this machine's OS and CPU ([`machine_description`]). Set
-//! `OCIO_RS_ORACLE_NO_CACHE=1` to bypass the cache. Environment variables named `OCIO` or
-//! `OCIO_*` are never passed to the oracle, so its results don't depend on the caller's
-//! environment.
+//! `OCIO_RS_ORACLE_NO_CACHE=1` to bypass the cache. Environment variables named `OCIO`,
+//! `OCIO_*` or `PYTHON*` are never passed to the oracle's processes ([`isolate`]), so their
+//! results and output don't depend on the caller's environment.
 //!
 //! Under Intel SDE (`scripts/sde.sh`), the test process and the oracle it starts both see the
 //! emulated CPU, so the wheel and the port dispatch to the SIMD kernels of that CPU.
@@ -147,25 +147,24 @@ impl Oracle {
         &self.python
     }
 
+    /// A command that runs the oracle environment's Python as the oracle runs: from the oracle's
+    /// directory, so `ocio_oracle` imports, in the caller's environment less what [`isolate`]
+    /// removes. Every process of the oracle starts this way.
+    pub fn command(&self) -> Command {
+        let mut command = Command::new(&self.python);
+        command.current_dir(paths::oracle_dir());
+        isolate(&mut command);
+        command
+    }
+
     /// Runs `script` in the oracle's environment, as the oracle runs (from its directory, so
     /// `ocio_oracle` imports, and without the caller's `OCIO` variables), with `args`, and
     /// returns the lines it prints. For tests that read the wheel independently of a command,
     /// or reach a check no request can. Panics if the script fails. Nothing is cached.
     #[track_caller]
     pub fn run_script(&self, script: &str, args: &[String]) -> Vec<String> {
-        let mut command = Command::new(&self.python);
-        command
-            .args(["-X", "utf8", "-c", script])
-            .args(args)
-            .current_dir(paths::oracle_dir())
-            .env("PYTHONDONTWRITEBYTECODE", "1")
-            .env_remove("PYTHONPATH");
-        for (key, _) in std::env::vars_os() {
-            let key_str = key.to_string_lossy();
-            if key_str == "OCIO" || key_str.starts_with("OCIO_") {
-                command.env_remove(&key);
-            }
-        }
+        let mut command = self.command();
+        command.args(["-X", "utf8", "-c", script]).args(args);
         let output = command.output().expect("the oracle's Python runs");
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(
@@ -288,61 +287,79 @@ impl Oracle {
     }
 
     fn run(&self, request: &[u8]) -> Result<Vec<u8>, String> {
-        let mut command = Command::new(&self.python);
-        command
-            .args(["-X", "utf8", "-m", "ocio_oracle"])
-            .current_dir(paths::oracle_dir())
-            .env("PYTHONDONTWRITEBYTECODE", "1")
-            .env_remove("PYTHONPATH")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        for (key, _) in std::env::vars_os() {
-            let key_str = key.to_string_lossy();
-            if key_str == "OCIO" || key_str.starts_with("OCIO_") {
-                command.env_remove(&key);
-            }
-        }
-        let mut child = command
-            .spawn()
-            .map_err(|e| format!("could not start {}: {e}", self.python.display()))?;
-
-        // Write on a separate thread so a large response can't deadlock a large request. Both
-        // directions move at most PIPE_PIECE bytes per call: on Windows, one pipe read or write
-        // of several megabytes can fail when the system is short of kernel memory, and a failed
-        // write left the oracle with an empty request ("EOFError: expected 4 bytes, got 0").
-        let mut stdin = child.stdin.take().expect("piped stdin");
-        let request_len = request.len();
-        let request = request.to_vec();
-        let writer = std::thread::spawn(move || -> std::io::Result<()> {
-            for piece in request.chunks(PIPE_PIECE) {
-                stdin.write_all(piece)?;
-            }
-            Ok(())
-        });
-        let stdout = read_in_pieces(&mut child.stdout.take().expect("piped stdout"))
-            .map_err(|e| format!("reading the oracle's response failed: {e}"))?;
-        let stderr = read_in_pieces(&mut child.stderr.take().expect("piped stderr"))
-            .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
-            .unwrap_or_default();
-        let status = child.wait().map_err(|e| e.to_string())?;
-        let written = writer
-            .join()
-            .unwrap_or_else(|_| Err(std::io::Error::other("the writer thread panicked")));
-        // The exit status says how the oracle died when it stopped reading early: under Intel
-        // SDE on Windows, it has exited mid-request without writing anything to stderr.
-        if let Err(e) = written {
-            return Err(format!(
-                "writing the {}-byte request to the oracle failed: {e}; the oracle exited with \
-                 {status}\n{stderr}",
-                request_len
-            ));
-        }
-        if !status.success() {
-            return Err(format!("oracle exited with {status}\n{stderr}"));
-        }
-        Ok(stdout)
+        let mut command = self.command();
+        command.args(["-X", "utf8", "-m", "ocio_oracle"]);
+        exchange(command, request)
     }
+}
+
+/// Removes from `command`'s environment the variables named `OCIO` or `OCIO_*`, which would
+/// change what OCIO does, and every `PYTHON*` variable, which would change what Python does or
+/// writes (`PYTHONPATH`, `PYTHONHOME`, `PYTHONVERBOSE`, `PYTHONWARNINGS`, ...); then sets
+/// `PYTHONDONTWRITEBYTECODE=1`, so the oracle leaves no `__pycache__` in the checkout.
+pub fn isolate(command: &mut Command) -> &mut Command {
+    for (key, _) in std::env::vars_os() {
+        let name = key.to_string_lossy();
+        if name == "OCIO" || name.starts_with("OCIO_") || name.starts_with("PYTHON") {
+            command.env_remove(&key);
+        }
+    }
+    command.env("PYTHONDONTWRITEBYTECODE", "1")
+}
+
+/// Starts `command`, writes `request` to its stdin, and returns its stdout once it exits
+/// successfully. Each pipe has its own thread or loop, so the process never waits on a full
+/// pipe: the request is written on a thread (a large response can't deadlock a large
+/// request), stderr is read on another (a process that writes more than a pipe holds to
+/// stderr before it closes stdout can't hang), and stdout is read here.
+fn exchange(mut command: Command, request: &[u8]) -> Result<Vec<u8>, String> {
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let program = command.get_program().to_string_lossy().into_owned();
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("could not start {program}: {e}"))?;
+
+    // Both directions move at most PIPE_PIECE bytes per call: on Windows, one pipe read or
+    // write of several megabytes can fail when the system is short of kernel memory, and a
+    // failed write left the oracle with an empty request ("EOFError: expected 4 bytes, got 0").
+    let mut stdin = child.stdin.take().expect("piped stdin");
+    let request_len = request.len();
+    let request = request.to_vec();
+    let writer = std::thread::spawn(move || -> std::io::Result<()> {
+        for piece in request.chunks(PIPE_PIECE) {
+            stdin.write_all(piece)?;
+        }
+        Ok(())
+    });
+    let mut stderr_pipe = child.stderr.take().expect("piped stderr");
+    let stderr_reader = std::thread::spawn(move || read_in_pieces(&mut stderr_pipe));
+    let stdout = read_in_pieces(&mut child.stdout.take().expect("piped stdout"));
+    let stderr = stderr_reader
+        .join()
+        .ok()
+        .and_then(Result::ok)
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+        .unwrap_or_default();
+    let status = child.wait().map_err(|e| e.to_string())?;
+    let stdout = stdout.map_err(|e| format!("reading the oracle's response failed: {e}"))?;
+    let written = writer
+        .join()
+        .unwrap_or_else(|_| Err(std::io::Error::other("the writer thread panicked")));
+    // The exit status says how the oracle died when it stopped reading early: under Intel
+    // SDE on Windows, it has exited mid-request without writing anything to stderr.
+    if let Err(e) = written {
+        return Err(format!(
+            "writing the {request_len}-byte request to the oracle failed: {e}; the oracle \
+             exited with {status}\n{stderr}"
+        ));
+    }
+    if !status.success() {
+        return Err(format!("oracle exited with {status}\n{stderr}"));
+    }
+    Ok(stdout)
 }
 
 /// The most bytes one read or write moves through a pipe to or from the oracle.
@@ -365,7 +382,7 @@ fn read_in_pieces(stream: &mut impl Read) -> std::io::Result<Vec<u8>> {
 /// Whether `python` exists and starts.
 fn python_runs(python: &Path) -> bool {
     python.is_file()
-        && Command::new(python)
+        && isolate(&mut Command::new(python))
             .args(["-c", "pass"])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -623,6 +640,25 @@ pub fn bytes_to_f32(bytes: &[u8]) -> Vec<f32> {
 
 #[cfg(test)]
 mod tests {
+    /// A process that writes more to stderr than a pipe holds before it closes stdout still
+    /// gives its stdout back: stderr is drained while stdout is read.
+    #[test]
+    fn a_large_stderr_does_not_block_the_exchange() {
+        let mut command = super::Oracle::get().command();
+        command.args([
+            "-c",
+            "import sys\n\
+             request = sys.stdin.buffer.read()\n\
+             sys.stderr.write('e' * (1 << 20))\n\
+             sys.stderr.flush()\n\
+             sys.stdout.buffer.write(request[::-1])\n",
+        ]);
+        let request: Vec<u8> = (0..=255u8).cycle().take(200_000).collect();
+        let stdout = super::exchange(command, &request).expect("the exchange");
+        let reversed: Vec<u8> = request.iter().rev().copied().collect();
+        assert_eq!(stdout, reversed);
+    }
+
     use super::*;
 
     /// A batch in which a call raised is never cached, and never replayed from the cache: the
