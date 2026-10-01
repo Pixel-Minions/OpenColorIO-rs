@@ -456,7 +456,7 @@ path = "src/OpenColorIO/OpOptimizers.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/op_optimizers.rs"]
 status = "partial"
-note = "1.2c: FinalizeOps (132-139) and OpRcPtrVec::finalize (598-609); the optimizer is WP 1.6"
+note = "1.2c: FinalizeOps (132-139) and OpRcPtrVec::finalize (598-609); 1.2d (the owner's Option A): the optimizer's core, optimize (the pass loop, RemoveNoOpTypes, RemoveDynamicProperties, RemoveNoOps, ReplaceOps, ReplaceIdentityOps, RemoveInverseOps, CombineOps, IsPairInverseEnabled, IsCombineEnabled, the debug log) and optimizeForBitdepth (the clamp identities, FindSeparablePrefix). p1-optimizer (WP 2.5): the LUT arms of ReplaceInverseLuts, RemoveInverseOps and FindSeparablePrefix, and OptimizeSeparablePrefix's Lut1D bake, which the port refuses until then"
 
 [[file]]
 path = "src/OpenColorIO/ParseUtils.cpp"
