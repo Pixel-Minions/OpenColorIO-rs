@@ -1114,13 +1114,15 @@ status = "todo"
 path = "src/OpenColorIO/ops/cdl/CDLOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/cdl/cdl_op_cpu.rs"]
-status = "todo"
+status = "done"
+note = "1.3c2: RenderParams, the 4 scalar and 4 SSE2 (fast-math) renderers, GetCDLCPURenderer; bit-exact against the wheel through tests/cdl_oracle.rs, alpha passed through"
 
 [[file]]
 path = "src/OpenColorIO/ops/cdl/CDLOpCPU.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/cdl/cdl_op_cpu.rs"]
-status = "todo"
+status = "done"
+note = "1.3c2: RenderParams, the 4 scalar and 4 SSE2 (fast-math) renderers, GetCDLCPURenderer; bit-exact against the wheel through tests/cdl_oracle.rs, alpha passed through"
 
 [[file]]
 path = "src/OpenColorIO/ops/cdl/CDLOpData.cpp"

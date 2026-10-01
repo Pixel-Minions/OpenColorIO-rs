@@ -3,6 +3,7 @@
 
 //! The CDL op family: a port of `src/OpenColorIO/ops/cdl/` @ v2.5.2.
 
+pub mod cdl_op_cpu;
 pub mod cdl_op_data;
 
 pub use cdl_op_data::{CdlOpData, CdlOpStyle, ChannelParams};
