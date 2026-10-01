@@ -1606,13 +1606,15 @@ status = "todo"
 path = "src/OpenColorIO/ops/log/LogOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/log/log_op.rs"]
-status = "todo"
+status = "partial"
+note = "1.3l3: the op, CreateLogOp, the Log arm of CreateOpVecFromOpData; cache IDs, the optimizer's inverse pairs and pixels against the wheel (tests/log_op_oracle.rs). BuildLogOp and CreateLogTransform come with the transforms (WP 1.8), extractGpuShaderInfo with 1.3l4"
 
 [[file]]
 path = "src/OpenColorIO/ops/log/LogOp.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/log/log_op.rs"]
-status = "todo"
+status = "partial"
+note = "1.3l3: CreateLogOp; CreateLogTransform comes with the transforms (WP 1.8)"
 
 [[file]]
 path = "src/OpenColorIO/ops/log/LogOpCPU.cpp"
@@ -4705,7 +4707,8 @@ status = "done"
 path = "tests/cpu/ops/log/LogOp_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/log/log_op_tests.rs"]
-status = "todo"
+status = "partial"
+note = "lin_to_log, log_to_lin, inverse, cache_id; create_transform needs CreateLogTransform (WP 1.8)"
 
 [[file]]
 path = "tests/cpu/ops/log/LogUtils_tests.cpp"
