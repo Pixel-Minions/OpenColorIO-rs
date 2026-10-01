@@ -23,9 +23,10 @@ Checking and landing chunks:
   gate [--staged] [--crates a,b] [--release] [--rocky] [--quick|--full]
                               fmt, clippy, ci and tests, stopping at the first failure;
                               logs in target/gate-logs/ (`cargo xtask gate --help`)
-  land <branch> [--no-rocky]  replay <branch> onto phase0 gating every commit (Rocky Linux 9
-                              too), merge it with --no-ff, regenerate the generated files,
-                              gate the result and fast-forward phase0; never pushes
+  land <branch> [--no-rocky]  replay <branch> onto phase0 gating every commit (debug, this
+                              platform), merge it with --no-ff, regenerate the generated
+                              files, gate the result fully (release, Rocky Linux 9) and
+                              fast-forward phase0; never pushes
                               (`cargo xtask land --help`)
   clean-scratch [--yes] [--unlabelled]
                               list, and with --yes delete: target/verify* in every
