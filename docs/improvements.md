@@ -250,6 +250,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   port calls the platform's functions, as OCIO does). The review suspects these values may also
   depend on the CPU (SIMD renderers, glibc's ifunc variants). If so, their checks belong in
   `cpu-tests`.
+
 ## Ops
 
 ### I-40. A file no-op has no cache ID
@@ -264,6 +265,72 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Who notices:** people reading OCIO's debug log.
 - **A fix:** return the path, as `LookNoOp` returns the look.
 - **Status:** matched in `p1-engine` (1.2c).
+
+### I-42. Matrix renderers' NaNs depend on the platform and, on Windows, on the pixel's position
+
+- **Upstream:** the Matrix renderers (`ops/matrix/MatrixOpCPU.cpp`) multiply and add the
+  pixel's values with the matrix's. Where two NaNs meet in a product or a sum, x86 returns the
+  first operand's, and the two compilers ordered the operands differently: GCC computes
+  `(b*m2 + a*m3) + (r*m0 + g*m1)` (Linux wheel 0x4e4140, 0x4e40c0), MSVC
+  `(a*m3 + b*m2) + (g*m1 + r*m0)` in its four-pixel loop (Windows wheel 0x1802b24f4,
+  0x1802b26b4) and `(g*m1 + r*m0) + (a*m3 + b*m2)` in the loop that finishes the last
+  `numPixels % 4` pixels (0x1802b260b, 0x1802b27db). `ScaleRenderer` and
+  `ScaleWithOffsetRenderer` compute blue as `in * scale` everywhere except MSVC's remainder
+  loop, which computes `scale * in` (0x1802b29c2, 0x1802b2be4). So the NaN a pixel gets depends
+  on the platform and, on Windows, on where the pixel sits in its row.
+- **Who notices:** images with NaN pixels through a matrix with NaN or infinite coefficients;
+  the NaN's sign and payload differ.
+- **A fix:** one operand order for every platform and loop.
+- **Status:** matched in `p1-engine` (1.3m2), each wheel's order per platform and loop.
+
+### I-43. Inverting a matrix flips a NaN offset's sign on Linux only
+
+- **Upstream:** `MatrixOpData::getAsForward` negates the inverse's offsets with
+  `invOffsets.scale(-1.)` (`ops/matrix/MatrixOpData.cpp`). MSVC multiplies by -1 (Windows
+  wheel 0x1802b3b5f, `mulpd`), which keeps a NaN's sign; GCC folds `x * -1.0` into a negation
+  (Linux wheel 0x4e8303, `xorpd` with -0.0), which flips it. Every other value gives the same
+  bits.
+- **Who notices:** inverse matrices whose offsets come out NaN: the NaN's sign, in the cache
+  ID and the pixels, differs between Windows and Linux.
+- **A fix:** negate on both, or multiply on both.
+- **Status:** matched in `p1-engine` (1.3m1), each wheel's operation.
+
+### I-44. Inverting a matrix orders its NaNs per platform
+
+- **Upstream:** `MatrixArray::inverse` (Imath's Gauss-Jordan elimination,
+  `ops/matrix/MatrixOpData.cpp`) subtracts `f * t[..]` in each step. MSVC keeps the source's
+  `f * x` (Windows wheel 0x1802b4758); GCC computes `x * f`, except for the last product of
+  each step, whose register it reuses (Linux wheel, its 9 unrolled steps, e.g. 0x4e673e and
+  0x4e67de). When both are NaN, the first operand's NaN comes out.
+- **Who notices:** inverse matrices with NaN coefficients: the inverse's NaNs, in the cache
+  ID and the pixels, differ between Windows and Linux.
+- **A fix:** one operand order for both platforms.
+- **Status:** matched in `p1-engine` (1.3m1), each wheel's order.
+
+### I-45. Optimization flags are 32 bits on Windows and 64 on Linux
+
+- **Upstream:** `OptimizationFlags` is an `enum : unsigned long`
+  (`include/OpenColorIO/OpenColorTypes.h:634`), 32 bits with MSVC and 64 with GCC. The binding
+  converts a Python integer to it: on Linux `OptimizationFlags(2**32 + 1)` is accepted, and the
+  CPU processor's cache ID prints `oFlags 4294967297`; on Windows the same call raises
+  `TypeError`.
+- **Who notices:** callers passing flags above bit 31, which no flag uses.
+- **A fix:** a 32-bit type on every platform, or refusing unknown bits.
+- **Status:** matched in `p1-engine` (1.2d): the port's `OptimizationFlags` holds a
+  `c_ulong`.
+
+### I-46. The optimizer stops after 81 passes, and logs its cap at exactly 80
+
+- **Upstream:** `OpRcPtrVec::optimize` (`OpOptimizers.cpp:628-735`) loops
+  `while (passes <= MAX_OPTIMIZATION_PASSES)`, with `MAX_OPTIMIZATION_PASSES = 80`, so it makes
+  up to 81 passes, and then logs "The max number of passes, 80, was reached" only when
+  `passes == 80`: when the 81st pass found nothing left to do, not when the cap stopped it.
+  Seen through the wheel with the default optimization: lists of 80, 81 and 82 Matrix ops
+  keep one op, 83 keep two, 84 three and 90 nine, and the message appears at 81 ops only.
+- **Who notices:** very long lists of ops that combine one pair per pass; people reading the
+  debug log.
+- **A fix:** stop at 80 passes, and log when the cap stops the loop.
+- **Status:** matched in `p1-engine` (1.2d).
 
 ## Transforms
 
