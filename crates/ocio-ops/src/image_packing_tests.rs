@@ -85,6 +85,36 @@ fn a_scanline_reaching_past_the_buffer_is_refused() {
     assert!(bytes.iter().all(|&b| b == 0xa5), "nothing is written");
 }
 
+/// The run check's bounds, exactly (U-15), as the D-2 tests check the descriptions': a run of
+/// 4 items that starts at the buffer's first byte and ends at its last is inside; the same run
+/// one item earlier, one byte earlier or later, or in a buffer one byte short, is not. Left to
+/// right and right to left, for 1- and 4-byte channels.
+#[test]
+fn a_run_is_inside_up_to_the_buffers_bounds() {
+    let at = |offset: isize| [Some((0, offset)), None, None, None];
+    for size in [1usize, 4] {
+        let s = size as isize;
+        let exact = |_: usize| 4 * size;
+        let short = |_: usize| 4 * size - 1;
+
+        // Left to right: the first item at byte 0, the last ending at byte 4 * size.
+        assert!(run_is_inside(&at(0), s, 4, size, exact));
+        assert!(!run_is_inside(&at(0), s, 4, size, short));
+        assert!(!run_is_inside(&at(-s), s, 4, size, exact));
+        assert!(!run_is_inside(&at(-1), s, 4, size, exact));
+        assert!(!run_is_inside(&at(1), s, 4, size, exact));
+
+        // Right to left: the first item is the last in memory.
+        assert!(run_is_inside(&at(3 * s), -s, 4, size, exact));
+        assert!(!run_is_inside(&at(3 * s), -s, 4, size, short));
+        assert!(!run_is_inside(&at(2 * s), -s, 4, size, exact));
+        assert!(!run_is_inside(&at(3 * s - 1), -s, 4, size, exact));
+        assert!(!run_is_inside(&at(3 * s + 1), -s, 4, size, exact));
+    }
+    // No item: nothing to reach.
+    assert!(run_is_inside(&at(-1), 4, 0, 4, |_| 0));
+}
+
 #[test]
 fn a_scanline_inside_the_buffer_is_written_where_its_index_says() {
     // A top-down F32 plane of 4 by 2 pixels, from pixel 2 of row 0: upstream writes pixels 2

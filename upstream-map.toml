@@ -532,7 +532,7 @@ path = "src/OpenColorIO/ScanlineHelper.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/scanline_helper.rs"]
 status = "done"
-note = "1.1e, checked against the wheel through image_apply (tests/scanline_helper_oracle.rs: RGBA-packed and other layouts, from one image to another and in place, every bit depth pair, and the init errors). The port processes every row in its scratch row, where upstream processes a packed RGBA F32 destination in its own memory; processing in the image is Phase 8. Very wide and very tall images follow the general rule (U-3)"
+note = "1.1e, checked against the wheel through image_apply (tests/scanline_helper_oracle.rs: RGBA-packed and other layouts, from one image to another and in place, every bit depth pair, and the init errors). As upstream, an RGBA-packed F32 destination is processed in its own memory, and the scratch rows are sized only where upstream sizes them; the rows of RGBA-packed images are read and written through typed views, with a copy only for a row that isn't aligned for its channel type. Very wide and very tall images follow the general rule (U-3)"
 
 [[file]]
 path = "src/OpenColorIO/ScanlineHelper.h"
