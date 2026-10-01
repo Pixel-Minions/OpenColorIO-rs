@@ -261,10 +261,46 @@ fn queries_of_an_unvalidated_3x3_matrix_are_errors() {
         crate::op::serialize_op_vec(&ops, 0).unwrap_err().message(),
         message
     );
+    // The renderers read the 16 values too.
+    let renderer_error = |r: Result<_>| match r {
+        Ok(_) => panic!("a renderer for an unvalidated 3x3 matrix"),
+        Err(e) => crate::exception::Exception::message(&e).to_string(),
+    };
+    assert_eq!(renderer_error(ops[0].get_cpu_op(false)), message);
+    assert_eq!(renderer_error(ops[0].get_cpu_op(true)), message);
+    let mut pixel = [0.5f32, 0.25, 0.125, 1.0];
+    assert_eq!(ops[0].apply(&mut pixel).unwrap_err().message(), message);
+    let mut out = [0.0f32; 4];
+    assert_eq!(
+        ops[0].apply_in_out(&pixel, &mut out).unwrap_err().message(),
+        message
+    );
 
     ops[0].validate().unwrap();
     assert!(ops[0].is_no_op().unwrap());
     assert!(!ops[0].get_cache_id().unwrap().is_empty());
+    assert!(ops[0].get_cpu_op(false).unwrap().is_some());
+}
+
+/// A 3x3 matrix with offsets, before validation: `isIdentity` returns false on the offsets
+/// before `hasAlpha` reads past the 9 values (MatrixOpData.cpp:534-539 @ v2.5.2), so the
+/// query answers (docs/improvements.md, U-16), and so does `isNoOp`.
+#[test]
+fn an_unvalidated_3x3_matrix_with_offsets_is_not_an_identity() {
+    let mut data = MatrixOpData::new();
+    data.get_array_mut().resize(3, 3);
+    data.get_array_mut()
+        .get_values_mut()
+        .copy_from_slice(&[1., 0., 0., 0., 1., 0., 0., 0., 1.]);
+    data.set_offset_value(0, 0.5).unwrap();
+    assert!(data.has_alpha().is_err());
+    assert!(!data.is_identity().unwrap());
+    assert!(!data.is_no_op().unwrap());
+
+    let mut ops = OpVec::new();
+    create_matrix_op(&mut ops, data, TransformDirection::Forward);
+    assert!(!ops[0].is_identity().unwrap());
+    assert!(!ops[0].is_no_op().unwrap());
 }
 
 /// `OCIO_CHECK_CLOSE(expected[i], tmp[i], error)` for every value, in `float`.
@@ -906,6 +942,12 @@ fn has_channel_crosstalk() {
     assert!(ops[1].has_channel_crosstalk());
 }
 
+/// `CreateIdentityMatrixOp(ops, direction)` makes an identity Matrix op in the direction it is
+/// given (src/OpenColorIO/ops/matrix/MatrixOp.cpp:282-294 @ v2.5.2).
+///
+/// Hand-derived: nothing upstream calls this overload, neither the library nor its tests, so
+/// no output of the wheel shows it and no upstream test checks it. The expected values are what
+/// the code above says: the direction passed, and an identity matrix, which `isNoOp` finds.
 #[test]
 fn the_identity_op_in_a_direction() {
     let mut ops = OpVec::new();
