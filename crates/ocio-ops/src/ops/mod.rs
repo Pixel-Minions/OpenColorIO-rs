@@ -10,4 +10,5 @@ pub mod lut3d;
 pub mod matrix;
 pub mod noop;
 pub mod op_array;
+pub mod range;
 pub mod reference;
