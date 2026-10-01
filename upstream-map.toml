@@ -1343,14 +1343,14 @@ path = "src/OpenColorIO/ops/gamma/GammaOpUtils.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_utils.rs"]
 status = "done"
-note = "S2"
+note = "S2; ComputeParamsFwd/Rev refuse short parameters (U-24)"
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOpUtils.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_utils.rs"]
 status = "done"
-note = "S2"
+note = "S2; ComputeParamsFwd/Rev refuse short parameters (U-24)"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradinghuecurve/GradingHueCurve.cpp"

@@ -12,7 +12,7 @@ fn compute_params_forward() {
     // `{ 2.0f, 0.1f }`: float literals in a vector of doubles.
     let g_params: Params = vec![f64::from(2.0f32), f64::from(0.1f32)];
 
-    let r_params = compute_params_fwd(&std::hint::black_box(g_params));
+    let r_params = compute_params_fwd(&std::hint::black_box(g_params)).unwrap();
 
     assert_eq!(r_params.gamma, 2.0f32);
     assert_eq!(r_params.offset, (0.1f64 / (1.0 + 0.1)) as f32);
@@ -27,7 +27,7 @@ fn compute_params_forward() {
 fn compute_params_reverse() {
     let g_params: Params = vec![f64::from(2.0f32), f64::from(0.1f32)];
 
-    let r_params = compute_params_rev(&std::hint::black_box(g_params));
+    let r_params = compute_params_rev(&std::hint::black_box(g_params)).unwrap();
 
     assert_eq!(r_params.gamma, 0.5f32);
     assert_eq!(r_params.offset, 0.1f32);
@@ -39,4 +39,17 @@ fn compute_params_reverse() {
         1e-7f32
     ));
     assert!(equal_with_abs_error(r_params.slope, 3.02499986f32, 1e-7f32));
+}
+
+/// Where upstream would read past the parameters (`p[0]` and `p[1]`), the port returns an
+/// error instead (`docs/improvements.md` U-24).
+#[test]
+fn short_parameters_are_errors() {
+    use crate::ops::gamma::gamma_op_data::SHORT_PARAMS;
+    for p in [vec![], vec![2.0]] {
+        assert_eq!(compute_params_fwd(&p).unwrap_err().message(), SHORT_PARAMS);
+        assert_eq!(compute_params_rev(&p).unwrap_err().message(), SHORT_PARAMS);
+    }
+    assert!(compute_params_fwd(&vec![2.0, 0.1, 7.0]).is_ok());
+    assert!(compute_params_rev(&vec![2.0, 0.1, 7.0]).is_ok());
 }

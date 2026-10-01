@@ -274,8 +274,8 @@ impl Family for ExponentWithLinearFamily {
         let data = exponent_with_linear_op(p.gamma, p.offset, p.style, port_direction(dir));
         let mut points = vec![0.0f32];
         for params in data.all_params() {
-            points.push(compute_params_fwd(params).break_pnt);
-            points.push(compute_params_rev(params).break_pnt);
+            points.push(compute_params_fwd(params).unwrap().break_pnt);
+            points.push(compute_params_rev(params).unwrap().break_pnt);
         }
         points
     }

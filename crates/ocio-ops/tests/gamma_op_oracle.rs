@@ -348,31 +348,39 @@ fn the_cache_id_matches_the_wheel() {
     );
 }
 
-/// Whether `chain` holds the one Gamma case whose NaNs the two wheels order differently: a
-/// NaN parameter of a forward linear moncurve, rendered without fast math
-/// (`OPTIMIZATION_FAST_LOG_EXP_POW`), where GCC multiplies `scale * pixel` and MSVC
-/// `pixel * scale` (`GammaMoncurveOpCPUFwd`; see `tests/gamma_oracle.rs`, which compares it
-/// under waiver W0002, the only place W0002 may be used). Those pixels are left out here; the
-/// ones with fast math, and the cache ID, are compared.
-fn under_w0002(chain: &[T]) -> bool {
-    chain.iter().any(|t| {
-        matches!(t, T::Lin(g, o, Linear, F)
+/// Whether the pixels of `chain` rendered with `flags` fall under waiver W0002, and so are left
+/// out here: exactly the cases with a NaN parameter in a forward linear moncurve
+/// (`ExponentWithLinearTransform`, `NEGATIVE_LINEAR`, forward) rendered without fast math
+/// (`OPTIMIZATION_FAST_LOG_EXP_POW` off). There GCC multiplies `scale * pixel` and MSVC
+/// `pixel * scale` (`GammaMoncurveOpCPUFwd`), so a NaN pixel meeting a NaN coefficient comes
+/// out differently on Linux and Windows. Those cases are compared in the battery of
+/// `tests/gamma_oracle.rs` under W0002, the only place W0002 may apply. The same chains with
+/// fast math, and their cache IDs, are compared here bit for bit.
+fn under_w0002(chain: &[T], flags: OptimizationFlags) -> bool {
+    !flags.has_flag(OptimizationFlags::FAST_LOG_EXP_POW)
+        && chain.iter().any(|t| {
+            matches!(t, T::Lin(g, o, Linear, F)
             if g.iter().chain(o).any(|v| v.is_nan()))
-    })
+        })
 }
 
 #[test]
 fn the_pixels_match_the_wheel() {
     let flags = flags();
     let mut cases = Vec::new();
+    let mut waived = 0;
     for chain in chains() {
         for (f, (_, flag)) in flags.iter().enumerate() {
-            let fast = flag.has_flag(OptimizationFlags::FAST_LOG_EXP_POW);
-            if fast || !under_w0002(&chain) {
+            if under_w0002(&chain, *flag) {
+                waived += 1;
+            } else {
                 cases.push((chain.clone(), f));
             }
         }
     }
+    // One chain (a NaN gamma and a NaN offset, linear, forward) at the 6 settings without fast
+    // math: NONE, LOSSLESS, and the Gamma flags alone and together.
+    assert_eq!(waived, 6, "the W0002 cases left out");
     let shape = common::image::PACKED_SHAPES[0];
     let requests: Vec<Request> = cases
         .iter()
