@@ -436,14 +436,14 @@ path = "src/OpenColorIO/Op.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/op.rs", "crates/ocio-ops/src/op_data.rs"]
 status = "partial"
-note = "1.2c: OpCPU's defaults, OpData, GetTypeName, Op, OpRcPtrVec (as OpVec), SerializeOpVec and CreateOpVecFromOpData, with each family's arms added with the family; Op::getIdentityReplacement comes with the Matrix op"
+note = "1.2c: OpCPU's defaults, OpData, GetTypeName, Op, OpRcPtrVec (as OpVec), SerializeOpVec and CreateOpVecFromOpData, with each family's arms added with the family; the Matrix op (before 1.2d): its arms, Op::getIdentityReplacement and OpData::getIdentityReplacement (an identity Matrix op; the Range branch and the overrides that return a range come with their families)"
 
 [[file]]
 path = "src/OpenColorIO/Op.h"
 kind = "src"
 target = ["crates/ocio-ops/src/op.rs", "crates/ocio-ops/src/op_data.rs"]
 status = "partial"
-note = "S2, 1.1d: OpCPU (as the CpuOp trait, with the typed apply_bit_depth); 1.2c: OpData (an enum with a variant per family), Op, OpRcPtrVec (as OpVec); not yet: Op::getIdentityReplacement (Matrix op), dumpMetadata (WP 1.8), optimize and optimizeForBitdepth (WP 1.6), HasFlag (1.2d)"
+note = "S2, 1.1d: OpCPU (as the CpuOp trait, with the typed apply_bit_depth); 1.2c: OpData (an enum with a variant per family), Op, OpRcPtrVec (as OpVec); getIdentityReplacement with the Matrix op; not yet: dumpMetadata (WP 1.8), optimize and optimizeForBitdepth (WP 1.6), HasFlag (1.2d)"
 
 [[file]]
 path = "src/OpenColorIO/OpBuilders.h"
@@ -1866,13 +1866,15 @@ status = "todo"
 path = "src/OpenColorIO/ops/matrix/MatrixOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/matrix/matrix_op.rs"]
-status = "todo"
+status = "partial"
+note = "p1-engine, before 1.2d: MatrixOffsetOp's methods (clone, getInfo, isSameType, isInverse, canCombineWith, combineWith, finalize, getCacheID, getCPUOp; the op is OpData::Matrix), CreateMatrixOp(ops, MatrixOpDataRcPtr, direction) and CreateIdentityMatrixOp(ops). 1.3m3 (p1-matrix): the factories from values (CreateScaleOp, CreateMatrixOp(m44), CreateOffsetOp, CreateScaleOffsetOp, CreateSaturationOp, CreateMatrixOffsetOp, CreateFitOp, CreateIdentityMatrixOp(ops, direction), CreateMinMaxOp, CreateMatrixOp(MatrixArrayPtr)), the MatrixOffsetOp(m44, offset4, direction) constructor and CreateMatrixTransform; extractGpuShaderInfo is 1.3m4's"
 
 [[file]]
 path = "src/OpenColorIO/ops/matrix/MatrixOp.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/matrix/matrix_op.rs"]
-status = "todo"
+status = "partial"
+note = "see MatrixOp.cpp"
 
 [[file]]
 path = "src/OpenColorIO/ops/matrix/MatrixOpCPU.cpp"
