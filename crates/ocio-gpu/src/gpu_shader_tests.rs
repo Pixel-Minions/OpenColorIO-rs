@@ -347,3 +347,70 @@ fn a_texture_float_count_wraps_at_2_to_the_32() {
     .unwrap();
     check_equal(desc.texture(1).unwrap().values(), &values[..]);
 }
+
+/// A uniform whose name is taken, by a uniform of any type, is not added: `addUniform`
+/// returns false before it moves the buffer (`if (uniformNameUsed(name)) return false;`,
+/// GpuShader.cpp:380-449 @ v2.5.2). Upstream's tests add one uniform only, and the wheel's
+/// processors never add a name twice, so this follows upstream's code.
+#[test]
+fn a_uniform_whose_name_is_taken_is_not_added() {
+    let mut desc = GpuShaderDesc::default();
+    let size: Getter<i32> = Arc::new(|| 1);
+    let floats: Getter<Vec<f32>> = Arc::new(Vec::new);
+    let ints: Getter<Vec<i32>> = Arc::new(Vec::new);
+    let double: Getter<f64> = Arc::new(|| 0.5);
+    let boolean: Getter<bool> = Arc::new(|| true);
+    let float3: Getter<[f32; 3]> = Arc::new(|| [1.0, 2.0, 3.0]);
+    let names = ["d", "b", "f", "v", "i"];
+    let add = |desc: &mut GpuShaderDesc, kind: usize, name: &str| match kind {
+        0 => desc.add_uniform_double(name, double.clone()),
+        1 => desc.add_uniform_bool(name, boolean.clone()),
+        2 => desc.add_uniform_float3(name, float3.clone()),
+        3 => desc.add_uniform_vector_float(name, size.clone(), floats.clone(), 3),
+        _ => desc.add_uniform_vector_int(name, size.clone(), ints.clone(), 5),
+    };
+    for (kind, name) in names.iter().enumerate() {
+        check_equal(add(&mut desc, kind, name).unwrap(), true);
+    }
+    let buffer_size = desc.uniform_buffer_size();
+    for kind in 0..names.len() {
+        for name in names {
+            check_equal(add(&mut desc, kind, name).unwrap(), false);
+            check_equal(desc.num_uniforms(), 5);
+            check_equal(desc.uniform_buffer_size(), buffer_size);
+        }
+    }
+    // Only the C string counts: the name ends at a NUL.
+    check_equal(add(&mut desc, 0, "d\0x").unwrap(), false);
+    check_equal(desc.num_uniforms(), 5);
+}
+
+/// An empty uniform name is refused by the `Uniform` constructor
+/// (GpuShader.cpp:178-185 @ v2.5.2), which `addUniform` calls after it aligns the buffer
+/// (`m_uniformBufferSize = alignOffset(...)`, lines 387, 400, 413, 429 and 445): the refused
+/// uniform still aligns the buffer, here to `GPU_ARRAY_ALIGNMENT`, 16 (line 59), after a
+/// double's 4 bytes (`GPU_FLOAT_SIZE`, line 53).
+#[test]
+fn an_empty_uniform_name_is_refused_after_the_buffer_is_aligned() {
+    let mut desc = GpuShaderDesc::default();
+    desc.add_uniform_double("d", Arc::new(|| 0.5)).unwrap();
+    check_equal(desc.uniform_buffer_size(), 4);
+    check_equal(
+        desc.add_uniform_vector_float("", Arc::new(|| 1), Arc::new(Vec::new), 3)
+            .unwrap_err()
+            .message(),
+        "The dynamic property name is invalid.",
+    );
+    check_equal(desc.num_uniforms(), 1);
+    check_equal(desc.uniform_buffer_size(), 16);
+    // A name that is empty as a C string is refused too.
+    check_equal(
+        desc.add_uniform_double("\0d", Arc::new(|| 0.5))
+            .unwrap_err()
+            .message(),
+        "The dynamic property name is invalid.",
+    );
+    check_equal(desc.uniform_buffer_size(), 16);
+    desc.add_uniform_bool("b", Arc::new(|| true)).unwrap();
+    check_equal(desc.uniform(1).unwrap().buffer_offset(), 16);
+}

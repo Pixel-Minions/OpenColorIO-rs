@@ -598,8 +598,9 @@ struct WrapperCase {
 /// - its footer, after everything before it, is the whole text.
 ///
 /// In MSL, the declarations follow the class's constructor and the empty line after it; in
-/// OSL, the shader's opening brace. A class name starting with a digit raises the wheel's
-/// error (that name has no double underscore, so the request's names are the getters').
+/// OSL, the shader's opening brace. A class name starting with a digit (0, 1 or 9) raises the
+/// wheel's error (that name has no double underscore, so the request's names are the
+/// getters').
 #[test]
 fn wrappers_write_the_wheels_shaders() {
     let none =
@@ -698,6 +699,8 @@ fn wrappers_write_the_wheels_shaders() {
             Some("p\nx"),
         ),
         ("a prefix starting with a digit", Some("9x"), None, None),
+        ("a prefix starting with a 0", Some("0x"), None, None),
+        ("a prefix starting with a 1", Some("1"), None, None),
     ];
     let osl_names: Vec<Names> = vec![
         ("the defaults", None, None, None),
