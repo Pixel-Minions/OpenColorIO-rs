@@ -373,7 +373,29 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
     which it processes in its own memory.
 - **Decided** (general rule): the port gives the wheel's messages where the wheel raises, and an
   error where it would overrun.
-- **Status:** to be matched in `p1-bitdepth` (1.1e).
+- **Status:** matched in `p1-bitdepth` (1.1e), in `crates/ocio-ops/src/scanline_helper.rs`:
+  - where upstream's resize gets a negative size, `init` raises the C++ library's
+    `std::length_error`: "vector too long" on Windows, "vector::_M_default_append" on Linux
+    (where a C `long` wraps from a width of 2^61);
+  - where upstream's RGBA row is empty and the source is packed channel by channel, the first
+    row raises "Invalid output image buffer" (with a period for F32 sources);
+  - where upstream would write outside its rows, the first row returns "ScanlineHelper Error:
+    The image is too wide: 4 * width overflows the scanline buffers.";
+  - after row 2^31 - 1 (Linux only: a Windows `long` can't count more rows), a source packed
+    channel by channel raises "Invalid output image position.", as upstream's does, and an
+    RGBA-packed one returns "ScanlineHelper Error: The image is too tall: the scanline index
+    overflows.". With a y stride of 0, upstream reads the same row again instead, and never
+    stops, since the negative index never reaches the height; the error is right there too;
+  - the port sizes the rows upstream sizes, in its order, and raises `std::length_error` past
+    libstdc++'s `max_size()` ("vector::_M_default_append" on Linux; a Windows `long` can't
+    reach MSVC's, whose message is "vector too long") and `std::bad_alloc` where the memory
+    can't be had ("std::bad_alloc" on Linux, "bad allocation" in MSVC's library, which both
+    modules of the Windows wheel hold), instead of aborting. It sizes rows of its own only for
+    the rows of RGBA-packed images that aren't aligned for their channel type, which upstream
+    reads and writes in place; so there, and only there, it may raise `std::bad_alloc` where
+    upstream wouldn't.
+  The oracle refuses these sizes, so `scanline_helper_tests.rs` defines the behaviour.
+
 ### U-4. A Python logging function crashes the interpreter's exit
 
 - **Upstream:** a logging function set from Python is held in a C++ global
@@ -425,39 +447,6 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   the scope: 1.7d for the wrapper, 1.7e for the uid.
 - **Status:** to be matched in `p1-gpu-infra`. The oracle refuses these MSL prefixes
   (`gpu_shader`, `_check_names`).
-- **Status:** matched in `p1-bitdepth` (1.1e), in `crates/ocio-ops/src/scanline_helper.rs`:
-  - where upstream's resize gets a negative size, `init` raises the C++ library's
-    `std::length_error`: "vector too long" on Windows, "vector::_M_default_append" on Linux
-    (where a C `long` wraps from a width of 2^61);
-  - where upstream's RGBA row is empty and the source is packed channel by channel, the first
-    row raises "Invalid output image buffer" (with a period for F32 sources);
-  - where upstream would write outside its rows, the first row returns "ScanlineHelper Error:
-    The image is too wide: 4 * width overflows the scanline buffers.";
-  - after row 2^31 - 1 (Linux only: a Windows `long` can't count more rows), a source packed
-    channel by channel raises "Invalid output image position.", as upstream's does, and an
-    RGBA-packed one returns "ScanlineHelper Error: The image is too tall: the scanline index
-    overflows.". With a y stride of 0, upstream reads the same row again instead, and never
-    stops, since the negative index never reaches the height; the error is right there too;
-  - the port sizes the rows upstream sizes, in its order, and raises `std::length_error` past
-    libstdc++'s `max_size()` ("vector::_M_default_append" on Linux; a Windows `long` can't
-    reach MSVC's, whose message is "vector too long") and `std::bad_alloc` where the memory
-    can't be had ("std::bad_alloc" on Linux, "bad allocation" in MSVC's library, which both
-    modules of the Windows wheel hold), instead of aborting. It sizes rows of its own only for
-    the rows of RGBA-packed images that aren't aligned for their channel type, which upstream
-    reads and writes in place; so there, and only there, it may raise `std::bad_alloc` where
-    upstream wouldn't.
-  The oracle refuses these sizes, so `scanline_helper_tests.rs` defines the behaviour.
-
-### U-4. A Python logging function crashes the interpreter's exit
-
-- **Upstream:** a logging function set from Python is held in a C++ global
-  (`Logging.cpp:71`), which outlives the Python interpreter. A process that exits with one
-  still set crashes (a segmentation fault on both platforms, seen through the wheel in
-  `p1-foundations`); `ResetToDefaultLoggingFunction()` before exit avoids it, and the oracle's
-  commands do so.
-- **Options:** release the function when Python shuts down, or keep it and never release it;
-  either way the process exits cleanly.
-- **Status:** open; decided in Phase 6 (the Python module).
 
 ### U-15. A wrapped scanline reaches outside the image
 
