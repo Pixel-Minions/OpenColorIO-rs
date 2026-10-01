@@ -512,3 +512,44 @@ fn nan_and_infinities_compose_as_in_the_wheel() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// `MatrixOpData::equals` against the wheel's `MatrixTransform::equals`, which compares the
+/// transforms' data with it (src/OpenColorIO/transforms/MatrixTransform.cpp, `equals`; the
+/// oracle's `transform_text` pairs). The offsets compare their bits, as upstream's `memcmp`
+/// (MatrixOpData.cpp:39-42 @ v2.5.2): 0 and -0 differ there, but not in the matrix, whose
+/// values compare with `==`. (JSON can't carry NaN, the other case where the two differ.)
+#[test]
+fn equality_compares_the_offsets_bits_and_the_matrix_values() {
+    let zero = [0.0; 4];
+    let negative_zero_offset = [-0.0, 0.0, 0.0, 0.0];
+    let mut negative_zero_matrix = [
+        1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+    ];
+    let identity = negative_zero_matrix;
+    negative_zero_matrix[1] = -0.0;
+    let matrices: Vec<Matrix> = vec![
+        (identity, zero),
+        (identity, negative_zero_offset),
+        (negative_zero_matrix, zero),
+        (identity, [0.5, -0.0, 0.25, 0.0]),
+        (identity, [0.5, 0.0, 0.25, 0.0]),
+    ];
+    let pairs: Vec<[usize; 2]> = vec![[0, 1], [1, 0], [0, 2], [2, 0], [1, 1], [3, 4], [4, 3]];
+    let specs: Vec<Value> = matrices.iter().map(transform).collect();
+    let response = Oracle::get().call(
+        "transform_text",
+        json!({"transforms": specs, "pairs": pairs}),
+        &[],
+    );
+    for (pair, result) in pairs
+        .iter()
+        .zip(response.result["pairs"].as_array().unwrap())
+    {
+        let wheel = result["equals"]
+            .as_bool()
+            .unwrap_or_else(|| panic!("no equals for {pair:?}: {result}"));
+        let a = port_data(&matrices[pair[0]], TransformDirection::Forward);
+        let b = port_data(&matrices[pair[1]], TransformDirection::Forward);
+        assert_eq!(a.equals(&b), wheel, "{pair:?}");
+    }
+}
