@@ -186,7 +186,7 @@ fn the_op_cache_id_matches_the_wheel() {
         create_matrix_op(&mut ops, data(matrix, TransformDirection::Forward), *dir);
         let port = ops
             .finalize()
-            .map(|()| String::from_utf8(ops.get_cache_id()).unwrap())
+            .map(|()| String::from_utf8(ops.get_cache_id().unwrap()).unwrap())
             .map_err(|e| e.message().to_string());
         if port != *wheel {
             failures.push(format!(
@@ -240,7 +240,7 @@ fn combining_matches_the_wheel() {
             // RemoveNoOps, then CombineOps on the pair.
             let mut kept = OpVec::new();
             for op in ops.iter() {
-                if !op.is_no_op() {
+                if !op.is_no_op().unwrap() {
                     kept.push_back(op.clone());
                 }
             }
@@ -254,7 +254,7 @@ fn combining_matches_the_wheel() {
             if result.is_empty() {
                 create_identity_matrix_op(&mut result);
             }
-            Ok(String::from_utf8(result.get_cache_id()).unwrap())
+            Ok(String::from_utf8(result.get_cache_id().unwrap()).unwrap())
         })()
         .map_err(|e| e.message().to_string());
         if port != *wheel {

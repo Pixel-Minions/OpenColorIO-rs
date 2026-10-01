@@ -103,18 +103,18 @@ fn remove_dynamic_properties(op_vec: &mut OpVec) {
 /// Removes the ops that are no-ops, identity matrices included, and returns how many.
 ///
 /// Port of `RemoveNoOps` (src/OpenColorIO/OpOptimizers.cpp:113-130 @ v2.5.2).
-fn remove_no_ops(op_vec: &mut OpVec) -> i32 {
+fn remove_no_ops(op_vec: &mut OpVec) -> Result<i32> {
     let mut count = 0;
     let mut iter = 0;
     while iter != op_vec.len() {
-        if op_vec[iter].is_no_op() {
+        if op_vec[iter].is_no_op()? {
             op_vec.erase(iter);
             count += 1;
         } else {
             iter += 1;
         }
     }
-    count
+    Ok(count)
 }
 
 /// Finalizes each op ([`Op::finalize`]): e.g. Matrix and Range ops become forward, and a
@@ -184,7 +184,7 @@ fn replace_identity_ops(op_vec: &mut OpVec, o_flags: OptimizationFlags) -> Resul
             if op_type != OpDataType::Range
                 && ((op_type == OpDataType::Gamma && opt_id_gamma)
                     || (op_type != OpDataType::Gamma && opt_identity))
-                && op.is_identity()
+                && op.is_identity()?
             {
                 // Optimization flag is tested before.
                 let mut replaced_by = op.get_identity_replacement()?;
@@ -254,7 +254,7 @@ fn remove_inverse_ops(op_vec: &mut OpVec, o_flags: OptimizationFlags) -> Result<
             let mut replaced_by = pair_identity_replacement(op1)?;
 
             replaced_by.finalize()?;
-            if replaced_by.is_no_op() {
+            if replaced_by.is_no_op()? {
                 op_vec.erase_range(index, index + 2);
                 firstindex = 0.max(firstindex - 1);
             } else {
@@ -350,11 +350,11 @@ fn replace_inverse_luts(op_vec: &mut OpVec) -> i32 {
 /// Removes the leading Range ops that are identities, and returns how many.
 ///
 /// Port of `RemoveLeadingClampIdentity` (src/OpenColorIO/OpOptimizers.cpp:410-434 @ v2.5.2).
-fn remove_leading_clamp_identity(op_vec: &mut OpVec) -> usize {
+fn remove_leading_clamp_identity(op_vec: &mut OpVec) -> Result<usize> {
     let mut count = 0;
     for op in op_vec.iter() {
         let o_data = op.data();
-        if o_data.get_type() == OpDataType::Range && o_data.is_identity() {
+        if o_data.get_type() == OpDataType::Range && o_data.is_identity()? {
             count += 1;
         } else {
             break;
@@ -363,17 +363,17 @@ fn remove_leading_clamp_identity(op_vec: &mut OpVec) -> usize {
     if count != 0 {
         op_vec.erase_range(0, count);
     }
-    count
+    Ok(count)
 }
 
 /// Removes the trailing Range ops that are identities, and returns how many.
 ///
 /// Port of `RemoveTrailingClampIdentity` (src/OpenColorIO/OpOptimizers.cpp:436-462 @ v2.5.2).
-fn remove_trailing_clamp_identity(op_vec: &mut OpVec) -> usize {
+fn remove_trailing_clamp_identity(op_vec: &mut OpVec) -> Result<usize> {
     let mut count = 0;
     for op in op_vec.iter().rev() {
         let o_data = op.data();
-        if o_data.get_type() == OpDataType::Range && o_data.is_identity() {
+        if o_data.get_type() == OpDataType::Range && o_data.is_identity()? {
             count += 1;
         } else {
             break;
@@ -384,7 +384,7 @@ fn remove_trailing_clamp_identity(op_vec: &mut OpVec) -> usize {
         let len = op_vec.len();
         op_vec.erase_range(len - count, len);
     }
-    count
+    Ok(count)
 }
 
 /// Whether the op is a Lut1D evaluated forward. The Lut1D arm comes with its variant.
@@ -510,7 +510,7 @@ impl OpVec {
 
         if is_debug_logging_enabled() {
             let mut oss = b"\n**\nOptimizing Op Vec...\n".to_vec();
-            oss.extend_from_slice(&serialize_op_vec(self, 4));
+            oss.extend_from_slice(&serialize_op_vec(self, 4)?);
             oss.push(b'\n');
 
             log_debug(oss);
@@ -530,7 +530,7 @@ impl OpVec {
                      no-op types removed\n"
                 )
                 .into_bytes();
-                os.extend_from_slice(&serialize_op_vec(self, 4));
+                os.extend_from_slice(&serialize_op_vec(self, 4)?);
                 log_debug(os);
             }
 
@@ -563,7 +563,7 @@ impl OpVec {
         while passes <= MAX_OPTIMIZATION_PASSES {
             // Remove all ops for which isNoOp is true, including identity matrices.
             let noops = if optimize_identity {
-                remove_no_ops(self)
+                remove_no_ops(self)?
             } else {
                 0
             };
@@ -632,7 +632,7 @@ impl OpVec {
                  {total_inverses} ops inverted\n"
             )
             .into_bytes();
-            os.extend_from_slice(&serialize_op_vec(self, 4));
+            os.extend_from_slice(&serialize_op_vec(self, 4)?);
             log_debug(os);
         }
 
@@ -653,10 +653,10 @@ impl OpVec {
     ) -> Result<()> {
         if !self.is_empty() {
             if !is_float_bit_depth(in_bit_depth)? {
-                remove_leading_clamp_identity(self);
+                remove_leading_clamp_identity(self)?;
             }
             if !is_float_bit_depth(out_bit_depth)? {
-                remove_trailing_clamp_identity(self);
+                remove_trailing_clamp_identity(self)?;
             }
             if o_flags.has_flag(OptimizationFlags::COMP_SEPARABLE_PREFIX) {
                 optimize_separable_prefix(self, in_bit_depth)?;

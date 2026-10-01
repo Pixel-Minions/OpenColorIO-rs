@@ -37,7 +37,7 @@ fn looks(n: usize) -> OpVec {
 
 /// The looks' names, in order.
 fn names(ops: &OpVec) -> Vec<Vec<u8>> {
-    ops.iter().map(Op::get_cache_id).collect()
+    ops.iter().map(|op| op.get_cache_id().unwrap()).collect()
 }
 
 fn same_ops(a: &[Op], b: &[Op]) -> bool {
@@ -74,12 +74,12 @@ fn an_empty_list() {
     let mut ops = OpVec::new();
     assert!(ops.is_empty());
     assert_eq!(ops.get_format_metadata(), &FormatMetadataImpl::root());
-    assert!(ops.is_no_op());
+    assert!(ops.is_no_op().unwrap());
     assert!(!ops.has_channel_crosstalk());
     assert!(!ops.is_dynamic());
-    assert!(ops.get_cache_id().is_empty());
+    assert!(ops.get_cache_id().unwrap().is_empty());
     assert!(ops.validate().is_ok());
-    assert!(serialize_op_vec(&ops, 4).is_empty());
+    assert!(serialize_op_vec(&ops, 4).unwrap().is_empty());
     assert!(ops.clone_ops().is_empty());
     assert!(ops.invert().unwrap().is_empty());
     let mut finalized = ops.clone();
@@ -191,12 +191,12 @@ fn append_fails_after_appending_when_the_metadata_names_differ() {
 fn no_ops_make_a_no_op_list_without_cache_id() {
     let mut ops = looks(2);
     create_file_no_op(&mut ops, b"file.clf");
-    assert!(ops.is_no_op());
+    assert!(ops.is_no_op().unwrap());
     assert!(!ops.has_channel_crosstalk());
     assert!(ops.validate().is_ok());
     // The look no-ops have cache IDs, but the list skips no-op types.
-    assert!(!ops[0].get_cache_id().is_empty());
-    assert!(ops.get_cache_id().is_empty());
+    assert!(!ops[0].get_cache_id().unwrap().is_empty());
+    assert!(ops.get_cache_id().unwrap().is_empty());
 }
 
 #[test]
@@ -264,7 +264,7 @@ fn serialize_writes_a_line_per_op() {
     create_file_no_op(&mut ops, b"file.clf");
 
     for indent in [-3, 0, 1, 4] {
-        let text = serialize_op_vec(&ops, indent);
+        let text = serialize_op_vec(&ops, indent).unwrap();
         let lines: Vec<&[u8]> = text.split_inclusive(|&c| c == b'\n').collect();
         assert_eq!(lines.len(), ops.len());
         let spaces = indent.max(0) as usize;
@@ -273,7 +273,7 @@ fn serialize_writes_a_line_per_op() {
             assert_ne!(line[spaces], b' ');
             let info = op.get_info().as_bytes();
             assert!(line.windows(info.len()).any(|w| w == info));
-            let mut tail = op.get_cache_id();
+            let mut tail = op.get_cache_id().unwrap();
             tail.push(b'\n');
             assert!(line.ends_with(&tail));
         }
@@ -348,5 +348,5 @@ fn serialize() {
     create_identity_matrix_op(&mut ops);
 
     // Serialize not optimized OpVec i.e. contains some NoOps.
-    serialize_op_vec(&ops, 0);
+    serialize_op_vec(&ops, 0).unwrap();
 }

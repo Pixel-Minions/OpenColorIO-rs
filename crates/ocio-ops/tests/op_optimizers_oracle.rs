@@ -187,7 +187,7 @@ fn port_ops(
         if ops.is_empty() {
             create_identity_matrix_op(&mut ops);
         }
-        Ok(String::from_utf8(ops.get_cache_id()).unwrap())
+        Ok(String::from_utf8(ops.get_cache_id().unwrap()).unwrap())
     };
     run().map_err(|e| e.message().to_string())
 }

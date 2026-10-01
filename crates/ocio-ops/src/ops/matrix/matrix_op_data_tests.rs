@@ -11,7 +11,7 @@ use super::*;
 #[test]
 fn empty() {
     let mut m = MatrixOpData::new();
-    assert!(m.is_no_op());
+    assert!(m.is_no_op().unwrap());
     assert!(m.is_unity_diagonal());
     assert!(m.is_diagonal());
     m.validate().unwrap();
@@ -33,28 +33,28 @@ fn empty() {
 #[test]
 fn accessors() {
     let mut m = MatrixOpData::new();
-    assert!(m.is_no_op());
+    assert!(m.is_no_op().unwrap());
     assert!(m.is_unity_diagonal());
     assert!(m.is_diagonal());
-    assert!(m.is_identity());
+    assert!(m.is_identity().unwrap());
     m.validate().unwrap();
 
     // `1 + 1e-5f` is a float sum, passed as a double.
     m.set_array_value(15, f64::from(1.0f32 + 1e-5f32));
 
-    assert!(!m.is_no_op());
+    assert!(!m.is_no_op().unwrap());
     assert!(!m.is_unity_diagonal());
     assert!(m.is_diagonal());
-    assert!(!m.is_identity());
+    assert!(!m.is_identity().unwrap());
     m.validate().unwrap();
 
     m.set_array_value(1, f64::from(1e-5f32));
     m.set_array_value(15, f64::from(1.0f32));
 
-    assert!(!m.is_no_op());
+    assert!(!m.is_no_op().unwrap());
     assert!(!m.is_unity_diagonal());
     assert!(!m.is_diagonal());
-    assert!(!m.is_identity());
+    assert!(!m.is_identity().unwrap());
     m.validate().unwrap();
 
     assert_eq!(m.get_file_input_bit_depth(), BitDepth::Unknown);
@@ -79,14 +79,14 @@ fn accessors() {
 #[test]
 fn offsets() {
     let mut m = MatrixOpData::new();
-    assert!(m.is_no_op());
+    assert!(m.is_no_op().unwrap());
     assert!(m.is_unity_diagonal());
     assert!(m.is_diagonal());
     assert!(!m.has_offsets());
     m.validate().unwrap();
 
     m.set_offset_value(2, f64::from(1.0f32)).unwrap();
-    assert!(!m.is_no_op());
+    assert!(!m.is_no_op().unwrap());
     assert!(m.is_unity_diagonal());
     assert!(m.is_diagonal());
     assert!(m.has_offsets());
@@ -98,14 +98,14 @@ fn offsets() {
 #[test]
 fn offsets4() {
     let mut m = MatrixOpData::new();
-    assert!(m.is_no_op());
+    assert!(m.is_no_op().unwrap());
     assert!(m.is_unity_diagonal());
     assert!(m.is_diagonal());
     assert!(!m.has_offsets());
     m.validate().unwrap();
 
     m.set_offset_value(3, f64::from(-1e-6f32)).unwrap();
-    assert!(!m.is_no_op());
+    assert!(!m.is_no_op().unwrap());
     assert!(m.is_unity_diagonal());
     assert!(m.is_diagonal());
     assert!(m.has_offsets());
@@ -131,14 +131,14 @@ fn diagonal() {
 #[test]
 fn has_alpha() {
     let mut mat = MatrixOpData::new();
-    assert!(!mat.has_alpha());
+    assert!(!mat.has_alpha().unwrap());
 
     // MATRIX_TEST_HAS_ALPHA(id, val)
     let mut test_has_alpha = |id: usize, val: f64| {
         mat.get_array_mut()[id] = val + 0.001;
-        assert!(mat.has_alpha());
+        assert!(mat.has_alpha().unwrap());
         mat.get_array_mut()[id] = val;
-        assert!(!mat.has_alpha());
+        assert!(!mat.has_alpha().unwrap());
     };
     test_has_alpha(3, 0.0);
     test_has_alpha(7, 0.0);
@@ -149,9 +149,9 @@ fn has_alpha() {
     test_has_alpha(15, 1.0);
 
     mat.get_offsets_mut()[3] = 0.001;
-    assert!(mat.has_alpha());
+    assert!(mat.has_alpha().unwrap());
     mat.get_offsets_mut()[3] = 0.0;
-    assert!(!mat.has_alpha());
+    assert!(!mat.has_alpha().unwrap());
 }
 
 /// Port of `OCIO_ADD_TEST(MatrixOpData, clone)` @ v2.5.2.
@@ -163,7 +163,7 @@ fn clone() {
 
     let mut p_clone = reference.clone();
 
-    assert!(!p_clone.is_no_op());
+    assert!(!p_clone.is_no_op().unwrap());
     assert!(!p_clone.is_unity_diagonal());
     assert!(p_clone.is_diagonal());
     p_clone.validate().unwrap();
@@ -187,7 +187,7 @@ fn clone_offsets4() {
 
     let mut p_clone = reference.clone();
 
-    assert!(!p_clone.is_no_op());
+    assert!(!p_clone.is_no_op().unwrap());
     assert!(!p_clone.is_unity_diagonal());
     assert!(p_clone.is_diagonal());
     p_clone.validate().unwrap();
@@ -487,10 +487,10 @@ fn rgba() {
         assert_eq!(v[i], f64::from(rgba[i]));
     }
 
-    assert!(!matrix.is_no_op());
+    assert!(!matrix.is_no_op().unwrap());
     assert!(matrix.has_channel_crosstalk());
     assert!(!matrix.is_diagonal());
-    assert!(!matrix.is_identity());
+    assert!(!matrix.is_identity().unwrap());
 }
 
 /// Port of `OCIO_ADD_TEST(MatrixOpData, matrixInverse_identity)` @ v2.5.2.
@@ -507,10 +507,10 @@ fn matrix_inverse_identity() {
     assert_eq!(BitDepth::F32, ref_matrix_op.get_file_input_bit_depth());
     assert_eq!(BitDepth::Uint12, ref_matrix_op.get_file_output_bit_depth());
 
-    assert!(ref_matrix_op.is_no_op());
+    assert!(ref_matrix_op.is_no_op().unwrap());
     assert!(!ref_matrix_op.has_channel_crosstalk());
     assert!(ref_matrix_op.is_diagonal());
-    assert!(ref_matrix_op.is_identity());
+    assert!(ref_matrix_op.is_identity().unwrap());
     assert!(!ref_matrix_op.has_offsets());
 
     // Get inverse of reference matrix operation.
@@ -529,7 +529,7 @@ fn matrix_inverse_identity() {
 
     // But still be an identity matrix.
     assert!(fwd_matrix_op.is_diagonal());
-    assert!(fwd_matrix_op.is_identity());
+    assert!(fwd_matrix_op.is_identity().unwrap());
     assert!(!fwd_matrix_op.has_offsets());
 }
 
@@ -549,11 +549,11 @@ fn matrix_inverse_singular() {
     singular_matrix_op.set_rgba(&mat);
     singular_matrix_op.set_direction(TransformDirection::Inverse);
 
-    assert!(!singular_matrix_op.is_no_op());
+    assert!(!singular_matrix_op.is_no_op().unwrap());
     assert!(singular_matrix_op.has_channel_crosstalk());
     assert!(!singular_matrix_op.is_unity_diagonal());
     assert!(!singular_matrix_op.is_diagonal());
-    assert!(!singular_matrix_op.is_identity());
+    assert!(!singular_matrix_op.is_identity().unwrap());
     assert!(!singular_matrix_op.has_offsets());
 
     // Get inverse of singular matrix operation.
@@ -581,20 +581,20 @@ fn inverse() {
     ref_matrix_op.set_rgba(&matrix);
     ref_matrix_op.set_rgba_offsets(&offsets);
 
-    assert!(!ref_matrix_op.is_no_op());
+    assert!(!ref_matrix_op.is_no_op().unwrap());
     assert!(ref_matrix_op.has_channel_crosstalk());
     assert!(!ref_matrix_op.is_diagonal());
-    assert!(!ref_matrix_op.is_identity());
+    assert!(!ref_matrix_op.is_identity().unwrap());
 
     let fwd_matrix_op = ref_matrix_op.get_as_forward().unwrap();
     assert!(ref_matrix_op == fwd_matrix_op);
 
     ref_matrix_op.set_direction(TransformDirection::Inverse);
 
-    assert!(!ref_matrix_op.is_no_op());
+    assert!(!ref_matrix_op.is_no_op().unwrap());
     assert!(ref_matrix_op.has_channel_crosstalk());
     assert!(!ref_matrix_op.is_diagonal());
-    assert!(!ref_matrix_op.is_identity());
+    assert!(!ref_matrix_op.is_identity().unwrap());
 
     // Get inverse of reference matrix operation.
     let inv_matrix_op = ref_matrix_op.get_as_forward().unwrap();
@@ -652,9 +652,9 @@ fn inverse() {
 fn channel_crosstalk() {
     let mut ref_matrix_op = MatrixOpData::new();
 
-    assert!(ref_matrix_op.is_no_op());
+    assert!(ref_matrix_op.is_no_op().unwrap());
     assert!(ref_matrix_op.is_diagonal());
-    assert!(ref_matrix_op.is_identity());
+    assert!(ref_matrix_op.is_identity().unwrap());
 
     assert!(!ref_matrix_op.has_channel_crosstalk());
 

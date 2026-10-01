@@ -141,11 +141,11 @@ impl OpData {
     /// Whether the op leaves every pixel as it is.
     ///
     /// Port of `OpData::isNoOp`, pure virtual (src/OpenColorIO/Op.h:138-139 @ v2.5.2).
-    pub fn is_no_op(&self) -> bool {
+    pub fn is_no_op(&self) -> Result<bool> {
         match self {
             OpData::Matrix(data) => data.is_no_op(),
-            OpData::Reference(data) => data.is_no_op(),
-            OpData::NoOp(data) => data.is_no_op(),
+            OpData::Reference(data) => Ok(data.is_no_op()),
+            OpData::NoOp(data) => Ok(data.is_no_op()),
         }
     }
 
@@ -153,11 +153,11 @@ impl OpData {
     /// it. For example, a Lut1D may be an identity without being a no-op.
     ///
     /// Port of `OpData::isIdentity`, pure virtual (src/OpenColorIO/Op.h:141-143 @ v2.5.2).
-    pub fn is_identity(&self) -> bool {
+    pub fn is_identity(&self) -> Result<bool> {
         match self {
             OpData::Matrix(data) => data.is_identity(),
-            OpData::Reference(data) => data.is_identity(),
-            OpData::NoOp(data) => data.is_identity(),
+            OpData::Reference(data) => Ok(data.is_identity()),
+            OpData::NoOp(data) => Ok(data.is_identity()),
         }
     }
 
@@ -221,7 +221,7 @@ impl OpData {
     /// Port of `OpData::getCacheID`, pure virtual (src/OpenColorIO/Op.h:159-160 @ v2.5.2).
     pub fn get_cache_id(&self) -> Result<Vec<u8>> {
         match self {
-            OpData::Matrix(data) => Ok(data.get_cache_id()),
+            OpData::Matrix(data) => data.get_cache_id(),
             OpData::Reference(data) => data.get_cache_id(),
             OpData::NoOp(data) => Ok(data.get_cache_id()),
         }

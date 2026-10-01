@@ -88,7 +88,7 @@ impl MatrixOpData {
             unreachable!("can_combine_with found a Matrix op");
         };
         let composed_mat = self.compose(this_data)?;
-        if !composed_mat.is_no_op() {
+        if !composed_mat.is_no_op()? {
             create_matrix_op(ops, composed_mat, TransformDirection::Forward);
         }
         Ok(())
@@ -97,11 +97,11 @@ impl MatrixOpData {
     /// The op's cache ID: `<MatrixOffsetOp `, the data's cache ID, ` >`.
     ///
     /// Port of `MatrixOffsetOp::getCacheID` (MatrixOp.cpp:173-182 @ v2.5.2).
-    pub(crate) fn get_op_cache_id(&self) -> Vec<u8> {
+    pub(crate) fn get_op_cache_id(&self) -> Result<Vec<u8>> {
         let mut cache_id = b"<MatrixOffsetOp ".to_vec();
-        cache_id.extend_from_slice(&self.get_cache_id());
+        cache_id.extend_from_slice(&self.get_cache_id()?);
         cache_id.extend_from_slice(b" >");
-        cache_id
+        Ok(cache_id)
     }
 
     /// The renderer for the matrix: "Op::finalize has to be called." while it is inverse.

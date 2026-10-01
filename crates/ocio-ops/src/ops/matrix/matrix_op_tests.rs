@@ -88,7 +88,7 @@ fn create_matrix_op_combines_the_directions() {
         assert!(op.is_same_type(&ops[0]));
         assert!(!op.is_inverse(&ops[0]));
         assert!(op.has_channel_crosstalk());
-        assert!(!op.is_no_op());
+        assert!(!op.is_no_op().unwrap());
     }
 }
 
@@ -224,8 +224,8 @@ fn the_identity_op_and_replacement() {
     let mut ops = OpVec::new();
     create_identity_matrix_op(&mut ops);
     assert_eq!(ops.len(), 1);
-    assert!(ops[0].is_no_op());
-    assert!(ops[0].is_identity());
+    assert!(ops[0].is_no_op().unwrap());
+    assert!(ops[0].is_identity().unwrap());
     assert!(*matrix(&ops[0]) == MatrixOpData::create_diagonal_matrix(1.0));
 
     // The replacement of any op the optimizer finds to be an identity is an identity matrix
@@ -327,4 +327,41 @@ fn validating_a_3x3_matrix_op_makes_it_4x4() {
     let cpu4 =
         CpuProcessor::new(&ops4, BitDepth::F32, BitDepth::F32, OptimizationFlags::NONE).unwrap();
     assert_eq!(cpu.get_cache_id(), cpu4.get_cache_id());
+}
+
+/// A 3x3 matrix before validation (docs/improvements.md, U-16): the queries that upstream
+/// answers by reading past its 9 values return an error, on the data and on its op; once the
+/// op is validated, they answer.
+#[test]
+fn queries_of_an_unvalidated_3x3_matrix_are_errors() {
+    let mut data = MatrixOpData::new();
+    data.get_array_mut().resize(3, 3);
+    data.get_array_mut()
+        .get_values_mut()
+        .copy_from_slice(&[1., 0., 0., 0., 1., 0., 0., 0., 1.]);
+    let message = "Matrix: a 3x3 matrix has to be validated before this query: upstream reads \
+                   past its 9 values.";
+    assert_eq!(data.has_alpha().unwrap_err().message(), message);
+    assert_eq!(data.is_identity().unwrap_err().message(), message);
+    assert_eq!(data.is_no_op().unwrap_err().message(), message);
+    assert_eq!(data.get_cache_id().unwrap_err().message(), message);
+    // The queries that read only the 3x3 positions answer.
+    assert!(data.is_diagonal());
+    assert!(data.is_unity_diagonal());
+
+    let mut ops = OpVec::new();
+    create_matrix_op(&mut ops, data, TransformDirection::Forward);
+    assert_eq!(ops[0].is_no_op().unwrap_err().message(), message);
+    assert_eq!(ops[0].is_identity().unwrap_err().message(), message);
+    assert_eq!(ops[0].get_cache_id().unwrap_err().message(), message);
+    assert_eq!(ops.is_no_op().unwrap_err().message(), message);
+    assert_eq!(ops.get_cache_id().unwrap_err().message(), message);
+    assert_eq!(
+        crate::op::serialize_op_vec(&ops, 0).unwrap_err().message(),
+        message
+    );
+
+    ops[0].validate().unwrap();
+    assert!(ops[0].is_no_op().unwrap());
+    assert!(!ops[0].get_cache_id().unwrap().is_empty());
 }
