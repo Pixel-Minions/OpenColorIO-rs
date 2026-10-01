@@ -13,6 +13,12 @@ name: SDE
 #
 # SDE is downloaded from Intel's mirror under Intel's license (accepted by the owner), and
 # scripts/sde.sh checks its SHA256 before using it. The archive is cached between runs.
+#
+# On Windows, SDE now and then crashes the oracle (exit code 0xC0000005, "The pipe is being
+# closed" while the request is written) as it starts: importing PyOpenColorIO calls
+# platform.system(), which under SDE falls back to starting `cmd /c ver` (WMI isn't available),
+# and Pin's injection into that child crashes. No command has run then, so the test harness
+# starts the oracle again, at most twice (crates/ocio-testkit/src/oracle.rs, crashed_unread).
 
 on:
   schedule:

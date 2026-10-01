@@ -5,8 +5,8 @@
 //!
 //! From the main checkout, on `phase0`, with a clean tree:
 //! 1. replays the branch's commits onto `phase0` in a temporary worktree (`target/land/wt`)
-//!    with `git rebase --exec "cargo xtask gate --auto --rocky"`, which gates every commit
-//!    (release and Rocky Linux 9 for commits that touch platform-sensitive files); a branch
+//!    with `git rebase --exec "cargo xtask gate"`, which gates every commit in debug on this
+//!    platform (release and Rocky Linux 9 run once, on the merge commit, in step 4); a branch
 //!    with merge commits is first replayed without gates, to check that the replay drops
 //!    nothing they carry;
 //! 2. merges the result with `--no-ff`, listing each chunk's subject;
@@ -40,9 +40,9 @@ cargo xtask land <branch> [--no-rocky]
 
 Lands <branch> on phase0, from the main checkout on phase0 with a clean tree:
   1. replays its commits onto phase0 in target/land/wt with
-     `git rebase --exec \"cargo xtask gate --auto --rocky\"`: every commit is gated, in
-     release and in Rocky Linux 9 too when it touches platform-sensitive files; commits
-     already on top of phase0 keep their hashes. For a branch with merge commits, a first
+     `git rebase --exec \"cargo xtask gate\"`: every commit is gated in debug on this
+     platform (each chunk already passed its own gate; release and Rocky Linux 9 run on
+     the merge commit, step 4); commits already on top of phase0 keep their hashes. For a branch with merge commits, a first
      replay without gates must give the tree that merging the branch as it is gives (a
      replay drops merge commits, and what only they carry); otherwise it stops at once.
   2. merges the result with --no-ff; the message lists each chunk's subject
@@ -186,12 +186,12 @@ pub(crate) fn run(branch: &str, rocky: bool) -> Result<(), String> {
         println!("land: replaying drops nothing the branch's merge commits carry");
     }
 
-    // 1. Replay, gating every commit.
-    let exec = if rocky {
-        "cargo xtask gate --auto --rocky"
-    } else {
-        "cargo xtask gate --auto"
-    };
+    // 1. Replay, gating every commit lightly: fmt, clippy, ci and the debug tests on this
+    // platform. Each chunk already passed its own `gate --staged` (with --release --rocky when
+    // numeric), and step 4 runs the full gate, release and Rocky Linux 9 included, on the
+    // merged result (owner decision, 2026-10-01: the per-commit Rocky and release passes made
+    // lands the slowest step).
+    let exec = "cargo xtask gate";
     println!("land: git rebase --exec \"{exec}\" {}", short(&base));
     let mut rebase = Command::new("git");
     rebase

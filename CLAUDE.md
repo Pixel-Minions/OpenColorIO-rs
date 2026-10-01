@@ -141,7 +141,7 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
 | Command | Purpose |
 |---|---|
 | `cargo xtask gate [--staged] [--crates a,b] [--release] [--rocky] [--quick\|--full]` | The chunk gate: fmt, clippy, `xtask ci`, tests; logs in `target/gate-logs/`. `--staged`: only what is staged |
-| `cargo xtask land <branch> [--no-rocky]` | Orchestrator: replay a card onto `phase0` gating every commit (Rocky Linux 9 too), merge `--no-ff`, regenerate the generated files, full gate; never pushes. Its full gate (`gate --main`) runs cargo-deny 0.20.2: `cargo install cargo-deny --version 0.20.2 --locked` |
+| `cargo xtask land <branch> [--no-rocky]` | Orchestrator: replay a card onto `phase0` gating every commit (debug, this platform), merge `--no-ff`, regenerate the generated files, full gate on the result (release, Rocky Linux 9); never pushes. Its full gate (`gate --main`) runs cargo-deny 0.20.2: `cargo install cargo-deny --version 0.20.2 --locked` |
 | `cargo xtask clean-scratch [--yes]` | List (with `--yes`, delete) `target/verify*` in every checkout, worktrees of landed branches, and this repository's Rocky build volumes whose checkout is gone |
 | `cargo xtask ci [--base <rev>]` | Guards, fixture hashes, ported tests at least `docs/ratchet.toml` at `<rev>` (branch mode; the gate passes its base) |
 | `cargo xtask ci --main` | Also: `docs/ratchet.toml` and `docs/parity.md` are current (`main` and land commits) |

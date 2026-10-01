@@ -150,11 +150,19 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Upstream:** a transform's text (`repr()`), error messages and op cache IDs print NaN as the
   platform's C++ library does: Windows writes `nan`, `-nan(ind)`, `nan(snan)`, `-nan(snan)` or
   `-nan`; Linux writes `nan` or `-nan`. A processor with a NaN parameter has a different cache
-  ID on each platform.
-- **Who notices:** anyone comparing text or cache IDs across platforms for transforms with NaN
-  parameters.
+  ID on each platform. Through the wheels, the oracle's commands show the same split in two
+  more places, for a negative NaN, `-nan(ind)` on Windows and `-nan` on Linux:
+  - the messages of `validate()` that print a parameter's value (`transform_text`, over 247
+    transforms of 13 classes holding special values; `oracle/ocio_oracle/transform_text.py`,
+    c49a36e);
+  - shader text, whose literals print the parameter (`getFloatString`,
+    `GpuShaderUtils.cpp:21-35`; `gpu_shader`, over 1230 shaders in all 10 languages;
+    `oracle/ocio_oracle/gpu.py`, 470d0b7).
+- **Who notices:** anyone comparing text, messages, shaders or cache IDs across platforms for
+  transforms with NaN parameters.
 - **A fix:** one spelling on both platforms.
-- **Status:** matched in `cfmt` (WP 0.5); each op's text uses it as the op lands (D12).
+- **Status:** matched in `cfmt` (WP 0.5); each op's text, validation messages and shader
+  literals use it as the op lands (D12).
 
 ### I-8. Built-in configs have Windows line endings on Windows
 
