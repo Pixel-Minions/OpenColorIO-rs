@@ -414,25 +414,39 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Status:** open; decided in Phase 2, with the Lut1D GPU writer. The oracle refuses these
   requests (`gpu_shader`, `_padding_fits`).
 
-### U-6. Resource prefixes the Metal class wrapper can't read
+### U-6. Resource prefixes the Metal class wrapper reads past
 
 - **Upstream:** in MSL, a class wrapper reads the shader's declarations back to build its class
-  (`GpuShaderClassWrapper.cpp:279-366`).
-  - It passes the resource prefix's first byte past white space to `std::isdigit` and
-    `std::isspace` (lines 157, 226, 325, 333, 348). They are undefined for a non-ASCII byte, a
-    negative `char`. glibc defines them there (neither a digit nor a space), so D12 may apply
-    on Linux; whether MSVC's release CRT stays inside its table is still to be checked.
-  - A line feed in the prefix cuts a texture's declaration in two. The wrapper then looks for
-    its sampler at `find("sampler") + 7`, which wraps past `npos` to 6 and can read past the end
-    of a short line (lines 330-333).
-  - The uid goes through `std::isalpha` and `std::isalnum` too (`GPUProcessor.cpp:180-188`), but
+  (`GpuShaderClassWrapper.cpp:285-372`), and their names start with the resource prefix.
+  - After a line that starts with `texture` past white space, it takes the next line for the
+    texture's sampler and reads from `find("sampler") + 7` (lines 330-335). Without `sampler`,
+    that wraps past `npos` to 6, past the end of a shorter line. A line feed in the prefix cuts
+    each declaration into lines, so this happens when the prefix's first segment between two
+    line feeds is shorter than 6 bytes (it is the line after a texture's declaration), or when
+    a segment after a line feed starts with `texture` past white space (the wrapper takes its
+    line for a texture's declaration, and the line after the last declaration is empty).
+  - The wrapper also passes the declarations' bytes to `std::isspace`, and the class name's
+    first byte to `std::isdigit` (lines 157, 226, 307, 325, 333, 348). The C++ standard leaves
+    them undefined for a non-ASCII byte, a negative `char`, but both wheels define them and give
+    such a byte neither class, so there is no undefined behaviour there, and no D12 split:
+    - Windows: the UCRT's `isspace` and `isdigit` return 0 below -1 in a single-byte locale
+      (`ucrt/convert/_ctype.cpp:28-56`, Windows SDK 10.0.22000.0), and classify the byte
+      through the code page in a multibyte one (`_isctype_l`).
+    - Linux: glibc's `isspace` reads the locale's table, which covers -128 to 255. GCC inlines
+      `isdigit` as `(unsigned)(c - '0') <= 9` (wheel-inspect, `generateClassWrapperHeader`).
+    - Through `ctypes`, no byte from 0x80 to 0xFE gets either class: in the UCRT under the C,
+      single-byte (874, 1251 to 1256) and multibyte (932, 936, 949, 950, UTF-8) locales, and in
+      glibc under every locale of the Rocky Linux 9 image (C, POSIX, C.UTF-8). Python starts in
+      the user's locale (`English_United States.1252` here) and in C.UTF-8 there.
+  - The uid goes through `std::isalpha` and `std::isalnum` (`GPUProcessor.cpp:180-188`), but
     only in the `GpuShaderCreator` overload of `extractGpuShaderInfo`. Python takes the
     `GpuShaderDesc` overload (lines 151-155), which skips it: through Python, the uid changes
     nothing, not even the cache ID.
-- **Who notices:** MSL shaders whose resource prefix starts with a non-ASCII byte or holds a line
-  feed; C++ callers of the creator overload with a non-ASCII uid. Other names, and every name in
-  the other languages, are only written out, so they are well defined.
-- **Decided** (general rule): the port returns an error for those names. `p1-gpu-infra` settles
-  the scope: 1.7d for the wrapper, 1.7e for the uid.
-- **Status:** to be matched in `p1-gpu-infra`. The oracle refuses these MSL prefixes
-  (`gpu_shader`, `_check_names`).
+- **Who notices:** MSL shaders whose resource prefix holds line feeds like those; C++ callers of
+  the creator overload with a non-ASCII uid. Other names, and every name in the other
+  languages, are only written out, so they are well defined.
+- **Decided** (general rule): the port returns an error where the wrapper would read past a
+  line. `p1-gpu-infra` settles the scope: 1.7d for the wrapper, 1.7e for the uid.
+- **Status:** to be matched in `p1-gpu-infra`. The oracle refuses these MSL prefixes whatever
+  the processor (`gpu_shader`, `_check_names`): being exact would need the declarations, which
+  only the extraction makes.

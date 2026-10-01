@@ -47,43 +47,66 @@ UNPADDED = re.compile(r"(reach_m|gamut_cusp)_table_\d+$")
 # The names a description takes, which the request gives as strings.
 NAMES = ["function_name", "pixel_name", "resource_prefix", "uid"]
 
-# The bytes C's std::isspace calls white space in the "C" locale.
+# The bytes C's std::isspace calls white space. Both wheels give every other byte, a non-ASCII
+# one included, no class (see _check_names).
 C_SPACE = " \t\n\v\f\r"
+
+# Where the Metal class wrapper reads a line that has no "sampler": find("sampler") + 7, which
+# wraps past npos to 6.
+SAMPLER_READ = 6
 
 
 def _check_names(settings):
-    """Refuses a name that isn't a string, and the names whose handling the wheel leaves
-    undefined. Python's extractGpuShaderInfo takes the GpuShaderDesc overload, which doesn't
-    read the uid (GPUProcessor.cpp:151-155 @ v2.5.2), and only the MSL class wrapper reads
-    names back (GpuShaderClassWrapper.cpp:279-366 @ v2.5.2), from the resource prefix: the
-    class name starts with it, and the declarations' names do.
-    - A non-ASCII byte is a negative `char`, for which std::isdigit and std::isspace are
-      undefined. The wrapper passes them the prefix's first byte and its leading white space
-      (lines 157, 226, 325, 333, 348): a prefix whose first byte past white space isn't ASCII
-      is refused.
-    - The wrapper reads the declarations a line at a time. A line feed in the prefix cuts a
-      texture's declaration in two, and the wrapper then looks for its sampler at
-      `find("sampler") + 7`, which wraps past npos to 6 and can read past a short line's end
-      (lines 330-333): a prefix with a line feed is refused.
-    Everything else in a name, control characters included, is well defined: the other
-    languages only write the names out."""
+    """Refuses a name that isn't a string, and the MSL resource prefixes that would make the
+    wheel read past the end of a line.
+
+    Python's extractGpuShaderInfo takes the GpuShaderDesc overload, which doesn't read the uid
+    (GPUProcessor.cpp:151-155 @ v2.5.2). Only the MSL class wrapper reads names back: it parses
+    the declarations a line at a time (GpuShaderClassWrapper.cpp:285-372 @ v2.5.2), and their
+    names start with the resource prefix. After a line that starts with "texture" past white
+    space, it takes the next line for the texture's sampler and reads from find("sampler") + 7
+    (lines 330-335): without "sampler", from byte 6, past the end of a shorter line. A line
+    feed in the prefix cuts every declaration into lines, so the command refuses an MSL prefix
+    - whose first segment between two line feeds, as the declarations hold it, is shorter than
+      6 bytes: in a texture's declaration, it is the line after the texture's. setResourcePrefix
+      and BuildResourceName each make "__" "_" once (GpuShaderDesc.cpp:147-153,
+      GpuShaderUtils.cpp:1392-1404 @ v2.5.2), so "___" ends up "_";
+    - with a segment after a line feed that starts with "texture" past white space: the wrapper
+      takes the line it starts for a texture's declaration, and the line after the last
+      declaration is empty.
+    It refuses them whatever the processor: being exact would need the declarations, which only
+    the extraction makes. Without a texture, the wheel reads the first kind safely, and the
+    second kind when the line after each such segment is long enough.
+
+    Everything else in a name is defined. The wrapper passes the declarations' bytes to
+    std::isspace and the class name's first byte to std::isdigit, which the C++ standard leaves
+    undefined for a non-ASCII byte, a negative char. Both wheels define them, and give such a
+    byte neither class: the UCRT returns 0 below -1 in a single-byte locale
+    (ucrt/convert/_ctype.cpp:28-56, Windows SDK 10.0.22000.0); glibc's isspace reads its
+    locale's table, which covers -128 to 255 and has no class there in the C and UTF-8 locales;
+    GCC inlines isdigit as (unsigned)(c - '0') <= 9. The other languages only write the names
+    out."""
     for key in NAMES:
         if key in settings and not isinstance(settings[key], str):
             raise ValueError(f"{key} must be a string, not {settings[key]!r}")
     if settings.get("language") != "GPU_LANGUAGE_MSL_2_0":
         return
     prefix = settings.get("resource_prefix", "ocio")
-    if "\n" in prefix:
-        raise ValueError(
-            f"gpu_shader refuses resource_prefix {prefix!r} in MSL: the wheel's Metal class "
-            f"wrapper reads the declarations back a line at a time, and a line feed in their "
-            f"names can make it read past the end of a line")
-    first = prefix.lstrip(C_SPACE)[:1]
-    if first and ord(first) > 0x7F:
-        raise ValueError(
-            f"gpu_shader refuses resource_prefix {prefix!r} in MSL: the wheel's Metal class "
-            f"wrapper passes its first byte past white space to std::isdigit and std::isspace, "
-            f"which are undefined for a non-ASCII byte")
+    segments = prefix.split("\n")
+    if len(segments) > 2:
+        line = segments[1].replace("__", "_").replace("__", "_")
+        if len(line.encode("utf-8")) < SAMPLER_READ:
+            raise ValueError(
+                f"gpu_shader refuses resource_prefix {prefix!r} in MSL: its line feeds make "
+                f"{line!r} the line after a texture's declaration, which the wheel's Metal class "
+                f"wrapper reads for a sampler past its end")
+    for segment in segments[1:]:
+        if segment.lstrip(C_SPACE).startswith("texture"):
+            raise ValueError(
+                f"gpu_shader refuses resource_prefix {prefix!r} in MSL: after a line feed, it "
+                f"starts a line with 'texture', which the wheel's Metal class wrapper reads as a "
+                f"texture's declaration, and the line after it for a sampler, past the end of a "
+                f"short one")
 
 
 def _check_settings(settings):
@@ -298,11 +321,11 @@ def gpu_shader(args, blobs):
                   allow_texture_1d  setAllowTexture1D
 
     Before extracting, the command refuses the request (it raises, so the call fails) where
-    the wheel would do something undefined: an MSL resource prefix the Metal class wrapper
-    can't read (_check_names), or a 1D LUT that wouldn't fit its texture width limit, which
-    divides by zero, loops forever or exhausts memory (_padding_fits; the default limit of 4096
-    can't hold a LUT of 8191 entries). An unknown key, or a setting of the wrong type, is
-    refused too (_check_settings).
+    the wheel would do something undefined: an MSL resource prefix whose line feeds make the
+    Metal class wrapper read past a line (_check_names), or a 1D LUT that wouldn't fit its
+    texture width limit, which divides by zero, loops forever or exhausts memory
+    (_padding_fits; the default limit of 4096 can't hold a LUT of 8191 entries). An unknown
+    key, or a setting of the wrong type, is refused too (_check_settings).
 
     result:
       processor_cache_id, gpu_cache_id, gpu_processor (isNoOp, hasChannelCrosstalk)
