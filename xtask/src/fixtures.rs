@@ -4,7 +4,6 @@
 //! `oracle regen|check|info` and `fixtures verify`.
 
 use std::path::Path;
-use std::process::Command;
 
 use ocio_testkit::fixtures::{Entry, Manifest, OracleInfo, sha256_hex};
 use ocio_testkit::oracle::{Oracle, machine_description};
@@ -32,16 +31,10 @@ pub(crate) fn oracle_info() -> Result<(), String> {
 
 fn run_regen(group: &str, out_dir: &Path) -> Result<RegenOutput, String> {
     let oracle = Oracle::get();
-    let output = Command::new(oracle.python())
+    let output = oracle
+        .command()
         .args(["-X", "utf8", "-m", "ocio_oracle", "regen", group])
         .arg(out_dir)
-        .current_dir(paths::oracle_dir())
-        .env_clear()
-        .envs(std::env::vars_os().filter(|(k, _)| {
-            let k = k.to_string_lossy();
-            k != "OCIO" && !k.starts_with("OCIO_") && k != "PYTHONPATH"
-        }))
-        .env("PYTHONDONTWRITEBYTECODE", "1")
         .output()
         .map_err(|e| format!("could not run the oracle: {e}"))?;
     if !output.status.success() {
