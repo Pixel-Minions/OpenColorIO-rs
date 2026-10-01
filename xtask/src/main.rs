@@ -13,6 +13,7 @@ mod gate;
 mod guards;
 mod land;
 mod parity;
+mod registers;
 mod scratch;
 mod upstream;
 
@@ -43,7 +44,9 @@ Oracle and fixtures (fixtures/ is written only by these commands):
   fixtures verify            every fixture matches fixtures/MANIFEST.toml, and vice versa
 
 Guardrails:
-  guards                      forbidden patterns, unsafe allowlist, waivers, headers
+  guards                      forbidden patterns, unsafe allowlist, waivers, headers,
+                              the registers' structure (docs/improvements.md,
+                              docs/deviations.md)
   ratchet [--update] [--base <rev>]
                               ported upstream tests may only increase (--update records
                               the current counts; `xtask land` does it at merge time)

@@ -170,6 +170,7 @@ pub(crate) fn run() -> Result<(), String> {
     }
 
     problems.extend(check_dependency_pins(root));
+    problems.extend(crate::registers::check(root));
     problems.extend(crate::upstream::validate(&crate::upstream::load_map()?));
     check_submodule(root, &mut problems);
 
