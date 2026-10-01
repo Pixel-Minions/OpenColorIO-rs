@@ -131,13 +131,14 @@ path = "src/OpenColorIO/CPUProcessor.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/cpu_processor.rs"]
 status = "partial"
-note = "1.1d: BitDepthCast (20-66) and CreateGenericBitDepthHelper (68-116), the conversions at the ends of a CPU processor, which the scanline helper runs; the rest is 1.2d"
+note = "1.1d: BitDepthCast (20-66) and CreateGenericBitDepthHelper (68-116), the conversions at the ends of a CPU processor, which the scanline helper runs; 1.2d: CreateCPUEngine (122-184; its Lut1D ends come with the Lut1D op), FinalizeOpsForCPU (311-338), CPUProcessor::Impl::finalize (341-377) as CpuProcessor::new, the queries and the dynamic properties (242-309, 491-534); next: CreateScanlineHelper and the apply methods"
 
 [[file]]
 path = "src/OpenColorIO/CPUProcessor.h"
 kind = "src"
 target = ["crates/ocio-ops/src/cpu_processor.rs"]
-status = "todo"
+status = "partial"
+note = "1.2d: CPUProcessor::Impl as CpuProcessor; its apply methods come next"
 
 [[file]]
 path = "src/OpenColorIO/Caching.cpp"
