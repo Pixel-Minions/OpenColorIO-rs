@@ -27,7 +27,8 @@ use ocio_ops::exception::Result;
 use ocio_ops::op::{Op, OpVec};
 use ocio_ops::open_color_types::TransformDirection;
 use ocio_ops::ops::matrix::matrix_op::{
-    create_fit_op, create_min_max_op_f32, create_saturation_op, create_scale_offset_op,
+    create_fit_op, create_min_max_op, create_min_max_op_f32, create_saturation_op,
+    create_scale_offset_op,
 };
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle::BatchCall;
@@ -261,6 +262,8 @@ fn min_max_matches_the_wheel() {
         [-4.0, 4.0],
         [0.5, 0.5],
         [1e-3, 3.0e3],
+        // A tiny range: a scale near the float maximum.
+        [0.0, 1e-35],
     ];
     // Random ranges: where `-min * (1 / range)` and `-min / range` round differently.
     let mut rng = Rng::new(0x5b1d);
@@ -307,4 +310,199 @@ fn min_max_matches_the_wheel() {
         })
     });
     std::fs::remove_dir_all(&dir).ok();
+}
+
+/// `CreateSaturationOp` (`MatrixTransform::Sat`) on 200 random saturations, at several
+/// magnitudes, and a few chosen ones, through a `CDLTransform` that otherwise changes nothing.
+#[test]
+fn saturation_matches_the_wheel() {
+    let mut rng = Rng::new(0x5a7);
+    let mut sats = vec![0.0, 1.0, 0.5, 2.0, 1e-300, 1e300];
+    for scale in [-20, -4, 0, 1, 4, 20] {
+        for _ in 0..34 {
+            sats.push(value(&mut rng, scale).abs());
+        }
+    }
+    let mut cases = Vec::new();
+    for sat in sats {
+        for dir in [Forward, Inverse] {
+            cases.push((sat, dir));
+        }
+    }
+    let specs = cases
+        .iter()
+        .map(|(sat, dir)| {
+            json!({
+                "config": {"yaml": V1_CONFIG},
+                "transform": {"class": "CDLTransform", "args": {
+                    "sat": sat,
+                    "direction": dir_enum(*dir),
+                }},
+            })
+        })
+        .collect();
+    let wheel = run(specs);
+    // The default luma coefficients (src/OpenColorIO/ops/cdl/CDLOpData.cpp, Rec. 709).
+    let luma = [0.2126, 0.7152, 0.0722];
+    let (slope4, offset4) = ([1.0; 4], [0.0; 4]);
+    check(&cases, wheel, |(sat, dir)| {
+        port_matrix_ops(|ops| {
+            match dir {
+                Forward => {
+                    create_scale_offset_op(ops, &slope4, &offset4, Forward);
+                    create_saturation_op(ops, *sat, &luma, Forward);
+                }
+                Inverse => {
+                    create_saturation_op(ops, *sat, &luma, Inverse);
+                    create_scale_offset_op(ops, &slope4, &offset4, Inverse);
+                }
+            }
+            Ok(())
+        })
+    });
+}
+
+/// `CreateMinMaxOp` with per-channel bounds: an Iridas `.cube` file's `DOMAIN_MIN` and
+/// `DOMAIN_MAX`, read as `float`s, before its LUT forward and after it inverse
+/// (src/OpenColorIO/fileformats/FileFormatIridasCube.cpp:546-575 @ v2.5.2). Channels at
+/// [0, 1] next to others, equal bounds on one channel (the error), reversed bounds, and random
+/// ones.
+#[test]
+fn per_channel_min_max_matches_the_wheel() {
+    let dir = std::env::temp_dir().join(format!("ocio-rs-domain-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut domains: Vec<([f32; 3], [f32; 3])> = vec![
+        ([0.0; 3], [1.0; 3]),
+        ([0.0, -0.5, 0.1], [1.0, 2.0, 0.9]),
+        ([0.0, 0.0, 0.25], [1.0, 1.0, 0.75]),
+        ([0.5, 0.0, 0.0], [0.5, 1.0, 1.0]),
+        ([0.0, 0.0, 0.3], [1.0, 1.0, 0.3]),
+        ([1.0, 0.0, 0.0], [0.0, 1.0, 1.0]),
+        ([-1e-3, 0.0, 0.0], [1e-3, 1.0, 1e4]),
+    ];
+    let mut rng = Rng::new(0xd0a1);
+    for scale in [-4, 0, 4] {
+        for _ in 0..8 {
+            let v = |rng: &mut Rng| value(rng, scale) as f32;
+            let a = [v(&mut rng), v(&mut rng), v(&mut rng)];
+            let b = [v(&mut rng), v(&mut rng), v(&mut rng)];
+            domains.push((
+                std::array::from_fn(|i| a[i].min(b[i])),
+                std::array::from_fn(|i| a[i].max(b[i])),
+            ));
+        }
+    }
+    let mut cases = Vec::new();
+    let mut specs = Vec::new();
+    let mut paths = Vec::new();
+    for (k, (min, max)) in domains.iter().enumerate() {
+        let path = dir.join(format!("d{k}.cube"));
+        std::fs::write(
+            &path,
+            format!(
+                "LUT_1D_SIZE 2\nDOMAIN_MIN {} {} {}\nDOMAIN_MAX {} {} {}\n0 0 0\n1 1 1\n",
+                min[0], min[1], min[2], max[0], max[1], max[2]
+            ),
+        )
+        .unwrap();
+        for d in [Forward, Inverse] {
+            cases.push((*min, *max, d, paths.len()));
+            specs.push(json!({"transform": {"class": "FileTransform", "args": {
+                "src": path.to_str().unwrap(),
+                "direction": dir_enum(d),
+            }}}));
+        }
+        paths.push(path);
+    }
+    let wheel = run(specs);
+    check(&cases, wheel, |(min, max, d, k)| {
+        let min3 = min.map(f64::from);
+        let max3 = max.map(f64::from);
+        port_matrix_ops(|ops| create_min_max_op(ops, &min3, &max3, *d)).map_err(|e| {
+            // `BuildFileTransformOps` wraps what building the ops raised
+            // (src/OpenColorIO/transforms/FileTransform.cpp:962-970 @ v2.5.2).
+            ocio_ops::exception::Exception::new(format!(
+                "The transform file: {} failed while building ops with this error: {}",
+                paths[*k].to_str().unwrap(),
+                e.message()
+            ))
+        })
+    });
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+/// `CreateMatrixOp(ops, MatrixArrayPtr, TRANSFORM_DIR_INVERSE)`, which the ACES 2 output
+/// transforms use to undo their clamp to AP1 (src/OpenColorIO/transforms/builtins/ACES.cpp:
+/// 511-521 @ v2.5.2): the wheel's processor holds the forward matrix, a range, then the inverse
+/// one, finalized into its forward equivalent. The port makes both ops from the wheel's forward
+/// matrix, finalizes them, and compares their values bit for bit with the processor's
+/// `createGroupTransform()`, through the oracle's `processor_ops`.
+#[test]
+fn matrix_from_array_inverse_matches_the_wheel() {
+    use ocio_ops::op_data::OpData;
+    use ocio_ops::ops::matrix::matrix_op::create_matrix_op_from_array;
+    use ocio_ops::ops::matrix::matrix_op_data::MatrixArray;
+
+    let styles = [
+        "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-100nit-REC709_2.0",
+        "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-1000nit-P3-D65_2.0",
+    ];
+    let calls: Vec<BatchCall<'_>> = styles
+        .iter()
+        .map(|style| BatchCall {
+            cmd: "processor_ops",
+            args: json!({
+                "transform": {"class": "BuiltinTransform", "args": {"style": style}},
+                "optimization": "OPTIMIZATION_NONE",
+            }),
+            blobs: vec![],
+        })
+        .collect();
+    let f64s = |v: &Value| -> Vec<f64> {
+        v.as_array()
+            .unwrap()
+            .iter()
+            .map(|x| f64::from_bits(x["f64"].as_u64().unwrap()))
+            .collect()
+    };
+    let bits = |v: &[f64]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+    for (style, response) in styles.iter().zip(Oracle::get().batch(&calls, true)) {
+        let result = response.unwrap_or_else(|e| panic!("{e}")).result;
+        let children = result["processor"]["group"]["children"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{style}: {result}"));
+        let classes: Vec<&str> = children[..3]
+            .iter()
+            .map(|c| c["class"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            classes,
+            ["MatrixTransform", "RangeTransform", "MatrixTransform"],
+            "{style}"
+        );
+        let forward = f64s(&children[0]["getters"]["getMatrix"]);
+        let mut array = MatrixArray::new();
+        array.get_values_mut().copy_from_slice(&forward);
+
+        let mut ops = OpVec::new();
+        create_matrix_op_from_array(&mut ops, &array, Forward);
+        create_matrix_op_from_array(&mut ops, &array, Inverse);
+        ops.finalize().unwrap();
+        for (op, child) in ops.iter().zip([&children[0], &children[2]]) {
+            let OpData::Matrix(mat) = &**op.data() else {
+                unreachable!("a matrix op")
+            };
+            assert_eq!(mat.get_direction(), Forward, "{style}");
+            assert_eq!(
+                bits(mat.get_array().get_values()),
+                bits(&f64s(&child["getters"]["getMatrix"])),
+                "{style}"
+            );
+            assert_eq!(
+                bits(mat.get_offsets().get_values()),
+                bits(&f64s(&child["getters"]["getOffset"])),
+                "{style}"
+            );
+        }
+    }
 }
