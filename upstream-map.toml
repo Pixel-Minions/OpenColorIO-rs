@@ -254,13 +254,15 @@ status = "todo"
 path = "src/OpenColorIO/GPUProcessor.cpp"
 kind = "src"
 target = ["crates/ocio-gpu/src/gpu_processor.rs"]
-status = "todo"
+status = "partial"
+note = "1.7e: WriteShaderHeader and WriteShaderFooter, checked against the wheel's shaders of processors with no op (gpu_shader, 10 languages). The resource key of the creator overload reaches only begin(), which does nothing, and isn't ported (U-6). GPUProcessor::Impl (finalize, the per-op extraction, the cache ID) waits for the op model (1.2c) and the optimizer"
 
 [[file]]
 path = "src/OpenColorIO/GPUProcessor.h"
 kind = "src"
 target = ["crates/ocio-gpu/src/gpu_processor.rs"]
-status = "todo"
+status = "partial"
+note = "see GPUProcessor.cpp"
 
 [[file]]
 path = "src/OpenColorIO/GpuShader.cpp"
