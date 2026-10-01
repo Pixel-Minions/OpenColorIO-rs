@@ -814,3 +814,23 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Status:** matched in `p1-range` (before 1.3r1), the renderer in `p1-matrix`;
   `matrix_op_tests.rs` checks the errors, the answers with offsets, and that validating clears
   them.
+
+### U-24. Queries of a Gamma op whose channels have too few parameters
+
+- **Upstream:** a basic Gamma style uses one parameter per channel and a moncurve style two,
+  but the setters take any number, and only `validate` checks it
+  (`ops/gamma/GammaOpData.cpp:366-436`). Before that, the queries read the values they need
+  without a check: `isIdentity` (and so `isNoOp`) reads red's first value when the four
+  channels are equal, and a moncurve style's second one when the first is 1
+  (`GammaOpData.cpp:28-38, 512-549`); `getCacheID` prints each channel's first value
+  (`GammaOpData.cpp:40-50, 798-816`); `compose` reads the first value of each channel of both
+  ops (`GammaOpData.cpp:707-745`). On an empty or too short vector, these read past its end.
+  The processors validate their ops first, so only code that queries such an op directly gets
+  there.
+- **Decided** (general rule): the port returns an error from those queries instead, where
+  upstream would read past the end and only there: "GammaOp: a channel has fewer parameters
+  than its style uses: upstream reads past them." `GammaOpData::{is_identity, is_no_op,
+  get_cache_id, compose}` return it.
+- **Status:** matched in `p1-gamma` (1.3g1); `gamma_op_data_tests.rs` checks the errors, and
+  that the reads upstream doesn't make (a moncurve gamma other than 1, channels that differ)
+  are answered.

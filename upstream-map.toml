@@ -1314,15 +1314,15 @@ note = "S2: every renderer, scalar and SSE2, bit-exact against the wheel on Wind
 path = "src/OpenColorIO/ops/gamma/GammaOpData.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_data.rs"]
-status = "partial"
-note = "S2: styles, parameters, accessors, style conversions, identity, direction, isInverse; validate, getCacheID, style strings, mayCompose/compose and getIdentityReplacement are WP 1.3g1"
+status = "done"
+note = "S2, then 1.3g1: the whole class; reads past short parameters are errors (U-24)"
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOpData.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_data.rs"]
-status = "partial"
-note = "S2: styles, parameters, accessors, style conversions, identity, direction, isInverse; validate, getCacheID, style strings, mayCompose/compose and getIdentityReplacement are WP 1.3g1"
+status = "done"
+note = "S2, then 1.3g1: the whole class; reads past short parameters are errors (U-24)"
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOpGPU.cpp"
@@ -4574,7 +4574,8 @@ note = "S2: all 10 tests, without upstream's finalize/optimize/size-1 checks, wh
 path = "tests/cpu/ops/gamma/GammaOpData_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_data_tests.rs"]
-status = "todo"
+status = "done"
+note = "1.3g1: all 12 tests"
 
 [[file]]
 path = "tests/cpu/ops/gamma/GammaOpUtils_tests.cpp"

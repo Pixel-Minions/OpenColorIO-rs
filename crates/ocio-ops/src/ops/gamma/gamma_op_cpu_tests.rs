@@ -25,7 +25,7 @@ const INF: f32 = f32::INFINITY;
 #[track_caller]
 fn apply_gamma(op: &GammaOpData, image: &mut [f32], result: &[f32], error_threshold: f32) {
     // ops.finalize(); ops.optimize(OPTIMIZATION_DEFAULT); OCIO_REQUIRE_EQUAL(ops.size(), 1).
-    assert!(!op.is_no_op() && !op.is_identity());
+    assert!(!op.is_no_op().unwrap() && !op.is_identity().unwrap());
 
     let cpu = get_gamma_renderer(op, true);
     cpu.apply(image);
