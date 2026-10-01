@@ -512,10 +512,16 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   leaves the texture's line in the buffer, which is long enough: I-34.)
 
   The error is `std::out_of_range`, not an OCIO `Exception`. Python sees an `IndexError`, whose
-  message is the C++ library's, so it differs by platform ("invalid string position" through
-  the Windows wheel). It also escapes the `catch (const Exception &)` of
-  `GPUProcessor.cpp:197-201`, so an extraction that meets it doesn't call the creator's
-  `end()`.
+  message is the C++ library's, so it differs by platform:
+  - through the Windows wheel, `invalid string position`;
+  - through the Rocky Linux 9 wheel (the verifier's probe), `basic_string::substr: __pos (which
+    is 6) > this->size() (which is 0)` for the declarations `"texture2d<float> t;\n"`, and
+    `(which is 2)` for `"texture2d<float> t;\nab\n"`. `__pos` can exceed 6: before `substr`
+    throws, the loop that skips spaces (line 333) reads the bytes past the line's end, stale
+    ones of the string's buffer, and steps over any that are white space.
+
+  It also escapes the `catch (const Exception &)` of `GPUProcessor.cpp:197-201`, so an
+  extraction that meets it doesn't call the creator's `end()`.
 - **Who notices:** MSL shaders whose added declaration code declares a texture without a sampler
   after it, or whose resource prefix holds line feeds like U-6's.
 - **Decided** (general rule): the port returns an error exactly where the read would pass the
