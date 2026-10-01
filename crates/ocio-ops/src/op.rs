@@ -362,10 +362,23 @@ impl Op {
         }
     }
 
-    /// Checks the data.
+    /// Checks the data. A 3x3 matrix (from a CLF or CTF file) becomes its canonical 4x4 form in
+    /// the op's data, as upstream's `const` `MatrixArray::validate` makes it through a
+    /// `const_cast` (src/OpenColorIO/ops/matrix/MatrixOpData.cpp:413-436 @ v2.5.2): the op's
+    /// later queries, renderers and cache ID then work on 4 by 4 values. The data is copied
+    /// first if another op shares it ([`Arc::make_mut`]), where upstream changes it for every
+    /// op that shares it.
     ///
     /// Port of `Op::validate` (src/OpenColorIO/Op.cpp:158-161 @ v2.5.2).
-    pub fn validate(&self) -> Result<()> {
+    pub fn validate(&mut self) -> Result<()> {
+        if let OpData::Matrix(mat) = &*self.data
+            && mat.get_array().get_length() == 3
+        {
+            let OpData::Matrix(mat) = Arc::make_mut(&mut self.data) else {
+                unreachable!("the data is a matrix");
+            };
+            return mat.validate();
+        }
         self.data.validate()
     }
 
@@ -763,8 +776,8 @@ impl OpVec {
     /// Checks each op's data.
     ///
     /// Port of `OpRcPtrVec::validate` (src/OpenColorIO/Op.cpp:364-370 @ v2.5.2).
-    pub fn validate(&self) -> Result<()> {
-        for op in &self.ops {
+    pub fn validate(&mut self) -> Result<()> {
+        for op in &mut self.ops {
             op.validate()?;
         }
         Ok(())

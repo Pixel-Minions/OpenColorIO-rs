@@ -277,3 +277,54 @@ fn op_vec_from_matrix_data_in_both_directions() {
         TransformDirection::Inverse
     );
 }
+
+/// A 3x3 matrix in an op, as a CLF or CTF file gives one: validating the op makes it 4x4 in the
+/// op's data, as upstream's `const` `MatrixArray::validate` does through a `const_cast`
+/// (MatrixOpData.cpp:413-436 @ v2.5.2), with the 3x3 values as its RGB part and alpha passed
+/// through (`expandFrom3x3To4x4`, MatrixOpData.cpp:365-372). So finalizing the ops, and a CPU
+/// processor of them, work on 4 by 4 values; before, the processor indexed past the 9 values.
+#[test]
+fn validating_a_3x3_matrix_op_makes_it_4x4() {
+    use crate::cpu_processor::CpuProcessor;
+    use crate::open_color_types::{BitDepth, OptimizationFlags};
+
+    let values3 = [1.1, 0.2, 0.3, 0.4, 1.5, 0.6, 0.7, 0.8, 1.9];
+    let mut data = MatrixOpData::new();
+    data.get_array_mut().resize(3, 3);
+    data.get_array_mut()
+        .get_values_mut()
+        .copy_from_slice(&values3);
+    let mut ops = OpVec::new();
+    create_matrix_op(&mut ops, data, TransformDirection::Forward);
+    let shared = ops[0].clone();
+
+    // The processor validates a copy of the ops.
+    let cpu =
+        CpuProcessor::new(&ops, BitDepth::F32, BitDepth::F32, OptimizationFlags::NONE).unwrap();
+
+    ops.finalize().unwrap();
+    let expanded = matrix(&ops[0]).get_array();
+    assert_eq!(expanded.get_length(), 4);
+    assert_eq!(
+        expanded.get_values()[..],
+        [
+            1.1, 0.2, 0.3, 0.0, //
+            0.4, 1.5, 0.6, 0.0, //
+            0.7, 0.8, 1.9, 0.0, //
+            0.0, 0.0, 0.0, 1.0,
+        ]
+    );
+    // An op sharing the data before keeps its 3x3 copy.
+    assert_eq!(matrix(&shared).get_array().get_length(), 3);
+
+    let mut ops4 = OpVec::new();
+    let mut data4 = MatrixOpData::new();
+    data4
+        .get_array_mut()
+        .get_values_mut()
+        .copy_from_slice(expanded.get_values());
+    create_matrix_op(&mut ops4, data4, TransformDirection::Forward);
+    let cpu4 =
+        CpuProcessor::new(&ops4, BitDepth::F32, BitDepth::F32, OptimizationFlags::NONE).unwrap();
+    assert_eq!(cpu.get_cache_id(), cpu4.get_cache_id());
+}
