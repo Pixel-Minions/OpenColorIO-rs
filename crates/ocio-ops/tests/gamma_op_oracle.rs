@@ -174,6 +174,20 @@ fn chains() -> Vec<Vec<T>> {
             T::Exp([0.5, 0.5, 1.5, 1.0], Mirror, F),
             T::Exp([0.5, 0.5, 0.5, 1.0], Mirror, F),
         ],
+        // Red and green below 1 but blue above: no inversion (all three must be below 1).
+        vec![
+            T::Exp([0.5, 0.5, 2.0, 1.0], Clamp, F),
+            T::Exp([0.5, 0.5, 1.0, 1.0], Clamp, F),
+        ],
+        // A forward/inverse pair that differs only in alpha: not an inverse pair.
+        vec![
+            T::Exp([2.2, 2.2, 2.2, 1.0], Clamp, F),
+            T::Exp([2.2, 2.2, 2.2, 1.5], Clamp, I),
+        ],
+        // A moncurve gamma of 1 with an offset: not an identity (`IsMonCurveIdentity` reads
+        // the offset after the gamma).
+        vec![T::Lin([1.0; 4], [0.1; 4], Linear, F)],
+        vec![T::Lin([1.0; 4], [0.1; 4], Mirror, I)],
         // Three in a row, then an identity left behind.
         vec![
             T::Exp(v, Clamp, F),
