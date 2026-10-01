@@ -568,7 +568,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   while a full matrix keeps it as a 17-digit `double`. Through the wheel, in GLSL: a diagonal
   of 1e39 gives `vec4(inf, 1., 1., 1.) * res`; the same value in a full matrix gives
   `mat4(9.9999999999999994e+38., ...)` (I-30's `.`); offsets of 1e39 and -1e39 give
-  `vec4(inf, -inf, 0., 0.)`; NaN parameters give `nan`.
+  `vec4(inf, -inf, 0., 0.)`; NaN parameters give `nan`. In Cg, ±inf and values beyond the
+  half range are clamped to ±65504 first (e.g. `half4(65504., -65504., 0., 0.)`), so those
+  shaders compile; only `nan` stays invalid.
 - **Who notices:** shaders for transforms with NaN or infinite parameters, or diagonal matrices
   and offsets beyond the float range: the shader doesn't compile. The CPU renders them.
 - **A fix:** write non-finite values in a form each language accepts (`1.0/0.0`,
