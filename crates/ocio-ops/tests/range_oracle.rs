@@ -254,6 +254,16 @@ fn range_transform_matches_the_wheel() {
         ("constant", Range::clamp([0.0, 1.0, 0.5, 0.5])),
         ("zero bounds", Range::clamp([-0.0, 0.0 + 1e-3, 0.0, -0.0])),
         ("scale is zero", Range::clamp([0.0, 1.0, 0.25, 0.25])),
+        // `scales()` takes an offset up to 1e-6 for none: the clamp renderer below it, the
+        // scaling one above.
+        (
+            "offset below 1e-6",
+            Range::clamp([0.0, 1.0, 0.5e-6, 1.0 + 0.5e-6]),
+        ),
+        (
+            "offset above 1e-6",
+            Range::clamp([0.0, 1.0, 1.5e-6, 1.0 + 1.5e-6]),
+        ),
         // Bounds past the float range: infinite float bounds.
         ("float overflow", Range::clamp([-1e39, 1e39, -1e39, 1e39])),
         // A NaN scale and offset: the differences overflow.
