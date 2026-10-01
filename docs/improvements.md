@@ -333,6 +333,22 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   debug log.
 - **A fix:** stop at 80 passes, and log when the cap stops the loop.
 - **Status:** matched in `p1-engine` (1.2d).
+### I-50. A max-only range followed by a min-only one can't be optimized
+
+- **Upstream:** `RangeOpData::compose` (`ops/range/RangeOpData.cpp:352-431`) keeps the first
+  range's input bounds when the composition outputs a constant. For a range with only a
+  maximum followed by one with only a minimum at or above it (or the other way round), the
+  result has an output bound set where its input bound is empty, and its constructor's
+  `validate` raises ("In and out minimum limits must be both set or both missing in Range.",
+  or the maximum's). So the optimizer, which combines neighbouring Range ops
+  (`RangeOp::combineWith`, `ops/range/RangeOp.cpp:150-174`), can't build the CPU processor,
+  at every optimization level that combines ranges. Seen through the wheel, for
+  `[-, 0.5] -> [-, 0.5]` then `[0.5, -] -> [0.5, -]`, and the reverse.
+- **Who notices:** a processor with such a pair of ranges, which raises instead of clamping
+  every value to 0.5.
+- **A fix:** compose into the constant range over the combined input bounds (`minInNew`,
+  `maxInNew`).
+- **Status:** matched in `p1-range` (1.3r2).
 
 ## Transforms
 

@@ -17,6 +17,7 @@ use crate::exception::{Exception, Result};
 use crate::format_metadata::{FormatMetadataImpl, METADATA_ID, METADATA_NAME};
 use crate::ops::matrix::MatrixOpData;
 use crate::ops::noop::NoOpData;
+use crate::ops::range::RangeOpData;
 use crate::ops::reference::ReferenceOpData;
 
 /// The type of an op's data.
@@ -95,6 +96,8 @@ pub fn get_type_name(op_type: OpDataType) -> Result<&'static str> {
 pub enum OpData {
     /// `MatrixOpData`.
     Matrix(MatrixOpData),
+    /// `RangeOpData`.
+    Range(RangeOpData),
     /// `ReferenceOpData`.
     Reference(ReferenceOpData),
     /// `NoOpData` and its subclass `FileNoOpData`.
@@ -114,6 +117,7 @@ impl OpData {
     pub fn get_type(&self) -> OpDataType {
         match self {
             OpData::Matrix(data) => data.get_type(),
+            OpData::Range(data) => data.get_type(),
             OpData::Reference(_) => OpDataType::Reference,
             OpData::NoOp(_) => OpDataType::NoOp,
         }
@@ -127,6 +131,8 @@ impl OpData {
             // On a shared reference: a 3x3 matrix is checked as its 4x4 form, which upstream's
             // `const` validate keeps through a `const_cast` (`MatrixOpData::validate_ref`).
             OpData::Matrix(data) => data.validate_ref(),
+            // `const`, and fills the `mutable` scale and offset.
+            OpData::Range(data) => data.validate(),
             OpData::Reference(data) => {
                 data.validate();
                 Ok(())
@@ -144,6 +150,7 @@ impl OpData {
     pub fn is_no_op(&self) -> Result<bool> {
         match self {
             OpData::Matrix(data) => data.is_no_op(),
+            OpData::Range(data) => Ok(data.is_no_op()),
             OpData::Reference(data) => Ok(data.is_no_op()),
             OpData::NoOp(data) => Ok(data.is_no_op()),
         }
@@ -156,6 +163,7 @@ impl OpData {
     pub fn is_identity(&self) -> Result<bool> {
         match self {
             OpData::Matrix(data) => data.is_identity(),
+            OpData::Range(data) => Ok(data.is_identity()),
             OpData::Reference(data) => Ok(data.is_identity()),
             OpData::NoOp(data) => Ok(data.is_identity()),
         }
@@ -169,7 +177,7 @@ impl OpData {
     pub fn get_simpler_replacement(&self, _ops: &mut OpDataVec) -> Result<()> {
         match self {
             // The OpData default: nothing.
-            OpData::Matrix(_) | OpData::Reference(_) | OpData::NoOp(_) => Ok(()),
+            OpData::Matrix(_) | OpData::Range(_) | OpData::Reference(_) | OpData::NoOp(_) => Ok(()),
         }
     }
 
@@ -181,7 +189,7 @@ impl OpData {
     pub fn get_identity_replacement(&self) -> OpData {
         match self {
             // The OpData default: `std::make_shared<MatrixOpData>()`, the identity.
-            OpData::Matrix(_) | OpData::Reference(_) | OpData::NoOp(_) => {
+            OpData::Matrix(_) | OpData::Range(_) | OpData::Reference(_) | OpData::NoOp(_) => {
                 OpData::Matrix(MatrixOpData::new())
             }
         }
@@ -195,6 +203,7 @@ impl OpData {
     pub fn has_channel_crosstalk(&self) -> bool {
         match self {
             OpData::Matrix(data) => data.has_channel_crosstalk(),
+            OpData::Range(data) => data.has_channel_crosstalk(),
             OpData::Reference(data) => data.has_channel_crosstalk(),
             OpData::NoOp(data) => data.has_channel_crosstalk(),
         }
@@ -208,6 +217,7 @@ impl OpData {
     pub fn equals(&self, other: &OpData) -> bool {
         match self {
             OpData::Matrix(data) => matches!(other, OpData::Matrix(other) if data.equals(other)),
+            OpData::Range(data) => matches!(other, OpData::Range(other) if data.equals(other)),
             OpData::Reference(data) => {
                 matches!(other, OpData::Reference(other) if data.equals(other))
             }
@@ -222,6 +232,7 @@ impl OpData {
     pub fn get_cache_id(&self) -> Result<Vec<u8>> {
         match self {
             OpData::Matrix(data) => data.get_cache_id(),
+            OpData::Range(data) => Ok(data.get_cache_id()),
             OpData::Reference(data) => data.get_cache_id(),
             OpData::NoOp(data) => Ok(data.get_cache_id()),
         }
@@ -233,6 +244,7 @@ impl OpData {
     pub fn get_format_metadata(&self) -> &FormatMetadataImpl {
         match self {
             OpData::Matrix(data) => data.get_format_metadata(),
+            OpData::Range(data) => data.get_format_metadata(),
             OpData::Reference(data) => data.get_format_metadata(),
             OpData::NoOp(data) => data.get_format_metadata(),
         }
@@ -244,6 +256,7 @@ impl OpData {
     pub fn get_format_metadata_mut(&mut self) -> &mut FormatMetadataImpl {
         match self {
             OpData::Matrix(data) => data.get_format_metadata_mut(),
+            OpData::Range(data) => data.get_format_metadata_mut(),
             OpData::Reference(data) => data.get_format_metadata_mut(),
             OpData::NoOp(data) => data.get_format_metadata_mut(),
         }
