@@ -16,7 +16,8 @@
 
 Like every oracle command, these report what the library does and never compute expected
 values. Requests are checked: an unknown key, operation or level name is an error, so a typo
-can't pass unnoticed.
+can't pass unnoticed, and so is a value of the wrong shape (a string where a list or a pair is
+expected, a bool or a string as an index).
 
 A Python logging function still installed when the interpreter exits crashes the wheel, on
 both platforms. Every command here that installs one resets it before it returns, and
@@ -50,6 +51,29 @@ def _string(what, value):
     return value
 
 
+def _list(what, value):
+    """`value`, refused unless it is a JSON array (a string would iterate as its characters)."""
+    if not isinstance(value, list):
+        raise ValueError(f"{what} must be a list, not {value!r}")
+    return value
+
+
+def _pair(what, value):
+    """`value`, refused unless it is a JSON array of two items (a string of two characters
+    would unpack as a pair)."""
+    if not isinstance(value, list) or len(value) != 2:
+        raise ValueError(f"{what} must be a list of two items, not {value!r}")
+    return value
+
+
+def _index(what, value):
+    """`value`, refused unless it is a JSON integer (a bool isn't one, though Python makes it
+    an index of 0 or 1)."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{what} must be an integer, not {value!r}")
+    return value
+
+
 def _level(name):
     """A LoggingLevel from its name, such as "LOGGING_LEVEL_INFO"."""
     if not isinstance(name, str) or not name.startswith("LOGGING_LEVEL_") \
@@ -78,6 +102,13 @@ def _metadata_node(root, path):
     for index in path:
         node = node.getChildElements()[index]
     return node
+
+
+def _check_path(what, path):
+    """A path of child indices, refused unless it is a list of integers."""
+    for i, index in enumerate(_list(what, path)):
+        _index(f"{what}[{i}]", index)
+    return path
 
 
 def _metadata_tree(node):
@@ -114,7 +145,7 @@ def format_metadata_ops(args, blobs):
     """
     _check_keys("format_metadata_ops", args, ["scenarios"])
     results = []
-    for s, scenario in enumerate(args["scenarios"]):
+    for s, scenario in enumerate(_list("scenarios", args["scenarios"])):
         if not isinstance(scenario, list):
             raise ValueError(f"scenarios[{s}] must be a list of operations")
         root = OCIO.MatrixTransform().getFormatMetadata()
@@ -125,10 +156,10 @@ def format_metadata_ops(args, blobs):
                 raise ValueError(f"scenarios[{s}][{i}]: unknown operation in {op!r}")
             keys, call = METADATA_OPS[name]
             _check_keys(f"scenarios[{s}][{i}] ({name})", op, ("op", "path") + keys)
+            _check_path(f"scenarios[{s}][{i}].path", op["path"])
             for key in keys:
                 if key == "index":
-                    if not isinstance(op[key], int):
-                        raise ValueError(f"scenarios[{s}][{i}]: index must be an integer")
+                    _index(f"scenarios[{s}][{i}]: index", op[key])
                 else:
                     _string(f"scenarios[{s}][{i}].{key}", op[key])
             try:
@@ -148,9 +179,11 @@ def _metadata_transform(what, spec):
     _check_keys(what, spec, ["attributes", "children"])
     transform = OCIO.MatrixTransform(matrix=COMBINE_MATRIX)
     metadata = transform.getFormatMetadata()
-    for name, value in spec["attributes"]:
+    for name, value in (_pair(f"{what}.attributes[]", a)
+                        for a in _list(f"{what}.attributes", spec["attributes"])):
         metadata[_string(what, name)] = _string(what, value)
-    for name, value in spec["children"]:
+    for name, value in (_pair(f"{what}.children[]", c)
+                        for c in _list(f"{what}.children", spec["children"])):
         metadata.addChildElement(_string(what, name), _string(what, value))
     return transform
 
@@ -173,7 +206,7 @@ def format_metadata_combine(args, blobs):
     """
     _check_keys("format_metadata_combine", args, ["cases"])
     results = []
-    for c, case in enumerate(args["cases"]):
+    for c, case in enumerate(_list("cases", args["cases"])):
         _check_keys(f"cases[{c}]", case, ["first", "second"])
         try:
             group = OCIO.GroupTransform()
@@ -207,9 +240,9 @@ def log_message(args, blobs):
       order level, then message.
     """
     _check_keys("log_message", args, ["settings", "levels", "messages"])
-    settings = [_level(name) for name in args["settings"]]
-    levels = [_level(name) for name in args["levels"]]
-    messages = [_string("messages[]", m) for m in args["messages"]]
+    settings = [_level(name) for name in _list("settings", args["settings"])]
+    levels = [_level(name) for name in _list("levels", args["levels"])]
+    messages = [_string("messages[]", m) for m in _list("messages", args["messages"])]
     received = []
     previous = OCIO.GetLoggingLevel()
     OCIO.SetLoggingFunction(received.append)
@@ -246,8 +279,9 @@ def logging_level_strings(args, blobs):
     """
     _check_keys("logging_level_strings", args, ["from_string", "to_string"])
     from_string = [OCIO.LoggingLevelFromString(_string("from_string[]", s)).name
-                   for s in args["from_string"]]
-    to_string = [OCIO.LoggingLevelToString(_level(name)) for name in args["to_string"]]
+                   for s in _list("from_string", args["from_string"])]
+    to_string = [OCIO.LoggingLevelToString(_level(name))
+                 for name in _list("to_string", args["to_string"])]
     return {"from_string": from_string, "to_string": to_string}, []
 
 
@@ -288,9 +322,11 @@ def logging_environment(args, blobs):
     """OCIO_LOGGING_LEVEL, in a new Python process per case.
 
     OCIO reads the variable once per process, the first time it needs the level, and the
-    oracle's own environment has no OCIO_* variable. Each case starts `python -c` with this
+    oracle's own environment has no OCIO_* variable. Each case starts `python -I -c` with this
     oracle's interpreter and environment, less every OCIO_* variable, plus OCIO_LOGGING_LEVEL
-    when the case sets it. The new process:
+    when the case sets it. Isolated mode (-I) ignores every PYTHON* variable, which could change
+    the child's stderr bytes (PYTHONVERBOSE, PYTHONWARNINGS), and the user's site-packages. The
+    new process:
       1. when "custom_function" is true, sets a logging function that collects the lines;
       2. reads GetLoggingLevel(), which reads the variable (a bad value writes a warning to
          stderr, and "debug" a version line);
@@ -314,7 +350,7 @@ def logging_environment(args, blobs):
     """
     _check_keys("logging_environment", args, ["cases"])
     results, out = [], []
-    for c, case in enumerate(args["cases"]):
+    for c, case in enumerate(_list("cases", args["cases"])):
         _check_keys(f"cases[{c}]", case, ["env", "custom_function", "set_level", "messages",
                                           "messages_after_reset"])
         if case["env"] is not None:
@@ -324,13 +360,14 @@ def logging_environment(args, blobs):
         if case["set_level"] is not None:
             _level(case["set_level"])
         for key in ("messages", "messages_after_reset"):
-            for level, message in case[key]:
+            for item in _list(f"cases[{c}].{key}", case[key]):
+                level, message = _pair(f"cases[{c}].{key}[]", item)
                 _level(level)
                 _string(f"cases[{c}].{key}[]", message)
         env = {k: v for k, v in os.environ.items() if k != "OCIO" and not k.startswith("OCIO_")}
         if case["env"] is not None:
             env["OCIO_LOGGING_LEVEL"] = case["env"]
-        child = subprocess.run([sys.executable, "-c", _ENVIRONMENT_CHILD],
+        child = subprocess.run([sys.executable, "-I", "-c", _ENVIRONMENT_CHILD],
                                input=json.dumps(case).encode("utf-8"), env=env,
                                capture_output=True, timeout=120)
         try:

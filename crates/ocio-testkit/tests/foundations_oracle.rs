@@ -201,6 +201,71 @@ fn requests_with_unknown_keys_or_names_are_refused() {
                               "messages": [], "messages_after_reset": []}]}),
             "must be a string",
         ),
+        // Shapes: a string where a list is expected, a two-character string where a pair is,
+        // and a bool or a string as an index.
+        (
+            "format_metadata_ops",
+            json!({"scenarios": "ab"}),
+            "scenarios must be a list",
+        ),
+        (
+            "format_metadata_ops",
+            json!({"scenarios": [[{"op": "clear", "path": "0"}]]}),
+            "path must be a list",
+        ),
+        (
+            "format_metadata_ops",
+            json!({"scenarios": [[{"op": "clear", "path": [true]}]]}),
+            "must be an integer, not True",
+        ),
+        (
+            "format_metadata_ops",
+            json!({"scenarios": [[{"op": "get_child_element", "path": [], "index": true}]]}),
+            "must be an integer, not True",
+        ),
+        (
+            "format_metadata_combine",
+            json!({"cases": "ab"}),
+            "cases must be a list",
+        ),
+        (
+            "format_metadata_combine",
+            json!({"cases": [{"first": {"attributes": ["ab"], "children": []},
+                              "second": {"attributes": [], "children": []}}]}),
+            "must be a list of two items",
+        ),
+        (
+            "format_metadata_combine",
+            json!({"cases": [{"first": {"attributes": [], "children": "ab"},
+                              "second": {"attributes": [], "children": []}}]}),
+            "children must be a list",
+        ),
+        (
+            "log_message",
+            json!({"settings": "LOGGING_LEVEL_INFO", "levels": [], "messages": []}),
+            "settings must be a list",
+        ),
+        (
+            "log_message",
+            json!({"settings": [], "levels": [], "messages": "ab"}),
+            "messages must be a list",
+        ),
+        (
+            "logging_level_strings",
+            json!({"from_string": "info", "to_string": []}),
+            "from_string must be a list",
+        ),
+        (
+            "logging_environment",
+            json!({"cases": "ab"}),
+            "cases must be a list",
+        ),
+        (
+            "logging_environment",
+            json!({"cases": [{"env": null, "custom_function": false, "set_level": null,
+                              "messages": ["ab"], "messages_after_reset": []}]}),
+            "must be a list of two items",
+        ),
     ];
     let calls: Vec<BatchCall<'_>> = refused
         .iter()
@@ -211,5 +276,47 @@ fn requests_with_unknown_keys_or_names_are_refused() {
             Ok(response) => panic!("{cmd} {args} was accepted: {}", response.result),
             Err(error) => assert!(error.contains(fragment), "{cmd} {args}: {error}"),
         }
+    }
+}
+
+/// Runs `logging_environment` in a Python process whose environment has `PYTHON*` variables
+/// that change what Python writes to stderr, then again without them, and prints whether each
+/// case's stderr bytes and report are the same.
+const ISOLATED_CHILD: &str = r#"
+import json, os, sys
+from ocio_oracle.foundations import logging_environment
+cases = json.loads(sys.argv[1])
+plain, plain_err = logging_environment({"cases": cases}, [])
+os.environ["PYTHONVERBOSE"] = "1"
+os.environ["PYTHONWARNINGS"] = "error"
+os.environ["PYTHONDEVMODE"] = "1"
+noisy, noisy_err = logging_environment({"cases": cases}, [])
+for a, b, ea, eb in zip(plain, noisy, plain_err, noisy_err):
+    print(json.dumps({"same_stderr": ea == eb, "same_report": a["report"] == b["report"],
+                      "returncodes": [a["returncode"], b["returncode"]]}))
+"#;
+
+/// The process `logging_environment` starts ignores the `PYTHON*` variables of the oracle's
+/// environment (`python -I`): `PYTHONVERBOSE`, `PYTHONWARNINGS` and `PYTHONDEVMODE` change
+/// neither its stderr bytes nor its report.
+#[test]
+fn the_environment_process_ignores_python_variables() {
+    let cases = vec![
+        environment_case(None, false),
+        environment_case(Some("debug"), false),
+        environment_case(Some("bogus"), true),
+    ];
+    let lines = Oracle::get().run_script(
+        ISOLATED_CHILD,
+        &[serde_json::to_string(&cases).expect("JSON")],
+    );
+    assert_eq!(lines.len(), cases.len(), "{lines:?}");
+    for (case, line) in cases.iter().zip(&lines) {
+        let result: Value = serde_json::from_str(line).expect("the script's JSON");
+        assert_eq!(
+            result,
+            json!({"same_stderr": true, "same_report": true, "returncodes": [0, 0]}),
+            "{case}"
+        );
     }
 }
