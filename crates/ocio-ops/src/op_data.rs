@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use crate::exception::{Exception, Result};
 use crate::format_metadata::{FormatMetadataImpl, METADATA_ID, METADATA_NAME};
+use crate::ops::cdl::CdlOpData;
 use crate::ops::gamma::GammaOpData;
 use crate::ops::matrix::MatrixOpData;
 use crate::ops::noop::NoOpData;
@@ -95,6 +96,8 @@ pub fn get_type_name(op_type: OpDataType) -> Result<&'static str> {
 /// Port of `OpData` (src/OpenColorIO/Op.h:93-171, Op.cpp:44-104 @ v2.5.2).
 #[derive(Debug, Clone)]
 pub enum OpData {
+    /// `CDLOpData`.
+    Cdl(CdlOpData),
     /// `GammaOpData`.
     Gamma(GammaOpData),
     /// `MatrixOpData`.
@@ -119,6 +122,7 @@ impl OpData {
     /// Port of `OpData::getType`, pure virtual (src/OpenColorIO/Op.h:136 @ v2.5.2).
     pub fn get_type(&self) -> OpDataType {
         match self {
+            OpData::Cdl(data) => data.get_type(),
             OpData::Gamma(data) => data.get_type(),
             OpData::Matrix(data) => data.get_type(),
             OpData::Range(data) => data.get_type(),
@@ -132,6 +136,7 @@ impl OpData {
     /// Port of `OpData::validate`, pure virtual (src/OpenColorIO/Op.h:134 @ v2.5.2).
     pub fn validate(&self) -> Result<()> {
         match self {
+            OpData::Cdl(data) => data.validate(),
             OpData::Gamma(data) => data.validate(),
             // On a shared reference: a 3x3 matrix is checked as its 4x4 form, which upstream's
             // `const` validate keeps through a `const_cast` (`MatrixOpData::validate_ref`).
@@ -154,6 +159,7 @@ impl OpData {
     /// Port of `OpData::isNoOp`, pure virtual (src/OpenColorIO/Op.h:138-139 @ v2.5.2).
     pub fn is_no_op(&self) -> Result<bool> {
         match self {
+            OpData::Cdl(data) => Ok(data.is_no_op()),
             OpData::Gamma(data) => data.is_no_op(),
             OpData::Matrix(data) => data.is_no_op(),
             OpData::Range(data) => Ok(data.is_no_op()),
@@ -168,6 +174,7 @@ impl OpData {
     /// Port of `OpData::isIdentity`, pure virtual (src/OpenColorIO/Op.h:141-143 @ v2.5.2).
     pub fn is_identity(&self) -> Result<bool> {
         match self {
+            OpData::Cdl(data) => Ok(data.is_identity()),
             OpData::Gamma(data) => data.is_identity(),
             OpData::Matrix(data) => data.is_identity(),
             OpData::Range(data) => Ok(data.is_identity()),
@@ -181,8 +188,13 @@ impl OpData {
     ///
     /// Port of `OpData::getSimplerReplacement` (src/OpenColorIO/Op.h:147-148, Op.cpp:69-71 @
     /// v2.5.2).
-    pub fn get_simpler_replacement(&self, _ops: &mut OpDataVec) -> Result<()> {
+    pub fn get_simpler_replacement(&self, ops: &mut OpDataVec) -> Result<()> {
         match self {
+            // Port of `CDLOpData::getSimplerReplacement`.
+            OpData::Cdl(data) => {
+                data.get_simpler_replacement(ops);
+                Ok(())
+            }
             // The OpData default: nothing.
             OpData::Gamma(_)
             | OpData::Matrix(_)
@@ -199,6 +211,8 @@ impl OpData {
     /// v2.5.2) and its overrides.
     pub fn get_identity_replacement(&self) -> OpData {
         match self {
+            // Port of `CDLOpData::getIdentityReplacement`.
+            OpData::Cdl(data) => data.get_identity_replacement(),
             // Port of `GammaOpData::getIdentityReplacement`.
             OpData::Gamma(data) => data.get_identity_replacement(),
             // The OpData default: `std::make_shared<MatrixOpData>()`, the identity.
@@ -215,6 +229,7 @@ impl OpData {
     /// v2.5.2).
     pub fn has_channel_crosstalk(&self) -> bool {
         match self {
+            OpData::Cdl(data) => data.has_channel_crosstalk(),
             OpData::Gamma(data) => data.has_channel_crosstalk(),
             OpData::Matrix(data) => data.has_channel_crosstalk(),
             OpData::Range(data) => data.has_channel_crosstalk(),
@@ -230,6 +245,7 @@ impl OpData {
     /// also covers); each override then compares its parameters.
     pub fn equals(&self, other: &OpData) -> bool {
         match self {
+            OpData::Cdl(data) => matches!(other, OpData::Cdl(other) if data.equals(other)),
             OpData::Gamma(data) => matches!(other, OpData::Gamma(other) if data.equals(other)),
             OpData::Matrix(data) => matches!(other, OpData::Matrix(other) if data.equals(other)),
             OpData::Range(data) => matches!(other, OpData::Range(other) if data.equals(other)),
@@ -246,6 +262,7 @@ impl OpData {
     /// Port of `OpData::getCacheID`, pure virtual (src/OpenColorIO/Op.h:159-160 @ v2.5.2).
     pub fn get_cache_id(&self) -> Result<Vec<u8>> {
         match self {
+            OpData::Cdl(data) => Ok(data.get_cache_id()),
             OpData::Gamma(data) => data.get_cache_id(),
             OpData::Matrix(data) => data.get_cache_id(),
             OpData::Range(data) => Ok(data.get_cache_id()),
@@ -259,6 +276,7 @@ impl OpData {
     /// Port of `OpData::getFormatMetadata() const` (src/OpenColorIO/Op.h:164 @ v2.5.2).
     pub fn get_format_metadata(&self) -> &FormatMetadataImpl {
         match self {
+            OpData::Cdl(data) => data.get_format_metadata(),
             OpData::Gamma(data) => data.get_format_metadata(),
             OpData::Matrix(data) => data.get_format_metadata(),
             OpData::Range(data) => data.get_format_metadata(),
@@ -272,6 +290,7 @@ impl OpData {
     /// Port of `OpData::getFormatMetadata()` (src/OpenColorIO/Op.h:163 @ v2.5.2).
     pub fn get_format_metadata_mut(&mut self) -> &mut FormatMetadataImpl {
         match self {
+            OpData::Cdl(data) => data.get_format_metadata_mut(),
             OpData::Gamma(data) => data.get_format_metadata_mut(),
             OpData::Matrix(data) => data.get_format_metadata_mut(),
             OpData::Range(data) => data.get_format_metadata_mut(),
