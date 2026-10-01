@@ -75,7 +75,7 @@ fn create_appends_one_op_each() {
 #[test]
 fn the_no_ops_leave_pixels_alone() {
     // What upstream's NoOps tests check of each no-op (NoOps_tests.cpp:284-345 @ v2.5.2).
-    for op in the_no_ops().iter() {
+    for op in the_no_ops().iter_mut() {
         assert!(op.is_no_op_type());
         assert_eq!(op.data().get_type(), OpDataType::NoOp);
         assert!(op.is_no_op());

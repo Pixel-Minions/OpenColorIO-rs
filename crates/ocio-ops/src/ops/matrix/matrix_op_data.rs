@@ -731,8 +731,8 @@ impl MatrixOpData {
 
     /// [`validate`](Self::validate) on a shared reference. A 3x3 matrix is checked in its 4x4
     /// form, which isn't kept; any other is left alone by `validate`, which this runs on a copy
-    /// only for a 3x3 one. An op's matrix is 4x4: the transforms and the file readers validate
-    /// the data before building ops.
+    /// only for a 3x3 one. An op keeps the 4x4 form: [`crate::op::Op::validate`] runs
+    /// `validate` on the op's own data.
     pub fn validate_ref(&self) -> Result<()> {
         if self.array.get_length() == 3 {
             return self.clone().validate();

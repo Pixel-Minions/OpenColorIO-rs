@@ -71,7 +71,7 @@ fn cpu_op_has_no_dynamic_property_by_default() {
 
 #[test]
 fn an_empty_list() {
-    let ops = OpVec::new();
+    let mut ops = OpVec::new();
     assert!(ops.is_empty());
     assert_eq!(ops.get_format_metadata(), &FormatMetadataImpl::root());
     assert!(ops.is_no_op());
