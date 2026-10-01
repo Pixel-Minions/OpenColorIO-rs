@@ -5,6 +5,7 @@
 
 pub mod allocation;
 pub mod cdl;
+pub mod exponent;
 pub mod gamma;
 pub mod log;
 pub mod lut3d;

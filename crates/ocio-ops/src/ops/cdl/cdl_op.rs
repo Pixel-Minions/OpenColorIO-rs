@@ -52,6 +52,7 @@ impl CdlOpData {
             OpData::Gamma(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
+            | OpData::Exponent(_)
             | OpData::Reference(_)
             | OpData::NoOp(_) => false,
         }
