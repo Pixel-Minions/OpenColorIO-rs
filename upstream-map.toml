@@ -1149,9 +1149,9 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/ops/exponent/ExponentOp.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/exponent/exponent_op.rs", "crates/ocio-ops/src/ops/exponent/exponent_op_data.rs", "crates/ocio-ops/src/ops/exponent/exponent_op_cpu.rs"]
+target = ["crates/ocio-ops/src/ops/exponent/exponent_op.rs", "crates/ocio-ops/src/ops/exponent/exponent_op_data.rs", "crates/ocio-ops/src/ops/exponent/exponent_op_cpu.rs", "crates/ocio-gpu/src/ops/exponent/exponent_op_gpu.rs"]
 status = "partial"
-note = "1.3e1 (p1-exponent): ExponentOpData, ExponentOpCPU, ExponentOp's behaviors (OpData::Exponent) and both CreateExponentOp; checked against the wheel through a version 1 config (exponent_oracle.rs). Still to come: extractGpuShaderInfo (its GPU part, ocio-gpu) and CreateExponentTransform (1.8)"
+note = "1.3e1 (p1-exponent): ExponentOpData, ExponentOpCPU, ExponentOp's behaviors (OpData::Exponent) and both CreateExponentOp; checked against the wheel through a version 1 config (exponent_oracle.rs). Its GPU part: extractGpuShaderInfo in ocio-gpu (exponent_op_gpu.rs, exponent_op_gpu_oracle.rs). Still to come: CreateExponentTransform (1.8)"
 
 [[file]]
 path = "src/OpenColorIO/ops/exponent/ExponentOp.h"
