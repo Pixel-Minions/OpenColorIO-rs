@@ -824,13 +824,14 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   channels are equal, and a moncurve style's second one when the first is 1
   (`GammaOpData.cpp:28-38, 512-549`); `getCacheID` prints each channel's first value
   (`GammaOpData.cpp:40-50, 798-816`); `compose` reads the first value of each channel of both
-  ops (`GammaOpData.cpp:707-745`). On an empty or too short vector, these read past its end.
-  The processors validate their ops first, so only code that queries such an op directly gets
-  there.
+  ops (`GammaOpData.cpp:707-745`); the CPU renderers read each channel's first value, and a
+  moncurve style's second (`ops/gamma/GammaOpCPU.cpp:295-318`, `GammaOpUtils.cpp:32-120`). On
+  an empty or too short vector, these read past its end. The processors validate their ops
+  first, so only code that queries such an op directly gets there.
 - **Decided** (general rule): the port returns an error from those queries instead, where
   upstream would read past the end and only there: "GammaOp: a channel has fewer parameters
   than its style uses: upstream reads past them." `GammaOpData::{is_identity, is_no_op,
-  get_cache_id, compose}` return it.
-- **Status:** matched in `p1-gamma` (1.3g1); `gamma_op_data_tests.rs` checks the errors, and
-  that the reads upstream doesn't make (a moncurve gamma other than 1, channels that differ)
-  are answered.
+  get_cache_id, compose}` and `get_gamma_renderer` return it.
+- **Status:** matched in `p1-gamma` (1.3g1, the renderers in 1.3g2); `gamma_op_data_tests.rs`
+  and `gamma_op_cpu_tests.rs` check the errors, and that the reads upstream doesn't make (a
+  moncurve gamma other than 1, channels that differ) are answered.

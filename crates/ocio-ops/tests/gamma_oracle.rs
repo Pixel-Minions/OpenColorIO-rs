@@ -8,8 +8,19 @@
 //! The oracle builds an ExponentTransform or ExponentWithLinearTransform in a raw config (a
 //! version 2 config, so an ExponentTransform becomes a GammaOp, not an ExponentOp) and applies
 //! its CPU processor to F32 RGBA pixels. The families build the op data that upstream's
-//! transform and builder produce (each helper cites them) and the renderer that
+//! transform and builder produce (`common::gamma` cites them) and the renderer that
 //! `GetGammaRenderer` picks.
+//!
+//! The wheel refuses parameters out of `GammaOpData::validate`'s bounds, and the port gives
+//! the same texts:
+//! - a JSON spec's transform comes from the binding's constructor, which validates it with
+//!   the transform's prefix (`ExponentTransform validation failed: `,
+//!   src/OpenColorIO/transforms/ExponentTransform.cpp:40-53 @ v2.5.2, and
+//!   ExponentWithLinearTransform.cpp:60-73);
+//! - a YAML spec's transform is read without validating (src/OpenColorIO/OCIOYaml.cpp:
+//!   917-1140), and the processor between the config's color spaces builds its op with
+//!   `BuildExponentOp` or `BuildExponentWithLinearOp`, which validate the data without a
+//!   prefix (src/OpenColorIO/ops/gamma/GammaOp.cpp:179-216).
 //!
 //! For a single Gamma transform at F32 whose exponents are not all 1 (the cases below mix 1.0
 //! with other exponents), the processor's op list is that one GammaOp: it is neither a no-op
@@ -17,17 +28,23 @@
 //! combine or cancel, and the separable-prefix bake only applies to integer input bit depths
 //! (src/OpenColorIO/OpOptimizers.cpp:559-563 @ v2.5.2).
 //!
-//! Gamma ops have alpha parameters, so no channel passes through.
+//! Gamma ops have alpha parameters, so no channel passes through, and the renderers have no
+//! numeric profiles: the fast-math kernels are SSE2 code, which every x86-64 CPU runs.
+
+mod common;
 
 use std::hint::black_box;
 
+use common::gamma::{
+    exponent_op, exponent_with_linear_op, negative_style_enum, yaml_direction, yaml_style,
+};
 use ocio_ops::open_color_types::{NegativeStyle, TransformDirection};
 use ocio_ops::ops::gamma::gamma_op_cpu::get_gamma_renderer;
-use ocio_ops::ops::gamma::gamma_op_data::{GammaOpData, GammaStyle};
+use ocio_ops::ops::gamma::gamma_op_data::GammaOpData;
 use ocio_ops::ops::gamma::gamma_op_utils::{compute_params_fwd, compute_params_rev};
 use ocio_testkit::battery::params::{Case, Params, Precision, Slot};
 use ocio_testkit::battery::{self, Combo, Direction, Family, Port, Spec, Validation, yaml_list};
-use serde_json::{Value, json};
+use serde_json::json;
 
 /// The port's direction for the battery's.
 fn port_direction(direction: Direction) -> TransformDirection {
@@ -37,35 +54,24 @@ fn port_direction(direction: Direction) -> TransformDirection {
     }
 }
 
-/// The renderer `GetGammaRenderer` picks for `data`, as a battery port.
-fn gamma_port(data: GammaOpData, combo: &Combo) -> Result<Port, String> {
-    let renderer = get_gamma_renderer(&black_box(data), combo.fast_math);
+/// The renderer `GetGammaRenderer` picks for `data`, as a battery port; or the wheel's
+/// refusal. `prefix` is the transform's validation prefix where the spec is JSON (the
+/// binding's constructor validates the transform), `None` where it is YAML.
+fn gamma_port(data: GammaOpData, prefix: Option<&str>, combo: &Combo) -> Result<Port, String> {
+    if let Some(prefix) = prefix {
+        data.validate()
+            .map_err(|e| format!("{prefix}{}", e.message()))?;
+    }
+    // BuildExponentOp, BuildExponentWithLinearOp: `data.validate()`.
+    data.validate().map_err(|e| e.message().to_string())?;
+    let renderer = get_gamma_renderer(&black_box(data), combo.fast_math)
+        .map_err(|e| e.message().to_string())?;
     Ok(Port::in_place(move |px| renderer.apply(px)))
 }
 
 /// Whether every slot of `params` is finite: then a JSON transform spec can hold them.
 fn all_finite<P: Params>(params: &P) -> bool {
     (0..params.slots().len()).all(|i| params.get(i).is_finite())
-}
-
-fn negative_style_enum(style: NegativeStyle) -> Value {
-    let name = match style {
-        NegativeStyle::Clamp => "NEGATIVE_CLAMP",
-        NegativeStyle::Mirror => "NEGATIVE_MIRROR",
-        NegativeStyle::PassThru => "NEGATIVE_PASS_THRU",
-        NegativeStyle::Linear => "NEGATIVE_LINEAR",
-    };
-    json!({ "enum": name })
-}
-
-/// The negative style in the config's YAML syntax.
-fn yaml_style(style: NegativeStyle) -> &'static str {
-    match style {
-        NegativeStyle::Clamp => "clamp",
-        NegativeStyle::Mirror => "mirror",
-        NegativeStyle::PassThru => "pass_thru",
-        NegativeStyle::Linear => "linear",
-    }
 }
 
 /// The parameters of an ExponentTransform.
@@ -85,27 +91,6 @@ impl Params for Exponent {
     fn set(&mut self, i: usize, v: f64) {
         self.value[i] = v;
     }
-}
-
-/// The op data of `ExponentTransform(value, negativeStyle, direction)`.
-///
-/// `ExponentTransformImpl` holds a default `GammaOpData` (BASIC_FWD, identity parameters;
-/// src/OpenColorIO/transforms/ExponentTransform.h:46 and ops/gamma/GammaOpData.cpp:244-252
-/// @ v2.5.2). The Python constructor calls `setValue`, `setNegativeStyle` (which converts the
-/// style for the current direction) and `setDirection` (which inverts the style if needed)
-/// (src/bindings/python/transforms/PyExponentTransform.cpp:16-25;
-/// transforms/ExponentTransform.cpp:72-99). `BuildExponentOp` clones the data for a version 2
-/// config (ops/gamma/GammaOp.cpp:190-216).
-fn exponent_op(value: [f64; 4], neg: NegativeStyle, dir: TransformDirection) -> GammaOpData {
-    let mut data = GammaOpData::default();
-    data.red_params_mut()[0] = value[0];
-    data.green_params_mut()[0] = value[1];
-    data.blue_params_mut()[0] = value[2];
-    data.alpha_params_mut()[0] = value[3];
-    let cur_dir = data.direction();
-    data.set_style(GammaOpData::convert_style_basic(neg, cur_dir).unwrap());
-    data.set_direction(dir);
-    data
 }
 
 /// ExponentTransform.
@@ -141,13 +126,15 @@ impl Family for ExponentFamily {
                 "!<ExponentTransform> {{value: {}, style: {}, direction: {}}}",
                 yaml_list(&p.value),
                 yaml_style(p.style),
-                dir.yaml()
+                yaml_direction(port_direction(dir))
             ))
         }
     }
     fn port(&self, p: &Exponent, combo: &Combo) -> Result<Port, String> {
+        let prefix = all_finite(p).then_some("ExponentTransform validation failed: ");
         gamma_port(
             exponent_op(p.value, p.style, port_direction(combo.direction)),
+            prefix,
             combo,
         )
     }
@@ -156,7 +143,7 @@ impl Family for ExponentFamily {
         vec![0.0, 1.0]
     }
     fn validation(&self) -> Validation {
-        Validation::NotPorted { card: "WP 1.3g1" }
+        Validation::Ported
     }
 }
 
@@ -183,7 +170,21 @@ fn exponent_transform_matches_the_wheel() {
         }
         bases.push(cases[cases.len() - 3].clone());
     }
-    // An explicit case on the YAML spec the generated NaN and ±Inf cases take.
+    // Refusals, on both routes: JSON, then YAML for the infinite value.
+    for value in [
+        [2.2, 0.006, 1.0, 1.0],
+        [2.2, 2.2, 1.0, 110.0],
+        [f64::INFINITY, 2.2, 1.0, 1.0],
+    ] {
+        cases.push(Case::new(
+            format!("refused {value:?}"),
+            Exponent {
+                value,
+                style: NegativeStyle::Mirror,
+            },
+        ));
+    }
+    // An explicit case on the YAML spec the generated NaN and infinite cases take.
     let [nan_clamp, _, _] = exponent_nan_cases();
     cases.push(nan_clamp);
     battery::run(&ExponentFamily { cases, bases });
@@ -217,47 +218,6 @@ impl Params for ExponentWithLinear {
             self.offset[i - 4] = v;
         }
     }
-}
-
-/// The op data of `ExponentWithLinearTransform(gamma, offset, negativeStyle, direction)`.
-///
-/// `ExponentWithLinearTransformImpl()` sets `{1, 0}` on the four channels and MONCURVE_FWD
-/// (src/OpenColorIO/transforms/ExponentWithLinearTransform.cpp:25-33 @ v2.5.2). The Python
-/// constructor calls `setGamma`, `setOffset`, `setNegativeStyle` (which converts the style for
-/// the current direction) and `setDirection`
-/// (src/bindings/python/transforms/PyExponentWithLinearTransform.cpp:25-37;
-/// ExponentWithLinearTransform.cpp:91-138). `BuildExponentWithLinearOp` clones the data
-/// (ops/gamma/GammaOp.cpp:179-188).
-fn exponent_with_linear_op(
-    gamma: [f64; 4],
-    offset: [f64; 4],
-    neg: NegativeStyle,
-    dir: TransformDirection,
-) -> GammaOpData {
-    let mut data = GammaOpData::default();
-    data.set_red_params(vec![1.0, 0.0]);
-    data.set_green_params(vec![1.0, 0.0]);
-    data.set_blue_params(vec![1.0, 0.0]);
-    data.set_alpha_params(vec![1.0, 0.0]);
-    data.set_style(GammaStyle::MoncurveFwd);
-    // setGamma.
-    data.red_params_mut()[0] = gamma[0];
-    data.green_params_mut()[0] = gamma[1];
-    data.blue_params_mut()[0] = gamma[2];
-    data.alpha_params_mut()[0] = gamma[3];
-    // setOffset.
-    let red = vec![data.red_params()[0], offset[0]];
-    let grn = vec![data.green_params()[0], offset[1]];
-    let blu = vec![data.blue_params()[0], offset[2]];
-    let alp = vec![data.alpha_params()[0], offset[3]];
-    data.set_red_params(red);
-    data.set_green_params(grn);
-    data.set_blue_params(blu);
-    data.set_alpha_params(alp);
-    let cur_dir = data.direction();
-    data.set_style(GammaOpData::convert_style_mon_curve(neg, cur_dir).unwrap());
-    data.set_direction(dir);
-    data
 }
 
 /// ExponentWithLinearTransform.
@@ -296,14 +256,16 @@ impl Family for ExponentWithLinearFamily {
                 yaml_list(&p.gamma),
                 yaml_list(&p.offset),
                 yaml_style(p.style),
-                dir.yaml()
+                yaml_direction(port_direction(dir))
             ))
         }
     }
     fn port(&self, p: &ExponentWithLinear, combo: &Combo) -> Result<Port, String> {
         let dir = port_direction(combo.direction);
+        let prefix = all_finite(p).then_some("ExponentWithLinearTransform validation failed: ");
         gamma_port(
             exponent_with_linear_op(p.gamma, p.offset, p.style, dir),
+            prefix,
             combo,
         )
     }
@@ -311,19 +273,14 @@ impl Family for ExponentWithLinearFamily {
     fn breakpoints(&self, p: &ExponentWithLinear, dir: Direction) -> Vec<f32> {
         let data = exponent_with_linear_op(p.gamma, p.offset, p.style, port_direction(dir));
         let mut points = vec![0.0f32];
-        for params in [
-            data.red_params(),
-            data.green_params(),
-            data.blue_params(),
-            data.alpha_params(),
-        ] {
+        for params in data.all_params() {
             points.push(compute_params_fwd(params).break_pnt);
             points.push(compute_params_rev(params).break_pnt);
         }
         points
     }
     fn validation(&self) -> Validation {
-        Validation::NotPorted { card: "WP 1.3g1" }
+        Validation::Ported
     }
 }
 
@@ -350,6 +307,22 @@ fn exponent_with_linear_transform_matches_the_wheel() {
             ));
         }
         bases.push(cases[cases.len() - 3].clone());
+    }
+    // Refusals, on both routes: JSON, then YAML for the infinite values.
+    for (gamma, offset) in [
+        ([2.4, 0.5, 2.2, 1.8], [0.055, 0.1, 0.1, 0.1]),
+        ([2.4, 2.2, 2.2, 1.8], [0.055, 0.1, 0.1, 1.0]),
+        ([2.4, 2.2, 2.2, 1.8], [0.055, f64::NEG_INFINITY, 0.1, 0.1]),
+        ([2.4, f64::INFINITY, 2.2, 1.8], [0.055, 0.1, 0.1, 0.1]),
+    ] {
+        cases.push(Case::new(
+            format!("refused {gamma:?} {offset:?}"),
+            ExponentWithLinear {
+                gamma,
+                offset,
+                style: NegativeStyle::Linear,
+            },
+        ));
     }
     // An explicit case on the YAML spec the generated NaN and ±Inf cases take.
     let [_, nan_mirror] = exponent_with_linear_nan_cases();

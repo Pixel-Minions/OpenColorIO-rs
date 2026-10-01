@@ -1301,14 +1301,14 @@ path = "src/OpenColorIO/ops/gamma/GammaOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_cpu.rs"]
 status = "done"
-note = "S2: every renderer, scalar and SSE2, bit-exact against the wheel on Windows and Rocky Linux 9 (tests/gamma_oracle.rs)"
+note = "S2: every renderer, scalar and SSE2, bit-exact against the wheel on Windows and Rocky Linux 9 (tests/gamma_oracle.rs); 1.3g2: GetGammaRenderer refuses short parameters (U-24), the battery compares the refusals"
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOpCPU.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_cpu.rs"]
 status = "done"
-note = "S2: every renderer, scalar and SSE2, bit-exact against the wheel on Windows and Rocky Linux 9 (tests/gamma_oracle.rs)"
+note = "S2: every renderer, scalar and SSE2, bit-exact against the wheel on Windows and Rocky Linux 9 (tests/gamma_oracle.rs); 1.3g2: GetGammaRenderer refuses short parameters (U-24), the battery compares the refusals"
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOpData.cpp"

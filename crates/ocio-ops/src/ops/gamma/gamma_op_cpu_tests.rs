@@ -27,7 +27,7 @@ fn apply_gamma(op: &GammaOpData, image: &mut [f32], result: &[f32], error_thresh
     // ops.finalize(); ops.optimize(OPTIMIZATION_DEFAULT); OCIO_REQUIRE_EQUAL(ops.size(), 1).
     assert!(!op.is_no_op().unwrap() && !op.is_identity().unwrap());
 
-    let cpu = get_gamma_renderer(op, true);
+    let cpu = get_gamma_renderer(op, true).unwrap();
     cpu.apply(image);
 
     for (idx, (&value, &expected)) in image.iter().zip(result).enumerate() {
@@ -637,4 +637,37 @@ fn apply_moncurve_mirror_style_rev() {
     );
 
     apply_gamma(&gamma, &mut input_32f, &expected_32f, error_threshold);
+}
+
+/// Where upstream's renderers would read past a channel's parameters, `get_gamma_renderer`
+/// returns an error instead (`docs/improvements.md` U-24): a basic style reads one parameter
+/// per channel, a moncurve style two.
+#[test]
+fn short_parameters_are_errors() {
+    use crate::ops::gamma::gamma_op_data::SHORT_PARAMS;
+    let all = |p: Params| [p.clone(), p.clone(), p.clone(), p];
+    for (style, short, enough) in [
+        (GammaStyle::BasicFwd, vec![], vec![2.]),
+        (GammaStyle::BasicMirrorRev, vec![], vec![2., 0.5]),
+        (GammaStyle::MoncurveFwd, vec![2.], vec![2., 0.1]),
+        (GammaStyle::MoncurveMirrorRev, vec![], vec![2., 0.1, 7.]),
+    ] {
+        for channel in 0..4 {
+            let mut p = all(enough.clone());
+            p[channel] = short.clone();
+            let [r, g, b, a] = p;
+            let gamma = gamma_data(style, r, g, b, a);
+            for fast in [false, true] {
+                let Err(err) = get_gamma_renderer(&gamma, fast) else {
+                    panic!("an error")
+                };
+                assert_eq!(err.message(), SHORT_PARAMS);
+            }
+        }
+        let [r, g, b, a] = all(enough);
+        let gamma = gamma_data(style, r, g, b, a);
+        for fast in [false, true] {
+            assert!(get_gamma_renderer(&gamma, fast).is_ok());
+        }
+    }
 }
