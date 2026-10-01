@@ -11,7 +11,10 @@
 //! same way through the Matrix writer.
 
 use ocio_gpu::GpuLanguage;
-use ocio_gpu::gpu_shader_utils::{GpuShaderText, build_resource_name};
+use ocio_gpu::gpu_shader_utils::{
+    GpuShaderText, add_lin_to_log_shader, add_lin_to_log_shader_channel_blue,
+    add_log_to_lin_shader, add_log_to_lin_shader_channel_blue, build_resource_name,
+};
 use ocio_testkit::battery::yaml_list;
 use ocio_testkit::gpu::{self as oracle_gpu, GpuShaderReply, GpuShaderRequest, ShaderSettings};
 use ocio_testkit::probe::{self, Rng};
@@ -29,19 +32,34 @@ fn languages() -> impl Iterator<Item = (GpuLanguage, oracle_gpu::GpuLanguage)> {
         .zip(oracle_gpu::GpuLanguage::ALL)
 }
 
-/// Panics unless `text` has the lines of `block`, in a row and whole. On a mismatch, the
-/// lines that start like `block` are compared with it, to show the difference.
-fn assert_has_block(label: &str, text: &str, block: &str) {
-    let want: Vec<&str> = block
+/// Panics unless `text` has the lines of `block`, in a row, each whole, or without its
+/// indentation when `trim` is set (the indentation is then the writer's, not the helpers').
+/// A block without a line that isn't blank is refused: it would match any blank line, so a
+/// helper that writes nothing would pass. On a mismatch, the lines that start most like the
+/// block are compared with it, to show the difference.
+fn find_lines(label: &str, text: &str, block: &str, trim: bool) {
+    assert!(
+        block.split('\n').any(|l| !l.trim().is_empty()),
+        "{label}: nothing to find (the helper wrote no line): {block:?}"
+    );
+    let line = |l: &str| -> String {
+        if trim {
+            l.trim_start().to_string()
+        } else {
+            l.to_string()
+        }
+    };
+    let want: Vec<String> = block
         .strip_suffix('\n')
         .unwrap_or(block)
         .split('\n')
+        .map(line)
         .collect();
-    let lines: Vec<&str> = text.split('\n').collect();
+    let lines: Vec<String> = text.split('\n').map(line).collect();
     if lines.windows(want.len()).any(|w| w == want.as_slice()) {
         return;
     }
-    let first = want[0];
+    let first = &want[0];
     let common = |l: &str| {
         l.bytes()
             .zip(first.bytes())
@@ -49,7 +67,7 @@ fn assert_has_block(label: &str, text: &str, block: &str) {
             .count()
     };
     let best = (0..lines.len())
-        .max_by_key(|&i| common(lines[i]))
+        .max_by_key(|&i| common(&lines[i]))
         .unwrap_or(0);
     let end = (best + want.len()).min(lines.len());
     assert_text_eq(
@@ -60,37 +78,21 @@ fn assert_has_block(label: &str, text: &str, block: &str) {
     panic!("{label}: the wheel's shader has no lines {block:?}\n{text}");
 }
 
-/// Panics unless a line of `text`, without its indentation (which is the writer's, not the
-/// helpers'), is `line`.
-fn assert_has_line(label: &str, text: &str, line: &str) {
-    let lines: Vec<&str> = text.split('\n').map(str::trim_start).collect();
-    if lines.contains(&line) {
-        return;
-    }
-    let common = |l: &str| {
-        l.bytes()
-            .zip(line.bytes())
-            .take_while(|(a, b)| a == b)
-            .count()
-    };
-    let best = lines
-        .iter()
-        .copied()
-        .max_by_key(|l| common(l))
-        .unwrap_or("");
-    assert_text_eq(
-        &format!("{label}: the wheel's line that starts most like the expected one"),
-        best,
-        line,
-    );
-    panic!("{label}: the wheel's shader has no line {line:?}\n{text}");
+/// Panics unless `text` has the lines of `block`, in a row and whole.
+fn assert_has_block(label: &str, text: &str, block: &str) {
+    find_lines(label, text, block, false);
+}
+
+/// Panics unless `text` has the lines of `lines`, in a row, without their indentation.
+fn assert_has_line(label: &str, text: &str, lines: &str) {
+    find_lines(label, text, lines, true);
 }
 
 /// A processor of the case, extracted without optimization (`getOptimizedGPUProcessor
 /// (OPTIMIZATION_NONE)`), so that each transform gives its own op.
 struct Case {
     name: &'static str,
-    transform: Value,
+    processor: Value,
     allow_texture_1d: Option<bool>,
     resource_prefix: Option<&'static str>,
 }
@@ -99,15 +101,29 @@ impl Case {
     fn new(name: &'static str, transform: Value) -> Case {
         Case {
             name,
-            transform,
+            processor: json!({ "transform": transform }),
             allow_texture_1d: None,
             resource_prefix: None,
         }
     }
 
+    /// A transform in the config's YAML syntax, which holds infinities and the grading
+    /// values the JSON specs can't build: the processor from `raw` to a colour space `cs`.
+    fn yaml(name: &'static str, transform: &str) -> Case {
+        let config = format!(
+            "{RAW_CONFIG}  - !<ColorSpace>\n    name: cs\n    from_scene_reference: {transform}\n"
+        );
+        Case {
+            processor: json!({"config": {"yaml": config}, "src": "raw", "dst": "cs"}),
+            ..Case::new(name, Value::Null)
+        }
+    }
+
     fn request(&self, language: oracle_gpu::GpuLanguage) -> GpuShaderRequest {
+        let mut processor = self.processor.clone();
+        processor["optimization"] = json!("OPTIMIZATION_NONE");
         GpuShaderRequest::new(
-            json!({"transform": self.transform, "optimization": "OPTIMIZATION_NONE"}),
+            processor,
             ShaderSettings {
                 language: Some(language),
                 allow_texture_1d: self.allow_texture_1d,
@@ -253,7 +269,84 @@ fn cases() -> Vec<Case> {
             json!({"class": "GradingRGBCurveTransform",
                    "args": {"style": {"enum": "GRADING_LOG"}}, "calls": [["makeDynamic"]]}),
         ),
+        Case::new(
+            "exposure contrast, not dynamic",
+            json!({"class": "ExposureContrastTransform",
+                   "args": {"exposure": 0.5, "contrast": 1.2, "gamma": 1.1, "pivot": 0.18}}),
+        ),
+        Case::yaml(
+            "exposure contrast, infinite",
+            "!<ExposureContrastTransform> {style: linear, exposure: .inf, contrast: -.inf, \
+             gamma: 1.1}",
+        ),
+        Case::new(
+            "primary, dynamic",
+            json!({"class": "GradingPrimaryTransform",
+                   "args": {"style": {"enum": "GRADING_LOG"}, "dynamic": true}}),
+        ),
+        Case::yaml(
+            "primary",
+            "!<GradingPrimaryTransform> {style: log, contrast: {rgb: [1.1, 1, 1], master: 1}, \
+             gamma: {rgb: [1, 1.2, 1], master: 1}, pivot: {contrast: -0.2, black: 0.1, \
+             white: 0.9}, saturation: 1.2, clamp: {black: -0.1, white: 1.5}}",
+        ),
+        Case::new(
+            "rgb curve, linear",
+            json!({"class": "GradingRGBCurveTransform",
+                   "args": {"style": {"enum": "GRADING_LIN"}, "dynamic": true}}),
+        ),
+        Case::new(
+            "hue curve, linear",
+            json!({"class": "GradingHueCurveTransform",
+                   "args": {"style": {"enum": "GRADING_LIN"}, "dynamic": true}}),
+        ),
+        Case::yaml(
+            "rgb curve, not dynamic",
+            "!<GradingRGBCurveTransform> {style: log, red: {control_points: [0, 0, 0.5, 0.6, \
+             1, 1]}}",
+        ),
+        Case::new(
+            "double log",
+            json!({"class": "FixedFunctionTransform",
+                   "args": {"style": {"enum": "FIXED_FUNCTION_LIN_TO_DOUBLE_LOG"},
+                            "params": DOUBLE_LOG}}),
+        ),
     ]
+}
+
+/// The parameters of upstream's test `FixedFunctionOpCPU, LIN_TO_DOUBLE_LOG`
+/// (tests/cpu/ops/fixedfunction/FixedFunctionOpCPU_tests.cpp:1374-1381 @ v2.5.2): base,
+/// the two break points, the two log curves, and the linear segment.
+const DOUBLE_LOG: [f64; 13] = [
+    10.0, 0.25, 0.5, -1.0, 0.0, -1.0, 1.25, 1.0, 1.0, 1.0, 0.5, 1.0, 0.0,
+];
+
+/// The GLSL constants `const float name = value;` of a shader (`declareVarConst`,
+/// GpuShaderUtils.cpp:437-440 @ v2.5.2, which writes the value with `getFloatString`).
+fn glsl_float_constants(text: &str) -> Vec<(String, f32)> {
+    text.split('\n')
+        .filter_map(|l| {
+            let rest = l.trim_start().strip_prefix("const float ")?;
+            let (name, value) = rest.strip_suffix(';')?.split_once(" = ")?;
+            if name.contains('[') {
+                return None;
+            }
+            Some((name.to_string(), value.trim_end_matches('.').parse().ok()?))
+        })
+        .collect()
+}
+
+/// A GLSL constant array, `const T name[N] = T[N](v, ...);` (`declareFloatArrayConst` and
+/// `declareIntArrayConst`, GpuShaderUtils.cpp:520-648 @ v2.5.2): its name and values.
+fn glsl_array<T: std::str::FromStr>(line: &str, kind: &str) -> Option<(String, Vec<T>)> {
+    let rest = line.trim_start().strip_prefix(&format!("const {kind} "))?;
+    let (name, rest) = rest.split_once('[')?;
+    let values = rest.split_once('(')?.1.strip_suffix(");")?;
+    let values = values
+        .split(", ")
+        .map(|v| v.trim_end_matches('.').parse().ok())
+        .collect::<Option<Vec<T>>>()?;
+    Some((name.to_string(), values))
 }
 
 /// The first error of a LUT's declaration and lookup, as the Lut1D and Lut3D writers make
@@ -316,7 +409,16 @@ fn aces2_matrices(glsl_text: &str) -> Vec<(String, [f32; 9], String)> {
 ///   `declareUniformArrayFloat`, `declareUniformBool` and `castToBool` (GradingRGBCurve);
 /// - `mat4fMul` and `float4Const` through the Matrix writer, and `mat3fMul` (ACES 2);
 /// - `sign` and `float4GreaterThan` (Exponent), `float3GreaterThan` (Log), `lerp` (CDL) and
-///   `atan2` (the red modifier).
+///   `atan2` (the red modifier);
+/// - `declareVar` (CDL, ExposureContrast, an infinity as the largest float), `declareVarConst`
+///   and `vectorCompareExpression` (GradingPrimary);
+/// - `AddLinToLogShader`, `AddLogToLinShader` (GradingRGBCurve) and their blue variants
+///   (GradingHueCurve);
+/// - `declareFloatArrayConst` and `declareIntArrayConst` (GradingRGBCurve, not dynamic);
+/// - `float3GreaterThanEqual` (the double log).
+///
+/// Every check finds at least one line that isn't blank. No writer of 2.5.2 calls the bool
+/// `declareVar` and `declareVarConst` or `float4GreaterThanEqual`, so no shader holds them.
 #[test]
 fn helpers_write_the_wheels_lines() {
     let cases = cases();
@@ -331,16 +433,34 @@ fn helpers_write_the_wheels_lines() {
         .map(|r| GpuShaderReply::from_response(r.expect("the oracle")))
         .collect();
 
-    let glsl_aces2 = requests
-        .iter()
-        .zip(&replies)
-        .find(|((case, lang, _), _)| {
-            case.name == "aces 2 output transform" && *lang == GpuLanguage::Glsl4_0
-        })
-        .map(|(_, reply)| reply.shader().text.clone())
-        .expect("the GLSL 4.0 ACES 2 shader");
-    let aces2 = aces2_matrices(&glsl_aces2);
+    let glsl = |name: &str| {
+        requests
+            .iter()
+            .zip(&replies)
+            .find(|((case, lang, _), _)| case.name == name && *lang == GpuLanguage::Glsl4_0)
+            .map(|(_, reply)| reply.shader().text.clone())
+            .unwrap_or_else(|| panic!("the GLSL 4.0 shader of {name}"))
+    };
+    let aces2 = aces2_matrices(&glsl("aces 2 output transform"));
     assert!(aces2.len() >= 3, "the ACES 2 matrices: {aces2:?}");
+    let primary_constants = glsl_float_constants(&glsl("primary"));
+    assert!(
+        primary_constants.len() >= 6,
+        "the GradingPrimary constants: {primary_constants:?}"
+    );
+    let curve_text = glsl("rgb curve, not dynamic");
+    let curve_floats: Vec<(String, Vec<f32>)> = curve_text
+        .split('\n')
+        .filter_map(|l| glsl_array(l, "float"))
+        .collect();
+    let curve_ints: Vec<(String, Vec<i32>)> = curve_text
+        .split('\n')
+        .filter_map(|l| glsl_array(l, "int"))
+        .collect();
+    assert!(
+        curve_floats.len() == 2 && curve_ints.len() == 2,
+        "the GradingRGBCurve arrays: {curve_floats:?} {curve_ints:?}"
+    );
 
     let mut checks_per_language = [0usize; 10];
     let mut checks_per_case = vec![0usize; cases.len()];
@@ -567,6 +687,97 @@ fn helpers_write_the_wheels_lines() {
                 let rgb = format!("{pixel}.rgb");
                 let lerp = utf8(new().lerp(&rgb, "pixPower", "posPix"));
                 check_line(format!("{rgb} = {lerp};"));
+                // CDLOpGPU.cpp:22 and 43 @ v2.5.2: the saturation as a float.
+                let ss = new();
+                ss.declare_var_f32("saturation", 1.1f64 as f32).unwrap();
+                check_line(utf8(ss.string()));
+            }
+            // ExposureContrastOpGPU.cpp:61-65 @ v2.5.2: each property as a float variable;
+            // infinities become the largest float (declareVarStr, GpuShaderUtils.cpp:450-480).
+            "exposure contrast, not dynamic" | "exposure contrast, infinite" => {
+                let values = if case.name == "exposure contrast, infinite" {
+                    [f64::INFINITY, f64::NEG_INFINITY, 1.1]
+                } else {
+                    [0.5, 1.2, 1.1]
+                };
+                assert!(uniforms.is_empty(), "{label}: {uniforms:?}");
+                for (name, v) in ["exposureVal", "contrastVal", "gammaVal"]
+                    .iter()
+                    .zip(values)
+                {
+                    let ss = new();
+                    ss.declare_var_f32(name, v as f32).unwrap();
+                    check_line(utf8(ss.string()));
+                }
+            }
+            // GradingPrimaryOpGPU.cpp:142-168 @ v2.5.2 (the log style): the constants
+            // (declareVarConst), read from the GLSL shader, and the test of the gamma
+            // (vectorCompareExpression). Dynamic, the gamma is a uniform; OSL has none, and
+            // its processor, an identity then, writes nothing.
+            "primary, dynamic" | "primary" => {
+                let gamma = if case.name == "primary" {
+                    for (name, v) in &primary_constants {
+                        let ss = new();
+                        ss.declare_var_const_f32(name, *v).unwrap();
+                        check_line(utf8(ss.string()));
+                    }
+                    "gamma".to_string()
+                } else if lang == GpuLanguage::Osl1 {
+                    String::new()
+                } else {
+                    utf8(build_resource_name(&prefix, "grading_primary", "gamma"))
+                };
+                if !gamma.is_empty() {
+                    let ss = new();
+                    let one = ss.float3_splat_f32(1.0);
+                    let test = utf8(ss.vector_compare_expression(&gamma, "!=", one));
+                    check_line(format!("if ( {test} )"));
+                }
+            }
+            // GradingRGBCurveOpGPU.cpp:276-300 and GradingHueCurveOpGPU.cpp:366-401 @ v2.5.2:
+            // the linear style goes to log and back around the curves. OSL has no uniforms,
+            // and its processor, an identity then, writes nothing.
+            "rgb curve, linear" | "hue curve, linear" if lang != GpuLanguage::Osl1 => {
+                let (to_log, to_lin) = (new(), new());
+                if case.name == "rgb curve, linear" {
+                    add_lin_to_log_shader(&pixel, &to_log).unwrap();
+                    add_log_to_lin_shader(&pixel, &to_lin).unwrap();
+                } else {
+                    add_lin_to_log_shader_channel_blue(&pixel, &to_log).unwrap();
+                    add_log_to_lin_shader_channel_blue(&pixel, &to_lin).unwrap();
+                }
+                check_line(utf8(to_log.string()));
+                check_line(utf8(to_lin.string()));
+            }
+            // GradingRGBCurveOpGPU.cpp:219-231 @ v2.5.2: the curves' arrays as constants,
+            // read from the GLSL shader.
+            "rgb curve, not dynamic" => {
+                for (name, values) in &curve_floats {
+                    let ss = new();
+                    ss.declare_float_array_const(name, values).unwrap();
+                    check_line(utf8(ss.string()));
+                }
+                for (name, values) in &curve_ints {
+                    let ss = new();
+                    ss.declare_int_array_const(name, values).unwrap();
+                    check_line(utf8(ss.string()));
+                }
+            }
+            // FixedFunctionOpGPU.cpp:2117-2122 @ v2.5.2.
+            "double log" => {
+                let ss = new();
+                let rgb = format!("{pixel}.rgb");
+                let (low, high) = (
+                    ss.float3_splat_f64(DOUBLE_LOG[1]),
+                    ss.float3_splat_f64(DOUBLE_LOG[2]),
+                );
+                for (name, test) in [
+                    ("isSegment1", ss.float3_greater_than_equal(low, &rgb)),
+                    ("isSegment3", ss.float3_greater_than_equal(&rgb, high)),
+                ] {
+                    let decl = utf8(ss.float3_decl(name).unwrap());
+                    check_line(format!("{decl} = {};", utf8(test)));
+                }
             }
             // FixedFunctionOpGPU.cpp:35 @ v2.5.2.
             "red modifier" => {
