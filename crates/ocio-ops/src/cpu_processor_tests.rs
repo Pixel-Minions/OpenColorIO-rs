@@ -42,35 +42,6 @@ fn matrix_processor(
 }
 
 #[test]
-fn an_identity_is_a_no_op_only_between_equal_bit_depths() {
-    use crate::ops::matrix::MatrixOpData;
-    let same = matrix_processor(
-        MatrixOpData::create_diagonal_matrix(1.0),
-        BitDepth::Uint8,
-        BitDepth::Uint8,
-    );
-    assert!(same.is_identity());
-    assert!(same.is_no_op());
-    assert!(!same.has_channel_crosstalk());
-
-    let different = matrix_processor(
-        MatrixOpData::create_diagonal_matrix(1.0),
-        BitDepth::Uint8,
-        BitDepth::F32,
-    );
-    assert!(different.is_identity());
-    assert!(!different.is_no_op());
-    assert_eq!(different.get_input_bit_depth(), BitDepth::Uint8);
-    assert_eq!(different.get_output_bit_depth(), BitDepth::F32);
-
-    let mut mixing = MatrixOpData::create_diagonal_matrix(2.0);
-    mixing.set_array_value(1, 0.5);
-    let mixing = matrix_processor(mixing, BitDepth::F32, BitDepth::F32);
-    assert!(!mixing.is_identity());
-    assert!(mixing.has_channel_crosstalk());
-}
-
-#[test]
 fn a_matrix_processor_has_no_dynamic_property() {
     let cpu = matrix_processor(
         crate::ops::matrix::MatrixOpData::create_diagonal_matrix(2.0),

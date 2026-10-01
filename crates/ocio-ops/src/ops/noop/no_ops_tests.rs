@@ -5,6 +5,12 @@
 //! (tests/cpu/ops/noop/NoOps_tests.cpp @ v2.5.2). Its `allocation_op` test compares the
 //! allocation no-op with `CreateScaleOp`'s op (chunk 1.3m3), and `throw` and
 //! `partition_gpu_ops` test `PartitionGPUOps`, which needs the Lut3D op.
+//!
+//! The rest checks how the ops share and copy their data, and relations upstream's code
+//! states (a look's cache ID is its name, an allocation's its data's). What the wheel shows of
+//! the file and look no-ops, their `getInfo` and cache IDs in the debug log and their removal by
+//! the optimizer, is checked against it in `tests/cpu_processor_oracle.rs`
+//! (`the_no_op_types_match_the_wheel`).
 
 use std::sync::Arc;
 
