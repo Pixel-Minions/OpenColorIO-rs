@@ -22,26 +22,14 @@ use crate::op_data::OpData;
 use crate::open_color_types::TransformDirection;
 
 impl LogOpData {
-    /// A new Log op with a copy of the data: upstream's `clone()` builds the copy with the
-    /// constructor from the three channels' parameters, which refuses channels of mixed styles
-    /// ("Cannot create Log op, all channels need to have the same style."), then copies the
-    /// metadata. No op's data has such channels: the constructors refuse them, and only
-    /// `set_red_params` and its siblings make them, which no op path calls on an op's data
-    /// (upstream's CTF reader validates the data it sets them on before it makes an op).
+    /// A new Log op with a copy of the data ([`LogOpData::try_clone`]): channels of mixed
+    /// styles are its error, "Cannot create Log op, all channels need to have the same
+    /// style.". `create_log_op` doesn't validate a forward op's data, and the channel setters
+    /// are public, so an op can hold such channels.
     ///
-    /// Port of `LogOp::clone` (src/OpenColorIO/ops/log/LogOp.cpp:64-68 @ v2.5.2) and
-    /// `LogOpData::clone` (src/OpenColorIO/ops/log/LogOpData.cpp:340-349).
-    pub(crate) fn clone_op(&self) -> Op {
-        let mut copy = LogOpData::from_channel_params(
-            self.base(),
-            self.red_params().clone(),
-            self.green_params().clone(),
-            self.blue_params().clone(),
-            self.direction(),
-        )
-        .expect("an op's log has channels of one style");
-        *copy.get_format_metadata_mut() = self.get_format_metadata().clone();
-        Op::new(OpData::Log(copy))
+    /// Port of `LogOp::clone` (src/OpenColorIO/ops/log/LogOp.cpp:64-68 @ v2.5.2).
+    pub(crate) fn clone_op(&self) -> Result<Op> {
+        Ok(Op::new(OpData::Log(self.try_clone()?)))
     }
 
     /// Port of `LogOp::getInfo` (src/OpenColorIO/ops/log/LogOp.cpp:73-76 @ v2.5.2).
@@ -79,10 +67,11 @@ impl LogOpData {
     }
 
     /// The renderer for the log, with the fast approximations of `log2` and `exp2` when
-    /// `fast_log_exp_pow`.
+    /// `fast_log_exp_pow`. Channels with fewer parameters than the renderer reads are an error
+    /// ([`get_log_renderer`], U-20).
     ///
     /// Port of `LogOp::getCPUOp` (src/OpenColorIO/ops/log/LogOp.cpp:105-109 @ v2.5.2).
-    pub(crate) fn get_cpu_op(&self, fast_log_exp_pow: bool) -> Arc<dyn CpuOp> {
+    pub(crate) fn get_cpu_op(&self, fast_log_exp_pow: bool) -> Result<Arc<dyn CpuOp>> {
         get_log_renderer(self, fast_log_exp_pow)
     }
 }

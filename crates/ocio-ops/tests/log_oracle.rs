@@ -52,7 +52,8 @@ fn port_direction(direction: Direction) -> TransformDirection {
 
 /// The renderer `GetLogRenderer` picks for `data`, as a battery port.
 fn log_port(data: LogOpData, combo: &Combo) -> Result<Port, String> {
-    let renderer = get_log_renderer(&black_box(data), combo.fast_math);
+    let renderer =
+        get_log_renderer(&black_box(data), combo.fast_math).map_err(|e| e.message().to_string())?;
     Ok(Port::in_place(move |px| renderer.apply(px)))
 }
 
@@ -945,7 +946,9 @@ fn integer_output_casts_match_the_wheel() {
     let input = s2_probe_rgba();
     let data = black_box(log_transform_op(2.0, TransformDirection::Forward));
     let mut log_out = input.clone();
-    get_log_renderer(&data, true).apply(&mut log_out);
+    get_log_renderer(&data, true)
+        .expect("a plain log renders")
+        .apply(&mut log_out);
 
     // (bit depth, maxValue from BitDepthUtils.h:34-60, cast)
     type Cast = fn(f32) -> u16;

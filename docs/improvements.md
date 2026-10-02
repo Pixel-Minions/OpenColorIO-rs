@@ -949,17 +949,31 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   all have fewer than 4 parameters (`ops/log/LogOpData.cpp:86-107`), and `setRedParams`,
   `setGreenParams` and `setBlueParams` set any vector. Only upstream's tests and the CTF/CLF
   reader use them, and validation refuses both cases ("Log: expecting at least 4
-  parameters.", "Log: Red, green & blue parameters must have the same size."). Before that,
-  `setValue` writes past a channel too short for the parameter (`LogOpData.cpp:120-148`),
-  `getIdentityReplacement` reads the red channel's linear offset and slope
-  (`LogOpData.cpp:268-277`), and the parameter strings of the cache ID read past a green or
-  blue channel shorter than the red one (`LogOpData.cpp:389-414`).
+  parameters.", "Log: Red, green & blue parameters must have the same size."), but
+  `CreateLogOp` doesn't validate a forward op's data (`ops/log/LogOp.cpp:139-150`). Where the
+  data isn't validated:
+  - `setValue` writes past a channel too short for the parameter (`LogOpData.cpp:120-148`);
+  - `getValue`, and so `getParameters`, reads past a green or blue channel shorter than the
+    red one (`LogOpData.cpp:160-196`);
+  - `getIdentityReplacement` reads the red channel's linear offset and slope
+    (`LogOpData.cpp:268-277`);
+  - the parameter strings of the cache ID read past a green or blue channel shorter than the
+    red one (`LogOpData.cpp:389-414`);
+  - the renderers' `updateData` reads the first 4 parameters of each channel, and the first 5
+    for the camera style (`Log2LinRenderer`, `Lin2LogRenderer` and `CameraL2LBaseRenderer`,
+    `ops/log/LogOpCPU.cpp:530-545, 630-645, 728-742`), so `LogOp::getCPUOp` and `Op::apply`
+    read past a shorter channel.
 - **Decided** (general rule): the port returns an error instead: "Log: the channels have
   fewer parameters than this needs: upstream accesses past them." from
-  `LogOpData::{set_value, get_identity_replacement}` and the parameter strings (so
-  `get_cache_id`). `get_parameters`, like upstream's, leaves an array it has no parameter
-  for as it is.
-- **Status:** matched in `p1-log` (1.3l1); `log_op_data_tests.rs`, `short_channels_are_errors`.
+  `LogOpData::{set_value, value, get_parameters, get_identity_replacement}`, the parameter
+  strings (so `get_cache_id`) and `get_log_renderer` (so `Op::{get_cpu_op, apply,
+  apply_in_out}`). `get_parameters` leaves an array the red channel has no parameter for as
+  it is, as upstream's does, and raises for one the red channel has and the green or blue
+  one doesn't, after setting the arrays before it. A CPU processor is never affected: its
+  `finalize` validates the ops.
+- **Status:** matched in `p1-log` (1.3l1, and the verifier's fixes);
+  `log_op_data_tests.rs`, `short_channels_are_errors`; `log_op_tests.rs`,
+  `renderers_of_short_channels_raise`.
 
 ### U-24. Queries of a Gamma op whose channels have too few parameters
 

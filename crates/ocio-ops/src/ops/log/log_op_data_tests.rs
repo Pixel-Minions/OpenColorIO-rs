@@ -307,7 +307,10 @@ fn styles_follow_the_parameters() {
 
     // Any non-default parameter makes it an affine log.
     let mut affine = LogOpData::new(2.0, Forward);
-    let mut slope = affine.value(LogAffineParameter::LogSideSlope).unwrap();
+    let mut slope = affine
+        .value(LogAffineParameter::LogSideSlope)
+        .unwrap()
+        .unwrap();
     slope[1] = 0.5;
     affine
         .set_value(LogAffineParameter::LogSideSlope, &slope)
@@ -317,7 +320,10 @@ fn styles_follow_the_parameters() {
 
     // The break adds a fifth parameter, the linear slope a sixth.
     let mut camera = LogOpData::new(2.0, Forward);
-    let brk = camera.value(LogAffineParameter::LinSideSlope).unwrap();
+    let brk = camera
+        .value(LogAffineParameter::LinSideSlope)
+        .unwrap()
+        .unwrap();
     assert!(
         camera
             .set_value(LogAffineParameter::LinearSlope, &brk)
@@ -334,7 +340,7 @@ fn styles_follow_the_parameters() {
     assert_eq!(camera.red_params().len(), 6);
     camera.unset_linear_slope();
     assert_eq!(camera.red_params().len(), 5);
-    assert_eq!(camera.value(LogAffineParameter::LinearSlope), None);
+    assert_eq!(camera.value(LogAffineParameter::LinearSlope).unwrap(), None);
 }
 
 /// Channels with 4 or more parameters can't be mixed with ones with fewer.
@@ -383,8 +389,37 @@ fn short_channels_are_errors() {
         .unwrap();
     let mut out = [[7.0; 3]; 4];
     let [a, b, c, d] = &mut out;
-    log.get_parameters(a, b, c, d);
+    log.get_parameters(a, b, c, d).unwrap();
     assert_eq!(out, [[1.0; 3], [0.0; 3], values, [7.0; 3]]);
+
+    // Green and blue channels shorter than the red one: upstream's getValue reads past them.
+    let four = LogOpData::new(2.0, Forward).red_params().clone();
+    let mut log = LogOpData::new(2.0, Forward);
+    log.set_green_params(four[..3].to_vec());
+    assert_eq!(
+        log.value(LogAffineParameter::LinSideOffset)
+            .unwrap_err()
+            .message(),
+        message
+    );
+    assert_eq!(
+        log.value(LogAffineParameter::LinSideSlope).unwrap(),
+        Some([1.0; 3])
+    );
+    let mut out = [[7.0; 3]; 4];
+    let [a, b, c, d] = &mut out;
+    assert_eq!(
+        log.get_parameters(a, b, c, d).unwrap_err().message(),
+        message
+    );
+    log.set_green_params(four.clone());
+    log.set_blue_params(four[..1].to_vec());
+    assert_eq!(
+        log.value(LogAffineParameter::LogSideOffset)
+            .unwrap_err()
+            .message(),
+        message
+    );
 
     // A green channel shorter than the red one.
     let mut log = LogOpData::new(2.0, Forward);
@@ -399,6 +434,12 @@ fn short_channels_are_errors() {
         "Log: Red, green & blue parameters must have the same size."
     );
     assert_eq!(log.get_lin_break_string(7).unwrap_err().message(), message);
+    assert_eq!(
+        log.value(LogAffineParameter::LinSideBreak)
+            .unwrap_err()
+            .message(),
+        message
+    );
     assert_eq!(
         log.set_value(LogAffineParameter::LinSideBreak, &values)
             .unwrap_err()
