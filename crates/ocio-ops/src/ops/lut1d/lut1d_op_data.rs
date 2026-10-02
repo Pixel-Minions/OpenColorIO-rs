@@ -7,7 +7,7 @@
 //! Not here yet (Phase 2, WP 2.1): the inverse LUT's set-up (`initializeFromForward`, the
 //! component properties), `getPairIdentityReplacement`, `Compose`, `MakeFastLut1DFromInverse`.
 //! Only 1D LUTs from Phase 2's sources (files, `Lut1DTransform`) are inverse; the optimizer's
-//! bake makes forward ones. `ComposeVec` comes with the bake (`ops::op_tools`).
+//! bake makes forward ones, with [`Lut1DOpData::compose_vec`].
 
 use core::ffi::c_ulong;
 
@@ -17,6 +17,7 @@ use crate::format_metadata::{FormatMetadataImpl, METADATA_ID};
 use crate::hash_utils::cache_id_hash;
 use crate::imath_half::{float_to_half, half_to_float};
 use crate::math_utils::halfs_differ;
+use crate::op::OpVec;
 use crate::op_data::{OpData, OpDataType};
 use crate::open_color_types::{
     BitDepth, Lut1DHueAdjust, TransformDirection, bit_depth_to_string, interpolation_to_string,
@@ -25,6 +26,7 @@ use crate::open_color_types::{
 use crate::ops::lut3d::lut3d_op_data::Interpolation;
 use crate::ops::matrix::MatrixOpData;
 use crate::ops::op_array::Array;
+use crate::ops::op_tools::eval_transform;
 use crate::ops::range::RangeOpData;
 
 /// Number of possible values for the Half domain.
@@ -358,6 +360,39 @@ impl Lut1DOpData {
         // it should be safe to rely on the constructor and fill() to always return the correct
         // length. (E.g., we don't need to worry about 10i with a half domain.)
         Lut1DOpData::with_half_flags(domain_type, ideal_size, true)
+    }
+
+    /// Renders the LUT's own entries, its domain, through `ops` at F32 into its values, which
+    /// become three per entry: the composition of the LUT and the ops. "There is nothing to
+    /// compose the 1D LUT with" without ops. The ops must be separable, and the LUT a suitable
+    /// domain: unlike `Compose`, it doesn't resample. The hue adjust and the bypass are the
+    /// caller's.
+    ///
+    /// Port of `Lut1DOpData::ComposeVec` (src/OpenColorIO/ops/lut1d/Lut1DOpData.cpp:683-705
+    /// @ v2.5.2).
+    pub fn compose_vec(lut: &mut Lut1DOpData, ops: &mut OpVec) -> Result<()> {
+        if ops.is_empty() {
+            return Err(Exception::new(
+                "There is nothing to compose the 1D LUT with",
+            ));
+        }
+
+        // Set up so that the eval directly fills in the array of the result LUT.
+
+        let num_pixels = lut.get_array().get_length();
+
+        // TODO: Could keep it one channel in some cases.
+        lut.get_array_mut().resize(num_pixels, 3)?;
+        let in_values = lut.get_array().get_values().clone();
+
+        // Evaluate the transforms at 32f.
+        // Note: If any ops are bypassed, that will be respected here.
+        eval_transform(
+            &in_values,
+            lut.get_array_mut().get_values_mut(),
+            num_pixels as usize,
+            ops,
+        )
     }
 
     /// The number of entries a lookup needs for the bit depth: one per code for integer
