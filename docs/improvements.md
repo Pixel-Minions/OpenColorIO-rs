@@ -396,7 +396,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   their CPU outputs differ (0.7 becomes 0.48999998 and 0.48999995), and so do their shaders
   (`vec4(2.0000000999999998, ...)` and `vec4(2.0000003, ...)`).
 - **Who notices:** applications that cache processors or shaders by these cache IDs, with
-  version 1 configs (or CDL and CTF files, which build Exponent ops too).
+  version 1 configs (where CDLs build Exponent ops too).
 - **A fix:** write the exponents with all their digits (17), or hash them.
 - **Status:** matched in `p1-exponent` (1.3e1), checked against the wheel in
   `crates/ocio-ops/tests/exponent_oracle.rs`.
