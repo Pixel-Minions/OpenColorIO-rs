@@ -144,13 +144,15 @@ note = "1.2d: CPUProcessor::Impl as CpuProcessor, with its apply methods, applyR
 path = "src/OpenColorIO/Caching.cpp"
 kind = "src"
 target = ["crates/ocio/src/caching.rs"]
-status = "todo"
+status = "partial"
+note = "1.8g: the three variables' names; ClearAllCaches comes with the path and file caches (Phase 3-4)"
 
 [[file]]
 path = "src/OpenColorIO/Caching.h"
 kind = "src"
 target = ["crates/ocio/src/caching.rs"]
-status = "todo"
+status = "done"
+note = "1.8g: GenericCache and ProcessorCache, keyed by std::hash<std::string> (MSVC's FNV-1a on Windows, libstdc++'s _Hash_bytes on Linux, checked against the library), in crates/ocio/src/caching.rs"
 
 [[file]]
 path = "src/OpenColorIO/ColorSpace.cpp"
@@ -169,7 +171,7 @@ path = "src/OpenColorIO/Config.cpp"
 kind = "src"
 target = ["crates/ocio/src/config.rs"]
 status = "partial"
-note = "p1-transforms T0: CreateRaw's version and context, getMajorVersion, getMinorVersion, getCurrentContext; CreateRaw's state and getProcessor come with WP 1.8g, the rest with Phase 3"
+note = "p1-transforms T0: CreateRaw's version and context, getMajorVersion, getMinorVersion, getCurrentContext; 1.8g: the processor cache, its flags (get/setProcessorCacheFlags, clearProcessorCache, the copy) and getProcessor of a transform (with a context, a direction, or neither), its key and its fallback. CreateRaw's color spaces and the rest come with Phase 3"
 
 [[file]]
 path = "src/OpenColorIO/ConfigUtils.cpp"
@@ -194,7 +196,8 @@ note = "p1-transforms T0: Context::Create, without state (Phase 3)"
 path = "src/OpenColorIO/ContextVariableUtils.cpp"
 kind = "src"
 target = ["crates/ocio/src/context_variable_utils.rs"]
-status = "todo"
+status = "partial"
+note = "1.8g: CollectContextVariables for the classes in the port (the group overload of transforms/GroupTransform.cpp:206-223 included); the resolution and the other overloads come with the context's state (Phase 3)"
 
 [[file]]
 path = "src/OpenColorIO/ContextVariableUtils.h"
@@ -520,13 +523,15 @@ status = "todo"
 path = "src/OpenColorIO/Processor.cpp"
 kind = "src"
 target = ["crates/ocio/src/processor.rs"]
-status = "todo"
+status = "partial"
+note = "1.8g/1.8h1: ProcessorMetadata, Processor::Impl (copy, queries, getCacheID, createGroupTransform, the optimized processors and their cache, EnvironmentOverride with each wheel's std::stoul, the CPU processors and their cache, setProcessorCacheFlags, setTransform, computeMetadata); checked against the wheel through processor_ops (crates/ocio/tests/processor_oracle.rs). The GPU processors come with 1.8h3, setColorSpaceConversion and concatenate with the config (Phase 3)"
 
 [[file]]
 path = "src/OpenColorIO/Processor.h"
 kind = "src"
 target = ["crates/ocio/src/processor.rs"]
-status = "todo"
+status = "partial"
+note = "see Processor.cpp"
 
 [[file]]
 path = "src/OpenColorIO/SSE.h"
@@ -4107,7 +4112,8 @@ status = "todo"
 path = "tests/cpu/Caching_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/caching_tests.rs"]
-status = "todo"
+status = "partial"
+note = "generic_cache ported; processor_cache's parts before its config ported unmarked (processor_cache_without_the_config), its marker comes with Config::CreateFromStream (Phase 3)"
 
 [[file]]
 path = "tests/cpu/ColorSpaceSet_tests.cpp"
@@ -4249,7 +4255,8 @@ note = "string_compare. The others need Setenv/Unsetenv, AlignedMalloc, CreateTe
 path = "tests/cpu/Processor_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/processor_tests.rs"]
-status = "todo"
+status = "partial"
+note = "optimization_env_override_basic ported; the other tests build MatrixTransform, ExposureContrastTransform, Lut3DTransform and GPU processors, and come with them. Cache tests on ops built directly stand in meanwhile (cache_optimized_processors, cache_cpu_processors)"
 
 [[file]]
 path = "tests/cpu/SIMD_tests.cpp"
