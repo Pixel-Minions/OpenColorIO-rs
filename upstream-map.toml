@@ -1295,16 +1295,16 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOp.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/gamma/gamma_op.rs"]
+target = ["crates/ocio-ops/src/ops/gamma/gamma_op.rs", "crates/ocio-gpu/src/gpu_processor.rs"]
 status = "partial"
-note = "1.3g3: GammaOp (the op's behaviors on OpData::Gamma) and CreateGammaOp; checked against the wheel through CPU processor cache IDs and pixels (tests/gamma_op_oracle.rs: identities, inverse pairs, compositions, optimization flags). Not yet: CreateGammaTransform, BuildExponentWithLinearOp and BuildExponentOp (the transforms, WP 1.8), extractGpuShaderInfo (1.3g4)"
+note = "1.3g3: GammaOp (the op's behaviors on OpData::Gamma) and CreateGammaOp; checked against the wheel through CPU processor cache IDs and pixels (tests/gamma_op_oracle.rs: identities, inverse pairs, compositions, optimization flags). Not yet: CreateGammaTransform, BuildExponentWithLinearOp and BuildExponentOp (the transforms, WP 1.8). Its GPU part: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's Gamma arm (gpu_processor.rs, 1.3g4)"
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOp.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op.rs"]
 status = "partial"
-note = "1.3g3: GammaOp (the op's behaviors on OpData::Gamma) and CreateGammaOp; checked against the wheel through CPU processor cache IDs and pixels (tests/gamma_op_oracle.rs: identities, inverse pairs, compositions, optimization flags). Not yet: CreateGammaTransform, BuildExponentWithLinearOp and BuildExponentOp (the transforms, WP 1.8), extractGpuShaderInfo (1.3g4)"
+note = "1.3g3: GammaOp (the op's behaviors on OpData::Gamma) and CreateGammaOp; checked against the wheel through CPU processor cache IDs and pixels (tests/gamma_op_oracle.rs: identities, inverse pairs, compositions, optimization flags). Not yet: CreateGammaTransform, BuildExponentWithLinearOp and BuildExponentOp (the transforms, WP 1.8). Its GPU part: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's Gamma arm (gpu_processor.rs, 1.3g4)"
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOpCPU.cpp"
@@ -1338,13 +1338,15 @@ note = "S2, then 1.3g1: the whole class; reads past short parameters are errors 
 path = "src/OpenColorIO/ops/gamma/GammaOpGPU.cpp"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/gamma/gamma_op_gpu.rs"]
-status = "todo"
+status = "done"
+note = "1.3g4 (p1-gpu-gamma): GetGammaGPUShaderProgram and the styles' writers; checked against the wheel in 10 languages (crates/ocio-gpu/tests/gamma_op_gpu_oracle.rs)"
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOpGPU.h"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/gamma/gamma_op_gpu.rs"]
-status = "todo"
+status = "done"
+note = "1.3g4 (p1-gpu-gamma): GetGammaGPUShaderProgram and the styles' writers; checked against the wheel in 10 languages (crates/ocio-gpu/tests/gamma_op_gpu_oracle.rs)"
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOpUtils.cpp"
@@ -5013,6 +5015,7 @@ path = "tests/gpu/GammaOp_test.cpp"
 kind = "test-gpu"
 target = ["crates/ocio-gpu/tests/gamma_op_test.rs"]
 status = "todo"
+note = "Phase 7 (GPU execution). Its cases are data in crates/ocio-testkit/src/gpu_cases.rs (gamma_cases); 1.3g4 checks the shaders' text of the 10 that use a version 2 config against the wheel (crates/ocio-gpu/tests/gamma_op_gpu_oracle.rs)"
 
 [[file]]
 path = "tests/gpu/GradingHueCurveOp_test.cpp"

@@ -634,6 +634,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `uintBitsToFloat(...)`), or refuse such parameters on the GPU.
 - **Status:** matched in `p1-gpu-ops` (1.3m4), checked against the wheel in
   `crates/ocio-gpu/tests/matrix_op_gpu_oracle.rs` (`extreme_parameters_write_the_wheels_shader`).
+  The Gamma writer (1.3g4) writes a NaN parameter, which its validation lets through, as
+  a NaN literal too: `crates/ocio-gpu/tests/gamma_op_gpu_oracle.rs`.
 
 ## Python module (`ocio-py`)
 
@@ -946,9 +948,12 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   than its style uses: upstream reads past them." `GammaOpData::{is_identity, is_no_op,
   get_cache_id, compose}`, `get_gamma_renderer` and `compute_params_fwd`/`_rev` return it,
   and so do `Op::{is_no_op, is_identity, get_cache_id, get_cpu_op}` for a Gamma op (1.3g3),
-  which `CreateGammaOp` doesn't validate either.
+  which `CreateGammaOp` doesn't validate either. The GPU writer reads the same values in
+  each style's block (`ops/gamma/GammaOpGPU.cpp:16-314`): `get_gamma_gpu_shader_program`
+  (`ocio-gpu`, 1.3g4) returns the error too.
 - **Status:** matched in `p1-gamma` (1.3g1, the renderers in 1.3g2, the op in 1.3g3,
   `compute_params_fwd`/`_rev` after it); `gamma_op_data_tests.rs`, `gamma_op_cpu_tests.rs`,
   `gamma_op_utils_tests.rs` and `gamma_op_tests.rs` check the errors,
   and that the reads upstream doesn't make (a moncurve gamma other than 1, channels that
-  differ) are answered.
+  differ) are answered. The GPU writer in `p1-gpu-gamma` (1.3g4): `gamma_op_gpu.rs`'s test
+  checks the error for each style and channel.
