@@ -12,8 +12,9 @@
 //!
 //! For a single Log transform at F32, the processor's op list is that one LogOp: `LogOpData`
 //! is never a no-op or an identity (`LogOpData::isNoOp`/`isIdentity` return false), has no
-//! simpler replacement, and the separable-prefix bake only applies to integer input bit
-//! depths (`OptimizeSeparablePrefix`, src/OpenColorIO/OpOptimizers.cpp:559-563 @ v2.5.2).
+//! simpler replacement, and the separable-prefix bake skips F32 and UINT32 inputs (it bakes
+//! F16 and the other integer depths: `OptimizeSeparablePrefix`,
+//! src/OpenColorIO/OpOptimizers.cpp:559-565 @ v2.5.2).
 //!
 //! The op data goes through `std::hint::black_box`, so that the compiler cannot evaluate the
 //! renderers' constructors on the tests' constant parameters: it folds, for example, `log2` of
