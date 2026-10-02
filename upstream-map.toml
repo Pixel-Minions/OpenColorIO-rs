@@ -446,7 +446,7 @@ path = "src/OpenColorIO/Op.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/op.rs", "crates/ocio-ops/src/op_data.rs"]
 status = "partial"
-note = "1.2c: OpCPU's defaults, OpData, GetTypeName, Op, OpRcPtrVec (as OpVec), SerializeOpVec and CreateOpVecFromOpData, with each family's arms added with the family; the Matrix op (before 1.2d): its arms, Op::getIdentityReplacement and OpData::getIdentityReplacement (an identity Matrix op; the overrides that return a range come with their families); the Range op (1.3r2): its arms, getIdentityReplacement's Range branch, CreateOpVecFromOpData's"
+note = "1.2c: OpCPU's defaults, OpData, GetTypeName, Op, OpRcPtrVec (as OpVec), SerializeOpVec and CreateOpVecFromOpData, with each family's arms added with the family; the Matrix op (before 1.2d): its arms, Op::getIdentityReplacement and OpData::getIdentityReplacement (an identity Matrix op; the overrides that return a range come with their families); the Range op (1.3r2): its arms, getIdentityReplacement's Range branch, CreateOpVecFromOpData's; the Log op (1.3l3): its arms, getIdentityReplacement's Log branch (LogOpData's, which can raise), CreateOpVecFromOpData's"
 
 [[file]]
 path = "src/OpenColorIO/Op.h"

@@ -7,24 +7,13 @@
 //!
 //! The wheel is built with `OCIO_USE_SSE2`, so the ports keep the `#if OCIO_USE_SSE2` branches.
 
-use ocio_testkit::upstream::check_close;
+use ocio_testkit::upstream::{check_close, check_close_f32_f64};
 
 use super::*;
 use crate::format_metadata::METADATA_ID;
 use crate::open_color_types::OptimizationFlags;
 use crate::open_color_types::TransformDirection::Forward;
 use crate::ops::log::log_op_data::{LogAffineParameter, Params};
-
-/// `OCIO_CHECK_CLOSE(x, y, tol)` with `float` values and a `double` tolerance: the difference
-/// in `float`, compared in `double` (tests/testutils/UnitTest.h:194-212 @ v2.5.2).
-#[track_caller]
-fn check_close_f32_f64(x: f32, y: f32, tol: f64) {
-    let passes = f64::from((x - y).abs()) < tol;
-    assert!(
-        passes,
-        "OCIO_CHECK_CLOSE failed: abs({x:e} - {y:e}) < {tol:e}"
-    );
-}
 
 /// Port of `OCIO_ADD_TEST(LogOp, lin_to_log)` @ v2.5.2.
 #[test]
