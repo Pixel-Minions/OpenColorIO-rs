@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Tests of the allocation data. Upstream's `AllocationOps create`
-//! (tests/cpu/ops/allocation/AllocationOp_tests.cpp @ v2.5.2) tests `CreateAllocationOps`,
-//! which comes with the Matrix and Log ops.
+//! Tests of the allocation data and `CreateAllocationOps`. Upstream's `AllocationOps create`
+//! (tests/cpu/ops/allocation/AllocationOp_tests.cpp @ v2.5.2) needs the Log op for its `lg2`
+//! part; its other parts are here.
 
 use super::*;
 
@@ -71,4 +71,49 @@ fn an_unknown_allocation_has_its_own_name() {
         id,
         format!("{name} {} ", ocio_testkit::crt::format_f64("%.7g", 1.0))
     );
+}
+
+/// The parts of upstream's `AllocationOps create` (tests/cpu/ops/allocation/
+/// AllocationOp_tests.cpp:12-48 @ v2.5.2) that don't need the Log op: an unknown allocation is
+/// refused in both directions and adds no op; a uniform one, without variables or with two, is
+/// one Fit op in both directions. The test as a whole comes with the Log op (its `lg2` part).
+#[test]
+fn create_allocation_ops_without_the_log_op() {
+    use crate::op::OpVec;
+    use crate::open_color_types::TransformDirection;
+    use ocio_testkit::upstream::check_throw_what;
+
+    let mut ops = OpVec::new();
+    let mut alloc_data = AllocationData {
+        allocation: Allocation::Unknown,
+        ..AllocationData::default()
+    };
+    check_throw_what(
+        create_allocation_ops(&mut ops, &alloc_data, TransformDirection::Forward),
+        "Unsupported Allocation Type",
+    );
+    assert_eq!(ops.len(), 0);
+    check_throw_what(
+        create_allocation_ops(&mut ops, &alloc_data, TransformDirection::Inverse),
+        "Unsupported Allocation Type",
+    );
+    assert_eq!(ops.len(), 0);
+
+    alloc_data.allocation = Allocation::Uniform;
+    // No allocation data leads to identity, identity transform will be created.
+    create_allocation_ops(&mut ops, &alloc_data, TransformDirection::Forward).unwrap();
+    assert_eq!(ops.len(), 1);
+    ops.clear();
+    create_allocation_ops(&mut ops, &alloc_data, TransformDirection::Inverse).unwrap();
+    assert_eq!(ops.len(), 1);
+
+    // adding data to avoid identity. Fit transform will be created (if valid).
+    alloc_data.vars.push(0.0f32);
+    alloc_data.vars.push(10.0f32);
+    ops.clear();
+    create_allocation_ops(&mut ops, &alloc_data, TransformDirection::Forward).unwrap();
+    assert_eq!(ops.len(), 1);
+    ops.clear();
+    create_allocation_ops(&mut ops, &alloc_data, TransformDirection::Inverse).unwrap();
+    assert_eq!(ops.len(), 1);
 }
