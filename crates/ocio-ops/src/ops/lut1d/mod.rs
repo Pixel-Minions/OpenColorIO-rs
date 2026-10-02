@@ -5,6 +5,7 @@
 //! the optimizer's separable-prefix bake needs.
 
 pub mod lut1d_op;
+pub mod lut1d_op_cpu;
 pub mod lut1d_op_data;
 
 pub use lut1d_op_data::Lut1DOpData;
