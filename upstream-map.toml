@@ -466,7 +466,7 @@ path = "src/OpenColorIO/OpOptimizers.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/op_optimizers.rs"]
 status = "partial"
-note = "1.2c: FinalizeOps (132-139) and OpRcPtrVec::finalize (598-609); 1.2d (the owner's Option A): the optimizer's core, optimize (the pass loop, RemoveNoOpTypes, RemoveDynamicProperties, RemoveNoOps, ReplaceOps, ReplaceIdentityOps, RemoveInverseOps, CombineOps, IsPairInverseEnabled, IsCombineEnabled, the debug log) and optimizeForBitdepth (the clamp identities, FindSeparablePrefix). p1-optimizer B: the Lut1D arms of ReplaceInverseLuts and RemoveInverseOps (errors until Phase 2's inverse 1D LUT) and FindSeparablePrefix; still to come (p1-optimizer D): OptimizeSeparablePrefix's Lut1D bake, which the port refuses until then"
+note = "1.2c: FinalizeOps (132-139) and OpRcPtrVec::finalize (598-609); 1.2d (the owner's Option A): the optimizer's core, optimize (the pass loop, RemoveNoOpTypes, RemoveDynamicProperties, RemoveNoOps, ReplaceOps, ReplaceIdentityOps, RemoveInverseOps, CombineOps, IsPairInverseEnabled, IsCombineEnabled, the debug log) and optimizeForBitdepth (the clamp identities, FindSeparablePrefix). p1-optimizer B: the Lut1D arms of ReplaceInverseLuts and RemoveInverseOps (errors until Phase 2's inverse 1D LUT) and FindSeparablePrefix; p1-optimizer D: OptimizeSeparablePrefix, the Lut1D bake, entry for entry against the wheel (tests/lut1d_bake_oracle.rs). Not yet: the Lut3D arms (Phase 2); upstream's prefix tests that need CDL, gamma or files come when those families converge"
 
 [[file]]
 path = "src/OpenColorIO/ParseUtils.cpp"
@@ -1076,13 +1076,15 @@ note = "1.3m1: ArrayT (the constructor, resize, getLength, getNumColorComponents
 path = "src/OpenColorIO/ops/OpTools.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/op_tools.rs"]
-status = "todo"
+status = "done"
+note = "p1-optimizer D: EvalTransform"
 
 [[file]]
 path = "src/OpenColorIO/ops/OpTools.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/op_tools.rs"]
-status = "todo"
+status = "done"
+note = "p1-optimizer D: EvalTransform"
 
 [[file]]
 path = "src/OpenColorIO/ops/allocation/AllocationOp.cpp"
@@ -1761,7 +1763,7 @@ path = "src/OpenColorIO/ops/lut1d/Lut1DOpData.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_data.rs"]
 status = "partial"
-note = "p1-optimizer A: Lut3by1DArray, the constructors, the forward queries (isIdentity, isNoOp, hasChannelCrosstalk, getIdentityReplacement, mayLookup, mayCompose), MakeLookupDomain, GetLutIdealSize, validate, equals, inverse, getCacheID, hasExtendedRange, scale, finalize (forward; an inverse LUT is refused). The inverse set-up, getPairIdentityReplacement, Compose and MakeFastLut1DFromInverse are Phase 2 (WP 2.1); ComposeVec comes with the bake (chunk D)"
+note = "p1-optimizer A: Lut3by1DArray, the constructors, the forward queries (isIdentity, isNoOp, hasChannelCrosstalk, getIdentityReplacement, mayLookup, mayCompose), MakeLookupDomain, GetLutIdealSize, validate, equals, inverse, getCacheID, hasExtendedRange, scale, finalize (forward; an inverse LUT is refused). p1-optimizer D: ComposeVec. The inverse set-up, getPairIdentityReplacement, Compose and MakeFastLut1DFromInverse are Phase 2 (WP 2.1)"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpData.h"
