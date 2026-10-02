@@ -215,6 +215,39 @@ pub enum ChannelOrdering {
     Bgr,
 }
 
+/// The hue restoration a 1D LUT applies.
+///
+/// Port of `enum Lut1DHueAdjust` (include/OpenColorIO/OpenColorTypes.h:441-447 @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Lut1DHueAdjust {
+    /// `HUE_NONE`: no adjustment.
+    None = 0,
+    /// `HUE_DW3`: the algorithm of the ACES Output Transforms through v0.7.
+    Dw3,
+    /// `HUE_WYPN`: Weighted Yellow Power Norm, not implemented upstream.
+    Wypn,
+}
+
+/// The interpolation's name: `nearest`, `linear`, `tetrahedral`, `best`, `default`, `cubic`,
+/// or `unknown`.
+///
+/// Port of `InterpolationToString` (src/OpenColorIO/ParseUtils.cpp:234-244 @ v2.5.2).
+pub fn interpolation_to_string(
+    interp: crate::ops::lut3d::lut3d_op_data::Interpolation,
+) -> &'static str {
+    use crate::ops::lut3d::lut3d_op_data::Interpolation;
+    match interp {
+        Interpolation::Nearest => "nearest",
+        Interpolation::Linear => "linear",
+        Interpolation::Tetrahedral => "tetrahedral",
+        Interpolation::Best => "best",
+        Interpolation::Default => "default",
+        // INTERP_CUBIC is not implemented yet, but the string may be useful for error messages.
+        Interpolation::Cubic => "cubic",
+        Interpolation::Unknown => "unknown",
+    }
+}
+
 /// The bit depth's name in configs and error messages: `8ui`, `10ui`, `12ui`, `14ui`, `16ui`,
 /// `32ui`, `16f`, `32f`, or `unknown`.
 ///
