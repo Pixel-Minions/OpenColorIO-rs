@@ -486,7 +486,8 @@ fn upstreams_gpu_tests_write_the_wheels_shaders() {
 /// whose `double` and `float` literals differ; identities and inverse pairs the optimizer
 /// removes (the clamping ones without optimization: see the module notes); every pair of
 /// basic styles and directions, which combine; moncurves, which don't; a list around a
-/// matrix; refusals; and names (an empty pixel name is an error, but in OSL).
+/// matrix; a reverse slope beyond the float range; refusals; and names (an empty pixel name
+/// is an error, but in OSL).
 #[test]
 fn every_style_writes_the_wheels_shader() {
     let v = [2.2, 1.0 / 0.45, 1.23456789, 1.5];
@@ -572,6 +573,17 @@ fn every_style_writes_the_wheels_shader() {
                 T::Scale(0.5),
                 T::Lin(lin.0, lin.1, Linear, I),
             ],
+        ),
+        // Valid parameters whose reverse slope overflows a float: an `inf` literal
+        // (docs/improvements.md, I-35).
+        (
+            "reverse slope beyond the float range".to_string(),
+            vec![T::Lin(
+                [10.0, 2.4, 2.4, 1.0],
+                [0.0, 0.055, 0.055, 0.0],
+                Linear,
+                I,
+            )],
         ),
         // Refused: a basic exponent below its bound, a moncurve offset above its bound.
         (

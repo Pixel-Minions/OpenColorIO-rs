@@ -24,6 +24,9 @@ use crate::gpu_shader_utils::GpuShaderText;
 
 /// Each channel's first parameter (red, green, blue, alpha), or, for a reverse style, its
 /// inverse `1. / p[0]` in `double`. [`SHORT_PARAMS`] for a channel without one.
+///
+/// Port of the first lines of the basic styles' writers, `redGamma` to `alphaGamma`
+/// (GammaOpGPU.cpp:21-24, 43-46, 66-69, 86-89, 107-110, 135-138 @ v2.5.2).
 fn basic_gammas(gamma: &GammaOpData, reverse: bool) -> Result<[f64; 4]> {
     let mut out = [0.0; 4];
     for (o, p) in out.iter_mut().zip(gamma.all_params()) {
@@ -34,6 +37,10 @@ fn basic_gammas(gamma: &GammaOpData, reverse: bool) -> Result<[f64; 4]> {
 }
 
 /// The moncurve coefficients of the four channels (red, green, blue, alpha).
+///
+/// Port of the first lines of the moncurve styles' writers, `ComputeParamsFwd` or
+/// `ComputeParamsRev` for each channel (GammaOpGPU.cpp:164-169, 202-207, 239-244, 281-286
+/// @ v2.5.2).
 fn moncurve_params(gamma: &GammaOpData, reverse: bool) -> Result<[RendererParams; 4]> {
     let compute = if reverse {
         compute_params_rev
@@ -51,6 +58,9 @@ fn moncurve_params(gamma: &GammaOpData, reverse: bool) -> Result<[RendererParams
 /// The moncurve styles' declarations: `breakPnt`, `slope`, `scale`, `offset` and `gamma`, as
 /// `float`s. (Upstream: "Even if all components are the same, on OS X, a vec4 needs to be
 /// declared. This code will work in both cases.")
+///
+/// Port of the moncurve styles' `declareFloat4` calls (GammaOpGPU.cpp:176-180, 214-218,
+/// 250-254, 292-296 @ v2.5.2).
 fn declare_moncurve_params(ss: &GpuShaderText, p: &[RendererParams; 4]) -> Result<()> {
     let [r, g, b, a] = p;
     ss.declare_float4_f32(
@@ -67,6 +77,9 @@ fn declare_moncurve_params(ss: &GpuShaderText, p: &[RendererParams; 4]) -> Resul
 }
 
 /// Every style's last two lines: the pixel takes `res`.
+///
+/// Port of each writer's last two lines (GammaOpGPU.cpp:35-36, 57-58, 78-79, 98-99,
+/// 127-128, 155-156, 193-194, 230-231, 272-273, 312-313 @ v2.5.2).
 fn write_back(ss: &GpuShaderText, pxl: &[u8]) {
     ss.new_line()
         .put(pxl)
