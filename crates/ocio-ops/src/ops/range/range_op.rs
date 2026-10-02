@@ -82,6 +82,7 @@ impl RangeOpData {
             // range, come with their families.
             OpData::Cdl(_)
             | OpData::Gamma(_)
+            | OpData::Exponent(_)
             | OpData::Matrix(_)
             | OpData::Reference(_)
             | OpData::NoOp(_) => Ok(false),
@@ -110,6 +111,7 @@ impl RangeOpData {
             // actually want to use the second op). Those types come with their families.
             OpData::Cdl(_)
             | OpData::Gamma(_)
+            | OpData::Exponent(_)
             | OpData::Matrix(_)
             | OpData::Reference(_)
             | OpData::NoOp(_) => {

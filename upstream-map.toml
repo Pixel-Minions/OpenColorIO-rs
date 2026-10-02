@@ -446,7 +446,7 @@ path = "src/OpenColorIO/Op.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/op.rs", "crates/ocio-ops/src/op_data.rs"]
 status = "partial"
-note = "1.2c: OpCPU's defaults, OpData, GetTypeName, Op, OpRcPtrVec (as OpVec), SerializeOpVec and CreateOpVecFromOpData, with each family's arms added with the family; the Matrix op (before 1.2d): its arms, Op::getIdentityReplacement and OpData::getIdentityReplacement (an identity Matrix op; the overrides that return a range come with their families); the Range op (1.3r2): its arms, getIdentityReplacement's Range branch, CreateOpVecFromOpData's; the Gamma op (1.3g3): its arms, OpData::getIdentityReplacement's Gamma override, CreateOpVecFromOpData's; the CDL op (1.3c3): its arms, OpData::getIdentityReplacement's and getSimplerReplacement's CDL overrides, CreateOpVecFromOpData's"
+note = "1.2c: OpCPU's defaults, OpData, GetTypeName, Op, OpRcPtrVec (as OpVec), SerializeOpVec and CreateOpVecFromOpData, with each family's arms added with the family; the Matrix op (before 1.2d): its arms, Op::getIdentityReplacement and OpData::getIdentityReplacement (an identity Matrix op; the overrides that return a range come with their families); the Range op (1.3r2): its arms, getIdentityReplacement's Range branch, CreateOpVecFromOpData's; the Gamma op (1.3g3): its arms, OpData::getIdentityReplacement's Gamma override, CreateOpVecFromOpData's; the CDL op (1.3c3): its arms, OpData::getIdentityReplacement's and getSimplerReplacement's CDL overrides, CreateOpVecFromOpData's; the Exponent op (1.3e1): its arms, and CreateOpVecFromOpData's"
 
 [[file]]
 path = "src/OpenColorIO/Op.h"
@@ -1155,14 +1155,16 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/ops/exponent/ExponentOp.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/exponent/exponent_op.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/ops/exponent/exponent_op.rs", "crates/ocio-ops/src/ops/exponent/exponent_op_data.rs", "crates/ocio-ops/src/ops/exponent/exponent_op_cpu.rs", "crates/ocio-gpu/src/ops/exponent/exponent_op_gpu.rs"]
+status = "partial"
+note = "1.3e1 (p1-exponent): ExponentOpData, ExponentOpCPU, ExponentOp's behaviors (OpData::Exponent) and both CreateExponentOp; checked against the wheel through a version 1 config (exponent_oracle.rs). Its GPU part: extractGpuShaderInfo in ocio-gpu (exponent_op_gpu.rs, exponent_op_gpu_oracle.rs). Still to come: CreateExponentTransform (1.8)"
 
 [[file]]
 path = "src/OpenColorIO/ops/exponent/ExponentOp.h"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/exponent/exponent_op.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/ops/exponent/exponent_op.rs", "crates/ocio-ops/src/ops/exponent/exponent_op_data.rs", "crates/ocio-ops/src/ops/exponent/exponent_op_cpu.rs"]
+status = "partial"
+note = "see ExponentOp.cpp"
 
 [[file]]
 path = "src/OpenColorIO/ops/exposurecontrast/ExposureContrastOp.cpp"
@@ -4535,7 +4537,8 @@ note = "1.3c3: 9 of 10 tests; create_transform needs the CDLTransform (WP 1.8)"
 path = "tests/cpu/ops/exponent/ExponentOp_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/exponent/exponent_op_tests.rs"]
-status = "todo"
+status = "partial"
+note = "1.3e1: every test but create_transform, which needs CreateExponentTransform (1.8)"
 
 [[file]]
 path = "tests/cpu/ops/exposurecontrast/ExposureContrastOpCPU_tests.cpp"
