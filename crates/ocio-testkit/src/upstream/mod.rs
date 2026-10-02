@@ -63,6 +63,19 @@ pub fn check_close<T: UpstreamFloat>(x: T, y: T, tol: T) {
     }
 }
 
+/// `OCIO_CHECK_CLOSE(x, y, tol)` with `float` values and a `double` tolerance: `std::abs(x -
+/// y)` is computed in `float`, then promoted to `double` for the comparison. A NaN fails.
+///
+/// Port of `OCIO_CHECK_CLOSE` / `OCIO_CHECK_CLOSE_FROM`
+/// (tests/testutils/UnitTest.h:194-212 @ v2.5.2).
+#[track_caller]
+pub fn check_close_f32_f64(x: f32, y: f32, tol: f64) {
+    let passes = f64::from((x - y).abs()) < tol;
+    if !passes {
+        panic!("OCIO_CHECK_CLOSE failed: abs({x:e} - {y:e}) < {tol:e}");
+    }
+}
+
 /// `EqualWithAbsError(x1, x2, e)`: `((x1 > x2) ? x1 - x2 : x2 - x1) <= e`.
 ///
 /// Port of `EqualWithAbsError` (src/OpenColorIO/MathUtils.h:21-45 @ v2.5.2), which upstream's
@@ -298,6 +311,19 @@ mod tests {
         let failed = std::panic::catch_unwind(|| check_close(1.0f32, 1.5f32, 0.5f32));
         assert!(failed.is_err(), "the bound is exclusive, as in `<`");
         let nan = std::panic::catch_unwind(|| check_close(f32::NAN, 1.0f32, 1.0f32));
+        assert!(nan.is_err(), "NaN fails, as the comparison is false");
+    }
+
+    #[test]
+    fn check_close_f32_f64_compares_in_double() {
+        // 1e-3f32 is 1.00000005e-3 in double: below 1.0000001e-3, not below 1e-3.
+        check_close_f32_f64(1.0e-3, 0.0, 1.0000001e-3);
+        let failed = std::panic::catch_unwind(|| check_close_f32_f64(1.0e-3, 0.0, 1.0e-3));
+        assert!(
+            failed.is_err(),
+            "the float difference is compared in double"
+        );
+        let nan = std::panic::catch_unwind(|| check_close_f32_f64(f32::NAN, 1.0, 1.0));
         assert!(nan.is_err(), "NaN fails, as the comparison is false");
     }
 
