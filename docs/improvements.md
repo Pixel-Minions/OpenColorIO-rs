@@ -520,6 +520,23 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p1-cdl` (1.3c1), checked against the wheel in
   `crates/ocio-ops/tests/cdl_op_data_oracle.rs` and the battery.
 
+### I-68. Two half-domain 1D LUTs are never equal
+
+- **Upstream:** `Lut1DTransform::setLength` fills a half-domain LUT with each half code's
+  value, NaN codes included ("Use NaNs for the 2048 NaN values in the domain.",
+  `transforms/Lut1DTransform.cpp:101-106`). `Lut1DOpData::equals` compares the values with
+  `std::vector<float>::operator==` (`ops/lut1d/Lut1DOpData.cpp:528-550`, `ops/OpArray.h:182-188`),
+  where a NaN equals nothing. So two half-domain LUTs with the same values are unequal, unless
+  they are the same object, and so are the `Lut1DTransform`s that hold them; seen through the
+  wheel. `isInverse` uses the same comparison, so the optimizer never removes such a pair of
+  inverse LUTs as an identity.
+- **Who notices:** code that compares half-domain `Lut1DTransform`s, and processors with a
+  half-domain LUT followed by its inverse.
+- **A fix:** compare the values bit for bit, or fill the NaN codes with a value that compares
+  (as the lookup domains do, with `filterNANs`).
+- **Status:** matched in `p1-optimizer` (chunk A); `lut1d_op_data_oracle.rs` checks equality
+  against the wheel.
+
 ### I-70. A camera log's break differs between Windows and Linux
 
 - **Upstream:** `LogUtil::GetLogSideBreak` (`ops/log/LogUtils.cpp:270-281`) computes the

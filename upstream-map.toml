@@ -39,7 +39,7 @@ path = "include/OpenColorIO/OpenColorTypes.h"
 kind = "api"
 target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs", "crates/ocio-ops/src/format_metadata.rs", "crates/ocio-ops/src/logging.rs", "crates/ocio-gpu/src/open_color_types.rs"]
 status = "partial"
-note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.1a: BitDepth, and BitDepthToString (defined in ParseUtils.cpp); 1.1b: ChannelOrdering; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does; 1.2b: DynamicPropertyType; 1.2e: LoggingLevel (288-297), in open_color_types.rs, and LoggingFunction (283-284), in logging.rs; 1.7a: GpuLanguage, in ocio-gpu/src/open_color_types.rs; 1.3n1: Allocation (459-463); 1.2d: OptimizationFlags (634-722), a bit-flags type over a C unsigned long"
+note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.1a: BitDepth, and BitDepthToString (defined in ParseUtils.cpp); 1.1b: ChannelOrdering; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does; 1.2b: DynamicPropertyType; 1.2e: LoggingLevel (288-297), in open_color_types.rs, and LoggingFunction (283-284), in logging.rs; 1.7a: GpuLanguage, in ocio-gpu/src/open_color_types.rs; 1.3n1: Allocation (459-463); 1.2d: OptimizationFlags (634-722), a bit-flags type over a C unsigned long; p1-optimizer A: Lut1DHueAdjust (441-447)"
 
 [[file]]
 path = "src/CMakeLists.txt"
@@ -473,7 +473,7 @@ path = "src/OpenColorIO/ParseUtils.cpp"
 kind = "src"
 target = ["crates/ocio/src/parse_utils.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-gpu/src/open_color_types.rs"]
 status = "partial"
-note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection; 1.1a: BitDepthToString, next to BitDepth; 1.2e: LoggingLevelToString and LoggingLevelFromString, next to LoggingLevel; 1.7c: GpuLanguageToString, next to GpuLanguage; 1.3n1: AllocationToString, next to Allocation; 1.3m1: TransformDirectionToString, next to TransformDirection"
+note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection; 1.1a: BitDepthToString, next to BitDepth; 1.2e: LoggingLevelToString and LoggingLevelFromString, next to LoggingLevel; 1.7c: GpuLanguageToString, next to GpuLanguage; 1.3n1: AllocationToString, next to Allocation; 1.3m1: TransformDirectionToString, next to TransformDirection; p1-optimizer A: InterpolationToString, in open_color_types.rs"
 
 [[file]]
 path = "src/OpenColorIO/ParseUtils.h"
@@ -1070,7 +1070,7 @@ path = "src/OpenColorIO/ops/OpArray.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/op_array.rs"]
 status = "partial"
-note = "1.3m1: ArrayT (the constructor, resize, getLength, getNumColorComponents, getValues, operator[], validate, operator== and scale) and ArrayDouble, what the Matrix op uses; getNumValues is the subclass's, so resize and validate take its value. ArrayBase, Array (ArrayT<float>), setLength, setDoubleValue, getDoubleValue, setMaxColorComponents, getMaxColorComponents, setNumColorComponents and adjustColorComponentNumber come with the LUT ops"
+note = "1.3m1: ArrayT (the constructor, resize, getLength, getNumColorComponents, getValues, operator[], validate, operator== and scale) and ArrayDouble, what the Matrix op uses; getNumValues is the subclass's, so resize and validate take its value. p1-optimizer A: Array (ArrayT<float>), setLength, getMaxColorComponents, setNumColorComponents and adjustColorComponentNumber (for float arrays), for the Lut1D op. ArrayBase, setDoubleValue, getDoubleValue and setMaxColorComponents come with the file readers"
 
 [[file]]
 path = "src/OpenColorIO/ops/OpTools.cpp"
@@ -1758,13 +1758,15 @@ status = "todo"
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpData.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_data.rs"]
-status = "todo"
+status = "partial"
+note = "p1-optimizer A: Lut3by1DArray, the constructors, the forward queries (isIdentity, isNoOp, hasChannelCrosstalk, getIdentityReplacement, mayLookup, mayCompose), MakeLookupDomain, GetLutIdealSize, validate, equals, inverse, getCacheID, hasExtendedRange, scale, finalize (forward; an inverse LUT is refused). The inverse set-up, getPairIdentityReplacement, Compose and MakeFastLut1DFromInverse are Phase 2 (WP 2.1); ComposeVec comes with the bake (chunk D)"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpData.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_data.rs"]
-status = "todo"
+status = "partial"
+note = "p1-optimizer A: the forward data; ComponentProperties and the inverse are Phase 2 (WP 2.1)"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpGPU.cpp"
@@ -4745,7 +4747,8 @@ status = "todo"
 path = "tests/cpu/ops/lut1d/Lut1DOpData_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_data_tests.rs"]
-status = "todo"
+status = "partial"
+note = "get_lut_ideal_size, constructor, accessors, is_identity, clone, equality_test, channel, interpolation; the composition and inverse tests come with Phase 2 (WP 2.1)"
 
 [[file]]
 path = "tests/cpu/ops/lut1d/Lut1DOpGPU_tests.cpp"

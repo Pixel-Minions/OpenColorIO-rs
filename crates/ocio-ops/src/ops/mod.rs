@@ -8,6 +8,7 @@ pub mod cdl;
 pub mod exponent;
 pub mod gamma;
 pub mod log;
+pub mod lut1d;
 pub mod lut3d;
 pub mod matrix;
 pub mod noop;
