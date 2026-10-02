@@ -91,15 +91,16 @@ fn remove_no_op_types(op_vec: &mut OpVec) -> i32 {
 /// Replaces each dynamic op with a copy whose dynamic properties are no longer dynamic.
 ///
 /// Port of `RemoveDynamicProperties` (src/OpenColorIO/OpOptimizers.cpp:96-111 @ v2.5.2).
-fn remove_dynamic_properties(op_vec: &mut OpVec) {
+fn remove_dynamic_properties(op_vec: &mut OpVec) -> Result<()> {
     for op in op_vec.iter_mut() {
         if op.is_dynamic() {
             // Optimization flag is tested before.
-            let mut replaced_by = op.clone_op();
+            let mut replaced_by = op.clone_op()?;
             replaced_by.remove_dynamic_properties();
             *op = replaced_by;
         }
     }
+    Ok(())
 }
 
 /// Removes the ops that are no-ops, identity matrices included, and returns how many.
@@ -562,7 +563,7 @@ impl OpVec {
         // dynamically.
         let remove_dynamic = o_flags.has_flag(OptimizationFlags::NO_DYNAMIC_PROPERTIES);
         if remove_dynamic {
-            remove_dynamic_properties(self);
+            remove_dynamic_properties(self)?;
         }
 
         // As the input and output bit-depths represent the color processing request and they
