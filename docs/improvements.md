@@ -220,7 +220,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Who notices:** practically no one for a collision; for the fallback, applications that
   toggle `OCIO_DISABLE_CACHE_FALLBACK` and compare processors by identity.
 - **A fix:** key by the text itself, and make the fallback's choice not depend on the hash.
-- **Status:** matched (`p1-processor`, WP 1.8g: `caching::std_hash_string`).
+- **Status:** matched (`p1-processor`, WP 1.8g: `caching::std_hash_string`), checked through
+  the wheels' fallback (`crates/ocio/tests/processor_cache_oracle.rs`).
 
 ### I-54. `OCIO_OPTIMIZATION_FLAGS` reads differently on Windows and Linux
 
@@ -241,7 +242,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **A fix:** read the variable as a 32-bit value on both platforms, refuse trailing text, and
   give one message.
 - **Status:** matched (`p1-processor`, WP 1.8h1: `processor::stoul`, checked against each C
-  runtime's `strtoul`).
+  runtime's `strtoul`, and through both wheels in `crates/ocio/tests/processor_cache_oracle.rs`).
 
 ## Numeric helpers
 
