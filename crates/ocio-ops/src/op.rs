@@ -29,6 +29,7 @@ use crate::open_color_types::{DynamicPropertyType, TransformDirection};
 use crate::ops::cdl::cdl_op::create_cdl_op;
 use crate::ops::exponent::exponent_op::create_exponent_op;
 use crate::ops::gamma::gamma_op::create_gamma_op;
+use crate::ops::log::log_op::create_log_op;
 use crate::ops::matrix::matrix_op::create_matrix_op;
 use crate::ops::range::range_op::create_range_op;
 
@@ -208,6 +209,7 @@ impl Op {
         match &*self.data {
             OpData::Cdl(data) => data.clone_op(),
             OpData::Gamma(data) => data.clone_op(),
+            OpData::Log(data) => data.clone_op(),
             OpData::Matrix(data) => data.clone_op(),
             // The op's data was validated when the op was made, so the copy is valid too.
             OpData::Range(data) => data.clone_op().expect("an op's range is valid"),
@@ -226,6 +228,7 @@ impl Op {
         match &*self.data {
             OpData::Cdl(data) => data.get_info(),
             OpData::Gamma(data) => data.get_info(),
+            OpData::Log(data) => data.get_info(),
             OpData::Matrix(data) => data.get_info(),
             OpData::Range(data) => data.get_info(),
             OpData::Exponent(data) => data.get_info(),
@@ -250,7 +253,8 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default: the data's.
-            OpData::Cdl(_)
+            OpData::Log(_)
+            | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
@@ -266,7 +270,8 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default: the data's.
-            OpData::Cdl(_)
+            OpData::Log(_)
+            | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
@@ -281,7 +286,7 @@ impl Op {
     ///
     /// Port of `Op::getIdentityReplacement` (src/OpenColorIO/Op.cpp:178-202 @ v2.5.2).
     pub fn get_identity_replacement(&self) -> Result<Op> {
-        let op_data = self.data.get_identity_replacement();
+        let op_data = self.data.get_identity_replacement()?;
         let mut ops = OpVec::new();
         match op_data {
             OpData::Matrix(mat) => {
@@ -292,7 +297,8 @@ impl Op {
                 // Clamping op.
                 create_range_op(&mut ops, range, TransformDirection::Forward)?;
             }
-            OpData::Cdl(_)
+            OpData::Log(_)
+            | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Exponent(_)
             | OpData::Reference(_)
@@ -328,6 +334,7 @@ impl Op {
         match &*self.data {
             OpData::Cdl(data) => data.is_same_type(op),
             OpData::Gamma(data) => data.is_same_type(op),
+            OpData::Log(data) => data.is_same_type(op),
             OpData::Matrix(data) => data.is_same_type(op),
             OpData::Range(data) => data.is_same_type(op),
             OpData::Exponent(data) => data.is_same_type(op),
@@ -344,6 +351,7 @@ impl Op {
         match &*self.data {
             OpData::Cdl(data) => data.is_inverse_op(op),
             OpData::Gamma(data) => data.is_inverse_op(op),
+            OpData::Log(data) => data.is_inverse_op(op),
             OpData::Matrix(data) => data.is_inverse(op),
             OpData::Range(data) => data.is_inverse(op),
             OpData::Exponent(data) => data.is_inverse(op),
@@ -366,7 +374,7 @@ impl Op {
             OpData::Exponent(data) => Ok(data.can_combine_with(op)),
             OpData::Reference(_) => no_reference_op(),
             // The Op default.
-            OpData::NoOp(_) => Ok(false),
+            OpData::Log(_) | OpData::NoOp(_) => Ok(false),
         }
     }
 
@@ -384,7 +392,7 @@ impl Op {
             OpData::Exponent(data) => data.combine_with(ops, second_op),
             OpData::Reference(_) => no_reference_op(),
             // The Op default.
-            OpData::NoOp(_) => Err(self.cannot_combine()),
+            OpData::Log(_) | OpData::NoOp(_) => Err(self.cannot_combine()),
         }
     }
 
@@ -404,7 +412,8 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default: the data's.
-            OpData::Cdl(_)
+            OpData::Log(_)
+            | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
@@ -458,8 +467,13 @@ impl Op {
                 Ok(())
             }
             OpData::Reference(_) => no_reference_op(),
-            // The Op default: nothing. (A reverse Gamma style renders as it is.)
-            OpData::Cdl(_) | OpData::Gamma(_) | OpData::Exponent(_) | OpData::NoOp(_) => Ok(()),
+            // The Op default: nothing. (A reverse Gamma style renders as it is; `LogOp` keeps
+            // it too: its renderers handle both directions.)
+            OpData::Cdl(_)
+            | OpData::Gamma(_)
+            | OpData::Log(_)
+            | OpData::Exponent(_)
+            | OpData::NoOp(_) => Ok(()),
         }
     }
 
@@ -471,6 +485,7 @@ impl Op {
         match &*self.data {
             OpData::Cdl(data) => Ok(data.get_op_cache_id()),
             OpData::Gamma(data) => data.get_op_cache_id(),
+            OpData::Log(data) => data.get_op_cache_id(),
             OpData::Matrix(data) => data.get_op_cache_id(),
             OpData::Range(data) => Ok(data.get_op_cache_id()),
             OpData::Exponent(data) => Ok(data.get_op_cache_id()),
@@ -493,6 +508,10 @@ impl Op {
             }
             OpData::Gamma(data) => {
                 data.get_cpu_op(false)?.apply(rgba);
+                Ok(())
+            }
+            OpData::Log(data) => {
+                data.get_cpu_op(false).apply(rgba);
                 Ok(())
             }
             OpData::Matrix(data) => {
@@ -538,6 +557,12 @@ impl Op {
                 renderer.apply(output);
                 Ok(())
             }
+            OpData::Log(data) => {
+                let renderer = data.get_cpu_op(false);
+                output.copy_from_slice(input);
+                renderer.apply(output);
+                Ok(())
+            }
             OpData::Matrix(data) => {
                 let renderer = data.get_cpu_op()?;
                 output.copy_from_slice(input);
@@ -576,7 +601,8 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default.
-            OpData::Cdl(_)
+            OpData::Log(_)
+            | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
@@ -592,7 +618,8 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default.
-            OpData::Cdl(_)
+            OpData::Log(_)
+            | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
@@ -609,7 +636,8 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default.
-            OpData::Cdl(_)
+            OpData::Log(_)
+            | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
@@ -626,7 +654,8 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default.
-            OpData::Cdl(_)
+            OpData::Log(_)
+            | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
@@ -648,7 +677,8 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default: each overload's error.
-            OpData::Cdl(_)
+            OpData::Log(_)
+            | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
@@ -665,7 +695,8 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default: nothing.
-            OpData::Cdl(_)
+            OpData::Log(_)
+            | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
@@ -684,6 +715,7 @@ impl Op {
         match &*self.data {
             OpData::Cdl(data) => Ok(Some(data.get_cpu_op(fast_log_exp_pow))),
             OpData::Gamma(data) => Ok(Some(data.get_cpu_op(fast_log_exp_pow)?)),
+            OpData::Log(data) => Ok(Some(data.get_cpu_op(fast_log_exp_pow))),
             OpData::Matrix(data) => Ok(Some(data.get_cpu_op()?)),
             OpData::Range(data) => Ok(Some(data.get_cpu_op()?)),
             OpData::Exponent(data) => Ok(Some(data.get_cpu_op())),
@@ -1030,6 +1062,10 @@ pub fn create_op_vec_from_op_data(
             let gamma = gamma_src.clone();
             create_gamma_op(ops, gamma, dir);
             Ok(())
+        }
+        OpData::Log(log_src) => {
+            let log = log_src.clone();
+            create_log_op(ops, log, dir)
         }
         OpData::Matrix(matrix_src) => {
             let matrix = matrix_src.clone();

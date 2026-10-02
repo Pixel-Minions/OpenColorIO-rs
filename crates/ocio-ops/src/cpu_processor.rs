@@ -357,7 +357,8 @@ fn create_cpu_engine(
     for (idx, op) in ops.iter().enumerate() {
         // (A Lut1D at either end: `GetLut1DRenderer` converts the bit depths.)
         match &**op.data() {
-            OpData::Cdl(_)
+            OpData::Log(_)
+            | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Matrix(_)
             | OpData::Range(_)

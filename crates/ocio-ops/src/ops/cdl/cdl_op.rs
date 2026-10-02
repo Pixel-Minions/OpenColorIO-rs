@@ -50,6 +50,7 @@ impl CdlOpData {
         match &**op.data() {
             OpData::Cdl(cdl_data2) => self.is_inverse(cdl_data2),
             OpData::Gamma(_)
+            | OpData::Log(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
