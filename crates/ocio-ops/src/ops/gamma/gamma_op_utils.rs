@@ -11,7 +11,8 @@
 //!
 //! Port of `src/OpenColorIO/ops/gamma/GammaOpUtils.h` and `GammaOpUtils.cpp` @ v2.5.2.
 
-use super::gamma_op_data::Params;
+use super::gamma_op_data::{Params, SHORT_PARAMS};
+use crate::exception::{Exception, Result};
 use crate::math_utils::{sse_mul, std_max};
 
 /// The coefficients of one channel of a moncurve renderer.
@@ -125,30 +126,43 @@ fn mon_curve_scale_rev(p: &Params) -> f64 {
     1.0 + offset
 }
 
-/// The coefficients of the forward monitor curve.
+/// The monitor-curve functions read `p[0]` and `p[1]`: [`SHORT_PARAMS`] for a shorter vector.
+fn check_two_params(p: &Params) -> Result<()> {
+    if p.len() < 2 {
+        return Err(Exception::new(SHORT_PARAMS));
+    }
+    Ok(())
+}
+
+/// The coefficients of the forward monitor curve. [`SHORT_PARAMS`] where `g_params` holds
+/// fewer than two values: upstream reads `p[0]` and `p[1]` regardless (`docs/improvements.md`
+/// U-24).
 ///
 /// Port of `ComputeParamsFwd` (src/OpenColorIO/ops/gamma/GammaOpUtils.cpp:109-117 @ v2.5.2).
-pub fn compute_params_fwd(g_params: &Params) -> RendererParams {
-    RendererParams {
+pub fn compute_params_fwd(g_params: &Params) -> Result<RendererParams> {
+    check_two_params(g_params)?;
+    Ok(RendererParams {
         gamma: mon_curve_gamma_fwd(g_params) as f32,
         offset: mon_curve_offset_fwd(g_params) as f32,
         break_pnt: mon_curve_break_fwd(g_params) as f32,
         slope: mon_curve_slope_fwd(g_params) as f32,
         scale: mon_curve_scale_fwd(g_params) as f32,
-    }
+    })
 }
 
-/// The coefficients of the reverse monitor curve.
+/// The coefficients of the reverse monitor curve. [`SHORT_PARAMS`] where `g_params` holds
+/// fewer than two values, as [`compute_params_fwd`].
 ///
 /// Port of `ComputeParamsRev` (src/OpenColorIO/ops/gamma/GammaOpUtils.cpp:119-127 @ v2.5.2).
-pub fn compute_params_rev(g_params: &Params) -> RendererParams {
-    RendererParams {
+pub fn compute_params_rev(g_params: &Params) -> Result<RendererParams> {
+    check_two_params(g_params)?;
+    Ok(RendererParams {
         gamma: mon_curve_gamma_rev(g_params) as f32,
         offset: mon_curve_offset_rev(g_params) as f32,
         break_pnt: mon_curve_break_rev(g_params) as f32,
         slope: mon_curve_slope_rev(g_params) as f32,
         scale: mon_curve_scale_rev(g_params) as f32,
-    }
+    })
 }
 
 #[cfg(test)]

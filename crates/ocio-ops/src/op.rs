@@ -26,6 +26,7 @@ use crate::format_metadata::FormatMetadataImpl;
 use crate::logging::log_warning;
 use crate::op_data::{OpData, OpDataRcPtr, OpDataType, OpDataVec, get_type_name};
 use crate::open_color_types::{DynamicPropertyType, TransformDirection};
+use crate::ops::gamma::gamma_op::create_gamma_op;
 use crate::ops::matrix::matrix_op::create_matrix_op;
 use crate::ops::range::range_op::create_range_op;
 
@@ -203,6 +204,7 @@ impl Op {
     /// overrides.
     pub fn clone_op(&self) -> Op {
         match &*self.data {
+            OpData::Gamma(data) => data.clone_op(),
             OpData::Matrix(data) => data.clone_op(),
             // The op's data was validated when the op was made, so the copy is valid too.
             OpData::Range(data) => data.clone_op().expect("an op's range is valid"),
@@ -218,6 +220,7 @@ impl Op {
     /// overrides.
     pub fn get_info(&self) -> &'static str {
         match &*self.data {
+            OpData::Gamma(data) => data.get_info(),
             OpData::Matrix(data) => data.get_info(),
             OpData::Range(data) => data.get_info(),
             OpData::Reference(_) => no_reference_op(),
@@ -241,7 +244,9 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default: the data's.
-            OpData::Matrix(_) | OpData::Range(_) | OpData::NoOp(_) => self.data.is_no_op(),
+            OpData::Gamma(_) | OpData::Matrix(_) | OpData::Range(_) | OpData::NoOp(_) => {
+                self.data.is_no_op()
+            }
         }
     }
 
@@ -252,7 +257,9 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default: the data's.
-            OpData::Matrix(_) | OpData::Range(_) | OpData::NoOp(_) => self.data.is_identity(),
+            OpData::Gamma(_) | OpData::Matrix(_) | OpData::Range(_) | OpData::NoOp(_) => {
+                self.data.is_identity()
+            }
         }
     }
 
@@ -273,7 +280,7 @@ impl Op {
                 // Clamping op.
                 create_range_op(&mut ops, range, TransformDirection::Forward)?;
             }
-            OpData::Reference(_) | OpData::NoOp(_) => {
+            OpData::Gamma(_) | OpData::Reference(_) | OpData::NoOp(_) => {
                 return Err(Exception::new(format!(
                     "Unexpected type in getIdentityReplacement. Expecting Matrix or Range, \
                      got :{}.",
@@ -303,6 +310,7 @@ impl Op {
     /// overrides.
     pub fn is_same_type(&self, op: &Op) -> bool {
         match &*self.data {
+            OpData::Gamma(data) => data.is_same_type(op),
             OpData::Matrix(data) => data.is_same_type(op),
             OpData::Range(data) => data.is_same_type(op),
             OpData::Reference(_) => no_reference_op(),
@@ -316,6 +324,7 @@ impl Op {
     /// overrides.
     pub fn is_inverse(&self, op: &Op) -> bool {
         match &*self.data {
+            OpData::Gamma(data) => data.is_inverse_op(op),
             OpData::Matrix(data) => data.is_inverse(op),
             OpData::Range(data) => data.is_inverse(op),
             OpData::Reference(_) => no_reference_op(),
@@ -330,6 +339,7 @@ impl Op {
     /// its overrides.
     pub fn can_combine_with(&self, op: &Op) -> Result<bool> {
         match &*self.data {
+            OpData::Gamma(data) => Ok(data.can_combine_with(op)),
             OpData::Matrix(data) => data.can_combine_with(op),
             OpData::Range(data) => data.can_combine_with(op),
             OpData::Reference(_) => no_reference_op(),
@@ -345,6 +355,7 @@ impl Op {
     /// its overrides.
     pub fn combine_with(&self, ops: &mut OpVec, second_op: &Op) -> Result<()> {
         match &*self.data {
+            OpData::Gamma(data) => data.combine_with(ops, second_op),
             OpData::Matrix(data) => data.combine_with(ops, second_op),
             OpData::Range(data) => data.combine_with(ops, second_op),
             OpData::Reference(_) => no_reference_op(),
@@ -369,7 +380,7 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default: the data's.
-            OpData::Matrix(_) | OpData::Range(_) | OpData::NoOp(_) => {
+            OpData::Gamma(_) | OpData::Matrix(_) | OpData::Range(_) | OpData::NoOp(_) => {
                 self.data.has_channel_crosstalk()
             }
         }
@@ -420,8 +431,8 @@ impl Op {
                 Ok(())
             }
             OpData::Reference(_) => no_reference_op(),
-            // The Op default: nothing.
-            OpData::NoOp(_) => Ok(()),
+            // The Op default: nothing. (A reverse Gamma style renders as it is.)
+            OpData::Gamma(_) | OpData::NoOp(_) => Ok(()),
         }
     }
 
@@ -431,6 +442,7 @@ impl Op {
     /// overrides.
     pub fn get_cache_id(&self) -> Result<Vec<u8>> {
         match &*self.data {
+            OpData::Gamma(data) => data.get_op_cache_id(),
             OpData::Matrix(data) => data.get_op_cache_id(),
             OpData::Range(data) => Ok(data.get_op_cache_id()),
             OpData::Reference(_) => no_reference_op(),
@@ -446,6 +458,10 @@ impl Op {
     pub fn apply(&self, rgba: &mut [f32]) -> Result<()> {
         match &*self.data {
             // The Op default: `getCPUOp(false)->apply(img, img, numPixels)`.
+            OpData::Gamma(data) => {
+                data.get_cpu_op(false)?.apply(rgba);
+                Ok(())
+            }
             OpData::Matrix(data) => {
                 data.get_cpu_op()?.apply(rgba);
                 Ok(())
@@ -471,6 +487,13 @@ impl Op {
         match &*self.data {
             // The Op default: `getCPUOp(false)->apply(inImg, outImg, numPixels)`. The matrix
             // renderers read a pixel before writing it, so they render a copy in place.
+            // The gamma renderers read a pixel's four values before writing it too.
+            OpData::Gamma(data) => {
+                let renderer = data.get_cpu_op(false)?;
+                output.copy_from_slice(input);
+                renderer.apply(output);
+                Ok(())
+            }
             OpData::Matrix(data) => {
                 let renderer = data.get_cpu_op()?;
                 output.copy_from_slice(input);
@@ -502,7 +525,7 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default.
-            OpData::Matrix(_) | OpData::Range(_) | OpData::NoOp(_) => true,
+            OpData::Gamma(_) | OpData::Matrix(_) | OpData::Range(_) | OpData::NoOp(_) => true,
         }
     }
 
@@ -513,7 +536,7 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default.
-            OpData::Matrix(_) | OpData::Range(_) | OpData::NoOp(_) => false,
+            OpData::Gamma(_) | OpData::Matrix(_) | OpData::Range(_) | OpData::NoOp(_) => false,
         }
     }
 
@@ -525,7 +548,7 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default.
-            OpData::Matrix(_) | OpData::Range(_) | OpData::NoOp(_) => false,
+            OpData::Gamma(_) | OpData::Matrix(_) | OpData::Range(_) | OpData::NoOp(_) => false,
         }
     }
 
@@ -537,7 +560,7 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default.
-            OpData::Matrix(_) | OpData::Range(_) | OpData::NoOp(_) => {
+            OpData::Gamma(_) | OpData::Matrix(_) | OpData::Range(_) | OpData::NoOp(_) => {
                 Err(Exception::new(NO_DYNAMIC_PROPERTY))
             }
         }
@@ -556,7 +579,9 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default: each overload's error.
-            OpData::Matrix(_) | OpData::Range(_) | OpData::NoOp(_) => Err(cannot_replace(prop)),
+            OpData::Gamma(_) | OpData::Matrix(_) | OpData::Range(_) | OpData::NoOp(_) => {
+                Err(cannot_replace(prop))
+            }
         }
     }
 
@@ -568,7 +593,7 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default: nothing.
-            OpData::Matrix(_) | OpData::Range(_) | OpData::NoOp(_) => {}
+            OpData::Gamma(_) | OpData::Matrix(_) | OpData::Range(_) | OpData::NoOp(_) => {}
         }
     }
 
@@ -578,8 +603,9 @@ impl Op {
     ///
     /// Port of `Op::getCPUOp`, pure virtual (src/OpenColorIO/Op.h:285-286 @ v2.5.2), and its
     /// overrides.
-    pub fn get_cpu_op(&self, _fast_log_exp_pow: bool) -> Result<Option<Arc<dyn CpuOp>>> {
+    pub fn get_cpu_op(&self, fast_log_exp_pow: bool) -> Result<Option<Arc<dyn CpuOp>>> {
         match &*self.data {
+            OpData::Gamma(data) => Ok(Some(data.get_cpu_op(fast_log_exp_pow)?)),
             OpData::Matrix(data) => Ok(Some(data.get_cpu_op()?)),
             OpData::Range(data) => Ok(Some(data.get_cpu_op()?)),
             OpData::Reference(_) => no_reference_op(),
@@ -916,6 +942,11 @@ pub fn create_op_vec_from_op_data(
     dir: TransformDirection,
 ) -> Result<()> {
     match &**op_data {
+        OpData::Gamma(gamma_src) => {
+            let gamma = gamma_src.clone();
+            create_gamma_op(ops, gamma, dir);
+            Ok(())
+        }
         OpData::Matrix(matrix_src) => {
             let matrix = matrix_src.clone();
             create_matrix_op(ops, matrix, dir);

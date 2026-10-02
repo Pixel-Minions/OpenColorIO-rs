@@ -34,8 +34,9 @@
 
 use std::sync::Arc;
 
-use super::gamma_op_data::{GammaOpData, GammaStyle};
+use super::gamma_op_data::{GammaOpData, GammaStyle, SHORT_PARAMS};
 use super::gamma_op_utils::{RendererParams, compute_params_fwd, compute_params_rev};
+use crate::exception::{Exception, Result};
 use crate::math_utils::{sse_add, sse_mul, std_max};
 use crate::op::CpuOp;
 use crate::sse::{EABS_MASK, ESIGN_MASK, sse_power};
@@ -43,22 +44,37 @@ use crate::sse::{EABS_MASK, ESIGN_MASK, sse_power};
 /// The Gamma renderer for the op's style: the SSE kernel when `fast_power`
 /// (`OPTIMIZATION_FAST_LOG_EXP_POW`) is set, the math-library one otherwise.
 ///
+/// The renderers read each channel's first parameter (the basic styles) or first two (the
+/// moncurve styles) without a check, past the end of a shorter vector, which only
+/// `GammaOpData::validate` refuses: [`SHORT_PARAMS`] there instead (`docs/improvements.md`
+/// U-24).
+///
 /// Port of `GetGammaRenderer` (src/OpenColorIO/ops/gamma/GammaOpCPU.cpp:211-292 @ v2.5.2). Its
 /// final `throw Exception("Unsupported Gamma style")` cannot be reached with a [`GammaStyle`].
-pub fn get_gamma_renderer(gamma: &GammaOpData, fast_power: bool) -> Arc<dyn CpuOp> {
-    match (gamma.style(), fast_power) {
-        (GammaStyle::MoncurveFwd, true) => Arc::new(GammaMoncurveOpCpuFwdSse::new(gamma)),
-        (GammaStyle::MoncurveFwd, false) => Arc::new(GammaMoncurveOpCpuFwd::new(gamma)),
-        (GammaStyle::MoncurveRev, true) => Arc::new(GammaMoncurveOpCpuRevSse::new(gamma)),
-        (GammaStyle::MoncurveRev, false) => Arc::new(GammaMoncurveOpCpuRev::new(gamma)),
+pub fn get_gamma_renderer(gamma: &GammaOpData, fast_power: bool) -> Result<Arc<dyn CpuOp>> {
+    // `GammaBasicOpCPU::update` reads p[0]; `ComputeParamsFwd`/`Rev` read p[0] and p[1].
+    let used = if gamma.style().is_basic() { 1 } else { 2 };
+    if gamma.all_params().iter().any(|p| p.len() < used) {
+        return Err(Exception::new(SHORT_PARAMS));
+    }
+
+    Ok(match (gamma.style(), fast_power) {
+        (GammaStyle::MoncurveFwd, true) => Arc::new(GammaMoncurveOpCpuFwdSse::new(gamma)?),
+        (GammaStyle::MoncurveFwd, false) => Arc::new(GammaMoncurveOpCpuFwd::new(gamma)?),
+        (GammaStyle::MoncurveRev, true) => Arc::new(GammaMoncurveOpCpuRevSse::new(gamma)?),
+        (GammaStyle::MoncurveRev, false) => Arc::new(GammaMoncurveOpCpuRev::new(gamma)?),
         (GammaStyle::MoncurveMirrorFwd, true) => {
-            Arc::new(GammaMoncurveMirrorOpCpuFwdSse::new(gamma))
+            Arc::new(GammaMoncurveMirrorOpCpuFwdSse::new(gamma)?)
         }
-        (GammaStyle::MoncurveMirrorFwd, false) => Arc::new(GammaMoncurveMirrorOpCpuFwd::new(gamma)),
+        (GammaStyle::MoncurveMirrorFwd, false) => {
+            Arc::new(GammaMoncurveMirrorOpCpuFwd::new(gamma)?)
+        }
         (GammaStyle::MoncurveMirrorRev, true) => {
-            Arc::new(GammaMoncurveMirrorOpCpuRevSse::new(gamma))
+            Arc::new(GammaMoncurveMirrorOpCpuRevSse::new(gamma)?)
         }
-        (GammaStyle::MoncurveMirrorRev, false) => Arc::new(GammaMoncurveMirrorOpCpuRev::new(gamma)),
+        (GammaStyle::MoncurveMirrorRev, false) => {
+            Arc::new(GammaMoncurveMirrorOpCpuRev::new(gamma)?)
+        }
         (GammaStyle::BasicFwd | GammaStyle::BasicRev, true) => {
             Arc::new(GammaBasicOpCpuSse::new(gamma))
         }
@@ -77,7 +93,7 @@ pub fn get_gamma_renderer(gamma: &GammaOpData, fast_power: bool) -> Arc<dyn CpuO
         (GammaStyle::BasicPassThruFwd | GammaStyle::BasicPassThruRev, false) => {
             Arc::new(GammaBasicPassThruOpCpu::new(gamma))
         }
-    }
+    })
 }
 
 /// The RGBA pixels of a buffer.
@@ -161,7 +177,7 @@ pub struct GammaBasicOpCpu {
 impl GammaBasicOpCpu {
     /// Port of `GammaBasicOpCPU::GammaBasicOpCPU` and `GammaBasicOpCPU::update`
     /// (src/OpenColorIO/ops/gamma/GammaOpCPU.cpp:295-318 @ v2.5.2).
-    pub fn new(gamma: &GammaOpData) -> Self {
+    pub(crate) fn new(gamma: &GammaOpData) -> Self {
         GammaBasicOpCpu {
             gamma: basic_gammas(gamma),
         }
@@ -192,7 +208,7 @@ pub struct GammaBasicOpCpuSse(GammaBasicOpCpu);
 impl GammaBasicOpCpuSse {
     /// Port of `GammaBasicOpCPUSSE::GammaBasicOpCPUSSE`
     /// (src/OpenColorIO/ops/gamma/GammaOpCPU.cpp:47-50 @ v2.5.2).
-    pub fn new(gamma: &GammaOpData) -> Self {
+    pub(crate) fn new(gamma: &GammaOpData) -> Self {
         GammaBasicOpCpuSse(GammaBasicOpCpu::new(gamma))
     }
 }
@@ -220,7 +236,7 @@ pub struct GammaBasicMirrorOpCpu(GammaBasicOpCpu);
 impl GammaBasicMirrorOpCpu {
     /// Port of `GammaBasicMirrorOpCPU::GammaBasicMirrorOpCPU`
     /// (src/OpenColorIO/ops/gamma/GammaOpCPU.cpp:364-367 @ v2.5.2).
-    pub fn new(gamma: &GammaOpData) -> Self {
+    pub(crate) fn new(gamma: &GammaOpData) -> Self {
         GammaBasicMirrorOpCpu(GammaBasicOpCpu::new(gamma))
     }
 }
@@ -250,7 +266,7 @@ pub struct GammaBasicMirrorOpCpuSse(GammaBasicOpCpu);
 impl GammaBasicMirrorOpCpuSse {
     /// Port of `GammaBasicMirrorOpCPUSSE::GammaBasicMirrorOpCPUSSE`
     /// (src/OpenColorIO/ops/gamma/GammaOpCPU.cpp:70-73 @ v2.5.2).
-    pub fn new(gamma: &GammaOpData) -> Self {
+    pub(crate) fn new(gamma: &GammaOpData) -> Self {
         GammaBasicMirrorOpCpuSse(GammaBasicOpCpu::new(gamma))
     }
 }
@@ -281,7 +297,7 @@ pub struct GammaBasicPassThruOpCpu(GammaBasicOpCpu);
 impl GammaBasicPassThruOpCpu {
     /// Port of `GammaBasicPassThruOpCPU::GammaBasicPassThruOpCPU`
     /// (src/OpenColorIO/ops/gamma/GammaOpCPU.cpp:416-419 @ v2.5.2).
-    pub fn new(gamma: &GammaOpData) -> Self {
+    pub(crate) fn new(gamma: &GammaOpData) -> Self {
         GammaBasicPassThruOpCpu(GammaBasicOpCpu::new(gamma))
     }
 }
@@ -314,7 +330,7 @@ pub struct GammaBasicPassThruOpCpuSse(GammaBasicOpCpu);
 impl GammaBasicPassThruOpCpuSse {
     /// Port of `GammaBasicPassThruOpCPUSSE::GammaBasicPassThruOpCPUSSE`
     /// (src/OpenColorIO/ops/gamma/GammaOpCPU.cpp:93-96 @ v2.5.2).
-    pub fn new(gamma: &GammaOpData) -> Self {
+    pub(crate) fn new(gamma: &GammaOpData) -> Self {
         GammaBasicPassThruOpCpuSse(GammaBasicOpCpu::new(gamma))
     }
 }
@@ -341,14 +357,14 @@ impl CpuOp for GammaBasicPassThruOpCpuSse {
 /// The four channels' moncurve coefficients (`m_red`, `m_green`, `m_blue`, `m_alpha`).
 fn moncurve_params(
     gamma: &GammaOpData,
-    compute: fn(&super::gamma_op_data::Params) -> RendererParams,
-) -> [RendererParams; 4] {
-    [
-        compute(gamma.red_params()),
-        compute(gamma.green_params()),
-        compute(gamma.blue_params()),
-        compute(gamma.alpha_params()),
-    ]
+    compute: fn(&super::gamma_op_data::Params) -> Result<RendererParams>,
+) -> Result<[RendererParams; 4]> {
+    Ok([
+        compute(gamma.red_params())?,
+        compute(gamma.green_params())?,
+        compute(gamma.blue_params())?,
+        compute(gamma.alpha_params())?,
+    ])
 }
 
 /// Moncurve forward: `in <= breakPnt ? in * slope : pow(in * scale + offset, gamma)` with
@@ -364,10 +380,10 @@ pub struct GammaMoncurveOpCpuFwd {
 impl GammaMoncurveOpCpuFwd {
     /// Port of `GammaMoncurveOpCPUFwd::GammaMoncurveOpCPUFwd` and `update`
     /// (src/OpenColorIO/ops/gamma/GammaOpCPU.cpp:469-481 @ v2.5.2).
-    pub fn new(gamma: &GammaOpData) -> Self {
-        GammaMoncurveOpCpuFwd {
-            params: moncurve_params(gamma, compute_params_fwd),
-        }
+    pub(crate) fn new(gamma: &GammaOpData) -> Result<Self> {
+        Ok(GammaMoncurveOpCpuFwd {
+            params: moncurve_params(gamma, compute_params_fwd)?,
+        })
     }
 }
 
@@ -403,8 +419,8 @@ pub struct GammaMoncurveOpCpuFwdSse(GammaMoncurveOpCpuFwd);
 impl GammaMoncurveOpCpuFwdSse {
     /// Port of `GammaMoncurveOpCPUFwdSSE::GammaMoncurveOpCPUFwdSSE`
     /// (src/OpenColorIO/ops/gamma/GammaOpCPU.cpp:129-132 @ v2.5.2).
-    pub fn new(gamma: &GammaOpData) -> Self {
-        GammaMoncurveOpCpuFwdSse(GammaMoncurveOpCpuFwd::new(gamma))
+    pub(crate) fn new(gamma: &GammaOpData) -> Result<Self> {
+        Ok(GammaMoncurveOpCpuFwdSse(GammaMoncurveOpCpuFwd::new(gamma)?))
     }
 }
 
@@ -437,10 +453,10 @@ pub struct GammaMoncurveOpCpuRev {
 impl GammaMoncurveOpCpuRev {
     /// Port of `GammaMoncurveOpCPURev::GammaMoncurveOpCPURev` and `update`
     /// (src/OpenColorIO/ops/gamma/GammaOpCPU.cpp:558-570 @ v2.5.2).
-    pub fn new(gamma: &GammaOpData) -> Self {
-        GammaMoncurveOpCpuRev {
-            params: moncurve_params(gamma, compute_params_rev),
-        }
+    pub(crate) fn new(gamma: &GammaOpData) -> Result<Self> {
+        Ok(GammaMoncurveOpCpuRev {
+            params: moncurve_params(gamma, compute_params_rev)?,
+        })
     }
 }
 
@@ -476,8 +492,8 @@ pub struct GammaMoncurveOpCpuRevSse(GammaMoncurveOpCpuRev);
 impl GammaMoncurveOpCpuRevSse {
     /// Port of `GammaMoncurveOpCPURevSSE::GammaMoncurveOpCPURevSSE`
     /// (src/OpenColorIO/ops/gamma/GammaOpCPU.cpp:154-157 @ v2.5.2).
-    pub fn new(gamma: &GammaOpData) -> Self {
-        GammaMoncurveOpCpuRevSse(GammaMoncurveOpCpuRev::new(gamma))
+    pub(crate) fn new(gamma: &GammaOpData) -> Result<Self> {
+        Ok(GammaMoncurveOpCpuRevSse(GammaMoncurveOpCpuRev::new(gamma)?))
     }
 }
 
@@ -510,10 +526,10 @@ pub struct GammaMoncurveMirrorOpCpuFwd {
 impl GammaMoncurveMirrorOpCpuFwd {
     /// Port of `GammaMoncurveMirrorOpCPUFwd::GammaMoncurveMirrorOpCPUFwd` and `update`
     /// (src/OpenColorIO/ops/gamma/GammaOpCPU.cpp:647-659 @ v2.5.2).
-    pub fn new(gamma: &GammaOpData) -> Self {
-        GammaMoncurveMirrorOpCpuFwd {
-            params: moncurve_params(gamma, compute_params_fwd),
-        }
+    pub(crate) fn new(gamma: &GammaOpData) -> Result<Self> {
+        Ok(GammaMoncurveMirrorOpCpuFwd {
+            params: moncurve_params(gamma, compute_params_fwd)?,
+        })
     }
 }
 
@@ -553,8 +569,10 @@ pub struct GammaMoncurveMirrorOpCpuFwdSse(GammaMoncurveMirrorOpCpuFwd);
 impl GammaMoncurveMirrorOpCpuFwdSse {
     /// Port of `GammaMoncurveMirrorOpCPUFwdSSE::GammaMoncurveMirrorOpCPUFwdSSE`
     /// (src/OpenColorIO/ops/gamma/GammaOpCPU.cpp:178-181 @ v2.5.2).
-    pub fn new(gamma: &GammaOpData) -> Self {
-        GammaMoncurveMirrorOpCpuFwdSse(GammaMoncurveMirrorOpCpuFwd::new(gamma))
+    pub(crate) fn new(gamma: &GammaOpData) -> Result<Self> {
+        Ok(GammaMoncurveMirrorOpCpuFwdSse(
+            GammaMoncurveMirrorOpCpuFwd::new(gamma)?,
+        ))
     }
 }
 
@@ -596,10 +614,10 @@ pub struct GammaMoncurveMirrorOpCpuRev {
 impl GammaMoncurveMirrorOpCpuRev {
     /// Port of `GammaMoncurveMirrorOpCPURev::GammaMoncurveMirrorOpCPURev` and `update`
     /// (src/OpenColorIO/ops/gamma/GammaOpCPU.cpp:743-755 @ v2.5.2).
-    pub fn new(gamma: &GammaOpData) -> Self {
-        GammaMoncurveMirrorOpCpuRev {
-            params: moncurve_params(gamma, compute_params_rev),
-        }
+    pub(crate) fn new(gamma: &GammaOpData) -> Result<Self> {
+        Ok(GammaMoncurveMirrorOpCpuRev {
+            params: moncurve_params(gamma, compute_params_rev)?,
+        })
     }
 }
 
@@ -637,8 +655,10 @@ pub struct GammaMoncurveMirrorOpCpuRevSse(GammaMoncurveMirrorOpCpuRev);
 impl GammaMoncurveMirrorOpCpuRevSse {
     /// Port of `GammaMoncurveMirrorOpCPURevSSE::GammaMoncurveMirrorOpCPURevSSE`
     /// (src/OpenColorIO/ops/gamma/GammaOpCPU.cpp:202-205 @ v2.5.2).
-    pub fn new(gamma: &GammaOpData) -> Self {
-        GammaMoncurveMirrorOpCpuRevSse(GammaMoncurveMirrorOpCpuRev::new(gamma))
+    pub(crate) fn new(gamma: &GammaOpData) -> Result<Self> {
+        Ok(GammaMoncurveMirrorOpCpuRevSse(
+            GammaMoncurveMirrorOpCpuRev::new(gamma)?,
+        ))
     }
 }
 

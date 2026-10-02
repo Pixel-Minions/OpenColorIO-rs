@@ -385,6 +385,29 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p1-range` (1.3r1); `range_op_data_oracle.rs` checks both orders of
   validation and equality against the wheel.
 
+### I-60. The mirror Gamma styles give a negative NaN pixel a different sign per platform
+
+- **Upstream:** without fast math, `GammaBasicMirrorOpCPU::apply` and the two
+  `GammaMoncurveMirrorOpCPU` renderers compute `std::copysign(1.0f, in) * value`
+  (`ops/gamma/GammaOpCPU.cpp:394-414, 707-741, 803-838`), where `value` comes from `|in|`, so
+  for a NaN pixel it is a positive NaN. MSVC builds `±1.0f` and multiplies (Windows wheel
+  `0x1801bd3d0`, the moncurve mirror loop at `0x1801bde60`): the NaN keeps its positive sign.
+  GCC turns the product into its `xorsign` pattern, `value ^ signbit(in)` (Linux wheel
+  `GammaBasicMirrorOpCPU::apply` at `0x384be0`, `GammaMoncurveMirrorOpCPUFwd::apply` at
+  `0x384d30`, `...Rev::apply` at `0x385030`): the NaN takes the input's sign, except in the
+  alpha channel of the two moncurve mirror renderers, where GCC builds `±1.0f` and multiplies
+  too (`docs/spikes/s2-s5.md`, "Windows and Linux differences" 2). Every value other than a
+  NaN gives the same bits on both. The fast-math renderers OR the sign bit back on both
+  platforms.
+- **Who notices:** images with negative NaNs (the sign bit set) through an `ExponentTransform`
+  or `ExponentWithLinearTransform` of the mirror style, with ordinary parameters and fast math
+  off: the output NaN is positive on Windows, negative on Linux (but positive in a moncurve
+  mirror's alpha).
+- **A fix:** one rule for every platform and channel, e.g. always the input's sign.
+- **Status:** matched in `p1-gamma` (S2, 1.3g2): `gamma_op_cpu.rs` reproduces each wheel per
+  renderer and channel (`BASIC_MIRROR_SIGN`, `MONCURVE_MIRROR_SIGN`), and the battery's NaN
+  probes compare it bit for bit on both platforms.
+
 ## Transforms
 
 ### I-11. Copying a group transform shares its children
@@ -814,3 +837,28 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Status:** matched in `p1-range` (before 1.3r1), the renderer in `p1-matrix`;
   `matrix_op_tests.rs` checks the errors, the answers with offsets, and that validating clears
   them.
+
+### U-24. Queries of a Gamma op whose channels have too few parameters
+
+- **Upstream:** a basic Gamma style uses one parameter per channel and a moncurve style two,
+  but the setters take any number, and only `validate` checks it
+  (`ops/gamma/GammaOpData.cpp:366-436`). Before that, the queries read the values they need
+  without a check: `isIdentity` (and so `isNoOp`) reads red's first value when the four
+  channels are equal, and a moncurve style's second one when the first is 1
+  (`GammaOpData.cpp:28-38, 512-549`); `getCacheID` prints each channel's first value
+  (`GammaOpData.cpp:40-50, 798-816`); `compose` reads the first value of each channel of both
+  ops (`GammaOpData.cpp:707-745`); the CPU renderers read each channel's first value, and a
+  moncurve style's second (`ops/gamma/GammaOpCPU.cpp:295-318`, `GammaOpUtils.cpp:32-120`). On
+  an empty or too short vector, these read past its end. The processors validate their ops
+  first, so only code that queries such an op directly gets there.
+- **Decided** (general rule): the port returns an error from those queries instead, where
+  upstream would read past the end and only there: "GammaOp: a channel has fewer parameters
+  than its style uses: upstream reads past them." `GammaOpData::{is_identity, is_no_op,
+  get_cache_id, compose}`, `get_gamma_renderer` and `compute_params_fwd`/`_rev` return it,
+  and so do `Op::{is_no_op, is_identity, get_cache_id, get_cpu_op}` for a Gamma op (1.3g3),
+  which `CreateGammaOp` doesn't validate either.
+- **Status:** matched in `p1-gamma` (1.3g1, the renderers in 1.3g2, the op in 1.3g3,
+  `compute_params_fwd`/`_rev` after it); `gamma_op_data_tests.rs`, `gamma_op_cpu_tests.rs`,
+  `gamma_op_utils_tests.rs` and `gamma_op_tests.rs` check the errors,
+  and that the reads upstream doesn't make (a moncurve gamma other than 1, channels that
+  differ) are answered.

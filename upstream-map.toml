@@ -446,7 +446,7 @@ path = "src/OpenColorIO/Op.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/op.rs", "crates/ocio-ops/src/op_data.rs"]
 status = "partial"
-note = "1.2c: OpCPU's defaults, OpData, GetTypeName, Op, OpRcPtrVec (as OpVec), SerializeOpVec and CreateOpVecFromOpData, with each family's arms added with the family; the Matrix op (before 1.2d): its arms, Op::getIdentityReplacement and OpData::getIdentityReplacement (an identity Matrix op; the overrides that return a range come with their families); the Range op (1.3r2): its arms, getIdentityReplacement's Range branch, CreateOpVecFromOpData's"
+note = "1.2c: OpCPU's defaults, OpData, GetTypeName, Op, OpRcPtrVec (as OpVec), SerializeOpVec and CreateOpVecFromOpData, with each family's arms added with the family; the Matrix op (before 1.2d): its arms, Op::getIdentityReplacement and OpData::getIdentityReplacement (an identity Matrix op; the overrides that return a range come with their families); the Range op (1.3r2): its arms, getIdentityReplacement's Range branch, CreateOpVecFromOpData's; the Gamma op (1.3g3): its arms, OpData::getIdentityReplacement's Gamma override, CreateOpVecFromOpData's"
 
 [[file]]
 path = "src/OpenColorIO/Op.h"
@@ -1288,41 +1288,43 @@ status = "todo"
 path = "src/OpenColorIO/ops/gamma/GammaOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op.rs"]
-status = "todo"
+status = "partial"
+note = "1.3g3: GammaOp (the op's behaviors on OpData::Gamma) and CreateGammaOp; checked against the wheel through CPU processor cache IDs and pixels (tests/gamma_op_oracle.rs: identities, inverse pairs, compositions, optimization flags). Not yet: CreateGammaTransform, BuildExponentWithLinearOp and BuildExponentOp (the transforms, WP 1.8), extractGpuShaderInfo (1.3g4)"
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOp.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op.rs"]
-status = "todo"
+status = "partial"
+note = "1.3g3: GammaOp (the op's behaviors on OpData::Gamma) and CreateGammaOp; checked against the wheel through CPU processor cache IDs and pixels (tests/gamma_op_oracle.rs: identities, inverse pairs, compositions, optimization flags). Not yet: CreateGammaTransform, BuildExponentWithLinearOp and BuildExponentOp (the transforms, WP 1.8), extractGpuShaderInfo (1.3g4)"
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_cpu.rs"]
 status = "done"
-note = "S2: every renderer, scalar and SSE2, bit-exact against the wheel on Windows and Rocky Linux 9 (tests/gamma_oracle.rs)"
+note = "S2: every renderer, scalar and SSE2, bit-exact against the wheel on Windows and Rocky Linux 9 (tests/gamma_oracle.rs); 1.3g2: GetGammaRenderer refuses short parameters (U-24), the battery compares the refusals"
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOpCPU.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_cpu.rs"]
 status = "done"
-note = "S2: every renderer, scalar and SSE2, bit-exact against the wheel on Windows and Rocky Linux 9 (tests/gamma_oracle.rs)"
+note = "S2: every renderer, scalar and SSE2, bit-exact against the wheel on Windows and Rocky Linux 9 (tests/gamma_oracle.rs); 1.3g2: GetGammaRenderer refuses short parameters (U-24), the battery compares the refusals"
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOpData.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_data.rs"]
-status = "partial"
-note = "S2: styles, parameters, accessors, style conversions, identity, direction, isInverse; validate, getCacheID, style strings, mayCompose/compose and getIdentityReplacement are WP 1.3g1"
+status = "done"
+note = "S2, then 1.3g1: the whole class; reads past short parameters are errors (U-24)"
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOpData.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_data.rs"]
-status = "partial"
-note = "S2: styles, parameters, accessors, style conversions, identity, direction, isInverse; validate, getCacheID, style strings, mayCompose/compose and getIdentityReplacement are WP 1.3g1"
+status = "done"
+note = "S2, then 1.3g1: the whole class; reads past short parameters are errors (U-24)"
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOpGPU.cpp"
@@ -1341,14 +1343,14 @@ path = "src/OpenColorIO/ops/gamma/GammaOpUtils.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_utils.rs"]
 status = "done"
-note = "S2"
+note = "S2; ComputeParamsFwd/Rev refuse short parameters (U-24)"
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOpUtils.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_utils.rs"]
 status = "done"
-note = "S2"
+note = "S2; ComputeParamsFwd/Rev refuse short parameters (U-24)"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradinghuecurve/GradingHueCurve.cpp"
@@ -4567,14 +4569,15 @@ status = "todo"
 path = "tests/cpu/ops/gamma/GammaOpCPU_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_cpu_tests.rs"]
-status = "partial"
-note = "S2: all 10 tests, without upstream's finalize/optimize/size-1 checks, which wait for WP 1.6a and 1.3g1; they are replaced today by `!is_no_op() && !is_identity()`"
+status = "done"
+note = "S2, then 1.3g3: all 10 tests, with upstream's CreateGammaOp, finalize, optimize and size-1 checks"
 
 [[file]]
 path = "tests/cpu/ops/gamma/GammaOpData_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_data_tests.rs"]
-status = "todo"
+status = "done"
+note = "1.3g1: all 12 tests"
 
 [[file]]
 path = "tests/cpu/ops/gamma/GammaOpUtils_tests.cpp"
@@ -4587,7 +4590,8 @@ note = "S2: both tests"
 path = "tests/cpu/ops/gamma/GammaOp_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op_tests.rs"]
-status = "todo"
+status = "partial"
+note = "1.3g3: 3 of 4 tests; create_transform needs the ExponentTransform and ExponentWithLinearTransform (WP 1.8)"
 
 [[file]]
 path = "tests/cpu/ops/gradinghuecurve/GradingHueCurveOpCPU_tests.cpp"
