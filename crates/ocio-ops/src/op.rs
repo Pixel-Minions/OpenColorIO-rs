@@ -30,6 +30,7 @@ use crate::ops::cdl::cdl_op::create_cdl_op;
 use crate::ops::exponent::exponent_op::create_exponent_op;
 use crate::ops::gamma::gamma_op::create_gamma_op;
 use crate::ops::log::log_op::create_log_op;
+use crate::ops::lut1d::lut1d_op::{NOT_PORTED_F32, create_lut1d_op};
 use crate::ops::matrix::matrix_op::create_matrix_op;
 use crate::ops::range::range_op::create_range_op;
 
@@ -211,6 +212,7 @@ impl Op {
             OpData::Cdl(data) => Ok(data.clone_op()),
             OpData::Gamma(data) => Ok(data.clone_op()),
             OpData::Log(data) => data.clone_op(),
+            OpData::Lut1D(data) => Ok(data.clone_op()),
             OpData::Matrix(data) => Ok(data.clone_op()),
             OpData::Range(data) => data.clone_op(),
             OpData::Exponent(data) => Ok(data.clone_op()),
@@ -229,6 +231,7 @@ impl Op {
             OpData::Cdl(data) => data.get_info(),
             OpData::Gamma(data) => data.get_info(),
             OpData::Log(data) => data.get_info(),
+            OpData::Lut1D(data) => data.get_info(),
             OpData::Matrix(data) => data.get_info(),
             OpData::Range(data) => data.get_info(),
             OpData::Exponent(data) => data.get_info(),
@@ -256,6 +259,7 @@ impl Op {
             OpData::Log(_)
             | OpData::Cdl(_)
             | OpData::Gamma(_)
+            | OpData::Lut1D(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
@@ -273,6 +277,7 @@ impl Op {
             OpData::Log(_)
             | OpData::Cdl(_)
             | OpData::Gamma(_)
+            | OpData::Lut1D(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
@@ -301,6 +306,7 @@ impl Op {
             | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Exponent(_)
+            | OpData::Lut1D(_)
             | OpData::Reference(_)
             | OpData::NoOp(_) => {
                 return Err(Exception::new(format!(
@@ -335,6 +341,7 @@ impl Op {
             OpData::Cdl(data) => data.is_same_type(op),
             OpData::Gamma(data) => data.is_same_type(op),
             OpData::Log(data) => data.is_same_type(op),
+            OpData::Lut1D(data) => data.is_same_type(op),
             OpData::Matrix(data) => data.is_same_type(op),
             OpData::Range(data) => data.is_same_type(op),
             OpData::Exponent(data) => data.is_same_type(op),
@@ -352,6 +359,7 @@ impl Op {
             OpData::Cdl(data) => data.is_inverse_op(op),
             OpData::Gamma(data) => data.is_inverse_op(op),
             OpData::Log(data) => data.is_inverse_op(op),
+            OpData::Lut1D(data) => data.is_inverse_op(op),
             OpData::Matrix(data) => data.is_inverse(op),
             OpData::Range(data) => data.is_inverse(op),
             OpData::Exponent(data) => data.is_inverse(op),
@@ -373,6 +381,7 @@ impl Op {
             OpData::Range(data) => data.can_combine_with(op),
             OpData::Exponent(data) => Ok(data.can_combine_with(op)),
             OpData::Reference(_) => no_reference_op(),
+            OpData::Lut1D(data) => Ok(data.can_combine_with(op)),
             // The Op default.
             OpData::Log(_) | OpData::NoOp(_) => Ok(false),
         }
@@ -391,6 +400,7 @@ impl Op {
             OpData::Range(data) => data.combine_with(ops, second_op),
             OpData::Exponent(data) => data.combine_with(ops, second_op),
             OpData::Reference(_) => no_reference_op(),
+            OpData::Lut1D(data) => data.combine_with(ops, second_op),
             // The Op default.
             OpData::Log(_) | OpData::NoOp(_) => Err(self.cannot_combine()),
         }
@@ -415,6 +425,7 @@ impl Op {
             OpData::Log(_)
             | OpData::Cdl(_)
             | OpData::Gamma(_)
+            | OpData::Lut1D(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
@@ -466,6 +477,16 @@ impl Op {
                 }
                 Ok(())
             }
+            // The data prepares itself: an inverse 1D LUT would set up its inversion (Phase
+            // 2). The data is copied first if another op shares it.
+            // Port of `Lut1DOp::finalize` (src/OpenColorIO/ops/lut1d/Lut1DOp.cpp:135-138 @
+            // v2.5.2).
+            OpData::Lut1D(_) => {
+                let OpData::Lut1D(lut) = Arc::make_mut(&mut self.data) else {
+                    unreachable!("the data is a 1D LUT");
+                };
+                lut.finalize()
+            }
             OpData::Reference(_) => no_reference_op(),
             // The Op default: nothing. (A reverse Gamma style renders as it is; `LogOp` keeps
             // it too: its renderers handle both directions.)
@@ -486,6 +507,7 @@ impl Op {
             OpData::Cdl(data) => Ok(data.get_op_cache_id()),
             OpData::Gamma(data) => data.get_op_cache_id(),
             OpData::Log(data) => data.get_op_cache_id(),
+            OpData::Lut1D(data) => data.get_op_cache_id(),
             OpData::Matrix(data) => data.get_op_cache_id(),
             OpData::Range(data) => Ok(data.get_op_cache_id()),
             OpData::Exponent(data) => Ok(data.get_op_cache_id()),
@@ -501,7 +523,9 @@ impl Op {
     /// overrides.
     pub fn apply(&self, rgba: &mut [f32]) -> Result<()> {
         match &*self.data {
-            // The Op default: `getCPUOp(false)->apply(img, img, numPixels)`.
+            // The Op default: `getCPUOp(false)->apply(img, img, numPixels)`, whose float renderer
+            // waits for Phase 2 for a 1D LUT.
+            OpData::Lut1D(_) => Err(Exception::new(NOT_PORTED_F32)),
             OpData::Cdl(data) => {
                 data.get_cpu_op(false).apply(rgba);
                 Ok(())
@@ -543,6 +567,7 @@ impl Op {
         match &*self.data {
             // The Op default: `getCPUOp(false)->apply(inImg, outImg, numPixels)`. The matrix
             // renderers read a pixel before writing it, so they render a copy in place.
+            OpData::Lut1D(_) => Err(Exception::new(NOT_PORTED_F32)),
             // The CDL renderers read a pixel before writing it too.
             OpData::Cdl(data) => {
                 let renderer = data.get_cpu_op(false);
@@ -601,6 +626,9 @@ impl Op {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
             // The Op default.
+            // Port of `Lut1DOp::supportedByLegacyShader` (src/OpenColorIO/ops/lut1d/Lut1DOp.cpp:54
+            // @ v2.5.2).
+            OpData::Lut1D(_) => false,
             OpData::Log(_)
             | OpData::Cdl(_)
             | OpData::Gamma(_)
@@ -621,6 +649,7 @@ impl Op {
             OpData::Log(_)
             | OpData::Cdl(_)
             | OpData::Gamma(_)
+            | OpData::Lut1D(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
@@ -639,6 +668,7 @@ impl Op {
             OpData::Log(_)
             | OpData::Cdl(_)
             | OpData::Gamma(_)
+            | OpData::Lut1D(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
@@ -657,6 +687,7 @@ impl Op {
             OpData::Log(_)
             | OpData::Cdl(_)
             | OpData::Gamma(_)
+            | OpData::Lut1D(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
@@ -680,6 +711,7 @@ impl Op {
             OpData::Log(_)
             | OpData::Cdl(_)
             | OpData::Gamma(_)
+            | OpData::Lut1D(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
@@ -698,6 +730,7 @@ impl Op {
             OpData::Log(_)
             | OpData::Cdl(_)
             | OpData::Gamma(_)
+            | OpData::Lut1D(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
@@ -716,6 +749,10 @@ impl Op {
             OpData::Cdl(data) => Ok(Some(data.get_cpu_op(fast_log_exp_pow))),
             OpData::Gamma(data) => Ok(Some(data.get_cpu_op(fast_log_exp_pow)?)),
             OpData::Log(data) => Ok(Some(data.get_cpu_op(fast_log_exp_pow)?)),
+            // `GetLut1DRenderer(data, BIT_DEPTH_F32, BIT_DEPTH_F32)`
+            // (src/OpenColorIO/ops/lut1d/Lut1DOp.cpp:151-155 @ v2.5.2): the float renderers
+            // wait for Phase 2.
+            OpData::Lut1D(_) => Err(Exception::new(NOT_PORTED_F32)),
             OpData::Matrix(data) => Ok(Some(data.get_cpu_op()?)),
             OpData::Range(data) => Ok(Some(data.get_cpu_op()?)),
             OpData::Exponent(data) => Ok(Some(data.get_cpu_op())),
@@ -1066,6 +1103,11 @@ pub fn create_op_vec_from_op_data(
         OpData::Log(log_src) => {
             let log = log_src.clone();
             create_log_op(ops, log, dir)
+        }
+        OpData::Lut1D(lut_src) => {
+            let lut = lut_src.clone();
+            create_lut1d_op(ops, lut, dir);
+            Ok(())
         }
         OpData::Matrix(matrix_src) => {
             let matrix = matrix_src.clone();

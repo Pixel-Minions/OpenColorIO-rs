@@ -51,6 +51,7 @@ impl CdlOpData {
             OpData::Cdl(cdl_data2) => self.is_inverse(cdl_data2),
             OpData::Gamma(_)
             | OpData::Log(_)
+            | OpData::Lut1D(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
