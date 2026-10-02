@@ -24,6 +24,7 @@ use ocio_ops::{Exception, Result};
 use crate::gpu_shader_desc::GpuShaderDesc;
 use crate::gpu_shader_utils::GpuShaderText;
 use crate::open_color_types::GpuLanguage;
+use crate::ops::gamma::gamma_op_gpu::get_gamma_gpu_shader_program;
 use crate::ops::matrix::matrix_op_gpu::get_matrix_gpu_shader_program;
 
 /// Adds the OCIO function's header to the description: its signature, its opening brace, and
@@ -110,6 +111,7 @@ pub(crate) fn extract_op_gpu_shader_info(
             }
             get_matrix_gpu_shader_program(shader_creator, data)
         }
+        OpData::Gamma(data) => get_gamma_gpu_shader_program(shader_creator, data),
         OpData::NoOp(_) => Ok(()),
         OpData::Reference(_) => unreachable!("an op never holds a ReferenceOpData"),
         // The families whose GPU writer comes later.
