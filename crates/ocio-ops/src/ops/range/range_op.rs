@@ -57,8 +57,8 @@ impl RangeOpData {
     /// replaces it. "Op::finalize has to be called." if either Range op is still inverse. It
     /// validates this op's data first, which updates its scale and offset.
     ///
-    /// Port of `RangeOp::canCombineWith` (RangeOp.cpp:100-148 @ v2.5.2). The Lut1D and Lut3D
-    /// arms come with those families; no op of either type exists before.
+    /// Port of `RangeOp::canCombineWith` (RangeOp.cpp:100-148 @ v2.5.2). The Lut3D arm comes
+    /// with its family; no op of that type exists before.
     pub(crate) fn can_combine_with(&self, op2: &Op) -> Result<bool> {
         let op_data2 = op2.data();
         let range1 = self;
@@ -78,8 +78,12 @@ impl RangeOpData {
 
                 Ok(true)
             }
-            // `if (range1->isIdentity())`: the LUT types, whose op can replace an identity
-            // range, come with their families.
+            // If op is LUT range op can be removed. Keep range for half domain LUT.
+            OpData::Lut1D(lut) => Ok(range1.is_identity()
+                && !lut.is_input_half_domain()
+                && lut.get_direction() == TransformDirection::Forward),
+            // `if (range1->isIdentity())`: the Lut3D type, whose op can replace an identity
+            // range, comes with its family.
             OpData::Log(_)
             | OpData::Cdl(_)
             | OpData::Gamma(_)
@@ -108,8 +112,12 @@ impl RangeOpData {
                 let res_range = range1.compose(range2)?;
                 create_range_op(ops, res_range, TransformDirection::Forward)
             }
-            // `if (type == OpData::Lut1DType || type == OpData::Lut3DType)`: avoid clone (we
-            // actually want to use the second op). Those types come with their families.
+            // Avoid clone (we actually want to use the second op): here the op shares its
+            // data. (The Lut3D type comes with its family.)
+            OpData::Lut1D(_) => {
+                ops.push_back(second_op.clone());
+                Ok(())
+            }
             OpData::Log(_)
             | OpData::Cdl(_)
             | OpData::Gamma(_)

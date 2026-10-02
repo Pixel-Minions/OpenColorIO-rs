@@ -446,7 +446,7 @@ path = "src/OpenColorIO/Op.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/op.rs", "crates/ocio-ops/src/op_data.rs"]
 status = "partial"
-note = "1.2c: OpCPU's defaults, OpData, GetTypeName, Op, OpRcPtrVec (as OpVec), SerializeOpVec and CreateOpVecFromOpData, with each family's arms added with the family; the Matrix op (before 1.2d): its arms, Op::getIdentityReplacement and OpData::getIdentityReplacement (an identity Matrix op; the overrides that return a range come with their families); the Range op (1.3r2): its arms, getIdentityReplacement's Range branch, CreateOpVecFromOpData's; the Gamma op (1.3g3): its arms, OpData::getIdentityReplacement's Gamma override, CreateOpVecFromOpData's; the CDL op (1.3c3): its arms, OpData::getIdentityReplacement's and getSimplerReplacement's CDL overrides, CreateOpVecFromOpData's; the Exponent op (1.3e1): its arms, and CreateOpVecFromOpData's; the Log op (1.3l3): its arms, OpData::getIdentityReplacement's Log override (LogOpData's, which can raise), CreateOpVecFromOpData's"
+note = "1.2c: OpCPU's defaults, OpData, GetTypeName, Op, OpRcPtrVec (as OpVec), SerializeOpVec and CreateOpVecFromOpData, with each family's arms added with the family; the Matrix op (before 1.2d): its arms, Op::getIdentityReplacement and OpData::getIdentityReplacement (an identity Matrix op; the overrides that return a range come with their families); the Range op (1.3r2): its arms, getIdentityReplacement's Range branch, CreateOpVecFromOpData's; the Gamma op (1.3g3): its arms, OpData::getIdentityReplacement's Gamma override, CreateOpVecFromOpData's; the CDL op (1.3c3): its arms, OpData::getIdentityReplacement's and getSimplerReplacement's CDL overrides, CreateOpVecFromOpData's; the Exponent op (1.3e1): its arms, and CreateOpVecFromOpData's; the Log op (1.3l3): its arms, OpData::getIdentityReplacement's Log override (LogOpData's, which can raise), CreateOpVecFromOpData's; the Lut1D op (p1-optimizer B): its arms"
 
 [[file]]
 path = "src/OpenColorIO/Op.h"
@@ -466,7 +466,7 @@ path = "src/OpenColorIO/OpOptimizers.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/op_optimizers.rs"]
 status = "partial"
-note = "1.2c: FinalizeOps (132-139) and OpRcPtrVec::finalize (598-609); 1.2d (the owner's Option A): the optimizer's core, optimize (the pass loop, RemoveNoOpTypes, RemoveDynamicProperties, RemoveNoOps, ReplaceOps, ReplaceIdentityOps, RemoveInverseOps, CombineOps, IsPairInverseEnabled, IsCombineEnabled, the debug log) and optimizeForBitdepth (the clamp identities, FindSeparablePrefix). p1-optimizer (WP 2.5): the LUT arms of ReplaceInverseLuts, RemoveInverseOps and FindSeparablePrefix, and OptimizeSeparablePrefix's Lut1D bake, which the port refuses until then"
+note = "1.2c: FinalizeOps (132-139) and OpRcPtrVec::finalize (598-609); 1.2d (the owner's Option A): the optimizer's core, optimize (the pass loop, RemoveNoOpTypes, RemoveDynamicProperties, RemoveNoOps, ReplaceOps, ReplaceIdentityOps, RemoveInverseOps, CombineOps, IsPairInverseEnabled, IsCombineEnabled, the debug log) and optimizeForBitdepth (the clamp identities, FindSeparablePrefix). p1-optimizer B: the Lut1D arms of ReplaceInverseLuts and RemoveInverseOps (errors until Phase 2's inverse 1D LUT) and FindSeparablePrefix; still to come (p1-optimizer D): OptimizeSeparablePrefix's Lut1D bake, which the port refuses until then"
 
 [[file]]
 path = "src/OpenColorIO/ParseUtils.cpp"
@@ -1686,13 +1686,15 @@ note = "S2: GetLinearSlope, GetLogSideBreak (Windows and Linux variants), GetLin
 path = "src/OpenColorIO/ops/lut1d/Lut1DOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op.rs"]
-status = "todo"
+status = "partial"
+note = "p1-optimizer B: Lut1DOp (clone, getInfo, isSameType, isInverse, canCombineWith, hasChannelCrosstalk, finalize, getCacheID, supportedByLegacyShader), CreateLut1DOp, GenerateIdentityLut1D; cache IDs and the optimizer's Lut1D rules against the wheel (tests/lut1d_op_oracle.rs). combineWith (Compose) and getCPUOp's float renderers are errors until Phase 2 (WP 2.5); extractGpuShaderInfo, GenerateLinearScaleLut1D, CreateLut1DTransform and BuildLut1DOp come later"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOp.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op.rs"]
-status = "todo"
+status = "partial"
+note = "p1-optimizer B: CreateLut1DOp and GenerateIdentityLut1D"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU.cpp"
@@ -1963,7 +1965,7 @@ path = "src/OpenColorIO/ops/range/RangeOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/range/range_op.rs"]
 status = "partial"
-note = "1.3r2: RangeOp (the op's behaviors on OpData::Range, its finalize in Op::finalize) and both CreateRangeOp; checked against the wheel through CPU processor cache IDs and pixels (tests/range_op_oracle.rs: combinations, identities, bit depths). Not yet: BuildRangeOp and CreateRangeTransform (the RangeTransform, WP 1.8), extractGpuShaderInfo (1.3r3)"
+note = "1.3r2: RangeOp (the op's behaviors on OpData::Range, its finalize in Op::finalize) and both CreateRangeOp; checked against the wheel through CPU processor cache IDs and pixels (tests/range_op_oracle.rs: combinations, identities, bit depths). p1-optimizer B: the Lut1D arms of canCombineWith and combineWith (an identity range before a forward standard-domain LUT goes). Not yet: the Lut3D arms, BuildRangeOp and CreateRangeTransform (the RangeTransform, WP 1.8), extractGpuShaderInfo (1.3r3)"
 
 [[file]]
 path = "src/OpenColorIO/ops/range/RangeOp.h"
@@ -4760,7 +4762,8 @@ status = "todo"
 path = "tests/cpu/ops/lut1d/Lut1DOp_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_tests.rs"]
-status = "todo"
+status = "partial"
+note = "gpu, identity_lut_1d; the others need the float renderers, the inverse or the transform (Phase 2)"
 
 [[file]]
 path = "tests/cpu/ops/lut3d/Lut3DOpCPU_tests.cpp"

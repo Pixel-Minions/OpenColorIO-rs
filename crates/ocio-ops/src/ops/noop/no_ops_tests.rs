@@ -51,6 +51,7 @@ fn no_op_data(op: &Op) -> &NoOpData {
         OpData::Log(_)
         | OpData::Cdl(_)
         | OpData::Gamma(_)
+        | OpData::Lut1D(_)
         | OpData::Matrix(_)
         | OpData::Range(_)
         | OpData::Exponent(_)
