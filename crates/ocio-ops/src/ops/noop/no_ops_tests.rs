@@ -48,7 +48,8 @@ fn the_no_ops() -> OpVec {
 fn no_op_data(op: &Op) -> &NoOpData {
     match &**op.data() {
         OpData::NoOp(data) => data,
-        OpData::Cdl(_)
+        OpData::Log(_)
+        | OpData::Cdl(_)
         | OpData::Gamma(_)
         | OpData::Matrix(_)
         | OpData::Range(_)

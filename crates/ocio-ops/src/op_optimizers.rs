@@ -207,7 +207,8 @@ fn replace_identity_ops(op_vec: &mut OpVec, o_flags: OptimizationFlags) -> Resul
 /// v2.5.2).
 fn pair_identity_replacement(op1: &Op) -> Result<Op> {
     match &**op1.data() {
-        OpData::Cdl(_)
+        OpData::Log(_)
+        | OpData::Cdl(_)
         | OpData::Gamma(_)
         | OpData::Matrix(_)
         | OpData::Range(_)
@@ -347,7 +348,8 @@ fn replace_inverse_luts(op_vec: &mut OpVec) -> i32 {
     for op in op_vec.iter() {
         match &**op.data() {
             // (The Lut1D and Lut3D arms: an inverse LUT becomes a fast forward one, counted.)
-            OpData::Cdl(_)
+            OpData::Log(_)
+            | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
@@ -402,7 +404,8 @@ fn remove_trailing_clamp_identity(op_vec: &mut OpVec) -> Result<usize> {
 /// Whether the op is a Lut1D evaluated forward. The Lut1D arm comes with its variant.
 fn is_forward_lut1d(op: &Op) -> bool {
     match &**op.data() {
-        OpData::Cdl(_)
+        OpData::Log(_)
+        | OpData::Cdl(_)
         | OpData::Gamma(_)
         | OpData::Matrix(_)
         | OpData::Range(_)
