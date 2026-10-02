@@ -248,8 +248,10 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
     for UINT8, UINT10, UINT12, UINT16 and F16 input, at the default and DRAFT flags, differ,
     and so does the optimized processor's cache ID, which hashes them.
 
-  Log, LogAffine, LogCamera, ExposureContrast, and the LUT and built-in bakes came out the same
-  on both, over 3309 cases (the p1-oracle review's survey).
+  Log, LogAffine, ExposureContrast, and the LUT and built-in bakes came out the same on both,
+  over 3309 cases (the p1-oracle review's survey). LogCamera did too in that survey, but its
+  break on the log side is computed differently on each platform, and other parameters show
+  it (I-70).
 - **Who notices:** anyone comparing GPU textures, SDR 2.0 shaders, or renders of exponents at 8
   to 16 bits between a Windows and a Linux machine.
 - **A fix:** one math library on every platform, which changes the port's results on at least
@@ -510,6 +512,34 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   prefix for all three.
 - **Status:** matched in `p1-cdl` (1.3c1), checked against the wheel in
   `crates/ocio-ops/tests/cdl_op_data_oracle.rs` and the battery.
+
+### I-70. A camera log's break differs between Windows and Linux
+
+- **Upstream:** `LogUtil::GetLogSideBreak` (`ops/log/LogUtils.cpp:270-281`) computes the
+  break on the log side of a LogCameraTransform as `float logSideBreak =
+  log2((float)(...)); logSideBreak *= (float)logSlope / log2((float)base);`. The wheels
+  compile it differently:
+  - Windows (MSVC) calls `log2f` and computes every step in `float`;
+  - Linux (GCC, libstdc++) calls `double log2(double)` on the promoted arguments, so the
+    quotient is a `double` and `*=` multiplies in `double` before rounding back to `float`.
+    It links `log2@GLIBC_2.2.5`, whose compatibility wrapper returns a positive NaN for a
+    negative argument, where the UCRT's `log2f` returns the negative x86 default NaN.
+
+  Finite, valid parameters then give breaks one ULP apart: the "per channel, base 10" case
+  of `log_oracle.rs` gets 0x3e16fa6b on Windows and 0x3e16fa6c on Linux on its red channel,
+  and differs on all three channels. A break whose argument `linSlope * linBreak + linOffset`
+  is negative is a NaN of each platform's sign. The break feeds the offset of the linear
+  segment (`GetLinearOffset`) and the inverse's choice of segment, so the pixels at and
+  below the break differ, and so do the NaNs the linear segment produces.
+- **Who notices:** anyone comparing renders of a LogCameraTransform, or a camera-style CTF
+  Log, between a Windows and a Linux machine; ARRI LogC3 (EI 800) happens to give the same
+  break on both.
+- **A fix:** one computation and one `log2` on every platform (`log2f` in `float`, say),
+  which changes the port's results on at least one of them.
+- **Status:** matched in `p1-log` (1.3l1, the S2 spike's variants); `log_utils.rs`,
+  `get_log_side_break_msvc` and `get_log_side_break_libstdcxx`; `log_oracle.rs`,
+  `camera_cases_distinguish_the_log_side_break_variants` and the camera battery, on both
+  platforms.
 
 ## Transforms
 
