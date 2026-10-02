@@ -385,6 +385,21 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p1-range` (1.3r1); `range_op_data_oracle.rs` checks both orders of
   validation and equality against the wheel.
 
+### I-52. The unknown Log style message is written over its own start
+
+- **Upstream:** `LogUtil::ConvertStringToStyle` (`ops/log/LogUtils.cpp:54-59`) builds its
+  error in `std::stringstream ss("Unknown Log style: '"); ss << str << "'.";`. A stream
+  constructed with text starts writing at its beginning, so the style name and `'.` overwrite
+  "Unknown Log style: '" instead of following it: "foo" gives "foo'.wn Log style: '", and a
+  name of 18 characters or more replaces it all. `ConvertStyleToString`'s message for a value
+  outside the enum (`LogUtils.cpp:87-90`) has the same bug, but a Rust enum can't hold such a
+  value. The only caller, the CTF/CLF reader (`fileformats/ctf/CTFReaderHelper.cpp:3564-3571`),
+  replaces the message with its own ("Required attribute 'style' 'foo' is invalid."), so no
+  output shows it.
+- **Who notices:** nobody through the library; code calling the function directly.
+- **A fix:** `std::ostringstream ss; ss << "Unknown Log style: '" << str << "'.";`.
+- **Status:** matched in `p1-log` (1.3l1); `log_utils.rs`, `overwritten`.
+
 ### I-55. Exponents that differ past 7 digits share a cache ID
 
 - **Upstream:** an Exponent op's cache ID writes each exponent with 7 significant digits
@@ -927,6 +942,24 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Status:** matched in `p1-range` (before 1.3r1), the renderer in `p1-matrix`;
   `matrix_op_tests.rs` checks the errors, the answers with offsets, and that validating clears
   them.
+
+### U-20. A Log op's data with short channels
+
+- **Upstream:** `LogOpData`'s constructor from three parameter vectors accepts channels that
+  all have fewer than 4 parameters (`ops/log/LogOpData.cpp:86-107`), and `setRedParams`,
+  `setGreenParams` and `setBlueParams` set any vector. Only upstream's tests and the CTF/CLF
+  reader use them, and validation refuses both cases ("Log: expecting at least 4
+  parameters.", "Log: Red, green & blue parameters must have the same size."). Before that,
+  `setValue` writes past a channel too short for the parameter (`LogOpData.cpp:120-148`),
+  `getIdentityReplacement` reads the red channel's linear offset and slope
+  (`LogOpData.cpp:268-277`), and the parameter strings of the cache ID read past a green or
+  blue channel shorter than the red one (`LogOpData.cpp:389-414`).
+- **Decided** (general rule): the port returns an error instead: "Log: the channels have
+  fewer parameters than this needs: upstream accesses past them." from
+  `LogOpData::{set_value, get_identity_replacement}` and the parameter strings (so
+  `get_cache_id`). `get_parameters`, like upstream's, leaves an array it has no parameter
+  for as it is.
+- **Status:** matched in `p1-log` (1.3l1); `log_op_data_tests.rs`, `short_channels_are_errors`.
 
 ### U-24. Queries of a Gamma op whose channels have too few parameters
 

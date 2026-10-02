@@ -4,11 +4,14 @@
 //! Ported `tests/cpu/ops/log/LogOpCPU_tests.cpp` @ v2.5.2.
 //!
 //! The wheel is built with `OCIO_USE_SSE2`, so the ports keep the `#if OCIO_USE_SSE2` branches.
-//! `log2lin_test` and `lin2log_test` need `LogUtil::ConvertLogParameters` (WP 1.3l1) and are not
-//! ported yet.
 
 use super::*;
+use crate::math_utils::std_min;
 use crate::open_color_types::TransformDirection;
+use crate::ops::log::log_op_data::Params;
+use crate::ops::log::log_utils::{
+    CtfChannel, CtfParams, LogStyle, convert_log_parameters, ctf_values, get_log_direction,
+};
 use ocio_testkit::upstream::{check_close, equal_with_safe_rel_error};
 
 const QNAN: f32 = f32::NAN;
@@ -186,6 +189,210 @@ fn anti_log_test() {
 
     // Anti-Log base 2 case, no scaling.
     test_anti_log(2.0f32);
+}
+
+/// The legacy parameters of upstream's log2lin and lin2log tests, per channel: gamma, refWhite,
+/// refBlack, highlight, shadow (tests/cpu/ops/log/LogOpCPU_tests.cpp:221-241, 357-377 @ v2.5.2).
+fn legacy_params(style: LogStyle) -> CtfParams {
+    let mut params = CtfParams::default();
+    for (channel, values) in [
+        (CtfChannel::Red, [0.5, 685., 93., 0.8, 0.0004]),
+        (CtfChannel::Green, [0.6, 684., 94., 0.9, 0.0005]),
+        (CtfChannel::Blue, [0.65, 683., 95., 1.0, 0.0003]),
+    ] {
+        let p = params.get_mut(channel);
+        p[ctf_values::GAMMA] = values[0];
+        p[ctf_values::REF_WHITE] = values[1];
+        p[ctf_values::REF_BLACK] = values[2];
+        p[ctf_values::HIGHLIGHT] = values[3];
+        p[ctf_values::SHADOW] = values[4];
+    }
+    params.style = style;
+    params
+}
+
+/// The op data upstream's tests build from legacy parameters: `GetLogDirection`,
+/// `ConvertLogParameters`, then `LogOpData(base, paramsR, paramsG, paramsB, dir)`.
+fn legacy_log_op(params: &CtfParams) -> LogOpData {
+    let (mut params_r, mut params_g, mut params_b) = (Params::new(), Params::new(), Params::new());
+    let mut base = 1.0;
+    let dir = get_log_direction(params.style);
+    convert_log_parameters(
+        params,
+        &mut base,
+        &mut params_r,
+        &mut params_g,
+        &mut params_b,
+    )
+    .unwrap();
+    LogOpData::from_channel_params(base, params_r, params_g, params_b, dir).unwrap()
+}
+
+/// `ComputeLog2LinEval` (tests/cpu/ops/log/LogOpCPU_tests.cpp:185-206 @ v2.5.2).
+fn compute_log2lin_eval(input: f32, params: &[f64]) -> f32 {
+    let range = 0.002f32 * 1023.0f32;
+
+    let gamma = params[0] as f32;
+    let ref_white = params[1] as f32 / 1023.0f32;
+    let ref_black = params[2] as f32 / 1023.0f32;
+    let highlight = params[3] as f32;
+    let shadow = params[4] as f32;
+
+    let mult_factor = range / gamma;
+
+    let mut tmp_value = (ref_black - ref_white) * mult_factor;
+    tmp_value = std_min(tmp_value, -0.0001f32);
+
+    let gain = (highlight - shadow) / (1.0f32 - 10.0f32.powf(tmp_value));
+    let offset = gain - (highlight - shadow);
+
+    10.0f32.powf((input - ref_white) * mult_factor) * gain - offset + shadow
+}
+
+/// The channel's legacy parameters for index `i` of a pixel, or none for alpha (the tests'
+/// `noParam`).
+fn channel_params(params: &CtfParams, i: usize) -> &[f64] {
+    match i % 4 {
+        0 => params.get(CtfChannel::Red),
+        1 => params.get(CtfChannel::Green),
+        2 => params.get(CtfChannel::Blue),
+        _ => &[],
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(LogOpCPU, log2lin_test)` @ v2.5.2.
+#[test]
+fn log2lin_test() {
+    let params = legacy_params(LogStyle::LogToLin);
+    let log_op = legacy_log_op(&params);
+
+    let renderer = get_log_renderer(&log_op, true);
+    let rgba = apply(renderer.as_ref(), &RGBA_IMAGE);
+
+    // Relative error tolerance for the log2 approximation.
+    let rtol = 2.0f32.powf(-14.0f32);
+
+    for i in 0..8 {
+        let is_alpha = i % 4 == 3;
+
+        let result = rgba[i];
+        let mut expected = RGBA_IMAGE[i];
+
+        if !is_alpha {
+            expected = compute_log2lin_eval(expected, channel_params(&params, i));
+        }
+
+        // LogOpCPU implementation uses optimized logarithm approximation cannot use strict
+        // comparison.
+        assert!(
+            equal_with_safe_rel_error(result, expected, rtol, 1.0f32),
+            "[{i}] {result:e} vs {expected:e}"
+        );
+    }
+
+    let red_p = params.get(CtfChannel::Red);
+    let res0 = compute_log2lin_eval(0.0f32, red_p);
+
+    // Evaluating output for input rgbaImage[8-11] = {qnan, qnan, qnan, 0.}.
+    assert!(rgba[8].is_nan());
+    assert_eq!(rgba[11], 0.0f32);
+
+    // Evaluating output for input rgbaImage[12-15] = {0., 0., 0., qnan.}.
+    check_close(rgba[12], res0, rtol);
+    assert!(rgba[15].is_nan());
+
+    // Evaluating output for input rgbaImage[16-19] = {inf, inf, inf, 0.}.
+    assert_eq!(rgba[16], INF);
+    assert_eq!(rgba[19], 0.0f32);
+
+    // Evaluating output for input rgbaImage[20-23] = {0., 0., 0., inf}.
+    check_close(rgba[20], res0, rtol);
+    assert_eq!(rgba[23], INF);
+
+    // Evaluating output for input rgbaImage[24-27] = {-inf, -inf, -inf, 0.}.
+    check_close(rgba[24], compute_log2lin_eval(-INF, red_p), rtol);
+    assert_eq!(rgba[27], 0.0f32);
+
+    // Evaluating output for input rgbaImage[28-31] = {0., 0.,  0., -inf}.
+    check_close(rgba[28], res0, rtol);
+    assert_eq!(rgba[31], -INF);
+}
+
+/// `ComputeLin2LogEval` (tests/cpu/ops/log/LogOpCPU_tests.cpp:317-340 @ v2.5.2).
+fn compute_lin2log_eval(mut input: f32, params: &[f64]) -> f32 {
+    let min_value = f32::MIN_POSITIVE;
+
+    let gamma = params[0] as f32;
+    let ref_white = params[1] as f32 / 1023.0f32;
+    let ref_black = params[2] as f32 / 1023.0f32;
+    let highlight = params[3] as f32;
+    let shadow = params[4] as f32;
+
+    let range = 0.002f32 * 1023.0f32;
+    let mult_factor = range / gamma;
+
+    let mut tmp_value = (ref_black - ref_white) * mult_factor;
+    tmp_value = std_min(tmp_value, -0.0001f32);
+
+    let gain = (highlight - shadow) / (1.0f32 - 10.0f32.powf(tmp_value));
+    let offset = gain - (highlight - shadow);
+
+    input = (input - shadow + offset) / gain;
+    std_max(min_value, input).log10() / mult_factor + ref_white
+}
+
+/// Port of `OCIO_ADD_TEST(LogOpCPU, lin2log_test)` @ v2.5.2.
+#[test]
+fn lin2log_test() {
+    let params = legacy_params(LogStyle::LinToLog);
+    let log_op = legacy_log_op(&params);
+
+    let renderer = get_log_renderer(&log_op, true);
+    let rgba = apply(renderer.as_ref(), &RGBA_IMAGE);
+
+    let error = 1e-4f32;
+    for i in 0..8 {
+        let is_alpha = i % 4 == 3;
+
+        let result = rgba[i];
+        let mut expected = RGBA_IMAGE[i];
+
+        if !is_alpha {
+            expected = compute_lin2log_eval(expected, channel_params(&params, i));
+        }
+
+        // LogOpCPU implementation uses optimized logarithm approximation cannot use strict
+        // comparison.
+        check_close(result, expected, error);
+    }
+
+    let red_p = params.get(CtfChannel::Red);
+    let res0 = compute_lin2log_eval(0.0f32, red_p);
+    let res_min = compute_lin2log_eval(-100.0f32, red_p);
+
+    // Evaluating output for input rgbaImage[8-11] = {qnan, qnan, qnan, 0.}.
+    check_close(rgba[8], res_min, error);
+    assert_eq!(rgba[11], 0.0f32);
+
+    // Evaluating output for input rgbaImage[12-15] = {0., 0., 0., qnan.}.
+    check_close(rgba[12], res0, error);
+    assert!(rgba[15].is_nan());
+
+    // Evaluating output for input rgbaImage[16-19] = {inf, inf, inf, 0.}.
+    check_close(rgba[16], 10.08598328f32, error);
+    assert_eq!(rgba[19], 0.0f32);
+
+    // Evaluating output for input rgbaImage[20-23] = {0., 0., 0., inf}.
+    check_close(rgba[20], res0, error);
+    assert_eq!(rgba[23], INF);
+
+    // Evaluating output for input rgbaImage[24-27] = {-inf, -inf, -inf, 0.}.
+    check_close(rgba[24], res_min, error);
+    assert_eq!(rgba[27], 0.0f32);
+
+    // Evaluating output for input rgbaImage[28-31] = {0., 0.,  0., -inf}.
+    check_close(rgba[28], res0, error);
+    assert_eq!(rgba[31], -INF);
 }
 
 /// Port of `OCIO_ADD_TEST(LogOpCPU, cameralin2log_test)` @ v2.5.2.
