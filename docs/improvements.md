@@ -635,7 +635,12 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p1-gpu-ops` (1.3m4), checked against the wheel in
   `crates/ocio-gpu/tests/matrix_op_gpu_oracle.rs` (`extreme_parameters_write_the_wheels_shader`).
   The Gamma writer (1.3g4) writes a NaN parameter, which its validation lets through, as
-  a NaN literal too: `crates/ocio-gpu/tests/gamma_op_gpu_oracle.rs`.
+  a NaN literal too: `crates/ocio-gpu/tests/gamma_op_gpu_oracle.rs`. Valid, finite
+  moncurve parameters can still give `inf`, since `ComputeParamsRev` narrows the reverse
+  slope to `float` (`ops/gamma/GammaOpUtils.cpp:90-97, 119-127`): a gamma above about 7.6
+  with an offset of 0, e.g. `ExponentWithLinearTransform([10, 2.4, 2.4, 1],
+  [0, 0.055, 0.055, 0], NEGATIVE_LINEAR, INVERSE)`, gives
+  `vec4 slope = vec4(inf, 12.9232101, ...)`; the same test checks it.
 
 ## Python module (`ocio-py`)
 
