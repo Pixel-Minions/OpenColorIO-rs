@@ -16,9 +16,9 @@
 use std::fmt;
 
 use ocio_ops::cfmt::{Crt, OStringStream};
-use ocio_ops::exception::{Exception, Result};
+use ocio_ops::exception::Result;
 use ocio_ops::op::{Op, OpVec};
-use ocio_ops::op_data::{OpData, OpDataType, get_type_name};
+use ocio_ops::op_data::OpData;
 use ocio_ops::open_color_types::TransformDirection;
 
 use crate::config::Config;
@@ -27,6 +27,7 @@ use crate::transforms::group_transform::{GroupTransform, build_group_ops};
 use crate::transforms::matrix_transform::{
     MatrixTransform, build_matrix_op, create_matrix_transform,
 };
+use crate::transforms::range_transform::{RangeTransform, build_range_op, create_range_transform};
 
 /// The class of a transform.
 ///
@@ -95,6 +96,8 @@ pub enum Transform {
     Group(GroupTransform),
     /// `MatrixTransform`.
     Matrix(MatrixTransform),
+    /// `RangeTransform`.
+    Range(RangeTransform),
 }
 
 impl From<GroupTransform> for Transform {
@@ -109,6 +112,12 @@ impl From<MatrixTransform> for Transform {
     }
 }
 
+impl From<RangeTransform> for Transform {
+    fn from(t: RangeTransform) -> Transform {
+        Transform::Range(t)
+    }
+}
+
 impl Transform {
     /// The transform's class.
     ///
@@ -118,6 +127,7 @@ impl Transform {
         match self {
             Transform::Group(_) => TransformType::Group,
             Transform::Matrix(_) => TransformType::Matrix,
+            Transform::Range(_) => TransformType::Range,
         }
     }
 
@@ -127,6 +137,7 @@ impl Transform {
         match self {
             Transform::Group(t) => t.direction(),
             Transform::Matrix(t) => t.direction(),
+            Transform::Range(t) => t.direction(),
         }
     }
 
@@ -136,6 +147,7 @@ impl Transform {
         match self {
             Transform::Group(t) => t.set_direction(dir),
             Transform::Matrix(t) => t.set_direction(dir),
+            Transform::Range(t) => t.set_direction(dir),
         }
     }
 
@@ -146,6 +158,7 @@ impl Transform {
         match self {
             Transform::Group(t) => t.validate(),
             Transform::Matrix(t) => t.validate(),
+            Transform::Range(t) => t.validate(),
         }
     }
 }
@@ -189,6 +202,7 @@ impl Transform {
         match self {
             Transform::Group(t) => t.write_text(os),
             Transform::Matrix(t) => t.write_text(os),
+            Transform::Range(t) => t.write_text(os),
         }
     }
 }
@@ -213,15 +227,16 @@ pub fn build_ops(
             build_group_ops(ops, config, context, group_transform, dir)
         }
         Transform::Matrix(matrix_transform) => build_matrix_op(ops, matrix_transform, dir),
+        Transform::Range(range_transform) => build_range_op(ops, range_transform, dir),
     }
 }
 
 /// Appends to `group` the transform that `op` renders: nothing for the no-op types; for each op
 /// type, its class's `Create<Class>Transform`, which comes with the class.
 ///
-/// The op types whose transform class isn't ported yet are an error ("CreateTransform: the
-/// transform of a <type> op is not ported yet."); upstream has them all. Upstream's own error
-/// for an op type without one names the op's C++ class with `typeid`, which differs between the
+/// Every op type the port has so far has its transform class; a family that adds an op type
+/// adds its arm (as a "not ported yet" error until its class comes). Upstream's own error for
+/// an op type without one names the op's C++ class with `typeid`, which differs between the
 /// wheels; every op type has a transform in 2.5.2, so it can't happen.
 ///
 /// Port of `CreateTransform` (src/OpenColorIO/Transform.cpp:310-383 @ v2.5.2). Internal to the
@@ -233,15 +248,9 @@ pub fn create_transform(group: &mut GroupTransform, op: &Op) -> Result<()> {
         return Ok(());
     }
 
-    let not_ported = |op_type: OpDataType| -> Result<()> {
-        Err(Exception::new(format!(
-            "CreateTransform: the transform of a {} op is not ported yet.",
-            get_type_name(op_type)?
-        )))
-    };
     match &**op.data() {
         OpData::Matrix(_) => create_matrix_transform(group, op),
-        data @ OpData::Range(_) => not_ported(data.get_type()),
+        OpData::Range(_) => create_range_transform(group, op),
         // No op holds a reference (the file readers replace it with the file's ops), and the
         // no-op types returned above.
         OpData::Reference(_) | OpData::NoOp(_) => {

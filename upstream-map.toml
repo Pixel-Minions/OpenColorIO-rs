@@ -37,9 +37,9 @@ note = "1.2a: the FormatMetadata interface (44-117) is FormatMetadataImpl's own 
 [[file]]
 path = "include/OpenColorIO/OpenColorTypes.h"
 kind = "api"
-target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs", "crates/ocio-ops/src/format_metadata.rs", "crates/ocio-ops/src/logging.rs", "crates/ocio-gpu/src/open_color_types.rs", "crates/ocio/src/transform.rs"]
+target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs", "crates/ocio-ops/src/format_metadata.rs", "crates/ocio-ops/src/logging.rs", "crates/ocio-gpu/src/open_color_types.rs", "crates/ocio/src/transform.rs", "crates/ocio/src/transforms/range_transform.rs"]
 status = "partial"
-note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.1a: BitDepth, and BitDepthToString (defined in ParseUtils.cpp); 1.1b: ChannelOrdering; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does; 1.2b: DynamicPropertyType; 1.2e: LoggingLevel (288-297), in open_color_types.rs, and LoggingFunction (283-284), in logging.rs; 1.7a: GpuLanguage, in ocio-gpu/src/open_color_types.rs; 1.3n1: Allocation (459-463); 1.2d: OptimizationFlags (634-722), a bit-flags type over a C unsigned long; p1-transforms T0: TransformType (361-386), in crates/ocio/src/transform.rs"
+note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.1a: BitDepth, and BitDepthToString (defined in ParseUtils.cpp); 1.1b: ChannelOrdering; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does; 1.2b: DynamicPropertyType; 1.2e: LoggingLevel (288-297), in open_color_types.rs, and LoggingFunction (283-284), in logging.rs; 1.7a: GpuLanguage, in ocio-gpu/src/open_color_types.rs; 1.3n1: Allocation (459-463); 1.2d: OptimizationFlags (634-722), a bit-flags type over a C unsigned long; p1-transforms T0: TransformType (361-386), in crates/ocio/src/transform.rs; p1-transforms-fam1 (1.8c): RangeStyle (491-496), in crates/ocio/src/transforms/range_transform.rs"
 
 [[file]]
 path = "src/CMakeLists.txt"
@@ -460,9 +460,9 @@ note = "S2, 1.1d: OpCPU (as the CpuOp trait, with the typed apply_bit_depth); 1.
 [[file]]
 path = "src/OpenColorIO/OpBuilders.h"
 kind = "src"
-target = ["crates/ocio/src/transform.rs", "crates/ocio/src/transforms/group_transform.rs", "crates/ocio/src/transforms/matrix_transform.rs"]
+target = ["crates/ocio/src/transform.rs", "crates/ocio/src/transforms/group_transform.rs", "crates/ocio/src/transforms/matrix_transform.rs", "crates/ocio/src/transforms/range_transform.rs"]
 status = "partial"
-note = "p1-transforms T0: BuildOps and BuildGroupOps; each Build<Class>Op comes with its class, next to it; p1-transforms-fam1: BuildMatrixOp (1.8b)"
+note = "p1-transforms T0: BuildOps and BuildGroupOps; each Build<Class>Op comes with its class, next to it; p1-transforms-fam1: BuildMatrixOp (1.8b), BuildRangeOp (1.8c)"
 
 [[file]]
 path = "src/OpenColorIO/OpOptimizers.cpp"
@@ -474,9 +474,9 @@ note = "1.2c: FinalizeOps (132-139) and OpRcPtrVec::finalize (598-609); 1.2d (th
 [[file]]
 path = "src/OpenColorIO/ParseUtils.cpp"
 kind = "src"
-target = ["crates/ocio/src/parse_utils.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-gpu/src/open_color_types.rs"]
+target = ["crates/ocio/src/parse_utils.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-gpu/src/open_color_types.rs", "crates/ocio/src/transforms/range_transform.rs"]
 status = "partial"
-note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection; 1.1a: BitDepthToString, next to BitDepth; 1.2e: LoggingLevelToString and LoggingLevelFromString, next to LoggingLevel; 1.7c: GpuLanguageToString, next to GpuLanguage; 1.3n1: AllocationToString, next to Allocation; 1.3m1: TransformDirectionToString, next to TransformDirection"
+note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection; 1.1a: BitDepthToString, next to BitDepth; 1.2e: LoggingLevelToString and LoggingLevelFromString, next to LoggingLevel; 1.7c: GpuLanguageToString, next to GpuLanguage; 1.3n1: AllocationToString, next to Allocation; 1.3m1: TransformDirectionToString, next to TransformDirection; p1-transforms-fam1 (1.8c): RangeStyleToString, next to RangeStyle"
 
 [[file]]
 path = "src/OpenColorIO/ParseUtils.h"
@@ -1949,9 +1949,9 @@ note = "1.2c: NoOpData, FileNoOpData, CreateFileNoOp, CreateLookNoOp; not yet: P
 [[file]]
 path = "src/OpenColorIO/ops/range/RangeOp.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/range/range_op.rs"]
+target = ["crates/ocio-ops/src/ops/range/range_op.rs", "crates/ocio/src/transforms/range_transform.rs"]
 status = "partial"
-note = "1.3r2: RangeOp (the op's behaviors on OpData::Range, its finalize in Op::finalize) and both CreateRangeOp; checked against the wheel through CPU processor cache IDs and pixels (tests/range_op_oracle.rs: combinations, identities, bit depths). Not yet: BuildRangeOp and CreateRangeTransform (the RangeTransform, WP 1.8), extractGpuShaderInfo (1.3r3)"
+note = "1.3r2: RangeOp (the op's behaviors on OpData::Range, its finalize in Op::finalize) and both CreateRangeOp; checked against the wheel through CPU processor cache IDs and pixels (tests/range_op_oracle.rs: combinations, identities, bit depths). p1-transforms-fam1 (1.8c): BuildRangeOp and CreateRangeTransform, in crates/ocio/src/transforms/range_transform.rs. Not yet: extractGpuShaderInfo (1.3r3)"
 
 [[file]]
 path = "src/OpenColorIO/ops/range/RangeOp.h"
@@ -2272,13 +2272,15 @@ note = "p1-transforms-fam1 (1.8b)"
 path = "src/OpenColorIO/transforms/RangeTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/range_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam1 (1.8c): RangeTransform, its validation (I-75) and operator<< on the shared stream (I-73); checked against the wheel in crates/ocio/tests/range_transform_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/transforms/RangeTransform.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/range_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam1 (1.8c)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/ACES.cpp"
@@ -4806,8 +4808,9 @@ status = "todo"
 [[file]]
 path = "tests/cpu/ops/range/RangeOp_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-ops/src/ops/range/range_op_tests.rs"]
+target = ["crates/ocio-ops/src/ops/range/range_op_tests.rs", "crates/ocio/src/transforms/range_transform_tests.rs"]
 status = "todo"
+note = "create_transform and RangeTransform no_clamp_converts_to_matrix need the RangeTransform: in crates/ocio/src/transforms/range_transform_tests.rs (p1-transforms-fam1, 1.8c)"
 
 [[file]]
 path = "tests/cpu/ops/reference/ReferenceOpData_tests.cpp"
@@ -4952,7 +4955,8 @@ note = "p1-transforms-fam1 (1.8b)"
 path = "tests/cpu/transforms/RangeTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/range_transform_tests.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam1 (1.8c)"
 
 [[file]]
 path = "tests/cpu/transforms/builtins/BuiltinTransformRegistry_tests.cpp"

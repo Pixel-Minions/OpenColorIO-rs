@@ -457,6 +457,18 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p1-transforms-fam1` (1.8b), each wheel's order, checked in
   `crates/ocio/tests/matrix_transform_oracle.rs`.
 
+### I-75. A range that doesn't clamp names its class twice when it lacks a bound
+
+- **Upstream:** `RangeTransformImpl::validate` throws "RangeTransform validation failed:
+  non clamping range must have min and max values defined." for a range that doesn't clamp
+  and lacks a bound, inside the `try` whose `catch` prefixes every message with
+  "RangeTransform validation failed: " (`transforms/RangeTransform.cpp:52-73`). The message
+  comes out with the prefix twice.
+- **Who notices:** anyone who reads the message.
+- **A fix:** throw the message without its prefix.
+- **Status:** matched in `p1-transforms-fam1` (1.8c), checked against the wheel in
+  `crates/ocio/tests/range_transform_oracle.rs`.
+
 ## Logging
 
 ### I-16. Two messages bypass the logging function
