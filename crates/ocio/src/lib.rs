@@ -5,11 +5,17 @@
 //! (PLAN.md §2): results, text output, errors and accepted configs.
 #![forbid(unsafe_code)]
 
+pub mod caching;
 pub mod config;
 pub mod context;
+pub mod context_variable_utils;
+pub mod processor;
 pub mod transform;
 pub mod transforms;
 pub mod yaml_cpp;
+
+#[cfg(test)]
+mod test_env;
 
 pub use config::Config;
 pub use context::Context;
@@ -20,6 +26,7 @@ pub use ocio_ops::open_color_types::{
     TransformDirection,
 };
 pub use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
+pub use processor::{Processor, ProcessorCacheFlags, ProcessorMetadata};
 pub use transform::{Transform, TransformType};
 pub use transforms::allocation_transform::AllocationTransform;
 pub use transforms::cdl_transform::CdlTransform;

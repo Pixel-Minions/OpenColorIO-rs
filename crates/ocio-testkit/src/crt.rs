@@ -40,7 +40,7 @@ pub const EINVAL: i32 = 22;
 
 /// The raw C declarations. The safe wrappers below are the only callers.
 mod ffi {
-    use std::ffi::{c_char, c_double, c_float, c_int, c_long, c_void};
+    use std::ffi::{c_char, c_double, c_float, c_int, c_long, c_ulong, c_void};
 
     #[cfg_attr(windows, link(name = "legacy_stdio_definitions"))]
     unsafe extern "C" {
@@ -53,6 +53,7 @@ mod ffi {
         pub(super) fn strtod(s: *const c_char, end: *mut *mut c_char) -> c_double;
         pub(super) fn strtof(s: *const c_char, end: *mut *mut c_char) -> c_float;
         pub(super) fn strtol(s: *const c_char, end: *mut *mut c_char, base: c_int) -> c_long;
+        pub(super) fn strtoul(s: *const c_char, end: *mut *mut c_char, base: c_int) -> c_ulong;
     }
 
     #[cfg(windows)]
@@ -77,6 +78,12 @@ mod ffi {
         ) -> c_long;
         pub(super) fn _stricmp(a: *const c_char, b: *const c_char) -> c_int;
         pub(super) fn _strnicmp(a: *const c_char, b: *const c_char, n: usize) -> c_int;
+    }
+
+    #[cfg(target_os = "linux")]
+    unsafe extern "C" {
+        pub(super) fn dlopen(filename: *const c_char, flags: c_int) -> *mut c_void;
+        pub(super) fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
     }
 
     #[cfg(target_os = "linux")]
@@ -302,6 +309,41 @@ pub fn strtol_c(input: &[u8], base: i32) -> Strto<i64> {
     strto(input, |s, end| {
         widen_long(unsafe { ffi::strtol(s, end, base) })
     })
+}
+
+/// `strtoul(input, &end, base)` in the "C" locale. `unsigned long` is 32 bits on Windows and
+/// 64 bits on Linux; the value is widened to `u64`.
+// `unsigned long` is already `u64` on Linux.
+#[allow(clippy::useless_conversion)]
+pub fn strtoul_c(input: &[u8], base: i32) -> Strto<u64> {
+    // SAFETY: as in `strtod_c`.
+    strto(input, |s, end| {
+        u64::from(unsafe { ffi::strtoul(s, end, base) })
+    })
+}
+
+/// libstdc++'s `std::_Hash_bytes(ptr, len, seed)` (`_ZSt11_Hash_bytesPKvmm` in
+/// `libstdc++.so.6`), which `std::hash<std::string>` calls with the seed `0xc70f6907`: the
+/// reference for the Linux wheel's hashes of strings. Loaded at run time, as the oracle's
+/// wheel needs the library anyway; Linux only.
+#[cfg(target_os = "linux")]
+pub fn libstdcxx_hash_bytes(bytes: &[u8], seed: u64) -> u64 {
+    type HashBytes = unsafe extern "C" fn(*const c_void, usize, usize) -> usize;
+    static FUNC: OnceLock<usize> = OnceLock::new();
+    let f = *FUNC.get_or_init(|| {
+        // SAFETY: valid C strings; RTLD_NOW is 2 in glibc.
+        let handle = unsafe { ffi::dlopen(c"libstdc++.so.6".as_ptr(), 2) };
+        assert!(!handle.is_null(), "could not load libstdc++.so.6");
+        // SAFETY: a handle dlopen returned and a valid C string.
+        let sym = unsafe { ffi::dlsym(handle, c"_ZSt11_Hash_bytesPKvmm".as_ptr()) };
+        assert!(!sym.is_null(), "no std::_Hash_bytes in libstdc++.so.6");
+        sym as usize
+    });
+    // SAFETY: the symbol is `std::size_t std::_Hash_bytes(const void*, std::size_t,
+    // std::size_t)`, which reads `len` bytes at `ptr`.
+    let func: HashBytes = unsafe { std::mem::transmute::<usize, HashBytes>(f) };
+    // SAFETY: as above.
+    unsafe { func(bytes.as_ptr().cast(), bytes.len(), seed as usize) as u64 }
 }
 
 /// The "C" locale object for the `*_l` functions, created once, as OCIO's
