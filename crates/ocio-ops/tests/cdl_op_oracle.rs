@@ -127,6 +127,24 @@ fn chains() -> Vec<Vec<T>> {
             chains.push(vec![(near, dir)]);
             // Two simplified CDLs whose matrices combine.
             chains.push(vec![(power_1(0.7, style), dir), (power_1(1.0, style), dir)]);
+            // Saturation only: a saturation matrix (and clamps) when simplified.
+            for sat in [0.7, 1.3] {
+                chains.push(vec![(cdl([1.0; 3], [0.0; 3], [1.0; 3], sat, style), dir)]);
+            }
+            // A power of 1 with a zero or tiny slope or saturation (I-62): the simplified
+            // inverse matrices are singular, or divide by 0.005 where the renderer floors the
+            // reciprocal at 0.01.
+            for (slope, sat) in [
+                ([0.0, 1.0, 1.2], 0.9),
+                ([1.2, 1.0, 0.9], 0.0),
+                ([0.005, 1.0, 1.2], 0.9),
+                ([1.2, 1.0, 0.9], 0.005),
+            ] {
+                chains.push(vec![(
+                    cdl(slope, [0.1, 0.0, -0.1], [1.0; 3], sat, style),
+                    dir,
+                )]);
+            }
         }
     }
     let nan = f64::NAN;
@@ -344,4 +362,88 @@ fn the_pixels_match_the_wheel() {
         cases.len(),
         failures.join("\n")
     );
+}
+
+/// An op's ID heads its data's cache ID (`CDLOpData::getCacheID`, CDLOpData.cpp:492-511 @
+/// v2.5.2): a `CDLTransform` with `setID` (CDLTransform.cpp:319-322), which sets its data's
+/// ID, alone and next to one without, under every flag setting.
+#[test]
+fn the_cache_id_with_an_op_id_matches_the_wheel() {
+    let with_id = cdl([1.2, 1.0, 0.9], [0.1, 0.0, 0.0], [1.1; 3], 0.4321, Asc);
+    let chains: Vec<Vec<(Cdl, TransformDirection, Option<&str>)>> = vec![
+        vec![(with_id, F, Some("abc"))],
+        vec![(with_id, I, Some("abc"))],
+        vec![(with_id, F, Some("abc")), (with_id, F, None)],
+    ];
+    let flags = flags();
+    let mut cases = Vec::new();
+    for chain in &chains {
+        for f in 0..flags.len() {
+            cases.push((chain, f));
+        }
+    }
+    let pixel = vec![0u8; 16];
+    let calls: Vec<BatchCall<'_>> = cases
+        .iter()
+        .map(|(chain, f)| {
+            let children: Vec<Value> = chain
+                .iter()
+                .map(|(c, dir, id)| {
+                    let mut spec = c.spec(*dir);
+                    if let Some(id) = id {
+                        spec["calls"]
+                            .as_array_mut()
+                            .expect("the spec's calls")
+                            .push(json!(["setID", id]));
+                    }
+                    spec
+                })
+                .collect();
+            BatchCall {
+                cmd: "cpu_apply",
+                args: json!({
+                    "transform": {"class": "GroupTransform", "children": children},
+                    "optimization": flags[*f].0,
+                }),
+                blobs: vec![&pixel],
+            }
+        })
+        .collect();
+    let results = Oracle::get().batch(&calls, true);
+
+    let mut failures = Vec::new();
+    for ((chain, f), result) in cases.iter().zip(results) {
+        let result = result.unwrap_or_else(|e| panic!("{e}")).result;
+        let wheel = result["cpu_cache_id"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{result}"))
+            .to_string();
+        let port = (|| -> Result<String> {
+            let mut raw = OpVec::new();
+            for (c, dir, id) in chain.iter() {
+                let mut data = c.op_data(*dir);
+                if let Some(id) = id {
+                    data.set_id(id.as_bytes());
+                }
+                data.validate()?;
+                create_cdl_op(&mut raw, data, F);
+            }
+            raw.finalize()?;
+            let cpu = CpuProcessor::new(
+                &raw,
+                port_depth(Depth::F32),
+                port_depth(Depth::F32),
+                flags[*f].1,
+            )?;
+            Ok(String::from_utf8(cpu.get_cache_id().to_vec()).unwrap())
+        })()
+        .unwrap_or_else(|e| e.message().to_string());
+        if port != wheel {
+            failures.push(format!(
+                "{chain:?} {}\n  wheel {wheel:?}\n  port  {port:?}",
+                flags[*f].0
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
