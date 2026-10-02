@@ -3,8 +3,8 @@
 
 //! Tests of the Matrix op: `tests/cpu/ops/matrix/MatrixOp_tests.cpp` @ v2.5.2, but for
 //! `is_same_type` (it needs `CreateLogOp`, with the Log op) and `create_transform` (it needs
-//! `CreateMatrixTransform` and `BuildMatrixOp`, with the transforms, WP 1.8); and the op's
-//! behaviors. `tests/matrix_op_oracle.rs` checks the cache IDs and the combinations against
+//! `CreateMatrixTransform` and `BuildMatrixOp`: in crates/ocio/src/transforms/
+//! matrix_transform_tests.rs); and the op's behaviors. `tests/matrix_op_oracle.rs` checks the cache IDs and the combinations against
 //! the wheel, and `tests/matrix_factories_oracle.rs` the factories.
 
 use ocio_testkit::upstream::{check_close, check_throw_what, equal_with_safe_rel_error};

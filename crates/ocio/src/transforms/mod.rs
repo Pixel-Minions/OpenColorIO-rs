@@ -5,3 +5,4 @@
 //! op glue (`Build<Class>Op`, `Create<Class>Transform`; docs/architecture.md).
 
 pub mod group_transform;
+pub mod matrix_transform;

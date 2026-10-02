@@ -423,6 +423,40 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p1-foundations` (1.2a), checked against the wheel in
   `crates/ocio-ops/tests/format_metadata_oracle.rs`.
 
+### I-73. A matrix transform's text changes how a group prints what follows it
+
+- **Upstream:** `operator<<(std::ostream &, const MatrixTransform &)` sets the stream's
+  precision to 16 and leaves it there (`transforms/MatrixTransform.cpp:348`). A group prints its
+  children on one stream (`transforms/GroupTransform.cpp:156-169`), so every transform after a
+  MatrixTransform prints its numbers with 16 significant digits instead of the default 6: in a
+  group of a RangeTransform, a MatrixTransform and the same RangeTransform, the wheel prints
+  `minInValue=0.123457` the first time and `minInValue=0.1234567891234` the second.
+- **Who notices:** anyone reading `repr()` of a group, or comparing the texts of groups that
+  hold the same transforms in another order.
+- **A fix:** restore the stream's precision at the end of the MatrixTransform's text.
+- **Status:** matched in `p1-transforms-fam1` (1.8b): the transforms write their text on one
+  stream (`Transform::write_text`), checked against the wheel in
+  `crates/ocio/tests/matrix_transform_oracle.rs` and, with the transforms that print numbers,
+  in their own oracle tests.
+
+### I-74. The matrix transform's static functions order their NaNs per platform
+
+- **Upstream:** `MatrixTransform::Fit`, `Sat` and `View` (`transforms/MatrixTransform.cpp:
+  162-334`) combine their arguments with products and sums. Where two NaNs meet, x86 keeps the
+  first operand's, and the wheels' compilers ordered the operands differently: in `Fit`'s
+  offsets, `newmin * oldmax - newmax * oldmin`, the Windows wheel multiplies in the source's
+  order and the Linux wheel computes `oldmax * newmin`; in `Sat`, `(1 - sat) * luma`, Windows
+  multiplies in the source's order and Linux with the luma first, except for the last
+  diagonal value; in `View`, `values[0] + values[1] + values[2]`, Windows adds the first two
+  in the other order. Seen through each wheel's `MatrixTransform.Fit`, `Sat` and `View`.
+  The ops that use `Fit` and `Sat` (an AllocationTransform's, a version 1 CDL's saturation)
+  pass them constants with the one variable, so no two NaNs meet there.
+- **Who notices:** matrices built from NaN arguments of different signs or payloads: their
+  NaNs, in the cache IDs, the pixels and the shaders, differ between Windows and Linux.
+- **A fix:** one operand order for both platforms.
+- **Status:** matched in `p1-transforms-fam1` (1.8b), each wheel's order, checked in
+  `crates/ocio/tests/matrix_transform_oracle.rs`.
+
 ## Logging
 
 ### I-16. Two messages bypass the logging function

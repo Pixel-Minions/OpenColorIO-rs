@@ -460,9 +460,9 @@ note = "S2, 1.1d: OpCPU (as the CpuOp trait, with the typed apply_bit_depth); 1.
 [[file]]
 path = "src/OpenColorIO/OpBuilders.h"
 kind = "src"
-target = ["crates/ocio/src/transform.rs", "crates/ocio/src/transforms/group_transform.rs"]
+target = ["crates/ocio/src/transform.rs", "crates/ocio/src/transforms/group_transform.rs", "crates/ocio/src/transforms/matrix_transform.rs"]
 status = "partial"
-note = "p1-transforms T0: BuildOps and BuildGroupOps; each Build<Class>Op comes with its class, next to it"
+note = "p1-transforms T0: BuildOps and BuildGroupOps; each Build<Class>Op comes with its class, next to it; p1-transforms-fam1: BuildMatrixOp (1.8b)"
 
 [[file]]
 path = "src/OpenColorIO/OpOptimizers.cpp"
@@ -1879,9 +1879,9 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/ops/matrix/MatrixOp.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/matrix/matrix_op.rs", "crates/ocio-gpu/src/gpu_processor.rs"]
-status = "partial"
-note = "p1-engine, before 1.2d: MatrixOffsetOp's methods (clone, getInfo, isSameType, isInverse, canCombineWith, combineWith, finalize, getCacheID, getCPUOp; the op is OpData::Matrix), CreateMatrixOp(ops, MatrixOpDataRcPtr, direction) and CreateIdentityMatrixOp(ops). 1.3m3 (p1-matrix): the factories from values (CreateScaleOp, CreateMatrixOp(m44), CreateOffsetOp, CreateScaleOffsetOp, CreateSaturationOp, CreateMatrixOffsetOp, CreateFitOp, CreateIdentityMatrixOp(ops, direction), CreateMinMaxOp, CreateMatrixOp(MatrixArrayPtr)) and the MatrixOffsetOp(m44, offset4, direction) constructor, checked against the wheel through AllocationTransform, a v1 CDLTransform and .spi1d files (tests/matrix_factories_oracle.rs). Not yet: CreateMatrixTransform and BuildMatrixOp (the MatrixTransform, WP 1.8); the float overloads of CreateMatrixOffsetOp and CreateFitOp are declared in MatrixOp.h and never defined. extractGpuShaderInfo is 1.3m4's (p1-gpu-ops): MatrixOffsetOp::extractGpuShaderInfo, in ocio-gpu's extract_op_gpu_shader_info (gpu_processor.rs)."
+target = ["crates/ocio-ops/src/ops/matrix/matrix_op.rs", "crates/ocio-gpu/src/gpu_processor.rs", "crates/ocio/src/transforms/matrix_transform.rs"]
+status = "done"
+note = "p1-engine, before 1.2d: MatrixOffsetOp's methods (clone, getInfo, isSameType, isInverse, canCombineWith, combineWith, finalize, getCacheID, getCPUOp; the op is OpData::Matrix), CreateMatrixOp(ops, MatrixOpDataRcPtr, direction) and CreateIdentityMatrixOp(ops). 1.3m3 (p1-matrix): the factories from values (CreateScaleOp, CreateMatrixOp(m44), CreateOffsetOp, CreateScaleOffsetOp, CreateSaturationOp, CreateMatrixOffsetOp, CreateFitOp, CreateIdentityMatrixOp(ops, direction), CreateMinMaxOp, CreateMatrixOp(MatrixArrayPtr)) and the MatrixOffsetOp(m44, offset4, direction) constructor, checked against the wheel through AllocationTransform, a v1 CDLTransform and .spi1d files (tests/matrix_factories_oracle.rs). p1-transforms-fam1 (1.8b): CreateMatrixTransform and BuildMatrixOp, in crates/ocio/src/transforms/matrix_transform.rs. The float overloads of CreateMatrixOffsetOp and CreateFitOp are declared in MatrixOp.h and never defined. extractGpuShaderInfo is 1.3m4's (p1-gpu-ops): MatrixOffsetOp::extractGpuShaderInfo, in ocio-gpu's extract_op_gpu_shader_info (gpu_processor.rs)."
 
 [[file]]
 path = "src/OpenColorIO/ops/matrix/MatrixOp.h"
@@ -2179,7 +2179,7 @@ path = "src/OpenColorIO/transforms/GroupTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/group_transform.rs"]
 status = "partial"
-note = "p1-transforms T0: GroupTransform (Create, direction, validate, metadata, the children, operator<<) and BuildGroupOps; text and validation against the wheel (crates/ocio/tests/transform_oracle.rs). write and its format queries (Phase 4) and CollectContextVariables (Phase 3) come later"
+note = "p1-transforms T0: GroupTransform (Create, direction, validate, metadata, the children, operator<<) and BuildGroupOps; p1-transforms-fam1 (1.8b): operator<< writes the children on the group's stream (I-73); text and validation against the wheel (crates/ocio/tests/transform_oracle.rs). write and its format queries (Phase 4) and CollectContextVariables (Phase 3) come later"
 
 [[file]]
 path = "src/OpenColorIO/transforms/GroupTransform.h"
@@ -2258,14 +2258,15 @@ status = "todo"
 path = "src/OpenColorIO/transforms/MatrixTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/matrix_transform.rs", "crates/ocio-ops/src/ops/matrix/matrix_op.rs"]
-status = "partial"
-note = "1.3m3: MatrixTransform::Fit and Sat (162-245), which CreateFitOp and CreateSaturationOp call, as ocio-ops' matrix_transform_fit and matrix_transform_sat (doc(hidden), for the transform to reuse); the rest with the transforms (WP 1.8)"
+status = "done"
+note = "1.3m3: MatrixTransform::Fit and Sat (162-245), which CreateFitOp and CreateSaturationOp call, as ocio-ops' matrix_transform_fit and matrix_transform_sat (doc(hidden)); p1-transforms-fam1 (1.8b): the rest, MatrixTransform in crates/ocio (its fit and sat return those), Fit's and Sat's NaN orders per wheel (I-74), and operator<< on the shared stream (I-73); checked against the wheel in crates/ocio/tests/matrix_transform_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/transforms/MatrixTransform.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/matrix_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam1 (1.8b)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/RangeTransform.cpp"
@@ -4780,8 +4781,9 @@ status = "todo"
 [[file]]
 path = "tests/cpu/ops/matrix/MatrixOp_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-ops/src/ops/matrix/matrix_op_tests.rs"]
+target = ["crates/ocio-ops/src/ops/matrix/matrix_op_tests.rs", "crates/ocio/src/transforms/matrix_transform_tests.rs"]
 status = "todo"
+note = "create_transform needs the MatrixTransform: in crates/ocio/src/transforms/matrix_transform_tests.rs (p1-transforms-fam1, 1.8b)"
 
 [[file]]
 path = "tests/cpu/ops/noop/NoOps_tests.cpp"
@@ -4943,7 +4945,8 @@ status = "todo"
 path = "tests/cpu/transforms/MatrixTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/matrix_transform_tests.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam1 (1.8b)"
 
 [[file]]
 path = "tests/cpu/transforms/RangeTransform_tests.cpp"

@@ -18,6 +18,7 @@ pub use ocio_ops::format_metadata::FormatMetadataImpl as FormatMetadata;
 pub use ocio_ops::open_color_types::{BitDepth, OptimizationFlags, TransformDirection};
 pub use transform::{Transform, TransformType};
 pub use transforms::group_transform::GroupTransform;
+pub use transforms::matrix_transform::MatrixTransform;
 
 /// The OpenColorIO version this port matches, as `OCIO::GetVersion()` reports it.
 pub const fn version() -> &'static str {
