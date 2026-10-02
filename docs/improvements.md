@@ -408,6 +408,63 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   renderer and channel (`BASIC_MIRROR_SIGN`, `MONCURVE_MIRROR_SIGN`), and the battery's NaN
   probes compare it bit for bit on both platforms.
 
+### I-61. With fast math, a no-clamp CDL lets an infinite or NaN alpha change the colour
+
+- **Upstream:** the fast-math CDL renderers process a pixel as one four-lane vector, alpha
+  included, and the saturation's luma sums all four lanes, alpha's with a weight of 0
+  (`ops/cdl/CDLOpCPU.cpp:104, 157-171`). The clamping styles clamp the lanes to [0, 1] before
+  the luma, so alpha's lane is a number; the no-clamp styles don't. Forward
+  (`CDLRendererFwdSSE<false>`, `CDLOpCPU.cpp:346-376`), an infinite alpha passes the power
+  step, `inf * 0` makes the luma NaN, and red, green and blue come out NaN. Reverse
+  (`CDLRendererRevSSE<false>`, `CDLOpCPU.cpp:409-440`), the saturation comes first, so an
+  infinite or NaN alpha makes the luma and every channel NaN; the power step then turns the
+  NaNs into 0, and the output is `-offset / slope` whatever the colour. The scalar renderers
+  (fast math off) never read alpha. Seen through the wheel, the same on both platforms, for
+  CDL_DATA_1 (`tests/cpu/ops/cdl/CDLOp_tests.cpp:60-66`) in the no-clamp style and the pixel
+  `(0.5, 0.5, 0.5, A)`: forward, `(0.80900, 0.38568, 0.0032947)` without fast math for any
+  `A`, but NaN in every channel at `OPTIMIZATION_DEFAULT` for `A = ±inf`; inverse,
+  `(0.31451, 0.59543, 6.61108)` without fast math, but `(-0.037037, 0.209091, -1.549296)` at
+  `OPTIMIZATION_DEFAULT` for `A = ±inf` or NaN.
+- **Who notices:** images with infinite (or, inverse, NaN) alpha through a no-clamp
+  `CDLTransform` whose power isn't 1, at the default optimization: the colour is lost, and it
+  differs from the result without fast math.
+- **A fix:** leave alpha's lane out of the luma (a 0 lane before the multiply, or a three-lane
+  sum).
+- **Status:** matched in `p1-cdl` (1.3c2): `cdl_op_cpu.rs` computes alpha's lane, and the
+  battery's probes (infinite and NaN alphas) compare it bit for bit on both platforms.
+
+### I-62. A CDL with a power of 1 depends on the optimization flags
+
+- **Upstream:** with `OPTIMIZATION_SIMPLIFY_OPS` (part of `OPTIMIZATION_LOSSLESS`, `_DEFAULT`,
+  `_GOOD` and `_ALL`; `OpOptimizers.cpp:673`), a CDL op whose power is 1 is replaced with a
+  slope and offset matrix, a saturation matrix and clamps (`CDLOpData::getSimplerReplacement`,
+  `ops/cdl/CDLOpData.cpp:325-394`); an inverse one with the matrices inverted exactly
+  (`MatrixOpData`'s inverse). The CDL renderers instead floor a reverse slope, power and
+  saturation at 0.01 before taking the reciprocal (`Reciprocal`, `ops/cdl/CDLOpCPU.cpp:18-23,
+  62-99`). So an inverse CDL with a power of 1 and a slope or saturation of 0 fails with
+  "Singular Matrix can't be inverted." (`ops/matrix/MatrixOpData.cpp:218, 259`) under those
+  flags, but renders under `OPTIMIZATION_NONE`, `_IDENTITY` or `_PAIR_IDENTITY_CDL`; and a
+  slope or saturation below 0.01, such as 0.005, divides by 0.005 (200) in the matrices but by
+  0.01 (100) in the renderer.
+- **Who notices:** inverse CDLs with a power of 1 and a zero or tiny slope or saturation: the
+  processor refuses them, or renders them differently, depending on the optimization flags.
+- **A fix:** floor the reciprocals in the simplified matrices as the renderer does (or not in
+  either), and give the zero cases one outcome.
+- **Status:** matched in `p1-cdl` (1.3c1, 1.3c3); `cdl_op_oracle.rs` checks the zero and 0.005
+  cases against the wheel under every flag setting.
+
+### I-63. The CDL's validation messages misname their bounds and their class
+
+- **Upstream:** `validateGreaterEqual` refuses a slope or saturation below 0 with "CDL:
+  Invalid 'slope' -0.9 should be greater than 0.", though 0 is accepted ("or equal to" is
+  missing), and `validateGreaterThan` refuses a power with the prefix "CDLOpData: Invalid
+  'power'" where the other two say "CDL:" (`ops/cdl/CDLOpData.cpp:221-253`).
+- **Who notices:** anyone who reads the messages.
+- **A fix:** "should be greater than or equal to 0." for the slope and saturation, and one
+  prefix for all three.
+- **Status:** matched in `p1-cdl` (1.3c1), checked against the wheel in
+  `crates/ocio-ops/tests/cdl_op_data_oracle.rs` and the battery.
+
 ## Transforms
 
 ### I-11. Copying a group transform shares its children

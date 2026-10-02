@@ -6,6 +6,7 @@
 
 #![allow(dead_code)] // Each test crate uses a subset.
 
+pub(crate) mod cdl;
 pub(crate) mod gamma;
 pub(crate) mod image;
 pub(crate) mod matrix;

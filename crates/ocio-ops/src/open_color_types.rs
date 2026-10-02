@@ -114,6 +114,24 @@ pub fn transform_direction_to_string(dir: TransformDirection) -> &'static str {
     "inverse"
 }
 
+/// The style of a CDL: the ASC v1.2 specification, which clamps, or no clamping. The default
+/// for reading .cc/.ccc/.cdl files, config YAML and the `CDLTransform` is no-clamp; the CLF
+/// format's default is ASC.
+///
+/// Port of `CDLStyle` (include/OpenColorIO/OpenColorTypes.h:533-546 @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CdlStyle {
+    /// `CDL_ASC`: ASC CDL specification v1.2.
+    Asc = 0,
+    /// `CDL_NO_CLAMP`: a CDL that does not clamp.
+    NoClamp,
+}
+
+impl CdlStyle {
+    /// `CDL_TRANSFORM_DEFAULT`, which is `CDL_NO_CLAMP`.
+    pub const TRANSFORM_DEFAULT: CdlStyle = CdlStyle::NoClamp;
+}
+
 /// How an exponent or curve handles negative values.
 ///
 /// Port of `NegativeStyle` (include/OpenColorIO/OpenColorTypes.h:552-558 @ v2.5.2).
