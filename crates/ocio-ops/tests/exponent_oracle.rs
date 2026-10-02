@@ -122,8 +122,8 @@ impl Family for ExponentFamily {
 
 /// Upstream's values (tests/cpu/ops/exponent/ExponentOp_tests.cpp @ v2.5.2: `value`,
 /// `value_limits`, `combining`, `throw_create`, `cache_id`), a 0 exponent in each channel
-/// (refused in the inverse), tiny exponents around the float zero test, and NaN and infinite
-/// exponents.
+/// (refused in the inverse), an exponent just past 1 (the identity test, in float), tiny
+/// exponents around the float zero test, and NaN and infinite exponents.
 #[test]
 fn exponent_transform_matches_the_wheel() {
     let case = |label: &str, value: [f64; 4]| Case::new(label, Exponents { value });
@@ -137,6 +137,7 @@ fn exponent_transform_matches_the_wheel() {
         case("cache_id 1", [2.0, 2.1, 3.0, 3.1]),
         case("cache_id 2", [4.0, 4.1, 5.0, 5.1]),
         case("identity", [1.0, 1.0, 1.0, 1.0]),
+        case("near identity", [1.0000002, 1.0, 1.0, 1.0]),
         case("zero alpha", [2.2, 2.2, 2.2, 0.0]),
         case("float zero", [1e-46, 2.0, 2.0, 1.0]),
         case("tiny", [5e-45, 1e-300, 2.0, 1.0]),
