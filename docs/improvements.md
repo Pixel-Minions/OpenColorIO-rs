@@ -213,9 +213,16 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
     2.1e-45 is refused as "cannot be 0", and 3.6e-45 is accepted;
   - a value in [1 − 2.5·2⁻²⁴, 1 + 2.5·2⁻²³] (about 1 − 1.49e-7 to 1 + 2.98e-7) counts as 1: a
     v1 exponent in that band is dropped as a no-op.
-- **Who notices:** configs with tiny slopes, or with exponents and gains within 3e-7 of 1.
+
+  `LogUtil::ValidateLegacyParams` (`ops/log/LogUtils.cpp:139-147`) compares a CTF Log's
+  double gamma with the float `0.01f` (0.009999999776482582): a gamma equal to the float's
+  value is refused, but the next double up is accepted, although it is below 0.01 and the
+  message says it "should be greater than 0.01".
+- **Who notices:** configs with tiny slopes, or with exponents and gains within 3e-7 of 1;
+  CTF files with a legacy Log gamma within 2.3e-10 below 0.01.
 - **A fix:** compare in double.
-- **Status:** matched in `p1-math` (1.4a).
+- **Status:** matched in `p1-math` (1.4a); the gamma in `p1-log` (1.3l1), `log_utils_oracle.rs`
+  against the wheel.
 
 ### I-21. The matrix inverse's singularity test is absolute
 

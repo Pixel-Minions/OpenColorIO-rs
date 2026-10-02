@@ -458,3 +458,25 @@ fn short_channels_are_errors() {
         "Log: accessing parameter that does not exist."
     );
 }
+
+/// A channel holds at most 6 parameters (`ValidateParams`, LogOpData.cpp:31-61 @ v2.5.2): 6
+/// pass, 7 on any channel don't. No transform makes 7; the channel setters do.
+#[test]
+fn seven_parameters_are_too_many() {
+    let six: Params = vec![1.0, 0.0, 1.0, 0.0, 0.1, 1.5];
+    let mut seven = six.clone();
+    seven.push(2.0);
+    let log = LogOpData::from_channel_params(2.0, six.clone(), six.clone(), six.clone(), Forward)
+        .unwrap();
+    log.validate().unwrap();
+    for channel in 0..3 {
+        let mut params = [six.clone(), six.clone(), six.clone()];
+        params[channel] = seven.clone();
+        let [r, g, b] = params;
+        let log = LogOpData::from_channel_params(2.0, r, g, b, Forward).unwrap();
+        assert_eq!(
+            log.validate().unwrap_err().message(),
+            "Log: expecting at most 6 parameters."
+        );
+    }
+}
