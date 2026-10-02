@@ -223,9 +223,11 @@ fn cdl_transform_matches_the_wheel() {
     ] {
         cases.push(Case::new(format!("refused {c:?}"), c));
     }
-    // The YAML route, which the generated NaN and infinite cases take: a NaN offset (accepted,
-    // compared under W0002 in its channel), an infinite slope and power (accepted), and a NaN
-    // power (refused).
+    // The YAML route, which the generated NaN and infinite cases take: a NaN offset (accepted),
+    // an infinite slope and power (accepted), and a NaN power (refused). These explicit cases
+    // compare bit for bit, NaN offsets included (`w0002_nowhere`): the renderers' NaNs don't
+    // depend on operand orders (`cdl_op_cpu.rs`). Only the generated NaN cases get W0002, in
+    // their channel.
     let nan = f64::NAN;
     let inf = f64::INFINITY;
     for c in [
