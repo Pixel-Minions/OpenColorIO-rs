@@ -4272,13 +4272,14 @@ path = "tests/cpu/OpOptimizers_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/op_optimizers_tests.rs"]
 status = "partial"
-note = "p1-optimizer: gamma_prefix; multi_op_prefix needs the Lut1D float renderers (Phase 2) for CompareRender, opt_prefix_test1 the CTF reader (WP 1.6); the rest with their ops' factories"
+note = "p1-optimizer: gamma_prefix; p1-tests-catchup: remove_leading_clamp_identity, remove_trailing_clamp_identity, combine_ops, non_optimizable, optimizable, lut1d_identity_replacement, range_composition, gamma_comp_identity, replace_ops. Not yet: the tests that read files through BuildOpsTest (optimization, optimization2, lut1d_identities, lut1d_identity_replacement_order, invlut_pair_identities, mntr_identities, gamma_comp, gamma_comp_test2, log_identities, range_lut, prefer_pair_inverse_over_combine, opt_prefix_test1: the CTF/CLF and spi1d readers, Phase 4); remove_inverse_ops (the FixedFunction op, Phase 2); dynamic_ops and dyn_properties_prefix (the ExposureContrast op, Phase 5); lut1d_half_domain_keep_prior_range and multi_op_prefix (the inverse Lut1D and the Lut1D float renderers that CompareRender runs, Phase 2)"
 
 [[file]]
 path = "tests/cpu/Op_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/op_tests.rs"]
-status = "todo"
+status = "partial"
+note = "all but OpRcPtrVec/is_noop and OpRcPtrVec/dynamic_property, which need the ExposureContrast op (Phase 5)"
 
 [[file]]
 path = "tests/cpu/ParseUtils_tests.cpp"
@@ -4844,14 +4845,15 @@ status = "todo"
 path = "tests/cpu/ops/matrix/MatrixOp_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/matrix/matrix_op_tests.rs", "crates/ocio/src/transforms/matrix_transform_tests.rs"]
-status = "todo"
-note = "create_transform needs the MatrixTransform: in crates/ocio/src/transforms/matrix_transform_tests.rs (p1-transforms-fam1, 1.8b)"
+status = "done"
+note = "create_transform is in crates/ocio/src/transforms/matrix_transform_tests.rs (p1-transforms-fam1, 1.8b)"
 
 [[file]]
 path = "tests/cpu/ops/noop/NoOps_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/noop/no_ops_tests.rs"]
-status = "todo"
+status = "partial"
+note = "allocation_op, file_op, look_op; partition_gpu_ops and throw test PartitionGPUOps, which needs the Lut3D op (Phase 2)"
 
 [[file]]
 path = "tests/cpu/ops/range/RangeOpCPU_tests.cpp"
@@ -4896,7 +4898,7 @@ path = "tests/cpu/transforms/CDLTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/cdl_transform_tests.rs"]
 status = "partial"
-note = "p1-transforms-fam2 (1.8f): equality, buildops, description, style; the file tests come with the CDL readers (Phase 4), apply_optimize_simplify with the processor (1.8h)"
+note = "p1-transforms-fam2 (1.8f): equality, buildops, description, style; p1-tests-catchup: apply_optimize_simplify. The file tests come with the CDL readers (Phase 4)"
 
 [[file]]
 path = "tests/cpu/transforms/ColorSpaceTransform_tests.cpp"
