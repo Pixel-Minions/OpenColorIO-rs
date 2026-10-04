@@ -132,6 +132,17 @@ impl CdlStyle {
     pub const TRANSFORM_DEFAULT: CdlStyle = CdlStyle::NoClamp;
 }
 
+/// The style's name: `asc` or `noClamp`.
+///
+/// Port of `CDLStyleToString` (src/OpenColorIO/ParseUtils.cpp:314-319 @ v2.5.2). Its fallback
+/// for a value outside the enum can't happen.
+pub fn cdl_style_to_string(style: CdlStyle) -> &'static str {
+    match style {
+        CdlStyle::Asc => "asc",
+        CdlStyle::NoClamp => "noClamp",
+    }
+}
+
 /// How an exponent or curve handles negative values.
 ///
 /// Port of `NegativeStyle` (include/OpenColorIO/OpenColorTypes.h:552-558 @ v2.5.2).

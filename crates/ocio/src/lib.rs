@@ -16,10 +16,11 @@ pub use context::Context;
 pub use ocio_ops::exception::{Exception, ExceptionKind, Result};
 pub use ocio_ops::format_metadata::FormatMetadataImpl as FormatMetadata;
 pub use ocio_ops::open_color_types::{
-    Allocation, BitDepth, NegativeStyle, OptimizationFlags, TransformDirection,
+    Allocation, BitDepth, CdlStyle, NegativeStyle, OptimizationFlags, TransformDirection,
 };
 pub use transform::{Transform, TransformType};
 pub use transforms::allocation_transform::AllocationTransform;
+pub use transforms::cdl_transform::CdlTransform;
 pub use transforms::exponent_transform::ExponentTransform;
 pub use transforms::exponent_with_linear_transform::ExponentWithLinearTransform;
 pub use transforms::group_transform::GroupTransform;

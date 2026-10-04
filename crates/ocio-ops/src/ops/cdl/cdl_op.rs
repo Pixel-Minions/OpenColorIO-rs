@@ -4,7 +4,7 @@
 //! The CDL op: part of a port of `src/OpenColorIO/ops/cdl/CDLOp.h` and `CDLOp.cpp` @ v2.5.2,
 //! what the CPU engine needs: the op's behaviors, and the functions that create ops,
 //! [`create_cdl_op`] and [`create_cdl_op_from_values`]. `CreateCDLTransform` and `BuildCDLOp`
-//! work on the `CDLTransform`, and come with the transforms (WP 1.8); `extractGpuShaderInfo`
+//! work on the `CDLTransform`: they are in `ocio` (crates/ocio/src/transforms/cdl_transform.rs); `extractGpuShaderInfo`
 //! comes with the GPU writer (1.3c4).
 //!
 //! As for every family, the op is its data, [`OpData::Cdl`]: [`Op`]'s methods match on it and

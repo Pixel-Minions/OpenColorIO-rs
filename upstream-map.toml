@@ -460,9 +460,9 @@ note = "S2, 1.1d: OpCPU (as the CpuOp trait, with the typed apply_bit_depth); 1.
 [[file]]
 path = "src/OpenColorIO/OpBuilders.h"
 kind = "src"
-target = ["crates/ocio/src/transform.rs", "crates/ocio/src/transforms/group_transform.rs", "crates/ocio/src/transforms/matrix_transform.rs", "crates/ocio/src/transforms/range_transform.rs", "crates/ocio/src/transforms/allocation_transform.rs", "crates/ocio/src/transforms/exponent_transform.rs", "crates/ocio/src/transforms/exponent_with_linear_transform.rs", "crates/ocio/src/transforms/log_transform.rs"]
+target = ["crates/ocio/src/transform.rs", "crates/ocio/src/transforms/group_transform.rs", "crates/ocio/src/transforms/matrix_transform.rs", "crates/ocio/src/transforms/range_transform.rs", "crates/ocio/src/transforms/allocation_transform.rs", "crates/ocio/src/transforms/exponent_transform.rs", "crates/ocio/src/transforms/exponent_with_linear_transform.rs", "crates/ocio/src/transforms/log_transform.rs", "crates/ocio/src/transforms/cdl_transform.rs"]
 status = "partial"
-note = "p1-transforms T0: BuildOps and BuildGroupOps; each Build<Class>Op comes with its class, next to it; p1-transforms-fam1: BuildMatrixOp (1.8b), BuildRangeOp (1.8c), BuildAllocationOp (in AllocationTransform.cpp); p1-transforms-fam2: BuildExponentOp, BuildExponentWithLinearOp (1.8d), BuildLogOp (1.8e)"
+note = "p1-transforms T0: BuildOps and BuildGroupOps; each Build<Class>Op comes with its class, next to it; p1-transforms-fam1: BuildMatrixOp (1.8b), BuildRangeOp (1.8c), BuildAllocationOp (in AllocationTransform.cpp); p1-transforms-fam2: BuildExponentOp, BuildExponentWithLinearOp (1.8d), BuildLogOp (1.8e), BuildCDLOp (1.8f)"
 
 [[file]]
 path = "src/OpenColorIO/OpOptimizers.cpp"
@@ -476,7 +476,7 @@ path = "src/OpenColorIO/ParseUtils.cpp"
 kind = "src"
 target = ["crates/ocio/src/parse_utils.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-gpu/src/open_color_types.rs", "crates/ocio/src/transforms/range_transform.rs"]
 status = "partial"
-note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection; 1.1a: BitDepthToString, next to BitDepth; 1.2e: LoggingLevelToString and LoggingLevelFromString, next to LoggingLevel; 1.7c: GpuLanguageToString, next to GpuLanguage; 1.3n1: AllocationToString, next to Allocation; 1.3m1: TransformDirectionToString, next to TransformDirection; p1-transforms-fam1 (1.8c): RangeStyleToString, next to RangeStyle; p1-transforms-fam2 (1.8d): NegativeStyleToString, next to NegativeStyle"
+note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection; 1.1a: BitDepthToString, next to BitDepth; 1.2e: LoggingLevelToString and LoggingLevelFromString, next to LoggingLevel; 1.7c: GpuLanguageToString, next to GpuLanguage; 1.3n1: AllocationToString, next to Allocation; 1.3m1: TransformDirectionToString, next to TransformDirection; p1-transforms-fam1 (1.8c): RangeStyleToString, next to RangeStyle; p1-transforms-fam2 (1.8d): NegativeStyleToString, next to NegativeStyle; p1-transforms-fam2 (1.8f): CDLStyleToString, next to CDLStyle"
 
 [[file]]
 path = "src/OpenColorIO/ParseUtils.h"
@@ -1105,9 +1105,9 @@ note = "1.3n1: AllocationData; CreateGpuAllocationNoOp in no_ops.rs, where NoOps
 [[file]]
 path = "src/OpenColorIO/ops/cdl/CDLOp.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/cdl/cdl_op.rs"]
+target = ["crates/ocio-ops/src/ops/cdl/cdl_op.rs", "crates/ocio/src/transforms/cdl_transform.rs"]
 status = "partial"
-note = "1.3c3: CDLOp (the op's behaviors on OpData::Cdl) and both CreateCDLOp; checked against the wheel through CPU processor cache IDs and pixels (tests/cdl_op_oracle.rs: identities, inverse pairs, simplified CDLs, optimization flags). Not yet: CreateCDLTransform and BuildCDLOp (the CDLTransform, WP 1.8), extractGpuShaderInfo (1.3c4)"
+note = "1.3c3: CDLOp (the op's behaviors on OpData::Cdl) and both CreateCDLOp; checked against the wheel through CPU processor cache IDs and pixels (tests/cdl_op_oracle.rs: identities, inverse pairs, simplified CDLs, optimization flags). p1-transforms-fam2 (1.8f): CreateCDLTransform and BuildCDLOp (both config versions), in crates/ocio/src/transforms/cdl_transform.rs. Not yet here: extractGpuShaderInfo (1.3c4)"
 
 [[file]]
 path = "src/OpenColorIO/ops/cdl/CDLOp.h"
@@ -2059,13 +2059,15 @@ status = "todo"
 path = "src/OpenColorIO/transforms/CDLTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/cdl_transform.rs"]
-status = "todo"
+status = "partial"
+note = "p1-transforms-fam2 (1.8f): CDLTransform without its files (Create, the parameters, style, ID, first SOP description, validation, equals, operator<< on the shared stream, I-73), checked against the wheel in crates/ocio/tests/cdl_transform_oracle.rs. GetCDL, CreateFromFile and CreateGroupFromFile come with the CDL readers (Phase 4)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/CDLTransform.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/cdl_transform.rs"]
-status = "todo"
+status = "partial"
+note = "p1-transforms-fam2 (1.8f): the class and the METADATA_*_DESCRIPTION names; the file caches' types come with the CDL readers (Phase 4)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/ColorSpaceTransform.cpp"
@@ -4553,9 +4555,9 @@ note = "1.3c1: all 7 tests"
 [[file]]
 path = "tests/cpu/ops/cdl/CDLOp_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-ops/src/ops/cdl/cdl_op_tests.rs"]
-status = "partial"
-note = "1.3c3: 9 of 10 tests; create_transform needs the CDLTransform (WP 1.8)"
+target = ["crates/ocio-ops/src/ops/cdl/cdl_op_tests.rs", "crates/ocio/src/transforms/cdl_transform_tests.rs"]
+status = "done"
+note = "1.3c3: 9 of 10 tests; p1-transforms-fam2 (1.8f): create_transform, in cdl_transform_tests.rs"
 
 [[file]]
 path = "tests/cpu/ops/exponent/ExponentOp_tests.cpp"
@@ -4865,7 +4867,8 @@ status = "todo"
 path = "tests/cpu/transforms/CDLTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/cdl_transform_tests.rs"]
-status = "todo"
+status = "partial"
+note = "p1-transforms-fam2 (1.8f): equality, buildops, description, style; the file tests come with the CDL readers (Phase 4), apply_optimize_simplify with the processor (1.8h)"
 
 [[file]]
 path = "tests/cpu/transforms/ColorSpaceTransform_tests.cpp"

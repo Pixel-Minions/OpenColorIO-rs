@@ -23,7 +23,7 @@ use ocio::{
     TransformDirection,
 };
 use ocio_ops::op::OpVec;
-use ocio_ops::open_color_types::BitDepth;
+use ocio_ops::open_color_types::{BitDepth, CdlStyle};
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle::BatchCall;
 use ocio_testkit::processor_ops::{Dump, Dumped, ProcessorOpsReply, ProcessorOpsRequest};
@@ -222,6 +222,7 @@ fn port_equals(a: &Transform, b: &Transform) -> Option<bool> {
     match (a, b) {
         (Transform::Matrix(a), Transform::Matrix(b)) => Some(a.equals(b)),
         (Transform::Range(a), Transform::Range(b)) => Some(a.equals(b)),
+        (Transform::Cdl(a), Transform::Cdl(b)) => Some(a.equals(b)),
         (Transform::Log(a), Transform::Log(b)) => Some(a.equals(b)),
         (Transform::LogAffine(a), Transform::LogAffine(b)) => Some(a.equals(b)),
         (Transform::LogCamera(a), Transform::LogCamera(b)) => Some(a.equals(b)),
@@ -504,6 +505,29 @@ pub(crate) fn dump_transform(transform: &Transform) -> (String, BTreeMap<String,
             );
             put("isLinearSlopeValueSet", Dumped::Bool(slope.is_some()));
             "LogCameraTransform"
+        }
+        Transform::Cdl(t) => {
+            put("getTransformType", dumped_enum("TRANSFORM_TYPE_CDL"));
+            put("getFormatMetadata", dump_metadata(t.format_metadata()));
+            put("getSlope", dumped_f64s(&t.slope()));
+            put("getOffset", dumped_f64s(&t.offset()));
+            put("getPower", dumped_f64s(&t.power()));
+            put("getSOP", dumped_f64s(&t.sop()));
+            put("getSat", Dumped::F64(t.sat()));
+            put("getSatLumaCoefs", dumped_f64s(&t.sat_luma_coefs()));
+            put(
+                "getStyle",
+                dumped_enum(match t.style() {
+                    CdlStyle::Asc => "CDL_ASC",
+                    CdlStyle::NoClamp => "CDL_NO_CLAMP",
+                }),
+            );
+            put("getID", dumped_str(t.id()));
+            put(
+                "getFirstSOPDescription",
+                dumped_str(t.first_sop_description()),
+            );
+            "CDLTransform"
         }
         Transform::Range(t) => {
             put("getTransformType", dumped_enum("TRANSFORM_TYPE_RANGE"));
