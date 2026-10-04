@@ -7,6 +7,7 @@
 
 use std::fmt;
 
+use ocio_ops::cfmt::{Crt, OStringStream};
 use ocio_ops::exception::{Exception, Result};
 use ocio_ops::format_metadata::FormatMetadataImpl;
 use ocio_ops::op::OpVec;
@@ -150,24 +151,37 @@ impl GroupTransform {
     }
 }
 
+impl GroupTransform {
+    /// Writes the group's text to `os`, its children's included, on the same stream: a child
+    /// that changes the stream's state changes it for the children after it (a
+    /// MatrixTransform's precision, docs/improvements.md, I-73).
+    ///
+    /// Port of `operator<<(std::ostream &, const GroupTransform &)` (GroupTransform.cpp:
+    /// 156-169 @ v2.5.2).
+    pub(crate) fn write_text(&self, os: &mut OStringStream) {
+        os.put_str("<GroupTransform ");
+        os.put_str("direction=");
+        os.put_str(transform_direction_to_string(self.direction()));
+        os.put_str(", ");
+        os.put_str("transforms=");
+        for transform in &self.transforms {
+            os.put_str("\n        ");
+            transform.write_text(os);
+        }
+        os.put_str(">");
+    }
+}
+
 impl fmt::Display for GroupTransform {
     /// `<GroupTransform direction=<dir>, transforms=`, each child on its own line after eight
     /// spaces, then `>`.
     ///
     /// Port of `operator<<(std::ostream &, const GroupTransform &)` (GroupTransform.cpp:
-    /// 151-164 @ v2.5.2).
-    fn fmt(&self, os: &mut fmt::Formatter<'_>) -> fmt::Result {
-        os.write_str("<GroupTransform ")?;
-        write!(
-            os,
-            "direction={}, ",
-            transform_direction_to_string(self.direction())
-        )?;
-        os.write_str("transforms=")?;
-        for transform in &self.transforms {
-            write!(os, "\n        {transform}")?;
-        }
-        os.write_str(">")
+    /// 156-169 @ v2.5.2), on a new stream.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut os = OStringStream::new(Crt::NATIVE);
+        self.write_text(&mut os);
+        f.write_str(os.str())
     }
 }
 
