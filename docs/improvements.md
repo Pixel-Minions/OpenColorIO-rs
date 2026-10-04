@@ -667,6 +667,17 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p1-transforms-fam1` (1.8c), checked against the wheel in
   `crates/ocio/tests/range_transform_oracle.rs`.
 
+### I-76. An allocation without variables doesn't print its allocation
+
+- **Upstream:** `operator<<(std::ostream &, const AllocationTransform &)` prints the allocation
+  only together with the variables, when there are some
+  (`transforms/AllocationTransform.cpp:159-183`). Without variables, a uniform and a log2
+  allocation (and an unknown one) both print `<AllocationTransform direction=forward>`.
+- **Who notices:** anyone reading `repr()` of such a transform, which hides how it allocates.
+- **A fix:** print the allocation always.
+- **Status:** matched in `p1-transforms-fam1`, checked against the wheel in
+  `crates/ocio/tests/allocation_transform_oracle.rs`.
+
 ## Logging
 
 ### I-16. Two messages bypass the logging function
