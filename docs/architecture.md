@@ -141,6 +141,33 @@ plan). Every transform class and the processors follow them.
   the class with `typeid`, which differs between the wheels; no Rust or Python direction can
   reach it, and the code says so.
 
+The owner approved these choices of the transform classes on 2026-10-04, as implemented
+(p1-transforms-fam2):
+- **Getters without `get_`** where the C++ getter fills an array: `ExponentTransform::value()`,
+  `ExponentWithLinearTransform::gamma()` and `offset()`, and the log transforms' `base()`,
+  returning the array (`[f64; 4]`) or the value.
+- **`Result` for the setters that throw upstream**, with upstream's message: the negative
+  styles a class refuses, LogCamera's linear slope before its break, and Lut1D's length, index
+  and hue adjustment.
+- **`LogCameraTransform::new(break)`**: upstream's only constructor,
+  `Create(linSideBreakValues)`, takes the break.
+- **`LogCameraTransform::linear_slope_value() -> Option<[f64; 3]>`**: `None` where upstream's
+  `getLinearSlopeValue` returns false.
+- **`CdlTransform` and `CdlStyle`**: Rust's casing of `CDLTransform` and `CDLStyle`.
+- **The CDL's ID and first SOP description** are bytes up to the first NUL, as upstream's
+  `const char *` getters return them.
+- **`CdlTransform::sop() -> [f64; 9]`**: slope, offset and power, as `getSOP` fills them.
+- **`Config::set_major_version(&mut self, u32) -> Result`**: a new config is changed before
+  it is shared (`Arc::get_mut`); the rest of `Config` comes with WP 1.8g.
+
+And, the same day:
+- **Private as upstream's.** The CDL's `METADATA_*_DESCRIPTION` element names are
+  crate-private, as upstream's private `transforms/CDLTransform.h` keeps them. `build_ops`
+  (`BuildOps`) and `create_transform` (`CreateTransform`) are crate-private: the processors
+  call them. The crate's integration tests, which check them against the wheel, reach them
+  through `ocio::internals`, which only the `internals` feature has; only `ocio`'s
+  dev-dependency on itself enables that feature, so a build of the library never has it.
+
 ## Strings are bytes
 
 OCIO's strings are C byte strings (`std::string`, `const char *`). They are usually UTF-8, but

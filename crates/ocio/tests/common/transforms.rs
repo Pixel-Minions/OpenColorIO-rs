@@ -17,7 +17,7 @@
 
 use std::collections::BTreeMap;
 
-use ocio::transform::{build_ops, create_transform};
+use ocio::internals::{build_ops, create_transform};
 use ocio::{
     Config, FormatMetadata, GroupTransform, Interpolation, Lut1DHueAdjust, NegativeStyle,
     OptimizationFlags, RangeStyle, Transform, TransformDirection,

@@ -27,15 +27,21 @@ use crate::config::Config;
 use crate::transform::validate_direction;
 use crate::transforms::group_transform::GroupTransform;
 
+// The CDL metadata's element names: private, as in upstream's CDLTransform.h (not part of
+// the public headers). The CDL and CTF readers and writers use the others (Phase 4).
+
 /// `METADATA_INPUT_DESCRIPTION` (src/OpenColorIO/transforms/CDLTransform.h:17 @ v2.5.2).
-pub const METADATA_INPUT_DESCRIPTION: &[u8] = b"InputDescription";
+#[allow(dead_code)]
+pub(crate) const METADATA_INPUT_DESCRIPTION: &[u8] = b"InputDescription";
 /// `METADATA_VIEWING_DESCRIPTION` (src/OpenColorIO/transforms/CDLTransform.h:18 @ v2.5.2).
-pub const METADATA_VIEWING_DESCRIPTION: &[u8] = b"ViewingDescription";
+#[allow(dead_code)]
+pub(crate) const METADATA_VIEWING_DESCRIPTION: &[u8] = b"ViewingDescription";
 /// `METADATA_SOP_DESCRIPTION` (src/OpenColorIO/transforms/CDLTransform.h:19 @ v2.5.2): the name
 /// of the metadata's children that hold the slope, offset and power's descriptions.
-pub const METADATA_SOP_DESCRIPTION: &[u8] = b"SOPDescription";
+pub(crate) const METADATA_SOP_DESCRIPTION: &[u8] = b"SOPDescription";
 /// `METADATA_SAT_DESCRIPTION` (src/OpenColorIO/transforms/CDLTransform.h:20 @ v2.5.2).
-pub const METADATA_SAT_DESCRIPTION: &[u8] = b"SATDescription";
+#[allow(dead_code)]
+pub(crate) const METADATA_SAT_DESCRIPTION: &[u8] = b"SATDescription";
 
 /// An ASC Color Decision List: `out = clamp((in * slope + offset) ^ power)`, then the
 /// saturation around Rec. 709 luma, per the style (ASC v1.2, which clamps, or without

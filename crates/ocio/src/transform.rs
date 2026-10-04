@@ -334,9 +334,11 @@ impl Transform {
 /// upstream builds as no ops, can't be passed: the callers hold transforms. Its "Unknown
 /// transform type for creation" can't happen with an enum.
 ///
-/// Internal to the processors: public for the port's tests only.
-#[doc(hidden)]
-pub fn build_ops(
+/// Internal to the processors (crate-private, the owner's decision of 2026-10-04); the crate's
+/// integration tests reach it through `ocio::internals`.
+// Unused in the library until the processors are ported, which call it.
+#[cfg_attr(not(feature = "internals"), allow(dead_code))]
+pub(crate) fn build_ops(
     ops: &mut OpVec,
     config: &Config,
     context: &Context,
@@ -375,9 +377,11 @@ pub fn build_ops(
 /// wheels; every op type has a transform in 2.5.2, so it can't happen.
 ///
 /// Port of `CreateTransform` (src/OpenColorIO/Transform.cpp:310-383 @ v2.5.2). Internal to the
-/// processors: public for the port's tests only.
-#[doc(hidden)]
-pub fn create_transform(group: &mut GroupTransform, op: &Op) -> Result<()> {
+/// processors (crate-private); the crate's integration tests reach it through
+/// `ocio::internals`.
+// Unused in the library until the processors are ported, which call it.
+#[cfg_attr(not(feature = "internals"), allow(dead_code))]
+pub(crate) fn create_transform(group: &mut GroupTransform, op: &Op) -> Result<()> {
     // AllocationNoOp, FileNoOp, LookNoOp won't create a Transform.
     if op.is_no_op_type() {
         return Ok(());
