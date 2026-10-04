@@ -74,35 +74,3 @@ mod tests {
         assert!(env!("CARGO_PKG_VERSION").ends_with("+ocio.2.5.2"));
     }
 }
-
-/// The processors' internals that `ocio`'s own integration tests check against the wheel
-/// (crates/ocio/tests): `BuildOps` and `CreateTransform`, which the crate keeps private (the
-/// owner's decision, 2026-10-04). Only the `internals` feature has it, and only the crate's
-/// dev-dependency on itself enables that feature: a build of the library never has it.
-#[cfg(feature = "internals")]
-#[doc(hidden)]
-pub mod internals {
-    use crate::config::Config;
-    use crate::context::Context;
-    use crate::transform::Transform;
-    use crate::transforms::group_transform::GroupTransform;
-    use ocio_ops::exception::Result;
-    use ocio_ops::op::{Op, OpVec};
-    use ocio_ops::open_color_types::TransformDirection;
-
-    /// [`crate::transform::build_ops`].
-    pub fn build_ops(
-        ops: &mut OpVec,
-        config: &Config,
-        context: &Context,
-        transform: &Transform,
-        dir: TransformDirection,
-    ) -> Result<()> {
-        crate::transform::build_ops(ops, config, context, transform, dir)
-    }
-
-    /// [`crate::transform::create_transform`].
-    pub fn create_transform(group: &mut GroupTransform, op: &Op) -> Result<()> {
-        crate::transform::create_transform(group, op)
-    }
-}

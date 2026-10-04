@@ -173,12 +173,12 @@ And, the same day:
 - **Private as upstream's.** The CDL's `METADATA_*_DESCRIPTION` element names are
   crate-private, as upstream's private `transforms/CDLTransform.h` keeps them. `build_ops`
   (`BuildOps`) and `create_transform` (`CreateTransform`) are crate-private: the processors
-  call them. The crate's integration tests, which check them against the wheel, reach them
-  through `ocio::internals`, which only the `internals` feature has; only `ocio`'s
-  dev-dependency on itself enables that feature, so a build of the library never has it.
+  call them. The crate's integration tests check them against the wheel through the public
+  processors: `Config::processor` and `Processor::create_group_transform`.
 - **`Lut1DTransform::new()` and `Lut1DTransform::with_length(length, is_half_domain) ->
   Result`** for upstream's two `Create`s (approved 2026-10-04); lengths and indices are
   `c_ulong`, upstream's `unsigned long` (32 bits on Windows, 64 on Linux).
+
 ## Strings are bytes
 
 OCIO's strings are C byte strings (`std::string`, `const char *`). They are usually UTF-8, but
