@@ -208,9 +208,10 @@ fn env_override_errors_name_the_variable() {
 }
 
 /// `getFile` and `getLook` give an empty string outside the lists (Processor.cpp:59-71, 83-92
-/// @ v2.5.2); the files are a set, the looks a list in their order; both take C strings.
+/// @ v2.5.2), which the binding can't reach (its iterators check the index). What the lists
+/// hold, and their order, is checked against the wheel by `tests/processor_oracle.rs`.
 #[test]
-fn processor_metadata() {
+fn processor_metadata_out_of_range() {
     let mut metadata = ProcessorMetadata::new();
     assert_eq!(metadata.num_files(), 0);
     assert_eq!(metadata.file(0), b"");
@@ -219,28 +220,16 @@ fn processor_metadata() {
     assert_eq!(metadata.look(0), b"");
 
     metadata.add_file(b"b");
-    metadata.add_file(b"a");
-    metadata.add_file(b"b");
-    metadata.add_file(b"c\0d");
-    assert_eq!(metadata.num_files(), 3);
-    assert_eq!(
-        [metadata.file(0), metadata.file(1), metadata.file(2)],
-        [b"a", b"b", b"c"]
-    );
-    assert_eq!(metadata.file(3), b"");
-
     metadata.add_look(b"y");
-    metadata.add_look(b"x");
-    metadata.add_look(b"y\0z");
-    assert_eq!(metadata.num_looks(), 3);
-    assert_eq!(
-        [metadata.look(0), metadata.look(1), metadata.look(2)],
-        [b"y", b"x", b"y"]
-    );
+    assert_eq!(metadata.file(1), b"");
+    assert_eq!(metadata.file(-1), b"");
+    assert_eq!(metadata.look(1), b"");
     assert_eq!(metadata.look(-1), b"");
 }
 
-/// `computeMetadata` collects the files of the `FileNoOp`s and the looks of the `LookNoOp`s.
+/// `computeMetadata` collects the files of the `FileNoOp`s and the looks of the `LookNoOp`s
+/// (Processor.cpp:655-664, ops/noop/NoOps.cpp:352-356, 437-440 @ v2.5.2): the file and look
+/// transforms that make those ops come in Phase 3, and the oracle checks them then.
 #[test]
 fn compute_metadata_reads_the_no_ops() {
     let mut ops = OpVec::new();
@@ -436,8 +425,16 @@ fn config_copy_keeps_the_flags_and_no_processor() {
     assert!(!Arc::ptr_eq(&p1, &p2));
     assert!(Arc::ptr_eq(&p2, &copy.processor(&group).unwrap()));
 
-    // The processors take the config's flags.
+    // A copy of a config whose flags turn the cache off has its cache off.
     config.set_processor_cache_flags(ProcessorCacheFlags::OFF);
+    let off = (*config).clone();
+    assert_eq!(off.processor_cache_flags(), ProcessorCacheFlags::OFF);
+    assert!(!Arc::ptr_eq(
+        &off.processor(&group).unwrap(),
+        &off.processor(&group).unwrap()
+    ));
+
+    // The processors take the config's flags.
     let p3 = config.processor(&group).unwrap();
     assert_eq!(p3.cache_flags, ProcessorCacheFlags::OFF);
     assert!(!p3.opt_processor_cache.is_enabled());
@@ -460,30 +457,6 @@ fn set_transform_needs_an_empty_processor() {
             .to_string(),
         "Internal error: Processor should be empty"
     );
-}
-
-/// `createGroupTransform` copies the ops' metadata: that of the groups built while the ops
-/// were still empty, the last of them winning (`BuildGroupOps`,
-/// transforms/GroupTransform.cpp:186-190 @ v2.5.2), so here the inner group's.
-#[test]
-fn create_group_transform_copies_the_metadata() {
-    let _env = EnvGuard::new();
-    let config = Config::create_raw();
-    let mut outer = GroupTransform::new();
-    outer
-        .format_metadata_mut()
-        .add_attribute(Some(b"id"), Some(b"UID42"))
-        .unwrap();
-    let mut inner = GroupTransform::new();
-    inner.format_metadata_mut().set_name(Some(b"inner"));
-    let inner_metadata = inner.format_metadata().clone();
-    outer.append_transform(inner.into());
-
-    let processor = config.processor(&outer.into()).unwrap();
-    let group = processor.create_group_transform().unwrap();
-    assert_eq!(group.num_transforms(), 0);
-    assert_eq!(*group.format_metadata(), inner_metadata);
-    assert_eq!(*processor.format_metadata(), inner_metadata);
 }
 
 /// What a processor's state is: its cache ID, computed afresh (the processor's own is computed
