@@ -68,7 +68,7 @@ fn get_channel_size() {
 }
 
 /// `GetBitdepthFromMaxValue` reads a Pandora file's `out 256` as 8-bit: upstream's
-/// `OCIO_ADD_TEST(FileFormatPandora, load_op)` (tests/cpu/fileformats/FileFormatPandora_tests.cpp:149-165
+/// `FileFormatPandora/load_op` test (tests/cpu/fileformats/FileFormatPandora_tests.cpp:149-165
 /// @ v2.5.2) checks `getFileOutputBitDepth() == BIT_DEPTH_UINT8` for
 /// `tests/data/files/pandora_3d.m3d`, whose line 3 is `out 256`, and the Pandora reader sets
 /// that bit depth to `GetBitdepthFromMaxValue(out)`
