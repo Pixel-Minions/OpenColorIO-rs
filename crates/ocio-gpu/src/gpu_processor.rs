@@ -27,6 +27,7 @@ use crate::open_color_types::GpuLanguage;
 use crate::ops::exponent::exponent_op_gpu::get_exponent_gpu_shader_program;
 use crate::ops::gamma::gamma_op_gpu::get_gamma_gpu_shader_program;
 use crate::ops::matrix::matrix_op_gpu::get_matrix_gpu_shader_program;
+use crate::ops::range::range_op_gpu::get_range_gpu_shader_program;
 
 /// Adds the OCIO function's header to the description: its signature, its opening brace, and
 /// the pixel variable set to the input. An empty pixel name is an error ("GPU variable name
@@ -96,7 +97,9 @@ pub fn write_shader_footer(shader_creator: &mut GpuShaderDesc) {
 /// The no-ops write nothing (`AllocationNoOp`, `FileNoOp` and `LookNoOp::extractGpuShaderInfo`,
 /// src/OpenColorIO/ops/noop/NoOps.cpp:54, 325, 411 @ v2.5.2). A Matrix op still inverse
 /// wasn't finalized: upstream refuses it ("Op::finalize has to be called.",
-/// `MatrixOffsetOp::extractGpuShaderInfo`, src/OpenColorIO/ops/matrix/MatrixOp.cpp:190-198).
+/// `MatrixOffsetOp::extractGpuShaderInfo`, src/OpenColorIO/ops/matrix/MatrixOp.cpp:190-198),
+/// and so is a Range op (`RangeOp::extractGpuShaderInfo`,
+/// src/OpenColorIO/ops/range/RangeOp.cpp:202-210).
 /// A family whose GPU writer isn't ported yet is the port's error, naming the op.
 ///
 /// Port of `Op::extractGpuShaderInfo`, pure virtual (src/OpenColorIO/Op.h:251 @ v2.5.2), and
@@ -111,6 +114,12 @@ pub(crate) fn extract_op_gpu_shader_info(
                 return Err(Exception::new("Op::finalize has to be called."));
             }
             get_matrix_gpu_shader_program(shader_creator, data)
+        }
+        OpData::Range(data) => {
+            if data.get_direction() == TransformDirection::Inverse {
+                return Err(Exception::new("Op::finalize has to be called."));
+            }
+            get_range_gpu_shader_program(shader_creator, data)
         }
         OpData::Exponent(data) => get_exponent_gpu_shader_program(shader_creator, data),
         OpData::Gamma(data) => get_gamma_gpu_shader_program(shader_creator, data),
@@ -226,5 +235,42 @@ impl GpuProcessor {
         write_shader_footer(shader_desc);
 
         shader_desc.finalize()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ocio_ops::ops::matrix::MatrixOpData;
+    use ocio_ops::ops::matrix::matrix_op::create_matrix_op;
+    use ocio_ops::ops::range::range_op::create_range_op_from_values;
+
+    /// A Matrix or Range op that is still inverse, which only a list that wasn't finalized
+    /// holds (`GpuProcessor::new` finalizes its own copy), is refused with upstream's message
+    /// (`MatrixOffsetOp::extractGpuShaderInfo`, src/OpenColorIO/ops/matrix/MatrixOp.cpp:190-198;
+    /// `RangeOp::extractGpuShaderInfo`, src/OpenColorIO/ops/range/RangeOp.cpp:202-210
+    /// @ v2.5.2); once finalized, both write their code.
+    #[test]
+    fn unfinalized_inverse_ops_are_refused() {
+        let mut ops = OpVec::new();
+        create_range_op_from_values(&mut ops, 0.1, 1.1, 0.5, 1.5, TransformDirection::Inverse)
+            .unwrap();
+        let mut matrix = MatrixOpData::new();
+        matrix.set_rgba(&[
+            2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+        ]);
+        matrix.validate().unwrap();
+        create_matrix_op(&mut ops, matrix, TransformDirection::Inverse);
+        assert_eq!(ops.len(), 2);
+        for op in ops.iter() {
+            let mut desc = GpuShaderDesc::new(GpuLanguage::Glsl4_0);
+            let err = extract_op_gpu_shader_info(op, &mut desc).unwrap_err();
+            assert_eq!(err.message(), "Op::finalize has to be called.", "{op}");
+        }
+        ops.finalize().unwrap();
+        for op in ops.iter() {
+            let mut desc = GpuShaderDesc::new(GpuLanguage::Glsl4_0);
+            assert!(extract_op_gpu_shader_info(op, &mut desc).is_ok(), "{op}");
+        }
     }
 }
