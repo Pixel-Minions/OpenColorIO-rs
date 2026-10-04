@@ -608,7 +608,9 @@ fn every_path_writes_the_wheels_shader() {
 
 /// Extreme bounds, generated: each of a range's four bounds in turn empty (NaN), ±Inf, the
 /// largest double, -0, the smallest denormal, 1e-9, values beyond the float range and Cg's
-/// half range, forward and inverse, without optimization, in every language.
+/// half range, forward and inverse, at every level, in every language; alone, and in lists the
+/// optimizer combines or removes: after `[0, 1, 0, 1]`, before it, after an inverse `r6`,
+/// twice, as an inverse pair, and around a matrix.
 #[test]
 fn extreme_bounds_write_the_wheels_shader() {
     let bases = [
@@ -627,6 +629,8 @@ fn extreme_bounds_write_the_wheels_shader() {
         1e39,
         65504.5,
     ];
+    let r1 = T::Range([0., 1., 0., 1.], F, false);
+    let r6_inverse = T::Range([-1.0, 1.0, 0., 1.2], I, false);
     let mut cases = Vec::new();
     for (b, base) in bases.into_iter().enumerate() {
         for slot in 0..4 {
@@ -634,12 +638,29 @@ fn extreme_bounds_write_the_wheels_shader() {
                 for dir in [F, I] {
                     let mut bounds = base;
                     bounds[slot] = v;
-                    cases.extend(cases_of(
-                        &format!("base {b} bound[{slot}] = {v:e} {dir:?}"),
-                        vec![T::Range(bounds, dir, false)],
-                        &no_optimization(),
-                        Names::default(),
-                    ));
+                    let x = T::Range(bounds, dir, false);
+                    let inverse = match dir {
+                        F => I,
+                        I => F,
+                    };
+                    let other = T::Range(bounds, inverse, false);
+                    let chains = [
+                        ("", vec![x]),
+                        (" after r1", vec![r1, x]),
+                        (" before r1", vec![x, r1]),
+                        (" after r6 inverse", vec![r6_inverse, x]),
+                        (" twice", vec![x, x]),
+                        (" inverse pair", vec![x, other]),
+                        (" around a matrix", vec![x, T::Scale(2.0), x]),
+                    ];
+                    for (label, chain) in chains {
+                        cases.extend(cases_of(
+                            &format!("base {b} bound[{slot}] = {v:e} {dir:?}{label}"),
+                            chain,
+                            &levels(),
+                            Names::default(),
+                        ));
+                    }
                 }
             }
         }
