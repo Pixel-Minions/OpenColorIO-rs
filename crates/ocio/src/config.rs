@@ -7,6 +7,8 @@
 
 use std::sync::Arc;
 
+use ocio_ops::exception::{Exception, Result};
+
 use crate::context::Context;
 
 /// A config: so far the version the op builders read (`BuildCDLOp` and `BuildExponentOp` build
@@ -46,6 +48,33 @@ impl Config {
         self.major_version
     }
 
+    /// Sets the major version, and the minor version to the last one this release supports for
+    /// it: "The version is <v> where supported versions start at 1 and end at 2." outside them.
+    /// Upstream also resets the config's cache IDs; the port's config has none yet (WP 1.8g).
+    ///
+    /// Port of `Config::setMajorVersion` (src/OpenColorIO/Config.cpp:1285-1304 @ v2.5.2), with
+    /// `FirstSupportedMajorVersion`, `LastSupportedMajorVersion` and `LastSupportedMinorVersion`
+    /// (Config.cpp:245-251).
+    #[doc(alias = "setMajorVersion")]
+    pub fn set_major_version(&mut self, version: u32) -> Result<()> {
+        /// `FirstSupportedMajorVersion`.
+        const FIRST_SUPPORTED_MAJOR_VERSION: u32 = 1;
+        /// `LastSupportedMajorVersion`: `OCIO_VERSION_MAJOR`.
+        const LAST_SUPPORTED_MAJOR_VERSION: u32 = 2;
+        /// `LastSupportedMinorVersion`: for each major version, the most recent minor.
+        const LAST_SUPPORTED_MINOR_VERSION: [u32; 2] = [0, 5];
+
+        if !(FIRST_SUPPORTED_MAJOR_VERSION..=LAST_SUPPORTED_MAJOR_VERSION).contains(&version) {
+            return Err(Exception::new(format!(
+                "The version is {version} where supported versions start at \
+                 {FIRST_SUPPORTED_MAJOR_VERSION} and end at {LAST_SUPPORTED_MAJOR_VERSION}."
+            )));
+        }
+        self.major_version = version;
+        self.minor_version = LAST_SUPPORTED_MINOR_VERSION[(version - 1) as usize];
+        Ok(())
+    }
+
     /// Port of `Config::getMinorVersion` (src/OpenColorIO/Config.cpp:1306-1309 @ v2.5.2).
     #[doc(alias = "getMinorVersion")]
     pub fn minor_version(&self) -> u32 {
@@ -58,3 +87,7 @@ impl Config {
         &self.context
     }
 }
+
+#[cfg(test)]
+#[path = "config_tests.rs"]
+mod tests;

@@ -15,9 +15,13 @@ pub use config::Config;
 pub use context::Context;
 pub use ocio_ops::exception::{Exception, ExceptionKind, Result};
 pub use ocio_ops::format_metadata::FormatMetadataImpl as FormatMetadata;
-pub use ocio_ops::open_color_types::{Allocation, BitDepth, OptimizationFlags, TransformDirection};
+pub use ocio_ops::open_color_types::{
+    Allocation, BitDepth, NegativeStyle, OptimizationFlags, TransformDirection,
+};
 pub use transform::{Transform, TransformType};
 pub use transforms::allocation_transform::AllocationTransform;
+pub use transforms::exponent_transform::ExponentTransform;
+pub use transforms::exponent_with_linear_transform::ExponentWithLinearTransform;
 pub use transforms::group_transform::GroupTransform;
 pub use transforms::matrix_transform::MatrixTransform;
 pub use transforms::range_transform::{RangeStyle, RangeTransform};

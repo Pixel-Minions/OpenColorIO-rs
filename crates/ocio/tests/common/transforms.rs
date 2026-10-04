@@ -18,7 +18,10 @@
 use std::collections::BTreeMap;
 
 use ocio::transform::{build_ops, create_transform};
-use ocio::{Config, FormatMetadata, GroupTransform, RangeStyle, Transform, TransformDirection};
+use ocio::{
+    Config, FormatMetadata, GroupTransform, NegativeStyle, RangeStyle, Transform,
+    TransformDirection,
+};
 use ocio_ops::op::OpVec;
 use ocio_ops::open_color_types::BitDepth;
 use ocio_testkit::Oracle;
@@ -90,6 +93,21 @@ pub(crate) fn bit_depth_name(depth: BitDepth) -> &'static str {
         BitDepth::F16 => "BIT_DEPTH_F16",
         BitDepth::F32 => "BIT_DEPTH_F32",
     }
+}
+
+/// A negative style, as the binding names it.
+pub(crate) fn negative_style_name(style: NegativeStyle) -> &'static str {
+    match style {
+        NegativeStyle::Clamp => "NEGATIVE_CLAMP",
+        NegativeStyle::Mirror => "NEGATIVE_MIRROR",
+        NegativeStyle::PassThru => "NEGATIVE_PASS_THRU",
+        NegativeStyle::Linear => "NEGATIVE_LINEAR",
+    }
+}
+
+/// A negative style, as a spec value.
+pub(crate) fn negative_style_spec(style: NegativeStyle) -> Value {
+    json!({"enum": negative_style_name(style)})
 }
 
 /// Every bit depth.
@@ -204,6 +222,8 @@ fn port_equals(a: &Transform, b: &Transform) -> Option<bool> {
     match (a, b) {
         (Transform::Matrix(a), Transform::Matrix(b)) => Some(a.equals(b)),
         (Transform::Range(a), Transform::Range(b)) => Some(a.equals(b)),
+        (Transform::Exponent(a), Transform::Exponent(b)) => Some(a.equals(b)),
+        (Transform::ExponentWithLinear(a), Transform::ExponentWithLinear(b)) => Some(a.equals(b)),
         _ => None,
     }
 }
@@ -214,13 +234,13 @@ fn port_equals(a: &Transform, b: &Transform) -> Option<bool> {
 /// Port of `Processor::Impl::setTransform` and `createGroupTransform` (src/OpenColorIO/
 /// Processor.cpp:300-316, 623-641 @ v2.5.2), for transforms without dynamic properties.
 pub(crate) fn port_processor_group(
+    config: &Config,
     transform: &Transform,
     dir: TransformDirection,
 ) -> ocio::Result<GroupTransform> {
     transform.validate()?;
-    let config = Config::create_raw();
     let mut ops = OpVec::new();
-    build_ops(&mut ops, &config, config.current_context(), transform, dir)?;
+    build_ops(&mut ops, config, config.current_context(), transform, dir)?;
     ops.finalize()?;
 
     let mut group = GroupTransform::new();
@@ -231,17 +251,27 @@ pub(crate) fn port_processor_group(
     Ok(group)
 }
 
-/// The wheel's processors of `cases`, in both directions, against the port's.
+/// The raw config's processors of `cases`, in both directions, the wheel's against the port's.
 pub(crate) fn check_processors(cases: &[Case]) {
+    check_processors_in(cases, None, &Config::create_raw());
+}
+
+/// The processors of `cases` in a config, in both directions, the wheel's against the port's:
+/// `config_spec` is the oracle's config (see `spec.config`; `None` for the raw config) and
+/// `config` the port's, which must be the same.
+pub(crate) fn check_processors_in(cases: &[Case], config_spec: Option<&Value>, config: &Config) {
     let dirs = [TransformDirection::Forward, TransformDirection::Inverse];
     let requests: Vec<(usize, TransformDirection, ProcessorOpsRequest)> = cases
         .iter()
         .enumerate()
         .flat_map(|(k, case)| {
             dirs.map(|dir| {
-                let mut request = ProcessorOpsRequest::new(
-                    json!({"transform": case.spec, "direction": direction_name(dir)}),
-                );
+                let mut processor =
+                    json!({"transform": case.spec, "direction": direction_name(dir)});
+                if let Some(config_spec) = config_spec {
+                    processor["config"] = config_spec.clone();
+                }
+                let mut request = ProcessorOpsRequest::new(processor);
                 request.optimization = Some(json!("OPTIMIZATION_NONE"));
                 (k, dir, request)
             })
@@ -252,7 +282,7 @@ pub(crate) fn check_processors(cases: &[Case]) {
     for ((k, dir, _), response) in requests.iter().zip(Oracle::get().batch(&calls, true)) {
         let reply = ProcessorOpsReply::from_response(response.unwrap_or_else(|e| panic!("{e}")));
         let case = &cases[*k];
-        let port = port_processor_group(&case.port, *dir);
+        let port = port_processor_group(config, &case.port, *dir);
         let outcome = match (reply.raised(), &port) {
             (Some(raised), Err(e)) => {
                 if raised.stage == "processor" && raised.message == e.message() {
@@ -385,6 +415,30 @@ pub(crate) fn dump_transform(transform: &Transform) -> (String, BTreeMap<String,
             put("getMatrix", dumped_f64s(&t.matrix()));
             put("getOffset", dumped_f64s(&t.offset()));
             "MatrixTransform"
+        }
+        Transform::Exponent(t) => {
+            put("getTransformType", dumped_enum("TRANSFORM_TYPE_EXPONENT"));
+            put("getFormatMetadata", dump_metadata(t.format_metadata()));
+            put(
+                "getNegativeStyle",
+                dumped_enum(negative_style_name(t.negative_style())),
+            );
+            put("getValue", dumped_f64s(&t.value()));
+            "ExponentTransform"
+        }
+        Transform::ExponentWithLinear(t) => {
+            put(
+                "getTransformType",
+                dumped_enum("TRANSFORM_TYPE_EXPONENT_WITH_LINEAR"),
+            );
+            put("getFormatMetadata", dump_metadata(t.format_metadata()));
+            put(
+                "getNegativeStyle",
+                dumped_enum(negative_style_name(t.negative_style())),
+            );
+            put("getGamma", dumped_f64s(&t.gamma()));
+            put("getOffset", dumped_f64s(&t.offset()));
+            "ExponentWithLinearTransform"
         }
         Transform::Range(t) => {
             put("getTransformType", dumped_enum("TRANSFORM_TYPE_RANGE"));

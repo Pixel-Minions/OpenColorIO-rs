@@ -147,6 +147,20 @@ pub enum NegativeStyle {
     Linear,
 }
 
+/// The negative style's name: `clamp`, `mirror`, `pass_thru` or `linear`.
+///
+/// Port of `NegativeStyleToString` (src/OpenColorIO/ParseUtils.cpp:496-513 @ v2.5.2), with the
+/// `NEGATIVE_STYLE_*` names. Its "Unknown exponent style" for a value outside the enum can't
+/// happen.
+pub fn negative_style_to_string(style: NegativeStyle) -> &'static str {
+    match style {
+        NegativeStyle::Clamp => "clamp",
+        NegativeStyle::Mirror => "mirror",
+        NegativeStyle::PassThru => "pass_thru",
+        NegativeStyle::Linear => "linear",
+    }
+}
+
 /// What a dynamic property holds: a double for the first three, a grading value for the
 /// others.
 ///
