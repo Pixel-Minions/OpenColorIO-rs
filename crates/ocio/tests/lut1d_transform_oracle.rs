@@ -32,7 +32,7 @@ use common::transforms::{
 };
 use ocio::{
     BitDepth, Interpolation, Lut1DHueAdjust, Lut1DTransform, MatrixTransform, RangeTransform,
-    TransformDirection,
+    Transform, TransformDirection,
 };
 use ocio_testkit::battery::BitDepth as Depth;
 use ocio_testkit::transform_text::f64_spec;
@@ -284,6 +284,30 @@ fn lut_cases() -> Vec<Case> {
             .value(1, [nan, nan, nan])
             .case("NaNs only"),
     );
+    // A channel's minimum and maximum keep the first of equal values: `-0` before `0` and `0`
+    // before `-0` print as they come.
+    cases.push(
+        Lut::new()
+            .value(0, [-0.0, 0.0, -0.0])
+            .value(1, [0.0, -0.0, -0.0])
+            .case("signed zeros in either order"),
+    );
+    // The direction set through `Transform::setDirection`, the base class's virtual.
+    for dir in [Forward, Inverse] {
+        let lut = ramp(Lut::new(), 5);
+        let mut port: Transform = lut.port.clone().into();
+        port.set_direction(dir);
+        let mut spec = lut.spec();
+        spec["calls"]
+            .as_array_mut()
+            .expect("calls")
+            .push(json!(["setDirection", direction_spec(dir)]));
+        cases.push(Case::new(
+            format!("a ramp, {dir:?} through the Transform"),
+            spec,
+            port,
+        ));
+    }
     cases
 }
 

@@ -125,7 +125,10 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   (`Config.cpp:4830-4841`), and the cache is on by default. That text leaves things out:
   - for a `Lut1DTransform` or `Lut3DTransform` that holds its values in memory, it gives only the
     size, settings and the smallest and largest values (`transforms/Lut1DTransform.cpp:184-224`,
-    `transforms/Lut3DTransform.cpp:174-218`);
+    `transforms/Lut3DTransform.cpp:174-218`). The Lut1DTransform's smallest and largest values
+    are `std::min` and `std::max` from `FLT_MAX` and `-FLT_MAX`, which skip a NaN entry, so a
+    channel of only NaNs prints `minrgb` 3.40282e+38 and `maxrgb` -3.40282e+38, whatever else
+    the LUT holds (seen through the wheel);
   - it prints numbers with 9 significant digits, so two `MatrixTransform`s one ULP apart have
     the same text (seen through the wheel: the second gets the first one's processor, and with
     `PROCESSOR_CACHE_OFF` they differ).
@@ -135,7 +138,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   processors from one config.
 - **A fix:** put every value, or a hash of it, in the key.
 - **Status:** the cache and its key are matched (`p1-processor`, WP 1.8g); each class's text
-  as the class lands.
+  as the class lands. The Lut1DTransform's text, NaN channels included, is matched in
+  `p1-transforms-fam4` and checked against the wheel in
+  `crates/ocio/tests/lut1d_transform_oracle.rs` (the "NaNs only" case).
 
 ### I-6. A malformed UTF-8 sequence truncates a config's text and cache ID
 
@@ -581,7 +586,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **A fix:** compare the values bit for bit, or fill the NaN codes with a value that compares
   (as the lookup domains do, with `filterNANs`).
 - **Status:** matched in `p1-optimizer` (chunk A); `lut1d_op_data_oracle.rs` checks equality
-  against the wheel.
+  against the wheel, and `crates/ocio/tests/lut1d_transform_oracle.rs` checks it on the
+  `Lut1DTransform`s (each half-domain case against a copy of itself, `p1-transforms-fam4`).
 
 ### I-70. A camera log's break differs between Windows and Linux
 
