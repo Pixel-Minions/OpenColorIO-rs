@@ -2,15 +2,16 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Tests of the Matrix op: `tests/cpu/ops/matrix/MatrixOp_tests.cpp` @ v2.5.2, but for
-//! `is_same_type` (it needs `CreateLogOp`, with the Log op) and `create_transform` (it needs
-//! `CreateMatrixTransform` and `BuildMatrixOp`: in crates/ocio/src/transforms/
-//! matrix_transform_tests.rs); and the op's behaviors. `tests/matrix_op_oracle.rs` checks the cache IDs and the combinations against
-//! the wheel, and `tests/matrix_factories_oracle.rs` the factories.
+//! `create_transform` (it needs `CreateMatrixTransform` and `BuildMatrixOp`: in
+//! crates/ocio/src/transforms/matrix_transform_tests.rs); and the op's behaviors.
+//! `tests/matrix_op_oracle.rs` checks the cache IDs and the combinations against the wheel, and
+//! `tests/matrix_factories_oracle.rs` the factories.
 
 use ocio_testkit::upstream::{check_close, check_throw_what, equal_with_safe_rel_error};
 
 use super::*;
 use crate::op::OpVec;
+use crate::ops::log::log_op::create_log_op_from_parameters;
 use crate::ops::matrix::matrix_op_data::Offsets;
 use crate::ops::noop::create_file_no_op;
 
@@ -921,6 +922,47 @@ fn no_op() {
     ops[0].validate().unwrap();
     ops[0].finalize().unwrap();
     assert!(ops[0].is_no_op().unwrap());
+}
+
+/// Port of `OCIO_ADD_TEST(MatrixOffsetOp, is_same_type)` @ v2.5.2.
+#[test]
+fn is_same_type() {
+    let sat = 0.9;
+    let luma_coef3 = [1.0, 0.5, 0.1];
+    let scale = [1.1, 1.3, 0.3, 1.0];
+    let base = 10.0;
+    let log_slope = [0.18, 0.5, 0.3];
+    let lin_slope = [2.0, 4.0, 8.0];
+    let lin_offset = [0.1, 0.1, 0.1];
+    let log_offset = [1.0, 1.0, 1.0];
+
+    // Create saturation, scale and log.
+    let mut ops = OpVec::new();
+    create_saturation_op(&mut ops, sat, &luma_coef3, TransformDirection::Forward);
+    assert_eq!(ops.len(), 1);
+    create_scale_op(&mut ops, &scale, TransformDirection::Forward);
+    assert_eq!(ops.len(), 2);
+    create_log_op_from_parameters(
+        &mut ops,
+        base,
+        &log_slope,
+        &log_offset,
+        &lin_slope,
+        &lin_offset,
+        TransformDirection::Forward,
+    );
+    assert_eq!(ops.len(), 3);
+    let op0 = &ops[0];
+    let op1 = &ops[1];
+    let op2 = &ops[2];
+
+    // saturation and scale are MatrixOffset operators, log is not.
+    assert!(ops[0].is_same_type(op1));
+    assert!(ops[1].is_same_type(op0));
+    assert!(!ops[0].is_same_type(op2));
+    assert!(!ops[2].is_same_type(op0));
+    assert!(!ops[1].is_same_type(op2));
+    assert!(!ops[2].is_same_type(op1));
 }
 
 /// Port of `OCIO_ADD_TEST(MatrixOffsetOp, has_channel_crosstalk)` @ v2.5.2.

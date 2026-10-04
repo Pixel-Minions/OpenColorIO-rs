@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Tests of the no-ops, with upstream's `file_op` and `look_op` tests
-//! (tests/cpu/ops/noop/NoOps_tests.cpp @ v2.5.2). Its `allocation_op` test compares the
-//! allocation no-op with `CreateScaleOp`'s op (chunk 1.3m3), and `throw` and
-//! `partition_gpu_ops` test `PartitionGPUOps`, which needs the Lut3D op.
+//! Tests of the no-ops, with upstream's `allocation_op`, `file_op` and `look_op` tests
+//! (tests/cpu/ops/noop/NoOps_tests.cpp @ v2.5.2). Its `throw` and `partition_gpu_ops` tests
+//! test `PartitionGPUOps`, which needs the Lut3D op.
 //!
 //! The rest checks how the ops share and copy their data, and relations upstream's code
 //! states (a look's cache ID is its name, an allocation's its data's). What the wheel shows of
@@ -16,7 +15,8 @@ use std::sync::Arc;
 
 use super::*;
 use crate::op_data::OpDataType;
-use crate::open_color_types::{Allocation, DynamicPropertyType};
+use crate::open_color_types::{Allocation, DynamicPropertyType, TransformDirection};
+use crate::ops::matrix::matrix_op::create_scale_op;
 
 const ALL_DYNAMIC_TYPES: [DynamicPropertyType; 7] = [
     DynamicPropertyType::Exposure,
@@ -275,6 +275,22 @@ fn check_clone_of_first(ops: &OpVec) {
     assert!(cloned_op.is_no_op().unwrap());
     assert!(!cloned_op.has_channel_crosstalk());
     assert!(cloned_op.supported_by_legacy_shader());
+}
+
+/// The scale op of upstream's `CreateGenericScaleOp` (NoOps_tests.cpp:26-30 @ v2.5.2).
+fn create_generic_scale_op(ops: &mut OpVec) {
+    let scale4 = [1.04, 1.05, 1.06, 1.0];
+    create_scale_op(ops, &scale4, TransformDirection::Forward);
+}
+
+/// Port of `OCIO_ADD_TEST(NoOps, allocation_op)` @ v2.5.2.
+#[test]
+fn allocation_op() {
+    let mut ops = OpVec::new();
+    create_gpu_allocation_no_op(&mut ops, &lg2_allocation());
+    create_generic_scale_op(&mut ops);
+
+    check_clone_of_first(&ops);
 }
 
 /// Port of `OCIO_ADD_TEST(NoOps, file_op)` @ v2.5.2.
