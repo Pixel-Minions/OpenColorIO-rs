@@ -26,8 +26,8 @@ use crate::transform::{Transform, build_ops, validate_direction};
 /// where upstream's `createEditableCopy` shares them (docs/improvements.md, I-11).
 ///
 /// Port of `GroupTransform` and `GroupTransformImpl` (include/OpenColorIO/
-/// OpenColorTransforms.h:1527-1590, src/OpenColorIO/transforms/GroupTransform.h,
-/// GroupTransform.cpp:14-128 @ v2.5.2).
+/// OpenColorTransforms.h:1530-1589, src/OpenColorIO/transforms/GroupTransform.h,
+/// GroupTransform.cpp:17-112 @ v2.5.2).
 #[derive(Debug, Clone)]
 pub struct GroupTransform {
     /// `m_metadata`.
@@ -48,7 +48,7 @@ impl GroupTransform {
     /// An empty forward group with empty metadata.
     ///
     /// Port of `GroupTransform::Create` and `GroupTransformImpl::GroupTransformImpl`
-    /// (GroupTransform.cpp:14-28 @ v2.5.2).
+    /// (GroupTransform.cpp:17-20, 30-34 @ v2.5.2).
     #[doc(alias = "Create")]
     pub fn new() -> GroupTransform {
         GroupTransform {
@@ -58,13 +58,13 @@ impl GroupTransform {
         }
     }
 
-    /// Port of `GroupTransformImpl::getDirection` (GroupTransform.cpp:40-43 @ v2.5.2).
+    /// Port of `GroupTransformImpl::getDirection` (GroupTransform.cpp:46-49 @ v2.5.2).
     #[doc(alias = "getDirection")]
     pub fn direction(&self) -> TransformDirection {
         self.dir
     }
 
-    /// Port of `GroupTransformImpl::setDirection` (GroupTransform.cpp:45-48 @ v2.5.2).
+    /// Port of `GroupTransformImpl::setDirection` (GroupTransform.cpp:51-54 @ v2.5.2).
     #[doc(alias = "setDirection")]
     pub fn set_direction(&mut self, dir: TransformDirection) {
         self.dir = dir;
@@ -72,7 +72,7 @@ impl GroupTransform {
 
     /// Checks the group's direction, then each child: the first child's error as it is.
     ///
-    /// Port of `GroupTransformImpl::validate` (GroupTransform.cpp:50-67 @ v2.5.2).
+    /// Port of `GroupTransformImpl::validate` (GroupTransform.cpp:56-73 @ v2.5.2).
     pub fn validate(&self) -> Result<()> {
         if let Err(ex) = validate_direction(self.dir) {
             return Err(Exception::new(format!(
@@ -87,13 +87,13 @@ impl GroupTransform {
         Ok(())
     }
 
-    /// Port of `GroupTransformImpl::getFormatMetadata() const` (GroupTransform.h @ v2.5.2).
+    /// Port of `GroupTransformImpl::getFormatMetadata() const` (GroupTransform.h:40-43 @ v2.5.2).
     #[doc(alias = "getFormatMetadata")]
     pub fn format_metadata(&self) -> &FormatMetadataImpl {
         &self.metadata
     }
 
-    /// Port of `GroupTransformImpl::getFormatMetadata()` (GroupTransform.h @ v2.5.2).
+    /// Port of `GroupTransformImpl::getFormatMetadata()` (GroupTransform.h:35-38 @ v2.5.2).
     #[doc(alias = "getFormatMetadata")]
     pub fn format_metadata_mut(&mut self) -> &mut FormatMetadataImpl {
         &mut self.metadata
@@ -101,20 +101,20 @@ impl GroupTransform {
 
     /// The number of children.
     ///
-    /// Port of `GroupTransformImpl::getNumTransforms` (GroupTransform.cpp:69-72 @ v2.5.2).
+    /// Port of `GroupTransformImpl::getNumTransforms` (GroupTransform.cpp:75-78 @ v2.5.2).
     #[doc(alias = "getNumTransforms")]
     pub fn num_transforms(&self) -> i32 {
         self.transforms.len() as i32
     }
 
-    /// The error of an index past the children (GroupTransform.cpp:76-81 @ v2.5.2).
+    /// The error of an index past the children (GroupTransform.cpp:82-87, 94-99 @ v2.5.2).
     fn invalid_index(index: i32) -> Exception {
         Exception::new(format!("Invalid transform index {index}."))
     }
 
     /// Child `index`: "Invalid transform index <index>." outside the children.
     ///
-    /// Port of `GroupTransformImpl::getTransform() const` (GroupTransform.cpp:74-83 @ v2.5.2).
+    /// Port of `GroupTransformImpl::getTransform() const` (GroupTransform.cpp:80-90 @ v2.5.2).
     #[doc(alias = "getTransform")]
     pub fn transform(&self, index: i32) -> Result<&Transform> {
         if index < 0 || index >= self.transforms.len() as i32 {
@@ -125,7 +125,7 @@ impl GroupTransform {
 
     /// Child `index`, to change: "Invalid transform index <index>." outside the children.
     ///
-    /// Port of `GroupTransformImpl::getTransform()` (GroupTransform.cpp:85-94 @ v2.5.2).
+    /// Port of `GroupTransformImpl::getTransform()` (GroupTransform.cpp:92-102 @ v2.5.2).
     #[doc(alias = "getTransform")]
     pub fn transform_mut(&mut self, index: i32) -> Result<&mut Transform> {
         if index < 0 || index >= self.transforms.len() as i32 {
@@ -136,7 +136,7 @@ impl GroupTransform {
 
     /// Adds `transform` after the children.
     ///
-    /// Port of `GroupTransformImpl::appendTransform` (GroupTransform.cpp:96-99 @ v2.5.2).
+    /// Port of `GroupTransformImpl::appendTransform` (GroupTransform.cpp:104-107 @ v2.5.2).
     #[doc(alias = "appendTransform")]
     pub fn append_transform(&mut self, transform: Transform) {
         self.transforms.push(transform);
@@ -144,7 +144,7 @@ impl GroupTransform {
 
     /// Adds `transform` before the children.
     ///
-    /// Port of `GroupTransformImpl::prependTransform` (GroupTransform.cpp:101-104 @ v2.5.2).
+    /// Port of `GroupTransformImpl::prependTransform` (GroupTransform.cpp:109-112 @ v2.5.2).
     #[doc(alias = "prependTransform")]
     pub fn prepend_transform(&mut self, transform: Transform) {
         self.transforms.insert(0, transform);
@@ -157,7 +157,7 @@ impl GroupTransform {
     /// MatrixTransform's precision, docs/improvements.md, I-73).
     ///
     /// Port of `operator<<(std::ostream &, const GroupTransform &)` (GroupTransform.cpp:
-    /// 156-169 @ v2.5.2).
+    /// 156-168 @ v2.5.2).
     pub(crate) fn write_text(&self, os: &mut OStringStream) {
         os.put_str("<GroupTransform ");
         os.put_str("direction=");
@@ -177,7 +177,7 @@ impl fmt::Display for GroupTransform {
     /// spaces, then `>`.
     ///
     /// Port of `operator<<(std::ostream &, const GroupTransform &)` (GroupTransform.cpp:
-    /// 156-169 @ v2.5.2), on a new stream.
+    /// 156-168 @ v2.5.2), on a new stream.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut os = OStringStream::new(Crt::NATIVE);
         self.write_text(&mut os);
@@ -189,7 +189,7 @@ impl fmt::Display for GroupTransform {
 /// group's: in order forward, in reverse order inverted. The first group's metadata becomes the
 /// ops' metadata.
 ///
-/// Port of `BuildGroupOps` (src/OpenColorIO/transforms/GroupTransform.cpp:168-200 @ v2.5.2).
+/// Port of `BuildGroupOps` (src/OpenColorIO/transforms/GroupTransform.cpp:172-204 @ v2.5.2).
 pub(crate) fn build_group_ops(
     ops: &mut OpVec,
     config: &Config,

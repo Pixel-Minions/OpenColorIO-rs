@@ -89,3 +89,25 @@ fn group_text_and_validation_match_the_wheel() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// A child index outside the group raises upstream's message, as the binding's `__getitem__`
+/// (`GroupTransform::getTransform`) raises it while the spec is built.
+#[test]
+fn an_index_outside_the_group_raises_the_wheels_message() {
+    let indices = [-1, 0, 1, 7, i32::MAX, i32::MIN];
+    let reply = TransformTextRequest {
+        transforms: indices
+            .iter()
+            .map(|i| json!({"class": "GroupTransform", "calls": [["__getitem__", i]]}))
+            .collect(),
+        pairs: Vec::new(),
+    }
+    .run();
+    for (&index, built) in indices.iter().zip(&reply.transforms) {
+        let Built::Raised(raised) = built else {
+            panic!("{index}: the wheel built it: {built:?}");
+        };
+        let port = GroupTransform::new().transform(index).unwrap_err();
+        assert_eq!(port.message(), raised.message, "{index}");
+    }
+}

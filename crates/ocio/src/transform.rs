@@ -89,7 +89,8 @@ pub enum TransformType {
 /// The variants come with their classes (`p1-transforms` and later phases), so the enum is
 /// `#[non_exhaustive]`.
 ///
-/// Port of `Transform` (include/OpenColorIO/OpenColorTransforms.h @ v2.5.2) and its subclasses.
+/// Port of `Transform` (include/OpenColorIO/OpenColorTransforms.h:121-142 @ v2.5.2) and its
+/// subclasses.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum Transform {
@@ -130,7 +131,8 @@ impl From<RangeTransform> for Transform {
 impl Transform {
     /// The transform's class.
     ///
-    /// Port of `Transform::getTransformType` and its overrides (each class's header @ v2.5.2).
+    /// Port of `Transform::getTransformType` (include/OpenColorIO/OpenColorTransforms.h:130 @
+    /// v2.5.2) and its overrides (each class's header).
     #[doc(alias = "getTransformType")]
     pub fn transform_type(&self) -> TransformType {
         match self {
@@ -141,7 +143,8 @@ impl Transform {
         }
     }
 
-    /// Port of `Transform::getDirection` and its overrides.
+    /// Port of `Transform::getDirection` (include/OpenColorIO/OpenColorTransforms.h:126 @ v2.5.2)
+    /// and its overrides.
     #[doc(alias = "getDirection")]
     pub fn direction(&self) -> TransformDirection {
         match self {
@@ -152,7 +155,8 @@ impl Transform {
         }
     }
 
-    /// Port of `Transform::setDirection` and its overrides.
+    /// Port of `Transform::setDirection` (include/OpenColorIO/OpenColorTransforms.h:128 @ v2.5.2)
+    /// and its overrides.
     #[doc(alias = "setDirection")]
     pub fn set_direction(&mut self, dir: TransformDirection) {
         match self {
@@ -165,7 +169,8 @@ impl Transform {
 
     /// Checks the transform, with upstream's message for the first problem.
     ///
-    /// Port of `Transform::validate` and its overrides.
+    /// Port of `Transform::validate` (src/OpenColorIO/Transform.cpp:30-40 @ v2.5.2) and its
+    /// overrides.
     pub fn validate(&self) -> Result<()> {
         match self {
             Transform::Allocation(t) => t.validate(),

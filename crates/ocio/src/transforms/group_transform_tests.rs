@@ -42,12 +42,10 @@ fn children_and_indices() {
         TransformDirection::Inverse
     );
 
+    // The message is the wheel's, checked in tests/transform_oracle.rs.
     for index in [-1, 2] {
-        assert_eq!(
-            group.transform(index).unwrap_err().message(),
-            format!("Invalid transform index {index}.")
-        );
-        assert!(group.transform_mut(index).is_err());
+        let message = group.transform(index).unwrap_err().message().to_string();
+        assert_eq!(group.transform_mut(index).unwrap_err().message(), message);
     }
 
     // A copy owns its children (the owner's decision; upstream shares them, I-11).
@@ -83,4 +81,82 @@ fn build_ops_copies_the_first_group_metadata() {
     .unwrap();
     assert!(ops.is_empty());
     assert_eq!(ops.get_format_metadata().get_num_attributes(), 1);
+}
+
+/// A group with the given metadata attribute and children.
+fn group_with(name: &[u8], dir: TransformDirection, children: Vec<Transform>) -> GroupTransform {
+    let mut group = GroupTransform::new();
+    group.set_direction(dir);
+    group
+        .format_metadata_mut()
+        .add_attribute(Some(b"name"), Some(name))
+        .unwrap();
+    for child in children {
+        group.append_transform(child);
+    }
+    group
+}
+
+/// Nested groups: each group copies its metadata while no op is built yet, so the innermost
+/// group met first before any op wins over the groups around it; a group met after an op
+/// copies nothing. Inverse, the children come in reverse order, so the last group is met
+/// first.
+#[test]
+fn build_ops_copies_the_metadata_of_the_groups_met_before_any_op() {
+    use crate::transforms::matrix_transform::MatrixTransform;
+
+    let config = Config::create_raw();
+    let build = |group: &GroupTransform, dir: TransformDirection| {
+        let mut ops = OpVec::new();
+        crate::transform::build_ops(
+            &mut ops,
+            &config,
+            config.current_context(),
+            &group.clone().into(),
+            dir,
+        )
+        .unwrap();
+        assert_eq!(ops.len(), 2);
+        ops.get_format_metadata().clone()
+    };
+    let matrix = || Transform::from(MatrixTransform::new());
+    let first = group_with(
+        b"first",
+        TransformDirection::Forward,
+        vec![group_with(b"innermost", TransformDirection::Forward, vec![matrix()]).into()],
+    );
+    let last = group_with(b"last", TransformDirection::Forward, vec![matrix()]);
+    let outer = group_with(
+        b"outer",
+        TransformDirection::Forward,
+        vec![first.clone().into(), last.clone().into()],
+    );
+
+    let innermost = match first.transform(0).unwrap() {
+        Transform::Group(g) => g.format_metadata().clone(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(
+        build(&outer, TransformDirection::Forward).get_attribute_value(0),
+        innermost.get_attribute_value(0)
+    );
+    assert_eq!(
+        build(&outer, TransformDirection::Inverse).get_attribute_value(0),
+        last.format_metadata().get_attribute_value(0)
+    );
+
+    // An op before the groups: none of them copies, the outer group's own included.
+    let mut ops = OpVec::new();
+    for transform in [matrix(), outer.into()] {
+        crate::transform::build_ops(
+            &mut ops,
+            &config,
+            config.current_context(),
+            &transform,
+            TransformDirection::Forward,
+        )
+        .unwrap();
+    }
+    assert_eq!(ops.len(), 3);
+    assert_eq!(ops.get_format_metadata().get_num_attributes(), 0);
 }

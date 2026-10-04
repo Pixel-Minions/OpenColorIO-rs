@@ -7,15 +7,15 @@
 
 /// The context in which a config resolves file paths and variables.
 ///
-/// Port of `Context` (include/OpenColorIO/OpenColorIO.h, src/OpenColorIO/Context.cpp @ v2.5.2),
-/// so far without state.
+/// Port of `Context` (include/OpenColorIO/OpenColorIO.h:3865, src/OpenColorIO/Context.cpp @
+/// v2.5.2), so far without state.
 #[derive(Debug, Clone, Default)]
 pub struct Context {}
 
 impl Context {
     /// An empty context.
     ///
-    /// Port of `Context::Create`.
+    /// Port of `Context::Create` (src/OpenColorIO/Context.cpp:133-136 @ v2.5.2).
     #[doc(alias = "Create")]
     pub fn new() -> Context {
         Context {}
