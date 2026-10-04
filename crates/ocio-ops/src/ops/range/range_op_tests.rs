@@ -3,8 +3,8 @@
 
 //! Port of `tests/cpu/ops/range/RangeOp_tests.cpp` @ v2.5.2: the tests of the op. Its tests of
 //! `CreateRangeTransform` and `BuildRangeOp` (`create_transform`, and
-//! `RangeTransform.no_clamp_converts_to_matrix`) need the `RangeTransform`, and come with the
-//! transforms (WP 1.8).
+//! `RangeTransform.no_clamp_converts_to_matrix`) need the `RangeTransform`: they are in
+//! crates/ocio/src/transforms/range_transform_tests.rs.
 
 use ocio_testkit::upstream::{check_close, check_throw_what};
 

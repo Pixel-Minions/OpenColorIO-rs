@@ -4,7 +4,8 @@
 //! The Range op: part of a port of `src/OpenColorIO/ops/range/RangeOp.h` and `RangeOp.cpp` @
 //! v2.5.2, what the CPU engine needs: the op's behaviors, and the functions that create ops,
 //! [`create_range_op`] and [`create_range_op_from_values`]. `BuildRangeOp` and
-//! `CreateRangeTransform` work on the `RangeTransform`, and come with the transforms (WP 1.8);
+//! `CreateRangeTransform` work on the `RangeTransform`, in `ocio`
+//! (crates/ocio/src/transforms/range_transform.rs);
 //! `extractGpuShaderInfo` comes with the GPU writer (1.3r3).
 //!
 //! As for every family, the op is its data, [`OpData::Range`]: [`Op`]'s methods match on it

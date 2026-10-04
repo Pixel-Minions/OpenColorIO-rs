@@ -19,6 +19,7 @@ pub use ocio_ops::open_color_types::{BitDepth, OptimizationFlags, TransformDirec
 pub use transform::{Transform, TransformType};
 pub use transforms::group_transform::GroupTransform;
 pub use transforms::matrix_transform::MatrixTransform;
+pub use transforms::range_transform::{RangeStyle, RangeTransform};
 
 /// The OpenColorIO version this port matches, as `OCIO::GetVersion()` reports it.
 pub const fn version() -> &'static str {

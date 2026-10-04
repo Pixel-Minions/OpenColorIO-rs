@@ -18,7 +18,7 @@
 use std::collections::BTreeMap;
 
 use ocio::transform::{build_ops, create_transform};
-use ocio::{Config, FormatMetadata, GroupTransform, Transform, TransformDirection};
+use ocio::{Config, FormatMetadata, GroupTransform, RangeStyle, Transform, TransformDirection};
 use ocio_ops::op::OpVec;
 use ocio_ops::open_color_types::BitDepth;
 use ocio_testkit::Oracle;
@@ -203,6 +203,7 @@ pub(crate) fn compare_text(cases: &[Case], pairs: &[(usize, usize)], reply: &Tra
 fn port_equals(a: &Transform, b: &Transform) -> Option<bool> {
     match (a, b) {
         (Transform::Matrix(a), Transform::Matrix(b)) => Some(a.equals(b)),
+        (Transform::Range(a), Transform::Range(b)) => Some(a.equals(b)),
         _ => None,
     }
 }
@@ -384,6 +385,34 @@ pub(crate) fn dump_transform(transform: &Transform) -> (String, BTreeMap<String,
             put("getMatrix", dumped_f64s(&t.matrix()));
             put("getOffset", dumped_f64s(&t.offset()));
             "MatrixTransform"
+        }
+        Transform::Range(t) => {
+            put("getTransformType", dumped_enum("TRANSFORM_TYPE_RANGE"));
+            put(
+                "getFileInputBitDepth",
+                dumped_enum(bit_depth_name(t.file_input_bit_depth())),
+            );
+            put(
+                "getFileOutputBitDepth",
+                dumped_enum(bit_depth_name(t.file_output_bit_depth())),
+            );
+            put("getFormatMetadata", dump_metadata(t.format_metadata()));
+            put(
+                "getStyle",
+                dumped_enum(match t.style() {
+                    RangeStyle::Clamp => "RANGE_CLAMP",
+                    RangeStyle::NoClamp => "RANGE_NO_CLAMP",
+                }),
+            );
+            put("getMinInValue", Dumped::F64(t.min_in_value()));
+            put("getMaxInValue", Dumped::F64(t.max_in_value()));
+            put("getMinOutValue", Dumped::F64(t.min_out_value()));
+            put("getMaxOutValue", Dumped::F64(t.max_out_value()));
+            put("hasMinInValue", Dumped::Bool(t.has_min_in_value()));
+            put("hasMaxInValue", Dumped::Bool(t.has_max_in_value()));
+            put("hasMinOutValue", Dumped::Bool(t.has_min_out_value()));
+            put("hasMaxOutValue", Dumped::Bool(t.has_max_out_value()));
+            "RangeTransform"
         }
         other => panic!("no dump for {other:?}"),
     };

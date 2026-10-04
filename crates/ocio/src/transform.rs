@@ -27,6 +27,7 @@ use crate::transforms::group_transform::{GroupTransform, build_group_ops};
 use crate::transforms::matrix_transform::{
     MatrixTransform, build_matrix_op, create_matrix_transform,
 };
+use crate::transforms::range_transform::{RangeTransform, build_range_op, create_range_transform};
 
 /// The class of a transform.
 ///
@@ -95,6 +96,8 @@ pub enum Transform {
     Group(GroupTransform),
     /// `MatrixTransform`.
     Matrix(MatrixTransform),
+    /// `RangeTransform`.
+    Range(RangeTransform),
 }
 
 impl From<GroupTransform> for Transform {
@@ -109,6 +112,12 @@ impl From<MatrixTransform> for Transform {
     }
 }
 
+impl From<RangeTransform> for Transform {
+    fn from(t: RangeTransform) -> Transform {
+        Transform::Range(t)
+    }
+}
+
 impl Transform {
     /// The transform's class.
     ///
@@ -118,6 +127,7 @@ impl Transform {
         match self {
             Transform::Group(_) => TransformType::Group,
             Transform::Matrix(_) => TransformType::Matrix,
+            Transform::Range(_) => TransformType::Range,
         }
     }
 
@@ -127,6 +137,7 @@ impl Transform {
         match self {
             Transform::Group(t) => t.direction(),
             Transform::Matrix(t) => t.direction(),
+            Transform::Range(t) => t.direction(),
         }
     }
 
@@ -136,6 +147,7 @@ impl Transform {
         match self {
             Transform::Group(t) => t.set_direction(dir),
             Transform::Matrix(t) => t.set_direction(dir),
+            Transform::Range(t) => t.set_direction(dir),
         }
     }
 
@@ -146,6 +158,7 @@ impl Transform {
         match self {
             Transform::Group(t) => t.validate(),
             Transform::Matrix(t) => t.validate(),
+            Transform::Range(t) => t.validate(),
         }
     }
 }
@@ -189,6 +202,7 @@ impl Transform {
         match self {
             Transform::Group(t) => t.write_text(os),
             Transform::Matrix(t) => t.write_text(os),
+            Transform::Range(t) => t.write_text(os),
         }
     }
 }
@@ -213,6 +227,7 @@ pub fn build_ops(
             build_group_ops(ops, config, context, group_transform, dir)
         }
         Transform::Matrix(matrix_transform) => build_matrix_op(ops, matrix_transform, dir),
+        Transform::Range(range_transform) => build_range_op(ops, range_transform, dir),
     }
 }
 
@@ -241,11 +256,10 @@ pub fn create_transform(group: &mut GroupTransform, op: &Op) -> Result<()> {
     };
     match &**op.data() {
         OpData::Matrix(_) => create_matrix_transform(group, op),
-        data @ (OpData::Cdl(_)
-        | OpData::Gamma(_)
-        | OpData::Log(_)
-        | OpData::Range(_)
-        | OpData::Exponent(_)) => not_ported(data.get_type()),
+        OpData::Range(_) => create_range_transform(group, op),
+        data @ (OpData::Cdl(_) | OpData::Gamma(_) | OpData::Log(_) | OpData::Exponent(_)) => {
+            not_ported(data.get_type())
+        }
         // No op holds a reference (the file readers replace it with the file's ops), and the
         // no-op types returned above.
         OpData::Reference(_) | OpData::NoOp(_) => {
