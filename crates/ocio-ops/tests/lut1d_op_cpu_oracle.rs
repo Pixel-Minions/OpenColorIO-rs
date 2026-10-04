@@ -21,7 +21,7 @@ mod common;
 
 use core::ffi::c_ulong;
 
-use common::image::{depth_name, port_depth, port_image, source_bytes};
+use common::image::{depth_name, port_depth, port_image};
 use ocio_ops::cpu_processor::CpuProcessor;
 use ocio_ops::exception::Result;
 use ocio_ops::image_desc::Bytes;
@@ -240,14 +240,22 @@ fn every_code_matches_the_wheel() {
 /// `applyRGB` and `applyRGBA` with 8-, 16-bit and half input to F32, through `apply(src, dst)`
 /// over one pixel's 16 bytes: the lookup reads the pixel's first bytes as codes and writes four
 /// floats over them, in the order each wheel compiled (module docs).
+///
+/// The pixels have no zero channel, so that every code the lookup reads, before or after the
+/// store of the float before it, is a byte of a non-zero float: the order of the reads and
+/// stores shows in the result, at 8 bits on red too.
 #[test]
 fn the_in_place_lookup_follows_the_wheel() {
     let mut cases = Vec::new();
     for input in [Depth::Uint8, Depth::Uint16, Depth::F16] {
         for curve in [Some(mixed as fn(f32) -> [f32; 3]), Some(extreme)] {
-            for seed in 0..8u64 {
+            for seed in 0..8u16 {
                 // The RGBA pixel's bytes, and the RGB pixel's {r, g, b, 0.0f}.
-                let rgba = source_bytes(port_depth(Depth::F32), 16, seed * 7 + 1);
+                let s = f32::from(seed);
+                let rgba: Vec<u8> = [0.13 + 0.071 * s, 0.61 - 0.043 * s, 0.37 + 0.05 * s, 0.9]
+                    .iter()
+                    .flat_map(|v: &f32| v.to_ne_bytes())
+                    .collect();
                 let mut rgb = rgba[..12].to_vec();
                 rgb.extend_from_slice(&0.0f32.to_ne_bytes());
                 cases.push((Lut::for_depth(input, curve), input, [rgba, rgb]));

@@ -128,3 +128,76 @@ fn in_place_codes_past_the_table_are_errors() {
         cpu.apply_rgba(&mut zero).unwrap();
     }
 }
+
+/// The CPU processor of a forward 10- or 12-bit lookup domain (or, with `zero`, the same LUT
+/// with every entry 0.0), to F32, without optimization.
+fn lookup_processor(depth: BitDepth, zero: bool) -> crate::cpu_processor::CpuProcessor {
+    use crate::cpu_processor::CpuProcessor;
+    use crate::op::OpVec;
+    use crate::open_color_types::OptimizationFlags;
+    use crate::ops::lut1d::lut1d_op::create_lut1d_op;
+
+    let mut lut = Lut1DOpData::make_lookup_domain(depth).unwrap();
+    if zero {
+        lut.get_array_mut().get_values_mut().fill(0.0);
+    }
+    let mut ops = OpVec::new();
+    create_lut1d_op(&mut ops, lut, TransformDirection::Forward);
+    ops.finalize().unwrap();
+    CpuProcessor::new(&ops, depth, BitDepth::F32, OptimizationFlags::NONE).unwrap()
+}
+
+/// U-1 through the image paths (docs/improvements.md): a 1x1 10-bit image whose green code is
+/// past the table, RGBA (the scanline helper's packed path) and RGB (through the packer), to
+/// F32, is U-1's error, not a panic.
+#[test]
+fn image_codes_past_the_table_are_errors() {
+    use crate::image_desc::{AUTO_STRIDE, PackedImageDesc};
+
+    let cpu = lookup_processor(BitDepth::Uint10, false);
+    for channels in [4usize, 3] {
+        let mut src = [100u16, 2000, 300, 1023];
+        let src = PackedImageDesc::with_strides(
+            &mut src[..channels],
+            1,
+            1,
+            channels,
+            BitDepth::Uint10,
+            AUTO_STRIDE,
+            AUTO_STRIDE,
+            AUTO_STRIDE,
+        )
+        .unwrap();
+        let mut dst = [0.0f32; 4];
+        let mut dst = PackedImageDesc::new(&mut dst[..channels], 1, 1, channels).unwrap();
+        let e = cpu.apply_src_dst(&src, &mut dst).unwrap_err();
+        assert_eq!(
+            e.message(),
+            "Lut1D: a 10ui value above 1023 can't be looked up: upstream reads past the 1D LUT's \
+             1024 entries.",
+            "{channels} channels"
+        );
+    }
+}
+
+/// In place, the first code read is red's, the pixel's first 16 bits on both wheels' orders:
+/// with a LUT of zeros, the floats stored read back as code 0, so a red code of exactly the
+/// maximum is looked up, and one above it is U-1's error.
+#[test]
+fn in_place_codes_at_the_table_boundary() {
+    for (depth, max) in [(BitDepth::Uint10, 1023u32), (BitDepth::Uint12, 4095)] {
+        let cpu = lookup_processor(depth, true);
+        let mut at_max = [f32::from_bits(max), 0.0, 0.0, 0.0];
+        cpu.apply_rgba(&mut at_max).unwrap();
+        let mut rgb = [f32::from_bits(max), 0.0, 0.0];
+        cpu.apply_rgb(&mut rgb).unwrap();
+
+        let past = [f32::from_bits(max + 1), 0.0, 0.0, 0.0];
+        let mut pixel = past;
+        let e = cpu.apply_rgba(&mut pixel).unwrap_err();
+        assert!(e.message().starts_with("Lut1D: a "), "{}", e.message());
+        assert_eq!(pixel.map(f32::to_bits), past.map(f32::to_bits));
+        let mut rgb = [past[0], 0.0, 0.0];
+        cpu.apply_rgb(&mut rgb).unwrap_err();
+    }
+}
