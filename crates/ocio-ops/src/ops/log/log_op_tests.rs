@@ -2,8 +2,8 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Port of `tests/cpu/ops/log/LogOp_tests.cpp` @ v2.5.2: the tests of the op. Its test of
-//! `CreateLogTransform` (`create_transform`) needs the Log transforms, and comes with them
-//! (WP 1.8).
+//! `CreateLogTransform` (`create_transform`) needs the Log transforms: it is in
+//! crates/ocio/src/transforms/log_transform_tests.rs.
 //!
 //! The wheel is built with `OCIO_USE_SSE2`, so the ports keep the `#if OCIO_USE_SSE2` branches.
 

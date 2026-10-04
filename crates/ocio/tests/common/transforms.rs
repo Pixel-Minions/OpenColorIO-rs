@@ -222,6 +222,9 @@ fn port_equals(a: &Transform, b: &Transform) -> Option<bool> {
     match (a, b) {
         (Transform::Matrix(a), Transform::Matrix(b)) => Some(a.equals(b)),
         (Transform::Range(a), Transform::Range(b)) => Some(a.equals(b)),
+        (Transform::Log(a), Transform::Log(b)) => Some(a.equals(b)),
+        (Transform::LogAffine(a), Transform::LogAffine(b)) => Some(a.equals(b)),
+        (Transform::LogCamera(a), Transform::LogCamera(b)) => Some(a.equals(b)),
         (Transform::Exponent(a), Transform::Exponent(b)) => Some(a.equals(b)),
         (Transform::ExponentWithLinear(a), Transform::ExponentWithLinear(b)) => Some(a.equals(b)),
         _ => None,
@@ -439,6 +442,68 @@ pub(crate) fn dump_transform(transform: &Transform) -> (String, BTreeMap<String,
             put("getGamma", dumped_f64s(&t.gamma()));
             put("getOffset", dumped_f64s(&t.offset()));
             "ExponentWithLinearTransform"
+        }
+        Transform::Log(t) => {
+            put("getTransformType", dumped_enum("TRANSFORM_TYPE_LOG"));
+            put("getFormatMetadata", dump_metadata(t.format_metadata()));
+            put("getBase", Dumped::F64(t.base()));
+            "LogTransform"
+        }
+        Transform::LogAffine(t) => {
+            put("getTransformType", dumped_enum("TRANSFORM_TYPE_LOG_AFFINE"));
+            put("getFormatMetadata", dump_metadata(t.format_metadata()));
+            put("getBase", Dumped::F64(t.base()));
+            put(
+                "getLogSideSlopeValue",
+                dumped_f64s(&t.log_side_slope_value()),
+            );
+            put(
+                "getLogSideOffsetValue",
+                dumped_f64s(&t.log_side_offset_value()),
+            );
+            put(
+                "getLinSideSlopeValue",
+                dumped_f64s(&t.lin_side_slope_value()),
+            );
+            put(
+                "getLinSideOffsetValue",
+                dumped_f64s(&t.lin_side_offset_value()),
+            );
+            "LogAffineTransform"
+        }
+        Transform::LogCamera(t) => {
+            put("getTransformType", dumped_enum("TRANSFORM_TYPE_LOG_CAMERA"));
+            put("getFormatMetadata", dump_metadata(t.format_metadata()));
+            put("getBase", Dumped::F64(t.base()));
+            put(
+                "getLogSideSlopeValue",
+                dumped_f64s(&t.log_side_slope_value()),
+            );
+            put(
+                "getLogSideOffsetValue",
+                dumped_f64s(&t.log_side_offset_value()),
+            );
+            put(
+                "getLinSideSlopeValue",
+                dumped_f64s(&t.lin_side_slope_value()),
+            );
+            put(
+                "getLinSideOffsetValue",
+                dumped_f64s(&t.lin_side_offset_value()),
+            );
+            put(
+                "getLinSideBreakValue",
+                dumped_f64s(&t.lin_side_break_value()),
+            );
+            // The binding returns three quiet NaNs where the slope isn't set
+            // (src/bindings/python/transforms/PyLogCameraTransform.cpp:156-166 @ v2.5.2).
+            let slope = t.linear_slope_value();
+            put(
+                "getLinearSlopeValue",
+                dumped_f64s(&slope.unwrap_or([f64::NAN; 3])),
+            );
+            put("isLinearSlopeValueSet", Dumped::Bool(slope.is_some()));
+            "LogCameraTransform"
         }
         Transform::Range(t) => {
             put("getTransformType", dumped_enum("TRANSFORM_TYPE_RANGE"));

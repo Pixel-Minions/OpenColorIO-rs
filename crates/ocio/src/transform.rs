@@ -31,6 +31,9 @@ use crate::transforms::exponent_with_linear_transform::{
     ExponentWithLinearTransform, build_exponent_with_linear_op, create_gamma_transform,
 };
 use crate::transforms::group_transform::{GroupTransform, build_group_ops};
+use crate::transforms::log_affine_transform::LogAffineTransform;
+use crate::transforms::log_camera_transform::LogCameraTransform;
+use crate::transforms::log_transform::{LogTransform, build_log_op, create_log_transform};
 use crate::transforms::matrix_transform::{
     MatrixTransform, build_matrix_op, create_matrix_transform,
 };
@@ -108,6 +111,12 @@ pub enum Transform {
     ExponentWithLinear(ExponentWithLinearTransform),
     /// `GroupTransform`.
     Group(GroupTransform),
+    /// `LogAffineTransform`.
+    LogAffine(LogAffineTransform),
+    /// `LogCameraTransform`.
+    LogCamera(LogCameraTransform),
+    /// `LogTransform`.
+    Log(LogTransform),
     /// `MatrixTransform`.
     Matrix(MatrixTransform),
     /// `RangeTransform`.
@@ -138,6 +147,24 @@ impl From<GroupTransform> for Transform {
     }
 }
 
+impl From<LogAffineTransform> for Transform {
+    fn from(t: LogAffineTransform) -> Transform {
+        Transform::LogAffine(t)
+    }
+}
+
+impl From<LogCameraTransform> for Transform {
+    fn from(t: LogCameraTransform) -> Transform {
+        Transform::LogCamera(t)
+    }
+}
+
+impl From<LogTransform> for Transform {
+    fn from(t: LogTransform) -> Transform {
+        Transform::Log(t)
+    }
+}
+
 impl From<MatrixTransform> for Transform {
     fn from(t: MatrixTransform) -> Transform {
         Transform::Matrix(t)
@@ -162,6 +189,9 @@ impl Transform {
             Transform::Exponent(_) => TransformType::Exponent,
             Transform::ExponentWithLinear(_) => TransformType::ExponentWithLinear,
             Transform::Group(_) => TransformType::Group,
+            Transform::LogAffine(_) => TransformType::LogAffine,
+            Transform::LogCamera(_) => TransformType::LogCamera,
+            Transform::Log(_) => TransformType::Log,
             Transform::Matrix(_) => TransformType::Matrix,
             Transform::Range(_) => TransformType::Range,
         }
@@ -176,6 +206,9 @@ impl Transform {
             Transform::Exponent(t) => t.direction(),
             Transform::ExponentWithLinear(t) => t.direction(),
             Transform::Group(t) => t.direction(),
+            Transform::LogAffine(t) => t.direction(),
+            Transform::LogCamera(t) => t.direction(),
+            Transform::Log(t) => t.direction(),
             Transform::Matrix(t) => t.direction(),
             Transform::Range(t) => t.direction(),
         }
@@ -190,6 +223,9 @@ impl Transform {
             Transform::Exponent(t) => t.set_direction(dir),
             Transform::ExponentWithLinear(t) => t.set_direction(dir),
             Transform::Group(t) => t.set_direction(dir),
+            Transform::LogAffine(t) => t.set_direction(dir),
+            Transform::LogCamera(t) => t.set_direction(dir),
+            Transform::Log(t) => t.set_direction(dir),
             Transform::Matrix(t) => t.set_direction(dir),
             Transform::Range(t) => t.set_direction(dir),
         }
@@ -205,6 +241,9 @@ impl Transform {
             Transform::Exponent(t) => t.validate(),
             Transform::ExponentWithLinear(t) => t.validate(),
             Transform::Group(t) => t.validate(),
+            Transform::LogAffine(t) => t.validate(),
+            Transform::LogCamera(t) => t.validate(),
+            Transform::Log(t) => t.validate(),
             Transform::Matrix(t) => t.validate(),
             Transform::Range(t) => t.validate(),
         }
@@ -252,6 +291,9 @@ impl Transform {
             Transform::Exponent(t) => t.write_text(os),
             Transform::ExponentWithLinear(t) => t.write_text(os),
             Transform::Group(t) => t.write_text(os),
+            Transform::LogAffine(t) => t.write_text(os),
+            Transform::LogCamera(t) => t.write_text(os),
+            Transform::Log(t) => t.write_text(os),
             Transform::Matrix(t) => t.write_text(os),
             Transform::Range(t) => t.write_text(os),
         }
@@ -286,6 +328,9 @@ pub fn build_ops(
         Transform::Group(group_transform) => {
             build_group_ops(ops, config, context, group_transform, dir)
         }
+        Transform::LogAffine(log_transform) => build_log_op(ops, log_transform.data(), dir),
+        Transform::LogCamera(log_transform) => build_log_op(ops, log_transform.data(), dir),
+        Transform::Log(log_transform) => build_log_op(ops, log_transform.data(), dir),
         Transform::Matrix(matrix_transform) => build_matrix_op(ops, matrix_transform, dir),
         Transform::Range(range_transform) => build_range_op(ops, range_transform, dir),
     }
@@ -319,7 +364,8 @@ pub fn create_transform(group: &mut GroupTransform, op: &Op) -> Result<()> {
         OpData::Gamma(_) => create_gamma_transform(group, op),
         OpData::Matrix(_) => create_matrix_transform(group, op),
         OpData::Range(_) => create_range_transform(group, op),
-        data @ (OpData::Cdl(_) | OpData::Log(_)) => not_ported(data.get_type()),
+        OpData::Log(_) => create_log_transform(group, op),
+        data @ OpData::Cdl(_) => not_ported(data.get_type()),
         // No op holds a reference (the file readers replace it with the file's ops), and the
         // no-op types returned above.
         OpData::Reference(_) | OpData::NoOp(_) => {
