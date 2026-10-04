@@ -2,8 +2,8 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Port of `tests/cpu/ops/cdl/CDLOp_tests.cpp` @ v2.5.2: the tests of the op. Its test of
-//! `CreateCDLTransform` (`create_transform`) needs the `CDLTransform`, and comes with the
-//! transforms (WP 1.8).
+//! `CreateCDLTransform` (`create_transform`) needs the `CDLTransform`: it is in
+//! crates/ocio/src/transforms/cdl_transform_tests.rs.
 //!
 //! The wheel is built with `OCIO_USE_SSE2`, so the apply tests keep the `#if OCIO_USE_SSE2`
 //! error thresholds; they render with `getCPUOp(true)`.

@@ -24,6 +24,7 @@ use ocio_ops::open_color_types::TransformDirection;
 use crate::config::Config;
 use crate::context::Context;
 use crate::transforms::allocation_transform::{AllocationTransform, build_allocation_op};
+use crate::transforms::cdl_transform::{CdlTransform, build_cdl_op, create_cdl_transform};
 use crate::transforms::exponent_transform::{
     ExponentTransform, build_exponent_op, create_exponent_transform,
 };
@@ -105,6 +106,8 @@ pub enum TransformType {
 pub enum Transform {
     /// `AllocationTransform`.
     Allocation(AllocationTransform),
+    /// `CDLTransform`.
+    Cdl(CdlTransform),
     /// `ExponentTransform`.
     Exponent(ExponentTransform),
     /// `ExponentWithLinearTransform`.
@@ -126,6 +129,12 @@ pub enum Transform {
 impl From<AllocationTransform> for Transform {
     fn from(t: AllocationTransform) -> Transform {
         Transform::Allocation(t)
+    }
+}
+
+impl From<CdlTransform> for Transform {
+    fn from(t: CdlTransform) -> Transform {
+        Transform::Cdl(t)
     }
 }
 
@@ -186,6 +195,7 @@ impl Transform {
     pub fn transform_type(&self) -> TransformType {
         match self {
             Transform::Allocation(_) => TransformType::Allocation,
+            Transform::Cdl(_) => TransformType::Cdl,
             Transform::Exponent(_) => TransformType::Exponent,
             Transform::ExponentWithLinear(_) => TransformType::ExponentWithLinear,
             Transform::Group(_) => TransformType::Group,
@@ -203,6 +213,7 @@ impl Transform {
     pub fn direction(&self) -> TransformDirection {
         match self {
             Transform::Allocation(t) => t.direction(),
+            Transform::Cdl(t) => t.direction(),
             Transform::Exponent(t) => t.direction(),
             Transform::ExponentWithLinear(t) => t.direction(),
             Transform::Group(t) => t.direction(),
@@ -220,6 +231,7 @@ impl Transform {
     pub fn set_direction(&mut self, dir: TransformDirection) {
         match self {
             Transform::Allocation(t) => t.set_direction(dir),
+            Transform::Cdl(t) => t.set_direction(dir),
             Transform::Exponent(t) => t.set_direction(dir),
             Transform::ExponentWithLinear(t) => t.set_direction(dir),
             Transform::Group(t) => t.set_direction(dir),
@@ -238,6 +250,7 @@ impl Transform {
     pub fn validate(&self) -> Result<()> {
         match self {
             Transform::Allocation(t) => t.validate(),
+            Transform::Cdl(t) => t.validate(),
             Transform::Exponent(t) => t.validate(),
             Transform::ExponentWithLinear(t) => t.validate(),
             Transform::Group(t) => t.validate(),
@@ -288,6 +301,7 @@ impl Transform {
     pub(crate) fn write_text(&self, os: &mut OStringStream) {
         match self {
             Transform::Allocation(t) => t.write_text(os),
+            Transform::Cdl(t) => t.write_text(os),
             Transform::Exponent(t) => t.write_text(os),
             Transform::ExponentWithLinear(t) => t.write_text(os),
             Transform::Group(t) => t.write_text(os),
@@ -319,6 +333,7 @@ pub fn build_ops(
         Transform::Allocation(allocation_transform) => {
             build_allocation_op(ops, allocation_transform, dir)
         }
+        Transform::Cdl(cdl_transform) => build_cdl_op(ops, config, cdl_transform, dir),
         Transform::Exponent(exponent_transform) => {
             build_exponent_op(ops, config, exponent_transform, dir)
         }
@@ -365,7 +380,8 @@ pub fn create_transform(group: &mut GroupTransform, op: &Op) -> Result<()> {
         OpData::Matrix(_) => create_matrix_transform(group, op),
         OpData::Range(_) => create_range_transform(group, op),
         OpData::Log(_) => create_log_transform(group, op),
-        data @ (OpData::Cdl(_) | OpData::Lut1D(_)) => not_ported(data.get_type()),
+        OpData::Cdl(_) => create_cdl_transform(group, op),
+        data @ OpData::Lut1D(_) => not_ported(data.get_type()),
         // No op holds a reference (the file readers replace it with the file's ops), and the
         // no-op types returned above.
         OpData::Reference(_) | OpData::NoOp(_) => {

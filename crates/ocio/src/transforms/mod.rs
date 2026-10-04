@@ -5,6 +5,7 @@
 //! op glue (`Build<Class>Op`, `Create<Class>Transform`; docs/architecture.md).
 
 pub mod allocation_transform;
+pub mod cdl_transform;
 pub mod exponent_transform;
 pub mod exponent_with_linear_transform;
 pub mod group_transform;
