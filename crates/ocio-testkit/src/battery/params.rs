@@ -6,7 +6,7 @@
 //! A family describes its transform's numeric parameters as [`Slot`]s (name, precision, and
 //! the channels each one applies to) by implementing [`Params`]. From that:
 //! - [`Case`]s know which channels carry a NaN or infinite parameter, and compare the channels
-//!   of NaN parameters under waiver W0002 and everything else bit for bit ([`Case::compare`];
+//!   of NaN parameters under waiver W0002 and everything else bit for bit ([`Case::compare_pixels`];
 //!   [`Case::compare_baked_luts`] for the 1D LUTs the optimizer bakes from such a case and the
 //!   cache ID that hashes them; the only places that apply W0002);
 //! - [`mutations`] generates, from a typical case, one case per slot and value: extreme finite
@@ -310,7 +310,7 @@ impl<P: Params> Case<P> {
     /// sweep through the API (`crates/ocio/tests/api_formats_oracle.rs`), which decodes its
     /// images into RGBA `f32` (no bit of a value lost) and passes whether the pixels were
     /// rendered with fast math in `combo`.
-    pub fn compare(
+    pub fn compare_pixels(
         &self,
         combo: &Combo,
         inputs: &[f32],
@@ -339,10 +339,14 @@ impl<P: Params> Case<P> {
     /// Equal cache IDs are exact. Otherwise W0002 as the owner extended it on 2026-10-04
     /// (`waivers.toml`): the bake renders the ops without fast math (`EvalTransform`,
     /// src/OpenColorIO/ops/OpTools.cpp, through `Op::apply`, Op.h:232-241 @ v2.5.2), so where
-    /// W0002 applies to this case in `combo` with fast math off, the cache IDs may differ in
-    /// the hashes of the LUTs (`<Lut1D <hash> `) and nowhere else, and only if the LUTs differ
-    /// in nothing but the sign and payload bits of NaN entries in the channels of NaN
-    /// parameters, in one entry at least. Anything else is a mismatch.
+    /// W0002 applies to this case in `combo` with fast math off:
+    /// - both IDs hold one `<Lut1D <hash> ` per LUT (a hash of 32 hexadecimal digits, as
+    ///   `Lut1DOpData::getCacheID` writes it), and are equal but for those hashes;
+    /// - LUT `k`'s hash may differ only if LUT `k`'s entries differ, and only in the sign and
+    ///   payload bits of NaN entries in the channels of NaN parameters; a LUT whose hash is
+    ///   equal must be bit-identical.
+    ///
+    /// Anything else is a mismatch.
     pub fn compare_baked_luts(
         &self,
         combo: &Combo,
@@ -354,27 +358,39 @@ impl<P: Params> Case<P> {
         if expected == actual {
             return Comparison::Exact;
         }
+        let ids = || format!("\n  wheel {expected}\n  port  {actual}");
         let combo = Combo {
             fast_math: false,
             ..*combo
         };
         if !self.w0002_applies(&combo) {
             return Comparison::Mismatch(format!(
-                "cache IDs differ where W0002 doesn't apply:\n  wheel {expected}\n  port  {actual}"
+                "cache IDs differ where W0002 doesn't apply:{}",
+                ids()
             ));
         }
-        if without_lut_hashes(expected) != without_lut_hashes(actual) {
+        let (Some((expected_rest, expected_hashes)), Some((actual_rest, actual_hashes))) =
+            (lut_hashes(expected), lut_hashes(actual))
+        else {
             return Comparison::Mismatch(format!(
-                "cache IDs differ beyond their 1D LUTs' hashes:\n  wheel {expected}\n  port  \
-                 {actual}"
+                "a cache ID has a 1D LUT without a hash of 32 hexadecimal digits:{}",
+                ids()
+            ));
+        };
+        if expected_rest != actual_rest {
+            return Comparison::Mismatch(format!(
+                "cache IDs differ beyond their 1D LUTs' hashes:{}",
+                ids()
             ));
         }
-        if expected_luts.len() != actual_luts.len() || expected_luts.is_empty() {
+        if expected_luts.len() != actual_luts.len() || expected_hashes.len() != expected_luts.len()
+        {
             return Comparison::Mismatch(format!(
-                "the optimized processors have {} and {} 1D LUTs (wheel, port), whose hashes \
-                 differ in the cache IDs:\n  wheel {expected}\n  port  {actual}",
+                "{} and {} 1D LUTs (wheel, port) for {} hashes in the cache IDs:{}",
                 expected_luts.len(),
-                actual_luts.len()
+                actual_luts.len(),
+                expected_hashes.len(),
+                ids()
             ));
         }
         let mut waived = 0;
@@ -394,36 +410,47 @@ impl<P: Params> Case<P> {
             };
             let (e, a) = (rgba(e), rgba(a));
             let entries = vec![0.0; e.len()];
-            match pixels_report_except_nan_bits(w0002(), &self.nan, &entries, &e, &a) {
-                Ok(n) => waived += n,
+            let n = match pixels_report_except_nan_bits(w0002(), &self.nan, &entries, &e, &a) {
+                Ok(n) => n,
                 Err(report) => return Comparison::Mismatch(format!("1D LUT {k}: {report}")),
+            };
+            let hash_differs = expected_hashes[k] != actual_hashes[k];
+            if hash_differs != (n > 0) {
+                return Comparison::Mismatch(format!(
+                    "1D LUT {k}: its hash {} and {n} of its entries differ in NaN bits:{}",
+                    if hash_differs { "differs" } else { "is equal" },
+                    ids()
+                ));
             }
-        }
-        if waived == 0 {
-            return Comparison::Mismatch(format!(
-                "cache IDs differ, but the 1D LUTs are identical:\n  wheel {expected}\n  port  \
-                 {actual}"
-            ));
+            waived += n;
         }
         Comparison::W0002 { waived }
     }
 }
 
-/// A cache ID with the hash of each 1D LUT (`<Lut1D ` and 32 hexadecimal digits, as
-/// `Lut1DOpData::getCacheID` writes it into the ops' IDs) replaced by `#`.
-fn without_lut_hashes(cache_id: &str) -> String {
+/// A cache ID without its 1D LUTs' hashes (each `<Lut1D ` followed by 32 hexadecimal digits
+/// and a space, as `Lut1DOpData::getCacheID` writes it into the ops' IDs, with the hash
+/// replaced by `#`), and the hashes in order; `None` if a `<Lut1D ` isn't followed by such a
+/// hash.
+fn lut_hashes(cache_id: &str) -> Option<(String, Vec<&str>)> {
     const TAG: &str = "<Lut1D ";
+    const DIGITS: usize = 32;
     let mut out = String::new();
+    let mut hashes = Vec::new();
     let mut rest = cache_id;
     while let Some(at) = rest.find(TAG) {
         out.push_str(&rest[..at + TAG.len()]);
         rest = &rest[at + TAG.len()..];
-        let hash = rest.bytes().take_while(u8::is_ascii_hexdigit).count();
+        let digits = rest.bytes().take_while(u8::is_ascii_hexdigit).count();
+        if digits != DIGITS || rest.as_bytes().get(DIGITS) != Some(&b' ') {
+            return None;
+        }
+        hashes.push(&rest[..DIGITS]);
         out.push('#');
-        rest = &rest[hash..];
+        rest = &rest[DIGITS..];
     }
     out.push_str(rest);
-    out
+    Some((out, hashes))
 }
 
 /// The fewest characters of a message's own text that a [`Case::allow_log`] fragment needs.
@@ -731,15 +758,16 @@ mod tests {
         let case = Case::new("NaN green slope", p);
         assert!(case.w0002_applies(&fwd));
         assert_eq!(
-            case.compare(&fwd, &inputs, &expected, &expected),
+            case.compare_pixels(&fwd, &inputs, &expected, &expected),
             Comparison::Exact
         );
         assert_eq!(
-            case.compare(&fwd, &inputs, &expected, &differs_in_green),
+            case.compare_pixels(&fwd, &inputs, &expected, &differs_in_green),
             Comparison::W0002 { waived: 1 }
         );
         for actual in [&differs_in_red, &not_nan_in_green] {
-            let Comparison::Mismatch(report) = case.compare(&fwd, &inputs, &expected, actual)
+            let Comparison::Mismatch(report) =
+                case.compare_pixels(&fwd, &inputs, &expected, actual)
             else {
                 panic!("a mismatch outside W0002 passed");
             };
@@ -750,7 +778,7 @@ mod tests {
         let typical = Case::new("typical", toy());
         assert!(!typical.w0002_applies(&fwd));
         assert!(matches!(
-            typical.compare(&fwd, &inputs, &expected, &differs_in_green),
+            typical.compare_pixels(&fwd, &inputs, &expected, &differs_in_green),
             Comparison::Mismatch(_)
         ));
         // Nor does an extreme finite one, or one with an infinite parameter.
@@ -760,7 +788,7 @@ mod tests {
             let case = Case::new("extreme or infinite", p);
             assert!(!case.w0002_applies(&fwd));
             assert!(matches!(
-                case.compare(&fwd, &inputs, &expected, &differs_in_green),
+                case.compare_pixels(&fwd, &inputs, &expected, &differs_in_green),
                 Comparison::Mismatch(_)
             ));
         }
@@ -783,7 +811,7 @@ mod tests {
             for c in 0..4 {
                 let mut actual = expected.clone();
                 actual[c] = f32::from_bits(NAN_B);
-                let result = case.compare(&fwd, &inputs, &expected, &actual);
+                let result = case.compare_pixels(&fwd, &inputs, &expected, &actual);
                 if covered[c] {
                     assert_eq!(result, Comparison::W0002 { waived: 1 }, "channel {c}");
                 } else {
@@ -813,7 +841,7 @@ mod tests {
                 let c = combo(direction, fast_math);
                 assert!(!nowhere.w0002_applies(&c));
                 assert!(matches!(
-                    nowhere.compare(&c, &inputs, &expected, &actual),
+                    nowhere.compare_pixels(&c, &inputs, &expected, &actual),
                     Comparison::Mismatch(_)
                 ));
                 assert_eq!(narrowed.w0002_applies(&c), inverse_exact(&c));
@@ -881,11 +909,54 @@ mod tests {
                 Comparison::Mismatch(_)
             ));
         }
+        let inverse = combo(Direction::Inverse, false);
+        let check = |e: &str, a: &str, wheel: &[Vec<f32>], port: &[Vec<f32>]| {
+            case.compare_baked_luts(&inverse, e, a, wheel, port)
+        };
+        // NaNs of other bits in a channel without a NaN parameter (red, blue).
+        let red_nan = vec![vec![nan_a, 0.5, 0.25, 0.75, 0.5, 1.0]];
+        let red_other = vec![vec![nan_b, 0.5, 0.25, 0.75, 0.5, 1.0]];
+        assert!(matches!(
+            check(&id(h1), &id(h2), &red_nan, &red_other),
+            Comparison::Mismatch(_)
+        ));
+        // Two LUTs: each hash may differ only where its own LUT differs in NaN bits.
+        let two = |a: &str, b: &str| format!("{} <Lut1D {b} forward>", id(a));
+        let wheel_two = vec![wheel[0].clone(), wheel[0].clone()];
+        let second = vec![wheel[0].clone(), green[0].clone()];
         assert_eq!(
-            without_lut_hashes(&format!("{} <Lut1D {h2} x>", id(h1))),
-            "CPU Processor: from 8ui to 8ui oFlags 1 ops:  <Lut1D # forward default standard \
-             domain none> <Lut1D # x>"
+            check(&two(h1, h1), &two(h1, h2), &wheel_two, &second),
+            Comparison::W0002 { waived: 1 }
         );
+        // The first LUT's hash differs, but its entries are identical.
+        assert!(matches!(
+            check(&two(h1, h1), &two(h2, h2), &wheel_two, &second),
+            Comparison::Mismatch(_)
+        ));
+        // The second LUT differs in NaN bits, but its hash is equal.
+        assert!(matches!(
+            check(&two(h1, h1), &two(h2, h1), &wheel_two, &second),
+            Comparison::Mismatch(_)
+        ));
+        // Hashes are 32 hexadecimal digits.
+        assert!(matches!(
+            check(&id("abc"), &id(h2), &wheel, &green),
+            Comparison::Mismatch(_)
+        ));
+        assert!(matches!(
+            check(&id("deadbeef"), &id("cafe"), &wheel, &green),
+            Comparison::Mismatch(_)
+        ));
+        assert_eq!(
+            lut_hashes(&two(h1, h2)),
+            Some((
+                "CPU Processor: from 8ui to 8ui oFlags 1 ops:  <Lut1D # forward default \
+                 standard domain none> <Lut1D # forward>"
+                    .to_string(),
+                vec![h1, h2]
+            ))
+        );
+        assert_eq!(lut_hashes(&id(&format!("{h1}0"))), None);
     }
 
     #[test]
@@ -942,9 +1013,11 @@ mod tests {
         }
     }
 
-    /// Nothing but the battery compares under W0002: outside `compare.rs`, which defines the
-    /// comparison, only `Case::compare` here may call it. Oracle tests go through the battery,
-    /// which applies W0002 to the channels of NaN parameters and nothing else.
+    /// Nothing but the battery and the format sweep through the API compares under W0002.
+    /// Outside `compare.rs`, which defines the comparison, only the `Case` methods here may call
+    /// it; and they are called only by the battery's engine, by this file's tests, and by
+    /// `crates/ocio/tests/api_formats_oracle.rs` (`compare_pixels` on its decoded images,
+    /// `compare_baked_luts` on the LUTs the optimizer bakes), whatever `Combo` a caller builds.
     #[test]
     fn only_the_battery_uses_the_w0002_comparison() {
         fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
@@ -964,13 +1037,16 @@ mod tests {
         for dir in ["crates", "xtask"] {
             walk(&root.join(dir), &mut files);
         }
-        let allowed: [&[&str]; 2] = [
-            &["crates", "ocio-testkit", "src", "compare.rs"],
-            &["crates", "ocio-testkit", "src", "battery", "params.rs"],
-        ];
-        let calls = [
-            "assert_pixels_bits_eq_except_nan_bits",
-            "pixels_report_except_nan_bits",
+        const COMPARE: &str = "crates/ocio-testkit/src/compare.rs";
+        const PARAMS: &str = "crates/ocio-testkit/src/battery/params.rs";
+        const ENGINE: &str = "crates/ocio-testkit/src/battery/engine.rs";
+        const SWEEP: &str = "crates/ocio/tests/api_formats_oracle.rs";
+        // Each name, and the only files that may contain it.
+        let rules: [(&str, &[&str]); 4] = [
+            ("assert_pixels_bits_eq_except_nan_bits", &[COMPARE, PARAMS]),
+            ("pixels_report_except_nan_bits", &[COMPARE, PARAMS]),
+            ("compare_pixels(", &[PARAMS, ENGINE, SWEEP]),
+            ("compare_baked_luts(", &[PARAMS, SWEEP]),
         ];
         let mut offenders = Vec::new();
         for file in &files {
@@ -980,18 +1056,19 @@ mod tests {
                 .components()
                 .map(|c| c.as_os_str().to_string_lossy().into_owned())
                 .collect();
-            if allowed.iter().any(|a| rel.iter().eq(a.iter())) {
-                continue;
-            }
+            let rel = rel.join("/");
             let text = std::fs::read_to_string(file).unwrap_or_default();
-            if calls.iter().any(|call| text.contains(call)) {
-                offenders.push(rel.join("/"));
+            for (name, allowed) in rules {
+                if text.contains(name) && !allowed.contains(&rel.as_str()) {
+                    offenders.push(format!("{rel}: {name}"));
+                }
             }
         }
         assert!(files.len() > 20, "found only {} sources", files.len());
         assert!(
             offenders.is_empty(),
-            "the W0002 comparison is used outside the battery: {offenders:?}"
+            "the W0002 comparison is used outside the battery and the format sweep: \
+             {offenders:?}"
         );
     }
 }

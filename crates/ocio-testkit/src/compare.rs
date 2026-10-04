@@ -154,8 +154,8 @@ pub fn assert_pixels_bits_eq_except_nan_bits(
 /// values matched only as NaN, or a report that starts with
 /// `(NaN bits waived by <waiver> in channels [...]):`.
 ///
-/// Only the battery calls it (`battery::params::Case::compare`), for the channels of NaN
-/// parameters (waiver W0002).
+/// Only `battery::params::Case::compare_pixels` and `Case::compare_baked_luts` call it, for the
+/// channels of NaN parameters (waiver W0002); a test pins their callers.
 pub(crate) fn pixels_report_except_nan_bits(
     waiver: &str,
     waived_channels: &[bool],
