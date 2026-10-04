@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright Contributors to the OpenColorIO Project.
 """Oracle command for the processors' caches and the environment that controls them
-(card p1-processor, WP 1.8g and 1.8h1).
+(card p1-processor, WP 1.8g, 1.8h1 and 1.8h3).
 
 - processor_cache: steps on a raw config and the processors it makes, in a new Python process
   whose environment the case sets, and which processors came back as the same object.
@@ -35,6 +35,7 @@ STEPS = {
     "processor": 3,
     "optimized": 5,
     "cpu": 5,
+    "gpu": 3,
 }
 
 # Runs in the new process of a case. It reads the case from stdin and writes its report to
@@ -68,6 +69,10 @@ for step in case["steps"]:
             name, transform, direction = args
             objects[name] = config.getProcessor(spec.transform(transform),
                                                 getattr(OCIO, direction))
+        elif kind == "gpu":
+            name, of, flags = args
+            objects[name] = (objects[of].getDefaultGPUProcessor() if flags is None
+                             else objects[of].getOptimizedGPUProcessor(spec.flags(flags)))
         else:
             name, of, in_bd, out_bd, flags = args
             getter = (objects[of].getOptimizedProcessor if kind == "optimized"
@@ -105,11 +110,11 @@ def _check_case(c, case):
                 raise ValueError(f"{what}: only OCIO_* variables")
             if step[2] is not None and not isinstance(step[2], str):
                 raise ValueError(f"{what}: a value is a string or null")
-        if step[0] in ("processor", "optimized", "cpu"):
+        if step[0] in ("processor", "optimized", "cpu", "gpu"):
             if not isinstance(step[1], str) or step[1] in names:
                 raise ValueError(f"{what}: names must be new strings")
             names.add(step[1])
-        if step[0] in ("optimized", "cpu") and step[2] not in names:
+        if step[0] in ("optimized", "cpu", "gpu") and step[2] not in names:
             raise ValueError(f"{what}: unknown processor {step[2]!r}")
 
 
@@ -135,6 +140,8 @@ def processor_cache(args, blobs):
                                           objects[of].getOptimizedProcessor(in, out, flags)
       ["cpu", name, of, in bit depth, out bit depth, flags]
                                           objects[of].getOptimizedCPUProcessor(in, out, flags)
+      ["gpu", name, of, flags or null]    objects[of].getOptimizedGPUProcessor(flags), or
+                                          getDefaultGPUProcessor() for null
       (bit depths are BIT_DEPTH_* names, flags as spec.flags takes them)
     result: per case {"returncode": int, "report": {"steps": per step null or the exception
       {"type", "message"}, "same": for each named object, the first name (in the order the
