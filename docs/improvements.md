@@ -1216,3 +1216,22 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   transform, whose getters, setters and text read each channel's first parameter; the port's
   `create_gamma_transform` (so `CreateTransform`) returns the error for an empty channel and
   adds no transform (`exponent_with_linear_transform_tests.rs`, `empty_channels_are_refused`).
+  checks the error for each style and channel.
+
+### U-27. A config's processor cache disabled while a thread uses it
+
+- **Upstream:** `Config::getProcessor` checks `m_processorCache.isEnabled()` before it takes the
+  cache's lock (`Config.cpp:4830-4832`), and `Config::setProcessorCacheFlags` is `const` and
+  doesn't take that lock (`Config.cpp:929-933`). When another thread disables the cache
+  (`PROCESSOR_CACHE_OFF`) between the check and `m_processorCache[key]`, `operator[]` checks
+  again and returns a function-static `dummy` entry (`Caching.h:71-77`), one per cache type,
+  shared by every config: the call reads and writes it unlocked against other threads, a data
+  race, and can return a processor that another call left there, of another transform. Reading
+  `m_enabled` while another thread writes it is a data race too. A processor's own caches can't
+  get there: its flags are set before it is shared.
+- **Who notices:** applications that change a config's cache flags while other threads get
+  processors from it.
+- **Decided** (general rule): the port's `GenericCache::lock` checks that the cache is enabled
+  under the lock and gives no entries otherwise, and `processor_with_context` then makes an
+  uncached processor of the transform it was given.
+- **Status:** matched in `p1-processor` (`caching.rs`, `config.rs`), found by its verifier.

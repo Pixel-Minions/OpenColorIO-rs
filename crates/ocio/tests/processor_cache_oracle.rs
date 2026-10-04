@@ -563,3 +563,52 @@ fn optimization_flags_variable_matches_the_wheel() {
         steps,
     }]);
 }
+
+/// The direction is part of the config's key (`<< direction`, Config.cpp:4836-4839 @ v2.5.2):
+/// without the fallback, the same group forward and inverse gives two processors, each of them
+/// again for its direction. And a processor's copies keep its cache flags: the optimized
+/// processor's own caches are on or off as the config's flags were when the processor was
+/// made (Processor.cpp:237-263, 584-593 @ v2.5.2).
+#[test]
+fn the_key_and_the_copies_match_the_wheel() {
+    let all = groups(6);
+    let (fwd, inv) = (TransformDirection::Forward, TransformDirection::Inverse);
+    let mut cases = vec![Case {
+        what: "direction without fallback".into(),
+        env: vec![(FALLBACK, "1".to_string())],
+        steps: vec![
+            Step::Config,
+            Step::Processor("f".into(), all[3].clone(), fwd),
+            Step::Processor("i".into(), all[3].clone(), inv),
+            Step::Processor("f2".into(), all[3].clone(), fwd),
+            Step::Processor("i2".into(), all[3].clone(), inv),
+        ],
+    }];
+    for flags in [
+        "PROCESSOR_CACHE_OFF",
+        "PROCESSOR_CACHE_DEFAULT",
+        "PROCESSOR_CACHE_ENABLED",
+    ] {
+        cases.push(Case {
+            what: format!("optimized of optimized, {flags}"),
+            env: Vec::new(),
+            steps: vec![
+                Step::Config,
+                Step::SetCacheFlags(flags),
+                Step::Processor("p".into(), all[1].clone(), fwd),
+                Step::Optimized("o".into(), "p".into(), F32, F32, 0),
+                Step::Optimized("oo1".into(), "o".into(), F32, F32, 0),
+                Step::Optimized("oo2".into(), "o".into(), F32, F32, 0),
+                Step::Cpu("oc1".into(), "o".into(), F32, F32, 0),
+                Step::Cpu("oc2".into(), "o".into(), F32, F32, 0),
+                Step::Gpu("og1".into(), "o".into(), None),
+                Step::Gpu("og2".into(), "o".into(), None),
+                Step::SetCacheFlags("PROCESSOR_CACHE_DEFAULT"),
+                Step::Optimized("oo3".into(), "o".into(), F32, F32, 0),
+                Step::Optimized("oo4".into(), "o".into(), F32, F32, 0),
+                Step::Processor("q".into(), all[1].clone(), fwd),
+            ],
+        });
+    }
+    check(&cases);
+}

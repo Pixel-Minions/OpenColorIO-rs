@@ -84,7 +84,10 @@ pub fn libstdcxx_hash_bytes(bytes: &[u8], seed: u64) -> u64 {
 ///
 /// Port of `GenericCache` (src/OpenColorIO/Caching.h:24-94 @ v2.5.2). Upstream's lock and
 /// `operator[]` become [`GenericCache::lock`], which returns the locked entries, or `None` when
-/// the cache is disabled (where upstream returns its `dummy` entry, which nothing reads).
+/// the cache is disabled. Upstream's `operator[]` returns a static `dummy` entry then, which a
+/// config's `getProcessor` can reach when another thread disables the cache between its
+/// unlocked `isEnabled()` and the lock; the port makes an uncached processor instead
+/// (docs/improvements.md, U-27).
 #[derive(Debug)]
 pub struct GenericCache<K, V> {
     /// `m_envDisableAllCaches`: the environment disables the cache.
