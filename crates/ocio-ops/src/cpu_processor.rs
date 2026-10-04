@@ -573,6 +573,10 @@ impl CpuProcessor {
     /// Applies the processor to `img`, in place. The image has the input bit depth and the
     /// output bit depth, which must then be the same.
     ///
+    /// An error where upstream reads past a 1D LUT: a 10- or 12-bit code above the maximum that a
+    /// 1D LUT lookup converts (docs/improvements.md, U-1). The image is processed a chunk of a
+    /// row at a time, so the chunks before the one with the code are already written.
+    ///
     /// Port of `CPUProcessor::apply(const ImageDesc &)` (src/OpenColorIO/CPUProcessor.cpp:
     /// 379-404, 541-544 @ v2.5.2).
     pub fn apply(&self, img: &mut dyn ImageDescMut) -> Result<()> {
@@ -587,6 +591,10 @@ impl CpuProcessor {
 
     /// Applies the processor from `src`, of the input bit depth, to `dst`, of the output bit
     /// depth and the same size.
+    ///
+    /// An error where upstream reads past a 1D LUT: a 10- or 12-bit code above the maximum that a
+    /// 1D LUT lookup converts (docs/improvements.md, U-1). The image is processed a chunk of a
+    /// row at a time, so the chunks before the one with the code are already written.
     ///
     /// Port of `CPUProcessor::apply(const ImageDesc &, ImageDesc &)`
     /// (src/OpenColorIO/CPUProcessor.cpp:406-431, 546-549 @ v2.5.2).
@@ -603,6 +611,8 @@ impl CpuProcessor {
     /// Applies the processor from `img` to `img`: upstream's path from one image to another,
     /// with the one image as both, which reads each row from the image it writes. Rust's
     /// borrows can't pass the image to [`CpuProcessor::apply_src_dst`] as both.
+    ///
+    /// U-1.s error as for [`CpuProcessor::apply_src_dst`].
     ///
     /// Port of `CPUProcessor::apply(const ImageDesc &, ImageDesc &)`
     /// (src/OpenColorIO/CPUProcessor.cpp:406-431, 546-549 @ v2.5.2) called as
