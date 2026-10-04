@@ -839,6 +839,309 @@ pub fn cdl_cases() -> Vec<CdlCase> {
         .collect()
 }
 
+/// The parameters a `LogAffineTransform` or `LogCameraTransform` GPU test sets, each when it
+/// sets it (tests/gpu/LogOp_test.cpp @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct LogParams {
+    /// `setLogSideSlopeValue`.
+    pub log_side_slope: Option<[f64; 3]>,
+    /// `setLogSideOffsetValue`.
+    pub log_side_offset: Option<[f64; 3]>,
+    /// `setLinSideSlopeValue`.
+    pub lin_side_slope: Option<[f64; 3]>,
+    /// `setLinSideOffsetValue`.
+    pub lin_side_offset: Option<[f64; 3]>,
+    /// `setLinearSlopeValue` (camera logs).
+    pub linear_slope: Option<[f64; 3]>,
+}
+
+/// One `OCIO_ADD_GPU_TEST(LogTransform, ...)`, `(LogAffineTransform, ...)` or
+/// `(LogCameraTransform, ...)` (tests/gpu/LogOp_test.cpp @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LogCase {
+    /// The test's group, which is the transform's class.
+    pub group: &'static str,
+    /// The test's name.
+    pub name: &'static str,
+    /// `TRANSFORM_DIR_INVERSE`, rather than forward.
+    pub inverse: bool,
+    /// `setBase`, when the test calls it: the `float` the test passes, as the `double` the
+    /// setter takes.
+    pub base: Option<f64>,
+    /// `LogCameraTransform::Create`'s break on the linear side.
+    pub lin_side_break: Option<[f64; 3]>,
+    /// The parameters the test sets.
+    pub params: LogParams,
+    /// `setLegacyShader(true)`.
+    pub legacy_shader: bool,
+    /// `setRelativeComparison(true)`, rather than the absolute default.
+    pub relative_comparison: bool,
+    /// The harness's NaN inputs, unless the test calls `setTestNaN(false)` (the camera tests
+    /// call it on Apple platforms only).
+    pub test_nan: bool,
+    /// The harness's infinite inputs, unless the test calls `setTestInfinity(false)`.
+    pub test_infinity: bool,
+    /// `setErrorThreshold`: the error allowed. The file chooses `g_epsilon` and
+    /// `g_epsilon_inverse` with `#if OCIO_USE_SSE2`: these are the SSE2 values, as both wheels
+    /// are built with SSE2.
+    pub error_threshold: f32,
+}
+
+impl LogCase {
+    /// The transform's spec for the oracle, with the setters in the test's order: the
+    /// direction, the base when it sets one, then the log side slope and offset, the linear
+    /// side slope and offset, and the linear slope, each when it sets it (every test sets them
+    /// in that order). A camera log's break is the constructor's argument.
+    pub fn transform(&self) -> Value {
+        let direction = if self.inverse {
+            "TRANSFORM_DIR_INVERSE"
+        } else {
+            "TRANSFORM_DIR_FORWARD"
+        };
+        let mut calls = vec![json!(["setDirection", {"enum": direction}])];
+        if let Some(base) = self.base {
+            calls.push(json!(["setBase", base]));
+        }
+        let p = &self.params;
+        for (setter, values) in [
+            ("setLogSideSlopeValue", p.log_side_slope),
+            ("setLogSideOffsetValue", p.log_side_offset),
+            ("setLinSideSlopeValue", p.lin_side_slope),
+            ("setLinSideOffsetValue", p.lin_side_offset),
+            ("setLinearSlopeValue", p.linear_slope),
+        ] {
+            if let Some(values) = values {
+                calls.push(json!([setter, values.to_vec()]));
+            }
+        }
+        match self.lin_side_break {
+            Some(brk) => json!({
+                "class": self.group,
+                "args": {"linSideBreak": brk.to_vec()},
+                "calls": calls,
+            }),
+            None => json!({"class": self.group, "calls": calls}),
+        }
+    }
+}
+
+/// `g_epsilon` with SSE2 (tests/gpu/LogOp_test.cpp:13-14 @ v2.5.2).
+const LOG_EPSILON: f32 = 1e-4;
+
+/// `g_epsilon_inverse` with SSE2 (tests/gpu/LogOp_test.cpp:13, 15 @ v2.5.2).
+const LOG_EPSILON_INVERSE: f32 = 1e-3;
+
+/// `base10` (tests/gpu/LogOp_test.cpp:21 @ v2.5.2).
+const BASE10: f32 = 10.0;
+
+/// `eulerConstant`, `expf(1.0f)` (tests/gpu/LogOp_test.cpp:22 @ v2.5.2), from the platform's
+/// `expf` at run time.
+fn euler_constant() -> f32 {
+    std::hint::black_box(1.0f32).exp()
+}
+
+/// The `LogTransform`, `LogAffineTransform` and `LogCameraTransform` GPU tests
+/// (tests/gpu/LogOp_test.cpp:45-353 @ v2.5.2), in the file's order.
+pub fn log_cases() -> Vec<LogCase> {
+    let euler = euler_constant();
+    // `AddLogTest` (tests/gpu/LogOp_test.cpp:26-42): a `LogTransform` in `base`, without
+    // infinite inputs; every `LogTransform` test then sets no NaN.
+    let log_test = |name, inverse, base: f32, epsilon, legacy_shader| LogCase {
+        group: "LogTransform",
+        name,
+        inverse,
+        base: Some(f64::from(base)),
+        lin_side_break: None,
+        params: LogParams::default(),
+        legacy_shader,
+        relative_comparison: false,
+        test_nan: false,
+        test_infinity: false,
+        error_threshold: epsilon,
+    };
+    // A `LogAffineTransform` test: no infinite inputs, and NaN ones forward only.
+    let affine = |name, inverse, base: Option<f32>, params, error_threshold| LogCase {
+        group: "LogAffineTransform",
+        name,
+        inverse,
+        base: base.map(f64::from),
+        lin_side_break: None,
+        params,
+        legacy_shader: false,
+        relative_comparison: false,
+        test_nan: !inverse,
+        test_infinity: false,
+        error_threshold,
+    };
+    let camera = |name, inverse, lin_side_break, params, error_threshold| LogCase {
+        group: "LogCameraTransform",
+        name,
+        inverse,
+        base: None,
+        lin_side_break: Some(lin_side_break),
+        params,
+        legacy_shader: false,
+        relative_comparison: false,
+        test_nan: true,
+        test_infinity: false,
+        error_threshold,
+    };
+    let only = |set: fn(&mut LogParams, [f64; 3]), values| {
+        let mut p = LogParams::default();
+        set(&mut p, values);
+        p
+    };
+    let log_slope = |p: &mut LogParams, v| p.log_side_slope = Some(v);
+    let log_offset = |p: &mut LogParams, v| p.log_side_offset = Some(v);
+    let lin_slope = |p: &mut LogParams, v| p.lin_side_slope = Some(v);
+    let lin_offset = |p: &mut LogParams, v| p.lin_side_offset = Some(v);
+    let (eps, eps_inv) = (LOG_EPSILON, LOG_EPSILON_INVERSE);
+    let mut base_inverse = affine(
+        "base_inverse",
+        true,
+        Some(BASE10),
+        LogParams::default(),
+        eps,
+    );
+    base_inverse.relative_comparison = true;
+    vec![
+        log_test("LogBase_10_legacy", false, BASE10, eps, true),
+        log_test("LogBase_10_legacy_inverse", true, BASE10, eps_inv, true),
+        log_test("LogBase_10_generic_shader", false, BASE10, eps, false),
+        log_test(
+            "LogBase_10_inverse_generic_shader",
+            true,
+            BASE10,
+            eps_inv,
+            false,
+        ),
+        log_test("LogBase_euler_legacy", false, euler, eps, true),
+        log_test("LogBase_euler_legacy_inverse", true, euler, eps_inv, true),
+        log_test("LogBase_euler_generic_shader", false, euler, eps, false),
+        log_test(
+            "LogBase_euler_inverse_generic_shader",
+            true,
+            euler,
+            eps_inv,
+            false,
+        ),
+        affine("base", false, Some(BASE10), LogParams::default(), eps),
+        base_inverse,
+        affine(
+            "linSideSlope",
+            false,
+            None,
+            only(lin_slope, [2.0, 0.5, 3.0]),
+            eps,
+        ),
+        affine(
+            "linSideSlope_inverse",
+            true,
+            None,
+            only(lin_slope, [2.0, 0.5, 3.0]),
+            eps,
+        ),
+        affine(
+            "linSideOffset",
+            false,
+            None,
+            only(lin_offset, [0.1, 0.2, 0.3]),
+            eps,
+        ),
+        affine(
+            "linSideOffset_inverse",
+            true,
+            None,
+            only(lin_offset, [0.1, 0.2, 0.3]),
+            eps,
+        ),
+        affine(
+            "logSideSlope",
+            false,
+            None,
+            only(log_slope, [2.0, 0.5, 3.0]),
+            eps * 5.0,
+        ),
+        affine(
+            "logSideSlope_inverse",
+            true,
+            None,
+            only(log_slope, [2.0, 0.5, 3.0]),
+            eps,
+        ),
+        affine(
+            "logSideOffset",
+            false,
+            None,
+            only(log_offset, [0.1, 0.2, 0.3]),
+            eps,
+        ),
+        affine(
+            "logSideOffset_inverse",
+            true,
+            None,
+            only(log_offset, [0.1, 0.2, 0.3]),
+            eps,
+        ),
+        affine(
+            "lin2log",
+            false,
+            None,
+            LogParams {
+                log_side_slope: Some([0.2, 0.4, 0.25]),
+                log_side_offset: Some([0.14, 0.13, 0.12]),
+                lin_side_slope: Some([1.5, 1.8, 1.2]),
+                lin_side_offset: Some([0.05, 0.1, 0.15]),
+                linear_slope: None,
+            },
+            eps * 5.0,
+        ),
+        // The only inverse affine test that keeps the NaN inputs.
+        LogCase {
+            test_nan: true,
+            ..affine(
+                "log2lin",
+                true,
+                None,
+                LogParams {
+                    log_side_slope: Some([0.21, 0.2, 0.19]),
+                    log_side_offset: Some([0.61, 0.6, 0.59]),
+                    lin_side_slope: Some([1.11, 1.1, 1.12]),
+                    lin_side_offset: Some([0.051, 0.05, 0.052]),
+                    linear_slope: None,
+                },
+                eps_inv,
+            )
+        },
+        camera(
+            "camera_lin2log",
+            false,
+            [0.12, 0.13, 0.15],
+            LogParams {
+                log_side_slope: Some([0.2, 0.3, 0.4]),
+                log_side_offset: Some([0.7, 0.6, 0.5]),
+                lin_side_slope: Some([1.4, 1.1, 1.2]),
+                lin_side_offset: Some([0.15, 0.16, 0.25]),
+                linear_slope: Some([1.22, 1.33, 1.44]),
+            },
+            eps,
+        ),
+        camera(
+            "camera_log2lin",
+            true,
+            [0.12, 0.13, 0.14],
+            LogParams {
+                log_side_slope: Some([0.21, 0.22, 0.23]),
+                log_side_offset: Some([0.6, 0.7, 0.8]),
+                lin_side_slope: Some([1.1, 1.2, 1.3]),
+                lin_side_offset: Some([0.051, 0.052, 0.053]),
+                linear_slope: Some([1.25, 1.23, 1.22]),
+            },
+            eps_inv,
+        ),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1446,6 +1749,318 @@ mod tests {
                 (wide, nan, inf),
                 "{name}"
             );
+            assert_eq!(
+                case.error_threshold.to_bits(),
+                threshold.to_bits(),
+                "{name}"
+            );
+        }
+    }
+
+    /// Each of upstream's 22 tests, in the file's order, builds the spec its body builds
+    /// (tests/gpu/LogOp_test.cpp:21-353 @ v2.5.2): the transform's class, the break the
+    /// camera constructor takes, the direction, the base when it sets one (`base10`, or
+    /// `eulerConstant`: `expf(1.0f)`), and the parameters it sets; the legacy shader, the
+    /// relative comparison, NaN and infinity inputs, and the threshold (the SSE2 values of
+    /// `g_epsilon`, 1e-4, and `g_epsilon_inverse`, 1e-3).
+    #[test]
+    fn log_cases_are_upstreams() {
+        let euler = f64::from(std::hint::black_box(1.0f32).exp());
+        let base10 = f64::from(10.0f32);
+        let (fwd, inv) = ("TRANSFORM_DIR_FORWARD", "TRANSFORM_DIR_INVERSE");
+        let dir = |d: &str| json!(["setDirection", {"enum": d}]);
+        let log = |d: &str, base: f64| json!({"class": "LogTransform", "calls": [dir(d), ["setBase", base]]});
+        let affine = |calls: Vec<Value>| json!({"class": "LogAffineTransform", "calls": calls});
+        let set = |setter: &str, v: [f64; 3]| json!([setter, v.to_vec()]);
+        let (ls, lo, ns, no) = (
+            "setLogSideSlopeValue",
+            "setLogSideOffsetValue",
+            "setLinSideSlopeValue",
+            "setLinSideOffsetValue",
+        );
+        let camera = |brk: [f64; 3], calls: Vec<Value>| {
+            json!({"class": "LogCameraTransform", "args": {"linSideBreak": brk.to_vec()},
+                "calls": calls})
+        };
+        // (group, name, spec, legacy, relative, NaN, infinity, threshold)
+        type Expected = (
+            &'static str,
+            &'static str,
+            Value,
+            bool,
+            bool,
+            bool,
+            bool,
+            f32,
+        );
+        let (lt, at, ct) = ("LogTransform", "LogAffineTransform", "LogCameraTransform");
+        let expected: Vec<Expected> = vec![
+            (
+                lt,
+                "LogBase_10_legacy",
+                log(fwd, base10),
+                true,
+                false,
+                false,
+                false,
+                1e-4,
+            ),
+            (
+                lt,
+                "LogBase_10_legacy_inverse",
+                log(inv, base10),
+                true,
+                false,
+                false,
+                false,
+                1e-3,
+            ),
+            (
+                lt,
+                "LogBase_10_generic_shader",
+                log(fwd, base10),
+                false,
+                false,
+                false,
+                false,
+                1e-4,
+            ),
+            (
+                lt,
+                "LogBase_10_inverse_generic_shader",
+                log(inv, base10),
+                false,
+                false,
+                false,
+                false,
+                1e-3,
+            ),
+            (
+                lt,
+                "LogBase_euler_legacy",
+                log(fwd, euler),
+                true,
+                false,
+                false,
+                false,
+                1e-4,
+            ),
+            (
+                lt,
+                "LogBase_euler_legacy_inverse",
+                log(inv, euler),
+                true,
+                false,
+                false,
+                false,
+                1e-3,
+            ),
+            (
+                lt,
+                "LogBase_euler_generic_shader",
+                log(fwd, euler),
+                false,
+                false,
+                false,
+                false,
+                1e-4,
+            ),
+            (
+                lt,
+                "LogBase_euler_inverse_generic_shader",
+                log(inv, euler),
+                false,
+                false,
+                false,
+                false,
+                1e-3,
+            ),
+            (
+                at,
+                "base",
+                affine(vec![dir(fwd), json!(["setBase", base10])]),
+                false,
+                false,
+                true,
+                false,
+                1e-4,
+            ),
+            (
+                at,
+                "base_inverse",
+                affine(vec![dir(inv), json!(["setBase", base10])]),
+                false,
+                true,
+                false,
+                false,
+                1e-4,
+            ),
+            (
+                at,
+                "linSideSlope",
+                affine(vec![dir(fwd), set(ns, [2.0, 0.5, 3.0])]),
+                false,
+                false,
+                true,
+                false,
+                1e-4,
+            ),
+            (
+                at,
+                "linSideSlope_inverse",
+                affine(vec![dir(inv), set(ns, [2.0, 0.5, 3.0])]),
+                false,
+                false,
+                false,
+                false,
+                1e-4,
+            ),
+            (
+                at,
+                "linSideOffset",
+                affine(vec![dir(fwd), set(no, [0.1, 0.2, 0.3])]),
+                false,
+                false,
+                true,
+                false,
+                1e-4,
+            ),
+            (
+                at,
+                "linSideOffset_inverse",
+                affine(vec![dir(inv), set(no, [0.1, 0.2, 0.3])]),
+                false,
+                false,
+                false,
+                false,
+                1e-4,
+            ),
+            (
+                at,
+                "logSideSlope",
+                affine(vec![dir(fwd), set(ls, [2.0, 0.5, 3.0])]),
+                false,
+                false,
+                true,
+                false,
+                1e-4 * 5.0,
+            ),
+            (
+                at,
+                "logSideSlope_inverse",
+                affine(vec![dir(inv), set(ls, [2.0, 0.5, 3.0])]),
+                false,
+                false,
+                false,
+                false,
+                1e-4,
+            ),
+            (
+                at,
+                "logSideOffset",
+                affine(vec![dir(fwd), set(lo, [0.1, 0.2, 0.3])]),
+                false,
+                false,
+                true,
+                false,
+                1e-4,
+            ),
+            (
+                at,
+                "logSideOffset_inverse",
+                affine(vec![dir(inv), set(lo, [0.1, 0.2, 0.3])]),
+                false,
+                false,
+                false,
+                false,
+                1e-4,
+            ),
+            (
+                at,
+                "lin2log",
+                affine(vec![
+                    dir(fwd),
+                    set(ls, [0.2, 0.4, 0.25]),
+                    set(lo, [0.14, 0.13, 0.12]),
+                    set(ns, [1.5, 1.8, 1.2]),
+                    set(no, [0.05, 0.1, 0.15]),
+                ]),
+                false,
+                false,
+                true,
+                false,
+                1e-4 * 5.0,
+            ),
+            (
+                at,
+                "log2lin",
+                affine(vec![
+                    dir(inv),
+                    set(ls, [0.21, 0.2, 0.19]),
+                    set(lo, [0.61, 0.6, 0.59]),
+                    set(ns, [1.11, 1.1, 1.12]),
+                    set(no, [0.051, 0.05, 0.052]),
+                ]),
+                false,
+                false,
+                true,
+                false,
+                1e-3,
+            ),
+            (
+                ct,
+                "camera_lin2log",
+                camera(
+                    [0.12, 0.13, 0.15],
+                    vec![
+                        dir(fwd),
+                        set(ls, [0.2, 0.3, 0.4]),
+                        set(lo, [0.7, 0.6, 0.5]),
+                        set(ns, [1.4, 1.1, 1.2]),
+                        set(no, [0.15, 0.16, 0.25]),
+                        set("setLinearSlopeValue", [1.22, 1.33, 1.44]),
+                    ],
+                ),
+                false,
+                false,
+                true,
+                false,
+                1e-4,
+            ),
+            (
+                ct,
+                "camera_log2lin",
+                camera(
+                    [0.12, 0.13, 0.14],
+                    vec![
+                        dir(inv),
+                        set(ls, [0.21, 0.22, 0.23]),
+                        set(lo, [0.6, 0.7, 0.8]),
+                        set(ns, [1.1, 1.2, 1.3]),
+                        set(no, [0.051, 0.052, 0.053]),
+                        set("setLinearSlopeValue", [1.25, 1.23, 1.22]),
+                    ],
+                ),
+                false,
+                false,
+                true,
+                false,
+                1e-3,
+            ),
+        ];
+        let cases = log_cases();
+        assert_eq!(cases.len(), expected.len());
+        for (case, (group, name, spec, legacy, relative, nan, inf, threshold)) in
+            cases.iter().zip(expected)
+        {
+            assert_eq!((case.group, case.name), (group, name));
+            assert_eq!(case.transform(), spec, "{name}");
+            assert_eq!(
+                (case.legacy_shader, case.relative_comparison),
+                (legacy, relative),
+                "{name}"
+            );
+            assert_eq!((case.test_nan, case.test_infinity), (nan, inf), "{name}");
             assert_eq!(
                 case.error_threshold.to_bits(),
                 threshold.to_bits(),

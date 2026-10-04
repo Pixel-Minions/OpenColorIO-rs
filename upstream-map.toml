@@ -1619,9 +1619,9 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/ops/log/LogOp.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/log/log_op.rs"]
+target = ["crates/ocio-ops/src/ops/log/log_op.rs", "crates/ocio-gpu/src/gpu_processor.rs"]
 status = "partial"
-note = "1.3l3: the op, CreateLogOp, the Log arm of CreateOpVecFromOpData; cache IDs, the optimizer's inverse pairs and pixels against the wheel (tests/log_op_oracle.rs). BuildLogOp and CreateLogTransform come with the transforms (WP 1.8), extractGpuShaderInfo with 1.3l4"
+note = "1.3l3: the op, CreateLogOp, the Log arm of CreateOpVecFromOpData; cache IDs, the optimizer's inverse pairs and pixels against the wheel (tests/log_op_oracle.rs). BuildLogOp and CreateLogTransform come with the transforms (WP 1.8). Its GPU part: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's Log arm (gpu_processor.rs, 1.3l4)"
 
 [[file]]
 path = "src/OpenColorIO/ops/log/LogOp.h"
@@ -1662,13 +1662,15 @@ note = "Validation and equality against the wheel through the Log transforms (te
 path = "src/OpenColorIO/ops/log/LogOpGPU.cpp"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/log/log_op_gpu.rs"]
-status = "todo"
+status = "done"
+note = "1.3l4 (p1-gpu-ops3): GetLogGPUShaderProgram and its six writers; checked against the wheel in 10 languages, live on each platform (the camera log's break, I-70): crates/ocio-gpu/tests/log_op_gpu_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/ops/log/LogOpGPU.h"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/log/log_op_gpu.rs"]
-status = "todo"
+status = "done"
+note = "1.3l4 (p1-gpu-ops3): GetLogGPUShaderProgram; checked against the wheel in 10 languages (crates/ocio-gpu/tests/log_op_gpu_oracle.rs)"
 
 [[file]]
 path = "src/OpenColorIO/ops/log/LogUtils.cpp"
@@ -5053,6 +5055,7 @@ path = "tests/gpu/LogOp_test.cpp"
 kind = "test-gpu"
 target = ["crates/ocio-gpu/tests/log_op_test.rs"]
 status = "todo"
+note = "Phase 7 (GPU execution). Its 22 cases are data in crates/ocio-testkit/src/gpu_cases.rs (log_cases); 1.3l4 checks their shaders' text against the wheel (crates/ocio-gpu/tests/log_op_gpu_oracle.rs)"
 
 [[file]]
 path = "tests/gpu/Lut1DOp_test.cpp"

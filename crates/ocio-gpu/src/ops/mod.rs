@@ -6,5 +6,6 @@
 pub mod cdl;
 pub mod exponent;
 pub mod gamma;
+pub mod log;
 pub mod matrix;
 pub mod range;
