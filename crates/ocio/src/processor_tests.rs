@@ -7,13 +7,16 @@
 //! getters leave it as it was.
 //!
 //! Which calls return the same processor is checked against the wheel by
-//! `tests/processor_cache_oracle.rs`, on processors of groups (no ops). The cache tests here
-//! run the same checks on processors with matrix ops, which the oracle's cases can't build
-//! until `MatrixTransform` is ported; they mirror upstream's own cache tests, and go when the
-//! oracle's cases have matrices.
+//! `tests/processor_cache_oracle.rs`, on processors of groups and of matrix and range ops. The
+//! cache tests here run the checks of upstream's own cache tests on processors of matrix ops
+//! built directly.
 //!
-//! The upstream tests that build their processors from `MatrixTransform`,
-//! `ExposureContrastTransform` and `Lut3DTransform` come with those classes.
+//! The other upstream tests get their processors from `Config::Create()`, which waits for
+//! Phase 3 (owner decision, 2026-10-04): `basic_cache`, `channel_crosstalk`,
+//! `optimized_processor`; and, as they also need `ExposureContrastTransform` (Phase 5),
+//! `cache_optimized_processors`, `cache_cpu_processors`, `cache_gpu_processors`, `is_noop`
+//! and `dynamic_properties`; `basic_cache_lut` also needs `Lut3DTransform` (Phase 2).
+//! `unique_dynamic_properties` needs the ExposureContrast op (Phase 5).
 
 use std::sync::Arc;
 
@@ -272,7 +275,7 @@ fn transform_format_metadata_out_of_range() {
 }
 
 /// The optimized processors are cached by bit depths and flags, after the environment's
-/// override, as `OCIO_ADD_TEST(Processor, cache_optimized_processors)` checks them with two
+/// override, as upstream's `cache_optimized_processors` test checks them with two
 /// MatrixTransforms (tests/cpu/Processor_tests.cpp:302-372 @ v2.5.2). The wheel:
 /// `processor_cache_oracle.rs`, `cache_flags_and_variables_match_the_wheel` (oa, ob, oc) and
 /// `optimization_flags_variable_matches_the_wheel` (o0 against env_o0).
@@ -326,9 +329,9 @@ fn cache_optimized_processors() {
     assert_eq!(proc1.num_transforms(), 2);
 }
 
-/// The CPU processors are cached by bit depths and flags, as `OCIO_ADD_TEST(Processor,
-/// cache_cpu_processors)` checks them with a MatrixTransform (Processor_tests.cpp:374-471 @
-/// v2.5.2), and not at all when the cache flags turn the cache off. The wheel:
+/// The CPU processors are cached by bit depths and flags, as upstream's `cache_cpu_processors`
+/// test checks them with a MatrixTransform (Processor_tests.cpp:374-471 @ v2.5.2), and not at
+/// all when the cache flags turn the cache off. The wheel:
 /// `processor_cache_oracle.rs`, `cache_flags_and_variables_match_the_wheel` (ca, cb, cc, and
 /// the `PROCESSOR_CACHE_OFF` case).
 #[test]

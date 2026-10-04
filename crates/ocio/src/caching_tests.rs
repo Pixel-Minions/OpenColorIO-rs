@@ -84,7 +84,7 @@ fn generic_cache() {
     }
 }
 
-/// The parts of `OCIO_ADD_TEST(Caching, processor_cache)` (tests/cpu/Caching_tests.cpp:110-159
+/// The parts of upstream's `Caching/processor_cache` test (tests/cpu/Caching_tests.cpp:110-159
 /// @ v2.5.2) before its config: the test's last part reads a config with a `FileTransform`,
 /// which comes with the config reader (Phase 3), and the test's port marker with it.
 #[test]
