@@ -1957,9 +1957,9 @@ note = "1.2c: NoOpData, FileNoOpData, CreateFileNoOp, CreateLookNoOp; not yet: P
 [[file]]
 path = "src/OpenColorIO/ops/range/RangeOp.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/range/range_op.rs"]
+target = ["crates/ocio-ops/src/ops/range/range_op.rs", "crates/ocio-gpu/src/gpu_processor.rs"]
 status = "partial"
-note = "1.3r2: RangeOp (the op's behaviors on OpData::Range, its finalize in Op::finalize) and both CreateRangeOp; checked against the wheel through CPU processor cache IDs and pixels (tests/range_op_oracle.rs: combinations, identities, bit depths). Not yet: BuildRangeOp and CreateRangeTransform (the RangeTransform, WP 1.8), extractGpuShaderInfo (1.3r3)"
+note = "1.3r2: RangeOp (the op's behaviors on OpData::Range, its finalize in Op::finalize) and both CreateRangeOp; checked against the wheel through CPU processor cache IDs and pixels (tests/range_op_oracle.rs: combinations, identities, bit depths). Not yet: BuildRangeOp and CreateRangeTransform (the RangeTransform, WP 1.8). Its GPU part: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's Range arm with its finalize check (gpu_processor.rs, 1.3r3)"
 
 [[file]]
 path = "src/OpenColorIO/ops/range/RangeOp.h"
@@ -2000,13 +2000,15 @@ note = "see RangeOpData.cpp"
 path = "src/OpenColorIO/ops/range/RangeOpGPU.cpp"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/range/range_op_gpu.rs"]
-status = "todo"
+status = "done"
+note = "1.3r3 (p1-gpu-ops2): GetRangeGPUShaderProgram; checked against the wheel in 10 languages (crates/ocio-gpu/tests/range_op_gpu_oracle.rs)"
 
 [[file]]
 path = "src/OpenColorIO/ops/range/RangeOpGPU.h"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/range/range_op_gpu.rs"]
-status = "todo"
+status = "done"
+note = "1.3r3 (p1-gpu-ops2): GetRangeGPUShaderProgram; checked against the wheel in 10 languages (crates/ocio-gpu/tests/range_op_gpu_oracle.rs)"
 
 [[file]]
 path = "src/OpenColorIO/ops/reference/ReferenceOpData.cpp"
@@ -5071,6 +5073,7 @@ path = "tests/gpu/RangeOp_test.cpp"
 kind = "test-gpu"
 target = ["crates/ocio-gpu/tests/range_op_test.rs"]
 status = "todo"
+note = "Phase 7 (GPU execution). Its cases are data in crates/ocio-testkit/src/gpu_cases.rs (range_cases); 1.3r3 checks their shaders' text against the wheel (crates/ocio-gpu/tests/range_op_gpu_oracle.rs)"
 
 [[file]]
 path = "tests/java/CMakeLists.txt"

@@ -410,6 +410,128 @@ pub fn gamma_cases() -> Vec<GammaCase> {
     ]
 }
 
+/// One `OCIO_ADD_GPU_TEST(RangeOp, ...)`: a `RangeTransform` in `Config::Create()`, with the
+/// style and the bounds the test sets (tests/gpu/RangeOp_test.cpp @ v2.5.2). The tests pass
+/// `float` literals to the `double` setters, so each bound is that `float`'s value.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RangeCase {
+    /// The test's name.
+    pub name: &'static str,
+    /// `setStyle(RANGE_NO_CLAMP)`, which builds a Matrix op rather than a Range op
+    /// (`BuildRangeOp`, src/OpenColorIO/ops/range/RangeOp.cpp:263-281).
+    pub no_clamp: bool,
+    /// `setMinInValue`, when the test calls it.
+    pub min_in: Option<f64>,
+    /// `setMaxInValue`, when the test calls it.
+    pub max_in: Option<f64>,
+    /// `setMinOutValue`, when the test calls it.
+    pub min_out: Option<f64>,
+    /// `setMaxOutValue`, when the test calls it.
+    pub max_out: Option<f64>,
+    /// `setErrorThreshold`: the absolute error allowed.
+    pub error_threshold: f32,
+}
+
+impl RangeCase {
+    /// The transform's spec for the oracle, with the setters in the test's order: the style
+    /// first, then the bounds the test sets. (`setTestWideRange(true)`, which some tests call,
+    /// is the harness's default.)
+    pub fn transform(&self) -> Value {
+        let mut calls = Vec::new();
+        if self.no_clamp {
+            calls.push(json!(["setStyle", {"enum": "RANGE_NO_CLAMP"}]));
+        }
+        for (setter, value) in [
+            ("setMinInValue", self.min_in),
+            ("setMaxInValue", self.max_in),
+            ("setMinOutValue", self.min_out),
+            ("setMaxOutValue", self.max_out),
+        ] {
+            if let Some(v) = value {
+                calls.push(json!([setter, v]));
+            }
+        }
+        json!({"class": "RangeTransform", "calls": calls})
+    }
+}
+
+/// `g_epsilon` (tests/gpu/RangeOp_test.cpp:15 @ v2.5.2).
+const RANGE_EPSILON: f32 = 1e-6;
+
+/// The `RangeOp` GPU tests (tests/gpu/RangeOp_test.cpp:17-119 @ v2.5.2), in the file's order.
+pub fn range_cases() -> Vec<RangeCase> {
+    // A `float` literal, as the `double` setter receives it.
+    let f = |v: f32| Some(f64::from(v));
+    let case = |name, no_clamp, min_in, max_in, min_out, max_out| RangeCase {
+        name,
+        no_clamp,
+        min_in,
+        max_in,
+        min_out,
+        max_out,
+        error_threshold: RANGE_EPSILON,
+    };
+    vec![
+        case(
+            "scale_with_low_and_high_clippings",
+            false,
+            f(0.1),
+            f(1.1),
+            f(0.5),
+            f(1.5),
+        ),
+        case("scale_with_low_clipping", false, f(0.2), None, f(0.2), None),
+        case(
+            "scale_with_high_clipping",
+            false,
+            None,
+            f(0.9),
+            None,
+            f(0.9),
+        ),
+        case(
+            "scale_with_low_and_high_clippings_2",
+            false,
+            f(0.1),
+            f(1.1),
+            f(-0.5),
+            f(1.5),
+        ),
+        case(
+            "arbitrary_1",
+            false,
+            f(0.4000202),
+            f(0.6000502),
+            f(0.4000601),
+            f(0.6000801),
+        ),
+        case(
+            "arbitrary_1_no_clamp",
+            true,
+            f(0.4000202),
+            f(0.6000502),
+            f(0.4000601),
+            f(0.6000801),
+        ),
+        case(
+            "arbitrary_2",
+            false,
+            f(-0.010201),
+            f(0.601102),
+            f(0.209803),
+            f(1.600208),
+        ),
+        case(
+            "arbitrary_2_no_clamp",
+            true,
+            f(-0.010201),
+            f(0.601102),
+            f(0.209803),
+            f(1.600208),
+        ),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -728,5 +850,83 @@ mod tests {
                 "{group} {name}"
             );
         }
+    }
+
+    /// Each of upstream's eight tests, in the file's order, builds the spec its body builds
+    /// (tests/gpu/RangeOp_test.cpp:17-119 @ v2.5.2): the style first when it sets one, then
+    /// each bound it sets, as the `float` literal's value, and `g_epsilon`.
+    #[test]
+    fn range_cases_are_upstreams() {
+        let style = json!(["setStyle", {"enum": "RANGE_NO_CLAMP"}]);
+        let min_in = |v: f32| json!(["setMinInValue", f64::from(v)]);
+        let max_in = |v: f32| json!(["setMaxInValue", f64::from(v)]);
+        let min_out = |v: f32| json!(["setMinOutValue", f64::from(v)]);
+        let max_out = |v: f32| json!(["setMaxOutValue", f64::from(v)]);
+        let range = |calls: Vec<Value>| json!({"class": "RangeTransform", "calls": calls});
+        let expected: Vec<(&str, Value)> = vec![
+            (
+                "scale_with_low_and_high_clippings",
+                range(vec![min_in(0.1), max_in(1.1), min_out(0.5), max_out(1.5)]),
+            ),
+            (
+                "scale_with_low_clipping",
+                range(vec![min_in(0.2), min_out(0.2)]),
+            ),
+            (
+                "scale_with_high_clipping",
+                range(vec![max_in(0.9), max_out(0.9)]),
+            ),
+            (
+                "scale_with_low_and_high_clippings_2",
+                range(vec![min_in(0.1), max_in(1.1), min_out(-0.5), max_out(1.5)]),
+            ),
+            (
+                "arbitrary_1",
+                range(vec![
+                    min_in(0.4000202),
+                    max_in(0.6000502),
+                    min_out(0.4000601),
+                    max_out(0.6000801),
+                ]),
+            ),
+            (
+                "arbitrary_1_no_clamp",
+                range(vec![
+                    style.clone(),
+                    min_in(0.4000202),
+                    max_in(0.6000502),
+                    min_out(0.4000601),
+                    max_out(0.6000801),
+                ]),
+            ),
+            (
+                "arbitrary_2",
+                range(vec![
+                    min_in(-0.010201),
+                    max_in(0.601102),
+                    min_out(0.209803),
+                    max_out(1.600208),
+                ]),
+            ),
+            (
+                "arbitrary_2_no_clamp",
+                range(vec![
+                    style,
+                    min_in(-0.010201),
+                    max_in(0.601102),
+                    min_out(0.209803),
+                    max_out(1.600208),
+                ]),
+            ),
+        ];
+        let cases = range_cases();
+        assert_eq!(cases.len(), expected.len());
+        for (case, (name, spec)) in cases.iter().zip(expected) {
+            assert_eq!(case.name, name);
+            assert_eq!(case.transform(), spec, "{name}");
+            assert_eq!(case.error_threshold.to_bits(), 1e-6f32.to_bits(), "{name}");
+        }
+        // The `float` literal reaches the setter, not its decimal text.
+        assert_ne!(cases[0].min_in, Some(0.1));
     }
 }

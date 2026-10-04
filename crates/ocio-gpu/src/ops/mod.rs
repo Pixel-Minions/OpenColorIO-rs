@@ -6,3 +6,4 @@
 pub mod exponent;
 pub mod gamma;
 pub mod matrix;
+pub mod range;
