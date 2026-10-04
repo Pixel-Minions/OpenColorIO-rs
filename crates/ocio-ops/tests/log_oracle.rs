@@ -12,8 +12,9 @@
 //!
 //! For a single Log transform at F32, the processor's op list is that one LogOp: `LogOpData`
 //! is never a no-op or an identity (`LogOpData::isNoOp`/`isIdentity` return false), has no
-//! simpler replacement, and the separable-prefix bake only applies to integer input bit
-//! depths (`OptimizeSeparablePrefix`, src/OpenColorIO/OpOptimizers.cpp:559-563 @ v2.5.2).
+//! simpler replacement, and the separable-prefix bake skips F32 and UINT32 inputs (it bakes
+//! F16 and the other integer depths: `OptimizeSeparablePrefix`,
+//! src/OpenColorIO/OpOptimizers.cpp:559-565 @ v2.5.2).
 //!
 //! The op data goes through `std::hint::black_box`, so that the compiler cannot evaluate the
 //! renderers' constructors on the tests' constant parameters: it folds, for example, `log2` of
@@ -22,6 +23,23 @@
 //!
 //! The Log renderers never write alpha (they work in place), so alpha is a pass-through
 //! channel for the battery.
+//!
+//! The wheel refuses parameters out of `LogOpData::validate`'s bounds, and the port gives the
+//! same texts:
+//! - a JSON spec's transform is validated by `Config::getProcessor(transform)`
+//!   (`Processor::Impl::setTransform`, src/OpenColorIO/Processor.cpp:623-633 @ v2.5.2), with
+//!   the transform's prefix: `LogTransform validation failed: `, `LogAffineTransform
+//!   validation failed: ` or `LogCameraTransform validation failed: `
+//!   (src/OpenColorIO/transforms/LogTransform.cpp:46-59, LogAffineTransform.cpp:47-60,
+//!   LogCameraTransform.cpp:50-67). The LogTransform and LogAffineTransform bindings'
+//!   constructors validate the transform first, with the same prefix
+//!   (src/bindings/python/transforms/PyLogTransform.cpp:20-27,
+//!   PyLogAffineTransform.cpp:31-45): the affine one before `setBase`, at the default base 2,
+//!   but `validate` checks the parameters before the base, so the first refusal is the same;
+//! - a YAML spec's transform is read without validating (src/OpenColorIO/OCIOYaml.cpp:
+//!   2614-2680, 2877-2920 and the LogCameraTransform loader), and the processor between the
+//!   config's color spaces builds its op with `BuildLogOp`, which validates the data without
+//!   a prefix (src/OpenColorIO/ops/log/LogOp.cpp:190-221).
 
 use std::hint::black_box;
 
@@ -49,9 +67,21 @@ fn port_direction(direction: Direction) -> TransformDirection {
     }
 }
 
-/// The renderer `GetLogRenderer` picks for `data`, as a battery port.
-fn log_port(data: LogOpData, combo: &Combo) -> Result<Port, String> {
-    let renderer = get_log_renderer(&black_box(data), combo.fast_math);
+/// The renderer `GetLogRenderer` picks for `data`, as a battery port; or the wheel's refusal.
+/// `prefix` is the transform's validation prefix where the spec is JSON, `None` where it is
+/// YAML (see the module's docs).
+fn log_port(data: LogOpData, prefix: Option<&str>, combo: &Combo) -> Result<Port, String> {
+    let message = |e: ocio_ops::exception::Exception| e.message().to_string();
+    if let Some(prefix) = prefix {
+        // `Processor::Impl::setTransform`: `transform->validate()`.
+        data.validate()
+            .map_err(|e| format!("{prefix}{}", e.message()))?;
+    }
+    // BuildLogOp: `data.validate()`, then `data.clone()` for `CreateLogOp`, which leaves a
+    // forward op's data as it is.
+    data.validate().map_err(message)?;
+    let data = data.try_clone().map_err(message)?;
+    let renderer = get_log_renderer(&black_box(data), combo.fast_math).map_err(message)?;
     Ok(Port::in_place(move |px| renderer.apply(px)))
 }
 
@@ -127,6 +157,7 @@ impl Family for LogFamily {
     fn port(&self, p: &LogBase, combo: &Combo) -> Result<Port, String> {
         log_port(
             log_transform_op(p.base, port_direction(combo.direction)),
+            all_finite(p).then_some("LogTransform validation failed: "),
             combo,
         )
     }
@@ -134,7 +165,7 @@ impl Family for LogFamily {
         A
     }
     fn validation(&self) -> Validation {
-        Validation::NotPorted { card: "WP 1.3l1" }
+        Validation::Ported
     }
 }
 
@@ -148,6 +179,10 @@ fn log_transform_matches_the_wheel() {
     // A NaN base takes the YAML spec, as the generated NaN and ±Inf cases do: an explicit case
     // there makes a bug in that spec fail rather than show as refusals.
     cases.push(Case::new("base NaN", LogBase { base: f64::NAN }).w0002_nowhere());
+    // Refusals, on both routes: JSON, then YAML for the infinite base.
+    for base in [1.0, 0.0, -2.5, f64::NEG_INFINITY] {
+        cases.push(Case::new(format!("refused base {base}"), LogBase { base }));
+    }
     battery::run(&LogFamily { cases, bases });
 }
 
@@ -196,6 +231,11 @@ impl Params for Affine {
 }
 
 impl Affine {
+    /// The validation prefix of the JSON spec's refusals, `None` for the YAML spec's.
+    fn prefix(&self) -> Option<&'static str> {
+        all_finite(self).then_some("LogAffineTransform validation failed: ")
+    }
+
     fn spec(&self, dir: Direction) -> Spec {
         if !all_finite(self) {
             return Spec::Yaml(self.yaml(dir));
@@ -271,13 +311,13 @@ impl Family for AffineFamily {
         p.spec(direction)
     }
     fn port(&self, p: &Affine, combo: &Combo) -> Result<Port, String> {
-        log_port(p.op(port_direction(combo.direction)), combo)
+        log_port(p.op(port_direction(combo.direction)), p.prefix(), combo)
     }
     fn pass_through(&self, _: &Affine, _: &Combo) -> Channels {
         A
     }
     fn validation(&self) -> Validation {
-        Validation::NotPorted { card: "WP 1.3l1" }
+        Validation::Ported
     }
 }
 
@@ -344,6 +384,33 @@ fn log_affine_transform_matches_the_wheel() {
     // An explicit case on the YAML spec the generated NaN and ±Inf cases take.
     let [_, nan_base] = affine_nan_cases();
     cases.push(nan_base);
+    // Refusals, on both routes: JSON, then YAML for the infinite offset. The parameters are
+    // checked channel by channel, the linear side's slope before the log side's, and the base
+    // last.
+    let base = cases[0].params().clone();
+    let refused = |label: &str, change: &dyn Fn(&mut Affine)| {
+        let mut p = base.clone();
+        change(&mut p);
+        Case::new(format!("refused: {label}"), p)
+    };
+    cases.extend([
+        refused("green lin side slope 0", &|p| p.lin_side_slope[1] = 0.0),
+        refused("red log side slope -0", &|p| p.log_side_slope[0] = -0.0),
+        refused("blue slopes 0, green log side slope 0", &|p| {
+            p.lin_side_slope[2] = 0.0;
+            p.log_side_slope = [1.0, 0.0, 0.0];
+        }),
+        refused("base 1, tiny lin side slope", &|p| {
+            p.base = 1.0;
+            p.lin_side_slope[0] = 1e-300;
+        }),
+        refused("base 0", &|p| p.base = 0.0),
+        refused("lin side slope 0, infinite offset", &|p| {
+            p.lin_side_slope[0] = 0.0;
+            p.log_side_offset[2] = f64::INFINITY;
+        }),
+        refused("base -inf", &|p| p.base = f64::NEG_INFINITY),
+    ]);
     battery::run(&AffineFamily { cases, bases });
 }
 
@@ -402,6 +469,11 @@ impl Params for Camera {
 }
 
 impl Camera {
+    /// The validation prefix of the JSON spec's refusals, `None` for the YAML spec's.
+    fn prefix(&self) -> Option<&'static str> {
+        all_finite(self).then_some("LogCameraTransform validation failed: ")
+    }
+
     fn spec(&self, dir: Direction) -> Spec {
         if !all_finite(self) {
             return Spec::Yaml(self.yaml(dir));
@@ -502,7 +574,7 @@ impl Family for CameraFamily {
         p.spec(direction)
     }
     fn port(&self, p: &Camera, combo: &Combo) -> Result<Port, String> {
-        log_port(p.op(port_direction(combo.direction)), combo)
+        log_port(p.op(port_direction(combo.direction)), p.prefix(), combo)
     }
     fn pass_through(&self, _: &Camera, _: &Combo) -> Channels {
         A
@@ -511,7 +583,7 @@ impl Family for CameraFamily {
         p.break_points()
     }
     fn validation(&self) -> Validation {
-        Validation::NotPorted { card: "WP 1.3l1" }
+        Validation::Ported
     }
 }
 
@@ -666,6 +738,22 @@ fn log_camera_transform_matches_the_wheel() {
     let bases = vec![cases[3].clone()];
     // An explicit case on the YAML spec the generated NaN and ±Inf cases take.
     cases.push(camera_nan_case());
+    // Refusals, on both routes: JSON, then YAML for the infinite break.
+    let base = cases[3].params().clone();
+    let refused = |label: &str, change: &dyn Fn(&mut Camera)| {
+        let mut p = base.clone();
+        change(&mut p);
+        Case::new(format!("refused: {label}"), p)
+    };
+    cases.extend([
+        refused("blue lin side slope 0", &|p| p.lin_side_slope[2] = 0.0),
+        refused("green log side slope 0", &|p| p.log_side_slope[1] = 0.0),
+        refused("base -2", &|p| p.base = -2.0),
+        refused("log side slope 0, infinite break", &|p| {
+            p.log_side_slope[0] = 0.0;
+            p.lin_side_break[1] = f64::INFINITY;
+        }),
+    ]);
     battery::run(&CameraFamily { cases, bases });
 }
 
@@ -944,7 +1032,9 @@ fn integer_output_casts_match_the_wheel() {
     let input = s2_probe_rgba();
     let data = black_box(log_transform_op(2.0, TransformDirection::Forward));
     let mut log_out = input.clone();
-    get_log_renderer(&data, true).apply(&mut log_out);
+    get_log_renderer(&data, true)
+        .expect("a plain log renders")
+        .apply(&mut log_out);
 
     // (bit depth, maxValue from BitDepthUtils.h:34-60, cast)
     type Cast = fn(f32) -> u16;

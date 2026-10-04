@@ -200,7 +200,8 @@ impl NoOpData {
     pub(crate) fn is_same_type(&self, op: &Op) -> bool {
         match &**op.data() {
             OpData::NoOp(other) => discriminant(&self.kind) == discriminant(&other.kind),
-            OpData::Cdl(_)
+            OpData::Log(_)
+            | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Matrix(_)
             | OpData::Range(_)

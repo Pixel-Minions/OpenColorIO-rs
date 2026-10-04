@@ -29,9 +29,10 @@ use std::sync::Arc;
 
 use super::log_op_data::{
     LIN_SIDE_BREAK, LIN_SIDE_OFFSET, LIN_SIDE_SLOPE, LOG_SIDE_OFFSET, LOG_SIDE_SLOPE, LogOpData,
-    Params,
+    Params, SHORT_PARAMS,
 };
 use super::log_utils::{get_linear_offset, get_linear_slope, get_log_side_break};
+use crate::exception::{Exception, Result};
 use crate::math_utils::{sse_add, sse_max, sse_mul, std_max};
 use crate::op::CpuOp;
 use crate::open_color_types::TransformDirection;
@@ -49,14 +50,31 @@ const MIN_VALUE: f32 = f32::MIN_POSITIVE;
 /// The Log renderer for the op's style and direction: the SSE kernel when `fast_exp`
 /// (`OPTIMIZATION_FAST_LOG_EXP_POW`) is set, the math-library one otherwise.
 ///
+/// The renderers of affine logs read the first 4 parameters of each channel, and the camera
+/// ones the first 5 (`L2LBaseRenderer` and `CameraL2LBaseRenderer::updateData`); the plain logs
+/// read none. A channel with fewer is an error (U-20), where upstream reads past its
+/// parameters: validation refuses such channels, but `create_log_op` doesn't validate a forward
+/// op's data.
+///
 /// Port of `GetLogRenderer` (src/OpenColorIO/ops/log/LogOpCPU.cpp:224-315 @ v2.5.2). Its final
 /// `throw Exception("Illegal Log direction.")` cannot be reached with a
 /// [`TransformDirection`].
-pub fn get_log_renderer(log: &LogOpData, fast_exp: bool) -> Arc<dyn CpuOp> {
+pub fn get_log_renderer(log: &LogOpData, fast_exp: bool) -> Result<Arc<dyn CpuOp>> {
     use TransformDirection::{Forward, Inverse};
 
+    if !log.is_log2() && !log.is_log10() {
+        let read = if log.is_camera() {
+            LIN_SIDE_BREAK + 1
+        } else {
+            LIN_SIDE_OFFSET + 1
+        };
+        if channel_params(log).iter().any(|p| p.len() < read) {
+            return Err(Exception::new(SHORT_PARAMS));
+        }
+    }
+
     let dir = log.direction();
-    if log.is_log2() {
+    Ok(if log.is_log2() {
         match (dir, fast_exp) {
             (Forward, true) => Arc::new(LogRendererSse::new(log, 1.0)),
             (Forward, false) => Arc::new(LogRenderer::new(log, 1.0)),
@@ -84,7 +102,7 @@ pub fn get_log_renderer(log: &LogOpData, fast_exp: bool) -> Arc<dyn CpuOp> {
             (Inverse, true) => Arc::new(Log2LinRendererSse::new(log)),
             (Inverse, false) => Arc::new(Log2LinRenderer::new(log)),
         }
-    }
+    })
 }
 
 /// The RGBA pixels of a buffer.
@@ -115,7 +133,7 @@ pub struct LogRenderer {
 impl LogRenderer {
     /// Port of `LogRenderer::LogRenderer` (src/OpenColorIO/ops/log/LogOpCPU.cpp:342-347
     /// @ v2.5.2).
-    pub fn new(_log: &LogOpData, log_scale: f32) -> Self {
+    fn new(_log: &LogOpData, log_scale: f32) -> Self {
         LogRenderer { log_scale }
     }
 }
@@ -143,7 +161,7 @@ pub struct LogRendererSse(LogRenderer);
 impl LogRendererSse {
     /// Port of `LogRendererSSE::LogRendererSSE` (src/OpenColorIO/ops/log/LogOpCPU.cpp:417-420
     /// @ v2.5.2).
-    pub fn new(log: &LogOpData, log_scale: f32) -> Self {
+    fn new(log: &LogOpData, log_scale: f32) -> Self {
         LogRendererSse(LogRenderer::new(log, log_scale))
     }
 }
@@ -176,7 +194,7 @@ pub struct AntiLogRenderer {
 impl AntiLogRenderer {
     /// Port of `AntiLogRenderer::AntiLogRenderer` (src/OpenColorIO/ops/log/LogOpCPU.cpp:455-460
     /// @ v2.5.2).
-    pub fn new(_log: &LogOpData, log2_base: f32) -> Self {
+    fn new(_log: &LogOpData, log2_base: f32) -> Self {
         AntiLogRenderer { log2_base }
     }
 }
@@ -205,7 +223,7 @@ pub struct AntiLogRendererSse(AntiLogRenderer);
 impl AntiLogRendererSse {
     /// Port of `AntiLogRendererSSE::AntiLogRendererSSE`
     /// (src/OpenColorIO/ops/log/LogOpCPU.cpp:485-488 @ v2.5.2).
-    pub fn new(log: &LogOpData, log2_base: f32) -> Self {
+    fn new(log: &LogOpData, log2_base: f32) -> Self {
         AntiLogRendererSse(AntiLogRenderer::new(log, log2_base))
     }
 }
@@ -241,7 +259,7 @@ impl Log2LinRenderer {
     /// Port of `Log2LinRenderer::Log2LinRenderer` and `Log2LinRenderer::updateData`
     /// (src/OpenColorIO/ops/log/LogOpCPU.cpp:524-546 @ v2.5.2), with
     /// `L2LBaseRenderer::updateData` (:332-340).
-    pub fn new(log: &LogOpData) -> Self {
+    fn new(log: &LogOpData) -> Self {
         let base = log.base() as f32;
         let params = channel_params(log);
         Log2LinRenderer {
@@ -281,7 +299,7 @@ pub struct Log2LinRendererSse(Log2LinRenderer);
 impl Log2LinRendererSse {
     /// Port of `Log2LinRendererSSE::Log2LinRendererSSE`
     /// (src/OpenColorIO/ops/log/LogOpCPU.cpp:575-579 @ v2.5.2).
-    pub fn new(log: &LogOpData) -> Self {
+    fn new(log: &LogOpData) -> Self {
         Log2LinRendererSse(Log2LinRenderer::new(log))
     }
 }
@@ -324,7 +342,7 @@ impl Lin2LogRenderer {
     /// `L2LBaseRenderer::updateData` (:332-340). `log2(m_base)` takes a `float`, and
     /// `LogOpCPU.cpp` sees the `float` overload on both platforms: it is `log2f`, promoted to
     /// `double` for the division.
-    pub fn new(log: &LogOpData) -> Self {
+    fn new(log: &LogOpData) -> Self {
         let base = log.base() as f32;
         let params = channel_params(log);
         Lin2LogRenderer {
@@ -364,7 +382,7 @@ pub struct Lin2LogRendererSse(Lin2LogRenderer);
 impl Lin2LogRendererSse {
     /// Port of `Lin2LogRendererSSE::Lin2LogRendererSSE`
     /// (src/OpenColorIO/ops/log/LogOpCPU.cpp:677-680 @ v2.5.2).
-    pub fn new(log: &LogOpData) -> Self {
+    fn new(log: &LogOpData) -> Self {
         Lin2LogRendererSse(Lin2LogRenderer::new(log))
     }
 }
@@ -441,7 +459,7 @@ pub struct CameraLog2LinRenderer {
 impl CameraLog2LinRenderer {
     /// Port of `CameraLog2LinRenderer::CameraLog2LinRenderer` and `updateData`
     /// (src/OpenColorIO/ops/log/LogOpCPU.cpp:744-772 @ v2.5.2).
-    pub fn new(log: &LogOpData) -> Self {
+    fn new(log: &LogOpData) -> Self {
         let base = CameraL2LBase::new(log);
         let params = channel_params(log);
         CameraLog2LinRenderer {
@@ -490,7 +508,7 @@ pub struct CameraLog2LinRendererSse(CameraLog2LinRenderer);
 impl CameraLog2LinRendererSse {
     /// Port of `CameraLog2LinRendererSSE::CameraLog2LinRendererSSE`
     /// (src/OpenColorIO/ops/log/LogOpCPU.cpp:805-808 @ v2.5.2).
-    pub fn new(log: &LogOpData) -> Self {
+    fn new(log: &LogOpData) -> Self {
         CameraLog2LinRendererSse(CameraLog2LinRenderer::new(log))
     }
 }
@@ -538,7 +556,7 @@ pub struct CameraLin2LogRenderer {
 impl CameraLin2LogRenderer {
     /// Port of `CameraLin2LogRenderer::CameraLin2LogRenderer` and `updateData`
     /// (src/OpenColorIO/ops/log/LogOpCPU.cpp:862-887 @ v2.5.2).
-    pub fn new(log: &LogOpData) -> Self {
+    fn new(log: &LogOpData) -> Self {
         let base = CameraL2LBase::new(log);
         let params = channel_params(log);
         CameraLin2LogRenderer {
@@ -587,7 +605,7 @@ pub struct CameraLin2LogRendererSse(CameraLin2LogRenderer);
 impl CameraLin2LogRendererSse {
     /// Port of `CameraLin2LogRendererSSE::CameraLin2LogRendererSSE`
     /// (src/OpenColorIO/ops/log/LogOpCPU.cpp:923-926 @ v2.5.2).
-    pub fn new(log: &LogOpData) -> Self {
+    fn new(log: &LogOpData) -> Self {
         CameraLin2LogRendererSse(CameraLin2LogRenderer::new(log))
     }
 }

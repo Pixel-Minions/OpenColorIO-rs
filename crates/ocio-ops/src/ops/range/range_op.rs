@@ -80,7 +80,8 @@ impl RangeOpData {
             }
             // `if (range1->isIdentity())`: the LUT types, whose op can replace an identity
             // range, come with their families.
-            OpData::Cdl(_)
+            OpData::Log(_)
+            | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Exponent(_)
             | OpData::Matrix(_)
@@ -109,7 +110,8 @@ impl RangeOpData {
             }
             // `if (type == OpData::Lut1DType || type == OpData::Lut3DType)`: avoid clone (we
             // actually want to use the second op). Those types come with their families.
-            OpData::Cdl(_)
+            OpData::Log(_)
+            | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Exponent(_)
             | OpData::Matrix(_)

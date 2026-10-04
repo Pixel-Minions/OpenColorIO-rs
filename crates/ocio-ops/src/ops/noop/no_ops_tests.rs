@@ -48,7 +48,8 @@ fn the_no_ops() -> OpVec {
 fn no_op_data(op: &Op) -> &NoOpData {
     match &**op.data() {
         OpData::NoOp(data) => data,
-        OpData::Cdl(_)
+        OpData::Log(_)
+        | OpData::Cdl(_)
         | OpData::Gamma(_)
         | OpData::Matrix(_)
         | OpData::Range(_)
@@ -224,7 +225,7 @@ fn clone_op_makes_new_data_of_the_same_class() {
 
     for op in ops.iter() {
         assert_eq!(op.data().get_name(), b"named");
-        let clone = op.clone_op();
+        let clone = op.clone_op().unwrap();
         assert!(!Arc::ptr_eq(op.data(), clone.data()));
         assert!(op.is_same_type(&clone));
         assert_eq!(clone.get_info(), op.get_info());
@@ -234,14 +235,14 @@ fn clone_op_makes_new_data_of_the_same_class() {
     }
 
     // The allocation is copied.
-    let clone = ops[0].clone_op();
+    let clone = ops[0].clone_op().unwrap();
     assert_eq!(
         no_op_data(&clone).get_gpu_allocation(),
         Some(&lg2_allocation())
     );
 
     // A new FileNoOpData is still being loaded, and has the path.
-    let clone = ops[1].clone_op();
+    let clone = ops[1].clone_op().unwrap();
     let cloned = no_op_data(&clone).file_data().unwrap();
     assert_eq!(cloned.get_path(), b"dir/file.clf");
     assert!(!cloned.get_complete());
@@ -263,7 +264,7 @@ fn check_clone_of_first(ops: &OpVec) {
     assert_eq!(ops.len(), 2);
     let op0 = &ops[0];
     let op1 = &ops[1];
-    let cloned_op = ops[0].clone_op();
+    let cloned_op = ops[0].clone_op().unwrap();
 
     assert!(cloned_op.is_same_type(op0));
     assert!(!cloned_op.is_same_type(op1));

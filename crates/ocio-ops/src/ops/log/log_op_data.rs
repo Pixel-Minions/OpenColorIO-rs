@@ -5,14 +5,18 @@
 //! logSideOffset`, per channel, with an optional linear segment below a break point (the
 //! "camera" style).
 //!
-//! Port of `LogOpData` (src/OpenColorIO/ops/log/LogOpData.h and LogOpData.cpp @ v2.5.2): the
-//! parameters, their accessors and the style predicates the CPU renderers need. Not yet
-//! ported (WP 1.3l1): `validate` and the other methods whose results or error messages print
-//! doubles with C++ stream formatting (`getCacheID`, the `get*String` accessors, `inverse`'s
-//! validation), and `getIdentityReplacement`, which builds Range and Matrix op data.
+//! Port of `LogOpData` (src/OpenColorIO/ops/log/LogOpData.h and LogOpData.cpp @ v2.5.2).
 
+use crate::cfmt::{Crt, OStringStream};
 use crate::exception::{Exception, Result};
-use crate::open_color_types::{TransformDirection, get_inverse_transform_direction};
+use crate::format_metadata::{FormatMetadataImpl, METADATA_ID};
+use crate::math_utils::is_scalar_equal_to_zero;
+use crate::op_data::{OpData, OpDataType};
+use crate::open_color_types::{
+    TransformDirection, get_inverse_transform_direction, transform_direction_to_string,
+};
+use crate::ops::matrix::MatrixOpData;
+use crate::ops::range::RangeOpData;
 
 /// The parameters of one channel, indexed by [`LogAffineParameter`]. There are 4 (`LOG_SIDE_*`
 /// and `LIN_SIDE_*`), 5 (with `LIN_SIDE_BREAK`, the camera style) or 6 (with `LINEAR_SLOPE`).
@@ -58,13 +62,62 @@ mod default_values {
     pub(super) const LIN_SLOPE: [f64; 3] = [1.0, 1.0, 1.0];
     pub(super) const LIN_OFFSET: [f64; 3] = [0.0, 0.0, 0.0];
     pub(super) const LOG_OFFSET: [f64; 3] = [0.0, 0.0, 0.0];
+    /// `FLOAT_DECIMALS`: the cache ID's precision.
+    pub(super) const FLOAT_DECIMALS: i64 = 7;
+}
+
+/// The error where upstream reads or writes past a channel's parameters (U-20): only a log
+/// whose channels have fewer than 4 parameters, or different numbers of them, gets there;
+/// validation refuses both.
+pub(super) const SHORT_PARAMS: &str =
+    "Log: the channels have fewer parameters than this needs: upstream accesses past them.";
+
+/// Checks one channel's parameters: 4 to 6 of them, and slopes that aren't 0.
+///
+/// Port of `ValidateParams` (src/OpenColorIO/ops/log/LogOpData.cpp:31-61 @ v2.5.2).
+fn validate_params(params: &Params, _direction: TransformDirection) -> Result<()> {
+    const MIN_SIZE: usize = 4;
+    if params.len() < MIN_SIZE {
+        return Err(Exception::new("Log: expecting at least 4 parameters."));
+    }
+    const MAX_SIZE: usize = 6;
+    if params.len() > MAX_SIZE {
+        return Err(Exception::new("Log: expecting at most 6 parameters."));
+    }
+
+    let message = |before: &str, value: f64, after: &str| {
+        let mut oss = OStringStream::new(Crt::NATIVE);
+        oss.put_str(before);
+        oss.put_f64(value);
+        oss.put_str(after);
+        Exception::new(oss.into_string())
+    };
+    if is_scalar_equal_to_zero(params[LIN_SIDE_SLOPE]) {
+        return Err(message(
+            "Log: Invalid linear side slope value '",
+            params[LIN_SIDE_SLOPE],
+            "', linear side slope cannot be 0.",
+        ));
+    }
+    if is_scalar_equal_to_zero(params[LOG_SIDE_SLOPE]) {
+        return Err(message(
+            "Log: Invalid log side slope value '",
+            params[LOG_SIDE_SLOPE],
+            "', log side slope cannot be 0.",
+        ));
+    }
+    Ok(())
 }
 
 /// The Log op's data.
 ///
-/// Port of `LogOpData` (src/OpenColorIO/ops/log/LogOpData.h:30-155 @ v2.5.2).
-#[derive(Debug, Clone, PartialEq)]
+/// Port of `LogOpData` (src/OpenColorIO/ops/log/LogOpData.h:30-155 @ v2.5.2). `Clone` copies
+/// every field, as upstream's implicit copy constructor and assignment do; upstream's `clone()` is
+/// [`LogOpData::try_clone`], which refuses channels of mixed styles.
+#[derive(Debug, Clone)]
 pub struct LogOpData {
+    /// The `OpData` base's `m_metadata`.
+    metadata: FormatMetadataImpl,
     red_params: Params,
     green_params: Params,
     blue_params: Params,
@@ -79,6 +132,7 @@ impl LogOpData {
     /// (src/OpenColorIO/ops/log/LogOpData.cpp:64-71 @ v2.5.2).
     pub fn new(base: f64, direction: TransformDirection) -> Self {
         let mut data = LogOpData {
+            metadata: FormatMetadataImpl::default(),
             red_params: Params::new(),
             green_params: Params::new(),
             blue_params: Params::new(),
@@ -131,6 +185,7 @@ impl LogOpData {
             ));
         }
         Ok(LogOpData {
+            metadata: FormatMetadataImpl::default(),
             red_params,
             green_params,
             blue_params,
@@ -192,6 +247,9 @@ impl LogOpData {
     /// Sets one parameter on the three channels. Setting `LIN_SIDE_BREAK` grows the
     /// parameters to 5; setting `LINEAR_SLOPE` needs the break and grows them to 6.
     ///
+    /// A channel that is still too short for the parameter is an error (U-20), where upstream
+    /// writes past its parameters.
+    ///
     /// Port of `LogOpData::setValue` (src/OpenColorIO/ops/log/LogOpData.cpp:120-148 @ v2.5.2).
     pub fn set_value(&mut self, val: LogAffineParameter, values: &[f64; 3]) -> Result<()> {
         if val == LogAffineParameter::LinSideBreak {
@@ -213,6 +271,10 @@ impl LogOpData {
             }
         }
         let i = val as usize;
+        if i >= self.red_params.len() || i >= self.green_params.len() || i >= self.blue_params.len()
+        {
+            return Err(Exception::new(SHORT_PARAMS));
+        }
         self.red_params[i] = values[0];
         self.green_params[i] = values[1];
         self.blue_params[i] = values[2];
@@ -231,19 +293,25 @@ impl LogOpData {
         }
     }
 
-    /// One parameter of the three channels, or `None` if it is not defined.
+    /// One parameter of the three channels, or `None` if the red channel doesn't have it.
+    ///
+    /// A green or blue channel without it, where the red one has it, is an error (U-20):
+    /// upstream reads past that channel's parameters.
     ///
     /// Port of `LogOpData::getValue` (src/OpenColorIO/ops/log/LogOpData.cpp:160-170 @ v2.5.2).
-    pub fn value(&self, val: LogAffineParameter) -> Option<[f64; 3]> {
+    pub fn value(&self, val: LogAffineParameter) -> Result<Option<[f64; 3]>> {
         let i = val as usize;
         if i >= self.red_params.len() {
-            return None;
+            return Ok(None);
         }
-        Some([
+        if i >= self.green_params.len() || i >= self.blue_params.len() {
+            return Err(Exception::new(SHORT_PARAMS));
+        }
+        Ok(Some([
             self.red_params[i],
             self.green_params[i],
             self.blue_params[i],
-        ])
+        ]))
     }
 
     /// Resets every channel to the four affine parameters.
@@ -334,6 +402,326 @@ impl LogOpData {
         self.is_log_base(10.0)
     }
 
+    /// The four affine parameters, one value per channel. A parameter the red channel doesn't
+    /// have leaves its array as it is. One the red channel has and the green or blue one
+    /// doesn't is [`LogOpData::value`]'s error (U-20), once the arrays before it are set.
+    ///
+    /// Port of `LogOpData::getParameters` (src/OpenColorIO/ops/log/LogOpData.cpp:187-196 @
+    /// v2.5.2).
+    pub fn get_parameters(
+        &self,
+        log_slope: &mut [f64; 3],
+        log_offset: &mut [f64; 3],
+        lin_slope: &mut [f64; 3],
+        lin_offset: &mut [f64; 3],
+    ) -> Result<()> {
+        for (param, values) in [
+            (LogAffineParameter::LogSideSlope, log_slope),
+            (LogAffineParameter::LogSideOffset, log_offset),
+            (LogAffineParameter::LinSideSlope, lin_slope),
+            (LogAffineParameter::LinSideOffset, lin_offset),
+        ] {
+            if let Some(v) = self.value(param)? {
+                *values = v;
+            }
+        }
+        Ok(())
+    }
+
+    /// Checks the parameters of each channel, their sizes, and the base: "Log: Invalid base
+    /// value '<base>', base cannot be 1." or "... must be greater than 0.".
+    ///
+    /// Port of `LogOpData::validate` (src/OpenColorIO/ops/log/LogOpData.cpp:202-230 @ v2.5.2).
+    pub fn validate(&self) -> Result<()> {
+        validate_params(&self.red_params, self.direction)?;
+        validate_params(&self.green_params, self.direction)?;
+        validate_params(&self.blue_params, self.direction)?;
+
+        if self.red_params.len() != self.green_params.len()
+            || self.red_params.len() != self.blue_params.len()
+        {
+            return Err(Exception::new(
+                "Log: Red, green & blue parameters must have the same size.",
+            ));
+        }
+
+        let message = |after: &str| {
+            let mut oss = OStringStream::new(Crt::NATIVE);
+            oss.put_str("Log: Invalid base value '");
+            oss.put_f64(self.base);
+            oss.put_str(after);
+            Exception::new(oss.into_string())
+        };
+        if self.base == 1.0 {
+            return Err(message("', base cannot be 1."));
+        } else if self.base <= 0.0 {
+            return Err(message("', base must be greater than 0."));
+        }
+        Ok(())
+    }
+
+    /// Port of `LogOpData::getType` (src/OpenColorIO/ops/log/LogOpData.h:72 @ v2.5.2).
+    pub fn get_type(&self) -> OpDataType {
+        OpDataType::Log
+    }
+
+    /// Never: a logarithm changes every value.
+    ///
+    /// Port of `LogOpData::isIdentity` (src/OpenColorIO/ops/log/LogOpData.cpp:232-235 @
+    /// v2.5.2).
+    pub fn is_identity(&self) -> bool {
+        false
+    }
+
+    /// The data of an op that replaces a pair of inverse logs, emulating the clamping the pair
+    /// does: a forward plain or affine log clamps below the smallest value it accepts (a Range
+    /// from 0, or from `-linOffset / linSlope`), an inverse one or a camera log doesn't (an
+    /// identity matrix). The range's validation can raise, and so can a forward affine log
+    /// whose red channel has fewer than 4 parameters (U-20), where upstream reads past them.
+    ///
+    /// Port of `LogOpData::getIdentityReplacement` (src/OpenColorIO/ops/log/LogOpData.cpp:
+    /// 237-292 @ v2.5.2).
+    pub fn get_identity_replacement(&self) -> Result<OpData> {
+        let res_op;
+        if self.is_log2() || self.is_log10() {
+            match self.direction {
+                TransformDirection::Forward => {
+                    // The first op logarithm is not defined for negative values.
+                    res_op = OpData::Range(RangeOpData::with_values(
+                        0.,
+                        // Don't clamp high end.
+                        RangeOpData::empty_value(),
+                        0.,
+                        RangeOpData::empty_value(),
+                    )?);
+                }
+                TransformDirection::Inverse => {
+                    // In principle, the power function is defined over the entire domain.
+                    // However, in practice the input to the following logarithm is clamped to
+                    // a very small positive number and this imposes a limit. E.g.,
+                    // log10(FLOAT_MIN) = -37.93, but this is so small that it makes more sense
+                    // to consider it an exact inverse.
+                    res_op = OpData::Matrix(MatrixOpData::new());
+                }
+            }
+        } else if !self.is_camera() {
+            match self.direction {
+                // LinToLog -> LogToLin
+                TransformDirection::Forward => {
+                    if self.red_params.len() <= LIN_SIDE_OFFSET {
+                        return Err(Exception::new(SHORT_PARAMS));
+                    }
+                    // Minimum value allowed is -linOffset/linSlope so that
+                    // linSlope*x+linOffset > 0.
+                    let min_value =
+                        -self.red_params[LIN_SIDE_OFFSET] / self.red_params[LIN_SIDE_SLOPE];
+                    res_op = OpData::Range(RangeOpData::with_values(
+                        min_value,
+                        // Don't clamp high end.
+                        RangeOpData::empty_value(),
+                        min_value,
+                        RangeOpData::empty_value(),
+                    )?);
+                }
+                // LogToLin -> LinToLog
+                TransformDirection::Inverse => {
+                    res_op = OpData::Matrix(MatrixOpData::new());
+                }
+            }
+        } else {
+            res_op = OpData::Matrix(MatrixOpData::new());
+        }
+        Ok(res_op)
+    }
+
+    /// Never: a logarithm changes every value.
+    ///
+    /// Port of `LogOpData::isNoOp` (src/OpenColorIO/ops/log/LogOpData.cpp:294-297 @ v2.5.2).
+    pub fn is_no_op(&self) -> bool {
+        false
+    }
+
+    /// Port of `LogOpData::hasChannelCrosstalk` (src/OpenColorIO/ops/log/LogOpData.h:80 @
+    /// v2.5.2).
+    pub fn has_channel_crosstalk(&self) -> bool {
+        false
+    }
+
+    /// The data's cache ID: its id and a space, if it has one, the direction, then each
+    /// parameter's string with 7 significant digits: `Base`, `LogSideSlope`, `LogSideOffset`,
+    /// `LinSideSlope`, `LinSideOffset`, and `LinSideBreak` and `LinearSlope` when set. An error
+    /// for channels with fewer than 4 parameters.
+    ///
+    /// Port of `LogOpData::getCacheID` (src/OpenColorIO/ops/log/LogOpData.cpp:299-325 @
+    /// v2.5.2).
+    pub fn get_cache_id(&self) -> Result<Vec<u8>> {
+        let mut cache_id = Vec::new();
+        if !self.get_id().is_empty() {
+            cache_id.extend_from_slice(self.get_id());
+            cache_id.push(b' ');
+        }
+
+        let precision = default_values::FLOAT_DECIMALS;
+        let mut s = String::new();
+        s += transform_direction_to_string(self.direction);
+        s += " ";
+        s += &format!("Base {} ", self.get_base_string(precision));
+        s += &format!("LogSideSlope {} ", self.get_log_slope_string(precision)?);
+        s += &format!("LogSideOffset {} ", self.get_log_offset_string(precision)?);
+        s += &format!("LinSideSlope {} ", self.get_lin_slope_string(precision)?);
+        s += &format!("LinSideOffset {}", self.get_lin_offset_string(precision)?);
+        if self.red_params.len() > 4 {
+            s += &format!(" LinSideBreak {}", self.get_lin_break_string(precision)?);
+            if self.red_params.len() > 5 {
+                s += &format!(" LinearSlope {}", self.get_linear_slope_string(precision)?);
+            }
+        }
+        cache_id.extend_from_slice(s.as_bytes());
+        Ok(cache_id)
+    }
+
+    /// Whether `log` has the same direction, base and parameters, compared with `==` (so 0
+    /// and -0 are equal and a NaN never is). The metadata is ignored. The `OpData` base's type
+    /// comparison is [`OpData::equals`]'s.
+    ///
+    /// Port of `LogOpData::equals` (src/OpenColorIO/ops/log/LogOpData.cpp:327-338 @ v2.5.2).
+    pub fn equals(&self, log: &LogOpData) -> bool {
+        // `OpData::equals`: the same object, or the same type.
+        if std::ptr::eq(self, log) {
+            return true;
+        }
+        self.direction == log.direction
+            && self.base == log.base
+            && self.red_params == log.red_params
+            && self.green_params == log.green_params
+            && self.blue_params == log.blue_params
+    }
+
+    /// A copy of the data, built with the constructor from the three channels' parameters
+    /// ([`LogOpData::from_channel_params`]), which refuses channels of mixed styles ("Cannot
+    /// create Log op, all channels need to have the same style."); then the metadata is copied.
+    ///
+    /// Port of `LogOpData::clone` (src/OpenColorIO/ops/log/LogOpData.cpp:340-349 @ v2.5.2).
+    pub fn try_clone(&self) -> Result<LogOpData> {
+        let mut clone = LogOpData::from_channel_params(
+            self.base(),
+            self.red_params().clone(),
+            self.green_params().clone(),
+            self.blue_params().clone(),
+            self.direction,
+        )?;
+        *clone.get_format_metadata_mut() = self.get_format_metadata().clone();
+        Ok(clone)
+    }
+
+    /// The same log in the other direction, validated. The copy is [`LogOpData::try_clone`]'s,
+    /// so channels of mixed styles are its error, which comes before validation's.
+    ///
+    /// Port of `LogOpData::inverse` (src/OpenColorIO/ops/log/LogOpData.cpp:351-362 @ v2.5.2).
+    pub fn inverse(&self) -> Result<LogOpData> {
+        let mut inv_op = self.try_clone()?;
+
+        inv_op.set_direction(get_inverse_transform_direction(self.direction));
+        inv_op.validate()?;
+
+        // Note that any existing metadata could become stale at this point but trying to update
+        // it is also challenging since inverse() is sometimes called even during the creation
+        // of new ops.
+        Ok(inv_op)
+    }
+
+    /// One parameter's text with `precision` significant digits: the red value when the
+    /// channels are equal, else the three, comma-separated; "Log: accessing parameter that does
+    /// not exist." past the red channel's parameters, and the U-20 error past the green or blue
+    /// channel's, where upstream reads past them.
+    ///
+    /// Port of `getParameterString<index>` (src/OpenColorIO/ops/log/LogOpData.cpp:389-414 @
+    /// v2.5.2).
+    fn get_parameter_string(&self, index: usize, precision: i64) -> Result<String> {
+        let mut o = OStringStream::new(Crt::NATIVE);
+        o.precision = precision;
+
+        if index < self.red_params.len() {
+            if self.all_components_equal() {
+                o.put_f64(self.red_params[index]);
+            } else {
+                if index >= self.green_params.len() || index >= self.blue_params.len() {
+                    return Err(Exception::new(SHORT_PARAMS));
+                }
+                o.put_f64(self.red_params[index]);
+                o.put_str(", ");
+                o.put_f64(self.green_params[index]);
+                o.put_str(", ");
+                o.put_f64(self.blue_params[index]);
+            }
+        } else {
+            return Err(Exception::new(
+                "Log: accessing parameter that does not exist.",
+            ));
+        }
+        Ok(o.into_string())
+    }
+
+    /// Port of `LogOpData::getBaseString` (src/OpenColorIO/ops/log/LogOpData.cpp:416-422 @
+    /// v2.5.2).
+    pub fn get_base_string(&self, precision: i64) -> String {
+        let mut o = OStringStream::new(Crt::NATIVE);
+        o.precision = precision;
+        o.put_f64(self.base);
+        o.into_string()
+    }
+
+    /// Port of `LogOpData::getLogSlopeString` (src/OpenColorIO/ops/log/LogOpData.cpp:424-427 @
+    /// v2.5.2).
+    pub fn get_log_slope_string(&self, precision: i64) -> Result<String> {
+        self.get_parameter_string(LOG_SIDE_SLOPE, precision)
+    }
+
+    /// Port of `LogOpData::getLinSlopeString` (src/OpenColorIO/ops/log/LogOpData.cpp:429-432 @
+    /// v2.5.2).
+    pub fn get_lin_slope_string(&self, precision: i64) -> Result<String> {
+        self.get_parameter_string(LIN_SIDE_SLOPE, precision)
+    }
+
+    /// Port of `LogOpData::getLinOffsetString` (src/OpenColorIO/ops/log/LogOpData.cpp:434-437
+    /// @ v2.5.2).
+    pub fn get_lin_offset_string(&self, precision: i64) -> Result<String> {
+        self.get_parameter_string(LIN_SIDE_OFFSET, precision)
+    }
+
+    /// Port of `LogOpData::getLogOffsetString` (src/OpenColorIO/ops/log/LogOpData.cpp:439-442
+    /// @ v2.5.2).
+    pub fn get_log_offset_string(&self, precision: i64) -> Result<String> {
+        self.get_parameter_string(LOG_SIDE_OFFSET, precision)
+    }
+
+    /// Port of `LogOpData::getLinBreakString` (src/OpenColorIO/ops/log/LogOpData.cpp:444-447 @
+    /// v2.5.2).
+    pub fn get_lin_break_string(&self, precision: i64) -> Result<String> {
+        self.get_parameter_string(LIN_SIDE_BREAK, precision)
+    }
+
+    /// Port of `LogOpData::getLinearSlopeString` (src/OpenColorIO/ops/log/LogOpData.cpp:449-452
+    /// @ v2.5.2).
+    pub fn get_linear_slope_string(&self, precision: i64) -> Result<String> {
+        self.get_parameter_string(LINEAR_SLOPE, precision)
+    }
+
+    /// Port of `OpData::getFormatMetadata() const` (src/OpenColorIO/Op.h:164 @ v2.5.2).
+    pub fn get_format_metadata(&self) -> &FormatMetadataImpl {
+        &self.metadata
+    }
+
+    /// Port of `OpData::getFormatMetadata()` (src/OpenColorIO/Op.h:163 @ v2.5.2).
+    pub fn get_format_metadata_mut(&mut self) -> &mut FormatMetadataImpl {
+        &mut self.metadata
+    }
+
+    /// Port of `OpData::getID` (src/OpenColorIO/Op.cpp:81-84 @ v2.5.2).
+    pub fn get_id(&self) -> &[u8] {
+        self.metadata.get_attribute_value_string(Some(METADATA_ID))
+    }
+
     /// The camera style: a linear segment below `LIN_SIDE_BREAK`.
     ///
     /// Port of `LogOpData::isCamera` (src/OpenColorIO/ops/log/LogOpData.cpp:488-491 @ v2.5.2).
@@ -342,62 +730,14 @@ impl LogOpData {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use TransformDirection::{Forward, Inverse};
-
-    #[test]
-    fn styles_follow_the_parameters() {
-        let log2 = LogOpData::new(2.0, Forward);
-        assert!(log2.is_simple_log() && log2.is_log2() && !log2.is_log10());
-        assert!(!log2.is_camera());
-        assert!(LogOpData::new(10.0, Inverse).is_log10());
-
-        // Any non-default parameter makes it an affine log.
-        let mut affine = LogOpData::new(2.0, Forward);
-        let mut slope = affine.value(LogAffineParameter::LogSideSlope).unwrap();
-        slope[1] = 0.5;
-        affine
-            .set_value(LogAffineParameter::LogSideSlope, &slope)
-            .unwrap();
-        assert!(!affine.is_simple_log() && !affine.is_log2());
-        assert!(!affine.all_components_equal());
-
-        // The break adds a fifth parameter, the linear slope a sixth.
-        let mut camera = LogOpData::new(2.0, Forward);
-        let brk = camera.value(LogAffineParameter::LinSideSlope).unwrap();
-        assert!(
-            camera
-                .set_value(LogAffineParameter::LinearSlope, &brk)
-                .is_err()
-        );
-        camera
-            .set_value(LogAffineParameter::LinSideBreak, &brk)
-            .unwrap();
-        assert!(camera.is_camera() && !camera.is_log2());
-        assert_eq!(camera.red_params().len(), 5);
-        camera
-            .set_value(LogAffineParameter::LinearSlope, &brk)
-            .unwrap();
-        assert_eq!(camera.red_params().len(), 6);
-        camera.unset_linear_slope();
-        assert_eq!(camera.red_params().len(), 5);
-        assert_eq!(camera.value(LogAffineParameter::LinearSlope), None);
-    }
-
-    #[test]
-    fn channels_need_the_same_style() {
-        let four = LogOpData::new(2.0, Forward).red_params().clone();
-        let three = four[..3].to_vec();
-        let err = LogOpData::from_channel_params(2.0, four.clone(), three, four.clone(), Forward)
-            .unwrap_err();
-        assert_eq!(
-            err.message(),
-            "Cannot create Log op, all channels need to have the same style."
-        );
-        let a = LogOpData::from_channel_params(2.0, four.clone(), four.clone(), four, Forward);
-        let b = LogOpData::new(2.0, Inverse);
-        assert!(a.unwrap().is_inverse(&b));
+/// Port of `operator==(const LogOpData &, const LogOpData &)` (src/OpenColorIO/ops/log/
+/// LogOpData.cpp:493-496 @ v2.5.2).
+impl PartialEq for LogOpData {
+    fn eq(&self, other: &Self) -> bool {
+        self.equals(other)
     }
 }
+
+#[cfg(test)]
+#[path = "log_op_data_tests.rs"]
+mod tests;

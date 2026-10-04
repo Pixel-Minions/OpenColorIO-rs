@@ -213,9 +213,16 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
     2.1e-45 is refused as "cannot be 0", and 3.6e-45 is accepted;
   - a value in [1 − 2.5·2⁻²⁴, 1 + 2.5·2⁻²³] (about 1 − 1.49e-7 to 1 + 2.98e-7) counts as 1: a
     v1 exponent in that band is dropped as a no-op.
-- **Who notices:** configs with tiny slopes, or with exponents and gains within 3e-7 of 1.
+
+  `LogUtil::ValidateLegacyParams` (`ops/log/LogUtils.cpp:139-147`) compares a CTF Log's
+  double gamma with the float `0.01f` (0.009999999776482582): a gamma equal to the float's
+  value is refused, but the next double up is accepted, although it is below 0.01 and the
+  message says it "should be greater than 0.01".
+- **Who notices:** configs with tiny slopes, or with exponents and gains within 3e-7 of 1;
+  CTF files with a legacy Log gamma within 2.3e-10 below 0.01.
 - **A fix:** compare in double.
-- **Status:** matched in `p1-math` (1.4a).
+- **Status:** matched in `p1-math` (1.4a); the gamma in `p1-log` (1.3l1), `log_utils_oracle.rs`
+  against the wheel.
 
 ### I-21. The matrix inverse's singularity test is absolute
 
@@ -248,8 +255,10 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
     for UINT8, UINT10, UINT12, UINT16 and F16 input, at the default and DRAFT flags, differ,
     and so does the optimized processor's cache ID, which hashes them.
 
-  Log, LogAffine, LogCamera, ExposureContrast, and the LUT and built-in bakes came out the same
-  on both, over 3309 cases (the p1-oracle review's survey).
+  Log, LogAffine, ExposureContrast, and the LUT and built-in bakes came out the same on both,
+  over 3309 cases (the p1-oracle review's survey). LogCamera did too in that survey, but its
+  break on the log side is computed differently on each platform, and other parameters show
+  it (I-70).
 - **Who notices:** anyone comparing GPU textures, SDR 2.0 shaders, or renders of exponents at 8
   to 16 bits between a Windows and a Linux machine.
 - **A fix:** one math library on every platform, which changes the port's results on at least
@@ -385,6 +394,21 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p1-range` (1.3r1); `range_op_data_oracle.rs` checks both orders of
   validation and equality against the wheel.
 
+### I-52. The unknown Log style message is written over its own start
+
+- **Upstream:** `LogUtil::ConvertStringToStyle` (`ops/log/LogUtils.cpp:54-59`) builds its
+  error in `std::stringstream ss("Unknown Log style: '"); ss << str << "'.";`. A stream
+  constructed with text starts writing at its beginning, so the style name and `'.` overwrite
+  "Unknown Log style: '" instead of following it: "foo" gives "foo'.wn Log style: '", and a
+  name of 18 characters or more replaces it all. `ConvertStyleToString`'s message for a value
+  outside the enum (`LogUtils.cpp:87-90`) has the same bug, but a Rust enum can't hold such a
+  value. The only caller, the CTF/CLF reader (`fileformats/ctf/CTFReaderHelper.cpp:3564-3571`),
+  replaces the message with its own ("Required attribute 'style' 'foo' is invalid."), so no
+  output shows it.
+- **Who notices:** nobody through the library; code calling the function directly.
+- **A fix:** `std::ostringstream ss; ss << "Unknown Log style: '" << str << "'.";`.
+- **Status:** matched in `p1-log` (1.3l1); `log_utils.rs`, `overwritten`.
+
 ### I-55. Exponents that differ past 7 digits share a cache ID
 
 - **Upstream:** an Exponent op's cache ID writes each exponent with 7 significant digits
@@ -495,6 +519,34 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   prefix for all three.
 - **Status:** matched in `p1-cdl` (1.3c1), checked against the wheel in
   `crates/ocio-ops/tests/cdl_op_data_oracle.rs` and the battery.
+
+### I-70. A camera log's break differs between Windows and Linux
+
+- **Upstream:** `LogUtil::GetLogSideBreak` (`ops/log/LogUtils.cpp:270-281`) computes the
+  break on the log side of a LogCameraTransform as `float logSideBreak =
+  log2((float)(...)); logSideBreak *= (float)logSlope / log2((float)base);`. The wheels
+  compile it differently:
+  - Windows (MSVC) calls `log2f` and computes every step in `float`;
+  - Linux (GCC, libstdc++) calls `double log2(double)` on the promoted arguments, so the
+    quotient is a `double` and `*=` multiplies in `double` before rounding back to `float`.
+    It links `log2@GLIBC_2.2.5`, whose compatibility wrapper returns a positive NaN for a
+    negative argument, where the UCRT's `log2f` returns the negative x86 default NaN.
+
+  Finite, valid parameters then give breaks one ULP apart: the "per channel, base 10" case
+  of `log_oracle.rs` gets 0x3e16fa6b on Windows and 0x3e16fa6c on Linux on its red channel,
+  and differs on all three channels. A break whose argument `linSlope * linBreak + linOffset`
+  is negative is a NaN of each platform's sign. The break feeds the offset of the linear
+  segment (`GetLinearOffset`) and the inverse's choice of segment, so the pixels at and
+  below the break differ, and so do the NaNs the linear segment produces.
+- **Who notices:** anyone comparing renders of a LogCameraTransform, or a camera-style CTF
+  Log, between a Windows and a Linux machine; ARRI LogC3 (EI 800) happens to give the same
+  break on both.
+- **A fix:** one computation and one `log2` on every platform (`log2f` in `float`, say),
+  which changes the port's results on at least one of them.
+- **Status:** matched in `p1-log` (1.3l1, the S2 spike's variants); `log_utils.rs`,
+  `get_log_side_break_msvc` and `get_log_side_break_libstdcxx`; `log_oracle.rs`,
+  `camera_cases_distinguish_the_log_side_break_variants` and the camera battery, on both
+  platforms.
 
 ## Transforms
 
@@ -927,6 +979,38 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Status:** matched in `p1-range` (before 1.3r1), the renderer in `p1-matrix`;
   `matrix_op_tests.rs` checks the errors, the answers with offsets, and that validating clears
   them.
+
+### U-20. A Log op's data with short channels
+
+- **Upstream:** `LogOpData`'s constructor from three parameter vectors accepts channels that
+  all have fewer than 4 parameters (`ops/log/LogOpData.cpp:86-107`), and `setRedParams`,
+  `setGreenParams` and `setBlueParams` set any vector. Only upstream's tests and the CTF/CLF
+  reader use them, and validation refuses both cases ("Log: expecting at least 4
+  parameters.", "Log: Red, green & blue parameters must have the same size."), but
+  `CreateLogOp` doesn't validate a forward op's data (`ops/log/LogOp.cpp:139-150`). Where the
+  data isn't validated:
+  - `setValue` writes past a channel too short for the parameter (`LogOpData.cpp:120-148`);
+  - `getValue`, and so `getParameters`, reads past a green or blue channel shorter than the
+    red one (`LogOpData.cpp:160-196`);
+  - `getIdentityReplacement` reads the red channel's linear offset and slope
+    (`LogOpData.cpp:268-277`);
+  - the parameter strings of the cache ID read past a green or blue channel shorter than the
+    red one (`LogOpData.cpp:389-414`);
+  - the renderers' `updateData` reads the first 4 parameters of each channel, and the first 5
+    for the camera style (`Log2LinRenderer`, `Lin2LogRenderer` and `CameraL2LBaseRenderer`,
+    `ops/log/LogOpCPU.cpp:530-545, 630-645, 728-742`), so `LogOp::getCPUOp` and `Op::apply`
+    read past a shorter channel.
+- **Decided** (general rule): the port returns an error instead: "Log: the channels have
+  fewer parameters than this needs: upstream accesses past them." from
+  `LogOpData::{set_value, value, get_parameters, get_identity_replacement}`, the parameter
+  strings (so `get_cache_id`) and `get_log_renderer` (so `Op::{get_cpu_op, apply,
+  apply_in_out}`). `get_parameters` leaves an array the red channel has no parameter for as
+  it is, as upstream's does, and raises for one the red channel has and the green or blue
+  one doesn't, after setting the arrays before it. A CPU processor is never affected: its
+  `finalize` validates the ops.
+- **Status:** matched in `p1-log` (1.3l1, and the verifier's fixes);
+  `log_op_data_tests.rs`, `short_channels_are_errors`; `log_op_tests.rs`,
+  `renderers_of_short_channels_raise`.
 
 ### U-24. Queries of a Gamma op whose channels have too few parameters
 
