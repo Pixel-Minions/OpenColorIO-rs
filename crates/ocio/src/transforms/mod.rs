@@ -6,3 +6,4 @@
 
 pub mod group_transform;
 pub mod matrix_transform;
+pub mod range_transform;
