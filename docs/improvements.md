@@ -646,7 +646,12 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   maxOut of inf gives `outColor.rgb * vec3(inf, inf, inf) + vec3(-inf, -inf, -inf)` and
   `min(vec3(inf, inf, inf), ...)`; a minIn of -inf gives an offset of `-nan(ind)` on
   Windows: `crates/ocio-gpu/tests/range_op_gpu_oracle.rs`
-  (`extreme_bounds_write_the_wheels_shader`).
+  (`extreme_bounds_write_the_wheels_shader`). The CDL writer (1.3c4) writes the renderers'
+  `float` parameters, which its validation lets be NaN or infinite, and which a `double`
+  beyond `FLT_MAX` overflows: through the wheel, a slope of 1e39 and an offset of NaN give
+  `vec3 slope = vec3(inf, ...)` and `vec3 offset = vec3(nan, ...)`; an infinite saturation
+  goes through `declareVar`, which writes `3.40282347e+38` instead:
+  `crates/ocio-gpu/tests/cdl_op_gpu_oracle.rs` (`extreme_parameters_write_the_wheels_shader`).
 
 ## Python module (`ocio-py`)
 

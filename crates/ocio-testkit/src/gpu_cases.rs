@@ -532,6 +532,313 @@ pub fn range_cases() -> Vec<RangeCase> {
     ]
 }
 
+/// The parameters of a `CDLOp` GPU test's CDL (tests/gpu/CDLOp_test.cpp @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CdlParams {
+    /// `setSlope`.
+    pub slope: [f64; 3],
+    /// `setOffset`.
+    pub offset: [f64; 3],
+    /// `setPower`.
+    pub power: [f64; 3],
+    /// `setSat`, when the test calls it.
+    pub sat: Option<f64>,
+}
+
+/// One `OCIO_ADD_GPU_TEST(CDLOp, ...)`: a `CDLTransform` in a config of major version
+/// `version`, with the setters the test calls (tests/gpu/CDLOp_test.cpp @ v2.5.2). A version 1
+/// config builds the CDL as matrices and an exponent, a version 2 config a CDL op
+/// (`BuildCDLOp`, src/OpenColorIO/ops/cdl/CDLOp.cpp:200-265).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CdlCase {
+    /// The test's name.
+    pub name: &'static str,
+    /// `setStyle`, when the test calls it: a `CDL_*` name.
+    pub style: Option<&'static str>,
+    /// `TRANSFORM_DIR_INVERSE`, rather than forward.
+    pub inverse: bool,
+    /// The CDL's parameters.
+    pub params: CdlParams,
+    /// `config->setMajorVersion`: 1 when the test calls it, otherwise `Config::Create()`'s 2.
+    pub version: u32,
+    /// `setLegacyShader(true)`.
+    pub legacy_shader: bool,
+    /// `setTestWideRange`: every test calls it.
+    pub test_wide_range: bool,
+    /// The harness's NaN inputs, unless the test calls `setTestNaN(false)`.
+    pub test_nan: bool,
+    /// The harness's infinite inputs, unless the test calls `setTestInfinity(false)`.
+    pub test_infinity: bool,
+    /// `setErrorThreshold`: the absolute error allowed (every test calls
+    /// `setRelativeComparison(false)`).
+    pub error_threshold: f32,
+}
+
+impl CdlCase {
+    /// The transform's spec for the oracle, with the setters in the test's order: the style
+    /// when it sets one, the direction, the slope, offset and power, then the saturation when
+    /// it sets one.
+    pub fn transform(&self) -> Value {
+        let mut calls = Vec::new();
+        if let Some(style) = self.style {
+            calls.push(json!(["setStyle", {"enum": style}]));
+        }
+        let direction = if self.inverse {
+            "TRANSFORM_DIR_INVERSE"
+        } else {
+            "TRANSFORM_DIR_FORWARD"
+        };
+        calls.push(json!(["setDirection", {"enum": direction}]));
+        calls.push(json!(["setSlope", self.params.slope.to_vec()]));
+        calls.push(json!(["setOffset", self.params.offset.to_vec()]));
+        calls.push(json!(["setPower", self.params.power.to_vec()]));
+        if let Some(sat) = self.params.sat {
+            calls.push(json!(["setSat", sat]));
+        }
+        json!({"class": "CDLTransform", "calls": calls})
+    }
+}
+
+/// `CDL_Data_1` (tests/gpu/CDLOp_test.cpp:20-25 @ v2.5.2).
+const CDL_DATA_1: CdlParams = CdlParams {
+    slope: [1.35, 1.10, 0.71],
+    offset: [0.05, -0.23, 0.11],
+    power: [0.93, 0.81, 1.27],
+    sat: None,
+};
+
+/// `CDL_Data_2` (tests/gpu/CDLOp_test.cpp:149-155 @ v2.5.2).
+const CDL_DATA_2: CdlParams = CdlParams {
+    slope: [1.15, 1.10, 0.90],
+    offset: [0.05, -0.02, 0.07],
+    power: [1.20, 0.95, 1.13],
+    sat: Some(0.9),
+};
+
+/// `CDL_Data_3` (tests/gpu/CDLOp_test.cpp:282-288 @ v2.5.2).
+const CDL_DATA_3: CdlParams = CdlParams {
+    slope: [3.405, 1.0, 1.0],
+    offset: [-0.178, -0.178, -0.178],
+    power: [1.095, 1.095, 1.0],
+    sat: Some(1.2),
+};
+
+/// The `CDLOp` GPU tests (tests/gpu/CDLOp_test.cpp:27-352 @ v2.5.2), in the file's order.
+pub fn cdl_cases() -> Vec<CdlCase> {
+    // (name, style, inverse, params, version, legacy, wide range, NaN, infinity, threshold)
+    type Row = (
+        &'static str,
+        Option<&'static str>,
+        bool,
+        CdlParams,
+        u32,
+        bool,
+        bool,
+        bool,
+        bool,
+        f32,
+    );
+    let (asc, no_clamp) = (Some("CDL_ASC"), Some("CDL_NO_CLAMP"));
+    let rows: [Row; 15] = [
+        (
+            "clamp_fwd_v1_legacy_shader",
+            None,
+            false,
+            CDL_DATA_1,
+            1,
+            true,
+            true,
+            false,
+            true,
+            1e-6,
+        ),
+        (
+            "clamp_fwd_v1",
+            None,
+            false,
+            CDL_DATA_1,
+            1,
+            false,
+            true,
+            false,
+            true,
+            1e-6,
+        ),
+        (
+            "clamp_fwd_v2",
+            asc,
+            false,
+            CDL_DATA_1,
+            2,
+            false,
+            true,
+            true,
+            true,
+            1e-5,
+        ),
+        (
+            "clamp_fwd_no_clamp_v2",
+            no_clamp,
+            false,
+            CDL_DATA_1,
+            2,
+            false,
+            true,
+            false,
+            false,
+            5e-5,
+        ),
+        (
+            "clamp_inv_v2",
+            asc,
+            true,
+            CDL_DATA_1,
+            2,
+            false,
+            true,
+            true,
+            true,
+            1e-4,
+        ),
+        (
+            "clamp_inv_no_clamp_v2",
+            no_clamp,
+            true,
+            CDL_DATA_1,
+            2,
+            false,
+            true,
+            false,
+            false,
+            1e-4,
+        ),
+        (
+            "clamp_fwd_v1_legacy_shader_Data_2",
+            None,
+            false,
+            CDL_DATA_2,
+            1,
+            true,
+            true,
+            false,
+            false,
+            1e-6,
+        ),
+        (
+            "clamp_fwd_v1_Data_2",
+            None,
+            false,
+            CDL_DATA_2,
+            1,
+            false,
+            true,
+            false,
+            false,
+            1e-6,
+        ),
+        (
+            "clamp_fwd_v2_Data_2",
+            asc,
+            false,
+            CDL_DATA_2,
+            2,
+            false,
+            true,
+            true,
+            true,
+            2e-5,
+        ),
+        (
+            "clamp_inv_v2_Data_2",
+            asc,
+            true,
+            CDL_DATA_2,
+            2,
+            false,
+            true,
+            true,
+            true,
+            2e-5,
+        ),
+        (
+            "clamp_fwd_no_clamp_v2_Data_2",
+            no_clamp,
+            false,
+            CDL_DATA_2,
+            2,
+            false,
+            true,
+            false,
+            false,
+            5e-5,
+        ),
+        (
+            "clamp_inv_no_clamp_v2_Data_2",
+            no_clamp,
+            true,
+            CDL_DATA_2,
+            2,
+            false,
+            true,
+            false,
+            false,
+            5e-5,
+        ),
+        (
+            "clamp_fwd_v2_Data_3",
+            asc,
+            false,
+            CDL_DATA_3,
+            2,
+            false,
+            true,
+            true,
+            true,
+            5e-5,
+        ),
+        (
+            "clamp_fwd_no_clamp_v2_Data_3",
+            no_clamp,
+            false,
+            CDL_DATA_3,
+            2,
+            false,
+            false,
+            false,
+            false,
+            5e-5,
+        ),
+        (
+            "clamp_inv_no_clamp_v2_Data_3",
+            no_clamp,
+            true,
+            CDL_DATA_3,
+            2,
+            false,
+            false,
+            false,
+            false,
+            5e-5,
+        ),
+    ];
+    rows.into_iter()
+        .map(
+            |(name, style, inverse, params, version, legacy, wide, nan, inf, threshold)| CdlCase {
+                name,
+                style,
+                inverse,
+                params,
+                version,
+                legacy_shader: legacy,
+                test_wide_range: wide,
+                test_nan: nan,
+                test_infinity: inf,
+                error_threshold: threshold,
+            },
+        )
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -928,5 +1235,222 @@ mod tests {
         }
         // The `float` literal reaches the setter, not its decimal text.
         assert_ne!(cases[0].min_in, Some(0.1));
+    }
+
+    /// Each of upstream's fifteen tests, in the file's order, builds the spec its body builds
+    /// (tests/gpu/CDLOp_test.cpp:20-352 @ v2.5.2): the style when it sets one, the direction,
+    /// the data set's slope, offset and power, and its saturation when it sets one; the
+    /// config's version, the legacy shader, the wide range, NaN and infinity inputs, and the
+    /// threshold.
+    #[test]
+    fn cdl_cases_are_upstreams() {
+        let data_1 = (
+            json!([1.35, 1.10, 0.71]),
+            json!([0.05, -0.23, 0.11]),
+            json!([0.93, 0.81, 1.27]),
+            None,
+        );
+        let data_2 = (
+            json!([1.15, 1.10, 0.90]),
+            json!([0.05, -0.02, 0.07]),
+            json!([1.20, 0.95, 1.13]),
+            Some(json!(0.9)),
+        );
+        let data_3 = (
+            json!([3.405, 1.0, 1.0]),
+            json!([-0.178, -0.178, -0.178]),
+            json!([1.095, 1.095, 1.0]),
+            Some(json!(1.2)),
+        );
+        let spec = |style: Option<&str>, dir: &str, data: &(Value, Value, Value, Option<Value>)| {
+            let mut calls = Vec::new();
+            if let Some(style) = style {
+                calls.push(json!(["setStyle", {"enum": style}]));
+            }
+            calls.push(json!(["setDirection", {"enum": dir}]));
+            calls.push(json!(["setSlope", data.0]));
+            calls.push(json!(["setOffset", data.1]));
+            calls.push(json!(["setPower", data.2]));
+            if let Some(sat) = &data.3 {
+                calls.push(json!(["setSat", sat]));
+            }
+            json!({"class": "CDLTransform", "calls": calls})
+        };
+        let (fwd, inv) = ("TRANSFORM_DIR_FORWARD", "TRANSFORM_DIR_INVERSE");
+        let (asc, nc) = (Some("CDL_ASC"), Some("CDL_NO_CLAMP"));
+        // (name, spec, version, legacy, wide range, NaN, infinity, threshold)
+        type Expected = (&'static str, Value, u32, bool, bool, bool, bool, f32);
+        let expected: Vec<Expected> = vec![
+            (
+                "clamp_fwd_v1_legacy_shader",
+                spec(None, fwd, &data_1),
+                1,
+                true,
+                true,
+                false,
+                true,
+                1e-6,
+            ),
+            (
+                "clamp_fwd_v1",
+                spec(None, fwd, &data_1),
+                1,
+                false,
+                true,
+                false,
+                true,
+                1e-6,
+            ),
+            (
+                "clamp_fwd_v2",
+                spec(asc, fwd, &data_1),
+                2,
+                false,
+                true,
+                true,
+                true,
+                1e-5,
+            ),
+            (
+                "clamp_fwd_no_clamp_v2",
+                spec(nc, fwd, &data_1),
+                2,
+                false,
+                true,
+                false,
+                false,
+                5e-5,
+            ),
+            (
+                "clamp_inv_v2",
+                spec(asc, inv, &data_1),
+                2,
+                false,
+                true,
+                true,
+                true,
+                1e-4,
+            ),
+            (
+                "clamp_inv_no_clamp_v2",
+                spec(nc, inv, &data_1),
+                2,
+                false,
+                true,
+                false,
+                false,
+                1e-4,
+            ),
+            (
+                "clamp_fwd_v1_legacy_shader_Data_2",
+                spec(None, fwd, &data_2),
+                1,
+                true,
+                true,
+                false,
+                false,
+                1e-6,
+            ),
+            (
+                "clamp_fwd_v1_Data_2",
+                spec(None, fwd, &data_2),
+                1,
+                false,
+                true,
+                false,
+                false,
+                1e-6,
+            ),
+            (
+                "clamp_fwd_v2_Data_2",
+                spec(asc, fwd, &data_2),
+                2,
+                false,
+                true,
+                true,
+                true,
+                2e-5,
+            ),
+            (
+                "clamp_inv_v2_Data_2",
+                spec(asc, inv, &data_2),
+                2,
+                false,
+                true,
+                true,
+                true,
+                2e-5,
+            ),
+            (
+                "clamp_fwd_no_clamp_v2_Data_2",
+                spec(nc, fwd, &data_2),
+                2,
+                false,
+                true,
+                false,
+                false,
+                5e-5,
+            ),
+            (
+                "clamp_inv_no_clamp_v2_Data_2",
+                spec(nc, inv, &data_2),
+                2,
+                false,
+                true,
+                false,
+                false,
+                5e-5,
+            ),
+            (
+                "clamp_fwd_v2_Data_3",
+                spec(asc, fwd, &data_3),
+                2,
+                false,
+                true,
+                true,
+                true,
+                5e-5,
+            ),
+            (
+                "clamp_fwd_no_clamp_v2_Data_3",
+                spec(nc, fwd, &data_3),
+                2,
+                false,
+                false,
+                false,
+                false,
+                5e-5,
+            ),
+            (
+                "clamp_inv_no_clamp_v2_Data_3",
+                spec(nc, inv, &data_3),
+                2,
+                false,
+                false,
+                false,
+                false,
+                5e-5,
+            ),
+        ];
+        let cases = cdl_cases();
+        assert_eq!(cases.len(), expected.len());
+        for (case, (name, spec, version, legacy, wide, nan, inf, threshold)) in
+            cases.iter().zip(expected)
+        {
+            assert_eq!(case.name, name);
+            assert_eq!(case.transform(), spec, "{name}");
+            assert_eq!(case.version, version, "{name}");
+            assert_eq!(case.legacy_shader, legacy, "{name}");
+            assert_eq!(
+                (case.test_wide_range, case.test_nan, case.test_infinity),
+                (wide, nan, inf),
+                "{name}"
+            );
+            assert_eq!(
+                case.error_threshold.to_bits(),
+                threshold.to_bits(),
+                "{name}"
+            );
+        }
     }
 }
