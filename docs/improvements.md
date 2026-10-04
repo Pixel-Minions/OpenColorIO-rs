@@ -693,6 +693,12 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   with an offset of 0, e.g. `ExponentWithLinearTransform([10, 2.4, 2.4, 1],
   [0, 0.055, 0.055, 0], NEGATIVE_LINEAR, INVERSE)`, gives
   `vec4 slope = vec4(inf, 12.9232101, ...)`; the same test checks it.
+  The Range writer (1.3r3): `RangeOpData::validate` accepts infinite bounds, and the scale
+  and offset it computes from them are infinite or NaN. Through the wheel, in GLSL 4.0, a
+  maxOut of inf gives `outColor.rgb * vec3(inf, inf, inf) + vec3(-inf, -inf, -inf)` and
+  `min(vec3(inf, inf, inf), ...)`; a minIn of -inf gives an offset of `-nan(ind)` on
+  Windows: `crates/ocio-gpu/tests/range_op_gpu_oracle.rs`
+  (`extreme_bounds_write_the_wheels_shader`).
 
 ## Python module (`ocio-py`)
 
