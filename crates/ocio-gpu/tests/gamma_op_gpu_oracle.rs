@@ -21,8 +21,8 @@
 //! validates, without a prefix).
 //!
 //! An identity of a basic style that clamps, and an inverse pair of them, become a Range op
-//! where the optimizer replaces identities (`GammaOpData::getIdentityReplacement`); the
-//! Range op's GPU writer (1.3r3) isn't ported yet, so those lists run without optimization.
+//! where the optimizer replaces identities (`GammaOpData::getIdentityReplacement`), which the
+//! Range op's GPU writer (1.3r3) writes.
 
 use ocio_gpu::gpu_processor::GpuProcessor;
 use ocio_gpu::{GpuLanguage, GpuShaderDesc};
@@ -484,7 +484,7 @@ fn upstreams_gpu_tests_write_the_wheels_shaders() {
 
 /// Each style, forward and inverse, in every language and at every level, with exponents
 /// whose `double` and `float` literals differ; identities and inverse pairs the optimizer
-/// removes (the clamping ones without optimization: see the module notes); every pair of
+/// removes, or replaces with a Range op for the styles that clamp; every pair of
 /// basic styles and directions, which combine; moncurves, which don't; a list around a
 /// matrix; a reverse slope beyond the float range; refusals; and names (an empty pixel name
 /// is an error, but in OSL).
@@ -495,21 +495,15 @@ fn every_style_writes_the_wheels_shader() {
     let one = [1.0; 4];
     let lin_one = ([1.0; 4], [0.0; 4]);
     let mut all: Vec<(String, Vec<T>)> = Vec::new();
-    let mut unoptimized: Vec<(String, Vec<T>)> = Vec::new();
     for neg in [Clamp, Mirror, PassThru] {
         for dir in [F, I] {
             let inv = get_inverse_transform_direction(dir);
             all.push((format!("{neg:?} {dir:?}"), vec![T::Exp(v, neg, dir)]));
-            let identities = if neg == Clamp {
-                &mut unoptimized
-            } else {
-                &mut all
-            };
-            identities.push((
+            all.push((
                 format!("{neg:?} {dir:?} identity"),
                 vec![T::Exp(one, neg, dir)],
             ));
-            identities.push((
+            all.push((
                 format!("{neg:?} {dir:?} inverse pair"),
                 vec![T::Exp(v, neg, dir), T::Exp(v, neg, inv)],
             ));
@@ -606,14 +600,6 @@ fn every_style_writes_the_wheels_shader() {
     let mut cases = Vec::new();
     for (label, chain) in all {
         cases.extend(cases_of(&label, chain, &levels(), Names::default()));
-    }
-    for (label, chain) in unoptimized {
-        cases.extend(cases_of(
-            &label,
-            chain,
-            &no_optimization(),
-            Names::default(),
-        ));
     }
     let names = [
         Names {
