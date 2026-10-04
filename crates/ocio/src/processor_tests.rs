@@ -3,7 +3,14 @@
 
 //! Tests of the processor: the parts of `tests/cpu/Processor_tests.cpp` @ v2.5.2 that need no
 //! transform class beyond the group, the environment's optimization flags against the C
-//! runtime's `strtoul`, and the processors' caches on ops built directly.
+//! runtime's `strtoul`, the processors' caches on ops built directly, and that a processor's
+//! getters leave it as it was.
+//!
+//! Which calls return the same processor is checked against the wheel by
+//! `tests/processor_cache_oracle.rs`, on processors of groups (no ops). The cache tests here
+//! run the same checks on processors with matrix ops, which the oracle's cases can't build
+//! until `MatrixTransform` is ported; they mirror upstream's own cache tests, and go when the
+//! oracle's cases have matrices.
 //!
 //! The upstream tests that build their processors from `MatrixTransform`,
 //! `ExposureContrastTransform` and `Lut3DTransform` come with those classes.
@@ -11,12 +18,12 @@
 use std::sync::Arc;
 
 use ocio_ops::open_color_types::{BitDepth, OptimizationFlags, TransformDirection};
-use ocio_ops::ops::matrix::matrix_op::create_offset_op;
+use ocio_ops::ops::matrix::MatrixOpData;
+use ocio_ops::ops::matrix::matrix_op::{create_matrix_op, create_offset_op};
 use ocio_ops::ops::noop::no_ops::{create_file_no_op, create_look_no_op};
 use ocio_testkit::crt::{ERANGE, strtoul_c};
 
 use super::*;
-use crate::caching::{OCIO_DISABLE_CACHE_FALLBACK, OCIO_DISABLE_PROCESSOR_CACHES};
 use crate::test_env::EnvGuard;
 use crate::transforms::group_transform::GroupTransform;
 
@@ -277,7 +284,9 @@ fn transform_format_metadata_out_of_range() {
 
 /// The optimized processors are cached by bit depths and flags, after the environment's
 /// override, as `OCIO_ADD_TEST(Processor, cache_optimized_processors)` checks them with two
-/// MatrixTransforms (tests/cpu/Processor_tests.cpp:302-372 @ v2.5.2).
+/// MatrixTransforms (tests/cpu/Processor_tests.cpp:302-372 @ v2.5.2). The wheel:
+/// `processor_cache_oracle.rs`, `cache_flags_and_variables_match_the_wheel` (oa, ob, oc) and
+/// `optimization_flags_variable_matches_the_wheel` (o0 against env_o0).
 #[test]
 fn cache_optimized_processors() {
     let env = EnvGuard::new();
@@ -330,7 +339,9 @@ fn cache_optimized_processors() {
 
 /// The CPU processors are cached by bit depths and flags, as `OCIO_ADD_TEST(Processor,
 /// cache_cpu_processors)` checks them with a MatrixTransform (Processor_tests.cpp:374-471 @
-/// v2.5.2), and not at all when the cache flags turn the cache off.
+/// v2.5.2), and not at all when the cache flags turn the cache off. The wheel:
+/// `processor_cache_oracle.rs`, `cache_flags_and_variables_match_the_wheel` (ca, cb, cc, and
+/// the `PROCESSOR_CACHE_OFF` case).
 #[test]
 fn cache_cpu_processors() {
     let _env = EnvGuard::new();
@@ -388,7 +399,8 @@ fn cache_cpu_processors() {
 }
 
 /// An optimized processor keeps its parent's cache flags (`Processor::Impl::operator=`,
-/// Processor.cpp:237-263 @ v2.5.2) and shares its metadata.
+/// Processor.cpp:237-263 @ v2.5.2) and shares its metadata: the port's structure, which the
+/// wheel's binding doesn't show.
 #[test]
 fn optimized_processors_keep_the_cache_flags_and_metadata() {
     let _env = EnvGuard::new();
@@ -407,93 +419,29 @@ fn optimized_processors_keep_the_cache_flags_and_metadata() {
     assert_eq!(optimized.processor_metadata().file(0), b"/a.clf");
 }
 
-/// The environment's flags apply to the CPU processors too; a value `std::stoul` refuses fails
-/// every optimized and CPU processor.
+/// A copy of a config keeps its cache flags and none of its processors
+/// (`Config::Impl::operator=`, Config.cpp:451-454 @ v2.5.2); the oracle doesn't copy configs.
+/// The rest of the config's cache is checked against the wheel by `processor_cache_oracle.rs`.
 #[test]
-fn env_override_applies_to_every_getter() {
-    let env = EnvGuard::new();
-    let proc1 = processor_of(two_offsets());
-    env.set(&[(OCIO_OPTIMIZATION_FLAGS_ENVVAR, "0")]);
-    let cpu_none = proc1.default_cpu_processor().unwrap();
-    env.set(&[]);
-    assert!(Arc::ptr_eq(
-        &cpu_none,
-        &proc1
-            .optimized_cpu_processor(OptimizationFlags::NONE)
-            .unwrap()
-    ));
-
-    env.set(&[(OCIO_OPTIMIZATION_FLAGS_ENVVAR, "x")]);
-    assert!(proc1.default_cpu_processor().is_err());
-    assert!(proc1.optimized_processor(OptimizationFlags::NONE).is_err());
-}
-
-/// The config's cache: the same transform gives the same processor; another transform of the
-/// same cache ID gives it too, unless `OCIO_DISABLE_CACHE_FALLBACK` is set; the cache flags
-/// and `clearProcessorCache` (Config.cpp:4791-4880 @ v2.5.2).
-#[test]
-fn config_processor_cache() {
-    let env = EnvGuard::new();
+fn config_copy_keeps_the_flags_and_no_processor() {
+    let _env = EnvGuard::new();
     let config = Config::create_raw();
-
-    let group = Transform::from(GroupTransform::new());
-    let mut inverse = GroupTransform::new();
-    inverse.set_direction(TransformDirection::Inverse);
-    let inverse = Transform::from(inverse);
-
-    let p1 = config.processor(&group).unwrap();
-    assert!(Arc::ptr_eq(&p1, &config.processor(&group).unwrap()));
-    assert_eq!(p1.cache_id().unwrap(), "<NOOP>");
-
-    // Another key, the same cache ID: the fallback.
-    assert!(Arc::ptr_eq(&p1, &config.processor(&inverse).unwrap()));
-    assert!(Arc::ptr_eq(
-        &p1,
-        &config
-            .processor_in_direction(&group, TransformDirection::Inverse)
-            .unwrap()
-    ));
-
-    config.clear_processor_cache();
-    env.set(&[(OCIO_DISABLE_CACHE_FALLBACK, "1")]);
-    let p2 = config.processor(&group).unwrap();
-    assert!(!Arc::ptr_eq(&p1, &p2));
-    let p3 = config.processor(&inverse).unwrap();
-    assert!(!Arc::ptr_eq(&p2, &p3));
-    assert!(Arc::ptr_eq(&p3, &config.processor(&inverse).unwrap()));
-    env.set(&[]);
-
-    // Disabled, then enabled again: the entries stay.
-    config.set_processor_cache_flags(ProcessorCacheFlags::OFF);
-    assert!(!Arc::ptr_eq(&p2, &config.processor(&group).unwrap()));
     config.set_processor_cache_flags(ProcessorCacheFlags::ENABLED);
-    assert!(Arc::ptr_eq(&p2, &config.processor(&group).unwrap()));
+    let group = Transform::from(GroupTransform::new());
+    let p1 = config.processor(&group).unwrap();
 
-    // The processors take the config's flags.
-    let off = Config::create_raw();
-    off.set_processor_cache_flags(ProcessorCacheFlags::OFF);
-    let p4 = off.processor(&group).unwrap();
-    assert_eq!(p4.cache_flags, ProcessorCacheFlags::OFF);
-    assert!(!p4.opt_processor_cache.is_enabled());
-
-    // A copy has the flags and none of the processors.
     let copy = (*config).clone();
     assert_eq!(copy.processor_cache_flags(), ProcessorCacheFlags::ENABLED);
-    assert!(!Arc::ptr_eq(&p2, &copy.processor(&group).unwrap()));
-}
+    let p2 = copy.processor(&group).unwrap();
+    assert!(!Arc::ptr_eq(&p1, &p2));
+    assert!(Arc::ptr_eq(&p2, &copy.processor(&group).unwrap()));
 
-/// `OCIO_DISABLE_PROCESSOR_CACHES` turns off a config's cache, read when the config is made.
-#[test]
-fn config_processor_cache_disabled_by_the_environment() {
-    let env = EnvGuard::new();
-    env.set(&[(OCIO_DISABLE_PROCESSOR_CACHES, "1")]);
-    let config = Config::create_raw();
-    env.set(&[]);
-    let group = Transform::from(GroupTransform::new());
-    assert!(!Arc::ptr_eq(
-        &config.processor(&group).unwrap(),
-        &config.processor(&group).unwrap()
-    ));
+    // The processors take the config's flags.
+    config.set_processor_cache_flags(ProcessorCacheFlags::OFF);
+    let p3 = config.processor(&group).unwrap();
+    assert_eq!(p3.cache_flags, ProcessorCacheFlags::OFF);
+    assert!(!p3.opt_processor_cache.is_enabled());
+    assert!(!p3.gpu_processor_cache.is_enabled());
 }
 
 /// A processor's ops are built once: building a processor twice is an internal error
@@ -536,4 +484,89 @@ fn create_group_transform_copies_the_metadata() {
     assert_eq!(group.num_transforms(), 0);
     assert_eq!(*group.format_metadata(), inner_metadata);
     assert_eq!(*processor.format_metadata(), inner_metadata);
+}
+
+/// What a processor's state is: its cache ID, computed afresh (the processor's own is computed
+/// once), and each op's data, its address and its cache ID.
+fn state(processor: &Processor) -> (String, Vec<(usize, String, Vec<u8>)>) {
+    let cache_id = cache_id_hash(&processor.ops.get_cache_id().expect("a cache ID"));
+    let ops = processor
+        .ops
+        .iter()
+        .map(|op| {
+            (
+                Arc::as_ptr(op.data()) as usize,
+                format!("{:?}", op.data()),
+                op.get_cache_id().expect("an op cache ID"),
+            )
+        })
+        .collect();
+    (cache_id, ops)
+}
+
+/// A processor of an inverse matrix, a 3x3 matrix (as a CLF file gives one, which the
+/// processor's finalize expands to 4x4) and an offset: every getter that makes a processor
+/// from it works on a copy of its ops, and leaves the processor's ops, their data and its
+/// cache ID as they were (the processor finalizes its own ops once, in `setTransform`).
+#[test]
+fn getters_leave_the_processor_as_it_was() {
+    let _env = EnvGuard::new();
+    let mut ops = OpVec::new();
+    let mut inverse = MatrixOpData::new();
+    inverse.set_rgba(&[
+        2.0, 0.1, 0.0, 0.0, 0.0, 1.5, 0.2, 0.0, 0.3, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0, 1.0,
+    ]);
+    create_matrix_op(&mut ops, inverse, TransformDirection::Inverse);
+    let mut three = MatrixOpData::new();
+    three.get_array_mut().resize(3, 3);
+    three
+        .get_array_mut()
+        .get_values_mut()
+        .copy_from_slice(&[1.1, 0.1, 0.0, 0.0, 0.9, 0.0, 0.2, 0.0, 1.2]);
+    create_matrix_op(&mut ops, three, TransformDirection::Forward);
+    create_offset_op(&mut ops, &[0.1, 0.2, 0.3, 0.0], TransformDirection::Forward);
+    let processor = processor_of(ops);
+
+    let before = state(&processor);
+    let cache_id = processor.cache_id().unwrap();
+    assert_eq!(before.1.len(), 3);
+
+    let (f16, u8_, f32) = (BitDepth::F16, BitDepth::Uint8, BitDepth::F32);
+    let made = [
+        processor
+            .optimized_processor(OptimizationFlags::DEFAULT)
+            .unwrap(),
+        processor
+            .optimized_processor(OptimizationFlags::NONE)
+            .unwrap(),
+        processor
+            .optimized_processor_with_bit_depths(f16, u8_, OptimizationFlags::ALL)
+            .unwrap(),
+    ];
+    processor.default_cpu_processor().unwrap();
+    processor
+        .optimized_cpu_processor_with_bit_depths(f16, u8_, OptimizationFlags::ALL)
+        .unwrap();
+    processor
+        .optimized_cpu_processor_with_bit_depths(f32, f32, OptimizationFlags::NONE)
+        .unwrap();
+    processor.default_gpu_processor().unwrap();
+    processor
+        .optimized_gpu_processor(OptimizationFlags::ALL)
+        .unwrap();
+    processor
+        .optimized_gpu_processor(OptimizationFlags::NONE)
+        .unwrap();
+    // createGroupTransform of a matrix op comes with MatrixTransform: an error until then.
+    let _ = processor.create_group_transform();
+    for optimized in &made {
+        optimized.default_cpu_processor().unwrap();
+        optimized.default_gpu_processor().unwrap();
+    }
+
+    assert_eq!(state(&processor), before);
+    assert_eq!(processor.cache_id().unwrap(), cache_id);
+    assert_eq!(processor.num_transforms(), 3);
+    // Not vacuous: the optimizer changed the copies' ops.
+    assert_ne!(state(&made[0]).1, before.1);
 }
