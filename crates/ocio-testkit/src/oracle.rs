@@ -25,11 +25,13 @@
 //!
 //! Under Intel SDE (`scripts/sde.sh`), the test process and the oracle it starts both see the
 //! emulated CPU, so the wheel and the port dispatch to the SIMD kernels of that CPU. On
-//! Windows, SDE now and then crashes the oracle (`0xC0000005`) while it starts, before it reads
-//! the request: importing `PyOpenColorIO` calls `platform.system()`, which under SDE falls back
-//! to starting `cmd /c ver`, and Pin's injection into that child crashes. Such a crash is
-//! started again, at most twice; it can't hide a bug of the wheel, since no command ran
-//! ([`crashed_unread`]).
+//! Windows, importing `PyOpenColorIO` calls `platform.system()`, which under SDE, where the
+//! WMI query fails, falls back to starting `cmd /c ver`; Pin's injection into that child now
+//! and then crashed the oracle (`0xC0000005`) before it read the request. The oracle's package
+//! (`oracle/ocio_oracle/__init__.py`) now answers that version from `sys.getwindowsversion()`
+//! without starting `ver`, before anything imports `PyOpenColorIO`. A crash before the request
+//! is read is still started again, at most twice; it can't hide a bug of the wheel, since no
+//! command ran ([`crashed_unread`]).
 //!
 //! Starting the oracle costs about a third of a second; a small `cpu_apply` inside it, about
 //! a tenth of a millisecond. [`Oracle::batch`] runs many calls in one process (the `batch`
