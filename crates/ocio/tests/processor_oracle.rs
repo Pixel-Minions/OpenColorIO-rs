@@ -248,3 +248,147 @@ fn group_processors_match_the_wheel() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// A group with format metadata, for `processor_metadata`.
+#[derive(Debug, Clone)]
+struct MetaGroup {
+    dir: TransformDirection,
+    name: Option<&'static str>,
+    id: Option<&'static str>,
+    attributes: Vec<(&'static str, &'static str)>,
+    children: Vec<MetaGroup>,
+}
+
+impl MetaGroup {
+    fn spec(&self) -> Value {
+        json!({
+            "direction": dir_name(self.dir),
+            "name": self.name,
+            "id": self.id,
+            "attributes": self.attributes.iter().map(|(n, v)| json!([n, v])).collect::<Vec<_>>(),
+            "children": self.children.iter().map(MetaGroup::spec).collect::<Vec<_>>(),
+        })
+    }
+
+    /// The group, its metadata set in the oracle's order: name, ID, attributes.
+    fn port(&self) -> Transform {
+        let mut group = GroupTransform::new();
+        group.set_direction(self.dir);
+        let metadata = group.format_metadata_mut();
+        if let Some(name) = self.name {
+            metadata.set_name(Some(name.as_bytes()));
+        }
+        if let Some(id) = self.id {
+            metadata.set_id(Some(id.as_bytes()));
+        }
+        for (name, value) in &self.attributes {
+            metadata
+                .add_attribute(Some(name.as_bytes()), Some(value.as_bytes()))
+                .expect("an attribute");
+        }
+        for child in &self.children {
+            group.append_transform(child.port());
+        }
+        group.into()
+    }
+}
+
+/// A metadata tree in the command's form.
+fn metadata_tree(metadata: &FormatMetadata) -> Value {
+    json!({
+        "element_name": text(metadata.get_element_name()),
+        "element_value": text(metadata.get_element_value()),
+        "attributes": metadata
+            .get_attributes()
+            .iter()
+            .map(|(name, value)| json!([text(name), text(value)]))
+            .collect::<Vec<_>>(),
+        "children": metadata
+            .get_children_elements()
+            .iter()
+            .map(metadata_tree)
+            .collect::<Vec<_>>(),
+    })
+}
+
+/// A `ProcessorMetadata`'s files (a set, in byte order) and looks (a list), from C strings;
+/// and the format metadata of groups' processors and of their `createGroupTransform()`: the
+/// metadata of the groups built while the ops are still empty, the last of them winning
+/// (`BuildGroupOps`, transforms/GroupTransform.cpp:178-183 @ v2.5.2). Against the wheel
+/// (`processor_metadata`).
+#[test]
+fn processor_metadata_matches_the_wheel() {
+    use TransformDirection::{Forward as F, Inverse as I};
+    let files = ["b", "a", "b", "c\u{0}d", "", "\u{e9}", "B", "a/b.clf"];
+    let looks = ["y", "x", "y\u{0}z", "", "y"];
+    let leaf = |dir, name, id, attributes| MetaGroup {
+        dir,
+        name,
+        id,
+        attributes,
+        children: Vec::new(),
+    };
+    let groups = [
+        leaf(F, None, None, Vec::new()),
+        leaf(
+            I,
+            Some("one"),
+            Some("UID42"),
+            vec![("k", "v"), ("name", "two")],
+        ),
+        MetaGroup {
+            dir: F,
+            name: Some("outer"),
+            id: Some("UID42"),
+            attributes: vec![("k", "v")],
+            children: vec![leaf(I, Some("inner"), None, vec![("a", "1")])],
+        },
+        MetaGroup {
+            dir: I,
+            name: Some("outer"),
+            id: None,
+            attributes: Vec::new(),
+            children: vec![
+                leaf(F, Some("first"), None, Vec::new()),
+                leaf(F, None, Some("second"), Vec::new()),
+            ],
+        },
+    ];
+
+    let response = Oracle::get().call(
+        "processor_metadata",
+        json!({"files": files, "looks": looks,
+            "groups": groups.iter().map(MetaGroup::spec).collect::<Vec<_>>()}),
+        &[],
+    );
+
+    let mut metadata = ocio::ProcessorMetadata::new();
+    for file in files {
+        metadata.add_file(file.as_bytes());
+    }
+    for look in looks {
+        metadata.add_look(look.as_bytes());
+    }
+    let config = Config::create_raw();
+    let port_groups: Vec<Value> = groups
+        .iter()
+        .map(|group| {
+            let processor = config.processor(&group.port()).expect("a processor");
+            let created = processor.create_group_transform().expect("a group");
+            json!({
+                "cache_id": processor.cache_id().expect("a cache ID"),
+                "metadata": metadata_tree(processor.format_metadata()),
+                "group_metadata": metadata_tree(created.format_metadata()),
+                "group_size": created.num_transforms(),
+            })
+        })
+        .collect();
+    let port = json!({
+        "metadata": {
+            "files": (0..metadata.num_files()).map(|i| text(metadata.file(i))).collect::<Vec<_>>(),
+            "looks": (0..metadata.num_looks()).map(|i| text(metadata.look(i))).collect::<Vec<_>>(),
+        },
+        "groups": port_groups,
+    });
+    assert_eq!(port, response.result);
+}
