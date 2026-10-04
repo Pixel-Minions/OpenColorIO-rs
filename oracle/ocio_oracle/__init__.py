@@ -21,8 +21,11 @@ def _platform_without_ver():
     Pin's injection into that child now and then crashes the oracle (0xC0000005) before it
     reads its request. Here ``_syscmd_ver`` answers the version ``ver`` prints,
     ``major.minor.build`` of ``sys.getwindowsversion()``, without starting it, and ``uname()``
-    runs once so its answer is cached before any import needs it. Where WMI answers, as
-    outside SDE, ``_syscmd_ver`` isn't called and nothing changes.
+    runs once so its answer is cached before any import needs it. Only ``uname()`` is cached:
+    ``platform.platform()`` (the ``info`` command) and ``platform.win32_ver()`` run
+    ``_win32_ver`` again, and where WMI fails, call the replaced ``_syscmd_ver`` again, which
+    still starts nothing. Where WMI answers, as outside SDE, ``_syscmd_ver`` isn't called and
+    nothing changes.
     """
     import platform
     import sys
