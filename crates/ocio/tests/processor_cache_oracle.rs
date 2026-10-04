@@ -3,7 +3,8 @@
 
 //! The processors' caches and the environment against the wheel, through the oracle's
 //! `processor_cache`: which `getProcessor`, `getOptimizedProcessor` and
-//! `getOptimizedCPUProcessor` calls give the same object, under the cache flags,
+//! `getOptimizedCPUProcessor`, `getDefaultGPUProcessor` and `getOptimizedGPUProcessor` calls
+//! give the same object, under the cache flags,
 //! `clearProcessorCache`, `OCIO_DISABLE_ALL_CACHES`, `OCIO_DISABLE_PROCESSOR_CACHES`,
 //! `OCIO_DISABLE_CACHE_FALLBACK` and `OCIO_OPTIMIZATION_FLAGS`, and the errors.
 //!
@@ -22,6 +23,7 @@ use ocio::{
     BitDepth, Config, GroupTransform, OptimizationFlags, Processor, ProcessorCacheFlags, Transform,
     TransformDirection,
 };
+use ocio_gpu::gpu_processor::GpuProcessor;
 use ocio_ops::cpu_processor::CpuProcessor;
 use ocio_ops::platform::{MapEnv, set_env_provider};
 use ocio_testkit::Oracle;
@@ -100,6 +102,8 @@ enum Step {
     Processor(String, Group, TransformDirection),
     Optimized(String, String, BitDepth, BitDepth, u64),
     Cpu(String, String, BitDepth, BitDepth, u64),
+    /// `getOptimizedGPUProcessor(flags)`, or `getDefaultGPUProcessor()` for `None`.
+    Gpu(String, String, Option<u64>),
 }
 
 fn depth_name(depth: BitDepth) -> &'static str {
@@ -130,6 +134,7 @@ impl Step {
             Step::Cpu(name, of, i, o, flags) => {
                 json!(["cpu", name, of, depth_name(*i), depth_name(*o), flags])
             }
+            Step::Gpu(name, of, flags) => json!(["gpu", name, of, flags]),
         }
     }
 }
@@ -154,6 +159,7 @@ impl Case {
 enum Object {
     Processor(Arc<Processor>),
     Cpu(Arc<CpuProcessor>),
+    Gpu(Arc<GpuProcessor>),
 }
 
 impl Object {
@@ -161,6 +167,7 @@ impl Object {
         match (self, other) {
             (Object::Processor(a), Object::Processor(b)) => Arc::ptr_eq(a, b),
             (Object::Cpu(a), Object::Cpu(b)) => Arc::ptr_eq(a, b),
+            (Object::Gpu(a), Object::Gpu(b)) => Arc::ptr_eq(a, b),
             _ => false,
         }
     }
@@ -169,6 +176,7 @@ impl Object {
         match self {
             Object::Processor(p) => p.cache_id().expect("a cache ID"),
             Object::Cpu(p) => String::from_utf8(p.get_cache_id().to_vec()).expect("UTF-8"),
+            Object::Gpu(p) => String::from_utf8(p.get_cache_id().to_vec()).expect("UTF-8"),
         }
     }
 }
@@ -237,6 +245,15 @@ fn run_port(case: &Case) -> Value {
                     let p = find(&objects, of)
                         .optimized_cpu_processor_with_bit_depths(*i, *o, flags)?;
                     objects.push((name.clone(), Object::Cpu(p)));
+                }
+                Step::Gpu(name, of, flags) => {
+                    let p = match flags {
+                        None => find(&objects, of).default_gpu_processor()?,
+                        Some(flags) => find(&objects, of).optimized_gpu_processor(
+                            OptimizationFlags(*flags as std::ffi::c_ulong),
+                        )?,
+                    };
+                    objects.push((name.clone(), Object::Gpu(p)));
                 }
             }
             Ok(())
@@ -369,6 +386,8 @@ fn the_fallback_and_the_hash_match_the_wheel() {
 /// The cache flags, `clearProcessorCache` and the variables that disable the caches, for the
 /// config's cache and the processors' caches.
 #[test]
+// `unsigned long` is already `u64` on Linux.
+#[allow(clippy::unnecessary_cast)]
 fn cache_flags_and_variables_match_the_wheel() {
     let all = groups(4);
     let steps = |flags: Option<&'static str>| {
@@ -386,6 +405,15 @@ fn cache_flags_and_variables_match_the_wheel() {
             Step::Cpu("ca".into(), "a".into(), F32, F32, 0),
             Step::Cpu("cb".into(), "a".into(), F32, F32, 0),
             Step::Cpu("cc".into(), "a".into(), F32, BitDepth::F16, 0),
+            Step::Gpu("ga".into(), "a".into(), None),
+            Step::Gpu("gb".into(), "a".into(), None),
+            Step::Gpu("gc".into(), "a".into(), Some(0)),
+            Step::Gpu("gd".into(), "a".into(), Some(0)),
+            Step::Gpu(
+                "ge".into(),
+                "a".into(),
+                Some(OptimizationFlags::DEFAULT.0 as u64),
+            ),
             Step::SetCacheFlags("PROCESSOR_CACHE_OFF"),
             Step::Processor("d".into(), all[1].clone(), TransformDirection::Forward),
             Step::Optimized("od".into(), "a".into(), F32, F32, 0),
@@ -395,6 +423,9 @@ fn cache_flags_and_variables_match_the_wheel() {
             Step::Processor("f".into(), all[1].clone(), TransformDirection::Forward),
             Step::Optimized("of".into(), "f".into(), F32, F32, 0),
             Step::Optimized("og".into(), "f".into(), F32, F32, 0),
+            Step::Gpu("gf".into(), "f".into(), None),
+            Step::Gpu("gg".into(), "f".into(), None),
+            Step::Gpu("gh".into(), "a".into(), None),
         ]);
         steps
     };
@@ -486,6 +517,11 @@ fn optimization_flags_variable_matches_the_wheel() {
             F32,
             explicit,
         ));
+        steps.push(Step::Gpu(
+            name("g", explicit as usize),
+            "p".into(),
+            Some(explicit),
+        ));
     }
     for (i, value) in values.iter().enumerate() {
         steps.push(Step::Env(FLAGS, Some(value.to_string())));
@@ -510,6 +546,8 @@ fn optimization_flags_variable_matches_the_wheel() {
             F32,
             0,
         ));
+        steps.push(Step::Gpu(name("env_g", i), "p".into(), Some(0x0000_0003)));
+        steps.push(Step::Gpu(name("env_gd", i), "p".into(), None));
     }
     steps.push(Step::Env(FLAGS, None));
     steps.push(Step::Optimized(
