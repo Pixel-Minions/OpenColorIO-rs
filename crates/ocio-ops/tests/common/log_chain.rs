@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Lists of Log transforms with Range and Matrix transforms, as the oracle builds them and as
-//! the port builds their ops: for the Log op's tests (`log_op_oracle.rs`) and the optimizer's
-//! bake (`lut1d_bake_oracle.rs`).
+//! Lists of Log transforms with Range, Matrix, Gamma, CDL and Lut1D transforms, as the oracle
+//! builds them and as the port builds their ops: for the Log op's tests (`log_op_oracle.rs`)
+//! and the optimizer's bake (`lut1d_bake_oracle.rs`).
 
 use ocio_ops::cpu_processor::CpuProcessor;
 use ocio_ops::exception::{Exception, Result};
 use ocio_ops::op::OpVec;
-use ocio_ops::open_color_types::{OptimizationFlags, TransformDirection};
+use ocio_ops::open_color_types::{NegativeStyle, OptimizationFlags, TransformDirection};
+use ocio_ops::ops::cdl::cdl_op::create_cdl_op;
+use ocio_ops::ops::gamma::gamma_op::create_gamma_op;
 use ocio_ops::ops::log::log_op::create_log_op;
 use ocio_ops::ops::log::log_op_data::{LogAffineParameter, LogOpData};
 use ocio_ops::ops::lut1d::Lut1DOpData;
@@ -21,6 +23,10 @@ use ocio_ops::ops::range::range_op::create_range_op;
 use ocio_testkit::battery::BitDepth as Depth;
 use serde_json::{Value, json};
 
+use super::cdl::Cdl;
+use super::gamma::{
+    exponent_op, exponent_spec, exponent_with_linear_op, exponent_with_linear_spec,
+};
 use super::image::{depth_name, port_depth};
 
 use TransformDirection::{Forward as F, Inverse as I};
@@ -49,6 +55,14 @@ pub(crate) enum T {
     Range01,
     /// A forward `Lut1DTransform` of 256 entries, which an 8-bit input looks up.
     Lut8,
+    /// An `ExponentTransform` (a Gamma op of a basic style): the exponents, the negative style
+    /// and the direction.
+    Gamma([f64; 4], NegativeStyle, TransformDirection),
+    /// An `ExponentWithLinearTransform` (a Gamma op of a moncurve style): the gammas, the
+    /// offsets, the negative style and the direction.
+    Moncurve([f64; 4], [f64; 4], NegativeStyle, TransformDirection),
+    /// A `CDLTransform` and its direction.
+    Cdl(Cdl, TransformDirection),
 }
 
 const SETTERS: [(&str, LogAffineParameter); 4] = [
@@ -140,6 +154,11 @@ pub(crate) fn transform(t: &T) -> Value {
                 "minOutValue": RANGE01[2], "maxOutValue": RANGE01[3],
             }});
         }
+        T::Gamma(value, neg, dir) => return exponent_spec(*value, *neg, *dir),
+        T::Moncurve(gamma, offset, neg, dir) => {
+            return exponent_with_linear_spec(*gamma, *offset, *neg, *dir);
+        }
+        T::Cdl(cdl, dir) => return cdl.spec(*dir),
         T::Lut8 => {
             let lut = lut8_data();
             let mut calls = vec![json!(["setLength", 256])];
@@ -169,7 +188,7 @@ fn port_log_data(t: &T) -> LogOpData {
                 .unwrap();
             (*base, Some(p), *dir)
         }
-        T::Range | T::Range01 | T::Matrix | T::CrossMatrix | T::Lut8 => unreachable!("a log"),
+        _ => unreachable!("a log: {t:?}"),
     };
     data.set_base(base);
     if let Some(params) = params {
@@ -234,6 +253,25 @@ pub(crate) fn port_raw_ops(chain: &[T]) -> Result<OpVec> {
                     RangeOpData::with_values(RANGE01[0], RANGE01[1], RANGE01[2], RANGE01[3])?;
                 create_range_op(&mut raw, data, F)?;
             }
+            T::Gamma(value, neg, dir) => {
+                // `BuildExponentOp` (src/OpenColorIO/ops/gamma/GammaOp.cpp:179-216 @ v2.5.2):
+                // validated, then a Gamma op, forward.
+                let data = exponent_op(*value, *neg, *dir);
+                data.validate()?;
+                create_gamma_op(&mut raw, data, F);
+            }
+            T::Moncurve(gamma, offset, neg, dir) => {
+                // `BuildExponentWithLinearOp` (GammaOp.cpp:179-216 @ v2.5.2).
+                let data = exponent_with_linear_op(*gamma, *offset, *neg, *dir);
+                data.validate()?;
+                create_gamma_op(&mut raw, data, F);
+            }
+            T::Cdl(cdl, dir) => {
+                // `BuildCDLOp` (src/OpenColorIO/ops/cdl/CDLOp.cpp:200-265 @ v2.5.2).
+                let data = cdl.op_data(*dir);
+                data.validate()?;
+                create_cdl_op(&mut raw, data, F);
+            }
             T::Lut8 => {
                 // `BuildLut1DOp`: validated, then copied (src/OpenColorIO/ops/lut1d/Lut1DOp.cpp:
                 // 244-253 @ v2.5.2).
@@ -275,7 +313,7 @@ pub(crate) fn staged_port_processor(
             T::Log(..) => "LogTransform validation failed: ",
             T::Affine(..) => "LogAffineTransform validation failed: ",
             T::Camera(..) => "LogCameraTransform validation failed: ",
-            T::Range | T::Range01 | T::Matrix | T::CrossMatrix | T::Lut8 => continue,
+            _ => continue,
         };
         let data = port_log_data(t);
         let mut valid = data.validate();

@@ -16,23 +16,36 @@
 //!   ID, and its first transform's `getData()`, the baked LUT's values, bit for bit;
 //! - the CPU processor's pixels, for every code of each input bit depth on each channel.
 //!
-//! The prefixes hold Log, LogAffine and LogCamera transforms, with Matrix and Range
-//! transforms before and after them; a matrix that mixes channels ends the prefix; a prefix
-//! of Matrix and Range transforms alone isn't baked.
+//! The bake uses each platform's math library, so its entries can differ between Windows and
+//! Linux (docs/improvements.md, I-24): the checks compare each platform's wheel with the port
+//! on that platform. They belong to `cpu-tests`.
+//!
+//! The prefixes hold Log, LogAffine and LogCamera transforms, Gamma ops (ExponentTransform and
+//! ExponentWithLinearTransform in a version 2 config), CDL ops, and Exponent ops (a version 1
+//! config's ExponentTransform), with Matrix and Range transforms before and after them; a
+//! matrix that mixes channels, or a CDL with a saturation, ends the prefix; a prefix of Matrix
+//! and Range transforms alone isn't baked, and neither is a single forward 1D LUT.
 
 mod common;
 
+use common::cdl::Cdl;
 use common::image::{depth_name, port_depth, port_image};
-use common::log_chain::{Affine, T, port_processor, port_raw_ops, processor};
+use common::log_chain::{Affine, T, port_raw_ops};
+use ocio_ops::cpu_processor::CpuProcessor;
 use ocio_ops::exception::Result;
 use ocio_ops::hash_utils::cache_id_hash;
 use ocio_ops::image_desc::Bytes;
 use ocio_ops::op::OpVec;
 use ocio_ops::op_data::OpData;
-use ocio_ops::open_color_types::{OptimizationFlags, TransformDirection};
+use ocio_ops::open_color_types::{CdlStyle, NegativeStyle, OptimizationFlags, TransformDirection};
+use ocio_ops::ops::exponent::ExponentOpData;
+use ocio_ops::ops::exponent::exponent_op::create_exponent_op;
 use ocio_ops::ops::lut1d::Lut1DOpData;
+use ocio_ops::ops::matrix::MatrixOpData;
+use ocio_ops::ops::matrix::matrix_op::create_matrix_op;
 use ocio_testkit::Oracle;
 use ocio_testkit::battery::BitDepth as Depth;
+use ocio_testkit::battery::{Combo, Direction, Format, Spec, yaml_list};
 use ocio_testkit::image::{Buffer, Channels, Data, Packed, Request, Stride};
 use ocio_testkit::oracle::BatchCall;
 use serde_json::{Value, json};
@@ -75,41 +88,216 @@ fn chains() -> Vec<Vec<T>> {
         // not at half input, and one at an integer output.
         vec![T::Range01, T::Log(2.0, F)],
         vec![T::Log(2.0, F), T::Range01],
+        // Gamma ops (an ExponentTransform in a version 2 config, and an
+        // ExponentWithLinearTransform), CDL ops, and Gamma or CDL ops with others; a CDL with a
+        // saturation mixes channels and ends the prefix.
+        vec![T::Gamma([2.2, 2.4, 1.8, 1.0], NegativeStyle::Clamp, F)],
+        vec![T::Gamma([2.6, 2.6, 2.6, 1.0], NegativeStyle::Mirror, I)],
+        vec![T::Gamma([2.2, 2.2, 2.2, 1.5], NegativeStyle::PassThru, F)],
+        vec![T::Moncurve(
+            [2.4, 2.2, 2.0, 1.0],
+            [0.055, 0.09, 0.1, 0.0],
+            NegativeStyle::Linear,
+            F,
+        )],
+        vec![T::Moncurve(
+            [2.4, 2.4, 2.4, 1.0],
+            [0.055, 0.055, 0.055, 0.0],
+            NegativeStyle::Mirror,
+            I,
+        )],
+        vec![T::Cdl(cdl(1.0, CdlStyle::Asc), F)],
+        vec![T::Cdl(cdl(1.0, CdlStyle::NoClamp), I)],
+        vec![T::Cdl(cdl(1.2, CdlStyle::Asc), F), T::Log(2.0, F)],
+        vec![
+            T::Matrix,
+            T::Gamma([2.2, 2.4, 1.8, 1.0], NegativeStyle::Clamp, F),
+            T::Cdl(cdl(1.0, CdlStyle::NoClamp), F),
+            T::Log(10.0, F),
+        ],
+        vec![
+            T::Gamma([2.2, 2.4, 1.8, 1.0], NegativeStyle::Mirror, F),
+            T::Cdl(cdl(1.2, CdlStyle::Asc), F),
+        ],
     ]
+}
+
+/// A `CDLTransform` with upstream's `multi_op_prefix` slope, offset and power
+/// (tests/cpu/OpOptimizers_tests.cpp:1447-1449 @ v2.5.2), the saturation `sat` and `style`.
+fn cdl(sat: f64, style: CdlStyle) -> Cdl {
+    Cdl {
+        slope: [1.35, 1.1, 0.071],
+        offset: [0.05, -0.23, 0.11],
+        power: [1.27, 0.81, 0.2],
+        sat,
+        style,
+    }
+}
+
+/// A list of an Exponent op's version 1 config: `ExponentTransform`s and scales.
+#[derive(Debug, Clone, Copy)]
+enum V1 {
+    /// An `ExponentTransform`: the exponents and the direction.
+    Exponent([f64; 4], TransformDirection),
+    /// A `MatrixTransform` scaling RGB.
+    Scale(f64),
+}
+
+/// What a processor is built from.
+#[derive(Debug, Clone)]
+enum Source {
+    /// A `GroupTransform` of these transforms, in the raw config (version 2).
+    Chain(Vec<T>),
+    /// A colour space of a version 1 config whose `from_reference` is a `GroupTransform` of
+    /// these transforms: only a version 1 config builds Exponent ops (`BuildExponentOp`,
+    /// src/OpenColorIO/ops/gamma/GammaOp.cpp:190-215 @ v2.5.2).
+    V1(Vec<V1>),
+}
+
+impl Source {
+    /// The oracle's arguments that name the processor.
+    fn processor_args(&self) -> Value {
+        match self {
+            Source::Chain(chain) => {
+                let children: Vec<Value> = chain.iter().map(common::log_chain::transform).collect();
+                json!({"transform": {"class": "GroupTransform", "children": children}})
+            }
+            Source::V1(items) => {
+                let children: Vec<String> = items
+                    .iter()
+                    .map(|item| match item {
+                        V1::Exponent(v, dir) => format!(
+                            "!<ExponentTransform> {{value: {}, direction: {}}}",
+                            yaml_list(v),
+                            match dir {
+                                F => "forward",
+                                I => "inverse",
+                            }
+                        ),
+                        V1::Scale(s) => format!(
+                            "!<MatrixTransform> {{matrix: {}}}",
+                            yaml_list(&[
+                                *s, 0., 0., 0., 0., *s, 0., 0., 0., 0., *s, 0., 0., 0., 0., 1.
+                            ])
+                        ),
+                    })
+                    .collect();
+                let group = format!("!<GroupTransform> {{children: [{}]}}", children.join(", "));
+                Spec::YamlV1(group).cpu_apply_args(&Combo {
+                    direction: Direction::Forward,
+                    fast_math: true,
+                    format: Format::F32_RGBA,
+                })
+            }
+        }
+    }
+
+    /// The oracle's arguments of the processor with `flags`, from `input` to `output`.
+    fn args(&self, flags: &str, input: Depth, output: Depth) -> Value {
+        let mut args = self.processor_args();
+        args["optimization"] = json!(flags);
+        args["in_bitdepth"] = json!(depth_name(port_depth(input)));
+        args["out_bitdepth"] = json!(depth_name(port_depth(output)));
+        args
+    }
+
+    /// The processor's ops, as it builds and finalizes them.
+    fn raw_ops(&self) -> Result<OpVec> {
+        match self {
+            Source::Chain(chain) => port_raw_ops(chain),
+            Source::V1(items) => {
+                let mut raw = OpVec::new();
+                for item in items {
+                    match item {
+                        // BuildExponentOp: the transform's direction (GammaOp.cpp:190-215).
+                        V1::Exponent(v, dir) => {
+                            create_exponent_op(&mut raw, ExponentOpData::from_values(v), *dir)?;
+                        }
+                        // BuildMatrixOp: the transform's data, validated (MatrixOp.cpp:395-404).
+                        V1::Scale(s) => {
+                            let mut data = MatrixOpData::create_diagonal_matrix(*s);
+                            data.set_array_value(15, 1.0);
+                            data.validate()?;
+                            create_matrix_op(&mut raw, data, F);
+                        }
+                    }
+                }
+                raw.finalize()?;
+                Ok(raw)
+            }
+        }
+    }
 }
 
 /// The port's optimized ops: `getOptimizedProcessor`'s steps on the processor's ops.
 fn port_optimized(
-    chain: &[T],
+    source: &Source,
     flags: OptimizationFlags,
     input: Depth,
     output: Depth,
 ) -> Result<OpVec> {
-    let mut ops = port_raw_ops(chain)?;
+    let mut ops = source.raw_ops()?;
     ops.finalize()?;
     ops.optimize(flags)?;
     ops.optimize_for_bitdepth(port_depth(input), port_depth(output), flags)?;
     Ok(ops)
 }
 
-/// A case of the optimized processor: a list, the input and output bit depths, and the flags.
-type BakeCase = (Vec<T>, Depth, Depth, &'static str, OptimizationFlags);
+/// A case of the optimized processor: what it's built from, the input and output bit depths,
+/// and the flags.
+type BakeCase = (Source, Depth, Depth, &'static str, OptimizationFlags);
 
-#[test]
-fn the_baked_luts_match_the_wheel() {
+/// `sources` at every input bit depth, to F32 and 16-bit output, at the levels that bake.
+fn bake_cases(sources: &[Source]) -> Vec<BakeCase> {
     let mut cases = Vec::new();
-    for chain in chains() {
+    for source in sources {
         for input in INPUTS {
             for output in [Depth::F32, Depth::Uint16] {
                 for (name, flags) in FLAGS {
-                    cases.push((chain.clone(), input, output, name, flags));
+                    cases.push((source.clone(), input, output, name, flags));
                 }
             }
         }
     }
+    cases
+}
+
+#[test]
+fn the_baked_luts_match_the_wheel() {
+    let sources: Vec<Source> = chains().into_iter().map(Source::Chain).collect();
+    let cases = bake_cases(&sources);
     let baked = check_bakes(&cases);
     // Most cases bake; some don't.
     assert!(baked > cases.len() / 2 && baked < cases.len(), "{baked}");
+}
+
+/// Lists of Exponent ops (`ExponentOp`, a version 1 config's), alone, in pairs, and with a
+/// scale: the bake renders them with the Exponent renderer and the math library.
+fn exponent_lists() -> Vec<Source> {
+    let a = [1.037289, 1.019015, 0.966082, 1.0];
+    let b = [2.0, 2.1, 3.0, 3.1];
+    vec![
+        vec![V1::Exponent(b, F)],
+        vec![V1::Exponent(b, I)],
+        vec![V1::Exponent(a, F), V1::Exponent(b, F)],
+        vec![V1::Scale(2.0), V1::Exponent(b, F)],
+        vec![V1::Exponent(a, F), V1::Scale(0.5), V1::Exponent(b, I)],
+    ]
+    .into_iter()
+    .map(Source::V1)
+    .collect()
+}
+
+#[test]
+fn exponent_bakes_match_the_wheel() {
+    let cases = bake_cases(&exponent_lists());
+    let baked = check_bakes(&cases);
+    assert!(baked > 0, "{baked}");
+}
+
+#[test]
+fn exponent_bakes_render_every_code_as_the_wheel() {
+    every_code_of(&exponent_lists());
 }
 
 /// The optimized processors of `cases` against the wheel: their cache IDs, and the baked LUT
@@ -117,16 +305,14 @@ fn the_baked_luts_match_the_wheel() {
 fn check_bakes(cases: &[BakeCase]) -> usize {
     let calls: Vec<BatchCall<'_>> = cases
         .iter()
-        .map(|(chain, input, output, name, _)| {
-            let children: Vec<Value> = chain.iter().map(common::log_chain::transform).collect();
+        .map(|(source, input, output, name, _)| {
+            let mut args = source.processor_args();
+            args["in_bitdepth"] = json!(depth_name(port_depth(*input)));
+            args["out_bitdepth"] = json!(depth_name(port_depth(*output)));
+            args["optimization"] = json!(name);
             BatchCall {
                 cmd: "processor_ops",
-                args: json!({
-                    "transform": {"class": "GroupTransform", "children": children},
-                    "in_bitdepth": depth_name(port_depth(*input)),
-                    "out_bitdepth": depth_name(port_depth(*output)),
-                    "optimization": name,
-                }),
+                args,
                 blobs: vec![],
             }
         })
@@ -135,13 +321,13 @@ fn check_bakes(cases: &[BakeCase]) -> usize {
 
     let mut failures = Vec::new();
     let mut baked = 0;
-    for ((chain, input, output, name, flags), response) in cases.iter().zip(responses) {
-        let what = format!("{chain:?} {input:?}->{output:?} {name}");
+    for ((source, input, output, name, flags), response) in cases.iter().zip(responses) {
+        let what = format!("{source:?} {input:?}->{output:?} {name}");
         let response = response.unwrap_or_else(|e| panic!("{what}: {e}"));
         let result = &response.result;
         assert!(result.get("exception").is_none(), "{what}: {result}");
         let optimized = &result["optimized"];
-        let ops = match port_optimized(chain, *flags, *input, *output) {
+        let ops = match port_optimized(source, *flags, *input, *output) {
             Ok(ops) => ops,
             Err(e) => {
                 failures.push(format!("{what}: the port raised {}", e.message()));
@@ -227,11 +413,15 @@ fn check_bakes(cases: &[BakeCase]) -> usize {
 #[test]
 fn a_single_lut_isnt_baked_again() {
     let mut cases = Vec::new();
-    for chain in [vec![T::Lut8]] {
-        for output in [Depth::F32, Depth::Uint16] {
-            for (name, flags) in FLAGS {
-                cases.push((chain.clone(), Depth::Uint8, output, name, flags));
-            }
+    for output in [Depth::F32, Depth::Uint16] {
+        for (name, flags) in FLAGS {
+            cases.push((
+                Source::Chain(vec![T::Lut8]),
+                Depth::Uint8,
+                output,
+                name,
+                flags,
+            ));
         }
     }
     check_bakes(&cases);
@@ -263,20 +453,27 @@ fn packed(buffer: usize, height: i64, depth: Depth) -> Packed {
 /// output.
 #[test]
 fn every_code_matches_the_wheel() {
+    let sources: Vec<Source> = chains().into_iter().map(Source::Chain).collect();
+    every_code_of(&sources);
+}
+
+/// The CPU processors of `sources`, with the default flags, from every code of each input bit
+/// depth, to F32 and to 16-bit output, against the wheel.
+fn every_code_of(sources: &[Source]) {
     let mut cases = Vec::new();
-    for chain in chains() {
+    for source in sources {
         for input in INPUTS {
             for output in [Depth::F32, Depth::Uint16] {
-                cases.push((chain.clone(), input, output));
+                cases.push((source.clone(), input, output));
             }
         }
     }
     let requests: Vec<Request> = cases
         .iter()
-        .map(|(chain, input, output)| {
+        .map(|(source, input, output)| {
             let (bytes, height) = ramp(*input);
             let out_size = if *output == Depth::F32 { 4 } else { 2 };
-            let mut request = Request::new(processor(chain, FLAGS[0].0, *input, *output));
+            let mut request = Request::new(source.args(FLAGS[0].0, *input, *output));
             let src = request.buffer(Buffer::Bytes(bytes));
             let dst = request.buffer(Buffer::Bytes(vec![0; 4 * 256 * height as usize * out_size]));
             request.image(packed(src, height, *input));
@@ -289,14 +486,19 @@ fn every_code_matches_the_wheel() {
     let responses = Oracle::get().batch(&calls, true);
 
     let mut failures = Vec::new();
-    for (((chain, input, output), request), response) in cases.iter().zip(&requests).zip(responses)
+    for (((source, input, output), request), response) in cases.iter().zip(&requests).zip(responses)
     {
-        let what = format!("{chain:?} {input:?}->{output:?}");
+        let what = format!("{source:?} {input:?}->{output:?}");
         let reply = request.reply(response.unwrap_or_else(|e| panic!("{what}: {e}")));
         assert!(reply.raised().is_none(), "{what}: {:?}", reply.raised());
         let mut buffers: Vec<Vec<u8>> = request.buffers.iter().map(Buffer::bytes).collect();
         let port = (|| -> Result<()> {
-            let cpu = port_processor(chain, FLAGS[0].1, *input, *output)?;
+            let cpu = CpuProcessor::new(
+                &source.raw_ops()?,
+                port_depth(*input),
+                port_depth(*output),
+                FLAGS[0].1,
+            )?;
             let (src_buffers, dst_buffers) = buffers.split_at_mut(1);
             let src = port_image(&request.images[0], |_| Bytes(&src_buffers[0][..]))?;
             let mut slot = Some(&mut dst_buffers[0][..]);

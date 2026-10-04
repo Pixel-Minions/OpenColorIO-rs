@@ -4232,7 +4232,8 @@ status = "todo"
 path = "tests/cpu/OpOptimizers_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/op_optimizers_tests.rs"]
-status = "todo"
+status = "partial"
+note = "p1-optimizer: gamma_prefix; multi_op_prefix needs the Lut1D float renderers (Phase 2) for CompareRender, opt_prefix_test1 the CTF reader (WP 1.6); the rest with their ops' factories"
 
 [[file]]
 path = "tests/cpu/Op_tests.cpp"
