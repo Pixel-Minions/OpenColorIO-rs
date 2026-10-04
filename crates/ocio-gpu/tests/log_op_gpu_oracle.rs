@@ -713,6 +713,12 @@ fn every_path_writes_the_wheels_shader() {
             }
         }
         push("camera", vec![cam(up, None, dir)]);
+        // A base that isn't a float, with a computed linear slope: the slope is computed with
+        // the double base.
+        push(
+            "camera base 1.2345678",
+            vec![T::Camera(1.2345678, up, [0.1; 3], None, dir)],
+        );
         push("camera linear slope", vec![cam(up, Some([1.5; 3]), dir)]);
         push(
             "camera unequal",

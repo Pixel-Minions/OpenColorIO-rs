@@ -405,18 +405,56 @@ fn log_argument_at_break(params: &Params) -> f64 {
 }
 
 /// The slope of the camera style's linear segment: `LINEAR_SLOPE` if set, otherwise the
-/// slope of the log curve at the break, computed in `double`.
+/// slope of the log curve at the break, computed in `double`, as each platform's wheel
+/// computes it ([`get_linear_slope_msvc`] on Windows, [`get_linear_slope_libstdcxx`] on
+/// Linux; the crate does not build for other targets).
 ///
 /// Port of `LogUtil::GetLinearSlope` (src/OpenColorIO/ops/log/LogUtils.cpp:255-268 @ v2.5.2).
 pub fn get_linear_slope(params: &Params, base: f64) -> f32 {
+    #[cfg(target_os = "windows")]
+    {
+        get_linear_slope_msvc(params, base)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        get_linear_slope_libstdcxx(params, base)
+    }
+}
+
+/// `GetLinearSlope` as MSVC compiles it: the numerator is `linSlope * logSlope` (the Windows
+/// wheel at 0x18021abde: `movaps xmm7, xmm6` holds `linSlope`, then `mulsd xmm7, [rbx]`
+/// multiplies by `logSlope`), so where both are NaN, the linear side slope's NaN is kept (I-70).
+///
+/// Port of `LogUtil::GetLinearSlope` (src/OpenColorIO/ops/log/LogUtils.cpp:255-268 @ v2.5.2),
+/// Windows wheel.
+pub fn get_linear_slope_msvc(params: &Params, base: f64) -> f32 {
+    linear_slope_with(params, base, |log_slope, lin_slope| {
+        sse_mul(lin_slope, log_slope)
+    })
+}
+
+/// `GetLinearSlope` as GCC compiles it: the numerator is `logSlope * linSlope`, the source's
+/// order (the Linux wheel at 0x40176d: `mulsd xmm1, xmm2`, `xmm1` holding `logSlope`), so where
+/// both are NaN, the log side slope's NaN is kept (I-70).
+///
+/// Port of `LogUtil::GetLinearSlope` (src/OpenColorIO/ops/log/LogUtils.cpp:255-268 @ v2.5.2),
+/// Linux wheel.
+pub fn get_linear_slope_libstdcxx(params: &Params, base: f64) -> f32 {
+    linear_slope_with(params, base, |log_slope, lin_slope| {
+        sse_mul(log_slope, lin_slope)
+    })
+}
+
+/// `GetLinearSlope` with the numerator's product `numerator(logSlope, linSlope)`.
+fn linear_slope_with(params: &Params, base: f64, numerator: fn(f64, f64) -> f64) -> f32 {
     // If value is defined, use it, else compute value.
     if params.len() > LINEAR_SLOPE {
         params[LINEAR_SLOPE] as f32
     } else {
         // logSlope * linSlope / ((linSlope * linBreak + linOffset) * log(base)). Both wheels
-        // multiply `log(base) * (...)` (Windows at 0x18021abf1, Linux at 0x40178b); the
-        // numerator's order differs between them, and only NaN parameters reach it.
-        (sse_mul(params[LOG_SIDE_SLOPE], params[LIN_SIDE_SLOPE])
+        // multiply `log(base) * (...)` (Windows at 0x18021abf1, Linux at 0x40178b) and divide
+        // the numerator by it.
+        (numerator(params[LOG_SIDE_SLOPE], params[LIN_SIDE_SLOPE])
             / sse_mul(base.ln(), log_argument_at_break(params))) as f32
     }
 }

@@ -560,6 +560,12 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   is negative is a NaN of each platform's sign. The break feeds the offset of the linear
   segment (`GetLinearOffset`) and the inverse's choice of segment, so the pixels at and
   below the break differ, and so do the NaNs the linear segment produces.
+  `LogUtil::GetLinearSlope` (`LogUtils.cpp:255-268`), when no linear slope is set, also
+  multiplies its numerator `logSlope * linSlope` in a different order on each: MSVC computes
+  `linSlope * logSlope` (0x18021abde), GCC the source's order (0x40176d). With both slopes NaN
+  the slope keeps the linear side's NaN on Windows and the log side's on Linux; with NaNs of
+  opposite signs (reachable through the API's setters, not through a config), the renderers'
+  NaNs and the shader's `linear_segment_slope` literal differ in sign between the platforms.
 - **Who notices:** anyone comparing renders of a LogCameraTransform, or a camera-style CTF
   Log, between a Windows and a Linux machine; ARRI LogC3 (EI 800) happens to give the same
   break on both.
@@ -571,7 +577,10 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   platforms. The GPU writer (1.3l4) writes the break (`log_break`) and the linear segment's
   offset (`linear_segment_offset`) as `float` literals, so a camera log's shader text
   differs between the platforms too: `crates/ocio-gpu/tests/log_op_gpu_oracle.rs` compares
-  it with the wheel live on each.
+  it with the wheel live on each. The linear slope's numerator: `get_linear_slope_msvc` and
+  `get_linear_slope_libstdcxx` (p1-gpu-ops4, from the review of 1.3l4), read from both wheels'
+  machine code; the wheel can't be given NaNs of opposite signs until the specs carry a
+  double's bits, so no oracle test checks them yet.
 
 ## Transforms
 
