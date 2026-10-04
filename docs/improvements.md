@@ -568,7 +568,10 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p1-log` (1.3l1, the S2 spike's variants); `log_utils.rs`,
   `get_log_side_break_msvc` and `get_log_side_break_libstdcxx`; `log_oracle.rs`,
   `camera_cases_distinguish_the_log_side_break_variants` and the camera battery, on both
-  platforms.
+  platforms. The GPU writer (1.3l4) writes the break (`log_break`) and the linear segment's
+  offset (`linear_segment_offset`) as `float` literals, so a camera log's shader text
+  differs between the platforms too: `crates/ocio-gpu/tests/log_op_gpu_oracle.rs` compares
+  it with the wheel live on each.
 
 ## Transforms
 
@@ -726,6 +729,14 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `vec3 slope = vec3(inf, ...)` and `vec3 offset = vec3(nan, ...)`; an infinite saturation
   goes through `declareVar`, which writes `3.40282347e+38` instead:
   `crates/ocio-gpu/tests/cdl_op_gpu_oracle.rs` (`extreme_parameters_write_the_wheels_shader`).
+  The Log writer (1.3l4) writes some parameters as `double`s and others as `float`s it
+  computes from them, and its validation lets the base and the parameters be NaN or
+  infinite. Through the wheel, in GLSL 4.0, an affine log in base 10 with a log side slope
+  and a linear side slope of 1e39 gives `vec3 lin_slope = vec3(9.9999999999999994e+38., ...)`
+  and `vec3 log_slope = vec3(inf, ...)` (the slope divided by `log(base)` in `double`, then
+  narrowed), and its inverse `vec3 log_slopeinv = vec3(0., ...)`; a `LogTransform` with a
+  NaN base gives `vec3 log_slope = vec3(nan, nan, nan)`:
+  `crates/ocio-gpu/tests/log_op_gpu_oracle.rs` (`extreme_parameters_write_the_wheels_shader`).
 
 ## Python module (`ocio-py`)
 
