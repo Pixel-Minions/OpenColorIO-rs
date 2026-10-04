@@ -187,7 +187,7 @@ impl fmt::Display for AllocationTransform {
 }
 
 /// Appends the ops of the allocation in the direction `dir` combined with the transform's
-/// ([`create_allocation_ops`]: so far the `lg2` allocation is an error, until the Log op).
+/// ([`create_allocation_ops`]).
 ///
 /// Port of `BuildAllocationOp` (src/OpenColorIO/transforms/AllocationTransform.cpp:189-205 @
 /// v2.5.2).

@@ -5,10 +5,9 @@
 //! - its text (`repr()`, `str()`): the allocation and the variables only when there are
 //!   variables, each `float` with 6 significant digits, or 16 after a MatrixTransform in the
 //!   same group (I-73); its validation, every message; the binding gives it no `equals()`;
-//! - the raw config's processor of each uniform allocation, in both directions:
-//!   `BuildAllocationOp` and `CreateAllocationOps`, a Fit Matrix op, through
-//!   `createGroupTransform()`. The `lg2` allocation needs the Log op, which isn't in the port
-//!   yet: its processors are checked when it comes.
+//! - the raw config's processor of each, in both directions: `BuildAllocationOp` and
+//!   `CreateAllocationOps`, a Fit Matrix op for the uniform allocation, a Log op and a fit (in
+//!   the reverse order inverse) for `lg2`, through `createGroupTransform()`.
 //!
 //! The binding's `setVars` takes 2 or 3 variables (src/bindings/python/transforms/
 //! PyAllocationTransform.cpp:23-30 @ v2.5.2), so the specs set 2 or 3, or none.
@@ -147,13 +146,8 @@ fn text_and_validation_match_the_wheel() {
 }
 
 #[test]
-fn processors_of_uniform_allocations_match_the_wheel() {
-    let cases: Vec<Case> = cases()
-        .into_iter()
-        .filter(|case| match &case.port {
-            ocio::Transform::Allocation(t) => t.allocation() != Allocation::Lg2,
-            _ => true,
-        })
-        .collect();
+fn processors_match_the_wheel() {
+    let mut cases = cases();
+    cases.extend(group_cases());
     check_processors(&cases);
 }
