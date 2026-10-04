@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Tests of the allocation data and `CreateAllocationOps`. Upstream's `AllocationOps create`
-//! (tests/cpu/ops/allocation/AllocationOp_tests.cpp @ v2.5.2) needs the Log op for its `lg2`
-//! part; its other parts are here.
+//! Tests of the allocation data, and of `CreateAllocationOps`: upstream's `AllocationOps create`
+//! (tests/cpu/ops/allocation/AllocationOp_tests.cpp @ v2.5.2).
 
 use super::*;
 
@@ -73,15 +72,13 @@ fn an_unknown_allocation_has_its_own_name() {
     );
 }
 
-/// The parts of upstream's `AllocationOps create` (tests/cpu/ops/allocation/
-/// AllocationOp_tests.cpp:12-48 @ v2.5.2) that don't need the Log op: an unknown allocation is
-/// refused in both directions and adds no op; a uniform one, without variables or with two, is
-/// one Fit op in both directions. The test as a whole comes with the Log op (its `lg2` part).
+/// Port of `OCIO_ADD_TEST(AllocationOps, create)` @ v2.5.2. The wheel is built with
+/// `OCIO_USE_SSE2`, so the test keeps its `#else` tolerance.
 #[test]
-fn create_allocation_ops_without_the_log_op() {
+fn create() {
     use crate::op::OpVec;
-    use crate::open_color_types::TransformDirection;
-    use ocio_testkit::upstream::check_throw_what;
+    use crate::open_color_types::{OptimizationFlags, TransformDirection};
+    use ocio_testkit::upstream::{check_close, check_throw_what};
 
     let mut ops = OpVec::new();
     let mut alloc_data = AllocationData {
@@ -113,7 +110,119 @@ fn create_allocation_ops_without_the_log_op() {
     ops.clear();
     create_allocation_ops(&mut ops, &alloc_data, TransformDirection::Forward).unwrap();
     assert_eq!(ops.len(), 1);
+    let forward_fit_op = ops[0].clone_op().unwrap();
     ops.clear();
     create_allocation_ops(&mut ops, &alloc_data, TransformDirection::Inverse).unwrap();
     assert_eq!(ops.len(), 1);
+    ops.clear();
+
+    alloc_data.allocation = Allocation::Lg2;
+
+    // default is not identity
+    alloc_data.vars.clear();
+    create_allocation_ops(&mut ops, &alloc_data, TransformDirection::Forward).unwrap();
+    assert_eq!(ops.len(), 2);
+    // second op is a fit transform
+    assert!(forward_fit_op.is_same_type(&ops[1]));
+    ops.finalize().unwrap();
+    ops.optimize(OptimizationFlags::DEFAULT).unwrap();
+    assert_eq!(ops.len(), 2);
+    let default_log_op = ops[0].clone_op().unwrap();
+
+    let error = 2e-5f32;
+    const NB_PIXELS: usize = 3;
+    let src: [f32; NB_PIXELS * 4] = [
+        0.16, 0.2, 0.3, 0.4, //
+        -0.16, -0.2, 32.0, 123.4, //
+        1.0, 1.0, 1.0, 1.0,
+    ];
+
+    let dst_log: [f32; NB_PIXELS * 4] = [
+        -2.64385629,
+        -2.32192802,
+        -1.73696554,
+        0.4, //
+        -126.0,
+        -126.0,
+        5.0,
+        123.4, //
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    ];
+
+    let dst_fit: [f32; NB_PIXELS * 4] = [
+        0.635, 0.6375, 0.64375, 0.4, //
+        0.615, 0.6125, 2.625, 123.4, //
+        0.6875, 0.6875, 0.6875, 1.0,
+    ];
+
+    let mut tmp = src;
+
+    ops[0].apply(&mut tmp).unwrap();
+
+    for idx in 0..NB_PIXELS * 4 {
+        check_close(dst_log[idx], tmp[idx], error);
+    }
+
+    let mut tmp = src;
+
+    ops[1].apply(&mut tmp).unwrap();
+
+    for idx in 0..NB_PIXELS * 4 {
+        check_close(dst_fit[idx], tmp[idx], error);
+    }
+
+    ops.clear();
+
+    create_allocation_ops(&mut ops, &alloc_data, TransformDirection::Inverse).unwrap();
+    assert_eq!(ops.len(), 2);
+    assert!(default_log_op.is_inverse(&ops[1]));
+
+    ops.clear();
+
+    // adding data to target identity, Log op and identity are created
+    alloc_data.vars.push(0.0f32);
+    alloc_data.vars.push(1.0f32);
+
+    create_allocation_ops(&mut ops, &alloc_data, TransformDirection::Forward).unwrap();
+    assert_eq!(ops.len(), 2);
+    // Identity is removed.
+    ops.finalize().unwrap();
+    ops.optimize(OptimizationFlags::DEFAULT).unwrap();
+    assert_eq!(ops.len(), 1);
+    assert!(default_log_op.is_same_type(&ops[0]));
+    ops.clear();
+
+    create_allocation_ops(&mut ops, &alloc_data, TransformDirection::Inverse).unwrap();
+    assert_eq!(ops.len(), 2);
+    // Identity is removed.
+    ops.finalize().unwrap();
+    ops.optimize(OptimizationFlags::DEFAULT).unwrap();
+    assert_eq!(ops.len(), 1);
+    assert!(default_log_op.is_same_type(&ops[0]));
+    ops.clear();
+
+    // change log intercept
+    alloc_data.vars.push(10.0f32);
+    create_allocation_ops(&mut ops, &alloc_data, TransformDirection::Forward).unwrap();
+    assert_eq!(ops.len(), 2);
+    ops.finalize().unwrap();
+    ops.optimize(OptimizationFlags::DEFAULT).unwrap();
+    assert_eq!(ops.len(), 1);
+
+    let mut tmp = src;
+
+    let dst_log_shift: [f32; NB_PIXELS * 4] = [
+        3.34482837, 3.35049725, 3.36457253, 0.4, //
+        3.29865813, 3.29278183, 5.39231730, 123.4, //
+        3.45943165, 3.45943165, 3.45943165, 1.0,
+    ];
+
+    ops[0].apply(&mut tmp).unwrap();
+
+    for idx in 0..NB_PIXELS * 4 {
+        check_close(dst_log_shift[idx], tmp[idx], error);
+    }
 }

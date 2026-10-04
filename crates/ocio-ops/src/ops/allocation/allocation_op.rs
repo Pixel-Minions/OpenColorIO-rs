@@ -7,7 +7,7 @@
 //! `AllocationData`, which the `AllocationNoOp` carries
 //! ([`crate::ops::noop::create_gpu_allocation_no_op`], where upstream defines
 //! `CreateGpuAllocationNoOp`), and [`create_allocation_ops`], which builds Fit (Matrix) ops and,
-//! for the `lg2` allocation, a Log op: until the Log op is ported, `lg2` is an error.
+//! for the `lg2` allocation, a Log op.
 
 use std::fmt;
 
@@ -15,6 +15,7 @@ use crate::cfmt::{Crt, OStringStream};
 use crate::exception::{Exception, Result};
 use crate::op::OpVec;
 use crate::open_color_types::{Allocation, TransformDirection, allocation_to_string};
+use crate::ops::log::log_op::create_log_op_from_parameters;
 use crate::ops::matrix::matrix_op::create_fit_op;
 
 /// A color space's allocation and its variables: the range it spreads over (2 values, or a
@@ -79,11 +80,8 @@ impl fmt::Display for AllocationData {
 /// offset) and the fit from `[vars[0], vars[1]]` (or `[-10, 6]`), in reverse order inverse;
 /// "Unsupported Allocation Type." for an unknown one.
 ///
-/// The Log op isn't ported yet: `lg2` is the error "CreateAllocationOps: the lg2 allocation
-/// needs the Log op, which is not ported yet.", until it comes (card p1-log).
-///
 /// Port of `CreateAllocationOps` (src/OpenColorIO/ops/allocation/AllocationOp.cpp:37-117 @
-/// v2.5.2), without its Log ops so far.
+/// v2.5.2).
 pub fn create_allocation_ops(
     ops: &mut OpVec,
     data: &AllocationData,
@@ -105,9 +103,62 @@ pub fn create_allocation_ops(
 
             create_fit_op(ops, &oldmin, &oldmax, &newmin, &newmax, dir)
         }
-        Allocation::Lg2 => Err(Exception::new(
-            "CreateAllocationOps: the lg2 allocation needs the Log op, which is not ported yet.",
-        )),
+        Allocation::Lg2 => {
+            let mut oldmin = [-10.0, -10.0, -10.0, 0.0];
+            let mut oldmax = [6.0, 6.0, 6.0, 1.0];
+            let newmin = [0.0, 0.0, 0.0, 0.0];
+            let newmax = [1.0, 1.0, 1.0, 1.0];
+
+            if data.vars.len() >= 2 {
+                for i in 0..3 {
+                    oldmin[i] = f64::from(data.vars[0]);
+                    oldmax[i] = f64::from(data.vars[1]);
+                }
+            }
+
+            // Log Settings.
+            // output = logSlope * log( linSlope * input + linOffset, base ) + logOffset
+
+            let base = 2.0;
+            let log_slope = [1.0, 1.0, 1.0];
+            let lin_slope = [1.0, 1.0, 1.0];
+            let mut lin_offset = [0.0, 0.0, 0.0];
+            let log_offset = [0.0, 0.0, 0.0];
+
+            if data.vars.len() >= 3 {
+                for value in &mut lin_offset {
+                    *value = f64::from(data.vars[2]);
+                }
+            }
+
+            match dir {
+                TransformDirection::Forward => {
+                    create_log_op_from_parameters(
+                        ops,
+                        base,
+                        &log_slope,
+                        &log_offset,
+                        &lin_slope,
+                        &lin_offset,
+                        dir,
+                    );
+                    create_fit_op(ops, &oldmin, &oldmax, &newmin, &newmax, dir)
+                }
+                TransformDirection::Inverse => {
+                    create_fit_op(ops, &oldmin, &oldmax, &newmin, &newmax, dir)?;
+                    create_log_op_from_parameters(
+                        ops,
+                        base,
+                        &log_slope,
+                        &log_offset,
+                        &lin_slope,
+                        &lin_offset,
+                        dir,
+                    );
+                    Ok(())
+                }
+            }
+        }
         Allocation::Unknown => Err(Exception::new("Unsupported Allocation Type.")),
     }
 }

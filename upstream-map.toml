@@ -1094,8 +1094,8 @@ note = "p1-optimizer D: EvalTransform"
 path = "src/OpenColorIO/ops/allocation/AllocationOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/allocation/allocation_op.rs"]
-status = "partial"
-note = "1.3n1: AllocationData::getCacheID and operator<<; p1-transforms-fam1: CreateAllocationOps for the uniform and unknown allocations (the lg2 allocation needs CreateLogOp: an error until the Log op, card p1-log)"
+status = "done"
+note = "1.3n1: AllocationData::getCacheID and operator<<; p1-transforms-fam1: CreateAllocationOps for the uniform and unknown allocations; p1-transforms-fam2: its lg2 allocation (CreateLogOp and the fit)"
 
 [[file]]
 path = "src/OpenColorIO/ops/allocation/AllocationOp.h"
@@ -2057,7 +2057,7 @@ path = "src/OpenColorIO/transforms/AllocationTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/allocation_transform.rs"]
 status = "done"
-note = "p1-transforms-fam1: AllocationTransform, its validation and operator<< (I-73, I-76), BuildAllocationOp (its lg2 ops wait for CreateAllocationOps' Log op); checked against the wheel in crates/ocio/tests/allocation_transform_oracle.rs"
+note = "p1-transforms-fam1: AllocationTransform, its validation and operator<< (I-73, I-76), BuildAllocationOp (its lg2 ops since p1-transforms-fam2); checked against the wheel in crates/ocio/tests/allocation_transform_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/transforms/BuiltinTransform.cpp"
@@ -4559,8 +4559,8 @@ status = "todo"
 path = "tests/cpu/ops/allocation/AllocationOp_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/allocation/allocation_op_tests.rs"]
-status = "todo"
-note = "AllocationOps create needs the Log op (lg2)"
+status = "done"
+note = "p1-transforms-fam2: AllocationOps create"
 
 [[file]]
 path = "tests/cpu/ops/cdl/CDLOpData_tests.cpp"
