@@ -2,7 +2,7 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Port of `tests/cpu/ops/exponent/ExponentOp_tests.cpp` @ v2.5.2, but `create_transform`,
-//! which needs the transforms (1.8). `tests/exponent_oracle.rs` checks the renderer against
+//! which needs the transform (crates/ocio/src/transforms/exponent_transform_tests.rs). `tests/exponent_oracle.rs` checks the renderer against
 //! the wheel, and the optimizer's combinations through the processor's cache ID.
 
 use ocio_testkit::upstream::{check_close, check_equal, check_throw_what};

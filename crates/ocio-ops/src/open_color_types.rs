@@ -132,6 +132,17 @@ impl CdlStyle {
     pub const TRANSFORM_DEFAULT: CdlStyle = CdlStyle::NoClamp;
 }
 
+/// The style's name: `asc` or `noClamp`.
+///
+/// Port of `CDLStyleToString` (src/OpenColorIO/ParseUtils.cpp:314-319 @ v2.5.2). Its fallback
+/// for a value outside the enum can't happen.
+pub fn cdl_style_to_string(style: CdlStyle) -> &'static str {
+    match style {
+        CdlStyle::Asc => "asc",
+        CdlStyle::NoClamp => "noClamp",
+    }
+}
+
 /// How an exponent or curve handles negative values.
 ///
 /// Port of `NegativeStyle` (include/OpenColorIO/OpenColorTypes.h:552-558 @ v2.5.2).
@@ -145,6 +156,20 @@ pub enum NegativeStyle {
     PassThru,
     /// `NEGATIVE_LINEAR`: linearly extrapolate the curve for negative values.
     Linear,
+}
+
+/// The negative style's name: `clamp`, `mirror`, `pass_thru` or `linear`.
+///
+/// Port of `NegativeStyleToString` (src/OpenColorIO/ParseUtils.cpp:496-513 @ v2.5.2), with the
+/// `NEGATIVE_STYLE_*` names. Its "Unknown exponent style" for a value outside the enum can't
+/// happen.
+pub fn negative_style_to_string(style: NegativeStyle) -> &'static str {
+    match style {
+        NegativeStyle::Clamp => "clamp",
+        NegativeStyle::Mirror => "mirror",
+        NegativeStyle::PassThru => "pass_thru",
+        NegativeStyle::Linear => "linear",
+    }
 }
 
 /// What a dynamic property holds: a double for the first three, a grading value for the

@@ -30,16 +30,16 @@ note = "1.1b-1.1c: AutoStride, ImageDesc, PackedImageDesc and PlanarImageDesc (i
 [[file]]
 path = "include/OpenColorIO/OpenColorTransforms.h"
 kind = "api"
-target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/format_metadata.rs", "crates/ocio-ops/src/dynamic_property.rs"]
+target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/format_metadata.rs", "crates/ocio-ops/src/dynamic_property.rs", "crates/ocio/src/transform.rs"]
 status = "partial"
-note = "1.2a: the FormatMetadata interface (44-117) is FormatMetadataImpl's own methods in format_metadata.rs (upstream has no other implementation), and its operator<< is FormatMetadataImpl::write_to; 1.2b: DynamicProperty (766-779) is the DynamicPropertyRcPtr enum and DynamicPropertyDouble (810-824) is DynamicPropertyDoubleImpl, in dynamic_property.rs"
+note = "1.2a: the FormatMetadata interface (44-117) is FormatMetadataImpl's own methods in format_metadata.rs (upstream has no other implementation), and its operator<< is FormatMetadataImpl::write_to; 1.2b: DynamicProperty (766-779) is the DynamicPropertyRcPtr enum and DynamicPropertyDouble (810-824) is DynamicPropertyDoubleImpl, in dynamic_property.rs; p1-transforms T0: Transform (as enum Transform) and GroupTransform, in crates/ocio/src/transform.rs and transforms/group_transform.rs; each class comes with its card"
 
 [[file]]
 path = "include/OpenColorIO/OpenColorTypes.h"
 kind = "api"
-target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs", "crates/ocio-ops/src/format_metadata.rs", "crates/ocio-ops/src/logging.rs", "crates/ocio-gpu/src/open_color_types.rs"]
+target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs", "crates/ocio-ops/src/format_metadata.rs", "crates/ocio-ops/src/logging.rs", "crates/ocio-gpu/src/open_color_types.rs", "crates/ocio/src/transform.rs", "crates/ocio/src/transforms/range_transform.rs"]
 status = "partial"
-note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.1a: BitDepth, and BitDepthToString (defined in ParseUtils.cpp); 1.1b: ChannelOrdering; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does; 1.2b: DynamicPropertyType; 1.2e: LoggingLevel (288-297), in open_color_types.rs, and LoggingFunction (283-284), in logging.rs; 1.7a: GpuLanguage, in ocio-gpu/src/open_color_types.rs; 1.3n1: Allocation (459-463); 1.2d: OptimizationFlags (634-722), a bit-flags type over a C unsigned long; p1-optimizer A: Lut1DHueAdjust (441-447)"
+note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.1a: BitDepth, and BitDepthToString (defined in ParseUtils.cpp); 1.1b: ChannelOrdering; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does; 1.2b: DynamicPropertyType; 1.2e: LoggingLevel (288-297), in open_color_types.rs, and LoggingFunction (283-284), in logging.rs; 1.7a: GpuLanguage, in ocio-gpu/src/open_color_types.rs; 1.3n1: Allocation (459-463); 1.2d: OptimizationFlags (634-722), a bit-flags type over a C unsigned long; p1-optimizer A: Lut1DHueAdjust (441-447); p1-transforms T0: TransformType (361-386), in crates/ocio/src/transform.rs; p1-transforms-fam1 (1.8c): RangeStyle (491-496), in crates/ocio/src/transforms/range_transform.rs"
 
 [[file]]
 path = "src/CMakeLists.txt"
@@ -168,7 +168,8 @@ status = "todo"
 path = "src/OpenColorIO/Config.cpp"
 kind = "src"
 target = ["crates/ocio/src/config.rs"]
-status = "todo"
+status = "partial"
+note = "p1-transforms T0: CreateRaw's version and context, getMajorVersion, getMinorVersion, getCurrentContext; p1-transforms-fam2 (1.8d): setMajorVersion; CreateRaw's state and getProcessor come with WP 1.8g, the rest with Phase 3"
 
 [[file]]
 path = "src/OpenColorIO/ConfigUtils.cpp"
@@ -186,7 +187,8 @@ status = "todo"
 path = "src/OpenColorIO/Context.cpp"
 kind = "src"
 target = ["crates/ocio/src/context.rs"]
-status = "todo"
+status = "partial"
+note = "p1-transforms T0: Context::Create, without state (Phase 3)"
 
 [[file]]
 path = "src/OpenColorIO/ContextVariableUtils.cpp"
@@ -458,8 +460,9 @@ note = "S2, 1.1d: OpCPU (as the CpuOp trait, with the typed apply_bit_depth); 1.
 [[file]]
 path = "src/OpenColorIO/OpBuilders.h"
 kind = "src"
-target = ["crates/ocio-ops/src/op_builders.rs"]
-status = "todo"
+target = ["crates/ocio/src/transform.rs", "crates/ocio/src/transforms/group_transform.rs", "crates/ocio/src/transforms/matrix_transform.rs", "crates/ocio/src/transforms/range_transform.rs", "crates/ocio/src/transforms/allocation_transform.rs", "crates/ocio/src/transforms/exponent_transform.rs", "crates/ocio/src/transforms/exponent_with_linear_transform.rs", "crates/ocio/src/transforms/log_transform.rs", "crates/ocio/src/transforms/cdl_transform.rs"]
+status = "partial"
+note = "p1-transforms T0: BuildOps and BuildGroupOps; each Build<Class>Op comes with its class, next to it; p1-transforms-fam1: BuildMatrixOp (1.8b), BuildRangeOp (1.8c), BuildAllocationOp (in AllocationTransform.cpp); p1-transforms-fam2: BuildExponentOp, BuildExponentWithLinearOp (1.8d), BuildLogOp (1.8e), BuildCDLOp (1.8f)"
 
 [[file]]
 path = "src/OpenColorIO/OpOptimizers.cpp"
@@ -471,9 +474,9 @@ note = "1.2c: FinalizeOps (132-139) and OpRcPtrVec::finalize (598-609); 1.2d (th
 [[file]]
 path = "src/OpenColorIO/ParseUtils.cpp"
 kind = "src"
-target = ["crates/ocio/src/parse_utils.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-gpu/src/open_color_types.rs"]
+target = ["crates/ocio/src/parse_utils.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-gpu/src/open_color_types.rs", "crates/ocio/src/transforms/range_transform.rs"]
 status = "partial"
-note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection; 1.1a: BitDepthToString, next to BitDepth; 1.2e: LoggingLevelToString and LoggingLevelFromString, next to LoggingLevel; 1.7c: GpuLanguageToString, next to GpuLanguage; 1.3n1: AllocationToString, next to Allocation; 1.3m1: TransformDirectionToString, next to TransformDirection; p1-optimizer A: InterpolationToString, in open_color_types.rs"
+note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection; 1.1a: BitDepthToString, next to BitDepth; 1.2e: LoggingLevelToString and LoggingLevelFromString, next to LoggingLevel; 1.7c: GpuLanguageToString, next to GpuLanguage; 1.3n1: AllocationToString, next to Allocation; 1.3m1: TransformDirectionToString, next to TransformDirection; p1-optimizer A: InterpolationToString, in open_color_types.rs; p1-transforms-fam1 (1.8c): RangeStyleToString, next to RangeStyle; p1-transforms-fam2 (1.8d): NegativeStyleToString, next to NegativeStyle; p1-transforms-fam2 (1.8f): CDLStyleToString, next to CDLStyle"
 
 [[file]]
 path = "src/OpenColorIO/ParseUtils.h"
@@ -587,7 +590,8 @@ status = "todo"
 path = "src/OpenColorIO/Transform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transform.rs"]
-status = "todo"
+status = "partial"
+note = "p1-transforms T0: Transform::validate's direction check (the typeid text unreachable), BuildOps, operator<< and CreateTransform as exhaustive matches over enum Transform, with the classes ported so far; each class adds its arms"
 
 [[file]]
 path = "src/OpenColorIO/TransformBuilder.h"
@@ -1090,8 +1094,8 @@ note = "p1-optimizer D: EvalTransform"
 path = "src/OpenColorIO/ops/allocation/AllocationOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/allocation/allocation_op.rs"]
-status = "partial"
-note = "1.3n1: AllocationData::getCacheID and operator<<; CreateAllocationOps needs CreateFitOp (Matrix op) and the Log op"
+status = "done"
+note = "1.3n1: AllocationData::getCacheID and operator<<; p1-transforms-fam1: CreateAllocationOps for the uniform and unknown allocations; p1-transforms-fam2: its lg2 allocation (CreateLogOp and the fit)"
 
 [[file]]
 path = "src/OpenColorIO/ops/allocation/AllocationOp.h"
@@ -1103,9 +1107,9 @@ note = "1.3n1: AllocationData; CreateGpuAllocationNoOp in no_ops.rs, where NoOps
 [[file]]
 path = "src/OpenColorIO/ops/cdl/CDLOp.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/cdl/cdl_op.rs", "crates/ocio-gpu/src/gpu_processor.rs"]
+target = ["crates/ocio-ops/src/ops/cdl/cdl_op.rs", "crates/ocio-gpu/src/gpu_processor.rs", "crates/ocio/src/transforms/cdl_transform.rs"]
 status = "partial"
-note = "1.3c3: CDLOp (the op's behaviors on OpData::Cdl) and both CreateCDLOp; checked against the wheel through CPU processor cache IDs and pixels (tests/cdl_op_oracle.rs: identities, inverse pairs, simplified CDLs, optimization flags). Not yet: CreateCDLTransform and BuildCDLOp (the CDLTransform, WP 1.8). Its GPU part: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's Cdl arm (gpu_processor.rs, 1.3c4)"
+note = "1.3c3: CDLOp (the op's behaviors on OpData::Cdl) and both CreateCDLOp; checked against the wheel through CPU processor cache IDs and pixels (tests/cdl_op_oracle.rs: identities, inverse pairs, simplified CDLs, optimization flags). p1-transforms-fam2 (1.8f): CreateCDLTransform and BuildCDLOp (both config versions), in crates/ocio/src/transforms/cdl_transform.rs. Its GPU part: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's Cdl arm (gpu_processor.rs, 1.3c4)"
 
 [[file]]
 path = "src/OpenColorIO/ops/cdl/CDLOp.h"
@@ -1159,9 +1163,9 @@ note = "1.3c4 (p1-gpu-ops2): GetCDLGPUShaderProgram; checked against the wheel i
 [[file]]
 path = "src/OpenColorIO/ops/exponent/ExponentOp.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/exponent/exponent_op.rs", "crates/ocio-ops/src/ops/exponent/exponent_op_data.rs", "crates/ocio-ops/src/ops/exponent/exponent_op_cpu.rs", "crates/ocio-gpu/src/ops/exponent/exponent_op_gpu.rs"]
-status = "partial"
-note = "1.3e1 (p1-exponent): ExponentOpData, ExponentOpCPU, ExponentOp's behaviors (OpData::Exponent) and both CreateExponentOp; checked against the wheel through a version 1 config (exponent_oracle.rs). Its GPU part: extractGpuShaderInfo in ocio-gpu (exponent_op_gpu.rs, exponent_op_gpu_oracle.rs). Still to come: CreateExponentTransform (1.8)"
+target = ["crates/ocio-ops/src/ops/exponent/exponent_op.rs", "crates/ocio-ops/src/ops/exponent/exponent_op_data.rs", "crates/ocio-ops/src/ops/exponent/exponent_op_cpu.rs", "crates/ocio-gpu/src/ops/exponent/exponent_op_gpu.rs", "crates/ocio/src/transforms/exponent_transform.rs"]
+status = "done"
+note = "1.3e1 (p1-exponent): ExponentOpData, ExponentOpCPU, ExponentOp's behaviors (OpData::Exponent) and both CreateExponentOp; checked against the wheel through a version 1 config (exponent_oracle.rs). Its GPU part: extractGpuShaderInfo in ocio-gpu (exponent_op_gpu.rs, exponent_op_gpu_oracle.rs). p1-transforms-fam2 (1.8d): CreateExponentTransform, in crates/ocio/src/transforms/exponent_transform.rs"
 
 [[file]]
 path = "src/OpenColorIO/ops/exponent/ExponentOp.h"
@@ -1299,9 +1303,9 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOp.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/gamma/gamma_op.rs", "crates/ocio-gpu/src/gpu_processor.rs"]
+target = ["crates/ocio-ops/src/ops/gamma/gamma_op.rs", "crates/ocio-gpu/src/gpu_processor.rs", "crates/ocio/src/transforms/exponent_transform.rs", "crates/ocio/src/transforms/exponent_with_linear_transform.rs"]
 status = "partial"
-note = "1.3g3: GammaOp (the op's behaviors on OpData::Gamma) and CreateGammaOp; checked against the wheel through CPU processor cache IDs and pixels (tests/gamma_op_oracle.rs: identities, inverse pairs, compositions, optimization flags). Not yet: CreateGammaTransform, BuildExponentWithLinearOp and BuildExponentOp (the transforms, WP 1.8). Its GPU part: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's Gamma arm (gpu_processor.rs, 1.3g4)"
+note = "1.3g3: GammaOp (the op's behaviors on OpData::Gamma) and CreateGammaOp; checked against the wheel through CPU processor cache IDs and pixels (tests/gamma_op_oracle.rs: identities, inverse pairs, compositions, optimization flags). p1-transforms-fam2 (1.8d): CreateGammaTransform and BuildExponentWithLinearOp in exponent_with_linear_transform.rs, BuildExponentOp in exponent_transform.rs. Its GPU part: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's Gamma arm (gpu_processor.rs, 1.3g4)"
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOp.h"
@@ -1621,9 +1625,9 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/ops/log/LogOp.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/log/log_op.rs", "crates/ocio-gpu/src/gpu_processor.rs"]
+target = ["crates/ocio-ops/src/ops/log/log_op.rs", "crates/ocio-gpu/src/gpu_processor.rs", "crates/ocio/src/transforms/log_transform.rs"]
 status = "partial"
-note = "1.3l3: the op, CreateLogOp, the Log arm of CreateOpVecFromOpData; cache IDs, the optimizer's inverse pairs and pixels against the wheel (tests/log_op_oracle.rs). BuildLogOp and CreateLogTransform come with the transforms (WP 1.8). Its GPU part: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's Log arm (gpu_processor.rs, 1.3l4)"
+note = "1.3l3: the op, CreateLogOp, the Log arm of CreateOpVecFromOpData; cache IDs, the optimizer's inverse pairs and pixels against the wheel (tests/log_op_oracle.rs). p1-transforms-fam2 (1.8e): the three BuildLogOp and CreateLogTransform, in crates/ocio/src/transforms/log_transform.rs. Its GPU part: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's Log arm (gpu_processor.rs, 1.3l4)"
 
 [[file]]
 path = "src/OpenColorIO/ops/log/LogOp.h"
@@ -1691,9 +1695,9 @@ note = "S2: GetLinearSlope, GetLogSideBreak (Windows and Linux variants), GetLin
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOp.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op.rs"]
+target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op.rs", "crates/ocio/src/transforms/lut1d_transform.rs"]
 status = "partial"
-note = "p1-optimizer B: Lut1DOp (clone, getInfo, isSameType, isInverse, canCombineWith, hasChannelCrosstalk, finalize, getCacheID, supportedByLegacyShader), CreateLut1DOp, GenerateIdentityLut1D; cache IDs and the optimizer's Lut1D rules against the wheel (tests/lut1d_op_oracle.rs). combineWith (Compose) and getCPUOp's float renderers are errors until Phase 2 (WP 2.5); extractGpuShaderInfo, GenerateLinearScaleLut1D, CreateLut1DTransform and BuildLut1DOp come later"
+note = "p1-optimizer B: Lut1DOp (clone, getInfo, isSameType, isInverse, canCombineWith, hasChannelCrosstalk, finalize, getCacheID, supportedByLegacyShader), CreateLut1DOp, GenerateIdentityLut1D; cache IDs and the optimizer's Lut1D rules against the wheel (tests/lut1d_op_oracle.rs). combineWith (Compose) and getCPUOp's float renderers are errors until Phase 2 (WP 2.5); p1-transforms-fam4: CreateLut1DTransform and BuildLut1DOp, in crates/ocio/src/transforms/lut1d_transform.rs. extractGpuShaderInfo and GenerateLinearScaleLut1D come later"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOp.h"
@@ -1901,9 +1905,9 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/ops/matrix/MatrixOp.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/matrix/matrix_op.rs", "crates/ocio-gpu/src/gpu_processor.rs"]
-status = "partial"
-note = "p1-engine, before 1.2d: MatrixOffsetOp's methods (clone, getInfo, isSameType, isInverse, canCombineWith, combineWith, finalize, getCacheID, getCPUOp; the op is OpData::Matrix), CreateMatrixOp(ops, MatrixOpDataRcPtr, direction) and CreateIdentityMatrixOp(ops). 1.3m3 (p1-matrix): the factories from values (CreateScaleOp, CreateMatrixOp(m44), CreateOffsetOp, CreateScaleOffsetOp, CreateSaturationOp, CreateMatrixOffsetOp, CreateFitOp, CreateIdentityMatrixOp(ops, direction), CreateMinMaxOp, CreateMatrixOp(MatrixArrayPtr)) and the MatrixOffsetOp(m44, offset4, direction) constructor, checked against the wheel through AllocationTransform, a v1 CDLTransform and .spi1d files (tests/matrix_factories_oracle.rs). Not yet: CreateMatrixTransform and BuildMatrixOp (the MatrixTransform, WP 1.8); the float overloads of CreateMatrixOffsetOp and CreateFitOp are declared in MatrixOp.h and never defined. extractGpuShaderInfo is 1.3m4's (p1-gpu-ops): MatrixOffsetOp::extractGpuShaderInfo, in ocio-gpu's extract_op_gpu_shader_info (gpu_processor.rs)."
+target = ["crates/ocio-ops/src/ops/matrix/matrix_op.rs", "crates/ocio-gpu/src/gpu_processor.rs", "crates/ocio/src/transforms/matrix_transform.rs"]
+status = "done"
+note = "p1-engine, before 1.2d: MatrixOffsetOp's methods (clone, getInfo, isSameType, isInverse, canCombineWith, combineWith, finalize, getCacheID, getCPUOp; the op is OpData::Matrix), CreateMatrixOp(ops, MatrixOpDataRcPtr, direction) and CreateIdentityMatrixOp(ops). 1.3m3 (p1-matrix): the factories from values (CreateScaleOp, CreateMatrixOp(m44), CreateOffsetOp, CreateScaleOffsetOp, CreateSaturationOp, CreateMatrixOffsetOp, CreateFitOp, CreateIdentityMatrixOp(ops, direction), CreateMinMaxOp, CreateMatrixOp(MatrixArrayPtr)) and the MatrixOffsetOp(m44, offset4, direction) constructor, checked against the wheel through AllocationTransform, a v1 CDLTransform and .spi1d files (tests/matrix_factories_oracle.rs). p1-transforms-fam1 (1.8b): CreateMatrixTransform and BuildMatrixOp, in crates/ocio/src/transforms/matrix_transform.rs. The float overloads of CreateMatrixOffsetOp and CreateFitOp are declared in MatrixOp.h and never defined. extractGpuShaderInfo is 1.3m4's (p1-gpu-ops): MatrixOffsetOp::extractGpuShaderInfo, in ocio-gpu's extract_op_gpu_shader_info (gpu_processor.rs)."
 
 [[file]]
 path = "src/OpenColorIO/ops/matrix/MatrixOp.h"
@@ -1971,9 +1975,9 @@ note = "1.2c: NoOpData, FileNoOpData, CreateFileNoOp, CreateLookNoOp; not yet: P
 [[file]]
 path = "src/OpenColorIO/ops/range/RangeOp.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/range/range_op.rs", "crates/ocio-gpu/src/gpu_processor.rs"]
+target = ["crates/ocio-ops/src/ops/range/range_op.rs", "crates/ocio-gpu/src/gpu_processor.rs", "crates/ocio/src/transforms/range_transform.rs"]
 status = "partial"
-note = "1.3r2: RangeOp (the op's behaviors on OpData::Range, its finalize in Op::finalize) and both CreateRangeOp; checked against the wheel through CPU processor cache IDs and pixels (tests/range_op_oracle.rs: combinations, identities, bit depths). p1-optimizer B: the Lut1D arms of canCombineWith and combineWith (an identity range before a forward standard-domain LUT goes). Not yet: the Lut3D arms, BuildRangeOp and CreateRangeTransform (the RangeTransform, WP 1.8). Its GPU part: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's Range arm with its finalize check (gpu_processor.rs, 1.3r3)"
+note = "1.3r2: RangeOp (the op's behaviors on OpData::Range, its finalize in Op::finalize) and both CreateRangeOp; checked against the wheel through CPU processor cache IDs and pixels (tests/range_op_oracle.rs: combinations, identities, bit depths). p1-optimizer B: the Lut1D arms of canCombineWith and combineWith (an identity range before a forward standard-domain LUT goes). p1-transforms-fam1 (1.8c): BuildRangeOp and CreateRangeTransform, in crates/ocio/src/transforms/range_transform.rs. Not yet: the Lut3D arms. Its GPU part: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's Range arm with its finalize check (gpu_processor.rs, 1.3r3)"
 
 [[file]]
 path = "src/OpenColorIO/ops/range/RangeOp.h"
@@ -2052,7 +2056,8 @@ note = "build system"
 path = "src/OpenColorIO/transforms/AllocationTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/allocation_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam1: AllocationTransform, its validation and operator<< (I-73, I-76), BuildAllocationOp (its lg2 ops since p1-transforms-fam2); checked against the wheel in crates/ocio/tests/allocation_transform_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/transforms/BuiltinTransform.cpp"
@@ -2070,13 +2075,15 @@ status = "todo"
 path = "src/OpenColorIO/transforms/CDLTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/cdl_transform.rs"]
-status = "todo"
+status = "partial"
+note = "p1-transforms-fam2 (1.8f): CDLTransform without its files (Create, the parameters, style, ID, first SOP description, validation, equals, operator<< on the shared stream, I-73), checked against the wheel in crates/ocio/tests/cdl_transform_oracle.rs. GetCDL, CreateFromFile and CreateGroupFromFile come with the CDL readers (Phase 4)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/CDLTransform.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/cdl_transform.rs"]
-status = "todo"
+status = "partial"
+note = "p1-transforms-fam2 (1.8f): the class and the METADATA_*_DESCRIPTION names; the file caches' types come with the CDL readers (Phase 4)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/ColorSpaceTransform.cpp"
@@ -2094,25 +2101,29 @@ status = "todo"
 path = "src/OpenColorIO/transforms/ExponentTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/exponent_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam2 (1.8d): the class and its operator<< on the shared stream (I-73); checked against the wheel in crates/ocio/tests/exponent_transform_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/transforms/ExponentTransform.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/exponent_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam2 (1.8d)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/ExponentWithLinearTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/exponent_with_linear_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam2 (1.8d): the class and its operator<< on the shared stream (I-73); checked against the wheel in crates/ocio/tests/exponent_transform_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/transforms/ExponentWithLinearTransform.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/exponent_with_linear_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam2 (1.8d)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/ExposureContrastTransform.cpp"
@@ -2202,49 +2213,57 @@ status = "todo"
 path = "src/OpenColorIO/transforms/GroupTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/group_transform.rs"]
-status = "todo"
+status = "partial"
+note = "p1-transforms T0: GroupTransform (Create, direction, validate, metadata, the children, operator<<) and BuildGroupOps; p1-transforms-fam1 (1.8b): operator<< writes the children on the group's stream (I-73); text and validation against the wheel (crates/ocio/tests/transform_oracle.rs). write and its format queries (Phase 4) and CollectContextVariables (Phase 3) come later"
 
 [[file]]
 path = "src/OpenColorIO/transforms/GroupTransform.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/group_transform.rs"]
-status = "todo"
+status = "partial"
+note = "p1-transforms T0: GroupTransformImpl, as GroupTransform"
 
 [[file]]
 path = "src/OpenColorIO/transforms/LogAffineTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/log_affine_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam2 (1.8e): the class and its operator<< on the shared stream (I-73); checked against the wheel in crates/ocio/tests/log_transform_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/transforms/LogAffineTransform.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/log_affine_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam2 (1.8e)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/LogCameraTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/log_camera_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam2 (1.8e): the class and its operator<< on the shared stream (I-73); checked against the wheel in crates/ocio/tests/log_transform_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/transforms/LogCameraTransform.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/log_camera_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam2 (1.8e)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/LogTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/log_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam2 (1.8e): the class and its operator<< on the shared stream (I-73); checked against the wheel in crates/ocio/tests/log_transform_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/transforms/LogTransform.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/log_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam2 (1.8e)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/LookTransform.cpp"
@@ -2256,13 +2275,15 @@ status = "todo"
 path = "src/OpenColorIO/transforms/Lut1DTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/lut1d_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam4: Lut1DTransform, its setters' errors and operator<< (its min/max scan, on the shared stream, I-73); checked against the wheel in crates/ocio/tests/lut1d_transform_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/transforms/Lut1DTransform.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/lut1d_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam4: Lut1DTransformImpl, as the struct Lut1DTransform"
 
 [[file]]
 path = "src/OpenColorIO/transforms/Lut3DTransform.cpp"
@@ -2280,26 +2301,29 @@ status = "todo"
 path = "src/OpenColorIO/transforms/MatrixTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/matrix_transform.rs", "crates/ocio-ops/src/ops/matrix/matrix_op.rs"]
-status = "partial"
-note = "1.3m3: MatrixTransform::Fit and Sat (162-245), which CreateFitOp and CreateSaturationOp call, as ocio-ops' matrix_transform_fit and matrix_transform_sat (doc(hidden), for the transform to reuse); the rest with the transforms (WP 1.8)"
+status = "done"
+note = "1.3m3: MatrixTransform::Fit and Sat (162-245), which CreateFitOp and CreateSaturationOp call, as ocio-ops' matrix_transform_fit and matrix_transform_sat (doc(hidden)); p1-transforms-fam1 (1.8b): the rest, MatrixTransform in crates/ocio (its fit and sat return those), Fit's and Sat's NaN orders per wheel (I-74), and operator<< on the shared stream (I-73); checked against the wheel in crates/ocio/tests/matrix_transform_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/transforms/MatrixTransform.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/matrix_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam1 (1.8b)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/RangeTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/range_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam1 (1.8c): RangeTransform, its validation (I-75) and operator<< on the shared stream (I-73); checked against the wheel in crates/ocio/tests/range_transform_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/transforms/RangeTransform.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/range_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam1 (1.8c)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/ACES.cpp"
@@ -4154,6 +4178,7 @@ path = "tests/cpu/Config_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/config_tests.rs"]
 status = "todo"
+note = "p1-transforms-fam2 (1.8d): the setMajorVersion checks of version (2065-2067, 2104-2107), without the markers; the tests need configs read from YAML (Phase 3)"
 
 [[file]]
 path = "tests/cpu/ContextVariableUtils_tests.cpp"
@@ -4536,7 +4561,8 @@ status = "todo"
 path = "tests/cpu/ops/allocation/AllocationOp_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/allocation/allocation_op_tests.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam2: AllocationOps create"
 
 [[file]]
 path = "tests/cpu/ops/cdl/CDLOpData_tests.cpp"
@@ -4548,16 +4574,16 @@ note = "1.3c1: all 7 tests"
 [[file]]
 path = "tests/cpu/ops/cdl/CDLOp_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-ops/src/ops/cdl/cdl_op_tests.rs"]
-status = "partial"
-note = "1.3c3: 9 of 10 tests; create_transform needs the CDLTransform (WP 1.8)"
+target = ["crates/ocio-ops/src/ops/cdl/cdl_op_tests.rs", "crates/ocio/src/transforms/cdl_transform_tests.rs"]
+status = "done"
+note = "1.3c3: 9 of 10 tests; p1-transforms-fam2 (1.8f): create_transform, in cdl_transform_tests.rs"
 
 [[file]]
 path = "tests/cpu/ops/exponent/ExponentOp_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-ops/src/ops/exponent/exponent_op_tests.rs"]
-status = "partial"
-note = "1.3e1: every test but create_transform, which needs CreateExponentTransform (1.8)"
+target = ["crates/ocio-ops/src/ops/exponent/exponent_op_tests.rs", "crates/ocio/src/transforms/exponent_transform_tests.rs"]
+status = "done"
+note = "1.3e1: every test but create_transform; p1-transforms-fam2 (1.8d): create_transform, in exponent_transform_tests.rs"
 
 [[file]]
 path = "tests/cpu/ops/exposurecontrast/ExposureContrastOpCPU_tests.cpp"
@@ -4619,9 +4645,9 @@ note = "S2: both tests"
 [[file]]
 path = "tests/cpu/ops/gamma/GammaOp_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-ops/src/ops/gamma/gamma_op_tests.rs"]
-status = "partial"
-note = "1.3g3: 3 of 4 tests; create_transform needs the ExponentTransform and ExponentWithLinearTransform (WP 1.8)"
+target = ["crates/ocio-ops/src/ops/gamma/gamma_op_tests.rs", "crates/ocio/src/transforms/exponent_with_linear_transform_tests.rs"]
+status = "done"
+note = "1.3g3: 3 of 4 tests; p1-transforms-fam2 (1.8d): create_transform, in exponent_with_linear_transform_tests.rs"
 
 [[file]]
 path = "tests/cpu/ops/gradinghuecurve/GradingHueCurveOpCPU_tests.cpp"
@@ -4740,9 +4766,9 @@ status = "done"
 [[file]]
 path = "tests/cpu/ops/log/LogOp_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-ops/src/ops/log/log_op_tests.rs"]
-status = "partial"
-note = "lin_to_log, log_to_lin, inverse, cache_id; create_transform needs CreateLogTransform (WP 1.8)"
+target = ["crates/ocio-ops/src/ops/log/log_op_tests.rs", "crates/ocio/src/transforms/log_transform_tests.rs"]
+status = "done"
+note = "lin_to_log, log_to_lin, inverse, cache_id; p1-transforms-fam2 (1.8e): create_transform, in log_transform_tests.rs"
 
 [[file]]
 path = "tests/cpu/ops/log/LogUtils_tests.cpp"
@@ -4772,9 +4798,9 @@ status = "todo"
 [[file]]
 path = "tests/cpu/ops/lut1d/Lut1DOp_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_tests.rs"]
+target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_tests.rs", "crates/ocio/src/transforms/lut1d_transform_tests.rs"]
 status = "partial"
-note = "gpu, identity_lut_1d; the others need the float renderers, the inverse or the transform (Phase 2)"
+note = "gpu, identity_lut_1d; Lut1D create_transform and Lut1DTransform build_op need the transform: in crates/ocio/src/transforms/lut1d_transform_tests.rs (p1-transforms-fam4); the others need the float renderers or the inverse (Phase 2)"
 
 [[file]]
 path = "tests/cpu/ops/lut3d/Lut3DOpCPU_tests.cpp"
@@ -4810,8 +4836,9 @@ status = "todo"
 [[file]]
 path = "tests/cpu/ops/matrix/MatrixOp_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-ops/src/ops/matrix/matrix_op_tests.rs"]
+target = ["crates/ocio-ops/src/ops/matrix/matrix_op_tests.rs", "crates/ocio/src/transforms/matrix_transform_tests.rs"]
 status = "todo"
+note = "create_transform needs the MatrixTransform: in crates/ocio/src/transforms/matrix_transform_tests.rs (p1-transforms-fam1, 1.8b)"
 
 [[file]]
 path = "tests/cpu/ops/noop/NoOps_tests.cpp"
@@ -4834,8 +4861,9 @@ status = "todo"
 [[file]]
 path = "tests/cpu/ops/range/RangeOp_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-ops/src/ops/range/range_op_tests.rs"]
+target = ["crates/ocio-ops/src/ops/range/range_op_tests.rs", "crates/ocio/src/transforms/range_transform_tests.rs"]
 status = "todo"
+note = "create_transform and RangeTransform no_clamp_converts_to_matrix need the RangeTransform: in crates/ocio/src/transforms/range_transform_tests.rs (p1-transforms-fam1, 1.8c)"
 
 [[file]]
 path = "tests/cpu/ops/reference/ReferenceOpData_tests.cpp"
@@ -4847,7 +4875,8 @@ status = "todo"
 path = "tests/cpu/transforms/AllocationTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/allocation_transform_tests.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam1"
 
 [[file]]
 path = "tests/cpu/transforms/BuiltinTransform_tests.cpp"
@@ -4859,7 +4888,8 @@ status = "todo"
 path = "tests/cpu/transforms/CDLTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/cdl_transform_tests.rs"]
-status = "todo"
+status = "partial"
+note = "p1-transforms-fam2 (1.8f): equality, buildops, description, style; the file tests come with the CDL readers (Phase 4), apply_optimize_simplify with the processor (1.8h)"
 
 [[file]]
 path = "tests/cpu/transforms/ColorSpaceTransform_tests.cpp"
@@ -4877,13 +4907,15 @@ status = "todo"
 path = "tests/cpu/transforms/ExponentTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/exponent_transform_tests.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam2 (1.8d)"
 
 [[file]]
 path = "tests/cpu/transforms/ExponentWithLinearTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/exponent_with_linear_transform_tests.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam2 (1.8d)"
 
 [[file]]
 path = "tests/cpu/transforms/ExposureContrastTransform_tests.cpp"
@@ -4937,19 +4969,22 @@ status = "todo"
 path = "tests/cpu/transforms/LogAffineTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/log_affine_transform_tests.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam2 (1.8e)"
 
 [[file]]
 path = "tests/cpu/transforms/LogCameraTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/log_camera_transform_tests.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam2 (1.8e)"
 
 [[file]]
 path = "tests/cpu/transforms/LogTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/log_transform_tests.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam2 (1.8e)"
 
 [[file]]
 path = "tests/cpu/transforms/LookTransform_tests.cpp"
@@ -4961,7 +4996,8 @@ status = "todo"
 path = "tests/cpu/transforms/Lut1DTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/lut1d_transform_tests.rs"]
-status = "todo"
+status = "partial"
+note = "p1-transforms-fam4: basic, create_with_parameters, hue_adjust, format_metadata; non_monotonic needs the inverse 1D LUT (Phase 2, WP 2.1)"
 
 [[file]]
 path = "tests/cpu/transforms/Lut3DTransform_tests.cpp"
@@ -4973,13 +5009,15 @@ status = "todo"
 path = "tests/cpu/transforms/MatrixTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/matrix_transform_tests.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam1 (1.8b)"
 
 [[file]]
 path = "tests/cpu/transforms/RangeTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/range_transform_tests.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam1 (1.8c)"
 
 [[file]]
 path = "tests/cpu/transforms/builtins/BuiltinTransformRegistry_tests.cpp"

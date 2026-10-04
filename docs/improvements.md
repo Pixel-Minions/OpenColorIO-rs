@@ -621,6 +621,63 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p1-foundations` (1.2a), checked against the wheel in
   `crates/ocio-ops/tests/format_metadata_oracle.rs`.
 
+### I-73. A matrix transform's text changes how a group prints what follows it
+
+- **Upstream:** `operator<<(std::ostream &, const MatrixTransform &)` sets the stream's
+  precision to 16 and leaves it there (`transforms/MatrixTransform.cpp:348`). A group prints its
+  children on one stream (`transforms/GroupTransform.cpp:156-169`), so every transform after a
+  MatrixTransform prints its numbers with 16 significant digits instead of the default 6: in a
+  group of a RangeTransform, a MatrixTransform and the same RangeTransform, the wheel prints
+  `minInValue=0.123457` the first time and `minInValue=0.1234567891234` the second.
+- **Who notices:** anyone reading `repr()` of a group, or comparing the texts of groups that
+  hold the same transforms in another order.
+- **A fix:** restore the stream's precision at the end of the MatrixTransform's text.
+- **Status:** matched in `p1-transforms-fam4` (1.8b): the transforms write their text on one
+  stream (`Transform::write_text`), checked against the wheel in
+  `crates/ocio/tests/matrix_transform_oracle.rs` and, with the transforms that print numbers,
+  in their own oracle tests.
+
+### I-74. The matrix transform's static functions order their NaNs per platform
+
+- **Upstream:** `MatrixTransform::Fit`, `Sat` and `View` (`transforms/MatrixTransform.cpp:
+  162-334`) combine their arguments with products and sums. Where two NaNs meet, x86 keeps the
+  first operand's, and the wheels' compilers ordered the operands differently: in `Fit`'s
+  offsets, `newmin * oldmax - newmax * oldmin`, the Windows wheel multiplies in the source's
+  order and the Linux wheel computes `oldmax * newmin`; in `Sat`, `(1 - sat) * luma`, Windows
+  multiplies in the source's order and Linux with the luma first, except for the last
+  diagonal value; in `View`, `values[0] + values[1] + values[2]`, Windows adds the first two
+  in the other order. Seen through each wheel's `MatrixTransform.Fit`, `Sat` and `View`.
+  The ops that use `Fit` and `Sat` (an AllocationTransform's, a version 1 CDL's saturation)
+  pass them constants with the one variable, so no two NaNs meet there.
+- **Who notices:** matrices built from NaN arguments of different signs or payloads: their
+  NaNs, in the cache IDs, the pixels and the shaders, differ between Windows and Linux.
+- **A fix:** one operand order for both platforms.
+- **Status:** matched in `p1-transforms-fam4` (1.8b), each wheel's order, checked in
+  `crates/ocio/tests/matrix_transform_oracle.rs`.
+
+### I-75. A range that doesn't clamp names its class twice when it lacks a bound
+
+- **Upstream:** `RangeTransformImpl::validate` throws "RangeTransform validation failed:
+  non clamping range must have min and max values defined." for a range that doesn't clamp
+  and lacks a bound, inside the `try` whose `catch` prefixes every message with
+  "RangeTransform validation failed: " (`transforms/RangeTransform.cpp:52-73`). The message
+  comes out with the prefix twice.
+- **Who notices:** anyone who reads the message.
+- **A fix:** throw the message without its prefix.
+- **Status:** matched in `p1-transforms-fam4` (1.8c), checked against the wheel in
+  `crates/ocio/tests/range_transform_oracle.rs`.
+
+### I-76. An allocation without variables doesn't print its allocation
+
+- **Upstream:** `operator<<(std::ostream &, const AllocationTransform &)` prints the allocation
+  only together with the variables, when there are some
+  (`transforms/AllocationTransform.cpp:159-183`). Without variables, a uniform and a log2
+  allocation (and an unknown one) both print `<AllocationTransform direction=forward>`.
+- **Who notices:** anyone reading `repr()` of such a transform, which hides how it allocates.
+- **A fix:** print the allocation always.
+- **Status:** matched in `p1-transforms-fam4`, checked against the wheel in
+  `crates/ocio/tests/allocation_transform_oracle.rs`.
+
 ## Logging
 
 ### I-16. Two messages bypass the logging function
@@ -1080,7 +1137,12 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `finalize` validates the ops.
 - **Status:** matched in `p1-log` (1.3l1, and the verifier's fixes);
   `log_op_data_tests.rs`, `short_channels_are_errors`; `log_op_tests.rs`,
-  `renderers_of_short_channels_raise`.
+  `renderers_of_short_channels_raise`. The transforms in `p1-transforms-fam4`: upstream's
+  `CreateLogTransform` copies such data into a log affine or log camera transform, whose
+  getters and setters read past the short channels; the port's `create_log_transform` (so
+  `CreateTransform`, which the processors' `createGroupTransform` calls) returns the error
+  and adds no transform, for a channel too short for the four affine parameters, or for a
+  camera's break or linear slope (`log_transform_tests.rs`, `short_channels_are_refused`).
 
 ### U-24. Queries of a Gamma op whose channels have too few parameters
 
@@ -1108,4 +1170,8 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `gamma_op_utils_tests.rs` and `gamma_op_tests.rs` check the errors,
   and that the reads upstream doesn't make (a moncurve gamma other than 1, channels that
   differ) are answered. The GPU writer in `p1-gpu-gamma` (1.3g4): `gamma_op_gpu.rs`'s test
-  checks the error for each style and channel.
+  checks the error for each style and channel. The transforms in `p1-transforms-fam4`:
+  upstream's `CreateGammaTransform` copies such data into an exponent or exponent with linear
+  transform, whose getters, setters and text read each channel's first parameter; the port's
+  `create_gamma_transform` (so `CreateTransform`) returns the error for an empty channel and
+  adds no transform (`exponent_with_linear_transform_tests.rs`, `empty_channels_are_refused`).
