@@ -84,10 +84,10 @@ one.
 
 Status as of 2026-10-04: **Phase 1 (the op engine and the analytic transforms) is almost
 complete**, about 21% of the planned work. Through OCIO's own API, every analytic transform
-already matches the official library on the CPU and the GPU. The last Phase 1 work is a sweep
-of every transform through the port's public processors (at every bit depth, layout and
-optimization level, and in all 10 shading languages), plus the last upstream tests that Phase 1
-unblocks. Both are in review. Phase 2 (LUTs and fixed functions) comes next.
+already matches the official library on the CPU and the GPU, and every upstream test that
+Phase 1 unblocks is ported. The last Phase 1 work, in review, is a sweep of every transform
+through the port's public processors (at every bit depth, layout and optimization level, and in
+all 10 shading languages). Phase 2 (LUTs and fixed functions) comes next.
 
 **Done:** everything below is bit-exact against the official library on Windows and Linux, in
 debug and release builds, and was reviewed independently before merging.
@@ -154,7 +154,7 @@ instead. Every such case, and every upstream bug the port reproduces, is listed 
 
 | Suite | Ported | Total |
 |---|---:|---:|
-| C++ | 248 | 1,191 |
+| C++ | 262 | 1,191 |
 | GPU | 0 | 264 |
 | Python | 0 | 384 |
 
