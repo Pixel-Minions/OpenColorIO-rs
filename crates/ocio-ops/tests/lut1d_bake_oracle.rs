@@ -408,8 +408,12 @@ fn check_bakes(cases: &[BakeCase]) -> usize {
 
 /// `FindSeparablePrefix` leaves a prefix that is a single forward Lut1D as it is ("nothing to
 /// optimize", src/OpenColorIO/OpOptimizers.cpp:493-507 @ v2.5.2): a 256-entry Lut1DTransform
-/// at 8-bit input. (A prefix with a LUT and other ops renders the LUT on floats to bake it,
-/// which waits for the float renderers, Phase 2.)
+/// at 8-bit input, whose optimized processor's cache ID and LUT, entry for entry, match the
+/// wheel's. That alone can't tell the LUT from a re-bake of it: through its own lookup
+/// domain, a re-bake may give the same entries. What tells them apart is that the port can't
+/// re-bake a LUT yet: that renders it on floats, which waits for the float renderers (Phase 2),
+/// so without the rule the port raises. When those come, this test needs another way to see the
+/// original data.
 #[test]
 fn a_single_lut_isnt_baked_again() {
     let mut cases = Vec::new();
