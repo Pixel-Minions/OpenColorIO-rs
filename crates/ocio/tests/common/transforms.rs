@@ -9,24 +9,26 @@
 //!   against `Display`, byte for byte; what `validate()` raises against `validate`'s message;
 //!   and `equals()` for pairs of cases against the port's `equals`.
 //! - [`check_processors`]: through `processor_ops`, the raw config's processor of each case
-//!   (`Config::CreateRaw()->getProcessor(transform, direction)`), written out by
-//!   `createGroupTransform()`, against the port's ops: `validate`, [`build_ops`], `finalize`,
-//!   then [`create_transform`] for each op (`Processor::Impl::setTransform` and
-//!   `createGroupTransform`, src/OpenColorIO/Processor.cpp:300-316, 623-641 @ v2.5.2). Every
-//!   getter the dump holds is compared, floats by their bits; or the error and its message.
+//!   (`Config::CreateRaw()->getProcessor(transform, direction)`) and its optimized processor,
+//!   against the port's [`Config::processor_in_direction`] and
+//!   [`Processor::optimized_processor_with_bit_depths`]: their cache IDs, `isNoOp`,
+//!   `hasChannelCrosstalk`, `isDynamic`, the files and looks they read, and
+//!   `createGroupTransform()`, every getter of every transform the dump holds, floats by their
+//!   bits; or the error, its message and where it happened.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
-use ocio::transform::{build_ops, create_transform};
 use ocio::{
-    Config, FormatMetadata, GroupTransform, NegativeStyle, RangeStyle, Transform,
-    TransformDirection,
+    Config, FormatMetadata, GroupTransform, NegativeStyle, OptimizationFlags, Processor,
+    RangeStyle, Transform, TransformDirection,
 };
-use ocio_ops::op::OpVec;
 use ocio_ops::open_color_types::{BitDepth, CdlStyle};
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle::BatchCall;
-use ocio_testkit::processor_ops::{Dump, Dumped, ProcessorOpsReply, ProcessorOpsRequest};
+use ocio_testkit::processor_ops::{
+    Dump, Dumped, ProcessorDump, ProcessorOpsReply, ProcessorOpsRequest,
+};
 use ocio_testkit::transform_text::{Built, TransformTextReply, TransformTextRequest};
 use serde_json::{Value, json};
 
@@ -232,27 +234,35 @@ fn port_equals(a: &Transform, b: &Transform) -> Option<bool> {
     }
 }
 
-/// What the port's processor of `transform` in the direction `dir` makes of it: the group
-/// `createGroupTransform()` returns, or the error.
-///
-/// Port of `Processor::Impl::setTransform` and `createGroupTransform` (src/OpenColorIO/
-/// Processor.cpp:300-316, 623-641 @ v2.5.2), for transforms without dynamic properties.
-pub(crate) fn port_processor_group(
+/// The port's processor of `transform` in the direction `dir`, and its optimized processor
+/// (F32 in and out, no optimization, as the checks ask the wheel), each with its
+/// `createGroupTransform()`; or the error, and the step that raised it, as `processor_ops`
+/// names it ("processor", "group", "optimize" or "optimized_group").
+#[allow(clippy::type_complexity)]
+pub(crate) fn port_processors(
     config: &Config,
     transform: &Transform,
     dir: TransformDirection,
-) -> ocio::Result<GroupTransform> {
-    transform.validate()?;
-    let mut ops = OpVec::new();
-    build_ops(&mut ops, config, config.current_context(), transform, dir)?;
-    ops.finalize()?;
-
-    let mut group = GroupTransform::new();
-    *group.format_metadata_mut() = ops.get_format_metadata().clone();
-    for op in ops.iter() {
-        create_transform(&mut group, op)?;
-    }
-    Ok(group)
+) -> Result<
+    (
+        (Arc<Processor>, GroupTransform),
+        (Arc<Processor>, GroupTransform),
+    ),
+    (&'static str, ocio::Exception),
+> {
+    let processor = config
+        .processor_in_direction(transform, dir)
+        .map_err(|e| ("processor", e))?;
+    let group = processor
+        .create_group_transform()
+        .map_err(|e| ("group", e))?;
+    let optimized = processor
+        .optimized_processor_with_bit_depths(BitDepth::F32, BitDepth::F32, OptimizationFlags::NONE)
+        .map_err(|e| ("optimize", e))?;
+    let optimized_group = optimized
+        .create_group_transform()
+        .map_err(|e| ("optimized_group", e))?;
+    Ok(((processor, group), (optimized, optimized_group)))
 }
 
 /// The raw config's processors of `cases`, in both directions, the wheel's against the port's.
@@ -286,18 +296,27 @@ pub(crate) fn check_processors_in(cases: &[Case], config_spec: Option<&Value>, c
     for ((k, dir, _), response) in requests.iter().zip(Oracle::get().batch(&calls, true)) {
         let reply = ProcessorOpsReply::from_response(response.unwrap_or_else(|e| panic!("{e}")));
         let case = &cases[*k];
-        let port = port_processor_group(config, &case.port, *dir);
+        // Each request makes its own config in the oracle: a copy has an empty cache.
+        let config = config.clone();
+        let port = port_processors(&config, &case.port, *dir);
         let outcome = match (reply.raised(), &port) {
-            (Some(raised), Err(e)) => {
-                if raised.stage == "processor" && raised.message == e.message() {
+            (Some(raised), Err((stage, e))) => {
+                if raised.stage == *stage && raised.message == e.message() {
                     None
                 } else {
-                    Some(format!("wheel {raised:?}\n  port  {e:?}"))
+                    Some(format!("wheel {raised:?}\n  port  {stage} {e:?}"))
                 }
             }
-            (None, Ok(group)) => compare_group(&reply.processor().group, group)
-                .err()
-                .map(|e| format!("{e}\n  wheel {}", reply.result)),
+            (None, Ok(((processor, group), (optimized, optimized_group)))) => {
+                compare_processor(reply.processor(), processor, group)
+                    .map_err(|e| format!("processor: {e}"))
+                    .and_then(|()| {
+                        compare_processor(reply.optimized(), optimized, optimized_group)
+                            .map_err(|e| format!("optimized processor: {e}"))
+                    })
+                    .err()
+                    .map(|e| format!("{e}\n  wheel {}", reply.result))
+            }
             (wheel, port) => Some(format!(
                 "wheel {wheel:?} {}\n  port  {port:?}",
                 reply.result
@@ -308,6 +327,51 @@ pub(crate) fn check_processors_in(cases: &[Case], config_spec: Option<&Value>, c
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The wheel's processor, as `processor_ops` writes it out, against the port's.
+fn compare_processor(
+    wheel: &ProcessorDump,
+    port: &Processor,
+    group: &GroupTransform,
+) -> Result<(), String> {
+    let cache_id = port.cache_id().map_err(|e| e.to_string())?;
+    let is_no_op = port.is_no_op().map_err(|e| e.to_string())?;
+    let port_flags = (
+        cache_id.as_str(),
+        is_no_op,
+        port.has_channel_crosstalk(),
+        port.is_dynamic(),
+    );
+    let wheel_flags = (
+        wheel.cache_id.as_str(),
+        wheel.is_no_op,
+        wheel.has_channel_crosstalk,
+        wheel.is_dynamic,
+    );
+    if port_flags != wheel_flags {
+        return Err(format!(
+            "(cache ID, isNoOp, hasChannelCrosstalk, isDynamic): wheel {wheel_flags:?}, port \
+             {port_flags:?}"
+        ));
+    }
+    let metadata = port.processor_metadata();
+    let files: Vec<Dumped> = (0..metadata.num_files())
+        .map(|i| dumped_str(metadata.file(i)))
+        .collect();
+    let looks: Vec<Dumped> = (0..metadata.num_looks())
+        .map(|i| dumped_str(metadata.look(i)))
+        .collect();
+    for (name, port_list) in [("getFiles", files), ("getLooks", looks)] {
+        let port_list = Dumped::List(port_list);
+        if wheel.processor_metadata.getter(name) != &port_list {
+            return Err(format!(
+                "{name}: wheel {:?}, port {port_list:?}",
+                wheel.processor_metadata.getter(name)
+            ));
+        }
+    }
+    compare_group(&wheel.group, group)
 }
 
 /// The wheel's group, as `processor_ops` writes it out, against the port's.

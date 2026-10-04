@@ -5,8 +5,9 @@
 //! and `getOptimizedProcessor` for groups of groups, nested, in both directions, and the
 //! processors' cache ID, flags, metadata and `createGroupTransform()`.
 //!
-//! So far the group transform, the one class in the port; its processors have no ops. Each
-//! class adds its cases as it lands.
+//! Here, groups of groups, whose processors have no ops. The processors of every other class,
+//! and their `createGroupTransform()`, are checked by each class's oracle test
+//! (`common/transforms.rs`, `check_processors`).
 
 use ocio::{
     BitDepth, Config, FormatMetadata, GroupTransform, OptimizationFlags, Processor, Transform,
