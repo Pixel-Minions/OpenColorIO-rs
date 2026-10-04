@@ -651,8 +651,9 @@ fn every_path_writes_the_wheels_shader() {
 
 /// Extreme parameters, generated: each slope, offset and power, and the saturation, in turn
 /// NaN, ±Inf, the largest double, -0, the smallest denormal, 1e-9, 1e39 and 65504.5 (beyond the
-/// float range and Cg's half range), for each style and direction, without optimization, in
-/// every language.
+/// float range and Cg's half range), for each style and direction, at every level, in every
+/// language; alone, and in lists the optimizer combines or removes: twice, as an inverse pair,
+/// and around a matrix.
 #[test]
 fn extreme_parameters_write_the_wheels_shader() {
     let base = |style| {
@@ -687,12 +688,25 @@ fn extreme_parameters_write_the_wheels_shader() {
                         6..9 => c.power[slot - 6] = v,
                         _ => c.sat = v,
                     }
-                    cases.extend(cases_of(
-                        &format!("{style:?} {dir:?} slot {slot} = {v:e}"),
-                        vec![T::Cdl(c, dir)],
-                        &no_optimization(),
-                        Names::default(),
-                    ));
+                    let other = match dir {
+                        F => I,
+                        I => F,
+                    };
+                    let (x, inverse) = (T::Cdl(c, dir), T::Cdl(c, other));
+                    let chains = [
+                        ("", vec![x]),
+                        (" twice", vec![x, x]),
+                        (" inverse pair", vec![x, inverse]),
+                        (" around a matrix", vec![x, T::Scale(2.0), x]),
+                    ];
+                    for (label, chain) in chains {
+                        cases.extend(cases_of(
+                            &format!("{style:?} {dir:?} slot {slot} = {v:e}{label}"),
+                            chain,
+                            &levels(),
+                            Names::default(),
+                        ));
+                    }
                 }
             }
         }

@@ -1108,7 +1108,7 @@ note = "1.3c3: CDLOp (the op's behaviors on OpData::Cdl) and both CreateCDLOp; c
 [[file]]
 path = "src/OpenColorIO/ops/cdl/CDLOp.h"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/cdl/cdl_op.rs"]
+target = ["crates/ocio-ops/src/ops/cdl/cdl_op.rs", "crates/ocio-gpu/src/gpu_processor.rs"]
 status = "partial"
 note = "1.3c3: CDLOp (the op's behaviors on OpData::Cdl) and both CreateCDLOp; checked against the wheel through CPU processor cache IDs and pixels (tests/cdl_op_oracle.rs: identities, inverse pairs, simplified CDLs, optimization flags). Not yet: CreateCDLTransform and BuildCDLOp (the CDLTransform, WP 1.8). Its GPU part: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's Cdl arm (gpu_processor.rs, 1.3c4)"
 
