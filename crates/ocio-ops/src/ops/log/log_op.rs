@@ -4,7 +4,8 @@
 //! The Log op: a port of `src/OpenColorIO/ops/log/LogOp.h` and `LogOp.cpp` @ v2.5.2, what the
 //! CPU engine needs: the op's behaviors, and the functions that create ops, [`create_log_op`],
 //! [`create_log_op_from_parameters`] and [`create_log_op_from_base`]. `BuildLogOp` and
-//! `CreateLogTransform` work on the Log transforms, and come with them (WP 1.8);
+//! `CreateLogTransform` work on the Log transforms: they are in `ocio`
+//! (crates/ocio/src/transforms/log_transform.rs);
 //! `extractGpuShaderInfo` comes with the GPU writer (1.3l4).
 //!
 //! As for every family, the op is its data, [`OpData::Log`]: [`Op`]'s methods match on it and

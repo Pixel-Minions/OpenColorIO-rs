@@ -23,6 +23,9 @@ pub use transforms::allocation_transform::AllocationTransform;
 pub use transforms::exponent_transform::ExponentTransform;
 pub use transforms::exponent_with_linear_transform::ExponentWithLinearTransform;
 pub use transforms::group_transform::GroupTransform;
+pub use transforms::log_affine_transform::LogAffineTransform;
+pub use transforms::log_camera_transform::LogCameraTransform;
+pub use transforms::log_transform::LogTransform;
 pub use transforms::matrix_transform::MatrixTransform;
 pub use transforms::range_transform::{RangeStyle, RangeTransform};
 

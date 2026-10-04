@@ -460,9 +460,9 @@ note = "S2, 1.1d: OpCPU (as the CpuOp trait, with the typed apply_bit_depth); 1.
 [[file]]
 path = "src/OpenColorIO/OpBuilders.h"
 kind = "src"
-target = ["crates/ocio/src/transform.rs", "crates/ocio/src/transforms/group_transform.rs", "crates/ocio/src/transforms/matrix_transform.rs", "crates/ocio/src/transforms/range_transform.rs", "crates/ocio/src/transforms/allocation_transform.rs", "crates/ocio/src/transforms/exponent_transform.rs", "crates/ocio/src/transforms/exponent_with_linear_transform.rs"]
+target = ["crates/ocio/src/transform.rs", "crates/ocio/src/transforms/group_transform.rs", "crates/ocio/src/transforms/matrix_transform.rs", "crates/ocio/src/transforms/range_transform.rs", "crates/ocio/src/transforms/allocation_transform.rs", "crates/ocio/src/transforms/exponent_transform.rs", "crates/ocio/src/transforms/exponent_with_linear_transform.rs", "crates/ocio/src/transforms/log_transform.rs"]
 status = "partial"
-note = "p1-transforms T0: BuildOps and BuildGroupOps; each Build<Class>Op comes with its class, next to it; p1-transforms-fam1: BuildMatrixOp (1.8b), BuildRangeOp (1.8c), BuildAllocationOp (in AllocationTransform.cpp); p1-transforms-fam2: BuildExponentOp, BuildExponentWithLinearOp (1.8d)"
+note = "p1-transforms T0: BuildOps and BuildGroupOps; each Build<Class>Op comes with its class, next to it; p1-transforms-fam1: BuildMatrixOp (1.8b), BuildRangeOp (1.8c), BuildAllocationOp (in AllocationTransform.cpp); p1-transforms-fam2: BuildExponentOp, BuildExponentWithLinearOp (1.8d), BuildLogOp (1.8e)"
 
 [[file]]
 path = "src/OpenColorIO/OpOptimizers.cpp"
@@ -1625,9 +1625,9 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/ops/log/LogOp.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/log/log_op.rs", "crates/ocio-gpu/src/gpu_processor.rs"]
+target = ["crates/ocio-ops/src/ops/log/log_op.rs", "crates/ocio-gpu/src/gpu_processor.rs", "crates/ocio/src/transforms/log_transform.rs"]
 status = "partial"
-note = "1.3l3: the op, CreateLogOp, the Log arm of CreateOpVecFromOpData; cache IDs, the optimizer's inverse pairs and pixels against the wheel (tests/log_op_oracle.rs). BuildLogOp and CreateLogTransform come with the transforms (WP 1.8). Its GPU part: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's Log arm (gpu_processor.rs, 1.3l4)"
+note = "1.3l3: the op, CreateLogOp, the Log arm of CreateOpVecFromOpData; cache IDs, the optimizer's inverse pairs and pixels against the wheel (tests/log_op_oracle.rs). p1-transforms-fam2 (1.8e): the three BuildLogOp and CreateLogTransform, in crates/ocio/src/transforms/log_transform.rs. Its GPU part: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's Log arm (gpu_processor.rs, 1.3l4)"
 
 [[file]]
 path = "src/OpenColorIO/ops/log/LogOp.h"
@@ -2225,37 +2225,43 @@ note = "p1-transforms T0: GroupTransformImpl, as GroupTransform"
 path = "src/OpenColorIO/transforms/LogAffineTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/log_affine_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam2 (1.8e): the class and its operator<< on the shared stream (I-73); checked against the wheel in crates/ocio/tests/log_transform_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/transforms/LogAffineTransform.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/log_affine_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam2 (1.8e)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/LogCameraTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/log_camera_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam2 (1.8e): the class and its operator<< on the shared stream (I-73); checked against the wheel in crates/ocio/tests/log_transform_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/transforms/LogCameraTransform.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/log_camera_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam2 (1.8e)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/LogTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/log_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam2 (1.8e): the class and its operator<< on the shared stream (I-73); checked against the wheel in crates/ocio/tests/log_transform_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/transforms/LogTransform.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/log_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam2 (1.8e)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/LookTransform.cpp"
@@ -4756,9 +4762,9 @@ status = "done"
 [[file]]
 path = "tests/cpu/ops/log/LogOp_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-ops/src/ops/log/log_op_tests.rs"]
-status = "partial"
-note = "lin_to_log, log_to_lin, inverse, cache_id; create_transform needs CreateLogTransform (WP 1.8)"
+target = ["crates/ocio-ops/src/ops/log/log_op_tests.rs", "crates/ocio/src/transforms/log_transform_tests.rs"]
+status = "done"
+note = "lin_to_log, log_to_lin, inverse, cache_id; p1-transforms-fam2 (1.8e): create_transform, in log_transform_tests.rs"
 
 [[file]]
 path = "tests/cpu/ops/log/LogUtils_tests.cpp"
@@ -4958,19 +4964,22 @@ status = "todo"
 path = "tests/cpu/transforms/LogAffineTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/log_affine_transform_tests.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam2 (1.8e)"
 
 [[file]]
 path = "tests/cpu/transforms/LogCameraTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/log_camera_transform_tests.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam2 (1.8e)"
 
 [[file]]
 path = "tests/cpu/transforms/LogTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/log_transform_tests.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam2 (1.8e)"
 
 [[file]]
 path = "tests/cpu/transforms/LookTransform_tests.cpp"
