@@ -14,7 +14,9 @@
 //! can't be attributed), are kept; `--unlabelled` also deletes the unlabelled ones that no
 //! checkout of this repository still uses. It runs only from the project's main checkout: from
 //! a linked worktree or a local clone, the checkouts still using unlabelled volumes may not be
-//! visible. It never deletes anything else.
+//! visible. It never deletes anything else: links inside what it deletes (a worktree's
+//! `upstream/OpenColorIO` linked to the main checkout's, say) are unlinked first, never followed
+//! (`links`).
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -98,15 +100,9 @@ pub(crate) fn run(args: &[&str]) -> Result<(), String> {
             let size = disk_size(&path);
             println!("  delete {:>10}  {}", bytes(size), shown(&path));
             freed += size;
-            if yes {
-                let removed = if path.is_dir() {
-                    std::fs::remove_dir_all(&path)
-                } else {
-                    std::fs::remove_file(&path)
-                };
-                if let Err(e) = removed {
-                    failures.push(format!("{}: {e}", shown(&path)));
-                }
+            // Without deleting through a link inside it (`links::remove_tree`).
+            if yes && let Err(e) = crate::links::remove_tree(&path) {
+                failures.push(e);
             }
         }
     }
@@ -128,9 +124,11 @@ pub(crate) fn run(args: &[&str]) -> Result<(), String> {
                     gone.push(wt);
                     continue;
                 }
-                // --force: every worktree here holds the upstream submodule, which git
-                // refuses to remove without it. It was checked clean just above.
-                match crate::git(&root, &["worktree", "remove", "--force", &wt.path]) {
+                // `git worktree remove --force` (every worktree here holds the upstream
+                // submodule, which git refuses to remove without it; it was checked clean just
+                // above), after unlinking the links inside it: git would delete what a junction
+                // points to.
+                match crate::land::remove_worktree(&root, Path::new(&wt.path)) {
                     Ok(_) => gone.push(wt),
                     Err(e) => failures.push(e),
                 }
