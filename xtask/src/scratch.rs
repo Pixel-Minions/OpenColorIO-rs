@@ -14,7 +14,13 @@
 //! can't be attributed), are kept; `--unlabelled` also deletes the unlabelled ones that no
 //! checkout of this repository still uses. It runs only from the project's main checkout: from
 //! a linked worktree or a local clone, the checkouts still using unlabelled volumes may not be
-//! visible. It never deletes anything else.
+//! visible.
+//!
+//! It never deletes anything else, and never through a link (a symbolic link or junction): a
+//! checkout whose `target` is a link, and a `target/verify*` entry that is one, are skipped
+//! with a message; links inside what it deletes (a worktree's `upstream/OpenColorIO` linked to
+//! the main checkout's, say) are unlinked first, never followed (`links`); a worktree that is
+//! itself a link is refused.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -83,30 +89,19 @@ pub(crate) fn run(args: &[&str]) -> Result<(), String> {
         .iter()
         .filter(|w| Path::new(&w.path).is_dir() && !goes(w))
     {
-        let target = Path::new(&wt.path).join("target");
-        let Ok(entries) = std::fs::read_dir(&target) else {
-            continue;
-        };
-        let mut found: Vec<PathBuf> = entries
-            .flatten()
-            .filter(|e| e.file_name().to_string_lossy().starts_with("verify"))
-            .map(|e| e.path())
-            .collect();
-        found.sort();
+        let (found, skipped) = verify_entries(Path::new(&wt.path));
+        for (path, why) in skipped {
+            any = true;
+            println!("  skip   {:>10}  {}: {why}", "", shown(&path));
+        }
         for path in found {
             any = true;
             let size = disk_size(&path);
             println!("  delete {:>10}  {}", bytes(size), shown(&path));
             freed += size;
-            if yes {
-                let removed = if path.is_dir() {
-                    std::fs::remove_dir_all(&path)
-                } else {
-                    std::fs::remove_file(&path)
-                };
-                if let Err(e) = removed {
-                    failures.push(format!("{}: {e}", shown(&path)));
-                }
+            // Without deleting through a link inside it (`links::remove_tree`).
+            if yes && let Err(e) = crate::links::remove_tree(&path) {
+                failures.push(e);
             }
         }
     }
@@ -128,9 +123,11 @@ pub(crate) fn run(args: &[&str]) -> Result<(), String> {
                     gone.push(wt);
                     continue;
                 }
-                // --force: every worktree here holds the upstream submodule, which git
-                // refuses to remove without it. It was checked clean just above.
-                match crate::git(&root, &["worktree", "remove", "--force", &wt.path]) {
+                // `git worktree remove --force` (every worktree here holds the upstream
+                // submodule, which git refuses to remove without it; it was checked clean just
+                // above), after unlinking the links inside it: git would delete what a junction
+                // points to.
+                match crate::land::remove_worktree(&root, Path::new(&wt.path)) {
                     Ok(_) => gone.push(wt),
                     Err(e) => failures.push(e),
                 }
@@ -182,6 +179,30 @@ pub(crate) fn run(args: &[&str]) -> Result<(), String> {
             failures.join("\n  ")
         ))
     }
+}
+
+/// The `target/verify*` entries of `checkout` to delete, sorted, and those it skips, with why:
+/// a `target` that is a link (a symbolic link or junction) is skipped whole, and so is a
+/// `verify*` entry that is one, since deleting through either would delete what it points to.
+fn verify_entries(checkout: &Path) -> (Vec<PathBuf>, Vec<(PathBuf, &'static str)>) {
+    const LINK: &str = "a link (symbolic link or junction): not deleted, nor what it points to";
+    let target = checkout.join("target");
+    if std::fs::symlink_metadata(&target).is_ok_and(|m| crate::links::is_link(&m)) {
+        return (Vec::new(), vec![(target, LINK)]);
+    }
+    let Ok(entries) = std::fs::read_dir(&target) else {
+        return (Vec::new(), Vec::new());
+    };
+    let mut found: Vec<PathBuf> = entries
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with("verify"))
+        .map(|e| e.path())
+        .collect();
+    found.sort();
+    let (links, found): (Vec<PathBuf>, Vec<PathBuf>) = found
+        .into_iter()
+        .partition(|p| std::fs::symlink_metadata(p).is_ok_and(|m| crate::links::is_link(&m)));
+    (found, links.into_iter().map(|p| (p, LINK)).collect())
 }
 
 /// `--unlabelled` needs the project's main checkout: the one whose worktrees include every
@@ -948,6 +969,43 @@ mod tests {
         ] {
             assert!(!is_local_path(remote), "{remote}");
         }
+    }
+
+    #[test]
+    fn verify_output_behind_a_link_is_skipped() {
+        use crate::links::testing::{Scratch, intact, link_dir, precious};
+        let dir = Scratch::new("verify");
+        let keep = precious(dir.path());
+        // A checkout with verifier output, a verify* entry that is a link, and other output.
+        let checkout = dir.path().join("checkout");
+        let target = checkout.join("target");
+        for d in ["verify-b", "verify-a", "debug"] {
+            std::fs::create_dir_all(target.join(d)).unwrap();
+        }
+        std::fs::write(target.join("verify.log"), "log").unwrap();
+        link_dir(&keep, &target.join("verify-link"));
+        let (found, skipped) = verify_entries(&checkout);
+        assert_eq!(
+            found,
+            [
+                target.join("verify-a"),
+                target.join("verify-b"),
+                target.join("verify.log")
+            ]
+        );
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].0, target.join("verify-link"));
+        // A checkout whose target is a link: skipped whole, not read through.
+        let linked = dir.path().join("linked");
+        std::fs::create_dir_all(&linked).unwrap();
+        link_dir(&checkout.join("target"), &linked.join("target"));
+        let (found, skipped) = verify_entries(&linked);
+        assert!(found.is_empty(), "{found:?}");
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].0, linked.join("target"));
+        // No target: nothing.
+        assert_eq!(verify_entries(&keep), (Vec::new(), Vec::new()));
+        assert!(intact(&keep));
     }
 
     #[test]

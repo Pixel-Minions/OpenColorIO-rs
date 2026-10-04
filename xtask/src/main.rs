@@ -12,6 +12,7 @@ mod fixtures;
 mod gate;
 mod guards;
 mod land;
+mod links;
 mod parity;
 mod registers;
 mod scratch;
@@ -34,7 +35,9 @@ Checking and landing chunks:
                               checkout (in use or not), worktrees of landed branches, and
                               Rocky build volumes (ocio-rs-target-*) that scripts/rocky9.sh
                               labelled with this repository and whose checkout is gone;
-                              --unlabelled: also unlabelled volumes no checkout still uses
+                              --unlabelled: also unlabelled volumes no checkout still uses;
+                              links (symlinks, junctions) inside what it deletes are
+                              unlinked first, never followed
 
 Oracle and fixtures (fixtures/ is written only by these commands):
   oracle info                 versions and platform of the pinned oracle wheel
@@ -47,7 +50,8 @@ Oracle and fixtures (fixtures/ is written only by these commands):
 Guardrails:
   guards                      forbidden patterns, unsafe allowlist, waivers, headers,
                               the registers' structure (docs/improvements.md,
-                              docs/deviations.md)
+                              docs/deviations.md), ocio::internals and its feature only
+                              for crates/ocio/tests
   ratchet [--update] [--base <rev>]
                               ported upstream tests may only increase (--update records
                               the current counts; `xtask land` does it at merge time)
