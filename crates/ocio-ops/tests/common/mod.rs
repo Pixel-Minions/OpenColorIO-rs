@@ -9,5 +9,6 @@
 pub(crate) mod cdl;
 pub(crate) mod gamma;
 pub(crate) mod image;
+pub(crate) mod log_chain;
 pub(crate) mod matrix;
 pub(crate) mod numbers;

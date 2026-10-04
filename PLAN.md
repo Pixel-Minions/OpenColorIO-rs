@@ -483,7 +483,7 @@ let view = ocio::DisplayViewTransform::new("ACEScg", "sRGB - Display", "ACES 2.0
 let proc = config.processor(&view.into())?;                 // Arc<Processor>
 
 let cpu = proc.default_cpu_processor()?;
-cpu.apply_rgba(&mut strip);                                  // &mut [[f32; 4]]; bit-identical to applyRGBA
+cpu.apply_rgba(&mut strip)?;                                 // &mut [[f32; 4]]; bit-identical to applyRGBA; an error where OCIO reads past a LUT (U-1)
 
 let mut desc = ocio::GpuShaderDesc::new(ocio::GpuLanguage::GlslVk4_6);
 desc.set_allow_texture_1d(false);

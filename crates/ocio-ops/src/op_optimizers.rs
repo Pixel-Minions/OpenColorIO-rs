@@ -5,23 +5,20 @@
 //! `src/OpenColorIO/OpOptimizers.cpp` @ v2.5.2.
 //!
 //! The optimizer's core: `OpRcPtrVec::finalize`, `optimize` (the pass loop and its generic
-//! steps, which ask the ops only through [`Op`]'s methods) and `optimizeForBitdepth`. The
-//! steps that act on LUT data come with the LUT families (WP 2.5, card `p1-optimizer`): each
-//! matches over [`OpData`] without a wildcard, so the LUT arms join it with their variants.
-//! - `ReplaceInverseLuts` finds nothing to act on among the variants so far, and
-//!   `RemoveInverseOps` has no Lut1D pair to replace.
-//! - `OptimizeSeparablePrefix` bakes a prefix into a Lut1D, so it refuses a prefix to bake
-//!   until the Lut1D op exists. A prefix needs an op other than a Matrix or a Range (the no-op
-//!   types are gone by then): a Gamma op (1.3g3) and a CDL op without saturation (1.3c3) are,
-//!   so for integer and half input, with `OPTIMIZATION_COMP_SEPARABLE_PREFIX`, a CPU processor
-//!   whose separable prefix holds one is refused until then.
+//! steps, which ask the ops only through [`Op`]'s methods) and `optimizeForBitdepth`, with
+//! `OptimizeSeparablePrefix`, which bakes a prefix of separable ops into a Lut1D for integer
+//! and half input. The steps that act on LUT data match over [`OpData`] without a wildcard:
+//! - `ReplaceInverseLuts` and `RemoveInverseOps` refuse an inverse Lut1D, whose set-up is
+//!   Phase 2's (WP 2.1); only Phase 2's sources make one. The Lut3D arms come with Lut3D.
 
 use crate::bit_depth_utils::is_float_bit_depth;
 use crate::exception::{Exception, Result};
 use crate::logging::{is_debug_logging_enabled, log_debug};
 use crate::op::{Op, OpVec, serialize_op_vec};
 use crate::op_data::{OpData, OpDataType};
-use crate::open_color_types::{BitDepth, OptimizationFlags};
+use crate::open_color_types::{BitDepth, OptimizationFlags, TransformDirection};
+use crate::ops::lut1d::Lut1DOpData;
+use crate::ops::lut1d::lut1d_op::create_lut1d_op;
 
 /// Whether `flags` let the optimizer remove a pair of inverse ops of type `op_type`.
 ///
@@ -202,12 +199,18 @@ fn replace_identity_ops(op_vec: &mut OpVec, o_flags: OptimizationFlags) -> Resul
 
 /// The op that replaces a pair of inverse ops: the first one's identity replacement, which
 /// keeps any clamping the pair does. A pair of Lut1D ops gets its own
-/// (`Lut1DOpData::getPairIdentityReplacement`), with the Lut1D variant.
+/// (`Lut1DOpData::getPairIdentityReplacement`), which needs the inverse LUT's set-up (Phase 2,
+/// WP 2.1): until then such a pair is an error. A pair holds an inverse LUT, which only Phase
+/// 2's sources make, and which `finalize` refuses.
 ///
 /// Port of the replacement of `RemoveInverseOps` (src/OpenColorIO/OpOptimizers.cpp:249-276 @
 /// v2.5.2).
 fn pair_identity_replacement(op1: &Op) -> Result<Op> {
     match &**op1.data() {
+        OpData::Lut1D(_) => Err(Exception::new(
+            "Lut1D: the identity replacement of a pair of inverse 1D LUTs is not ported yet \
+             (Phase 2, WP 2.1).",
+        )),
         OpData::Log(_)
         | OpData::Cdl(_)
         | OpData::Gamma(_)
@@ -341,14 +344,24 @@ fn combine_ops(op_vec: &mut OpVec, o_flags: OptimizationFlags) -> Result<i32> {
 }
 
 /// Replaces each Lut1D or Lut3D evaluated inverse with a faster forward approximation, and
-/// returns how many. The LUT arms come with the LUT variants; no other op is replaced.
+/// returns how many. The fast forward Lut1D (`MakeFastLut1DFromInverse`) is Phase 2's (WP
+/// 2.1): until then an inverse Lut1D is an error. Only Phase 2's sources make one, and
+/// `finalize` refuses it. The Lut3D arm comes with its variant; no other op is replaced.
 ///
 /// Port of `ReplaceInverseLuts` (src/OpenColorIO/OpOptimizers.cpp:369-408 @ v2.5.2).
-fn replace_inverse_luts(op_vec: &mut OpVec) -> i32 {
+fn replace_inverse_luts(op_vec: &mut OpVec) -> Result<i32> {
     let count = 0;
     for op in op_vec.iter() {
         match &**op.data() {
-            // (The Lut1D and Lut3D arms: an inverse LUT becomes a fast forward one, counted.)
+            OpData::Lut1D(lut) => {
+                if lut.get_direction() == TransformDirection::Inverse {
+                    return Err(Exception::new(
+                        "Lut1D: the fast forward LUT of an inverse 1D LUT is not ported yet \
+                         (Phase 2, WP 2.1).",
+                    ));
+                }
+            }
+            // (The Lut3D arm: an inverse LUT becomes a fast forward one, counted.)
             OpData::Log(_)
             | OpData::Cdl(_)
             | OpData::Gamma(_)
@@ -359,7 +372,7 @@ fn replace_inverse_luts(op_vec: &mut OpVec) -> i32 {
             | OpData::NoOp(_) => {}
         }
     }
-    count
+    Ok(count)
 }
 
 /// Removes the leading Range ops that are identities, and returns how many.
@@ -402,9 +415,10 @@ fn remove_trailing_clamp_identity(op_vec: &mut OpVec) -> Result<usize> {
     Ok(count)
 }
 
-/// Whether the op is a Lut1D evaluated forward. The Lut1D arm comes with its variant.
+/// Whether the op is a Lut1D evaluated forward.
 fn is_forward_lut1d(op: &Op) -> bool {
     match &**op.data() {
+        OpData::Lut1D(lut) => lut.get_direction() == TransformDirection::Forward,
         OpData::Log(_)
         | OpData::Cdl(_)
         | OpData::Gamma(_)
@@ -477,11 +491,11 @@ fn find_separable_prefix(ops: &OpVec) -> Result<usize> {
 }
 
 /// Replaces the separable prefix of the ops with one Lut1D sampled for the input bit depth,
-/// for integer and half input. The bake needs the Lut1D op (WP 2.5): until then a prefix to
-/// bake is refused: one with a Gamma or CDL op (module docs).
+/// for integer and half input: copies of the prefix's ops render the lookup domain
+/// ([`Lut1DOpData::make_lookup_domain`], [`Lut1DOpData::compose_vec`]), and the LUT replaces
+/// them.
 ///
-/// Port of `OptimizeSeparablePrefix` (src/OpenColorIO/OpOptimizers.cpp:553-596 @ v2.5.2), up
-/// to the bake.
+/// Port of `OptimizeSeparablePrefix` (src/OpenColorIO/OpOptimizers.cpp:553-596 @ v2.5.2).
 fn optimize_separable_prefix(ops: &mut OpVec, in_bit_depth: BitDepth) -> Result<()> {
     if ops.is_empty() {
         return Ok(());
@@ -498,10 +512,28 @@ fn optimize_separable_prefix(ops: &mut OpVec, in_bit_depth: BitDepth) -> Result<
         return Ok(()); // Nothing to do.
     }
 
-    Err(Exception::new(format!(
-        "OpOptimizers: baking a separable prefix of {prefix_len} ops needs the Lut1D op, which \
-         is not ported yet."
-    )))
+    let mut prefix_ops = OpVec::new();
+    for op in &ops[..prefix_len] {
+        prefix_ops.push_back(op.clone_op()?);
+    }
+
+    // Make a domain for the LUT. (Will be half-domain for target == 16f.)
+    let mut new_domain = Lut1DOpData::make_lookup_domain(in_bit_depth)?;
+
+    // Send the domain through the prefix ops.
+    // Note: This sets the outBitDepth of newDomain to match prefixOps.
+    Lut1DOpData::compose_vec(&mut new_domain, &mut prefix_ops)?;
+
+    // Remove the prefix ops.
+    ops.erase_range(0, prefix_len);
+
+    // Insert the new LUT to replace the prefix ops.
+    let mut lut_ops = OpVec::new();
+    create_lut1d_op(&mut lut_ops, new_domain, TransformDirection::Forward);
+    finalize_ops(&mut lut_ops)?;
+
+    ops.insert(0, &lut_ops[..]);
+    Ok(())
 }
 
 impl OpVec {
@@ -614,7 +646,7 @@ impl OpVec {
                 // any inverse LUTs with faster forward LUTs and do another pass to see if more
                 // optimization is possible.
                 if fast_lut {
-                    let inverses = replace_inverse_luts(self);
+                    let inverses = replace_inverse_luts(self)?;
                     if inverses == 0 {
                         break;
                     }

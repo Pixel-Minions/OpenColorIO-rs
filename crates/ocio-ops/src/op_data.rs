@@ -19,6 +19,7 @@ use crate::ops::cdl::CdlOpData;
 use crate::ops::exponent::ExponentOpData;
 use crate::ops::gamma::GammaOpData;
 use crate::ops::log::log_op_data::LogOpData;
+use crate::ops::lut1d::Lut1DOpData;
 use crate::ops::matrix::MatrixOpData;
 use crate::ops::noop::NoOpData;
 use crate::ops::range::RangeOpData;
@@ -104,6 +105,8 @@ pub enum OpData {
     Gamma(GammaOpData),
     /// `LogOpData`.
     Log(LogOpData),
+    /// `Lut1DOpData`.
+    Lut1D(Lut1DOpData),
     /// `MatrixOpData`.
     Matrix(MatrixOpData),
     /// `RangeOpData`.
@@ -131,6 +134,7 @@ impl OpData {
             OpData::Cdl(data) => data.get_type(),
             OpData::Gamma(data) => data.get_type(),
             OpData::Log(data) => data.get_type(),
+            OpData::Lut1D(data) => data.get_type(),
             OpData::Matrix(data) => data.get_type(),
             OpData::Range(data) => data.get_type(),
             OpData::Exponent(data) => data.get_type(),
@@ -149,6 +153,7 @@ impl OpData {
             OpData::Log(data) => data.validate(),
             // On a shared reference: a 3x3 matrix is checked as its 4x4 form, which upstream's
             // `const` validate keeps through a `const_cast` (`MatrixOpData::validate_ref`).
+            OpData::Lut1D(data) => data.validate(),
             OpData::Matrix(data) => data.validate_ref(),
             // `const`, and fills the `mutable` scale and offset.
             OpData::Range(data) => data.validate(),
@@ -175,6 +180,7 @@ impl OpData {
             OpData::Cdl(data) => Ok(data.is_no_op()),
             OpData::Gamma(data) => data.is_no_op(),
             OpData::Log(data) => Ok(data.is_no_op()),
+            OpData::Lut1D(data) => Ok(data.is_no_op()),
             OpData::Matrix(data) => data.is_no_op(),
             OpData::Range(data) => Ok(data.is_no_op()),
             OpData::Exponent(data) => Ok(data.is_no_op()),
@@ -192,6 +198,7 @@ impl OpData {
             OpData::Cdl(data) => Ok(data.is_identity()),
             OpData::Gamma(data) => data.is_identity(),
             OpData::Log(data) => Ok(data.is_identity()),
+            OpData::Lut1D(data) => Ok(data.is_identity()),
             OpData::Matrix(data) => data.is_identity(),
             OpData::Range(data) => Ok(data.is_identity()),
             OpData::Exponent(data) => Ok(data.is_identity()),
@@ -215,6 +222,7 @@ impl OpData {
             // The OpData default: nothing.
             OpData::Log(_)
             | OpData::Gamma(_)
+            | OpData::Lut1D(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
@@ -236,6 +244,7 @@ impl OpData {
             // Port of `GammaOpData::getIdentityReplacement`.
             OpData::Gamma(data) => Ok(data.get_identity_replacement()),
             OpData::Log(data) => data.get_identity_replacement(),
+            OpData::Lut1D(data) => data.get_identity_replacement(),
             // The OpData default: `std::make_shared<MatrixOpData>()`, the identity.
             OpData::Matrix(_)
             | OpData::Range(_)
@@ -255,6 +264,7 @@ impl OpData {
             OpData::Cdl(data) => data.has_channel_crosstalk(),
             OpData::Gamma(data) => data.has_channel_crosstalk(),
             OpData::Log(data) => data.has_channel_crosstalk(),
+            OpData::Lut1D(data) => data.has_channel_crosstalk(),
             OpData::Matrix(data) => data.has_channel_crosstalk(),
             OpData::Range(data) => data.has_channel_crosstalk(),
             OpData::Exponent(data) => data.has_channel_crosstalk(),
@@ -273,6 +283,7 @@ impl OpData {
             OpData::Cdl(data) => matches!(other, OpData::Cdl(other) if data.equals(other)),
             OpData::Gamma(data) => matches!(other, OpData::Gamma(other) if data.equals(other)),
             OpData::Log(data) => matches!(other, OpData::Log(other) if data.equals(other)),
+            OpData::Lut1D(data) => matches!(other, OpData::Lut1D(other) if data.equals(other)),
             OpData::Matrix(data) => matches!(other, OpData::Matrix(other) if data.equals(other)),
             OpData::Range(data) => matches!(other, OpData::Range(other) if data.equals(other)),
             OpData::Reference(data) => {
@@ -293,6 +304,7 @@ impl OpData {
             OpData::Cdl(data) => Ok(data.get_cache_id()),
             OpData::Gamma(data) => data.get_cache_id(),
             OpData::Log(data) => data.get_cache_id(),
+            OpData::Lut1D(data) => data.get_cache_id(),
             OpData::Matrix(data) => data.get_cache_id(),
             OpData::Range(data) => Ok(data.get_cache_id()),
             OpData::Exponent(data) => Ok(data.get_cache_id()),
@@ -309,6 +321,7 @@ impl OpData {
             OpData::Cdl(data) => data.get_format_metadata(),
             OpData::Gamma(data) => data.get_format_metadata(),
             OpData::Log(data) => data.get_format_metadata(),
+            OpData::Lut1D(data) => data.get_format_metadata(),
             OpData::Matrix(data) => data.get_format_metadata(),
             OpData::Range(data) => data.get_format_metadata(),
             OpData::Exponent(data) => data.get_format_metadata(),
@@ -325,6 +338,7 @@ impl OpData {
             OpData::Cdl(data) => data.get_format_metadata_mut(),
             OpData::Gamma(data) => data.get_format_metadata_mut(),
             OpData::Log(data) => data.get_format_metadata_mut(),
+            OpData::Lut1D(data) => data.get_format_metadata_mut(),
             OpData::Matrix(data) => data.get_format_metadata_mut(),
             OpData::Range(data) => data.get_format_metadata_mut(),
             OpData::Exponent(data) => data.get_format_metadata_mut(),

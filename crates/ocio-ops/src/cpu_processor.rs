@@ -25,6 +25,7 @@ use crate::op_data::OpData;
 use crate::open_color_types::{
     BitDepth, DynamicPropertyType, OptimizationFlags, bit_depth_to_string,
 };
+use crate::ops::lut1d::lut1d_op_cpu::get_lut1d_renderer;
 use crate::ops::matrix::matrix_op::create_identity_matrix_op;
 use crate::scanline_helper::{GenericScanlineHelper, ScanlineHelper};
 
@@ -101,9 +102,9 @@ impl<I: BitDepthInfo + 'static, O: Converter + 'static> CpuOp for BitDepthCast<I
     ///   two values back: red and green, store red, blue, store green, alpha, store blue and
     ///   alpha. Its loads of 16-bit values may move past stores of `float`, which can't alias
     ///   them (the strict aliasing rule); its loads of `uint8_t` can't.
-    fn apply_pixel_in_place(&self, pixel: &mut [f32; 4]) {
+    fn apply_pixel_in_place(&self, pixel: &mut [f32; 4]) -> Result<()> {
         if Self::copies() {
-            return;
+            return Ok(());
         }
 
         let mut bytes = [0u8; 16];
@@ -152,6 +153,7 @@ impl<I: BitDepthInfo + 'static, O: Converter + 'static> CpuOp for BitDepthCast<I
         for (k, value) in pixel.iter_mut().enumerate() {
             *value = f32::from_ne_bytes(bytes[4 * k..4 * k + 4].try_into().expect("4 bytes"));
         }
+        Ok(())
     }
 
     fn apply_bit_depth(&self, input: Pixels<'_>, output: PixelsMut<'_>) {
@@ -340,7 +342,7 @@ fn renderer(op: &crate::op::Op, fast_log_exp_pow: bool) -> Result<Arc<dyn CpuOp>
 
 /// The renderers of `ops` for images of the bit depths `in` and `out`: an F32 end is rendered
 /// by its op, any other by a bit-depth conversion next to the op's renderer. A Lut1D at either
-/// end renders the conversion itself, which comes with its variant.
+/// end renders the conversion itself ([`get_lut1d_renderer`]).
 ///
 /// Port of `CreateCPUEngine` (src/OpenColorIO/CPUProcessor.cpp:122-184 @ v2.5.2).
 fn create_cpu_engine(
@@ -355,8 +357,9 @@ fn create_cpu_engine(
     let mut cpu_ops = Vec::new();
     let mut out_bit_depth_op = None;
     for (idx, op) in ops.iter().enumerate() {
-        // (A Lut1D at either end: `GetLut1DRenderer` converts the bit depths.)
-        match &**op.data() {
+        // A Lut1D at either end: `GetLut1DRenderer` converts the bit depths.
+        let lut = match &**op.data() {
+            OpData::Lut1D(lut) => Some(lut),
             OpData::Log(_)
             | OpData::Cdl(_)
             | OpData::Gamma(_)
@@ -364,11 +367,13 @@ fn create_cpu_engine(
             | OpData::Range(_)
             | OpData::Exponent(_)
             | OpData::Reference(_)
-            | OpData::NoOp(_) => {}
-        }
+            | OpData::NoOp(_) => None,
+        };
 
         if idx == 0 {
-            if in_bit_depth == BitDepth::F32 {
+            if let Some(lut) = lut {
+                in_bit_depth_op = Some(get_lut1d_renderer(lut, in_bit_depth, BitDepth::F32)?);
+            } else if in_bit_depth == BitDepth::F32 {
                 in_bit_depth_op = Some(renderer(op, fast_log_exp_pow)?);
             } else {
                 in_bit_depth_op = Some(create_generic_bit_depth_helper(
@@ -385,7 +390,9 @@ fn create_cpu_engine(
                 )?);
             }
         } else if idx == max_ops - 1 {
-            if out_bit_depth == BitDepth::F32 {
+            if let Some(lut) = lut {
+                out_bit_depth_op = Some(get_lut1d_renderer(lut, BitDepth::F32, out_bit_depth)?);
+            } else if out_bit_depth == BitDepth::F32 {
                 out_bit_depth_op = Some(renderer(op, fast_log_exp_pow)?);
             } else {
                 out_bit_depth_op = Some(create_generic_bit_depth_helper(
@@ -566,6 +573,10 @@ impl CpuProcessor {
     /// Applies the processor to `img`, in place. The image has the input bit depth and the
     /// output bit depth, which must then be the same.
     ///
+    /// An error where upstream reads past a 1D LUT: a 10- or 12-bit code above the maximum that a
+    /// 1D LUT lookup converts (docs/improvements.md, U-1). The image is processed a chunk of a
+    /// row at a time, so the chunks before the one with the code are already written.
+    ///
     /// Port of `CPUProcessor::apply(const ImageDesc &)` (src/OpenColorIO/CPUProcessor.cpp:
     /// 379-404, 541-544 @ v2.5.2).
     pub fn apply(&self, img: &mut dyn ImageDescMut) -> Result<()> {
@@ -580,6 +591,10 @@ impl CpuProcessor {
 
     /// Applies the processor from `src`, of the input bit depth, to `dst`, of the output bit
     /// depth and the same size.
+    ///
+    /// An error where upstream reads past a 1D LUT: a 10- or 12-bit code above the maximum that a
+    /// 1D LUT lookup converts (docs/improvements.md, U-1). The image is processed a chunk of a
+    /// row at a time, so the chunks before the one with the code are already written.
     ///
     /// Port of `CPUProcessor::apply(const ImageDesc &, ImageDesc &)`
     /// (src/OpenColorIO/CPUProcessor.cpp:406-431, 546-549 @ v2.5.2).
@@ -597,6 +612,8 @@ impl CpuProcessor {
     /// with the one image as both, which reads each row from the image it writes. Rust's
     /// borrows can't pass the image to [`CpuProcessor::apply_src_dst`] as both.
     ///
+    /// U-1's error as for [`CpuProcessor::apply_src_dst`].
+    ///
     /// Port of `CPUProcessor::apply(const ImageDesc &, ImageDesc &)`
     /// (src/OpenColorIO/CPUProcessor.cpp:406-431, 546-549 @ v2.5.2) called as
     /// `apply(img, img)`.
@@ -613,20 +630,26 @@ impl CpuProcessor {
     /// Applies the processor to one RGB pixel: `pixel` and an alpha of 0, as an RGBA pixel
     /// ([`CpuProcessor::apply_rgba`]), of which the RGB values are kept.
     ///
+    /// An error, leaving `pixel` as it was, where upstream reads past a 1D LUT: the lookup of a
+    /// processor with 10- or 12-bit input reads the pixel's bytes as codes, which can exceed
+    /// the LUT (docs/improvements.md, U-1). Upstream returns nothing; the `Result` is an API
+    /// change the owner approved (2026-10-01).
+    ///
     /// Port of `CPUProcessor::applyRGB` (src/OpenColorIO/CPUProcessor.cpp:433-449, 551-554 @
     /// v2.5.2).
-    pub fn apply_rgb(&self, pixel: &mut [f32; 3]) {
+    pub fn apply_rgb(&self, pixel: &mut [f32; 3]) -> Result<()> {
         let mut v = [pixel[0], pixel[1], pixel[2], 0.0];
 
-        self.engine.in_bit_depth_op.apply_pixel_in_place(&mut v);
+        self.engine.in_bit_depth_op.apply_pixel_in_place(&mut v)?;
 
         for op in &self.engine.cpu_ops {
             op.apply(&mut v);
         }
 
-        self.engine.out_bit_depth_op.apply_pixel_in_place(&mut v);
+        self.engine.out_bit_depth_op.apply_pixel_in_place(&mut v)?;
 
         pixel.copy_from_slice(&v[..3]);
+        Ok(())
     }
 
     /// Applies the processor to one RGBA pixel, in place. Upstream applies the conversions to
@@ -634,16 +657,22 @@ impl CpuProcessor {
     /// F32, its first bytes are read as that channel type, and with an output bit depth other
     /// than F32, the result is in its first bytes as that type (docs/improvements.md, I-41).
     ///
+    /// An error where upstream reads past a 1D LUT, as for [`CpuProcessor::apply_rgb`]: the
+    /// pixel is then left as it was (an API change the owner approved, 2026-10-01).
+    ///
     /// Port of `CPUProcessor::applyRGBA` (src/OpenColorIO/CPUProcessor.cpp:451-465, 556-559 @
     /// v2.5.2).
-    pub fn apply_rgba(&self, pixel: &mut [f32; 4]) {
-        self.engine.in_bit_depth_op.apply_pixel_in_place(pixel);
+    pub fn apply_rgba(&self, pixel: &mut [f32; 4]) -> Result<()> {
+        let mut v = *pixel;
+        self.engine.in_bit_depth_op.apply_pixel_in_place(&mut v)?;
 
         for op in &self.engine.cpu_ops {
-            op.apply(pixel);
+            op.apply(&mut v);
         }
 
-        self.engine.out_bit_depth_op.apply_pixel_in_place(pixel);
+        self.engine.out_bit_depth_op.apply_pixel_in_place(&mut v)?;
+        *pixel = v;
+        Ok(())
     }
 
     /// Whether a renderer has a dynamic property that is dynamic.

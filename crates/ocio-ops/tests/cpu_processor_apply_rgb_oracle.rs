@@ -111,10 +111,10 @@ fn port_apply(
     let cpu = port_processor(chain, FLAGS[flags].1, port_depth(input), port_depth(output))
         .unwrap_or_else(|e| panic!("{}", e.message()));
     let mut rgba = floats(rgba);
-    cpu.apply_rgba(&mut rgba);
+    cpu.apply_rgba(&mut rgba).unwrap();
     let rgb4 = floats(rgb);
     let mut rgb = [rgb4[0], rgb4[1], rgb4[2]];
-    cpu.apply_rgb(&mut rgb);
+    cpu.apply_rgb(&mut rgb).unwrap();
     [bytes_of(&rgba), bytes_of(&rgb)]
 }
 
@@ -360,7 +360,7 @@ fn the_in_place_conversion_from_uint16_follows_the_wheel() {
     let cpu = port_processor(&identity(), flags.1, BitDepth::Uint16, BitDepth::F32)
         .unwrap_or_else(|e| panic!("{}", e.message()));
     let mut port = floats(&codes);
-    cpu.apply_rgba(&mut port);
+    cpu.apply_rgba(&mut port).unwrap();
     assert_eq!(
         bytes_of(&port),
         replies[0].buffers[0],

@@ -119,7 +119,11 @@ pub trait Generic: ChannelType {
         )?;
         let values = 4 * pixels_copied;
 
-        // Convert from the input bit-depth to F32 (i.e always in RGBA).
+        // Convert from the input bit-depth to F32 (i.e always in RGBA). The codes a 1D LUT
+        // lookup can't take are an error first (docs/improvements.md, U-1).
+        src_img
+            .bit_depth_op
+            .check_input(Self::pixels(&in_bit_depth_buffer[..values]))?;
         src_img.bit_depth_op.apply_bit_depth(
             Self::pixels(&in_bit_depth_buffer[..values]),
             PixelsMut::F32(&mut output_buffer[..values]),

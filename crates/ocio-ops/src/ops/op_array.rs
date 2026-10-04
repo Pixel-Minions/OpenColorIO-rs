@@ -4,7 +4,7 @@
 //! The arrays of values of the ops that hold one (Lut1D, Lut3D, Matrix): a port of
 //! `src/OpenColorIO/ops/OpArray.h` @ v2.5.2.
 //!
-//! So far what the Matrix op uses. Upstream's `ArrayT` is an abstract class template: how many
+//! So far what the Matrix and Lut1D ops use. Upstream's `ArrayT` is an abstract class template: how many
 //! values the dimensions call for is its subclass's (`ArrayBase::getNumValues`, pure virtual),
 //! so the methods that need that number take it.
 
@@ -30,6 +30,9 @@ pub struct ArrayT<T> {
 
 /// `ArrayT<double>`: `ArrayDouble` (src/OpenColorIO/ops/OpArray.h:208 @ v2.5.2).
 pub type ArrayDouble = ArrayT<f64>;
+
+/// `ArrayT<float>`: `Array` (src/OpenColorIO/ops/OpArray.h:209 @ v2.5.2).
+pub type Array = ArrayT<f32>;
 
 impl<T: Copy + Default> Default for ArrayT<T> {
     fn default() -> Self {
@@ -57,6 +60,35 @@ impl<T: Copy + Default> ArrayT<T> {
         self.length = length;
         self.num_color_components = num_color_components;
         self.data.resize(num_values as usize, T::default());
+    }
+
+    /// Changes the length, and resizes the values to `num_values`, what the op's array has for
+    /// it, when the length changes.
+    ///
+    /// Port of `ArrayT::setLength` (OpArray.h:64-71 @ v2.5.2).
+    pub fn set_length(&mut self, length: c_ulong, num_values: c_ulong) {
+        if self.length != length {
+            self.length = length;
+            self.data.resize(num_values as usize, T::default());
+        }
+    }
+
+    /// Changes the number of color components, and resizes the values to `num_values`, what
+    /// the op's array has for it, when the number changes.
+    ///
+    /// Port of `ArrayT::setNumColorComponents` (OpArray.h:102-109 @ v2.5.2).
+    pub fn set_num_color_components(&mut self, num_color_components: c_ulong, num_values: c_ulong) {
+        if self.num_color_components != num_color_components {
+            self.num_color_components = num_color_components;
+            self.data.resize(num_values as usize, T::default());
+        }
+    }
+
+    /// Always 3.
+    ///
+    /// Port of `ArrayT::getMaxColorComponents` (OpArray.h:139-142 @ v2.5.2).
+    pub fn get_max_color_components(&self) -> c_ulong {
+        3
     }
 
     /// Port of `ArrayT::getLength` (OpArray.h:83-86 @ v2.5.2).
@@ -124,6 +156,37 @@ impl<T: SseFloat + PartialEq + From<u8>> ArrayT<T> {
         if scale != T::from(1) {
             for value in &mut self.data {
                 *value = sse_mul(*value, scale);
+            }
+        }
+    }
+}
+
+impl ArrayT<f32> {
+    /// Sets the number of color components to 1, keeping the three values of each entry, when
+    /// it is 3 and every entry has three equal values (entries of three NaNs count as equal;
+    /// one or two NaNs don't).
+    ///
+    /// Port of `ArrayT::adjustColorComponentNumber` (OpArray.h:111-137 @ v2.5.2), for the
+    /// `float` arrays of the LUTs.
+    pub fn adjust_color_component_number(&mut self) {
+        if self.num_color_components == 3 {
+            let mut same_coeff = true;
+            let mut idx = 0;
+            while idx < self.length as usize && same_coeff {
+                let d = &self.data;
+                if d[idx * 3].is_nan() && d[idx * 3 + 1].is_nan() && d[idx * 3 + 2].is_nan() {
+                    idx += 1;
+                    continue;
+                }
+                if d[idx * 3] != d[idx * 3 + 1] || d[idx * 3] != d[idx * 3 + 2] {
+                    same_coeff = false;
+                    break;
+                }
+                idx += 1;
+            }
+
+            if same_coeff {
+                self.num_color_components = 1; // But keep the three values...
             }
         }
     }

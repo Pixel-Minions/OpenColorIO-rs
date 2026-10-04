@@ -253,20 +253,25 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
     too, which prints some of those values (the hues);
   - the 1D LUTs that the optimizer bakes from ExponentTransform and ExponentWithLinearTransform
     for UINT8, UINT10, UINT12, UINT16 and F16 input, at the default and DRAFT flags, differ,
-    and so does the optimized processor's cache ID, which hashes them.
+    and so does the optimized processor's cache ID, which hashes them;
+  - so do the ones it bakes from CDLTransforms (`powf`), at every one of those input depths:
+    an ASC CDL and an inverse no-clamp one (the p1-optimizer verifier's probe of both wheels;
+    at UINT8 the optimized cache ID is 4edb2d4f on Windows and 3210436f on Linux).
 
   Log, LogAffine, ExposureContrast, and the LUT and built-in bakes came out the same on both,
   over 3309 cases (the p1-oracle review's survey). LogCamera did too in that survey, but its
   break on the log side is computed differently on each platform, and other parameters show
   it (I-70).
-- **Who notices:** anyone comparing GPU textures, SDR 2.0 shaders, or renders of exponents at 8
-  to 16 bits between a Windows and a Linux machine.
+- **Who notices:** anyone comparing GPU textures, SDR 2.0 shaders, or renders of exponents or
+  CDLs at 8 to 16 bits between a Windows and a Linux machine.
 - **A fix:** one math library on every platform, which changes the port's results on at least
   one of them.
-- **Status:** to be matched in Phase 2, with the Lut1D bakes and the ACES 2 tables (D12: the
-  port calls the platform's functions, as OCIO does). The review suspects these values may also
-  depend on the CPU (SIMD renderers, glibc's ifunc variants). If so, their checks belong in
-  `cpu-tests`.
+- **Status:** the bake is matched in `p1-optimizer` (D, `OptimizeSeparablePrefix`): it renders the
+  prefix with each op's renderer and the platform's math library, and
+  `tests/lut1d_bake_oracle.rs` compares the baked LUTs with each platform's wheel, entry for
+  entry. The ACES 2 tables are to be matched in Phase 2 (D12: the port calls the platform's
+  functions, as OCIO does). The values may also depend on the CPU (SIMD renderers, glibc's
+  ifunc variants), so their checks belong in `cpu-tests` (the bake's are there).
 
 ## Ops
 
@@ -520,6 +525,23 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p1-cdl` (1.3c1), checked against the wheel in
   `crates/ocio-ops/tests/cdl_op_data_oracle.rs` and the battery.
 
+### I-68. Two half-domain 1D LUTs are never equal
+
+- **Upstream:** `Lut1DTransform::setLength` fills a half-domain LUT with each half code's
+  value, NaN codes included ("Use NaNs for the 2048 NaN values in the domain.",
+  `transforms/Lut1DTransform.cpp:101-106`). `Lut1DOpData::equals` compares the values with
+  `std::vector<float>::operator==` (`ops/lut1d/Lut1DOpData.cpp:528-550`, `ops/OpArray.h:182-188`),
+  where a NaN equals nothing. So two half-domain LUTs with the same values are unequal, unless
+  they are the same object, and so are the `Lut1DTransform`s that hold them; seen through the
+  wheel. `isInverse` uses the same comparison, so the optimizer never removes such a pair of
+  inverse LUTs as an identity.
+- **Who notices:** code that compares half-domain `Lut1DTransform`s, and processors with a
+  half-domain LUT followed by its inverse.
+- **A fix:** compare the values bit for bit, or fill the NaN codes with a value that compares
+  (as the lookup domains do, with `filterNANs`).
+- **Status:** matched in `p1-optimizer` (chunk A); `lut1d_op_data_oracle.rs` checks equality
+  against the wheel.
+
 ### I-70. A camera log's break differs between Windows and Linux
 
 - **Upstream:** `LogUtil::GetLogSideBreak` (`ops/log/LogUtils.cpp:270-281`) computes the
@@ -764,9 +786,18 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   table: garbage, or a crash (it crashed the oracle). Alpha is scaled, not looked up
   (`Lut1DOpCPU.cpp:646`), and other processors convert codes with a multiply, which is well
   defined: a UINT10 red of 2000 with `OPTIMIZATION_NONE` gives 1023.
-- **Options:** clamp to the largest code, ignore the extra bits, or return an error.
-- **Status:** open; decided in Phase 2, with the Lut1D bake. The general rule doesn't apply
-  here until then.
+  `applyRGB` and `applyRGBA` look up the pixel's own bytes as codes (I-41), so with 10- or
+  12-bit input they read past the table whenever those bytes exceed the maximum.
+- **Decided** (owner, 2026-10-01): the port returns an error: "Lut1D: a 10ui value above 1023
+  can't be looked up: upstream reads past the 1D LUT's 1024 entries." (and the 12-bit one).
+  The CPU processor checks the codes before the lookup (`CpuOp::check_input`), and
+  `CpuProcessor::apply_rgb` and `apply_rgba` return a `Result` for it (an API change the
+  owner approved), leaving the pixel as it was.
+- **Future improvement** (owner, 2026-10-01): a candidate for the end-of-port review, which
+  picks one of the alternatives considered: clamp the code to the largest one, or mask the
+  extra high bits.
+- **Status:** matched with an error in `p1-optimizer` (chunk C); `lut1d_op_cpu_tests.rs`
+  checks the errors.
 
 ### U-2. `getAData()` without an alpha plane
 
