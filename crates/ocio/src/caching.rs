@@ -148,7 +148,11 @@ impl<K: Ord, V> GenericCache<K, V> {
 
     /// Whether the cache is enabled and has an entry under `key`.
     ///
-    /// Port of `GenericCache::exists` (Caching.h:64-69 @ v2.5.2), which takes the lock itself.
+    /// Upstream's `exists` doesn't lock: its callers hold the lock ("To only use when lock is
+    /// on"). This one takes the lock itself, so it must not be called while a [`CacheGuard`] of
+    /// the same cache is held (a `std` mutex isn't reentrant); only the tests call it.
+    ///
+    /// Port of `GenericCache::exists` (Caching.h:64-69 @ v2.5.2).
     pub fn exists(&self, key: &K) -> bool {
         let state = self.state();
         !self.env_disable_all_caches && state.enabled && state.entries.contains_key(key)
