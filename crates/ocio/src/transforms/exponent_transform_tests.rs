@@ -11,7 +11,8 @@ use std::sync::Arc;
 
 use ocio_ops::format_metadata::METADATA_ID;
 use ocio_ops::op_data::OpData;
-use ocio_ops::ops::exponent::exponent_op::create_exponent_op_from_values;
+use ocio_ops::ops::exponent::ExponentOpData;
+use ocio_ops::ops::exponent::exponent_op::{create_exponent_op, create_exponent_op_from_values};
 use ocio_ops::ops::gamma::GammaStyle;
 use ocio_testkit::upstream::{check_close, check_throw_what};
 
@@ -183,6 +184,35 @@ fn create_transform() {
     assert_eq!(exp_val[1], exp[1]);
     assert_eq!(exp_val[2], exp[2]);
     assert_eq!(exp_val[3], exp[3]);
+}
+
+/// `CreateExponentTransform` copies the op's metadata into the transform (ExponentOp.cpp:
+// 349-351 @ v2.5.2) with the exponents, and the transform's values and metadata hold what
+/// the op had.
+#[test]
+fn create_transform_copies_the_metadata() {
+    let exp: [f64; 4] = [2.0, 2.1, 3.0, 3.1];
+    let mut data = ExponentOpData::from_values(&exp);
+    data.get_format_metadata_mut()
+        .add_attribute(Some(b"name"), Some(b"test"))
+        .unwrap();
+    data.get_format_metadata_mut().set_id(Some(b"exp-id"));
+    let source = data.get_format_metadata().clone();
+
+    let mut ops = OpVec::new();
+    create_exponent_op(&mut ops, data, TransformDirection::Forward).unwrap();
+    let mut group = GroupTransform::new();
+    create_exponent_transform(&mut group, &ops[0]).unwrap();
+    let Transform::Exponent(exp_transform) = group.transform(0).unwrap() else {
+        panic!("not an ExponentTransform");
+    };
+    assert_eq!(exp_transform.format_metadata(), &source);
+    assert_eq!(
+        exp_transform.format_metadata().get_attribute_value(0),
+        b"test"
+    );
+    assert_eq!(exp_transform.format_metadata().get_id(), b"exp-id");
+    assert_eq!(exp_transform.value(), exp);
 }
 
 /// `CreateExponentTransform` refuses an op of another type (which `CreateTransform`'s dispatch

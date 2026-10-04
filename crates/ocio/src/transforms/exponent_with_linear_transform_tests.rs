@@ -205,3 +205,25 @@ fn build_exponent_with_linear_op_validates_the_data() {
     );
     assert_eq!(ops.len(), 0);
 }
+
+/// `CreateGammaTransform` of a Gamma op whose data wasn't validated, with an empty channel
+/// (U-24), adds nothing and raises the port's error, where upstream makes a transform that
+/// reads past it: a basic style (an ExponentTransform) and a moncurve one (an
+/// ExponentWithLinearTransform), each channel empty in turn.
+#[test]
+fn empty_channels_are_refused() {
+    for style in [GammaStyle::BasicFwd, GammaStyle::MoncurveFwd] {
+        for empty in 0..4 {
+            let mut params = vec![vec![2.0, 0.1]; 4];
+            params[empty].clear();
+            let [r, g, b, a] = <[Vec<f64>; 4]>::try_from(params).unwrap();
+            let gamma = GammaOpData::new(style, r, g, b, a);
+            let mut ops = OpVec::new();
+            create_gamma_op(&mut ops, gamma, TransformDirection::Forward);
+            let mut group = GroupTransform::new();
+            let err = create_gamma_transform(&mut group, &ops[0]).unwrap_err();
+            assert_eq!(err.message(), SHORT_PARAMS, "{style:?}, channel {empty}");
+            assert_eq!(group.num_transforms(), 0);
+        }
+    }
+}

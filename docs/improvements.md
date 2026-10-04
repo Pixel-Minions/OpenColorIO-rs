@@ -632,7 +632,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Who notices:** anyone reading `repr()` of a group, or comparing the texts of groups that
   hold the same transforms in another order.
 - **A fix:** restore the stream's precision at the end of the MatrixTransform's text.
-- **Status:** matched in `p1-transforms-fam1` (1.8b): the transforms write their text on one
+- **Status:** matched in `p1-transforms-fam4` (1.8b): the transforms write their text on one
   stream (`Transform::write_text`), checked against the wheel in
   `crates/ocio/tests/matrix_transform_oracle.rs` and, with the transforms that print numbers,
   in their own oracle tests.
@@ -652,7 +652,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Who notices:** matrices built from NaN arguments of different signs or payloads: their
   NaNs, in the cache IDs, the pixels and the shaders, differ between Windows and Linux.
 - **A fix:** one operand order for both platforms.
-- **Status:** matched in `p1-transforms-fam1` (1.8b), each wheel's order, checked in
+- **Status:** matched in `p1-transforms-fam4` (1.8b), each wheel's order, checked in
   `crates/ocio/tests/matrix_transform_oracle.rs`.
 
 ### I-75. A range that doesn't clamp names its class twice when it lacks a bound
@@ -664,7 +664,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   comes out with the prefix twice.
 - **Who notices:** anyone who reads the message.
 - **A fix:** throw the message without its prefix.
-- **Status:** matched in `p1-transforms-fam1` (1.8c), checked against the wheel in
+- **Status:** matched in `p1-transforms-fam4` (1.8c), checked against the wheel in
   `crates/ocio/tests/range_transform_oracle.rs`.
 
 ### I-76. An allocation without variables doesn't print its allocation
@@ -675,7 +675,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   allocation (and an unknown one) both print `<AllocationTransform direction=forward>`.
 - **Who notices:** anyone reading `repr()` of such a transform, which hides how it allocates.
 - **A fix:** print the allocation always.
-- **Status:** matched in `p1-transforms-fam1`, checked against the wheel in
+- **Status:** matched in `p1-transforms-fam4`, checked against the wheel in
   `crates/ocio/tests/allocation_transform_oracle.rs`.
 
 ## Logging
@@ -1137,7 +1137,12 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `finalize` validates the ops.
 - **Status:** matched in `p1-log` (1.3l1, and the verifier's fixes);
   `log_op_data_tests.rs`, `short_channels_are_errors`; `log_op_tests.rs`,
-  `renderers_of_short_channels_raise`.
+  `renderers_of_short_channels_raise`. The transforms in `p1-transforms-fam4`: upstream's
+  `CreateLogTransform` copies such data into a log affine or log camera transform, whose
+  getters and setters read past the short channels; the port's `create_log_transform` (so
+  `CreateTransform`, which the processors' `createGroupTransform` calls) returns the error
+  and adds no transform, for a channel too short for the four affine parameters, or for a
+  camera's break or linear slope (`log_transform_tests.rs`, `short_channels_are_refused`).
 
 ### U-24. Queries of a Gamma op whose channels have too few parameters
 
@@ -1165,4 +1170,8 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `gamma_op_utils_tests.rs` and `gamma_op_tests.rs` check the errors,
   and that the reads upstream doesn't make (a moncurve gamma other than 1, channels that
   differ) are answered. The GPU writer in `p1-gpu-gamma` (1.3g4): `gamma_op_gpu.rs`'s test
-  checks the error for each style and channel.
+  checks the error for each style and channel. The transforms in `p1-transforms-fam4`:
+  upstream's `CreateGammaTransform` copies such data into an exponent or exponent with linear
+  transform, whose getters, setters and text read each channel's first parameter; the port's
+  `create_gamma_transform` (so `CreateTransform`) returns the error for an empty channel and
+  adds no transform (`exponent_with_linear_transform_tests.rs`, `empty_channels_are_refused`).

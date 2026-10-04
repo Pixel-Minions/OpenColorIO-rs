@@ -178,3 +178,55 @@ fn build_log_op_validates_the_data() {
     );
     assert_eq!(ops.len(), 0);
 }
+
+/// `CreateLogTransform` of a Log op whose data wasn't validated, with channels too short for
+/// the transform's getters (U-20), adds nothing and raises the port's error, where upstream
+/// makes a transform that reads past them: an affine log whose green channel, or every
+/// channel, has 2 parameters; a camera log whose green channel lacks the break; and one whose
+/// green channel lacks the linear slope the red one has.
+#[test]
+fn short_channels_are_refused() {
+    let affine = || LogOpData::new(10.0, TransformDirection::Forward);
+    let mut short_green = affine();
+    short_green.set_green_params(vec![1.0, 0.0]);
+    let mut all_short = affine();
+    all_short.set_red_params(vec![2.0, 0.0]);
+    all_short.set_green_params(vec![2.0, 0.0]);
+    all_short.set_blue_params(vec![2.0, 0.0]);
+    let camera = || {
+        let mut data = affine();
+        data.set_value(LogAffineParameter::LinSideBreak, &[0.1, 0.2, 0.3])
+            .unwrap();
+        data
+    };
+    let mut camera_short_green = camera();
+    camera_short_green.set_green_params(vec![1.0, 0.0, 1.0, 0.0]);
+    let mut slope_short_green = camera();
+    slope_short_green
+        .set_value(LogAffineParameter::LinearSlope, &[1.0, 1.0, 1.0])
+        .unwrap();
+    slope_short_green.set_green_params(vec![1.0, 0.0, 1.0, 0.0, 0.1]);
+    for (label, data) in [
+        ("a short green channel", short_green),
+        ("short channels", all_short),
+        ("a camera log's short green channel", camera_short_green),
+        (
+            "a green channel without the linear slope",
+            slope_short_green,
+        ),
+    ] {
+        let mut ops = OpVec::new();
+        create_log_op(&mut ops, data, TransformDirection::Forward).unwrap();
+        let mut group = GroupTransform::new();
+        let err = create_log_transform(&mut group, &ops[0]).unwrap_err();
+        assert_eq!(err.message(), SHORT_PARAMS, "{label}");
+        assert_eq!(group.num_transforms(), 0, "{label}");
+    }
+
+    // The same channels, full: each makes its transform.
+    let mut ops = OpVec::new();
+    create_log_op(&mut ops, camera(), TransformDirection::Forward).unwrap();
+    let mut group = GroupTransform::new();
+    create_log_transform(&mut group, &ops[0]).unwrap();
+    assert_eq!(group.num_transforms(), 1);
+}

@@ -10,7 +10,11 @@
 //!   the reverse order inverse) for `lg2`, through `createGroupTransform()`.
 //!
 //! The binding's `setVars` takes 2 or 3 variables (src/bindings/python/transforms/
-//! PyAllocationTransform.cpp:23-30 @ v2.5.2), so the specs set 2 or 3, or none.
+//! PyAllocationTransform.cpp:23-30 @ v2.5.2), so the specs set 2 or 3, or none. The C++
+//! `setVars` (src/OpenColorIO/transforms/AllocationTransform.cpp:143-157) takes any number,
+//! so the text of an allocation with 1 variable, or more than 3, is unpinned: the wheel can't
+//! build one. Validation refuses those counts for both allocations (98-111), so no processor
+//! holds one.
 
 mod common;
 

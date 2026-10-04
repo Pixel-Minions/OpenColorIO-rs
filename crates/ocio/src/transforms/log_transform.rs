@@ -16,7 +16,7 @@ use ocio_ops::op::{Op, OpVec};
 use ocio_ops::op_data::OpData;
 use ocio_ops::open_color_types::{TransformDirection, transform_direction_to_string};
 use ocio_ops::ops::log::log_op::create_log_op;
-use ocio_ops::ops::log::log_op_data::{LogAffineParameter, LogOpData};
+use ocio_ops::ops::log::log_op_data::{LogAffineParameter, LogOpData, SHORT_PARAMS};
 
 use crate::transform::validate_direction;
 use crate::transforms::group_transform::GroupTransform;
@@ -192,12 +192,22 @@ impl fmt::Display for LogTransform {
 /// camera transform for the camera style (its constructor's break replaced by the data's), a
 /// log transform for a simple log, a log affine transform otherwise.
 ///
+/// The log affine and log camera transforms' getters and setters read the four affine
+/// parameters of each channel, and the camera's its break and linear slope, which upstream
+/// reads past the end of a channel too short for them (an op's data that wasn't validated;
+/// docs/improvements.md, U-20). The port refuses to make such a transform instead: "Log: the
+/// channels have fewer parameters than this needs: upstream accesses past them.", and adds
+/// nothing.
+///
 /// Port of `CreateLogTransform` (src/OpenColorIO/ops/log/LogOp.cpp:158-188 @ v2.5.2).
 pub(crate) fn create_log_transform(group: &mut GroupTransform, op: &Op) -> Result<()> {
     let OpData::Log(log_data) = &**op.data() else {
         return Err(Exception::new("CreateLogTransform: op has to be a LogOp."));
     };
     if log_data.is_camera() {
+        check_params(log_data, &CAMERA_PARAMS)?;
+        // Absent unless set, but a channel can't be shorter than the red one.
+        log_data.value(LogAffineParameter::LinearSlope)?;
         let lin_sb = [0.1, 0.1, 0.1];
         let mut log_transform = LogCameraTransform::new(&lin_sb);
         *log_transform.data_mut() = log_data.clone();
@@ -208,9 +218,30 @@ pub(crate) fn create_log_transform(group: &mut GroupTransform, op: &Op) -> Resul
         };
         group.append_transform(log_transform.into());
     } else {
+        check_params(log_data, &CAMERA_PARAMS[..4])?;
         let mut log_transform = LogAffineTransform::new();
         *log_transform.data_mut() = log_data.clone();
         group.append_transform(log_transform.into());
+    }
+    Ok(())
+}
+
+/// The parameters the camera transform holds for each channel: the four affine ones, then the
+/// break.
+const CAMERA_PARAMS: [LogAffineParameter; 5] = [
+    LogAffineParameter::LogSideSlope,
+    LogAffineParameter::LogSideOffset,
+    LogAffineParameter::LinSideSlope,
+    LogAffineParameter::LinSideOffset,
+    LogAffineParameter::LinSideBreak,
+];
+
+/// Refuses data whose channels don't all hold `params` (U-20).
+fn check_params(data: &LogOpData, params: &[LogAffineParameter]) -> Result<()> {
+    for &param in params {
+        if data.value(param)?.is_none() {
+            return Err(Exception::new(SHORT_PARAMS));
+        }
     }
     Ok(())
 }

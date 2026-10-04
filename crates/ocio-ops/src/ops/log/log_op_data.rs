@@ -69,7 +69,7 @@ mod default_values {
 /// The error where upstream reads or writes past a channel's parameters (U-20): only a log
 /// whose channels have fewer than 4 parameters, or different numbers of them, gets there;
 /// validation refuses both.
-pub(super) const SHORT_PARAMS: &str =
+pub const SHORT_PARAMS: &str =
     "Log: the channels have fewer parameters than this needs: upstream accesses past them.";
 
 /// Checks one channel's parameters: 4 to 6 of them, and slopes that aren't 0.

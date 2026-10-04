@@ -19,7 +19,7 @@ use ocio_ops::open_color_types::{
     NegativeStyle, TransformDirection, negative_style_to_string, transform_direction_to_string,
 };
 use ocio_ops::ops::gamma::gamma_op::create_gamma_op;
-use ocio_ops::ops::gamma::gamma_op_data::{GammaOpData, GammaStyle};
+use ocio_ops::ops::gamma::gamma_op_data::{GammaOpData, GammaStyle, SHORT_PARAMS};
 
 use crate::transform::validate_direction;
 use crate::transforms::exponent_transform::ExponentTransform;
@@ -271,6 +271,12 @@ impl fmt::Display for ExponentWithLinearTransform {
 /// Appends to `group` the transform of the Gamma op `op`: an exponent with linear segment for
 /// a moncurve style, an exponent for a basic one, holding a copy of the op's data.
 ///
+/// Both transforms' getters and setters read the first parameter of each channel (the
+/// exponent, or the gamma), which upstream reads past the end of an empty channel (an op's data
+/// that wasn't validated; docs/improvements.md, U-24). The port refuses to make such a
+/// transform instead: "GammaOp: a channel has fewer parameters than its style uses: upstream
+/// reads past them.", and adds nothing.
+///
 /// Port of `CreateGammaTransform` (src/OpenColorIO/ops/gamma/GammaOp.cpp:149-177 @ v2.5.2).
 pub(crate) fn create_gamma_transform(group: &mut GroupTransform, op: &Op) -> Result<()> {
     let OpData::Gamma(gamma_data) = &**op.data() else {
@@ -278,6 +284,18 @@ pub(crate) fn create_gamma_transform(group: &mut GroupTransform, op: &Op) -> Res
             "CreateGammaTransform: op has to be a GammaOp",
         ));
     };
+
+    if [
+        gamma_data.red_params(),
+        gamma_data.green_params(),
+        gamma_data.blue_params(),
+        gamma_data.alpha_params(),
+    ]
+    .iter()
+    .any(|params| params.is_empty())
+    {
+        return Err(Exception::new(SHORT_PARAMS));
+    }
 
     let style = gamma_data.style();
 
