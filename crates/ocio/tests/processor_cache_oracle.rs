@@ -677,7 +677,7 @@ fn processor_of(name: &str, (spec, port): (Value, Transform)) -> Step {
 
 /// Processors of ops, whose cache IDs differ (the groups' are all `<NOOP>`):
 /// - the fallback reuses only a processor of the same cache ID (a group of one matrix and the
-///   matrix), not any cached one (Config.cpp:4857-4868 @ v2.5.2);
+///   matrix), not any cached one (Config.cpp:4850-4872 @ v2.5.2);
 /// - an optimized processor computes its own cache ID, which differs from the processor's when
 ///   the optimizer changes the ops: the copy starts without one (Processor.cpp:237-263 @
 ///   v2.5.2), even when the processor's is already known (the fallback computed it);
