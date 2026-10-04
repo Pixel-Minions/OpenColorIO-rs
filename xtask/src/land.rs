@@ -548,8 +548,27 @@ fn check_clean(root: &Path) -> Result<(), String> {
 /// First every link inside it is unlinked (`links::unlink_all`): `git worktree remove --force`
 /// deletes what a junction points to (Git for Windows 2.53), such as the main checkout's
 /// submodule when a worktree links `upstream/OpenColorIO` to it. A worktree that is itself a
-/// link is refused.
+/// link is refused, and so is a locked one (`git worktree lock`), before anything in it is
+/// touched.
 pub(crate) fn remove_worktree(root: &Path, wt: &Path) -> Result<(), String> {
+    let list = crate::git(root, &["worktree", "list", "--porcelain"])?.replace("\r\n", "\n");
+    // `git worktree list --porcelain`: one record per worktree, separated by an empty line.
+    let record = list.split("\n\n").find(|record| {
+        record
+            .lines()
+            .filter_map(|l| l.strip_prefix("worktree "))
+            .any(|p| same_path(p, &wt.to_string_lossy()))
+    });
+    if let Some(record) = record
+        && record
+            .lines()
+            .any(|l| l == "locked" || l.starts_with("locked "))
+    {
+        return Err(format!(
+            "{} is locked (`git worktree lock`): not removing it; `git worktree unlock` it first",
+            crate::display_path(wt)
+        ));
+    }
     for link in crate::links::unlink_all(wt)? {
         println!(
             "removed the link {} (not what it pointed to)",
@@ -558,12 +577,7 @@ pub(crate) fn remove_worktree(root: &Path, wt: &Path) -> Result<(), String> {
                 .replace('\\', "/")
         );
     }
-    let list = crate::git(root, &["worktree", "list", "--porcelain"])?;
-    let registered = list
-        .lines()
-        .filter_map(|l| l.strip_prefix("worktree "))
-        .any(|p| same_path(p, &wt.to_string_lossy()));
-    if registered {
+    if record.is_some() {
         crate::git(
             root,
             &[
