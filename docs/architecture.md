@@ -123,6 +123,15 @@ plan). Every transform class and the processors follow them.
 - **Names.** snake_case without `get_`: `matrix()`, `direction()`, `num_transforms()`; setters
   keep `set_`. Each method carries `#[doc(alias = "getMatrix")]` with the C++ name, and
   constructors are `new()` with `#[doc(alias = "Create")]`.
+- **Overloads.** The overload with the fewest arguments takes the plain name; each other one
+  adds what it takes: `_in_direction` for a direction, `_with_<what>` for the rest. All carry
+  the C++ name as their `doc(alias)`. So `Config::getProcessor` is `processor(&transform)`,
+  `processor_in_direction(&transform, dir)` and `processor_with_context(&context, &transform,
+  dir)`; `getOptimizedProcessor` is `optimized_processor(flags)` and
+  `optimized_processor_with_bit_depths(in, out, flags)`; the CPU getters are
+  `default_cpu_processor()`, `optimized_cpu_processor(flags)` and
+  `optimized_cpu_processor_with_bit_depths(in, out, flags)` (the owner's decision,
+  2026-10-02).
 - **Arrays.** Fixed-size arrays for C++'s pointers to arrays: `&[f64; 16]` for a matrix,
   `&[f64; 4]` for offsets, `&[f64; 3]` per channel.
 - **Errors.** The setters and getters that throw upstream return `ocio::Result` with

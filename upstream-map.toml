@@ -524,7 +524,7 @@ path = "src/OpenColorIO/Processor.cpp"
 kind = "src"
 target = ["crates/ocio/src/processor.rs"]
 status = "partial"
-note = "1.8g/1.8h1: ProcessorMetadata, Processor::Impl (copy, queries, getCacheID, createGroupTransform, the optimized processors and their cache, EnvironmentOverride with each wheel's std::stoul, the CPU processors and their cache, setProcessorCacheFlags, setTransform, computeMetadata); checked against the wheel through processor_ops (crates/ocio/tests/processor_oracle.rs). The GPU processors come with 1.8h3, setColorSpaceConversion and concatenate with the config (Phase 3)"
+note = "1.8g/1.8h1: ProcessorMetadata, Processor::Impl (copy, queries, getCacheID, createGroupTransform, the optimized processors and their cache, EnvironmentOverride with each wheel's std::stoul, the CPU processors and their cache, setProcessorCacheFlags, setTransform, computeMetadata); checked against the wheel through processor_ops (crates/ocio/tests/processor_oracle.rs); 1.8h3: getDefaultGPUProcessor, getOptimizedGPUProcessor and getGPUProcessor with its cache (crates/ocio/tests/processor_gpu_oracle.rs, processor_cache_oracle.rs). getOptimizedLegacyGPUProcessor comes with the 3D LUT op (PartitionGPUOps, Create3DLut), setColorSpaceConversion and concatenate with the config (Phase 3)"
 
 [[file]]
 path = "src/OpenColorIO/Processor.h"

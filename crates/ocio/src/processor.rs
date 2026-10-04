@@ -2,8 +2,8 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Processors: a port of `src/OpenColorIO/Processor.h` and `Processor.cpp` @ v2.5.2, with the
-//! CPU processors it makes. The GPU processors come with WP 1.8h3, `setColorSpaceConversion`
-//! and `concatenate` with the config (Phase 3).
+//! CPU and GPU processors it makes. The legacy GPU processor comes with the 3D LUT op (its
+//! `Create3DLut`), `setColorSpaceConversion` and `concatenate` with the config (Phase 3).
 //!
 //! A processor owns its ops and finalizes them once, in [`Processor::set_transform`]. The
 //! processors it makes ([`Processor::optimized_processor_with_bit_depths`], the CPU
@@ -16,6 +16,7 @@ use std::collections::BTreeSet;
 use std::ffi::c_ulong;
 use std::sync::{Arc, Mutex};
 
+use ocio_gpu::gpu_processor::GpuProcessor;
 use ocio_ops::cpu_processor::CpuProcessor;
 use ocio_ops::dynamic_property::DynamicPropertyRcPtr;
 use ocio_ops::exception::{Exception, Result};
@@ -159,6 +160,8 @@ pub struct Processor {
     cache_flags: ProcessorCacheFlags,
     /// `m_optProcessorCache`.
     opt_processor_cache: ProcessorCache<u64, Arc<Processor>>,
+    /// `m_gpuProcessorCache`, by the flags themselves.
+    gpu_processor_cache: ProcessorCache<u64, Arc<GpuProcessor>>,
     /// `m_cpuProcessorCache`.
     cpu_processor_cache: ProcessorCache<u64, Arc<CpuProcessor>>,
 }
@@ -168,6 +171,14 @@ pub struct Processor {
 fn depths_and_flags_key(in_bd: BitDepth, out_bd: BitDepth, flags: OptimizationFlags) -> u64 {
     let text = format!("{}{}{}", in_bd as i32, out_bd as i32, flags.0);
     std_hash_string(text.as_bytes())
+}
+
+/// The GPU processors' key: the flags' value, an `unsigned long` (32 bits on Windows, 64 on
+/// Linux) widened to `std::size_t`.
+// `unsigned long` is already `u64` on Linux.
+#[allow(clippy::useless_conversion)]
+fn flags_key(flags: OptimizationFlags) -> u64 {
+    u64::from(flags.0)
 }
 
 /// `std::stoul(text, nullptr, 0)`, with each wheel's C++ library's message (`e.what()`) for
@@ -284,6 +295,7 @@ impl Processor {
             cache_id: Mutex::new(None),
             cache_flags: ProcessorCacheFlags::DEFAULT,
             opt_processor_cache: ProcessorCache::new(),
+            gpu_processor_cache: ProcessorCache::new(),
             cpu_processor_cache: ProcessorCache::new(),
         }
     }
@@ -456,6 +468,51 @@ impl Processor {
         create_processor(o_flags)
     }
 
+    /// The GPU processor of the default optimization.
+    ///
+    /// Port of `Processor::Impl::getDefaultGPUProcessor` (Processor.cpp:437-440 @ v2.5.2).
+    #[doc(alias = "getDefaultGPUProcessor")]
+    pub fn default_gpu_processor(&self) -> Result<Arc<GpuProcessor>> {
+        self.gpu_processor(&self.ops, OptimizationFlags::DEFAULT)
+    }
+
+    /// The GPU processor of these flags.
+    ///
+    /// Port of `Processor::Impl::getOptimizedGPUProcessor` (Processor.cpp:442-445 @ v2.5.2).
+    #[doc(alias = "getOptimizedGPUProcessor")]
+    pub fn optimized_gpu_processor(&self, o_flags: OptimizationFlags) -> Result<Arc<GpuProcessor>> {
+        self.gpu_processor(&self.ops, o_flags)
+    }
+
+    /// The GPU processor of `gpu_ops` for the flags (which `OCIO_OPTIMIZATION_FLAGS`
+    /// overrides), cached under the flags alone: unlike the CPU processors, whatever the ops'
+    /// dynamic properties and the cache flags' `SHARE_DYN_PROPERTIES`.
+    ///
+    /// Port of `Processor::Impl::getGPUProcessor` (Processor.cpp:491-523 @ v2.5.2).
+    fn gpu_processor(
+        &self,
+        gpu_ops: &OpVec,
+        o_flags: OptimizationFlags,
+    ) -> Result<Arc<GpuProcessor>> {
+        // Helper method.
+        let create_processor = |o_flags: OptimizationFlags| -> Result<Arc<GpuProcessor>> {
+            Ok(Arc::new(GpuProcessor::new(gpu_ops, o_flags)?))
+        };
+
+        let o_flags = environment_override(o_flags)?;
+
+        if let Some(mut cache) = self.gpu_processor_cache.lock() {
+            let key = flags_key(o_flags);
+            if let Some(processor) = cache.entries().get(&key) {
+                return Ok(processor.clone());
+            }
+            let processor = create_processor(o_flags)?;
+            cache.entries().insert(key, processor.clone());
+            return Ok(processor);
+        }
+        create_processor(o_flags)
+    }
+
     /// The CPU processor of the default optimization, F32 in and out.
     ///
     /// Port of `Processor::Impl::getDefaultCPUProcessor` (Processor.cpp:527-530 @ v2.5.2).
@@ -528,6 +585,7 @@ impl Processor {
         let cache_enabled = self.cache_flags.has_flag(ProcessorCacheFlags::ENABLED);
 
         self.opt_processor_cache.enable(cache_enabled);
+        self.gpu_processor_cache.enable(cache_enabled);
         self.cpu_processor_cache.enable(cache_enabled);
     }
 
