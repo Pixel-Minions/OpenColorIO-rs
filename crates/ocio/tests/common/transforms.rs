@@ -9,25 +9,29 @@
 //!   against `Display`, byte for byte; what `validate()` raises against `validate`'s message;
 //!   and `equals()` for pairs of cases against the port's `equals`.
 //! - [`check_processors`]: through `processor_ops`, the raw config's processor of each case
-//!   (`Config::CreateRaw()->getProcessor(transform, direction)`), written out by
-//!   `createGroupTransform()`, against the port's ops: `validate`, [`build_ops`], `finalize`,
-//!   then [`create_transform`] for each op (`Processor::Impl::setTransform` and
-//!   `createGroupTransform`, src/OpenColorIO/Processor.cpp:300-316, 623-641 @ v2.5.2). Every
-//!   getter the dump holds is compared, floats by their bits; or the error and its message.
+//!   (`Config::CreateRaw()->getProcessor(transform, direction)`) and its optimized processor,
+//!   against the port's [`Config::processor_in_direction`] and
+//!   [`Processor::optimized_processor_with_bit_depths`]: their cache IDs, `isNoOp`,
+//!   `hasChannelCrosstalk`, `isDynamic`, the files and looks they read, and
+//!   `createGroupTransform()`, every getter of every transform the dump holds, floats by their
+//!   bits; or the error, its message and where it happened.
+//! - [`check_optimized_processors`]: the same for the optimized processors of other bit
+//!   depths and the default flags, where the optimizer bakes and folds LUTs.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
-use ocio::internals::{build_ops, create_transform};
 use ocio::{
     Config, FormatMetadata, GroupTransform, Interpolation, Lut1DHueAdjust, NegativeStyle,
-    OptimizationFlags, RangeStyle, Transform, TransformDirection,
+    OptimizationFlags, Processor, RangeStyle, Transform, TransformDirection,
 };
-use ocio_ops::op::OpVec;
 use ocio_ops::open_color_types::{BitDepth, CdlStyle};
 use ocio_testkit::Oracle;
 use ocio_testkit::battery::BitDepth as Depth;
 use ocio_testkit::oracle::BatchCall;
-use ocio_testkit::processor_ops::{Dump, Dumped, ProcessorOpsReply, ProcessorOpsRequest};
+use ocio_testkit::processor_ops::{
+    Dump, Dumped, ProcessorDump, ProcessorOpsReply, ProcessorOpsRequest,
+};
 use ocio_testkit::transform_text::{Built, TransformTextReply, TransformTextRequest};
 use serde_json::{Value, json};
 
@@ -234,21 +238,111 @@ fn port_equals(a: &Transform, b: &Transform) -> Option<bool> {
     }
 }
 
-/// What the port's processor of `transform` in the direction `dir` makes of it: the group
-/// `createGroupTransform()` returns, or the error.
+/// A processor and the group its `createGroupTransform()` returns.
+pub(crate) type ProcessorAndGroup = (Arc<Processor>, GroupTransform);
+
+/// The port's processor of `transform` in the direction `dir`, and its optimized processor for
+/// the bit depths `input` and `output` and the flags `flags`, each with its
+/// `createGroupTransform()`; or the error, and the step that raised it, as `processor_ops`
+/// names it ("processor", "group", "optimize" or "optimized_group").
 ///
-/// Port of `Processor::Impl::setTransform` and `createGroupTransform` (src/OpenColorIO/
-/// Processor.cpp:300-316, 623-641 @ v2.5.2), for transforms without dynamic properties.
-pub(crate) fn port_processor_group(
+/// `config` is copied first: the oracle makes a config per request, so its cache is empty.
+pub(crate) fn port_processors(
     config: &Config,
     transform: &Transform,
     dir: TransformDirection,
-) -> ocio::Result<GroupTransform> {
-    transform.validate()?;
-    let mut ops = OpVec::new();
-    build_ops(&mut ops, config, config.current_context(), transform, dir)?;
-    ops.finalize()?;
-    group_of(&ops)
+    (input, output, flags): (BitDepth, BitDepth, OptimizationFlags),
+) -> Result<(ProcessorAndGroup, ProcessorAndGroup), (&'static str, ocio::Exception)> {
+    let config = config.clone();
+    let processor = config
+        .processor_in_direction(transform, dir)
+        .map_err(|e| ("processor", e))?;
+    let group = processor
+        .create_group_transform()
+        .map_err(|e| ("group", e))?;
+    let optimized = processor
+        .optimized_processor_with_bit_depths(input, output, flags)
+        .map_err(|e| ("optimize", e))?;
+    let optimized_group = optimized
+        .create_group_transform()
+        .map_err(|e| ("optimized_group", e))?;
+    Ok(((processor, group), (optimized, optimized_group)))
+}
+
+/// The wheel's reply to a `processor_ops` request against the port's processors: `None` when
+/// they agree.
+fn compare_reply(
+    reply: &ProcessorOpsReply,
+    port: &Result<(ProcessorAndGroup, ProcessorAndGroup), (&'static str, ocio::Exception)>,
+) -> Option<String> {
+    match (reply.raised(), port) {
+        (Some(raised), Err((stage, e))) => {
+            if raised.stage == *stage && raised.message == e.message() {
+                None
+            } else {
+                Some(format!("wheel {raised:?}\n  port  {stage} {e:?}"))
+            }
+        }
+        (None, Ok(((processor, group), (optimized, optimized_group)))) => {
+            compare_processor(reply.processor(), processor, group)
+                .map_err(|e| format!("processor: {e}"))
+                .and_then(|()| {
+                    compare_processor(reply.optimized(), optimized, optimized_group)
+                        .map_err(|e| format!("optimized processor: {e}"))
+                })
+                .err()
+                .map(|e| format!("{e}\n  wheel {}", reply.result))
+        }
+        (wheel, port) => Some(format!(
+            "wheel {wheel:?} {}\n  port  {port:?}",
+            reply.result
+        )),
+    }
+}
+
+/// The wheel's processor, as `processor_ops` writes it out, against the port's.
+fn compare_processor(
+    wheel: &ProcessorDump,
+    port: &Processor,
+    group: &GroupTransform,
+) -> Result<(), String> {
+    let cache_id = port.cache_id().map_err(|e| e.to_string())?;
+    let is_no_op = port.is_no_op().map_err(|e| e.to_string())?;
+    let port_flags = (
+        cache_id.as_str(),
+        is_no_op,
+        port.has_channel_crosstalk(),
+        port.is_dynamic(),
+    );
+    let wheel_flags = (
+        wheel.cache_id.as_str(),
+        wheel.is_no_op,
+        wheel.has_channel_crosstalk,
+        wheel.is_dynamic,
+    );
+    if port_flags != wheel_flags {
+        return Err(format!(
+            "(cache ID, isNoOp, hasChannelCrosstalk, isDynamic): wheel {wheel_flags:?}, port \
+             {port_flags:?}"
+        ));
+    }
+    let metadata = port.processor_metadata();
+    let files: Vec<Dumped> = (0..metadata.num_files())
+        .map(|i| dumped_str(metadata.file(i)))
+        .collect();
+    let looks: Vec<Dumped> = (0..metadata.num_looks())
+        .map(|i| dumped_str(metadata.look(i)))
+        .collect();
+    for (name, port_list) in [("getFiles", files), ("getLooks", looks)] {
+        let port_list = Dumped::List(port_list);
+        if wheel.processor_metadata.getter(name) != &port_list {
+            return Err(format!(
+                "{name}: wheel {:?}, port {port_list:?}",
+                wheel.processor_metadata.getter(name)
+            ));
+        }
+    }
+    compare_group(&wheel.group, group)
 }
 
 /// The raw config's processors of `cases`, in both directions, the wheel's against the port's.
@@ -299,24 +393,13 @@ pub(crate) fn check_processors_in_dirs(
     for ((k, dir, _), response) in requests.iter().zip(Oracle::get().batch(&calls, true)) {
         let reply = ProcessorOpsReply::from_response(response.unwrap_or_else(|e| panic!("{e}")));
         let case = &cases[*k];
-        let port = port_processor_group(config, &case.port, *dir);
-        let outcome = match (reply.raised(), &port) {
-            (Some(raised), Err(e)) => {
-                if raised.stage == "processor" && raised.message == e.message() {
-                    None
-                } else {
-                    Some(format!("wheel {raised:?}\n  port  {e:?}"))
-                }
-            }
-            (None, Ok(group)) => compare_group(&reply.processor().group, group)
-                .err()
-                .map(|e| format!("{e}\n  wheel {}", reply.result)),
-            (wheel, port) => Some(format!(
-                "wheel {wheel:?} {}\n  port  {port:?}",
-                reply.result
-            )),
-        };
-        if let Some(failure) = outcome {
+        let port = port_processors(
+            config,
+            &case.port,
+            *dir,
+            (BitDepth::F32, BitDepth::F32, OptimizationFlags::NONE),
+        );
+        if let Some(failure) = compare_reply(&reply, &port) {
             failures.push(format!("{} ({dir:?}): {failure}", case.label));
         }
     }
@@ -604,50 +687,11 @@ pub(crate) fn dump_transform(transform: &Transform) -> (String, BTreeMap<String,
     (class.to_string(), getters)
 }
 
-/// The group `createGroupTransform()` makes of `ops`: their metadata, and the transform of each
-/// op (none for the no-op types).
-///
-/// Port of `Processor::Impl::createGroupTransform` (src/OpenColorIO/Processor.cpp:300-316 @
-/// v2.5.2).
-fn group_of(ops: &OpVec) -> ocio::Result<GroupTransform> {
-    let mut group = GroupTransform::new();
-    *group.format_metadata_mut() = ops.get_format_metadata().clone();
-    for op in ops.iter() {
-        create_transform(&mut group, op)?;
-    }
-    Ok(group)
-}
-
-/// What the port's optimized processor of `transform` in the direction `dir` makes of it for
-/// the bit depths `input` and `output` and the flags `flags`: the group
-/// `createGroupTransform()` returns, or the error.
-///
-/// Port of `Processor::Impl::setTransform` and of `getOptimizedProcessor`'s `CreateProcessor`
-/// (src/OpenColorIO/Processor.cpp:386-399, 623-641 @ v2.5.2), for transforms without dynamic
-/// properties and without `OCIO_OPTIMIZATION_FLAGS` set (the oracle's environment).
-pub(crate) fn port_optimized_group(
-    config: &Config,
-    transform: &Transform,
-    dir: TransformDirection,
-    input: BitDepth,
-    output: BitDepth,
-    flags: OptimizationFlags,
-) -> ocio::Result<GroupTransform> {
-    transform.validate()?;
-    let mut ops = OpVec::new();
-    build_ops(&mut ops, config, config.current_context(), transform, dir)?;
-    ops.finalize()?;
-
-    ops.finalize()?;
-    ops.optimize(flags)?;
-    ops.optimize_for_bitdepth(input, output, flags)?;
-    group_of(&ops)
-}
-
-/// The raw config's optimized processors of `cases`, forward, for each `(input, output)` bit
-/// depth pair with the default flags, the wheel's (`getOptimizedProcessor`, then
-/// `createGroupTransform()`) against the port's: every getter, a LUT's values bit for bit. Returns,
-/// per case, how many of its optimized processors hold a Lut1DTransform.
+/// The raw config's processors of `cases`, forward, and their optimized processors for each
+/// `(input, output)` bit depth pair with the default flags, the wheel's (`getProcessor`,
+/// `getOptimizedProcessor`, then `createGroupTransform()`) against the port's
+/// ([`port_processors`]): the processors' cache IDs and flags, and every getter, a LUT's values
+/// bit for bit. Returns, per case, how many of its optimized processors hold a Lut1DTransform.
 pub(crate) fn check_optimized_processors(cases: &[Case], depths: &[(Depth, Depth)]) -> Vec<usize> {
     let requests: Vec<(usize, Depth, Depth, ProcessorOpsRequest)> = cases
         .iter()
@@ -677,23 +721,17 @@ pub(crate) fn check_optimized_processors(cases: &[Case], depths: &[(Depth, Depth
             luts[*k] += 1;
         }
         let case = &cases[*k];
-        let port = port_optimized_group(
+        let port = port_processors(
             &config,
             &case.port,
             TransformDirection::Forward,
-            port_depth(*input),
-            port_depth(*output),
-            OptimizationFlags::DEFAULT,
+            (
+                port_depth(*input),
+                port_depth(*output),
+                OptimizationFlags::DEFAULT,
+            ),
         );
-        let outcome = match (reply.raised(), &port) {
-            (None, Ok(group)) => compare_group(&reply.optimized().group, group)
-                .err()
-                .map(|e| format!("{e}\n  wheel {}", reply.result)),
-            (wheel, port) => Some(format!(
-                "wheel {wheel:?} {}\n  port  {port:?}",
-                reply.result
-            )),
-        };
+        let outcome = compare_reply(&reply, &port);
         if let Some(failure) = outcome {
             failures.push(format!(
                 "{} ({input:?} -> {output:?}): {failure}",
