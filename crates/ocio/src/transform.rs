@@ -23,6 +23,7 @@ use ocio_ops::open_color_types::TransformDirection;
 
 use crate::config::Config;
 use crate::context::Context;
+use crate::transforms::allocation_transform::{AllocationTransform, build_allocation_op};
 use crate::transforms::group_transform::{GroupTransform, build_group_ops};
 use crate::transforms::matrix_transform::{
     MatrixTransform, build_matrix_op, create_matrix_transform,
@@ -92,12 +93,20 @@ pub enum TransformType {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum Transform {
+    /// `AllocationTransform`.
+    Allocation(AllocationTransform),
     /// `GroupTransform`.
     Group(GroupTransform),
     /// `MatrixTransform`.
     Matrix(MatrixTransform),
     /// `RangeTransform`.
     Range(RangeTransform),
+}
+
+impl From<AllocationTransform> for Transform {
+    fn from(t: AllocationTransform) -> Transform {
+        Transform::Allocation(t)
+    }
 }
 
 impl From<GroupTransform> for Transform {
@@ -125,6 +134,7 @@ impl Transform {
     #[doc(alias = "getTransformType")]
     pub fn transform_type(&self) -> TransformType {
         match self {
+            Transform::Allocation(_) => TransformType::Allocation,
             Transform::Group(_) => TransformType::Group,
             Transform::Matrix(_) => TransformType::Matrix,
             Transform::Range(_) => TransformType::Range,
@@ -135,6 +145,7 @@ impl Transform {
     #[doc(alias = "getDirection")]
     pub fn direction(&self) -> TransformDirection {
         match self {
+            Transform::Allocation(t) => t.direction(),
             Transform::Group(t) => t.direction(),
             Transform::Matrix(t) => t.direction(),
             Transform::Range(t) => t.direction(),
@@ -145,6 +156,7 @@ impl Transform {
     #[doc(alias = "setDirection")]
     pub fn set_direction(&mut self, dir: TransformDirection) {
         match self {
+            Transform::Allocation(t) => t.set_direction(dir),
             Transform::Group(t) => t.set_direction(dir),
             Transform::Matrix(t) => t.set_direction(dir),
             Transform::Range(t) => t.set_direction(dir),
@@ -156,6 +168,7 @@ impl Transform {
     /// Port of `Transform::validate` and its overrides.
     pub fn validate(&self) -> Result<()> {
         match self {
+            Transform::Allocation(t) => t.validate(),
             Transform::Group(t) => t.validate(),
             Transform::Matrix(t) => t.validate(),
             Transform::Range(t) => t.validate(),
@@ -200,6 +213,7 @@ impl Transform {
     /// Transform.cpp:177-308 @ v2.5.2).
     pub(crate) fn write_text(&self, os: &mut OStringStream) {
         match self {
+            Transform::Allocation(t) => t.write_text(os),
             Transform::Group(t) => t.write_text(os),
             Transform::Matrix(t) => t.write_text(os),
             Transform::Range(t) => t.write_text(os),
@@ -223,6 +237,9 @@ pub fn build_ops(
     dir: TransformDirection,
 ) -> Result<()> {
     match transform {
+        Transform::Allocation(allocation_transform) => {
+            build_allocation_op(ops, allocation_transform, dir)
+        }
         Transform::Group(group_transform) => {
             build_group_ops(ops, config, context, group_transform, dir)
         }

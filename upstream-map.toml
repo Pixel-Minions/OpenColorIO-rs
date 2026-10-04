@@ -460,9 +460,9 @@ note = "S2, 1.1d: OpCPU (as the CpuOp trait, with the typed apply_bit_depth); 1.
 [[file]]
 path = "src/OpenColorIO/OpBuilders.h"
 kind = "src"
-target = ["crates/ocio/src/transform.rs", "crates/ocio/src/transforms/group_transform.rs", "crates/ocio/src/transforms/matrix_transform.rs", "crates/ocio/src/transforms/range_transform.rs"]
+target = ["crates/ocio/src/transform.rs", "crates/ocio/src/transforms/group_transform.rs", "crates/ocio/src/transforms/matrix_transform.rs", "crates/ocio/src/transforms/range_transform.rs", "crates/ocio/src/transforms/allocation_transform.rs"]
 status = "partial"
-note = "p1-transforms T0: BuildOps and BuildGroupOps; each Build<Class>Op comes with its class, next to it; p1-transforms-fam1: BuildMatrixOp (1.8b), BuildRangeOp (1.8c)"
+note = "p1-transforms T0: BuildOps and BuildGroupOps; each Build<Class>Op comes with its class, next to it; p1-transforms-fam1: BuildMatrixOp (1.8b), BuildRangeOp (1.8c), BuildAllocationOp (in AllocationTransform.cpp)"
 
 [[file]]
 path = "src/OpenColorIO/OpOptimizers.cpp"
@@ -1093,7 +1093,7 @@ path = "src/OpenColorIO/ops/allocation/AllocationOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/allocation/allocation_op.rs"]
 status = "partial"
-note = "1.3n1: AllocationData::getCacheID and operator<<; CreateAllocationOps needs CreateFitOp (Matrix op) and the Log op"
+note = "1.3n1: AllocationData::getCacheID and operator<<; p1-transforms-fam1: CreateAllocationOps for the uniform and unknown allocations (the lg2 allocation needs CreateLogOp: an error until the Log op, card p1-log)"
 
 [[file]]
 path = "src/OpenColorIO/ops/allocation/AllocationOp.h"
@@ -2040,7 +2040,8 @@ note = "build system"
 path = "src/OpenColorIO/transforms/AllocationTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/allocation_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam1: AllocationTransform, its validation and operator<< (I-73, I-76), BuildAllocationOp (its lg2 ops wait for CreateAllocationOps' Log op); checked against the wheel in crates/ocio/tests/allocation_transform_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/transforms/BuiltinTransform.cpp"
@@ -4529,6 +4530,7 @@ path = "tests/cpu/ops/allocation/AllocationOp_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/allocation/allocation_op_tests.rs"]
 status = "todo"
+note = "AllocationOps create needs the Log op (lg2)"
 
 [[file]]
 path = "tests/cpu/ops/cdl/CDLOpData_tests.cpp"
@@ -4839,7 +4841,8 @@ status = "todo"
 path = "tests/cpu/transforms/AllocationTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/allocation_transform_tests.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam1"
 
 [[file]]
 path = "tests/cpu/transforms/BuiltinTransform_tests.cpp"
