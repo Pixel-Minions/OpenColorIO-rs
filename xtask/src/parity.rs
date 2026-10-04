@@ -3,14 +3,19 @@
 
 //! Upstream test inventory, ported-test markers, the ratchet and `docs/parity.md`.
 //!
-//! A Rust test counts as a port of an upstream test when a comment directly above it names
-//! the upstream test exactly as upstream's macro does, for example:
+//! A Rust test counts as a port of an upstream test when its doc comment, directly above
+//! `#[test]` (other doc lines and attributes may come between), has a marker line: `/// Port
+//! of`, the upstream test in backquotes exactly as upstream's macro names it, then
+//! ` @ v2.5.2.`, which anything may follow on that line. For example:
 //!
 //! ```text
 //! /// Port of `OCIO_ADD_TEST(Lut1DOpCPU, apply_half)` @ v2.5.2.
 //! #[test]
 //! fn apply_half() { ... }
 //! ```
+//!
+//! Any other mention of an upstream test, such as a partial port or a stand-in that names
+//! the test it stands in for, doesn't count.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -200,7 +205,51 @@ pub(crate) fn upstream_python_tests() -> Vec<String> {
     tests
 }
 
-/// Ported-test markers in Rust sources: (suite, id) -> Rust files mentioning it.
+/// The upstream version port markers name.
+const MARKER_VERSION: &str = "v2.5.2";
+
+/// The upstream test a port marker line names: `/// Port of `, one upstream test macro in
+/// backquotes, then ` @ v2.5.2.`, with anything after that. Any other line names none.
+fn marker_id(line: &str) -> Option<(&'static str, String)> {
+    let rest = line.trim_start().strip_prefix("/// Port of `")?;
+    let (invocation, after) = rest.split_once('`')?;
+    if !after.starts_with(&format!(" @ {MARKER_VERSION}.")) {
+        return None;
+    }
+    // The backquotes hold exactly one macro, and nothing else.
+    if !invocation.starts_with("OCIO_ADD_") || !invocation.ends_with(')') {
+        return None;
+    }
+    let mut ids = macro_ids(invocation);
+    if ids.len() != 1 {
+        return None;
+    }
+    ids.pop()
+}
+
+/// The upstream tests `text` (a Rust source) marks as ported: each marker line
+/// ([`marker_id`]) in a comment block directly above a `#[test]` function.
+fn markers_in(text: &str) -> Vec<(&'static str, String)> {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut ids = Vec::new();
+    for (i, line) in lines.iter().enumerate() {
+        let Some(id) = marker_id(line) else {
+            continue;
+        };
+        // The marker must be in the comment block directly above a #[test] function.
+        let attached = lines[i + 1..]
+            .iter()
+            .map(|l| l.trim_start())
+            .take_while(|l| l.starts_with("//") || l.starts_with("#["))
+            .any(|l| l.starts_with("#[test]"));
+        if attached {
+            ids.push(id);
+        }
+    }
+    ids
+}
+
+/// Ported-test markers in Rust sources: (suite, id) -> Rust files marking it.
 pub(crate) fn ported_markers() -> Result<BTreeMap<(&'static str, String), Vec<String>>, String> {
     let root = paths::workspace_root();
     let mut found: BTreeMap<(&'static str, String), Vec<String>> = BTreeMap::new();
@@ -210,24 +259,8 @@ pub(crate) fn ported_markers() -> Result<BTreeMap<(&'static str, String), Vec<St
         }
         let file = format!("crates/{rel}");
         let text = std::fs::read_to_string(root.join(&file)).map_err(|e| format!("{file}: {e}"))?;
-        let lines: Vec<&str> = text.lines().collect();
-        for (i, line) in lines.iter().enumerate() {
-            let t = line.trim_start();
-            if !t.starts_with("//") {
-                continue;
-            }
-            // The marker must be in the comment block directly above a #[test] function.
-            let attached = lines[i + 1..]
-                .iter()
-                .map(|l| l.trim_start())
-                .take_while(|l| l.starts_with("//") || l.starts_with("#["))
-                .any(|l| l.starts_with("#[test]"));
-            if !attached {
-                continue;
-            }
-            for (suite, id) in macro_ids(t) {
-                found.entry((suite, id)).or_default().push(file.clone());
-            }
+        for (suite, id) in markers_in(&text) {
+            found.entry((suite, id)).or_default().push(file.clone());
         }
     }
     Ok(found)
@@ -533,5 +566,87 @@ mod tests {
             .map(|(_, id)| id)
             .collect();
         assert_eq!(ids, ["A/b", "SSE2/e"]);
+    }
+
+    fn marker(line: &str) -> Option<String> {
+        marker_id(line).map(|(suite, id)| format!("{suite} {id}"))
+    }
+
+    #[test]
+    fn a_port_of_marker_counts() {
+        assert_eq!(
+            marker("/// Port of `OCIO_ADD_TEST(Lut1DOpCPU, apply_half)` @ v2.5.2.").as_deref(),
+            Some("cpu Lut1DOpCPU/apply_half")
+        );
+        // Indented, and with more text on the line.
+        assert_eq!(
+            marker("    /// Port of `OCIO_ADD_TEST(A, b)` @ v2.5.2. Upstream's x is y.").as_deref(),
+            Some("cpu A/b")
+        );
+        assert_eq!(
+            marker("/// Port of `OCIO_ADD_GPU_TEST(MatrixOps, inverse)` @ v2.5.2.").as_deref(),
+            Some("gpu MatrixOps/inverse")
+        );
+        assert_eq!(
+            marker("/// Port of `OCIO_ADD_TEST_AVX2(packed_all_test)` @ v2.5.2.").as_deref(),
+            Some("cpu AVX2/packed_all_test")
+        );
+    }
+
+    #[test]
+    fn other_mentions_do_not_count() {
+        for line in [
+            // A bare mention.
+            "/// as `OCIO_ADD_TEST(A, b)` checks them (tests/cpu/A_tests.cpp:1-9 @ v2.5.2).",
+            "/// `OCIO_ADD_TEST(A, b)` @ v2.5.2.",
+            // A stand-in, and a partial port.
+            "/// Stand-in for `OCIO_ADD_TEST(A, b)` @ v2.5.2.",
+            "/// The parts of `OCIO_ADD_TEST(A, b)` (tests/cpu/A_tests.cpp:1-9 @ v2.5.2) before",
+            "/// Part of `OCIO_ADD_TEST(A, b)` @ v2.5.2.",
+            // A port of something else, another version, or no version.
+            "/// Port of `CreateLogOp` (src/OpenColorIO/ops/log/LogOp.cpp:1-9 @ v2.5.2).",
+            "/// Port of `OCIO_ADD_TEST(A, b)` @ v2.6.0.",
+            "/// Port of `OCIO_ADD_TEST(A, b)` (tests/cpu/A_tests.cpp:1-9 @ v2.5.2).",
+            "/// Port of `OCIO_ADD_TEST(A, b)`.",
+            // Two tests, or more than the macro, in the backquotes.
+            "/// Port of `OCIO_ADD_TEST(A, b) OCIO_ADD_TEST(A, c)` @ v2.5.2.",
+            "/// Port of `OCIO_ADD_TEST(A, b) and more` @ v2.5.2.",
+            "/// Port of `OCIO_ADD_TEST(A, ...)` @ v2.5.2.",
+            // Not a doc comment, or not a comment.
+            "// Port of `OCIO_ADD_TEST(A, b)` @ v2.5.2.",
+            "//! Port of `OCIO_ADD_TEST(A, b)` @ v2.5.2.",
+            "let s = \"/// Port of `OCIO_ADD_TEST(A, b)` @ v2.5.2.\";",
+        ] {
+            assert_eq!(marker(line), None, "{line}");
+        }
+    }
+
+    #[test]
+    fn a_marker_counts_only_above_a_test() {
+        let text = "\
+/// Port of `OCIO_ADD_TEST(A, attached)` @ v2.5.2.
+#[test]
+fn attached() {}
+
+/// Port of `OCIO_ADD_TEST(A, with_lines_between)` @ v2.5.2. Upstream's
+/// x is y here.
+#[cfg(target_os = \"windows\")]
+#[test]
+fn with_lines_between() {}
+
+/// Port of `OCIO_ADD_TEST(A, a_helper)` @ v2.5.2.
+fn a_helper() {}
+
+/// Port of `OCIO_ADD_TEST(A, after_code)` @ v2.5.2.
+const X: i32 = 1;
+#[test]
+fn after_code() {}
+
+/// The parts of `OCIO_ADD_TEST(A, partial)` (tests/cpu/A_tests.cpp:1-9 @ v2.5.2).
+#[test]
+fn partial() {}
+";
+        let ids: Vec<String> = markers_in(text).into_iter().map(|(_, id)| id).collect();
+        assert_eq!(ids, ["A/attached", "A/with_lines_between"]);
     }
 }
