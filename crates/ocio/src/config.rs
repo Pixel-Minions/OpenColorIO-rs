@@ -12,7 +12,7 @@ use crate::context::Context;
 /// A config: so far the version the op builders read (`BuildCDLOp` and `BuildExponentOp` build
 /// version 1 configs' ops differently) and the current context.
 ///
-/// Port of `Config` and `Config::Impl` (include/OpenColorIO/OpenColorIO.h,
+/// Port of `Config` and `Config::Impl` (include/OpenColorIO/OpenColorIO.h:285,
 /// src/OpenColorIO/Config.cpp @ v2.5.2), in part.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -40,19 +40,19 @@ impl Config {
         })
     }
 
-    /// Port of `Config::getMajorVersion`.
+    /// Port of `Config::getMajorVersion` (src/OpenColorIO/Config.cpp:1280-1283 @ v2.5.2).
     #[doc(alias = "getMajorVersion")]
     pub fn major_version(&self) -> u32 {
         self.major_version
     }
 
-    /// Port of `Config::getMinorVersion`.
+    /// Port of `Config::getMinorVersion` (src/OpenColorIO/Config.cpp:1306-1309 @ v2.5.2).
     #[doc(alias = "getMinorVersion")]
     pub fn minor_version(&self) -> u32 {
         self.minor_version
     }
 
-    /// Port of `Config::getCurrentContext`.
+    /// Port of `Config::getCurrentContext` (src/OpenColorIO/Config.cpp:2161-2164 @ v2.5.2).
     #[doc(alias = "getCurrentContext")]
     pub fn current_context(&self) -> &Arc<Context> {
         &self.context
