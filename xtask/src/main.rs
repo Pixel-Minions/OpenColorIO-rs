@@ -47,7 +47,8 @@ Oracle and fixtures (fixtures/ is written only by these commands):
 Guardrails:
   guards                      forbidden patterns, unsafe allowlist, waivers, headers,
                               the registers' structure (docs/improvements.md,
-                              docs/deviations.md)
+                              docs/deviations.md), ocio::internals and its feature only
+                              for crates/ocio/tests
   ratchet [--update] [--base <rev>]
                               ported upstream tests may only increase (--update records
                               the current counts; `xtask land` does it at merge time)
