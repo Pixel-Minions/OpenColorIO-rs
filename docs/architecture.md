@@ -123,6 +123,15 @@ plan). Every transform class and the processors follow them.
 - **Names.** snake_case without `get_`: `matrix()`, `direction()`, `num_transforms()`; setters
   keep `set_`. Each method carries `#[doc(alias = "getMatrix")]` with the C++ name, and
   constructors are `new()` with `#[doc(alias = "Create")]`.
+- **Overloads.** The overload with the fewest arguments takes the plain name; each other one
+  adds what it takes: `_in_direction` for a direction, `_with_<what>` for the rest. All carry
+  the C++ name as their `doc(alias)`. So `Config::getProcessor` is `processor(&transform)`,
+  `processor_in_direction(&transform, dir)` and `processor_with_context(&context, &transform,
+  dir)`; `getOptimizedProcessor` is `optimized_processor(flags)` and
+  `optimized_processor_with_bit_depths(in, out, flags)`; the CPU getters are
+  `default_cpu_processor()`, `optimized_cpu_processor(flags)` and
+  `optimized_cpu_processor_with_bit_depths(in, out, flags)` (the owner's decision,
+  2026-10-02).
 - **Arrays.** Fixed-size arrays for C++'s pointers to arrays: `&[f64; 16]` for a matrix,
   `&[f64; 4]` for offsets, `&[f64; 3]` per channel.
 - **Errors.** The setters and getters that throw upstream return `ocio::Result` with
@@ -164,12 +173,12 @@ And, the same day:
 - **Private as upstream's.** The CDL's `METADATA_*_DESCRIPTION` element names are
   crate-private, as upstream's private `transforms/CDLTransform.h` keeps them. `build_ops`
   (`BuildOps`) and `create_transform` (`CreateTransform`) are crate-private: the processors
-  call them. The crate's integration tests, which check them against the wheel, reach them
-  through `ocio::internals`, which only the `internals` feature has; only `ocio`'s
-  dev-dependency on itself enables that feature, so a build of the library never has it.
+  call them. The crate's integration tests check them against the wheel through the public
+  processors: `Config::processor` and `Processor::create_group_transform`.
 - **`Lut1DTransform::new()` and `Lut1DTransform::with_length(length, is_half_domain) ->
   Result`** for upstream's two `Create`s (approved 2026-10-04); lengths and indices are
   `c_ulong`, upstream's `unsigned long` (32 bits on Windows, 64 on Linux).
+
 ## Strings are bytes
 
 OCIO's strings are C byte strings (`std::string`, `const char *`). They are usually UTF-8, but

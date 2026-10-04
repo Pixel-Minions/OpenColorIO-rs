@@ -14,14 +14,7 @@ ocio-ops.workspace = true
 ocio-formats.workspace = true
 ocio-gpu.workspace = true
 
-[features]
-# The processors' internals for the crate's own integration tests (`ocio::internals`): only
-# the dev-dependency on itself below enables it.
-internals = []
-
 [dev-dependencies]
-# Itself, with `internals`, for the integration tests.
-ocio = { workspace = true, features = ["internals"] }
 ocio-testkit.workspace = true
 saphyr-parser.workspace = true
 serde_json.workspace = true

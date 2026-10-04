@@ -134,7 +134,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Who notices:** applications that build transforms in code, not from files, and get several
   processors from one config.
 - **A fix:** put every value, or a hash of it, in the key.
-- **Status:** to be matched in Phase 3 (the processor cache).
+- **Status:** the cache and its key are matched (`p1-processor`, WP 1.8g); each class's text
+  as the class lands.
 
 ### I-6. A malformed UTF-8 sequence truncates a config's text and cache ID
 
@@ -202,6 +203,46 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   the defaults.
 - **A fix:** leave a value out only when it equals its default exactly.
 - **Status:** to be matched in Phase 3 (the YAML writer), with `p1-math`'s helpers.
+
+### I-53. Processor caches key by a hash, which differs between Windows and Linux
+
+- **Upstream:** the config's cache of processors, and each processor's caches of optimized and
+  CPU processors, key their entries by `std::hash<std::string>` of a text
+  (`Config.cpp:4836-4841`, `Processor.cpp:410-413, 563-566` @ v2.5.2), not by the text. The
+  hash is the C++ library's: FNV-1a on Windows (MSVC), `_Hash_bytes` with the seed
+  `0xc70f6907` on Linux (libstdc++). So:
+  - two texts with the same 64-bit hash share an entry: the second gets the first one's
+    processor;
+  - the config's fallback (`Config.cpp:4849-4873`) reuses the first cached processor with the
+    same cache ID in the order of the keys, so when several cached processors share a cache ID
+    (cached while `OCIO_DISABLE_CACHE_FALLBACK` was set), which one comes back differs between
+    the platforms.
+- **Who notices:** practically no one for a collision; for the fallback, applications that
+  toggle `OCIO_DISABLE_CACHE_FALLBACK` and compare processors by identity.
+- **A fix:** key by the text itself, and make the fallback's choice not depend on the hash.
+- **Status:** matched (`p1-processor`, WP 1.8g: `caching::std_hash_string`), checked through
+  the wheels' fallback (`crates/ocio/tests/processor_cache_oracle.rs`).
+
+### I-54. `OCIO_OPTIMIZATION_FLAGS` reads differently on Windows and Linux
+
+- **Upstream:** `EnvironmentOverride` reads the variable with `std::stoul(value, nullptr, 0)`
+  (`Processor.cpp:354-374` @ v2.5.2), whose `unsigned long` is 32 bits on Windows and 64 bits
+  on Linux, and whose messages are the C++ library's. So, between the wheels:
+  - a value above 2^32 - 1 (`4294967296`) is an error on Windows ("Illegal value for
+    OCIO_OPTIMIZATION_FLAGS: stoul argument out of range") and flags on Linux;
+  - a negative value wraps at a different width (`-1` is `0xFFFFFFFF` on Windows, 2^64 - 1 on
+    Linux), which changes the cache keys of the optimized and CPU processors;
+  - `0x` with no hexadecimal digit after it is an error on Windows ("invalid stoul argument";
+    the Windows C runtime converts nothing) and 0 on Linux (glibc converts the `0`);
+  - the messages of the errors differ: "invalid stoul argument" and "stoul argument out of
+    range" on Windows, "stoul" for both on Linux.
+  Any text after the digits is ignored (`0x1Fzz` reads as 31).
+- **Who notices:** users who set `OCIO_OPTIMIZATION_FLAGS` to a value out of the flags' range,
+  or a malformed one.
+- **A fix:** read the variable as a 32-bit value on both platforms, refuse trailing text, and
+  give one message.
+- **Status:** matched (`p1-processor`, WP 1.8h1: `processor::stoul`, checked against each C
+  runtime's `strtoul`, and through both wheels in `crates/ocio/tests/processor_cache_oracle.rs`).
 
 ## Numeric helpers
 
@@ -1175,3 +1216,22 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   transform, whose getters, setters and text read each channel's first parameter; the port's
   `create_gamma_transform` (so `CreateTransform`) returns the error for an empty channel and
   adds no transform (`exponent_with_linear_transform_tests.rs`, `empty_channels_are_refused`).
+  checks the error for each style and channel.
+
+### U-27. A config's processor cache disabled while a thread uses it
+
+- **Upstream:** `Config::getProcessor` checks `m_processorCache.isEnabled()` before it takes the
+  cache's lock (`Config.cpp:4830-4832`), and `Config::setProcessorCacheFlags` is `const` and
+  doesn't take that lock (`Config.cpp:929-933`). When another thread disables the cache
+  (`PROCESSOR_CACHE_OFF`) between the check and `m_processorCache[key]`, `operator[]` checks
+  again and returns a function-static `dummy` entry (`Caching.h:71-77`), one per cache type,
+  shared by every config: the call reads and writes it unlocked against other threads, a data
+  race, and can return a processor that another call left there, of another transform. Reading
+  `m_enabled` while another thread writes it is a data race too. A processor's own caches can't
+  get there: its flags are set before it is shared.
+- **Who notices:** applications that change a config's cache flags while other threads get
+  processors from it.
+- **Decided** (general rule): the port's `GenericCache::lock` checks that the cache is enabled
+  under the lock and gives no entries otherwise, and `processor_with_context` then makes an
+  uncached processor of the transform it was given.
+- **Status:** matched in `p1-processor` (`caching.rs`, `config.rs`), found by its verifier.
