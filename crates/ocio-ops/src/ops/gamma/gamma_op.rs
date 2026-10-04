@@ -4,7 +4,8 @@
 //! The Gamma op: part of a port of `src/OpenColorIO/ops/gamma/GammaOp.h` and `GammaOp.cpp` @
 //! v2.5.2, what the CPU engine needs: the op's behaviors, and [`create_gamma_op`].
 //! `CreateGammaTransform`, `BuildExponentWithLinearOp` and `BuildExponentOp` work on the
-//! transforms, and come with them (WP 1.8); `extractGpuShaderInfo` comes with the GPU writer
+//! transforms, and are in `ocio` (crates/ocio/src/transforms/exponent_transform.rs and
+//! exponent_with_linear_transform.rs); `extractGpuShaderInfo` comes with the GPU writer
 //! (1.3g4).
 //!
 //! As for every family, the op is its data, [`OpData::Gamma`]: [`Op`]'s methods match on it

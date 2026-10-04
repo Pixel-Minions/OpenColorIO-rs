@@ -4,7 +4,8 @@
 //! The Exponent op, `ExponentOp`: part of a port of `src/OpenColorIO/ops/exponent/ExponentOp.h`
 //! and `ExponentOp.cpp` @ v2.5.2, the op's behaviors and the functions that create it,
 //! [`create_exponent_op`] and [`create_exponent_op_from_values`]. Its GPU writer is
-//! `ocio-gpu`'s; `CreateExponentTransform` comes with the transforms (1.8).
+//! `ocio-gpu`'s; `CreateExponentTransform` is in `ocio`
+//! (crates/ocio/src/transforms/exponent_transform.rs).
 //!
 //! As for every family, the op is its data, [`OpData::Exponent`]: [`Op`]'s methods match on
 //! it and call the methods here, `ExponentOp`'s overrides.

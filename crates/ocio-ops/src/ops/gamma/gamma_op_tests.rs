@@ -3,7 +3,8 @@
 
 //! Port of `tests/cpu/ops/gamma/GammaOp_tests.cpp` @ v2.5.2: the tests of the op. Its test of
 //! `CreateGammaTransform` (`create_transform`) needs the `ExponentTransform` and
-//! `ExponentWithLinearTransform`, and comes with the transforms (WP 1.8).
+//! `ExponentWithLinearTransform`: it is in crates/ocio/src/transforms/
+//! exponent_with_linear_transform_tests.rs.
 
 use super::*;
 use crate::format_metadata::{METADATA_ID, METADATA_NAME};

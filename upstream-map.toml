@@ -169,7 +169,7 @@ path = "src/OpenColorIO/Config.cpp"
 kind = "src"
 target = ["crates/ocio/src/config.rs"]
 status = "partial"
-note = "p1-transforms T0: CreateRaw's version and context, getMajorVersion, getMinorVersion, getCurrentContext; CreateRaw's state and getProcessor come with WP 1.8g, the rest with Phase 3"
+note = "p1-transforms T0: CreateRaw's version and context, getMajorVersion, getMinorVersion, getCurrentContext; p1-transforms-fam2 (1.8d): setMajorVersion; CreateRaw's state and getProcessor come with WP 1.8g, the rest with Phase 3"
 
 [[file]]
 path = "src/OpenColorIO/ConfigUtils.cpp"
@@ -460,9 +460,9 @@ note = "S2, 1.1d: OpCPU (as the CpuOp trait, with the typed apply_bit_depth); 1.
 [[file]]
 path = "src/OpenColorIO/OpBuilders.h"
 kind = "src"
-target = ["crates/ocio/src/transform.rs", "crates/ocio/src/transforms/group_transform.rs", "crates/ocio/src/transforms/matrix_transform.rs", "crates/ocio/src/transforms/range_transform.rs", "crates/ocio/src/transforms/allocation_transform.rs"]
+target = ["crates/ocio/src/transform.rs", "crates/ocio/src/transforms/group_transform.rs", "crates/ocio/src/transforms/matrix_transform.rs", "crates/ocio/src/transforms/range_transform.rs", "crates/ocio/src/transforms/allocation_transform.rs", "crates/ocio/src/transforms/exponent_transform.rs", "crates/ocio/src/transforms/exponent_with_linear_transform.rs"]
 status = "partial"
-note = "p1-transforms T0: BuildOps and BuildGroupOps; each Build<Class>Op comes with its class, next to it; p1-transforms-fam1: BuildMatrixOp (1.8b), BuildRangeOp (1.8c), BuildAllocationOp (in AllocationTransform.cpp)"
+note = "p1-transforms T0: BuildOps and BuildGroupOps; each Build<Class>Op comes with its class, next to it; p1-transforms-fam1: BuildMatrixOp (1.8b), BuildRangeOp (1.8c), BuildAllocationOp (in AllocationTransform.cpp); p1-transforms-fam2: BuildExponentOp, BuildExponentWithLinearOp (1.8d)"
 
 [[file]]
 path = "src/OpenColorIO/OpOptimizers.cpp"
@@ -476,7 +476,7 @@ path = "src/OpenColorIO/ParseUtils.cpp"
 kind = "src"
 target = ["crates/ocio/src/parse_utils.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-gpu/src/open_color_types.rs", "crates/ocio/src/transforms/range_transform.rs"]
 status = "partial"
-note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection; 1.1a: BitDepthToString, next to BitDepth; 1.2e: LoggingLevelToString and LoggingLevelFromString, next to LoggingLevel; 1.7c: GpuLanguageToString, next to GpuLanguage; 1.3n1: AllocationToString, next to Allocation; 1.3m1: TransformDirectionToString, next to TransformDirection; p1-transforms-fam1 (1.8c): RangeStyleToString, next to RangeStyle"
+note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection; 1.1a: BitDepthToString, next to BitDepth; 1.2e: LoggingLevelToString and LoggingLevelFromString, next to LoggingLevel; 1.7c: GpuLanguageToString, next to GpuLanguage; 1.3n1: AllocationToString, next to Allocation; 1.3m1: TransformDirectionToString, next to TransformDirection; p1-transforms-fam1 (1.8c): RangeStyleToString, next to RangeStyle; p1-transforms-fam2 (1.8d): NegativeStyleToString, next to NegativeStyle"
 
 [[file]]
 path = "src/OpenColorIO/ParseUtils.h"
@@ -1159,9 +1159,9 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/ops/exponent/ExponentOp.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/exponent/exponent_op.rs", "crates/ocio-ops/src/ops/exponent/exponent_op_data.rs", "crates/ocio-ops/src/ops/exponent/exponent_op_cpu.rs", "crates/ocio-gpu/src/ops/exponent/exponent_op_gpu.rs"]
-status = "partial"
-note = "1.3e1 (p1-exponent): ExponentOpData, ExponentOpCPU, ExponentOp's behaviors (OpData::Exponent) and both CreateExponentOp; checked against the wheel through a version 1 config (exponent_oracle.rs). Its GPU part: extractGpuShaderInfo in ocio-gpu (exponent_op_gpu.rs, exponent_op_gpu_oracle.rs). Still to come: CreateExponentTransform (1.8)"
+target = ["crates/ocio-ops/src/ops/exponent/exponent_op.rs", "crates/ocio-ops/src/ops/exponent/exponent_op_data.rs", "crates/ocio-ops/src/ops/exponent/exponent_op_cpu.rs", "crates/ocio-gpu/src/ops/exponent/exponent_op_gpu.rs", "crates/ocio/src/transforms/exponent_transform.rs"]
+status = "done"
+note = "1.3e1 (p1-exponent): ExponentOpData, ExponentOpCPU, ExponentOp's behaviors (OpData::Exponent) and both CreateExponentOp; checked against the wheel through a version 1 config (exponent_oracle.rs). Its GPU part: extractGpuShaderInfo in ocio-gpu (exponent_op_gpu.rs, exponent_op_gpu_oracle.rs). p1-transforms-fam2 (1.8d): CreateExponentTransform, in crates/ocio/src/transforms/exponent_transform.rs"
 
 [[file]]
 path = "src/OpenColorIO/ops/exponent/ExponentOp.h"
@@ -1299,9 +1299,9 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOp.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/gamma/gamma_op.rs"]
+target = ["crates/ocio-ops/src/ops/gamma/gamma_op.rs", "crates/ocio/src/transforms/exponent_transform.rs", "crates/ocio/src/transforms/exponent_with_linear_transform.rs"]
 status = "partial"
-note = "1.3g3: GammaOp (the op's behaviors on OpData::Gamma) and CreateGammaOp; checked against the wheel through CPU processor cache IDs and pixels (tests/gamma_op_oracle.rs: identities, inverse pairs, compositions, optimization flags). Not yet: CreateGammaTransform, BuildExponentWithLinearOp and BuildExponentOp (the transforms, WP 1.8), extractGpuShaderInfo (1.3g4)"
+note = "1.3g3: GammaOp (the op's behaviors on OpData::Gamma) and CreateGammaOp; checked against the wheel through CPU processor cache IDs and pixels (tests/gamma_op_oracle.rs: identities, inverse pairs, compositions, optimization flags). p1-transforms-fam2 (1.8d): CreateGammaTransform and BuildExponentWithLinearOp in exponent_with_linear_transform.rs, BuildExponentOp in exponent_transform.rs. Not yet here: extractGpuShaderInfo (1.3g4)"
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOp.h"
@@ -2083,25 +2083,29 @@ status = "todo"
 path = "src/OpenColorIO/transforms/ExponentTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/exponent_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam2 (1.8d): the class and its operator<< on the shared stream (I-73); checked against the wheel in crates/ocio/tests/exponent_transform_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/transforms/ExponentTransform.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/exponent_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam2 (1.8d)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/ExponentWithLinearTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/exponent_with_linear_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam2 (1.8d): the class and its operator<< on the shared stream (I-73); checked against the wheel in crates/ocio/tests/exponent_transform_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/transforms/ExponentWithLinearTransform.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/exponent_with_linear_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam2 (1.8d)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/ExposureContrastTransform.cpp"
@@ -4148,6 +4152,7 @@ path = "tests/cpu/Config_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/config_tests.rs"]
 status = "todo"
+note = "p1-transforms-fam2 (1.8d): the setMajorVersion checks of version (2065-2067, 2104-2107), without the markers; the tests need configs read from YAML (Phase 3)"
 
 [[file]]
 path = "tests/cpu/ContextVariableUtils_tests.cpp"
@@ -4549,9 +4554,9 @@ note = "1.3c3: 9 of 10 tests; create_transform needs the CDLTransform (WP 1.8)"
 [[file]]
 path = "tests/cpu/ops/exponent/ExponentOp_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-ops/src/ops/exponent/exponent_op_tests.rs"]
-status = "partial"
-note = "1.3e1: every test but create_transform, which needs CreateExponentTransform (1.8)"
+target = ["crates/ocio-ops/src/ops/exponent/exponent_op_tests.rs", "crates/ocio/src/transforms/exponent_transform_tests.rs"]
+status = "done"
+note = "1.3e1: every test but create_transform; p1-transforms-fam2 (1.8d): create_transform, in exponent_transform_tests.rs"
 
 [[file]]
 path = "tests/cpu/ops/exposurecontrast/ExposureContrastOpCPU_tests.cpp"
@@ -4613,9 +4618,9 @@ note = "S2: both tests"
 [[file]]
 path = "tests/cpu/ops/gamma/GammaOp_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-ops/src/ops/gamma/gamma_op_tests.rs"]
-status = "partial"
-note = "1.3g3: 3 of 4 tests; create_transform needs the ExponentTransform and ExponentWithLinearTransform (WP 1.8)"
+target = ["crates/ocio-ops/src/ops/gamma/gamma_op_tests.rs", "crates/ocio/src/transforms/exponent_with_linear_transform_tests.rs"]
+status = "done"
+note = "1.3g3: 3 of 4 tests; p1-transforms-fam2 (1.8d): create_transform, in exponent_with_linear_transform_tests.rs"
 
 [[file]]
 path = "tests/cpu/ops/gradinghuecurve/GradingHueCurveOpCPU_tests.cpp"
@@ -4872,13 +4877,15 @@ status = "todo"
 path = "tests/cpu/transforms/ExponentTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/exponent_transform_tests.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam2 (1.8d)"
 
 [[file]]
 path = "tests/cpu/transforms/ExponentWithLinearTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/exponent_with_linear_transform_tests.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam2 (1.8d)"
 
 [[file]]
 path = "tests/cpu/transforms/ExposureContrastTransform_tests.cpp"
