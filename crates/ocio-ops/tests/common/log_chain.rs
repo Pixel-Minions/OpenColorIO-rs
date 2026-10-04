@@ -11,6 +11,9 @@ use ocio_ops::op::OpVec;
 use ocio_ops::open_color_types::{OptimizationFlags, TransformDirection};
 use ocio_ops::ops::log::log_op::create_log_op;
 use ocio_ops::ops::log::log_op_data::{LogAffineParameter, LogOpData};
+use ocio_ops::ops::lut1d::Lut1DOpData;
+use ocio_ops::ops::lut1d::lut1d_op::create_lut1d_op;
+use ocio_ops::ops::lut1d::lut1d_op_data::Lut3by1DArray;
 use ocio_ops::ops::matrix::MatrixOpData;
 use ocio_ops::ops::matrix::matrix_op::create_matrix_op;
 use ocio_ops::ops::range::RangeOpData;
@@ -41,6 +44,11 @@ pub(crate) enum T {
     Matrix,
     /// A `MatrixTransform` that mixes channels (red takes a tenth of green).
     CrossMatrix,
+    /// A clamping `RangeTransform` from 0 to 1 on both sides: an identity clamp at integer bit
+    /// depths, which `optimizeForBitdepth` removes at either end.
+    Range01,
+    /// A forward `Lut1DTransform` of 256 entries, which an 8-bit input looks up.
+    Lut8,
 }
 
 const SETTERS: [(&str, LogAffineParameter); 4] = [
@@ -62,6 +70,27 @@ const CROSS: [f64; 16] = [
 ];
 /// The bounds of [`T::Range`].
 const RANGE: [f64; 4] = [0.25, 2.0, 0.25, 2.0];
+/// The bounds of [`T::Range01`].
+const RANGE01: [f64; 4] = [0.0, 1.0, 0.0, 1.0];
+
+/// The entries of [`T::Lut8`] for the identity entry `x`.
+fn lut8_entry(x: f32) -> [f32; 3] {
+    [x * x, 1.0 - x, x * 0.5 + 0.25]
+}
+
+/// The entries of [`T::Lut8`]: `setLength(256)` makes the identity, then `setValue` sets each
+/// entry (src/OpenColorIO/transforms/Lut1DTransform.cpp @ v2.5.2).
+fn lut8_data() -> Lut1DOpData {
+    let mut data = Lut1DOpData::new(2).unwrap();
+    *data.get_array_mut() = Lut3by1DArray::new(data.get_half_flags(), 3, 256, false).unwrap();
+    for i in 0..256 {
+        let rgb = lut8_entry(data.get_array()[3 * i]);
+        for (c, v) in rgb.into_iter().enumerate() {
+            data.get_array_mut()[3 * i + c] = v;
+        }
+    }
+    data
+}
 
 fn dir_enum(dir: TransformDirection) -> Value {
     match dir {
@@ -105,6 +134,21 @@ pub(crate) fn transform(t: &T) -> Value {
         T::CrossMatrix => {
             return json!({"class": "MatrixTransform", "args": {"matrix": CROSS.to_vec()}});
         }
+        T::Range01 => {
+            return json!({"class": "RangeTransform", "args": {
+                "minInValue": RANGE01[0], "maxInValue": RANGE01[1],
+                "minOutValue": RANGE01[2], "maxOutValue": RANGE01[3],
+            }});
+        }
+        T::Lut8 => {
+            let lut = lut8_data();
+            let mut calls = vec![json!(["setLength", 256])];
+            for i in 0..256 {
+                let a = lut.get_array();
+                calls.push(json!(["setValue", i, a[3 * i], a[3 * i + 1], a[3 * i + 2]]));
+            }
+            return json!({"class": "Lut1DTransform", "args": {}, "calls": calls});
+        }
     };
     if let T::Camera(_, _, _, Some(slope), _) = t {
         calls.push(json!(["setLinearSlopeValue", slope]));
@@ -125,7 +169,7 @@ fn port_log_data(t: &T) -> LogOpData {
                 .unwrap();
             (*base, Some(p), *dir)
         }
-        T::Range | T::Matrix | T::CrossMatrix => unreachable!("a log"),
+        T::Range | T::Range01 | T::Matrix | T::CrossMatrix | T::Lut8 => unreachable!("a log"),
     };
     data.set_base(base);
     if let Some(params) = params {
@@ -185,6 +229,18 @@ pub(crate) fn port_raw_ops(chain: &[T]) -> Result<OpVec> {
                 data.validate()?;
                 create_matrix_op(&mut raw, data, F);
             }
+            T::Range01 => {
+                let data =
+                    RangeOpData::with_values(RANGE01[0], RANGE01[1], RANGE01[2], RANGE01[3])?;
+                create_range_op(&mut raw, data, F)?;
+            }
+            T::Lut8 => {
+                // `BuildLut1DOp`: validated, then copied (src/OpenColorIO/ops/lut1d/Lut1DOp.cpp:
+                // 244-253 @ v2.5.2).
+                let data = lut8_data();
+                data.validate()?;
+                create_lut1d_op(&mut raw, data, F);
+            }
             log => {
                 // `BuildLogOp`: the transform's data, validated, then copied
                 // (LogOp.cpp:185-216).
@@ -219,7 +275,7 @@ pub(crate) fn staged_port_processor(
             T::Log(..) => "LogTransform validation failed: ",
             T::Affine(..) => "LogAffineTransform validation failed: ",
             T::Camera(..) => "LogCameraTransform validation failed: ",
-            T::Range | T::Matrix | T::CrossMatrix => continue,
+            T::Range | T::Range01 | T::Matrix | T::CrossMatrix | T::Lut8 => continue,
         };
         let data = port_log_data(t);
         let mut valid = data.validate();
