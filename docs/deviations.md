@@ -10,7 +10,7 @@ port and listed here. Upstream bugs that do affect outputs are copied, and liste
 
 **General rule (approved by the owner in chat, 2026-09-30):** where upstream reads or writes
 memory it doesn't own (a crash, or corrupted data), the port returns an error instead. Each
-case is a `U-` entry in `docs/improvements.md`, where an entry can make an exception (U-1).
+case is a `U-` entry in `docs/improvements.md`, where an entry can make an exception.
 The first case is D-2: image layouts that reach outside their buffer.
 
 | Id | Upstream behavior | Port behavior | Affects outputs? | Approved |

@@ -263,10 +263,12 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   to 16 bits between a Windows and a Linux machine.
 - **A fix:** one math library on every platform, which changes the port's results on at least
   one of them.
-- **Status:** to be matched in Phase 2, with the Lut1D bakes and the ACES 2 tables (D12: the
-  port calls the platform's functions, as OCIO does). The review suspects these values may also
-  depend on the CPU (SIMD renderers, glibc's ifunc variants). If so, their checks belong in
-  `cpu-tests`.
+- **Status:** the bake is matched in `p1-optimizer` (D, `OptimizeSeparablePrefix`): it renders the
+  prefix with each op's renderer and the platform's math library, and
+  `tests/lut1d_bake_oracle.rs` compares the baked LUTs with each platform's wheel, entry for
+  entry. The ACES 2 tables are to be matched in Phase 2 (D12: the port calls the platform's
+  functions, as OCIO does). The values may also depend on the CPU (SIMD renderers, glibc's
+  ifunc variants), so their checks belong in `cpu-tests` (the bake's are there).
 
 ## Ops
 
