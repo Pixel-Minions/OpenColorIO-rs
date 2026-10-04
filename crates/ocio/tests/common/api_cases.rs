@@ -12,9 +12,10 @@
 //! src/OpenColorIO/Processor.cpp:623-641 @ v2.5.2), and NaN and infinite parameters take the
 //! same route as finite ones.
 
-use ocio_testkit::battery::params::{Case, RGB};
+use ocio_testkit::battery::Direction;
+use ocio_testkit::battery::params::{B, Case, G, R, RGB};
 
-use super::api::Calls;
+use super::api::{Arg, Calls};
 
 /// A family's cases: the explicit ones, and the mutation bases among them.
 pub(crate) struct Cases {
@@ -280,4 +281,732 @@ pub(crate) fn cdl() -> Cases {
         cases.push(Case::new(label, c).w0002_nowhere());
     }
     Cases { cases, bases }
+}
+
+/// A `LogTransform` of this base.
+pub(crate) fn log_calls(base: f64) -> Calls {
+    Calls::new("LogTransform").scalar("setBase", base, RGB)
+}
+
+/// `LogTransform`: the cases of `crates/ocio-ops/tests/log_oracle.rs`.
+pub(crate) fn log() -> Cases {
+    // 2 and 10 are the Log2/Log10 renderers; others use LinToLog and LogToLin.
+    let mut cases: Vec<Case<Calls>> = [2.0, 10.0, std::f64::consts::E, 3.7, 0.5]
+        .map(|base| Case::new(format!("base {base}"), log_calls(base)))
+        .to_vec();
+    let bases = vec![cases[3].clone()];
+    cases.push(Case::new("base NaN", log_calls(f64::NAN)).w0002_nowhere());
+    for base in [1.0, 0.0, -2.5, f64::NEG_INFINITY] {
+        cases.push(Case::new(format!("refused base {base}"), log_calls(base)));
+    }
+    Cases { cases, bases }
+}
+
+/// The parameters of a `LogAffineTransform` or a `LogCameraTransform`: the base, then
+/// `[logSideSlope, logSideOffset, linSideSlope, linSideOffset]`.
+type Affine = (f64, [[f64; 3]; 4]);
+
+/// A labelled `LogCameraTransform`: the break, the base and affine parameters, the linear slope.
+type CameraCase = (&'static str, [f64; 3], Affine, Option<[f64; 3]>);
+
+/// The setters of the affine parameters, in [`Affine`]'s order.
+const AFFINE_SETTERS: [&str; 4] = [
+    "setLogSideSlopeValue",
+    "setLogSideOffsetValue",
+    "setLinSideSlopeValue",
+    "setLinSideOffsetValue",
+];
+
+/// The base and the affine parameters, set on `calls`.
+fn affine_setters(mut calls: Calls, (base, params): Affine) -> Calls {
+    calls = calls.scalar("setBase", base, RGB);
+    for (setter, values) in AFFINE_SETTERS.iter().zip(params) {
+        calls = calls.rgb(setter, values);
+    }
+    calls
+}
+
+/// A `LogAffineTransform`.
+pub(crate) fn log_affine_calls(p: Affine) -> Calls {
+    affine_setters(Calls::new("LogAffineTransform"), p)
+}
+
+/// `LogAffineTransform`: the cases of `crates/ocio-ops/tests/log_oracle.rs`, its extreme
+/// finite and NaN cases included.
+pub(crate) fn log_affine() -> Cases {
+    let typical: [Affine; 6] = [
+        // Different parameters per channel.
+        (
+            10.0,
+            [
+                [0.18, 0.5, 1.7],
+                [0.4, -0.1, 0.0],
+                [1.5, 0.9, 2.2],
+                [0.01, 0.2, -0.05],
+            ],
+        ),
+        // Cineon-like, base 10.
+        (
+            10.0,
+            [[0.293255132; 3], [0.669599218; 3], [0.9892; 3], [0.0108; 3]],
+        ),
+        // Base e and base 2 with non-default parameters.
+        (
+            std::f64::consts::E,
+            [[0.25, 0.3, 0.35], [0.5; 3], [4.0, 5.0, 6.0], [0.1; 3]],
+        ),
+        (2.0, [[0.05; 3], [0.6; 3], [1.0; 3], [0.0078125; 3]]),
+        // Default parameters: plain Log2 and Log10 ops.
+        (2.0, [[1.0; 3], [0.0; 3], [1.0; 3], [0.0; 3]]),
+        (10.0, [[1.0; 3], [0.0; 3], [1.0; 3], [0.0; 3]]),
+    ];
+    let mut cases: Vec<Case<Calls>> = typical
+        .iter()
+        .enumerate()
+        .map(|(i, &p)| Case::new(format!("case {i}"), log_affine_calls(p)))
+        .collect();
+    let bases = vec![cases[0].clone()];
+    let base = typical[0];
+    let refused = |label: &str, change: &dyn Fn(&mut Affine)| {
+        let mut p = base;
+        change(&mut p);
+        Case::new(format!("refused: {label}"), log_affine_calls(p))
+    };
+    cases.extend([
+        refused("green lin side slope 0", &|p| p.1[2][1] = 0.0),
+        refused("red log side slope -0", &|p| p.1[0][0] = -0.0),
+        refused("blue slopes 0, green log side slope 0", &|p| {
+            p.1[2][2] = 0.0;
+            p.1[0] = [1.0, 0.0, 0.0];
+        }),
+        refused("base 1, tiny lin side slope", &|p| {
+            p.0 = 1.0;
+            p.1[2][0] = 1e-300;
+        }),
+        refused("base 0", &|p| p.0 = 0.0),
+        refused("lin side slope 0, infinite offset", &|p| {
+            p.1[2][0] = 0.0;
+            p.1[1][2] = f64::INFINITY;
+        }),
+        refused("base -inf", &|p| p.0 = f64::NEG_INFINITY),
+    ]);
+    // Finite parameters that overflow `float`.
+    let extreme: [Affine; 3] = [
+        (
+            1e39,
+            [
+                [1e39, 0.5, -1e39],
+                [0.1, 0.2, 0.3],
+                [1.0; 3],
+                [0.01, 0.02, 0.03],
+            ],
+        ),
+        (
+            1e-46,
+            [
+                [1e39, 0.5, -1e39],
+                [0.1, 0.2, 0.3],
+                [1.0; 3],
+                [0.01, 0.02, 0.03],
+            ],
+        ),
+        (
+            10.0,
+            [
+                [0.3; 3],
+                [1e39, -1e39, 0.3],
+                [1e39, -1e39, 1.0],
+                [-1e39, 1e39, 0.03],
+            ],
+        ),
+    ];
+    for (i, p) in extreme.into_iter().enumerate() {
+        cases.push(Case::new(format!("extreme {i}"), log_affine_calls(p)));
+    }
+    // NaN parameters: under W0002 only where MSVC swapped the operands of `Log2LinRenderer`
+    // (inverse, fast math off; `crates/ocio-ops/tests/log_oracle.rs`), bit for bit elsewhere.
+    let nan = f64::NAN;
+    cases.push(
+        Case::new(
+            "NaN parameters",
+            log_affine_calls((
+                10.0,
+                [
+                    [nan, 0.5, 1.0],
+                    [0.1, nan, 0.2],
+                    [1.0, 1.0, nan],
+                    [nan, 0.01, 0.1],
+                ],
+            )),
+        )
+        .w0002_only_where(|c| c.direction == Direction::Inverse && !c.fast_math),
+    );
+    cases.push(
+        Case::new(
+            "NaN base",
+            log_affine_calls((nan, [[0.3, 0.5, 1.0], [0.1, 0.2, 0.3], [1.0; 3], [0.0; 3]])),
+        )
+        .w0002_nowhere(),
+    );
+    Cases { cases, bases }
+}
+
+/// A `LogCameraTransform`: the break, the base and the affine parameters, and the linear
+/// slope when set.
+pub(crate) fn log_camera_calls(brk: [f64; 3], p: Affine, linear_slope: Option<[f64; 3]>) -> Calls {
+    let calls = affine_setters(
+        Calls::new("LogCameraTransform").arg_rgb("linSideBreak", brk),
+        p,
+    );
+    match linear_slope {
+        Some(slope) => calls.rgb("setLinearSlopeValue", slope),
+        None => calls,
+    }
+}
+
+/// `LogCameraTransform`: the cases of `crates/ocio-ops/tests/log_oracle.rs`, its extreme
+/// finite and NaN cases included.
+pub(crate) fn log_camera() -> Cases {
+    let logc3: Affine = (
+        10.0,
+        [[0.247190; 3], [0.385537; 3], [5.555556; 3], [0.052272; 3]],
+    );
+    let rgb: Affine = (
+        2.0,
+        [
+            [0.2, 0.25, 0.18],
+            [0.6, 0.55, 0.62],
+            [1.1, 1.3, 0.9],
+            [0.05, 0.02, 0.1],
+        ],
+    );
+    let rgb10: Affine = (
+        10.0,
+        [
+            [0.24719; 3],
+            [0.385537, 0.6, 0.0],
+            [5.555556, 1.0, 1.0],
+            [0.05, 0.05, 0.0],
+        ],
+    );
+    let mut cases = vec![
+        Case::new(
+            "LogC3 EI800, computed linear slope",
+            log_camera_calls([0.010591; 3], logc3, None),
+        ),
+        Case::new(
+            "LogC3 EI800",
+            log_camera_calls([0.010591; 3], logc3, Some([5.367655; 3])),
+        ),
+        Case::new(
+            "per channel, computed linear slope",
+            log_camera_calls([0.1, 0.05, 0.2], rgb, None),
+        ),
+        Case::new(
+            "per channel",
+            log_camera_calls([0.1, 0.05, 0.2], rgb, Some([1.2, 1.4, 0.95])),
+        ),
+        Case::new(
+            "per channel, base 10, computed linear slope",
+            log_camera_calls([0.010591; 3], rgb10, None),
+        ),
+        Case::new(
+            "per channel, base 10",
+            log_camera_calls([0.010591; 3], rgb10, Some([5.367655, 1.1, 0.9])),
+        ),
+        Case::new(
+            "base e",
+            log_camera_calls(
+                [0.18, 0.02, 0.3],
+                (
+                    std::f64::consts::E,
+                    [
+                        [0.3, 0.3, 0.3],
+                        [0.5, 0.45, 0.55],
+                        [3.0, 2.5, 4.0],
+                        [0.01, 0.03, 0.005],
+                    ],
+                ),
+                None,
+            ),
+        ),
+        Case::new(
+            "negative break",
+            log_camera_calls(
+                [-0.05, -0.1, -0.2],
+                (2.0, [[1.0; 3], [0.0; 3], [1.0; 3], [0.0; 3]]),
+                None,
+            ),
+        ),
+    ];
+    let bases = vec![cases[3].clone()];
+    let refused = |label: &str, brk: [f64; 3], p: Affine| {
+        Case::new(
+            format!("refused: {label}"),
+            log_camera_calls(brk, p, Some([1.2, 1.4, 0.95])),
+        )
+    };
+    let with = |change: &dyn Fn(&mut Affine)| {
+        let mut p = rgb;
+        change(&mut p);
+        p
+    };
+    cases.extend([
+        refused(
+            "blue lin side slope 0",
+            [0.1, 0.05, 0.2],
+            with(&|p| p.1[2][2] = 0.0),
+        ),
+        refused(
+            "green log side slope 0",
+            [0.1, 0.05, 0.2],
+            with(&|p| p.1[0][1] = 0.0),
+        ),
+        refused("base -2", [0.1, 0.05, 0.2], with(&|p| p.0 = -2.0)),
+        refused(
+            "log side slope 0, infinite break",
+            [0.1, f64::INFINITY, 0.2],
+            with(&|p| p.1[0][0] = 0.0),
+        ),
+    ]);
+    // Finite parameters that overflow `float` or `double`.
+    let extreme: [CameraCase; 7] = [
+        (
+            "base 1e39, log slope 1e39, negative break",
+            [-0.05, -0.1, -0.2],
+            (1e39, [[1e39; 3], [0.0; 3], [1.0; 3], [0.0; 3]]),
+            None,
+        ),
+        (
+            "base 1e39, log slope 1e39, positive break",
+            [0.1, 0.2, 0.3],
+            (1e39, [[1e39; 3], [0.5; 3], [1.0; 3], [0.01; 3]]),
+            None,
+        ),
+        (
+            "base 1e-46, log slope -1e39, negative break",
+            [-0.05, -0.1, -0.2],
+            (1e-46, [[-1e39; 3], [0.0; 3], [1.0; 3], [0.0; 3]]),
+            None,
+        ),
+        (
+            "overflowing computed slope",
+            [1e200, 1e200, 0.1],
+            (
+                10.0,
+                [[1e200, 1e200, 0.3], [0.5; 3], [1e200, 1e200, 1.0], [0.0; 3]],
+            ),
+            None,
+        ),
+        (
+            "linear slope 1e39, zero break",
+            [0.0; 3],
+            (2.0, [[0.25; 3], [0.5; 3], [1.0; 3], [0.0; 3]]),
+            Some([1e39, -1e39, 1e39]),
+        ),
+        (
+            "negative lin side to -inf",
+            [-1e300, -0.1, 0.1],
+            (
+                2.0,
+                [[1e39, 1.0, 1.0], [0.0; 3], [1e10, 1.0, 1.0], [0.0; 3]],
+            ),
+            None,
+        ),
+        (
+            "overflowing lin side, finite break",
+            [-2.0; 3],
+            (2.0, [[2.0; 3], [0.0; 3], [1.7e308; 3], [0.0; 3]]),
+            None,
+        ),
+    ];
+    for (label, brk, p, slope) in extreme {
+        cases.push(Case::new(label, log_camera_calls(brk, p, slope)));
+    }
+    let nan = f64::NAN;
+    cases.push(
+        Case::new(
+            "NaN parameters",
+            log_camera_calls(
+                [0.1, nan, 0.2],
+                (
+                    2.0,
+                    [
+                        [0.25, 0.3, nan],
+                        [0.5, nan, 0.6],
+                        [1.0; 3],
+                        [nan, 0.02, 0.01],
+                    ],
+                ),
+                Some([1.2, 1.0, nan]),
+            ),
+        )
+        .w0002_nowhere(),
+    );
+    Cases { cases, bases }
+}
+
+/// An `ExponentTransform` with this value and negative style.
+pub(crate) fn exponent_calls(value: [f64; 4], style: &str) -> Calls {
+    Calls::new("ExponentTransform")
+        .rgba("setValue", value)
+        .enumerated("setNegativeStyle", style)
+}
+
+/// `ExponentTransform` in the raw config, a version 2 config, where it builds a Gamma op: the
+/// cases of `crates/ocio-ops/tests/gamma_oracle.rs`.
+pub(crate) fn exponent() -> Cases {
+    let values: [[f64; 4]; 3] = [
+        [1.0, 2.2, 0.45, 2.6],
+        [2.4, 1.0, 1.8, 0.5],
+        [0.01, 100.0, 1.0, 3.3],
+    ];
+    let mut cases = Vec::new();
+    let mut bases = Vec::new();
+    for style in ["NEGATIVE_CLAMP", "NEGATIVE_MIRROR", "NEGATIVE_PASS_THRU"] {
+        for value in values {
+            cases.push(Case::new(
+                format!("{value:?} {style}"),
+                exponent_calls(value, style),
+            ));
+        }
+        bases.push(cases[cases.len() - 3].clone());
+    }
+    for value in [
+        [2.2, 0.006, 1.0, 1.0],
+        [2.2, 2.2, 1.0, 110.0],
+        [f64::INFINITY, 2.2, 1.0, 1.0],
+    ] {
+        cases.push(Case::new(
+            format!("refused {value:?}"),
+            exponent_calls(value, "NEGATIVE_MIRROR"),
+        ));
+    }
+    for style in ["NEGATIVE_CLAMP", "NEGATIVE_MIRROR", "NEGATIVE_PASS_THRU"] {
+        cases.push(
+            Case::new(
+                format!("NaN value {style}"),
+                exponent_calls([2.2, f64::NAN, 1.8, 1.0], style),
+            )
+            .w0002_nowhere(),
+        );
+    }
+    Cases { cases, bases }
+}
+
+/// An `ExponentWithLinearTransform` with this gamma, offset and negative style.
+pub(crate) fn exponent_with_linear_calls(gamma: [f64; 4], offset: [f64; 4], style: &str) -> Calls {
+    Calls::new("ExponentWithLinearTransform")
+        .rgba("setGamma", gamma)
+        .rgba("setOffset", offset)
+        .enumerated("setNegativeStyle", style)
+}
+
+/// `ExponentWithLinearTransform`: the cases of `crates/ocio-ops/tests/gamma_oracle.rs`.
+pub(crate) fn exponent_with_linear() -> Cases {
+    let params: [([f64; 4], [f64; 4]); 3] = [
+        ([2.4, 2.2, 1.0, 1.8], [0.055, 0.2, 0.0, 0.6]),
+        ([2.4, 1.0 / 0.45, 3.0, 10.0], [0.055, 0.099, 0.16, 0.9]),
+        ([1.0, 1.5, 7.5, 2.0], [0.5, 0.0, 0.001, 0.4]),
+    ];
+    let mut cases = Vec::new();
+    let mut bases = Vec::new();
+    for style in ["NEGATIVE_LINEAR", "NEGATIVE_MIRROR"] {
+        for (gamma, offset) in params {
+            cases.push(Case::new(
+                format!("{gamma:?} {offset:?} {style}"),
+                exponent_with_linear_calls(gamma, offset, style),
+            ));
+        }
+        bases.push(cases[cases.len() - 3].clone());
+    }
+    for (gamma, offset) in [
+        ([2.4, 0.5, 2.2, 1.8], [0.055, 0.1, 0.1, 0.1]),
+        ([2.4, 2.2, 2.2, 1.8], [0.055, 0.1, 0.1, 1.0]),
+        ([2.4, 2.2, 2.2, 1.8], [0.055, f64::NEG_INFINITY, 0.1, 0.1]),
+        ([2.4, f64::INFINITY, 2.2, 1.8], [0.055, 0.1, 0.1, 0.1]),
+    ] {
+        cases.push(Case::new(
+            format!("refused {gamma:?} {offset:?}"),
+            exponent_with_linear_calls(gamma, offset, "NEGATIVE_LINEAR"),
+        ));
+    }
+    // NaN gamma and offset (`crates/ocio-ops/tests/gamma_oracle.rs`): the linear style under
+    // W0002 only forward with fast math off, the mirror style bit for bit.
+    let nan = f64::NAN;
+    let (gamma, offset) = ([2.4, nan, 2.2, 1.8], [0.055, 0.1, nan, 0.2]);
+    cases.push(
+        Case::new(
+            "NaN gamma and offset Linear",
+            exponent_with_linear_calls(gamma, offset, "NEGATIVE_LINEAR"),
+        )
+        .w0002_only_where(|c| c.direction == Direction::Forward && !c.fast_math),
+    );
+    cases.push(
+        Case::new(
+            "NaN gamma and offset Mirror",
+            exponent_with_linear_calls(gamma, offset, "NEGATIVE_MIRROR"),
+        )
+        .w0002_nowhere(),
+    );
+    Cases { cases, bases }
+}
+
+/// An `AllocationTransform` of `allocation` (`ALLOCATION_*`) with these variables, if any.
+pub(crate) fn allocation_calls(allocation: &str, vars: &[f64]) -> Calls {
+    let calls = Calls::new("AllocationTransform")
+        .f32()
+        .enumerated("setAllocation", allocation);
+    if vars.is_empty() {
+        calls
+    } else {
+        calls.list("setVars", vars, RGB)
+    }
+}
+
+/// `AllocationTransform`: the default, uniform and log2 allocations with the default
+/// variables, upstream's (tests/cpu/ops/allocation/AllocationOp_tests.cpp @ v2.5.2: 0 to 10,
+/// 0 to 1), those of `crates/ocio/tests/allocation_transform_oracle.rs`, and an unknown
+/// allocation, which is refused.
+pub(crate) fn allocation() -> Cases {
+    let mut cases = vec![Case::new(
+        "the default",
+        Calls::new("AllocationTransform").f32(),
+    )];
+    let mut bases = Vec::new();
+    for allocation in ["ALLOCATION_UNIFORM", "ALLOCATION_LG2"] {
+        let list: [&[f64]; 6] = [
+            &[],
+            &[0.0, 10.0],
+            &[0.0, 1.0],
+            &[-8.0, 8.0],
+            &[-10.0, 6.0, 0.0001],
+            &[0.0, 0.0],
+        ];
+        for vars in list {
+            cases.push(Case::new(
+                format!("{allocation} {vars:?}"),
+                allocation_calls(allocation, vars),
+            ));
+        }
+        bases.push(cases[cases.len() - 2].clone());
+    }
+    cases.push(Case::new(
+        "refused unknown",
+        allocation_calls("ALLOCATION_UNKNOWN", &[0.0, 1.0]),
+    ));
+    Cases { cases, bases }
+}
+
+/// `GroupTransform`: lists of the other classes that the optimizer combines, replaces or
+/// removes, and nested groups in either direction. The bases are a list of three classes and a
+/// pair of matrices, which the optimizer combines.
+pub(crate) fn group() -> Cases {
+    let inverse = Direction::Inverse;
+    let group = || Calls::new("GroupTransform");
+    let log_matrix_range = group()
+        .child(log_calls(2.0))
+        .child(matrix_calls(
+            diagonal([2.0, 0.5, 4.0, 1.0]),
+            [0.1, 0.0, -0.1, 0.0],
+        ))
+        .child(range_calls([0.0, 2.0, 0.0, 1.0], true));
+    let two_matrices = group()
+        .child(matrix_calls(
+            [
+                0.9, 0.8, -0.7, 0.0, -0.4, 0.5, 0.3, 0.0, 0.1, -0.2, 0.4, 0.0, 0.0, 0.0, 0.0, 1.0,
+            ],
+            [0.1, 0.2, 0.3, 0.0],
+        ))
+        .child(matrix_calls(
+            diagonal([1.5, 2.0, 0.25, 1.0]),
+            [0.0, -0.5, 0.5, 0.0],
+        ));
+    let affine: Affine = (
+        10.0,
+        [
+            [0.18, 0.5, 1.7],
+            [0.4, -0.1, 0.0],
+            [1.5, 0.9, 2.2],
+            [0.01, 0.2, -0.05],
+        ],
+    );
+    let cdl = cdl_calls(
+        [1.35, 1.1, 0.071],
+        [0.05, -0.23, 0.11],
+        [0.93, 0.81, 1.27],
+        1.23,
+        true,
+    );
+    let exponent = exponent_calls([2.2, 2.4, 1.8, 1.0], "NEGATIVE_CLAMP");
+    let bases = vec![
+        Case::new("log, matrix, range", log_matrix_range.clone()),
+        Case::new("two matrices", two_matrices.clone()),
+    ];
+    let mut cases = bases.clone();
+    cases.extend([
+        Case::new("empty", group()),
+        Case::new(
+            "a log and its inverse",
+            group()
+                .child(log_calls(10.0))
+                .child_in(log_calls(10.0), inverse),
+        ),
+        Case::new(
+            "an affine log and its inverse",
+            group()
+                .child_in(log_affine_calls(affine), inverse)
+                .child(log_affine_calls(affine)),
+        ),
+        Case::new(
+            "an exponent and its inverse",
+            group()
+                .child(exponent.clone())
+                .child_in(exponent.clone(), inverse),
+        ),
+        Case::new(
+            "two exponents",
+            group()
+                .child(exponent)
+                .child(exponent_calls([0.5, 1.25, 2.0, 1.0], "NEGATIVE_CLAMP")),
+        ),
+        Case::new(
+            "a CDL and its inverse",
+            group().child(cdl.clone()).child_in(cdl.clone(), inverse),
+        ),
+        Case::new(
+            "two ranges",
+            group()
+                .child(range_calls([0.0, 1.0, 0.25, 1.5], true))
+                .child(range_calls([0.5, 1.0, 0.0, 2.0], true)),
+        ),
+        Case::new(
+            "inverse nested",
+            group().child_in(log_matrix_range, inverse).child(
+                group()
+                    .child(allocation_calls("ALLOCATION_LG2", &[-8.0, 5.0, 0.002]))
+                    .child_in(
+                        exponent_with_linear_calls(
+                            [2.4, 2.2, 1.0, 1.8],
+                            [0.055, 0.2, 0.0, 0.6],
+                            "NEGATIVE_LINEAR",
+                        ),
+                        inverse,
+                    ),
+            ),
+        ),
+        Case::new(
+            "camera log, CDL, matrices",
+            group()
+                .child(log_camera_calls(
+                    [0.010591; 3],
+                    (
+                        10.0,
+                        [[0.247190; 3], [0.385537; 3], [5.555556; 3], [0.052272; 3]],
+                    ),
+                    None,
+                ))
+                .child(cdl)
+                .child(two_matrices.clone())
+                .child_in(two_matrices, inverse),
+        ),
+        Case::new(
+            "uniform allocations",
+            group()
+                .child(allocation_calls("ALLOCATION_UNIFORM", &[-0.125, 1.125]))
+                .child_in(
+                    allocation_calls("ALLOCATION_UNIFORM", &[-0.125, 1.125]),
+                    inverse,
+                ),
+        ),
+        Case::new(
+            "a NaN in a matrix pair",
+            group()
+                .child(matrix_calls(diagonal([2.0, f64::NAN, 0.5, 1.0]), [0.0; 4]))
+                .child(matrix_calls(diagonal([0.5, 2.0, 2.0, 1.0]), [0.1; 4])),
+        ),
+    ]);
+    Cases { cases, bases }
+}
+
+/// `ExponentTransform` in a version 1 config, where it builds an Exponent op
+/// (`BuildExponentOp`, src/OpenColorIO/ops/gamma/GammaOp.cpp:190-215 @ v2.5.2): the cases of
+/// `crates/ocio-ops/tests/exponent_oracle.rs`. Through `getProcessor(transform)` the transform
+/// is validated first, so the values outside the Gamma op's bounds are refused there.
+pub(crate) fn exponent_v1() -> Cases {
+    let case = |label: &str, value: [f64; 4]| {
+        Case::new(
+            label,
+            Calls::new("ExponentTransform").rgba("setValue", value),
+        )
+    };
+    let mut cases = vec![
+        case("value", [1.2, 1.3, 1.4, 1.5]),
+        case("value_limits", [0.0, 2.0, -2.0, 1.5]),
+        case("combining 1", [2.0, 2.0, 2.0, 1.0]),
+        case("combining 2", [1.2, 1.2, 1.2, 1.0]),
+        case("combining 3", [1.037289, 1.019015, 0.966082, 1.0]),
+        case("cache_id 1", [2.0, 2.1, 3.0, 3.1]),
+        case("identity", [1.0, 1.0, 1.0, 1.0]),
+        case("near identity", [1.0000002, 1.0, 1.0, 1.0]),
+    ];
+    let bases = vec![cases[0].clone()];
+    cases.push(case("NaN", [f64::NAN, 2.0, 2.0, 1.0]).w0002_nowhere());
+    Cases { cases, bases }
+}
+
+/// A `Lut1DTransform` of `length` entries, `f(i)` for entry `i`, in R, G and B.
+pub(crate) fn lut1d_calls(length: u64, f: impl Fn(u64) -> [f32; 3]) -> Calls {
+    let mut calls = Calls::new("Lut1DTransform").fixed("setLength", serde_json::json!(length));
+    for i in 0..length {
+        let [r, g, b] = f(i).map(f64::from);
+        calls = calls.call(
+            "setValue",
+            vec![
+                Arg::Fixed(serde_json::json!(i)),
+                Arg::Num(r, R),
+                Arg::Num(g, G),
+                Arg::Num(b, B),
+            ],
+        );
+    }
+    calls
+}
+
+/// `Lut1DTransform`: curves of 256 entries (the length an 8-bit input looks up without
+/// resampling), 65 and 1024 entries, nearest and linear interpolation, an output beyond [0, 1]
+/// and a decreasing one. Phase 1 has the lookups of integer and half input to float only: the
+/// float renderers, composing LUTs, the inverse LUT and the hue adjustment are Phase 2's (WP
+/// 2.1, 2.5), and the tests list the port's "not ported yet" refusals as deferrals.
+pub(crate) fn lut1d() -> Cases {
+    let curve = |n: u64| {
+        move |i: u64| {
+            let x = i as f32 / (n - 1) as f32;
+            [x * x, x.sqrt(), 0.25 + 0.5 * x]
+        }
+    };
+    let cases = vec![
+        Case::new("256 entries", lut1d_calls(256, curve(256))),
+        Case::new("65 entries", lut1d_calls(65, curve(65))),
+        Case::new("1024 entries", lut1d_calls(1024, curve(1024))),
+        Case::new(
+            "256 entries, nearest",
+            lut1d_calls(256, curve(256)).enumerated("setInterpolation", "INTERP_NEAREST"),
+        ),
+        Case::new(
+            "256 entries, wide and decreasing",
+            lut1d_calls(256, |i| {
+                let x = i as f32 / 255.0;
+                [2.0 - 3.0 * x, -0.5 + 2.0 * x, 1.0 - x]
+            }),
+        ),
+        Case::new(
+            "256 entries, hue adjust",
+            lut1d_calls(256, curve(256)).enumerated("setHueAdjust", "HUE_DW3"),
+        ),
+    ];
+    Cases {
+        cases,
+        bases: Vec::new(),
+    }
 }

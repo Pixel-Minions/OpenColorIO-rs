@@ -124,3 +124,50 @@ fn range_transform_through_the_api_matches_the_wheel() {
 fn cdl_transform_through_the_api_matches_the_wheel() {
     battery::run(&ApiFamily::new("CDLTransform", api_cases::cdl()));
 }
+
+#[test]
+fn log_transform_through_the_api_matches_the_wheel() {
+    battery::run(&ApiFamily::new("LogTransform", api_cases::log()));
+}
+
+#[test]
+fn log_affine_transform_through_the_api_matches_the_wheel() {
+    battery::run(&ApiFamily::new(
+        "LogAffineTransform",
+        api_cases::log_affine(),
+    ));
+}
+
+#[test]
+fn log_camera_transform_through_the_api_matches_the_wheel() {
+    battery::run(&ApiFamily::new(
+        "LogCameraTransform",
+        api_cases::log_camera(),
+    ));
+}
+
+#[test]
+fn exponent_transform_through_the_api_matches_the_wheel() {
+    battery::run(&ApiFamily::new("ExponentTransform", api_cases::exponent()));
+}
+
+#[test]
+fn exponent_with_linear_transform_through_the_api_matches_the_wheel() {
+    battery::run(&ApiFamily::new(
+        "ExponentWithLinearTransform",
+        api_cases::exponent_with_linear(),
+    ));
+}
+
+#[test]
+fn allocation_transform_through_the_api_matches_the_wheel() {
+    battery::run(&ApiFamily::new(
+        "AllocationTransform",
+        api_cases::allocation(),
+    ));
+}
+
+#[test]
+fn group_transform_through_the_api_matches_the_wheel() {
+    battery::run(&ApiFamily::new("GroupTransform", api_cases::group()));
+}
