@@ -201,3 +201,44 @@ fn in_place_codes_at_the_table_boundary() {
         cpu.apply_rgb(&mut rgb).unwrap_err();
     }
 }
+
+/// U-1 through the scanline helper's second packed path, where the destination isn't packed
+/// RGBA F32 (src/OpenColorIO/ScanlineHelper.cpp @ v2.5.2, the `m_rgbaFloatBuffer` branch): a
+/// 1x1 packed RGBA 10-bit image with green 2000, to a 16-bit image, and in place through a
+/// 10-bit to 10-bit processor. Both are U-1's error.
+#[test]
+fn codes_past_the_table_through_the_float_buffer_are_errors() {
+    use crate::cpu_processor::CpuProcessor;
+    use crate::image_desc::{AUTO_STRIDE, PackedImageDesc};
+    use crate::op::OpVec;
+    use crate::open_color_types::OptimizationFlags;
+    use crate::ops::lut1d::lut1d_op::create_lut1d_op;
+
+    let message = "Lut1D: a 10ui value above 1023 can't be looked up: upstream reads past the 1D \
+                   LUT's 1024 entries.";
+    let processor = |out: BitDepth| {
+        let lut = Lut1DOpData::make_lookup_domain(BitDepth::Uint10).unwrap();
+        let mut ops = OpVec::new();
+        create_lut1d_op(&mut ops, lut, TransformDirection::Forward);
+        ops.finalize().unwrap();
+        CpuProcessor::new(&ops, BitDepth::Uint10, out, OptimizationFlags::NONE).unwrap()
+    };
+    fn packed(px: &mut [u16], depth: BitDepth) -> PackedImageDesc<&mut [u8]> {
+        PackedImageDesc::with_strides(px, 1, 1, 4, depth, AUTO_STRIDE, AUTO_STRIDE, AUTO_STRIDE)
+            .unwrap()
+    }
+
+    let cpu = processor(BitDepth::Uint16);
+    let mut src = [100u16, 2000, 300, 1023];
+    let src = packed(&mut src[..], BitDepth::Uint10);
+    let mut dst = [0u16; 4];
+    let mut dst = packed(&mut dst[..], BitDepth::Uint16);
+    let e = cpu.apply_src_dst(&src, &mut dst).unwrap_err();
+    assert_eq!(e.message(), message);
+
+    let cpu = processor(BitDepth::Uint10);
+    let mut px = [100u16, 2000, 300, 1023];
+    let mut img = packed(&mut px[..], BitDepth::Uint10);
+    let e = cpu.apply(&mut img).unwrap_err();
+    assert_eq!(e.message(), message);
+}

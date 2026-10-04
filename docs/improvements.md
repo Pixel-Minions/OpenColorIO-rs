@@ -253,14 +253,17 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
     too, which prints some of those values (the hues);
   - the 1D LUTs that the optimizer bakes from ExponentTransform and ExponentWithLinearTransform
     for UINT8, UINT10, UINT12, UINT16 and F16 input, at the default and DRAFT flags, differ,
-    and so does the optimized processor's cache ID, which hashes them.
+    and so does the optimized processor's cache ID, which hashes them;
+  - so do the ones it bakes from CDLTransforms (`powf`), at every one of those input depths:
+    an ASC CDL and an inverse no-clamp one (the p1-optimizer verifier's probe of both wheels;
+    at UINT8 the optimized cache ID is 4edb2d4f on Windows and 3210436f on Linux).
 
   Log, LogAffine, ExposureContrast, and the LUT and built-in bakes came out the same on both,
   over 3309 cases (the p1-oracle review's survey). LogCamera did too in that survey, but its
   break on the log side is computed differently on each platform, and other parameters show
   it (I-70).
-- **Who notices:** anyone comparing GPU textures, SDR 2.0 shaders, or renders of exponents at 8
-  to 16 bits between a Windows and a Linux machine.
+- **Who notices:** anyone comparing GPU textures, SDR 2.0 shaders, or renders of exponents or
+  CDLs at 8 to 16 bits between a Windows and a Linux machine.
 - **A fix:** one math library on every platform, which changes the port's results on at least
   one of them.
 - **Status:** the bake is matched in `p1-optimizer` (D, `OptimizeSeparablePrefix`): it renders the

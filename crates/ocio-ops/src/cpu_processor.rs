@@ -612,7 +612,7 @@ impl CpuProcessor {
     /// with the one image as both, which reads each row from the image it writes. Rust's
     /// borrows can't pass the image to [`CpuProcessor::apply_src_dst`] as both.
     ///
-    /// U-1.s error as for [`CpuProcessor::apply_src_dst`].
+    /// U-1's error as for [`CpuProcessor::apply_src_dst`].
     ///
     /// Port of `CPUProcessor::apply(const ImageDesc &, ImageDesc &)`
     /// (src/OpenColorIO/CPUProcessor.cpp:406-431, 546-549 @ v2.5.2) called as
