@@ -490,7 +490,7 @@ impl<F: Family> Checker<'_, F> {
             }
         };
         let actual = port.apply(input);
-        let comparison = case.compare(&combo, input, &expected, &actual);
+        let comparison = case.compare_pixels(&combo, input, &expected, &actual);
         let pass_through = ports.pass_through;
         let mut failures = Vec::new();
         let mut pass_through_checks = 0;
