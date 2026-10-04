@@ -23,9 +23,12 @@
 //! class, spread over its cases and directions; the full and exhaustive tiers run every
 //! combination for every case in both directions.
 //!
-//! Only the battery may use waiver W0002 (`api_battery_oracle.rs` compares the cases it
-//! covers). The combinations of those cases that differ from the wheel are left out here, each
-//! listed with what differs ([`EXCLUSIONS`]); the others are compared bit for bit.
+//! Waiver W0002 applies to the cases with NaN parameters where their scope says, through the
+//! battery's own comparisons only: the images, decoded into RGBA `f32`, with `Case::compare`,
+//! where the pixels' renderer ran with fast math as [`w0002_combo`] says; and where the CPU
+//! processors' cache IDs differ, the 1D LUTs the optimizer baked from the ops, read back from
+//! both optimized processors, with `Case::compare_baked_luts` (the owner's extension of W0002,
+//! 2026-10-04). Everything else compares bit for bit, and what W0002 covers is counted.
 //!
 //! The `Lut1DTransform`'s float renderers, composing LUTs, the inverse LUT and the hue
 //! adjustment are Phase 2's (WP 2.1, 2.5). [`lut1d_deferral`] says, from the renderer upstream
@@ -41,7 +44,7 @@ use std::sync::Arc;
 
 use common::api::{Calls, LEVELS, port_transform};
 use common::api_cases::{self, Cases};
-use ocio::{BitDepth, Config, Exception, OptimizationFlags, TransformDirection};
+use ocio::{BitDepth, Config, Exception, OptimizationFlags, Transform, TransformDirection};
 use ocio_ops::cpu_processor::CpuProcessor;
 use ocio_ops::image_desc::{
     AUTO_STRIDE, Bytes, ImageDesc, ImageDescMut, PackedImageDesc, PixelData, PlanarImageDesc,
@@ -49,11 +52,13 @@ use ocio_ops::image_desc::{
 use ocio_ops::open_color_types::ChannelOrdering;
 use ocio_ops::ops::lut1d::lut1d_op::{NOT_PORTED_COMPOSE, NOT_PORTED_F32};
 use ocio_testkit::Oracle;
-use ocio_testkit::battery::{BitDepth as Depth, Direction, Tier};
+use ocio_testkit::battery::params::Comparison;
+use ocio_testkit::battery::{self, BitDepth as Depth, Direction, Tier};
 use ocio_testkit::image::{
     Buffer, ChannelOrder, Channels, Data, Packed, Planar, Request, Stride, channel_bytes,
 };
 use ocio_testkit::probe::{Rng, specials};
+use ocio_testkit::processor_ops::{ProcessorOpsReply, ProcessorOpsRequest};
 use serde_json::{Value, json};
 
 /// The images' width and height: an odd width, so that the engine's loops have a remainder.
@@ -361,71 +366,177 @@ fn combos() -> Vec<Combo> {
     out
 }
 
-/// A combination of a case that this sweep leaves out: where the port differs from the wheel
-/// only as waiver W0002 describes, which only the battery may apply.
-struct Exclusion {
-    class: &'static str,
-    case: &'static str,
-    dir: Direction,
-    /// The combinations left out.
-    applies: fn(&Combo) -> bool,
-    /// What differs there, for the record.
-    #[allow(dead_code)]
-    differs: &'static str,
+/// The battery's combination for W0002's scope at `combo` in `dir`: whether the pixels were
+/// rendered with fast math. An integer or half input at a level with
+/// `OPTIMIZATION_COMP_SEPARABLE_PREFIX` looks the pixels up in the 1D LUT the optimizer bakes
+/// from the ops, which renders them without fast math (`EvalTransform`, ops/OpTools.cpp,
+/// through `Op::apply`, src/OpenColorIO/Op.h:232-241 @ v2.5.2); otherwise the level's
+/// `OPTIMIZATION_FAST_LOG_EXP_POW` decides.
+fn w0002_combo(dir: Direction, combo: &Combo) -> battery::Combo {
+    let flags = combo.flags();
+    let baked =
+        combo.input != Depth::F32 && flags.has_flag(OptimizationFlags::COMP_SEPARABLE_PREFIX);
+    battery::Combo {
+        direction: dir,
+        fast_math: !baked && flags.has_flag(OptimizationFlags::FAST_LOG_EXP_POW),
+        format: battery::Format::F32_RGBA,
+    }
 }
 
-/// The combinations left out (see [`Exclusion`]). The first two are the LogAffineTransform case
-/// "NaN parameters" in the inverse direction, which the battery compares under W0002 where MSVC
-/// swapped the operands of `Log2LinRenderer`'s `+ minusb` (inverse, fast math off;
-/// `crates/ocio-ops/tests/log_oracle.rs`): the port keeps the source's order, as GCC does, so
-/// on Windows a NaN of that sum has the other sign. Its other combinations match bit for bit:
-/// with fast math on and no bake (F32 input), and at integer outputs, which hold no NaN. (On
-/// Windows, in the full tier, each of the 1,015 combinations listed differs, and no other.)
-const EXCLUSIONS: [Exclusion; 3] = [
-    Exclusion {
-        class: "LogAffineTransform",
-        case: "NaN parameters",
-        dir: Direction::Inverse,
-        applies: |c| {
-            !c.flags().has_flag(OptimizationFlags::FAST_LOG_EXP_POW)
-                && matches!(c.output, Depth::F16 | Depth::F32)
-        },
-        differs: "fast math off (OPTIMIZATION_NONE, LOSSLESS): the renderer runs per pixel, and \
-                  its NaNs reach F16 and F32 outputs with the other sign bit (0x7fc00000 for \
-                  0xffc00000, 0x7e00 for 0xfe00): W0002's difference",
-    },
-    Exclusion {
-        class: "LogAffineTransform",
-        case: "NaN parameters",
-        dir: Direction::Inverse,
-        applies: |c| {
-            c.input != Depth::F32 && c.flags().has_flag(OptimizationFlags::COMP_SEPARABLE_PREFIX)
-        },
-        differs: "integer and half inputs at the levels with the separable-prefix bake: the \
-                  baked 1D LUT renders the op with fast math off, so its NaN entries have the \
-                  other sign, and the CPU processor's cache ID, which hashes the LUT's values, \
-                  differs; the images match (outside W0002's text: awaiting the owner's \
-                  decision on W0002's scope)",
-    },
-    Exclusion {
-        class: "ExponentWithLinearTransform",
-        case: "NaN gamma and offset Linear",
-        dir: Direction::Forward,
-        applies: |c| {
-            !c.flags().has_flag(OptimizationFlags::FAST_LOG_EXP_POW)
-                && matches!(c.output, Depth::F16 | Depth::F32)
-        },
-        differs: "on Linux, fast math off (OPTIMIZATION_NONE, LOSSLESS): NaN sign bits in F16 \
-                  and F32 outputs, where the battery applies W0002 to this case (forward, fast \
-                  math off; crates/ocio-ops/tests/gamma_oracle.rs); Windows matches",
-    },
-];
+/// An exact `f32` for half bits: the same value, and for a NaN the same sign and payload.
+fn half_to_f32(h: u16) -> f32 {
+    let sign = u32::from(h >> 15) << 31;
+    let exponent = u32::from((h >> 10) & 0x1f);
+    let mantissa = u32::from(h & 0x3ff);
+    let magnitude = match exponent {
+        0x1f => 0x7f80_0000 | (mantissa << 13),
+        // Subnormal: mantissa * 2^-24, exact in `f32`.
+        0 => (mantissa as f32 * f32::from_bits(0x3380_0000)).to_bits(),
+        _ => ((exponent + 112) << 23) | (mantissa << 13),
+    };
+    f32::from_bits(sign | magnitude)
+}
 
-/// Whether [`EXCLUSIONS`] leaves out case `label` of `class` in `dir` at `combo`.
-fn excluded(class: &str, label: &str, dir: Direction, combo: &Combo) -> bool {
-    EXCLUSIONS
+/// An image of `layout` and `depth` over `buffers` (one, or one per plane), as RGBA `f32`
+/// pixels: every value exact (half NaNs keep their sign and payload), and 0 for the alpha of
+/// an RGB image.
+fn decode(layout: Layout, depth: Depth, buffers: &[Vec<u8>]) -> Vec<f32> {
+    let item = channel_bytes(depth);
+    let value = |buffer: &[u8], index: usize| -> f32 {
+        let b = &buffer[index * item..(index + 1) * item];
+        match depth {
+            Depth::Uint8 => f32::from(b[0]),
+            Depth::Uint10 | Depth::Uint12 | Depth::Uint16 => {
+                f32::from(u16::from_ne_bytes([b[0], b[1]]))
+            }
+            Depth::F16 => half_to_f32(u16::from_ne_bytes([b[0], b[1]])),
+            Depth::F32 => f32::from_ne_bytes([b[0], b[1], b[2], b[3]]),
+        }
+    };
+    let positions: [Option<usize>; 4] = match layout {
+        Layout::PackedRgba | Layout::PlanarRgba => [Some(0), Some(1), Some(2), Some(3)],
+        Layout::PackedRgb | Layout::PlanarRgb => [Some(0), Some(1), Some(2), None],
+        Layout::PackedBgra => [Some(2), Some(1), Some(0), Some(3)],
+    };
+    let channels = layout.channels();
+    let mut out = Vec::with_capacity(WIDTH * HEIGHT * 4);
+    for pixel in 0..WIDTH * HEIGHT {
+        for position in positions {
+            out.push(match position {
+                None => 0.0,
+                Some(c) if layout.planar() => value(&buffers[c], pixel),
+                Some(c) => value(&buffers[0], pixel * channels + c),
+            });
+        }
+    }
+    out
+}
+
+/// The layout of the destination image of a job that applies from one image to another.
+fn destination_layout(job: &Job) -> Layout {
+    match &job.request.images[1] {
+        ocio_testkit::image::Image::Packed(p) => match p.channels {
+            Channels::Order(ChannelOrder::Bgra) => Layout::PackedBgra,
+            Channels::Count(4) => Layout::PackedRgba,
+            _ => Layout::PackedRgb,
+        },
+        ocio_testkit::image::Image::Planar(p) => {
+            if p.planes.len() == 4 {
+                Layout::PlanarRgba
+            } else {
+                Layout::PlanarRgb
+            }
+        }
+    }
+}
+
+/// Compares the buffers after a job, the wheel's and the port's: the source's (when it isn't
+/// the destination) byte for byte, and the destination image byte for byte or, where they
+/// differ, through the case's comparison ([`battery::params::Case::compare`]), which applies
+/// W0002 where it covers the case. Returns how many NaN values W0002 waived.
+fn compare_images(
+    case: &battery::params::Case<Calls>,
+    job: &Job,
+    wheel: &[Vec<u8>],
+    port: &[Vec<u8>],
+) -> Result<usize, String> {
+    let sources = job.combo.layout.buffers();
+    let output = if job.combo.in_place {
+        0..sources
+    } else {
+        for k in 0..sources {
+            if wheel[k] != port[k] {
+                return Err(format!("source buffer {k} differs"));
+            }
+        }
+        sources..wheel.len()
+    };
+    if wheel[output.clone()] == port[output.clone()] {
+        return Ok(0);
+    }
+    let (layout, depth) = if job.combo.in_place {
+        (job.combo.layout, job.combo.input)
+    } else {
+        (destination_layout(job), job.combo.output)
+    };
+    let source: Vec<Vec<u8>> = job.request.buffers[..sources]
         .iter()
-        .any(|e| e.class == class && e.case == label && e.dir == dir && (e.applies)(combo))
+        .map(Buffer::bytes)
+        .collect();
+    let inputs = decode(job.combo.layout, job.combo.input, &source);
+    let expected = decode(layout, depth, &wheel[output.clone()]);
+    let actual = decode(layout, depth, &port[output]);
+    match case.compare(
+        &w0002_combo(job.dir, &job.combo),
+        &inputs,
+        &expected,
+        &actual,
+    ) {
+        Comparison::W0002 { waived } => Ok(waived),
+        Comparison::Exact => Err("the destination's bytes differ, its values don't".into()),
+        Comparison::Mismatch(report) => Err(report),
+    }
+}
+
+/// The values of the Lut1DTransforms of the port's optimized processor of `job`, three per
+/// entry, in order: the 1D LUTs its CPU processor renders.
+fn port_luts(class: &Class, job: &Job, calls: &Calls) -> Result<Vec<Vec<f32>>, Exception> {
+    let transform = port_transform(&calls.spec(job.dir))?;
+    let mut config = (*Config::create_raw()).clone();
+    if class.v1 {
+        config.set_major_version(1).expect("version 1");
+    }
+    let processor = config.processor_in_direction(&transform, TransformDirection::Forward)?;
+    let group = processor
+        .optimized_processor_with_bit_depths(
+            port_depth(job.combo.input),
+            port_depth(job.combo.output),
+            job.combo.flags(),
+        )?
+        .create_group_transform()?;
+    let mut luts = Vec::new();
+    for k in 0..group.num_transforms() {
+        if let Transform::Lut1D(lut) = group.transform(k)? {
+            let mut values = Vec::new();
+            for i in 0..lut.length() {
+                values.extend(lut.value(i)?);
+            }
+            luts.push(values);
+        }
+    }
+    Ok(luts)
+}
+
+/// The values of the Lut1DTransforms of the wheel's optimized processor, three per entry.
+fn wheel_luts(reply: &ProcessorOpsReply) -> Vec<Vec<f32>> {
+    reply
+        .optimized()
+        .group
+        .children
+        .iter()
+        .filter(|t| t.class == "Lut1DTransform")
+        .map(|t| t.getter("getData").f32s())
+        .collect()
 }
 
 /// What a `Lut1DTransform`'s renderer depends on: its length, whether its domain is the half
@@ -546,7 +657,7 @@ struct Job {
 /// The jobs of `class`: in the quick tier, each combination for [`QUICK_TURNS`] of the cases and
 /// directions, in turn, and for the `Lut1DTransform` also every case and direction the port
 /// looks up; otherwise every combination for every case in both directions. Less for the
-/// `Lut1DTransform`'s large specs ([`Lut1D::runs`]), and nothing [`EXCLUSIONS`] leaves out.
+/// `Lut1DTransform`'s large specs ([`Lut1D::runs`]).
 fn jobs(class: &Class, tier: Tier) -> Vec<Job> {
     let combos = combos();
     let cases = &class.cases.cases;
@@ -562,10 +673,7 @@ fn jobs(class: &Class, tier: Tier) -> Vec<Job> {
         let runs: Vec<(usize, Direction)> = turns
             .iter()
             .copied()
-            .filter(|&(c, dir)| {
-                !excluded(class.name, cases[c].label(), dir, combo)
-                    && luts[c].is_none_or(|lut| lut.runs(combo))
-            })
+            .filter(|&(c, _)| luts[c].is_none_or(|lut| lut.runs(combo)))
             .collect();
         let deferral =
             |(c, dir): (usize, Direction)| luts[c].and_then(|lut| lut1d_deferral(&lut, dir, combo));
@@ -711,6 +819,20 @@ fn port(class: &Class, job: &Job, calls: &Calls) -> PortOutcome {
     Ok((result, buffers))
 }
 
+/// What W0002 covered in a class's jobs.#[derive(Debug, Default)]struct Waived {    /// Destination images with NaN values that differ in sign or payload bits only.    images: usize,    /// Those values.    values: usize,    /// CPU processors' cache IDs that differ in the hashes of baked 1D LUTs only.    cache_ids: usize,    /// The NaN entries of those LUTs that differ in sign or payload bits only.    lut_entries: usize,}
+/// What W0002 covered in a class's jobs.
+#[derive(Debug, Default)]
+struct Waived {
+    /// Destination images with NaN values that differ in sign or payload bits only.
+    images: usize,
+    /// Those values.
+    values: usize,
+    /// CPU processors' cache IDs that differ in the hashes of baked 1D LUTs only.
+    cache_ids: usize,
+    /// The NaN entries of those LUTs that differ in sign or payload bits only.
+    lut_entries: usize,
+}
+
 /// Runs every job of `class` against the wheel; panics with a report if any differs.
 fn check(class: &Class) {
     let tier = Tier::current();
@@ -740,6 +862,9 @@ fn check(class: &Class) {
     let mut deferred: BTreeMap<String, usize> = BTreeMap::new();
     let mut compared = 0;
     let mut refusals = 0;
+    let mut waived = Waived::default();
+    // The jobs whose CPU processors' cache IDs differ, with both IDs.
+    let mut baked: Vec<(&Job, String, String)> = Vec::new();
     // Batches of a bounded size, to keep each request's JSON small.
     for batch in jobs.chunks(500) {
         let calls: Vec<_> = batch.iter().map(|job| job.request.call()).collect();
@@ -787,19 +912,28 @@ fn check(class: &Class) {
                         "cpu_cache_id": reply.result["cpu_cache_id"],
                         "cpu_processor": reply.result["cpu_processor"],
                     });
-                    if wheel != result {
-                        failures.push(format!("{what}\n  wheel {wheel}\n  port  {result}"));
+                    compared += 1;
+                    match compare_images(case, job, &reply.buffers, &buffers) {
+                        Ok(0) => {}
+                        Ok(n) => {
+                            waived.images += 1;
+                            waived.values += n;
+                        }
+                        Err(report) => failures.push(format!("{what}\n  {report}")),
+                    }
+                    if wheel == result {
                         continue;
                     }
-                    for (k, (port, wheel)) in buffers.iter().zip(&reply.buffers).enumerate() {
-                        if port != wheel {
-                            let first = port.iter().zip(wheel).position(|(a, b)| a != b);
-                            failures.push(format!(
-                                "{what}\n  buffer {k} differs first at byte {first:?}"
-                            ));
-                        }
+                    // Only the CPU processor's cache ID may differ, where it hashes 1D LUTs
+                    // baked from NaN parameters: the second round reads them back.
+                    let mut others = result.clone();
+                    others["cpu_cache_id"] = wheel["cpu_cache_id"].clone();
+                    if others == wheel {
+                        let id = |v: &Value| v["cpu_cache_id"].as_str().expect("an ID").to_string();
+                        baked.push((job, id(&wheel), id(&result)));
+                    } else {
+                        failures.push(format!("{what}\n  wheel {wheel}\n  port  {result}"));
                     }
-                    compared += 1;
                 }
                 (raised, port) => failures.push(format!(
                     "{what}\n  wheel {:?}\n  port  {:?}",
@@ -809,9 +943,58 @@ fn check(class: &Class) {
             }
         }
     }
+    // The cache IDs that differ: the optimized processors' 1D LUTs, from both sides.
+    let requests: Vec<ProcessorOpsRequest> = baked
+        .iter()
+        .map(|(job, _, _)| {
+            let mut processor = json!({"transform": job.request.processor["transform"]});
+            if class.v1 {
+                processor["config"] = json!({"yaml": V1_CONFIG});
+            }
+            let mut request = ProcessorOpsRequest::new(processor);
+            request.in_bitdepth = Some(job.combo.input);
+            request.out_bitdepth = Some(job.combo.output);
+            request.optimization = Some(json!(
+                job.combo
+                    .level
+                    .map_or("OPTIMIZATION_DEFAULT", |l| LEVELS[l].0)
+            ));
+            request
+        })
+        .collect();
+    let calls: Vec<_> = requests.iter().map(ProcessorOpsRequest::call).collect();
+    for ((job, wheel_id, port_id), response) in baked.iter().zip(Oracle::get().batch(&calls, true))
+    {
+        let case = &class.cases.cases[job.case];
+        let what = format!(
+            "{} \"{}\" {:?} {:?}",
+            class.name,
+            case.label(),
+            job.dir,
+            job.combo
+        );
+        let reply = ProcessorOpsReply::from_response(response.unwrap_or_else(|e| panic!("{e}")));
+        let port = match port_luts(class, job, case.params()) {
+            Ok(luts) => luts,
+            Err(e) => {
+                failures.push(format!("{what}: the port's LUTs: {}", e.message()));
+                continue;
+            }
+        };
+        let combo = w0002_combo(job.dir, &job.combo);
+        match case.compare_baked_luts(&combo, wheel_id, port_id, &wheel_luts(&reply), &port) {
+            Comparison::W0002 { waived: n } => {
+                waived.cache_ids += 1;
+                waived.lut_entries += n;
+            }
+            Comparison::Exact => {}
+            Comparison::Mismatch(report) => failures.push(format!("{what}\n  {report}")),
+        }
+    }
     println!(
         "{}: {} applies ({} tier): {compared} compared, {refusals} refusals compared, {} \
-         deferred to Phase 2{}",
+         deferred to Phase 2{}\n  W0002: {} images with {} NaN values differing in sign or \
+         payload bits only; {} cache IDs of 1D LUTs baked with {} such NaN entries",
         class.name,
         jobs.len(),
         tier.name(),
@@ -819,7 +1002,11 @@ fn check(class: &Class) {
         deferred
             .iter()
             .map(|(m, n)| format!("\n  {n}: {m}"))
-            .collect::<String>()
+            .collect::<String>(),
+        waived.images,
+        waived.values,
+        waived.cache_ids,
+        waived.lut_entries
     );
     assert!(
         failures.is_empty(),
