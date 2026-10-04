@@ -23,13 +23,16 @@
 //! class, spread over its cases and directions; the full and exhaustive tiers run every
 //! combination for every case in both directions.
 //!
-//! A case with NaN parameters that waiver W0002 covers in a direction is left out in that
-//! direction: only the battery may use W0002 (`api_battery_oracle.rs` compares it). Its NaNs
-//! reach the 1D LUT that the optimizer bakes from the ops for integer and half inputs, too.
+//! Only the battery may use waiver W0002 (`api_battery_oracle.rs` compares the cases it
+//! covers). The combinations of those cases that differ from the wheel are left out here, each
+//! listed with what differs ([`EXCLUSIONS`]); the others are compared bit for bit.
 //!
 //! The `Lut1DTransform`'s float renderers, composing LUTs, the inverse LUT and the hue
-//! adjustment are Phase 2's (WP 2.1, 2.5): where the wheel renders and the port refuses with
-//! its "not ported yet" message, the test counts a deferral, and only for that class.
+//! adjustment are Phase 2's (WP 2.1, 2.5). [`lut1d_deferral`] says, from the renderer upstream
+//! picks for each combination, which ones the port must refuse with which "not ported yet"
+//! message, while the wheel renders them: the test counts those as deferrals, pins how many
+//! there are per message, and compares every other combination, the lookups of integer and
+//! half inputs, which every tier runs in full.
 
 mod common;
 
@@ -44,8 +47,9 @@ use ocio_ops::image_desc::{
     AUTO_STRIDE, Bytes, ImageDesc, ImageDescMut, PackedImageDesc, PixelData, PlanarImageDesc,
 };
 use ocio_ops::open_color_types::ChannelOrdering;
+use ocio_ops::ops::lut1d::lut1d_op::{NOT_PORTED_COMPOSE, NOT_PORTED_F32};
 use ocio_testkit::Oracle;
-use ocio_testkit::battery::{self, BitDepth as Depth, Direction, Tier};
+use ocio_testkit::battery::{BitDepth as Depth, Direction, Tier};
 use ocio_testkit::image::{
     Buffer, ChannelOrder, Channels, Data, Packed, Planar, Request, Stride, channel_bytes,
 };
@@ -291,14 +295,14 @@ where
     Ok(PortImage::Packed(desc))
 }
 
-/// A class of the sweep: its cases, the config, and whether it has Phase 2 deferrals.
+/// A class of the sweep: its cases, the config, and whether it is the `Lut1DTransform`.
 struct Class {
     name: &'static str,
     cases: Cases,
     /// A version 1 config instead of the raw config.
     v1: bool,
-    /// The class's "not ported yet" refusals count as deferrals.
-    deferred: bool,
+    /// The `Lut1DTransform`, whose Phase 2 deferrals [`lut1d_deferral`] lists.
+    lut1d: bool,
 }
 
 impl Class {
@@ -307,7 +311,7 @@ impl Class {
             name,
             cases,
             v1: false,
-            deferred: false,
+            lut1d: false,
         }
     }
 }
@@ -320,6 +324,14 @@ struct Combo {
     layout: Layout,
     level: Option<usize>,
     in_place: bool,
+}
+
+impl Combo {
+    /// The flags of the CPU processor: the level's, `OPTIMIZATION_DEFAULT` without one.
+    fn flags(&self) -> OptimizationFlags {
+        self.level
+            .map_or(OptimizationFlags::DEFAULT, |level| LEVELS[level].1)
+    }
 }
 
 /// Every combination: from one image to another at every pair of bit depths, and in place at
@@ -349,42 +361,226 @@ fn combos() -> Vec<Combo> {
     out
 }
 
+/// A combination of a case that this sweep leaves out: where the port differs from the wheel
+/// only as waiver W0002 describes, which only the battery may apply.
+struct Exclusion {
+    class: &'static str,
+    case: &'static str,
+    dir: Direction,
+    /// The combinations left out.
+    applies: fn(&Combo) -> bool,
+    /// What differs there, for the record.
+    #[allow(dead_code)]
+    differs: &'static str,
+}
+
+/// The combinations left out (see [`Exclusion`]). The first two are the LogAffineTransform case
+/// "NaN parameters" in the inverse direction, which the battery compares under W0002 where MSVC
+/// swapped the operands of `Log2LinRenderer`'s `+ minusb` (inverse, fast math off;
+/// `crates/ocio-ops/tests/log_oracle.rs`): the port keeps the source's order, as GCC does, so
+/// on Windows a NaN of that sum has the other sign. Its other combinations match bit for bit:
+/// with fast math on and no bake (F32 input), and at integer outputs, which hold no NaN. (On
+/// Windows, in the full tier, each of the 1,015 combinations listed differs, and no other.)
+const EXCLUSIONS: [Exclusion; 3] = [
+    Exclusion {
+        class: "LogAffineTransform",
+        case: "NaN parameters",
+        dir: Direction::Inverse,
+        applies: |c| {
+            !c.flags().has_flag(OptimizationFlags::FAST_LOG_EXP_POW)
+                && matches!(c.output, Depth::F16 | Depth::F32)
+        },
+        differs: "fast math off (OPTIMIZATION_NONE, LOSSLESS): the renderer runs per pixel, and \
+                  its NaNs reach F16 and F32 outputs with the other sign bit (0x7fc00000 for \
+                  0xffc00000, 0x7e00 for 0xfe00): W0002's difference",
+    },
+    Exclusion {
+        class: "LogAffineTransform",
+        case: "NaN parameters",
+        dir: Direction::Inverse,
+        applies: |c| {
+            c.input != Depth::F32 && c.flags().has_flag(OptimizationFlags::COMP_SEPARABLE_PREFIX)
+        },
+        differs: "integer and half inputs at the levels with the separable-prefix bake: the \
+                  baked 1D LUT renders the op with fast math off, so its NaN entries have the \
+                  other sign, and the CPU processor's cache ID, which hashes the LUT's values, \
+                  differs; the images match (outside W0002's text: awaiting the owner's \
+                  decision on W0002's scope)",
+    },
+    Exclusion {
+        class: "ExponentWithLinearTransform",
+        case: "NaN gamma and offset Linear",
+        dir: Direction::Forward,
+        applies: |c| {
+            !c.flags().has_flag(OptimizationFlags::FAST_LOG_EXP_POW)
+                && matches!(c.output, Depth::F16 | Depth::F32)
+        },
+        differs: "on Linux, fast math off (OPTIMIZATION_NONE, LOSSLESS): NaN sign bits in F16 \
+                  and F32 outputs, where the battery applies W0002 to this case (forward, fast \
+                  math off; crates/ocio-ops/tests/gamma_oracle.rs); Windows matches",
+    },
+];
+
+/// Whether [`EXCLUSIONS`] leaves out case `label` of `class` in `dir` at `combo`.
+fn excluded(class: &str, label: &str, dir: Direction, combo: &Combo) -> bool {
+    EXCLUSIONS
+        .iter()
+        .any(|e| e.class == class && e.case == label && e.dir == dir && (e.applies)(combo))
+}
+
+/// What a `Lut1DTransform`'s renderer depends on: its length, whether its domain is the half
+/// codes, and whether it adjusts the hue, as its spec sets them.
+#[derive(Debug, Clone, Copy)]
+struct Lut1D {
+    length: u64,
+    half_domain: bool,
+    hue_adjust: bool,
+}
+
+impl Lut1D {
+    fn of(calls: &Calls) -> Lut1D {
+        let spec = calls.spec(Direction::Forward);
+        let mut lut = Lut1D {
+            length: 2,
+            half_domain: false,
+            hue_adjust: false,
+        };
+        for call in spec["calls"].as_array().expect("calls") {
+            match call[0].as_str() {
+                Some("setLength") => lut.length = call[1].as_u64().expect("a length"),
+                Some("setInputHalfDomain") => lut.half_domain = call[1] == json!(true),
+                Some("setHueAdjust") => lut.hue_adjust = call[1]["enum"] != "HUE_NONE",
+                _ => {}
+            }
+        }
+        lut
+    }
+
+    /// The bit depth whose codes look the LUT up without resampling it, if any
+    /// (`Lut1DOpData::mayLookup`, src/OpenColorIO/ops/lut1d/Lut1DOpData.cpp:491-506 @ v2.5.2).
+    fn lookup_depth(&self) -> Option<Depth> {
+        if self.half_domain {
+            return Some(Depth::F16);
+        }
+        match self.length {
+            256 => Some(Depth::Uint8),
+            1024 => Some(Depth::Uint10),
+            4096 => Some(Depth::Uint12),
+            65536 => Some(Depth::Uint16),
+            _ => None,
+        }
+    }
+
+    /// Whether the spec is large (a setter per entry): the sweep runs it at its lookup's input
+    /// only, from and to packed RGBA images, to F32 and to its own bit depth, at
+    /// `OPTIMIZATION_NONE`, `LOSSLESS` and `DEFAULT`.
+    fn runs(&self, combo: &Combo) -> bool {
+        self.length < 4096
+            || (Some(combo.input) == self.lookup_depth()
+                && combo.layout == Layout::PackedRgba
+                && (combo.output == Depth::F32 || combo.output == combo.input)
+                && matches!(combo.level, Some(0 | 1 | 5)))
+    }
+}
+
+/// The inverse LUT's deferral (its set-up in the processor's `finalize`, WP 2.1).
+const NOT_PORTED_INVERSE: &str = "Lut1D: the inverse 1D LUT is not ported yet (WP 2.1).";
+
+/// Where the port refuses a `Lut1DTransform` at `combo` because the renderer upstream picks is
+/// Phase 2's, with the stage and message; `None` where the renderer is a lookup, which the port
+/// has, and which must match the wheel.
+///
+/// Upstream (src/OpenColorIO @ v2.5.2):
+/// - an inverse LUT is set up when the processor finalizes it (`Lut1DOpData::finalize`, the
+///   inverse's domain); the port refuses there;
+/// - the optimizer leaves a single forward LUT alone: `FindSeparablePrefix` gives no prefix to
+///   bake for it (OpOptimizers.cpp:473-509), and a hue adjustment has crosstalk anyway;
+/// - `GetLut1DRenderer` (ops/lut1d/Lut1DOpCPU.cpp:1657-1754) picks the hue-adjust renderer, the
+///   lookup where `mayLookup(inBD)` (one entry per integer code, or a half domain for half
+///   codes), and otherwise the float renderer (F32 input) or one that interpolates the codes.
+///   The port has the lookup; the others are Phase 2's (WP 2.5), and the codes' interpolation
+///   is its "composing 1D LUTs" refusal.
+fn lut1d_deferral(
+    lut: &Lut1D,
+    dir: Direction,
+    combo: &Combo,
+) -> Option<(&'static str, &'static str)> {
+    if dir == Direction::Inverse {
+        return Some(("processor", NOT_PORTED_INVERSE));
+    }
+    if lut.hue_adjust {
+        return Some(("cpu_processor", NOT_PORTED_F32));
+    }
+    if combo.input == Depth::F32 {
+        return Some(("cpu_processor", NOT_PORTED_F32));
+    }
+    if lut.lookup_depth() == Some(combo.input) {
+        return None;
+    }
+    Some(("cpu_processor", NOT_PORTED_COMPOSE))
+}
+
+/// The deferrals of the `Lut1DTransform`'s plan, per message, in the quick tier and in the
+/// others: a digest of the plan the test generates, so that it can't change unnoticed.
+const LUT1D_DEFERRALS_QUICK: [(&str, usize); 3] = [
+    (NOT_PORTED_COMPOSE, 1277),
+    (NOT_PORTED_F32, 674),
+    (NOT_PORTED_INVERSE, 2205),
+];
+const LUT1D_DEFERRALS_FULL: [(&str, usize); 3] = [
+    (NOT_PORTED_COMPOSE, 5145),
+    (NOT_PORTED_F32, 2695),
+    (NOT_PORTED_INVERSE, 8847),
+];
+
 /// One apply: a case in a direction, a combination, and its request.
 struct Job {
     case: usize,
     dir: Direction,
     combo: Combo,
     request: Request,
+    /// For the `Lut1DTransform`: its Phase 2 deferral at this combination, if any.
+    deferral: Option<(&'static str, &'static str)>,
 }
 
 /// The jobs of `class`: in the quick tier, each combination for [`QUICK_TURNS`] of the cases and
-/// directions, in turn; otherwise every combination for every case in both directions.
+/// directions, in turn, and for the `Lut1DTransform` also every case and direction the port
+/// looks up; otherwise every combination for every case in both directions. Less for the
+/// `Lut1DTransform`'s large specs ([`Lut1D::runs`]), and nothing [`EXCLUSIONS`] leaves out.
 fn jobs(class: &Class, tier: Tier) -> Vec<Job> {
     let combos = combos();
     let cases = &class.cases.cases;
-    // A case with NaN parameters that waiver W0002 covers in a direction (the battery's
-    // comparison, which nothing else may use) is compared there only, by the battery.
-    let waived = |c: usize, direction: Direction| {
-        [true, false].into_iter().any(|fast_math| {
-            cases[c].w0002_applies(&battery::Combo {
-                direction,
-                fast_math,
-                format: battery::Format::F32_RGBA,
-            })
-        })
-    };
+    let luts: Vec<Option<Lut1D>> = cases
+        .iter()
+        .map(|c| class.lut1d.then(|| Lut1D::of(c.params())))
+        .collect();
     let turns: Vec<(usize, Direction)> = (0..cases.len())
         .flat_map(|c| [(c, Direction::Forward), (c, Direction::Inverse)])
-        .filter(|&(c, dir)| !waived(c, dir))
         .collect();
     let mut jobs = Vec::new();
     for (k, combo) in combos.iter().enumerate() {
-        let picked: Vec<(usize, Direction)> = if tier == Tier::Quick {
-            (0..QUICK_TURNS.min(turns.len()))
-                .map(|t| turns[(k * QUICK_TURNS + t) % turns.len()])
-                .collect()
+        let runs: Vec<(usize, Direction)> = turns
+            .iter()
+            .copied()
+            .filter(|&(c, dir)| {
+                !excluded(class.name, cases[c].label(), dir, combo)
+                    && luts[c].is_none_or(|lut| lut.runs(combo))
+            })
+            .collect();
+        let deferral =
+            |(c, dir): (usize, Direction)| luts[c].and_then(|lut| lut1d_deferral(&lut, dir, combo));
+        let picked: Vec<(usize, Direction)> = if tier == Tier::Quick && !runs.is_empty() {
+            let mut picked: Vec<(usize, Direction)> = (0..QUICK_TURNS.min(runs.len()))
+                .map(|t| runs[(k * QUICK_TURNS + t) % runs.len()])
+                .collect();
+            for &turn in &runs {
+                if class.lut1d && deferral(turn).is_none() && !picked.contains(&turn) {
+                    picked.push(turn);
+                }
+            }
+            picked
         } else {
-            turns.clone()
+            runs.clone()
         };
         for (case, dir) in picked {
             let spec = cases[case].params().spec(dir);
@@ -405,7 +601,11 @@ fn jobs(class: &Class, tier: Tier) -> Vec<Job> {
             request.apply = if combo.in_place {
                 vec![src]
             } else {
-                let next = LAYOUTS[(k / 7 + 1) % LAYOUTS.len()];
+                let next = if luts[case].is_some_and(|lut| lut.length >= 4096) {
+                    combo.layout
+                } else {
+                    LAYOUTS[(k / 7 + 1) % LAYOUTS.len()]
+                };
                 let dst = add_image(&mut request, next, combo.output, None);
                 vec![src, dst]
             };
@@ -414,6 +614,7 @@ fn jobs(class: &Class, tier: Tier) -> Vec<Job> {
                 dir,
                 combo: *combo,
                 request,
+                deferral: deferral((case, dir)),
             });
         }
     }
@@ -514,6 +715,27 @@ fn port(class: &Class, job: &Job, calls: &Calls) -> PortOutcome {
 fn check(class: &Class) {
     let tier = Tier::current();
     let jobs = jobs(class, tier);
+    if class.lut1d {
+        let mut planned: BTreeMap<&str, usize> = BTreeMap::new();
+        for job in &jobs {
+            if let Some((_, message)) = job.deferral {
+                *planned.entry(message).or_default() += 1;
+            }
+        }
+        let pinned = if tier == Tier::Quick {
+            LUT1D_DEFERRALS_QUICK
+        } else {
+            LUT1D_DEFERRALS_FULL
+        };
+        let pinned: BTreeMap<&str, usize> = pinned.into_iter().collect();
+        assert_eq!(
+            planned,
+            pinned,
+            "the {} tier's plan of {} applies has other deferrals than pinned",
+            tier.name(),
+            jobs.len()
+        );
+    }
     let mut failures = Vec::new();
     let mut deferred: BTreeMap<String, usize> = BTreeMap::new();
     let mut compared = 0;
@@ -537,16 +759,27 @@ fn check(class: &Class) {
             if !reply.log().is_empty() {
                 failures.push(format!("{what}: OCIO logged {:?}", reply.log()));
             }
-            match (reply.raised(), port(class, job, case.params())) {
+            let port = port(class, job, case.params());
+            if let Some((stage, message)) = job.deferral {
+                // The wheel renders it; the port refuses it, there, with that message.
+                match (reply.raised(), &port) {
+                    (None, Err((s, m))) if s == stage && m == message => {
+                        *deferred.entry(message.to_string()).or_default() += 1;
+                    }
+                    (raised, port) => failures.push(format!(
+                        "{what}: a Phase 2 deferral ({stage}: {message}) was expected\n  \
+                         wheel {:?}\n  port  {:?}",
+                        raised.map(|r| (r.stage, r.message)),
+                        port.as_ref().map(|_| ())
+                    )),
+                }
+                continue;
+            }
+            match (reply.raised(), port) {
                 (Some(raised), Err((stage, message)))
                     if raised.stage == stage && raised.message == message =>
                 {
                     refusals += 1;
-                }
-                (None, Err((_, message)))
-                    if class.deferred && message.contains("not ported yet") =>
-                {
-                    *deferred.entry(message).or_default() += 1;
                 }
                 (None, Ok((result, buffers))) => {
                     let wheel = json!({
@@ -657,8 +890,10 @@ fn group_transform_matches_the_wheel_at_every_format_and_level() {
 
 #[test]
 fn lut1d_transform_matches_the_wheel_at_every_format_and_level() {
+    let mut cases = api_cases::lut1d();
+    cases.cases.extend(api_cases::lut1d_lookups().cases);
     check(&Class {
-        deferred: true,
-        ..Class::new("Lut1DTransform", api_cases::lut1d())
+        lut1d: true,
+        ..Class::new("Lut1DTransform", cases)
     });
 }
