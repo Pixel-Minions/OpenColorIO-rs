@@ -20,13 +20,14 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use ocio::{
-    BitDepth, Config, GroupTransform, OptimizationFlags, Processor, ProcessorCacheFlags, Transform,
-    TransformDirection,
+    BitDepth, Config, GroupTransform, MatrixTransform, OptimizationFlags, Processor,
+    ProcessorCacheFlags, RangeTransform, Transform, TransformDirection,
 };
 use ocio_gpu::gpu_processor::GpuProcessor;
 use ocio_ops::cpu_processor::CpuProcessor;
 use ocio_ops::platform::{MapEnv, set_env_provider};
 use ocio_testkit::Oracle;
+use ocio_testkit::transform_text::f64_spec;
 use serde_json::{Value, json};
 
 static ENVIRONMENT: Mutex<()> = Mutex::new(());
@@ -100,6 +101,8 @@ enum Step {
     SetCacheFlags(&'static str),
     ClearCache,
     Processor(String, Group, TransformDirection),
+    /// `config.getProcessor(transform, direction)` of any transform: its spec, and the port's.
+    ProcessorOf(String, Value, Box<Transform>, TransformDirection),
     Optimized(String, String, BitDepth, BitDepth, u64),
     Cpu(String, String, BitDepth, BitDepth, u64),
     /// `getOptimizedGPUProcessor(flags)`, or `getDefaultGPUProcessor()` for `None`.
@@ -127,6 +130,9 @@ impl Step {
             Step::ClearCache => json!(["clear_cache"]),
             Step::Processor(name, group, dir) => {
                 json!(["processor", name, group.spec(), dir_name(*dir)])
+            }
+            Step::ProcessorOf(name, spec, _, dir) => {
+                json!(["processor", name, spec, dir_name(*dir)])
             }
             Step::Optimized(name, of, i, o, flags) => {
                 json!(["optimized", name, of, depth_name(*i), depth_name(*o), flags])
@@ -232,6 +238,13 @@ fn run_port(case: &Case) -> Value {
                         .as_ref()
                         .expect("a config")
                         .processor_in_direction(&group.port(), *dir)?;
+                    objects.push((name.clone(), Object::Processor(p)));
+                }
+                Step::ProcessorOf(name, _, transform, dir) => {
+                    let p = config
+                        .as_ref()
+                        .expect("a config")
+                        .processor_in_direction(transform, *dir)?;
                     objects.push((name.clone(), Object::Processor(p)));
                 }
                 Step::Optimized(name, of, i, o, flags) => {
@@ -607,6 +620,105 @@ fn the_key_and_the_copies_match_the_wheel() {
                 Step::Optimized("oo3".into(), "o".into(), F32, F32, 0),
                 Step::Optimized("oo4".into(), "o".into(), F32, F32, 0),
                 Step::Processor("q".into(), all[1].clone(), fwd),
+            ],
+        });
+    }
+    check(&cases);
+}
+
+/// A matrix transform of `offset4`, with the spec that builds it in the wheel.
+fn offset_matrix(offset4: [f64; 4]) -> (Value, Transform) {
+    let mut port = MatrixTransform::new();
+    port.set_offset(&offset4);
+    let spec = json!({"class": "MatrixTransform", "calls": [
+        ["setOffset", offset4.iter().map(|&v| f64_spec(v)).collect::<Vec<_>>()],
+    ]});
+    (spec, port.into())
+}
+
+/// A clamping range transform from `[0, 1]` to `[0, 1]`: an identity clamp.
+fn identity_clamp() -> (Value, Transform) {
+    let mut port = RangeTransform::new();
+    port.set_min_in_value(0.0);
+    port.set_max_in_value(1.0);
+    port.set_min_out_value(0.0);
+    port.set_max_out_value(1.0);
+    let spec = json!({"class": "RangeTransform", "calls": [
+        ["setMinInValue", f64_spec(0.0)],
+        ["setMaxInValue", f64_spec(1.0)],
+        ["setMinOutValue", f64_spec(0.0)],
+        ["setMaxOutValue", f64_spec(1.0)],
+    ]});
+    (spec, port.into())
+}
+
+/// A group of `children`, with the spec that builds it in the wheel.
+fn group_of(children: Vec<(Value, Transform)>) -> (Value, Transform) {
+    let mut port = GroupTransform::new();
+    let mut specs = Vec::new();
+    for (spec, child) in children {
+        port.append_transform(child);
+        specs.push(spec);
+    }
+    (
+        json!({"class": "GroupTransform", "children": specs}),
+        port.into(),
+    )
+}
+
+fn processor_of(name: &str, (spec, port): (Value, Transform)) -> Step {
+    Step::ProcessorOf(
+        name.into(),
+        spec,
+        Box::new(port),
+        TransformDirection::Forward,
+    )
+}
+
+/// Processors of ops, whose cache IDs differ (the groups' are all `<NOOP>`):
+/// - the fallback reuses only a processor of the same cache ID (a group of one matrix and the
+///   matrix), not any cached one (Config.cpp:4850-4872 @ v2.5.2);
+/// - an optimized processor computes its own cache ID, which differs from the processor's when
+///   the optimizer changes the ops: the copy starts without one (Processor.cpp:237-263 @
+///   v2.5.2), even when the processor's is already known (the fallback computed it);
+/// - the optimized processors of integer input lose the leading identity clamp
+///   (`optimizeForBitdepth`, Processor.cpp:382-433 @ v2.5.2).
+#[test]
+// `unsigned long` is already `u64` on Linux.
+#[allow(clippy::unnecessary_cast)]
+fn processors_of_ops_match_the_wheel() {
+    let default = OptimizationFlags::DEFAULT.0 as u64;
+    let two_matrices_after_a_clamp = || {
+        group_of(vec![
+            identity_clamp(),
+            offset_matrix([0.1, 0.0, 0.0, 0.0]),
+            offset_matrix([0.0, 0.2, 0.0, 0.0]),
+        ])
+    };
+    let mut cases = Vec::new();
+    for fallback in [None, Some("1".to_string())] {
+        let env = match &fallback {
+            Some(value) => vec![(FALLBACK, value.clone())],
+            None => Vec::new(),
+        };
+        cases.push(Case {
+            what: format!("matrices, {FALLBACK} {fallback:?}"),
+            env,
+            steps: vec![
+                Step::Config,
+                processor_of("a", offset_matrix([0.1, 0.0, 0.0, 0.0])),
+                processor_of("b", offset_matrix([0.2, 0.0, 0.0, 0.0])),
+                processor_of("c", group_of(vec![offset_matrix([0.1, 0.0, 0.0, 0.0])])),
+                processor_of("d", two_matrices_after_a_clamp()),
+                Step::Optimized("od".into(), "d".into(), F32, F32, default),
+                Step::Optimized("od_none".into(), "d".into(), F32, F32, 0),
+                Step::Optimized("od8".into(), "d".into(), BitDepth::Uint8, F32, default),
+                Step::Optimized("od16".into(), "d".into(), BitDepth::Uint16, F32, default),
+                Step::Optimized("od_f16".into(), "d".into(), BitDepth::F16, F32, default),
+                Step::Cpu("cd".into(), "d".into(), F32, F32, default),
+                Step::Cpu("cd8".into(), "d".into(), BitDepth::Uint8, F32, default),
+                Step::Cpu("cd8_out".into(), "d".into(), F32, BitDepth::Uint8, default),
+                processor_of("e", two_matrices_after_a_clamp()),
             ],
         });
     }

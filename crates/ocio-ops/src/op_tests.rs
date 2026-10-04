@@ -1,19 +1,25 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Tests of the op list. Upstream's `Op`, `OpData`, `OpRcPtrVec` and `FinalizeOpVec` tests
-//! (tests/cpu/Op_tests.cpp @ v2.5.2) all use Matrix ops, and most also other families; each
-//! comes with the ops it needs. `channel_crosstalk` and `serialize` need only the Matrix op
-//! and the no-ops; the others use the no-ops.
+//! Tests of the op list: upstream's `Op`, `OpData`, `OpRcPtrVec` and `FinalizeOpVec` tests
+//! (tests/cpu/Op_tests.cpp @ v2.5.2), but for `OpRcPtrVec/is_noop` and
+//! `OpRcPtrVec/dynamic_property`, which need the ExposureContrast op (Phase 5). The tests
+//! that aren't upstream's use the no-ops.
 
 use std::sync::Arc;
 
 use super::*;
 use crate::bit_depth_utils::{F32, Uint8};
 use crate::cpu_processor::BitDepthCast;
+use crate::open_color_types::OptimizationFlags;
+use crate::ops::gamma::gamma_op_data::{GammaOpData, GammaStyle};
+use crate::ops::log::log_op::{create_log_op_from_base, create_log_op_from_parameters};
 use crate::ops::matrix::MatrixOpData;
-use crate::ops::matrix::matrix_op::{create_identity_matrix_op, create_matrix_op};
+use crate::ops::matrix::matrix_op::{
+    create_identity_matrix_op, create_matrix_offset_op, create_matrix_op, create_scale_op,
+};
 use crate::ops::noop::{create_file_no_op, create_look_no_op};
+use crate::ops::range::range_op_data::RangeOpData;
 use crate::unit_test_log_utils::LogGuard;
 
 const ALL_DYNAMIC_TYPES: [DynamicPropertyType; 7] = [
@@ -349,4 +355,447 @@ fn serialize() {
 
     // Serialize not optimized OpVec i.e. contains some NoOps.
     serialize_op_vec(&ops, 0).unwrap();
+}
+
+/// Port of `Apply` (tests/cpu/Op_tests.cpp:14-20 @ v2.5.2).
+fn apply(ops: &OpVec, source: &mut [f32]) {
+    for op in ops.iter() {
+        op.apply(source).unwrap();
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(FinalizeOpVec, optimize_combine)` @ v2.5.2.
+#[test]
+fn optimize_combine() {
+    use ocio_testkit::upstream::check_close;
+
+    let m1: [f64; 16] = [
+        1.1, 0.2, 0.3, 0.4, //
+        0.5, 1.6, 0.7, 0.8, //
+        0.2, 0.1, 1.1, 0.2, //
+        0.3, 0.4, 0.5, 1.6,
+    ];
+
+    let v1: [f64; 4] = [-0.5, -0.25, 0.25, 0.0];
+
+    let m2: [f64; 16] = [
+        1.1, -0.1, -0.1, 0.0, //
+        0.1, 0.9, -0.2, 0.0, //
+        0.05, 0.0, 1.1, 0.0, //
+        0.0, 0.0, 0.0, 1.0,
+    ];
+    let v2: [f64; 4] = [-0.2, -0.1, -0.1, -0.2];
+
+    let source: [f32; 12] = [
+        0.1, 0.2, 0.3, 0.4, //
+        -0.1, -0.2, 50.0, 123.4, //
+        1.0, 1.0, 1.0, 1.0,
+    ];
+    let error = 1e-4f32;
+
+    let base = 10.0;
+    let log_slope = [0.18, 0.18, 0.18];
+    let lin_slope = [2.0, 2.0, 2.0];
+    let lin_offset = [0.1, 0.1, 0.1];
+    let log_offset = [1.0, 1.0, 1.0];
+
+    let create_log_op = |ops: &mut OpVec| {
+        create_log_op_from_parameters(
+            ops,
+            base,
+            &log_slope,
+            &log_offset,
+            &lin_slope,
+            &lin_offset,
+            TransformDirection::Forward,
+        )
+    };
+
+    // Combining ops.
+    {
+        let mut ops = OpVec::new();
+        create_matrix_offset_op(&mut ops, &m1, &v1, TransformDirection::Forward);
+        create_matrix_offset_op(&mut ops, &m2, &v2, TransformDirection::Forward);
+        assert_eq!(ops.len(), 2);
+
+        // No optimize: keep both matrix ops.
+        ops.finalize().unwrap();
+        ops.optimize(OptimizationFlags::NONE).unwrap();
+        assert_eq!(ops.len(), 2);
+
+        // Apply ops.
+        let mut tmp = source;
+        apply(&ops, &mut tmp);
+
+        // Optimize: Combine 2 matrix ops.
+        ops.finalize().unwrap();
+        ops.optimize(OptimizationFlags::DEFAULT).unwrap();
+        assert_eq!(ops.len(), 1);
+
+        // Apply ops.
+        let mut tmp2 = source;
+        apply(&ops, &mut tmp2);
+
+        // Compare results.
+        for i in 0..12 {
+            check_close(tmp2[i], tmp[i], error);
+        }
+    }
+
+    // Remove NoOp at the beginning.
+    {
+        let mut ops = OpVec::new();
+        // NoOp.
+        create_file_no_op(&mut ops, b"NoOp");
+        create_identity_matrix_op(&mut ops);
+        create_matrix_offset_op(&mut ops, &m1, &v1, TransformDirection::Forward);
+        create_log_op(&mut ops);
+
+        assert_eq!(ops.len(), 4);
+
+        // No optimize: only no-ops types are removed. Keep 3 other ops.
+        ops.finalize().unwrap();
+        ops.optimize(OptimizationFlags::NONE).unwrap();
+        assert_eq!(ops.len(), 3);
+
+        // Apply ops.
+        let mut tmp = source;
+        apply(&ops, &mut tmp);
+
+        // Optimize: remove all no-ops.
+        ops.finalize().unwrap();
+        ops.optimize(OptimizationFlags::DEFAULT).unwrap();
+        assert_eq!(ops.len(), 2);
+        assert_eq!(ops[0].get_info(), "<MatrixOffsetOp>");
+        assert_eq!(ops[1].get_info(), "<LogOp>");
+
+        // Apply ops.
+        let mut tmp2 = source;
+        apply(&ops, &mut tmp2);
+
+        // Compare results.
+        for i in 0..12 {
+            check_close(tmp2[i], tmp[i], error);
+        }
+    }
+
+    // remove NoOp in the middle
+    {
+        let mut ops = OpVec::new();
+        create_matrix_offset_op(&mut ops, &m1, &v1, TransformDirection::Forward);
+        // NoOp
+        create_identity_matrix_op(&mut ops);
+        create_file_no_op(&mut ops, b"NoOp");
+        create_log_op(&mut ops);
+
+        assert_eq!(ops.len(), 4);
+
+        // No optimize: only no-ops types are removed.
+        ops.finalize().unwrap();
+        ops.optimize(OptimizationFlags::NONE).unwrap();
+        assert_eq!(ops.len(), 3);
+
+        // Apply ops.
+        let mut tmp = source;
+        apply(&ops, &mut tmp);
+
+        // Optimize: remove all no ops.
+        ops.finalize().unwrap();
+        ops.optimize(OptimizationFlags::DEFAULT).unwrap();
+        assert_eq!(ops.len(), 2);
+        assert_eq!(ops[0].get_info(), "<MatrixOffsetOp>");
+        assert_eq!(ops[1].get_info(), "<LogOp>");
+
+        // Apply ops.
+        let mut tmp2 = source;
+        apply(&ops, &mut tmp2);
+
+        // Compare results.
+        for i in 0..12 {
+            check_close(tmp2[i], tmp[i], error);
+        }
+    }
+
+    // Remove NoOp in the end.
+    {
+        let mut ops = OpVec::new();
+        create_matrix_offset_op(&mut ops, &m1, &v1, TransformDirection::Forward);
+        create_log_op(&mut ops);
+        // NoOp.
+        create_identity_matrix_op(&mut ops);
+        create_file_no_op(&mut ops, b"NoOp");
+
+        assert_eq!(ops.len(), 4);
+
+        // No optimize: only no-op types are removed.
+        ops.finalize().unwrap();
+        ops.optimize(OptimizationFlags::NONE).unwrap();
+        assert_eq!(ops.len(), 3);
+
+        // Apply ops.
+        let mut tmp = source;
+        apply(&ops, &mut tmp);
+
+        // Optimize: remove the no op
+        ops.finalize().unwrap();
+        ops.optimize(OptimizationFlags::DEFAULT).unwrap();
+        assert_eq!(ops.len(), 2);
+        assert_eq!(ops[0].get_info(), "<MatrixOffsetOp>");
+        assert_eq!(ops[1].get_info(), "<LogOp>");
+
+        // Apply ops.
+        let mut tmp2 = source;
+        apply(&ops, &mut tmp2);
+
+        // Compare results.
+        for i in 0..12 {
+            check_close(tmp2[i], tmp[i], error);
+        }
+    }
+
+    // remove several NoOp
+    {
+        let mut ops = OpVec::new();
+        create_file_no_op(&mut ops, b"NoOp");
+        create_identity_matrix_op(&mut ops);
+        create_file_no_op(&mut ops, b"NoOp");
+        create_matrix_offset_op(&mut ops, &m1, &v1, TransformDirection::Forward);
+        create_file_no_op(&mut ops, b"NoOp");
+        create_identity_matrix_op(&mut ops);
+        create_log_op(&mut ops);
+        create_file_no_op(&mut ops, b"NoOp");
+        create_identity_matrix_op(&mut ops);
+
+        assert_eq!(ops.len(), 9);
+
+        // No optimize: only no-op types are removed.
+        ops.finalize().unwrap();
+        ops.optimize(OptimizationFlags::NONE).unwrap();
+        assert_eq!(ops.len(), 5);
+
+        // Apply ops.
+        let mut tmp = source;
+        apply(&ops, &mut tmp);
+
+        // Optimize: remove all no ops.
+        ops.finalize().unwrap();
+        ops.optimize(OptimizationFlags::DEFAULT).unwrap();
+        assert_eq!(ops.len(), 2);
+        assert_eq!(ops[0].get_info(), "<MatrixOffsetOp>");
+        assert_eq!(ops[1].get_info(), "<LogOp>");
+
+        // Apply ops.
+        let mut tmp2 = source;
+        apply(&ops, &mut tmp2);
+
+        // Compare results.
+        for i in 0..12 {
+            check_close(tmp2[i], tmp[i], error);
+        }
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Op, non_dynamic_ops)` @ v2.5.2.
+#[test]
+fn non_dynamic_ops() {
+    let scale = [2.0, 2.0, 2.0, 1.0];
+
+    let mut ops = OpVec::new();
+    create_scale_op(&mut ops, &scale, TransformDirection::Forward);
+
+    assert_eq!(ops.len(), 1);
+    // (OCIO_REQUIRE_ASSERT(ops[0]): an op can't be null here.)
+
+    // Test that non-dynamic ops such as matrix respond properly to dynamic
+    // property requests.
+    assert!(!ops[0].has_dynamic_property(DynamicPropertyType::Exposure));
+    assert!(!ops[0].has_dynamic_property(DynamicPropertyType::Contrast));
+    assert!(!ops[0].has_dynamic_property(DynamicPropertyType::Gamma));
+
+    ocio_testkit::upstream::check_throw_what(
+        ops[0].get_dynamic_property(DynamicPropertyType::Gamma),
+        "does not implement dynamic property",
+    );
+}
+
+/// The Matrix data `op` holds.
+fn matrix_mut(op: &mut OpData) -> &mut MatrixOpData {
+    match op {
+        OpData::Matrix(data) => data,
+        other => panic!("not a Matrix op: {other:?}"),
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(OpData, equality)` @ v2.5.2.
+///
+/// Upstream's `operator==` takes an `OpData` on its right and dispatches on its left, so each
+/// comparison here is one of `OpData`s. Upstream's `op2` is `mat2` through the `OpData` base,
+/// the same object: here `mat2` lives in `op2`.
+#[test]
+fn equality() {
+    let mat1 = OpData::Matrix(MatrixOpData::create_diagonal_matrix(1.1));
+    let mut op2 = mat1.clone();
+
+    // Use the MatrixOpData::operator==().
+    assert!(op2 == mat1);
+
+    let range = OpData::Range(RangeOpData::with_values(0.0, 1.0, 0.5, 1.5).unwrap());
+
+    // Use the MatrixOpData::operator==().
+    assert!(!(op2 == range));
+
+    // Use the RangeOpData::operator==().
+    assert!(!(range == mat1));
+
+    // Use the OpData::operator==().
+    let op1 = &range;
+    assert!(!(*op1 == mat1));
+
+    // Use the OpData::operator==().
+    assert!(!(op2 == *op1));
+
+    // Change something.
+
+    // Use the MatrixOpData::operator==().
+    assert!(op2 == mat1);
+
+    // Use the OpData::operator==().
+    assert!(op2 == mat1);
+
+    let mat2 = matrix_mut(&mut op2);
+    let value = mat2.get_offset_value(1).unwrap() + 1.0;
+    mat2.set_offset_value(1, value).unwrap();
+
+    // Use the MatrixOpData::operator==().
+    assert!(!(op2 == mat1));
+
+    // Use the OpData::operator==().
+    assert!(!(op2 == mat1));
+}
+
+/// Port of `OCIO_ADD_TEST(OpRcPtrVec, erase_insert)` @ v2.5.2.
+#[test]
+fn erase_insert() {
+    let mut ops = OpVec::new();
+    let mut mat = MatrixOpData::create_diagonal_matrix(1.1);
+    mat.set_id(b"First");
+    create_matrix_op(&mut ops, mat, TransformDirection::Forward);
+    assert_eq!(ops.len(), 1);
+
+    let range = RangeOpData::with_values(0.0, 1.0, 0.5, 1.5).unwrap();
+
+    create_range_op(&mut ops, range.clone(), TransformDirection::Forward).unwrap();
+
+    assert_eq!(ops.len(), 2);
+
+    // Test push_back.
+    let mat = MatrixOpData::create_diagonal_matrix(1.3);
+    create_matrix_op(&mut ops, mat, TransformDirection::Forward);
+
+    assert_eq!(ops.len(), 3);
+
+    // Test erase.
+    ops.erase(1);
+
+    assert_eq!(ops.len(), 2);
+    assert_eq!(ops[0].get_info(), "<MatrixOffsetOp>");
+    assert_eq!(ops[1].get_info(), "<MatrixOffsetOp>");
+
+    // Test erase.
+    create_log_op_from_base(&mut ops, 1.2, TransformDirection::Forward);
+    create_log_op_from_base(&mut ops, 1.1, TransformDirection::Forward);
+
+    create_range_op(&mut ops, range, TransformDirection::Forward).unwrap();
+
+    assert_eq!(ops.len(), 5);
+
+    ops.erase_range(1, 4);
+
+    assert_eq!(ops.len(), 2);
+    assert_eq!(ops[0].get_info(), "<MatrixOffsetOp>");
+    assert_eq!(ops[1].get_info(), "<RangeOp>");
+
+    // Test insert.
+    let mut ops1 = ops.clone();
+
+    assert_eq!(ops1.len(), 2);
+
+    ops1.insert(1, &ops[0..1]);
+    assert_eq!(ops1.len(), 3);
+    assert_eq!(ops1[0].get_info(), "<MatrixOffsetOp>");
+    assert_eq!(ops1[1].get_info(), "<MatrixOffsetOp>");
+    assert_eq!(ops1[2].get_info(), "<RangeOp>");
+
+    // Test operator +=.
+    let mut ops2 = ops.clone();
+    assert_eq!(ops2.len(), 2);
+
+    // (`ops2 += ops2`: upstream appends a copy.)
+    let copy = ops2.clone();
+    ops2.append(&copy).unwrap();
+
+    assert_eq!(ops2.len(), 4);
+    assert_eq!(ops2[0].get_info(), "<MatrixOffsetOp>");
+    assert_eq!(ops2[1].get_info(), "<RangeOp>");
+    assert_eq!(ops2[2].get_info(), "<MatrixOffsetOp>");
+    assert_eq!(ops2[3].get_info(), "<RangeOp>");
+}
+
+/// Port of `OCIO_ADD_TEST(OpRcPtrVec, clone_invert)` @ v2.5.2.
+#[test]
+fn clone_invert() {
+    let mut ops = OpVec::new();
+
+    create_look_no_op(&mut ops, b"look");
+
+    let params = vec![1.001];
+    let gamma = GammaOpData::new(
+        GammaStyle::BasicFwd,
+        params.clone(),
+        params.clone(),
+        params.clone(),
+        params,
+    );
+    create_gamma_op(&mut ops, gamma, TransformDirection::Forward);
+
+    create_log_op_from_base(&mut ops, 2., TransformDirection::Forward);
+
+    assert_eq!(ops.len(), 3);
+
+    // Test the clone() method.
+
+    let cloned = ops.clone_ops().unwrap();
+    assert_eq!(cloned.len(), 3);
+
+    // (Upstream compares the ops' addresses; an op here is its shared data.)
+    assert!(!Arc::ptr_eq(ops[0].data(), cloned[0].data()));
+    assert!(!Arc::ptr_eq(ops[1].data(), cloned[1].data()));
+    assert!(!Arc::ptr_eq(ops[2].data(), cloned[2].data()));
+
+    assert_eq!(ops[0].get_info(), cloned[0].get_info());
+    assert_eq!(ops[1].get_info(), cloned[1].get_info());
+    assert_eq!(ops[2].get_info(), cloned[2].get_info());
+
+    // Test the invert() method.
+
+    let inverted = ops.invert().unwrap();
+    assert_eq!(inverted.len(), 3);
+
+    for op1 in ops.iter() {
+        for op2 in cloned.iter() {
+            assert!(!Arc::ptr_eq(op1.data(), op2.data()));
+        }
+    }
+
+    // Test the Log.
+    let inv = &inverted[0];
+    assert!(ops[2].is_inverse(inv));
+
+    // Test the Gamma.
+    let inv = &inverted[1];
+    assert!(ops[1].is_inverse(inv));
+
+    assert_eq!(ops[0].get_info(), inverted[2].get_info());
+    assert_eq!(ops[1].get_info(), inverted[1].get_info());
+    assert_eq!(ops[2].get_info(), inverted[0].get_info());
 }

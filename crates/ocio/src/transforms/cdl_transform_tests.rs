@@ -2,12 +2,11 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Tests of the CDL transform: the tests of `tests/cpu/transforms/CDLTransform_tests.cpp` @
-//! v2.5.2 that need no file (`equality`, `buildops`, `description`, `style`), and `CDLOp
-//! create_transform` (tests/cpu/ops/cdl/CDLOp_tests.cpp @ v2.5.2), which tests
-//! `CreateCDLTransform` and needed the transform. The file tests come with the CDL readers
-//! (Phase 4), and `apply_optimize_simplify` with the processor (WP 1.8h). The text, the
-//! validation, the equality and the ops built are compared with the wheel's in
-//! `tests/cdl_transform_oracle.rs`.
+//! v2.5.2 that need no file (`equality`, `buildops`, `description`, `style`,
+//! `apply_optimize_simplify`), and `CDLOp create_transform` (tests/cpu/ops/cdl/CDLOp_tests.cpp
+//! @ v2.5.2), which tests `CreateCDLTransform` and needed the transform. The file tests come
+//! with the CDL readers (Phase 4). The text, the validation, the equality and the ops built
+//! are compared with the wheel's in `tests/cdl_transform_oracle.rs`.
 
 use std::sync::Arc;
 
@@ -385,4 +384,64 @@ fn build_cdl_op_validates_the_data() {
         validated.message()
     );
     assert_eq!(ops.len(), 0);
+}
+
+/// Port of `OCIO_ADD_TEST(CDLTransform, apply_optimize_simplify)` @ v2.5.2.
+#[test]
+fn apply_optimize_simplify() {
+    use ocio_testkit::upstream::check_close;
+
+    use crate::config::Config;
+
+    let mut cdl = CdlTransform::new();
+    const SLOPE: [f64; 3] = [0.8, 0.9, 1.1];
+    cdl.set_slope(&SLOPE);
+    const OFFSET: [f64; 3] = [0.1, 0.05, -0.2];
+    cdl.set_offset(&OFFSET);
+    cdl.set_sat(1.23);
+    let config = Config::create_raw();
+    let proc = config.processor(&Transform::Cdl(cdl.clone())).unwrap();
+
+    // Verify that non-simplified and simplified cpu processors are equivalent.
+
+    let no_simplify =
+        OptimizationFlags(OptimizationFlags::DEFAULT.0 & !OptimizationFlags::SIMPLIFY_OPS.0);
+    let cpu = proc.optimized_cpu_processor(no_simplify).unwrap();
+    const SOURCE: [f32; 3] = [-0.1, 0.5, 1.5];
+    let mut pix_no_simplify = [SOURCE[0], SOURCE[1], SOURCE[2]];
+    cpu.apply_rgb(&mut pix_no_simplify).unwrap();
+
+    let cpu = proc
+        .optimized_cpu_processor(OptimizationFlags::DEFAULT)
+        .unwrap();
+    let mut pix_simplify = [SOURCE[0], SOURCE[1], SOURCE[2]];
+    cpu.apply_rgb(&mut pix_simplify).unwrap();
+
+    const ERROR: f32 = 2.0e-5;
+    check_close(pix_no_simplify[0], pix_simplify[0], ERROR);
+    check_close(pix_no_simplify[1], pix_simplify[1], ERROR);
+    check_close(pix_no_simplify[2], pix_simplify[2], ERROR);
+
+    // Same in inverse direction.
+
+    cdl.set_direction(TransformDirection::Inverse);
+
+    let proc = config.processor(&Transform::Cdl(cdl)).unwrap();
+    let cpu = proc.optimized_cpu_processor(no_simplify).unwrap();
+    pix_no_simplify[0] = SOURCE[0];
+    pix_no_simplify[1] = SOURCE[1];
+    pix_no_simplify[2] = SOURCE[2];
+    cpu.apply_rgb(&mut pix_no_simplify).unwrap();
+
+    let cpu = proc
+        .optimized_cpu_processor(OptimizationFlags::DEFAULT)
+        .unwrap();
+    pix_simplify[0] = SOURCE[0];
+    pix_simplify[1] = SOURCE[1];
+    pix_simplify[2] = SOURCE[2];
+    cpu.apply_rgb(&mut pix_simplify).unwrap();
+
+    check_close(pix_no_simplify[0], pix_simplify[0], ERROR);
+    check_close(pix_no_simplify[1], pix_simplify[1], ERROR);
+    check_close(pix_no_simplify[2], pix_simplify[2], ERROR);
 }

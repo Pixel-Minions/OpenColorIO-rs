@@ -458,7 +458,7 @@ path = "src/OpenColorIO/Op.h"
 kind = "src"
 target = ["crates/ocio-ops/src/op.rs", "crates/ocio-ops/src/op_data.rs", "crates/ocio-gpu/src/gpu_processor.rs"]
 status = "partial"
-note = "S2, 1.1d: OpCPU (as the CpuOp trait, with the typed apply_bit_depth); 1.2c: OpData (an enum with a variant per family), Op, OpRcPtrVec (as OpVec); getIdentityReplacement with the Matrix op; not yet: dumpMetadata (WP 1.8), optimize and optimizeForBitdepth (1.2d); 1.2d: HasFlag, as OptimizationFlags::has_flag; 1.7e: extractGpuShaderInfo, in ocio-gpu (extract_op_gpu_shader_info, gpu_processor.rs), which matches on the op data's variant"
+note = "S2, 1.1d: OpCPU (as the CpuOp trait, with the typed apply_bit_depth); 1.2c: OpData (an enum with a variant per family), Op, OpRcPtrVec (as OpVec); getIdentityReplacement with the Matrix op; 1.2d: optimize and optimizeForBitdepth (OpOptimizers.cpp), HasFlag, as OptimizationFlags::has_flag; 1.8h1: dumpMetadata, in Processor::compute_metadata (crates/ocio/src/processor.rs); 1.7e: extractGpuShaderInfo, in ocio-gpu (extract_op_gpu_shader_info, gpu_processor.rs), which matches on the op data's variant"
 
 [[file]]
 path = "src/OpenColorIO/OpBuilders.h"
@@ -524,7 +524,7 @@ path = "src/OpenColorIO/Processor.cpp"
 kind = "src"
 target = ["crates/ocio/src/processor.rs"]
 status = "partial"
-note = "1.8g/1.8h1: ProcessorMetadata, Processor::Impl (copy, queries, getCacheID, createGroupTransform, the optimized processors and their cache, EnvironmentOverride with each wheel's std::stoul, the CPU processors and their cache, setProcessorCacheFlags, setTransform, computeMetadata); checked against the wheel through processor_ops (crates/ocio/tests/processor_oracle.rs); 1.8h2: createGroupTransform over every family ported so far (Allocation, CDL, Exponent, ExponentWithLinear, Log, LogAffine, LogCamera, Lut1D, Matrix, Range), the processor and its optimized processor checked against the wheel by every family's oracle test (crates/ocio/tests/common/transforms.rs, check_processors), and the optimized processors of integer and half input, whose LUTs the optimizer bakes or folds (check_optimized_processors), the format metadata createGroupTransform copies (a config per group) and the output bit depth of getOptimizedProcessor (processor_oracle.rs); 1.8h3: getDefaultGPUProcessor, getOptimizedGPUProcessor and getGPUProcessor with its cache (crates/ocio/tests/processor_gpu_oracle.rs, processor_cache_oracle.rs). getOptimizedLegacyGPUProcessor comes with the 3D LUT op (PartitionGPUOps, Create3DLut), setColorSpaceConversion and concatenate with the config (Phase 3). To test once MatrixTransform and ExposureContrastTransform exist: the verifier's surviving mutants M11 (the CPU cache ignoring dynamic ops), M36 (the fallback taking the first entry), M42 and M47 (card p1-processor verification, 2026-10-04)"
+note = "1.8g/1.8h1: ProcessorMetadata, Processor::Impl (copy, queries, getCacheID, createGroupTransform, the optimized processors and their cache, EnvironmentOverride with each wheel's std::stoul, the CPU processors and their cache, setProcessorCacheFlags, setTransform, computeMetadata); checked against the wheel through processor_ops (crates/ocio/tests/processor_oracle.rs); 1.8h2: createGroupTransform over every family ported so far (Allocation, CDL, Exponent, ExponentWithLinear, Log, LogAffine, LogCamera, Lut1D, Matrix, Range), the processor and its optimized processor checked against the wheel by every family's oracle test (crates/ocio/tests/common/transforms.rs, check_processors), and the optimized processors of integer and half input, whose LUTs the optimizer bakes or folds (check_optimized_processors), the format metadata createGroupTransform copies (a config per group) and the output bit depth of getOptimizedProcessor (processor_oracle.rs); 1.8h3: getDefaultGPUProcessor, getOptimizedGPUProcessor and getGPUProcessor with its cache (crates/ocio/tests/processor_gpu_oracle.rs, processor_cache_oracle.rs). getOptimizedLegacyGPUProcessor comes with the 3D LUT op (PartitionGPUOps, Create3DLut), setColorSpaceConversion and concatenate with the config (Phase 3). To test once ExposureContrastTransform exists: the verifier's surviving mutant M11 (the CPU cache ignoring dynamic ops) (card p1-processor verification, 2026-10-04); its M36 (the fallback taking the first entry), M42 (a copy keeping the processor's cache ID) and M47 (no optimizeForBitdepth) are killed by processors_of_ops_match_the_wheel (crates/ocio/tests/processor_cache_oracle.rs, p1-tests-catchup)"
 
 [[file]]
 path = "src/OpenColorIO/Processor.h"
@@ -1121,7 +1121,7 @@ path = "src/OpenColorIO/ops/cdl/CDLOp.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/cdl/cdl_op.rs", "crates/ocio-gpu/src/gpu_processor.rs"]
 status = "partial"
-note = "1.3c3: CDLOp (the op's behaviors on OpData::Cdl) and both CreateCDLOp; checked against the wheel through CPU processor cache IDs and pixels (tests/cdl_op_oracle.rs: identities, inverse pairs, simplified CDLs, optimization flags). Not yet: CreateCDLTransform and BuildCDLOp (the CDLTransform, WP 1.8). Its GPU part: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's Cdl arm (gpu_processor.rs, 1.3c4)"
+note = "1.3c3: CDLOp (the op's behaviors on OpData::Cdl) and both CreateCDLOp; checked against the wheel through CPU processor cache IDs and pixels (tests/cdl_op_oracle.rs: identities, inverse pairs, simplified CDLs, optimization flags). p1-transforms-fam2 (1.8f): CreateCDLTransform and BuildCDLOp (both config versions), in crates/ocio/src/transforms/cdl_transform.rs. Its GPU part: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's Cdl arm (gpu_processor.rs, 1.3c4)"
 
 [[file]]
 path = "src/OpenColorIO/ops/cdl/CDLOpCPU.cpp"
@@ -1317,7 +1317,7 @@ path = "src/OpenColorIO/ops/gamma/GammaOp.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gamma/gamma_op.rs"]
 status = "partial"
-note = "1.3g3: GammaOp (the op's behaviors on OpData::Gamma) and CreateGammaOp; checked against the wheel through CPU processor cache IDs and pixels (tests/gamma_op_oracle.rs: identities, inverse pairs, compositions, optimization flags). Not yet: CreateGammaTransform, BuildExponentWithLinearOp and BuildExponentOp (the transforms, WP 1.8). Its GPU part: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's Gamma arm (gpu_processor.rs, 1.3g4)"
+note = "1.3g3: GammaOp (the op's behaviors on OpData::Gamma) and CreateGammaOp; checked against the wheel through CPU processor cache IDs and pixels (tests/gamma_op_oracle.rs: identities, inverse pairs, compositions, optimization flags). p1-transforms-fam2 (1.8d): CreateGammaTransform and BuildExponentWithLinearOp in exponent_with_linear_transform.rs, BuildExponentOp in exponent_transform.rs. Its GPU part: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's Gamma arm (gpu_processor.rs, 1.3g4)"
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOpCPU.cpp"
@@ -1639,7 +1639,7 @@ path = "src/OpenColorIO/ops/log/LogOp.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/log/log_op.rs"]
 status = "partial"
-note = "1.3l3: CreateLogOp; CreateLogTransform comes with the transforms (WP 1.8)"
+note = "1.3l3: CreateLogOp; p1-transforms-fam2 (1.8e): the three BuildLogOp and CreateLogTransform, in crates/ocio/src/transforms/log_transform.rs"
 
 [[file]]
 path = "src/OpenColorIO/ops/log/LogOpCPU.cpp"
@@ -1968,7 +1968,7 @@ path = "src/OpenColorIO/ops/noop/NoOps.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/noop/no_ops.rs"]
 status = "partial"
-note = "1.2c: FileNoOp, LookNoOp, CreateFileNoOp and CreateLookNoOp, CPU side (the op class is kept in the data, NoOpKind); 1.3n1: AllocationNoOp and CreateGpuAllocationNoOp; not yet: dumpMetadata (WP 1.8), PartitionGPUOps and Create3DLut with their helpers (they need the Lut3D op)"
+note = "1.2c: FileNoOp, LookNoOp, CreateFileNoOp and CreateLookNoOp, CPU side (the op class is kept in the data, NoOpKind); 1.3n1: AllocationNoOp and CreateGpuAllocationNoOp; 1.8h1: the dumpMetadata overrides, in Processor::compute_metadata (crates/ocio/src/processor.rs); not yet: PartitionGPUOps and Create3DLut with their helpers (they need the Lut3D op)"
 
 [[file]]
 path = "src/OpenColorIO/ops/noop/NoOps.h"
@@ -4152,7 +4152,8 @@ note = "build system"
 path = "tests/cpu/CPUProcessor_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/cpu_processor_tests.rs"]
-status = "todo"
+status = "partial"
+note = "flag_composition. with_one_matrix, one_pixel, optimizations, planar_vs_packed and the scanline_* tests wait for Config::Create() (Phase 3, owner decision 2026-10-04), through their helpers (BuildProcessor, ComputeImage); dynamic_properties waits for Config::Create() (Phase 3, owner decision 2026-10-04) and ExposureContrastTransform (Phase 5), with_one_1d_lut for Config::Create() (Phase 3, owner decision 2026-10-04) and FileTransform; image_desc and with_several_ops read a config with a FileTransform (Config::CreateFromStream, Phase 3)"
 
 [[file]]
 path = "tests/cpu/Caching_tests.cpp"
@@ -4272,13 +4273,14 @@ path = "tests/cpu/OpOptimizers_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/op_optimizers_tests.rs"]
 status = "partial"
-note = "p1-optimizer: gamma_prefix; multi_op_prefix needs the Lut1D float renderers (Phase 2) for CompareRender, opt_prefix_test1 the CTF reader (WP 1.6); the rest with their ops' factories"
+note = "p1-optimizer: gamma_prefix; p1-tests-catchup: remove_leading_clamp_identity, remove_trailing_clamp_identity, combine_ops, non_optimizable, optimizable, lut1d_identity_replacement, range_composition, gamma_comp_identity, replace_ops. Not yet: the tests that read files through BuildOpsTest (optimization, optimization2, lut1d_identities, lut1d_identity_replacement_order, invlut_pair_identities, mntr_identities, gamma_comp, gamma_comp_test2, log_identities, range_lut, prefer_pair_inverse_over_combine, opt_prefix_test1: the CTF/CLF and spi1d readers, Phase 4); remove_inverse_ops (the FixedFunction op, Phase 2); dynamic_ops and dyn_properties_prefix (the ExposureContrast op, Phase 5); lut1d_half_domain_keep_prior_range and multi_op_prefix (the inverse Lut1D and the Lut1D float renderers that CompareRender runs, Phase 2)"
 
 [[file]]
 path = "tests/cpu/Op_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/op_tests.rs"]
-status = "todo"
+status = "partial"
+note = "all but OpRcPtrVec/is_noop and OpRcPtrVec/dynamic_property, which need the ExposureContrast op (Phase 5)"
 
 [[file]]
 path = "tests/cpu/ParseUtils_tests.cpp"
@@ -4304,7 +4306,7 @@ path = "tests/cpu/Processor_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/processor_tests.rs"]
 status = "partial"
-note = "optimization_env_override_basic ported; the other tests build MatrixTransform, ExposureContrastTransform, Lut3DTransform and GPU processors, and come with them. Cache tests on ops built directly stand in meanwhile (cache_optimized_processors, cache_cpu_processors)"
+note = "optimization_env_override_basic. basic_cache, channel_crosstalk and optimized_processor wait for Config::Create() (Phase 3, owner decision 2026-10-04); cache_optimized_processors, cache_cpu_processors, cache_gpu_processors, is_noop and dynamic_properties wait for Config::Create() (Phase 3, owner decision 2026-10-04) and ExposureContrastTransform (Phase 5); basic_cache_lut for Config::Create() (Phase 3, owner decision 2026-10-04) and Lut3DTransform (Phase 2); unique_dynamic_properties for the ExposureContrast op (Phase 5). Cache tests on ops built directly stand in meanwhile (cache_optimized_processors, cache_cpu_processors in crates/ocio/src/processor_tests.rs), with the wheel comparisons of crates/ocio/tests/processor_cache_oracle.rs"
 
 [[file]]
 path = "tests/cpu/SIMD_tests.cpp"
@@ -4832,51 +4834,53 @@ status = "todo"
 path = "tests/cpu/ops/matrix/MatrixOpCPU_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/matrix/matrix_op_cpu_tests.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "tests/cpu/ops/matrix/MatrixOpData_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/matrix/matrix_op_data_tests.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "tests/cpu/ops/matrix/MatrixOp_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/matrix/matrix_op_tests.rs", "crates/ocio/src/transforms/matrix_transform_tests.rs"]
-status = "todo"
-note = "create_transform needs the MatrixTransform: in crates/ocio/src/transforms/matrix_transform_tests.rs (p1-transforms-fam1, 1.8b)"
+status = "done"
+note = "create_transform is in crates/ocio/src/transforms/matrix_transform_tests.rs (p1-transforms-fam1, 1.8b)"
 
 [[file]]
 path = "tests/cpu/ops/noop/NoOps_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/noop/no_ops_tests.rs"]
-status = "todo"
+status = "partial"
+note = "allocation_op, file_op, look_op; partition_gpu_ops and throw test PartitionGPUOps, which needs the Lut3D op (Phase 2)"
 
 [[file]]
 path = "tests/cpu/ops/range/RangeOpCPU_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/range/range_op_cpu_tests.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "tests/cpu/ops/range/RangeOpData_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/range/range_op_data_tests.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "tests/cpu/ops/range/RangeOp_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/range/range_op_tests.rs", "crates/ocio/src/transforms/range_transform_tests.rs"]
-status = "todo"
-note = "create_transform and RangeTransform no_clamp_converts_to_matrix need the RangeTransform: in crates/ocio/src/transforms/range_transform_tests.rs (p1-transforms-fam1, 1.8c)"
+status = "done"
+note = "create_transform and RangeTransform no_clamp_converts_to_matrix are in crates/ocio/src/transforms/range_transform_tests.rs (p1-transforms-fam1, 1.8c)"
 
 [[file]]
 path = "tests/cpu/ops/reference/ReferenceOpData_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/reference/reference_op_data_tests.rs"]
-status = "todo"
+status = "partial"
+note = "accessors; the load_* tests read CTF files with references (the CTF reader and FileTransform, Phase 4)"
 
 [[file]]
 path = "tests/cpu/transforms/AllocationTransform_tests.cpp"
@@ -4896,7 +4900,7 @@ path = "tests/cpu/transforms/CDLTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/cdl_transform_tests.rs"]
 status = "partial"
-note = "p1-transforms-fam2 (1.8f): equality, buildops, description, style; the file tests come with the CDL readers (Phase 4), apply_optimize_simplify with the processor (1.8h)"
+note = "p1-transforms-fam2 (1.8f): equality, buildops, description, style; p1-tests-catchup: apply_optimize_simplify. The file tests come with the CDL readers (Phase 4)"
 
 [[file]]
 path = "tests/cpu/transforms/ColorSpaceTransform_tests.cpp"
