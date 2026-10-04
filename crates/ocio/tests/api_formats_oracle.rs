@@ -24,11 +24,12 @@
 //! combination for every case in both directions.
 //!
 //! Waiver W0002 applies to the cases with NaN parameters where their scope says, through the
-//! battery's own comparisons only: the images, decoded into RGBA `f32`, with `Case::compare`,
-//! where the pixels' renderer ran with fast math as [`w0002_combo`] says; and where the CPU
-//! processors' cache IDs differ, the 1D LUTs the optimizer baked from the ops, read back from
-//! both optimized processors, with `Case::compare_baked_luts` (the owner's extension of W0002,
-//! 2026-10-04). Everything else compares bit for bit, and what W0002 covers is counted.
+//! battery's own comparisons only: the images, decoded into RGBA `f32`, with
+//! `Case::compare_pixels`, where the pixels' renderer ran with fast math as [`w0002_combo`]
+//! says; and where the CPU processors' cache IDs differ, the 1D LUTs the optimizer baked from
+//! the ops, read back from both optimized processors, with `Case::compare_baked_luts` (the
+//! owner's extension of W0002, 2026-10-04). Everything else compares bit for bit, and what
+//! W0002 covers is counted. A test in `battery::params` pins the callers of both.
 //!
 //! The `Lut1DTransform`'s float renderers, composing LUTs, the inverse LUT and the hue
 //! adjustment are Phase 2's (WP 2.1, 2.5). [`lut1d_deferral`] says, from the renderer upstream
@@ -452,7 +453,7 @@ fn destination_layout(job: &Job) -> Layout {
 
 /// Compares the buffers after a job, the wheel's and the port's: the source's (when it isn't
 /// the destination) byte for byte, and the destination image byte for byte or, where they
-/// differ, through the case's comparison ([`battery::params::Case::compare`]), which applies
+/// differ, through the case's comparison ([`battery::params::Case::compare_pixels`]), which applies
 /// W0002 where it covers the case. Returns how many NaN values W0002 waived.
 fn compare_images(
     case: &battery::params::Case<Calls>,
@@ -486,7 +487,7 @@ fn compare_images(
     let inputs = decode(job.combo.layout, job.combo.input, &source);
     let expected = decode(layout, depth, &wheel[output.clone()]);
     let actual = decode(layout, depth, &port[output]);
-    match case.compare(
+    match case.compare_pixels(
         &w0002_combo(job.dir, &job.combo),
         &inputs,
         &expected,
@@ -819,7 +820,6 @@ fn port(class: &Class, job: &Job, calls: &Calls) -> PortOutcome {
     Ok((result, buffers))
 }
 
-/// What W0002 covered in a class's jobs.#[derive(Debug, Default)]struct Waived {    /// Destination images with NaN values that differ in sign or payload bits only.    images: usize,    /// Those values.    values: usize,    /// CPU processors' cache IDs that differ in the hashes of baked 1D LUTs only.    cache_ids: usize,    /// The NaN entries of those LUTs that differ in sign or payload bits only.    lut_entries: usize,}
 /// What W0002 covered in a class's jobs.
 #[derive(Debug, Default)]
 struct Waived {
