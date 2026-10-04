@@ -541,10 +541,23 @@ fn check_clean(root: &Path) -> Result<(), String> {
     }
 }
 
-/// Removes a scratch worktree (land's or `gate --staged`'s), registered or not. `--force`: it
-/// holds the upstream submodule and may be stopped mid-rebase, and git refuses to remove
-/// either without it.
+/// Removes a scratch worktree (land's, `gate --staged`'s, or one `clean-scratch` deletes),
+/// registered or not. `--force`: it holds the upstream submodule and may be stopped
+/// mid-rebase, and git refuses to remove either without it.
+///
+/// First every link inside it is unlinked (`links::unlink_all`): `git worktree remove --force`
+/// deletes what a junction points to (Git for Windows 2.53), such as the main checkout's
+/// submodule when a worktree links `upstream/OpenColorIO` to it. A worktree that is itself a
+/// link is refused.
 pub(crate) fn remove_worktree(root: &Path, wt: &Path) -> Result<(), String> {
+    for link in crate::links::unlink_all(wt)? {
+        println!(
+            "removed the link {} (not what it pointed to)",
+            crate::plain_path(&link)
+                .to_string_lossy()
+                .replace('\\', "/")
+        );
+    }
     let list = crate::git(root, &["worktree", "list", "--porcelain"])?;
     let registered = list
         .lines()
@@ -563,10 +576,7 @@ pub(crate) fn remove_worktree(root: &Path, wt: &Path) -> Result<(), String> {
             ],
         )?;
     }
-    if wt.exists() {
-        std::fs::remove_dir_all(wt).map_err(|e| format!("{}: {e}", wt.display()))?;
-    }
-    Ok(())
+    crate::links::remove_tree(wt)
 }
 
 /// Nested under a long checkout path, OCIO's longest file names (84 characters inside the
