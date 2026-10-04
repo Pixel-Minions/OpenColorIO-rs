@@ -46,7 +46,10 @@
 //! Comparisons are exact. Waiver W0002 applies automatically, and only, to the channels of NaN
 //! parameters ([`params::Case::compare`]); a case can narrow it
 //! ([`params::Case::w0002_only_where`]), never widen it. Infinite and extreme finite
-//! parameters compare bit for bit. Nothing else uses W0002.
+//! parameters compare bit for bit. Nothing else uses W0002, but the format sweep through the API
+//! (`crates/ocio/tests/api_formats_oracle.rs`), through the same [`params::Case`] comparisons:
+//! [`params::Case::compare`] on its decoded images, and [`params::Case::compare_baked_luts`]
+//! for the 1D LUTs the optimizer bakes from a case with NaN parameters (`waivers.toml`).
 //!
 //! ```no_run
 //! use ocio_testkit::battery::params::{A, Case, Channels, Params, Precision, RGB, Slot};
