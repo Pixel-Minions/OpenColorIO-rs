@@ -29,7 +29,7 @@ use ocio_ops::hash_utils::cache_id_hash;
 use ocio_ops::image_desc::Bytes;
 use ocio_ops::op::OpVec;
 use ocio_ops::op_data::OpData;
-use ocio_ops::open_color_types::{BitDepth, OptimizationFlags, TransformDirection};
+use ocio_ops::open_color_types::{OptimizationFlags, TransformDirection};
 use ocio_ops::ops::lut1d::Lut1DOpData;
 use ocio_testkit::Oracle;
 use ocio_testkit::battery::BitDepth as Depth;
@@ -71,37 +71,60 @@ fn chains() -> Vec<Vec<T>> {
         vec![T::Log(2.0, F), T::CrossMatrix, T::Log(2.0, I)],
         vec![T::CrossMatrix, T::Log(2.0, F)],
         vec![T::Range, T::Matrix],
+        // `optimizeForBitdepth` removes an identity clamp at an integer input before the bake,
+        // not at half input, and one at an integer output.
+        vec![T::Range01, T::Log(2.0, F)],
+        vec![T::Log(2.0, F), T::Range01],
     ]
 }
 
 /// The port's optimized ops: `getOptimizedProcessor`'s steps on the processor's ops.
-fn port_optimized(chain: &[T], flags: OptimizationFlags, input: Depth) -> Result<OpVec> {
+fn port_optimized(
+    chain: &[T],
+    flags: OptimizationFlags,
+    input: Depth,
+    output: Depth,
+) -> Result<OpVec> {
     let mut ops = port_raw_ops(chain)?;
     ops.finalize()?;
     ops.optimize(flags)?;
-    ops.optimize_for_bitdepth(port_depth(input), BitDepth::F32, flags)?;
+    ops.optimize_for_bitdepth(port_depth(input), port_depth(output), flags)?;
     Ok(ops)
 }
+
+/// A case of the optimized processor: a list, the input and output bit depths, and the flags.
+type BakeCase = (Vec<T>, Depth, Depth, &'static str, OptimizationFlags);
 
 #[test]
 fn the_baked_luts_match_the_wheel() {
     let mut cases = Vec::new();
     for chain in chains() {
         for input in INPUTS {
-            for (name, flags) in FLAGS {
-                cases.push((chain.clone(), input, name, flags));
+            for output in [Depth::F32, Depth::Uint16] {
+                for (name, flags) in FLAGS {
+                    cases.push((chain.clone(), input, output, name, flags));
+                }
             }
         }
     }
+    let baked = check_bakes(&cases);
+    // Most cases bake; some don't.
+    assert!(baked > cases.len() / 2 && baked < cases.len(), "{baked}");
+}
+
+/// The optimized processors of `cases` against the wheel: their cache IDs, and the baked LUT
+/// entry for entry. Returns how many baked.
+fn check_bakes(cases: &[BakeCase]) -> usize {
     let calls: Vec<BatchCall<'_>> = cases
         .iter()
-        .map(|(chain, input, name, _)| {
+        .map(|(chain, input, output, name, _)| {
             let children: Vec<Value> = chain.iter().map(common::log_chain::transform).collect();
             BatchCall {
                 cmd: "processor_ops",
                 args: json!({
                     "transform": {"class": "GroupTransform", "children": children},
                     "in_bitdepth": depth_name(port_depth(*input)),
+                    "out_bitdepth": depth_name(port_depth(*output)),
                     "optimization": name,
                 }),
                 blobs: vec![],
@@ -112,13 +135,13 @@ fn the_baked_luts_match_the_wheel() {
 
     let mut failures = Vec::new();
     let mut baked = 0;
-    for ((chain, input, name, flags), response) in cases.iter().zip(responses) {
-        let what = format!("{chain:?} {input:?} {name}");
+    for ((chain, input, output, name, flags), response) in cases.iter().zip(responses) {
+        let what = format!("{chain:?} {input:?}->{output:?} {name}");
         let response = response.unwrap_or_else(|e| panic!("{what}: {e}"));
         let result = &response.result;
         assert!(result.get("exception").is_none(), "{what}: {result}");
         let optimized = &result["optimized"];
-        let ops = match port_optimized(chain, *flags, *input) {
+        let ops = match port_optimized(chain, *flags, *input, *output) {
             Ok(ops) => ops,
             Err(e) => {
                 failures.push(format!("{what}: the port raised {}", e.message()));
@@ -194,8 +217,24 @@ fn the_baked_luts_match_the_wheel() {
         cases.len(),
         failures.join("\n")
     );
-    // Most cases bake; some don't.
-    assert!(baked > cases.len() / 2 && baked < cases.len(), "{baked}");
+    baked
+}
+
+/// `FindSeparablePrefix` leaves a prefix that is a single forward Lut1D as it is ("nothing to
+/// optimize", src/OpenColorIO/OpOptimizers.cpp:493-507 @ v2.5.2): a 256-entry Lut1DTransform
+/// at 8-bit input. (A prefix with a LUT and other ops renders the LUT on floats to bake it,
+/// which waits for the float renderers, Phase 2.)
+#[test]
+fn a_single_lut_isnt_baked_again() {
+    let mut cases = Vec::new();
+    for chain in [vec![T::Lut8]] {
+        for output in [Depth::F32, Depth::Uint16] {
+            for (name, flags) in FLAGS {
+                cases.push((chain.clone(), Depth::Uint8, output, name, flags));
+            }
+        }
+    }
+    check_bakes(&cases);
 }
 
 /// Every code of `depth` on each channel: red `i`, green the codes backwards, blue a
