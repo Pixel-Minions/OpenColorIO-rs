@@ -105,6 +105,42 @@ buffer of `m_width` pixels).
   keeps a description's layout (`ImageLayout`, plain data) with the NumPy buffers, and borrows the
   buffers only while `apply` runs.
 
+## Public API: transforms and processors
+
+The owner approved these conventions for `ocio`'s public API on 2026-10-01 (p1-transforms
+plan). Every transform class and the processors follow them.
+
+- **One enum.** `ocio::Transform` is a `#[non_exhaustive]` enum with one variant per transform
+  class (`Transform::Group(GroupTransform)`, `Transform::Matrix(MatrixTransform)`, ...), each
+  holding the class as a plain struct. Every dispatch over it (`transform_type`, `direction`,
+  `set_direction`, `validate`, `Display`, `build_ops`, `create_transform`) is an exhaustive
+  `match`, so a new class adds its variant and an arm in each. Each class has
+  `From<Class> for Transform`.
+- **Values.** Transforms are `Clone` values; a copy is upstream's `createEditableCopy`. A group
+  owns its children (`Vec<Transform>`), where upstream shares them (docs/improvements.md,
+  I-11). The Python layer (Phase 6) wraps transforms in shared handles to keep pybind's
+  aliasing.
+- **Names.** snake_case without `get_`: `matrix()`, `direction()`, `num_transforms()`; setters
+  keep `set_`. Each method carries `#[doc(alias = "getMatrix")]` with the C++ name, and
+  constructors are `new()` with `#[doc(alias = "Create")]`.
+- **Arrays.** Fixed-size arrays for C++'s pointers to arrays: `&[f64; 16]` for a matrix,
+  `&[f64; 4]` for offsets, `&[f64; 3]` per channel.
+- **Errors.** The setters and getters that throw upstream return `ocio::Result` with
+  upstream's message verbatim (for example `GroupTransform::transform(i)`, LogCamera's linear
+  slope, Lut1D's length and hue adjust). The others return values.
+- **Text.** `Display` is upstream's `operator<<`, byte for byte, the text of Python's
+  `repr()`; tests compare it with the wheel's (`transform_text`).
+- **Equality.** A class with an `equals` upstream has `equals(&self, &Self) -> bool`, and
+  `PartialEq` delegates to it.
+- **Sharing.** `Config` and `Processor` are shared as `Arc<Config>` and `Arc<Processor>`, as
+  upstream's `ConstConfigRcPtr` and `ConstProcessorRcPtr`; the CPU and GPU processors as `Arc`
+  too.
+- **Metadata.** `ocio::FormatMetadata` is the port's `FormatMetadataImpl` (upstream's only
+  implementation of `FormatMetadata`): bytes in and out (below).
+- **Unreachable upstream text.** `Transform::validate`'s error for an invalid direction names
+  the class with `typeid`, which differs between the wheels; no Rust or Python direction can
+  reach it, and the code says so.
+
 ## Strings are bytes
 
 OCIO's strings are C byte strings (`std::string`, `const char *`). They are usually UTF-8, but
