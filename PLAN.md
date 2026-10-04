@@ -1,6 +1,10 @@
 # OpenColorIO-rs — Porting Plan
 
-**Status:** v0.8, 2026-09-30. Phase 0 is complete; Phase 0b (tooling) comes next (§15).
+**Status:** v0.9, 2026-10-04. Phases 0, 0b and 1 are complete (M0, §15); Phase 2 comes next.
+- **Changes in v0.9:**
+  - Phase 1 results and its measured duration (§1, §11, §15);
+  - owner decisions: the optimizer's generic core moved to 1.2d (Option A); Lut1D E–J move to Phase 2 (WP 2.1, 2.5); upstream `Processor` and `CPUProcessor` tests that need `Config::Create()` move to Phase 3;
+  - W0002 extended to the NaN entries of the 1D LUT the optimizer bakes from NaN parameters, and the CPU cache ID that hashes it.
 - **Changes in v0.8:** Phase 0 results; W0001, W0002 and D-1 approved; the tooling round before Phase 1.
 - **Changes in v0.7:**
   - parity with OpenColorIO is the goal, and consumers align with the port (§1, §6);
@@ -82,7 +86,7 @@
   - M1 (LUTs, fixed functions, built-in configs) in about 3–4.5 months;
   - full 2.5.2 parity (`1.0.0`) in about 6–10 months.
 
-  Confidence is low until Phase 1 measures real velocity (§11).
+  Measured: Phase 1, planned at 18 person-weeks, took 2026-09-30 to 2026-10-04 with 2–4 implementer agents plus verifiers. The re-estimate is in §11 (owner to confirm).
 
 ### Milestones: complete sections of OCIO
 
@@ -687,6 +691,8 @@ The assumption: the team delivers 3–5 conventional person-weeks of *verified* 
 | M5 — `1.0.0`, full 2.5.2 parity | ~133 | 6–10 months |
 
 - **Re-estimate at the end of Phase 1,** from the measured person-weeks per calendar week.
+  - **Measured:** Phases 0 and 0b (7 pw) took 2026-09-28 to 2026-09-30. Phase 1 (18 pw) took 2026-09-30 to 2026-10-04, with 2–4 implementer agents plus verifiers. M0 (~25 pw) was planned at 5–8 weeks.
+  - **Proposed wording (owner to confirm):** "The calendar above is replaced by the measured rate: 18 pw in 5 days in Phase 1. The remaining phases are scaled from it and re-checked at the end of Phase 2, because LUT, config and file-format work is more text and parsing than Phase 1 was."
 - **The critical path is not code generation.** It is:
   - Phase 0 (the harness);
   - exact YAML and float formatting;
@@ -786,7 +792,23 @@ None right now. Answered on 2026-09-29:
   - the oracle cache mixing up emulated CPUs.
 - **Still open from T5b:** the nightly exhaustive tier and `cargo-mutants` on changed modules. They are built during Phase 1, not before it.
 
-**Then: Phase 1**, following `docs/cards/phase1.md`. M0 is the analytic transforms, CPU and GPU.
+**Phase 1: complete (2026-10-04).** Card file `docs/cards/phase1.md`. Milestone M0: the analytic transforms through `Config::CreateRaw()` processors, byte-exact on CPU and GPU.
+- **Cards landed:** `p1-oracle-image`, `p1-math`, `p1-foundations` (and `p1-foundations-fix`), `p1-oracle-2`, `p1-bitdepth-2`, `p1-gpu-infra-3`, `p1-engine-3`, `tooling-1`, `p1-gpu-ops`, `p1-matrix-4` (Range and Matrix), `p1-gamma-2`, `p1-cdl-2`, `p1-exponent-4`, `p1-log-2`, `p1-gpu-gamma-2`, `p1-optimizer-2`, `p1-gpu-ops4`, `p1-transforms-fam4` (every transform, with Allocation and Lut1DTransform), `tooling-2`, `p1-processor-4`, `p1-tests-catchup-3`, `p1-api-parity-2`.
+- **Through the public API:** `p1-api-parity-2` checks every analytic transform through the port's own processors against the wheel:
+  - CPU at every bit depth (U8, U10, U12, U16, F16, F32) in and out, packed RGBA, RGB and BGRA, planar RGBA and RGB, and every optimization level;
+  - GPU in all 10 languages at every optimization level;
+  - AllocationTransform too. It found no parity bugs.
+- **Upstream tests ported:** 262 of 1,191 C++ (ratchet 262); GPU 0 of 264 (Phase 7, with the pixel harness); Python 0 of 384.
+- **Deferred by owner decisions:**
+  - Lut1D E–J (float interpolation, hue adjust, SIMD, inverse): Phase 2, WP 2.1 and 2.5;
+  - the GPU processor of a baked U8 or LUT processor returns "not ported yet" until Phase 2;
+  - `multi_op_prefix` (Phase 2) and `opt_prefix_test1` (needs the CTF reader);
+  - upstream `Processor` and `CPUProcessor` tests that need `Config::Create()`: Phase 3 (2026-10-04);
+  - F5: the 10- and 12-bit in-place wheel test is skipped.
+- **Waivers:** W0002 was extended on 2026-10-04 to the NaN entries of the 1D LUT the optimizer bakes from NaN parameters (integer and half-float input), and the CPU cache ID that hashes it. Everything else is exact.
+- **Improvements register:** `docs/improvements.md` grew from 22 entries at the end of Phase 0 to 68 (54 `I-` and 14 `U-`).
+
+**Then: Phase 2**, following `docs/cards/phase2.md` (to be written). M1 is LUTs, fixed functions and the built-in configs.
 
 ---
 
