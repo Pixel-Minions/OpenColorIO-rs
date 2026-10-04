@@ -559,6 +559,14 @@ pub(crate) fn remove_worktree(root: &Path, wt: &Path) -> Result<(), String> {
             .filter_map(|l| l.strip_prefix("worktree "))
             .any(|p| same_path(p, &wt.to_string_lossy()))
     });
+    // The worktree as git records it, which is what `git worktree remove` is given: `wt` may
+    // spell the same directory differently (an 8.3 short name), which git doesn't match.
+    let registered = record.and_then(|record| {
+        record
+            .lines()
+            .find_map(|l| l.strip_prefix("worktree "))
+            .map(str::to_string)
+    });
     if let Some(record) = record
         && record
             .lines()
@@ -577,7 +585,7 @@ pub(crate) fn remove_worktree(root: &Path, wt: &Path) -> Result<(), String> {
                 .replace('\\', "/")
         );
     }
-    if record.is_some() {
+    if let Some(registered) = &registered {
         crate::git(
             root,
             &[
@@ -586,7 +594,7 @@ pub(crate) fn remove_worktree(root: &Path, wt: &Path) -> Result<(), String> {
                 "worktree",
                 "remove",
                 "--force",
-                path_str(wt)?,
+                registered,
             ],
         )?;
     }
@@ -727,14 +735,18 @@ pub(crate) fn path_str(path: &Path) -> Result<&str, String> {
 
 /// Whether two paths, as git or the OS print them, name the same directory.
 pub(crate) fn same_path(a: &str, b: &str) -> bool {
-    let norm = |p: &str| {
-        let p = crate::plain_path(Path::new(p))
-            .to_string_lossy()
-            .replace('\\', "/");
+    let norm = |p: &Path| {
+        let p = crate::plain_path(p).to_string_lossy().replace('\\', "/");
         let p = p.trim_end_matches('/').to_string();
         if cfg!(windows) { p.to_lowercase() } else { p }
     };
-    norm(a) == norm(b)
+    // Where both exist, compare what they resolve to: on Windows one spelling may use an 8.3
+    // short name (`C:/Users/RUNNER~1/...`, as GitHub's runners give TEMP) and the other the
+    // long one (`C:/Users/runneradmin/...`, as `git worktree list` prints it).
+    if let (Ok(ca), Ok(cb)) = (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        return norm(&ca) == norm(&cb);
+    }
+    norm(Path::new(a)) == norm(Path::new(b))
 }
 
 fn short(sha: &str) -> &str {
