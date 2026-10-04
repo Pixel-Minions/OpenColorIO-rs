@@ -5,8 +5,9 @@
 //! `getDefaultGPUProcessor` and `getOptimizedGPUProcessor` of `Config::getProcessor`'s
 //! processors, their cache IDs and flags, and the shader they write in the 10 languages.
 //!
-//! So far the group transform, the one class in the port; its processors have no ops, so the
-//! shader is the function's header and footer. Each class adds its cases as it lands.
+//! Here, empty groups: their processors have no ops, so the shader is the function's header
+//! and footer. Every class's shaders through the API, at every level and in every language,
+//! are in `api_gpu_oracle.rs`.
 
 use ocio::{Config, GroupTransform, OptimizationFlags, Transform, TransformDirection};
 use ocio_gpu::{GpuLanguage, GpuShaderDesc};
