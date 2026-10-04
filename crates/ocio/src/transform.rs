@@ -16,9 +16,9 @@
 use std::fmt;
 
 use ocio_ops::cfmt::{Crt, OStringStream};
-use ocio_ops::exception::{Exception, Result};
+use ocio_ops::exception::Result;
 use ocio_ops::op::{Op, OpVec};
-use ocio_ops::op_data::{OpData, OpDataType, get_type_name};
+use ocio_ops::op_data::OpData;
 use ocio_ops::open_color_types::TransformDirection;
 
 use crate::config::Config;
@@ -35,6 +35,7 @@ use crate::transforms::group_transform::{GroupTransform, build_group_ops};
 use crate::transforms::log_affine_transform::LogAffineTransform;
 use crate::transforms::log_camera_transform::LogCameraTransform;
 use crate::transforms::log_transform::{LogTransform, build_log_op, create_log_transform};
+use crate::transforms::lut1d_transform::{Lut1DTransform, build_lut1d_op, create_lut1d_transform};
 use crate::transforms::matrix_transform::{
     MatrixTransform, build_matrix_op, create_matrix_transform,
 };
@@ -120,6 +121,8 @@ pub enum Transform {
     LogCamera(LogCameraTransform),
     /// `LogTransform`.
     Log(LogTransform),
+    /// `Lut1DTransform`.
+    Lut1D(Lut1DTransform),
     /// `MatrixTransform`.
     Matrix(MatrixTransform),
     /// `RangeTransform`.
@@ -174,6 +177,12 @@ impl From<LogTransform> for Transform {
     }
 }
 
+impl From<Lut1DTransform> for Transform {
+    fn from(t: Lut1DTransform) -> Transform {
+        Transform::Lut1D(t)
+    }
+}
+
 impl From<MatrixTransform> for Transform {
     fn from(t: MatrixTransform) -> Transform {
         Transform::Matrix(t)
@@ -202,6 +211,7 @@ impl Transform {
             Transform::LogAffine(_) => TransformType::LogAffine,
             Transform::LogCamera(_) => TransformType::LogCamera,
             Transform::Log(_) => TransformType::Log,
+            Transform::Lut1D(_) => TransformType::Lut1D,
             Transform::Matrix(_) => TransformType::Matrix,
             Transform::Range(_) => TransformType::Range,
         }
@@ -220,6 +230,7 @@ impl Transform {
             Transform::LogAffine(t) => t.direction(),
             Transform::LogCamera(t) => t.direction(),
             Transform::Log(t) => t.direction(),
+            Transform::Lut1D(t) => t.direction(),
             Transform::Matrix(t) => t.direction(),
             Transform::Range(t) => t.direction(),
         }
@@ -238,6 +249,7 @@ impl Transform {
             Transform::LogAffine(t) => t.set_direction(dir),
             Transform::LogCamera(t) => t.set_direction(dir),
             Transform::Log(t) => t.set_direction(dir),
+            Transform::Lut1D(t) => t.set_direction(dir),
             Transform::Matrix(t) => t.set_direction(dir),
             Transform::Range(t) => t.set_direction(dir),
         }
@@ -257,6 +269,7 @@ impl Transform {
             Transform::LogAffine(t) => t.validate(),
             Transform::LogCamera(t) => t.validate(),
             Transform::Log(t) => t.validate(),
+            Transform::Lut1D(t) => t.validate(),
             Transform::Matrix(t) => t.validate(),
             Transform::Range(t) => t.validate(),
         }
@@ -308,6 +321,7 @@ impl Transform {
             Transform::LogAffine(t) => t.write_text(os),
             Transform::LogCamera(t) => t.write_text(os),
             Transform::Log(t) => t.write_text(os),
+            Transform::Lut1D(t) => t.write_text(os),
             Transform::Matrix(t) => t.write_text(os),
             Transform::Range(t) => t.write_text(os),
         }
@@ -346,6 +360,7 @@ pub fn build_ops(
         Transform::LogAffine(log_transform) => build_log_op(ops, log_transform.data(), dir),
         Transform::LogCamera(log_transform) => build_log_op(ops, log_transform.data(), dir),
         Transform::Log(log_transform) => build_log_op(ops, log_transform.data(), dir),
+        Transform::Lut1D(lut_transform) => build_lut1d_op(ops, lut_transform, dir),
         Transform::Matrix(matrix_transform) => build_matrix_op(ops, matrix_transform, dir),
         Transform::Range(range_transform) => build_range_op(ops, range_transform, dir),
     }
@@ -354,9 +369,9 @@ pub fn build_ops(
 /// Appends to `group` the transform that `op` renders: nothing for the no-op types; for each op
 /// type, its class's `Create<Class>Transform`, which comes with the class.
 ///
-/// The op types whose transform class isn't ported yet are an error ("CreateTransform: the
-/// transform of a <type> op is not ported yet."); upstream has them all. Upstream's own error
-/// for an op type without one names the op's C++ class with `typeid`, which differs between the
+/// Every op type the port has so far has its transform class; a family that adds an op type adds
+/// its arm (a "not ported yet" error until its class comes). Upstream's own error for an op
+/// type without one names the op's C++ class with `typeid`, which differs between the
 /// wheels; every op type has a transform in 2.5.2, so it can't happen.
 ///
 /// Port of `CreateTransform` (src/OpenColorIO/Transform.cpp:310-383 @ v2.5.2). Internal to the
@@ -368,12 +383,6 @@ pub fn create_transform(group: &mut GroupTransform, op: &Op) -> Result<()> {
         return Ok(());
     }
 
-    let not_ported = |op_type: OpDataType| -> Result<()> {
-        Err(Exception::new(format!(
-            "CreateTransform: the transform of a {} op is not ported yet.",
-            get_type_name(op_type)?
-        )))
-    };
     match &**op.data() {
         OpData::Exponent(_) => create_exponent_transform(group, op),
         OpData::Gamma(_) => create_gamma_transform(group, op),
@@ -381,7 +390,7 @@ pub fn create_transform(group: &mut GroupTransform, op: &Op) -> Result<()> {
         OpData::Range(_) => create_range_transform(group, op),
         OpData::Log(_) => create_log_transform(group, op),
         OpData::Cdl(_) => create_cdl_transform(group, op),
-        data @ OpData::Lut1D(_) => not_ported(data.get_type()),
+        OpData::Lut1D(_) => create_lut1d_transform(group, op),
         // No op holds a reference (the file readers replace it with the file's ops), and the
         // no-op types returned above.
         OpData::Reference(_) | OpData::NoOp(_) => {

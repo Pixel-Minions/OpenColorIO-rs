@@ -19,12 +19,13 @@ use std::collections::BTreeMap;
 
 use ocio::transform::{build_ops, create_transform};
 use ocio::{
-    Config, FormatMetadata, GroupTransform, NegativeStyle, RangeStyle, Transform,
-    TransformDirection,
+    Config, FormatMetadata, GroupTransform, Interpolation, Lut1DHueAdjust, NegativeStyle,
+    OptimizationFlags, RangeStyle, Transform, TransformDirection,
 };
 use ocio_ops::op::OpVec;
 use ocio_ops::open_color_types::{BitDepth, CdlStyle};
 use ocio_testkit::Oracle;
+use ocio_testkit::battery::BitDepth as Depth;
 use ocio_testkit::oracle::BatchCall;
 use ocio_testkit::processor_ops::{Dump, Dumped, ProcessorOpsReply, ProcessorOpsRequest};
 use ocio_testkit::transform_text::{Built, TransformTextReply, TransformTextRequest};
@@ -222,6 +223,7 @@ fn port_equals(a: &Transform, b: &Transform) -> Option<bool> {
     match (a, b) {
         (Transform::Matrix(a), Transform::Matrix(b)) => Some(a.equals(b)),
         (Transform::Range(a), Transform::Range(b)) => Some(a.equals(b)),
+        (Transform::Lut1D(a), Transform::Lut1D(b)) => Some(a.equals(b)),
         (Transform::Cdl(a), Transform::Cdl(b)) => Some(a.equals(b)),
         (Transform::Log(a), Transform::Log(b)) => Some(a.equals(b)),
         (Transform::LogAffine(a), Transform::LogAffine(b)) => Some(a.equals(b)),
@@ -246,13 +248,7 @@ pub(crate) fn port_processor_group(
     let mut ops = OpVec::new();
     build_ops(&mut ops, config, config.current_context(), transform, dir)?;
     ops.finalize()?;
-
-    let mut group = GroupTransform::new();
-    *group.format_metadata_mut() = ops.get_format_metadata().clone();
-    for op in ops.iter() {
-        create_transform(&mut group, op)?;
-    }
-    Ok(group)
+    group_of(&ops)
 }
 
 /// The raw config's processors of `cases`, in both directions, the wheel's against the port's.
@@ -265,11 +261,28 @@ pub(crate) fn check_processors(cases: &[Case]) {
 /// `config` the port's, which must be the same.
 pub(crate) fn check_processors_in(cases: &[Case], config_spec: Option<&Value>, config: &Config) {
     let dirs = [TransformDirection::Forward, TransformDirection::Inverse];
+    check_processors_in_dirs(cases, config_spec, config, &dirs);
+}
+
+/// The raw config's processors of `cases` in the directions `dirs`, the wheel's against the
+/// port's.
+pub(crate) fn check_processors_dirs(cases: &[Case], dirs: &[TransformDirection]) {
+    check_processors_in_dirs(cases, None, &Config::create_raw(), dirs);
+}
+
+/// The processors of `cases` in a config, in the directions `dirs`, the wheel's against the
+/// port's (see [`check_processors_in`]).
+pub(crate) fn check_processors_in_dirs(
+    cases: &[Case],
+    config_spec: Option<&Value>,
+    config: &Config,
+    dirs: &[TransformDirection],
+) {
     let requests: Vec<(usize, TransformDirection, ProcessorOpsRequest)> = cases
         .iter()
         .enumerate()
         .flat_map(|(k, case)| {
-            dirs.map(|dir| {
+            dirs.iter().map(move |&dir| {
                 let mut processor =
                     json!({"transform": case.spec, "direction": direction_name(dir)});
                 if let Some(config_spec) = config_spec {
@@ -557,7 +570,193 @@ pub(crate) fn dump_transform(transform: &Transform) -> (String, BTreeMap<String,
             put("hasMaxOutValue", Dumped::Bool(t.has_max_out_value()));
             "RangeTransform"
         }
+        Transform::Lut1D(t) => {
+            put("getTransformType", dumped_enum("TRANSFORM_TYPE_LUT1D"));
+            put(
+                "getFileOutputBitDepth",
+                dumped_enum(bit_depth_name(t.file_output_bit_depth())),
+            );
+            put("getFormatMetadata", dump_metadata(t.format_metadata()));
+            put("getHueAdjust", dumped_enum(hue_adjust_name(t.hue_adjust())));
+            put("getInputHalfDomain", Dumped::Bool(t.input_half_domain()));
+            put("getOutputRawHalfs", Dumped::Bool(t.output_raw_halfs()));
+            put(
+                "getInterpolation",
+                dumped_enum(interpolation_name(t.interpolation())),
+            );
+            put("getLength", Dumped::Int(t.length() as i64));
+            // The binding's getData(): the values of each entry, in a float32 array.
+            let values: Vec<f32> = (0..t.length())
+                .flat_map(|i| t.value(i).expect("an entry"))
+                .collect();
+            put(
+                "getData",
+                Dumped::Array {
+                    dtype: "float32".to_string(),
+                    shape: vec![values.len() as u64],
+                    bytes: values.iter().flat_map(|v| v.to_le_bytes()).collect(),
+                },
+            );
+            "Lut1DTransform"
+        }
         other => panic!("no dump for {other:?}"),
     };
     (class.to_string(), getters)
+}
+
+/// The group `createGroupTransform()` makes of `ops`: their metadata, and the transform of each
+/// op (none for the no-op types).
+///
+/// Port of `Processor::Impl::createGroupTransform` (src/OpenColorIO/Processor.cpp:300-316 @
+/// v2.5.2).
+fn group_of(ops: &OpVec) -> ocio::Result<GroupTransform> {
+    let mut group = GroupTransform::new();
+    *group.format_metadata_mut() = ops.get_format_metadata().clone();
+    for op in ops.iter() {
+        create_transform(&mut group, op)?;
+    }
+    Ok(group)
+}
+
+/// What the port's optimized processor of `transform` in the direction `dir` makes of it for
+/// the bit depths `input` and `output` and the flags `flags`: the group
+/// `createGroupTransform()` returns, or the error.
+///
+/// Port of `Processor::Impl::setTransform` and of `getOptimizedProcessor`'s `CreateProcessor`
+/// (src/OpenColorIO/Processor.cpp:386-399, 623-641 @ v2.5.2), for transforms without dynamic
+/// properties and without `OCIO_OPTIMIZATION_FLAGS` set (the oracle's environment).
+pub(crate) fn port_optimized_group(
+    config: &Config,
+    transform: &Transform,
+    dir: TransformDirection,
+    input: BitDepth,
+    output: BitDepth,
+    flags: OptimizationFlags,
+) -> ocio::Result<GroupTransform> {
+    transform.validate()?;
+    let mut ops = OpVec::new();
+    build_ops(&mut ops, config, config.current_context(), transform, dir)?;
+    ops.finalize()?;
+
+    ops.finalize()?;
+    ops.optimize(flags)?;
+    ops.optimize_for_bitdepth(input, output, flags)?;
+    group_of(&ops)
+}
+
+/// The raw config's optimized processors of `cases`, forward, for each `(input, output)` bit
+/// depth pair with the default flags, the wheel's (`getOptimizedProcessor`, then
+/// `createGroupTransform()`) against the port's: every getter, a LUT's values bit for bit. Returns,
+/// per case, how many of its optimized processors hold a Lut1DTransform.
+pub(crate) fn check_optimized_processors(cases: &[Case], depths: &[(Depth, Depth)]) -> Vec<usize> {
+    let requests: Vec<(usize, Depth, Depth, ProcessorOpsRequest)> = cases
+        .iter()
+        .enumerate()
+        .flat_map(|(k, case)| {
+            depths.iter().map(move |&(input, output)| {
+                let mut request = ProcessorOpsRequest::new(
+                    json!({"transform": case.spec, "direction": direction_name(TransformDirection::Forward)}),
+                );
+                request.in_bitdepth = Some(input);
+                request.out_bitdepth = Some(output);
+                request.optimization = Some(json!("OPTIMIZATION_DEFAULT"));
+                (k, input, output, request)
+            })
+        })
+        .collect();
+    let calls: Vec<BatchCall<'_>> = requests.iter().map(|(.., r)| r.call()).collect();
+    let config = Config::create_raw();
+    let mut failures = Vec::new();
+    let mut luts = vec![0; cases.len()];
+    for ((k, input, output, _), response) in requests.iter().zip(Oracle::get().batch(&calls, true))
+    {
+        let reply = ProcessorOpsReply::from_response(response.unwrap_or_else(|e| panic!("{e}")));
+        if let Some(optimized) = &reply.optimized
+            && optimized.classes().contains(&"Lut1DTransform")
+        {
+            luts[*k] += 1;
+        }
+        let case = &cases[*k];
+        let port = port_optimized_group(
+            &config,
+            &case.port,
+            TransformDirection::Forward,
+            port_depth(*input),
+            port_depth(*output),
+            OptimizationFlags::DEFAULT,
+        );
+        let outcome = match (reply.raised(), &port) {
+            (None, Ok(group)) => compare_group(&reply.optimized().group, group)
+                .err()
+                .map(|e| format!("{e}\n  wheel {}", reply.result)),
+            (wheel, port) => Some(format!(
+                "wheel {wheel:?} {}\n  port  {port:?}",
+                reply.result
+            )),
+        };
+        if let Some(failure) = outcome {
+            failures.push(format!(
+                "{} ({input:?} -> {output:?}): {failure}",
+                case.label
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+    luts
+}
+
+/// Transforms whose building raises in the wheel (`transform_text`'s `Raised`: a constructor or
+/// a setter of the spec), against the port's error for the same call, by message.
+pub(crate) fn setter_errors(checks: &[(&str, Value, ocio::Result<()>)]) {
+    let reply = TransformTextRequest {
+        transforms: checks.iter().map(|(_, spec, _)| spec.clone()).collect(),
+        pairs: Vec::new(),
+    }
+    .run();
+    let mut failures = Vec::new();
+    for ((label, _, port), built) in checks.iter().zip(&reply.transforms) {
+        let wheel = match built {
+            Built::Raised(e) => Some(e.message.clone()),
+            Built::Text(_) => None,
+        };
+        let port = port.as_ref().err().map(|e| e.message().to_string());
+        if wheel.is_none() || wheel != port {
+            failures.push(format!("{label}: wheel {wheel:?}, port {port:?}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The port's bit depth of a battery bit depth.
+pub(crate) fn port_depth(depth: Depth) -> BitDepth {
+    match depth {
+        Depth::Uint8 => BitDepth::Uint8,
+        Depth::Uint10 => BitDepth::Uint10,
+        Depth::Uint12 => BitDepth::Uint12,
+        Depth::Uint16 => BitDepth::Uint16,
+        Depth::F16 => BitDepth::F16,
+        Depth::F32 => BitDepth::F32,
+    }
+}
+
+/// An interpolation, as the binding names it.
+pub(crate) fn interpolation_name(interp: Interpolation) -> &'static str {
+    match interp {
+        Interpolation::Unknown => "INTERP_UNKNOWN",
+        Interpolation::Nearest => "INTERP_NEAREST",
+        Interpolation::Linear => "INTERP_LINEAR",
+        Interpolation::Tetrahedral => "INTERP_TETRAHEDRAL",
+        Interpolation::Cubic => "INTERP_CUBIC",
+        Interpolation::Default => "INTERP_DEFAULT",
+        Interpolation::Best => "INTERP_BEST",
+    }
+}
+
+/// A hue adjustment, as the binding names it.
+pub(crate) fn hue_adjust_name(hue: Lut1DHueAdjust) -> &'static str {
+    match hue {
+        Lut1DHueAdjust::None => "HUE_NONE",
+        Lut1DHueAdjust::Dw3 => "HUE_DW3",
+        Lut1DHueAdjust::Wypn => "HUE_WYPN",
+    }
 }

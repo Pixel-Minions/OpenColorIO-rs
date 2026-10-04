@@ -1695,9 +1695,9 @@ note = "S2: GetLinearSlope, GetLogSideBreak (Windows and Linux variants), GetLin
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOp.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op.rs"]
+target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op.rs", "crates/ocio/src/transforms/lut1d_transform.rs"]
 status = "partial"
-note = "p1-optimizer B: Lut1DOp (clone, getInfo, isSameType, isInverse, canCombineWith, hasChannelCrosstalk, finalize, getCacheID, supportedByLegacyShader), CreateLut1DOp, GenerateIdentityLut1D; cache IDs and the optimizer's Lut1D rules against the wheel (tests/lut1d_op_oracle.rs). combineWith (Compose) and getCPUOp's float renderers are errors until Phase 2 (WP 2.5); extractGpuShaderInfo, GenerateLinearScaleLut1D, CreateLut1DTransform and BuildLut1DOp come later"
+note = "p1-optimizer B: Lut1DOp (clone, getInfo, isSameType, isInverse, canCombineWith, hasChannelCrosstalk, finalize, getCacheID, supportedByLegacyShader), CreateLut1DOp, GenerateIdentityLut1D; cache IDs and the optimizer's Lut1D rules against the wheel (tests/lut1d_op_oracle.rs). combineWith (Compose) and getCPUOp's float renderers are errors until Phase 2 (WP 2.5); p1-transforms-fam4: CreateLut1DTransform and BuildLut1DOp, in crates/ocio/src/transforms/lut1d_transform.rs. extractGpuShaderInfo and GenerateLinearScaleLut1D come later"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOp.h"
@@ -2275,13 +2275,15 @@ status = "todo"
 path = "src/OpenColorIO/transforms/Lut1DTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/lut1d_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam4: Lut1DTransform, its setters' errors and operator<< (its min/max scan, on the shared stream, I-73); checked against the wheel in crates/ocio/tests/lut1d_transform_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/transforms/Lut1DTransform.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/lut1d_transform.rs"]
-status = "todo"
+status = "done"
+note = "p1-transforms-fam4: Lut1DTransformImpl, as the struct Lut1DTransform"
 
 [[file]]
 path = "src/OpenColorIO/transforms/Lut3DTransform.cpp"
@@ -4796,9 +4798,9 @@ status = "todo"
 [[file]]
 path = "tests/cpu/ops/lut1d/Lut1DOp_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_tests.rs"]
+target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_tests.rs", "crates/ocio/src/transforms/lut1d_transform_tests.rs"]
 status = "partial"
-note = "gpu, identity_lut_1d; the others need the float renderers, the inverse or the transform (Phase 2)"
+note = "gpu, identity_lut_1d; Lut1D create_transform and Lut1DTransform build_op need the transform: in crates/ocio/src/transforms/lut1d_transform_tests.rs (p1-transforms-fam4); the others need the float renderers or the inverse (Phase 2)"
 
 [[file]]
 path = "tests/cpu/ops/lut3d/Lut3DOpCPU_tests.cpp"
@@ -4994,7 +4996,8 @@ status = "todo"
 path = "tests/cpu/transforms/Lut1DTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/lut1d_transform_tests.rs"]
-status = "todo"
+status = "partial"
+note = "p1-transforms-fam4: basic, create_with_parameters, hue_adjust, format_metadata; non_monotonic needs the inverse 1D LUT (Phase 2, WP 2.1)"
 
 [[file]]
 path = "tests/cpu/transforms/Lut3DTransform_tests.cpp"
