@@ -16,7 +16,7 @@
 //!   a lone forward LUT, or replace a range before it, or bake a separable prefix into one:
 //!   `CreateLut1DTransform` of the baked LUT, entry for entry. The bakes follow each
 //!   platform's math library (I-24), so the checks compare each platform's wheel with the port
-//!   on that platform.
+//!   on that platform. They belong to `cpu-tests`, which run them on emulated CPUs too.
 //!
 //! The binding passes a C `float` as a Python float, which quiets a signalling NaN, so the
 //! values set and compared are floats a double holds exactly: quiet NaNs, with their
