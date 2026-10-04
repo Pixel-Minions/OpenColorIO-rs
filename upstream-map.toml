@@ -1103,16 +1103,16 @@ note = "1.3n1: AllocationData; CreateGpuAllocationNoOp in no_ops.rs, where NoOps
 [[file]]
 path = "src/OpenColorIO/ops/cdl/CDLOp.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/cdl/cdl_op.rs"]
+target = ["crates/ocio-ops/src/ops/cdl/cdl_op.rs", "crates/ocio-gpu/src/gpu_processor.rs"]
 status = "partial"
-note = "1.3c3: CDLOp (the op's behaviors on OpData::Cdl) and both CreateCDLOp; checked against the wheel through CPU processor cache IDs and pixels (tests/cdl_op_oracle.rs: identities, inverse pairs, simplified CDLs, optimization flags). Not yet: CreateCDLTransform and BuildCDLOp (the CDLTransform, WP 1.8), extractGpuShaderInfo (1.3c4)"
+note = "1.3c3: CDLOp (the op's behaviors on OpData::Cdl) and both CreateCDLOp; checked against the wheel through CPU processor cache IDs and pixels (tests/cdl_op_oracle.rs: identities, inverse pairs, simplified CDLs, optimization flags). Not yet: CreateCDLTransform and BuildCDLOp (the CDLTransform, WP 1.8). Its GPU part: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's Cdl arm (gpu_processor.rs, 1.3c4)"
 
 [[file]]
 path = "src/OpenColorIO/ops/cdl/CDLOp.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/cdl/cdl_op.rs"]
 status = "partial"
-note = "1.3c3: CDLOp (the op's behaviors on OpData::Cdl) and both CreateCDLOp; checked against the wheel through CPU processor cache IDs and pixels (tests/cdl_op_oracle.rs: identities, inverse pairs, simplified CDLs, optimization flags). Not yet: CreateCDLTransform and BuildCDLOp (the CDLTransform, WP 1.8), extractGpuShaderInfo (1.3c4)"
+note = "1.3c3: CDLOp (the op's behaviors on OpData::Cdl) and both CreateCDLOp; checked against the wheel through CPU processor cache IDs and pixels (tests/cdl_op_oracle.rs: identities, inverse pairs, simplified CDLs, optimization flags). Not yet: CreateCDLTransform and BuildCDLOp (the CDLTransform, WP 1.8). Its GPU part: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's Cdl arm (gpu_processor.rs, 1.3c4)"
 
 [[file]]
 path = "src/OpenColorIO/ops/cdl/CDLOpCPU.cpp"
@@ -1146,13 +1146,15 @@ note = "1.3c1: the whole class, with ChannelParams; getSimplerReplacement and ge
 path = "src/OpenColorIO/ops/cdl/CDLOpGPU.cpp"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/cdl/cdl_op_gpu.rs"]
-status = "todo"
+status = "done"
+note = "1.3c4 (p1-gpu-ops2): GetCDLGPUShaderProgram; checked against the wheel in 10 languages (crates/ocio-gpu/tests/cdl_op_gpu_oracle.rs)"
 
 [[file]]
 path = "src/OpenColorIO/ops/cdl/CDLOpGPU.h"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/cdl/cdl_op_gpu.rs"]
-status = "todo"
+status = "done"
+note = "1.3c4 (p1-gpu-ops2): GetCDLGPUShaderProgram; checked against the wheel in 10 languages (crates/ocio-gpu/tests/cdl_op_gpu_oracle.rs)"
 
 [[file]]
 path = "src/OpenColorIO/ops/exponent/ExponentOp.cpp"
@@ -4988,6 +4990,7 @@ path = "tests/gpu/CDLOp_test.cpp"
 kind = "test-gpu"
 target = ["crates/ocio-gpu/tests/cdl_op_test.rs"]
 status = "todo"
+note = "Phase 7 (GPU execution). Its cases are data in crates/ocio-testkit/src/gpu_cases.rs (cdl_cases); 1.3c4 checks the shaders' text of the 11 that use a version 2 config against the wheel (crates/ocio-gpu/tests/cdl_op_gpu_oracle.rs)"
 
 [[file]]
 path = "tests/gpu/CMakeLists.txt"
