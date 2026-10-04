@@ -19,6 +19,16 @@ pub(crate) struct Waivers {
     pub(crate) not_applicable: Vec<NotApplicable>,
 }
 
+impl Waivers {
+    /// Whether a waiver lets `file` contain the otherwise forbidden `pattern`.
+    fn allow(&self, file: &str, pattern: &str) -> bool {
+        self.waivers
+            .iter()
+            .flat_map(|w| &w.allow_patterns)
+            .any(|a| a.file == file && a.pattern == pattern)
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Waiver {
@@ -123,57 +133,10 @@ pub(crate) fn run() -> Result<(), String> {
             ));
         }
     }
-    let waived = |file: &str, pattern: &str| {
-        waivers
-            .waivers
-            .iter()
-            .flat_map(|w| &w.allow_patterns)
-            .any(|a| a.file == file && a.pattern == pattern)
-    };
+    let waived = |file: &str, pattern: &str| waivers.allow(file, pattern);
 
-    for rel in rust_sources() {
-        let text = std::fs::read_to_string(root.join(&rel)).map_err(|e| format!("{rel}: {e}"))?;
-        if !text.starts_with("// SPDX-License-Identifier: BSD-3-Clause\n// Copyright Contributors to the OpenColorIO Project.\n") {
-            problems.push(format!("{rel}: missing the SPDX / copyright header"));
-        }
-        problems.extend(check_internals_uses(&rel, &text));
-        let is_test_file = rel.ends_with("_tests.rs") || rel.contains("/tests/");
-        let is_xtask = rel.starts_with("xtask/");
-        for (n, line) in text.lines().enumerate() {
-            let code = line.trim_start();
-            let at = || format!("{rel}:{}", n + 1);
-            // The guard's own pattern table is not a use of the patterns.
-            if is_xtask && rel.ends_with("guards.rs") {
-                continue;
-            }
-            for (pattern, why) in FORBIDDEN {
-                if code.contains(pattern) && !code.starts_with("//") && !waived(&rel, pattern) {
-                    problems.push(format!("{}: `{pattern}`: {why}", at()));
-                }
-            }
-            if code.contains("allow(unsafe_code)") && !unsafe_allowed(&rel) {
-                problems.push(format!(
-                    "{}: `unsafe` is allowed only in SIMD modules and ocio-py (PLAN.md D8)",
-                    at()
-                ));
-            }
-            if is_test_file && !rel.starts_with("crates/ocio-testkit/src/upstream/") {
-                for pattern in TOLERANCE {
-                    if code.contains(pattern) && !code.starts_with("//") && !waived(&rel, pattern) {
-                        problems.push(format!(
-                            "{}: `{pattern}`: comparisons are exact; upstream tolerance checks go through ocio_testkit::upstream",
-                            at()
-                        ));
-                    }
-                }
-            }
-        }
-    }
-
-    for rel in manifests(root) {
-        let text = std::fs::read_to_string(root.join(&rel)).map_err(|e| format!("{rel}: {e}"))?;
-        problems.extend(check_internals_feature(&rel, &text));
-    }
+    let (sources, manifests) = workspace_files(root)?;
+    problems.extend(check_files(&sources, &manifests, &waived));
     problems.extend(check_dependency_pins(root));
     problems.extend(crate::registers::check(root));
     problems.extend(crate::upstream::validate(&crate::upstream::load_map()?));
@@ -185,6 +148,81 @@ pub(crate) fn run() -> Result<(), String> {
     } else {
         Err(format!("guards failed:\n  {}", problems.join("\n  ")))
     }
+}
+
+/// Files as (path relative to the workspace root, text).
+type Files = Vec<(String, String)>;
+
+/// The workspace's Rust sources and manifests: what `run` hands `check_files`.
+fn workspace_files(root: &Path) -> Result<(Files, Files), String> {
+    let read = |rel: String| {
+        std::fs::read_to_string(root.join(&rel))
+            .map(|text| (rel.clone(), text))
+            .map_err(|e| format!("{rel}: {e}"))
+    };
+    let sources = rust_sources()
+        .into_iter()
+        .map(read)
+        .collect::<Result<_, _>>()?;
+    let manifests = manifests(root)
+        .into_iter()
+        .map(read)
+        .collect::<Result<_, _>>()?;
+    Ok((sources, manifests))
+}
+
+/// The guards over the files' contents, the entry point `run` checks the workspace's Rust
+/// sources and manifests through. `waived(file, pattern)`: whether a waiver lets `file`
+/// contain the forbidden `pattern`.
+fn check_files(
+    sources: &[(String, String)],
+    manifests: &[(String, String)],
+    waived: &dyn Fn(&str, &str) -> bool,
+) -> Vec<String> {
+    let mut problems = Vec::new();
+    for (rel, text) in sources {
+        let rel = rel.as_str();
+        if !text.starts_with("// SPDX-License-Identifier: BSD-3-Clause\n// Copyright Contributors to the OpenColorIO Project.\n") {
+            problems.push(format!("{rel}: missing the SPDX / copyright header"));
+        }
+        problems.extend(check_internals_uses(rel, text));
+        let is_test_file = rel.ends_with("_tests.rs") || rel.contains("/tests/");
+        let is_xtask = rel.starts_with("xtask/");
+        for (n, line) in text.lines().enumerate() {
+            let code = line.trim_start();
+            let at = || format!("{rel}:{}", n + 1);
+            // The guard's own pattern table is not a use of the patterns.
+            if is_xtask && rel.ends_with("guards.rs") {
+                continue;
+            }
+            for (pattern, why) in FORBIDDEN {
+                if code.contains(pattern) && !code.starts_with("//") && !waived(rel, pattern) {
+                    problems.push(format!("{}: `{pattern}`: {why}", at()));
+                }
+            }
+            if code.contains("allow(unsafe_code)") && !unsafe_allowed(rel) {
+                problems.push(format!(
+                    "{}: `unsafe` is allowed only in SIMD modules and ocio-py (PLAN.md D8)",
+                    at()
+                ));
+            }
+            if is_test_file && !rel.starts_with("crates/ocio-testkit/src/upstream/") {
+                for pattern in TOLERANCE {
+                    if code.contains(pattern) && !code.starts_with("//") && !waived(rel, pattern) {
+                        problems.push(format!(
+                            "{}: `{pattern}`: comparisons are exact; upstream tolerance checks go through ocio_testkit::upstream",
+                            at()
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    for (rel, text) in manifests {
+        problems.extend(check_internals_feature(rel, text));
+    }
+    problems
 }
 
 /// The module of `ocio`'s test-only internals (`ocio::internals`, under the crate's `internals`
@@ -205,14 +243,16 @@ const INTERNALS_MANIFEST: &str = "crates/ocio/Cargo.toml";
 ///
 /// Outside `crates/ocio/tests/`, the identifier `internals` may appear in code (not comments or
 /// literals) only as `crates/ocio/src/lib.rs`'s `mod internals`, gated by
-/// `#[cfg(feature = "internals")]`. Any other identifier `internals`, whatever path or alias
-/// leads to it (`ocio::internals`, `use ocio::{internals, ..}`, `use ocio as o; o::internals`,
-/// `use ocio::*; internals::..`, `pub use crate::internals::..`), is refused.
+/// `#[cfg(feature = "internals")]` (`gated`). Any other identifier `internals`, whatever path or
+/// alias leads to it (`ocio::internals`, `use ocio::{internals, ..}`, `use ocio as o;
+/// o::internals`, `use ocio::*; internals::..`, `pub use crate::internals::..`, even gated), is
+/// refused. Other identifiers that contain the word (`_internals`, `internals_x`) can't name
+/// the module, and are not.
 fn check_internals_uses(rel: &str, text: &str) -> Vec<String> {
     if rel.starts_with(INTERNALS_USERS) {
         return Vec::new();
     }
-    let idents = identifiers(text);
+    let Lexed { idents, code } = lex(text);
     let mut problems = Vec::new();
     for (k, (word, line)) in idents.iter().enumerate() {
         if word != INTERNALS {
@@ -225,7 +265,7 @@ fn check_internals_uses(rel: &str, text: &str) -> Vec<String> {
                  be used only by {INTERNALS_USERS}, and the crate may not re-export them (the \
                  identifier is reserved for them outside {INTERNALS_USERS})"
             ));
-        } else if !gated(text, *line) {
+        } else if !gated(&code, *line) {
             problems.push(format!(
                 "{rel}:{line}: `mod {INTERNALS}` must be gated by `{INTERNALS_GATE}`, so that a \
                  build of the library never has it"
@@ -235,26 +275,49 @@ fn check_internals_uses(rel: &str, text: &str) -> Vec<String> {
     problems
 }
 
-/// Whether the item declared on `line` (1-based) carries `INTERNALS_GATE`, on that line or among
-/// the attributes and doc comments directly above it.
-fn gated(text: &str, line: usize) -> bool {
-    let lines: Vec<&str> = text.lines().collect();
-    let Some(own) = lines.get(line - 1) else {
-        return false;
-    };
-    own.contains(INTERNALS_GATE)
-        || lines[..line - 1]
-            .iter()
-            .rev()
-            .map(|l| l.trim())
-            .take_while(|l| l.starts_with("#[") || l.starts_with("//"))
-            .any(|l| l.starts_with(INTERNALS_GATE))
+/// Whether the item declared on `line` (1-based) of `code` (the source with its comments
+/// blanked, `Lexed::code`) carries `INTERNALS_GATE`: a line that is exactly that attribute,
+/// among the attribute lines directly above the declaration (blank and comment lines between
+/// them are skipped). rustfmt, which the gate runs, puts every outer attribute on a line of its
+/// own, so an attribute on the declaration's own line doesn't count, nor one of another item.
+fn gated(code: &str, line: usize) -> bool {
+    let lines: Vec<&str> = code.lines().collect();
+    for above in lines[..line.saturating_sub(1).min(lines.len())]
+        .iter()
+        .rev()
+    {
+        let above = above.trim();
+        if above == INTERNALS_GATE {
+            return true;
+        }
+        if !(above.is_empty() || (above.starts_with("#[") && above.ends_with(']'))) {
+            return false;
+        }
+    }
+    false
 }
 
-/// The identifiers in Rust source `text`, with their 1-based lines, outside comments and
-/// string, byte-string, raw-string and character literals. A raw identifier `r#x` is `x`.
-fn identifiers(text: &str) -> Vec<(String, usize)> {
+/// Rust source, lexed.
+struct Lexed {
+    /// Its identifiers, with their 1-based lines, outside comments and string, byte-string,
+    /// raw-string and character literals. A raw identifier `r#x` is `x`.
+    idents: Vec<(String, usize)>,
+    /// The source with every comment's characters (doc comments too) blanked to spaces, its
+    /// lines kept.
+    code: String,
+}
+
+/// Lexes `text` just enough for the guards: see `Lexed`.
+fn lex(text: &str) -> Lexed {
     let c: Vec<char> = text.chars().collect();
+    let mut code = c.clone();
+    let mut blank = |from: usize, to: usize| {
+        for ch in &mut code[from..to.min(c.len())] {
+            if *ch != '\n' {
+                *ch = ' ';
+            }
+        }
+    };
     let mut out = Vec::new();
     let mut line = 1;
     let mut i = 0;
@@ -265,11 +328,14 @@ fn identifiers(text: &str) -> Vec<(String, usize)> {
             line += 1;
             i += 1;
         } else if ch == '/' && next == Some('/') {
+            let start = i;
             while i < c.len() && c[i] != '\n' {
                 i += 1;
             }
+            blank(start, i);
         } else if ch == '/' && next == Some('*') {
             // Block comments nest.
+            let start = i;
             let mut depth = 0;
             loop {
                 if i >= c.len() {
@@ -288,6 +354,7 @@ fn identifiers(text: &str) -> Vec<(String, usize)> {
                     i += 1;
                 }
             }
+            blank(start, i);
         } else if ch == '"' {
             i = skip_string(&c, i + 1, None, &mut line);
         } else if ch == '\'' {
@@ -337,7 +404,10 @@ fn identifiers(text: &str) -> Vec<(String, usize)> {
             i += 1;
         }
     }
-    out
+    Lexed {
+        idents: out,
+        code: code.into_iter().collect(),
+    }
 }
 
 /// Skips a string literal whose body starts at `i`: a raw string (`raw` holds its number of
@@ -606,22 +676,43 @@ mod tests {
         let gated = "/// Docs.\n#[cfg(feature = \"internals\")]\n#[doc(hidden)]\npub mod internals {\n    \
                      use crate::config::Config;\n}\n";
         assert!(refused("crates/ocio/src/lib.rs", gated).is_empty());
+        // Blank lines and comments between the attributes and the declaration don't detach
+        // them.
         assert!(
             refused(
                 "crates/ocio/src/lib.rs",
-                "#[cfg(feature = \"internals\")] mod internals;\n"
+                "#[cfg(feature = \"internals\")]\n\n// Note.\n/* More. */\n#[doc(hidden)]\n\
+                 mod internals;\n"
             )
             .is_empty()
         );
-        // Ungated, gated by something else, or gated away from the declaration.
+        // Ungated, gated by something else, or the gate another item's, a comment's, or on the
+        // declaration's own line (which rustfmt never leaves there).
         for text in [
             "pub mod internals {}\n",
             "#[cfg(not(feature = \"internals\"))]\npub mod internals {}\n",
             "#[cfg(any(feature = \"internals\", test))]\npub mod internals {}\n",
             "#[cfg(feature = \"internals\")]\nfn f() {}\n\npub mod internals {}\n",
+            "#[cfg(feature = \"internals\")] fn f() {}\npub mod internals {}\n",
+            "#[cfg(feature = \"internals\")]\n#[doc(hidden)] fn f() {}\npub mod internals {}\n",
+            "pub mod internals {} // #[cfg(feature = \"internals\")]\n",
+            "// #[cfg(feature = \"internals\")]\npub mod internals {}\n",
+            "/// #[cfg(feature = \"internals\")]\npub mod internals {}\n",
+            "/* #[cfg(feature = \"internals\")] */\npub mod internals {}\n",
+            "#[cfg(feature = \"internals\")] pub mod internals {}\n",
+            "#[cfg(feature = \"internals\")] mod internals;\n",
         ] {
             assert_eq!(refused("crates/ocio/src/lib.rs", text).len(), 1, "{text}");
         }
+        // Gated or not, nothing else in lib.rs may name it: no re-export.
+        assert_eq!(
+            refused(
+                "crates/ocio/src/lib.rs",
+                "#[cfg(feature = \"internals\")]\npub mod internals {}\n\
+                 #[cfg(feature = \"internals\")]\npub use internals::build_ops;\n"
+            ),
+            [4]
+        );
         // Declared anywhere else.
         assert_eq!(refused("crates/ocio/src/transform.rs", gated), [4]);
         assert_eq!(refused("crates/ocio-ops/src/lib.rs", gated), [4]);
@@ -639,8 +730,13 @@ mod tests {
                     const D: char = '\"'; const E: char = '\''; fn l<'a>(x: &'a str) {}\n\
                     const F: &str = \"internals\";\n\
                     fn internals_x() { let internals_y = 1; }\n\
+                    const G: &core::ffi::CStr = cr#\"ocio::internals \" internals\"#;\n\
+                    const H: &core::ffi::CStr = c\"internals\"; const I: &[u8] = br\"internals\";\n\
+                    fn _internals() { let _internals = 1; }\n\
                     fn after() { ocio::internals::build_ops(); }\n";
-        assert_eq!(refused("crates/ocio-tools/src/main.rs", text), [11]);
+        // Identifiers that merely contain the word (`internals_x`, `_internals`) can't name the
+        // module: allowed.
+        assert_eq!(refused("crates/ocio-tools/src/main.rs", text), [14]);
     }
 
     #[test]
@@ -662,6 +758,8 @@ mod tests {
         for text in [
             "[dependencies]\nocio = { workspace = true, features = [\"internals\"] }\n",
             "[dev-dependencies]\nocio = { workspace = true, features = [\"internals\"] }\n",
+            "[build-dependencies]\nocio = { workspace = true, features = [\"internals\"] }\n",
+            "[dependencies]\nocio = { workspace = true, features = [\"x\", \"internals\"] }\n",
             "[dependencies]\nx = { package = \"ocio\", workspace = true, features = [\"internals\"] }\n",
             "[target.'cfg(windows)'.dev-dependencies]\nocio = { workspace = true, features = [\"internals\"] }\n",
             "[features]\nt = [\"ocio/internals\"]\n",
@@ -669,6 +767,8 @@ mod tests {
             "[dependencies]\nx = { package = \"ocio\", workspace = true }\n[features]\nt = [\"x/internals\"]\n",
         ] {
             assert_eq!(refused(tools, text), 1, "{text}");
+            // xtask's manifest is no exception.
+            assert_eq!(refused("xtask/Cargo.toml", text), 1, "{text}");
         }
         // Another crate's feature named `internals`, or a feature of another dependency: fine.
         assert_eq!(
@@ -711,15 +811,48 @@ mod tests {
     }
 
     #[test]
+    fn run_checks_sources_and_manifests_for_internals() {
+        // Through check_files, the entry point `run` checks the workspace's files through.
+        let file = |rel: &str, text: &str| (rel.to_string(), text.to_string());
+        let header = "// SPDX-License-Identifier: BSD-3-Clause\n\
+                      // Copyright Contributors to the OpenColorIO Project.\n";
+        let sources = [
+            file(
+                "crates/ocio/tests/t.rs",
+                &format!("{header}use ocio::internals::build_ops;\n"),
+            ),
+            file(
+                "crates/ocio-tools/src/main.rs",
+                &format!("{header}use ocio::internals::build_ops;\n"),
+            ),
+        ];
+        let manifests = [
+            file(
+                INTERNALS_MANIFEST,
+                "[dev-dependencies]\nocio = { workspace = true, features = [\"internals\"] }\n",
+            ),
+            file(
+                "crates/ocio-py/Cargo.toml",
+                "[dependencies]\nocio = { workspace = true, features = [\"internals\"] }\n",
+            ),
+        ];
+        let problems = check_files(&sources, &manifests, &|_, _| false);
+        assert_eq!(problems.len(), 2, "{problems:#?}");
+        assert!(problems[0].starts_with("crates/ocio-tools/src/main.rs:3: `internals`"));
+        assert!(problems[1].starts_with("crates/ocio-py/Cargo.toml: [dependencies] `ocio`"));
+    }
+
+    #[test]
     fn this_workspace_passes() {
-        let root = paths::workspace_root();
-        for rel in rust_sources() {
-            let text = std::fs::read_to_string(root.join(&rel)).unwrap();
-            assert_eq!(check_internals_uses(&rel, &text), Vec::<String>::new());
-        }
-        for rel in manifests(root) {
-            let text = std::fs::read_to_string(root.join(&rel)).unwrap();
-            assert_eq!(check_internals_feature(&rel, &text), Vec::<String>::new());
-        }
+        let waivers = load_waivers().unwrap();
+        let waived = |file: &str, pattern: &str| waivers.allow(file, pattern);
+        let (sources, manifests) = workspace_files(paths::workspace_root()).unwrap();
+        assert!(sources.iter().any(|(rel, _)| rel == INTERNALS_HOME));
+        assert!(manifests.iter().any(|(rel, _)| rel == INTERNALS_MANIFEST));
+        assert!(manifests.iter().any(|(rel, _)| rel == "Cargo.toml"));
+        assert_eq!(
+            check_files(&sources, &manifests, &waived),
+            Vec::<String>::new()
+        );
     }
 }
