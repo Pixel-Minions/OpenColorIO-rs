@@ -5,7 +5,19 @@
 //! (PLAN.md §2): results, text output, errors and accepted configs.
 #![forbid(unsafe_code)]
 
+pub mod config;
+pub mod context;
+pub mod transform;
+pub mod transforms;
 pub mod yaml_cpp;
+
+pub use config::Config;
+pub use context::Context;
+pub use ocio_ops::exception::{Exception, ExceptionKind, Result};
+pub use ocio_ops::format_metadata::FormatMetadataImpl as FormatMetadata;
+pub use ocio_ops::open_color_types::{BitDepth, OptimizationFlags, TransformDirection};
+pub use transform::{Transform, TransformType};
+pub use transforms::group_transform::GroupTransform;
 
 /// The OpenColorIO version this port matches, as `OCIO::GetVersion()` reports it.
 pub const fn version() -> &'static str {

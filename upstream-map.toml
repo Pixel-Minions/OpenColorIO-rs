@@ -30,16 +30,16 @@ note = "1.1b-1.1c: AutoStride, ImageDesc, PackedImageDesc and PlanarImageDesc (i
 [[file]]
 path = "include/OpenColorIO/OpenColorTransforms.h"
 kind = "api"
-target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/format_metadata.rs", "crates/ocio-ops/src/dynamic_property.rs"]
+target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/format_metadata.rs", "crates/ocio-ops/src/dynamic_property.rs", "crates/ocio/src/transform.rs"]
 status = "partial"
-note = "1.2a: the FormatMetadata interface (44-117) is FormatMetadataImpl's own methods in format_metadata.rs (upstream has no other implementation), and its operator<< is FormatMetadataImpl::write_to; 1.2b: DynamicProperty (766-779) is the DynamicPropertyRcPtr enum and DynamicPropertyDouble (810-824) is DynamicPropertyDoubleImpl, in dynamic_property.rs"
+note = "1.2a: the FormatMetadata interface (44-117) is FormatMetadataImpl's own methods in format_metadata.rs (upstream has no other implementation), and its operator<< is FormatMetadataImpl::write_to; 1.2b: DynamicProperty (766-779) is the DynamicPropertyRcPtr enum and DynamicPropertyDouble (810-824) is DynamicPropertyDoubleImpl, in dynamic_property.rs; p1-transforms T0: Transform (as enum Transform) and GroupTransform, in crates/ocio/src/transform.rs and transforms/group_transform.rs; each class comes with its card"
 
 [[file]]
 path = "include/OpenColorIO/OpenColorTypes.h"
 kind = "api"
-target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs", "crates/ocio-ops/src/format_metadata.rs", "crates/ocio-ops/src/logging.rs", "crates/ocio-gpu/src/open_color_types.rs"]
+target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs", "crates/ocio-ops/src/format_metadata.rs", "crates/ocio-ops/src/logging.rs", "crates/ocio-gpu/src/open_color_types.rs", "crates/ocio/src/transform.rs"]
 status = "partial"
-note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.1a: BitDepth, and BitDepthToString (defined in ParseUtils.cpp); 1.1b: ChannelOrdering; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does; 1.2b: DynamicPropertyType; 1.2e: LoggingLevel (288-297), in open_color_types.rs, and LoggingFunction (283-284), in logging.rs; 1.7a: GpuLanguage, in ocio-gpu/src/open_color_types.rs; 1.3n1: Allocation (459-463); 1.2d: OptimizationFlags (634-722), a bit-flags type over a C unsigned long"
+note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.1a: BitDepth, and BitDepthToString (defined in ParseUtils.cpp); 1.1b: ChannelOrdering; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does; 1.2b: DynamicPropertyType; 1.2e: LoggingLevel (288-297), in open_color_types.rs, and LoggingFunction (283-284), in logging.rs; 1.7a: GpuLanguage, in ocio-gpu/src/open_color_types.rs; 1.3n1: Allocation (459-463); 1.2d: OptimizationFlags (634-722), a bit-flags type over a C unsigned long; p1-transforms T0: TransformType (361-386), in crates/ocio/src/transform.rs"
 
 [[file]]
 path = "src/CMakeLists.txt"
@@ -168,7 +168,8 @@ status = "todo"
 path = "src/OpenColorIO/Config.cpp"
 kind = "src"
 target = ["crates/ocio/src/config.rs"]
-status = "todo"
+status = "partial"
+note = "p1-transforms T0: CreateRaw's version and context, getMajorVersion, getMinorVersion, getCurrentContext; CreateRaw's state and getProcessor come with WP 1.8g, the rest with Phase 3"
 
 [[file]]
 path = "src/OpenColorIO/ConfigUtils.cpp"
@@ -186,7 +187,8 @@ status = "todo"
 path = "src/OpenColorIO/Context.cpp"
 kind = "src"
 target = ["crates/ocio/src/context.rs"]
-status = "todo"
+status = "partial"
+note = "p1-transforms T0: Context::Create, without state (Phase 3)"
 
 [[file]]
 path = "src/OpenColorIO/ContextVariableUtils.cpp"
@@ -458,8 +460,9 @@ note = "S2, 1.1d: OpCPU (as the CpuOp trait, with the typed apply_bit_depth); 1.
 [[file]]
 path = "src/OpenColorIO/OpBuilders.h"
 kind = "src"
-target = ["crates/ocio-ops/src/op_builders.rs"]
-status = "todo"
+target = ["crates/ocio/src/transform.rs", "crates/ocio/src/transforms/group_transform.rs"]
+status = "partial"
+note = "p1-transforms T0: BuildOps and BuildGroupOps; each Build<Class>Op comes with its class, next to it"
 
 [[file]]
 path = "src/OpenColorIO/OpOptimizers.cpp"
@@ -587,7 +590,8 @@ status = "todo"
 path = "src/OpenColorIO/Transform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transform.rs"]
-status = "todo"
+status = "partial"
+note = "p1-transforms T0: Transform::validate's direction check (the typeid text unreachable), BuildOps, operator<< and CreateTransform as exhaustive matches over enum Transform, with the classes ported so far; each class adds its arms"
 
 [[file]]
 path = "src/OpenColorIO/TransformBuilder.h"
@@ -2186,13 +2190,15 @@ status = "todo"
 path = "src/OpenColorIO/transforms/GroupTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/group_transform.rs"]
-status = "todo"
+status = "partial"
+note = "p1-transforms T0: GroupTransform (Create, direction, validate, metadata, the children, operator<<) and BuildGroupOps; text and validation against the wheel (crates/ocio/tests/transform_oracle.rs). write and its format queries (Phase 4) and CollectContextVariables (Phase 3) come later"
 
 [[file]]
 path = "src/OpenColorIO/transforms/GroupTransform.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/group_transform.rs"]
-status = "todo"
+status = "partial"
+note = "p1-transforms T0: GroupTransformImpl, as GroupTransform"
 
 [[file]]
 path = "src/OpenColorIO/transforms/LogAffineTransform.cpp"
