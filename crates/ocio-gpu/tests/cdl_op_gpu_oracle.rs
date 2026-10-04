@@ -1,88 +1,85 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! The Gamma op's GPU writer against the wheel (`gpu_shader`), in the 10 languages: for each
+//! The CDL op's GPU writer against the wheel (`gpu_shader`), in the 10 languages: for each
 //! case, the GPU processor's cache ID and queries, and the shader the extraction writes (its
 //! text, cache ID and names), or the error, byte for byte.
 //!
-//! In a version 2 config, an `ExponentTransform` and an `ExponentWithLinearTransform` each
-//! build a Gamma op with a copy of their data (`BuildExponentOp`, `BuildExponentWithLinearOp`,
-//! src/OpenColorIO/ops/gamma/GammaOp.cpp:179-216 @ v2.5.2): the negative styles and the two
-//! directions give the 10 Gamma styles. A `GroupTransform` builds each child forward, and the
-//! processor finalizes the ops (src/OpenColorIO/Processor.cpp:618-641); the GPU processor is
-//! then `getOptimizedGPUProcessor` at each level, or `getDefaultGPUProcessor`
-//! (Processor.cpp:437-445, 491-523). The port builds the same data (the helpers of
-//! `crates/ocio-ops/tests/common/gamma.rs`), the ops with `create_gamma_op`, and runs the GPU
-//! processor from them as they are, and from them finalized first: both must give the
-//! wheel's outcome.
+//! In a version 2 config, a `CDLTransform` builds a CDL op with a copy of its data
+//! (`BuildCDLOp`, src/OpenColorIO/ops/cdl/CDLOp.cpp:200-265 @ v2.5.2); a version 1 config
+//! builds matrices and an Exponent op instead, which the transforms' port (WP 1.8) brings. A
+//! `GroupTransform` builds each child forward, and the processor finalizes the ops
+//! (Processor.cpp:618-641); the GPU processor is then `getOptimizedGPUProcessor` at each level,
+//! or `getDefaultGPUProcessor` (Processor.cpp:437-445, 491-523). The port builds the same data
+//! (the helpers of `crates/ocio-ops/tests/common/cdl.rs`), the ops with `create_cdl_op`, and
+//! runs the GPU processor from them as they are, and from them finalized first: both must give
+//! the wheel's outcome.
 //!
-//! Finite parameters go through JSON (the binding's constructor validates each child, with
-//! its transform's prefix), NaN and infinite ones through a config's YAML (`BuildExponentOp`
-//! validates, without a prefix).
-//!
-//! An identity of a basic style that clamps, and an inverse pair of them, become a Range op
-//! where the optimizer replaces identities (`GammaOpData::getIdentityReplacement`), which the
-//! Range op's GPU writer (1.3r3) writes.
+//! Finite parameters go through JSON, NaN and infinite ones through a config's YAML. The
+//! optimizer replaces an identity CDL, an inverse pair, and a CDL whose power is 1, with Range
+//! and Matrix ops (`CDLOpData::getIdentityReplacement`, `getSimplerReplacement`), whose GPU
+//! writers are ported too.
 
 use ocio_gpu::gpu_processor::GpuProcessor;
 use ocio_gpu::{GpuLanguage, GpuShaderDesc};
 use ocio_ops::op::OpVec;
-use ocio_ops::open_color_types::{
-    NegativeStyle, OptimizationFlags, TransformDirection, get_inverse_transform_direction,
-};
-use ocio_ops::ops::gamma::GammaOpData;
-use ocio_ops::ops::gamma::gamma_op::create_gamma_op;
+use ocio_ops::open_color_types::{CdlStyle, OptimizationFlags, TransformDirection};
+use ocio_ops::ops::cdl::cdl_op::create_cdl_op;
 use ocio_ops::ops::matrix::MatrixOpData;
 use ocio_ops::ops::matrix::matrix_op::create_matrix_op;
-use ocio_testkit::battery::yaml_list;
+use ocio_testkit::battery::{yaml_list, yaml_number};
 use ocio_testkit::gpu::{self as oracle_gpu, GpuShaderReply, GpuShaderRequest, ShaderSettings};
-use ocio_testkit::gpu_cases::{GammaTransform, gamma_cases};
+use ocio_testkit::gpu_cases::cdl_cases;
 use ocio_testkit::{Oracle, assert_text_eq};
 use serde_json::{Value, json};
 
 #[allow(dead_code)] // The GPU tests use a subset.
-#[path = "../../ocio-ops/tests/common/gamma.rs"]
-mod gamma;
+#[path = "../../ocio-ops/tests/common/cdl.rs"]
+mod cdl;
 
-use NegativeStyle::{Clamp, Linear, Mirror, PassThru};
+use CdlStyle::{Asc, NoClamp};
 use TransformDirection::{Forward as F, Inverse as I};
-use gamma::{
-    direction_enum, exponent_op, exponent_with_linear_op, negative_style_enum, yaml_direction,
-    yaml_style,
-};
+use cdl::{Cdl, yaml_style};
 
 /// A transform of the lists.
 #[derive(Debug, Clone, Copy)]
 enum T {
-    /// `ExponentTransform(value, negativeStyle, direction)`.
-    Exp([f64; 4], NegativeStyle, TransformDirection),
-    /// `ExponentWithLinearTransform(gamma, offset, negativeStyle, direction)`.
-    Lin([f64; 4], [f64; 4], NegativeStyle, TransformDirection),
+    /// A `CDLTransform` and its direction.
+    Cdl(Cdl, TransformDirection),
     /// A `MatrixTransform` scaling R, G and B.
     Scale(f64),
+}
+
+/// A CDL.
+fn cdl(slope: [f64; 3], offset: [f64; 3], power: [f64; 3], sat: f64, style: CdlStyle) -> Cdl {
+    Cdl {
+        slope,
+        offset,
+        power,
+        sat,
+        style,
+    }
 }
 
 impl T {
     /// Whether every parameter is finite: then JSON can hold them.
     fn finite(&self) -> bool {
         match self {
-            T::Exp(v, ..) => v.iter().all(|x| x.is_finite()),
-            T::Lin(g, o, ..) => g.iter().chain(o).all(|x| x.is_finite()),
+            T::Cdl(c, _) => c
+                .slope
+                .iter()
+                .chain(&c.offset)
+                .chain(&c.power)
+                .chain([&c.sat])
+                .all(|v| v.is_finite()),
             T::Scale(s) => s.is_finite(),
         }
     }
 
-    /// The JSON spec.
+    /// The JSON spec: the constructor's arguments (it validates), then the style.
     fn spec(&self) -> Value {
         match *self {
-            T::Exp(value, neg, dir) => json!({"class": "ExponentTransform", "args": {
-                "value": value, "negativeStyle": negative_style_enum(neg),
-                "direction": direction_enum(dir)}}),
-            T::Lin(gamma, offset, neg, dir) => {
-                json!({"class": "ExponentWithLinearTransform", "args": {
-                "gamma": gamma, "offset": offset, "negativeStyle": negative_style_enum(neg),
-                "direction": direction_enum(dir)}})
-            }
+            T::Cdl(c, dir) => c.spec(dir),
             T::Scale(s) => json!({"class": "MatrixTransform", "args": {"matrix": scale(s)}}),
         }
     }
@@ -90,36 +87,20 @@ impl T {
     /// The config YAML.
     fn yaml(&self) -> String {
         match *self {
-            T::Exp(value, neg, dir) => format!(
-                "!<ExponentTransform> {{value: {}, style: {}, direction: {}}}",
-                yaml_list(&value),
-                yaml_style(neg),
-                yaml_direction(dir)
-            ),
-            T::Lin(gamma, offset, neg, dir) => format!(
-                "!<ExponentWithLinearTransform> {{gamma: {}, offset: {}, style: {}, \
+            T::Cdl(c, dir) => format!(
+                "!<CDLTransform> {{slope: {}, offset: {}, power: {}, sat: {}, style: {}, \
                  direction: {}}}",
-                yaml_list(&gamma),
-                yaml_list(&offset),
-                yaml_style(neg),
-                yaml_direction(dir)
+                yaml_list(&c.slope),
+                yaml_list(&c.offset),
+                yaml_list(&c.power),
+                yaml_number(c.sat),
+                yaml_style(c.style),
+                match dir {
+                    F => "forward",
+                    I => "inverse",
+                }
             ),
             T::Scale(s) => format!("!<MatrixTransform> {{matrix: {}}}", yaml_list(&scale(s))),
-        }
-    }
-
-    /// The op data of a Gamma transform, and the transform's validation prefix.
-    fn gamma_data(&self) -> Option<(GammaOpData, &'static str)> {
-        match *self {
-            T::Exp(value, neg, dir) => Some((
-                exponent_op(value, neg, dir),
-                "ExponentTransform validation failed: ",
-            )),
-            T::Lin(gamma, offset, neg, dir) => Some((
-                exponent_with_linear_op(gamma, offset, neg, dir),
-                "ExponentWithLinearTransform validation failed: ",
-            )),
-            T::Scale(_) => None,
         }
     }
 }
@@ -163,6 +144,7 @@ struct Case {
     chain: Vec<T>,
     /// The processor, as the oracle takes it.
     processor: Value,
+    route: Route,
     flags: (Option<Value>, OptimizationFlags),
     language: GpuLanguage,
     oracle_language: oracle_gpu::GpuLanguage,
@@ -201,8 +183,8 @@ colorspaces:
     name: raw
 ";
 
-/// The oracle's processor for `chain`: a `GroupTransform`, as JSON, or, when a value isn't
-/// finite, in a config's YAML (JSON can't hold NaN and infinities).
+/// The oracle's processor for `chain`: a `GroupTransform`, as JSON, or, when a bound is
+/// infinite, in a config's YAML (JSON can't hold infinities).
 fn processor(chain: &[T]) -> Value {
     if chain.iter().all(T::finite) {
         let children: Vec<Value> = chain.iter().map(T::spec).collect();
@@ -217,31 +199,57 @@ fn processor(chain: &[T]) -> Value {
     json!({"config": {"yaml": config}, "src": "raw", "dst": "cs"})
 }
 
+/// How the oracle's processor gets its transforms.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Route {
+    /// JSON, each `CDLTransform` from the binding's constructor, which validates it
+    /// (PyCDLTransform.cpp:37-62 @ v2.5.2), then its style's setter.
+    Constructor,
+    /// JSON, a default `CDLTransform` and its setters, which don't validate.
+    Setters,
+    /// A config's YAML, from a colour space: no transform's `validate`.
+    Yaml,
+}
+
 /// The processor's ops, as the transforms build them (see the module notes), before the
-/// processor finalizes them. An error carries the wheel's stage: the binding's constructor
-/// validates each Gamma transform with its prefix on the JSON route (`json`), and
-/// `BuildExponentOp` validates without one.
-fn raw_ops(chain: &[T], json: bool) -> Result<OpVec, String> {
-    if json {
+/// processor finalizes them. An error carries the wheel's stage:
+/// - on the constructor route, the binding validates each CDL transform: "transform";
+/// - on both JSON routes, `Processor::Impl::setTransform` validates the group, which validates
+///   each child, with `CDLTransformImpl::validate`'s prefix (Processor.cpp:633,
+///   GroupTransform.cpp:56-73, CDLTransform.cpp:142-155): "processor";
+/// - `BuildCDLOp` validates the data, without a prefix (CDLOp.cpp:255-264): "processor".
+fn raw_ops(chain: &[T], route: Route) -> Result<OpVec, String> {
+    let prefixed = |c: &Cdl, dir: TransformDirection, stage: &str| {
+        c.op_data(dir)
+            .validate()
+            .map_err(|e| format!("{stage}: CDLTransform validation failed: {}", e.message()))
+    };
+    if route == Route::Constructor {
         for t in chain {
-            if let Some((data, prefix)) = t.gamma_data() {
-                data.validate()
-                    .map_err(|e| format!("transform: {prefix}{}", e.message()))?;
+            if let T::Cdl(c, dir) = t {
+                prefixed(c, *dir, "transform")?;
+            }
+        }
+    }
+    if route != Route::Yaml {
+        for t in chain {
+            if let T::Cdl(c, dir) = t {
+                prefixed(c, *dir, "processor")?;
             }
         }
     }
     let processor = |e: ocio_ops::Exception| format!("processor: {}", e.message());
     let mut raw = OpVec::new();
     for t in chain {
-        match t.gamma_data() {
-            Some((data, _)) => {
+        match t {
+            T::Cdl(c, dir) => {
+                let data = c.op_data(*dir);
                 data.validate().map_err(processor)?;
-                create_gamma_op(&mut raw, data, F);
+                create_cdl_op(&mut raw, data, F);
             }
-            None => {
-                let T::Scale(s) = *t else { unreachable!() };
+            T::Scale(s) => {
                 let mut data = MatrixOpData::new();
-                data.set_rgba(&scale(s));
+                data.set_rgba(&scale(*s));
                 data.validate().map_err(processor)?;
                 create_matrix_op(&mut raw, data, F);
             }
@@ -278,7 +286,7 @@ fn wheel(reply: &GpuShaderReply) -> Outcome {
                 shader.uniforms.is_empty()
                     && shader.textures.is_empty()
                     && shader.textures_3d.is_empty(),
-                "a Gamma shader has no uniform nor texture"
+                "a CDL shader has no uniform nor texture"
             );
             let getter = |key: &str| shader.getters[key].as_str().unwrap().to_string();
             Ok([
@@ -305,8 +313,7 @@ fn wheel(reply: &GpuShaderReply) -> Outcome {
 /// takes either, and finalizes them itself.
 fn port(case: &Case, finalize_first: bool) -> Outcome {
     let text = |b: &[u8]| String::from_utf8(b.to_vec()).unwrap();
-    let json = case.processor.get("transform").is_some();
-    let mut raw = match raw_ops(&case.chain, json) {
+    let mut raw = match raw_ops(&case.chain, case.route) {
         Ok(raw) => raw,
         Err(e) => return Outcome::Raised(e),
     };
@@ -407,6 +414,7 @@ fn cases_with(
     label: &str,
     chain: Vec<T>,
     processor: Value,
+    route: Route,
     flags: &[(Option<Value>, OptimizationFlags)],
     names: Names,
 ) -> Vec<Case> {
@@ -417,6 +425,7 @@ fn cases_with(
                 label: format!("{label} {:?} {language:?} {names:?}", flags.0),
                 chain: chain.clone(),
                 processor: processor.clone(),
+                route,
                 flags: flags.clone(),
                 language,
                 oracle_language,
@@ -435,45 +444,42 @@ fn cases_of(
     names: Names,
 ) -> Vec<Case> {
     let processor = processor(&chain);
-    cases_with(label, chain, processor, flags, names)
+    let route = if processor.get("transform").is_some() {
+        Route::Constructor
+    } else {
+        Route::Yaml
+    };
+    cases_with(label, chain, processor, route, flags, names)
 }
 
-/// The negative style of an oracle `NEGATIVE_*` name.
-fn negative_style(name: &str) -> NegativeStyle {
-    match name {
-        "NEGATIVE_CLAMP" => Clamp,
-        "NEGATIVE_MIRROR" => Mirror,
-        "NEGATIVE_PASS_THRU" => PassThru,
-        "NEGATIVE_LINEAR" => Linear,
-        _ => panic!("unknown negative style {name}"),
-    }
-}
-
-/// Upstream's `ExponentOp` and `ExponentWithLinearOp` GPU tests (tests/gpu/GammaOp_test.cpp
-/// @ v2.5.2, `ocio_testkit::gpu_cases`) that use a version 2 config, which builds Gamma ops:
-/// the wheel's shader for each, from `getDefaultGPUProcessor` as the tests take it and from
-/// every optimization level, in every language, is the port's. (The four at version 1 build
-/// Exponent ops, `p1-exponent`'s; the legacy GPU processor comes in Phase 7.)
+/// Upstream's `CDLOp` GPU tests (tests/gpu/CDLOp_test.cpp @ v2.5.2, `ocio_testkit::gpu_cases`)
+/// that use a version 2 config, which builds a CDL op: the wheel's shader for each, from
+/// `getDefaultGPUProcessor` as the tests take it and from every optimization level, in every
+/// language, is the port's. (The four at version 1 build matrices and an Exponent op, through
+/// the transforms' port, WP 1.8; the legacy GPU processor comes in Phase 7.)
 #[test]
 fn upstreams_gpu_tests_write_the_wheels_shaders() {
     let mut cases = Vec::new();
-    let upstream: Vec<_> = gamma_cases()
-        .into_iter()
-        .filter(|c| c.config_major_version() == 2)
-        .collect();
-    assert_eq!(upstream.len(), 10);
+    let upstream: Vec<_> = cdl_cases().into_iter().filter(|c| c.version == 2).collect();
+    assert_eq!(upstream.len(), 11);
     for case in upstream {
         let dir = if case.inverse { I } else { F };
-        let neg = negative_style(case.negative_style);
-        let t = match case.transform {
-            GammaTransform::Exponent { value, .. } => T::Exp(value, neg, dir),
-            GammaTransform::ExponentWithLinear { gamma, offset } => T::Lin(gamma, offset, neg, dir),
+        let style = match case.style {
+            Some("CDL_ASC") => Asc,
+            Some("CDL_NO_CLAMP") => NoClamp,
+            other => panic!("{}: style {other:?}", case.name),
         };
+        let p = case.params;
+        let t = T::Cdl(
+            cdl(p.slope, p.offset, p.power, p.sat.unwrap_or(1.0), style),
+            dir,
+        );
         let processor = json!({ "transform": case.transform() });
         cases.extend(cases_with(
-            &format!("{} {}", case.group, case.name),
+            &format!("CDLOp {}", case.name),
             vec![t],
             processor,
+            Route::Setters,
             &levels(),
             Names::default(),
         ));
@@ -482,123 +488,138 @@ fn upstreams_gpu_tests_write_the_wheels_shaders() {
     assert_eq!(extracted, cases.len());
 }
 
-/// Each style, forward and inverse, in every language and at every level, with exponents
-/// whose `double` and `float` literals differ; identities and inverse pairs the optimizer
-/// removes, or replaces with a Range op for the styles that clamp; every pair of
-/// basic styles and directions, which combine; moncurves, which don't; a list around a
-/// matrix; a reverse slope beyond the float range; refusals; and names (an empty pixel name
-/// is an error, but in OSL).
+/// Each style and direction, in every language and at every level: the lists of
+/// `crates/ocio-ops/tests/cdl_op_oracle.rs` (upstream's data, powers of 1 that the optimizer
+/// simplifies into matrices and ranges, identities, inverse pairs and pairs just past the
+/// tolerance, saturation only, zero and tiny slopes and saturations, parameters that need 7
+/// digits, refusals), a list around a matrix, and names (an empty pixel name is an error, but
+/// in OSL).
 #[test]
-fn every_style_writes_the_wheels_shader() {
-    let v = [2.2, 1.0 / 0.45, 1.23456789, 1.5];
-    let lin = ([2.4, 1.0 / 0.45, 3.0, 1.1], [0.055, 0.099, 0.16, 0.0]);
-    let one = [1.0; 4];
-    let lin_one = ([1.0; 4], [0.0; 4]);
-    let mut all: Vec<(String, Vec<T>)> = Vec::new();
-    for neg in [Clamp, Mirror, PassThru] {
+fn every_path_writes_the_wheels_shader() {
+    // tests/cpu/ops/cdl/CDLOp_tests.cpp:60-66 @ v2.5.2.
+    let data_1 = |style| {
+        cdl(
+            [1.35, 1.1, 0.071],
+            [0.05, -0.23, 0.11],
+            [0.93, 0.81, 1.27],
+            1.23,
+            style,
+        )
+    };
+    let power_1 = |sat, style| cdl([1.2, 0.8, 1.1], [0.05, -0.1, 0.0], [1.0; 3], sat, style);
+    let identity = |style| cdl([1.0; 3], [0.0; 3], [1.0; 3], 1.0, style);
+    let mut chains: Vec<(String, Vec<T>)> = Vec::new();
+    for style in [Asc, NoClamp] {
         for dir in [F, I] {
-            let inv = get_inverse_transform_direction(dir);
-            all.push((format!("{neg:?} {dir:?}"), vec![T::Exp(v, neg, dir)]));
-            all.push((
-                format!("{neg:?} {dir:?} identity"),
-                vec![T::Exp(one, neg, dir)],
-            ));
-            all.push((
-                format!("{neg:?} {dir:?} inverse pair"),
-                vec![T::Exp(v, neg, dir), T::Exp(v, neg, inv)],
-            ));
-        }
-    }
-    for neg in [Linear, Mirror] {
-        for dir in [F, I] {
-            let inv = get_inverse_transform_direction(dir);
-            all.extend([
-                (
-                    format!("moncurve {neg:?} {dir:?}"),
-                    vec![T::Lin(lin.0, lin.1, neg, dir)],
-                ),
-                (
-                    format!("moncurve {neg:?} {dir:?} identity"),
-                    vec![T::Lin(lin_one.0, lin_one.1, neg, dir)],
-                ),
-                (
-                    format!("moncurve {neg:?} {dir:?} inverse pair"),
-                    vec![
-                        T::Lin(lin.0, lin.1, neg, dir),
-                        T::Lin(lin.0, lin.1, neg, inv),
-                    ],
-                ),
-                (
-                    format!("moncurve {neg:?} {dir:?} twice"),
-                    vec![
-                        T::Lin(lin.0, lin.1, neg, dir),
-                        T::Lin(lin.0, lin.1, neg, dir),
-                    ],
-                ),
-                (
-                    format!("moncurve {neg:?} {dir:?} after a basic one"),
-                    vec![T::Exp(v, Mirror, dir), T::Lin(lin.0, lin.1, neg, dir)],
-                ),
-            ]);
-        }
-    }
-    // Every pair of basic styles and directions: combined where `mayCompose` allows it.
-    let a = [1.0 / 0.45, 2.0, 0.5, 1.25];
-    let b = [0.45, 3.0, 0.8, 1.0];
-    for neg1 in [Clamp, Mirror, PassThru] {
-        for neg2 in [Clamp, Mirror, PassThru] {
-            for (d1, d2) in [(F, F), (F, I), (I, F), (I, I)] {
-                all.push((
-                    format!("{neg1:?} {d1:?} then {neg2:?} {d2:?}"),
-                    vec![T::Exp(a, neg1, d1), T::Exp(b, neg2, d2)],
-                ));
+            let other = match dir {
+                F => I,
+                I => F,
+            };
+            let mut push = |label: &str, chain: Vec<T>| {
+                chains.push((format!("{style:?} {dir:?} {label}"), chain));
+            };
+            push("data 1", vec![T::Cdl(data_1(style), dir)]);
+            push("power 1", vec![T::Cdl(power_1(1.0, style), dir)]);
+            push("power 1, sat", vec![T::Cdl(power_1(0.7, style), dir)]);
+            push("identity", vec![T::Cdl(identity(style), dir)]);
+            push(
+                "inverse pair",
+                vec![T::Cdl(data_1(style), dir), T::Cdl(data_1(style), other)],
+            );
+            let mut sat = data_1(style);
+            sat.sat = 1.3;
+            push(
+                "pair, other sat",
+                vec![T::Cdl(data_1(style), dir), T::Cdl(sat, other)],
+            );
+            let mut past = data_1(style);
+            past.power[1] += 2e-9;
+            push(
+                "pair past the tolerance",
+                vec![T::Cdl(data_1(style), dir), T::Cdl(past, other)],
+            );
+            let mut within = data_1(style);
+            within.power[1] += 0.5e-9;
+            push(
+                "pair within the tolerance",
+                vec![T::Cdl(data_1(style), dir), T::Cdl(within, other)],
+            );
+            let mut near = power_1(0.7, style);
+            near.power = [1.0 + 0.5e-9, 1.0 - 0.5e-9, 1.0];
+            push("power near 1", vec![T::Cdl(near, dir)]);
+            push(
+                "two simplified",
+                vec![
+                    T::Cdl(power_1(0.7, style), dir),
+                    T::Cdl(power_1(1.0, style), dir),
+                ],
+            );
+            for sat in [0.7, 1.3] {
+                push(
+                    &format!("sat {sat} only"),
+                    vec![T::Cdl(cdl([1.0; 3], [0.0; 3], [1.0; 3], sat, style), dir)],
+                );
             }
+            for (slope, sat) in [
+                ([0.0, 1.0, 1.2], 0.9),
+                ([1.2, 1.0, 0.9], 0.0),
+                ([0.005, 1.0, 1.2], 0.9),
+                ([1.2, 1.0, 0.9], 0.005),
+            ] {
+                push(
+                    &format!("slope {slope:?}, sat {sat}"),
+                    vec![T::Cdl(
+                        cdl(slope, [0.1, 0.0, -0.1], [1.0; 3], sat, style),
+                        dir,
+                    )],
+                );
+            }
+            push(
+                "around a matrix",
+                vec![
+                    T::Cdl(data_1(style), dir),
+                    T::Scale(2.0),
+                    T::Cdl(data_1(style), other),
+                ],
+            );
         }
     }
-    all.extend([
+    chains.extend([
         (
-            "around a matrix".to_string(),
-            vec![T::Exp(v, Mirror, F), T::Scale(2.0), T::Exp(v, Mirror, I)],
-        ),
-        (
-            "around a matrix, moncurve".to_string(),
-            vec![
-                T::Lin(lin.0, lin.1, Linear, F),
-                T::Scale(0.5),
-                T::Lin(lin.0, lin.1, Linear, I),
-            ],
-        ),
-        // Valid parameters whose reverse slope overflows a float: an `inf` literal
-        // (docs/improvements.md, I-35).
-        (
-            "reverse slope beyond the float range".to_string(),
-            vec![T::Lin(
-                [10.0, 2.4, 2.4, 1.0],
-                [0.0, 0.055, 0.055, 0.0],
-                Linear,
-                I,
+            "7 digits".to_string(),
+            vec![T::Cdl(
+                cdl(
+                    [1.234567, 0.1234567, 12.34567],
+                    [0.001234565, -1.2345678, 1234567.8],
+                    [1.1234567, 0.98765432, 2.5],
+                    0.9876543,
+                    Asc,
+                ),
+                F,
             )],
         ),
-        // Refused: a basic exponent below its bound, a moncurve offset above its bound.
         (
-            "refused basic".to_string(),
-            vec![
-                T::Exp(v, Clamp, F),
-                T::Exp([0.001, 1.0, 1.0, 1.0], Clamp, F),
-            ],
+            "both styles".to_string(),
+            vec![T::Cdl(data_1(Asc), F), T::Cdl(data_1(NoClamp), I)],
+        ),
+        // Refused: a negative slope, a zero power.
+        (
+            "negative slope".to_string(),
+            vec![T::Cdl(
+                cdl([-0.5, 1.0, 1.0], [0.0; 3], [1.2; 3], 1.0, Asc),
+                F,
+            )],
         ),
         (
-            "refused moncurve".to_string(),
-            vec![T::Lin(
-                [2.4, 2.2, 2.2, 1.0],
-                [0.055, 0.95, 0.1, 0.0],
-                Linear,
-                F,
+            "zero power".to_string(),
+            vec![T::Cdl(
+                cdl([1.0; 3], [0.0; 3], [1.2, 0.0, 1.2], 1.0, NoClamp),
+                I,
             )],
         ),
     ]);
     let mut cases = Vec::new();
-    for (label, chain) in all {
+    for (label, chain) in chains {
         cases.extend(cases_of(&label, chain, &levels(), Names::default()));
     }
     let names = [
@@ -613,26 +634,38 @@ fn every_style_writes_the_wheels_shader() {
         },
     ];
     for names in names {
-        for chain in [
-            vec![T::Exp(v, PassThru, I)],
-            vec![T::Lin(lin.0, lin.1, Mirror, F)],
-        ] {
-            cases.extend(cases_of("names", chain, &no_optimization(), names));
+        for style in [Asc, NoClamp] {
+            for dir in [F, I] {
+                cases.extend(cases_of(
+                    "names",
+                    vec![T::Cdl(data_1(style), dir)],
+                    &no_optimization(),
+                    names,
+                ));
+            }
         }
     }
     let (extracted, refused) = check(&cases);
     assert!(extracted > 0 && refused > 0);
 }
 
-/// Extreme parameters, generated: each exponent of each basic style, and each gamma and
-/// offset of each moncurve style, in turn NaN, ±Inf, the largest double, -0, the smallest
-/// denormal, 1e-9, 65504.5 (beyond Cg's half range), the bounds `validate` checks and values
-/// just past them, without optimization, in every language.
+/// Extreme parameters, generated: each slope, offset and power, and the saturation, in turn
+/// NaN, ±Inf, the largest double, -0, the smallest denormal, 1e-9, 1e39 and 65504.5 (beyond the
+/// float range and Cg's half range), for each style and direction, at every level, in every
+/// language; alone, and in lists the optimizer combines or removes: twice, as an inverse pair,
+/// and around a matrix.
 #[test]
 fn extreme_parameters_write_the_wheels_shader() {
-    let v = [2.2, 1.0 / 0.45, 1.23456789, 1.5];
-    let lin = ([2.4, 1.0 / 0.45, 3.0, 1.1], [0.055, 0.099, 0.16, 0.0]);
-    let common = [
+    let base = |style| {
+        cdl(
+            [1.15, 1.10, 0.90],
+            [0.05, -0.02, 0.07],
+            [1.20, 0.95, 1.13],
+            0.9,
+            style,
+        )
+    };
+    let values = [
         f64::NAN,
         f64::INFINITY,
         f64::NEG_INFINITY,
@@ -640,51 +673,40 @@ fn extreme_parameters_write_the_wheels_shader() {
         -0.0,
         f64::from_bits(1),
         1e-9,
+        1e39,
         65504.5,
     ];
     let mut cases = Vec::new();
-    // The basic styles' bounds: [0.01, 100].
-    let basic: Vec<f64> = common
-        .into_iter()
-        .chain([0.01, 0.009999999, 100.0, 100.00001])
-        .collect();
-    for neg in [Clamp, Mirror, PassThru] {
+    for style in [Asc, NoClamp] {
         for dir in [F, I] {
-            for slot in 0..4 {
-                for &x in &basic {
-                    let mut e = v;
-                    e[slot] = x;
-                    cases.extend(cases_of(
-                        &format!("{neg:?} {dir:?} value[{slot}] = {x:e}"),
-                        vec![T::Exp(e, neg, dir)],
-                        &no_optimization(),
-                        Names::default(),
-                    ));
-                }
-            }
-        }
-    }
-    // The moncurve styles' bounds: [1, 10] for the gamma, [0, 0.9] for the offset.
-    let moncurve: Vec<f64> = common
-        .into_iter()
-        .chain([1.0, 0.9999999, 10.0, 10.000001, 0.9, 0.9000001])
-        .collect();
-    for neg in [Linear, Mirror] {
-        for dir in [F, I] {
-            for slot in 0..8 {
-                for &x in &moncurve {
-                    let (mut g, mut o) = lin;
-                    if slot < 4 {
-                        g[slot] = x;
-                    } else {
-                        o[slot - 4] = x;
+            for slot in 0..10 {
+                for v in values {
+                    let mut c = base(style);
+                    match slot {
+                        0..3 => c.slope[slot] = v,
+                        3..6 => c.offset[slot - 3] = v,
+                        6..9 => c.power[slot - 6] = v,
+                        _ => c.sat = v,
                     }
-                    cases.extend(cases_of(
-                        &format!("moncurve {neg:?} {dir:?} slot {slot} = {x:e}"),
-                        vec![T::Lin(g, o, neg, dir)],
-                        &no_optimization(),
-                        Names::default(),
-                    ));
+                    let other = match dir {
+                        F => I,
+                        I => F,
+                    };
+                    let (x, inverse) = (T::Cdl(c, dir), T::Cdl(c, other));
+                    let chains = [
+                        ("", vec![x]),
+                        (" twice", vec![x, x]),
+                        (" inverse pair", vec![x, inverse]),
+                        (" around a matrix", vec![x, T::Scale(2.0), x]),
+                    ];
+                    for (label, chain) in chains {
+                        cases.extend(cases_of(
+                            &format!("{style:?} {dir:?} slot {slot} = {v:e}{label}"),
+                            chain,
+                            &levels(),
+                            Names::default(),
+                        ));
+                    }
                 }
             }
         }

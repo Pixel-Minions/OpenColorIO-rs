@@ -560,6 +560,13 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   is negative is a NaN of each platform's sign. The break feeds the offset of the linear
   segment (`GetLinearOffset`) and the inverse's choice of segment, so the pixels at and
   below the break differ, and so do the NaNs the linear segment produces.
+  `LogUtil::GetLinearSlope` (`LogUtils.cpp:255-268`), when no linear slope is set, also
+  multiplies its numerator `logSlope * linSlope` in a different order on each: MSVC computes
+  `linSlope * logSlope` (0x18021abde), GCC the source's order (0x40176d). With both slopes NaN
+  the slope keeps the linear side's NaN on Windows and the log side's on Linux; with NaNs of
+  opposite signs (reachable through the API's setters, not through a config), the renderers'
+  NaNs and the shader's literal of the linear segment's slope (`linear_segment_slope`, or
+  `linear_segment_slopeinv` in the inverse) differ in sign between the platforms.
 - **Who notices:** anyone comparing renders of a LogCameraTransform, or a camera-style CTF
   Log, between a Windows and a Linux machine; ARRI LogC3 (EI 800) happens to give the same
   break on both.
@@ -568,7 +575,13 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p1-log` (1.3l1, the S2 spike's variants); `log_utils.rs`,
   `get_log_side_break_msvc` and `get_log_side_break_libstdcxx`; `log_oracle.rs`,
   `camera_cases_distinguish_the_log_side_break_variants` and the camera battery, on both
-  platforms.
+  platforms. The GPU writer (1.3l4) writes the break (`log_break`) and the linear segment's
+  offset (`linear_segment_offset`) as `float` literals, so a camera log's shader text
+  differs between the platforms too: `crates/ocio-gpu/tests/log_op_gpu_oracle.rs` compares
+  it with the wheel live on each. The linear slope's numerator: `get_linear_slope_msvc` and
+  `get_linear_slope_libstdcxx` (p1-gpu-ops4, from the review of 1.3l4), read from both wheels'
+  machine code; the wheel can't be given NaNs of opposite signs until the specs carry a
+  double's bits, so no oracle test checks them yet.
 
 ## Transforms
 
@@ -715,6 +728,25 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   with an offset of 0, e.g. `ExponentWithLinearTransform([10, 2.4, 2.4, 1],
   [0, 0.055, 0.055, 0], NEGATIVE_LINEAR, INVERSE)`, gives
   `vec4 slope = vec4(inf, 12.9232101, ...)`; the same test checks it.
+  The Range writer (1.3r3): `RangeOpData::validate` accepts infinite bounds, and the scale
+  and offset it computes from them are infinite or NaN. Through the wheel, in GLSL 4.0, a
+  maxOut of inf gives `outColor.rgb * vec3(inf, inf, inf) + vec3(-inf, -inf, -inf)` and
+  `min(vec3(inf, inf, inf), ...)`; a minIn of -inf gives an offset of `-nan(ind)` on
+  Windows: `crates/ocio-gpu/tests/range_op_gpu_oracle.rs`
+  (`extreme_bounds_write_the_wheels_shader`). The CDL writer (1.3c4) writes the renderers'
+  `float` parameters, which its validation lets be NaN or infinite, and which a `double`
+  beyond `FLT_MAX` overflows: through the wheel, a slope of 1e39 and an offset of NaN give
+  `vec3 slope = vec3(inf, ...)` and `vec3 offset = vec3(nan, ...)`; an infinite saturation
+  goes through `declareVar`, which writes `3.40282347e+38` instead:
+  `crates/ocio-gpu/tests/cdl_op_gpu_oracle.rs` (`extreme_parameters_write_the_wheels_shader`).
+  The Log writer (1.3l4) writes some parameters as `double`s and others as `float`s it
+  computes from them, and its validation lets the base and the parameters be NaN or
+  infinite. Through the wheel, in GLSL 4.0, an affine log in base 10 with a log side slope
+  and a linear side slope of 1e39 gives `vec3 lin_slope = vec3(9.9999999999999994e+38., ...)`
+  and `vec3 log_slope = vec3(inf, ...)` (the slope divided by `log(base)` in `double`, then
+  narrowed), and its inverse `vec3 log_slopeinv = vec3(0., ...)`; a `LogTransform` with a
+  NaN base gives `vec3 log_slope = vec3(nan, nan, nan)`:
+  `crates/ocio-gpu/tests/log_op_gpu_oracle.rs` (`extreme_parameters_write_the_wheels_shader`).
 
 ## Python module (`ocio-py`)
 
