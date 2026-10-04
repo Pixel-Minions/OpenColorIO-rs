@@ -5,14 +5,16 @@
 //! `MatrixOp.cpp` @ v2.5.2: the op's behaviors, the functions that create ops from data
 //! ([`create_matrix_op`], [`create_identity_matrix_op`]) and from values ([`create_scale_op`],
 //! [`create_fit_op`], [`create_saturation_op`], [`create_min_max_op`], ...). Not here:
-//! `CreateMatrixTransform` and `BuildMatrixOp`, which work on the `MatrixTransform` (WP 1.8),
-//! `extractGpuShaderInfo` (1.3m4), and the `float` overloads of `CreateMatrixOffsetOp` and
-//! `CreateFitOp`, which MatrixOp.h declares and nothing defines.
+//! `CreateMatrixTransform` and `BuildMatrixOp`, which work on the `MatrixTransform` (in `ocio`,
+//! crates/ocio/src/transforms/matrix_transform.rs), `extractGpuShaderInfo` (1.3m4), and the
+//! `float` overloads of `CreateMatrixOffsetOp` and `CreateFitOp`, which MatrixOp.h declares and
+//! nothing defines.
 //!
 //! `CreateFitOp` and `CreateSaturationOp` compute their matrices with `MatrixTransform::Fit` and
 //! `MatrixTransform::Sat`, static functions of the transform (src/OpenColorIO/transforms/
 //! MatrixTransform.cpp:162-245); the ops can't call the transform's crate, so they are ported
-//! here, [`matrix_transform_fit`] and [`matrix_transform_sat`], for the transform to reuse.
+//! here, [`matrix_transform_fit`] and [`matrix_transform_sat`], which `ocio::MatrixTransform`'s
+//! `fit` and `sat` return.
 //!
 //! As for every family, the op is its data, [`OpData::Matrix`]: [`Op`]'s methods match on it
 //! and call the methods here, `MatrixOffsetOp`'s overrides. Its `finalize` replaces the op's
@@ -24,7 +26,7 @@ use super::matrix_op_cpu::get_matrix_renderer;
 use super::matrix_op_data::{MatrixArray, MatrixOpData};
 use crate::cfmt::{Crt, OStringStream};
 use crate::exception::{Exception, Result};
-use crate::math_utils::is_scalar_equal_to_zero;
+use crate::math_utils::{is_scalar_equal_to_zero, sse_add, sse_mul};
 use crate::op::{CpuOp, Op, OpVec};
 use crate::op_data::OpData;
 use crate::open_color_types::{TransformDirection, combine_transform_directions};
@@ -154,8 +156,7 @@ pub fn create_identity_matrix_op(ops: &mut OpVec) {
 /// <i>." where a channel's old range is 0.
 ///
 /// Port of `MatrixTransform::Fit` (src/OpenColorIO/transforms/MatrixTransform.cpp:162-188 @
-/// v2.5.2), with both outputs asked for. Internal to the ops: public for the
-/// `MatrixTransform`, which comes with the transforms (WP 1.8).
+/// v2.5.2), with both outputs asked for. Internal to the ops: public for `ocio::MatrixTransform`.
 #[doc(hidden)]
 pub fn matrix_transform_fit(
     old_min4: &[f64; 4],
@@ -180,7 +181,18 @@ pub fn matrix_transform_fit(
         }
 
         m44[5 * i] = (new_max4[i] - new_min4[i]) / denom;
-        offset4[i] = (new_min4[i] * old_max4[i] - new_max4[i] * old_min4[i]) / denom;
+        // `newmin4[i]*oldmax4[i] - newmax4[i]*oldmin4[i]`. Where two NaNs meet in a product, the
+        // product keeps its first operand's: the Windows wheel multiplies in the source's order,
+        // the Linux wheel too but for `oldmax4[i]` first in the first product
+        // (docs/improvements.md, I-74; seen through each wheel's `MatrixTransform.Fit`,
+        // crates/ocio/tests/matrix_transform_oracle.rs).
+        let new_min_old_max = if cfg!(target_os = "windows") {
+            sse_mul(new_min4[i], old_max4[i])
+        } else {
+            sse_mul(old_max4[i], new_min4[i])
+        };
+        let new_max_old_min = sse_mul(new_max4[i], old_min4[i]);
+        offset4[i] = (new_min_old_max - new_max_old_min) / denom;
     }
     Ok((m44, offset4))
 }
@@ -189,25 +201,39 @@ pub fn matrix_transform_fit(
 /// offsets.
 ///
 /// Port of `MatrixTransform::Sat` (src/OpenColorIO/transforms/MatrixTransform.cpp:210-245 @
-/// v2.5.2), with both outputs asked for. Internal to the ops: public for the
-/// `MatrixTransform`, which comes with the transforms (WP 1.8).
+/// v2.5.2), with both outputs asked for. Internal to the ops: public for `ocio::MatrixTransform`.
 #[doc(hidden)]
 pub fn matrix_transform_sat(sat: f64, luma_coef3: &[f64; 3]) -> ([f64; 16], [f64; 4]) {
     let mut m44 = [0.0; 16];
 
-    m44[0] = (1. - sat) * luma_coef3[0] + sat;
-    m44[1] = (1. - sat) * luma_coef3[1];
-    m44[2] = (1. - sat) * luma_coef3[2];
+    // `(1. - sat) * lumaCoef3[i]`, and `+ sat` on the diagonal. Where two NaNs meet, a product
+    // or a sum keeps its first operand's: the Windows wheel multiplies in the source's order,
+    // the Linux wheel with the luma first, except on the last diagonal value, which it computes
+    // as if in the source's order (or adds `sat` first: the two give the same bits). The sums
+    // keep the source's order (docs/improvements.md, I-74; seen through each wheel's
+    // `MatrixTransform.Sat`, crates/ocio/tests/matrix_transform_oracle.rs).
+    let one_minus_sat = 1. - sat;
+    let scaled = |luma: f64| {
+        if cfg!(target_os = "windows") {
+            sse_mul(one_minus_sat, luma)
+        } else {
+            sse_mul(luma, one_minus_sat)
+        }
+    };
+
+    m44[0] = sse_add(scaled(luma_coef3[0]), sat);
+    m44[1] = scaled(luma_coef3[1]);
+    m44[2] = scaled(luma_coef3[2]);
     m44[3] = 0.0;
 
-    m44[4] = (1. - sat) * luma_coef3[0];
-    m44[5] = (1. - sat) * luma_coef3[1] + sat;
-    m44[6] = (1. - sat) * luma_coef3[2];
+    m44[4] = scaled(luma_coef3[0]);
+    m44[5] = sse_add(scaled(luma_coef3[1]), sat);
+    m44[6] = scaled(luma_coef3[2]);
     m44[7] = 0.0;
 
-    m44[8] = (1. - sat) * luma_coef3[0];
-    m44[9] = (1. - sat) * luma_coef3[1];
-    m44[10] = (1. - sat) * luma_coef3[2] + sat;
+    m44[8] = scaled(luma_coef3[0]);
+    m44[9] = scaled(luma_coef3[1]);
+    m44[10] = sse_add(sse_mul(one_minus_sat, luma_coef3[2]), sat);
     m44[11] = 0.0;
 
     m44[12] = 0.0;

@@ -15,6 +15,7 @@
 
 use std::fmt;
 
+use ocio_ops::cfmt::{Crt, OStringStream};
 use ocio_ops::exception::{Exception, Result};
 use ocio_ops::op::{Op, OpVec};
 use ocio_ops::op_data::{OpData, OpDataType, get_type_name};
@@ -23,6 +24,9 @@ use ocio_ops::open_color_types::TransformDirection;
 use crate::config::Config;
 use crate::context::Context;
 use crate::transforms::group_transform::{GroupTransform, build_group_ops};
+use crate::transforms::matrix_transform::{
+    MatrixTransform, build_matrix_op, create_matrix_transform,
+};
 
 /// The class of a transform.
 ///
@@ -89,11 +93,19 @@ pub enum TransformType {
 pub enum Transform {
     /// `GroupTransform`.
     Group(GroupTransform),
+    /// `MatrixTransform`.
+    Matrix(MatrixTransform),
 }
 
 impl From<GroupTransform> for Transform {
     fn from(t: GroupTransform) -> Transform {
         Transform::Group(t)
+    }
+}
+
+impl From<MatrixTransform> for Transform {
+    fn from(t: MatrixTransform) -> Transform {
+        Transform::Matrix(t)
     }
 }
 
@@ -105,6 +117,7 @@ impl Transform {
     pub fn transform_type(&self) -> TransformType {
         match self {
             Transform::Group(_) => TransformType::Group,
+            Transform::Matrix(_) => TransformType::Matrix,
         }
     }
 
@@ -113,6 +126,7 @@ impl Transform {
     pub fn direction(&self) -> TransformDirection {
         match self {
             Transform::Group(t) => t.direction(),
+            Transform::Matrix(t) => t.direction(),
         }
     }
 
@@ -121,6 +135,7 @@ impl Transform {
     pub fn set_direction(&mut self, dir: TransformDirection) {
         match self {
             Transform::Group(t) => t.set_direction(dir),
+            Transform::Matrix(t) => t.set_direction(dir),
         }
     }
 
@@ -130,6 +145,7 @@ impl Transform {
     pub fn validate(&self) -> Result<()> {
         match self {
             Transform::Group(t) => t.validate(),
+            Transform::Matrix(t) => t.validate(),
         }
     }
 }
@@ -156,8 +172,23 @@ impl fmt::Display for Transform {
     /// Transform.cpp:177-308 @ v2.5.2). Its "Unknown transform type for serialization" can't
     /// happen with an enum.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut os = OStringStream::new(Crt::NATIVE);
+        self.write_text(&mut os);
+        f.write_str(os.str())
+    }
+}
+
+impl Transform {
+    /// Writes the transform's text to `os`, a stream that a group shares with its children:
+    /// what a class changes in its state stays for what follows (a MatrixTransform's precision,
+    /// docs/improvements.md, I-73).
+    ///
+    /// Port of `operator<<(std::ostream &, const Transform &)` (src/OpenColorIO/
+    /// Transform.cpp:177-308 @ v2.5.2).
+    pub(crate) fn write_text(&self, os: &mut OStringStream) {
         match self {
-            Transform::Group(t) => t.fmt(f),
+            Transform::Group(t) => t.write_text(os),
+            Transform::Matrix(t) => t.write_text(os),
         }
     }
 }
@@ -181,6 +212,7 @@ pub fn build_ops(
         Transform::Group(group_transform) => {
             build_group_ops(ops, config, context, group_transform, dir)
         }
+        Transform::Matrix(matrix_transform) => build_matrix_op(ops, matrix_transform, dir),
     }
 }
 
@@ -195,7 +227,7 @@ pub fn build_ops(
 /// Port of `CreateTransform` (src/OpenColorIO/Transform.cpp:310-383 @ v2.5.2). Internal to the
 /// processors: public for the port's tests only.
 #[doc(hidden)]
-pub fn create_transform(_group: &mut GroupTransform, op: &Op) -> Result<()> {
+pub fn create_transform(group: &mut GroupTransform, op: &Op) -> Result<()> {
     // AllocationNoOp, FileNoOp, LookNoOp won't create a Transform.
     if op.is_no_op_type() {
         return Ok(());
@@ -208,10 +240,10 @@ pub fn create_transform(_group: &mut GroupTransform, op: &Op) -> Result<()> {
         )))
     };
     match &**op.data() {
+        OpData::Matrix(_) => create_matrix_transform(group, op),
         data @ (OpData::Cdl(_)
         | OpData::Gamma(_)
         | OpData::Log(_)
-        | OpData::Matrix(_)
         | OpData::Range(_)
         | OpData::Exponent(_)) => not_ported(data.get_type()),
         // No op holds a reference (the file readers replace it with the file's ops), and the

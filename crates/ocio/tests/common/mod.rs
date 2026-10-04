@@ -6,4 +6,5 @@
 #![allow(dead_code)]
 
 pub(crate) mod ocio_writer;
+pub(crate) mod transforms;
 pub(crate) mod yaml_tree;
