@@ -15,6 +15,7 @@ use ocio::{
 };
 use ocio_testkit::Oracle;
 use ocio_testkit::battery::BitDepth as WheelBitDepth;
+use ocio_testkit::oracle::BatchCall;
 use ocio_testkit::processor_ops::{
     Dump, Dumped, ProcessorDump, ProcessorOpsReply, ProcessorOpsRequest,
 };
@@ -312,11 +313,58 @@ fn metadata_tree(metadata: &FormatMetadata) -> Value {
     })
 }
 
+/// A `processor_metadata` reply, from the port: `files` and `looks` in a `ProcessorMetadata`,
+/// and the processors `config` gives `groups`, one after the other.
+fn port_processor_metadata(
+    files: &[&str],
+    looks: &[&str],
+    groups: &[MetaGroup],
+    config: &Config,
+) -> Value {
+    let mut metadata = ocio::ProcessorMetadata::new();
+    for file in files {
+        metadata.add_file(file.as_bytes());
+    }
+    for look in looks {
+        metadata.add_look(look.as_bytes());
+    }
+    let port_groups: Vec<Value> = groups
+        .iter()
+        .map(|group| {
+            let processor = config.processor(&group.port()).expect("a processor");
+            let created = processor.create_group_transform().expect("a group");
+            json!({
+                "cache_id": processor.cache_id().expect("a cache ID"),
+                "metadata": metadata_tree(processor.format_metadata()),
+                "group_metadata": metadata_tree(created.format_metadata()),
+                "group_size": created.num_transforms(),
+            })
+        })
+        .collect();
+    json!({
+        "metadata": {
+            "files": (0..metadata.num_files()).map(|i| text(metadata.file(i))).collect::<Vec<_>>(),
+            "looks": (0..metadata.num_looks()).map(|i| text(metadata.look(i))).collect::<Vec<_>>(),
+        },
+        "groups": port_groups,
+    })
+}
+
 /// A `ProcessorMetadata`'s files (a set, in byte order) and looks (a list), from C strings;
-/// and the format metadata of groups' processors and of their `createGroupTransform()`: the
-/// metadata of the groups built while the ops are still empty, the last of them winning
-/// (`BuildGroupOps`, transforms/GroupTransform.cpp:178-183 @ v2.5.2). Against the wheel
-/// (`processor_metadata`).
+/// and the format metadata of groups' processors and of their `createGroupTransform()`.
+/// `BuildGroupOps` copies a group's metadata into the ops while they are still empty, so with
+/// groups of groups, which add no ops, the processor holds the metadata of the last group
+/// visited (transforms/GroupTransform.cpp:178-183 @ v2.5.2): "inner" over "outer", and in an
+/// inverse group, whose children are visited last to first, "first" over "outer" and the
+/// second child's. `createGroupTransform` copies the processor's (Processor.cpp:305 @ v2.5.2).
+/// Against the wheel (`processor_metadata`).
+///
+/// Each group's processor comes from a config of its own, in the wheel (a request per group)
+/// and in the port. A config's processor cache returns the processor it already holds with the
+/// same cache ID (`Config::Impl::getProcessor`), and every processor here has the cache ID
+/// `<NOOP>`, so with one config every group would get the first group's processor. The last
+/// request pins that fallback on purpose: every group with one config, each getting the first
+/// group's processor, which has no metadata.
 #[test]
 fn processor_metadata_matches_the_wheel() {
     use TransformDirection::{Forward as F, Inverse as I};
@@ -356,40 +404,42 @@ fn processor_metadata_matches_the_wheel() {
         },
     ];
 
-    let response = Oracle::get().call(
-        "processor_metadata",
-        json!({"files": files, "looks": looks,
-            "groups": groups.iter().map(MetaGroup::spec).collect::<Vec<_>>()}),
-        &[],
-    );
-
-    let mut metadata = ocio::ProcessorMetadata::new();
-    for file in files {
-        metadata.add_file(file.as_bytes());
-    }
-    for look in looks {
-        metadata.add_look(look.as_bytes());
-    }
-    let config = Config::create_raw();
-    let port_groups: Vec<Value> = groups
+    // A request per group, each with a config of its own; then every group with one config.
+    let mut cases: Vec<(String, Value, Value)> = groups
         .iter()
         .map(|group| {
-            let processor = config.processor(&group.port()).expect("a processor");
-            let created = processor.create_group_transform().expect("a group");
-            json!({
-                "cache_id": processor.cache_id().expect("a cache ID"),
-                "metadata": metadata_tree(processor.format_metadata()),
-                "group_metadata": metadata_tree(created.format_metadata()),
-                "group_size": created.num_transforms(),
-            })
+            let args = json!({"files": files, "looks": looks, "groups": [group.spec()]});
+            let port = port_processor_metadata(
+                &files,
+                &looks,
+                std::slice::from_ref(group),
+                &Config::create_raw(),
+            );
+            (format!("{group:?}"), args, port)
         })
         .collect();
-    let port = json!({
-        "metadata": {
-            "files": (0..metadata.num_files()).map(|i| text(metadata.file(i))).collect::<Vec<_>>(),
-            "looks": (0..metadata.num_looks()).map(|i| text(metadata.look(i))).collect::<Vec<_>>(),
-        },
-        "groups": port_groups,
-    });
-    assert_eq!(port, response.result);
+    cases.push((
+        "every group, one config".to_string(),
+        json!({"files": files, "looks": looks,
+            "groups": groups.iter().map(MetaGroup::spec).collect::<Vec<_>>()}),
+        port_processor_metadata(&files, &looks, &groups, &Config::create_raw()),
+    ));
+
+    let calls: Vec<BatchCall<'_>> = cases
+        .iter()
+        .map(|(_, args, _)| BatchCall {
+            cmd: "processor_metadata",
+            args: args.clone(),
+            blobs: Vec::new(),
+        })
+        .collect();
+    let responses = Oracle::get().batch(&calls, true);
+    let mut failures = Vec::new();
+    for ((case, _, port), response) in cases.iter().zip(responses) {
+        let wheel = response.unwrap_or_else(|e| panic!("{case}: {e}")).result;
+        if *port != wheel {
+            failures.push(format!("{case}\n  wheel {wheel}\n  port  {port}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
