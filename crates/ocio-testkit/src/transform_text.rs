@@ -11,6 +11,13 @@ use serde_json::{Value, json};
 use crate::Oracle;
 use crate::oracle::{BatchCall, Response};
 
+/// A double in a transform spec, by its bits (`{"f64": bits}`, `oracle/ocio_oracle/spec.py`):
+/// JSON can't hold NaN or the infinities (serde_json writes them as `null`), so a spec passes
+/// every special value this way, and any other exactly.
+pub fn f64_spec(value: f64) -> Value {
+    json!({"f64": value.to_bits()})
+}
+
 /// One `transform_text` call.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TransformTextRequest {
