@@ -5,13 +5,17 @@
 //! and `getOptimizedProcessor` for groups of groups, nested, in both directions, and the
 //! processors' cache ID, flags, metadata and `createGroupTransform()`.
 //!
-//! Here, groups of groups, whose processors have no ops. The processors of every other class,
-//! and their `createGroupTransform()`, are checked by each class's oracle test
-//! (`common/transforms.rs`, `check_processors`).
+//! Here, groups of groups, whose processors have no ops, and a group whose optimized processor
+//! depends on the output bit depth. The processors of every other class, and their
+//! `createGroupTransform()`, are checked by each class's oracle test (`common/transforms.rs`,
+//! `check_processors`).
 
+mod common;
+
+use common::transforms::{self, Case};
 use ocio::{
-    BitDepth, Config, FormatMetadata, GroupTransform, OptimizationFlags, Processor, Transform,
-    TransformDirection,
+    BitDepth, Config, FormatMetadata, GroupTransform, MatrixTransform, OptimizationFlags,
+    Processor, RangeTransform, Transform, TransformDirection,
 };
 use ocio_testkit::Oracle;
 use ocio_testkit::battery::BitDepth as WheelBitDepth;
@@ -442,4 +446,72 @@ fn processor_metadata_matches_the_wheel() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The optimized processor's output bit depth: a matrix, then a range that only clamps to
+/// [0, 1], optimized from F32 to UINT16 and to F32 with the default flags. The trailing clamp
+/// goes only when the output is an integer depth (`OpRcPtrVec::optimizeForBitdepth`,
+/// OpOptimizers.cpp:768-771 @ v2.5.2, through `Processor::Impl::getOptimizedProcessor`,
+/// Processor.cpp:382-433). The wheel's processors and the port's compare getter for getter
+/// (`check_optimized_processors`); and the wheel's two optimized processors must differ, or
+/// the case would not tell the output depth from the input's.
+#[test]
+fn optimized_processor_output_depth_matches_the_wheel() {
+    let m44 = [
+        2.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.5, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0,
+    ];
+    let mut matrix = MatrixTransform::new();
+    matrix.set_matrix(&m44);
+    let mut range = RangeTransform::new();
+    range.set_min_in_value(0.0);
+    range.set_max_in_value(1.0);
+    range.set_min_out_value(0.0);
+    range.set_max_out_value(1.0);
+    let case = transforms::group(
+        "a matrix, then an identity range",
+        TransformDirection::Forward,
+        &[
+            Case::new(
+                "a matrix",
+                json!({"class": "MatrixTransform", "calls": [["setMatrix", m44]]}),
+                matrix,
+            ),
+            Case::new(
+                "an identity range",
+                json!({"class": "RangeTransform", "calls": [
+                    ["setMinInValue", 0.0], ["setMaxInValue", 1.0],
+                    ["setMinOutValue", 0.0], ["setMaxOutValue", 1.0]]}),
+                range,
+            ),
+        ],
+    );
+    let depths = [
+        (WheelBitDepth::F32, WheelBitDepth::Uint16),
+        (WheelBitDepth::F32, WheelBitDepth::F32),
+    ];
+    transforms::check_optimized_processors(std::slice::from_ref(&case), &depths);
+
+    let requests: Vec<ProcessorOpsRequest> = depths
+        .iter()
+        .map(|&(input, output)| {
+            let mut request = ProcessorOpsRequest::new(
+                json!({"transform": case.spec, "direction": dir_name(TransformDirection::Forward)}),
+            );
+            request.in_bitdepth = Some(input);
+            request.out_bitdepth = Some(output);
+            request.optimization = Some(json!("OPTIMIZATION_DEFAULT"));
+            request
+        })
+        .collect();
+    let calls: Vec<BatchCall<'_>> = requests.iter().map(ProcessorOpsRequest::call).collect();
+    let classes: Vec<Vec<String>> = Oracle::get()
+        .batch(&calls, true)
+        .into_iter()
+        .map(|response| {
+            let reply = ProcessorOpsReply::from_response(response.expect("an oracle reply"));
+            let optimized = reply.optimized().classes();
+            optimized.iter().map(|c| c.to_string()).collect()
+        })
+        .collect();
+    assert_ne!(classes[0], classes[1], "{classes:?}");
 }
