@@ -208,25 +208,36 @@ fn port(class: &Class, job: &Job, calls: &Calls) -> Outcome {
     Outcome::Gpu { processor, shader }
 }
 
-/// Whether the port's outcome is a Phase 2 deferral of `class` where the wheel built a GPU
-/// processor: it then wrote a shader, or refused in the extraction with the writer's own
-/// message (upstream's Lut1D writer has no OSL translation).
-fn deferral(class: &Class, wheel: &Outcome, port: &Outcome) -> Option<String> {
-    if !class.deferred {
-        return None;
+/// The `Lut1DTransform`'s Phase 2 deferral in `dir`, the stage and message of the port's
+/// refusal: an inverse LUT is set up when the processor finalizes it (`Lut1DOpData::finalize`,
+/// WP 2.1); a forward one reaches the GPU processor, whose extraction needs the Lut1D op's GPU
+/// writer (`GetLut1DGPUShaderProgram`, src/OpenColorIO/ops/lut1d/Lut1DOpGPU.cpp @ v2.5.2).
+fn lut1d_deferral(dir: Direction) -> (&'static str, &'static str) {
+    match dir {
+        Direction::Inverse => (
+            "processor",
+            "Lut1D: the inverse 1D LUT is not ported yet (WP 2.1).",
+        ),
+        Direction::Forward => ("extract", "The GPU writer of <Lut1DOp> is not ported yet."),
     }
+}
+
+/// Whether the port's outcome is the `Lut1DTransform`'s deferral in `dir`, where the wheel
+/// built a GPU processor: it then wrote a shader, or refused in the extraction with the
+/// writer's own message (upstream's Lut1D writer has no OSL translation).
+fn deferral(wheel: &Outcome, port: &Outcome, dir: Direction) -> bool {
     let Outcome::Gpu { .. } = wheel else {
-        return None;
+        return false;
     };
-    let message = match port {
-        Outcome::Raised(_, message) => message,
-        Outcome::Gpu {
-            shader: Err((_, message)),
+    let (stage, message) = lut1d_deferral(dir);
+    match port {
+        Outcome::Raised(s, m)
+        | Outcome::Gpu {
+            shader: Err((s, m)),
             ..
-        } => message,
-        Outcome::Gpu { shader: Ok(_), .. } => return None,
-    };
-    message.contains("not ported yet").then(|| message.clone())
+        } => s == stage && m == message,
+        Outcome::Gpu { shader: Ok(_), .. } => false,
+    }
 }
 
 /// Runs every job of `class` against the wheel; panics with a report if any differs.
@@ -254,7 +265,16 @@ fn check(class: &Class) {
             }
             let wheel = wheel(&reply);
             let port = port(class, job, case.params());
-            if let Some(message) = deferral(class, &wheel, &port) {
+            if class.deferred {
+                // Every extraction of the class is a deferral, at its stage, with its message.
+                if !deferral(&wheel, &port, job.dir) {
+                    failures.push(format!(
+                        "{what}: the deferral {:?} was expected\n  wheel {wheel:?}\n  port  \
+                         {port:?}",
+                        lut1d_deferral(job.dir)
+                    ));
+                    continue;
+                }
                 // What the port computed before it refused must still be the wheel's.
                 if let (Outcome::Gpu { processor: w, .. }, Outcome::Gpu { processor: p, .. }) =
                     (&wheel, &port)
@@ -262,7 +282,9 @@ fn check(class: &Class) {
                 {
                     failures.push(format!("{what}\n  wheel {w}\n  port  {p}"));
                 }
-                *deferred.entry(message).or_default() += 1;
+                *deferred
+                    .entry(lut1d_deferral(job.dir).1.to_string())
+                    .or_default() += 1;
                 continue;
             }
             if wheel != port {

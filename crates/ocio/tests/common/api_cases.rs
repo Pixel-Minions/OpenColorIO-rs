@@ -13,9 +13,9 @@
 //! same route as finite ones.
 
 use ocio_testkit::battery::Direction;
-use ocio_testkit::battery::params::{B, Case, G, R, RGB};
+use ocio_testkit::battery::params::{Case, RGB};
 
-use super::api::{Arg, Calls};
+use super::api::{Arg, Calls, num};
 
 /// A family's cases: the explicit ones, and the mutation bases among them.
 pub(crate) struct Cases {
@@ -924,7 +924,10 @@ pub(crate) fn group() -> Cases {
             group()
                 .child(matrix_calls(diagonal([2.0, f64::NAN, 0.5, 1.0]), [0.0; 4]))
                 .child(matrix_calls(diagonal([0.5, 2.0, 2.0, 1.0]), [0.1; 4])),
-        ),
+        )
+        // The NaN is compared bit for bit: the combined matrix's renderers follow each wheel's
+        // operand orders, as the Matrix family's NaN cases do.
+        .w0002_nowhere(),
     ]);
     Cases { cases, bases }
 }
@@ -955,7 +958,8 @@ pub(crate) fn exponent_v1() -> Cases {
     Cases { cases, bases }
 }
 
-/// A `Lut1DTransform` of `length` entries, `f(i)` for entry `i`, in R, G and B.
+/// A `Lut1DTransform` of `length` entries, `f(i)` for entry `i`, in R, G and B. The entries
+/// are not battery slots: no test mutates them, and the battery doesn't run this class.
 pub(crate) fn lut1d_calls(length: u64, f: impl Fn(u64) -> [f32; 3]) -> Calls {
     let mut calls = Calls::new("Lut1DTransform").fixed("setLength", serde_json::json!(length));
     for i in 0..length {
@@ -964,9 +968,9 @@ pub(crate) fn lut1d_calls(length: u64, f: impl Fn(u64) -> [f32; 3]) -> Calls {
             "setValue",
             vec![
                 Arg::Fixed(serde_json::json!(i)),
-                Arg::Num(r, R),
-                Arg::Num(g, G),
-                Arg::Num(b, B),
+                Arg::Fixed(num(r)),
+                Arg::Fixed(num(g)),
+                Arg::Fixed(num(b)),
             ],
         );
     }
@@ -1003,6 +1007,32 @@ pub(crate) fn lut1d() -> Cases {
         Case::new(
             "256 entries, hue adjust",
             lut1d_calls(256, curve(256)).enumerated("setHueAdjust", "HUE_DW3"),
+        ),
+    ];
+    Cases {
+        cases,
+        bases: Vec::new(),
+    }
+}
+
+/// `Lut1DTransform`s of the lengths a 12-bit and a 16-bit input look up without resampling
+/// (4096 and 65536 entries), and a half-domain one (65536 entries, one per half code), which a
+/// half input looks up: the lookups of the other inputs than [`lut1d`]'s through a
+/// `Lut1DTransform`. Their specs are large (a setter per entry), so the format sweep runs them
+/// on few combinations, and the GPU sweep not at all.
+pub(crate) fn lut1d_lookups() -> Cases {
+    let ramp = |n: u64| {
+        move |i: u64| {
+            let x = i as f32 / (n - 1) as f32;
+            [x.sqrt(), 1.5 * x - 0.25, 1.0 - x * x]
+        }
+    };
+    let cases = vec![
+        Case::new("4096 entries", lut1d_calls(4096, ramp(4096))),
+        Case::new("65536 entries", lut1d_calls(65536, ramp(65536))),
+        Case::new(
+            "half domain",
+            lut1d_calls(65536, ramp(65536)).fixed("setInputHalfDomain", serde_json::json!(true)),
         ),
     ];
     Cases {
