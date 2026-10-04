@@ -565,7 +565,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `linSlope * logSlope` (0x18021abde), GCC the source's order (0x40176d). With both slopes NaN
   the slope keeps the linear side's NaN on Windows and the log side's on Linux; with NaNs of
   opposite signs (reachable through the API's setters, not through a config), the renderers'
-  NaNs and the shader's `linear_segment_slope` literal differ in sign between the platforms.
+  NaNs and the shader's literal of the linear segment's slope (`linear_segment_slope`, or
+  `linear_segment_slopeinv` in the inverse) differ in sign between the platforms.
 - **Who notices:** anyone comparing renders of a LogCameraTransform, or a camera-style CTF
   Log, between a Windows and a Linux machine; ARRI LogC3 (EI 800) happens to give the same
   break on both.
