@@ -8,8 +8,9 @@ project ports it to Rust one upstream release at a time. The current line matche
 2.5.2**: the same results, the same text output, the same errors and the same accepted configs,
 from Rust and, later, from Python.
 
-> **Status: early development.** Phase 0 (test harness and feasibility proofs) and Phase 0b
-> (tooling) are complete; Phase 1 is next. Nothing is usable end to end yet. See
+> **Status: early development.** Phase 1 (the op engine and the analytic transforms) is almost
+> complete: through OCIO's API, every analytic transform matches the official library on the
+> CPU and the GPU. LUT files, configs and Python come in later phases. See
 > [Progress](#progress).
 
 ## How precise: byte for byte
@@ -81,54 +82,85 @@ one.
 
 ## Progress
 
-Status as of 2026-09-30: **Phase 0 and Phase 0b complete** (test harness, feasibility proofs
-and tooling), about 5% of the planned work. Phase 1 (the op engine and analytic transforms) is
-next.
+Status as of 2026-10-04: **Phase 1 (the op engine and the analytic transforms) is almost
+complete**, about 21% of the planned work. Through OCIO's own API, every analytic transform
+already matches the official library on the CPU and the GPU. The last Phase 1 work is a sweep
+of every transform through the port's public processors (at every bit depth, layout and
+optimization level, and in all 10 shading languages), plus the last upstream tests that Phase 1
+unblocks. Both are in review. Phase 2 (LUTs and fixed functions) comes next.
 
 **Done:** everything below is bit-exact against the official library on Windows and Linux, in
 debug and release builds, and was reviewed independently before merging.
-- **Test harness:**
+- **The op engine:**
+  - bit-depth conversion and every pixel layout OCIO accepts (packed, planar, strided, RGB and
+    RGBA, every channel order);
+  - format metadata, dynamic properties and logging;
+  - the optimizer: its passes, every optimization level, and the separable-prefix bake into a
+    1D LUT for integer and half-float input;
+  - the CPU processor and its renderers, with fast math on and off, for every SIMD profile.
+- **Every analytic op family:** Matrix, Range, Exponent, ExponentWithLinear (moncurve), Log,
+  LogAffine, LogCamera and CDL, plus the forward 1D LUT that the optimizer bakes. Each one has:
+  - its op data and validation;
+  - its CPU renderers;
+  - its GPU shader writer, in all 10 shading languages.
+- **The transforms:** MatrixTransform, RangeTransform, ExponentTransform,
+  ExponentWithLinearTransform, LogTransform, LogAffineTransform, LogCameraTransform,
+  CDLTransform, AllocationTransform, Lut1DTransform and GroupTransform. Their text output,
+  getters, equality and errors match OCIO byte for byte.
+- **The processors:** `Config::CreateRaw()`, `getProcessor` with its caches, the optimized
+  processors, `createGroupTransform`, and the CPU and GPU processors. Cache IDs, metadata and
+  flags match OCIO.
+- **The GPU infrastructure:** the shader description, the shader-text helpers for all 10
+  languages, uniforms and dynamic properties.
+- **The test harness:**
   - the live oracle;
   - hash-locked reference fixtures;
   - guardrails (`cargo xtask ci`);
   - the parity dashboard;
   - a Rocky Linux 9 reference container;
-  - CI on Windows and Linux on every pull request, with `main` accepting only commits that passed it.
+  - CI on Windows and Linux on every pull request, with `main` accepting only commits that
+    passed it.
 - **Checks on emulated CPUs.** The CPU-dependent tests also run under Intel's CPU emulator, as
   Nehalem, Sandy Bridge, Haswell, Skylake and Skylake server. So every SIMD kernel the official
-  library has (SSE2, AVX, AVX2, AVX-512) is compared with the port's, whatever CPU the tests run on.
+  library has (SSE2, AVX, AVX2, AVX-512) is compared with the port's, whatever CPU the tests
+  run on.
 - **A shared test battery.** Every op family is tested the same way against the official
   library: probe sets, generated extreme and non-finite parameters, and every numeric profile.
-  Its own tests were mutation-tested to prove they catch deliberate breakage.
-- **Cache-ID hashing (XXH3-128).** It reproduces the official cache IDs of all 8 built-in
-  configs.
-- **OCIO's fast-math functions** (the approximations of `log2`, `exp2` and `pow` used by
-  default), ported operation for operation.
-- **The Log and Gamma CPU renderers**, with fast math on and off.
-- **CPU feature detection**, identical to OCIO's own (`ociocpuinfo`).
-- **The 3D LUT forward kernels in every SIMD variant** (SSE2, AVX, AVX2, AVX-512, including
-  the FMA kernels), identical to the official library's own kernels.
-- **All three half-float conversions OCIO uses**, compared on every possible input.
-- **C and C++ number formatting and parsing** as OCIO uses them, identical to each platform's
-  runtime.
-- **A port of the yaml-cpp emitter.** It writes the `serialize()` output of all 8 built-in
-  configs byte for byte, with OCIO's byte-string semantics.
+  Every card's tests were mutation-tested by an independent reviewer to prove they catch
+  deliberate breakage.
+- **Earlier foundations:**
+  - cache-ID hashing (XXH3-128), which reproduces the official cache IDs of all 8 built-in
+    configs;
+  - OCIO's fast-math functions;
+  - CPU feature detection, identical to OCIO's own;
+  - the 3D LUT forward kernels in every SIMD variant;
+  - all three half-float conversions OCIO uses;
+  - C and C++ number formatting and parsing, identical to each platform's runtime;
+  - a port of the yaml-cpp emitter that writes the `serialize()` output of all 8 built-in
+    configs byte for byte.
 
 Along the way, the checks found platform differences inside the official library itself. The
 port reproduces each of them per platform:
 - camera-log math in float on Windows and double on Linux;
+- the operand order of multiplications, which decides which NaN comes out on each platform;
 - NaN signs and text;
 - the Windows build's CRLF built-in configs.
+
+Where the official library reads or writes memory it doesn't own, the port returns an error
+instead. Every such case, and every upstream bug the port reproduces, is listed in
+[`docs/improvements.md`](docs/improvements.md) for a decision at the end of the port.
 
 **Upstream tests ported:**
 
 | Suite | Ported | Total |
 |---|---:|---:|
-| C++ | 68 | 1,191 |
+| C++ | 248 | 1,191 |
 | GPU | 0 | 264 |
 | Python | 0 | 384 |
 
-The live numbers are in [`docs/parity.md`](docs/parity.md).
+The live numbers are in [`docs/parity.md`](docs/parity.md). The GPU tests need a GPU to run
+on; they are ported with the pixel harness in a later phase. The shaders themselves are already
+compared with the official library's, text for text.
 
 ### Milestones
 
