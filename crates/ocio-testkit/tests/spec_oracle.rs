@@ -12,7 +12,7 @@
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle::BatchCall;
 use ocio_testkit::oracle::f32_to_bytes;
-use ocio_testkit::processor_ops::{ProcessorOpsReply, ProcessorOpsRequest};
+use ocio_testkit::processor_ops::{Dump, Dumped, ProcessorOpsReply, ProcessorOpsRequest};
 use ocio_testkit::transform_text::{TransformTextRequest, f64_spec};
 use serde_json::{Value, json};
 
@@ -432,5 +432,136 @@ fn bad_blob_specs_are_refused() {
     for ((data, fragment), result) in cases.iter().zip(Oracle::get().batch(&calls, false)) {
         let error = result.expect_err(&format!("{data}: refused"));
         assert!(error.contains(fragment), "{data}: {error}");
+    }
+}
+
+/// `values` (f32s) as spec values by their bits.
+fn f32_specs(values: &[f32]) -> Vec<Value> {
+    values.iter().map(|&v| f64_spec(f64::from(v))).collect()
+}
+
+/// A GradingBSplineCurve object spec from control points `[x0, y0, x1, y1, ...]` (the
+/// binding's constructor from a list, positional), with `setSlopes(slopes)` if any.
+fn curve_spec(points: &[f32], slopes: Option<&[f32]>) -> Value {
+    let mut spec = json!({"class": "GradingBSplineCurve", "args": [f32_specs(points)]});
+    if let Some(slopes) = slopes {
+        spec["calls"] = json!([["setSlopes", f32_specs(slopes)]]);
+    }
+    json!({ "object": spec })
+}
+
+/// A GradingBSplineCurve as `checks.dump` writes it out: its control points `[x0, y0, ...]`
+/// and its slopes, by their bits.
+fn curve_bits(curve: &Dump) -> (Vec<u64>, Vec<u64>) {
+    let points = match curve.getter("getControlPoints") {
+        Dumped::List(points) => points
+            .iter()
+            .flat_map(|p| {
+                let p = p.object();
+                [p.property("x").f64(), p.property("y").f64()]
+            })
+            .map(f64::to_bits)
+            .collect(),
+        other => panic!("not a list of control points: {other:?}"),
+    };
+    let slopes = curve
+        .getter("getSlopes")
+        .f64s()
+        .into_iter()
+        .map(f64::to_bits)
+        .collect();
+    (points, slopes)
+}
+
+/// The bits of `values` widened to doubles, as the binding returns C floats.
+fn widened_bits(values: &[f32]) -> Vec<u64> {
+    values.iter().map(|&v| f64::from(v).to_bits()).collect()
+}
+
+/// Object specs build the value objects a GradingRGBCurveTransform takes: GradingBSplineCurves
+/// from a list of control points (positional), with `setSlopes` called on one; a
+/// GradingRGBCurve from them by keyword arguments, and with its `master` property set through
+/// "attrs". The processor's `createGroupTransform()` gives every control point and slope back,
+/// bit for bit, on the curves the spec set.
+#[test]
+fn a_grading_curve_transform_takes_value_objects() {
+    let red = [0.0, 0.1, 0.5, 0.6, 1.0, 1.2f32];
+    let red_slopes = [1.0, 0.8, 1.5f32];
+    let green = [-0.25, -0.5, 0.125, 0.3, 0.75, 0.7, 2.0, 1.9f32];
+    let master = [0.0, 0.0, 0.3, 0.2, 1.0, 1.0f32];
+    let rgb_curve = json!({"object": {
+        "class": "GradingRGBCurve",
+        "args": {"red": curve_spec(&red, Some(&red_slopes)), "green": curve_spec(&green, None)},
+        "attrs": [["master", curve_spec(&master, None)]],
+    }});
+    let spec = json!({"class": "GradingRGBCurveTransform",
+        "args": {"values": rgb_curve, "style": {"enum": "GRADING_LIN"}}});
+    let mut request = ProcessorOpsRequest::new(json!({ "transform": spec }));
+    request.optimization = Some(json!("OPTIMIZATION_NONE"));
+    let reply = request.run();
+    assert_eq!(
+        reply.processor().classes(),
+        ["GradingRGBCurveTransform"],
+        "{}",
+        reply.result
+    );
+    let transform = &reply.processor().group.children[0];
+    assert_eq!(transform.getter("getStyle").name(), "GRADING_LIN");
+    let values = transform.getter("getValue").object();
+    assert_eq!(values.class, "GradingRGBCurve");
+    let curve = |name: &str| curve_bits(values.property(name).object());
+    assert_eq!(
+        curve("red"),
+        (widened_bits(&red), widened_bits(&red_slopes))
+    );
+    assert_eq!(curve("green").0, widened_bits(&green));
+    assert_eq!(curve("master").0, widened_bits(&master));
+}
+
+/// Object specs that the oracle can't build as asked are refused: a transform's class (a
+/// transform spec builds those), no class, an unknown key, both args and a factory, attrs
+/// that aren't [name, value] pairs, and an attribute the class doesn't have (the binding's
+/// AttributeError).
+#[test]
+fn bad_object_specs_are_refused() {
+    let curve = curve_spec(&[0.0, 0.0, 1.0, 1.0], None);
+    let cases = [
+        (
+            json!({"class": "LogTransform"}),
+            "an instance of a class that isn't a transform's, not 'LogTransform'",
+        ),
+        (
+            json!({"args": [0.5, 0.5]}),
+            "an object spec takes class and optionally",
+        ),
+        (
+            json!({"class": "GradingControlPoint", "children": []}),
+            "an object spec takes class and optionally",
+        ),
+        (
+            json!({"class": "GradingRGBCurve", "args": {"red": curve}, "factory": ["Create"]}),
+            "an object spec takes args or a factory, not both",
+        ),
+        (
+            json!({"class": "GradingRGBCurve", "attrs": [["red"]]}),
+            "attrs are [name, value] pairs, not ['red']",
+        ),
+        (
+            json!({"class": "GradingRGBCurve", "attrs": [["redd", curve]]}),
+            "has no attribute 'redd'",
+        ),
+    ];
+    let calls: Vec<BatchCall<'_>> = cases
+        .iter()
+        .map(|(object, _)| BatchCall {
+            cmd: "transform_text",
+            args: json!({"transforms": [{"class": "GradingRGBCurveTransform",
+                "args": {"values": {"object": object}}}]}),
+            blobs: Vec::new(),
+        })
+        .collect();
+    for ((object, fragment), result) in cases.iter().zip(Oracle::get().batch(&calls, false)) {
+        let error = result.expect_err(&format!("{object}: refused"));
+        assert!(error.contains(fragment), "{object}: {error}");
     }
 }

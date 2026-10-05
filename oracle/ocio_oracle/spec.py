@@ -12,10 +12,25 @@ A transform spec is a JSON object:
 Instead of "args", "factory": ["Fit", <arg>, ...] builds the transform with the class's static
 factory of that name, from positional arguments (MatrixTransform's Fit, Identity, Sat, Scale and
 View); "calls" and "children" then apply as usual. It must return a transform of the class.
+"args" may also be a list, of positional arguments.
 
-Values inside "args", "factory" and "calls" are converted recursively:
+An object spec builds a value object, an instance of a PyOpenColorIO class that isn't a
+transform (GradingControlPoint, GradingBSplineCurve, GradingRGBCurve, GradingPrimary, ...), the
+same way:
+
+    {"class": "GradingBSplineCurve",          # any PyOpenColorIO class but a transform's
+     "args": [[0.0, 0.0, 0.5, 0.6, 1.0, 1.0]],  # positional, or keyword arguments as an object
+     "attrs": [["name", <value>], ...],       # attributes and properties set, in order
+     "calls": [["setSlopes", [1.0, 0.8, 1.2]]]}  # then methods called, in order
+
+with "factory" instead of "args" as for a transform (it must return an instance of the class).
+"attrs" set fields such as GradingPrimary's, which the binding exposes as attributes rather
+than setters.
+
+Values inside "args", "factory", "attrs" and "calls" are converted recursively:
 - {"enum": "NAME"} becomes ``getattr(OCIO, "NAME")``;
 - {"transform": <spec>} becomes a transform;
+- {"object": <spec>} becomes a value object (an object spec);
 - {"f64": bits} becomes the float (a C double) with those bits, an unsigned 64-bit integer, as
   checks.dump writes floats: the way to pass NaNs (any sign and payload, signalling ones
   included), the infinities and -0.0, which JSON can't hold or loses;
@@ -87,6 +102,8 @@ def value(v, blobs=()):
             return getattr(OCIO, v["enum"])
         if set(v) == {"transform"}:
             return transform(v["transform"], blobs)
+        if set(v) == {"object"}:
+            return value_object(v["object"], blobs)
         if set(v) == {"f64"}:
             return f64_from_bits(v["f64"])
         if "blob" in v:
@@ -97,23 +114,60 @@ def value(v, blobs=()):
     return v
 
 
-def transform(spec, blobs=()):
-    """The transform of a transform spec; `blobs` are the spec's blobs."""
-    cls = getattr(OCIO, spec["class"])
+def _construct(what, cls, spec, blobs):
+    """An instance of `cls` from a transform or object spec's "args" (keyword arguments, or a
+    list of positional ones) or "factory"."""
     if "factory" in spec:
         if spec.get("args"):
-            raise ValueError(f"a transform spec takes args or a factory, not both: {spec!r}")
+            raise ValueError(f"{what} takes args or a factory, not both: {spec!r}")
         name, *args = spec["factory"]
         obj = getattr(cls, name)(*[value(a, blobs) for a in args])
         if not isinstance(obj, cls):
             raise ValueError(f"{spec['class']}.{name} returned a {type(obj).__name__}, not a "
                              f"{spec['class']}")
-    else:
-        obj = cls(**{k: value(v, blobs) for k, v in (spec.get("args") or {}).items()})
+        return obj
+    args = spec.get("args") or {}
+    if isinstance(args, list):
+        return cls(*[value(a, blobs) for a in args])
+    return cls(**{k: value(v, blobs) for k, v in args.items()})
+
+
+def _call(obj, spec, blobs):
+    """Calls the methods of a spec's "calls" on `obj`, in order."""
     for call in spec.get("calls") or []:
         getattr(obj, call[0])(*[value(a, blobs) for a in call[1:]])
+
+
+def transform(spec, blobs=()):
+    """The transform of a transform spec; `blobs` are the spec's blobs."""
+    obj = _construct("a transform spec", getattr(OCIO, spec["class"]), spec, blobs)
+    _call(obj, spec, blobs)
     for child in spec.get("children") or []:
         obj.appendTransform(transform(child, blobs))
+    return obj
+
+
+# The keys of an object spec.
+OBJECT_KEYS = {"class", "args", "factory", "attrs", "calls"}
+
+
+def value_object(spec, blobs=()):
+    """The value object of an object spec; `blobs` are the spec's blobs. Refused: a key the
+    spec doesn't take, a class that isn't a PyOpenColorIO class or is a transform's (a
+    transform spec builds those), and "attrs" that aren't [name, value] pairs."""
+    if not isinstance(spec, dict) or "class" not in spec or not set(spec) <= OBJECT_KEYS:
+        raise ValueError(f"an object spec takes class and optionally args or factory, attrs and "
+                         f"calls: {spec!r}")
+    cls = getattr(OCIO, spec["class"])
+    if not isinstance(cls, type) or issubclass(cls, OCIO.Transform):
+        raise ValueError(f"an object spec builds an instance of a class that isn't a "
+                         f"transform's, not {spec['class']!r}")
+    obj = _construct("an object spec", cls, spec, blobs)
+    for attr in spec.get("attrs") or []:
+        if not isinstance(attr, list) or len(attr) != 2 or not isinstance(attr[0], str):
+            raise ValueError(f"an object spec's attrs are [name, value] pairs, not {attr!r}")
+        setattr(obj, attr[0], value(attr[1], blobs))
+    _call(obj, spec, blobs)
     return obj
 
 
