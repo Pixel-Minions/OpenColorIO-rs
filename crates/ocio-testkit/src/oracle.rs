@@ -42,6 +42,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -881,11 +882,18 @@ fn parse_frame(bytes: &[u8]) -> Result<(Value, Vec<Vec<u8>>), String> {
     Ok((header, blobs))
 }
 
+/// Writes `bytes` to `file` through a temporary file of its own, renamed over `file`, so a
+/// reader finds either the whole of `bytes` or what was there before. The temporary file's name
+/// is this write's alone: when it named only the process, two test threads writing the same
+/// entry at once shared it, and one could empty it while the other renamed it into place, so
+/// a reader found the entry part written.
 fn write_atomically(file: &Path, bytes: &[u8]) {
+    static WRITES: AtomicU64 = AtomicU64::new(0);
     if let Some(dir) = file.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    let tmp = file.with_extension(format!("tmp{}", std::process::id()));
+    let write = WRITES.fetch_add(1, Ordering::Relaxed);
+    let tmp = file.with_extension(format!("tmp{}-{write}", std::process::id()));
     if std::fs::write(&tmp, bytes).is_ok() && std::fs::rename(&tmp, file).is_err() {
         let _ = std::fs::remove_file(&tmp);
     }
@@ -1557,5 +1565,56 @@ mod tests {
         });
         assert_eq!(most.load(Ordering::SeqCst), 1);
         std::fs::remove_dir_all(venv.parent().unwrap()).unwrap();
+    }
+
+    /// A cache entry that test threads of one process write at once, as two tests asking the
+    /// same question do, is never seen part written: each read finds either no entry or the
+    /// whole of it. The race needs a narrow interleaving: with a temporary file per process,
+    /// this test failed in 4 of 6 runs on Windows (1 to 5 part-written reads of about 1000).
+    #[test]
+    fn a_cache_entry_written_by_threads_at_once_is_read_whole_or_not_at_all() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let dir = paths::target_dir().join(format!("oracle_cache_race_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let file = dir.join("entry.bin");
+        let entry: Vec<u8> = (0..=255u8).cycle().take(64 * 1024).collect();
+        let done = AtomicBool::new(false);
+        let (mut reads, mut partial) = (0, 0);
+        std::thread::scope(|scope| {
+            let writers: Vec<_> = (0..4)
+                .map(|_| {
+                    scope.spawn(|| {
+                        for _ in 0..500 {
+                            write_atomically(&file, &entry);
+                        }
+                    })
+                })
+                .collect();
+            scope.spawn(|| {
+                for writer in writers {
+                    writer.join().unwrap();
+                }
+                done.store(true, Ordering::SeqCst);
+            });
+            while !done.load(Ordering::SeqCst) {
+                if let Ok(bytes) = std::fs::read(&file) {
+                    reads += 1;
+                    if bytes != entry {
+                        partial += 1;
+                    }
+                }
+            }
+        });
+        assert_eq!(
+            partial, 0,
+            "{partial} of {reads} reads found a part-written entry"
+        );
+        assert_eq!(std::fs::read(&file).unwrap(), entry);
+        assert_eq!(
+            std::fs::read_dir(&dir).unwrap().count(),
+            1,
+            "temporary files were left"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
