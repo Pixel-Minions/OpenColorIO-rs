@@ -274,12 +274,12 @@ impl Oracle {
             return Ok(response);
         }
 
-        let bytes = self.run(&request)?;
-        let response = parse_response(&bytes)?;
+        let output = self.run(&request)?;
+        let response = response_of(&output)?;
         if let Some(file) = &cache_file
             && cacheable(cmd, &response)
         {
-            write_atomically(file, &bytes);
+            write_atomically(file, &output.stdout);
         }
         Ok(response)
     }
@@ -294,7 +294,7 @@ impl Oracle {
         })
     }
 
-    fn run(&self, request: &[u8]) -> Result<Vec<u8>, String> {
+    fn run(&self, request: &[u8]) -> Result<Output, String> {
         let mut command = self.command();
         command.args(["-X", "utf8", "-m", "ocio_oracle"]);
         exchange(command, request)
@@ -325,16 +325,40 @@ fn isolate_from(
     command.env("PYTHONDONTWRITEBYTECODE", "1")
 }
 
-/// Starts `command`, writes `request` to its stdin, and returns its stdout once it exits
+/// What an oracle process that exited successfully wrote.
+#[derive(Debug)]
+struct Output {
+    /// The framed response.
+    stdout: Vec<u8>,
+    /// Anything else it printed, as text.
+    stderr: String,
+}
+
+/// The response in `output`. A response whose framing is broken (fewer or more bytes than its
+/// header declares) is an error that carries the oracle's stderr: the process exited
+/// successfully, so its stderr is the only trace of what went wrong while it wrote.
+fn response_of(output: &Output) -> Result<Response, String> {
+    let (header, blobs) = parse_frame(&output.stdout).map_err(|e| {
+        format!(
+            "{e}: the oracle exited successfully after writing {} bytes to stdout; its \
+             stderr:\n{}",
+            output.stdout.len(),
+            output.stderr
+        )
+    })?;
+    response_from_frame(&header, blobs)
+}
+
+/// Starts `command`, writes `request` to its stdin, and returns its output once it exits
 /// successfully, starting it again (at most [`SPAWN_RETRIES`] times) when it crashed as the
 /// oracle crashes under Intel SDE on Windows before it reads a request ([`crashed_unread`]).
 /// The final error says how many attempts were made, with each attempt's message and stderr;
 /// each retry also prints a line to the process's stderr.
-fn exchange(mut command: Command, request: &[u8]) -> Result<Vec<u8>, String> {
+fn exchange(mut command: Command, request: &[u8]) -> Result<Output, String> {
     let mut failures = Vec::new();
     loop {
         match exchange_once(&mut command, request) {
-            Ok(stdout) => return Ok(stdout),
+            Ok(output) => return Ok(output),
             Err(failure) => {
                 let retry = failure.crashed_unread && failures.len() < SPAWN_RETRIES;
                 failures.push(failure.message);
@@ -409,12 +433,12 @@ struct Failure {
     crashed_unread: bool,
 }
 
-/// Starts `command`, writes `request` to its stdin, and returns its stdout once it exits
+/// Starts `command`, writes `request` to its stdin, and returns its output once it exits
 /// successfully. Each pipe has its own thread or loop, so the process never waits on a full
 /// pipe: the request is written on a thread (a large response can't deadlock a large
 /// request), stderr is read on another (a process that writes more than a pipe holds to
 /// stderr before it closes stdout can't hang), and stdout is read here.
-fn exchange_once(command: &mut Command, request: &[u8]) -> Result<Vec<u8>, Failure> {
+fn exchange_once(command: &mut Command, request: &[u8]) -> Result<Output, Failure> {
     let fail = |message: String| Failure {
         message,
         crashed_unread: false,
@@ -469,7 +493,7 @@ fn exchange_once(command: &mut Command, request: &[u8]) -> Result<Vec<u8>, Failu
     if !status.success() {
         return Err(fail(format!("oracle exited with {status}\n{stderr}")));
     }
-    Ok(stdout)
+    Ok(Output { stdout, stderr })
 }
 
 /// The most bytes one read or write moves through a pipe to or from the oracle.
@@ -713,7 +737,30 @@ fn frame(header: &Value, blobs: &[&[u8]]) -> Vec<u8> {
     out
 }
 
+/// The response framed in `bytes`, or what is wrong with it: its framing, or the error the
+/// oracle reported.
 fn parse_response(bytes: &[u8]) -> Result<Response, String> {
+    let (header, blobs) = parse_frame(bytes)?;
+    response_from_frame(&header, blobs)
+}
+
+/// The response of a well-framed `header` and its `blobs`, or the error the oracle reported.
+fn response_from_frame(header: &Value, blobs: Vec<Vec<u8>>) -> Result<Response, String> {
+    if header["ok"] != Value::Bool(true) {
+        return Err(header["error"]
+            .as_str()
+            .unwrap_or("unknown oracle error")
+            .to_string());
+    }
+    Ok(Response {
+        result: header["result"].clone(),
+        blobs,
+    })
+}
+
+/// The header and blobs of a framed response, or what is wrong with its framing: a header
+/// that is cut short or isn't JSON, or fewer or more bytes than its blob sizes add up to.
+fn parse_frame(bytes: &[u8]) -> Result<(Value, Vec<Vec<u8>>), String> {
     let len_bytes: [u8; 4] = bytes
         .get(..4)
         .and_then(|b| b.try_into().ok())
@@ -723,12 +770,6 @@ fn parse_response(bytes: &[u8]) -> Result<Response, String> {
         .get(4..4 + len)
         .ok_or("oracle response header is truncated")?;
     let header: Value = serde_json::from_slice(header_bytes).map_err(|e| e.to_string())?;
-    if header["ok"] != Value::Bool(true) {
-        return Err(header["error"]
-            .as_str()
-            .unwrap_or("unknown oracle error")
-            .to_string());
-    }
     let mut offset = 4 + len;
     let mut blobs = Vec::new();
     for size in header["blobs"].as_array().into_iter().flatten() {
@@ -745,10 +786,7 @@ fn parse_response(bytes: &[u8]) -> Result<Response, String> {
             bytes.len() - offset
         ));
     }
-    Ok(Response {
-        result: header["result"].clone(),
-        blobs,
-    })
+    Ok((header, blobs))
 }
 
 fn write_atomically(file: &Path, bytes: &[u8]) {
@@ -908,7 +946,8 @@ mod tests {
         let counter = counter("once");
         let request = large_request();
         let stdout = super::exchange(fake_oracle(&counter, 1, "unread"), &request)
-            .expect("the second start answers");
+            .expect("the second start answers")
+            .stdout;
         assert_eq!(stdout, request.iter().rev().copied().collect::<Vec<u8>>());
         assert_eq!(starts(&counter), "2");
     }
@@ -949,6 +988,32 @@ mod tests {
         assert!(!error.contains("attempts"), "{error}");
     }
 
+    /// A process that exits successfully with a response shorter than its header declares, as
+    /// the oracle did when writing a blob failed under memory pressure (it then appended an
+    /// error frame and exited with 0): the error says the blob is truncated and that the
+    /// process exited successfully, and carries its stderr.
+    #[test]
+    fn a_truncated_response_reports_the_oracle_stderr() {
+        let mut command = super::Oracle::get().command();
+        command.args([
+            "-c",
+            "import json, struct, sys\n\
+             sys.stdin.buffer.read()\n\
+             header = json.dumps({'ok': True, 'result': None, 'blobs': [1 << 20]}).encode()\n\
+             sys.stdout.buffer.write(struct.pack('<I', len(header)) + header + bytes(1000))\n\
+             error = json.dumps({'ok': False, 'error': 'OSError', 'blobs': []}).encode()\n\
+             sys.stdout.buffer.write(struct.pack('<I', len(error)) + error)\n\
+             sys.stderr.write('the write of blob 0 failed\\n')\n",
+        ]);
+        let output = super::exchange(command, b"request").expect("the process exits with 0");
+        let error = super::response_of(&output).expect_err("the response is truncated");
+        assert!(
+            error.starts_with("oracle response blob is truncated: the oracle exited successfully"),
+            "{error}"
+        );
+        assert!(error.contains("the write of blob 0 failed"), "{error}");
+    }
+
     fn large_stderr_exchange() {
         let mut command = super::Oracle::get().command();
         command.args([
@@ -960,7 +1025,9 @@ mod tests {
              sys.stdout.buffer.write(request[::-1])\n",
         ]);
         let request: Vec<u8> = (0..=255u8).cycle().take(200_000).collect();
-        let stdout = super::exchange(command, &request).expect("the exchange");
+        let stdout = super::exchange(command, &request)
+            .expect("the exchange")
+            .stdout;
         let reversed: Vec<u8> = request.iter().rev().copied().collect();
         assert_eq!(stdout, reversed);
     }
