@@ -45,7 +45,6 @@ pub(crate) fn not_ported_yet(style: &'static [u8]) -> OpCreator {
 ///
 /// Port of `BuiltinTransformRegistryImpl::BuiltinData` (BuiltinTransformRegistry.h:23-49 @
 /// v2.5.2).
-#[derive(Clone)]
 struct BuiltinData {
     /// `m_style`: the built-in transform style.
     style: Vec<u8>,
@@ -86,7 +85,10 @@ impl fmt::Debug for BuiltinData {
 /// Port of `BuiltinTransformRegistry` (include/OpenColorIO/OpenColorIO.h:3963-3985 @ v2.5.2)
 /// and `BuiltinTransformRegistryImpl` (BuiltinTransformRegistry.h:19-70 @ v2.5.2), its only
 /// implementation.
-#[derive(Debug, Clone, Default)]
+///
+/// Upstream deletes the copy constructor and assignment, and only the registry itself makes an
+/// empty one: the type has neither `Clone` nor `Default`.
+#[derive(Debug)]
 pub struct BuiltinTransformRegistry {
     /// `m_builtins`.
     builtins: Vec<BuiltinData>,
@@ -112,7 +114,9 @@ impl BuiltinTransformRegistry {
     /// Port of `BuiltinTransformRegistryImpl::BuiltinTransformRegistryImpl`
     /// (BuiltinTransformRegistry.h:53 @ v2.5.2).
     pub(crate) fn new() -> BuiltinTransformRegistry {
-        BuiltinTransformRegistry::default()
+        BuiltinTransformRegistry {
+            builtins: Vec::new(),
+        }
     }
 
     /// Adds a built-in transform, or replaces the one whose style is the same ignoring case.
