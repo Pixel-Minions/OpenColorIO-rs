@@ -416,6 +416,20 @@ pub fn bit_depth_to_string(bit_depth: BitDepth) -> &'static str {
     }
 }
 
+/// Which environment variables a context loads: those of the config's `environment:`
+/// section only (`LoadPredefined`), or all of them (`LoadAll`).
+///
+/// Port of `EnvironmentMode` (include/OpenColorIO/OpenColorTypes.h:484-489 @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum EnvironmentMode {
+    /// `ENV_ENVIRONMENT_UNKNOWN`.
+    Unknown = 0,
+    /// `ENV_ENVIRONMENT_LOAD_PREDEFINED`: only load vars in the config's environment section.
+    LoadPredefined,
+    /// `ENV_ENVIRONMENT_LOAD_ALL`: load all env. vars.
+    LoadAll,
+}
+
 /// How a color space's values are spread over the range the GPU's legacy 3D LUT samples:
 /// uniformly, or on a log2 scale.
 ///
