@@ -367,4 +367,24 @@ fn contexts_match_the_wheel() {
             Op::ResolveFileLocation(b("")),
         ],
     );
+
+    // Windows' verbatim and device paths, which `_wstat` opens, and a drive letter alone, which
+    // it refuses; on Linux, names like any other.
+    const VERBATIM: &str = "\\\\?\\";
+    const DEVICE: &str = "\\\\.\\";
+    let sep = if cfg!(windows) { "\\" } else { "/" };
+    check(
+        "drives and verbatim paths",
+        &[],
+        &[
+            Op::ResolveFileLocation(b(&format!("{VERBATIM}{root_text}{sep}d.clf"))),
+            Op::ResolveFileLocation(b(&format!("{VERBATIM}{root_text}{sep}missing.clf"))),
+            Op::ResolveFileLocation(b(&format!("{DEVICE}{root_text}{sep}d.clf"))),
+            Op::ResolveFileLocation(b("C:")),
+            Op::ResolveFileLocation(b("C:.")),
+            Op::SetWorkingDir(dir("")),
+            Op::ResolveFileLocation(b("C:")),
+            Op::ResolveFileLocation(b("nul")),
+        ],
+    );
 }

@@ -968,12 +968,16 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 - **Upstream:** `CreateFileContentHash` asks `_wstat` whether a file exists. On Windows it finds
   some device names, in any directory that exists: `nul`, `aux`, `com1`, `conin$`, `nul:` (with
-  `st_dev` -1), but not `con` or `lpt1` (as probed on Windows 11).
+  `st_dev` -1), but not `con` or `lpt1` (as probed on Windows 11). `_wstat` also opens verbatim
+  (`\\?\`) and device (`\\.\`) paths and UNC paths (`st_dev` then the current drive's), and
+  refuses a drive letter alone (`C:`).
 - **Who notices:** a config whose file references name such devices; `resolveFileLocation` then
   finds them.
-- **A fix:** treat device names as missing on Windows, as the port does.
-- **Status:** not matched (p3-context 3.5a): the port asks `std::fs::metadata`, which finds no
-  device. For the owner to decide, with D-5's kind of limitation.
+- **A fix:** treat device names as missing on Windows.
+- **Status:** matched (p3-context 3.5a, corrected in a fix chunk after the verifier's review):
+  the port opens the path as `_wstat` does, and takes a file whose information can't be read for
+  a device; checked against `_wstat` in `crates/ocio-ops/tests/platform_crt.rs` and against the
+  wheel in `crates/ocio/tests/context_oracle.rs`.
 
 ### I-115. pystring's indices are `int`
 
