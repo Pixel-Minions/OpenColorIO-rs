@@ -808,7 +808,7 @@ None right now. Answered on 2026-09-29:
 - **Waivers:** W0002 was extended on 2026-10-04 to the NaN entries of the 1D LUT the optimizer bakes from NaN parameters (integer and half-float input), and the CPU cache ID that hashes it. Everything else is exact.
 - **Improvements register:** `docs/improvements.md` grew from 22 entries at the end of Phase 0 to 68 (54 `I-` and 14 `U-`).
 
-**Then: Phase 2**, following `docs/cards/phase2.md` (to be written). M1 is LUTs, fixed functions and the built-in configs.
+**Then: Phase 2**, following `docs/cards/phase2.md`, in parallel with Phase 3 (owner decision, 2026-10-05). M1 is LUTs, fixed functions and the built-in configs.
 
 ---
 
