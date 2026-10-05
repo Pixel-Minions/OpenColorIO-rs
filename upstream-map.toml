@@ -1311,7 +1311,7 @@ path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOpGPU.cpp"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/fixedfunction/fixed_function_op_gpu.rs"]
 status = "partial"
-note = "p2-ff-gpu 2.3f: the ACES 1.x shaders (1-351, and Add_Surround_10_Fwd_Shader 1636-1649) and the dispatch (GetFixedFunctionGPUShaderProgram, GetFixedFunctionGPUProcessingText, 2225-2491), its other arms not ported yet; 2.3g1: the Rec.2100 surround, RGB<->HSV, the HSYs, XYZ<->xyY, u'v'Y and LUV (1651-1948); 2.3g2: PQ, gamma-log and double-log (1950-2223); p2-aces2-gpu 2.4f1: hue wrap, sin/cos, RGB<->Aab<->JMh (352-503), the RGB_TO_JMh entry points (1442-1492)"
+note = "p2-ff-gpu 2.3f: the ACES 1.x shaders (1-351, and Add_Surround_10_Fwd_Shader 1636-1649) and the dispatch (GetFixedFunctionGPUShaderProgram, GetFixedFunctionGPUProcessingText, 2225-2491), its other arms not ported yet; 2.3g1: the Rec.2100 surround, RGB<->HSV, the HSYs, XYZ<->xyY, u'v'Y and LUV (1651-1948); 2.3g2: PQ, gamma-log and double-log (1950-2223); p2-aces2-gpu 2.4f1: hue wrap, sin/cos, RGB<->Aab<->JMh (352-503), the RGB_TO_JMh entry points (1442-1492); 2.4f2: the reach table, toe, tone scale and chroma compression (505-805), the TONESCALE_COMPRESS entry points (1494-1548)"
 
 [[file]]
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOpGPU.h"
