@@ -1550,13 +1550,14 @@ status = "todo"
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingRGBCurveOpData.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_rgb_curve_op_data.rs"]
-status = "todo"
+status = "done"
+note = "p2-rgbcurve 2.6c"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingRGBCurveOpData.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_rgb_curve_op_data.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingRGBCurveOpGPU.cpp"
@@ -4726,7 +4727,7 @@ status = "todo"
 path = "tests/cpu/ops/gradingrgbcurve/GradingRGBCurveOpData_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_rgb_curve_op_data_tests.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "tests/cpu/ops/gradingrgbcurve/GradingRGBCurveOp_tests.cpp"
