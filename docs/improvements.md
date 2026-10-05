@@ -860,15 +860,33 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
     product each order their operands per compiler and, with GCC, per style (`0x18018ed10`
     and `0x18018e8e0`; `0x358880` and `0x357ce0`; the port's `apply_rgb_to_hsy`,
     `apply_hsy_to_rgb` and `hsy_lin_gain` list them).
+  - ACES 2.0's JMh model and chroma compression (`ACES2/Transform.cpp`, 175-250 and
+    335-462), which the ACES 2.0 renderers share: MSVC sums the matrices' rows as
+    `(p1 + p0) + p2` and GCC as `(p0 + p1) + p2`, except the last two rows of RGB to Aab's
+    second matrix, which MSVC sums `(p0 + p1) + p2`, and the middle row of both directions'
+    second matrices, which GCC sums `p2 + (p0 + p1)` (`sub_1802f9170` and `0x34b5f0`,
+    `sub_1802f8c00` and `0x34ba60`, `sub_1802f8ed0` and `0x34bcd0`); the chroma compression's
+    limit is `pow(..) * reachMaxM` with MSVC and `reachMaxM * pow(..)` with GCC, its
+    colourfulness `pow(..) * M` with MSVC and `M * pow(..)` with GCC, and the inverse's
+    `pow(..) * M` with MSVC and `M * pow(..)` with GCC (`sub_1802fa060` and `0x34c4d0`,
+    `sub_1802fa250` and `0x34c8b0`). Both compilers compute `a` as `cos_hr * M` in the copy
+    of `JMh_to_Aab` that JMh to RGB inlines, against the source's `M * cos_hr`. The toes,
+    `JMh_to_Aab`'s `b` and the inverse's `Mnorm * M` (GCC) order more operands per compiled
+    copy (the port's `ToeFwdOrder`, `toe_inv`, `jmh_to_aab_with` and `chroma_compress_inv`
+    list them), where the renderers can't show it: a NaN that reaches them has already
+    reached the operand that decides the result.
   Both compilers also reorder some of the source's operations the same way (for example
   `13 * L* * (u - u'n)` as `(u - u'n) * (13 * L*)`), which only matters to the port.
 - **Who notices:** images whose pixels have NaNs of different signs or payloads in two or
   more channels, through these styles: the output NaN's sign and payload differ between
   Windows and Linux. For example, through a glow, a pixel with a NaN A in green, a NaN B in
   blue and a finite red comes out with A in red and blue on Windows, B on Linux.
+  Through ACES 2.0's RGB to JMh (of AP0), a pixel with one NaN in red and blue and another
+  in green comes out with green's NaN in J, M and h on Windows, red's on Linux.
 - **A fix:** one operand order for both platforms.
 - **Status:** matched in `p2-ff-cpu` (the glows, 2.3b) and `p2-ff-cpu-2` (2.3c1, the HSYs in
-  2.3c2), each wheel's order per platform (`cfg(target_os)`). The battery's NaN buffers and
+  2.3c2), and `p2-aces2-cpu` (ACES 2.0's JMh model and chroma compression, 2.4e1), each
+  wheel's order per platform (`cfg(target_os)`). The battery's NaN buffers and
   `fixed_function_oracle.rs`'s `nan_combinations_match_the_wheel` (every combination of NaNs,
   finite values and infinities in red, green and blue) compare them with the wheel on both
   platforms.
