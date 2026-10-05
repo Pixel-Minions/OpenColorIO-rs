@@ -7,8 +7,10 @@
 
 pub mod caching;
 pub mod config;
+pub mod config_io_proxy;
 pub mod context;
 pub mod context_variable_utils;
+pub mod path_utils;
 pub mod processor;
 pub mod transform;
 pub mod transforms;
@@ -26,6 +28,9 @@ pub use ocio_ops::open_color_types::{
     OptimizationFlags, TransformDirection,
 };
 pub use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
+pub use ocio_ops::platform::{
+    get_env_variable, is_env_variable_present, set_env_variable, unset_env_variable,
+};
 pub use processor::{Processor, ProcessorCacheFlags, ProcessorMetadata};
 pub use transform::{Transform, TransformType};
 pub use transforms::allocation_transform::AllocationTransform;

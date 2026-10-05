@@ -75,10 +75,9 @@ impl GroupTransform {
     /// Port of `GroupTransformImpl::validate` (GroupTransform.cpp:56-73 @ v2.5.2).
     pub fn validate(&self) -> Result<()> {
         if let Err(ex) = validate_direction(self.dir) {
-            return Err(Exception::new(format!(
-                "GroupTransform validation failed: {}",
-                ex.message()
-            )));
+            return Err(Exception::new(
+                [b"GroupTransform validation failed: ".as_slice(), ex.what()].concat(),
+            ));
         }
 
         for val in &self.transforms {
@@ -181,7 +180,7 @@ impl fmt::Display for GroupTransform {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut os = OStringStream::new(Crt::NATIVE);
         self.write_text(&mut os);
-        f.write_str(os.str())
+        f.write_str(&os.to_string_lossy())
     }
 }
 

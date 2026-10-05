@@ -177,7 +177,7 @@ pub fn matrix_transform_fit(
             os.put_str("' in channel index ");
             os.put_i32(i as i32);
             os.put_str(".");
-            return Err(Exception::new(os.into_string()));
+            return Err(Exception::new(os.into_bytes()));
         }
 
         m44[5 * i] = (new_max4[i] - new_min4[i]) / denom;

@@ -662,10 +662,14 @@ impl MatrixOpData {
     /// The error of the offset accessors for an index past the matrix's size.
     fn offset_index_error(&self, index: c_ulong) -> Exception {
         // TODO: should never happen. Consider assert.
-        Exception::new(format!(
-            "Matrix array content issue: '{}' offset index out of range '{index}'. ",
-            String::from_utf8_lossy(c_str(self.get_id()))
-        ))
+        Exception::new(
+            [
+                b"Matrix array content issue: '".as_slice(),
+                c_str(self.get_id()),
+                format!("' offset index out of range '{index}'. ").as_bytes(),
+            ]
+            .concat(),
+        )
     }
 
     /// The offset at `index`, below the matrix's size.
@@ -717,10 +721,9 @@ impl MatrixOpData {
     /// Port of `MatrixOpData::validate` (MatrixOpData.cpp:491-510 @ v2.5.2).
     pub fn validate(&mut self) -> Result<()> {
         if let Err(e) = self.array.validate() {
-            return Err(Exception::new(format!(
-                "Matrix array content issue: {}",
-                e.message()
-            )));
+            return Err(Exception::new(
+                [b"Matrix array content issue: ".as_slice(), e.what()].concat(),
+            ));
         }
         if self.direction == TransformDirection::Inverse {
             // Make sure matrix can be inverted.
@@ -738,10 +741,9 @@ impl MatrixOpData {
             return self.clone().validate();
         }
         if let Err(e) = self.array.validate_ref() {
-            return Err(Exception::new(format!(
-                "Matrix array content issue: {}",
-                e.message()
-            )));
+            return Err(Exception::new(
+                [b"Matrix array content issue: ".as_slice(), e.what()].concat(),
+            ));
         }
         if self.direction == TransformDirection::Inverse {
             // Make sure matrix can be inverted.

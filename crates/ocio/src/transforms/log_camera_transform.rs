@@ -87,10 +87,13 @@ impl LogCameraTransform {
             Ok(())
         })();
         checked.map_err(|ex| {
-            Exception::new(format!(
-                "LogCameraTransform validation failed: {}",
-                ex.message()
-            ))
+            Exception::new(
+                [
+                    b"LogCameraTransform validation failed: ".as_slice(),
+                    ex.what(),
+                ]
+                .concat(),
+            )
         })
     }
 
@@ -271,7 +274,7 @@ impl fmt::Display for LogCameraTransform {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut os = OStringStream::new(Crt::NATIVE);
         self.write_text(&mut os);
-        f.write_str(os.str())
+        f.write_str(&os.to_string_lossy())
     }
 }
 

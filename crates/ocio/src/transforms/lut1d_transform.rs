@@ -109,10 +109,7 @@ impl Lut1DTransform {
             self.data.validate()
         })();
         checked.map_err(|ex| {
-            Exception::new(format!(
-                "Lut1DTransform validation failed: {}",
-                ex.message()
-            ))
+            Exception::new([b"Lut1DTransform validation failed: ".as_slice(), ex.what()].concat())
         })
     }
 
@@ -366,7 +363,7 @@ impl fmt::Display for Lut1DTransform {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut os = OStringStream::new(Crt::NATIVE);
         self.write_text(&mut os);
-        f.write_str(os.str())
+        f.write_str(&os.to_string_lossy())
     }
 }
 

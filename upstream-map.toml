@@ -25,7 +25,7 @@ path = "include/OpenColorIO/OpenColorIO.h"
 kind = "api"
 target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/image_desc.rs", "crates/ocio-ops/src/logging.rs", "crates/ocio-gpu/src/gpu_shader_desc.rs", "crates/ocio-gpu/src/gpu_shader.rs"]
 status = "partial"
-note = "1.1b-1.1c: AutoStride, ImageDesc, PackedImageDesc and PlanarImageDesc (image_desc.rs, for ocio to re-export); 1.2e: the logging functions (155-177: GetLoggingLevel, SetLoggingLevel, SetLoggingFunction, ResetToDefaultLoggingFunction, LogMessage) in logging.rs; 1.7c: GpuShaderCreator (3361-3573) and GpuShaderDesc (3725-3825) are GpuShaderDesc in gpu_shader_desc.rs, with TextureType, TextureDimensions, UniformData and the getter types in gpu_shader.rs"
+note = "1.1b-1.1c: AutoStride, ImageDesc, PackedImageDesc and PlanarImageDesc (image_desc.rs, for ocio to re-export); 1.2e: the logging functions (155-177: GetLoggingLevel, SetLoggingLevel, SetLoggingFunction, ResetToDefaultLoggingFunction, LogMessage) in logging.rs; 1.7c: GpuShaderCreator (3361-3573) and GpuShaderDesc (3725-3825) are GpuShaderDesc in gpu_shader_desc.rs, with TextureType, TextureDimensions, UniformData and the getter types in gpu_shader.rs; p3-context: GetEnvVariable, SetEnvVariable, UnsetEnvVariable, IsEnvVariablePresent (197-203), re-exported from ocio_ops::platform (3.5a); Context (3865-3951) in context.rs and ConfigIOProxy (4095-4138) in config_io_proxy.rs (3.5e)"
 
 [[file]]
 path = "include/OpenColorIO/OpenColorTransforms.h"
@@ -39,7 +39,7 @@ path = "include/OpenColorIO/OpenColorTypes.h"
 kind = "api"
 target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs", "crates/ocio-ops/src/format_metadata.rs", "crates/ocio-ops/src/logging.rs", "crates/ocio-gpu/src/open_color_types.rs", "crates/ocio/src/transform.rs", "crates/ocio/src/transforms/range_transform.rs"]
 status = "partial"
-note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.1a: BitDepth, and BitDepthToString (defined in ParseUtils.cpp); 1.1b: ChannelOrdering; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does; 1.2b: DynamicPropertyType; 1.2e: LoggingLevel (288-297), in open_color_types.rs, and LoggingFunction (283-284), in logging.rs; 1.7a: GpuLanguage, in ocio-gpu/src/open_color_types.rs; 1.3n1: Allocation (459-463); 1.2d: OptimizationFlags (634-722), a bit-flags type over a C unsigned long; p1-optimizer A: Lut1DHueAdjust (441-447); p1-transforms T0: TransformType (361-386), in crates/ocio/src/transform.rs; p1-transforms-fam1 (1.8c): RangeStyle (491-496), in crates/ocio/src/transforms/range_transform.rs; p2-ff-cpu 2.3a1: FixedFunctionStyle (499-524)"
+note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.1a: BitDepth, and BitDepthToString (defined in ParseUtils.cpp); 1.1b: ChannelOrdering; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does; 1.2b: DynamicPropertyType; 1.2e: LoggingLevel (288-297), in open_color_types.rs, and LoggingFunction (283-284), in logging.rs; 1.7a: GpuLanguage, in ocio-gpu/src/open_color_types.rs; 1.3n1: Allocation (459-463); 1.2d: OptimizationFlags (634-722), a bit-flags type over a C unsigned long; p1-optimizer A: Lut1DHueAdjust (441-447); p1-transforms T0: TransformType (361-386), in crates/ocio/src/transform.rs; p1-transforms-fam1 (1.8c): RangeStyle (491-496), in crates/ocio/src/transforms/range_transform.rs; p3-context 3.5c: EnvironmentMode (484-489); p2-ff-cpu 2.3a1: FixedFunctionStyle (499-524)"
 
 [[file]]
 path = "src/CMakeLists.txt"
@@ -189,21 +189,22 @@ status = "todo"
 path = "src/OpenColorIO/Context.cpp"
 kind = "src"
 target = ["crates/ocio/src/context.rs"]
-status = "partial"
-note = "p1-transforms T0: Context::Create, without state (Phase 3)"
+status = "done"
+note = "p1-transforms T0: Context::Create; p3-context 3.5e: the state (search paths, working dir, environment mode, variables), loadEnvironment, resolveStringVar with the used context, the cache ID and its caches, createEditableCopy (I-111), operator<<, the I/O proxy slot; 3.5f: resolveFileLocation and GetAbsoluteSearchPaths"
 
 [[file]]
 path = "src/OpenColorIO/ContextVariableUtils.cpp"
 kind = "src"
 target = ["crates/ocio/src/context_variable_utils.rs"]
 status = "partial"
-note = "1.8g: CollectContextVariables for the classes in the port (the group overload of transforms/GroupTransform.cpp:206-223 included); the resolution and the other overloads come with the context's state (Phase 3)"
+note = "1.8g: CollectContextVariables for the classes in the port (the group overload of transforms/GroupTransform.cpp:206-223 included); p3-context 3.5d: ContainsContextVariableToken, ContainsContextVariables, LoadEnvironment, ResolveContextVariables. The other CollectContextVariables overloads come with their transform classes"
 
 [[file]]
 path = "src/OpenColorIO/ContextVariableUtils.h"
 kind = "src"
 target = ["crates/ocio/src/context_variable_utils.rs"]
-status = "todo"
+status = "partial"
+note = "p3-context 3.5d: EnvMapKey, EnvMap, UsedEnvs and the declarations; the CollectContextVariables overloads of the classes not ported yet come with them"
 
 [[file]]
 path = "src/OpenColorIO/CustomKeys.h"
@@ -477,34 +478,37 @@ note = "1.2c: FinalizeOps (132-139) and OpRcPtrVec::finalize (598-609); 1.2d (th
 [[file]]
 path = "src/OpenColorIO/ParseUtils.cpp"
 kind = "src"
-target = ["crates/ocio/src/parse_utils.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-gpu/src/open_color_types.rs", "crates/ocio/src/transforms/range_transform.rs"]
+target = ["crates/ocio-ops/src/parse_utils.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-gpu/src/open_color_types.rs", "crates/ocio/src/transforms/range_transform.rs"]
 status = "partial"
-note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection; 1.1a: BitDepthToString, next to BitDepth; 1.2e: LoggingLevelToString and LoggingLevelFromString, next to LoggingLevel; 1.7c: GpuLanguageToString, next to GpuLanguage; 1.3n1: AllocationToString, next to Allocation; 1.3m1: TransformDirectionToString, next to TransformDirection; p1-optimizer A: InterpolationToString, in open_color_types.rs; p1-transforms-fam1 (1.8c): RangeStyleToString, next to RangeStyle; p1-transforms-fam2 (1.8d): NegativeStyleToString, next to NegativeStyle; p1-transforms-fam2 (1.8f): CDLStyleToString, next to CDLStyle; p2-ff-cpu 2.3a1: FixedFunctionStyleToString, next to FixedFunctionStyle"
+note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection; 1.1a: BitDepthToString, next to BitDepth; 1.2e: LoggingLevelToString and LoggingLevelFromString, next to LoggingLevel; 1.7c: GpuLanguageToString, next to GpuLanguage; 1.3n1: AllocationToString, next to Allocation; 1.3m1: TransformDirectionToString, next to TransformDirection; p1-optimizer A: InterpolationToString, in open_color_types.rs; p1-transforms-fam1 (1.8c): RangeStyleToString, next to RangeStyle; p1-transforms-fam2 (1.8d): NegativeStyleToString, next to NegativeStyle; p1-transforms-fam2 (1.8f): CDLStyleToString, next to CDLStyle; p3-context 3.5c: BoolToString/FromString, TransformDirectionFromString, BitDepthFromString, BitDepthIsFloat, BitDepthToInt, AllocationFromString, InterpolationFromString, EnvironmentModeToString/FromString, CDLStyleFromString, NegativeStyleFromString, StrEqualsCaseIgnore, SplitStringEnvStyle, JoinStringEnvStyle, IntersectStringVecsCaseIgnore, FindInStringVecCaseIgnore in parse_utils.rs; RangeStyleFromString next to RangeStyle; p2-ff-cpu 2.3a1: FixedFunctionStyleToString, next to FixedFunctionStyle. StringToInt, StringToFloat, FloatToString, the string-vector and XML helpers wait for Phase 4"
 
 [[file]]
 path = "src/OpenColorIO/ParseUtils.h"
 kind = "src"
-target = ["crates/ocio/src/parse_utils.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/parse_utils.rs"]
+status = "partial"
+note = "p3-context 3.5c: the declarations of the functions ported in parse_utils.rs"
 
 [[file]]
 path = "src/OpenColorIO/PathUtils.cpp"
 kind = "src"
 target = ["crates/ocio/src/path_utils.rs"]
-status = "todo"
+status = "partial"
+note = "p3-context 3.5f: SetComputeHashFunction, ResetComputeHashFunction, GetFastFileHash and its cache, FileExists, ClearPathCaches, GetCwd (I-116, U-45), AbsPath. AdjustRightmost and ParseColorSpaceFromString come with the file rules (WP 3.9)"
 
 [[file]]
 path = "src/OpenColorIO/PathUtils.h"
 kind = "src"
 target = ["crates/ocio/src/path_utils.rs"]
-status = "todo"
+status = "partial"
+note = "p3-context 3.5f: the declarations of the functions in path_utils.rs"
 
 [[file]]
 path = "src/OpenColorIO/Platform.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/platform.rs"]
 status = "partial"
-note = "Getenv, isEnvPresent, Strcasecmp, Strncasecmp; Setenv/Unsetenv, AlignedMalloc, CreateTempFilename, UTF-8/16 conversion pending. Strcasecmp and Strncasecmp take bytes that end at a NUL and fold A-Z only, as the classic C locale does (deviation D-4), checked against _stricmp/_strnicmp (UCRT) and strcasecmp/strncasecmp (glibc) for every pair of bytes (tests/platform_crt.rs)"
+note = "p3-context 3.5a: everything but AlignedMalloc/AlignedFree (no caller in the port yet). The environment goes through an injectable provider with each platform's rules, bytes, and the whole-environment listing (environ / _wenviron); what OCIO sets goes to an overlay (deviation D-5). Utf8ToUtf16/Utf16ToUtf8 reproduce MultiByteToWideChar/WideCharToMultiByte, CreateFileContentHash _wstat/stat (devices: I-114), checked against the system in tests/platform_crt.rs; CreateTempFilename's names differ (I-112). The public GetEnvVariable, SetEnvVariable, UnsetEnvVariable, IsEnvVariablePresent are re-exported by ocio. Strcasecmp and Strncasecmp take bytes that end at a NUL and fold A-Z only, as the classic C locale does (deviation D-4), checked against _stricmp/_strnicmp (UCRT) and strcasecmp/strncasecmp (glibc) for every pair of bytes (tests/platform_crt.rs)"
 
 [[file]]
 path = "src/OpenColorIO/Platform.h"
@@ -4212,13 +4216,15 @@ note = "p1-transforms-fam2 (1.8d): the setMajorVersion checks of version (2065-2
 path = "tests/cpu/ContextVariableUtils_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/context_variable_utils_tests.rs"]
-status = "todo"
+status = "done"
+note = "p3-context 3.5d: env_check, env_expand"
 
 [[file]]
 path = "tests/cpu/Context_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/context_tests.rs"]
-status = "todo"
+status = "done"
+note = "p3-context 3.5e: search_paths, string_vars; 3.5f: abs_path, var_search_path, use_searchpaths, use_searchpaths_workingdir"
 
 [[file]]
 path = "tests/cpu/Display_tests.cpp"
@@ -4306,21 +4312,23 @@ note = "all but OpRcPtrVec/is_noop and OpRcPtrVec/dynamic_property, which need t
 [[file]]
 path = "tests/cpu/ParseUtils_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio/src/parse_utils_tests.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/parse_utils_tests.rs"]
+status = "partial"
+note = "p3-context 3.5c: bool_string, transform_direction, bitdepth, split_string_env_style, join_string_env_style, intersect_string_vecs_case_ignore. xml_text, string_to_int, string_to_float, float_double, string_vec_to_int_vec wait for their functions (Phase 4)"
 
 [[file]]
 path = "tests/cpu/PathUtils_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/path_utils_tests.rs"]
-status = "todo"
+status = "done"
+note = "p3-context 3.5f: compute_hash"
 
 [[file]]
 path = "tests/cpu/Platform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/platform_tests.rs"]
 status = "partial"
-note = "string_compare. The others need Setenv/Unsetenv, AlignedMalloc, CreateTempFilename or the UTF-8/16 conversions"
+note = "string_compare; envVariable, getenv, setenv (without their checks through the Windows API, deviation D-5), create_temp_filename, utf8_utf16_convert (p3-context 3.5a). aligned_memory_test waits for AlignedMalloc"
 
 [[file]]
 path = "tests/cpu/Processor_tests.cpp"

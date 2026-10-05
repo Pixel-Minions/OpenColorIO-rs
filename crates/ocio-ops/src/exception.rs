@@ -37,35 +37,57 @@ pub enum ExceptionKind {
 }
 
 /// An OpenColorIO error: upstream's exception type and its message, verbatim.
+///
+/// The message is bytes, as upstream's `what()` holds them: it embeds names, paths and config
+/// text, which need not be UTF-8. [`what`](Self::what) gives the bytes; [`message`](Self::message)
+/// and `Display` give them as text, each byte sequence that isn't UTF-8 replaced by U+FFFD.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Exception {
     kind: ExceptionKind,
-    message: String,
+    message: Vec<u8>,
+    /// The message as text, kept for `message`.
+    text: String,
+}
+
+/// A message as the C++ exceptions take it, a `const char *`: up to its first NUL.
+fn c_message(message: impl Into<Vec<u8>>) -> Vec<u8> {
+    let mut message = message.into();
+    if let Some(nul) = message.iter().position(|&c| c == 0) {
+        message.truncate(nul);
+    }
+    message
 }
 
 impl Exception {
-    /// `OCIO::Exception(msg)`.
-    pub fn new(message: impl Into<String>) -> Self {
+    /// `OCIO::Exception(msg)`. The message ends at its first NUL, as the `const char *` upstream
+    /// takes.
+    pub fn new(message: impl Into<Vec<u8>>) -> Self {
         Exception {
             kind: ExceptionKind::Exception,
-            message: message.into(),
+            text: String::new(),
+            message: c_message(message),
         }
+        .with_text()
     }
 
-    /// `OCIO::ExceptionMissingFile(msg)`.
-    pub fn missing_file(message: impl Into<String>) -> Self {
+    /// `OCIO::ExceptionMissingFile(msg)`, the message up to its first NUL.
+    pub fn missing_file(message: impl Into<Vec<u8>>) -> Self {
         Exception {
             kind: ExceptionKind::MissingFile,
-            message: message.into(),
+            text: String::new(),
+            message: c_message(message),
         }
+        .with_text()
     }
 
-    /// A `std::length_error` with `what()` = `msg`.
-    pub fn length_error(message: impl Into<String>) -> Self {
+    /// A `std::length_error` with `what()` = `msg`, up to its first NUL.
+    pub fn length_error(message: impl Into<Vec<u8>>) -> Self {
         Exception {
             kind: ExceptionKind::LengthError,
-            message: message.into(),
+            text: String::new(),
+            message: c_message(message),
         }
+        .with_text()
     }
 
     /// A `std::bad_alloc`, with the C++ library's `what()`: "bad allocation" in MSVC's (both
@@ -73,8 +95,15 @@ impl Exception {
     pub fn bad_alloc() -> Self {
         Exception {
             kind: ExceptionKind::BadAlloc,
-            message: BAD_ALLOC.to_string(),
+            message: BAD_ALLOC.as_bytes().to_vec(),
+            text: BAD_ALLOC.to_string(),
         }
+    }
+
+    /// Fills in the message's text.
+    fn with_text(mut self) -> Self {
+        self.text = String::from_utf8_lossy(&self.message).into_owned();
+        self
     }
 
     /// The upstream exception type.
@@ -82,9 +111,15 @@ impl Exception {
         self.kind
     }
 
-    /// `what()`: the message, verbatim.
-    pub fn message(&self) -> &str {
+    /// `what()`: the message's bytes, verbatim.
+    pub fn what(&self) -> &[u8] {
         &self.message
+    }
+
+    /// The message as text: [`what`](Self::what), with each byte sequence that isn't UTF-8
+    /// replaced by U+FFFD.
+    pub fn message(&self) -> &str {
+        &self.text
     }
 
     /// True for `ExceptionMissingFile`.
@@ -94,8 +129,9 @@ impl Exception {
 }
 
 impl fmt::Display for Exception {
+    /// [`Exception::message`].
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
+        f.write_str(&self.text)
     }
 }
 
@@ -117,5 +153,14 @@ mod tests {
         );
         assert!(!e.is_missing_file());
         assert!(Exception::missing_file("x").is_missing_file());
+    }
+
+    /// The message is bytes up to the first NUL, and its text replaces what isn't UTF-8.
+    #[test]
+    fn message_is_bytes() {
+        let e = Exception::new(b"a\xffb\0c".to_vec());
+        assert_eq!(e.what(), b"a\xffb");
+        assert_eq!(e.message(), "a\u{fffd}b");
+        assert_eq!(e.to_string(), "a\u{fffd}b");
     }
 }

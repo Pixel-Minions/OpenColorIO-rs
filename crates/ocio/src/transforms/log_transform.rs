@@ -115,7 +115,7 @@ impl LogTransform {
     pub fn validate(&self) -> Result<()> {
         let checked = validate_direction(self.direction()).and_then(|()| self.data.validate());
         checked.map_err(|ex| {
-            Exception::new(format!("LogTransform validation failed: {}", ex.message()))
+            Exception::new([b"LogTransform validation failed: ".as_slice(), ex.what()].concat())
         })
     }
 
@@ -184,7 +184,7 @@ impl fmt::Display for LogTransform {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut os = OStringStream::new(Crt::NATIVE);
         self.write_text(&mut os);
-        f.write_str(os.str())
+        f.write_str(&os.to_string_lossy())
     }
 }
 

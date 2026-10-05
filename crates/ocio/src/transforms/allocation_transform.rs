@@ -75,10 +75,13 @@ impl AllocationTransform {
     /// Port of `AllocationTransform::validate` (AllocationTransform.cpp:85-116 @ v2.5.2).
     pub fn validate(&self) -> Result<()> {
         if let Err(ex) = validate_direction(self.dir) {
-            return Err(Exception::new(format!(
-                "AllocationTransform validation failed: {}",
-                ex.message()
-            )));
+            return Err(Exception::new(
+                [
+                    b"AllocationTransform validation failed: ".as_slice(),
+                    ex.what(),
+                ]
+                .concat(),
+            ));
         }
 
         let n = self.vars.len();
@@ -182,7 +185,7 @@ impl fmt::Display for AllocationTransform {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut os = OStringStream::new(Crt::NATIVE);
         self.write_text(&mut os);
-        f.write_str(os.str())
+        f.write_str(&os.to_string_lossy())
     }
 }
 

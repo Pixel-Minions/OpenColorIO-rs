@@ -46,6 +46,20 @@ pub fn range_style_to_string(style: RangeStyle) -> &'static str {
     }
 }
 
+/// `noclamp` or `clamp`, in any ASCII case. `None` is upstream's null pointer, read as "".
+///
+/// Port of `RangeStyleFromString` (src/OpenColorIO/ParseUtils.cpp:341-352 @ v2.5.2).
+pub fn range_style_from_string(style: Option<&[u8]>) -> Result<RangeStyle> {
+    let p = style.map_or(&[][..], ocio_ops::utils::string_utils::c_str);
+    match ocio_ops::utils::string_utils::lower(p).as_slice() {
+        b"noclamp" => Ok(RangeStyle::NoClamp),
+        b"clamp" => Ok(RangeStyle::Clamp),
+        _ => Err(Exception::new(
+            [b"Wrong Range style '".as_slice(), p, b"'."].concat(),
+        )),
+    }
+}
+
 /// A range: `out = (in - minIn) * scale + minOut` on RGB, the scale mapping the input bounds to
 /// the output bounds, clamped to the output bounds unless the style is
 /// [`RangeStyle::NoClamp`]. A bound can be unset (a NaN), which leaves that side unclamped.
@@ -136,10 +150,7 @@ impl RangeTransform {
             Ok(())
         })();
         checked.map_err(|ex| {
-            Exception::new(format!(
-                "RangeTransform validation failed: {}",
-                ex.message()
-            ))
+            Exception::new([b"RangeTransform validation failed: ".as_slice(), ex.what()].concat())
         })
     }
 
@@ -352,7 +363,7 @@ impl fmt::Display for RangeTransform {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut os = OStringStream::new(Crt::NATIVE);
         self.write_text(&mut os);
-        f.write_str(os.str())
+        f.write_str(&os.to_string_lossy())
     }
 }
 

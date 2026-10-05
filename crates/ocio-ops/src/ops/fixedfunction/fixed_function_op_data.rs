@@ -432,7 +432,7 @@ fn check_param_bounds(name: &str, val: f64, low: f64, high: f64) -> Result<()> {
         ss.put_str(",");
         put(&mut ss, high);
         ss.put_str("]");
-        return Err(Exception::new(ss.into_string()));
+        return Err(Exception::new(ss.into_bytes()));
     }
     Ok(())
 }
@@ -449,7 +449,7 @@ fn check_param_no_frac(name: &str, val: f64) -> Result<()> {
         ss.put_str(" (");
         ss.put_str(name);
         ss.put_str(") cannot include any fractional component");
-        return Err(Exception::new(ss.into_string()));
+        return Err(Exception::new(ss.into_bytes()));
     }
     Ok(())
 }
@@ -463,7 +463,7 @@ fn message(parts: &[Part<'_>]) -> Exception {
             Part::Value(value) => put(&mut ss, value),
         }
     }
-    Exception::new(ss.into_string())
+    Exception::new(ss.into_bytes())
 }
 
 /// A piece of a [`message`].
@@ -682,7 +682,7 @@ impl FixedFunctionOpData {
             ss.put_str(" but ");
             ss.put_u64(self.params.len() as u64);
             ss.put_str(" found.");
-            return Err(Exception::new(ss.into_string()));
+            return Err(Exception::new(ss.into_bytes()));
         }
         Ok(())
     }
@@ -931,7 +931,7 @@ impl FixedFunctionOpData {
             stream.put_f64(param);
         }
 
-        cache_id.extend_from_slice(stream.into_string().as_bytes());
+        cache_id.extend_from_slice(&stream.into_bytes());
         cache_id
     }
 

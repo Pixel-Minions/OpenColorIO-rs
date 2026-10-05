@@ -224,11 +224,18 @@ impl TextureData {
             .wrapping_mul(channel.channels()) as usize;
         if values.len() < size {
             // Upstream reads `size` floats from the pointer, past the caller's buffer (U-11).
-            return Err(Exception::new(format!(
-                "The texture '{}' needs {size} values, but only {} were given.",
-                String::from_utf8_lossy(texture_name),
-                values.len()
-            )));
+            return Err(Exception::new(
+                [
+                    b"The texture '".as_slice(),
+                    texture_name,
+                    format!(
+                        "' needs {size} values, but only {} were given.",
+                        values.len()
+                    )
+                    .as_bytes(),
+                ]
+                .concat(),
+            ));
         }
 
         Ok(TextureData {

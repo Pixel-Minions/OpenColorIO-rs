@@ -163,7 +163,7 @@ pub fn get_float_string<T: ShaderFloat>(v: T, lang: GpuLanguage) -> String {
     } else {
         ""
     });
-    oss.into_string()
+    oss.into_string_lossy()
 }
 
 /// The keyword of a vector of `n` floats.
@@ -656,7 +656,7 @@ impl GpuShaderText {
             oss.precision = <f32 as ShaderFloat>::MAX_DIGITS10;
             oss.put_f32(new_val);
 
-            return Ok(cat([&self.float_decl(name)?, b" = ", oss.str().as_bytes()]));
+            return Ok(cat([&self.float_decl(name)?, b" = ", oss.str()]));
         }
 
         Ok(cat([

@@ -257,12 +257,16 @@ impl MetalShaderClassWrapper {
                 if i > line_buffer.len() {
                     // No `sampler`, and a line shorter than `npos + 7`, i.e. 6: upstream reads
                     // past the line's end (U-10).
-                    return Err(Exception::new(format!(
-                        "The MSL class wrapper found no sampler after texture '{}': the next \
-                         line is '{}'.",
-                        String::from_utf8_lossy(&texture_name),
-                        String::from_utf8_lossy(&line_buffer)
-                    )));
+                    return Err(Exception::new(
+                        [
+                            b"The MSL class wrapper found no sampler after texture '".as_slice(),
+                            &texture_name,
+                            b"': the next line is '",
+                            &line_buffer,
+                            b"'.",
+                        ]
+                        .concat(),
+                    ));
                 }
                 while is_space(at(&line_buffer, i)) {
                     i += 1;
@@ -326,7 +330,7 @@ impl MetalShaderClassWrapper {
             let mut message =
                 b"Struct name must not start with a digit. Invalid className passed in: ".to_vec();
             message.extend_from_slice(&self.class_name);
-            return Err(Exception::new(String::from_utf8_lossy(&c_str(message))));
+            return Err(Exception::new(message));
         }
         Ok(())
     }

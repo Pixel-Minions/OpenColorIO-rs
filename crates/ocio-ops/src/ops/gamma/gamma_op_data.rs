@@ -122,7 +122,7 @@ fn get_parameters_string(params: &Params) -> String {
         oss.put_str(", ");
         oss.put_f64(param);
     }
-    oss.into_string()
+    oss.into_string_lossy()
 }
 
 // The style names (GammaOpData.cpp:52-62). Note that CTF before version 2 was using
@@ -158,7 +158,7 @@ fn validate_params(
             ss.put_f64(p[i]);
             ss.put_str(" is less than lower bound ");
             ss.put_f64(low_bounds[i]);
-            return Err(Exception::new(ss.into_string()));
+            return Err(Exception::new(ss.into_bytes()));
         }
         if p[i] > high_bounds[i] {
             let mut ss = OStringStream::new(Crt::NATIVE);
@@ -166,7 +166,7 @@ fn validate_params(
             ss.put_f64(p[i]);
             ss.put_str(" is greater than upper bound ");
             ss.put_f64(high_bounds[i]);
-            return Err(Exception::new(ss.into_string()));
+            return Err(Exception::new(ss.into_bytes()));
         }
     }
     Ok(())

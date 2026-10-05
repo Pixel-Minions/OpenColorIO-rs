@@ -117,3 +117,200 @@ fn lengths_and_counts() {
         }
     }
 }
+
+/// Every string of up to 4 bytes over bytes of each UTF-8 class (ASCII, continuation bytes at
+/// the edges of each lead's range, every kind of lead, bytes that never start a sequence).
+#[cfg(windows)]
+fn utf8_probes() -> Vec<Vec<u8>> {
+    const CLASSES: [u8; 22] = [
+        0x41, 0x00, 0x80, 0x8f, 0x90, 0x9f, 0xa0, 0xbf, 0xc0, 0xc1, 0xc2, 0xdf, 0xe0, 0xe1, 0xed,
+        0xee, 0xef, 0xf0, 0xf1, 0xf4, 0xf5, 0xff,
+    ];
+    let mut out: Vec<Vec<u8>> = vec![Vec::new()];
+    let mut level: Vec<Vec<u8>> = vec![Vec::new()];
+    for _ in 0..4 {
+        level = level
+            .iter()
+            .flat_map(|p| {
+                CLASSES.iter().map(move |&c| {
+                    let mut v = p.clone();
+                    v.push(c);
+                    v
+                })
+            })
+            .collect();
+        out.extend(level.iter().cloned());
+    }
+    out
+}
+
+/// `Utf8ToUtf16`'s lossy conversion against `MultiByteToWideChar(CP_UTF8, 0)`.
+#[cfg(windows)]
+#[test]
+fn utf8_to_utf16_matches_the_system() {
+    use ocio_ops::platform::utf8_to_utf16_lossy;
+    for probe in utf8_probes() {
+        assert_eq!(
+            utf8_to_utf16_lossy(&probe),
+            crt::utf8_to_utf16_system(&probe),
+            "{probe:02x?}"
+        );
+    }
+    let valid = "a\u{e9}\u{3053}\u{1f600}".as_bytes();
+    assert_eq!(utf8_to_utf16_lossy(valid), crt::utf8_to_utf16_system(valid));
+}
+
+/// `Utf16ToUtf8`'s lossy conversion against `WideCharToMultiByte(CP_UTF8, 0)`: every string
+/// of up to 4 units over ASCII, NUL, the surrogates' edges and others.
+#[cfg(windows)]
+#[test]
+fn utf16_to_utf8_matches_the_system() {
+    use ocio_ops::platform::utf16_to_utf8_lossy;
+    const UNITS: [u16; 9] = [
+        0x41, 0, 0xd800, 0xdbff, 0xdc00, 0xdfff, 0xe000, 0xfffd, 0x3053,
+    ];
+    let mut level: Vec<Vec<u16>> = vec![Vec::new()];
+    for _ in 0..4 {
+        level = level
+            .iter()
+            .flat_map(|p| {
+                UNITS.iter().map(move |&c| {
+                    let mut v = p.clone();
+                    v.push(c);
+                    v
+                })
+            })
+            .collect();
+        for probe in &level {
+            assert_eq!(
+                utf16_to_utf8_lossy(probe),
+                crt::utf16_to_utf8_system(probe),
+                "{probe:04x?}"
+            );
+        }
+    }
+}
+
+/// `CreateFileContentHash` against `_wstat` (Windows) or `stat` (Linux): which paths it finds,
+/// and their device (and inode on Linux). Absolute and relative paths, both separators,
+/// directories with and without a trailing separator, wildcards, missing files, NUL; on Windows
+/// also verbatim (`\\?\`) and device (`\\.\`) paths, UNC paths, drive letters with and without a
+/// path, and device names (`nul`, `con`, `aux`, `conin$`, `nul:`).
+#[test]
+fn file_content_hash_matches_the_system() {
+    use ocio_ops::platform::create_file_content_hash;
+    let dir = std::env::temp_dir().join(format!("ocio_rs_hash_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("a.spi1d");
+    std::fs::write(&file, b"x").unwrap();
+    let dir_text = dir.to_str().unwrap().to_string();
+    let file_text = file.to_str().unwrap().to_string();
+    let mut probes: Vec<String> = vec![
+        file_text.clone(),
+        file_text.replace('\\', "/"),
+        format!("{file_text}/"),
+        format!("{file_text}\\"),
+        dir_text.clone(),
+        format!("{dir_text}/"),
+        format!("{dir_text}\\"),
+        format!("{dir_text}/*.spi1d"),
+        format!("{dir_text}/a.spi1?"),
+        format!("{dir_text}/missing"),
+        format!("{dir_text}/./a.spi1d"),
+        format!(
+            "{dir_text}/../{}/a.spi1d",
+            dir.file_name().unwrap().to_str().unwrap()
+        ),
+        "Cargo.toml".to_string(),
+        "src".to_string(),
+        "/dev/null".to_string(),
+        String::new(),
+        ".".to_string(),
+    ];
+    if cfg!(windows) {
+        probes.push(file_text.to_lowercase());
+        probes.push(file_text.to_uppercase());
+        probes.push(format!(r"\\?\{file_text}"));
+        probes.push(format!(r"\\.\{file_text}"));
+        probes.push(format!(r"\\?\{dir_text}"));
+        for name in [
+            r"\\localhost\C$\Windows\win.ini",
+            "//localhost/C$/Windows/win.ini",
+            r"\\127.0.0.1\C$\Windows\win.ini",
+            r"\\?\UNC\localhost\C$\Windows\win.ini",
+            r"\\localhost\C$\missing",
+            "C:",
+            "D:",
+            "c:",
+            r"C:\",
+            "C:.",
+            "C:Cargo.toml",
+            "1:x",
+            "nul",
+            "NUL",
+            "con",
+            "aux",
+            "conin$",
+            "nul:",
+            "lpt1",
+            r"C:\Windows\nul",
+        ] {
+            probes.push(name.to_string());
+        }
+    }
+    for probe in &probes {
+        let hash = create_file_content_hash(probe.as_bytes());
+        #[cfg(windows)]
+        {
+            let wide: Vec<u16> = probe.encode_utf16().collect();
+            let expected = crt::wstat_dev(&wide)
+                .map(|dev| format!("{dev}:{}", ocio_testkit_fnv(probe.as_bytes())).into_bytes());
+            assert_eq!(Some(hash).filter(|h| !h.is_empty()), expected, "{probe:?}");
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let expected = crt::stat_dev_ino(probe.as_bytes())
+                .map(|(dev, ino)| format!("{dev}:{ino}").into_bytes());
+            assert_eq!(Some(hash).filter(|h| !h.is_empty()), expected, "{probe:?}");
+        }
+    }
+    // A NUL ends the name, as in the C string.
+    let with_nul = [file_text.as_bytes(), b"\0ignored"].concat();
+    assert_eq!(
+        create_file_content_hash(&with_nul),
+        create_file_content_hash(file_text.as_bytes())
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// MSVC's `std::hash<std::string>` (FNV-1a), as the Windows wheel hashes the file name: the
+/// constants of `<type_traits>` (`_FNV_offset_basis`, `_FNV_prime`).
+#[cfg(windows)]
+fn ocio_testkit_fnv(bytes: &[u8]) -> u64 {
+    bytes.iter().fold(14_695_981_039_346_656_037u64, |h, &b| {
+        (h ^ u64::from(b)).wrapping_mul(1_099_511_628_211)
+    })
+}
+
+/// Windows' folding of environment variable names, for every code unit, against
+/// `RtlUpcaseUnicodeChar` (docs/improvements.md, I-117: the table is the system's).
+#[cfg(windows)]
+#[test]
+fn windows_upcase_matches_the_system() {
+    for c in 0..=u16::MAX {
+        assert_eq!(
+            ocio_ops::platform::windows_upcase(c),
+            crt::rtl_upcase_unicode_char(c),
+            "{c:04x}"
+        );
+    }
+}
+
+/// The process environment's entries, as OCIO's LoadEnvironment reads them, against the C
+/// runtime's own list (`_wenviron`, which leaves out the system's `=C:` entries, or
+/// `environ`).
+#[test]
+fn process_entries_match_the_c_runtime() {
+    use ocio_ops::platform::{EnvProvider, ProcessEnv};
+    assert_eq!(ProcessEnv.entries(), crt::c_runtime_environment());
+}

@@ -80,10 +80,13 @@ impl LogAffineTransform {
     pub fn validate(&self) -> Result<()> {
         let checked = validate_direction(self.direction()).and_then(|()| self.data.validate());
         checked.map_err(|ex| {
-            Exception::new(format!(
-                "LogAffineTransform validation failed: {}",
-                ex.message()
-            ))
+            Exception::new(
+                [
+                    b"LogAffineTransform validation failed: ".as_slice(),
+                    ex.what(),
+                ]
+                .concat(),
+            )
         })
     }
 
@@ -215,7 +218,7 @@ impl fmt::Display for LogAffineTransform {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut os = OStringStream::new(Crt::NATIVE);
         self.write_text(&mut os);
-        f.write_str(os.str())
+        f.write_str(&os.to_string_lossy())
     }
 }
 

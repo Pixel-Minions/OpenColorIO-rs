@@ -953,6 +953,135 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **A fix:** the repr its values give, like the other grading classes'.
 - **Status:** to be matched in Phase 6 (D13).
 
+## Platform, environment and paths
+
+### I-110. `splitext` compares the rest of the name with "."
+
+- **Upstream:** pystring's `splitext_generic`, which OCIO calls through `os::path::splitext` to
+  find a file's extension, skips a name's leading dots by comparing `slice(p, filenameIndex)`,
+  the rest of the path, with "." (pystring.cpp:1597-1608 @ v1.1.4), where Python's
+  `ntpath._splitext` compares the one character `p[filenameIndex]`. So a name that starts with
+  dots and has another dot later (`..b`, `.a.` after a separator) is split at its last dot, where
+  Python leaves it whole.
+- **Who notices:** file names made of leading dots and an extension, such as `..cube`, whose
+  extension Python's `splitext` wouldn't find.
+- **A fix:** compare the one byte, as Python does.
+- **Status:** matched in p3-context (3.5b, `crates/ocio-ops/src/utils/pystring.rs`).
+
+### I-111. A context's copy forgets its environment mode
+
+- **Upstream:** `Context::createEditableCopy` copies the context through `Context::Impl::
+  operator=` (`Context.cpp:60-80, 156-161` @ v2.5.2), which copies the search paths, working
+  directory, variables, caches, cache ID and I/O proxy, but not `m_envmode`: the copy has the
+  default, `ENV_ENVIRONMENT_LOAD_PREDEFINED`. The copied cache ID was computed with the original
+  mode, so the copy's `getCacheID` describes a mode it doesn't have until a setter clears it.
+- **Who notices:** code that copies a context in `ENV_ENVIRONMENT_LOAD_ALL` mode (and a config's
+  copy, which copies its context) and then calls `loadEnvironment`: the copy updates its own
+  variables instead of loading all of them.
+- **A fix:** copy `m_envmode` in `operator=`.
+- **Status:** matched in p3-context (3.5e, `crates/ocio/src/context.rs`, `Clone for Context`);
+  checked against the wheel (`crates/ocio/tests/context_oracle.rs`, "environment").
+
+### I-112. Temporary file names
+
+- **Upstream:** `Platform::CreateTempFilename` names a file `/tmp/ocio_<n>` on Linux, `<n>` drawn
+  with `std::uniform_int_distribution<int>` from a default-seeded `std::mt19937`, and takes
+  `tmpnam_s`'s name on Windows (`<temp dir>\u<id>.<k>`) (`Platform.cpp:210-259` @ v2.5.2). Only
+  upstream's tests call it.
+- **Who notices:** nobody through the API: no library code calls it.
+- **A fix:** none needed. The port keeps the forms (`/tmp/ocio_<n>`, a name in the temporary
+  directory) with its own numbers: the distribution's algorithm is the C++ library's, which the
+  standard leaves open, and `tmpnam_s`'s names come from the UCRT.
+- **Status:** not matched, by design (p3-context 3.5a, `crates/ocio-ops/src/platform.rs`).
+
+### I-113. Windows converts names, values and paths through UTF-16
+
+- **Upstream:** on Windows, the wheel converts environment variable names and values, and file
+  paths, between UTF-8 and UTF-16 with `MultiByteToWideChar` and `WideCharToMultiByte`
+  (`Platform.cpp:48-142, 261-322, 333-357` @ v2.5.2). Bytes that aren't UTF-8 become U+FFFD,
+  with Windows' own rule (a lead byte and a continuation byte outside its range are one
+  replacement), and an unpaired surrogate in the environment becomes U+FFFD: a variable set
+  with such bytes reads back with U+FFFD, and two names that differ only there are one
+  variable. Linux passes the bytes. The C runtimes set variables by their own rules:
+  `_wputenv_s` (Windows) builds `name=value` and splits it at its first `=`, so
+  `SetEnvVariable("A=B", "C")` sets `A` to `B=C` and `UnsetEnvVariable("Q=R")` sets `Q` to `R=`,
+  refuses a name that starts with `=`, and removes a variable set to ""; Linux's `setenv`
+  refuses a name holding `=` and keeps an empty value. Windows compares names without case
+  twice over: the system (`GetEnvironmentVariableW`, which `GetEnvVariable` reads) folds every
+  code unit by its own table (I-117), the C runtime's list (`_wenviron`, which a context's
+  `loadEnvironment` reads) folds ASCII only, so after setting a lowercase "e acute" name and
+  then its uppercase, the first reads the second's value and the context loads both. Linux
+  compares exactly.
+- **Who notices:** configs and environments with names or paths that aren't UTF-8, names that
+  differ only in case or hold `=`, used on both platforms.
+- **A fix:** none: these are the platforms' rules.
+- **Status:** matched in p3-context (3.5a, and its fix chunk after the verifier's review): the
+  conversions checked against the system for every string of up to 4 bytes or units over each
+  class, the C runtime's list against `_wenviron`/`environ`
+  (`crates/ocio-ops/tests/platform_crt.rs`), and the environment functions against the wheel
+  (`crates/ocio/tests/env_oracle.rs`).
+
+### I-114. Windows device names as files
+
+- **Upstream:** `CreateFileContentHash` asks `_wstat` whether a file exists. On Windows it finds
+  some device names, in any directory that exists: `nul`, `aux`, `com1`, `conin$`, `nul:` (with
+  `st_dev` -1), but not `con` or `lpt1` (as probed on Windows 11). `_wstat` also opens verbatim
+  (`\\?\`) and device (`\\.\`) paths and UNC paths (`st_dev` then the current drive's), and
+  refuses a drive letter alone (`C:`).
+- **Who notices:** a config whose file references name such devices; `resolveFileLocation` then
+  finds them.
+- **A fix:** treat device names as missing on Windows.
+- **Status:** matched (p3-context 3.5a, corrected in a fix chunk after the verifier's review):
+  the port opens the path as `_wstat` does, and takes a file whose information can't be read for
+  a device; checked against `_wstat` in `crates/ocio-ops/tests/platform_crt.rs` and against the
+  wheel in `crates/ocio/tests/context_oracle.rs`.
+
+### I-115. pystring's indices are `int`
+
+- **Upstream:** pystring computes positions and lengths as `int` (`(int) str.size()` and the
+  `ADJUST_INDICES` arithmetic, pystring.cpp @ v1.1.4), so for a path of 2^31 bytes or more the
+  length wraps.
+- **Who notices:** nobody in practice: OCIO passes it file paths and names.
+- **A fix:** none needed. The port computes with the true lengths (`i64`).
+- **Status:** not matched (p3-context 3.5b), for the owner: matching would mean computing every
+  pystring index as a wrapping `int`, whose results then index outside the string (undefined
+  behaviour, which the general rule turns into errors), for inputs no one passes.
+
+### I-116. Windows reads the working directory in the ANSI code page
+
+- **Upstream:** `GetCwd` (`PathUtils.cpp:131-150` @ v2.5.2) calls `_getcwd` on Windows, which
+  gives the path in the process's ANSI code page (cp1252 on most Western systems), not UTF-8,
+  and with `?` for characters the code page lacks. `AbsPath` joins a relative file name to it;
+  OCIO's other paths are UTF-8 and go to the system through `Utf8ToUtf16`. Linux gives the
+  bytes.
+- **Who notices:** a config loaded by a relative path (`Config::CreateFromFile("x.ocio")`) from
+  a working directory whose name isn't ASCII, on Windows: the config's working directory is the
+  ANSI path, which `Utf8ToUtf16` then misreads.
+- **A fix:** `_wgetcwd` and `Utf16ToUtf8`.
+- **Status:** not matched (p3-context 3.5f, `crates/ocio/src/path_utils.rs`, `get_cwd`): the
+  port gives the path as UTF-8, as the rest of OCIO's paths are; the ANSI conversion needs a
+  system call the port's crates can't make (`unsafe`). ASCII paths are the same on both. For
+  the owner.
+
+### I-117. Windows folds environment variable names by the system's table
+
+- **Upstream:** the Windows wheel reads a variable with `GetEnvironmentVariableW`, which finds
+  its name ignoring case as `RtlUpcaseUnicodeChar` folds each UTF-16 code unit, from the NLS
+  data of the Windows it runs on (`Platform.cpp:48-97` @ v2.5.2). That table is Unicode's
+  simple uppercase mapping of an older Unicode version: on the reference machine (Windows 11,
+  build 26300) it differs from Unicode's current mapping at 252 code units (225 it leaves
+  alone, such as the dotless i, the micro sign and the long s, whose mapping Unicode added
+  later; 27 Greek letters with iota subscript, which it maps to their titlecase form). Another
+  Windows version can have another table, so which names are the same variable can change with
+  a Windows update.
+- **Who notices:** names that differ only in the case of such characters.
+- **A fix:** none: it is the system's rule.
+- **Status:** matched on the reference machine (p3-context, the fix chunk after the verifier's
+  review): the port folds with Rust's simple uppercase mapping and the reference machine's
+  252 exceptions (`crates/ocio-ops/src/platform_nls_upcase.rs`); `tests/platform_crt.rs`
+  checks every code unit against `RtlUpcaseUnicodeChar`, so a machine with another table fails
+  there. The alternative, calling the system (FFI, `unsafe`), is the owner's decision.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
@@ -1314,3 +1443,32 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   error, and that the comparisons upstream makes without reading (another style, or an inverse
   that validation refuses) give upstream's answers. The renderer in 2.3b:
   `fixed_function_op_cpu_tests.rs` checks its error.
+
+### U-45. The working directory when `_getcwd` fails
+
+- **Upstream:** `GetCwd` (`PathUtils.cpp:131-150` @ v2.5.2) on Windows calls
+  `_getcwd(path, MAXPATHLEN)` into an uninitialized `char path[4096]` and returns `path` without
+  checking the result. When the call fails (a working directory of 4096 bytes or more, or one
+  the system can't give), the buffer is read uninitialized, up to whatever NUL follows.
+- **Who notices:** `AbsPath` callers (the config loader, for a relative path) on Windows with a
+  very long or removed working directory.
+- **Decided** (the owner's general rule, with a clear message): the port returns the error "The
+  current working directory could not be read (_getcwd failed)." from `abs_path`. Linux needs
+  nothing: its buffer is zeroed and grown until the path fits, and another failure gives "".
+- **Status:** p3-context 3.5f (`crates/ocio/src/path_utils.rs`, `get_cwd`).
+
+### U-46. An environment variable of 32,767 UTF-16 code units
+
+- **Upstream:** on Windows, `Setenv` and `Unsetenv` call `_wputenv_s` (`Platform.cpp:99-142` @
+  v2.5.2), whose parameter validation refuses a name or a value of `_MAX_ENV` (32,767) UTF-16
+  code units or more by calling the invalid parameter handler, which ends the wheel's process
+  (status 0xC0000409). 32,766 works. Linux's `setenv` takes any length.
+- **Who notices:** a caller of `SetEnvVariable` or `UnsetEnvVariable` with such a name or value,
+  on Windows.
+- **Decided** (the owner's general rule, with a clear message): `set_env_variable`,
+  `unset_env_variable` (and `platform::setenv`, `unsetenv`) return a `Result`, the error
+  "Environment variable names and values must be shorter than 32767 UTF-16 code units
+  (_MAX_ENV)." on Windows, and change nothing.
+- **Status:** p3-context, the fix chunk after the verifier's review (`crates/ocio-ops/src/
+  platform.rs`, `put`); checked against the wheel, whose process ends, in
+  `crates/ocio/tests/env_oracle.rs`.

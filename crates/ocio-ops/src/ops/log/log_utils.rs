@@ -80,15 +80,14 @@ pub const CAMERA_LOG_TO_LIN_STR: &str = "cameraLogToLin";
 /// What `std::stringstream ss(initial); ss << written;` holds: the stream starts writing at the
 /// beginning of its initial text, so `written` overwrites it, and the rest of it stays after
 /// (docs/improvements.md, I-52).
-fn overwritten(initial: &str, written: &str) -> String {
+fn overwritten(initial: &str, written: &str) -> Vec<u8> {
     let mut bytes = initial.as_bytes().to_vec();
     let written = written.as_bytes();
     let n = written.len().min(bytes.len());
     bytes[..n].copy_from_slice(&written[..n]);
     bytes.extend_from_slice(&written[n..]);
-    // Upstream's message is bytes; a Rust message is UTF-8, so a multi-byte character cut in
-    // two shows as a replacement character.
-    String::from_utf8_lossy(&bytes).into_owned()
+    // A multi-byte character cut in two stays cut: the message is bytes, as upstream's.
+    bytes
 }
 
 /// The style a name gives, ignoring ASCII case: "Unknown Log style: ..." for any other, as
@@ -299,7 +298,7 @@ fn validate_legacy_params(ctf_params: &[f64]) -> Result<()> {
                 oss.put_f64(*value);
             }
         }
-        Exception::new(oss.into_string())
+        Exception::new(oss.into_bytes())
     };
 
     // gamma > 0.01.
