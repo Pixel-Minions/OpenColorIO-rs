@@ -47,3 +47,13 @@ commit f7320141120f720aecc4c32be25586e7da9eb978), so that the citations can be c
     LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
     THE SOFTWARE.
+
+The Microsoft C++ Standard Library (https://github.com/microsoft/STL), the C++ library of
+the Windows wheel: its num_get gathering of floating-point fields (_Parse_fp_with_locale,
+stl/inc/xlocnum, as shipped with MSVC 14.44) is translated in
+crates/ocio-ops/src/utils/num_get.rs:
+
+    Copyright (c) Microsoft Corporation.
+    SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+    (https://www.apache.org/licenses/LICENSE-2.0, with the LLVM exception:
+    https://llvm.org/LICENSE.txt)

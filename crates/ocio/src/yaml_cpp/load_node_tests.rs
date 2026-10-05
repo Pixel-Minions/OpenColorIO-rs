@@ -7,7 +7,6 @@
 //! `ForceInsertIntoMap` mutate nodes; `CloneScalar`, `CloneSeq`, `CloneMap`, `CloneAlias`
 //! need `Clone`; `Binary` and `BinaryWithWhitespaces` need `Binary`; `EmitEmptyNode` and
 //! `SpecialFlow` emit nodes), and `ForEach` and `ForEachMap`, which need Boost.
-//! `FallbackValues` and `NumericConversion` read floating-point numbers and come with them.
 
 use super::load;
 use crate::yaml_cpp::convert::CChar;
@@ -245,5 +244,79 @@ fn block_crnl_encoded() -> Result<()> {
         Bytes::from(node.get(b"blockText")?.as_::<Vec<u8>>()?)
     );
     assert_eq!(1, node.get(b"followup")?.as_::<i32>()?);
+    Ok(())
+}
+
+/// `EXPECT_THROW(statement, TypedBadConversion<T>)`.
+#[track_caller]
+fn expect_bad_conversion<T: std::fmt::Debug>(result: Result<T>) {
+    match result {
+        Err(e) => assert_eq!(e.kind, ExceptionType::BadConversion, "{e:?}"),
+        Ok(v) => panic!("no exception: {v:?}"),
+    }
+}
+
+/// Port of yaml-cpp 0.8.0 `TEST(LoadNodeTest, FallbackValues)`.
+#[test]
+fn fallback_values() -> Result<()> {
+    let node = load(b"foo: bar\nx: 2")?;
+    assert_eq!(
+        Bytes::from(b"bar"),
+        Bytes::from(node.get(b"foo")?.as_::<Vec<u8>>()?)
+    );
+    assert_eq!(
+        Bytes::from(b"bar"),
+        Bytes::from(node.get(b"foo")?.as_or::<Vec<u8>>(b"hello".to_vec())?)
+    );
+    assert_eq!(
+        Bytes::from(b"hello"),
+        Bytes::from(node.get(b"baz")?.as_or::<Vec<u8>>(b"hello".to_vec())?)
+    );
+    assert_eq!(2, node.get(b"x")?.as_::<i32>()?);
+    assert_eq!(2, node.get(b"x")?.as_or::<i32>(5)?);
+    assert_eq!(5, node.get(b"y")?.as_or::<i32>(5)?);
+    Ok(())
+}
+
+/// Port of yaml-cpp 0.8.0 `TEST(LoadNodeTest, NumericConversion)`. The floats compare bit for
+/// bit; `unsigned long` is `c_ulong` (32 bits on Windows, 64 on Linux).
+#[test]
+fn numeric_conversion() -> Result<()> {
+    assert_eq!(1.5f32.to_bits(), load(b"1.5")?.as_::<f32>()?.to_bits());
+    assert_eq!(1.5f64.to_bits(), load(b"1.5")?.as_::<f64>()?.to_bits());
+    expect_bad_conversion(load(b"1.5")?.as_::<i32>());
+    assert_eq!(1, load(b"1")?.as_::<i32>()?);
+    assert_eq!(1.0f32.to_bits(), load(b"1")?.as_::<f32>()?.to_bits());
+    let nan = load(b".nan")?.as_::<f32>()?;
+    assert!(nan != load(b".nan")?.as_::<f32>()?);
+    assert_eq!(
+        f32::INFINITY.to_bits(),
+        load(b".inf")?.as_::<f32>()?.to_bits()
+    );
+    assert_eq!(
+        (-f32::INFINITY).to_bits(),
+        load(b"-.inf")?.as_::<f32>()?.to_bits()
+    );
+    assert_eq!(21, load(b"0x15")?.as_::<i32>()?);
+    assert_eq!(13, load(b"015")?.as_::<i32>()?);
+    assert_eq!(-128, load(b"-128")?.as_::<i8>()?);
+    assert_eq!(127, load(b"127")?.as_::<i8>()?);
+    expect_bad_conversion(load(b"128")?.as_::<i8>());
+    assert_eq!(255, load(b"255")?.as_::<u8>()?);
+    expect_bad_conversion(load(b"256")?.as_::<u8>());
+    // test as<char>/as<uint8_t> with 'a',"ab",'1',"127"
+    assert_eq!(b'a', load(b"a")?.as_::<CChar>()?.0);
+    expect_bad_conversion(load(b"ab")?.as_::<CChar>());
+    assert_eq!(b'1', load(b"1")?.as_::<CChar>()?.0);
+    expect_bad_conversion(load(b"127")?.as_::<CChar>());
+    expect_bad_conversion(load(b"a")?.as_::<u8>());
+    expect_bad_conversion(load(b"ab")?.as_::<u8>());
+    assert_eq!(1, load(b"1")?.as_::<u8>()?);
+    // Throw exception: convert a negative number to an unsigned number.
+    expect_bad_conversion(load(b"-128")?.as_::<u32>());
+    expect_bad_conversion(load(b"-128")?.as_::<u16>());
+    expect_bad_conversion(load(b"-128")?.as_::<std::ffi::c_ulong>());
+    expect_bad_conversion(load(b"-128")?.as_::<u64>());
+    expect_bad_conversion(load(b"-128")?.as_::<u8>());
     Ok(())
 }
