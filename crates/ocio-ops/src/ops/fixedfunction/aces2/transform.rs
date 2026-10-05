@@ -14,14 +14,17 @@
 use super::color_lib::{IDENTITY_M33, rgb_to_rgb_f33, rgb_to_xyz_f33, xyz_to_rgb_f33};
 use super::common::{
     CAM_NL_OFFSET, CAM_NL_SCALE, CHROMA_COMPRESS, CHROMA_COMPRESS_FACT, CHROMA_EXPAND,
-    CHROMA_EXPAND_FACT, CHROMA_EXPAND_THR, CUSP_CORNER_COUNT, ChromaCompressParams,
-    DISPLAY_CUSP_TOLERANCE, HUE_LIMIT, J_SCALE, JMhParams, L_A, MAX_SORTED_CORNERS,
-    REACH_CUSP_TOLERANCE, REFERENCE_LUMINANCE, ResolvedSharedCompressionParameters, SMOOTH_CUSPS,
-    SMOOTH_M, SURROUND, SharedCompressionParameters, TOTAL_CORNER_COUNT, Table1D, Table3D,
-    ToneScaleParams, Y_B, cam16, f32_to_u32, from_radians_, table_base, to_radians,
+    CHROMA_EXPAND_FACT, CHROMA_EXPAND_THR, COMPRESSION_THRESHOLD, CUSP_CORNER_COUNT,
+    CUSP_MID_BLEND, ChromaCompressParams, DISPLAY_CUSP_TOLERANCE, FOCUS_DISTANCE,
+    FOCUS_DISTANCE_SCALING, FOCUS_GAIN_BLEND, GAMMA_ACCURACY, GAMMA_MAXIMUM, GAMMA_MINIMUM,
+    GAMMA_SEARCH_STEP, GamutCompressParams, HUE_LIMIT, HueDependantGamutParams, J_SCALE, JMhParams,
+    L_A, MAX_SORTED_CORNERS, REACH_CUSP_TOLERANCE, REFERENCE_LUMINANCE,
+    ResolvedSharedCompressionParameters, SMOOTH_CUSPS, SMOOTH_M, SURROUND,
+    SharedCompressionParameters, TOTAL_CORNER_COUNT, Table1D, Table3D, ToneScaleParams, Y_B, cam16,
+    f32_to_u32, from_radians_, table_base, to_radians,
 };
 use super::matrix_lib::{
-    F3, M33f, f3_from_f, invert_f33, mult_f_f3, mult_f3_f33, mult_f33_f33, scale_f33,
+    F2, F3, M33f, f3_from_f, invert_f33, mult_f_f3, mult_f3_f33, mult_f33_f33, scale_f33,
 };
 use crate::exception::{Exception, Result};
 use crate::math_utils::{lerpf, sse_add, sse_mul, std_max, std_min};
@@ -1073,6 +1076,514 @@ pub fn make_reach_m_table(params: &JMhParams, limit_j_max: f32) -> Table1D {
     gamut_reach_table
 }
 
+/// Whether a component of `rgb` is above `max_rgb_test_val`: outside the top of the gamut.
+///
+/// Port of `outside_hull` (Transform.cpp:912-916 @ v2.5.2).
+#[inline]
+pub fn outside_hull(rgb: &F3, max_rgb_test_val: f32) -> bool {
+    // limit value, once we cross this value, we are outside of the top gamut shell
+    rgb[0] > max_rgb_test_val || rgb[1] > max_rgb_test_val || rgb[2] > max_rgb_test_val
+}
+
+/// The focus gain: `limit_J_max * focus_dist`, raised above the analytical threshold.
+///
+/// Port of `get_focus_gain` (Transform.cpp:918-930 @ v2.5.2).
+#[inline]
+pub fn get_focus_gain(j: f32, analytical_threshold: f32, limit_j_max: f32, focus_dist: f32) -> f32 {
+    let mut gain = sse_mul(limit_j_max, focus_dist);
+    if j > analytical_threshold {
+        // Approximate inverse required above threshold due to the introduction of J in the
+        // calculation
+        let mut gain_adjustment =
+            ((limit_j_max - analytical_threshold) / std_max(0.0001, limit_j_max - j)).log10();
+        gain_adjustment = sse_add(sse_mul(gain_adjustment, gain_adjustment), 1.0);
+        gain = sse_mul(gain, gain_adjustment);
+    }
+    gain
+}
+
+/// The J where the compression line through (J, M) meets the J axis.
+///
+/// Port of `solve_J_intersect` (Transform.cpp:932-953 @ v2.5.2).
+pub fn solve_j_intersect(j: f32, m: f32, focus_j: f32, max_j: f32, slope_gain: f32) -> f32 {
+    let mul = sse_mul;
+    let m_scaled = m / slope_gain;
+    let a = m_scaled / focus_j;
+
+    if j < focus_j {
+        let b = 1.0 - m_scaled;
+        let c = -j;
+        let det = mul(b, b) - mul(mul(4.0, a), c);
+        let root = det.sqrt();
+        mul(-2.0, c) / sse_add(b, root)
+    } else {
+        let b = -sse_add(sse_add(1.0, m_scaled), mul(max_j, a));
+        let c = sse_add(mul(max_j, m_scaled), j);
+        let det = mul(b, b) - mul(mul(4.0, a), c);
+        let root = det.sqrt();
+        mul(-2.0, c) / (b - root)
+    }
+}
+
+/// A smooth minimum about the scaled reference, based upon a cubic polynomial.
+///
+/// Port of `smin_scaled` (Transform.cpp:955-961 @ v2.5.2).
+#[inline]
+pub fn smin_scaled(a: f32, b: f32, scale_reference: f32) -> f32 {
+    let mul = sse_mul;
+    let s_scaled = mul(SMOOTH_CUSPS, scale_reference);
+    let h = std_max(s_scaled - (a - b).abs(), 0.0) / s_scaled;
+    std_min(a, b) - mul(mul(mul(mul(h, h), h), s_scaled), 1.0 / 6.0)
+}
+
+/// The slope of the compression vector at the J axis intersection.
+///
+/// Port of `compute_compression_vector_slope` (Transform.cpp:963-967 @ v2.5.2).
+#[inline]
+pub fn compute_compression_vector_slope(
+    intersect_j: f32,
+    focus_j: f32,
+    limit_jmax: f32,
+    slope_gain: f32,
+) -> f32 {
+    let direction_scaler = if intersect_j < focus_j {
+        intersect_j
+    } else {
+        limit_jmax - intersect_j
+    }; // TODO < vs <=
+    sse_mul(direction_scaler, intersect_j - focus_j) / sse_mul(focus_j, slope_gain)
+}
+
+/// The approximate M where the line `J = slope * M + J_axis_intersect` meets the boundary
+/// `J = J_max * (M / M_max)^(1/inv_gamma)`.
+///
+/// Port of `estimate_line_and_boundary_intersection_M` (Transform.cpp:969-987 @ v2.5.2).
+#[inline]
+pub fn estimate_line_and_boundary_intersection_m(
+    j_axis_intersect: f32,
+    slope: f32,
+    inv_gamma: f32,
+    j_max: f32,
+    m_max: f32,
+    j_intersection_reference: f32,
+) -> f32 {
+    // We calculate a shifted intersection from the original intersection using the inverse
+    // of the exponential and the provided reference
+    let normalised_j = j_axis_intersect / j_intersection_reference;
+    let shifted_intersection = sse_mul(j_intersection_reference, normalised_j.powf(inv_gamma));
+
+    // Now we find the M intersection of two lines
+    // line from origin to J,M Max       l1(x) = J/M * x
+    // line from J Intersect' with slope l2(x) = slope * x + Intersect'
+    sse_mul(shifted_intersection, m_max) / (j_max - sse_mul(slope, m_max))
+}
+
+/// The gamut boundary's M along the compression line: a smooth minimum of the lower and the
+/// (flipped) upper hulls' intersections.
+///
+/// Port of `find_gamut_boundary_intersection` (Transform.cpp:989-1004 @ v2.5.2).
+pub fn find_gamut_boundary_intersection(
+    jm_cusp: &F2,
+    j_max: f32,
+    gamma_top_inv: f32,
+    gamma_bottom_inv: f32,
+    j_intersect_source: f32,
+    slope: f32,
+    j_intersect_cusp: f32,
+) -> f32 {
+    let m_boundary_lower = estimate_line_and_boundary_intersection_m(
+        j_intersect_source,
+        slope,
+        gamma_bottom_inv,
+        jm_cusp[0],
+        jm_cusp[1],
+        j_intersect_cusp,
+    );
+
+    // The upper hull is flipped and thus 'zeroed' at J_max
+    // Also note we negate the slope
+    let f_j_intersect_cusp = j_max - j_intersect_cusp;
+    let f_j_intersect_source = j_max - j_intersect_source;
+    let f_jm_cusp_j = j_max - jm_cusp[0];
+    let m_boundary_upper = estimate_line_and_boundary_intersection_m(
+        f_j_intersect_source,
+        -slope,
+        gamma_top_inv,
+        f_jm_cusp_j,
+        jm_cusp[1],
+        f_j_intersect_cusp,
+    );
+
+    // Smooth minimum between the two calculated values for the M component
+    smin_scaled(m_boundary_lower, m_boundary_upper, jm_cusp[1])
+}
+
+/// The Reinhard curve, or its inverse.
+///
+/// Port of `reinhard_remap<invert>` (Transform.cpp:1006-1017 @ v2.5.2).
+#[inline]
+pub fn reinhard_remap<const INVERT: bool>(scale: f32, nd: f32) -> f32 {
+    if INVERT {
+        // TODO: given remap_M already tests against proportion do we need this asymptote test
+        if nd >= 1.0 {
+            return scale;
+        }
+        return sse_mul(scale, -(nd / (nd - 1.0)));
+    }
+    sse_mul(scale, nd) / sse_add(1.0, nd)
+}
+
+/// M compressed (or expanded, inverted) between the gamut and the reach boundaries, above a
+/// threshold.
+///
+/// Port of `remap_M<invert>` (Transform.cpp:1019-1039 @ v2.5.2).
+#[inline]
+pub fn remap_m<const INVERT: bool>(m: f32, gamut_boundary_m: f32, reach_boundary_m: f32) -> f32 {
+    let boundary_ratio = gamut_boundary_m / reach_boundary_m;
+    let proportion = std_max(boundary_ratio, COMPRESSION_THRESHOLD);
+    let threshold = sse_mul(proportion, gamut_boundary_m);
+
+    if m <= threshold || proportion >= 1.0 {
+        return m;
+    }
+
+    // Translate to place threshold at zero
+    let m_offset = m - threshold;
+    let gamut_offset = gamut_boundary_m - threshold;
+    let reach_offset = reach_boundary_m - threshold;
+
+    let scale = reach_offset / ((reach_offset / gamut_offset) - 1.0);
+    let nd = m_offset / scale;
+
+    // shift back to absolute
+    sse_add(threshold, reinhard_remap::<INVERT>(scale, nd))
+}
+
+/// The gamut compression of a JMh along its compression line, with `Jx` the J that sets the
+/// focus gain.
+///
+/// Port of `compressGamut<invert>` (Transform.cpp:1041-1070 @ v2.5.2).
+pub fn compress_gamut<const INVERT: bool>(
+    jmh: &F3,
+    jx: f32,
+    sr: &ResolvedSharedCompressionParameters,
+    p: &GamutCompressParams,
+    hdp: &HueDependantGamutParams,
+) -> F3 {
+    let j = jmh[0];
+    let m = jmh[1];
+    let h = jmh[2];
+
+    let slope_gain = get_focus_gain(jx, hdp.analytical_threshold, sr.limit_j_max, p.focus_dist);
+    let j_intersect_source = solve_j_intersect(j, m, hdp.focus_j, sr.limit_j_max, slope_gain);
+    let gamut_slope = compute_compression_vector_slope(
+        j_intersect_source,
+        hdp.focus_j,
+        sr.limit_j_max,
+        slope_gain,
+    );
+
+    let j_intersect_cusp = solve_j_intersect(
+        hdp.jm_cusp[0],
+        hdp.jm_cusp[1],
+        hdp.focus_j,
+        sr.limit_j_max,
+        slope_gain,
+    );
+    let gamut_boundary_m = find_gamut_boundary_intersection(
+        &hdp.jm_cusp,
+        sr.limit_j_max,
+        hdp.gamma_top_inv,
+        hdp.gamma_bottom_inv,
+        j_intersect_source,
+        gamut_slope,
+        j_intersect_cusp,
+    );
+
+    if gamut_boundary_m <= 0.0 {
+        // TODO: when/why does this happen?
+        return [j, 0.0, h];
+    }
+
+    let reach_boundary_m = estimate_line_and_boundary_intersection_m(
+        j_intersect_source,
+        gamut_slope,
+        sr.model_gamma_inv,
+        sr.limit_j_max,
+        sr.reach_max_m,
+        sr.limit_j_max,
+    );
+
+    let remapped_m = remap_m::<INVERT>(m, gamut_boundary_m, reach_boundary_m);
+
+    [
+        sse_add(j_intersect_source, sse_mul(remapped_m, gamut_slope)),
+        remapped_m,
+        h,
+    ]
+}
+
+/// The focus J: between the cusp's J and `mid_J`.
+///
+/// Port of `compute_focusJ` (Transform.cpp:1072-1075 @ v2.5.2).
+#[inline]
+pub fn compute_focus_j(cusp_j: f32, mid_j: f32, limit_j_max: f32) -> f32 {
+    lerpf(
+        cusp_j,
+        mid_j,
+        std_min(1.0, CUSP_MID_BLEND - (cusp_j / limit_j_max)),
+    )
+}
+
+/// The gamut compression's parameters at `hue`, from the hue and cusp tables.
+///
+/// Port of `init_HueDependantGamutParams` (Transform.cpp:1077-1091 @ v2.5.2).
+pub fn init_hue_dependant_gamut_params(
+    hue: f32,
+    sr: &ResolvedSharedCompressionParameters,
+    p: &GamutCompressParams,
+) -> HueDependantGamutParams {
+    let i_hi = lookup_hue_interval(hue, &p.hue_table, &p.hue_linearity_search_range);
+    let t = interpolation_weight(
+        hue,
+        p.hue_table[i_hi as usize - 1],
+        p.hue_table[i_hi as usize],
+    );
+    let cusp = cusp_from_table(i_hi, t, &p.gamut_cusp_table);
+
+    let jm_cusp = [cusp[0], cusp[1]];
+    HueDependantGamutParams {
+        gamma_bottom_inv: p.lower_hull_gamma_inv,
+        jm_cusp,
+        gamma_top_inv: cusp[2],
+        focus_j: compute_focus_j(jm_cusp[0], p.mid_j, sr.limit_j_max),
+        analytical_threshold: lerpf(jm_cusp[0], sr.limit_j_max, FOCUS_GAIN_BLEND),
+    }
+}
+
+/// The forward gamut compression of a JMh.
+///
+/// Port of `gamut_compress_fwd` (Transform.cpp:1093-1111 @ v2.5.2).
+pub fn gamut_compress_fwd(
+    jmh: &F3,
+    sr: &ResolvedSharedCompressionParameters,
+    p: &GamutCompressParams,
+) -> F3 {
+    let j = jmh[0];
+    let m = jmh[1];
+    let h = jmh[2];
+
+    if j <= 0.0 {
+        // Limit to +ve J values // TODO test this is needed
+        return [0.0, 0.0, h];
+    }
+    if m <= 0.0 || j > sr.limit_j_max {
+        // We compress M only so avoid mapping zero
+        // Above the expected maximum we explicitly map to 0 M
+        return [j, 0.0, h];
+    }
+    let hdp = init_hue_dependant_gamut_params(h, sr, p);
+
+    compress_gamut::<false>(jmh, jmh[0], sr, p, &hdp)
+}
+
+/// The inverse gamut compression of a JMh.
+///
+/// Port of `gamut_compress_inv` (Transform.cpp:1113-1137 @ v2.5.2).
+pub fn gamut_compress_inv(
+    jmh: &F3,
+    sr: &ResolvedSharedCompressionParameters,
+    p: &GamutCompressParams,
+) -> F3 {
+    let j = jmh[0];
+    let m = jmh[1];
+    let h = jmh[2];
+
+    if j <= 0.0 {
+        // Limit to +ve J values // TODO test this is needed
+        return [0.0, 0.0, h];
+    }
+    if m <= 0.0 || j > sr.limit_j_max {
+        // We compress M only so avoid mapping zero
+        // Above the expected maximum we explicitly map to 0 M
+        return [j, 0.0, h];
+    }
+    let hdp = init_hue_dependant_gamut_params(h, sr, p);
+
+    let mut jx = j;
+    if jx > hdp.analytical_threshold {
+        // Approximation above threshold
+        jx = compress_gamut::<true>(jmh, jx, sr, p, &hdp)[0];
+    }
+    compress_gamut::<true>(jmh, jx, sr, p, &hdp)
+}
+
+/// `gamma_test_count`.
+const GAMMA_TEST_COUNT: usize = 5;
+
+/// A test point of the upper hull's gamma fit.
+///
+/// Port of `testData` (Transform.cpp:1139-1145 @ v2.5.2).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct TestData {
+    /// `testJMh`.
+    pub test_jmh: F3,
+    /// `J_intersect_source`.
+    pub j_intersect_source: f32,
+    /// `slope`.
+    pub slope: f32,
+    /// `J_intersect_cusp`.
+    pub j_intersect_cusp: f32,
+}
+
+/// The gamma fit's test points between the cusp and `limit_J_max`.
+///
+/// Port of `generate_gamma_test_data` (Transform.cpp:1147-1169 @ v2.5.2).
+pub fn generate_gamma_test_data(
+    jm_cusp: &F2,
+    hue: f32,
+    limit_j_max: f32,
+    mid_j: f32,
+    focus_dist: f32,
+) -> [TestData; GAMMA_TEST_COUNT] {
+    const TEST_POSITIONS: [f32; GAMMA_TEST_COUNT] = [0.01, 0.1, 0.5, 0.8, 0.99];
+    let analytical_threshold = lerpf(jm_cusp[0], limit_j_max, FOCUS_GAIN_BLEND);
+    let focus_j = compute_focus_j(jm_cusp[0], mid_j, limit_j_max);
+
+    TEST_POSITIONS.map(|position| {
+        let test_j = lerpf(jm_cusp[0], limit_j_max, position);
+        let slope_gain = get_focus_gain(test_j, analytical_threshold, limit_j_max, focus_dist);
+        let j_intersect_source =
+            solve_j_intersect(test_j, jm_cusp[1], focus_j, limit_j_max, slope_gain);
+        TestData {
+            test_jmh: [test_j, jm_cusp[1], hue],
+            j_intersect_source,
+            slope: compute_compression_vector_slope(
+                j_intersect_source,
+                focus_j,
+                limit_j_max,
+                slope_gain,
+            ),
+            j_intersect_cusp: solve_j_intersect(
+                jm_cusp[0],
+                jm_cusp[1],
+                focus_j,
+                limit_j_max,
+                slope_gain,
+            ),
+        }
+    })
+}
+
+/// Whether every test point's boundary estimate with the upper hull's `topGamma_inv` falls
+/// outside the limiting gamut's top.
+///
+/// Port of `evaluate_gamma_fit` (Transform.cpp:1171-1197 @ v2.5.2).
+pub fn evaluate_gamma_fit(
+    jm_cusp: &F2,
+    data: &[TestData; GAMMA_TEST_COUNT],
+    top_gamma_inv: f32,
+    peak_luminance: f32,
+    limit_j_max: f32,
+    lower_hull_gamma_inv: f32,
+    limit_jmh_params: &JMhParams,
+) -> bool {
+    let luminance_limit = peak_luminance / REFERENCE_LUMINANCE;
+    for test_data in data {
+        let approx_limit_m = find_gamut_boundary_intersection(
+            jm_cusp,
+            limit_j_max,
+            top_gamma_inv,
+            lower_hull_gamma_inv,
+            test_data.j_intersect_source,
+            test_data.slope,
+            test_data.j_intersect_cusp,
+        );
+        let approx_limit_j = sse_add(
+            test_data.j_intersect_source,
+            sse_mul(test_data.slope, approx_limit_m),
+        );
+
+        let approximate_jmh = [approx_limit_j, approx_limit_m, test_data.test_jmh[2]];
+        let new_limit_rgb = jmh_to_rgb(&approximate_jmh, limit_jmh_params);
+
+        if !outside_hull(&new_limit_rgb, luminance_limit) {
+            return false;
+        }
+    }
+
+    true
+}
+
+/// The upper hull's inverse gamma at each hue of the cusp table, into its third column: the
+/// smallest gamma (by stepping then bisecting) whose fit puts every test point outside the
+/// limiting gamut.
+///
+/// Port of `make_upper_hull_gamma` (Transform.cpp:1199-1263 @ v2.5.2).
+#[allow(clippy::too_many_arguments)]
+pub fn make_upper_hull_gamma(
+    hue_table: &Table1D,
+    gamut_cusp_table: &mut Table3D,
+    peak_luminance: f32,
+    limit_j_max: f32,
+    mid_j: f32,
+    focus_dist: f32,
+    lower_hull_gamma_inv: f32,
+    limit_jmh_params: &JMhParams,
+) {
+    for i in table_base::FIRST_NOMINAL_INDEX..table_base::UPPER_WRAP_INDEX {
+        let hue = hue_table[i];
+        let jm_cusp = [gamut_cusp_table[i][0], gamut_cusp_table[i][1]];
+
+        let data = generate_gamma_test_data(&jm_cusp, hue, limit_j_max, mid_j, focus_dist);
+
+        let search_range = GAMMA_SEARCH_STEP;
+        let mut low = GAMMA_MINIMUM;
+        let mut high = low + search_range;
+        let mut outside = false;
+
+        let gamma_fit_predicate = |gamma: f32| {
+            evaluate_gamma_fit(
+                &jm_cusp,
+                &data,
+                1.0 / gamma,
+                peak_luminance,
+                limit_j_max,
+                lower_hull_gamma_inv,
+                limit_jmh_params,
+            )
+        };
+        while !outside && high < GAMMA_MAXIMUM {
+            let gamma_found = gamma_fit_predicate(high);
+            if !gamma_found {
+                low = high;
+                high = sse_add(high, search_range);
+            } else {
+                outside = true;
+            }
+        }
+
+        while (high - low) > GAMMA_ACCURACY {
+            let test_gamma = midpoint(high, low);
+            let gamma_found = gamma_fit_predicate(test_gamma);
+            if gamma_found {
+                high = test_gamma;
+            } else {
+                low = test_gamma;
+            }
+        }
+        gamut_cusp_table[i][2] = 1.0 / high;
+    }
+
+    // Copy last populated entries to empty spot 'wrapping' entries
+    gamut_cusp_table[table_base::LOWER_WRAP_INDEX][2] =
+        gamut_cusp_table[table_base::LAST_NOMINAL_INDEX][2];
+    gamut_cusp_table[table_base::UPPER_WRAP_INDEX][2] =
+        gamut_cusp_table[table_base::FIRST_NOMINAL_INDEX][2];
+    gamut_cusp_table[table_base::UPPER_WRAP_INDEX + 1][2] =
+        gamut_cusp_table[table_base::FIRST_NOMINAL_INDEX + 1][2];
+}
+
 /// The tone scale's parameters for `peakLuminance` nits.
 ///
 /// Port of `init_ToneScaleParams` (Transform.cpp:1265-1315 @ v2.5.2).
@@ -1194,6 +1705,88 @@ pub fn init_chroma_compress_params(
         compr,
         chroma_compress_scale,
     }
+}
+
+/// The range around a hue's uniform-table position that holds its interval in the cusp
+/// table: the largest deviations from a linear distribution, padded.
+///
+/// Port of `determine_hue_linearity_search_range` (Transform.cpp:1358-1382 @ v2.5.2).
+pub fn determine_hue_linearity_search_range(gamut_cusp_table: &Table3D) -> [i32; 2] {
+    // TODO: Padding values are a quick hack to ensure the range encloses the needed range
+    const LOWER_PADDING: i32 = 0;
+    const UPPER_PADDING: i32 = 1;
+    let mut hue_linearity_search_range = [LOWER_PADDING, UPPER_PADDING];
+    for (i, entry) in gamut_cusp_table
+        .iter()
+        .enumerate()
+        .take(table_base::UPPER_WRAP_INDEX)
+        .skip(table_base::FIRST_NOMINAL_INDEX)
+    {
+        let pos = table_base::nominal_hue_position_in_uniform_table(entry[2]);
+        let delta = (i as i32).wrapping_sub(pos as i32);
+        hue_linearity_search_range[0] = std::cmp::min(
+            hue_linearity_search_range[0],
+            delta.wrapping_add(LOWER_PADDING),
+        );
+        hue_linearity_search_range[1] = std::cmp::max(
+            hue_linearity_search_range[1],
+            delta.wrapping_add(UPPER_PADDING),
+        );
+    }
+    hue_linearity_search_range
+}
+
+/// The gamut compression's parameters: `mid_J`, the focus distance, the lower hull's inverse
+/// gamma, and the hue, cusp and upper hull gamma tables.
+///
+/// Port of `init_GamutCompressParams` (Transform.cpp:1384-1402 @ v2.5.2).
+pub fn init_gamut_compress_params(
+    peak_luminance: f32,
+    input_jmh_params: &JMhParams,
+    limit_jmh_params: &JMhParams,
+    ts_params: &ToneScaleParams,
+    sh_params: &SharedCompressionParameters,
+    reach_params: &JMhParams,
+) -> Result<GamutCompressParams> {
+    let mul = sse_mul;
+    let mid_j = y_to_j(mul(ts_params.c_t, REFERENCE_LUMINANCE), input_jmh_params);
+
+    // Calculated chroma compress variables
+    let focus_dist = sse_add(
+        FOCUS_DISTANCE,
+        mul(FOCUS_DISTANCE * FOCUS_DISTANCE_SCALING, ts_params.log_peak),
+    );
+    // TODO: name these magic constants
+    let lower_hull_gamma_inv = 1.0 / sse_add(1.14, mul(0.07, ts_params.log_peak));
+
+    let mut hue_table: Table1D = [0.0; table_base::TOTAL_SIZE];
+    let mut gamut_cusp_table = make_uniform_hue_gamut_table(
+        reach_params,
+        limit_jmh_params,
+        peak_luminance,
+        ts_params.forward_limit,
+        sh_params,
+        &mut hue_table,
+    )?;
+    let hue_linearity_search_range = determine_hue_linearity_search_range(&gamut_cusp_table);
+    make_upper_hull_gamma(
+        &hue_table,
+        &mut gamut_cusp_table,
+        peak_luminance,
+        sh_params.limit_j_max,
+        mid_j,
+        focus_dist,
+        lower_hull_gamma_inv,
+        limit_jmh_params,
+    );
+    Ok(GamutCompressParams {
+        mid_j,
+        focus_dist,
+        lower_hull_gamma_inv,
+        hue_linearity_search_range,
+        hue_table,
+        gamut_cusp_table,
+    })
 }
 
 #[cfg(test)]
