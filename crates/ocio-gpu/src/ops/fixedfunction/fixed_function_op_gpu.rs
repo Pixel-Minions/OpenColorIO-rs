@@ -5,9 +5,11 @@
 //! `FixedFunctionOpGPU.cpp` @ v2.5.2: the FixedFunction op's GPU writer.
 //!
 //! So far the ACES 1.x styles: the red modifiers 0.3 and 1.0, the glows 0.3 and 1.0, the dark
-//! to dim surround 1.0 and the gamut compression 1.3, forward and inverse (chunk 2.3f). The
-//! other styles' shaders come with chunks 2.3g1, 2.3g2 and card `p2-aces2-gpu`; until then
-//! [`get_fixed_function_gpu_processing_text`] refuses them ([`not_ported`]).
+//! to dim surround 1.0 and the gamut compression 1.3, forward and inverse (chunk 2.3f); the
+//! Rec.2100 surround, RGB to and from HSV and the three HSYs, and XYZ to and from xyY, u'v'Y
+//! and CIELUV (2.3g1). The other styles' shaders come with chunk 2.3g2 and card
+//! `p2-aces2-gpu`; until then [`get_fixed_function_gpu_processing_text`] refuses them
+//! ([`not_ported`]).
 //!
 //! Upstream writes `float` values into the text with `operator<<`, which formats them with
 //! `getFloatString` (`GpuShaderText`'s stream operators); the constants it derives from them
@@ -633,6 +635,568 @@ fn add_surround_10_fwd_shader(pxl: &[u8], st: &GpuShaderText, gamma: f32) -> Res
     Ok(())
 }
 
+/// The Rec.2100 surround correction: the pixel times `Y^(gamma - 1)` of its luminance's
+/// magnitude, limited below; the inverse with `1 / gamma` and the limit raised to `gamma`.
+///
+/// Port of `Add_Rec2100_Surround_Shader` (FixedFunctionOpGPU.cpp:1651-1673 @ v2.5.2).
+fn add_rec2100_surround_shader(
+    pxl: &[u8],
+    st: &GpuShaderText,
+    gamma: f32,
+    is_forward: bool,
+) -> Result<()> {
+    let mut gamma = gamma;
+    let mut min_lum = 1e-4f32;
+    if !is_forward {
+        min_lum = min_lum.powf(gamma);
+        gamma = 1.0 / gamma;
+    }
+
+    st.new_line()
+        .put(st.float_decl("Y")?)
+        .put(" = 0.2627 * ")
+        .put(pxl)
+        .put(".rgb.r + ")
+        .put("0.6780 * ")
+        .put(pxl)
+        .put(".rgb.g + ")
+        .put("0.0593 * ")
+        .put(pxl)
+        .put(".rgb.b;");
+
+    st.new_line()
+        .put("Y = max( ")
+        .put(min_lum)
+        .put(", abs(Y) );");
+
+    st.new_line()
+        .put(st.float_decl("Ypow_over_Y")?)
+        .put(" = pow( Y, ")
+        .put(gamma - 1.0)
+        .put(");");
+
+    st.new_line()
+        .put("")
+        .put(pxl)
+        .put(".rgb = ")
+        .put(pxl)
+        .put(".rgb * Ypow_over_Y;");
+    Ok(())
+}
+
+/// Port of `Add_RGB_TO_HSV` (FixedFunctionOpGPU.cpp:1675-1702 @ v2.5.2).
+fn add_rgb_to_hsv(pxl: &[u8], st: &GpuShaderText) -> Result<()> {
+    st.new_line()
+        .put(st.float_decl("minRGB")?)
+        .put(" = min( ")
+        .put(pxl)
+        .put(".rgb.r, min( ")
+        .put(pxl)
+        .put(".rgb.g, ")
+        .put(pxl)
+        .put(".rgb.b ) );");
+    st.new_line()
+        .put(st.float_decl("maxRGB")?)
+        .put(" = max( ")
+        .put(pxl)
+        .put(".rgb.r, max( ")
+        .put(pxl)
+        .put(".rgb.g, ")
+        .put(pxl)
+        .put(".rgb.b ) );");
+    st.new_line().put(st.float_decl("val")?).put(" = maxRGB;");
+
+    st.new_line()
+        .put(st.float_decl("sat")?)
+        .put(" = 0.0, hue = 0.0;");
+    st.new_line().put("if (minRGB != maxRGB)");
+    st.new_line().put("{");
+    st.indent();
+
+    st.new_line()
+        .put("if (val != 0.0) sat = (maxRGB - minRGB) / val;");
+    st.new_line()
+        .put(st.float_decl("OneOverMaxMinusMin")?)
+        .put(" = 1.0 / (maxRGB - minRGB);");
+    st.new_line()
+        .put("if ( maxRGB == ")
+        .put(pxl)
+        .put(".rgb.r ) hue = (")
+        .put(pxl)
+        .put(".rgb.g - ")
+        .put(pxl)
+        .put(".rgb.b) * OneOverMaxMinusMin;");
+    st.new_line()
+        .put("else if ( maxRGB == ")
+        .put(pxl)
+        .put(".rgb.g ) hue = 2.0 + (")
+        .put(pxl)
+        .put(".rgb.b - ")
+        .put(pxl)
+        .put(".rgb.r) * OneOverMaxMinusMin;");
+    st.new_line()
+        .put("else hue = 4.0 + (")
+        .put(pxl)
+        .put(".rgb.r - ")
+        .put(pxl)
+        .put(".rgb.g) * OneOverMaxMinusMin;");
+    st.new_line().put("if ( hue < 0.0 ) hue += 6.0;");
+
+    st.dedent();
+    st.new_line().put("}");
+
+    st.new_line().put("if ( minRGB < 0.0 ) val += minRGB;");
+    st.new_line()
+        .put("if ( -minRGB > maxRGB ) sat = (maxRGB - minRGB) / -minRGB;");
+
+    st.new_line()
+        .put(pxl)
+        .put(".rgb = ")
+        .put(st.float3_const("hue * 1./6.", "sat", "val"))
+        .put(";");
+    Ok(())
+}
+
+/// The variant of RGB to HSY and back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Hsy {
+    Lin,
+    Log,
+    Vid,
+}
+
+/// Port of `Add_RGB_TO_HSY` (FixedFunctionOpGPU.cpp:1704-1745 @ v2.5.2).
+fn add_rgb_to_hsy(pxl: &[u8], st: &GpuShaderText, func_style: Hsy) -> Result<()> {
+    st.new_line()
+        .put(st.float3_decl("lumaWeights")?)
+        .put(" = ")
+        .put(st.float3_const_f32(0.2126, 0.7152, 0.0722))
+        .put(";");
+    st.new_line()
+        .put(st.float3_decl("ones")?)
+        .put(" = ")
+        .put(st.float3_const_f32(1.0, 1.0, 1.0))
+        .put(";");
+    st.new_line()
+        .put("float luma = dot(")
+        .put(pxl)
+        .put(".rgb, lumaWeights);");
+    st.new_line()
+        .put("float minRGB =  min( ")
+        .put(pxl)
+        .put(".x, min( ")
+        .put(pxl)
+        .put(".y, ")
+        .put(pxl)
+        .put(".z ) );");
+    st.new_line()
+        .put("float maxRGB =  max( ")
+        .put(pxl)
+        .put(".x, max( ")
+        .put(pxl)
+        .put(".y, ")
+        .put(pxl)
+        .put(".z ) );");
+    st.new_line()
+        .put(st.float3_decl("RGBm")?)
+        .put(" = ")
+        .put(pxl)
+        .put(".rgb - luma;");
+    st.new_line()
+        .put("float distRGB  = dot( abs(RGBm), ones );");
+    match func_style {
+        Hsy::Lin => {
+            st.new_line()
+                .put("float sumRGB  = dot( ")
+                .put(pxl)
+                .put(".rgb, ones );");
+            st.new_line()
+                .put("float sat_hi  = distRGB / max(0.07 * distRGB + 1e-6, 0.15 + sumRGB);");
+            st.new_line().put("float sat_lo  = distRGB * 5.;");
+            st.new_line()
+                .put("float alpha  = clamp( (luma - 0.001) / (0.01 - 0.001), 0., 1.);");
+
+            st.new_line()
+                .put("float sat = sat_lo + alpha * (sat_hi - sat_lo);");
+            st.new_line().put("sat *= 1.4;");
+        }
+        Hsy::Log => {
+            st.new_line().put("float sat = distRGB * 4.;");
+        }
+        Hsy::Vid => {
+            st.new_line().put("float sat = distRGB * 1.25;");
+        }
+    }
+    // NB: Unlike typical HSV, HSY maps magenta rather than red to a hue of zero.
+    // (This allows for better placement of red when manipulating curves in a UI.)
+    st.new_line().put("float hue = 0.0;");
+    st.new_line().put("if (minRGB != maxRGB) {");
+    st.new_line()
+        .put("   float OneOverMaxMinusMin = 1.0 / (maxRGB - minRGB);");
+    st.new_line()
+        .put("   if ( maxRGB == ")
+        .put(pxl)
+        .put(".r ) hue = 1.0 + (")
+        .put(pxl)
+        .put(".g - ")
+        .put(pxl)
+        .put(".b) * OneOverMaxMinusMin;");
+    st.new_line()
+        .put("   else if ( maxRGB == ")
+        .put(pxl)
+        .put(".g ) hue = 3.0 + (")
+        .put(pxl)
+        .put(".b - ")
+        .put(pxl)
+        .put(".r) * OneOverMaxMinusMin;");
+    st.new_line()
+        .put("   else hue = 5.0 + (")
+        .put(pxl)
+        .put(".r - ")
+        .put(pxl)
+        .put(".g) * OneOverMaxMinusMin;");
+    st.new_line().put("}");
+    st.new_line()
+        .put("")
+        .put(pxl)
+        .put(".r = hue * 1./6.; ")
+        .put(pxl)
+        .put(".g = sat; ")
+        .put(pxl)
+        .put(".b = luma;");
+    Ok(())
+}
+
+/// Port of `Add_HSY_TO_RGB` (FixedFunctionOpGPU.cpp:1747-1800 @ v2.5.2).
+fn add_hsy_to_rgb(pxl: &[u8], st: &GpuShaderText, func_style: Hsy) -> Result<()> {
+    st.new_line().put("float luma = ").put(pxl).put(".z;");
+    st.new_line()
+        .put("float Hue = ")
+        .put(pxl)
+        .put(".x - 1./6.;");
+    st.new_line().put("Hue = (luma < 0.) ? Hue + 0.5 : Hue;");
+    st.new_line().put("Hue = ( Hue - floor( Hue ) ) * 6.0;");
+    st.new_line().put("float R = abs(Hue - 3.0) - 1.0;");
+    st.new_line().put("float G = 2.0 - abs(Hue - 2.0);");
+    st.new_line().put("float B = 2.0 - abs(Hue - 4.0);");
+    st.new_line()
+        .put(st.float3_decl("RGB0")?)
+        .put(" = ")
+        .put(st.float3_const("R", "G", "B"))
+        .put(";");
+    st.new_line().put("RGB0 = clamp( RGB0, 0., 1. );");
+
+    st.new_line()
+        .put(st.float3_decl("lumaWeights")?)
+        .put(" = ")
+        .put(st.float3_const_f32(0.2126, 0.7152, 0.0722))
+        .put(";");
+    st.new_line()
+        .put(st.float3_decl("ones")?)
+        .put(" = ")
+        .put(st.float3_const_f32(1.0, 1.0, 1.0))
+        .put(";");
+    st.new_line().put("float currY = dot(RGB0, lumaWeights);");
+    st.new_line().put("RGB0 *= luma / currY;");
+
+    st.new_line().put("float sat = ").put(pxl).put(".y;");
+    st.new_line()
+        .put("float distRGB = dot( abs(RGB0 - luma), ones );");
+    match func_style {
+        Hsy::Lin => {
+            for line in [
+                "float sumRGB  = dot( RGB0, ones );",
+                "float k = 0.15;",
+                "float lo_gain = 5.;",
+                "sat /= 1.4;",
+                "float tmp = -sat * sumRGB + sat * 3. * luma + distRGB;",
+                "tmp = max(1e-6, tmp);",
+                "float s1 = sat * (k + 3. * luma) / tmp;",
+                "s1 = min(s1, 50.);",
+                "float s0 = sat / max(1e-10, distRGB * lo_gain);",
+                "float alpha  = clamp( (luma - 0.001) / (0.01 - 0.001), 0., 1.);",
+                "float a = distRGB * lo_gain * (1. - alpha) * (sumRGB - 3. * luma);",
+                "float b = distRGB * lo_gain * (1. - alpha) * (k + 3. * luma) + distRGB * alpha \
+                 - sat * (sumRGB - 3. * luma);",
+                "float c = -sat * (k + 3. * luma);",
+                "float discrim = sqrt( b * b - 4. * a * c );",
+                "float denom = -discrim - b;",
+                "float sm = (2. * c) / denom;",
+                "sm = (sm >= 0.) ? sm : (2. * c) / (denom + discrim * 2.);",
+                "float gainS = (alpha == 1.) ? s1 : (alpha == 0.) ? s0 : sm;",
+            ] {
+                st.new_line().put(line);
+            }
+        }
+        Hsy::Log => {
+            st.new_line()
+                .put("float gainS = sat / max(1e-10, distRGB * 4.);");
+        }
+        Hsy::Vid => {
+            st.new_line()
+                .put("float gainS = sat / max(1e-10, distRGB * 1.25);");
+        }
+    }
+    st.new_line()
+        .put("")
+        .put(pxl)
+        .put(".rgb = luma + gainS * (RGB0 - luma);");
+    Ok(())
+}
+
+/// Port of `Add_HSV_TO_RGB` (FixedFunctionOpGPU.cpp:1832-1867 @ v2.5.2).
+fn add_hsv_to_rgb(pxl: &[u8], st: &GpuShaderText) -> Result<()> {
+    st.new_line()
+        .put(st.float_decl("Hue")?)
+        .put(" = ( ")
+        .put(pxl)
+        .put(".rgb.r - floor( ")
+        .put(pxl)
+        .put(".rgb.r ) ) * 6.0;");
+    st.new_line()
+        .put(st.float_decl("Sat")?)
+        .put(" = clamp( ")
+        .put(pxl)
+        .put(".rgb.g, 0., 1.999 );");
+    st.new_line()
+        .put(st.float_decl("Val")?)
+        .put(" = ")
+        .put(pxl)
+        .put(".rgb.b;");
+
+    st.new_line()
+        .put(st.float_decl("R")?)
+        .put(" = abs(Hue - 3.0) - 1.0;");
+    st.new_line()
+        .put(st.float_decl("G")?)
+        .put(" = 2.0 - abs(Hue - 2.0);");
+    st.new_line()
+        .put(st.float_decl("B")?)
+        .put(" = 2.0 - abs(Hue - 4.0);");
+    st.new_line()
+        .put(st.float3_decl("RGB")?)
+        .put(" = ")
+        .put(st.float3_const("R", "G", "B"))
+        .put(";");
+    st.new_line().put("RGB = clamp( RGB, 0., 1. );");
+
+    st.new_line().put(st.float_keyword()).put(" rgbMax = Val;");
+    st.new_line()
+        .put(st.float_keyword())
+        .put(" rgbMin = Val * (1.0 - Sat);");
+
+    st.new_line().put("if ( Sat > 1.0 )");
+    st.new_line().put("{");
+    st.indent();
+    st.new_line()
+        .put("rgbMin = Val * (1.0 - Sat) / (2.0 - Sat);");
+    st.new_line().put("rgbMax = Val - rgbMin;");
+    st.dedent();
+    st.new_line().put("}");
+    st.new_line().put("if ( Val < 0.0 )");
+    st.new_line().put("{");
+    st.indent();
+    st.new_line().put("rgbMin = Val / (2.0 - Sat);");
+    st.new_line().put("rgbMax = Val - rgbMin;");
+    st.dedent();
+    st.new_line().put("}");
+
+    st.new_line().put("RGB = RGB * (rgbMax - rgbMin) + rgbMin;");
+
+    st.new_line().put("").put(pxl).put(".rgb = RGB;");
+    Ok(())
+}
+
+/// Port of `Add_XYZ_TO_xyY` (FixedFunctionOpGPU.cpp:1869-1878 @ v2.5.2).
+fn add_xyz_to_xyy(pxl: &[u8], st: &GpuShaderText) -> Result<()> {
+    st.new_line()
+        .put(st.float_decl("d")?)
+        .put(" = ")
+        .put(pxl)
+        .put(".rgb.r + ")
+        .put(pxl)
+        .put(".rgb.g + ")
+        .put(pxl)
+        .put(".rgb.b;");
+    st.new_line().put("d = (d == 0.) ? 0. : 1. / d;");
+    st.new_line()
+        .put(pxl)
+        .put(".rgb.b = ")
+        .put(pxl)
+        .put(".rgb.g;");
+    st.new_line().put(pxl).put(".rgb.r *= d;");
+    st.new_line().put(pxl).put(".rgb.g *= d;");
+    Ok(())
+}
+
+/// Port of `Add_xyY_TO_XYZ` (FixedFunctionOpGPU.cpp:1880-1889 @ v2.5.2).
+fn add_xyy_to_xyz(pxl: &[u8], st: &GpuShaderText) -> Result<()> {
+    st.new_line()
+        .put(st.float_decl("d")?)
+        .put(" = (")
+        .put(pxl)
+        .put(".rgb.g == 0.) ? 0. : 1. / ")
+        .put(pxl)
+        .put(".rgb.g;");
+    st.new_line()
+        .put(st.float_decl("Y")?)
+        .put(" = ")
+        .put(pxl)
+        .put(".rgb.b;");
+    st.new_line()
+        .put(pxl)
+        .put(".rgb.b = Y * (1. - ")
+        .put(pxl)
+        .put(".rgb.r - ")
+        .put(pxl)
+        .put(".rgb.g) * d;");
+    st.new_line().put(pxl).put(".rgb.r *= Y * d;");
+    st.new_line().put(pxl).put(".rgb.g = Y;");
+    Ok(())
+}
+
+/// The CIE 1976 denominator `X + 15 Y + 3 Z`, inverted where it isn't 0.
+fn write_uv_denominator(pxl: &[u8], st: &GpuShaderText) -> Result<()> {
+    st.new_line()
+        .put(st.float_decl("d")?)
+        .put(" = ")
+        .put(pxl)
+        .put(".rgb.r + 15. * ")
+        .put(pxl)
+        .put(".rgb.g + 3. * ")
+        .put(pxl)
+        .put(".rgb.b;");
+    st.new_line().put("d = (d == 0.) ? 0. : 1. / d;");
+    Ok(())
+}
+
+/// Port of `Add_XYZ_TO_uvY` (FixedFunctionOpGPU.cpp:1891-1900 @ v2.5.2).
+fn add_xyz_to_uvy(pxl: &[u8], st: &GpuShaderText) -> Result<()> {
+    write_uv_denominator(pxl, st)?;
+    st.new_line()
+        .put(pxl)
+        .put(".rgb.b = ")
+        .put(pxl)
+        .put(".rgb.g;");
+    st.new_line().put(pxl).put(".rgb.r *= 4. * d;");
+    st.new_line().put(pxl).put(".rgb.g *= 9. * d;");
+    Ok(())
+}
+
+/// Port of `Add_uvY_TO_XYZ` (FixedFunctionOpGPU.cpp:1902-1911 @ v2.5.2).
+fn add_uvy_to_xyz(pxl: &[u8], st: &GpuShaderText) -> Result<()> {
+    st.new_line()
+        .put(st.float_decl("d")?)
+        .put(" = (")
+        .put(pxl)
+        .put(".rgb.g == 0.) ? 0. : 1. / ")
+        .put(pxl)
+        .put(".rgb.g;");
+    st.new_line()
+        .put(st.float_decl("Y")?)
+        .put(" = ")
+        .put(pxl)
+        .put(".rgb.b;");
+    st.new_line()
+        .put(pxl)
+        .put(".rgb.b = (3./4.) * Y * (4. - ")
+        .put(pxl)
+        .put(".rgb.r - 6.6666666666666667 * ")
+        .put(pxl)
+        .put(".rgb.g) * d;");
+    st.new_line().put(pxl).put(".rgb.r *= (9./4.) * Y * d;");
+    st.new_line().put(pxl).put(".rgb.g = Y;");
+    Ok(())
+}
+
+/// Port of `Add_XYZ_TO_LUV` (FixedFunctionOpGPU.cpp:1913-1929 @ v2.5.2).
+fn add_xyz_to_luv(pxl: &[u8], st: &GpuShaderText) -> Result<()> {
+    write_uv_denominator(pxl, st)?;
+    st.new_line()
+        .put(st.float_decl("u")?)
+        .put(" = ")
+        .put(pxl)
+        .put(".rgb.r * 4. * d;");
+    st.new_line()
+        .put(st.float_decl("v")?)
+        .put(" = ")
+        .put(pxl)
+        .put(".rgb.g * 9. * d;");
+    st.new_line()
+        .put(st.float_decl("Y")?)
+        .put(" = ")
+        .put(pxl)
+        .put(".rgb.g;");
+
+    st.new_line()
+        .put(st.float_decl("Lstar")?)
+        .put(" = ")
+        .put(st.lerp(
+            "1.16 * pow( max(0., Y), 1./3. ) - 0.16",
+            "9.0329629629629608 * Y",
+            "float(Y <= 0.008856451679)",
+        ))
+        .put(";");
+    st.new_line()
+        .put(st.float_decl("ustar")?)
+        .put(" = 13. * Lstar * (u - 0.19783001);");
+    st.new_line()
+        .put(st.float_decl("vstar")?)
+        .put(" = 13. * Lstar * (v - 0.46831999);");
+
+    st.new_line()
+        .put(pxl)
+        .put(".rgb = ")
+        .put(st.float3_const("Lstar", "ustar", "vstar"))
+        .put(";");
+    Ok(())
+}
+
+/// Port of `Add_LUV_TO_XYZ` (FixedFunctionOpGPU.cpp:1931-1948 @ v2.5.2).
+fn add_luv_to_xyz(pxl: &[u8], st: &GpuShaderText) -> Result<()> {
+    st.new_line()
+        .put(st.float_decl("Lstar")?)
+        .put(" = ")
+        .put(pxl)
+        .put(".rgb.r;");
+    st.new_line()
+        .put(st.float_decl("d")?)
+        .put(" = (Lstar == 0.) ? 0. : 0.076923076923076927 / Lstar;");
+    st.new_line()
+        .put(st.float_decl("u")?)
+        .put(" = ")
+        .put(pxl)
+        .put(".rgb.g * d + 0.19783001;");
+    st.new_line()
+        .put(st.float_decl("v")?)
+        .put(" = ")
+        .put(pxl)
+        .put(".rgb.b * d + 0.46831999;");
+
+    st.new_line()
+        .put(st.float_decl("tmp")?)
+        .put(" = (Lstar + 0.16) * 0.86206896551724144;");
+    st.new_line()
+        .put(st.float_decl("Y")?)
+        .put(" = ")
+        .put(st.lerp(
+            "tmp * tmp * tmp",
+            "0.11070564598794539 * Lstar",
+            "float(Lstar <= 0.08)",
+        ))
+        .put(";");
+
+    st.new_line()
+        .put(st.float_decl("dd")?)
+        .put(" = (v == 0.) ? 0. : 0.25 / v;");
+    st.new_line().put(pxl).put(".rgb.r = 9. * Y * u * dd;");
+    st.new_line()
+        .put(pxl)
+        .put(".rgb.b = Y * (12. - 3. * u - 20. * v) * dd;");
+    st.new_line().put(pxl).put(".rgb.g = Y;");
+    Ok(())
+}
+
 /// Adds the code of a FixedFunction op to `shader_creator`'s function body.
 ///
 /// Port of `GetFixedFunctionGPUShaderProgram` (FixedFunctionOpGPU.cpp:2225-2231 @ v2.5.2).
@@ -690,6 +1254,22 @@ pub fn get_fixed_function_gpu_processing_text(
         AcesGamutComp13Inv => {
             add_gamut_comp_13(st, &pxl, func, add_gamut_comp_13_shader_uncompress)?;
         }
+        Rec2100SurroundFwd => add_rec2100_surround_shader(&pxl, st, param_f32(func, 0)?, true)?,
+        Rec2100SurroundInv => add_rec2100_surround_shader(&pxl, st, param_f32(func, 0)?, false)?,
+        RgbToHsv => add_rgb_to_hsv(&pxl, st)?,
+        RgbToHsyLog => add_rgb_to_hsy(&pxl, st, Hsy::Log)?,
+        RgbToHsyLin => add_rgb_to_hsy(&pxl, st, Hsy::Lin)?,
+        RgbToHsyVid => add_rgb_to_hsy(&pxl, st, Hsy::Vid)?,
+        HsyLogToRgb => add_hsy_to_rgb(&pxl, st, Hsy::Log)?,
+        HsyLinToRgb => add_hsy_to_rgb(&pxl, st, Hsy::Lin)?,
+        HsyVidToRgb => add_hsy_to_rgb(&pxl, st, Hsy::Vid)?,
+        HsvToRgb => add_hsv_to_rgb(&pxl, st)?,
+        XyzToXyy => add_xyz_to_xyy(&pxl, st)?,
+        XyyToXyz => add_xyy_to_xyz(&pxl, st)?,
+        XyzToUvy => add_xyz_to_uvy(&pxl, st)?,
+        UvyToXyz => add_uvy_to_xyz(&pxl, st)?,
+        XyzToLuv => add_xyz_to_luv(&pxl, st)?,
+        LuvToXyz => add_luv_to_xyz(&pxl, st)?,
         style => return Err(not_ported(style)),
     }
 
