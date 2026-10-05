@@ -540,6 +540,28 @@ mod sys {
         pub(super) fn _wstat64i32(path: *const u16, buffer: *mut Stat64i32) -> c_int;
     }
 
+    #[cfg(windows)]
+    #[link(name = "ntdll")]
+    unsafe extern "system" {
+        pub(super) fn RtlUpcaseUnicodeChar(c: u16) -> u16;
+    }
+
+    #[cfg(windows)]
+    unsafe extern "C" {
+        pub(super) fn __p__wenviron() -> *mut *mut *mut u16;
+        pub(super) fn _wgetenv_s(
+            required: *mut usize,
+            buffer: *mut u16,
+            count: usize,
+            name: *const u16,
+        ) -> c_int;
+    }
+
+    #[cfg(target_os = "linux")]
+    unsafe extern "C" {
+        pub(super) static environ: *const *const c_char;
+    }
+
     /// `struct stat` of glibc on x86_64 (bits/struct_stat.h).
     #[cfg(target_os = "linux")]
     #[repr(C)]
@@ -664,6 +686,55 @@ pub fn stat_dev_ino(path: &[u8]) -> Option<(u64, u64)> {
     // SAFETY: `path` is NUL-terminated and `info` is glibc's `struct stat` on x86_64.
     let r = unsafe { sys::stat(path.as_ptr().cast(), &mut info) };
     (r == 0).then_some((info.st_dev, info.st_ino))
+}
+
+/// `RtlUpcaseUnicodeChar(c)` (ntdll): how Windows folds a code unit of an environment variable's
+/// name.
+#[cfg(windows)]
+pub fn rtl_upcase_unicode_char(c: u16) -> u16 {
+    // SAFETY: a plain function of a value.
+    unsafe { sys::RtlUpcaseUnicodeChar(c) }
+}
+
+/// The C runtime's list of the process's environment, `NAME=value` entries in order: the
+/// UCRT's `_wenviron` converted with `WideCharToMultiByte` (initialized first as OCIO does it,
+/// with `_wgetenv_s`), or glibc's `environ`. Nothing may change the environment meanwhile.
+pub fn c_runtime_environment() -> Vec<Vec<u8>> {
+    let mut out = Vec::new();
+    #[cfg(windows)]
+    {
+        let empty = [0u16];
+        let mut required = 0usize;
+        // SAFETY: a null buffer of size 0 asks for the size; the name is NUL-terminated.
+        unsafe { sys::_wgetenv_s(&mut required, std::ptr::null_mut(), 0, empty.as_ptr()) };
+        // SAFETY: `_wenviron` is a NULL-terminated array of NUL-terminated strings, which
+        // nothing changes while it is read.
+        unsafe {
+            let mut entry = *sys::__p__wenviron();
+            while !entry.is_null() && !(*entry).is_null() {
+                let start = *entry;
+                let mut len = 0;
+                while *start.add(len) != 0 {
+                    len += 1;
+                }
+                out.push(utf16_to_utf8_system(std::slice::from_raw_parts(start, len)));
+                entry = entry.add(1);
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        // SAFETY: `environ` is a NULL-terminated array of NUL-terminated strings, which nothing
+        // changes while it is read.
+        unsafe {
+            let mut entry = sys::environ;
+            while !(*entry).is_null() {
+                out.push(std::ffi::CStr::from_ptr(*entry).to_bytes().to_vec());
+                entry = entry.add(1);
+            }
+        }
+    }
+    out
 }
 
 /// The number of bits in C `long` on this platform (32 on Windows, 64 on Linux).

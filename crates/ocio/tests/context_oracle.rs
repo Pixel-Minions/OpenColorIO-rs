@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use ocio::Context;
 use ocio_ops::open_color_types::EnvironmentMode;
-use ocio_ops::platform::{EnvProvider, MapEnv, set_env_provider};
+use ocio_ops::platform::{MapEnv, set_env_provider, setenv};
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle_values::{bytes, result, result_bytes};
 use ocio_testkit::paths::target_dir;
@@ -148,13 +148,12 @@ fn check(name: &str, env: &[(&str, &str)], ops: &[Op]) {
     let wheel = response.result["calls"].as_array().unwrap();
     let mut w = wheel.iter();
 
-    // The oracle sets the request's variables in its process one by one, with the platform's
-    // rules: on Windows a variable set to "" is removed. So are the port's.
-    let port_env = MapEnv::default();
+    // The oracle sets the request's variables in its process one by one (os.putenv: setenv, or
+    // _wputenv_s, which removes a variable set to ""). So does the port, with OCIO's Setenv.
+    set_env_provider(Some(Arc::new(MapEnv::default())));
     for (name, value) in env {
-        port_env.set_var(name.as_bytes(), value.as_bytes());
+        setenv(name, value).expect("a request's variable");
     }
-    set_env_provider(Some(Arc::new(port_env)));
     let mut context = Context::new();
     for (i, op) in ops.iter().enumerate() {
         let what = format!("{name}, operation {i}");
@@ -271,6 +270,7 @@ fn contexts_match_the_wheel() {
         "shots/s01/luts/b.spi1d",
         "shots/s01/c.cube",
         "d.clf",
+        "$NOPE/x.clf",
     ] {
         let path = root.join(file);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -343,6 +343,49 @@ fn contexts_match_the_wheel() {
         ],
     );
 
+    // A variable the environment holds twice in different cases (on Windows the second
+    // replaces the first, name included); a context's own value against the environment's in
+    // LOAD_ALL and UNKNOWN modes.
+    check(
+        "environment names and modes",
+        &[("SHOT", "a"), ("Shot", "b")],
+        &[
+            Op::SetEnvironmentMode(EnvironmentMode::LoadAll),
+            Op::LoadEnvironment,
+            Op::ClearStringVars,
+            Op::SetStringVar(b("SHOT"), Some(b("x"))),
+            Op::SetStringVar(b("Shot"), Some(b("x"))),
+            Op::LoadEnvironment,
+            Op::ClearStringVars,
+            Op::SetEnvironmentMode(EnvironmentMode::Unknown),
+            Op::SetStringVar(b("SHOT"), Some(b("y"))),
+            Op::SetStringVar(b("Shot"), Some(b("y"))),
+            Op::LoadEnvironment,
+        ],
+    );
+
+    // The root as a search path; a directory literally named `$NOPE` as one (a search path
+    // still holding a variable is never tried); a missing file named through a variable (the
+    // message names it as given); `..` right after the root.
+    let parent = match root_text.split_once(':') {
+        Some((drive, rest)) if cfg!(windows) => format!("{drive}:/..{rest}"),
+        _ => format!("/..{root_text}"),
+    };
+    check(
+        "search paths and messages",
+        &[],
+        &[
+            Op::AddSearchPath(b("/")),
+            Op::ResolveFileLocation(b("missing.clf")),
+            Op::ClearSearchPaths,
+            Op::SetWorkingDir(dir("")),
+            Op::AddSearchPath(b("$NOPE")),
+            Op::ResolveFileLocation(b("x.clf")),
+            Op::SetStringVar(b("F"), Some(b("missing.clf"))),
+            Op::ResolveFileLocation(b("$F")),
+            Op::ResolveFileLocation(b(&format!("{parent}/d.clf"))),
+        ],
+    );
     check(
         "files",
         &[],
