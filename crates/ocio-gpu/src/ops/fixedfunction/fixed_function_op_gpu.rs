@@ -7,7 +7,8 @@
 //! So far the ACES 1.x styles: the red modifiers 0.3 and 1.0, the glows 0.3 and 1.0, the dark
 //! to dim surround 1.0 and the gamut compression 1.3, forward and inverse (chunk 2.3f); the
 //! Rec.2100 surround, RGB to and from HSV and the three HSYs, and XYZ to and from xyY, u'v'Y
-//! and CIELUV (2.3g1). The other styles' shaders come with chunk 2.3g2 and card
+//! and CIELUV (2.3g1); PQ, the gamma-log and the double-log curves (2.3g2), with `double`
+//! parameters as upstream reads them. The ACES 2.0 styles' shaders come with card
 //! `p2-aces2-gpu`; until then [`get_fixed_function_gpu_processing_text`] refuses them
 //! ([`not_ported`]).
 //!
@@ -1197,6 +1198,522 @@ fn add_luv_to_xyz(pxl: &[u8], st: &GpuShaderText) -> Result<()> {
     Ok(())
 }
 
+/// SMPTE ST 2084's constants, in `double`.
+///
+/// Port of `ST_2084` (FixedFunctionOpGPU.cpp:1950-1960 @ v2.5.2).
+mod st_2084 {
+    pub(super) const M1: f64 = 0.25 * 2610. / 4096.;
+    pub(super) const M2: f64 = 128. * 2523. / 4096.;
+    pub(super) const C2: f64 = 32. * 2413. / 4096.;
+    pub(super) const C3: f64 = 32. * 2392. / 4096.;
+    pub(super) const C1: f64 = C3 - C2 + 1.;
+}
+
+/// Port of `Add_LIN_TO_PQ` (FixedFunctionOpGPU.cpp:1962-1977 @ v2.5.2).
+fn add_lin_to_pq(pxl: &[u8], st: &GpuShaderText) -> Result<()> {
+    use st_2084::{C1, C2, C3, M1, M2};
+
+    st.new_line()
+        .put(st.float3_decl("sign3")?)
+        .put(" = sign(")
+        .put(pxl)
+        .put(".rgb);");
+    st.new_line()
+        .put(st.float3_decl("L")?)
+        .put(" = abs(0.01 * ")
+        .put(pxl)
+        .put(".rgb);");
+    st.new_line()
+        .put(st.float3_decl("y")?)
+        .put(" = pow(L, ")
+        .put(st.float3_splat_f64(M1))
+        .put(");");
+    st.new_line()
+        .put(st.float3_decl("ratpoly")?)
+        .put(" = (")
+        .put(st.float3_splat_f64(C1))
+        .put(" + ")
+        .put(C2)
+        .put(" * y) / (")
+        .put(st.float3_splat_f64(1.0))
+        .put(" + ")
+        .put(C3)
+        .put(" * y);");
+    st.new_line()
+        .put(pxl)
+        .put(".rgb = sign3 * pow(ratpoly, ")
+        .put(st.float3_splat_f64(M2))
+        .put(");");
+
+    // The sign transfer here is very slightly different than in the CPU path,
+    // resulting in a PQ value of 0 at 0 rather than the true value of
+    // 0.836^78.84 = 7.36e-07, however, this is well below visual threshold.
+    Ok(())
+}
+
+/// Port of `Add_PQ_TO_LIN` (FixedFunctionOpGPU.cpp:1979-1988 @ v2.5.2).
+fn add_pq_to_lin(pxl: &[u8], st: &GpuShaderText) -> Result<()> {
+    use st_2084::{C1, C2, C3, M1, M2};
+
+    st.new_line()
+        .put(st.float3_decl("sign3")?)
+        .put(" = sign(")
+        .put(pxl)
+        .put(".rgb);");
+    st.new_line()
+        .put(st.float3_decl("x")?)
+        .put(" = pow(abs(")
+        .put(pxl)
+        .put(".rgb), ")
+        .put(st.float3_splat_f64(1.0 / M2))
+        .put(");");
+    st.new_line()
+        .put(pxl)
+        .put(".rgb = 100. * sign3 * pow(max(")
+        .put(st.float3_splat_f64(0.0))
+        .put(", x - ")
+        .put(st.float3_splat_f64(C1))
+        .put(") / (")
+        .put(st.float3_splat_f64(C2))
+        .put(" - ")
+        .put(C3)
+        .put(" * x), ")
+        .put(st.float3_splat_f64(1.0 / M1))
+        .put(");");
+    Ok(())
+}
+
+/// `params[i]` as the `double` it is, or [`SHORT_PARAMS`] where upstream would read past the
+/// parameters (`docs/improvements.md` U-31).
+fn param(func: &FixedFunctionOpData, i: usize) -> Result<f64> {
+    func.params()
+        .get(i)
+        .copied()
+        .ok_or_else(|| Exception::new(SHORT_PARAMS))
+}
+
+/// The gamma-log curve's parameters, the log base folded into the log slope.
+struct GammaLog {
+    mirror_pt: f64,
+    break_pt: f64,
+    gamma_seg_power: f64,
+    gamma_seg_slope: f64,
+    gamma_seg_off: f64,
+    log_seg_log_slope: f64,
+    log_seg_log_off: f64,
+    log_seg_lin_slope: f64,
+    log_seg_lin_off: f64,
+}
+
+impl GammaLog {
+    /// Port of the parameters' reading in `Add_LIN_TO_GAMMA_LOG` and `Add_GAMMA_LOG_TO_LIN`
+    /// (FixedFunctionOpGPU.cpp:1995-2005, 2043-2053 @ v2.5.2).
+    fn new(func: &FixedFunctionOpData) -> Result<GammaLog> {
+        let p = |i| param(func, i);
+        // Get parameters, baking the log base conversion into 'logSlope'.
+        let log_seg_base = p(5)?;
+        Ok(GammaLog {
+            mirror_pt: p(0)?,
+            break_pt: p(1)?,
+            gamma_seg_power: p(2)?,
+            gamma_seg_slope: p(3)?,
+            gamma_seg_off: p(4)?,
+            log_seg_log_slope: p(6)? / log_seg_base.ln(),
+            log_seg_log_off: p(7)?,
+            log_seg_lin_slope: p(8)?,
+            log_seg_lin_off: p(9)?,
+        })
+    }
+}
+
+/// The gamma segment subtracts its offset here where the CPU renderer adds it (upstream's,
+/// `docs/improvements.md` I-85).
+///
+/// Port of `Add_LIN_TO_GAMMA_LOG` (FixedFunctionOpGPU.cpp:1990-2036 @ v2.5.2).
+fn add_lin_to_gamma_log(pxl: &[u8], st: &GpuShaderText, func: &FixedFunctionOpData) -> Result<()> {
+    let g = GammaLog::new(func)?;
+
+    st.new_line()
+        .put(st.float3_decl("mirrorin")?)
+        .put(" = ")
+        .put(pxl)
+        .put(".rgb - ")
+        .put(st.float3_splat_f64(g.mirror_pt))
+        .put(";");
+    st.new_line()
+        .put(st.float3_decl("sign3")?)
+        .put(" = sign(mirrorin);");
+    st.new_line()
+        .put(st.float3_decl("E")?)
+        .put(" = abs(mirrorin) + ")
+        .put(st.float3_splat_f64(g.mirror_pt))
+        .put(";");
+    st.new_line()
+        .put(st.float3_decl("isAboveBreak")?)
+        .put(" = ")
+        .put(st.float3_greater_than("E", st.float3_splat_f64(g.break_pt)))
+        .put(";");
+    st.new_line()
+        .put(st.float3_decl("isAtOrBelowBreak")?)
+        .put(" = ")
+        .put(st.float3_splat_f32(1.0))
+        .put(" - isAboveBreak;");
+
+    st.new_line()
+        .put(st.float3_decl("Ep_gamma")?)
+        .put(" = ")
+        .put(st.float3_splat_f64(g.gamma_seg_slope))
+        .put(" * pow( E - ")
+        .put(st.float3_splat_f64(g.gamma_seg_off))
+        .put(", ")
+        .put(st.float3_splat_f64(g.gamma_seg_power))
+        .put(");");
+
+    // Avoid NaNs by clamping log input below 1 if the branch will not be used.
+    st.new_line()
+        .put(st.float3_decl("Ep_clamped")?)
+        .put(" = max( isAtOrBelowBreak, E * ")
+        .put(st.float3_splat_f64(g.log_seg_lin_slope))
+        .put(" + ")
+        .put(st.float3_splat_f64(g.log_seg_lin_off))
+        .put(" );");
+    st.new_line()
+        .put(st.float3_decl("Ep_log")?)
+        .put(" = ")
+        .put(st.float3_splat_f64(g.log_seg_log_slope))
+        .put(" * log( Ep_clamped ) + ")
+        .put(st.float3_splat_f64(g.log_seg_log_off))
+        .put(";");
+
+    // Combine log and gamma parts.
+    st.new_line()
+        .put(pxl)
+        .put(".rgb = sign3 * (isAboveBreak * Ep_log + ( ")
+        .put(st.float3_splat_f32(1.0))
+        .put(" - isAboveBreak ) * Ep_gamma);");
+    Ok(())
+}
+
+/// Port of `Add_GAMMA_LOG_TO_LIN` (FixedFunctionOpGPU.cpp:2038-2084 @ v2.5.2).
+fn add_gamma_log_to_lin(pxl: &[u8], st: &GpuShaderText, func: &FixedFunctionOpData) -> Result<()> {
+    let g = GammaLog::new(func)?;
+
+    let prime_break = g.gamma_seg_slope * (g.break_pt + g.gamma_seg_off).powf(g.gamma_seg_power);
+    let prime_mirror = g.gamma_seg_slope * (g.mirror_pt + g.gamma_seg_off).powf(g.gamma_seg_power);
+
+    st.new_line()
+        .put(st.float3_decl("mirrorin")?)
+        .put(" = ")
+        .put(pxl)
+        .put(".rgb - ")
+        .put(st.float3_splat_f64(prime_mirror))
+        .put(";");
+    st.new_line()
+        .put(st.float3_decl("sign3")?)
+        .put(" = sign(mirrorin);");
+    st.new_line()
+        .put(st.float3_decl("Eprime")?)
+        .put(" = abs(mirrorin) + ")
+        .put(st.float3_splat_f64(prime_mirror))
+        .put(";");
+    st.new_line()
+        .put(st.float3_decl("isAboveBreak")?)
+        .put(" = ")
+        .put(st.float3_greater_than("Eprime", st.float3_splat_f64(prime_break)))
+        .put(";");
+
+    // Gamma Segment.
+    st.new_line()
+        .put(st.float3_decl("E_gamma")?)
+        .put(" = pow( Eprime * ")
+        .put(st.float3_splat_f64(1.0 / g.gamma_seg_slope))
+        .put(",")
+        .put(st.float3_splat_f64(1.0 / g.gamma_seg_power))
+        .put(") - ")
+        .put(st.float3_splat_f64(g.gamma_seg_off))
+        .put(";");
+
+    // Log Segment.
+    st.new_line()
+        .put(st.float3_decl("E_log")?)
+        .put(" = (exp((Eprime - ")
+        .put(st.float3_splat_f64(g.log_seg_log_off))
+        .put(") * ")
+        .put(st.float3_splat_f64(1.0 / g.log_seg_log_slope))
+        .put(") - ")
+        .put(st.float3_splat_f64(g.log_seg_lin_off))
+        .put(") * ")
+        .put(st.float3_splat_f64(1.0 / g.log_seg_lin_slope))
+        .put(";");
+
+    // Combine log and gamma parts.
+    st.new_line()
+        .put(pxl)
+        .put(".rgb = sign3 * (isAboveBreak * E_log + ( ")
+        .put(st.float3_splat_f32(1.0))
+        .put(" - isAboveBreak ) * E_gamma);");
+    Ok(())
+}
+
+/// The double-log curve's parameters, the log base folded into the log slopes.
+struct DoubleLog {
+    break1: f64,
+    break2: f64,
+    log_seg1_log_slope: f64,
+    log_seg1_log_off: f64,
+    log_seg1_lin_slope: f64,
+    log_seg1_lin_off: f64,
+    log_seg2_log_slope: f64,
+    log_seg2_log_off: f64,
+    log_seg2_lin_slope: f64,
+    log_seg2_lin_off: f64,
+    lin_seg_slope: f64,
+    lin_seg_off: f64,
+}
+
+impl DoubleLog {
+    /// Port of the parameters' reading in `Add_LIN_TO_DOUBLE_LOG` and `Add_DOUBLE_LOG_TO_LIN`
+    /// (FixedFunctionOpGPU.cpp:2091-2104, 2165-2178 @ v2.5.2).
+    fn new(func: &FixedFunctionOpData) -> Result<DoubleLog> {
+        let p = |i| param(func, i);
+        // Get parameters, baking the log base conversion into 'logSlope'.
+        let base = p(0)?;
+        Ok(DoubleLog {
+            break1: p(1)?,
+            break2: p(2)?,
+            log_seg1_log_slope: p(3)? / base.ln(),
+            log_seg1_log_off: p(4)?,
+            log_seg1_lin_slope: p(5)?,
+            log_seg1_lin_off: p(6)?,
+            log_seg2_log_slope: p(7)? / base.ln(),
+            log_seg2_log_off: p(8)?,
+            log_seg2_lin_slope: p(9)?,
+            log_seg2_lin_off: p(10)?,
+            lin_seg_slope: p(11)?,
+            lin_seg_off: p(12)?,
+        })
+    }
+}
+
+/// The three segments' masks: `isSegment1` at or below `break1`, `isSegment3` at or above
+/// `break2`, `isSegment2` between.
+fn write_double_log_segments(
+    st: &GpuShaderText,
+    pix3: &[u8],
+    break1: f64,
+    break2: f64,
+) -> Result<()> {
+    st.new_line()
+        .put(st.float3_decl("isSegment1")?)
+        .put(" = ")
+        .put(st.float3_greater_than_equal(st.float3_splat_f64(break1), pix3))
+        .put(";");
+    st.new_line()
+        .put(st.float3_decl("isSegment3")?)
+        .put(" = ")
+        .put(st.float3_greater_than_equal(pix3, st.float3_splat_f64(break2)))
+        .put(";");
+    st.new_line()
+        .put(st.float3_decl("isSegment2")?)
+        .put(" = ")
+        .put(st.float3_splat_f32(1.0))
+        .put(" - isSegment1 - isSegment3;");
+    Ok(())
+}
+
+/// One log segment of the forward double log, clamped below 1 where it isn't used.
+fn write_lin_to_log_segment(
+    st: &GpuShaderText,
+    pix3: &[u8],
+    seg: &str,
+    mask: &str,
+    log_slope: f64,
+    log_off: f64,
+    lin_slope: f64,
+    lin_off: f64,
+) -> Result<()> {
+    st.new_line();
+    st.new_line()
+        .put(st.float3_decl(seg)?)
+        .put(" = ")
+        .put(pix3)
+        .put(" * ")
+        .put(st.float3_splat_f64(lin_slope))
+        .put(" + ")
+        .put(st.float3_splat_f64(lin_off))
+        .put(";");
+
+    // Clamp below 1 to avoid NaNs if the branch will not be used.
+    st.new_line()
+        .put(seg)
+        .put(" = max( ")
+        .put(st.float3_splat_f64(1.0))
+        .put(" - ")
+        .put(mask)
+        .put(", ")
+        .put(seg)
+        .put(" );");
+
+    st.new_line()
+        .put(seg)
+        .put(" = ")
+        .put(st.float3_splat_f64(log_slope))
+        .put(" * log( ")
+        .put(seg)
+        .put(" ) + ")
+        .put(st.float3_splat_f64(log_off))
+        .put(";");
+    Ok(())
+}
+
+/// Port of `Add_LIN_TO_DOUBLE_LOG` (FixedFunctionOpGPU.cpp:2086-2158 @ v2.5.2).
+fn add_lin_to_double_log(pix: &[u8], st: &GpuShaderText, func: &FixedFunctionOpData) -> Result<()> {
+    let d = DoubleLog::new(func)?;
+    let pix3 = [pix, b".rgb"].concat();
+
+    write_double_log_segments(st, &pix3, d.break1, d.break2)?;
+
+    // Log Segment 1.
+    // TODO: This segment usually handles very dark (even negative) values, thus
+    // is rarely hit. As an optimization we can use "any()" to skip this in a
+    // branch (needs benchmarking to see if it's worth the effort).
+    write_lin_to_log_segment(
+        st,
+        &pix3,
+        "logSeg1",
+        "isSegment1",
+        d.log_seg1_log_slope,
+        d.log_seg1_log_off,
+        d.log_seg1_lin_slope,
+        d.log_seg1_lin_off,
+    )?;
+
+    // Log Segment 2.
+    write_lin_to_log_segment(
+        st,
+        &pix3,
+        "logSeg2",
+        "isSegment3",
+        d.log_seg2_log_slope,
+        d.log_seg2_log_off,
+        d.log_seg2_lin_slope,
+        d.log_seg2_lin_off,
+    )?;
+
+    // Linear Segment.
+    st.new_line();
+    st.new_line()
+        .put(st.float3_decl("linSeg")?)
+        .put("= ")
+        .put(st.float3_splat_f64(d.lin_seg_slope))
+        .put(" * ")
+        .put(&pix3)
+        .put(" + ")
+        .put(st.float3_splat_f64(d.lin_seg_off))
+        .put(";");
+
+    // Combine segments.
+    st.new_line();
+    st.new_line()
+        .put(&pix3)
+        .put(" = isSegment1 * logSeg1 + isSegment2 * linSeg + isSegment3 * logSeg2;");
+    Ok(())
+}
+
+/// One log segment of the inverse double log.
+fn write_log_to_lin_segment(
+    st: &GpuShaderText,
+    pix3: &[u8],
+    seg: &str,
+    log_slope: f64,
+    log_off: f64,
+    lin_slope: f64,
+    lin_off: f64,
+) -> Result<()> {
+    st.new_line();
+    st.new_line()
+        .put(st.float3_decl(seg)?)
+        .put(" = (")
+        .put(pix3)
+        .put(" - ")
+        .put(st.float3_splat_f64(log_off))
+        .put(") * ")
+        .put(st.float3_splat_f64(1.0 / log_slope))
+        .put(";");
+    st.new_line()
+        .put(seg)
+        .put(" = (")
+        .put("exp(")
+        .put(seg)
+        .put(") - ")
+        .put(st.float3_splat_f64(lin_off))
+        .put(") * ")
+        .put(st.float3_splat_f64(1.0 / lin_slope))
+        .put(";");
+    Ok(())
+}
+
+/// Port of `Add_DOUBLE_LOG_TO_LIN` (FixedFunctionOpGPU.cpp:2160-2223 @ v2.5.2).
+fn add_double_log_to_lin(pix: &[u8], st: &GpuShaderText, func: &FixedFunctionOpData) -> Result<()> {
+    let d = DoubleLog::new(func)?;
+
+    let break1_log = d.log_seg1_log_slope
+        * (d.log_seg1_lin_slope * d.break1 + d.log_seg1_lin_off).ln()
+        + d.log_seg1_log_off;
+    let break2_log = d.log_seg2_log_slope
+        * (d.log_seg2_lin_slope * d.break2 + d.log_seg2_lin_off).ln()
+        + d.log_seg2_log_off;
+
+    let pix3 = [pix, b".rgb"].concat();
+
+    // This assumes the forward function is monotonically increasing.
+    write_double_log_segments(st, &pix3, break1_log, break2_log)?;
+
+    // Log Segment 1.
+    // TODO: This segment usually handles very dark (even negative) values, thus
+    // is rarely hit. As an optimization we can use "any()" to skip this in a
+    // branch (needs benchmarking to see if it's worth the effort).
+    write_log_to_lin_segment(
+        st,
+        &pix3,
+        "logSeg1",
+        d.log_seg1_log_slope,
+        d.log_seg1_log_off,
+        d.log_seg1_lin_slope,
+        d.log_seg1_lin_off,
+    )?;
+
+    // Log Segment 2.
+    write_log_to_lin_segment(
+        st,
+        &pix3,
+        "logSeg2",
+        d.log_seg2_log_slope,
+        d.log_seg2_log_off,
+        d.log_seg2_lin_slope,
+        d.log_seg2_lin_off,
+    )?;
+
+    // Linear Segment.
+    st.new_line();
+    st.new_line()
+        .put(st.float3_decl("linSeg")?)
+        .put(" = (")
+        .put(&pix3)
+        .put(" - ")
+        .put(st.float3_splat_f64(d.lin_seg_off))
+        .put(") * ")
+        .put(st.float3_splat_f64(1.0 / d.lin_seg_slope))
+        .put(";");
+
+    // Combine segments.
+    st.new_line();
+    st.new_line()
+        .put(&pix3)
+        .put(" = isSegment1 * logSeg1 + isSegment2 * linSeg + isSegment3 * logSeg2;");
+    Ok(())
+}
+
 /// Adds the code of a FixedFunction op to `shader_creator`'s function body.
 ///
 /// Port of `GetFixedFunctionGPUShaderProgram` (FixedFunctionOpGPU.cpp:2225-2231 @ v2.5.2).
@@ -1270,6 +1787,12 @@ pub fn get_fixed_function_gpu_processing_text(
         UvyToXyz => add_uvy_to_xyz(&pxl, st)?,
         XyzToLuv => add_xyz_to_luv(&pxl, st)?,
         LuvToXyz => add_luv_to_xyz(&pxl, st)?,
+        LinToPq => add_lin_to_pq(&pxl, st)?,
+        PqToLin => add_pq_to_lin(&pxl, st)?,
+        LinToGammaLog => add_lin_to_gamma_log(&pxl, st, func)?,
+        GammaLogToLin => add_gamma_log_to_lin(&pxl, st, func)?,
+        LinToDoubleLog => add_lin_to_double_log(&pxl, st, func)?,
+        DoubleLogToLin => add_double_log_to_lin(&pxl, st, func)?,
         style => return Err(not_ported(style)),
     }
 
