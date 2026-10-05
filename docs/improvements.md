@@ -795,6 +795,24 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p2-ff-cpu-2` (2.3c1, `RendererRgbToHsv`, `cfg(target_os)`); the
   battery's specials and `nan_combinations_match_the_wheel` compare it on both platforms.
 
+### I-83. The gamma-log styles give a NaN a different sign per platform
+
+- **Upstream:** `Renderer_LIN_TO_GAMMA_LOG::apply` and `Renderer_GAMMA_LOG_TO_LIN::apply`
+  restore the sign below the mirror point with `value * std::copysign(1.0f, mirrorin)`
+  (`ops/fixedfunction/FixedFunctionOpCPU.cpp:2271, 2314`), where `value` comes from
+  `|mirrorin|`, so for a NaN pixel it is a positive NaN. MSVC builds `±1.0f` and multiplies
+  (Windows wheel `0x18018d39e`, `0x18018cd22`): the NaN keeps its sign. GCC turns the product
+  into its `xorsign` pattern, `value ^ signbit(mirrorin)` (Linux wheel `0x354dbb`,
+  `0x355077`): the NaN's sign flips where the input's is set, so a NaN pixel's output takes
+  the pixel's sign. Every value other than a NaN gives the same bits on both. It is the mirror
+  Gamma styles' difference (I-60) in another renderer.
+- **Who notices:** images with negative NaNs (the sign bit set) through a
+  `FIXED_FUNCTION_LIN_TO_GAMMA_LOG` transform, in either direction: the output NaN is positive
+  on Windows and negative on Linux.
+- **A fix:** one rule for both platforms, e.g. always the input's sign.
+- **Status:** matched in `p2-ff-cpu-2` (2.3d1, `times_copysign_one`, `cfg(target_os)`); the
+  battery's specials and NaN buffers compare it bit for bit on both platforms.
+
 ### I-120. A color space transform's text runs the data bypass into the destination
 
 - **Upstream:** `operator<<(std::ostream &, const ColorSpaceTransform &)` prints
@@ -1481,16 +1499,18 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Upstream:** the setters take any number of parameters, and only `validate` checks how many
   the style takes (`ops/fixedfunction/FixedFunctionOpData.cpp:617-842`). Before that,
   `isInverse` of two Rec.2100 surrounds of the same style reads both first parameters without
-  a check (`FixedFunctionOpData.cpp:844-856`), the ACES 1.3 gamut compression's renderer
-  reads seven parameters (`ops/fixedfunction/FixedFunctionOpCPU.cpp:984-1002`), and the
-  Rec.2100 surround's renderer one (`FixedFunctionOpCPU.cpp:1406-1417`): on a shorter vector,
-  they read past its end. The processors validate their ops first (`OpRcPtrVec::finalize`), so
-  only code that queries such data directly gets there.
-- **Decided** (general rule): `FixedFunctionOpData::is_inverse` and the gamut compression's
-  and the surround's renderers (`RendererAcesGamutComp13Fwd::new`,
-  `RendererRec2100Surround::new`, so `get_fixed_function_cpu_renderer`) return an error there,
-  and only there: "FixedFunctionOp: the style has fewer parameters than it uses: upstream
-  reads past them."
+  a check (`FixedFunctionOpData.cpp:844-856`), and these renderers read their parameters
+  without one: the ACES 1.3 gamut compression's seven
+  (`ops/fixedfunction/FixedFunctionOpCPU.cpp:984-1002`), the Rec.2100 surround's one
+  (`FixedFunctionOpCPU.cpp:1406-1417`), the gamma-log's ten and the double-log's 13
+  (`FixedFunctionOpCPU.cpp:2230-2246, 2322-2344`). On a shorter vector, they read past its
+  end. The processors validate their ops first (`OpRcPtrVec::finalize`), so only code that
+  queries such data directly gets there.
+- **Decided** (general rule): `FixedFunctionOpData::is_inverse` and those renderers
+  (`RendererAcesGamutComp13Fwd::new`, `RendererRec2100Surround::new`,
+  `RendererLinToGammaLog::new`, `RendererLinToDoubleLog::new`, so
+  `get_fixed_function_cpu_renderer`) return an error there, and only there: "FixedFunctionOp:
+  the style has fewer parameters than it uses: upstream reads past them."
 - **Status:** matched in `p2-ff-cpu` (2.3a2); `fixed_function_op_data_tests.rs` checks the
   error, and that the comparisons upstream makes without reading (another style, or an inverse
   that validation refuses) give upstream's answers. The renderer in 2.3b:
@@ -1526,3 +1546,5 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `crates/ocio/tests/env_oracle.rs`.
   that validation refuses) give upstream's answers. The renderers in 2.3b and 2.3c1
   (`p2-ff-cpu-2`): `fixed_function_op_cpu_tests.rs` checks their errors.
+  that validation refuses) give upstream's answers. The renderers in 2.3b, and in 2.3c1 and
+  2.3d1 (`p2-ff-cpu-2`): `fixed_function_op_cpu_tests.rs` checks their errors.
