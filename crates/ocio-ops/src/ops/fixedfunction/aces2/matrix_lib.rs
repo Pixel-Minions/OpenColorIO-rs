@@ -61,6 +61,41 @@ pub fn mult_f3_f33(f3: &F3, mat33: &M33f) -> F3 {
     [row(0), row(1), row(2)]
 }
 
+/// How a wheel's compiled copy of [`mult_f3_f33`] computes one row, with `p_i` the product of
+/// `f3[i]` and `mat33[3r + i]`: which operand of the products comes first (`X`: the vector's,
+/// `M`: the matrix's), and the order of the sums. The value is the source's in every order;
+/// where two operands are NaN, the result is the first one's (`math_utils::sse_add`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Row {
+    /// `(x0*m0 + x1*m1) + x2*m2`: the source's order.
+    X012,
+    /// `(x1*m1 + x0*m0) + x2*m2`.
+    X102,
+    /// `(m0*x0 + m1*x1) + m2*x2`.
+    M012,
+    /// `m2*x2 + (m0*x0 + m1*x1)`.
+    M201,
+}
+
+/// [`mult_f3_f33`] with each row computed as `rows` says: the orders of a wheel's compiled
+/// copy, which its caller has read from that wheel's machine code.
+#[inline]
+pub fn mult_f3_f33_rows(f3: &F3, mat33: &M33f, rows: [Row; 3]) -> F3 {
+    let row = |r: usize| {
+        let m = &mat33[3 * r..3 * r + 3];
+        let p = |i: usize| match rows[r] {
+            Row::X012 | Row::X102 => sse_mul(f3[i], m[i]),
+            Row::M012 | Row::M201 => sse_mul(m[i], f3[i]),
+        };
+        match rows[r] {
+            Row::X012 | Row::M012 => sse_add(sse_add(p(0), p(1)), p(2)),
+            Row::X102 => sse_add(sse_add(p(1), p(0)), p(2)),
+            Row::M201 => sse_add(p(2), sse_add(p(0), p(1))),
+        }
+    };
+    [row(0), row(1), row(2)]
+}
+
 /// The product `a * b` of two 3x3 matrices, each entry summed left to right.
 ///
 /// Port of `mult_f33_f33` (src/OpenColorIO/ops/fixedfunction/ACES2/MatrixLib.h:53-68 @ v2.5.2).

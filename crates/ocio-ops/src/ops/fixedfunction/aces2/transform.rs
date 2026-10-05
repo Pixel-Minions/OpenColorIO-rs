@@ -24,10 +24,11 @@ use super::common::{
     f32_to_u32, from_radians_, table_base, to_radians,
 };
 use super::matrix_lib::{
-    F2, F3, M33f, f3_from_f, invert_f33, mult_f_f3, mult_f3_f33, mult_f33_f33, scale_f33,
+    F2, F3, M33f, Row, f3_from_f, invert_f33, mult_f_f3, mult_f3_f33, mult_f3_f33_rows,
+    mult_f33_f33, scale_f33,
 };
 use crate::exception::{Exception, Result};
-use crate::math_utils::{lerpf, sse_add, sse_mul, std_max, std_min};
+use crate::math_utils::{lerpf, sse_add, sse_mul, sse_sub, std_max, std_min};
 use crate::transforms::builtins::color_matrix_helpers::Primaries;
 
 /// `cuspCornerCount`, as an index.
@@ -36,6 +37,30 @@ const CUSP_CORNERS: usize = CUSP_CORNER_COUNT as usize;
 const TOTAL_CORNERS: usize = TOTAL_CORNER_COUNT as usize;
 /// `max_sorted_corners`, as an index.
 const MAX_SORTED: usize = MAX_SORTED_CORNERS as usize;
+
+/// Whether the platform's wheel is the Windows one (MSVC) rather than the Linux one (GCC).
+///
+/// Where both operands of an operation can be NaN, the result is the first one's
+/// (`math_utils::sse_add`), and the two compilers ordered the operands of the renderers'
+/// functions differently, and differently in each inlined copy of a helper. The functions
+/// the renderers call follow their wheel's machine code, read with `tools/wheel-inspect`: each
+/// names the compiled functions it follows (Linux symbols; Windows `sub_` addresses, which
+/// `wheel-inspect disasm 0x...` prints), and `MSVC` picks the platform's order. The values
+/// are the source's in every order: only which NaN comes out differs
+/// (`docs/improvements.md` I-81).
+const MSVC: bool = cfg!(target_os = "windows");
+
+/// `a + b`, or `b + a` where `swap`: the same value, but the first operand's NaN.
+#[inline]
+fn add_swap(a: f32, b: f32, swap: bool) -> f32 {
+    if swap { sse_add(b, a) } else { sse_add(a, b) }
+}
+
+/// `a * b`, or `b * a` where `swap`: the same value, but the first operand's NaN.
+#[inline]
+fn mul_swap(a: f32, b: f32, swap: bool) -> f32 {
+    if swap { sse_mul(b, a) } else { sse_mul(a, b) }
+}
 
 /// The error where hues that don't compare (NaN) or a degenerate gamut make upstream's hue table
 /// code read or write past its arrays (`docs/improvements.md` U-32).
@@ -219,9 +244,18 @@ pub fn y_to_j(y: f32, p: &JMhParams) -> f32 {
 
 /// RGB to the achromatic and opponent responses.
 ///
+/// The matrices' rows in the wheels' orders (`ACES2::RGB_to_Aab`, Linux `0x34b5f0`, Windows
+/// `sub_1802f9170`).
+///
 /// Port of `RGB_to_Aab` (Transform.cpp:175-187 @ v2.5.2).
 pub fn rgb_to_aab(rgb: &F3, p: &JMhParams) -> F3 {
-    let rgb_m = mult_f3_f33(rgb, &p.matrix_rgb_to_cam16_c);
+    use Row::{M012, M201, X012, X102};
+    let (rows_m, rows_a) = if MSVC {
+        ([X102, X102, X102], [X102, X012, X012])
+    } else {
+        ([M012, M012, X012], [X012, M201, M012])
+    };
+    let rgb_m = mult_f3_f33_rows(rgb, &p.matrix_rgb_to_cam16_c, rows_m);
 
     let rgb_a = [
         post_adaptation_cone_response_compression_fwd(rgb_m[0]),
@@ -229,7 +263,7 @@ pub fn rgb_to_aab(rgb: &F3, p: &JMhParams) -> F3 {
         post_adaptation_cone_response_compression_fwd(rgb_m[2]),
     ];
 
-    mult_f3_f33(&rgb_a, &p.matrix_cone_response_to_aab)
+    mult_f3_f33_rows(&rgb_a, &p.matrix_cone_response_to_aab, rows_a)
 }
 
 /// The achromatic and opponent responses to lightness, colourfulness and hue (degrees); 0 for
@@ -256,6 +290,9 @@ pub fn rgb_to_jmh(rgb: &F3, p: &JMhParams) -> F3 {
 
 /// JMh to Aab with the hue's cosine and sine given.
 ///
+/// `b` is `M * sin_hr` on Windows and `sin_hr * M` on Linux (`ACES2::JMh_to_Aab`, Linux
+/// `0x34b960`, Windows `sub_1802f8e50`).
+///
 /// Port of `JMh_to_Aab(const f3 &, const float &, const float &, const JMhParams &)`
 /// (Transform.cpp:210-219 @ v2.5.2).
 pub fn jmh_to_aab_with(jmh: &F3, cos_hr: f32, sin_hr: f32, p: &JMhParams) -> F3 {
@@ -264,10 +301,14 @@ pub fn jmh_to_aab_with(jmh: &F3, cos_hr: f32, sin_hr: f32, p: &JMhParams) -> F3 
 
     let a_ = j_to_achromatic_n(j, p.inv_cz);
     let a = sse_mul(m, cos_hr);
-    let b = sse_mul(m, sin_hr);
+    let b = mul_swap(m, sin_hr, !MSVC);
     [a_, a, b]
 }
 
+/// JMh to Aab, `a` and `b` as `cos_hr * M` and `sin_hr * M`: the order of both wheels' copy
+/// inlined in `JMh_to_RGB` (Linux `0x34bcd0`, Windows `sub_1802f8ed0`), the one the renderers
+/// run.
+///
 /// Port of `JMh_to_Aab(const f3 &, const JMhParams &)` (Transform.cpp:221-229 @ v2.5.2).
 pub fn jmh_to_aab(jmh: &F3, p: &JMhParams) -> F3 {
     let h = jmh[2];
@@ -275,12 +316,23 @@ pub fn jmh_to_aab(jmh: &F3, p: &JMhParams) -> F3 {
     let cos_hr = h_rad.cos();
     let sin_hr = h_rad.sin();
 
-    jmh_to_aab_with(jmh, cos_hr, sin_hr, p)
+    let m = jmh[1];
+    let a_ = j_to_achromatic_n(jmh[0], p.inv_cz);
+    [a_, sse_mul(cos_hr, m), sse_mul(sin_hr, m)]
 }
 
+/// The matrices' rows in the wheels' orders (`ACES2::Aab_to_RGB`, Linux `0x34ba60`, Windows
+/// `sub_1802f8c00`; the copies inlined in `JMh_to_RGB` have the same).
+///
 /// Port of `Aab_to_RGB` (Transform.cpp:231-243 @ v2.5.2).
 pub fn aab_to_rgb(aab: &F3, p: &JMhParams) -> F3 {
-    let rgb_a = mult_f3_f33(aab, &p.matrix_aab_to_cone_response);
+    use Row::{M012, M201, X012, X102};
+    let (rows_a, rows_m) = if MSVC {
+        ([X102, X102, X102], [X102, X102, X102])
+    } else {
+        ([M012, M012, X012], [X012, M201, M012])
+    };
+    let rgb_a = mult_f3_f33_rows(aab, &p.matrix_aab_to_cone_response, rows_a);
 
     let rgb_m = [
         post_adaptation_cone_response_compression_inv(rgb_a[0]),
@@ -288,7 +340,7 @@ pub fn aab_to_rgb(aab: &F3, p: &JMhParams) -> F3 {
         post_adaptation_cone_response_compression_inv(rgb_a[2]),
     ];
 
-    mult_f3_f33(&rgb_m, &p.matrix_cam16_c_to_rgb)
+    mult_f3_f33_rows(&rgb_m, &p.matrix_cam16_c_to_rgb, rows_m)
 }
 
 /// Port of `JMh_to_RGB` (Transform.cpp:245-250 @ v2.5.2).
@@ -329,30 +381,45 @@ pub fn chroma_compress_norm(cos_hr1: f32, sin_hr1: f32, chroma_compress_scale: f
     m(big_m, chroma_compress_scale) // TODO: is it worth prescaling the above weights?
 }
 
-/// Port of `toe_fwd` (Transform.cpp:335-349 @ v2.5.2).
+/// The operand orders of a compiled copy of [`toe_fwd`], which differ between the wheels'
+/// copies; every copy computes `minus_ac` as `(k3 * k2) * x` and the discriminant as
+/// `4 * minus_ac + minus_b * minus_b`.
+#[derive(Clone, Copy, Debug)]
+pub struct ToeFwdOrder {
+    /// `k2 * k2 + k1_in * k1_in`, not `k1_in * k1_in + k2 * k2`.
+    pub k2_squared_first: bool,
+    /// `(k1 + limit) / (k2 + limit)`, not `(limit + k1) / (limit + k2)`.
+    pub k_plus_limit: bool,
+    /// `x * k3`, not `k3 * x`.
+    pub x_times_k3: bool,
+    /// `sqrt(..) + minus_b`, not `minus_b + sqrt(..)`.
+    pub root_first: bool,
+}
+
+/// Port of `toe_fwd` (Transform.cpp:335-349 @ v2.5.2), in the operand orders `o`.
 #[inline]
-pub fn toe_fwd(x: f32, limit: f32, k1_in: f32, k2_in: f32) -> f32 {
+pub fn toe_fwd(x: f32, limit: f32, k1_in: f32, k2_in: f32, o: ToeFwdOrder) -> f32 {
     if x > limit {
         return x;
     }
 
     let m = sse_mul;
     let k2 = std_max(k2_in, 0.001);
-    let k1 = sse_add(m(k1_in, k1_in), m(k2, k2)).sqrt();
-    let k3 = sse_add(limit, k1) / sse_add(limit, k2);
+    let k1 = add_swap(m(k1_in, k1_in), m(k2, k2), o.k2_squared_first).sqrt();
+    let k3 = add_swap(limit, k1, o.k_plus_limit) / add_swap(limit, k2, o.k_plus_limit);
 
-    let minus_b = m(k3, x) - k1;
-    let minus_ac = m(m(k2, k3), x); // a is 1.0
+    let minus_b = sse_sub(mul_swap(k3, x, o.x_times_k3), k1);
+    let minus_ac = m(m(k3, k2), x); // a is 1.0
     // a is 1.0, mins_b squared == b^2
-    m(
-        0.5,
-        sse_add(
-            minus_b,
-            sse_add(m(minus_b, minus_b), m(4.0, minus_ac)).sqrt(),
-        ),
-    )
+    let root = sse_add(m(minus_ac, 4.0), m(minus_b, minus_b)).sqrt();
+    m(add_swap(minus_b, root, o.root_first), 0.5)
 }
 
+/// `(k1 + limit) / (k2 + limit)`, `k1 * x + x * x` on Windows (both copies inlined in
+/// `chroma_compress_inv`, `sub_1802fa250`), `(k1 + limit) / (limit + k2)`, `x * x + x * k1` on
+/// Linux (both copies in `ACES2::chroma_compress_inv`, `0x34c8b0`); both wheels compute
+/// `k3 * (k2 + x)`.
+///
 /// Port of `toe_inv` (Transform.cpp:351-362 @ v2.5.2).
 #[inline]
 pub fn toe_inv(x: f32, limit: f32, k1_in: f32, k2_in: f32) -> f32 {
@@ -363,8 +430,13 @@ pub fn toe_inv(x: f32, limit: f32, k1_in: f32, k2_in: f32) -> f32 {
     let m = sse_mul;
     let k2 = std_max(k2_in, 0.001);
     let k1 = sse_add(m(k1_in, k1_in), m(k2, k2)).sqrt();
-    let k3 = sse_add(limit, k1) / sse_add(limit, k2);
-    sse_add(m(x, x), m(k1, x)) / m(k3, sse_add(x, k2))
+    let k3 = sse_add(k1, limit) / add_swap(limit, k2, MSVC);
+    let numerator = if MSVC {
+        sse_add(m(k1, x), m(x, x))
+    } else {
+        sse_add(m(x, x), m(x, k1))
+    };
+    numerator / m(k3, sse_add(k2, x))
 }
 
 /// The ACES 2.0 tone scale of a luminance, or its inverse.
@@ -427,6 +499,11 @@ pub fn tonescale_a_to_j_fwd(a: f32, p: &JMhParams, pt: &ToneScaleParams) -> f32 
 
 /// The chroma compression of a JMh, given its tone-scaled J and the hue's normalisation.
 ///
+/// In the wheels' orders (Linux `ACES2::chroma_compress_fwd`, `0x34c4d0`, its two copies of
+/// `toe_fwd` inlined; Windows `sub_1802fa060`, which calls `toe_fwd` as `sub_1802fd040`):
+/// `limit` is `reachMaxM * pow(..) / Mnorm` on Linux, and the colourfulness `pow(..) * M` on
+/// Windows.
+///
 /// Port of `chroma_compress_fwd` (Transform.cpp:417-439 @ v2.5.2).
 pub fn chroma_compress_fwd(
     jmh: &F3,
@@ -442,21 +519,50 @@ pub fn chroma_compress_fwd(
     let m = sse_mul;
     let mut m_cp = mm;
 
+    // Windows calls one copy of `toe_fwd`; Linux inlines two.
+    const TOE_WINDOWS: ToeFwdOrder = ToeFwdOrder {
+        k2_squared_first: true,
+        k_plus_limit: true,
+        x_times_k3: false,
+        root_first: true,
+    };
+    let (toe_1, toe_2) = if MSVC {
+        (TOE_WINDOWS, TOE_WINDOWS)
+    } else {
+        (
+            ToeFwdOrder {
+                k2_squared_first: true,
+                k_plus_limit: false,
+                x_times_k3: true,
+                root_first: true,
+            },
+            ToeFwdOrder {
+                k2_squared_first: false,
+                k_plus_limit: false,
+                x_times_k3: false,
+                root_first: false,
+            },
+        )
+    };
+
     if mm != 0.0 {
         let nj = j_ts / pr.limit_j_max;
         let snj = std_max(0.0, 1.0 - nj);
-        let limit = m(nj.powf(pr.model_gamma_inv), pr.reach_max_m) / mnorm;
+        let limit = mul_swap(nj.powf(pr.model_gamma_inv), pr.reach_max_m, !MSVC) / mnorm;
 
-        m_cp = m(mm, (j_ts / j).powf(pr.model_gamma_inv));
+        m_cp = mul_swap(mm, (j_ts / j).powf(pr.model_gamma_inv), MSVC);
         m_cp /= mnorm;
-        m_cp = limit
-            - toe_fwd(
-                limit - m_cp,
+        m_cp = sse_sub(
+            limit,
+            toe_fwd(
+                sse_sub(limit, m_cp),
                 limit - 0.001,
                 m(snj, pc.sat),
                 sse_add(m(nj, nj), pc.sat_thr).sqrt(),
-            );
-        m_cp = toe_fwd(m_cp, limit, m(nj, pc.compr), snj);
+                toe_1,
+            ),
+        );
+        m_cp = toe_fwd(m_cp, limit, m(nj, pc.compr), snj, toe_2);
         m_cp = m(m_cp, mnorm);
     }
 
@@ -464,6 +570,11 @@ pub fn chroma_compress_fwd(
 }
 
 /// The inverse of [`chroma_compress_fwd`], given the original J.
+///
+/// In the wheels' orders (Linux `ACES2::chroma_compress_inv`, `0x34c8b0`; Windows
+/// `sub_1802fa250`; both inline the two copies of `toe_inv`): `limit` is
+/// `reachMaxM * pow(..) / Mnorm` and the colourfulness `Mnorm * M` on Linux, the last product
+/// `pow(..) * M` on Windows.
 ///
 /// Port of `chroma_compress_inv` (Transform.cpp:441-462 @ v2.5.2).
 pub fn chroma_compress_inv(
@@ -483,19 +594,21 @@ pub fn chroma_compress_inv(
     if m_cp != 0.0 {
         let nj = j_ts / pr.limit_j_max;
         let snj = std_max(0.0, 1.0 - nj);
-        let limit = m(nj.powf(pr.model_gamma_inv), pr.reach_max_m) / mnorm;
+        let limit = mul_swap(nj.powf(pr.model_gamma_inv), pr.reach_max_m, !MSVC) / mnorm;
 
         mm = m_cp / mnorm;
         mm = toe_inv(mm, limit, m(nj, pc.compr), snj);
-        mm = limit
-            - toe_inv(
-                limit - mm,
+        mm = sse_sub(
+            limit,
+            toe_inv(
+                sse_sub(limit, mm),
                 limit - 0.001,
                 m(snj, pc.sat),
                 sse_add(m(nj, nj), pc.sat_thr).sqrt(),
-            );
-        mm = m(mm, mnorm);
-        mm = m(mm, (j_ts / j).powf(-pr.model_gamma_inv));
+            ),
+        );
+        mm = mul_swap(mm, mnorm, !MSVC);
+        mm = mul_swap(mm, (j_ts / j).powf(-pr.model_gamma_inv), MSVC);
     }
 
     [j, mm, h]

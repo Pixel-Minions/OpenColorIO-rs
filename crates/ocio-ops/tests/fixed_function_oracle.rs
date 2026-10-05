@@ -453,6 +453,70 @@ fn gamma_log_and_double_log_match_the_wheel() {
     });
 }
 
+/// The ACES 2.0 outputs' limiting primaries: Rec.709, P3-D65, Rec.2020, P3-DCI, P3-D60.
+const ACES2_PRIMARIES: [[f64; 8]; 5] = [
+    [0.64, 0.33, 0.30, 0.60, 0.15, 0.06, 0.3127, 0.3290],
+    [0.680, 0.320, 0.265, 0.690, 0.150, 0.060, 0.3127, 0.3290],
+    [0.708, 0.292, 0.170, 0.797, 0.131, 0.046, 0.3127, 0.3290],
+    [0.680, 0.320, 0.265, 0.690, 0.150, 0.060, 0.314, 0.351],
+    [0.680, 0.320, 0.265, 0.690, 0.150, 0.060, 0.32168, 0.33767],
+];
+
+/// ACES2065-1's primaries (AP0), as upstream's aces_rgb_to_jmh_20 gives them
+/// (tests/cpu/ops/fixedfunction/FixedFunctionOpCPU_tests.cpp:773 @ v2.5.2).
+const AP0: [f64; 8] = [
+    0.7347, 0.2653, 0.0000, 1.0000, 0.0001, -0.0770, 0.32168, 0.33767,
+];
+
+#[test]
+fn aces_2_styles_match_the_wheel() {
+    use FixedFunctionStyle::*;
+    // The parameter of upstream's aces_tonescale_compress_20
+    // (tests/cpu/ops/fixedfunction/FixedFunctionOpCPU_tests.cpp @ v2.5.2).
+    let tonescale = Case::new(
+        "AcesTonescaleCompress20 1000",
+        Fixed::new(AcesTonescaleCompress20, &[1000.0]),
+    );
+    let rgb_to_jmh = Case::new("AcesRgbToJmh20 AP0", Fixed::new(AcesRgbToJmh20, &AP0));
+    let bases = vec![tonescale.clone(), rgb_to_jmh.clone()];
+    let mut cases = vec![tonescale, rgb_to_jmh];
+    for peak in [100.0, 4000.0, 108.0, 48.0, 500.0] {
+        cases.push(Case::new(
+            format!("AcesTonescaleCompress20 {peak}"),
+            Fixed::new(AcesTonescaleCompress20, &[peak]),
+        ));
+    }
+    // AP1, and the outputs'.
+    let ap1 = [0.713, 0.293, 0.165, 0.830, 0.128, 0.044, 0.32168, 0.33767];
+    for (i, primaries) in std::iter::once(&ap1).chain(&ACES2_PRIMARIES).enumerate() {
+        cases.push(Case::new(
+            format!("AcesRgbToJmh20 {i}"),
+            Fixed::new(AcesRgbToJmh20, primaries),
+        ));
+    }
+    // Refusals: the peak's bounds and its fraction, and short parameters.
+    for peak in [0.5, 10001.0, 100.5] {
+        cases.push(Case::new(
+            format!("refused AcesTonescaleCompress20 peak {peak}"),
+            Fixed::new(AcesTonescaleCompress20, &[peak]),
+        ));
+    }
+    cases.push(Case::new(
+        "refused AcesRgbToJmh20 7 parameters",
+        Fixed::new(AcesRgbToJmh20, &AP0[..7]),
+    ));
+    cases.push(Case::new(
+        "refused AcesTonescaleCompress20 no parameter",
+        Fixed::new(AcesTonescaleCompress20, &[]),
+    ));
+
+    battery::run(&FixedFamily {
+        name: "ACES 2.0",
+        cases,
+        bases,
+    });
+}
+
 /// The values of [`nan_combination_pixels`]: NaNs of different signs and payloads, quiet and
 /// signalling, with finite values and infinities of both signs.
 const COMBINATION_VALUES: [u32; 14] = [
@@ -505,6 +569,8 @@ fn nan_combinations_match_the_wheel() {
         Fixed::new(XyzToXyy, &[]),
         Fixed::new(XyzToUvy, &[]),
         Fixed::new(XyzToLuv, &[]),
+        Fixed::new(AcesTonescaleCompress20, &[1000.0]),
+        Fixed::new(AcesRgbToJmh20, &AP0),
     ];
     let family = FixedFamily {
         name: "NaN combinations",
