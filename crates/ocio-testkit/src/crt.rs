@@ -485,6 +485,187 @@ pub fn strncasecmp_c(a: &[u8], b: &[u8], n: usize) -> i32 {
     r
 }
 
+/// The system calls `Platform.cpp` makes for text conversions and file identities: Windows'
+/// `MultiByteToWideChar` and `WideCharToMultiByte` (kernel32) and the UCRT's `_wstat`
+/// (`_wstat64i32`, which `struct _stat` maps to on x64), glibc's `stat`.
+mod sys {
+    #[cfg(target_os = "linux")]
+    use std::ffi::{c_char, c_int};
+    #[cfg(windows)]
+    use std::ffi::{c_char, c_int, c_uint, c_ushort};
+
+    /// `struct _stat64i32` (ucrt/sys/stat.h).
+    #[cfg(windows)]
+    #[repr(C)]
+    #[derive(Default)]
+    pub(super) struct Stat64i32 {
+        pub(super) st_dev: c_uint,
+        pub(super) st_ino: c_ushort,
+        pub(super) st_mode: c_ushort,
+        pub(super) st_nlink: i16,
+        pub(super) st_uid: i16,
+        pub(super) st_gid: i16,
+        pub(super) st_rdev: c_uint,
+        pub(super) st_size: i32,
+        pub(super) st_atime: i64,
+        pub(super) st_mtime: i64,
+        pub(super) st_ctime: i64,
+    }
+
+    #[cfg(windows)]
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        pub(super) fn MultiByteToWideChar(
+            code_page: c_uint,
+            flags: u32,
+            src: *const c_char,
+            src_len: c_int,
+            dst: *mut u16,
+            dst_len: c_int,
+        ) -> c_int;
+        pub(super) fn WideCharToMultiByte(
+            code_page: c_uint,
+            flags: u32,
+            src: *const u16,
+            src_len: c_int,
+            dst: *mut c_char,
+            dst_len: c_int,
+            default_char: *const c_char,
+            used_default: *mut c_int,
+        ) -> c_int;
+    }
+
+    #[cfg(windows)]
+    unsafe extern "C" {
+        pub(super) fn _wstat64i32(path: *const u16, buffer: *mut Stat64i32) -> c_int;
+    }
+
+    /// `struct stat` of glibc on x86_64 (bits/struct_stat.h).
+    #[cfg(target_os = "linux")]
+    #[repr(C)]
+    #[derive(Default)]
+    pub(super) struct Stat {
+        pub(super) st_dev: u64,
+        pub(super) st_ino: u64,
+        pub(super) st_nlink: u64,
+        pub(super) st_mode: u32,
+        pub(super) st_uid: u32,
+        pub(super) st_gid: u32,
+        pub(super) pad0: i32,
+        pub(super) st_rdev: u64,
+        pub(super) st_size: i64,
+        pub(super) st_blksize: i64,
+        pub(super) st_blocks: i64,
+        pub(super) times: [i64; 6],
+        pub(super) reserved: [i64; 3],
+    }
+
+    #[cfg(target_os = "linux")]
+    unsafe extern "C" {
+        pub(super) fn stat(path: *const c_char, buffer: *mut Stat) -> c_int;
+    }
+}
+
+/// `CP_UTF8`.
+#[cfg(windows)]
+const CP_UTF8: std::ffi::c_uint = 65001;
+
+/// `MultiByteToWideChar(CP_UTF8, 0, ...)` on `bytes`: `Platform::Utf8ToUtf16`.
+#[cfg(windows)]
+pub fn utf8_to_utf16_system(bytes: &[u8]) -> Vec<u16> {
+    if bytes.is_empty() {
+        return Vec::new();
+    }
+    let len = c_int::try_from(bytes.len()).expect("a C int length");
+    // SAFETY: `bytes` holds `len` bytes; a null destination with size 0 asks for the size.
+    let size = unsafe {
+        sys::MultiByteToWideChar(
+            CP_UTF8,
+            0,
+            bytes.as_ptr().cast(),
+            len,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    let mut out = vec![0u16; usize::try_from(size).expect("a size")];
+    // SAFETY: `out` holds `size` units, the size the first call asked for.
+    let written = unsafe {
+        sys::MultiByteToWideChar(
+            CP_UTF8,
+            0,
+            bytes.as_ptr().cast(),
+            len,
+            out.as_mut_ptr(),
+            size,
+        )
+    };
+    out.truncate(usize::try_from(written).expect("a size"));
+    out
+}
+
+/// `WideCharToMultiByte(CP_UTF8, 0, ...)` on `units`: `Platform::Utf16ToUtf8`.
+#[cfg(windows)]
+pub fn utf16_to_utf8_system(units: &[u16]) -> Vec<u8> {
+    if units.is_empty() {
+        return Vec::new();
+    }
+    let len = c_int::try_from(units.len()).expect("a C int length");
+    let null = std::ptr::null_mut();
+    // SAFETY: `units` holds `len` units; a null destination with size 0 asks for the size.
+    let size = unsafe {
+        sys::WideCharToMultiByte(
+            CP_UTF8,
+            0,
+            units.as_ptr(),
+            len,
+            null,
+            0,
+            std::ptr::null(),
+            null.cast(),
+        )
+    };
+    let mut out = vec![0u8; usize::try_from(size).expect("a size")];
+    // SAFETY: `out` holds `size` bytes, the size the first call asked for.
+    let written = unsafe {
+        sys::WideCharToMultiByte(
+            CP_UTF8,
+            0,
+            units.as_ptr(),
+            len,
+            out.as_mut_ptr().cast(),
+            size,
+            std::ptr::null(),
+            std::ptr::null_mut(),
+        )
+    };
+    out.truncate(usize::try_from(written).expect("a size"));
+    out
+}
+
+/// The `st_dev` of `_wstat` on the UTF-16 path `path`, or `None` when it fails:
+/// `Platform::CreateFileContentHash` on Windows.
+#[cfg(windows)]
+pub fn wstat_dev(path: &[u16]) -> Option<u32> {
+    let mut wide = path.to_vec();
+    wide.push(0);
+    let mut info = sys::Stat64i32::default();
+    // SAFETY: `wide` is NUL-terminated and `info` is a `struct _stat64i32`.
+    let r = unsafe { sys::_wstat64i32(wide.as_ptr(), &mut info) };
+    (r == 0).then_some(info.st_dev)
+}
+
+/// The `st_dev` and `st_ino` of `stat` on the C string `path` + NUL (so it ends at its first
+/// NUL), or `None` when it fails: `Platform::CreateFileContentHash` on Linux.
+#[cfg(target_os = "linux")]
+pub fn stat_dev_ino(path: &[u8]) -> Option<(u64, u64)> {
+    let path = nul_terminated(path);
+    let mut info = sys::Stat::default();
+    // SAFETY: `path` is NUL-terminated and `info` is glibc's `struct stat` on x86_64.
+    let r = unsafe { sys::stat(path.as_ptr().cast(), &mut info) };
+    (r == 0).then_some((info.st_dev, info.st_ino))
+}
+
 /// The number of bits in C `long` on this platform (32 on Windows, 64 on Linux).
 pub const LONG_BITS: u32 = c_long::BITS;
 

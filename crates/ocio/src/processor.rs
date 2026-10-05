@@ -273,7 +273,7 @@ fn environment_override(o_flags: OptimizationFlags) -> Result<OptimizationFlags>
     let env_flag = getenv(OCIO_OPTIMIZATION_FLAGS_ENVVAR).unwrap_or_default();
     if !env_flag.is_empty() {
         // Use 0 to allow base to be determined by the format.
-        return match stoul(env_flag.as_bytes()) {
+        return match stoul(&env_flag) {
             Ok(value) => Ok(OptimizationFlags(value)),
             Err(what) => Err(Exception::new(format!(
                 "Illegal value for {OCIO_OPTIMIZATION_FLAGS_ENVVAR}: {what}"

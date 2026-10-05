@@ -26,6 +26,9 @@ pub use ocio_ops::open_color_types::{
     OptimizationFlags, TransformDirection,
 };
 pub use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
+pub use ocio_ops::platform::{
+    get_env_variable, is_env_variable_present, set_env_variable, unset_env_variable,
+};
 pub use processor::{Processor, ProcessorCacheFlags, ProcessorMetadata};
 pub use transform::{Transform, TransformType};
 pub use transforms::allocation_transform::AllocationTransform;

@@ -206,7 +206,7 @@ fn run_port(case: &Case) -> Value {
         .iter()
         .map(|(k, v)| (k.to_string(), v.clone()))
         .collect();
-    set_env_provider(Some(Arc::new(MapEnv(env.clone()))));
+    set_env_provider(Some(Arc::new(MapEnv::from(env.clone()))));
 
     let mut config: Option<Arc<Config>> = None;
     let mut objects: Vec<(String, Object)> = Vec::new();
@@ -226,7 +226,7 @@ fn run_port(case: &Case) -> Value {
                         Some(v) => env.insert(name.to_string(), v.clone()),
                         None => env.remove(*name),
                     };
-                    set_env_provider(Some(Arc::new(MapEnv(env.clone()))));
+                    set_env_provider(Some(Arc::new(MapEnv::from(env.clone()))));
                 }
                 Step::SetCacheFlags(flags) => config
                     .as_ref()

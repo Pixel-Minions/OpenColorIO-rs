@@ -953,6 +953,46 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **A fix:** the repr its values give, like the other grading classes'.
 - **Status:** to be matched in Phase 6 (D13).
 
+## Platform, environment and paths
+
+### I-112. Temporary file names
+
+- **Upstream:** `Platform::CreateTempFilename` names a file `/tmp/ocio_<n>` on Linux, `<n>` drawn
+  with `std::uniform_int_distribution<int>` from a default-seeded `std::mt19937`, and takes
+  `tmpnam_s`'s name on Windows (`<temp dir>\u<id>.<k>`) (`Platform.cpp:210-259` @ v2.5.2). Only
+  upstream's tests call it.
+- **Who notices:** nobody through the API: no library code calls it.
+- **A fix:** none needed. The port keeps the forms (`/tmp/ocio_<n>`, a name in the temporary
+  directory) with its own numbers: the distribution's algorithm is the C++ library's, which the
+  standard leaves open, and `tmpnam_s`'s names come from the UCRT.
+- **Status:** not matched, by design (p3-context 3.5a, `crates/ocio-ops/src/platform.rs`).
+
+### I-113. Windows converts names, values and paths through UTF-16
+
+- **Upstream:** on Windows, the wheel converts environment variable names and values, and file
+  paths, between UTF-8 and UTF-16 with `MultiByteToWideChar` and `WideCharToMultiByte`
+  (`Platform.cpp:48-142, 261-322, 333-357` @ v2.5.2). Bytes that aren't UTF-8 become U+FFFD,
+  with Windows' own rule (a lead byte and a continuation byte outside its range are one
+  replacement), and an unpaired surrogate in the environment becomes U+FFFD. Linux passes the
+  bytes. Names compare without case on Windows (`GetEnvironmentVariableW`), exactly on Linux;
+  and setting a variable to "" removes it on Windows, keeps it empty on Linux.
+- **Who notices:** configs and environments with names or paths that aren't UTF-8, or that
+  differ only in case, used on both platforms.
+- **A fix:** none: these are the platforms' rules.
+- **Status:** matched in p3-context (3.5a): the conversions checked against the system for every
+  string of up to 4 bytes or units over each class (`crates/ocio-ops/tests/platform_crt.rs`).
+
+### I-114. Windows device names as files
+
+- **Upstream:** `CreateFileContentHash` asks `_wstat` whether a file exists. On Windows it finds
+  some device names, in any directory that exists: `nul`, `aux`, `com1`, `conin$`, `nul:` (with
+  `st_dev` -1), but not `con` or `lpt1` (as probed on Windows 11).
+- **Who notices:** a config whose file references name such devices; `resolveFileLocation` then
+  finds them.
+- **A fix:** treat device names as missing on Windows, as the port does.
+- **Status:** not matched (p3-context 3.5a): the port asks `std::fs::metadata`, which finds no
+  device. For the owner to decide, with D-5's kind of limitation.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on

@@ -504,7 +504,7 @@ path = "src/OpenColorIO/Platform.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/platform.rs"]
 status = "partial"
-note = "Getenv, isEnvPresent, Strcasecmp, Strncasecmp; Setenv/Unsetenv, AlignedMalloc, CreateTempFilename, UTF-8/16 conversion pending. Strcasecmp and Strncasecmp take bytes that end at a NUL and fold A-Z only, as the classic C locale does (deviation D-4), checked against _stricmp/_strnicmp (UCRT) and strcasecmp/strncasecmp (glibc) for every pair of bytes (tests/platform_crt.rs)"
+note = "p3-context 3.5a: everything but AlignedMalloc/AlignedFree (no caller in the port yet). The environment goes through an injectable provider with each platform's rules, bytes, and the whole-environment listing (environ / _wenviron); what OCIO sets goes to an overlay (deviation D-5). Utf8ToUtf16/Utf16ToUtf8 reproduce MultiByteToWideChar/WideCharToMultiByte, CreateFileContentHash _wstat/stat (devices: I-114), checked against the system in tests/platform_crt.rs; CreateTempFilename's names differ (I-112). The public GetEnvVariable, SetEnvVariable, UnsetEnvVariable, IsEnvVariablePresent are re-exported by ocio. Strcasecmp and Strncasecmp take bytes that end at a NUL and fold A-Z only, as the classic C locale does (deviation D-4), checked against _stricmp/_strnicmp (UCRT) and strcasecmp/strncasecmp (glibc) for every pair of bytes (tests/platform_crt.rs)"
 
 [[file]]
 path = "src/OpenColorIO/Platform.h"
@@ -4320,7 +4320,7 @@ path = "tests/cpu/Platform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/platform_tests.rs"]
 status = "partial"
-note = "string_compare. The others need Setenv/Unsetenv, AlignedMalloc, CreateTempFilename or the UTF-8/16 conversions"
+note = "string_compare; envVariable, getenv, setenv (without their checks through the Windows API, deviation D-5), create_temp_filename, utf8_utf16_convert (p3-context 3.5a). aligned_memory_test waits for AlignedMalloc"
 
 [[file]]
 path = "tests/cpu/Processor_tests.cpp"
