@@ -56,6 +56,7 @@ def transform_text(args, blobs):
     args:
       transforms  transform specs (see spec.transform), each built on its own
       pairs       [[i, j], ...]: transforms[i].equals(transforms[j]) for each (optional)
+    request blobs: the transform specs' blobs, which they share (see spec.py)
     result:
       transforms  per spec, in order: {"class", "repr", "str", "validate": null, or what it
                   raised ({"type", "message"})}, or {"exception", "stage": "transform"} when
@@ -89,7 +90,7 @@ def transform_text(args, blobs):
     with captured_log() as log:
         for transform_spec in specs:
             try:
-                transform = spec.transform(transform_spec)
+                transform = spec.transform(transform_spec, blobs)
             except RAISED as exc:
                 built.append(None)
                 result["transforms"].append({"exception": exception_result(exc),

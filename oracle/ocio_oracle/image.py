@@ -445,12 +445,13 @@ def _data_getters(desc, image, buffers, first_blob, out):
             for name, plane in zip(("getRData", "getGData", "getBData", "getAData"), planes)}
 
 
-def _cpu_processor(args, stage):
+def _cpu_processor(args, stage, blobs):
     """The processor and CPU processor of a request, chosen as cpu_apply chooses them: the
     default CPU processor, or getOptimizedCPUProcessor with optimization or non-F32 depths;
     and the (in, out, flags) the CPU processor was made with (the default one's are F32, F32
-    and OPTIMIZATION_DEFAULT, Processor.cpp:527-535)."""
-    _, proc = _processor(args, stage)
+    and OPTIMIZATION_DEFAULT, Processor.cpp:527-535). `blobs` are the transform spec's
+    blobs (see spec.py)."""
+    _, proc = _processor(args, stage, blobs)
     stage[0] = "cpu_processor"
     in_bd = args.get("in_bitdepth", "BIT_DEPTH_F32")
     out_bd = args.get("out_bitdepth", "BIT_DEPTH_F32")
@@ -461,6 +462,14 @@ def _cpu_processor(args, stage):
         key = (OCIO.BIT_DEPTH_F32, OCIO.BIT_DEPTH_F32, OCIO.OPTIMIZATION_DEFAULT)
         cpu = proc.getDefaultCPUProcessor()
     return proc, cpu, key
+
+
+def _own_blobs(args):
+    """How many request blobs are image_apply's own: up to the last one its buffers name (none
+    without such a buffer). The transform spec's blobs follow them."""
+    named = [buffer["blob"] for buffer in args.get("buffers") or []
+             if isinstance(buffer, dict) and "blob" in buffer]
+    return max(named) + 1 if named else 0
 
 
 def _reads_source(descs, apply, cpu):
@@ -534,6 +543,8 @@ def image_apply(args, blobs):
                 plane (without one, the binding returns uninitialized memory).
       config, transform or src/dst, direction, optimization, in_bitdepth, out_bitdepth
                 the processor, as cpu_apply takes them; built first, only when apply isn't []
+    request blobs: the ones the buffers name, up to the last one named; then the transform
+                spec's blobs (see spec.py)
 
     Before calling apply, the command refuses the request (it raises, so the call fails) where
     the wheel would read or write outside its memory:
@@ -590,7 +601,7 @@ def image_apply(args, blobs):
     with captured_log() as log:
         try:
             if apply:
-                proc, cpu, key = _cpu_processor(args, stage)
+                proc, cpu, key = _cpu_processor(args, stage, blobs[_own_blobs(args):])
                 result.update(_processor_result(proc, cpu))
             stage[0] = "image"
             for make in makers:
@@ -644,7 +655,8 @@ def image_apply_rgb(args, blobs):
                 it, so the library touches the view's own entries only
       config, transform or src/dst, direction, optimization, in_bitdepth, out_bitdepth
                 the processor, as cpu_apply takes them
-    blobs: [the array's memory, or the list's values as little-endian float64]
+    blobs: [the array's memory, or the list's values as little-endian float64], then the
+           transform spec's blobs (see spec.py)
     result:
       processor_cache_id, cpu_cache_id, cpu_processor: as in image_apply, once built
       exception, stage   when OCIO or the binding raised, as in image_apply: "config", ...,
@@ -671,7 +683,7 @@ def image_apply_rgb(args, blobs):
     stage, result, out = ["config"], {}, []
     with captured_log() as log:
         try:
-            proc, cpu, _ = _cpu_processor(args, stage)
+            proc, cpu, _ = _cpu_processor(args, stage, blobs[1:])
             result.update(_processor_result(proc, cpu))
             stage[0] = "apply"
             returned = getattr(cpu, call)(data)

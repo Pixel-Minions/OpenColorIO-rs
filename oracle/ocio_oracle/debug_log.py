@@ -37,6 +37,7 @@ def processor_debug_log(args, blobs):
                 BIT_DEPTH_* names (default BIT_DEPTH_F32)
       optimization
                 flags (see spec.flags; default OPTIMIZATION_DEFAULT)
+    request blobs: the transform spec's blobs (see spec.py)
     result:
       processor       the messages logged while the config built the processor
                       (config.getProcessor), each as the logging function received it
@@ -64,7 +65,7 @@ def processor_debug_log(args, blobs):
     try:
         with captured_log() as processor_log:
             try:
-                _, proc = _processor(args, stage)
+                _, proc = _processor(args, stage, blobs)
             except RAISED as exc:
                 result = {"exception": exception_result(exc), "stage": stage[0]}
         result["processor"] = list(processor_log)
