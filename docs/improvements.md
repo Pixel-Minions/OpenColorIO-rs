@@ -1241,3 +1241,13 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   under the lock and gives no entries otherwise, and `processor_with_context` then makes an
   uncached processor of the transform it was given.
 - **Status:** matched in `p1-processor` (`caching.rs`, `config.rs`), found by its verifier.
+
+### U-30. A FixedFunction style from a null name
+
+- **Upstream:** `FixedFunctionOpData::GetStyle` refuses a null or empty name with "Unknown
+  FixedFunction style: " followed by the name, appending the `const char *` to a `std::string`
+  (`ops/fixedfunction/FixedFunctionOpData.cpp:194-376`). For a null pointer that is undefined
+  behaviour. The CTF reader calls it with an attribute's value, which is never null.
+- **Decided** (general rule): `FixedFunctionOpStyle::from_name(None)` refuses it as an empty
+  name: "Unknown FixedFunction style: ".
+- **Status:** matched in `p2-ff-cpu` (2.3a1).
