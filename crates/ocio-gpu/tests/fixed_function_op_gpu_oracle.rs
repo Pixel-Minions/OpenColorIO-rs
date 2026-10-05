@@ -797,3 +797,58 @@ fn aces_2_tonescale_compress_shaders_match_the_wheel() {
     }
     check(&cases);
 }
+
+/// A peak luminance and limiting primaries, as the ACES 2.0 output transform and gamut
+/// compression take them.
+fn peak_and(peak: f64, primaries: &[f64; 8]) -> Vec<f64> {
+    std::iter::once(peak)
+        .chain(primaries.iter().copied())
+        .collect()
+}
+
+/// The peak luminances and limiting primaries (indices into [`ACES2_PRIMARIES`]) of the ACES
+/// 2.0 output transform and gamut compression cases: upstream's tests' 1000 nits P3-D65 first.
+const PEAK_PRIMARIES: [(f64, usize); 6] = [
+    (1000.0, 1),
+    (100.0, 0),
+    (4000.0, 2),
+    (108.0, 3),
+    (48.0, 4),
+    (500.0, 0),
+];
+
+/// ACES 2.0's gamut compression (chunk 2.4g) for six peak luminances and five limiting gamuts,
+/// both ways, at every level, in every language; the shader's settings.
+#[test]
+fn aces_2_gamut_compress_shaders_match_the_wheel() {
+    let style = |peak: f64, primaries: usize, dir| {
+        T::Fixed(
+            "FIXED_FUNCTION_ACES_GAMUT_COMPRESS_20",
+            FixedFunctionOpStyle::AcesGamutCompress20Fwd,
+            peak_and(peak, &ACES2_PRIMARIES[primaries]),
+            dir,
+        )
+    };
+    let mut cases = Vec::new();
+    for (i, (peak, primaries)) in PEAK_PRIMARIES.iter().enumerate() {
+        for dir in [F, I] {
+            cases.extend(cases_of(
+                &format!("gamut compression {peak} {primaries} {dir:?}"),
+                vec![style(*peak, *primaries, dir)],
+                &levels()[if i == 0 { 0..5 } else { 1..2 }],
+                Names::default(),
+            ));
+        }
+    }
+    for names in aces2_settings() {
+        for dir in [F, I] {
+            cases.extend(cases_of(
+                "gamut compression settings",
+                vec![style(1000.0, 1, dir)],
+                &levels()[1..2],
+                names,
+            ));
+        }
+    }
+    check(&cases);
+}

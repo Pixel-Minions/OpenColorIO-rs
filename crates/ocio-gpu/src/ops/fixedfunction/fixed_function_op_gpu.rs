@@ -8,22 +8,25 @@
 //! to dim surround 1.0 and the gamut compression 1.3, forward and inverse (chunk 2.3f); the
 //! Rec.2100 surround, RGB to and from HSV and the three HSYs, and XYZ to and from xyY, u'v'Y
 //! and CIELUV (2.3g1); PQ, the gamma-log and the double-log curves (2.3g2), with `double`
-//! parameters as upstream reads them; ACES 2.0's RGB to and from JMh, and its tone scale and
-//! chroma compression, with the reach table as a texture (2.4f1, 2.4f2). The ACES 2.0 output
-//! transform and gamut compression come with chunks 2.4g and 2.4h; until then
-//! [`get_fixed_function_gpu_processing_text`] refuses them ([`not_ported`]).
+//! parameters as upstream reads them; ACES 2.0's RGB to and from JMh (2.4f1), its tone scale
+//! and chroma compression, with the reach table as a texture (2.4f2), and its gamut
+//! compression, with the cusp table as a texture and the hues as a constant array (2.4g). The
+//! ACES 2.0 output transform comes with chunk 2.4h; until then
+//! [`get_fixed_function_gpu_processing_text`] refuses it ([`not_ported`]).
 //!
 //! Upstream writes `float` values into the text with `operator<<`, which formats them with
 //! `getFloatString` (`GpuShaderText`'s stream operators); the constants it derives from them
 //! are computed in `float`, as here.
 
+use ocio_ops::cfmt::{Crt, to_string_f32};
 use ocio_ops::ops::fixedfunction::aces2::common::{
-    CAM_NL_OFFSET, ChromaCompressParams, J_SCALE, JMhParams, REFERENCE_LUMINANCE,
+    CAM_NL_OFFSET, COMPRESSION_THRESHOLD, CUSP_MID_BLEND, ChromaCompressParams, FOCUS_GAIN_BLEND,
+    GamutCompressParams, J_SCALE, JMhParams, REFERENCE_LUMINANCE, SMOOTH_CUSPS,
     SharedCompressionParameters, Table1D, ToneScaleParams, table_base,
 };
 use ocio_ops::ops::fixedfunction::aces2::transform::{
-    init_chroma_compress_params, init_jmh_params, init_shared_compression_params,
-    init_tone_scale_params,
+    init_chroma_compress_params, init_gamut_compress_params, init_jmh_params,
+    init_shared_compression_params, init_tone_scale_params,
 };
 use ocio_ops::ops::fixedfunction::fixed_function_op_data::{
     FixedFunctionOpData, FixedFunctionOpStyle, SHORT_PARAMS,
@@ -2580,6 +2583,807 @@ fn add_tonescale_compress_shader(
     }
 }
 
+/// `std::to_string(float)`: `%f` on the platform's C runtime.
+fn cpp_to_string(value: f32) -> String {
+    to_string_f32(Crt::NATIVE, value)
+}
+
+/// The gamut's cusp table as a texture of three channels (J, M and the upper hull's gamma),
+/// the hue table as a constant array, and `<name>_sample(h)`, which finds the hue's interval by
+/// a binary search within the hue linearity range and interpolates the cusp linearly. Returns
+/// the name.
+///
+/// Port of `_Add_Cusp_table` (FixedFunctionOpGPU.cpp:807-923 @ v2.5.2).
+fn add_cusp_table(
+    shader_creator: &mut GpuShaderDesc,
+    resource_index: u32,
+    g: &GamutCompressParams,
+) -> Result<Vec<u8>> {
+    // Reserve name.
+    let name = aces2_resource_name(
+        shader_creator,
+        &format!("gamut_cusp_table_{resource_index}"),
+    );
+
+    // Determine texture dimensions.
+    let dimensions = aces2_texture_dimensions(shader_creator);
+
+    // Copy the LUT into the shaderCreator as a Texture object.
+    let values: Vec<f32> = g.gamut_cusp_table.iter().flatten().copied().collect();
+    let binding_index = shader_creator.add_texture(
+        &name,
+        GpuShaderText::get_sampler_name(&name),
+        table_base::TOTAL_SIZE as u32,
+        1,
+        TextureType::RgbChannel,
+        dimensions,
+        Interpolation::Nearest,
+        &values,
+    )?;
+
+    // Create the texture declaration.
+    declare_aces2_texture(shader_creator, &name, dimensions, binding_index)?;
+
+    // Sampler function.
+    let st = GpuShaderText::new(shader_creator.language());
+
+    let hues_array_name = [&name[..], b"_hues_array"].concat();
+    st.declare_float_array_const(&hues_array_name, &g.hue_table[..])?;
+
+    st.new_line()
+        .put(st.float3_keyword())
+        .put(" ")
+        .put(&name)
+        .put("_sample(float h)");
+    st.new_line().put("{");
+    st.indent();
+
+    st.new_line()
+        .put(st.int_decl("i")?)
+        .put(" = ")
+        .put(st.int_keyword())
+        .put("(h) + ")
+        .put(table_base::BASE_INDEX as u32)
+        .put(";");
+
+    st.new_line()
+        .put(st.int_decl("i_lo")?)
+        .put(" = ")
+        .put(st.int_keyword())
+        .put("(max(")
+        .put(st.float_keyword())
+        .put("(")
+        .put(table_base::LOWER_WRAP_INDEX as u32)
+        .put("), ")
+        .put(st.float_keyword())
+        .put("(i + ")
+        .put(g.hue_linearity_search_range[0])
+        .put(")));");
+    st.new_line()
+        .put(st.int_decl("i_hi")?)
+        .put(" = ")
+        .put(st.int_keyword())
+        .put("(min(")
+        .put(st.float_keyword())
+        .put("(")
+        .put(table_base::UPPER_WRAP_INDEX as u32)
+        .put("), ")
+        .put(st.float_keyword())
+        .put("(i + ")
+        .put(g.hue_linearity_search_range[1])
+        .put(")));");
+
+    st.new_line().put("while (i_lo + 1 < i_hi)");
+    st.new_line().put("{");
+    st.indent();
+
+    st.new_line()
+        .put(st.float_decl("hcur")?)
+        .put(" = ")
+        .put(&hues_array_name)
+        .put("[i];");
+
+    st.new_line().put("if (h > hcur)");
+    st.new_line().put("{");
+    st.indent();
+    st.new_line().put("i_lo = i;");
+    st.dedent();
+    st.new_line().put("}");
+    st.new_line().put("else");
+    st.new_line().put("{");
+    st.indent();
+    st.new_line().put("i_hi = i;");
+    st.dedent();
+    st.new_line().put("}");
+    st.new_line().put("i = (i_lo + i_hi) / 2;");
+
+    st.dedent();
+    st.new_line().put("}");
+
+    let coord = |offset: &str| {
+        format!(
+            "({float}(i_hi){offset} + 0.5) / {float}({})",
+            table_base::TOTAL_SIZE,
+            float = st.float_keyword()
+        )
+    };
+    match dimensions {
+        TextureDimensions::D1 => {
+            st.new_line()
+                .put(st.float3_decl("lo")?)
+                .put(" = ")
+                .put(st.sample_tex1d(&name, coord(" - 1.0"))?)
+                .put(".rgb;");
+            st.new_line()
+                .put(st.float3_decl("hi")?)
+                .put(" = ")
+                .put(st.sample_tex1d(&name, coord(""))?)
+                .put(".rgb;");
+        }
+        TextureDimensions::D2 => {
+            st.new_line()
+                .put(st.float3_decl("lo")?)
+                .put(" = ")
+                .put(st.sample_tex2d(&name, st.float2_const(coord(" - 1.0"), "0.5"))?)
+                .put(".rgb;");
+            st.new_line()
+                .put(st.float3_decl("hi")?)
+                .put(" = ")
+                .put(st.sample_tex2d(&name, st.float2_const(coord(""), "0.5"))?)
+                .put(".rgb;");
+        }
+    }
+
+    st.new_line()
+        .put(st.float_decl("t")?)
+        .put(" = (h - ")
+        .put(&hues_array_name)
+        .put("[i_hi - 1]) / (")
+        .put(&hues_array_name)
+        .put("[i_hi] - ")
+        .put(&hues_array_name)
+        .put("[i_hi - 1]);");
+    st.new_line()
+        .put("return ")
+        .put(st.lerp("lo", "hi", "t"))
+        .put(";");
+
+    st.dedent();
+    st.new_line().put("}");
+
+    shader_creator.add_to_helper_shader_code(st.string());
+
+    Ok(name)
+}
+
+/// The focus gain as a helper function. Returns its name.
+///
+/// Port of `_Add_Focus_Gain_func` (FixedFunctionOpGPU.cpp:925-971 @ v2.5.2).
+fn add_focus_gain_func(
+    shader_creator: &mut GpuShaderDesc,
+    resource_index: u32,
+    s: &SharedCompressionParameters,
+) -> Result<Vec<u8>> {
+    // Reserve name
+    let name = aces2_resource_name(shader_creator, &format!("get_focus_gain{resource_index}"));
+
+    let st = GpuShaderText::new(shader_creator.language());
+
+    st.new_line()
+        .put(st.float_keyword())
+        .put(" ")
+        .put(&name)
+        .put("(float J, float cuspJ)");
+    st.new_line().put("{");
+    st.indent();
+
+    st.new_line()
+        .put(st.float_decl("thr")?)
+        .put(" = ")
+        .put(st.lerp(
+            "cuspJ",
+            cpp_to_string(s.limit_j_max),
+            cpp_to_string(FOCUS_GAIN_BLEND),
+        ))
+        .put(";");
+
+    st.new_line().put("if (J > thr)"); // TODO threshold
+    st.new_line().put("{");
+    st.indent();
+    st.new_line()
+        .put(st.float_decl("gain")?)
+        .put(" = ( ")
+        .put(s.limit_j_max)
+        .put(" - thr) / max(0.0001, ")
+        .put(s.limit_j_max)
+        .put(" - J);");
+    // TODO log10(gain) but not all shading languages have log10() would log2(gain)/log2(10)
+    // be better? perhaps delegate to GpuShaderText?
+    st.new_line().put("gain = log(gain)/log(10.0);");
+    st.new_line().put("return gain * gain + 1.0;");
+    st.dedent();
+    st.new_line().put("}");
+    st.new_line().put("else");
+    st.new_line().put("{");
+    st.indent();
+    st.new_line().put("return 1.0;");
+    st.dedent();
+    st.new_line().put("}");
+
+    st.dedent();
+    st.new_line().put("}");
+
+    shader_creator.add_to_helper_shader_code(st.string());
+
+    Ok(name)
+}
+
+/// The J where the compression line meets the J axis, as a helper function. Returns its name.
+///
+/// Port of `_Add_Solve_J_Intersect_func` (FixedFunctionOpGPU.cpp:973-1025 @ v2.5.2).
+fn add_solve_j_intersect_func(
+    shader_creator: &mut GpuShaderDesc,
+    resource_index: u32,
+    s: &SharedCompressionParameters,
+) -> Result<Vec<u8>> {
+    // Reserve name
+    let name = aces2_resource_name(
+        shader_creator,
+        &format!("solve_J_intersect{resource_index}"),
+    );
+
+    let st = GpuShaderText::new(shader_creator.language());
+
+    st.new_line()
+        .put(st.float_keyword())
+        .put(" ")
+        .put(&name)
+        .put("(float J, float M, float focusJ, float slope_gain)");
+    st.new_line().put("{");
+    st.indent();
+
+    st.new_line()
+        .put(st.float_decl("M_scaled")?)
+        .put(" = M / slope_gain;");
+    st.new_line()
+        .put(st.float_decl("a")?)
+        .put(" = M_scaled / focusJ;");
+
+    st.new_line().put("if (J < focusJ)");
+    st.new_line().put("{");
+    st.indent();
+    st.new_line()
+        .put(st.float_decl("b")?)
+        .put(" = 1.0 - M_scaled;");
+    st.new_line().put(st.float_decl("c")?).put(" = -J;");
+    st.new_line()
+        .put(st.float_decl("det")?)
+        .put(" =  b * b - 4.f * a * c;");
+    st.new_line()
+        .put(st.float_decl("root")?)
+        .put(" =  sqrt(det);");
+    st.new_line().put("return -2.0 * c / (b + root);");
+    st.dedent();
+    st.new_line().put("}");
+    st.new_line().put("else");
+    st.new_line().put("{");
+    st.indent();
+    st.new_line()
+        .put(st.float_decl("b")?)
+        .put(" = - (1.0 + M_scaled + ")
+        .put(s.limit_j_max)
+        .put(" * a);");
+    st.new_line()
+        .put(st.float_decl("c")?)
+        .put(" = ")
+        .put(s.limit_j_max)
+        .put(" * M_scaled + J;");
+    st.new_line()
+        .put(st.float_decl("det")?)
+        .put(" =  b * b - 4.f * a * c;");
+    st.new_line()
+        .put(st.float_decl("root")?)
+        .put(" =  sqrt(det);");
+    st.new_line().put("return -2.0 * c / (b - root);");
+    st.dedent();
+    st.new_line().put("}");
+
+    st.dedent();
+    st.new_line().put("}");
+
+    shader_creator.add_to_helper_shader_code(st.string());
+
+    Ok(name)
+}
+
+/// The gamut boundary's M along the compression line, as a helper function. Returns its name.
+///
+/// Port of `_Add_Find_Gamut_Boundary_Intersection_func` (FixedFunctionOpGPU.cpp:1027-1074 @
+/// v2.5.2).
+fn add_find_gamut_boundary_intersection_func(
+    shader_creator: &mut GpuShaderDesc,
+    resource_index: u32,
+    s: &SharedCompressionParameters,
+) -> Result<Vec<u8>> {
+    // Reserve name
+    let name = aces2_resource_name(
+        shader_creator,
+        &format!("find_gamut_boundary_intersection{resource_index}"),
+    );
+
+    let st = GpuShaderText::new(shader_creator.language());
+
+    st.new_line()
+        .put(st.float_keyword())
+        .put(" ")
+        .put(&name)
+        .put("(")
+        .put(st.float2_keyword())
+        .put(
+            " JM_cusp, float gamma_top_inv, float gamma_bottom_inv, float J_intersect_source, \
+             float J_intersect_cusp, float slope)",
+        );
+    st.new_line().put("{");
+    st.indent();
+
+    st.new_line().put(st.float_decl("M_boundary_lower")?).put(
+        " = J_intersect_cusp * pow(J_intersect_source / J_intersect_cusp, gamma_bottom_inv) \
+             / (JM_cusp.r / JM_cusp.g - slope);",
+    );
+    let l = s.limit_j_max;
+    st.new_line()
+        .put(st.float_decl("M_boundary_upper")?)
+        .put(" = JM_cusp.g * (")
+        .put(l)
+        .put(" - J_intersect_cusp) * pow((")
+        .put(l)
+        .put(" - J_intersect_source) / (")
+        .put(l)
+        .put(" - J_intersect_cusp), gamma_top_inv) / (slope * JM_cusp.g + ")
+        .put(l)
+        .put(" - JM_cusp.r);");
+
+    st.new_line().put(st.float_decl("smin")?).put(" = 0.0;");
+    st.new_line().put("{");
+    st.indent();
+    st.new_line()
+        .put(st.float_decl("a")?)
+        .put(" = M_boundary_lower;");
+    st.new_line()
+        .put(st.float_decl("b")?)
+        .put(" = M_boundary_upper;");
+    st.new_line()
+        .put(st.float_decl("s")?)
+        .put(" = ")
+        .put(SMOOTH_CUSPS)
+        .put(" * JM_cusp.g;");
+
+    st.new_line()
+        .put(st.float_decl("h")?)
+        .put(" = max(s - abs(a - b), 0.0) / s;");
+    st.new_line()
+        .put("smin = min(a, b) - h * h * h * s * ")
+        .put(1.0f64 / 6.0)
+        .put(";");
+
+    st.dedent();
+    st.new_line().put("}");
+
+    st.new_line().put("return smin;");
+
+    st.dedent();
+    st.new_line().put("}");
+
+    shader_creator.add_to_helper_shader_code(st.string());
+
+    Ok(name)
+}
+
+/// The remapping of M between the gamut and the reach boundaries, or its inverse, as a helper
+/// function. Returns its name.
+///
+/// Port of `_Add_Compression_func` (FixedFunctionOpGPU.cpp:1076-1142 @ v2.5.2).
+fn add_compression_func(
+    shader_creator: &mut GpuShaderDesc,
+    resource_index: u32,
+    invert: bool,
+) -> Result<Vec<u8>> {
+    // Reserve name
+    let direction = if invert { "_inv" } else { "_fwd" };
+    let name = aces2_resource_name(
+        shader_creator,
+        &format!("remap_M{direction}{resource_index}"),
+    );
+
+    let st = GpuShaderText::new(shader_creator.language());
+
+    st.new_line()
+        .put(st.float_keyword())
+        .put(" ")
+        .put(&name)
+        .put("(float M, float gamut_boundary_M, float reach_boundary_M)");
+    st.new_line().put("{");
+    st.indent();
+
+    st.new_line()
+        .put(st.float_decl("boundary_ratio")?)
+        .put(" = gamut_boundary_M / reach_boundary_M;");
+    st.new_line()
+        .put(st.float_decl("proportion")?)
+        .put(" = max(boundary_ratio, ")
+        .put(COMPRESSION_THRESHOLD)
+        .put(");");
+    st.new_line()
+        .put(st.float_decl("threshold")?)
+        .put(" = proportion * gamut_boundary_M;");
+
+    st.new_line()
+        .put("if (proportion >= 1.0f || M <= threshold)");
+    st.new_line().put("{");
+    st.indent();
+    st.new_line().put("return M;");
+    st.dedent();
+    st.new_line().put("}");
+    st.new_line()
+        .put(st.float_decl("m_offset")?)
+        .put(" = M - threshold;");
+    st.new_line()
+        .put(st.float_decl("gamut_offset")?)
+        .put(" = gamut_boundary_M - threshold;");
+    st.new_line()
+        .put(st.float_decl("reach_offset")?)
+        .put(" = reach_boundary_M - threshold;");
+
+    st.new_line()
+        .put(st.float_decl("scale")?)
+        .put(" = reach_offset / ((reach_offset / gamut_offset) - 1.0f);");
+    st.new_line()
+        .put(st.float_decl("nd")?)
+        .put(" = m_offset / scale;");
+
+    if invert {
+        st.new_line().put("if (nd >= 1.0f)"); // TODO: could be done branchless?
+        st.new_line().put("{");
+        st.indent();
+        st.new_line().put("return threshold + scale;");
+        st.dedent();
+        st.new_line().put("}");
+        st.new_line().put("else");
+        st.new_line().put("{");
+        st.indent();
+        st.new_line()
+            .put("return threshold + scale * -(nd / (nd - 1.0f));");
+        st.dedent();
+        st.new_line().put("}");
+    } else {
+        st.new_line()
+            .put("return threshold + scale * nd / (1.0f + nd);");
+    }
+
+    st.dedent();
+    st.new_line().put("}");
+
+    shader_creator.add_to_helper_shader_code(st.string());
+
+    Ok(name)
+}
+
+/// The names of the gamut compression's helper functions.
+struct GamutCompressNames<'a> {
+    get_focus_gain: &'a [u8],
+    find_gamut_boundary_intersection: &'a [u8],
+    compression: &'a [u8],
+    solve_j_intersect: &'a [u8],
+}
+
+/// The gamut compression of a JMh, as a helper function. Returns its name. Unlike the CPU, it
+/// compresses a J at or below 0 (`docs/improvements.md` I-86).
+///
+/// Port of `_Add_Compress_Gamut_func` (FixedFunctionOpGPU.cpp:1144-1225 @ v2.5.2).
+fn add_compress_gamut_func(
+    shader_creator: &mut GpuShaderDesc,
+    resource_index: u32,
+    s: &SharedCompressionParameters,
+    g: &GamutCompressParams,
+    names: &GamutCompressNames<'_>,
+) -> Result<Vec<u8>> {
+    // Reserve name
+    let name = aces2_resource_name(shader_creator, &format!("gamut_compress{resource_index}"));
+
+    let st = GpuShaderText::new(shader_creator.language());
+    let l = s.limit_j_max;
+
+    st.new_line()
+        .put(st.float3_keyword())
+        .put(" ")
+        .put(&name)
+        .put("(")
+        .put(st.float3_keyword())
+        .put(" JMh, float Jx, ")
+        .put(st.float3_keyword())
+        .put(" JMGcusp, float reachMaxM)");
+    st.new_line().put("{");
+    st.indent();
+
+    st.new_line().put(st.float_decl("J")?).put(" = JMh.r;");
+    st.new_line().put(st.float_decl("M")?).put(" = JMh.g;");
+    st.new_line().put(st.float_decl("h")?).put(" = JMh.b;");
+
+    st.new_line().put("if (M <= 0.0 || J > ").put(l).put(")");
+    st.new_line().put("{");
+    st.indent();
+    st.new_line()
+        .put("return ")
+        .put(st.float3_const("J", "0.0", "h"))
+        .put(";");
+    st.dedent();
+    st.new_line().put("}");
+    st.new_line().put("else");
+    st.new_line().put("{");
+    st.indent();
+
+    st.new_line()
+        .put(st.float2_decl("JMcusp")?)
+        .put(" = JMGcusp.rg;");
+
+    st.new_line()
+        .put(st.float_decl("focusJ")?)
+        .put(" = ")
+        .put(st.lerp(
+            "JMcusp.r",
+            cpp_to_string(g.mid_j),
+            format!(
+                "min(1.0, {} - (JMcusp.r / {}",
+                cpp_to_string(CUSP_MID_BLEND),
+                cpp_to_string(l)
+            ),
+        ))
+        .put("));");
+    st.new_line()
+        .put(st.float_decl("slope_gain")?)
+        .put(" = ")
+        .put(l * g.focus_dist)
+        .put(" * ")
+        .put(names.get_focus_gain)
+        .put("(Jx, JMcusp.r);");
+    st.new_line()
+        .put(st.float_decl("J_intersect_source")?)
+        .put(" = ")
+        .put(names.solve_j_intersect)
+        .put("(JMh.r, JMh.g, focusJ, slope_gain);");
+    st.new_line()
+        .put(st.float_decl("gamut_slope")?)
+        .put(" = (J_intersect_source < focusJ) ? J_intersect_source : (")
+        .put(l)
+        .put(" - J_intersect_source);");
+    st.new_line()
+        .put("gamut_slope = gamut_slope * (J_intersect_source - focusJ) / (focusJ * slope_gain);");
+
+    st.new_line()
+        .put(st.float_decl("gamma_top_inv")?)
+        .put(" = JMGcusp.b;");
+    st.new_line()
+        .put(st.float_decl("gamma_bottom_inv")?)
+        .put(" = ")
+        .put(g.lower_hull_gamma_inv)
+        .put(";"); // TODO move to where it is used
+
+    st.new_line()
+        .put(st.float_decl("J_intersect_cusp")?)
+        .put(" = ")
+        .put(names.solve_j_intersect)
+        .put("(JMcusp.r, JMcusp.g, focusJ, slope_gain);");
+    st.new_line()
+        .put(st.float_decl("gamutBoundaryM")?)
+        .put(" = ")
+        .put(names.find_gamut_boundary_intersection)
+        .put(
+            "(JMcusp, gamma_top_inv, gamma_bottom_inv, J_intersect_source, J_intersect_cusp, \
+             gamut_slope);",
+        );
+
+    st.new_line().put("if (gamutBoundaryM <= 0.0)");
+    st.new_line().put("{");
+    st.indent();
+    st.new_line()
+        .put("return ")
+        .put(st.float3_const("J", "0.0", "h"))
+        .put(";");
+    st.dedent();
+    st.new_line().put("}");
+
+    st.new_line()
+        .put(st.float_decl("reachBoundaryM")?)
+        .put(" = ")
+        .put(l)
+        .put(" * pow(J_intersect_source / ")
+        .put(l)
+        .put(",  ")
+        .put(s.model_gamma_inv)
+        .put(");");
+    st.new_line()
+        .put("reachBoundaryM = reachBoundaryM / ((")
+        .put(l)
+        .put(" / reachMaxM) - gamut_slope);");
+
+    st.new_line()
+        .put(st.float_decl("remapped_M")?)
+        .put(" = ")
+        .put(names.compression)
+        .put("(M, gamutBoundaryM, reachBoundaryM);");
+    st.new_line()
+        .put(st.float_decl("remapped_J")?)
+        .put(" = J_intersect_source + remapped_M * gamut_slope;");
+
+    st.new_line()
+        .put("return ")
+        .put(st.float3_const("remapped_J", "remapped_M", "h"))
+        .put(";");
+
+    st.dedent();
+    st.new_line().put("}");
+
+    st.dedent();
+    st.new_line().put("}");
+
+    shader_creator.add_to_helper_shader_code(st.string());
+
+    Ok(name)
+}
+
+/// The gamut compression's helper functions and its use on the pixel, with `reachMaxM`
+/// already declared, or the inverse's.
+///
+/// Port of `_Add_Gamut_Compress_Fwd_Shader` and `_Add_Gamut_Compress_Inv_Shader`
+/// (FixedFunctionOpGPU.cpp:1227-1285 @ v2.5.2).
+fn add_gamut_compress_shader_(
+    shader_creator: &mut GpuShaderDesc,
+    st: &GpuShaderText,
+    resource_index: u32,
+    s: &SharedCompressionParameters,
+    g: &GamutCompressParams,
+    invert: bool,
+) -> Result<()> {
+    let cusp_name = add_cusp_table(shader_creator, resource_index, g)?;
+    let get_focus_gain = add_focus_gain_func(shader_creator, resource_index, s)?;
+    let solve_j_intersect = add_solve_j_intersect_func(shader_creator, resource_index, s)?;
+    let find_gamut_boundary_intersection =
+        add_find_gamut_boundary_intersection_func(shader_creator, resource_index, s)?;
+    let compression = add_compression_func(shader_creator, resource_index, invert)?;
+    let names = GamutCompressNames {
+        get_focus_gain: &get_focus_gain,
+        find_gamut_boundary_intersection: &find_gamut_boundary_intersection,
+        compression: &compression,
+        solve_j_intersect: &solve_j_intersect,
+    };
+    let gamut_compress_name =
+        add_compress_gamut_func(shader_creator, resource_index, s, g, &names)?;
+
+    let pxl = shader_creator.pixel_name().to_vec();
+
+    st.new_line()
+        .put(st.float3_decl("JMGcusp")?)
+        .put(" = ")
+        .put(&cusp_name)
+        .put("_sample(")
+        .put(&pxl)
+        .put(".b);");
+
+    let compress = |jx: &str| {
+        [
+            &gamut_compress_name[..],
+            b"(",
+            &pxl[..],
+            b".rgb, ",
+            jx.as_bytes(),
+            b", JMGcusp, reachMaxM)",
+        ]
+        .concat()
+    };
+    if !invert {
+        st.new_line()
+            .put(&pxl)
+            .put(".rgb = ")
+            .put(compress(&format!("{}.r", String::from_utf8_lossy(&pxl))))
+            .put(";");
+        return Ok(());
+    }
+
+    st.new_line()
+        .put(st.float_decl("Jx")?)
+        .put(" = ")
+        .put(&pxl)
+        .put(".r;");
+    st.new_line()
+        .put(st.float3_decl("unCompressedJMh")?)
+        .put(";");
+
+    // Analytic inverse below threshold
+    st.new_line()
+        .put("if (Jx <= ")
+        .put(st.lerp(
+            "JMGcusp.r",
+            cpp_to_string(s.limit_j_max),
+            cpp_to_string(FOCUS_GAIN_BLEND),
+        ))
+        .put(")");
+    st.new_line().put("{");
+    st.indent();
+    st.new_line()
+        .put("unCompressedJMh = ")
+        .put(compress("Jx"))
+        .put(";");
+    st.dedent();
+    st.new_line().put("}");
+    // Approximation above threshold
+    st.new_line().put("else");
+    st.new_line().put("{");
+    st.indent();
+    st.new_line().put("Jx = ").put(compress("Jx")).put(".r;");
+    st.new_line()
+        .put("unCompressedJMh = ")
+        .put(compress("Jx"))
+        .put(";");
+    st.dedent();
+    st.new_line().put("}");
+
+    st.new_line().put(&pxl).put(".rgb = unCompressedJMh;");
+    Ok(())
+}
+
+/// The models and parameters the gamut compression's shaders use, for the peak luminance and
+/// the limiting primaries of the parameters.
+#[allow(clippy::type_complexity)]
+fn aces2_gamut_params(
+    func: &FixedFunctionOpData,
+) -> Result<(
+    JMhParams,
+    JMhParams,
+    ToneScaleParams,
+    SharedCompressionParameters,
+    GamutCompressParams,
+)> {
+    let peak_luminance = param_f32(func, 0)?;
+    let lim_primaries = aces2_primaries(func, 1)?;
+
+    let p_in = init_jmh_params(&aces_ap0::PRIMARIES)?;
+    let p_lim = init_jmh_params(&lim_primaries)?;
+    let t = init_tone_scale_params(peak_luminance);
+    let reach_gamut = init_jmh_params(&aces_ap1::PRIMARIES)?;
+    let s = init_shared_compression_params(peak_luminance, &p_in, &reach_gamut);
+    let g = init_gamut_compress_params(peak_luminance, &p_in, &p_lim, &t, &s, &reach_gamut)?;
+    Ok((p_in, p_lim, t, s, g))
+}
+
+/// Port of `Add_Gamut_Compress_Fwd_Shader` and `Add_Gamut_Compress_Inv_Shader`
+/// (FixedFunctionOpGPU.cpp:1550-1634 @ v2.5.2).
+fn add_gamut_compress_shader(
+    shader_creator: &mut GpuShaderDesc,
+    st: &GpuShaderText,
+    func: &FixedFunctionOpData,
+    invert: bool,
+) -> Result<()> {
+    let (_, _, _, s, g) = aces2_gamut_params(func)?;
+
+    let resource_index = shader_creator.next_resource_index();
+    let pxl = shader_creator.pixel_name().to_vec();
+
+    let reach_name = add_reach_table(shader_creator, resource_index, &s.reach_m_table)?;
+
+    add_wrap_hue_channel_shader(&pxl, st)?;
+    add_sin_cos_shader(&pxl, st)?;
+
+    st.new_line()
+        .put(st.float_decl("reachMaxM")?)
+        .put(" = ")
+        .put(&reach_name)
+        .put("_sample(")
+        .put(&pxl)
+        .put(".b);");
+
+    add_gamut_compress_shader_(shader_creator, st, resource_index, &s, &g, invert)
+}
+
 /// Adds the code of a FixedFunction op to `shader_creator`'s function body.
 ///
 /// Port of `GetFixedFunctionGPUShaderProgram` (FixedFunctionOpGPU.cpp:2225-2231 @ v2.5.2).
@@ -2667,6 +3471,8 @@ pub fn get_fixed_function_gpu_processing_text(
         AcesTonescaleCompress20Inv => {
             add_tonescale_compress_shader(shader_creator, st, func, true)?
         }
+        AcesGamutCompress20Fwd => add_gamut_compress_shader(shader_creator, st, func, false)?,
+        AcesGamutCompress20Inv => add_gamut_compress_shader(shader_creator, st, func, true)?,
         style => return Err(not_ported(style)),
     }
 
