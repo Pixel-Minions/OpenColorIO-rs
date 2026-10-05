@@ -291,3 +291,26 @@ fn ocio_testkit_fnv(bytes: &[u8]) -> u64 {
         (h ^ u64::from(b)).wrapping_mul(1_099_511_628_211)
     })
 }
+
+/// Windows' folding of environment variable names, for every code unit, against
+/// `RtlUpcaseUnicodeChar` (docs/improvements.md, I-117: the table is the system's).
+#[cfg(windows)]
+#[test]
+fn windows_upcase_matches_the_system() {
+    for c in 0..=u16::MAX {
+        assert_eq!(
+            ocio_ops::platform::windows_upcase(c),
+            crt::rtl_upcase_unicode_char(c),
+            "{c:04x}"
+        );
+    }
+}
+
+/// The process environment's entries, as OCIO's LoadEnvironment reads them, against the C
+/// runtime's own list (`_wenviron`, which leaves out the system's `=C:` entries, or
+/// `environ`).
+#[test]
+fn process_entries_match_the_c_runtime() {
+    use ocio_ops::platform::{EnvProvider, ProcessEnv};
+    assert_eq!(ProcessEnv.entries(), crt::c_runtime_environment());
+}

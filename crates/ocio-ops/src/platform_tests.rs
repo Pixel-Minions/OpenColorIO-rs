@@ -61,12 +61,12 @@ fn env_variable() {
     let path = get_env_variable("PATH");
     assert!(!path.is_empty());
 
-    set_env_variable("MY_DUMMY_ENV", Some(b"SomeValue"));
+    set_env_variable("MY_DUMMY_ENV", Some(b"SomeValue")).expect("no error");
     let value = get_env_variable("MY_DUMMY_ENV");
     assert!(!value.is_empty());
     assert_eq!(value, b"SomeValue");
 
-    unset_env_variable("MY_DUMMY_ENV");
+    unset_env_variable("MY_DUMMY_ENV").expect("no error");
     let value = get_env_variable("MY_DUMMY_ENV");
     assert!(value.is_empty());
 }
@@ -90,12 +90,12 @@ fn getenv_test() {
     assert!(getenv("PATH").is_some_and(|e| !e.is_empty()));
 
     // Create a variable and test that it's retrievable.
-    setenv("MY_WINDOWS_DUMMY_ENV", "SomeValue");
+    setenv("MY_WINDOWS_DUMMY_ENV", "SomeValue").expect("no error");
     assert_eq!(
         ProcessEnv.var(b"MY_WINDOWS_DUMMY_ENV"),
         Some(b"SomeValue".to_vec())
     );
-    unsetenv("MY_WINDOWS_DUMMY_ENV");
+    unsetenv("MY_WINDOWS_DUMMY_ENV").expect("no error");
     assert_eq!(ProcessEnv.var(b"MY_WINDOWS_DUMMY_ENV"), None);
 }
 
@@ -108,55 +108,30 @@ fn setenv_test() {
     struct Guard;
     impl Drop for Guard {
         fn drop(&mut self) {
-            unsetenv("MY_DUMMY_ENV");
-            unsetenv("MY_WINDOWS_DUMMY_ENV");
+            unsetenv("MY_DUMMY_ENV").expect("no error");
+            unsetenv("MY_WINDOWS_DUMMY_ENV").expect("no error");
         }
     }
     let _guard = Guard;
 
     {
-        setenv("MY_DUMMY_ENV", "SomeValue");
+        setenv("MY_DUMMY_ENV", "SomeValue").expect("no error");
         let env = getenv("MY_DUMMY_ENV").expect("set");
         assert!(!env.is_empty());
         assert_eq!(env, b"SomeValue");
         assert_eq!(env.len(), "SomeValue".len());
     }
     {
-        setenv("MY_DUMMY_ENV", " ");
+        setenv("MY_DUMMY_ENV", " ").expect("no error");
         let env = getenv("MY_DUMMY_ENV").expect("set");
         assert!(!env.is_empty());
         assert_eq!(env, b" ");
         assert_eq!(env.len(), 1);
     }
     {
-        unsetenv("MY_DUMMY_ENV");
+        unsetenv("MY_DUMMY_ENV").expect("no error");
         assert_eq!(getenv("MY_DUMMY_ENV"), None);
     }
-}
-
-/// The platform's rules for an empty value and for names: Windows removes a variable set to
-/// "" and ignores the case of names; Linux keeps it and doesn't.
-#[test]
-fn platform_rules() {
-    let _environment = crate::unit_test_log_utils::environment_lock();
-    set_env_provider(Some(Arc::new(MapEnv::from_entries(&[("Name", "value")]))));
-    assert_eq!(getenv("NAME").is_some(), cfg!(windows));
-    setenv("Name", "");
-    assert_eq!(
-        getenv("Name"),
-        if cfg!(windows) {
-            None
-        } else {
-            Some(Vec::new())
-        }
-    );
-    setenv("A=B", "x");
-    assert_eq!(getenv("A"), None);
-    setenv("", "x");
-    assert_eq!(env_provider().entries().len(), usize::from(!cfg!(windows)));
-    setenv("New\0Ignored", "value\0ignored");
-    assert_eq!(getenv("New"), Some(b"value".to_vec()));
-    set_env_provider(None);
 }
 
 /// Port of `OCIO_ADD_TEST(Platform, utf8_utf16_convert)` @ v2.5.2.
@@ -179,13 +154,25 @@ fn utf8_utf16_convert() {
 
         assert_eq!(utf16_to_utf8, utf8_str);
         assert_eq!(utf8_to_utf16, utf16_str);
-    } else {
-        assert_eq!(
-            utf8_to_utf16(b"a").unwrap_err().to_string(),
-            "Only supported by the Windows platform."
-        );
-        assert_eq!(utf8_to_utf16(b""), Ok(Vec::new()));
     }
+}
+
+/// Elsewhere than Windows, the conversions throw for a non-empty string, with upstream's text
+/// (Platform.cpp:304, 320 @ v2.5.2), and give an empty string for an empty one.
+#[cfg(not(windows))]
+#[test]
+fn utf_conversions_are_windows_only() {
+    for result in [
+        utf8_to_utf16(b"a").map(|_| ()),
+        utf16_to_utf8(&[0x61]).map(|_| ()),
+    ] {
+        assert_eq!(
+            result.unwrap_err().what(),
+            b"Only supported by the Windows platform."
+        );
+    }
+    assert_eq!(utf8_to_utf16(b""), Ok(Vec::new()));
+    assert_eq!(utf16_to_utf8(&[]), Ok(Vec::new()));
 }
 
 /// Port of `OCIO_ADD_TEST(Platform, create_temp_filename)` @ v2.5.2.

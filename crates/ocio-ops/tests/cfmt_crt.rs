@@ -434,7 +434,11 @@ fn stream_std_string_keeps_its_nuls() {
     os.put_bytes(b"a\0b\xff");
     os.put_c_str(b"c\0d");
     os.put_f64(0.5);
-    let mut expected = b"a\0b\xff".to_vec();
+    // The std::string's bytes: what printf writes of each part without a NUL (%s), joined by
+    // the NUL; then the C string's, up to its NUL.
+    let mut expected = crt::format_c_str("%s", b"a");
+    expected.push(0);
+    expected.extend(crt::format_c_str("%s", b"b\xff"));
     expected.extend(crt::format_c_str("%s", b"c\0d"));
     expected.extend(crt::format_f64("%.6g", 0.5).as_bytes());
     assert_eq!(os.str(), expected.as_slice());

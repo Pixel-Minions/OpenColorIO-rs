@@ -1000,14 +1000,26 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   paths, between UTF-8 and UTF-16 with `MultiByteToWideChar` and `WideCharToMultiByte`
   (`Platform.cpp:48-142, 261-322, 333-357` @ v2.5.2). Bytes that aren't UTF-8 become U+FFFD,
   with Windows' own rule (a lead byte and a continuation byte outside its range are one
-  replacement), and an unpaired surrogate in the environment becomes U+FFFD. Linux passes the
-  bytes. Names compare without case on Windows (`GetEnvironmentVariableW`), exactly on Linux;
-  and setting a variable to "" removes it on Windows, keeps it empty on Linux.
-- **Who notices:** configs and environments with names or paths that aren't UTF-8, or that
-  differ only in case, used on both platforms.
+  replacement), and an unpaired surrogate in the environment becomes U+FFFD: a variable set
+  with such bytes reads back with U+FFFD, and two names that differ only there are one
+  variable. Linux passes the bytes. The C runtimes set variables by their own rules:
+  `_wputenv_s` (Windows) builds `name=value` and splits it at its first `=`, so
+  `SetEnvVariable("A=B", "C")` sets `A` to `B=C` and `UnsetEnvVariable("Q=R")` sets `Q` to `R=`,
+  refuses a name that starts with `=`, and removes a variable set to ""; Linux's `setenv`
+  refuses a name holding `=` and keeps an empty value. Windows compares names without case
+  twice over: the system (`GetEnvironmentVariableW`, which `GetEnvVariable` reads) folds every
+  code unit by its own table (I-117), the C runtime's list (`_wenviron`, which a context's
+  `loadEnvironment` reads) folds ASCII only, so after setting a lowercase "e acute" name and
+  then its uppercase, the first reads the second's value and the context loads both. Linux
+  compares exactly.
+- **Who notices:** configs and environments with names or paths that aren't UTF-8, names that
+  differ only in case or hold `=`, used on both platforms.
 - **A fix:** none: these are the platforms' rules.
-- **Status:** matched in p3-context (3.5a): the conversions checked against the system for every
-  string of up to 4 bytes or units over each class (`crates/ocio-ops/tests/platform_crt.rs`).
+- **Status:** matched in p3-context (3.5a, and its fix chunk after the verifier's review): the
+  conversions checked against the system for every string of up to 4 bytes or units over each
+  class, the C runtime's list against `_wenviron`/`environ`
+  (`crates/ocio-ops/tests/platform_crt.rs`), and the environment functions against the wheel
+  (`crates/ocio/tests/env_oracle.rs`).
 
 ### I-114. Windows device names as files
 
@@ -1050,6 +1062,25 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   port gives the path as UTF-8, as the rest of OCIO's paths are; the ANSI conversion needs a
   system call the port's crates can't make (`unsafe`). ASCII paths are the same on both. For
   the owner.
+
+### I-117. Windows folds environment variable names by the system's table
+
+- **Upstream:** the Windows wheel reads a variable with `GetEnvironmentVariableW`, which finds
+  its name ignoring case as `RtlUpcaseUnicodeChar` folds each UTF-16 code unit, from the NLS
+  data of the Windows it runs on (`Platform.cpp:48-97` @ v2.5.2). That table is Unicode's
+  simple uppercase mapping of an older Unicode version: on the reference machine (Windows 11,
+  build 26300) it differs from Unicode's current mapping at 252 code units (225 it leaves
+  alone, such as the dotless i, the micro sign and the long s, whose mapping Unicode added
+  later; 27 Greek letters with iota subscript, which it maps to their titlecase form). Another
+  Windows version can have another table, so which names are the same variable can change with
+  a Windows update.
+- **Who notices:** names that differ only in the case of such characters.
+- **A fix:** none: it is the system's rule.
+- **Status:** matched on the reference machine (p3-context, the fix chunk after the verifier's
+  review): the port folds with Rust's simple uppercase mapping and the reference machine's
+  252 exceptions (`crates/ocio-ops/src/platform_nls_upcase.rs`); `tests/platform_crt.rs`
+  checks every code unit against `RtlUpcaseUnicodeChar`, so a machine with another table fails
+  there. The alternative, calling the system (FFI, `unsafe`), is the owner's decision.
 
 ## Undefined behaviour upstream
 
@@ -1425,3 +1456,19 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   current working directory could not be read (_getcwd failed)." from `abs_path`. Linux needs
   nothing: its buffer is zeroed and grown until the path fits, and another failure gives "".
 - **Status:** p3-context 3.5f (`crates/ocio/src/path_utils.rs`, `get_cwd`).
+
+### U-46. An environment variable of 32,767 UTF-16 code units
+
+- **Upstream:** on Windows, `Setenv` and `Unsetenv` call `_wputenv_s` (`Platform.cpp:99-142` @
+  v2.5.2), whose parameter validation refuses a name or a value of `_MAX_ENV` (32,767) UTF-16
+  code units or more by calling the invalid parameter handler, which ends the wheel's process
+  (status 0xC0000409). 32,766 works. Linux's `setenv` takes any length.
+- **Who notices:** a caller of `SetEnvVariable` or `UnsetEnvVariable` with such a name or value,
+  on Windows.
+- **Decided** (the owner's general rule, with a clear message): `set_env_variable`,
+  `unset_env_variable` (and `platform::setenv`, `unsetenv`) return a `Result`, the error
+  "Environment variable names and values must be shorter than 32767 UTF-16 code units
+  (_MAX_ENV)." on Windows, and change nothing.
+- **Status:** p3-context, the fix chunk after the verifier's review (`crates/ocio-ops/src/
+  platform.rs`, `put`); checked against the wheel, whose process ends, in
+  `crates/ocio/tests/env_oracle.rs`.

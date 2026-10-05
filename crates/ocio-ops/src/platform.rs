@@ -5,22 +5,19 @@
 //!
 //! **The environment** goes through an injectable [`EnvProvider`] (PLAN.md §9), so tests can
 //! give OCIO an environment without touching the process's. Names and values are bytes, as
-//! OCIO's C strings hold them, and each platform's rules apply:
-//! - Windows names are case-insensitive (`GetEnvironmentVariableW`), and setting a variable to
-//!   the empty string removes it (`_wputenv_s`); Linux names are exact, and an empty value is a
-//!   value.
-//! - The Windows wheel reads and writes UTF-16 and converts with `MultiByteToWideChar` and
-//!   `WideCharToMultiByte`, which replace what they can't convert with U+FFFD; the Linux wheel
-//!   passes the bytes.
-//! - [`EnvProvider::entries`] is the process's environment as `environ` (Linux) or the C
-//!   runtime's `_wenviron` (Windows, converted to UTF-8) lists it: `NAME=value` entries, in
-//!   order. `_wenviron` leaves out the entries the process block hides behind a leading `=`
-//!   (`=C:=C:\dir`, `=ExitCode=...`), as the wheel shows.
+//! OCIO's C strings hold them, and each platform's rules apply (`EnvState`, docs/improvements.md
+//! I-113 and I-117): the C runtime's rules for setting a variable (`setenv`, `_wputenv_s`), the
+//! system's for reading one (`getenv`, `GetEnvironmentVariableW`, which on Windows folds names
+//! by the system's table), and the C runtime's list for the whole environment (`environ`,
+//! `_wenviron`, which folds names by ASCII and leaves out the system's `=C:` entries). The
+//! Windows wheel reads and writes UTF-16 and converts with `MultiByteToWideChar` and
+//! `WideCharToMultiByte`, which replace what they can't convert with U+FFFD; the Linux wheel
+//! passes the bytes.
 //!
 //! **The process environment** ([`ProcessEnv`]) is read through `std::env`. Rust 2024 makes
 //! changing it `unsafe`, which this crate forbids, so what OCIO sets and unsets
-//! (`SetEnvVariable`, `UnsetEnvVariable`) lands in an overlay that OCIO reads on top of the
-//! process environment, and that other code in the process doesn't see (deviation D-5,
+//! (`SetEnvVariable`, `UnsetEnvVariable`) is recorded and replayed on the process environment
+//! when OCIO reads it, and other code in the process doesn't see it (deviation D-5,
 //! `docs/deviations.md`).
 
 use std::cmp::Ordering;
@@ -30,27 +27,151 @@ use std::sync::{Arc, RwLock};
 use crate::exception::{Exception, Result};
 use crate::utils::string_utils::c_str;
 
-/// Where OCIO reads and writes environment variables.
+#[path = "platform_nls_upcase.rs"]
+mod nls_upcase;
+
+/// `RtlUpcaseUnicodeChar(c)`, as Windows folds environment variable names (the reference
+/// machine's table, docs/improvements.md I-117). For `tests/platform_crt.rs`.
+#[doc(hidden)]
+pub fn windows_upcase(c: u16) -> u16 {
+    nls_upcase::upcase(c)
+}
+
+/// Where OCIO reads and writes environment variables. [`setenv`] and [`unsetenv`] apply the
+/// C runtime's rules to their arguments first (a name holding `=`, Windows' empty value), so a
+/// provider receives a variable's final name and value.
 pub trait EnvProvider: Send + Sync {
-    /// The value of `name` (non-empty, no NUL), or `None` if it is not set. A variable set to
-    /// the empty string is `Some("")`.
+    /// The value the system gives for `name` (non-empty, no NUL): `getenv` (Linux) or
+    /// `GetEnvironmentVariableW` (Windows), or `None` if it has none. A variable set to the
+    /// empty string is `Some("")`.
     fn var(&self, name: &[u8]) -> Option<Vec<u8>>;
 
-    /// The environment's entries, `NAME=value`, in the order the C runtime lists them.
+    /// The environment's entries, `NAME=value`, as the C runtime lists them: `environ` (Linux)
+    /// or `_wenviron` (Windows, converted to UTF-8).
     fn entries(&self) -> Vec<Vec<u8>>;
 
-    /// Sets `name` (non-empty, no NUL) to `value` (no NUL), as the platform's C runtime does.
+    /// Sets the variable `name` (non-empty, no NUL, no `=`) to `value` (no NUL; on Windows not
+    /// empty), as the C runtime's `setenv` or `_wputenv_s` stores it.
     fn set_var(&self, name: &[u8], value: &[u8]);
 
-    /// Removes `name` (non-empty, no NUL).
+    /// Removes the variable `name` (non-empty, no NUL, no `=`), as the C runtime's `unsetenv` or
+    /// `_wputenv_s` with an empty value does.
     fn remove_var(&self, name: &[u8]);
 }
 
-/// Whether two names are the same variable: ignoring case on Windows, where
-/// `GetEnvironmentVariableW` and `_wputenv_s` fold it; exactly on Linux. The fold is ASCII's
-/// here; Windows folds every letter of the Unicode basic plane, which only [`ProcessEnv`] does
-/// (through the system).
-fn same_name(a: &[u8], b: &[u8]) -> bool {
+/// A variable: its name (the entry up to its first `=` after the first character) and value.
+type Var = (Vec<u8>, Vec<u8>);
+
+/// `name=value`.
+fn line((name, value): &Var) -> Vec<u8> {
+    [name.as_slice(), b"=", value].concat()
+}
+
+/// An environment as the platform keeps it, and its rules.
+///
+/// - Linux: one list, `environ`. `setenv` replaces the first entry of the name in place (and
+///   its name) or appends one; `unsetenv` removes every entry of the name; `getenv(name)` is
+///   the first entry that starts with `name` followed by `=`. Names compare exactly.
+/// - Windows: two lists. The C runtime's `_wenviron`, which `LoadEnvironment` reads, compares
+///   names ignoring ASCII case only (`_wcsnicoll` in the "C" locale), replaces the first entry
+///   of the name in place (with the new name) or appends one, removes the first entry of the
+///   name, and leaves out the entries whose name starts with `=` (`=C:`). The system's block,
+///   which `GetEnvironmentVariableW` reads, compares names as `RtlUpcaseUnicodeChar` folds
+///   them, code unit by code unit ([`nls_upcase`]), and gives for `name` the entry that starts
+///   with it (folded) followed by `=`. Everything is UTF-16 there: names and values reach it
+///   through `Utf8ToUtf16` and come back through `Utf16ToUtf8`, so bytes that aren't UTF-8 come
+///   back as U+FFFD.
+#[derive(Debug, Default, Clone)]
+struct EnvState {
+    /// `environ` (Linux), `_wenviron` (Windows).
+    crt: Vec<Var>,
+    /// The system's block (Windows); unused on Linux.
+    os: Vec<Var>,
+}
+
+impl EnvState {
+    /// An environment holding `vars`, the system's block in its order.
+    fn new(vars: Vec<Var>) -> EnvState {
+        if cfg!(windows) {
+            let vars: Vec<Var> = vars
+                .into_iter()
+                .map(|(n, v)| (round_trip(&n), round_trip(&v)))
+                .collect();
+            EnvState {
+                crt: vars
+                    .iter()
+                    .filter(|(n, _)| n.first() != Some(&b'='))
+                    .cloned()
+                    .collect(),
+                os: vars,
+            }
+        } else {
+            EnvState {
+                crt: vars,
+                os: Vec::new(),
+            }
+        }
+    }
+
+    fn set(&mut self, name: &[u8], value: &[u8]) {
+        let var = (name.to_vec(), value.to_vec());
+        match self.crt.iter_mut().find(|(n, _)| same_crt_name(n, name)) {
+            Some(entry) => *entry = var.clone(),
+            None => self.crt.push(var.clone()),
+        }
+        if cfg!(windows) {
+            match self.os.iter_mut().find(|(n, _)| same_os_name(n, name)) {
+                Some(entry) => entry.1 = var.1,
+                None => self.os.push(var),
+            }
+        }
+    }
+
+    fn remove(&mut self, name: &[u8]) {
+        if cfg!(windows) {
+            if let Some(i) = self.crt.iter().position(|(n, _)| same_crt_name(n, name)) {
+                self.crt.remove(i);
+            }
+            self.os.retain(|(n, _)| !same_os_name(n, name));
+        } else {
+            self.crt.retain(|(n, _)| n != name);
+        }
+    }
+
+    fn var(&self, name: &[u8]) -> Option<Vec<u8>> {
+        if cfg!(windows) {
+            let name = utf8_to_utf16_lossy(name);
+            self.os.iter().find_map(|var| {
+                let entry = utf8_to_utf16_lossy(&line(var));
+                (entry.len() > name.len()
+                    && entry[name.len()] == u16::from(b'=')
+                    && nls_upcase::equal_ignoring_case(&entry[..name.len()], &name))
+                .then(|| utf16_to_utf8_lossy(&entry[name.len() + 1..]))
+            })
+        } else {
+            self.crt.iter().find_map(|var| {
+                let entry = line(var);
+                (entry.len() > name.len()
+                    && entry[name.len()] == b'='
+                    && &entry[..name.len()] == name)
+                    .then(|| entry[name.len() + 1..].to_vec())
+            })
+        }
+    }
+
+    fn entries(&self) -> Vec<Vec<u8>> {
+        self.crt.iter().map(line).collect()
+    }
+}
+
+/// UTF-8 bytes as they come back from the system's UTF-16: `Utf16ToUtf8(Utf8ToUtf16(s))`.
+fn round_trip(s: &[u8]) -> Vec<u8> {
+    utf16_to_utf8_lossy(&utf8_to_utf16_lossy(s))
+}
+
+/// Whether the C runtime's list takes `a` and `b` for the same name: exactly on Linux,
+/// ignoring ASCII case on Windows (`_wcsnicoll` in the "C" locale).
+fn same_crt_name(a: &[u8], b: &[u8]) -> bool {
     if cfg!(windows) {
         a.eq_ignore_ascii_case(b)
     } else {
@@ -58,79 +179,52 @@ fn same_name(a: &[u8], b: &[u8]) -> bool {
     }
 }
 
-/// Whether `name` is one the C runtime accepts for setting: `_wputenv_s` and `setenv` both
-/// refuse a name holding `=` (`EINVAL`), and OCIO ignores the error.
-fn settable(name: &[u8]) -> bool {
-    !name.contains(&b'=')
+/// Whether Windows' block takes `a` and `b` for the same name (`RtlUpcaseUnicodeChar`).
+fn same_os_name(a: &[u8], b: &[u8]) -> bool {
+    nls_upcase::equal_ignoring_case(&utf8_to_utf16_lossy(a), &utf8_to_utf16_lossy(b))
 }
 
-/// A list of `NAME=value` entries, kept as the C runtime keeps `environ`: setting an existing
-/// variable replaces its entry in place (renamed as given), a new one is appended, and removing
-/// one takes its entry out.
-#[derive(Debug, Default, Clone)]
-struct Entries(Vec<(Vec<u8>, Vec<u8>)>);
-
-impl Entries {
-    fn get(&self, name: &[u8]) -> Option<Vec<u8>> {
-        self.0
-            .iter()
-            .find(|(n, _)| same_name(n, name))
-            .map(|(_, v)| v.clone())
-    }
-
-    fn set(&mut self, name: &[u8], value: &[u8]) {
-        if cfg!(windows) && value.is_empty() {
-            self.remove(name);
-            return;
-        }
-        match self.0.iter_mut().find(|(n, _)| same_name(n, name)) {
-            Some(entry) => *entry = (name.to_vec(), value.to_vec()),
-            None => self.0.push((name.to_vec(), value.to_vec())),
-        }
-    }
-
-    fn remove(&mut self, name: &[u8]) {
-        self.0.retain(|(n, _)| !same_name(n, name));
-    }
-
-    fn lines(&self) -> Vec<Vec<u8>> {
-        self.0
-            .iter()
-            .map(|(n, v)| {
-                let mut line = n.clone();
-                line.push(b'=');
-                line.extend_from_slice(v);
-                line
-            })
-            .collect()
-    }
+/// The process's environment, as `std::env` reads it.
+fn process_vars() -> Vec<Var> {
+    std::env::vars_os()
+        .map(|(n, v)| (process::bytes(&n), process::bytes(&v)))
+        .collect()
 }
 
-/// The process environment, read through `std::env`, with OCIO's own changes on top.
+/// The process environment, read through `std::env`, with OCIO's own changes on top: what OCIO
+/// sets and unsets is recorded, and replayed on the process's environment when OCIO reads it
+/// (deviation D-5).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ProcessEnv;
 
 /// A change OCIO made: a name, and its value or `None` when removed.
 type Change = (Vec<u8>, Option<Vec<u8>>);
 
-/// OCIO's changes to the process environment, one per name, in the order OCIO made them.
+/// OCIO's changes to the process environment, in the order OCIO made them.
 static OVERLAY: RwLock<Vec<Change>> = RwLock::new(Vec::new());
 
 impl ProcessEnv {
-    fn overlay(name: &[u8]) -> Option<Option<Vec<u8>>> {
-        OVERLAY
-            .read()
-            .unwrap_or_else(|e| e.into_inner())
-            .iter()
-            .rev()
-            .find(|(n, _)| same_name(n, name))
-            .map(|(_, v)| v.clone())
+    /// The process's environment with OCIO's changes, or `None` when OCIO changed nothing.
+    fn changed() -> Option<EnvState> {
+        let overlay = OVERLAY.read().unwrap_or_else(|e| e.into_inner());
+        if overlay.is_empty() {
+            return None;
+        }
+        let mut state = EnvState::new(process_vars());
+        for (name, value) in overlay.iter() {
+            match value {
+                Some(value) => state.set(name, value),
+                None => state.remove(name),
+            }
+        }
+        Some(state)
     }
 
     fn record(name: &[u8], value: Option<Vec<u8>>) {
-        let mut overlay = OVERLAY.write().unwrap_or_else(|e| e.into_inner());
-        overlay.retain(|(n, _)| !same_name(n, name));
-        overlay.push((name.to_vec(), value));
+        OVERLAY
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .push((name.to_vec(), value));
     }
 }
 
@@ -148,12 +242,6 @@ mod process {
     pub(super) fn bytes(s: &OsStr) -> Vec<u8> {
         super::utf16_to_utf8_lossy(&s.encode_wide().collect::<Vec<u16>>())
     }
-
-    /// Whether the C runtime's `_wenviron` lists the entry: not the ones the process block
-    /// hides behind a leading `=`.
-    pub(super) fn listed(name: &OsStr) -> bool {
-        name.encode_wide().next() != Some(u16::from(b'='))
-    }
 }
 
 #[cfg(not(windows))]
@@ -168,16 +256,12 @@ mod process {
     pub(super) fn bytes(s: &OsStr) -> Vec<u8> {
         s.as_bytes().to_vec()
     }
-
-    pub(super) fn listed(_: &OsStr) -> bool {
-        true
-    }
 }
 
 impl EnvProvider for ProcessEnv {
     fn var(&self, name: &[u8]) -> Option<Vec<u8>> {
-        if let Some(value) = Self::overlay(name) {
-            return value;
+        if let Some(state) = Self::changed() {
+            return state.var(name);
         }
         // std::env::var_os asks GetEnvironmentVariableW (Windows) or getenv (Linux), as
         // upstream does, with the same name.
@@ -185,27 +269,13 @@ impl EnvProvider for ProcessEnv {
     }
 
     fn entries(&self) -> Vec<Vec<u8>> {
-        let mut entries = Entries(
-            std::env::vars_os()
-                .filter(|(n, _)| process::listed(n))
-                .map(|(n, v)| (process::bytes(&n), process::bytes(&v)))
-                .collect(),
-        );
-        for (name, value) in OVERLAY.read().unwrap_or_else(|e| e.into_inner()).iter() {
-            match value {
-                Some(value) => entries.set(name, value),
-                None => entries.remove(name),
-            }
-        }
-        entries.lines()
+        Self::changed()
+            .unwrap_or_else(|| EnvState::new(process_vars()))
+            .entries()
     }
 
     fn set_var(&self, name: &[u8], value: &[u8]) {
-        if cfg!(windows) && value.is_empty() {
-            Self::record(name, None);
-        } else {
-            Self::record(name, Some(value.to_vec()));
-        }
+        Self::record(name, Some(value.to_vec()));
     }
 
     fn remove_var(&self, name: &[u8]) {
@@ -213,15 +283,16 @@ impl EnvProvider for ProcessEnv {
     }
 }
 
-/// A fixed environment, for tests: entries in order, with the platform's rules for names and
-/// empty values.
+/// A fixed environment, for tests, with the platform's rules (as the process's environment
+/// has them).
 #[derive(Debug, Default)]
-pub struct MapEnv(RwLock<Entries>);
+pub struct MapEnv(RwLock<EnvState>);
 
 impl MapEnv {
-    /// An environment of these `(name, value)` entries, in order.
+    /// An environment of these `(name, value)` entries, in order, as the system's block would
+    /// hold them (on Windows, through UTF-16).
     pub fn from_entries<N: AsRef<[u8]>, V: AsRef<[u8]>>(entries: &[(N, V)]) -> MapEnv {
-        MapEnv(RwLock::new(Entries(
+        MapEnv(RwLock::new(EnvState::new(
             entries
                 .iter()
                 .map(|(n, v)| (n.as_ref().to_vec(), v.as_ref().to_vec()))
@@ -239,11 +310,11 @@ impl From<BTreeMap<String, String>> for MapEnv {
 
 impl EnvProvider for MapEnv {
     fn var(&self, name: &[u8]) -> Option<Vec<u8>> {
-        self.0.read().unwrap_or_else(|e| e.into_inner()).get(name)
+        self.0.read().unwrap_or_else(|e| e.into_inner()).var(name)
     }
 
     fn entries(&self) -> Vec<Vec<u8>> {
-        self.0.read().unwrap_or_else(|e| e.into_inner()).lines()
+        self.0.read().unwrap_or_else(|e| e.into_inner()).entries()
     }
 
     fn set_var(&self, name: &[u8], value: &[u8]) {
@@ -287,24 +358,82 @@ pub fn getenv(name: impl AsRef<[u8]>) -> Option<Vec<u8>> {
     env_provider().var(name)
 }
 
-/// Port of `Platform::Setenv` (Platform.cpp:99-121 @ v2.5.2): `_wputenv_s` on Windows, which
-/// removes the variable for an empty value, and `setenv` on Linux, which keeps it empty. An
-/// empty name, or one the C runtime refuses (holding `=`), changes nothing.
-pub fn setenv(name: impl AsRef<[u8]>, value: impl AsRef<[u8]>) {
-    let name = c_str(name.as_ref());
-    if name.is_empty() || !settable(name) {
-        return;
+/// The UCRT's `_MAX_ENV`: `_wputenv_s` refuses a name or a value of this many UTF-16 code
+/// units or more by its parameter validation, which ends the process.
+#[cfg(windows)]
+const MAX_ENV: usize = 32_767;
+
+/// What `Setenv(name, value)` (`value` given) and `Unsetenv(name)` do to the environment.
+/// Arguments end at their first NUL; an empty name changes nothing.
+///
+/// Windows (`_wputenv_s(Utf8ToUtf16(name), Utf8ToUtf16(value))`, Unsetenv with `L""`): the C
+/// runtime builds `name=value` and splits it at its first `=`, so a name holding `=` sets the
+/// variable named by its part before the `=` (`A=B`, `C` sets `A` to `B=C`); a name that starts
+/// with `=` is refused; an empty value after the split removes the variable. A name or a value
+/// of `_MAX_ENV` UTF-16 code units or more ends the wheel's process: the port returns an error
+/// (docs/improvements.md, U-46). Linux (`setenv`, `unsetenv`): a name holding `=` is refused.
+fn put(name: &[u8], value: Option<&[u8]>) -> Result<()> {
+    let name = c_str(name);
+    if name.is_empty() {
+        return Ok(());
     }
-    env_provider().set_var(name, c_str(value.as_ref()));
+    #[cfg(windows)]
+    {
+        let wname = utf8_to_utf16_lossy(name);
+        let wvalue = utf8_to_utf16_lossy(value.map_or(&[][..], c_str));
+        if wname.len() >= MAX_ENV || wvalue.len() >= MAX_ENV {
+            return Err(Exception::new(format!(
+                "Environment variable names and values must be shorter than {MAX_ENV} UTF-16 \
+                 code units (_MAX_ENV)."
+            )));
+        }
+        let option = [wname.as_slice(), &[u16::from(b'=')], &wvalue].concat();
+        let equal = option
+            .iter()
+            .position(|&c| c == u16::from(b'='))
+            .unwrap_or(0);
+        if equal == 0 {
+            // EINVAL, which OCIO ignores.
+            return Ok(());
+        }
+        let name = utf16_to_utf8_lossy(&option[..equal]);
+        let value = utf16_to_utf8_lossy(&option[equal + 1..]);
+        if value.is_empty() {
+            env_provider().remove_var(&name);
+        } else {
+            env_provider().set_var(&name, &value);
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        if name.contains(&b'=') {
+            // EINVAL, which OCIO ignores.
+            return Ok(());
+        }
+        match value {
+            Some(value) => env_provider().set_var(name, c_str(value)),
+            None => env_provider().remove_var(name),
+        }
+    }
+    Ok(())
 }
 
-/// Port of `Platform::Unsetenv` (Platform.cpp:123-142 @ v2.5.2).
-pub fn unsetenv(name: impl AsRef<[u8]>) {
-    let name = c_str(name.as_ref());
-    if name.is_empty() || !settable(name) {
-        return;
+/// Port of `Platform::Setenv` (Platform.cpp:99-121 @ v2.5.2): `_wputenv_s` on Windows, which
+/// removes the variable for an empty value, and `setenv` on Linux, which keeps it empty; each
+/// C runtime's rules as `put` describes them, and an error where the Windows wheel's process
+/// ends.
+pub fn setenv(name: impl AsRef<[u8]>, value: impl AsRef<[u8]>) -> Result<()> {
+    put(name.as_ref(), Some(value.as_ref()))
+}
+
+/// Port of `Platform::Unsetenv` (Platform.cpp:123-142 @ v2.5.2): `_wputenv_s(name, L"")` on
+/// Windows (so `Q=R` sets `Q` to `R=`), `unsetenv` on Linux.
+pub fn unsetenv(name: impl AsRef<[u8]>) -> Result<()> {
+    if cfg!(windows) {
+        put(name.as_ref(), Some(b""))
+    } else {
+        put(name.as_ref(), None)
     }
-    env_provider().remove_var(name);
 }
 
 /// Port of `Platform::isEnvPresent` (Platform.cpp:144-153 @ v2.5.2).
@@ -321,20 +450,21 @@ pub fn get_env_variable(name: impl AsRef<[u8]>) -> Vec<u8> {
 }
 
 /// Sets the environment variable `name` to `value` (`None` is upstream's null pointer, the
-/// empty string).
+/// empty string). Errors where the Windows wheel's process ends ([`setenv`]).
 ///
 /// Port of `SetEnvVariable` (src/OpenColorIO/Platform.cpp:30-33 @ v2.5.2).
 #[doc(alias = "SetEnvVariable")]
-pub fn set_env_variable(name: impl AsRef<[u8]>, value: Option<&[u8]>) {
-    setenv(name, value.unwrap_or_default());
+pub fn set_env_variable(name: impl AsRef<[u8]>, value: Option<&[u8]>) -> Result<()> {
+    setenv(name, value.unwrap_or_default())
 }
 
-/// Removes the environment variable `name`.
+/// Removes the environment variable `name`. Errors where the Windows wheel's process ends
+/// ([`unsetenv`]).
 ///
 /// Port of `UnsetEnvVariable` (src/OpenColorIO/Platform.cpp:35-38 @ v2.5.2).
 #[doc(alias = "UnsetEnvVariable")]
-pub fn unset_env_variable(name: impl AsRef<[u8]>) {
-    unsetenv(name);
+pub fn unset_env_variable(name: impl AsRef<[u8]>) -> Result<()> {
+    unsetenv(name)
 }
 
 /// Whether the environment variable `name` exists (its value may be empty).
