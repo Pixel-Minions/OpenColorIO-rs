@@ -583,9 +583,120 @@ fn pq_matches_the_wheel() {
     });
 }
 
+/// The pole window of `PQ_TO_LIN`, in magnitude: the curve's denominator `c2 - c3 *
+/// x^(1/m2)` is 0 near 1.992 (FixedFunctionOpCPU.cpp:2066-2068, 2160-2161 @ v2.5.2).
+const PQ_POLE_WINDOW: (f32, f32) = (1.95, 2.05);
+
+/// What W0001 waives without bound, `PQ_TO_LIN` above 1 in magnitude on Windows without fast
+/// math, can't grow unnoticed where it matters most: every `f32` of `PQ_TO_LIN` in
+/// [1.93, 2.07] and [-2.07, -1.93], around the pole. On Windows without fast math, the wheel
+/// and the port give NaNs and infinities at the same inputs outside [`PQ_POLE_WINDOW`] (both
+/// signs), where only finite values differ, and the test prints what differs inside it. Alpha
+/// passes through bit for bit. With fast math, and on Linux, every value is bit-identical.
+#[test]
+fn pq_to_lin_pole_window_is_pinned() {
+    use FixedFunctionStyle::*;
+    let p = Fixed::new(LinToPq, &[]);
+    let family = FixedFamily {
+        name: "PQ pole window",
+        cases: Vec::new(),
+        bases: Vec::new(),
+    };
+    let (lo, hi) = (1.93f32.to_bits(), 2.07f32.to_bits());
+    let values: Vec<f32> = (lo..=hi)
+        .map(f32::from_bits)
+        .flat_map(|v| [v, -v])
+        .collect();
+    let input: Vec<f32> = values
+        .chunks(3)
+        .flat_map(|c| {
+            [
+                c[0],
+                c.get(1).copied().unwrap_or(1.0),
+                c.get(2).copied().unwrap_or(1.0),
+                1.0,
+            ]
+        })
+        .collect();
+    let bytes = ocio_testkit::oracle::f32_to_bytes(&input);
+    let combos: Vec<Combo> = [false, true]
+        .map(|fast_math| Combo {
+            direction: Direction::Inverse,
+            fast_math,
+            format: battery::Format::F32_RGBA,
+        })
+        .to_vec();
+    let calls: Vec<ocio_testkit::oracle::BatchCall<'_>> = combos
+        .iter()
+        .map(|combo| ocio_testkit::oracle::BatchCall {
+            cmd: "cpu_apply",
+            args: family.spec(&p, combo.direction).cpu_apply_args(combo),
+            blobs: vec![&bytes],
+        })
+        .collect();
+    // Not cached: the responses are large, and cheap to compute again.
+    let responses = ocio_testkit::oracle::Oracle::get().batch(&calls, false);
+    for (combo, response) in combos.iter().zip(responses) {
+        let expected = response
+            .unwrap_or_else(|e| panic!("{combo}: the oracle failed: {e}"))
+            .blob_f32(0);
+        let data = p.transform_data(port_direction(combo.direction)).unwrap();
+        let renderer = get_fixed_function_cpu_renderer(&black_box(data), combo.fast_math).unwrap();
+        let mut actual = input.clone();
+        renderer.apply(&mut actual);
+        if combo.fast_math || !cfg!(target_os = "windows") {
+            if let Some(report) =
+                ocio_testkit::compare::f32_bits_report(&expected, &actual, Some(&input), 4)
+            {
+                panic!("{combo}: {report}");
+            }
+            continue;
+        }
+        let (mut differ, mut kind_inside, mut outside) = (0, Vec::new(), Vec::new());
+        for (i, ((&x, &e), &a)) in input.iter().zip(&expected).zip(&actual).enumerate() {
+            if e.to_bits() == a.to_bits() {
+                continue;
+            }
+            if i % 4 == 3 {
+                outside.push(format!(
+                    "alpha of {x:e}: wheel {:08x}, port {:08x}",
+                    e.to_bits(),
+                    a.to_bits()
+                ));
+                continue;
+            }
+            differ += 1;
+            if e.is_nan() == a.is_nan() && e.is_infinite() == a.is_infinite() {
+                continue;
+            }
+            let entry = format!(
+                "{x:e} ({:08x}): wheel {e:e} ({:08x}), port {a:e} ({:08x})",
+                x.to_bits(),
+                e.to_bits(),
+                a.to_bits()
+            );
+            if (PQ_POLE_WINDOW.0..=PQ_POLE_WINDOW.1).contains(&x.abs()) {
+                kind_inside.push(entry);
+            } else {
+                outside.push(entry);
+            }
+        }
+        println!(
+            "{combo}: {} values, {differ} differ; NaN or infinity at different inputs inside \
+             the pole window: {kind_inside:#?}",
+            values.len()
+        );
+        assert!(
+            outside.is_empty(),
+            "{combo}: NaN or infinity at different inputs outside the pole window \
+             {PQ_POLE_WINDOW:?}, or alpha differs: {outside:#?}"
+        );
+    }
+}
+
 /// The values of [`nan_combination_pixels`]: NaNs of different signs and payloads, quiet and
 /// signalling, with finite values and infinities of both signs.
-const COMBINATION_VALUES: [u32; 14] = [
+const COMBINATION_VALUES: [u32; 15] = [
     0xffc0_0000, // the x86 default NaN
     0x7fc1_2345,
     0xffc5_4321,
@@ -598,6 +709,7 @@ const COMBINATION_VALUES: [u32; 14] = [
     0xbf00_0000, // -0.5
     0x4000_0000, // 2
     0x3a83_126f, // 0.001
+    0x3ba3_d70a, // 0.005, between the linear HSY's blending lumas
     0x7f80_0000, // +inf
     0xff80_0000, // -inf
 ];

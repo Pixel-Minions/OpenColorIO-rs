@@ -13,7 +13,7 @@
 //! same route as finite ones.
 
 use ocio_testkit::battery::Direction;
-use ocio_testkit::battery::params::{Case, RGB};
+use ocio_testkit::battery::params::{Case, RGB, W0001Function};
 
 use super::api::{Arg, Calls, num};
 
@@ -1196,6 +1196,15 @@ pub(crate) fn fixed_function() -> Cases {
             fixed_function_calls(style, params),
         ));
     }
+    // W0001: without fast math, the Windows wheel computes PQ with SVML's pow, the port with
+    // powf; Linux and fast math compare bit for bit.
+    cases.push(
+        Case::new(
+            "LIN_TO_PQ",
+            fixed_function_calls("FIXED_FUNCTION_LIN_TO_PQ", &[]),
+        )
+        .w0001(W0001Function::LinToPq, W0001Function::PqToLin),
+    );
     let mut nan = GAMUT_COMP_13;
     nan[6] = f64::NAN;
     cases.push(Case::new(
