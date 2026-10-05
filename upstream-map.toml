@@ -1285,15 +1285,15 @@ status = "todo"
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op_data.rs"]
-status = "partial"
-note = "p2-ff-cpu 2.3a1: the styles, their names, GetStyle and both ConvertStyles (1-590)"
+status = "done"
+note = "p2-ff-cpu 2.3a1: the styles, their names, GetStyle and both ConvertStyles; 2.3a2: the constructors, validate, isInverse, invert, inverse, the direction, equals, the cache ID"
 
 [[file]]
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op_data.rs"]
-status = "partial"
-note = "p2-ff-cpu 2.3a1: Style (FixedFunctionOpStyle)"
+status = "done"
+note = "p2-ff-cpu 2.3a1: Style (FixedFunctionOpStyle); 2.3a2: the class"
 
 [[file]]
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOpGPU.cpp"
@@ -4624,7 +4624,8 @@ status = "todo"
 path = "tests/cpu/ops/fixedfunction/FixedFunctionOpData_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op_data_tests.rs"]
-status = "todo"
+status = "done"
+note = "p2-ff-cpu 2.3a2: all 7"
 
 [[file]]
 path = "tests/cpu/ops/fixedfunction/FixedFunctionOp_tests.cpp"

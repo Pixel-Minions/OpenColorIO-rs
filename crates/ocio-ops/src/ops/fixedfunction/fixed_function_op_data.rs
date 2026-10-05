@@ -7,7 +7,10 @@
 //! Port of `FixedFunctionOpData` (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.h and
 //! FixedFunctionOpData.cpp @ v2.5.2).
 
+use crate::cfmt::{Crt, OStringStream};
 use crate::exception::{Exception, Result};
+use crate::format_metadata::{FormatMetadataImpl, METADATA_ID, METADATA_NAME};
+use crate::op_data::OpDataType;
 use crate::open_color_types::{FixedFunctionStyle, TransformDirection, UNIMPLEMENTED_GAMUTMAP};
 use crate::platform::strcasecmp;
 
@@ -391,3 +394,582 @@ impl FixedFunctionOpStyle {
         }
     }
 }
+
+/// The parameters of a style: none for most, 1 for the Rec.2100 surround and the ACES 2.0
+/// tone scale, 7 for the ACES 1.3 gamut compression, 8, 9, 10 or 13 for others.
+///
+/// Port of `FixedFunctionOpData::Params` (src/OpenColorIO/ops/fixedfunction/
+/// FixedFunctionOpData.h:81 @ v2.5.2).
+pub type Params = Vec<f64>;
+
+/// The cache ID's precision (`DefaultValues::FLOAT_DECIMALS`, FixedFunctionOpData.cpp:38-41 @
+/// v2.5.2).
+const FLOAT_DECIMALS: i64 = 7;
+
+/// The error of a query that would read a Rec.2100 surround's missing parameter upstream
+/// (`docs/improvements.md` U-31).
+pub const SHORT_PARAMS: &str = "FixedFunctionOp: the style has fewer parameters than it \
+     uses: upstream reads past them.";
+
+/// `ss << value` on a default `std::stringstream`: 6 significant digits.
+fn put(ss: &mut OStringStream, value: f64) {
+    ss.put_f64(value);
+}
+
+/// Refuses `val` outside `[low, high]`; a NaN passes.
+///
+/// Port of `check_param_bounds` (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.cpp:
+/// 17-25 @ v2.5.2).
+fn check_param_bounds(name: &str, val: f64, low: f64, high: f64) -> Result<()> {
+    if val < low || val > high {
+        let mut ss = OStringStream::new(Crt::NATIVE);
+        ss.put_str("Parameter ");
+        put(&mut ss, val);
+        ss.put_str(" (");
+        ss.put_str(name);
+        ss.put_str(") is outside valid range [");
+        put(&mut ss, low);
+        ss.put_str(",");
+        put(&mut ss, high);
+        ss.put_str("]");
+        return Err(Exception::new(ss.into_string()));
+    }
+    Ok(())
+}
+
+/// Refuses a `val` with a fractional part, NaN included (`floor(NaN) != NaN`).
+///
+/// Port of `check_param_no_frac` (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.cpp:
+/// 27-35 @ v2.5.2).
+fn check_param_no_frac(name: &str, val: f64) -> Result<()> {
+    if val.floor() != val {
+        let mut ss = OStringStream::new(Crt::NATIVE);
+        ss.put_str("Parameter ");
+        put(&mut ss, val);
+        ss.put_str(" (");
+        ss.put_str(name);
+        ss.put_str(") cannot include any fractional component");
+        return Err(Exception::new(ss.into_string()));
+    }
+    Ok(())
+}
+
+/// Builds a message on a default `std::stringstream`, from text and doubles.
+fn message(parts: &[Part<'_>]) -> Exception {
+    let mut ss = OStringStream::new(Crt::NATIVE);
+    for part in parts {
+        match *part {
+            Part::Text(text) => ss.put_str(text),
+            Part::Value(value) => put(&mut ss, value),
+        }
+    }
+    Exception::new(ss.into_string())
+}
+
+/// A piece of a [`message`].
+enum Part<'a> {
+    Text(&'a str),
+    Value(f64),
+}
+
+/// The FixedFunction op's data.
+///
+/// `==` is upstream's `operator==` ([`equals`](Self::equals)): the style and the parameters,
+/// not the metadata.
+///
+/// Port of `FixedFunctionOpData` (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.h:
+/// 23-119 @ v2.5.2).
+#[derive(Debug, Clone)]
+pub struct FixedFunctionOpData {
+    /// The `OpData` base's `m_metadata`.
+    metadata: FormatMetadataImpl,
+    /// `m_style`.
+    style: FixedFunctionOpStyle,
+    /// `m_params`.
+    params: Params,
+}
+
+impl FixedFunctionOpData {
+    /// The style without parameters, validated: a style that takes some is refused.
+    ///
+    /// Port of `FixedFunctionOpData(Style)` (src/OpenColorIO/ops/fixedfunction/
+    /// FixedFunctionOpData.cpp:591-596 @ v2.5.2).
+    pub fn new(style: FixedFunctionOpStyle) -> Result<Self> {
+        Self::with_params(style, Params::new())
+    }
+
+    /// The style with its parameters, validated.
+    ///
+    /// Port of `FixedFunctionOpData(Style, const Params &)` (src/OpenColorIO/ops/fixedfunction/
+    /// FixedFunctionOpData.cpp:598-604 @ v2.5.2).
+    pub fn with_params(style: FixedFunctionOpStyle, params: Params) -> Result<Self> {
+        let data = FixedFunctionOpData {
+            metadata: FormatMetadataImpl::default(),
+            style,
+            params,
+        };
+        data.validate()?;
+        Ok(data)
+    }
+
+    /// A copy made with the validating constructor, so invalid data is refused, then given the
+    /// metadata.
+    ///
+    /// Port of `FixedFunctionOpData::clone` (src/OpenColorIO/ops/fixedfunction/
+    /// FixedFunctionOpData.cpp:610-615 @ v2.5.2).
+    pub fn try_clone(&self) -> Result<Self> {
+        let mut clone = Self::with_params(self.style, self.params.clone())?;
+        clone.metadata = self.metadata.clone();
+        Ok(clone)
+    }
+
+    /// Checks the number of parameters the style takes and, for some styles, their values.
+    ///
+    /// Port of `FixedFunctionOpData::validate` (src/OpenColorIO/ops/fixedfunction/
+    /// FixedFunctionOpData.cpp:617-842 @ v2.5.2).
+    pub fn validate(&self) -> Result<()> {
+        use FixedFunctionOpStyle::*;
+        use Part::{Text, Value};
+        let p = &self.params;
+        match self.style {
+            AcesGamutComp13Fwd | AcesGamutComp13Inv => {
+                self.check_size(7, "seven parameters")?;
+
+                // Clamped to the smallest increment above 1 in half float precision for
+                // numerical stability.
+                const LIM_LOW_BOUND: f64 = 1.001;
+                const LIM_HI_BOUND: f64 = 65504.0;
+                check_param_bounds("lim_cyan", p[0], LIM_LOW_BOUND, LIM_HI_BOUND)?;
+                check_param_bounds("lim_magenta", p[1], LIM_LOW_BOUND, LIM_HI_BOUND)?;
+                check_param_bounds("lim_yellow", p[2], LIM_LOW_BOUND, LIM_HI_BOUND)?;
+
+                const THR_LOW_BOUND: f64 = 0.0;
+                // Clamped to the smallest increment below 1 in half float precision for
+                // numerical stability.
+                const THR_HI_BOUND: f64 = 0.9995;
+                check_param_bounds("thr_cyan", p[3], THR_LOW_BOUND, THR_HI_BOUND)?;
+                check_param_bounds("thr_magenta", p[4], THR_LOW_BOUND, THR_HI_BOUND)?;
+                check_param_bounds("thr_yellow", p[5], THR_LOW_BOUND, THR_HI_BOUND)?;
+
+                const PWR_LOW_BOUND: f64 = 1.0;
+                const PWR_HI_BOUND: f64 = 65504.0;
+                check_param_bounds("power", p[6], PWR_LOW_BOUND, PWR_HI_BOUND)?;
+            }
+            AcesOutputTransform20Fwd | AcesOutputTransform20Inv => {
+                self.check_size(9, "9 parameters")?;
+                check_param_bounds("peak_luminance", p[0], 1.0, 10000.0)?;
+                check_param_no_frac("peak_luminance", p[0])?;
+            }
+            AcesRgbToJmh20 | AcesJmhToRgb20 => {
+                self.check_size(8, "8 parameters")?;
+            }
+            AcesTonescaleCompress20Fwd | AcesTonescaleCompress20Inv => {
+                self.check_size(1, "1 parameters")?;
+                check_param_bounds("peak_luminance", p[0], 1.0, 10000.0)?;
+                check_param_no_frac("peak_luminance", p[0])?;
+            }
+            AcesGamutCompress20Fwd | AcesGamutCompress20Inv => {
+                self.check_size(9, "9 parameters")?;
+                check_param_bounds("peak_luminance", p[0], 1.0, 10000.0)?;
+                check_param_no_frac("peak_luminance", p[0])?;
+            }
+            Rec2100SurroundFwd | Rec2100SurroundInv => {
+                self.check_size(1, "one parameter")?;
+
+                let p = p[0];
+                let low_bound = 0.01;
+                let hi_bound = 100.;
+
+                if p < low_bound {
+                    return Err(message(&[
+                        Text("Parameter "),
+                        Value(p),
+                        Text(" is less than lower bound "),
+                        Value(low_bound),
+                    ]));
+                } else if p > hi_bound {
+                    return Err(message(&[
+                        Text("Parameter "),
+                        Value(p),
+                        Text(" is greater than upper bound "),
+                        Value(hi_bound),
+                    ]));
+                }
+            }
+            DoubleLogToLin | LinToDoubleLog => {
+                self.check_size(13, "13 parameters")?;
+
+                let base = p[0];
+                let break1 = p[1];
+                let break2 = p[2];
+                // Upstream's TODO: add additional checks on the remaining params.
+
+                // Check log base.
+                if base <= 0.0 {
+                    return Err(message(&[
+                        Text("Log base "),
+                        Value(base),
+                        Text(" is not greater than zero."),
+                    ]));
+                }
+
+                // Check break point order.
+                if break1 > break2 {
+                    return Err(message(&[
+                        Text("First break point "),
+                        Value(break1),
+                        Text(" is larger than the second break point "),
+                        Value(break2),
+                        Text("."),
+                    ]));
+                }
+            }
+            LinToGammaLog | GammaLogToLin => {
+                self.check_size(10, "10 parameters")?;
+
+                let mirror_pt = p[0];
+                let break_pt = p[1];
+                let gamma_seg_power = p[2];
+                // Upstream's TODO: add additional checks on the remaining params.
+                let log_seg_base = p[5];
+
+                // Check log base.
+                if log_seg_base <= 0.0 {
+                    return Err(message(&[
+                        Text("Log base "),
+                        Value(log_seg_base),
+                        Text(" is not greater than zero."),
+                    ]));
+                }
+
+                // Check mirror and break point order.
+                if mirror_pt >= break_pt {
+                    return Err(message(&[
+                        Text("Mirror point "),
+                        Value(mirror_pt),
+                        Text(" is not smaller than the break point "),
+                        Value(break_pt),
+                        Text("."),
+                    ]));
+                }
+
+                // Check gamma.
+                if gamma_seg_power == 0.0 {
+                    return Err(Exception::new("Gamma power is zero."));
+                }
+            }
+            AcesRedMod03Fwd | AcesRedMod03Inv | AcesRedMod10Fwd | AcesRedMod10Inv
+            | AcesGlow03Fwd | AcesGlow03Inv | AcesGlow10Fwd | AcesGlow10Inv
+            | AcesDarkToDim10Fwd | AcesDarkToDim10Inv | RgbToHsv | HsvToRgb | XyzToXyy
+            | XyyToXyz | XyzToUvy | UvyToXyz | XyzToLuv | LuvToXyz | LinToPq | PqToLin
+            | RgbToHsyLin | RgbToHsyLog | RgbToHsyVid | HsyLinToRgb | HsyLogToRgb | HsyVidToRgb => {
+                self.check_size(0, "zero parameters")?;
+            }
+        }
+        Ok(())
+    }
+
+    /// "The style '<detailed name>' must have <what> but <size> found." unless the style has
+    /// `size` parameters (FixedFunctionOpData.cpp:621-628 @ v2.5.2, and the other styles'
+    /// copies).
+    fn check_size(&self, size: usize, what: &str) -> Result<()> {
+        if self.params.len() != size {
+            let mut ss = OStringStream::new(Crt::NATIVE);
+            ss.put_str("The style '");
+            ss.put_str(self.style.to_str(true));
+            ss.put_str("' must have ");
+            ss.put_str(what);
+            ss.put_str(" but ");
+            ss.put_u64(self.params.len() as u64);
+            ss.put_str(" found.");
+            return Err(Exception::new(ss.into_string()));
+        }
+        Ok(())
+    }
+
+    /// The type of the data: `FixedFunctionType`.
+    ///
+    /// Port of `FixedFunctionOpData::getType` (src/OpenColorIO/ops/fixedfunction/
+    /// FixedFunctionOpData.h:92 @ v2.5.2).
+    pub fn get_type(&self) -> OpDataType {
+        OpDataType::FixedFunction
+    }
+
+    /// Never a no-op.
+    ///
+    /// Port of `FixedFunctionOpData::isNoOp` (src/OpenColorIO/ops/fixedfunction/
+    /// FixedFunctionOpData.h:94 @ v2.5.2).
+    pub fn is_no_op(&self) -> bool {
+        false
+    }
+
+    /// Never an identity.
+    ///
+    /// Port of `FixedFunctionOpData::isIdentity` (src/OpenColorIO/ops/fixedfunction/
+    /// FixedFunctionOpData.h:95 @ v2.5.2).
+    pub fn is_identity(&self) -> bool {
+        false
+    }
+
+    /// Always mixes channels.
+    ///
+    /// Port of `FixedFunctionOpData::hasChannelCrosstalk` (src/OpenColorIO/ops/fixedfunction/
+    /// FixedFunctionOpData.h:96 @ v2.5.2).
+    pub fn has_channel_crosstalk(&self) -> bool {
+        true
+    }
+
+    /// Whether `r` undoes this data: a Rec.2100 surround of the same style whose parameter is
+    /// the reciprocal of this one's, or else data equal to this one's
+    /// [`inverse`](Self::inverse), whose errors it raises.
+    ///
+    /// [`SHORT_PARAMS`] where the Rec.2100 surround's comparison would read a missing
+    /// parameter upstream (`docs/improvements.md` U-31).
+    ///
+    /// Port of `FixedFunctionOpData::isInverse` (src/OpenColorIO/ops/fixedfunction/
+    /// FixedFunctionOpData.cpp:844-856 @ v2.5.2).
+    pub fn is_inverse(&self, r: &FixedFunctionOpData) -> Result<bool> {
+        let this_style = self.style;
+        if (FixedFunctionOpStyle::Rec2100SurroundFwd == this_style
+            || FixedFunctionOpStyle::Rec2100SurroundInv == this_style)
+            && this_style == r.style
+        {
+            // Check for the case where the styles are the same but the parameter is
+            // inverted.
+            let (Some(&p), Some(&q)) = (self.params.first(), r.params.first()) else {
+                return Err(Exception::new(SHORT_PARAMS));
+            };
+            return Ok(p == 1. / q);
+        }
+        Ok(r.equals(&self.inverse()?))
+    }
+
+    /// Swaps the style's direction. The data is assumed to be validated.
+    ///
+    /// Port of `FixedFunctionOpData::invert` (src/OpenColorIO/ops/fixedfunction/
+    /// FixedFunctionOpData.cpp:858-1069 @ v2.5.2).
+    fn invert(&mut self) {
+        use FixedFunctionOpStyle::*;
+        let inverse = match self.style {
+            AcesRedMod03Fwd => AcesRedMod03Inv,
+            AcesRedMod03Inv => AcesRedMod03Fwd,
+            AcesRedMod10Fwd => AcesRedMod10Inv,
+            AcesRedMod10Inv => AcesRedMod10Fwd,
+            AcesGlow03Fwd => AcesGlow03Inv,
+            AcesGlow03Inv => AcesGlow03Fwd,
+            AcesGlow10Fwd => AcesGlow10Inv,
+            AcesGlow10Inv => AcesGlow10Fwd,
+            AcesDarkToDim10Fwd => AcesDarkToDim10Inv,
+            AcesDarkToDim10Inv => AcesDarkToDim10Fwd,
+            AcesGamutComp13Fwd => AcesGamutComp13Inv,
+            AcesGamutComp13Inv => AcesGamutComp13Fwd,
+            AcesOutputTransform20Fwd => AcesOutputTransform20Inv,
+            AcesOutputTransform20Inv => AcesOutputTransform20Fwd,
+            AcesRgbToJmh20 => AcesJmhToRgb20,
+            AcesJmhToRgb20 => AcesRgbToJmh20,
+            AcesTonescaleCompress20Fwd => AcesTonescaleCompress20Inv,
+            AcesTonescaleCompress20Inv => AcesTonescaleCompress20Fwd,
+            AcesGamutCompress20Fwd => AcesGamutCompress20Inv,
+            AcesGamutCompress20Inv => AcesGamutCompress20Fwd,
+            Rec2100SurroundFwd => Rec2100SurroundInv,
+            Rec2100SurroundInv => Rec2100SurroundFwd,
+            RgbToHsv => HsvToRgb,
+            HsvToRgb => RgbToHsv,
+            RgbToHsyLog => HsyLogToRgb,
+            HsyLogToRgb => RgbToHsyLog,
+            RgbToHsyLin => HsyLinToRgb,
+            HsyLinToRgb => RgbToHsyLin,
+            RgbToHsyVid => HsyVidToRgb,
+            HsyVidToRgb => RgbToHsyVid,
+            XyzToXyy => XyyToXyz,
+            XyyToXyz => XyzToXyy,
+            XyzToUvy => UvyToXyz,
+            UvyToXyz => XyzToUvy,
+            XyzToLuv => LuvToXyz,
+            LuvToXyz => XyzToLuv,
+            LinToPq => PqToLin,
+            PqToLin => LinToPq,
+            LinToGammaLog => GammaLogToLin,
+            GammaLogToLin => LinToGammaLog,
+            LinToDoubleLog => DoubleLogToLin,
+            DoubleLogToLin => LinToDoubleLog,
+        };
+        self.set_style(inverse);
+
+        // Note that any existing metadata could become stale at this point but trying to
+        // update it is also challenging since inverse() is sometimes called even during the
+        // creation of new ops.
+    }
+
+    /// A copy ([`try_clone`](Self::try_clone), whose errors it raises) with the direction
+    /// swapped.
+    ///
+    /// Port of `FixedFunctionOpData::inverse` (src/OpenColorIO/ops/fixedfunction/
+    /// FixedFunctionOpData.cpp:1071-1076 @ v2.5.2).
+    pub fn inverse(&self) -> Result<FixedFunctionOpData> {
+        let mut func = self.try_clone()?;
+        func.invert();
+        Ok(func)
+    }
+
+    /// Port of `FixedFunctionOpData::getStyle` (src/OpenColorIO/ops/fixedfunction/
+    /// FixedFunctionOpData.h:103 @ v2.5.2).
+    pub fn style(&self) -> FixedFunctionOpStyle {
+        self.style
+    }
+
+    /// Port of `FixedFunctionOpData::setStyle` (src/OpenColorIO/ops/fixedfunction/
+    /// FixedFunctionOpData.h:104 @ v2.5.2). It doesn't validate.
+    pub fn set_style(&mut self, style: FixedFunctionOpStyle) {
+        self.style = style;
+    }
+
+    /// The direction the style encodes.
+    ///
+    /// Port of `FixedFunctionOpData::getDirection` (src/OpenColorIO/ops/fixedfunction/
+    /// FixedFunctionOpData.cpp:1078-1129 @ v2.5.2).
+    pub fn direction(&self) -> TransformDirection {
+        use FixedFunctionOpStyle::*;
+        match self.style {
+            AcesRedMod03Fwd
+            | AcesRedMod10Fwd
+            | AcesGlow03Fwd
+            | AcesGlow10Fwd
+            | AcesDarkToDim10Fwd
+            | AcesGamutComp13Fwd
+            | AcesOutputTransform20Fwd
+            | AcesRgbToJmh20
+            | AcesTonescaleCompress20Fwd
+            | AcesGamutCompress20Fwd
+            | Rec2100SurroundFwd
+            | RgbToHsv
+            | RgbToHsyLog
+            | RgbToHsyLin
+            | RgbToHsyVid
+            | XyzToXyy
+            | XyzToUvy
+            | XyzToLuv
+            | LinToPq
+            | LinToGammaLog
+            | LinToDoubleLog => TransformDirection::Forward,
+
+            AcesRedMod03Inv
+            | AcesRedMod10Inv
+            | AcesGlow03Inv
+            | AcesGlow10Inv
+            | AcesDarkToDim10Inv
+            | AcesGamutComp13Inv
+            | AcesOutputTransform20Inv
+            | AcesJmhToRgb20
+            | AcesTonescaleCompress20Inv
+            | AcesGamutCompress20Inv
+            | Rec2100SurroundInv
+            | HsvToRgb
+            | HsyLogToRgb
+            | HsyLinToRgb
+            | HsyVidToRgb
+            | XyyToXyz
+            | UvyToXyz
+            | LuvToXyz
+            | PqToLin
+            | GammaLogToLin
+            | DoubleLogToLin => TransformDirection::Inverse,
+        }
+    }
+
+    /// Inverts the style when the direction differs.
+    ///
+    /// Port of `FixedFunctionOpData::setDirection` (src/OpenColorIO/ops/fixedfunction/
+    /// FixedFunctionOpData.cpp:1131-1137 @ v2.5.2).
+    pub fn set_direction(&mut self, dir: TransformDirection) {
+        if self.direction() != dir {
+            self.invert();
+        }
+    }
+
+    /// Port of `FixedFunctionOpData::setParams` (src/OpenColorIO/ops/fixedfunction/
+    /// FixedFunctionOpData.h:109 @ v2.5.2). It doesn't validate.
+    pub fn set_params(&mut self, params: Params) {
+        self.params = params;
+    }
+
+    /// Port of `FixedFunctionOpData::getParams` (src/OpenColorIO/ops/fixedfunction/
+    /// FixedFunctionOpData.h:110 @ v2.5.2).
+    pub fn params(&self) -> &Params {
+        &self.params
+    }
+
+    /// Whether `other` has the same style and parameters (a NaN parameter is never equal).
+    /// The metadata is ignored.
+    ///
+    /// Port of `FixedFunctionOpData::equals` (src/OpenColorIO/ops/fixedfunction/
+    /// FixedFunctionOpData.cpp:1139-1146 @ v2.5.2), after `OpData::equals`, which compares the
+    /// types.
+    pub fn equals(&self, other: &FixedFunctionOpData) -> bool {
+        self.style == other.style && self.params == other.params
+    }
+
+    /// The ID (followed by a space) if there is one, the style's detailed name, then each
+    /// parameter after a space, with 7 significant digits.
+    ///
+    /// Port of `FixedFunctionOpData::getCacheID` (src/OpenColorIO/ops/fixedfunction/
+    /// FixedFunctionOpData.cpp:1148-1168 @ v2.5.2).
+    pub fn get_cache_id(&self) -> Vec<u8> {
+        let mut cache_id = Vec::new();
+        if !self.get_id().is_empty() {
+            cache_id.extend_from_slice(self.get_id());
+            cache_id.push(b' ');
+        }
+
+        let mut stream = OStringStream::new(Crt::NATIVE);
+        stream.precision = FLOAT_DECIMALS;
+
+        stream.put_str(self.style.to_str(true));
+
+        for &param in &self.params {
+            stream.put_str(" ");
+            stream.put_f64(param);
+        }
+
+        cache_id.extend_from_slice(stream.into_string().as_bytes());
+        cache_id
+    }
+
+    /// Port of `OpData::getFormatMetadata() const` (src/OpenColorIO/Op.h:164 @ v2.5.2).
+    pub fn get_format_metadata(&self) -> &FormatMetadataImpl {
+        &self.metadata
+    }
+
+    /// Port of `OpData::getFormatMetadata()` (src/OpenColorIO/Op.h:163 @ v2.5.2).
+    pub fn get_format_metadata_mut(&mut self) -> &mut FormatMetadataImpl {
+        &mut self.metadata
+    }
+
+    /// Port of `OpData::getID` (src/OpenColorIO/Op.cpp:81-84 @ v2.5.2).
+    pub fn get_id(&self) -> &[u8] {
+        self.metadata.get_attribute_value_string(Some(METADATA_ID))
+    }
+
+    /// Port of `OpData::setID` (src/OpenColorIO/Op.cpp:86-89 @ v2.5.2).
+    pub fn set_id(&mut self, id: &[u8]) {
+        self.metadata.set_id(Some(id));
+    }
+
+    /// Port of `OpData::getName` (src/OpenColorIO/Op.cpp:91-94 @ v2.5.2).
+    pub fn get_name(&self) -> &[u8] {
+        self.metadata
+            .get_attribute_value_string(Some(METADATA_NAME))
+    }
+}
+
+/// Port of `operator==(const FixedFunctionOpData &, const FixedFunctionOpData &)`
+/// (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.cpp:1170-1173 @ v2.5.2).
+impl PartialEq for FixedFunctionOpData {
+    fn eq(&self, other: &Self) -> bool {
+        self.equals(other)
+    }
+}
+
+#[cfg(test)]
+#[path = "fixed_function_op_data_tests.rs"]
+mod tests;

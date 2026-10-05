@@ -81,7 +81,7 @@ pub(crate) fn direction_enum(dir: TransformDirection) -> Value {
 
 /// A transform built with the binding's constructor, `FixedFunctionTransform(style, params,
 /// direction)`, which validates it
-/// (src/bindings/python/transforms/PyFixedFunctionTransform.cpp:25-40 @ v2.5.2).
+/// (src/bindings/python/transforms/PyFixedFunctionTransform.cpp:26-42 @ v2.5.2).
 pub(crate) fn constructed(
     style: FixedFunctionStyle,
     params: Value,
@@ -96,7 +96,7 @@ pub(crate) fn constructed(
 /// A transform built without validation: the default `FixedFunctionTransform(ACES_GLOW_03)`,
 /// then `setDirection(dir)`, `setStyle(style)` and `setParams(params)`, none of which
 /// validates. (`setStyle` keeps the direction: `FixedFunctionTransformImpl::setStyle`,
-/// src/OpenColorIO/transforms/FixedFunctionTransform.cpp:136-140 @ v2.5.2.)
+/// src/OpenColorIO/transforms/FixedFunctionTransform.cpp:122-126 @ v2.5.2.)
 pub(crate) fn unvalidated(
     style: FixedFunctionStyle,
     params: Value,
