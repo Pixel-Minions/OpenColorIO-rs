@@ -36,21 +36,9 @@ pub enum FlowType {
     Block,
 }
 
-/// yaml-cpp's `ErrorMsg` texts the emitter reports (include/yaml-cpp/exceptions.h:81-88).
-pub mod error_msg {
-    /// `ErrorMsg::UNMATCHED_GROUP_TAG`
-    pub const UNMATCHED_GROUP_TAG: &str = "unmatched group tag";
-    /// `ErrorMsg::UNEXPECTED_END_SEQ`
-    pub const UNEXPECTED_END_SEQ: &str = "unexpected end sequence token";
-    /// `ErrorMsg::UNEXPECTED_END_MAP`
-    pub const UNEXPECTED_END_MAP: &str = "unexpected end map token";
-    /// `ErrorMsg::INVALID_ANCHOR`
-    pub const INVALID_ANCHOR: &str = "invalid anchor";
-    /// `ErrorMsg::INVALID_ALIAS`
-    pub const INVALID_ALIAS: &str = "invalid alias";
-    /// `ErrorMsg::INVALID_TAG`
-    pub const INVALID_TAG: &str = "invalid tag";
-}
+/// yaml-cpp's `ErrorMsg` texts (include/yaml-cpp/exceptions.h), the emitter's among them
+/// (exceptions.h:81-88).
+pub use super::exceptions::error_msg;
 
 /// The `Setting<T>` members of `EmitterState`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

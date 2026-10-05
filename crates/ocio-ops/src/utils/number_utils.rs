@@ -1064,6 +1064,54 @@ pub mod glibc {
     }
 }
 
+/// The UCRT's `strtod` and `strtof` in the "C" locale, on the fields MSVC's `num_get` gathers
+/// for them (`std::num_get::_Parse_fp_with_locale`, which [`super::num_get`] ports): a sign,
+/// then `0` and decimal digits with at most one `.` and an `e` exponent, or `0x`, hex digits
+/// and a `p` exponent. The conversion is correctly rounded, as the UCRT's is; `errno` is
+/// `ERANGE` when the value rounds to zero or to infinity (MSVC's `from_chars` reports the same
+/// cases as `result_out_of_range`). Returns (value, end offset, `errno == ERANGE`).
+pub mod ucrt {
+    use super::{Float, decimal_to_float, hex_to_float, negate, scan_number};
+
+    fn strto_field<F: Float>(s: &[u8]) -> (F, usize, bool) {
+        let mut i = 0;
+        let mut negative = false;
+        match s.first() {
+            Some(b'-') => {
+                negative = true;
+                i += 1;
+            }
+            Some(b'+') => i += 1,
+            _ => {}
+        }
+        let hex = s.get(i) == Some(&b'0') && s.get(i + 1).map(u8::to_ascii_lowercase) == Some(b'x');
+        let start = if hex { i + 2 } else { i };
+        match scan_number(s, start, hex) {
+            Some((end, d, h)) => {
+                let c = if hex {
+                    hex_to_float::<F>(&h)
+                } else {
+                    decimal_to_float::<F>(&d)
+                };
+                (negate(c.value, negative), end, c.out_of_range)
+            }
+            // "0x" without a hex digit: the "0" alone.
+            None if hex => (negate(F::from_bits_u64(0), negative), i + 1, false),
+            None => (F::from_bits_u64(0), 0, false),
+        }
+    }
+
+    /// `strtod(s, &end)` on a gathered field.
+    pub fn strtod_field(s: &[u8]) -> (f64, usize, bool) {
+        strto_field::<f64>(s)
+    }
+
+    /// `strtof(s, &end)` on a gathered field.
+    pub fn strtof_field(s: &[u8]) -> (f32, usize, bool) {
+        strto_field::<f32>(s)
+    }
+}
+
 #[cfg(test)]
 #[path = "number_utils_tests.rs"]
 mod tests;

@@ -249,6 +249,98 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched (`p1-processor`, WP 1.8h1: `processor::stoul`, checked against each C
   runtime's `strtoul`, and through both wheels in `crates/ocio/tests/processor_cache_oracle.rs`).
 
+### I-100. YAML positions wrap after 2^31 characters or lines
+
+- **Upstream:** yaml-cpp counts the reader's position, line and column in C++ `int`s with `++`
+  (`Stream::get`, `AdvanceCurrent`, yaml-cpp 0.8.0 `src/stream.cpp:262-303`), and prints the
+  line and column plus one (`include/yaml-cpp/exceptions.h:173-181`). Past 2^31 characters or
+  lines the counters overflow, undefined behaviour that a plain machine addition resolves by
+  wrapping. The port wraps them: marks turn negative, and a mark of -1 everywhere reads as
+  "no mark".
+- **Who notices:** configs larger than 2 GiB, in the line numbers of their error messages and
+  in yaml-cpp's 1024-character limit on simple keys, which compares positions.
+- **A fix:** count in 64 bits.
+- **Status:** matched in the YAML parser (`p3-yaml-parser`, `crates/ocio/src/yaml_cpp/`).
+
+### I-101. A NUL byte in an unquoted or block scalar starts an escape sequence
+
+- **Upstream:** yaml-cpp scans plain and block scalars with no escape character, which it
+  stores as `0`, and still compares each character with it (yaml-cpp 0.8.0
+  `src/scanscalar.cpp:69-75`). So a NUL byte and the character after it go through the
+  escapes of double-quoted scalars (`src/exp.cpp:66-134`): NUL then `n` reads as a line
+  break, NUL then `0` as a NUL, and NUL then another character fails with "unknown escape
+  character: ...". Seen through the wheel: `ocio_profile_version: x<NUL>ny` reads the version
+  `x`, line break, `y`; `ab<NUL>cd` fails at line 1, column 5 with "unknown escape character:
+  c"; a NUL at the end fails with the end-of-input character 0x04 as the unknown one.
+- **Who notices:** configs with NUL bytes outside quoted scalars.
+- **A fix:** refuse the NUL, or keep it as it is.
+- **Status:** matched in the YAML parser (`p3-yaml-parser`), and checked against the wheel in
+  `crates/ocio/tests/yaml_cpp_parser_oracle.rs`.
+
+### I-102. The control character 0x04 can end a YAML token
+
+- **Upstream:** yaml-cpp's reader marks the end of the input with the character 0x04
+  (`Stream::eof()`, yaml-cpp 0.8.0 `src/stream.h:40`), and passes the byte 0x04 of UTF-8
+  input through unchanged. Its expressions that accept "the end of the input" test for that
+  character (`RegEx::MatchOpEmpty`, `src/regeximpl.h:100-103`), so a 0x04 byte counts as the
+  end where the scanner looks for one: `:` followed by 0x04 is a mapping indicator, and so are
+  `-`, `---` and `...` followed by it. Seen through the wheel: `ocio_profile_version:<0x04>x`
+  is a map whose version is `<0x04>x`, where `ocio_profile_version:x` is a scalar. Elsewhere
+  the byte is an ordinary character.
+- **Who notices:** configs with 0x04 bytes.
+- **A fix:** decode UTF-8 so that an input byte can't be the end marker.
+- **Status:** matched in the YAML parser (`p3-yaml-parser`), and checked against the wheel in
+  `crates/ocio/tests/yaml_cpp_parser_oracle.rs`.
+
+### I-103. Configs read some numbers differently on Windows and Linux
+
+- **Upstream:** yaml-cpp reads a number with `std::stringstream >> value` (yaml-cpp 0.8.0
+  `include/yaml-cpp/node/convert.h:160-201`), so each wheel's C++ library decides what a number
+  is. MSVC's STL with the UCRT's `strtod` (Windows) reads hexadecimal floats (`0x1p3` is 8,
+  `0x.8` is 0.5) and refuses a nonzero value that rounds to zero (`1e-400`, `2e-324`: "bad
+  conversion"). libstdc++ with glibc's `strtod_l` (Linux) refuses hexadecimal floats (it reads
+  the `0` and stops) and reads a value that rounds to zero as 0. Both refuse a value that
+  overflows and keep subnormal values. A config with such a number loads with a different
+  value, or fails, on one platform only. Seen through both wheels (`yaml_scalars`, O3.3).
+  The Windows wheel doesn't ship its C++ library: it runs the `msvcp140.dll` of the machine
+  (System32), 14.51.36247 on the reference machine, so its reading can change with a Visual
+  C++ runtime update. The port translates the MSVC 14.44 headers' `num_get`, and is checked
+  against the 14.51 runtime.
+- **Who notices:** configs with hexadecimal floats or numbers below the smallest subnormal.
+- **A fix:** one reader on both platforms (decimal only, and a value that rounds to zero
+  read as 0, say).
+- **Status:** matched in the YAML parser (`p3-yaml-parser`, `ocio_ops::utils::num_get`), and
+  checked against both wheels in `crates/ocio/tests/yaml_cpp_convert_oracle.rs`.
+
+### I-104. The escapes `\N` and `\_` give bytes that aren't UTF-8
+
+- **Upstream:** in a double-quoted scalar, yaml-cpp turns `\N` (next line, U+0085) into the
+  single byte 0x85 and `\_` (no-break space, U+00A0) into the single byte 0xA0 (yaml-cpp 0.8.0
+  `src/exp.cpp:117-120`), where UTF-8 needs two bytes (C2 85, C2 A0); the other escapes,
+  `\L`, `\P` and `\x`/`\u`/`\U`, give UTF-8. So a config string with these escapes holds
+  bytes that aren't UTF-8. Seen through the wheel: the version `"x\N\_\L\P"` reads as `x`,
+  0x85, 0xA0, then E2 80 A8 and E2 80 A9.
+- **Who notices:** configs that write these two escapes, in names, descriptions or roles.
+- **A fix:** write them as UTF-8.
+- **Status:** matched in the YAML parser (`p3-yaml-parser`, `crates/ocio/src/yaml_cpp/exp.rs`).
+
+### I-105. UTF-16 and UTF-32 configs are decoded leniently
+
+- **Upstream:** yaml-cpp converts a UTF-16 or UTF-32 input (found by its byte order mark or
+  its first bytes) to UTF-8 as it reads (yaml-cpp 0.8.0 `src/stream.cpp:161-182`,
+  `336-445`), and never refuses a code unit:
+  - a lone low surrogate, and a high surrogate that no low one follows, read as U+FFFD (the
+    unit after a lone high surrogate is then read on its own);
+  - U+0004, the reader's end-of-input character (I-102), reads as U+FFFD;
+  - UTF-32 surrogates and values above U+10FFFF are written in UTF-8's form anyway, and above
+    0x1FFFFF they lose their high bits (`Utf8Adjust` masks them).
+  Seen through the wheel: `ocio_profile_version: x`, U+0004, `y` in UTF-16 reads the version
+  `x`, U+FFFD, `y`; with a lone 0xDC00 in place of U+0004 too.
+- **Who notices:** UTF-16 and UTF-32 configs with invalid code units.
+- **A fix:** refuse invalid code units, and keep U+0004.
+- **Status:** matched in the YAML parser (`p3-yaml-parser`, `crates/ocio/src/yaml_cpp/stream.rs`),
+  and checked against the wheel in `crates/ocio/tests/yaml_cpp_node_oracle.rs`.
+
 ## Numeric helpers
 
 ### I-20. Double values are compared to 0 and 1 in float precision

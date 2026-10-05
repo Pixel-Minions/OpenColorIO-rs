@@ -4,3 +4,6 @@
 [submodule "upstream/pystring"]
 	path = upstream/pystring
 	url = https://github.com/imageworks/pystring
+[submodule "upstream/yaml-cpp"]
+	path = upstream/yaml-cpp
+	url = https://github.com/jbeder/yaml-cpp
