@@ -50,11 +50,16 @@ impl FixedFunctionOpData {
     /// Whether `op` is a FixedFunction op whose data undoes this one's
     /// ([`FixedFunctionOpData::is_inverse`]).
     ///
-    /// Upstream's comparison raises where this op's data doesn't validate (its inverse is a
-    /// validated copy) or, for a Rec.2100 surround, where either op has no parameter (U-31).
-    /// The optimizer, its only caller, compares ops that `OpRcPtrVec::finalize` validated
-    /// first, so it never gets there; `Op::is_inverse` answers a `bool`, so a direct call on
-    /// such ops panics with the error.
+    /// # Panics
+    ///
+    /// Panics, with upstream's error text, where [`FixedFunctionOpData::is_inverse`] fails:
+    /// where this op's data doesn't validate, or, for a Rec.2100 surround, where either op has
+    /// no parameter. Upstream throws in the first case, since its comparison builds this
+    /// data's inverse, a copy it validates; in the second it reads a parameter past the end of
+    /// its vector, which the port refuses (`docs/improvements.md` U-31). `Op::is_inverse`
+    /// answers a `bool`, as upstream's does, so the error can't be returned. The `ocio` crate
+    /// never gets there: the optimizer, the only caller, compares ops of an `OpRcPtrVec` that
+    /// `finalize` validated first.
     ///
     /// Port of `FixedFunctionOp::isInverse` (src/OpenColorIO/ops/fixedfunction/
     /// FixedFunctionOp.cpp:90-97 @ v2.5.2).
