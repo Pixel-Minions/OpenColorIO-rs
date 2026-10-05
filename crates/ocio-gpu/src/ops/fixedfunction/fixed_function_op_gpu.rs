@@ -8,22 +8,35 @@
 //! to dim surround 1.0 and the gamut compression 1.3, forward and inverse (chunk 2.3f); the
 //! Rec.2100 surround, RGB to and from HSV and the three HSYs, and XYZ to and from xyY, u'v'Y
 //! and CIELUV (2.3g1); PQ, the gamma-log and the double-log curves (2.3g2), with `double`
-//! parameters as upstream reads them; RGB to and from ACES 2.0's JMh (2.4f1). The other ACES
-//! 2.0 styles come with chunks 2.4f2, 2.4g and 2.4h; until then
+//! parameters as upstream reads them; ACES 2.0's RGB to and from JMh, and its tone scale and
+//! chroma compression, with the reach table as a texture (2.4f1, 2.4f2). The ACES 2.0 output
+//! transform and gamut compression come with chunks 2.4g and 2.4h; until then
 //! [`get_fixed_function_gpu_processing_text`] refuses them ([`not_ported`]).
 //!
 //! Upstream writes `float` values into the text with `operator<<`, which formats them with
 //! `getFloatString` (`GpuShaderText`'s stream operators); the constants it derives from them
 //! are computed in `float`, as here.
 
-use ocio_ops::ops::fixedfunction::aces2::common::{CAM_NL_OFFSET, J_SCALE, JMhParams};
-use ocio_ops::ops::fixedfunction::aces2::transform::init_jmh_params;
+use ocio_ops::ops::fixedfunction::aces2::common::{
+    CAM_NL_OFFSET, ChromaCompressParams, J_SCALE, JMhParams, REFERENCE_LUMINANCE,
+    SharedCompressionParameters, Table1D, ToneScaleParams, table_base,
+};
+use ocio_ops::ops::fixedfunction::aces2::transform::{
+    init_chroma_compress_params, init_jmh_params, init_shared_compression_params,
+    init_tone_scale_params,
+};
 use ocio_ops::ops::fixedfunction::fixed_function_op_data::{
     FixedFunctionOpData, FixedFunctionOpStyle, SHORT_PARAMS,
 };
-use ocio_ops::transforms::builtins::color_matrix_helpers::{Chromaticities, Primaries};
+use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
+use ocio_ops::transforms::builtins::color_matrix_helpers::{
+    Chromaticities, Primaries, aces_ap0, aces_ap1,
+};
+use ocio_ops::utils::string_utils::replace_in_place;
 use ocio_ops::{Exception, Result};
 
+use crate::GpuLanguage;
+use crate::gpu_shader::{TextureDimensions, TextureType};
 use crate::gpu_shader_desc::GpuShaderDesc;
 use crate::gpu_shader_utils::GpuShaderText;
 
@@ -1721,6 +1734,18 @@ fn add_double_log_to_lin(pix: &[u8], st: &GpuShaderText, func: &FixedFunctionOpD
 // ACES 2.0
 //
 
+/// `<resource prefix>_<name>`, with every `__` replaced by `_`: how the ACES 2.0 shaders name
+/// their textures and helper functions (`name` ends with the resource index).
+///
+/// Port of the names' reservation in `_Add_Reach_table`, `_Add_Toe_func` and the other
+/// helpers (FixedFunctionOpGPU.cpp:511-518, 597-606 @ v2.5.2).
+fn aces2_resource_name(shader_creator: &GpuShaderDesc, name: &str) -> Vec<u8> {
+    let mut res = [shader_creator.resource_prefix(), b"_", name.as_bytes()].concat();
+    // Note: Remove potentially problematic double underscores from GLSL resource names.
+    replace_in_place(&mut res, b"__", b"_");
+    res
+}
+
 /// The primaries of the parameters from `first` on (red, green, blue and white x and y), each
 /// narrowed to `float` as upstream reads them.
 fn aces2_primaries(func: &FixedFunctionOpData, first: usize) -> Result<Primaries> {
@@ -1944,6 +1969,543 @@ fn add_jmh_to_rgb_shader_(pxl: &[u8], st: &GpuShaderText, p: &JMhParams) -> Resu
     Ok(())
 }
 
+/// The dimensions of the ACES 2.0 tables' textures: 2D in GLSL ES, or where 1D textures aren't
+/// allowed.
+fn aces2_texture_dimensions(shader_creator: &GpuShaderDesc) -> TextureDimensions {
+    let lang = shader_creator.language();
+    if lang == GpuLanguage::GlslEs1_0
+        || lang == GpuLanguage::GlslEs3_0
+        || !shader_creator.allow_texture_1d()
+    {
+        TextureDimensions::D2
+    } else {
+        TextureDimensions::D1
+    }
+}
+
+/// Declares a table's texture in the texture declarations.
+fn declare_aces2_texture(
+    shader_creator: &mut GpuShaderDesc,
+    name: &[u8],
+    dimensions: TextureDimensions,
+    binding_index: u32,
+) -> Result<()> {
+    let st = GpuShaderText::new(shader_creator.language());
+    match dimensions {
+        TextureDimensions::D1 => {
+            st.declare_tex1d(name, shader_creator.descriptor_set_index(), binding_index)?;
+        }
+        TextureDimensions::D2 => {
+            st.declare_tex2d(name, shader_creator.descriptor_set_index(), binding_index)?;
+        }
+    }
+    shader_creator.add_to_texture_declare_shader_code(st.string());
+    Ok(())
+}
+
+/// The reach table as a texture of one channel, and `<name>_sample(h)`, which interpolates it
+/// linearly at a hue in degrees. Returns the name.
+///
+/// Port of `_Add_Reach_table` (FixedFunctionOpGPU.cpp:505-589 @ v2.5.2).
+fn add_reach_table(
+    shader_creator: &mut GpuShaderDesc,
+    resource_index: u32,
+    table: &Table1D,
+) -> Result<Vec<u8>> {
+    // Reserve name.
+    let name = aces2_resource_name(shader_creator, &format!("reach_m_table_{resource_index}"));
+
+    // Determine texture dimensions.
+    let dimensions = aces2_texture_dimensions(shader_creator);
+
+    // Copy the LUT into the shaderCreator as a Texture object.
+    let binding_index = shader_creator.add_texture(
+        &name,
+        GpuShaderText::get_sampler_name(&name),
+        table_base::TOTAL_SIZE as u32,
+        1,
+        TextureType::RedChannel,
+        dimensions,
+        Interpolation::Nearest,
+        &table[..],
+    )?;
+
+    // Create the texture declaration.
+    declare_aces2_texture(shader_creator, &name, dimensions, binding_index)?;
+
+    // Sampler function.
+    let st = GpuShaderText::new(shader_creator.language());
+
+    st.new_line()
+        .put(st.float_keyword())
+        .put(" ")
+        .put(&name)
+        .put("_sample(float h)");
+    st.new_line().put("{");
+    st.indent();
+
+    st.new_line()
+        .put(st.float_decl("i_base")?)
+        .put(" = floor(h);");
+    st.new_line()
+        .put(st.float_decl("i_lo")?)
+        .put(" = i_base + ")
+        .put(st.float_keyword())
+        .put("(")
+        .put(table_base::BASE_INDEX as u32)
+        .put(");");
+    st.new_line()
+        .put(st.float_decl("i_hi")?)
+        .put(" = i_lo + 1.0;");
+
+    let coord = |i: &str| {
+        format!(
+            "({i} + 0.5) / {} ({})",
+            st.float_keyword(),
+            table_base::TOTAL_SIZE
+        )
+    };
+    match dimensions {
+        TextureDimensions::D1 => {
+            st.new_line()
+                .put(st.float_decl("lo")?)
+                .put(" = ")
+                .put(st.sample_tex1d(&name, coord("i_lo"))?)
+                .put(".r;");
+            st.new_line()
+                .put(st.float_decl("hi")?)
+                .put(" = ")
+                .put(st.sample_tex1d(&name, coord("i_hi"))?)
+                .put(".r;");
+        }
+        TextureDimensions::D2 => {
+            st.new_line()
+                .put(st.float_decl("lo")?)
+                .put(" = ")
+                .put(st.sample_tex2d(&name, st.float2_const(coord("i_lo"), "0.0"))?)
+                .put(".r;");
+            st.new_line()
+                .put(st.float_decl("hi")?)
+                .put(" = ")
+                .put(st.sample_tex2d(&name, st.float2_const(coord("i_hi"), "0.5"))?)
+                .put(".r;");
+        }
+    }
+
+    // Hardcoded single degree spacing
+    st.new_line().put(st.float_decl("t")?).put(" = h - i_base;");
+    st.new_line()
+        .put("return ")
+        .put(st.lerp("lo", "hi", "t"))
+        .put(";");
+
+    st.dedent();
+    st.new_line().put("}");
+
+    shader_creator.add_to_helper_shader_code(st.string());
+
+    Ok(name)
+}
+
+/// The toe of the chroma compression, or its inverse, as a helper function. Returns its name.
+///
+/// Port of `_Add_Toe_func` (FixedFunctionOpGPU.cpp:591-633 @ v2.5.2).
+fn add_toe_func(
+    shader_creator: &mut GpuShaderDesc,
+    resource_index: u32,
+    invert: bool,
+) -> Result<Vec<u8>> {
+    // Reserve name
+    let direction = if invert { "_inv" } else { "_fwd" };
+    let name = aces2_resource_name(shader_creator, &format!("toe{direction}{resource_index}"));
+
+    let st = GpuShaderText::new(shader_creator.language());
+
+    st.new_line()
+        .put(st.float_keyword())
+        .put(" ")
+        .put(&name)
+        .put("(float x, float limit, float k1_in, float k2_in)");
+    st.new_line().put("{");
+    st.indent();
+
+    st.new_line()
+        .put(st.float_decl("k2")?)
+        .put(" = max(k2_in, 0.001);");
+    st.new_line()
+        .put(st.float_decl("k1")?)
+        .put(" = sqrt(k1_in * k1_in + k2 * k2);");
+    st.new_line()
+        .put(st.float_decl("k3")?)
+        .put(" = (limit + k1) / (limit + k2);");
+
+    if invert {
+        st.new_line()
+            .put("return (x > limit) ? x : (x * x + k1 * x) / (k3 * (x + k2));");
+    } else {
+        st.new_line().put(
+            "return (x > limit) ? x : 0.5 * (k3 * x - k1 + sqrt((k3 * x - k1) * (k3 * x - k1) \
+             + 4.0 * k2 * k3 * x));",
+        );
+    }
+
+    st.dedent();
+    st.new_line().put("}");
+
+    shader_creator.add_to_helper_shader_code(st.string());
+
+    Ok(name)
+}
+
+/// The tone scale of a J, or its inverse, through Y, as a helper function. Returns its name.
+///
+/// Port of `_Add_Tonescale_func` (FixedFunctionOpGPU.cpp:635-694 @ v2.5.2).
+fn add_tonescale_func(
+    shader_creator: &mut GpuShaderDesc,
+    resource_index: u32,
+    invert: bool,
+    p: &JMhParams,
+    t: &ToneScaleParams,
+) -> Result<Vec<u8>> {
+    // Reserve name
+    let direction = if invert { "_inv" } else { "_fwd" };
+    let name = aces2_resource_name(
+        shader_creator,
+        &format!("tonescale{direction}{resource_index}"),
+    );
+
+    let st = GpuShaderText::new(shader_creator.language());
+
+    st.new_line()
+        .put(st.float_keyword())
+        .put(" ")
+        .put(&name)
+        .put("(float J)");
+    st.new_line().put("{");
+    st.indent();
+
+    // Tonescale applied in Y (convert to and from J)
+    // TODO: Investigate if we can receive negative J here at all.
+    // If not, abs(J) here and the sign(J) at the return may not be needed at all.
+    st.new_line()
+        .put(st.float_decl("A")?)
+        .put(" = ")
+        .put(p.a_w_j)
+        .put(" * pow(abs(J) * ")
+        .put(1.0f32 / J_SCALE)
+        .put(", ")
+        .put(p.inv_cz)
+        .put(");");
+    st.new_line()
+        .put(st.float_decl("Y")?)
+        .put(" = pow(( ")
+        .put(CAM_NL_OFFSET)
+        .put(" * A) / (1.0f - A), ")
+        .put(1.0f64 / 0.42)
+        .put(");");
+
+    if invert {
+        // Inverse Tonescale applied in Y (convert to and from J)
+        st.new_line()
+            .put(st.float_decl("Y_i")?)
+            .put(" = Y / ")
+            .put(f64::from(p.f_l_n) * f64::from(REFERENCE_LUMINANCE))
+            .put(";");
+
+        st.new_line()
+            .put(st.float_decl("Z")?)
+            .put(" = max(0.0, min(")
+            .put(t.inverse_limit)
+            .put(", Y_i));");
+        st.new_line()
+            .put(st.float_decl("ht")?)
+            .put(" = 0.5 * (Z + sqrt(Z * (")
+            .put(4.0 * f64::from(t.t_1))
+            .put(" + Z)));");
+        st.new_line()
+            .put(st.float_decl("Yo")?)
+            .put(" = ")
+            .put(f64::from(p.f_l_n) * f64::from(t.s_2))
+            .put(" / (pow((")
+            .put(t.m_2)
+            .put(" / ht), (")
+            .put(1.0 / f64::from(t.g))
+            .put(")) - 1.0);");
+
+        st.new_line()
+            .put(st.float_decl("F_L_Y")?)
+            .put(" = pow(abs(Yo), 0.42);");
+    } else {
+        // Tonescale applied in Y (convert to and from J)
+        st.new_line()
+            .put(st.float_decl("f")?)
+            .put(" = ")
+            .put(t.m_2)
+            .put(" * pow(Y / (Y + ")
+            .put(f64::from(t.s_2) * f64::from(p.f_l_n))
+            .put("), ")
+            .put(t.g)
+            .put(");");
+        st.new_line()
+            .put(st.float_decl("Y_ts")?)
+            .put(" = max(0.0, f * f / (f + ")
+            .put(t.t_1)
+            .put("));");
+        st.new_line()
+            .put(st.float_decl("F_L_Y")?)
+            .put(" = pow(")
+            .put(f64::from(p.f_l_n) * f64::from(REFERENCE_LUMINANCE))
+            .put(" * Y_ts, 0.42);");
+    }
+
+    st.new_line()
+        .put(st.float_decl("J_ts")?)
+        .put(" = ")
+        .put(J_SCALE)
+        .put(" * pow((F_L_Y / ( ")
+        .put(CAM_NL_OFFSET)
+        .put(" + F_L_Y)) * ")
+        .put(p.inv_a_w_j)
+        .put(", ")
+        .put(p.cz)
+        .put(");");
+    st.new_line().put("return sign(J) * J_ts;");
+
+    st.dedent();
+    st.new_line().put("}");
+
+    shader_creator.add_to_helper_shader_code(st.string());
+
+    Ok(name)
+}
+
+/// The chroma compression's normalisation `Mnorm`, from the hue's first three harmonics.
+///
+/// Port of `_Add_ChromaCompressionNorm_Shader` (FixedFunctionOpGPU.cpp:696-722 @ v2.5.2).
+fn add_chroma_compression_norm_shader(st: &GpuShaderText, c: &ChromaCompressParams) -> Result<()> {
+    let scale = f64::from(c.chroma_compress_scale);
+
+    // Mnorm
+    st.new_line().put(st.float_decl("Mnorm")?).put(";");
+    st.new_line().put("{");
+    st.indent();
+
+    // TODO: optimization: can bake weights into terms and convert dotprods to addition. /coz
+    st.new_line()
+        .put(st.float_decl("cos_hr2")?)
+        .put(" = 2.0 * cos_hr * cos_hr - 1.0;");
+    st.new_line()
+        .put(st.float_decl("sin_hr2")?)
+        .put(" = 2.0 * cos_hr * sin_hr;");
+    st.new_line()
+        .put(st.float_decl("cos_hr3")?)
+        .put(" = 4.0 * cos_hr * cos_hr * cos_hr - 3.0 * cos_hr;");
+    st.new_line()
+        .put(st.float_decl("sin_hr3")?)
+        .put(" = 3.0 * sin_hr - 4.0 * sin_hr * sin_hr * sin_hr;");
+    st.new_line()
+        .put(st.float3_decl("cosines")?)
+        .put(" = ")
+        .put(st.float3_const("cos_hr", "cos_hr2", "cos_hr3"))
+        .put(";");
+    st.new_line()
+        .put(st.float3_decl("cosine_weights")?)
+        .put(" = ")
+        .put(st.float3_const_f64(11.34072 * scale, 16.46899 * scale, 7.88380 * scale))
+        .put(";");
+    st.new_line()
+        .put(st.float3_decl("sines")?)
+        .put(" = ")
+        .put(st.float3_const("sin_hr", "sin_hr2", "sin_hr3"))
+        .put(";");
+    st.new_line()
+        .put(st.float3_decl("sine_weights")?)
+        .put(" = ")
+        .put(st.float3_const_f64(14.66441 * scale, -6.37224 * scale, 9.19364 * scale))
+        .put(";");
+    st.new_line()
+        .put("Mnorm = dot(cosines, cosine_weights) + dot(sines, sine_weights) + ")
+        .put(77.12896 * scale)
+        .put(";");
+
+    st.dedent();
+    st.new_line().put("}");
+    Ok(())
+}
+
+/// The chroma compression of `J`, `M`, `h` with `J_ts` and `reachMaxM` already declared.
+///
+/// Port of `_Add_Tonescale_Compress_Fwd_Shader` (FixedFunctionOpGPU.cpp:724-764 @ v2.5.2).
+fn add_tonescale_compress_fwd_shader_(
+    shader_creator: &mut GpuShaderDesc,
+    st: &GpuShaderText,
+    resource_index: u32,
+    s: &SharedCompressionParameters,
+    c: &ChromaCompressParams,
+) -> Result<()> {
+    let toe_name = add_toe_func(shader_creator, resource_index, false)?;
+
+    let pxl = shader_creator.pixel_name().to_vec();
+
+    st.new_line()
+        .put(st.float_decl("J")?)
+        .put(" = ")
+        .put(&pxl)
+        .put(".r;");
+    st.new_line()
+        .put(st.float_decl("M")?)
+        .put(" = ")
+        .put(&pxl)
+        .put(".g;");
+    st.new_line()
+        .put(st.float_decl("h")?)
+        .put(" = ")
+        .put(&pxl)
+        .put(".b;");
+
+    // ChromaCompress
+    st.new_line().put(st.float_decl("M_cp")?).put(" = M;");
+
+    st.new_line().put("if (M != 0.0)");
+    st.new_line().put("{");
+    st.indent();
+
+    st.new_line()
+        .put(st.float_decl("nJ")?)
+        .put(" = J_ts / ")
+        .put(s.limit_j_max)
+        .put(";");
+    st.new_line()
+        .put(st.float_decl("snJ")?)
+        .put(" = max(0.0, 1.0 - nJ);");
+
+    add_chroma_compression_norm_shader(st, c)?;
+
+    st.new_line()
+        .put(st.float_decl("limit")?)
+        .put(" = pow(nJ, ")
+        .put(s.model_gamma_inv)
+        .put(") * reachMaxM / Mnorm;");
+    st.new_line()
+        .put("M_cp = M * pow(J_ts / J, ")
+        .put(s.model_gamma_inv)
+        .put(");");
+    st.new_line().put("M_cp = M_cp / Mnorm;");
+
+    st.new_line()
+        .put("M_cp = limit - ")
+        .put(&toe_name)
+        .put("(limit - M_cp, limit - 0.001, snJ * ")
+        .put(c.sat)
+        .put(", sqrt(nJ * nJ + ")
+        .put(c.sat_thr)
+        .put("));");
+    st.new_line()
+        .put("M_cp = ")
+        .put(&toe_name)
+        .put("(M_cp, limit, nJ * ")
+        .put(c.compr)
+        .put(", snJ);");
+    st.new_line().put("M_cp = M_cp * Mnorm;");
+
+    st.dedent();
+    st.new_line().put("}");
+
+    st.new_line()
+        .put(&pxl)
+        .put(".rgb = ")
+        .put(st.float3_const("J_ts", "M_cp", "h"))
+        .put(";");
+    Ok(())
+}
+
+/// The inverse chroma compression of `J_ts`, `M_cp`, `h` with `J` and `reachMaxM` already
+/// declared.
+///
+/// Port of `_Add_Tonescale_Compress_Inv_Shader` (FixedFunctionOpGPU.cpp:766-805 @ v2.5.2).
+fn add_tonescale_compress_inv_shader_(
+    shader_creator: &mut GpuShaderDesc,
+    st: &GpuShaderText,
+    resource_index: u32,
+    s: &SharedCompressionParameters,
+    c: &ChromaCompressParams,
+) -> Result<()> {
+    let toe_name = add_toe_func(shader_creator, resource_index, true)?;
+
+    let pxl = shader_creator.pixel_name().to_vec();
+
+    st.new_line()
+        .put(st.float_decl("J_ts")?)
+        .put(" = ")
+        .put(&pxl)
+        .put(".r;");
+    st.new_line()
+        .put(st.float_decl("M_cp")?)
+        .put(" = ")
+        .put(&pxl)
+        .put(".g;");
+    st.new_line()
+        .put(st.float_decl("h")?)
+        .put(" = ")
+        .put(&pxl)
+        .put(".b;");
+
+    // ChromaCompress
+    st.new_line().put(st.float_decl("M")?).put(" = M_cp;");
+
+    st.new_line().put("if (M_cp != 0.0)");
+    st.new_line().put("{");
+    st.indent();
+
+    st.new_line()
+        .put(st.float_decl("nJ")?)
+        .put(" = J_ts / ")
+        .put(s.limit_j_max)
+        .put(";");
+    st.new_line()
+        .put(st.float_decl("snJ")?)
+        .put(" = max(0.0, 1.0 - nJ);");
+
+    add_chroma_compression_norm_shader(st, c)?;
+
+    st.new_line()
+        .put(st.float_decl("limit")?)
+        .put(" = pow(nJ, ")
+        .put(s.model_gamma_inv)
+        .put(") * reachMaxM / Mnorm;");
+
+    st.new_line().put("M = M_cp / Mnorm;");
+    st.new_line()
+        .put("M = ")
+        .put(&toe_name)
+        .put("(M, limit, nJ * ")
+        .put(c.compr)
+        .put(", snJ);");
+    st.new_line()
+        .put("M = limit - ")
+        .put(&toe_name)
+        .put("(limit - M, limit - 0.001, snJ * ")
+        .put(c.sat)
+        .put(", sqrt(nJ * nJ + ")
+        .put(c.sat_thr)
+        .put("));");
+    st.new_line().put("M = M * Mnorm;");
+    st.new_line()
+        .put("M = M * pow(J_ts / J, ")
+        .put(-s.model_gamma_inv)
+        .put(");");
+
+    st.dedent();
+    st.new_line().put("}");
+
+    st.new_line()
+        .put(&pxl)
+        .put(".rgb = ")
+        .put(st.float3_const("J", "M", "h"))
+        .put(";");
+    Ok(())
+}
+
 /// Port of `Add_RGB_to_JMh_Shader` (FixedFunctionOpGPU.cpp:1442-1465 @ v2.5.2).
 fn add_rgb_to_jmh_shader(pxl: &[u8], st: &GpuShaderText, func: &FixedFunctionOpData) -> Result<()> {
     let p = init_jmh_params(&aces2_primaries(func, 0)?)?;
@@ -1956,6 +2518,66 @@ fn add_jmh_to_rgb_shader(pxl: &[u8], st: &GpuShaderText, func: &FixedFunctionOpD
     add_wrap_hue_channel_shader(pxl, st)?;
     add_sin_cos_shader(pxl, st)?;
     add_jmh_to_rgb_shader_(pxl, st, &p)
+}
+
+/// The models and parameters the tone scale's shaders use, for the peak luminance.
+fn aces2_tonescale_params(
+    func: &FixedFunctionOpData,
+) -> Result<(
+    JMhParams,
+    ToneScaleParams,
+    SharedCompressionParameters,
+    ChromaCompressParams,
+)> {
+    let peak_luminance = param_f32(func, 0)?;
+
+    let p = init_jmh_params(&aces_ap0::PRIMARIES)?;
+    let t = init_tone_scale_params(peak_luminance);
+    let reach_gamut = init_jmh_params(&aces_ap1::PRIMARIES)?;
+    let s = init_shared_compression_params(peak_luminance, &p, &reach_gamut);
+    let c = init_chroma_compress_params(peak_luminance, &t);
+    Ok((p, t, s, c))
+}
+
+/// Port of `Add_Tonescale_Compress_Fwd_Shader` and `Add_Tonescale_Compress_Inv_Shader`
+/// (FixedFunctionOpGPU.cpp:1494-1548 @ v2.5.2).
+fn add_tonescale_compress_shader(
+    shader_creator: &mut GpuShaderDesc,
+    st: &GpuShaderText,
+    func: &FixedFunctionOpData,
+    invert: bool,
+) -> Result<()> {
+    let (p, t, s, c) = aces2_tonescale_params(func)?;
+
+    let resource_index = shader_creator.next_resource_index();
+    let pxl = shader_creator.pixel_name().to_vec();
+
+    let reach_name = add_reach_table(shader_creator, resource_index, &s.reach_m_table)?;
+    let tonescale_name = add_tonescale_func(shader_creator, resource_index, invert, &p, &t)?;
+
+    add_wrap_hue_channel_shader(&pxl, st)?;
+    add_sin_cos_shader(&pxl, st)?;
+
+    st.new_line()
+        .put(st.float_decl("reachMaxM")?)
+        .put(" = ")
+        .put(&reach_name)
+        .put("_sample(")
+        .put(&pxl)
+        .put(".b);");
+    st.new_line()
+        .put(st.float_decl(if invert { "J" } else { "J_ts" })?)
+        .put(" = ")
+        .put(&tonescale_name)
+        .put("(")
+        .put(&pxl)
+        .put(".r);");
+
+    if invert {
+        add_tonescale_compress_inv_shader_(shader_creator, st, resource_index, &s, &c)
+    } else {
+        add_tonescale_compress_fwd_shader_(shader_creator, st, resource_index, &s, &c)
+    }
 }
 
 /// Adds the code of a FixedFunction op to `shader_creator`'s function body.
@@ -2039,6 +2661,12 @@ pub fn get_fixed_function_gpu_processing_text(
         DoubleLogToLin => add_double_log_to_lin(&pxl, st, func)?,
         AcesRgbToJmh20 => add_rgb_to_jmh_shader(&pxl, st, func)?,
         AcesJmhToRgb20 => add_jmh_to_rgb_shader(&pxl, st, func)?,
+        AcesTonescaleCompress20Fwd => {
+            add_tonescale_compress_shader(shader_creator, st, func, false)?
+        }
+        AcesTonescaleCompress20Inv => {
+            add_tonescale_compress_shader(shader_creator, st, func, true)?
+        }
         style => return Err(not_ported(style)),
     }
 

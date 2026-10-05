@@ -696,6 +696,9 @@ const AP0: [f64; 8] = [
 ];
 const AP1: [f64; 8] = [0.713, 0.293, 0.165, 0.830, 0.128, 0.044, 0.32168, 0.33767];
 
+/// The peak luminances of the ACES 2.0 cases.
+const PEAKS: [f64; 6] = [1000.0, 100.0, 4000.0, 108.0, 48.0, 500.0];
+
 /// The settings of the ACES 2.0 cases besides the defaults: names, a descriptor set (the
 /// textures' bindings in GLSL for Vulkan), and 2D textures where 1D ones aren't allowed.
 fn aces2_settings() -> [Names; 3] {
@@ -744,6 +747,49 @@ fn aces_2_rgb_to_jmh_shaders_match_the_wheel() {
             cases.extend(cases_of(
                 "RGB to JMh settings",
                 vec![style(&AP0, dir)],
+                &levels()[1..2],
+                names,
+            ));
+        }
+    }
+    check(&cases);
+}
+
+/// ACES 2.0's tone scale and chroma compression (chunk 2.4f2) for six peak luminances, both
+/// ways, at every level, in every language; two in one shader (each with its own resources);
+/// the shader's settings.
+#[test]
+fn aces_2_tonescale_compress_shaders_match_the_wheel() {
+    let style = |peak: f64, dir| {
+        T::Fixed(
+            "FIXED_FUNCTION_ACES_TONESCALE_COMPRESS_20",
+            FixedFunctionOpStyle::AcesTonescaleCompress20Fwd,
+            vec![peak],
+            dir,
+        )
+    };
+    let mut cases = Vec::new();
+    for (i, peak) in PEAKS.iter().enumerate() {
+        for dir in [F, I] {
+            cases.extend(cases_of(
+                &format!("tone scale {peak} {dir:?}"),
+                vec![style(*peak, dir)],
+                &levels()[if i == 0 { 0..5 } else { 1..2 }],
+                Names::default(),
+            ));
+        }
+    }
+    cases.extend(cases_of(
+        "two tone scales",
+        vec![style(1000.0, F), style(100.0, I)],
+        &levels()[1..2],
+        Names::default(),
+    ));
+    for names in aces2_settings() {
+        for dir in [F, I] {
+            cases.extend(cases_of(
+                "tone scale settings",
+                vec![style(1000.0, dir)],
                 &levels()[1..2],
                 names,
             ));
