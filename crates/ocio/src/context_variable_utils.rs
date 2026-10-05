@@ -39,8 +39,16 @@ pub(crate) fn collect_context_variables(
 
             found_context_vars
         }
+        // Their overloads read the names and the config's color spaces, displays, views and
+        // looks; they come with their op builders (WP 3.2a-c), and until then the processor
+        // refuses to build their ops.
+        Transform::ColorSpace(_)
+        | Transform::DisplayView(_)
+        | Transform::File(_)
+        | Transform::Look(_) => false,
         // The classes that use no context variable.
         Transform::Allocation(_)
+        | Transform::Builtin(_)
         | Transform::Cdl(_)
         | Transform::Exponent(_)
         | Transform::ExponentWithLinear(_)

@@ -16,7 +16,7 @@
 use std::fmt;
 
 use ocio_ops::cfmt::{Crt, OStringStream};
-use ocio_ops::exception::Result;
+use ocio_ops::exception::{Exception, Result};
 use ocio_ops::op::{Op, OpVec};
 use ocio_ops::op_data::OpData;
 use ocio_ops::open_color_types::TransformDirection;
@@ -24,13 +24,17 @@ use ocio_ops::open_color_types::TransformDirection;
 use crate::config::Config;
 use crate::context::Context;
 use crate::transforms::allocation_transform::{AllocationTransform, build_allocation_op};
+use crate::transforms::builtin_transform::{BuiltinTransform, build_builtin_ops};
 use crate::transforms::cdl_transform::{CdlTransform, build_cdl_op, create_cdl_transform};
+use crate::transforms::color_space_transform::ColorSpaceTransform;
+use crate::transforms::display_view_transform::DisplayViewTransform;
 use crate::transforms::exponent_transform::{
     ExponentTransform, build_exponent_op, create_exponent_transform,
 };
 use crate::transforms::exponent_with_linear_transform::{
     ExponentWithLinearTransform, build_exponent_with_linear_op, create_gamma_transform,
 };
+use crate::transforms::file_transform::FileTransform;
 use crate::transforms::fixed_function_transform::{
     FixedFunctionTransform, build_fixed_function_op, create_fixed_function_transform,
 };
@@ -38,6 +42,7 @@ use crate::transforms::group_transform::{GroupTransform, build_group_ops};
 use crate::transforms::log_affine_transform::LogAffineTransform;
 use crate::transforms::log_camera_transform::LogCameraTransform;
 use crate::transforms::log_transform::{LogTransform, build_log_op, create_log_transform};
+use crate::transforms::look_transform::LookTransform;
 use crate::transforms::lut1d_transform::{Lut1DTransform, build_lut1d_op, create_lut1d_transform};
 use crate::transforms::matrix_transform::{
     MatrixTransform, build_matrix_op, create_matrix_transform,
@@ -110,12 +115,20 @@ pub enum TransformType {
 pub enum Transform {
     /// `AllocationTransform`.
     Allocation(AllocationTransform),
+    /// `BuiltinTransform`.
+    Builtin(BuiltinTransform),
     /// `CDLTransform`.
     Cdl(CdlTransform),
+    /// `ColorSpaceTransform`.
+    ColorSpace(ColorSpaceTransform),
+    /// `DisplayViewTransform`.
+    DisplayView(DisplayViewTransform),
     /// `ExponentTransform`.
     Exponent(ExponentTransform),
     /// `ExponentWithLinearTransform`.
     ExponentWithLinear(ExponentWithLinearTransform),
+    /// `FileTransform`.
+    File(FileTransform),
     /// `FixedFunctionTransform`.
     FixedFunction(FixedFunctionTransform),
     /// `GroupTransform`.
@@ -126,6 +139,8 @@ pub enum Transform {
     LogCamera(LogCameraTransform),
     /// `LogTransform`.
     Log(LogTransform),
+    /// `LookTransform`.
+    Look(LookTransform),
     /// `Lut1DTransform`.
     Lut1D(Lut1DTransform),
     /// `MatrixTransform`.
@@ -140,9 +155,27 @@ impl From<AllocationTransform> for Transform {
     }
 }
 
+impl From<BuiltinTransform> for Transform {
+    fn from(t: BuiltinTransform) -> Transform {
+        Transform::Builtin(t)
+    }
+}
+
 impl From<CdlTransform> for Transform {
     fn from(t: CdlTransform) -> Transform {
         Transform::Cdl(t)
+    }
+}
+
+impl From<ColorSpaceTransform> for Transform {
+    fn from(t: ColorSpaceTransform) -> Transform {
+        Transform::ColorSpace(t)
+    }
+}
+
+impl From<DisplayViewTransform> for Transform {
+    fn from(t: DisplayViewTransform) -> Transform {
+        Transform::DisplayView(t)
     }
 }
 
@@ -155,6 +188,12 @@ impl From<ExponentTransform> for Transform {
 impl From<ExponentWithLinearTransform> for Transform {
     fn from(t: ExponentWithLinearTransform) -> Transform {
         Transform::ExponentWithLinear(t)
+    }
+}
+
+impl From<FileTransform> for Transform {
+    fn from(t: FileTransform) -> Transform {
+        Transform::File(t)
     }
 }
 
@@ -188,6 +227,12 @@ impl From<LogTransform> for Transform {
     }
 }
 
+impl From<LookTransform> for Transform {
+    fn from(t: LookTransform) -> Transform {
+        Transform::Look(t)
+    }
+}
+
 impl From<Lut1DTransform> for Transform {
     fn from(t: Lut1DTransform) -> Transform {
         Transform::Lut1D(t)
@@ -215,14 +260,19 @@ impl Transform {
     pub fn transform_type(&self) -> TransformType {
         match self {
             Transform::Allocation(_) => TransformType::Allocation,
+            Transform::Builtin(_) => TransformType::Builtin,
             Transform::Cdl(_) => TransformType::Cdl,
+            Transform::ColorSpace(_) => TransformType::ColorSpace,
+            Transform::DisplayView(_) => TransformType::DisplayView,
             Transform::Exponent(_) => TransformType::Exponent,
             Transform::ExponentWithLinear(_) => TransformType::ExponentWithLinear,
+            Transform::File(_) => TransformType::File,
             Transform::FixedFunction(_) => TransformType::FixedFunction,
             Transform::Group(_) => TransformType::Group,
             Transform::LogAffine(_) => TransformType::LogAffine,
             Transform::LogCamera(_) => TransformType::LogCamera,
             Transform::Log(_) => TransformType::Log,
+            Transform::Look(_) => TransformType::Look,
             Transform::Lut1D(_) => TransformType::Lut1D,
             Transform::Matrix(_) => TransformType::Matrix,
             Transform::Range(_) => TransformType::Range,
@@ -235,14 +285,19 @@ impl Transform {
     pub fn direction(&self) -> TransformDirection {
         match self {
             Transform::Allocation(t) => t.direction(),
+            Transform::Builtin(t) => t.direction(),
             Transform::Cdl(t) => t.direction(),
+            Transform::ColorSpace(t) => t.direction(),
+            Transform::DisplayView(t) => t.direction(),
             Transform::Exponent(t) => t.direction(),
             Transform::ExponentWithLinear(t) => t.direction(),
+            Transform::File(t) => t.direction(),
             Transform::FixedFunction(t) => t.direction(),
             Transform::Group(t) => t.direction(),
             Transform::LogAffine(t) => t.direction(),
             Transform::LogCamera(t) => t.direction(),
             Transform::Log(t) => t.direction(),
+            Transform::Look(t) => t.direction(),
             Transform::Lut1D(t) => t.direction(),
             Transform::Matrix(t) => t.direction(),
             Transform::Range(t) => t.direction(),
@@ -255,14 +310,19 @@ impl Transform {
     pub fn set_direction(&mut self, dir: TransformDirection) {
         match self {
             Transform::Allocation(t) => t.set_direction(dir),
+            Transform::Builtin(t) => t.set_direction(dir),
             Transform::Cdl(t) => t.set_direction(dir),
+            Transform::ColorSpace(t) => t.set_direction(dir),
+            Transform::DisplayView(t) => t.set_direction(dir),
             Transform::Exponent(t) => t.set_direction(dir),
             Transform::ExponentWithLinear(t) => t.set_direction(dir),
+            Transform::File(t) => t.set_direction(dir),
             Transform::FixedFunction(t) => t.set_direction(dir),
             Transform::Group(t) => t.set_direction(dir),
             Transform::LogAffine(t) => t.set_direction(dir),
             Transform::LogCamera(t) => t.set_direction(dir),
             Transform::Log(t) => t.set_direction(dir),
+            Transform::Look(t) => t.set_direction(dir),
             Transform::Lut1D(t) => t.set_direction(dir),
             Transform::Matrix(t) => t.set_direction(dir),
             Transform::Range(t) => t.set_direction(dir),
@@ -276,14 +336,19 @@ impl Transform {
     pub fn validate(&self) -> Result<()> {
         match self {
             Transform::Allocation(t) => t.validate(),
+            Transform::Builtin(t) => t.validate(),
             Transform::Cdl(t) => t.validate(),
+            Transform::ColorSpace(t) => t.validate(),
+            Transform::DisplayView(t) => t.validate(),
             Transform::Exponent(t) => t.validate(),
             Transform::ExponentWithLinear(t) => t.validate(),
+            Transform::File(t) => t.validate(),
             Transform::FixedFunction(t) => t.validate(),
             Transform::Group(t) => t.validate(),
             Transform::LogAffine(t) => t.validate(),
             Transform::LogCamera(t) => t.validate(),
             Transform::Log(t) => t.validate(),
+            Transform::Look(t) => t.validate(),
             Transform::Lut1D(t) => t.validate(),
             Transform::Matrix(t) => t.validate(),
             Transform::Range(t) => t.validate(),
@@ -304,6 +369,24 @@ pub(crate) fn validate_direction(dir: TransformDirection) -> Result<()> {
     match dir {
         TransformDirection::Forward | TransformDirection::Inverse => Ok(()),
     }
+}
+
+/// `os << s` for a C string (`const char *`): the bytes up to the first NUL.
+///
+/// The stream holds text, so bytes that aren't UTF-8 print as U+FFFD here; upstream prints
+/// them as they are, and Python can't decode such a text either (pybind11 raises
+/// `UnicodeDecodeError`).
+pub(crate) fn put_c_str(os: &mut OStringStream, s: &[u8]) {
+    let s = ocio_ops::utils::string_utils::c_str(s);
+    match std::str::from_utf8(s) {
+        Ok(text) => os.put_str(text),
+        Err(_) => os.put_str(&String::from_utf8_lossy(s)),
+    }
+}
+
+/// `os << b` for a C++ `bool`, without `std::boolalpha`: `1` or `0`.
+pub(crate) fn put_bool(os: &mut OStringStream, b: bool) {
+    os.put_str(if b { "1" } else { "0" });
 }
 
 impl fmt::Display for Transform {
@@ -329,19 +412,31 @@ impl Transform {
     pub(crate) fn write_text(&self, os: &mut OStringStream) {
         match self {
             Transform::Allocation(t) => t.write_text(os),
+            Transform::Builtin(t) => t.write_text(os),
             Transform::Cdl(t) => t.write_text(os),
+            Transform::ColorSpace(t) => t.write_text(os),
+            Transform::DisplayView(t) => t.write_text(os),
             Transform::Exponent(t) => t.write_text(os),
             Transform::ExponentWithLinear(t) => t.write_text(os),
+            Transform::File(t) => t.write_text(os),
             Transform::FixedFunction(t) => t.write_text(os),
             Transform::Group(t) => t.write_text(os),
             Transform::LogAffine(t) => t.write_text(os),
             Transform::LogCamera(t) => t.write_text(os),
             Transform::Log(t) => t.write_text(os),
+            Transform::Look(t) => t.write_text(os),
             Transform::Lut1D(t) => t.write_text(os),
             Transform::Matrix(t) => t.write_text(os),
             Transform::Range(t) => t.write_text(os),
         }
     }
+}
+
+/// The error of a class whose op builder is not ported yet: `work_package` ports it.
+fn not_ported_yet(class: &str, work_package: &str) -> Exception {
+    Exception::new(format!(
+        "{class}: building its ops is not ported yet ({work_package})."
+    ))
 }
 
 /// Appends the ops of `transform` in the direction `dir`.
@@ -362,13 +457,17 @@ pub(crate) fn build_ops(
         Transform::Allocation(allocation_transform) => {
             build_allocation_op(ops, allocation_transform, dir)
         }
+        Transform::Builtin(builtin_transform) => build_builtin_ops(ops, builtin_transform, dir),
         Transform::Cdl(cdl_transform) => build_cdl_op(ops, config, cdl_transform, dir),
+        Transform::ColorSpace(_) => Err(not_ported_yet("ColorSpaceTransform", "WP 3.2a")),
+        Transform::DisplayView(_) => Err(not_ported_yet("DisplayViewTransform", "WP 3.2c")),
         Transform::Exponent(exponent_transform) => {
             build_exponent_op(ops, config, exponent_transform, dir)
         }
         Transform::ExponentWithLinear(exponent_transform) => {
             build_exponent_with_linear_op(ops, exponent_transform, dir)
         }
+        Transform::File(_) => Err(not_ported_yet("FileTransform", "WP 4.1")),
         Transform::FixedFunction(ff_transform) => build_fixed_function_op(ops, ff_transform, dir),
         Transform::Group(group_transform) => {
             build_group_ops(ops, config, context, group_transform, dir)
@@ -376,6 +475,7 @@ pub(crate) fn build_ops(
         Transform::LogAffine(log_transform) => build_log_op(ops, log_transform.data(), dir),
         Transform::LogCamera(log_transform) => build_log_op(ops, log_transform.data(), dir),
         Transform::Log(log_transform) => build_log_op(ops, log_transform.data(), dir),
+        Transform::Look(_) => Err(not_ported_yet("LookTransform", "WP 3.2b")),
         Transform::Lut1D(lut_transform) => build_lut1d_op(ops, lut_transform, dir),
         Transform::Matrix(matrix_transform) => build_matrix_op(ops, matrix_transform, dir),
         Transform::Range(range_transform) => build_range_op(ops, range_transform, dir),
@@ -414,3 +514,7 @@ pub(crate) fn create_transform(group: &mut GroupTransform, op: &Op) -> Result<()
         }
     }
 }
+
+#[cfg(test)]
+#[path = "transform_tests.rs"]
+mod tests;

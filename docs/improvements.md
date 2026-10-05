@@ -745,6 +745,31 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   transform's `set_style` in 2.3e); `fixed_function_op_data_oracle.rs` checks the styles the
   setters give in both directions against the wheel's validation messages.
 
+### I-120. A color space transform's text runs the data bypass into the destination
+
+- **Upstream:** `operator<<(std::ostream &, const ColorSpaceTransform &)` prints
+  `dataBypass=0` straight after the destination's name, without a separator
+  (`transforms/ColorSpaceTransform.cpp:138-151`):
+  `<ColorSpaceTransform direction=forward, src=a, dst=bdataBypass=0>`. The flag prints only
+  when it is off, as a C++ `bool` (`0`).
+- **Who notices:** anyone reading `repr()` of a transform that processes data color spaces; a
+  destination whose name ends in `dataBypass=0` prints the same as one without the flag.
+- **A fix:** `, dataBypass=false`.
+- **Status:** matched in `p3-transforms` (3.1a), checked against the wheel in
+  `crates/ocio/tests/config_transforms_oracle.rs`.
+
+### I-121. A display view transform's text doubles its separators
+
+- **Upstream:** `operator<<(std::ostream &, const DisplayViewTransform &)` ends the view with
+  `", "`, and each bypass it prints starts with another `", "`
+  (`transforms/DisplayViewTransform.cpp:154-171`): `... view=v, >` without bypasses, and
+  `... view=v, , looksBypass=1, dataBypass=0>` with both. The flags print as C++ `bool`s
+  (`1`, `0`).
+- **Who notices:** anyone reading `repr()` of a display view transform.
+- **A fix:** one separator before each field, and none before `>`.
+- **Status:** matched in `p3-transforms` (3.1a), checked against the wheel in
+  `crates/ocio/tests/config_transforms_oracle.rs`.
+
 ## Logging
 
 ### I-16. Two messages bypass the logging function
