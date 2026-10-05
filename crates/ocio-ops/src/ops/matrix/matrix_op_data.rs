@@ -662,10 +662,14 @@ impl MatrixOpData {
     /// The error of the offset accessors for an index past the matrix's size.
     fn offset_index_error(&self, index: c_ulong) -> Exception {
         // TODO: should never happen. Consider assert.
-        Exception::new(format!(
-            "Matrix array content issue: '{}' offset index out of range '{index}'. ",
-            String::from_utf8_lossy(c_str(self.get_id()))
-        ))
+        Exception::new(
+            [
+                b"Matrix array content issue: '".as_slice(),
+                c_str(self.get_id()),
+                format!("' offset index out of range '{index}'. ").as_bytes(),
+            ]
+            .concat(),
+        )
     }
 
     /// The offset at `index`, below the matrix's size.

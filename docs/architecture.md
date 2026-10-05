@@ -203,6 +203,14 @@ unchanged.
   `message()` and `Display` give them as text, what isn't UTF-8 replaced by U+FFFD (the
   owner's decision, 2026-10-05). Code that builds a message from another one concatenates the
   bytes.
+- Messages and texts are built as upstream builds them, in a stream: `ocio_ops::cfmt::
+  OStringStream`, whose text is bytes (the owner's decision, 2026-10-05). `put_bytes`
+  (`std::string`), `put_c_str` (`const char *`, up to the first NUL), `put_char` and `put_str`
+  (literals) insert text; `str()` and `into_bytes()` give the bytes unchanged, so names and
+  paths that aren't UTF-8 reach a message (`Exception::new(os.into_bytes())`) or a
+  serialization exactly. `to_string_lossy()` is for `Display` only, and `into_string_lossy()`
+  for texts of numbers and literals. `Transform::to_bytes()` is a transform's
+  `operator<<` text in bytes; its `Display` is that text, what isn't UTF-8 replaced.
 - Logging is a port of `Logging.cpp`: the same prefixes (`[OpenColorIO Warning]: `), the
   same line splitting, and the same level rules (`OCIO_LOGGING_LEVEL` read once). The
   callback is called *outside* the global lock (upstream calls it under the lock and can

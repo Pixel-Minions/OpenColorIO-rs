@@ -319,9 +319,9 @@ fn stream_padding_matches_printf_width() {
             for width in [0i64, 3, 11, 19, 30] {
                 for &v in &values {
                     for (adjust, fill, flag) in [
-                        (Adjust::Right, ' ', ""),
-                        (Adjust::Left, ' ', "-"),
-                        (Adjust::Internal, '0', "0"),
+                        (Adjust::Right, b' ', ""),
+                        (Adjust::Left, b' ', "-"),
+                        (Adjust::Internal, b'0', "0"),
                     ] {
                         if adjust == Adjust::Internal && !v.is_finite() {
                             continue;
@@ -334,7 +334,11 @@ fn stream_padding_matches_printf_width() {
                         os.adjust = adjust;
                         os.put_f64(v);
                         let format = format!("%{flag}{width}.{precision}{conv}");
-                        assert_eq!(os.str(), crt::format_f64(&format, v), "{format} {v:e}");
+                        assert_eq!(
+                            os.str(),
+                            crt::format_f64(&format, v).as_bytes(),
+                            "{format} {v:e}"
+                        );
                         assert_eq!(os.width, 0, "width resets");
                     }
                 }
@@ -350,10 +354,10 @@ fn stream_integers_match_printf() {
         let u = rng.next_u64() >> (rng.next_u64() % 64);
         let mut os = OStringStream::new(Crt::NATIVE);
         os.base = Base::Hex;
-        os.fill = '0';
+        os.fill = b'0';
         os.width = 16;
         os.put_u64(u);
-        assert_eq!(os.str(), crt::format_u64("%016llx", u));
+        assert_eq!(os.str(), crt::format_u64("%016llx", u).as_bytes());
 
         let mut os = OStringStream::new(Crt::NATIVE);
         os.put_u64(u);
@@ -364,6 +368,76 @@ fn stream_integers_match_printf() {
             crt::format_u64("%llu", u),
             crt::format_i64("%lld", u as i64)
         );
-        assert_eq!(os.str(), expected);
+        assert_eq!(os.str(), expected.as_bytes());
     }
+}
+
+/// Strings are bytes. `os << const char *` writes its bytes up to the first NUL and pads them
+/// to the width as printf's `%Ws` (right) and `%-Ws` (left) do with a space: C++ and C both
+/// count `char`s, so text that isn't UTF-8, or is multi-byte UTF-8, passes through unchanged
+/// and pads by its byte count. (C17 leaves the `0` flag undefined for `%s`, so only the space
+/// fill is compared; `stream_padding_matches_printf_width` checks a `0` fill on numbers.)
+#[test]
+fn stream_strings_are_bytes_padded_as_printf() {
+    let texts: [&[u8]; 10] = [
+        b"x",
+        b"\xe9",
+        b"",
+        b"abc",
+        b"\xc3\xa9",
+        b"\xff\xfe\x80",
+        b"a\xe9b",
+        b"\xed\xa0\x80",
+        b"name\0tail",
+        b"\0",
+    ];
+    for text in texts {
+        for width in [0i64, 1, 2, 3, 5, 12] {
+            for (adjust, flag) in [(Adjust::Right, ""), (Adjust::Left, "-")] {
+                let format = format!("%{flag}{width}s");
+                let expected = crt::format_c_str(&format, text);
+
+                let mut os = OStringStream::new(Crt::NATIVE);
+                os.width = width;
+                os.adjust = adjust;
+                os.put_c_str(text);
+                assert_eq!(os.str(), expected.as_slice(), "{format} {text:?}");
+                assert_eq!(os.width, 0, "width resets");
+
+                // `std::string` and `char`: the same padding of the same bytes.
+                if !text.contains(&0) {
+                    let mut os = OStringStream::new(Crt::NATIVE);
+                    os.width = width;
+                    os.adjust = adjust;
+                    os.put_bytes(text);
+                    assert_eq!(os.str(), expected.as_slice(), "{format} {text:?}");
+                }
+                if let [c] = text
+                    && *c != 0
+                {
+                    let mut os = OStringStream::new(Crt::NATIVE);
+                    os.width = width;
+                    os.adjust = adjust;
+                    os.put_char(*c);
+                    assert_eq!(os.str(), expected.as_slice(), "{format} {text:?}");
+                }
+            }
+        }
+    }
+}
+
+/// A `std::string` keeps the bytes after a NUL, which a `const char *` drops; the stream's
+/// text is the concatenation of what each insertion wrote, numbers included.
+#[test]
+fn stream_std_string_keeps_its_nuls() {
+    let mut os = OStringStream::new(Crt::NATIVE);
+    os.put_bytes(b"a\0b\xff");
+    os.put_c_str(b"c\0d");
+    os.put_f64(0.5);
+    let mut expected = b"a\0b\xff".to_vec();
+    expected.extend(crt::format_c_str("%s", b"c\0d"));
+    expected.extend(crt::format_f64("%.6g", 0.5).as_bytes());
+    assert_eq!(os.str(), expected.as_slice());
+    assert_eq!(os.clone().into_bytes(), expected);
+    assert_eq!(os.to_string_lossy(), String::from_utf8_lossy(&expected));
 }

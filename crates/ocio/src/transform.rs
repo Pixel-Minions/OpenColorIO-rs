@@ -371,17 +371,10 @@ pub(crate) fn validate_direction(dir: TransformDirection) -> Result<()> {
     }
 }
 
-/// `os << s` for a C string (`const char *`): the bytes up to the first NUL.
-///
-/// The stream holds text, so bytes that aren't UTF-8 print as U+FFFD here; upstream prints
-/// them as they are, and Python can't decode such a text either (pybind11 raises
-/// `UnicodeDecodeError`).
+/// `os << s` for a C string (`const char *`): the bytes up to the first NUL, as they are
+/// (the stream holds bytes, so names that aren't UTF-8 print exactly as upstream prints them).
 pub(crate) fn put_c_str(os: &mut OStringStream, s: &[u8]) {
-    let s = ocio_ops::utils::string_utils::c_str(s);
-    match std::str::from_utf8(s) {
-        Ok(text) => os.put_str(text),
-        Err(_) => os.put_str(&String::from_utf8_lossy(s)),
-    }
+    os.put_c_str(s);
 }
 
 /// `os << b` for a C++ `bool`, without `std::boolalpha`: `1` or `0`.
@@ -396,13 +389,22 @@ impl fmt::Display for Transform {
     /// Transform.cpp:177-308 @ v2.5.2). Its "Unknown transform type for serialization" can't
     /// happen with an enum.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut os = OStringStream::new(Crt::NATIVE);
-        self.write_text(&mut os);
-        f.write_str(os.str())
+        f.write_str(&String::from_utf8_lossy(&self.to_bytes()))
     }
 }
 
 impl Transform {
+    /// The transform's text, as its class prints it, in bytes: names and paths in it pass
+    /// through unchanged, where `Display` replaces what isn't UTF-8.
+    ///
+    /// Port of `operator<<(std::ostream &, const Transform &)` (src/OpenColorIO/
+    /// Transform.cpp:177-308 @ v2.5.2), on a new stream.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut os = OStringStream::new(Crt::NATIVE);
+        self.write_text(&mut os);
+        os.into_bytes()
+    }
+
     /// Writes the transform's text to `os`, a stream that a group shares with its children:
     /// what a class changes in its state stays for what follows (a MatrixTransform's precision,
     /// docs/improvements.md, I-73).

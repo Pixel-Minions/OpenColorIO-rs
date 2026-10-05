@@ -61,7 +61,7 @@ impl AllocationData {
             os.put_str(" ");
         }
 
-        os.into_string()
+        os.into_string_lossy()
     }
 }
 

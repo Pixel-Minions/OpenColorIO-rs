@@ -134,7 +134,7 @@ fn validate_greater_equal(name: &str, value: f64, threshold: f64) -> Result<()> 
         oss.put_str(" should be greater than ");
         oss.put_f64(threshold);
         oss.put_str(".");
-        return Err(Exception::new(oss.into_string()));
+        return Err(Exception::new(oss.into_bytes()));
     }
     Ok(())
 }
@@ -153,7 +153,7 @@ fn validate_greater_than(name: &str, value: f64, threshold: f64) -> Result<()> {
         oss.put_str(" should be greater than ");
         oss.put_f64(threshold);
         oss.put_str(".");
-        return Err(Exception::new(oss.into_string()));
+        return Err(Exception::new(oss.into_bytes()));
     }
     Ok(())
 }
@@ -204,7 +204,7 @@ fn get_channel_parameters_string(params: &ChannelParams) -> String {
     oss.put_f64(params.data[1]);
     oss.put_str(", ");
     oss.put_f64(params.data[2]);
-    oss.into_string()
+    oss.into_string_lossy()
 }
 
 /// The CDL op's data.
@@ -601,7 +601,7 @@ impl CdlOpData {
         let mut oss = OStringStream::new(Crt::NATIVE);
         oss.precision = FLOAT_DECIMALS;
         oss.put_f64(self.saturation);
-        oss.into_string()
+        oss.into_string_lossy()
     }
 
     /// The `V1_2` styles clamp.
