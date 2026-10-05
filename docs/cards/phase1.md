@@ -1,5 +1,8 @@
 # Phase 1 cards: op engine, analytic transforms and GPU infrastructure
 
+**Status: complete (M0), 2026-10-04.** Landed as the cards below. Deferrals to later phases are listed
+in "Cards" and in `upstream-map.toml`.
+
 **Goal: milestone M0.** The analytic section of OpenColorIO 2.5.2 is complete and
 byte-exact with the wheel, through OCIO's own API (PLAN.md §1, §10). The section covers:
 - the Matrix, Range, Exponent, ExponentWithLinear, Log, LogAffine, LogCamera, CDL and Group transforms;
@@ -137,7 +140,7 @@ NaN and ±Inf parameters. Every numeric profile the family has is covered throug
 |---|---|---|---|
 | 1.6a | `OpOptimizers.cpp`: `RemoveNoOpTypes`, `RemoveNoOps`, `ReplaceOps`, `ReplaceIdentityOps`, `RemoveInverseOps`, `CombineOps`, the 80-pass loop | `op_optimizers.rs` | `tests/cpu/OpOptimizers_tests.cpp` (the tests whose ops exist) |
 
-`ReplaceInverseLuts` and the separable-prefix bit-depth bake need Lut1D, so they belong to Phase 2 (WP 2.5).
+`ReplaceInverseLuts` and the separable-prefix bit-depth bake need Lut1D. The owner pulled the bake into Phase 1 (2026-10-01): `p1-optimizer` ported the forward Lut1D's data, its lookup renderers and the bake (part of WP 2.5), because `OPTIMIZATION_DEFAULT` bakes integer and half-float inputs, so M0's "every bit depth" needs it. `ReplaceInverseLuts`, the inverse LUT and the float renderers stay in Phase 2 (WP 2.1, 2.5).
 
 ## WP 1.7: GPU infrastructure (`ocio-gpu`)
 
@@ -203,27 +206,49 @@ rows can run in parallel.
 | Card | Chunks | Who | Needs | Status |
 |---|---|---|---|---|
 | `p1-oracle-image` | O1.2, its own chunk; the owner reviews it, labelled `oracle` | B | — | done |
-| `p1-oracle` | O1.1, O1.3, O1.4, each its own chunk; the owner reviews them, labelled `oracle` | B | — | done |
-| `p1-bitdepth` | 1.1a–1.1e | A | `p1-oracle-image` | done |
+| `p1-oracle` | O1.1, O1.3, O1.4, each its own chunk; the owner reviews them, labelled `oracle` | B | — | done (`p1-oracle-2`) |
+| `p1-bitdepth` | 1.1a–1.1e | A | `p1-oracle-image` | done (`p1-bitdepth-2`) |
 | `p1-math` | 1.4a–1.4c | B | — | done |
 | `p1-dispatch` | 1.5a–1.5c, finished in spike S4: `CPUInfo` with `with_flags`/`with_build`, `SSE2.h`, the `AVX*.h` headers and their tests | B | — | done |
 | `p1-foundations` | 1.2a, 1.2b, 1.2e | A | — | done |
 | `p1-foundations-fix` | review follow-ups of `p1-foundations` | B | `p1-foundations` | done |
-| `p1-engine` | 1.2c, 1.2d (with the optimizer's generic core, owner decision 2026-10-01: Option A), 1.3n1, 1.3m1–m2 | A | `p1-bitdepth`, `p1-math`, `p1-foundations` | |
-| `p1-matrix` | 1.3m3 | A | `p1-engine` | |
-| `p1-range` | 1.3r1–r2 | A or C | `p1-engine` | |
-| `p1-exponent` | 1.3e1, its CPU part | A or C | `p1-engine` | |
-| `p1-gamma` | 1.3g1–g3 | A or C | `p1-engine` | |
-| `p1-log` | 1.3l1–l3 | A or C | `p1-engine` | |
-| `p1-cdl` | 1.3c1–c3 | A or C | `p1-engine` | |
-| `p1-optimizer` | 1.6a: only the LUT steps remain (the generic core moved to 1.2d, in `p1-engine`) | A | the families above | |
-| `p1-gpu-infra` | 1.7a–1.7e | B | O1.3 | |
-| `p1-gpu-ops` | 1.3m4, r3, e1 (its GPU part), g4, l4, c4 | B | `p1-gpu-infra`, each family's op card | |
-| `p1-transforms` | 1.8a–1.8f | A or B | the families' op cards | |
-| `p1-processor` | 1.8g–1.8h | A or B | `p1-transforms`, `p1-optimizer`, `p1-gpu-infra` | |
+| `p1-engine` | 1.2c, 1.2d (with the optimizer's generic core, owner decision 2026-10-01: Option A), 1.3n1, 1.3m1–m2 | A | `p1-bitdepth`, `p1-math`, `p1-foundations` | done (`p1-engine-3`) |
+| `p1-matrix` | 1.3m3 | A | `p1-engine` | done (`p1-matrix-4`, with `p1-range`) |
+| `p1-range` | 1.3r1–r2 | A or C | `p1-engine` | done (landed in `p1-matrix-4`) |
+| `p1-exponent` | 1.3e1, its CPU part | A or C | `p1-engine` | done (`p1-exponent-4`, GPU writer included) |
+| `p1-gamma` | 1.3g1–g3 | A or C | `p1-engine` | done (`p1-gamma-2`) |
+| `p1-log` | 1.3l1–l3 | A or C | `p1-engine` | done (`p1-log-2`) |
+| `p1-cdl` | 1.3c1–c3 | A or C | `p1-engine` | done (`p1-cdl-2`) |
+| `p1-optimizer` | 1.6a: only the LUT steps remain (the generic core moved to 1.2d, in `p1-engine`) | A | the families above | done (`p1-optimizer-2`; `multi_op_prefix` → Phase 2, `opt_prefix_test1` → the CTF reader) |
+| `p1-gpu-infra` | 1.7a–1.7e | B | O1.3 | done (`p1-gpu-infra-3`) |
+| `p1-gpu-ops` | 1.3m4, r3, e1 (its GPU part), g4, l4, c4 | B | `p1-gpu-infra`, each family's op card | done (`p1-gpu-ops`, `p1-gpu-gamma-2`, `p1-gpu-ops4`) |
+| `p1-transforms` | 1.8a–1.8f | A or B | the families' op cards | done (`p1-transforms-fam4`: fam1, fam2 and fam4, with AllocationTransform and Lut1DTransform; Lut1D E–J → Phase 2, WP 2.1 and 2.5) |
+| `p1-processor` | 1.8g–1.8h | A or B | `p1-transforms`, `p1-optimizer`, `p1-gpu-infra` | done (`p1-processor-4`; tests that need `Config::Create()` → Phase 3) |
 
 The op-family cards from `p1-range` to `p1-cdl` can go to a third implementer, C (the owner
 approved one on 2026-10-01).
+
+**Closing cards**, opened after the table was written:
+- `tooling-1`, `tooling-2`: harness fixes during the phase. Done.
+- `p1-tests-catchup-3`: 17 upstream tests that the landed cards unblocked, the optimizer's pair
+  and combination checks, and a parity counter that counts only "Port of" markers. Done.
+- `p1-api-parity-2`: every analytic transform through the port's public API, against the wheel.
+  CPU at every bit depth (U8, U10, U12, U16, F16, F32) in and out, packed RGBA, RGB and BGRA and
+  planar RGBA and RGB, every optimization level. GPU in all 10 languages at every level.
+  AllocationTransform too. It found no parity bugs. Done.
+
+**Deferred by owner decisions:**
+- Lut1D E–J (float interpolation, hue adjust, SIMD, inverse): Phase 2, WP 2.1 and 2.5.
+- The GPU processor of a processor with a baked U8 or LUT op returns "not ported yet" until
+  Phase 2.
+- `multi_op_prefix` (Phase 2) and `opt_prefix_test1` (needs the CTF reader).
+- Upstream `Processor` and `CPUProcessor` tests that need `Config::Create()`: Phase 3 (owner
+  decision 2026-10-04).
+- F5: the 10- and 12-bit in-place wheel test is skipped.
+
+**Waiver change:** W0002 was extended on 2026-10-04 (owner decision) to the NaN entries of the 1D
+LUT that the optimizer bakes from NaN parameters (integer and half-float input), and to the CPU
+cache ID that hashes that LUT. Everything else stays exact.
 
 Small cards land sooner and are easier to verify. When a card grows past about 6 chunks, split it
 at a dependency boundary.

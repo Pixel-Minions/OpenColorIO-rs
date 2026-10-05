@@ -8,9 +8,9 @@ project ports it to Rust one upstream release at a time. The current line matche
 2.5.2**: the same results, the same text output, the same errors and the same accepted configs,
 from Rust and, later, from Python.
 
-> **Status: early development.** Phase 1 (the op engine and the analytic transforms) is almost
-> complete: through OCIO's API, every analytic transform matches the official library on the
-> CPU and the GPU. LUT files, configs and Python come in later phases. See
+> **Status: early development.** Phase 1 (the op engine and the analytic transforms) is
+> complete: milestone M0. Through OCIO's API, every analytic transform matches the official
+> library on the CPU and the GPU. LUT files, configs and Python come in later phases. See
 > [Progress](#progress).
 
 ## How precise: byte for byte
@@ -30,12 +30,13 @@ from Rust and, later, from Python.
   its 384 Python tests run unmodified against this port's Python module.
 - **Nothing is waived silently.** Every exception is a written, approved waiver in
   [`waivers.toml`](waivers.toml), and CI fails on any difference that isn't listed there. Today
-  there are two, and neither is visible:
+  there are two, and neither changes a visible value:
   - **W0001:** on Windows, the port uses standard `powf` in one exact-math PQ path. The official
     build uses MSVC's vector math library there. About 1.7% of values differ, far below one
     8-, 10- or 12-bit code value.
-  - **W0002:** in a config with a NaN parameter, the internal bits of the resulting NaN values
-    may differ. They are still NaN.
+  - **W0002:** with a NaN parameter, the internal bits of the resulting NaN values may differ,
+    including in the 1D LUT the optimizer bakes from it and the CPU cache ID that hashes that LUT;
+    they are still NaN.
 - **Deviations are listed too.** [`docs/deviations.md`](docs/deviations.md) records where the
   port intentionally behaves differently.
 
@@ -82,12 +83,10 @@ one.
 
 ## Progress
 
-Status as of 2026-10-04: **Phase 1 (the op engine and the analytic transforms) is almost
-complete**, about 21% of the planned work. Through OCIO's own API, every analytic transform
-already matches the official library on the CPU and the GPU, and every upstream test that
-Phase 1 unblocks is ported. The last Phase 1 work, in review, is a sweep of every transform
-through the port's public processors (at every bit depth, layout and optimization level, and in
-all 10 shading languages). Phase 2 (LUTs and fixed functions) comes next.
+Status as of 2026-10-04: **Phase 1 (the op engine and the analytic transforms) is complete**:
+milestone M0, about 22% of the planned work. Through OCIO's own API, every analytic transform
+matches the official library on the CPU and the GPU. Phase 2 (LUTs and fixed functions) is
+next.
 
 **Done:** everything below is bit-exact against the official library on Windows and Linux, in
 debug and release builds, and was reviewed independently before merging.
@@ -112,6 +111,12 @@ debug and release builds, and was reviewed independently before merging.
   flags match OCIO.
 - **The GPU infrastructure:** the shader description, the shader-text helpers for all 10
   languages, uniforms and dynamic properties.
+- **A sweep through the public API:** every analytic transform runs through the port's own
+  processors and is compared with the official library:
+  - on the CPU, at every bit depth (8, 10, 12 and 16-bit integer, half and float) in and out,
+    in packed RGBA, RGB and BGRA and planar RGBA and RGB, at every optimization level;
+  - on the GPU, in all 10 shading languages at every optimization level.
+  It found no differences.
 - **The test harness:**
   - the live oracle;
   - hash-locked reference fixtures;
@@ -168,7 +173,7 @@ Each milestone is a complete section of OCIO, byte-exact on CPU and GPU:
 
 | Milestone | Section | Version |
 |---|---|---|
-| **M0** | Analytic transforms (matrix, range, exponent, log, CDL), the op engine and the processor API | `0.1.0` |
+| **M0** (done) | Analytic transforms (matrix, range, exponent, log, CDL), the op engine and the processor API | `0.1.0` |
 | **M1** | LUTs, fixed functions (including ACES 2.0), built-in transforms and configs, config read and write | `0.2.0` |
 | **M2** | All 24 file formats, file-based configs and `.ocioz`, the baker | `0.3.0` |
 | **M3** | Dynamic properties, grading ops, app helpers | `0.4.0` |
