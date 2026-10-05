@@ -620,7 +620,15 @@ const WINDOWS: bool = cfg!(target_os = "windows");
 /// ends a slope of at least 0.01.
 ///
 /// Port of `EstimateRGBSlopes` (src/OpenColorIO/ops/gradingrgbcurve/GradingBSplineCurve.cpp:
-/// 335-384 @ v2.5.2).
+/// 335-384 @ v2.5.2), in the operand orders of each wheel's machine code where a NaN of the
+/// curve (a NaN y or slope) can meet another NaN (`docs/improvements.md` I-91; Windows
+/// `sub_1801e5df0`, Linux inlined in `computeKnotsAndCoefsForRGBCurve`, `0x3bef40`):
+/// - both compute a secant's length as `sqrt(del_y * del_y + del_x * del_x)` and add the
+///   lengths of equal secants as `DL + secantLen[j + 1]`, the denominator of a slope as
+///   `secantLen[k] + secantLen[k - 1]`, as the source;
+/// - the numerator of a slope is `secantLen[k - 1] * secantSlope[k - 1] + secantLen[k] *
+///   secantSlope[k]` on Windows, `secantSlope[k] * secantLen[k] + secantSlope[k - 1] *
+///   secantLen[k - 1]` on Linux.
 fn estimate_rgb_slopes(ctrl_pnts: &[GradingControlPoint], slopes: &mut Vec<f32>) {
     let mut secant_slope = Vec::new();
     let mut secant_len = Vec::new();
@@ -629,7 +637,7 @@ fn estimate_rgb_slopes(ctrl_pnts: &[GradingControlPoint], slopes: &mut Vec<f32>)
         let del_x = ctrl_pnts[i + 1].x - ctrl_pnts[i].x;
         let del_y = ctrl_pnts[i + 1].y - ctrl_pnts[i].y;
         secant_slope.push(del_y / del_x);
-        secant_len.push((del_x * del_x + del_y * del_y).sqrt());
+        secant_len.push(sse_add(sse_mul(del_y, del_y), sse_mul(del_x, del_x)).sqrt());
     }
     if num_ctrl_pnts == 2 {
         slopes.push(secant_slope[0]);
@@ -641,7 +649,7 @@ fn estimate_rgb_slopes(ctrl_pnts: &[GradingControlPoint], slopes: &mut Vec<f32>)
         let mut j = i;
         let mut dl = secant_len[i];
         while j < num_ctrl_pnts - 2 && (secant_slope[j + 1] - secant_slope[j]).abs() < 1e-6 {
-            dl += secant_len[j + 1];
+            dl = sse_add(dl, secant_len[j + 1]);
             j += 1;
         }
         for len in &mut secant_len[i..=j] {
@@ -654,8 +662,13 @@ fn estimate_rgb_slopes(ctrl_pnts: &[GradingControlPoint], slopes: &mut Vec<f32>)
     }
     slopes.push(0.0);
     for k in 1..num_ctrl_pnts - 1 {
-        let s = (secant_len[k] * secant_slope[k] + secant_len[k - 1] * secant_slope[k - 1])
-            / (secant_len[k] + secant_len[k - 1]);
+        let (len, sec) = (&secant_len, &secant_slope);
+        let numerator = if WINDOWS {
+            sse_add(sse_mul(len[k - 1], sec[k - 1]), sse_mul(len[k], sec[k]))
+        } else {
+            sse_add(sse_mul(sec[k], len[k]), sse_mul(sec[k - 1], len[k - 1]))
+        };
+        let s = numerator / sse_add(len[k], len[k - 1]);
         slopes.push(s);
     }
     slopes.push(std_max(
@@ -669,7 +682,17 @@ fn estimate_rgb_slopes(ctrl_pnts: &[GradingControlPoint], slopes: &mut Vec<f32>)
 /// given slopes: one segment between two points whose slopes average to the secant, two
 /// segments with a knot `ksi` between them otherwise.
 ///
-/// Port of `FitRGBSpline` (GradingBSplineCurve.cpp:388-446 @ v2.5.2).
+/// Port of `FitRGBSpline` (GradingBSplineCurve.cpp:388-446 @ v2.5.2), in the operand orders of
+/// each wheel's machine code where a NaN of the curve can meet another NaN
+/// (`docs/improvements.md` I-91; Windows `sub_1801e6c80`, Linux `0x3be970`). Both compute the
+/// middle knot as `(xi_pl1 + xi) * 0.5`, the other knots as `aa * del_x / (s1 - s0) + xi_pl1`
+/// and `bb * del_x / (s1 - s0) + xi`, and `s_bar` as `prod / del_x + (2 * secantSlope - s1)`,
+/// where the source adds the other way round; then:
+/// - Windows: `prod = (ksi - xi) * (s1 - s0)`, and the second segment's constant
+///   `((ksi - xi) * s0 + yi) + q`;
+/// - Linux: `prod = (s1 - s0) * (ksi - xi)`, and `q + (yi + s0 * (ksi - xi))`;
+///
+/// with `q = 0.5 * eta * (ksi - xi) * (ksi - xi)` in the source's order on both.
 fn fit_rgb_spline(
     ctrl_pnts: &[GradingControlPoint],
     slopes: &[f32],
@@ -696,20 +719,32 @@ fn fit_rgb_spline(
         } else {
             let aa = slopes[i] - secant_slope;
             let bb = slopes[i + 1] - secant_slope;
+            let del_s = slopes[i + 1] - slopes[i];
             let ksi = if aa * bb >= 0.0 {
-                (xi + xi_pl1) * 0.5
+                sse_add(xi_pl1, xi) * 0.5
             } else if aa.abs() > bb.abs() {
-                xi_pl1 + aa * del_x / (slopes[i + 1] - slopes[i])
+                sse_add(sse_mul(aa, del_x) / del_s, xi_pl1)
             } else {
-                xi + bb * del_x / (slopes[i + 1] - slopes[i])
+                sse_add(sse_mul(bb, del_x) / del_s, xi)
             };
-            let s_bar = (2.0 * secant_slope - slopes[i + 1])
-                + (slopes[i + 1] - slopes[i]) * (ksi - xi) / del_x;
-            let eta = (s_bar - slopes[i]) / (ksi - xi);
+            let k = ksi - xi;
+            let prod = if WINDOWS {
+                sse_mul(k, del_s)
+            } else {
+                sse_mul(del_s, k)
+            };
+            let s_bar = sse_add(prod / del_x, 2.0 * secant_slope - slopes[i + 1]);
+            let eta = (s_bar - slopes[i]) / k;
+            let half_eta = 0.5 * eta;
+            let q = sse_mul(sse_mul(half_eta, k), k);
             coefs_c.push(yi);
             coefs_b.push(slopes[i]);
-            coefs_a.push(0.5 * eta);
-            coefs_c.push(yi + slopes[i] * (ksi - xi) + 0.5 * eta * (ksi - xi) * (ksi - xi));
+            coefs_a.push(half_eta);
+            coefs_c.push(if WINDOWS {
+                sse_add(sse_add(sse_mul(k, slopes[i]), yi), q)
+            } else {
+                sse_add(q, sse_add(yi, sse_mul(slopes[i], k)))
+            });
             coefs_b.push(s_bar);
             coefs_a.push(0.5 * (slopes[i + 1] - s_bar) / (xi_pl1 - ksi));
             knots.push(ksi);
@@ -726,6 +761,10 @@ fn fit_rgb_spline(
 /// upstream walks past the last control point and reads memory it doesn't own; the port
 /// refuses the curve there instead ([`READS_PAST_THE_CONTROL_POINTS`], `docs/improvements.md`
 /// U-35).
+///
+/// The wheels order some operands differently here too, but no two different NaNs can meet: a
+/// knot is adjusted only where `s_bar` is a number, so the control points and slopes it reads
+/// are numbers, and any NaN it computes is the default NaN of an invalid operation.
 fn adjust_rgb_slopes(
     ctrl_pnts: &[GradingControlPoint],
     slopes: &mut [f32],

@@ -804,13 +804,29 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   and the NaN coefficients of a degenerate curve, such as one with two control points at the
   same x), the result keeps a different NaN, and a NaN `C0` comes out with its sign flipped
   on Linux only.
+- **Upstream, the fitting:** `EstimateRGBSlopes` and `FitRGBSpline` (335-446) differ the same
+  way where a NaN y coordinate or slope meets the default NaN of an invalid operation. MSVC
+  computes a slope's numerator as `secantLen[k - 1] * secantSlope[k - 1] + secantLen[k] *
+  secantSlope[k]`, the middle segment's `(ksi - xi) * (s1 - s0)` and the second segment's
+  constant as `((ksi - xi) * s0 + yi) + q` (`sub_1801e5df0`, `sub_1801e6c80`); GCC computes
+  `secantSlope[k] * secantLen[k] + secantSlope[k - 1] * secantLen[k - 1]`, `(s1 - s0) * (ksi -
+  xi)` and `q + (yi + s0 * (ksi - xi))` (inlined in `computeKnotsAndCoefsForRGBCurve`,
+  `0x3bef40`, and `0x3be970`). Both add the knots and `s_bar`'s terms in the other order from
+  the source. Such a curve's coefficients keep a different NaN on each platform: the GPU
+  shader's constants (`nan` against `-nan(ind)`) and a dynamic op's uniform values.
 - **Who notices:** anyone comparing NaN pixels of a GradingRGBCurveTransform, or an ACES 1.x
-  output built-in, between a Windows and a Linux machine.
+  output built-in, between a Windows and a Linux machine; and the shader text or uniforms of
+  a curve with a NaN y coordinate or slope.
 - **A fix:** one operand order on every platform, which changes NaN bits on at least one.
 - **Status:** matched in `p2-rgbcurve` (2.6b), `KnotsCoefs::eval_curve` and
   `eval_curve_rev`, read from both wheels' machine code; the GradingRGBCurve battery (2.6d,
   `crates/ocio-ops/tests/grading_rgb_curve_oracle.rs`, the "x repeated" case) checks it on
-  both platforms.
+  both platforms. The fitting is matched in `p2-rgbcurve`'s fix-forward chunk,
+  `estimate_rgb_slopes` and `fit_rgb_spline`, read from both wheels' machine code;
+  `nan_curves_shaders_match_the_wheel`
+  (`crates/ocio-gpu/tests/grading_rgb_curve_op_gpu_oracle.rs`) checks it on both platforms.
+  `AdjustRGBSlopes` differs too (MSVC's unrolled loop multiplies `slopes[i + 1] * adjust` or
+  `adjust * slopes[i + 1]` by the knot's index), but no two different NaNs meet there.
 
 ## Transforms
 

@@ -302,8 +302,12 @@ fn take_log() -> Vec<String> {
     std::mem::take(&mut *LOG.lock().unwrap_or_else(PoisonError::into_inner))
 }
 
-/// The port's log: this test is the only one of its process, as the logging state is global.
+/// The port's log. The logging state is global, so the tests of this process run one at a
+/// time ([`SERIAL`]).
 static LOG: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Held by each test for its whole run, so that no test logs into another's [`LOG`].
+static SERIAL: Mutex<()> = Mutex::new(());
 
 /// Sends the port's log to [`LOG`], after OCIO's one-time read of `OCIO_LOGGING_LEVEL` in an
 /// empty environment, as the oracle's process reads it.
@@ -473,6 +477,7 @@ fn cases_of(label: &str, ops: Vec<Op>) -> Vec<Case> {
 /// every style, forward and inverse, bypassed, dynamic and not, alone and two at a time.
 #[test]
 fn grading_rgb_curve_shaders_match_the_wheel() {
+    let _serial = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
     capture_log();
     use GradingStyle::{Lin, Log, Video};
     let identity: &[(f32, f32)] = &[(0.0, 0.0), (1.0, 1.0)];
@@ -538,6 +543,166 @@ fn grading_rgb_curve_shaders_match_the_wheel() {
     let mut cases = Vec::new();
     for (label, ops) in lists {
         cases.extend(cases_of(label, ops));
+    }
+    check(&cases);
+}
+
+/// Curves with a NaN y coordinate or slope, where the fitting's NaNs meet in each wheel's
+/// operand order (`docs/improvements.md` I-91): NaN y coordinates first, in the middle and
+/// last, quiet NaNs of both signs and with a payload, beside repeated x coordinates (two
+/// points at the same x give the fitting infinite and default-NaN coefficients) and infinite
+/// values; NaN slopes beside finite and infinite ones; and the curves a random sweep found
+/// differing before the fitting took each wheel's order. Each master curve is in a log-style
+/// op, forward and inverse, dynamic (the coefficients are uniforms) and not (constants), at
+/// every level, in every language.
+#[test]
+fn nan_curves_shaders_match_the_wheel() {
+    let _serial = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
+    capture_log();
+    use GradingStyle::{Lin, Log, Video};
+    let n = f32::NAN;
+    let neg_payload = f32::from_bits(0xffc1_2345);
+    let payload = f32::from_bits(0x7fd0_0001);
+    let inf = f32::INFINITY;
+    let identity: &[(f32, f32)] = &[(0.0, 0.0), (1.0, 1.0)];
+    let master = |points: &[(f32, f32)], slopes: Option<&[f32]>| {
+        let op = Op::new(Log, [identity, identity, identity, points]);
+        match slopes {
+            Some(s) => op.slopes(3, s),
+            None => op,
+        }
+    };
+    let masters: Vec<(&str, Op)> = vec![
+        (
+            "NaN y, x repeated",
+            master(&[(0.0, 0.0), (1.0, n), (2.0, 2.0), (2.0, 3.0)], None),
+        ),
+        (
+            "NaN y",
+            master(&[(0.0, 0.0), (1.0, n), (2.0, 2.0), (3.0, 3.0)], None),
+        ),
+        (
+            "NaN y first",
+            master(&[(0.0, n), (1.0, 1.0), (2.0, 2.0)], None),
+        ),
+        (
+            "NaN y last",
+            master(&[(0.0, 0.0), (1.0, 1.0), (2.0, n)], None),
+        ),
+        (
+            "negative NaN y with a payload",
+            master(
+                &[(0.0, 0.0), (1.0, neg_payload), (2.0, 2.0), (3.0, 3.0)],
+                None,
+            ),
+        ),
+        (
+            "NaN y with a payload, x repeated first",
+            master(&[(0.0, 0.0), (0.0, 0.5), (1.0, payload), (2.0, 2.0)], None),
+        ),
+        (
+            "NaN y and +Inf y",
+            master(&[(0.0, 0.0), (1.0, n), (2.0, inf)], None),
+        ),
+        (
+            "NaN first slope",
+            master(&[(0.0, 0.0), (1.0, 1.0), (2.0, 2.0)], Some(&[n, 1.0, 1.0])),
+        ),
+        (
+            "NaN middle slope",
+            master(&[(0.0, 0.0), (1.0, 1.5), (2.0, 2.0)], Some(&[1.0, n, 1.0])),
+        ),
+        (
+            "NaN slope after +Inf",
+            master(&[(0.0, 0.0), (1.0, 1.5), (2.0, 2.0)], Some(&[inf, n, 1.0])),
+        ),
+        (
+            "negative NaN slope, x repeated",
+            master(
+                &[(0.0, 0.0), (1.0, 0.5), (1.0, 1.5), (2.0, 2.0)],
+                Some(&[1.0, neg_payload, 1.0, 1.0]),
+            ),
+        ),
+    ];
+    let mut cases = Vec::new();
+    for (label, op) in masters {
+        for (variant, op) in [
+            ("", op.clone()),
+            (" inverse", op.clone().inverse()),
+            (" dynamic", op.clone().dynamic()),
+            (" dynamic inverse", op.dynamic().inverse()),
+        ] {
+            cases.extend(cases_of(&format!("{label}{variant}"), vec![op]));
+        }
+    }
+    // The sweep's curves (the verifier's random GPU probe of card p2-rgbcurve).
+    let rgb = |red: &[(f32, f32)], green: &[(f32, f32)], blue: &[(f32, f32)], m: &[(f32, f32)]| {
+        [red.to_vec(), green.to_vec(), blue.to_vec(), m.to_vec()]
+    };
+    let id = identity;
+    let swept = [
+        Op {
+            style: Lin,
+            inverse: true,
+            bypass: false,
+            dynamic: true,
+            curves: rgb(&[(-0.4203682, n), (1.2377115, 1.8922781)], id, id, id),
+            slopes: [vec![n, 2.9866364], vec![0.0; 2], vec![0.0; 2], vec![0.0; 2]],
+        },
+        Op {
+            style: Video,
+            inverse: false,
+            bypass: false,
+            dynamic: true,
+            curves: rgb(
+                id,
+                id,
+                id,
+                &[
+                    (-0.34862792, n),
+                    (0.6080862, 1.3145257),
+                    (1.1321678, 1.3369833),
+                ],
+            ),
+            slopes: [
+                vec![0.0; 2],
+                vec![0.0; 2],
+                vec![0.0; 2],
+                vec![n, 1.6824479, 2.2533407],
+            ],
+        },
+        Op {
+            style: Log,
+            inverse: false,
+            bypass: false,
+            dynamic: false,
+            curves: rgb(
+                id,
+                &[
+                    (-0.8917401, -0.57419956),
+                    (-0.8917401, 0.5),
+                    (-0.8917401, 1.3048507),
+                    (-0.8917401, 1.5977271),
+                    (0.87305605, 3.1626081),
+                    (1.1617106, 4.247768),
+                ],
+                &[(-0.8532873, -0.64455146), (-0.8532873, 0.94803864)],
+                &[
+                    (-0.6654385, -0.91152686),
+                    (1.028795, -0.91152686),
+                    (2.859833, n),
+                ],
+            ),
+            slopes: [
+                vec![0.0; 2],
+                vec![0.0; 6],
+                vec![n, 0.0],
+                vec![3.4028235e38, 0.0, 0.0],
+            ],
+        },
+    ];
+    for (i, op) in swept.into_iter().enumerate() {
+        cases.extend(cases_of(&format!("swept {i}"), vec![op]));
     }
     check(&cases);
 }

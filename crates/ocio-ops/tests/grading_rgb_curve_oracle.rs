@@ -14,6 +14,7 @@
 //! - whether they are identities: the processor's `createGroupTransform()` gives the curves
 //!   back, and the dump calls `GradingRGBCurve.isIdentity()`.
 
+use ocio_ops::dynamic_property::DynamicPropertyGradingRgbCurveImpl;
 use ocio_ops::op::{OpVec, Pixels, PixelsMut};
 use ocio_ops::open_color_types::{BSplineType, GradingStyle, RgbCurveType, TransformDirection};
 use ocio_ops::ops::gradingrgbcurve::grading_b_spline_curve::{
@@ -187,6 +188,49 @@ fn invalid_curves_raise_the_wheels_messages() {
     for curves in valid_curves() {
         curves.validate().unwrap();
     }
+}
+
+/// Curves of the most knots an op takes, 120 (GradingBSplineCurve.h:118 @ v2.5.2), and of one
+/// more: the wheel's GradingRGBCurveTransform takes the first and raises the second's message,
+/// as the port's fitting does. A master curve of points on y = 2x is fitted with one segment
+/// between two points, so its knots are its points; the other curves are identities, which
+/// have none.
+#[test]
+fn the_most_knots_are_the_wheels() {
+    let identity = curve(&[(0.0, 0.0), (1.0, 1.0)]);
+    let line = |n: u16| {
+        let points: Vec<(f32, f32)> = (0..n).map(|k| (f32::from(k), 2.0 * f32::from(k))).collect();
+        curve(&points)
+    };
+    let i = &identity;
+    let cases = [
+        GradingRgbCurve::with_curves(i, i, i, &line(119)),
+        GradingRgbCurve::with_curves(i, i, i, &line(120)),
+        GradingRgbCurve::with_curves(i, i, i, &line(121)),
+        GradingRgbCurve::with_curves(&line(60), i, i, &line(60)),
+        GradingRgbCurve::with_curves(&line(60), i, i, &line(61)),
+    ];
+    let reply = TransformTextRequest {
+        transforms: cases.iter().map(transform_spec).collect(),
+        pairs: Vec::new(),
+    }
+    .run();
+    let (mut accepted, mut refused) = (0, 0);
+    for (curves, built) in cases.iter().zip(&reply.transforms) {
+        let port = DynamicPropertyGradingRgbCurveImpl::new(curves, false);
+        match (built, port) {
+            (Built::Text(_), Ok(_)) => accepted += 1,
+            (Built::Raised(wheel), Err(port)) => {
+                refused += 1;
+                assert_text_eq("the fitting's message", &wheel.message, port.message());
+            }
+            (built, port) => panic!("{curves}: the wheel gives {built:?}, the port {port:?}"),
+        }
+    }
+    assert!(
+        accepted > 0 && refused > 0,
+        "the cases are on both sides of the wheel's limit"
+    );
 }
 
 /// Whether the curves are identities, as the wheel's `GradingRGBCurve.isIdentity()` says of
@@ -402,9 +446,14 @@ impl Family for RgbCurveFamily {
         A
     }
 
-    /// The control points' x (forward) and y (inverse) coordinates of every curve.
+    /// The control points' x (forward) and y (inverse) coordinates of every curve; for the
+    /// linear style, the breaks of its conversions to and from the grading log, `xbrk` and
+    /// `ybrk` (GradingRGBCurveOpCPU.cpp:161-166 @ v2.5.2): `LinLog` takes the pixels, and maps
+    /// those at `xbrk` to `ybrk` or next to it, where `LogLin` takes a channel whose curves are
+    /// identities.
     fn breakpoints(&self, p: &RgbCurveParams, direction: Direction) -> Vec<f32> {
-        p.points
+        let mut points: Vec<f32> = p
+            .points
             .iter()
             .flatten()
             .map(|&(x, y)| {
@@ -415,7 +464,11 @@ impl Family for RgbCurveFamily {
                 }
             })
             .filter(|v| v.is_finite())
-            .collect()
+            .collect();
+        if p.style == GradingStyle::Lin {
+            points.extend([0.0041318374739483946, -5.5]);
+        }
+        points
     }
 }
 
@@ -629,6 +682,17 @@ fn explicit_cases() -> Vec<Case<RgbCurveParams>> {
                     &[(-1e38, -1.0), (1.0, 2.0)],
                 ],
             ),
+        ),
+        Case::new(
+            "lin, red curve and master identities",
+            RgbCurveParams::new(Lin, [default_lin, lin_rgb, lin_rgb, lin_m]),
+        ),
+        // The inverse's low end where the first slope is near 0 but above its 1e-5 test
+        // (GradingBSplineCurve.cpp:1344 @ v2.5.2).
+        Case::new(
+            "a first slope of 5e-4",
+            RgbCurveParams::new(Log, [default_log, identity, identity, identity])
+                .with_slopes(0, &[5e-4, 1.0, 1.0]),
         ),
         Case::new(
             "x repeated",

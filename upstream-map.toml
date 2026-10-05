@@ -1524,7 +1524,7 @@ path = "src/OpenColorIO/ops/gradingrgbcurve/GradingBSplineCurve.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_b_spline_curve.rs", "crates/ocio-gpu/src/ops/gradingrgbcurve/grading_rgb_curve_op_gpu.rs"]
 status = "partial"
-note = "p2-rgbcurve 2.6a: the curve, its control points and slopes, validate, isIdentity and operator==; 2.6b: the RGB curves' fitting (EstimateRGBSlopes, FitRGBSpline, AdjustRGBSlopes with U-35's guard, computeKnotsAndCoefsForRGBCurve), KnotsCoefs and evalCurve/evalCurveRev in each wheel's operand order (I-91); 2.6e: AddShaderEvalFwd/Rev, in ocio-gpu's grading_rgb_curve_op_gpu.rs; Phase 5: the hue curves' parts (PrepHueCurveData, CalcKsi, FitHueSpline, EstimateHueSlopes, computeKnotsAndCoefsForHueCurve, evalCurveRevHue, AddShaderEvalRevHue, the Create overloads with a HueCurveType), which compute_knots_and_coefs refuses as not ported yet"
+note = "p2-rgbcurve 2.6a: the curve, its control points and slopes, validate, isIdentity and operator==; 2.6b: the RGB curves' fitting (EstimateRGBSlopes, FitRGBSpline, AdjustRGBSlopes with U-35's guard, computeKnotsAndCoefsForRGBCurve), KnotsCoefs and evalCurve/evalCurveRev, the fitting and the evaluation in each wheel's operand order (I-91); 2.6e: AddShaderEvalFwd/Rev, in ocio-gpu's grading_rgb_curve_op_gpu.rs; Phase 5: the hue curves' parts (PrepHueCurveData, CalcKsi, FitHueSpline, EstimateHueSlopes, computeKnotsAndCoefsForHueCurve, evalCurveRevHue, AddShaderEvalRevHue, the Create overloads with a HueCurveType), which compute_knots_and_coefs refuses as not ported yet"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingBSplineCurve.h"
