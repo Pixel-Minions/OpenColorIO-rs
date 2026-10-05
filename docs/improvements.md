@@ -292,6 +292,22 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in the YAML parser (`p3-yaml-parser`), and checked against the wheel in
   `crates/ocio/tests/yaml_cpp_parser_oracle.rs`.
 
+### I-103. Configs read some numbers differently on Windows and Linux
+
+- **Upstream:** yaml-cpp reads a number with `std::stringstream >> value` (yaml-cpp 0.8.0
+  `include/yaml-cpp/node/convert.h:160-201`), so each wheel's C++ library decides what a number
+  is. MSVC's STL with the UCRT's `strtod` (Windows) reads hexadecimal floats (`0x1p3` is 8,
+  `0x.8` is 0.5) and refuses a nonzero value that rounds to zero (`1e-400`, `2e-324`: "bad
+  conversion"). libstdc++ with glibc's `strtod_l` (Linux) refuses hexadecimal floats (it reads
+  the `0` and stops) and reads a value that rounds to zero as 0. Both refuse a value that
+  overflows and keep subnormal values. A config with such a number loads with a different
+  value, or fails, on one platform only. Seen through both wheels (`yaml_scalars`, O3.3).
+- **Who notices:** configs with hexadecimal floats or numbers below the smallest subnormal.
+- **A fix:** one reader on both platforms (decimal only, and a value that rounds to zero
+  read as 0, say).
+- **Status:** matched in the YAML parser (`p3-yaml-parser`, `ocio_ops::utils::num_get`), and
+  checked against both wheels in `crates/ocio/tests/yaml_cpp_convert_oracle.rs`.
+
 ## Numeric helpers
 
 ### I-20. Double values are compared to 0 and 1 in float precision

@@ -4,13 +4,16 @@
 
 //! Port of yaml-cpp 0.8.0's conversions of nodes (include/yaml-cpp/node/convert.h,
 //! src/convert.cpp) and of `Node::as<T>()`'s helpers (`as_if`, node/impl.h:90-149):
-//! strings, `Null`, `bool`, the integer types and sequences of them.
+//! strings, `Null`, `bool`, the integer and floating-point types and sequences of them.
 //!
 //! Numbers go through `std::stringstream >> std::noskipws >> value` after
 //! `unsetf(std::ios::dec)`, so an integer can be written in hexadecimal (`0x15`) or octal
-//! (`015`), and only white space may follow it ([`ocio_ops::utils::num_get`]).
+//! (`015`), and only white space may follow it ([`ocio_ops::utils::num_get`]). Floating-point
+//! numbers read as each wheel's C++ library reads them ([`num_get::Library::NATIVE`]): the
+//! Windows wheel takes hexadecimal floats and refuses a value that rounds to zero, the Linux
+//! wheel does neither (`docs/improvements.md` I-103).
 
-use ocio_ops::utils::num_get::{self, Basefield};
+use ocio_ops::utils::num_get::{self, Basefield, Library};
 
 use super::exceptions::{Exception, Result};
 use super::node::{Node, NodeType};
@@ -263,3 +266,62 @@ convert_vector!(
     i64 => "long long",
     u64 => "unsigned long long",
 );
+
+/// `conversion::IsInfinity` (convert.h:34-37).
+fn is_infinity(input: &[u8]) -> bool {
+    matches!(
+        input,
+        b".inf" | b".Inf" | b".INF" | b"+.inf" | b"+.Inf" | b"+.INF"
+    )
+}
+
+/// `conversion::IsNegativeInfinity` (convert.h:39-41).
+fn is_negative_infinity(input: &[u8]) -> bool {
+    matches!(input, b"-.inf" | b"-.Inf" | b"-.INF")
+}
+
+/// `conversion::IsNaN` (convert.h:43-45).
+fn is_nan(input: &[u8]) -> bool {
+    matches!(input, b".nan" | b".NaN" | b".NAN")
+}
+
+macro_rules! convert_float {
+    ($($t:ty => $cpp:literal, $get:ident, $nan_bits:expr),* $(,)?) => {$(
+        impl Convert for $t {
+            #[doc = concat!("`convert<", $cpp, ">::decode` (convert.h:160-201): the stream ")]
+            #[doc = "conversion of this platform's C++ library, then the YAML spellings of the"]
+            #[doc = "infinities and NaN (`std::numeric_limits<T>::quiet_NaN()`)."]
+            fn decode(node: &Node) -> Result<Option<Self>> {
+                if node.node_type()? != NodeType::Scalar {
+                    return Ok(None);
+                }
+                let input = node.scalar()?;
+                let extracted = num_get::$get(input, Library::NATIVE);
+                if !extracted.fail
+                    && only_space_follows(input, extracted.consumed, extracted.eof)
+                {
+                    return Ok(Some(extracted.value));
+                }
+                if is_infinity(input) {
+                    return Ok(Some(<$t>::INFINITY));
+                }
+                if is_negative_infinity(input) {
+                    return Ok(Some(-<$t>::INFINITY));
+                }
+                if is_nan(input) {
+                    return Ok(Some(<$t>::from_bits($nan_bits)));
+                }
+                Ok(None)
+            }
+        }
+    )*};
+}
+
+convert_float!(
+    f32 => "float", get_f32, 0x7fc0_0000,
+    f64 => "double", get_f64, 0x7ff8_0000_0000_0000,
+);
+
+// OCIO reads `std::vector<float>` (allocation variables) and `std::vector<double>` (luma,
+// transform parameters).
+convert_vector!(f32 => "float", f64 => "double");

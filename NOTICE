@@ -57,3 +57,13 @@ that the citations can be checked:
     Copyright (c) 2008-present Contributors to the Pystring project.
     All Rights Reserved.
     SPDX-License-Identifier: BSD-3-Clause (the same terms as LICENSE)
+
+The Microsoft C++ Standard Library (https://github.com/microsoft/STL), the C++ library of
+the Windows wheel: its num_get gathering of floating-point fields (_Parse_fp_with_locale,
+stl/inc/xlocnum, as shipped with MSVC 14.44) is translated in
+crates/ocio-ops/src/utils/num_get.rs:
+
+    Copyright (c) Microsoft Corporation.
+    SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+    (https://www.apache.org/licenses/LICENSE-2.0, with the LLVM exception:
+    https://llvm.org/LICENSE.txt)
