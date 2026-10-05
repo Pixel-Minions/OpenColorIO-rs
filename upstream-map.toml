@@ -32,7 +32,7 @@ path = "include/OpenColorIO/OpenColorTransforms.h"
 kind = "api"
 target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/format_metadata.rs", "crates/ocio-ops/src/dynamic_property.rs", "crates/ocio/src/transform.rs"]
 status = "partial"
-note = "1.2a: the FormatMetadata interface (44-117) is FormatMetadataImpl's own methods in format_metadata.rs (upstream has no other implementation), and its operator<< is FormatMetadataImpl::write_to; 1.2b: DynamicProperty (766-779) is the DynamicPropertyRcPtr enum and DynamicPropertyDouble (810-824) is DynamicPropertyDoubleImpl, in dynamic_property.rs; p1-transforms T0: Transform (as enum Transform) and GroupTransform, in crates/ocio/src/transform.rs and transforms/group_transform.rs; each class comes with its card"
+note = "1.2a: the FormatMetadata interface (44-117) is FormatMetadataImpl's own methods in format_metadata.rs (upstream has no other implementation), and its operator<< is FormatMetadataImpl::write_to; 1.2b: DynamicProperty (766-779) is the DynamicPropertyRcPtr enum and DynamicPropertyDouble (810-824) is DynamicPropertyDoubleImpl, in dynamic_property.rs; p1-transforms T0: Transform (as enum Transform) and GroupTransform, in crates/ocio/src/transform.rs and transforms/group_transform.rs; each class comes with its card; p2-ff-cpu 2.3e: FixedFunctionTransform (1187-1221), in crates/ocio/src/transforms/fixed_function_transform.rs"
 
 [[file]]
 path = "include/OpenColorIO/OpenColorTypes.h"
@@ -1260,14 +1260,15 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOp.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op.rs", "crates/ocio/src/transforms/fixed_function_transform.rs"]
+status = "partial"
+note = "p2-ff-cpu 2.3e: the op, CreateFixedFunctionOp (both), and in crates/ocio BuildFixedFunctionOp and CreateFixedFunctionTransform. Not yet: extractGpuShaderInfo (2.3f)"
 
 [[file]]
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOp.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp"
@@ -2161,13 +2162,14 @@ status = "todo"
 path = "src/OpenColorIO/transforms/FixedFunctionTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/fixed_function_transform.rs"]
-status = "todo"
+status = "done"
+note = "p2-ff-cpu 2.3e; createEditableCopy is create_editable_copy (Clone copies without validating)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/FixedFunctionTransform.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/fixed_function_transform.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/transforms/GradingHueCurveTransform.cpp"
@@ -4276,7 +4278,7 @@ path = "tests/cpu/OpOptimizers_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/op_optimizers_tests.rs"]
 status = "partial"
-note = "p1-optimizer: gamma_prefix; p1-tests-catchup: remove_leading_clamp_identity, remove_trailing_clamp_identity, combine_ops, non_optimizable, optimizable, lut1d_identity_replacement, range_composition, gamma_comp_identity, replace_ops. Not yet: the tests that read files through BuildOpsTest (optimization, optimization2, lut1d_identities, lut1d_identity_replacement_order, invlut_pair_identities, mntr_identities, gamma_comp, gamma_comp_test2, log_identities, range_lut, prefer_pair_inverse_over_combine, opt_prefix_test1: the CTF/CLF and spi1d readers, Phase 4); remove_inverse_ops (the FixedFunction op, Phase 2); dynamic_ops and dyn_properties_prefix (the ExposureContrast op, Phase 5); lut1d_half_domain_keep_prior_range and multi_op_prefix (the inverse Lut1D and the Lut1D float renderers that CompareRender runs, Phase 2)"
+note = "p1-optimizer: gamma_prefix; p1-tests-catchup: remove_leading_clamp_identity, remove_trailing_clamp_identity, combine_ops, non_optimizable, optimizable, lut1d_identity_replacement, range_composition, gamma_comp_identity, replace_ops; p2-ff-cpu 2.3e: remove_inverse_ops. Not yet: the tests that read files through BuildOpsTest (optimization, optimization2, lut1d_identities, lut1d_identity_replacement_order, invlut_pair_identities, mntr_identities, gamma_comp, gamma_comp_test2, log_identities, range_lut, prefer_pair_inverse_over_combine, opt_prefix_test1: the CTF/CLF and spi1d readers, Phase 4); dynamic_ops and dyn_properties_prefix (the ExposureContrast op, Phase 5); lut1d_half_domain_keep_prior_range and multi_op_prefix (the inverse Lut1D and the Lut1D float renderers that CompareRender runs, Phase 2)"
 
 [[file]]
 path = "tests/cpu/Op_tests.cpp"
@@ -4632,8 +4634,9 @@ note = "p2-ff-cpu 2.3a2: all 7"
 [[file]]
 path = "tests/cpu/ops/fixedfunction/FixedFunctionOp_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op_tests.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op_tests.rs", "crates/ocio/src/transforms/fixed_function_transform_tests.rs"]
+status = "partial"
+note = "p2-ff-cpu 2.3e: basic, glow03_cpu_engine, darktodim10_cpu_engine, aces_red_mod_inv, aces_glow_inv, aces_darktodim10_inv, aces_gamutmap13_inv, rec2100_surround_inv, and create_transform (in fixed_function_transform_tests.rs). The FixedFunctionOps tests come with their renderers (2.3c, 2.3d)"
 
 [[file]]
 path = "tests/cpu/ops/gamma/GammaOpCPU_tests.cpp"
@@ -4949,7 +4952,8 @@ status = "todo"
 path = "tests/cpu/transforms/FixedFunctionTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/fixed_function_transform_tests.rs"]
-status = "todo"
+status = "done"
+note = "p2-ff-cpu 2.3e: basic, createEditableCopy"
 
 [[file]]
 path = "tests/cpu/transforms/GradingHueCurveTransform_tests.cpp"

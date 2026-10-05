@@ -21,10 +21,10 @@ use std::sync::Arc;
 
 use ocio::{
     Allocation, AllocationTransform, BitDepth, CdlTransform, Config, Exception, ExponentTransform,
-    ExponentWithLinearTransform, GroupTransform, Interpolation, LogAffineTransform,
-    LogCameraTransform, LogTransform, Lut1DHueAdjust, Lut1DTransform, MatrixTransform,
-    NegativeStyle, OptimizationFlags, Processor, RangeStyle, RangeTransform, Transform,
-    TransformDirection,
+    ExponentWithLinearTransform, FixedFunctionStyle, FixedFunctionTransform, GroupTransform,
+    Interpolation, LogAffineTransform, LogCameraTransform, LogTransform, Lut1DHueAdjust,
+    Lut1DTransform, MatrixTransform, NegativeStyle, OptimizationFlags, Processor, RangeStyle,
+    RangeTransform, Transform, TransformDirection,
 };
 use ocio_ops::open_color_types::CdlStyle;
 use ocio_testkit::battery::Direction;
@@ -91,6 +91,37 @@ fn negative_style(v: &Value) -> NegativeStyle {
         "NEGATIVE_PASS_THRU" => NegativeStyle::PassThru,
         "NEGATIVE_LINEAR" => NegativeStyle::Linear,
         other => panic!("negative style {other}"),
+    }
+}
+
+/// A `FixedFunctionStyle` by its PyOpenColorIO name.
+fn fixed_function_style(v: &Value) -> FixedFunctionStyle {
+    use FixedFunctionStyle::*;
+    match enum_name(v) {
+        "FIXED_FUNCTION_ACES_RED_MOD_03" => AcesRedMod03,
+        "FIXED_FUNCTION_ACES_RED_MOD_10" => AcesRedMod10,
+        "FIXED_FUNCTION_ACES_GLOW_03" => AcesGlow03,
+        "FIXED_FUNCTION_ACES_GLOW_10" => AcesGlow10,
+        "FIXED_FUNCTION_ACES_DARK_TO_DIM_10" => AcesDarkToDim10,
+        "FIXED_FUNCTION_REC2100_SURROUND" => Rec2100Surround,
+        "FIXED_FUNCTION_RGB_TO_HSV" => RgbToHsv,
+        "FIXED_FUNCTION_XYZ_TO_xyY" => XyzToXyy,
+        "FIXED_FUNCTION_XYZ_TO_uvY" => XyzToUvy,
+        "FIXED_FUNCTION_XYZ_TO_LUV" => XyzToLuv,
+        "FIXED_FUNCTION_ACES_GAMUTMAP_02" => AcesGamutMap02,
+        "FIXED_FUNCTION_ACES_GAMUTMAP_07" => AcesGamutMap07,
+        "FIXED_FUNCTION_ACES_GAMUT_COMP_13" => AcesGamutComp13,
+        "FIXED_FUNCTION_LIN_TO_PQ" => LinToPq,
+        "FIXED_FUNCTION_LIN_TO_GAMMA_LOG" => LinToGammaLog,
+        "FIXED_FUNCTION_LIN_TO_DOUBLE_LOG" => LinToDoubleLog,
+        "FIXED_FUNCTION_ACES_OUTPUT_TRANSFORM_20" => AcesOutputTransform20,
+        "FIXED_FUNCTION_ACES_RGB_TO_JMH_20" => AcesRgbToJmh20,
+        "FIXED_FUNCTION_ACES_TONESCALE_COMPRESS_20" => AcesTonescaleCompress20,
+        "FIXED_FUNCTION_ACES_GAMUT_COMPRESS_20" => AcesGamutCompress20,
+        "FIXED_FUNCTION_RGB_TO_HSY_LIN" => RgbToHsyLin,
+        "FIXED_FUNCTION_RGB_TO_HSY_LOG" => RgbToHsyLog,
+        "FIXED_FUNCTION_RGB_TO_HSY_VID" => RgbToHsyVid,
+        other => panic!("fixed function style {other}"),
     }
 }
 
@@ -389,6 +420,36 @@ pub(crate) fn port_transform(spec: &Value) -> Result<Transform, Exception> {
             }
             t.into()
         }
+        "FixedFunctionTransform" => {
+            check_args(&["style"]);
+            // The binding's constructor: `Create(style)` (validating), then `setDirection` to
+            // the default forward direction and `validate`
+            // (src/bindings/python/transforms/PyFixedFunctionTransform.cpp:26-42 @ v2.5.2).
+            let style = args
+                .get("style")
+                .expect("FixedFunctionTransform takes a style");
+            let mut t = FixedFunctionTransform::new(fixed_function_style(style), &[])?;
+            t.set_direction(TransformDirection::Forward);
+            t.validate()?;
+            for call in calls {
+                let (name, a) = args_of(call);
+                match name {
+                    "setDirection" => t.set_direction(direction(one(name, a))),
+                    "setStyle" => t.set_style(fixed_function_style(one(name, a)))?,
+                    "setParams" => {
+                        let params: Vec<f64> = one(name, a)
+                            .as_array()
+                            .expect("a list")
+                            .iter()
+                            .map(number)
+                            .collect();
+                        t.set_params(&params);
+                    }
+                    _ => unknown(name),
+                }
+            }
+            t.into()
+        }
         other => panic!("port_transform: no class {other}"),
     };
     if class != "GroupTransform" {
@@ -482,6 +543,12 @@ impl Calls {
     /// A constructor argument of numbers, one per channel R, G, B.
     pub(crate) fn arg_rgb(mut self, key: &'static str, values: [f64; 3]) -> Calls {
         self.args.push((key, rgb(values)));
+        self
+    }
+
+    /// A constructor argument that isn't a number: an enum's name, an index, a bool.
+    pub(crate) fn arg_fixed(mut self, key: &'static str, value: Value) -> Calls {
+        self.args.push((key, Arg::Fixed(value)));
         self
     }
 

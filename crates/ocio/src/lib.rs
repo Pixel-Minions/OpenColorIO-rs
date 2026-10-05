@@ -22,8 +22,8 @@ pub use context::Context;
 pub use ocio_ops::exception::{Exception, ExceptionKind, Result};
 pub use ocio_ops::format_metadata::FormatMetadataImpl as FormatMetadata;
 pub use ocio_ops::open_color_types::{
-    Allocation, BitDepth, CdlStyle, Lut1DHueAdjust, NegativeStyle, OptimizationFlags,
-    TransformDirection,
+    Allocation, BitDepth, CdlStyle, FixedFunctionStyle, Lut1DHueAdjust, NegativeStyle,
+    OptimizationFlags, TransformDirection,
 };
 pub use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 pub use processor::{Processor, ProcessorCacheFlags, ProcessorMetadata};
@@ -32,6 +32,7 @@ pub use transforms::allocation_transform::AllocationTransform;
 pub use transforms::cdl_transform::CdlTransform;
 pub use transforms::exponent_transform::ExponentTransform;
 pub use transforms::exponent_with_linear_transform::ExponentWithLinearTransform;
+pub use transforms::fixed_function_transform::FixedFunctionTransform;
 pub use transforms::group_transform::GroupTransform;
 pub use transforms::log_affine_transform::LogAffineTransform;
 pub use transforms::log_camera_transform::LogCameraTransform;

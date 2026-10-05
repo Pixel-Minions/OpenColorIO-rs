@@ -31,6 +31,9 @@ use crate::transforms::exponent_transform::{
 use crate::transforms::exponent_with_linear_transform::{
     ExponentWithLinearTransform, build_exponent_with_linear_op, create_gamma_transform,
 };
+use crate::transforms::fixed_function_transform::{
+    FixedFunctionTransform, build_fixed_function_op, create_fixed_function_transform,
+};
 use crate::transforms::group_transform::{GroupTransform, build_group_ops};
 use crate::transforms::log_affine_transform::LogAffineTransform;
 use crate::transforms::log_camera_transform::LogCameraTransform;
@@ -113,6 +116,8 @@ pub enum Transform {
     Exponent(ExponentTransform),
     /// `ExponentWithLinearTransform`.
     ExponentWithLinear(ExponentWithLinearTransform),
+    /// `FixedFunctionTransform`.
+    FixedFunction(FixedFunctionTransform),
     /// `GroupTransform`.
     Group(GroupTransform),
     /// `LogAffineTransform`.
@@ -150,6 +155,12 @@ impl From<ExponentTransform> for Transform {
 impl From<ExponentWithLinearTransform> for Transform {
     fn from(t: ExponentWithLinearTransform) -> Transform {
         Transform::ExponentWithLinear(t)
+    }
+}
+
+impl From<FixedFunctionTransform> for Transform {
+    fn from(t: FixedFunctionTransform) -> Transform {
+        Transform::FixedFunction(t)
     }
 }
 
@@ -207,6 +218,7 @@ impl Transform {
             Transform::Cdl(_) => TransformType::Cdl,
             Transform::Exponent(_) => TransformType::Exponent,
             Transform::ExponentWithLinear(_) => TransformType::ExponentWithLinear,
+            Transform::FixedFunction(_) => TransformType::FixedFunction,
             Transform::Group(_) => TransformType::Group,
             Transform::LogAffine(_) => TransformType::LogAffine,
             Transform::LogCamera(_) => TransformType::LogCamera,
@@ -226,6 +238,7 @@ impl Transform {
             Transform::Cdl(t) => t.direction(),
             Transform::Exponent(t) => t.direction(),
             Transform::ExponentWithLinear(t) => t.direction(),
+            Transform::FixedFunction(t) => t.direction(),
             Transform::Group(t) => t.direction(),
             Transform::LogAffine(t) => t.direction(),
             Transform::LogCamera(t) => t.direction(),
@@ -245,6 +258,7 @@ impl Transform {
             Transform::Cdl(t) => t.set_direction(dir),
             Transform::Exponent(t) => t.set_direction(dir),
             Transform::ExponentWithLinear(t) => t.set_direction(dir),
+            Transform::FixedFunction(t) => t.set_direction(dir),
             Transform::Group(t) => t.set_direction(dir),
             Transform::LogAffine(t) => t.set_direction(dir),
             Transform::LogCamera(t) => t.set_direction(dir),
@@ -265,6 +279,7 @@ impl Transform {
             Transform::Cdl(t) => t.validate(),
             Transform::Exponent(t) => t.validate(),
             Transform::ExponentWithLinear(t) => t.validate(),
+            Transform::FixedFunction(t) => t.validate(),
             Transform::Group(t) => t.validate(),
             Transform::LogAffine(t) => t.validate(),
             Transform::LogCamera(t) => t.validate(),
@@ -317,6 +332,7 @@ impl Transform {
             Transform::Cdl(t) => t.write_text(os),
             Transform::Exponent(t) => t.write_text(os),
             Transform::ExponentWithLinear(t) => t.write_text(os),
+            Transform::FixedFunction(t) => t.write_text(os),
             Transform::Group(t) => t.write_text(os),
             Transform::LogAffine(t) => t.write_text(os),
             Transform::LogCamera(t) => t.write_text(os),
@@ -353,6 +369,7 @@ pub(crate) fn build_ops(
         Transform::ExponentWithLinear(exponent_transform) => {
             build_exponent_with_linear_op(ops, exponent_transform, dir)
         }
+        Transform::FixedFunction(ff_transform) => build_fixed_function_op(ops, ff_transform, dir),
         Transform::Group(group_transform) => {
             build_group_ops(ops, config, context, group_transform, dir)
         }
@@ -389,6 +406,7 @@ pub(crate) fn create_transform(group: &mut GroupTransform, op: &Op) -> Result<()
         OpData::Log(_) => create_log_transform(group, op),
         OpData::Cdl(_) => create_cdl_transform(group, op),
         OpData::Lut1D(_) => create_lut1d_transform(group, op),
+        OpData::FixedFunction(_) => create_fixed_function_transform(group, op),
         // No op holds a reference (the file readers replace it with the file's ops), and the
         // no-op types returned above.
         OpData::Reference(_) | OpData::NoOp(_) => {

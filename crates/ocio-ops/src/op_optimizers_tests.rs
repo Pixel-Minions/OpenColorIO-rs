@@ -12,7 +12,6 @@
 //!   `optimization`, `optimization2`, `lut1d_identities`, `lut1d_identity_replacement_order`,
 //!   `invlut_pair_identities`, `mntr_identities`, `gamma_comp`, `gamma_comp_test2`,
 //!   `log_identities`, `range_lut`, `prefer_pair_inverse_over_combine`, `opt_prefix_test1`;
-//! - the FixedFunction op (Phase 2): `remove_inverse_ops`;
 //! - the ExposureContrast op (Phase 5): `dynamic_ops`, `dyn_properties_prefix`;
 //! - the inverse Lut1D and the Lut1D's float renderers (Phase 2, WP 2.1), which `CompareRender`
 //!   runs: `lut1d_half_domain_keep_prior_range`, `multi_op_prefix`.
@@ -25,6 +24,9 @@ use crate::open_color_types::{BitDepth, OptimizationFlags, TransformDirection};
 use crate::ops::cdl::cdl_op::create_cdl_op;
 use crate::ops::cdl::{CdlOpData, CdlOpStyle, ChannelParams};
 use crate::ops::exponent::exponent_op::create_exponent_op_from_values;
+use crate::ops::fixedfunction::FixedFunctionOpStyle;
+use crate::ops::fixedfunction::fixed_function_op::create_fixed_function_op_from_data;
+use crate::ops::fixedfunction::fixed_function_op_data::FixedFunctionOpData;
 use crate::ops::gamma::gamma_op::create_gamma_op;
 use crate::ops::gamma::gamma_op_data::{GammaOpData, GammaStyle};
 use crate::ops::lut1d::Lut1DOpData;
@@ -839,4 +841,73 @@ fn replace_ops() {
     assert_eq!(optimized_ops.len(), 1);
 
     assert_eq!(op_type(&optimized_ops[0]), OpDataType::Cdl);
+}
+
+/// Port of `OCIO_ADD_TEST(OpOptimizers, remove_inverse_ops)` @ v2.5.2.
+#[test]
+fn remove_inverse_ops_fixed_function() {
+    use crate::ops::log::log_op::create_log_op_from_parameters;
+    use TransformDirection::{Forward, Inverse};
+
+    let func = FixedFunctionOpData::new(FixedFunctionOpStyle::AcesRedMod03Fwd).unwrap();
+
+    let log_slope = [0.18, 0.18, 0.18];
+    let lin_slope = [2.0, 2.0, 2.0];
+    let lin_offset = [0.1, 0.1, 0.1];
+    let base = 10.0;
+    let log_offset = [1.0, 1.0, 1.0];
+    let log = |ops: &mut OpVec, dir| {
+        create_log_op_from_parameters(
+            ops,
+            base,
+            &log_slope,
+            &log_offset,
+            &lin_slope,
+            &lin_offset,
+            dir,
+        );
+    };
+    let ff = |ops: &mut OpVec, dir| {
+        create_fixed_function_op_from_data(ops, func.clone(), dir).unwrap();
+    };
+
+    let mut ops = OpVec::new();
+    ff(&mut ops, Forward);
+    log(&mut ops, Inverse);
+    log(&mut ops, Forward);
+    ff(&mut ops, Inverse);
+    assert_eq!(ops.len(), 4);
+
+    // Inverse + forward log are optimized as no-op then forward and inverse exponent are
+    // optimized as no-op within the same call.
+    super::remove_inverse_ops(&mut ops, OptimizationFlags::ALL).unwrap();
+    assert_eq!(ops.len(), 0);
+    ops.clear();
+
+    ff(&mut ops, Forward);
+    log(&mut ops, Forward);
+    log(&mut ops, Inverse);
+    ff(&mut ops, Inverse);
+    assert_eq!(ops.len(), 4);
+
+    // Forward + inverse log are optimized as a clamping range that stays between forward and
+    // inverse exponents.
+    super::remove_inverse_ops(&mut ops, OptimizationFlags::ALL).unwrap();
+    assert_eq!(ops.len(), 3);
+    assert_eq!(ops[0].get_info(), "<FixedFunctionOp>");
+    assert_eq!(ops[1].get_info(), "<RangeOp>");
+    assert_eq!(ops[2].get_info(), "<FixedFunctionOp>");
+    ops.clear();
+
+    ff(&mut ops, Forward);
+    ff(&mut ops, Inverse);
+    log(&mut ops, Inverse);
+    log(&mut ops, Forward);
+    ff(&mut ops, Forward);
+    assert_eq!(ops.len(), 5);
+
+    super::remove_inverse_ops(&mut ops, OptimizationFlags::ALL).unwrap();
+    assert_eq!(ops.len(), 1);
+
+    assert_eq!(ops[0].get_info(), "<FixedFunctionOp>");
 }

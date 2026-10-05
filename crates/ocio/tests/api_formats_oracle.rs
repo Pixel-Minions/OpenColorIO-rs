@@ -1084,3 +1084,11 @@ fn lut1d_transform_matches_the_wheel_at_every_format_and_level() {
         ..Class::new("Lut1DTransform", cases)
     });
 }
+
+#[test]
+fn fixed_function_transform_matches_the_wheel_at_every_format_and_level() {
+    check(&Class::new(
+        "FixedFunctionTransform",
+        api_cases::fixed_function(),
+    ));
+}
