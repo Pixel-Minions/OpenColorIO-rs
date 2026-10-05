@@ -3,7 +3,8 @@
 
 //! Ported `tests/cpu/ops/fixedfunction/FixedFunctionOpCPU_tests.cpp` @ v2.5.2: the ACES 1.x
 //! styles (chunk 2.3b), the Rec.2100 surround, HSV and CIE styles (2.3c1), the HSY styles
-//! (2.3c2). The other styles' tests come with their renderers.
+//! (2.3c2), the gamma-log and double-log styles (2.3d1). The other styles' tests come with
+//! their renderers.
 
 use super::*;
 use crate::ops::fixedfunction::fixed_function_op_data::Params;
@@ -693,9 +694,123 @@ fn xyz_to_luv() {
     apply_fixed_function(&mut img, &input_frame, &data(LuvToXyz), 1e-5, false);
 }
 
-/// U-31: the gamut compression's renderer reads seven parameters and the Rec.2100 surround's
-/// one, which upstream does without a check; the port refuses data with fewer (set after the
-/// validating constructor). The styles whose renderers come later are refused, in both
+/// The Rec.2100 HLG curve's parameters (FixedFunctionOpCPU_tests.cpp:1311-1325 @ v2.5.2).
+fn hlg_params() -> Params {
+    vec![
+        0.0,  // mirror point
+        0.25, // break point
+        // Gamma segment.
+        0.5, // gamma power
+        1.0, // post-power scale
+        0.0, // pre-power offset
+        // Log segment.
+        1.0f64.exp(),   // log base (e)
+        0.17883277,     // log-side slope
+        0.807825590164, // log-side offset
+        1.0,            // lin-side slope
+        -0.07116723,    // lin-side offset
+    ]
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, LIN_TO_GAMMA_LOG)` @ v2.5.2.
+#[test]
+fn lin_to_gamma_log() {
+    // Parameters for the Rec.2100 HLG curve.
+    let params = hlg_params();
+
+    #[rustfmt::skip]
+    let hlg_frame: [f32; 40] = [
+      -0.60, -0.55, -0.50, -1.0, // negative log segment
+      -0.10, -0.05,  0.00,  1.0, // negative gamma Segment
+       0.05,  0.10,  0.15,  1.0,
+       0.20,  0.25,  0.30,  1.0,
+       0.35,  0.40,  0.45,  0.5,
+       0.50,  0.55,  0.60,  0.0,
+       0.65,  0.70,  0.75,  1.0,
+       0.80,  0.85,  0.90,  1.0,
+       0.95,  1.00,  1.05,  1.0,
+       1.10,  1.15,  1.20,  1.0, // over range
+    ];
+
+    #[rustfmt::skip]
+    let linear_frame: [f32; 40] = [
+       -0.383988768, -0.307689428, -0.250000000, -1.0,
+       -0.01000000,  -0.002500000,  0.00000000,   1.0,
+        0.002500000,  0.010000000,  0.02250000,   1.0,
+        0.040000000,  0.062500000,  0.09000000,   1.0,
+        0.122500000,  0.160000000,  0.202499986,  0.5,
+        0.250000000,  0.307689428,  0.383988768,  0.0,
+        0.484901309,  0.618367195,  0.794887662,  1.0,
+        1.02835166,   1.33712840,   1.74551260,   1.0,
+        2.28563738,   3.00000000,   3.94480681,   1.0,
+        5.19440079,   6.84709501,   9.03293514,   1.0,
+    ];
+
+    let data_fwd = FixedFunctionOpData::with_params(GammaLogToLin, params.clone()).unwrap();
+    let mut img = hlg_frame;
+    apply_fixed_function(&mut img, &linear_frame, &data_fwd, 5e-5, false);
+
+    let data_f_inv = FixedFunctionOpData::with_params(LinToGammaLog, params).unwrap();
+    let mut img = linear_frame;
+    apply_fixed_function(&mut img, &hlg_frame, &data_f_inv, 1e-5, false);
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, LIN_TO_DOUBLE_LOG)` @ v2.5.2.
+#[test]
+fn lin_to_double_log() {
+    // Note: Parameters are designed to result in a monotonically increasing but discontinuous
+    // function. Also the break points are chosen to be exact values in IEEE-754 to verify that
+    // they belong to the log segments.
+    #[rustfmt::skip]
+    let params: Params = vec![
+        10.0,                  // base for the log
+        0.25,                  // break point between log1 and linear segments
+        0.5,                   // break point between linear and log2 segments
+       -1.0, 0.0, -1.0, 1.25,  // log curve 1: LogSideSlope, LogSideOffset, LinSideSlope, LinSideOffset
+        1.0, 1.0, 1.0, 0.5,    // log curve 2: LogSideSlope, LogSideOffset, LinSideSlope, LinSideOffset
+        1.0, 0.0,              // linear segment slope and offset
+    ];
+
+    #[rustfmt::skip]
+    let linear_frame: [f32; 40] = [
+       -0.25, -0.20, -0.15, -1.00, // negative input
+       -0.10, -0.05,  0.00,  0.00,
+        0.05,  0.10,  0.15,  1.00,
+        0.20,  0.25,  0.30,  1.00, // 0.25 breakpoint belongs to log1
+        0.35,  0.40,  0.45,  1.00, // linear segment (y=x)
+        0.50,  0.55,  0.60,  1.00, // 0.50 breakpoint belongs to log2
+        0.65,  0.70,  0.75,  1.00,
+        0.80,  0.85,  0.90,  1.00,
+        0.95,  1.00,  1.05,  1.00,
+        1.10,  1.15,  1.20,  1.25, // over-range
+    ];
+
+    #[rustfmt::skip]
+    let log_frame: [f32; 40] = [
+        -0.17609126, -0.161368  , -0.14612804, -1.00, // negative input
+        -0.13033377, -0.11394335, -0.09691001,  0.00,
+        -0.07918125, -0.06069784, -0.04139269,  1.00,
+        -0.0211893 ,  0.0       ,  0.3       ,  1.00, // 0.25 breakpoint belongs to log1
+         0.35      ,  0.4       ,  0.45      ,  1.00, // linear segment (y=x)
+         1.0       ,  1.0211893 ,  1.04139269,  1.00, // 0.50 breakpoint belongs to log2
+         1.06069784,  1.07918125,  1.09691001,  1.00,
+         1.11394335,  1.13033377,  1.14612804,  1.00,
+         1.161368  ,  1.17609126,  1.1903317 ,  1.00,
+         1.20411998,  1.21748394,  1.23044892,  1.25, // over-range
+    ];
+
+    let data_fwd = FixedFunctionOpData::with_params(LinToDoubleLog, params.clone()).unwrap();
+    let mut img = linear_frame;
+    apply_fixed_function(&mut img, &log_frame, &data_fwd, 1e-6, false);
+
+    let data_f_inv = FixedFunctionOpData::with_params(DoubleLogToLin, params).unwrap();
+    let mut img = log_frame;
+    apply_fixed_function(&mut img, &linear_frame, &data_f_inv, 1e-6, false);
+}
+
+/// U-31: the gamut compression's renderer reads seven parameters, the Rec.2100 surround's
+/// one, the gamma-log's ten and the double-log's 13, which upstream does without a check; the
+/// port refuses data with fewer (set after the validating constructor). The styles whose renderers come later are refused, in both
 /// fast-math settings.
 #[test]
 fn short_params_and_unported_styles_are_refused() {
@@ -711,6 +826,22 @@ fn short_params_and_unported_styles_are_refused() {
     for style in [Rec2100SurroundFwd, Rec2100SurroundInv] {
         let mut data = FixedFunctionOpData::with_params(style, vec![0.78]).unwrap();
         data.set_params(Vec::new());
+        check_throw_what(
+            get_fixed_function_cpu_renderer(&data, false).map(|_| ()),
+            SHORT_PARAMS,
+        );
+    }
+    let double_log: Params = vec![
+        10.0, 0.25, 0.5, -1.0, 0.0, -1.0, 1.25, 1.0, 1.0, 1.0, 0.5, 1.0, 0.0,
+    ];
+    for (style, params) in [
+        (LinToGammaLog, hlg_params()),
+        (GammaLogToLin, hlg_params()),
+        (LinToDoubleLog, double_log.clone()),
+        (DoubleLogToLin, double_log),
+    ] {
+        let mut data = FixedFunctionOpData::with_params(style, params.clone()).unwrap();
+        data.set_params(params[..params.len() - 1].to_vec());
         check_throw_what(
             get_fixed_function_cpu_renderer(&data, false).map(|_| ()),
             SHORT_PARAMS,
