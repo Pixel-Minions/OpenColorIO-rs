@@ -51,6 +51,7 @@ def processor_ops(args, blobs):
                 BIT_DEPTH_* names (default BIT_DEPTH_F32)
       optimization
                 flags (see spec.flags; default OPTIMIZATION_DEFAULT)
+    request blobs: the transform spec's blobs (see spec.py)
     result:
       processor, optimized
                 each {"cache_id": getCacheID(), "isNoOp", "hasChannelCrosstalk", "isDynamic",
@@ -86,7 +87,7 @@ def processor_ops(args, blobs):
     stage, result, out = ["config"], {}, []
     with captured_log() as log:
         try:
-            _, proc = _processor(args, stage)
+            _, proc = _processor(args, stage, blobs)
             stage[0] = "group"
             result["processor"] = _processor_dump(proc, out)
             stage[0] = "optimize"

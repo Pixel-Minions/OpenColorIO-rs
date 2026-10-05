@@ -11,7 +11,8 @@
 
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle::BatchCall;
-use ocio_testkit::processor_ops::ProcessorOpsRequest;
+use ocio_testkit::oracle::f32_to_bytes;
+use ocio_testkit::processor_ops::{ProcessorOpsReply, ProcessorOpsRequest};
 use ocio_testkit::transform_text::{TransformTextRequest, f64_spec};
 use serde_json::{Value, json};
 
@@ -172,5 +173,264 @@ fn bad_factories_are_refused() {
     for ((spec, fragment), result) in cases.iter().zip(Oracle::get().batch(&calls, false)) {
         let error = result.expect_err(&format!("{spec}: refused"));
         assert!(error.contains(fragment), "{spec}: {error}");
+    }
+}
+
+/// The values of a 5-entry 1D LUT, red, green and blue per entry, with -0.0, a subnormal, a
+/// large value and an infinity among them.
+fn lut1d_values() -> Vec<f32> {
+    let mut values: Vec<f32> = (0..3u8)
+        .flat_map(|i| {
+            let x = f32::from(i) * 0.25;
+            [x * x, -x, 1.0 - x]
+        })
+        .collect();
+    values.extend([-0.0, f32::from_bits(1), 3.0e38, f32::INFINITY, 0.1, -7.5]);
+    values
+}
+
+/// The values of a 2x2x2 3D LUT, entry `(r, g, b)` at `3 * ((r * 2 + g) * 2 + b)`, as
+/// `Lut3DTransform.setData` reads them (PyLut3DTransform.cpp:76-104 @ v2.5.2).
+fn lut3d_values() -> Vec<f32> {
+    (0..24u8).map(|i| f32::from(i) / 23.0 - 0.125).collect()
+}
+
+/// A Lut1DTransform made entry by entry with `setValue`, the values by their bits.
+fn lut1d_by_values(values: &[f32]) -> Value {
+    let mut calls = vec![json!(["setLength", values.len() / 3])];
+    for (i, rgb) in values.chunks(3).enumerate() {
+        calls.push(json!([
+            "setValue",
+            i,
+            f64_spec(f64::from(rgb[0])),
+            f64_spec(f64::from(rgb[1])),
+            f64_spec(f64::from(rgb[2]))
+        ]));
+    }
+    json!({"class": "Lut1DTransform", "calls": calls})
+}
+
+/// A Lut3DTransform of grid size 2 made entry by entry with `setValue`.
+fn lut3d_by_values(values: &[f32]) -> Value {
+    let mut calls = vec![json!(["setGridSize", 2])];
+    for (i, rgb) in values.chunks(3).enumerate() {
+        let (r, g, b) = (i / 4, i / 2 % 2, i % 2);
+        calls.push(json!([
+            "setValue",
+            r,
+            g,
+            b,
+            f64_spec(f64::from(rgb[0])),
+            f64_spec(f64::from(rgb[1])),
+            f64_spec(f64::from(rgb[2]))
+        ]));
+    }
+    json!({"class": "Lut3DTransform", "calls": calls})
+}
+
+/// A LUT transform of `class` whose values come from the spec's blob `blob` with `setData`,
+/// in `shape` if any.
+fn lut_by_blob(class: &str, blob: usize, shape: Option<&[usize]>) -> Value {
+    let mut data = json!({"blob": blob, "dtype": "float32"});
+    if let Some(shape) = shape {
+        data["shape"] = json!(shape);
+    }
+    json!({"class": class, "calls": [["setData", data]]})
+}
+
+/// A LUT's values passed as a blob reach `setData` whole: the processor's
+/// `createGroupTransform()` gives them back, bit for bit, in the LUT's `getData()`, for a 1D
+/// LUT and for a 3D LUT given flat or in its `[2, 2, 2, 3]` shape.
+#[test]
+fn a_lut_takes_its_values_from_a_blob() {
+    let cases = [
+        (lut_by_blob("Lut1DTransform", 0, None), lut1d_values()),
+        (lut_by_blob("Lut3DTransform", 0, None), lut3d_values()),
+        (
+            lut_by_blob("Lut3DTransform", 0, Some(&[2, 2, 2, 3])),
+            lut3d_values(),
+        ),
+    ];
+    for (spec, values) in cases {
+        let bytes = f32_to_bytes(&values);
+        let response = Oracle::get().call(
+            "processor_ops",
+            json!({"transform": spec, "optimization": "OPTIMIZATION_NONE"}),
+            &[&bytes],
+        );
+        let reply = ProcessorOpsReply::from_response(response);
+        assert_eq!(
+            reply.processor().classes(),
+            [spec["class"].as_str().unwrap()],
+            "{spec}"
+        );
+        let group = &reply.processor().group;
+        let data = group.children[0].getter("getData").f32s();
+        let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+        assert_eq!(bits(&data), bits(&values), "{spec}");
+    }
+}
+
+/// Each command's arguments for a transform spec.
+type Args = fn(&Value) -> Value;
+
+/// Every command that takes a transform spec passes it the request blobs that follow its own:
+/// a LUT made from a blob gives each command the same response as the same LUT made entry by
+/// entry, where the command's own blobs come first. A command that handed the spec the wrong
+/// blobs would build another LUT (from its pixels) or refuse the request.
+#[test]
+fn every_command_passes_the_spec_its_blobs() {
+    let lut1d = f32_to_bytes(&lut1d_values()[..9]);
+    let lut3d = f32_to_bytes(&lut3d_values());
+    let pixels = f32_to_bytes(&[0.0, 0.3, 0.6, 1.0, 0.9, 0.5, 0.25, 0.75]);
+    let rgb = f32_to_bytes(&[0.1, 0.2, 0.3, 0.7, 0.8, 0.9]);
+    let luts = [
+        (
+            lut1d_by_values(&lut1d_values()[..9]),
+            lut_by_blob("Lut1DTransform", 0, None),
+            &lut1d,
+        ),
+        (
+            lut3d_by_values(&lut3d_values()),
+            lut_by_blob("Lut3DTransform", 0, Some(&[2, 2, 2, 3])),
+            &lut3d,
+        ),
+    ];
+    let requests: [(&str, Args, Vec<&[u8]>); 8] = [
+        ("cpu_apply", |t| json!({"transform": t}), vec![&pixels]),
+        (
+            "image_apply",
+            |t| {
+                json!({
+                    "transform": t,
+                    "buffers": [{"blob": 0}, {"size": 32}],
+                    "images": [
+                        {"kind": "packed", "data": {"buffer": 0}, "width": 2, "height": 1,
+                         "num_channels": 4},
+                        {"kind": "packed", "data": {"buffer": 1}, "width": 2, "height": 1,
+                         "num_channels": 4},
+                    ],
+                    "apply": [0, 1],
+                })
+            },
+            vec![&pixels],
+        ),
+        (
+            "image_apply_rgb",
+            |t| json!({"transform": t, "call": "applyRGB"}),
+            vec![&rgb],
+        ),
+        ("processor_debug_log", |t| json!({"transform": t}), vec![]),
+        ("gpu_shader", |t| json!({"transform": t}), vec![]),
+        ("processor_ops", |t| json!({"transform": t}), vec![]),
+        (
+            "processor_cache",
+            |t| {
+                json!({"cases": [{"env": {}, "steps": [
+                    ["config"],
+                    ["processor", "p", t, "TRANSFORM_DIR_FORWARD"],
+                    ["cpu", "c", "p", "BIT_DEPTH_F32", "BIT_DEPTH_F32", null],
+                ]}]})
+            },
+            vec![],
+        ),
+        ("transform_text", |t| json!({"transforms": [t]}), vec![]),
+    ];
+    let mut calls = Vec::new();
+    for (by_values, by_blob, lut) in &luts {
+        for (cmd, args, own) in &requests {
+            calls.push(BatchCall {
+                cmd,
+                args: args(by_values),
+                blobs: own.clone(),
+            });
+            let mut blobs = own.clone();
+            blobs.push(lut.as_slice());
+            calls.push(BatchCall {
+                cmd,
+                args: args(by_blob),
+                blobs,
+            });
+        }
+    }
+    let results = Oracle::get().batch(&calls, false);
+    for (pair, call) in results.chunks(2).zip(calls.chunks(2)) {
+        let what = format!("{} of {}", call[1].cmd, call[1].args);
+        let (by_values, by_blob) = (
+            pair[0].as_ref().unwrap_or_else(|e| panic!("{what}: {e}")),
+            pair[1].as_ref().unwrap_or_else(|e| panic!("{what}: {e}")),
+        );
+        let text = by_values.result.to_string();
+        assert!(
+            !text.contains("exception") && !text.contains("\"type\""),
+            "{what}: the wheel refused the LUT: {text}"
+        );
+        assert_eq!(by_blob.result, by_values.result, "{what}");
+        assert_eq!(by_blob.blobs, by_values.blobs, "{what}");
+    }
+}
+
+/// Blob value specs that don't describe an array of the spec's blobs are refused: an index
+/// out of range, a bool or a string for an index, no dtype, an unknown key, a dtype that isn't
+/// a NumPy type of fixed size, a blob that isn't a whole number of entries, and a shape the
+/// blob doesn't fill or that isn't a list of non-negative integers.
+#[test]
+fn bad_blob_specs_are_refused() {
+    let lut = f32_to_bytes(&lut3d_values());
+    let cases = [
+        (
+            json!({"blob": 1, "dtype": "float32"}),
+            "blob 1 isn't one of the spec's 1 blobs",
+        ),
+        (
+            json!({"blob": true, "dtype": "float32"}),
+            "blob True isn't one",
+        ),
+        (
+            json!({"blob": "0", "dtype": "float32"}),
+            "blob '0' isn't one",
+        ),
+        (json!({"blob": 0}), "takes blob, dtype and optionally shape"),
+        (
+            json!({"blob": 0, "dtype": "float32", "size": 3}),
+            "takes blob, dtype and optionally shape",
+        ),
+        (
+            json!({"blob": 0, "dtype": "object"}),
+            "of fixed size, not 'object'",
+        ),
+        (json!({"blob": 0, "dtype": 4}), "of fixed size, not 4"),
+        (
+            json!({"blob": 0, "dtype": "V7"}),
+            "blob 0 has 96 bytes, not a whole number of",
+        ),
+        (
+            json!({"blob": 0, "dtype": "float64", "shape": [24]}),
+            "blob 0 has 12 float64 entries, which don't fill the shape [24]",
+        ),
+        (
+            json!({"blob": 0, "dtype": "float32", "shape": [2, 2, 2, 2]}),
+            "don't fill the shape [2, 2, 2, 2]",
+        ),
+        (
+            json!({"blob": 0, "dtype": "float32", "shape": [24, -1]}),
+            "list of non-negative integers, not [24, -1]",
+        ),
+        (
+            json!({"blob": 0, "dtype": "float32", "shape": 24}),
+            "list of non-negative integers, not 24",
+        ),
+    ];
+    let calls: Vec<BatchCall<'_>> = cases
+        .iter()
+        .map(|(data, _)| BatchCall {
+            cmd: "transform_text",
+            args: json!({"transforms": [{"class": "Lut3DTransform", "calls": [["setData", data]]}]}),
+            blobs: vec![&lut],
+        })
+        .collect();
+    for ((data, fragment), result) in cases.iter().zip(Oracle::get().batch(&calls, false)) {
+        let error = result.expect_err(&format!("{data}: refused"));
+        assert!(error.contains(fragment), "{data}: {error}");
     }
 }

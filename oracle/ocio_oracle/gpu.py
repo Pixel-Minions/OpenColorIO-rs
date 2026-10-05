@@ -319,6 +319,7 @@ def gpu_shader(args, blobs):
                                     (setDescriptorSetIndex)
                   texture_max_width setTextureMaxWidth
                   allow_texture_1d  setAllowTexture1D
+    request blobs: the transform spec's blobs (see spec.py)
 
     Before extracting, the command refuses the request (it raises, so the call fails) where
     the wheel would do something undefined: an MSL resource prefix whose line feeds make the
@@ -365,7 +366,7 @@ def gpu_shader(args, blobs):
     stage, result, out = ["config"], {}, []
     with captured_log() as log:
         try:
-            _, proc = _processor(args, stage)
+            _, proc = _processor(args, stage, blobs)
             stage[0] = "gpu_processor"
             if "optimization" in args:
                 gpu = proc.getOptimizedGPUProcessor(spec.flags(args["optimization"]))

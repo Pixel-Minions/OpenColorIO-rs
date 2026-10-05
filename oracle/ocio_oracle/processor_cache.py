@@ -47,6 +47,7 @@ sys.path.insert(0, case["oracle_path"])
 import PyOpenColorIO as OCIO
 from ocio_oracle import spec
 
+blobs = [bytes.fromhex(blob) for blob in case["blobs"]]
 config = None
 objects = {}
 results = []
@@ -67,7 +68,7 @@ for step in case["steps"]:
             config.clearProcessorCache()
         elif kind == "processor":
             name, transform, direction = args
-            objects[name] = config.getProcessor(spec.transform(transform),
+            objects[name] = config.getProcessor(spec.transform(transform, blobs),
                                                 getattr(OCIO, direction))
         elif kind == "gpu":
             name, of, flags = args
@@ -143,6 +144,8 @@ def processor_cache(args, blobs):
       ["gpu", name, of, flags or null]    objects[of].getOptimizedGPUProcessor(flags), or
                                           getDefaultGPUProcessor() for null
       (bit depths are BIT_DEPTH_* names, flags as spec.flags takes them)
+    request blobs: the transform specs' blobs, which every case and step share (see spec.py);
+      the new process gets them in its input
     result: per case {"returncode": int, "report": {"steps": per step null or the exception
       {"type", "message"}, "same": for each named object, the first name (in the order the
       steps made them) of the same object, "cache_ids": each named object's getCacheID()}, or
@@ -160,7 +163,8 @@ def processor_cache(args, blobs):
         _check_case(c, case)
         env = {k: v for k, v in os.environ.items() if k != "OCIO" and not k.startswith("OCIO_")}
         env.update(case["env"])
-        child_input = {"oracle_path": oracle_path, "steps": case["steps"]}
+        child_input = {"oracle_path": oracle_path, "steps": case["steps"],
+                       "blobs": [blob.hex() for blob in blobs]}
         child = subprocess.run([sys.executable, "-I", "-c", _CHILD],
                                input=json.dumps(child_input).encode("utf-8"), env=env,
                                capture_output=True, timeout=120)
