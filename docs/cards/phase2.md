@@ -364,6 +364,8 @@ functions 53, GradingRGBCurve 18, the optimizer 3. Left for later:
 
 ## Owner items
 
+**Decided by the owner on 2026-10-05:** P2-1, the whole GradingRGBCurve family in Phase 2 (WP 2.6); P2-2, P2-3, P2-4 and P2-6 as proposed. Still open: P2-5 (W0001's bound, measured in chunk 2.3d), P2-7, and P2-8 (each `oracle` chunk is reviewed when it is written).
+
 | # | Item | Label | Proposal |
 |---|---|---|---|
 | P2-1 | Pull the GradingRGBCurve op family into Phase 2 (M1's ACES 1.x built-ins need it) | decision | The whole family, dynamic property and GPU uniforms included, since families land whole. Option B: only the non-dynamic path now, the rest in Phase 5. Either way the hue-curve parts stay in Phase 5 |

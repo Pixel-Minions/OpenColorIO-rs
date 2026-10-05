@@ -355,6 +355,8 @@ survives. Each call captures the log.
 
 ## Owner decisions needed
 
+**Decided by the owner on 2026-10-05, all as recommended:** D1 (port yaml-cpp 0.8.0's parser), D2 (our own ECMAScript regex engine), D3, D4, D5, D6, D7, D9 and D10. Still open: D8 (the corpus, after a licence check), and each `oracle` chunk, reviewed when it is written.
+
 | # | Decision | Recommendation |
 |---|---|---|
 | D1 | **The YAML parser** (`dependency`). PLAN.md §9 picks `saphyr-parser` | **Port yaml-cpp 0.8.0's parser**, next to the emitter port. OCIO's messages embed yaml-cpp's texts and marks ("yaml-cpp: error at line 3, column 5: ...", "At line N, ..."). Its accepted syntax, lenient decoding (the overlong NUL), tags and number conversions are part of what configs the wheel accepts. A crate would need a compatibility layer as large as the port, and would still differ at the edges. ~3,000 lines, plus yaml-cpp's own tests (rule 2 already allows them) |

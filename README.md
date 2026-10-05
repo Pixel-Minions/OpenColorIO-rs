@@ -10,8 +10,8 @@ from Rust and, later, from Python.
 
 > **Status: early development.** Phase 1 (the op engine and the analytic transforms) is
 > complete: milestone M0. Through OCIO's API, every analytic transform matches the official
-> library on the CPU and the GPU. LUT files, configs and Python come in later phases. See
-> [Progress](#progress).
+> library on the CPU and the GPU. Phases 2 (LUTs, fixed functions, ACES 2.0) and 3 (configs)
+> are under way, in parallel. Python comes later. See [Progress](#progress).
 
 ## How precise: byte for byte
 
@@ -83,10 +83,16 @@ one.
 
 ## Progress
 
-Status as of 2026-10-04: **Phase 1 (the op engine and the analytic transforms) is complete**:
+Status as of 2026-10-05: **Phase 1 (the op engine and the analytic transforms) is complete**:
 milestone M0, about 22% of the planned work. Through OCIO's own API, every analytic transform
-matches the official library on the CPU and the GPU. Phase 2 (LUTs and fixed functions) is
-next.
+matches the official library on the CPU and the GPU. Phases 2 and 3 now run in parallel, toward
+milestone M1:
+- **Phase 2:** LUTs (1D and 3D, with their inverses), fixed functions, ACES 2.0 and the
+  GradingRGBCurve op that the ACES 1.x built-ins use
+  ([`docs/cards/phase2.md`](docs/cards/phase2.md));
+- **Phase 3:** configs (a port of yaml-cpp's parser, the config model, context, file and viewing
+  rules, the YAML writer, `validate()`, the built-in transforms and configs)
+  ([`docs/cards/phase3.md`](docs/cards/phase3.md)).
 
 **Done:** everything below is bit-exact against the official library on Windows and Linux, in
 debug and release builds, and was reviewed independently before merging.
