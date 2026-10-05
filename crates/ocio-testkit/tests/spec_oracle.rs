@@ -274,30 +274,17 @@ fn a_lut_takes_its_values_from_a_blob() {
 /// Each command's arguments for a transform spec.
 type Args = fn(&Value) -> Value;
 
-/// Every command that takes a transform spec passes it the request blobs that follow its own:
-/// a LUT made from a blob gives each command the same response as the same LUT made entry by
-/// entry, where the command's own blobs come first. A command that handed the spec the wrong
-/// blobs would build another LUT (from its pixels) or refuse the request.
-#[test]
-fn every_command_passes_the_spec_its_blobs() {
-    let lut1d = f32_to_bytes(&lut1d_values()[..9]);
-    let lut3d = f32_to_bytes(&lut3d_values());
+/// Every command that takes a transform spec, with its arguments for one and its own blobs,
+/// which come before the spec's.
+fn commands() -> Vec<(&'static str, Args, Vec<Vec<u8>>)> {
     let pixels = f32_to_bytes(&[0.0, 0.3, 0.6, 1.0, 0.9, 0.5, 0.25, 0.75]);
     let rgb = f32_to_bytes(&[0.1, 0.2, 0.3, 0.7, 0.8, 0.9]);
-    let luts = [
+    vec![
         (
-            lut1d_by_values(&lut1d_values()[..9]),
-            lut_by_blob("Lut1DTransform", 0, None),
-            &lut1d,
+            "cpu_apply",
+            |t| json!({"transform": t}),
+            vec![pixels.clone()],
         ),
-        (
-            lut3d_by_values(&lut3d_values()),
-            lut_by_blob("Lut3DTransform", 0, Some(&[2, 2, 2, 3])),
-            &lut3d,
-        ),
-    ];
-    let requests: [(&str, Args, Vec<&[u8]>); 8] = [
-        ("cpu_apply", |t| json!({"transform": t}), vec![&pixels]),
         (
             "image_apply",
             |t| {
@@ -313,12 +300,12 @@ fn every_command_passes_the_spec_its_blobs() {
                     "apply": [0, 1],
                 })
             },
-            vec![&pixels],
+            vec![pixels],
         ),
         (
             "image_apply_rgb",
             |t| json!({"transform": t, "call": "applyRGB"}),
-            vec![&rgb],
+            vec![rgb],
         ),
         ("processor_debug_log", |t| json!({"transform": t}), vec![]),
         ("gpu_shader", |t| json!({"transform": t}), vec![]),
@@ -335,7 +322,34 @@ fn every_command_passes_the_spec_its_blobs() {
             vec![],
         ),
         ("transform_text", |t| json!({"transforms": [t]}), vec![]),
+    ]
+}
+
+/// Every command that takes a transform spec passes it the request blobs that follow its own:
+/// a LUT made from a blob gives each command the same response as the same LUT made entry by
+/// entry, where the command's own blobs come first. A command that handed the spec the wrong
+/// blobs would build another LUT (from its pixels) or refuse the request.
+#[test]
+fn every_command_passes_the_spec_its_blobs() {
+    let lut1d = f32_to_bytes(&lut1d_values()[..9]);
+    let lut3d = f32_to_bytes(&lut3d_values());
+    let luts = [
+        (
+            lut1d_by_values(&lut1d_values()[..9]),
+            lut_by_blob("Lut1DTransform", 0, None),
+            &lut1d,
+        ),
+        (
+            lut3d_by_values(&lut3d_values()),
+            lut_by_blob("Lut3DTransform", 0, Some(&[2, 2, 2, 3])),
+            &lut3d,
+        ),
     ];
+    let commands = commands();
+    let requests: Vec<(&str, Args, Vec<&[u8]>)> = commands
+        .iter()
+        .map(|(cmd, args, own)| (*cmd, *args, own.iter().map(Vec::as_slice).collect()))
+        .collect();
     let mut calls = Vec::new();
     for (by_values, by_blob, lut) in &luts {
         for (cmd, args, own) in &requests {
@@ -372,8 +386,9 @@ fn every_command_passes_the_spec_its_blobs() {
 
 /// Blob value specs that don't describe an array of the spec's blobs are refused: an index
 /// out of range, a bool or a string for an index, no dtype, an unknown key, a dtype that isn't
-/// a NumPy type of fixed size, a blob that isn't a whole number of entries, and a shape the
-/// blob doesn't fill or that isn't a list of non-negative integers.
+/// a NumPy type of fixed size or that is big-endian (the blobs are little-endian), a blob that
+/// isn't a whole number of entries, and a shape the blob doesn't fill or that isn't a list of
+/// non-negative integers.
 #[test]
 fn bad_blob_specs_are_refused() {
     let lut = f32_to_bytes(&lut3d_values());
@@ -400,6 +415,10 @@ fn bad_blob_specs_are_refused() {
             "of fixed size, not 'object'",
         ),
         (json!({"blob": 0, "dtype": 4}), "of fixed size, not 4"),
+        (
+            json!({"blob": 0, "dtype": ">f4"}),
+            "little-endian, as the blobs are, not '>f4'",
+        ),
         (
             json!({"blob": 0, "dtype": "V7"}),
             "blob 0 has 96 bytes, not a whole number of",
@@ -563,5 +582,143 @@ fn bad_object_specs_are_refused() {
     for ((object, fragment), result) in cases.iter().zip(Oracle::get().batch(&calls, false)) {
         let error = result.expect_err(&format!("{object}: refused"));
         assert!(error.contains(fragment), "{object}: {error}");
+    }
+}
+
+/// What a command reports for the transform spec it was given, the binding's exception and
+/// the stage, wherever the command puts them.
+fn reported_exception(cmd: &str, result: &Value) -> (Value, Value) {
+    match cmd {
+        "transform_text" => (
+            result["transforms"][0]["exception"].clone(),
+            result["transforms"][0]["stage"].clone(),
+        ),
+        "processor_cache" => {
+            assert_eq!(result[0]["returncode"], 0, "{result}");
+            (result[0]["report"]["steps"][1].clone(), json!("transform"))
+        }
+        _ => (result["exception"].clone(), result["stage"].clone()),
+    }
+}
+
+/// Every command reports what the binding raises building a transform spec the same way:
+/// a Lut3DTransform given a blob in a shape `setData` can't take, `[3, 8]`, raises the same
+/// RuntimeError, message for message, at the "transform" stage, in each command's report.
+/// (processor_cache reports it as the processor step's exception; its case stops there,
+/// since a later step on the processor it didn't make would stop the new process.)
+#[test]
+fn every_command_reports_the_bindings_exception_alike() {
+    let lut = f32_to_bytes(&lut3d_values());
+    let spec = lut_by_blob("Lut3DTransform", 0, Some(&[3, 8]));
+    let commands = commands();
+    let calls: Vec<BatchCall<'_>> = commands
+        .iter()
+        .map(|(cmd, args, own)| {
+            let mut blobs: Vec<&[u8]> = own.iter().map(Vec::as_slice).collect();
+            blobs.push(&lut);
+            let args = if *cmd == "processor_cache" {
+                json!({"cases": [{"env": {}, "steps": [
+                    ["config"],
+                    ["processor", "p", spec, "TRANSFORM_DIR_FORWARD"],
+                ]}]})
+            } else {
+                args(&spec)
+            };
+            BatchCall { cmd, args, blobs }
+        })
+        .collect();
+    let mut first: Option<Value> = None;
+    for (call, result) in calls.iter().zip(Oracle::get().batch(&calls, false)) {
+        let result = result.unwrap_or_else(|e| panic!("{}: {e}", call.cmd));
+        let (exception, stage) = reported_exception(call.cmd, &result.result);
+        assert_eq!(stage, "transform", "{}: {}", call.cmd, result.result);
+        assert_eq!(
+            exception["type"], "RuntimeError",
+            "{}: {exception}",
+            call.cmd
+        );
+        let message = exception["message"].as_str().unwrap_or_default();
+        assert!(
+            message.contains("failed to calculate grid size from shape (3, 8)"),
+            "{}: {exception}",
+            call.cmd
+        );
+        let first = first.get_or_insert_with(|| exception.clone());
+        assert_eq!(&exception, first, "{}", call.cmd);
+    }
+}
+
+/// A transform spec the oracle itself refuses (a blob value spec naming a blob the request
+/// doesn't have) refuses the request, whatever the command: it is never reported as if the
+/// wheel had raised.
+#[test]
+fn every_command_refuses_a_spec_the_oracle_refuses() {
+    let lut = f32_to_bytes(&lut3d_values());
+    let spec = lut_by_blob("Lut3DTransform", 1, None);
+    let commands = commands();
+    let calls: Vec<BatchCall<'_>> = commands
+        .iter()
+        .map(|(cmd, args, own)| {
+            let mut blobs: Vec<&[u8]> = own.iter().map(Vec::as_slice).collect();
+            blobs.push(&lut);
+            BatchCall {
+                cmd,
+                args: args(&spec),
+                blobs,
+            }
+        })
+        .collect();
+    for (call, result) in calls.iter().zip(Oracle::get().batch(&calls, false)) {
+        let error = result.expect_err(call.cmd);
+        assert!(
+            error.contains("blob 1 isn't one of the spec's 1 blobs"),
+            "{}: {error}",
+            call.cmd
+        );
+    }
+}
+
+/// processor_cache gives every case the request's blobs, each by its index: in each of two
+/// cases, a 3D LUT made from blob 0 or from blob 1 makes a processor of the same cache ID as
+/// the same LUT made entry by entry, and the two LUTs' IDs differ.
+#[test]
+fn processor_cache_gives_every_case_the_blobs() {
+    let values = lut3d_values();
+    let other: Vec<f32> = values.iter().rev().copied().collect();
+    let (lut, other_lut) = (f32_to_bytes(&values), f32_to_bytes(&other));
+    let shape: &[usize] = &[2, 2, 2, 3];
+    let processor =
+        |name: &str, spec: Value| json!(["processor", name, spec, "TRANSFORM_DIR_FORWARD"]);
+    let steps = |order: [usize; 4]| {
+        let all = [
+            processor("v", lut3d_by_values(&values)),
+            processor("b", lut_by_blob("Lut3DTransform", 0, Some(shape))),
+            processor("w", lut3d_by_values(&other)),
+            processor("o", lut_by_blob("Lut3DTransform", 1, Some(shape))),
+        ];
+        let mut steps = vec![json!(["config"])];
+        steps.extend(order.iter().map(|&i| all[i].clone()));
+        json!({"env": {}, "steps": steps})
+    };
+    let reply = Oracle::get().call(
+        "processor_cache",
+        json!({"cases": [steps([0, 1, 2, 3]), steps([3, 2, 1, 0])]}),
+        &[&lut, &other_lut],
+    );
+    let cases = reply.result.as_array().expect("cases");
+    assert_eq!(cases.len(), 2);
+    for case in cases {
+        assert_eq!(case["returncode"], 0, "{case}");
+        let report = &case["report"];
+        assert_eq!(
+            report["steps"],
+            json!([null, null, null, null, null]),
+            "{case}"
+        );
+        let ids = &report["cache_ids"];
+        assert_eq!(ids["b"], ids["v"], "{case}");
+        assert_eq!(ids["o"], ids["w"], "{case}");
+        assert_ne!(ids["v"], ids["w"], "{case}");
+        assert_eq!(ids, &cases[0]["report"]["cache_ids"], "{case}");
     }
 }

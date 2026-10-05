@@ -20,10 +20,7 @@ import PyOpenColorIO as OCIO
 
 from . import spec
 from .checks import PROCESSOR_KEYS, check_keys, check_member
-from .commands import _processor, captured_log, command, exception_result
-
-# What OCIO raises (in PyOpenColorIO, ExceptionMissingFile doesn't derive from OCIO.Exception).
-RAISED = (OCIO.Exception, OCIO.ExceptionMissingFile)
+from .commands import RAISED, _processor, captured_log, command, exception_result
 
 
 @command
@@ -47,9 +44,10 @@ def processor_debug_log(args, blobs):
       level           the logging level in force before the call, which it restores
                       (LoggingLevelToString)
       exception, stage
-                      when OCIO raised: {"type", "message"}, and where: "config", "transform",
-                      "processor" (as in cpu_apply) or "cpu_processor"; "processor" and
-                      "cpu_processor" then hold the messages logged so far
+                      when OCIO or the binding raised (commands.RAISED): {"type", "message"},
+                      and where: "config", "transform", "processor" (as in cpu_apply) or
+                      "cpu_processor"; "processor" and "cpu_processor" then hold the messages
+                      logged so far
     blobs: none
 
     An unknown key, or a bit depth that isn't a BIT_DEPTH_* name, is refused.

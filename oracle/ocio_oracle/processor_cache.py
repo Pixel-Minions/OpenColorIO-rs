@@ -23,8 +23,10 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 
-from .commands import command
+from . import spec
+from .commands import RAISED, command
 
 # The steps a case can take, with the number of arguments each takes.
 STEPS = {
@@ -38,16 +40,21 @@ STEPS = {
     "gpu": 3,
 }
 
-# Runs in the new process of a case. It reads the case from stdin and writes its report to
-# stdout.
+# Runs in the new process of a case. It reads the case from stdin, and the request's blobs,
+# raw, one after the other, from the file the case names; it writes its report to stdout.
 _CHILD = r"""
 import json, os, sys
 case = json.loads(sys.stdin.read())
+with open(case["blob_file"], "rb") as f:
+    raw = f.read()
 sys.path.insert(0, case["oracle_path"])
 import PyOpenColorIO as OCIO
 from ocio_oracle import spec
 
-blobs = [bytes.fromhex(blob) for blob in case["blobs"]]
+blobs, start = [], 0
+for size in case["blob_sizes"]:
+    blobs.append(raw[start:start + size])
+    start += size
 config = None
 objects = {}
 results = []
@@ -81,7 +88,7 @@ for step in case["steps"]:
             objects[name] = getter(getattr(OCIO, in_bd), getattr(OCIO, out_bd),
                                    spec.flags(flags))
         results.append(None)
-    except OCIO.Exception as exc:
+    except (OCIO.Exception, OCIO.ExceptionMissingFile, RuntimeError) as exc:
         results.append({"type": type(exc).__name__, "message": str(exc)})
 names = list(objects)
 same = {name: next(first for first in names if objects[first] is objects[name])
@@ -91,7 +98,7 @@ sys.stdout.write(json.dumps({"steps": results, "same": same, "cache_ids": ids}))
 """
 
 
-def _check_case(c, case):
+def _check_case(c, case, blobs):
     if not isinstance(case, dict) or set(case) != {"env", "steps"}:
         raise ValueError(f"cases[{c}] must have exactly the keys env and steps")
     env = case["env"]
@@ -117,6 +124,14 @@ def _check_case(c, case):
             names.add(step[1])
         if step[0] in ("optimized", "cpu", "gpu") and step[2] not in names:
             raise ValueError(f"{what}: unknown processor {step[2]!r}")
+        if step[0] == "processor":
+            # The spec builds in the new process; one the oracle itself refuses (a bad blob
+            # value spec, say) refuses the request here. What OCIO and the binding raise is
+            # reported by the new process.
+            try:
+                spec.transform(step[2], blobs)
+            except RAISED:
+                pass
 
 
 @command
@@ -145,7 +160,9 @@ def processor_cache(args, blobs):
                                           getDefaultGPUProcessor() for null
       (bit depths are BIT_DEPTH_* names, flags as spec.flags takes them)
     request blobs: the transform specs' blobs, which every case and step share (see spec.py);
-      the new process gets them in its input
+      each new process reads them from one file the command writes. A transform spec the
+      oracle refuses (as spec.py does) refuses the request before any case runs; what OCIO
+      and the binding raise building it (commands.RAISED) is the step's exception
     result: per case {"returncode": int, "report": {"steps": per step null or the exception
       {"type", "message"}, "same": for each named object, the first name (in the order the
       steps made them) of the same object, "cache_ids": each named object's getCacheID()}, or
@@ -158,13 +175,27 @@ def processor_cache(args, blobs):
                                                                               list):
         raise ValueError("processor_cache takes exactly {'cases': [...]}")
     oracle_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    results, out = [], []
     for c, case in enumerate(args["cases"]):
-        _check_case(c, case)
+        _check_case(c, case, blobs)
+    # The blobs go to every new process in one file, written once.
+    with tempfile.NamedTemporaryFile(prefix="ocio_oracle_blobs_", delete=False) as f:
+        for blob in blobs:
+            f.write(blob)
+        blob_file = f.name
+    try:
+        return _run_cases(args["cases"], blobs, blob_file, oracle_path)
+    finally:
+        os.remove(blob_file)
+
+
+def _run_cases(cases, blobs, blob_file, oracle_path):
+    """Runs each case in a new process: the command's result and blobs."""
+    results, out = [], []
+    for case in cases:
         env = {k: v for k, v in os.environ.items() if k != "OCIO" and not k.startswith("OCIO_")}
         env.update(case["env"])
         child_input = {"oracle_path": oracle_path, "steps": case["steps"],
-                       "blobs": [blob.hex() for blob in blobs]}
+                       "blob_file": blob_file, "blob_sizes": [len(blob) for blob in blobs]}
         child = subprocess.run([sys.executable, "-I", "-c", _CHILD],
                                input=json.dumps(child_input).encode("utf-8"), env=env,
                                capture_output=True, timeout=120)
