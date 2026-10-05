@@ -42,6 +42,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
+use std::time::Duration;
 
 use serde_json::{Value, json};
 use xxhash_rust::xxh3::Xxh3;
@@ -105,13 +106,6 @@ impl Oracle {
         } else {
             venv.join("bin").join("python")
         };
-        // A target directory restored from a build cache, or a moved uv Python install, can
-        // leave an environment whose interpreter no longer runs; uv refuses to reuse it.
-        // Rebuild it from the lock file instead.
-        if venv.exists() && !python_runs(&python) {
-            std::fs::remove_dir_all(&venv)
-                .map_err(|e| format!("could not remove the broken {}: {e}", venv.display()))?;
-        }
         let sync = || {
             Command::new(uv_program())
                 .arg("sync")
@@ -126,16 +120,22 @@ impl Oracle {
                     format!("could not run `uv` ({e}); install it: https://docs.astral.sh/uv/")
                 })
         };
-        let mut status = sync()?;
-        if !status.success() && venv.exists() {
-            // One retry from scratch, for any other kind of stale environment.
-            let _ = std::fs::remove_dir_all(&venv);
-            status = sync()?;
-        }
-        if !status.success() {
+        let mut status = None;
+        let synced = prepare_venv(
+            &venv,
+            || python_runs(&python),
+            || {
+                let last = sync()?;
+                status = Some(last);
+                Ok(last.success())
+            },
+            &PYTHON_RETRY_PAUSES,
+        )?;
+        if !synced {
             return Err(format!(
-                "`uv sync` for {} failed: {status}",
-                oracle_dir.display()
+                "`uv sync` for {} failed: {}",
+                oracle_dir.display(),
+                status.expect("uv ran")
             ));
         }
         let cache_dir = if std::env::var_os("OCIO_RS_ORACLE_NO_CACHE").is_some() {
@@ -531,6 +531,98 @@ fn read_in_pieces(stream: &mut impl Read) -> std::io::Result<Vec<u8>> {
             Ok(n) => out.extend_from_slice(&piece[..n]),
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
             Err(e) => return Err(e),
+        }
+    }
+}
+
+/// The pauses before the second and third tries of the oracle's interpreter, when it didn't
+/// start ([`prepare_venv`]).
+const PYTHON_RETRY_PAUSES: [Duration; 2] = [Duration::from_millis(500), Duration::from_secs(2)];
+
+/// Brings the oracle's environment `venv` up to date with the lock file: `sync` runs `uv sync`
+/// on it and says whether that succeeded, and so does the result. `starts` says whether the
+/// environment's interpreter starts.
+///
+/// Every test process does this on its first oracle call, often while other processes already
+/// run the oracle from the same environment. So:
+/// - Processes take turns, under a lock file beside `venv` (`oracle-venv.lock`).
+/// - A target directory restored from a build cache, or a moved uv Python install, can leave an
+///   environment whose interpreter no longer runs, which uv refuses to reuse; it is rebuilt
+///   from the lock file. But only once the interpreter has failed to start three times,
+///   `pauses` apart: on a system short of memory, a process can fail to start
+///   (`STATUS_DLL_INIT_FAILED`) with nothing wrong with its environment.
+/// - An environment is never deleted where it is: it is renamed aside, then deleted
+///   ([`set_aside`]). Deleting it in place stopped part way on the files that processes running
+///   from it held open, and left an environment with part of numpy's files gone, which
+///   `uv sync` took for a complete one.
+fn prepare_venv(
+    venv: &Path,
+    mut starts: impl FnMut() -> bool,
+    mut sync: impl FnMut() -> Result<bool, String>,
+    pauses: &[Duration],
+) -> Result<bool, String> {
+    let lock_path = venv.with_extension("lock");
+    if let Some(dir) = venv.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+        .map_err(|e| format!("{}: {e}", lock_path.display()))?;
+    lock.lock()
+        .map_err(|e| format!("could not lock {}: {e}", lock_path.display()))?;
+    remove_set_aside(venv);
+    if venv.exists() {
+        let mut started = starts();
+        for pause in pauses {
+            if started {
+                break;
+            }
+            std::thread::sleep(*pause);
+            started = starts();
+        }
+        if !started {
+            set_aside(venv);
+        }
+    }
+    let synced = sync()?;
+    if synced || !venv.exists() {
+        return Ok(synced);
+    }
+    // One retry from scratch, for any other kind of stale environment.
+    set_aside(venv);
+    sync()
+}
+
+/// Renames the environment `venv` aside (to `<venv>.old-<pid>-<time>`), then deletes it as far
+/// as it can: the files that processes still running from it hold open stay, and
+/// [`remove_set_aside`] deletes them later. Either way, nothing at `venv` is left half deleted.
+fn set_aside(venv: &Path) {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let mut name = venv.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(".old-{}-{nanos:x}", std::process::id()));
+    let aside = venv.with_file_name(name);
+    if std::fs::rename(venv, &aside).is_ok() {
+        let _ = std::fs::remove_dir_all(&aside);
+    }
+}
+
+/// Deletes, as far as it can, the environments [`set_aside`] renamed aside and couldn't delete.
+fn remove_set_aside(venv: &Path) {
+    let (Some(dir), Some(name)) = (venv.parent(), venv.file_name()) else {
+        return;
+    };
+    let mut prefix = name.to_os_string();
+    prefix.push(".old-");
+    let prefix = prefix.to_string_lossy().into_owned();
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        if entry.file_name().to_string_lossy().starts_with(&prefix) {
+            let _ = std::fs::remove_dir_all(entry.path());
         }
     }
 }
@@ -1391,5 +1483,163 @@ mod tests {
                 .any(|(k, v)| k == "PYTHONDONTWRITEBYTECODE" && v.as_deref() == Some("1")),
             "{envs:?}"
         );
+    }
+
+    /// A fresh directory for a [`prepare_venv`] test, with an environment `oracle-venv` in it
+    /// that holds a file `marker` reading "old". Returns the environment's path.
+    fn venv_fixture(test: &str) -> PathBuf {
+        let dir = paths::target_dir().join(format!("oracle_venv_{test}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let venv = dir.join("oracle-venv");
+        std::fs::create_dir_all(venv.join("Lib")).unwrap();
+        std::fs::write(venv.join("marker"), "old").unwrap();
+        venv
+    }
+
+    /// The names in the directory of `venv`, sorted.
+    fn venv_dir_names(venv: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(venv.parent().unwrap())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    const NO_PAUSES: [Duration; 2] = [Duration::ZERO, Duration::ZERO];
+
+    /// An interpreter that fails to start, then starts (a system short of memory), leaves the
+    /// environment where it is, untouched.
+    #[test]
+    fn an_environment_whose_python_starts_on_a_later_try_is_kept() {
+        let venv = venv_fixture("kept");
+        let mut tries = 0;
+        let mut syncs = 0;
+        let synced = prepare_venv(
+            &venv,
+            || {
+                tries += 1;
+                tries == 3
+            },
+            || {
+                syncs += 1;
+                Ok(true)
+            },
+            &NO_PAUSES,
+        );
+        assert_eq!(synced, Ok(true));
+        assert_eq!((tries, syncs), (3, 1));
+        assert_eq!(std::fs::read_to_string(venv.join("marker")).unwrap(), "old");
+        assert_eq!(venv_dir_names(&venv), ["oracle-venv", "oracle-venv.lock"]);
+        std::fs::remove_dir_all(venv.parent().unwrap()).unwrap();
+    }
+
+    /// An interpreter that never starts gets a new environment: the old one is renamed aside and
+    /// deleted, and `uv sync` builds the new one where it was.
+    #[test]
+    fn an_environment_whose_python_never_starts_is_set_aside_and_rebuilt() {
+        let venv = venv_fixture("rebuilt");
+        let mut tries = 0;
+        let synced = prepare_venv(
+            &venv,
+            || {
+                tries += 1;
+                false
+            },
+            || {
+                assert!(!venv.exists(), "the old environment is still there");
+                std::fs::create_dir_all(&venv).unwrap();
+                std::fs::write(venv.join("marker"), "new").unwrap();
+                Ok(true)
+            },
+            &NO_PAUSES,
+        );
+        assert_eq!(synced, Ok(true));
+        assert_eq!(tries, 3);
+        assert_eq!(std::fs::read_to_string(venv.join("marker")).unwrap(), "new");
+        assert_eq!(venv_dir_names(&venv), ["oracle-venv", "oracle-venv.lock"]);
+        std::fs::remove_dir_all(venv.parent().unwrap()).unwrap();
+    }
+
+    /// A failed `uv sync` is tried once more, on a new environment; what that one says is the
+    /// result.
+    #[test]
+    fn a_failed_sync_is_tried_again_from_scratch() {
+        let venv = venv_fixture("resync");
+        for second in [true, false] {
+            let mut syncs = 0;
+            let synced = prepare_venv(
+                &venv,
+                || true,
+                || {
+                    syncs += 1;
+                    if syncs == 1 {
+                        assert!(venv.exists());
+                        return Ok(false);
+                    }
+                    assert!(!venv.exists(), "the old environment is still there");
+                    std::fs::create_dir_all(&venv).unwrap();
+                    Ok(second)
+                },
+                &NO_PAUSES,
+            );
+            assert_eq!(synced, Ok(second));
+            assert_eq!(syncs, 2);
+        }
+        assert_eq!(venv_dir_names(&venv), ["oracle-venv", "oracle-venv.lock"]);
+        std::fs::remove_dir_all(venv.parent().unwrap()).unwrap();
+    }
+
+    /// What an earlier process set aside and couldn't delete (files that a running process held
+    /// open) is deleted by the next one; other names beside the environment stay.
+    #[test]
+    fn environments_left_aside_are_deleted_later() {
+        let venv = venv_fixture("aside");
+        let dir = venv.parent().unwrap().to_path_buf();
+        std::fs::create_dir_all(dir.join("oracle-venv.old-1-2").join("Lib")).unwrap();
+        std::fs::write(
+            dir.join("oracle-venv.old-1-2").join("Lib").join("a.py"),
+            "x",
+        )
+        .unwrap();
+        std::fs::create_dir_all(dir.join("oracle-cache")).unwrap();
+        let synced = prepare_venv(&venv, || true, || Ok(true), &NO_PAUSES);
+        assert_eq!(synced, Ok(true));
+        assert_eq!(
+            venv_dir_names(&venv),
+            ["oracle-cache", "oracle-venv", "oracle-venv.lock"]
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Processes (here threads, each with its own handle of the lock file) take turns: no two
+    /// prepare the environment at once.
+    #[test]
+    fn environments_are_prepared_one_at_a_time() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let venv = venv_fixture("turns");
+        let busy = AtomicUsize::new(0);
+        let most = AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            for _ in 0..4 {
+                scope.spawn(|| {
+                    let synced = prepare_venv(
+                        &venv,
+                        || true,
+                        || {
+                            let now = busy.fetch_add(1, Ordering::SeqCst) + 1;
+                            most.fetch_max(now, Ordering::SeqCst);
+                            std::thread::sleep(Duration::from_millis(50));
+                            busy.fetch_sub(1, Ordering::SeqCst);
+                            Ok(true)
+                        },
+                        &NO_PAUSES,
+                    );
+                    assert_eq!(synced, Ok(true));
+                });
+            }
+        });
+        assert_eq!(most.load(Ordering::SeqCst), 1);
+        std::fs::remove_dir_all(venv.parent().unwrap()).unwrap();
     }
 }
