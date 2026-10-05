@@ -8,8 +8,10 @@
 //! to dim surround 1.0 and the gamut compression 1.3, forward and inverse (chunk 2.3b); the
 //! Rec.2100 surround, RGB to and from HSV, and XYZ to and from xyY, u'v'Y and CIELUV (2.3c1);
 //! RGB to and from the three HSYs (2.3c2); the gamma-log and double-log curves, both ways
-//! (2.3d1). The other styles' renderers come with chunks 2.3d2 and 2.4e; until then
-//! [`get_fixed_function_cpu_renderer`] refuses them ([`not_ported`]).
+//! (2.3d1); ACES 2.0's RGB to and from JMh, and its tone scale and chroma compression (2.4e1).
+//! The other styles' renderers come with chunks 2.3d2 (PQ) and 2.4e2 (ACES 2.0's output
+//! transform and gamut compression); until then [`get_fixed_function_cpu_renderer`] refuses
+//! them ([`not_ported`]).
 //!
 //! The renderers work in place and never write alpha, which upstream copies (`out[3] =
 //! in[3]`), nor a channel upstream leaves as it was.
@@ -41,11 +43,23 @@
 
 use std::sync::Arc;
 
+use super::aces2::common::{
+    ChromaCompressParams, JMhParams, SharedCompressionParameters, ToneScaleParams, from_degrees,
+    to_degrees, to_radians,
+};
+use super::aces2::transform::{
+    chroma_compress_fwd, chroma_compress_inv, chroma_compress_norm, init_chroma_compress_params,
+    init_jmh_params, init_shared_compression_params, init_tone_scale_params, jmh_to_rgb,
+    resolve_compression_params, rgb_to_jmh, tonescale_fwd, tonescale_inv,
+};
 use super::fixed_function_op_data::{FixedFunctionOpData, FixedFunctionOpStyle, SHORT_PARAMS};
 use crate::bit_depth_utils::clamp_macro;
 use crate::exception::{Exception, Result};
 use crate::math_utils::{clamp, sse_add, sse_cvttps_epi32, sse_mul, sse_sub, std_max, std_min};
 use crate::op::CpuOp;
+use crate::transforms::builtins::color_matrix_helpers::{
+    Chromaticities, Primaries, aces_ap0, aces_ap1,
+};
 
 /// The error for a style whose renderer isn't ported yet.
 pub fn not_ported(style: FixedFunctionOpStyle) -> Exception {
@@ -735,6 +749,144 @@ impl CpuOp for RendererAcesGamutComp13Inv {
     /// v2.5.2).
     fn apply(&self, rgba: &mut [f32]) {
         self.fwd.apply_with(rgba, uncompress);
+    }
+}
+
+/// `(float) params[i]`, or [`SHORT_PARAMS`] where upstream would read past the parameters
+/// (U-31).
+fn param_f32(data: &FixedFunctionOpData, i: usize) -> Result<f32> {
+    data.params()
+        .get(i)
+        .map(|&v| v as f32)
+        .ok_or_else(|| Exception::new(SHORT_PARAMS))
+}
+
+/// The primaries of the parameters from `first` on (red, green, blue and white x and y), each
+/// narrowed to `float` as the renderers read them, then held in `double` (`Primaries`'
+/// `Chromaticities`).
+fn primaries_from(data: &FixedFunctionOpData, first: usize) -> Result<Primaries> {
+    let c = |i: usize| -> Result<Chromaticities> {
+        Ok(Chromaticities::new(
+            f64::from(param_f32(data, first + 2 * i)?),
+            f64::from(param_f32(data, first + 2 * i + 1)?),
+        ))
+    };
+    Ok(Primaries::new(c(0)?, c(1)?, c(2)?, c(3)?))
+}
+
+/// RGB of the parameters' primaries to ACES 2.0's JMh (hue in degrees), or back.
+///
+/// Port of `Renderer_ACES_RGB_TO_JMh_20` (src/OpenColorIO/ops/fixedfunction/
+/// FixedFunctionOpCPU.cpp:153-167, 1168-1241 @ v2.5.2).
+#[derive(Debug)]
+pub struct RendererAcesRgbToJmh20 {
+    /// `m_fwd`.
+    fwd: bool,
+    /// `m_p`.
+    p: JMhParams,
+}
+
+impl RendererAcesRgbToJmh20 {
+    /// The model of the parameters' primaries. [`SHORT_PARAMS`] for fewer than eight
+    /// parameters (U-31); refused where a matrix is singular.
+    ///
+    /// Port of `Renderer_ACES_RGB_TO_JMh_20::Renderer_ACES_RGB_TO_JMh_20`
+    /// (FixedFunctionOpCPU.cpp:1168-1190 @ v2.5.2).
+    pub fn new(data: &FixedFunctionOpData) -> Result<Self> {
+        let fwd = FixedFunctionOpStyle::AcesRgbToJmh20 == data.style();
+        let primaries = primaries_from(data, 0)?;
+        Ok(RendererAcesRgbToJmh20 {
+            fwd,
+            p: init_jmh_params(&primaries)?,
+        })
+    }
+}
+
+impl CpuOp for RendererAcesRgbToJmh20 {
+    /// Port of `Renderer_ACES_RGB_TO_JMh_20::apply`, `fwd` and `inv`
+    /// (FixedFunctionOpCPU.cpp:1192-1241 @ v2.5.2).
+    fn apply(&self, rgba: &mut [f32]) {
+        for pixel in rgba.as_chunks_mut::<4>().0 {
+            if self.fwd {
+                let jmh = rgb_to_jmh(&[pixel[0], pixel[1], pixel[2]], &self.p);
+
+                pixel[0] = jmh[0];
+                pixel[1] = jmh[1];
+                pixel[2] = to_degrees(jmh[2]);
+            } else {
+                let normalised_hue = from_degrees(pixel[2]);
+                let rgb = jmh_to_rgb(&[pixel[0], pixel[1], normalised_hue], &self.p);
+
+                pixel[0] = rgb[0];
+                pixel[1] = rgb[1];
+                pixel[2] = rgb[2];
+            }
+        }
+    }
+}
+
+/// ACES 2.0's tone scale and chroma compression of a JMh (hue in degrees), or back.
+///
+/// Port of `Renderer_ACES_TONESCALE_COMPRESS_20` (src/OpenColorIO/ops/fixedfunction/
+/// FixedFunctionOpCPU.cpp:169-187, 1243-1319 @ v2.5.2).
+#[derive(Debug)]
+pub struct RendererAcesTonescaleCompress20 {
+    /// `m_fwd`.
+    fwd: bool,
+    /// `m_p`.
+    p: JMhParams,
+    /// `m_t`.
+    t: ToneScaleParams,
+    /// `m_s`.
+    s: SharedCompressionParameters,
+    /// `m_c`.
+    c: ChromaCompressParams,
+}
+
+impl RendererAcesTonescaleCompress20 {
+    /// The models of AP0 and the reach (AP1), and the parameters for the peak luminance.
+    /// [`SHORT_PARAMS`] without the parameter (U-31).
+    ///
+    /// Port of `Renderer_ACES_TONESCALE_COMPRESS_20::Renderer_ACES_TONESCALE_COMPRESS_20`
+    /// (FixedFunctionOpCPU.cpp:1243-1255 @ v2.5.2).
+    pub fn new(data: &FixedFunctionOpData) -> Result<Self> {
+        let fwd = FixedFunctionOpStyle::AcesTonescaleCompress20Fwd == data.style();
+
+        let peak_luminance = param_f32(data, 0)?;
+
+        let p = init_jmh_params(&aces_ap0::PRIMARIES)?;
+        let t = init_tone_scale_params(peak_luminance);
+        let reach_gamut = init_jmh_params(&aces_ap1::PRIMARIES)?;
+        let s = init_shared_compression_params(peak_luminance, &p, &reach_gamut);
+        let c = init_chroma_compress_params(peak_luminance, &t);
+        Ok(RendererAcesTonescaleCompress20 { fwd, p, t, s, c })
+    }
+}
+
+impl CpuOp for RendererAcesTonescaleCompress20 {
+    /// Port of `Renderer_ACES_TONESCALE_COMPRESS_20::apply`, `fwd` and `inv`
+    /// (FixedFunctionOpCPU.cpp:1257-1319 @ v2.5.2).
+    fn apply(&self, rgba: &mut [f32]) {
+        for pixel in rgba.as_chunks_mut::<4>().0 {
+            let normalised_hue = from_degrees(pixel[2]);
+            let h_rad = to_radians(normalised_hue);
+            let cos_hr1 = h_rad.cos();
+            let sin_hr1 = h_rad.sin();
+            let mnorm = chroma_compress_norm(cos_hr1, sin_hr1, self.c.chroma_compress_scale);
+            let rp = resolve_compression_params(normalised_hue, &self.s);
+            let jmh_in = [pixel[0], pixel[1], normalised_hue];
+            let jmh = if self.fwd {
+                let j_ts = tonescale_fwd(pixel[0], &self.p, &self.t);
+                chroma_compress_fwd(&jmh_in, j_ts, mnorm, &rp, &self.c)
+            } else {
+                let j = tonescale_inv(pixel[0], &self.p, &self.t);
+                chroma_compress_inv(&jmh_in, j, mnorm, &rp, &self.c)
+            };
+
+            pixel[0] = jmh[0];
+            pixel[1] = jmh[1];
+            pixel[2] = to_degrees(jmh[2]);
+        }
     }
 }
 
@@ -1916,6 +2068,11 @@ pub fn get_fixed_function_cpu_renderer(
         AcesGamutComp13Fwd => Arc::new(RendererAcesGamutComp13Fwd::new(func)?),
         AcesGamutComp13Inv => Arc::new(RendererAcesGamutComp13Inv::new(func)?),
 
+        AcesRgbToJmh20 | AcesJmhToRgb20 => Arc::new(RendererAcesRgbToJmh20::new(func)?),
+        AcesTonescaleCompress20Fwd | AcesTonescaleCompress20Inv => {
+            Arc::new(RendererAcesTonescaleCompress20::new(func)?)
+        }
+
         Rec2100SurroundFwd | Rec2100SurroundInv => {
             // Sharing same renderer (param will be inverted to handle direction).
             Arc::new(RendererRec2100Surround::new(func)?)
@@ -1944,10 +2101,6 @@ pub fn get_fixed_function_cpu_renderer(
 
         style @ (AcesOutputTransform20Fwd
         | AcesOutputTransform20Inv
-        | AcesRgbToJmh20
-        | AcesJmhToRgb20
-        | AcesTonescaleCompress20Fwd
-        | AcesTonescaleCompress20Inv
         | AcesGamutCompress20Fwd
         | AcesGamutCompress20Inv
         | LinToPq
