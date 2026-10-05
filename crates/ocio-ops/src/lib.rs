@@ -72,6 +72,7 @@ pub mod platform;
 pub mod scanline_helper;
 pub mod sse;
 pub mod sse2;
+pub mod std_regex;
 #[cfg(test)]
 mod unit_test_log_utils;
 pub mod utils;
