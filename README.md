@@ -99,7 +99,10 @@ renderers (red modifier, glow, dark-to-dim and gamut compression) and FixedFunct
 the config transforms ColorSpaceTransform, DisplayViewTransform, LookTransform, FileTransform
 and BuiltinTransform with its registry (their classes and text; their processors come with the
 config). The live oracle can now also drive a config, its context and its file rules call by
-call in the official library, which the Phase 3 cards are checked against.
+call in the official library, which the Phase 3 cards are checked against. A config's context
+is merged too: its environment (byte for byte as each platform's C runtime and system apply
+it), its variables and their expansion, its search paths and how it finds files, with the
+pystring and ParseUtils helpers it uses.
 Each also went through an independent review before merging.
 
 **Done:** everything below is bit-exact against the official library on Windows and Linux, in
@@ -173,7 +176,7 @@ instead. Every such case, and every upstream bug the port reproduces, is listed 
 
 | Suite | Ported | Total |
 |---|---:|---:|
-| C++ | 295 | 1,191 |
+| C++ | 315 | 1,191 |
 | GPU | 0 | 264 |
 | Python | 0 | 384 |
 
