@@ -8,17 +8,20 @@
 //! to dim surround 1.0 and the gamut compression 1.3, forward and inverse (chunk 2.3f); the
 //! Rec.2100 surround, RGB to and from HSV and the three HSYs, and XYZ to and from xyY, u'v'Y
 //! and CIELUV (2.3g1); PQ, the gamma-log and the double-log curves (2.3g2), with `double`
-//! parameters as upstream reads them. The ACES 2.0 styles' shaders come with card
-//! `p2-aces2-gpu`; until then [`get_fixed_function_gpu_processing_text`] refuses them
-//! ([`not_ported`]).
+//! parameters as upstream reads them; RGB to and from ACES 2.0's JMh (2.4f1). The other ACES
+//! 2.0 styles come with chunks 2.4f2, 2.4g and 2.4h; until then
+//! [`get_fixed_function_gpu_processing_text`] refuses them ([`not_ported`]).
 //!
 //! Upstream writes `float` values into the text with `operator<<`, which formats them with
 //! `getFloatString` (`GpuShaderText`'s stream operators); the constants it derives from them
 //! are computed in `float`, as here.
 
+use ocio_ops::ops::fixedfunction::aces2::common::{CAM_NL_OFFSET, J_SCALE, JMhParams};
+use ocio_ops::ops::fixedfunction::aces2::transform::init_jmh_params;
 use ocio_ops::ops::fixedfunction::fixed_function_op_data::{
     FixedFunctionOpData, FixedFunctionOpStyle, SHORT_PARAMS,
 };
+use ocio_ops::transforms::builtins::color_matrix_helpers::{Chromaticities, Primaries};
 use ocio_ops::{Exception, Result};
 
 use crate::gpu_shader_desc::GpuShaderDesc;
@@ -1734,6 +1737,247 @@ fn add_double_log_to_lin(pix: &[u8], st: &GpuShaderText, func: &FixedFunctionOpD
     Ok(())
 }
 
+//
+// ACES 2.0
+//
+
+/// The primaries of the parameters from `first` on (red, green, blue and white x and y), each
+/// narrowed to `float` as upstream reads them.
+fn aces2_primaries(func: &FixedFunctionOpData, first: usize) -> Result<Primaries> {
+    let c = |i: usize| -> Result<Chromaticities> {
+        Ok(Chromaticities::new(
+            f64::from(param_f32(func, first + 2 * i)?),
+            f64::from(param_f32(func, first + 2 * i + 1)?),
+        ))
+    };
+    Ok(Primaries::new(c(0)?, c(1)?, c(2)?, c(3)?))
+}
+
+/// The hue, the pixel's blue, wrapped into [0, 360).
+///
+/// Port of `_Add_WrapHueChannel_Shader` (FixedFunctionOpGPU.cpp:352-361 @ v2.5.2).
+fn add_wrap_hue_channel_shader(pxl: &[u8], st: &GpuShaderText) -> Result<()> {
+    st.new_line()
+        .put(st.float_decl("hwrap")?)
+        .put(" = ")
+        .put(pxl)
+        .put(".b;");
+    st.new_line()
+        .put("hwrap = hwrap - floor(hwrap / 360.0) * 360.0;");
+    st.new_line()
+        .put("hwrap = (hwrap < 0.0) ? hwrap + 360.0 : hwrap;");
+    st.new_line().put(pxl).put(".b = hwrap;");
+    Ok(())
+}
+
+/// The hue in radians, and its cosine and sine.
+///
+/// Port of `_Add_SinCos_Shader` (FixedFunctionOpGPU.cpp:363-371 @ v2.5.2).
+fn add_sin_cos_shader(pxl: &[u8], st: &GpuShaderText) -> Result<()> {
+    #[allow(clippy::approx_constant)] // Upstream's literal.
+    const PI: f32 = 3.14159265358979;
+    st.new_line()
+        .put(st.float_decl("h_rad")?)
+        .put(" = ")
+        .put(pxl)
+        .put(".b * ")
+        .put(PI / 180.0)
+        .put(";");
+    st.new_line()
+        .put(st.float_decl("cos_hr")?)
+        .put(" = cos(h_rad);");
+    st.new_line()
+        .put(st.float_decl("sin_hr")?)
+        .put(" = sin(h_rad);");
+    Ok(())
+}
+
+/// Port of `_Add_RGB_to_Aab_Shader` (FixedFunctionOpGPU.cpp:374-393 @ v2.5.2).
+fn add_rgb_to_aab_shader(pxl: &[u8], st: &GpuShaderText, p: &JMhParams) -> Result<()> {
+    st.new_line().put("{");
+    st.indent();
+
+    let pxl_rgb = [pxl, b".rgb"].concat();
+    st.new_line()
+        .put(st.float3_decl("lms")?)
+        .put(" = ")
+        .put(st.mat3f_mul_f32(&p.matrix_rgb_to_cam16_c, &pxl_rgb)?)
+        .put(";");
+
+    st.new_line()
+        .put(st.float3_decl("F_L_v")?)
+        .put(" = pow(abs(lms), ")
+        .put(st.float3_splat_f32(0.42))
+        .put(");");
+    st.new_line()
+        .put(st.float3_decl("rgb_a")?)
+        .put(" = (sign(lms) * F_L_v) / ( ")
+        .put(CAM_NL_OFFSET)
+        .put(" + F_L_v);");
+
+    st.new_line()
+        .put("Aab = ")
+        .put(st.mat3f_mul_f32(&p.matrix_cone_response_to_aab, "rgb_a.rgb")?)
+        .put(";");
+
+    st.dedent();
+    st.new_line().put("}");
+    Ok(())
+}
+
+/// Port of `_Add_Aab_to_JMh_Shader` (FixedFunctionOpGPU.cpp:395-429 @ v2.5.2).
+fn add_aab_to_jmh_shader(st: &GpuShaderText, p: &JMhParams) -> Result<()> {
+    st.new_line().put("{");
+    st.indent();
+
+    st.new_line().put("if (Aab.r <= 0.0)");
+    st.new_line().put("{");
+    st.indent();
+    st.new_line()
+        .put("JMh.rgb = ")
+        .put(st.float3_splat_f64(0.0))
+        .put(";");
+    st.dedent();
+    st.new_line().put("}");
+
+    st.new_line().put("else");
+    st.new_line().put("{");
+    st.indent();
+    st.new_line()
+        .put(st.float_decl("J")?)
+        .put(" = ")
+        .put(J_SCALE)
+        .put(" * pow(Aab.r, ")
+        .put(p.cz)
+        .put(");");
+
+    st.new_line()
+        .put(st.float_decl("M")?)
+        .put(" = (J == 0.0) ? 0.0 : sqrt(Aab.g * Aab.g + Aab.b * Aab.b);");
+
+    #[allow(clippy::approx_constant)] // Upstream's literal.
+    const PI: f64 = 3.14159265358979;
+    st.new_line()
+        .put(st.float_decl("h")?)
+        .put(" = (Aab.g == 0.0) ? 0.0 : ")
+        .put(st.atan2("Aab.b", "Aab.g"))
+        .put(" * ")
+        .put(180.0 / PI)
+        .put(";");
+    st.new_line().put("h = h - floor(h / 360.0) * 360.0;");
+    st.new_line().put("h = (h < 0.0) ? h + 360.0 : h;");
+
+    st.new_line()
+        .put("JMh.rgb = ")
+        .put(st.float3_const("J", "M", "h"))
+        .put(";");
+    st.dedent();
+    st.new_line().put("}");
+
+    st.dedent();
+    st.new_line().put("}");
+    Ok(())
+}
+
+/// Port of `_Add_RGB_to_JMh_Shader` (FixedFunctionOpGPU.cpp:431-452 @ v2.5.2).
+fn add_rgb_to_jmh_shader_(pxl: &[u8], st: &GpuShaderText, p: &JMhParams) -> Result<()> {
+    // TODO: leaky abstraction should really be explicit functions
+    st.new_line().put(st.float3_decl("JMh")?).put(";");
+    // TODO: leaky abstraction should really be explicit functions
+    st.new_line().put(st.float3_decl("Aab")?).put(";");
+
+    st.new_line().put("{");
+    st.indent();
+
+    add_rgb_to_aab_shader(pxl, st, p)?;
+    add_aab_to_jmh_shader(st, p)?;
+
+    st.new_line().put(pxl).put(".rgb = JMh;");
+
+    st.dedent();
+    st.new_line().put("}");
+    Ok(())
+}
+
+/// Port of `_Add_JMh_to_Aab_Shader` (FixedFunctionOpGPU.cpp:454-471 @ v2.5.2).
+fn add_jmh_to_aab_shader(st: &GpuShaderText, p: &JMhParams) {
+    st.new_line().put("{");
+    st.indent();
+
+    st.new_line()
+        .put("Aab.r = pow(JMh.r * ")
+        .put(1.0f32 / J_SCALE)
+        .put(", ")
+        .put(p.inv_cz)
+        .put(");");
+    st.new_line().put("Aab.g = JMh.g * cos_hr;");
+    st.new_line().put("Aab.b = JMh.g * sin_hr;");
+
+    st.dedent();
+    st.new_line().put("}");
+}
+
+/// Port of `_Add_Aab_to_RGB_Shader` (FixedFunctionOpGPU.cpp:473-488 @ v2.5.2).
+fn add_aab_to_rgb_shader(st: &GpuShaderText, p: &JMhParams) -> Result<()> {
+    st.new_line().put("{");
+    st.indent();
+
+    st.new_line()
+        .put(st.float3_decl("rgb_a")?)
+        .put(" = ")
+        .put(st.mat3f_mul_f32(&p.matrix_aab_to_cone_response, "Aab.rgb")?)
+        .put(";");
+    st.new_line()
+        .put(st.float3_decl("rgb_a_lim")?)
+        .put(" = min( abs(rgb_a), ")
+        .put(st.float3_splat_f32(0.99))
+        .put(" );");
+    st.new_line()
+        .put(st.float3_decl("lms")?)
+        .put(" = sign(rgb_a) * pow( ")
+        .put(CAM_NL_OFFSET)
+        .put(" * rgb_a_lim / (1.0f - rgb_a_lim), ")
+        .put(st.float3_splat_f32(1.0f32 / 0.42))
+        .put(");");
+    st.new_line()
+        .put("JMh.rgb = ")
+        .put(st.mat3f_mul_f32(&p.matrix_cam16_c_to_rgb, "lms")?)
+        .put(";");
+
+    st.dedent();
+    st.new_line().put("}");
+    Ok(())
+}
+
+/// Port of `_Add_JMh_to_RGB_Shader` (FixedFunctionOpGPU.cpp:490-503 @ v2.5.2).
+fn add_jmh_to_rgb_shader_(pxl: &[u8], st: &GpuShaderText, p: &JMhParams) -> Result<()> {
+    st.new_line()
+        .put(st.float3_decl("JMh")?)
+        .put(" = ")
+        .put(pxl)
+        .put(".rgb;");
+    st.new_line().put(st.float3_decl("Aab")?).put(";");
+    add_jmh_to_aab_shader(st, p);
+    add_aab_to_rgb_shader(st, p)?;
+
+    st.new_line().put(pxl).put(".rgb = JMh;");
+    Ok(())
+}
+
+/// Port of `Add_RGB_to_JMh_Shader` (FixedFunctionOpGPU.cpp:1442-1465 @ v2.5.2).
+fn add_rgb_to_jmh_shader(pxl: &[u8], st: &GpuShaderText, func: &FixedFunctionOpData) -> Result<()> {
+    let p = init_jmh_params(&aces2_primaries(func, 0)?)?;
+    add_rgb_to_jmh_shader_(pxl, st, &p)
+}
+
+/// Port of `Add_JMh_to_RGB_Shader` (FixedFunctionOpGPU.cpp:1467-1492 @ v2.5.2).
+fn add_jmh_to_rgb_shader(pxl: &[u8], st: &GpuShaderText, func: &FixedFunctionOpData) -> Result<()> {
+    let p = init_jmh_params(&aces2_primaries(func, 0)?)?;
+    add_wrap_hue_channel_shader(pxl, st)?;
+    add_sin_cos_shader(pxl, st)?;
+    add_jmh_to_rgb_shader_(pxl, st, &p)
+}
+
 /// Adds the code of a FixedFunction op to `shader_creator`'s function body.
 ///
 /// Port of `GetFixedFunctionGPUShaderProgram` (FixedFunctionOpGPU.cpp:2225-2231 @ v2.5.2).
@@ -1753,7 +1997,7 @@ pub fn get_fixed_function_gpu_shader_program(
 ///
 /// Port of `GetFixedFunctionGPUProcessingText` (FixedFunctionOpGPU.cpp:2233-2491 @ v2.5.2).
 pub fn get_fixed_function_gpu_processing_text(
-    shader_creator: &GpuShaderDesc,
+    shader_creator: &mut GpuShaderDesc,
     st: &GpuShaderText,
     func: &FixedFunctionOpData,
 ) -> Result<()> {
@@ -1813,6 +2057,8 @@ pub fn get_fixed_function_gpu_processing_text(
         GammaLogToLin => add_gamma_log_to_lin(&pxl, st, func)?,
         LinToDoubleLog => add_lin_to_double_log(&pxl, st, func)?,
         DoubleLogToLin => add_double_log_to_lin(&pxl, st, func)?,
+        AcesRgbToJmh20 => add_rgb_to_jmh_shader(&pxl, st, func)?,
+        AcesJmhToRgb20 => add_jmh_to_rgb_shader(&pxl, st, func)?,
         style => return Err(not_ported(style)),
     }
 
