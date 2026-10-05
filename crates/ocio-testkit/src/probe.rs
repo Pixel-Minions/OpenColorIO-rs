@@ -384,6 +384,56 @@ pub fn nan_buffers(max_pixels: usize) -> Vec<(String, Vec<f32>)> {
     out
 }
 
+/// One RGBA buffer of each length from 1 to `max_pixels` pixels, named `"row of n pixels"`:
+/// the battery applies each buffer as one row, in one renderer call, so the buffers make a
+/// renderer's SIMD loops leave every remainder up to `max_pixels` (33 covers the 4-, 8- and
+/// 16-pixel kernels' remainders, and their bodies), and single-pixel rows take the paths that
+/// rows of one pixel take.
+///
+/// Every fifth value, counting through all the buffers, comes from [`specials`] in turn, so
+/// that NaNs, infinities and signalling NaNs reach every channel and every place in a loop;
+/// the others are seeded random values in `[0, 1)` and `[-1, 2)` ([`RandomRange::Unit`] and
+/// [`RandomRange::Overshoot`]: a LUT's domain and past it).
+pub fn row_length_buffers(max_pixels: usize) -> Vec<(String, Vec<f32>)> {
+    let specials = specials();
+    let values = random(
+        0x0b47_7e27_0002,
+        &[(RandomRange::Unit, 1024), (RandomRange::Overshoot, 256)],
+    );
+    let mut k = 0usize;
+    let mut next = || {
+        let v = if k % 5 == 4 {
+            specials[(k / 5) % specials.len()]
+        } else {
+            values[k % values.len()]
+        };
+        k += 1;
+        v
+    };
+    (1..=max_pixels)
+        .map(|n| {
+            let pixels = (0..4 * n).map(|_| next()).collect();
+            (format!("row of {n} pixels"), pixels)
+        })
+        .collect()
+}
+
+/// Inputs at a LUT's nodes, at the midpoints between them, and outside its domain, for the
+/// battery's break-point neighbourhoods ([`neighbourhoods`]): for a LUT of `entries` entries
+/// per channel over `[0, 1]` (a 1D LUT's standard domain, a 3D LUT's grid along each axis),
+/// node `k` is `k / (entries - 1)` and midpoint `k` is `(k + 0.5) / (entries - 1)`, each
+/// computed in `f64` and rounded to `f32`; then -1, -0.5, 1.5 and 2. The renderers scale the
+/// input by `entries - 1`, so a node's ulp neighbours land just below, on and just above the
+/// node.
+pub fn lut_domain_points(entries: usize) -> Vec<f32> {
+    assert!(entries >= 2, "a LUT of {entries} entries has no interval");
+    let last = (entries - 1) as f64;
+    let mut points: Vec<f32> = (0..entries).map(|k| (k as f64 / last) as f32).collect();
+    points.extend((0..entries - 1).map(|k| ((k as f64 + 0.5) / last) as f32));
+    points.extend([-1.0, -0.5, 1.5, 2.0]);
+    points
+}
+
 /// The number of RGBA pixels that hold every `f32` bit pattern once, four per pixel.
 pub const ALL_F32_PIXELS: u64 = 1 << 30;
 
@@ -457,6 +507,12 @@ pub enum ProbeSet {
         /// The longest buffer.
         max_pixels: usize,
     },
+    /// [`row_length_buffers`]: one buffer, one row, of every length from 1 to `max_pixels`
+    /// pixels.
+    RowLengths {
+        /// The longest buffer.
+        max_pixels: usize,
+    },
 }
 
 impl ProbeSet {
@@ -472,12 +528,13 @@ impl ProbeSet {
             ProbeSet::NanBuffers { max_pixels } => {
                 format!("NaN buffers of 1 to {max_pixels} pixels")
             }
+            ProbeSet::RowLengths { max_pixels } => format!("rows of 1 to {max_pixels} pixels"),
         }
     }
 
     /// The set's RGBA buffers, as `(name, pixels)` pairs: one buffer with every value in every
-    /// channel ([`to_rgba_cycled`]), or the whole buffers of [`ProbeSet::NanBuffers`]. An empty
-    /// set has no buffers.
+    /// channel ([`to_rgba_cycled`]), or the whole buffers of [`ProbeSet::NanBuffers`] and
+    /// [`ProbeSet::RowLengths`]. An empty set has no buffers.
     pub fn rgba_buffers(&self) -> Vec<(String, Vec<f32>)> {
         let values = match self {
             ProbeSet::Halves { stride } => half_values_every(*stride),
@@ -486,6 +543,7 @@ impl ProbeSet {
             ProbeSet::Neighbourhoods { points, ulps } => neighbourhoods(points, *ulps),
             ProbeSet::Values { values, .. } => values.clone(),
             ProbeSet::NanBuffers { max_pixels } => return nan_buffers(*max_pixels),
+            ProbeSet::RowLengths { max_pixels } => return row_length_buffers(*max_pixels),
         };
         if values.is_empty() {
             return Vec::new();
@@ -780,6 +838,51 @@ mod tests {
         assert_eq!(buffers[47].0, "nan rgba, 24 pixels");
     }
 
+    /// One row of each length; every fifth value, counted across the rows, a special in turn,
+    /// so that the specials' NaNs reach every channel; the rest in the unit and overshoot
+    /// ranges.
+    #[test]
+    fn row_length_buffers_cover_every_length() {
+        let rows = row_length_buffers(33);
+        assert_eq!(rows.len(), 33);
+        let specials = specials();
+        let mut k = 0;
+        let mut nan_channels = [false; 4];
+        for (n, (name, pixels)) in (1..).zip(&rows) {
+            assert_eq!(name, &format!("row of {n} pixels"));
+            assert_eq!(pixels.len(), 4 * n);
+            for (i, v) in pixels.iter().enumerate() {
+                if k % 5 == 4 {
+                    assert_eq!(v.to_bits(), specials[(k / 5) % specials.len()].to_bits());
+                    nan_channels[i % 4] |= v.is_nan();
+                } else {
+                    assert!((-1.0..2.0).contains(v), "{name}: {v}");
+                }
+                k += 1;
+            }
+        }
+        assert_eq!(nan_channels, [true; 4]);
+        let set = ProbeSet::RowLengths { max_pixels: 3 };
+        assert_eq!(set.name(), "rows of 1 to 3 pixels");
+        assert_eq!(set.rgba_buffers(), row_length_buffers(3));
+    }
+
+    /// A LUT's nodes, then the midpoints between them, then four points outside `[0, 1]`.
+    #[test]
+    fn lut_domain_points_are_nodes_midpoints_and_outside() {
+        let points = lut_domain_points(5);
+        assert_eq!(
+            points,
+            [
+                0.0, 0.25, 0.5, 0.75, 1.0, 0.125, 0.375, 0.625, 0.875, -1.0, -0.5, 1.5, 2.0
+            ]
+        );
+        let points = lut_domain_points(4096);
+        assert_eq!(points.len(), 4096 + 4095 + 4);
+        assert_eq!(points[4095], 1.0);
+        assert_eq!(points[1].to_bits(), ((1.0f64 / 4095.0) as f32).to_bits());
+    }
+
     #[test]
     fn the_f32_sweep_holds_every_bit_pattern_once() {
         let pixels = 1u64 << 20;
@@ -847,6 +950,16 @@ mod tests {
                 "neighbourhoods",
                 digest(&neighbourhoods(&[0.0, 1.0, -0.18, 1e-40, f32::MAX], 5)),
             ),
+            (
+                "rows",
+                digest(
+                    &row_length_buffers(33)
+                        .into_iter()
+                        .flat_map(|(_, pixels)| pixels)
+                        .collect::<Vec<f32>>(),
+                ),
+            ),
+            ("lut points", digest(&lut_domain_points(4096))),
         ];
         let expected = [
             ("all halves", 0xbca4_a3b3_75d9_2669),
@@ -854,6 +967,8 @@ mod tests {
             ("specials", 0xd36e_7d82_fe87_5fc3),
             ("random", 0x0e44_d267_2a56_3dc6),
             ("neighbourhoods", 0x1636_2655_412e_6ab6),
+            ("rows", 0xdca1_81b6_676b_a224),
+            ("lut points", 0xde0c_0135_2f84_a084),
         ];
         assert_eq!(digests, expected, "{digests:#018x?}");
     }
