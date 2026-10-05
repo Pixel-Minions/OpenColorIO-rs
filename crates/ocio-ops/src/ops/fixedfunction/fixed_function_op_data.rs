@@ -152,7 +152,7 @@ const HSY_LOG_TO_RGB_STR: &str = "HSY_LOG_TO_RGB";
 const HSY_LIN_TO_RGB_STR: &str = "HSY_LIN_TO_RGB";
 const HSY_VID_TO_RGB_STR: &str = "HSY_VID_TO_RGB";
 
-/// The names `GetStyle` recognizes, in its order of tests (FixedFunctionOpData.cpp:197-370 @
+/// The names `GetStyle` recognizes, in its order of tests (FixedFunctionOpData.cpp:191-361 @
 /// v2.5.2).
 const STYLE_NAMES: [(&str, FixedFunctionOpStyle); 43] = {
     use FixedFunctionOpStyle::*;
@@ -215,7 +215,7 @@ impl FixedFunctionOpStyle {
     /// the Rec.2100 surround have a detailed name; the others give their CTF name either way.
     ///
     /// Port of `FixedFunctionOpData::ConvertStyleToString`
-    /// (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.cpp:90-191 @ v2.5.2). Its
+    /// (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.cpp:92-186 @ v2.5.2). Its
     /// "Unknown FixedFunction style" for a value outside the enum can't happen.
     pub fn to_str(self, detailed: bool) -> &'static str {
         use FixedFunctionOpStyle::*;
@@ -292,7 +292,7 @@ impl FixedFunctionOpStyle {
     /// its message, which is undefined behaviour (`docs/improvements.md` U-30).
     ///
     /// Port of `FixedFunctionOpData::GetStyle`
-    /// (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.cpp:194-376 @ v2.5.2).
+    /// (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.cpp:189-368 @ v2.5.2).
     pub fn from_name(name: Option<&str>) -> Result<FixedFunctionOpStyle> {
         let name = name.map_or("", |s| s.split('\0').next().unwrap_or(""));
         if !name.is_empty() {
@@ -312,7 +312,7 @@ impl FixedFunctionOpStyle {
     /// upstream doesn't implement are refused ([`UNIMPLEMENTED_GAMUTMAP`]).
     ///
     /// Port of `FixedFunctionOpData::ConvertStyle(FixedFunctionStyle, TransformDirection)`
-    /// (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.cpp:378-525 @ v2.5.2). Its
+    /// (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.cpp:371-492 @ v2.5.2). Its
     /// "Unknown FixedFunction transform style" for a value outside the enum can't happen.
     pub fn from_transform_style(
         style: FixedFunctionStyle,
@@ -359,7 +359,7 @@ impl FixedFunctionOpStyle {
     /// The transform style of the op style, in either direction.
     ///
     /// Port of `FixedFunctionOpData::ConvertStyle(Style)`
-    /// (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.cpp:527-589 @ v2.5.2). Its
+    /// (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.cpp:495-589 @ v2.5.2). Its
     /// "Unknown FixedFunction style" for a value outside the enum can't happen.
     pub fn to_transform_style(self) -> FixedFunctionStyle {
         use FixedFunctionOpStyle::*;
@@ -526,7 +526,7 @@ impl FixedFunctionOpData {
     /// Checks the number of parameters the style takes and, for some styles, their values.
     ///
     /// Port of `FixedFunctionOpData::validate` (src/OpenColorIO/ops/fixedfunction/
-    /// FixedFunctionOpData.cpp:617-842 @ v2.5.2).
+    /// FixedFunctionOpData.cpp:617-840 @ v2.5.2).
     pub fn validate(&self) -> Result<()> {
         use FixedFunctionOpStyle::*;
         use Part::{Text, Value};
@@ -727,7 +727,7 @@ impl FixedFunctionOpData {
     /// parameter upstream (`docs/improvements.md` U-31).
     ///
     /// Port of `FixedFunctionOpData::isInverse` (src/OpenColorIO/ops/fixedfunction/
-    /// FixedFunctionOpData.cpp:844-856 @ v2.5.2).
+    /// FixedFunctionOpData.cpp:842-854 @ v2.5.2).
     pub fn is_inverse(&self, r: &FixedFunctionOpData) -> Result<bool> {
         let this_style = self.style;
         if (FixedFunctionOpStyle::Rec2100SurroundFwd == this_style
@@ -747,7 +747,7 @@ impl FixedFunctionOpData {
     /// Swaps the style's direction. The data is assumed to be validated.
     ///
     /// Port of `FixedFunctionOpData::invert` (src/OpenColorIO/ops/fixedfunction/
-    /// FixedFunctionOpData.cpp:858-1069 @ v2.5.2).
+    /// FixedFunctionOpData.cpp:856-1088 @ v2.5.2).
     fn invert(&mut self) {
         use FixedFunctionOpStyle::*;
         let inverse = match self.style {
@@ -805,7 +805,7 @@ impl FixedFunctionOpData {
     /// swapped.
     ///
     /// Port of `FixedFunctionOpData::inverse` (src/OpenColorIO/ops/fixedfunction/
-    /// FixedFunctionOpData.cpp:1071-1076 @ v2.5.2).
+    /// FixedFunctionOpData.cpp:1090-1095 @ v2.5.2).
     pub fn inverse(&self) -> Result<FixedFunctionOpData> {
         let mut func = self.try_clone()?;
         func.invert();
@@ -827,7 +827,7 @@ impl FixedFunctionOpData {
     /// The direction the style encodes.
     ///
     /// Port of `FixedFunctionOpData::getDirection` (src/OpenColorIO/ops/fixedfunction/
-    /// FixedFunctionOpData.cpp:1078-1129 @ v2.5.2).
+    /// FixedFunctionOpData.cpp:1098-1149 @ v2.5.2).
     pub fn direction(&self) -> TransformDirection {
         use FixedFunctionOpStyle::*;
         match self.style {
@@ -880,7 +880,7 @@ impl FixedFunctionOpData {
     /// Inverts the style when the direction differs.
     ///
     /// Port of `FixedFunctionOpData::setDirection` (src/OpenColorIO/ops/fixedfunction/
-    /// FixedFunctionOpData.cpp:1131-1137 @ v2.5.2).
+    /// FixedFunctionOpData.cpp:1151-1157 @ v2.5.2).
     pub fn set_direction(&mut self, dir: TransformDirection) {
         if self.direction() != dir {
             self.invert();
@@ -903,7 +903,7 @@ impl FixedFunctionOpData {
     /// The metadata is ignored.
     ///
     /// Port of `FixedFunctionOpData::equals` (src/OpenColorIO/ops/fixedfunction/
-    /// FixedFunctionOpData.cpp:1139-1146 @ v2.5.2), after `OpData::equals`, which compares the
+    /// FixedFunctionOpData.cpp:1159-1166 @ v2.5.2), after `OpData::equals`, which compares the
     /// types.
     pub fn equals(&self, other: &FixedFunctionOpData) -> bool {
         self.style == other.style && self.params == other.params
@@ -913,7 +913,7 @@ impl FixedFunctionOpData {
     /// parameter after a space, with 7 significant digits.
     ///
     /// Port of `FixedFunctionOpData::getCacheID` (src/OpenColorIO/ops/fixedfunction/
-    /// FixedFunctionOpData.cpp:1148-1168 @ v2.5.2).
+    /// FixedFunctionOpData.cpp:1168-1188 @ v2.5.2).
     pub fn get_cache_id(&self) -> Vec<u8> {
         let mut cache_id = Vec::new();
         if !self.get_id().is_empty() {
@@ -963,7 +963,7 @@ impl FixedFunctionOpData {
 }
 
 /// Port of `operator==(const FixedFunctionOpData &, const FixedFunctionOpData &)`
-/// (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.cpp:1170-1173 @ v2.5.2).
+/// (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpData.cpp:1190-1193 @ v2.5.2).
 impl PartialEq for FixedFunctionOpData {
     fn eq(&self, other: &Self) -> bool {
         self.equals(other)
