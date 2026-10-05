@@ -7,7 +7,14 @@
 //!   -0.0; a value passed by its bits prints as the same value passed as a JSON number; and
 //!   anything but an unsigned 64-bit integer is refused;
 //! - a transform built by a static factory of its class (`"factory"`), and the specs that
-//!   misuse it refused.
+//!   misuse it refused;
+//! - a LUT's values taken from a request blob (`{"blob": i, "dtype": name}`), bit for bit, NaN
+//!   payloads included, from the blob the spec names, in every command, after the command's
+//!   own blobs; the blob specs that don't describe an array refused;
+//! - what the binding raises building a spec reported alike by every command, and what the
+//!   oracle refuses refusing the request;
+//! - value objects (`{"object": spec}`), their "attrs" set before their "calls", and the
+//!   object specs that misuse them refused.
 
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle::BatchCall;
@@ -176,8 +183,10 @@ fn bad_factories_are_refused() {
     }
 }
 
-/// The values of a 5-entry 1D LUT, red, green and blue per entry, with -0.0, a subnormal, a
-/// large value and an infinity among them.
+/// The values of a 7-entry 1D LUT, red, green and blue per entry, with -0.0, a subnormal, a
+/// large value, an infinity and NaNs among them: quiet and signalling, of both signs, with
+/// payloads, which a blob must carry bit for bit (NumPy or the binding converting the values
+/// would quiet the signalling ones or drop the payloads).
 fn lut1d_values() -> Vec<f32> {
     let mut values: Vec<f32> = (0..3u8)
         .flat_map(|i| {
@@ -186,6 +195,8 @@ fn lut1d_values() -> Vec<f32> {
         })
         .collect();
     values.extend([-0.0, f32::from_bits(1), 3.0e38, f32::INFINITY, 0.1, -7.5]);
+    values.extend([0x7f80_0001, 0x7fc1_2345, 0xff80_0001, 0x7fbf_ffff].map(f32::from_bits));
+    values.extend([0.5, -1.0]);
     values
 }
 
@@ -721,4 +732,132 @@ fn processor_cache_gives_every_case_the_blobs() {
         assert_ne!(ids["v"], ids["w"], "{case}");
         assert_eq!(ids, &cases[0]["report"]["cache_ids"], "{case}");
     }
+}
+
+/// A spec reads the blob it names, through a GroupTransform's children and through a list of
+/// transforms (GroupTransform's constructor): of two LUTs of the same size but other values,
+/// from blobs 1 and 0, the processor's `createGroupTransform()` gives back blob 1's values
+/// first and blob 0's second, bit for bit.
+#[test]
+fn a_spec_reads_the_blob_it_names() {
+    let values = lut1d_values();
+    let other: Vec<f32> = values.iter().rev().copied().collect();
+    let (first, second) = (
+        lut_by_blob("Lut1DTransform", 1, None),
+        lut_by_blob("Lut1DTransform", 0, None),
+    );
+    let groups = [
+        json!({"class": "GroupTransform", "children": [first, second]}),
+        json!({"class": "GroupTransform", "args": {"transforms": [
+            {"transform": first}, {"transform": second},
+        ]}}),
+    ];
+    let bytes = [f32_to_bytes(&values), f32_to_bytes(&other)];
+    let bits = |v: &[f32]| v.iter().map(|x| x.to_bits()).collect::<Vec<_>>();
+    for spec in groups {
+        let response = Oracle::get().call(
+            "processor_ops",
+            json!({"transform": spec, "optimization": "OPTIMIZATION_NONE"}),
+            &[&bytes[0], &bytes[1]],
+        );
+        let reply = ProcessorOpsReply::from_response(response);
+        assert_eq!(
+            reply.processor().classes(),
+            ["Lut1DTransform", "Lut1DTransform"],
+            "{spec}"
+        );
+        let children = &reply.processor().group.children;
+        let data = |i: usize| bits(&children[i].getter("getData").f32s());
+        assert_eq!(data(0), bits(&other), "{spec}");
+        assert_eq!(data(1), bits(&values), "{spec}");
+    }
+}
+
+/// image_apply's own blobs are the ones its buffers name, up to the last one named, and the
+/// transform spec's follow them: with a buffer naming only blob 1 (blob 0 another LUT's
+/// values, which the spec must not read), with two buffers naming the same blob, and with no
+/// buffer naming a blob, a LUT from the spec's blob 0 gives the response of the same LUT made
+/// entry by entry.
+#[test]
+fn image_apply_splits_its_blobs_from_the_specs() {
+    let values = &lut1d_values()[..9];
+    let other: Vec<f32> = values.iter().rev().copied().collect();
+    let (lut, decoy) = (f32_to_bytes(values), f32_to_bytes(&other));
+    let pixels = f32_to_bytes(&[0.0, 0.3, 0.6, 1.0, 0.9, 0.5, 0.25, 0.75]);
+    let image = |buffer: usize| {
+        json!({"kind": "packed", "data": {"buffer": buffer}, "width": 2, "height": 1,
+               "num_channels": 4})
+    };
+    let quarter = [0x00, 0x00, 0x80, 0x3e];
+    let cases: [(Value, Vec<&[u8]>); 3] = [
+        (json!([{"blob": 1}, {"size": 32}]), vec![&decoy, &pixels]),
+        (json!([{"blob": 0}, {"blob": 0}]), vec![&pixels]),
+        (json!([{"size": 32, "fill": quarter}, {"size": 32}]), vec![]),
+    ];
+    let mut calls = Vec::new();
+    for (buffers, own) in &cases {
+        let args = |transform: Value| {
+            json!({"transform": transform, "buffers": buffers, "images": [image(0), image(1)],
+                   "apply": [0, 1]})
+        };
+        calls.push(BatchCall {
+            cmd: "image_apply",
+            args: args(lut1d_by_values(values)),
+            blobs: own.clone(),
+        });
+        let mut blobs = own.clone();
+        blobs.push(&lut);
+        calls.push(BatchCall {
+            cmd: "image_apply",
+            args: args(lut_by_blob("Lut1DTransform", 0, None)),
+            blobs,
+        });
+    }
+    let results = Oracle::get().batch(&calls, false);
+    for (pair, call) in results.chunks(2).zip(calls.chunks(2)) {
+        let what = &call[1].args["buffers"];
+        let (by_values, by_blob) = (
+            pair[0].as_ref().unwrap_or_else(|e| panic!("{what}: {e}")),
+            pair[1].as_ref().unwrap_or_else(|e| panic!("{what}: {e}")),
+        );
+        assert!(
+            by_values.result.get("exception").is_none(),
+            "{what}: {}",
+            by_values.result
+        );
+        assert_eq!(by_blob.result, by_values.result, "{what}");
+        assert_eq!(by_blob.blobs, by_values.blobs, "{what}");
+    }
+}
+
+/// An object spec sets its "attrs" before it makes its "calls": a GradingPrimary whose gamma
+/// "attrs" set to 0 makes `validate(GRADING_LOG)` raise (GradingPrimary.cpp:69-79 @ v2.5.2),
+/// which validating the defaults first wouldn't; without that call, the same object builds a
+/// GradingPrimaryTransform of the linear style, which takes a gamma of 0.
+#[test]
+fn an_object_spec_sets_its_attrs_before_its_calls() {
+    let zero = json!({"object": {"class": "GradingRGBM", "args": [0.0, 0.0, 0.0, 0.0]}});
+    let spec = |calls: Value| {
+        json!({"class": "GradingPrimaryTransform", "args": {
+            "values": {"object": {"class": "GradingPrimary",
+                "args": [{"enum": "GRADING_LIN"}],
+                "attrs": [["gamma", zero]], "calls": calls}},
+            "style": {"enum": "GRADING_LIN"}}})
+    };
+    let response = Oracle::get().call(
+        "transform_text",
+        json!({"transforms": [spec(json!([["validate", {"enum": "GRADING_LOG"}]])),
+                              spec(json!([]))]}),
+        &[],
+    );
+    let transforms = &response.result["transforms"];
+    assert_eq!(transforms[0]["stage"], "transform", "{transforms}");
+    let message = transforms[0]["exception"]["message"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        message.starts_with("GradingPrimary gamma '"),
+        "{transforms}"
+    );
+    assert!(transforms[1].get("exception").is_none(), "{transforms}");
 }
