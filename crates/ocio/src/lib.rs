@@ -14,11 +14,13 @@ pub mod context;
 pub mod context_variable_utils;
 pub mod look;
 pub(crate) mod look_parse;
+pub mod named_transform;
 pub mod path_utils;
 pub mod processor;
 pub(crate) mod tokens_manager;
 pub mod transform;
 pub mod transforms;
+pub mod view_transform;
 pub mod yaml_cpp;
 
 #[cfg(test)]
@@ -29,6 +31,7 @@ pub use color_space_set::ColorSpaceSet;
 pub use config::Config;
 pub use context::Context;
 pub use look::Look;
+pub use named_transform::NamedTransform;
 pub use ocio_ops::exception::{Exception, ExceptionKind, Result};
 pub use ocio_ops::format_metadata::FormatMetadataImpl as FormatMetadata;
 pub use ocio_ops::open_color_types::{
@@ -60,6 +63,7 @@ pub use transforms::look_transform::LookTransform;
 pub use transforms::lut1d_transform::Lut1DTransform;
 pub use transforms::matrix_transform::MatrixTransform;
 pub use transforms::range_transform::{RangeStyle, RangeTransform};
+pub use view_transform::ViewTransform;
 
 /// The OpenColorIO version this port matches, as `OCIO::GetVersion()` reports it.
 pub const fn version() -> &'static str {

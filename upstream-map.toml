@@ -420,13 +420,15 @@ status = "todo"
 path = "src/OpenColorIO/NamedTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/named_transform.rs"]
-status = "todo"
+status = "partial"
+note = "p3-model-objects (3.4c): the class and its operator<<; NamedTransform::GetTransform and GetTransform(src, dst) (182-221, 310-334) come with 3.2a"
 
 [[file]]
 path = "src/OpenColorIO/NamedTransform.h"
 kind = "src"
 target = ["crates/ocio/src/named_transform.rs"]
-status = "todo"
+status = "partial"
+note = "p3-model-objects (3.4c): NamedTransformImpl; the GetTransform declaration comes with 3.2a"
 
 [[file]]
 path = "src/OpenColorIO/OCIOYaml.cpp"
@@ -618,7 +620,8 @@ status = "todo"
 path = "src/OpenColorIO/ViewTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/view_transform.rs"]
-status = "todo"
+status = "done"
+note = "p3-model-objects (3.4c)"
 
 [[file]]
 path = "src/OpenColorIO/ViewingRules.cpp"
@@ -4297,6 +4300,7 @@ path = "tests/cpu/NamedTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/named_transform_tests.rs"]
 status = "todo"
+note = "basic and alias add named transforms to a config (3.4j) and call NamedTransform::GetTransform (3.2a): they move to p3-config-2; p3-model-objects (3.4c) checks their parts without a config in named_transform_tests.rs. The others: static_get_transform (3.2a), the Config tests (3.2d, 3.3j, 3.8b)"
 
 [[file]]
 path = "tests/cpu/OCIOZArchive_tests.cpp"
@@ -4416,7 +4420,8 @@ note = "S2: EqualWithSafeRelError"
 path = "tests/cpu/ViewTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/view_transform_tests.rs"]
-status = "todo"
+status = "done"
+note = "p3-model-objects (3.4c)"
 
 [[file]]
 path = "tests/cpu/ViewingRules_tests.cpp"
