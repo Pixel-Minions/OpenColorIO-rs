@@ -45,16 +45,19 @@ pub mod emitter;
 pub mod emitter_manip;
 pub mod emitter_state;
 pub mod emitter_utils;
+pub mod event_handler;
 pub mod exceptions;
 pub mod exp;
 pub mod mark;
 pub mod ostream_wrapper;
+pub mod parser;
 pub mod regex_yaml;
 pub mod scan_scalar;
 pub mod scan_tag;
 mod scan_token;
 pub mod scanner;
 mod simple_key;
+pub mod single_doc_parser;
 pub mod stream;
 pub mod tag;
 pub mod token;
@@ -65,3 +68,8 @@ pub use emitter_manip::{
     double_precision, float_precision, local_tag, local_tag_with_prefix, precision, secondary_tag,
     verbatim_tag,
 };
+
+#[cfg(test)]
+mod handler_test;
+#[cfg(test)]
+mod spec_examples;
