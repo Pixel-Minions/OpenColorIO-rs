@@ -24,7 +24,7 @@ use std::fmt::Debug;
 use std::sync::OnceLock;
 
 use super::Combo;
-use crate::compare::{f32_bits_report, pixels_report_except_nan_bits};
+use crate::compare::{f32_bits_report, pixels_report_except_nan_bits, pixels_report_within_ulp};
 
 /// Which of a pixel's four channels (R, G, B, A) something applies to.
 pub type Channels = [bool; 4];
@@ -160,6 +160,27 @@ pub enum W0002Scope {
     Only(fn(&Combo) -> bool),
 }
 
+/// A renderer under waiver W0001 (`waivers.toml`): the PQ curves without fast math on
+/// Windows, where the wheel calls SVML's `pow` and the port the UCRT's `powf`. Its name is the
+/// key of its bound in the waiver's `bound_ulp`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum W0001Function {
+    /// `Renderer_LIN_TO_PQ`: `LIN_TO_PQ` forward, `PQ_TO_LIN` inverse.
+    LinToPq,
+    /// `Renderer_PQ_TO_LIN`: `PQ_TO_LIN` forward, `LIN_TO_PQ` inverse.
+    PqToLin,
+}
+
+impl W0001Function {
+    /// The key of the function's bound in W0001's `bound_ulp`.
+    pub fn key(self) -> &'static str {
+        match self {
+            W0001Function::LinToPq => "LIN_TO_PQ",
+            W0001Function::PqToLin => "PQ_TO_LIN",
+        }
+    }
+}
+
 /// One parameter set of a family, with its label.
 #[derive(Debug, Clone)]
 pub struct Case<P> {
@@ -170,6 +191,8 @@ pub struct Case<P> {
     non_finite: Channels,
     nan: Channels,
     w0002: W0002Scope,
+    /// The renderers W0001 covers, forward and inverse.
+    w0001: Option<[W0001Function; 2]>,
     allowed_log: Vec<String>,
 }
 
@@ -206,6 +229,7 @@ impl<P: Params> Case<P> {
             non_finite,
             nan,
             w0002: W0002Scope::Everywhere,
+            w0001: None,
             allowed_log: Vec::new(),
         }
     }
@@ -222,6 +246,29 @@ impl<P: Params> Case<P> {
     pub fn w0002_nowhere(mut self) -> Self {
         self.w0002 = W0002Scope::Nowhere;
         self
+    }
+
+    /// Puts this case under waiver W0001 (`waivers.toml`): its renderer is `forward` in the
+    /// forward direction and `inverse` in the inverse one, and on Windows with fast math off
+    /// ([`Case::w0001_applies`]) its pixels compare within the waiver's bound for that
+    /// renderer. Only the PQ curves' cases take it. Generated cases inherit it.
+    pub fn w0001(mut self, forward: W0001Function, inverse: W0001Function) -> Self {
+        self.w0001 = Some([forward, inverse]);
+        self
+    }
+
+    /// The renderer W0001 covers for this case in `combo`: on Windows, with fast math off, for
+    /// a case marked with [`Case::w0001`]. Elsewhere `None`: the wheel's Linux build and its
+    /// fast math compute PQ as the port does, and compare bit for bit.
+    pub fn w0001_applies(&self, combo: &Combo) -> Option<W0001Function> {
+        let [forward, inverse] = self.w0001?;
+        if !cfg!(target_os = "windows") || combo.fast_math {
+            return None;
+        }
+        Some(match combo.direction {
+            super::Direction::Forward => forward,
+            super::Direction::Inverse => inverse,
+        })
     }
 
     /// Allows OCIO log messages that contain `fragment` for this case. Any other message the
@@ -303,6 +350,11 @@ impl<P: Params> Case<P> {
 
     /// Compares the port's `actual` RGBA pixels with the wheel's `expected` for `inputs`.
     ///
+    /// Where W0001 applies ([`Case::w0001_applies`]), a value may differ from the wheel's by up
+    /// to the waiver's bound for the renderer if both are finite, and in its NaN bits if both
+    /// are NaN (`compare::pixels_report_within_ulp`); everything else compares bit for bit.
+    /// Otherwise:
+    ///
     /// Where W0002 applies ([`Case::w0002_applies`]), a value that is NaN in `expected`, in a
     /// channel with a NaN parameter, only has to be NaN in `actual`. Every other value,
     /// including the channels of infinite parameters, compares bit for bit. With
@@ -317,6 +369,14 @@ impl<P: Params> Case<P> {
         expected: &[f32],
         actual: &[f32],
     ) -> Comparison {
+        if let Some(function) = self.w0001_applies(combo) {
+            let (waiver, bound) = w0001_bound(function);
+            return match pixels_report_within_ulp(waiver, bound, inputs, expected, actual) {
+                Ok(0) => Comparison::Exact,
+                Ok(waived) => Comparison::W0001 { waived },
+                Err(report) => Comparison::Mismatch(report),
+            };
+        }
         if self.w0002_applies(combo) {
             match pixels_report_except_nan_bits(w0002(), &self.nan, inputs, expected, actual) {
                 Ok(0) => Comparison::Exact,
@@ -495,6 +555,12 @@ pub enum Comparison {
         /// How many NaN values matched only as NaN.
         waived: usize,
     },
+    /// Identical except `waived` values within waiver W0001: finite values within its bound,
+    /// NaN values differing in sign or payload bits.
+    W0001 {
+        /// How many values differed within the waiver.
+        waived: usize,
+    },
     /// Different; the report lists the differences.
     Mismatch(String),
 }
@@ -524,6 +590,46 @@ fn w0002() -> &'static str {
         );
     });
     "W0002"
+}
+
+/// `"W0001"` and its bound in ulp for `function`, read from the waiver's `bound_ulp` in
+/// `waivers.toml`: the owner's numbers, so that a changed or withdrawn bound fails every
+/// comparison that relies on it instead of passing silently.
+fn w0001_bound(function: W0001Function) -> (&'static str, u64) {
+    static BOUNDS: OnceLock<toml::Table> = OnceLock::new();
+    let bounds = BOUNDS.get_or_init(|| {
+        let path = crate::paths::workspace_root().join("waivers.toml");
+        let text =
+            std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        let doc: toml::Table = text
+            .parse()
+            .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        doc.get("waiver")
+            .and_then(|w| w.as_array())
+            .into_iter()
+            .flatten()
+            .find(|w| w.get("id").and_then(|id| id.as_str()) == Some("W0001"))
+            .and_then(|w| w.get("bound_ulp"))
+            .and_then(|b| b.as_table())
+            .cloned()
+            .unwrap_or_else(|| {
+                panic!(
+                    "waiver W0001 has no bound_ulp in {}: the PQ curves must match exactly",
+                    path.display()
+                )
+            })
+    });
+    let bound = bounds
+        .get(function.key())
+        .and_then(|b| b.as_integer())
+        .and_then(|b| u64::try_from(b).ok())
+        .unwrap_or_else(|| {
+            panic!(
+                "waiver W0001 has no bound for {}: it must match exactly",
+                function.key()
+            )
+        });
+    ("W0001", bound)
 }
 
 /// The generated cases of `base`: one per slot and value, where the slot takes one of its
@@ -568,6 +674,7 @@ fn mutation<P: Params>(base: &Case<P>, slot: usize, info: &Slot, value: usize, v
     let mut case = Case::new(label, params);
     case.origin = Origin::Generated { slot, value };
     case.allowed_log = base.allowed_log.clone();
+    case.w0001 = base.w0001;
     case
 }
 
@@ -794,6 +901,76 @@ mod tests {
         }
     }
 
+    /// W0001 applies to the cases marked with `Case::w0001`, on Windows with fast math off, to
+    /// the renderer of the combination's direction: finite values within its bound in
+    /// `waivers.toml`, NaN bits of NaNs; NaN positions, infinities and values beyond the bound
+    /// are mismatches. Elsewhere, and for other cases, the comparison is exact.
+    #[test]
+    fn w0001_covers_the_pq_renderers_within_their_bound_on_windows_only() {
+        let inputs = px([0; 4]);
+        let one = 0x3f80_0000;
+        let expected = px([one, one, NAN_A, one]);
+        let (fwd, inv) = (
+            combo(Direction::Forward, false),
+            combo(Direction::Inverse, false),
+        );
+        let case =
+            Case::new("typical", toy()).w0001(W0001Function::LinToPq, W0001Function::PqToLin);
+        let windows = cfg!(target_os = "windows");
+        assert_eq!(
+            case.w0001_applies(&fwd),
+            windows.then_some(W0001Function::LinToPq)
+        );
+        assert_eq!(
+            case.w0001_applies(&inv),
+            windows.then_some(W0001Function::PqToLin)
+        );
+        assert_eq!(case.w0001_applies(&combo(Direction::Forward, true)), None);
+        assert_eq!(Case::new("typical", toy()).w0001_applies(&fwd), None);
+
+        let (_, bound) = w0001_bound(W0001Function::LinToPq);
+        let off = |ulp: u64| {
+            let mut a = expected.clone();
+            a[0] = f32::from_bits(one + u32::try_from(ulp).unwrap());
+            a
+        };
+        let other_nan = px([one, one, NAN_B, one]);
+        let mut nan_moved = expected.clone();
+        nan_moved[1] = f32::from_bits(NAN_A);
+        let mut infinite = expected.clone();
+        infinite[0] = f32::INFINITY;
+        if windows {
+            assert_eq!(
+                case.compare_pixels(&fwd, &inputs, &expected, &off(bound)),
+                Comparison::W0001 { waived: 1 }
+            );
+            assert_eq!(
+                case.compare_pixels(&fwd, &inputs, &expected, &other_nan),
+                Comparison::W0001 { waived: 1 }
+            );
+        }
+        for actual in [&off(bound + 1), &nan_moved, &infinite] {
+            assert!(matches!(
+                case.compare_pixels(&fwd, &inputs, &expected, actual),
+                Comparison::Mismatch(_)
+            ));
+        }
+        // Fast math, and cases without the mark, compare exactly.
+        for (c, combo) in [
+            (&case, combo(Direction::Forward, true)),
+            (&Case::new("typical", toy()), fwd),
+        ] {
+            assert!(matches!(
+                c.compare_pixels(&combo, &inputs, &expected, &off(1)),
+                Comparison::Mismatch(_)
+            ));
+        }
+        // Generated cases inherit the mark.
+        for generated in sampled_mutations(&case) {
+            assert_eq!(generated.w0001_applies(&fwd), case.w0001_applies(&fwd));
+        }
+    }
+
     /// W0002 covers the channels of NaN parameters and no other, alpha included: for a NaN
     /// green slope, a NaN-bit difference in red, blue or alpha is a mismatch; for a NaN base
     /// (the three colour channels), one in alpha is.
@@ -1013,11 +1190,13 @@ mod tests {
         }
     }
 
-    /// Nothing but the battery and the format sweep through the API compares under W0002.
-    /// Outside `compare.rs`, which defines the comparison, only the `Case` methods here may call
-    /// it; and they are called only by the battery's engine, by this file's tests, and by
-    /// `crates/ocio/tests/api_formats_oracle.rs` (`compare_pixels` on its decoded images,
-    /// `compare_baked_luts` on the LUTs the optimizer bakes), whatever `Combo` a caller builds.
+    /// Nothing but the battery and the format sweep through the API compares under W0002, and
+    /// nothing but the battery under W0001 (`compare_pixels` with a case marked `Case::w0001`).
+    /// Outside `compare.rs`, which defines the comparisons, only the `Case` methods here may call
+    /// them, and only `w0001_bound` reads W0001's bound; and they are called only by the
+    /// battery's engine, by this file's tests, and by `crates/ocio/tests/api_formats_oracle.rs`
+    /// (`compare_pixels` on its decoded images, `compare_baked_luts` on the LUTs the optimizer
+    /// bakes), whatever `Combo` a caller builds.
     #[test]
     fn only_the_battery_uses_the_w0002_comparison() {
         fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
@@ -1042,9 +1221,11 @@ mod tests {
         const ENGINE: &str = "crates/ocio-testkit/src/battery/engine.rs";
         const SWEEP: &str = "crates/ocio/tests/api_formats_oracle.rs";
         // Each name, and the only files that may contain it.
-        let rules: [(&str, &[&str]); 4] = [
+        let rules: [(&str, &[&str]); 6] = [
             ("assert_pixels_bits_eq_except_nan_bits", &[COMPARE, PARAMS]),
             ("pixels_report_except_nan_bits", &[COMPARE, PARAMS]),
+            ("pixels_report_within_ulp", &[COMPARE, PARAMS]),
+            ("w0001_bound(", &[PARAMS]),
             ("compare_pixels(", &[PARAMS, ENGINE, SWEEP]),
             ("compare_baked_luts(", &[PARAMS, SWEEP]),
         ];
@@ -1067,7 +1248,7 @@ mod tests {
         assert!(files.len() > 20, "found only {} sources", files.len());
         assert!(
             offenders.is_empty(),
-            "the W0002 comparison is used outside the battery and the format sweep: \
+            "the W0002 or W0001 comparison is used outside the battery and the format sweep: \
              {offenders:?}"
         );
     }

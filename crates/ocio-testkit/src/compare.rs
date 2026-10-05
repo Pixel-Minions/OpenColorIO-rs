@@ -11,7 +11,8 @@ use std::fmt::Write as _;
 const MAX_LISTED: usize = 20;
 
 /// Distance in units in the last place between two non-NaN floats, counting `-0.0` and
-/// `0.0` as one step apart. For reports only: comparisons are always exact.
+/// `0.0` as one step apart. For reports, and for the bound of waiver W0001
+/// (`pixels_report_within_ulp`); other comparisons are exact.
 pub fn ulp_distance(a: f32, b: f32) -> Option<u64> {
     if a.is_nan() || b.is_nan() {
         return None;
@@ -177,6 +178,45 @@ pub(crate) fn pixels_report_except_nan_bits(
         None => Ok(waived),
         Some(report) => Err(format!(
             "(NaN bits waived by {waiver} in channels {waived_channels:?}): {report}"
+        )),
+    }
+}
+
+/// The comparison of waiver W0001 (`waivers.toml`): `actual` equals `expected` bit for bit,
+/// except that a value that is NaN in both may differ in its sign and payload bits, and a value
+/// that is finite in both may differ by at most `bound` ulp ([`ulp_distance`]). NaN positions,
+/// infinities and every other value compare exactly. How many values differed within the
+/// waiver, or a report that starts with `(within <bound> ulp, NaN bits waived, by <waiver>):`.
+///
+/// Only `battery::params::Case::compare_pixels` calls it, for the cases a family marks with
+/// `Case::w0001`; a test pins its callers.
+pub(crate) fn pixels_report_within_ulp(
+    waiver: &str,
+    bound: u64,
+    inputs: &[f32],
+    expected: &[f32],
+    actual: &[f32],
+) -> Result<usize, String> {
+    let mut compared = actual.to_vec();
+    let mut waived = 0;
+    for (i, (e, a)) in expected.iter().zip(actual).enumerate() {
+        if e.to_bits() == a.to_bits() {
+            continue;
+        }
+        let within = if e.is_nan() || a.is_nan() {
+            e.is_nan() && a.is_nan()
+        } else {
+            e.is_finite() && a.is_finite() && ulp_distance(*e, *a).is_some_and(|d| d <= bound)
+        };
+        if within {
+            compared[i] = *e;
+            waived += 1;
+        }
+    }
+    match f32_bits_report(expected, &compared, Some(inputs), 4) {
+        None => Ok(waived),
+        Some(report) => Err(format!(
+            "(within {bound} ulp, NaN bits waived, by {waiver}): {report}"
         )),
     }
 }

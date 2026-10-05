@@ -495,6 +495,8 @@ fn compare_images(
     ) {
         Comparison::W0002 { waived } => Ok(waived),
         Comparison::Exact => Err("the destination's bytes differ, its values don't".into()),
+        // No case of the sweep is under W0001 (the PQ curves are the op battery's only).
+        Comparison::W0001 { .. } => Err("W0001 applied to a case of the format sweep".into()),
         Comparison::Mismatch(report) => Err(report),
     }
 }
@@ -988,6 +990,8 @@ fn check(class: &Class) {
                 waived.lut_entries += n;
             }
             Comparison::Exact => {}
+            // `compare_baked_luts` never compares under W0001.
+            Comparison::W0001 { .. } => failures.push(format!("{what}: W0001 on a baked LUT")),
             Comparison::Mismatch(report) => failures.push(format!("{what}\n  {report}")),
         }
     }

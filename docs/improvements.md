@@ -814,6 +814,21 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p2-ff-cpu-2` (2.3d1, `times_copysign_one`, `cfg(target_os)`); the
   battery's specials and NaN buffers compare it bit for bit on both platforms.
 
+### I-84. PQ without fast math differs between Windows and Linux
+
+- **Upstream:** with fast math off, `GetFixedFunctionCPURenderer` picks the SSE PQ renderers
+  with `_mm_pow_ps` where the compiler is MSVC 2019 or later with AVX enabled, and the scalar
+  `Renderer_LIN_TO_PQ<float>` and `Renderer_PQ_TO_LIN<float>` with `powf` elsewhere
+  (`ops/fixedfunction/FixedFunctionOpCPU.cpp:2557-2590`). MSVC compiles `_mm_pow_ps` to
+  SVML's `__vdecl_powf4`, so the Windows wheel computes PQ with SVML and the Linux wheel with
+  glibc's `powf`: different results in the last bits of about 1.7% of the values, up to a few
+  hundred ulp for `LIN_TO_PQ` and far more for `PQ_TO_LIN` near its pole (W0001).
+- **Who notices:** `FIXED_FUNCTION_LIN_TO_PQ` transforms, in either direction, with fast math
+  off: Windows and Linux give different values.
+- **A fix:** one renderer and one `pow` on every platform.
+- **Status:** matched in `p2-ff-cpu-2` (2.3d2) on Linux, bit for bit; on Windows the port
+  calls `powf` where the wheel calls SVML (W0001, within its bound).
+
 ## Logging
 
 ### I-16. Two messages bypass the logging function

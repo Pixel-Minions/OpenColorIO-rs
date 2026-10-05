@@ -3,8 +3,7 @@
 
 //! Port of `tests/cpu/ops/fixedfunction/FixedFunctionOp_tests.cpp` @ v2.5.2: the tests of the
 //! op. Its test of `CreateFixedFunctionTransform` (`create_transform`) needs the transform: it
-//! is in crates/ocio/src/transforms/fixed_function_transform_tests.rs. The `FixedFunctionOps`
-//! test of the PQ styles comes with their renderers (2.3d2).
+//! is in crates/ocio/src/transforms/fixed_function_transform_tests.rs.
 
 use super::*;
 
@@ -379,4 +378,11 @@ fn ops_lin_to_double_log() {
         &params,
         "RendererLinToDoubleLog",
     );
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOps, LIN_TO_PQ)` @ v2.5.2.
+#[test]
+fn ops_lin_to_pq() {
+    use FixedFunctionOpStyle::*;
+    check_ops(PqToLin, LinToPq, "RendererPqToLin");
 }

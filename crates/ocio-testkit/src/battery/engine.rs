@@ -253,6 +253,7 @@ pub(super) fn run<F: Family>(family: &F, plan: &Plan) -> Summary {
         refused: HashMap::new(),
         reported: HashSet::new(),
         waived: HashMap::new(),
+        w0001_waived: HashMap::new(),
         refusals: HashMap::new(),
         expected,
         routes,
@@ -315,6 +316,8 @@ struct Checker<'a, F: Family> {
     reported: HashSet<(usize, usize)>,
     /// NaN values W0002 covered, per case and combination.
     waived: HashMap<(usize, usize), usize>,
+    /// Values W0001 covered, per case and combination.
+    w0001_waived: HashMap<(usize, usize), usize>,
     /// How many case and combination pairs the wheel refused with each text.
     refusals: HashMap<String, usize>,
     /// Per case and combination, how many buffers the plan asks for.
@@ -522,9 +525,16 @@ impl<F: Family> Checker<'_, F> {
             // Listed in the summary even when nothing needs the waiver.
             self.waived.entry(group).or_default();
         }
+        if case.w0001_applies(&combo).is_some() {
+            self.summary.w0001_comparisons += 1;
+            self.w0001_waived.entry(group).or_default();
+        }
         match comparison {
             Comparison::Exact => {}
             Comparison::W0002 { waived } => *self.waived.entry(group).or_default() += waived,
+            Comparison::W0001 { waived } => {
+                *self.w0001_waived.entry(group).or_default() += waived;
+            }
             Comparison::Mismatch(report) => {
                 failures.insert(0, format!("{label}, {probe}:\n{report}"));
             }
@@ -629,6 +639,14 @@ impl<F: Family> Checker<'_, F> {
             let label = self.cases[case].label().to_string();
             self.summary
                 .w0002_waived
+                .push((label, self.combos[combo].to_string(), n));
+        }
+        let mut w0001: Vec<((usize, usize), usize)> = self.w0001_waived.into_iter().collect();
+        w0001.sort();
+        for ((case, combo), n) in w0001 {
+            let label = self.cases[case].label().to_string();
+            self.summary
+                .w0001_waived
                 .push((label, self.combos[combo].to_string(), n));
         }
         let mut refusals: Vec<(String, usize)> = self.refusals.into_iter().collect();

@@ -52,6 +52,12 @@
 //! [`params::Case::compare_baked_luts`] for the 1D LUTs the optimizer bakes from a case with
 //! NaN parameters (`waivers.toml`). A test pins these callers.
 //!
+//! Waiver W0001 applies only to the cases a family marks with [`params::Case::w0001`] (the PQ
+//! curves), and only on Windows with fast math off, through the same
+//! [`params::Case::compare_pixels`]: a finite value may differ from the wheel's by up to the
+//! bound `waivers.toml` gives for the renderer, a NaN in its sign and payload bits; NaN
+//! positions and everything else compare bit for bit.
+//!
 //! ```no_run
 //! use ocio_testkit::battery::params::{A, Case, Channels, Params, Precision, RGB, Slot};
 //! use ocio_testkit::battery::{self, Combo, Direction, Family, Port, Spec, Validation};
@@ -653,6 +659,11 @@ pub struct Summary {
     /// For every case and combination W0002 applied to, zeros included: the case, the
     /// combination, and how many NaN values matched only as NaN.
     pub w0002_waived: Vec<(String, String, usize)>,
+    /// Comparisons under waiver W0001 (the PQ curves without fast math on Windows).
+    pub w0001_comparisons: usize,
+    /// For every case and combination W0001 applied to, zeros included: the case, the
+    /// combination, and how many values differed within the waiver.
+    pub w0001_waived: Vec<(String, String, usize)>,
     /// Oracle calls.
     pub oracle_calls: usize,
     /// Oracle processes (batches).
@@ -715,6 +726,18 @@ impl fmt::Display for Summary {
             )?;
             for (text, n) in &self.refusals {
                 writeln!(f, "    {n}: {text}")?;
+            }
+        }
+        if !self.w0001_waived.is_empty() {
+            let waived: usize = self.w0001_waived.iter().map(|(_, _, n)| n).sum();
+            writeln!(
+                f,
+                "  under W0001: {} buffers, {waived} values within its bound or differing in NaN \
+                 bits only:",
+                self.w0001_comparisons
+            )?;
+            for (case, combo, n) in &self.w0001_waived {
+                writeln!(f, "    {case}: {combo} {n}")?;
             }
         }
         if !self.w0002_waived.is_empty() {
