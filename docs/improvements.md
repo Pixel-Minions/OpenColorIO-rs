@@ -995,14 +995,18 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   a positive NaN. The shader then compares the pixel with `vec3(-nan, -nan, -nan)` on Windows
   and `vec3(nan, nan, nan)` on Linux. The CPU renderer computes its breaks with `logf`, which
   both wheels link in its current version, and the other `log` calls of the gamma-log and
-  double-log writers and renderers take the log base, which validation keeps positive.
+  double-log writers and renderers take the log base, which validation keeps positive. The
+  gamma-log inverse shader's `std::pow(double, double)` (its break and mirror,
+  `FixedFunctionOpGPU.cpp:2055-2056`) is `pow@GLIBC_2.2.5` on Linux too, but its wrapper gives
+  a negative base with a non-integer power the same NaN as the current symbol.
 - **Who notices:** anyone comparing the shader text of such a `FIXED_FUNCTION_LIN_TO_DOUBLE_LOG`
   inverse between a Windows and a Linux machine (the shader's results don't depend on the sign).
 - **A fix:** refuse a negative log argument at a break in `validate`, or one `log` on every
   platform; either changes the port's results on at least one of them.
 - **Status:** matched in `p2-ff-gpu` (`log_as_linked` in `fixed_function_op_gpu.rs`, as
   `log2_glibc_2_2_5` does for I-70); `fixed_function_op_gpu_oracle.rs`,
-  `double_log_break_points_match_the_wheel`, on both platforms.
+  `double_log_break_points_match_the_wheel`, and for the `pow`
+  `gamma_log_negative_gamma_bases_match_the_wheel`, on both platforms.
 
 ## Python module (`ocio-py`)
 
