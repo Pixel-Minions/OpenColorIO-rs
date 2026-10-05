@@ -30,6 +30,35 @@ fn injected_environment() {
     set_env_provider(None);
 }
 
+/// A thread's environment comes first on that thread, for what OCIO reads and what it sets
+/// (`setenv` goes to the thread's environment, not to the process-wide one), and nowhere else.
+#[test]
+fn a_thread_environment_comes_first_on_its_thread_only() {
+    let _environment = crate::unit_test_log_utils::environment_lock();
+    let env = |value: &str| {
+        let vars = BTreeMap::from([("OCIO_TEST_VAR".to_string(), value.to_string())]);
+        Arc::new(MapEnv::from(vars))
+    };
+    let global = env("global");
+    let thread = env("thread");
+    set_env_provider(Some(global.clone()));
+    set_thread_env_provider(Some(thread.clone()));
+    assert_eq!(getenv("OCIO_TEST_VAR").as_deref(), Some(&b"thread"[..]));
+    setenv("OCIO_TEST_VAR", "set").expect("no error");
+    assert_eq!(thread.var(b"OCIO_TEST_VAR").as_deref(), Some(&b"set"[..]));
+    assert_eq!(
+        global.var(b"OCIO_TEST_VAR").as_deref(),
+        Some(&b"global"[..])
+    );
+    let other = std::thread::spawn(|| getenv("OCIO_TEST_VAR"))
+        .join()
+        .unwrap();
+    assert_eq!(other.as_deref(), Some(&b"global"[..]));
+    set_thread_env_provider(None);
+    assert_eq!(getenv("OCIO_TEST_VAR").as_deref(), Some(&b"global"[..]));
+    set_env_provider(None);
+}
+
 /// Port of `OCIO_ADD_TEST(Platform, string_compare)` @ v2.5.2.
 #[test]
 fn string_compare() {

@@ -20,6 +20,7 @@
 //! when OCIO reads it, and other code in the process doesn't see it (deviation D-5,
 //! `docs/deviations.md`).
 
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
@@ -339,8 +340,25 @@ pub fn set_env_provider(provider: Option<Arc<dyn EnvProvider>>) {
     *ENV.write().unwrap_or_else(|e| e.into_inner()) = provider;
 }
 
-/// The environment OCIO reads.
+thread_local! {
+    static THREAD_ENV: RefCell<Option<Arc<dyn EnvProvider>>> = const { RefCell::new(None) };
+}
+
+/// Replaces the environment OCIO reads and writes on this thread only, ahead of
+/// [`set_env_provider`]'s (`None` removes it). For tests that run in parallel threads: the
+/// environment one test gives OCIO is never what another test reads, or changes, on its own
+/// thread.
+pub fn set_thread_env_provider(provider: Option<Arc<dyn EnvProvider>>) {
+    THREAD_ENV.with(|env| *env.borrow_mut() = provider);
+}
+
+/// The environment OCIO reads and writes on this thread: this thread's
+/// ([`set_thread_env_provider`]), or else the process-wide one ([`set_env_provider`]), or else
+/// the process environment.
 pub fn env_provider() -> Arc<dyn EnvProvider> {
+    if let Some(provider) = THREAD_ENV.with(|env| env.borrow().clone()) {
+        return provider;
+    }
     ENV.read()
         .unwrap_or_else(|e| e.into_inner())
         .clone()
