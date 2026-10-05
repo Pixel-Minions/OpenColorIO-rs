@@ -16,7 +16,7 @@ use super::emitter_manip::EmitterManip;
 use super::emitter_state::FlowType;
 use super::exp;
 use super::ostream_wrapper::OstreamWrapper;
-use super::regex_yaml::{RegEx, StringCharSource};
+use super::regex_yaml::{RegEx, Source, StringCharSource};
 
 /// Port of `YAML::StringFormat::value` (emitterutils.h:17-19).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

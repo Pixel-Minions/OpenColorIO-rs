@@ -3,13 +3,16 @@
 // Ported from yaml-cpp 0.8.0 (MIT License, Copyright (c) 2008-2015 Jesse Beder); see mod.rs.
 
 //! Port of yaml-cpp 0.8.0's simplified regular expressions (src/regex_yaml.h,
-//! src/regex_yaml.cpp, src/regeximpl.h) over `StringCharSource` (src/stringsource.h), the
-//! only source the emitter matches against.
+//! src/regex_yaml.cpp, src/regeximpl.h) over its two sources: `StringCharSource`
+//! (src/stringsource.h), which the emitter matches against, and `StreamCharSource`
+//! (src/streamcharsource.h, in [`super::stream`]), which the scanner matches against.
 //!
 //! yaml-cpp stores characters as `char`, which is signed on x86-64 with both MSVC and GCC,
 //! and compares ranges as signed values; `RegEx` keeps them as `i8` for that reason.
 
 use std::ops::{Add, BitAnd, BitOr, Not};
+
+use super::stream::{STREAM_EOF, Stream, StreamCharSource};
 
 /// Port of `YAML::REGEX_OP` (regex_yaml.h:13-21).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,6 +24,31 @@ pub enum RegexOp {
     And,
     Not,
     Seq,
+}
+
+/// What `RegEx`'s templates need of a source (regeximpl.h): `operator bool`, `operator[]`,
+/// `operator+`, and the two template specializations that differ between the sources.
+pub trait Source: Sized {
+    /// `operator bool`: whether the source has a character at its position.
+    fn is_valid(&self) -> bool;
+
+    /// `operator[](i)`: the character `i` places on.
+    fn at(&self, i: usize) -> u8;
+
+    /// `operator+(int)`: the source `i` characters on (never before its start).
+    fn plus(&self, i: i32) -> Self;
+
+    /// `RegEx::IsValidSource<Source>` (regeximpl.h:50-65). The general template is
+    /// `operator bool`; `StringCharSource` checks it only before a match or a range.
+    fn is_valid_for(&self, _op: RegexOp) -> bool {
+        self.is_valid()
+    }
+
+    /// `RegEx::MatchOpEmpty<Source>` (regeximpl.h:100-110). The general template matches the
+    /// stream's end-of-input character; `StringCharSource` matches the end of the string.
+    fn match_empty(&self) -> i32 {
+        if self.at(0) == STREAM_EOF { 0 } else { -1 }
+    }
 }
 
 /// Port of `YAML::StringCharSource` (stringsource.h): a position in a byte string. Reading
@@ -36,19 +64,26 @@ impl<'a> StringCharSource<'a> {
         StringCharSource { s, offset: 0 }
     }
 
+    /// `operator++` (stringsource.h:29-32).
+    pub fn advance(&mut self) {
+        self.offset += 1;
+    }
+}
+
+impl Source for StringCharSource<'_> {
     /// `operator bool`: characters remain.
-    pub fn is_valid(&self) -> bool {
+    fn is_valid(&self) -> bool {
         self.offset < self.s.len()
     }
 
     /// `operator[](i)`: `m_str[m_offset + i]`. At the end this is the NUL terminator of
     /// `c_str()`; the matchers never read further.
-    pub fn at(&self, i: usize) -> u8 {
+    fn at(&self, i: usize) -> u8 {
         self.s.get(self.offset + i).copied().unwrap_or(0)
     }
 
     /// `operator+(int)` (stringsource.h:20-27).
-    pub fn plus(&self, i: i32) -> StringCharSource<'a> {
+    fn plus(&self, i: i32) -> Self {
         let mut source = *self;
         if self.offset as i64 + i64::from(i) >= 0 {
             source.offset = (self.offset as i64 + i64::from(i)) as usize;
@@ -58,9 +93,17 @@ impl<'a> StringCharSource<'a> {
         source
     }
 
-    /// `operator++` (stringsource.h:29-32).
-    pub fn advance(&mut self) {
-        self.offset += 1;
+    /// `IsValidSource<StringCharSource>` (regeximpl.h:55-65).
+    fn is_valid_for(&self, op: RegexOp) -> bool {
+        match op {
+            RegexOp::Match | RegexOp::Range => self.is_valid(),
+            _ => true,
+        }
+    }
+
+    /// `MatchOpEmpty<StringCharSource>` (regeximpl.h:105-110): only the empty string.
+    fn match_empty(&self) -> i32 {
+        if self.is_valid() { -1 } else { 0 }
     }
 }
 
@@ -121,6 +164,11 @@ impl RegEx {
         }
     }
 
+    /// `Matches(char ch)` (regeximpl.h:15-19): against a one-character string.
+    pub fn matches_char(&self, ch: u8) -> bool {
+        self.matches_str(&[ch])
+    }
+
     /// `Matches(const std::string &)`.
     pub fn matches_str(&self, s: &[u8]) -> bool {
         self.match_str(s) >= 0
@@ -131,39 +179,34 @@ impl RegEx {
         self.match_source(&StringCharSource::new(s))
     }
 
+    /// `Matches(const Stream &)` (regeximpl.h:25): at the stream's current character.
+    pub fn matches_stream(&self, stream: &Stream<'_>) -> bool {
+        self.match_stream(stream) >= 0
+    }
+
+    /// `Match(const Stream &)` (regeximpl.h:44-47).
+    pub fn match_stream(&self, stream: &Stream<'_>) -> i32 {
+        self.match_source(&StreamCharSource::new(stream))
+    }
+
     /// `Matches(const Source &)`.
-    pub fn matches(&self, source: &StringCharSource<'_>) -> bool {
+    pub fn matches<S: Source>(&self, source: &S) -> bool {
         self.match_source(source) >= 0
     }
 
     /// `Match(const Source &)` (regeximpl.h:67-70).
-    pub fn match_source(&self, source: &StringCharSource<'_>) -> i32 {
-        if self.is_valid_source(source) {
+    pub fn match_source<S: Source>(&self, source: &S) -> i32 {
+        if source.is_valid_for(self.op) {
             self.match_unchecked(source)
         } else {
             -1
         }
     }
 
-    /// `IsValidSource<StringCharSource>` (regeximpl.h:55-65).
-    fn is_valid_source(&self, source: &StringCharSource<'_>) -> bool {
-        match self.op {
-            RegexOp::Match | RegexOp::Range => source.is_valid(),
-            _ => true,
-        }
-    }
-
     /// `MatchUnchecked` and the `MatchOp*` operators (regeximpl.h:72-182).
-    fn match_unchecked(&self, source: &StringCharSource<'_>) -> i32 {
+    fn match_unchecked<S: Source>(&self, source: &S) -> i32 {
         match self.op {
-            // MatchOpEmpty<StringCharSource>: only the empty string.
-            RegexOp::Empty => {
-                if source.is_valid() {
-                    -1
-                } else {
-                    0
-                }
-            }
+            RegexOp::Empty => source.match_empty(),
             RegexOp::Match => {
                 if source.at(0) as i8 != self.a {
                     -1
