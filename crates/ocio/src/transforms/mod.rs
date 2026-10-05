@@ -12,6 +12,7 @@ pub mod color_space_transform;
 pub mod display_view_transform;
 pub mod exponent_transform;
 pub mod exponent_with_linear_transform;
+pub mod file_transform;
 pub mod fixed_function_transform;
 pub mod group_transform;
 pub mod log_affine_transform;

@@ -36,6 +36,7 @@ pub use transforms::color_space_transform::ColorSpaceTransform;
 pub use transforms::display_view_transform::DisplayViewTransform;
 pub use transforms::exponent_transform::ExponentTransform;
 pub use transforms::exponent_with_linear_transform::ExponentWithLinearTransform;
+pub use transforms::file_transform::FileTransform;
 pub use transforms::fixed_function_transform::FixedFunctionTransform;
 pub use transforms::group_transform::GroupTransform;
 pub use transforms::log_affine_transform::LogAffineTransform;

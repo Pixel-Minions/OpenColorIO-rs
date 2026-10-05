@@ -235,3 +235,76 @@ fn unknown_builtin_styles_raise_the_wheels_message() {
         assert_eq!(port.message(), raised.message, "{style:?}");
     }
 }
+
+/// The file transform of `src` and `cccid`, with the CDL style and the interpolation.
+fn file_case(
+    [src, cccid]: [&str; 2],
+    style: ocio::CdlStyle,
+    interp: ocio::Interpolation,
+    dir: TransformDirection,
+) -> Case {
+    let mut port = ocio::FileTransform::new();
+    port.set_src(src);
+    port.set_ccc_id(cccid);
+    port.set_cdl_style(style);
+    port.set_interpolation(interp);
+    port.set_direction(dir);
+    let style_name = match style {
+        ocio::CdlStyle::Asc => "CDL_ASC",
+        ocio::CdlStyle::NoClamp => "CDL_NO_CLAMP",
+    };
+    Case::new(
+        format!("FileTransform {src:?} {cccid:?} {style:?} {interp:?} {dir:?}"),
+        json!({"class": "FileTransform", "calls": [
+            ["setSrc", src], ["setCCCId", cccid],
+            ["setCDLStyle", {"enum": style_name}],
+            ["setInterpolation", {"enum": common::transforms::interpolation_name(interp)}],
+            ["setDirection", direction_spec(dir)]]}),
+        port,
+    )
+}
+
+/// File transforms: the default, every interpolation and CDL style, paths and CCC IDs empty,
+/// ending at a NUL or non-ASCII, both directions, alone and in groups.
+#[test]
+fn file_transforms_match_the_wheel() {
+    use ocio::{CdlStyle, Interpolation};
+    let interps = [
+        Interpolation::Unknown,
+        Interpolation::Nearest,
+        Interpolation::Linear,
+        Interpolation::Tetrahedral,
+        Interpolation::Cubic,
+        Interpolation::Default,
+        Interpolation::Best,
+    ];
+    let mut cases = vec![Case::new(
+        "FileTransform default",
+        json!({"class": "FileTransform"}),
+        ocio::FileTransform::new(),
+    )];
+    let n = NAMES.len();
+    for (k, &src) in NAMES.iter().enumerate() {
+        let cccid = NAMES[(k + 2) % n];
+        for (j, &interp) in interps.iter().enumerate() {
+            let style = if (k + j) % 2 == 0 {
+                CdlStyle::Asc
+            } else {
+                CdlStyle::NoClamp
+            };
+            let dir = if j % 3 == 0 { Inverse } else { Forward };
+            cases.push(file_case([src, cccid], style, interp, dir));
+            cases.push(file_case([cccid, src], CdlStyle::NoClamp, interp, dir));
+        }
+    }
+    check_text(&cases, &[]);
+    let groups: Vec<Case> = cases
+        .chunks(6)
+        .enumerate()
+        .map(|(k, chunk)| {
+            let dir = if k % 2 == 0 { Forward } else { Inverse };
+            group(&format!("group {k}"), dir, chunk)
+        })
+        .collect();
+    check_text(&groups, &[]);
+}

@@ -2154,7 +2154,8 @@ status = "todo"
 path = "src/OpenColorIO/transforms/FileTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/file_transform.rs"]
-status = "todo"
+status = "partial"
+note = "p3-transforms (3.1c): the class (28-144) and its operator<< (166-185), checked against the wheel in crates/ocio/tests/config_transforms_oracle.rs; the format registry, getLutData, loading and BuildFileTransformOps come with WP 4.1, CollectContextVariables with 3.2a"
 
 [[file]]
 path = "src/OpenColorIO/transforms/FileTransform.h"
@@ -4964,7 +4965,8 @@ status = "todo"
 path = "tests/cpu/transforms/FileTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/file_transform_tests.rs"]
-status = "todo"
+status = "partial"
+note = "p3-transforms (3.1c): basic, validate; the others read LUT files (Phase 4), context_variables comes with 3.2a"
 
 [[file]]
 path = "tests/cpu/transforms/FixedFunctionTransform_tests.cpp"
