@@ -262,6 +262,36 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **A fix:** count in 64 bits.
 - **Status:** matched in the YAML parser (`p3-yaml-parser`, `crates/ocio/src/yaml_cpp/`).
 
+### I-101. A NUL byte in an unquoted or block scalar starts an escape sequence
+
+- **Upstream:** yaml-cpp scans plain and block scalars with no escape character, which it
+  stores as `0`, and still compares each character with it (yaml-cpp 0.8.0
+  `src/scanscalar.cpp:69-75`). So a NUL byte and the character after it go through the
+  escapes of double-quoted scalars (`src/exp.cpp:66-134`): NUL then `n` reads as a line
+  break, NUL then `0` as a NUL, and NUL then another character fails with "unknown escape
+  character: ...". Seen through the wheel: `ocio_profile_version: x<NUL>ny` reads the version
+  `x`, line break, `y`; `ab<NUL>cd` fails at line 1, column 5 with "unknown escape character:
+  c"; a NUL at the end fails with the end-of-input character 0x04 as the unknown one.
+- **Who notices:** configs with NUL bytes outside quoted scalars.
+- **A fix:** refuse the NUL, or keep it as it is.
+- **Status:** matched in the YAML parser (`p3-yaml-parser`), and checked against the wheel in
+  `crates/ocio/tests/yaml_cpp_parser_oracle.rs`.
+
+### I-102. The control character 0x04 can end a YAML token
+
+- **Upstream:** yaml-cpp's reader marks the end of the input with the character 0x04
+  (`Stream::eof()`, yaml-cpp 0.8.0 `src/stream.h:40`), and passes the byte 0x04 of UTF-8
+  input through unchanged. Its expressions that accept "the end of the input" test for that
+  character (`RegEx::MatchOpEmpty`, `src/regeximpl.h:100-103`), so a 0x04 byte counts as the
+  end where the scanner looks for one: `:` followed by 0x04 is a mapping indicator, and so are
+  `-`, `---` and `...` followed by it. Seen through the wheel: `ocio_profile_version:<0x04>x`
+  is a map whose version is `<0x04>x`, where `ocio_profile_version:x` is a scalar. Elsewhere
+  the byte is an ordinary character.
+- **Who notices:** configs with 0x04 bytes.
+- **A fix:** decode UTF-8 so that an input byte can't be the end marker.
+- **Status:** matched in the YAML parser (`p3-yaml-parser`), and checked against the wheel in
+  `crates/ocio/tests/yaml_cpp_parser_oracle.rs`.
+
 ## Numeric helpers
 
 ### I-20. Double values are compared to 0 and 1 in float precision
