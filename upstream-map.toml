@@ -1265,9 +1265,9 @@ note = "p2-aces2-cpu 2.4a-2.4d: the declarations, in transform.rs"
 [[file]]
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOp.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op.rs", "crates/ocio/src/transforms/fixed_function_transform.rs"]
-status = "partial"
-note = "p2-ff-cpu 2.3e: the op, CreateFixedFunctionOp (both), and in crates/ocio BuildFixedFunctionOp and CreateFixedFunctionTransform. Not yet: extractGpuShaderInfo (2.3f)"
+target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op.rs", "crates/ocio/src/transforms/fixed_function_transform.rs", "crates/ocio-gpu/src/gpu_processor.rs"]
+status = "done"
+note = "p2-ff-cpu 2.3e: the op, CreateFixedFunctionOp (both), and in crates/ocio BuildFixedFunctionOp and CreateFixedFunctionTransform. p2-ff-gpu 2.3f: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's FixedFunction arm (gpu_processor.rs)"
 
 [[file]]
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOp.h"
@@ -1306,13 +1306,15 @@ note = "p2-ff-cpu 2.3a1: Style (FixedFunctionOpStyle); 2.3a2: the class"
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOpGPU.cpp"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/fixedfunction/fixed_function_op_gpu.rs"]
-status = "todo"
+status = "partial"
+note = "p2-ff-gpu 2.3f: the ACES 1.x shaders (1-351, and Add_Surround_10_Fwd_Shader 1636-1649) and the dispatch (GetFixedFunctionGPUShaderProgram, GetFixedFunctionGPUProcessingText, 2225-2491), its other arms not ported yet"
 
 [[file]]
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOpGPU.h"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/fixedfunction/fixed_function_op_gpu.rs"]
-status = "todo"
+status = "done"
+note = "p2-ff-gpu 2.3f: the two functions it declares"
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOp.cpp"

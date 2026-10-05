@@ -5,8 +5,8 @@
 //! `FixedFunctionOp.cpp` @ v2.5.2, what the CPU engine needs: the op's behaviors, and
 //! [`create_fixed_function_op`] and [`create_fixed_function_op_from_data`].
 //! `BuildFixedFunctionOp` and `CreateFixedFunctionTransform` work on the transform: they are in
-//! `ocio` (crates/ocio/src/transforms/fixed_function_transform.rs); `extractGpuShaderInfo` comes
-//! with the GPU writer (2.3f).
+//! `ocio` (crates/ocio/src/transforms/fixed_function_transform.rs); `extractGpuShaderInfo` is in
+//! `ocio-gpu`, the FixedFunction arm of `gpu_processor::extract_op_gpu_shader_info` (2.3f).
 //!
 //! As for every family, the op is its data, [`OpData::FixedFunction`]: [`Op`]'s methods match
 //! on it and call the methods here, `FixedFunctionOp`'s overrides. `FixedFunctionOp` keeps the
