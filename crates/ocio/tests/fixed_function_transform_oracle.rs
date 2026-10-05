@@ -302,6 +302,23 @@ fn processor_cases() -> Vec<Case> {
     ] {
         cases.push(constructed(AcesGamutComp13, &params, Inverse));
     }
+    // Two forward surrounds are inverses when `isInverse` finds `p0 == 1. / p1` in double
+    // (FixedFunctionOpData.cpp:842-854 @ v2.5.2), which the optimizer then removes. Pairs
+    // where that test, `p0 * p1 == 1` and `1 / p0 == p1` don't all agree, in both orders.
+    for gammas in [
+        [23.804083062918217, 0.04200959967064603],
+        [6.562230635388913, 0.1523872072717442],
+    ] {
+        for [a, b] in [gammas, [gammas[1], gammas[0]]] {
+            let first = constructed(Rec2100Surround, &[a], Forward);
+            let second = constructed(Rec2100Surround, &[b], Forward);
+            cases.push(group(
+                &format!("surrounds {a} and {b}"),
+                Forward,
+                &[first, second],
+            ));
+        }
+    }
     cases
 }
 

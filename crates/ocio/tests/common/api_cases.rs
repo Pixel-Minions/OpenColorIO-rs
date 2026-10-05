@@ -1110,6 +1110,22 @@ pub(crate) fn fixed_function() -> Cases {
             fixed_function_calls("FIXED_FUNCTION_ACES_GAMUT_COMP_13", &params),
         ));
     }
+    // Random sets within the bounds, as the op battery runs them
+    // (crates/ocio-ops/tests/common/fixed_function.rs, `random_gamut_comp_13_params`); the
+    // digest pins them.
+    let random = random_gamut_comp_13_params(6);
+    let bytes: Vec<u8> = random
+        .iter()
+        .flatten()
+        .flat_map(|v| v.to_le_bytes())
+        .collect();
+    assert_eq!(xxhash_rust::xxh3::xxh3_64(&bytes), 0xdec4_928a_cfc1_3ecc);
+    for (i, params) in random.iter().enumerate() {
+        cases.push(Case::new(
+            format!("ACES_GAMUT_COMP_13 random {i}"),
+            fixed_function_calls("FIXED_FUNCTION_ACES_GAMUT_COMP_13", params),
+        ));
+    }
     // tests/cpu/ops/fixedfunction/FixedFunctionOpCPU_tests.cpp:996, 1030 @ v2.5.2.
     let surround = Case::new(
         "REC2100_SURROUND 0.78",
@@ -1186,4 +1202,24 @@ pub(crate) fn fixed_function() -> Cases {
             ),
     ));
     Cases { cases, bases }
+}
+
+/// Random ACES 1.3 gamut compression parameters within `validate`'s bounds, as
+/// `crates/ocio-ops/tests/common/fixed_function.rs` generates them for the op battery.
+fn random_gamut_comp_13_params(n: usize) -> Vec<[f64; 7]> {
+    let mut rng = ocio_testkit::probe::Rng::new(0x6a3c_0013);
+    let mut unit = move || (rng.next_u64() >> 11) as f64 / (1u64 << 53) as f64;
+    (0..n)
+        .map(|_| {
+            let mut p = [0.0; 7];
+            for v in &mut p[..3] {
+                *v = 1.001 + 1.499 * unit();
+            }
+            for v in &mut p[3..6] {
+                *v = 0.9995 * unit();
+            }
+            p[6] = 1.0 + 4.0 * unit();
+            p
+        })
+        .collect()
 }
