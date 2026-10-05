@@ -60,7 +60,7 @@ pub fn not_ported(style: FixedFunctionOpStyle) -> Exception {
 /// problems from negative values, the denominator is clamped higher to prevent dark noise from
 /// being classified as having high saturation.
 ///
-/// Port of `CalcSatWeight` (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp:481-494 @
+/// Port of `CalcSatWeight` (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp:483-495 @
 /// v2.5.2).
 #[inline]
 fn calc_sat_weight(red: f32, grn: f32, blu: f32, noise_limit: f32) -> f32 {
@@ -71,7 +71,7 @@ fn calc_sat_weight(red: f32, grn: f32, blu: f32, noise_limit: f32) -> f32 {
 }
 
 /// The coefficients of a quadratic B-spline basis function (all coefs taken from the ACES ctl
-/// code on github), FixedFunctionOpCPU.cpp:535-539 @ v2.5.2.
+/// code on github), FixedFunctionOpCPU.cpp:539-543 @ v2.5.2.
 const M: [[f32; 4]; 4] = [
     [0.25, 0.00, 0.00, 0.00],
     [-0.75, 0.75, 0.75, 0.25],
@@ -83,7 +83,7 @@ const M: [[f32; 4]; 4] = [
 /// width `4 / inv_width` radians; 0 outside it. A NaN or infinite hue coordinate gives index
 /// `INT_MIN` (`(int)` is `cvttss2si`), so 0.
 ///
-/// Port of `CalcHueWeight` (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp:508-556 @
+/// Port of `CalcHueWeight` (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp:510-556 @
 /// v2.5.2).
 #[inline]
 fn calc_hue_weight(red: f32, grn: f32, blu: f32, inv_width: f32) -> f32 {
@@ -119,7 +119,7 @@ fn calc_hue_weight(red: f32, grn: f32, blu: f32, inv_width: f32) -> f32 {
 /// saturation weights, and the middle channel moves with it to keep the hue.
 ///
 /// Port of `Renderer_ACES_RedMod03_Fwd` (src/OpenColorIO/ops/fixedfunction/
-/// FixedFunctionOpCPU.cpp:21-35, 496-506, 558-604 @ v2.5.2).
+/// FixedFunctionOpCPU.cpp:21-35, 497-508, 558-607 @ v2.5.2).
 #[derive(Debug)]
 pub struct RendererAcesRedMod03Fwd {
     /// `m_1minusScale`: `1 - scale`, from the original ctl code.
@@ -130,13 +130,13 @@ pub struct RendererAcesRedMod03Fwd {
     inv_width: f32,
 }
 
-/// `m_noiseLimit` of the red modifiers and the glows (FixedFunctionOpCPU.cpp:34, 58, 79 @
+/// `m_noiseLimit` of the red modifiers and the glows (FixedFunctionOpCPU.cpp:34, 58, 80 @
 /// v2.5.2).
 const NOISE_LIMIT: f32 = 1e-2;
 
 impl RendererAcesRedMod03Fwd {
     /// Port of `Renderer_ACES_RedMod03_Fwd::Renderer_ACES_RedMod03_Fwd`
-    /// (FixedFunctionOpCPU.cpp:496-506 @ v2.5.2).
+    /// (FixedFunctionOpCPU.cpp:497-508 @ v2.5.2).
     pub fn new() -> Self {
         RendererAcesRedMod03Fwd {
             one_minus_scale: 1.0f32 - 0.85f32,
@@ -153,7 +153,7 @@ impl Default for RendererAcesRedMod03Fwd {
 }
 
 impl CpuOp for RendererAcesRedMod03Fwd {
-    /// Port of `Renderer_ACES_RedMod03_Fwd::apply` (FixedFunctionOpCPU.cpp:558-604 @ v2.5.2).
+    /// Port of `Renderer_ACES_RedMod03_Fwd::apply` (FixedFunctionOpCPU.cpp:558-607 @ v2.5.2).
     fn apply(&self, rgba: &mut [f32]) {
         for pixel in rgba.as_chunks_mut::<4>().0 {
             let red = pixel[0];
@@ -189,7 +189,7 @@ impl CpuOp for RendererAcesRedMod03Fwd {
 /// The inverse of the red modifier 0.3: red solves the forward's quadratic.
 ///
 /// Port of `Renderer_ACES_RedMod03_Inv` (src/OpenColorIO/ops/fixedfunction/
-/// FixedFunctionOpCPU.cpp:37-43, 606-656 @ v2.5.2).
+/// FixedFunctionOpCPU.cpp:37-43, 609-659 @ v2.5.2).
 #[derive(Debug, Default)]
 pub struct RendererAcesRedMod03Inv {
     /// The forward renderer, whose constants it shares.
@@ -197,7 +197,7 @@ pub struct RendererAcesRedMod03Inv {
 }
 
 impl CpuOp for RendererAcesRedMod03Inv {
-    /// Port of `Renderer_ACES_RedMod03_Inv::apply` (FixedFunctionOpCPU.cpp:611-656 @ v2.5.2).
+    /// Port of `Renderer_ACES_RedMod03_Inv::apply` (FixedFunctionOpCPU.cpp:614-659 @ v2.5.2).
     fn apply(&self, rgba: &mut [f32]) {
         let RendererAcesRedMod03Fwd {
             one_minus_scale,
@@ -239,7 +239,7 @@ impl CpuOp for RendererAcesRedMod03Inv {
 /// The red modifier 1.0 (ACES 1.0): red alone is moved towards a pivot.
 ///
 /// Port of `Renderer_ACES_RedMod10_Fwd` (src/OpenColorIO/ops/fixedfunction/
-/// FixedFunctionOpCPU.cpp:45-59, 658-704 @ v2.5.2).
+/// FixedFunctionOpCPU.cpp:45-59, 661-709 @ v2.5.2).
 #[derive(Debug)]
 pub struct RendererAcesRedMod10Fwd {
     /// `m_1minusScale`: `1 - scale`, from the original ctl code.
@@ -252,7 +252,7 @@ pub struct RendererAcesRedMod10Fwd {
 
 impl RendererAcesRedMod10Fwd {
     /// Port of `Renderer_ACES_RedMod10_Fwd::Renderer_ACES_RedMod10_Fwd`
-    /// (FixedFunctionOpCPU.cpp:658-668 @ v2.5.2).
+    /// (FixedFunctionOpCPU.cpp:661-672 @ v2.5.2).
     pub fn new() -> Self {
         RendererAcesRedMod10Fwd {
             one_minus_scale: 1.0f32 - 0.82f32,
@@ -269,7 +269,7 @@ impl Default for RendererAcesRedMod10Fwd {
 }
 
 impl CpuOp for RendererAcesRedMod10Fwd {
-    /// Port of `Renderer_ACES_RedMod10_Fwd::apply` (FixedFunctionOpCPU.cpp:670-704 @ v2.5.2).
+    /// Port of `Renderer_ACES_RedMod10_Fwd::apply` (FixedFunctionOpCPU.cpp:674-709 @ v2.5.2).
     fn apply(&self, rgba: &mut [f32]) {
         for pixel in rgba.as_chunks_mut::<4>().0 {
             let red = pixel[0];
@@ -292,7 +292,7 @@ impl CpuOp for RendererAcesRedMod10Fwd {
 /// The inverse of the red modifier 1.0.
 ///
 /// Port of `Renderer_ACES_RedMod10_Inv` (src/OpenColorIO/ops/fixedfunction/
-/// FixedFunctionOpCPU.cpp:61-67, 706-740 @ v2.5.2).
+/// FixedFunctionOpCPU.cpp:61-67, 711-748 @ v2.5.2).
 #[derive(Debug, Default)]
 pub struct RendererAcesRedMod10Inv {
     /// The forward renderer, whose constants it shares.
@@ -300,7 +300,7 @@ pub struct RendererAcesRedMod10Inv {
 }
 
 impl CpuOp for RendererAcesRedMod10Inv {
-    /// Port of `Renderer_ACES_RedMod10_Inv::apply` (FixedFunctionOpCPU.cpp:711-740 @ v2.5.2).
+    /// Port of `Renderer_ACES_RedMod10_Inv::apply` (FixedFunctionOpCPU.cpp:716-748 @ v2.5.2).
     fn apply(&self, rgba: &mut [f32]) {
         let RendererAcesRedMod10Fwd {
             one_minus_scale,
@@ -330,14 +330,14 @@ impl CpuOp for RendererAcesRedMod10Inv {
 /// `(blu + grn + red + 1.75 * sqrt(blu*(blu-grn) + grn*(grn-red) + red*(red-blu))) / 3`.
 ///
 /// Where NaNs of different payloads meet, the order is the wheels' (FixedFunctionOpCPU.cpp:
-/// 751-758 inlined in `Renderer_ACES_Glow03_Fwd::apply` and `_Inv::apply`, Windows
+/// 759-766 inlined in `Renderer_ACES_Glow03_Fwd::apply` and `_Inv::apply`, Windows
 /// `0x18018b37e`, `0x18018b3f0`; Linux `0x355195`, `0x3551c9`): MSVC adds the green term to
 /// the blue one, GCC the blue term to the green one, then both add the red term; and both
 /// add the sum of the channels to the chroma term (`1.75 * chroma + ((blu + grn) + red)`).
 /// The products' operands can't hold two different NaNs (`blu - grn` is a NaN only where
 /// `grn` or `blu` is, and then it is `blu`'s NaN when `blu` is one).
 ///
-/// Port of `rgbToYC` (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp:751-758 @
+/// Port of `rgbToYC` (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp:759-766 @
 /// v2.5.2).
 #[inline]
 fn rgb_to_yc(red: f32, grn: f32, blu: f32) -> f32 {
@@ -356,7 +356,7 @@ fn rgb_to_yc(red: f32, grn: f32, blu: f32) -> f32 {
 
 /// The sigmoid shaper of the glow's saturation.
 ///
-/// Port of `SigmoidShaper` (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp:760-767
+/// Port of `SigmoidShaper` (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp:768-775
 /// @ v2.5.2).
 #[inline]
 fn sigmoid_shaper(sat: f32) -> f32 {
@@ -389,7 +389,7 @@ fn scale_rgb(pixel: &mut [f32; 4], factor: f32) {
 /// brightened.
 ///
 /// Port of `Renderer_ACES_Glow03_Fwd` (src/OpenColorIO/ops/fixedfunction/
-/// FixedFunctionOpCPU.cpp:69-81, 742-749, 769-822 @ v2.5.2).
+/// FixedFunctionOpCPU.cpp:69-81, 750-757, 777-824 @ v2.5.2).
 #[derive(Debug)]
 pub struct RendererAcesGlow03Fwd {
     /// `m_glowGain`.
@@ -400,7 +400,7 @@ pub struct RendererAcesGlow03Fwd {
 
 impl RendererAcesGlow03Fwd {
     /// Port of `Renderer_ACES_Glow03_Fwd::Renderer_ACES_Glow03_Fwd`
-    /// (FixedFunctionOpCPU.cpp:742-749 @ v2.5.2).
+    /// (FixedFunctionOpCPU.cpp:750-757 @ v2.5.2).
     pub fn new(glow_gain: f32, glow_mid: f32) -> Self {
         RendererAcesGlow03Fwd {
             glow_gain,
@@ -410,7 +410,7 @@ impl RendererAcesGlow03Fwd {
 }
 
 impl CpuOp for RendererAcesGlow03Fwd {
-    /// Port of `Renderer_ACES_Glow03_Fwd::apply` (FixedFunctionOpCPU.cpp:769-822 @ v2.5.2).
+    /// Port of `Renderer_ACES_Glow03_Fwd::apply` (FixedFunctionOpCPU.cpp:777-824 @ v2.5.2).
     fn apply(&self, rgba: &mut [f32]) {
         for pixel in rgba.as_chunks_mut::<4>().0 {
             let red = pixel[0];
@@ -447,7 +447,7 @@ impl CpuOp for RendererAcesGlow03Fwd {
 /// The inverse of the glow.
 ///
 /// Port of `Renderer_ACES_Glow03_Inv` (src/OpenColorIO/ops/fixedfunction/
-/// FixedFunctionOpCPU.cpp:83-89, 824-882 @ v2.5.2).
+/// FixedFunctionOpCPU.cpp:83-89, 826-880 @ v2.5.2).
 #[derive(Debug)]
 pub struct RendererAcesGlow03Inv {
     /// The forward renderer, whose constants it shares.
@@ -456,7 +456,7 @@ pub struct RendererAcesGlow03Inv {
 
 impl RendererAcesGlow03Inv {
     /// Port of `Renderer_ACES_Glow03_Inv::Renderer_ACES_Glow03_Inv`
-    /// (FixedFunctionOpCPU.cpp:824-829 @ v2.5.2).
+    /// (FixedFunctionOpCPU.cpp:826-831 @ v2.5.2).
     pub fn new(glow_gain: f32, glow_mid: f32) -> Self {
         RendererAcesGlow03Inv {
             fwd: RendererAcesGlow03Fwd::new(glow_gain, glow_mid),
@@ -465,7 +465,7 @@ impl RendererAcesGlow03Inv {
 }
 
 impl CpuOp for RendererAcesGlow03Inv {
-    /// Port of `Renderer_ACES_Glow03_Inv::apply` (FixedFunctionOpCPU.cpp:831-882 @ v2.5.2).
+    /// Port of `Renderer_ACES_Glow03_Inv::apply` (FixedFunctionOpCPU.cpp:833-880 @ v2.5.2).
     fn apply(&self, rgba: &mut [f32]) {
         for pixel in rgba.as_chunks_mut::<4>().0 {
             let red = pixel[0];
@@ -503,7 +503,7 @@ impl CpuOp for RendererAcesGlow03Inv {
 /// inverse: each channel times `Y^(gamma - 1)`, of the AP1 luminance.
 ///
 /// Port of `Renderer_ACES_DarkToDim10_Fwd` (src/OpenColorIO/ops/fixedfunction/
-/// FixedFunctionOpCPU.cpp:91-101, 884-923 @ v2.5.2).
+/// FixedFunctionOpCPU.cpp:91-101, 882-922 @ v2.5.2).
 #[derive(Debug)]
 pub struct RendererAcesDarkToDim10Fwd {
     /// `m_gamma`: `gamma - 1`, to compute `Y^gamma / Y`.
@@ -512,7 +512,7 @@ pub struct RendererAcesDarkToDim10Fwd {
 
 impl RendererAcesDarkToDim10Fwd {
     /// Port of `Renderer_ACES_DarkToDim10_Fwd::Renderer_ACES_DarkToDim10_Fwd`
-    /// (FixedFunctionOpCPU.cpp:884-889 @ v2.5.2).
+    /// (FixedFunctionOpCPU.cpp:882-887 @ v2.5.2).
     pub fn new(gamma: f32) -> Self {
         RendererAcesDarkToDim10Fwd {
             gamma: gamma - 1.0f32,
@@ -521,7 +521,7 @@ impl RendererAcesDarkToDim10Fwd {
 }
 
 impl CpuOp for RendererAcesDarkToDim10Fwd {
-    /// Port of `Renderer_ACES_DarkToDim10_Fwd::apply` (FixedFunctionOpCPU.cpp:891-923 @
+    /// Port of `Renderer_ACES_DarkToDim10_Fwd::apply` (FixedFunctionOpCPU.cpp:889-922 @
     /// v2.5.2).
     fn apply(&self, rgba: &mut [f32]) {
         // With the modest 2% ACES surround, this minLum allows the min/max gain applied to
@@ -551,7 +551,7 @@ impl CpuOp for RendererAcesDarkToDim10Fwd {
 
 /// The compression of a distance beyond the threshold.
 ///
-/// Port of `compress` (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp:925-933 @
+/// Port of `compress` (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp:924-932 @
 /// v2.5.2).
 fn compress(dist: f32, thr: f32, scale: f32, power: f32) -> f32 {
     // Normalize distance outside threshold by scale factor.
@@ -564,7 +564,7 @@ fn compress(dist: f32, thr: f32, scale: f32, power: f32) -> f32 {
 /// The inverse of [`compress`]; a distance at or beyond `thr + scale` (the singularity) is
 /// kept.
 ///
-/// Port of `uncompress` (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp:935-950 @
+/// Port of `uncompress` (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp:934-950 @
 /// v2.5.2).
 fn uncompress(dist: f32, thr: f32, scale: f32, power: f32) -> f32 {
     // Avoid singularity
@@ -589,7 +589,7 @@ fn uncompress(dist: f32, thr: f32, scale: f32, power: f32) -> f32 {
 /// other end the B values is reconstructed as `1e-7 - 1.12 * 1e-7 = -1.2e-8`. So it went from
 /// -1e-5 to -1.2e-8, but it caused no numerical instability.
 ///
-/// Port of `gamut_comp` (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp:952-980 @
+/// Port of `gamut_comp` (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp:952-982 @
 /// v2.5.2).
 #[inline]
 fn gamut_comp(
@@ -623,7 +623,7 @@ fn gamut_comp(
 /// axis is compressed beyond a threshold, to a limit.
 ///
 /// Port of `Renderer_ACES_GamutComp13_Fwd` (src/OpenColorIO/ops/fixedfunction/
-/// FixedFunctionOpCPU.cpp:103-123, 982-1023 @ v2.5.2).
+/// FixedFunctionOpCPU.cpp:103-123, 984-1026 @ v2.5.2).
 #[derive(Debug)]
 pub struct RendererAcesGamutComp13Fwd {
     /// `m_thrCyan`.
@@ -648,7 +648,7 @@ impl RendererAcesGamutComp13Fwd {
     /// which upstream reads past (`docs/improvements.md` U-31).
     ///
     /// Port of `Renderer_ACES_GamutComp13_Fwd::Renderer_ACES_GamutComp13_Fwd`
-    /// (FixedFunctionOpCPU.cpp:982-1001 @ v2.5.2).
+    /// (FixedFunctionOpCPU.cpp:984-1002 @ v2.5.2).
     pub fn new(data: &FixedFunctionOpData) -> Result<Self> {
         let params = data.params();
         if params.len() < 7 {
@@ -703,7 +703,7 @@ impl RendererAcesGamutComp13Fwd {
 }
 
 impl CpuOp for RendererAcesGamutComp13Fwd {
-    /// Port of `Renderer_ACES_GamutComp13_Fwd::apply` (FixedFunctionOpCPU.cpp:1003-1023 @
+    /// Port of `Renderer_ACES_GamutComp13_Fwd::apply` (FixedFunctionOpCPU.cpp:1004-1026 @
     /// v2.5.2).
     fn apply(&self, rgba: &mut [f32]) {
         self.apply_with(rgba, compress);
@@ -713,7 +713,7 @@ impl CpuOp for RendererAcesGamutComp13Fwd {
 /// The inverse of the gamut compression.
 ///
 /// Port of `Renderer_ACES_GamutComp13_Inv` (src/OpenColorIO/ops/fixedfunction/
-/// FixedFunctionOpCPU.cpp:125-131, 1025-1053 @ v2.5.2).
+/// FixedFunctionOpCPU.cpp:125-131, 1028-1055 @ v2.5.2).
 #[derive(Debug)]
 pub struct RendererAcesGamutComp13Inv {
     /// The forward renderer, whose constants it shares.
@@ -722,7 +722,7 @@ pub struct RendererAcesGamutComp13Inv {
 
 impl RendererAcesGamutComp13Inv {
     /// Port of `Renderer_ACES_GamutComp13_Inv::Renderer_ACES_GamutComp13_Inv`
-    /// (FixedFunctionOpCPU.cpp:1025-1028 @ v2.5.2).
+    /// (FixedFunctionOpCPU.cpp:1028-1031 @ v2.5.2).
     pub fn new(data: &FixedFunctionOpData) -> Result<Self> {
         Ok(RendererAcesGamutComp13Inv {
             fwd: RendererAcesGamutComp13Fwd::new(data)?,
@@ -731,7 +731,7 @@ impl RendererAcesGamutComp13Inv {
 }
 
 impl CpuOp for RendererAcesGamutComp13Inv {
-    /// Port of `Renderer_ACES_GamutComp13_Inv::apply` (FixedFunctionOpCPU.cpp:1030-1053 @
+    /// Port of `Renderer_ACES_GamutComp13_Inv::apply` (FixedFunctionOpCPU.cpp:1033-1055 @
     /// v2.5.2).
     fn apply(&self, rgba: &mut [f32]) {
         self.fwd.apply_with(rgba, uncompress);
