@@ -194,6 +194,95 @@ pub enum DynamicPropertyType {
     GradingHueCurve,
 }
 
+/// The kind of color space a grading op works in: it picks the defaults and the algorithms.
+///
+/// Port of `GradingStyle` (include/OpenColorIO/OpenColorTypes.h:560-566 @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GradingStyle {
+    /// `GRADING_LOG`: algorithms for logarithmic color spaces.
+    #[doc(alias = "GRADING_LOG")]
+    Log = 0,
+    /// `GRADING_LIN`: algorithms for scene-linear color spaces.
+    #[doc(alias = "GRADING_LIN")]
+    Lin,
+    /// `GRADING_VIDEO`: algorithms for video color spaces.
+    #[doc(alias = "GRADING_VIDEO")]
+    Video,
+}
+
+/// The style's name: `log`, `linear` or `video`.
+///
+/// Port of `GradingStyleToString` (src/OpenColorIO/ParseUtils.cpp:425-441 @ v2.5.2). Its
+/// "Unknown grading style" for a value outside the enum can't happen.
+#[doc(alias = "GradingStyleToString")]
+pub fn grading_style_to_string(style: GradingStyle) -> &'static str {
+    match style {
+        GradingStyle::Lin => "linear",
+        GradingStyle::Log => "log",
+        GradingStyle::Video => "video",
+    }
+}
+
+/// The curves of a `GradingRGBCurve`. `NumCurves` is no curve: it is the number of curves,
+/// which the getters that take a curve refuse ("Invalid curve."), as upstream's do.
+///
+/// Port of `RGBCurveType` (include/OpenColorIO/OpenColorTypes.h:580-588 @ v2.5.2).
+#[doc(alias = "RGBCurveType")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RgbCurveType {
+    /// `RGB_RED`.
+    #[doc(alias = "RGB_RED")]
+    Red = 0,
+    /// `RGB_GREEN`.
+    #[doc(alias = "RGB_GREEN")]
+    Green,
+    /// `RGB_BLUE`.
+    #[doc(alias = "RGB_BLUE")]
+    Blue,
+    /// `RGB_MASTER`.
+    #[doc(alias = "RGB_MASTER")]
+    Master,
+    /// `RGB_NUM_CURVES`.
+    #[doc(alias = "RGB_NUM_CURVES")]
+    NumCurves,
+}
+
+impl RgbCurveType {
+    /// The four curves, in upstream's order: red, green, blue, master.
+    pub const CURVES: [RgbCurveType; 4] = [
+        RgbCurveType::Red,
+        RgbCurveType::Green,
+        RgbCurveType::Blue,
+        RgbCurveType::Master,
+    ];
+}
+
+/// The kind of B-spline a `GradingBSplineCurve` is. The RGB curves use `BSpline`; the others
+/// are the hue curves' (Phase 5).
+///
+/// Port of `BSplineType` (include/OpenColorIO/OpenColorTypes.h:611-620 @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum BSplineType {
+    /// `B_SPLINE`: the monotonic quadratic B-spline of the RGBM curves.
+    #[doc(alias = "B_SPLINE")]
+    BSpline = 0,
+    /// `DIAGONAL_B_SPLINE`: the monotonic quadratic B-spline of the sat-sat and lum-lum curves.
+    #[doc(alias = "DIAGONAL_B_SPLINE")]
+    DiagonalBSpline,
+    /// `HUE_HUE_B_SPLINE`: the monotonic and periodic B-spline of the hue-hue curve.
+    #[doc(alias = "HUE_HUE_B_SPLINE")]
+    HueHueBSpline,
+    /// `PERIODIC_1_B_SPLINE`: periodic, horizontal at 1, for the hue-sat and hue-lum curves.
+    #[doc(alias = "PERIODIC_1_B_SPLINE")]
+    Periodic1BSpline,
+    /// `PERIODIC_0_B_SPLINE`: periodic, horizontal at 0, for the hue-fx curve.
+    #[doc(alias = "PERIODIC_0_B_SPLINE")]
+    Periodic0BSpline,
+    /// `HORIZONTAL1_B_SPLINE`: horizontal at 1, for the lum-sat and sat-lum curves.
+    #[doc(alias = "HORIZONTAL1_B_SPLINE")]
+    Horizontal1BSpline,
+}
+
 /// The bit depth of a color space, or of the images a CPU processor reads and writes. The
 /// processor supports only `Uint8`, `Uint10`, `Uint12`, `Uint16`, `F16` and `F32`; the other
 /// enumerators exist for upstream's API and are rejected where a supported one is needed.

@@ -22,9 +22,13 @@ pub use context::Context;
 pub use ocio_ops::exception::{Exception, ExceptionKind, Result};
 pub use ocio_ops::format_metadata::FormatMetadataImpl as FormatMetadata;
 pub use ocio_ops::open_color_types::{
-    Allocation, BitDepth, CdlStyle, Lut1DHueAdjust, NegativeStyle, OptimizationFlags,
-    TransformDirection,
+    Allocation, BSplineType, BitDepth, CdlStyle, GradingStyle, Lut1DHueAdjust, NegativeStyle,
+    OptimizationFlags, RgbCurveType, TransformDirection,
 };
+pub use ocio_ops::ops::gradingrgbcurve::grading_b_spline_curve::{
+    GradingBSplineCurve, GradingControlPoint,
+};
+pub use ocio_ops::ops::gradingrgbcurve::grading_rgb_curve::GradingRgbCurve;
 pub use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 pub use processor::{Processor, ProcessorCacheFlags, ProcessorMetadata};
 pub use transform::{Transform, TransformType};
