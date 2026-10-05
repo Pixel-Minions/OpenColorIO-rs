@@ -4,7 +4,8 @@
 //! Port of `tests/cpu/ops/fixedfunction/FixedFunctionOp_tests.cpp` @ v2.5.2: the tests of the
 //! op. Its test of `CreateFixedFunctionTransform` (`create_transform`) needs the transform: it
 //! is in crates/ocio/src/transforms/fixed_function_transform_tests.rs. The `FixedFunctionOps`
-//! tests of the styles whose renderers come later come with them (2.3c, 2.3d).
+//! tests of the HSY, PQ, gamma-log and double-log styles come with their renderers (2.3c2,
+//! 2.3d).
 
 use super::*;
 
@@ -244,4 +245,69 @@ fn info_clone_and_combine() {
     // A forward op keeps the data as it is.
     create_fixed_function_op_from_data(&mut ops, bad, TransformDirection::Forward).unwrap();
     assert_eq!(ops.len(), 1);
+}
+
+/// The `FixedFunctionOps` tests: a style and its inverse are inverse ops of the same type,
+/// neither an identity, and the first renders with `renderer`.
+#[track_caller]
+fn check_ops(fwd: FixedFunctionOpStyle, inv: FixedFunctionOpStyle, renderer: &str) {
+    check_ops_with(fwd, inv, &Params::new(), renderer);
+}
+
+/// [`check_ops`] with parameters.
+#[track_caller]
+fn check_ops_with(
+    fwd: FixedFunctionOpStyle,
+    inv: FixedFunctionOpStyle,
+    params: &Params,
+    renderer: &str,
+) {
+    let mut ops = OpVec::new();
+
+    create_fixed_function_op(&mut ops, fwd, params).unwrap();
+    create_fixed_function_op(&mut ops, inv, params).unwrap();
+
+    ops.finalize().unwrap();
+    assert_eq!(ops.len(), 2);
+
+    let op0 = &ops[0];
+    let op1 = &ops[1];
+
+    assert!(!op0.is_identity().unwrap());
+    assert!(!op1.is_identity().unwrap());
+
+    assert!(op0.is_same_type(op1));
+    assert!(op0.is_inverse(op1));
+    assert!(op1.is_inverse(op0));
+
+    let cpu_op = op0.get_cpu_op(false).unwrap().unwrap();
+    assert!(has_type(&cpu_op, renderer), "{cpu_op:?}");
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOps, RGB_TO_HSV)` @ v2.5.2.
+#[test]
+fn ops_rgb_to_hsv() {
+    use FixedFunctionOpStyle::*;
+    check_ops(RgbToHsv, HsvToRgb, "RendererRgbToHsv");
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOps, XYZ_TO_xyY)` @ v2.5.2.
+#[test]
+fn ops_xyz_to_xyy() {
+    use FixedFunctionOpStyle::*;
+    check_ops(XyzToXyy, XyyToXyz, "RendererXyzToXyy");
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOps, XYZ_TO_uvY)` @ v2.5.2.
+#[test]
+fn ops_xyz_to_uvy() {
+    use FixedFunctionOpStyle::*;
+    check_ops(XyzToUvy, UvyToXyz, "RendererXyzToUvy");
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOps, XYZ_TO_LUV)` @ v2.5.2.
+#[test]
+fn ops_xyz_to_luv() {
+    use FixedFunctionOpStyle::*;
+    check_ops(XyzToLuv, LuvToXyz, "RendererXyzToLuv");
 }

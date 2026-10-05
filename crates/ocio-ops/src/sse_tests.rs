@@ -759,7 +759,7 @@ fn math_utils_lane_helpers_match_the_instructions() {
     }
 }
 
-/// The x86 additions and multiplications, run through `asm!`: in Intel syntax,
+/// The x86 additions, multiplications and subtractions, run through `asm!`: in Intel syntax,
 /// `addps x, y` computes `x + y` with `x` as the first source operand. (The `core::arch`
 /// intrinsics `_mm_add_ps`/`_mm_mul_ps` are plain additions and multiplications to LLVM, which
 /// may swap their operands: the behaviour `sse_add`/`sse_mul` exist to avoid.)
@@ -789,10 +789,13 @@ mod instructions {
 
     instruction!(addps, "addps", __m128);
     instruction!(mulps, "mulps", __m128);
+    instruction!(subps, "subps", __m128);
     instruction!(addss, "addss", f32);
     instruction!(mulss, "mulss", f32);
+    instruction!(subss, "subss", f32);
     instruction!(addsd, "addsd", f64);
     instruction!(mulsd, "mulsd", f64);
+    instruction!(subsd, "subsd", f64);
 }
 
 /// `f32` operands for the NaN pairs: NaNs of both signs, quiet and signalling, with and
@@ -961,6 +964,80 @@ fn math_utils_arithmetic_helpers_match_the_instructions() {
             x,
             y,
             instructions::mulsd(a, b).to_bits(),
+            port.to_bits(),
+        );
+    }
+}
+
+/// `math_utils::sse_sub` matches `SUBPS` and `SUBSS` on `f32`, and `SUBSD` on `f64`, bit for
+/// bit, on the pairs of [`math_utils_arithmetic_helpers_match_the_instructions`]: for two NaNs,
+/// the result is the first operand's NaN, quieted.
+#[cfg(target_arch = "x86_64")]
+#[test]
+fn math_utils_sse_sub_matches_the_instructions() {
+    use crate::math_utils::sse_sub;
+    use std::hint::black_box;
+
+    let specials = NAN_PAIR_VALUES_F32.map(f32::from_bits);
+    let mut pairs: Vec<(f32, f32)> = specials
+        .iter()
+        .flat_map(|&a| specials.map(|b| (a, b)))
+        .collect();
+    let inputs = cross_check_inputs();
+    pairs.extend(
+        inputs
+            .iter()
+            .zip(inputs.iter().rev())
+            .map(|(&a, &b)| (a, b)),
+    );
+
+    for chunk in pairs.as_chunks::<4>().0 {
+        let a = chunk.map(|p| p.0);
+        let b = chunk.map(|p| p.1);
+        // SAFETY: SSE2 is part of the x86-64 baseline.
+        let (va, vb) = unsafe { (reference::load(a), reference::load(b)) };
+        let differences = reference::store(instructions::subps(va, vb));
+        for l in 0..4 {
+            let port = sse_sub(black_box(a[l]), black_box(b[l]));
+            assert_same_bits(
+                "subps",
+                u64::from(a[l].to_bits()),
+                u64::from(b[l].to_bits()),
+                u64::from(differences[l].to_bits()),
+                u64::from(port.to_bits()),
+            );
+        }
+    }
+    for &(a, b) in &pairs {
+        let port = sse_sub(black_box(a), black_box(b));
+        assert_same_bits(
+            "subss",
+            u64::from(a.to_bits()),
+            u64::from(b.to_bits()),
+            u64::from(instructions::subss(a, b).to_bits()),
+            u64::from(port.to_bits()),
+        );
+    }
+
+    let specials = NAN_PAIR_VALUES_F64.map(f64::from_bits);
+    let mut pairs: Vec<(f64, f64)> = specials
+        .iter()
+        .flat_map(|&a| specials.map(|b| (a, b)))
+        .collect();
+    let mut rng = ocio_testkit::probe::Rng::new(0x5ee5_0006);
+    pairs.extend((0..200_000).map(|_| {
+        (
+            f64::from_bits(rng.next_u64()),
+            f64::from_bits(rng.next_u64()),
+        )
+    }));
+    for &(a, b) in &pairs {
+        let port = sse_sub(black_box(a), black_box(b));
+        assert_same_bits(
+            "subsd",
+            a.to_bits(),
+            b.to_bits(),
+            instructions::subsd(a, b).to_bits(),
             port.to_bits(),
         );
     }
