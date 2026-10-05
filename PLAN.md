@@ -298,7 +298,7 @@ Everything in this subsection is work in Ultravioleta, recorded here for context
 
 These exist so that no one can pass by weakening a check.
 - **Fixtures are locked.** Only `xtask oracle regen` can regenerate them, from the pinned wheel. A manifest records each fixture's hash, oracle version and CPU flags, and CI verifies it.
-- **You own the checks.** CODEOWNERS assigns `fixtures/`, `oracle/`, `waivers.toml` and the vendored upstream Python tests to you. Agents never push: the orchestrator opens every PR, and a PR that touches them carries the `needs-owner` label until you approve it.
+- **You own the checks.** CODEOWNERS assigns `fixtures/`, `oracle/`, `waivers.toml` and the vendored upstream Python tests to you. Agents never push: the orchestrator opens every PR, and a PR that changes waivers, deviations, public API shape or dependencies carries the `needs-owner` label until you approve it; oracle and fixture changes are reviewed by the verifier agent (your decision, 2026-10-05).
 - **Exact by default.** Comparisons are exact unless a waiver in `waivers.toml` says otherwise, and every waiver needs your approval.
 - **No hidden gaps.** The main branch may not contain `#[ignore]`, `todo!()` or `unimplemented!()` without a tracked waiver.
 - **Coverage only goes up.** The count of ported upstream tests can only increase. Every upstream test and source file is either mapped or marked not-applicable with a reason.
@@ -334,8 +334,9 @@ orchestrator pushes.
 2. **Open the PR.** The orchestrator pushes the branch and opens the PR with the template in
    `.github/`. CI runs on GitHub's Windows and Linux machines. Their CPUs differ from the
    workstation's, so they run SIMD kernels the workstation doesn't.
-3. **Owner items.** Oracle and fixture changes, waivers, deviations, public API shape and new
-   dependencies get their label plus `needs-owner`, and wait for your OK.
+3. **Owner items.** Waivers, deviations, public API shape and new
+   dependencies get their label plus `needs-owner`, and wait for your OK. Oracle and fixture
+   changes are reviewed by the verifier agent instead (your decision, 2026-10-05).
 4. **Land.** `cargo xtask land` builds the merge commit locally and runs the full gate. It
    regenerates the generated files and replays the branch onto `main` first if other cards
    landed in the meantime. The orchestrator pushes that merge commit to the PR branch, so CI
