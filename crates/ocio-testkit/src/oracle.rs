@@ -1014,6 +1014,122 @@ mod tests {
         assert!(error.contains("the write of blob 0 failed"), "{error}");
     }
 
+    /// Runs the oracle (`python -m ocio_oracle`) on pipes it sees through a recorder: each read
+    /// and write goes to the real stdin or stdout, and the sizes are recorded. With
+    /// `fail_after`, the first write that would take stdout past that many bytes raises
+    /// `OSError` (errno 22, as Python reports a failed `WriteFile`), as one write does when the
+    /// system is short of memory; later writes go through. At exit it prints `pipes: <largest
+    /// read> <largest write> <bytes written> <writes after the failure>` to stderr.
+    fn recorded_oracle(fail_after: Option<usize>) -> Command {
+        let mut command = super::Oracle::get().command();
+        command.args([
+            "-X",
+            "utf8",
+            "-c",
+            "import atexit, io, os, runpy, sys\n\
+             limit = int(sys.argv[1]) if len(sys.argv) > 1 else None\n\
+             stats = {'read': 0, 'write': 0, 'sent': 0, 'after': 0, 'failed': False}\n\
+             class Pipe(io.RawIOBase):\n\
+             \x20   def __init__(self, fd): self.fd = fd\n\
+             \x20   def readable(self): return self.fd == 0\n\
+             \x20   def writable(self): return self.fd == 1\n\
+             \x20   def readinto(self, b):\n\
+             \x20       stats['read'] = max(stats['read'], len(b))\n\
+             \x20       data = os.read(self.fd, len(b))\n\
+             \x20       b[:len(data)] = data\n\
+             \x20       return len(data)\n\
+             \x20   def write(self, b):\n\
+             \x20       stats['write'] = max(stats['write'], len(b))\n\
+             \x20       if stats['failed']:\n\
+             \x20           stats['after'] += 1\n\
+             \x20       elif limit is not None and stats['sent'] + len(b) > limit:\n\
+             \x20           stats['failed'] = True\n\
+             \x20           raise OSError(22, 'Invalid argument')\n\
+             \x20       n = os.write(self.fd, b)\n\
+             \x20       stats['sent'] += n\n\
+             \x20       return n\n\
+             atexit.register(lambda: sys.__stderr__.write(\n\
+             \x20   'pipes: %(read)d %(write)d %(sent)d %(after)d\\n' % stats))\n\
+             # Held here too, as sys.__stdout__ holds the real one: the oracle replaces\n\
+             # sys.stdout, and that must not close the pipe.\n\
+             pipes = [io.TextIOWrapper(io.BufferedReader(Pipe(0))),\n\
+             \x20        io.TextIOWrapper(io.BufferedWriter(Pipe(1)))]\n\
+             sys.stdin, sys.stdout = pipes\n\
+             sys.argv = ['ocio_oracle']\n\
+             runpy.run_module('ocio_oracle', run_name='__main__', alter_sys=True)\n",
+        ]);
+        if let Some(limit) = fail_after {
+            command.arg(limit.to_string());
+        }
+        command
+    }
+
+    /// The recorder's `pipes:` line in `stderr`: the largest read and write, the bytes
+    /// written, and the writes after the failure.
+    fn pipe_stats(stderr: &str) -> [usize; 4] {
+        let line = stderr
+            .lines()
+            .find_map(|l| l.strip_prefix("pipes: "))
+            .unwrap_or_else(|| panic!("no pipe statistics in:\n{stderr}"));
+        let values: Vec<usize> = line.split(' ').map(|v| v.parse().unwrap()).collect();
+        values.try_into().unwrap()
+    }
+
+    /// A `cpu_apply` request and response of 1 MiB of pixels each, many pipe pieces long.
+    fn large_cpu_apply() -> Vec<u8> {
+        let pixels = f32_to_bytes(&[0.25f32, 0.5, 1.0, 1.0].repeat(1 << 16));
+        let args = json!({"transform": {"class": "LogTransform", "args": {"base": 2.0}}});
+        request("cpu_apply", args, &[&pixels])
+    }
+
+    /// The oracle reads its request and writes its response at most [`PIPE_PIECE`] bytes per
+    /// call, as the caller does: one pipe read or write of megabytes can fail on Windows when
+    /// the system is short of memory.
+    #[test]
+    fn the_oracle_moves_at_most_a_pipe_piece_per_call() {
+        let output =
+            super::exchange(recorded_oracle(None), &large_cpu_apply()).expect("a response");
+        let response = super::response_of(&output).expect("the response");
+        assert_eq!(response.blobs[0].len(), 1 << 20);
+        let [read, write, sent, _] = pipe_stats(&output.stderr);
+        assert!(read <= PIPE_PIECE, "a read of {read} bytes");
+        assert!(write <= PIPE_PIECE, "a write of {write} bytes");
+        assert_eq!(sent, output.stdout.len());
+    }
+
+    /// When writing the response fails after part of it went out (a blob, here), the oracle
+    /// writes nothing more and exits with an error and the traceback on stderr. It used to
+    /// append an error frame and exit with 0, which the caller read as a truncated blob
+    /// ("oracle response blob is truncated").
+    #[test]
+    fn the_oracle_fails_without_a_second_frame_when_its_response_is_cut() {
+        let limit = 100_000;
+        let error = match super::exchange(recorded_oracle(Some(limit)), &large_cpu_apply()) {
+            Err(error) => error,
+            Ok(output) => panic!(
+                "the oracle exited successfully: {:?}",
+                super::response_of(&output).map(|r| r.result)
+            ),
+        };
+        // `ExitStatus` displays as "exit code: 1" on Windows and "exit status: 1" on Linux.
+        let exit = if cfg!(windows) {
+            "exit code: 1"
+        } else {
+            "exit status: 1"
+        };
+        assert!(
+            error.starts_with(&format!("oracle exited with {exit}\n")),
+            "{error}"
+        );
+        assert!(
+            error.contains("OSError: [Errno 22] Invalid argument"),
+            "{error}"
+        );
+        let [_, _, sent, after] = pipe_stats(&error);
+        assert!(sent <= limit && sent > 0, "{sent} bytes written");
+        assert_eq!(after, 0, "the oracle kept writing after the failure");
+    }
+
     fn large_stderr_exchange() {
         let mut command = super::Oracle::get().command();
         command.args([
