@@ -2094,13 +2094,15 @@ note = "p1-transforms-fam2 (1.8f): the class and the METADATA_*_DESCRIPTION name
 path = "src/OpenColorIO/transforms/ColorSpaceTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/color_space_transform.rs"]
-status = "todo"
+status = "partial"
+note = "p3-transforms (3.1a): the class (18-151), its validation and operator<< (I-120), checked against the wheel in crates/ocio/tests/config_transforms_oracle.rs; BuildColorSpaceOps and CollectContextVariables come with p3-builders (3.2a)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/DisplayViewTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/display_view_transform.rs"]
-status = "todo"
+status = "partial"
+note = "p3-transforms (3.1a): the class (18-171), its validation and operator<< (I-121), checked against the wheel in crates/ocio/tests/config_transforms_oracle.rs; BuildDisplayOps and CollectContextVariables come with p3-builders (3.2c)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/ExponentTransform.cpp"
@@ -2274,7 +2276,8 @@ note = "p1-transforms-fam2 (1.8e)"
 path = "src/OpenColorIO/transforms/LookTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/look_transform.rs"]
-status = "todo"
+status = "partial"
+note = "p3-transforms (3.1a): the class (18-147, 181-191), its validation and operator<<, checked against the wheel in crates/ocio/tests/config_transforms_oracle.rs; GetLooksResultColorSpace, BuildLookOps and CollectContextVariables come with p3-builders (3.2b)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/Lut1DTransform.cpp"
@@ -4906,13 +4909,15 @@ note = "p1-transforms-fam2 (1.8f): equality, buildops, description, style; p1-te
 path = "tests/cpu/transforms/ColorSpaceTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/color_space_transform_tests.rs"]
-status = "todo"
+status = "partial"
+note = "p3-transforms (3.1a): basic; context_variables comes with 3.2a, the build_* tests use fixed functions (p3-after-p2)"
 
 [[file]]
 path = "tests/cpu/transforms/DisplayViewTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/display_view_transform_tests.rs"]
-status = "todo"
+status = "partial"
+note = "p3-transforms (3.1a): basic; build_ops_with_looks, config_load, apply_fwd_inv and context_variables come with 3.2c, build_ops uses ExposureContrast (Phase 5)"
 
 [[file]]
 path = "tests/cpu/transforms/ExponentTransform_tests.cpp"
@@ -5001,7 +5006,8 @@ note = "p1-transforms-fam2 (1.8e)"
 path = "tests/cpu/transforms/LookTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/look_transform_tests.rs"]
-status = "todo"
+status = "partial"
+note = "p3-transforms (3.1a): basic (it uses no fixed function); inverse_look_transform and context_variables come with 3.2b, build_look_ops and build_look_options_ops use fixed functions (p3-after-p2)"
 
 [[file]]
 path = "tests/cpu/transforms/Lut1DTransform_tests.cpp"
