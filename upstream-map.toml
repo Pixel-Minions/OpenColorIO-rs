@@ -25,7 +25,7 @@ path = "include/OpenColorIO/OpenColorIO.h"
 kind = "api"
 target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/image_desc.rs", "crates/ocio-ops/src/logging.rs", "crates/ocio-gpu/src/gpu_shader_desc.rs", "crates/ocio-gpu/src/gpu_shader.rs"]
 status = "partial"
-note = "1.1b-1.1c: AutoStride, ImageDesc, PackedImageDesc and PlanarImageDesc (image_desc.rs, for ocio to re-export); 1.2e: the logging functions (155-177: GetLoggingLevel, SetLoggingLevel, SetLoggingFunction, ResetToDefaultLoggingFunction, LogMessage) in logging.rs; 1.7c: GpuShaderCreator (3361-3573) and GpuShaderDesc (3725-3825) are GpuShaderDesc in gpu_shader_desc.rs, with TextureType, TextureDimensions, UniformData and the getter types in gpu_shader.rs"
+note = "1.1b-1.1c: AutoStride, ImageDesc, PackedImageDesc and PlanarImageDesc (image_desc.rs, for ocio to re-export); 1.2e: the logging functions (155-177: GetLoggingLevel, SetLoggingLevel, SetLoggingFunction, ResetToDefaultLoggingFunction, LogMessage) in logging.rs; 1.7c: GpuShaderCreator (3361-3573) and GpuShaderDesc (3725-3825) are GpuShaderDesc in gpu_shader_desc.rs, with TextureType, TextureDimensions, UniformData and the getter types in gpu_shader.rs; p3-context: GetEnvVariable, SetEnvVariable, UnsetEnvVariable, IsEnvVariablePresent (197-203), re-exported from ocio_ops::platform (3.5a); Context (3865-3951) in context.rs and ConfigIOProxy (4095-4138) in config_io_proxy.rs (3.5e)"
 
 [[file]]
 path = "include/OpenColorIO/OpenColorTransforms.h"
@@ -190,7 +190,7 @@ path = "src/OpenColorIO/Context.cpp"
 kind = "src"
 target = ["crates/ocio/src/context.rs"]
 status = "partial"
-note = "p1-transforms T0: Context::Create, without state (Phase 3)"
+note = "p1-transforms T0: Context::Create; p3-context 3.5e: the state (search paths, working dir, environment mode, variables), loadEnvironment, resolveStringVar with the used context, the cache ID and its caches, createEditableCopy (I-111), operator<<, the I/O proxy slot. resolveFileLocation and GetAbsoluteSearchPaths come in 3.5f"
 
 [[file]]
 path = "src/OpenColorIO/ContextVariableUtils.cpp"
@@ -4200,7 +4200,8 @@ note = "p3-context 3.5d: env_check, env_expand"
 path = "tests/cpu/Context_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/context_tests.rs"]
-status = "todo"
+status = "partial"
+note = "p3-context 3.5e: search_paths, string_vars; the tests that look for files come in 3.5f"
 
 [[file]]
 path = "tests/cpu/Display_tests.cpp"

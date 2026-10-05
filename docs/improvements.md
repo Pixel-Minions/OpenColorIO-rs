@@ -923,6 +923,20 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **A fix:** compare the one byte, as Python does.
 - **Status:** matched in p3-context (3.5b, `crates/ocio-ops/src/utils/pystring.rs`).
 
+### I-111. A context's copy forgets its environment mode
+
+- **Upstream:** `Context::createEditableCopy` copies the context through `Context::Impl::
+  operator=` (`Context.cpp:60-80, 156-161` @ v2.5.2), which copies the search paths, working
+  directory, variables, caches, cache ID and I/O proxy, but not `m_envmode`: the copy has the
+  default, `ENV_ENVIRONMENT_LOAD_PREDEFINED`. The copied cache ID was computed with the original
+  mode, so the copy's `getCacheID` describes a mode it doesn't have until a setter clears it.
+- **Who notices:** code that copies a context in `ENV_ENVIRONMENT_LOAD_ALL` mode (and a config's
+  copy, which copies its context) and then calls `loadEnvironment`: the copy updates its own
+  variables instead of loading all of them.
+- **A fix:** copy `m_envmode` in `operator=`.
+- **Status:** matched in p3-context (3.5e, `crates/ocio/src/context.rs`, `Clone for Context`);
+  checked against the wheel (`crates/ocio/tests/context_oracle.rs`, "environment").
+
 ### I-112. Temporary file names
 
 - **Upstream:** `Platform::CreateTempFilename` names a file `/tmp/ocio_<n>` on Linux, `<n>` drawn
