@@ -12,11 +12,14 @@
 //! - [`mutations`] generates, from a typical case, one case per slot and value: extreme finite
 //!   values ([`extreme_values`]: ±1e38 and the smallest subnormals for `float` parameters,
 //!   ±1e300 and the smallest subnormals for `double` ones) and NaN, +Inf and -Inf
-//!   ([`NON_FINITE`]).
+//!   ([`NON_FINITE`]);
+//! - a LUT's chosen entries are slots too ([`LutEntries`], [`Slot::lut_entry`]), so the
+//!   generated cases put those values in one component of one entry at a time.
 //!
 //! W0002 covers the channels of NaN parameters, as the owner approved it (`waivers.toml`), and
 //! since 2026-10-04 the NaN entries of the 1D LUTs baked from them, with the cache IDs that
-//! hash those LUTs.
+//! hash those LUTs. It never covers a NaN entry of a LUT the transform is given (owner
+//! decision P2-6): those compare bit for bit.
 //! Infinite parameters, like extreme finite ones that overflow to infinity in the renderers,
 //! compare bit for bit.
 
@@ -62,8 +65,12 @@ pub struct Slot {
     /// How the op uses it.
     pub precision: Precision,
     /// The output channels it applies to: a NaN value makes these channels compare under
-    /// W0002.
+    /// W0002, unless the slot is a LUT entry.
     pub channels: Channels,
+    /// Whether the slot is an entry of a LUT ([`Slot::lut_entry`]) rather than a parameter:
+    /// W0002 never covers a NaN LUT entry (owner decision P2-6): the renderers sanitize or
+    /// clamp them, so the outputs compare bit for bit.
+    pub lut_entry: bool,
 }
 
 impl Slot {
@@ -73,6 +80,7 @@ impl Slot {
             name: name.into(),
             precision,
             channels,
+            lut_entry: false,
         }
     }
 
@@ -86,6 +94,80 @@ impl Slot {
     pub fn rgba(name: &str, precision: Precision) -> [Slot; 4] {
         [("r", R), ("g", G), ("b", B), ("a", A)]
             .map(|(c, ch)| Slot::new(format!("{name}[{c}]"), precision, ch))
+    }
+
+    /// A slot for one component of a LUT entry: a `float` that applies to `channels`, which
+    /// W0002 never covers ([`Slot::lut_entry`](Slot#structfield.lut_entry)).
+    pub fn lut_entry(name: impl Into<String>, channels: Channels) -> Self {
+        Slot {
+            lut_entry: true,
+            ..Slot::new(name, Precision::F32, channels)
+        }
+    }
+}
+
+/// Chosen entries of a LUT of red, green and blue values, as parameter slots: the battery's
+/// generated cases put extreme finite, NaN and ±Inf values in one component of one chosen entry
+/// at a time, rather than in every entry ([`mutations`]).
+///
+/// A family keeps the LUT's values (three `f32`s per entry, red first, in the order the
+/// transform's `setData` takes them) in its parameters, and implements [`Params`] for them
+/// with [`LutEntries::slots`], [`LutEntries::get`] and [`LutEntries::set`]. Component `c` of
+/// an entry applies to output channel `c`, as in a 1D LUT and in a 3D LUT's red, green and
+/// blue outputs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LutEntries {
+    name: String,
+    indices: Vec<usize>,
+}
+
+impl LutEntries {
+    /// The entries `indices` of the LUT `name`, in that order.
+    pub fn new(name: impl Into<String>, indices: Vec<usize>) -> Self {
+        LutEntries {
+            name: name.into(),
+            indices,
+        }
+    }
+
+    /// The usual choice for a LUT of `entries` entries: the first, the second (the first node
+    /// inside the domain), the middle one and the last, without repeats.
+    pub fn first_second_middle_last(name: impl Into<String>, entries: usize) -> Self {
+        assert!(entries > 0, "a LUT without entries");
+        let mut indices = vec![0, 1.min(entries - 1), entries / 2, entries - 1];
+        indices.dedup();
+        LutEntries::new(name, indices)
+    }
+
+    /// The chosen entries' indices.
+    pub fn indices(&self) -> &[usize] {
+        &self.indices
+    }
+
+    /// Three slots per chosen entry, `name[i].r`, `name[i].g` and `name[i].b`.
+    pub fn slots(&self) -> Vec<Slot> {
+        self.indices
+            .iter()
+            .flat_map(|&i| {
+                [("r", R), ("g", G), ("b", B)]
+                    .map(|(c, ch)| Slot::lut_entry(format!("{}[{i}].{c}", self.name), ch))
+            })
+            .collect()
+    }
+
+    /// Where slot `slot` is in the values (three per entry).
+    fn position(&self, slot: usize) -> usize {
+        3 * self.indices[slot / 3] + slot % 3
+    }
+
+    /// The value of slot `slot` of [`LutEntries::slots`] in `values`.
+    pub fn get(&self, values: &[f32], slot: usize) -> f64 {
+        f64::from(values[self.position(slot)])
+    }
+
+    /// Sets slot `slot` of [`LutEntries::slots`] in `values`, as a `float` (the C++ cast).
+    pub fn set(&self, values: &mut [f32], slot: usize, value: f64) {
+        values[self.position(slot)] = value as f32;
     }
 }
 
@@ -187,7 +269,8 @@ impl<P: Params> Case<P> {
                 any_non_finite = true;
                 for (c, &on) in slot.channels.iter().enumerate() {
                     non_finite[c] |= on;
-                    nan[c] |= on && v.is_nan();
+                    // W0002 covers NaN parameters, never NaN LUT entries (P2-6).
+                    nan[c] |= on && v.is_nan() && !slot.lut_entry;
                 }
             }
         }
@@ -957,6 +1040,119 @@ mod tests {
             ))
         );
         assert_eq!(lut_hashes(&id(&format!("{h1}0"))), None);
+    }
+
+    /// A LUT's values with chosen entries as slots, as a family keeps them.
+    #[derive(Debug, Clone)]
+    struct Lut {
+        values: Vec<f32>,
+        entries: LutEntries,
+    }
+
+    impl Params for Lut {
+        fn slots(&self) -> Vec<Slot> {
+            self.entries.slots()
+        }
+        fn get(&self, index: usize) -> f64 {
+            self.entries.get(&self.values, index)
+        }
+        fn set(&mut self, index: usize, value: f64) {
+            self.entries.set(&mut self.values, index, value);
+        }
+    }
+
+    /// A LUT of `n` entries whose value `k` is `k`.
+    fn lut(n: usize) -> Lut {
+        Lut {
+            values: (0..3 * n).map(|k| k as f32).collect(),
+            entries: LutEntries::first_second_middle_last("lut", n),
+        }
+    }
+
+    #[test]
+    fn lut_entries_are_the_first_second_middle_and_last() {
+        let indices = |n| {
+            LutEntries::first_second_middle_last("lut", n)
+                .indices()
+                .to_vec()
+        };
+        assert_eq!(indices(1), [0]);
+        assert_eq!(indices(2), [0, 1]);
+        assert_eq!(indices(3), [0, 1, 2]);
+        assert_eq!(indices(17), [0, 1, 8, 16]);
+        assert_eq!(indices(4096), [0, 1, 2048, 4095]);
+        let slots = LutEntries::new("lut", vec![5, 2]).slots();
+        let names: Vec<&str> = slots.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "lut[5].r", "lut[5].g", "lut[5].b", "lut[2].r", "lut[2].g", "lut[2].b"
+            ]
+        );
+        for (slot, channels) in slots.iter().zip([R, G, B, R, G, B]) {
+            assert_eq!(slot.channels, channels);
+            assert_eq!(slot.precision, Precision::F32);
+            assert!(slot.lut_entry);
+        }
+        assert!(!Slot::new("base", Precision::F32, RGB).lut_entry);
+    }
+
+    /// Each generated case of a LUT changes one component of one chosen entry, as a `float`,
+    /// and leaves every other value alone.
+    #[test]
+    fn lut_mutations_change_one_entry_component() {
+        let base = Case::new("lut", lut(17));
+        let cases = mutations(&base);
+        // 4 entries, 3 components, F32 (4 + 3) values each.
+        assert_eq!(cases.len(), 4 * 3 * 7);
+        for case in &cases {
+            let Origin::Generated { slot, value } = case.origin() else {
+                panic!("{} is not generated", case.label());
+            };
+            let at = 3 * [0, 1, 8, 16][slot / 3] + slot % 3;
+            let wanted = slot_values(&base.params().slots()[slot])[value] as f32;
+            for (k, (a, b)) in case
+                .params()
+                .values
+                .iter()
+                .zip(&base.params().values)
+                .enumerate()
+            {
+                if k == at {
+                    assert_eq!(a.to_bits(), wanted.to_bits(), "{}", case.label());
+                } else {
+                    assert_eq!(a.to_bits(), b.to_bits(), "{}", case.label());
+                }
+            }
+        }
+        let labels: Vec<&str> = cases.iter().map(|c| c.label()).collect();
+        assert!(labels.contains(&"lut, lut[8].g = NaN"), "{labels:?}");
+        assert!(labels.contains(&"lut, lut[16].b = -1e38"), "{labels:?}");
+    }
+
+    /// W0002 never covers a NaN LUT entry (owner decision P2-6): such a case is non-finite in
+    /// the entry's channel, but compares NaN bits exactly, in every combination.
+    #[test]
+    fn w0002_never_covers_nan_lut_entries() {
+        let mut p = lut(17);
+        p.set(4, f64::NAN);
+        let case = Case::new("NaN lut[1].g", p);
+        assert_eq!(case.kind(), Kind::NonFinite);
+        assert_eq!(case.non_finite_channels(), G);
+        assert_eq!(case.nan_channels(), [false; 4]);
+        let inputs = px([0; 4]);
+        let expected = px([0, NAN_A, 0, 0]);
+        let actual = px([0, NAN_B, 0, 0]);
+        for direction in Direction::BOTH {
+            for fast_math in [true, false] {
+                let c = combo(direction, fast_math);
+                assert!(!case.w0002_applies(&c));
+                assert!(matches!(
+                    case.compare_pixels(&c, &inputs, &expected, &actual),
+                    Comparison::Mismatch(_)
+                ));
+            }
+        }
     }
 
     #[test]

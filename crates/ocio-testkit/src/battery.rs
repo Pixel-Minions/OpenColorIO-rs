@@ -127,6 +127,25 @@
 //! The migrated families in `crates/ocio-ops/tests/log_oracle.rs` and `gamma_oracle.rs` are
 //! complete examples; their costs per tier are in [`tier`].
 //!
+//! # LUT families
+//!
+//! A family whose transform takes a LUT (card T2.1):
+//! - **Spec:** [`Spec::with_f32_blobs`] passes the LUT's values as a blob, which the oracle
+//!   hands to `setData` whole (`{"blob": 0, "dtype": "float32"}`, with `"shape"` for a 3D
+//!   LUT's `[n, n, n, 3]`), rather than one `setValue` call per entry.
+//! - **Parameters:** keep the values in the parameters and make chosen entries slots with
+//!   [`params::LutEntries`] (typically [`params::LutEntries::first_second_middle_last`]): the
+//!   generated cases then put extreme finite, NaN and ±Inf values in one component of one
+//!   chosen entry at a time. W0002 never covers a LUT entry (owner decision P2-6): a NaN entry
+//!   compares bit for bit.
+//! - **Probes:** return [`crate::probe::lut_domain_points`] from [`Family::breakpoints`] (the
+//!   neighbourhoods of the nodes, the midpoints and points outside the domain), and
+//!   [`ProbeSet::RowLengths`]` { max_pixels: 33 }` from [`Family::extra_probes`] for renderers
+//!   with SIMD loops: each buffer is one row, one renderer call, so every remainder of the 4-,
+//!   8- and 16-pixel kernels runs, and rows of one pixel take their own path.
+//!
+//! `crates/ocio-testkit/tests/battery_lut_oracle.rs` runs such a family against the wheel.
+//!
 //! # Modules and types
 //!
 //! - [`params`]: parameter cases, their generators (extreme finite, NaN and ±Inf values), and
@@ -161,6 +180,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
+use crate::oracle::f32_to_bytes;
 use crate::probe::ProbeSet;
 use params::{Case, Channels, Params};
 pub use tier::Tier;
@@ -341,6 +361,13 @@ pub enum Spec {
     /// `getProcessor(transform)`. JSON can't hold NaN or ±Inf (serde_json writes them as
     /// `null`, which the battery refuses): use [`Spec::Yaml`] for those.
     Transform(Value),
+    /// A transform spec with blobs, applied like [`Spec::Transform`]: a value
+    /// `{"blob": i, "dtype": "float32"}` in it (with an optional `"shape"`) becomes a NumPy
+    /// array of blob `i` (`oracle/ocio_oracle/spec.py`, chunk O2.1), so that
+    /// `Lut1DTransform.setData` and `Lut3DTransform.setData` take a whole LUT in one call: a
+    /// 65,536-entry half domain or a 129³ cube doesn't fit in JSON. [`Spec::with_f32_blobs`]
+    /// makes one from `f32` arrays.
+    TransformWithBlobs(Value, Vec<Vec<u8>>),
     /// One transform in the config's YAML syntax, e.g. `!<LogTransform> {base: .nan}`, as the
     /// `from_scene_reference` of a colour space `cs` in a raw version 2.1 config: the
     /// processor from `raw` to `cs`. YAML can hold NaN and infinite parameters (`.nan`,
@@ -354,12 +381,29 @@ pub enum Spec {
 }
 
 impl Spec {
+    /// A [`Spec::TransformWithBlobs`] whose blob `i` holds `arrays[i]`'s values as
+    /// little-endian `f32`s, for `{"blob": i, "dtype": "float32"}` values in `transform`.
+    pub fn with_f32_blobs(transform: Value, arrays: &[&[f32]]) -> Spec {
+        let blobs = arrays.iter().map(|values| f32_to_bytes(values)).collect();
+        Spec::TransformWithBlobs(transform, blobs)
+    }
+
+    /// The spec's blobs, which follow `cpu_apply`'s own pixels in its request: empty but for a
+    /// [`Spec::TransformWithBlobs`].
+    pub fn blobs(&self) -> &[Vec<u8>] {
+        match self {
+            Spec::TransformWithBlobs(_, blobs) => blobs,
+            Spec::Transform(_) | Spec::Yaml(_) | Spec::YamlV1(_) => &[],
+        }
+    }
+
     /// The oracle's `cpu_apply` arguments for this processor in `combo`: the default CPU
     /// processor with fast math on, the default flags without `OPTIMIZATION_FAST_LOG_EXP_POW`
-    /// with fast math off, and the bit depths and channel count of other formats.
+    /// with fast math off, and the bit depths and channel count of other formats. A
+    /// [`Spec::TransformWithBlobs`]'s blobs go after the pixels ([`Spec::blobs`]).
     pub fn cpu_apply_args(&self, combo: &Combo) -> Value {
         let mut args = match self {
-            Spec::Transform(transform) => {
+            Spec::Transform(transform) | Spec::TransformWithBlobs(transform, _) => {
                 if let Some(path) = null_path(transform, "") {
                     panic!(
                         "transform spec {transform} has null at {path}: JSON can't hold NaN or \
@@ -562,6 +606,14 @@ pub trait Family {
     /// Points whose ±N ulp neighbourhoods to probe for `params` in `direction`, such as break
     /// points; none by default.
     fn breakpoints(&self, params: &Self::Params, direction: Direction) -> Vec<f32> {
+        let _ = (params, direction);
+        Vec::new()
+    }
+
+    /// Probe sets of the family's own, run for every case, explicit and generated, at every
+    /// tier, after the plan's: [`ProbeSet::RowLengths`] for renderers whose SIMD loops leave a
+    /// remainder (each buffer is one row, one renderer call). None by default.
+    fn extra_probes(&self, params: &Self::Params, direction: Direction) -> Vec<ProbeSet> {
         let _ = (params, direction);
         Vec::new()
     }

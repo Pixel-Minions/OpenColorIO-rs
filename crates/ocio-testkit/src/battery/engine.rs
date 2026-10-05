@@ -99,7 +99,7 @@ enum Route {
 impl Route {
     fn of(spec: &Spec) -> Route {
         match spec {
-            Spec::Transform(_) => Route::Transform,
+            Spec::Transform(_) | Spec::TransformWithBlobs(..) => Route::Transform,
             Spec::Yaml(_) => Route::Yaml,
             Spec::YamlV1(_) => Route::YamlV1,
         }
@@ -119,6 +119,8 @@ struct Job {
     case: usize,
     combo: usize,
     args: Arc<Value>,
+    /// The spec's blobs, which follow the pixels ([`Spec::blobs`]).
+    blobs: Arc<Vec<Vec<u8>>>,
     input: Input,
 }
 
@@ -190,13 +192,21 @@ pub(super) fn run<F: Family>(family: &F, plan: &Plan) -> Summary {
             Origin::Generated { .. } => &generated_buffers,
         };
         let mut neighbourhoods: HashMap<super::Direction, Option<Arc<Buffer>>> = HashMap::new();
+        let mut extras: HashMap<super::Direction, Vec<Arc<Buffer>>> = HashMap::new();
         let mut specs = HashMap::new();
         for (k, combo) in combos.iter().enumerate() {
-            let spec = specs
-                .entry(combo.direction)
-                .or_insert_with(|| family.spec(case.params(), combo.direction));
+            let (spec, blobs) = specs.entry(combo.direction).or_insert_with(|| {
+                let spec = family.spec(case.params(), combo.direction);
+                let blobs = Arc::new(spec.blobs().to_vec());
+                (spec, blobs)
+            });
             routes[c].insert(Route::of(spec));
             let args = Arc::new(spec.cpu_apply_args(combo));
+            let blobs = Arc::clone(blobs);
+            let extra = extras
+                .entry(combo.direction)
+                .or_insert_with(|| buffers(&family.extra_probes(case.params(), combo.direction)))
+                .clone();
             let near = neighbourhoods
                 .entry(combo.direction)
                 .or_insert_with(|| {
@@ -214,12 +224,13 @@ pub(super) fn run<F: Family>(family: &F, plan: &Plan) -> Summary {
                         .map(|(name, pixels)| Buffer::new(name, pixels))
                 })
                 .clone();
-            let mut buffers_asked = shared.len() + usize::from(near.is_some());
-            for buffer in shared.iter().chain(near.iter()) {
+            let mut buffers_asked = shared.len() + usize::from(near.is_some()) + extra.len();
+            for buffer in shared.iter().chain(near.iter()).chain(extra.iter()) {
                 jobs.push(Job {
                     case: c,
                     combo: k,
                     args: Arc::clone(&args),
+                    blobs: Arc::clone(&blobs),
                     input: Input::Buffer(Arc::clone(buffer)),
                 });
             }
@@ -236,6 +247,7 @@ pub(super) fn run<F: Family>(family: &F, plan: &Plan) -> Summary {
                     case: c,
                     combo: k,
                     args: Arc::clone(&args),
+                    blobs: Arc::clone(&blobs),
                     input: Input::Sweep { index, pixels },
                 }));
             }
@@ -281,7 +293,10 @@ pub(super) fn run<F: Family>(family: &F, plan: &Plan) -> Summary {
             .map(|(job, input)| BatchCall {
                 cmd: "cpu_apply",
                 args: (*job.args).clone(),
-                blobs: vec![&input.bytes],
+                // The batch sends identical blobs once: a LUT once per process.
+                blobs: std::iter::once(input.bytes.as_slice())
+                    .chain(job.blobs.iter().map(Vec::as_slice))
+                    .collect(),
             })
             .collect();
         // A sweep's responses would only fill the disk.
