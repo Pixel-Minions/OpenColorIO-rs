@@ -4,7 +4,7 @@
 //! The FixedFunction renderers against the wheel, bit for bit, through the oracle test
 //! battery (`ocio_testkit::battery`): every case in both directions, with fast math on and
 //! off, on the tier's probe sets (`OCIO_RS_TIER`). So far the ACES 1.x styles (chunk 2.3b), the
-//! Rec.2100 surround, HSV and the CIE styles (2.3c1).
+//! Rec.2100 surround, HSV and the CIE styles (2.3c1), and the HSY styles (2.3c2).
 //!
 //! The oracle builds a FixedFunctionTransform in a raw config and applies its CPU processor
 //! to F32 RGBA pixels. The family builds the op data that upstream's transform and
@@ -190,8 +190,11 @@ impl Family for FixedFamily {
         }
         match p.style {
             // L* switches from linear to the cube root at this Y, and back at this L*
-            // (FixedFunctionOpCPU.cpp:1970-1971, 2011 @ v2.5.2).
+            // (FixedFunctionOpCPU.cpp:1974, 2012 @ v2.5.2).
             FixedFunctionStyle::XyzToLuv => vec![0.008856451679, 0.08],
+            // The linear HSY blends its low and high saturations between these lumas
+            // (FixedFunctionOpCPU.cpp:1638-1640, 1714-1716 @ v2.5.2).
+            FixedFunctionStyle::RgbToHsyLin => vec![0.001, 0.01],
             _ => Vec::new(),
         }
     }
@@ -279,11 +282,19 @@ fn aces_1_styles_match_the_wheel() {
 }
 
 #[test]
-fn surround_hsv_and_cie_styles_match_the_wheel() {
+fn surround_hsv_hsy_and_cie_styles_match_the_wheel() {
     use FixedFunctionStyle::*;
-    let mut cases: Vec<Case<Fixed>> = [RgbToHsv, XyzToXyy, XyzToUvy, XyzToLuv]
-        .map(|style| Case::new(format!("{style:?}"), Fixed::new(style, &[])))
-        .to_vec();
+    let mut cases: Vec<Case<Fixed>> = [
+        RgbToHsv,
+        RgbToHsyLin,
+        RgbToHsyLog,
+        RgbToHsyVid,
+        XyzToXyy,
+        XyzToUvy,
+        XyzToLuv,
+    ]
+    .map(|style| Case::new(format!("{style:?}"), Fixed::new(style, &[])))
+    .to_vec();
 
     // tests/cpu/ops/fixedfunction/FixedFunctionOpCPU_tests.cpp:996, 1030 @ v2.5.2.
     let surround = Case::new("Rec2100Surround 0.78", Fixed::new(Rec2100Surround, &[0.78]));
@@ -322,7 +333,7 @@ fn surround_hsv_and_cie_styles_match_the_wheel() {
     ));
 
     battery::run(&FixedFamily {
-        name: "surround, HSV, CIE",
+        name: "surround, HSV, HSY, CIE",
         cases,
         bases,
     });
@@ -374,6 +385,9 @@ fn nan_combinations_match_the_wheel() {
         Fixed::new(AcesGamutComp13, &GAMUT_COMP_13),
         Fixed::new(Rec2100Surround, &[0.78]),
         Fixed::new(RgbToHsv, &[]),
+        Fixed::new(RgbToHsyLin, &[]),
+        Fixed::new(RgbToHsyLog, &[]),
+        Fixed::new(RgbToHsyVid, &[]),
         Fixed::new(XyzToXyy, &[]),
         Fixed::new(XyzToUvy, &[]),
         Fixed::new(XyzToLuv, &[]),

@@ -136,8 +136,8 @@ const STYLES: [FixedFunctionStyle; 21] = [
     RgbToHsyVid,
 ];
 
-/// The styles whose CPU renderers are ported (2.3b, 2.3c1): the processors' cases.
-const RENDERED: [FixedFunctionStyle; 11] = [
+/// The styles whose CPU renderers are ported (2.3b, 2.3c1, 2.3c2): the processors' cases.
+const RENDERED: [FixedFunctionStyle; 14] = [
     AcesRedMod03,
     AcesRedMod10,
     AcesGlow03,
@@ -149,6 +149,9 @@ const RENDERED: [FixedFunctionStyle; 11] = [
     XyzToXyy,
     XyzToUvy,
     XyzToLuv,
+    RgbToHsyLin,
+    RgbToHsyLog,
+    RgbToHsyVid,
 ];
 
 /// Transforms of every style in both directions, valid and set up with other parameters, and
