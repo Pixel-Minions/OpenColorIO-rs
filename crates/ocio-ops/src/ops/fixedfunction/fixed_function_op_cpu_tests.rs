@@ -2,7 +2,8 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Ported `tests/cpu/ops/fixedfunction/FixedFunctionOpCPU_tests.cpp` @ v2.5.2: the ACES 1.x
-//! styles (chunk 2.3b). The other styles' tests come with their renderers.
+//! styles (chunk 2.3b), the Rec.2100 surround, HSV and CIE styles (2.3c1). The other styles'
+//! tests come with their renderers.
 
 use super::*;
 use crate::ops::fixedfunction::fixed_function_op_data::Params;
@@ -360,9 +361,244 @@ fn aces_gamut_map_13() {
     apply_fixed_function(&mut output_32f, &input_32f, &inv, 1e-6, false);
 }
 
-/// U-31: the gamut compression's renderer reads seven parameters, which upstream does without
-/// a check; the port refuses data with fewer (set after the validating constructor). The
-/// styles whose renderers come later are refused, in both fast-math settings.
+/// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, rec2100_surround)` @ v2.5.2.
+#[test]
+fn rec2100_surround() {
+    let input_32f: [f32; 20] = [
+        8.4e-5, 2.4e-5, 1.4e-4, 0.1, //
+        0.11, 0.02, 0.04, 0.5, //
+        0.71, 0.51, 0.81, 1.0, //
+        0.43, 0.82, 0.71, 0.0, //
+        -1.00, -0.001, 1.2, 0.0,
+    ];
+    {
+        let params: Params = vec![0.78];
+
+        let mut output_32f = input_32f;
+
+        let expected_32f: [f32; 20] = [
+            0.000637205163,
+            0.000182058618,
+            0.001062008605,
+            0.1, //
+            0.21779590,
+            0.03959925,
+            0.07919850,
+            0.5, //
+            0.80029451,
+            0.57485944,
+            0.91301214,
+            1.0, //
+            0.46350446,
+            0.88389223,
+            0.76532131,
+            0.0, //
+            -1.43735918,
+            -0.00143735918,
+            1.72483102,
+            0.0,
+        ];
+
+        // Forward transform -- input to expected.
+        let func_data =
+            FixedFunctionOpData::with_params(Rec2100SurroundFwd, params.clone()).unwrap();
+        apply_fixed_function(&mut output_32f, &expected_32f, &func_data, 4e-7, false);
+
+        // Inverse transform -- output back to original.
+        let func_data_inv = FixedFunctionOpData::with_params(Rec2100SurroundInv, params).unwrap();
+        apply_fixed_function(&mut output_32f, &input_32f, &func_data_inv, 3e-7, false);
+    }
+    {
+        let params: Params = vec![1.2];
+
+        let mut output_32f = input_32f;
+
+        let expected_32f: [f32; 20] = [
+            1.331310281667e-05,
+            3.803743661907e-06,
+            2.218850469446e-05,
+            0.1, //
+            0.059115925805,
+            0.010748350146,
+            0.021496700293,
+            0.5, //
+            0.636785774786,
+            0.457409500198,
+            0.726473912080,
+            1.0, //
+            0.401647721515,
+            0.765932864285,
+            0.663185772735,
+            0.0, //
+            -7.190495367684e-01,
+            -7.190495367684e-04,
+            8.628594441221e-01,
+            0.0,
+        ];
+
+        // Forward transform -- input to expected.
+        let func_data =
+            FixedFunctionOpData::with_params(Rec2100SurroundFwd, params.clone()).unwrap();
+        apply_fixed_function(&mut output_32f, &expected_32f, &func_data, 2e-7, false);
+
+        // Inverse transform -- output back to original.
+        let func_data_inv = FixedFunctionOpData::with_params(Rec2100SurroundInv, params).unwrap();
+        apply_fixed_function(&mut output_32f, &input_32f, &func_data_inv, 2e-7, false);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, RGB_TO_HSV)` @ v2.5.2.
+#[test]
+fn rgb_to_hsv() {
+    #[rustfmt::skip]
+    let hsv_frame: Vec<f32> = vec![
+         3./12.,  0.80,  2.50,  0.50,      // val > 1
+        11./12.,  1.20,  2.50,  1.00,      // sat > 1
+        15./24.,  0.80, -2.00,  0.25,      // val < 0
+        19./24.,  1.50, -0.40,  0.25,      // sat > 1, val < 0
+       -89./24.,  0.50,  0.40,  2.00,      // under-range hue
+        81./24.,  1.50, -0.40, -0.25,      // over-range hue, sat > 1, val < 0
+        81./24., -0.50,  0.40,  0.00,      // sat < 0
+         0.5000,  2.50,  0.04,  0.00,      // sat > 2
+    ];
+
+    #[rustfmt::skip]
+    let rgb_frame: Vec<f32> = vec![
+        1.500,   2.500,   0.500,   0.50,
+        3.125,  -0.625,   1.250,   1.00,
+       -5./3., -4./3., -1./3.,  0.25,
+        0.100,  -0.800,   0.400,   0.25,
+        0.250,   0.400,   0.200,   2.00,
+       -0.800,   0.400,  -0.500,  -0.25,
+        0.400,   0.400,   0.400,   0.00,
+       -39.96,   40.00,   40.00,   0.00,
+    ];
+
+    let data_fwd = data(RgbToHsv);
+
+    let num_rgb = 4; // only the first 4 are relevant for RGB --> HSV
+    let mut img = rgb_frame.clone();
+    apply_fixed_function(
+        &mut img[..num_rgb * 4],
+        &hsv_frame[..num_rgb * 4],
+        &data_fwd,
+        1e-6,
+        false,
+    );
+
+    let data_f_inv = data(HsvToRgb);
+
+    let num_hsv = 7; // not using the last one as it requires a looser tolerance
+    let mut img = hsv_frame.clone();
+    apply_fixed_function(
+        &mut img[..num_hsv * 4],
+        &rgb_frame[..num_hsv * 4],
+        &data_f_inv,
+        1e-6,
+        false,
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, XYZ_TO_xyY)` @ v2.5.2.
+#[test]
+fn xyz_to_xyy() {
+    let input_frame: Vec<f32> = vec![
+        3600.0 / 4095.0,
+        250.0 / 4095.0,
+        900.0 / 4095.0,
+        2000.0 / 4095.0,
+        400.0 / 4095.0,
+        3000.0 / 4095.0,
+        4000.0 / 4095.0,
+        4095.0 / 4095.0,
+    ];
+
+    let output_frame: Vec<f32> = vec![
+        49669.0 / 65535.0,
+        3449.0 / 65535.0,
+        4001.0 / 65535.0,
+        32007.0 / 65535.0,
+        3542.0 / 65535.0,
+        26568.0 / 65535.0,
+        48011.0 / 65535.0,
+        65535.0 / 65535.0,
+    ];
+
+    let mut img = input_frame.clone();
+    apply_fixed_function(&mut img, &output_frame, &data(XyzToXyy), 1e-5, false);
+
+    let mut img = output_frame.clone();
+    apply_fixed_function(&mut img, &input_frame, &data(XyyToXyz), 1e-4, false);
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, XYZ_TO_uvY)` @ v2.5.2.
+#[test]
+fn xyz_to_uvy() {
+    let input_frame: Vec<f32> = vec![
+        3600.0 / 4095.0,
+        350.0 / 4095.0,
+        1900.0 / 4095.0,
+        2000.0 / 4095.0,
+        400.0 / 4095.0,
+        3000.0 / 4095.0,
+        4000.0 / 4095.0,
+        4095.0 / 4095.0,
+    ];
+
+    let output_frame: Vec<f32> = vec![
+        64859.0 / 65535.0,
+        14188.0 / 65535.0,
+        5601.0 / 65535.0,
+        32007.0 / 65535.0,
+        1827.0 / 65535.0,
+        30827.0 / 65535.0,
+        48011.0 / 65535.0,
+        65535.0 / 65535.0,
+    ];
+
+    let mut img = input_frame.clone();
+    apply_fixed_function(&mut img, &output_frame, &data(XyzToUvy), 1e-5, false);
+
+    let mut img = output_frame.clone();
+    apply_fixed_function(&mut img, &input_frame, &data(UvyToXyz), 1e-4, false);
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, XYZ_TO_LUV)` @ v2.5.2.
+#[test]
+fn xyz_to_luv() {
+    let input_frame: Vec<f32> = vec![
+        3600.0 / 4095.0,
+        3500.0 / 4095.0,
+        1900.0 / 4095.0,
+        2000.0 / 4095.0,
+        50.0 / 4095.0,
+        30.0 / 4095.0,
+        19.0 / 4095.0,
+        4095.0 / 4095.0, // below the L* break
+    ];
+
+    let output_frame: Vec<f32> = vec![
+        61659.0 / 65535.0,
+        28199.0 / 65535.0,
+        33176.0 / 65535.0,
+        32007.0 / 65535.0,
+        4337.0 / 65535.0,
+        9090.0 / 65535.0,
+        926.0 / 65535.0,
+        65535.0 / 65535.0,
+    ];
+
+    let mut img = input_frame.clone();
+    apply_fixed_function(&mut img, &output_frame, &data(XyzToLuv), 1e-5, false);
+
+    let mut img = output_frame.clone();
+    apply_fixed_function(&mut img, &input_frame, &data(LuvToXyz), 1e-5, false);
+}
+
+/// U-31: the gamut compression's renderer reads seven parameters and the Rec.2100 surround's
+/// one, which upstream does without a check; the port refuses data with fewer (set after the
+/// validating constructor). The styles whose renderers come later are refused, in both
+/// fast-math settings.
 #[test]
 fn short_params_and_unported_styles_are_refused() {
     let params: Params = vec![1.147, 1.264, 1.312, 0.815, 0.803, 0.880, 1.2];
@@ -374,11 +610,19 @@ fn short_params_and_unported_styles_are_refused() {
             SHORT_PARAMS,
         );
     }
+    for style in [Rec2100SurroundFwd, Rec2100SurroundInv] {
+        let mut data = FixedFunctionOpData::with_params(style, vec![0.78]).unwrap();
+        data.set_params(Vec::new());
+        check_throw_what(
+            get_fixed_function_cpu_renderer(&data, false).map(|_| ()),
+            SHORT_PARAMS,
+        );
+    }
     for fast in [false, true] {
-        let data = FixedFunctionOpData::new(RgbToHsv).unwrap();
+        let data = FixedFunctionOpData::new(RgbToHsyLin).unwrap();
         check_throw_what(
             get_fixed_function_cpu_renderer(&data, fast).map(|_| ()),
-            "the CPU renderer of the style 'RGB_TO_HSV' is not ported yet",
+            "the CPU renderer of the style 'RGB_TO_HSY_LIN' is not ported yet",
         );
     }
 }

@@ -745,6 +745,50 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   transform's `set_style` in 2.3e); `fixed_function_op_data_oracle.rs` checks the styles the
   setters give in both directions against the wheel's validation messages.
 
+### I-81. Fixed function renderers order their NaNs per platform
+
+- **Upstream:** the fixed function renderers mix a pixel's channels in sums and products
+  (`ops/fixedfunction/FixedFunctionOpCPU.cpp`). Where two NaNs meet, x86 returns the first
+  operand's, and the two compilers ordered the operands differently:
+  - the glows' YC (`rgbToYC`, 759-766): MSVC adds the green term to the blue one, GCC the
+    blue term to the green one (Windows wheel `0x18018b37e`, Linux wheel `0x355195`), and the
+    glows' gain is the first factor of red, green and blue with MSVC but the second of blue
+    with GCC (`0x18018b4c5`, `0x35513f`);
+  - the Rec.2100 surround (1419-1454): MSVC computes `channel * factor`, GCC `factor *
+    channel` for red and green (`0x18018da66`, `0x3548b8`);
+  - XYZ to xyY (1830-1854): MSVC `(Y + X) + Z` and `d * X`, GCC `(X + Y) + Z` and `X * d`
+    (`0x18018e1f9`, `0x353a7e`); xyY to XYZ (1861-1884): MSVC `(Y * x) * d`, GCC
+    `(x * Y) * d` (`0x18018e703`, `0x353b40`);
+  - XYZ to CIELUV (1956-1987): MSVC `(9 * Y) * d`, GCC `d * (9 * Y)` (`0x18018ddbd`,
+    `0x35464f`); CIELUV to XYZ (1994-2026): MSVC `d * u*` and `(... * Y) * dd`, GCC `u* * d`
+    and `dd * (... * Y)` (`0x18018d5ac`, `0x353e2f`).
+  Both compilers also reorder some of the source's operations the same way (for example
+  `13 * L* * (u - u'n)` as `(u - u'n) * (13 * L*)`), which only matters to the port.
+- **Who notices:** images whose pixels have NaNs of different signs or payloads in two or
+  more channels, through these styles: the output NaN's sign and payload differ between
+  Windows and Linux.
+- **A fix:** one operand order for both platforms.
+- **Status:** matched in `p2-ff-cpu` (the glows, 2.3b) and `p2-ff-cpu-2` (2.3c1), each wheel's
+  order per platform (`cfg(target_os)`). The battery's NaN buffers and
+  `fixed_function_oracle.rs`'s `nan_combinations_match_the_wheel` (every combination of NaNs,
+  finite values and infinities in red, green and blue) compare them with the wheel on both
+  platforms.
+
+### I-82. RGB to HSV gives an all-negative-infinity pixel's saturation a different sign per platform
+
+- **Upstream:** for extended-range input, `Renderer_RGB_TO_HSV::apply` computes the saturation
+  as `(rgb_max - rgb_min) / -rgb_min` (`ops/fixedfunction/FixedFunctionOpCPU.cpp:1521-1524`).
+  MSVC divides by the negated minimum; GCC computes `-(rgb_max - rgb_min) / rgb_min` (Linux
+  wheel `0x35398c`: `subss`, `xorps` with the sign bit, `divss`), the same value for every
+  input but a NaN difference, whose sign it flips. The difference is a NaN when the maximum
+  and the minimum are the same infinity: for a pixel whose three channels are -Inf (where
+  `-rgb_min > rgb_max` holds), the saturation is the x86 default NaN (`0xffc00000`) on Windows
+  and its positive twin (`0x7fc00000`) on Linux.
+- **Who notices:** images with all-negative-infinity pixels through `RGB_TO_HSV`.
+- **A fix:** one formula for both platforms.
+- **Status:** matched in `p2-ff-cpu-2` (2.3c1, `RendererRgbToHsv`, `cfg(target_os)`); the
+  battery's specials and `nan_combinations_match_the_wheel` compare it on both platforms.
+
 ## Logging
 
 ### I-16. Two messages bypass the logging function
@@ -1277,15 +1321,17 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Upstream:** the setters take any number of parameters, and only `validate` checks how many
   the style takes (`ops/fixedfunction/FixedFunctionOpData.cpp:617-842`). Before that,
   `isInverse` of two Rec.2100 surrounds of the same style reads both first parameters without
-  a check (`FixedFunctionOpData.cpp:844-856`), and the ACES 1.3 gamut compression's renderer
-  reads seven parameters (`ops/fixedfunction/FixedFunctionOpCPU.cpp:982-1001`): on a shorter
-  vector, they read past its end. The processors validate their ops first
-  (`OpRcPtrVec::finalize`), so only code that queries such data directly gets there.
+  a check (`FixedFunctionOpData.cpp:844-856`), the ACES 1.3 gamut compression's renderer
+  reads seven parameters (`ops/fixedfunction/FixedFunctionOpCPU.cpp:984-1002`), and the
+  Rec.2100 surround's renderer one (`FixedFunctionOpCPU.cpp:1406-1417`): on a shorter vector,
+  they read past its end. The processors validate their ops first (`OpRcPtrVec::finalize`), so
+  only code that queries such data directly gets there.
 - **Decided** (general rule): `FixedFunctionOpData::is_inverse` and the gamut compression's
-  renderer (`RendererAcesGamutComp13Fwd::new`, so `get_fixed_function_cpu_renderer`) return an
-  error there, and only there: "FixedFunctionOp: the style has fewer parameters than it uses:
-  upstream reads past them."
+  and the surround's renderers (`RendererAcesGamutComp13Fwd::new`,
+  `RendererRec2100Surround::new`, so `get_fixed_function_cpu_renderer`) return an error there,
+  and only there: "FixedFunctionOp: the style has fewer parameters than it uses: upstream
+  reads past them."
 - **Status:** matched in `p2-ff-cpu` (2.3a2); `fixed_function_op_data_tests.rs` checks the
   error, and that the comparisons upstream makes without reading (another style, or an inverse
-  that validation refuses) give upstream's answers. The renderer in 2.3b:
-  `fixed_function_op_cpu_tests.rs` checks its error.
+  that validation refuses) give upstream's answers. The renderers in 2.3b and 2.3c1
+  (`p2-ff-cpu-2`): `fixed_function_op_cpu_tests.rs` checks their errors.

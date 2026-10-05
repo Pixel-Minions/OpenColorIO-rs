@@ -1080,6 +1080,10 @@ pub(crate) fn fixed_function() -> Cases {
         "FIXED_FUNCTION_ACES_GLOW_03",
         "FIXED_FUNCTION_ACES_GLOW_10",
         "FIXED_FUNCTION_ACES_DARK_TO_DIM_10",
+        "FIXED_FUNCTION_RGB_TO_HSV",
+        "FIXED_FUNCTION_XYZ_TO_xyY",
+        "FIXED_FUNCTION_XYZ_TO_uvY",
+        "FIXED_FUNCTION_XYZ_TO_LUV",
     ]
     .into_iter()
     .map(|style| Case::new(style, fixed_function_calls(style, &[])))
@@ -1088,7 +1092,7 @@ pub(crate) fn fixed_function() -> Cases {
         "ACES_GAMUT_COMP_13",
         fixed_function_calls("FIXED_FUNCTION_ACES_GAMUT_COMP_13", &GAMUT_COMP_13),
     );
-    let bases = vec![gamut.clone()];
+    let mut bases = vec![gamut.clone()];
     cases.push(gamut);
     for (label, params) in [
         ("lower bounds", [1.001, 1.001, 1.001, 0.0, 0.0, 0.0, 1.0]),
@@ -1103,6 +1107,21 @@ pub(crate) fn fixed_function() -> Cases {
             fixed_function_calls("FIXED_FUNCTION_ACES_GAMUT_COMP_13", &params),
         ));
     }
+    // tests/cpu/ops/fixedfunction/FixedFunctionOpCPU_tests.cpp:996, 1030 @ v2.5.2.
+    let surround = Case::new(
+        "REC2100_SURROUND 0.78",
+        fixed_function_calls("FIXED_FUNCTION_REC2100_SURROUND", &[0.78]),
+    );
+    bases.push(surround.clone());
+    cases.push(surround);
+    cases.push(Case::new(
+        "REC2100_SURROUND 1.2",
+        fixed_function_calls("FIXED_FUNCTION_REC2100_SURROUND", &[1.2]),
+    ));
+    cases.push(Case::new(
+        "REC2100_SURROUND NaN",
+        fixed_function_calls("FIXED_FUNCTION_REC2100_SURROUND", &[f64::NAN]),
+    ));
     let mut nan = GAMUT_COMP_13;
     nan[6] = f64::NAN;
     cases.push(Case::new(

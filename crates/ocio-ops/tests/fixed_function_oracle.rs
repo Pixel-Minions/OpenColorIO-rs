@@ -3,7 +3,8 @@
 
 //! The FixedFunction renderers against the wheel, bit for bit, through the oracle test
 //! battery (`ocio_testkit::battery`): every case in both directions, with fast math on and
-//! off, on the tier's probe sets (`OCIO_RS_TIER`). So far the ACES 1.x styles (chunk 2.3b).
+//! off, on the tier's probe sets (`OCIO_RS_TIER`). So far the ACES 1.x styles (chunk 2.3b), the
+//! Rec.2100 surround, HSV and the CIE styles (2.3c1).
 //!
 //! The oracle builds a FixedFunctionTransform in a raw config and applies its CPU processor
 //! to F32 RGBA pixels. The family builds the op data that upstream's transform and
@@ -140,17 +141,18 @@ fn fixed_port(p: &Fixed, combo: &Combo) -> Result<Port, String> {
     Ok(Port::in_place(move |px| renderer.apply(px)))
 }
 
-/// The ACES 1.x styles.
-struct AcesFamily {
+/// A set of styles.
+struct FixedFamily {
+    name: &'static str,
     cases: Vec<Case<Fixed>>,
     bases: Vec<Case<Fixed>>,
 }
 
-impl Family for AcesFamily {
+impl Family for FixedFamily {
     type Params = Fixed;
 
     fn name(&self) -> String {
-        "FixedFunctionTransform (ACES 1.x)".to_string()
+        format!("FixedFunctionTransform ({})", self.name)
     }
     fn cases(&self) -> Vec<Case<Fixed>> {
         self.cases.clone()
@@ -183,7 +185,15 @@ impl Family for AcesFamily {
             FixedFunctionStyle::AcesGlow10 => Some(0.08),
             _ => None,
         };
-        mid.map_or_else(Vec::new, |mid| vec![mid * 2.0, mid * 2.0 / 3.0])
+        if let Some(mid) = mid {
+            return vec![mid * 2.0, mid * 2.0 / 3.0];
+        }
+        match p.style {
+            // L* switches from linear to the cube root at this Y, and back at this L*
+            // (FixedFunctionOpCPU.cpp:1970-1971, 2011 @ v2.5.2).
+            FixedFunctionStyle::XyzToLuv => vec![0.008856451679, 0.08],
+            _ => Vec::new(),
+        }
     }
     fn validation(&self) -> Validation {
         Validation::Ported
@@ -261,5 +271,168 @@ fn aces_1_styles_match_the_wheel() {
         Fixed::new(AcesGlow10, &[f64::INFINITY]),
     ));
 
-    battery::run(&AcesFamily { cases, bases });
+    battery::run(&FixedFamily {
+        name: "ACES 1.x",
+        cases,
+        bases,
+    });
+}
+
+#[test]
+fn surround_hsv_and_cie_styles_match_the_wheel() {
+    use FixedFunctionStyle::*;
+    let mut cases: Vec<Case<Fixed>> = [RgbToHsv, XyzToXyy, XyzToUvy, XyzToLuv]
+        .map(|style| Case::new(format!("{style:?}"), Fixed::new(style, &[])))
+        .to_vec();
+
+    // tests/cpu/ops/fixedfunction/FixedFunctionOpCPU_tests.cpp:996, 1030 @ v2.5.2.
+    let surround = Case::new("Rec2100Surround 0.78", Fixed::new(Rec2100Surround, &[0.78]));
+    let bases = vec![surround.clone()];
+    cases.push(surround);
+    cases.push(Case::new(
+        "Rec2100Surround 1.2",
+        Fixed::new(Rec2100Surround, &[1.2]),
+    ));
+    // The bounds.
+    cases.push(Case::new(
+        "Rec2100Surround 0.01",
+        Fixed::new(Rec2100Surround, &[0.01]),
+    ));
+    cases.push(Case::new(
+        "Rec2100Surround 100",
+        Fixed::new(Rec2100Surround, &[100.0]),
+    ));
+    // A NaN gamma, which validation accepts.
+    cases.push(Case::new(
+        "Rec2100Surround NaN",
+        Fixed::new(Rec2100Surround, &[f64::NAN]),
+    ));
+    // Refusals.
+    cases.push(Case::new(
+        "refused surround 0.001",
+        Fixed::new(Rec2100Surround, &[0.001]),
+    ));
+    cases.push(Case::new(
+        "refused surround no parameter",
+        Fixed::new(Rec2100Surround, &[]),
+    ));
+    cases.push(Case::new(
+        "refused HSV parameter",
+        Fixed::new(RgbToHsv, &[1.0]),
+    ));
+
+    battery::run(&FixedFamily {
+        name: "surround, HSV, CIE",
+        cases,
+        bases,
+    });
+}
+
+/// The values of [`nan_combination_pixels`]: NaNs of different signs and payloads, quiet and
+/// signalling, with finite values and infinities of both signs.
+const COMBINATION_VALUES: [u32; 14] = [
+    0xffc0_0000, // the x86 default NaN
+    0x7fc1_2345,
+    0xffc5_4321,
+    0xff80_0001, // signalling
+    0x7fa0_0000, // signalling
+    0x0000_0000,
+    0x8000_0000,
+    0x3e38_51ec, // 0.18
+    0x3f80_0000, // 1
+    0xbf00_0000, // -0.5
+    0x4000_0000, // 2
+    0x3a83_126f, // 0.001
+    0x7f80_0000, // +inf
+    0xff80_0000, // -inf
+];
+
+/// Every combination of [`COMBINATION_VALUES`] in red, green and blue, one pixel each, alpha
+/// cycling through them too. The battery's NaN buffers put NaNs in all three channels at once;
+/// these also put two NaNs of different payloads next to a finite value or an infinity, which
+/// is where a renderer's arithmetic can meet two NaNs in a branch the all-NaN pixels skip.
+fn nan_combination_pixels() -> Vec<f32> {
+    let v = COMBINATION_VALUES.map(f32::from_bits);
+    let n = v.len();
+    (0..n * n * n)
+        .flat_map(|i| [v[i / (n * n)], v[i / n % n], v[i % n], v[i % (n - 1)]])
+        .collect()
+}
+
+/// Every style whose renderer mixes channels, in both directions and with fast math on and
+/// off, on [`nan_combination_pixels`]: where two NaNs of different payloads meet, the result
+/// is the one the wheel's machine code picks (`CLAUDE.md`, "NaN operand order").
+#[test]
+fn nan_combinations_match_the_wheel() {
+    use FixedFunctionStyle::*;
+    let cases = [
+        Fixed::new(AcesRedMod03, &[]),
+        Fixed::new(AcesRedMod10, &[]),
+        Fixed::new(AcesGlow03, &[]),
+        Fixed::new(AcesGlow10, &[]),
+        Fixed::new(AcesDarkToDim10, &[]),
+        Fixed::new(AcesGamutComp13, &GAMUT_COMP_13),
+        Fixed::new(Rec2100Surround, &[0.78]),
+        Fixed::new(RgbToHsv, &[]),
+        Fixed::new(XyzToXyy, &[]),
+        Fixed::new(XyzToUvy, &[]),
+        Fixed::new(XyzToLuv, &[]),
+    ];
+    let family = FixedFamily {
+        name: "NaN combinations",
+        cases: Vec::new(),
+        bases: Vec::new(),
+    };
+    let input = nan_combination_pixels();
+    let bytes = ocio_testkit::oracle::f32_to_bytes(&input);
+    let mut combos = Vec::new();
+    for p in &cases {
+        for direction in [Direction::Forward, Direction::Inverse] {
+            for fast_math in [true, false] {
+                let combo = Combo {
+                    direction,
+                    fast_math,
+                    format: battery::Format::F32_RGBA,
+                };
+                combos.push((p, combo));
+            }
+        }
+    }
+    let calls: Vec<ocio_testkit::oracle::BatchCall<'_>> = combos
+        .iter()
+        .map(|(p, combo)| ocio_testkit::oracle::BatchCall {
+            cmd: "cpu_apply",
+            args: family.spec(p, combo.direction).cpu_apply_args(combo),
+            blobs: vec![&bytes],
+        })
+        .collect();
+    let responses = ocio_testkit::oracle::Oracle::get().batch(&calls, true);
+    let mut failures = Vec::new();
+    for ((p, combo), response) in combos.iter().zip(responses) {
+        let label = format!("{:?} {:?}, {combo}", p.style, p.params);
+        let response = response.unwrap_or_else(|e| panic!("{label}: the oracle failed: {e}"));
+        if let Some(exception) = response.result.get("exception") {
+            panic!("{label}: the wheel refused it: {exception}");
+        }
+        let expected = response.blob_f32(0);
+        let data = p
+            .transform_data(port_direction(combo.direction))
+            .unwrap_or_else(|e| panic!("{label}: the port refused it: {e}"));
+        let renderer = get_fixed_function_cpu_renderer(&black_box(data), combo.fast_math)
+            .unwrap_or_else(|e| panic!("{label}: {}", e.message()));
+        let mut actual = input.clone();
+        renderer.apply(&mut actual);
+        if let Some(report) =
+            ocio_testkit::compare::f32_bits_report(&expected, &actual, Some(&input), 4)
+        {
+            failures.push(format!("{label}: {report}"));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} of {} combinations differ:\n\n{}",
+        failures.len(),
+        combos.len(),
+        failures.join("\n")
+    );
 }
