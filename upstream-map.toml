@@ -2414,14 +2414,16 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/ColorMatrixHelpers.cpp"
 kind = "src"
-target = ["crates/ocio/src/transforms/builtins/color_matrix_helpers.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/transforms/builtins/color_matrix_helpers.rs"]
+status = "done"
+note = "p2-aces2-cpu: ported whole into ocio-ops, since the ACES 2.0 fixed functions (ACES2/ColorLib.h) use it; Phase 3's 3.2e only re-exports it from ocio"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/ColorMatrixHelpers.h"
 kind = "src"
-target = ["crates/ocio/src/transforms/builtins/color_matrix_helpers.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/transforms/builtins/color_matrix_helpers.rs"]
+status = "done"
+note = "p2-aces2-cpu: ported whole into ocio-ops, since the ACES 2.0 fixed functions (ACES2/ColorLib.h) use it; Phase 3's 3.2e only re-exports it from ocio"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/Displays.cpp"
@@ -4924,9 +4926,9 @@ note = "p1-transforms-fam1"
 [[file]]
 path = "tests/cpu/transforms/BuiltinTransform_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio/src/transforms/builtin_transform_tests.rs"]
+target = ["crates/ocio/src/transforms/builtin_transform_tests.rs", "crates/ocio-ops/src/transforms/builtins/color_matrix_helpers_tests.rs"]
 status = "partial"
-note = "p3-transforms (3.1b): creation, access; color_matrix_helpers comes with 3.2e; forward_inverse, interpolate, validate, aces2_displayview_roundtrip and aces2_Aab_to_RGB_nan build ops of Phase 2 (p3-after-p2)"
+note = "p3-transforms (3.1b): creation, access; p2-aces2-cpu: color_matrix_helpers, in ocio-ops (color_matrix_helpers_tests.rs); forward_inverse, interpolate, validate, aces2_displayview_roundtrip and aces2_Aab_to_RGB_nan build ops of Phase 2 (p3-after-p2)"
 
 [[file]]
 path = "tests/cpu/transforms/CDLTransform_tests.cpp"
