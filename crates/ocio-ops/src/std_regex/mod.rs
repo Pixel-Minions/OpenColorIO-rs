@@ -27,6 +27,7 @@
 
 pub mod libstdcxx;
 pub mod msvc;
+mod msvc_match;
 
 /// The C++ library whose `std::regex` the port reproduces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -134,5 +135,21 @@ impl Regex {
             Program::Msvc(p) => p.mark_count() - 1,
             Program::Libstdcxx(p) => p.mark_count() - 1,
         }
+    }
+}
+
+/// `regex_match(text, re)`: whether the whole text matches. A `const char *` text is the
+/// bytes up to its first NUL; the caller cuts it. Matching can throw: MSVC's matcher gives up
+/// with `error_stack` or `error_complexity` past its limits.
+///
+/// Port of `regex_match(const char *, const regex &)` (MSVC STL `<regex>`:2196-2203).
+pub fn regex_match(text: &[u8], re: &Regex) -> Result<bool, RegexError> {
+    match &re.program {
+        Program::Msvc(p) => msvc_match::regex_match(p, text),
+        // The libstdc++ matcher comes with the next chunk of p3-regex (3.9d).
+        Program::Libstdcxx(_) => Err(RegexError {
+            code: ErrorType::Syntax,
+            what: "matching with libstdc++'s std::regex is not ported yet (p3-regex 3.9d)",
+        }),
     }
 }
