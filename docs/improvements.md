@@ -955,6 +955,19 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 ## Platform, environment and paths
 
+### I-110. `splitext` compares the rest of the name with "."
+
+- **Upstream:** pystring's `splitext_generic`, which OCIO calls through `os::path::splitext` to
+  find a file's extension, skips a name's leading dots by comparing `slice(p, filenameIndex)`,
+  the rest of the path, with "." (pystring.cpp:1597-1608 @ v1.1.4), where Python's
+  `ntpath._splitext` compares the one character `p[filenameIndex]`. So a name that starts with
+  dots and has another dot later (`..b`, `.a.` after a separator) is split at its last dot, where
+  Python leaves it whole.
+- **Who notices:** file names made of leading dots and an extension, such as `..cube`, whose
+  extension Python's `splitext` wouldn't find.
+- **A fix:** compare the one byte, as Python does.
+- **Status:** matched in p3-context (3.5b, `crates/ocio-ops/src/utils/pystring.rs`).
+
 ### I-112. Temporary file names
 
 - **Upstream:** `Platform::CreateTempFilename` names a file `/tmp/ocio_<n>` on Linux, `<n>` drawn
@@ -992,6 +1005,17 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **A fix:** treat device names as missing on Windows, as the port does.
 - **Status:** not matched (p3-context 3.5a): the port asks `std::fs::metadata`, which finds no
   device. For the owner to decide, with D-5's kind of limitation.
+
+### I-115. pystring's indices are `int`
+
+- **Upstream:** pystring computes positions and lengths as `int` (`(int) str.size()` and the
+  `ADJUST_INDICES` arithmetic, pystring.cpp @ v1.1.4), so for a path of 2^31 bytes or more the
+  length wraps.
+- **Who notices:** nobody in practice: OCIO passes it file paths and names.
+- **A fix:** none needed. The port computes with the true lengths (`i64`).
+- **Status:** not matched (p3-context 3.5b), for the owner: matching would mean computing every
+  pystring index as a wrapping `int`, whose results then index outside the string (undefined
+  behaviour, which the general rule turns into errors), for inputs no one passes.
 
 ## Undefined behaviour upstream
 

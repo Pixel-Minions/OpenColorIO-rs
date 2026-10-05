@@ -45,3 +45,13 @@ is built with, ported in crates/ocio/src/yaml_cpp/ together with its own tests:
     LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
     OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
     THE SOFTWARE.
+
+pystring 1.1.4 (https://github.com/imageworks/pystring), the string library OpenColorIO 2.5.2
+is built with: its string functions and os.path are ported in
+crates/ocio-ops/src/utils/pystring.rs together with its own tests. Its source is pinned as the
+submodule upstream/pystring (tag v1.1.4, commit 7d16bc814ccb4cad03c300dcb77440034caa84f7), so
+that the citations can be checked:
+
+    Copyright (c) 2008-present Contributors to the Pystring project.
+    All Rights Reserved.
+    SPDX-License-Identifier: BSD-3-Clause (the same terms as LICENSE)

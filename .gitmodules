@@ -1,3 +1,6 @@
 [submodule "upstream/OpenColorIO"]
 	path = upstream/OpenColorIO
 	url = https://github.com/AcademySoftwareFoundation/OpenColorIO
+[submodule "upstream/pystring"]
+	path = upstream/pystring
+	url = https://github.com/imageworks/pystring
