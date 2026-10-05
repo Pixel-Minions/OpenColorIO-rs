@@ -514,3 +514,87 @@ fn surround_hsv_hsy_and_cie_shaders_match_the_wheel() {
     }
     check(&cases);
 }
+
+/// The Rec.2100 HLG curve as a gamma-log, and a double log (tests/cpu/ops/fixedfunction/
+/// FixedFunctionOpCPU_tests.cpp:1311-1325, 1374-1382 @ v2.5.2).
+const HLG: [f64; 10] = [
+    0.0,
+    0.25,
+    0.5,
+    1.0,
+    0.0,
+    std::f64::consts::E,
+    0.17883277,
+    0.807825590164,
+    1.0,
+    -0.07116723,
+];
+const DOUBLE_LOG: [f64; 13] = [
+    10.0, 0.25, 0.5, -1.0, 0.0, -1.0, 1.25, 1.0, 1.0, 1.0, 0.5, 1.0, 0.0,
+];
+
+/// PQ, the gamma-log and the double-log curves (chunk 2.3g2), forward and inverse, at every
+/// level, in every language: PQ, the HLG curve and one with a gamma segment offset (which the
+/// shader subtracts, I-85), and the double log with other parameters; other names.
+#[test]
+fn pq_gamma_log_and_double_log_shaders_match_the_wheel() {
+    let mut offset = HLG;
+    offset[4] = 0.125;
+    let mut other_double = DOUBLE_LOG;
+    other_double[0] = 2.0;
+    other_double[11] = 1.5;
+    other_double[12] = 0.25;
+    let styles: Vec<(&str, &str, FixedFunctionOpStyle, Vec<f64>)> = vec![
+        (
+            "PQ",
+            "FIXED_FUNCTION_LIN_TO_PQ",
+            FixedFunctionOpStyle::LinToPq,
+            Vec::new(),
+        ),
+        (
+            "HLG",
+            "FIXED_FUNCTION_LIN_TO_GAMMA_LOG",
+            FixedFunctionOpStyle::LinToGammaLog,
+            HLG.to_vec(),
+        ),
+        (
+            "gamma offset",
+            "FIXED_FUNCTION_LIN_TO_GAMMA_LOG",
+            FixedFunctionOpStyle::LinToGammaLog,
+            offset.to_vec(),
+        ),
+        (
+            "double log",
+            "FIXED_FUNCTION_LIN_TO_DOUBLE_LOG",
+            FixedFunctionOpStyle::LinToDoubleLog,
+            DOUBLE_LOG.to_vec(),
+        ),
+        (
+            "other double log",
+            "FIXED_FUNCTION_LIN_TO_DOUBLE_LOG",
+            FixedFunctionOpStyle::LinToDoubleLog,
+            other_double.to_vec(),
+        ),
+    ];
+    let mut cases = Vec::new();
+    for (label, name, style, params) in &styles {
+        for dir in [F, I] {
+            cases.extend(cases_of(
+                &format!("{label} {dir:?}"),
+                vec![T::Fixed(name, *style, params.clone(), dir)],
+                &levels(),
+                Names::default(),
+            ));
+        }
+        cases.extend(cases_of(
+            &format!("{label} names"),
+            vec![T::Fixed(name, *style, params.clone(), I)],
+            &levels()[1..2],
+            Names {
+                pixel: Some("px"),
+                prefix: Some("p__q"),
+            },
+        ));
+    }
+    check(&cases);
+}

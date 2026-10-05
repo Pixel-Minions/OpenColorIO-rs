@@ -392,3 +392,12 @@ fn lut1d_transform_shaders_are_deferred_where_the_wheel_writes_them() {
         ..Class::new("Lut1DTransform", api_cases::lut1d())
     });
 }
+
+/// The FixedFunctionTransform's styles whose shaders are ported (2.3f, 2.3g1, 2.3g2): every
+/// case of the class but the ACES 2.0 ones, whose shaders come with card `p2-aces2-gpu`.
+#[test]
+fn fixed_function_transform_shaders_match_the_wheel() {
+    let mut cases = api_cases::fixed_function();
+    cases.cases.retain(|case| !case.label().ends_with("_20"));
+    check(&Class::new("FixedFunctionTransform", cases));
+}
