@@ -1,18 +1,24 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! The transforms that name a config's objects, against the wheel (`common::transforms`):
-//! `ColorSpaceTransform`, `DisplayViewTransform` and `LookTransform`. Their text (`repr()`,
-//! `str()`, upstream's `operator<<`) and their validation, every message, for names empty,
-//! ending at a NUL, non-ASCII or holding the text's separators, every flag and both
-//! directions, alone and in groups. The binding gives them no `equals()`.
+//! The transforms that name a config's objects or a built-in transform, against the wheel
+//! (`common::transforms`): `ColorSpaceTransform`, `DisplayViewTransform`, `LookTransform` and
+//! `BuiltinTransform`. Their text (`repr()`, `str()`, upstream's `operator<<`) and their
+//! validation, every message, for names empty, ending at a NUL, non-ASCII or holding the
+//! text's separators, every flag and both directions, alone and in groups; every built-in
+//! style the port registers, in any case, and the styles the wheel refuses, with its message.
+//! The binding gives them no `equals()`.
 //!
 //! Their processors need their op builders (WP 3.2).
 
 mod common;
 
 use common::transforms::{Case, check_text, direction_spec, group};
-use ocio::{ColorSpaceTransform, DisplayViewTransform, LookTransform, TransformDirection};
+use ocio::{
+    BuiltinTransform, BuiltinTransformRegistry, ColorSpaceTransform, DisplayViewTransform,
+    LookTransform, TransformDirection,
+};
+use ocio_testkit::transform_text::{Built, TransformTextRequest};
 use serde_json::{Value, json};
 
 use TransformDirection::{Forward, Inverse};
@@ -153,4 +159,79 @@ fn groups_of_them_match_the_wheel() {
         })
         .collect();
     check_text(&groups, &[]);
+}
+
+/// The built-in transform of `style`, set as the wheel's `setStyle` sets it.
+fn builtin_case(style: &[u8], dir: TransformDirection) -> Case {
+    let text = std::str::from_utf8(style).expect("an ASCII style");
+    let mut port = BuiltinTransform::new();
+    port.set_style(style).expect("a registered style");
+    port.set_direction(dir);
+    Case::new(
+        format!("BuiltinTransform {text:?} {dir:?}"),
+        json!({"class": "BuiltinTransform", "calls": [
+            ["setStyle", text], ["setDirection", direction_spec(dir)]]}),
+        port,
+    )
+}
+
+/// Every style the port registers names the same style in the wheel, which prints it with the
+/// same spelling, also when it is set in lower or upper case.
+#[test]
+fn every_builtin_style_matches_the_wheel() {
+    let registry = BuiltinTransformRegistry::get();
+    let mut cases = vec![Case::new(
+        "BuiltinTransform default",
+        json!({"class": "BuiltinTransform"}),
+        BuiltinTransform::new(),
+    )];
+    for index in 0..registry.num_builtins() {
+        let style = registry.builtin_style(index).unwrap();
+        let dir = if index % 2 == 0 { Forward } else { Inverse };
+        cases.push(builtin_case(style, dir));
+        cases.push(builtin_case(&style.to_ascii_lowercase(), Inverse));
+        cases.push(builtin_case(&style.to_ascii_uppercase(), Forward));
+    }
+    check_text(&cases, &[]);
+    let groups: Vec<Case> = cases
+        .chunks(7)
+        .enumerate()
+        .map(|(k, chunk)| {
+            let dir = if k % 2 == 0 { Inverse } else { Forward };
+            group(&format!("group {k}"), dir, chunk)
+        })
+        .collect();
+    check_text(&groups, &[]);
+}
+
+/// A style the registry doesn't hold raises the wheel's message, and the port's `set_style`
+/// returns the same.
+#[test]
+fn unknown_builtin_styles_raise_the_wheels_message() {
+    let styles = [
+        "",
+        "\0IDENTITY",
+        "IDENTITY ",
+        " IDENTITY",
+        "IDENTITY\u{a0}",
+        "UTILITY - ACES-AP0_to_CIE-XYZ-D65_BFD_UNKNOWN",
+        "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-100nit-REC709_2.",
+        "caf\u{e9}",
+        "it's",
+    ];
+    let reply = TransformTextRequest {
+        transforms: styles
+            .iter()
+            .map(|style| json!({"class": "BuiltinTransform", "calls": [["setStyle", style]]}))
+            .collect(),
+        pairs: Vec::new(),
+    }
+    .run();
+    for (&style, built) in styles.iter().zip(&reply.transforms) {
+        let Built::Raised(raised) = built else {
+            panic!("{style:?}: the wheel accepted it: {built:?}");
+        };
+        let port = BuiltinTransform::new().set_style(style).unwrap_err();
+        assert_eq!(port.message(), raised.message, "{style:?}");
+    }
 }

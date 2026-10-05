@@ -2068,13 +2068,15 @@ note = "p1-transforms-fam1: AllocationTransform, its validation and operator<< (
 path = "src/OpenColorIO/transforms/BuiltinTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtin_transform.rs"]
-status = "todo"
+status = "done"
+note = "p3-transforms (3.1b): the class, its operator<< and BuildBuiltinOps; checked against the wheel in crates/ocio/tests/config_transforms_oracle.rs. The entries' ops come with p3-builtins and p3-after-p2"
 
 [[file]]
 path = "src/OpenColorIO/transforms/BuiltinTransform.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtin_transform.rs"]
-status = "todo"
+status = "done"
+note = "p3-transforms (3.1b)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/CDLTransform.cpp"
@@ -2337,7 +2339,8 @@ note = "p1-transforms-fam1 (1.8c)"
 path = "src/OpenColorIO/transforms/builtins/ACES.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/aces.rs"]
-status = "todo"
+status = "partial"
+note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (576-1437), the ACES 2.0 table's names (1122-1419); the ops come with 3.2g and p3-after-p2"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/ACES.h"
@@ -2349,7 +2352,8 @@ status = "todo"
 path = "src/OpenColorIO/transforms/builtins/AppleCameras.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/apple_cameras.rs"]
-status = "todo"
+status = "partial"
+note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (96-122); the ops (fixed functions) come with p3-after-p2"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/AppleCameras.h"
@@ -2361,7 +2365,8 @@ status = "todo"
 path = "src/OpenColorIO/transforms/builtins/ArriCameras.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/arri_cameras.rs"]
-status = "todo"
+status = "partial"
+note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (75-108); the ops come with 3.2f"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/ArriCameras.h"
@@ -2373,19 +2378,22 @@ status = "todo"
 path = "src/OpenColorIO/transforms/builtins/BuiltinTransformRegistry.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/builtin_transform_registry.rs"]
-status = "todo"
+status = "partial"
+note = "p3-transforms (3.1b): Get, addBuiltin, the getters, createOps, registerAll and CreateBuiltinTransformOps; the identity's op (CreateIdentityMatrixOp) comes with 3.2e"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/BuiltinTransformRegistry.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/builtin_transform_registry.rs"]
-status = "todo"
+status = "done"
+note = "p3-transforms (3.1b)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/CanonCameras.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/canon_cameras.rs"]
-status = "todo"
+status = "partial"
+note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (146-197); the ops (fixed functions) come with p3-after-p2"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/CanonCameras.h"
@@ -2409,7 +2417,8 @@ status = "todo"
 path = "src/OpenColorIO/transforms/builtins/Displays.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/displays.rs"]
-status = "todo"
+status = "partial"
+note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (177-556); the ops come with 3.2g and p3-after-p2"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/Displays.h"
@@ -2433,7 +2442,8 @@ status = "todo"
 path = "src/OpenColorIO/transforms/builtins/PanasonicCameras.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/panasonic_cameras.rs"]
-status = "todo"
+status = "partial"
+note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (58-75); the ops come with 3.2f"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/PanasonicCameras.h"
@@ -2445,7 +2455,8 @@ status = "todo"
 path = "src/OpenColorIO/transforms/builtins/RedCameras.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/red_cameras.rs"]
-status = "todo"
+status = "partial"
+note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (77-113); the ops come with 3.2f"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/RedCameras.h"
@@ -2457,7 +2468,8 @@ status = "todo"
 path = "src/OpenColorIO/transforms/builtins/SonyCameras.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/sony_cameras.rs"]
-status = "todo"
+status = "partial"
+note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (64-143); the ops come with 3.2f"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/SonyCameras.h"
@@ -4896,7 +4908,8 @@ note = "p1-transforms-fam1"
 path = "tests/cpu/transforms/BuiltinTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/builtin_transform_tests.rs"]
-status = "todo"
+status = "partial"
+note = "p3-transforms (3.1b): creation, access; color_matrix_helpers comes with 3.2e; forward_inverse, interpolate, validate, aces2_displayview_roundtrip and aces2_Aab_to_RGB_nan build ops of Phase 2 (p3-after-p2)"
 
 [[file]]
 path = "tests/cpu/transforms/CDLTransform_tests.cpp"
@@ -5040,7 +5053,8 @@ note = "p1-transforms-fam1 (1.8c)"
 path = "tests/cpu/transforms/builtins/BuiltinTransformRegistry_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/builtins/builtin_transform_registry_tests.rs"]
-status = "todo"
+status = "partial"
+note = "p3-transforms (3.1b): basic; aces builds the ops of IDENTITY, an ACES matrix and ACEScct (3.2e, 3.2g), read_write every entry's processor (p3-after-p2), the version_*_validation tests come with 3.8c"
 
 [[file]]
 path = "tests/gpu/CDLOp_test.cpp"

@@ -20,7 +20,7 @@ use crate::transform::{put_bool, put_c_str, validate_direction};
 /// A copy is upstream's `createEditableCopy`. Upstream gives the class no `equals`.
 ///
 /// Port of `DisplayViewTransform` and its `Impl` (include/OpenColorIO/OpenColorTransforms.h:
-/// 376-427, src/OpenColorIO/transforms/DisplayViewTransform.cpp:18-152 @ v2.5.2).
+/// 376-425, src/OpenColorIO/transforms/DisplayViewTransform.cpp:18-152 @ v2.5.2).
 #[derive(Debug, Clone)]
 pub struct DisplayViewTransform {
     /// `m_dir`.
