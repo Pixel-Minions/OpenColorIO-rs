@@ -598,3 +598,93 @@ fn pq_gamma_log_and_double_log_shaders_match_the_wheel() {
     }
     check(&cases);
 }
+
+/// The inverse double log's break points, `logSlope * log(linSlope * break + linOff) +
+/// logOff` in double (FixedFunctionOpGPU.cpp:2180-2181 @ v2.5.2), with log arguments other
+/// than 1: between 0 and 1 and above 1 (with many digits, and another base); 0 (`-Inf`); and
+/// negative, where the Linux wheel's `log` returns a positive NaN (`log_as_linked`), which
+/// validation allows. Forward too, without and with the default optimization, in every
+/// language.
+#[test]
+fn double_log_break_points_match_the_wheel() {
+    let cases_params: [(&str, [f64; 13]); 4] = [
+        (
+            "logs of 0.55 and 1.6",
+            [
+                10.0,
+                0.25,
+                0.5,
+                -0.987654321,
+                0.0123456789,
+                -1.123456789,
+                0.8123456789,
+                1.3333333333,
+                1.0,
+                2.7182818,
+                0.1415926535,
+                1.0,
+                0.0,
+            ],
+        ),
+        (
+            "base e, logs of 0.15 and 3.45",
+            [
+                std::f64::consts::E,
+                -0.5,
+                2.0,
+                0.7,
+                -0.3,
+                0.9,
+                0.6,
+                0.45,
+                0.2,
+                1.7,
+                0.05,
+                0.3,
+                0.1,
+            ],
+        ),
+        (
+            "logs of 0 and -0.5",
+            [
+                10.0, 0.25, 0.5, -1.0, 0.0, -1.0, 0.25, 1.0, 1.0, -2.0, 0.5, 1.0, 0.0,
+            ],
+        ),
+        (
+            // The verifier's case: both log arguments negative.
+            "negative logs",
+            [
+                1.9052000598835162,
+                -0.9794537224590187,
+                1.8954702027918462,
+                1.2284430584087982,
+                2.5406650941164033,
+                -1.9680095268936535,
+                2.7685875793308403,
+                3.2653761150669647,
+                2.5135993762664723,
+                0.7618666521524582,
+                -1.5682119819337907,
+                0.5948939107800797,
+                3.2304805663146983,
+            ],
+        ),
+    ];
+    let mut cases = Vec::new();
+    for (label, params) in cases_params {
+        for dir in [F, I] {
+            cases.extend(cases_of(
+                &format!("double log, {label} {dir:?}"),
+                vec![T::Fixed(
+                    "FIXED_FUNCTION_LIN_TO_DOUBLE_LOG",
+                    FixedFunctionOpStyle::LinToDoubleLog,
+                    params.to_vec(),
+                    dir,
+                )],
+                &levels()[0..2],
+                Names::default(),
+            ));
+        }
+    }
+    check(&cases);
+}

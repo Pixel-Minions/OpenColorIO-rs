@@ -1653,15 +1653,35 @@ fn write_log_to_lin_segment(
     Ok(())
 }
 
+/// `std::log(double)` as each wheel links it. The Windows wheel calls the UCRT's `log`, as Rust
+/// does. The Linux wheel calls `log@GLIBC_2.2.5` (`Add_DOUBLE_LOG_TO_LIN` at 0x3711f0; it was
+/// built against a glibc older than 2.29), while Rust links the current `log@GLIBC_2.29`.
+///
+/// Both glibc symbols run the same `__ieee754_log`. They differ only for `x < 0`: the old one
+/// is the SVID/XOPEN compatibility wrapper `__log_compat` (glibc `math/w_log_compat.c`), which
+/// returns `__kernel_standard(x, x, 17)`, that is `NAN`, a *positive* quiet NaN; the new one
+/// returns the x86 default NaN, which is negative. (`log(+/-0)` is `-Inf` in both.) The sign
+/// reaches the inverse double-log shader's break points when `linSlope * break + linOff < 0`,
+/// which validation allows. The same as `log2_glibc_2_2_5` in `ocio_ops::ops::log::log_utils`.
+/// The log bases go through Rust's `ln` as they are: validation leaves them positive (or NaN,
+/// which both symbols propagate).
+fn log_as_linked(x: f64) -> f64 {
+    if cfg!(target_os = "linux") && x < 0.0 {
+        f64::from_bits(0x7ff8_0000_0000_0000)
+    } else {
+        x.ln()
+    }
+}
+
 /// Port of `Add_DOUBLE_LOG_TO_LIN` (FixedFunctionOpGPU.cpp:2160-2223 @ v2.5.2).
 fn add_double_log_to_lin(pix: &[u8], st: &GpuShaderText, func: &FixedFunctionOpData) -> Result<()> {
     let d = DoubleLog::new(func)?;
 
     let break1_log = d.log_seg1_log_slope
-        * (d.log_seg1_lin_slope * d.break1 + d.log_seg1_lin_off).ln()
+        * log_as_linked(d.log_seg1_lin_slope * d.break1 + d.log_seg1_lin_off)
         + d.log_seg1_log_off;
     let break2_log = d.log_seg2_log_slope
-        * (d.log_seg2_lin_slope * d.break2 + d.log_seg2_lin_off).ln()
+        * log_as_linked(d.log_seg2_lin_slope * d.break2 + d.log_seg2_lin_off)
         + d.log_seg2_log_off;
 
     let pix3 = [pix, b".rgb"].concat();
@@ -1808,22 +1828,53 @@ mod tests {
     use super::*;
     use crate::GpuLanguage;
 
+    /// The shader of `data`, or the writer's error.
+    fn shader_of(data: &FixedFunctionOpData) -> (Result<()>, Vec<u8>) {
+        let mut desc = GpuShaderDesc::new(GpuLanguage::Glsl1_2);
+        let result = get_fixed_function_gpu_shader_program(&mut desc, data);
+        (result, desc.shader_text().to_vec())
+    }
+
     /// U-31: where upstream's shader reads past the parameters (data that doesn't validate,
-    /// which no processor extracts), the port refuses.
+    /// which no processor extracts), the port refuses: each style that reads parameters, with
+    /// one fewer than it reads.
     #[test]
     fn short_params_are_refused() {
-        for style in [
-            FixedFunctionOpStyle::AcesGamutComp13Fwd,
-            FixedFunctionOpStyle::AcesGamutComp13Inv,
+        use FixedFunctionOpStyle::*;
+        let gamut = vec![1.2, 1.2, 1.2, 0.5, 0.5, 0.5, 1.2];
+        let gamma_log = vec![0.0, 0.25, 0.5, 1.0, 0.0, 2.5, 0.2, 0.8, 1.0, -0.07];
+        let double_log = vec![
+            10.0, 0.25, 0.5, -1.0, 0.0, -1.0, 1.25, 1.0, 1.0, 1.0, 0.5, 1.0, 0.0,
+        ];
+        for (style, params) in [
+            (AcesGamutComp13Fwd, &gamut),
+            (AcesGamutComp13Inv, &gamut),
+            (Rec2100SurroundFwd, &vec![0.78]),
+            (Rec2100SurroundInv, &vec![0.78]),
+            (LinToGammaLog, &gamma_log),
+            (GammaLogToLin, &gamma_log),
+            (LinToDoubleLog, &double_log),
+            (DoubleLogToLin, &double_log),
         ] {
-            let mut data =
-                FixedFunctionOpData::with_params(style, vec![1.2, 1.2, 1.2, 0.5, 0.5, 0.5, 1.2])
-                    .unwrap();
-            data.set_params(vec![1.2; 6]);
-            let mut desc = GpuShaderDesc::new(GpuLanguage::Glsl1_2);
-            let error = get_fixed_function_gpu_shader_program(&mut desc, &data).unwrap_err();
-            assert_eq!(error.message(), SHORT_PARAMS);
-            assert!(desc.shader_text().is_empty());
+            let mut data = FixedFunctionOpData::with_params(style, params.clone()).unwrap();
+            assert!(shader_of(&data).0.is_ok(), "{style:?}");
+            data.set_params(params[..params.len() - 1].to_vec());
+            let (result, text) = shader_of(&data);
+            assert_eq!(result.unwrap_err().message(), SHORT_PARAMS, "{style:?}");
+            assert!(text.is_empty(), "{style:?}");
         }
+    }
+
+    /// The ACES 2.0 styles' shaders are not ported yet: the port refuses them.
+    #[test]
+    fn aces_2_styles_are_not_ported() {
+        let mut data = FixedFunctionOpData::new(FixedFunctionOpStyle::AcesGlow10Fwd).unwrap();
+        data.set_style(FixedFunctionOpStyle::AcesRgbToJmh20);
+        let (result, text) = shader_of(&data);
+        assert_eq!(
+            result.unwrap_err().message(),
+            not_ported(FixedFunctionOpStyle::AcesRgbToJmh20).message()
+        );
+        assert!(text.is_empty());
     }
 }
