@@ -1198,6 +1198,72 @@ mod tests {
         assert!(error.contains("the write of blob 0 failed"), "{error}");
     }
 
+    /// A process that exits successfully after a whole response followed by more bytes (here
+    /// an error frame, as the oracle wrote one after a failed write): the response is refused,
+    /// with the number of extra bytes, and the error carries its stderr.
+    #[test]
+    fn a_response_with_trailing_bytes_reports_the_oracle_stderr() {
+        let mut command = super::Oracle::get().command();
+        command.args([
+            "-c",
+            "import json, struct, sys\n\
+             sys.stdin.buffer.read()\n\
+             header = json.dumps({'ok': True, 'result': 1, 'blobs': []}).encode()\n\
+             sys.stdout.buffer.write(struct.pack('<I', len(header)) + header)\n\
+             error = json.dumps({'ok': False, 'error': 'OSError', 'blobs': []}).encode()\n\
+             sys.stdout.buffer.write(struct.pack('<I', len(error)) + error)\n\
+             sys.stderr.write('a second frame went out\\n')\n",
+        ]);
+        let output = super::exchange(command, b"request").expect("the process exits with 0");
+        let error = super::response_of(&output).expect_err("the response has trailing bytes");
+        let error_frame = 4 + r#"{"ok": false, "error": "OSError", "blobs": []}"#.len();
+        assert!(
+            error.starts_with(&format!(
+                "{error_frame} trailing bytes after the oracle response: the oracle exited \
+                 successfully"
+            )),
+            "{error}"
+        );
+        assert!(error.contains("a second frame went out"), "{error}");
+    }
+
+    /// A request shorter than its header declares, then the end of stdin: the oracle answers
+    /// with an `EOFError` and exits, rather than waiting for the rest forever. The process is
+    /// killed if it hasn't exited after a minute.
+    #[test]
+    fn the_oracle_reports_a_request_cut_short() {
+        let mut request = super::request("info", json!({}), &[&[0u8; 100]]);
+        request.truncate(request.len() - 90);
+        let mut child = super::Oracle::get()
+            .command()
+            .args(["-X", "utf8", "-m", "ocio_oracle"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("the oracle starts");
+        let mut stdin = child.stdin.take().unwrap();
+        stdin.write_all(&request).unwrap();
+        drop(stdin);
+        let mut stdout = child.stdout.take().unwrap();
+        let reader = std::thread::spawn(move || read_in_pieces(&mut stdout));
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        while child.try_wait().unwrap().is_none() {
+            if std::time::Instant::now() > deadline {
+                let _ = child.kill();
+                panic!("the oracle still waits for the rest of the request after a minute");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let stdout = reader.join().unwrap().unwrap();
+        let (header, blobs) = super::parse_frame(&stdout).expect("one whole frame");
+        let error = super::response_from_frame(&header, blobs).expect_err("an error frame");
+        assert!(
+            error.contains("EOFError: expected 100 bytes, got 10"),
+            "{error}"
+        );
+    }
+
     /// Runs the oracle (`python -m ocio_oracle`) on pipes it sees through a recorder: each read
     /// and write goes to the real stdin or stdout, and the sizes are recorded. With
     /// `fail_after`, the first write that would take stdout past that many bytes raises
