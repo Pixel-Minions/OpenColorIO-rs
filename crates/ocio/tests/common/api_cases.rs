@@ -1040,3 +1040,97 @@ pub(crate) fn lut1d_lookups() -> Cases {
         bases: Vec::new(),
     }
 }
+
+/// A `FixedFunctionTransform` of `style` (a `FIXED_FUNCTION_*` name) and `params`: the
+/// binding's constructor of a style without parameters, `ACES_GLOW_03`, which validates, then
+/// `setStyle` and `setParams`, which don't. The ACES 1.3 gamut compression's limits and
+/// thresholds apply to one channel each (cyan to red, magenta to green, yellow to blue), its
+/// power to the three; every other style's parameters to the three.
+pub(crate) fn fixed_function_calls(style: &str, params: &[f64]) -> Calls {
+    use ocio_testkit::battery::params::{B, G, R};
+    let calls = Calls::new("FixedFunctionTransform")
+        .arg_fixed(
+            "style",
+            serde_json::json!({"enum": "FIXED_FUNCTION_ACES_GLOW_03"}),
+        )
+        .enumerated("setStyle", style);
+    if params.is_empty() {
+        return calls;
+    }
+    let channels: Vec<_> = if style == "FIXED_FUNCTION_ACES_GAMUT_COMP_13" && params.len() == 7 {
+        vec![R, G, B, R, G, B, RGB]
+    } else {
+        vec![RGB; params.len()]
+    };
+    let list = params.iter().copied().zip(channels).collect();
+    calls.call("setParams", vec![Arg::List(list)])
+}
+
+/// The ACES 1.3 gamut compression's parameters, as upstream's tests use them
+/// (tests/cpu/ops/fixedfunction/FixedFunctionOpCPU_tests.cpp:393 @ v2.5.2).
+const GAMUT_COMP_13: [f64; 7] = [1.147, 1.264, 1.312, 0.815, 0.803, 0.880, 1.2];
+
+/// `FixedFunctionTransform`: the cases of `crates/ocio-ops/tests/fixed_function_oracle.rs` for
+/// the styles whose renderers are ported, and a pair of inverse transforms, which the
+/// optimizer removes.
+pub(crate) fn fixed_function() -> Cases {
+    let mut cases: Vec<Case<Calls>> = [
+        "FIXED_FUNCTION_ACES_RED_MOD_03",
+        "FIXED_FUNCTION_ACES_RED_MOD_10",
+        "FIXED_FUNCTION_ACES_GLOW_03",
+        "FIXED_FUNCTION_ACES_GLOW_10",
+        "FIXED_FUNCTION_ACES_DARK_TO_DIM_10",
+    ]
+    .into_iter()
+    .map(|style| Case::new(style, fixed_function_calls(style, &[])))
+    .collect();
+    let gamut = Case::new(
+        "ACES_GAMUT_COMP_13",
+        fixed_function_calls("FIXED_FUNCTION_ACES_GAMUT_COMP_13", &GAMUT_COMP_13),
+    );
+    let bases = vec![gamut.clone()];
+    cases.push(gamut);
+    for (label, params) in [
+        ("lower bounds", [1.001, 1.001, 1.001, 0.0, 0.0, 0.0, 1.0]),
+        (
+            "upper bounds",
+            [65504.0, 65504.0, 65504.0, 0.9995, 0.9995, 0.9995, 65504.0],
+        ),
+        ("mixed", [1.5, 2.0, 1.01, 0.5, 0.9, 0.2, 3.0]),
+    ] {
+        cases.push(Case::new(
+            format!("ACES_GAMUT_COMP_13 {label}"),
+            fixed_function_calls("FIXED_FUNCTION_ACES_GAMUT_COMP_13", &params),
+        ));
+    }
+    let mut nan = GAMUT_COMP_13;
+    nan[6] = f64::NAN;
+    cases.push(Case::new(
+        "ACES_GAMUT_COMP_13 NaN power",
+        fixed_function_calls("FIXED_FUNCTION_ACES_GAMUT_COMP_13", &nan),
+    ));
+    let mut low = GAMUT_COMP_13;
+    low[0] = 1.0;
+    cases.push(Case::new(
+        "refused lim_cyan 1",
+        fixed_function_calls("FIXED_FUNCTION_ACES_GAMUT_COMP_13", &low),
+    ));
+    cases.push(Case::new(
+        "refused glow parameter",
+        fixed_function_calls("FIXED_FUNCTION_ACES_GLOW_03", &[1.0]),
+    ));
+    cases.push(Case::new(
+        "refused 6 parameters",
+        fixed_function_calls("FIXED_FUNCTION_ACES_GAMUT_COMP_13", &GAMUT_COMP_13[..6]),
+    ));
+    cases.push(Case::new(
+        "glow and its inverse",
+        Calls::new("GroupTransform")
+            .child(fixed_function_calls("FIXED_FUNCTION_ACES_GLOW_10", &[]))
+            .child_in(
+                fixed_function_calls("FIXED_FUNCTION_ACES_GLOW_10", &[]),
+                Direction::Inverse,
+            ),
+    ));
+    Cases { cases, bases }
+}

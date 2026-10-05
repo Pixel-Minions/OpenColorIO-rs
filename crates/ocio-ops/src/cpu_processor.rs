@@ -361,6 +361,7 @@ fn create_cpu_engine(
         let lut = match &**op.data() {
             OpData::Lut1D(lut) => Some(lut),
             OpData::Log(_)
+            | OpData::FixedFunction(_)
             | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Matrix(_)

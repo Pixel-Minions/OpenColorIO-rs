@@ -49,6 +49,7 @@ fn no_op_data(op: &Op) -> &NoOpData {
     match &**op.data() {
         OpData::NoOp(data) => data,
         OpData::Log(_)
+        | OpData::FixedFunction(_)
         | OpData::Cdl(_)
         | OpData::Gamma(_)
         | OpData::Lut1D(_)

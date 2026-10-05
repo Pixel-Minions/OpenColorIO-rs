@@ -171,3 +171,11 @@ fn allocation_transform_through_the_api_matches_the_wheel() {
 fn group_transform_through_the_api_matches_the_wheel() {
     battery::run(&ApiFamily::new("GroupTransform", api_cases::group()));
 }
+
+#[test]
+fn fixed_function_transform_through_the_api_matches_the_wheel() {
+    battery::run(&ApiFamily::new(
+        "FixedFunctionTransform",
+        api_cases::fixed_function(),
+    ));
+}

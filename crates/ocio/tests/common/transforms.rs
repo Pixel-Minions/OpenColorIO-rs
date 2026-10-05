@@ -22,8 +22,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use ocio::{
-    Config, FormatMetadata, GroupTransform, Interpolation, Lut1DHueAdjust, NegativeStyle,
-    OptimizationFlags, Processor, RangeStyle, Transform, TransformDirection,
+    Config, FixedFunctionStyle, FormatMetadata, GroupTransform, Interpolation, Lut1DHueAdjust,
+    NegativeStyle, OptimizationFlags, Processor, RangeStyle, Transform, TransformDirection,
 };
 use ocio_ops::open_color_types::{BitDepth, CdlStyle};
 use ocio_testkit::Oracle;
@@ -234,6 +234,7 @@ fn port_equals(a: &Transform, b: &Transform) -> Option<bool> {
         (Transform::LogCamera(a), Transform::LogCamera(b)) => Some(a.equals(b)),
         (Transform::Exponent(a), Transform::Exponent(b)) => Some(a.equals(b)),
         (Transform::ExponentWithLinear(a), Transform::ExponentWithLinear(b)) => Some(a.equals(b)),
+        (Transform::FixedFunction(a), Transform::FixedFunction(b)) => Some(a.equals(b)),
         _ => None,
     }
 }
@@ -682,6 +683,19 @@ pub(crate) fn dump_transform(transform: &Transform) -> (String, BTreeMap<String,
             );
             "Lut1DTransform"
         }
+        Transform::FixedFunction(t) => {
+            put(
+                "getTransformType",
+                dumped_enum("TRANSFORM_TYPE_FIXED_FUNCTION"),
+            );
+            put("getFormatMetadata", dump_metadata(t.format_metadata()));
+            put(
+                "getStyle",
+                dumped_enum(fixed_function_style_name(t.style())),
+            );
+            put("getParams", dumped_f64s(&t.params()));
+            "FixedFunctionTransform"
+        }
         other => panic!("no dump for {other:?}"),
     };
     (class.to_string(), getters)
@@ -796,5 +810,35 @@ pub(crate) fn hue_adjust_name(hue: Lut1DHueAdjust) -> &'static str {
         Lut1DHueAdjust::None => "HUE_NONE",
         Lut1DHueAdjust::Dw3 => "HUE_DW3",
         Lut1DHueAdjust::Wypn => "HUE_WYPN",
+    }
+}
+
+/// A `FixedFunctionStyle`, as PyOpenColorIO names it.
+pub(crate) fn fixed_function_style_name(style: FixedFunctionStyle) -> &'static str {
+    use FixedFunctionStyle::*;
+    match style {
+        AcesRedMod03 => "FIXED_FUNCTION_ACES_RED_MOD_03",
+        AcesRedMod10 => "FIXED_FUNCTION_ACES_RED_MOD_10",
+        AcesGlow03 => "FIXED_FUNCTION_ACES_GLOW_03",
+        AcesGlow10 => "FIXED_FUNCTION_ACES_GLOW_10",
+        AcesDarkToDim10 => "FIXED_FUNCTION_ACES_DARK_TO_DIM_10",
+        Rec2100Surround => "FIXED_FUNCTION_REC2100_SURROUND",
+        RgbToHsv => "FIXED_FUNCTION_RGB_TO_HSV",
+        XyzToXyy => "FIXED_FUNCTION_XYZ_TO_xyY",
+        XyzToUvy => "FIXED_FUNCTION_XYZ_TO_uvY",
+        XyzToLuv => "FIXED_FUNCTION_XYZ_TO_LUV",
+        AcesGamutMap02 => "FIXED_FUNCTION_ACES_GAMUTMAP_02",
+        AcesGamutMap07 => "FIXED_FUNCTION_ACES_GAMUTMAP_07",
+        AcesGamutComp13 => "FIXED_FUNCTION_ACES_GAMUT_COMP_13",
+        LinToPq => "FIXED_FUNCTION_LIN_TO_PQ",
+        LinToGammaLog => "FIXED_FUNCTION_LIN_TO_GAMMA_LOG",
+        LinToDoubleLog => "FIXED_FUNCTION_LIN_TO_DOUBLE_LOG",
+        AcesOutputTransform20 => "FIXED_FUNCTION_ACES_OUTPUT_TRANSFORM_20",
+        AcesRgbToJmh20 => "FIXED_FUNCTION_ACES_RGB_TO_JMH_20",
+        AcesTonescaleCompress20 => "FIXED_FUNCTION_ACES_TONESCALE_COMPRESS_20",
+        AcesGamutCompress20 => "FIXED_FUNCTION_ACES_GAMUT_COMPRESS_20",
+        RgbToHsyLin => "FIXED_FUNCTION_RGB_TO_HSY_LIN",
+        RgbToHsyLog => "FIXED_FUNCTION_RGB_TO_HSY_LOG",
+        RgbToHsyVid => "FIXED_FUNCTION_RGB_TO_HSY_VID",
     }
 }

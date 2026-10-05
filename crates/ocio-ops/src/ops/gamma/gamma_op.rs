@@ -50,6 +50,7 @@ impl GammaOpData {
             OpData::Gamma(gamma2) => self.is_inverse(gamma2),
             OpData::Cdl(_)
             | OpData::Log(_)
+            | OpData::FixedFunction(_)
             | OpData::Lut1D(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
@@ -68,6 +69,7 @@ impl GammaOpData {
             OpData::Gamma(gamma2) => self.may_compose(gamma2),
             OpData::Cdl(_)
             | OpData::Log(_)
+            | OpData::FixedFunction(_)
             | OpData::Lut1D(_)
             | OpData::Matrix(_)
             | OpData::Range(_)

@@ -212,6 +212,7 @@ fn pair_identity_replacement(op1: &Op) -> Result<Op> {
              (Phase 2, WP 2.1).",
         )),
         OpData::Log(_)
+        | OpData::FixedFunction(_)
         | OpData::Cdl(_)
         | OpData::Gamma(_)
         | OpData::Matrix(_)
@@ -363,6 +364,7 @@ fn replace_inverse_luts(op_vec: &mut OpVec) -> Result<i32> {
             }
             // (The Lut3D arm: an inverse LUT becomes a fast forward one, counted.)
             OpData::Log(_)
+            | OpData::FixedFunction(_)
             | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Matrix(_)
@@ -420,6 +422,7 @@ fn is_forward_lut1d(op: &Op) -> bool {
     match &**op.data() {
         OpData::Lut1D(lut) => lut.get_direction() == TransformDirection::Forward,
         OpData::Log(_)
+        | OpData::FixedFunction(_)
         | OpData::Cdl(_)
         | OpData::Gamma(_)
         | OpData::Matrix(_)
