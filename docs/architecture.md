@@ -198,7 +198,11 @@ unchanged.
 ## Errors, logging and environment
 
 - `ocio_ops::Exception` holds upstream's message verbatim and whether it is
-  `ExceptionMissingFile`. Every fallible port function returns `ocio_ops::Result`.
+  `ExceptionMissingFile`. Every fallible port function returns `ocio_ops::Result`. The message
+  is bytes up to the first NUL, as the C++ exception's `const char *`: `what()` gives them,
+  `message()` and `Display` give them as text, what isn't UTF-8 replaced by U+FFFD (the
+  owner's decision, 2026-10-05). Code that builds a message from another one concatenates the
+  bytes.
 - Logging is a port of `Logging.cpp`: the same prefixes (`[OpenColorIO Warning]: `), the
   same line splitting, and the same level rules (`OCIO_LOGGING_LEVEL` read once). The
   callback is called *outside* the global lock (upstream calls it under the lock and can

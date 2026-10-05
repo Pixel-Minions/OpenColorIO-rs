@@ -115,7 +115,7 @@ impl LogTransform {
     pub fn validate(&self) -> Result<()> {
         let checked = validate_direction(self.direction()).and_then(|()| self.data.validate());
         checked.map_err(|ex| {
-            Exception::new(format!("LogTransform validation failed: {}", ex.message()))
+            Exception::new([b"LogTransform validation failed: ".as_slice(), ex.what()].concat())
         })
     }
 

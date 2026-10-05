@@ -94,10 +94,7 @@ impl MatrixTransform {
     pub fn validate(&self) -> Result<()> {
         let checked = validate_direction(self.direction()).and_then(|()| self.data.validate_ref());
         checked.map_err(|ex| {
-            Exception::new(format!(
-                "MatrixTransform validation failed: {}",
-                ex.message()
-            ))
+            Exception::new([b"MatrixTransform validation failed: ".as_slice(), ex.what()].concat())
         })
     }
 

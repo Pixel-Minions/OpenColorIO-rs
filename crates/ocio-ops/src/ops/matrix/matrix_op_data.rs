@@ -717,10 +717,9 @@ impl MatrixOpData {
     /// Port of `MatrixOpData::validate` (MatrixOpData.cpp:491-510 @ v2.5.2).
     pub fn validate(&mut self) -> Result<()> {
         if let Err(e) = self.array.validate() {
-            return Err(Exception::new(format!(
-                "Matrix array content issue: {}",
-                e.message()
-            )));
+            return Err(Exception::new(
+                [b"Matrix array content issue: ".as_slice(), e.what()].concat(),
+            ));
         }
         if self.direction == TransformDirection::Inverse {
             // Make sure matrix can be inverted.
@@ -738,10 +737,9 @@ impl MatrixOpData {
             return self.clone().validate();
         }
         if let Err(e) = self.array.validate_ref() {
-            return Err(Exception::new(format!(
-                "Matrix array content issue: {}",
-                e.message()
-            )));
+            return Err(Exception::new(
+                [b"Matrix array content issue: ".as_slice(), e.what()].concat(),
+            ));
         }
         if self.direction == TransformDirection::Inverse {
             // Make sure matrix can be inverted.

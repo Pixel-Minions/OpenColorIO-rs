@@ -105,7 +105,7 @@ impl CdlTransform {
     pub fn validate(&self) -> Result<()> {
         let checked = validate_direction(self.direction()).and_then(|()| self.data.validate());
         checked.map_err(|ex| {
-            Exception::new(format!("CDLTransform validation failed: {}", ex.message()))
+            Exception::new([b"CDLTransform validation failed: ".as_slice(), ex.what()].concat())
         })
     }
 
