@@ -5,8 +5,9 @@
 //! `src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp` @ v2.5.2.
 //!
 //! So far the ACES 1.x styles: the red modifiers 0.3 and 1.0, the glows 0.3 and 1.0, the dark
-//! to dim surround 1.0 and the gamut compression 1.3, forward and inverse (chunk 2.3b). The
-//! other styles' renderers come with chunks 2.3c, 2.3d and 2.4e; until then
+//! to dim surround 1.0 and the gamut compression 1.3, forward and inverse (chunk 2.3b); the
+//! Rec.2100 surround, RGB to and from HSV, and XYZ to and from xyY, u'v'Y and CIELUV (2.3c1).
+//! The other styles' renderers come with chunks 2.3c2, 2.3d and 2.4e; until then
 //! [`get_fixed_function_cpu_renderer`] refuses them ([`not_ported`]).
 //!
 //! The renderers work in place and never write alpha, which upstream copies (`out[3] =
@@ -16,20 +17,27 @@
 //!
 //! Where two NaNs of different payloads can meet, the result is the first operand's
 //! (`CLAUDE.md`, "NaN operand order"), so the port pins the order both wheels' machine code
-//! uses ([`math_utils::sse_add`], [`math_utils::sse_mul`]). In these renderers only the glow
+//! uses ([`sse_add`], [`sse_sub`], [`sse_mul`]). Among the ACES 1.x renderers only the glow
 //! mixes input channels into a value that reaches the output: its luma-chroma value and the
-//! final products (see [`rgb_to_yc`] and [`RendererAcesGlow03Fwd`]). The red modifier's
-//! hue weight is 0 whenever an input is NaN, so a NaN pixel goes through it unchanged; the
-//! dark to dim's luminance is never NaN (`std::max(minLum, NaN)` is `minLum`), and the gamut
+//! final products (see [`rgb_to_yc`] and [`RendererAcesGlow03Fwd`]). The red modifier's hue
+//! weight is 0 whenever an input is NaN, so a NaN pixel goes through it unchanged; the dark to
+//! dim's luminance is never NaN (`std::max(minLum, NaN)` is `minLum`), and the gamut
 //! compression's achromatic value is red's NaN or no NaN, which its arithmetic propagates
 //! whatever the order. Every other NaN inside is the default NaN, whose bits don't depend on
 //! the order.
+//!
+//! The Rec.2100 surround and the CIE conversions mix the channels throughout; each documents
+//! the orders MSVC and GCC chose, which often differ (`cfg(target_os)`). LLVM rewrites `a - c *
+//! x` as `a + (-c) * x` and may then swap the addition's operands, so those subtractions are
+//! [`sse_sub`]. RGB to HSV's extremes carry only red's NaN (`std::min(NaN, x)` is `NaN` only for
+//! a NaN first operand), and HSV to RGB's `Clamp` turns a NaN hue or saturation into 0, so
+//! neither meets two NaNs in an operation whose operands the compilers can swap.
 
 use std::sync::Arc;
 
 use super::fixed_function_op_data::{FixedFunctionOpData, FixedFunctionOpStyle, SHORT_PARAMS};
 use crate::exception::{Exception, Result};
-use crate::math_utils::{sse_add, sse_cvttps_epi32, sse_mul, std_max, std_min};
+use crate::math_utils::{clamp, sse_add, sse_cvttps_epi32, sse_mul, sse_sub, std_max, std_min};
 use crate::op::CpuOp;
 
 /// The error for a style whose renderer isn't ported yet.
@@ -723,6 +731,421 @@ impl CpuOp for RendererAcesGamutComp13Inv {
     }
 }
 
+/// The Rec.2100 surround correction: each channel times `Y^(gamma - 1)` of the Rec.2100
+/// luminance, mirrored around 0 and limited below; the inverse uses `1 / gamma`.
+///
+/// Port of `Renderer_REC2100_Surround` (src/OpenColorIO/ops/fixedfunction/
+/// FixedFunctionOpCPU.cpp:210-221, 1406-1454 @ v2.5.2).
+#[derive(Debug)]
+pub struct RendererRec2100Surround {
+    /// `m_gamma`: `gamma - 1`, to compute `Y^gamma / Y`.
+    gamma: f32,
+    /// `m_minLum`.
+    min_lum: f32,
+}
+
+impl RendererRec2100Surround {
+    /// [`SHORT_PARAMS`] without a parameter, which upstream reads past (U-31).
+    ///
+    /// Port of `Renderer_REC2100_Surround::Renderer_REC2100_Surround`
+    /// (FixedFunctionOpCPU.cpp:1406-1417 @ v2.5.2).
+    pub fn new(data: &FixedFunctionOpData) -> Result<Self> {
+        let fwd = FixedFunctionOpStyle::Rec2100SurroundFwd == data.style();
+        let Some(&param) = data.params().first() else {
+            return Err(Exception::new(SHORT_PARAMS));
+        };
+        let mut gamma = param as f32;
+
+        let min_lum = if fwd { 1e-4f32 } else { 1e-4f32.powf(gamma) };
+
+        gamma = if fwd { gamma } else { 1.0f32 / gamma };
+
+        Ok(RendererRec2100Surround {
+            gamma: gamma - 1.0f32,
+            min_lum,
+        })
+    }
+}
+
+impl CpuOp for RendererRec2100Surround {
+    /// The products' order where the factor and a channel are NaNs (only with a NaN parameter,
+    /// W0002): the channel first on Windows; on Linux, the factor first for red and green and
+    /// blue first (`Renderer_REC2100_Surround::apply`, Windows `0x18018da66`-`0x18018da73`,
+    /// Linux `0x3548b8`, `0x3548c4`).
+    ///
+    /// Port of `Renderer_REC2100_Surround::apply` (FixedFunctionOpCPU.cpp:1419-1454 @ v2.5.2).
+    fn apply(&self, rgba: &mut [f32]) {
+        for pixel in rgba.as_chunks_mut::<4>().0 {
+            let red = pixel[0];
+            let grn = pixel[1];
+            let blu = pixel[2];
+
+            // Calculate luminance assuming input is Rec.2100 RGB.
+            let mut y = sse_add(sse_add(0.2627f32 * red, 0.6780f32 * grn), 0.0593f32 * blu);
+
+            // Mirror the function around the origin.
+            y = y.abs();
+
+            // Since the slope may approach infinity as Y approaches 0, limit the min value
+            // to avoid gaining up the RGB values (which may not be as close to 0).
+            y = std_max(self.min_lum, y);
+
+            let ypow_over_y = y.powf(self.gamma);
+
+            #[cfg(target_os = "windows")]
+            {
+                pixel[0] = sse_mul(red, ypow_over_y);
+                pixel[1] = sse_mul(grn, ypow_over_y);
+                pixel[2] = sse_mul(blu, ypow_over_y);
+            }
+            #[cfg(target_os = "linux")]
+            {
+                pixel[0] = sse_mul(ypow_over_y, red);
+                pixel[1] = sse_mul(ypow_over_y, grn);
+                pixel[2] = sse_mul(blu, ypow_over_y);
+            }
+        }
+    }
+}
+
+/// RGB to HSV, for extended range values: if RGB are non-negative or all negative, S is on
+/// [0,1]; if RGB are a mix of positive and negative, S is on [1,2]. H is [0,1] for all inputs,
+/// with 1 meaning 360 degrees. For RGB on [0,1], the classic HSV formula.
+///
+/// Port of `Renderer_RGB_TO_HSV` (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp:
+/// 223-230, 1456-1534 @ v2.5.2).
+#[derive(Debug, Default)]
+pub struct RendererRgbToHsv;
+
+impl CpuOp for RendererRgbToHsv {
+    /// Port of `Renderer_RGB_TO_HSV::apply` (FixedFunctionOpCPU.cpp:1466-1534 @ v2.5.2).
+    fn apply(&self, rgba: &mut [f32]) {
+        for pixel in rgba.as_chunks_mut::<4>().0 {
+            let red = pixel[0];
+            let grn = pixel[1];
+            let blu = pixel[2];
+
+            let rgb_min = std_min(std_min(red, grn), blu);
+            let rgb_max = std_max(std_max(red, grn), blu);
+
+            let mut val = rgb_max;
+            let mut sat = 0.0f32;
+            let mut hue = 0.0f32;
+
+            if rgb_min != rgb_max {
+                // Sat
+                let delta = rgb_max - rgb_min;
+                if rgb_max != 0.0 {
+                    sat = delta / rgb_max;
+                }
+
+                // Hue
+                if red == rgb_max {
+                    hue = (grn - blu) / delta;
+                } else if grn == rgb_max {
+                    hue = 2.0f32 + (blu - red) / delta;
+                } else {
+                    hue = 4.0f32 + (red - grn) / delta;
+                }
+                if hue < 0.0 {
+                    hue += 6.0f32;
+                }
+                hue *= 0.16666666666666666f32;
+            }
+
+            // Handle extended range inputs.
+            if rgb_min < 0.0 {
+                val += rgb_min;
+            }
+            if -rgb_min > rgb_max {
+                // GCC computes `-(rgb_max - rgb_min) / rgb_min`, which flips the sign of the NaN
+                // that infinities of one sign give (`Renderer_RGB_TO_HSV::apply`, Linux
+                // `0x35398c`); MSVC divides by `-rgb_min`.
+                #[cfg(target_os = "windows")]
+                {
+                    sat = (rgb_max - rgb_min) / -rgb_min;
+                }
+                #[cfg(target_os = "linux")]
+                {
+                    sat = -(rgb_max - rgb_min) / rgb_min;
+                }
+            }
+
+            pixel[0] = hue;
+            pixel[1] = sat;
+            pixel[2] = val;
+        }
+    }
+}
+
+/// HSV to RGB, for extended range values: H is nominally on [0,1], but values outside are
+/// wrapped back into range; S is nominally on [0,1] for non-negative RGB but may extend up to
+/// 2, and values outside [0, 1.999] are clamped.
+///
+/// Port of `Renderer_HSV_TO_RGB` (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp:
+/// 232-239, 1536-1589 @ v2.5.2).
+#[derive(Debug, Default)]
+pub struct RendererHsvToRgb;
+
+impl CpuOp for RendererHsvToRgb {
+    /// Port of `Renderer_HSV_TO_RGB::apply` (FixedFunctionOpCPU.cpp:1548-1589 @ v2.5.2).
+    fn apply(&self, rgba: &mut [f32]) {
+        const MAX_SAT: f32 = 1.999;
+        for pixel in rgba.as_chunks_mut::<4>().0 {
+            let hue = (pixel[0] - pixel[0].floor()) * 6.0f32;
+            let sat = clamp(pixel[1], 0.0f32, MAX_SAT);
+            let val = pixel[2];
+
+            let red = clamp((hue - 3.0f32).abs() - 1.0f32, 0.0f32, 1.0f32);
+            let grn = clamp(2.0f32 - (hue - 2.0f32).abs(), 0.0f32, 1.0f32);
+            let blu = clamp(2.0f32 - (hue - 4.0f32).abs(), 0.0f32, 1.0f32);
+
+            let mut rgb_max = val;
+            let mut rgb_min = val * (1.0f32 - sat);
+
+            // Handle extended range inputs.
+            if sat > 1.0 {
+                rgb_min = val * (1.0f32 - sat) / (2.0f32 - sat);
+                rgb_max = val - rgb_min;
+            }
+            if val < 0.0 {
+                rgb_min = val / (2.0f32 - sat);
+                rgb_max = val - rgb_min;
+            }
+
+            let delta = rgb_max - rgb_min;
+            pixel[0] = red * delta + rgb_min;
+            pixel[1] = grn * delta + rgb_min;
+            pixel[2] = blu * delta + rgb_min;
+        }
+    }
+}
+
+/// XYZ to xyY.
+///
+/// Where NaNs meet: MSVC sums `(Y + X) + Z` and multiplies `d * X`, `d * Y`; GCC `(X + Y) + Z` and
+/// `X * d`, `Y * d` (`Renderer_XYZ_TO_xyY::apply`, Windows `0x18018e1f9`, Linux `0x353a7e`).
+///
+/// Port of `Renderer_XYZ_TO_xyY` (FixedFunctionOpCPU.cpp:295-302, 1825-1854 @ v2.5.2).
+#[derive(Debug, Default)]
+pub struct RendererXyzToXyy;
+
+impl CpuOp for RendererXyzToXyy {
+    fn apply(&self, rgba: &mut [f32]) {
+        for pixel in rgba.as_chunks_mut::<4>().0 {
+            let x_ = pixel[0];
+            let y_ = pixel[1];
+            let z_ = pixel[2];
+
+            #[cfg(target_os = "windows")]
+            let mut d = sse_add(sse_add(y_, x_), z_);
+            #[cfg(target_os = "linux")]
+            let mut d = sse_add(sse_add(x_, y_), z_);
+            d = if d == 0.0 { 0.0 } else { 1.0f32 / d };
+            #[cfg(target_os = "windows")]
+            let (x, y) = (sse_mul(d, x_), sse_mul(d, y_));
+            #[cfg(target_os = "linux")]
+            let (x, y) = (sse_mul(x_, d), sse_mul(y_, d));
+
+            pixel[0] = x;
+            pixel[1] = y;
+            pixel[2] = y_;
+        }
+    }
+}
+
+/// xyY to XYZ.
+///
+/// Where NaNs meet: `X` is `(Y * x) * d` with MSVC and `(x * Y) * d` with GCC; `Z` is `((1 - x - y)
+/// * Y) * d` with both (`Renderer_xyY_TO_XYZ::apply`, Windows `0x18018e703`, Linux `0x353b40`).
+///
+/// Port of `Renderer_xyY_TO_XYZ` (FixedFunctionOpCPU.cpp:304-311, 1856-1884 @ v2.5.2).
+#[derive(Debug, Default)]
+pub struct RendererXyyToXyz;
+
+impl CpuOp for RendererXyyToXyz {
+    /// Port of `Renderer_xyY_TO_XYZ::apply` (FixedFunctionOpCPU.cpp:1861-1884 @ v2.5.2).
+    fn apply(&self, rgba: &mut [f32]) {
+        for pixel in rgba.as_chunks_mut::<4>().0 {
+            let x = pixel[0];
+            let y = pixel[1];
+            let y_ = pixel[2];
+
+            let d = if y == 0.0 { 0.0f32 } else { 1.0f32 / y };
+            #[cfg(target_os = "windows")]
+            let x_ = sse_mul(sse_mul(y_, x), d);
+            #[cfg(target_os = "linux")]
+            let x_ = sse_mul(sse_mul(x, y_), d);
+            let z_ = sse_mul(sse_mul(1.0f32 - x - y, y_), d);
+
+            pixel[0] = x_;
+            pixel[1] = y_;
+            pixel[2] = z_;
+        }
+    }
+}
+
+/// XYZ to u'v'Y.
+///
+/// Where NaNs meet, both wheels: `d` is `(15 * Y + X) + 3 * Z`, and `u`, `v` are `(4 * X) * d`,
+/// `(9 * Y) * d` (`Renderer_XYZ_TO_uvY::apply`, Windows `0x18018df71`, Linux `0x353bd7`).
+///
+/// Port of `Renderer_XYZ_TO_uvY` (FixedFunctionOpCPU.cpp:313-320, 1886-1917 @ v2.5.2).
+#[derive(Debug, Default)]
+pub struct RendererXyzToUvy;
+
+impl CpuOp for RendererXyzToUvy {
+    /// Port of `Renderer_XYZ_TO_uvY::apply` (FixedFunctionOpCPU.cpp:1891-1917 @ v2.5.2).
+    fn apply(&self, rgba: &mut [f32]) {
+        for pixel in rgba.as_chunks_mut::<4>().0 {
+            let x_ = pixel[0];
+            let y_ = pixel[1];
+            let z_ = pixel[2];
+
+            let mut d = sse_add(sse_add(15.0f32 * y_, x_), 3.0f32 * z_);
+            d = if d == 0.0 { 0.0 } else { 1.0f32 / d };
+            let u = sse_mul(4.0f32 * x_, d);
+            let v = sse_mul(9.0f32 * y_, d);
+
+            pixel[0] = u;
+            pixel[1] = v;
+            pixel[2] = y_;
+        }
+    }
+}
+
+/// u'v'Y to XYZ.
+///
+/// Where NaNs meet, both wheels: `X` is `((9/4 * Y) * u) * d` and `Z` is `((4 - u - 20/3 * v) *
+/// (3/4 * Y)) * d` (`Renderer_uvY_TO_XYZ::apply`, Windows `0x18018e457`, Linux `0x353ca4`), the
+/// subtraction kept as one ([`sse_sub`]).
+///
+/// Port of `Renderer_uvY_TO_XYZ` (FixedFunctionOpCPU.cpp:322-329, 1919-1949 @ v2.5.2).
+#[derive(Debug, Default)]
+pub struct RendererUvyToXyz;
+
+impl CpuOp for RendererUvyToXyz {
+    /// Port of `Renderer_uvY_TO_XYZ::apply` (FixedFunctionOpCPU.cpp:1924-1949 @ v2.5.2).
+    fn apply(&self, rgba: &mut [f32]) {
+        for pixel in rgba.as_chunks_mut::<4>().0 {
+            let u = pixel[0];
+            let v = pixel[1];
+            let y_ = pixel[2];
+
+            let d = if v == 0.0 { 0.0f32 } else { 1.0f32 / v };
+            let x_ = sse_mul(sse_mul((9.0f32 / 4.0f32) * y_, u), d);
+            let z_ = sse_mul(
+                sse_mul(
+                    sse_sub(4.0f32 - u, 6.666666666666667f32 * v),
+                    (3.0f32 / 4.0f32) * y_,
+                ),
+                d,
+            );
+
+            pixel[0] = x_;
+            pixel[1] = y_;
+            pixel[2] = z_;
+        }
+    }
+}
+
+/// XYZ to CIELUV (D65 white).
+///
+/// Where NaNs meet: `d`, `u` as [`RendererXyzToUvy`]; `v` is `(9 * Y) * d` with MSVC and
+/// `d * (9 * Y)` with GCC; `u*` and `v*` are `(u - u'n) * (13 * L*)` with both
+/// (`Renderer_XYZ_TO_LUV::apply`, Windows `0x18018ddbd`, Linux `0x35464f`).
+///
+/// Port of `Renderer_XYZ_TO_LUV` (FixedFunctionOpCPU.cpp:331-338, 1951-1987 @ v2.5.2).
+#[derive(Debug, Default)]
+pub struct RendererXyzToLuv;
+
+impl CpuOp for RendererXyzToLuv {
+    /// Port of `Renderer_XYZ_TO_LUV::apply` (FixedFunctionOpCPU.cpp:1956-1987 @ v2.5.2).
+    fn apply(&self, rgba: &mut [f32]) {
+        for pixel in rgba.as_chunks_mut::<4>().0 {
+            let x_ = pixel[0];
+            let y_ = pixel[1];
+            let z_ = pixel[2];
+
+            let mut d = sse_add(sse_add(15.0f32 * y_, x_), 3.0f32 * z_);
+            d = if d == 0.0 { 0.0 } else { 1.0f32 / d };
+            let u = sse_mul(4.0f32 * x_, d);
+            #[cfg(target_os = "windows")]
+            let v = sse_mul(9.0f32 * y_, d);
+            #[cfg(target_os = "linux")]
+            let v = sse_mul(d, 9.0f32 * y_);
+
+            let lstar = if y_ <= 0.008856451679f32 {
+                9.0329629629629608f32 * y_
+            } else {
+                1.16f32 * y_.powf(0.333333333f32) - 0.16f32
+            };
+            let ustar = sse_mul(u - 0.19783001f32, 13.0f32 * lstar); // D65 white
+            let vstar = sse_mul(v - 0.46831999f32, 13.0f32 * lstar); // D65 white
+
+            pixel[0] = lstar;
+            pixel[1] = ustar;
+            pixel[2] = vstar;
+        }
+    }
+}
+
+/// CIELUV (D65 white) to XYZ.
+///
+/// Where NaNs meet: `u`, `v` are `d * u*` with MSVC and `u* * d` with GCC; `X` is `((9 * Y) * u) *
+/// dd` with both; `Z` is `((12 - 3u - 20v) * Y) * dd` with MSVC and `dd * ((12 - 3u - 20v) * Y)`
+/// with GCC (`Renderer_LUV_TO_XYZ::apply`, Windows `0x18018d5ac`, Linux `0x353e2f`).
+///
+/// Port of `Renderer_LUV_TO_XYZ` (FixedFunctionOpCPU.cpp:340-347, 1989-2026 @ v2.5.2).
+#[derive(Debug, Default)]
+pub struct RendererLuvToXyz;
+
+impl CpuOp for RendererLuvToXyz {
+    /// Port of `Renderer_LUV_TO_XYZ::apply` (FixedFunctionOpCPU.cpp:1994-2026 @ v2.5.2).
+    fn apply(&self, rgba: &mut [f32]) {
+        for pixel in rgba.as_chunks_mut::<4>().0 {
+            let lstar = pixel[0];
+            let ustar = pixel[1];
+            let vstar = pixel[2];
+
+            let d = if lstar == 0.0 {
+                0.0f32
+            } else {
+                0.076923076923076927f32 / lstar
+            };
+            #[cfg(target_os = "windows")]
+            let (u, v) = (
+                sse_mul(d, ustar) + 0.19783001f32, // D65 white
+                sse_mul(d, vstar) + 0.46831999f32, // D65 white
+            );
+            #[cfg(target_os = "linux")]
+            let (u, v) = (
+                sse_mul(ustar, d) + 0.19783001f32, // D65 white
+                sse_mul(vstar, d) + 0.46831999f32, // D65 white
+            );
+
+            let tmp = (lstar + 0.16f32) * 0.86206896551724144f32;
+            let y_ = if lstar <= 0.08f32 {
+                0.11070564598794539f32 * lstar
+            } else {
+                tmp * tmp * tmp
+            };
+
+            let dd = if v == 0.0 { 0.0f32 } else { 0.25f32 / v };
+            let x_ = sse_mul(sse_mul(9.0f32 * y_, u), dd);
+            let paren_y = sse_mul(sse_sub(12.0f32 - 3.0f32 * u, 20.0f32 * v), y_);
+            #[cfg(target_os = "windows")]
+            let z_ = sse_mul(paren_y, dd);
+            #[cfg(target_os = "linux")]
+            let z_ = sse_mul(dd, paren_y);
+
+            pixel[0] = x_;
+            pixel[1] = y_;
+            pixel[2] = z_;
+        }
+    }
+}
+
 /// The renderer of `func`'s style. `fast_log_exp_pow` picks the fast-math variants of the
 /// styles that have one (PQ, chunk 2.3d). The styles whose renderers aren't ported yet are
 /// refused ([`not_ported`]).
@@ -750,6 +1173,23 @@ pub fn get_fixed_function_cpu_renderer(
         AcesGamutComp13Fwd => Arc::new(RendererAcesGamutComp13Fwd::new(func)?),
         AcesGamutComp13Inv => Arc::new(RendererAcesGamutComp13Inv::new(func)?),
 
+        Rec2100SurroundFwd | Rec2100SurroundInv => {
+            // Sharing same renderer (param will be inverted to handle direction).
+            Arc::new(RendererRec2100Surround::new(func)?)
+        }
+
+        RgbToHsv => Arc::new(RendererRgbToHsv),
+        HsvToRgb => Arc::new(RendererHsvToRgb),
+
+        XyzToXyy => Arc::new(RendererXyzToXyy),
+        XyyToXyz => Arc::new(RendererXyyToXyz),
+
+        XyzToUvy => Arc::new(RendererXyzToUvy),
+        UvyToXyz => Arc::new(RendererUvyToXyz),
+
+        XyzToLuv => Arc::new(RendererXyzToLuv),
+        LuvToXyz => Arc::new(RendererLuvToXyz),
+
         style @ (AcesOutputTransform20Fwd
         | AcesOutputTransform20Inv
         | AcesRgbToJmh20
@@ -758,16 +1198,6 @@ pub fn get_fixed_function_cpu_renderer(
         | AcesTonescaleCompress20Inv
         | AcesGamutCompress20Fwd
         | AcesGamutCompress20Inv
-        | Rec2100SurroundFwd
-        | Rec2100SurroundInv
-        | RgbToHsv
-        | HsvToRgb
-        | XyzToXyy
-        | XyyToXyz
-        | XyzToUvy
-        | UvyToXyz
-        | XyzToLuv
-        | LuvToXyz
         | LinToPq
         | PqToLin
         | LinToGammaLog
