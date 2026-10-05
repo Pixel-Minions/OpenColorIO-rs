@@ -477,3 +477,39 @@ fn color_space_set_operators_are_reached() {
     let eq = result(&c[first + 9]).as_bool().unwrap();
     assert_eq!(*result(&c[first + 10]), json!(!eq));
 }
+
+/// The dump of a named transform calls `NamedTransform.GetTransform` in both directions only
+/// when it has a transform: for one with none, the wheel would dereference null
+/// (NamedTransform.cpp:182-221 @ v2.5.2) and end the oracle.
+#[test]
+fn a_named_transform_without_transforms_dumps() {
+    let response = call(json!({
+        "config": "raw",
+        "calls": [
+            {"new": "NamedTransform", "as": "empty"},
+            {"dump": "empty"},
+            {"new": "NamedTransform", "as": "one"},
+            {"call": "setTransform", "on": "one", "args": [
+                {"transform": {"class": "MatrixTransform"}}, {"enum": "TRANSFORM_DIR_FORWARD"}]},
+            {"dump": "one"},
+        ],
+    }));
+    let c = calls(&response);
+    let get_transforms = |dump: &Value| -> Vec<Value> {
+        dump["keyed"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{dump}"))
+            .iter()
+            .filter(|k| k[0] == "GetTransform")
+            .map(|k| k[2].clone())
+            .collect()
+    };
+    let empty = result(&c[1]);
+    assert_eq!(empty["class"], "NamedTransform");
+    assert!(get_transforms(empty).is_empty(), "{empty}");
+    let one = get_transforms(result(&c[4]));
+    assert_eq!(one.len(), 2);
+    for got in one {
+        assert_eq!(got["class"], "MatrixTransform", "{got}");
+    }
+}

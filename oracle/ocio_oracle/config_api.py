@@ -589,6 +589,15 @@ def _directions(enum):
     return [("getTransform", (d,)) for d in _enum_members(enum)]
 
 
+def _named_get_transform(o):
+    """NamedTransform.GetTransform(o, dir) for both directions, unless o has no transform at
+    all: GetTransform then inverts a null transform (NamedTransform.cpp:182-221 dereferences
+    it), which ends the process."""
+    if all(o.getTransform(d) is None for d in TRANSFORM_DIRECTIONS):
+        return []
+    return [("GetTransform", (o, d)) for d in TRANSFORM_DIRECTIONS]
+
+
 def _rules(o, per_rule):
     entries = range(o.getNumEntries())
     return ([(m, (i,)) for i in entries for m in per_rule + ("getNumCustomKeys",)]
@@ -623,7 +632,7 @@ KEYED = {
     "NamedTransform": (
         ("getTransform", "GetTransform", "hasAlias", "hasCategory"),
         lambda o: ([("getTransform", (d,)) for d in TRANSFORM_DIRECTIONS]
-                   + [("GetTransform", (o, d)) for d in TRANSFORM_DIRECTIONS]
+                   + _named_get_transform(o)
                    + _tokens(o, "hasAlias", "getAliases")
                    + _tokens(o, "hasCategory", "getCategories"))),
     "ColorSpaceSet": (("hasColorSpace",), lambda o: _tokens(o, "hasColorSpace",
