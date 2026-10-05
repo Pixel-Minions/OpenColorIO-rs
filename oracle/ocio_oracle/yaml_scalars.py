@@ -21,8 +21,9 @@ import struct
 import PyOpenColorIO as OCIO
 
 from .checks import check_keys
-from .commands import captured_log, command
-from .config_api import REPORTED, RequestError, f64_bits, raised, text
+from .commands import command
+from .config_api import (REPORTED, LogCapture, RequestError, f64_bits, raised, text,
+                         value_out)
 
 
 def _f32_bits(value):
@@ -60,13 +61,13 @@ FIELDS = {
                        lambda c: _color_space(c).getAllocationVars(),
                        lambda v: [{"f32": _f32_bits(x)} for x in v]),
     "family": ("color_space", "family", "string (load(std::string), as<std::string>)",
-               lambda c: _color_space(c).getFamily(), str),
+               lambda c: _color_space(c).getFamily(), value_out),
     "description": ("color_space", "description",
                     "string (loadDescription: as<std::string>, trailing newlines removed)",
-                    lambda c: _color_space(c).getDescription(), str),
+                    lambda c: _color_space(c).getDescription(), value_out),
     "aliases": ("color_space", "aliases",
                 "string list (as<std::vector<std::string>>), then ColorSpace::addAlias",
-                lambda c: list(_color_space(c).getAliases()), list),
+                lambda c: _color_space(c).getAliases(), value_out),
 }
 
 
@@ -88,24 +89,18 @@ def _yaml(field, spelling):
 
 
 def _read(field, yaml):
-    """Loads the config and reads the field back."""
+    """Loads the config and reads the field back: {"value"}, or {"exception"} or
+    {"undecodable"} (as config_api.call_out reports them), and the log."""
     read, write = FIELDS[field][3:]
-    out = {}
-    with captured_log() as log:
+    with LogCapture() as log:
         try:
-            config = OCIO.Config.CreateFromStream(yaml)
-            out["value"] = write(read(config))
+            out = {"value": write(read(OCIO.Config.CreateFromStream(yaml)))}
+        except UnicodeDecodeError as exc:
+            out = {"undecodable": bytes(exc.object).hex()}
         except REPORTED as exc:
-            out["exception"] = raised(exc)
-    out["log"] = list(log)
+            out = {"exception": raised(exc)}
+        out["log"] = log.take()
     return out
-
-
-def _yaml_out(yaml):
-    try:
-        return yaml.decode("utf-8")
-    except UnicodeDecodeError:
-        return {"bytes": yaml.hex()}
 
 
 @command
@@ -143,12 +138,12 @@ def yaml_scalars(args, blobs):
               base: <spelling>]
       with a line feed after each line; each result gives the exact text.
     result:
-      cases     per case, in order, per spelling: {"yaml": the config's text (or
-                {"bytes": hex} when it isn't UTF-8), "value", "log"} or {"yaml", "exception",
-                "log"}. The value: a bool; [major, minor]; {"f64": bits} or a list of them
-                (doubles); a list of {"f32": bits} (floats); a string; a list of strings. A
-                string the binding can't decode is an exception, UnicodeDecodeError, with its
-                bytes (see config_api)
+      cases     per case, in order, per spelling: {"yaml": the config's text, {"bytes": hex},
+                "value", "log"}, or {"yaml", "exception" or "undecodable", "log"} (as
+                config_api reports them). The value: a bool; [major, minor]; {"f64": bits} or a
+                list of them (doubles); a list of {"f32": bits} (floats); a string,
+                {"bytes": hex}; a list of strings (each as config_api writes a list's elements).
+                The log: [{"bytes": hex}], a message each (config_api.LogCapture)
     blobs: none
 
     An unknown key or field, or a spelling that isn't text or {"bytes": hex}, is refused.
@@ -169,6 +164,6 @@ def yaml_scalars(args, blobs):
         entries = []
         for s, spelling in enumerate(spellings):
             yaml = _yaml(field, text(f"cases[{c}].spellings[{s}]", spelling))
-            entries.append({"yaml": _yaml_out(yaml), **_read(field, yaml)})
+            entries.append({"yaml": {"bytes": yaml.hex()}, **_read(field, yaml)})
         out.append(entries)
     return {"cases": out}, []

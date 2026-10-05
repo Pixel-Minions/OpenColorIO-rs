@@ -9,6 +9,7 @@
 
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle::{BatchCall, Response, f32_to_bytes};
+use ocio_testkit::oracle_values::bytes;
 use serde_json::{Value, json};
 
 /// A config with two color spaces, a display with a view, and a named transform.
@@ -102,8 +103,11 @@ fn each_part_is_its_commands_report() {
     assert_eq!(all["ops"]["processor"], r[1].result["processor"]);
     assert_eq!(all["ops"]["optimized"], r[1].result["optimized"]);
     assert_eq!(
-        all["processor"]["cache_id"],
+        bytes(&all["processor"]["cache_id"]),
         r[1].result["processor"]["cache_id"]
+            .as_str()
+            .unwrap()
+            .as_bytes()
     );
     // cpu_apply
     for (part, single) in all["cpu"].as_array().unwrap().iter().zip(&r[2..4]) {
@@ -175,7 +179,10 @@ fn every_overload_reaches_the_library() {
     let replies = batch(&calls);
     for (a, reply) in args.iter().zip(&replies) {
         let result = &reply.result;
-        assert!(result["processor"]["cache_id"].is_string(), "{a}: {result}");
+        assert!(
+            result["processor"]["cache_id"]["bytes"].is_string(),
+            "{a}: {result}"
+        );
         assert!(result["cpu"][0]["pixels"].is_u64(), "{a}: {result}");
         if a.get("context").is_some() {
             assert_eq!(
@@ -198,6 +205,167 @@ fn every_overload_reaches_the_library() {
     );
 }
 
+/// A config whose file transform takes its LUT from a context variable, with two LUTs.
+fn lut_request(context: Option<Value>, overload: Value) -> Value {
+    let lut =
+        |top: &str| format!("Version 1\nFrom 0.0 1.0\nLength 2\nComponents 1\n{{\n0\n{top}\n}}\n");
+    let mut args = json!({
+        "config": {"yaml": "ocio_profile_version: 2\nsearch_path: .\nroles:\n  default: lin\n\
+            colorspaces:\n  - !<ColorSpace>\n    name: lin\n  - !<ColorSpace>\n    name: lut\n\
+            \x20   from_scene_reference: !<FileTransform> {src: lut_$LUT.spi1d}\n"},
+        "env": {"LUT": "a"},
+        "files": {"lut_a.spi1d": lut("1"), "lut_b.spi1d": lut("0.5")},
+        "overload": overload,
+        "cpu": [{"blob": 0}],
+    });
+    if let Some(context) = context {
+        args["context"] = context;
+    }
+    args
+}
+
+/// The context passed reaches getProcessor: a variable it sets picks another LUT. It is a copy
+/// of the config's current context, which it leaves alone.
+#[test]
+fn the_context_reaches_the_processor() {
+    let input = pixels();
+    let names = json!({"names": ["lin", "lut"]});
+    let set_b = json!({"calls": [{"call": "setStringVar", "args": ["LUT", "b"]}]});
+    let set_a = json!({"calls": [{"call": "setStringVar", "args": ["LUT", "a"]}]});
+    let args = [
+        lut_request(None, names.clone()),
+        lut_request(Some(set_b), names.clone()),
+        lut_request(Some(set_a), names.clone()),
+        lut_request(
+            Some(json!({"base": "new", "calls": [
+            {"call": "setStringVar", "args": ["LUT", "b"]},
+            {"call": "setSearchPath", "args": ["."]}]})),
+            names,
+        ),
+    ];
+    let calls: Vec<BatchCall<'_>> = args
+        .iter()
+        .map(|a| BatchCall {
+            cmd: "config_processor",
+            args: a.clone(),
+            blobs: vec![&input],
+        })
+        .collect();
+    let r = batch(&calls);
+    let pixels_of = |i: usize| {
+        let index = r[i].result["cpu"][0]["pixels"]
+            .as_u64()
+            .unwrap_or_else(|| panic!("{}", r[i].result));
+        let index = usize::try_from(index).unwrap();
+        r[i].blobs[index].clone()
+    };
+    assert_ne!(pixels_of(0), pixels_of(1), "{}", r[1].result);
+    assert_eq!(pixels_of(0), pixels_of(2));
+    assert_eq!(pixels_of(1), pixels_of(3));
+    assert_ne!(
+        r[0].result["processor"]["cache_id"],
+        r[1].result["processor"]["cache_id"]
+    );
+    for reply in &r[1..3] {
+        assert_eq!(
+            reply.result["config_context_cache_id"], r[0].result["config_context_cache_id"],
+            "{}",
+            reply.result
+        );
+    }
+}
+
+/// The direction an overload is given reaches getProcessor.
+#[test]
+fn directions_reach_the_processor() {
+    let input = pixels();
+    let mut args = Vec::new();
+    for dir in ["TRANSFORM_DIR_FORWARD", "TRANSFORM_DIR_INVERSE"] {
+        let exponent = json!({"class": "ExponentTransform", "args": {"value": [2, 2, 2, 1]}});
+        for overload in [
+            json!({"display_view": ["lin", "disp", "view", dir]}),
+            json!({"named_transform": ["nt", dir]}),
+            json!({"named_transform_name": ["nt", dir]}),
+            json!({"transform_direction": [exponent, dir]}),
+        ] {
+            args.push(json!({"config": {"yaml": YAML}, "overload": overload,
+                             "cpu": [{"blob": 0}]}));
+        }
+    }
+    let calls: Vec<BatchCall<'_>> = args
+        .iter()
+        .map(|a| BatchCall {
+            cmd: "config_processor",
+            args: a.clone(),
+            blobs: vec![&input],
+        })
+        .collect();
+    let r = batch(&calls);
+    for i in 0..4 {
+        assert_ne!(
+            r[i].result["processor"]["cache_id"],
+            r[i + 4].result["processor"]["cache_id"],
+            "{}",
+            args[i]
+        );
+    }
+}
+
+/// The optimization flags of the ops and gpu parts reach the optimizer: what they report is
+/// what processor_ops and gpu_shader report with the same flags, and the two settings differ.
+#[test]
+fn optimization_flags_reach_the_parts() {
+    let two = json!({"class": "GroupTransform", "children": [
+        {"class": "MatrixTransform", "args": {"offset": [0.25, 0, 0, 0]}},
+        {"class": "MatrixTransform", "args": {"offset": [0.5, 0, 0, 0]}}]});
+    let mut args = Vec::new();
+    for flags in ["OPTIMIZATION_NONE", "OPTIMIZATION_DEFAULT"] {
+        args.push((
+            "config_processor",
+            json!({
+            "config": "raw", "overload": {"transform": [two]},
+            "ops": {"optimization": flags},
+            "gpu": {"optimization": flags, "shader": {"language": "GPU_LANGUAGE_GLSL_4_0"}}}),
+        ));
+        args.push((
+            "processor_ops",
+            json!({"transform": two, "optimization": flags}),
+        ));
+        args.push((
+            "gpu_shader",
+            json!({"transform": two, "optimization": flags,
+                                        "shader": {"language": "GPU_LANGUAGE_GLSL_4_0"}}),
+        ));
+    }
+    let calls: Vec<BatchCall<'_>> = args
+        .iter()
+        .map(|(cmd, a)| BatchCall {
+            cmd,
+            args: a.clone(),
+            blobs: vec![],
+        })
+        .collect();
+    let r = batch(&calls);
+    for k in [0, 3] {
+        assert_eq!(
+            r[k].result["ops"]["optimized"],
+            r[k + 1].result["optimized"]
+        );
+        assert_eq!(
+            r[k].result["gpu"]["gpu_cache_id"],
+            r[k + 2].result["gpu_cache_id"]
+        );
+    }
+    assert_ne!(
+        r[0].result["ops"]["optimized"],
+        r[3].result["ops"]["optimized"]
+    );
+    assert_ne!(
+        r[0].result["gpu"]["gpu_cache_id"],
+        r[3].result["gpu"]["gpu_cache_id"]
+    );
+}
+
 /// Requests it can't run exactly are refused.
 #[test]
 fn bad_requests_are_refused() {
@@ -216,6 +384,8 @@ fn bad_requests_are_refused() {
         json!({"config": yaml, "overload": {"names": ["lin", "log"]}, "ops": {"x": 1}}),
         json!({"config": yaml, "overload": {"names": ["lin", "log"]},
                "context": {"base": "other"}}),
+        json!({"config": yaml, "overload": {"names": ["lin", "log"]},
+               "context": {"calls": [{"call": "setStringVar", "args": [{"f64": -1}, "x"]}]}}),
         json!({"config": yaml, "overload": {"names": ["lin", "log"]}, "other": 1}),
     ] {
         assert!(
