@@ -509,6 +509,12 @@ pub(crate) fn create_transform(group: &mut GroupTransform, op: &Op) -> Result<()
         OpData::Cdl(_) => create_cdl_transform(group, op),
         OpData::Lut1D(_) => create_lut1d_transform(group, op),
         OpData::FixedFunction(_) => create_fixed_function_transform(group, op),
+        // `CreateGradingRGBCurveTransform` (src/OpenColorIO/ops/gradingrgbcurve/
+        // GradingRGBCurveOp.cpp:219-233 @ v2.5.2) comes with `GradingRGBCurveTransform`
+        // (Phase 3, WP 3.1).
+        OpData::GradingRgbCurve(_) => Err(Exception::new(
+            "CreateGradingRGBCurveTransform is not ported yet (Phase 3).",
+        )),
         // No op holds a reference (the file readers replace it with the file's ops), and the
         // no-op types returned above.
         OpData::Reference(_) | OpData::NoOp(_) => {

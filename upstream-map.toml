@@ -1550,25 +1550,27 @@ status = "done"
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingRGBCurveOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_rgb_curve_op.rs"]
-status = "todo"
+status = "partial"
+note = "p2-rgbcurve 2.6d: the op (as GradingRgbCurveOpData's Op methods) and CreateGradingRGBCurveOp; Phase 3 (3.1): CreateGradingRGBCurveTransform, with GradingRGBCurveTransform"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingRGBCurveOp.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_rgb_curve_op.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingRGBCurveOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_rgb_curve_op_cpu.rs"]
-status = "todo"
+status = "done"
+note = "p2-rgbcurve 2.6d: the four renderers and their SSE2 LinLog/LogLin; alpha as I-90 says"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingRGBCurveOpCPU.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_rgb_curve_op_cpu.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingRGBCurveOpData.cpp"
@@ -4784,7 +4786,7 @@ status = "done"
 path = "tests/cpu/ops/gradingrgbcurve/GradingRGBCurveOpCPU_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_rgb_curve_op_cpu_tests.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "tests/cpu/ops/gradingrgbcurve/GradingRGBCurveOpData_tests.cpp"
@@ -4796,7 +4798,8 @@ status = "done"
 path = "tests/cpu/ops/gradingrgbcurve/GradingRGBCurveOp_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_rgb_curve_op_tests.rs"]
-status = "todo"
+status = "partial"
+note = "p2-rgbcurve 2.6d: create; Phase 3 (3.1): create_transform and build_ops, which need GradingRGBCurveTransform"
 
 [[file]]
 path = "tests/cpu/ops/gradingrgbcurve/GradingRGBCurve_tests.cpp"

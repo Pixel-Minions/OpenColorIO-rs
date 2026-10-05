@@ -769,6 +769,26 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   machine code; the wheel can't be given NaNs of opposite signs until the specs carry a
   double's bits, so no oracle test checks them yet.
 
+### I-90. A linear-style RGB curve changes alpha when it isn't the first op
+
+- **Upstream:** the linear style's renderers (`GradingRGBCurveLinearFwdOpCPU`,
+  `GradingRGBCurveLinearRevOpCPU`, `ops/gradingrgbcurve/GradingRGBCurveOpCPU.cpp:237-347`)
+  convert all four lanes to the grading log and back with the SSE2 `LinLog` and `LogLin`
+  (179-235), then restore alpha with `out[3] = in[3]`. That restores it only when the
+  renderer reads one buffer and writes another, as the CPU processor's first op does from a
+  packed F32 image (`ScanlineHelper.cpp:130-137`). Every other op of a chain, and every op of
+  `applyRGB`/`applyRGBA` and of an image processed in place, renders in place
+  (`CPUProcessor.cpp:400`), where `in[3]` is the converted alpha: alpha comes out as
+  `LogLin(LinLog(alpha))`, which isn't always alpha (the approximations round, and a
+  signalling NaN comes out quiet).
+- **Who notices:** anyone whose alpha goes through a GradingRGBCurveTransform of the linear
+  style that isn't the first op of the processor, or is applied in place.
+- **A fix:** leave alpha alone in the renderers, as the GPU shaders do.
+- **Status:** matched in `p2-rgbcurve` (2.6d): `grading_rgb_curve_op_cpu.rs` converts alpha
+  in `CpuOp::apply` and restores it in `CpuOp::apply_bit_depth`; the battery checks the first
+  op's alpha against the wheel, and `in_place_the_linear_style_converts_alpha`
+  (`crates/ocio-ops/tests/grading_rgb_curve_oracle.rs`) the alpha of `applyRGBA` in place.
+
 ### I-91. The RGB curves' NaNs differ between Windows and Linux
 
 - **Upstream:** `KnotsCoefs::evalCurve` and `evalCurveRev`

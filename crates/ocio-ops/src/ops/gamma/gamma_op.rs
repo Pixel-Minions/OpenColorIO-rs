@@ -55,6 +55,7 @@ impl GammaOpData {
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
+            | OpData::GradingRgbCurve(_)
             | OpData::Reference(_)
             | OpData::NoOp(_) => false,
         }
@@ -74,6 +75,7 @@ impl GammaOpData {
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
+            | OpData::GradingRgbCurve(_)
             | OpData::Reference(_)
             | OpData::NoOp(_) => false,
         }

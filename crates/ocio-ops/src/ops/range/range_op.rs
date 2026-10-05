@@ -90,6 +90,7 @@ impl RangeOpData {
             | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Exponent(_)
+            | OpData::GradingRgbCurve(_)
             | OpData::Matrix(_)
             | OpData::Reference(_)
             | OpData::NoOp(_) => Ok(false),
@@ -125,6 +126,7 @@ impl RangeOpData {
             | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Exponent(_)
+            | OpData::GradingRgbCurve(_)
             | OpData::Matrix(_)
             | OpData::Reference(_)
             | OpData::NoOp(_) => {
