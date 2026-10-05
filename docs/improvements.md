@@ -729,7 +729,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 - **Upstream:** `FixedFunctionOpData::ConvertStyle(FixedFunctionStyle, TransformDirection)` gives
   the forward op style of `FIXED_FUNCTION_RGB_TO_HSV`, `XYZ_TO_xyY`, `XYZ_TO_uvY` and
-  `XYZ_TO_LUV` whatever the direction (`ops/fixedfunction/FixedFunctionOpData.cpp:433-436, 450-463`),
+  `XYZ_TO_LUV` whatever the direction (`ops/fixedfunction/FixedFunctionOpData.cpp:433-436, 452-463`),
   where every other style takes the inverse op style in the inverse direction.
   `FixedFunctionTransform::setStyle` converts the style in the transform's current direction
   (`transforms/FixedFunctionTransform.cpp:122-126`), so setting one of these styles on an
@@ -772,7 +772,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `13 * L* * (u - u'n)` as `(u - u'n) * (13 * L*)`), which only matters to the port.
 - **Who notices:** images whose pixels have NaNs of different signs or payloads in two or
   more channels, through these styles: the output NaN's sign and payload differ between
-  Windows and Linux.
+  Windows and Linux. For example, through a glow, a pixel with a NaN A in green, a NaN B in
+  blue and a finite red comes out with A in red and blue on Windows, B on Linux.
 - **A fix:** one operand order for both platforms.
 - **Status:** matched in `p2-ff-cpu` (the glows, 2.3b) and `p2-ff-cpu-2` (2.3c1, the HSYs in
   2.3c2), each wheel's order per platform (`cfg(target_os)`). The battery's NaN buffers and
@@ -1334,7 +1335,7 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 
 - **Upstream:** `FixedFunctionOpData::GetStyle` refuses a null or empty name with "Unknown
   FixedFunction style: " followed by the name, appending the `const char *` to a `std::string`
-  (`ops/fixedfunction/FixedFunctionOpData.cpp:194-376`). For a null pointer that is undefined
+  (`ops/fixedfunction/FixedFunctionOpData.cpp:189-368`). For a null pointer that is undefined
   behaviour. The CTF reader calls it with an attribute's value, which is never null.
 - **Decided** (general rule): `FixedFunctionOpStyle::from_name(None)` refuses it as an empty
   name: "Unknown FixedFunction style: ".
@@ -1343,9 +1344,9 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 ### U-31. Queries of a FixedFunction op whose style has too few parameters
 
 - **Upstream:** the setters take any number of parameters, and only `validate` checks how many
-  the style takes (`ops/fixedfunction/FixedFunctionOpData.cpp:617-842`). Before that,
+  the style takes (`ops/fixedfunction/FixedFunctionOpData.cpp:617-840`). Before that,
   `isInverse` of two Rec.2100 surrounds of the same style reads both first parameters without
-  a check (`FixedFunctionOpData.cpp:844-856`), and these renderers read their parameters
+  a check (`FixedFunctionOpData.cpp:842-854`), and these renderers read their parameters
   without one: the ACES 1.3 gamut compression's seven
   (`ops/fixedfunction/FixedFunctionOpCPU.cpp:984-1002`), the Rec.2100 surround's one
   (`FixedFunctionOpCPU.cpp:1406-1417`), the gamma-log's ten and the double-log's 13

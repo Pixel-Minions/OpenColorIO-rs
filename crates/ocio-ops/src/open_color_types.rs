@@ -257,8 +257,8 @@ pub enum FixedFunctionStyle {
 }
 
 /// The error for the two styles upstream doesn't implement, `FIXED_FUNCTION_ACES_GAMUTMAP_02`
-/// and `_07` (src/OpenColorIO/ParseUtils.cpp:377-381, ops/fixedfunction/FixedFunctionOpData.cpp:
-/// 500-506 @ v2.5.2).
+/// and `_07` (src/OpenColorIO/ParseUtils.cpp:379-383, ops/fixedfunction/FixedFunctionOpData.cpp:
+/// 464-470 @ v2.5.2).
 pub const UNIMPLEMENTED_GAMUTMAP: &str = "Unimplemented fixed function types: \
      FIXED_FUNCTION_ACES_GAMUTMAP_02, FIXED_FUNCTION_ACES_GAMUTMAP_07.";
 
