@@ -46,7 +46,7 @@ fn matrix_repr(values: &[f64]) -> String {
         os.put_f64(v);
     }
     os.put_str("]>");
-    os.into_string()
+    os.into_string_lossy()
 }
 
 /// Port of `operator<<(std::ostream &, const ExponentTransform &)` (ExponentTransform.cpp:
@@ -63,7 +63,7 @@ fn exponent_repr(values: &[f64]) -> String {
     }
     os.put_str("], style=clamp");
     os.put_str(">");
-    os.into_string()
+    os.into_string_lossy()
 }
 
 /// Port of `operator<<(std::ostream &, const AllocationTransform &)` (AllocationTransform.cpp:
@@ -80,7 +80,7 @@ fn allocation_repr(vars: &[f32]) -> String {
         os.put_f32(v);
     }
     os.put_str(">");
-    os.into_string()
+    os.into_string_lossy()
 }
 
 /// Every NaN and infinity spelling, signed zeros, subnormals and extremes.

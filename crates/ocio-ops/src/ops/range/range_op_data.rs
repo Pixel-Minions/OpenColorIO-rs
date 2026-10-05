@@ -365,7 +365,7 @@ impl RangeOpData {
         os.put_f64(self.max_out_value);
         os.put_str("]");
 
-        cache_id.extend_from_slice(os.str().as_bytes());
+        cache_id.extend_from_slice(os.str());
         cache_id
     }
 

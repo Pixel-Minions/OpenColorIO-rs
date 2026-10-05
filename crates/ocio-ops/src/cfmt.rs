@@ -27,8 +27,10 @@
 //!   loses a digit when rounding carries into a new power of ten (`%#.2g` of 99.5 is
 //!   `1.e+02`, not `1.0e+02`);
 //! - `std::showpos` (which C++ ignores for unsigned values);
-//! - `%a`;
-//! - padding text that is not ASCII (C++ counts bytes; a fill is one byte).
+//! - `%a`.
+//!
+//! A stream's text is bytes, as a C++ `std::string`'s: names, paths and config text that are
+//! not UTF-8 pass through it unchanged, and padding counts bytes with a one-byte fill.
 //!
 //! The conversion here is exact by construction: a finite binary value `m * 2^e` is expanded
 //! to all of its decimal digits with integer arithmetic (`m << e`, or `m * 5^-e` scaled by
@@ -583,14 +585,18 @@ pub enum Base {
 }
 
 /// A `std::ostringstream` imbued with the classic ("C") locale, as OCIO creates them, limited
-/// to the operations OCIO uses: numbers and strings, with precision, `floatfield`,
+/// to the operations OCIO uses: numbers, characters and strings, with precision, `floatfield`,
 /// `uppercase`, `basefield`, `showbase`, width, fill and `adjustfield`. Width resets to 0
 /// after every insertion, as in C++. `showpoint` and `showpos` are left out (see the module
-/// documentation), and only ASCII text is padded.
+/// documentation).
+///
+/// The text is bytes, as a C++ `std::string` holds it: [`put_bytes`](Self::put_bytes) and
+/// [`put_c_str`](Self::put_c_str) insert names and paths that need not be UTF-8, and
+/// [`str`](Self::str) returns them unchanged.
 #[derive(Debug, Clone)]
 pub struct OStringStream {
     crt: Crt,
-    buf: String,
+    buf: Vec<u8>,
     /// `precision()`; a new stream has 6.
     pub precision: i64,
     /// The `floatfield` flags.
@@ -603,8 +609,8 @@ pub struct OStringStream {
     pub showbase: bool,
     /// `width()`: applies to the next insertion only.
     pub width: i64,
-    /// `fill()`, a C++ `char`; a new stream has `' '`. Only ASCII fills are supported.
-    pub fill: char,
+    /// `fill()`, a C++ `char`; a new stream has `' '`.
+    pub fill: u8,
     /// The `adjustfield` flags.
     pub adjust: Adjust,
 }
@@ -614,20 +620,20 @@ impl OStringStream {
     pub fn new(crt: Crt) -> OStringStream {
         OStringStream {
             crt,
-            buf: String::new(),
+            buf: Vec::new(),
             precision: 6,
             float_field: FloatField::Default,
             uppercase: false,
             base: Base::Dec,
             showbase: false,
             width: 0,
-            fill: ' ',
+            fill: b' ',
             adjust: Adjust::Right,
         }
     }
 
-    /// `str()`: the text written so far.
-    pub fn str(&self) -> &str {
+    /// `str()`: the bytes written so far.
+    pub fn str(&self) -> &[u8] {
         &self.buf
     }
 
@@ -636,37 +642,48 @@ impl OStringStream {
         self.buf.clear();
     }
 
-    /// Consumes the stream, returning its text.
-    pub fn into_string(self) -> String {
+    /// Consumes the stream, returning its bytes.
+    pub fn into_bytes(self) -> Vec<u8> {
         self.buf
     }
 
+    /// The bytes written so far as text, each byte sequence that isn't UTF-8 replaced by
+    /// U+FFFD: for Rust's `Display`, which can only write text.
+    pub fn to_string_lossy(&self) -> std::borrow::Cow<'_, str> {
+        String::from_utf8_lossy(&self.buf)
+    }
+
+    /// Consumes the stream, returning its bytes as text as
+    /// [`to_string_lossy`](Self::to_string_lossy) does: for text made of numbers and literals
+    /// only, which is UTF-8 and comes back unchanged. Text that may hold names or paths uses
+    /// [`into_bytes`](Self::into_bytes).
+    pub fn into_string_lossy(self) -> String {
+        match String::from_utf8(self.buf) {
+            Ok(text) => text,
+            Err(e) => String::from_utf8_lossy(e.as_bytes()).into_owned(),
+        }
+    }
+
     /// Appends `text` padded to `width()` (the stream's `_M_pad` / `_Rep`), with the fill
-    /// inserted after `prefix_len` bytes for `std::internal`; then resets the width.
-    ///
-    /// C++ counts `char`s, i.e. bytes. OCIO pads only numbers and ASCII words (`nan`, `inf`)
-    /// with ASCII fills, so padding anything else is refused rather than modeled.
-    fn put_padded(&mut self, text: &str, prefix_len: usize) {
+    /// inserted after `prefix_len` bytes for `std::internal`; then resets the width. C++
+    /// counts `char`s, i.e. bytes, and the fill is one `char`.
+    fn put_padded(&mut self, text: &[u8], prefix_len: usize) {
         let width = usize::try_from(self.width).unwrap_or(0);
         let pad = width.saturating_sub(text.len());
-        assert!(
-            pad == 0 || (text.is_ascii() && self.fill.is_ascii()),
-            "OStringStream pads ASCII text with an ASCII fill only"
-        );
         let fill = std::iter::repeat_n(self.fill, pad);
         match self.adjust {
             Adjust::Left => {
-                self.buf.push_str(text);
+                self.buf.extend_from_slice(text);
                 self.buf.extend(fill);
             }
             Adjust::Internal => {
-                self.buf.push_str(&text[..prefix_len]);
+                self.buf.extend_from_slice(&text[..prefix_len]);
                 self.buf.extend(fill);
-                self.buf.push_str(&text[prefix_len..]);
+                self.buf.extend_from_slice(&text[prefix_len..]);
             }
             Adjust::Right => {
                 self.buf.extend(fill);
-                self.buf.push_str(text);
+                self.buf.extend_from_slice(text);
             }
         }
         self.width = 0;
@@ -691,7 +708,7 @@ impl OStringStream {
         let precision = usize::try_from(self.precision).unwrap_or(6);
         let text = sprintf(self.crt, &Spec::new(conv, precision), value);
         let prefix = usize::from(text.starts_with('-'));
-        self.put_padded(&text, prefix);
+        self.put_padded(text.as_bytes(), prefix);
     }
 
     /// `os << value` for a `float`: promoted to `double` by both libraries.
@@ -714,7 +731,7 @@ impl OStringStream {
             Base::Oct if self.showbase && value != 0 => ("0", 0),
             _ => ("", 0),
         };
-        self.put_padded(&format!("{prefix}{text}"), prefix_len);
+        self.put_padded(format!("{prefix}{text}").as_bytes(), prefix_len);
     }
 
     /// `os << value` for a signed integer of `bits` bits (hex and octal print the two's
@@ -723,7 +740,7 @@ impl OStringStream {
         if self.base == Base::Dec {
             let text = value.to_string();
             let prefix = usize::from(text.starts_with('-'));
-            self.put_padded(&text, prefix);
+            self.put_padded(text.as_bytes(), prefix);
         } else {
             let mask = if bits == 64 {
                 u64::MAX
@@ -749,9 +766,28 @@ impl OStringStream {
         self.put_u64(u64::from(value));
     }
 
-    /// `os << text` for a string: padded to the width, which then resets.
+    /// `os << text` for a string literal or other UTF-8 text: its bytes, as
+    /// [`put_bytes`](Self::put_bytes).
     pub fn put_str(&mut self, text: &str) {
+        self.put_bytes(text.as_bytes());
+    }
+
+    /// `os << s` for a `std::string`: all of its bytes, padded to the width, which then
+    /// resets.
+    pub fn put_bytes(&mut self, text: &[u8]) {
         self.put_padded(text, 0);
+    }
+
+    /// `os << s` for a `const char *`: its bytes up to the first NUL (all of them when there
+    /// is none), padded to the width, which then resets.
+    pub fn put_c_str(&mut self, text: &[u8]) {
+        let end = text.iter().position(|&c| c == 0).unwrap_or(text.len());
+        self.put_padded(&text[..end], 0);
+    }
+
+    /// `os << c` for a `char`: one byte, padded to the width, which then resets.
+    pub fn put_char(&mut self, c: u8) {
+        self.put_padded(&[c], 0);
     }
 }
 
@@ -827,22 +863,5 @@ mod tests {
         assert!(Spec::parse("x%g").is_none());
         assert!(Spec::parse("%#g").is_none());
         assert!(Spec::parse("%-#012.7e").is_none());
-    }
-
-    #[test]
-    #[should_panic(expected = "pads ASCII text with an ASCII fill only")]
-    fn padding_text_that_is_not_ascii_is_refused() {
-        let mut os = OStringStream::new(Crt::NATIVE);
-        os.width = 6;
-        os.put_str("\u{e9}");
-    }
-
-    #[test]
-    fn text_that_is_not_ascii_passes_unpadded() {
-        // Two bytes reach a width of 2, as C++ counts them: nothing to pad.
-        let mut os = OStringStream::new(Crt::NATIVE);
-        os.width = 2;
-        os.put_str("\u{e9}");
-        assert_eq!(os.str(), "\u{e9}");
     }
 }

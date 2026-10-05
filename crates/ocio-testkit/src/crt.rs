@@ -144,6 +144,7 @@ enum ArgKind {
     Double,
     LongLong,
     UnsignedLongLong,
+    CString,
 }
 
 /// Checks that `format` has exactly one conversion (plus any number of `%%`), with no `*`
@@ -190,6 +191,7 @@ fn check_format(format: &str) -> ArgKind {
             (b'e' | b'E' | b'f' | b'F' | b'g' | b'G' | b'a' | b'A', false) => ArgKind::Double,
             (b'd' | b'i', true) => ArgKind::LongLong,
             (b'u' | b'x' | b'X' | b'o', true) => ArgKind::UnsignedLongLong,
+            (b's', false) => ArgKind::CString,
             _ => panic!("unsupported conversion in {format:?}"),
         };
         assert!(kind.is_none(), "more than one conversion in {format:?}");
@@ -211,6 +213,14 @@ fn snprintf_with(
     format: &str,
     call: impl Fn(*mut c_char, usize, *const c_char) -> c_int,
 ) -> String {
+    String::from_utf8(snprintf_bytes(format, call)).expect("printf output is ASCII")
+}
+
+/// Formats with `snprintf` into bytes, growing the buffer until the output fits.
+fn snprintf_bytes(
+    format: &str,
+    call: impl Fn(*mut c_char, usize, *const c_char) -> c_int,
+) -> Vec<u8> {
     let fmt = c_string(format);
     let mut buf = vec![0u8; 64];
     loop {
@@ -218,7 +228,7 @@ fn snprintf_with(
         let n = usize::try_from(n).unwrap_or_else(|_| panic!("snprintf({format:?}) failed"));
         if n < buf.len() {
             buf.truncate(n);
-            return String::from_utf8(buf).expect("printf output is ASCII");
+            return buf;
         }
         buf = vec![0u8; n + 1];
     }
@@ -254,6 +264,20 @@ pub fn format_u64(format: &str, value: u64) -> String {
     snprintf_with(format, |buf, size, fmt| {
         // SAFETY: as in `format_f64`, for one unsigned long long (`u64`).
         unsafe { ffi::snprintf(buf, size, fmt, value) }
+    })
+}
+
+/// `snprintf` for a format with one `%s` conversion, whose argument is `text` up to its first
+/// NUL (a C string): the bytes printf writes, which need not be UTF-8.
+pub fn format_c_str(format: &str, text: &[u8]) -> Vec<u8> {
+    assert_eq!(check_format(format), ArgKind::CString, "{format:?}");
+    let end = text.iter().position(|&c| c == 0).unwrap_or(text.len());
+    let mut arg = text[..end].to_vec();
+    arg.push(0);
+    snprintf_bytes(format, |buf, size, fmt| {
+        // SAFETY: as in `format_f64`, for one `const char *`: `arg` is NUL-terminated and
+        // outlives the call.
+        unsafe { ffi::snprintf(buf, size, fmt, arg.as_ptr().cast::<c_char>()) }
     })
 }
 

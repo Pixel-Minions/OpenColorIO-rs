@@ -298,13 +298,22 @@ impl fmt::Display for Transform {
     /// Transform.cpp:177-308 @ v2.5.2). Its "Unknown transform type for serialization" can't
     /// happen with an enum.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut os = OStringStream::new(Crt::NATIVE);
-        self.write_text(&mut os);
-        f.write_str(os.str())
+        f.write_str(&String::from_utf8_lossy(&self.to_bytes()))
     }
 }
 
 impl Transform {
+    /// The transform's text, as its class prints it, in bytes: names and paths in it pass
+    /// through unchanged, where `Display` replaces what isn't UTF-8.
+    ///
+    /// Port of `operator<<(std::ostream &, const Transform &)` (src/OpenColorIO/
+    /// Transform.cpp:177-308 @ v2.5.2), on a new stream.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut os = OStringStream::new(Crt::NATIVE);
+        self.write_text(&mut os);
+        os.into_bytes()
+    }
+
     /// Writes the transform's text to `os`, a stream that a group shares with its children:
     /// what a class changes in its state stays for what follows (a MatrixTransform's precision,
     /// docs/improvements.md, I-73).

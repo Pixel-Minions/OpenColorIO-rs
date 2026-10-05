@@ -90,7 +90,7 @@ fn validate_params(params: &Params, _direction: TransformDirection) -> Result<()
         oss.put_str(before);
         oss.put_f64(value);
         oss.put_str(after);
-        Exception::new(oss.into_string())
+        Exception::new(oss.into_bytes())
     };
     if is_scalar_equal_to_zero(params[LIN_SIDE_SLOPE]) {
         return Err(message(
@@ -450,7 +450,7 @@ impl LogOpData {
             oss.put_str("Log: Invalid base value '");
             oss.put_f64(self.base);
             oss.put_str(after);
-            Exception::new(oss.into_string())
+            Exception::new(oss.into_bytes())
         };
         if self.base == 1.0 {
             return Err(message("', base cannot be 1."));
@@ -659,7 +659,7 @@ impl LogOpData {
                 "Log: accessing parameter that does not exist.",
             ));
         }
-        Ok(o.into_string())
+        Ok(o.into_string_lossy())
     }
 
     /// Port of `LogOpData::getBaseString` (src/OpenColorIO/ops/log/LogOpData.cpp:416-422 @
@@ -668,7 +668,7 @@ impl LogOpData {
         let mut o = OStringStream::new(Crt::NATIVE);
         o.precision = precision;
         o.put_f64(self.base);
-        o.into_string()
+        o.into_string_lossy()
     }
 
     /// Port of `LogOpData::getLogSlopeString` (src/OpenColorIO/ops/log/LogOpData.cpp:424-427 @

@@ -942,7 +942,7 @@ impl Emitter {
             };
             stream.put_u64(value as u64 & mask);
         }
-        self.stream.write_str(stream.str());
+        self.stream.write_bytes(stream.str());
 
         self.started_scalar();
         self
@@ -971,7 +971,7 @@ impl Emitter {
         } else {
             stream.put_f64(value);
         }
-        self.stream.write_str(stream.str());
+        self.stream.write_bytes(stream.str());
 
         self.started_scalar();
     }

@@ -95,7 +95,7 @@ impl ExponentOpData {
             cache_id_stream.put_f64(value);
             cache_id_stream.put_str(" ");
         }
-        out.extend_from_slice(cache_id_stream.str().as_bytes());
+        out.extend_from_slice(cache_id_stream.str());
         out
     }
 
