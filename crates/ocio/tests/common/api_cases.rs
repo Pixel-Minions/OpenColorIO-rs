@@ -1172,6 +1172,30 @@ pub(crate) fn fixed_function() -> Cases {
     );
     bases.push(double_log.clone());
     cases.push(double_log);
+    // ACES 2.0, as upstream's tests run it (tests/cpu/ops/fixedfunction/
+    // FixedFunctionOpCPU_tests.cpp @ v2.5.2): the output transform and the gamut compression to
+    // P3-D65 at 1000 nits, the tone scale at 1000 nits, RGB to JMh of AP0 (773). Not bases: a
+    // NaN primary makes the wheel's hue table code write past its arrays (U-32).
+    let p3_d65_1000 = [
+        1000.0, 0.680, 0.320, 0.265, 0.690, 0.150, 0.060, 0.3127, 0.3290,
+    ];
+    let ap0 = [
+        0.7347, 0.2653, 0.0000, 1.0000, 0.0001, -0.0770, 0.32168, 0.33767,
+    ];
+    for (style, params) in [
+        ("FIXED_FUNCTION_ACES_OUTPUT_TRANSFORM_20", &p3_d65_1000[..]),
+        ("FIXED_FUNCTION_ACES_GAMUT_COMPRESS_20", &p3_d65_1000[..]),
+        (
+            "FIXED_FUNCTION_ACES_TONESCALE_COMPRESS_20",
+            &p3_d65_1000[..1],
+        ),
+        ("FIXED_FUNCTION_ACES_RGB_TO_JMH_20", &ap0[..]),
+    ] {
+        cases.push(Case::new(
+            style.trim_start_matches("FIXED_FUNCTION_"),
+            fixed_function_calls(style, params),
+        ));
+    }
     let mut nan = GAMUT_COMP_13;
     nan[6] = f64::NAN;
     cases.push(Case::new(
