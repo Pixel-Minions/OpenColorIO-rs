@@ -165,7 +165,8 @@ note = "p3-model-objects (3.4a): the class and its operator<<; BoolToString (Par
 path = "src/OpenColorIO/ColorSpaceSet.cpp"
 kind = "src"
 target = ["crates/ocio/src/color_space_set.rs"]
-status = "todo"
+status = "done"
+note = "p3-model-objects (3.4b): the class and the operators ||, && and - (ColorSpaceSet::union, intersection, difference)"
 
 [[file]]
 path = "src/OpenColorIO/Config.cpp"
@@ -372,19 +373,22 @@ note = "see Logging.cpp"
 path = "src/OpenColorIO/Look.cpp"
 kind = "src"
 target = ["crates/ocio/src/look.rs"]
-status = "todo"
+status = "partial"
+note = "p3-model-objects (3.4b): the class and its operator<< (U-50); CollectContextVariables (198-271) comes with 3.2b"
 
 [[file]]
 path = "src/OpenColorIO/LookParse.cpp"
 kind = "src"
 target = ["crates/ocio/src/look_parse.rs"]
-status = "todo"
+status = "done"
+note = "p3-model-objects (3.4b); it splits with ocio_ops::parse_utils::split_string_env_style (p3-context 3.5c)"
 
 [[file]]
 path = "src/OpenColorIO/LookParse.h"
 kind = "src"
 target = ["crates/ocio/src/look_parse.rs"]
-status = "todo"
+status = "done"
+note = "p3-model-objects (3.4b)"
 
 [[file]]
 path = "src/OpenColorIO/LutLimits.h"
@@ -4194,6 +4198,7 @@ path = "tests/cpu/ColorSpaceSet_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/color_space_set_tests.rs"]
 status = "todo"
+note = "all 4 tests build their sets with Config::getColorSpaces and addColorSpace: they move to p3-config-1 (3.4f). p3-model-objects (3.4b) tests the class on its own in color_space_set_tests.rs"
 
 [[file]]
 path = "tests/cpu/ColorSpace_tests.cpp"
@@ -4277,7 +4282,8 @@ status = "done"
 path = "tests/cpu/LookParse_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/look_parse_tests.rs"]
-status = "todo"
+status = "done"
+note = "p3-model-objects (3.4b)"
 
 [[file]]
 path = "tests/cpu/MathUtils_tests.cpp"

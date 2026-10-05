@@ -7,10 +7,13 @@
 
 pub mod caching;
 pub mod color_space;
+pub mod color_space_set;
 pub mod config;
 pub mod config_io_proxy;
 pub mod context;
 pub mod context_variable_utils;
+pub mod look;
+pub(crate) mod look_parse;
 pub mod path_utils;
 pub mod processor;
 pub(crate) mod tokens_manager;
@@ -22,8 +25,10 @@ pub mod yaml_cpp;
 mod test_env;
 
 pub use color_space::ColorSpace;
+pub use color_space_set::ColorSpaceSet;
 pub use config::Config;
 pub use context::Context;
+pub use look::Look;
 pub use ocio_ops::exception::{Exception, ExceptionKind, Result};
 pub use ocio_ops::format_metadata::FormatMetadataImpl as FormatMetadata;
 pub use ocio_ops::open_color_types::{

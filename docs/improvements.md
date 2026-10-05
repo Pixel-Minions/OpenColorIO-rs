@@ -1564,3 +1564,15 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Status:** p3-context, the fix chunk after the verifier's review (`crates/ocio-ops/src/
   platform.rs`, `put`); checked against the wheel, whose process ends, in
   `crates/ocio/tests/env_oracle.rs`.
+
+### U-50. A look's transform set to null
+
+- **Upstream:** `Look::setTransform` and `Look::setInverseTransform` call
+  `transform->createEditableCopy()` without checking the pointer (`Look.cpp:116-129`), so a
+  null transform dereferences null. Through the wheel, `Look().setTransform(None)` ends the
+  Python process with a segmentation fault (exit 139), on Windows too. The color space's, view
+  transform's and named transform's setters check for null and remove the transform instead.
+- **Who notices:** code and Python scripts that clear a look's transform by setting it to null.
+- **Decided** (general rule): the Rust setters take a `&Transform`, which can't be null; the
+  Python module (Phase 6) refuses `None` with an error instead of crashing.
+- **Status:** matched in `p3-model-objects` (3.4b, `look.rs`); the Python part is Phase 6's.
