@@ -423,3 +423,94 @@ fn gamut_comp_13_shaders_match_the_wheel() {
     }
     check(&cases);
 }
+
+/// The Rec.2100 surround, RGB to and from HSV and the three HSYs, and XYZ to and from xyY,
+/// u'v'Y and CIELUV (chunk 2.3g1): the transform's name, the op's forward style and the
+/// parameters (upstream's tests' surround gammas, tests/cpu/ops/fixedfunction/
+/// FixedFunctionOpCPU_tests.cpp:996, 1030 @ v2.5.2).
+const G1_STYLES: [(&str, FixedFunctionOpStyle, &[f64]); 9] = [
+    (
+        "FIXED_FUNCTION_REC2100_SURROUND",
+        FixedFunctionOpStyle::Rec2100SurroundFwd,
+        &[0.78],
+    ),
+    (
+        "FIXED_FUNCTION_REC2100_SURROUND",
+        FixedFunctionOpStyle::Rec2100SurroundFwd,
+        &[1.2],
+    ),
+    (
+        "FIXED_FUNCTION_RGB_TO_HSV",
+        FixedFunctionOpStyle::RgbToHsv,
+        &[],
+    ),
+    (
+        "FIXED_FUNCTION_RGB_TO_HSY_LIN",
+        FixedFunctionOpStyle::RgbToHsyLin,
+        &[],
+    ),
+    (
+        "FIXED_FUNCTION_RGB_TO_HSY_LOG",
+        FixedFunctionOpStyle::RgbToHsyLog,
+        &[],
+    ),
+    (
+        "FIXED_FUNCTION_RGB_TO_HSY_VID",
+        FixedFunctionOpStyle::RgbToHsyVid,
+        &[],
+    ),
+    (
+        "FIXED_FUNCTION_XYZ_TO_xyY",
+        FixedFunctionOpStyle::XyzToXyy,
+        &[],
+    ),
+    (
+        "FIXED_FUNCTION_XYZ_TO_uvY",
+        FixedFunctionOpStyle::XyzToUvy,
+        &[],
+    ),
+    (
+        "FIXED_FUNCTION_XYZ_TO_LUV",
+        FixedFunctionOpStyle::XyzToLuv,
+        &[],
+    ),
+];
+
+/// Every style of [`G1_STYLES`] forward and inverse, at every level, in every language; a
+/// surround and its inverse, which the optimizer removes; other names.
+#[test]
+fn surround_hsv_hsy_and_cie_shaders_match_the_wheel() {
+    let fixed = |i: usize, dir| {
+        let (name, style, params) = G1_STYLES[i];
+        T::Fixed(name, style, params.to_vec(), dir)
+    };
+    let mut cases = Vec::new();
+    for (i, (name, _, params)) in G1_STYLES.iter().enumerate() {
+        for dir in [F, I] {
+            cases.extend(cases_of(
+                &format!("{name} {params:?} {dir:?}"),
+                vec![fixed(i, dir)],
+                &levels(),
+                Names::default(),
+            ));
+        }
+    }
+    cases.extend(cases_of(
+        "surround and its inverse",
+        vec![fixed(0, F), fixed(0, I)],
+        &levels(),
+        Names::default(),
+    ));
+    for i in 0..G1_STYLES.len() {
+        cases.extend(cases_of(
+            "names",
+            vec![fixed(i, I)],
+            &levels()[1..2],
+            Names {
+                pixel: Some("px"),
+                prefix: Some("p__q"),
+            },
+        ));
+    }
+    check(&cases);
+}
