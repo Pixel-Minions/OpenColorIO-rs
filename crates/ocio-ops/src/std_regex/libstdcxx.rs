@@ -303,8 +303,6 @@ impl ByteSet {
 
 /// A node of the parsed expression.
 #[derive(Debug, Clone)]
-// The matcher (the next chunk of p3-regex) reads the fields.
-#[allow(dead_code)]
 pub(super) enum Node {
     /// Nothing: an empty alternative.
     Empty,
@@ -357,8 +355,6 @@ pub(super) enum RepeatForm {
 
 /// A compiled expression: the tree, and the number of capture groups (group 0 included).
 #[derive(Debug, Clone)]
-// The matcher (the next chunk of p3-regex) reads the tree.
-#[allow(dead_code)]
 pub struct Program {
     pub(super) root: Node,
     pub(super) groups: usize,
