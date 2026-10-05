@@ -688,3 +688,40 @@ fn double_log_break_points_match_the_wheel() {
     }
     check(&cases);
 }
+
+/// The gamma-log inverse's break and mirror in the gamma segment, `slope * pow(point + off,
+/// power)` in double (FixedFunctionOpGPU.cpp:2055-2056 @ v2.5.2), where `point + off` is
+/// negative and the power not an integer.
+#[test]
+fn gamma_log_negative_gamma_bases_match_the_wheel() {
+    let mut cases = Vec::new();
+    for (label, params) in [
+        (
+            "both negative",
+            [0.0, 0.25, 0.5, 1.0, -1.0, 2.5, 0.2, 0.8, 1.0, -0.07],
+        ),
+        (
+            "mirror negative",
+            [-0.5, 0.25, 2.4, 1.1, 0.125, 10.0, 0.3, 0.7, 2.0, 0.5],
+        ),
+        (
+            "negative, integer power",
+            [-0.5, 0.25, 3.0, 1.1, -0.375, 10.0, 0.3, 0.7, 2.0, 0.5],
+        ),
+    ] {
+        for dir in [F, I] {
+            cases.extend(cases_of(
+                &format!("gamma log, {label} {dir:?}"),
+                vec![T::Fixed(
+                    "FIXED_FUNCTION_LIN_TO_GAMMA_LOG",
+                    FixedFunctionOpStyle::LinToGammaLog,
+                    params.to_vec(),
+                    dir,
+                )],
+                &levels()[0..2],
+                Names::default(),
+            ));
+        }
+    }
+    check(&cases);
+}
