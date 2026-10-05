@@ -514,3 +514,7 @@ pub(crate) fn create_transform(group: &mut GroupTransform, op: &Op) -> Result<()
         }
     }
 }
+
+#[cfg(test)]
+#[path = "transform_tests.rs"]
+mod tests;
