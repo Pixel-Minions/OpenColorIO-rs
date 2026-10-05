@@ -14,15 +14,30 @@
 use super::color_lib::{IDENTITY_M33, rgb_to_rgb_f33, rgb_to_xyz_f33, xyz_to_rgb_f33};
 use super::common::{
     CAM_NL_OFFSET, CAM_NL_SCALE, CHROMA_COMPRESS, CHROMA_COMPRESS_FACT, CHROMA_EXPAND,
-    CHROMA_EXPAND_FACT, CHROMA_EXPAND_THR, ChromaCompressParams, J_SCALE, JMhParams, L_A,
-    REFERENCE_LUMINANCE, ResolvedSharedCompressionParameters, SURROUND,
-    SharedCompressionParameters, Table1D, Table3D, ToneScaleParams, Y_B, cam16, from_radians_,
-    table_base, to_radians,
+    CHROMA_EXPAND_FACT, CHROMA_EXPAND_THR, CUSP_CORNER_COUNT, ChromaCompressParams,
+    DISPLAY_CUSP_TOLERANCE, HUE_LIMIT, J_SCALE, JMhParams, L_A, MAX_SORTED_CORNERS,
+    REACH_CUSP_TOLERANCE, REFERENCE_LUMINANCE, ResolvedSharedCompressionParameters, SMOOTH_CUSPS,
+    SMOOTH_M, SURROUND, SharedCompressionParameters, TOTAL_CORNER_COUNT, Table1D, Table3D,
+    ToneScaleParams, Y_B, cam16, f32_to_u32, from_radians_, table_base, to_radians,
 };
-use super::matrix_lib::{F3, M33f, f3_from_f, invert_f33, mult_f3_f33, mult_f33_f33, scale_f33};
-use crate::exception::Result;
+use super::matrix_lib::{
+    F3, M33f, f3_from_f, invert_f33, mult_f_f3, mult_f3_f33, mult_f33_f33, scale_f33,
+};
+use crate::exception::{Exception, Result};
 use crate::math_utils::{lerpf, sse_add, sse_mul, std_max, std_min};
 use crate::transforms::builtins::color_matrix_helpers::Primaries;
+
+/// `cuspCornerCount`, as an index.
+const CUSP_CORNERS: usize = CUSP_CORNER_COUNT as usize;
+/// `totalCornerCount`, as an index.
+const TOTAL_CORNERS: usize = TOTAL_CORNER_COUNT as usize;
+/// `max_sorted_corners`, as an index.
+const MAX_SORTED: usize = MAX_SORTED_CORNERS as usize;
+
+/// The error where hues that don't compare (NaN) or a degenerate gamut make upstream's hue table
+/// code read or write past its arrays (`docs/improvements.md` U-32).
+pub const CORNERS_OVERRUN: &str = "ACES 2.0: the gamut's corner hues make the hue table read or \
+     write past its arrays: upstream's behaviour is undefined.";
 
 //
 // Table lookups
@@ -599,6 +614,408 @@ pub fn init_jmh_params(prims: &Primaries) -> Result<JMhParams> {
     })
 }
 
+/// The RGB corner of the unit cube of cusp `corner`, in the order R, Y, G, C, B, M, so that
+/// hues rotate in the correct order.
+///
+/// Port of `generate_unit_cube_cusp_corners` (Transform.cpp:547-554 @ v2.5.2).
+#[inline]
+pub fn generate_unit_cube_cusp_corners(corner: u32) -> F3 {
+    let n = CUSP_CORNER_COUNT as u32;
+    let lit = |shift: u32| f32::from(u8::from(corner.wrapping_add(shift) % n < 3));
+    [lit(1), lit(5), lit(3)]
+}
+
+/// The limiting gamut's cusp corners in RGB and JMh, in a cycle with the lowest hue at [1],
+/// and the wrapped copies of the last and first at [0] and [7].
+///
+/// Port of `build_limiting_cusp_corners_tables` (Transform.cpp:556-588 @ v2.5.2).
+pub fn build_limiting_cusp_corners_tables(
+    rgb_corners: &mut [F3; TOTAL_CORNERS],
+    jmh_corners: &mut [F3; TOTAL_CORNERS],
+    params: &JMhParams,
+    peak_luminance: f32,
+) {
+    // We calculate the RGB and JMh values for the limiting gamut cusp corners
+    // They are then arranged into a cycle with the lowest JMh value at [1] to allow for hue
+    // wrapping
+    let mut temp_rgb_corners = [[0.0f32; 3]; CUSP_CORNERS];
+    let mut temp_jmh_corners = [[0.0f32; 3]; CUSP_CORNERS];
+    let mut min_index = 0;
+    for i in 0..CUSP_CORNERS {
+        temp_rgb_corners[i] = mult_f_f3(
+            peak_luminance / REFERENCE_LUMINANCE,
+            &generate_unit_cube_cusp_corners(i as u32),
+        );
+        temp_jmh_corners[i] = rgb_to_jmh(&temp_rgb_corners[i], params);
+        if temp_jmh_corners[i][2] < temp_jmh_corners[min_index][2] {
+            min_index = i;
+        }
+    }
+
+    // Rotate entries placing lowest at [1] (not [0])
+    for i in 0..CUSP_CORNERS {
+        rgb_corners[i + 1] = temp_rgb_corners[(i + min_index) % CUSP_CORNERS];
+        jmh_corners[i + 1] = temp_jmh_corners[(i + min_index) % CUSP_CORNERS];
+    }
+
+    // Copy end elements to create a cycle
+    rgb_corners[0] = rgb_corners[CUSP_CORNERS];
+    rgb_corners[CUSP_CORNERS + 1] = rgb_corners[1];
+    jmh_corners[0] = jmh_corners[CUSP_CORNERS];
+    jmh_corners[CUSP_CORNERS + 1] = jmh_corners[1];
+
+    // Wrap the hues, to maintain monotonicity these entries will fall outside [0.0, hue_limit)
+    jmh_corners[0][2] -= HUE_LIMIT;
+    jmh_corners[CUSP_CORNERS + 1][2] += HUE_LIMIT;
+}
+
+/// The reach gamut's corners at the J `limit_j`, in JMh: each unit corner scaled, by
+/// bisection on the achromatic response, until its J reaches `limit_j`; in a cycle as
+/// [`build_limiting_cusp_corners_tables`] arranges them.
+///
+/// Port of `find_reach_corners_table` (Transform.cpp:590-644 @ v2.5.2).
+pub fn find_reach_corners_table(
+    jmh_corners: &mut [F3; TOTAL_CORNERS],
+    params: &JMhParams,
+    limit_j: f32,
+    maximum_source: f32,
+) {
+    let mut temp_jmh_corners = [[0.0f32; 3]; CUSP_CORNERS];
+    let limit_a = j_to_achromatic_n(limit_j, params.inv_cz);
+
+    let mut min_index = 0;
+    for i in 0..CUSP_CORNERS {
+        let rgb_vector = generate_unit_cube_cusp_corners(i as u32);
+
+        let mut lower = 0.0f32;
+        let mut upper = maximum_source;
+        while (upper - lower) > REACH_CUSP_TOLERANCE {
+            let test = midpoint(lower, upper);
+            let test_corner = mult_f_f3(test, &rgb_vector);
+            let a = rgb_to_aab(&test_corner, params)[0];
+            if a < limit_a {
+                lower = test;
+            } else {
+                upper = test;
+            }
+            if a == limit_a {
+                break;
+            }
+        }
+        temp_jmh_corners[i] = rgb_to_jmh(&mult_f_f3(upper, &rgb_vector), params);
+
+        if temp_jmh_corners[i][2] < temp_jmh_corners[min_index][2] {
+            min_index = i;
+        }
+    }
+
+    // Rotate entries placing lowest at [1] (not [0])
+    for i in 0..CUSP_CORNERS {
+        jmh_corners[i + 1] = temp_jmh_corners[(i + min_index) % CUSP_CORNERS];
+    }
+
+    // Copy end elements to create a cycle
+    jmh_corners[0] = jmh_corners[CUSP_CORNERS];
+    jmh_corners[CUSP_CORNERS + 1] = jmh_corners[1];
+
+    // Wrap the hues, to maintain monotonicity these entries will fall outside [0.0, hue_limit)
+    jmh_corners[0][2] -= HUE_LIMIT;
+    jmh_corners[CUSP_CORNERS + 1][2] += HUE_LIMIT;
+}
+
+/// The unique hues of the two corner cycles' nominal entries, merged in order; returns how
+/// many. Where hues that don't compare (NaN) make upstream read past the corners or write past
+/// the hues, the port refuses the parameters ([`CORNERS_OVERRUN`], U-32).
+///
+/// Port of `extract_sorted_cube_hues` (Transform.cpp:646-681 @ v2.5.2).
+pub fn extract_sorted_cube_hues(
+    sorted_hues: &mut [f32; MAX_SORTED],
+    reach_jmh: &[F3; TOTAL_CORNERS],
+    display_jmh: &[F3; TOTAL_CORNERS],
+) -> Result<u32> {
+    // Basic merge of 2 sorted arrays, extracting the unique hues.
+    // Return the count of the unique hues
+    let mut idx = 0;
+    let mut reach_idx = 1;
+    let mut display_idx = 1;
+    while reach_idx < CUSP_CORNERS + 1 || display_idx < CUSP_CORNERS + 1 {
+        if reach_idx >= TOTAL_CORNERS || display_idx >= TOTAL_CORNERS || idx >= MAX_SORTED {
+            return Err(Exception::new(CORNERS_OVERRUN));
+        }
+        let reach_hue = reach_jmh[reach_idx][2];
+        let display_hue = display_jmh[display_idx][2];
+        if reach_hue == display_hue {
+            sorted_hues[idx] = reach_hue;
+            reach_idx += 1;
+            display_idx += 1; // When equal consume both
+        } else if reach_hue < display_hue {
+            sorted_hues[idx] = reach_hue;
+            reach_idx += 1;
+        } else {
+            sorted_hues[idx] = display_hue;
+            display_idx += 1;
+        }
+        idx += 1;
+    }
+    Ok(idx as u32)
+}
+
+/// `samples` evenly spaced hues from `lower` towards `upper` into `hue_table` from `base`.
+/// Where upstream would write past the table, the port refuses the parameters
+/// ([`CORNERS_OVERRUN`], U-32).
+///
+/// Port of `build_hue_sample_interval` (Transform.cpp:683-690 @ v2.5.2).
+pub fn build_hue_sample_interval(
+    samples: u32,
+    lower: f32,
+    upper: f32,
+    hue_table: &mut Table1D,
+    base: u32,
+) -> Result<()> {
+    if u64::from(base) + u64::from(samples) > table_base::TOTAL_SIZE as u64 {
+        return Err(Exception::new(CORNERS_OVERRUN));
+    }
+    let delta = (upper - lower) / samples as f32;
+    for i in 0..samples {
+        hue_table[(base + i) as usize] = sse_add(lower, sse_mul(i as f32, delta));
+    }
+    Ok(())
+}
+
+/// The hue table: about one sample per degree, with the sorted unique corner hues among the
+/// samples, and the wrapped entries.
+///
+/// Port of `build_hue_table` (Transform.cpp:692-736 @ v2.5.2), its two `BUG` notes included:
+/// where they would make upstream write past the table, the port refuses the parameters
+/// ([`CORNERS_OVERRUN`], U-32).
+pub fn build_hue_table(
+    hue_table: &mut Table1D,
+    sorted_hues: &[f32; MAX_SORTED],
+    unique_hues: u32,
+) -> Result<()> {
+    const NOMINAL: u32 = table_base::NOMINAL_SIZE as u32;
+    let ideal_spacing = NOMINAL as f32 / HUE_LIMIT;
+    let mut samples_count = [0u32; 2 * CUSP_CORNERS + 2];
+    let mut last_idx = u32::MAX;
+    // Ensure we can always sample at 0.0 hue
+    let mut min_index: u32 = if sorted_hues[0] == 0.0 { 0 } else { 1 };
+    for hue_idx in 0..unique_hues as usize {
+        // BUG: "hue_table.size - 1" will fail if we have multiple hues mapping near the top of
+        // the table
+        let mut nominal_idx = std::cmp::min(
+            std::cmp::max(
+                f32_to_u32(sse_mul(sorted_hues[hue_idx], ideal_spacing).round()),
+                min_index,
+            ),
+            NOMINAL - 1,
+        );
+        if last_idx == nominal_idx {
+            // Last two hues should sample at same index, need to adjust them
+            // Adjust previous sample down if we can
+            if hue_idx > 1
+                && samples_count[hue_idx - 2] != samples_count[hue_idx - 1].wrapping_sub(1)
+            {
+                samples_count[hue_idx - 1] = samples_count[hue_idx - 1].wrapping_sub(1);
+            } else {
+                nominal_idx = nominal_idx.wrapping_add(1);
+            }
+        }
+        samples_count[hue_idx] = std::cmp::min(nominal_idx, NOMINAL - 1);
+        last_idx = nominal_idx;
+        min_index = nominal_idx;
+    }
+
+    let mut total_samples: u32 = 0;
+    // Special cases for ends
+    let mut i = 0usize;
+    build_hue_sample_interval(
+        samples_count[i],
+        0.0,
+        sorted_hues[i],
+        hue_table,
+        total_samples.wrapping_add(1),
+    )?;
+    total_samples = total_samples.wrapping_add(samples_count[i]);
+    i += 1;
+    while i != unique_hues as usize {
+        let samples = samples_count[i].wrapping_sub(samples_count[i - 1]);
+        build_hue_sample_interval(
+            samples,
+            sorted_hues[i - 1],
+            sorted_hues[i],
+            hue_table,
+            total_samples.wrapping_add(1),
+        )?;
+        total_samples = total_samples.wrapping_add(samples);
+        i += 1;
+    }
+    // BUG: could break if we are unlucky with samples all being used up by this point
+    build_hue_sample_interval(
+        NOMINAL.wrapping_sub(total_samples),
+        sorted_hues[i - 1],
+        HUE_LIMIT,
+        hue_table,
+        total_samples.wrapping_add(1),
+    )?;
+
+    hue_table[table_base::LOWER_WRAP_INDEX] = hue_table[table_base::LAST_NOMINAL_INDEX] - HUE_LIMIT;
+    hue_table[table_base::UPPER_WRAP_INDEX] =
+        sse_add(hue_table[table_base::FIRST_NOMINAL_INDEX], HUE_LIMIT);
+    hue_table[table_base::UPPER_WRAP_INDEX + 1] =
+        sse_add(hue_table[table_base::FIRST_NOMINAL_INDEX + 1], HUE_LIMIT);
+    Ok(())
+}
+
+/// The limiting gamut's cusp (J, M) at `hue`: by bisection along the RGB segment between the
+/// two cusp corners around the hue. `previous` holds the last segment and position, to
+/// resume from there.
+///
+/// Port of `find_display_cusp_for_hue` (Transform.cpp:738-808 @ v2.5.2).
+pub fn find_display_cusp_for_hue(
+    hue: f32,
+    rgb_corners: &[F3; TOTAL_CORNERS],
+    jmh_corners: &[F3; TOTAL_CORNERS],
+    params: &JMhParams,
+    previous: &mut [f32; 2],
+) -> [f32; 2] {
+    // This works by finding the required line segment between two of the XYZ cusp corners,
+    // then binary searching along the line calculating the JMh of points along the line till
+    // we find the required value. All values on the line segments are valid cusp locations.
+
+    let mut upper_corner = 1;
+    for (i, corner) in jmh_corners.iter().enumerate().skip(upper_corner) {
+        if corner[2] > hue {
+            upper_corner = i;
+            break;
+        }
+    }
+    let lower_corner = upper_corner - 1;
+
+    // hue should now be within [lower_corner, upper_corner), handle exact match
+    if jmh_corners[lower_corner][2] == hue {
+        return [jmh_corners[lower_corner][0], jmh_corners[lower_corner][1]];
+    }
+
+    // search by lerping between RGB corners for the hue
+    let cusp_lower = rgb_corners[lower_corner];
+    let cusp_upper = rgb_corners[upper_corner];
+
+    // If we are still on the same segment start from where we left off
+    let mut lower_t = if upper_corner as f32 == previous[0] {
+        previous[1]
+    } else {
+        0.0
+    };
+    let mut upper_t = 1.0f32;
+
+    // There is an edge case where we need to search towards the range when across the [0.0f,
+    // hue_limit) boundary each edge needs the directions swapped. This is handled by comparing
+    // against the appropriate corner to make sure we are still in the expected range between
+    // the lower and upper corner hue limits
+    while (upper_t - lower_t) > DISPLAY_CUSP_TOLERANCE {
+        let sample_t = midpoint(lower_t, upper_t);
+        let sample = lerp(&cusp_lower, &cusp_upper, sample_t);
+        let jmh = rgb_to_jmh(&sample, params);
+        if jmh[2] < jmh_corners[lower_corner][2] {
+            upper_t = sample_t;
+        } else if jmh[2] >= jmh_corners[upper_corner][2] {
+            lower_t = sample_t;
+        } else if jmh[2] > hue {
+            upper_t = sample_t;
+        } else {
+            lower_t = sample_t;
+        }
+    }
+
+    // Use the midpoint of the final interval for the actual samples
+    let sample_t = midpoint(lower_t, upper_t);
+    let sample = lerp(&cusp_lower, &cusp_upper, sample_t);
+    let jmh = rgb_to_jmh(&sample, params);
+
+    previous[0] = upper_corner as f32;
+    previous[1] = sample_t;
+
+    [jmh[0], jmh[1]]
+}
+
+/// The cusp table: the limiting gamut's cusp J and smoothed M at each hue of `hue_table`,
+/// and the hue; the wrapped entries copied.
+///
+/// Port of `build_cusp_table` (Transform.cpp:810-834 @ v2.5.2).
+pub fn build_cusp_table(
+    hue_table: &Table1D,
+    rgb_corners: &[F3; TOTAL_CORNERS],
+    jmh_corners: &[F3; TOTAL_CORNERS],
+    params: &JMhParams,
+) -> Table3D {
+    let mut previous = [0.0f32, 0.0];
+    let mut output_table: Table3D = [[0.0; 3]; table_base::TOTAL_SIZE];
+    for i in table_base::FIRST_NOMINAL_INDEX..table_base::UPPER_WRAP_INDEX {
+        let hue = hue_table[i];
+        let jm = find_display_cusp_for_hue(hue, rgb_corners, jmh_corners, params, &mut previous);
+        output_table[i][0] = jm[0];
+        output_table[i][1] = sse_mul(jm[1], 1.0 + SMOOTH_M * SMOOTH_CUSPS);
+        output_table[i][2] = hue;
+    }
+
+    // Copy extra entries to ease the code to handle hues wrapping around
+    let (lower, last) = (table_base::LOWER_WRAP_INDEX, table_base::LAST_NOMINAL_INDEX);
+    let (upper, first) = (
+        table_base::UPPER_WRAP_INDEX,
+        table_base::FIRST_NOMINAL_INDEX,
+    );
+    output_table[lower][0] = output_table[last][0];
+    output_table[lower][1] = output_table[last][1];
+    output_table[lower][2] = hue_table[lower];
+    output_table[upper][0] = output_table[first][0];
+    output_table[upper][1] = output_table[first][1];
+    output_table[upper][2] = hue_table[upper];
+    output_table[upper + 1][0] = output_table[first + 1][0];
+    output_table[upper + 1][1] = output_table[first + 1][1];
+    output_table[upper + 1][2] = hue_table[upper + 1];
+    output_table
+}
+
+/// The hue table and the cusp table: the hues sampled as uniformly as possible while
+/// including the corners of the limiting gamut and of the reach gamut at `limit_J_max`.
+///
+/// Port of `make_uniform_hue_gamut_table` (Transform.cpp:836-855 @ v2.5.2).
+pub fn make_uniform_hue_gamut_table(
+    reach_params: &JMhParams,
+    params: &JMhParams,
+    peak_luminance: f32,
+    forward_limit: f32,
+    sp: &SharedCompressionParameters,
+    hue_table: &mut Table1D,
+) -> Result<Table3D> {
+    let mut reach_jmh_corners = [[0.0f32; 3]; TOTAL_CORNERS];
+    let mut limiting_rgb_corners = [[0.0f32; 3]; TOTAL_CORNERS];
+    let mut limiting_jmh_corners = [[0.0f32; 3]; TOTAL_CORNERS];
+    let mut sorted_hues = [0.0f32; MAX_SORTED];
+
+    find_reach_corners_table(
+        &mut reach_jmh_corners,
+        reach_params,
+        sp.limit_j_max,
+        forward_limit,
+    );
+    build_limiting_cusp_corners_tables(
+        &mut limiting_rgb_corners,
+        &mut limiting_jmh_corners,
+        params,
+        peak_luminance,
+    );
+    let unique_hues =
+        extract_sorted_cube_hues(&mut sorted_hues, &reach_jmh_corners, &limiting_jmh_corners)?;
+    build_hue_table(hue_table, &sorted_hues, unique_hues)?;
+    Ok(build_cusp_table(
+        hue_table,
+        &limiting_rgb_corners,
+        &limiting_jmh_corners,
+        params,
+    ))
+}
+
 /// Port of `any_below_zero` (Transform.cpp:857-860 @ v2.5.2).
 #[inline]
 pub fn any_below_zero(rgb: &F3) -> bool {
@@ -778,3 +1195,7 @@ pub fn init_chroma_compress_params(
         chroma_compress_scale,
     }
 }
+
+#[cfg(test)]
+#[path = "transform_tests.rs"]
+mod tests;
