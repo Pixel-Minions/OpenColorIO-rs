@@ -28,7 +28,9 @@ Strings. The binding passes a Python str to the library as UTF-8 and a Python by
 so a request gives a string as JSON text or as {"bytes": hex}. The binding decodes what the
 library returns as UTF-8: a result string comes back as JSON text, which holds it exactly. A
 result the binding can't decode raises UnicodeDecodeError, which the command reports with the
-bytes it couldn't decode (the whole string), in hex.
+bytes it couldn't decode (the whole string), in hex. So does an exception whose message the
+binding can't decode: the message's bytes then come back, and its type (Exception or
+ExceptionMissingFile) doesn't.
 """
 
 import contextlib
@@ -67,7 +69,14 @@ FIXED_VARIABLES = {"OCIO_LOGGING_LEVEL"}
 MODULE_FUNCTIONS = {
     "GetVersion", "GetVersionHex", "GetEnvVariable", "IsEnvVariablePresent",
     "ResolveConfigPath", "ClearAllCaches",
-    "CombineTransformDirections", "GetInverseTransformDirection",
+    "CombineTransformDirections", "GetInverseTransformDirection", "BitDepthIsFloat",
+    "BitDepthToInt",
+    # The enums' string conversions (ParseUtils.cpp), each *ToString and *FromString.
+    *(f"{name}{way}" for name in ("Allocation", "BitDepth", "Bool", "CDLStyle", "EnvironmentMode",
+                                  "ExposureContrastStyle", "FixedFunctionStyle", "GpuLanguage",
+                                  "GradingStyle", "Interpolation", "LoggingLevel", "NegativeStyle",
+                                  "RangeStyle", "TransformDirection")
+      for way in ("ToString", "FromString")),
 }
 
 # Dunder methods a call may name. Everything else starting with "_" is refused.
