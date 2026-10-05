@@ -45,7 +45,7 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
   - `cargo xtask land` regenerates both into the merge commit.
   - On a branch, `cargo xtask ci` (branch mode) only checks that the ported-test count is at least the base's `docs/ratchet.toml`: the gate's base is where the branch left `phase0`, CI's the PR's base. A branch can't lower it by editing its own copy.
   - CI runs `cargo xtask ci --main` on `main` and on land commits, which checks that both files are current.
-- **Oracle changes stand alone.** Changes to `oracle/` and new fixture groups get their own chunk, before the chunk that first uses them. The owner reviews them separately.
+- **Oracle changes stand alone.** Changes to `oracle/` and new fixture groups get their own chunk, before the chunk that first uses them. An independent verifier agent reviews them (owner decision 2026-10-05); the owner decides only waivers, deviations, new dependencies and new API shapes.
 - **Order and fixes.** Chunks are ordered by dependency. A later fix is a new chunk; never rewrite an earlier commit.
 - **Checking a chunk in isolation** while other work is in progress:
   1. `git add <files>`: exactly the chunk.
@@ -98,7 +98,7 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
   - `commands.py` imports every module of the package, in sorted order, so adding a command never edits a shared file.
   - Command names are unique across modules: a duplicate stops the oracle with an error.
   - A command reports what the library does and never computes expected values.
-  - The owner reviews every oracle change.
+  - An independent verifier agent reviews every oracle change, with mutation testing of its contract tests.
 - **Both reference platforms:**
   - Windows: `cargo test ...`
   - Rocky Linux 9: `scripts/rocky9.sh cargo test ...`. It uses the `docker/rocky9` image, with the checkout mounted at `/work`.

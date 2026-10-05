@@ -41,6 +41,7 @@ pub mod gpu_cases;
 pub mod gpu_desc;
 pub mod image;
 pub mod oracle;
+pub mod oracle_values;
 pub mod paths;
 pub mod probe;
 pub mod processor_ops;
