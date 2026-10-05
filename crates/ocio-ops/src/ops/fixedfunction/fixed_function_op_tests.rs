@@ -199,7 +199,8 @@ fn rec2100_surround_inv() {
 }
 
 /// The op's info, a copy (`clone_op`) that validates, and `combineWith`'s refusal. (The cache
-/// ID is compared with the wheel's through the processors, `tests/fixed_function_op_oracle.rs`.)
+/// ID is compared with the wheel's through the processors,
+/// `crates/ocio/tests/fixed_function_transform_oracle.rs`.)
 #[test]
 fn info_clone_and_combine() {
     let mut ops = OpVec::new();

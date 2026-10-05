@@ -19,7 +19,7 @@
 //!   (FixedFunctionTransform.cpp:111-115).
 //!
 //! The cache ID and `isInverse` reach the wheel through the processors, with the op
-//! (`tests/fixed_function_op_oracle.rs`, chunk 2.3e).
+//! (`crates/ocio/tests/fixed_function_transform_oracle.rs`, chunk 2.3e).
 
 mod common;
 
