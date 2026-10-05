@@ -4,8 +4,7 @@
 //! Port of `tests/cpu/ops/fixedfunction/FixedFunctionOp_tests.cpp` @ v2.5.2: the tests of the
 //! op. Its test of `CreateFixedFunctionTransform` (`create_transform`) needs the transform: it
 //! is in crates/ocio/src/transforms/fixed_function_transform_tests.rs. The `FixedFunctionOps`
-//! tests of the HSY, PQ, gamma-log and double-log styles come with their renderers (2.3c2,
-//! 2.3d).
+//! tests of the PQ, gamma-log and double-log styles come with their renderers (2.3d).
 
 use super::*;
 
@@ -289,6 +288,27 @@ fn check_ops_with(
 fn ops_rgb_to_hsv() {
     use FixedFunctionOpStyle::*;
     check_ops(RgbToHsv, HsvToRgb, "RendererRgbToHsv");
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOps, RGB_TO_HSY_LIN)` @ v2.5.2.
+#[test]
+fn ops_rgb_to_hsy_lin() {
+    use FixedFunctionOpStyle::*;
+    check_ops(RgbToHsyLin, HsyLinToRgb, "RendererRgbToHsyLin");
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOps, RGB_TO_HSY_LOG)` @ v2.5.2.
+#[test]
+fn ops_rgb_to_hsy_log() {
+    use FixedFunctionOpStyle::*;
+    check_ops(RgbToHsyLog, HsyLogToRgb, "RendererRgbToHsyLog");
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOps, RGB_TO_HSY_VID)` @ v2.5.2.
+#[test]
+fn ops_rgb_to_hsy_vid() {
+    use FixedFunctionOpStyle::*;
+    check_ops(RgbToHsyVid, HsyVidToRgb, "RendererRgbToHsyVid");
 }
 
 /// Port of `OCIO_ADD_TEST(FixedFunctionOps, XYZ_TO_xyY)` @ v2.5.2.

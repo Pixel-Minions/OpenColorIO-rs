@@ -761,15 +761,21 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
     `(x * Y) * d` (`0x18018e703`, `0x353b40`);
   - XYZ to CIELUV (1956-1987): MSVC `(9 * Y) * d`, GCC `d * (9 * Y)` (`0x18018ddbd`,
     `0x35464f`); CIELUV to XYZ (1994-2026): MSVC `d * u*` and `(... * Y) * dd`, GCC `u* * d`
-    and `dd * (... * Y)` (`0x18018d5ac`, `0x353e2f`).
+    and `dd * (... * Y)` (`0x18018d5ac`, `0x353e2f`);
+  - RGB to HSY and back (`applyRGBToHSY`, `applyHSYToRGB`, 1591-1763): MSVC compiles one
+    function for the three styles, GCC a loop per style, and the luma's and the distance's
+    sums, the scaling by `luma / currY`, the linear style's quadratic and the result's
+    product each order their operands per compiler and, with GCC, per style (`0x18018ed10`
+    and `0x18018e8e0`; `0x358880` and `0x357ce0`; the port's `apply_rgb_to_hsy`,
+    `apply_hsy_to_rgb` and `hsy_lin_gain` list them).
   Both compilers also reorder some of the source's operations the same way (for example
   `13 * L* * (u - u'n)` as `(u - u'n) * (13 * L*)`), which only matters to the port.
 - **Who notices:** images whose pixels have NaNs of different signs or payloads in two or
   more channels, through these styles: the output NaN's sign and payload differ between
   Windows and Linux.
 - **A fix:** one operand order for both platforms.
-- **Status:** matched in `p2-ff-cpu` (the glows, 2.3b) and `p2-ff-cpu-2` (2.3c1), each wheel's
-  order per platform (`cfg(target_os)`). The battery's NaN buffers and
+- **Status:** matched in `p2-ff-cpu` (the glows, 2.3b) and `p2-ff-cpu-2` (2.3c1, the HSYs in
+  2.3c2), each wheel's order per platform (`cfg(target_os)`). The battery's NaN buffers and
   `fixed_function_oracle.rs`'s `nan_combinations_match_the_wheel` (every combination of NaNs,
   finite values and infinities in red, green and blue) compare them with the wheel on both
   platforms.
