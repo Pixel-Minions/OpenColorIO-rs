@@ -102,7 +102,8 @@ config). The live oracle can now also drive a config, its context and its file r
 call in the official library, which the Phase 3 cards are checked against. A config's context
 is merged too: its environment (byte for byte as each platform's C runtime and system apply
 it), its variables and their expansion, its search paths and how it finds files, with the
-pystring and ParseUtils helpers it uses.
+pystring and ParseUtils helpers it uses. The test battery also checks LUT families now: the oracle
+takes a LUT's values as a blob, and grading values as objects.
 Each also went through an independent review before merging.
 
 **Done:** everything below is bit-exact against the official library on Windows and Linux, in
