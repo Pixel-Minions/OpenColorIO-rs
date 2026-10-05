@@ -425,3 +425,21 @@ fn is_inverse_of_short_params_is_refused() {
     );
     assert!(!f_s.is_inverse(&inv).unwrap());
 }
+
+/// `GetStyle` reads its C string up to the first NUL (`Platform::Strcasecmp`), and refuses an
+/// empty name and, where upstream's message would append a null pointer, a missing one (U-30).
+/// The CTF names themselves are checked against the wheel's CTF reader
+/// (`tests/fixed_function_op_data_oracle.rs`, `ctf_style_names_match_the_wheel`).
+#[test]
+fn style_names_stop_at_a_nul_and_empty_ones_are_refused() {
+    for style in [AcesRedMod03Inv, Rec2100SurroundFwd, LinToPq, HsyVidToRgb] {
+        let text = format!("{}\0junk", style.to_str(false));
+        assert_eq!(FixedFunctionOpStyle::from_name(Some(&text)).unwrap(), style);
+    }
+    for missing in [None, Some(""), Some("\0RedMod03Fwd")] {
+        check_throw_what(
+            FixedFunctionOpStyle::from_name(missing),
+            "Unknown FixedFunction style: ",
+        );
+    }
+}

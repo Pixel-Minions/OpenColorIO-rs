@@ -402,3 +402,184 @@ fn equality_matches_the_wheel() {
         failures.join("\n")
     );
 }
+
+/// Every op style, with parameters its `validate` accepts (the CTF reader validates the op at
+/// the element's end, src/OpenColorIO/fileformats/ctf/CTFReaderHelper.cpp:1482-1487 @ v2.5.2).
+fn op_styles() -> Vec<(FixedFunctionOpStyle, Vec<f64>)> {
+    use FixedFunctionOpStyle::*;
+    let gamut_comp_13 = vec![1.147, 1.264, 1.312, 0.815, 0.803, 0.880, 1.2];
+    let output_20 = vec![
+        100.0, 0.708, 0.292, 0.17, 0.797, 0.131, 0.046, 0.3127, 0.329,
+    ];
+    let gamma_log = vec![
+        0.0,
+        0.25,
+        0.5,
+        1.0,
+        0.0,
+        2.718281828459045,
+        0.17883277,
+        0.807825590164,
+        1.0,
+        -0.07116723,
+    ];
+    let double_log = vec![
+        10.0, 0.25, 0.5, -1.0, 0.0, -1.0, 1.25, 1.0, 1.0, 1.0, 0.5, 1.0, 0.0,
+    ];
+    vec![
+        (AcesRedMod03Fwd, vec![]),
+        (AcesRedMod03Inv, vec![]),
+        (AcesRedMod10Fwd, vec![]),
+        (AcesRedMod10Inv, vec![]),
+        (AcesGlow03Fwd, vec![]),
+        (AcesGlow03Inv, vec![]),
+        (AcesGlow10Fwd, vec![]),
+        (AcesGlow10Inv, vec![]),
+        (AcesDarkToDim10Fwd, vec![]),
+        (AcesDarkToDim10Inv, vec![]),
+        (AcesGamutComp13Fwd, gamut_comp_13.clone()),
+        (AcesGamutComp13Inv, gamut_comp_13),
+        (AcesOutputTransform20Fwd, output_20.clone()),
+        (AcesOutputTransform20Inv, output_20.clone()),
+        (AcesRgbToJmh20, output_20[1..].to_vec()),
+        (AcesJmhToRgb20, output_20[1..].to_vec()),
+        (AcesTonescaleCompress20Fwd, vec![100.0]),
+        (AcesTonescaleCompress20Inv, vec![100.0]),
+        (AcesGamutCompress20Fwd, output_20.clone()),
+        (AcesGamutCompress20Inv, output_20),
+        (Rec2100SurroundFwd, vec![0.78]),
+        (Rec2100SurroundInv, vec![0.78]),
+        (RgbToHsv, vec![]),
+        (HsvToRgb, vec![]),
+        (XyzToXyy, vec![]),
+        (XyyToXyz, vec![]),
+        (XyzToUvy, vec![]),
+        (UvyToXyz, vec![]),
+        (XyzToLuv, vec![]),
+        (LuvToXyz, vec![]),
+        (LinToPq, vec![]),
+        (PqToLin, vec![]),
+        (LinToGammaLog, gamma_log.clone()),
+        (GammaLogToLin, gamma_log),
+        (LinToDoubleLog, double_log.clone()),
+        (DoubleLogToLin, double_log),
+        (RgbToHsyLin, vec![]),
+        (HsyLinToRgb, vec![]),
+        (RgbToHsyLog, vec![]),
+        (HsyLogToRgb, vec![]),
+        (RgbToHsyVid, vec![]),
+        (HsyVidToRgb, vec![]),
+    ]
+}
+
+/// `GetStyle` against the wheel's CTF reader, which calls it on the `style` attribute of a
+/// `FixedFunction` element (CTFReaderHelper.cpp:1427-1473 @ v2.5.2): every style's CTF name
+/// as `to_str(false)` writes it, in upper and lower case (`GetStyle` compares with
+/// `Platform::Strcasecmp`), the `Surround` alias, and names it refuses. The wheel reads each
+/// file through a `FileTransform`; its processor's `FixedFunctionTransform` gives the style
+/// and the direction, which the port's op style converts to (`ConvertStyle`, `getDirection`).
+#[test]
+fn ctf_style_names_match_the_wheel() {
+    use ocio_testkit::oracle::{BatchCall, Oracle};
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("ctf_style_names");
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let mut cases: Vec<(String, Vec<f64>)> = Vec::new();
+    for (style, params) in op_styles() {
+        let name = style.to_str(false);
+        for text in [
+            name.to_string(),
+            name.to_ascii_uppercase(),
+            name.to_ascii_lowercase(),
+        ] {
+            cases.push((text, params.clone()));
+        }
+    }
+    for text in ["Surround", "SURROUND", "surround"] {
+        cases.push((text.to_string(), vec![0.78]));
+    }
+    for text in [
+        "RedMod03Inv",
+        "Rec2100Surround",
+        "Unknown",
+        "RGB_TO_HSV_",
+        " RGB_TO_HSV",
+    ] {
+        cases.push((text.to_string(), vec![]));
+    }
+
+    let mut calls = Vec::new();
+    for (i, (text, params)) in cases.iter().enumerate() {
+        let params = if params.is_empty() {
+            String::new()
+        } else {
+            let list: Vec<String> = params.iter().map(|p| format!("{p:?}")).collect();
+            format!(" params=\"{}\"", list.join(" "))
+        };
+        let ctf = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ProcessList version=\"2\" id=\"ABCD\">\n    \
+             <FixedFunction inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"{text}\"{params}/>\n\
+             </ProcessList>\n"
+        );
+        let path = dir.join(format!("style_{i}.ctf"));
+        std::fs::write(&path, ctf).unwrap();
+        let src = path
+            .to_str()
+            .unwrap()
+            .replace(std::path::MAIN_SEPARATOR, "/");
+        calls.push(BatchCall {
+            cmd: "processor_ops",
+            args: json!({"transform": {"class": "FileTransform", "args": {"src": src}}}),
+            blobs: vec![],
+        });
+    }
+    // The files' contents aren't part of the cache key: never cache these calls.
+    let responses = Oracle::get().batch(&calls, false);
+
+    let mut failures = Vec::new();
+    for ((text, params), response) in cases.iter().zip(responses) {
+        let response = response.unwrap_or_else(|e| panic!("{text:?}: the oracle failed: {e}"));
+        let port = FixedFunctionOpStyle::from_name(Some(text));
+        match (response.result.get("exception"), port) {
+            (Some(exception), Err(e)) => {
+                let message = exception["message"].as_str().unwrap_or_default();
+                if !message.contains(e.message()) {
+                    failures.push(format!(
+                        "{text:?}: wheel {message:?}, port {:?}",
+                        e.message()
+                    ));
+                }
+            }
+            (Some(exception), Ok(style)) => {
+                failures.push(format!("{text:?}: wheel {exception}, port {style:?}"));
+            }
+            (None, Err(e)) => {
+                failures.push(format!(
+                    "{text:?}: wheel {}, port {:?}",
+                    response.result,
+                    e.message()
+                ));
+            }
+            (None, Ok(style)) => {
+                let data = FixedFunctionOpData::with_params(style, params.clone()).unwrap();
+                let child = &response.result["processor"]["group"]["children"][0]["getters"];
+                let wheel = (child["getStyle"].clone(), child["getDirection"].clone());
+                let port = (
+                    style_enum(style.to_transform_style()),
+                    common::fixed_function::direction_enum(data.direction()),
+                );
+                if wheel != port {
+                    failures.push(format!("{text:?}: wheel {wheel:?}, port {port:?}"));
+                }
+            }
+        }
+    }
+    println!("{} names", cases.len());
+    assert!(
+        failures.is_empty(),
+        "{} of {} names differ:\n{}",
+        failures.len(),
+        cases.len(),
+        failures.join("\n")
+    );
+}
