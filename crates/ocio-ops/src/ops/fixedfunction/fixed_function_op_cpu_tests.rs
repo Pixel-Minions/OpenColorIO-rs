@@ -1091,6 +1091,48 @@ fn xyz_to_luv() {
     apply_fixed_function(&mut img, &input_frame, &data(LuvToXyz), 1e-5, false);
 }
 
+/// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, LIN_TO_PQ)` @ v2.5.2.
+#[test]
+fn lin_to_pq() {
+    #[rustfmt::skip]
+    let pq_frame: [f32; 36] = [
+      -0.10, -0.05,  0.00, -1.0, // negative input
+       0.05,  0.10,  0.15,  1.0,
+       0.20,  0.25,  0.30,  1.0,
+       0.35,  0.40,  0.45,  0.5,
+       0.50,  0.55,  0.60,  0.0,
+       0.65,  0.70,  0.75,  1.0,
+       0.80,  0.85,  0.90,  1.0,
+       0.95,  1.00,  1.05,  1.0,
+       1.10,  1.15,  1.20,  1.0, // over range
+    ];
+
+    #[rustfmt::skip]
+    let linear_frame: [f32; 36] = [
+       -3.2456559e-03, -6.0001636e-04,  0.0,           -1.0,
+        6.0001636e-04,  3.2456559e-03,  1.0010649e-02,  1.0,
+        2.4292633e-02,  5.1541760e-02,  1.0038226e-01,  1.0,
+        1.8433567e-01,  3.2447918e-01,  5.5356688e-01,  0.5,
+        9.2245709e-01,  1.5102065e+00,  2.4400519e+00,  0.0,
+        3.9049474e+00,  6.2087938e+00,  9.8337786e+00,  1.0,
+        1.5551784e+01,  2.4611351e+01,  3.9056447e+01,  1.0,
+        6.2279535e+01,  1.0000000e+02,  1.6203272e+02,  1.0,
+        2.6556253e+02,  4.4137110e+02,  7.4603927e+02,  1.0,
+    ];
+
+    // Fast power enabled.
+    let mut img = pq_frame;
+    apply_fixed_function(&mut img, &linear_frame, &data(PqToLin), 2.5e-3, true);
+    let mut img = linear_frame;
+    apply_fixed_function(&mut img, &pq_frame, &data(LinToPq), 1e-3, true);
+
+    // Fast power disabled.
+    let mut img = pq_frame;
+    apply_fixed_function(&mut img, &linear_frame, &data(PqToLin), 5e-5, false);
+    let mut img = linear_frame;
+    apply_fixed_function(&mut img, &pq_frame, &data(LinToPq), 1e-5, false);
+}
+
 /// The Rec.2100 HLG curve's parameters (FixedFunctionOpCPU_tests.cpp:1311-1325 @ v2.5.2).
 fn hlg_params() -> Params {
     vec![
@@ -1207,10 +1249,9 @@ fn lin_to_double_log() {
 
 /// U-31: the gamut compression's renderer reads seven parameters, the Rec.2100 surround's
 /// one, the gamma-log's ten and the double-log's 13, which upstream does without a check; the
-/// port refuses data with fewer (set after the validating constructor). The styles whose renderers come later are refused, in both
-/// fast-math settings.
+/// port refuses data with fewer (set after the validating constructor).
 #[test]
-fn short_params_and_unported_styles_are_refused() {
+fn short_params_are_refused() {
     let params: Params = vec![1.147, 1.264, 1.312, 0.815, 0.803, 0.880, 1.2];
     for style in [AcesGamutComp13Fwd, AcesGamutComp13Inv] {
         let mut data = FixedFunctionOpData::with_params(style, params.clone()).unwrap();
@@ -1242,13 +1283,6 @@ fn short_params_and_unported_styles_are_refused() {
         check_throw_what(
             get_fixed_function_cpu_renderer(&data, false).map(|_| ()),
             SHORT_PARAMS,
-        );
-    }
-    for fast in [false, true] {
-        let data = FixedFunctionOpData::new(LinToPq).unwrap();
-        check_throw_what(
-            get_fixed_function_cpu_renderer(&data, fast).map(|_| ()),
-            "the CPU renderer of the style 'Lin_TO_PQ' is not ported yet",
         );
     }
 }

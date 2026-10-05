@@ -41,6 +41,13 @@ pub(crate) struct Waiver {
     /// Source files allowed to contain an otherwise forbidden pattern, e.g. `#[ignore`.
     #[serde(default)]
     pub(crate) allow_patterns: Vec<AllowPattern>,
+    /// A bound in ulp per function (W0001), which the test kit's comparison reads
+    /// (`ocio_testkit::battery::params`).
+    #[serde(default)]
+    pub(crate) bound_ulp: std::collections::BTreeMap<String, u64>,
+    /// When and over what the bound was measured; required with `bound_ulp`.
+    #[serde(default)]
+    pub(crate) bound_measured: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -121,6 +128,12 @@ pub(crate) fn run() -> Result<(), String> {
         {
             problems.push(format!(
                 "waivers.toml: waiver `{}` has an empty field",
+                w.id
+            ));
+        }
+        if !w.bound_ulp.is_empty() && w.bound_measured.is_empty() {
+            problems.push(format!(
+                "waivers.toml: waiver `{}` has a bound_ulp without bound_measured",
                 w.id
             ));
         }
