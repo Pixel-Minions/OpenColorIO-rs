@@ -478,22 +478,76 @@ fn msvc_std_hash(bytes: &[u8]) -> u64 {
     })
 }
 
-/// The `st_dev` the UCRT's `_wstat` gives a file that exists: the number of the drive its full
-/// path is on (`A:` is 0), or `-1` as an `unsigned` for a path on no drive (a device such as
-/// `nul`, a UNC path). `tests/platform_crt.rs` checks it against `_wstat`.
+/// `_getdrive()`: the number of the current directory's drive (`A:` is 1), or 0 when the
+/// current directory is on no drive (a UNC path) or can't be read.
 #[cfg(windows)]
-fn ucrt_st_dev(path: &std::path::Path) -> u32 {
-    let full = std::path::absolute(path).unwrap_or_default();
-    let wide: Vec<u16> = std::os::windows::ffi::OsStrExt::encode_wide(full.as_os_str()).collect();
+fn current_drive_number() -> u32 {
+    use std::os::windows::ffi::OsStrExt;
+    let Ok(dir) = std::env::current_dir() else {
+        return 0;
+    };
+    let wide: Vec<u16> = dir.as_os_str().encode_wide().take(2).collect();
     match wide.as_slice() {
-        [letter, colon, ..] if *colon == u16::from(b':') => {
-            match u8::try_from(*letter).map(|c| c.to_ascii_uppercase()) {
-                Ok(c @ b'A'..=b'Z') => u32::from(c - b'A'),
-                _ => u32::MAX,
-            }
-        }
-        _ => u32::MAX,
+        [letter, colon] if *colon == u16::from(b':') => match u8::try_from(*letter) {
+            Ok(c) if c.is_ascii_alphabetic() => u32::from(c.to_ascii_uppercase() - b'A') + 1,
+            _ => 0,
+        },
+        _ => 0,
     }
+}
+
+/// The drive number the UCRT's `_wstat` gives a file on a disk (`A:` is 1): the drive letter
+/// the path starts with, else the current drive (0 when there is none); `None` for a path that
+/// is a drive letter and a colon alone, which `_wstat` refuses. `tests/platform_crt.rs` checks
+/// it against `_wstat`.
+#[cfg(windows)]
+fn ucrt_drive_number(path: &[u16]) -> Option<u32> {
+    match path {
+        [letter, colon, rest @ ..] if *colon == u16::from(b':') => match u8::try_from(*letter) {
+            Ok(c) if c.is_ascii_alphabetic() => {
+                if rest.is_empty() {
+                    None
+                } else {
+                    Some(u32::from(c.to_ascii_lowercase() - b'a') + 1)
+                }
+            }
+            _ => Some(current_drive_number()),
+        },
+        _ => Some(current_drive_number()),
+    }
+}
+
+/// `_wstat`'s `st_dev` for `path`, or `None` when `_wstat` fails, as the UCRT computes it: it
+/// opens the path for its attributes (`CreateFileW` with `FILE_READ_ATTRIBUTES`, every share
+/// mode, `FILE_FLAG_BACKUP_SEMANTICS`) and fails when that fails; a device or a pipe (whose
+/// file information can't be read) has `st_dev` -1, a file on a disk its drive number minus
+/// one ([`ucrt_drive_number`]). No wildcard is refused: `\?\` paths open. `tests/platform_crt.rs`
+/// checks it against `_wstat`.
+///
+/// Not reproduced: the UCRT's fallback for a root that `CreateFileW` can't open
+/// (`C:\`, `\server\share\`, fabricated from `GetDriveTypeW`), which opens on the systems the
+/// wheels run on; and a disk file whose information can't be read, taken here for a device.
+#[cfg(windows)]
+fn ucrt_wstat_dev(path: &[u16]) -> Option<u32> {
+    use std::os::windows::ffi::OsStringExt;
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_READ_ATTRIBUTES: u32 = 0x80;
+    const FILE_SHARE_READ_WRITE_DELETE: u32 = 0x7;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    if path.is_empty() {
+        return None;
+    }
+    let file = std::fs::OpenOptions::new()
+        .access_mode(FILE_READ_ATTRIBUTES)
+        .share_mode(FILE_SHARE_READ_WRITE_DELETE)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(std::ffi::OsString::from_wide(path))
+        .ok()?;
+    if file.metadata().is_err() {
+        // A character device or a pipe: `st_dev` is the file handle, -1.
+        return Some(u32::MAX);
+    }
+    ucrt_drive_number(path).map(|drive| drive.wrapping_sub(1))
 }
 
 /// A file's identity, as a proxy for its contents: `st_dev:st_ino` of `stat` on Linux;
@@ -501,27 +555,17 @@ fn ucrt_st_dev(path: &std::path::Path) -> u32 {
 /// the file can't be found. `filename` ends at its first NUL.
 ///
 /// Port of `Platform::CreateFileContentHash` (Platform.cpp:333-357 @ v2.5.2). On Windows,
-/// `_wstat` takes the UTF-16 conversion of the name and refuses wildcards (`*`, `?`).
+/// `_wstat` takes the UTF-16 conversion of the name ([`ucrt_wstat_dev`]).
 pub fn create_file_content_hash(filename: &[u8]) -> Vec<u8> {
     let filename = c_str(filename);
     #[cfg(windows)]
     {
-        use std::os::windows::ffi::OsStringExt;
-        let wide = utf8_to_utf16_lossy(filename);
-        if wide.is_empty()
-            || wide
-                .iter()
-                .any(|&c| c == u16::from(b'*') || c == u16::from(b'?'))
-        {
+        let Some(st_dev) = ucrt_wstat_dev(&utf8_to_utf16_lossy(filename)) else {
             return Vec::new();
-        }
-        let path = std::path::PathBuf::from(std::ffi::OsString::from_wide(&wide));
-        if std::fs::metadata(&path).is_err() {
-            return Vec::new();
-        }
+        };
         // Treat the st_dev (i.e. device) + st_ino (i.e. inode) as a proxy for the contents.
         // The hard-linked files are then not correctly supported on Windows.
-        format!("{}:{}", ucrt_st_dev(&path), msvc_std_hash(filename)).into_bytes()
+        format!("{st_dev}:{}", msvc_std_hash(filename)).into_bytes()
     }
     #[cfg(not(windows))]
     {

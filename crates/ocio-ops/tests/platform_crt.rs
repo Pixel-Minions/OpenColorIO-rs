@@ -193,8 +193,9 @@ fn utf16_to_utf8_matches_the_system() {
 
 /// `CreateFileContentHash` against `_wstat` (Windows) or `stat` (Linux): which paths it finds,
 /// and their device (and inode on Linux). Absolute and relative paths, both separators,
-/// directories with and without a trailing separator, wildcards, missing files, NUL. (Windows
-/// device names such as `nul` are left out: `_wstat` finds some of them, the port none.)
+/// directories with and without a trailing separator, wildcards, missing files, NUL; on Windows
+/// also verbatim (`\\?\`) and device (`\\.\`) paths, UNC paths, drive letters with and without a
+/// path, and device names (`nul`, `con`, `aux`, `conin$`, `nul:`).
 #[test]
 fn file_content_hash_matches_the_system() {
     use ocio_ops::platform::create_file_content_hash;
@@ -229,6 +230,33 @@ fn file_content_hash_matches_the_system() {
     if cfg!(windows) {
         probes.push(file_text.to_lowercase());
         probes.push(file_text.to_uppercase());
+        probes.push(format!(r"\\?\{file_text}"));
+        probes.push(format!(r"\\.\{file_text}"));
+        probes.push(format!(r"\\?\{dir_text}"));
+        for name in [
+            r"\\localhost\C$\Windows\win.ini",
+            "//localhost/C$/Windows/win.ini",
+            r"\\127.0.0.1\C$\Windows\win.ini",
+            r"\\?\UNC\localhost\C$\Windows\win.ini",
+            r"\\localhost\C$\missing",
+            "C:",
+            "D:",
+            "c:",
+            r"C:\",
+            "C:.",
+            "C:Cargo.toml",
+            "1:x",
+            "nul",
+            "NUL",
+            "con",
+            "aux",
+            "conin$",
+            "nul:",
+            "lpt1",
+            r"C:\Windows\nul",
+        ] {
+            probes.push(name.to_string());
+        }
     }
     for probe in &probes {
         let hash = create_file_content_hash(probe.as_bytes());
