@@ -7,19 +7,22 @@
 //! `DynamicProperty` and `DynamicPropertyDouble` interfaces
 //! (`include/OpenColorIO/OpenColorTransforms.h:766-779, 810-824`).
 //!
-//! So far: the base (the type and whether the property is dynamic, and equality) and the
-//! property that holds a double. The grading properties and `DynamicPropertyValue::As*`
-//! come with the grading ops (Phase 5).
+//! So far: the base (the type and whether the property is dynamic, and equality), the
+//! property that holds a double, and the GradingRGBCurve property (Phase 2, WP 2.6). The other
+//! grading properties and `DynamicPropertyValue::As*` come with the grading ops (Phase 5).
 //!
 //! Upstream shares a property between the ops and processors that use it through a
 //! `std::shared_ptr`, and the application changes it through the same pointer. Here the
 //! handle is an [`Arc`], and the mutable state is atomic (PLAN.md §9), so a property can be
 //! changed through a shared handle. A renderer reads the value once per `apply`.
 
-use crate::open_color_types::DynamicPropertyType;
+use crate::exception::Result;
+use crate::open_color_types::{DynamicPropertyType, RgbCurveType};
+use crate::ops::gradingrgbcurve::grading_b_spline_curve::KnotsCoefs;
+use crate::ops::gradingrgbcurve::grading_rgb_curve::GradingRgbCurve;
 use std::fmt;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 /// What every dynamic property holds: its type, and whether it is dynamic.
 ///
@@ -179,6 +182,206 @@ impl PartialEq for DynamicPropertyDoubleImpl {
     }
 }
 
+/// A shared GradingRGBCurve dynamic property.
+///
+/// Port of `DynamicPropertyGradingRGBCurveImplRcPtr` (src/OpenColorIO/DynamicProperty.h:139 @
+/// v2.5.2).
+pub type DynamicPropertyGradingRgbCurveImplRcPtr = Arc<DynamicPropertyGradingRgbCurveImpl>;
+
+/// The value of a GradingRGBCurve property and the knots and coefficients computed from it.
+#[derive(Debug, Clone)]
+pub struct RgbCurveState {
+    /// `m_gradingRGBCurve`.
+    pub value: GradingRgbCurve,
+    /// `m_knotsCoefs`: the four curves' knots and coefficients.
+    pub knots_coefs: KnotsCoefs,
+}
+
+/// The dynamic property of a GradingRGBCurve op: its four curves, and their knots and
+/// coefficients, which the renderers evaluate. It dereferences to its [`DynamicPropertyImpl`].
+/// The value and the knots change together under a lock, so a renderer reads a consistent
+/// pair ([`DynamicPropertyGradingRgbCurveImpl::state`]); upstream reads them unlocked.
+///
+/// Port of `DynamicPropertyGradingRGBCurveImpl` (src/OpenColorIO/DynamicProperty.h:141-174,
+/// DynamicProperty.cpp:202-297 @ v2.5.2) and of the `DynamicPropertyGradingRGBCurve`
+/// interface (include/OpenColorIO/OpenColorTransforms.h).
+pub struct DynamicPropertyGradingRgbCurveImpl {
+    base: DynamicPropertyImpl,
+    state: RwLock<RgbCurveState>,
+}
+
+impl std::ops::Deref for DynamicPropertyGradingRgbCurveImpl {
+    type Target = DynamicPropertyImpl;
+
+    fn deref(&self) -> &DynamicPropertyImpl {
+        &self.base
+    }
+}
+
+impl fmt::Debug for DynamicPropertyGradingRgbCurveImpl {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DynamicPropertyGradingRgbCurveImpl")
+            .field("is_dynamic", &self.is_dynamic())
+            .field("state", &*self.state())
+            .finish()
+    }
+}
+
+impl DynamicPropertyGradingRgbCurveImpl {
+    /// A property holding a copy of `value`, not validated, with its knots and coefficients;
+    /// the errors of fitting the curves (too many control points).
+    ///
+    /// Port of `DynamicPropertyGradingRGBCurveImpl::DynamicPropertyGradingRGBCurveImpl`
+    /// (src/OpenColorIO/DynamicProperty.cpp:202-209 @ v2.5.2).
+    pub fn new(value: &GradingRgbCurve, dynamic: bool) -> Result<Self> {
+        let mut state = RgbCurveState {
+            value: value.clone(),
+            knots_coefs: KnotsCoefs::new(4),
+        };
+        // Convert control points from the UI into knots and coefficients for the apply.
+        Self::precompute(&mut state)?;
+        Ok(DynamicPropertyGradingRgbCurveImpl {
+            base: DynamicPropertyImpl::new(DynamicPropertyType::GradingRgbCurve, dynamic),
+            state: RwLock::new(state),
+        })
+    }
+
+    /// A property holding `state` as it is: the curves and their knots, not fitted again.
+    pub fn from_state(state: RgbCurveState, dynamic: bool) -> Self {
+        DynamicPropertyGradingRgbCurveImpl {
+            base: DynamicPropertyImpl::new(DynamicPropertyType::GradingRgbCurve, dynamic),
+            state: RwLock::new(state),
+        }
+    }
+
+    /// The value and its knots and coefficients, read-locked.
+    pub fn state(&self) -> RwLockReadGuard<'_, RgbCurveState> {
+        self.state.read().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn state_mut(&self) -> RwLockWriteGuard<'_, RgbCurveState> {
+        self.state.write().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// A copy of the curves.
+    ///
+    /// Port of `DynamicPropertyGradingRGBCurveImpl::getValue` (DynamicProperty.cpp:211-214 @
+    /// v2.5.2).
+    pub fn get_value(&self) -> GradingRgbCurve {
+        self.state().value.clone()
+    }
+
+    /// Validates `value`, then holds a copy of it and computes its knots and coefficients.
+    /// When fitting the curves fails, the property keeps the new value and the knots of the
+    /// curves fitted before the failure, as upstream's does.
+    ///
+    /// Port of `DynamicPropertyGradingRGBCurveImpl::setValue` (DynamicProperty.cpp:216-223 @
+    /// v2.5.2).
+    pub fn set_value(&self, value: &GradingRgbCurve) -> Result<()> {
+        value.validate()?;
+        let mut state = self.state_mut();
+        state.value = value.clone();
+        // Convert control points from the UI into knots and coefficients for the apply.
+        Self::precompute(&mut state)
+    }
+
+    /// Port of `DynamicPropertyGradingRGBCurveImpl::getLocalBypass` (DynamicProperty.cpp:
+    /// 225-228 @ v2.5.2).
+    pub fn get_local_bypass(&self) -> bool {
+        self.state().knots_coefs.local_bypass
+    }
+
+    /// Port of `DynamicPropertyGradingRGBCurveImpl::getNumKnots` (DynamicProperty.cpp:230-233
+    /// @ v2.5.2).
+    pub fn get_num_knots(&self) -> i32 {
+        self.state().knots_coefs.num_knots
+    }
+
+    /// Port of `DynamicPropertyGradingRGBCurveImpl::getNumCoefs` (DynamicProperty.cpp:235-238
+    /// @ v2.5.2).
+    pub fn get_num_coefs(&self) -> i32 {
+        self.state().knots_coefs.num_coefs
+    }
+
+    /// The offset and count of each of the four curves.
+    ///
+    /// Port of `DynamicPropertyGradingRGBCurveImpl::GetNumOffsetValues` (DynamicProperty.h:154
+    /// @ v2.5.2).
+    pub const NUM_OFFSET_VALUES: i32 = 8;
+
+    /// Port of `DynamicPropertyGradingRGBCurveImpl::GetMaxKnots` (DynamicProperty.cpp:260-263
+    /// @ v2.5.2).
+    pub const MAX_KNOTS: u32 = KnotsCoefs::MAX_NUM_KNOTS as u32;
+
+    /// Port of `DynamicPropertyGradingRGBCurveImpl::GetMaxCoefs` (DynamicProperty.cpp:265-268
+    /// @ v2.5.2).
+    pub const MAX_COEFS: u32 = KnotsCoefs::MAX_NUM_COEFS as u32;
+
+    /// Fits the four curves, in order, packing their knots and coefficients.
+    ///
+    /// Port of `DynamicPropertyGradingRGBCurveImpl::precompute` (DynamicProperty.cpp:270-290
+    /// @ v2.5.2). Its "unexpected curve implementation" can't happen.
+    fn precompute(state: &mut RgbCurveState) -> Result<()> {
+        let knots_coefs = &mut state.knots_coefs;
+        knots_coefs.local_bypass = false;
+        knots_coefs.num_coefs = 0;
+        knots_coefs.num_knots = 0;
+
+        // Compute knots and coefficients for each control point and pack all knots and coefs
+        // of all curves in one knots array and one coef array, using an offset array to find
+        // specific curve data.
+        for (c, curve) in RgbCurveType::CURVES.iter().zip(state.value.curves()) {
+            curve.compute_knots_and_coefs(knots_coefs, *c as usize, false)?;
+        }
+        if knots_coefs.num_knots <= 0 {
+            knots_coefs.local_bypass = true;
+        }
+        Ok(())
+    }
+
+    /// A new property with the same value, knots and dynamic state.
+    ///
+    /// Port of `DynamicPropertyGradingRGBCurveImpl::createEditableCopy` (DynamicProperty.cpp:
+    /// 292-297 @ v2.5.2): it makes a property of the value, which fits the curves again, then
+    /// copies the knots over.
+    pub fn create_editable_copy(&self) -> Result<DynamicPropertyGradingRgbCurveImplRcPtr> {
+        let state = self.state().clone();
+        let res = DynamicPropertyGradingRgbCurveImpl::new(&state.value, self.is_dynamic())?;
+        res.state_mut().knots_coefs = state.knots_coefs;
+        Ok(Arc::new(res))
+    }
+
+    /// Whether two RGB curve properties are equal, as the optimizer sees it: a property
+    /// equals itself; two non-dynamic properties are equal when their curves are; a dynamic
+    /// property equals no other property.
+    ///
+    /// Port of `DynamicPropertyImpl::equals` (src/OpenColorIO/DynamicProperty.cpp:69-125 @
+    /// v2.5.2) for two GradingRGBCurve properties.
+    pub fn equals(&self, rhs: &DynamicPropertyGradingRgbCurveImpl) -> bool {
+        if std::ptr::eq(self, rhs) {
+            return true;
+        }
+        if self.is_dynamic() == rhs.is_dynamic() {
+            if !self.is_dynamic() {
+                // Both not dynamic, same value or not.
+                return self.state().value == rhs.state().value;
+            }
+            // Both dynamic, may not be same.
+            return false;
+        }
+        // One dynamic, not the other.
+        false
+    }
+}
+
+/// Port of `operator==(const DynamicProperty &, const DynamicProperty &)`
+/// (src/OpenColorIO/DynamicProperty.cpp:50-61 @ v2.5.2) for two RGB curve properties.
+impl PartialEq for DynamicPropertyGradingRgbCurveImpl {
+    fn eq(&self, other: &Self) -> bool {
+        self.equals(other)
+    }
+}
+
 /// A shared handle to a dynamic property of any kind: what `Processor::getDynamicProperty`
 /// returns. `==` compares the properties, as upstream's `operator==` on `DynamicProperty`
 /// references does.
@@ -192,6 +395,8 @@ impl PartialEq for DynamicPropertyDoubleImpl {
 pub enum DynamicPropertyRcPtr {
     /// Exposure, contrast or gamma.
     Double(DynamicPropertyDoubleImplRcPtr),
+    /// A GradingRGBCurve's curves.
+    GradingRgbCurve(DynamicPropertyGradingRgbCurveImplRcPtr),
 }
 
 impl DynamicPropertyRcPtr {
@@ -199,6 +404,7 @@ impl DynamicPropertyRcPtr {
     pub fn base(&self) -> &DynamicPropertyImpl {
         match self {
             DynamicPropertyRcPtr::Double(p) => p,
+            DynamicPropertyRcPtr::GradingRgbCurve(p) => p,
         }
     }
 
@@ -213,6 +419,12 @@ impl DynamicPropertyRcPtr {
     pub fn equals(&self, rhs: &DynamicPropertyRcPtr) -> bool {
         match (self, rhs) {
             (DynamicPropertyRcPtr::Double(l), DynamicPropertyRcPtr::Double(r)) => l.equals(r),
+            (
+                DynamicPropertyRcPtr::GradingRgbCurve(l),
+                DynamicPropertyRcPtr::GradingRgbCurve(r),
+            ) => l.equals(r),
+            (DynamicPropertyRcPtr::Double(_), _)
+            | (DynamicPropertyRcPtr::GradingRgbCurve(_), _) => false,
         }
     }
 }
@@ -220,6 +432,12 @@ impl DynamicPropertyRcPtr {
 impl From<DynamicPropertyDoubleImplRcPtr> for DynamicPropertyRcPtr {
     fn from(p: DynamicPropertyDoubleImplRcPtr) -> Self {
         DynamicPropertyRcPtr::Double(p)
+    }
+}
+
+impl From<DynamicPropertyGradingRgbCurveImplRcPtr> for DynamicPropertyRcPtr {
+    fn from(p: DynamicPropertyGradingRgbCurveImplRcPtr) -> Self {
+        DynamicPropertyRcPtr::GradingRgbCurve(p)
     }
 }
 

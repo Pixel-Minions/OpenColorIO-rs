@@ -16,6 +16,7 @@ use std::fmt;
 
 use crate::cfmt::{Crt, OStringStream};
 use crate::exception::{Exception, Result};
+use crate::math_utils::{sse_add, sse_mul, std_max};
 use crate::open_color_types::BSplineType;
 
 /// A 2D control point of a [`GradingBSplineCurve`]. `==` compares both coordinates as floats.
@@ -361,6 +362,518 @@ impl GradingBSplineCurve {
             }
         }
         os.put_str("]>");
+    }
+}
+
+/// The error of the hue curves' spline fitting, which comes with GradingHueCurve (Phase 5).
+pub const HUE_CURVES_NOT_PORTED: &str =
+    "GradingBSplineCurve: fitting the hue curves' splines is not ported yet (Phase 5).";
+
+/// The error where upstream's `AdjustRGBSlopes` reads past the control points (a control
+/// point's x is NaN): `docs/improvements.md` U-35.
+pub const READS_PAST_THE_CONTROL_POINTS: &str =
+    "RGB curve: fitting the curve would read past its control points.";
+
+/// The packed knots and coefficients of all the curves of a grading op, which its renderers
+/// evaluate: for curve `c`, `knots_offsets[2c]` and `knots_offsets[2c + 1]` are the offset and
+/// count of its knots in `knots`, `coefs_offsets[2c]` and `coefs_offsets[2c + 1]` those of
+/// its coefficients in `coefs` (the quadratic coefficients of every segment, then the linear
+/// ones, then the constant ones). An identity curve has offset -1 and count 0.
+///
+/// Port of `GradingBSplineCurveImpl::KnotsCoefs` (src/OpenColorIO/ops/gradingrgbcurve/
+/// GradingBSplineCurve.h:43-129 @ v2.5.2).
+#[derive(Debug, Clone, PartialEq)]
+pub struct KnotsCoefs {
+    /// `m_localBypass`: don't apply the op, all the curves are identities.
+    pub local_bypass: bool,
+    /// `m_knotsOffsetsArray`: offset and count per curve.
+    pub knots_offsets: Vec<i32>,
+    /// `m_coefsOffsetsArray`: offset and count per curve.
+    pub coefs_offsets: Vec<i32>,
+    /// `m_coefsArray`: [`KnotsCoefs::MAX_NUM_COEFS`] entries.
+    pub coefs: Vec<f32>,
+    /// `m_knotsArray`: [`KnotsCoefs::MAX_NUM_KNOTS`] entries.
+    pub knots: Vec<f32>,
+    /// `m_numCoefs`: the entries of `coefs` in use.
+    pub num_coefs: i32,
+    /// `m_numKnots`: the entries of `knots` in use.
+    pub num_knots: i32,
+}
+
+impl KnotsCoefs {
+    /// The most knots of all the curves together (GradingBSplineCurve.h:118).
+    pub const MAX_NUM_KNOTS: i32 = 120;
+    /// The most coefficients of all the curves together (GradingBSplineCurve.h:120).
+    pub const MAX_NUM_COEFS: i32 = 360;
+
+    /// Room for `num_curves` curves. Upstream leaves `m_localBypass` uninitialized; its users
+    /// set it before they read it (`precompute`).
+    ///
+    /// Port of `KnotsCoefs::KnotsCoefs(size_t)` (GradingBSplineCurve.cpp:1247-1254 @ v2.5.2).
+    pub fn new(num_curves: usize) -> Self {
+        KnotsCoefs {
+            local_bypass: false,
+            knots_offsets: vec![0; 2 * num_curves],
+            coefs_offsets: vec![0; 2 * num_curves],
+            coefs: vec![0.0; Self::MAX_NUM_COEFS as usize],
+            knots: vec![0.0; Self::MAX_NUM_KNOTS as usize],
+            num_coefs: 0,
+            num_knots: 0,
+        }
+    }
+
+    /// Curve `c` at `x`: `identity_x` for an identity curve, the line of the first segment's
+    /// slope below the first knot, the line of the last segment's end slope past the last
+    /// knot, and the segment's quadratic in between.
+    ///
+    /// Port of `KnotsCoefs::evalCurve` (GradingBSplineCurve.cpp:1258-1307 @ v2.5.2), in the
+    /// operand orders of each wheel's machine code, since a NaN input meets NaN coefficients
+    /// (degenerate curves give them; `docs/wheel-inspect.md`):
+    /// - Windows (`sub_1801e87d0`, which `GradingRGBCurveFwdOpCPU::apply` calls): `(x -
+    ///   knStart) * B + C` below; `offs + slope * (x - knEnd)` above, with `offs = ((t * A) + B)
+    ///   * t + C` and `slope = (A + A) * t + B`; `((t * A) + B) * t + C` in between;
+    /// - Linux (`0x3bc930`): `B * (x - knStart) + C` below; `offs + (x - knEnd) * slope` above,
+    ///   with `offs = ((A * t) + B) * t + C` and the same slope; `((A * t) + B) * t + C` in
+    ///   between.
+    ///
+    /// Both compute upstream's `2.f * A` as `A + A`, which gives the same bits.
+    pub fn eval_curve(&self, c: usize, x: f32, identity_x: f32) -> f32 {
+        let coefs_sets = self.coefs_offsets[2 * c + 1] / 3;
+        if coefs_sets == 0 {
+            return identity_x;
+        }
+        let coefs_offs = self.coefs_offsets[2 * c];
+        let knots_cnt = self.knots_offsets[2 * c + 1];
+        let knots_offs = self.knots_offsets[2 * c];
+        let knot = |i: i32| self.knots[(knots_offs + i) as usize];
+        let coef = |i: i32| self.coefs[(coefs_offs + i) as usize];
+        // `(A * t + B) * t + C`, with the product `A * t` in each wheel's order.
+        let quadratic = |a: f32, b: f32, c: f32, t: f32| {
+            let at = if WINDOWS {
+                sse_mul(t, a)
+            } else {
+                sse_mul(a, t)
+            };
+            sse_add(sse_mul(sse_add(at, b), t), c)
+        };
+
+        let kn_start = knot(0);
+        let kn_end = knot(knots_cnt - 1);
+
+        if x <= kn_start {
+            let b = coef(coefs_sets);
+            let c = coef(coefs_sets * 2);
+            let t = x - kn_start;
+            let bt = if WINDOWS {
+                sse_mul(t, b)
+            } else {
+                sse_mul(b, t)
+            };
+            sse_add(bt, c)
+        } else if x >= kn_end {
+            let a = coef(coefs_sets - 1);
+            let b = coef(coefs_sets * 2 - 1);
+            let c = coef(coefs_sets * 3 - 1);
+            let kn = knot(knots_cnt - 2);
+            let t = kn_end - kn;
+            let slope = sse_add(sse_mul(sse_add(a, a), t), b);
+            let offs = quadratic(a, b, c, t);
+            let xe = x - kn_end;
+            let rise = if WINDOWS {
+                sse_mul(slope, xe)
+            } else {
+                sse_mul(xe, slope)
+            };
+            sse_add(offs, rise)
+        } else {
+            let mut i = 0;
+            while i < knots_cnt - 2 {
+                if x < knot(i + 1) {
+                    break;
+                }
+                i += 1;
+            }
+            let a = coef(i);
+            let b = coef(coefs_sets + i);
+            let c = coef(coefs_sets * 2 + i);
+            let kn = knot(i);
+            quadratic(a, b, c, x - kn)
+        }
+    }
+
+    /// The inverse of curve `c` (a monotonic one) at `y`: `y` for an identity curve, the
+    /// inverses of the end lines outside the curve's range (the end knot where their slope is
+    /// nearly 0), and the segment's quadratic solved in between.
+    ///
+    /// Port of `KnotsCoefs::evalCurveRev` (GradingBSplineCurve.cpp:1311-1381 @ v2.5.2), in the
+    /// operand orders and operations of each wheel's machine code:
+    /// - Windows (`sub_1801e8970`, which `GradingRGBCurveRevOpCPU::apply` calls): the end
+    ///   lines' inverses add the knot second, as the source does; the quadratic's root is `kn -
+    ///   C0 / B` and `kn - (C0 + C0) / denom`, for upstream's `kn + (-C0 / B)` and `kn + (-2.f *
+    ///   C0) / denom`: the same values, but a NaN `C0` keeps its sign;
+    /// - Linux (`0x3bcab0`): the end lines' inverses add the knot first (`knStart + q`); the
+    ///   root is `kn + (-C0) / B` and `kn + (C0 * -2) / denom`, as the source.
+    ///
+    /// `knEndY` and the slope are computed as in [`eval_curve`](Self::eval_curve) on both,
+    /// `4.f * A` as `A * 4` (Windows) or `4 * A` (Linux), which give the same bits.
+    /// Upstream's unqualified `sqrt` of a `float` is `sqrtss` in both wheels (and `sqrtf` for
+    /// a negative argument, for `errno`): the same `float`.
+    pub fn eval_curve_rev(&self, c: usize, y: f32) -> f32 {
+        let coefs_sets = self.coefs_offsets[2 * c + 1] / 3;
+        if coefs_sets == 0 {
+            return y;
+        }
+        let coefs_offs = self.coefs_offsets[2 * c];
+        let knots_cnt = self.knots_offsets[2 * c + 1];
+        let knots_offs = self.knots_offsets[2 * c];
+        let knot = |i: i32| self.knots[(knots_offs + i) as usize];
+        let coef = |i: i32| self.coefs[(coefs_offs + i) as usize];
+        // `q + kn`, in each wheel's order.
+        let add_knot = |q: f32, kn: f32| {
+            if WINDOWS {
+                sse_add(q, kn)
+            } else {
+                sse_add(kn, q)
+            }
+        };
+
+        let kn_start = knot(0);
+        let kn_end = knot(knots_cnt - 1);
+        let kn_start_y = coef(coefs_sets * 2);
+        let kn_end_y = {
+            let a = coef(coefs_sets - 1);
+            let b = coef(coefs_sets * 2 - 1);
+            let c = coef(coefs_sets * 3 - 1);
+            let kn = knot(knots_cnt - 2);
+            let t = kn_end - kn;
+            sse_add(sse_mul(sse_add(sse_mul(a, t), b), t), c)
+        };
+
+        if y <= kn_start_y {
+            // Extrapolate low side.
+            let b = coef(coefs_sets);
+            let c = coef(coefs_sets * 2);
+            if b.abs() < 1e-5 {
+                kn_start
+            } else {
+                add_knot((y - c) / b, kn_start)
+            }
+        } else if y >= kn_end_y {
+            // Extrapolate high side.
+            let a = coef(coefs_sets - 1);
+            let b = coef(coefs_sets * 2 - 1);
+            let kn = knot(knots_cnt - 2);
+            let t = kn_end - kn;
+            let slope = sse_add(sse_mul(sse_add(a, a), t), b);
+            // `offs` is `knEndY`: the same expression, which both wheels compute once.
+            let offs = kn_end_y;
+            if slope.abs() < 1e-5 {
+                kn_end
+            } else {
+                add_knot((y - offs) / slope, kn_end)
+            }
+        } else {
+            let mut i = 0;
+            while i < knots_cnt - 2 {
+                if y < coef(coefs_sets * 2 + i + 1) {
+                    break;
+                }
+                i += 1;
+            }
+            let a = coef(i);
+            let b = coef(coefs_sets + i);
+            let c = coef(coefs_sets * 2 + i);
+            let kn = knot(i);
+            let c0 = c - y;
+            let four_a = if WINDOWS {
+                sse_mul(a, 4.0)
+            } else {
+                sse_mul(4.0, a)
+            };
+            let discrim = (sse_mul(b, b) - sse_mul(four_a, c0)).sqrt();
+            let denom = sse_add(discrim, b);
+            if denom.abs() < 1e-5 {
+                // A~=0, B<0: linear segment with negative slope; use linear inverse.
+                return if b.abs() < 1e-5 {
+                    kn
+                } else if WINDOWS {
+                    kn - c0 / b
+                } else {
+                    sse_add(kn, -c0 / b)
+                };
+            }
+            if WINDOWS {
+                kn - sse_add(c0, c0) / denom
+            } else {
+                sse_add(kn, sse_mul(c0, -2.0) / denom)
+            }
+        }
+    }
+}
+
+/// Whether this is the Windows build, whose wheel's machine code orders some operands
+/// differently from the Linux wheel's (D12).
+const WINDOWS: bool = cfg!(target_os = "windows");
+
+/// The slopes at the control points of an RGB curve, when the user gives none: weighted means
+/// of the secants on either side (by their lengths, over runs of equal secants), and at the
+/// ends a slope of at least 0.01.
+///
+/// Port of `EstimateRGBSlopes` (src/OpenColorIO/ops/gradingrgbcurve/GradingBSplineCurve.cpp:
+/// 335-384 @ v2.5.2).
+fn estimate_rgb_slopes(ctrl_pnts: &[GradingControlPoint], slopes: &mut Vec<f32>) {
+    let mut secant_slope = Vec::new();
+    let mut secant_len = Vec::new();
+    let num_ctrl_pnts = ctrl_pnts.len();
+    for i in 0..num_ctrl_pnts - 1 {
+        let del_x = ctrl_pnts[i + 1].x - ctrl_pnts[i].x;
+        let del_y = ctrl_pnts[i + 1].y - ctrl_pnts[i].y;
+        secant_slope.push(del_y / del_x);
+        secant_len.push((del_x * del_x + del_y * del_y).sqrt());
+    }
+    if num_ctrl_pnts == 2 {
+        slopes.push(secant_slope[0]);
+        slopes.push(secant_slope[0]);
+        return;
+    }
+    let mut i = 0;
+    loop {
+        let mut j = i;
+        let mut dl = secant_len[i];
+        while j < num_ctrl_pnts - 2 && (secant_slope[j + 1] - secant_slope[j]).abs() < 1e-6 {
+            dl += secant_len[j + 1];
+            j += 1;
+        }
+        for len in &mut secant_len[i..=j] {
+            *len = dl;
+        }
+        if j >= num_ctrl_pnts - 3 {
+            break;
+        }
+        i = j + 1;
+    }
+    slopes.push(0.0);
+    for k in 1..num_ctrl_pnts - 1 {
+        let s = (secant_len[k] * secant_slope[k] + secant_len[k - 1] * secant_slope[k - 1])
+            / (secant_len[k] + secant_len[k - 1]);
+        slopes.push(s);
+    }
+    slopes.push(std_max(
+        0.01,
+        0.5 * (3.0 * secant_slope[num_ctrl_pnts - 2] - slopes[num_ctrl_pnts - 2]),
+    ));
+    slopes[0] = std_max(0.01, 0.5 * (3.0 * secant_slope[0] - slopes[1]));
+}
+
+/// The knots and coefficients of the quadratic B-spline through the control points with the
+/// given slopes: one segment between two points whose slopes average to the secant, two
+/// segments with a knot `ksi` between them otherwise.
+///
+/// Port of `FitRGBSpline` (GradingBSplineCurve.cpp:388-446 @ v2.5.2).
+fn fit_rgb_spline(
+    ctrl_pnts: &[GradingControlPoint],
+    slopes: &[f32],
+    knots: &mut Vec<f32>,
+    coefs_a: &mut Vec<f32>,
+    coefs_b: &mut Vec<f32>,
+    coefs_c: &mut Vec<f32>,
+) {
+    let num_ctrl_pnts = ctrl_pnts.len();
+
+    knots.push(ctrl_pnts[0].x);
+    for i in 0..num_ctrl_pnts - 1 {
+        let xi = ctrl_pnts[i].x;
+        let xi_pl1 = ctrl_pnts[i + 1].x;
+        let yi = ctrl_pnts[i].y;
+        let yi_pl1 = ctrl_pnts[i + 1].y;
+        let del_x = xi_pl1 - xi;
+        let del_y = yi_pl1 - yi;
+        let secant_slope = del_y / del_x;
+        if ((slopes[i] + slopes[i + 1]) - 2.0 * secant_slope).abs() < 1e-6 {
+            coefs_c.push(yi);
+            coefs_b.push(slopes[i]);
+            coefs_a.push(0.5 * (slopes[i + 1] - slopes[i]) / del_x);
+        } else {
+            let aa = slopes[i] - secant_slope;
+            let bb = slopes[i + 1] - secant_slope;
+            let ksi = if aa * bb >= 0.0 {
+                (xi + xi_pl1) * 0.5
+            } else if aa.abs() > bb.abs() {
+                xi_pl1 + aa * del_x / (slopes[i + 1] - slopes[i])
+            } else {
+                xi + bb * del_x / (slopes[i + 1] - slopes[i])
+            };
+            let s_bar = (2.0 * secant_slope - slopes[i + 1])
+                + (slopes[i + 1] - slopes[i]) * (ksi - xi) / del_x;
+            let eta = (s_bar - slopes[i]) / (ksi - xi);
+            coefs_c.push(yi);
+            coefs_b.push(slopes[i]);
+            coefs_a.push(0.5 * eta);
+            coefs_c.push(yi + slopes[i] * (ksi - xi) + 0.5 * eta * (ksi - xi) * (ksi - xi));
+            coefs_b.push(s_bar);
+            coefs_a.push(0.5 * (slopes[i + 1] - s_bar) / (xi_pl1 - ksi));
+            knots.push(ksi);
+        }
+        knots.push(xi_pl1);
+    }
+}
+
+/// Scales the slopes of the segments whose middle slope would be negative, so that the curve
+/// stays monotonic; whether it changed any.
+///
+/// Port of `AdjustRGBSlopes` (GradingBSplineCurve.cpp:450-488 @ v2.5.2). Upstream pairs each knot
+/// that isn't a control point's x with the next control point. A NaN x matches no knot, so
+/// upstream walks past the last control point and reads memory it doesn't own; the port
+/// refuses the curve there instead ([`READS_PAST_THE_CONTROL_POINTS`], `docs/improvements.md`
+/// U-35).
+fn adjust_rgb_slopes(
+    ctrl_pnts: &[GradingControlPoint],
+    slopes: &mut [f32],
+    knots: &[f32],
+) -> Result<bool> {
+    let mut adjustment_done = false;
+    let (mut i, mut j) = (0, 0);
+    let n = knots.len();
+    while j < n {
+        if ctrl_pnts[i].x != knots[j] {
+            if i + 1 >= ctrl_pnts.len() {
+                return Err(Exception::new(READS_PAST_THE_CONTROL_POINTS));
+            }
+            let ksi = knots[j];
+            let xi = ctrl_pnts[i].x;
+            let xi_pl1 = ctrl_pnts[i + 1].x;
+            let yi = ctrl_pnts[i].y;
+            let yi_pl1 = ctrl_pnts[i + 1].y;
+            let s_bar =
+                (2.0 * (yi_pl1 - yi) - (ksi - xi) * slopes[i] - (xi_pl1 - ksi) * slopes[i + 1])
+                    / (xi_pl1 - xi);
+            if s_bar < 0.0 {
+                adjustment_done = true;
+                let secant = (yi_pl1 - yi) / (xi_pl1 - xi);
+                let blend_slope =
+                    ((ksi - xi) * slopes[i] + (xi_pl1 - ksi) * slopes[i + 1]) / (xi_pl1 - xi);
+                let mut aim_slope = 0.01 * 0.5 * (slopes[i] + slopes[i + 1]);
+                if aim_slope > secant {
+                    aim_slope = secant;
+                }
+                let adjust = (2.0 * secant - aim_slope) / blend_slope;
+                slopes[i] *= adjust;
+                slopes[i + 1] *= adjust;
+            }
+            i += 1;
+        }
+        j += 1;
+    }
+    Ok(adjustment_done)
+}
+
+impl GradingBSplineCurve {
+    /// Fits this curve (curve `curve_idx` of the op) and adds its knots and coefficients to
+    /// `knots_coefs`. Only `B_SPLINE` curves, the RGB curves' type, are fitted here; the hue
+    /// curves' types come with GradingHueCurve ([`HUE_CURVES_NOT_PORTED`]).
+    ///
+    /// Port of `GradingBSplineCurveImpl::computeKnotsAndCoefs` (GradingBSplineCurve.cpp:
+    /// 1009-1019 @ v2.5.2).
+    pub fn compute_knots_and_coefs(
+        &self,
+        knots_coefs: &mut KnotsCoefs,
+        curve_idx: usize,
+        draw_curve_only: bool,
+    ) -> Result<()> {
+        let _ = draw_curve_only;
+        if self.spline_type == BSplineType::BSpline {
+            self.compute_knots_and_coefs_for_rgb_curve(knots_coefs, curve_idx)
+        } else {
+            Err(Exception::new(HUE_CURVES_NOT_PORTED))
+        }
+    }
+
+    /// An identity curve, or one of fewer than 2 points, gets offset -1 and count 0; any other
+    /// is fitted with the given slopes, or estimated ones, adjusted once to stay monotonic.
+    ///
+    /// Port of `GradingBSplineCurveImpl::computeKnotsAndCoefsForRGBCurve`
+    /// (GradingBSplineCurve.cpp:793-860 @ v2.5.2).
+    fn compute_knots_and_coefs_for_rgb_curve(
+        &self,
+        knots_coefs: &mut KnotsCoefs,
+        curve_idx: usize,
+    ) -> Result<()> {
+        // Skip invalid data and identity.
+        if self.control_points.len() < 2 || self.is_identity() {
+            // Identity curve: offset is -1 and count is 0.
+            knots_coefs.knots_offsets[curve_idx * 2] = -1;
+            knots_coefs.knots_offsets[curve_idx * 2 + 1] = 0;
+            knots_coefs.coefs_offsets[curve_idx * 2] = -1;
+            knots_coefs.coefs_offsets[curve_idx * 2 + 1] = 0;
+            return Ok(());
+        }
+        let mut knots = Vec::new();
+        let mut coefs_a = Vec::new();
+        let mut coefs_b = Vec::new();
+        let mut coefs_c = Vec::new();
+        let mut slopes = Vec::new();
+
+        if !self.slopes_are_default() && self.slopes.len() == self.control_points.len() {
+            // If the user-supplied slopes are non-zero, use those.
+            slopes.clone_from(&self.slopes);
+        } else {
+            // Otherwise, estimate slopes based on the control points.
+            estimate_rgb_slopes(&self.control_points, &mut slopes);
+        }
+
+        let points = &self.control_points;
+        fit_rgb_spline(
+            points,
+            &slopes,
+            &mut knots,
+            &mut coefs_a,
+            &mut coefs_b,
+            &mut coefs_c,
+        );
+
+        if adjust_rgb_slopes(points, &mut slopes, &knots)? {
+            knots.clear();
+            coefs_a.clear();
+            coefs_b.clear();
+            coefs_c.clear();
+            fit_rgb_spline(
+                points,
+                &slopes,
+                &mut knots,
+                &mut coefs_a,
+                &mut coefs_b,
+                &mut coefs_c,
+            );
+        }
+
+        let num_knots = knots_coefs.num_knots;
+        let new_knots = knots.len() as i32;
+        let num_coefs = knots_coefs.num_coefs;
+        let new_coefs = (coefs_a.len() * 3) as i32;
+
+        if num_knots + new_knots > KnotsCoefs::MAX_NUM_KNOTS
+            || num_coefs + new_coefs > KnotsCoefs::MAX_NUM_COEFS
+        {
+            return Err(Exception::new(
+                "RGB curve: maximum number of control points reached.",
+            ));
+        }
+
+        knots_coefs.knots_offsets[curve_idx * 2] = num_knots;
+        knots_coefs.knots_offsets[curve_idx * 2 + 1] = new_knots;
+        knots_coefs.coefs_offsets[curve_idx * 2] = num_coefs;
+        knots_coefs.coefs_offsets[curve_idx * 2 + 1] = new_coefs;
+
+        let coefs_size = coefs_a.len();
+        let (nk, nc) = (num_knots as usize, num_coefs as usize);
+        knots_coefs.knots[nk..nk + knots.len()].copy_from_slice(&knots);
+        knots_coefs.coefs[nc..nc + coefs_size].copy_from_slice(&coefs_a);
+        knots_coefs.coefs[nc + coefs_size..nc + 2 * coefs_size].copy_from_slice(&coefs_b);
+        knots_coefs.coefs[nc + 2 * coefs_size..nc + 3 * coefs_size].copy_from_slice(&coefs_c);
+
+        knots_coefs.num_knots += new_knots;
+        knots_coefs.num_coefs += new_coefs;
+        Ok(())
     }
 }
 

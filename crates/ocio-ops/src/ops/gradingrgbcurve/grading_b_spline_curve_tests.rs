@@ -123,3 +123,17 @@ fn equals() {
     curve4.control_point_mut(2).unwrap().y = 0.9;
     assert!(!(curve1 == curve4));
 }
+
+/// A NaN x coordinate matches no knot, so upstream's `AdjustRGBSlopes` would read past the
+/// control points: the port refuses to fit the curve there (U-35). A curve of numbers fits.
+#[test]
+fn a_nan_x_coordinate_is_refused_where_upstream_reads_past_the_points() {
+    let fit = |xy: &[(f32, f32)]| {
+        let curve = GradingBSplineCurve::with_points(&points(xy));
+        let mut knots_coefs = KnotsCoefs::new(4);
+        curve.compute_knots_and_coefs(&mut knots_coefs, 0, false)
+    };
+    let error = fit(&[(f32::NAN, 0.0), (0.5, 0.5), (1.0, 1.0)]).unwrap_err();
+    assert_eq!(error.message(), READS_PAST_THE_CONTROL_POINTS);
+    fit(&[(0.0, 0.0), (0.5, 0.25), (1.0, 1.0)]).unwrap();
+}
