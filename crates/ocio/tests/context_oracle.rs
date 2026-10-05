@@ -3,9 +3,11 @@
 
 //! `ocio::Context` against the wheel's, through the oracle's `context_calls`: the same
 //! operations on both, then everything the context says compared byte for byte: its cache ID,
-//! `operator<<` (repr), search paths, working directory, environment mode and variables, and the
-//! strings it resolves with the variables they used. The environment is the same on both (the
-//! oracle's holds exactly the request's variables).
+//! `operator<<` (repr), search paths, working directory, environment mode and variables; the
+//! strings and file locations it resolves, with the variables they used, and the exceptions
+//! (`ExceptionMissingFile` and its message) where a file isn't found. Files live in a directory
+//! of this checkout's target directory, given to both by its absolute path; the environment is
+//! the same on both (the oracle's holds exactly the request's variables).
 
 use std::sync::Arc;
 
@@ -14,6 +16,7 @@ use ocio_ops::open_color_types::EnvironmentMode;
 use ocio_ops::platform::{EnvProvider, MapEnv, set_env_provider};
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle_values::{bytes, result, result_bytes};
+use ocio_testkit::paths::target_dir;
 use serde_json::{Value, json};
 
 /// One operation, on the port's context and as a `context_calls` call.
@@ -30,6 +33,7 @@ enum Op {
     /// `copy.deepcopy`: createEditableCopy, which the next operations act on.
     Copy,
     ResolveStringVar(Vec<u8>),
+    ResolveFileLocation(Vec<u8>),
 }
 
 fn hex(bytes: &[u8]) -> String {
@@ -81,6 +85,12 @@ fn calls(ops: &[Op]) -> Vec<Value> {
             Op::ResolveStringVar(s) => {
                 out.push(json!({"new": "Context", "as": "used"}));
                 out.push(json!({"call": "resolveStringVar", "on": on,
+                                "args": [text(s), {"ref": "used"}]}));
+                out.push(json!({"call": "getStringVars", "on": "used"}));
+            }
+            Op::ResolveFileLocation(s) => {
+                out.push(json!({"new": "Context", "as": "used"}));
+                out.push(json!({"call": "resolveFileLocation", "on": on,
                                 "args": [text(s), {"ref": "used"}]}));
                 out.push(json!({"call": "getStringVars", "on": "used"}));
             }
@@ -165,6 +175,29 @@ fn check(name: &str, env: &[(&str, &str)], ops: &[Op]) {
                 assert_eq!(r, wheel_text(w.next().unwrap()), "{what}");
                 assert_eq!(port_pairs(&used), wheel_pairs(w.next().unwrap()), "{what}");
             }
+            Op::ResolveFileLocation(s) => {
+                let mut used = Context::new();
+                let r = context.resolve_file_location_with_used(s, &mut used);
+                w.next();
+                let call = w.next().unwrap();
+                match r {
+                    Ok(path) => assert_eq!(path, wheel_text(call), "{what}: {call}"),
+                    Err(e) => {
+                        let exc = &call["exception"];
+                        assert_eq!(
+                            exc["type"],
+                            if e.is_missing_file() {
+                                "ExceptionMissingFile"
+                            } else {
+                                "Exception"
+                            },
+                            "{what}: {call}"
+                        );
+                        assert_eq!(e.what(), bytes(&exc["message"]), "{what}");
+                    }
+                }
+                assert_eq!(port_pairs(&used), wheel_pairs(w.next().unwrap()), "{what}");
+            }
         }
         if matches!(
             op,
@@ -231,6 +264,25 @@ fn b(s: &str) -> Vec<u8> {
 
 #[test]
 fn contexts_match_the_wheel() {
+    // The files the contexts look for.
+    let root = target_dir().join("context_oracle_files");
+    for file in [
+        "luts/a.spi1d",
+        "shots/s01/luts/b.spi1d",
+        "shots/s01/c.cube",
+        "d.clf",
+    ] {
+        let path = root.join(file);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"x").unwrap();
+    }
+    let root_text = root.to_str().unwrap().to_string();
+    let root_text = root_text
+        .strip_prefix(r"\\?\")
+        .unwrap_or(&root_text)
+        .to_string();
+    let dir = |rel: &str| b(&format!("{root_text}/{rel}"));
+
     check(
         "setters",
         &[],
@@ -288,6 +340,31 @@ fn contexts_match_the_wheel() {
             Op::LoadEnvironment,
             Op::Copy,
             Op::LoadEnvironment,
+        ],
+    );
+
+    check(
+        "files",
+        &[],
+        &[
+            Op::SetWorkingDir(dir("")),
+            Op::ResolveFileLocation(b("d.clf")),
+            Op::ResolveFileLocation(b("missing.clf")),
+            Op::AddSearchPath(b("luts")),
+            Op::AddSearchPath(b("shots/$SHOT/luts/ ")),
+            Op::AddSearchPath(dir("shots/$SHOT")),
+            Op::SetStringVar(b("SHOT"), Some(b("s01"))),
+            Op::ResolveFileLocation(b("a.spi1d")),
+            Op::ResolveFileLocation(b("b.spi1d")),
+            Op::ResolveFileLocation(b("b.spi1d")),
+            Op::ResolveFileLocation(b("c.cube")),
+            Op::ResolveFileLocation(b("missing.spi1d")),
+            Op::SetStringVar(b("FILE"), Some(b("a.spi1d"))),
+            Op::ResolveFileLocation(b("$FILE")),
+            Op::ResolveFileLocation(dir("d.clf")),
+            Op::ResolveFileLocation(dir("./luts/../d.clf")),
+            Op::ResolveFileLocation(dir("missing.clf")),
+            Op::ResolveFileLocation(b("")),
         ],
     );
 }
