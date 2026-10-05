@@ -1272,6 +1272,32 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   checks every code unit against `RtlUpcaseUnicodeChar`, so a machine with another table fails
   there. The alternative, calling the system (FFI, `unsafe`), is the owner's decision.
 
+### I-122. A file rule's regular expression means different things on Windows and Linux
+
+- **Upstream:** OCIO compiles and matches a file rule's regular expression with the C++
+  library's `std::regex` (ECMAScript): MSVC's STL in the Windows wheel, GCC 14's libstdc++ in
+  the Linux wheel. They accept different expressions, read some differently, and word their
+  errors differently. In the Linux wheel:
+  - a quantifier may follow a quantifier (`a**`, `a{2}{3}`); `]` and `}` are ordinary
+    characters; `\cX` is `X` itself; `\0` is NUL and the digits after it ordinary characters;
+    `\uNNNN` keeps the low byte; a range compares its ends as signed `char`s
+    (`[\x7f-\x81]` is refused);
+  - `^` and `$` match only at the ends of the text (the Windows wheel also matches them after
+    and before a `\n`);
+  - a back reference to a group that matched nothing fails (Windows: matches empty); a
+    repetition keeps its groups' captures from one iteration to the next; an iteration may
+    match empty (at most twice at a position);
+  - collating elements and equivalence classes take POSIX names (`[[.space.]]`); the errors are
+    libstdc++'s texts, or `regex_error` alone.
+  In the Windows wheel, a collating element (`[[.a.]]`) matches only at the end of the text
+  (`_Lookup_coll` compares up to the end of the text), and a match gives up with
+  `error_stack` past 600 nested matches and `error_complexity` past ten million steps.
+- **Who notices:** configs whose regex file rules use these constructs, shared between Windows
+  and Linux.
+- **Decided** (D12): the port does what each wheel does.
+- **Status:** matched in `p3-regex`: the MSVC parser (3.9a), the libstdc++ parser and its NFA
+  state limit (3.9c); the matchers come with 3.9b and 3.9d.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
@@ -1746,3 +1772,23 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   the port refuses what the wheel accepts; the limit is a choice for the owner.
 - **Status:** matched in `p3-regex` (3.9a, `std_regex/msvc.rs`); libstdc++'s parser comes in a
   later chunk.
+
+### U-54. Regular expressions and texts too large for the Linux wheel's stack
+
+- **Upstream:** libstdc++'s regex compiler recurses once per term of an alternative and once
+  per nested group, and its matcher once per step of a match. The Linux wheel's stack overflows
+  (the process ends) compiling about 75,000 terms in a row or about 14,100 to 14,500 nested
+  groups, and matching paths of about 14,000 (`(a|b)*`) to 58,000 (`a*?`) characters; the
+  depths vary between runs.
+- **Who notices:** configs and applications with machine-made rules, or very long paths.
+- **Decided** (owner, 2026-10-05: fixed limits below the crash points, each error the closest
+  existing one):
+  - an expression of more than 50,000 terms is refused with the state limit's
+    `error_space` ("Number of NFA states exceeds limit. ...");
+  - groups nested deeper than 5,000 are refused with `error_stack`, whose `what()` is
+    `regex_error` (a code without a message);
+  - a text longer than 8,192 bytes, or a match whose recursion would go deeper than 100,000
+    levels, is refused with that `error_stack` too (with the matcher, 3.9d).
+  Between these limits and the wheel's crashes the port refuses what the wheel accepts.
+- **Status:** matched in `p3-regex` (3.9c, `std_regex/libstdcxx.rs`; the text limits with
+  3.9d).

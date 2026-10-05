@@ -19,12 +19,13 @@
 //!   wheel with MSVC 14.44; its `regex_error` is thrown by `_Xregex_error` in `msvcp140.dll`).
 //!   It is translated here from the headers of MSVC 14.44.35207 (Apache-2.0 WITH
 //!   LLVM-exception, owner decision D3, notice in NOTICE): [`msvc`].
-//! - the Linux wheel, GCC's libstdc++, which is not translated: its behavior is reproduced
-//!   from the C++ standard ([re.grammar], ECMA-262 3rd edition) and checked against the
-//!   Linux wheel. It comes with a later chunk of `p3-regex`.
+//! - the Linux wheel, GCC 14's libstdc++, which is not translated (it is GPL with the runtime
+//!   exception): its behavior is reproduced from the C++ standard ([re.grammar], ECMA-262 3rd
+//!   edition) and the Linux wheel, black-box: [`libstdcxx`].
 //!
 //! An expression is bytes, as C++ `char`s: no Unicode, no locale but the classic one.
 
+pub mod libstdcxx;
 pub mod msvc;
 
 /// The C++ library whose `std::regex` the port reproduces.
@@ -32,6 +33,8 @@ pub mod msvc;
 pub enum Library {
     /// Microsoft's STL, the Windows wheel's.
     Msvc,
+    /// GCC's libstdc++, the Linux wheel's.
+    Libstdcxx,
 }
 
 /// The kind of a `std::regex_error`.
@@ -100,7 +103,14 @@ impl std::error::Error for RegexError {}
 /// A compiled expression: `std::regex(pattern)`.
 #[derive(Debug, Clone)]
 pub struct Regex {
-    program: msvc::Program,
+    program: Program,
+}
+
+/// The compiled form of each library.
+#[derive(Debug, Clone)]
+enum Program {
+    Msvc(msvc::Program),
+    Libstdcxx(libstdcxx::Program),
 }
 
 impl Regex {
@@ -110,13 +120,19 @@ impl Regex {
     pub fn new(pattern: &[u8], library: Library) -> Result<Regex, RegexError> {
         match library {
             Library::Msvc => Ok(Regex {
-                program: msvc::compile(pattern)?,
+                program: Program::Msvc(msvc::compile(pattern)?),
+            }),
+            Library::Libstdcxx => Ok(Regex {
+                program: Program::Libstdcxx(libstdcxx::compile(pattern)?),
             }),
         }
     }
 
     /// The number of capture groups (`mark_count()`).
     pub fn mark_count(&self) -> usize {
-        self.program.mark_count() - 1
+        match &self.program {
+            Program::Msvc(p) => p.mark_count() - 1,
+            Program::Libstdcxx(p) => p.mark_count() - 1,
+        }
     }
 }
