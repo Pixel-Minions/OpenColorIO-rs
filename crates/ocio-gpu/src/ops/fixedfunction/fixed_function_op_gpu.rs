@@ -4,15 +4,12 @@
 //! Port of `src/OpenColorIO/ops/fixedfunction/FixedFunctionOpGPU.h` and
 //! `FixedFunctionOpGPU.cpp` @ v2.5.2: the FixedFunction op's GPU writer.
 //!
-//! So far the ACES 1.x styles: the red modifiers 0.3 and 1.0, the glows 0.3 and 1.0, the dark
-//! to dim surround 1.0 and the gamut compression 1.3, forward and inverse (chunk 2.3f); the
-//! Rec.2100 surround, RGB to and from HSV and the three HSYs, and XYZ to and from xyY, u'v'Y
-//! and CIELUV (2.3g1); PQ, the gamma-log and the double-log curves (2.3g2), with `double`
-//! parameters as upstream reads them; ACES 2.0's RGB to and from JMh (2.4f1), its tone scale
-//! and chroma compression, with the reach table as a texture (2.4f2), and its gamut
-//! compression, with the cusp table as a texture and the hues as a constant array (2.4g). The
-//! ACES 2.0 output transform comes with chunk 2.4h; until then
-//! [`get_fixed_function_gpu_processing_text`] refuses it ([`not_ported`]).
+//! Every style: the ACES 1.x ones (chunk 2.3f); the Rec.2100 surround, RGB to and from HSV and
+//! the three HSYs, and XYZ to and from xyY, u'v'Y and CIELUV (2.3g1); PQ, the gamma-log and the
+//! double-log curves (2.3g2), with `double` parameters as upstream reads them; ACES 2.0's RGB
+//! to and from JMh (2.4f1), its tone scale and chroma compression, with the reach table as a
+//! texture (2.4f2), its gamut compression, with the cusp table as a texture and the hues as a
+//! constant array (2.4g), and its output transform (2.4h).
 //!
 //! Upstream writes `float` values into the text with `operator<<`, which formats them with
 //! `getFloatString` (`GpuShaderText`'s stream operators); the constants it derives from them
@@ -42,14 +39,6 @@ use crate::GpuLanguage;
 use crate::gpu_shader::{TextureDimensions, TextureType};
 use crate::gpu_shader_desc::GpuShaderDesc;
 use crate::gpu_shader_utils::GpuShaderText;
-
-/// The port's error for a style whose shader isn't ported yet.
-pub fn not_ported(style: FixedFunctionOpStyle) -> Exception {
-    Exception::new(format!(
-        "The GPU writer of FixedFunction style {} is not ported yet.",
-        style.to_str(true)
-    ))
-}
 
 /// `(float) params[i]`, or [`SHORT_PARAMS`] where upstream would read past the parameters
 /// (`docs/improvements.md` U-31).
@@ -3384,6 +3373,131 @@ fn add_gamut_compress_shader(
     add_gamut_compress_shader_(shader_creator, st, resource_index, &s, &g, invert)
 }
 
+/// A block of the output transform: an empty line, the comment, an empty line.
+fn write_aces2_section(st: &GpuShaderText, comment: &str) {
+    st.new_line().put("");
+    st.new_line().put(comment);
+    st.new_line().put("");
+}
+
+/// Port of `Add_ACES_OutputTransform_Fwd_Shader` (FixedFunctionOpGPU.cpp:1287-1366 @ v2.5.2).
+fn add_aces_output_transform_fwd_shader(
+    shader_creator: &mut GpuShaderDesc,
+    st: &GpuShaderText,
+    func: &FixedFunctionOpData,
+) -> Result<()> {
+    let (p_in, p_lim, t, s, g) = aces2_gamut_params(func)?;
+    let c = init_chroma_compress_params(param_f32(func, 0)?, &t);
+
+    let resource_index = shader_creator.next_resource_index();
+
+    let reach_name = add_reach_table(shader_creator, resource_index, &s.reach_m_table)?;
+    let tonescale_name_fwd = add_tonescale_func(shader_creator, resource_index, false, &p_in, &t)?;
+    let pxl = shader_creator.pixel_name().to_vec();
+
+    write_aces2_section(st, "// Add RGB to JMh");
+    add_rgb_to_jmh_shader_(&pxl, st, &p_in)?;
+    add_sin_cos_shader(&pxl, st)?;
+
+    write_aces2_section(st, "// Add ToneScale and ChromaCompress (fwd)");
+
+    st.new_line()
+        .put(st.float_decl("J_ts")?)
+        .put(" = ")
+        .put(&tonescale_name_fwd)
+        .put("(")
+        .put(&pxl)
+        .put(".r);");
+
+    st.new_line().put("// Sample tables (fwd)");
+    st.new_line()
+        .put(st.float_decl("reachMaxM")?)
+        .put(" = ")
+        .put(&reach_name)
+        .put("_sample(")
+        .put(&pxl)
+        .put(".b);");
+
+    st.new_line().put("");
+
+    st.new_line().put("{");
+    st.indent();
+    add_tonescale_compress_fwd_shader_(shader_creator, st, resource_index, &s, &c)?;
+    st.dedent();
+    st.new_line().put("}");
+
+    write_aces2_section(st, "// Add GamutCompress (fwd)");
+    st.new_line().put("{");
+    st.indent();
+    add_gamut_compress_shader_(shader_creator, st, resource_index, &s, &g, false)?;
+    st.dedent();
+    st.new_line().put("}");
+
+    write_aces2_section(st, "// Add JMh to RGB");
+    st.new_line().put("{");
+    st.indent();
+    add_jmh_to_rgb_shader_(&pxl, st, &p_lim)?;
+    st.dedent();
+    st.new_line().put("}");
+    Ok(())
+}
+
+/// Port of `Add_ACES_OutputTransform_Inv_Shader` (FixedFunctionOpGPU.cpp:1368-1440 @ v2.5.2).
+fn add_aces_output_transform_inv_shader(
+    shader_creator: &mut GpuShaderDesc,
+    st: &GpuShaderText,
+    func: &FixedFunctionOpData,
+) -> Result<()> {
+    let (p_in, p_lim, t, s, g) = aces2_gamut_params(func)?;
+    let c = init_chroma_compress_params(param_f32(func, 0)?, &t);
+
+    let resource_index = shader_creator.next_resource_index();
+    let pxl = shader_creator.pixel_name().to_vec();
+
+    let reach_name = add_reach_table(shader_creator, resource_index, &s.reach_m_table)?;
+    let tonescale_name_inv = add_tonescale_func(shader_creator, resource_index, true, &p_in, &t)?;
+
+    write_aces2_section(st, "// Add RGB to JMh");
+    add_rgb_to_jmh_shader_(&pxl, st, &p_lim)?;
+    add_sin_cos_shader(&pxl, st)?;
+
+    st.new_line()
+        .put(st.float_decl("reachMaxM")?)
+        .put(" = ")
+        .put(&reach_name)
+        .put("_sample(")
+        .put(&pxl)
+        .put(".b);");
+    write_aces2_section(st, "// Add GamutCompress (inv)");
+    st.new_line().put("{");
+    st.indent();
+    add_gamut_compress_shader_(shader_creator, st, resource_index, &s, &g, true)?;
+    st.dedent();
+    st.new_line().put("}");
+
+    write_aces2_section(st, "// Add ToneScale and ChromaCompress (inv)");
+    st.new_line()
+        .put(st.float_decl("J")?)
+        .put(" = ")
+        .put(&tonescale_name_inv)
+        .put("(")
+        .put(&pxl)
+        .put(".r);");
+    st.new_line().put("{");
+    st.indent();
+    add_tonescale_compress_inv_shader_(shader_creator, st, resource_index, &s, &c)?;
+    st.dedent();
+    st.new_line().put("}");
+
+    write_aces2_section(st, "// Add JMh to RGB");
+    st.new_line().put("{");
+    st.indent();
+    add_jmh_to_rgb_shader_(&pxl, st, &p_in)?;
+    st.dedent();
+    st.new_line().put("}");
+    Ok(())
+}
+
 /// Adds the code of a FixedFunction op to `shader_creator`'s function body.
 ///
 /// Port of `GetFixedFunctionGPUShaderProgram` (FixedFunctionOpGPU.cpp:2225-2231 @ v2.5.2).
@@ -3398,8 +3512,7 @@ pub fn get_fixed_function_gpu_shader_program(
 }
 
 /// Writes the code of a FixedFunction op into `st`: a comment naming the style, then the
-/// style's shader in a block. The styles whose shaders aren't ported yet are the port's error
-/// ([`not_ported`]).
+/// style's shader in a block.
 ///
 /// Port of `GetFixedFunctionGPUProcessingText` (FixedFunctionOpGPU.cpp:2233-2491 @ v2.5.2).
 pub fn get_fixed_function_gpu_processing_text(
@@ -3473,7 +3586,8 @@ pub fn get_fixed_function_gpu_processing_text(
         }
         AcesGamutCompress20Fwd => add_gamut_compress_shader(shader_creator, st, func, false)?,
         AcesGamutCompress20Inv => add_gamut_compress_shader(shader_creator, st, func, true)?,
-        style => return Err(not_ported(style)),
+        AcesOutputTransform20Fwd => add_aces_output_transform_fwd_shader(shader_creator, st, func)?,
+        AcesOutputTransform20Inv => add_aces_output_transform_inv_shader(shader_creator, st, func)?,
     }
 
     st.dedent();
