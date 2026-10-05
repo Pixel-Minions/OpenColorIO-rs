@@ -12,7 +12,7 @@
 //!   payloads included, from the blob the spec names, in every command, after the command's
 //!   own blobs; the blob specs that don't describe an array refused;
 //! - what the binding raises building a spec reported alike by every command, and what the
-//!   oracle refuses refusing the request;
+//!   oracle refuses, or Python raises (a RuntimeError subclass), refusing the request;
 //! - value objects (`{"object": spec}`), their "attrs" set before their "calls", and the
 //!   object specs that misuse them refused.
 
@@ -338,22 +338,35 @@ fn commands() -> Vec<(&'static str, Args, Vec<Vec<u8>>)> {
 
 /// Every command that takes a transform spec passes it the request blobs that follow its own:
 /// a LUT made from a blob gives each command the same response as the same LUT made entry by
-/// entry, where the command's own blobs come first. A command that handed the spec the wrong
-/// blobs would build another LUT (from its pixels) or refuse the request.
+/// entry, where the command's own blobs come first; and so does a GroupTransform of a 1D LUT
+/// from blob 0 and a 3D LUT from blob 1, so every blob reaches the spec, each by its index. A
+/// command that handed the spec the wrong blobs (its pixels, or only the last blob) would build
+/// another LUT or refuse the request.
 #[test]
 fn every_command_passes_the_spec_its_blobs() {
     let lut1d = f32_to_bytes(&lut1d_values()[..9]);
     let lut3d = f32_to_bytes(&lut3d_values());
-    let luts = [
+    let luts: [(Value, Value, Vec<&[u8]>); 3] = [
         (
             lut1d_by_values(&lut1d_values()[..9]),
             lut_by_blob("Lut1DTransform", 0, None),
-            &lut1d,
+            vec![&lut1d],
         ),
         (
             lut3d_by_values(&lut3d_values()),
             lut_by_blob("Lut3DTransform", 0, Some(&[2, 2, 2, 3])),
-            &lut3d,
+            vec![&lut3d],
+        ),
+        (
+            json!({"class": "GroupTransform", "children": [
+                lut1d_by_values(&lut1d_values()[..9]),
+                lut3d_by_values(&lut3d_values()),
+            ]}),
+            json!({"class": "GroupTransform", "children": [
+                lut_by_blob("Lut1DTransform", 0, None),
+                lut_by_blob("Lut3DTransform", 1, Some(&[2, 2, 2, 3])),
+            ]}),
+            vec![&lut1d, &lut3d],
         ),
     ];
     let commands = commands();
@@ -362,7 +375,7 @@ fn every_command_passes_the_spec_its_blobs() {
         .map(|(cmd, args, own)| (*cmd, *args, own.iter().map(Vec::as_slice).collect()))
         .collect();
     let mut calls = Vec::new();
-    for (by_values, by_blob, lut) in &luts {
+    for (by_values, by_blob, spec_blobs) in &luts {
         for (cmd, args, own) in &requests {
             calls.push(BatchCall {
                 cmd,
@@ -370,7 +383,7 @@ fn every_command_passes_the_spec_its_blobs() {
                 blobs: own.clone(),
             });
             let mut blobs = own.clone();
-            blobs.push(lut.as_slice());
+            blobs.extend(spec_blobs);
             calls.push(BatchCall {
                 cmd,
                 args: args(by_blob),
@@ -399,7 +412,8 @@ fn every_command_passes_the_spec_its_blobs() {
 /// out of range, a bool or a string for an index, no dtype, an unknown key, a dtype that isn't
 /// a NumPy type of fixed size or that is big-endian (the blobs are little-endian), a blob that
 /// isn't a whole number of entries, and a shape the blob doesn't fill or that isn't a list of
-/// non-negative integers.
+/// non-negative integers. With two blobs, the indices Python would take for one of them, -1
+/// (from the end) and `true` (1), are refused too.
 #[test]
 fn bad_blob_specs_are_refused() {
     let lut = f32_to_bytes(&lut3d_values());
@@ -460,6 +474,28 @@ fn bad_blob_specs_are_refused() {
         })
         .collect();
     for ((data, fragment), result) in cases.iter().zip(Oracle::get().batch(&calls, false)) {
+        let error = result.expect_err(&format!("{data}: refused"));
+        assert!(error.contains(fragment), "{data}: {error}");
+    }
+    let two_blobs = [
+        (
+            json!({"blob": -1, "dtype": "float32"}),
+            "blob -1 isn't one of the spec's 2 blobs",
+        ),
+        (
+            json!({"blob": true, "dtype": "float32"}),
+            "blob True isn't one of the spec's 2 blobs",
+        ),
+    ];
+    let calls: Vec<BatchCall<'_>> = two_blobs
+        .iter()
+        .map(|(data, _)| BatchCall {
+            cmd: "transform_text",
+            args: json!({"transforms": [{"class": "Lut3DTransform", "calls": [["setData", data]]}]}),
+            blobs: vec![&lut, &lut],
+        })
+        .collect();
+    for ((data, fragment), result) in two_blobs.iter().zip(Oracle::get().batch(&calls, false)) {
         let error = result.expect_err(&format!("{data}: refused"));
         assert!(error.contains(fragment), "{data}: {error}");
     }
@@ -686,6 +722,32 @@ fn every_command_refuses_a_spec_the_oracle_refuses() {
             "{}: {error}",
             call.cmd
         );
+    }
+}
+
+/// A RuntimeError of Python's own refuses the request in every command: it is never reported
+/// as if the wheel had raised, as the binding's RuntimeError (pybind11's std::runtime_error)
+/// is. A value spec nested deeper than Python's recursion limit raises RecursionError, a
+/// subclass of RuntimeError, while the oracle builds the spec.
+#[test]
+fn every_command_refuses_pythons_own_runtime_errors() {
+    let mut deep = json!(3);
+    for _ in 0..1500 {
+        deep = json!([deep]);
+    }
+    let spec = json!({"class": "Lut1DTransform", "calls": [["setLength", deep]]});
+    let commands = commands();
+    let calls: Vec<BatchCall<'_>> = commands
+        .iter()
+        .map(|(cmd, args, own)| BatchCall {
+            cmd,
+            args: args(&spec),
+            blobs: own.iter().map(Vec::as_slice).collect(),
+        })
+        .collect();
+    for (call, result) in calls.iter().zip(Oracle::get().batch(&calls, false)) {
+        let error = result.expect_err(call.cmd);
+        assert!(error.contains("RecursionError"), "{}: {error}", call.cmd);
     }
 }
 

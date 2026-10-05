@@ -14,7 +14,7 @@ import numpy as np
 import PyOpenColorIO as OCIO
 
 from .checks import UNSIGNED_MAX, check_bool, check_member, check_uint
-from .commands import captured_log, command, exception_result
+from .commands import captured_log, command, exception_result, wheel_raised
 from .gpu import C_SPACE, RAISED, SAMPLER_READ, _shader
 
 # The largest C `int`: the texture iterators take their index as one.
@@ -261,6 +261,8 @@ def _run(checked, out):
         try:
             desc, returned = _call(desc, name, values, out)
         except RAISED as exc:
+            if not wheel_raised(exc):
+                raise
             results.append({"exception": exception_result(exc)})
             continue
         if name == "clone":

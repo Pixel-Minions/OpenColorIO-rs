@@ -19,7 +19,7 @@ import PyOpenColorIO as OCIO
 
 from . import spec
 from .checks import check_keys
-from .commands import RAISED, captured_log, command, exception_result
+from .commands import RAISED, captured_log, command, exception_result, wheel_raised
 
 
 def _text(transform):
@@ -29,6 +29,8 @@ def _text(transform):
         transform.validate()
         out["validate"] = None
     except RAISED as exc:
+        if not wheel_raised(exc):
+            raise
         out["validate"] = exception_result(exc)
     return out
 
@@ -90,6 +92,8 @@ def transform_text(args, blobs):
             try:
                 transform = spec.transform(transform_spec, blobs)
             except RAISED as exc:
+                if not wheel_raised(exc):
+                    raise
                 built.append(None)
                 result["transforms"].append({"exception": exception_result(exc),
                                              "stage": "transform"})

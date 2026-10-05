@@ -20,7 +20,7 @@ import PyOpenColorIO as OCIO
 
 from . import spec
 from .checks import PROCESSOR_KEYS, check_keys, check_member, dump
-from .commands import RAISED, _processor, captured_log, command, exception_result
+from .commands import RAISED, _processor, captured_log, command, exception_result, wheel_raised
 
 
 def _processor_dump(proc, blobs):
@@ -93,6 +93,8 @@ def processor_ops(args, blobs):
             stage[0] = "optimized_group"
             result["optimized"] = _processor_dump(optimized, out)
         except RAISED as exc:
+            if not wheel_raised(exc):
+                raise
             result = {"exception": exception_result(exc), "stage": stage[0]}
             out = []
     result["log"] = log

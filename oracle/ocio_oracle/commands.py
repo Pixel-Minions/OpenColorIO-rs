@@ -52,8 +52,18 @@ def captured_log():
 # the binding's own checks, std::runtime_error, which pybind11 raises as RuntimeError (such as
 # Lut3DTransform.setData's "Incompatible buffer dimensions"). Every command reports them as
 # {"exception": exception_result(exc), "stage": ...}; anything else the oracle raises refuses
-# the request.
+# the request, and so do Python's own subclasses of RuntimeError (wheel_raised).
 RAISED = (OCIO.Exception, OCIO.ExceptionMissingFile, RuntimeError)
+
+
+def wheel_raised(exc):
+    """Whether an exception a RAISED clause caught is the wheel's: an OCIO exception, or a
+    RuntimeError itself. Python's own subclasses of RuntimeError (RecursionError,
+    NotImplementedError, PythonFinalizationError) come from the interpreter or the oracle, never
+    from pybind11's std::runtime_error: the commands raise them again, which refuses the request
+    rather than report them as the wheel's."""
+    return (isinstance(exc, (OCIO.Exception, OCIO.ExceptionMissingFile))
+            or type(exc) is RuntimeError)
 
 
 def exception_result(exc):
@@ -172,6 +182,8 @@ def cpu_apply(args, blobs):
             result = {"processor_cache_id": proc.getCacheID(), "cpu_cache_id": cpu.getCacheID()}
             out = [dst.tobytes()]
         except RAISED as exc:
+            if not wheel_raised(exc):
+                raise
             result, out = {"exception": exception_result(exc), "stage": stage[0]}, []
     result["log"] = log
     return result, out

@@ -26,7 +26,7 @@ import sys
 import tempfile
 
 from . import spec
-from .commands import RAISED, command
+from .commands import RAISED, command, wheel_raised
 
 # The steps a case can take, with the number of arguments each takes.
 STEPS = {
@@ -89,6 +89,8 @@ for step in case["steps"]:
                                    spec.flags(flags))
         results.append(None)
     except (OCIO.Exception, OCIO.ExceptionMissingFile, RuntimeError) as exc:
+        if isinstance(exc, RuntimeError) and type(exc) is not RuntimeError:
+            raise  # Python's own, not the binding's (commands.wheel_raised)
         results.append({"type": type(exc).__name__, "message": str(exc)})
 names = list(objects)
 same = {name: next(first for first in names if objects[first] is objects[name])
@@ -130,8 +132,9 @@ def _check_case(c, case, blobs):
             # reported by the new process.
             try:
                 spec.transform(step[2], blobs)
-            except RAISED:
-                pass
+            except RAISED as exc:
+                if not wheel_raised(exc):
+                    raise
 
 
 @command

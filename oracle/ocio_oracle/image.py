@@ -22,7 +22,8 @@ import numpy as np
 import PyOpenColorIO as OCIO
 
 from . import spec
-from .commands import DTYPES, _processor, captured_log, command, exception_result
+from .commands import (DTYPES, _processor, captured_log, command, exception_result,
+                       wheel_raised)
 
 # Buffers start on this boundary, so an image's alignment depends only on the request.
 ALIGNMENT = 64
@@ -416,6 +417,8 @@ def _starts_with_forward_lut1d(proc, key):
     try:
         group = proc.getOptimizedProcessor(*key).createGroupTransform()
     except RAISED as exc:
+        if not wheel_raised(exc):
+            raise
         raise ValueError(f"image_apply can't tell which op the processor starts with: {exc}")
     return (len(group) > 0 and isinstance(group[0], OCIO.Lut1DTransform)
             and group[0].getDirection() == OCIO.TRANSFORM_DIR_FORWARD)
@@ -628,6 +631,8 @@ def image_apply(args, blobs):
             # constructor for the arguments); anywhere else it is a bug in the request or here.
             if isinstance(exc, TypeError) and not constructing:
                 raise
+            if not isinstance(exc, TypeError) and not wheel_raised(exc):
+                raise
             result.update(exception=exception_result(exc), stage=stage[0])
             if stage[0] == "image":
                 result["image"] = len(descs)
@@ -690,6 +695,8 @@ def image_apply_rgb(args, blobs):
             if memory is None:
                 out.append(np.array(returned, dtype="<f8").tobytes())
         except RAISED as exc:
+            if not wheel_raised(exc):
+                raise
             result.update(exception=exception_result(exc), stage=stage[0])
     result["log"] = log
     return result, out if memory is None else [memory.tobytes()]

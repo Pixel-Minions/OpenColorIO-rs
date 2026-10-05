@@ -25,7 +25,7 @@ import PyOpenColorIO as OCIO
 from . import spec
 from .checks import (PROCESSOR_KEYS, check_bool, check_keys, check_member, check_uint, dump,
                      f32_bits, f64_bits)
-from .commands import RAISED, _processor, captured_log, command, exception_result
+from .commands import RAISED, _processor, captured_log, command, exception_result, wheel_raised
 
 # The GpuShaderDesc settings, in the order the command applies them.
 SETTINGS = ["language", "function_name", "pixel_name", "resource_prefix", "uid",
@@ -189,8 +189,9 @@ def _check_textures(gpu, settings, max_width, log):
     logged = len(log)
     try:
         gpu.extractGpuShaderInfo(probe)
-    except RAISED:
-        pass
+    except RAISED as exc:
+        if not wheel_raised(exc):
+            raise
     finally:
         del log[logged:]
     for texture in probe.getTextures():
@@ -383,6 +384,8 @@ def gpu_shader(args, blobs):
             gpu.extractGpuShaderInfo(desc)
             result["shader"] = _shader(desc, out)
         except RAISED as exc:
+            if not wheel_raised(exc):
+                raise
             result.update(exception=exception_result(exc), stage=stage[0])
             out = []
     result["log"] = log
