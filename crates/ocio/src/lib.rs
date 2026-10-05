@@ -7,6 +7,7 @@
 
 pub mod caching;
 pub mod config;
+pub mod config_io_proxy;
 pub mod context;
 pub mod context_variable_utils;
 pub mod processor;
