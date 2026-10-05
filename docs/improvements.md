@@ -1691,6 +1691,8 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   error, and that the comparisons upstream makes without reading (another style, or an inverse
   that validation refuses) give upstream's answers. The renderers in 2.3b, and in 2.3c1 and
   2.3d1 (`p2-ff-cpu-2`): `fixed_function_op_cpu_tests.rs` checks their errors.
+  The GPU writer reads the ACES 1.3 gamut compression's parameters the same way in `p2-ff-gpu`
+  (2.3f, `fixed_function_op_gpu.rs`), which checks its error.
 
 ### U-32. ACES 2.0's hue table past its arrays
 
