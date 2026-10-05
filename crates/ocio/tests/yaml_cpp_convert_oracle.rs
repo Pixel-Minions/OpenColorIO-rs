@@ -23,7 +23,7 @@ use ocio::yaml_cpp::exceptions::Result;
 use ocio::yaml_cpp::node::Node;
 use ocio::yaml_cpp::parse::load;
 use ocio_testkit::fixtures::sha256_hex;
-use ocio_testkit::{Oracle, assert_text_eq};
+use ocio_testkit::{Oracle, assert_bytes_eq, oracle_values};
 use serde_json::{Value, json};
 
 const PREFIX: &str = "Error: Loading the OCIO profile failed. ";
@@ -64,17 +64,33 @@ impl OracleValue for bool {
 }
 
 /// OCIO's `load(node, x)`: the value, or its message (OCIOYaml.cpp:66-160).
-fn ocio_load<T: OracleValue>(node: &Node) -> Result<std::result::Result<T, String>> {
+fn ocio_load<T: OracleValue>(node: &Node) -> Result<std::result::Result<T, Vec<u8>>> {
     match node.as_::<T>() {
         Ok(v) => Ok(Ok(v)),
-        Err(e) => Ok(Err(format!(
-            "{PREFIX}At line {}, '{}' parsing {} failed with: {}",
-            node.mark()?.line + 1,
-            String::from_utf8_lossy(node.tag()?),
-            T::OCIO_NAME,
-            String::from_utf8_lossy(&e.what())
-        ))),
+        Err(e) => {
+            let mut message = format!("{PREFIX}At line {}, '", node.mark()?.line + 1).into_bytes();
+            message.extend_from_slice(node.tag()?);
+            message
+                .extend_from_slice(format!("' parsing {} failed with: ", T::OCIO_NAME).as_bytes());
+            message.extend(e.what());
+            Ok(Err(message))
+        }
     }
+}
+
+/// The message of the wheel's error: the exception's, or the text the binding couldn't
+/// decode.
+fn wheel_error(entry: &Value) -> Option<Vec<u8>> {
+    if let Some(e) = entry.get("exception") {
+        return Some(oracle_values::bytes(&e["message"]));
+    }
+    entry.get("undecodable").map(|hex| {
+        let hex = hex.as_str().expect("hex");
+        (0..hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).expect("hex"))
+            .collect()
+    })
 }
 
 /// The field's node in the oracle's config: (field, path of keys and indices).
@@ -96,20 +112,15 @@ fn field_node(root: &Node, field: &str) -> Result<Node> {
 /// Compares the port with one oracle entry.
 fn check<T: OracleValue>(field: &str, spelling: &str, entry: &Value) {
     let label = format!("{field}: {spelling:?}");
-    let yaml = entry["yaml"]
-        .as_str()
-        .unwrap_or_else(|| panic!("{label}: the config text isn't UTF-8: {entry}"));
-    let wheel_message = || {
-        entry["exception"]["message"]
-            .as_str()
-            .unwrap_or_else(|| panic!("{label}: the wheel loaded it: {entry}"))
-    };
-    let root = match load(yaml.as_bytes()) {
+    let yaml = oracle_values::bytes(&entry["yaml"]);
+    let wheel_message =
+        || wheel_error(entry).unwrap_or_else(|| panic!("{label}: the wheel loaded it: {entry}"));
+    let root = match load(&yaml) {
         Ok(root) => root,
         // a spelling that isn't a YAML value there: the parser's error
         Err(e) => {
-            let what = format!("{PREFIX}{}", String::from_utf8_lossy(&e.what()));
-            return assert_text_eq(&label, wheel_message(), &what);
+            let what = [PREFIX.as_bytes(), &e.what()].concat();
+            return assert_bytes_eq(&label, &wheel_message(), &what);
         }
     };
     let node = field_node(&root, field).unwrap_or_else(|e| panic!("{label}: {e}"));
@@ -120,7 +131,7 @@ fn check<T: OracleValue>(field: &str, spelling: &str, entry: &Value) {
             let message = format!(
                 "{PREFIX}LogTransform parse error, base must be a  single double. Found {nb}."
             );
-            return assert_text_eq(&label, wheel_message(), &message);
+            return assert_bytes_eq(&label, &wheel_message(), message.as_bytes());
         }
     }
     // OCIO skips a key whose value is null (OCIOYaml.cpp:3445 for a color space's keys, 4491
@@ -130,11 +141,9 @@ fn check<T: OracleValue>(field: &str, spelling: &str, entry: &Value) {
         return;
     }
     let port = ocio_load::<T>(&node).unwrap_or_else(|e| panic!("{label}: {e}"));
-    match (port, entry.get("value"), entry.get("exception")) {
+    match (port, entry.get("value"), wheel_error(entry)) {
         (Ok(v), Some(wheel), None) => assert_eq!(&v.to_json(), wheel, "{label}"),
-        (Err(message), None, Some(wheel)) => {
-            assert_text_eq(&label, wheel["message"].as_str().unwrap(), &message)
-        }
+        (Err(message), None, Some(wheel)) => assert_bytes_eq(&label, &wheel, &message),
         (port, _, _) => panic!(
             "{label}: the port gives {:?}, the wheel {entry}",
             port.map(|v| v.to_json())
@@ -215,6 +224,8 @@ const NUMBERS: &[&str] = &[
     ".Inf",
     ".INF",
     "+.inf",
+    "+.Inf",
+    "+.INF",
     "-.inf",
     "-.Inf",
     "-.INF",
@@ -456,7 +467,13 @@ fn long_numbers() -> Vec<String> {
         out.push(format!("0.{}{s}", zeros(1075 - s.len())));
         out.push(format!("0.{}{s}1", zeros(1075 - s.len())));
         out.push(format!("0.{}{s}{}1", zeros(1075 - s.len()), zeros(5)));
+        // the 768 digits as the integer part, a fraction after them
+        out.push(format!("{s}.1e-1075"));
     }
+    // Hexadecimal exponents past the bound num_get clamps to (4200), against long significands:
+    // the clamp, and its adjustment of a large exponent by the digits' power.
+    out.push(format!("0x1{}p-4150", zeros(767)));
+    out.push(format!("0x1{}p-4001", zeros(3767)));
     for (lead, exp) in [
         (1099, "1099"),
         (1100, "1100"),
@@ -501,7 +518,7 @@ fn numbers_read_as_the_wheel_reads_them() {
         .collect();
     assert_eq!(
         sha256_hex(&all),
-        "afd72e849fc6d4c2bad33315152f85a0a2ce873c23963ea38dd7da3b8fb291a5",
+        "d33f71a3cec32304f3d32dd0df14b30ae6343a5c9b4b0320a1600834a549b35f",
         "the generated spellings changed"
     );
 
@@ -527,11 +544,9 @@ fn numbers_read_as_the_wheel_reads_them() {
     for (spelling, entry) in lumas.iter().zip(entries("luma", &lumas)) {
         // OCIO refuses a luma that doesn't hold 3 values after reading it; those are OCIO's
         // own checks, not the conversion's.
-        if entry.get("exception").is_some_and(|e| {
-            e["message"]
-                .as_str()
-                .is_some_and(|m| m.contains("'luma' values must be 3"))
-        }) {
+        if wheel_error(&entry)
+            .is_some_and(|m| String::from_utf8_lossy(&m).contains("'luma' values must be 3"))
+        {
             continue;
         }
         check::<Vec<f64>>("luma", spelling, &entry);

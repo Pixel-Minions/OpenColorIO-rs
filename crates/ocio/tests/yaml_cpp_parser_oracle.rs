@@ -24,8 +24,8 @@ use ocio::yaml_cpp::mark::Mark;
 use ocio::yaml_cpp::parser::Parser;
 use ocio_testkit::fixtures::sha256_hex;
 use ocio_testkit::oracle::BatchCall;
-use ocio_testkit::{Oracle, assert_text_eq};
-use serde_json::json;
+use ocio_testkit::{Oracle, assert_bytes_eq, oracle_values};
+use serde_json::{Value, json};
 
 /// An event handler that ignores the events.
 struct NullHandler;
@@ -40,6 +40,21 @@ impl EventHandler for NullHandler {
     fn on_sequence_end(&mut self) {}
     fn on_map_start(&mut self, _: Mark, _: &[u8], _: Anchor, _: EmitterStyle) {}
     fn on_map_end(&mut self) {}
+}
+
+/// The message of the wheel's error making the config (`config_calls`): the exception's, or
+/// the text the binding couldn't decode; `None` when it loaded.
+fn wheel_error(config: &Value) -> Option<Vec<u8>> {
+    if config.is_null() {
+        return None;
+    }
+    if let Some(e) = config.get("exception") {
+        return Some(oracle_values::bytes(&e["message"]));
+    }
+    let hex = config["undecodable"]
+        .as_str()
+        .unwrap_or_else(|| panic!("not an outcome: {config}"));
+    Some(oracle_values::bytes(&json!({ "bytes": hex })))
 }
 
 /// The `what()` of the port's parser on the first document, if it throws.
@@ -131,6 +146,7 @@ const CASES: &[&str] = &[
     "%YAML 1\n---\na",
     "%YAML 1.\n---\na",
     "%YAML 01.2\n---\na",
+    "%YAML 09.1\n---\na",
     "%YAML +1.2\n---\na",
     "%YAML -1.2\n---\na",
     "%YAML 1.-2\n---\na",
@@ -165,7 +181,60 @@ const CASES: &[&str] = &[
     // encodings
     "\u{feff}a: b",
     "\u{feff}\u{feff}a: b",
+    // escapes
+    "ocio_profile_version: \"x\\uDFFF\"",
+    "ocio_profile_version: \"x\\uDBFF\\uDFFF\"",
+    "ocio_profile_version: \"x\\uE000\"",
+    "ocio_profile_version: \"x\\\ty\"",
 ];
+
+/// Documents as bytes, in UTF-16 and UTF-32 (both byte orders, with and without a byte order
+/// mark): a lone low surrogate, a high surrogate before a unit that isn't a low one,
+/// U+0004 (which yaml-cpp's stream takes for its end), and UTF-32 values past U+10FFFF; and
+/// NUL bytes alone.
+fn byte_cases() -> Vec<Vec<u8>> {
+    let base: Vec<u32> = "ocio_profile_version: x".chars().map(u32::from).collect();
+    // (the units after the base, in UTF-16, in UTF-32)
+    let tails: &[(&[u32], bool, bool)] = &[
+        (&[0x0004, 0x79], true, true),
+        (&[0xDC00, 0x79], true, true),
+        (&[0xD800, 0x0041], true, true),
+        (&[0xD800, 0xDC00, 0x79], true, false),
+        (&[0x10_FFFF, 0x79], false, true),
+        (&[0x11_0000, 0x79], false, true),
+        (&[0x20_0041, 0x79], false, true),
+    ];
+    let mut out = vec![b"\x00".to_vec(), b"\x00\x00".to_vec(), b"\x00a".to_vec()];
+    for &(tail, in16, in32) in tails {
+        let units: Vec<u32> = base.iter().chain(tail.iter()).copied().collect();
+        for be in [false, true] {
+            for bom in [false, true] {
+                let bom: &[u32] = if bom { &[0xFEFF] } else { &[] };
+                let units: Vec<u32> = bom.iter().chain(&units).copied().collect();
+                if in16 {
+                    out.push(
+                        units
+                            .iter()
+                            .flat_map(|&u| {
+                                let u = u as u16;
+                                if be { u.to_be_bytes() } else { u.to_le_bytes() }
+                            })
+                            .collect(),
+                    );
+                }
+                if in32 {
+                    out.push(
+                        units
+                            .iter()
+                            .flat_map(|&u| if be { u.to_be_bytes() } else { u.to_le_bytes() })
+                            .collect(),
+                    );
+                }
+            }
+        }
+    }
+    out
+}
 
 /// A small deterministic generator (xorshift64*), so the generated documents never change.
 struct Rng(u64);
@@ -258,30 +327,44 @@ fn random_fragments(rng: &mut Rng, count: usize) -> Vec<String> {
 #[test]
 fn parser_errors_match_the_wheel() {
     let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
-    let mut docs: Vec<String> = CASES.iter().map(|s| s.to_string()).collect();
-    docs.extend(random_characters(&mut rng, 3000));
-    docs.extend(random_fragments(&mut rng, 4000));
+    let mut docs: Vec<Vec<u8>> = CASES.iter().map(|s| s.as_bytes().to_vec()).collect();
+    docs.extend(
+        random_characters(&mut rng, 3000)
+            .into_iter()
+            .map(String::into_bytes),
+    );
+    docs.extend(
+        random_fragments(&mut rng, 4000)
+            .into_iter()
+            .map(String::into_bytes),
+    );
     // A deep document: "bad file" at depth 500.
-    docs.push("[".repeat(600));
-    docs.push(format!("{}a{}", "- ".repeat(498), ""));
-    docs.push(format!("{}a{}", "{a: ".repeat(300), "}".repeat(300)));
+    docs.push("[".repeat(600).into_bytes());
+    docs.push(format!("{}a{}", "- ".repeat(498), "").into_bytes());
+    docs.push(format!("{}a{}", "{a: ".repeat(300), "}".repeat(300)).into_bytes());
+    docs.push(format!("{}a", "- ".repeat(499)).into_bytes());
+    // A simple key may span 1024 characters, not 1025.
+    for n in [1023, 1024, 1025] {
+        docs.push(format!("{}: v\nocio_profile_version: x", "k".repeat(n)).into_bytes());
+    }
+    docs.extend(byte_cases());
 
     // The generated documents are fixed: a change to the generator must be deliberate.
     let all: Vec<u8> = docs
         .iter()
-        .flat_map(|d| [d.as_bytes(), b"\x01"].concat())
+        .flat_map(|d| [d, b"\x01".as_slice()].concat())
         .collect();
     assert_eq!(
         sha256_hex(&all),
-        "21d2ea6b14879fd799d3c28a97431666a7357a282b59244669acfe7a78e170d6",
+        "327fe7af514571a6f80289b5f25d98324276e4aded96686a4eb3d7aaf49f03f1",
         "the generated documents changed"
     );
 
     let calls: Vec<BatchCall<'_>> = docs
         .iter()
         .map(|yaml| BatchCall {
-            cmd: "config_serialize",
-            args: json!({"config": {"yaml": yaml}}),
+            cmd: "config_calls",
+            args: json!({"config": {"yaml": oracle_values::bytes_arg(yaml)}}),
             blobs: Vec::new(),
         })
         .collect();
@@ -290,12 +373,9 @@ fn parser_errors_match_the_wheel() {
     let (mut thrown, mut parsed) = (0, 0);
     for (yaml, response) in docs.iter().zip(responses) {
         let response = response.unwrap_or_else(|e| panic!("{e}"));
-        let wheel = response
-            .result
-            .get("exception")
-            .map(|e| e["message"].as_str().expect("a message").to_string());
-        let label = format!("document {yaml:?}");
-        match port_error(yaml.as_bytes()) {
+        let wheel = wheel_error(&response.result["config"]);
+        let label = format!("document {:?}", String::from_utf8_lossy(yaml));
+        match port_error(yaml) {
             Some(what) => {
                 thrown += 1;
                 // OCIO's Exception keeps the C string: up to the first NUL.
@@ -304,12 +384,12 @@ fn parser_errors_match_the_wheel() {
                     None => &what[..],
                 };
                 let expected = wheel.unwrap_or_else(|| panic!("{label}: the wheel loaded it"));
-                let actual = format!("{PREFIX}{}", String::from_utf8_lossy(what));
-                assert_text_eq(&label, &expected, &actual);
+                let actual = [PREFIX.as_bytes(), what].concat();
+                assert_bytes_eq(&label, &expected, &actual);
             }
             None => {
                 parsed += 1;
-                if let Some(wheel) = wheel
+                if let Some(wheel) = wheel.map(|w| String::from_utf8_lossy(&w).into_owned())
                     && let Some(rest) = wheel.strip_prefix(PREFIX)
                     && rest.starts_with("yaml-cpp: error at line ")
                 {
