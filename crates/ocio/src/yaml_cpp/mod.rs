@@ -50,7 +50,14 @@ pub mod exp;
 pub mod mark;
 pub mod ostream_wrapper;
 pub mod regex_yaml;
+pub mod scan_scalar;
+pub mod scan_tag;
+mod scan_token;
+pub mod scanner;
+mod simple_key;
 pub mod stream;
+pub mod tag;
+pub mod token;
 
 pub use emitter::{Emittable, Emitter};
 pub use emitter_manip::{
