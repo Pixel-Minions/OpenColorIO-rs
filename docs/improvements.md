@@ -1728,3 +1728,21 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   (`p2-ff-cpu-2`): `fixed_function_op_cpu_tests.rs` checks their errors.
   that validation refuses) give upstream's answers. The renderers in 2.3b, and in 2.3c1 and
   2.3d1 (`p2-ff-cpu-2`): `fixed_function_op_cpu_tests.rs` checks their errors.
+
+### U-53. Regular expressions nested too deep for the wheel's stack
+
+- **Upstream:** each wheel's `std::regex` parser recurses once per nested group. OCIO compiles
+  a file rule's regular expression when it is set (`ValidateRegularExpression`,
+  `FileRules.cpp:263-282`) and again for each match, so a rule nested deep enough ends the
+  process with a stack overflow. The Windows wheel overflows at about 7,800 nested lookaheads
+  (`(?=`) or 8,400 nested non-capture groups (`(?:`), measured in a Python process of its own;
+  the depth varies between runs and with the caller's stack. Capture groups stop earlier: MSVC
+  refuses a thousandth with `error_stack`.
+- **Who notices:** configs and applications with machine-made rules; no real rule nests so
+  deep.
+- **Decided** (general rule, the wheel crashes): the port refuses groups nested deeper than
+  5,000 with `error_stack`, the error MSVC gives its own limit, and compiles a deeply nested
+  expression on a thread with the stack it needs. Between 5,000 levels and the wheel's limit
+  the port refuses what the wheel accepts; the limit is a choice for the owner.
+- **Status:** matched in `p3-regex` (3.9a, `std_regex/msvc.rs`); libstdc++'s parser comes in a
+  later chunk.
