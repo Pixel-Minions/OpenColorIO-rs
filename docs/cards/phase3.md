@@ -189,8 +189,8 @@ tests at 0.8.0 are copied verbatim, as the emitter's were.
 | Chunk | Upstream | Rust | Port tests |
 |---|---|---|---|
 | 3.4a | `ColorSpace.cpp` (499), `TokensManager.h` (74): names, aliases, family, equality group, description, encoding, bit depth, data, allocation, categories, interop ID, AMF IDs, ICC profile name, interchange attributes, transforms, `operator<<` | `color_space.rs`, `tokens_manager.rs` | `ColorSpace_tests.cpp` `basic`, `alias`, `category`, `interop_id`, `amf_transform_ids`, `icc_profile_name`, `unknown_interchange_attrib` |
-| 3.4b | `ColorSpaceSet.cpp` (280), `Look.cpp` (250), `LookParse.cpp/.h` (122) | `color_space_set.rs`, `look.rs`, `look_parse.rs` | `ColorSpaceSet_tests.cpp` (4), `LookParse_tests.cpp` (2) |
-| 3.4c | `ViewTransform.cpp` (238), `NamedTransform.cpp/.h` (346) | `view_transform.rs`, `named_transform.rs` | `ViewTransform_tests.cpp` `basic`; `NamedTransform_tests.cpp` `basic`, `alias` |
+| 3.4b | `ColorSpaceSet.cpp` (280), `Look.cpp` (250), `LookParse.cpp/.h` (122) | `color_space_set.rs`, `look.rs`, `look_parse.rs` | `LookParse_tests.cpp` (2); `ColorSpaceSet_tests.cpp` builds its sets with `Config::getColorSpaces`: with 3.4f |
+| 3.4c | `ViewTransform.cpp` (238), `NamedTransform.cpp/.h` (346) | `view_transform.rs`, `named_transform.rs` | `ViewTransform_tests.cpp` `basic`; `NamedTransform_tests.cpp` `basic` and `alias` add to a config and call `GetTransform`: with 3.4j (`p3-config-2`) and 3.2a |
 | 3.4d | `Config::Create()` and `Config::Impl`'s state and constructor, which reads `OCIO_ACTIVE_DISPLAYS`, `OCIO_ACTIVE_VIEWS` and `OCIO_INACTIVE_COLORSPACES` (`Config.cpp:255-466`); `GetVersion`, `LookupEnvironment`, `LookupRole`, `GetFileReferences` (`Config.cpp:99-254`); versions (`setMinorVersion`, `setVersion`, `upgradeToLatestVersion`); name, description, family separator; environment variables and mode; search paths and working dir (`Config.cpp:2110-2295`); the copy (~500) | `config.rs` | `Config_tests.cpp` `version` parts that don't load YAML |
 | 3.4e | The upstream tests deferred from Phase 1 that need only `Config::Create()` | — | `Processor_tests.cpp` `basic_cache`, `channel_crosstalk`, `optimized_processor`; `CPUProcessor_tests.cpp` `with_one_matrix`, `one_pixel`, `optimizations`, `planar_vs_packed` and the 7 `scanline_*` tests |
 | 3.4f | Color spaces (`Config.cpp:2296-2783`): sets by category, lookups by name, alias or role, canonical name, indices by reference type and visibility, add, remove, `isColorSpaceUsed`, clear; `Impl::getColorSpace`, `hasColorSpace` (~450) | `config.rs` | `Config_tests.cpp` group B, as each test's other parts exist |
@@ -320,14 +320,14 @@ So Phase 3 ports 67 of the 89, and `p3-after-p2` 5 more.
 | File | Tests | In Phase 3 | Waits |
 |---|---:|---|---|
 | `ColorSpace_tests.cpp` | 14 | 11 (3.4a, 3.3j, 3.7b) | `is_colorspace_linear` (P2: Lut3D); `processor_to_known_colorspace`, `processor_to_known_colorspace_alt_config` (P9) |
-| `ColorSpaceSet_tests.cpp` | 4 | 4 (3.4b) | — |
+| `ColorSpaceSet_tests.cpp` | 4 | 4 (3.4f) | — |
 | `Context_tests.cpp` | 6 | 6 (3.5e, 3.5f) | — |
 | `ContextVariableUtils_tests.cpp` | 2 | 2 (3.5d) | — |
 | `Display_tests.cpp` | 3 | 3 (3.4h, then 3.7b and 3.8b) | — |
 | `FileRules_tests.cpp` | 30 | 30 (3.9c–d, 3.3k, 3.7b) | — |
 | `ViewingRules_tests.cpp` | 3 | 3 (3.9e, 3.3k) | — |
 | `LookParse_tests.cpp` | 2 | 2 (3.4b) | — |
-| `NamedTransform_tests.cpp` | 9 | 9 (3.4c, 3.2a, 3.2d, 3.3j, 3.8b) | — |
+| `NamedTransform_tests.cpp` | 9 | 9 (3.4j, 3.2a, 3.2d, 3.3j, 3.8b) | — |
 | `ViewTransform_tests.cpp` | 1 | 1 (3.4c) | — |
 | `ParseUtils_tests.cpp` | 11 | 6 (3.5c) | the XML, int, float and string-vector tests (P4) |
 | `PathUtils_tests.cpp` | 1 | 1 (3.5b) | — |
