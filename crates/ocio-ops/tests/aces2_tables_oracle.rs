@@ -5,16 +5,24 @@
 //! exist: the GPU shader of an `ACES_OUTPUT_TRANSFORM_20` (the oracle's `gpu_shader`) holds
 //! them, built by the same `init_*` functions as the CPU renderer
 //! (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpGPU.cpp:1287-1366,
-//! FixedFunctionOpCPU.cpp:1057-1088 @ v2.5.2). The JMh models' matrices, `cz`, `A_w_J` and
-//! `1/cz` are literals in it, which the shader writes with 9 significant digits
-//! (`getFloatString`, src/OpenColorIO/GpuShaderUtils.cpp:21-36 @ v2.5.2), enough to give back
-//! every `float` exactly.
+//! FixedFunctionOpCPU.cpp:1057-1088 @ v2.5.2): the reach table as a texture; the JMh models'
+//! matrices, `cz`, `A_w_J`, `1/cz`, the tone scale's and the chroma compression's parameters as
+//! literals, which the shader writes with 9 significant digits for a `float`
+//! (`getFloatString`, src/OpenColorIO/GpuShaderUtils.cpp:21-36 @ v2.5.2) and 17 for a
+//! `double`, enough to give back every value exactly.
 //!
 //! The limiting primaries go through `float`, as the renderers read them.
 
-use ocio_ops::ops::fixedfunction::aces2::common::JMhParams;
-use ocio_ops::ops::fixedfunction::aces2::transform::init_jmh_params;
-use ocio_ops::transforms::builtins::color_matrix_helpers::{Chromaticities, Primaries, aces_ap0};
+use ocio_ops::ops::fixedfunction::aces2::common::{
+    ChromaCompressParams, JMhParams, SharedCompressionParameters, ToneScaleParams,
+};
+use ocio_ops::ops::fixedfunction::aces2::transform::{
+    init_chroma_compress_params, init_jmh_params, init_shared_compression_params,
+    init_tone_scale_params,
+};
+use ocio_ops::transforms::builtins::color_matrix_helpers::{
+    Chromaticities, Primaries, aces_ap0, aces_ap1,
+};
 use ocio_testkit::gpu::{GpuShaderReply, GpuShaderRequest, ShaderSettings};
 use ocio_testkit::oracle::Oracle;
 use serde_json::json;
@@ -24,12 +32,16 @@ use serde_json::json;
 struct Model {
     p_in: JMhParams,
     p_out: JMhParams,
+    t: ToneScaleParams,
+    s: SharedCompressionParameters,
+    c: ChromaCompressParams,
 }
 
 /// The parameters as `Renderer_ACES_OutputTransform20` builds them
 /// (FixedFunctionOpCPU.cpp:1057-1088 @ v2.5.2).
 fn model(params: &[f64; 9]) -> Model {
     let f = |i: usize| f64::from(params[i] as f32);
+    let peak = params[0] as f32;
     let lim = Primaries::new(
         Chromaticities::new(f(1), f(2)),
         Chromaticities::new(f(3), f(4)),
@@ -38,7 +50,17 @@ fn model(params: &[f64; 9]) -> Model {
     );
     let p_in = init_jmh_params(&aces_ap0::PRIMARIES).unwrap();
     let p_out = init_jmh_params(&lim).unwrap();
-    Model { p_in, p_out }
+    let t = init_tone_scale_params(peak);
+    let reach = init_jmh_params(&aces_ap1::PRIMARIES).unwrap();
+    let s = init_shared_compression_params(peak, &p_in, &reach);
+    let c = init_chroma_compress_params(peak, &t);
+    Model {
+        p_in,
+        p_out,
+        t,
+        s,
+        c,
+    }
 }
 
 /// The text after `prefix`, which must occur once at least.
@@ -69,6 +91,15 @@ fn number_after(text: &str, prefix: &str) -> f32 {
     let end = rest.find([',', ')', ';', ' ']).expect("the number's end");
     rest[..end]
         .parse::<f32>()
+        .unwrap_or_else(|_| panic!("not a number: {:?} after {prefix:?}", &rest[..end]))
+}
+
+/// The double after `prefix`, up to the next delimiter.
+fn double_after(text: &str, prefix: &str) -> f64 {
+    let rest = after(text, prefix).trim_start();
+    let end = rest.find([',', ')', ';', ' ']).expect("the number's end");
+    rest[..end]
+        .parse::<f64>()
         .unwrap_or_else(|_| panic!("not a number: {:?} after {prefix:?}", &rest[..end]))
 }
 
@@ -127,6 +158,15 @@ fn tables_and_parameters_match_the_gpu_shader() {
         let shader = reply.shader();
         let text = shader.text.as_str();
         let m = model(params);
+        let texture = |name: &str| {
+            shader
+                .textures
+                .iter()
+                .find(|t| t.name.contains(name))
+                .unwrap_or_else(|| panic!("no texture {name}"))
+                .values
+                .clone()
+        };
 
         let mut check = |what: &str, wheel: Vec<f32>, port: Vec<f32>| {
             if bits(&wheel) != bits(&port) {
@@ -174,6 +214,46 @@ fn tables_and_parameters_match_the_gpu_shader() {
             ],
             vec![m.p_in.cz, m.p_in.a_w_j, m.p_out.inv_cz],
         );
+        check(
+            "reach table",
+            texture("reach_m_table"),
+            m.s.reach_m_table.to_vec(),
+        );
+        check(
+            "chroma compression, model gamma",
+            vec![
+                number_after(text, "snJ * "),
+                number_after(text, "sqrt(nJ * nJ + "),
+                number_after(text, ", nJ * "),
+                number_after(text, "pow(nJ, "),
+            ],
+            vec![m.c.sat, m.c.sat_thr, m.c.compr, m.s.model_gamma_inv],
+        );
+        check(
+            "tone scale",
+            vec![
+                number_after(text, "float f = "),
+                number_after(after(text, "float f = "), "), "),
+                number_after(text, "f * f / (f + "),
+                number_after(text, "F_L_Y)) * "),
+            ],
+            vec![m.t.m_2, m.t.g, m.t.t_1, m.p_in.inv_a_w_j],
+        );
+        // `double(t.s_2) * p.F_L_n` and `double(p.F_L_n) * reference_luminance`, written as
+        // doubles with 17 significant digits (FixedFunctionOpGPU.cpp:680-682 @ v2.5.2).
+        let doubles = [
+            double_after(text, "Y / (Y + "),
+            double_after(text, "float F_L_Y = pow("),
+        ];
+        let port = [
+            f64::from(m.t.s_2) * f64::from(m.p_in.f_l_n),
+            f64::from(m.p_in.f_l_n) * 100.0,
+        ];
+        if doubles.map(f64::to_bits) != port.map(f64::to_bits) {
+            failures.push(format!(
+                "{params:?} tone scale doubles: wheel {doubles:?}, port {port:?}"
+            ));
+        }
     }
     assert!(
         failures.is_empty(),
