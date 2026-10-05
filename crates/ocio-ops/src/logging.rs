@@ -85,7 +85,7 @@ impl State {
         let levelstr = platform::getenv(OCIO_LOGGING_LEVEL_ENVVAR).unwrap_or_default();
         if !levelstr.is_empty() {
             self.logging_override = true;
-            self.level = logging_level_from_string(Some(levelstr.as_bytes()));
+            self.level = logging_level_from_string(Some(&levelstr));
 
             if self.level == LoggingLevel::Unknown {
                 write_stderr(b"[OpenColorIO Warning]: Invalid $OCIO_LOGGING_LEVEL specified. ");

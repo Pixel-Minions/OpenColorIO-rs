@@ -34,7 +34,7 @@ impl EnvGuard {
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
-        set_env_provider(Some(Arc::new(MapEnv(map))));
+        set_env_provider(Some(Arc::new(MapEnv::from(map))));
     }
 }
 

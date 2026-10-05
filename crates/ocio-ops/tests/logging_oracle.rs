@@ -329,7 +329,7 @@ fn run_environment_case(case: OsString) {
     if let Some(value) = case["env"].as_str() {
         vars.insert("OCIO_LOGGING_LEVEL".to_string(), value.to_string());
     }
-    set_env_provider(Some(Arc::new(MapEnv(vars))));
+    set_env_provider(Some(Arc::new(MapEnv::from(vars))));
 
     let received = Arc::new(Mutex::new(Vec::<String>::new()));
     if case["custom_function"].as_bool().expect("custom_function") {
