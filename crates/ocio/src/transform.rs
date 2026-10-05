@@ -34,6 +34,7 @@ use crate::transforms::exponent_transform::{
 use crate::transforms::exponent_with_linear_transform::{
     ExponentWithLinearTransform, build_exponent_with_linear_op, create_gamma_transform,
 };
+use crate::transforms::file_transform::FileTransform;
 use crate::transforms::group_transform::{GroupTransform, build_group_ops};
 use crate::transforms::log_affine_transform::LogAffineTransform;
 use crate::transforms::log_camera_transform::LogCameraTransform;
@@ -123,6 +124,8 @@ pub enum Transform {
     Exponent(ExponentTransform),
     /// `ExponentWithLinearTransform`.
     ExponentWithLinear(ExponentWithLinearTransform),
+    /// `FileTransform`.
+    File(FileTransform),
     /// `GroupTransform`.
     Group(GroupTransform),
     /// `LogAffineTransform`.
@@ -180,6 +183,12 @@ impl From<ExponentTransform> for Transform {
 impl From<ExponentWithLinearTransform> for Transform {
     fn from(t: ExponentWithLinearTransform) -> Transform {
         Transform::ExponentWithLinear(t)
+    }
+}
+
+impl From<FileTransform> for Transform {
+    fn from(t: FileTransform) -> Transform {
+        Transform::File(t)
     }
 }
 
@@ -246,6 +255,7 @@ impl Transform {
             Transform::DisplayView(_) => TransformType::DisplayView,
             Transform::Exponent(_) => TransformType::Exponent,
             Transform::ExponentWithLinear(_) => TransformType::ExponentWithLinear,
+            Transform::File(_) => TransformType::File,
             Transform::Group(_) => TransformType::Group,
             Transform::LogAffine(_) => TransformType::LogAffine,
             Transform::LogCamera(_) => TransformType::LogCamera,
@@ -269,6 +279,7 @@ impl Transform {
             Transform::DisplayView(t) => t.direction(),
             Transform::Exponent(t) => t.direction(),
             Transform::ExponentWithLinear(t) => t.direction(),
+            Transform::File(t) => t.direction(),
             Transform::Group(t) => t.direction(),
             Transform::LogAffine(t) => t.direction(),
             Transform::LogCamera(t) => t.direction(),
@@ -292,6 +303,7 @@ impl Transform {
             Transform::DisplayView(t) => t.set_direction(dir),
             Transform::Exponent(t) => t.set_direction(dir),
             Transform::ExponentWithLinear(t) => t.set_direction(dir),
+            Transform::File(t) => t.set_direction(dir),
             Transform::Group(t) => t.set_direction(dir),
             Transform::LogAffine(t) => t.set_direction(dir),
             Transform::LogCamera(t) => t.set_direction(dir),
@@ -316,6 +328,7 @@ impl Transform {
             Transform::DisplayView(t) => t.validate(),
             Transform::Exponent(t) => t.validate(),
             Transform::ExponentWithLinear(t) => t.validate(),
+            Transform::File(t) => t.validate(),
             Transform::Group(t) => t.validate(),
             Transform::LogAffine(t) => t.validate(),
             Transform::LogCamera(t) => t.validate(),
@@ -390,6 +403,7 @@ impl Transform {
             Transform::DisplayView(t) => t.write_text(os),
             Transform::Exponent(t) => t.write_text(os),
             Transform::ExponentWithLinear(t) => t.write_text(os),
+            Transform::File(t) => t.write_text(os),
             Transform::Group(t) => t.write_text(os),
             Transform::LogAffine(t) => t.write_text(os),
             Transform::LogCamera(t) => t.write_text(os),
@@ -437,6 +451,7 @@ pub(crate) fn build_ops(
         Transform::ExponentWithLinear(exponent_transform) => {
             build_exponent_with_linear_op(ops, exponent_transform, dir)
         }
+        Transform::File(_) => Err(not_ported_yet("FileTransform", "WP 4.1")),
         Transform::Group(group_transform) => {
             build_group_ops(ops, config, context, group_transform, dir)
         }
