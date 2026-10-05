@@ -5,22 +5,24 @@
 //! exist: the GPU shader of an `ACES_OUTPUT_TRANSFORM_20` (the oracle's `gpu_shader`) holds
 //! them, built by the same `init_*` functions as the CPU renderer
 //! (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpGPU.cpp:1287-1366,
-//! FixedFunctionOpCPU.cpp:1057-1088 @ v2.5.2): the reach table and the cusp table as textures,
-//! the hue table as a float array constant; the JMh models'
-//! matrices, `cz`, `A_w_J`, `1/cz`, the tone scale's and the chroma compression's parameters as
-//! literals, which the shader writes with 9 significant digits for a `float`
-//! (`getFloatString`, src/OpenColorIO/GpuShaderUtils.cpp:21-36 @ v2.5.2) and 17 for a
-//! `double`, enough to give back every value exactly.
+//! FixedFunctionOpCPU.cpp:1057-1088 @ v2.5.2):
+//! - the reach table and the cusp table, with the upper hull's gammas, as textures;
+//! - the hue table as a float array constant, and the hue search range as the integers of the
+//!   cusp table's sampler;
+//! - the lower hull's gamma, the JMh models' matrices, `cz`, `A_w_J`, `1/cz`, the tone scale's
+//!   and the chroma compression's parameters as literals, which the shader writes with 9
+//!   significant digits for a `float` (`getFloatString`, src/OpenColorIO/GpuShaderUtils.cpp:
+//!   21-36 @ v2.5.2) and 17 for a `double`, enough to give back every value exactly.
 //!
 //! The limiting primaries go through `float`, as the renderers read them.
 
 use ocio_ops::ops::fixedfunction::aces2::common::{
-    ChromaCompressParams, JMhParams, SharedCompressionParameters, Table1D, Table3D,
-    ToneScaleParams, table_base,
+    ChromaCompressParams, GamutCompressParams, JMhParams, SharedCompressionParameters,
+    ToneScaleParams,
 };
 use ocio_ops::ops::fixedfunction::aces2::transform::{
-    init_chroma_compress_params, init_jmh_params, init_shared_compression_params,
-    init_tone_scale_params, make_uniform_hue_gamut_table,
+    init_chroma_compress_params, init_gamut_compress_params, init_jmh_params,
+    init_shared_compression_params, init_tone_scale_params,
 };
 use ocio_ops::transforms::builtins::color_matrix_helpers::{
     Chromaticities, Primaries, aces_ap0, aces_ap1,
@@ -37,8 +39,7 @@ struct Model {
     t: ToneScaleParams,
     s: SharedCompressionParameters,
     c: ChromaCompressParams,
-    hue_table: Table1D,
-    cusp_table: Table3D,
+    g: GamutCompressParams,
 }
 
 /// The parameters as `Renderer_ACES_OutputTransform20` builds them
@@ -58,18 +59,14 @@ fn model(params: &[f64; 9]) -> Model {
     let reach = init_jmh_params(&aces_ap1::PRIMARIES).unwrap();
     let s = init_shared_compression_params(peak, &p_in, &reach);
     let c = init_chroma_compress_params(peak, &t);
-    let mut hue_table: Table1D = [0.0; table_base::TOTAL_SIZE];
-    let cusp_table =
-        make_uniform_hue_gamut_table(&reach, &p_out, peak, t.forward_limit, &s, &mut hue_table)
-            .unwrap();
+    let g = init_gamut_compress_params(peak, &p_in, &p_out, &t, &s, &reach).unwrap();
     Model {
         p_in,
         p_out,
         t,
         s,
         c,
-        hue_table,
-        cusp_table,
+        g,
     }
 }
 
@@ -252,15 +249,26 @@ fn tables_and_parameters_match_the_gpu_shader() {
         check(
             "hue table",
             numbers_after(text, "_hues_array[363] = float[363]("),
-            m.hue_table.to_vec(),
+            m.g.hue_table.to_vec(),
         );
-        // The cusps' J and M; the third column is the upper hull's gamma, which
-        // `make_upper_hull_gamma` fills (chunk 2.4d).
-        let cusps = texture("gamut_cusp_table");
+        // The cusps' J and M, and the upper hull's inverse gamma.
         check(
-            "cusp table J and M",
-            cusps.chunks(3).flat_map(|e| [e[0], e[1]]).collect(),
-            m.cusp_table.iter().flat_map(|e| [e[0], e[1]]).collect(),
+            "cusp table",
+            texture("gamut_cusp_table"),
+            m.g.gamut_cusp_table.iter().flatten().copied().collect(),
+        );
+        check(
+            "lower hull gamma",
+            vec![number_after(text, "float gamma_bottom_inv = ")],
+            vec![m.g.lower_hull_gamma_inv],
+        );
+        // The cusp table sampler's search range, `i + range[0]` and `i + range[1]`.
+        let lo = number_after(text, "float(i + ");
+        let hi = number_after(after(text, "int i_hi = int(min("), "float(i + ");
+        check(
+            "hue search range",
+            vec![lo, hi],
+            m.g.hue_linearity_search_range.map(|v| v as f32).to_vec(),
         );
         // `double(t.s_2) * p.F_L_n` and `double(p.F_L_n) * reference_luminance`, written as
         // doubles with 17 significant digits (FixedFunctionOpGPU.cpp:680-682 @ v2.5.2).
