@@ -725,6 +725,26 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p1-transforms-fam4`, checked against the wheel in
   `crates/ocio/tests/allocation_transform_oracle.rs`.
 
+### I-80. Some fixed function styles ignore the direction when they are set
+
+- **Upstream:** `FixedFunctionOpData::ConvertStyle(FixedFunctionStyle, TransformDirection)` gives
+  the forward op style of `FIXED_FUNCTION_RGB_TO_HSV`, `XYZ_TO_xyY`, `XYZ_TO_uvY` and
+  `XYZ_TO_LUV` whatever the direction (`ops/fixedfunction/FixedFunctionOpData.cpp:433-436, 450-463`),
+  where every other style takes the inverse op style in the inverse direction.
+  `FixedFunctionTransform::setStyle` converts the style in the transform's current direction
+  (`transforms/FixedFunctionTransform.cpp:122-126`), so setting one of these styles on an
+  inverse transform makes it forward: `getDirection()` then says forward, and the processor
+  renders RGB to HSV instead of HSV to RGB. The config reader calls `setStyle` and
+  `setDirection` in the order of the YAML keys (`OCIOYaml.cpp:1421-1483`), so
+  `{direction: inverse, style: RGB_TO_HSV}` loads a forward transform where
+  `{style: RGB_TO_HSV, direction: inverse}` loads an inverse one.
+- **Who notices:** code that sets the style of an inverse transform to one of these four, and
+  configs that write `direction` before `style`.
+- **A fix:** give those styles their inverse op style in the inverse direction, as the others.
+- **Status:** matched in `p2-ff-cpu` (2.3a1, `FixedFunctionOpStyle::from_transform_style`; the
+  transform's `set_style` in 2.3e); `fixed_function_op_data_oracle.rs` checks the styles the
+  setters give in both directions against the wheel's validation messages.
+
 ## Logging
 
 ### I-16. Two messages bypass the logging function
@@ -1251,3 +1271,18 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Decided** (general rule): `FixedFunctionOpStyle::from_name(None)` refuses it as an empty
   name: "Unknown FixedFunction style: ".
 - **Status:** matched in `p2-ff-cpu` (2.3a1).
+
+### U-31. Queries of a FixedFunction op whose style has too few parameters
+
+- **Upstream:** the setters take any number of parameters, and only `validate` checks how many
+  the style takes (`ops/fixedfunction/FixedFunctionOpData.cpp:617-842`). Before that,
+  `isInverse` of two Rec.2100 surrounds of the same style reads both first parameters without
+  a check (`FixedFunctionOpData.cpp:844-856`): on an empty vector, it reads past its end. The
+  processors validate their ops first (`OpRcPtrVec::finalize`), so only code that queries such
+  data directly gets there.
+- **Decided** (general rule): `FixedFunctionOpData::is_inverse` returns an error there, and
+  only there: "FixedFunctionOp: the style has fewer parameters than it uses: upstream reads past
+  them."
+- **Status:** matched in `p2-ff-cpu` (2.3a2); `fixed_function_op_data_tests.rs` checks the
+  error, and that the comparisons upstream makes without reading (another style, or an inverse
+  that validation refuses) give upstream's answers.
