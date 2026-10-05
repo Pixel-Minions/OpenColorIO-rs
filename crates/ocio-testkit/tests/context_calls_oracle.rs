@@ -2,10 +2,12 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! The oracle's `context_calls` command (`oracle/ocio_oracle/context_api.py`), against the
-//! wheel itself: each context source, file resolution against the request's files with a used
-//! context, the request's environment, and the requests it refuses.
+//! wheel itself: each context source and its arguments, file resolution against the request's
+//! files with a used context, the request's environment, the module's string conversions, and
+//! the requests it refuses.
 
 use ocio_testkit::Oracle;
+use ocio_testkit::oracle_values::{bytes, exception, result, result_bytes};
 use serde_json::{Value, json};
 
 fn call(args: Value) -> Value {
@@ -17,6 +19,14 @@ fn calls(response: &Value) -> &Vec<Value> {
     response["calls"]
         .as_array()
         .unwrap_or_else(|| panic!("{response}"))
+}
+
+fn pairs(list: &Value) -> Vec<(Vec<u8>, Vec<u8>)> {
+    list.as_array()
+        .unwrap()
+        .iter()
+        .map(|p| (bytes(&p[0]), bytes(&p[1])))
+        .collect()
 }
 
 /// A search path finds a file the request wrote, the used context records the variable that
@@ -35,15 +45,30 @@ fn files_resolve_with_the_used_context() {
         ],
     }));
     let c = calls(&response);
-    let found = c[1]["result"]
-        .as_str()
-        .unwrap_or_else(|| panic!("{response}"));
-    assert!(found.ends_with("a.spi1d"), "{found}");
-    assert_eq!(c[2]["result"], json!([["SHOT", "s01"]]));
-    assert_eq!(
-        c[3]["exception"]["type"], "ExceptionMissingFile",
-        "{response}"
-    );
+    assert!(result_bytes(&c[1]).ends_with(b"a.spi1d"), "{response}");
+    assert_eq!(pairs(result(&c[2])), [(b"SHOT".to_vec(), b"s01".to_vec())]);
+    assert_eq!(exception(&c[3]).0, "ExceptionMissingFile", "{response}");
+}
+
+/// Each of the constructor's arguments reaches the context.
+#[test]
+fn the_constructor_takes_every_argument() {
+    let response = call(json!({
+        "context": {"new": {"workingDir": "/work", "searchPaths": ["a", "b"],
+                            "stringVars": {"map": [["V", "x"]]},
+                            "environmentMode": {"enum": "ENV_ENVIRONMENT_LOAD_ALL"}}},
+        "calls": [
+            {"call": "getWorkingDir"},
+            {"call": "getSearchPath"},
+            {"call": "getStringVars"},
+            {"call": "getEnvironmentMode"},
+        ],
+    }));
+    let c = calls(&response);
+    assert_eq!(result_bytes(&c[0]), b"/work");
+    assert_eq!(result_bytes(&c[1]), b"a:b");
+    assert_eq!(pairs(result(&c[2])), [(b"V".to_vec(), b"x".to_vec())]);
+    assert_eq!(*result(&c[3]), json!({"enum": "ENV_ENVIRONMENT_LOAD_ALL"}));
 }
 
 /// A context made new loads nothing; loadEnvironment updates its predefined variables from the
@@ -61,9 +86,12 @@ fn the_environment_is_the_requests() {
         ],
     }));
     let c = calls(&response);
-    assert_eq!(c[0]["result"], json!([["V", "default"]]));
-    assert_eq!(c[2]["result"], json!([["V", "from env"]]));
-    assert_eq!(c[3]["result"], json!(false));
+    assert_eq!(pairs(result(&c[0])), [(b"V".to_vec(), b"default".to_vec())]);
+    assert_eq!(
+        pairs(result(&c[2])),
+        [(b"V".to_vec(), b"from env".to_vec())]
+    );
+    assert_eq!(*result(&c[3]), json!(false));
 }
 
 /// A config's context is its current one, and the config is reachable as "config".
@@ -79,10 +107,16 @@ fn a_configs_context() {
         ],
     }));
     let c = calls(&response);
-    assert_eq!(c[0]["result"], json!(["a", "b"]));
-    assert!(c[1]["result"].is_string(), "{response}");
-    assert_eq!(c[2]["result"]["class"], "Context");
-    assert!(c[2]["result"]["repr"].is_string());
+    let paths: Vec<Vec<u8>> = result(&c[0])
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(bytes)
+        .collect();
+    assert_eq!(paths, [b"a".to_vec(), b"b".to_vec()]);
+    assert!(!result_bytes(&c[1]).is_empty(), "{response}");
+    assert_eq!(result(&c[2])["class"], "Context");
+    assert!(bytes(&result(&c[2])["repr"]).starts_with(b"<Context"));
     let failed =
         call(json!({"context": {"config": {"yaml": "x: 1"}}, "calls": [{"dump": "context"}]}));
     assert_eq!(
@@ -90,26 +124,6 @@ fn a_configs_context() {
         "{failed}"
     );
     assert_eq!(failed["calls"], json!([]));
-}
-
-/// Requests it can't run exactly are refused.
-#[test]
-fn bad_requests_are_refused() {
-    for args in [
-        json!({"context": "new", "config": "raw"}),
-        json!({"context": "old"}),
-        json!({"context": {"new": ["x"]}}),
-        json!({"context": {"new": {"noSuchArgument": 1}}}),
-        json!({"context": "new", "calls": [{"call": "resolveStringVar", "args": [1]}]}),
-        json!({"context": "new", "env": {"OCIO_LOGGING_LEVEL": "info"}}),
-    ] {
-        assert!(
-            Oracle::get()
-                .try_call("context_calls", args.clone(), &[])
-                .is_err(),
-            "{args}"
-        );
-    }
 }
 
 /// The module's string conversions of the enums are reachable on "OCIO", their exceptions
@@ -127,8 +141,31 @@ fn the_string_conversions_are_reachable() {
         ],
     }));
     let c = calls(&response);
-    assert!(c[0]["result"].is_string(), "{response}");
-    assert!(c[1]["result"]["enum"].is_string(), "{response}");
-    assert!(c[2]["result"].is_boolean(), "{response}");
-    assert_eq!(c[3]["exception"]["type"], "Exception", "{response}");
+    assert_eq!(result_bytes(&c[0]), b"loadall");
+    assert_eq!(*result(&c[1]), json!({"enum": "ENV_ENVIRONMENT_LOAD_ALL"}));
+    assert_eq!(*result(&c[2]), json!(true));
+    assert_eq!(exception(&c[3]).0, "Exception", "{response}");
+}
+
+/// Requests it can't run exactly are refused.
+#[test]
+fn bad_requests_are_refused() {
+    for args in [
+        json!({"context": "new", "config": "raw"}),
+        json!({"context": "old"}),
+        json!({"context": {"new": ["x"]}}),
+        json!({"context": {"new": {"noSuchArgument": 1}}}),
+        json!({"context": {"new": {"stringVars": {"map": "x"}}}}),
+        json!({"context": {"new": {"workingDir": {"f64": 0}}}}),
+        json!({"context": {"config": "nope"}}),
+        json!({"context": "new", "calls": [{"call": "resolveStringVar", "args": [1]}]}),
+        json!({"context": "new", "env": {"OCIO_LOGGING_LEVEL": "info"}}),
+    ] {
+        assert!(
+            Oracle::get()
+                .try_call("context_calls", args.clone(), &[])
+                .is_err(),
+            "{args}"
+        );
+    }
 }

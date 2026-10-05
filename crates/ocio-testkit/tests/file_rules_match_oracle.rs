@@ -4,10 +4,12 @@
 //! The oracle's `file_rules_match` command (`oracle/ocio_oracle/file_rules_api.py`), against
 //! the wheel itself: rules are inserted in order before the default rule, refused ones report
 //! the library's message, each path reports the rule that matched it consistently with
-//! filepathOnlyMatchesDefaultRule, an isolated case reports what the same case reports in the
-//! oracle's process, and the requests it can't read exactly are refused.
+//! filepathOnlyMatchesDefaultRule, an isolated case runs in a process of its own and reports
+//! what the same case reports in the oracle's process, the rules are set on the request's
+//! config, and the requests it can't read exactly are refused.
 
 use ocio_testkit::Oracle;
+use ocio_testkit::oracle_values::{bytes, exception};
 use serde_json::{Value, json};
 
 fn cases(args: Value) -> Vec<Value> {
@@ -32,19 +34,18 @@ fn case() -> Value {
 }
 
 /// Rules land in order before the default rule; the refused one reports the library's message
-/// and is left out; each path's rule index agrees with filepathOnlyMatchesDefaultRule.
+/// and is left out; each path's rule and color space are reported, its rule index agreeing with
+/// filepathOnlyMatchesDefaultRule.
 #[test]
 fn rules_and_matches() {
     let all = cases(json!({"cases": [case()]}));
     let result = &all[0];
     let inserted = result["inserted"].as_array().unwrap();
     assert_eq!(inserted[0], Value::Null);
-    assert_eq!(inserted[1]["exception"]["type"], "Exception", "{result}");
+    let (kind, message) = exception(&inserted[1]);
+    assert_eq!(kind, "Exception", "{result}");
     assert!(
-        inserted[1]["exception"]["message"]
-            .as_str()
-            .unwrap()
-            .starts_with("File rules: invalid regular expression 'a(b'"),
+        message.starts_with(b"File rules: invalid regular expression 'a(b'"),
         "{result}"
     );
     assert_eq!(inserted[2], Value::Null);
@@ -52,21 +53,38 @@ fn rules_and_matches() {
     assert_eq!(result["default"], Value::Null);
     let rules = &result["file_rules"];
     assert_eq!(rules["getters"]["getNumEntries"], 4, "{rules}");
-    let names: Vec<&Value> = rules["keyed"]
+    let names: Vec<Vec<u8>> = rules["keyed"]
         .as_array()
         .unwrap()
         .iter()
         .filter(|k| k[0] == "getName")
-        .map(|k| &k[2])
+        .map(|k| bytes(&k[2]))
         .collect();
     assert_eq!(
         names,
-        ["glob", "regex", "ColorSpaceNamePathSearch", "Default"]
+        [
+            b"glob".to_vec(),
+            b"regex".to_vec(),
+            b"ColorSpaceNamePathSearch".to_vec(),
+            b"Default".to_vec()
+        ]
     );
-    for path in result["paths"].as_array().unwrap() {
-        let rule = path["rule"].as_u64().unwrap_or_else(|| panic!("{path}"));
-        assert_eq!(path["only_default"], json!(rule == 3), "{path}");
-        assert!(path["colorspace"].is_string(), "{path}");
+    let paths = result["paths"].as_array().unwrap();
+    let rule_of = |i: usize| paths[i]["rule"].as_u64().unwrap();
+    assert_eq!(
+        [rule_of(0), rule_of(1), rule_of(2), rule_of(3)],
+        [0, 1, 3, 0],
+        "{result}"
+    );
+    assert_eq!(bytes(&paths[0]["colorspace"]), b"cs_glob");
+    assert_eq!(bytes(&paths[1]["colorspace"]), b"cs_regex");
+    assert_eq!(bytes(&paths[2]["colorspace"]), b"cs_default");
+    for path in paths {
+        assert_eq!(
+            path["only_default"],
+            json!(path["rule"].as_u64().unwrap() == 3),
+            "{path}"
+        );
     }
 }
 
@@ -77,7 +95,13 @@ fn an_isolated_case_reports_the_same() {
     let mut isolated = case();
     isolated["isolated"] = json!(true);
     let all = cases(json!({"cases": [case(), isolated]}));
-    assert_eq!(all[0], all[1]);
+    assert_ne!(all[0]["pid"], all[1]["pid"]);
+    let without_pid = |v: &Value| {
+        let mut v = v.clone();
+        v.as_object_mut().unwrap().remove("pid");
+        v
+    };
+    assert_eq!(without_pid(&all[0]), without_pid(&all[1]));
 }
 
 /// The rules are set on the config the request gives, whose color space names the path
@@ -92,11 +116,11 @@ fn the_path_search_uses_the_config() {
     }));
     let paths = all[0]["paths"].as_array().unwrap();
     assert_eq!(paths[0]["rule"], 0, "{paths:?}");
-    assert_eq!(paths[0]["colorspace"], "log", "{paths:?}");
+    assert_eq!(bytes(&paths[0]["colorspace"]), b"log");
     assert_eq!(paths[1]["rule"], 1, "{paths:?}");
 }
 
-/// Requests it can't read exactly are refused.
+/// Requests it can't read exactly are refused, isolated ones too.
 #[test]
 fn bad_requests_are_refused() {
     for args in [
@@ -108,6 +132,9 @@ fn bad_requests_are_refused() {
         json!({"cases": [{"paths": [1]}]}),
         json!({"cases": [{"paths": "x"}]}),
         json!({"cases": [{"isolated": "yes"}]}),
+        json!({"cases": [{"paths": [1], "isolated": true}]}),
+        json!({"config": {"file": 1}, "cases": [{"isolated": true}]}),
+        json!({"config": "nope", "cases": []}),
         json!({"cases": {}}),
         json!({"cases": [], "other": 1}),
     ] {

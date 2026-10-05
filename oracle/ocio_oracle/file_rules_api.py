@@ -28,9 +28,9 @@ import sys
 import PyOpenColorIO as OCIO
 
 from .checks import check_bool, check_keys
-from .commands import captured_log, command
-from .config_api import (REPORTED, RequestError, attempt, dump_object, make_config, raised,
-                         text)
+from .commands import command
+from .config_api import (REPORTED, LogCapture, RequestError, attempt, call_out, check_source,
+                         directory, dump_object, environment, make_config, raised, text)
 
 RULE_KEYS = {
     "glob": {"name", "colorspace", "pattern", "extension"},
@@ -78,41 +78,40 @@ def _insert(rules, index, rule):
 
 
 def _match(config, path):
-    """The color space and rule index getColorSpaceFromFilepath gives the path, and
-    filepathOnlyMatchesDefaultRule's answer."""
-    out = {}
-    try:
-        colorspace, index = config.getColorSpaceFromFilepath(path)
+    """The color space and rule index getColorSpaceFromFilepath gives the path (each written out
+    as config_api writes values), and filepathOnlyMatchesDefaultRule's answer."""
+    out = call_out(config.getColorSpaceFromFilepath, path)
+    if "result" in out:
+        colorspace, index = out.pop("result")
         out["colorspace"], out["rule"] = colorspace, index
-    except REPORTED as exc:
-        out["exception"] = raised(exc)
     out["only_default"] = attempt(config.filepathOnlyMatchesDefaultRule, path)
     return out
 
 
 def run_case(source, case):
-    """One case, in this process."""
-    out = {}
-    with captured_log() as log:
+    """One case, in this process: in an empty environment and a new working directory, as
+    config_calls runs a request. "pid" is the process's, which tells an isolated case's."""
+    out = {"pid": os.getpid()}
+    with directory(None), environment(None), LogCapture() as log:
         try:
             config = make_config(source)
+        except UnicodeDecodeError as exc:
+            return {**out, "config": {"undecodable": bytes(exc.object).hex()}, "log": log.take()}
         except REPORTED as exc:
-            return {"config": {"exception": raised(exc)}, "log": list(log)}
+            return {**out, "config": {"exception": raised(exc)}, "log": log.take()}
         rules = OCIO.FileRules()
         inserted = []
         for rule in case.get("rules", []):
-            try:
-                _insert(rules, rules.getNumEntries() - 1, rule)
-                inserted.append(None)
-            except REPORTED as exc:
-                inserted.append({"exception": raised(exc)})
+            done = call_out(_insert, rules, rules.getNumEntries() - 1, rule)
+            inserted.append(None if "result" in done else done)
         out["inserted"] = inserted
         if "default" in case:
-            out["default"] = attempt(rules.setDefaultRuleColorSpace, text("", case["default"]))
+            done = call_out(rules.setDefaultRuleColorSpace, text("", case["default"]))
+            out["default"] = None if "result" in done else done
         out["file_rules"] = dump_object(rules)
         config.setFileRules(rules)
         out["paths"] = [_match(config, text("", path)) for path in case.get("paths", [])]
-    out["log"] = list(log)
+        out["log"] = log.take()
     return out
 
 
@@ -138,8 +137,7 @@ def _run_isolated(source, case):
             return json.loads(child.stdout.decode("utf-8"))
         except ValueError:
             pass
-    return {"crashed": {"returncode": child.returncode,
-                        "stderr": child.stderr.decode("utf-8", "replace")}}
+    return {"crashed": {"returncode": child.returncode, "stderr": {"bytes": child.stderr.hex()}}}
 
 
 @command
@@ -164,13 +162,17 @@ def file_rules_match(args, blobs):
                 config_api). "isolated": true runs the case in a new Python process
                 (`python -I`), so that a crash in the regex engine is reported
     result:
-      cases     per case: {"inserted": per rule null or {"exception"}, "default": null or
-                {"exception"} (when given), "file_rules": the FileRules as config_api's
-                dump_object writes it (repr(), and per rule its name, pattern, extension, regex,
-                color space and custom keys), "paths": per path {"colorspace", "rule" (its
-                index), "only_default"} or {"exception", "only_default"}, "log"}; or {"config":
-                {"exception"}, "log"} when making the config raised; or, for an isolated case
-                whose process died, {"crashed": {"returncode", "stderr"}}
+      cases     per case: {"pid": the process that ran it, "inserted": per rule null or
+                {"exception"} (or {"undecodable"}), "default": null or {"exception"} (when
+                given), "file_rules": the FileRules as config_api's dump_object writes it
+                (repr(), and per rule its name, pattern, extension, regex, color space and
+                custom keys), "paths": per path {"colorspace" ({"bytes": hex}), "rule" (its
+                index), "only_default"} or {"exception" or "undecodable", "only_default"},
+                "log": [{"bytes": hex}]}; or {"pid", "config": {"exception"}, "log"} when making
+                the config raised; or, for an isolated case whose process died,
+                {"crashed": {"returncode", "stderr": {"bytes": hex}}}. Each case runs in an
+                empty environment and a new working directory, as config_calls runs a
+                request
     blobs: none
 
     An unknown key, a rule with keys of more than one kind, or a string that isn't text or
@@ -178,6 +180,7 @@ def file_rules_match(args, blobs):
     """
     check_keys("file_rules_match", args, {"config", "cases"})
     source = args.get("config", "raw")
+    check_source(source)
     cases = args.get("cases", [])
     if not isinstance(cases, list):
         raise RequestError(f"cases must be a list, not {cases!r}")
