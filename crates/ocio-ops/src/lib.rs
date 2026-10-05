@@ -45,6 +45,7 @@ pub mod avx;
 pub mod avx2;
 pub mod avx512;
 pub mod bit_depth_utils;
+#[doc(hidden)]
 pub mod cfmt;
 pub mod cpu_info;
 pub mod cpu_processor;
@@ -65,6 +66,7 @@ pub mod op_data;
 pub mod op_optimizers;
 pub mod open_color_types;
 pub mod ops;
+pub mod parse_utils;
 pub mod platform;
 #[doc(hidden)]
 pub mod scanline_helper;
