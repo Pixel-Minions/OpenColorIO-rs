@@ -1277,12 +1277,15 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Upstream:** the setters take any number of parameters, and only `validate` checks how many
   the style takes (`ops/fixedfunction/FixedFunctionOpData.cpp:617-842`). Before that,
   `isInverse` of two Rec.2100 surrounds of the same style reads both first parameters without
-  a check (`FixedFunctionOpData.cpp:844-856`): on an empty vector, it reads past its end. The
-  processors validate their ops first (`OpRcPtrVec::finalize`), so only code that queries such
-  data directly gets there.
-- **Decided** (general rule): `FixedFunctionOpData::is_inverse` returns an error there, and
-  only there: "FixedFunctionOp: the style has fewer parameters than it uses: upstream reads past
-  them."
+  a check (`FixedFunctionOpData.cpp:844-856`), and the ACES 1.3 gamut compression's renderer
+  reads seven parameters (`ops/fixedfunction/FixedFunctionOpCPU.cpp:982-1001`): on a shorter
+  vector, they read past its end. The processors validate their ops first
+  (`OpRcPtrVec::finalize`), so only code that queries such data directly gets there.
+- **Decided** (general rule): `FixedFunctionOpData::is_inverse` and the gamut compression's
+  renderer (`RendererAcesGamutComp13Fwd::new`, so `get_fixed_function_cpu_renderer`) return an
+  error there, and only there: "FixedFunctionOp: the style has fewer parameters than it uses:
+  upstream reads past them."
 - **Status:** matched in `p2-ff-cpu` (2.3a2); `fixed_function_op_data_tests.rs` checks the
   error, and that the comparisons upstream makes without reading (another style, or an inverse
-  that validation refuses) give upstream's answers.
+  that validation refuses) give upstream's answers. The renderer in 2.3b:
+  `fixed_function_op_cpu_tests.rs` checks its error.
