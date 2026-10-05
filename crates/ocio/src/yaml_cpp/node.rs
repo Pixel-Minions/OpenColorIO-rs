@@ -499,3 +499,7 @@ mod node_spec_tests;
 #[cfg(test)]
 #[path = "error_messages_tests.rs"]
 mod error_messages_tests;
+
+#[cfg(test)]
+#[path = "node_tests.rs"]
+mod node_tests;

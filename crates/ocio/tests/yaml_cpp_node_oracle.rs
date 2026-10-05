@@ -29,10 +29,25 @@ use ocio::yaml_cpp::node::{Node, NodeType};
 use ocio::yaml_cpp::parse::load;
 use ocio_testkit::fixtures::sha256_hex;
 use ocio_testkit::oracle::BatchCall;
-use ocio_testkit::{Oracle, assert_text_eq};
-use serde_json::json;
+use ocio_testkit::{Oracle, assert_bytes_eq, oracle_values};
+use serde_json::{Value, json};
 
 const PREFIX: &[u8] = b"Error: Loading the OCIO profile failed. ";
+
+/// The message of the wheel's error making the config (`config_calls`): the exception's, or
+/// the text the binding couldn't decode; `None` when it loaded.
+fn wheel_error(config: &Value) -> Option<Vec<u8>> {
+    if config.is_null() {
+        return None;
+    }
+    if let Some(e) = config.get("exception") {
+        return Some(oracle_values::bytes(&e["message"]));
+    }
+    let hex = config["undecodable"]
+        .as_str()
+        .unwrap_or_else(|| panic!("not an outcome: {config}"));
+    Some(oracle_values::bytes(&json!({ "bytes": hex })))
+}
 
 /// "At line N, '<tag>' " with the node's line counted from 1, as OCIO writes it.
 fn at_line(node: &Node) -> Result<Vec<u8>> {
@@ -115,6 +130,8 @@ const CASES: &[&str] = &[
     "ocio_profile_version: ~",
     "ocio_profile_version:",
     "ocio_profile_version: null",
+    "ocio_profile_version: NULL",
+    "ocio_profile_version: nULL",
     "ocio_profile_version: !!str null",
     "ocio_profile_version: !foo x",
     "ocio_profile_version: !<v> x",
@@ -165,6 +182,13 @@ const CASES: &[&str] = &[
     "ocio_profile_version:\u{4}x",
     "\u{feff}ocio_profile_version: x",
     "ocio_profile_version: x\u{e9}",
+    "ocio_profile_version: x\u{0} ",
+    "ocio_profile_version: x \u{0} ",
+    // escapes: a tab after a backslash, and escaped line breaks before empty lines
+    "ocio_profile_version: \"x\\\ty\"",
+    "ocio_profile_version: \"x\\\n\n\n\"",
+    "ocio_profile_version: \"x \\\n\n\"",
+    "ocio_profile_version: \"x\\N\\_\\L\\P\"",
     // Aliases are the anchored node, and an anchor names its collection from the collection's
     // start: a collection can hold itself, as an element, a value or a key.
     "a: &a [*a]\nocio_profile_version: x",
@@ -189,6 +213,54 @@ const CASES: &[&str] = &[
      &a11 [*a10, *a10, *a10, *a10, *a10, *a10, *a10, *a10, *a10]]\n\
      ocio_profile_version: *a11",
 ];
+
+/// Documents as bytes, in UTF-16 and UTF-32 (both byte orders, with and without a byte order
+/// mark): a lone low surrogate, a high surrogate before a unit that isn't a low one,
+/// U+0004 (which yaml-cpp's stream takes for its end), and UTF-32 values past U+10FFFF; and
+/// NUL bytes alone.
+fn byte_cases() -> Vec<Vec<u8>> {
+    let base: Vec<u32> = "ocio_profile_version: x".chars().map(u32::from).collect();
+    // (the units after the base, in UTF-16, in UTF-32)
+    let tails: &[(&[u32], bool, bool)] = &[
+        (&[0x0004, 0x79], true, true),
+        (&[0xDC00, 0x79], true, true),
+        (&[0xD800, 0x0041], true, true),
+        (&[0xD800, 0xDC00, 0x79], true, false),
+        (&[0x10_FFFF, 0x79], false, true),
+        (&[0x11_0000, 0x79], false, true),
+        (&[0x20_0041, 0x79], false, true),
+    ];
+    let mut out = vec![b"\x00".to_vec(), b"\x00\x00".to_vec(), b"\x00a".to_vec()];
+    for &(tail, in16, in32) in tails {
+        let units: Vec<u32> = base.iter().chain(tail.iter()).copied().collect();
+        for be in [false, true] {
+            for bom in [false, true] {
+                let bom: &[u32] = if bom { &[0xFEFF] } else { &[] };
+                let units: Vec<u32> = bom.iter().chain(&units).copied().collect();
+                if in16 {
+                    out.push(
+                        units
+                            .iter()
+                            .flat_map(|&u| {
+                                let u = u as u16;
+                                if be { u.to_be_bytes() } else { u.to_le_bytes() }
+                            })
+                            .collect(),
+                    );
+                }
+                if in32 {
+                    out.push(
+                        units
+                            .iter()
+                            .flat_map(|&u| if be { u.to_be_bytes() } else { u.to_le_bytes() })
+                            .collect(),
+                    );
+                }
+            }
+        }
+    }
+    out
+}
 
 /// A small deterministic generator (xorshift64*), so the generated documents never change.
 struct Rng(u64);
@@ -297,26 +369,35 @@ fn random_versions(rng: &mut Rng, count: usize) -> Vec<String> {
 #[test]
 fn config_load_errors_match_the_wheel() {
     let mut rng = Rng(0x0DDB_A11C_0FFE_E123);
-    let mut docs: Vec<String> = CASES.iter().map(|s| s.to_string()).collect();
-    docs.extend(random_fragments(&mut rng, 4000));
-    docs.extend(random_versions(&mut rng, 4000));
+    let mut docs: Vec<Vec<u8>> = CASES.iter().map(|s| s.as_bytes().to_vec()).collect();
+    docs.extend(
+        random_fragments(&mut rng, 4000)
+            .into_iter()
+            .map(String::into_bytes),
+    );
+    docs.extend(
+        random_versions(&mut rng, 4000)
+            .into_iter()
+            .map(String::into_bytes),
+    );
+    docs.extend(byte_cases());
 
     // The generated documents are fixed: a change to the generator must be deliberate.
     let all: Vec<u8> = docs
         .iter()
-        .flat_map(|d| [d.as_bytes(), b"\x01"].concat())
+        .flat_map(|d| [d, b"\x01".as_slice()].concat())
         .collect();
     assert_eq!(
         sha256_hex(&all),
-        "12e94a2261a1813cd9f06c1c6816c5e49ad255d7c8ae6c6cfc10d0127aa423e6",
+        "3875437ab923cbd0e07bd9c0e3e06d4532bef42ed91ce05755fed5b08eeca2a8",
         "the generated documents changed"
     );
 
     let calls: Vec<BatchCall<'_>> = docs
         .iter()
         .map(|yaml| BatchCall {
-            cmd: "config_serialize",
-            args: json!({"config": {"yaml": yaml}}),
+            cmd: "config_calls",
+            args: json!({"config": {"yaml": oracle_values::bytes_arg(yaml)}}),
             blobs: Vec::new(),
         })
         .collect();
@@ -325,9 +406,9 @@ fn config_load_errors_match_the_wheel() {
     let (mut loaded, mut versions, mut roots) = (0, 0, [0usize; 5]);
     for (yaml, response) in docs.iter().zip(responses) {
         let response = response.unwrap_or_else(|e| panic!("{e}"));
-        let label = format!("document {yaml:?}");
+        let label = format!("document {:?}", String::from_utf8_lossy(yaml));
         // Documents the parser refuses are the parser test's.
-        let Ok(root) = load(yaml.as_bytes()) else {
+        let Ok(root) = load(yaml) else {
             continue;
         };
         loaded += 1;
@@ -342,12 +423,9 @@ fn config_load_errors_match_the_wheel() {
         if let Some(nul) = expected.iter().position(|&c| c == 0) {
             expected.truncate(nul);
         }
-        let wheel = response
-            .result
-            .get("exception")
-            .map(|e| e["message"].as_str().expect("a message").to_string())
+        let wheel = wheel_error(&response.result["config"])
             .unwrap_or_else(|| panic!("{label}: the wheel loaded it"));
-        assert_text_eq(&label, &wheel, &String::from_utf8_lossy(&expected));
+        assert_bytes_eq(&label, &wheel, &expected);
     }
     // Every root type and many versions are checked.
     assert!(

@@ -302,11 +302,44 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   the `0` and stops) and reads a value that rounds to zero as 0. Both refuse a value that
   overflows and keep subnormal values. A config with such a number loads with a different
   value, or fails, on one platform only. Seen through both wheels (`yaml_scalars`, O3.3).
+  The Windows wheel doesn't ship its C++ library: it runs the `msvcp140.dll` of the machine
+  (System32), 14.51.36247 on the reference machine, so its reading can change with a Visual
+  C++ runtime update. The port translates the MSVC 14.44 headers' `num_get`, and is checked
+  against the 14.51 runtime.
 - **Who notices:** configs with hexadecimal floats or numbers below the smallest subnormal.
 - **A fix:** one reader on both platforms (decimal only, and a value that rounds to zero
   read as 0, say).
 - **Status:** matched in the YAML parser (`p3-yaml-parser`, `ocio_ops::utils::num_get`), and
   checked against both wheels in `crates/ocio/tests/yaml_cpp_convert_oracle.rs`.
+
+### I-104. The escapes `\N` and `\_` give bytes that aren't UTF-8
+
+- **Upstream:** in a double-quoted scalar, yaml-cpp turns `\N` (next line, U+0085) into the
+  single byte 0x85 and `\_` (no-break space, U+00A0) into the single byte 0xA0 (yaml-cpp 0.8.0
+  `src/exp.cpp:117-120`), where UTF-8 needs two bytes (C2 85, C2 A0); the other escapes,
+  `\L`, `\P` and `\x`/`\u`/`\U`, give UTF-8. So a config string with these escapes holds
+  bytes that aren't UTF-8. Seen through the wheel: the version `"x\N\_\L\P"` reads as `x`,
+  0x85, 0xA0, then E2 80 A8 and E2 80 A9.
+- **Who notices:** configs that write these two escapes, in names, descriptions or roles.
+- **A fix:** write them as UTF-8.
+- **Status:** matched in the YAML parser (`p3-yaml-parser`, `crates/ocio/src/yaml_cpp/exp.rs`).
+
+### I-105. UTF-16 and UTF-32 configs are decoded leniently
+
+- **Upstream:** yaml-cpp converts a UTF-16 or UTF-32 input (found by its byte order mark or
+  its first bytes) to UTF-8 as it reads (yaml-cpp 0.8.0 `src/stream.cpp:161-182`,
+  `336-445`), and never refuses a code unit:
+  - a lone low surrogate, and a high surrogate that no low one follows, read as U+FFFD (the
+    unit after a lone high surrogate is then read on its own);
+  - U+0004, the reader's end-of-input character (I-102), reads as U+FFFD;
+  - UTF-32 surrogates and values above U+10FFFF are written in UTF-8's form anyway, and above
+    0x1FFFFF they lose their high bits (`Utf8Adjust` masks them).
+  Seen through the wheel: `ocio_profile_version: x`, U+0004, `y` in UTF-16 reads the version
+  `x`, U+FFFD, `y`; with a lone 0xDC00 in place of U+0004 too.
+- **Who notices:** UTF-16 and UTF-32 configs with invalid code units.
+- **A fix:** refuse invalid code units, and keep U+0004.
+- **Status:** matched in the YAML parser (`p3-yaml-parser`, `crates/ocio/src/yaml_cpp/stream.rs`),
+  and checked against the wheel in `crates/ocio/tests/yaml_cpp_node_oracle.rs`.
 
 ## Numeric helpers
 

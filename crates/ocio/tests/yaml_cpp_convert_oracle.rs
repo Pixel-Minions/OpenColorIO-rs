@@ -224,6 +224,8 @@ const NUMBERS: &[&str] = &[
     ".Inf",
     ".INF",
     "+.inf",
+    "+.Inf",
+    "+.INF",
     "-.inf",
     "-.Inf",
     "-.INF",
@@ -465,7 +467,13 @@ fn long_numbers() -> Vec<String> {
         out.push(format!("0.{}{s}", zeros(1075 - s.len())));
         out.push(format!("0.{}{s}1", zeros(1075 - s.len())));
         out.push(format!("0.{}{s}{}1", zeros(1075 - s.len()), zeros(5)));
+        // the 768 digits as the integer part, a fraction after them
+        out.push(format!("{s}.1e-1075"));
     }
+    // Hexadecimal exponents past the bound num_get clamps to (4200), against long significands:
+    // the clamp, and its adjustment of a large exponent by the digits' power.
+    out.push(format!("0x1{}p-4150", zeros(767)));
+    out.push(format!("0x1{}p-4001", zeros(3767)));
     for (lead, exp) in [
         (1099, "1099"),
         (1100, "1100"),
@@ -510,7 +518,7 @@ fn numbers_read_as_the_wheel_reads_them() {
         .collect();
     assert_eq!(
         sha256_hex(&all),
-        "afd72e849fc6d4c2bad33315152f85a0a2ce873c23963ea38dd7da3b8fb291a5",
+        "d33f71a3cec32304f3d32dd0df14b30ae6343a5c9b4b0320a1600834a549b35f",
         "the generated spellings changed"
     );
 
