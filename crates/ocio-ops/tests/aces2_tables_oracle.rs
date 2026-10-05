@@ -5,7 +5,8 @@
 //! exist: the GPU shader of an `ACES_OUTPUT_TRANSFORM_20` (the oracle's `gpu_shader`) holds
 //! them, built by the same `init_*` functions as the CPU renderer
 //! (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpGPU.cpp:1287-1366,
-//! FixedFunctionOpCPU.cpp:1057-1088 @ v2.5.2): the reach table as a texture; the JMh models'
+//! FixedFunctionOpCPU.cpp:1057-1088 @ v2.5.2): the reach table and the cusp table as textures,
+//! the hue table as a float array constant; the JMh models'
 //! matrices, `cz`, `A_w_J`, `1/cz`, the tone scale's and the chroma compression's parameters as
 //! literals, which the shader writes with 9 significant digits for a `float`
 //! (`getFloatString`, src/OpenColorIO/GpuShaderUtils.cpp:21-36 @ v2.5.2) and 17 for a
@@ -14,11 +15,12 @@
 //! The limiting primaries go through `float`, as the renderers read them.
 
 use ocio_ops::ops::fixedfunction::aces2::common::{
-    ChromaCompressParams, JMhParams, SharedCompressionParameters, ToneScaleParams,
+    ChromaCompressParams, JMhParams, SharedCompressionParameters, Table1D, Table3D,
+    ToneScaleParams, table_base,
 };
 use ocio_ops::ops::fixedfunction::aces2::transform::{
     init_chroma_compress_params, init_jmh_params, init_shared_compression_params,
-    init_tone_scale_params,
+    init_tone_scale_params, make_uniform_hue_gamut_table,
 };
 use ocio_ops::transforms::builtins::color_matrix_helpers::{
     Chromaticities, Primaries, aces_ap0, aces_ap1,
@@ -35,6 +37,8 @@ struct Model {
     t: ToneScaleParams,
     s: SharedCompressionParameters,
     c: ChromaCompressParams,
+    hue_table: Table1D,
+    cusp_table: Table3D,
 }
 
 /// The parameters as `Renderer_ACES_OutputTransform20` builds them
@@ -54,12 +58,18 @@ fn model(params: &[f64; 9]) -> Model {
     let reach = init_jmh_params(&aces_ap1::PRIMARIES).unwrap();
     let s = init_shared_compression_params(peak, &p_in, &reach);
     let c = init_chroma_compress_params(peak, &t);
+    let mut hue_table: Table1D = [0.0; table_base::TOTAL_SIZE];
+    let cusp_table =
+        make_uniform_hue_gamut_table(&reach, &p_out, peak, t.forward_limit, &s, &mut hue_table)
+            .unwrap();
     Model {
         p_in,
         p_out,
         t,
         s,
         c,
+        hue_table,
+        cusp_table,
     }
 }
 
@@ -238,6 +248,19 @@ fn tables_and_parameters_match_the_gpu_shader() {
                 number_after(text, "F_L_Y)) * "),
             ],
             vec![m.t.m_2, m.t.g, m.t.t_1, m.p_in.inv_a_w_j],
+        );
+        check(
+            "hue table",
+            numbers_after(text, "_hues_array[363] = float[363]("),
+            m.hue_table.to_vec(),
+        );
+        // The cusps' J and M; the third column is the upper hull's gamma, which
+        // `make_upper_hull_gamma` fills (chunk 2.4d).
+        let cusps = texture("gamut_cusp_table");
+        check(
+            "cusp table J and M",
+            cusps.chunks(3).flat_map(|e| [e[0], e[1]]).collect(),
+            m.cusp_table.iter().flat_map(|e| [e[0], e[1]]).collect(),
         );
         // `double(t.s_2) * p.F_L_n` and `double(p.F_L_n) * reference_luminance`, written as
         // doubles with 17 significant digits (FixedFunctionOpGPU.cpp:680-682 @ v2.5.2).

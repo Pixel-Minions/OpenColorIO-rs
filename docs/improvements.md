@@ -1362,3 +1362,19 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   error, and that the comparisons upstream makes without reading (another style, or an inverse
   that validation refuses) give upstream's answers. The renderers in 2.3b, and in 2.3c1 and
   2.3d1 (`p2-ff-cpu-2`): `fixed_function_op_cpu_tests.rs` checks their errors.
+
+### U-32. ACES 2.0's hue table past its arrays
+
+- **Upstream:** the ACES 2.0 fixed functions build their hue table from the corners of the
+  limiting and the reach gamuts (`ops/fixedfunction/ACES2/Transform.cpp:646-736`).
+  `extract_sorted_cube_hues` merges the two sorted lists of corner hues with comparisons that
+  NaN hues never satisfy, so it reads past the 8 corners and writes past the 12 sorted hues;
+  `build_hue_table` writes `samples` entries into the 363-entry table from counts that, as
+  its own `BUG` notes say, can overrun it. Limiting primaries with a NaN coordinate, which
+  `FixedFunctionOpData::validate` accepts (it checks only the peak luminance), get there: the
+  wheel's process stops on Windows with `0xc0000409` (the stack cookie check) when it builds
+  the processor.
+- **Decided** (general rule): the port refuses such parameters where upstream would read or
+  write past an array: "ACES 2.0: the gamut's corner hues make the hue table read or write
+  past its arrays: upstream's behaviour is undefined." (`aces2::transform::CORNERS_OVERRUN`).
+- **Status:** matched in `p2-aces2-cpu` (2.4c); `aces2/transform_tests.rs` checks the error.
