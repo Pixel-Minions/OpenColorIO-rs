@@ -41,6 +41,7 @@
 //!
 //! yaml-cpp is MIT-licensed; its notice is above and applies to this module.
 
+pub mod convert;
 pub mod emitter;
 pub mod emitter_manip;
 pub mod emitter_state;
@@ -49,7 +50,10 @@ pub mod event_handler;
 pub mod exceptions;
 pub mod exp;
 pub mod mark;
+pub mod node;
+pub mod node_builder;
 pub mod ostream_wrapper;
+pub mod parse;
 pub mod parser;
 pub mod regex_yaml;
 pub mod scan_scalar;
