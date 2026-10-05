@@ -249,6 +249,19 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched (`p1-processor`, WP 1.8h1: `processor::stoul`, checked against each C
   runtime's `strtoul`, and through both wheels in `crates/ocio/tests/processor_cache_oracle.rs`).
 
+### I-100. YAML positions wrap after 2^31 characters or lines
+
+- **Upstream:** yaml-cpp counts the reader's position, line and column in C++ `int`s with `++`
+  (`Stream::get`, `AdvanceCurrent`, yaml-cpp 0.8.0 `src/stream.cpp:262-303`), and prints the
+  line and column plus one (`include/yaml-cpp/exceptions.h:173-181`). Past 2^31 characters or
+  lines the counters overflow, undefined behaviour that a plain machine addition resolves by
+  wrapping. The port wraps them: marks turn negative, and a mark of -1 everywhere reads as
+  "no mark".
+- **Who notices:** configs larger than 2 GiB, in the line numbers of their error messages and
+  in yaml-cpp's 1024-character limit on simple keys, which compares positions.
+- **A fix:** count in 64 bits.
+- **Status:** matched in the YAML parser (`p3-yaml-parser`, `crates/ocio/src/yaml_cpp/`).
+
 ## Numeric helpers
 
 ### I-20. Double values are compared to 0 and 1 in float precision

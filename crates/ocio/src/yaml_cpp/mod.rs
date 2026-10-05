@@ -23,16 +23,21 @@
 //   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 //   THE SOFTWARE.
 
-//! A port of the yaml-cpp 0.8.0 emitter, the YAML writer OpenColorIO 2.5.2 is built with
-//! (`share/cmake/modules/FindExtPackages.cmake`). OCIO's `Config::serialize()` is a sequence
-//! of calls to it (`OCIOYaml.cpp` `save` functions), so its layout, quoting and number
-//! formatting are part of OCIO's byte-exact output.
+//! A port of yaml-cpp 0.8.0, the YAML library OpenColorIO 2.5.2 is built with
+//! (`share/cmake/modules/FindExtPackages.cmake`); its source is pinned at `upstream/yaml-cpp`.
 //!
-//! The files mirror yaml-cpp's: `emitter.cpp`, `emitterstate.cpp`, `emitterutils.cpp`,
-//! `emittermanip.h`, `ostream_wrapper.cpp`, `regex_yaml.cpp`/`regeximpl.h` and `exp.h`.
-//! Each item cites the yaml-cpp source it translates. The emitter writes to its own
-//! buffer (the `Emitter()` constructor OCIO uses); yaml-cpp's `std::ostream` mode is not
-//! ported.
+//! - **The emitter.** OCIO's `Config::serialize()` is a sequence of calls to it
+//!   (`OCIOYaml.cpp` `save` functions), so its layout, quoting and number formatting are part
+//!   of OCIO's byte-exact output. The files mirror yaml-cpp's: `emitter.cpp`,
+//!   `emitterstate.cpp`, `emitterutils.cpp`, `emittermanip.h`, `ostream_wrapper.cpp`,
+//!   `regex_yaml.cpp`/`regeximpl.h` and `exp.h`. The emitter writes to its own buffer (the
+//!   `Emitter()` constructor OCIO uses); yaml-cpp's `std::ostream` mode is not ported.
+//! - **The parser.** OCIO reads a config with `YAML::Load` and the node API. Its accepted
+//!   syntax, its lenient decoding and its error texts and marks ("yaml-cpp: error at line 3,
+//!   column 5: ...") are part of what OCIO accepts and reports. The files mirror yaml-cpp's:
+//!   `stream.cpp`, `exceptions.h`, `mark.h`, and the scanner, parser and node files.
+//!
+//! Each item cites the yaml-cpp source it translates.
 //!
 //! yaml-cpp is MIT-licensed; its notice is above and applies to this module.
 
@@ -40,9 +45,12 @@ pub mod emitter;
 pub mod emitter_manip;
 pub mod emitter_state;
 pub mod emitter_utils;
+pub mod exceptions;
 pub mod exp;
+pub mod mark;
 pub mod ostream_wrapper;
 pub mod regex_yaml;
+pub mod stream;
 
 pub use emitter::{Emittable, Emitter};
 pub use emitter_manip::{
