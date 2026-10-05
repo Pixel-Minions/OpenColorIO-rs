@@ -31,6 +31,11 @@
 //! owner's extension of W0002, 2026-10-04). Everything else compares bit for bit, and what
 //! W0002 covers is counted. A test in `battery::params` pins the callers of both.
 //!
+//! Waiver W0001 applies to the PQ curves' case on Windows where the pixels render without
+//! fast math: there only the applies from `F32` to `F32` run, through `Case::compare_pixels`
+//! under it, and the others are counted as not run ([`w0001_skips`]); Linux, and fast math,
+//! compare everything bit for bit.
+//!
 //! The `Lut1DTransform`'s float renderers, composing LUTs, the inverse LUT and the hue
 //! adjustment are Phase 2's (WP 2.1, 2.5). [`lut1d_deferral`] says, from the renderer upstream
 //! picks for each combination, which ones the port must refuse with which "not ported yet"
@@ -454,13 +459,14 @@ fn destination_layout(job: &Job) -> Layout {
 /// Compares the buffers after a job, the wheel's and the port's: the source's (when it isn't
 /// the destination) byte for byte, and the destination image byte for byte or, where they
 /// differ, through the case's comparison ([`battery::params::Case::compare_pixels`]), which applies
-/// W0002 where it covers the case. Returns how many NaN values W0002 waived.
+/// W0002 or W0001 where they cover the case. Returns the comparison, `Exact` where the bytes
+/// are equal, or an error where a source buffer differs.
 fn compare_images(
     case: &battery::params::Case<Calls>,
     job: &Job,
     wheel: &[Vec<u8>],
     port: &[Vec<u8>],
-) -> Result<usize, String> {
+) -> Result<Comparison, String> {
     let sources = job.combo.layout.buffers();
     let output = if job.combo.in_place {
         0..sources
@@ -473,7 +479,7 @@ fn compare_images(
         sources..wheel.len()
     };
     if wheel[output.clone()] == port[output.clone()] {
-        return Ok(0);
+        return Ok(Comparison::Exact);
     }
     let (layout, depth) = if job.combo.in_place {
         (job.combo.layout, job.combo.input)
@@ -493,11 +499,8 @@ fn compare_images(
         &expected,
         &actual,
     ) {
-        Comparison::W0002 { waived } => Ok(waived),
         Comparison::Exact => Err("the destination's bytes differ, its values don't".into()),
-        // No case of the sweep is under W0001 (the PQ curves are the op battery's only).
-        Comparison::W0001 { .. } => Err("W0001 applied to a case of the format sweep".into()),
-        Comparison::Mismatch(report) => Err(report),
+        comparison => Ok(comparison),
     }
 }
 
@@ -833,6 +836,21 @@ struct Waived {
     cache_ids: usize,
     /// The NaN entries of those LUTs that differ in sign or payload bits only.
     lut_entries: usize,
+    /// Destination images of the PQ curves with values that differ within W0001.
+    w0001_images: usize,
+    /// Those values.
+    w0001_values: usize,
+}
+
+/// Whether waiver W0001 keeps `job` out of the sweep: where it applies to the case (the PQ
+/// curves, on Windows, rendered without fast math, which includes the 1D LUT the optimizer
+/// bakes for integer and half inputs), only applies from `F32` to `F32` are compared, through
+/// its comparison. The others would compare values rounded to an integer or half output, or
+/// looked up in a baked LUT, which the waiver's bound in ulp of `f32` doesn't describe.
+fn w0001_skips(case: &battery::params::Case<Calls>, job: &Job) -> bool {
+    case.w0001_applies(&w0002_combo(job.dir, &job.combo))
+        .is_some()
+        && !(job.combo.input == Depth::F32 && job.combo.output == Depth::F32)
 }
 
 /// Runs every job of `class` against the wheel; panics with a report if any differs.
@@ -860,6 +878,9 @@ fn check(class: &Class) {
             jobs.len()
         );
     }
+    let (jobs, skipped): (Vec<Job>, Vec<Job>) = jobs
+        .into_iter()
+        .partition(|job| !w0001_skips(&class.cases.cases[job.case], job));
     let mut failures = Vec::new();
     let mut deferred: BTreeMap<String, usize> = BTreeMap::new();
     let mut compared = 0;
@@ -916,12 +937,18 @@ fn check(class: &Class) {
                     });
                     compared += 1;
                     match compare_images(case, job, &reply.buffers, &buffers) {
-                        Ok(0) => {}
-                        Ok(n) => {
+                        Ok(Comparison::Exact) => {}
+                        Ok(Comparison::W0002 { waived: n }) => {
                             waived.images += 1;
                             waived.values += n;
                         }
-                        Err(report) => failures.push(format!("{what}\n  {report}")),
+                        Ok(Comparison::W0001 { waived: n }) => {
+                            waived.w0001_images += 1;
+                            waived.w0001_values += n;
+                        }
+                        Ok(Comparison::Mismatch(report)) | Err(report) => {
+                            failures.push(format!("{what}\n  {report}"));
+                        }
                     }
                     if wheel == result {
                         continue;
@@ -998,7 +1025,8 @@ fn check(class: &Class) {
     println!(
         "{}: {} applies ({} tier): {compared} compared, {refusals} refusals compared, {} \
          deferred to Phase 2{}\n  W0002: {} images with {} NaN values differing in sign or \
-         payload bits only; {} cache IDs of 1D LUTs baked with {} such NaN entries",
+         payload bits only; {} cache IDs of 1D LUTs baked with {} such NaN entries\n  W0001: \
+         {} images with values within it ({} values); {} applies not run (not F32 to F32)",
         class.name,
         jobs.len(),
         tier.name(),
@@ -1010,7 +1038,10 @@ fn check(class: &Class) {
         waived.images,
         waived.values,
         waived.cache_ids,
-        waived.lut_entries
+        waived.lut_entries,
+        waived.w0001_images,
+        waived.w0001_values,
+        skipped.len()
     );
     assert!(
         failures.is_empty(),

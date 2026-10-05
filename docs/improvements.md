@@ -942,13 +942,16 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `Renderer_LIN_TO_PQ<float>` and `Renderer_PQ_TO_LIN<float>` with `powf` elsewhere
   (`ops/fixedfunction/FixedFunctionOpCPU.cpp:2557-2590`). MSVC compiles `_mm_pow_ps` to
   SVML's `__vdecl_powf4`, so the Windows wheel computes PQ with SVML and the Linux wheel with
-  glibc's `powf`: different results in the last bits of about 1.7% of the values, up to a few
-  hundred ulp for `LIN_TO_PQ` and far more for `PQ_TO_LIN` near its pole (W0001).
+  glibc's `powf`: different results in about 1.7% of the values (every `f32` measured): up to
+  339 ulp for `LIN_TO_PQ`; for `PQ_TO_LIN`, up to 3,356,700 ulp up to 1 in magnitude (near
+  black, where the outputs are subnormal), and without bound above 1, through its pole near
+  1.992, where the two give infinities and NaNs at different inputs (W0001).
 - **Who notices:** `FIXED_FUNCTION_LIN_TO_PQ` transforms, in either direction, with fast math
   off: Windows and Linux give different values.
 - **A fix:** one renderer and one `pow` on every platform.
 - **Status:** matched in `p2-ff-cpu-2` (2.3d2) on Linux, bit for bit; on Windows the port
-  calls `powf` where the wheel calls SVML (W0001, within its bound).
+  calls `powf` where the wheel calls SVML (W0001: within its bound, and for `PQ_TO_LIN` above 1
+  in magnitude any difference, split by range in 2.3d3).
 
 ### I-120. A color space transform's text runs the data bypass into the destination
 
