@@ -197,13 +197,14 @@ path = "src/OpenColorIO/ContextVariableUtils.cpp"
 kind = "src"
 target = ["crates/ocio/src/context_variable_utils.rs"]
 status = "partial"
-note = "1.8g: CollectContextVariables for the classes in the port (the group overload of transforms/GroupTransform.cpp:206-223 included); the resolution and the other overloads come with the context's state (Phase 3)"
+note = "1.8g: CollectContextVariables for the classes in the port (the group overload of transforms/GroupTransform.cpp:206-223 included); p3-context 3.5d: ContainsContextVariableToken, ContainsContextVariables, LoadEnvironment, ResolveContextVariables. The other CollectContextVariables overloads come with their transform classes"
 
 [[file]]
 path = "src/OpenColorIO/ContextVariableUtils.h"
 kind = "src"
 target = ["crates/ocio/src/context_variable_utils.rs"]
-status = "todo"
+status = "partial"
+note = "p3-context 3.5d: EnvMapKey, EnvMap, UsedEnvs and the declarations; the CollectContextVariables overloads of the classes not ported yet come with them"
 
 [[file]]
 path = "src/OpenColorIO/CustomKeys.h"
@@ -4192,7 +4193,8 @@ note = "p1-transforms-fam2 (1.8d): the setMajorVersion checks of version (2065-2
 path = "tests/cpu/ContextVariableUtils_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/context_variable_utils_tests.rs"]
-status = "todo"
+status = "done"
+note = "p3-context 3.5d: env_check, env_expand"
 
 [[file]]
 path = "tests/cpu/Context_tests.cpp"
