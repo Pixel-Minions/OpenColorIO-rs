@@ -1125,6 +1125,37 @@ pub(crate) fn fixed_function() -> Cases {
         "REC2100_SURROUND NaN",
         fixed_function_calls("FIXED_FUNCTION_REC2100_SURROUND", &[f64::NAN]),
     ));
+    // The Rec.2100 HLG curve, and a double log (tests/cpu/ops/fixedfunction/
+    // FixedFunctionOpCPU_tests.cpp:1311-1325, 1374-1382 @ v2.5.2).
+    let hlg = [
+        0.0,
+        0.25,
+        0.5,
+        1.0,
+        0.0,
+        std::f64::consts::E,
+        0.17883277,
+        0.807825590164,
+        1.0,
+        -0.07116723,
+    ];
+    let gamma_log = Case::new(
+        "LIN_TO_GAMMA_LOG HLG",
+        fixed_function_calls("FIXED_FUNCTION_LIN_TO_GAMMA_LOG", &hlg),
+    );
+    bases.push(gamma_log.clone());
+    cases.push(gamma_log);
+    let double_log = Case::new(
+        "LIN_TO_DOUBLE_LOG",
+        fixed_function_calls(
+            "FIXED_FUNCTION_LIN_TO_DOUBLE_LOG",
+            &[
+                10.0, 0.25, 0.5, -1.0, 0.0, -1.0, 1.25, 1.0, 1.0, 1.0, 0.5, 1.0, 0.0,
+            ],
+        ),
+    );
+    bases.push(double_log.clone());
+    cases.push(double_log);
     let mut nan = GAMUT_COMP_13;
     nan[6] = f64::NAN;
     cases.push(Case::new(

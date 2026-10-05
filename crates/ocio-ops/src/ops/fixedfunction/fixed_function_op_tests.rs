@@ -4,7 +4,7 @@
 //! Port of `tests/cpu/ops/fixedfunction/FixedFunctionOp_tests.cpp` @ v2.5.2: the tests of the
 //! op. Its test of `CreateFixedFunctionTransform` (`create_transform`) needs the transform: it
 //! is in crates/ocio/src/transforms/fixed_function_transform_tests.rs. The `FixedFunctionOps`
-//! tests of the PQ, gamma-log and double-log styles come with their renderers (2.3d).
+//! test of the PQ styles comes with their renderers (2.3d2).
 
 use super::*;
 
@@ -330,4 +330,52 @@ fn ops_xyz_to_uvy() {
 fn ops_xyz_to_luv() {
     use FixedFunctionOpStyle::*;
     check_ops(XyzToLuv, LuvToXyz, "RendererXyzToLuv");
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOps, LIN_TO_GAMMA_LOG)` @ v2.5.2.
+#[test]
+fn ops_lin_to_gamma_log() {
+    use FixedFunctionOpStyle::*;
+    // Parameters for the Rec.2100 HLG curve.
+    let params: Params = vec![
+        0.0,  // mirror point
+        0.25, // break point
+        // Gamma segment.
+        0.5, // gamma power
+        1.0, // post-power scale
+        0.0, // pre-power offset
+        // Log segment.
+        1.0f64.exp(),   // log base (e)
+        0.17883277,     // log-side slope
+        0.807825590164, // log-side offset
+        1.0,            // lin-side slope
+        -0.07116723,    // lin-side offset
+    ];
+    check_ops_with(
+        GammaLogToLin,
+        LinToGammaLog,
+        &params,
+        "RendererGammaLogToLin",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOps, LIN_TO_DOUBLE_LOG)` @ v2.5.2.
+#[test]
+fn ops_lin_to_double_log() {
+    use FixedFunctionOpStyle::*;
+    #[rustfmt::skip]
+    let params: Params = vec![
+        10.0,               // base for the log
+        0.5,                // break point between log1 and linear segments
+        0.5,                // break point between linear and log2 segments
+        1.0, 0.0, 1.0, 0.0, // log curve 1: LinSideSlope, LinSideOffset, LogSideSlope, LogSideOffset,
+        1.0, 0.0, 1.0, 0.0, // log curve 2: LinSideSlope, LinSideOffset, LogSideSlope, LogSideOffset,
+        1.0, 0.0,           // linear segment slope and offset
+    ];
+    check_ops_with(
+        LinToDoubleLog,
+        DoubleLogToLin,
+        &params,
+        "RendererLinToDoubleLog",
+    );
 }

@@ -4,7 +4,8 @@
 //! The FixedFunction renderers against the wheel, bit for bit, through the oracle test
 //! battery (`ocio_testkit::battery`): every case in both directions, with fast math on and
 //! off, on the tier's probe sets (`OCIO_RS_TIER`). So far the ACES 1.x styles (chunk 2.3b), the
-//! Rec.2100 surround, HSV and the CIE styles (2.3c1), and the HSY styles (2.3c2).
+//! Rec.2100 surround, HSV and the CIE styles (2.3c1), the HSY styles (2.3c2), and the
+//! gamma-log and double-log styles (2.3d1).
 //!
 //! The oracle builds a FixedFunctionTransform in a raw config and applies its CPU processor
 //! to F32 RGBA pixels. The family builds the op data that upstream's transform and
@@ -195,6 +196,18 @@ impl Family for FixedFamily {
             // The linear HSY blends its low and high saturations between these lumas
             // (FixedFunctionOpCPU.cpp:1638-1640, 1714-1716 @ v2.5.2).
             FixedFunctionStyle::RgbToHsyLin => vec![0.001, 0.01],
+            // The mirror and break points, and the break point after the gamma segment
+            // (FixedFunctionOpCPU.cpp:2260-2263, 2284-2285 @ v2.5.2).
+            FixedFunctionStyle::LinToGammaLog if p.params.len() == 10 => {
+                let q = |i: usize| p.params[i] as f32;
+                let prime_break = q(3) * (q(1) + q(4)).powf(q(2));
+                let prime_mirror = q(3) * (q(0) + q(4)).powf(q(2));
+                vec![q(0), q(1), prime_break, prime_mirror]
+            }
+            // The break points (FixedFunctionOpCPU.cpp:2359, 2363 @ v2.5.2).
+            FixedFunctionStyle::LinToDoubleLog if p.params.len() == 13 => {
+                vec![p.params[1] as f32, p.params[2] as f32]
+            }
             _ => Vec::new(),
         }
     }
@@ -334,6 +347,97 @@ fn surround_hsv_hsy_and_cie_styles_match_the_wheel() {
 
     battery::run(&FixedFamily {
         name: "surround, HSV, HSY, CIE",
+        cases,
+        bases,
+    });
+}
+
+#[test]
+fn gamma_log_and_double_log_match_the_wheel() {
+    use FixedFunctionStyle::*;
+    // The Rec.2100 HLG curve (tests/cpu/ops/fixedfunction/FixedFunctionOpCPU_tests.cpp:1311-1325
+    // @ v2.5.2).
+    let hlg = [
+        0.0,
+        0.25,
+        0.5,
+        1.0,
+        0.0,
+        std::f64::consts::E,
+        0.17883277,
+        0.807825590164,
+        1.0,
+        -0.07116723,
+    ];
+    // FixedFunctionOpCPU_tests.cpp:1374-1382 and FixedFunctionOp_tests.cpp:536-543 @ v2.5.2.
+    let double_log = [
+        10.0, 0.25, 0.5, -1.0, 0.0, -1.0, 1.25, 1.0, 1.0, 1.0, 0.5, 1.0, 0.0,
+    ];
+    let double_log_2 = [
+        10.0, 0.5, 0.5, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0,
+    ];
+    let gamma_log = Case::new("LinToGammaLog HLG", Fixed::new(LinToGammaLog, &hlg));
+    let double = Case::new("LinToDoubleLog", Fixed::new(LinToDoubleLog, &double_log));
+    let bases = vec![gamma_log.clone(), double.clone()];
+    let mut cases = vec![
+        gamma_log,
+        double,
+        Case::new(
+            "LinToDoubleLog 2",
+            Fixed::new(LinToDoubleLog, &double_log_2),
+        ),
+    ];
+    // A mirror below 0, a gamma above 1 and an offset gamma segment.
+    let mut mirrored = hlg;
+    mirrored[0] = -0.1;
+    mirrored[2] = 2.4;
+    mirrored[4] = 0.055;
+    mirrored[5] = 2.0;
+    cases.push(Case::new(
+        "LinToGammaLog mirrored",
+        Fixed::new(LinToGammaLog, &mirrored),
+    ));
+    // NaN parameters, which validation accepts.
+    let mut nan = hlg;
+    nan[6] = f64::NAN;
+    cases.push(Case::new(
+        "LinToGammaLog NaN slope",
+        Fixed::new(LinToGammaLog, &nan),
+    ));
+    let mut nan = double_log;
+    nan[12] = f64::NAN;
+    cases.push(Case::new(
+        "LinToDoubleLog NaN offset",
+        Fixed::new(LinToDoubleLog, &nan),
+    ));
+    // Refusals.
+    for (label, i, v) in [
+        ("base 0", 5, 0.0),
+        ("mirror at the break", 0, 0.25),
+        ("gamma power 0", 2, 0.0),
+    ] {
+        let mut p = hlg;
+        p[i] = v;
+        cases.push(Case::new(
+            format!("refused LinToGammaLog {label}"),
+            Fixed::new(LinToGammaLog, &p),
+        ));
+    }
+    for (label, i, v) in [("base -1", 0, -1.0), ("break order", 1, 0.75)] {
+        let mut p = double_log;
+        p[i] = v;
+        cases.push(Case::new(
+            format!("refused LinToDoubleLog {label}"),
+            Fixed::new(LinToDoubleLog, &p),
+        ));
+    }
+    cases.push(Case::new(
+        "refused LinToDoubleLog 12 parameters",
+        Fixed::new(LinToDoubleLog, &double_log[..12]),
+    ));
+
+    battery::run(&FixedFamily {
+        name: "gamma-log, double-log",
         cases,
         bases,
     });

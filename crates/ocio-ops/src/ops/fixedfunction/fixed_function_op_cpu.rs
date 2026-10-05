@@ -7,8 +7,9 @@
 //! So far the ACES 1.x styles: the red modifiers 0.3 and 1.0, the glows 0.3 and 1.0, the dark
 //! to dim surround 1.0 and the gamut compression 1.3, forward and inverse (chunk 2.3b); the
 //! Rec.2100 surround, RGB to and from HSV, and XYZ to and from xyY, u'v'Y and CIELUV (2.3c1);
-//! RGB to and from the three HSYs (2.3c2). The other styles' renderers come with chunks 2.3d
-//! and 2.4e; until then [`get_fixed_function_cpu_renderer`] refuses them ([`not_ported`]).
+//! RGB to and from the three HSYs (2.3c2); the gamma-log and double-log curves, both ways
+//! (2.3d1). The other styles' renderers come with chunks 2.3d2 and 2.4e; until then
+//! [`get_fixed_function_cpu_renderer`] refuses them ([`not_ported`]).
 //!
 //! The renderers work in place and never write alpha, which upstream copies (`out[3] =
 //! in[3]`), nor a channel upstream leaves as it was.
@@ -29,9 +30,14 @@
 //! The Rec.2100 surround, the HSYs and the CIE conversions mix the channels throughout; each
 //! documents the orders MSVC and GCC chose, which often differ (`cfg(target_os)`). LLVM
 //! rewrites `a - c * x` as `a + (-c) * x` and may then swap the addition's operands, so those
-//! subtractions are [`sse_sub`]. RGB to HSV's extremes carry only red's NaN (`std::min(NaN, x)` is `NaN` only for
-//! a NaN first operand), and HSV to RGB's `Clamp` turns a NaN hue or saturation into 0, so
-//! neither meets two NaNs in an operation whose operands the compilers can swap.
+//! subtractions are [`sse_sub`]. RGB to HSV's extremes carry only red's NaN
+//! (`std::min(NaN, x)` is `NaN` only for a NaN first operand), and HSV to RGB's `Clamp` turns
+//! a NaN hue or saturation into 0, so neither meets two NaNs in an operation whose operands
+//! the compilers can swap.
+//!
+//! The gamma-log and double-log curves work on one channel at a time, so a NaN pixel meets
+//! only NaN parameters (W0002); they follow both wheels' order anyway, and the gamma-log
+//! restores the sign per platform (I-83, [`times_copysign_one`]).
 
 use std::sync::Arc;
 
@@ -1525,6 +1531,364 @@ impl CpuOp for RendererHsyVidToRgb {
     }
 }
 
+/// `params[i]`, or [`SHORT_PARAMS`] where upstream would read past the parameters (U-31).
+fn param(params: &[f64], i: usize) -> Result<f64> {
+    params
+        .get(i)
+        .copied()
+        .ok_or_else(|| Exception::new(SHORT_PARAMS))
+}
+
+/// `value * std::copysign(1.0f, sign)` as each wheel computes it (I-83). MSVC builds `±1.0f`
+/// and multiplies it by `value` (Windows `0x18018d39e`-`0x18018d3a7`), which keeps a NaN
+/// `value`'s sign; GCC's `xorsign` pattern flips `value`'s sign bit where `sign`'s is set
+/// (Linux `0x354db5`-`0x354dc2`), a NaN's too, and leaves a signalling NaN signalling.
+#[inline]
+fn times_copysign_one(value: f32, sign: f32) -> f32 {
+    #[cfg(target_os = "windows")]
+    {
+        sse_mul(1.0f32.copysign(sign), value)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        f32::from_bits(value.to_bits() ^ (sign.to_bits() & 0x8000_0000))
+    }
+}
+
+/// The gamma segment of [`RendererLinToGammaLog`]: `Ygamma = slope * (Xlin + off)^power`.
+#[derive(Debug, Clone, Copy)]
+struct GammaSegment {
+    /// `power`.
+    power: f32,
+    /// `slope`: the post-power scale.
+    slope: f32,
+    /// `off`: the pre-power offset.
+    off: f32,
+}
+
+/// The log segment of [`RendererLinToGammaLog`]: `Ylog = logSlope * log(linSlope * Xlin +
+/// linOff, base) + logOff`.
+#[derive(Debug, Clone, Copy)]
+struct GammaLogSegment {
+    /// `logSlope`, with the base conversion baked in.
+    log_slope: f32,
+    /// `logOff`.
+    log_off: f32,
+    /// `linSlope`.
+    lin_slope: f32,
+    /// `linOff`.
+    lin_off: f32,
+}
+
+/// A curve with a gamma segment below a break point and a log segment above it, mirrored
+/// around a point.
+///
+/// Port of `Renderer_LIN_TO_GAMMA_LOG` (src/OpenColorIO/ops/fixedfunction/
+/// FixedFunctionOpCPU.cpp:389-419, 2230-2277 @ v2.5.2).
+#[derive(Debug)]
+pub struct RendererLinToGammaLog {
+    /// `m_mirror`: the mirroring point in lin space.
+    mirror: f32,
+    /// `m_break`: the break point between gamma and log in lin space.
+    break_: f32,
+    /// `m_gammaSeg`.
+    gamma_seg: GammaSegment,
+    /// `m_logSeg`.
+    log_seg: GammaLogSegment,
+}
+
+impl RendererLinToGammaLog {
+    /// The parameters as floats, the log base conversion baked into `logSlope`: `params[6] /
+    /// log(params[5])` in double, with the C library's `log` (both wheels; the base is
+    /// positive or NaN after validation, so glibc's compatibility `log` that the Linux wheel
+    /// links answers as the current one). [`SHORT_PARAMS`] for fewer than ten parameters,
+    /// which upstream reads past (U-31).
+    ///
+    /// Port of `Renderer_LIN_TO_GAMMA_LOG::Renderer_LIN_TO_GAMMA_LOG`
+    /// (FixedFunctionOpCPU.cpp:2230-2246 @ v2.5.2).
+    pub fn new(data: &FixedFunctionOpData) -> Result<Self> {
+        let params = data.params();
+        let p = |i| param(params, i);
+        let log_slope = p(6)? / p(5)?.ln();
+        Ok(RendererLinToGammaLog {
+            mirror: p(0)? as f32,
+            break_: p(1)? as f32,
+            gamma_seg: GammaSegment {
+                power: p(2)? as f32,
+                slope: p(3)? as f32,
+                off: p(4)? as f32,
+            },
+            log_seg: GammaLogSegment {
+                log_slope: log_slope as f32,
+                log_off: p(7)? as f32,
+                lin_slope: p(8)? as f32,
+                lin_off: p(9)? as f32,
+            },
+        })
+    }
+}
+
+impl CpuOp for RendererLinToGammaLog {
+    /// Where a NaN pixel meets a NaN parameter (W0002), the operand order is both wheels':
+    /// `(E + off)^power * slope` and `log(E * linSlope + linOff) * logSlope + logOff`
+    /// (Windows `0x18018d35e`-`0x18018d38e`, Linux `0x354d92`-`0x354daf`, `0x354e08`-`0x354e2b`).
+    /// The sign comes back per platform ([`times_copysign_one`]).
+    ///
+    /// Port of `Renderer_LIN_TO_GAMMA_LOG::apply` (FixedFunctionOpCPU.cpp:2248-2277 @
+    /// v2.5.2).
+    fn apply(&self, rgba: &mut [f32]) {
+        let g = &self.gamma_seg;
+        let l = &self.log_seg;
+        for pixel in rgba.as_chunks_mut::<4>().0 {
+            for value in &mut pixel[..3] {
+                let ein = *value;
+
+                let mirrorin = ein - self.mirror;
+                let e = sse_add(mirrorin.abs(), self.mirror);
+                let eprime = if e < self.break_ {
+                    sse_mul(sse_add(e, g.off).powf(g.power), g.slope)
+                } else {
+                    let x = sse_add(sse_mul(e, l.lin_slope), l.lin_off);
+                    sse_add(sse_mul(x.ln(), l.log_slope), l.log_off)
+                };
+                *value = times_copysign_one(eprime, mirrorin);
+            }
+        }
+    }
+}
+
+/// The inverse of [`RendererLinToGammaLog`].
+///
+/// Port of `Renderer_GAMMA_LOG_TO_LIN` (src/OpenColorIO/ops/fixedfunction/
+/// FixedFunctionOpCPU.cpp:421-430, 2279-2320 @ v2.5.2).
+#[derive(Debug)]
+pub struct RendererGammaLogToLin {
+    /// The forward renderer, whose parameters it shares.
+    fwd: RendererLinToGammaLog,
+    /// `m_primeBreak`: the break point in the non-linear axis.
+    prime_break: f32,
+    /// `m_primeMirror`: the mirror point in the non-linear axis.
+    prime_mirror: f32,
+}
+
+impl RendererGammaLogToLin {
+    /// Assuming that the function is continuous, the gamma segment gives the break and mirror
+    /// points in the non-linear domain. Both wheels compute `(x + off)^power * slope`
+    /// (Linux `0x35931e`, `0x359341`).
+    ///
+    /// Port of `Renderer_GAMMA_LOG_TO_LIN::Renderer_GAMMA_LOG_TO_LIN`
+    /// (FixedFunctionOpCPU.cpp:2279-2288 @ v2.5.2).
+    pub fn new(data: &FixedFunctionOpData) -> Result<Self> {
+        let fwd = RendererLinToGammaLog::new(data)?;
+        let g = fwd.gamma_seg;
+        let prime_break = sse_mul(sse_add(fwd.break_, g.off).powf(g.power), g.slope);
+        let prime_mirror = sse_mul(sse_add(fwd.mirror, g.off).powf(g.power), g.slope);
+        Ok(RendererGammaLogToLin {
+            fwd,
+            prime_break,
+            prime_mirror,
+        })
+    }
+}
+
+impl CpuOp for RendererGammaLogToLin {
+    /// The sign comes back per platform ([`times_copysign_one`]; Windows `0x18018cd17`-
+    /// `0x18018cd2b`, Linux `0x355071`-`0x35507e`).
+    ///
+    /// Port of `Renderer_GAMMA_LOG_TO_LIN::apply` (FixedFunctionOpCPU.cpp:2290-2320 @ v2.5.2).
+    fn apply(&self, rgba: &mut [f32]) {
+        let g = &self.fwd.gamma_seg;
+        let l = &self.fwd.log_seg;
+        for pixel in rgba.as_chunks_mut::<4>().0 {
+            for value in &mut pixel[..3] {
+                let eprimein = *value;
+
+                let mirrorin = eprimein - self.prime_mirror;
+                let eprime = sse_add(mirrorin.abs(), self.prime_mirror);
+                let e = if eprime < self.prime_break {
+                    (eprime / g.slope).powf(1.0f32 / g.power) - g.off
+                } else {
+                    (((eprime - l.log_off) / l.log_slope).exp() - l.lin_off) / l.lin_slope
+                };
+                // Flip the sign below the mirror point.
+                *value = times_copysign_one(e, mirrorin);
+            }
+        }
+    }
+}
+
+/// A log segment of [`RendererLinToDoubleLog`]: `Ylog = logSlope * log(linSlope * Xlin +
+/// linOff, base) + logOff`.
+#[derive(Debug, Clone, Copy)]
+struct DoubleLogSegment {
+    /// `logSlope`, with the base conversion baked in.
+    log_slope: f32,
+    /// `logOff`.
+    log_off: f32,
+    /// `linSlope`.
+    lin_slope: f32,
+    /// `linOff`.
+    lin_off: f32,
+}
+
+impl DoubleLogSegment {
+    /// `logSlope * log(linSlope * x + linOff) + logOff`, in both wheels' operand order:
+    /// `log(x * linSlope + linOff) * logSlope + logOff` (`Renderer_LIN_TO_DOUBLE_LOG::apply`,
+    /// Windows `0x18018d19e`-`0x18018d1b8`, Linux `0x354c06`-`0x354c26`).
+    ///
+    /// Port of the log segments of `Renderer_LIN_TO_DOUBLE_LOG::apply`
+    /// (FixedFunctionOpCPU.cpp:2359-2370 @ v2.5.2).
+    #[inline]
+    fn eval(&self, x: f32) -> f32 {
+        let x = sse_add(sse_mul(x, self.lin_slope), self.lin_off);
+        sse_add(sse_mul(x.ln(), self.log_slope), self.log_off)
+    }
+
+    /// The same at a break point, for the inverse's constructor, which both wheels compute
+    /// as `log(linSlope * x + linOff) * logSlope + logOff` (Windows `0x180189bfc`-`0x180189c19`,
+    /// inlined in `GetFixedFunctionCPURenderer`; Linux `0x35954d`-`0x359581`).
+    ///
+    /// Port of a break of `Renderer_DOUBLE_LOG_TO_LIN::Renderer_DOUBLE_LOG_TO_LIN`
+    /// (FixedFunctionOpCPU.cpp:2387-2388 @ v2.5.2).
+    #[inline]
+    fn eval_break(&self, x: f32) -> f32 {
+        let x = sse_add(sse_mul(self.lin_slope, x), self.lin_off);
+        sse_add(sse_mul(x.ln(), self.log_slope), self.log_off)
+    }
+}
+
+/// Two log segments with a linear one between them.
+///
+/// Port of `Renderer_LIN_TO_DOUBLE_LOG` (src/OpenColorIO/ops/fixedfunction/
+/// FixedFunctionOpCPU.cpp:432-462, 2322-2378 @ v2.5.2).
+#[derive(Debug)]
+pub struct RendererLinToDoubleLog {
+    /// `m_break1`: between the first log segment and the linear segment.
+    break1: f32,
+    /// `m_break2`: between the linear segment and the second log segment.
+    break2: f32,
+    /// `m_logSeg1`.
+    log_seg1: DoubleLogSegment,
+    /// `m_logSeg2`.
+    log_seg2: DoubleLogSegment,
+    /// `m_linSeg`: `slope` and `off`.
+    lin_seg: (f32, f32),
+}
+
+impl RendererLinToDoubleLog {
+    /// The parameters as floats, the log base conversion baked into each `logSlope`:
+    /// `(float)params[i] / logf(base)`. [`SHORT_PARAMS`] for fewer than 13 parameters, which
+    /// upstream reads past (U-31).
+    ///
+    /// Port of `Renderer_LIN_TO_DOUBLE_LOG::Renderer_LIN_TO_DOUBLE_LOG`
+    /// (FixedFunctionOpCPU.cpp:2322-2344 @ v2.5.2).
+    pub fn new(data: &FixedFunctionOpData) -> Result<Self> {
+        let params = data.params();
+        let p = |i| param(params, i).map(|v| v as f32);
+        let base = p(0)?;
+        Ok(RendererLinToDoubleLog {
+            break1: p(1)?,
+            break2: p(2)?,
+            log_seg1: DoubleLogSegment {
+                log_slope: p(3)? / base.ln(),
+                log_off: p(4)?,
+                lin_slope: p(5)?,
+                lin_off: p(6)?,
+            },
+            log_seg2: DoubleLogSegment {
+                log_slope: p(7)? / base.ln(),
+                log_off: p(8)?,
+                lin_slope: p(9)?,
+                lin_off: p(10)?,
+            },
+            lin_seg: (p(11)?, p(12)?),
+        })
+    }
+}
+
+impl CpuOp for RendererLinToDoubleLog {
+    /// The linear segment is `x * slope + off` in both wheels (Windows `0x18018d1c9`, Linux
+    /// `0x354b5e`).
+    ///
+    /// Port of `Renderer_LIN_TO_DOUBLE_LOG::apply` (FixedFunctionOpCPU.cpp:2346-2378 @ v2.5.2).
+    fn apply(&self, rgba: &mut [f32]) {
+        let (slope, off) = self.lin_seg;
+        for pixel in rgba.as_chunks_mut::<4>().0 {
+            for value in &mut pixel[..3] {
+                let mut x = *value;
+
+                // Linear segment may not exist or be valid. Thus we include the break points in
+                // the log segments.
+                if x <= self.break1 {
+                    x = self.log_seg1.eval(x);
+                } else if x < self.break2 {
+                    x = sse_add(sse_mul(x, slope), off);
+                } else {
+                    x = self.log_seg2.eval(x);
+                }
+
+                *value = x;
+            }
+        }
+    }
+}
+
+/// The inverse of [`RendererLinToDoubleLog`].
+///
+/// Port of `Renderer_DOUBLE_LOG_TO_LIN` (src/OpenColorIO/ops/fixedfunction/
+/// FixedFunctionOpCPU.cpp:464-474, 2380-2423 @ v2.5.2).
+#[derive(Debug)]
+pub struct RendererDoubleLogToLin {
+    /// The forward renderer, whose parameters it shares.
+    fwd: RendererLinToDoubleLog,
+    /// `m_break1Log`: the first break in log space.
+    break1_log: f32,
+    /// `m_break2Log`: the second break in log space.
+    break2_log: f32,
+}
+
+impl RendererDoubleLogToLin {
+    /// The break locations in log space (the break points belong to the log segments, not the
+    /// linear segment, which may be missing).
+    ///
+    /// Port of `Renderer_DOUBLE_LOG_TO_LIN::Renderer_DOUBLE_LOG_TO_LIN`
+    /// (FixedFunctionOpCPU.cpp:2380-2389 @ v2.5.2).
+    pub fn new(data: &FixedFunctionOpData) -> Result<Self> {
+        let fwd = RendererLinToDoubleLog::new(data)?;
+        let break1_log = fwd.log_seg1.eval_break(fwd.break1);
+        let break2_log = fwd.log_seg2.eval_break(fwd.break2);
+        Ok(RendererDoubleLogToLin {
+            fwd,
+            break1_log,
+            break2_log,
+        })
+    }
+}
+
+impl CpuOp for RendererDoubleLogToLin {
+    /// Port of `Renderer_DOUBLE_LOG_TO_LIN::apply` (FixedFunctionOpCPU.cpp:2391-2423 @
+    /// v2.5.2).
+    fn apply(&self, rgba: &mut [f32]) {
+        let (s1, s2) = (&self.fwd.log_seg1, &self.fwd.log_seg2);
+        let (slope, off) = self.fwd.lin_seg;
+        for pixel in rgba.as_chunks_mut::<4>().0 {
+            for value in &mut pixel[..3] {
+                let mut y = *value;
+
+                if y <= self.break1_log {
+                    y = (((y - s1.log_off) / s1.log_slope).exp() - s1.lin_off) / s1.lin_slope;
+                } else if y < self.break2_log {
+                    y = (y - off) / slope;
+                } else {
+                    y = (((y - s2.log_off) / s2.log_slope).exp() - s2.lin_off) / s2.lin_slope;
+                }
+
+                *value = y;
+            }
+        }
+    }
+}
+
 /// The renderer of `func`'s style. `fast_log_exp_pow` picks the fast-math variants of the
 /// styles that have one (PQ, chunk 2.3d). The styles whose renderers aren't ported yet are
 /// refused ([`not_ported`]).
@@ -1587,11 +1951,13 @@ pub fn get_fixed_function_cpu_renderer(
         | AcesGamutCompress20Fwd
         | AcesGamutCompress20Inv
         | LinToPq
-        | PqToLin
-        | LinToGammaLog
-        | GammaLogToLin
-        | LinToDoubleLog
-        | DoubleLogToLin) => return Err(not_ported(style)),
+        | PqToLin) => return Err(not_ported(style)),
+
+        LinToGammaLog => Arc::new(RendererLinToGammaLog::new(func)?),
+        GammaLogToLin => Arc::new(RendererGammaLogToLin::new(func)?),
+
+        LinToDoubleLog => Arc::new(RendererLinToDoubleLog::new(func)?),
+        DoubleLogToLin => Arc::new(RendererDoubleLogToLin::new(func)?),
     })
 }
 
