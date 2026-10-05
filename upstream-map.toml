@@ -1279,7 +1279,7 @@ path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op_cpu.rs"]
 status = "partial"
-note = "p2-ff-cpu 2.3b: the ACES 1.x renderers (red modifiers, glows, dark to dim, gamut compression 1.3, 1-132 and 558-1088) and GetFixedFunctionCPURenderer (2429-2645), its other arms not ported yet; p2-ff-cpu-2 2.3c1: Rec.2100 surround, RGB<->HSV, XYZ<->xyY, XYZ<->u'v'Y, XYZ<->LUV (210-239, 295-347, 1406-1589, 1825-2027)"
+note = "p2-ff-cpu 2.3b: the ACES 1.x renderers (red modifiers, glows, dark to dim, gamut compression 1.3, 1-132 and 558-1088) and GetFixedFunctionCPURenderer (2429-2645), its other arms not ported yet; p2-ff-cpu-2 2.3c1: Rec.2100 surround, RGB<->HSV, XYZ<->xyY, XYZ<->u'v'Y, XYZ<->LUV (210-239, 295-347, 1406-1589, 1825-2027); 2.3c2: RGB<->HSY lin, log and video (241-293, 1591-1823)"
 
 [[file]]
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.h"
@@ -4646,7 +4646,7 @@ path = "tests/cpu/ops/fixedfunction/FixedFunctionOpCPU_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op_cpu_tests.rs"]
 status = "partial"
-note = "p2-ff-cpu 2.3b: aces_red_mod_03, aces_red_mod_10, aces_glow_03, aces_glow_10, aces_dark_to_dim_10, aces_gamut_map_13. p2-ff-cpu-2 2.3c1: rec2100_surround, RGB_TO_HSV, XYZ_TO_xyY, XYZ_TO_uvY, XYZ_TO_LUV. The others come with their renderers (2.3c2, 2.3d, 2.4e)"
+note = "p2-ff-cpu 2.3b: aces_red_mod_03, aces_red_mod_10, aces_glow_03, aces_glow_10, aces_dark_to_dim_10, aces_gamut_map_13. p2-ff-cpu-2 2.3c1: rec2100_surround, RGB_TO_HSV, XYZ_TO_xyY, XYZ_TO_uvY, XYZ_TO_LUV; 2.3c2: RGB_TO_HSY_LIN, RGB_TO_HSY_LOG, RGB_TO_HSY_VID. The others come with their renderers (2.3d, 2.4e)"
 
 [[file]]
 path = "tests/cpu/ops/fixedfunction/FixedFunctionOpData_tests.cpp"
@@ -4660,7 +4660,7 @@ path = "tests/cpu/ops/fixedfunction/FixedFunctionOp_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op_tests.rs", "crates/ocio/src/transforms/fixed_function_transform_tests.rs"]
 status = "partial"
-note = "p2-ff-cpu 2.3e: basic, glow03_cpu_engine, darktodim10_cpu_engine, aces_red_mod_inv, aces_glow_inv, aces_darktodim10_inv, aces_gamutmap13_inv, rec2100_surround_inv, and create_transform (in fixed_function_transform_tests.rs). p2-ff-cpu-2 2.3c1: FixedFunctionOps RGB_TO_HSV, XYZ_TO_xyY, XYZ_TO_uvY, XYZ_TO_LUV. The other FixedFunctionOps tests come with their renderers (2.3c2, 2.3d)"
+note = "p2-ff-cpu 2.3e: basic, glow03_cpu_engine, darktodim10_cpu_engine, aces_red_mod_inv, aces_glow_inv, aces_darktodim10_inv, aces_gamutmap13_inv, rec2100_surround_inv, and create_transform (in fixed_function_transform_tests.rs). p2-ff-cpu-2 2.3c1: FixedFunctionOps RGB_TO_HSV, XYZ_TO_xyY, XYZ_TO_uvY, XYZ_TO_LUV; 2.3c2: FixedFunctionOps RGB_TO_HSY_LIN, RGB_TO_HSY_LOG, RGB_TO_HSY_VID. The other FixedFunctionOps tests come with their renderers (2.3d)"
 
 [[file]]
 path = "tests/cpu/ops/gamma/GammaOpCPU_tests.cpp"

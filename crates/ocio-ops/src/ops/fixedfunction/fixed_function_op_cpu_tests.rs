@@ -2,8 +2,8 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Ported `tests/cpu/ops/fixedfunction/FixedFunctionOpCPU_tests.cpp` @ v2.5.2: the ACES 1.x
-//! styles (chunk 2.3b), the Rec.2100 surround, HSV and CIE styles (2.3c1). The other styles'
-//! tests come with their renderers.
+//! styles (chunk 2.3b), the Rec.2100 surround, HSV and CIE styles (2.3c1), the HSY styles
+//! (2.3c2). The other styles' tests come with their renderers.
 
 use super::*;
 use crate::ops::fixedfunction::fixed_function_op_data::Params;
@@ -499,6 +499,104 @@ fn rgb_to_hsv() {
     );
 }
 
+/// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, RGB_TO_HSY_LIN)` @ v2.5.2.
+#[test]
+fn rgb_to_hsy_lin() {
+    #[rustfmt::skip]
+    let hsy_frame: Vec<f32> = vec![
+         0.470554752,    9.12594033,   0.0326650218,  0.,   // hsy alpha == 1
+         0.75,           0.22196741,   0.38596,       0.,
+         0.08333333,     0.12976444,   0.034974,      0.,
+         0.333333333333, 0.606036032,  0.0056680,     1.,   // hsy mid alpha
+         0.241666666667, 0.8372990325, 0.0034440,     1.,
+         0.734693877551, 0.752099600,  0.0005572,     0.,   // hsy alpha == 0
+         0.96296296,     9.7034,      -0.1862,        0.,
+         0.730158730159, 0.811517000, -0.0009310,     0.,
+    ];
+
+    #[rustfmt::skip]
+    let rgb_frame: Vec<f32> = vec![
+        -0.075290,  0.078996, -0.108397, 0.,
+         0.3,       0.4,       0.5,      0.,
+         0.05,      0.03,      0.04,     0.,
+         0.01,      0.01,     -0.05,     1.,
+         0.05,     -0.005,    -0.05,     1.,
+        -0.048,     0.01,      0.05,     0.,
+         0.3,      -0.4,       0.5,      0.,
+        -0.055,     0.01,      0.05,     0.,
+    ];
+
+    let mut img = rgb_frame.clone();
+    apply_fixed_function(&mut img, &hsy_frame, &data(RgbToHsyLin), 1e-6, false);
+
+    let mut img = hsy_frame.clone();
+    apply_fixed_function(&mut img, &rgb_frame, &data(HsyLinToRgb), 1e-6, false);
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, RGB_TO_HSY_LOG)` @ v2.5.2.
+#[test]
+fn rgb_to_hsy_log() {
+    let hsy_frame: Vec<f32> = vec![
+        14563.0 / 65535.,
+        64392.0 / 65535.,
+        20899.0 / 65535.,
+        32007.0 / 65535.,
+        50061.0 / 65535.,
+        64310.0 / 65535.,
+        6328.0 / 65535.,
+        65535.0 / 65535.,
+    ];
+
+    let rgb_frame: Vec<f32> = vec![
+        1800.0 / 4095.,
+        1200.0 / 4095.,
+        900.0 / 4095.,
+        2000.0 / 4095.,
+        40.0 / 4095.,
+        440.0 / 4095.,
+        1000.0 / 4095.,
+        4095.0 / 4095.,
+    ];
+
+    let mut img = rgb_frame.clone();
+    apply_fixed_function(&mut img, &hsy_frame, &data(RgbToHsyLog), 1e-5, false);
+
+    let mut img = hsy_frame.clone();
+    apply_fixed_function(&mut img, &rgb_frame, &data(HsyLogToRgb), 1e-5, false);
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, RGB_TO_HSY_VID)` @ v2.5.2.
+#[test]
+fn rgb_to_hsy_vid() {
+    let hsy_frame: Vec<f32> = vec![
+        0.54190051555634,
+        1.0851333141327,
+        0.55111348628998,
+        0.48840048909187,
+        0.54262113571167,
+        1.4824789762497,
+        1.1281162500381,
+        1.,
+    ];
+
+    let rgb_frame: Vec<f32> = vec![
+        0.12152557820082,
+        0.70731294155121,
+        0.26879417896271,
+        0.48840048909187,
+        0.53938156366348,
+        1.3418402671814,
+        0.74459171295166,
+        1.,
+    ];
+
+    let mut img = rgb_frame.clone();
+    apply_fixed_function(&mut img, &hsy_frame, &data(RgbToHsyVid), 1e-6, false);
+
+    let mut img = hsy_frame.clone();
+    apply_fixed_function(&mut img, &rgb_frame, &data(HsyVidToRgb), 1e-6, false);
+}
+
 /// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, XYZ_TO_xyY)` @ v2.5.2.
 #[test]
 fn xyz_to_xyy() {
@@ -619,10 +717,10 @@ fn short_params_and_unported_styles_are_refused() {
         );
     }
     for fast in [false, true] {
-        let data = FixedFunctionOpData::new(RgbToHsyLin).unwrap();
+        let data = FixedFunctionOpData::new(LinToPq).unwrap();
         check_throw_what(
             get_fixed_function_cpu_renderer(&data, fast).map(|_| ()),
-            "the CPU renderer of the style 'RGB_TO_HSY_LIN' is not ported yet",
+            "the CPU renderer of the style 'Lin_TO_PQ' is not ported yet",
         );
     }
 }

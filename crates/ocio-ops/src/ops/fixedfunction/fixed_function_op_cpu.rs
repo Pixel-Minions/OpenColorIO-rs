@@ -6,9 +6,9 @@
 //!
 //! So far the ACES 1.x styles: the red modifiers 0.3 and 1.0, the glows 0.3 and 1.0, the dark
 //! to dim surround 1.0 and the gamut compression 1.3, forward and inverse (chunk 2.3b); the
-//! Rec.2100 surround, RGB to and from HSV, and XYZ to and from xyY, u'v'Y and CIELUV (2.3c1).
-//! The other styles' renderers come with chunks 2.3c2, 2.3d and 2.4e; until then
-//! [`get_fixed_function_cpu_renderer`] refuses them ([`not_ported`]).
+//! Rec.2100 surround, RGB to and from HSV, and XYZ to and from xyY, u'v'Y and CIELUV (2.3c1);
+//! RGB to and from the three HSYs (2.3c2). The other styles' renderers come with chunks 2.3d
+//! and 2.4e; until then [`get_fixed_function_cpu_renderer`] refuses them ([`not_ported`]).
 //!
 //! The renderers work in place and never write alpha, which upstream copies (`out[3] =
 //! in[3]`), nor a channel upstream leaves as it was.
@@ -26,16 +26,17 @@
 //! whatever the order. Every other NaN inside is the default NaN, whose bits don't depend on
 //! the order.
 //!
-//! The Rec.2100 surround and the CIE conversions mix the channels throughout; each documents
-//! the orders MSVC and GCC chose, which often differ (`cfg(target_os)`). LLVM rewrites `a - c *
-//! x` as `a + (-c) * x` and may then swap the addition's operands, so those subtractions are
-//! [`sse_sub`]. RGB to HSV's extremes carry only red's NaN (`std::min(NaN, x)` is `NaN` only for
+//! The Rec.2100 surround, the HSYs and the CIE conversions mix the channels throughout; each
+//! documents the orders MSVC and GCC chose, which often differ (`cfg(target_os)`). LLVM
+//! rewrites `a - c * x` as `a + (-c) * x` and may then swap the addition's operands, so those
+//! subtractions are [`sse_sub`]. RGB to HSV's extremes carry only red's NaN (`std::min(NaN, x)` is `NaN` only for
 //! a NaN first operand), and HSV to RGB's `Clamp` turns a NaN hue or saturation into 0, so
 //! neither meets two NaNs in an operation whose operands the compilers can swap.
 
 use std::sync::Arc;
 
 use super::fixed_function_op_data::{FixedFunctionOpData, FixedFunctionOpStyle, SHORT_PARAMS};
+use crate::bit_depth_utils::clamp_macro;
 use crate::exception::{Exception, Result};
 use crate::math_utils::{clamp, sse_add, sse_cvttps_epi32, sse_mul, sse_sub, std_max, std_min};
 use crate::op::CpuOp;
@@ -1146,6 +1147,384 @@ impl CpuOp for RendererLuvToXyz {
     }
 }
 
+/// The HSY variants: luma and saturation for linear, log or video encodings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HsyStyle {
+    Lin,
+    Log,
+    Vid,
+}
+
+impl HsyStyle {
+    /// For [`apply_rgb_to_hsy`], where NaNs of different payloads meet: whether the luma adds
+    /// the red term to the green one (else the green to the red), and whether the distance
+    /// adds `|r - luma|` to `|g - luma|` (else the reverse). MSVC compiles one function for
+    /// the three styles (Windows `0x18018ed10`: green first in the luma, red first in the
+    /// distance); GCC a loop per style (`applyRGBToHSY`, Linux `0x358880`: the linear style
+    /// red first in the luma and green first in the distance, the log style green first in
+    /// both, the video style red first in both).
+    fn rgb_to_hsy_orders(self) -> (bool, bool) {
+        #[cfg(target_os = "windows")]
+        {
+            let _ = self;
+            (true, false)
+        }
+        #[cfg(target_os = "linux")]
+        {
+            match self {
+                HsyStyle::Lin => (false, true),
+                HsyStyle::Log => (true, true),
+                HsyStyle::Vid => (false, false),
+            }
+        }
+    }
+}
+
+/// HSY to RGB.
+///
+/// Where NaNs of different payloads meet, the order is the wheels' machine code's: MSVC
+/// compiles one function for the three styles (Windows `0x18018e8e0`), GCC a loop per style
+/// (`applyHSYToRGB`, Linux `0x357ce0`), with these differences from upstream's source order:
+/// - the luminance of the hue's RGB: MSVC and GCC's log loop add the red term to the green
+///   one; GCC's linear and video loops the green to the red;
+/// - the scaling by `luma / currY`: MSVC puts the factor first for the three channels; GCC
+///   puts blue first, and red and green after the factor (log and video), or first (linear;
+///   its distance uses the factor first for red);
+/// - the distance: MSVC and GCC's linear loop add red to green, then blue; GCC's log and video
+///   loops add red and green, then that to blue;
+/// - the linear style's quadratic: see [`hsy_lin_gain`];
+/// - the result: MSVC computes `(red - luma) * gainS + luma`; GCC puts the gain first for red
+///   and green, and the difference first for blue, except in the log loop.
+///
+/// Port of `applyHSYToRGB` (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp:
+/// 1591-1681 @ v2.5.2).
+fn apply_hsy_to_rgb(rgba: &mut [f32], func_style: HsyStyle) {
+    #[cfg(target_os = "windows")]
+    let msvc = true;
+    #[cfg(target_os = "linux")]
+    let msvc = false;
+    for pixel in rgba.as_chunks_mut::<4>().0 {
+        // Make magenta 0 hue, rather than red.
+        let mut hue = pixel[0] - 1.0f32 / 6.0f32;
+        let mut sat = pixel[1];
+        let luma = pixel[2];
+
+        // Rotate hue 180 deg. for negative luma values.
+        hue = if luma < 0.0 { hue + 0.5f32 } else { hue };
+        hue = (hue - hue.floor()) * 6.0f32;
+
+        let red = clamp_macro((hue - 3.0f32).abs() - 1.0f32, 0.0f32, 1.0f32);
+        let grn = clamp_macro(2.0f32 - (hue - 2.0f32).abs(), 0.0f32, 1.0f32);
+        let blu = clamp_macro(2.0f32 - (hue - 4.0f32).abs(), 0.0f32, 1.0f32);
+
+        let (r_term, g_term) = (0.2126f32 * red, 0.7152f32 * grn);
+        let rg_term = if msvc || func_style == HsyStyle::Log {
+            sse_add(g_term, r_term)
+        } else {
+            sse_add(r_term, g_term)
+        };
+        let curr_y = sse_add(rg_term, 0.0722f32 * blu);
+        let t = luma / curr_y;
+
+        // `red *= luma / currY` and the others, and the differences from luma.
+        let (red, grn, blu, rm_dist) = if msvc {
+            let (red, grn, blu) = (sse_mul(t, red), sse_mul(t, grn), sse_mul(t, blu));
+            (red, grn, blu, red - luma)
+        } else if func_style == HsyStyle::Lin {
+            (
+                sse_mul(red, t),
+                sse_mul(grn, t),
+                sse_mul(blu, t),
+                sse_mul(t, red) - luma,
+            )
+        } else {
+            let red_dist = if func_style == HsyStyle::Log {
+                sse_mul(red, t)
+            } else {
+                sse_mul(t, red)
+            };
+            (
+                sse_mul(t, red),
+                sse_mul(t, grn),
+                sse_mul(blu, t),
+                red_dist - luma,
+            )
+        };
+        let (rm, gm, bm) = (red - luma, grn - luma, blu - luma);
+
+        let dist_rgb = if msvc || func_style == HsyStyle::Lin {
+            sse_add(sse_add(gm.abs(), rm_dist.abs()), bm.abs())
+        } else {
+            sse_add(bm.abs(), sse_add(rm_dist.abs(), gm.abs()))
+        };
+
+        let gain_s = match func_style {
+            HsyStyle::Lin => {
+                sat /= 1.4f32;
+                hsy_lin_gain(red, grn, blu, sat, luma, dist_rgb, msvc)
+            }
+            HsyStyle::Log => {
+                let sat_gain = 4.0f32;
+                let curr_sat = sse_mul(dist_rgb, sat_gain);
+                sat / std_max(1e-10f32, curr_sat)
+            }
+            HsyStyle::Vid => {
+                let sat_gain = 1.25f32;
+                let curr_sat = sse_mul(dist_rgb, sat_gain);
+                sat / std_max(1e-10f32, curr_sat)
+            }
+        };
+
+        if msvc {
+            pixel[0] = sse_add(sse_mul(rm, gain_s), luma); // red
+            pixel[1] = sse_add(sse_mul(gm, gain_s), luma); // grn
+            pixel[2] = sse_add(sse_mul(bm, gain_s), luma); // blu
+        } else {
+            pixel[0] = sse_add(sse_mul(gain_s, rm), luma); // red
+            pixel[1] = sse_add(sse_mul(gain_s, gm), luma); // grn
+            pixel[2] = if func_style == HsyStyle::Log {
+                sse_add(sse_mul(gain_s, bm), luma)
+            } else {
+                sse_add(sse_mul(bm, gain_s), luma)
+            }; // blu
+        }
+    }
+}
+
+/// The linear HSY's saturation gain, from its quadratic between the low and high
+/// saturations. `sat` is already divided by 1.4. In the order of the wheels' machine code
+/// where NaNs of different payloads meet (`msvc` for the Windows wheel), which reorders
+/// upstream's `-sat * sumRgb + sat * 3 * luma + distRgb` as `sat * 3 * luma - sumRgb * sat +
+/// distRgb` (GCC: `sat * sumRgb`), and `-sat * (k + 3 * luma)` as `-sat * (3 * luma + k)` (GCC:
+/// `-((3 * luma + k) * sat)`).
+///
+/// Port of the linear branch of `applyHSYToRGB` (FixedFunctionOpCPU.cpp:1620-1658 @ v2.5.2).
+fn hsy_lin_gain(
+    red: f32,
+    grn: f32,
+    blu: f32,
+    sat: f32,
+    luma: f32,
+    dist_rgb: f32,
+    msvc: bool,
+) -> f32 {
+    let sum_rgb = sse_add(sse_add(grn, red), blu);
+
+    let k = 0.15f32;
+    let lo_gain = 5.0f32;
+
+    let three_l = luma * 3.0f32;
+    let k_3l = three_l + k;
+    let sat_sum = if msvc {
+        sse_mul(sum_rgb, sat)
+    } else {
+        sse_mul(sat, sum_rgb)
+    };
+    let mut tmp = sse_add(sse_sub(sse_mul(sat * 3.0f32, luma), sat_sum), dist_rgb);
+    // Don't allow tmp to go negative, which would cause a negative gainS.
+    tmp = std_max(1e-6f32, tmp);
+
+    let mut s1 = sse_mul(k_3l, sat) / tmp;
+    // Prevent gainS from becoming too extreme.
+    s1 = std_min(s1, 50.0f32);
+
+    let dist_lo = sse_mul(dist_rgb, lo_gain);
+    let s0 = sat / std_max(1e-10f32, dist_lo);
+
+    let max_lum = 0.01f32;
+    let min_lum = max_lum * 0.1f32;
+    let alpha = clamp_macro((luma - min_lum) / (max_lum - min_lum), 0.0f32, 1.0f32);
+
+    if alpha == 1.0 {
+        s1
+    } else if alpha == 0.0 {
+        s0
+    } else {
+        let one_minus_alpha = 1.0f32 - alpha;
+        let sum_3l = sse_sub(sum_rgb, three_l);
+        let alpha_dist = sse_mul(alpha, dist_rgb);
+        let (t5, sat_sum_3l, c) = if msvc {
+            (
+                sse_mul(one_minus_alpha, dist_lo),
+                sse_mul(sum_3l, sat),
+                sse_mul(-sat, k_3l),
+            )
+        } else {
+            (
+                sse_mul(dist_lo, one_minus_alpha),
+                sse_mul(sat, sum_3l),
+                -sse_mul(k_3l, sat),
+            )
+        };
+        let (b_head, a) = if msvc {
+            (sse_mul(t5, k_3l), sse_mul(t5, sum_3l))
+        } else {
+            (sse_mul(k_3l, t5), sse_mul(t5, sum_3l))
+        };
+        let b = sse_sub(sse_add(b_head, alpha_dist), sat_sum_3l);
+        let discrim = sse_sub(b * b, sse_mul(a * 4.0f32, c)).sqrt();
+        let denom = sse_sub(-discrim, b);
+        let two_c = sse_add(c, c);
+        let gain_s = two_c / denom;
+
+        if gain_s >= 0.0 {
+            gain_s
+        } else {
+            two_c / sse_add(sse_add(discrim, discrim), denom)
+        }
+    }
+}
+
+/// RGB to HSY. Unlike typical HSV, HSY maps magenta rather than red to a hue of zero (which
+/// allows for better placement of red when manipulating curves in a UI).
+///
+/// Port of `applyRGBToHSY` (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp:
+/// 1683-1763 @ v2.5.2).
+fn apply_rgb_to_hsy(rgba: &mut [f32], func_style: HsyStyle) {
+    for pixel in rgba.as_chunks_mut::<4>().0 {
+        let red = pixel[0];
+        let grn = pixel[1];
+        let blu = pixel[2];
+
+        let rgb_min = std_min(std_min(red, grn), blu);
+        let rgb_max = std_max(std_max(red, grn), blu);
+
+        // The wheels' orders where NaNs meet: see `HsyStyle::rgb_to_hsy_orders`.
+        let (green_first_luma, green_first_dist) = func_style.rgb_to_hsy_orders();
+        let (r_term, g_term) = (0.2126f32 * red, 0.7152f32 * grn);
+        let rg = if green_first_luma {
+            sse_add(g_term, r_term)
+        } else {
+            sse_add(r_term, g_term)
+        };
+        let luma = sse_add(rg, 0.0722f32 * blu);
+
+        let rm = red - luma;
+        let gm = grn - luma;
+        let bm = blu - luma;
+
+        let rgm = if green_first_dist {
+            sse_add(gm.abs(), rm.abs())
+        } else {
+            sse_add(rm.abs(), gm.abs())
+        };
+        let dist_rgb = sse_add(rgm, bm.abs());
+
+        let sat = match func_style {
+            HsyStyle::Lin => {
+                let sum_rgb = sse_add(sse_add(red, grn), blu);
+                let k = 0.15f32;
+                let sat_hi = dist_rgb / std_max(0.07f32 * dist_rgb + 1e-6f32, k + sum_rgb);
+                let lo_gain = 5.0f32;
+                let sat_lo = dist_rgb * lo_gain;
+                let max_lum = 0.01f32;
+                let min_lum = max_lum * 0.1f32;
+                let alpha = clamp_macro((luma - min_lum) / (max_lum - min_lum), 0.0f32, 1.0f32);
+                let sat = sse_add(sse_mul(sat_hi - sat_lo, alpha), sat_lo);
+                sat * 1.4f32
+            }
+            HsyStyle::Log => {
+                let sat_gain = 4.0f32;
+                dist_rgb * sat_gain
+            }
+            HsyStyle::Vid => {
+                let sat_gain = 1.25f32;
+                dist_rgb * sat_gain
+            }
+        };
+
+        // NB: Unlike typical HSV, HSY maps magenta rather than red to a hue of zero.
+        let mut hue = 0.0f32;
+        if rgb_min != rgb_max {
+            let delta = rgb_max - rgb_min;
+            if red == rgb_max {
+                hue = 1.0f32 + (grn - blu) / delta;
+            } else if grn == rgb_max {
+                hue = 3.0f32 + (blu - red) / delta;
+            } else {
+                hue = 5.0f32 + (red - grn) / delta;
+            }
+            hue *= 0.16666666666666666f32;
+        }
+
+        pixel[0] = hue;
+        pixel[1] = sat;
+        pixel[2] = luma;
+    }
+}
+
+/// RGB to HSY for log spaces.
+///
+/// Port of `Renderer_RGB_TO_HSY_LOG` (FixedFunctionOpCPU.cpp:241-248, 1765-1773 @ v2.5.2).
+#[derive(Debug, Default)]
+pub struct RendererRgbToHsyLog;
+
+impl CpuOp for RendererRgbToHsyLog {
+    fn apply(&self, rgba: &mut [f32]) {
+        apply_rgb_to_hsy(rgba, HsyStyle::Log);
+    }
+}
+
+/// HSY to RGB for log spaces.
+///
+/// Port of `Renderer_HSY_LOG_TO_RGB` (FixedFunctionOpCPU.cpp:250-257, 1775-1783 @ v2.5.2).
+#[derive(Debug, Default)]
+pub struct RendererHsyLogToRgb;
+
+impl CpuOp for RendererHsyLogToRgb {
+    fn apply(&self, rgba: &mut [f32]) {
+        apply_hsy_to_rgb(rgba, HsyStyle::Log);
+    }
+}
+
+/// RGB to HSY for linear spaces.
+///
+/// Port of `Renderer_RGB_TO_HSY_LIN` (FixedFunctionOpCPU.cpp:277-284, 1785-1793 @ v2.5.2).
+#[derive(Debug, Default)]
+pub struct RendererRgbToHsyLin;
+
+impl CpuOp for RendererRgbToHsyLin {
+    fn apply(&self, rgba: &mut [f32]) {
+        apply_rgb_to_hsy(rgba, HsyStyle::Lin);
+    }
+}
+
+/// HSY to RGB for linear spaces.
+///
+/// Port of `Renderer_HSY_LIN_TO_RGB` (FixedFunctionOpCPU.cpp:286-293, 1795-1803 @ v2.5.2).
+#[derive(Debug, Default)]
+pub struct RendererHsyLinToRgb;
+
+impl CpuOp for RendererHsyLinToRgb {
+    fn apply(&self, rgba: &mut [f32]) {
+        apply_hsy_to_rgb(rgba, HsyStyle::Lin);
+    }
+}
+
+/// RGB to HSY for video spaces.
+///
+/// Port of `Renderer_RGB_TO_HSY_VID` (FixedFunctionOpCPU.cpp:259-266, 1805-1813 @ v2.5.2).
+#[derive(Debug, Default)]
+pub struct RendererRgbToHsyVid;
+
+impl CpuOp for RendererRgbToHsyVid {
+    fn apply(&self, rgba: &mut [f32]) {
+        apply_rgb_to_hsy(rgba, HsyStyle::Vid);
+    }
+}
+
+/// HSY to RGB for video spaces.
+///
+/// Port of `Renderer_HSY_VID_TO_RGB` (FixedFunctionOpCPU.cpp:268-275, 1815-1823 @ v2.5.2).
+#[derive(Debug, Default)]
+pub struct RendererHsyVidToRgb;
+
+impl CpuOp for RendererHsyVidToRgb {
+    fn apply(&self, rgba: &mut [f32]) {
+        apply_hsy_to_rgb(rgba, HsyStyle::Vid);
+    }
+}
+
 /// The renderer of `func`'s style. `fast_log_exp_pow` picks the fast-math variants of the
 /// styles that have one (PQ, chunk 2.3d). The styles whose renderers aren't ported yet are
 /// refused ([`not_ported`]).
@@ -1190,6 +1569,15 @@ pub fn get_fixed_function_cpu_renderer(
         XyzToLuv => Arc::new(RendererXyzToLuv),
         LuvToXyz => Arc::new(RendererLuvToXyz),
 
+        RgbToHsyLog => Arc::new(RendererRgbToHsyLog),
+        HsyLogToRgb => Arc::new(RendererHsyLogToRgb),
+
+        RgbToHsyLin => Arc::new(RendererRgbToHsyLin),
+        HsyLinToRgb => Arc::new(RendererHsyLinToRgb),
+
+        RgbToHsyVid => Arc::new(RendererRgbToHsyVid),
+        HsyVidToRgb => Arc::new(RendererHsyVidToRgb),
+
         style @ (AcesOutputTransform20Fwd
         | AcesOutputTransform20Inv
         | AcesRgbToJmh20
@@ -1203,13 +1591,7 @@ pub fn get_fixed_function_cpu_renderer(
         | LinToGammaLog
         | GammaLogToLin
         | LinToDoubleLog
-        | DoubleLogToLin
-        | RgbToHsyLog
-        | HsyLogToRgb
-        | RgbToHsyLin
-        | HsyLinToRgb
-        | RgbToHsyVid
-        | HsyVidToRgb) => return Err(not_ported(style)),
+        | DoubleLogToLin) => return Err(not_ported(style)),
     })
 }
 
