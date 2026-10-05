@@ -20,10 +20,7 @@ import PyOpenColorIO as OCIO
 
 from . import spec
 from .checks import PROCESSOR_KEYS, check_keys, check_member, dump
-from .commands import _processor, captured_log, command, exception_result
-
-# What OCIO raises (in PyOpenColorIO, ExceptionMissingFile doesn't derive from OCIO.Exception).
-RAISED = (OCIO.Exception, OCIO.ExceptionMissingFile)
+from .commands import RAISED, _processor, captured_log, command, exception_result
 
 
 def _processor_dump(proc, blobs):
@@ -59,7 +56,8 @@ def processor_ops(args, blobs):
                 "group": createGroupTransform()}, the objects written out as checks.dump
                 writes them: {"class", "getters", "properties", "uncalled"}, and a group's
                 "children", its transforms written out the same way
-      exception, stage   when OCIO raised: {"type", "message"}, and where: "config",
+      exception, stage   when OCIO or the binding raised (commands.RAISED): {"type",
+                "message"}, and where: "config",
                 "transform", "processor" (as in cpu_apply), "group" (the processor's getters
                 and createGroupTransform), "optimize" (getOptimizedProcessor) or
                 "optimized_group"

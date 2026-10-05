@@ -47,6 +47,15 @@ def captured_log():
         OCIO.ResetToDefaultLoggingFunction()
 
 
+# What OCIO and the binding raise while a command builds and runs a processor: OCIO's
+# exceptions (in PyOpenColorIO, ExceptionMissingFile doesn't derive from OCIO.Exception), and
+# the binding's own checks, std::runtime_error, which pybind11 raises as RuntimeError (such as
+# Lut3DTransform.setData's "Incompatible buffer dimensions"). Every command reports them as
+# {"exception": exception_result(exc), "stage": ...}; anything else the oracle raises refuses
+# the request.
+RAISED = (OCIO.Exception, OCIO.ExceptionMissingFile, RuntimeError)
+
+
 def exception_result(exc):
     return {"type": type(exc).__name__, "message": str(exc)}
 
@@ -131,8 +140,9 @@ def cpu_apply(args, blobs):
     blobs: [input pixels, little-endian, in in_bitdepth's storage type], then the transform
            spec's blobs (see spec.py)
     result: {"processor_cache_id", "cpu_cache_id", "log"} or {"exception", "stage", "log"}
-      stage  where OCIO raised: "config" (loading the config), "transform" (building the
-             transform: the Python bindings' constructors validate it), "processor"
+      stage  where OCIO or the binding raised (RAISED): "config" (loading the config),
+             "transform" (building the transform: the Python bindings' constructors validate
+             it, and their setters check their arguments), "processor"
              (getProcessor, which validates the ops), "cpu_processor" or "apply"
     blobs: [output pixels in out_bitdepth's storage type]
     """
@@ -161,7 +171,7 @@ def cpu_apply(args, blobs):
             cpu.apply(src_desc, dst_desc)
             result = {"processor_cache_id": proc.getCacheID(), "cpu_cache_id": cpu.getCacheID()}
             out = [dst.tobytes()]
-        except OCIO.Exception as exc:
+        except RAISED as exc:
             result, out = {"exception": exception_result(exc), "stage": stage[0]}, []
     result["log"] = log
     return result, out

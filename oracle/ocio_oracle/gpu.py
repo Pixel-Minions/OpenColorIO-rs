@@ -25,10 +25,7 @@ import PyOpenColorIO as OCIO
 from . import spec
 from .checks import (PROCESSOR_KEYS, check_bool, check_keys, check_member, check_uint, dump,
                      f32_bits, f64_bits)
-from .commands import _processor, captured_log, command, exception_result
-
-# What OCIO raises (in PyOpenColorIO, ExceptionMissingFile doesn't derive from OCIO.Exception).
-RAISED = (OCIO.Exception, OCIO.ExceptionMissingFile)
+from .commands import RAISED, _processor, captured_log, command, exception_result
 
 # The GpuShaderDesc settings, in the order the command applies them.
 SETTINGS = ["language", "function_name", "pixel_name", "resource_prefix", "uid",
@@ -354,7 +351,8 @@ def gpu_shader(args, blobs):
                   dynamic_properties  in order: {"type", "value"}: a double as {"f64": bits}
                                     (exposure, contrast, gamma), a grading value written out
                                     by checks.dump, its floats as bits
-      exception, stage   when OCIO raised: {"type", "message"}, and where: "config",
+      exception, stage   when OCIO or the binding raised (commands.RAISED): {"type",
+                "message"}, and where: "config",
                 "transform", "processor" (as in cpu_apply), "gpu_processor", "shader_desc"
                 (the setters) or "extract"
       log       OCIO's log messages

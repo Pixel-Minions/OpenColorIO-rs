@@ -36,11 +36,11 @@ Values inside "args", "factory", "attrs" and "calls" are converted recursively:
   included), the infinities and -0.0, which JSON can't hold or loses;
 - {"blob": i, "dtype": name} becomes a NumPy array of the spec's blob i, read as the
   little-endian NumPy dtype `name` ("float32" for the LUT transforms' setData),
-  one-dimensional, or with "shape": [n, ...] in that shape (C order). It is a fresh, writable,
-  C-contiguous copy, so the library reads only its entries. This is how a LUT's values reach
-  Lut1DTransform.setData and Lut3DTransform.setData in one call: a 65,536-entry half domain or
-  a 129^3 cube doesn't fit in JSON. A blob that isn't a whole number of entries, or doesn't
-  fill the shape, is refused;
+  one-dimensional, or with "shape": [n, ...] in that shape (C order). It is a read-only,
+  C-contiguous view of the blob's bytes, so the library reads only its entries. This is how
+  a LUT's values reach Lut1DTransform.setData and Lut3DTransform.setData in one call: a
+  65,536-entry half domain or a 129^3 cube doesn't fit in JSON. A blob that isn't a whole
+  number of entries, or doesn't fill the shape, and a big-endian dtype (">f4"), are refused;
 - lists and plain JSON values pass through.
 
 A spec's blobs are its own list, numbered from 0. Each command that takes a transform spec
@@ -66,8 +66,9 @@ def array_from_blob(v, blobs):
     """The NumPy array of a {"blob": i, "dtype": name} value spec, with an optional "shape"
     (see the module's docstring). Refused: other keys, or no dtype; an index that isn't an
     integer naming one of the spec's blobs (a bool isn't one); a dtype that isn't the name of a
-    NumPy type of fixed size (objects aren't one); a shape that isn't a list of non-negative
-    integers; a blob that isn't a whole number of entries, or doesn't fill the shape."""
+    NumPy type of fixed size (objects aren't one), or names a big-endian one; a shape that
+    isn't a list of non-negative integers; a blob that isn't a whole number of entries, or
+    doesn't fill the shape."""
     if not set(v) <= {"blob", "dtype", "shape"} or "dtype" not in v:
         raise ValueError(f"a blob value spec takes blob, dtype and optionally shape: {v!r}")
     index = v["blob"]
@@ -77,12 +78,15 @@ def array_from_blob(v, blobs):
     if dtype is None or dtype.itemsize == 0 or dtype.hasobject:
         raise ValueError(f"a blob's dtype is the name of a NumPy type of fixed size, not "
                          f"{v['dtype']!r}")
+    if dtype.byteorder == ">":
+        raise ValueError(f"a blob's dtype is little-endian, as the blobs are, not {v['dtype']!r}")
     dtype = dtype.newbyteorder("<")
     data = blobs[index]
     if len(data) % dtype.itemsize:
         raise ValueError(f"blob {index} has {len(data)} bytes, not a whole number of "
                          f"{dtype.name} entries")
-    array = np.frombuffer(data, dtype=dtype).copy()
+    # The binding only reads the array (setData), so a view of the blob is enough.
+    array = np.frombuffer(data, dtype=dtype)
     if "shape" in v:
         shape = v["shape"]
         if not isinstance(shape, list) or any(

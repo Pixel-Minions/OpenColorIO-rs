@@ -19,10 +19,7 @@ import PyOpenColorIO as OCIO
 
 from . import spec
 from .checks import check_keys
-from .commands import captured_log, command, exception_result
-
-# What OCIO raises (in PyOpenColorIO, ExceptionMissingFile doesn't derive from OCIO.Exception).
-RAISED = (OCIO.Exception, OCIO.ExceptionMissingFile)
+from .commands import RAISED, captured_log, command, exception_result
 
 
 def _text(transform):
@@ -60,7 +57,8 @@ def transform_text(args, blobs):
     result:
       transforms  per spec, in order: {"class", "repr", "str", "validate": null, or what it
                   raised ({"type", "message"})}, or {"exception", "stage": "transform"} when
-                  building it raised (the binding's constructors validate some transforms)
+                  building it raised (commands.RAISED: the binding's constructors validate some
+                  transforms, and its setters check their arguments)
       pairs       per pair, in order: {"equals": true, false, or null where the binding has no
                   equals() for the first transform's class or none taking the second's, or where
                   either wasn't built}
