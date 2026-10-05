@@ -1027,6 +1027,19 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p2-ff-gpu` (2.3g2); `fixed_function_op_gpu_oracle.rs` compares a
   curve with an offset with the wheel's shader.
 
+### I-86. The ACES 2.0 gamut compression shader compresses a J at or below 0
+
+- **Upstream:** the CPU's `gamut_compress_fwd` and `gamut_compress_inv` return `(0, 0, h)` for
+  a J at or below 0 (`ops/fixedfunction/ACES2/Transform.cpp:1099, 1119`). The shader's
+  compression function only returns early for an M at or below 0 or a J above the limit
+  (`ops/fixedfunction/FixedFunctionOpGPU.cpp:1175`), so it compresses such a JMh.
+- **Who notices:** `FIXED_FUNCTION_ACES_GAMUT_COMPRESS_20` and
+  `FIXED_FUNCTION_ACES_OUTPUT_TRANSFORM_20` transforms on the GPU, for JMh values with a
+  negative or zero J and a positive M: the GPU's output differs from the CPU's.
+- **A fix:** the CPU's test in the shader.
+- **Status:** matched in `p2-aces2-gpu` (2.4g); `fixed_function_op_gpu_oracle.rs` compares the
+  shader with the wheel's.
+
 ### I-87. The inverse double-log shader's break points are NaNs of each platform's sign
 
 - **Upstream:** `Add_DOUBLE_LOG_TO_LIN` computes the break points in log space as
