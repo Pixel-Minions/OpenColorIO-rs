@@ -24,6 +24,7 @@ use ocio_ops::open_color_types::TransformDirection;
 use crate::config::Config;
 use crate::context::Context;
 use crate::transforms::allocation_transform::{AllocationTransform, build_allocation_op};
+use crate::transforms::builtin_transform::{BuiltinTransform, build_builtin_ops};
 use crate::transforms::cdl_transform::{CdlTransform, build_cdl_op, create_cdl_transform};
 use crate::transforms::color_space_transform::ColorSpaceTransform;
 use crate::transforms::display_view_transform::DisplayViewTransform;
@@ -113,6 +114,8 @@ pub enum TransformType {
 pub enum Transform {
     /// `AllocationTransform`.
     Allocation(AllocationTransform),
+    /// `BuiltinTransform`.
+    Builtin(BuiltinTransform),
     /// `CDLTransform`.
     Cdl(CdlTransform),
     /// `ColorSpaceTransform`.
@@ -146,6 +149,12 @@ pub enum Transform {
 impl From<AllocationTransform> for Transform {
     fn from(t: AllocationTransform) -> Transform {
         Transform::Allocation(t)
+    }
+}
+
+impl From<BuiltinTransform> for Transform {
+    fn from(t: BuiltinTransform) -> Transform {
+        Transform::Builtin(t)
     }
 }
 
@@ -242,6 +251,7 @@ impl Transform {
     pub fn transform_type(&self) -> TransformType {
         match self {
             Transform::Allocation(_) => TransformType::Allocation,
+            Transform::Builtin(_) => TransformType::Builtin,
             Transform::Cdl(_) => TransformType::Cdl,
             Transform::ColorSpace(_) => TransformType::ColorSpace,
             Transform::DisplayView(_) => TransformType::DisplayView,
@@ -265,6 +275,7 @@ impl Transform {
     pub fn direction(&self) -> TransformDirection {
         match self {
             Transform::Allocation(t) => t.direction(),
+            Transform::Builtin(t) => t.direction(),
             Transform::Cdl(t) => t.direction(),
             Transform::ColorSpace(t) => t.direction(),
             Transform::DisplayView(t) => t.direction(),
@@ -288,6 +299,7 @@ impl Transform {
     pub fn set_direction(&mut self, dir: TransformDirection) {
         match self {
             Transform::Allocation(t) => t.set_direction(dir),
+            Transform::Builtin(t) => t.set_direction(dir),
             Transform::Cdl(t) => t.set_direction(dir),
             Transform::ColorSpace(t) => t.set_direction(dir),
             Transform::DisplayView(t) => t.set_direction(dir),
@@ -312,6 +324,7 @@ impl Transform {
     pub fn validate(&self) -> Result<()> {
         match self {
             Transform::Allocation(t) => t.validate(),
+            Transform::Builtin(t) => t.validate(),
             Transform::Cdl(t) => t.validate(),
             Transform::ColorSpace(t) => t.validate(),
             Transform::DisplayView(t) => t.validate(),
@@ -386,6 +399,7 @@ impl Transform {
     pub(crate) fn write_text(&self, os: &mut OStringStream) {
         match self {
             Transform::Allocation(t) => t.write_text(os),
+            Transform::Builtin(t) => t.write_text(os),
             Transform::Cdl(t) => t.write_text(os),
             Transform::ColorSpace(t) => t.write_text(os),
             Transform::DisplayView(t) => t.write_text(os),
@@ -429,6 +443,7 @@ pub(crate) fn build_ops(
         Transform::Allocation(allocation_transform) => {
             build_allocation_op(ops, allocation_transform, dir)
         }
+        Transform::Builtin(builtin_transform) => build_builtin_ops(ops, builtin_transform, dir),
         Transform::Cdl(cdl_transform) => build_cdl_op(ops, config, cdl_transform, dir),
         Transform::ColorSpace(_) => Err(not_ported_yet("ColorSpaceTransform", "WP 3.2a")),
         Transform::DisplayView(_) => Err(not_ported_yet("DisplayViewTransform", "WP 3.2c")),

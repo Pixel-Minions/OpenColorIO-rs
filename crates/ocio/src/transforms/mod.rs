@@ -5,6 +5,8 @@
 //! op glue (`Build<Class>Op`, `Create<Class>Transform`; docs/architecture.md).
 
 pub mod allocation_transform;
+pub mod builtin_transform;
+pub mod builtins;
 pub mod cdl_transform;
 pub mod color_space_transform;
 pub mod display_view_transform;

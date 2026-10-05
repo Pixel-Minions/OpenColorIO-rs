@@ -20,7 +20,7 @@ use crate::transform::{put_bool, put_c_str, validate_direction};
 /// A copy is upstream's `createEditableCopy`. Upstream gives the class no `equals`.
 ///
 /// Port of `ColorSpaceTransform` and its `Impl` (include/OpenColorIO/OpenColorTransforms.h:
-/// 333-372, src/OpenColorIO/transforms/ColorSpaceTransform.cpp:18-136 @ v2.5.2).
+/// 333-371, src/OpenColorIO/transforms/ColorSpaceTransform.cpp:18-136 @ v2.5.2).
 #[derive(Debug, Clone)]
 pub struct ColorSpaceTransform {
     /// `m_dir`.

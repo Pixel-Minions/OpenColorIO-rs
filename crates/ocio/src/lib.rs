@@ -29,6 +29,8 @@ pub use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 pub use processor::{Processor, ProcessorCacheFlags, ProcessorMetadata};
 pub use transform::{Transform, TransformType};
 pub use transforms::allocation_transform::AllocationTransform;
+pub use transforms::builtin_transform::BuiltinTransform;
+pub use transforms::builtins::builtin_transform_registry::BuiltinTransformRegistry;
 pub use transforms::cdl_transform::CdlTransform;
 pub use transforms::color_space_transform::ColorSpaceTransform;
 pub use transforms::display_view_transform::DisplayViewTransform;

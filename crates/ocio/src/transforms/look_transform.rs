@@ -20,7 +20,7 @@ use crate::transform::{put_c_str, validate_direction};
 /// A copy is upstream's `createEditableCopy`. Upstream gives the class no `equals`.
 ///
 /// Port of `LookTransform` and its `Impl` (include/OpenColorIO/OpenColorTransforms.h:
-/// 1740-1798, src/OpenColorIO/transforms/LookTransform.cpp:18-147 @ v2.5.2).
+/// 1740-1797, src/OpenColorIO/transforms/LookTransform.cpp:18-147 @ v2.5.2).
 #[derive(Debug, Clone)]
 pub struct LookTransform {
     /// `m_dir`.
