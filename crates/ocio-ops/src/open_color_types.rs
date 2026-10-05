@@ -6,11 +6,12 @@
 //!
 //! They live in `ocio-ops` because op data uses them; the public `ocio` crate re-exports them.
 //! So far: `LoggingLevel`, `TransformDirection`, `NegativeStyle`, `DynamicPropertyType`, `BitDepth`,
-//! `ChannelOrdering`, `Allocation` and `OptimizationFlags`.
+//! `ChannelOrdering`, `Allocation`, `FixedFunctionStyle` and `OptimizationFlags`.
 
 use core::ffi::c_ulong;
 use std::ops::{BitAnd, BitOr};
 
+use crate::exception::{Exception, Result};
 use crate::utils::string_utils::lower_c_str;
 
 /// How much OCIO logs (`crate::logging`). The discriminants are upstream's, and levels
@@ -170,6 +171,130 @@ pub fn negative_style_to_string(style: NegativeStyle) -> &'static str {
         NegativeStyle::PassThru => "pass_thru",
         NegativeStyle::Linear => "linear",
     }
+}
+
+/// The algorithms of a `FixedFunctionTransform`. The discriminants are upstream's.
+///
+/// Port of `FixedFunctionStyle` (include/OpenColorIO/OpenColorTypes.h:499-524 @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FixedFunctionStyle {
+    /// `FIXED_FUNCTION_ACES_RED_MOD_03`: red modifier (ACES 0.3/0.7).
+    #[doc(alias = "FIXED_FUNCTION_ACES_RED_MOD_03")]
+    AcesRedMod03 = 0,
+    /// `FIXED_FUNCTION_ACES_RED_MOD_10`: red modifier (ACES 1.0).
+    #[doc(alias = "FIXED_FUNCTION_ACES_RED_MOD_10")]
+    AcesRedMod10,
+    /// `FIXED_FUNCTION_ACES_GLOW_03`: glow function (ACES 0.3/0.7).
+    #[doc(alias = "FIXED_FUNCTION_ACES_GLOW_03")]
+    AcesGlow03,
+    /// `FIXED_FUNCTION_ACES_GLOW_10`: glow function (ACES 1.0).
+    #[doc(alias = "FIXED_FUNCTION_ACES_GLOW_10")]
+    AcesGlow10,
+    /// `FIXED_FUNCTION_ACES_DARK_TO_DIM_10`: dark to dim surround correction (ACES 1.0).
+    #[doc(alias = "FIXED_FUNCTION_ACES_DARK_TO_DIM_10")]
+    AcesDarkToDim10,
+    /// `FIXED_FUNCTION_REC2100_SURROUND`: Rec.2100 surround correction (takes one double for
+    /// the gamma param).
+    #[doc(alias = "FIXED_FUNCTION_REC2100_SURROUND")]
+    Rec2100Surround,
+    /// `FIXED_FUNCTION_RGB_TO_HSV`: classic RGB to HSV function.
+    #[doc(alias = "FIXED_FUNCTION_RGB_TO_HSV")]
+    RgbToHsv,
+    /// `FIXED_FUNCTION_XYZ_TO_xyY`: CIE XYZ to 1931 xy chromaticity coordinates.
+    #[doc(alias = "FIXED_FUNCTION_XYZ_TO_xyY")]
+    XyzToXyy,
+    /// `FIXED_FUNCTION_XYZ_TO_uvY`: CIE XYZ to 1976 u'v' chromaticity coordinates.
+    #[doc(alias = "FIXED_FUNCTION_XYZ_TO_uvY")]
+    XyzToUvy,
+    /// `FIXED_FUNCTION_XYZ_TO_LUV`: CIE XYZ to 1976 CIELUV colour space (D65 white).
+    #[doc(alias = "FIXED_FUNCTION_XYZ_TO_LUV")]
+    XyzToLuv,
+    /// `FIXED_FUNCTION_ACES_GAMUTMAP_02`: ACES 0.2 gamut clamping algorithm, not implemented
+    /// upstream: refused.
+    #[doc(alias = "FIXED_FUNCTION_ACES_GAMUTMAP_02")]
+    AcesGamutMap02,
+    /// `FIXED_FUNCTION_ACES_GAMUTMAP_07`: ACES 0.7 gamut clamping algorithm, not implemented
+    /// upstream: refused.
+    #[doc(alias = "FIXED_FUNCTION_ACES_GAMUTMAP_07")]
+    AcesGamutMap07,
+    /// `FIXED_FUNCTION_ACES_GAMUT_COMP_13`: ACES 1.3 parametric gamut compression (expects
+    /// ACEScg values).
+    #[doc(alias = "FIXED_FUNCTION_ACES_GAMUT_COMP_13")]
+    AcesGamutComp13,
+    /// `FIXED_FUNCTION_LIN_TO_PQ`: SMPTE ST-2084 OETF, scaled with 100 nits at 1.0 (negative
+    /// values mirrored).
+    #[doc(alias = "FIXED_FUNCTION_LIN_TO_PQ")]
+    LinToPq,
+    /// `FIXED_FUNCTION_LIN_TO_GAMMA_LOG`: parametrized gamma and log segments with mirroring.
+    #[doc(alias = "FIXED_FUNCTION_LIN_TO_GAMMA_LOG")]
+    LinToGammaLog,
+    /// `FIXED_FUNCTION_LIN_TO_DOUBLE_LOG`: two parameterized LogAffineTransforms with a middle
+    /// linear segment.
+    #[doc(alias = "FIXED_FUNCTION_LIN_TO_DOUBLE_LOG")]
+    LinToDoubleLog,
+    /// `FIXED_FUNCTION_ACES_OUTPUT_TRANSFORM_20`: ACES 2.0 display rendering.
+    #[doc(alias = "FIXED_FUNCTION_ACES_OUTPUT_TRANSFORM_20")]
+    AcesOutputTransform20,
+    /// `FIXED_FUNCTION_ACES_RGB_TO_JMH_20`: ACES 2.0 RGB to JMh.
+    #[doc(alias = "FIXED_FUNCTION_ACES_RGB_TO_JMH_20")]
+    AcesRgbToJmh20,
+    /// `FIXED_FUNCTION_ACES_TONESCALE_COMPRESS_20`: ACES 2.0 tonescale and chroma compression.
+    #[doc(alias = "FIXED_FUNCTION_ACES_TONESCALE_COMPRESS_20")]
+    AcesTonescaleCompress20,
+    /// `FIXED_FUNCTION_ACES_GAMUT_COMPRESS_20`: ACES 2.0 gamut compression.
+    #[doc(alias = "FIXED_FUNCTION_ACES_GAMUT_COMPRESS_20")]
+    AcesGamutCompress20,
+    /// `FIXED_FUNCTION_RGB_TO_HSY_LIN`: RGB to HSY (hue, saturation, luminance) for linear
+    /// spaces.
+    #[doc(alias = "FIXED_FUNCTION_RGB_TO_HSY_LIN")]
+    RgbToHsyLin,
+    /// `FIXED_FUNCTION_RGB_TO_HSY_LOG`: RGB to HSY (hue, saturation, luma) for log spaces.
+    #[doc(alias = "FIXED_FUNCTION_RGB_TO_HSY_LOG")]
+    RgbToHsyLog,
+    /// `FIXED_FUNCTION_RGB_TO_HSY_VID`: RGB to HSY (hue, saturation, luma) for video spaces.
+    #[doc(alias = "FIXED_FUNCTION_RGB_TO_HSY_VID")]
+    RgbToHsyVid,
+}
+
+/// The error for the two styles upstream doesn't implement, `FIXED_FUNCTION_ACES_GAMUTMAP_02`
+/// and `_07` (src/OpenColorIO/ParseUtils.cpp:377-381, ops/fixedfunction/FixedFunctionOpData.cpp:
+/// 500-506 @ v2.5.2).
+pub const UNIMPLEMENTED_GAMUTMAP: &str = "Unimplemented fixed function types: \
+     FIXED_FUNCTION_ACES_GAMUTMAP_02, FIXED_FUNCTION_ACES_GAMUTMAP_07.";
+
+/// The style's name: `ACES_RedMod03`, ..., `ACES2_OutputTransform`, ..., `RGB_TO_HSY_VID`. The
+/// two styles upstream doesn't implement are refused ([`UNIMPLEMENTED_GAMUTMAP`]).
+///
+/// Port of `FixedFunctionStyleToString` (src/OpenColorIO/ParseUtils.cpp:354-388 @ v2.5.2). Its
+/// "Unknown Fixed FunctionOp style" for a value outside the enum can't happen.
+pub fn fixed_function_style_to_string(style: FixedFunctionStyle) -> Result<&'static str> {
+    use FixedFunctionStyle::*;
+    Ok(match style {
+        AcesRedMod03 => "ACES_RedMod03",
+        AcesRedMod10 => "ACES_RedMod10",
+        AcesGlow03 => "ACES_Glow03",
+        AcesGlow10 => "ACES_Glow10",
+        AcesDarkToDim10 => "ACES_DarkToDim10",
+        AcesGamutComp13 => "ACES_GamutComp13",
+        AcesOutputTransform20 => "ACES2_OutputTransform",
+        AcesRgbToJmh20 => "ACES2_RGB_TO_JMh",
+        AcesTonescaleCompress20 => "ACES2_TonescaleCompress",
+        AcesGamutCompress20 => "ACES2_GamutCompress",
+        Rec2100Surround => "REC2100_Surround",
+        RgbToHsv => "RGB_TO_HSV",
+        XyzToXyy => "XYZ_TO_xyY",
+        XyzToUvy => "XYZ_TO_uvY",
+        XyzToLuv => "XYZ_TO_LUV",
+        LinToPq => "Lin_TO_PQ",
+        LinToGammaLog => "Lin_TO_GammaLog",
+        LinToDoubleLog => "Lin_TO_DoubleLog",
+        RgbToHsyLin => "RGB_TO_HSY_LIN",
+        RgbToHsyLog => "RGB_TO_HSY_LOG",
+        RgbToHsyVid => "RGB_TO_HSY_VID",
+        AcesGamutMap02 | AcesGamutMap07 => {
+            return Err(Exception::new(UNIMPLEMENTED_GAMUTMAP));
+        }
+    })
 }
 
 /// What a dynamic property holds: a double for the first three, a grading value for the
