@@ -112,3 +112,34 @@ pub(crate) fn unvalidated(
         ],
     })
 }
+
+/// Random ACES 1.3 gamut compression parameters within `validate`'s bounds: the limits on
+/// [1.001, 2.5), the thresholds on [0, 0.9995), the power on [1, 5). The explicit cases' scales
+/// don't depend on how `powf(-power)` rounds; about one random set in eight does.
+pub(crate) fn random_gamut_comp_13_params(n: usize) -> Vec<[f64; 7]> {
+    let mut rng = ocio_testkit::probe::Rng::new(0x6a3c_0013);
+    let mut unit = move || (rng.next_u64() >> 11) as f64 / (1u64 << 53) as f64;
+    (0..n)
+        .map(|_| {
+            let mut p = [0.0; 7];
+            for v in &mut p[..3] {
+                *v = 1.001 + 1.499 * unit();
+            }
+            for v in &mut p[3..6] {
+                *v = 0.9995 * unit();
+            }
+            p[6] = 1.0 + 4.0 * unit();
+            p
+        })
+        .collect()
+}
+
+/// An XXH3-64 digest of parameter sets' bits, to pin the generated cases.
+pub(crate) fn params_digest(sets: &[[f64; 7]]) -> u64 {
+    let bytes: Vec<u8> = sets
+        .iter()
+        .flatten()
+        .flat_map(|v| v.to_le_bytes())
+        .collect();
+    xxhash_rust::xxh3::xxh3_64(&bytes)
+}

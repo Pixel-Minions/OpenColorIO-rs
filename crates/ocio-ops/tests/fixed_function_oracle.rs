@@ -44,7 +44,7 @@ mod common;
 
 use std::hint::black_box;
 
-use common::fixed_function::style_enum;
+use common::fixed_function::{params_digest, random_gamut_comp_13_params, style_enum};
 use ocio_ops::open_color_types::{FixedFunctionStyle, TransformDirection};
 use ocio_ops::ops::fixedfunction::FixedFunctionOpStyle;
 use ocio_ops::ops::fixedfunction::fixed_function_op_cpu::get_fixed_function_cpu_renderer;
@@ -251,6 +251,16 @@ fn aces_1_styles_match_the_wheel() {
         cases.push(Case::new(
             format!("AcesGamutComp13 {label}"),
             Fixed::new(AcesGamutComp13, &params),
+        ));
+    }
+    // Random sets within the bounds (pinned by `random_gamut_comp_params_are_pinned`).
+    for (i, params) in random_gamut_comp_13_params(RANDOM_GAMUT_COMP_SETS)
+        .iter()
+        .enumerate()
+    {
+        cases.push(Case::new(
+            format!("AcesGamutComp13 random {i}"),
+            Fixed::new(AcesGamutComp13, params),
         ));
     }
     // A NaN power, which validation accepts: the route of the generated NaN cases, where a
@@ -553,4 +563,14 @@ fn nan_combinations_match_the_wheel() {
         combos.len(),
         failures.join("\n")
     );
+}
+
+/// How many random gamut compression parameter sets the battery runs.
+const RANDOM_GAMUT_COMP_SETS: usize = 16;
+
+/// The random gamut compression parameter sets can't change unnoticed.
+#[test]
+fn random_gamut_comp_params_are_pinned() {
+    let sets = random_gamut_comp_13_params(RANDOM_GAMUT_COMP_SETS);
+    assert_eq!(params_digest(&sets), 0x8fca_09f0_28f3_5149);
 }
