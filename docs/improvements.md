@@ -1013,6 +1013,20 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   NaN base gives `vec3 log_slope = vec3(nan, nan, nan)`:
   `crates/ocio-gpu/tests/log_op_gpu_oracle.rs` (`extreme_parameters_write_the_wheels_shader`).
 
+### I-85. The gamma-log shader subtracts the gamma segment's offset
+
+- **Upstream:** the CPU renderer of `LIN_TO_GAMMA_LOG` computes the gamma segment as
+  `slope * pow(E + offset, power)` (`ops/fixedfunction/FixedFunctionOpCPU.cpp:2265`, as the
+  comment in the shader writer says too), and its inverse subtracts the offset after the
+  power. The shader writes `slope * pow(E - offset, power)`
+  (`ops/fixedfunction/FixedFunctionOpGPU.cpp:2024-2025`), while its inverse matches the CPU's.
+- **Who notices:** `FIXED_FUNCTION_LIN_TO_GAMMA_LOG` transforms whose gamma segment has an
+  offset (the fifth parameter; the Rec.2100 HLG curve's is 0), forward, on the GPU: the shader
+  gives other values than the CPU, and its inverse doesn't undo it.
+- **A fix:** `E + offset` in the shader.
+- **Status:** matched in `p2-ff-gpu` (2.3g2); `fixed_function_op_gpu_oracle.rs` compares a
+  curve with an offset with the wheel's shader.
+
 ## Python module (`ocio-py`)
 
 ### I-12. A channel order passed without its keyword is misread
