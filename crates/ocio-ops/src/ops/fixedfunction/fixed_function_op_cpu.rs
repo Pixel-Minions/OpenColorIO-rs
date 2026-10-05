@@ -8,10 +8,9 @@
 //! to dim surround 1.0 and the gamut compression 1.3, forward and inverse (chunk 2.3b); the
 //! Rec.2100 surround, RGB to and from HSV, and XYZ to and from xyY, u'v'Y and CIELUV (2.3c1);
 //! RGB to and from the three HSYs (2.3c2); the gamma-log and double-log curves, both ways
-//! (2.3d1); ACES 2.0's RGB to and from JMh, and its tone scale and chroma compression (2.4e1).
-//! The other styles' renderers come with chunks 2.3d2 (PQ) and 2.4e2 (ACES 2.0's output
-//! transform and gamut compression); until then [`get_fixed_function_cpu_renderer`] refuses
-//! them ([`not_ported`]).
+//! (2.3d1); ACES 2.0's RGB to and from JMh, and its tone scale and chroma compression (2.4e1),
+//! its output transform and gamut compression (2.4e2). The PQ curves' renderers come with
+//! chunk 2.3d2; until then [`get_fixed_function_cpu_renderer`] refuses them ([`not_ported`]).
 //!
 //! The renderers work in place and never write alpha, which upstream copies (`out[3] =
 //! in[3]`), nor a channel upstream leaves as it was.
@@ -44,13 +43,15 @@
 use std::sync::Arc;
 
 use super::aces2::common::{
-    ChromaCompressParams, JMhParams, SharedCompressionParameters, ToneScaleParams, from_degrees,
-    to_degrees, to_radians,
+    ChromaCompressParams, GamutCompressParams, JMhParams, SharedCompressionParameters,
+    ToneScaleParams, from_degrees, to_degrees, to_radians,
 };
 use super::aces2::transform::{
-    chroma_compress_fwd, chroma_compress_inv, chroma_compress_norm, init_chroma_compress_params,
-    init_jmh_params, init_shared_compression_params, init_tone_scale_params, jmh_to_rgb,
-    resolve_compression_params, rgb_to_jmh, tonescale_fwd, tonescale_inv,
+    aab_to_jmh, aab_to_rgb, chroma_compress_fwd, chroma_compress_inv, chroma_compress_norm,
+    gamut_compress_fwd, gamut_compress_inv, init_chroma_compress_params,
+    init_gamut_compress_params, init_jmh_params, init_shared_compression_params,
+    init_tone_scale_params, jmh_to_aab_with, jmh_to_rgb, resolve_compression_params, rgb_to_aab,
+    rgb_to_jmh, tonescale_a_to_j_fwd, tonescale_fwd, tonescale_inv,
 };
 use super::fixed_function_op_data::{FixedFunctionOpData, FixedFunctionOpStyle, SHORT_PARAMS};
 use crate::bit_depth_utils::clamp_macro;
@@ -774,6 +775,127 @@ fn primaries_from(data: &FixedFunctionOpData, first: usize) -> Result<Primaries>
     Ok(Primaries::new(c(0)?, c(1)?, c(2)?, c(3)?))
 }
 
+/// The ACES 2.0 output transform: ACES2065-1 to the display's RGB through the JMh model, the
+/// tone scale and the chroma and gamut compressions, or back.
+///
+/// Port of `Renderer_ACES_OutputTransform20` (src/OpenColorIO/ops/fixedfunction/
+/// FixedFunctionOpCPU.cpp:133-151, 1057-1166 @ v2.5.2).
+#[derive(Debug)]
+pub struct RendererAcesOutputTransform20 {
+    /// `m_fwd`.
+    fwd: bool,
+    /// `m_pIn`.
+    p_in: JMhParams,
+    /// `m_pOut`.
+    p_out: JMhParams,
+    /// `m_t`.
+    t: ToneScaleParams,
+    /// `m_s`.
+    s: SharedCompressionParameters,
+    /// `m_c`.
+    c: ChromaCompressParams,
+    /// `m_g`.
+    g: GamutCompressParams,
+}
+
+impl RendererAcesOutputTransform20 {
+    /// The models of the input (AP0), the limiting gamut of the parameters and the reach
+    /// (AP1), and the parameters for the peak luminance. [`SHORT_PARAMS`] for fewer than nine
+    /// parameters (U-31); refused where upstream's hue table overruns its arrays (U-32) or a
+    /// matrix is singular.
+    ///
+    /// Port of `Renderer_ACES_OutputTransform20::Renderer_ACES_OutputTransform20`
+    /// (FixedFunctionOpCPU.cpp:1057-1087 @ v2.5.2).
+    pub fn new(data: &FixedFunctionOpData) -> Result<Self> {
+        let fwd = FixedFunctionOpStyle::AcesOutputTransform20Fwd == data.style();
+
+        let peak_luminance = param_f32(data, 0)?;
+        let lim_primaries = primaries_from(data, 1)?;
+
+        let p_in = init_jmh_params(&aces_ap0::PRIMARIES)?;
+        let p_out = init_jmh_params(&lim_primaries)?;
+        let t = init_tone_scale_params(peak_luminance);
+        let reach_gamut = init_jmh_params(&aces_ap1::PRIMARIES)?;
+        let s = init_shared_compression_params(peak_luminance, &p_in, &reach_gamut);
+        let c = init_chroma_compress_params(peak_luminance, &t);
+        let g = init_gamut_compress_params(peak_luminance, &p_in, &p_out, &t, &s, &reach_gamut)?;
+        Ok(RendererAcesOutputTransform20 {
+            fwd,
+            p_in,
+            p_out,
+            t,
+            s,
+            c,
+            g,
+        })
+    }
+
+    /// Port of `Renderer_ACES_OutputTransform20::fwd` (FixedFunctionOpCPU.cpp:1102-1135 @
+    /// v2.5.2).
+    fn apply_fwd(&self, rgba: &mut [f32]) {
+        for pixel in rgba.as_chunks_mut::<4>().0 {
+            let rgb_in = [pixel[0], pixel[1], pixel[2]];
+            let aab = rgb_to_aab(&rgb_in, &self.p_in);
+            let jmh = aab_to_jmh(&aab, &self.p_in);
+
+            let rp = resolve_compression_params(jmh[2], &self.s);
+            let h_rad = to_radians(jmh[2]);
+            let cos_hr1 = h_rad.cos();
+            let sin_hr1 = h_rad.sin();
+            let mnorm = chroma_compress_norm(cos_hr1, sin_hr1, self.c.chroma_compress_scale);
+
+            let j_ts = tonescale_a_to_j_fwd(aab[0], &self.p_in, &self.t);
+            let tonemapped_jmh = chroma_compress_fwd(&jmh, j_ts, mnorm, &rp, &self.c);
+            let compressed_jmh = gamut_compress_fwd(&tonemapped_jmh, &rp, &self.g);
+
+            let aab_out = jmh_to_aab_with(&compressed_jmh, cos_hr1, sin_hr1, &self.p_out);
+            let rgb_out = aab_to_rgb(&aab_out, &self.p_out);
+
+            pixel[0] = rgb_out[0];
+            pixel[1] = rgb_out[1];
+            pixel[2] = rgb_out[2];
+        }
+    }
+
+    /// Port of `Renderer_ACES_OutputTransform20::inv` (FixedFunctionOpCPU.cpp:1137-1166 @
+    /// v2.5.2).
+    fn apply_inv(&self, rgba: &mut [f32]) {
+        for pixel in rgba.as_chunks_mut::<4>().0 {
+            let rgb_out = [pixel[0], pixel[1], pixel[2]];
+            let compressed_jmh = rgb_to_jmh(&rgb_out, &self.p_out);
+
+            let rp = resolve_compression_params(compressed_jmh[2], &self.s);
+            let h_rad = to_radians(compressed_jmh[2]);
+            let cos_hr1 = h_rad.cos();
+            let sin_hr1 = h_rad.sin();
+            let mnorm = chroma_compress_norm(cos_hr1, sin_hr1, self.c.chroma_compress_scale);
+
+            let tonemapped_jmh = gamut_compress_inv(&compressed_jmh, &rp, &self.g);
+            let j = tonescale_inv(tonemapped_jmh[0], &self.p_in, &self.t);
+            let jmh = chroma_compress_inv(&tonemapped_jmh, j, mnorm, &rp, &self.c);
+
+            let aab = jmh_to_aab_with(&jmh, cos_hr1, sin_hr1, &self.p_in);
+            let rgb_in = aab_to_rgb(&aab, &self.p_in);
+
+            pixel[0] = rgb_in[0];
+            pixel[1] = rgb_in[1];
+            pixel[2] = rgb_in[2];
+        }
+    }
+}
+
+impl CpuOp for RendererAcesOutputTransform20 {
+    /// Port of `Renderer_ACES_OutputTransform20::apply` (FixedFunctionOpCPU.cpp:1089-1100 @
+    /// v2.5.2).
+    fn apply(&self, rgba: &mut [f32]) {
+        if self.fwd {
+            self.apply_fwd(rgba);
+        } else {
+            self.apply_inv(rgba);
+        }
+    }
+}
+
 /// RGB of the parameters' primaries to ACES 2.0's JMh (hue in degrees), or back.
 ///
 /// Port of `Renderer_ACES_RGB_TO_JMh_20` (src/OpenColorIO/ops/fixedfunction/
@@ -881,6 +1003,65 @@ impl CpuOp for RendererAcesTonescaleCompress20 {
             } else {
                 let j = tonescale_inv(pixel[0], &self.p, &self.t);
                 chroma_compress_inv(&jmh_in, j, mnorm, &rp, &self.c)
+            };
+
+            pixel[0] = jmh[0];
+            pixel[1] = jmh[1];
+            pixel[2] = to_degrees(jmh[2]);
+        }
+    }
+}
+
+/// ACES 2.0's gamut compression of a JMh (hue in degrees), or back.
+///
+/// Port of `Renderer_ACES_GAMUT_COMPRESS_20` (src/OpenColorIO/ops/fixedfunction/
+/// FixedFunctionOpCPU.cpp:189-205, 1321-1404 @ v2.5.2).
+#[derive(Debug)]
+pub struct RendererAcesGamutCompress20 {
+    /// `m_fwd`.
+    fwd: bool,
+    /// `m_s`.
+    s: SharedCompressionParameters,
+    /// `m_g`.
+    g: GamutCompressParams,
+}
+
+impl RendererAcesGamutCompress20 {
+    /// The models of AP0, the limiting gamut of the parameters and the reach (AP1), and the
+    /// parameters for the peak luminance. [`SHORT_PARAMS`] for fewer than nine parameters
+    /// (U-31); refused where upstream's hue table overruns its arrays (U-32) or a matrix is
+    /// singular.
+    ///
+    /// Port of `Renderer_ACES_GAMUT_COMPRESS_20::Renderer_ACES_GAMUT_COMPRESS_20`
+    /// (FixedFunctionOpCPU.cpp:1321-1350 @ v2.5.2).
+    pub fn new(data: &FixedFunctionOpData) -> Result<Self> {
+        let fwd = FixedFunctionOpStyle::AcesGamutCompress20Fwd == data.style();
+
+        let peak_luminance = param_f32(data, 0)?;
+        let limiting_primaries = primaries_from(data, 1)?;
+
+        let p_in = init_jmh_params(&aces_ap0::PRIMARIES)?;
+        let p_lim = init_jmh_params(&limiting_primaries)?;
+        let t = init_tone_scale_params(peak_luminance);
+        let reach_gamut = init_jmh_params(&aces_ap1::PRIMARIES)?;
+        let s = init_shared_compression_params(peak_luminance, &p_in, &reach_gamut);
+        let g = init_gamut_compress_params(peak_luminance, &p_in, &p_lim, &t, &s, &reach_gamut)?;
+        Ok(RendererAcesGamutCompress20 { fwd, s, g })
+    }
+}
+
+impl CpuOp for RendererAcesGamutCompress20 {
+    /// Port of `Renderer_ACES_GAMUT_COMPRESS_20::apply`, `fwd` and `inv`
+    /// (FixedFunctionOpCPU.cpp:1352-1404 @ v2.5.2).
+    fn apply(&self, rgba: &mut [f32]) {
+        for pixel in rgba.as_chunks_mut::<4>().0 {
+            let normalised_hue = from_degrees(pixel[2]);
+            let rp = resolve_compression_params(normalised_hue, &self.s);
+            let jmh_in = [pixel[0], pixel[1], normalised_hue];
+            let jmh = if self.fwd {
+                gamut_compress_fwd(&jmh_in, &rp, &self.g)
+            } else {
+                gamut_compress_inv(&jmh_in, &rp, &self.g)
             };
 
             pixel[0] = jmh[0];
@@ -2068,9 +2249,16 @@ pub fn get_fixed_function_cpu_renderer(
         AcesGamutComp13Fwd => Arc::new(RendererAcesGamutComp13Fwd::new(func)?),
         AcesGamutComp13Inv => Arc::new(RendererAcesGamutComp13Inv::new(func)?),
 
+        // Sharing same renderer (param will be inverted to handle direction).
+        AcesOutputTransform20Fwd | AcesOutputTransform20Inv => {
+            Arc::new(RendererAcesOutputTransform20::new(func)?)
+        }
         AcesRgbToJmh20 | AcesJmhToRgb20 => Arc::new(RendererAcesRgbToJmh20::new(func)?),
         AcesTonescaleCompress20Fwd | AcesTonescaleCompress20Inv => {
             Arc::new(RendererAcesTonescaleCompress20::new(func)?)
+        }
+        AcesGamutCompress20Fwd | AcesGamutCompress20Inv => {
+            Arc::new(RendererAcesGamutCompress20::new(func)?)
         }
 
         Rec2100SurroundFwd | Rec2100SurroundInv => {
@@ -2099,12 +2287,7 @@ pub fn get_fixed_function_cpu_renderer(
         RgbToHsyVid => Arc::new(RendererRgbToHsyVid),
         HsyVidToRgb => Arc::new(RendererHsyVidToRgb),
 
-        style @ (AcesOutputTransform20Fwd
-        | AcesOutputTransform20Inv
-        | AcesGamutCompress20Fwd
-        | AcesGamutCompress20Inv
-        | LinToPq
-        | PqToLin) => return Err(not_ported(style)),
+        style @ (LinToPq | PqToLin) => return Err(not_ported(style)),
 
         LinToGammaLog => Arc::new(RendererLinToGammaLog::new(func)?),
         GammaLogToLin => Arc::new(RendererGammaLogToLin::new(func)?),

@@ -783,6 +783,17 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
     copy (the port's `ToeFwdOrder`, `toe_inv`, `jmh_to_aab_with` and `chroma_compress_inv`
     list them), where the renderers can't show it: a NaN that reaches them has already
     reached the operand that decides the result.
+  - ACES 2.0's gamut compression (`ACES2/Transform.cpp`, 932-1070): the compressed J is
+    `remapped_M * slope + J_intersect` with MSVC and `slope * remapped_M + J_intersect` with
+    GCC; the inverse Reinhard curve is `-(nd / (nd - 1)) * scale` with MSVC and `scale *
+    -(nd / (nd - 1))` with GCC, and GCC adds it to the threshold in the inverse, MSVC the
+    threshold to it (`sub_1802f88a0` and `sub_1802f8620`, `0x34ee70` and `0x34ac80`). GCC also
+    folded the source's negations in `solve_J_intersect` above the focus J (`-2c / (-s -
+    root)` with `s = -b`, where MSVC computes `-2c / (b - root)`), which can change a NaN's
+    sign. The other operations where two NaNs can meet (the J intersect, the hulls'
+    boundaries, the smooth minimum, the threshold) order their operands per compiler too (the
+    port's `solve_j_intersect`, `EstimateOrder`, `smin_scaled` and `remap_m` list them),
+    where the renderers can't show it.
   Both compilers also reorder some of the source's operations the same way (for example
   `13 * L* * (u - u'n)` as `(u - u'n) * (13 * L*)`), which only matters to the port.
 - **Who notices:** images whose pixels have NaNs of different signs or payloads in two or
@@ -793,11 +804,11 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   in green comes out with green's NaN in J, M and h on Windows, red's on Linux.
 - **A fix:** one operand order for both platforms.
 - **Status:** matched in `p2-ff-cpu` (the glows, 2.3b) and `p2-ff-cpu-2` (2.3c1, the HSYs in
-  2.3c2), and `p2-aces2-cpu` (ACES 2.0's JMh model and chroma compression, 2.4e1), each
-  wheel's order per platform (`cfg(target_os)`). The battery's NaN buffers and
-  `fixed_function_oracle.rs`'s `nan_combinations_match_the_wheel` (every combination of NaNs,
-  finite values and infinities in red, green and blue) compare them with the wheel on both
-  platforms.
+  2.3c2), and `p2-aces2-cpu` (ACES 2.0's JMh model and chroma compression, 2.4e1; its gamut
+  compression, 2.4e2), each wheel's order per platform (`cfg(target_os)`). The battery's NaN
+  buffers and `fixed_function_oracle.rs`'s `nan_combinations_match_the_wheel` (every
+  combination of NaNs, finite values and infinities in red, green and blue) compare them with
+  the wheel on both platforms.
 
 ### I-82. RGB to HSV gives an all-negative-infinity pixel's saturation a different sign per platform
 
