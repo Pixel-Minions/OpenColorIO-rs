@@ -54,9 +54,11 @@
 //!
 //! Waiver W0001 applies only to the cases a family marks with [`params::Case::w0001`] (the PQ
 //! curves), and only on Windows with fast math off, through the same
-//! [`params::Case::compare_pixels`]: a finite value may differ from the wheel's by up to the
-//! bound `waivers.toml` gives for the renderer, a NaN in its sign and payload bits; NaN
-//! positions and everything else compare bit for bit.
+//! [`params::Case::compare_pixels`]: in R, G and B, a value whose input the renderer's
+//! [`params::W0001Function::unbounded`] covers (`PQ_TO_LIN` above 1 in magnitude) may differ in
+//! any way, another finite value from the wheel's by up to the bound `waivers.toml` gives for
+//! the renderer, a NaN in its sign and payload bits; NaN positions, alpha and everything else
+//! compare bit for bit.
 //!
 //! ```no_run
 //! use ocio_testkit::battery::params::{A, Case, Channels, Params, Precision, RGB, Slot};
@@ -732,8 +734,8 @@ impl fmt::Display for Summary {
             let waived: usize = self.w0001_waived.iter().map(|(_, _, n)| n).sum();
             writeln!(
                 f,
-                "  under W0001: {} buffers, {waived} values within its bound or differing in NaN \
-                 bits only:",
+                "  under W0001: {} buffers, {waived} values within its bound, where it waives any \
+                 difference, or differing in NaN bits only:",
                 self.w0001_comparisons
             )?;
             for (case, combo, n) in &self.w0001_waived {

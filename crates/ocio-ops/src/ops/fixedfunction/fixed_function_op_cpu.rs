@@ -1564,7 +1564,7 @@ fn with_sign_of(value: f32, v: f32) -> f32 {
 /// The power function of the SSE PQ renderers: `ssePower` with fast math, and with fast math
 /// off the Windows wheel's `_mm_pow_ps`, which MSVC compiles to SVML's `__vdecl_powf4`. The port
 /// calls `powf` there instead (waiver W0001): SVML is not available to Rust, and its results
-/// differ from `powf`'s in the last bits of about 1.7% of the values.
+/// differ from `powf`'s in about 1.7% of the values, by the bounds W0001 records.
 ///
 /// Port of `Renderer_LIN_TO_PQ_SSE<FAST_POWER>::myPower` and
 /// `Renderer_PQ_TO_LIN_SSE<FAST_POWER>::myPower` (FixedFunctionOpCPU.cpp:2180-2195,

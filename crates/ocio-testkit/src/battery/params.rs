@@ -24,7 +24,9 @@ use std::fmt::Debug;
 use std::sync::OnceLock;
 
 use super::Combo;
-use crate::compare::{f32_bits_report, pixels_report_except_nan_bits, pixels_report_within_ulp};
+use crate::compare::{
+    InputRange, f32_bits_report, pixels_report_except_nan_bits, pixels_report_within_ulp,
+};
 
 /// Which of a pixel's four channels (R, G, B, A) something applies to.
 pub type Channels = [bool; 4];
@@ -177,6 +179,18 @@ impl W0001Function {
         match self {
             W0001Function::LinToPq => "LIN_TO_PQ",
             W0001Function::PqToLin => "PQ_TO_LIN",
+        }
+    }
+
+    /// The inputs for which W0001 waives any difference, with their description: `PQ_TO_LIN`'s
+    /// above 1 in magnitude, which the curve maps beyond 10000 nits and to its pole near 1.992,
+    /// where the wheel's SVML `pow` and the port's `powf` drift apart without bound, to
+    /// infinities and NaNs at different inputs (the owner's split of the waiver by range,
+    /// 2026-10-05). Its bound covers the inputs up to 1 in magnitude.
+    pub fn unbounded(self) -> Option<InputRange> {
+        match self {
+            W0001Function::LinToPq => None,
+            W0001Function::PqToLin => Some(("|input| > 1", |x: f32| x.abs() > 1.0)),
         }
     }
 }
@@ -350,10 +364,11 @@ impl<P: Params> Case<P> {
 
     /// Compares the port's `actual` RGBA pixels with the wheel's `expected` for `inputs`.
     ///
-    /// Where W0001 applies ([`Case::w0001_applies`]), a value may differ from the wheel's by up
-    /// to the waiver's bound for the renderer if both are finite, and in its NaN bits if both
-    /// are NaN (`compare::pixels_report_within_ulp`); everything else compares bit for bit.
-    /// Otherwise:
+    /// Where W0001 applies ([`Case::w0001_applies`]), a value of R, G or B may differ from the
+    /// wheel's in any way where its input is one the renderer's [`W0001Function::unbounded`]
+    /// covers, and elsewhere by up to the waiver's bound for the renderer if both are finite,
+    /// and in its NaN bits if both are NaN (`compare::pixels_report_within_ulp`); everything
+    /// else, alpha included, compares bit for bit. Otherwise:
     ///
     /// Where W0002 applies ([`Case::w0002_applies`]), a value that is NaN in `expected`, in a
     /// channel with a NaN parameter, only has to be NaN in `actual`. Every other value,
@@ -371,7 +386,11 @@ impl<P: Params> Case<P> {
     ) -> Comparison {
         if let Some(function) = self.w0001_applies(combo) {
             let (waiver, bound) = w0001_bound(function);
-            return match pixels_report_within_ulp(waiver, bound, inputs, expected, actual) {
+            // The PQ curves compute R, G and B; alpha passes through, exactly.
+            let unbounded = function.unbounded();
+            return match pixels_report_within_ulp(
+                waiver, bound, &RGB, unbounded, inputs, expected, actual,
+            ) {
                 Ok(0) => Comparison::Exact,
                 Ok(waived) => Comparison::W0001 { waived },
                 Err(report) => Comparison::Mismatch(report),
@@ -971,6 +990,59 @@ mod tests {
         }
     }
 
+    /// W0001 never covers alpha, which the PQ curves pass through: a finite alpha one ulp
+    /// off, or a signalling NaN alpha quieted, is a mismatch. It waives any difference of
+    /// R, G and B for the inputs of `PQ_TO_LIN` above 1 in magnitude, NaN positions and
+    /// infinities included, and none for `LIN_TO_PQ`'s or for inputs up to 1.
+    #[test]
+    fn w0001_compares_alpha_exactly_and_waives_pq_to_lin_above_1() {
+        let one = 0x3f80_0000;
+        let snan = 0x7f80_0001;
+        let case =
+            Case::new("typical", toy()).w0001(W0001Function::LinToPq, W0001Function::PqToLin);
+        let (fwd, inv) = (
+            combo(Direction::Forward, false),
+            combo(Direction::Inverse, false),
+        );
+        let expected = px([one, one, one, one]);
+        let mut alpha_off = expected.clone();
+        alpha_off[3] = f32::from_bits(one + 1);
+        let snan_alpha = px([one, one, one, snan]);
+        let mut quieted = snan_alpha.clone();
+        quieted[3] = f32::from_bits(snan | 0x0040_0000);
+        for combo in [fwd, inv] {
+            let inputs = px([0x3fc0_0000; 4]);
+            for (e, a) in [(&expected, &alpha_off), (&snan_alpha, &quieted)] {
+                assert!(matches!(
+                    case.compare_pixels(&combo, &inputs, e, a),
+                    Comparison::Mismatch(_)
+                ));
+            }
+        }
+        if !cfg!(target_os = "windows") {
+            return;
+        }
+        // Inputs 1.5 and -1.5 (any difference) and 1.0 (within the bound) in R, G and B.
+        let inputs = px([0x3fc0_0000, 0xbfc0_0000, one, one]);
+        let (_, bound) = w0001_bound(W0001Function::PqToLin);
+        let far = px([0x7f80_0000, NAN_A, one + u32::try_from(bound).unwrap(), one]);
+        assert_eq!(
+            case.compare_pixels(&inv, &inputs, &expected, &far),
+            Comparison::W0001 { waived: 3 }
+        );
+        let mut beyond = expected.clone();
+        beyond[2] = f32::from_bits(one + u32::try_from(bound).unwrap() + 1);
+        assert!(matches!(
+            case.compare_pixels(&inv, &inputs, &expected, &beyond),
+            Comparison::Mismatch(_)
+        ));
+        // Not forward (LIN_TO_PQ), whatever the input.
+        assert!(matches!(
+            case.compare_pixels(&fwd, &inputs, &expected, &far),
+            Comparison::Mismatch(_)
+        ));
+    }
+
     /// W0002 covers the channels of NaN parameters and no other, alpha included: for a NaN
     /// green slope, a NaN-bit difference in red, blue or alpha is a mismatch; for a NaN base
     /// (the three colour channels), one in alpha is.
@@ -1191,7 +1263,8 @@ mod tests {
     }
 
     /// Nothing but the battery and the format sweep through the API compares under W0002, and
-    /// nothing but the battery under W0001 (`compare_pixels` with a case marked `Case::w0001`).
+    /// nothing but them under W0001 (`compare_pixels` with a case marked `Case::w0001`, which
+    /// only the PQ cases of the op battery and of the API's cases are).
     /// Outside `compare.rs`, which defines the comparisons, only the `Case` methods here may call
     /// them, and only `w0001_bound` reads W0001's bound; and they are called only by the
     /// battery's engine, by this file's tests, and by `crates/ocio/tests/api_formats_oracle.rs`
@@ -1220,12 +1293,17 @@ mod tests {
         const PARAMS: &str = "crates/ocio-testkit/src/battery/params.rs";
         const ENGINE: &str = "crates/ocio-testkit/src/battery/engine.rs";
         const SWEEP: &str = "crates/ocio/tests/api_formats_oracle.rs";
+        // The cases under W0001: the PQ curves' in the op battery and in the API's cases.
+        const FIXED_FUNCTION: &str = "crates/ocio-ops/tests/fixed_function_oracle.rs";
+        const API_CASES: &str = "crates/ocio/tests/common/api_cases.rs";
         // Each name, and the only files that may contain it.
-        let rules: [(&str, &[&str]); 6] = [
+        let rules: [(&str, &[&str]); 8] = [
             ("assert_pixels_bits_eq_except_nan_bits", &[COMPARE, PARAMS]),
             ("pixels_report_except_nan_bits", &[COMPARE, PARAMS]),
             ("pixels_report_within_ulp", &[COMPARE, PARAMS]),
             ("w0001_bound(", &[PARAMS]),
+            (".w0001(", &[PARAMS, FIXED_FUNCTION, API_CASES]),
+            (".unbounded()", &[PARAMS]),
             ("compare_pixels(", &[PARAMS, ENGINE, SWEEP]),
             ("compare_baked_luts(", &[PARAMS, SWEEP]),
         ];
