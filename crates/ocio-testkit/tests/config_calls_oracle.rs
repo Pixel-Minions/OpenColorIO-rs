@@ -406,3 +406,74 @@ fn a_backslash_is_a_name_on_linux() {
         response["dir"].as_str().unwrap().as_bytes()
     );
 }
+
+/// ColorSpaceSet's operators are reached (`__or__`, `__and__`, `__sub__`, `__eq__`,
+/// `__ne__`): the sets of upstream's `OCIO_ADD_TEST(ColorSpaceSet, operations_on_set)`
+/// (tests/cpu/ColorSpaceSet_tests.cpp:205-316 @ v2.5.2), with its counts and names.
+#[test]
+fn color_space_set_operators_are_reached() {
+    let mut requests = vec![json!({"new": "Config", "as": "c"})];
+    for (name, categories) in [
+        ("cs1", &[][..]),
+        ("cs2", &["linear", "rendering"][..]),
+        ("cs3", &["log", "rendering"][..]),
+    ] {
+        requests.push(json!({"new": "ColorSpace", "as": name}));
+        requests.push(json!({"call": "setName", "on": name, "args": [name]}));
+        for category in categories {
+            requests.push(json!({"call": "addCategory", "on": name, "args": [category]}));
+        }
+        requests.push(json!({"call": "addColorSpace", "on": "c", "args": [{"ref": name}]}));
+    }
+    let set = |name: &str, category: Value| json!({"call": "getColorSpaces", "on": "c", "args": [category], "as": name});
+    requests.push(set("css1", Value::Null));
+    requests.push(set("css2", json!("linear")));
+    requests.push(set("css3", json!("log")));
+    requests.push(set("css5", json!("rendering")));
+    let op = |op: &str, a: &str, b: &str, store: &str| json!({"call": op, "on": a, "args": [{"ref": b}], "as": store});
+    let first = requests.len();
+    let ops = [
+        op("__or__", "css2", "css3", "u23"),
+        op("__or__", "css1", "css2", "u12"),
+        op("__and__", "css2", "css3", "i23"),
+        op("__and__", "css2", "css1", "i21"),
+        op("__sub__", "css1", "css3", "d13"),
+        op("__sub__", "css1", "css2", "d12"),
+        op("__sub__", "css1", "u23", "d1u"),
+        op("__sub__", "css1", "css5", "d15"),
+        op("__and__", "d15", "u23", "nested"),
+        op("__eq__", "css2", "i21", "eq"),
+        op("__ne__", "css2", "i21", "ne"),
+    ];
+    requests.extend(ops);
+    let named = [
+        "u23", "u12", "i23", "i21", "d13", "d12", "d1u", "css5", "nested",
+    ];
+    for set in named {
+        requests.push(json!({"call": "getColorSpaceNames", "on": set}));
+    }
+    let response = call(json!({"config": "raw", "calls": requests}));
+    let c = calls(&response);
+    let names = |k: usize| -> Vec<Vec<u8>> {
+        result(&c[first + 11 + k])
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(bytes)
+            .collect()
+    };
+    for k in 0..9 {
+        assert_eq!(result(&c[first + k])["class"], "ColorSpaceSet", "{k}");
+    }
+    assert_eq!(names(0).len(), 2);
+    assert_eq!(names(1).len(), 3);
+    assert_eq!(names(2).len(), 0);
+    assert_eq!(names(3), [b"cs2".to_vec()]);
+    assert_eq!(names(4), [b"cs1".to_vec(), b"cs2".to_vec()]);
+    assert_eq!(names(5), [b"cs1".to_vec(), b"cs3".to_vec()]);
+    assert_eq!(names(6), [b"cs1".to_vec()]);
+    assert_eq!(names(7), [b"cs2".to_vec(), b"cs3".to_vec()]);
+    assert_eq!(names(8).len(), 0);
+    let eq = result(&c[first + 9]).as_bool().unwrap();
+    assert_eq!(*result(&c[first + 10]), json!(!eq));
+}

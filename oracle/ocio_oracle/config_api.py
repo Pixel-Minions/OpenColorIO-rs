@@ -95,9 +95,10 @@ MODULE_FUNCTIONS = {
       for way in ("ToString", "FromString")),
 }
 
-# Dunder methods a call may name. Everything else starting with "_" is refused.
+# Dunder methods a call may name. Everything else starting with "_" is refused. The operators
+# are ColorSpaceSet's (PyColorSpaceSet.cpp): ==, !=, | (union), & (intersection), - (difference).
 DUNDER_CALLS = {"__str__", "__repr__", "__len__", "__getitem__", "__setitem__",
-                "__contains__", "__iter__"}
+                "__contains__", "__iter__", "__eq__", "__ne__", "__or__", "__and__", "__sub__"}
 
 
 # ---------------------------------------------------------------------------------------------
