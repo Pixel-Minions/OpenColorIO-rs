@@ -19,10 +19,7 @@ import PyOpenColorIO as OCIO
 
 from . import spec
 from .checks import check_keys
-from .commands import captured_log, command, exception_result
-
-# What OCIO raises (in PyOpenColorIO, ExceptionMissingFile doesn't derive from OCIO.Exception).
-RAISED = (OCIO.Exception, OCIO.ExceptionMissingFile)
+from .commands import RAISED, captured_log, command, exception_result, wheel_raised
 
 
 def _text(transform):
@@ -32,6 +29,8 @@ def _text(transform):
         transform.validate()
         out["validate"] = None
     except RAISED as exc:
+        if not wheel_raised(exc):
+            raise
         out["validate"] = exception_result(exc)
     return out
 
@@ -56,10 +55,12 @@ def transform_text(args, blobs):
     args:
       transforms  transform specs (see spec.transform), each built on its own
       pairs       [[i, j], ...]: transforms[i].equals(transforms[j]) for each (optional)
+    request blobs: the transform specs' blobs, which they share (see spec.py)
     result:
       transforms  per spec, in order: {"class", "repr", "str", "validate": null, or what it
                   raised ({"type", "message"})}, or {"exception", "stage": "transform"} when
-                  building it raised (the binding's constructors validate some transforms)
+                  building it raised (commands.RAISED: the binding's constructors validate some
+                  transforms, and its setters check their arguments)
       pairs       per pair, in order: {"equals": true, false, or null where the binding has no
                   equals() for the first transform's class or none taking the second's, or where
                   either wasn't built}
@@ -89,8 +90,10 @@ def transform_text(args, blobs):
     with captured_log() as log:
         for transform_spec in specs:
             try:
-                transform = spec.transform(transform_spec)
+                transform = spec.transform(transform_spec, blobs)
             except RAISED as exc:
+                if not wheel_raised(exc):
+                    raise
                 built.append(None)
                 result["transforms"].append({"exception": exception_result(exc),
                                              "stage": "transform"})

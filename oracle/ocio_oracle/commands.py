@@ -47,6 +47,25 @@ def captured_log():
         OCIO.ResetToDefaultLoggingFunction()
 
 
+# What OCIO and the binding raise while a command builds and runs a processor: OCIO's
+# exceptions (in PyOpenColorIO, ExceptionMissingFile doesn't derive from OCIO.Exception), and
+# the binding's own checks, std::runtime_error, which pybind11 raises as RuntimeError (such as
+# Lut3DTransform.setData's "Incompatible buffer dimensions"). Every command reports them as
+# {"exception": exception_result(exc), "stage": ...}; anything else the oracle raises refuses
+# the request, and so do Python's own subclasses of RuntimeError (wheel_raised).
+RAISED = (OCIO.Exception, OCIO.ExceptionMissingFile, RuntimeError)
+
+
+def wheel_raised(exc):
+    """Whether an exception a RAISED clause caught is the wheel's: an OCIO exception, or a
+    RuntimeError itself. Python's own subclasses of RuntimeError (RecursionError,
+    NotImplementedError, PythonFinalizationError) come from the interpreter or the oracle, never
+    from pybind11's std::runtime_error: the commands raise them again, which refuses the request
+    rather than report them as the wheel's."""
+    return (isinstance(exc, (OCIO.Exception, OCIO.ExceptionMissingFile))
+            or type(exc) is RuntimeError)
+
+
 def exception_result(exc):
     return {"type": type(exc).__name__, "message": str(exc)}
 
@@ -100,14 +119,15 @@ def batch(args, blobs):
     return results, out
 
 
-def _processor(args, stage):
-    """The config and processor of a cpu_apply call. `stage[0]` names the step in progress."""
+def _processor(args, stage, blobs=()):
+    """The config and processor of a cpu_apply call. `stage[0]` names the step in progress;
+    `blobs` are the transform spec's blobs (see spec.py)."""
     stage[0] = "config"
     config = spec.config(args.get("config"))
     stage[0] = "transform"
     direction = getattr(OCIO, args.get("direction", "TRANSFORM_DIR_FORWARD"))
     if "transform" in args:
-        transform = spec.transform(args["transform"])
+        transform = spec.transform(args["transform"], blobs)
         stage[0] = "processor"
         return config, config.getProcessor(transform, direction)
     if "src" in args:
@@ -127,17 +147,19 @@ def cpu_apply(args, blobs):
       optimization  flags (see spec.flags); absent means getDefaultCPUProcessor()
       in_bitdepth, out_bitdepth   BIT_DEPTH_* names (default F32)
       channels      3 or 4 (default 4)
-    blobs: [input pixels, little-endian, in in_bitdepth's storage type]
+    blobs: [input pixels, little-endian, in in_bitdepth's storage type], then the transform
+           spec's blobs (see spec.py)
     result: {"processor_cache_id", "cpu_cache_id", "log"} or {"exception", "stage", "log"}
-      stage  where OCIO raised: "config" (loading the config), "transform" (building the
-             transform: the Python bindings' constructors validate it), "processor"
+      stage  where OCIO or the binding raised (RAISED): "config" (loading the config),
+             "transform" (building the transform: the Python bindings' constructors validate
+             it, and their setters check their arguments), "processor"
              (getProcessor, which validates the ops), "cpu_processor" or "apply"
     blobs: [output pixels in out_bitdepth's storage type]
     """
     stage = ["config"]
     with captured_log() as log:
         try:
-            _, proc = _processor(args, stage)
+            _, proc = _processor(args, stage, blobs[1:])
             stage[0] = "cpu_processor"
             in_bd = args.get("in_bitdepth", "BIT_DEPTH_F32")
             out_bd = args.get("out_bitdepth", "BIT_DEPTH_F32")
@@ -159,7 +181,9 @@ def cpu_apply(args, blobs):
             cpu.apply(src_desc, dst_desc)
             result = {"processor_cache_id": proc.getCacheID(), "cpu_cache_id": cpu.getCacheID()}
             out = [dst.tobytes()]
-        except OCIO.Exception as exc:
+        except RAISED as exc:
+            if not wheel_raised(exc):
+                raise
             result, out = {"exception": exception_result(exc), "stage": stage[0]}, []
     result["log"] = log
     return result, out

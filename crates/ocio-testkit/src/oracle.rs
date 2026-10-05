@@ -37,7 +37,7 @@
 //! a tenth of a millisecond. [`Oracle::batch`] runs many calls in one process (the `batch`
 //! command), and the battery (`crate::battery`) sends all its calls that way.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -207,14 +207,35 @@ impl Oracle {
         }
     }
 
-    /// Runs `calls` in one oracle process with the `batch` command and returns their
-    /// responses, in order: a call that raised in the oracle gives `Err` with its traceback,
-    /// and the other calls still run. Identical input blobs are sent once. With `cache`, the
-    /// whole batch is one cache entry, but never a batch with a call that raised: the failure
-    /// may be transient (a `MemoryError`), and a cached one would replay on every later run.
-    /// Panics on a protocol error.
+    /// Runs `calls` with the `batch` command and returns their responses, in order: a call
+    /// that raised in the oracle gives `Err` with its traceback, and the other calls still run.
+    /// Identical input blobs are sent once. The calls go to one oracle process, or, when their
+    /// input blobs together pass [`MAX_BATCH_INPUT_BYTES`], to one process per run of
+    /// consecutive calls under it (a call over it alone): a process holds its inputs and every
+    /// output until it replies, and outputs can repeat the inputs (a LUT's values). With
+    /// `cache`, each process's batch is one cache entry, but never a batch with a call that
+    /// raised: the failure may be transient (a `MemoryError`), and a cached one would replay on
+    /// every later run. Panics on a protocol error.
     #[track_caller]
     pub fn batch(&self, calls: &[BatchCall<'_>], cache: bool) -> Vec<Result<Response, String>> {
+        let mut out = Vec::with_capacity(calls.len());
+        for range in batch_ranges(calls, MAX_BATCH_INPUT_BYTES) {
+            out.extend(self.batch_process(calls, range, cache));
+        }
+        out
+    }
+
+    /// [`Oracle::batch`] of `all[range]`, in one process; errors name each call's index in
+    /// `all`.
+    #[track_caller]
+    fn batch_process(
+        &self,
+        all: &[BatchCall<'_>],
+        range: std::ops::Range<usize>,
+        cache: bool,
+    ) -> Vec<Result<Response, String>> {
+        let first = range.start;
+        let calls = &all[range];
         let (args, blobs) = batch_request(calls);
         let response = match self.try_call_with("batch", args, &blobs, cache) {
             Ok(r) => r,
@@ -232,8 +253,9 @@ impl Oracle {
             .map(|(i, entry)| {
                 if let Some(error) = entry.get("error") {
                     return Err(format!(
-                        "oracle call {i} of {} (`{}`) failed: {}",
-                        calls.len(),
+                        "oracle call {} of {} (`{}`) failed: {}",
+                        first + i,
+                        all.len(),
                         calls[i].cmd,
                         error.as_str().unwrap_or_default()
                     ));
@@ -659,6 +681,40 @@ fn request(cmd: &str, args: Value, blobs: &[&[u8]]) -> Vec<u8> {
     frame(&header, blobs)
 }
 
+/// The most input bytes [`Oracle::batch`] sends one process, unless one call has more.
+pub const MAX_BATCH_INPUT_BYTES: usize = 256 << 20;
+
+/// The runs of consecutive `calls` whose distinct input blobs (by address, as
+/// [`batch_request`] first deduplicates them) add up to at most `max_bytes`, a call over it on
+/// its own: one run of all the calls when they fit.
+fn batch_ranges(calls: &[BatchCall<'_>], max_bytes: usize) -> Vec<std::ops::Range<usize>> {
+    let mut ranges = Vec::new();
+    let (mut start, mut bytes) = (0, 0);
+    let mut seen: HashSet<(usize, usize)> = HashSet::new();
+    let key = |b: &[u8]| (b.as_ptr() as usize, b.len());
+    for (i, call) in calls.iter().enumerate() {
+        let new: usize = call
+            .blobs
+            .iter()
+            .filter(|b| !seen.contains(&key(b)))
+            .map(|b| b.len())
+            .sum();
+        if i > start && bytes + new > max_bytes {
+            ranges.push(start..i);
+            start = i;
+            bytes = 0;
+            seen.clear();
+        }
+        for b in &call.blobs {
+            if seen.insert(key(b)) {
+                bytes += b.len();
+            }
+        }
+    }
+    ranges.push(start..calls.len());
+    ranges
+}
+
 /// The `batch` command's arguments for `calls`, and its blobs. Identical blobs are sent once,
 /// deduplicated by address first (the usual case: one probe buffer, many calls), then by
 /// content, so the request doesn't depend on where the buffers live.
@@ -783,6 +839,34 @@ pub fn bytes_to_f32(bytes: &[u8]) -> Vec<f32> {
 
 #[cfg(test)]
 mod tests {
+
+    /// A batch goes to one process while its distinct input blobs fit, and is cut into runs
+    /// of consecutive calls under the limit otherwise; a blob shared by calls counts once in a
+    /// run, and a call over the limit is a run of its own.
+    #[test]
+    fn batches_are_cut_by_their_input_bytes() {
+        let (a, b, c) = (vec![0u8; 40], vec![1u8; 40], vec![2u8; 100]);
+        let call = |blobs: Vec<&'static [u8]>| BatchCall {
+            cmd: "info",
+            args: Value::Null,
+            blobs,
+        };
+        let leak = |v: &Vec<u8>| -> &'static [u8] { Box::leak(v.clone().into_boxed_slice()) };
+        let (a, b, c) = (leak(&a), leak(&b), leak(&c));
+        let calls = vec![
+            call(vec![a]),
+            call(vec![a]),
+            call(vec![b]),
+            call(vec![c]),
+            call(vec![a, b]),
+            call(vec![]),
+        ];
+        assert_eq!(batch_ranges(&calls, 1000), vec![0..6]);
+        // a and b fit in 80 bytes, a shared counting once; c alone is over.
+        assert_eq!(batch_ranges(&calls, 80), vec![0..3, 3..4, 4..6]);
+        assert_eq!(batch_ranges(&calls, 50), vec![0..2, 2..3, 3..4, 4..5, 5..6]);
+        assert_eq!(batch_ranges(&[], 50), vec![0..0]);
+    }
 
     /// The test data's hash, as the cache key takes it.
     fn data_hash(dir: &Path) -> u128 {

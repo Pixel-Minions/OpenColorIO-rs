@@ -20,10 +20,7 @@ import PyOpenColorIO as OCIO
 
 from . import spec
 from .checks import PROCESSOR_KEYS, check_keys, check_member, dump
-from .commands import _processor, captured_log, command, exception_result
-
-# What OCIO raises (in PyOpenColorIO, ExceptionMissingFile doesn't derive from OCIO.Exception).
-RAISED = (OCIO.Exception, OCIO.ExceptionMissingFile)
+from .commands import RAISED, _processor, captured_log, command, exception_result, wheel_raised
 
 
 def _processor_dump(proc, blobs):
@@ -51,6 +48,7 @@ def processor_ops(args, blobs):
                 BIT_DEPTH_* names (default BIT_DEPTH_F32)
       optimization
                 flags (see spec.flags; default OPTIMIZATION_DEFAULT)
+    request blobs: the transform spec's blobs (see spec.py)
     result:
       processor, optimized
                 each {"cache_id": getCacheID(), "isNoOp", "hasChannelCrosstalk", "isDynamic",
@@ -58,7 +56,8 @@ def processor_ops(args, blobs):
                 "group": createGroupTransform()}, the objects written out as checks.dump
                 writes them: {"class", "getters", "properties", "uncalled"}, and a group's
                 "children", its transforms written out the same way
-      exception, stage   when OCIO raised: {"type", "message"}, and where: "config",
+      exception, stage   when OCIO or the binding raised (commands.RAISED): {"type",
+                "message"}, and where: "config",
                 "transform", "processor" (as in cpu_apply), "group" (the processor's getters
                 and createGroupTransform), "optimize" (getOptimizedProcessor) or
                 "optimized_group"
@@ -86,7 +85,7 @@ def processor_ops(args, blobs):
     stage, result, out = ["config"], {}, []
     with captured_log() as log:
         try:
-            _, proc = _processor(args, stage)
+            _, proc = _processor(args, stage, blobs)
             stage[0] = "group"
             result["processor"] = _processor_dump(proc, out)
             stage[0] = "optimize"
@@ -94,6 +93,8 @@ def processor_ops(args, blobs):
             stage[0] = "optimized_group"
             result["optimized"] = _processor_dump(optimized, out)
         except RAISED as exc:
+            if not wheel_raised(exc):
+                raise
             result = {"exception": exception_result(exc), "stage": stage[0]}
             out = []
     result["log"] = log

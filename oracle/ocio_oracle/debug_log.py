@@ -20,10 +20,7 @@ import PyOpenColorIO as OCIO
 
 from . import spec
 from .checks import PROCESSOR_KEYS, check_keys, check_member
-from .commands import _processor, captured_log, command, exception_result
-
-# What OCIO raises (in PyOpenColorIO, ExceptionMissingFile doesn't derive from OCIO.Exception).
-RAISED = (OCIO.Exception, OCIO.ExceptionMissingFile)
+from .commands import RAISED, _processor, captured_log, command, exception_result, wheel_raised
 
 
 @command
@@ -37,6 +34,7 @@ def processor_debug_log(args, blobs):
                 BIT_DEPTH_* names (default BIT_DEPTH_F32)
       optimization
                 flags (see spec.flags; default OPTIMIZATION_DEFAULT)
+    request blobs: the transform spec's blobs (see spec.py)
     result:
       processor       the messages logged while the config built the processor
                       (config.getProcessor), each as the logging function received it
@@ -46,9 +44,10 @@ def processor_debug_log(args, blobs):
       level           the logging level in force before the call, which it restores
                       (LoggingLevelToString)
       exception, stage
-                      when OCIO raised: {"type", "message"}, and where: "config", "transform",
-                      "processor" (as in cpu_apply) or "cpu_processor"; "processor" and
-                      "cpu_processor" then hold the messages logged so far
+                      when OCIO or the binding raised (commands.RAISED): {"type", "message"},
+                      and where: "config", "transform", "processor" (as in cpu_apply) or
+                      "cpu_processor"; "processor" and "cpu_processor" then hold the messages
+                      logged so far
     blobs: none
 
     An unknown key, or a bit depth that isn't a BIT_DEPTH_* name, is refused.
@@ -64,8 +63,10 @@ def processor_debug_log(args, blobs):
     try:
         with captured_log() as processor_log:
             try:
-                _, proc = _processor(args, stage)
+                _, proc = _processor(args, stage, blobs)
             except RAISED as exc:
+                if not wheel_raised(exc):
+                    raise
                 result = {"exception": exception_result(exc), "stage": stage[0]}
         result["processor"] = list(processor_log)
         result["cpu_processor"] = []
@@ -76,6 +77,8 @@ def processor_debug_log(args, blobs):
                     cpu = proc.getOptimizedCPUProcessor(in_bd, out_bd, flags)
                     result["cpu_cache_id"] = cpu.getCacheID()
                 except RAISED as exc:
+                    if not wheel_raised(exc):
+                        raise
                     result["exception"] = exception_result(exc)
                     result["stage"] = stage[0]
             result["cpu_processor"] = list(cpu_log)

@@ -25,10 +25,7 @@ import PyOpenColorIO as OCIO
 from . import spec
 from .checks import (PROCESSOR_KEYS, check_bool, check_keys, check_member, check_uint, dump,
                      f32_bits, f64_bits)
-from .commands import _processor, captured_log, command, exception_result
-
-# What OCIO raises (in PyOpenColorIO, ExceptionMissingFile doesn't derive from OCIO.Exception).
-RAISED = (OCIO.Exception, OCIO.ExceptionMissingFile)
+from .commands import RAISED, _processor, captured_log, command, exception_result, wheel_raised
 
 # The GpuShaderDesc settings, in the order the command applies them.
 SETTINGS = ["language", "function_name", "pixel_name", "resource_prefix", "uid",
@@ -192,8 +189,9 @@ def _check_textures(gpu, settings, max_width, log):
     logged = len(log)
     try:
         gpu.extractGpuShaderInfo(probe)
-    except RAISED:
-        pass
+    except RAISED as exc:
+        if not wheel_raised(exc):
+            raise
     finally:
         del log[logged:]
     for texture in probe.getTextures():
@@ -319,6 +317,7 @@ def gpu_shader(args, blobs):
                                     (setDescriptorSetIndex)
                   texture_max_width setTextureMaxWidth
                   allow_texture_1d  setAllowTexture1D
+    request blobs: the transform spec's blobs (see spec.py)
 
     Before extracting, the command refuses the request (it raises, so the call fails) where
     the wheel would do something undefined: an MSL resource prefix whose line feeds make the
@@ -353,7 +352,8 @@ def gpu_shader(args, blobs):
                   dynamic_properties  in order: {"type", "value"}: a double as {"f64": bits}
                                     (exposure, contrast, gamma), a grading value written out
                                     by checks.dump, its floats as bits
-      exception, stage   when OCIO raised: {"type", "message"}, and where: "config",
+      exception, stage   when OCIO or the binding raised (commands.RAISED): {"type",
+                "message"}, and where: "config",
                 "transform", "processor" (as in cpu_apply), "gpu_processor", "shader_desc"
                 (the setters) or "extract"
       log       OCIO's log messages
@@ -365,7 +365,7 @@ def gpu_shader(args, blobs):
     stage, result, out = ["config"], {}, []
     with captured_log() as log:
         try:
-            _, proc = _processor(args, stage)
+            _, proc = _processor(args, stage, blobs)
             stage[0] = "gpu_processor"
             if "optimization" in args:
                 gpu = proc.getOptimizedGPUProcessor(spec.flags(args["optimization"]))
@@ -384,6 +384,8 @@ def gpu_shader(args, blobs):
             gpu.extractGpuShaderInfo(desc)
             result["shader"] = _shader(desc, out)
         except RAISED as exc:
+            if not wheel_raised(exc):
+                raise
             result.update(exception=exception_result(exc), stage=stage[0])
             out = []
     result["log"] = log
