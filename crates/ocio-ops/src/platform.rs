@@ -6,6 +6,7 @@
 //! Environment access goes through an injectable [`EnvProvider`] (PLAN.md §9), so tests can
 //! give OCIO an environment without mutating the process environment.
 
+use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
@@ -44,7 +45,21 @@ pub fn set_env_provider(provider: Option<Arc<dyn EnvProvider>>) {
     *ENV.write().unwrap_or_else(|e| e.into_inner()) = provider;
 }
 
+thread_local! {
+    static THREAD_ENV: RefCell<Option<Arc<dyn EnvProvider>>> = const { RefCell::new(None) };
+}
+
+/// Replaces the environment OCIO reads on this thread only, ahead of [`set_env_provider`]'s
+/// (`None` removes it). For tests that run in parallel threads: the environment one test gives
+/// OCIO is never what another test reads on its own thread.
+pub fn set_thread_env_provider(provider: Option<Arc<dyn EnvProvider>>) {
+    THREAD_ENV.with(|env| *env.borrow_mut() = provider);
+}
+
 fn provider() -> Arc<dyn EnvProvider> {
+    if let Some(provider) = THREAD_ENV.with(|env| env.borrow().clone()) {
+        return provider;
+    }
     ENV.read()
         .unwrap_or_else(|e| e.into_inner())
         .clone()

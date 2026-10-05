@@ -24,6 +24,25 @@ fn injected_environment() {
     set_env_provider(None);
 }
 
+#[test]
+fn a_thread_environment_comes_first_on_its_thread_only() {
+    let _environment = crate::unit_test_log_utils::environment_lock();
+    let env = |value: &str| {
+        let vars = BTreeMap::from([("OCIO_TEST_VAR".to_string(), value.to_string())]);
+        Arc::new(MapEnv(vars))
+    };
+    set_env_provider(Some(env("global")));
+    set_thread_env_provider(Some(env("thread")));
+    assert_eq!(getenv("OCIO_TEST_VAR").as_deref(), Some("thread"));
+    let other = std::thread::spawn(|| getenv("OCIO_TEST_VAR"))
+        .join()
+        .unwrap();
+    assert_eq!(other.as_deref(), Some("global"));
+    set_thread_env_provider(None);
+    assert_eq!(getenv("OCIO_TEST_VAR").as_deref(), Some("global"));
+    set_env_provider(None);
+}
+
 /// Port of `OCIO_ADD_TEST(Platform, string_compare)` @ v2.5.2.
 #[test]
 fn string_compare() {
