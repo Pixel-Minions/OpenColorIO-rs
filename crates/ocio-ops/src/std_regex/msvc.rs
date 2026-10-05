@@ -254,8 +254,6 @@ impl Bitmap {
         self.0[(ch >> 3) as usize] |= 1 << (ch & 7);
     }
 
-    // The matcher (the next chunk of p3-regex) reads it.
-    #[allow(dead_code)]
     pub(super) fn find(&self, ch: u32) -> bool {
         self.0[(ch >> 3) as usize] & (1 << (ch & 7)) != 0
     }
@@ -307,8 +305,6 @@ pub(super) enum NodeData {
         child: Option<NodeId>,
     },
     /// `_Node_rep`.
-    // The matcher (the next chunk of p3-regex) reads them.
-    #[allow(dead_code)]
     Rep {
         min: i32,
         max: i32,
@@ -349,8 +345,6 @@ impl Program {
     }
 
     /// `_Root_node::_Loops`: the number of repetition nodes.
-    // The matcher (the next chunk of p3-regex) reads it.
-    #[allow(dead_code)]
     pub(super) fn loops(&self) -> usize {
         match self.nodes[0].data {
             NodeData::Root { loops, .. } => loops as usize,
