@@ -1217,39 +1217,62 @@ pub fn get_focus_gain(j: f32, analytical_threshold: f32, limit_j_max: f32, focus
 
 /// The J where the compression line through (J, M) meets the J axis.
 ///
+/// In each wheel's form, which differ in more than the operand order. Windows (`sub_1802fcf20`,
+/// which both compressions call) computes the source's `c = -J`. GCC folded the negations in
+/// the copies inlined in Linux's `ACES2::gamut_compress_fwd` (`0x34ee70`) and
+/// `compressGamut<true>` (`0x34ac80`): below the focus J, `det = 4a * J + b * b` and
+/// `(J + J) / (root + b)`; above it, `det = s * s - 4a * c` and `-2c / (-s - root)` with
+/// `s = -b`. The values are the same; the sign of a NaN can differ.
+///
 /// Port of `solve_J_intersect` (Transform.cpp:932-953 @ v2.5.2).
 pub fn solve_j_intersect(j: f32, m: f32, focus_j: f32, max_j: f32, slope_gain: f32) -> f32 {
     let mul = sse_mul;
     let m_scaled = m / slope_gain;
     let a = m_scaled / focus_j;
+    let a4 = mul(a, 4.0);
 
     if j < focus_j {
-        let b = 1.0 - m_scaled;
-        let c = -j;
-        let det = mul(b, b) - mul(mul(4.0, a), c);
-        let root = det.sqrt();
-        mul(-2.0, c) / sse_add(b, root)
+        let b = sse_sub(1.0, m_scaled);
+        if MSVC {
+            let c = -j;
+            let det = sse_sub(mul(b, b), mul(c, a4));
+            mul(c, -2.0) / sse_add(det.sqrt(), b)
+        } else {
+            let det = sse_add(mul(a4, j), mul(b, b));
+            sse_add(j, j) / sse_add(det.sqrt(), b)
+        }
     } else {
-        let b = -sse_add(sse_add(1.0, m_scaled), mul(max_j, a));
-        let c = sse_add(mul(max_j, m_scaled), j);
-        let det = mul(b, b) - mul(mul(4.0, a), c);
-        let root = det.sqrt();
-        mul(-2.0, c) / (b - root)
+        let c = sse_add(mul(m_scaled, max_j), j);
+        if MSVC {
+            let b = -sse_add(mul(a, max_j), sse_add(m_scaled, 1.0));
+            let det = sse_sub(mul(b, b), mul(c, a4));
+            mul(c, -2.0) / sse_sub(b, det.sqrt())
+        } else {
+            let s = sse_add(sse_add(m_scaled, 1.0), mul(a, max_j));
+            let det = sse_sub(mul(s, s), mul(a4, c));
+            mul(c, -2.0) / sse_sub(-s, det.sqrt())
+        }
     }
 }
 
 /// A smooth minimum about the scaled reference, based upon a cubic polynomial.
 ///
+/// The cubic term is `h * h * h * s_scaled` on Windows (`sub_1802fa9a0`) and
+/// `s_scaled * (h * h * h)` on Linux (the copies inlined in `ACES2::gamut_compress_fwd` and
+/// `compressGamut<true>`).
+///
 /// Port of `smin_scaled` (Transform.cpp:955-961 @ v2.5.2).
 #[inline]
 pub fn smin_scaled(a: f32, b: f32, scale_reference: f32) -> f32 {
     let mul = sse_mul;
-    let s_scaled = mul(SMOOTH_CUSPS, scale_reference);
-    let h = std_max(s_scaled - (a - b).abs(), 0.0) / s_scaled;
-    std_min(a, b) - mul(mul(mul(mul(h, h), h), s_scaled), 1.0 / 6.0)
+    let s_scaled = mul(scale_reference, SMOOTH_CUSPS);
+    let h = std_max(sse_sub(s_scaled, sse_sub(a, b).abs()), 0.0) / s_scaled;
+    let h3 = mul(mul(h, h), h);
+    sse_sub(std_min(a, b), mul(mul_swap(h3, s_scaled, !MSVC), 1.0 / 6.0))
 }
 
-/// The slope of the compression vector at the J axis intersection.
+/// The slope of the compression vector at the J axis intersection, as both wheels compute it:
+/// `(intersectJ - focusJ) * direction_scaler`.
 ///
 /// Port of `compute_compression_vector_slope` (Transform.cpp:963-967 @ v2.5.2).
 #[inline]
@@ -1262,13 +1285,28 @@ pub fn compute_compression_vector_slope(
     let direction_scaler = if intersect_j < focus_j {
         intersect_j
     } else {
-        limit_jmax - intersect_j
+        sse_sub(limit_jmax, intersect_j)
     }; // TODO < vs <=
-    sse_mul(direction_scaler, intersect_j - focus_j) / sse_mul(focus_j, slope_gain)
+    sse_mul(sse_sub(intersect_j, focus_j), direction_scaler) / sse_mul(focus_j, slope_gain)
+}
+
+/// How a compiled copy of `estimate_line_and_boundary_intersection_M` orders its products;
+/// every copy computes `shifted_intersection * M_max` first in the numerator.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EstimateOrder {
+    /// `powf(..) * J_intersection_reference` and `J_max - M_max * slope`: Windows' lower hull,
+    /// and both wheels' reach boundary.
+    PowMax,
+    /// `powf(..) * J_intersection_reference` and `J_max - slope * M_max`: Windows' upper hull
+    /// and Linux's lower one.
+    PowSlope,
+    /// `J_intersection_reference * powf(..)` and `J_max + (-slope) * M_max`: Linux's upper hull,
+    /// where GCC folded the negated slope it's given.
+    RefFolded,
 }
 
 /// The approximate M where the line `J = slope * M + J_axis_intersect` meets the boundary
-/// `J = J_max * (M / M_max)^(1/inv_gamma)`.
+/// `J = J_max * (M / M_max)^(1/inv_gamma)`, in the operand orders `order`.
 ///
 /// Port of `estimate_line_and_boundary_intersection_M` (Transform.cpp:969-987 @ v2.5.2).
 #[inline]
@@ -1279,20 +1317,34 @@ pub fn estimate_line_and_boundary_intersection_m(
     j_max: f32,
     m_max: f32,
     j_intersection_reference: f32,
+    order: EstimateOrder,
 ) -> f32 {
     // We calculate a shifted intersection from the original intersection using the inverse
     // of the exponential and the provided reference
     let normalised_j = j_axis_intersect / j_intersection_reference;
-    let shifted_intersection = sse_mul(j_intersection_reference, normalised_j.powf(inv_gamma));
+    let power = normalised_j.powf(inv_gamma);
+    let shifted_intersection = mul_swap(
+        power,
+        j_intersection_reference,
+        order == EstimateOrder::RefFolded,
+    );
 
     // Now we find the M intersection of two lines
     // line from origin to J,M Max       l1(x) = J/M * x
     // line from J Intersect' with slope l2(x) = slope * x + Intersect'
-    sse_mul(shifted_intersection, m_max) / (j_max - sse_mul(slope, m_max))
+    let denominator = match order {
+        EstimateOrder::PowMax => sse_sub(j_max, sse_mul(m_max, slope)),
+        EstimateOrder::PowSlope => sse_sub(j_max, sse_mul(slope, m_max)),
+        EstimateOrder::RefFolded => sse_add(j_max, sse_mul(-slope, m_max)),
+    };
+    sse_mul(shifted_intersection, m_max) / denominator
 }
 
 /// The gamut boundary's M along the compression line: a smooth minimum of the lower and the
 /// (flipped) upper hulls' intersections.
+///
+/// In the wheels' orders (Windows `sub_1802fa9a0`; Linux's copies inlined in
+/// `ACES2::gamut_compress_fwd` and `compressGamut<true>`): see [`EstimateOrder`].
 ///
 /// Port of `find_gamut_boundary_intersection` (Transform.cpp:989-1004 @ v2.5.2).
 pub fn find_gamut_boundary_intersection(
@@ -1304,6 +1356,11 @@ pub fn find_gamut_boundary_intersection(
     slope: f32,
     j_intersect_cusp: f32,
 ) -> f32 {
+    let (lower, upper) = if MSVC {
+        (EstimateOrder::PowMax, EstimateOrder::PowSlope)
+    } else {
+        (EstimateOrder::PowSlope, EstimateOrder::RefFolded)
+    };
     let m_boundary_lower = estimate_line_and_boundary_intersection_m(
         j_intersect_source,
         slope,
@@ -1311,13 +1368,14 @@ pub fn find_gamut_boundary_intersection(
         jm_cusp[0],
         jm_cusp[1],
         j_intersect_cusp,
+        lower,
     );
 
     // The upper hull is flipped and thus 'zeroed' at J_max
     // Also note we negate the slope
-    let f_j_intersect_cusp = j_max - j_intersect_cusp;
-    let f_j_intersect_source = j_max - j_intersect_source;
-    let f_jm_cusp_j = j_max - jm_cusp[0];
+    let f_j_intersect_cusp = sse_sub(j_max, j_intersect_cusp);
+    let f_j_intersect_source = sse_sub(j_max, j_intersect_source);
+    let f_jm_cusp_j = sse_sub(j_max, jm_cusp[0]);
     let m_boundary_upper = estimate_line_and_boundary_intersection_m(
         f_j_intersect_source,
         -slope,
@@ -1325,13 +1383,16 @@ pub fn find_gamut_boundary_intersection(
         f_jm_cusp_j,
         jm_cusp[1],
         f_j_intersect_cusp,
+        upper,
     );
 
     // Smooth minimum between the two calculated values for the M component
     smin_scaled(m_boundary_lower, m_boundary_upper, jm_cusp[1])
 }
 
-/// The Reinhard curve, or its inverse.
+/// The Reinhard curve, or its inverse: `scale` times the curve on Linux, the curve times
+/// `scale` on Windows (`compressGamut<false>` and `<true>`, `sub_1802f88a0` and
+/// `sub_1802f8620`).
 ///
 /// Port of `reinhard_remap<invert>` (Transform.cpp:1006-1017 @ v2.5.2).
 #[inline]
@@ -1341,39 +1402,54 @@ pub fn reinhard_remap<const INVERT: bool>(scale: f32, nd: f32) -> f32 {
         if nd >= 1.0 {
             return scale;
         }
-        return sse_mul(scale, -(nd / (nd - 1.0)));
+        return mul_swap(scale, -(nd / sse_sub(nd, 1.0)), MSVC);
     }
-    sse_mul(scale, nd) / sse_add(1.0, nd)
+    mul_swap(scale, nd, MSVC) / sse_add(nd, 1.0)
 }
 
 /// M compressed (or expanded, inverted) between the gamut and the reach boundaries, above a
 /// threshold.
 ///
+/// Linux's `compressGamut<true>` computes the threshold as `gamut_boundary_M * proportion`
+/// and adds the curve to it; the others compute `proportion * gamut_boundary_M` and add the
+/// threshold to the curve.
+///
 /// Port of `remap_M<invert>` (Transform.cpp:1019-1039 @ v2.5.2).
 #[inline]
 pub fn remap_m<const INVERT: bool>(m: f32, gamut_boundary_m: f32, reach_boundary_m: f32) -> f32 {
+    let linux_inverse = INVERT && !MSVC;
     let boundary_ratio = gamut_boundary_m / reach_boundary_m;
     let proportion = std_max(boundary_ratio, COMPRESSION_THRESHOLD);
-    let threshold = sse_mul(proportion, gamut_boundary_m);
+    let threshold = mul_swap(proportion, gamut_boundary_m, linux_inverse);
 
     if m <= threshold || proportion >= 1.0 {
         return m;
     }
 
     // Translate to place threshold at zero
-    let m_offset = m - threshold;
-    let gamut_offset = gamut_boundary_m - threshold;
-    let reach_offset = reach_boundary_m - threshold;
+    let m_offset = sse_sub(m, threshold);
+    let gamut_offset = sse_sub(gamut_boundary_m, threshold);
+    let reach_offset = sse_sub(reach_boundary_m, threshold);
 
-    let scale = reach_offset / ((reach_offset / gamut_offset) - 1.0);
+    let scale = reach_offset / sse_sub(reach_offset / gamut_offset, 1.0);
     let nd = m_offset / scale;
 
     // shift back to absolute
-    sse_add(threshold, reinhard_remap::<INVERT>(scale, nd))
+    add_swap(
+        threshold,
+        reinhard_remap::<INVERT>(scale, nd),
+        !linux_inverse,
+    )
 }
 
 /// The gamut compression of a JMh along its compression line, with `Jx` the J that sets the
 /// focus gain.
+///
+/// In the wheels' orders: Windows `sub_1802f88a0` (`<false>`) and `sub_1802f8620` (`<true>`),
+/// Linux `compressGamut<true>` (`0x34ac80`) and the copy of `<false>` inlined in
+/// `ACES2::gamut_compress_fwd` (`0x34ee70`); the compressed J is
+/// `remapped_M * gamut_slope + J_intersect_source` on Windows,
+/// `gamut_slope * remapped_M + J_intersect_source` on Linux.
 ///
 /// Port of `compressGamut<invert>` (Transform.cpp:1041-1070 @ v2.5.2).
 pub fn compress_gamut<const INVERT: bool>(
@@ -1425,12 +1501,13 @@ pub fn compress_gamut<const INVERT: bool>(
         sr.limit_j_max,
         sr.reach_max_m,
         sr.limit_j_max,
+        EstimateOrder::PowMax,
     );
 
     let remapped_m = remap_m::<INVERT>(m, gamut_boundary_m, reach_boundary_m);
 
     [
-        sse_add(j_intersect_source, sse_mul(remapped_m, gamut_slope)),
+        sse_add(mul_swap(remapped_m, gamut_slope, !MSVC), j_intersect_source),
         remapped_m,
         h,
     ]

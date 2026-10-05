@@ -89,6 +89,13 @@ impl Params for Fixed {
                 Slot::new("thr_yellow", p, B),
                 Slot::new("power", p, RGB),
             ],
+            // ACES 2.0: only the peak luminance is generated. Primaries with a NaN coordinate
+            // make the wheel's hue table code write past its arrays, and its process stops
+            // (U-32); the port's refusal is checked in aces2/transform_tests.rs.
+            (FixedFunctionStyle::AcesOutputTransform20, 9)
+            | (FixedFunctionStyle::AcesGamutCompress20, 9) => {
+                vec![Slot::new("peak_luminance", p, RGB)]
+            }
             _ => (0..self.params.len())
                 .map(|i| Slot::new(format!("params[{i}]"), p, RGB))
                 .collect(),
@@ -468,19 +475,53 @@ const AP0: [f64; 8] = [
     0.7347, 0.2653, 0.0000, 1.0000, 0.0001, -0.0770, 0.32168, 0.33767,
 ];
 
+/// A peak luminance and limiting primaries, as the ACES 2.0 output transform and gamut
+/// compression take them.
+fn peak_and(peak: f64, primaries: &[f64; 8]) -> Vec<f64> {
+    std::iter::once(peak)
+        .chain(primaries.iter().copied())
+        .collect()
+}
+
 #[test]
 fn aces_2_styles_match_the_wheel() {
     use FixedFunctionStyle::*;
-    // The parameter of upstream's aces_tonescale_compress_20
-    // (tests/cpu/ops/fixedfunction/FixedFunctionOpCPU_tests.cpp @ v2.5.2).
+    // The parameters of upstream's aces_output_transform_20, aces_gamut_map_20 and
+    // aces_tonescale_compress_20 (tests/cpu/ops/fixedfunction/FixedFunctionOpCPU_tests.cpp @
+    // v2.5.2).
+    let ot = Case::new(
+        "AcesOutputTransform20 1000 P3-D65",
+        Fixed::new(
+            AcesOutputTransform20,
+            &peak_and(1000.0, &ACES2_PRIMARIES[1]),
+        ),
+    );
+    let gamut = Case::new(
+        "AcesGamutCompress20 1000 P3-D65",
+        Fixed::new(AcesGamutCompress20, &peak_and(1000.0, &ACES2_PRIMARIES[1])),
+    );
     let tonescale = Case::new(
         "AcesTonescaleCompress20 1000",
         Fixed::new(AcesTonescaleCompress20, &[1000.0]),
     );
     let rgb_to_jmh = Case::new("AcesRgbToJmh20 AP0", Fixed::new(AcesRgbToJmh20, &AP0));
-    let bases = vec![tonescale.clone(), rgb_to_jmh.clone()];
-    let mut cases = vec![tonescale, rgb_to_jmh];
-    for peak in [100.0, 4000.0, 108.0, 48.0, 500.0] {
+    let bases = vec![
+        ot.clone(),
+        gamut.clone(),
+        tonescale.clone(),
+        rgb_to_jmh.clone(),
+    ];
+    let mut cases = vec![ot, gamut, tonescale, rgb_to_jmh];
+    for (peak, primaries) in [(100.0, 0), (4000.0, 2), (108.0, 3), (48.0, 4), (500.0, 0)] {
+        let params = peak_and(peak, &ACES2_PRIMARIES[primaries]);
+        cases.push(Case::new(
+            format!("AcesOutputTransform20 {peak} {primaries}"),
+            Fixed::new(AcesOutputTransform20, &params),
+        ));
+        cases.push(Case::new(
+            format!("AcesGamutCompress20 {peak} {primaries}"),
+            Fixed::new(AcesGamutCompress20, &params),
+        ));
         cases.push(Case::new(
             format!("AcesTonescaleCompress20 {peak}"),
             Fixed::new(AcesTonescaleCompress20, &[peak]),
@@ -499,6 +540,10 @@ fn aces_2_styles_match_the_wheel() {
         cases.push(Case::new(
             format!("refused AcesTonescaleCompress20 peak {peak}"),
             Fixed::new(AcesTonescaleCompress20, &[peak]),
+        ));
+        cases.push(Case::new(
+            format!("refused AcesOutputTransform20 peak {peak}"),
+            Fixed::new(AcesOutputTransform20, &peak_and(peak, &ACES2_PRIMARIES[0])),
         ));
     }
     cases.push(Case::new(
@@ -571,6 +616,11 @@ fn nan_combinations_match_the_wheel() {
         Fixed::new(XyzToLuv, &[]),
         Fixed::new(AcesTonescaleCompress20, &[1000.0]),
         Fixed::new(AcesRgbToJmh20, &AP0),
+        Fixed::new(
+            AcesOutputTransform20,
+            &peak_and(1000.0, &ACES2_PRIMARIES[1]),
+        ),
+        Fixed::new(AcesGamutCompress20, &peak_and(1000.0, &ACES2_PRIMARIES[1])),
     ];
     let family = FixedFamily {
         name: "NaN combinations",
