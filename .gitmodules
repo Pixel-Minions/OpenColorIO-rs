@@ -1,3 +1,6 @@
 [submodule "upstream/OpenColorIO"]
 	path = upstream/OpenColorIO
 	url = https://github.com/AcademySoftwareFoundation/OpenColorIO
+[submodule "upstream/yaml-cpp"]
+	path = upstream/yaml-cpp
+	url = https://github.com/jbeder/yaml-cpp
