@@ -87,10 +87,13 @@ impl LogCameraTransform {
             Ok(())
         })();
         checked.map_err(|ex| {
-            Exception::new(format!(
-                "LogCameraTransform validation failed: {}",
-                ex.message()
-            ))
+            Exception::new(
+                [
+                    b"LogCameraTransform validation failed: ".as_slice(),
+                    ex.what(),
+                ]
+                .concat(),
+            )
         })
     }
 

@@ -75,10 +75,9 @@ impl GroupTransform {
     /// Port of `GroupTransformImpl::validate` (GroupTransform.cpp:56-73 @ v2.5.2).
     pub fn validate(&self) -> Result<()> {
         if let Err(ex) = validate_direction(self.dir) {
-            return Err(Exception::new(format!(
-                "GroupTransform validation failed: {}",
-                ex.message()
-            )));
+            return Err(Exception::new(
+                [b"GroupTransform validation failed: ".as_slice(), ex.what()].concat(),
+            ));
         }
 
         for val in &self.transforms {

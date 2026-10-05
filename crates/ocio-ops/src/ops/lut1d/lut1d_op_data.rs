@@ -636,10 +636,9 @@ impl Lut1DOpData {
         }
 
         if let Err(e) = self.get_array().validate() {
-            return Err(Exception::new(format!(
-                "1D LUT content array issue: {}",
-                e.message()
-            )));
+            return Err(Exception::new(
+                [b"1D LUT content array issue: ".as_slice(), e.what()].concat(),
+            ));
         }
 
         // If isHalfDomain is set, we need to make sure we have 65536 entries.

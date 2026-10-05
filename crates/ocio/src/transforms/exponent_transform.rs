@@ -95,10 +95,13 @@ impl ExponentTransform {
     pub fn validate(&self) -> Result<()> {
         let checked = validate_direction(self.direction()).and_then(|()| self.data.validate());
         checked.map_err(|ex| {
-            Exception::new(format!(
-                "ExponentTransform validation failed: {}",
-                ex.message()
-            ))
+            Exception::new(
+                [
+                    b"ExponentTransform validation failed: ".as_slice(),
+                    ex.what(),
+                ]
+                .concat(),
+            )
         })
     }
 

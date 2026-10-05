@@ -109,10 +109,7 @@ impl Lut1DTransform {
             self.data.validate()
         })();
         checked.map_err(|ex| {
-            Exception::new(format!(
-                "Lut1DTransform validation failed: {}",
-                ex.message()
-            ))
+            Exception::new([b"Lut1DTransform validation failed: ".as_slice(), ex.what()].concat())
         })
     }
 

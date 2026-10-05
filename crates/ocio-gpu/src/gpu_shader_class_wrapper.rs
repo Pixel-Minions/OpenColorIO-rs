@@ -326,7 +326,7 @@ impl MetalShaderClassWrapper {
             let mut message =
                 b"Struct name must not start with a digit. Invalid className passed in: ".to_vec();
             message.extend_from_slice(&self.class_name);
-            return Err(Exception::new(String::from_utf8_lossy(&c_str(message))));
+            return Err(Exception::new(message));
         }
         Ok(())
     }

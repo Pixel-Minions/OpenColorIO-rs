@@ -136,10 +136,7 @@ impl RangeTransform {
             Ok(())
         })();
         checked.map_err(|ex| {
-            Exception::new(format!(
-                "RangeTransform validation failed: {}",
-                ex.message()
-            ))
+            Exception::new([b"RangeTransform validation failed: ".as_slice(), ex.what()].concat())
         })
     }
 
