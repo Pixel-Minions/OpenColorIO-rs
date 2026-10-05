@@ -166,3 +166,7 @@ impl LookParseResult {
 #[cfg(test)]
 #[path = "look_parse_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "look_parse_oracle_tests.rs"]
+mod oracle_tests;
