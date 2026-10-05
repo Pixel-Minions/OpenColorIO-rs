@@ -23,9 +23,28 @@ import PyOpenColorIO as OCIO
 
 from . import gpu, image, processor_ops, spec
 from .checks import check_keys, check_member
-from .commands import DTYPES, captured_log, command
-from .config_api import (REPORTED, RequestError, directory, environment, make_config, raised,
-                         run_calls, text)
+from .commands import DTYPES, command
+from .config_api import (REPORTED, LogCapture, RequestError, directory, environment,
+                         make_config, raised, run_calls, text, value_out)
+
+
+def _failed(exc):
+    """A part's failure: {"undecodable": hex} or {"exception": ...}, as config_api reports."""
+    if isinstance(exc, UnicodeDecodeError):
+        return {"undecodable": bytes(exc.object).hex()}
+    return {"exception": raised(exc)}
+
+
+def _helper(fn, *args):
+    """fn(*args), a helper of another oracle module. Its ValueError is that module's refusal
+    (checks.dump's depth, gpu_shader's texture widths and grading values), so the request's:
+    RequestError. What the library raises inside it passes through."""
+    try:
+        return fn(*args)
+    except (OCIO.Exception, OCIO.ExceptionMissingFile, UnicodeDecodeError):
+        raise
+    except ValueError as exc:
+        raise RequestError(f"{getattr(fn, '__name__', fn)}: {exc}") from exc
 
 # Overload name -> (its arguments' kinds, whether a context variant exists). The kinds:
 # "name" (text), "color_space" (a name, looked up with getColorSpace: a name it doesn't find
@@ -78,7 +97,7 @@ def _check_overload(args):
     return name, values
 
 
-def _context(config, spec_, objects):
+def _context(config, spec_, objects, log):
     """The context a request gives: {"base": "current" (a copy of the config's current
     context, the default) or "new" (Context()), "calls": calls on it (config_api.run_calls,
     on "context")}. Returns the calls' results."""
@@ -90,7 +109,7 @@ def _context(config, spec_, objects):
         objects["context"] = OCIO.Context()
     else:
         raise RequestError(f"context base {base!r}: current or new")
-    return run_calls(spec_.get("calls", []), objects, "context")
+    return run_calls(spec_.get("calls", []), objects, "context", log)
 
 
 def _bit_depth(key, args):
@@ -104,13 +123,13 @@ def _ops(proc, args, out):
            spec.flags(args.get("optimization")))
     stage, result = ["group"], {}
     try:
-        result["processor"] = processor_ops._processor_dump(proc, out)
+        result["processor"] = _helper(processor_ops._processor_dump, proc, out)
         stage[0] = "optimize"
         optimized = proc.getOptimizedProcessor(*key)
         stage[0] = "optimized_group"
-        result["optimized"] = processor_ops._processor_dump(optimized, out)
+        result["optimized"] = _helper(processor_ops._processor_dump, optimized, out)
     except REPORTED as exc:
-        result = {"exception": raised(exc), "stage": stage[0]}
+        result = {**_failed(exc), "stage": stage[0]}
     return result
 
 
@@ -152,7 +171,7 @@ def _cpu(proc, args, blobs, out):
         result = {"cpu_cache_id": cpu.getCacheID(), "pixels": len(out)}
         out.append(dst.tobytes())
     except REPORTED as exc:
-        result = {"exception": raised(exc), "stage": stage[0]}
+        result = {**_failed(exc), "stage": stage[0]}
     return result
 
 
@@ -206,7 +225,7 @@ def _image(proc, args, blobs, out):
     except (*image.RAISED, TypeError) as exc:
         if isinstance(exc, TypeError) and not constructing:
             raise
-        result.update(exception=raised(exc), stage=stage[0])
+        result.update(**_failed(exc), stage=stage[0])
         if stage[0] == "image":
             result["image"] = len(descs)
     result["buffers"] = list(range(first, first + len(buffers)))
@@ -215,8 +234,10 @@ def _image(proc, args, blobs, out):
     return result
 
 
-def _gpu(proc, args, log, out):
-    """gpu_shader's result for the processor."""
+def _gpu(proc, args, log, kept, out):
+    """gpu_shader's result for the processor. The probe extraction gpu_shader makes to check the
+    texture widths logs what the real one logs again: its lines are dropped from `log` (what
+    was logged before it is moved to `kept`)."""
     check_keys("gpu", args, {"optimization", "shader"})
     settings = args.get("shader") or {}
     gpu._check_settings(settings)
@@ -233,12 +254,14 @@ def _gpu(proc, args, log, out):
         })
         stage[0] = "shader_desc"
         desc = gpu._shader_desc(settings)
-        gpu._check_textures(processor, settings, desc.getTextureMaxWidth(), log)
+        kept.extend(log.take())
+        _helper(gpu._check_textures, processor, settings, desc.getTextureMaxWidth(), [])
+        log.discard()
         stage[0] = "extract"
         processor.extractGpuShaderInfo(desc)
-        result["shader"] = gpu._shader(desc, shader_blobs)
+        result["shader"] = _helper(gpu._shader, desc, shader_blobs)
     except REPORTED as exc:
-        return {**result, "exception": raised(exc), "stage": stage[0]}
+        return {**result, **_failed(exc), "stage": stage[0]}
     # gpu._shader numbers its blobs from 0: move them after the response's earlier blobs.
     base = len(out)
     shader = result["shader"]
@@ -286,10 +309,11 @@ def config_processor(args, blobs):
     result:
       dir           the request's directory
       config        null, or {"exception"} (nothing else runs then)
-      config_log    what OCIO logged while making the config
+      config_log    what OCIO logged while making the config: [{"bytes": hex}] (config_api)
       context       the context calls' results, each with its log (with a context; when one
                     raised, nothing else runs)
-      processor     {"cache_id"}, or {"exception"} when getProcessor raised (no part runs then)
+      processor     {"cache_id": {"bytes": hex}}, or {"exception"} or {"undecodable"} when
+                    getProcessor failed (no part runs then)
       ops           as processor_ops: {"processor", "optimized"} or {"exception", "stage"}
       cpu           per entry, as cpu_apply: {"cpu_cache_id", "pixels": blob index} or
                     {"exception", "stage"}
@@ -298,7 +322,9 @@ def config_processor(args, blobs):
                     absolute
       gpu           as gpu_shader: {"gpu_cache_id", "gpu_processor", "shader"} with absolute
                     blob indices, or {"exception", "stage"}
-      log           what OCIO logged from getProcessor on
+      config_context_cache_id   the config's current context's cache ID after the parts
+                    ({"bytes": hex}): the context passed is a copy, which leaves it alone
+      log           what OCIO logged from getProcessor on: [{"bytes": hex}]
     blobs: the parts' blobs, in the order ops, cpu, image, gpu
 
     The parts refuse what their commands refuse (image_apply's reads outside a buffer,
@@ -310,43 +336,46 @@ def config_processor(args, blobs):
     cpu_parts = args.get("cpu", [])
     if not isinstance(cpu_parts, list):
         raise RequestError("cpu must be a list")
+    if "context" in args:
+        check_keys("context", args["context"], {"base", "calls"})
     result, out = {}, []
-    with directory(args.get("files")) as root, environment(args.get("env")):
+    with directory(args.get("files")) as root, environment(args.get("env")), \
+            LogCapture() as log:
         result["dir"] = root
         objects = {}
-        with captured_log() as log:
-            try:
-                objects["config"] = make_config(args.get("config", "raw"))
-                result["config"] = None
-            except REPORTED as exc:
-                result["config"] = {"exception": raised(exc)}
-        result["config_log"] = list(log)
+        try:
+            objects["config"] = make_config(args.get("config", "raw"))
+            result["config"] = None
+        except REPORTED as exc:
+            result["config"] = _failed(exc)
+        result["config_log"] = log.take()
         if "config" not in objects:
             return result, out
         config = objects["config"]
         if "context" in args:
-            result["context"] = _context(config, args["context"], objects)
-            if any("exception" in c for c in result["context"]):
+            result["context"] = _context(config, args["context"], objects, log)
+            if any("result" not in c for c in result["context"]):
                 return result, out
         kwargs = _arguments(config, overload, values)
-        with captured_log() as log:
-            try:
-                if "context" in args:
-                    proc = config.getProcessor(context=objects["context"], **kwargs)
-                else:
-                    proc = config.getProcessor(**kwargs)
-                result["processor"] = {"cache_id": proc.getCacheID()}
-            except REPORTED as exc:
-                result["processor"] = {"exception": raised(exc)}
-                proc = None
-            if proc is not None:
-                if "ops" in args:
-                    result["ops"] = _ops(proc, args["ops"], out)
-                if cpu_parts:
-                    result["cpu"] = [_cpu(proc, part, blobs, out) for part in cpu_parts]
-                if "image" in args:
-                    result["image"] = _image(proc, args["image"], blobs, out)
-                if "gpu" in args:
-                    result["gpu"] = _gpu(proc, args["gpu"], log, out)
-        result["log"] = list(log)
+        kept = []
+        try:
+            if "context" in args:
+                proc = config.getProcessor(context=objects["context"], **kwargs)
+            else:
+                proc = config.getProcessor(**kwargs)
+            result["processor"] = {"cache_id": value_out(proc.getCacheID())}
+        except REPORTED as exc:
+            result["processor"] = _failed(exc)
+            proc = None
+        if proc is not None:
+            if "ops" in args:
+                result["ops"] = _ops(proc, args["ops"], out)
+            if cpu_parts:
+                result["cpu"] = [_cpu(proc, part, blobs, out) for part in cpu_parts]
+            if "image" in args:
+                result["image"] = _image(proc, args["image"], blobs, out)
+            if "gpu" in args:
+                result["gpu"] = _gpu(proc, args["gpu"], log, kept, out)
+        result["config_context_cache_id"] = value_out(config.getCurrentContext().getCacheID())
+        result["log"] = kept + log.take()
     return result, out

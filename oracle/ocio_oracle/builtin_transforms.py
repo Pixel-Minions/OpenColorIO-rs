@@ -17,26 +17,22 @@ values.
 import PyOpenColorIO as OCIO
 
 from .checks import check_keys
-from .commands import captured_log, command
-from .config_api import REPORTED, RequestError, raised, text
+from .commands import command
+from .config_api import LogCapture, RequestError, attempt, call_out, text, value_out
 
 
 def _set_style(style):
     """A BuiltinTransform after setStyle(style): its getters, repr() and validate(), or what
-    setStyle raised."""
+    setStyle raised (as config_api reports a call)."""
     transform = OCIO.BuiltinTransform()
-    try:
-        transform.setStyle(style)
-    except REPORTED as exc:
-        return {"exception": raised(exc)}
-    out = {"getStyle": transform.getStyle(), "getDescription": transform.getDescription(),
-           "repr": repr(transform)}
-    try:
-        transform.validate()
-        out["validate"] = None
-    except REPORTED as exc:
-        out["validate"] = {"exception": raised(exc)}
-    return out
+    done = call_out(transform.setStyle, style)
+    if "result" not in done:
+        return done
+    validated = call_out(transform.validate)
+    return {"getStyle": attempt(transform.getStyle),
+            "getDescription": attempt(transform.getDescription),
+            "repr": attempt(lambda: repr(transform)),
+            "validate": None if "result" in validated else validated}
 
 
 @command
@@ -47,11 +43,13 @@ def builtin_transform_names(args, blobs):
       styles    optional: [style, ...] (text or {"bytes": hex}), each set on a new
                 BuiltinTransform with setStyle, which looks it up case-insensitively
     result:
-      builtins  BuiltinTransformRegistry().getBuiltins(), in order: [[style, description], ...]
-      count     len(BuiltinTransformRegistry())
-      styles    per style given, in order: {"getStyle", "getDescription", "repr", "validate":
-                null or {"exception"}}, or {"exception"} when setStyle raised
-      log       what OCIO logged
+      builtins  BuiltinTransformRegistry().getBuiltins(), in order: [[style, description], ...],
+                each string {"bytes": hex}, read entry by entry (config_api.value_out)
+      count     len(BuiltinTransformRegistry()), getNumBuiltins()
+      styles    per style given, in order: {"getStyle", "getDescription", "repr" (each
+                {"bytes": hex}), "validate": null or {"exception"}}, or {"exception"} or
+                {"undecodable"} when setStyle failed
+      log       what OCIO logged: [{"bytes": hex}]
     blobs: none
 
     An unknown key, or a style that isn't text or {"bytes": hex}, is refused.
@@ -61,11 +59,10 @@ def builtin_transform_names(args, blobs):
     if not isinstance(styles, list):
         raise RequestError(f"styles must be a list, not {styles!r}")
     styles = [text(f"styles[{i}]", s) for i, s in enumerate(styles)]
-    with captured_log() as log:
+    with LogCapture() as log:
         registry = OCIO.BuiltinTransformRegistry()
-        result = {"builtins": [[style, description]
-                               for style, description in registry.getBuiltins()],
+        result = {"builtins": value_out(registry.getBuiltins()),
                   "count": len(registry),
                   "styles": [_set_style(style) for style in styles]}
-    result["log"] = list(log)
+        result["log"] = log.take()
     return result, []

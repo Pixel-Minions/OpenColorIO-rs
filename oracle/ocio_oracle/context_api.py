@@ -22,10 +22,8 @@ values.
 
 import PyOpenColorIO as OCIO
 
-from .checks import check_keys
-from .commands import captured_log, command
-from .config_api import (REPORTED, RequestError, directory, environment, make_config, raised,
-                         run_calls, value_in)
+from .commands import command
+from .config_api import RequestError, make_config, run_request, value_in
 
 
 def make_context(source, objects):
@@ -43,7 +41,8 @@ def make_context(source, objects):
         if kind == "new":
             if not isinstance(value, dict):
                 raise RequestError(f"context {{'new': ...}} takes an object, not {value!r}")
-            return OCIO.Context(**{k: value_in(v, objects) for k, v in value.items()})
+            kwargs = {k: value_in(v, objects) for k, v in value.items()}
+            return OCIO.Context(**kwargs)
         if kind == "config":
             objects["config"] = make_config(value)
             return objects["config"].getCurrentContext()
@@ -63,26 +62,13 @@ def context_calls(args, blobs):
       calls     the calls (see config_api.run_calls), on "context" unless they say otherwise
     result:
       dir           the temporary directory's absolute path
-      context       null, or {"exception"} when making the context (or its config) raised; no
-                    call runs then
-      context_log   what OCIO logged while making it
-      calls         per call {"result"} or {"exception"}, and "log" (see run_calls)
+      context       null, or {"exception"} or {"undecodable"} when making the context (or its
+                    config) failed; no call runs then
+      context_log   what OCIO logged while making it: [{"bytes": hex}]
+      calls         per call {"result"}, {"exception"} or {"undecodable"}, and "log" (see
+                    run_calls)
     blobs: none
 
     A request it can't run exactly is refused, as config_calls refuses it.
     """
-    check_keys("context_calls", args, {"context", "env", "files", "calls"})
-    result = {}
-    with directory(args.get("files")) as root, environment(args.get("env")):
-        result["dir"] = root
-        objects = {}
-        with captured_log() as log:
-            try:
-                objects["context"] = make_context(args.get("context"), objects)
-                result["context"] = None
-            except REPORTED as exc:
-                result["context"] = {"exception": raised(exc)}
-        result["context_log"] = list(log)
-        result["calls"] = (run_calls(args.get("calls", []), objects, "context")
-                           if "context" in objects else [])
-    return result, []
+    return run_request(args, "context", make_context), []
