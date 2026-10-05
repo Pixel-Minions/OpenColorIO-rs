@@ -95,7 +95,10 @@ milestone M1:
   ([`docs/cards/phase3.md`](docs/cards/phase3.md)).
 
 **Merged so far in Phases 2 and 3:** the fixed functions' op data, the ACES 1.x fixed-function
-renderers (red modifier, glow, dark-to-dim and gamut compression) and FixedFunctionTransform.
+renderers (red modifier, glow, dark-to-dim and gamut compression) and FixedFunctionTransform;
+the config transforms ColorSpaceTransform, DisplayViewTransform, LookTransform, FileTransform
+and BuiltinTransform with its registry (their classes and text; their processors come with the
+config).
 Each also went through an independent review before merging.
 
 **Done:** everything below is bit-exact against the official library on Windows and Linux, in
@@ -169,7 +172,7 @@ instead. Every such case, and every upstream bug the port reproduces, is listed 
 
 | Suite | Ported | Total |
 |---|---:|---:|
-| C++ | 287 | 1,191 |
+| C++ | 295 | 1,191 |
 | GPU | 0 | 264 |
 | Python | 0 | 384 |
 
