@@ -158,7 +158,8 @@ note = "1.8g: GenericCache and ProcessorCache, keyed by std::hash<std::string> (
 path = "src/OpenColorIO/ColorSpace.cpp"
 kind = "src"
 target = ["crates/ocio/src/color_space.rs"]
-status = "todo"
+status = "done"
+note = "p3-model-objects (3.4a): the class and its operator<<; BoolToString (ParseUtils.cpp:101-104) is a crate-private copy in color_space.rs until p3-context's parse_utils lands"
 
 [[file]]
 path = "src/OpenColorIO/ColorSpaceSet.cpp"
@@ -593,7 +594,8 @@ status = "todo"
 path = "src/OpenColorIO/TokensManager.h"
 kind = "src"
 target = ["crates/ocio/src/tokens_manager.rs"]
-status = "todo"
+status = "done"
+note = "p3-model-objects (3.4a)"
 
 [[file]]
 path = "src/OpenColorIO/Transform.cpp"
@@ -4197,7 +4199,8 @@ status = "todo"
 path = "tests/cpu/ColorSpace_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/color_space_tests.rs"]
-status = "todo"
+status = "partial"
+note = "p3-model-objects (3.4a): basic, alias, category, interop_id, amf_transform_ids, icc_profile_name, unknown_interchange_attrib; color_space_serialize, interop_id_serialization, icc_profile_name_serialization come with 3.7b, use_alias with 3.3j, is_colorspace_linear with p3-after-p2 (Lut3D), the two processor_to_known_colorspace tests with ConfigUtils (Phase 9)"
 
 [[file]]
 path = "tests/cpu/ConfigUtils_tests.cpp"

@@ -6,12 +6,14 @@
 #![forbid(unsafe_code)]
 
 pub mod caching;
+pub mod color_space;
 pub mod config;
 pub mod config_io_proxy;
 pub mod context;
 pub mod context_variable_utils;
 pub mod path_utils;
 pub mod processor;
+pub(crate) mod tokens_manager;
 pub mod transform;
 pub mod transforms;
 pub mod yaml_cpp;
@@ -19,13 +21,15 @@ pub mod yaml_cpp;
 #[cfg(test)]
 mod test_env;
 
+pub use color_space::ColorSpace;
 pub use config::Config;
 pub use context::Context;
 pub use ocio_ops::exception::{Exception, ExceptionKind, Result};
 pub use ocio_ops::format_metadata::FormatMetadataImpl as FormatMetadata;
 pub use ocio_ops::open_color_types::{
-    Allocation, BitDepth, CdlStyle, FixedFunctionStyle, Lut1DHueAdjust, NegativeStyle,
-    OptimizationFlags, TransformDirection,
+    Allocation, BitDepth, CdlStyle, ColorSpaceDirection, FixedFunctionStyle, Lut1DHueAdjust,
+    NegativeStyle, OptimizationFlags, ReferenceSpaceType, TransformDirection,
+    ViewTransformDirection,
 };
 pub use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 pub use ocio_ops::platform::{

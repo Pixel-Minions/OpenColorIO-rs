@@ -65,6 +65,40 @@ pub fn logging_level_from_string(s: Option<&[u8]>) -> LoggingLevel {
     }
 }
 
+/// The reference space a color space or a view transform converts to and from: the scene's
+/// or the display's.
+///
+/// Port of `ReferenceSpaceType` (include/OpenColorIO/OpenColorTypes.h:310-314 @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ReferenceSpaceType {
+    /// `REFERENCE_SPACE_SCENE`: the main scene reference space.
+    Scene = 0,
+    /// `REFERENCE_SPACE_DISPLAY`: the reference space for display color spaces.
+    Display,
+}
+
+/// Which of a color space's transforms: to its reference space, or from it.
+///
+/// Port of `ColorSpaceDirection` (include/OpenColorIO/OpenColorTypes.h:343-347 @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ColorSpaceDirection {
+    /// `COLORSPACE_DIR_TO_REFERENCE`.
+    ToReference = 0,
+    /// `COLORSPACE_DIR_FROM_REFERENCE`.
+    FromReference,
+}
+
+/// Which of a view transform's transforms: to its reference space, or from it.
+///
+/// Port of `ViewTransformDirection` (include/OpenColorIO/OpenColorTypes.h:349-353 @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ViewTransformDirection {
+    /// `VIEWTRANSFORM_DIR_TO_REFERENCE`.
+    ToReference = 0,
+    /// `VIEWTRANSFORM_DIR_FROM_REFERENCE`.
+    FromReference,
+}
+
 /// Port of `TransformDirection` (include/OpenColorIO/OpenColorTypes.h:355-359 @ v2.5.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum TransformDirection {
