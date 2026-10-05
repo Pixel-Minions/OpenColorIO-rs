@@ -107,12 +107,13 @@ owner item D5).
 | Chunk | Upstream | Rust (`ocio/src/...`) | Port tests |
 |---|---|---|---|
 | 3.1a | `transforms/ColorSpaceTransform.cpp`: the class (121), `DisplayViewTransform.cpp`: the class (136), `LookTransform.cpp`: the class (154) | `transforms/color_space_transform.rs`, `display_view_transform.rs`, `look_transform.rs` | `ColorSpaceTransform_tests.cpp` `basic`, `DisplayViewTransform_tests.cpp` `basic`; oracle `transform_text` |
-| 3.1b | `transforms/BuiltinTransform.cpp/.h` (100), `transforms/builtins/BuiltinTransformRegistry.cpp/.h` (171): the registry, every entry's name and description in upstream's order (each builtin file's `RegisterAll`, the ACES 2.0 table included), the op creators as "not ported yet" | `transforms/builtin_transform.rs`, `transforms/builtins/builtin_transform_registry.rs` | `BuiltinTransform_tests.cpp` `creation`, `access`; `BuiltinTransformRegistry_tests.cpp` `basic`, `aces`; oracle `builtin_transform_names` (O3.6) |
+| 3.1b | `transforms/BuiltinTransform.cpp/.h` (100), `transforms/builtins/BuiltinTransformRegistry.cpp/.h` (171): the registry, every entry's name and description in upstream's order (each builtin file's `RegisterAll`, the ACES 2.0 table included), the op creators as "not ported yet" | `transforms/builtin_transform.rs`, `transforms/builtins/builtin_transform_registry.rs` | `BuiltinTransform_tests.cpp` `creation`, `access`; `BuiltinTransformRegistry_tests.cpp` `basic` (`aces` builds ops: with 3.2g); oracle `builtin_transform_names` (O3.6) |
 | 3.1c | `transforms/FileTransform.cpp`: the class only (148): source, CCC id, CDL style, interpolation, validate, `operator<<`. The format registry, loading and `BuildFileTransformOps` are WP 4.1 | `transforms/file_transform.rs` | `FileTransform_tests.cpp` `basic`, `validate` |
 
 - Each class lands with its `Transform` arms (`transform_type`, `direction`, `validate`,
   `Display`). Its `build_ops` arm is "not ported yet" until its builder lands (WP 3.2).
-- `LookTransform_tests.cpp` `basic` uses a fixed function: it lands in `p3-after-p2`.
+- `LookTransform_tests.cpp` `basic` needs no fixed function (its file includes their headers, but
+  the test uses none): it lands with 3.1a.
 
 ## WP 3.2: op builders and the built-in transforms (`ocio`)
 
@@ -122,10 +123,14 @@ owner item D5).
 | 3.2b | `transforms/LookTransform.cpp`: `BuildLookOps`, look options and fallback, `CollectContextVariables` (234) | `transforms/look_transform.rs` | `LookTransform_tests.cpp` `inverse_look_transform`; `Config_tests.cpp` `look_is_noop` |
 | 3.2c | `transforms/DisplayViewTransform.cpp`: `BuildDisplayOps`, view transforms, looks, data bypass, `CollectContextVariables` (310) | `transforms/display_view_transform.rs` | `DisplayViewTransform_tests.cpp` `build_ops_with_looks`, `config_load`, `apply_fwd_inv` |
 | 3.2d | `Config.cpp:4679-4790`: the ten `getProcessor` overloads by names, color spaces, display and view, and named transform (110); the used context's cache ID in the processor cache key (`Config.cpp:4791-4880`), with its search path, working dir and I/O proxy; `ProcessorMetadata`'s files and looks | `config.rs`, `processor.rs` | `Config_tests.cpp` group D (below); `NamedTransform_tests.cpp` `named_transform_processor`, `inactive_named_transforms`; oracle `config_processor` (O3.5) |
-| 3.2e | `transforms/builtins/ColorMatrixHelpers.cpp/.h` (350), `OpHelpers.cpp/.h` (118), `BuildBuiltinTransformOps` and the registry's identity entry | `transforms/builtins/color_matrix_helpers.rs`, `op_helpers.rs` | `BuiltinTransform_tests.cpp` `color_matrix_helpers` |
+| 3.2e | `transforms/builtins/OpHelpers.cpp/.h` (118), `BuildBuiltinTransformOps` and the registry's identity entry; re-exports `ColorMatrixHelpers`, which Phase 2 ports into `ocio-ops` (below) | `transforms/builtins/op_helpers.rs`, the re-export in `transforms/builtins/mod.rs` | — |
 | 3.2f | `transforms/builtins/ArriCameras.cpp` (100), `RedCameras.cpp` (106), `SonyCameras.cpp` (126), `PanasonicCameras.cpp` (73): Log and Matrix ops only | `transforms/builtins/{arri,red,sony,panasonic}_cameras.rs` | battery `BuiltinTransform` family over these entries, both directions |
 | 3.2g | `ACES.cpp` and `Displays.cpp` entries built only from Phase 1 ops (Matrix, Log, Gamma, Range, Exponent) | `transforms/builtins/aces.rs`, `displays.rs` | battery over these entries |
 
+- `transforms/builtins/ColorMatrixHelpers.cpp/.h` (350) is ported by Phase 2's `p2-aces2-cpu`,
+  into `ocio-ops` (`crates/ocio-ops/src/transforms/builtins/color_matrix_helpers.rs`), with
+  `OCIO_ADD_TEST(BuiltinTransform, color_matrix_helpers)`. 3.2e only re-exports it from `ocio`;
+  no Phase 3 card ports that test again.
 - Each builder chunk ports its `CollectContextVariables` overload. `FileTransform`'s overload
   (`FileTransform.cpp:224-312`, 79) lands with 3.2a, since it needs only the context.
 - The rest of the built-ins wait for Phase 2 (card `p3-after-p2`):
@@ -144,7 +149,7 @@ tests at 0.8.0 are copied verbatim, as the emitter's were.
 
 | Chunk | Upstream (yaml-cpp 0.8.0) | Rust (`ocio/src/yaml_cpp/...`) | Port tests |
 |---|---|---|---|
-| 3.3a | `stream.cpp`, `streamcharsource.h`, `stringsource.h` (~400): BOM and UTF-8/16/32 detection, lenient decoding (an overlong `C0 80` becomes NUL); `mark.h`; `exceptions.h/.cpp`: the `ErrorMsg` texts and `what()`'s "yaml-cpp: error at line L, column C: ..." | `stream.rs`, `exceptions.rs` | `test/integration/encoding_test.cpp` |
+| 3.3a | `stream.cpp`, `streamcharsource.h`, `stringsource.h` (~400): BOM and UTF-8/16/32 detection, lenient decoding (an overlong `C0 80` passes through unchanged, as in the wheel); `mark.h`; `exceptions.h/.cpp`: the `ErrorMsg` texts and `what()`'s "yaml-cpp: error at line L, column C: ..." | `stream.rs`, `exceptions.rs` | `test/integration/encoding_test.cpp` |
 | 3.3b | `scanner.cpp/.h`, `simplekey.cpp`, `token.h`, `scantag.cpp`: indentation, flow levels, simple keys (~550) | `scanner.rs`, `simple_key.rs`, `token.rs` | the scanner parts of `test/integration/` |
 | 3.3c | `scantoken.cpp`, `scanscalar.cpp/.h`, `tag.cpp`, `directives.cpp` (~600): every token, plain, quoted, literal and folded scalars, verbatim tags (`!<ColorSpace>`) | `scan_token.rs`, `scan_scalar.rs`, `tag.rs` | as 3.3b |
 | 3.3d | `parser.cpp`, `singledocparser.cpp`, `collectionstack.h`, `depthguard.cpp` (~550): events, anchors and aliases, the depth limit | `parser.rs`, `single_doc_parser.rs` | `test/integration/handler_test.cpp`, `handler_spec_test.cpp`, `error_messages_test.cpp` |
@@ -168,6 +173,12 @@ tests at 0.8.0 are copied verbatim, as the emitter's were.
 | 3.3l | `load(Config)`, part 1 (`OCIOYaml.cpp:4398-4700`): the profile version and its errors, environment, search path (a string split on `:`, even on Windows), roles, luma, displays, views, active lists (~280) | `ocio_yaml.rs` | `Config_tests.cpp` group A |
 | 3.3m | `load(Config)`, part 2 (`OCIOYaml.cpp:4700-5032`): color spaces, looks, view transforms, named transforms, rules, inactive spaces, defaults, the config's directory as working dir, `loadEnvironment`; `OCIOYaml::Read` and its "Error: Loading the OCIO profile ..." wrapper; `Config::Impl::Read`; `Config::CreateFromStream` (~290) | `ocio_yaml.rs`, `config.rs` | `Config_tests.cpp` group A; the 8 built-in configs and the corpus load, compared by `dump` |
 
+- 3.3g: yaml-cpp's `Exception::what()` keeps the bytes after a NUL, but OCIO cuts its message
+  at the first NUL.
+- 3.3m: on Windows a 3-byte config file `00 00 FE` loads as an empty document through
+  `CreateFromFile`, but fails with "unknown escape character" through `CreateFromStream` (MSVC
+  `filebuf` putback after EOF); on Linux both behave the same. The port's yaml `Stream` models
+  only a string stream, so 3.3m must handle the file path.
 - The loader of `FixedFunctionTransform` lands in `p3-after-p2`.
 - The loaders of ExposureContrast and the Grading transforms (`OCIOYaml.cpp:1192-1333,
   1519-2501`, ~1,000 lines with their savers) wait for Phase 5 (owner item D5). Until then their
@@ -325,9 +336,9 @@ So Phase 3 ports 67 of the 89, and `p3-after-p2` 5 more.
 | `CPUProcessor_tests.cpp` | 16 | 11 (3.4e) | as WP 3.6 says |
 | `transforms/ColorSpaceTransform_tests.cpp` | 5 | `basic`, `context_variables` (3.1a, 3.2a) | the build tests use fixed functions (P2) |
 | `transforms/DisplayViewTransform_tests.cpp` | 6 | 5 (3.1a, 3.2c) | `build_ops` uses ExposureContrast (P5) |
-| `transforms/LookTransform_tests.cpp` | 5 | `inverse_look_transform`, `context_variables` | `basic`, `build_look_ops`, `build_look_options_ops` use fixed functions (P2) |
-| `transforms/BuiltinTransform_tests.cpp` | 8 | `creation`, `access`, `color_matrix_helpers` | `forward_inverse`, `interpolate`, `validate`, `aces2_displayview_roundtrip`, `aces2_Aab_to_RGB_nan` (P2) |
-| `transforms/builtins/BuiltinTransformRegistry_tests.cpp` | 7 | 6 (3.1b, 3.8c) | `read_write` builds every built-in's processor (P2) |
+| `transforms/LookTransform_tests.cpp` | 5 | `basic` (3.1a), `inverse_look_transform`, `context_variables` | `build_look_ops`, `build_look_options_ops` use fixed functions (P2) |
+| `transforms/BuiltinTransform_tests.cpp` | 8 | `creation`, `access` (3.1b); `color_matrix_helpers` is Phase 2's (`p2-aces2-cpu`) | `forward_inverse`, `interpolate`, `validate`, `aces2_displayview_roundtrip`, `aces2_Aab_to_RGB_nan` (P2) |
+| `transforms/builtins/BuiltinTransformRegistry_tests.cpp` | 7 | 6 (3.1b, 3.2e-g, 3.8c) | `read_write` builds every built-in's processor (P2) |
 | `builtinconfigs/BuiltinConfig_tests.cpp` | 4 | 4 (3.10a) | — |
 | `transforms/FileTransform_tests.cpp` | 10 | `basic`, `validate` (3.1c) | the rest (P4) |
 | `transforms/GroupTransform_tests.cpp` | 3 | — | `basic` (P2: fixed function), `write_formats`, `write_with_noops` (P4) |
