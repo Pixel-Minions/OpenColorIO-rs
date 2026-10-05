@@ -16,7 +16,7 @@
 use std::fmt;
 
 use ocio_ops::cfmt::{Crt, OStringStream};
-use ocio_ops::exception::Result;
+use ocio_ops::exception::{Exception, Result};
 use ocio_ops::op::{Op, OpVec};
 use ocio_ops::op_data::OpData;
 use ocio_ops::open_color_types::TransformDirection;
@@ -389,6 +389,12 @@ pub(crate) fn create_transform(group: &mut GroupTransform, op: &Op) -> Result<()
         OpData::Log(_) => create_log_transform(group, op),
         OpData::Cdl(_) => create_cdl_transform(group, op),
         OpData::Lut1D(_) => create_lut1d_transform(group, op),
+        // `CreateGradingRGBCurveTransform` (src/OpenColorIO/ops/gradingrgbcurve/
+        // GradingRGBCurveOp.cpp:219-233 @ v2.5.2) comes with `GradingRGBCurveTransform`
+        // (Phase 3, WP 3.1).
+        OpData::GradingRgbCurve(_) => Err(Exception::new(
+            "CreateGradingRGBCurveTransform is not ported yet (Phase 3).",
+        )),
         // No op holds a reference (the file readers replace it with the file's ops), and the
         // no-op types returned above.
         OpData::Reference(_) | OpData::NoOp(_) => {

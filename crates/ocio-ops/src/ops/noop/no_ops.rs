@@ -207,6 +207,7 @@ impl NoOpData {
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
+            | OpData::GradingRgbCurve(_)
             | OpData::Reference(_) => false,
         }
     }

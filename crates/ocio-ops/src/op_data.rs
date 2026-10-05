@@ -18,6 +18,7 @@ use crate::format_metadata::{FormatMetadataImpl, METADATA_ID, METADATA_NAME};
 use crate::ops::cdl::CdlOpData;
 use crate::ops::exponent::ExponentOpData;
 use crate::ops::gamma::GammaOpData;
+use crate::ops::gradingrgbcurve::grading_rgb_curve_op_data::GradingRgbCurveOpData;
 use crate::ops::log::log_op_data::LogOpData;
 use crate::ops::lut1d::Lut1DOpData;
 use crate::ops::matrix::MatrixOpData;
@@ -113,6 +114,8 @@ pub enum OpData {
     Range(RangeOpData),
     /// `ExponentOpData`.
     Exponent(ExponentOpData),
+    /// `GradingRGBCurveOpData`.
+    GradingRgbCurve(GradingRgbCurveOpData),
     /// `ReferenceOpData`.
     Reference(ReferenceOpData),
     /// `NoOpData` and its subclass `FileNoOpData`.
@@ -138,6 +141,7 @@ impl OpData {
             OpData::Matrix(data) => data.get_type(),
             OpData::Range(data) => data.get_type(),
             OpData::Exponent(data) => data.get_type(),
+            OpData::GradingRgbCurve(data) => data.get_type(),
             OpData::Reference(_) => OpDataType::Reference,
             OpData::NoOp(_) => OpDataType::NoOp,
         }
@@ -161,6 +165,7 @@ impl OpData {
                 data.validate();
                 Ok(())
             }
+            OpData::GradingRgbCurve(data) => data.validate(),
             OpData::Reference(data) => {
                 data.validate();
                 Ok(())
@@ -184,6 +189,7 @@ impl OpData {
             OpData::Matrix(data) => data.is_no_op(),
             OpData::Range(data) => Ok(data.is_no_op()),
             OpData::Exponent(data) => Ok(data.is_no_op()),
+            OpData::GradingRgbCurve(data) => Ok(data.is_no_op()),
             OpData::Reference(data) => Ok(data.is_no_op()),
             OpData::NoOp(data) => Ok(data.is_no_op()),
         }
@@ -202,6 +208,7 @@ impl OpData {
             OpData::Matrix(data) => data.is_identity(),
             OpData::Range(data) => Ok(data.is_identity()),
             OpData::Exponent(data) => Ok(data.is_identity()),
+            OpData::GradingRgbCurve(data) => Ok(data.is_identity()),
             OpData::Reference(data) => Ok(data.is_identity()),
             OpData::NoOp(data) => Ok(data.is_identity()),
         }
@@ -226,6 +233,7 @@ impl OpData {
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
+            | OpData::GradingRgbCurve(_)
             | OpData::Reference(_)
             | OpData::NoOp(_) => Ok(()),
         }
@@ -249,6 +257,7 @@ impl OpData {
             OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
+            | OpData::GradingRgbCurve(_)
             | OpData::Reference(_)
             | OpData::NoOp(_) => Ok(OpData::Matrix(MatrixOpData::new())),
         }
@@ -268,6 +277,7 @@ impl OpData {
             OpData::Matrix(data) => data.has_channel_crosstalk(),
             OpData::Range(data) => data.has_channel_crosstalk(),
             OpData::Exponent(data) => data.has_channel_crosstalk(),
+            OpData::GradingRgbCurve(data) => data.has_channel_crosstalk(),
             OpData::Reference(data) => data.has_channel_crosstalk(),
             OpData::NoOp(data) => data.has_channel_crosstalk(),
         }
@@ -286,6 +296,9 @@ impl OpData {
             OpData::Lut1D(data) => matches!(other, OpData::Lut1D(other) if data.equals(other)),
             OpData::Matrix(data) => matches!(other, OpData::Matrix(other) if data.equals(other)),
             OpData::Range(data) => matches!(other, OpData::Range(other) if data.equals(other)),
+            OpData::GradingRgbCurve(data) => {
+                matches!(other, OpData::GradingRgbCurve(other) if data.equals(other))
+            }
             OpData::Reference(data) => {
                 matches!(other, OpData::Reference(other) if data.equals(other))
             }
@@ -308,6 +321,7 @@ impl OpData {
             OpData::Matrix(data) => data.get_cache_id(),
             OpData::Range(data) => Ok(data.get_cache_id()),
             OpData::Exponent(data) => Ok(data.get_cache_id()),
+            OpData::GradingRgbCurve(data) => Ok(data.get_cache_id()),
             OpData::Reference(data) => data.get_cache_id(),
             OpData::NoOp(data) => Ok(data.get_cache_id()),
         }
@@ -325,6 +339,7 @@ impl OpData {
             OpData::Matrix(data) => data.get_format_metadata(),
             OpData::Range(data) => data.get_format_metadata(),
             OpData::Exponent(data) => data.get_format_metadata(),
+            OpData::GradingRgbCurve(data) => data.get_format_metadata(),
             OpData::Reference(data) => data.get_format_metadata(),
             OpData::NoOp(data) => data.get_format_metadata(),
         }
@@ -342,6 +357,7 @@ impl OpData {
             OpData::Matrix(data) => data.get_format_metadata_mut(),
             OpData::Range(data) => data.get_format_metadata_mut(),
             OpData::Exponent(data) => data.get_format_metadata_mut(),
+            OpData::GradingRgbCurve(data) => data.get_format_metadata_mut(),
             OpData::Reference(data) => data.get_format_metadata_mut(),
             OpData::NoOp(data) => data.get_format_metadata_mut(),
         }

@@ -5,4 +5,6 @@
 
 pub mod grading_b_spline_curve;
 pub mod grading_rgb_curve;
+pub mod grading_rgb_curve_op;
+pub mod grading_rgb_curve_op_cpu;
 pub mod grading_rgb_curve_op_data;
