@@ -165,6 +165,29 @@ const CASES: &[&str] = &[
     "ocio_profile_version:\u{4}x",
     "\u{feff}ocio_profile_version: x",
     "ocio_profile_version: x\u{e9}",
+    // Aliases are the anchored node, and an anchor names its collection from the collection's
+    // start: a collection can hold itself, as an element, a value or a key.
+    "a: &a [*a]\nocio_profile_version: x",
+    "a: &a\n  - b\n  - *a\nocio_profile_version: x",
+    "a: &a {k: *a}\nocio_profile_version: x",
+    "a: &a {*a : 1}\nocio_profile_version: x",
+    "&r {k: *r, ocio_profile_version: x}",
+    "&r {*r : 1, ocio_profile_version: x}",
+    "ocio_profile_version: &v [*v]",
+    "ocio_profile_version: &v {*v : *v}",
+    // Nested aliases, 9 to the power of 12 nodes if they were copied.
+    "l: [&a0 [x, x, x, x, x, x, x, x, x], &a1 [*a0, *a0, *a0, *a0, *a0, *a0, *a0, *a0, *a0], \
+     &a2 [*a1, *a1, *a1, *a1, *a1, *a1, *a1, *a1, *a1], \
+     &a3 [*a2, *a2, *a2, *a2, *a2, *a2, *a2, *a2, *a2], \
+     &a4 [*a3, *a3, *a3, *a3, *a3, *a3, *a3, *a3, *a3], \
+     &a5 [*a4, *a4, *a4, *a4, *a4, *a4, *a4, *a4, *a4], \
+     &a6 [*a5, *a5, *a5, *a5, *a5, *a5, *a5, *a5, *a5], \
+     &a7 [*a6, *a6, *a6, *a6, *a6, *a6, *a6, *a6, *a6], \
+     &a8 [*a7, *a7, *a7, *a7, *a7, *a7, *a7, *a7, *a7], \
+     &a9 [*a8, *a8, *a8, *a8, *a8, *a8, *a8, *a8, *a8], \
+     &a10 [*a9, *a9, *a9, *a9, *a9, *a9, *a9, *a9, *a9], \
+     &a11 [*a10, *a10, *a10, *a10, *a10, *a10, *a10, *a10, *a10]]\n\
+     ocio_profile_version: *a11",
 ];
 
 /// A small deterministic generator (xorshift64*), so the generated documents never change.
@@ -285,7 +308,7 @@ fn config_load_errors_match_the_wheel() {
         .collect();
     assert_eq!(
         sha256_hex(&all),
-        "3006b8ac6d3fb99d72370ebc4ba52f6a2ddb6b5e9d5101eedc4aeb4a357769d5",
+        "12e94a2261a1813cd9f06c1c6816c5e49ad255d7c8ae6c6cfc10d0127aa423e6",
         "the generated documents changed"
     );
 

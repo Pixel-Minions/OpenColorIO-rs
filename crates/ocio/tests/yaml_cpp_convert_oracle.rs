@@ -400,6 +400,80 @@ fn random_numbers(rng: &mut Rng, count: usize) -> Vec<String> {
         .collect()
 }
 
+/// Numbers with more significant digits than MSVC's `num_get` keeps (768), where the digits it
+/// drops decide the rounding: the halfway points between two doubles (1 + 2^-53) and two
+/// floats (1 + 2^-24), in decimal and hexadecimal, followed by zeros and a last nonzero digit
+/// on both sides of the 768th significant digit; long integer parts scaled back by an
+/// exponent; long runs of leading zeros against large exponents, where `num_get` clamps the
+/// exponent it hands `strtod`.
+fn long_numbers() -> Vec<String> {
+    let zeros = |n: usize| "0".repeat(n);
+    // 1 + 2^-53 and 1 + 2^-24, exactly: 54 and 25 significant digits.
+    const HALF_F64: &str = "1.00000000000000011102230246251565404236316680908203125";
+    const HALF_F32: &str = "1.000000059604644775390625";
+    let mut out = Vec::new();
+    for pad in [700, 712, 713, 714, 715, 740, 741, 742, 743, 744, 800] {
+        for half in [HALF_F64, HALF_F32] {
+            out.push(format!("{half}{}1", zeros(pad)));
+            out.push(format!("{half}{}5", zeros(pad)));
+            out.push(format!("{half}{}", zeros(pad)));
+            out.push(format!("-{half}{}1e0", zeros(pad)));
+        }
+        // just below the halfway point, by a run of nines
+        out.push(format!(
+            "1.00000000000000011102230246251565404236316680908203124{}",
+            "9".repeat(pad)
+        ));
+        // the halfway point in hexadecimal, 1 + 8 * 16^-14
+        out.push(format!("0x1.00000000000008{}1p0", zeros(pad)));
+        out.push(format!("0x1.000001{}1p0", zeros(pad)));
+        // a long integer part, scaled back
+        let digits = HALF_F64.replace('.', "");
+        out.push(format!("{digits}{}1e-{}", zeros(pad), 53 + pad + 1));
+        out.push(format!("0x1{}p-{}", zeros(pad), 4 * pad));
+    }
+    // Halfway points with exactly 768 significant digits, N * 2^-1075 for an odd N next to
+    // 2^53 (N * 5^1075 * 10^-1075): rounding to even goes up for 2^53 - 1 and down for
+    // 2^53 - 3, and a digit after the 768th breaks the tie.
+    for n in [(1u64 << 53) - 1, (1u64 << 53) - 3] {
+        // little-endian decimal digits of n * 5^1075
+        let mut d: Vec<u8> = n.to_string().bytes().rev().map(|c| c - b'0').collect();
+        for _ in 0..1075 {
+            let mut carry = 0u8;
+            for digit in d.iter_mut() {
+                let v = *digit * 5 + carry;
+                *digit = v % 10;
+                carry = v / 10;
+            }
+            if carry > 0 {
+                d.push(carry);
+            }
+        }
+        let s: String = d.iter().rev().map(|&c| char::from(b'0' + c)).collect();
+        out.push(format!("{s}e-1075"));
+        out.push(format!("{s}1e-1076"));
+        out.push(format!("{s}{}1e-1081", zeros(5)));
+        out.push(format!("0.{}{s}", zeros(1075 - s.len())));
+        out.push(format!("0.{}{s}1", zeros(1075 - s.len())));
+        out.push(format!("0.{}{s}{}1", zeros(1075 - s.len()), zeros(5)));
+    }
+    for (lead, exp) in [
+        (1099, "1099"),
+        (1100, "1100"),
+        (1101, "1101"),
+        (1200, "1200"),
+        (1200, "1201"),
+        (1200, "99999999999999999999"),
+    ] {
+        out.push(format!("0.{}1e{exp}", zeros(lead)));
+        out.push(format!("0.{}15e{exp}", zeros(lead)));
+        out.push(format!("1{}e-{exp}", zeros(lead)));
+        out.push(format!("0x0.{}1p{exp}", zeros(lead / 4)));
+        out.push(format!("0x1{}p-{exp}", zeros(lead / 4)));
+    }
+    out
+}
+
 /// The oracle's entries for these spellings of the field.
 fn entries(field: &str, spellings: &[String]) -> Vec<Value> {
     let response = Oracle::get().call(
@@ -418,6 +492,7 @@ fn numbers_read_as_the_wheel_reads_them() {
     let mut rng = Rng(0x5EED_F10A_7BAD_C0DE);
     let mut spellings: Vec<String> = NUMBERS.iter().map(|s| s.to_string()).collect();
     spellings.extend(random_numbers(&mut rng, 4000));
+    spellings.extend(long_numbers());
 
     // The generated spellings are fixed: a change to the generator must be deliberate.
     let all: Vec<u8> = spellings
@@ -426,7 +501,7 @@ fn numbers_read_as_the_wheel_reads_them() {
         .collect();
     assert_eq!(
         sha256_hex(&all),
-        "adaf3967d0dd7219e3360330351e7a9478132050152e71a9d5f0fc5561b83e0d",
+        "afd72e849fc6d4c2bad33315152f85a0a2ce873c23963ea38dd7da3b8fb291a5",
         "the generated spellings changed"
     );
 
