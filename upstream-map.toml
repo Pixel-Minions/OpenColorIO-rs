@@ -32,7 +32,7 @@ path = "include/OpenColorIO/OpenColorTransforms.h"
 kind = "api"
 target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/format_metadata.rs", "crates/ocio-ops/src/dynamic_property.rs", "crates/ocio/src/transform.rs", "crates/ocio-ops/src/ops/gradingrgbcurve/grading_b_spline_curve.rs", "crates/ocio-ops/src/ops/gradingrgbcurve/grading_rgb_curve.rs"]
 status = "partial"
-note = "1.2a: the FormatMetadata interface (44-117) is FormatMetadataImpl's own methods in format_metadata.rs (upstream has no other implementation), and its operator<< is FormatMetadataImpl::write_to; 1.2b: DynamicProperty (766-779) is the DynamicPropertyRcPtr enum and DynamicPropertyDouble (810-824) is DynamicPropertyDoubleImpl, in dynamic_property.rs; p1-transforms T0: Transform (as enum Transform) and GroupTransform, in crates/ocio/src/transform.rs and transforms/group_transform.rs; each class comes with its card; p2-ff-cpu 2.3e: FixedFunctionTransform (1187-1221), in crates/ocio/src/transforms/fixed_function_transform.rs; p2-rgbcurve 2.6a: GradingControlPoint, GradingBSplineCurve (without the hue curves' types) and GradingRGBCurve (497-583) as values in ocio-ops, re-exported by ocio (GradingRgbCurve)"
+note = "1.2a: the FormatMetadata interface (44-117) is FormatMetadataImpl's own methods in format_metadata.rs (upstream has no other implementation), and its operator<< is FormatMetadataImpl::write_to; 1.2b: DynamicProperty (766-779) is the DynamicPropertyRcPtr enum and DynamicPropertyDouble (810-824) is DynamicPropertyDoubleImpl, in dynamic_property.rs; p1-transforms T0: Transform (as enum Transform) and GroupTransform, in crates/ocio/src/transform.rs and transforms/group_transform.rs; each class comes with its card; p2-ff-cpu 2.3e: FixedFunctionTransform (1187-1221), in crates/ocio/src/transforms/fixed_function_transform.rs; p2-rgbcurve 2.6a: GradingControlPoint, GradingBSplineCurve (without the hue curves' types) and GradingRGBCurve (497-583) as values in ocio-ops, re-exported by ocio (GradingRgbCurve); 2.6b: DynamicPropertyGradingRGBCurve as DynamicPropertyGradingRgbCurveImpl"
 
 [[file]]
 path = "include/OpenColorIO/OpenColorTypes.h"
@@ -231,7 +231,7 @@ path = "src/OpenColorIO/DynamicProperty.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/dynamic_property.rs"]
 status = "partial"
-note = "1.2b, in ocio-ops because op data holds it: DynamicPropertyImpl, DynamicPropertyDoubleImpl, equals for two double properties, and operator== (on DynamicPropertyDoubleImpl and the DynamicPropertyRcPtr enum). The value is an AtomicU64 and the dynamic flag an AtomicBool, so an Arc handle can change them (PLAN.md §9). Checked by upstream's tests only. A mutation that drops the same-dynamic-state test in equals (D4 in the p1-foundations review) survives them: it changes only a comparison of a non-dynamic left operand with a dynamic right one, which upstream's test doesn't make; ExposureContrast (Phase 5) will pin it through the wheel. Phase 5: the grading properties and DynamicPropertyValue::As* (18-47)"
+note = "1.2b, in ocio-ops because op data holds it: DynamicPropertyImpl, DynamicPropertyDoubleImpl, equals for two double properties, and operator== (on DynamicPropertyDoubleImpl and the DynamicPropertyRcPtr enum). The value is an AtomicU64 and the dynamic flag an AtomicBool, so an Arc handle can change them (PLAN.md §9). Checked by upstream's tests only. A mutation that drops the same-dynamic-state test in equals (D4 in the p1-foundations review) survives them: it changes only a comparison of a non-dynamic left operand with a dynamic right one, which upstream's test doesn't make; ExposureContrast (Phase 5) will pin it through the wheel. p2-rgbcurve 2.6b: DynamicPropertyGradingRGBCurveImpl (202-297) and its equals arm, the value and knots under an RwLock; Phase 5: the other grading properties and DynamicPropertyValue::As* (18-47)"
 
 [[file]]
 path = "src/OpenColorIO/DynamicProperty.h"
@@ -1524,7 +1524,7 @@ path = "src/OpenColorIO/ops/gradingrgbcurve/GradingBSplineCurve.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_b_spline_curve.rs"]
 status = "partial"
-note = "p2-rgbcurve 2.6a: the curve, its control points and slopes, validate, isIdentity and operator==; the RGB curves' fitting, KnotsCoefs and the shader writers come later in the card; Phase 5: the hue curves' parts"
+note = "p2-rgbcurve 2.6a: the curve, its control points and slopes, validate, isIdentity and operator==; 2.6b: the RGB curves' fitting (EstimateRGBSlopes, FitRGBSpline, AdjustRGBSlopes with U-35's guard, computeKnotsAndCoefsForRGBCurve), KnotsCoefs and evalCurve/evalCurveRev in each wheel's operand order (I-91); the shader writers AddShaderEvalFwd/Rev come with the GPU writer; Phase 5: the hue curves' parts (PrepHueCurveData, CalcKsi, FitHueSpline, EstimateHueSlopes, computeKnotsAndCoefsForHueCurve, evalCurveRevHue, AddShaderEvalRevHue, the Create overloads with a HueCurveType), which compute_knots_and_coefs refuses as not ported yet"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingBSplineCurve.h"
@@ -4269,7 +4269,7 @@ path = "tests/cpu/DynamicProperty_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/dynamic_property_tests.rs"]
 status = "partial"
-note = "1.2b: basic and equal_double. The others need the grading properties (Phase 5), or a processor that reads CTF files"
+note = "1.2b: basic and equal_double. The others need the grading properties (Phase 5), or a processor that reads CTF files; p2-rgbcurve 2.6b: equal_grading_rgb_curve and grading_rgb_curve_knots_coefs"
 
 [[file]]
 path = "tests/cpu/Exception_tests.cpp"
@@ -4800,9 +4800,9 @@ status = "todo"
 [[file]]
 path = "tests/cpu/ops/gradingrgbcurve/GradingRGBCurve_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_rgb_curve_tests.rs"]
-status = "partial"
-note = "p2-rgbcurve 2.6a: basic and curves; max_ctrl_pnts needs the dynamic property"
+target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_rgb_curve_tests.rs", "crates/ocio-ops/src/dynamic_property_tests.rs"]
+status = "done"
+note = "p2-rgbcurve 2.6a: basic and curves; 2.6b: max_ctrl_pnts, in dynamic_property_tests.rs (it needs the dynamic property)"
 
 [[file]]
 path = "tests/cpu/ops/gradingtone/GradingToneOpCPU_tests.cpp"

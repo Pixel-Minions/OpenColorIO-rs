@@ -830,6 +830,9 @@ fn cannot_replace(prop: &DynamicPropertyRcPtr) -> Exception {
         DynamicPropertyRcPtr::Double(_) => {
             Exception::new("Op does not implement double dynamic property.")
         }
+        DynamicPropertyRcPtr::GradingRgbCurve(_) => {
+            Exception::new("Op does not implement grading rgb curve dynamic property.")
+        }
     }
 }
 
@@ -1111,6 +1114,7 @@ fn is_class_of(dp: &DynamicPropertyRcPtr, type_: DynamicPropertyType) -> bool {
                 | DynamicPropertyType::Contrast
                 | DynamicPropertyType::Gamma
         ),
+        DynamicPropertyRcPtr::GradingRgbCurve(_) => type_ == DynamicPropertyType::GradingRgbCurve,
     }
 }
 

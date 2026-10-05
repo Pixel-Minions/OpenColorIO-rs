@@ -769,6 +769,29 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   machine code; the wheel can't be given NaNs of opposite signs until the specs carry a
   double's bits, so no oracle test checks them yet.
 
+### I-91. The RGB curves' NaNs differ between Windows and Linux
+
+- **Upstream:** `KnotsCoefs::evalCurve` and `evalCurveRev`
+  (`ops/gradingrgbcurve/GradingBSplineCurve.cpp:1258-1381`) are scalar `float` code that the
+  two wheels compile with different operand orders (`docs/wheel-inspect.md`). MSVC computes the
+  segments' quadratic as `((t * A) + B) * t + C`, the low line as `(x - knStart) * B + C` and
+  the high line as `offs + slope * (x - knEnd)` (`sub_1801e87d0`); GCC computes `((A * t) +
+  B) * t + C`, `B * (x - knStart) + C` and `offs + (x - knEnd) * slope` (`0x3bc930`). In the
+  inverse, MSVC adds the knot after the quotient (`q + knStart`, as the source) and computes
+  the root as `kn - C0 / B` and `kn - (C0 + C0) / denom`, where GCC adds the knot first
+  (`knStart + q`) and keeps the source's `kn + (-C0) / B` and `kn + (C0 * -2) / denom`
+  (`sub_1801e8970`, `0x3bcab0`). The values are the same; where two NaNs meet (a NaN pixel
+  and the NaN coefficients of a degenerate curve, such as one with two control points at the
+  same x), the result keeps a different NaN, and a NaN `C0` comes out with its sign flipped
+  on Linux only.
+- **Who notices:** anyone comparing NaN pixels of a GradingRGBCurveTransform, or an ACES 1.x
+  output built-in, between a Windows and a Linux machine.
+- **A fix:** one operand order on every platform, which changes NaN bits on at least one.
+- **Status:** matched in `p2-rgbcurve` (2.6b), `KnotsCoefs::eval_curve` and
+  `eval_curve_rev`, read from both wheels' machine code; the GradingRGBCurve battery (2.6d,
+  `crates/ocio-ops/tests/grading_rgb_curve_oracle.rs`, the "x repeated" case) checks it on
+  both platforms.
+
 ## Transforms
 
 ### I-11. Copying a group transform shares its children
@@ -1813,6 +1836,23 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   The GPU writer refuses the same parameters before it writes anything (`p2-aces2-gpu`,
   2.4f1-2.4h); `fixed_function_op_gpu.rs` checks it for the output transform and the gamut
   compression, both directions.
+
+### U-35. An RGB curve with a NaN x coordinate
+
+- **Upstream:** `AdjustRGBSlopes` (`ops/gradingrgbcurve/GradingBSplineCurve.cpp:450-488`) walks
+  the fitted knots and pairs each knot that isn't a control point's x with the control
+  points `i` and `i + 1`, counting on every control point's x to match its own knot. A NaN x
+  matches nothing (`NaN != NaN`), so the walk counts that knot as a middle knot too, and
+  reaches `ctrlPnts[i + 1]` past the last control point: it reads memory it doesn't own. A
+  NaN x passes `GradingBSplineCurve::validate` (`x < lastX` is false), so a
+  GradingRGBCurveTransform with one renders after reading it.
+- **Who notices:** applications that set a NaN x coordinate on an RGB curve.
+- **Decided** (general rule): `adjust_rgb_slopes` returns "RGB curve: fitting the curve would
+  read past its control points." where upstream would read past them, so fitting the curves
+  (the dynamic property's `precompute`, building the op data) fails there.
+- **Status:** matched in `p2-rgbcurve` (2.6b), `grading_b_spline_curve.rs`; the GradingRGBCurve
+  battery (2.6d) doesn't vary x coordinates (only y and the slopes), so it never sends
+  such a curve to the wheel; `grading_b_spline_curve_tests.rs` checks the error.
 
 ### U-45. The working directory when `_getcwd` fails
 
