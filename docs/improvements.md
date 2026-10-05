@@ -1031,6 +1031,22 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   pystring index as a wrapping `int`, whose results then index outside the string (undefined
   behaviour, which the general rule turns into errors), for inputs no one passes.
 
+### I-116. Windows reads the working directory in the ANSI code page
+
+- **Upstream:** `GetCwd` (`PathUtils.cpp:131-150` @ v2.5.2) calls `_getcwd` on Windows, which
+  gives the path in the process's ANSI code page (cp1252 on most Western systems), not UTF-8,
+  and with `?` for characters the code page lacks. `AbsPath` joins a relative file name to it;
+  OCIO's other paths are UTF-8 and go to the system through `Utf8ToUtf16`. Linux gives the
+  bytes.
+- **Who notices:** a config loaded by a relative path (`Config::CreateFromFile("x.ocio")`) from
+  a working directory whose name isn't ASCII, on Windows: the config's working directory is the
+  ANSI path, which `Utf8ToUtf16` then misreads.
+- **A fix:** `_wgetcwd` and `Utf16ToUtf8`.
+- **Status:** not matched (p3-context 3.5f, `crates/ocio/src/path_utils.rs`, `get_cwd`): the
+  port gives the path as UTF-8, as the rest of OCIO's paths are; the ANSI conversion needs a
+  system call the port's crates can't make (`unsafe`). ASCII paths are the same on both. For
+  the owner.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
@@ -1392,3 +1408,16 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   error, and that the comparisons upstream makes without reading (another style, or an inverse
   that validation refuses) give upstream's answers. The renderer in 2.3b:
   `fixed_function_op_cpu_tests.rs` checks its error.
+
+### U-45. The working directory when `_getcwd` fails
+
+- **Upstream:** `GetCwd` (`PathUtils.cpp:131-150` @ v2.5.2) on Windows calls
+  `_getcwd(path, MAXPATHLEN)` into an uninitialized `char path[4096]` and returns `path` without
+  checking the result. When the call fails (a working directory of 4096 bytes or more, or one
+  the system can't give), the buffer is read uninitialized, up to whatever NUL follows.
+- **Who notices:** `AbsPath` callers (the config loader, for a relative path) on Windows with a
+  very long or removed working directory.
+- **Decided** (the owner's general rule, with a clear message): the port returns the error "The
+  current working directory could not be read (_getcwd failed)." from `abs_path`. Linux needs
+  nothing: its buffer is zeroed and grown until the path fits, and another failure gives "".
+- **Status:** p3-context 3.5f (`crates/ocio/src/path_utils.rs`, `get_cwd`).

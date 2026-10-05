@@ -11,15 +11,19 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
+use ocio_ops::exception::{Exception, Result};
 use ocio_ops::hash_utils::cache_id_hash;
 use ocio_ops::open_color_types::EnvironmentMode;
 use ocio_ops::parse_utils::environment_mode_to_string;
-use ocio_ops::utils::string_utils::{c_str, split};
+use ocio_ops::utils::pystring::os_path;
+use ocio_ops::utils::string_utils::{c_str, right_trim_char, split, trim};
 
 use crate::config_io_proxy::ConfigIoProxy;
 use crate::context_variable_utils::{
-    EnvMap, EnvMapKey, UsedEnvs, load_environment, resolve_context_variables,
+    EnvMap, EnvMapKey, UsedEnvs, contains_context_variables, load_environment,
+    resolve_context_variables,
 };
+use crate::path_utils::file_exists;
 
 /// A resolved string, and the context variables its resolution used.
 type Resolved = (Vec<u8>, UsedEnvs);
@@ -411,6 +415,123 @@ impl Context {
         self.resolve_string_var_impl(&mut caches, c_str(string.as_ref()), Some(used_context_vars))
     }
 
+    /// The path of the file `filename` names: its context variables resolved, then as it is
+    /// when absolute, else found in the search paths (or the working directory when there is
+    /// none), normalized.
+    ///
+    /// Port of `Context::resolveFileLocation(const char *)` (Context.cpp:403-408 @ v2.5.2).
+    #[doc(alias = "resolveFileLocation")]
+    pub fn resolve_file_location(&self, filename: impl AsRef<[u8]>) -> Result<Vec<u8>> {
+        self.resolve_file_location_impl(c_str(filename.as_ref()), None)
+    }
+
+    /// [`resolve_file_location`](Self::resolve_file_location), adding the variables it used
+    /// (those of every search path, for a relative file) to `used_context_vars`.
+    ///
+    /// Port of `Context::resolveFileLocation(const char *, ContextRcPtr &)`
+    /// (Context.cpp:414-516 @ v2.5.2).
+    #[doc(alias = "resolveFileLocation")]
+    pub fn resolve_file_location_with_used(
+        &self,
+        filename: impl AsRef<[u8]>,
+        used_context_vars: &mut Context,
+    ) -> Result<Vec<u8>> {
+        self.resolve_file_location_impl(c_str(filename.as_ref()), Some(used_context_vars))
+    }
+
+    fn resolve_file_location_impl(
+        &self,
+        filename: &[u8],
+        mut used_context_vars: Option<&mut Context>,
+    ) -> Result<Vec<u8>> {
+        let mut caches = self.lock();
+
+        // Resolve the context variables and collect the used context variables related to the
+        // filename only i.e. not including the ones from the search_paths.
+        let resolved_filename =
+            self.resolve_string_var_impl(&mut caches, filename, used_context_vars.as_deref_mut());
+
+        // Search for existing resolved filepath.
+        if let Some((path, envs)) = caches.filepaths.get(&resolved_filename) {
+            if let Some(used_vars) = used_context_vars {
+                // Collect all the used context variables from the search_paths if any.
+                for (name, value) in envs {
+                    used_vars.set_string_var(name, Some(value));
+                }
+            }
+            return Ok(path.clone());
+        }
+
+        // If the file reference is absolute, check if the file exists (independent of the
+        // search paths).
+        if os_path::isabs(&resolved_filename) {
+            if file_exists(&resolved_filename, self)? {
+                // That's already an absolute path so no extra context variables are present.
+                let path = os_path::normpath(&resolved_filename);
+                caches
+                    .filepaths
+                    .insert(resolved_filename, (path.clone(), UsedEnvs::new()));
+                return Ok(path);
+            }
+            return Err(Exception::missing_file(
+                [
+                    b"The specified absolute file reference '".as_slice(),
+                    &resolved_filename,
+                    b"' could not be located.",
+                ]
+                .concat(),
+            ));
+        }
+
+        // As that's a relative path search for the right root path using search path(s) or
+        // working path. The search_paths could contain some context variables.
+        let mut envs = UsedEnvs::new();
+        let searchpaths = get_absolute_search_paths(
+            &self.search_paths,
+            &self.working_dir,
+            &self.env_map,
+            &mut envs,
+        );
+
+        // Loop over each path, and try to find the file
+        let mut errortext = [
+            b"The specified file reference '".as_slice(),
+            filename,
+            b"' could not be located. The following attempts were made: ",
+        ]
+        .concat();
+
+        for (i, searchpath) in searchpaths.iter().enumerate() {
+            // Make an attempt to find the LUT in one of the search paths.
+            let resolvedfullpath = os_path::join(searchpath, &resolved_filename);
+            if !contains_context_variables(&resolvedfullpath)
+                && file_exists(&resolvedfullpath, self)?
+            {
+                // Collect all the used context variables.
+                if let Some(used_vars) = used_context_vars {
+                    for (name, value) in &envs {
+                        used_vars.set_string_var(name, Some(value));
+                    }
+                }
+                // Add to the cache.
+                let path = os_path::normpath(&resolvedfullpath);
+                caches
+                    .filepaths
+                    .insert(resolved_filename, (path.clone(), envs));
+                return Ok(path);
+            }
+            if i != 0 {
+                errortext.extend_from_slice(b" : ");
+            }
+            errortext.push(b'\'');
+            errortext.extend_from_slice(&resolvedfullpath);
+            errortext.push(b'\'');
+        }
+        errortext.push(b'.');
+
+        Err(Exception::missing_file(errortext))
+    }
+
     /// Port of `Context::setConfigIOProxy` (Context.cpp:518-521 @ v2.5.2).
     #[doc(alias = "setConfigIOProxy")]
     pub fn set_config_io_proxy(&mut self, ciop: Option<Arc<dyn ConfigIoProxy>>) {
@@ -468,6 +589,34 @@ impl fmt::Display for Context {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&String::from_utf8_lossy(&self.to_bytes()))
     }
+}
+
+/// The search paths as directories: each with its context variables resolved, trimmed of
+/// white space and trailing `/`, made absolute against the working directory, normalized; or
+/// the working directory alone when there is no search path.
+///
+/// Port of `GetAbsoluteSearchPaths` (Context.cpp:555-584 @ v2.5.2).
+fn get_absolute_search_paths(
+    path_strings: &[Vec<u8>],
+    working_dir: &[u8],
+    map: &EnvMap,
+    envs: &mut UsedEnvs,
+) -> Vec<Vec<u8>> {
+    if path_strings.is_empty() {
+        return vec![working_dir.to_vec()];
+    }
+    let mut searchpaths = Vec::with_capacity(path_strings.len());
+    for path in path_strings {
+        // Resolve variables in case the expansion adds slashes
+        let resolved = resolve_context_variables(path, map, envs);
+        // Remove trailing "/", and spaces
+        let mut dirname = right_trim_char(trim(&resolved), b'/').to_vec();
+        if !os_path::isabs(&dirname) {
+            dirname = os_path::join(working_dir, &dirname);
+        }
+        searchpaths.push(os_path::normpath(&dirname));
+    }
+    searchpaths
 }
 
 #[cfg(test)]

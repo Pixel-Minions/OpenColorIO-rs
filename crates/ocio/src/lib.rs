@@ -10,6 +10,7 @@ pub mod config;
 pub mod config_io_proxy;
 pub mod context;
 pub mod context_variable_utils;
+pub mod path_utils;
 pub mod processor;
 pub mod transform;
 pub mod transforms;

@@ -189,8 +189,8 @@ status = "todo"
 path = "src/OpenColorIO/Context.cpp"
 kind = "src"
 target = ["crates/ocio/src/context.rs"]
-status = "partial"
-note = "p1-transforms T0: Context::Create; p3-context 3.5e: the state (search paths, working dir, environment mode, variables), loadEnvironment, resolveStringVar with the used context, the cache ID and its caches, createEditableCopy (I-111), operator<<, the I/O proxy slot. resolveFileLocation and GetAbsoluteSearchPaths come in 3.5f"
+status = "done"
+note = "p1-transforms T0: Context::Create; p3-context 3.5e: the state (search paths, working dir, environment mode, variables), loadEnvironment, resolveStringVar with the used context, the cache ID and its caches, createEditableCopy (I-111), operator<<, the I/O proxy slot; 3.5f: resolveFileLocation and GetAbsoluteSearchPaths"
 
 [[file]]
 path = "src/OpenColorIO/ContextVariableUtils.cpp"
@@ -493,13 +493,15 @@ note = "p3-context 3.5c: the declarations of the functions ported in parse_utils
 path = "src/OpenColorIO/PathUtils.cpp"
 kind = "src"
 target = ["crates/ocio/src/path_utils.rs"]
-status = "todo"
+status = "partial"
+note = "p3-context 3.5f: SetComputeHashFunction, ResetComputeHashFunction, GetFastFileHash and its cache, FileExists, ClearPathCaches, GetCwd (I-116, U-45), AbsPath. AdjustRightmost and ParseColorSpaceFromString come with the file rules (WP 3.9)"
 
 [[file]]
 path = "src/OpenColorIO/PathUtils.h"
 kind = "src"
 target = ["crates/ocio/src/path_utils.rs"]
-status = "todo"
+status = "partial"
+note = "p3-context 3.5f: the declarations of the functions in path_utils.rs"
 
 [[file]]
 path = "src/OpenColorIO/Platform.cpp"
@@ -4221,8 +4223,8 @@ note = "p3-context 3.5d: env_check, env_expand"
 path = "tests/cpu/Context_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/context_tests.rs"]
-status = "partial"
-note = "p3-context 3.5e: search_paths, string_vars; the tests that look for files come in 3.5f"
+status = "done"
+note = "p3-context 3.5e: search_paths, string_vars; 3.5f: abs_path, var_search_path, use_searchpaths, use_searchpaths_workingdir"
 
 [[file]]
 path = "tests/cpu/Display_tests.cpp"
@@ -4318,7 +4320,8 @@ note = "p3-context 3.5c: bool_string, transform_direction, bitdepth, split_strin
 path = "tests/cpu/PathUtils_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/path_utils_tests.rs"]
-status = "todo"
+status = "done"
+note = "p3-context 3.5f: compute_hash"
 
 [[file]]
 path = "tests/cpu/Platform_tests.cpp"
