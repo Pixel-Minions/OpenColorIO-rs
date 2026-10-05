@@ -17,6 +17,7 @@
 //! ones, forward and inverse.
 
 use ocio_gpu::gpu_processor::GpuProcessor;
+use ocio_gpu::gpu_shader::{TextureDimensions, TextureType};
 use ocio_gpu::{GpuLanguage, GpuShaderDesc};
 use ocio_ops::op::OpVec;
 use ocio_ops::open_color_types::{OptimizationFlags, TransformDirection};
@@ -24,6 +25,7 @@ use ocio_ops::ops::fixedfunction::fixed_function_op::create_fixed_function_op_fr
 use ocio_ops::ops::fixedfunction::fixed_function_op_data::{
     FixedFunctionOpData, FixedFunctionOpStyle,
 };
+use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 use ocio_ops::ops::matrix::MatrixOpData;
 use ocio_ops::ops::matrix::matrix_op::create_matrix_op;
 use ocio_testkit::gpu::{self as oracle_gpu, GpuShaderReply, GpuShaderRequest, ShaderSettings};
@@ -134,6 +136,10 @@ fn levels() -> Vec<(Option<Value>, OptimizationFlags)> {
 struct Names {
     pixel: Option<&'static str>,
     prefix: Option<&'static str>,
+    /// `setDescriptorSetIndex(index, textureBindingStart)`.
+    descriptor_set: Option<(u32, u32)>,
+    /// `setAllowTexture1D`.
+    allow_texture_1d: Option<bool>,
 }
 
 /// One extraction.
@@ -160,6 +166,8 @@ impl Case {
                 language: Some(self.oracle_language),
                 pixel_name: self.names.pixel.map(String::from),
                 resource_prefix: self.names.prefix.map(String::from),
+                descriptor_set: self.names.descriptor_set,
+                allow_texture_1d: self.names.allow_texture_1d,
                 ..ShaderSettings::default()
             },
         )
@@ -174,9 +182,69 @@ enum Outcome {
         gpu_cache_id: String,
         is_no_op: bool,
         has_channel_crosstalk: bool,
-        /// The shader's text, cache ID, pixel name and resource prefix, or the error.
-        shader: Result<[String; 4], String>,
+        /// The shader's text, cache ID, pixel name and resource prefix, and its textures, or
+        /// the error.
+        shader: Result<([String; 4], Vec<Tex>), String>,
     },
+}
+
+/// A texture of the shader, its values by their bits.
+#[derive(Debug, Clone, PartialEq)]
+struct Tex {
+    name: String,
+    sampler_name: String,
+    width: u64,
+    height: u64,
+    channel: String,
+    dimensions: String,
+    interpolation: String,
+    binding_index: u64,
+    values: Vec<u32>,
+}
+
+impl From<&oracle_gpu::Texture> for Tex {
+    fn from(t: &oracle_gpu::Texture) -> Tex {
+        Tex {
+            name: t.name.clone(),
+            sampler_name: t.sampler_name.clone(),
+            width: t.width,
+            height: t.height,
+            channel: t.channel.clone(),
+            dimensions: t.dimensions.clone(),
+            interpolation: t.interpolation.clone(),
+            binding_index: t.binding_index,
+            values: t.values.iter().map(|v| v.to_bits()).collect(),
+        }
+    }
+}
+
+/// The port's texture `index`, as the oracle reports one.
+fn port_texture(desc: &GpuShaderDesc, index: u32) -> Tex {
+    let utf8 = |b: &[u8]| String::from_utf8(b.to_vec()).unwrap();
+    let t = desc.texture(index).unwrap();
+    Tex {
+        name: utf8(t.texture_name()),
+        sampler_name: utf8(t.sampler_name()),
+        width: u64::from(t.width()),
+        height: u64::from(t.height()),
+        channel: match t.channel() {
+            TextureType::RedChannel => "TEXTURE_RED_CHANNEL",
+            TextureType::RgbChannel => "TEXTURE_RGB_CHANNEL",
+        }
+        .into(),
+        dimensions: match t.dimensions() {
+            TextureDimensions::D1 => "TEXTURE_1D",
+            TextureDimensions::D2 => "TEXTURE_2D",
+        }
+        .into(),
+        interpolation: match t.interpolation() {
+            Interpolation::Nearest => "INTERP_NEAREST",
+            other => panic!("interpolation {other:?}"),
+        }
+        .into(),
+        binding_index: u64::from(desc.texture_shader_binding_index(index).unwrap()),
+        values: t.values().iter().map(|v| v.to_bits()).collect(),
+    }
 }
 
 fn wheel(reply: &GpuShaderReply) -> Outcome {
@@ -190,18 +258,17 @@ fn wheel(reply: &GpuShaderReply) -> Outcome {
         Some(raised) => Err(raised.message),
         None => {
             let shader = reply.shader();
-            assert!(
-                shader.uniforms.is_empty()
-                    && shader.textures.is_empty()
-                    && shader.textures_3d.is_empty()
-            );
+            assert!(shader.uniforms.is_empty() && shader.textures_3d.is_empty());
             let getter = |key: &str| shader.getters[key].as_str().unwrap().to_string();
-            Ok([
-                shader.text.clone(),
-                shader.cache_id.clone(),
-                getter("pixel_name"),
-                getter("resource_prefix"),
-            ])
+            Ok((
+                [
+                    shader.text.clone(),
+                    shader.cache_id.clone(),
+                    getter("pixel_name"),
+                    getter("resource_prefix"),
+                ],
+                shader.textures.iter().map(Tex::from).collect(),
+            ))
         }
     };
     Outcome::Extracted {
@@ -256,16 +323,27 @@ fn port(case: &Case, finalize_first: bool) -> Outcome {
     if let Some(p) = case.names.prefix {
         desc.set_resource_prefix(p);
     }
+    if let Some((index, start)) = case.names.descriptor_set {
+        desc.set_descriptor_set_index(index, start).unwrap();
+    }
+    if let Some(allowed) = case.names.allow_texture_1d {
+        desc.set_allow_texture_1d(allowed);
+    }
     let shader = gpu
         .extract_gpu_shader_info(&mut desc)
         .map(|()| {
-            assert!(desc.num_uniforms() == 0 && desc.num_textures() + desc.num_textures_3d() == 0);
-            [
-                text(desc.shader_text()),
-                text(&desc.cache_id()),
-                text(desc.pixel_name()),
-                text(desc.resource_prefix()),
-            ]
+            assert!(desc.num_uniforms() == 0 && desc.num_textures_3d() == 0);
+            (
+                [
+                    text(desc.shader_text()),
+                    text(&desc.cache_id()),
+                    text(desc.pixel_name()),
+                    text(desc.resource_prefix()),
+                ],
+                (0..desc.num_textures())
+                    .map(|i| port_texture(&desc, i))
+                    .collect(),
+            )
         })
         .map_err(|e| e.message().to_string());
     Outcome::Extracted {
@@ -304,7 +382,7 @@ fn check(cases: &[Case]) {
             Outcome::Extracted { shader: Ok(p), .. },
         ) = (wheel, port)
         {
-            assert_text_eq(&case.label, &w[0], &p[0]);
+            assert_text_eq(&case.label, &w.0[0], &p.0[0]);
         }
         let labels: Vec<&str> = failures.iter().map(|(c, _, _)| c.label.as_str()).collect();
         panic!(
@@ -374,10 +452,11 @@ fn aces_1_shaders_match_the_wheel() {
         Names {
             pixel: Some("px"),
             prefix: Some("p__q"),
+            ..Names::default()
         },
         Names {
             pixel: Some(""),
-            prefix: None,
+            ..Names::default()
         },
     ] {
         for i in 0..STYLES.len() {
@@ -509,6 +588,7 @@ fn surround_hsv_hsy_and_cie_shaders_match_the_wheel() {
             Names {
                 pixel: Some("px"),
                 prefix: Some("p__q"),
+                ..Names::default()
             },
         ));
     }
@@ -593,8 +673,81 @@ fn pq_gamma_log_and_double_log_shaders_match_the_wheel() {
             Names {
                 pixel: Some("px"),
                 prefix: Some("p__q"),
+                ..Names::default()
             },
         ));
+    }
+    check(&cases);
+}
+
+/// The ACES 2.0 outputs' limiting primaries: Rec.709, P3-D65, Rec.2020, P3-DCI, P3-D60.
+const ACES2_PRIMARIES: [[f64; 8]; 5] = [
+    [0.64, 0.33, 0.30, 0.60, 0.15, 0.06, 0.3127, 0.3290],
+    [0.680, 0.320, 0.265, 0.690, 0.150, 0.060, 0.3127, 0.3290],
+    [0.708, 0.292, 0.170, 0.797, 0.131, 0.046, 0.3127, 0.3290],
+    [0.680, 0.320, 0.265, 0.690, 0.150, 0.060, 0.314, 0.351],
+    [0.680, 0.320, 0.265, 0.690, 0.150, 0.060, 0.32168, 0.33767],
+];
+
+/// ACES2065-1's primaries (AP0), as upstream's aces_rgb_to_jmh_20 gives them
+/// (tests/cpu/ops/fixedfunction/FixedFunctionOpCPU_tests.cpp:773 @ v2.5.2), and AP1.
+const AP0: [f64; 8] = [
+    0.7347, 0.2653, 0.0000, 1.0000, 0.0001, -0.0770, 0.32168, 0.33767,
+];
+const AP1: [f64; 8] = [0.713, 0.293, 0.165, 0.830, 0.128, 0.044, 0.32168, 0.33767];
+
+/// The settings of the ACES 2.0 cases besides the defaults: names, a descriptor set (the
+/// textures' bindings in GLSL for Vulkan), and 2D textures where 1D ones aren't allowed.
+fn aces2_settings() -> [Names; 3] {
+    [
+        Names {
+            pixel: Some("px"),
+            prefix: Some("p__q"),
+            ..Names::default()
+        },
+        Names {
+            descriptor_set: Some((2, 3)),
+            ..Names::default()
+        },
+        Names {
+            allow_texture_1d: Some(false),
+            ..Names::default()
+        },
+    ]
+}
+
+/// RGB to and from ACES 2.0's JMh (chunk 2.4f1) for AP0, AP1 and the outputs' primaries, at
+/// every level, in every language; the shader's settings.
+#[test]
+fn aces_2_rgb_to_jmh_shaders_match_the_wheel() {
+    let style = |p: &[f64; 8], dir| {
+        T::Fixed(
+            "FIXED_FUNCTION_ACES_RGB_TO_JMH_20",
+            FixedFunctionOpStyle::AcesRgbToJmh20,
+            p.to_vec(),
+            dir,
+        )
+    };
+    let mut cases = Vec::new();
+    for (i, p) in [AP0, AP1].iter().chain(&ACES2_PRIMARIES).enumerate() {
+        for dir in [F, I] {
+            cases.extend(cases_of(
+                &format!("RGB to JMh {i} {dir:?}"),
+                vec![style(p, dir)],
+                &levels()[if i == 0 { 0..5 } else { 1..2 }],
+                Names::default(),
+            ));
+        }
+    }
+    for names in aces2_settings() {
+        for dir in [F, I] {
+            cases.extend(cases_of(
+                "RGB to JMh settings",
+                vec![style(&AP0, dir)],
+                &levels()[1..2],
+                names,
+            ));
+        }
     }
     check(&cases);
 }
