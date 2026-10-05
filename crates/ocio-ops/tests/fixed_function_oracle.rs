@@ -49,7 +49,9 @@ use ocio_ops::open_color_types::{FixedFunctionStyle, TransformDirection};
 use ocio_ops::ops::fixedfunction::FixedFunctionOpStyle;
 use ocio_ops::ops::fixedfunction::fixed_function_op_cpu::get_fixed_function_cpu_renderer;
 use ocio_ops::ops::fixedfunction::fixed_function_op_data::FixedFunctionOpData;
-use ocio_testkit::battery::params::{A, B, Case, Channels, G, Params, Precision, R, RGB, Slot};
+use ocio_testkit::battery::params::{
+    A, B, Case, Channels, G, Params, Precision, R, RGB, Slot, W0001Function,
+};
 use ocio_testkit::battery::{self, Combo, Direction, Family, Port, Spec, Validation};
 use ocio_testkit::transform_text::f64_spec;
 use serde_json::Value;
@@ -559,6 +561,25 @@ fn aces_2_styles_match_the_wheel() {
         name: "ACES 2.0",
         cases,
         bases,
+    });
+}
+
+#[test]
+fn pq_matches_the_wheel() {
+    use FixedFunctionStyle::*;
+    // W0001: without fast math, the Windows wheel computes PQ with SVML's pow, the port with
+    // powf; finite values within the waiver's bound per renderer.
+    let pq = Case::new("LinToPq", Fixed::new(LinToPq, &[]))
+        .w0001(W0001Function::LinToPq, W0001Function::PqToLin);
+    let cases = vec![
+        pq,
+        Case::new("refused LinToPq parameter", Fixed::new(LinToPq, &[1.0])),
+    ];
+
+    battery::run(&FixedFamily {
+        name: "PQ",
+        cases,
+        bases: Vec::new(),
     });
 }
 
