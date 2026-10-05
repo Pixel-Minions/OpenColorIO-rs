@@ -86,6 +86,7 @@ impl RangeOpData {
             // `if (range1->isIdentity())`: the Lut3D type, whose op can replace an identity
             // range, comes with its family.
             OpData::Log(_)
+            | OpData::FixedFunction(_)
             | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Exponent(_)
@@ -120,6 +121,7 @@ impl RangeOpData {
                 Ok(())
             }
             OpData::Log(_)
+            | OpData::FixedFunction(_)
             | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Exponent(_)

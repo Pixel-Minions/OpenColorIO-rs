@@ -28,6 +28,7 @@ use crate::op_data::{OpData, OpDataRcPtr, OpDataType, OpDataVec, get_type_name};
 use crate::open_color_types::{DynamicPropertyType, TransformDirection};
 use crate::ops::cdl::cdl_op::create_cdl_op;
 use crate::ops::exponent::exponent_op::create_exponent_op;
+use crate::ops::fixedfunction::fixed_function_op::create_fixed_function_op_from_data;
 use crate::ops::gamma::gamma_op::create_gamma_op;
 use crate::ops::log::log_op::create_log_op;
 use crate::ops::lut1d::lut1d_op::{NOT_PORTED_F32, create_lut1d_op};
@@ -227,6 +228,7 @@ impl Op {
             OpData::Matrix(data) => Ok(data.clone_op()),
             OpData::Range(data) => data.clone_op(),
             OpData::Exponent(data) => Ok(data.clone_op()),
+            OpData::FixedFunction(data) => data.clone_op(),
             OpData::Reference(_) => no_reference_op(),
             OpData::NoOp(data) => Ok(data.clone_op()),
         }
@@ -246,6 +248,7 @@ impl Op {
             OpData::Matrix(data) => data.get_info(),
             OpData::Range(data) => data.get_info(),
             OpData::Exponent(data) => data.get_info(),
+            OpData::FixedFunction(data) => data.get_info(),
             OpData::Reference(_) => no_reference_op(),
             OpData::NoOp(data) => data.get_info(),
         }
@@ -268,6 +271,7 @@ impl Op {
             OpData::Reference(_) => no_reference_op(),
             // The Op default: the data's.
             OpData::Log(_)
+            | OpData::FixedFunction(_)
             | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Lut1D(_)
@@ -286,6 +290,7 @@ impl Op {
             OpData::Reference(_) => no_reference_op(),
             // The Op default: the data's.
             OpData::Log(_)
+            | OpData::FixedFunction(_)
             | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Lut1D(_)
@@ -314,6 +319,7 @@ impl Op {
                 create_range_op(&mut ops, range, TransformDirection::Forward)?;
             }
             OpData::Log(_)
+            | OpData::FixedFunction(_)
             | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Exponent(_)
@@ -356,6 +362,7 @@ impl Op {
             OpData::Matrix(data) => data.is_same_type(op),
             OpData::Range(data) => data.is_same_type(op),
             OpData::Exponent(data) => data.is_same_type(op),
+            OpData::FixedFunction(data) => data.is_same_type(op),
             OpData::Reference(_) => no_reference_op(),
             OpData::NoOp(data) => data.is_same_type(op),
         }
@@ -374,6 +381,7 @@ impl Op {
             OpData::Matrix(data) => data.is_inverse(op),
             OpData::Range(data) => data.is_inverse(op),
             OpData::Exponent(data) => data.is_inverse(op),
+            OpData::FixedFunction(data) => data.is_inverse_op(op),
             OpData::Reference(_) => no_reference_op(),
             OpData::NoOp(data) => data.is_inverse(op),
         }
@@ -391,6 +399,7 @@ impl Op {
             OpData::Matrix(data) => data.can_combine_with(op),
             OpData::Range(data) => data.can_combine_with(op),
             OpData::Exponent(data) => Ok(data.can_combine_with(op)),
+            OpData::FixedFunction(data) => Ok(data.can_combine_with(op)),
             OpData::Reference(_) => no_reference_op(),
             OpData::Lut1D(data) => Ok(data.can_combine_with(op)),
             // The Op default.
@@ -410,6 +419,7 @@ impl Op {
             OpData::Matrix(data) => data.combine_with(ops, second_op),
             OpData::Range(data) => data.combine_with(ops, second_op),
             OpData::Exponent(data) => data.combine_with(ops, second_op),
+            OpData::FixedFunction(data) => data.combine_with(ops, second_op),
             OpData::Reference(_) => no_reference_op(),
             OpData::Lut1D(data) => data.combine_with(ops, second_op),
             // The Op default.
@@ -434,6 +444,7 @@ impl Op {
             OpData::Reference(_) => no_reference_op(),
             // The Op default: the data's.
             OpData::Log(_)
+            | OpData::FixedFunction(_)
             | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Lut1D(_)
@@ -504,6 +515,7 @@ impl Op {
             OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Log(_)
+            | OpData::FixedFunction(_)
             | OpData::Exponent(_)
             | OpData::NoOp(_) => Ok(()),
         }
@@ -522,6 +534,7 @@ impl Op {
             OpData::Matrix(data) => data.get_op_cache_id(),
             OpData::Range(data) => Ok(data.get_op_cache_id()),
             OpData::Exponent(data) => Ok(data.get_op_cache_id()),
+            OpData::FixedFunction(data) => Ok(data.get_op_cache_id()),
             OpData::Reference(_) => no_reference_op(),
             OpData::NoOp(data) => Ok(data.get_op_cache_id()),
         }
@@ -559,6 +572,10 @@ impl Op {
             }
             OpData::Exponent(data) => {
                 data.get_cpu_op().apply(rgba);
+                Ok(())
+            }
+            OpData::FixedFunction(data) => {
+                data.get_cpu_op(false)?.apply(rgba);
                 Ok(())
             }
             OpData::Reference(_) => no_reference_op(),
@@ -619,6 +636,13 @@ impl Op {
                 renderer.apply(output);
                 Ok(())
             }
+            // The FixedFunction renderers read a pixel before writing it too.
+            OpData::FixedFunction(data) => {
+                let renderer = data.get_cpu_op(false)?;
+                output.copy_from_slice(input);
+                renderer.apply(output);
+                Ok(())
+            }
             OpData::Reference(_) => no_reference_op(),
             // The no-ops copy (src/OpenColorIO/ops/noop/NoOps.cpp:51-52, 322-323, 408-409 @
             // v2.5.2).
@@ -641,6 +665,7 @@ impl Op {
             // @ v2.5.2).
             OpData::Lut1D(_) => false,
             OpData::Log(_)
+            | OpData::FixedFunction(_)
             | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Matrix(_)
@@ -658,6 +683,7 @@ impl Op {
             OpData::Reference(_) => no_reference_op(),
             // The Op default.
             OpData::Log(_)
+            | OpData::FixedFunction(_)
             | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Lut1D(_)
@@ -677,6 +703,7 @@ impl Op {
             OpData::Reference(_) => no_reference_op(),
             // The Op default.
             OpData::Log(_)
+            | OpData::FixedFunction(_)
             | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Lut1D(_)
@@ -696,6 +723,7 @@ impl Op {
             OpData::Reference(_) => no_reference_op(),
             // The Op default.
             OpData::Log(_)
+            | OpData::FixedFunction(_)
             | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Lut1D(_)
@@ -720,6 +748,7 @@ impl Op {
             OpData::Reference(_) => no_reference_op(),
             // The Op default: each overload's error.
             OpData::Log(_)
+            | OpData::FixedFunction(_)
             | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Lut1D(_)
@@ -739,6 +768,7 @@ impl Op {
             OpData::Reference(_) => no_reference_op(),
             // The Op default: nothing.
             OpData::Log(_)
+            | OpData::FixedFunction(_)
             | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Lut1D(_)
@@ -767,6 +797,7 @@ impl Op {
             OpData::Matrix(data) => Ok(Some(data.get_cpu_op()?)),
             OpData::Range(data) => Ok(Some(data.get_cpu_op()?)),
             OpData::Exponent(data) => Ok(Some(data.get_cpu_op())),
+            OpData::FixedFunction(data) => Ok(Some(data.get_cpu_op(fast_log_exp_pow)?)),
             OpData::Reference(_) => no_reference_op(),
             // AllocationNoOp, FileNoOp and LookNoOp::getCPUOp return nullptr
             // (src/OpenColorIO/ops/noop/NoOps.cpp:47, 318, 404 @ v2.5.2).
@@ -1132,6 +1163,10 @@ pub fn create_op_vec_from_op_data(
         OpData::Exponent(exp_src) => {
             let exp = exp_src.clone();
             create_exponent_op(ops, exp, dir)
+        }
+        OpData::FixedFunction(ff_src) => {
+            let ff = ff_src.clone();
+            create_fixed_function_op_from_data(ops, ff, dir)
         }
         OpData::Reference(_) => Err(Exception::new(
             "ReferenceOpData should have been replaced by referenced ops",

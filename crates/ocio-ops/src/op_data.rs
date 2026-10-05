@@ -17,6 +17,7 @@ use crate::exception::{Exception, Result};
 use crate::format_metadata::{FormatMetadataImpl, METADATA_ID, METADATA_NAME};
 use crate::ops::cdl::CdlOpData;
 use crate::ops::exponent::ExponentOpData;
+use crate::ops::fixedfunction::fixed_function_op_data::FixedFunctionOpData;
 use crate::ops::gamma::GammaOpData;
 use crate::ops::log::log_op_data::LogOpData;
 use crate::ops::lut1d::Lut1DOpData;
@@ -113,6 +114,8 @@ pub enum OpData {
     Range(RangeOpData),
     /// `ExponentOpData`.
     Exponent(ExponentOpData),
+    /// `FixedFunctionOpData`.
+    FixedFunction(FixedFunctionOpData),
     /// `ReferenceOpData`.
     Reference(ReferenceOpData),
     /// `NoOpData` and its subclass `FileNoOpData`.
@@ -138,6 +141,7 @@ impl OpData {
             OpData::Matrix(data) => data.get_type(),
             OpData::Range(data) => data.get_type(),
             OpData::Exponent(data) => data.get_type(),
+            OpData::FixedFunction(data) => data.get_type(),
             OpData::Reference(_) => OpDataType::Reference,
             OpData::NoOp(_) => OpDataType::NoOp,
         }
@@ -161,6 +165,7 @@ impl OpData {
                 data.validate();
                 Ok(())
             }
+            OpData::FixedFunction(data) => data.validate(),
             OpData::Reference(data) => {
                 data.validate();
                 Ok(())
@@ -184,6 +189,7 @@ impl OpData {
             OpData::Matrix(data) => data.is_no_op(),
             OpData::Range(data) => Ok(data.is_no_op()),
             OpData::Exponent(data) => Ok(data.is_no_op()),
+            OpData::FixedFunction(data) => Ok(data.is_no_op()),
             OpData::Reference(data) => Ok(data.is_no_op()),
             OpData::NoOp(data) => Ok(data.is_no_op()),
         }
@@ -202,6 +208,7 @@ impl OpData {
             OpData::Matrix(data) => data.is_identity(),
             OpData::Range(data) => Ok(data.is_identity()),
             OpData::Exponent(data) => Ok(data.is_identity()),
+            OpData::FixedFunction(data) => Ok(data.is_identity()),
             OpData::Reference(data) => Ok(data.is_identity()),
             OpData::NoOp(data) => Ok(data.is_identity()),
         }
@@ -221,6 +228,7 @@ impl OpData {
             }
             // The OpData default: nothing.
             OpData::Log(_)
+            | OpData::FixedFunction(_)
             | OpData::Gamma(_)
             | OpData::Lut1D(_)
             | OpData::Matrix(_)
@@ -249,6 +257,7 @@ impl OpData {
             OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
+            | OpData::FixedFunction(_)
             | OpData::Reference(_)
             | OpData::NoOp(_) => Ok(OpData::Matrix(MatrixOpData::new())),
         }
@@ -268,6 +277,7 @@ impl OpData {
             OpData::Matrix(data) => data.has_channel_crosstalk(),
             OpData::Range(data) => data.has_channel_crosstalk(),
             OpData::Exponent(data) => data.has_channel_crosstalk(),
+            OpData::FixedFunction(data) => data.has_channel_crosstalk(),
             OpData::Reference(data) => data.has_channel_crosstalk(),
             OpData::NoOp(data) => data.has_channel_crosstalk(),
         }
@@ -286,6 +296,9 @@ impl OpData {
             OpData::Lut1D(data) => matches!(other, OpData::Lut1D(other) if data.equals(other)),
             OpData::Matrix(data) => matches!(other, OpData::Matrix(other) if data.equals(other)),
             OpData::Range(data) => matches!(other, OpData::Range(other) if data.equals(other)),
+            OpData::FixedFunction(data) => {
+                matches!(other, OpData::FixedFunction(other) if data.equals(other))
+            }
             OpData::Reference(data) => {
                 matches!(other, OpData::Reference(other) if data.equals(other))
             }
@@ -308,6 +321,7 @@ impl OpData {
             OpData::Matrix(data) => data.get_cache_id(),
             OpData::Range(data) => Ok(data.get_cache_id()),
             OpData::Exponent(data) => Ok(data.get_cache_id()),
+            OpData::FixedFunction(data) => Ok(data.get_cache_id()),
             OpData::Reference(data) => data.get_cache_id(),
             OpData::NoOp(data) => Ok(data.get_cache_id()),
         }
@@ -325,6 +339,7 @@ impl OpData {
             OpData::Matrix(data) => data.get_format_metadata(),
             OpData::Range(data) => data.get_format_metadata(),
             OpData::Exponent(data) => data.get_format_metadata(),
+            OpData::FixedFunction(data) => data.get_format_metadata(),
             OpData::Reference(data) => data.get_format_metadata(),
             OpData::NoOp(data) => data.get_format_metadata(),
         }
@@ -342,6 +357,7 @@ impl OpData {
             OpData::Matrix(data) => data.get_format_metadata_mut(),
             OpData::Range(data) => data.get_format_metadata_mut(),
             OpData::Exponent(data) => data.get_format_metadata_mut(),
+            OpData::FixedFunction(data) => data.get_format_metadata_mut(),
             OpData::Reference(data) => data.get_format_metadata_mut(),
             OpData::NoOp(data) => data.get_format_metadata_mut(),
         }

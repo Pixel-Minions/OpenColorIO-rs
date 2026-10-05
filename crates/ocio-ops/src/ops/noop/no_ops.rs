@@ -201,6 +201,7 @@ impl NoOpData {
         match &**op.data() {
             OpData::NoOp(other) => discriminant(&self.kind) == discriminant(&other.kind),
             OpData::Log(_)
+            | OpData::FixedFunction(_)
             | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Lut1D(_)
