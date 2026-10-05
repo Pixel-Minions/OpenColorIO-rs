@@ -1119,6 +1119,26 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p2-ff-gpu` (2.3g2); `fixed_function_op_gpu_oracle.rs` compares a
   curve with an offset with the wheel's shader.
 
+### I-87. The inverse double-log shader's break points are NaNs of each platform's sign
+
+- **Upstream:** `Add_DOUBLE_LOG_TO_LIN` computes the break points in log space as
+  `logSlope * std::log(linSlope * break + linOff) + logOff` in `double`
+  (`ops/fixedfunction/FixedFunctionOpGPU.cpp:2180-2181`), and validation allows a negative
+  argument (it checks only the base and the breaks' order). The Windows wheel calls the
+  UCRT's `log`, which returns the negative x86 default NaN for it; the Linux wheel links
+  `log@GLIBC_2.2.5` (`Add_DOUBLE_LOG_TO_LIN` at 0x3711f0), whose compatibility wrapper returns
+  a positive NaN. The shader then compares the pixel with `vec3(-nan, -nan, -nan)` on Windows
+  and `vec3(nan, nan, nan)` on Linux. The CPU renderer computes its breaks with `logf`, which
+  both wheels link in its current version, and the other `log` calls of the gamma-log and
+  double-log writers and renderers take the log base, which validation keeps positive.
+- **Who notices:** anyone comparing the shader text of such a `FIXED_FUNCTION_LIN_TO_DOUBLE_LOG`
+  inverse between a Windows and a Linux machine (the shader's results don't depend on the sign).
+- **A fix:** refuse a negative log argument at a break in `validate`, or one `log` on every
+  platform; either changes the port's results on at least one of them.
+- **Status:** matched in `p2-ff-gpu` (`log_as_linked` in `fixed_function_op_gpu.rs`, as
+  `log2_glibc_2_2_5` does for I-70); `fixed_function_op_gpu_oracle.rs`,
+  `double_log_break_points_match_the_wheel`, on both platforms.
+
 ## Python module (`ocio-py`)
 
 ### I-12. A channel order passed without its keyword is misread
@@ -1706,7 +1726,8 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   that validation refuses) give upstream's answers. The renderers in 2.3b, and in 2.3c1 and
   2.3d1 (`p2-ff-cpu-2`): `fixed_function_op_cpu_tests.rs` checks their errors.
   The GPU writer reads the ACES 1.3 gamut compression's parameters the same way in `p2-ff-gpu`
-  (2.3f, `fixed_function_op_gpu.rs`), which checks its error.
+  (2.3f, `fixed_function_op_gpu.rs`), and the Rec.2100 surround's, the gamma-log's and the
+  double-log's (2.3g1, 2.3g2); `fixed_function_op_gpu.rs` checks their errors.
 
 ### U-32. ACES 2.0's hue table past its arrays
 
