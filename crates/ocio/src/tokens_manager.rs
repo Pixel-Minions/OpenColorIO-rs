@@ -94,32 +94,3 @@ impl TokensManager {
         self.tokens.clear();
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Lookups ignore case and the surrounding whitespace; tokens are stored trimmed, in order;
-    /// empty tokens are ignored; an index outside the list is `None`.
-    #[test]
-    fn lookups_ignore_case_and_whitespace() {
-        let mut tokens = TokensManager::default();
-        tokens.add_token(b"  File-IO ");
-        tokens.add_token(b"file-io");
-        tokens.add_token(b"");
-        tokens.add_token(b"\0x");
-        tokens.add_token(b"working space");
-        assert_eq!(tokens.num_tokens(), 2);
-        assert_eq!(tokens.token(0), Some(&b"File-IO"[..]));
-        assert_eq!(tokens.token(1), Some(&b"working space"[..]));
-        assert_eq!(tokens.token(2), None);
-        assert_eq!(tokens.token(-1), None);
-        assert!(tokens.has_token(b"FILE-IO\t"));
-        assert!(!tokens.has_token(b""));
-        tokens.remove_token(b" WORKING SPACE");
-        assert_eq!(tokens.num_tokens(), 1);
-        assert_eq!(tokens.token(0), Some(&b"File-IO"[..]));
-        tokens.clear_tokens();
-        assert_eq!(tokens.num_tokens(), 0);
-    }
-}

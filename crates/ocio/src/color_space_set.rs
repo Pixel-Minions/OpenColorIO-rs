@@ -131,7 +131,7 @@ impl ColorSpaceSet {
     /// alias, and one with an alias another color space uses.
     ///
     /// Port of `ColorSpaceSet::addColorSpace` and `Impl::add(const ConstColorSpaceRcPtr &)`
-    /// (ColorSpaceSet.cpp:119-168, 291-294 @ v2.5.2).
+    /// (ColorSpaceSet.cpp:120-171, 291-294 @ v2.5.2).
     #[doc(alias = "addColorSpace")]
     pub fn add_color_space(&mut self, cs: &ColorSpace) -> Result<()> {
         let cs_name = cs.name();
@@ -199,7 +199,7 @@ impl ColorSpaceSet {
     /// does; it stops at the first refused, keeping those added before.
     ///
     /// Port of `ColorSpaceSet::addColorSpaces` and `Impl::add(const Impl &)`
-    /// (ColorSpaceSet.cpp:170-176, 296-299 @ v2.5.2).
+    /// (ColorSpaceSet.cpp:173-179, 296-299 @ v2.5.2).
     #[doc(alias = "addColorSpaces")]
     pub fn add_color_spaces(&mut self, css: &ColorSpaceSet) -> Result<()> {
         for cs in &css.color_spaces {
@@ -212,7 +212,7 @@ impl ColorSpaceSet {
     /// looked at).
     ///
     /// Port of `ColorSpaceSet::removeColorSpace` and `Impl::remove(const char *)`
-    /// (ColorSpaceSet.cpp:178-193, 301-304 @ v2.5.2).
+    /// (ColorSpaceSet.cpp:181-195, 301-304 @ v2.5.2).
     #[doc(alias = "removeColorSpace")]
     pub fn remove_color_space(&mut self, name: impl AsRef<[u8]>) {
         let cs_name = c_str(name.as_ref());
@@ -236,7 +236,7 @@ impl ColorSpaceSet {
     /// Removes the color spaces named as those of `css`.
     ///
     /// Port of `ColorSpaceSet::removeColorSpaces` and `Impl::remove(const Impl &)`
-    /// (ColorSpaceSet.cpp:195-201, 306-309 @ v2.5.2).
+    /// (ColorSpaceSet.cpp:197-203, 306-309 @ v2.5.2).
     #[doc(alias = "removeColorSpaces")]
     pub fn remove_color_spaces(&mut self, css: &ColorSpaceSet) {
         for cs in &css.color_spaces {

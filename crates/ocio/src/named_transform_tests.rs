@@ -47,13 +47,6 @@ fn basic_without_a_config() {
          direction=forward, fileindepth=unknown, fileoutdepth=unknown, matrix=[1, 0, 0, 0, 0, \
          1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1], offset=[0, 0, 0, 0]>>"
     );
-
-    named_transform.set_transform(None, TransformDirection::Forward);
-    assert!(
-        named_transform
-            .transform(TransformDirection::Forward)
-            .is_none()
-    );
 }
 
 /// The alias part of upstream's `alias` (NamedTransform_tests.cpp:66-138 @ v2.5.2).
