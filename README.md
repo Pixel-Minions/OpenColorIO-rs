@@ -30,10 +30,12 @@ from Rust and, later, from Python.
   its 384 Python tests run unmodified against this port's Python module.
 - **Nothing is waived silently.** Every exception is a written, approved waiver in
   [`waivers.toml`](waivers.toml), and CI fails on any difference that isn't listed there. Today
-  there are two, and neither changes a visible value:
+  there are two:
   - **W0001:** on Windows, the port uses standard `powf` in one exact-math PQ path. The official
-    build uses MSVC's vector math library there. About 1.7% of values differ, far below one
-    8-, 10- or 12-bit code value.
+    build uses MSVC's vector math library there. About 1.7% of values differ. For inputs up to
+    1 in magnitude the difference is bounded and invisible in practice. Above 1, `PQ_TO_LIN`
+    approaches its pole near 1.992, where the two libraries drift apart without bound, so
+    those inputs are waived. Linux, and fast math, are bit-exact.
   - **W0002:** with a NaN parameter, the internal bits of the resulting NaN values may differ,
     including in the 1D LUT the optimizer bakes from it and the CPU cache ID that hashes that LUT;
     they are still NaN.

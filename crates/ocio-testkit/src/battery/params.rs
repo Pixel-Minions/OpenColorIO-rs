@@ -1119,11 +1119,31 @@ mod tests {
             case.compare_pixels(&inv, &inputs, &expected, &beyond),
             Comparison::Mismatch(_)
         ));
-        // Not forward (LIN_TO_PQ), whatever the input.
+        // Not forward (LIN_TO_PQ), whatever the input: an infinity or a NaN at input 1.5 alone
+        // is a mismatch there.
+        assert!(W0001Function::LinToPq.unbounded().is_none());
         assert!(matches!(
             case.compare_pixels(&fwd, &inputs, &expected, &far),
             Comparison::Mismatch(_)
         ));
+        for value in [0x7f80_0000, NAN_A] {
+            let mut only_above_1 = expected.clone();
+            only_above_1[0] = f32::from_bits(value);
+            assert!(matches!(
+                case.compare_pixels(&fwd, &inputs, &expected, &only_above_1),
+                Comparison::Mismatch(_)
+            ));
+        }
+        // Within the bound means finite: an infinity one ulp past the largest finite value, at
+        // input 1.0, is a mismatch in both directions.
+        let largest = px([0x7f7f_ffff, one, one, one]);
+        let infinite = px([0x7f80_0000, one, one, one]);
+        for combo in [fwd, inv] {
+            assert!(matches!(
+                case.compare_pixels(&combo, &px([one; 4]), &largest, &infinite),
+                Comparison::Mismatch(_)
+            ));
+        }
     }
 
     /// W0002 covers the channels of NaN parameters and no other, alpha included: for a NaN
