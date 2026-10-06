@@ -175,6 +175,7 @@ pub(super) fn run<F: Family>(family: &F, plan: &Plan) -> Summary {
     }
     assert!(!combos.is_empty(), "{name}: no combinations");
     summary.groups = cases.len() * combos.len();
+    let optimization_off = family.optimization_off();
 
     let explicit_buffers = buffers(&plan.probes);
     let generated_buffers = buffers(&plan.generated_probes);
@@ -201,7 +202,7 @@ pub(super) fn run<F: Family>(family: &F, plan: &Plan) -> Summary {
                 (spec, blobs)
             });
             routes[c].insert(Route::of(spec));
-            let args = Arc::new(spec.cpu_apply_args(combo));
+            let args = Arc::new(spec.cpu_apply_args_without(combo, &optimization_off));
             let blobs = Arc::clone(blobs);
             let extra = extras
                 .entry(combo.direction)
