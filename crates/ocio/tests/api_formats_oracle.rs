@@ -52,7 +52,9 @@ use ocio_ops::image_desc::{
     AUTO_STRIDE, Bytes, ImageDesc, ImageDescMut, PackedImageDesc, PixelData, PlanarImageDesc,
 };
 use ocio_ops::open_color_types::ChannelOrdering;
-use ocio_ops::ops::lut1d::lut1d_op::NOT_PORTED_COMPOSE;
+use ocio_ops::ops::lut1d::lut1d_op::{
+    NOT_PORTED_COMPOSE, NOT_PORTED_FAST_INVERSE, NOT_PORTED_INVERSE_RENDERER,
+};
 use ocio_testkit::Oracle;
 use ocio_testkit::battery::params::Comparison;
 use ocio_testkit::battery::{self, BitDepth as Depth, Direction, Tier};
@@ -599,16 +601,15 @@ impl Lut1D {
     }
 }
 
-/// The inverse LUT's deferral (its set-up in the processor's `finalize`, WP 2.1).
-const NOT_PORTED_INVERSE: &str = "Lut1D: the inverse 1D LUT is not ported yet (WP 2.1).";
-
 /// Where the port refuses a `Lut1DTransform` at `combo` because the renderer upstream picks is
 /// still to come in Phase 2, with the stage and message; `None` where the renderer is a lookup
 /// or a float renderer, which the port has, and which must match the wheel.
 ///
 /// Upstream (src/OpenColorIO @ v2.5.2):
-/// - an inverse LUT is set up when the processor finalizes it (`Lut1DOpData::finalize`, the
-///   inverse's domain); the port refuses there;
+/// - an inverse LUT is set up when the processor finalizes it (`Lut1DOpData::finalize`); with
+///   `OPTIMIZATION_LUT_INV_FAST` the CPU processor's optimizer replaces it with a fast forward
+///   LUT (`ReplaceInverseLuts`, WP 2.1g), and otherwise renders it (`InvLut1DRenderer`, WP
+///   2.1f);
 /// - the optimizer leaves a single forward LUT alone: `FindSeparablePrefix` gives no prefix to
 ///   bake for it (OpOptimizers.cpp:473-509), and a hue adjustment has crosstalk anyway;
 /// - `GetLut1DRenderer` (ops/lut1d/Lut1DOpCPU.cpp:1657-1754) picks the hue-adjust renderer, the
@@ -622,7 +623,10 @@ fn lut1d_deferral(
     combo: &Combo,
 ) -> Option<(&'static str, &'static str)> {
     if dir == Direction::Inverse {
-        return Some(("processor", NOT_PORTED_INVERSE));
+        if combo.flags().has_flag(OptimizationFlags::LUT_INV_FAST) {
+            return Some(("cpu_processor", NOT_PORTED_FAST_INVERSE));
+        }
+        return Some(("cpu_processor", NOT_PORTED_INVERSE_RENDERER));
     }
     if combo.input == Depth::F32 {
         return None;
@@ -635,10 +639,16 @@ fn lut1d_deferral(
 
 /// The deferrals of the `Lut1DTransform`'s plan, per message, in the quick tier and in the
 /// others: a digest of the plan the test generates, so that it can't change unnoticed.
-const LUT1D_DEFERRALS_QUICK: [(&str, usize); 2] =
-    [(NOT_PORTED_COMPOSE, 1523), (NOT_PORTED_INVERSE, 2205)];
-const LUT1D_DEFERRALS_FULL: [(&str, usize); 2] =
-    [(NOT_PORTED_COMPOSE, 6125), (NOT_PORTED_INVERSE, 8853)];
+const LUT1D_DEFERRALS_QUICK: [(&str, usize); 3] = [
+    (NOT_PORTED_COMPOSE, 1523),
+    (NOT_PORTED_FAST_INVERSE, 1575),
+    (NOT_PORTED_INVERSE_RENDERER, 630),
+];
+const LUT1D_DEFERRALS_FULL: [(&str, usize); 3] = [
+    (NOT_PORTED_COMPOSE, 6125),
+    (NOT_PORTED_FAST_INVERSE, 6311),
+    (NOT_PORTED_INVERSE_RENDERER, 2542),
+];
 
 /// One apply: a case in a direction, a combination, and its request.
 struct Job {

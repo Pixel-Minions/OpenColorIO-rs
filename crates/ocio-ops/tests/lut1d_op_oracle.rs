@@ -319,8 +319,9 @@ fn cache_ids_match_the_wheel() {
     assert!(optimized_differs > 0);
 }
 
-/// Two LUTs that compose, and an inverse LUT: the wheel builds and optimizes them, the port
-/// refuses until Phase 2 (WP 2.5). When it ports them, this test fails: compare these cases
+/// Two LUTs that compose, and an inverse LUT replaced by its fast forward LUT
+/// (`OPTIMIZATION_LUT_INV_FAST`, part of the default): the wheel builds and optimizes them,
+/// the port refuses until WP 2.1g. When it ports them, this test fails: compare these cases
 /// like the others.
 #[test]
 fn phase_2_cases_wait_for_their_ports() {
@@ -338,9 +339,9 @@ fn phase_2_cases_wait_for_their_ports() {
         ),
         (
             vec![inverse],
-            "OPTIMIZATION_NONE",
-            OptimizationFlags::NONE,
-            "Lut1D: the inverse 1D LUT is not ported yet (WP 2.1).",
+            "OPTIMIZATION_DEFAULT",
+            OptimizationFlags::DEFAULT,
+            "Lut1D: the fast forward LUT of an inverse 1D LUT is not ported yet (Phase 2, WP 2.1).",
         ),
     ];
     let wheel = wheel_cache_ids(
@@ -358,4 +359,41 @@ fn phase_2_cases_wait_for_their_ports() {
             "{chain:?}"
         );
     }
+}
+
+/// An inverse LUT, set up by the processor's `finalize` (`Lut1DOpData::initializeFromForward`)
+/// and not optimized: its cache IDs equal the wheel's, as do those of the reversal-flattening
+/// and flat-ended LUTs whose values `finalize` changes.
+#[test]
+fn inverse_luts_without_optimization_match_the_wheel() {
+    let inverse = |length, curve: fn(f32) -> [f32; 3], half_domain| {
+        T::Lut(Lut {
+            dir: I,
+            half_domain,
+            ..Lut::std(length, Some(curve))
+        })
+    };
+    let chains = [
+        vec![inverse(17, square, false)],
+        vec![inverse(17, wavy, false)],
+        vec![inverse(65536, scale_half, true)],
+        vec![inverse(65536, wavy, true)],
+    ];
+    let wheel = wheel_cache_ids(
+        &chains
+            .iter()
+            .map(|chain| (chain.clone(), "OPTIMIZATION_NONE"))
+            .collect::<Vec<_>>(),
+    );
+    for (chain, wheel) in chains.iter().zip(wheel) {
+        let port =
+            port_cache_ids(chain, OptimizationFlags::NONE).map_err(|e| e.message().to_string());
+        assert_eq!(port, wheel, "{chain:?}");
+    }
+}
+
+/// A curve that goes back and forth, with flat ends: what an inverse LUT's set-up flattens.
+fn wavy(x: f32) -> [f32; 3] {
+    let w = (x * 9.0).sin();
+    [w.clamp(-0.5, 0.5), -w, (x - 0.5).abs()]
 }

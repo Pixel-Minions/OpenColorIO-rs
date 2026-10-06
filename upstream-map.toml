@@ -1794,14 +1794,14 @@ path = "src/OpenColorIO/ops/lut1d/Lut1DOpData.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_data.rs"]
 status = "partial"
-note = "p1-optimizer A: Lut3by1DArray, the constructors, the forward queries (isIdentity, isNoOp, hasChannelCrosstalk, getIdentityReplacement, mayLookup, mayCompose), MakeLookupDomain, GetLutIdealSize, validate, equals, inverse, getCacheID, hasExtendedRange, scale, finalize (forward; an inverse LUT is refused). p1-optimizer D: ComposeVec. The inverse set-up, getPairIdentityReplacement, Compose and MakeFastLut1DFromInverse are Phase 2 (WP 2.1)"
+note = "p1-optimizer A: Lut3by1DArray, the constructors, the forward queries (isIdentity, isNoOp, hasChannelCrosstalk, getIdentityReplacement, mayLookup, mayCompose), MakeLookupDomain, GetLutIdealSize, validate, equals, inverse, getCacheID, hasExtendedRange, scale, finalize. p1-optimizer D: ComposeVec. p2-lut1d-inv 2.1e: finalize's inverse set-up (initializeFromForward, I-66), the component properties, getPairIdentityReplacement. Compose and MakeFastLut1DFromInverse come with 2.1g"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpData.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_data.rs"]
 status = "partial"
-note = "p1-optimizer A: the forward data; ComponentProperties and the inverse are Phase 2 (WP 2.1)"
+note = "p1-optimizer A: the forward data; p2-lut1d-inv 2.1e: ComponentProperties, its getters, initializeFromForward. ComposeMethod, Compose and MakeFastLut1DFromInverse come with 2.1g"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpGPU.cpp"

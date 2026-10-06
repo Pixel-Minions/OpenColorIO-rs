@@ -147,7 +147,8 @@ fn identity_lut_1d() {
 }
 
 /// What waits for the rest of Phase 2 is an error: composing two LUTs, and the inverse LUT's
-/// set-up (`finalize`). The float renderers (`getCPUOp`, `apply`) exist.
+/// renderers. The float renderers (`getCPUOp`, `apply`) and the inverse's set-up (`finalize`)
+/// exist.
 #[test]
 fn phase_2_parts_are_errors() {
     let mut ops = OpVec::new();
@@ -184,9 +185,10 @@ fn phase_2_parts_are_errors() {
         create_square_lut(),
         TransformDirection::Inverse,
     );
+    inverse.finalize().unwrap();
     assert_eq!(
-        inverse.finalize().unwrap_err().message(),
-        "Lut1D: the inverse 1D LUT is not ported yet (WP 2.1)."
+        inverse[0].get_cpu_op(false).unwrap_err().message(),
+        crate::ops::lut1d::lut1d_op::NOT_PORTED_INVERSE_RENDERER
     );
 }
 

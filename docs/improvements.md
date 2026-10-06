@@ -710,6 +710,22 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p2-lut1d-simd`, every kernel and the scalar loop; checked against the
   wheel on rows of every length, and under SDE on each kernel's CPUs.
 
+### I-66. An inverse half-domain 1D LUT keeps a reversal at ±Inf in green and blue
+
+- **Upstream:** `Lut1DOpData::initializeFromForward` flattens the reversals of a half-domain
+  LUT's positive half up to index `31744u * maxChannels` and of its negative half up to
+  `64512u * maxChannels` (`ops/lut1d/Lut1DOpData.cpp:994`, `1013`), without the channel's
+  offset `+ c` that its start indices have. For red the last entry flattened is +Inf's (and
+  -Inf's); for green and blue the loop stops one entry before them, so a reversal at the +Inf
+  or -Inf code stays in those channels.
+- **Who notices:** inverse half-domain LUTs whose green or blue values at +Inf or -Inf go the
+  wrong way: the processor's cache ID hashes the unflattened value. The inverse renderer's
+  effective domain ends at 65504 and -65504 (`31743`, `64511`), so the pixels don't see it.
+- **A fix:** end the loops at `31744u * maxChannels + c` and `64512u * maxChannels + c`. That
+  changes the LUT's values and its cache ID for such LUTs.
+- **Status:** matched in `p2-lut1d-inv` (2.1e); `tests/lut1d_op_oracle.rs` compares the cache
+  IDs of inverse half-domain LUTs with such reversals with the wheel's.
+
 ### I-68. Two half-domain 1D LUTs are never equal
 
 - **Upstream:** `Lut1DTransform::setLength` fills a half-domain LUT with each half code's

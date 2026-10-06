@@ -27,6 +27,11 @@ use crate::open_color_types::TransformDirection;
 pub const NOT_PORTED_INVERSE_RENDERER: &str =
     "Lut1D: the inverse 1D LUT renderers are not ported yet (Phase 2, WP 2.1f).";
 
+/// The error of the optimizer's fast forward LUT of an inverse 1D LUT
+/// (`MakeFastLut1DFromInverse`, `OPTIMIZATION_LUT_INV_FAST`) until WP 2.1g.
+pub const NOT_PORTED_FAST_INVERSE: &str =
+    "Lut1D: the fast forward LUT of an inverse 1D LUT is not ported yet (Phase 2, WP 2.1).";
+
 /// The error of composing two 1D LUTs until Phase 2 (WP 2.5).
 pub const NOT_PORTED_COMPOSE: &str =
     "Lut1D: composing 1D LUTs is not ported yet (Phase 2, WP 2.5).";

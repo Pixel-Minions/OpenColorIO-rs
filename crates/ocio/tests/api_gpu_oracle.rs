@@ -25,8 +25,9 @@ use std::collections::BTreeMap;
 
 use common::api::{Calls, LEVELS, port_transform};
 use common::api_cases::{self, Cases};
-use ocio::{Config, Exception, TransformDirection};
+use ocio::{Config, Exception, OptimizationFlags, TransformDirection};
 use ocio_gpu::{GpuLanguage, GpuShaderDesc};
+use ocio_ops::ops::lut1d::lut1d_op::NOT_PORTED_FAST_INVERSE;
 use ocio_testkit::Oracle;
 use ocio_testkit::battery::Direction;
 use ocio_testkit::gpu::{self as oracle_gpu, GpuShaderReply, GpuShaderRequest, ShaderSettings};
@@ -209,15 +210,15 @@ fn port(class: &Class, job: &Job, calls: &Calls) -> Outcome {
 }
 
 /// The `Lut1DTransform`'s Phase 2 deferral in `dir`, the stage and message of the port's
-/// refusal: an inverse LUT is set up when the processor finalizes it (`Lut1DOpData::finalize`,
-/// WP 2.1); a forward one reaches the GPU processor, whose extraction needs the Lut1D op's GPU
+/// refusal: the GPU processor replaces an inverse LUT with a fast forward one
+/// (`OPTIMIZATION_LUT_INV_FAST`, `MakeFastLut1DFromInverse`, WP 2.1g) at the levels with that
+/// flag; otherwise, and for a forward LUT, the LUT reaches the GPU processor, whose extraction needs the Lut1D op's GPU
 /// writer (`GetLut1DGPUShaderProgram`, src/OpenColorIO/ops/lut1d/Lut1DOpGPU.cpp @ v2.5.2).
-fn lut1d_deferral(dir: Direction) -> (&'static str, &'static str) {
+fn lut1d_deferral(dir: Direction, level: Option<usize>) -> (&'static str, &'static str) {
+    let fast_inverse = level.is_none_or(|l| LEVELS[l].1.has_flag(OptimizationFlags::LUT_INV_FAST));
     match dir {
-        Direction::Inverse => (
-            "processor",
-            "Lut1D: the inverse 1D LUT is not ported yet (WP 2.1).",
-        ),
+        Direction::Inverse if fast_inverse => ("gpu_processor", NOT_PORTED_FAST_INVERSE),
+        Direction::Inverse => ("extract", "The GPU writer of <Lut1DOp> is not ported yet."),
         Direction::Forward => ("extract", "The GPU writer of <Lut1DOp> is not ported yet."),
     }
 }
@@ -225,11 +226,11 @@ fn lut1d_deferral(dir: Direction) -> (&'static str, &'static str) {
 /// Whether the port's outcome is the `Lut1DTransform`'s deferral in `dir`, where the wheel
 /// built a GPU processor: it then wrote a shader, or refused in the extraction with the
 /// writer's own message (upstream's Lut1D writer has no OSL translation).
-fn deferral(wheel: &Outcome, port: &Outcome, dir: Direction) -> bool {
+fn deferral(wheel: &Outcome, port: &Outcome, dir: Direction, level: Option<usize>) -> bool {
     let Outcome::Gpu { .. } = wheel else {
         return false;
     };
-    let (stage, message) = lut1d_deferral(dir);
+    let (stage, message) = lut1d_deferral(dir, level);
     match port {
         Outcome::Raised(s, m)
         | Outcome::Gpu {
@@ -267,11 +268,11 @@ fn check(class: &Class) {
             let port = port(class, job, case.params());
             if class.deferred {
                 // Every extraction of the class is a deferral, at its stage, with its message.
-                if !deferral(&wheel, &port, job.dir) {
+                if !deferral(&wheel, &port, job.dir, job.level) {
                     failures.push(format!(
                         "{what}: the deferral {:?} was expected\n  wheel {wheel:?}\n  port  \
                          {port:?}",
-                        lut1d_deferral(job.dir)
+                        lut1d_deferral(job.dir, job.level)
                     ));
                     continue;
                 }
@@ -283,7 +284,7 @@ fn check(class: &Class) {
                     failures.push(format!("{what}\n  wheel {w}\n  port  {p}"));
                 }
                 *deferred
-                    .entry(lut1d_deferral(job.dir).1.to_string())
+                    .entry(lut1d_deferral(job.dir, job.level).1.to_string())
                     .or_default() += 1;
                 continue;
             }
