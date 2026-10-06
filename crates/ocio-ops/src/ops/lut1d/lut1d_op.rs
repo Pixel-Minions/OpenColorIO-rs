@@ -9,14 +9,13 @@
 //! and call the methods here, `Lut1DOp`'s overrides. Its `finalize` changes the op's data, so
 //! it is [`Op::finalize`]'s own arm.
 //!
-//! Not here yet (Phase 2, WP 2.5): `combineWith`, which composes two LUTs (`Compose`), and the
-//! renderers for float input that `getCPUOp` asks for (interpolation, hue adjust, inverse,
-//! SIMD); until then they return [`NOT_PORTED_F32`] and [`NOT_PORTED_COMPOSE`]. In Phase 1 the
-//! only 1D LUT is the bake's, the first op of a processor with integer or half input, which
-//! the CPU engine looks up instead (`GetLut1DRenderer`, `ops::lut1d::lut1d_op_cpu`).
-//! `extractGpuShaderInfo` comes with the GPU writer (Phase 2), and `CreateLut1DTransform` and
-//! `BuildLut1DOp` with the `Lut1DTransform`. `GenerateLinearScaleLut1D` comes with the file
-//! readers that use it.
+//! `getCPUOp` is [`Op::get_cpu_op`]'s arm: `GetLut1DRenderer` for F32 to F32
+//! (`ops::lut1d::lut1d_op_cpu`), whose SIMD, hue adjust and inverse renderers are still to
+//! come ([`NOT_PORTED_SIMD`], [`NOT_PORTED_HUE_ADJUST`], [`NOT_PORTED_INVERSE_RENDERER`]).
+//! Not here yet (Phase 2, WP 2.1g): `combineWith`, which composes two LUTs (`Compose`); until
+//! then it returns [`NOT_PORTED_COMPOSE`]. `extractGpuShaderInfo` comes with the GPU writer
+//! (WP 2.1h); `CreateLut1DTransform` and `BuildLut1DOp` are the `ocio` crate's, with the
+//! `Lut1DTransform`. `GenerateLinearScaleLut1D` comes with the file readers that use it.
 
 use super::lut1d_op_data::Lut1DOpData;
 use crate::exception::{Exception, Result};
@@ -24,9 +23,19 @@ use crate::op::{Op, OpVec};
 use crate::op_data::OpData;
 use crate::open_color_types::TransformDirection;
 
-/// The error of the renderers for float input until Phase 2 (WP 2.5).
-pub const NOT_PORTED_F32: &str =
-    "Lut1D: the 1D LUT renderers for float input are not ported yet (Phase 2, WP 2.5).";
+/// The error of the renderer of a forward standard-domain LUT for float input, whose SIMD
+/// kernels upstream runs on every row of more than one pixel (`Lut1DOpCPU_SSE2.cpp`, `_AVX`,
+/// `_AVX2`, `_AVX512`), until they are ported (WP 2.1c, 2.1d).
+pub const NOT_PORTED_SIMD: &str =
+    "Lut1D: the 1D LUT's SIMD kernels for float input are not ported yet (WP 2.1c, 2.1d).";
+
+/// The error of the hue adjust renderers until WP 2.1b.
+pub const NOT_PORTED_HUE_ADJUST: &str =
+    "Lut1D: the 1D LUT's hue adjust renderers are not ported yet (Phase 2, WP 2.1b).";
+
+/// The error of the inverse renderers until WP 2.1f.
+pub const NOT_PORTED_INVERSE_RENDERER: &str =
+    "Lut1D: the inverse 1D LUT renderers are not ported yet (Phase 2, WP 2.1f).";
 
 /// The error of composing two 1D LUTs until Phase 2 (WP 2.5).
 pub const NOT_PORTED_COMPOSE: &str =

@@ -663,6 +663,25 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p1-cdl` (1.3c1), checked against the wheel in
   `crates/ocio-ops/tests/cdl_op_data_oracle.rs` and the battery.
 
+### I-64. 1D LUT lookups cast floats to integers by their low bits
+
+- **Upstream:** the 1D LUT lookups write alpha to an integer output with a plain cast,
+  `OutType(in[3] * m_alphaScaling)` (`Lut1DRendererHalfCode::apply` and
+  `Lut1DRenderer::apply`, `ops/lut1d/Lut1DOpCPU.cpp:525, 646`), and so do the hue-adjust
+  lookups for their colour values, `OutType(RGB2[c])` (790-793, 886-889). The cast truncates,
+  where the other integer conversions add 0.5 first (`Converter<BD>::CastValue`), and
+  converting a NaN or a value outside the type's range is undefined behaviour. Both wheels
+  compile it as a 32-bit `cvttss2si` and keep the low 8 or 16 bits
+  (`Lut1DRendererHalfCode<F16, UINT8>::apply`: Windows 0x180274138, Linux 0x414c15): a NaN,
+  an infinity or a value past `INT_MAX` gives 0, and a value in range keeps its low bits, so
+  256 gives 0 in 8 bits.
+- **Who notices:** nothing through the API: the CPU engine renders a lookup to F32 only
+  (`CreateCPUEngine`, `CPUProcessor.cpp:140-146`). Code that calls `GetLut1DRenderer` for half
+  input to an integer output (upstream's unit tests do) gets 0 for a NaN or infinite alpha.
+- **A fix:** convert with `Converter<outBD>::CastValue`, which rounds and clamps.
+- **Status:** matched in `p2-lut1d-fwd` (2.1a) for the lookups; the hue-adjust lookups follow
+  in 2.1b.
+
 ### I-68. Two half-domain 1D LUTs are never equal
 
 - **Upstream:** `Lut1DTransform::setLength` fills a half-domain LUT with each half code's
