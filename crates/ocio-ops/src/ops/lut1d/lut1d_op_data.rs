@@ -2,12 +2,11 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! 1D LUT op data: a port of `src/OpenColorIO/ops/lut1d/Lut1DOpData.h` and `Lut1DOpData.cpp`
-//! @ v2.5.2, the forward part.
+//! @ v2.5.2, with the inverse LUT's set-up (`initializeFromForward`, the component properties)
+//! and `getPairIdentityReplacement`.
 //!
-//! Not here yet (Phase 2, WP 2.1): the inverse LUT's set-up (`initializeFromForward`, the
-//! component properties), `getPairIdentityReplacement`, `Compose`, `MakeFastLut1DFromInverse`.
-//! Only 1D LUTs from Phase 2's sources (files, `Lut1DTransform`) are inverse; the optimizer's
-//! bake makes forward ones, with [`Lut1DOpData::compose_vec`].
+//! Not here yet (WP 2.1g): `Compose`, `MakeFastLut1DFromInverse`. The optimizer's bake makes
+//! forward LUTs, with [`Lut1DOpData::compose_vec`].
 
 use core::ffi::c_ulong;
 
@@ -57,6 +56,24 @@ impl HalfFlags {
 /// Port of `Lut1DOpData::IsInputHalfDomain` (Lut1DOpData.h:153-157 @ v2.5.2).
 pub fn is_input_half_domain_flags(half_flags: HalfFlags) -> bool {
     (half_flags.0 & HalfFlags::INPUT_HALF_CODE.0) == HalfFlags::INPUT_HALF_CODE.0
+}
+
+/// What an inverse LUT's renderer needs to know of one channel of the LUT.
+///
+/// Port of `Lut1DOpData::ComponentProperties` (src/OpenColorIO/ops/lut1d/Lut1DOpData.h:41-56 @
+/// v2.5.2).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ComponentProperties {
+    /// Represents the overall increasing state.
+    pub is_increasing: bool,
+    /// Is the lowest index such that LUT[start] != LUT[start+1].
+    pub start_domain: c_ulong,
+    /// Is the highest index such that LUT[end-1] != LUT[end].
+    pub end_domain: c_ulong,
+    /// StartDomain for half-domain negative values.
+    pub neg_start_domain: c_ulong,
+    /// EndDomain for half-domain negative values.
+    pub neg_end_domain: c_ulong,
 }
 
 /// The values of a 1D LUT: `length` RGB entries, three values each, whatever the number of
@@ -291,6 +308,8 @@ pub struct Lut1DOpData {
     half_flags: HalfFlags,
     hue_adjust: Lut1DHueAdjust,
     direction: TransformDirection,
+    /// `m_componentProperties`: for an inverse LUT, set by `finalize`.
+    component_properties: [ComponentProperties; 3],
     /// `m_fileOutBitDepth`.
     file_out_bit_depth: BitDepth,
 }
@@ -315,6 +334,7 @@ impl Lut1DOpData {
             half_flags: HalfFlags::STANDARD,
             hue_adjust: Lut1DHueAdjust::None,
             direction: dir,
+            component_properties: [ComponentProperties::default(); 3],
             file_out_bit_depth: BitDepth::Unknown,
         })
     }
@@ -336,6 +356,7 @@ impl Lut1DOpData {
             half_flags,
             hue_adjust: Lut1DHueAdjust::None,
             direction: TransformDirection::Forward,
+            component_properties: [ComponentProperties::default(); 3],
             file_out_bit_depth: BitDepth::Unknown,
         })
     }
@@ -654,8 +675,7 @@ impl Lut1DOpData {
         Ok(())
     }
 
-    /// The same LUT in the other direction. Its inverse set-up (`finalize`) comes with Phase
-    /// 2's inverse LUTs.
+    /// The same LUT in the other direction (an inverse LUT is set up by `finalize`).
     ///
     /// Port of `Lut1DOpData::inverse` (Lut1DOpData.cpp:591-602 @ v2.5.2).
     pub fn inverse(&self) -> Lut1DOpData {
@@ -805,19 +825,319 @@ impl Lut1DOpData {
         self.get_array_mut().scale(scale);
     }
 
-    /// Prepares the LUT for rendering: one color component when the channels are equal. An
-    /// inverse LUT's set-up (`initializeFromForward`) is Phase 2's (WP 2.1): until then an
-    /// inverse LUT is refused. Only Phase 2's sources make one.
+    /// Prepares the LUT for rendering: an inverse LUT is made monotonic and its component
+    /// properties set ([`initialize_from_forward`](Self::initialize_from_forward)); then one
+    /// color component when the channels are equal.
     ///
     /// Port of `Lut1DOpData::finalize` (Lut1DOpData.cpp:912-919 @ v2.5.2).
     pub fn finalize(&mut self) -> Result<()> {
         if self.direction == TransformDirection::Inverse {
-            return Err(Exception::new(
-                "Lut1D: the inverse 1D LUT is not ported yet (WP 2.1).",
-            ));
+            self.initialize_from_forward();
         }
         self.array.adjust_color_component_number();
         Ok(())
+    }
+
+    /// The red channel's properties for an inverse LUT.
+    ///
+    /// Port of `Lut1DOpData::getRedProperties` (Lut1DOpData.h:184-187 @ v2.5.2).
+    pub fn get_red_properties(&self) -> &ComponentProperties {
+        &self.component_properties[0]
+    }
+
+    /// Port of `Lut1DOpData::getGreenProperties` (Lut1DOpData.h:189-192 @ v2.5.2).
+    pub fn get_green_properties(&self) -> &ComponentProperties {
+        &self.component_properties[1]
+    }
+
+    /// Port of `Lut1DOpData::getBlueProperties` (Lut1DOpData.h:194-197 @ v2.5.2).
+    pub fn get_blue_properties(&self) -> &ComponentProperties {
+        &self.component_properties[2]
+    }
+
+    /// Sets up an inverse LUT from its forward values: per active channel, whether it is
+    /// overall increasing (its first entry below its last; for a half domain, the entries of
+    /// 0 and 1), its reversals flattened (an entry that goes the wrong way takes the value
+    /// before it) so that the values sort, and its effective domain without the flat spots at
+    /// its ends (a half domain's positive and negative halves separately, the NaN codes left
+    /// out). With one active channel, all three take its properties.
+    ///
+    /// The half domain's flattening ends at index `31744 * maxChannels` (and the negative
+    /// half's at `64512 * maxChannels`) without the channel's offset, so for green and blue it
+    /// stops one entry short of +Inf and -Inf (docs/improvements.md, I-66).
+    ///
+    /// Port of `Lut1DOpData::initializeFromForward` (Lut1DOpData.cpp:921-1118 @ v2.5.2).
+    fn initialize_from_forward(&mut self) {
+        // This routine is to be called (e.g. in XML reader) once the base forward
+        // Lut1D has been created and then sets up what is needed for the invLut1D.
+
+        // Note that if the original LUT had a half domain, the invLut needs to as
+        // well so that the appropriate evaluation algorithm is called.
+
+        // NB: The file reader must call setFileOutputBitDepth since some methods
+        // need to know the original scaling of the LUT.
+
+        // NB: The half domain includes pos/neg infinity and NaNs.
+        // InitializeFromForward makes the LUT monotonic to ensure a unique inverse and
+        // determines an effective domain to handle flat spots at the ends nicely.
+        // It's not clear how the NaN part of the domain should be included in the
+        // monotonicity constraints, furthermore there are 2048 NaNs that could each
+        // potentially have different values.  For now, the inversion algorithm and
+        // the pre-processing ignore the NaN part of the domain.
+
+        // Note: Data allocated for the array is length*getMaxColorComponents().
+        let half_domain = self.is_input_half_domain();
+        let length = self.array.get_length() as usize;
+        let max_channels = self.array.get_max_color_components() as usize;
+        let active_channels = self.array.get_num_color_components() as usize;
+        let values = self.array.get_values_mut();
+
+        for c in 0..active_channels {
+            let props = &mut self.component_properties[c];
+
+            // Determine if the LUT is overall increasing or decreasing.
+            // The heuristic used is to compare first and last entries.
+            // (Note flat LUTs (arbitrarily) have isIncreasing == false.)
+            let mut low_ind = c;
+            let mut high_ind = (length - 1) * max_channels + c;
+            if half_domain {
+                // For half-domain LUTs, I am concerned that customer LUTs may not
+                // correctly populate the whole domain, so using -HALF_MAX and
+                // +HALF_MAX could potentially give unreliable results.
+                // Just using 0 and 1 for now.
+                low_ind = c; // 0u * maxChannels + c: 0.0
+                high_ind = 15360 * max_channels + c; // 15360 == 1.0
+            }
+
+            props.is_increasing = values[low_ind] < values[high_ind];
+
+            // Flatten reversals.
+            // (If the LUT has a reversal, there is not a unique inverse.
+            // Furthermore we require sorted values for the exact eval algorithm.)
+            {
+                let mut is_increasing = props.is_increasing;
+
+                // One run of the flattening, from `start` to `end` included, by steps of
+                // `max_channels`, from the value `prev_value`.
+                let flatten = |values: &mut Vec<f32>,
+                               start: usize,
+                               end: usize,
+                               is_increasing: bool,
+                               mut prev_value: f32| {
+                    let mut idx = start;
+                    while idx <= end {
+                        if is_increasing != (values[idx] > prev_value) {
+                            values[idx] = prev_value;
+                        } else {
+                            prev_value = values[idx];
+                        }
+                        idx += max_channels;
+                    }
+                };
+
+                if !half_domain {
+                    let prev_value = values[c];
+                    // `idx < length * maxChannels`.
+                    let end = length * max_channels - 1;
+                    flatten(values, c + max_channels, end, is_increasing, prev_value);
+                } else {
+                    // Do positive numbers.
+                    let start_ind = c; // 0u * maxChannels + c: 0 == +zero
+                    let end_ind = 31744 * max_channels; // 31744 == +infinity
+                    let prev_value = values[start_ind];
+                    flatten(
+                        values,
+                        start_ind + max_channels,
+                        end_ind,
+                        is_increasing,
+                        prev_value,
+                    );
+
+                    // Do negative numbers.
+                    is_increasing = !is_increasing;
+                    let start_ind = 32768 * max_channels + c; // 32768 == -zero
+                    let end_ind = 64512 * max_channels; // 64512 == -infinity
+                    let prev_value = values[c]; // prev value for -0 is +0 (disallow overlaps)
+                    flatten(values, start_ind, end_ind, is_increasing, prev_value);
+                }
+            }
+
+            // Determine effective domain from the starting/ending flat spots.
+            // (If the LUT begins or ends with a flat spot, the inverse should be
+            // the value nearest the center of the LUT.)
+            // For constant LUTs, the end domain == start domain == 0.
+            {
+                if !half_domain {
+                    let mut end_domain = length - 1;
+                    let end_value = values[end_domain * max_channels + c];
+                    while end_domain > 0 && values[(end_domain - 1) * max_channels + c] == end_value
+                    {
+                        end_domain -= 1;
+                    }
+
+                    let mut start_domain = 0;
+                    let start_value = values[start_domain * max_channels + c];
+                    // Note that this works for both increasing and decreasing LUTs
+                    // since there is no reqmt that startValue < endValue.
+                    while start_domain < end_domain
+                        && values[(start_domain + 1) * max_channels + c] == start_value
+                    {
+                        start_domain += 1;
+                    }
+
+                    props.start_domain = start_domain as c_ulong;
+                    props.end_domain = end_domain as c_ulong;
+                } else {
+                    // Question: Should the value for infinity be considered for
+                    // interpolation? The advantage is that in theory, if infinity
+                    // is mapped to some value by the forward LUT, you could
+                    // restore that value to infinity in the inverse.
+                    // This does seem to work in INV_EXACT mode (e.g.
+                    // CPURendererInvLUT1DHalf_fclut unit test).
+                    // TODO: Test to be ported CPURenderer_cases.cpp_inc
+                    // The problem is that in INV_FAST mode, there are Infs in the fast
+                    // LUT and these seem to make the value for both inf and 65504
+                    // a NaN. Limiting the effective domain allows 65504 to invert
+                    // correctly.
+                    let mut end_domain = 31743; // +65504 = largest half value < inf
+                    let end_value = values[end_domain * max_channels + c];
+                    while end_domain > 0 && values[(end_domain - 1) * max_channels + c] == end_value
+                    {
+                        end_domain -= 1;
+                    }
+
+                    let mut start_domain = 0; // positive zero
+                    let start_value = values[start_domain * max_channels + c];
+                    // Note that this works for both increasing and decreasing LUTs
+                    // since there is no reqmt that startValue < endValue.
+                    while start_domain < end_domain
+                        && values[(start_domain + 1) * max_channels + c] == start_value
+                    {
+                        start_domain += 1;
+                    }
+
+                    props.start_domain = start_domain as c_ulong;
+                    props.end_domain = end_domain as c_ulong;
+
+                    // Negative half of domain has its own start/end.
+                    let mut neg_end_domain = 64511; // -65504 = last value before neg inf
+                    let neg_end_value = values[neg_end_domain * max_channels + c];
+                    while neg_end_domain > 32768 // negative zero
+                        && values[(neg_end_domain - 1) * max_channels + c] == neg_end_value
+                    {
+                        neg_end_domain -= 1;
+                    }
+
+                    let mut neg_start_domain = 32768; // negative zero
+                    let neg_start_value = values[neg_start_domain * max_channels + c];
+                    while neg_start_domain < neg_end_domain
+                        && values[(neg_start_domain + 1) * max_channels + c] == neg_start_value
+                    {
+                        neg_start_domain += 1;
+                    }
+
+                    props.neg_start_domain = neg_start_domain as c_ulong;
+                    props.neg_end_domain = neg_end_domain as c_ulong;
+                }
+            }
+        }
+
+        if active_channels == 1 {
+            self.component_properties[2] = self.component_properties[0];
+            self.component_properties[1] = self.component_properties[0];
+        }
+    }
+
+    /// The data that replaces this LUT followed by `lut2`, its inverse (or the reverse): an
+    /// identity matrix for a half domain; otherwise a range that clamps as the round trip
+    /// does, from the inverse LUT's red channel (which `finalize` set up): its effective
+    /// domain over `[0, 1]` for a forward LUT then its inverse, its extreme values for an
+    /// inverse LUT then its forward.
+    ///
+    /// Port of `Lut1DOpData::getPairIdentityReplacement` (Lut1DOpData.cpp:282-360 @ v2.5.2).
+    pub fn get_pair_identity_replacement(&self, lut2: &Lut1DOpData) -> Result<OpData> {
+        if self.is_input_half_domain() {
+            // TODO: If a half-domain LUT has a flat spot, it would be more appropriate
+            // to use a Range, since some areas would be clamped in a round-trip.
+            // Currently leaving this a Matrix since it is a potential work-around
+            // for situations where you want a pair identity of LUTs to be totally
+            // removed, even if it omits some clamping at extreme values.
+            return Ok(OpData::Matrix(MatrixOpData::new()));
+        }
+
+        // Note that the ops have been finalized by the time this is called,
+        // Therefore, for an inverse Lut1D, it means initializeFromForward() has
+        // been called and so any reversals have been converted to flat regions.
+        // Therefore, the first and last LUT entries are the extreme values and
+        // the ComponentProperties has been initialized, but only for the op
+        // whose direction is INVERSE.
+        let inv_lut = if self.direction == TransformDirection::Inverse {
+            self
+        } else {
+            lut2
+        };
+        let red_properties = inv_lut.get_red_properties();
+        let length = inv_lut.get_array().get_length();
+
+        // If the start or end of the LUT contains a flat region, that will cause
+        // a round-trip to be limited.
+
+        let (min_value, max_value) = match self.direction {
+            // Fwd Lut1D -> Inv Lut1D
+            TransformDirection::Forward => {
+                // A round-trip in this order will impose at least a clamp to [0,1]
+                // based on what happens entering the first Fwd Lut1D.  However, the
+                // clamping may be to an even narrower range if there are flat regions.
+                //
+                // The flat region limitation is imposed based on the where it falls
+                // relative to the [0,1] input domain.
+
+                // TODO: A RangeOp has one min & max for all channels, whereas a Lut1D may
+                // have three independent channels.  Potentially could look at all chans
+                // and take the extrema of each?  For now, just using the first channel.
+                let min_index = red_properties.start_domain;
+                let max_index = red_properties.end_domain;
+
+                (
+                    min_index as f64 / (length - 1) as f64,
+                    max_index as f64 / (length - 1) as f64,
+                )
+            }
+            // Inv Lut1D -> Fwd Lut1D
+            TransformDirection::Inverse => {
+                // A round-trip in this order will impose a clamp, but it may be to
+                // bounds outside of [0,1] since the Fwd LUT may contain values outside
+                // [0,1] and so the Inv LUT will accept inputs on that extended range.
+                //
+                // The flat region limitation is imposed based on the output range.
+
+                let is_increasing = red_properties.is_increasing;
+                let max_channels = inv_lut.get_array().get_max_color_components();
+                let last_val_index = ((length - 1) * max_channels) as usize;
+                // Note that the array for the invLut has had initializeFromForward()
+                // done and so any reversals have been converted to flat regions and
+                // the extrema are at the beginning & end of the LUT.
+                let lut_values = inv_lut.get_array().get_values();
+
+                // TODO: Currently only basing this on the red channel.
+                (
+                    f64::from(if is_increasing {
+                        lut_values[0]
+                    } else {
+                        lut_values[last_val_index]
+                    }),
+                    f64::from(if is_increasing {
+                        lut_values[last_val_index]
+                    } else {
+                        lut_values[0]
+                    }),
+                )
+            }
+        };
+
+        Ok(OpData::Range(RangeOpData::with_values(
+            min_value, max_value, min_value, max_value,
+        )?))
     }
 
     /// Port of `OpData::getFormatMetadata() const` (src/OpenColorIO/Op.h:164 @ v2.5.2).

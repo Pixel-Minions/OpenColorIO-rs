@@ -2,13 +2,14 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Port of `tests/cpu/ops/lut1d/Lut1DOpData_tests.cpp` @ v2.5.2: the tests of the forward
-//! LUT. Its tests of composition and inversion (`lut_1d_compose`, `lut_1d_compose_sc`,
-//! `inverse_*`, `is_inverse`, `make_fast_from_inverse_*`, `compose_inverse_luts`) come with
-//! Phase 2's Lut1D (WP 2.1).
+//! LUT and of the inverse's set-up. Its tests of composition (`lut_1d_compose`,
+//! `lut_1d_compose_sc`, `compose_inverse_luts`) come with WP 2.1g; `make_fast_from_inverse_*`
+//! read files (Phase 4).
 
 use ocio_testkit::upstream::check_throw_what;
 
 use super::*;
+use crate::format_metadata::METADATA_ID;
 
 /// Port of `OCIO_ADD_TEST(Lut1DOpData, get_lut_ideal_size)` @ v2.5.2.
 #[test]
@@ -331,4 +332,413 @@ fn lookup_domains() {
     assert_eq!(half.get_array()[0x7e00 * 3], 0.0);
     assert_eq!(half.get_array()[0x7c00 * 3], f32::INFINITY);
     half.validate().unwrap();
+}
+
+/// `uid` (tests/cpu/ops/lut1d/Lut1DOpData_tests.cpp:504 @ v2.5.2).
+const UID: &[u8] = b"uid";
+
+/// Port of `OCIO_ADD_TEST(Lut1DOpData, inverse_hueadjust)` @ v2.5.2.
+#[test]
+fn inverse_hueadjust() {
+    let mut ref_lut1d = Lut1DOpData::with_half_flags(HalfFlags::STANDARD, 65536, false).unwrap();
+    ref_lut1d
+        .get_format_metadata_mut()
+        .add_attribute(Some(METADATA_ID), Some(UID))
+        .unwrap();
+
+    ref_lut1d.set_hue_adjust(Lut1DHueAdjust::Dw3).unwrap();
+
+    // Get inverse of reference lut1d operation.
+    let inv_lut1d = ref_lut1d.inverse();
+
+    assert_eq!(inv_lut1d.get_hue_adjust(), Lut1DHueAdjust::Dw3);
+}
+
+/// Port of `OCIO_ADD_TEST(Lut1DOpData, is_inverse)` @ v2.5.2.
+#[test]
+fn is_inverse() {
+    // Create forward LUT.
+    let mut l1 = Lut1DOpData::with_half_flags(HalfFlags::STANDARD, 5, false).unwrap();
+    l1.get_format_metadata_mut()
+        .add_attribute(Some(METADATA_ID), Some(UID))
+        .unwrap();
+
+    // Make it not an identity.
+    let values = l1.get_array_mut().get_values_mut();
+    values[0] = 20.0f32;
+    assert!(!l1.is_identity());
+
+    // Create an inverse LUT with same basics.
+    let l2 = l1.inverse();
+
+    assert!(!(l1 == l2));
+
+    // Check isInverse.
+    assert!(l1.is_inverse(&l2));
+    assert!(l2.is_inverse(&l1));
+}
+
+/// Port of `SetLutArray` (tests/cpu/ops/lut1d/Lut1DOpData_tests.cpp:542-567 @ v2.5.2).
+fn set_lut_array(op: &mut Lut1DOpData, dimension: c_ulong, channels: c_ulong, data: &[f32]) {
+    let ref_array = op.get_array_mut();
+    ref_array.resize(dimension, channels).unwrap();
+    // The data allocated for the array is dimension * getMaxColorComponents(),
+    // not dimension * channels.
+
+    let max_channels = ref_array.get_max_color_components();
+    let values = ref_array.get_values_mut();
+    if channels == max_channels {
+        let n = (dimension * channels) as usize;
+        values[..n].copy_from_slice(&data[..n]);
+    } else {
+        // Set the red component, fill other with zero values.
+        let max_channels = max_channels as usize;
+        for i in 0..dimension as usize {
+            values[i * max_channels] = data[i];
+            values[i * max_channels + 1] = 0.0f32;
+            values[i * max_channels + 2] = 0.0f32;
+        }
+    }
+}
+
+/// Port of `CheckInverse_IncreasingEffectiveDomain` (tests/cpu/ops/lut1d/Lut1DOpData_tests.cpp:
+/// 569-602 @ v2.5.2): `exp` holds each channel's `(increasing, start, end)`.
+fn check_inverse_increasing_effective_domain(
+    dimension: c_ulong,
+    channels: c_ulong,
+    fwd_array_data: &[f32],
+    exp: [(bool, c_ulong, c_ulong); 3],
+) {
+    let mut ref_lut1d_op = Lut1DOpData::with_half_flags(HalfFlags::STANDARD, 1024, false).unwrap();
+    ref_lut1d_op
+        .get_format_metadata_mut()
+        .add_attribute(Some(METADATA_ID), Some(UID))
+        .unwrap();
+
+    set_lut_array(&mut ref_lut1d_op, dimension, channels, fwd_array_data);
+
+    ref_lut1d_op.set_direction(TransformDirection::Inverse);
+    ref_lut1d_op.validate().unwrap();
+    ref_lut1d_op.finalize().unwrap();
+
+    let properties = [
+        *ref_lut1d_op.get_red_properties(),
+        *ref_lut1d_op.get_green_properties(),
+        *ref_lut1d_op.get_blue_properties(),
+    ];
+    for (props, (increasing, start, end)) in properties.iter().zip(exp) {
+        assert_eq!(props.is_increasing, increasing);
+        assert_eq!(props.start_domain, start);
+        assert_eq!(props.end_domain, end);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Lut1DOpData, inverse_increasing_effective_domain)` @ v2.5.2.
+#[test]
+fn inverse_increasing_effective_domain() {
+    {
+        #[rustfmt::skip]
+        let fwd_data: [f32; 30] = [
+            0.1, 0.8, 0.1,    // 0
+            0.1, 0.7, 0.1,
+            0.1, 0.6, 0.1,    // 2
+            0.2, 0.5, 0.1,    // 3
+            0.3, 0.4, 0.2,
+            0.4, 0.3, 0.3,
+            0.5, 0.1, 0.4,    // 6
+            0.6, 0.1, 0.5,    // 7
+            0.7, 0.1, 0.5,
+            0.8, 0.1, 0.5,    // 9
+        ];
+
+        check_inverse_increasing_effective_domain(
+            10,
+            3,
+            &fwd_data,
+            [
+                (true, 2, 9),  // increasing, flat [0, 2]
+                (false, 0, 6), // decreasing, flat [6, 9]
+                (true, 3, 7),  // increasing, flat [0, 3] and [7, 9]
+            ],
+        );
+    }
+
+    {
+        #[rustfmt::skip]
+        let fwd_data: [f32; 10] = [
+            0.3, // 0
+            0.3,
+            0.3, // 2
+            0.4,
+            0.5,
+            0.6,
+            0.7,
+            0.8, // 7
+            0.8,
+            0.8, // 9
+        ];
+
+        check_inverse_increasing_effective_domain(
+            10,
+            1,
+            &fwd_data,
+            [
+                (true, 2, 7), // increasing, flat [0->2] and [7->9]
+                (true, 2, 7),
+                (true, 2, 7),
+            ],
+        );
+    }
+
+    {
+        let fwd_data = [0.5f32; 10];
+
+        check_inverse_increasing_effective_domain(
+            10,
+            1,
+            &fwd_data,
+            [(false, 0, 0), (false, 0, 0), (false, 0, 0)],
+        );
+    }
+
+    {
+        #[rustfmt::skip]
+        let fwd_data: [f32; 10] = [
+            0.8, // 0
+            0.9, // reversal
+            0.8, // 2
+            0.5,
+            0.4,
+            0.3,
+            0.2,
+            0.1, // 7
+            0.1,
+            0.2, // reversal
+        ];
+
+        check_inverse_increasing_effective_domain(
+            10,
+            1,
+            &fwd_data,
+            [(false, 2, 7), (false, 2, 7), (false, 2, 7)],
+        );
+    }
+}
+
+/// Port of `CheckInverse_Flatten` (tests/cpu/ops/lut1d/Lut1DOpData_tests.cpp:678-702 @
+/// v2.5.2).
+fn check_inverse_flatten(
+    dimension: c_ulong,
+    channels: c_ulong,
+    fwd_array_data: &[f32],
+    exp_inv_array_data: &[f32],
+) {
+    let mut ref_lut1d_op = Lut1DOpData::with_half_flags(HalfFlags::STANDARD, 65536, false).unwrap();
+    ref_lut1d_op
+        .get_format_metadata_mut()
+        .add_attribute(Some(METADATA_ID), Some(UID))
+        .unwrap();
+
+    set_lut_array(&mut ref_lut1d_op, dimension, channels, fwd_array_data);
+
+    ref_lut1d_op.set_direction(TransformDirection::Inverse);
+    ref_lut1d_op.validate().unwrap();
+    ref_lut1d_op.finalize().unwrap();
+
+    let inv_values = ref_lut1d_op.get_array().get_values();
+
+    for i in 0..(dimension * channels) as usize {
+        assert_eq!(inv_values[i], exp_inv_array_data[i]);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Lut1DOpData, inverse_flatten_test)` @ v2.5.2.
+#[test]
+fn inverse_flatten_test() {
+    #[rustfmt::skip]
+    let fwd_data: [f32; 30] = [
+        0.10, 0.90, 0.25,    // 0
+        0.20, 0.80, 0.30,
+        0.30, 0.70, 0.40,
+        0.40, 0.60, 0.50,
+        0.35, 0.50, 0.60,    // 4
+        0.30, 0.55, 0.50,    // 5
+        0.45, 0.60, 0.40,    // 6
+        0.50, 0.65, 0.30,    // 7
+        0.60, 0.45, 0.20,    // 8
+        0.70, 0.50, 0.10,    // 9
+    ];
+    // red is increasing, with a reversal [4, 5]
+    // green is decreasing, with reversals [4, 5] and [9]
+    // blue is decreasing, with reversals [0, 8]
+
+    #[rustfmt::skip]
+    let exp_inv_data: [f32; 30] = [
+        0.10, 0.90, 0.25,
+        0.20, 0.80, 0.25,
+        0.30, 0.70, 0.25,
+        0.40, 0.60, 0.25,
+        0.40, 0.50, 0.25,
+        0.40, 0.50, 0.25,
+        0.45, 0.50, 0.25,
+        0.50, 0.50, 0.25,
+        0.60, 0.45, 0.20,
+        0.70, 0.45, 0.10,
+    ];
+
+    check_inverse_flatten(10, 3, &fwd_data, &exp_inv_data);
+}
+
+/// Port of `SetLutArrayHalf` (tests/cpu/ops/lut1d/Lut1DOpData_tests.cpp:732-803 @ v2.5.2).
+fn set_lut_array_half(op: &mut Lut1DOpData, channels: c_ulong) {
+    let dimension: c_ulong = 65536;
+    let ref_array = op.get_array_mut();
+    ref_array.resize(dimension, channels).unwrap();
+    // The data allocated for the array is dimension * getMaxColorComponents(),
+    // not dimension * channels.
+
+    let max_channels = ref_array.get_max_color_components() as usize;
+    let values = ref_array.get_values_mut();
+    for j in 0..channels as usize {
+        for i in 0u32..65536 {
+            let mut f = crate::math_utils::convert_half_bits_to_float(i as u16);
+            if j == 0 {
+                if i < 32768 {
+                    f = 2.0f32 * f - 0.1f32;
+                } else {
+                    // neg domain overlaps pos with reversal
+                    f = 3.0f32 * f + 0.1f32;
+                }
+                if (25000..32760).contains(&i) {
+                    // flat spot at positive end
+                    f = 10000.0f32;
+                }
+                if i >= 60000 {
+                    // flat spot at neg end
+                    f = -10000.0f32;
+                }
+                if i > 15000 && i < 20000 {
+                    // reversal in positive side
+                    f = 0.5f32;
+                }
+                if i > 50000 && i < 55000 {
+                    // reversal in negative side
+                    f = -2.0f32;
+                }
+            } else if j == 1 {
+                if i < 32768 {
+                    // decreasing function
+                    f = -0.5f32 * f + 0.02f32;
+                } else {
+                    // gap between pos & neg at zero
+                    f = -0.4f32 * f + 0.05f32;
+                }
+                if (25000..32760).contains(&i) {
+                    // flat spot at positive end
+                    f = -400.0f32;
+                }
+                if i >= 60000 {
+                    // flat spot at neg end
+                    f = 2000.0f32;
+                }
+                if i > 15000 && i < 20000 {
+                    // reversal in positive side
+                    f = -0.1f32;
+                }
+                if i > 50000 && i < 55000 {
+                    // reversal in negative side
+                    f = 1.4f32;
+                }
+            } else if j == 2 {
+                if i < 32768 {
+                    f = f.powf(1.5f32);
+                } else {
+                    f = -(-f).powf(0.9f32);
+                }
+                if i <= 11878 || (32768..=44646).contains(&i) {
+                    // flat spot around zero
+                    f = -0.01f32;
+                }
+            }
+            values[i as usize * max_channels + j] = f;
+        }
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Lut1DOpData, inverse_half_domain)` @ v2.5.2.
+#[test]
+fn inverse_half_domain() {
+    let half_flags = HalfFlags::INPUT_HALF_CODE;
+    let mut ref_lut1d_op = Lut1DOpData::with_half_flags(half_flags, 65536, false).unwrap();
+    ref_lut1d_op
+        .get_format_metadata_mut()
+        .add_attribute(Some(METADATA_ID), Some(UID))
+        .unwrap();
+
+    set_lut_array_half(&mut ref_lut1d_op, 3);
+
+    ref_lut1d_op.set_direction(TransformDirection::Inverse);
+    ref_lut1d_op.validate().unwrap();
+    ref_lut1d_op.finalize().unwrap();
+
+    let red_properties = *ref_lut1d_op.get_red_properties();
+    let green_properties = *ref_lut1d_op.get_green_properties();
+    let blue_properties = *ref_lut1d_op.get_blue_properties();
+
+    let inv_values = ref_lut1d_op.get_array().get_values();
+
+    // Check increasing/decreasing and start/end domain.
+    assert!(red_properties.is_increasing);
+    assert_eq!(red_properties.start_domain, 0);
+    assert_eq!(red_properties.end_domain, 25000);
+    assert_eq!(red_properties.neg_start_domain, 44100); // -0.2/3 (flattened to remove overlap)
+    assert_eq!(red_properties.neg_end_domain, 60000);
+
+    assert!(!green_properties.is_increasing);
+    assert_eq!(green_properties.start_domain, 0);
+    assert_eq!(green_properties.end_domain, 25000);
+    assert_eq!(green_properties.neg_start_domain, 32768);
+    assert_eq!(green_properties.neg_end_domain, 60000);
+
+    assert!(blue_properties.is_increasing);
+    assert_eq!(blue_properties.start_domain, 11878);
+    assert_eq!(blue_properties.end_domain, 31743); // see note in Lut1DOpData.cpp
+    assert_eq!(blue_properties.neg_start_domain, 44646);
+    assert_eq!(blue_properties.neg_end_domain, 64511);
+
+    // Check reversals are removed.
+    let half_bits = |v: f32| float_to_half(v);
+    assert_eq!(half_bits(inv_values[16000 * 3]), 15922); // halfToFloat(15000) * 2 - 0.1
+    assert_eq!(half_bits(inv_values[52000 * 3]), 51567); // halfToFloat(50000) * 3 + 0.1
+    assert_eq!(half_bits(inv_values[16000 * 3 + 1]), 46662); // halfToFloat(15000) * -0.5 + 0.02
+    assert_eq!(half_bits(inv_values[52000 * 3 + 1]), 15885); // halfToFloat(50000) * -0.4 + 0.05
+
+    let mut reversal = false;
+    for i in 1..31745 {
+        if inv_values[i * 3] < inv_values[(i - 1) * 3] {
+            // increasing red
+            reversal = true;
+        }
+    }
+    assert!(!reversal);
+    // Check no overlap at +0 and -0.
+    assert!(inv_values[0] >= inv_values[32768 * 3]);
+    reversal = false;
+    for i in 1..31745 {
+        if inv_values[i * 3 + 1] > inv_values[(i - 1) * 3 + 1] {
+            // decreasing grn
+            reversal = true;
+        }
+    }
+    assert!(!reversal);
+    assert!(inv_values[1] <= inv_values[32768 * 3 + 1]);
+    reversal = false;
+    for i in 1..31745 {
+        if inv_values[i * 3 + 2] < inv_values[(i - 1) * 3 + 2] {
+            // increasing blu
+            reversal = true;
+        }
+    }
+    assert!(!reversal);
+    assert!(inv_values[2] >= inv_values[32768 * 3 + 2]);
 }
