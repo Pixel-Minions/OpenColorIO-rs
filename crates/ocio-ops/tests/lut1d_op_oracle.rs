@@ -365,6 +365,52 @@ fn compositions_match_the_wheel() {
     assert!(check_chains(chains) > 0);
 }
 
+/// A LUT next to its inverse, which the optimizer replaces with the pair's own identity
+/// replacement (`RemoveInverseOps`, `Lut1DOpData::getPairIdentityReplacement`: a Range that
+/// clamps to the LUT's range, or a no-op Matrix), nested pairs, a pair between ranges, and a
+/// half domain's pair, which is not one (docs/improvements.md, I-68): the optimized processors'
+/// cache IDs are the wheel's.
+#[test]
+fn pairs_of_inverses_match_the_wheel() {
+    let sq = T::Lut(Lut::std(17, Some(square)));
+    let inv_sq = T::Lut(Lut {
+        dir: I,
+        ..Lut::std(17, Some(square))
+    });
+    let identity = T::Lut(Lut::std(17, None));
+    let inv_identity = T::Lut(Lut {
+        dir: I,
+        ..Lut::std(17, None)
+    });
+    let wide = T::Lut(Lut::std(9, Some(scale_half)));
+    let inv_wide = T::Lut(Lut {
+        dir: I,
+        ..Lut::std(9, Some(scale_half))
+    });
+    let half_scale = T::Lut(Lut {
+        half_domain: true,
+        ..Lut::std(65536, Some(scale_half))
+    });
+    let inv_half_scale = T::Lut(Lut {
+        dir: I,
+        half_domain: true,
+        ..Lut::std(65536, Some(scale_half))
+    });
+    let unit = T::Range([0., 1., 0., 1.]);
+    let chains = vec![
+        vec![sq, inv_sq],
+        vec![inv_sq, sq],
+        vec![wide, inv_wide],
+        vec![inv_wide, wide],
+        vec![identity, inv_identity],
+        vec![sq, wide, inv_wide, inv_sq],
+        vec![unit, sq, inv_sq, unit],
+        vec![T::Matrix, wide, inv_wide],
+        vec![half_scale, inv_half_scale],
+    ];
+    assert!(check_chains(chains) > 0);
+}
+
 /// An inverse LUT, set up by the processor's `finalize` (`Lut1DOpData::initializeFromForward`)
 /// and not optimized: its cache IDs equal the wheel's, as do those of the reversal-flattening
 /// and flat-ended LUTs whose values `finalize` changes.

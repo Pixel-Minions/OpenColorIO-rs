@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Port of `tests/cpu/ops/lut1d/Lut1DOp_tests.cpp` @ v2.5.2: the tests that need no
-//! optimizer pair replacement (WP 2.5a) or file, and a test of the refusal that stands in for
-//! the pair replacement until then.
+//! Port of `tests/cpu/ops/lut1d/Lut1DOp_tests.cpp` @ v2.5.2: the tests that need no file
+//! (`lut_1d_compose_with_bit_depth` reads one, Phase 4).
 //!
 //! Upstream's test runner reruns every test in each SIMD mode the CPU supports
 //! (tests/cpu/UnitTestMain.cpp:104-153 @ v2.5.2); a test of a renderer with SIMD kernels runs
@@ -228,11 +227,11 @@ fn identity_lut_1d() {
     }
 }
 
-/// What waits for the rest of Phase 2 is an error: the optimizer's replacement of a pair of
-/// inverse LUTs (WP 2.5a). Composing LUTs, the inverse's set-up and renderers, and its fast
-/// forward LUT exist.
+/// The Lut1D op's parts that waited for Phase 2 work: its renderers, composing LUTs, the
+/// inverse's set-up, renderers and fast forward LUT, and the replacement of a LUT and its
+/// inverse.
 #[test]
-fn phase_2_parts_are_errors() {
+fn phase_2_parts_work() {
     let mut ops = OpVec::new();
     create_lut1d_op(&mut ops, create_square_lut(), TransformDirection::Forward);
     create_lut1d_op(&mut ops, create_square_lut(), TransformDirection::Forward);
@@ -267,13 +266,73 @@ fn phase_2_parts_are_errors() {
     create_lut1d_op(&mut pair, create_square_lut(), TransformDirection::Forward);
     create_lut1d_op(&mut pair, create_square_lut(), TransformDirection::Inverse);
     pair.finalize().unwrap();
-    assert_eq!(
-        pair.optimize(OptimizationFlags::DEFAULT)
-            .unwrap_err()
-            .message(),
-        "Lut1D: the identity replacement of a pair of inverse 1D LUTs is not ported yet \
-         (Phase 2, WP 2.1)."
-    );
+    pair.optimize(OptimizationFlags::DEFAULT).unwrap();
+    assert_eq!(pair.len(), 1);
+    assert_eq!(pair[0].get_info(), "<RangeOp>");
+}
+
+/// Port of `OCIO_ADD_TEST(Lut1DOp, inverse)` @ v2.5.2.
+#[test]
+fn inverse() {
+    let mut luta = Lut1DOpData::new(3).unwrap();
+    luta.get_array_mut()[0] = 0.1f32;
+
+    let lutb = luta.clone();
+    let mut lutc = luta.clone();
+    lutc.get_array_mut()[0] = 0.2f32;
+
+    let mut ops = OpVec::new();
+    create_lut1d_op(&mut ops, luta.clone(), TransformDirection::Forward);
+    create_lut1d_op(&mut ops, luta, TransformDirection::Inverse);
+    create_lut1d_op(&mut ops, lutb.clone(), TransformDirection::Forward);
+    create_lut1d_op(&mut ops, lutb, TransformDirection::Inverse);
+    create_lut1d_op(&mut ops, lutc.clone(), TransformDirection::Forward);
+    create_lut1d_op(&mut ops, lutc, TransformDirection::Inverse);
+
+    assert_eq!(ops.len(), 6);
+    ops.finalize().unwrap();
+
+    let op0 = &ops[0];
+    let op1 = &ops[1];
+    let op2 = &ops[2];
+    let op3 = &ops[3];
+    let op4 = &ops[4];
+    let op5 = &ops[5];
+
+    assert!(op0.is_inverse(op1));
+    assert!(op2.is_inverse(op3));
+    assert!(op4.is_inverse(op5));
+
+    assert!(!op0.is_inverse(op2));
+    assert!(op0.is_inverse(op3));
+    assert!(op1.is_inverse(op2));
+    assert!(!op1.is_inverse(op3));
+
+    assert!(!op0.is_inverse(op4));
+    assert!(!op0.is_inverse(op5));
+    assert!(!op1.is_inverse(op4));
+    assert!(!op1.is_inverse(op5));
+
+    let cache_id0 = ops[0].get_cache_id().unwrap();
+    let cache_id1 = ops[1].get_cache_id().unwrap();
+    let cache_id2 = ops[2].get_cache_id().unwrap();
+    let cache_id3 = ops[3].get_cache_id().unwrap();
+    let cache_id4 = ops[4].get_cache_id().unwrap();
+    let cache_id5 = ops[5].get_cache_id().unwrap();
+    assert_eq!(cache_id0, cache_id2);
+    assert_eq!(cache_id1, cache_id3);
+
+    assert_ne!(cache_id0, cache_id4);
+    assert_ne!(cache_id0, cache_id5);
+    assert_ne!(cache_id1, cache_id4);
+    assert_ne!(cache_id1, cache_id5);
+
+    // Optimize will remove LUT forward and inverse (0+1, 2+3 and 4+5)
+    // and replace them by a clamping range.
+    ops.finalize().unwrap();
+    ops.optimize(OptimizationFlags::DEFAULT).unwrap();
+    assert_eq!(ops.len(), 1);
+    assert_eq!(ops[0].get_info(), "<RangeOp>");
 }
 
 /// Port of `OCIO_ADD_TEST(Lut1DRenderer, finite_value_hue_adjust)` @ v2.5.2.

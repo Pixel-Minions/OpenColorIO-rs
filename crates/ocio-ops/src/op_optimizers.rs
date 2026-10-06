@@ -8,9 +8,9 @@
 //! steps, which ask the ops only through [`Op`]'s methods) and `optimizeForBitdepth`, with
 //! `OptimizeSeparablePrefix`, which bakes a prefix of separable ops into a Lut1D for integer
 //! and half input. The steps that act on LUT data match over [`OpData`] without a wildcard:
-//! - `ReplaceInverseLuts` replaces an inverse Lut1D with its fast forward LUT;
-//!   `RemoveInverseOps` refuses a pair of inverse Lut1Ds until WP 2.5a. The Lut3D arms come
-//!   with Lut3D.
+//! - `ReplaceInverseLuts` replaces an inverse Lut1D with its fast forward LUT, and
+//!   `RemoveInverseOps` replaces a pair of inverse Lut1Ds with the pair's own identity
+//!   replacement (`Lut1DOpData::getPairIdentityReplacement`). The Lut3D arms come with Lut3D.
 
 use crate::bit_depth_utils::is_float_bit_depth;
 use crate::exception::{Exception, Result};
@@ -21,6 +21,8 @@ use crate::open_color_types::{BitDepth, OptimizationFlags, TransformDirection};
 use crate::ops::lut1d::Lut1DOpData;
 use crate::ops::lut1d::lut1d_op::create_lut1d_op;
 use crate::ops::lut1d::lut1d_op_data::make_fast_lut1d_from_inverse;
+use crate::ops::matrix::matrix_op::create_matrix_op;
+use crate::ops::range::range_op::create_range_op;
 
 /// Whether `flags` let the optimizer remove a pair of inverse ops of type `op_type`.
 ///
@@ -200,18 +202,38 @@ fn replace_identity_ops(op_vec: &mut OpVec, o_flags: OptimizationFlags) -> Resul
 }
 
 /// The op that replaces a pair of inverse ops: the first one's identity replacement, which
-/// keeps any clamping the pair does. A pair of Lut1D ops gets its own
-/// (`Lut1DOpData::getPairIdentityReplacement`), which the optimizer uses from WP 2.5a: until
-/// then such a pair is an error.
+/// keeps any clamping the pair does. A pair of Lut1D ops gets its own, a no-op Matrix or a
+/// clamping Range, from both halves of the pair: "Only the inverse LUT has the values needed
+/// to generate the replacement."
 ///
 /// Port of the replacement of `RemoveInverseOps` (src/OpenColorIO/OpOptimizers.cpp:249-276 @
 /// v2.5.2).
-fn pair_identity_replacement(op1: &Op) -> Result<Op> {
+fn pair_identity_replacement(op1: &Op, op2: &Op) -> Result<Op> {
     match &**op1.data() {
-        OpData::Lut1D(_) => Err(Exception::new(
-            "Lut1D: the identity replacement of a pair of inverse 1D LUTs is not ported yet \
-             (Phase 2, WP 2.1).",
-        )),
+        OpData::Lut1D(lut1) => {
+            // Lut1D gets special handling so that both halfs of the pair are available.
+            // Only the inverse LUT has the values needed to generate the replacement.
+            let OpData::Lut1D(lut2) = &**op2.data() else {
+                unreachable!("the pair's ops have one type")
+            };
+
+            let op_data = lut1.get_pair_identity_replacement(lut2)?;
+
+            let mut ops = OpVec::new();
+            match op_data {
+                // No-op that will be optimized.
+                OpData::Matrix(mat) => create_matrix_op(&mut ops, mat, TransformDirection::Forward),
+                // Clamping op.
+                OpData::Range(range) => {
+                    create_range_op(&mut ops, range, TransformDirection::Forward)?;
+                }
+                other => unreachable!(
+                    "getPairIdentityReplacement gives a Matrix or a Range, not {:?}",
+                    other.get_type()
+                ),
+            }
+            Ok(ops[0].clone())
+        }
         OpData::Log(_)
         | OpData::FixedFunction(_)
         | OpData::Cdl(_)
@@ -265,7 +287,7 @@ fn remove_inverse_ops(op_vec: &mut OpVec, o_flags: OptimizationFlags) -> Result<
             // When a pair of inverse ops is removed, we want the optimized ops to give the
             // same result as the original. For certain ops such as Lut1D or Log this may
             // mean inserting a Range to emulate the clamping done by the original ops.
-            let mut replaced_by = pair_identity_replacement(op1)?;
+            let mut replaced_by = pair_identity_replacement(op1, op2)?;
 
             replaced_by.finalize()?;
             if replaced_by.is_no_op()? {
