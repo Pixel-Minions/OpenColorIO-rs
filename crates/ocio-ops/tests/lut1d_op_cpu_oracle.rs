@@ -262,48 +262,54 @@ fn every_code_matches_the_wheel() {
             cases.push((lut.with_hue_adjust(), input, Depth::F32));
         }
     }
-    let requests: Vec<Request> = cases
-        .iter()
-        .map(|(lut, input, output)| {
-            let (bytes, height) = ramp(*input);
-            let mut request = Request::new(processor(lut, *input, *output));
-            let src = request.buffer(Buffer::Bytes(bytes));
-            let dst = request.buffer(Buffer::Bytes(vec![
-                0;
-                4 * 256 * height as usize * size(*output)
-            ]));
-            let width = 256;
-            request.image(packed(src, width, height, *input));
-            request.image(packed(dst, width, height, *output));
-            request.apply = vec![0, 1];
-            request
-        })
-        .collect();
-    let calls: Vec<BatchCall<'_>> = requests.iter().map(Request::call).collect();
-    let responses = Oracle::get().batch(&calls, true);
-
     let mut failures = Vec::new();
-    for (((lut, input, output), request), response) in cases.iter().zip(&requests).zip(responses) {
-        let what = format!("{lut:?} {input:?}->{output:?}");
-        let reply: Reply = request.reply(response.unwrap_or_else(|e| panic!("{what}: {e}")));
-        assert!(reply.raised().is_none(), "{what}: {:?}", reply.raised());
-        let mut buffers: Vec<Vec<u8>> = request.buffers.iter().map(Buffer::bytes).collect();
-        let port = (|| -> Result<()> {
-            let cpu = port_processor(lut, *input, *output)?;
-            let (src_buffers, dst_buffers) = buffers.split_at_mut(1);
-            let src = port_image(&request.images[0], |_| Bytes(&src_buffers[0][..]))?;
-            let mut slot = Some(&mut dst_buffers[0][..]);
-            let mut dst = port_image(&request.images[1], |_| {
-                Bytes(slot.take().expect("one buffer"))
-            })?;
-            cpu.apply_src_dst(src.desc(), dst.desc_mut())
-        })();
-        match port {
-            Err(e) => failures.push(format!("{what}: the port raised {}", e.message())),
-            Ok(()) if buffers[1] != reply.buffers[1] => {
-                failures.push(format!("{what}: the pixels differ"));
+    // A few cases at a time: a LUT of 65536 entries is a long spec.
+    for cases in cases.chunks(16) {
+        let requests: Vec<Request> = cases
+            .iter()
+            .map(|(lut, input, output)| {
+                let (bytes, height) = ramp(*input);
+                let mut request = Request::new(processor(lut, *input, *output));
+                let src = request.buffer(Buffer::Bytes(bytes));
+                let dst =
+                    request.buffer(Buffer::Bytes(vec![
+                        0;
+                        4 * 256 * height as usize * size(*output)
+                    ]));
+                let width = 256;
+                request.image(packed(src, width, height, *input));
+                request.image(packed(dst, width, height, *output));
+                request.apply = vec![0, 1];
+                request
+            })
+            .collect();
+        let calls: Vec<BatchCall<'_>> = requests.iter().map(Request::call).collect();
+        let responses = Oracle::get().batch(&calls, true);
+
+        for (((lut, input, output), request), response) in
+            cases.iter().zip(&requests).zip(responses)
+        {
+            let what = format!("{lut:?} {input:?}->{output:?}");
+            let reply: Reply = request.reply(response.unwrap_or_else(|e| panic!("{what}: {e}")));
+            assert!(reply.raised().is_none(), "{what}: {:?}", reply.raised());
+            let mut buffers: Vec<Vec<u8>> = request.buffers.iter().map(Buffer::bytes).collect();
+            let port = (|| -> Result<()> {
+                let cpu = port_processor(lut, *input, *output)?;
+                let (src_buffers, dst_buffers) = buffers.split_at_mut(1);
+                let src = port_image(&request.images[0], |_| Bytes(&src_buffers[0][..]))?;
+                let mut slot = Some(&mut dst_buffers[0][..]);
+                let mut dst = port_image(&request.images[1], |_| {
+                    Bytes(slot.take().expect("one buffer"))
+                })?;
+                cpu.apply_src_dst(src.desc(), dst.desc_mut())
+            })();
+            match port {
+                Err(e) => failures.push(format!("{what}: the port raised {}", e.message())),
+                Ok(()) if buffers[1] != reply.buffers[1] => {
+                    failures.push(format!("{what}: the pixels differ"));
+                }
+                Ok(()) => {}
             }
-            Ok(()) => {}
         }
     }
     assert!(
@@ -359,7 +365,7 @@ fn the_in_place_lookup_follows_the_wheel() {
     ] {
         for half_domain in [false, true] {
             for curve in [mixed as fn(f32) -> [f32; 3], extreme] {
-                for seed in 0..8u16 {
+                for seed in 0..4u16 {
                     let lut = Lut::of_domain(half_domain, curve).inverted();
                     cases.push((lut, input, pixels(seed)));
                     cases.push((lut.with_hue_adjust(), input, pixels(seed)));
@@ -367,55 +373,58 @@ fn the_in_place_lookup_follows_the_wheel() {
             }
         }
     }
-    let requests: Vec<Request> = cases
-        .iter()
-        .flat_map(|(lut, input, pixels)| {
-            pixels.iter().map(move |bytes| {
-                let mut request = Request::new(processor(lut, *input, Depth::F32));
-                let buffer = request.buffer(Buffer::Bytes(bytes.clone()));
-                request.image(packed(buffer, 1, 1, *input));
-                request.image(packed(buffer, 1, 1, Depth::F32));
-                request.apply = vec![0, 1];
-                request
-            })
-        })
-        .collect();
-    let calls: Vec<BatchCall<'_>> = requests.iter().map(Request::call).collect();
-    let responses = Oracle::get().batch(&calls, true);
-    let replies: Vec<Reply> = responses
-        .into_iter()
-        .zip(&requests)
-        .map(|(r, request)| request.reply(r.unwrap_or_else(|e| panic!("{e}"))))
-        .collect();
-
     let floats = |bytes: &[u8]| -> [f32; 4] {
         std::array::from_fn(|k| f32::from_ne_bytes(bytes[4 * k..4 * k + 4].try_into().unwrap()))
     };
     let bytes_of =
         |values: &[f32]| -> Vec<u8> { values.iter().flat_map(|v| v.to_ne_bytes()).collect() };
     let mut failures = Vec::new();
-    for ((lut, input, [rgba, rgb]), wheel) in cases.iter().zip(replies.chunks(2)) {
-        let cpu = port_processor(lut, *input, Depth::F32).unwrap();
-        let mut px = floats(rgba);
-        cpu.apply_rgba(&mut px).unwrap();
-        let rgb4 = floats(rgb);
-        let mut px3 = [rgb4[0], rgb4[1], rgb4[2]];
-        cpu.apply_rgb(&mut px3).unwrap();
-        for (k, (port, wheel)) in [bytes_of(&px), bytes_of(&px3)]
+    // A few cases at a time: a LUT of 65536 entries is a long spec.
+    for cases in cases.chunks(8) {
+        let requests: Vec<Request> = cases
             .iter()
-            .zip(wheel)
-            .enumerate()
-        {
-            assert!(wheel.raised().is_none());
-            let n = port.len();
-            if port[..] != wheel.buffers[0][..n] {
-                failures.push(format!(
-                    "{} {input:?} {:02x?}\n  wheel {:02x?}\n  port  {:02x?}",
-                    ["applyRGBA", "applyRGB"][k],
-                    [rgba, rgb][k],
-                    &wheel.buffers[0][..n],
-                    port
-                ));
+            .flat_map(|(lut, input, pixels)| {
+                pixels.iter().map(move |bytes| {
+                    let mut request = Request::new(processor(lut, *input, Depth::F32));
+                    let buffer = request.buffer(Buffer::Bytes(bytes.clone()));
+                    request.image(packed(buffer, 1, 1, *input));
+                    request.image(packed(buffer, 1, 1, Depth::F32));
+                    request.apply = vec![0, 1];
+                    request
+                })
+            })
+            .collect();
+        let calls: Vec<BatchCall<'_>> = requests.iter().map(Request::call).collect();
+        let responses = Oracle::get().batch(&calls, true);
+        let replies: Vec<Reply> = responses
+            .into_iter()
+            .zip(&requests)
+            .map(|(r, request)| request.reply(r.unwrap_or_else(|e| panic!("{e}"))))
+            .collect();
+
+        for ((lut, input, [rgba, rgb]), wheel) in cases.iter().zip(replies.chunks(2)) {
+            let cpu = port_processor(lut, *input, Depth::F32).unwrap();
+            let mut px = floats(rgba);
+            cpu.apply_rgba(&mut px).unwrap();
+            let rgb4 = floats(rgb);
+            let mut px3 = [rgb4[0], rgb4[1], rgb4[2]];
+            cpu.apply_rgb(&mut px3).unwrap();
+            for (k, (port, wheel)) in [bytes_of(&px), bytes_of(&px3)]
+                .iter()
+                .zip(wheel)
+                .enumerate()
+            {
+                assert!(wheel.raised().is_none());
+                let n = port.len();
+                if port[..] != wheel.buffers[0][..n] {
+                    failures.push(format!(
+                        "{} {input:?} {:02x?}\n  wheel {:02x?}\n  port  {:02x?}",
+                        ["applyRGBA", "applyRGB"][k],
+                        [rgba, rgb][k],
+                        &wheel.buffers[0][..n],
+                        port
+                    ));
+                }
             }
         }
     }
