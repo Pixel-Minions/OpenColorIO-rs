@@ -148,7 +148,33 @@ impl Regex {
 /// libstdc++, its behavior (`libstdcxx_match`).
 pub fn regex_match(text: &[u8], re: &Regex) -> Result<bool, RegexError> {
     match &re.program {
-        Program::Msvc(p) => msvc_match::regex_match(p, text),
+        Program::Msvc(p) => {
+            // MSVC's matcher recurses up to 600 levels (its own limit), with frames that are
+            // large at opt-level 0: on a thread of its own, with the stack that needs.
+            on_stack(MSVC_MATCH_STACK, || msvc_match::regex_match(p, text))
+                .unwrap_or_else(|| Err(msvc::error(ErrorType::Space)))
+        }
         Program::Libstdcxx(p) => libstdcxx_match::regex_match(p, text),
     }
+}
+
+/// The stack MSVC's matcher needs at its depth limit (600 nested matches): at most 1.43 MiB
+/// measured at opt-level 0, where frames are largest (`(a|b|c)*` on 298 `c`, `(?:(?=a|b).)*`
+/// on 299 `a`), with a margin.
+const MSVC_MATCH_STACK: usize = 8 * 1024 * 1024;
+
+/// Runs `f` on a new thread with a stack of `size` bytes, or `None` when the system can't
+/// create the thread. A panic in `f` is resumed on the caller's thread.
+fn on_stack<T: Send>(size: usize, f: impl FnOnce() -> T + Send) -> Option<T> {
+    std::thread::scope(|scope| {
+        let handle = std::thread::Builder::new()
+            .stack_size(size)
+            .spawn_scoped(scope, f)
+            .ok()?;
+        Some(
+            handle
+                .join()
+                .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+        )
+    })
 }
