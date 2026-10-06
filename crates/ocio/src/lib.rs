@@ -28,7 +28,7 @@ mod test_env;
 
 pub use color_space::ColorSpace;
 pub use color_space_set::ColorSpaceSet;
-pub use config::Config;
+pub use config::{Config, CurrentContext};
 pub use context::Context;
 pub use look::Look;
 pub use named_transform::NamedTransform;

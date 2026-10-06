@@ -7,8 +7,9 @@
 //! spaces, roles, displays, looks and the rest come with the later Phase 3 chunks.
 
 use std::collections::BTreeMap;
+use std::fmt;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, RwLock};
 
 use ocio_ops::exception::{Exception, Result};
 use ocio_ops::image_desc::PackedImageDesc;
@@ -103,6 +104,38 @@ enum InactiveType {
     NamedTransform,
 }
 
+/// A config's current context, shared with the config: what it reads is the context as the
+/// config holds it at that moment, so a handle taken before a change of the config (its
+/// environment, search paths, working directory) sees the change, as the pointer upstream's
+/// `getCurrentContext` returns does. The handle only reads the context.
+///
+/// Port of the `ConstContextRcPtr` of `Config::getCurrentContext`
+/// (src/OpenColorIO/Config.cpp:2161-2164 @ v2.5.2): the config and the callers share one
+/// context object (`Config::Impl::m_context`).
+#[derive(Clone)]
+pub struct CurrentContext(Arc<RwLock<Arc<Context>>>);
+
+impl CurrentContext {
+    fn new(context: Arc<Context>) -> CurrentContext {
+        CurrentContext(Arc::new(RwLock::new(context)))
+    }
+
+    /// The context as the config holds it now.
+    pub fn get(&self) -> Arc<Context> {
+        self.0.read().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    fn set(&self, context: Arc<Context>) {
+        *self.0.write().unwrap_or_else(|e| e.into_inner()) = context;
+    }
+}
+
+impl fmt::Debug for CurrentContext {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&*self.get(), f)
+    }
+}
+
 /// The result of the config's last validation.
 ///
 /// Port of `Config::Impl::Validation` (src/OpenColorIO/Config.cpp:257-262 @ v2.5.2).
@@ -162,8 +195,10 @@ pub struct Config {
     minor_version: u32,
     /// `m_env`: the environment variables and their default values.
     env: BTreeMap<Vec<u8>, Vec<u8>>,
-    /// `m_context`.
+    /// `m_context`: the config's own reference to its current context.
     context: Arc<Context>,
+    /// `m_context` as the callers of `getCurrentContext` share it: it always holds `context`.
+    shared_context: CurrentContext,
     /// `m_name`.
     name: Vec<u8>,
     /// `m_familySeparator`.
@@ -216,11 +251,13 @@ impl Clone for Config {
     /// Port of `Config::createEditableCopy` and `Config::Impl::operator=`
     /// (src/OpenColorIO/Config.cpp:379-457, 1352-1357 @ v2.5.2), in part.
     fn clone(&self) -> Config {
+        let context = Arc::new((*self.context).clone());
         let config = Config {
             major_version: self.major_version,
             minor_version: self.minor_version,
             env: self.env.clone(),
-            context: Arc::new((*self.context).clone()),
+            context: context.clone(),
+            shared_context: CurrentContext::new(context),
             name: self.name.clone(),
             family_separator: self.family_separator,
             description: self.description.clone(),
@@ -255,11 +292,13 @@ impl Clone for Config {
 impl Config {
     /// The state `Config::Impl::Impl` gives a config before it reads the environment.
     fn blank() -> Config {
+        let context = Arc::new(Context::new());
         let config = Config {
             major_version: LAST_SUPPORTED_MAJOR_VERSION,
             minor_version: LAST_SUPPORTED_MINOR_VERSION[LAST_SUPPORTED_MAJOR_VERSION as usize - 1],
             env: BTreeMap::new(),
-            context: Arc::new(Context::new()),
+            context: context.clone(),
+            shared_context: CurrentContext::new(context),
             name: Vec::new(),
             family_separator: DEFAULT_FAMILY_SEPARATOR,
             description: Vec::new(),
@@ -339,19 +378,18 @@ impl Config {
         self.processor_cache.clear();
     }
 
-    /// The current context, to change it. Upstream changes the context it shares with the
-    /// callers of `getCurrentContext`; the port changes its own, so a caller's
-    /// [`Config::current_context`] keeps the state it had: when the context is shared, the
-    /// config takes a copy of it first (with its environment mode, which
-    /// `Context::createEditableCopy` doesn't keep).
-    fn context_mut(&mut self) -> &mut Context {
-        if Arc::get_mut(&mut self.context).is_none() {
-            let mode = self.context.environment_mode();
-            let mut copy = (*self.context).clone();
-            copy.set_environment_mode(mode);
-            self.context = Arc::new(copy);
-        }
-        Arc::get_mut(&mut self.context).expect("a context of its own")
+    /// Changes the current context through `change`, as the callers of `getCurrentContext`
+    /// see it too. The config changes a copy of the context (with its environment mode, which
+    /// `Context::createEditableCopy` doesn't keep) and shares the copy: what callers took from
+    /// [`CurrentContext::get`] before keeps the state it had, as a value read from upstream's
+    /// context would.
+    fn update_context(&mut self, change: impl FnOnce(&mut Context)) {
+        let mode = self.context.environment_mode();
+        let mut copy = (*self.context).clone();
+        copy.set_environment_mode(mode);
+        change(&mut copy);
+        self.context = Arc::new(copy);
+        self.shared_context.set(self.context.clone());
     }
 
     /// The raw config: version 2.0, no strict parsing, its one color space `raw` and the role
@@ -516,13 +554,13 @@ impl Config {
         self.description = c_str(description.as_ref()).to_vec();
     }
 
-    /// The current context. A change of the config's context (its environment, search paths
-    /// or working directory) is not seen through a context returned before it.
+    /// The current context, shared with the config: a later change of the config's context
+    /// (its environment, search paths or working directory) is seen through it.
     ///
     /// Port of `Config::getCurrentContext` (src/OpenColorIO/Config.cpp:2161-2164 @ v2.5.2).
     #[doc(alias = "getCurrentContext")]
-    pub fn current_context(&self) -> &Arc<Context> {
-        &self.context
+    pub fn current_context(&self) -> CurrentContext {
+        self.shared_context.clone()
     }
 
     /// Adds the environment variable `name` with the default value `default_value`, or
@@ -543,11 +581,11 @@ impl Config {
             Some(default_value) => {
                 let default_value = c_str(default_value);
                 self.env.insert(name.to_vec(), default_value.to_vec());
-                self.context_mut().set_string_var(name, Some(default_value));
+                self.update_context(|c| c.set_string_var(name, Some(default_value)));
             }
             None => {
                 self.env.remove(name);
-                self.context_mut().set_string_var(name, None);
+                self.update_context(|c| c.set_string_var(name, None));
             }
         }
 
@@ -592,7 +630,7 @@ impl Config {
     #[doc(alias = "clearEnvironmentVars")]
     pub fn clear_environment_vars(&mut self) {
         self.env.clear();
-        self.context_mut().clear_string_vars();
+        self.update_context(|c| c.clear_string_vars());
 
         self.reset_cache_ids();
     }
@@ -602,7 +640,7 @@ impl Config {
     /// Port of `Config::setEnvironmentMode` (src/OpenColorIO/Config.cpp:2219-2225 @ v2.5.2).
     #[doc(alias = "setEnvironmentMode")]
     pub fn set_environment_mode(&mut self, mode: EnvironmentMode) {
-        self.context_mut().set_environment_mode(mode);
+        self.update_context(|c| c.set_environment_mode(mode));
 
         self.reset_cache_ids();
     }
@@ -618,7 +656,7 @@ impl Config {
     /// Port of `Config::loadEnvironment` (src/OpenColorIO/Config.cpp:2232-2238 @ v2.5.2).
     #[doc(alias = "loadEnvironment")]
     pub fn load_environment(&mut self) {
-        self.context_mut().load_environment();
+        self.update_context(|c| c.load_environment());
 
         self.reset_cache_ids();
     }
@@ -636,7 +674,7 @@ impl Config {
     /// Port of `Config::setSearchPath` (src/OpenColorIO/Config.cpp:2245-2251 @ v2.5.2).
     #[doc(alias = "setSearchPath")]
     pub fn set_search_path(&mut self, path: impl AsRef<[u8]>) {
-        self.context_mut().set_search_path(path);
+        self.update_context(|c| c.set_search_path(path));
 
         self.reset_cache_ids();
     }
@@ -658,7 +696,7 @@ impl Config {
     /// Port of `Config::clearSearchPaths` (src/OpenColorIO/Config.cpp:2263-2269 @ v2.5.2).
     #[doc(alias = "clearSearchPaths")]
     pub fn clear_search_paths(&mut self) {
-        self.context_mut().clear_search_paths();
+        self.update_context(|c| c.clear_search_paths());
 
         self.reset_cache_ids();
     }
@@ -672,7 +710,7 @@ impl Config {
         if path.is_empty() {
             return;
         }
-        self.context_mut().add_search_path(path);
+        self.update_context(|c| c.add_search_path(path));
 
         self.reset_cache_ids();
     }
@@ -686,7 +724,7 @@ impl Config {
     /// Port of `Config::setWorkingDir` (src/OpenColorIO/Config.cpp:2285-2291 @ v2.5.2).
     #[doc(alias = "setWorkingDir")]
     pub fn set_working_dir(&mut self, dirname: impl AsRef<[u8]>) {
-        self.context_mut().set_working_dir(dirname);
+        self.update_context(|c| c.set_working_dir(dirname));
 
         self.reset_cache_ids();
     }
@@ -1541,7 +1579,7 @@ impl Config {
         transform: &Transform,
         direction: TransformDirection,
     ) -> Result<Arc<Processor>> {
-        let context = self.current_context().clone();
+        let context = self.context.clone();
         self.processor_with_context(&context, transform, direction)
     }
 
