@@ -1741,7 +1741,8 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Status:** matched in `p2-ff-cpu` (2.3a2); `fixed_function_op_data_tests.rs` checks the
   error, and that the comparisons upstream makes without reading (another style, or an inverse
   that validation refuses) give upstream's answers. The renderers in 2.3b, and in 2.3c1 and
-  2.3d1 (`p2-ff-cpu-2`): `fixed_function_op_cpu_tests.rs` checks their errors.
+  2.3d1 (`p2-ff-cpu-2`), and ACES 2.0's (`p2-aces2-cpu`, 2.4e1, 2.4e2, through `param_f32`):
+  `fixed_function_op_cpu_tests.rs` checks their errors.
   The GPU writer reads the ACES 1.3 gamut compression's parameters the same way in `p2-ff-gpu`
   (2.3f, `fixed_function_op_gpu.rs`), and the Rec.2100 surround's, the gamma-log's and the
   double-log's (2.3g1, 2.3g2), and ACES 2.0's (`p2-aces2-gpu`, 2.4f1-2.4h);
@@ -1762,6 +1763,9 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   write past an array: "ACES 2.0: the gamut's corner hues make the hue table read or write
   past its arrays: upstream's behaviour is undefined." (`aces2::transform::CORNERS_OVERRUN`).
 - **Status:** matched in `p2-aces2-cpu` (2.4c); `aces2/transform_tests.rs` checks the error.
+  The GPU writer refuses the same parameters before it writes anything (`p2-aces2-gpu`,
+  2.4f1-2.4h); `fixed_function_op_gpu.rs` checks it for the output transform and the gamut
+  compression, both directions.
 
 ### U-45. The working directory when `_getcwd` fails
 

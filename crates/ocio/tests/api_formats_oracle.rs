@@ -881,6 +881,15 @@ fn check(class: &Class) {
     let (jobs, skipped): (Vec<Job>, Vec<Job>) = jobs
         .into_iter()
         .partition(|job| !w0001_skips(&class.cases.cases[job.case], job));
+    // The applies W0001 covers that run: from F32 to F32 (Windows, without fast math).
+    let w0001_run = jobs
+        .iter()
+        .filter(|job| {
+            class.cases.cases[job.case]
+                .w0001_applies(&w0002_combo(job.dir, &job.combo))
+                .is_some()
+        })
+        .count();
     let mut failures = Vec::new();
     let mut deferred: BTreeMap<String, usize> = BTreeMap::new();
     let mut compared = 0;
@@ -1026,7 +1035,8 @@ fn check(class: &Class) {
         "{}: {} applies ({} tier): {compared} compared, {refusals} refusals compared, {} \
          deferred to Phase 2{}\n  W0002: {} images with {} NaN values differing in sign or \
          payload bits only; {} cache IDs of 1D LUTs baked with {} such NaN entries\n  W0001: \
-         {} images with values within it ({} values); {} applies not run (not F32 to F32)",
+         {w0001_run} applies under it, {} images with values within it ({} values); {} applies \
+         not run (not F32 to F32)",
         class.name,
         jobs.len(),
         tier.name(),
@@ -1051,6 +1061,21 @@ fn check(class: &Class) {
         failures[..failures.len().min(20)].join("\n")
     );
     assert!(compared > 0, "{}: nothing compared", class.name);
+    // W0001 keeps out only what it must: where it covers a case, its F32-to-F32 applies run;
+    // on Linux it covers nothing, so everything runs.
+    assert!(
+        skipped.is_empty() || w0001_run > 0,
+        "{}: W0001 left out {} applies and ran none",
+        class.name,
+        skipped.len()
+    );
+    if !cfg!(target_os = "windows") {
+        assert!(
+            skipped.is_empty(),
+            "{}: W0001 left out applies on Linux",
+            class.name
+        );
+    }
 }
 
 #[test]

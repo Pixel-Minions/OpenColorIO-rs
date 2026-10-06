@@ -3673,4 +3673,27 @@ mod tests {
             assert!(text.is_empty(), "{style:?}");
         }
     }
+
+    /// U-32: limiting primaries with a NaN coordinate, which validation accepts, make
+    /// upstream's hue table code read and write past its arrays; the GPU writer refuses them as
+    /// the CPU renderers do, before it writes anything.
+    #[test]
+    fn nan_primaries_are_refused_where_upstream_overruns_the_hue_table() {
+        use FixedFunctionOpStyle::*;
+        use ocio_ops::ops::fixedfunction::aces2::transform::CORNERS_OVERRUN;
+        for style in [
+            AcesOutputTransform20Fwd,
+            AcesOutputTransform20Inv,
+            AcesGamutCompress20Fwd,
+            AcesGamutCompress20Inv,
+        ] {
+            for (red_x, white_x) in [(f64::NAN, 0.3127), (0.64, f64::NAN)] {
+                let params = vec![100.0, red_x, 0.33, 0.30, 0.60, 0.15, 0.06, white_x, 0.3290];
+                let data = FixedFunctionOpData::with_params(style, params).unwrap();
+                let (result, text) = shader_of(&data);
+                assert_eq!(result.unwrap_err().message(), CORNERS_OVERRUN, "{style:?}");
+                assert!(text.is_empty(), "{style:?}");
+            }
+        }
+    }
 }

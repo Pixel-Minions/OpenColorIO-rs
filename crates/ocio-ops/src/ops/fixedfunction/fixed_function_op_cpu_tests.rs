@@ -1248,8 +1248,9 @@ fn lin_to_double_log() {
 }
 
 /// U-31: the gamut compression's renderer reads seven parameters, the Rec.2100 surround's
-/// one, the gamma-log's ten and the double-log's 13, which upstream does without a check; the
-/// port refuses data with fewer (set after the validating constructor).
+/// one, the gamma-log's ten and the double-log's 13, and the ACES 2.0 styles theirs, which
+/// upstream does without a check; the port refuses data with fewer (set after the validating
+/// constructor).
 #[test]
 fn short_params_are_refused() {
     let params: Params = vec![1.147, 1.264, 1.312, 0.815, 0.803, 0.880, 1.2];
@@ -1279,6 +1280,35 @@ fn short_params_are_refused() {
         (DoubleLogToLin, double_log),
     ] {
         let mut data = FixedFunctionOpData::with_params(style, params.clone()).unwrap();
+        data.set_params(params[..params.len() - 1].to_vec());
+        check_throw_what(
+            get_fixed_function_cpu_renderer(&data, false).map(|_| ()),
+            SHORT_PARAMS,
+        );
+    }
+    // ACES 2.0: a peak luminance and limiting primaries (P3-D65 at 1000 nits), and AP0's
+    // primaries (upstream's aces_output_transform_20 and aces_rgb_to_jmh_20).
+    let peak_primaries: Params = vec![
+        1000.0, 0.680, 0.320, 0.265, 0.690, 0.150, 0.060, 0.3127, 0.3290,
+    ];
+    let ap0: Params = vec![
+        0.7347, 0.2653, 0.0000, 1.0000, 0.0001, -0.0770, 0.32168, 0.33767,
+    ];
+    for (style, params) in [
+        (AcesOutputTransform20Fwd, peak_primaries.clone()),
+        (AcesOutputTransform20Inv, peak_primaries.clone()),
+        (AcesGamutCompress20Fwd, peak_primaries.clone()),
+        (AcesGamutCompress20Inv, peak_primaries),
+        (AcesTonescaleCompress20Fwd, vec![1000.0]),
+        (AcesTonescaleCompress20Inv, vec![1000.0]),
+        (AcesRgbToJmh20, ap0.clone()),
+        (AcesJmhToRgb20, ap0),
+    ] {
+        let mut data = FixedFunctionOpData::with_params(style, params.clone()).unwrap();
+        assert!(
+            get_fixed_function_cpu_renderer(&data, false).is_ok(),
+            "{style:?}"
+        );
         data.set_params(params[..params.len() - 1].to_vec());
         check_throw_what(
             get_fixed_function_cpu_renderer(&data, false).map(|_| ()),
