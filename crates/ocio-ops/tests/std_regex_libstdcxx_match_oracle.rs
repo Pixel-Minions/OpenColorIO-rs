@@ -452,30 +452,167 @@ fn classes_escapes_and_anchors_match_as_in_the_wheel() {
     );
 }
 
-/// Paths of 8,192 bytes match as in the wheel; longer ones, and matches whose recursion would
-/// go past 100,000 levels, the port refuses (U-54).
-#[test]
-fn the_ports_limits() {
-    let long = vec![b'a'; 8192];
-    let cases = vec![
-        ("(a|b)*".to_string(), vec![long.clone()]),
-        (".*".to_string(), vec![long.clone()]),
-        ("a*?".to_string(), vec![long.clone()]),
-    ];
-    check(cases);
+/// The wheel's matcher recurses once per state it goes through and crashes about 74,900
+/// frames deep; the port estimates that depth and refuses a match past 37,000 (U-54). Per
+/// character of `a`, `(a|b)*` takes a loop iteration (1.29), a capture (2), an alternative
+/// other than the last (1) and the character (1): 5.29 frames; `((((a))))*` 1.29 + 4 x 2 + 1 =
+/// 10.29. With group 0 (2) and the last, failed, iteration (as deep as the others), a path of
+/// `n` characters takes `2 + (n + 1) x cost`, so the first refused `n` is `(37,000 - 2) / cost`
+/// rounded down (in hundredths of a frame).
+fn first_refused(cost_per_char: usize) -> usize {
+    (3_700_000 - 200) / cost_per_char
+}
 
+/// The bound is exact: the port matches `n - 1` characters and refuses `n`, where the
+/// estimate first passes 37,000 frames; and it is about half the measured crash (U-54).
+#[test]
+fn the_cost_bound_is_exact() {
+    for (pattern, cost) in [
+        ("(a|b)*", 529),
+        ("(?:(a)|b)*", 529),
+        ("((((a))))*", 1029),
+        ("((((((((((a))))))))))*", 2229),
+    ] {
+        let n = first_refused(cost);
+        let re = Regex::new(pattern.as_bytes(), Library::Libstdcxx).unwrap();
+        assert_eq!(
+            regex_match(&vec![b'a'; n - 1], &re),
+            Ok(true),
+            "{pattern} {n}"
+        );
+        let error = regex_match(&vec![b'a'; n], &re).unwrap_err();
+        assert_eq!(
+            (error.code(), error.what()),
+            (ErrorType::Stack, "regex_error"),
+            "{pattern} {n}"
+        );
+    }
     let re = Regex::new(b".*", Library::Libstdcxx).unwrap();
+    assert_eq!(regex_match(&vec![b'a'; 8192], &re), Ok(true));
     let error = regex_match(&vec![b'a'; 8193], &re).unwrap_err();
     assert_eq!(
         (error.code(), error.what()),
         (ErrorType::Stack, "regex_error")
     );
+}
 
-    let deep = format!("{}a{}*", "(".repeat(200), ")".repeat(200));
-    let re = Regex::new(deep.as_bytes(), Library::Libstdcxx).unwrap();
-    let error = regex_match(&long, &re).unwrap_err();
-    assert_eq!(
-        (error.code(), error.what()),
-        (ErrorType::Stack, "regex_error")
+/// The smallest `n` for which the port refuses `make(n)`, up to `limit`.
+fn port_refuses_from(make: &dyn Fn(usize) -> (Vec<u8>, Vec<u8>), limit: usize) -> usize {
+    let refuses = |n: usize| {
+        let (pattern, text) = make(n);
+        let re = Regex::new(&pattern, Library::Libstdcxx).unwrap();
+        regex_match(&text, &re).is_err()
+    };
+    assert!(refuses(limit), "the port refuses at {limit}");
+    let (mut lo, mut hi) = (0, limit);
+    while hi - lo > 1 {
+        let mid = (lo + hi) / 2;
+        if refuses(mid) { hi = mid } else { lo = mid }
+    }
+    hi
+}
+
+/// Where the port starts refusing, the wheel still matches: each case runs in a process of
+/// its own (O3.4's `isolated`), which reports a crash.
+#[test]
+fn the_wheel_survives_where_the_port_starts_refusing() {
+    let text_cases: [(&str, &str); 10] = [
+        ("a*", "a"),
+        ("(a)*", "a"),
+        ("((a))*", "a"),
+        ("((((a))))*", "a"),
+        ("(?:a|b)*", "a"),
+        ("(a|b)*", "a"),
+        ("(a)*?", "a"),
+        ("(?:a?)*", "a"),
+        ("(?:(a)|b)*", "a"),
+        ("((a)(b))*", "ab"),
+    ];
+    let mut cases = Vec::new();
+    for (pattern, unit) in text_cases {
+        let make = |n: usize| (pattern.as_bytes().to_vec(), unit.repeat(n).into_bytes());
+        let n = port_refuses_from(&make, 8193 / unit.len() + 1);
+        cases.push(make(n));
+    }
+    // Stacked quantifiers: `a` and `k` stars, on `a` and on the empty text.
+    for text in ["a", ""] {
+        let make = |k: usize| {
+            (
+                format!("a{}", "*".repeat(k)).into_bytes(),
+                text.as_bytes().to_vec(),
+            )
+        };
+        let k = port_refuses_from(&make, 40_000);
+        cases.push(make(k));
+    }
+    let requests: Vec<Value> = cases
+        .iter()
+        .map(|(pattern, text)| {
+            json!({
+                "rules": [{"name": "r", "colorspace": "raw", "regex": {"bytes": hex(pattern)}}],
+                "paths": [{"bytes": hex(text)}],
+                "isolated": true,
+            })
+        })
+        .collect();
+    let response = Oracle::get()
+        .call("file_rules_match", json!({"cases": requests}), &[])
+        .result;
+    for ((pattern, text), case) in cases.iter().zip(response["cases"].as_array().unwrap()) {
+        let label = format!(
+            "{} on {} bytes",
+            String::from_utf8_lossy(&pattern[..pattern.len().min(40)]),
+            text.len()
+        );
+        assert!(case.get("crashed").is_none(), "{label}: {case}");
+        assert!(case["paths"][0].get("rule").is_some(), "{label}: {case}");
+    }
+}
+
+/// Typical file rules on 4,096-byte paths are never refused, and match as in the wheel.
+#[test]
+fn typical_file_rules_on_long_paths() {
+    let patterns = [
+        r".*\.(exr|EXR)$",
+        r".*\.(dpx|DPX)$",
+        r".*_(srgb|SRGB)_.*",
+        r".*/(plates|PLATES)/.*",
+        r"^.*/shots/[^/]+/comp/.*\.exr$",
+        r".*\.[0-9]{4}\.exr$",
+        r"(.*)_v([0-9]+)\.([0-9]+)\.(exr|dpx)$",
+        r".*(lin|LIN|linear).*",
+        r"[^/]*\.(tif|tiff|TIF|TIFF)$",
+        r"(?:.*/)?([^/]+)\.(exr|dpx|tif)$",
+        r".*_(acescg|ACEScg|lin_rec709)\..*",
+    ];
+    let long_dir = |n: usize| {
+        let mut d = String::from("/shows/");
+        while d.len() < n {
+            d.push_str("seq_0100/");
+        }
+        d
+    };
+    let mut paths = Vec::new();
+    for name in [
+        "shots/sh010/comp/plate_srgb_v001.1001.exr",
+        "plates/bg_lin_rec709.1001.dpx",
+        "texture_acescg.tif",
+    ] {
+        let dir = long_dir(4096 - name.len());
+        let path = format!("{}{name}", &dir[..4096 - name.len()]);
+        assert_eq!(path.len(), 4096);
+        paths.push(path.into_bytes());
+    }
+    for pattern in patterns {
+        let re = Regex::new(pattern.as_bytes(), Library::Libstdcxx).unwrap();
+        for path in &paths {
+            assert!(regex_match(path, &re).is_ok(), "{pattern} is refused");
+        }
+    }
+    check(
+        patterns
+            .iter()
+            .map(|p| (p.to_string(), paths.clone()))
+            .collect(),
     );
 }
