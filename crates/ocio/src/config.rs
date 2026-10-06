@@ -45,6 +45,7 @@ use crate::path_utils::parse_color_space_from_string;
 use crate::processor::{Processor, ProcessorCacheFlags};
 use crate::transform::Transform;
 use crate::view_transform::ViewTransform;
+use crate::viewing_rules::{ViewingRules, find_rule};
 
 /// `OCIO_ACTIVE_DISPLAYS`: the displays a config shows, overriding its own list.
 ///
@@ -325,6 +326,8 @@ pub struct Config {
     strict_parsing: bool,
     /// `m_fileRules`.
     file_rules: FileRules,
+    /// `m_viewingRules`.
+    viewing_rules: ViewingRules,
     /// The validation and the cache IDs, under `m_cacheidMutex`.
     cache_ids: Mutex<CacheIds>,
     /// `m_cacheFlags` (`mutable`: a const config changes it).
@@ -374,6 +377,7 @@ impl Clone for Config {
             default_luma_coefs: self.default_luma_coefs,
             strict_parsing: self.strict_parsing,
             file_rules: self.file_rules.clone(),
+            viewing_rules: self.viewing_rules.clone(),
             cache_ids: Mutex::new(self.lock_cache_ids().clone()),
             cache_flags: AtomicU32::new(self.cache_flags.load(Ordering::Relaxed)),
             processor_cache: ProcessorCache::new(),
@@ -429,6 +433,7 @@ impl Config {
             default_luma_coefs: DEFAULT_LUMA_COEFFS,
             strict_parsing: true,
             file_rules: FileRules::new(),
+            viewing_rules: ViewingRules::new(),
             cache_ids: Mutex::new(CacheIds::new()),
             cache_flags: AtomicU32::new(ProcessorCacheFlags::DEFAULT.0),
             processor_cache: ProcessorCache::new(),
@@ -1720,13 +1725,12 @@ impl Config {
     }
 
     /// The active views of `views` for an image in the color space `image_cs_name`: the views
-    /// without a viewing rule, and those whose rule names that color space or its encoding.
-    /// `view_names` gets the names of `views`.
+    /// without a viewing rule, and those whose rule names that color space (or a role of it)
+    /// or its encoding. `view_names` gets the names of `views`. Upstream compares the name it
+    /// is given, not the color space's own, and the encoding as the color space writes it with
+    /// the rule's in lower case (docs/improvements.md, I-136).
     ///
-    /// Port of `Config::Impl::getFilteredViews` (src/OpenColorIO/Config.cpp:838-901 @ v2.5.2),
-    /// but for the views with a rule: a config has no viewing rules until they are ported
-    /// (3.9e, `setViewingRules`), so upstream's `FindRule` finds none of them, and those views
-    /// are left out.
+    /// Port of `Config::Impl::getFilteredViews` (src/OpenColorIO/Config.cpp:838-901 @ v2.5.2).
     fn impl_filtered_views(
         &self,
         view_names: &mut StringVec,
@@ -1734,7 +1738,7 @@ impl Config {
         image_cs_name: &[u8],
     ) -> Result<StringVec> {
         let image_cs_name = c_str(image_cs_name);
-        if self.impl_color_space(image_cs_name).is_none() {
+        let Some(image_color_space) = self.impl_color_space(image_cs_name) else {
             return Err(Exception::new(
                 [
                     b"Could not find source color space '".as_slice(),
@@ -1743,11 +1747,14 @@ impl Config {
                 ]
                 .concat(),
             ));
-        }
+        };
+
+        let view_encoding = image_color_space.encoding();
 
         *view_names = get_view_names(views);
         let active_views = self.impl_active_views(view_names);
 
+        let image_color_space_name = lower(image_cs_name);
         let mut filtered_active_views = StringVec::new();
         for view in &active_views {
             let idx = find_in_string_vec_case_ignore(view_names, view);
@@ -1755,6 +1762,48 @@ impl Config {
             if rule_name.is_empty() {
                 // Include all views that do not have a rule.
                 filtered_active_views.push(view.clone());
+            } else if let Some(rule_idx) = find_rule(&self.viewing_rules, rule_name) {
+                let numcs = self
+                    .viewing_rules
+                    .num_color_spaces(rule_idx)
+                    .expect("a rule FindRule found");
+                let mut added = false;
+                for cs_idx in 0..numcs {
+                    // Rule can use role names.
+                    let rolename = self
+                        .viewing_rules
+                        .color_space(rule_idx, cs_idx)
+                        .expect("a rule FindRule found")
+                        .expect("a color space in the list");
+                    let csname = lookup_role(&self.roles, rolename);
+
+                    let cs_name = if !csname.is_empty() { csname } else { rolename };
+                    if lower(cs_name) == image_color_space_name {
+                        // Include a view if its rule contains the image's color space.
+                        filtered_active_views.push(view.clone());
+                        added = true;
+                        break;
+                    }
+                }
+                if !added && !view_encoding.is_empty() {
+                    let num_enc = self
+                        .viewing_rules
+                        .num_encodings(rule_idx)
+                        .expect("a rule FindRule found");
+                    for enc_idx in 0..num_enc {
+                        let enc_name = self
+                            .viewing_rules
+                            .encoding(rule_idx, enc_idx)
+                            .expect("a rule FindRule found")
+                            .expect("an encoding in the list");
+                        if lower(enc_name) == view_encoding {
+                            // Include a view if its rule contains the image's color space
+                            // encoding.
+                            filtered_active_views.push(view.clone());
+                            break;
+                        }
+                    }
+                }
             }
         }
         Ok(filtered_active_views)
@@ -1782,6 +1831,24 @@ impl Config {
     /// Empties the cache of active displays (`m_displayCache.clear()`).
     fn clear_display_cache(&mut self) {
         self.display_cache = OnceLock::new();
+    }
+
+    /// The config's viewing rules.
+    ///
+    /// Port of `Config::getViewingRules` (src/OpenColorIO/Config.cpp:3332-3335 @ v2.5.2).
+    #[doc(alias = "getViewingRules")]
+    pub fn viewing_rules(&self) -> &ViewingRules {
+        &self.viewing_rules
+    }
+
+    /// Sets the config's viewing rules to a copy of `viewing_rules`.
+    ///
+    /// Port of `Config::setViewingRules` (src/OpenColorIO/Config.cpp:3337-3343 @ v2.5.2).
+    #[doc(alias = "setViewingRules")]
+    pub fn set_viewing_rules(&mut self, viewing_rules: &ViewingRules) {
+        self.viewing_rules = viewing_rules.clone();
+
+        self.reset_cache_ids();
     }
 
     /// Whether `view_name` is one of the shared views of `disp_name` (with an empty display
@@ -2008,8 +2075,8 @@ impl Config {
     }
 
     /// The number of active views of `display` for an image in the color space `colorspace`
-    /// (the views without a viewing rule); 0 for an unknown display or an empty color space
-    /// name, an error for an unknown color space.
+    /// (the views without a viewing rule, and those whose rule fits it); 0 for an unknown
+    /// display or an empty color space name, an error for an unknown color space.
     ///
     /// Port of `Config::getNumViews(const char *, const char *)`
     /// (src/OpenColorIO/Config.cpp:3502-3517 @ v2.5.2).

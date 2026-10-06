@@ -411,6 +411,36 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   Seen in the source; the oracle sets the environment once per process, before the config is
   made, so it can't show the case.
 
+### I-135. A viewing rule's color space and encoding indices are cut to `int`
+
+- **Upstream:** `ViewingRules::getColorSpace` and `getEncoding` (`ViewingRules.cpp:240-253,
+  288-301`) check a `size_t` index after `static_cast<int>`, which both wheels compile as the
+  low 32 bits, signed. So an index of 2^32 + n is index n, and an index whose low 32 bits are
+  2^31 or more is negative: it passes the check, and `TokensManager::getToken` gives a null
+  pointer. `removeColorSpace` and `removeEncoding` go through them: through the wheel,
+  `removeColorSpace(0, 2**32)` removes the rule's first color space, and
+  `removeColorSpace(0, 2**31)` removes nothing, without an error.
+- **Who notices:** code and Python scripts that pass a wrong, large index.
+- **A fix:** check the `size_t` index against the count, as `getName` does.
+- **Status:** matched in `p3-rules` (3.9g, `crates/ocio/src/viewing_rules.rs`): the getters
+  return `Option` for the null pointer; checked against the wheel
+  (`crates/ocio/tests/viewing_rules_oracle.rs`, `large_indices_match_the_wheel`).
+
+### I-136. Views for a color space miss rules on an alias, a role or an encoding's case
+
+- **Upstream:** `Config::Impl::getFilteredViews` (`Config.cpp:838-901`), behind
+  `getViews(display, colorSpaceName)`, finds the image's color space by any of its names, but
+  compares the rules' color spaces (roles resolved) with the name it was given, in lower case:
+  given an alias or a role, it misses the rules that name the color space, and a rule that
+  names an alias matches only an image given by that alias. It compares each of a rule's
+  encodings, in lower case, with the color space's encoding as the color space writes it: a
+  color space whose encoding has an upper-case letter matches no rule.
+- **Who notices:** applications that ask for the views of an image by an alias or a role, and
+  configs whose color spaces write their encodings with capitals.
+- **A fix:** compare with the found color space's name, and both encodings in lower case.
+- **Status:** matched in `p3-rules` (3.9g, `Config::impl_filtered_views`); checked against the
+  wheel (`crates/ocio/tests/config_oracle.rs`, `views_by_viewing_rules_match_the_wheel`).
+
 ## Numeric helpers
 
 ### I-20. Double values are compared to 0 and 1 in float precision
@@ -1925,3 +1955,20 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   from `Config::upgrade_to_latest_version`, and leaves the config as it was.
 - **Status:** matched in `p3-rules` (3.9f); the other paths of the upgrade are checked against
   the wheel in `crates/ocio/tests/config_oracle.rs`.
+
+### U-56. Null rules, and a null rule name for empty viewing rules
+
+- **Upstream:** `Config::setFileRules(nullptr)` and `setViewingRules(nullptr)` call
+  `createEditableCopy` on the null pointer (`Config.cpp:4648-4654, 3337-3343`), and
+  `ViewingRules::getIndexForRule(nullptr)` on rules without a rule writes the null pointer to a
+  stream for its message (`ViewingRules.cpp:212-226`). Through the Windows wheel,
+  `config.setFileRules(None)`, `config.setViewingRules(None)` and
+  `OCIO.ViewingRules().getIndexForRule(None)` end the Python process with an access violation.
+  With a rule, `getIndexForRule(None)` raises `Platform::Strcasecmp`'s "String pointer for
+  comparison must not be null." (`Platform.cpp:155-160`), as `FileRules.getIndexForRule(None)`
+  always does (its rules have the default rule).
+- **Who notices:** code and Python scripts that pass a missing rules object or rule name.
+- **Decided** (general rule): the Rust methods take `&FileRules`, `&ViewingRules` and byte
+  strings, which can't be null; the Python module (Phase 6) refuses `None` with an error
+  instead of crashing, and with Strcasecmp's message where the wheel raises it.
+- **Status:** matched in `p3-rules` (3.9g); the Python part is Phase 6's.

@@ -24,6 +24,7 @@ pub(crate) mod tokens_manager;
 pub mod transform;
 pub mod transforms;
 pub mod view_transform;
+pub mod viewing_rules;
 pub mod yaml_cpp;
 
 #[cfg(test)]
@@ -70,6 +71,7 @@ pub use transforms::lut1d_transform::Lut1DTransform;
 pub use transforms::matrix_transform::MatrixTransform;
 pub use transforms::range_transform::{RangeStyle, RangeTransform};
 pub use view_transform::ViewTransform;
+pub use viewing_rules::ViewingRules;
 
 /// The OpenColorIO version this port matches, as `OCIO::GetVersion()` reports it.
 pub const fn version() -> &'static str {
