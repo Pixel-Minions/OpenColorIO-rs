@@ -1740,7 +1740,7 @@ path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu.rs"]
 status = "partial"
-note = "p1-optimizer C: the lookups of a forward LUT without hue adjust from 8-, 10-, 12-, 16-bit and half codes to F32 (LookupLut, BaseLut1DRenderer::updateData's lookup branch, the lookup branches of Lut1DRenderer and Lut1DRendererHalfCode), GetLut1DRenderer for them, each wheel's in-place order (I-41) and U-1's error; every code against the wheel (tests/lut1d_op_cpu_oracle.rs). p2-lut1d-fwd 2.1a: the forward renderers to every output bit depth (L_ADJUST, BaseLut1DRenderer::updateData's float branch, the float branches of Lut1DRenderer (its scalar loop) and Lut1DRendererHalfCode, IndexPair::GetEdgeFloatValues), GetLut1DRenderer, GetLut1DRenderer_InBitDepth, _OutBitDepth and GetForwardLut1DRenderer for forward LUTs (I-64); the half domain through the battery and the scalar loop on single-pixel rows against the wheel (tests/lut1d_renderer_oracle.rs). 2.1b: GamutMapUtils::Order3, Lut1DRendererHueAdjust (its OCIO_USE_SSE2 branch) and Lut1DRendererHalfCodeHueAdjust, every output bit depth, each wheel's operand order and in-place alpha (I-41); through the battery, on single-pixel rows and every code (tests/lut1d_op_cpu_oracle.rs). Still errors: the constructors' SIMD dispatch (2.1c, 2.1d), the inverse renderers (2.1f), resampling (Compose, 2.1g)"
+note = "p1-optimizer C: the lookups of a forward LUT without hue adjust from 8-, 10-, 12-, 16-bit and half codes to F32 (LookupLut, BaseLut1DRenderer::updateData's lookup branch, the lookup branches of Lut1DRenderer and Lut1DRendererHalfCode), GetLut1DRenderer for them, each wheel's in-place order (I-41) and U-1's error; every code against the wheel (tests/lut1d_op_cpu_oracle.rs). p2-lut1d-fwd 2.1a: the forward renderers to every output bit depth (L_ADJUST, BaseLut1DRenderer::updateData's float branch, the float branches of Lut1DRenderer (its scalar loop) and Lut1DRendererHalfCode, IndexPair::GetEdgeFloatValues), GetLut1DRenderer, GetLut1DRenderer_InBitDepth, _OutBitDepth and GetForwardLut1DRenderer for forward LUTs (I-64); the half domain through the battery and the scalar loop on single-pixel rows against the wheel (tests/lut1d_renderer_oracle.rs). 2.1b: GamutMapUtils::Order3, Lut1DRendererHueAdjust (its OCIO_USE_SSE2 branch) and Lut1DRendererHalfCodeHueAdjust, every output bit depth, each wheel's operand order and in-place alpha (I-41); through the battery, on single-pixel rows and every code (tests/lut1d_op_cpu_oracle.rs). p2-lut1d-simd: the first constructor's SIMD dispatch (273-309, lut1d_kernel) and Lut1DRenderer::apply's kernel branch (652-658). Still errors: the inverse renderers (2.1f), resampling (Compose, 2.1g)"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU.h"
@@ -1753,49 +1753,57 @@ note = "p1-optimizer C: GetLut1DRenderer"
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_AVX.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu_avx.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut1d-simd: linear1D<BIT_DEPTH_F32, outBD> as exact scalar lanes (apply_lut_avx, the pack Store); against the wheel through the battery (dispatched kernel, the others on alpha) and under SDE"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_AVX.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu_avx.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut1d-simd: AVXGetLut1DApplyFunc is lut1d_op_cpu::Lut1DKernel::Avx"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_AVX2.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu_avx2.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut1d-simd: linear1D<BIT_DEPTH_F32, outBD> as exact scalar lanes (apply_lut_avx2, the pack Store); against the wheel through the battery (dispatched kernel, the others on alpha) and under SDE"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_AVX2.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu_avx2.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut1d-simd: AVX2GetLut1DApplyFunc is lut1d_op_cpu::Lut1DKernel::Avx2"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_AVX512.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu_avx512.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut1d-simd: linear1D<BIT_DEPTH_F32, outBD> as exact scalar lanes (apply_lut_avx512, the pack Store); against the wheel through the battery (dispatched kernel, the others on alpha) and under SDE"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_AVX512.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu_avx512.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut1d-simd: AVX512GetLut1DApplyFunc is lut1d_op_cpu::Lut1DKernel::Avx512"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_SSE2.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu_sse2.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut1d-simd: linear1D<BIT_DEPTH_F32, outBD> as exact scalar lanes (apply_lut_sse2, the pack Store); against the wheel through the battery (dispatched kernel, the others on alpha) and under SDE"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_SSE2.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu_sse2.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut1d-simd: SSE2GetLut1DApplyFunc is lut1d_op_cpu::Lut1DKernel::Sse2"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpData.cpp"

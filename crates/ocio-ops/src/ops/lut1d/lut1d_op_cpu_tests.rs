@@ -3,16 +3,19 @@
 
 //! Port of `tests/cpu/ops/lut1d/Lut1DOpCPU_tests.cpp` @ v2.5.2, the tests of the forward
 //! renderers that need no resampling (`Compose`, WP 2.1g); tests of the renderers' dispatch,
-//! of `GetEdgeFloatValues`, and of the 10- and 12-bit codes past the tables
-//! (docs/improvements.md, U-1). The pixels are compared with the wheel's in
-//! `tests/lut1d_op_cpu_oracle.rs` and `tests/lut1d_renderer_oracle.rs`.
+//! and of the 10- and 12-bit codes past the tables (docs/improvements.md, U-1). The pixels are
+//! compared with the wheel's in `tests/lut1d_op_cpu_oracle.rs` and
+//! `tests/lut1d_renderer_oracle.rs`.
 //!
-//! Upstream's tests of a standard domain with float input call `GetLut1DRenderer`, whose
-//! renderer runs a SIMD kernel on rows of more than one pixel; until the kernels are ported
-//! (WP 2.1c, 2.1d) the port refuses that renderer, and these tests run its scalar profile
-//! ([`get_lut1d_scalar_renderer`]) instead, with upstream's values and tolerances.
+//! Upstream's test runner reruns every test in each SIMD mode the CPU supports
+//! (tests/cpu/UnitTestMain.cpp:104-153 @ v2.5.2). The tests of a standard domain with float
+//! input, whose renderer runs a SIMD kernel on rows of more than one pixel, run once per mode
+//! here ([`simd_modes`]).
 
 use super::*;
+use crate::cpu_info::{
+    X86_CPU_FLAG_AVX, X86_CPU_FLAG_AVX2, X86_CPU_FLAG_AVX512, X86_CPU_FLAG_SSE2,
+};
 use crate::ops::lut1d::lut1d_op_data::HalfFlags;
 use ocio_testkit::upstream::check_close;
 
@@ -33,11 +36,32 @@ fn float(value: half::f16) -> f32 {
     half_to_float(value.to_bits())
 }
 
+/// The CPU flags upstream's test runner forces for each SIMD mode (`--no_accel`, `-sse2`,
+/// `-avx`, `-avx2`, `-avx512`; tests/cpu/UnitTestMain.cpp:104-153 @ v2.5.2), as in
+/// `lut3d_op_cpu_tests.rs`. The runner reruns the whole test binary per mode; here each test
+/// body runs once per mode.
+fn simd_modes() -> Vec<CpuInfo> {
+    let cpu = CpuInfo::instance();
+    let mut modes = vec![cpu.with_flags(0)];
+    for flag in [
+        X86_CPU_FLAG_SSE2,
+        X86_CPU_FLAG_AVX,
+        X86_CPU_FLAG_AVX2,
+        X86_CPU_FLAG_AVX512,
+    ] {
+        // Upstream skips a mode the CPU does not support; forcing the flag is how it selects one.
+        if cpu.flags & flag != 0 {
+            modes.push(cpu.with_flags(flag));
+        }
+    }
+    modes
+}
+
 /// `GetLut1DRenderer` picks a lookup for integer and half input that may use the LUT as it is,
 /// a float renderer for a half domain with float input, with or without hue adjust, and the
-/// hue-adjust renderer of a standard domain with float input, for every output bit depth; the
-/// standard domain's SIMD kernels, the inverse and the lookups that must resample the LUT are
-/// still to come.
+/// hue-adjust renderer of a standard domain with float input, and the standard domain's
+/// renderer, for every output bit depth; the inverse and the lookups that must resample the LUT
+/// are still to come.
 #[test]
 fn dispatch() {
     let lut8 = Lut1DOpData::new(256).unwrap();
@@ -61,10 +85,7 @@ fn dispatch() {
             let lut = Lut1DOpData::make_lookup_domain(depth).unwrap();
             get_lut1d_renderer(&lut, depth, out).unwrap();
         }
-        assert_eq!(
-            message(get_lut1d_renderer(&lut8, BitDepth::F32, out)),
-            NOT_PORTED_SIMD
-        );
+        get_lut1d_renderer(&lut8, BitDepth::F32, out).unwrap();
         get_lut1d_scalar_renderer(&lut8, out).unwrap();
     }
 
@@ -227,7 +248,7 @@ fn order3_test() {
     }
 }
 
-/// Through the scalar profile (module docs).
+/// Once per SIMD mode (module docs).
 ///
 /// Port of `OCIO_ADD_TEST(Lut1DRenderer, nan_test)` @ v2.5.2.
 #[test]
@@ -262,12 +283,14 @@ fn nan_test() {
     values[23] = 1.0f32;
     let values = values.clone();
 
-    let renderer = get_lut1d_scalar_renderer(&lut, BitDepth::F32).unwrap();
+    for cpu in simd_modes() {
+        let renderer =
+            get_lut1d_renderer_for_cpu(&lut, BitDepth::F32, BitDepth::F32, &cpu).unwrap();
 
-    let qnan = f32::NAN;
-    let inf = f32::INFINITY;
+        let qnan = f32::NAN;
+        let inf = f32::INFINITY;
 
-    #[rustfmt::skip]
+        #[rustfmt::skip]
     let mut pixels: [f32; 24] = [
         qnan, 0.5, 0.3, -0.2,
         0.5, qnan, 0.3, 0.2,
@@ -277,20 +300,21 @@ fn nan_test() {
         -inf, -inf, -inf, -inf,
     ];
 
-    renderer.apply(&mut pixels);
+        renderer.apply(&mut pixels);
 
-    check_close(pixels[0], values[0], 1e-7f32);
-    check_close(pixels[5], values[1], 1e-7f32);
-    check_close(pixels[10], values[2], 1e-7f32);
-    assert!(pixels[15].is_nan());
-    check_close(pixels[16], values[21], 1e-7f32);
-    check_close(pixels[17], values[22], 1e-7f32);
-    check_close(pixels[18], values[23], 1e-7f32);
-    assert_eq!(pixels[19], inf);
-    check_close(pixels[20], values[0], 1e-7f32);
-    check_close(pixels[21], values[1], 1e-7f32);
-    check_close(pixels[22], values[2], 1e-7f32);
-    assert_eq!(pixels[23], -inf);
+        check_close(pixels[0], values[0], 1e-7f32);
+        check_close(pixels[5], values[1], 1e-7f32);
+        check_close(pixels[10], values[2], 1e-7f32);
+        assert!(pixels[15].is_nan());
+        check_close(pixels[16], values[21], 1e-7f32);
+        check_close(pixels[17], values[22], 1e-7f32);
+        check_close(pixels[18], values[23], 1e-7f32);
+        assert_eq!(pixels[19], inf);
+        check_close(pixels[20], values[0], 1e-7f32);
+        check_close(pixels[21], values[1], 1e-7f32);
+        check_close(pixels[22], values[2], 1e-7f32);
+        assert_eq!(pixels[23], -inf);
+    }
 }
 
 /// Port of `OCIO_ADD_TEST(Lut1DRenderer, nan_half_test)` @ v2.5.2.
@@ -329,7 +353,7 @@ fn nan_half_test() {
     assert!(pixels[15].is_nan());
 }
 
-/// Through the scalar profile (module docs).
+/// Once per SIMD mode (module docs).
 ///
 /// Port of `OCIO_ADD_TEST(Lut1DRenderer, basic)` @ v2.5.2.
 #[test]
@@ -351,8 +375,9 @@ fn basic() {
     ];
 
     let error = 1e-6f32;
-    {
-        let cpu_op = get_lut1d_scalar_renderer(&lut_data, BitDepth::F32).unwrap();
+    for cpu in simd_modes() {
+        let cpu_op =
+            get_lut1d_renderer_for_cpu(&lut_data, BitDepth::F32, BitDepth::F32, &cpu).unwrap();
 
         let mut out_img = vec![1.0f32; 2 * 4];
         cpu_op.apply_bit_depth(Pixels::F32(&in_img), PixelsMut::F32(&mut out_img));
@@ -376,8 +401,9 @@ fn basic() {
     lut_data.validate().unwrap();
     lut_data.finalize().unwrap();
     assert!(!lut_data.is_identity());
-    {
-        let cpu_op = get_lut1d_scalar_renderer(&lut_data, BitDepth::F32).unwrap();
+    for cpu in simd_modes() {
+        let cpu_op =
+            get_lut1d_renderer_for_cpu(&lut_data, BitDepth::F32, BitDepth::F32, &cpu).unwrap();
 
         let mut out_img = vec![1.0f32; 2 * 4];
         cpu_op.apply_bit_depth(Pixels::F32(&in_img), PixelsMut::F32(&mut out_img));
@@ -394,7 +420,7 @@ fn basic() {
     }
 }
 
-/// Through the scalar profile (module docs).
+/// Once per SIMD mode (module docs).
 ///
 /// Port of `OCIO_ADD_TEST(Lut1DRenderer, nan)` @ v2.5.2.
 #[test]
@@ -405,31 +431,34 @@ fn nan() {
     lut_data.validate().unwrap();
     lut_data.finalize().unwrap();
 
-    let cpu_op = get_lut1d_scalar_renderer(&lut_data, BitDepth::F32).unwrap();
+    for cpu in simd_modes() {
+        let cpu_op =
+            get_lut1d_renderer_for_cpu(&lut_data, BitDepth::F32, BitDepth::F32, &cpu).unwrap();
 
-    let step = 1.0f32 / (lut_data.get_array().get_length() as f32 - 1.0f32);
+        let step = 1.0f32 / (lut_data.get_array().get_length() as f32 - 1.0f32);
 
-    #[rustfmt::skip]
+        #[rustfmt::skip]
     let my_image: [f32; 8] = [
         f32::NAN, 0.0, 0.0, 1.0,
         0.0, 0.0, step, 1.0,
     ];
 
-    let mut out_img = vec![0.0f32; 2 * 4];
-    cpu_op.apply_bit_depth(Pixels::F32(&my_image), PixelsMut::F32(&mut out_img));
+        let mut out_img = vec![0.0f32; 2 * 4];
+        cpu_op.apply_bit_depth(Pixels::F32(&my_image), PixelsMut::F32(&mut out_img));
 
-    assert_eq!(out_img[0], 0.0f32);
-    assert_eq!(out_img[1], 0.0f32);
-    assert_eq!(out_img[2], 0.0f32);
-    assert_eq!(out_img[3], 1.0f32);
+        assert_eq!(out_img[0], 0.0f32);
+        assert_eq!(out_img[1], 0.0f32);
+        assert_eq!(out_img[2], 0.0f32);
+        assert_eq!(out_img[3], 1.0f32);
 
-    assert_eq!(out_img[4], 0.0f32);
-    assert_eq!(out_img[5], 0.0f32);
-    assert_eq!(out_img[6], step);
-    assert_eq!(out_img[7], 1.0f32);
+        assert_eq!(out_img[4], 0.0f32);
+        assert_eq!(out_img[5], 0.0f32);
+        assert_eq!(out_img[6], step);
+        assert_eq!(out_img[7], 1.0f32);
+    }
 }
 
-/// Through the scalar profile (module docs).
+/// Once per SIMD mode (module docs).
 ///
 /// Port of `OCIO_ADD_TEST(Lut1DRenderer, lut_1d_red)` @ v2.5.2.
 #[test]
@@ -446,10 +475,12 @@ fn lut_1d_red() {
     lut_data.validate().unwrap();
     lut_data.finalize().unwrap();
 
-    let cpu_op = get_lut1d_scalar_renderer(&lut_data, BitDepth::Uint16).unwrap();
+    for cpu in simd_modes() {
+        let cpu_op =
+            get_lut1d_renderer_for_cpu(&lut_data, BitDepth::F32, BitDepth::Uint16, &cpu).unwrap();
 
-    let step = 1.0f32 / 31.0f32;
-    #[rustfmt::skip]
+        let step = 1.0f32 / 31.0f32;
+        #[rustfmt::skip]
     let in_img: Vec<f32> = vec![
         0.0, 0.0, 0.0, 0.0,
         step, 0.0, 0.0, 0.0,
@@ -458,35 +489,36 @@ fn lut_1d_red() {
         step, step, step, 0.0,
     ];
 
-    let mut out_img = vec![1u16; 5 * 4];
-    cpu_op.apply_bit_depth(Pixels::F32(&in_img), PixelsMut::U16(&mut out_img));
+        let mut out_img = vec![1u16; 5 * 4];
+        cpu_op.apply_bit_depth(Pixels::F32(&in_img), PixelsMut::U16(&mut out_img));
 
-    let scaled_step = (step * 65535.0f32).round() as u16;
+        let scaled_step = (step * 65535.0f32).round() as u16;
 
-    assert_eq!(out_img[0], 0);
-    assert_eq!(out_img[1], 0);
-    assert_eq!(out_img[2], 0);
-    assert_eq!(out_img[3], 0);
+        assert_eq!(out_img[0], 0);
+        assert_eq!(out_img[1], 0);
+        assert_eq!(out_img[2], 0);
+        assert_eq!(out_img[3], 0);
 
-    assert_eq!(out_img[4], scaled_step);
-    assert_eq!(out_img[5], 0);
-    assert_eq!(out_img[6], 0);
-    assert_eq!(out_img[7], 0);
+        assert_eq!(out_img[4], scaled_step);
+        assert_eq!(out_img[5], 0);
+        assert_eq!(out_img[6], 0);
+        assert_eq!(out_img[7], 0);
 
-    assert_eq!(out_img[8], 0);
-    assert_eq!(out_img[9], 0);
-    assert_eq!(out_img[10], 0);
-    assert_eq!(out_img[11], 0);
+        assert_eq!(out_img[8], 0);
+        assert_eq!(out_img[9], 0);
+        assert_eq!(out_img[10], 0);
+        assert_eq!(out_img[11], 0);
 
-    assert_eq!(out_img[12], 0);
-    assert_eq!(out_img[13], 0);
-    assert_eq!(out_img[14], 0);
-    assert_eq!(out_img[15], 0);
+        assert_eq!(out_img[12], 0);
+        assert_eq!(out_img[13], 0);
+        assert_eq!(out_img[14], 0);
+        assert_eq!(out_img[15], 0);
 
-    assert_eq!(out_img[16], scaled_step);
-    assert_eq!(out_img[17], 0);
-    assert_eq!(out_img[18], 0);
-    assert_eq!(out_img[19], 0);
+        assert_eq!(out_img[16], scaled_step);
+        assert_eq!(out_img[17], 0);
+        assert_eq!(out_img[18], 0);
+        assert_eq!(out_img[19], 0);
+    }
 }
 
 /// The renderer of the 64k 16f identity 1D LUT from F16 to `out`, and an image of every half
