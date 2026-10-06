@@ -117,11 +117,12 @@ impl BaseLut3D {
     /// Port of `BaseLut3DRenderer::updateData` and both `createOptLut`
     /// (src/OpenColorIO/ops/lut3d/Lut3DOpCPU.cpp:327-384 @ v2.5.2).
     fn new(lut: &Lut3DOpData, use_sse2: bool) -> BaseLut3D {
-        let dim = lut.array().length();
+        // (A grid size of at most 129, `unsigned long` upstream.)
+        let dim = lut.get_array().get_length() as usize as u32;
         let step = dim as f32 - 1.0f32;
         let components = if use_sse2 { 4 } else { 3 };
 
-        let values = lut.array().values();
+        let values = lut.get_array().get_values();
         let max_entries = dim as usize * dim as usize * dim as usize;
         let mut opt_lut = Vec::with_capacity(max_entries * components);
         for idx in 0..max_entries {
@@ -456,7 +457,7 @@ impl ForwardLut3DRenderer {
 /// The renderer OCIO uses for a forward LUT. Port of `GetForwardLut3DRenderer`
 /// (src/OpenColorIO/ops/lut3d/Lut3DOpCPU.cpp:1736-1747 @ v2.5.2).
 pub fn get_forward_lut3d_renderer(lut: &Lut3DOpData, cpu: &CpuInfo) -> ForwardLut3DRenderer {
-    if lut.concrete_interpolation() == Interpolation::Tetrahedral {
+    if lut.get_concrete_interpolation() == Interpolation::Tetrahedral {
         ForwardLut3DRenderer::Tetrahedral(Lut3DTetrahedralRenderer::new(lut, cpu))
     } else {
         ForwardLut3DRenderer::Trilinear(Lut3DRenderer::new(lut, cpu))

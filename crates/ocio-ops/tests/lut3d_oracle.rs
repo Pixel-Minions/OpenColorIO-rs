@@ -24,12 +24,14 @@
 //! - [`profiles_against_the_wheel`] prints which numeric profile matches the wheel here, and
 //!   checks every profile's alpha channel against the wheel's (every kernel copies it).
 
+use core::ffi::c_ulong;
+
 use ocio_ops::cpu_info::{
     BuildConfig, CpuInfo, X86_CPU_FLAG_AVX, X86_CPU_FLAG_AVX2, X86_CPU_FLAG_AVX512,
     X86_CPU_FLAG_SSE2,
 };
 use ocio_ops::ops::lut3d::lut3d_op_cpu::{ForwardLut3DRenderer, get_forward_lut3d_renderer};
-use ocio_ops::ops::lut3d::lut3d_op_data::{Interpolation, Lut3DArray, Lut3DOpData};
+use ocio_ops::ops::lut3d::lut3d_op_data::{Interpolation, Lut3DOpData};
 use ocio_testkit::compare::{assert_pixels_bits_eq, f32_bits_report};
 use ocio_testkit::oracle::{bytes_to_f32, f32_to_bytes};
 use ocio_testkit::{Oracle, probe};
@@ -139,8 +141,12 @@ fn renderer(
     interp: Interpolation,
     cpu: &CpuInfo,
 ) -> ForwardLut3DRenderer {
-    let array = Lut3DArray::from_values(grid_size, values.to_vec()).expect("a valid LUT");
-    get_forward_lut3d_renderer(&Lut3DOpData::from_array(interp, array), cpu)
+    let mut lut =
+        Lut3DOpData::with_interpolation(interp, c_ulong::from(grid_size)).expect("a valid LUT");
+    let lut_values = lut.get_array_mut().get_values_mut();
+    assert_eq!(lut_values.len(), values.len(), "the LUT's values");
+    lut_values.copy_from_slice(values);
+    get_forward_lut3d_renderer(&lut, cpu)
 }
 
 /// Applies `renderer` to all `pixels` in one call, as one image row.
