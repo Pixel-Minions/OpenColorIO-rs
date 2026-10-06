@@ -6,7 +6,7 @@
 //! environment and search paths, and the processors of a transform with their cache. Color
 //! spaces, roles, displays, looks and the rest come with the later Phase 3 chunks.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, RwLock};
@@ -38,8 +38,10 @@ use crate::context_variable_utils::{collect_context_variables, contains_context_
 use crate::display::{
     Display, DisplayMap, View, ViewVec, add_view, compute_displays, find_display, find_view,
 };
+use crate::file_rules::{FileRules, update_file_rules_from_v1_to_v2};
 use crate::look::Look;
 use crate::named_transform::NamedTransform;
+use crate::path_utils::parse_color_space_from_string;
 use crate::processor::{Processor, ProcessorCacheFlags};
 use crate::transform::Transform;
 use crate::view_transform::ViewTransform;
@@ -171,6 +173,40 @@ fn get_view_names(views: &[&View]) -> StringVec {
     views.iter().map(|view| view.name.clone()).collect()
 }
 
+/// Adds the color spaces `transform` names, and the groups it holds name, to
+/// `color_space_names`: a color space transform's source and destination (their context
+/// variables resolved), a display view transform's source, a look transform's source and
+/// destination.
+///
+/// Port of `GetColorSpaceReferences` (src/OpenColorIO/Config.cpp:171-208 @ v2.5.2).
+fn get_color_space_references(
+    color_space_names: &mut BTreeSet<Vec<u8>>,
+    transform: &Transform,
+    context: &Context,
+) {
+    match transform {
+        Transform::Group(group) => {
+            for i in 0..group.num_transforms() {
+                if let Ok(t) = group.transform(i) {
+                    get_color_space_references(color_space_names, t, context);
+                }
+            }
+        }
+        Transform::ColorSpace(t) => {
+            color_space_names.insert(context.resolve_string_var(t.src()));
+            color_space_names.insert(context.resolve_string_var(t.dst()));
+        }
+        Transform::DisplayView(t) => {
+            color_space_names.insert(t.src().to_vec());
+        }
+        Transform::Look(t) => {
+            color_space_names.insert(t.src().to_vec());
+            color_space_names.insert(t.dst().to_vec());
+        }
+        _ => {}
+    }
+}
+
 /// The result of the config's last validation.
 ///
 /// Port of `Config::Impl::Validation` (src/OpenColorIO/Config.cpp:257-262 @ v2.5.2).
@@ -287,6 +323,8 @@ pub struct Config {
     default_luma_coefs: [f64; 3],
     /// `m_strictParsing`.
     strict_parsing: bool,
+    /// `m_fileRules`.
+    file_rules: FileRules,
     /// The validation and the cache IDs, under `m_cacheidMutex`.
     cache_ids: Mutex<CacheIds>,
     /// `m_cacheFlags` (`mutable`: a const config changes it).
@@ -335,6 +373,7 @@ impl Clone for Config {
             active_views_env_override: self.active_views_env_override.clone(),
             default_luma_coefs: self.default_luma_coefs,
             strict_parsing: self.strict_parsing,
+            file_rules: self.file_rules.clone(),
             cache_ids: Mutex::new(self.lock_cache_ids().clone()),
             cache_flags: AtomicU32::new(self.cache_flags.load(Ordering::Relaxed)),
             processor_cache: ProcessorCache::new(),
@@ -389,6 +428,7 @@ impl Config {
             active_views_env_override: StringVec::new(),
             default_luma_coefs: DEFAULT_LUMA_COEFFS,
             strict_parsing: true,
+            file_rules: FileRules::new(),
             cache_ids: Mutex::new(CacheIds::new()),
             cache_flags: AtomicU32::new(ProcessorCacheFlags::DEFAULT.0),
             processor_cache: ProcessorCache::new(),
@@ -3561,6 +3601,297 @@ impl Config {
         self.view_transforms.clear();
 
         self.reset_cache_ids();
+    }
+
+    // File rules //////////////////////////////////////////////////////////////////////////////
+
+    /// The config's file rules.
+    ///
+    /// Port of `Config::getFileRules` (src/OpenColorIO/Config.cpp:4643-4646 @ v2.5.2).
+    #[doc(alias = "getFileRules")]
+    pub fn file_rules(&self) -> &FileRules {
+        &self.file_rules
+    }
+
+    /// Sets the config's file rules to a copy of `file_rules`.
+    ///
+    /// Port of `Config::setFileRules` (src/OpenColorIO/Config.cpp:4648-4654 @ v2.5.2).
+    #[doc(alias = "setFileRules")]
+    pub fn set_file_rules(&mut self, file_rules: &FileRules) {
+        self.file_rules = file_rules.clone();
+
+        self.reset_cache_ids();
+    }
+
+    /// The color space of the first file rule that matches `file_path`. Owned: the path search
+    /// rule's color space changes as it matches.
+    ///
+    /// Port of `Config::getColorSpaceFromFilepath(const char *)` (src/OpenColorIO/Config.cpp:
+    /// 4656-4660 @ v2.5.2).
+    #[doc(alias = "getColorSpaceFromFilepath")]
+    pub fn color_space_from_filepath(&self, file_path: impl AsRef<[u8]>) -> Result<Vec<u8>> {
+        Ok(self
+            .file_rules
+            .color_space_from_filepath(self, c_str(file_path.as_ref()))?
+            .0)
+    }
+
+    /// The color space of the first file rule that matches `file_path`, and that rule's index.
+    ///
+    /// Port of `Config::getColorSpaceFromFilepath(const char *, size_t &)`
+    /// (src/OpenColorIO/Config.cpp:4662-4667 @ v2.5.2).
+    #[doc(alias = "getColorSpaceFromFilepath")]
+    pub fn color_space_from_filepath_with_index(
+        &self,
+        file_path: impl AsRef<[u8]>,
+    ) -> Result<(Vec<u8>, usize)> {
+        self.file_rules
+            .color_space_from_filepath(self, c_str(file_path.as_ref()))
+    }
+
+    /// Whether only the default file rule matches `file_path`.
+    ///
+    /// Port of `Config::filepathOnlyMatchesDefaultRule` (src/OpenColorIO/Config.cpp:4669-4673 @
+    /// v2.5.2).
+    #[doc(alias = "filepathOnlyMatchesDefaultRule")]
+    pub fn filepath_only_matches_default_rule(&self, file_path: impl AsRef<[u8]>) -> Result<bool> {
+        self.file_rules
+            .filepath_only_matches_default_rule(self, c_str(file_path.as_ref()))
+    }
+
+    /// The color space whose name (or alias) ends rightmost in `str`; without one, unless
+    /// parsing is strict, the color space of the `default` role; else `""`.
+    ///
+    /// Port of `Config::parseColorSpaceFromString` (src/OpenColorIO/Config.cpp:2936-2962 @
+    /// v2.5.2).
+    #[doc(alias = "parseColorSpaceFromString")]
+    pub fn parse_color_space_from_string(&self, str: impl AsRef<[u8]>) -> &[u8] {
+        let right_most_color_space_index = parse_color_space_from_string(self, str.as_ref());
+
+        // Index is using all color spaces.
+        if right_most_color_space_index >= 0 {
+            return self
+                .all_color_spaces
+                .color_space_name_by_index(right_most_color_space_index)
+                .unwrap_or(&[]);
+        }
+
+        if !self.strict_parsing {
+            // Is a default role defined?
+            let csname = lookup_role(&self.roles, ROLE_DEFAULT.as_bytes());
+            if !csname.is_empty() {
+                let csindex = self.all_color_spaces.color_space_index(csname);
+                if -1 != csindex {
+                    return self
+                        .all_color_spaces
+                        .color_space_name_by_index(csindex)
+                        .unwrap_or(&[]);
+                }
+            }
+        }
+
+        &[]
+    }
+
+    /// Upgrades a version 1 config to the latest version (2.5): its file rules get the path
+    /// search rule and a default rule (`UpdateFileRulesFromV1ToV2`). A config without a color
+    /// space for that default rule is an error, where upstream's `noexcept` function ends the
+    /// program (docs/improvements.md, U-55); the config is then left as it was.
+    ///
+    /// Port of `Config::upgradeToLatestVersion` (src/OpenColorIO/Config.cpp:1332-1350 @
+    /// v2.5.2).
+    #[doc(alias = "upgradeToLatestVersion")]
+    pub fn upgrade_to_latest_version(&mut self) -> Result<()> {
+        let was_version = self.major_version;
+        if was_version != LAST_SUPPORTED_MAJOR_VERSION {
+            if was_version == 1 {
+                let mut file_rules = self.file_rules.clone();
+                update_file_rules_from_v1_to_v2(self, &mut file_rules)?;
+                self.file_rules = file_rules;
+
+                // The instance version is now 2.0
+                self.major_version = 2;
+                self.minor_version = 0;
+            }
+
+            const _: () = assert!(
+                LAST_SUPPORTED_MAJOR_VERSION == 2,
+                "Config: Handle newer versions"
+            );
+            self.set_major_version(LAST_SUPPORTED_MAJOR_VERSION)?;
+            self.set_minor_version(
+                LAST_SUPPORTED_MINOR_VERSION[LAST_SUPPORTED_MAJOR_VERSION as usize - 1],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// The transforms of the color spaces, looks, view transforms and named transforms, both
+    /// directions each, in that order.
+    ///
+    /// Port of `Config::Impl::getAllInternalTransforms` (src/OpenColorIO/Config.cpp:5476-5542
+    /// @ v2.5.2).
+    fn all_internal_transforms(&self) -> Vec<&Transform> {
+        let mut transform_vec = Vec::new();
+
+        // Grab all transforms from the ColorSpaces.
+
+        for i in 0..self.all_color_spaces.num_color_spaces() {
+            let cs = self
+                .all_color_spaces
+                .color_space_by_index(i)
+                .expect("an index of the set");
+            if let Some(tr) = cs.transform(ColorSpaceDirection::ToReference) {
+                transform_vec.push(tr);
+            }
+
+            if let Some(tr) = cs.transform(ColorSpaceDirection::FromReference) {
+                transform_vec.push(tr);
+            }
+        }
+
+        // Grab all transforms from the Looks.
+
+        for look in &self.looks_list {
+            if let Some(tr) = look.transform() {
+                transform_vec.push(tr);
+            }
+
+            if let Some(tr) = look.inverse_transform() {
+                transform_vec.push(tr);
+            }
+        }
+
+        // Grab all transforms from the view transforms.
+
+        for vt in &self.view_transforms {
+            if let Some(tr) = vt.transform(ViewTransformDirection::ToReference) {
+                transform_vec.push(tr);
+            }
+
+            if let Some(tr) = vt.transform(ViewTransformDirection::FromReference) {
+                transform_vec.push(tr);
+            }
+        }
+
+        // Grab all transforms from the named transforms.
+
+        for nt in &self.all_named_transforms {
+            if let Some(tr) = nt.transform(TransformDirection::Forward) {
+                transform_vec.push(tr);
+            }
+
+            if let Some(tr) = nt.transform(TransformDirection::Inverse) {
+                transform_vec.push(tr);
+            }
+        }
+
+        transform_vec
+    }
+
+    /// Whether a color space named `name` is used other than where it is defined: by a
+    /// transform (a color space, display view or look transform, context variables resolved),
+    /// a role, a shared view, a (display, view) pair, a look's process space or a file rule;
+    /// ignoring case.
+    ///
+    /// Port of `Config::isColorSpaceUsed` (src/OpenColorIO/Config.cpp:2659-2771 @ v2.5.2).
+    #[doc(alias = "isColorSpaceUsed")]
+    pub fn is_color_space_used(&self, name: impl AsRef<[u8]>) -> bool {
+        // Check if a color space is used somewhere in the config other than where it is
+        // defined, for example, in a display/view, look, or ColorSpaceTransform. If the color
+        // space is defined in the config, but not used elsewhere, this function returns false.
+
+        let name = c_str(name.as_ref());
+        if name.is_empty() {
+            return false;
+        }
+
+        // Check for all color spaces, looks and view transforms.
+
+        let all_transforms = self.all_internal_transforms();
+
+        let mut color_space_names = BTreeSet::new();
+        for transform in all_transforms {
+            get_color_space_references(
+                &mut color_space_names,
+                transform,
+                &self.shared_context.get(),
+            );
+        }
+
+        if color_space_names
+            .iter()
+            .any(|cs_name| strcasecmp(name, c_str(cs_name)).is_eq())
+        {
+            return true;
+        }
+
+        // Check for roles.
+
+        for idx in 0..self.num_roles() {
+            let role_name = self.role_name(idx);
+            let cs_name = lookup_role(&self.roles, role_name);
+            if strcasecmp(cs_name, name).is_eq() {
+                return true;
+            }
+        }
+
+        // Check for all shared views.
+
+        if self
+            .shared_views
+            .iter()
+            .any(|view| strcasecmp(&view.colorspace, name).is_eq())
+        {
+            return true;
+        }
+
+        // Check for all (display, view) pairs (i.e. active and inactive ones).
+
+        for (disp_name, display) in &self.displays {
+            for view in &display.views {
+                let cs_name = self.display_view_color_space_name(disp_name, &view.name);
+                if strcasecmp(cs_name, name).is_eq() {
+                    return true;
+                }
+            }
+            for shared_view in &display.shared_views {
+                if let Some(i) = find_view(&self.shared_views, shared_view) {
+                    let view = &self.shared_views[i];
+                    if !view.view_transform.is_empty()
+                        && view.use_display_name_for_colorspace()
+                        && strcasecmp(disp_name, name).is_eq()
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        // Check for 'process_space' from look.
+
+        for idx in 0..self.num_looks() {
+            let look_name = self.look_name_by_index(idx);
+
+            let l = self.look(look_name).expect("a look of the config");
+            if strcasecmp(l.process_space(), name).is_eq() {
+                return true;
+            }
+        }
+
+        // Check the file rules.
+
+        let rules = self.file_rules();
+
+        let num_rules = rules.num_entries();
+        for idx in 0..num_rules {
+            let cs_name = rules.color_space(idx).expect("a rule's index");
+            if strcasecmp(&cs_name, name).is_eq() {
+                return true;
+            }
+        }
+
+        false
     }
 
     /// Port of `Config::getProcessorCacheFlags` (Config.cpp:924-927, 5333-5336 @ v2.5.2).

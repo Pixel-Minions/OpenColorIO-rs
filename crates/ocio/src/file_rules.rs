@@ -16,12 +16,16 @@ use std::fmt;
 use std::sync::{Mutex, MutexGuard};
 
 use ocio_ops::exception::{Exception, Result};
+use ocio_ops::logging::log_warning;
+use ocio_ops::open_color_types::{ColorSpaceVisibility, SearchReferenceSpaceType};
 use ocio_ops::parse_utils::ROLE_DEFAULT;
 use ocio_ops::platform::strcasecmp;
-use ocio_ops::std_regex::{Library, Regex, regex_replace};
+use ocio_ops::std_regex::{Library, Regex, RegexError, regex_match, regex_replace};
 use ocio_ops::utils::string_utils::{c_str, compare, trim};
 
+use crate::config::Config;
 use crate::custom_keys::CustomKeysContainer;
+use crate::path_utils::parse_color_space_from_string;
 
 /// The `std::regex` of this platform's wheel.
 #[cfg(windows)]
@@ -304,8 +308,8 @@ pub(crate) enum RuleType {
 
 /// A file rule.
 ///
-/// Port of `FileRule` (src/OpenColorIO/FileRules.cpp:295-532 @ v2.5.2), in part: its matching
-/// and validation come with the config's file rules.
+/// Port of `FileRule` (src/OpenColorIO/FileRules.cpp:295-532 @ v2.5.2), but its `validate`,
+/// which comes with the config's (3.8b).
 #[derive(Debug)]
 pub(crate) struct FileRule {
     /// `m_customKeys`.
@@ -525,8 +529,8 @@ enum DefaultAllowed {
 /// A copy is upstream's `createEditableCopy`: a copy of each rule.
 ///
 /// Port of `FileRules` and `FileRules::Impl` (include/OpenColorIO/OpenColorIO.h:1726-1880,
-/// src/OpenColorIO/FileRules.h:30-71, FileRules.cpp:537-958 @ v2.5.2), in part: the matching
-/// of paths and the validation come with the config's file rules.
+/// src/OpenColorIO/FileRules.h:30-71, FileRules.cpp:537-958 @ v2.5.2), but `Impl::validate`,
+/// which comes with the config's (3.8b).
 #[derive(Debug, Clone)]
 pub struct FileRules {
     /// `m_rules`: all rules, default rule always at the end.
@@ -973,8 +977,186 @@ impl FileRules {
     }
 }
 
+impl FileRule {
+    /// Whether the rule matches `path`: the default rule always; the path search rule when a
+    /// color space name (or alias) is in it, which becomes the rule's color space; the others
+    /// by `regex_match` with their expression (which can fail past the matcher's limits).
+    ///
+    /// Port of `FileRule::matches` (src/OpenColorIO/FileRules.cpp:469-500 @ v2.5.2).
+    fn matches(&self, config: &Config, path: &[u8]) -> Result<bool> {
+        match self.rule_type {
+            RuleType::Default => Ok(true),
+            RuleType::ParseFilepath => {
+                let right_most_color_space_index = parse_color_space_from_string(config, path);
+                if right_most_color_space_index >= 0 {
+                    *self.lock_color_space() = config
+                        .color_space_name_by_index_with(
+                            SearchReferenceSpaceType::All,
+                            ColorSpaceVisibility::All,
+                            right_most_color_space_index,
+                        )
+                        .to_vec();
+                    return Ok(true);
+                }
+                Ok(false)
+            }
+            RuleType::Regex => {
+                let reg = Regex::new(&self.regex, LIBRARY).map_err(regex_exception)?;
+                regex_match(c_str(path), &reg).map_err(regex_exception)
+            }
+            RuleType::Glob => {
+                let exp = build_regular_expression(&self.pattern, &self.extension)?;
+                let reg = Regex::new(&exp, LIBRARY).map_err(regex_exception)?;
+                regex_match(c_str(path), &reg).map_err(regex_exception)
+            }
+        }
+    }
+}
+
+/// A `std::regex_error` that reaches the caller as is (U-54's refusals are such errors).
+fn regex_exception(e: RegexError) -> Exception {
+    Exception::regex_error(e.what())
+}
+
+impl FileRules {
+    /// The color space of the first rule that matches `file_path`, and its index.
+    ///
+    /// Port of `FileRules::Impl::getRuleFromFilepath` (src/OpenColorIO/FileRules.cpp:634-648
+    /// @ v2.5.2).
+    fn rule_from_filepath(&self, config: &Config, file_path: &[u8]) -> Result<(Vec<u8>, usize)> {
+        for (i, rule) in self.rules.iter().enumerate() {
+            if rule.matches(config, file_path)? {
+                return Ok((rule.color_space(), i));
+            }
+        }
+        // Should not be reached since the default rule always matches.
+        let last = self.rules.len() - 1;
+        Ok((self.rules[last].color_space(), last))
+    }
+
+    /// The color space of the first rule that matches `file_path`, and that rule's index.
+    ///
+    /// Port of `FileRules::Impl::getColorSpaceFromFilepath` (src/OpenColorIO/FileRules.cpp:
+    /// 892-904 @ v2.5.2).
+    pub(crate) fn color_space_from_filepath(
+        &self,
+        config: &Config,
+        file_path: &[u8],
+    ) -> Result<(Vec<u8>, usize)> {
+        self.rule_from_filepath(config, file_path)
+    }
+
+    /// Whether only the default rule matches `file_path`.
+    ///
+    /// Port of `FileRules::Impl::filepathOnlyMatchesDefaultRule` (src/OpenColorIO/FileRules.cpp:
+    /// 906-911 @ v2.5.2).
+    pub(crate) fn filepath_only_matches_default_rule(
+        &self,
+        config: &Config,
+        file_path: &[u8],
+    ) -> Result<bool> {
+        let (_, rule_pos) = self.color_space_from_filepath(config, file_path)?;
+        Ok((rule_pos + 1) == self.rules.len())
+    }
+}
+
+/// Makes the file rules of a version 1 config behave as `Config::parseColorSpaceFromString`
+/// did: the path search rule first (if missing), and a default rule for the `default` role,
+/// else the `raw` data color space, else the first data color space, else the first active
+/// one, else the first one (with a warning): an error when there is none (an empty name).
+///
+/// Port of `UpdateFileRulesFromV1ToV2` (src/OpenColorIO/FileRules.cpp:960-1047 @ v2.5.2).
+pub(crate) fn update_file_rules_from_v1_to_v2(
+    config: &Config,
+    file_rules: &mut FileRules,
+) -> Result<()> {
+    if config.major_version() != 1 {
+        return Ok(());
+    }
+
+    // In order to preserve the v1 behavior using Config:getColorSpaceFromFilepath() (i.e.
+    // mimic the Config::parseColorSpaceFromString() behavior) add the file path search
+    // rule to the list of file rules.
+
+    // Throws if the file rule does not exist.
+    if file_rules
+        .index_for_rule(FileRules::FILE_PATH_SEARCH_RULE_NAME)
+        .is_err()
+    {
+        file_rules
+            .insert_path_search_rule(0)
+            .expect("a new path search rule");
+    }
+
+    // Now, double-check the default rule (which is using the default role) to find the
+    // right alternative if the default role is missing.
+
+    // In order to always return a valid color space, the algorithm for the default rule is:
+    //   1. Use the default role if it exists (i.e. that's the default implementation)
+    //   2. Use the "raw" color space (case insensitive) if it exists & is a 'data' color space
+    //   3. Use the first 'data' color space if one exists
+    //   4. Use the first active color space
+    //   5. finally, fallback to the first color space.
+
+    let default_cs = config.color_space(ROLE_DEFAULT);
+
+    if default_cs.is_none() {
+        let cs = config.color_space(b"raw");
+        if let Some(cs) = cs.filter(|cs| cs.is_data()) {
+            file_rules.set_color_space(1, cs.name())?;
+        } else {
+            let num_color_spaces = config
+                .num_color_spaces_with(SearchReferenceSpaceType::Scene, ColorSpaceVisibility::All);
+
+            let mut found = false;
+            let mut idx = 0;
+            while idx < num_color_spaces && !found {
+                let cs_name = config.color_space_name_by_index_with(
+                    SearchReferenceSpaceType::Scene,
+                    ColorSpaceVisibility::All,
+                    idx,
+                );
+                let cs = config
+                    .color_space(cs_name)
+                    .expect("a color space of the config");
+
+                if cs.is_data() {
+                    file_rules.set_color_space(1, cs_name)?;
+                    found = true;
+                }
+                idx += 1;
+            }
+
+            if !found {
+                if config.num_color_spaces() > 0 {
+                    // Take the first active color space.
+                    file_rules.set_color_space(1, config.color_space_name_by_index(0))?;
+                } else {
+                    const MSG: &str = "The default rule creation falls back to the first color \
+                                       space because no suitable color space exists.";
+
+                    log_warning(MSG);
+
+                    // Take the first available color space.
+                    let cs_name = config.color_space_name_by_index_with(
+                        SearchReferenceSpaceType::Scene,
+                        ColorSpaceVisibility::All,
+                        0,
+                    );
+
+                    file_rules.set_color_space(1, cs_name)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
 impl fmt::Display for FileRules {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&String::from_utf8_lossy(&self.to_bytes()))
     }
 }
+
+#[cfg(test)]
+#[path = "file_rules_tests.rs"]
+mod tests;

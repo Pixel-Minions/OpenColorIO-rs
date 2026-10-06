@@ -65,6 +65,11 @@ impl View {
     pub(crate) fn use_display_name(csname: &[u8]) -> bool {
         strcasecmp(csname, OCIO_VIEW_USE_DISPLAY_NAME).is_eq()
     }
+
+    /// Port of `View::useDisplayNameForColorspace` (src/OpenColorIO/Display.h:53-56 @ v2.5.2).
+    pub(crate) fn use_display_name_for_colorspace(&self) -> bool {
+        View::use_display_name(&self.colorspace)
+    }
 }
 
 /// `ViewVec`.

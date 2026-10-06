@@ -2105,3 +2105,19 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   match limits in the fix chunk after 3.9d's verifier (`std_regex/libstdcxx_match.rs`). Tests:
   the exact bound, the wheel surviving (in a process of its own) where the port starts
   refusing, and typical file rules on 4,096-byte paths never refused.
+
+### U-55. Upgrading a version 1 config without a scene color space for the default rule
+
+- **Upstream:** `Config::upgradeToLatestVersion` is `noexcept` (`Config.cpp:1332-1350`). For a
+  version 1 config, it calls `UpdateFileRulesFromV1ToV2` (`FileRules.cpp:960-1047`), which,
+  when the config has no `default` role, no data `raw` color space, no data scene color space
+  and no active color space, gives the default rule the first scene color space: `""` when
+  there is none (no color space, or only display ones). `FileRules::setColorSpace` throws for
+  an empty name, and the exception leaving a `noexcept` function ends the program
+  (`std::terminate`). Seen in the source; not run against the wheel, whose process would end.
+- **Who notices:** applications that upgrade a version 1 config made in code before giving it
+  color spaces.
+- **Decided** (the owner's general rule, `docs/deviations.md`): the port returns that error
+  from `Config::upgrade_to_latest_version`, and leaves the config as it was.
+- **Status:** matched in `p3-rules` (3.9f); the other paths of the upgrade are checked against
+  the wheel in `crates/ocio/tests/config_oracle.rs`.
