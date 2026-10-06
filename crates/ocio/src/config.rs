@@ -16,8 +16,8 @@ use ocio_ops::image_desc::PackedImageDesc;
 use ocio_ops::math_utils::equal_with_abs_error;
 use ocio_ops::open_color_types::{
     Allocation, BitDepth, ChannelOrdering, ColorSpaceDirection, ColorSpaceVisibility,
-    EnvironmentMode, OptimizationFlags, ReferenceSpaceType, SearchReferenceSpaceType,
-    TransformDirection, ViewType,
+    EnvironmentMode, NamedTransformVisibility, OptimizationFlags, ReferenceSpaceType,
+    SearchReferenceSpaceType, TransformDirection, ViewTransformDirection, ViewType,
 };
 use ocio_ops::parse_utils::{
     ROLE_DEFAULT, find_in_string_vec_case_ignore, intersect_string_vecs_case_ignore,
@@ -38,9 +38,11 @@ use crate::context_variable_utils::{collect_context_variables, contains_context_
 use crate::display::{
     Display, DisplayMap, View, ViewVec, add_view, compute_displays, find_display, find_view,
 };
+use crate::look::Look;
 use crate::named_transform::NamedTransform;
 use crate::processor::{Processor, ProcessorCacheFlags};
 use crate::transform::Transform;
+use crate::view_transform::ViewTransform;
 
 /// `OCIO_ACTIVE_DISPLAYS`: the displays a config shows, overriding its own list.
 ///
@@ -254,6 +256,12 @@ pub struct Config {
     active_displays_env_override: StringVec,
     /// `m_activeViewsEnvOverride`: the views of `OCIO_ACTIVE_VIEWS`.
     active_views_env_override: StringVec,
+    /// `m_looksList`.
+    looks_list: Vec<Look>,
+    /// `m_viewTransforms`.
+    view_transforms: Vec<ViewTransform>,
+    /// `m_defaultViewTransform`: the name of the default view transform.
+    default_view_transform: Vec<u8>,
     /// `m_allNamedTransforms`: all the named transforms, active or not.
     all_named_transforms: Vec<NamedTransform>,
     /// `m_activeNamedTransformNames`.
@@ -297,6 +305,9 @@ impl Clone for Config {
             inactive_color_space_names_env: self.inactive_color_space_names_env.clone(),
             inactive_color_space_names_conf: self.inactive_color_space_names_conf.clone(),
             roles: self.roles.clone(),
+            looks_list: self.looks_list.clone(),
+            view_transforms: self.view_transforms.clone(),
+            default_view_transform: self.default_view_transform.clone(),
             all_named_transforms: self.all_named_transforms.clone(),
             active_named_transform_names: self.active_named_transform_names.clone(),
             inactive_named_transform_names: self.inactive_named_transform_names.clone(),
@@ -344,6 +355,9 @@ impl Config {
             inactive_color_space_names_env: Vec::new(),
             inactive_color_space_names_conf: Vec::new(),
             roles: BTreeMap::new(),
+            looks_list: Vec::new(),
+            view_transforms: Vec::new(),
+            default_view_transform: Vec::new(),
             all_named_transforms: Vec::new(),
             active_named_transform_names: StringVec::new(),
             inactive_named_transform_names: StringVec::new(),
@@ -3041,6 +3055,504 @@ impl Config {
             self.clear_display_cache();
             self.reset_cache_ids();
         }
+    }
+
+    // Named transforms ////////////////////////////////////////////////////////////////////////
+
+    /// The number of named transforms of `visibility`.
+    ///
+    /// Port of `Config::getNumNamedTransforms(NamedTransformVisibility)`
+    /// (src/OpenColorIO/Config.cpp:3065-3089 @ v2.5.2).
+    #[doc(alias = "getNumNamedTransforms")]
+    pub fn num_named_transforms_with(&self, visibility: NamedTransformVisibility) -> i32 {
+        match visibility {
+            NamedTransformVisibility::All => self.all_named_transforms.len() as i32,
+            NamedTransformVisibility::Active => self.active_named_transform_names.len() as i32,
+            NamedTransformVisibility::Inactive => self.inactive_named_transform_names.len() as i32,
+        }
+    }
+
+    /// The name of the named transform at `index` among those of `visibility`; `""` outside
+    /// them.
+    ///
+    /// Port of `Config::getNamedTransformNameByIndex(NamedTransformVisibility, int)`
+    /// (src/OpenColorIO/Config.cpp:3091-3128 @ v2.5.2).
+    #[doc(alias = "getNamedTransformNameByIndex")]
+    pub fn named_transform_name_by_index_with(
+        &self,
+        visibility: NamedTransformVisibility,
+        index: i32,
+    ) -> &[u8] {
+        let Ok(index) = usize::try_from(index) else {
+            return &[];
+        };
+
+        match visibility {
+            NamedTransformVisibility::All => self
+                .all_named_transforms
+                .get(index)
+                .map_or(&[], NamedTransform::name),
+            NamedTransformVisibility::Active => self
+                .active_named_transform_names
+                .get(index)
+                .map_or(&[], Vec::as_slice),
+            NamedTransformVisibility::Inactive => self
+                .inactive_named_transform_names
+                .get(index)
+                .map_or(&[], Vec::as_slice),
+        }
+    }
+
+    /// The named transform whose name or alias is `name`, ignoring case, active or not.
+    ///
+    /// Port of `Config::getNamedTransform` (src/OpenColorIO/Config.cpp:3130-3134 @ v2.5.2).
+    #[doc(alias = "getNamedTransform")]
+    pub fn named_transform(&self, name: impl AsRef<[u8]>) -> Option<&NamedTransform> {
+        // Use all named transforms.
+        self.impl_named_transform(name.as_ref())
+    }
+
+    /// The number of active named transforms.
+    ///
+    /// Port of `Config::getNumNamedTransforms()` (src/OpenColorIO/Config.cpp:3136-3139 @
+    /// v2.5.2).
+    #[doc(alias = "getNumNamedTransforms")]
+    pub fn num_named_transforms(&self) -> i32 {
+        self.num_named_transforms_with(NamedTransformVisibility::Active)
+    }
+
+    /// The name of the active named transform at `index`; `""` outside them.
+    ///
+    /// Port of `Config::getNamedTransformNameByIndex(int)` (src/OpenColorIO/Config.cpp:
+    /// 3141-3144 @ v2.5.2).
+    #[doc(alias = "getNamedTransformNameByIndex")]
+    pub fn named_transform_name_by_index(&self, index: i32) -> &[u8] {
+        self.named_transform_name_by_index_with(NamedTransformVisibility::Active, index)
+    }
+
+    /// The index among the active named transforms of the named transform `name` (by name or
+    /// alias); -1 for none or an inactive one.
+    ///
+    /// Port of `Config::getIndexForNamedTransform` (src/OpenColorIO/Config.cpp:3146-3167 @
+    /// v2.5.2).
+    #[doc(alias = "getIndexForNamedTransform")]
+    pub fn index_for_named_transform(&self, name: impl AsRef<[u8]>) -> i32 {
+        let Some(nt) = self.named_transform(name) else {
+            return -1;
+        };
+
+        // Check to see if the name is an active named transform.
+        let num = self.num_named_transforms_with(NamedTransformVisibility::Active);
+        for idx in 0..num {
+            // strcmp: names hold no NUL.
+            if self.named_transform_name_by_index_with(NamedTransformVisibility::Active, idx)
+                == nt.name()
+            {
+                return idx;
+            }
+        }
+
+        // Requests for an inactive named transform or an inactive color space will both fail.
+        -1
+    }
+
+    /// Adds a copy of `nt`, or replaces the named transform of the same name. Refuses a named
+    /// transform without a name or a transform, one whose name or an alias is a role, a color
+    /// space or holds `$` or `%`, and one that conflicts with another named transform's name
+    /// or aliases.
+    ///
+    /// Port of `Config::addNamedTransform` (src/OpenColorIO/Config.cpp:3169-3298 @ v2.5.2).
+    /// Its error for a null named transform can't happen with a reference.
+    #[doc(alias = "addNamedTransform")]
+    pub fn add_named_transform(&mut self, nt: &NamedTransform) -> Result<()> {
+        let name = nt.name();
+        if name.is_empty() {
+            return Err(Exception::new(
+                "Named transform must have a non-empty name.",
+            ));
+        }
+        if nt.transform(TransformDirection::Forward).is_none()
+            && nt.transform(TransformDirection::Inverse).is_none()
+        {
+            return Err(Exception::new(
+                "Named transform must define at least one transform.",
+            ));
+        }
+
+        if self.has_role(name) {
+            return Err(Exception::new(
+                [
+                    b"Cannot add '".as_slice(),
+                    name,
+                    b"' named transform, there is already a role with this name.",
+                ]
+                .concat(),
+            ));
+        }
+        if let Some(cs) = self.color_space(name) {
+            return Err(Exception::new(
+                [
+                    b"Cannot add '".as_slice(),
+                    name,
+                    b"' named transform, there is already a color space using this name as a \
+                      name or as an alias: '",
+                    cs.name(),
+                    b"'.",
+                ]
+                .concat(),
+            ));
+        }
+
+        if contains_context_variable_token(name) {
+            return Err(Exception::new(
+                [
+                    b"A named transform name '".as_slice(),
+                    name,
+                    b"' cannot contain a context variable reserved token i.e. % or $.",
+                ]
+                .concat(),
+            ));
+        }
+
+        let mut existing = self.impl_named_transform_index(name);
+
+        let mut replace_idx = usize::MAX;
+        let num_nt = self.all_named_transforms.len();
+        if existing < num_nt {
+            let existing_name = self.all_named_transforms[existing].name();
+            if !compare(existing_name, name) {
+                return Err(Exception::new(
+                    [
+                        b"Cannot add '".as_slice(),
+                        name,
+                        b"' named transform, existing named transform, '",
+                        existing_name,
+                        b"' is using this name as an alias.",
+                    ]
+                    .concat(),
+                ));
+            }
+            // There is a named transform with the same name that will be replaced (if new
+            // named transform can be used).
+            replace_idx = existing;
+        }
+
+        let num_aliases = nt.num_aliases();
+        for aidx in 0..num_aliases {
+            let alias = nt.alias(aidx);
+
+            if self.has_role(alias) {
+                return Err(Exception::new(
+                    [
+                        b"Cannot add '".as_slice(),
+                        name,
+                        b"' named transform, it has an alias '",
+                        alias,
+                        b"' and there is already a role with this name.",
+                    ]
+                    .concat(),
+                ));
+            }
+            if let Some(cs) = self.color_space(alias) {
+                return Err(Exception::new(
+                    [
+                        b"Cannot add '".as_slice(),
+                        name,
+                        b"' named transform, it has an alias '",
+                        alias,
+                        b"' and there is already a color space using this name as a name or as \
+                          an alias: '",
+                        cs.name(),
+                        b"'.",
+                    ]
+                    .concat(),
+                ));
+            }
+            if contains_context_variable_token(alias) {
+                return Err(Exception::new(
+                    [
+                        b"Cannot add '".as_slice(),
+                        name,
+                        b"' named transform, it has an alias '",
+                        alias,
+                        b"' that cannot contain a context variable reserved token i.e. % or $.",
+                    ]
+                    .concat(),
+                ));
+            }
+
+            existing = self.impl_named_transform_index(alias);
+            // Is an alias of the named transform already used by a named transform?
+            // Skip existing named transform that might be replaced.
+            if existing != replace_idx && existing < num_nt {
+                let existing_name = self.all_named_transforms[existing].name();
+                return Err(Exception::new(
+                    [
+                        b"Cannot add '".as_slice(),
+                        name,
+                        b"' named transform, it has '",
+                        alias,
+                        b"' alias and existing named transform, '",
+                        existing_name,
+                        b"' is using the same alias.",
+                    ]
+                    .concat(),
+                ));
+            }
+        }
+
+        if replace_idx < num_nt {
+            let existing_name = self.all_named_transforms[replace_idx].name();
+            if !compare(existing_name, name) {
+                return Err(Exception::new(
+                    [
+                        b"Cannot add '".as_slice(),
+                        name,
+                        b"' named transform, existing named transform, '",
+                        existing_name,
+                        b"' is using this name as an alias.",
+                    ]
+                    .concat(),
+                ));
+            }
+            self.all_named_transforms[replace_idx] = nt.clone();
+        } else {
+            self.all_named_transforms.push(nt.clone());
+        }
+
+        self.reset_cache_ids();
+        self.refresh_active_color_spaces();
+        Ok(())
+    }
+
+    /// Removes the named transform whose name (not an alias) is `name`, ignoring case. It keeps
+    /// the cache IDs and the lists of active and inactive named transforms, which then still
+    /// name it (docs/improvements.md, I-132).
+    ///
+    /// Port of `Config::removeNamedTransform` (src/OpenColorIO/Config.cpp:3300-3317 @ v2.5.2).
+    #[doc(alias = "removeNamedTransform")]
+    pub fn remove_named_transform(&mut self, name: impl AsRef<[u8]>) {
+        let name_to_search = lower(c_str(name.as_ref()));
+        if name_to_search.is_empty() {
+            return;
+        }
+
+        if let Some(itr) = self
+            .all_named_transforms
+            .iter()
+            .position(|nt| lower(nt.name()) == name_to_search)
+        {
+            self.all_named_transforms.remove(itr);
+            return;
+        }
+
+        self.reset_cache_ids();
+        self.refresh_active_color_spaces();
+    }
+
+    /// Removes every named transform.
+    ///
+    /// Port of `Config::clearNamedTransforms` (src/OpenColorIO/Config.cpp:3319-3325 @ v2.5.2).
+    #[doc(alias = "clearNamedTransforms")]
+    pub fn clear_named_transforms(&mut self) {
+        self.all_named_transforms.clear();
+
+        self.reset_cache_ids();
+        self.refresh_active_color_spaces();
+    }
+
+    // Looks ///////////////////////////////////////////////////////////////////////////////////
+
+    /// The look named `name`, ignoring case.
+    ///
+    /// Port of `Config::getLook` and `Config::Impl::getLook` (src/OpenColorIO/Config.cpp:
+    /// 543-554, 4473-4476 @ v2.5.2).
+    #[doc(alias = "getLook")]
+    pub fn look(&self, name: impl AsRef<[u8]>) -> Option<&Look> {
+        let namelower = lower(c_str(name.as_ref()));
+
+        self.looks_list
+            .iter()
+            .find(|look| lower(look.name()) == namelower)
+    }
+
+    /// Port of `Config::getNumLooks` (src/OpenColorIO/Config.cpp:4478-4481 @ v2.5.2).
+    #[doc(alias = "getNumLooks")]
+    pub fn num_looks(&self) -> i32 {
+        self.looks_list.len() as i32
+    }
+
+    /// The name of the look at `index`; `""` outside them.
+    ///
+    /// Port of `Config::getLookNameByIndex` (src/OpenColorIO/Config.cpp:4483-4491 @ v2.5.2).
+    #[doc(alias = "getLookNameByIndex")]
+    pub fn look_name_by_index(&self, index: i32) -> &[u8] {
+        usize::try_from(index)
+            .ok()
+            .and_then(|i| self.looks_list.get(i))
+            .map_or(&[], Look::name)
+    }
+
+    /// Adds a copy of `look`, or replaces the look of the same name (ignoring case).
+    ///
+    /// Port of `Config::addLook` (src/OpenColorIO/Config.cpp:4493-4520 @ v2.5.2).
+    #[doc(alias = "addLook")]
+    pub fn add_look(&mut self, look: &Look) -> Result<()> {
+        let name = look.name();
+        if name.is_empty() {
+            return Err(Exception::new("Cannot addLook with an empty name."));
+        }
+
+        let namelower = lower(name);
+
+        // If the look exists, replace it
+        match self
+            .looks_list
+            .iter()
+            .position(|l| lower(l.name()) == namelower)
+        {
+            Some(i) => self.looks_list[i] = look.clone(),
+            // Otherwise, add it
+            None => self.looks_list.push(look.clone()),
+        }
+
+        self.reset_cache_ids();
+        Ok(())
+    }
+
+    /// Port of `Config::clearLooks` (src/OpenColorIO/Config.cpp:4522-4528 @ v2.5.2).
+    #[doc(alias = "clearLooks")]
+    pub fn clear_looks(&mut self) {
+        self.looks_list.clear();
+
+        self.reset_cache_ids();
+    }
+
+    // View transforms /////////////////////////////////////////////////////////////////////////
+
+    /// Port of `Config::getNumViewTransforms` (src/OpenColorIO/Config.cpp:4532-4535 @ v2.5.2).
+    #[doc(alias = "getNumViewTransforms")]
+    pub fn num_view_transforms(&self) -> i32 {
+        self.view_transforms.len() as i32
+    }
+
+    /// The view transform named `name`, ignoring case.
+    ///
+    /// Port of `Config::getViewTransform` and `Config::Impl::getViewTransform`
+    /// (src/OpenColorIO/Config.cpp:529-541, 4537-4540 @ v2.5.2).
+    #[doc(alias = "getViewTransform")]
+    pub fn view_transform(&self, name: impl AsRef<[u8]>) -> Option<&ViewTransform> {
+        let namelower = lower(c_str(name.as_ref()));
+
+        self.view_transforms
+            .iter()
+            .find(|vt| lower(vt.name()) == namelower)
+    }
+
+    /// The name of the view transform at `index`; `""` outside them.
+    ///
+    /// Port of `Config::getViewTransformNameByIndex` (src/OpenColorIO/Config.cpp:4542-4550 @
+    /// v2.5.2).
+    #[doc(alias = "getViewTransformNameByIndex")]
+    pub fn view_transform_name_by_index(&self, index: i32) -> &[u8] {
+        usize::try_from(index)
+            .ok()
+            .and_then(|i| self.view_transforms.get(i))
+            .map_or(&[], ViewTransform::name)
+    }
+
+    /// The default view transform from the scene reference space to the display one: the
+    /// default view transform when it is a scene-referred one, else the first scene-referred
+    /// view transform.
+    ///
+    /// Port of `Config::getDefaultSceneToDisplayViewTransform` (src/OpenColorIO/Config.cpp:
+    /// 4552-4577 @ v2.5.2).
+    #[doc(alias = "getDefaultSceneToDisplayViewTransform")]
+    pub fn default_scene_to_display_view_transform(&self) -> Option<&ViewTransform> {
+        // The default view transform between the main reference space (scene-referred) and the
+        // display-referred space if it is not defined, it is the first one in the list that
+        // uses a scene-referred reference space.
+
+        if !self.default_view_transform.is_empty()
+            && let Some(vt) = self.view_transform(&self.default_view_transform)
+            && vt.reference_space_type() == ReferenceSpaceType::Scene
+        {
+            return Some(vt);
+        }
+        self.view_transforms
+            .iter()
+            .find(|vt| vt.reference_space_type() == ReferenceSpaceType::Scene)
+    }
+
+    /// Port of `Config::getDefaultViewTransformName` (src/OpenColorIO/Config.cpp:4579-4582 @
+    /// v2.5.2).
+    #[doc(alias = "getDefaultViewTransformName")]
+    pub fn default_view_transform_name(&self) -> &[u8] {
+        &self.default_view_transform
+    }
+
+    /// Port of `Config::setDefaultViewTransformName` (src/OpenColorIO/Config.cpp:4584-4590 @
+    /// v2.5.2).
+    #[doc(alias = "setDefaultViewTransformName")]
+    pub fn set_default_view_transform_name(&mut self, default_vt: impl AsRef<[u8]>) {
+        self.default_view_transform = c_str(default_vt.as_ref()).to_vec();
+
+        self.reset_cache_ids();
+    }
+
+    /// Adds a copy of `view_transform`, or replaces the view transform of the same name
+    /// (ignoring case). Refuses one without a name or a transform.
+    ///
+    /// Port of `Config::addViewTransform` (src/OpenColorIO/Config.cpp:4592-4631 @ v2.5.2).
+    #[doc(alias = "addViewTransform")]
+    pub fn add_view_transform(&mut self, view_transform: &ViewTransform) -> Result<()> {
+        let name = view_transform.name();
+        if name.is_empty() {
+            return Err(Exception::new(
+                "Cannot add view transform with an empty name.",
+            ));
+        }
+
+        if view_transform
+            .transform(ViewTransformDirection::ToReference)
+            .is_none()
+            && view_transform
+                .transform(ViewTransformDirection::FromReference)
+                .is_none()
+        {
+            return Err(Exception::new(
+                [
+                    b"Cannot add view transform '".as_slice(),
+                    name,
+                    b"' with no transform.",
+                ]
+                .concat(),
+            ));
+        }
+
+        let namelower = lower(name);
+
+        // If the view transform exists, replace it.
+        match self
+            .view_transforms
+            .iter()
+            .position(|vt| lower(vt.name()) == namelower)
+        {
+            Some(i) => self.view_transforms[i] = view_transform.clone(),
+            // Otherwise, add it.
+            None => self.view_transforms.push(view_transform.clone()),
+        }
+
+        self.reset_cache_ids();
+        Ok(())
+    }
+
+    /// Port of `Config::clearViewTransforms` (src/OpenColorIO/Config.cpp:4633-4639 @ v2.5.2).
+    #[doc(alias = "clearViewTransforms")]
+    pub fn clear_view_transforms(&mut self) {
+        self.view_transforms.clear();
+
+        self.reset_cache_ids();
     }
 
     /// Port of `Config::getProcessorCacheFlags` (Config.cpp:924-927, 5333-5336 @ v2.5.2).
