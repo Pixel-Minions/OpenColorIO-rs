@@ -1960,10 +1960,6 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Decided** (general rule): return an error instead (its text is decided with the port).
 - **Status:** to port with `NamedTransform::GetTransform` (WP 3.2a, `p3-builders`), found by the
   `p3-model-objects` verifier.
-  that validation refuses) give upstream's answers. The renderers in 2.3b and 2.3c1
-  (`p2-ff-cpu-2`): `fixed_function_op_cpu_tests.rs` checks their errors.
-  that validation refuses) give upstream's answers. The renderers in 2.3b, and in 2.3c1 and
-  2.3d1 (`p2-ff-cpu-2`): `fixed_function_op_cpu_tests.rs` checks their errors.
 
 ### U-53. Regular expressions nested too deep for the wheel's stack
 
