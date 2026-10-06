@@ -4872,7 +4872,8 @@ status = "done"
 path = "tests/cpu/ops/lut1d/Lut1DOpCPU_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu_tests.rs"]
-status = "todo"
+status = "partial"
+note = "p1-optimizer C: lut_1d_identity_half, lut_1d_identity_half_to_int, lut_1d_identity_half_code; p2-lut1d-fwd: order3_test, nan_test, nan_half_test, basic, nan, lut_1d_red; p2-lut1d-inv: bit_depth_support, half, lut_1d_green, lut_1d_blue, lut_1d_identity_int_to_half and the seven lut_1d_inv_* tests that need no file. The others read files (BuildOpsTest, Phase 4)"
 
 [[file]]
 path = "tests/cpu/ops/lut1d/Lut1DOpData_tests.cpp"
