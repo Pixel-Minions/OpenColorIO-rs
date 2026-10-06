@@ -212,7 +212,8 @@ note = "p3-context 3.5d: EnvMapKey, EnvMap, UsedEnvs and the declarations; the C
 path = "src/OpenColorIO/CustomKeys.h"
 kind = "src"
 target = ["crates/ocio/src/custom_keys.rs"]
-status = "todo"
+status = "partial"
+note = "p3-rules 3.9e: CustomKeysContainer's getSize, getName, getValue, set, validateIndex; hasKey and getValueForKey have no caller in OCIO 2.5.2"
 
 [[file]]
 path = "src/OpenColorIO/Display.cpp"
@@ -253,13 +254,15 @@ note = "1.1e: also std::length_error, which a C++ container raises for a size pa
 path = "src/OpenColorIO/FileRules.cpp"
 kind = "src"
 target = ["crates/ocio/src/file_rules.rs"]
-status = "todo"
+status = "partial"
+note = "p3-rules 3.9e: SanitizeRegularExpression (with std_regex::regex_replace), ThrowInvalidRegex, ConvertToRegularExpression, BuildRegularExpression, ValidateRegularExpression (both), FileRule but its matches and validate, FileRules and Impl (the rule list, its getters and setters, custom keys, insert, remove, move, isDefault, operator<<). Later (3.9f): FileRule::matches and validate, getRuleFromFilepath, getColorSpaceFromFilepath, filepathOnlyMatchesDefaultRule, Impl::validate, UpdateFileRulesFromV1ToV2"
 
 [[file]]
 path = "src/OpenColorIO/FileRules.h"
 kind = "src"
 target = ["crates/ocio/src/file_rules.rs"]
-status = "todo"
+status = "partial"
+note = "p3-rules 3.9e: FileRules::Impl's state and DefaultAllowed; the rest with 3.9f"
 
 [[file]]
 path = "src/OpenColorIO/GPUProcessor.cpp"
