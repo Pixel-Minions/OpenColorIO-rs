@@ -12,6 +12,7 @@ pub mod config;
 pub mod config_io_proxy;
 pub mod context;
 pub mod context_variable_utils;
+pub(crate) mod display;
 pub mod look;
 pub(crate) mod look_parse;
 pub mod named_transform;
@@ -30,6 +31,7 @@ pub use color_space::ColorSpace;
 pub use color_space_set::ColorSpaceSet;
 pub use config::{Config, CurrentContext};
 pub use context::Context;
+pub use display::OCIO_VIEW_USE_DISPLAY_NAME;
 pub use look::Look;
 pub use named_transform::NamedTransform;
 pub use ocio_ops::exception::{Exception, ExceptionKind, Result};
@@ -38,7 +40,7 @@ pub use ocio_ops::open_color_types::{
     Allocation, BSplineType, BitDepth, CdlStyle, ColorSpaceDirection, ColorSpaceVisibility,
     EnvironmentMode, FixedFunctionStyle, GradingStyle, Lut1DHueAdjust, NegativeStyle,
     OptimizationFlags, ReferenceSpaceType, RgbCurveType, SearchReferenceSpaceType,
-    TransformDirection, ViewTransformDirection,
+    TransformDirection, ViewTransformDirection, ViewType,
 };
 pub use ocio_ops::ops::gradingrgbcurve::grading_b_spline_curve::{
     GradingBSplineCurve, GradingControlPoint,

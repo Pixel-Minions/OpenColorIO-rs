@@ -103,6 +103,17 @@ pub enum ColorSpaceVisibility {
     All,
 }
 
+/// Which views of a display: the shared views it uses, or its own.
+///
+/// Port of `ViewType` (include/OpenColorIO/OpenColorTypes.h:337-341 @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ViewType {
+    /// `VIEW_SHARED`.
+    Shared = 0,
+    /// `VIEW_DISPLAY_DEFINED`.
+    DisplayDefined,
+}
+
 /// Which of a color space's transforms: to its reference space, or from it.
 ///
 /// Port of `ColorSpaceDirection` (include/OpenColorIO/OpenColorTypes.h:343-347 @ v2.5.2).
