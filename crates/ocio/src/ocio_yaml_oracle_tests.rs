@@ -200,6 +200,9 @@ pub(super) fn getters(t: &Transform) -> Vec<(&'static str, Value)> {
             out.push(("hasMaxOutValue", json!(t.has_max_out_value())));
             out.push(name(t.format_metadata()));
         }
+        Transform::Group(t) => {
+            out.push(name(t.format_metadata()));
+        }
         Transform::Allocation(t) => {
             out.push((
                 "getAllocation",
@@ -689,4 +692,121 @@ fn log_camera_transforms_load_as_in_the_wheel() {
         b"!<LogCameraTransform> {lin_side_break: 1, lin_side_break: 2}",
         b"!<LogCameraTransform> {lin_side_break: }",
     ]);
+}
+
+/// Groups nested `n` deep in flow style, around a MatrixTransform.
+fn nested_groups(n: usize) -> Vec<u8> {
+    let mut text = "!<GroupTransform> {children: [".repeat(n);
+    text.push_str("!<MatrixTransform> {}");
+    text.push_str(&"]}".repeat(n));
+    text.into_bytes()
+}
+
+/// The GroupTransform's children, in order, through aliases (each use loads the node again,
+/// I-141), nested, and the errors of a child; its other keys.
+#[test]
+fn group_transforms_load_as_in_the_wheel() {
+    let deepest = nested_groups(MAX_GROUP_DEPTH);
+    check(&[
+        b"!<GroupTransform> {}",
+        b"!<GroupTransform> {children: []}",
+        b"!<GroupTransform> {children: 5}",
+        b"!<GroupTransform> {children: \"x\"}",
+        b"!<GroupTransform> {children: {a: b}}",
+        b"!<GroupTransform> {children: {0: !<LogTransform> {}}}",
+        b"!<GroupTransform> {children: [1]}",
+        b"!<GroupTransform> {children: [[]]}",
+        b"!<GroupTransform> {children: [{}]}",
+        b"!<GroupTransform> {children: [~]}",
+        b"!<GroupTransform> {children: [!<Lut1DTransform> {}]}",
+        b"!<GroupTransform> {children: [!<LogTransform> {base: x}]}",
+        b"!<GroupTransform> {children: [!<LogTransform> {base: 10}, !<MatrixTransform> \
+          {offset: [1, 2, 3, 4]}, !<RangeTransform> {min_in_value: 0, max_in_value: 1}], \
+          direction: inverse, name: g}",
+        b"!<GroupTransform> {foo: 1, children: [!<MatrixTransform> {bar: 2}, \
+          !<GroupTransform> {baz: 3, children: [!<LogTransform> {qux: 4}]}], quux: 5}",
+        b"!<GroupTransform> {children: [!<MatrixTransform> {}], children: []}",
+        b"!<GroupTransform> {children: [!<GroupTransform> {children: [!<MatrixTransform> {}], \
+          children: []}]}",
+        b"!<GroupTransform> {children: [&m !<MatrixTransform> {offset: [1, 2, 3, 4]}, *m, *m]}",
+        b"!<GroupTransform> {children: [&a !<GroupTransform> {children: [&b !<GroupTransform> \
+          {children: [&c !<ExponentTransform> {value: 2}, *c]}, *b]}, *a]}",
+        b"!<GroupTransform> {name: [x]}",
+        b"!<GroupTransform> {direction: x}",
+        b"!<GroupTransform>\n      children:\n        - !<LogTransform> {base: 3}\n        \
+          - !<MatrixTransform>\n          foo: 1\n        - !<GroupTransform>\n          \
+          children: [!<LogTransform> {base: y}]",
+        &nested_groups(10),
+        &deepest,
+    ]);
+}
+
+/// A group nested one deeper than the port allows, which the wheel loads, and a group that
+/// holds itself, which overflows the wheel's stack: the port refuses both (U-60).
+#[test]
+fn groups_nested_too_deep_are_refused() {
+    let too_deep = nested_groups(MAX_GROUP_DEPTH + 1);
+    let wheel = run(vec![request(&too_deep, &[])]);
+    assert!(
+        wheel[0]["config"].is_null(),
+        "the wheel loads it: {}",
+        wheel[0]
+    );
+
+    let refused = |case: &[u8], line: usize| {
+        let (loaded, _) = port_load(case);
+        let Loaded::Error(message) = loaded else {
+            panic!("the port loads {}", String::from_utf8_lossy(case));
+        };
+        let expected = format!(
+            "Error: Loading the OCIO profile failed. At line {line}, 'GroupTransform' parsing \
+             failed: GroupTransforms nested more than {MAX_GROUP_DEPTH} deep can't be loaded: \
+             upstream's stack overflows."
+        );
+        assert_eq!(String::from_utf8_lossy(&message), expected);
+    };
+    refused(&too_deep, 7);
+    refused(b"&t !<GroupTransform> {children: [*t]}", 7);
+    refused(
+        b"&t !<GroupTransform> {children: [!<LogTransform> {}, *t]}",
+        7,
+    );
+    refused(b"\n      &t !<GroupTransform>\n      children: [*t]", 8);
+}
+
+/// Loading, copying, printing, validating and dropping the deepest group the port loads, and
+/// refusing deeper groups and a group that holds itself, fit a thread of 1 MiB: measured at opt-level 0, where
+/// copying a group takes about 4 KiB of stack per level (the port loads without recursion).
+#[test]
+fn deep_groups_fit_a_small_stack() {
+    // Parsed here: yaml-cpp's parser recurses per level of the text, which isn't the loader's.
+    let nodes: Vec<Node> = [
+        nested_groups(MAX_GROUP_DEPTH),
+        nested_groups(MAX_GROUP_DEPTH + 1),
+        b"&t !<GroupTransform> {children: [*t, *t]}".to_vec(),
+    ]
+    .iter()
+    .map(|case| {
+        load(&config_text(case))
+            .and_then(|doc| doc.get("colorspaces"))
+            .and_then(|n| n.get(0usize))
+            .and_then(|n| n.get("to_scene_reference"))
+            .unwrap()
+    })
+    .collect();
+    std::thread::Builder::new()
+        .stack_size(1 << 20)
+        .spawn(move || {
+            for node in nodes {
+                if let Ok(t) = load_transform(&node) {
+                    let copy = t.clone();
+                    assert!(!t.to_bytes().is_empty());
+                    let _ = t.validate();
+                    drop(copy);
+                }
+            }
+        })
+        .unwrap()
+        .join()
+        .unwrap();
 }

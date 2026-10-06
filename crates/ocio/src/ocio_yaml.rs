@@ -39,13 +39,14 @@ use crate::transforms::allocation_transform::AllocationTransform;
 use crate::transforms::cdl_transform::CdlTransform;
 use crate::transforms::exponent_transform::ExponentTransform;
 use crate::transforms::exponent_with_linear_transform::ExponentWithLinearTransform;
+use crate::transforms::group_transform::GroupTransform;
 use crate::transforms::log_affine_transform::LogAffineTransform;
 use crate::transforms::log_camera_transform::LogCameraTransform;
 use crate::transforms::log_transform::LogTransform;
 use crate::transforms::matrix_transform::MatrixTransform;
 use crate::transforms::range_transform::{RangeTransform, range_style_from_string};
 use crate::yaml_cpp::exceptions::Exception as YamlException;
-use crate::yaml_cpp::node::{Node, NodeType};
+use crate::yaml_cpp::node::{Node, NodeIter, NodeType};
 
 /// Why loading failed: OCIO's `Exception`, or an exception of yaml-cpp that upstream doesn't
 /// catch on the way.
@@ -730,6 +731,105 @@ fn load_log_camera(node: &Node) -> LoadResult<LogCameraTransform> {
     Ok(t)
 }
 
+/// The deepest the port nests GroupTransforms while loading them (U-60). The wheel recurses once
+/// per level and overflows its stack at 1,182 levels in Python's main thread on Windows (5,129
+/// on Linux), and on a group that contains itself through an alias. The port loads groups
+/// without recursion, but copying a group recurses, about 4 KiB per level at opt-level 0: 100
+/// levels take about half of a 1 MiB thread.
+pub(crate) const MAX_GROUP_DEPTH: usize = 100;
+
+/// A group being loaded: its node, the transform so far, the pairs of its map still to read,
+/// and the `children` being read (the sequence, the next index and the size).
+struct GroupFrame {
+    node: Node,
+    group: GroupTransform,
+    pairs: NodeIter,
+    children: Option<(Node, usize, usize)>,
+}
+
+impl GroupFrame {
+    /// Starts a group: `t = GroupTransform::Create()`, then `CheckDuplicates(node)`.
+    fn open(node: &Node) -> LoadResult<GroupFrame> {
+        let group = GroupTransform::new();
+        check_duplicates(node)?;
+        Ok(GroupFrame {
+            node: node.clone(),
+            group,
+            pairs: node.iter(),
+            children: None,
+        })
+    }
+}
+
+/// A `GroupTransform`: `children` (each a transform, loaded in order), `direction`, `name`.
+/// A group that [`MAX_GROUP_DEPTH`] groups hold fails (U-60).
+///
+/// Upstream recurses into each child (`load(const YAML::Node&, TransformRcPtr&)`). The port
+/// walks the nested groups with a stack of its own instead, in the same order, so that no
+/// depth overflows the caller's stack: each group's pairs are read in order, and a child
+/// group is read whole before its parent's next child. Upstream fails with "Child transform
+/// could not be parsed." when a child loads as null, which can't happen: a child is a
+/// transform or an exception.
+///
+/// Port of `load(const YAML::Node&, GroupTransformRcPtr&)` (OCIOYaml.cpp:2507-2556 @ v2.5.2).
+fn load_group(node: &Node) -> LoadResult<GroupTransform> {
+    let mut stack = vec![GroupFrame::open(node)?];
+    loop {
+        let level = stack.len() - 1;
+        // The next child of the `children` being read.
+        if let Some((value, next, size)) = &mut stack[level].children {
+            if *next < *size {
+                let val = value.get(*next)?;
+                *next += 1;
+                // load(val, childTransform): `level + 1` groups hold the child.
+                let node_type = val.node_type()?;
+                if node_type != NodeType::Map {
+                    return Err(not_a_map(&val, node_type));
+                }
+                if val.tag()? == b"GroupTransform" {
+                    if level + 1 >= MAX_GROUP_DEPTH {
+                        return Err(nested_too_deep(&val));
+                    }
+                    stack.push(GroupFrame::open(&val)?);
+                } else {
+                    let child = load_leaf(&val)?;
+                    stack[level].group.append_transform(child);
+                }
+                continue;
+            }
+            stack[level].children = None;
+        }
+
+        // The next pair of the map, or the group is complete.
+        let frame = &mut stack[level];
+        let Some(iter) = frame.pairs.next() else {
+            let done = stack.pop().expect("a group").group;
+            match stack.last_mut() {
+                Some(parent) => parent.group.append_transform(Transform::Group(done)),
+                None => return Ok(done),
+            }
+            continue;
+        };
+        let key = iter.first.as_::<Vec<u8>>()?;
+        if iter.second.is_null()? || !iter.second.is_defined() {
+            continue;
+        }
+        let value = &iter.second;
+        match key.as_slice() {
+            b"children" => frame.children = Some((value.clone(), 0, value.size()?)),
+            b"direction" => frame.group.set_direction(load_direction(value)?),
+            b"name" => {
+                let name = load_string(value)?;
+                frame
+                    .group
+                    .format_metadata_mut()
+                    .set_name(Some(c_str(&name)));
+            }
+            _ => log_unknown_key_warning(&frame.node, &iter.first)?,
+        }
+    }
+}
+
 /// The error of a transform class whose loader is not ported yet: `work_package` ports it.
 fn not_ported_yet(tag: &[u8], work_package: &str) -> LoadError {
     let mut msg = b"Loading a !<".to_vec();
@@ -750,14 +850,36 @@ fn not_ported_yet(tag: &[u8], work_package: &str) -> LoadError {
 pub(crate) fn load_transform(node: &Node) -> LoadResult<Transform> {
     let node_type = node.node_type()?;
     if node_type != NodeType::Map {
-        let os = format!(
-            "Unsupported Transform type encountered: ({}) in OCIO profile. Only Mapping types \
-             supported.",
-            node_type as i32
-        );
-        return Err(throw_error(node, os.as_bytes()));
+        return Err(not_a_map(node, node_type));
     }
 
+    if node.tag()? == b"GroupTransform" {
+        return Ok(Transform::Group(load_group(node)?));
+    }
+    load_leaf(node)
+}
+
+/// The error of a transform node that isn't a map.
+fn not_a_map(node: &Node, node_type: NodeType) -> LoadError {
+    let os = format!(
+        "Unsupported Transform type encountered: ({}) in OCIO profile. Only Mapping types \
+         supported.",
+        node_type as i32
+    );
+    throw_error(node, os.as_bytes())
+}
+
+/// The error of a group nested past [`MAX_GROUP_DEPTH`] (U-60).
+fn nested_too_deep(node: &Node) -> LoadError {
+    let os = format!(
+        "GroupTransforms nested more than {MAX_GROUP_DEPTH} deep can't be loaded: upstream's \
+         stack overflows."
+    );
+    throw_error(node, os.as_bytes())
+}
+
+/// A transform of a class other than a group, by the map's tag.
+fn load_leaf(node: &Node) -> LoadResult<Transform> {
     let ty = node.tag()?.to_vec();
     Ok(match ty.as_slice() {
         b"BuiltinTransform"
@@ -765,7 +887,6 @@ pub(crate) fn load_transform(node: &Node) -> LoadResult<Transform> {
         | b"DisplayViewTransform"
         | b"FileTransform"
         | b"LookTransform" => return Err(not_ported_yet(&ty, "WP 3.3i")),
-        b"GroupTransform" => return Err(not_ported_yet(&ty, "WP 3.3h")),
         b"AllocationTransform" => load_allocation_transform(node)?.into(),
         b"CDLTransform" => load_cdl(node)?.into(),
         b"ExponentTransform" => load_exponent(node)?.into(),
