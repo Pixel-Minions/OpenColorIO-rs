@@ -1004,7 +1004,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `AdjustRGBSlopes` differs too (MSVC's unrolled loop multiplies `slopes[i + 1] * adjust` or
   `adjust * slopes[i + 1]` by the knot's index), but no two different NaNs meet there.
 
-### I-140. A hue-adjust 1D LUT resampled on a domain renders green with red's curve
+### I-150. A hue-adjust 1D LUT resampled on a domain renders green with red's curve
 
 - **Upstream:** `Lut1DOpData::Compose` evaluates the second LUT, hue adjust included, on the
   entries of a lookup domain, whose three channels are equal (`ComposeVec`, `EvalTransform`;
