@@ -359,8 +359,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **A fix:** one wording with the line for every unknown key; one space; the node type's
   name.
 - **Status:** matched in `p3-yaml-load-1` (3.3g: the Log, Matrix and Range loaders; 3.3h: the
-  ExponentWithLinear loader; the FixedFunction and grading loaders with their cards), checked
-  against the wheel in `crates/ocio/src/ocio_yaml_oracle_tests.rs`.
+  ExponentWithLinear loader; 3.3i2: the FixedFunction loader; the grading loaders with Phase 5),
+  checked against the wheel in `crates/ocio/src/ocio_yaml_oracle_tests.rs`.
 
 ### I-141. A transform an alias names is loaded again at each use
 

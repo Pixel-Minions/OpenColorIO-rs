@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 
 use ocio_ops::logging::{reset_to_default_logging_function, set_logging_function};
-use ocio_ops::open_color_types::{CdlStyle, NegativeStyle};
+use ocio_ops::open_color_types::{CdlStyle, FixedFunctionStyle, NegativeStyle};
 use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle::BatchCall;
@@ -29,9 +29,10 @@ use serde_json::{Value, json};
 use super::*;
 use crate::yaml_cpp::parse::load;
 
-/// The config around a case: the case's text follows `to_scene_reference: ` on line 7, so a
-/// case written on one line is on line 7, as the messages report it.
-const HEAD: &[u8] = b"ocio_profile_version: 2\n\
+/// The config around a case, after its version: the case's text follows
+/// `to_scene_reference: ` on line 7, so a case written on one line is on line 7, as the
+/// messages report it.
+const HEAD: &[u8] = b"\n\
 roles: {default: raw}\n\
 \n\
 colorspaces:\n  \
@@ -43,9 +44,14 @@ to_scene_reference: ";
 /// @ v2.5.2).
 const READ_ERROR: &[u8] = b"Error: Loading the OCIO profile failed. ";
 
-/// The config of a case.
+/// The version 2 config of a case.
 pub(super) fn config_text(case: &[u8]) -> Vec<u8> {
-    [HEAD, case, b"\n"].concat()
+    config_text_v(b"2", case)
+}
+
+/// The config of a case, of the profile version `version`.
+fn config_text_v(version: &[u8], case: &[u8]) -> Vec<u8> {
+    [b"ocio_profile_version: ", version, HEAD, case, b"\n"].concat()
 }
 
 /// Serializes the tests that replace the logging function.
@@ -84,9 +90,17 @@ pub(super) enum Loaded {
 /// node `colorspaces[0]["to_scene_reference"]`, skipped when it is null (OCIOYaml.cpp:3443,
 /// 3523-3533 @ v2.5.2).
 pub(super) fn port_load(case: &[u8]) -> (Loaded, Vec<Vec<u8>>) {
+    port_load_v(b"2", case)
+}
+
+/// [`port_load`] in a config of the profile version `version`. The color space keeps a copy of
+/// the transform (`ColorSpace::setTransform`, ColorSpace.cpp:476-490 @ v2.5.2): upstream's
+/// `createEditableCopy`, which validates a FixedFunctionTransform (the port's
+/// `ColorSpace::set_transform` doesn't yet: the test copies it so).
+fn port_load_v(version: &[u8], case: &[u8]) -> (Loaded, Vec<Vec<u8>>) {
     capture_log(|| {
         let failed = |what: Vec<u8>| Loaded::Error([READ_ERROR, &what].concat());
-        let doc = match load(&config_text(case)) {
+        let doc = match load(&config_text_v(version, case)) {
             Ok(doc) => doc,
             Err(e) => return failed(LoadError::from(e).what()),
         };
@@ -99,6 +113,10 @@ pub(super) fn port_load(case: &[u8]) -> (Loaded, Vec<Vec<u8>>) {
             return Loaded::Transform(None);
         }
         match load_transform(&node) {
+            Ok(Transform::FixedFunction(t)) => match t.create_editable_copy() {
+                Ok(copy) => Loaded::Transform(Some(copy.into())),
+                Err(e) => failed(e.what().to_vec()),
+            },
             Ok(t) => Loaded::Transform(Some(t)),
             Err(e) => failed(e.what()),
         }
@@ -108,13 +126,18 @@ pub(super) fn port_load(case: &[u8]) -> (Loaded, Vec<Vec<u8>>) {
 /// The config call of a case: the config from its text, then the color space's transform,
 /// stored as `t`, and `more` calls.
 fn request(case: &[u8], more: &[Value]) -> Value {
+    request_v(b"2", case, more)
+}
+
+/// [`request`] in a config of the profile version `version`.
+fn request_v(version: &[u8], case: &[u8], more: &[Value]) -> Value {
     let mut calls = vec![
         json!({"call": "getColorSpace", "args": ["raw"], "as": "cs"}),
         json!({"call": "getTransform", "on": "cs",
                "args": [{"enum": "COLORSPACE_DIR_TO_REFERENCE"}], "as": "t"}),
     ];
     calls.extend_from_slice(more);
-    json!({"config": {"yaml": {"bytes": hex(&config_text(case))}}, "calls": calls})
+    json!({"config": {"yaml": {"bytes": hex(&config_text_v(version, case))}}, "calls": calls})
 }
 
 fn run(requests: Vec<Value>) -> Vec<Value> {
@@ -146,6 +169,36 @@ pub(super) fn bytes_out(v: &[u8]) -> Value {
 /// Floats as the oracle writes a list of them.
 pub(super) fn f64s(values: &[f64]) -> Value {
     Value::Array(values.iter().map(|&v| f64_out(v)).collect())
+}
+
+/// A fixed function style's name in PyOpenColorIO.
+fn fixed_function_style_name(style: FixedFunctionStyle) -> &'static str {
+    use FixedFunctionStyle::*;
+    match style {
+        AcesRedMod03 => "FIXED_FUNCTION_ACES_RED_MOD_03",
+        AcesRedMod10 => "FIXED_FUNCTION_ACES_RED_MOD_10",
+        AcesGlow03 => "FIXED_FUNCTION_ACES_GLOW_03",
+        AcesGlow10 => "FIXED_FUNCTION_ACES_GLOW_10",
+        AcesDarkToDim10 => "FIXED_FUNCTION_ACES_DARK_TO_DIM_10",
+        Rec2100Surround => "FIXED_FUNCTION_REC2100_SURROUND",
+        RgbToHsv => "FIXED_FUNCTION_RGB_TO_HSV",
+        XyzToXyy => "FIXED_FUNCTION_XYZ_TO_xyY",
+        XyzToUvy => "FIXED_FUNCTION_XYZ_TO_uvY",
+        XyzToLuv => "FIXED_FUNCTION_XYZ_TO_LUV",
+        AcesGamutMap02 => "FIXED_FUNCTION_ACES_GAMUTMAP_02",
+        AcesGamutMap07 => "FIXED_FUNCTION_ACES_GAMUTMAP_07",
+        AcesGamutComp13 => "FIXED_FUNCTION_ACES_GAMUT_COMP_13",
+        LinToPq => "FIXED_FUNCTION_LIN_TO_PQ",
+        LinToGammaLog => "FIXED_FUNCTION_LIN_TO_GAMMA_LOG",
+        LinToDoubleLog => "FIXED_FUNCTION_LIN_TO_DOUBLE_LOG",
+        AcesOutputTransform20 => "FIXED_FUNCTION_ACES_OUTPUT_TRANSFORM_20",
+        AcesRgbToJmh20 => "FIXED_FUNCTION_ACES_RGB_TO_JMH_20",
+        AcesTonescaleCompress20 => "FIXED_FUNCTION_ACES_TONESCALE_COMPRESS_20",
+        AcesGamutCompress20 => "FIXED_FUNCTION_ACES_GAMUT_COMPRESS_20",
+        RgbToHsyLin => "FIXED_FUNCTION_RGB_TO_HSY_LIN",
+        RgbToHsyLog => "FIXED_FUNCTION_RGB_TO_HSY_LOG",
+        RgbToHsyVid => "FIXED_FUNCTION_RGB_TO_HSY_VID",
+    }
 }
 
 /// A CDL style as the oracle writes it.
@@ -250,6 +303,14 @@ pub(super) fn getters(t: &Transform) -> Vec<(&'static str, Value)> {
                 "getSkipColorSpaceConversion",
                 json!(t.skip_color_space_conversion()),
             ));
+        }
+        Transform::FixedFunction(t) => {
+            out.push((
+                "getStyle",
+                json!({"enum": fixed_function_style_name(t.style())}),
+            ));
+            out.push(("getParams", f64s(&t.params())));
+            out.push(name(t.format_metadata()));
         }
         Transform::Group(t) => {
             out.push(name(t.format_metadata()));
@@ -370,8 +431,14 @@ fn wheel_error(config: &Value) -> Vec<u8> {
 
 /// Checks each case against the wheel; panics listing every case that differs.
 pub(super) fn check(cases: &[&[u8]]) {
-    let ported: Vec<(Loaded, Vec<Vec<u8>>)> = cases.iter().map(|c| port_load(c)).collect();
-    let wheel = run(cases.iter().map(|c| request(c, &[])).collect());
+    check_v(b"2", cases);
+}
+
+/// [`check`] in configs of the profile version `version`.
+fn check_v(version: &[u8], cases: &[&[u8]]) {
+    let ported: Vec<(Loaded, Vec<Vec<u8>>)> =
+        cases.iter().map(|c| port_load_v(version, c)).collect();
+    let wheel = run(cases.iter().map(|c| request_v(version, c, &[])).collect());
 
     let mut failures = Vec::new();
     let mut second: Vec<(usize, Vec<(&'static str, Value)>)> = Vec::new();
@@ -435,7 +502,7 @@ pub(super) fn check(cases: &[&[u8]]) {
 
     let wheel = run(second
         .iter()
-        .map(|(i, g)| request(cases[*i], &getter_calls(g)))
+        .map(|(i, g)| request_v(version, cases[*i], &getter_calls(g)))
         .collect());
     for ((i, g), w) in second.iter().zip(&wheel) {
         let label = String::from_utf8_lossy(cases[*i]);
@@ -981,4 +1048,67 @@ fn look_transforms_load_as_in_the_wheel() {
         b"!<LookTransform> {src: a, skip_color_space_conversion: true}",
         b"!<LookTransform> {looks: a, looks: b}",
     ]);
+}
+
+/// The FixedFunctionTransform's styles in each spelling, the ACES 2 styles' warning, its
+/// parameters, the styles that are always forward set after an inverse direction, and its
+/// errors (a missing style, an unknown one).
+#[test]
+fn fixed_function_transforms_load_as_in_the_wheel() {
+    let mut cases: Vec<Vec<u8>> = [
+        "ACES_RedMod03",
+        "aces_redmod10",
+        "ACES_GLOW03",
+        "ACES_Glow10",
+        "ACES_DarkToDim10",
+        "ACES_GamutComp13",
+        "ACES2_OutputTransform",
+        "ACES2_RGB_TO_JMh",
+        "ACES2_TonescaleCompress",
+        "ACES2_GamutCompress",
+        "REC2100_Surround",
+        "RGB_TO_HSV",
+        "XYZ_TO_xyY",
+        "XYZ_TO_uvY",
+        "XYZ_TO_LUV",
+        "Lin_TO_PQ",
+        "Lin_TO_GammaLog",
+        "Lin_TO_DoubleLog",
+        "RGB_TO_HSY_LIN",
+        "RGB_TO_HSY_LOG",
+        "RGB_TO_HSY_VID",
+        "ACES_GamutMap02",
+        "ACES_GamutMap07",
+        "foo",
+    ]
+    .iter()
+    .map(|s| format!("!<FixedFunctionTransform> {{style: {s}}}").into_bytes())
+    .collect();
+    cases.extend(
+        [
+            &b"!<FixedFunctionTransform> {}"[..],
+            b"!<FixedFunctionTransform> {params: [1, 2]}",
+            b"!<FixedFunctionTransform> {style: ACES_GamutComp13, params: [1.147, 1.264, 1.312, \
+              0.815, 0.803, 0.880, 1.2]}",
+            b"!<FixedFunctionTransform> {style: REC2100_Surround, params: [0.78]}",
+            b"!<FixedFunctionTransform> {style: REC2100_Surround, params: []}",
+            b"!<FixedFunctionTransform> {style: REC2100_Surround, params: 0.78}",
+            b"!<FixedFunctionTransform> {style: REC2100_Surround, params: [a]}",
+            b"!<FixedFunctionTransform> {direction: inverse, style: RGB_TO_HSV}",
+            b"!<FixedFunctionTransform> {style: RGB_TO_HSV, direction: inverse}",
+            b"!<FixedFunctionTransform> {direction: inverse, style: XYZ_TO_LUV}",
+            b"!<FixedFunctionTransform> {direction: inverse, style: ACES_Glow10}",
+            b"!<FixedFunctionTransform> {style: \"aces2_outputtransform\0x\"}",
+            b"!<FixedFunctionTransform> {style: [ACES_Glow10]}",
+            b"!<FixedFunctionTransform> {style: ACES_Glow10, name: ff, foo: 1}",
+            b"!<FixedFunctionTransform> {style: ACES_Glow10, style: ACES_Glow03}",
+            b"!<FixedFunctionTransform>\n      params: [1]\n      foo: 2",
+        ]
+        .iter()
+        .map(|c| c.to_vec()),
+    );
+    let refs: Vec<&[u8]> = cases.iter().map(Vec::as_slice).collect();
+    // Version 2.5: the config refuses the styles of later versions in older ones
+    // (`Config::Impl::checkVersionConsistency`, a config check after loading).
+    check_v(b"2.5", &refs);
 }
