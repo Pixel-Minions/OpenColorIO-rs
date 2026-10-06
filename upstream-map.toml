@@ -173,7 +173,7 @@ path = "src/OpenColorIO/Config.cpp"
 kind = "src"
 target = ["crates/ocio/src/config.rs"]
 status = "partial"
-note = "p1-transforms T0: CreateRaw's version and context, getMajorVersion, getMinorVersion, getCurrentContext; p1-transforms-fam2 (1.8d): setMajorVersion, which empties the processor cache (resetCacheIDs); 1.8g: the processor cache, its flags (get/setProcessorCacheFlags, clearProcessorCache, the copy) and getProcessor of a transform (with a context, a direction, or neither), its key and its fallback. p3-config-1 3.4d: Config::Create and Impl's constructor (the environment's active displays, views and inactive color spaces), the state, resetCacheIDs, the copy (createEditableCopy), LookupEnvironment, setMinorVersion, setVersion, name, description, family separator, environment variables and mode, loadEnvironment, search paths, working dir; CreateRaw built directly with its version and its environment (LOAD_ALL); p3-config-1 (C5): CreateRaw starts from Config::Create, so it reads the environment's lists and fails as Create does. p3-config-2: getCurrentContext returns a CurrentContext the config shares, so a context taken earlier sees later changes (owner decision 2026-10-06); a change through it (CurrentContext::update, hidden, for the Python binding, which casts the constness away) is the config's and keeps its processor cache, so getSearchPath, getSearchPath(index) and getWorkingDir return owned bytes. p3-config-2 3.4h: the displays and views (3332-3815, 4388-4446: isViewShared, addSharedView, removeSharedView, clearSharedViews, getDefaultDisplay, getNumDisplays, getDisplay, getDefaultView both ways, getNumViews and getView by display, by color space and by type, AreViewsEqual, getDisplayView*, hasView, addDisplaySharedView, addDisplayView both ways, removeDisplayView, clearDisplays), GetViewNames, Impl::getViews, getView, getActiveViews, getFilteredViews without the viewing rules (a config has none until 3.9e; p3-rules adds the rule branch), updateDisplayCache; CreateRaw's display. p3-config-2 3.4i: the virtual display (3816-4102: hasVirtualView, isVirtualViewShared, addVirtualDisplayView, addVirtualDisplaySharedView, getVirtualDisplayNumViews, getVirtualDisplayView, AreVirtualViewsEqual, getVirtualDisplayView*, removeVirtualDisplayView, clearVirtualDisplay), the active displays and views (4133-4331), getNumDisplaysAll, getDisplayAll, getDisplayAllByName, isDisplayTemporary, setDisplayTemporary; instantiateDisplayFromMonitorName and instantiateDisplayFromICCProfile check their argument, then are not ported yet (SystemMonitor, Phase 9; the ICC reader, WP 4.7), with Impl::instantiateDisplay. p3-config-2 3.4j: the named transforms (3065-3325: getNumNamedTransforms, getNamedTransformNameByIndex both ways, getNamedTransform, getIndexForNamedTransform, addNamedTransform, removeNamedTransform with its early return (docs/improvements.md I-132), clearNamedTransforms), the looks (4473-4528, Impl::getLook), the view transforms and the default one (4532-4639, Impl::getViewTransform). p3-config-1 3.4f: the color spaces (getColorSpaces by category, getNumColorSpaces and getColorSpaceNameByIndex by reference type and visibility, getColorSpace, getCanonicalName, getIndexForColorSpace, addColorSpace, removeColorSpace, clearColorSpaces), the roles (setRole, getNumRoles, hasRole, getRoleName, getRoleColorSpace both ways), LookupRole, MatchReferenceType, Impl::getColorSpace, Impl::getNamedTransform and getNamedTransformIndex, buildInactiveNamesList and refreshActiveColorSpaces (5351-5460); CreateRaw's color space and role. p3-config-1 3.4g: setInactiveColorSpaces (Impl's too), getInactiveColorSpaces, isInactiveColorSpace, isStrictParsingEnabled, setStrictParsingEnabled, getDefaultLumaCoefs, setDefaultLumaCoefs, isColorSpaceLinear and Impl::getProcessorWithoutCaching; CreateRaw's strict parsing. Later: Impl::getColorSpaceIndex and hasColorSpace with their callers (parseColorSpaceFromString, 3.9d; validate, 3.8a); isColorSpaceUsed with the displays (3.4h) and the file rules (p3-rules); buildInactiveNamesList's INACTIVE_ALL with validate (3.8a); GetFileReferences with getCacheID (3.7d); upgradeToLatestVersion with the file rules (UpdateFileRulesFromV1ToV2, p3-rules); getProcessor's context-variables branch is a not-ported error until 3.2d, then usedContext->getCacheID() in the key; the key ignores the cache flags, a candidate I- entry once ExposureContrastTransform (dynamic properties) lands"
+note = "p1-transforms T0: CreateRaw's version and context, getMajorVersion, getMinorVersion, getCurrentContext; p1-transforms-fam2 (1.8d): setMajorVersion, which empties the processor cache (resetCacheIDs); 1.8g: the processor cache, its flags (get/setProcessorCacheFlags, clearProcessorCache, the copy) and getProcessor of a transform (with a context, a direction, or neither), its key and its fallback. p3-config-1 3.4d: Config::Create and Impl's constructor (the environment's active displays, views and inactive color spaces), the state, resetCacheIDs, the copy (createEditableCopy), LookupEnvironment, setMinorVersion, setVersion, name, description, family separator, environment variables and mode, loadEnvironment, search paths, working dir; CreateRaw built directly with its version and its environment (LOAD_ALL); p3-config-1 (C5): CreateRaw starts from Config::Create, so it reads the environment's lists and fails as Create does. p3-config-2: getCurrentContext returns a CurrentContext the config shares, so a context taken earlier sees later changes (owner decision 2026-10-06); a change through it (CurrentContext::update, hidden, for the Python binding, which casts the constness away) is the config's and keeps its processor cache, so getSearchPath, getSearchPath(index) and getWorkingDir return owned bytes. p3-rules 3.9f: getFileRules, setFileRules, getColorSpaceFromFilepath (both), filepathOnlyMatchesDefaultRule, parseColorSpaceFromString, upgradeToLatestVersion (fallible, U-55), isColorSpaceUsed, GetColorSpaceReferences, Impl::getAllInternalTransforms. p3-config-2 3.4h: the displays and views (3332-3815, 4388-4446: isViewShared, addSharedView, removeSharedView, clearSharedViews, getDefaultDisplay, getNumDisplays, getDisplay, getDefaultView both ways, getNumViews and getView by display, by color space and by type, AreViewsEqual, getDisplayView*, hasView, addDisplaySharedView, addDisplayView both ways, removeDisplayView, clearDisplays), GetViewNames, Impl::getViews, getView, getActiveViews, getFilteredViews without the viewing rules (a config has none until 3.9e; p3-rules adds the rule branch), updateDisplayCache; CreateRaw's display. p3-config-2 3.4i: the virtual display (3816-4102: hasVirtualView, isVirtualViewShared, addVirtualDisplayView, addVirtualDisplaySharedView, getVirtualDisplayNumViews, getVirtualDisplayView, AreVirtualViewsEqual, getVirtualDisplayView*, removeVirtualDisplayView, clearVirtualDisplay), the active displays and views (4133-4331), getNumDisplaysAll, getDisplayAll, getDisplayAllByName, isDisplayTemporary, setDisplayTemporary; instantiateDisplayFromMonitorName and instantiateDisplayFromICCProfile check their argument, then are not ported yet (SystemMonitor, Phase 9; the ICC reader, WP 4.7), with Impl::instantiateDisplay. p3-config-2 3.4j: the named transforms (3065-3325: getNumNamedTransforms, getNamedTransformNameByIndex both ways, getNamedTransform, getIndexForNamedTransform, addNamedTransform, removeNamedTransform with its early return (docs/improvements.md I-132), clearNamedTransforms), the looks (4473-4528, Impl::getLook), the view transforms and the default one (4532-4639, Impl::getViewTransform). p3-config-1 3.4f: the color spaces (getColorSpaces by category, getNumColorSpaces and getColorSpaceNameByIndex by reference type and visibility, getColorSpace, getCanonicalName, getIndexForColorSpace, addColorSpace, removeColorSpace, clearColorSpaces), the roles (setRole, getNumRoles, hasRole, getRoleName, getRoleColorSpace both ways), LookupRole, MatchReferenceType, Impl::getColorSpace, Impl::getNamedTransform and getNamedTransformIndex, buildInactiveNamesList and refreshActiveColorSpaces (5351-5460); CreateRaw's color space and role. p3-config-1 3.4g: setInactiveColorSpaces (Impl's too), getInactiveColorSpaces, isInactiveColorSpace, isStrictParsingEnabled, setStrictParsingEnabled, getDefaultLumaCoefs, setDefaultLumaCoefs, isColorSpaceLinear and Impl::getProcessorWithoutCaching; CreateRaw's strict parsing. Later: Impl::hasColorSpace and buildInactiveNamesList's INACTIVE_ALL with validate (3.8a); GetFileReferences with getCacheID (3.7d); getProcessor's context-variables branch is a not-ported error until 3.2d, then usedContext->getCacheID() in the key; the key ignores the cache flags, a candidate I- entry once ExposureContrastTransform (dynamic properties) lands"
 
 [[file]]
 path = "src/OpenColorIO/ConfigUtils.cpp"
@@ -219,15 +219,15 @@ note = "p3-rules 3.9e: CustomKeysContainer's getSize, getName, getValue, set, va
 path = "src/OpenColorIO/Display.cpp"
 kind = "src"
 target = ["crates/ocio/src/display.rs"]
-status = "partial"
-note = "p3-config-2 3.4h: View (UseDisplayName; useDisplayNameForColorspace comes with its callers, isColorSpaceUsed and validate), Display, FindView, AddView, FindDisplay, ComputeDisplays; OCIO_VIEW_USE_DISPLAY_NAME (Config.cpp:59)"
+status = "done"
+note = "p3-config-2 3.4h: View (UseDisplayName), Display, FindView, AddView, FindDisplay, ComputeDisplays; OCIO_VIEW_USE_DISPLAY_NAME (Config.cpp:59). p3-rules 3.9f: View::useDisplayNameForColorspace, with isColorSpaceUsed"
 
 [[file]]
 path = "src/OpenColorIO/Display.h"
 kind = "src"
 target = ["crates/ocio/src/display.rs"]
-status = "partial"
-note = "p3-config-2 3.4h: View (UseDisplayName; useDisplayNameForColorspace comes with its callers, isColorSpaceUsed and validate), Display, FindView, AddView, FindDisplay, ComputeDisplays; OCIO_VIEW_USE_DISPLAY_NAME (Config.cpp:59)"
+status = "done"
+note = "p3-config-2 3.4h: View (UseDisplayName), Display, FindView, AddView, FindDisplay, ComputeDisplays; OCIO_VIEW_USE_DISPLAY_NAME (Config.cpp:59). p3-rules 3.9f: View::useDisplayNameForColorspace, with isColorSpaceUsed"
 
 [[file]]
 path = "src/OpenColorIO/DynamicProperty.cpp"
@@ -255,14 +255,14 @@ path = "src/OpenColorIO/FileRules.cpp"
 kind = "src"
 target = ["crates/ocio/src/file_rules.rs"]
 status = "partial"
-note = "p3-rules 3.9e: SanitizeRegularExpression (with std_regex::regex_replace), ThrowInvalidRegex, ConvertToRegularExpression, BuildRegularExpression, ValidateRegularExpression (both), FileRule but its matches and validate, FileRules and Impl (the rule list, its getters and setters, custom keys, insert, remove, move, isDefault, operator<<). Later (3.9f): FileRule::matches and validate, getRuleFromFilepath, getColorSpaceFromFilepath, filepathOnlyMatchesDefaultRule, Impl::validate, UpdateFileRulesFromV1ToV2"
+note = "p3-rules 3.9e: SanitizeRegularExpression (with std_regex::regex_replace), ThrowInvalidRegex, ConvertToRegularExpression, BuildRegularExpression, ValidateRegularExpression (both), FileRule but its matches and validate, FileRules and Impl (the rule list, its getters and setters, custom keys, insert, remove, move, isDefault, operator<<). p3-rules 3.9f: FileRule::matches (regex_error as ExceptionKind::RegexError), getRuleFromFilepath, getColorSpaceFromFilepath, filepathOnlyMatchesDefaultRule, UpdateFileRulesFromV1ToV2 (fallible, U-55). Later: FileRule::validate and Impl::validate with Config::validate (3.8b)"
 
 [[file]]
 path = "src/OpenColorIO/FileRules.h"
 kind = "src"
 target = ["crates/ocio/src/file_rules.rs"]
 status = "partial"
-note = "p3-rules 3.9e: FileRules::Impl's state and DefaultAllowed; the rest with 3.9f"
+note = "p3-rules 3.9e-f: FileRules::Impl and its methods, UpdateFileRulesFromV1ToV2; Impl::validate with Config::validate (3.8b)"
 
 [[file]]
 path = "src/OpenColorIO/GPUProcessor.cpp"
@@ -505,8 +505,8 @@ note = "p3-context 3.5c: the declarations of the functions ported in parse_utils
 path = "src/OpenColorIO/PathUtils.cpp"
 kind = "src"
 target = ["crates/ocio/src/path_utils.rs"]
-status = "partial"
-note = "p3-context 3.5f: SetComputeHashFunction, ResetComputeHashFunction, GetFastFileHash and its cache, FileExists, ClearPathCaches, GetCwd (I-116, U-45), AbsPath. AdjustRightmost and ParseColorSpaceFromString come with the file rules (WP 3.9)"
+status = "done"
+note = "p3-context 3.5f: SetComputeHashFunction, ResetComputeHashFunction, GetFastFileHash and its cache, FileExists, ClearPathCaches, GetCwd (I-116, U-45), AbsPath; p3-rules 3.9f: AdjustRightmost and ParseColorSpaceFromString"
 
 [[file]]
 path = "src/OpenColorIO/PathUtils.h"
@@ -4273,7 +4273,8 @@ status = "todo"
 path = "tests/cpu/FileRules_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/file_rules_tests.rs"]
-status = "todo"
+status = "partial"
+note = "p3-rules 3.9f: config_read_only, config_insert_rule, pattern_error, with_defaults, extension_error, clone, isDefault. The others read YAML (3.3k), serialize (3.7b) or validate (3.8b)"
 
 [[file]]
 path = "tests/cpu/GpuShaderUtils_tests.cpp"

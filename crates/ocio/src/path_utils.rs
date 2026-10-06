@@ -2,16 +2,19 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Path helpers: a port of `src/OpenColorIO/PathUtils.cpp` @ v2.5.2, so far the file hashes
-//! and their cache, `FileExists`, the working directory (`GetCwd`) and `AbsPath`.
-//! `ParseColorSpaceFromString` comes with the file rules (WP 3.9).
+//! and their cache, `FileExists`, the working directory (`GetCwd`), `AbsPath` and
+//! `ParseColorSpaceFromString`.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, RwLock};
 
 use ocio_ops::exception::Result;
+use ocio_ops::open_color_types::{ColorSpaceVisibility, SearchReferenceSpaceType};
 use ocio_ops::platform::create_file_content_hash;
 use ocio_ops::utils::pystring::os_path;
+use ocio_ops::utils::string_utils::{c_str, lower, reverse_find};
 
+use crate::config::Config;
 use crate::context::Context;
 
 /// A function computing a file's hash from its path: empty when the file doesn't exist.
@@ -152,6 +155,99 @@ pub fn abs_path(path: &[u8]) -> Result<Vec<u8>> {
         p = os_path::join(&get_cwd()?, &p);
     }
     Ok(os_path::normpath(&p))
+}
+
+/// Moves the right end of the match of `name` at `colorspace_pos`, and keeps it when it is the
+/// rightmost so far, or as far right and longer.
+///
+/// Port of `AdjustRightmost` (src/OpenColorIO/PathUtils.cpp:162-180 @ v2.5.2).
+fn adjust_rightmost(
+    name: &[u8],
+    index: i32,
+    colorspace_pos: &mut i32,
+    right_most_color_pos: &mut i32,
+    right_most_colorspace: &mut Vec<u8>,
+    right_most_color_space_index: &mut i32,
+) {
+    // If we have found a match, move the pointer over to the right end
+    // of the substring.  This will allow us to find the longest name
+    // that matches the rightmost colorspace
+    *colorspace_pos = colorspace_pos.wrapping_add(name.len() as i32);
+
+    if (*colorspace_pos > *right_most_color_pos)
+        || ((*colorspace_pos == *right_most_color_pos)
+            && (name.len() > right_most_colorspace.len()))
+    {
+        *right_most_color_pos = *colorspace_pos;
+        *right_most_colorspace = name.to_vec();
+        *right_most_color_space_index = index;
+    }
+}
+
+/// The index, among all the config's color spaces, of the color space whose name or alias
+/// ends rightmost in `str` (ignoring case; the longest of those ending there); -1 for none.
+///
+/// Port of `ParseColorSpaceFromString` (src/OpenColorIO/PathUtils.cpp:182-225 @ v2.5.2). Its
+/// `-1` for a null string can't happen with a reference. Positions are `int`, as upstream
+/// casts them.
+pub(crate) fn parse_color_space_from_string(config: &Config, str: &[u8]) -> i32 {
+    // Search the entire filePath, including directory name (if provided)
+    // convert the filename to lowercase.
+    let fullstr = lower(c_str(str));
+
+    // See if it matches a LUT name.
+    // This is the position of the RIGHT end of the colorspace substring,
+    // not the left
+    let mut right_most_color_pos = -1;
+    let mut right_most_colorspace = Vec::new();
+    let mut right_most_color_space_index = -1;
+
+    // `(int)StringUtils::ReverseFind(...)`: `npos` is -1.
+    let reverse_find_int = |s: &[u8]| reverse_find(&fullstr, s).unwrap_or(usize::MAX) as i32;
+
+    // Find the right-most occcurance within the string for each colorspace.
+    let num =
+        config.num_color_spaces_with(SearchReferenceSpaceType::All, ColorSpaceVisibility::All);
+    for i in 0..num {
+        let csname = lower(config.color_space_name_by_index_with(
+            SearchReferenceSpaceType::All,
+            ColorSpaceVisibility::All,
+            i,
+        ));
+
+        // find right-most extension matched in filename
+        let mut colorspace_pos = reverse_find_int(&csname);
+        if colorspace_pos >= 0 {
+            adjust_rightmost(
+                &csname,
+                i,
+                &mut colorspace_pos,
+                &mut right_most_color_pos,
+                &mut right_most_colorspace,
+                &mut right_most_color_space_index,
+            );
+        }
+
+        let cs = config
+            .color_space(&csname)
+            .expect("a color space of the config");
+        let num_aliases = cs.num_aliases();
+        for j in 0..num_aliases {
+            let aliasname = lower(cs.alias(j));
+            let mut colorspace_pos = reverse_find_int(&aliasname);
+            if colorspace_pos >= 0 {
+                adjust_rightmost(
+                    &aliasname,
+                    i,
+                    &mut colorspace_pos,
+                    &mut right_most_color_pos,
+                    &mut right_most_colorspace,
+                    &mut right_most_color_space_index,
+                );
+            }
+        }
+    }
+    right_most_color_space_index
 }
 
 /// Held by the unit tests that change the hash function and by those that look for files, which

@@ -443,3 +443,22 @@ fn compare_displays_without_yaml() {
         assert!(cfg1.has_view("", "sview1"));
     }
 }
+
+/// Upgrading a version 1 config without a scene color space for its default file rule is an
+/// error, where upstream's `noexcept` function ends the program (U-55); the config is left as
+/// it was.
+#[test]
+fn upgrade_without_a_scene_color_space_is_refused() {
+    let _env = EnvGuard::new();
+    let mut config = Config::new().unwrap();
+    let mut cs = ColorSpace::with_reference_space(ReferenceSpaceType::Display);
+    cs.set_name("display_only");
+    config.add_color_space(&cs).unwrap();
+    config.set_inactive_color_spaces("display_only");
+    config.set_major_version(1).unwrap();
+    let rules = config.file_rules().to_bytes();
+
+    assert!(config.upgrade_to_latest_version().is_err());
+    assert_eq!(config.major_version(), 1);
+    assert_eq!(config.file_rules().to_bytes(), rules);
+}

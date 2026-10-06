@@ -34,6 +34,10 @@ pub enum ExceptionKind {
     /// `std::vector::resize` of the scanline rows, U-3). PyOpenColorIO raises it as
     /// `MemoryError`.
     BadAlloc,
+    /// `std::regex_error`, which `std::regex` raises for an expression it refuses or a match
+    /// past its limits, where OCIO lets it through (matching a file rule's path). PyOpenColorIO
+    /// raises it as `RuntimeError`.
+    RegexError,
 }
 
 /// An OpenColorIO error: upstream's exception type and its message, verbatim.
@@ -84,6 +88,16 @@ impl Exception {
     pub fn length_error(message: impl Into<Vec<u8>>) -> Self {
         Exception {
             kind: ExceptionKind::LengthError,
+            text: String::new(),
+            message: c_message(message),
+        }
+        .with_text()
+    }
+
+    /// A `std::regex_error` with `what()` = `msg`, up to its first NUL.
+    pub fn regex_error(message: impl Into<Vec<u8>>) -> Self {
+        Exception {
+            kind: ExceptionKind::RegexError,
             text: String::new(),
             message: c_message(message),
         }

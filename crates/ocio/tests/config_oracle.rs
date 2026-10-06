@@ -11,14 +11,15 @@
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use ocio::{
-    ColorSpace, ColorSpaceDirection, ColorSpaceVisibility, Config, CurrentContext, LogTransform,
-    Look, MatrixTransform, NamedTransform, NamedTransformVisibility, ReferenceSpaceType,
-    SearchReferenceSpaceType, Transform, TransformDirection, ViewTransform, ViewTransformDirection,
-    ViewType,
+    ColorSpace, ColorSpaceDirection, ColorSpaceVisibility, Config, CurrentContext, FileRules,
+    LogTransform, Look, MatrixTransform, NamedTransform, NamedTransformVisibility,
+    ReferenceSpaceType, SearchReferenceSpaceType, Transform, TransformDirection, ViewTransform,
+    ViewTransformDirection, ViewType,
 };
+use ocio_ops::logging::{LoggingFunction, reset_to_default_logging_function, set_logging_function};
 use ocio_ops::open_color_types::EnvironmentMode;
 use ocio_ops::platform::{MapEnv, set_thread_env_provider, setenv};
 use ocio_ops::utils::string_utils::compare;
@@ -447,6 +448,8 @@ struct Probes {
     /// Displays, and the views the getters ask them for.
     displays: Vec<Vec<u8>>,
     views: Vec<Vec<u8>>,
+    /// Paths the file rule getters match.
+    paths: Vec<Vec<u8>>,
 }
 
 /// Probes of names only.
@@ -463,6 +466,11 @@ fn probes(names: &[&[u8]], categories: &[&[u8]]) -> Probes {
 }
 
 impl Probes {
+    fn paths(mut self, paths: &[&[u8]]) -> Probes {
+        self.paths = paths.iter().map(|n| n.to_vec()).collect();
+        self
+    }
+
     fn displays(mut self, displays: &[&[u8]], views: &[&[u8]]) -> Probes {
         self.displays = displays.iter().map(|n| n.to_vec()).collect();
         self.views = views.iter().map(|n| n.to_vec()).collect();
@@ -1286,6 +1294,129 @@ fn transform_getters(probes: &Probes) -> Vec<Step> {
     out
 }
 
+/// A file rule for [`set_file_rules`]: a glob (name, color space, pattern, extension), a
+/// regular expression (name, color space, expression), or the path search rule.
+#[derive(Clone)]
+enum Rule {
+    Glob(&'static [u8], &'static [u8], &'static [u8], &'static [u8]),
+    Regex(&'static [u8], &'static [u8], &'static [u8]),
+    PathSearch,
+}
+
+/// Makes file rules (stored as `fr`) with `rules` before the default rule, whose color space
+/// is `default` (when given), and sets them on the config. The rules must insert.
+fn set_file_rules(rules: &[Rule], default: Option<&'static [u8]>) -> Vec<Step> {
+    let mut out = vec![step(
+        json!({"new": "FileRules", "as": "fr"}),
+        |_| json!({"result": object_out("FileRules", &FileRules::new().to_bytes())}),
+    )];
+    for (i, rule) in rules.iter().enumerate() {
+        let call = match rule {
+            Rule::Glob(n, c, p, e) => json!({"call": "insertRule", "on": "fr",
+                "args": [i, arg(n), arg(c), arg(p), arg(e)]}),
+            Rule::Regex(n, c, x) => json!({"call": "insertRule", "on": "fr",
+                "args": [i, arg(n), arg(c), arg(x)]}),
+            Rule::PathSearch => json!({"call": "insertPathSearchRule", "on": "fr", "args": [i]}),
+        };
+        out.push(step(call, |_| json!({"result": null})));
+    }
+    if let Some(d) = default {
+        out.push(step(
+            json!({"call": "setDefaultRuleColorSpace", "on": "fr", "args": [arg(d)]}),
+            |_| json!({"result": null}),
+        ));
+    }
+    let rules = rules.to_vec();
+    out.push(step(
+        json!({"call": "setFileRules", "args": [{"ref": "fr"}]}),
+        move |c| {
+            let mut fr = FileRules::new();
+            for (i, rule) in rules.iter().enumerate() {
+                let inserted = match rule {
+                    Rule::Glob(n, cs, p, e) => fr.insert_rule(i, n, cs, p, e),
+                    Rule::Regex(n, cs, x) => fr.insert_regex_rule(i, n, cs, x),
+                    Rule::PathSearch => fr.insert_path_search_rule(i),
+                };
+                inserted.expect("a rule the case inserts");
+            }
+            if let Some(d) = default {
+                fr.set_default_rule_color_space(d)
+                    .expect("a default color space");
+            }
+            c.set_file_rules(&fr);
+            json!({"result": null})
+        },
+    ));
+    out
+}
+
+fn upgrade_to_latest_version() -> Step {
+    step(json!({"call": "upgradeToLatestVersion"}), |c| {
+        unit_out(c.upgrade_to_latest_version())
+    })
+}
+
+/// A `std::regex_error`, as the binding raises it.
+fn regex_error_out(e: &ocio::Exception) -> Value {
+    match std::str::from_utf8(e.what()) {
+        Ok(_) => json!({"exception": {"type": "RuntimeError", "message": bytes_arg(e.what())}}),
+        Err(_) => json!({"undecodable": hex(e.what())}),
+    }
+}
+
+/// An error as the binding raises it.
+fn error_out(e: ocio::Exception) -> Value {
+    if e.kind() == ocio::ExceptionKind::RegexError {
+        regex_error_out(&e)
+    } else {
+        unit_out(Err(e))
+    }
+}
+
+/// The getters of the file rules: the config's rules, and for each probe path the color space
+/// and rule that match it, whether only the default rule does, and the color space parsed from
+/// it; for each probe name, `isColorSpaceUsed`.
+fn file_rule_getters(probes: &Probes) -> Vec<Step> {
+    let mut out = vec![step(
+        json!({"call": "getFileRules"}),
+        |c| json!({"result": object_out("FileRules", &c.file_rules().to_bytes())}),
+    )];
+    for path in &probes.paths {
+        let p = path.clone();
+        out.push(step(
+            json!({"call": "getColorSpaceFromFilepath", "args": [arg(path)]}),
+            move |c| match c.color_space_from_filepath_with_index(&p) {
+                Ok((cs, i)) => match std::str::from_utf8(&cs) {
+                    Ok(_) => json!({"result": [bytes_arg(&cs), i]}),
+                    Err(_) => json!({"undecodable": hex(&cs)}),
+                },
+                Err(e) => error_out(e),
+            },
+        ));
+        let p = path.clone();
+        out.push(step(
+            json!({"call": "filepathOnlyMatchesDefaultRule", "args": [arg(path)]}),
+            move |c| match c.filepath_only_matches_default_rule(&p) {
+                Ok(b) => json!({ "result": b }),
+                Err(e) => error_out(e),
+            },
+        ));
+        let p = path.clone();
+        out.push(step(
+            json!({"call": "parseColorSpaceFromString", "args": [arg(path)]}),
+            move |c| text_out(c.parse_color_space_from_string(&p)),
+        ));
+    }
+    for name in &probes.names {
+        let n = name.clone();
+        out.push(step(
+            json!({"call": "isColorSpaceUsed", "args": [arg(name)]}),
+            move |c| json!({"result": c.is_color_space_used(&n)}),
+        ));
+    }
+    out
+}
+
 /// The config's getters, then its context's `repr()`.
 fn getters() -> Vec<Step> {
     vec![
@@ -1345,6 +1476,7 @@ fn all_getters(probes: &Probes) -> Vec<Step> {
     out.extend(display_getters(probes));
     out.extend(virtual_display_getters(probes));
     out.extend(transform_getters(probes));
+    out.extend(file_rule_getters(probes));
     out
 }
 
@@ -1353,6 +1485,42 @@ const COPY: &str = "copy";
 
 // ---------------------------------------------------------------------------------------------
 // The check
+
+/// The port's log while a case runs: OCIO's logging function is the process's, so the cases
+/// of this binary log one at a time.
+struct LogCapture {
+    messages: Arc<Mutex<Vec<Vec<u8>>>>,
+    _lock: MutexGuard<'static, ()>,
+}
+
+static LOGGING: Mutex<()> = Mutex::new(());
+
+impl LogCapture {
+    fn start() -> LogCapture {
+        let lock = LOGGING.lock().unwrap_or_else(|e| e.into_inner());
+        let messages = Arc::new(Mutex::new(Vec::new()));
+        let sink = messages.clone();
+        let function: LoggingFunction = Arc::new(move |m: &[u8]| {
+            sink.lock().unwrap().push(m.to_vec());
+        });
+        set_logging_function(Some(function)).expect("a logging function");
+        LogCapture {
+            messages,
+            _lock: lock,
+        }
+    }
+
+    /// The messages logged since the last call.
+    fn take(&self) -> Vec<Vec<u8>> {
+        std::mem::take(&mut *self.messages.lock().unwrap())
+    }
+}
+
+impl Drop for LogCapture {
+    fn drop(&mut self) {
+        reset_to_default_logging_function();
+    }
+}
 
 /// Runs `steps` (each followed by the getters) on a new config in the environment `env`, on
 /// both sides, and compares every outcome. `steps` may hold `None`: a copy of the config.
@@ -1420,12 +1588,12 @@ fn check_items(label: &str, source: &str, env: Env, items: Vec<Item>, probes: &P
         &[],
     );
     let wheel = &response.result;
-    assert!(log(&wheel["config_log"]).is_empty(), "{label}: {wheel}");
 
     set_thread_env_provider(Some(Arc::new(MapEnv::default())));
     for (name, value) in env {
         setenv(name, value).expect("a request's variable");
     }
+    let capture = LogCapture::start();
     let made = match source {
         "new" => Config::new(),
         "raw" => Config::create_raw().map(|c| Arc::try_unwrap(c).expect("a config of its own")),
@@ -1453,13 +1621,33 @@ fn check_items(label: &str, source: &str, env: Env, items: Vec<Item>, probes: &P
     };
     let results = wheel["calls"].as_array().expect("the calls' results");
     assert_eq!(results.len(), sequence.len(), "{label}");
+    assert_eq!(
+        capture.take(),
+        log(&wheel["config_log"]),
+        "{label}: the logs of making the config"
+    );
     for (i, (s, w)) in sequence.iter().zip(results).enumerate() {
-        assert!(log(&w["log"]).is_empty(), "{label}, call {i}: {w}");
+        let wheel_log = log(&w["log"]);
         let mut w = w.clone();
         w.as_object_mut().expect("a call's outcome").remove("log");
         match s {
             Some(s) => {
                 let port = (s.port)(&mut config);
+                let port_log = capture.take();
+                if port_log != wheel_log {
+                    failures.push(format!(
+                        "{label}, call {i} {}: wheel log {:?}, port log {:?}",
+                        s.call,
+                        wheel_log
+                            .iter()
+                            .map(|m| String::from_utf8_lossy(m))
+                            .collect::<Vec<_>>(),
+                        port_log
+                            .iter()
+                            .map(|m| String::from_utf8_lossy(m))
+                            .collect::<Vec<_>>()
+                    ));
+                }
                 if port != w {
                     failures.push(format!(
                         "{label}, call {i} {}: wheel {w}, port {port}",
@@ -2848,4 +3036,149 @@ fn a_change_through_the_held_context_is_the_configs() {
     }
     set_thread_env_provider(None);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// File rules on a config: the color space and rule of each path (globs, expressions, the path
+/// search rule, which takes the color space it finds, the default rule), the paths only the
+/// default rule matches, strict and lenient parsing of color spaces from paths; the color
+/// spaces a config uses; a version 1 config upgraded (its file rules get the path search rule
+/// and a default color space).
+#[test]
+fn file_rules_on_a_config_match_the_wheel() {
+    use Rule::{Glob, PathSearch, Regex};
+    let to = ColorSpaceDirection::ToReference;
+    let cst = |s: &[u8], d: &[u8]| {
+        let mut t = ocio::ColorSpaceTransform::new();
+        t.set_src(s);
+        t.set_dst(d);
+        (
+            json!({"class": "ColorSpaceTransform", "calls": [["setSrc", String::from_utf8_lossy(s)],
+                ["setDst", String::from_utf8_lossy(d)]]}),
+            Transform::from(t),
+        )
+    };
+    let with = |c: Cs, (spec, t): (Value, Transform), dir| c.transform(spec, t, dir);
+    let items: Vec<Item> = vec![
+        add_color_space(cs(b"raw").data()).into(),
+        add_color_space(cs(b"lin_srgb").alias(b"linear")).into(),
+        add_color_space(cs(b"srgb")).into(),
+        add_color_space(cs(b"acescg").category(b"c")).into(),
+        add_color_space(with(cs(b"used_by_cst"), cst(b"$SRC", b"lin_srgb"), to)).into(),
+        set_role(b"default", Some(b"raw")).into(),
+        add_environment_var(b"SRC", Some(b"acescg")).into(),
+        set_file_rules(
+            &[
+                Glob(b"exr", b"lin_srgb", b"*", b"exr"),
+                Glob(b"jpg", b"srgb", b"*render*", b"jp[e]g"),
+                Regex(b"tiff", b"acescg", b".*\\.tiff?$"),
+                PathSearch,
+                Glob(b"nl", b"srgb", b"\n.*", b"png"),
+            ],
+            None,
+        )
+        .into(),
+        set_strict_parsing_enabled(false).into(),
+        Item::Copy,
+        set_file_rules(
+            &[PathSearch, Glob(b"any", b"raw", b"*.*", b"*")],
+            Some(b"srgb"),
+        )
+        .into(),
+        set_strict_parsing_enabled(true).into(),
+        set_role(b"default", None).into(),
+    ];
+    let probes = probes(
+        &[
+            b"raw",
+            b"lin_srgb",
+            b"srgb",
+            b"acescg",
+            b"default",
+            b"unknown",
+        ],
+        &[],
+    )
+    .paths(&[
+        b"/a/b/file.exr",
+        b"/a/b/FILE.EXR",
+        b"/a/render/x.jpeg",
+        b"/a/render/x.jpg",
+        b"img.tif",
+        b"img.TIFF",
+        b"/shots/acescg/linear_x.dpx",
+        b"/shots/x_lin_srgb_srgb.dpx",
+        b"nothing.dpx",
+        b"\nfoo.png",
+        b"
+foo.png",
+        b"
+.foo.png",
+        b"",
+    ]);
+    check_items("file rules", "new", &[], items, &probes);
+}
+
+/// A version 1 config upgraded to the latest version: its file rules get the path search rule
+/// and a default color space (the default role's, `raw` when data, the first data one, the
+/// first active one, or the first one, with a warning); without a color space it is refused.
+#[test]
+fn upgrades_match_the_wheel() {
+    let cases: Vec<(&str, Vec<Item>)> = vec![
+        ("v2", vec![upgrade_to_latest_version().into()]),
+        (
+            "default role",
+            vec![
+                add_color_space(cs(b"a")).into(),
+                set_role(b"default", Some(b"a")).into(),
+                set_major_version(1).into(),
+                upgrade_to_latest_version().into(),
+                upgrade_to_latest_version().into(),
+            ],
+        ),
+        (
+            "raw",
+            vec![
+                add_color_space(cs(b"a")).into(),
+                add_color_space(cs(b"RAW").data()).into(),
+                set_major_version(1).into(),
+                upgrade_to_latest_version().into(),
+            ],
+        ),
+        (
+            "first data",
+            vec![
+                add_color_space(cs(b"a")).into(),
+                add_color_space(cs(b"raw")).into(),
+                add_color_space(cs(b"d").display().data()).into(),
+                add_color_space(cs(b"e").data()).into(),
+                set_major_version(1).into(),
+                upgrade_to_latest_version().into(),
+            ],
+        ),
+        (
+            "first active",
+            vec![
+                add_color_space(cs(b"d").display()).into(),
+                add_color_space(cs(b"b")).into(),
+                set_inactive_color_spaces(b"d").into(),
+                set_major_version(1).into(),
+                set_file_rules(&[Rule::PathSearch], None).into(),
+                upgrade_to_latest_version().into(),
+            ],
+        ),
+        (
+            "first",
+            vec![
+                add_color_space(cs(b"d").display()).into(),
+                add_color_space(cs(b"b")).into(),
+                set_inactive_color_spaces(b"d, b").into(),
+                set_major_version(1).into(),
+                upgrade_to_latest_version().into(),
+            ],
+        ),
+    ];
+    for (label, items) in cases {
+        let probes = probes(&[b"a", b"b", b"d"], &[]).paths(&[b"x_a.exr", b"b.exr"]);
+        check_items(label, "new", &[], items, &probes);
+    }
 }
