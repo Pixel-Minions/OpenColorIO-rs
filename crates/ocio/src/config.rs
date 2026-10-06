@@ -11,13 +11,17 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use ocio_ops::exception::{Exception, Result};
+use ocio_ops::image_desc::PackedImageDesc;
+use ocio_ops::math_utils::equal_with_abs_error;
 use ocio_ops::open_color_types::{
-    Allocation, BitDepth, ColorSpaceVisibility, EnvironmentMode, ReferenceSpaceType,
-    SearchReferenceSpaceType, TransformDirection,
+    Allocation, BitDepth, ChannelOrdering, ColorSpaceDirection, ColorSpaceVisibility,
+    EnvironmentMode, OptimizationFlags, ReferenceSpaceType, SearchReferenceSpaceType,
+    TransformDirection,
 };
 use ocio_ops::parse_utils::{ROLE_DEFAULT, split_string_env_style};
 use ocio_ops::platform::{getenv, is_env_present};
-use ocio_ops::utils::string_utils::{StringVec, c_str, lower, split, trim};
+use ocio_ops::utils::pystring;
+use ocio_ops::utils::string_utils::{StringVec, c_str, compare, lower, split, trim};
 
 use crate::caching::{OCIO_DISABLE_CACHE_FALLBACK, ProcessorCache, std_hash_string};
 use crate::color_space::ColorSpace;
@@ -350,20 +354,22 @@ impl Config {
         Arc::get_mut(&mut self.context).expect("a context of its own")
     }
 
-    /// The raw config: version 2.0, its one color space `raw` and the role `default`, its
-    /// display, and the whole environment in its context (its profile has no `environment`
-    /// section). So far its version, color space, role and environment; the rest of its state
-    /// comes with the displays and the file rules, built directly until the YAML reader parses
-    /// upstream's profile (3.7d).
+    /// The raw config: version 2.0, no strict parsing, its one color space `raw` and the role
+    /// `default`, its display, and the whole environment in its context (its profile has no
+    /// `environment` section). So far its version, strict parsing, color space, role and
+    /// environment; the rest of its state comes with the displays and the file rules, built
+    /// directly until the YAML reader parses upstream's profile (3.7d).
     ///
     /// Port of `Config::CreateRaw` (src/OpenColorIO/Config.cpp:74-92, 1127-1133 @ v2.5.2), in
-    /// part, with what `OCIOYaml`'s `load` sets from that profile (`setVersion`, `setRole`, the
+    /// part, with what `OCIOYaml`'s `load` sets from that profile (`setVersion`,
+    /// `setStrictParsingEnabled`, `setRole`, the
     /// color space's setters and `addColorSpace`, `setEnvironmentMode`, `loadEnvironment`) and
     /// `Config::Impl::Read`'s refresh of the active color spaces (Config.cpp:5545-5561).
     #[doc(alias = "CreateRaw")]
     pub fn create_raw() -> Arc<Config> {
         let mut config = Config::blank();
         config.minor_version = 0;
+        config.set_strict_parsing_enabled(false);
         config
             .set_role(ROLE_DEFAULT, Some(b"raw"))
             .expect("the raw config's role");
@@ -1285,6 +1291,212 @@ impl Config {
             return &[];
         }
         lookup_role(&self.roles, role_name)
+    }
+
+    /// Sets the config's list of inactive color spaces and named transforms (trimmed), which
+    /// supersedes the environment's: an API request.
+    ///
+    /// Port of `Config::setInactiveColorSpaces` and `Config::Impl::setInactiveColorSpaces`
+    /// (src/OpenColorIO/Config.cpp:766-778, 2551-2554 @ v2.5.2).
+    #[doc(alias = "setInactiveColorSpaces")]
+    pub fn set_inactive_color_spaces(&mut self, inactive_color_spaces: impl AsRef<[u8]>) {
+        self.inactive_color_space_names_conf = trim(c_str(inactive_color_spaces.as_ref())).to_vec();
+
+        // An API request must always supersede the two other lists. Filling the
+        // m_inactiveColorSpaceNamesAPI list highlights the API request precedence.
+        self.inactive_color_space_names_api = self.inactive_color_space_names_conf.clone();
+
+        self.reset_cache_ids();
+        self.refresh_active_color_spaces();
+    }
+
+    /// The config's list of inactive color spaces, as set (not the environment's).
+    ///
+    /// Port of `Config::getInactiveColorSpaces` (src/OpenColorIO/Config.cpp:2556-2559 @
+    /// v2.5.2).
+    #[doc(alias = "getInactiveColorSpaces")]
+    pub fn inactive_color_spaces(&self) -> &[u8] {
+        &self.inactive_color_space_names_conf
+    }
+
+    /// Whether the config's list of inactive color spaces, split on `", "`, holds `colorspace`,
+    /// ignoring case. Only the config's list counts, as written: not the environment's, and
+    /// neither aliases nor roles.
+    ///
+    /// Port of `Config::isInactiveColorSpace` (src/OpenColorIO/Config.cpp:2561-2575 @ v2.5.2).
+    #[doc(alias = "isInactiveColorSpace")]
+    pub fn is_inactive_color_space(&self, colorspace: impl AsRef<[u8]>) -> bool {
+        let colorspace = c_str(colorspace.as_ref());
+        let svec = pystring::split(&self.inactive_color_space_names_conf, b", ", -1);
+
+        // Colorspace is inactive.
+        svec.iter().any(|s| compare(colorspace, s))
+    }
+
+    /// Port of `Config::isStrictParsingEnabled` (src/OpenColorIO/Config.cpp:2964-2967 @
+    /// v2.5.2).
+    #[doc(alias = "isStrictParsingEnabled")]
+    pub fn is_strict_parsing_enabled(&self) -> bool {
+        self.strict_parsing
+    }
+
+    /// Port of `Config::setStrictParsingEnabled` (src/OpenColorIO/Config.cpp:2969-2975 @
+    /// v2.5.2).
+    #[doc(alias = "setStrictParsingEnabled")]
+    pub fn set_strict_parsing_enabled(&mut self, enabled: bool) {
+        self.strict_parsing = enabled;
+
+        self.reset_cache_ids();
+    }
+
+    /// The default luma coefficients, R, G and B.
+    ///
+    /// Port of `Config::getDefaultLumaCoefs` (src/OpenColorIO/Config.cpp:4450-4457 @ v2.5.2).
+    /// Its error for a null array can't happen with a reference.
+    #[doc(alias = "getDefaultLumaCoefs")]
+    pub fn default_luma_coefs(&self) -> [f64; 3] {
+        self.default_luma_coefs
+    }
+
+    /// Port of `Config::setDefaultLumaCoefs` (src/OpenColorIO/Config.cpp:4459-4470 @ v2.5.2).
+    /// Its error for a null array can't happen with a reference.
+    #[doc(alias = "setDefaultLumaCoefs")]
+    pub fn set_default_luma_coefs(&mut self, c3: &[f64; 3]) {
+        self.default_luma_coefs = *c3;
+
+        self.reset_cache_ids();
+    }
+
+    /// The processor of `transform` in the direction `direction`, in the current context, not
+    /// cached and with the processor caches off.
+    ///
+    /// Port of `Config::Impl::getProcessorWithoutCaching` (src/OpenColorIO/Config.cpp:903-918
+    /// @ v2.5.2). Its error for a null transform can't happen with a reference.
+    fn processor_without_caching(
+        &self,
+        transform: &Transform,
+        direction: TransformDirection,
+    ) -> Result<Processor> {
+        let mut processor = Processor::new();
+        processor.set_processor_cache_flags(ProcessorCacheFlags::OFF);
+        processor.set_transform(self, &self.context, transform, direction)?;
+        Ok(processor)
+    }
+
+    /// Whether the color space `color_space` (by name, alias or role) is linear for the
+    /// reference space `reference_space_type`: not data, of that reference space, and either
+    /// of the encoding `scene-linear` (scene) or `display-linear` (display), or without an
+    /// encoding and with transforms that keep 4 x 1/16 equal to 4 within 1e-5 on the neutral,
+    /// red, green and blue axes (or no transform).
+    ///
+    /// Port of `Config::isColorSpaceLinear` (src/OpenColorIO/Config.cpp:2784-2906 @ v2.5.2).
+    #[doc(alias = "isColorSpaceLinear")]
+    pub fn is_color_space_linear(
+        &self,
+        color_space: impl AsRef<[u8]>,
+        reference_space_type: ReferenceSpaceType,
+    ) -> Result<bool> {
+        let color_space = c_str(color_space.as_ref());
+        let Some(cs) = self.color_space(color_space) else {
+            return Err(Exception::new(
+                [
+                    b"Could not test colorspace linearity. Colorspace ".as_slice(),
+                    color_space,
+                    b" does not exist.",
+                ]
+                .concat(),
+            ));
+        };
+
+        if cs.is_data() {
+            return Ok(false);
+        }
+
+        // Colorspace is not linear if the types are opposite.
+        if cs.reference_space_type() != reference_space_type {
+            return Ok(false);
+        }
+
+        let encoding = cs.encoding();
+        if !encoding.is_empty() {
+            // Check the encoding value if it is set.
+            return Ok((compare(encoding, b"scene-linear")
+                && reference_space_type == ReferenceSpaceType::Scene)
+                || (compare(encoding, b"display-linear")
+                    && reference_space_type == ReferenceSpaceType::Display));
+        }
+
+        // We want to assess linearity over at least a reasonable range of values, so use a very
+        // dark value and a very bright value. Test neutral, red, green, and blue points to
+        // detect situations where the neutral may be linear but there is non-linearity off the
+        // neutral axis.
+        let evaluate = |config: &Config, t: &Transform| -> Result<bool> {
+            #[rustfmt::skip]
+            let img: [f32; 24] = [
+                0.0625, 0.0625, 0.0625, 4., 4., 4.,
+                0.0625, 0., 0., 4., 0., 0.,
+                0., 0.0625, 0., 0., 4., 0.,
+                0., 0., 0.0625, 0., 0., 4.,
+            ];
+            let mut dst = [0f32; 24];
+
+            let proc_to_reference =
+                config.processor_without_caching(t, TransformDirection::Forward)?;
+
+            // TODO: It could be useful to try and avoid evaluating points through ops that are
+            // expensive but highly unlikely to be linear (with inverse Lut3D being the prime
+            // example). (Upstream's comment continues at Config.cpp:2850-2864.)
+
+            let opt_cpu_proc =
+                proc_to_reference.optimized_cpu_processor(OptimizationFlags::NONE)?;
+            {
+                let desc =
+                    PackedImageDesc::with_channel_order(&img[..], 8, 1, ChannelOrdering::Rgb)?;
+                let mut desc_dst =
+                    PackedImageDesc::with_channel_order(&mut dst[..], 8, 1, ChannelOrdering::Rgb)?;
+                opt_cpu_proc.apply_src_dst(&desc, &mut desc_dst)?;
+            }
+
+            let abs_error = 1e-5f32;
+            let multiplier = 64.0f32;
+            let mut ret = true;
+
+            // Test the first RGB pair.
+            ret &= equal_with_abs_error(dst[0] * multiplier, dst[3], abs_error);
+            ret &= equal_with_abs_error(dst[1] * multiplier, dst[4], abs_error);
+            ret &= equal_with_abs_error(dst[2] * multiplier, dst[5], abs_error);
+
+            // Test the second RGB pair.
+            ret &= equal_with_abs_error(dst[6] * multiplier, dst[9], abs_error);
+            ret &= equal_with_abs_error(dst[7] * multiplier, dst[10], abs_error);
+            ret &= equal_with_abs_error(dst[8] * multiplier, dst[11], abs_error);
+
+            // Test the third RGB pair.
+            ret &= equal_with_abs_error(dst[12] * multiplier, dst[15], abs_error);
+            ret &= equal_with_abs_error(dst[13] * multiplier, dst[16], abs_error);
+            ret &= equal_with_abs_error(dst[14] * multiplier, dst[17], abs_error);
+
+            // Test the fourth RGB pair.
+            ret &= equal_with_abs_error(dst[18] * multiplier, dst[21], abs_error);
+            ret &= equal_with_abs_error(dst[19] * multiplier, dst[22], abs_error);
+            ret &= equal_with_abs_error(dst[20] * multiplier, dst[23], abs_error);
+
+            Ok(ret)
+        };
+
+        let transform_to_reference = cs.transform(ColorSpaceDirection::ToReference);
+        let transform_from_reference = cs.transform(ColorSpaceDirection::FromReference);
+        if let Some(to_reference) = transform_to_reference {
+            // Color space has a transform for the to-reference direction, or both directions.
+            return evaluate(self, to_reference);
+        } else if let Some(from_reference) = transform_from_reference {
+            // Color space only has a transform for the from-reference direction.
+            return evaluate(self, from_reference);
+        }
+
+        // Color space matches the desired reference space type, is not a data space, and has
+        // no transforms, so it is equivalent to the reference space and hence linear.
+        Ok(true)
     }
 
     /// Port of `Config::getProcessorCacheFlags` (Config.cpp:924-927, 5333-5336 @ v2.5.2).
