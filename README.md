@@ -108,7 +108,9 @@ its own port of yaml-cpp 0.8.0, the parser the official library uses, numbers in
 platform's C++ library reads floats its own way (Windows accepts hex floats, Linux reads
 tiny values as 0), and the port does too, with yaml-cpp's own tests ported. The config's model
 objects are merged too: ColorSpace, ColorSpaceSet, Look, ViewTransform and NamedTransform,
-with their text and errors byte for byte (names that aren't UTF-8 included).
+with their text and errors byte for byte (names that aren't UTF-8 included). The test harness
+is sturdier under load: the oracle never sends a second, broken reply, and tests that set
+environment variables keep them on their own thread.
 Each also went through an independent review before merging.
 
 **Done:** everything below is bit-exact against the official library on Windows and Linux, in
