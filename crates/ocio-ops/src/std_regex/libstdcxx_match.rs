@@ -13,6 +13,11 @@
 //!   apart (`*`, `+` and `?` don't copy);
 //! - a lookahead matches as an expression of its own that starts where it stands: there, `^`
 //!   matches and `\b` sees no character before.
+//!
+//! The wheel's matcher recurses once per state it goes through, and its stack overflows (the
+//! process ends) about 75,000 states deep. The port keeps a conservative estimate of that
+//! depth along the path it tries ([`cost`](Matcher::cost)), and refuses a match that would go
+//! past half of it, or a text longer than 8,192 bytes (U-54).
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -30,18 +35,38 @@ type LoopState = (Option<usize>, u32);
 /// braces around it), and which of the repetition's loops it is.
 type LoopKey = (usize, u64, u64);
 
-/// The longest text the port matches: the wheel's matcher recurses per character, and its
-/// stack overflows (the process ends) at about 14,000 to 58,000 characters (U-54). Longer
-/// texts are refused with `error_stack` (as `regex_error`, the text of a code without a
-/// message).
+// The wheel's stack, in hundredths of the frames a character match takes there. Measured with
+// the Linux wheel (2026-10-05), from the path length at which matching crashes it: `a*` at
+// 32,719 characters, `(a)*` at 17,460, `((((a))))*` at 7,272, `(a|b)*` at 14,150,
+// `(?:b|a)*` at 32,726, `a*?` at 58,197, `(?:aaaa)*` at 14,156, `(?:a?)*` at 20,943, all
+// about 74,900 frames; non-capture groups, lookaheads and copies of a brace's body add none.
+
+/// A character or set matched, an assertion, a back reference.
+const COST_ATOM: u32 = 100;
+/// A capture group: its start and end states.
+const COST_CAPTURE: u32 = 200;
+/// An alternative other than the last (the last is reached without a frame).
+const COST_ALTERNATIVE: u32 = 100;
+/// An iteration of a greedy loop (`*`, `+`, `?`, a brace's loop or optional copy).
+const COST_GREEDY_ITERATION: u32 = 129;
+/// An iteration of a lazy loop.
+const COST_LAZY_ITERATION: u32 = 29;
+/// The deepest the wheel's stack goes, about 74,900 frames: the lowest of the measured
+/// crashes is at 74,829 (`((((a))))*`).
+const WHEEL_STACK: u32 = 7_482_900;
+/// The port refuses a match whose path would go past this: under half the wheel's stack.
+const MAX_COST: u32 = 3_700_000;
+
+/// The longest text the port matches (U-54).
 const MAX_TEXT: usize = 8192;
 
-/// The deepest the port's matching recursion goes before it refuses the match the same way: a
-/// match the wheel's recursion would take about as deep as its stack allows (U-54).
-const MAX_DEPTH: u32 = 100_000;
+/// The stack the port's own recursion may use; the thread has a margin over it. The cost
+/// bound keeps a match far below it; it guards against expressions whose nesting costs the
+/// wheel nothing (thousands of non-capture groups).
+const STACK_BUDGET: usize = 192 * 1024 * 1024;
+const STACK_SIZE: usize = 256 * 1024 * 1024;
 
-/// The stack the matching recursion needs per level, with a margin.
-const STACK_PER_DEPTH: usize = 1024;
+const _: () = assert!(2 * MAX_COST < WHEEL_STACK);
 
 struct Matcher<'a> {
     text: &'a [u8],
@@ -49,8 +74,11 @@ struct Matcher<'a> {
     loops: RefCell<HashMap<LoopKey, LoopState>>,
     /// Where the expression being matched starts: the text's start, or a lookahead's.
     begin: Cell<usize>,
-    /// How deep the matching recursion is, and whether it went past `MAX_DEPTH`.
-    depth: Cell<u32>,
+    /// The estimated depth of the wheel's stack along the current path.
+    cost: Cell<u32>,
+    /// The address of a variable at the start of the thread, which the stack grows from.
+    stack_base: usize,
+    /// Whether the match went past a limit.
     aborted: Cell<bool>,
 }
 
@@ -69,26 +97,49 @@ fn mix(ctx: u64, id: usize, index: u64) -> u64 {
     z ^ (z >> 31)
 }
 
+/// The address of a local variable of the caller: how deep its stack is.
+#[inline(always)]
+fn stack_address() -> usize {
+    let marker = 0u8;
+    std::ptr::addr_of!(marker) as usize
+}
+
 type Cont<'c> = &'c mut dyn FnMut(usize, &mut Captures) -> bool;
 
 /// A repetition's loops, by kind, in [`LoopKey`]s.
 const STAR_LOOP: u64 = u64::MAX;
 
 impl<'a> Matcher<'a> {
-    /// Matches `node` at `pos` in the copy `ctx`, then the continuation `k`.
-    fn m(&self, node: &Node, pos: usize, caps: &mut Captures, ctx: u64, k: Cont<'_>) -> bool {
+    /// Runs `f` with `weight` added to the path's cost, unless that goes past the bound or the
+    /// port's stack budget (the match is then aborted).
+    fn weighted(&self, weight: u32, f: impl FnOnce() -> bool) -> bool {
         if self.aborted.get() {
             return false;
         }
-        let depth = self.depth.get() + 1;
-        if depth > MAX_DEPTH {
+        let cost = self.cost.get() + weight;
+        if cost > MAX_COST || self.stack_base.abs_diff(stack_address()) > STACK_BUDGET {
             self.aborted.set(true);
             return false;
         }
-        self.depth.set(depth);
-        let matched = self.m_inner(node, pos, caps, ctx, k);
-        self.depth.set(depth - 1);
+        self.cost.set(cost);
+        let matched = f();
+        self.cost.set(cost - weight);
         matched && !self.aborted.get()
+    }
+
+    /// Matches `node` at `pos` in the copy `ctx`, then the continuation `k`.
+    fn m(&self, node: &Node, pos: usize, caps: &mut Captures, ctx: u64, k: Cont<'_>) -> bool {
+        let weight = match node {
+            Node::Char(_)
+            | Node::Set(_)
+            | Node::LineBegin
+            | Node::LineEnd
+            | Node::WordBoundary { .. }
+            | Node::Backref(_) => COST_ATOM,
+            Node::Group { index: Some(_), .. } => COST_CAPTURE,
+            _ => 0,
+        };
+        self.weighted(weight, || self.m_inner(node, pos, caps, ctx, k))
     }
 
     fn m_inner(&self, node: &Node, pos: usize, caps: &mut Captures, ctx: u64, k: Cont<'_>) -> bool {
@@ -157,9 +208,11 @@ impl<'a> Matcher<'a> {
             }
             Node::Concat(nodes) => self.concat(nodes, pos, caps, ctx, k),
             Node::Alternation(nodes) => {
-                for n in nodes {
+                let last = nodes.len() - 1;
+                for (i, n) in nodes.iter().enumerate() {
                     let saved = caps.clone();
-                    if self.m(n, pos, caps, ctx, &mut *k) {
+                    let weight = if i < last { COST_ALTERNATIVE } else { 0 };
+                    if self.weighted(weight, || self.m(n, pos, caps, ctx, &mut *k)) {
                         return true;
                     }
                     if self.aborted.get() {
@@ -254,13 +307,15 @@ impl<'a> Matcher<'a> {
             *caps = saved.clone();
         }
         let iterated = self.once_more((r.id, r.ctx, STAR_LOOP), pos, || {
-            self.m(
-                r.body,
-                pos,
-                caps,
-                r.copy(r.min),
-                &mut |p, caps: &mut Captures| self.star(r, p, caps, k),
-            )
+            self.weighted(r.iteration_cost(), || {
+                self.m(
+                    r.body,
+                    pos,
+                    caps,
+                    r.copy(r.min),
+                    &mut |p, caps: &mut Captures| self.star(r, p, caps, k),
+                )
+            })
         });
         if iterated {
             return true;
@@ -296,13 +351,15 @@ impl<'a> Matcher<'a> {
         }
         let copy = r.max.unwrap_or(r.min) - remaining;
         let taken = self.once_more((r.id, r.ctx, remaining), pos, || {
-            self.m(
-                r.body,
-                pos,
-                caps,
-                r.copy(copy),
-                &mut |p, caps: &mut Captures| self.optionals(r, remaining - 1, p, caps, k),
-            )
+            self.weighted(r.iteration_cost(), || {
+                self.m(
+                    r.body,
+                    pos,
+                    caps,
+                    r.copy(copy),
+                    &mut |p, caps: &mut Captures| self.optionals(r, remaining - 1, p, caps, k),
+                )
+            })
         });
         if taken {
             return true;
@@ -338,6 +395,14 @@ impl Repeat<'_> {
             self.ctx
         }
     }
+
+    fn iteration_cost(&self) -> u32 {
+        if self.greedy {
+            COST_GREEDY_ITERATION
+        } else {
+            COST_LAZY_ITERATION
+        }
+    }
 }
 
 /// The error of a match the port refuses (U-54): `error_stack`, whose `what()` is
@@ -359,7 +424,8 @@ pub(super) fn regex_match(program: &Program, text: &[u8]) -> Result<bool, RegexE
             text,
             loops: RefCell::new(HashMap::new()),
             begin: Cell::new(0),
-            depth: Cell::new(0),
+            cost: Cell::new(0),
+            stack_base: stack_address(),
             aborted: Cell::new(false),
         };
         let mut caps: Captures = vec![None; program.groups];
@@ -371,12 +437,8 @@ pub(super) fn regex_match(program: &Program, text: &[u8]) -> Result<bool, RegexE
             Ok(matched)
         }
     };
-    std::thread::scope(|scope| {
-        std::thread::Builder::new()
-            .stack_size(1024 * 1024 + MAX_DEPTH as usize * STACK_PER_DEPTH)
-            .spawn_scoped(scope, run)
-            .expect("a thread to match the expression")
-            .join()
-            .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
-    })
+    super::on_stack(STACK_SIZE, run).unwrap_or(Err(RegexError {
+        code: ErrorType::Space,
+        what: "regex_error",
+    }))
 }

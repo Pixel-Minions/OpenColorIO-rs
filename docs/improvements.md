@@ -1784,19 +1784,35 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 ### U-54. Regular expressions and texts too large for the Linux wheel's stack
 
 - **Upstream:** libstdc++'s regex compiler recurses once per term of an alternative and once
-  per nested group, and its matcher once per step of a match. The Linux wheel's stack overflows
-  (the process ends) compiling about 75,000 terms in a row or about 14,100 to 14,500 nested
-  groups, and matching paths of about 14,000 (`(a|b)*`) to 58,000 (`a*?`) characters; the
-  depths vary between runs.
-- **Who notices:** configs and applications with machine-made rules, or very long paths.
-- **Decided** (owner, 2026-10-05: fixed limits below the crash points, each error the closest
-  existing one):
-  - an expression of more than 50,000 terms is refused with the state limit's
-    `error_space` ("Number of NFA states exceeds limit. ...");
-  - groups nested deeper than 5,000 are refused with `error_stack`, whose `what()` is
-    `regex_error` (a code without a message);
-  - a text longer than 8,192 bytes, or a match whose recursion would go deeper than 100,000
-    levels, is refused with that `error_stack` too (with the matcher, 3.9d).
+  per nested group, and its matcher once per state it goes through. The Linux wheel's stack
+  overflows (the process ends):
+  - compiling about 75,000 terms in a row or about 14,100 to 14,500 nested groups;
+  - matching, about 74,900 frames deep. Measured (2026-10-05/06) as the path length of `a`s at
+    which a match crashes it: `a*` 32,719, `.*` 32,727, `(a)*` 17,460, `((a))*` 11,903,
+    `((((a))))*` 7,272, `(((((a)))))*` 6,085, `(a|b)*` 14,150, `(?:a|b)*` 22,769, `(?:b|a)*`
+    32,726, `(?:(a)|b)*` 14,125, `a*?` 58,197, `(a)*?` 22,771, `(?:a?)*` 20,943, `(?:aa)*`
+    22,773 (pairs), `((a)(b))*` 8,041 (pairs), `(?:a{2,3})*` 13,361 (triples); `a` followed by
+    19,353 `*` on `a`, by 28,993 on the empty text. Every one is about 74,900 frames when a
+    character, assertion or back reference takes 1, a capture group 2, an alternative other than
+    the last 1 (the last none), a greedy loop iteration 1.29, a lazy one 0.29, and non-capture
+    groups, lookaheads (their frames go when they end) and a brace's copies none. The depths
+    vary a little between runs.
+- **Who notices:** configs and applications with machine-made rules, or very long paths. Real
+  file rules (a few groups, paths under 4 KB) are far from the limits.
+- **Decided** (owner, 2026-10-05: fixed limits below the crash points, and for matching a
+  conservative cost bound at most half the lowest crash; each error the closest existing one):
+  - compiling: an expression of more than 50,000 terms is refused with the state limit's
+    `error_space` ("Number of NFA states exceeds limit. ..."); groups nested deeper than 5,000
+    are refused with `error_stack`, whose `what()` is `regex_error` (a code without a message);
+  - matching: a text longer than 8,192 bytes is refused with that `error_stack`; and so is a
+    match whose estimated depth, along the path it tries (the weights above), would pass 37,000
+    frames: under half of the lowest crash measured (74,829 frames, `((((a))))*`). So
+    `(a|b)*` is refused from 6,993 `a`s (the wheel crashes at 14,150), `((((a))))*` from 3,595
+    (7,272), `a` with 9,561 stars on `a` (19,353);
+  - and a match the port's own recursion would take past 192 MiB of its thread's stack
+    (thousands of nested groups that cost the wheel nothing) is refused the same way.
   Between these limits and the wheel's crashes the port refuses what the wheel accepts.
-- **Status:** matched in `p3-regex` (3.9c, `std_regex/libstdcxx.rs`; the text limits with
-  3.9d).
+- **Status:** matched in `p3-regex`: the compile limits in 3.9c (`std_regex/libstdcxx.rs`), the
+  match limits in the fix chunk after 3.9d's verifier (`std_regex/libstdcxx_match.rs`). Tests:
+  the exact bound, the wheel surviving (in a process of its own) where the port starts
+  refusing, and typical file rules on 4,096-byte paths never refused.
