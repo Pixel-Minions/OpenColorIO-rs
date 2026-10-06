@@ -16,13 +16,42 @@
 
 use super::*;
 
+/// The process environment with test variables over it: what these tests give OCIO through the
+/// process-wide provider. Other tests of the crate run beside them and read the environment
+/// through that provider too, so it must only add variables that no other test reads. What
+/// OCIO sets or unsets through it changes only those added variables.
+struct OverProcess(MapEnv);
+
+impl EnvProvider for OverProcess {
+    fn var(&self, name: &[u8]) -> Option<Vec<u8>> {
+        self.0.var(name).or_else(|| ProcessEnv.var(name))
+    }
+
+    fn entries(&self) -> Vec<Vec<u8>> {
+        let mut entries = ProcessEnv.entries();
+        entries.extend(self.0.entries());
+        entries
+    }
+
+    fn set_var(&self, name: &[u8], value: &[u8]) {
+        self.0.set_var(name, value);
+    }
+
+    fn remove_var(&self, name: &[u8]) {
+        self.0.remove_var(name);
+    }
+}
+
+/// [`OverProcess`] with `name` set to `value`.
+fn over_process(name: &str, value: &str) -> Arc<OverProcess> {
+    Arc::new(OverProcess(MapEnv::from_entries(&[(name, value)])))
+}
+
 #[test]
 fn injected_environment() {
     // The provider is global: hold it against the other tests that replace it.
     let _environment = crate::unit_test_log_utils::environment_lock();
-    let mut vars = BTreeMap::new();
-    vars.insert("OCIO_TEST_EMPTY".to_string(), String::new());
-    set_env_provider(Some(Arc::new(MapEnv::from(vars))));
+    set_env_provider(Some(over_process("OCIO_TEST_EMPTY", "")));
     assert_eq!(getenv("OCIO_TEST_EMPTY"), Some(Vec::new()));
     assert!(is_env_present("OCIO_TEST_EMPTY"));
     assert_eq!(getenv("OCIO_TEST_MISSING"), None);
@@ -35,12 +64,8 @@ fn injected_environment() {
 #[test]
 fn a_thread_environment_comes_first_on_its_thread_only() {
     let _environment = crate::unit_test_log_utils::environment_lock();
-    let env = |value: &str| {
-        let vars = BTreeMap::from([("OCIO_TEST_VAR".to_string(), value.to_string())]);
-        Arc::new(MapEnv::from(vars))
-    };
-    let global = env("global");
-    let thread = env("thread");
+    let global = over_process("OCIO_TEST_VAR", "global");
+    let thread = over_process("OCIO_TEST_VAR", "thread");
     set_env_provider(Some(global.clone()));
     set_thread_env_provider(Some(thread.clone()));
     assert_eq!(getenv("OCIO_TEST_VAR").as_deref(), Some(&b"thread"[..]));

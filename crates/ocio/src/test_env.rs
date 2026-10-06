@@ -49,7 +49,8 @@ impl Drop for EnvGuard {
 #[cfg(test)]
 mod tests {
     use super::EnvGuard;
-    use std::sync::{Arc, Barrier};
+    use std::sync::mpsc;
+    use std::time::Duration;
 
     /// OCIO's value of `name`, as text.
     fn getenv(name: &str) -> Option<String> {
@@ -58,32 +59,37 @@ mod tests {
 
     /// While one test holds an `EnvGuard` with a variable set, a test on another thread still
     /// reads the process environment, before, during and after; and the guarded thread reads
-    /// its own environment.
+    /// its own environment. The threads pass what they read over channels and the checks run
+    /// at the end, so a thread that fails can't leave the other waiting for it.
     #[test]
     fn a_guarded_environment_is_seen_on_its_own_thread_only() {
         const NAME: &str = "OCIO_OPTIMIZATION_FLAGS";
-        let process = std::env::var_os(NAME).map(|v| v.to_string_lossy().into_owned());
-        let set = Arc::new(Barrier::new(2));
-        let read = Arc::new(Barrier::new(2));
-        let guarded = {
-            let (set, read) = (Arc::clone(&set), Arc::clone(&read));
-            std::thread::spawn(move || {
-                let env = EnvGuard::new();
-                env.set(&[(NAME, "not a number")]);
-                assert_eq!(getenv(NAME).as_deref(), Some("not a number"));
-                set.wait();
-                read.wait();
-                drop(env);
-                assert_eq!(
-                    getenv(NAME),
-                    std::env::var_os(NAME).map(|v| v.to_string_lossy().into_owned())
-                );
-            })
-        };
-        set.wait();
-        assert_eq!(getenv(NAME), process, "another test's environment was read");
-        read.wait();
+        const WAIT: Duration = Duration::from_secs(60);
+        let process = || std::env::var_os(NAME).map(|v| v.to_string_lossy().into_owned());
+        let before = getenv(NAME);
+        let (read_tx, read_rx) = mpsc::channel();
+        let (go_tx, go_rx) = mpsc::channel::<()>();
+        let guarded = std::thread::spawn(move || {
+            let env = EnvGuard::new();
+            env.set(&[(NAME, "not a number")]);
+            read_tx.send(getenv(NAME)).unwrap();
+            let _ = go_rx.recv_timeout(WAIT);
+            drop(env);
+            read_tx.send(getenv(NAME)).unwrap();
+        });
+        let guarded_reads = read_rx
+            .recv_timeout(WAIT)
+            .expect("the guarded thread set its environment");
+        let during = getenv(NAME);
+        go_tx.send(()).expect("the guarded thread waits");
+        let guarded_after = read_rx
+            .recv_timeout(WAIT)
+            .expect("the guarded thread dropped its guard");
         guarded.join().expect("the guarded thread");
-        assert_eq!(getenv(NAME), process);
+        assert_eq!(guarded_reads.as_deref(), Some("not a number"));
+        assert_eq!(guarded_after, process());
+        assert_eq!(before, process());
+        assert_eq!(during, process(), "another test's environment was read");
+        assert_eq!(getenv(NAME), process());
     }
 }

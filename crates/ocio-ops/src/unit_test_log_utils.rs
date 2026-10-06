@@ -29,21 +29,24 @@ use std::thread::{self, ThreadId};
 
 static ENVIRONMENT: Mutex<()> = Mutex::new(());
 
-/// Held by the tests that replace the environment provider (`platform::set_env_provider`),
-/// so that they can't change it under each other.
+/// Held by the tests that replace the process-wide environment provider
+/// (`platform::set_env_provider`), so that they can't change it under each other. Other tests
+/// read the environment through that provider at the same time, unguarded: such a test gives
+/// it only variables that no other test reads, over the process environment.
 pub(crate) fn environment_lock() -> MutexGuard<'static, ()> {
     ENVIRONMENT.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// Runs OCIO's one-time logging initialization, which reads `OCIO_LOGGING_LEVEL`, with an
-/// empty environment. It does it once per test process; later calls do nothing.
+/// empty environment. It does it once per test process; later calls do nothing. The empty
+/// environment is this thread's only (`platform::set_thread_env_provider`): the tests running
+/// beside it never read it.
 pub(crate) fn init_logging_with_empty_environment() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
-        let _environment = environment_lock();
-        platform::set_env_provider(Some(Arc::new(MapEnv::default())));
+        platform::set_thread_env_provider(Some(Arc::new(MapEnv::default())));
         let _ = get_logging_level();
-        platform::set_env_provider(None);
+        platform::set_thread_env_provider(None);
     });
 }
 

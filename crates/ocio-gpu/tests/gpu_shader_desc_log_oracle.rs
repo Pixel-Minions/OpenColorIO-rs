@@ -29,10 +29,11 @@ const FOOTER: &str = "  return inPixel;\n}\n";
 #[test]
 fn finalize_logs_the_shader_at_the_debug_level() {
     // OCIO reads OCIO_LOGGING_LEVEL once: read it in an empty environment, as the oracle's
-    // process does, so the developer's doesn't count.
-    platform::set_env_provider(Some(Arc::new(MapEnv::default())));
+    // process does, so the developer's doesn't count. On this thread only: a test added beside
+    // this one never reads it.
+    platform::set_thread_env_provider(Some(Arc::new(MapEnv::default())));
     let _ = get_logging_level();
-    platform::set_env_provider(None);
+    platform::set_thread_env_provider(None);
 
     let messages: Arc<Mutex<Vec<String>>> = Arc::default();
     let sink = Arc::clone(&messages);
