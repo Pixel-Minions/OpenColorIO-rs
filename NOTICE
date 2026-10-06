@@ -58,7 +58,8 @@ that the citations can be checked:
 
 The Microsoft C++ Standard Library (https://github.com/microsoft/STL), the C++ library of
 the Windows wheel: its std::regex (stl/inc/regex, as shipped with MSVC 14.44) is translated in
-crates/ocio-ops/src/std_regex/msvc.rs:
+crates/ocio-ops/src/std_regex/msvc.rs (the parser) and crates/ocio-ops/src/std_regex/msvc_match.rs
+(the matcher):
 
     Copyright (c) Microsoft Corporation.
     SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception

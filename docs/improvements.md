@@ -1106,9 +1106,11 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
     libstdc++'s texts, or `regex_error` alone: the text that the system's `libstdc++.so`
     gives a `regex_error` built from a code only, at run time (the wheel links it
     dynamically).
-  In the Windows wheel, a collating element (`[[.a.]]`) matches only at the end of the text
-  (`_Lookup_coll` compares up to the end of the text), and a match gives up with
-  `error_stack` past 600 nested matches and `error_complexity` past ten million steps.
+  In the Windows wheel, a collating element matches when `_Lookup_coll`'s comparison, which
+  stops after the first character that differs, ends at the end of the text: `[[.a.]]` matches
+  any one character that ends the text (`b[[.a.]]` matches `bz`), and `[[.ab.]]` matches `z`
+  but not `a`; and a match gives up with `error_stack` past 600 nested matches and
+  `error_complexity` past ten million steps.
 - **Who notices:** configs whose regex file rules use these constructs, shared between Windows
   and Linux.
 - **Decided** (D12): the port does what each wheel does.
@@ -1522,8 +1524,8 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   5,000 with `error_stack`, the error MSVC gives its own limit, and compiles a deeply nested
   expression on a thread with the stack it needs. Between 5,000 levels and the wheel's limit
   the port refuses what the wheel accepts; the limit is a choice for the owner.
-- **Status:** matched in `p3-regex` (3.9a, `std_regex/msvc.rs`); libstdc++'s parser comes in a
-  later chunk.
+- **Status:** matched in `p3-regex` (3.9a, `std_regex/msvc.rs`). The Linux wheel's limits, in
+  compiling (3.9c) and in matching (3.9d), are U-54.
 
 ### U-54. Regular expressions and texts too large for the Linux wheel's stack
 

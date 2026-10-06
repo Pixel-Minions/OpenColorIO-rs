@@ -279,11 +279,17 @@ part of OCIO's messages ("File rules: invalid regular expression '...': '<what()
 
 | Chunk | Upstream | Rust | Port tests |
 |---|---|---|---|
-| 3.9a | The ECMAScript grammar of C++ `[re.grammar]`: the parser, its error codes, and each library's `what()` texts (MSVC STL, libstdc++) (~500) | `ocio-ops/src/std_regex/` | oracle `file_rules_match` (O3.4): patterns and their errors, both platforms |
-| 3.9b | The matcher: `regex_match`, `regex_search`, `regex_replace` (`format_default`), backtracking, character classes (~500) | `ocio-ops/src/std_regex/` | oracle `file_rules_match`: generated patterns and paths, both platforms |
-| 3.9c | `FileRules.cpp:1-536` (460): `SanitizeRegularExpression`, `ConvertToRegularExpression`, `BuildRegularExpression`, `ValidateRegularExpression`, `FileRule` (pattern, extension, regex, color space, custom keys, `matches`); `CustomKeys.h` (82) | `file_rules.rs`, `custom_keys.rs` | `FileRules_tests.cpp` `config_read_only`, `pattern_error`, `with_defaults`, `extension_error`, `clone`, `isDefault` |
-| 3.9d | `FileRules.cpp:537-1050` (425): the rule list, the default and `ColorSpaceNamePathSearch` rules, insert, remove, move, validate, `operator<<`; `Config::getFileRules`, `setFileRules`, `getColorSpaceFromFilepath`, `filepathOnlyMatchesDefaultRule`, `parseColorSpaceFromString`; `PathUtils.cpp`'s `ParseColorSpaceFromString` (~470) | `file_rules.rs`, `config.rs`, `path_utils.rs` | `FileRules_tests.cpp` `config_insert_rule`, `rule_move`, `use_alias` |
-| 3.9e | `ViewingRules.cpp/.h` (462); `Config::getViewingRules`, `setViewingRules` | `viewing_rules.rs`, `config.rs` | `ViewingRules_tests.cpp` `basic` |
+| 3.9a | MSVC STL's parser, translated from MSVC 14.44's `<regex>` (Apache-2.0 with the LLVM exception, `NOTICE`): the ECMAScript grammar, its error codes and `what()` texts, its nesting limit (U-53) | `ocio-ops/src/std_regex/mod.rs`, `msvc.rs` | oracle `file_rules_match` (O3.4): patterns and their errors, Windows |
+| 3.9b | MSVC STL's matcher: `regex_match`, backtracking, character classes, collating elements, its stack and complexity limits | `ocio-ops/src/std_regex/msvc_match.rs` | O3.4: generated patterns and paths, Windows |
+| 3.9c | libstdc++'s parser, from the standard and checked against the Linux wheel (GPL: not translated): its grammar, errors, NFA state limit (U-54) | `ocio-ops/src/std_regex/libstdcxx.rs` | O3.4: patterns and their errors, Linux |
+| 3.9d | libstdc++'s matcher: `regex_match`, and the Linux wheel's stack in matching (U-54), with the verifier's fix chunks | `ocio-ops/src/std_regex/libstdcxx_match.rs` | O3.4: generated patterns and paths, Linux |
+| 3.9e | `FileRules.cpp:1-536` (460): `SanitizeRegularExpression`, `ConvertToRegularExpression`, `BuildRegularExpression`, `ValidateRegularExpression`, `FileRule` (pattern, extension, regex, color space, custom keys, `matches`); `CustomKeys.h` (82); `regex_replace` (`format_default`) for `SanitizeRegularExpression`'s two fixed patterns, in both libraries | `file_rules.rs`, `custom_keys.rs`, `ocio-ops/src/std_regex/` | `FileRules_tests.cpp` `config_read_only`, `pattern_error`, `with_defaults`, `extension_error`, `clone`, `isDefault` |
+| 3.9f | `FileRules.cpp:537-1050` (425): the rule list, the default and `ColorSpaceNamePathSearch` rules, insert, remove, move, validate, `operator<<`; `Config::getFileRules`, `setFileRules`, `getColorSpaceFromFilepath`, `filepathOnlyMatchesDefaultRule`, `parseColorSpaceFromString`; `PathUtils.cpp`'s `ParseColorSpaceFromString` (~470) | `file_rules.rs`, `config.rs`, `path_utils.rs` | `FileRules_tests.cpp` `config_insert_rule`, `rule_move`, `use_alias` |
+| 3.9g | `ViewingRules.cpp/.h` (462); `Config::getViewingRules`, `setViewingRules` | `viewing_rules.rs`, `config.rs` | `ViewingRules_tests.cpp` `basic` |
+
+`p3-regex` ported `regex_match` only. `regex_replace` comes with its one caller in 3.9e, and
+`regex_search` (the `ocio://` pattern) with the chunk that ports its first caller, `Config.cpp`'s
+or `BuiltinConfigRegistry.cpp`'s `ocio://` lookup, each checked against both wheels.
 
 - `FileRules_tests.cpp` has 30 tests. The ones that load YAML land with 3.3k, the ones that
   serialize with 3.7b, the rest here.
@@ -324,8 +330,8 @@ So Phase 3 ports 67 of the 89, and `p3-after-p2` 5 more.
 | `Context_tests.cpp` | 6 | 6 (3.5e, 3.5f) | — |
 | `ContextVariableUtils_tests.cpp` | 2 | 2 (3.5d) | — |
 | `Display_tests.cpp` | 3 | 3 (3.4h, then 3.7b and 3.8b) | — |
-| `FileRules_tests.cpp` | 30 | 30 (3.9c–d, 3.3k, 3.7b) | — |
-| `ViewingRules_tests.cpp` | 3 | 3 (3.9e, 3.3k) | — |
+| `FileRules_tests.cpp` | 30 | 30 (3.9e–f, 3.3k, 3.7b) | — |
+| `ViewingRules_tests.cpp` | 3 | 3 (3.9g, 3.3k) | — |
 | `LookParse_tests.cpp` | 2 | 2 (3.4b) | — |
 | `NamedTransform_tests.cpp` | 9 | 9 (3.4j, 3.2a, 3.2d, 3.3j, 3.8b) | — |
 | `ViewTransform_tests.cpp` | 1 | 1 (3.4c) | — |
@@ -419,8 +425,8 @@ p3-transforms (3.1a-c) ──┬────────────────
                          └─ p3-builtins (3.2e-g)                         │
 p3-context (3.5a-f) ─┬─ p3-config-1 (3.4d-g) ─ p3-config-2 (3.4h-j) ─────┤
 p3-model-objects ────┘          │                                         │
-  (3.4a-c)                      └─ p3-rules (3.9c-e) ─────────────────────┴─ p3-yaml-load-2 (3.3j-m)
-p3-regex (3.9a-b) ──────────────────┘                                         │
+  (3.4a-c)                      └─ p3-rules (3.9e-g) ─────────────────────┴─ p3-yaml-load-2 (3.3j-m)
+p3-regex (3.9a-d) ──────────────────┘                                         │
                        ┌─────────────────────────┬──────────────────────────┤
                  p3-yaml-save (3.7a-d)    p3-validate (3.8a-c)     p3-builders (3.2a-d)
                        └──────────── p3-loading (3.10a-c) ─────────────────┘
@@ -448,11 +454,11 @@ Each card is one branch and one PR. Cards in different rows can run in parallel 
 | `p3-yaml-parser` | 3.3a–3.3f | 6, ~2,950 lines | A | now (D1, D3); O3.3 for 3.3f's sweeps |
 | `p3-context` | 3.5a–3.5f | 6, ~1,500 | B | now; O3.2 for its oracle checks |
 | `p3-transforms` | 3.1a–3.1c | 3, ~850 | C | now; O3.6 |
-| `p3-regex` | 3.9a–3.9b | 2, ~1,000 | C | now (D2); O3.4 |
+| `p3-regex` | 3.9a–3.9d | 4 and the verifiers' fixes, ~4,000 | C | now (D2); O3.4 |
 | `p3-model-objects` | 3.4a–3.4c | 3, ~1,800 | B | now; O3.1 |
 | `p3-config-1` | 3.4d–3.4g | 4, ~1,300 | B | `p3-context`, `p3-model-objects` |
 | `p3-config-2` | 3.4h–3.4j | 3, ~1,350 | B | `p3-config-1` |
-| `p3-rules` | 3.9c–3.9e | 3, ~1,450 | C | `p3-regex`, `p3-config-1` |
+| `p3-rules` | 3.9e–3.9g | 3, ~1,450 | C | `p3-regex`, `p3-config-1` |
 | `p3-builtins` | 3.2e–3.2g | 3, ~1,300 | C | `p3-transforms` |
 | `p3-yaml-load-1` | 3.3g–3.3i | 3, ~1,050 | A | `p3-yaml-parser`, `p3-transforms`, 3.5c |
 | `p3-yaml-load-2` | 3.3j–3.3m | 4, ~1,150 | A | `p3-yaml-load-1`, `p3-config-2`, `p3-rules` |
