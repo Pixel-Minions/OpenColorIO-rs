@@ -1744,7 +1744,8 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   2.3d1 (`p2-ff-cpu-2`): `fixed_function_op_cpu_tests.rs` checks their errors.
   The GPU writer reads the ACES 1.3 gamut compression's parameters the same way in `p2-ff-gpu`
   (2.3f, `fixed_function_op_gpu.rs`), and the Rec.2100 surround's, the gamma-log's and the
-  double-log's (2.3g1, 2.3g2); `fixed_function_op_gpu.rs` checks their errors.
+  double-log's (2.3g1, 2.3g2), and ACES 2.0's (`p2-aces2-gpu`, 2.4f1-2.4h);
+  `fixed_function_op_gpu.rs` checks their errors.
 
 ### U-32. ACES 2.0's hue table past its arrays
 

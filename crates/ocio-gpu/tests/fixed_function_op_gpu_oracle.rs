@@ -853,6 +853,49 @@ fn aces_2_gamut_compress_shaders_match_the_wheel() {
     check(&cases);
 }
 
+/// ACES 2.0's output transform (chunk 2.4h) for six peak luminances and five limiting gamuts,
+/// both ways, at every level, in every language; a transform and its inverse (each with its own
+/// resources); the shader's settings.
+#[test]
+fn aces_2_output_transform_shaders_match_the_wheel() {
+    let style = |peak: f64, primaries: usize, dir| {
+        T::Fixed(
+            "FIXED_FUNCTION_ACES_OUTPUT_TRANSFORM_20",
+            FixedFunctionOpStyle::AcesOutputTransform20Fwd,
+            peak_and(peak, &ACES2_PRIMARIES[primaries]),
+            dir,
+        )
+    };
+    let mut cases = Vec::new();
+    for (i, (peak, primaries)) in PEAK_PRIMARIES.iter().enumerate() {
+        for dir in [F, I] {
+            cases.extend(cases_of(
+                &format!("output transform {peak} {primaries} {dir:?}"),
+                vec![style(*peak, *primaries, dir)],
+                &levels()[if i == 0 { 0..5 } else { 1..2 }],
+                Names::default(),
+            ));
+        }
+    }
+    cases.extend(cases_of(
+        "output transform and its inverse",
+        vec![style(1000.0, 1, F), style(1000.0, 1, I)],
+        &levels(),
+        Names::default(),
+    ));
+    for names in aces2_settings() {
+        for dir in [F, I] {
+            cases.extend(cases_of(
+                "output transform settings",
+                vec![style(1000.0, 1, dir)],
+                &levels()[1..2],
+                names,
+            ));
+        }
+    }
+    check(&cases);
+}
+
 /// The inverse double log's break points, `logSlope * log(linSlope * break + linOff) +
 /// logOff` in double (FixedFunctionOpGPU.cpp:2180-2181 @ v2.5.2), with log arguments other
 /// than 1: between 0 and 1 and above 1 (with many digits, and another base); 0 (`-Inf`); and
