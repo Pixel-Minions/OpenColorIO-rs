@@ -434,7 +434,8 @@ note = "p3-model-objects (3.4c): NamedTransformImpl; the GetTransform declaratio
 path = "src/OpenColorIO/OCIOYaml.cpp"
 kind = "src"
 target = ["crates/ocio/src/ocio_yaml.rs"]
-status = "todo"
+status = "partial"
+note = "p3-yaml-load-1 3.3g: the typed loaders of double, string and vector<double> (82-112, 146-160), the TransformDirection loader (189-194), LogUnknownKeyWarning (235-257), throwError and throwValueError (259-283), CheckDuplicates (301-321), the Log, Matrix and Range loaders (2877-2923, 3002-3057, 3091-3151) and the transform dispatch (3196-3351), which gives a not-ported-yet error for the other classes"
 
 [[file]]
 path = "src/OpenColorIO/OCIOYaml.h"

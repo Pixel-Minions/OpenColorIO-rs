@@ -15,6 +15,7 @@ pub mod context_variable_utils;
 pub mod look;
 pub(crate) mod look_parse;
 pub mod named_transform;
+pub(crate) mod ocio_yaml;
 pub mod path_utils;
 pub mod processor;
 pub(crate) mod tokens_manager;
