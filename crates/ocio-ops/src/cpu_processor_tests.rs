@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Port of `tests/cpu/CPUProcessor_tests.cpp` @ v2.5.2: so far `flag_composition`;
-//! `tests/cpu_processor_oracle.rs` checks the CPU processor against the wheel. The other tests
-//! get their processors from `Config::Create()`, which waits for Phase 3 (owner decision,
-//! 2026-10-04): `with_one_matrix`, `one_pixel`, `optimizations`, `planar_vs_packed` and the
-//! `scanline_*` tests, through their helpers (`BuildProcessor`, `ComputeImage`);
-//! `dynamic_properties` also needs `ExposureContrastTransform` (Phase 5), and `with_one_1d_lut`
-//! a `FileTransform`. `image_desc` and `with_several_ops` read a config with a `FileTransform`
-//! (`Config::CreateFromStream`, Phase 3).
+//! Port of `tests/cpu/CPUProcessor_tests.cpp` @ v2.5.2: here `flag_composition`;
+//! `tests/cpu_processor_oracle.rs` checks the CPU processor against the wheel. The tests that
+//! get their processors from `Config::Create()` (`with_one_matrix`, `one_pixel`,
+//! `optimizations`, `planar_vs_packed` and the `scanline_*` tests) are in
+//! `crates/ocio/tests/cpu_processor_tests.rs`. `dynamic_properties` also needs
+//! `ExposureContrastTransform` (Phase 5), and `with_one_1d_lut` a `FileTransform`. `image_desc`
+//! and `with_several_ops` read a config with a `FileTransform` (`Config::CreateFromStream`,
+//! Phase 3, and the file formats, Phase 4).
 
 use crate::open_color_types::{
     BitDepth, DynamicPropertyType, OptimizationFlags, TransformDirection,

@@ -11,12 +11,11 @@
 //! cache tests here run the checks of upstream's own cache tests on processors of matrix ops
 //! built directly.
 //!
-//! The other upstream tests get their processors from `Config::Create()`, which waits for
-//! Phase 3 (owner decision, 2026-10-04): `basic_cache`, `channel_crosstalk`,
-//! `optimized_processor`; and, as they also need `ExposureContrastTransform` (Phase 5),
-//! `cache_optimized_processors`, `cache_cpu_processors`, `cache_gpu_processors`, `is_noop`
-//! and `dynamic_properties`; `basic_cache_lut` also needs `Lut3DTransform` (Phase 2).
-//! `unique_dynamic_properties` needs the ExposureContrast op (Phase 5).
+//! `basic_cache`, `channel_crosstalk` and `optimized_processor` get their processors from
+//! `Config::Create()`. The others wait: `cache_optimized_processors`, `cache_cpu_processors`,
+//! `cache_gpu_processors`, `is_noop` and `dynamic_properties` need `ExposureContrastTransform`
+//! (Phase 5); `basic_cache_lut` needs `Lut3DTransform` (Phase 2); `unique_dynamic_properties`
+//! needs the ExposureContrast op (Phase 5).
 
 use std::sync::Arc;
 
@@ -29,6 +28,8 @@ use ocio_testkit::crt::{ERANGE, strtoul_c};
 use super::*;
 use crate::test_env::EnvGuard;
 use crate::transforms::group_transform::GroupTransform;
+use crate::transforms::matrix_transform::MatrixTransform;
+use ocio_ops::format_metadata::METADATA_ID;
 
 /// A processor of `ops`, finalized as `Processor::Impl::setTransform` finalizes the ops it
 /// builds (Processor.cpp:636-640 @ v2.5.2), with the default cache flags.
@@ -83,6 +84,223 @@ fn optimization_env_override_basic() {
     assert_eq!(
         OptimizationFlags::GOOD,
         environment_override(test_flag).unwrap()
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(Processor, basic_cache)` @ v2.5.2.
+#[test]
+fn basic_cache() {
+    let _env = EnvGuard::new();
+    let config = Config::new().unwrap();
+    let group = GroupTransform::new();
+
+    let processor_empty_group = config.processor(&Transform::from(group)).unwrap();
+    assert_eq!(processor_empty_group.num_transforms(), 0);
+    assert_eq!(processor_empty_group.cache_id().unwrap(), "<NOOP>");
+
+    let mut mat = MatrixTransform::new();
+    #[rustfmt::skip]
+    let mut matrix: [f64; 16] = [
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 1.0, 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0,
+        0.0, 0.0, 0.0, 1.0,
+    ];
+    let mut offset: [f64; 4] = [0.1, 0.2, 0.3, 0.4];
+    mat.set_matrix(&matrix);
+    mat.set_offset(&offset);
+
+    let mut processor_mat = config.processor(&Transform::from(mat.clone())).unwrap();
+    assert_eq!(processor_mat.num_transforms(), 1);
+    assert_eq!(
+        processor_mat.cache_id().unwrap(),
+        "1b1880136f7669351adb0dcae0f4f9fd"
+    );
+
+    // Check behaviour of the cacheID
+
+    offset[0] = 0.0;
+    mat.set_offset(&offset);
+    processor_mat = config.processor(&Transform::from(mat.clone())).unwrap();
+    assert_eq!(
+        processor_mat.cache_id().unwrap(),
+        "675ca29c0f7d28fbdc865818c8cf5c4c"
+    );
+
+    matrix[0] = 2.0;
+    mat.set_matrix(&matrix);
+    processor_mat = config.processor(&Transform::from(mat.clone())).unwrap();
+    assert_eq!(
+        processor_mat.cache_id().unwrap(),
+        "1ebac7d1c2d833943e1d1d3c26a7eb18"
+    );
+
+    offset[0] = 0.1;
+    matrix[0] = 1.0;
+    mat.set_offset(&offset);
+    mat.set_matrix(&matrix);
+    processor_mat = config.processor(&Transform::from(mat.clone())).unwrap();
+    assert_eq!(
+        processor_mat.cache_id().unwrap(),
+        "1b1880136f7669351adb0dcae0f4f9fd"
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(Processor, optimized_processor)` @ v2.5.2.
+#[test]
+fn optimized_processor() {
+    let env = EnvGuard::new();
+    let config = Config::new().unwrap();
+    let mut group = GroupTransform::new();
+
+    let mut mat = MatrixTransform::new();
+    let offset: [f64; 4] = [0.1, 0.2, 0.3, 0.4];
+    mat.set_offset(&offset);
+
+    group.append_transform(Transform::from(mat.clone()));
+    group.append_transform(Transform::from(mat));
+    group
+        .format_metadata_mut()
+        .add_attribute(Some(METADATA_ID), Some(b"UID42"))
+        .unwrap();
+
+    let processor_group = config.processor(&Transform::from(group)).unwrap();
+    assert_eq!(processor_group.num_transforms(), 2);
+
+    let processor_opt1 = processor_group
+        .optimized_processor(OptimizationFlags::DEFAULT)
+        .unwrap();
+    assert_eq!(processor_opt1.num_transforms(), 1);
+    assert_eq!(processor_opt1.format_metadata().get_num_attributes(), 1);
+    assert_eq!(
+        processor_opt1.format_metadata().get_attribute_name(0),
+        METADATA_ID
+    );
+    assert_eq!(
+        processor_opt1.format_metadata().get_attribute_value(0),
+        b"UID42"
+    );
+
+    let processor_opt2 = processor_group
+        .optimized_processor(OptimizationFlags::NONE)
+        .unwrap();
+    assert_eq!(processor_opt2.num_transforms(), 2);
+    assert_eq!(processor_opt2.format_metadata().get_num_attributes(), 1);
+    assert_eq!(
+        processor_opt2.format_metadata().get_attribute_name(0),
+        METADATA_ID
+    );
+    assert_eq!(
+        processor_opt2.format_metadata().get_attribute_value(0),
+        b"UID42"
+    );
+
+    // Use an optimization flags environment variable.
+    {
+        env.set(&[(OCIO_OPTIMIZATION_FLAGS_ENVVAR, "0")]); // OPTIMIZATION_NONE.
+        let processor_opt3 = processor_group
+            .optimized_processor(OptimizationFlags::DEFAULT)
+            .unwrap();
+        assert_eq!(processor_opt3.num_transforms(), 2);
+        env.set(&[]);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Processor, channel_crosstalk)` @ v2.5.2.
+#[test]
+fn channel_crosstalk() {
+    // Basic validation of the hasChannelCrosstalk() behavior.
+
+    let _env = EnvGuard::new();
+    let config = Config::new().unwrap();
+    let mut matrix = MatrixTransform::new();
+
+    #[rustfmt::skip]
+    let mut mat: [f64; 16] = [
+        1., 0., 0., 0.,
+        0., 1., 0., 0.,
+        0., 0., 2., 0.,
+        0., 0., 0., 1.,
+    ];
+
+    matrix.set_matrix(&mat);
+
+    let mut processor = config.processor(&Transform::from(matrix.clone())).unwrap();
+
+    assert!(!processor.has_channel_crosstalk());
+    assert!(
+        !processor
+            .default_cpu_processor()
+            .unwrap()
+            .has_channel_crosstalk()
+    );
+    assert!(
+        !processor
+            .default_gpu_processor()
+            .unwrap()
+            .has_channel_crosstalk()
+    );
+
+    mat[4] = 1.; // That's not anymore a diagonal matrix.
+    matrix.set_matrix(&mat);
+
+    processor = config.processor(&Transform::from(matrix.clone())).unwrap();
+
+    assert!(processor.has_channel_crosstalk());
+    assert!(
+        processor
+            .default_cpu_processor()
+            .unwrap()
+            .has_channel_crosstalk()
+    );
+    assert!(
+        processor
+            .default_gpu_processor()
+            .unwrap()
+            .has_channel_crosstalk()
+    );
+
+    // Check with a bit-depth change i.e. no impact.
+    assert!(
+        processor
+            .optimized_cpu_processor_with_bit_depths(
+                BitDepth::F16,
+                BitDepth::F32,
+                OptimizationFlags::DEFAULT
+            )
+            .unwrap()
+            .has_channel_crosstalk()
+    );
+
+    mat[4] = 0.; // It's now back to a diagonal matrix.
+    matrix.set_matrix(&mat);
+
+    processor = config.processor(&Transform::from(matrix)).unwrap();
+
+    assert!(!processor.has_channel_crosstalk());
+    assert!(
+        !processor
+            .default_cpu_processor()
+            .unwrap()
+            .has_channel_crosstalk()
+    );
+    assert!(
+        !processor
+            .default_gpu_processor()
+            .unwrap()
+            .has_channel_crosstalk()
+    );
+
+    // Check with a bit-depth change i.e. no impact.
+    assert!(
+        !processor
+            .optimized_cpu_processor_with_bit_depths(
+                BitDepth::F16,
+                BitDepth::F32,
+                OptimizationFlags::DEFAULT
+            )
+            .unwrap()
+            .has_channel_crosstalk()
     );
 }
 
