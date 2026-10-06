@@ -509,6 +509,18 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p3-yaml-load-1` (3.3h2), checked against the wheel with aliases of a
   matrix and of nested groups in `crates/ocio/src/ocio_yaml_oracle_tests.rs`.
 
+### I-142. Two transform loaders take a repeated key
+
+- **Upstream:** the loaders of the BuiltinTransform and the DisplayViewTransform don't call
+  `CheckDuplicates` (`OCIOYaml.cpp:600-629, 840-891`), so a key given twice is read twice and
+  the last value wins (`{view: a, view: b}` loads view `b`), where every other transform
+  refuses it ("Key-value pair with key 'view' specified more than once. "). Seen through the
+  wheel.
+- **Who notices:** configs that repeat a key of these two transforms by mistake.
+- **A fix:** check for repeated keys in both, as in the others.
+- **Status:** matched in `p3-yaml-load-1` (3.3i), checked against the wheel in
+  `crates/ocio/src/ocio_yaml_oracle_tests.rs`.
+
 ## Numeric helpers
 
 ### I-20. Double values are compared to 0 and 1 in float precision
