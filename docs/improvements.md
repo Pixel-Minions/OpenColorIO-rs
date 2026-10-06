@@ -1272,6 +1272,42 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   checks every code unit against `RtlUpcaseUnicodeChar`, so a machine with another table fails
   there. The alternative, calling the system (FFI, `unsafe`), is the owner's decision.
 
+### I-122. A file rule's regular expression means different things on Windows and Linux
+
+- **Upstream:** OCIO compiles and matches a file rule's regular expression with the C++
+  library's `std::regex` (ECMAScript): MSVC's STL in the Windows wheel, GCC 14's libstdc++ in
+  the Linux wheel. They accept different expressions, read some differently, and word their
+  errors differently. In the Linux wheel:
+  - a quantifier may follow a quantifier (`a**`, `a{2}{3}`); `]` and `}` are ordinary
+    characters; `\cX` is `X` itself; `\0` is NUL and the digits after it ordinary characters;
+    `\uNNNN` keeps the low byte; a range compares its ends as signed `char`s
+    (`[\x7f-\x81]` is refused);
+  - `^` matches only at the start of the expression being matched and `$` only at the end of
+    the text, never at a `\n` (the Windows wheel also matches them after and before a `\n`);
+    a lookahead is matched as an expression of its own that starts where it stands, so `^`
+    matches there and `\b`/`\B` see no character before it (`a(?=^b)b` and `a(?=\bb)b`
+    match `ab`);
+  - a back reference to a group that matched nothing fails (Windows: matches empty); a
+    repetition keeps its groups' captures from one iteration to the next; an iteration may
+    match empty (at most twice at a position); a brace copies its body (`{n,m}`: `n` copies
+    then `m - n` optional ones; `{n,}`: `n` copies then a loop), and each copy's loops count
+    those entries apart (`(?:(?:()|()|())?){3}\1\2\3` matches the empty text);
+  - collating elements and equivalence classes take POSIX names (`[[.space.]]`); the errors are
+    libstdc++'s texts, or `regex_error` alone: the text that the system's `libstdc++.so`
+    gives a `regex_error` built from a code only, at run time (the wheel links it
+    dynamically).
+  In the Windows wheel, a collating element matches when `_Lookup_coll`'s comparison, which
+  stops after the first character that differs, ends at the end of the text: `[[.a.]]` matches
+  any one character that ends the text (`b[[.a.]]` matches `bz`), and `[[.ab.]]` matches `z`
+  but not `a`; and a match gives up with `error_stack` past 600 nested matches and
+  `error_complexity` past ten million steps.
+- **Who notices:** configs whose regex file rules use these constructs, shared between Windows
+  and Linux.
+- **Decided** (D12): the port does what each wheel does.
+- **Status:** matched in `p3-regex`: the MSVC parser (3.9a) and matcher (3.9b), the libstdc++
+  parser and its NFA state limit (3.9c) and matcher (3.9d, with the lookahead and brace-copy
+  rules of the fix chunk after its verifier).
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
@@ -1728,3 +1764,57 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   (`p2-ff-cpu-2`): `fixed_function_op_cpu_tests.rs` checks their errors.
   that validation refuses) give upstream's answers. The renderers in 2.3b, and in 2.3c1 and
   2.3d1 (`p2-ff-cpu-2`): `fixed_function_op_cpu_tests.rs` checks their errors.
+
+### U-53. Regular expressions nested too deep for the wheel's stack
+
+- **Upstream:** each wheel's `std::regex` parser recurses once per nested group. OCIO compiles
+  a file rule's regular expression when it is set (`ValidateRegularExpression`,
+  `FileRules.cpp:263-282`) and again for each match, so a rule nested deep enough ends the
+  process with a stack overflow. The Windows wheel overflows at about 7,800 nested lookaheads
+  (`(?=`) or 8,400 nested non-capture groups (`(?:`), measured in a Python process of its own;
+  the depth varies between runs and with the caller's stack. Capture groups stop earlier: MSVC
+  refuses a thousandth with `error_stack`.
+- **Who notices:** configs and applications with machine-made rules; no real rule nests so
+  deep.
+- **Decided** (general rule, the wheel crashes): the port refuses groups nested deeper than
+  5,000 with `error_stack`, the error MSVC gives its own limit, and compiles a deeply nested
+  expression on a thread with the stack it needs. Between 5,000 levels and the wheel's limit
+  the port refuses what the wheel accepts; the limit is a choice for the owner.
+- **Status:** matched in `p3-regex` (3.9a, `std_regex/msvc.rs`). The Linux wheel's limits, in
+  compiling (3.9c) and in matching (3.9d), are U-54.
+
+### U-54. Regular expressions and texts too large for the Linux wheel's stack
+
+- **Upstream:** libstdc++'s regex compiler recurses once per term of an alternative and once
+  per nested group, and its matcher once per state it goes through. The Linux wheel's stack
+  overflows (the process ends):
+  - compiling about 75,000 terms in a row or about 14,100 to 14,500 nested groups;
+  - matching, about 74,900 frames deep. Measured (2026-10-05/06) as the path length of `a`s at
+    which a match crashes it: `a*` 32,719, `.*` 32,727, `(a)*` 17,460, `((a))*` 11,903,
+    `((((a))))*` 7,272, `(((((a)))))*` 6,085, `(a|b)*` 14,150, `(?:a|b)*` 22,769, `(?:b|a)*`
+    32,726, `(?:(a)|b)*` 14,125, `a*?` 58,197, `(a)*?` 22,771, `(?:a?)*` 20,943, `(?:aa)*`
+    22,773 (pairs), `((a)(b))*` 8,041 (pairs), `(?:a{2,3})*` 13,361 (triples); `a` followed by
+    19,353 `*` on `a`, by 28,993 on the empty text. Every one is about 74,900 frames when a
+    character, assertion or back reference takes 1, a capture group 2, an alternative other than
+    the last 1 (the last none), a greedy loop iteration 1.29, a lazy one 0.29, and non-capture
+    groups, lookaheads (their frames go when they end) and a brace's copies none. The depths
+    vary a little between runs.
+- **Who notices:** configs and applications with machine-made rules, or very long paths. Real
+  file rules (a few groups, paths under 4 KB) are far from the limits.
+- **Decided** (owner, 2026-10-05: fixed limits below the crash points, and for matching a
+  conservative cost bound at most half the lowest crash; each error the closest existing one):
+  - compiling: an expression of more than 50,000 terms is refused with the state limit's
+    `error_space` ("Number of NFA states exceeds limit. ..."); groups nested deeper than 5,000
+    are refused with `error_stack`, whose `what()` is `regex_error` (a code without a message);
+  - matching: a text longer than 8,192 bytes is refused with that `error_stack`; and so is a
+    match whose estimated depth, along the path it tries (the weights above), would pass 37,000
+    frames: under half of the lowest crash measured (74,829 frames, `((((a))))*`). So
+    `(a|b)*` is refused from 6,993 `a`s (the wheel crashes at 14,150), `((((a))))*` from 3,595
+    (7,272), `a` with 9,561 stars on `a` (19,353);
+  - and a match the port's own recursion would take past 192 MiB of its thread's stack
+    (thousands of nested groups that cost the wheel nothing) is refused the same way.
+  Between these limits and the wheel's crashes the port refuses what the wheel accepts.
+- **Status:** matched in `p3-regex`: the compile limits in 3.9c (`std_regex/libstdcxx.rs`), the
+  match limits in the fix chunk after 3.9d's verifier (`std_regex/libstdcxx_match.rs`). Tests:
+  the exact bound, the wheel surviving (in a process of its own) where the port starts
+  refusing, and typical file rules on 4,096-byte paths never refused.

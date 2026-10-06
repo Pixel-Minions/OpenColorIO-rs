@@ -107,12 +107,13 @@ owner item D5).
 | Chunk | Upstream | Rust (`ocio/src/...`) | Port tests |
 |---|---|---|---|
 | 3.1a | `transforms/ColorSpaceTransform.cpp`: the class (121), `DisplayViewTransform.cpp`: the class (136), `LookTransform.cpp`: the class (154) | `transforms/color_space_transform.rs`, `display_view_transform.rs`, `look_transform.rs` | `ColorSpaceTransform_tests.cpp` `basic`, `DisplayViewTransform_tests.cpp` `basic`; oracle `transform_text` |
-| 3.1b | `transforms/BuiltinTransform.cpp/.h` (100), `transforms/builtins/BuiltinTransformRegistry.cpp/.h` (171): the registry, every entry's name and description in upstream's order (each builtin file's `RegisterAll`, the ACES 2.0 table included), the op creators as "not ported yet" | `transforms/builtin_transform.rs`, `transforms/builtins/builtin_transform_registry.rs` | `BuiltinTransform_tests.cpp` `creation`, `access`; `BuiltinTransformRegistry_tests.cpp` `basic`, `aces`; oracle `builtin_transform_names` (O3.6) |
+| 3.1b | `transforms/BuiltinTransform.cpp/.h` (100), `transforms/builtins/BuiltinTransformRegistry.cpp/.h` (171): the registry, every entry's name and description in upstream's order (each builtin file's `RegisterAll`, the ACES 2.0 table included), the op creators as "not ported yet" | `transforms/builtin_transform.rs`, `transforms/builtins/builtin_transform_registry.rs` | `BuiltinTransform_tests.cpp` `creation`, `access`; `BuiltinTransformRegistry_tests.cpp` `basic` (`aces` builds ops: with 3.2g); oracle `builtin_transform_names` (O3.6) |
 | 3.1c | `transforms/FileTransform.cpp`: the class only (148): source, CCC id, CDL style, interpolation, validate, `operator<<`. The format registry, loading and `BuildFileTransformOps` are WP 4.1 | `transforms/file_transform.rs` | `FileTransform_tests.cpp` `basic`, `validate` |
 
 - Each class lands with its `Transform` arms (`transform_type`, `direction`, `validate`,
   `Display`). Its `build_ops` arm is "not ported yet" until its builder lands (WP 3.2).
-- `LookTransform_tests.cpp` `basic` uses a fixed function: it lands in `p3-after-p2`.
+- `LookTransform_tests.cpp` `basic` needs no fixed function (its file includes their headers, but
+  the test uses none): it lands with 3.1a.
 
 ## WP 3.2: op builders and the built-in transforms (`ocio`)
 
@@ -122,10 +123,14 @@ owner item D5).
 | 3.2b | `transforms/LookTransform.cpp`: `BuildLookOps`, look options and fallback, `CollectContextVariables` (234) | `transforms/look_transform.rs` | `LookTransform_tests.cpp` `inverse_look_transform`; `Config_tests.cpp` `look_is_noop` |
 | 3.2c | `transforms/DisplayViewTransform.cpp`: `BuildDisplayOps`, view transforms, looks, data bypass, `CollectContextVariables` (310) | `transforms/display_view_transform.rs` | `DisplayViewTransform_tests.cpp` `build_ops_with_looks`, `config_load`, `apply_fwd_inv` |
 | 3.2d | `Config.cpp:4679-4790`: the ten `getProcessor` overloads by names, color spaces, display and view, and named transform (110); the used context's cache ID in the processor cache key (`Config.cpp:4791-4880`), with its search path, working dir and I/O proxy; `ProcessorMetadata`'s files and looks | `config.rs`, `processor.rs` | `Config_tests.cpp` group D (below); `NamedTransform_tests.cpp` `named_transform_processor`, `inactive_named_transforms`; oracle `config_processor` (O3.5) |
-| 3.2e | `transforms/builtins/ColorMatrixHelpers.cpp/.h` (350), `OpHelpers.cpp/.h` (118), `BuildBuiltinTransformOps` and the registry's identity entry | `transforms/builtins/color_matrix_helpers.rs`, `op_helpers.rs` | `BuiltinTransform_tests.cpp` `color_matrix_helpers` |
+| 3.2e | `transforms/builtins/OpHelpers.cpp/.h` (118), `BuildBuiltinTransformOps` and the registry's identity entry; re-exports `ColorMatrixHelpers`, which Phase 2 ports into `ocio-ops` (below) | `transforms/builtins/op_helpers.rs`, the re-export in `transforms/builtins/mod.rs` | — |
 | 3.2f | `transforms/builtins/ArriCameras.cpp` (100), `RedCameras.cpp` (106), `SonyCameras.cpp` (126), `PanasonicCameras.cpp` (73): Log and Matrix ops only | `transforms/builtins/{arri,red,sony,panasonic}_cameras.rs` | battery `BuiltinTransform` family over these entries, both directions |
 | 3.2g | `ACES.cpp` and `Displays.cpp` entries built only from Phase 1 ops (Matrix, Log, Gamma, Range, Exponent) | `transforms/builtins/aces.rs`, `displays.rs` | battery over these entries |
 
+- `transforms/builtins/ColorMatrixHelpers.cpp/.h` (350) is ported by Phase 2's `p2-aces2-cpu`,
+  into `ocio-ops` (`crates/ocio-ops/src/transforms/builtins/color_matrix_helpers.rs`), with
+  `OCIO_ADD_TEST(BuiltinTransform, color_matrix_helpers)`. 3.2e only re-exports it from `ocio`;
+  no Phase 3 card ports that test again.
 - Each builder chunk ports its `CollectContextVariables` overload. `FileTransform`'s overload
   (`FileTransform.cpp:224-312`, 79) lands with 3.2a, since it needs only the context.
 - The rest of the built-ins wait for Phase 2 (card `p3-after-p2`):
@@ -144,7 +149,7 @@ tests at 0.8.0 are copied verbatim, as the emitter's were.
 
 | Chunk | Upstream (yaml-cpp 0.8.0) | Rust (`ocio/src/yaml_cpp/...`) | Port tests |
 |---|---|---|---|
-| 3.3a | `stream.cpp`, `streamcharsource.h`, `stringsource.h` (~400): BOM and UTF-8/16/32 detection, lenient decoding (an overlong `C0 80` becomes NUL); `mark.h`; `exceptions.h/.cpp`: the `ErrorMsg` texts and `what()`'s "yaml-cpp: error at line L, column C: ..." | `stream.rs`, `exceptions.rs` | `test/integration/encoding_test.cpp` |
+| 3.3a | `stream.cpp`, `streamcharsource.h`, `stringsource.h` (~400): BOM and UTF-8/16/32 detection, lenient decoding (an overlong `C0 80` passes through unchanged, as in the wheel); `mark.h`; `exceptions.h/.cpp`: the `ErrorMsg` texts and `what()`'s "yaml-cpp: error at line L, column C: ..." | `stream.rs`, `exceptions.rs` | `test/integration/encoding_test.cpp` |
 | 3.3b | `scanner.cpp/.h`, `simplekey.cpp`, `token.h`, `scantag.cpp`: indentation, flow levels, simple keys (~550) | `scanner.rs`, `simple_key.rs`, `token.rs` | the scanner parts of `test/integration/` |
 | 3.3c | `scantoken.cpp`, `scanscalar.cpp/.h`, `tag.cpp`, `directives.cpp` (~600): every token, plain, quoted, literal and folded scalars, verbatim tags (`!<ColorSpace>`) | `scan_token.rs`, `scan_scalar.rs`, `tag.rs` | as 3.3b |
 | 3.3d | `parser.cpp`, `singledocparser.cpp`, `collectionstack.h`, `depthguard.cpp` (~550): events, anchors and aliases, the depth limit | `parser.rs`, `single_doc_parser.rs` | `test/integration/handler_test.cpp`, `handler_spec_test.cpp`, `error_messages_test.cpp` |
@@ -168,6 +173,12 @@ tests at 0.8.0 are copied verbatim, as the emitter's were.
 | 3.3l | `load(Config)`, part 1 (`OCIOYaml.cpp:4398-4700`): the profile version and its errors, environment, search path (a string split on `:`, even on Windows), roles, luma, displays, views, active lists (~280) | `ocio_yaml.rs` | `Config_tests.cpp` group A |
 | 3.3m | `load(Config)`, part 2 (`OCIOYaml.cpp:4700-5032`): color spaces, looks, view transforms, named transforms, rules, inactive spaces, defaults, the config's directory as working dir, `loadEnvironment`; `OCIOYaml::Read` and its "Error: Loading the OCIO profile ..." wrapper; `Config::Impl::Read`; `Config::CreateFromStream` (~290) | `ocio_yaml.rs`, `config.rs` | `Config_tests.cpp` group A; the 8 built-in configs and the corpus load, compared by `dump` |
 
+- 3.3g: yaml-cpp's `Exception::what()` keeps the bytes after a NUL, but OCIO cuts its message
+  at the first NUL.
+- 3.3m: on Windows a 3-byte config file `00 00 FE` loads as an empty document through
+  `CreateFromFile`, but fails with "unknown escape character" through `CreateFromStream` (MSVC
+  `filebuf` putback after EOF); on Linux both behave the same. The port's yaml `Stream` models
+  only a string stream, so 3.3m must handle the file path.
 - The loader of `FixedFunctionTransform` lands in `p3-after-p2`.
 - The loaders of ExposureContrast and the Grading transforms (`OCIOYaml.cpp:1192-1333,
   1519-2501`, ~1,000 lines with their savers) wait for Phase 5 (owner item D5). Until then their
@@ -178,8 +189,8 @@ tests at 0.8.0 are copied verbatim, as the emitter's were.
 | Chunk | Upstream | Rust | Port tests |
 |---|---|---|---|
 | 3.4a | `ColorSpace.cpp` (499), `TokensManager.h` (74): names, aliases, family, equality group, description, encoding, bit depth, data, allocation, categories, interop ID, AMF IDs, ICC profile name, interchange attributes, transforms, `operator<<` | `color_space.rs`, `tokens_manager.rs` | `ColorSpace_tests.cpp` `basic`, `alias`, `category`, `interop_id`, `amf_transform_ids`, `icc_profile_name`, `unknown_interchange_attrib` |
-| 3.4b | `ColorSpaceSet.cpp` (280), `Look.cpp` (250), `LookParse.cpp/.h` (122) | `color_space_set.rs`, `look.rs`, `look_parse.rs` | `ColorSpaceSet_tests.cpp` (4), `LookParse_tests.cpp` (2) |
-| 3.4c | `ViewTransform.cpp` (238), `NamedTransform.cpp/.h` (346) | `view_transform.rs`, `named_transform.rs` | `ViewTransform_tests.cpp` `basic`; `NamedTransform_tests.cpp` `basic`, `alias` |
+| 3.4b | `ColorSpaceSet.cpp` (280), `Look.cpp` (250), `LookParse.cpp/.h` (122) | `color_space_set.rs`, `look.rs`, `look_parse.rs` | `LookParse_tests.cpp` (2); `ColorSpaceSet_tests.cpp` builds its sets with `Config::getColorSpaces`: with 3.4f |
+| 3.4c | `ViewTransform.cpp` (238), `NamedTransform.cpp/.h` (346) | `view_transform.rs`, `named_transform.rs` | `ViewTransform_tests.cpp` `basic`; `NamedTransform_tests.cpp` `basic` and `alias` add to a config and call `GetTransform`: with 3.4j (`p3-config-2`) and 3.2a |
 | 3.4d | `Config::Create()` and `Config::Impl`'s state and constructor, which reads `OCIO_ACTIVE_DISPLAYS`, `OCIO_ACTIVE_VIEWS` and `OCIO_INACTIVE_COLORSPACES` (`Config.cpp:255-466`); `GetVersion`, `LookupEnvironment`, `LookupRole`, `GetFileReferences` (`Config.cpp:99-254`); versions (`setMinorVersion`, `setVersion`, `upgradeToLatestVersion`); name, description, family separator; environment variables and mode; search paths and working dir (`Config.cpp:2110-2295`); the copy (~500) | `config.rs` | `Config_tests.cpp` `version` parts that don't load YAML |
 | 3.4e | The upstream tests deferred from Phase 1 that need only `Config::Create()` | — | `Processor_tests.cpp` `basic_cache`, `channel_crosstalk`, `optimized_processor`; `CPUProcessor_tests.cpp` `with_one_matrix`, `one_pixel`, `optimizations`, `planar_vs_packed` and the 7 `scanline_*` tests |
 | 3.4f | Color spaces (`Config.cpp:2296-2783`): sets by category, lookups by name, alias or role, canonical name, indices by reference type and visibility, add, remove, `isColorSpaceUsed`, clear; `Impl::getColorSpace`, `hasColorSpace` (~450) | `config.rs` | `Config_tests.cpp` group B, as each test's other parts exist |
@@ -268,11 +279,17 @@ part of OCIO's messages ("File rules: invalid regular expression '...': '<what()
 
 | Chunk | Upstream | Rust | Port tests |
 |---|---|---|---|
-| 3.9a | The ECMAScript grammar of C++ `[re.grammar]`: the parser, its error codes, and each library's `what()` texts (MSVC STL, libstdc++) (~500) | `ocio-ops/src/std_regex/` | oracle `file_rules_match` (O3.4): patterns and their errors, both platforms |
-| 3.9b | The matcher: `regex_match`, `regex_search`, `regex_replace` (`format_default`), backtracking, character classes (~500) | `ocio-ops/src/std_regex/` | oracle `file_rules_match`: generated patterns and paths, both platforms |
-| 3.9c | `FileRules.cpp:1-536` (460): `SanitizeRegularExpression`, `ConvertToRegularExpression`, `BuildRegularExpression`, `ValidateRegularExpression`, `FileRule` (pattern, extension, regex, color space, custom keys, `matches`); `CustomKeys.h` (82) | `file_rules.rs`, `custom_keys.rs` | `FileRules_tests.cpp` `config_read_only`, `pattern_error`, `with_defaults`, `extension_error`, `clone`, `isDefault` |
-| 3.9d | `FileRules.cpp:537-1050` (425): the rule list, the default and `ColorSpaceNamePathSearch` rules, insert, remove, move, validate, `operator<<`; `Config::getFileRules`, `setFileRules`, `getColorSpaceFromFilepath`, `filepathOnlyMatchesDefaultRule`, `parseColorSpaceFromString`; `PathUtils.cpp`'s `ParseColorSpaceFromString` (~470) | `file_rules.rs`, `config.rs`, `path_utils.rs` | `FileRules_tests.cpp` `config_insert_rule`, `rule_move`, `use_alias` |
-| 3.9e | `ViewingRules.cpp/.h` (462); `Config::getViewingRules`, `setViewingRules` | `viewing_rules.rs`, `config.rs` | `ViewingRules_tests.cpp` `basic` |
+| 3.9a | MSVC STL's parser, translated from MSVC 14.44's `<regex>` (Apache-2.0 with the LLVM exception, `NOTICE`): the ECMAScript grammar, its error codes and `what()` texts, its nesting limit (U-53) | `ocio-ops/src/std_regex/mod.rs`, `msvc.rs` | oracle `file_rules_match` (O3.4): patterns and their errors, Windows |
+| 3.9b | MSVC STL's matcher: `regex_match`, backtracking, character classes, collating elements, its stack and complexity limits | `ocio-ops/src/std_regex/msvc_match.rs` | O3.4: generated patterns and paths, Windows |
+| 3.9c | libstdc++'s parser, from the standard and checked against the Linux wheel (GPL: not translated): its grammar, errors, NFA state limit (U-54) | `ocio-ops/src/std_regex/libstdcxx.rs` | O3.4: patterns and their errors, Linux |
+| 3.9d | libstdc++'s matcher: `regex_match`, and the Linux wheel's stack in matching (U-54), with the verifier's fix chunks | `ocio-ops/src/std_regex/libstdcxx_match.rs` | O3.4: generated patterns and paths, Linux |
+| 3.9e | `FileRules.cpp:1-536` (460): `SanitizeRegularExpression`, `ConvertToRegularExpression`, `BuildRegularExpression`, `ValidateRegularExpression`, `FileRule` (pattern, extension, regex, color space, custom keys, `matches`); `CustomKeys.h` (82); `regex_replace` (`format_default`) for `SanitizeRegularExpression`'s two fixed patterns, in both libraries | `file_rules.rs`, `custom_keys.rs`, `ocio-ops/src/std_regex/` | `FileRules_tests.cpp` `config_read_only`, `pattern_error`, `with_defaults`, `extension_error`, `clone`, `isDefault` |
+| 3.9f | `FileRules.cpp:537-1050` (425): the rule list, the default and `ColorSpaceNamePathSearch` rules, insert, remove, move, validate, `operator<<`; `Config::getFileRules`, `setFileRules`, `getColorSpaceFromFilepath`, `filepathOnlyMatchesDefaultRule`, `parseColorSpaceFromString`; `PathUtils.cpp`'s `ParseColorSpaceFromString` (~470) | `file_rules.rs`, `config.rs`, `path_utils.rs` | `FileRules_tests.cpp` `config_insert_rule`, `rule_move`, `use_alias` |
+| 3.9g | `ViewingRules.cpp/.h` (462); `Config::getViewingRules`, `setViewingRules` | `viewing_rules.rs`, `config.rs` | `ViewingRules_tests.cpp` `basic` |
+
+`p3-regex` ported `regex_match` only. `regex_replace` comes with its one caller in 3.9e, and
+`regex_search` (the `ocio://` pattern) with the chunk that ports its first caller, `Config.cpp`'s
+or `BuiltinConfigRegistry.cpp`'s `ocio://` lookup, each checked against both wheels.
 
 - `FileRules_tests.cpp` has 30 tests. The ones that load YAML land with 3.3k, the ones that
   serialize with 3.7b, the rest here.
@@ -309,14 +326,14 @@ So Phase 3 ports 67 of the 89, and `p3-after-p2` 5 more.
 | File | Tests | In Phase 3 | Waits |
 |---|---:|---|---|
 | `ColorSpace_tests.cpp` | 14 | 11 (3.4a, 3.3j, 3.7b) | `is_colorspace_linear` (P2: Lut3D); `processor_to_known_colorspace`, `processor_to_known_colorspace_alt_config` (P9) |
-| `ColorSpaceSet_tests.cpp` | 4 | 4 (3.4b) | — |
+| `ColorSpaceSet_tests.cpp` | 4 | 4 (3.4f) | — |
 | `Context_tests.cpp` | 6 | 6 (3.5e, 3.5f) | — |
 | `ContextVariableUtils_tests.cpp` | 2 | 2 (3.5d) | — |
 | `Display_tests.cpp` | 3 | 3 (3.4h, then 3.7b and 3.8b) | — |
-| `FileRules_tests.cpp` | 30 | 30 (3.9c–d, 3.3k, 3.7b) | — |
-| `ViewingRules_tests.cpp` | 3 | 3 (3.9e, 3.3k) | — |
+| `FileRules_tests.cpp` | 30 | 30 (3.9e–f, 3.3k, 3.7b) | — |
+| `ViewingRules_tests.cpp` | 3 | 3 (3.9g, 3.3k) | — |
 | `LookParse_tests.cpp` | 2 | 2 (3.4b) | — |
-| `NamedTransform_tests.cpp` | 9 | 9 (3.4c, 3.2a, 3.2d, 3.3j, 3.8b) | — |
+| `NamedTransform_tests.cpp` | 9 | 9 (3.4j, 3.2a, 3.2d, 3.3j, 3.8b) | — |
 | `ViewTransform_tests.cpp` | 1 | 1 (3.4c) | — |
 | `ParseUtils_tests.cpp` | 11 | 6 (3.5c) | the XML, int, float and string-vector tests (P4) |
 | `PathUtils_tests.cpp` | 1 | 1 (3.5b) | — |
@@ -325,9 +342,9 @@ So Phase 3 ports 67 of the 89, and `p3-after-p2` 5 more.
 | `CPUProcessor_tests.cpp` | 16 | 11 (3.4e) | as WP 3.6 says |
 | `transforms/ColorSpaceTransform_tests.cpp` | 5 | `basic`, `context_variables` (3.1a, 3.2a) | the build tests use fixed functions (P2) |
 | `transforms/DisplayViewTransform_tests.cpp` | 6 | 5 (3.1a, 3.2c) | `build_ops` uses ExposureContrast (P5) |
-| `transforms/LookTransform_tests.cpp` | 5 | `inverse_look_transform`, `context_variables` | `basic`, `build_look_ops`, `build_look_options_ops` use fixed functions (P2) |
-| `transforms/BuiltinTransform_tests.cpp` | 8 | `creation`, `access`, `color_matrix_helpers` | `forward_inverse`, `interpolate`, `validate`, `aces2_displayview_roundtrip`, `aces2_Aab_to_RGB_nan` (P2) |
-| `transforms/builtins/BuiltinTransformRegistry_tests.cpp` | 7 | 6 (3.1b, 3.8c) | `read_write` builds every built-in's processor (P2) |
+| `transforms/LookTransform_tests.cpp` | 5 | `basic` (3.1a), `inverse_look_transform`, `context_variables` | `build_look_ops`, `build_look_options_ops` use fixed functions (P2) |
+| `transforms/BuiltinTransform_tests.cpp` | 8 | `creation`, `access` (3.1b); `color_matrix_helpers` is Phase 2's (`p2-aces2-cpu`) | `forward_inverse`, `interpolate`, `validate`, `aces2_displayview_roundtrip`, `aces2_Aab_to_RGB_nan` (P2) |
+| `transforms/builtins/BuiltinTransformRegistry_tests.cpp` | 7 | 6 (3.1b, 3.2e-g, 3.8c) | `read_write` builds every built-in's processor (P2) |
 | `builtinconfigs/BuiltinConfig_tests.cpp` | 4 | 4 (3.10a) | — |
 | `transforms/FileTransform_tests.cpp` | 10 | `basic`, `validate` (3.1c) | the rest (P4) |
 | `transforms/GroupTransform_tests.cpp` | 3 | — | `basic` (P2: fixed function), `write_formats`, `write_with_noops` (P4) |
@@ -408,8 +425,8 @@ p3-transforms (3.1a-c) ──┬────────────────
                          └─ p3-builtins (3.2e-g)                         │
 p3-context (3.5a-f) ─┬─ p3-config-1 (3.4d-g) ─ p3-config-2 (3.4h-j) ─────┤
 p3-model-objects ────┘          │                                         │
-  (3.4a-c)                      └─ p3-rules (3.9c-e) ─────────────────────┴─ p3-yaml-load-2 (3.3j-m)
-p3-regex (3.9a-b) ──────────────────┘                                         │
+  (3.4a-c)                      └─ p3-rules (3.9e-g) ─────────────────────┴─ p3-yaml-load-2 (3.3j-m)
+p3-regex (3.9a-d) ──────────────────┘                                         │
                        ┌─────────────────────────┬──────────────────────────┤
                  p3-yaml-save (3.7a-d)    p3-validate (3.8a-c)     p3-builders (3.2a-d)
                        └──────────── p3-loading (3.10a-c) ─────────────────┘
@@ -437,11 +454,11 @@ Each card is one branch and one PR. Cards in different rows can run in parallel 
 | `p3-yaml-parser` | 3.3a–3.3f | 6, ~2,950 lines | A | now (D1, D3); O3.3 for 3.3f's sweeps |
 | `p3-context` | 3.5a–3.5f | 6, ~1,500 | B | now; O3.2 for its oracle checks |
 | `p3-transforms` | 3.1a–3.1c | 3, ~850 | C | now; O3.6 |
-| `p3-regex` | 3.9a–3.9b | 2, ~1,000 | C | now (D2); O3.4 |
+| `p3-regex` | 3.9a–3.9d | 4 and the verifiers' fixes, ~4,000 | C | now (D2); O3.4 |
 | `p3-model-objects` | 3.4a–3.4c | 3, ~1,800 | B | now; O3.1 |
 | `p3-config-1` | 3.4d–3.4g | 4, ~1,300 | B | `p3-context`, `p3-model-objects` |
 | `p3-config-2` | 3.4h–3.4j | 3, ~1,350 | B | `p3-config-1` |
-| `p3-rules` | 3.9c–3.9e | 3, ~1,450 | C | `p3-regex`, `p3-config-1` |
+| `p3-rules` | 3.9e–3.9g | 3, ~1,450 | C | `p3-regex`, `p3-config-1` |
 | `p3-builtins` | 3.2e–3.2g | 3, ~1,300 | C | `p3-transforms` |
 | `p3-yaml-load-1` | 3.3g–3.3i | 3, ~1,050 | A | `p3-yaml-parser`, `p3-transforms`, 3.5c |
 | `p3-yaml-load-2` | 3.3j–3.3m | 4, ~1,150 | A | `p3-yaml-load-1`, `p3-config-2`, `p3-rules` |
