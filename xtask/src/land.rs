@@ -4,12 +4,16 @@
 //! `cargo xtask land <branch> [--no-rocky]`: lands a card branch on `phase0`.
 //!
 //! From the main checkout, on `phase0`, with a clean tree:
-//! 1. replays the branch's commits onto `phase0` in a temporary worktree (`target/land/wt`)
-//!    with `git rebase --exec "cargo xtask gate"`, which gates every commit in debug on this
-//!    platform (release and Rocky Linux 9 run once, on the merge commit, in step 4); a branch
-//!    with merge commits is first replayed without gates, to check that the replay drops
-//!    nothing they carry;
-//! 2. merges the result with `--no-ff`, listing each chunk's subject;
+//! 1. replays the branch's commits onto `phase0` in a temporary worktree (`target/land/wt`),
+//!    first without gates: a commit whose replay comes out empty, or that the replay drops,
+//!    although the original changed something, stops the land (a merge lost its changes); for
+//!    a branch with merge commits, the replay must also drop nothing they carry. Then with
+//!    `git rebase --exec "cargo xtask gate"`, which gates every commit in debug on this
+//!    platform (release and Rocky Linux 9 run once, on the merge commit, in step 4). Every
+//!    replay merges `docs/improvements.md` entry by entry (`xtask merge-register`, the
+//!    `ocio-register` merge driver that `.gitattributes` names);
+//! 2. merges the result with `--no-ff`, listing each chunk's subject, and checks that the
+//!    merged register equals the one rebuilt entry by entry from the branch's own commits;
 //! 3. regenerates `docs/parity.md` and `docs/ratchet.toml` into that merge commit;
 //! 4. runs the full gate on it (debug and release, `xtask ci --main`, cargo-deny, Rocky) and
 //!    `xtask oracle check-all`;
@@ -23,6 +27,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::gate::{self, Kind, Runner};
+use crate::register_merge;
 
 /// The local integration branch; `main` on GitHub fast-forwards to it.
 const INTEGRATION: &str = "phase0";
@@ -39,13 +44,18 @@ pub(crate) const USAGE: &str = "\
 cargo xtask land <branch> [--no-rocky]
 
 Lands <branch> on phase0, from the main checkout on phase0 with a clean tree:
-  1. replays its commits onto phase0 in target/land/wt with
+  1. replays its commits onto phase0 in target/land/wt, first without gates: it stops if a
+     commit that changes something replays as an empty one or is dropped (a merge lost its
+     changes). The replays merge docs/improvements.md entry by entry (`xtask
+     merge-register`). Then it replays them with
      `git rebase --exec \"cargo xtask gate\"`: every commit is gated in debug on this
      platform (each chunk already passed its own gate; release and Rocky Linux 9 run on
      the merge commit, step 4); commits already on top of phase0 keep their hashes. For a branch with merge commits, a first
      replay without gates must give the tree that merging the branch as it is gives (a
      replay drops merge commits, and what only they carry); otherwise it stops at once.
-  2. merges the result with --no-ff; the message lists each chunk's subject
+  2. merges the result with --no-ff; the message lists each chunk's subject. The merged
+     docs/improvements.md must equal the one rebuilt entry by entry from the branch's own
+     commits
   3. regenerates docs/parity.md and docs/ratchet.toml into the merge commit
   4. runs `cargo xtask gate --full --release --main --rocky` (with cargo-deny) and
      `xtask oracle check-all` on the merge commit
@@ -158,33 +168,41 @@ pub(crate) fn run(branch: &str, rocky: bool) -> Result<(), String> {
         crate::display_path(&build)
     );
 
-    // A replay drops merge commits, and with them anything only they carry. Before any gate
-    // runs, replay once without gates and compare that tree with merging the branch as it is.
-    // (Only with merge commits: for a linear branch the check has nothing to find, and it would
-    // refuse a follow-up land whose earlier chunks landed already, rewritten.)
+    // Before any gate runs, replay once without gates. Every commit that changes something
+    // must replay as a commit that changes something: one that comes out empty, or that the
+    // replay drops for that, lost its changes in a merge. A replay also drops merge commits,
+    // and with them anything only they carry: with merge commits, the replayed tree must equal
+    // merging the branch as it is. (Only with merge commits: for a linear branch that check
+    // has nothing to find, and it would refuse a follow-up land whose earlier chunks landed
+    // already, rewritten.)
+    let driver = register_driver()?;
+    let mut plain = Command::new("git");
+    plain
+        .current_dir(&wt)
+        .args(&driver)
+        .args(["rebase", "--quiet", "--no-autosquash", "--no-update-refs"])
+        .arg(&base);
+    let replayed = land_env(&mut plain, &build, &lock)
+        .status()
+        .map_err(|e| format!("could not run git rebase: {e}"))?;
+    if !replayed.success() {
+        return Err(replay_failure(&wt));
+    }
+    let plain_tip = crate::git(&wt, &["rev-parse", "HEAD"])?;
+    let stopped = |e: String| {
+        format!(
+            "{e}\nland stopped before any gate ran: {INTEGRATION} and {branch} are untouched; \
+             the plain replay is in {}",
+            crate::display_path(&wt)
+        )
+    };
+    check_replayed(&wt, &base, &tip, plain_tip.trim()).map_err(stopped)?;
+    println!("land: every commit that changes something replays as one that does");
     if merges != "0" {
-        let mut plain = Command::new("git");
-        plain
-            .current_dir(&wt)
-            .args(["rebase", "--quiet", "--no-autosquash", "--no-update-refs"])
-            .arg(&base);
-        let replayed = land_env(&mut plain, &build, &lock)
-            .status()
-            .map_err(|e| format!("could not run git rebase: {e}"))?;
-        if !replayed.success() {
-            return Err(replay_failure(&wt));
-        }
-        let rebased = crate::git(&wt, &["rev-parse", "HEAD"])?;
-        check_replay(&root, &base, &tip, rebased.trim()).map_err(|e| {
-            format!(
-                "{e}\nland stopped before any gate ran: {INTEGRATION} and {branch} are \
-                 untouched; the plain replay is in {}",
-                crate::display_path(&wt)
-            )
-        })?;
-        crate::git(&wt, &["checkout", "--quiet", "--detach", &tip])?;
+        check_replay(&root, &base, &tip, plain_tip.trim()).map_err(stopped)?;
         println!("land: replaying drops nothing the branch's merge commits carry");
     }
+    crate::git(&wt, &["checkout", "--quiet", "--detach", &tip])?;
 
     // 1. Replay, gating every commit lightly: fmt, clippy, ci and the debug tests on this
     // platform. Each chunk already passed its own `gate --staged` (with --release --rocky when
@@ -196,6 +214,7 @@ pub(crate) fn run(branch: &str, rocky: bool) -> Result<(), String> {
     let mut rebase = Command::new("git");
     rebase
         .current_dir(&wt)
+        .args(&driver)
         .args([
             "rebase",
             "--no-autosquash",
@@ -239,15 +258,17 @@ pub(crate) fn run(branch: &str, rocky: bool) -> Result<(), String> {
     }
 
     // 2.-4. The merge commit with the generated files, gated.
+    check_replayed(&wt, &base, &tip, &rebased)?;
     let landing = Landing {
         wt: &wt,
         build: &build,
         message_file: land_dir.join("MERGE_MSG"),
         rocky,
         lock: &lock,
+        driver: &driver,
     };
     let landed = landing
-        .merge_and_gate(&base, &rebased, &merge_message(branch, &tip, &chunks))
+        .merge_and_gate(&base, &tip, &rebased, &merge_message(branch, &tip, &chunks))
         .map_err(|e| {
             format!(
                 "{e}\nland stopped: {INTEGRATION} and {branch} are untouched; {} is left as it \
@@ -340,6 +361,131 @@ fn check_replay(root: &Path, base: &str, tip: &str, rebased: &str) -> Result<(),
     ))
 }
 
+/// The `git -c` options that make this xtask executable git's `ocio-register` merge driver
+/// (`.gitattributes`), which merges `docs/improvements.md` entry by entry.
+pub(crate) fn register_driver() -> Result<Vec<String>, String> {
+    let exe = std::env::current_exe().map_err(|e| format!("the xtask executable: {e}"))?;
+    let exe = crate::plain_path(&exe).to_string_lossy().replace('\\', "/");
+    if exe.contains('\'') {
+        return Err(format!(
+            "the xtask executable's path has a quote, which git's merge driver can't run: {exe}"
+        ));
+    }
+    Ok(vec![
+        "-c".into(),
+        "merge.ocio-register.name=docs/improvements.md, entry by entry".into(),
+        "-c".into(),
+        format!("merge.ocio-register.driver='{exe}' merge-register %O %A %B"),
+    ])
+}
+
+/// The commits a replay of `base...tip` onto `base` replays, in order: the branch's own,
+/// without merge commits and without those whose changes `base` already has.
+fn replay_originals(dir: &Path, base: &str, tip: &str) -> Result<Vec<String>, String> {
+    let list = crate::git(
+        dir,
+        &[
+            "rev-list",
+            "--reverse",
+            "--no-merges",
+            "--right-only",
+            "--cherry-pick",
+            &format!("{base}...{tip}"),
+        ],
+    )?;
+    Ok(list.lines().map(|l| l.trim().to_string()).collect())
+}
+
+/// Whether `commit` changes any file.
+fn changes_something(dir: &Path, commit: &str) -> Result<bool, String> {
+    let files = crate::git(
+        dir,
+        &["diff-tree", "--no-commit-id", "--name-only", "-r", commit],
+    )?;
+    Ok(!files.trim().is_empty())
+}
+
+/// Stops when the replay `base..rebased` of `tip` lost a commit's changes: each of the
+/// branch's commits that changes something needs a replay (the next one with its subject)
+/// that changes something. A replay comes out empty, or `git rebase` drops it, when merging it
+/// onto `base` undid its changes, as git's text merge of the register did (2026-10-06).
+pub(crate) fn check_replayed(
+    dir: &Path,
+    base: &str,
+    tip: &str,
+    rebased: &str,
+) -> Result<(), String> {
+    let log = crate::git(
+        dir,
+        &[
+            "log",
+            "--reverse",
+            "--format=%H%x09%s",
+            &format!("{base}..{rebased}"),
+        ],
+    )?;
+    let replays: Vec<(&str, &str)> = log.lines().filter_map(|l| l.split_once('\t')).collect();
+    let mut next = 0;
+    let mut problems = Vec::new();
+    for original in replay_originals(dir, base, tip)? {
+        if !changes_something(dir, &original)? {
+            continue;
+        }
+        let subject = crate::git(dir, &["log", "-1", "--format=%s", &original])?;
+        let subject = subject.trim();
+        match replays[next..].iter().position(|(_, s)| *s == subject) {
+            None => problems.push(format!(
+                "{} {subject}: the replay dropped it (its changes came out empty on \
+                 {INTEGRATION})",
+                short(&original)
+            )),
+            Some(k) => {
+                let replay = replays[next + k].0;
+                next += k + 1;
+                if !changes_something(dir, replay)? {
+                    problems.push(format!(
+                        "{} {subject}: its replay {} changes nothing",
+                        short(&original),
+                        short(replay)
+                    ));
+                }
+            }
+        }
+    }
+    if problems.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "the replay lost the changes of {} commit(s), which a merge undid:\n  {}",
+        problems.len(),
+        problems.join("\n  ")
+    ))
+}
+
+/// Stops when `rev`'s `docs/improvements.md` differs from `base`'s with the changes of the
+/// branch's own commits (up to `tip`) applied entry by entry ([`register_merge::rebuild`]).
+pub(crate) fn check_register(dir: &Path, base: &str, tip: &str, rev: &str) -> Result<(), String> {
+    let mut originals = Vec::new();
+    for commit in replay_originals(dir, base, tip)? {
+        if register_merge::touches_register(dir, &commit)? {
+            originals.push(commit);
+        }
+    }
+    let expected = register_merge::rebuild(dir, base, &originals)?;
+    let actual = crate::git(
+        dir,
+        &["show", &format!("{rev}:{}", register_merge::REGISTER)],
+    )?;
+    if expected == actual {
+        return Ok(());
+    }
+    Err(format!(
+        "the merged {} differs from its entry-by-entry rebuild from the branch's commits, in: {}",
+        register_merge::REGISTER,
+        register_merge::differences(&expected, &actual).join(", ")
+    ))
+}
+
 /// Where the merge commit is made and gated.
 struct Landing<'a> {
     wt: &'a Path,
@@ -347,12 +493,21 @@ struct Landing<'a> {
     message_file: PathBuf,
     rocky: bool,
     lock: &'a Lock,
+    /// The `git -c` options of the register's merge driver ([`register_driver`]).
+    driver: &'a [String],
 }
 
 impl Landing<'_> {
-    /// Merges `rebased` into `base` with `--no-ff`, regenerates the generated files into the
-    /// merge commit, runs the full gate and `oracle check-all` on it, and returns its hash.
-    fn merge_and_gate(&self, base: &str, rebased: &str, message: &str) -> Result<String, String> {
+    /// Merges `rebased` (the replay of `tip`) into `base` with `--no-ff`, checks the merged
+    /// register, regenerates the generated files into the merge commit, runs the full gate and
+    /// `oracle check-all` on it, and returns its hash.
+    fn merge_and_gate(
+        &self,
+        base: &str,
+        tip: &str,
+        rebased: &str,
+        message: &str,
+    ) -> Result<String, String> {
         let wt = self.wt;
         crate::git(wt, &["checkout", "--quiet", "--detach", base])?;
         std::fs::write(&self.message_file, message)
@@ -360,12 +515,18 @@ impl Landing<'_> {
         let mut merge = Command::new("git");
         merge
             .current_dir(wt)
+            .args(self.driver)
             .args(["merge", "--quiet", "--no-ff", "--no-edit", "-F"])
             .arg(&self.message_file)
             .arg(rebased);
         let merged = self.run(&mut merge, "git merge --no-ff");
         let _ = std::fs::remove_file(&self.message_file);
         merged?;
+        check_register(wt, base, tip, "HEAD")?;
+        println!(
+            "land: the merged {} equals its entry-by-entry rebuild from the branch's commits",
+            register_merge::REGISTER
+        );
 
         // 3. The generated files, regenerated into the merge commit. The ratchet's baseline is
         // phase0's committed docs/ratchet.toml.
@@ -784,6 +945,66 @@ mod tests {
              Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\n"
         );
         assert!(merge_message("b", "c", &["only"]).starts_with("Merge b (1 chunk)\n"));
+    }
+
+    /// The replay of a card on top of phase0: the card adds an unrelated file and removes the
+    /// stray lines at the end of the register; phase0 appended `U-52` after them.
+    struct Replay {
+        repo: register_merge::testing::Repo,
+        main: String,
+        card: String,
+        replay: String,
+    }
+
+    fn replay(name: &str, merge: &str) -> Replay {
+        use register_merge::testing::{STRAY, appended, fixed};
+        let repo = register_merge::testing::Repo::new(name, merge);
+        repo.commit(STRAY, "base");
+        repo.git(&["checkout", "--quiet", "-b", "card"]).unwrap();
+        std::fs::write(repo.path().join("notes.txt"), "notes\n").unwrap();
+        repo.git(&["add", "-A"]).unwrap();
+        repo.git(&["commit", "--quiet", "-m", "card: an unrelated change"])
+            .unwrap();
+        let card = repo.commit(&fixed(), "card: remove the stray lines");
+        repo.git(&["checkout", "--quiet", "main"]).unwrap();
+        let main = repo.commit(&appended(STRAY), "phase0: append U-52");
+        repo.git(&["checkout", "--quiet", "-b", "replay", &card])
+            .unwrap();
+        repo.git(&["rebase", "--quiet", "main"]).unwrap();
+        let replay = repo.git(&["rev-parse", "HEAD"]).unwrap();
+        Replay {
+            repo,
+            main,
+            card,
+            replay,
+        }
+    }
+
+    /// The failure of 2026-10-06, with the union merge the register had: the replay of the
+    /// removal comes out empty (or is dropped), and the replayed register keeps the stray lines.
+    /// Both checks stop it, and name what was lost.
+    #[test]
+    fn a_replay_that_loses_a_commits_changes_is_stopped() {
+        let r = replay("union", "union");
+        let dir = r.repo.path();
+        let lost = check_replayed(dir, &r.main, &r.card, &r.replay).unwrap_err();
+        assert!(lost.contains("card: remove the stray lines"), "{lost}");
+        assert!(!lost.contains("unrelated"), "{lost}");
+        let register = check_register(dir, &r.main, &r.card, &r.replay).unwrap_err();
+        assert!(register.ends_with("in: U-46"), "{register}");
+    }
+
+    /// The same replay with the entry-by-entry merge driver keeps the removal; both checks pass.
+    #[test]
+    fn the_entry_by_entry_replay_passes_both_checks() {
+        let r = replay("driver", "ocio-register");
+        let dir = r.repo.path();
+        assert_eq!(
+            r.repo.register(),
+            register_merge::testing::appended(&register_merge::testing::fixed())
+        );
+        check_replayed(dir, &r.main, &r.card, &r.replay).unwrap();
+        check_register(dir, &r.main, &r.card, &r.replay).unwrap();
     }
 
     #[test]

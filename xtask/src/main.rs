@@ -14,6 +14,7 @@ mod guards;
 mod land;
 mod links;
 mod parity;
+mod register_merge;
 mod registers;
 mod scratch;
 mod upstream;
@@ -38,6 +39,13 @@ Checking and landing chunks:
                               --unlabelled: also unlabelled volumes no checkout still uses;
                               links (symlinks, junctions) inside what it deletes are
                               unlinked first, never followed
+  merge-register <base> <ours> <theirs>
+                              git's merge driver for docs/improvements.md (.gitattributes:
+                              merge=ocio-register): merges it entry by entry into <ours>, an
+                              error on a real conflict. land configures it; for your own
+                              cherry-picks and merges:
+                              git -c merge.ocio-register.driver=\"cargo xtask merge-register
+                              %O %A %B\" cherry-pick <commit>
 
 Oracle and fixtures (fixtures/ is written only by these commands):
   oracle info                 versions and platform of the pinned oracle wheel
@@ -48,7 +56,7 @@ Oracle and fixtures (fixtures/ is written only by these commands):
   fixtures verify            every fixture matches fixtures/MANIFEST.toml, and vice versa
 
 Guardrails:
-  guards                      forbidden patterns, unsafe allowlist, waivers, headers,
+  guards                     forbidden patterns, unsafe allowlist, waivers, headers,
                               the registers' structure (docs/improvements.md,
                               docs/deviations.md), ocio::internals and its feature only
                               for crates/ocio/tests
@@ -94,6 +102,9 @@ fn main() -> ExitCode {
         ["oracle", "check-all"] => fixtures::check_all(),
         ["fixtures", "verify"] => fixtures::verify(),
         ["guards"] => guards::run(),
+        ["merge-register", base, ours, theirs] => {
+            register_merge::driver(Path::new(base), Path::new(ours), Path::new(theirs))
+        }
         ["ratchet", rest @ ..] => parse_base(rest, &["--update"]).and_then(|(flags, base)| {
             let mode = if flags.contains(&"--update") {
                 RatchetMode::Update
