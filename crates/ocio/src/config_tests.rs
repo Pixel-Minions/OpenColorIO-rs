@@ -142,3 +142,263 @@ fn alias_validation_of_color_spaces() {
     cs.add_alias("namedtransform");
     cfg.add_color_space(&cs).unwrap();
 }
+
+/// The two configs of `Config compare_displays` (Display_tests.cpp:242-326 @ v2.5.2), built
+/// through the API as the YAML reader builds them (without their roles, file rules and view
+/// transforms, which these checks never read).
+fn compare_displays_configs() -> (Config, Config) {
+    let mut config1 = Config::new().unwrap();
+    for (name, display) in [(&b"raw"[..], false), (b"display_cs", true)] {
+        let mut cs = if display {
+            ColorSpace::with_reference_space(ReferenceSpaceType::Display)
+        } else {
+            ColorSpace::new()
+        };
+        cs.set_name(name);
+        config1.add_color_space(&cs).unwrap();
+    }
+    let mut config2 = config1.clone();
+
+    config1
+        .add_shared_view("sview1", "", "raw", "", "", "")
+        .unwrap();
+    config1.add_display_view("Raw", "Raw", "raw", "").unwrap();
+    config1.add_display_view("sRGB", "Raw", "raw", "").unwrap();
+    config1
+        .add_display_view_with_view_transform(
+            "sRGB",
+            "view",
+            "display_vt",
+            "display_cs",
+            "",
+            "",
+            "",
+        )
+        .unwrap();
+    config1.add_display_shared_view("sRGB", "sview1").unwrap();
+    config1.set_active_displays("sRGB").unwrap();
+    config1.set_active_views("view, sview1").unwrap();
+
+    config2
+        .add_shared_view("view", "display_vt", "display_cs", "", "", "")
+        .unwrap();
+    config2
+        .add_shared_view("sview1", "", "raw", "", "", "")
+        .unwrap();
+    config2.add_display_view("Raw", "Raw", "raw", "").unwrap();
+    config2.add_display_view("sRGB", "Raw", "raw", "").unwrap();
+    config2.add_display_shared_view("sRGB", "view").unwrap();
+    config2.add_display_shared_view("sRGB", "sview1").unwrap();
+    config2.set_active_displays("Raw").unwrap();
+    config2.set_active_views("Raw").unwrap();
+    (config1, config2)
+}
+
+/// `Config compare_displays`'s checks (Display_tests.cpp:328-515 @ v2.5.2) on configs built
+/// through the API instead of read from YAML, without its `validate()` calls (no marker: the
+/// test reads YAML).
+#[test]
+fn compare_displays_without_yaml() {
+    let _env = EnvGuard::new();
+    let (config1, config2) = compare_displays_configs();
+
+    {
+        // Active (display, view) pair where the view is display-defined.
+        assert_eq!(1, config1.num_displays());
+        assert_eq!(b"sRGB", config1.default_display());
+
+        assert_eq!(
+            2,
+            config1.num_views_of_type(ViewType::DisplayDefined, "sRGB")
+        );
+        assert_eq!(
+            b"Raw",
+            config1.view_of_type(ViewType::DisplayDefined, "sRGB", 0)
+        );
+        assert_eq!(
+            b"view",
+            config1.view_of_type(ViewType::DisplayDefined, "sRGB", 1)
+        );
+
+        assert!(!config1.is_view_shared("sRGB", "view"));
+
+        assert_eq!(2, config1.num_views("sRGB"));
+        assert_eq!(b"view", config1.view("sRGB", 0));
+
+        // Inactive (display, view) pair where the view is a reference to a shared view.
+        assert_eq!(1, config2.num_displays());
+        assert_eq!(b"Raw", config2.default_display());
+        assert_eq!(1, config2.num_views("Raw"));
+        assert_eq!(b"Raw", config2.default_view("Raw"));
+
+        assert_eq!(config2.num_displays_all(), 2);
+        assert_eq!(config2.display_all(1), b"sRGB");
+
+        assert_eq!(2, config2.num_views_of_type(ViewType::Shared, "sRGB"));
+        assert_eq!(b"view", config2.view_of_type(ViewType::Shared, "sRGB", 0));
+        assert_eq!(b"sview1", config2.view_of_type(ViewType::Shared, "sRGB", 1));
+
+        assert!(config2.is_view_shared("sRGB", "view"));
+
+        assert!(Config::are_views_equal(&config1, &config2, "sRGB", "view"));
+    }
+
+    {
+        // Inactive (display, view) pair where the view is display-defined.
+        assert_eq!(1, config1.num_displays());
+        assert_eq!(b"sRGB", config1.default_display());
+        assert_eq!(config1.display_all(0), b"Raw");
+        assert_eq!(
+            1,
+            config1.num_views_of_type(ViewType::DisplayDefined, "Raw")
+        );
+        assert_eq!(
+            b"Raw",
+            config1.view_of_type(ViewType::DisplayDefined, "Raw", 0)
+        );
+        assert!(!config1.is_view_shared("Raw", "Raw"));
+
+        // Active (display, view) pair where the view is display-defined.
+        assert_eq!(1, config2.num_displays());
+        assert_eq!(b"Raw", config2.default_display());
+        assert_eq!(
+            1,
+            config2.num_views_of_type(ViewType::DisplayDefined, "Raw")
+        );
+        assert_eq!(
+            b"Raw",
+            config2.view_of_type(ViewType::DisplayDefined, "Raw", 0)
+        );
+        assert!(!config2.is_view_shared("Raw", "Raw"));
+
+        assert!(Config::are_views_equal(&config1, &config2, "Raw", "Raw"));
+    }
+
+    {
+        // Active (display, view) pair where the view is a reference to a shared view.
+        assert_eq!(1, config1.num_views_of_type(ViewType::Shared, "sRGB"));
+        assert_eq!(b"sview1", config1.view_of_type(ViewType::Shared, "sRGB", 0));
+        assert!(config1.is_view_shared("sRGB", "sview1"));
+
+        // Inactive (display, view) pair where the view is a reference to a shared view.
+        assert_eq!(2, config2.num_views_of_type(ViewType::Shared, "sRGB"));
+        assert_eq!(b"view", config2.view_of_type(ViewType::Shared, "sRGB", 0));
+        assert_eq!(b"sview1", config2.view_of_type(ViewType::Shared, "sRGB", 1));
+        assert!(config2.is_view_shared("sRGB", "sview1"));
+
+        assert!(Config::are_views_equal(
+            &config1, &config2, "sRGB", "sview1"
+        ));
+    }
+
+    {
+        let mut cfg1 = config1.clone();
+        assert!(cfg1.has_view("sRGB", "Raw"));
+        assert!(cfg1.has_view("sRGB", "view"));
+        assert!(cfg1.has_view("sRGB", "sview1"));
+        assert!(cfg1.has_view("Raw", "Raw"));
+
+        cfg1.set_active_displays("Raw").unwrap();
+        assert_eq!(1, cfg1.num_displays());
+        assert_eq!(b"Raw", cfg1.default_display());
+
+        assert!(cfg1.has_view("sRGB", "sview1"));
+
+        cfg1.set_active_views("Raw").unwrap();
+        assert_eq!(cfg1.num_views("sRGB"), 1);
+        assert_eq!(cfg1.view("sRGB", 0), b"Raw");
+
+        assert!(cfg1.has_view("sRGB", "Raw"));
+        assert!(cfg1.has_view("sRGB", "sview1"));
+
+        cfg1.set_active_displays("sRGB").unwrap();
+        assert_eq!(1, cfg1.num_displays());
+        assert_eq!(b"sRGB", cfg1.default_display());
+
+        assert!(cfg1.has_view("sRGB", "sview1"));
+    }
+
+    {
+        // Test when a display exists, but a view does not exist.
+
+        let mut cfg1 = config1.clone();
+
+        assert_eq!(b"sRGB", cfg1.default_display());
+        assert_eq!(2, cfg1.num_views_of_type(ViewType::DisplayDefined, "sRGB"));
+        assert_eq!(
+            b"Raw",
+            cfg1.view_of_type(ViewType::DisplayDefined, "sRGB", 0)
+        );
+        assert_eq!(
+            b"view",
+            cfg1.view_of_type(ViewType::DisplayDefined, "sRGB", 1)
+        );
+
+        assert!(cfg1.has_view("sRGB", "Raw"));
+        assert!(Config::are_views_equal(&config1, &cfg1, "sRGB", "Raw"));
+
+        // Remove the view from the display.
+        cfg1.remove_display_view("sRGB", "Raw").unwrap();
+        assert_eq!(1, cfg1.num_views_of_type(ViewType::DisplayDefined, "sRGB"));
+        assert_eq!(
+            b"view",
+            cfg1.view_of_type(ViewType::DisplayDefined, "sRGB", 0)
+        );
+
+        assert!(!cfg1.has_view("sRGB", "Raw"));
+        assert!(!Config::are_views_equal(&config1, &cfg1, "sRGB", "Raw"));
+    }
+
+    {
+        // Test when a view exists, but a display does not exist.
+
+        let mut cfg2 = config2.clone();
+
+        assert_eq!(b"Raw", cfg2.default_display());
+        assert_eq!(1, cfg2.num_views("Raw"));
+        assert_eq!(b"Raw", cfg2.view("Raw", 0));
+        assert_eq!(b"Raw", cfg2.active_views().as_slice());
+
+        assert!(cfg2.has_view("Raw", "Raw"));
+        assert!(Config::are_views_equal(&config2, &cfg2, "Raw", "Raw"));
+
+        // Remove the view from the display and the display itself since it only has no more
+        // views.
+        assert_eq!(2, cfg2.num_displays_all());
+        cfg2.remove_display_view("Raw", "Raw").unwrap();
+        assert_eq!(1, cfg2.num_displays_all());
+
+        // The view is still active.
+        assert_eq!(b"Raw", cfg2.active_views().as_slice());
+
+        assert!(!cfg2.has_view("Raw", "Raw"));
+        assert!(!Config::are_views_equal(&config2, &cfg2, "Raw", "Raw"));
+    }
+
+    {
+        // Test access of config-level shared views for hasView method.
+
+        let mut cfg1 = config1.clone();
+
+        assert_eq!(1, cfg1.num_views_of_type(ViewType::Shared, "sRGB"));
+        assert_eq!(b"sview1", cfg1.view_of_type(ViewType::Shared, "sRGB", 0));
+        assert!(cfg1.is_view_shared("sRGB", "sview1"));
+
+        assert!(cfg1.has_view("sRGB", "sview1"));
+
+        // Remove the shared view from the display.
+        cfg1.remove_display_view("sRGB", "sview1").unwrap();
+        assert_eq!(b"sRGB", config1.default_display());
+        assert_eq!(0, cfg1.num_views_of_type(ViewType::Shared, "sRGB"));
+
+        // Shared view still exists in the config.
+        assert_eq!(1, cfg1.num_views_of_type(ViewType::Shared, ""));
+        assert_eq!(b"sview1", cfg1.view_of_type(ViewType::Shared, "", 0));
+        assert!(cfg1.is_view_shared("", "sview1"));
+
+        assert!(!cfg1.has_view("sRGB", "sview1"));
+
+        // When display name is null, hasView will only check config level shared views.
+        assert!(cfg1.has_view("", "sview1"));
+    }
+}
