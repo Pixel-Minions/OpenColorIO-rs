@@ -358,8 +358,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Who notices:** anyone reading the warnings and errors of a config with mistakes in it.
 - **A fix:** one wording with the line for every unknown key; one space; the node type's
   name.
-- **Status:** matched in `p3-yaml-load-1` (3.3g: the Log, Matrix and Range loaders; the others
-  with their chunks), checked against the wheel in `crates/ocio/src/ocio_yaml_oracle_tests.rs`.
+- **Status:** matched in `p3-yaml-load-1` (3.3g: the Log, Matrix and Range loaders; 3.3h: the
+  ExponentWithLinear loader; the FixedFunction and grading loaders with their cards), checked
+  against the wheel in `crates/ocio/src/ocio_yaml_oracle_tests.rs`.
 
 ## Numeric helpers
 

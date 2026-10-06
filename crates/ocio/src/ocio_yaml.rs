@@ -27,11 +27,20 @@ use std::collections::HashSet;
 
 use ocio_ops::exception::Exception;
 use ocio_ops::logging::log_warning;
-use ocio_ops::open_color_types::TransformDirection;
-use ocio_ops::parse_utils::transform_direction_from_string;
+use ocio_ops::open_color_types::{Allocation, TransformDirection};
+use ocio_ops::parse_utils::{
+    allocation_from_string, cdl_style_from_string, negative_style_from_string,
+    transform_direction_from_string,
+};
 use ocio_ops::utils::string_utils::c_str;
 
 use crate::transform::Transform;
+use crate::transforms::allocation_transform::AllocationTransform;
+use crate::transforms::cdl_transform::CdlTransform;
+use crate::transforms::exponent_transform::ExponentTransform;
+use crate::transforms::exponent_with_linear_transform::ExponentWithLinearTransform;
+use crate::transforms::log_affine_transform::LogAffineTransform;
+use crate::transforms::log_camera_transform::LogCameraTransform;
 use crate::transforms::log_transform::LogTransform;
 use crate::transforms::matrix_transform::MatrixTransform;
 use crate::transforms::range_transform::{RangeTransform, range_style_from_string};
@@ -341,6 +350,386 @@ fn load_range(node: &Node) -> LoadResult<RangeTransform> {
     Ok(t)
 }
 
+/// The node as a `std::vector<float>`.
+///
+/// Port of `load(const YAML::Node&, std::vector<float>&)` (OCIOYaml.cpp:130-144 @ v2.5.2).
+pub(crate) fn load_vec_f32(node: &Node) -> LoadResult<Vec<f32>> {
+    node.as_::<Vec<f32>>()
+        .map_err(|e| parsing_failed(node, "vector<float>", &e.into()))
+}
+
+/// The node as an allocation: a string, then `AllocationFromString`.
+///
+/// Port of `load(const YAML::Node&, Allocation&)` (OCIOYaml.cpp:176-181 @ v2.5.2).
+pub(crate) fn load_allocation(node: &Node) -> LoadResult<Allocation> {
+    let s = load_string(node)?;
+    Ok(allocation_from_string(Some(c_str(&s))))
+}
+
+/// An `AllocationTransform`: `allocation`, `vars` (numbers, kept when there are any),
+/// `direction`.
+///
+/// Port of `load(const YAML::Node&, AllocationTransformRcPtr&)` (OCIOYaml.cpp:537-575 @
+/// v2.5.2).
+fn load_allocation_transform(node: &Node) -> LoadResult<AllocationTransform> {
+    let mut t = AllocationTransform::new();
+
+    check_duplicates(node)?;
+
+    for iter in node.iter() {
+        let key = iter.first.as_::<Vec<u8>>()?;
+        if iter.second.is_null()? || !iter.second.is_defined() {
+            continue;
+        }
+        let value = &iter.second;
+        match key.as_slice() {
+            b"allocation" => t.set_allocation(load_allocation(value)?),
+            b"vars" => {
+                let val = load_vec_f32(value)?;
+                if !val.is_empty() {
+                    t.set_vars(&val);
+                }
+            }
+            b"direction" => t.set_direction(load_direction(value)?),
+            _ => log_unknown_key_warning(node, &iter.first)?,
+        }
+    }
+    Ok(t)
+}
+
+/// A CDL's slope, offset or power: 3 numbers, or "'slope' values must be 3 floats. Found
+/// 'N'." through [`throw_value_error`].
+fn load_cdl_triple(node: &Node, key: &Node, name: &str, value: &Node) -> LoadResult<[f64; 3]> {
+    let floatvecval = load_vec_f64(value)?;
+    match <[f64; 3]>::try_from(floatvecval.as_slice()) {
+        Ok(rgb) => Ok(rgb),
+        Err(_) => {
+            let os = format!(
+                "'{name}' values must be 3 floats. Found '{}'.",
+                floatvecval.len()
+            );
+            Err(throw_value_error(node.tag()?, key, os.as_bytes()))
+        }
+    }
+}
+
+/// A `CDLTransform`: `slope`, `offset`, `power` (3 numbers each), `saturation` or `sat`,
+/// `style`, `direction`, `name`.
+///
+/// Port of `load(const YAML::Node&, CDLTransformRcPtr&)` (OCIOYaml.cpp:646-726 @ v2.5.2).
+fn load_cdl(node: &Node) -> LoadResult<CdlTransform> {
+    let mut t = CdlTransform::new();
+
+    check_duplicates(node)?;
+
+    for iter in node.iter() {
+        let key = iter.first.as_::<Vec<u8>>()?;
+        if iter.second.is_null()? || !iter.second.is_defined() {
+            continue;
+        }
+        let value = &iter.second;
+        match key.as_slice() {
+            b"slope" => t.set_slope(&load_cdl_triple(node, &iter.first, "slope", value)?),
+            b"offset" => t.set_offset(&load_cdl_triple(node, &iter.first, "offset", value)?),
+            b"power" => t.set_power(&load_cdl_triple(node, &iter.first, "power", value)?),
+            b"saturation" | b"sat" => t.set_sat(load_double(value)?),
+            b"style" => {
+                let style = load_string(value)?;
+                t.set_style(cdl_style_from_string(Some(c_str(&style)))?);
+            }
+            b"direction" => t.set_direction(load_direction(value)?),
+            b"name" => {
+                let name = load_string(value)?;
+                t.format_metadata_mut().set_name(Some(c_str(&name)));
+            }
+            _ => log_unknown_key_warning(node, &iter.first)?,
+        }
+    }
+    Ok(t)
+}
+
+/// Four numbers, or one number `v` read as `[v, v, v, alpha]`: the values of an exponent, or
+/// the gamma and offset of an exponent with a linear segment.
+fn load_rgba_or_single(value: &Node, alpha: f64) -> LoadResult<Vec<f64>> {
+    if value.node_type()? == NodeType::Sequence {
+        load_vec_f64(value)
+    } else {
+        // If a single value is supplied...
+        let single_val = load_double(value)?;
+        Ok(vec![single_val, single_val, single_val, alpha])
+    }
+}
+
+/// An `ExponentTransform`: `value` (4 numbers, or one for RGB with an alpha of 1), `style`,
+/// `direction`, `name`. The style depends on the direction set before it.
+///
+/// Port of `load(const YAML::Node&, ExponentTransformRcPtr&)` (OCIOYaml.cpp:917-977 @ v2.5.2).
+fn load_exponent(node: &Node) -> LoadResult<ExponentTransform> {
+    let mut t = ExponentTransform::new();
+
+    check_duplicates(node)?;
+
+    for iter in node.iter() {
+        let key = iter.first.as_::<Vec<u8>>()?;
+        if iter.second.is_null()? || !iter.second.is_defined() {
+            continue;
+        }
+        let value = &iter.second;
+        match key.as_slice() {
+            b"value" => {
+                let val = load_rgba_or_single(value, 1.0)?;
+                let Ok(v) = <[f64; 4]>::try_from(val.as_slice()) else {
+                    let os = format!("'value' values must be 4 floats. Found '{}'.", val.len());
+                    return Err(throw_value_error(node.tag()?, &iter.first, os.as_bytes()));
+                };
+                t.set_value(&v);
+            }
+            b"style" => {
+                let style = load_string(value)?;
+                t.set_negative_style(negative_style_from_string(Some(c_str(&style)))?)?;
+            }
+            b"direction" => t.set_direction(load_direction(value)?),
+            b"name" => {
+                let name = load_string(value)?;
+                t.format_metadata_mut().set_name(Some(c_str(&name)));
+            }
+            _ => log_unknown_key_warning(node, &iter.first)?,
+        }
+    }
+    Ok(t)
+}
+
+/// An `ExponentWithLinearTransform`: `gamma` (4 numbers, or one for RGB with an alpha of 1)
+/// and `offset` (4, or one with an alpha of 0), both required, `style`, `direction`, `name`.
+/// Its messages start "ExponentWithLinear parse error, " and have no line; unknown keys are
+/// reported with the node's tag (I-140).
+///
+/// Port of `load(const YAML::Node&, ExponentWithLinearTransformRcPtr&)` (OCIOYaml.cpp:
+/// 1018-1140 @ v2.5.2).
+fn load_exponent_with_linear(node: &Node) -> LoadResult<ExponentWithLinearTransform> {
+    const ERR: &str = "ExponentWithLinear parse error, ";
+
+    let mut t = ExponentWithLinearTransform::new();
+
+    let mut gamma_found = false;
+    let mut offset_found = false;
+
+    check_duplicates(node)?;
+
+    for iter in node.iter() {
+        let key = iter.first.as_::<Vec<u8>>()?;
+        if iter.second.is_null()? || !iter.second.is_defined() {
+            continue;
+        }
+        let value = &iter.second;
+        match key.as_slice() {
+            b"gamma" => {
+                let val = load_rgba_or_single(value, 1.0)?;
+                let Ok(v) = <[f64; 4]>::try_from(val.as_slice()) else {
+                    return Err(Exception::new(format!(
+                        "{ERR}gamma field must be 4 floats. Found '{}'.",
+                        val.len()
+                    ))
+                    .into());
+                };
+                t.set_gamma(&v);
+                gamma_found = true;
+            }
+            b"offset" => {
+                let val = load_rgba_or_single(value, 0.0)?;
+                let Ok(v) = <[f64; 4]>::try_from(val.as_slice()) else {
+                    return Err(Exception::new(format!(
+                        "{ERR}offset field must be 4 floats. Found '{}'.",
+                        val.len()
+                    ))
+                    .into());
+                };
+                t.set_offset(&v);
+                offset_found = true;
+            }
+            b"style" => {
+                let style = load_string(value)?;
+                t.set_negative_style(negative_style_from_string(Some(c_str(&style)))?)?;
+            }
+            b"direction" => t.set_direction(load_direction(value)?),
+            b"name" => {
+                let name = load_string(value)?;
+                t.format_metadata_mut().set_name(Some(c_str(&name)));
+            }
+            _ => log_unknown_key_warning_in(node.tag()?, &iter.first)?,
+        }
+    }
+
+    if !(gamma_found && offset_found) {
+        let missing = if !gamma_found && !offset_found {
+            "gamma and offset fields are missing"
+        } else if !gamma_found {
+            "gamma field is missing"
+        } else {
+            "offset field is missing"
+        };
+        return Err(Exception::new(format!("{ERR}{missing}")).into());
+    }
+    Ok(t)
+}
+
+/// A log parameter of 3 numbers, or one number for all three. A sequence of another size
+/// fails with "LogAffine/CameraTransform parse error, <key> value field must have 3
+/// components. Found 'N'.".
+///
+/// Port of `loadLogParam` (OCIOYaml.cpp:2584-2612 @ v2.5.2).
+fn load_log_param(node: &Node, param: &mut [f64; 3], param_name: &[u8]) -> LoadResult<()> {
+    if node.size()? == 0 {
+        // If a single value is provided.
+        let val = load_double(node)?;
+        *param = [val; 3];
+    } else {
+        let val = load_vec_f64(node)?;
+        let Ok(values) = <[f64; 3]>::try_from(val.as_slice()) else {
+            let mut os = b"LogAffine/CameraTransform parse error, ".to_vec();
+            os.extend_from_slice(param_name);
+            os.extend_from_slice(
+                format!(
+                    " value field must have 3 components. Found '{}'.",
+                    val.len()
+                )
+                .as_bytes(),
+            );
+            return Err(Exception::new(os).into());
+        };
+        *param = values;
+    }
+    Ok(())
+}
+
+/// A log's `base`: one number, or "<class> parse error, base must be a single double. Found
+/// N." for a sequence or a map of N elements.
+fn load_base(value: &Node, class: &str) -> LoadResult<f64> {
+    let nb = value.size()?;
+    if nb == 0 {
+        load_double(value)
+    } else {
+        Err(Exception::new(format!(
+            "{class} parse error, base must be a single double. Found {nb}."
+        ))
+        .into())
+    }
+}
+
+/// A `LogAffineTransform`: `base`, the four log parameters, `direction`, `name`. The values
+/// are set once the map is read.
+///
+/// Port of `load(const YAML::Node&, LogAffineTransformRcPtr&)` (OCIOYaml.cpp:2614-2685 @
+/// v2.5.2).
+fn load_log_affine(node: &Node) -> LoadResult<LogAffineTransform> {
+    let mut t = LogAffineTransform::new();
+
+    check_duplicates(node)?;
+
+    let mut base = 2.0;
+    let mut log_slope = [1.0; 3];
+    let mut lin_slope = [1.0; 3];
+    let mut lin_offset = [0.0; 3];
+    let mut log_offset = [0.0; 3];
+
+    for iter in node.iter() {
+        let key = iter.first.as_::<Vec<u8>>()?;
+        if iter.second.is_null()? || !iter.second.is_defined() {
+            continue;
+        }
+        let value = &iter.second;
+        match key.as_slice() {
+            b"base" => base = load_base(value, "LogAffineTransform")?,
+            b"lin_side_offset" => load_log_param(value, &mut lin_offset, &key)?,
+            b"lin_side_slope" => load_log_param(value, &mut lin_slope, &key)?,
+            b"log_side_offset" => load_log_param(value, &mut log_offset, &key)?,
+            b"log_side_slope" => load_log_param(value, &mut log_slope, &key)?,
+            b"direction" => t.set_direction(load_direction(value)?),
+            b"name" => {
+                let name = load_string(value)?;
+                t.format_metadata_mut().set_name(Some(c_str(&name)));
+            }
+            _ => log_unknown_key_warning(node, &iter.first)?,
+        }
+    }
+
+    t.set_base(base);
+    t.set_log_side_slope_value(&log_slope);
+    t.set_lin_side_slope_value(&lin_slope);
+    t.set_lin_side_offset_value(&lin_offset);
+    t.set_log_side_offset_value(&log_offset);
+    Ok(t)
+}
+
+/// A `LogCameraTransform`: `base`, the four log parameters, `lin_side_break` (required),
+/// `linear_slope` (set only when given), `direction`, `name`. The values are set once the map
+/// is read.
+///
+/// Port of `load(const YAML::Node&, LogCameraTransformRcPtr&)` (OCIOYaml.cpp:2740-2834 @
+/// v2.5.2).
+fn load_log_camera(node: &Node) -> LoadResult<LogCameraTransform> {
+    let mut lin_break = [0.0; 3];
+    let mut t = LogCameraTransform::new(&lin_break);
+
+    check_duplicates(node)?;
+
+    let mut base = 2.0;
+    let mut log_slope = [1.0; 3];
+    let mut lin_slope = [1.0; 3];
+    let mut lin_offset = [0.0; 3];
+    let mut log_offset = [0.0; 3];
+    let mut linear_slope = [1.0; 3];
+    let mut lin_break_found = false;
+    let mut linear_slope_found = false;
+
+    for iter in node.iter() {
+        let key = iter.first.as_::<Vec<u8>>()?;
+        if iter.second.is_null()? || !iter.second.is_defined() {
+            continue;
+        }
+        let value = &iter.second;
+        match key.as_slice() {
+            b"base" => base = load_base(value, "LogCameraTransform")?,
+            b"lin_side_offset" => load_log_param(value, &mut lin_offset, &key)?,
+            b"lin_side_slope" => load_log_param(value, &mut lin_slope, &key)?,
+            b"log_side_offset" => load_log_param(value, &mut log_offset, &key)?,
+            b"log_side_slope" => load_log_param(value, &mut log_slope, &key)?,
+            b"lin_side_break" => {
+                lin_break_found = true;
+                load_log_param(value, &mut lin_break, &key)?;
+            }
+            b"linear_slope" => {
+                linear_slope_found = true;
+                load_log_param(value, &mut linear_slope, &key)?;
+            }
+            b"direction" => t.set_direction(load_direction(value)?),
+            b"name" => {
+                let name = load_string(value)?;
+                t.format_metadata_mut().set_name(Some(c_str(&name)));
+            }
+            _ => log_unknown_key_warning(node, &iter.first)?,
+        }
+    }
+
+    if !lin_break_found {
+        return Err(Exception::new(
+            "LogCameraTransform parse error: lin_side_break values are missing.",
+        )
+        .into());
+    }
+
+    t.set_base(base);
+    t.set_log_side_slope_value(&log_slope);
+    t.set_lin_side_slope_value(&lin_slope);
+    t.set_lin_side_offset_value(&lin_offset);
+    t.set_log_side_offset_value(&log_offset);
+    t.set_lin_side_break_value(&lin_break);
+    if linear_slope_found {
+        t.set_linear_slope_value(&linear_slope)?;
+    }
+    Ok(t)
+}
+
 /// The error of a transform class whose loader is not ported yet: `work_package` ports it.
 fn not_ported_yet(tag: &[u8], work_package: &str) -> LoadError {
     let mut msg = b"Loading a !<".to_vec();
@@ -371,18 +760,18 @@ pub(crate) fn load_transform(node: &Node) -> LoadResult<Transform> {
 
     let ty = node.tag()?.to_vec();
     Ok(match ty.as_slice() {
-        b"AllocationTransform"
-        | b"BuiltinTransform"
-        | b"CDLTransform"
+        b"BuiltinTransform"
         | b"ColorSpaceTransform"
         | b"DisplayViewTransform"
-        | b"ExponentTransform"
-        | b"ExponentWithLinearTransform"
         | b"FileTransform"
-        | b"GroupTransform"
-        | b"LogAffineTransform"
-        | b"LogCameraTransform"
-        | b"LookTransform" => return Err(not_ported_yet(&ty, "WP 3.3h-i")),
+        | b"LookTransform" => return Err(not_ported_yet(&ty, "WP 3.3i")),
+        b"GroupTransform" => return Err(not_ported_yet(&ty, "WP 3.3h")),
+        b"AllocationTransform" => load_allocation_transform(node)?.into(),
+        b"CDLTransform" => load_cdl(node)?.into(),
+        b"ExponentTransform" => load_exponent(node)?.into(),
+        b"ExponentWithLinearTransform" => load_exponent_with_linear(node)?.into(),
+        b"LogAffineTransform" => load_log_affine(node)?.into(),
+        b"LogCameraTransform" => load_log_camera(node)?.into(),
         b"ExposureContrastTransform"
         | b"GradingPrimaryTransform"
         | b"GradingRGBCurveTransform"
