@@ -2,14 +2,13 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Port of `tests/cpu/ops/lut1d/Lut1DOpData_tests.cpp` @ v2.5.2: the tests of the forward
-//! LUT and of the inverse's set-up. Its tests of composition (`lut_1d_compose`,
-//! `lut_1d_compose_sc`, `compose_inverse_luts`) come with WP 2.1g; `make_fast_from_inverse_*`
-//! read files (Phase 4).
+//! LUT, of the inverse's set-up and of composition. `make_fast_from_inverse_*` read files
+//! (Phase 4).
 
-use ocio_testkit::upstream::check_throw_what;
+use ocio_testkit::upstream::{check_close, check_throw_what};
 
 use super::*;
-use crate::format_metadata::METADATA_ID;
+use crate::format_metadata::{METADATA_DESCRIPTION, METADATA_ID};
 
 /// Port of `OCIO_ADD_TEST(Lut1DOpData, get_lut_ideal_size)` @ v2.5.2.
 #[test]
@@ -741,4 +740,420 @@ fn inverse_half_domain() {
     }
     assert!(!reversal);
     assert!(inv_values[2] >= inv_values[32768 * 3 + 2]);
+}
+
+/// Port of `OCIO_ADD_TEST(Lut1DOpData, lut_1d_compose)` @ v2.5.2.
+#[test]
+fn lut_1d_compose() {
+    let mut lut1 = Lut1DOpData::new(10).unwrap();
+
+    lut1.get_format_metadata_mut()
+        .add_attribute(Some(METADATA_ID), Some(b"lut1"))
+        .unwrap();
+    lut1.get_format_metadata_mut()
+        .add_child_element(Some(METADATA_DESCRIPTION), Some(b"description of 'lut1'"))
+        .unwrap();
+    lut1.get_array_mut().resize(8, 3).unwrap();
+    {
+        let values = lut1.get_array_mut().get_values_mut();
+
+        values[0] = 0.0f32;
+        values[1] = 0.0f32;
+        values[2] = 0.002333f32;
+        values[3] = 0.0f32;
+        values[4] = 0.291341f32;
+        values[5] = 0.015624f32;
+        values[6] = 0.106521f32;
+        values[7] = 0.334331f32;
+        values[8] = 0.462431f32;
+        values[9] = 0.515851f32;
+        values[10] = 0.474151f32;
+        values[11] = 0.624611f32;
+        values[12] = 0.658791f32;
+        values[13] = 0.527381f32;
+        values[14] = 0.685071f32;
+        values[15] = 0.908501f32;
+        values[16] = 0.707951f32;
+        values[17] = 0.886331f32;
+        values[18] = 0.926671f32;
+        values[19] = 0.846431f32;
+        values[20] = 1.0f32;
+        values[21] = 1.0f32;
+        values[22] = 1.0f32;
+        values[23] = 1.0f32;
+    }
+
+    let mut lut2 = Lut1DOpData::new(10).unwrap();
+
+    lut2.get_format_metadata_mut()
+        .add_attribute(Some(METADATA_ID), Some(b"lut2"))
+        .unwrap();
+    lut2.get_format_metadata_mut()
+        .add_child_element(Some(METADATA_DESCRIPTION), Some(b"description of 'lut2'"))
+        .unwrap();
+    lut2.get_array_mut().resize(8, 3).unwrap();
+    {
+        let values = lut2.get_array_mut().get_values_mut();
+
+        values[0] = 0.0f32;
+        values[1] = 0.0f32;
+        values[2] = 0.0023303f32;
+        values[3] = 0.0f32;
+        values[4] = 0.0029134f32;
+        values[5] = 0.015624f32;
+        values[6] = 0.00010081f32;
+        values[7] = 0.0059806f32;
+        values[8] = 0.023362f32;
+        values[9] = 0.0045628f32;
+        values[10] = 0.024229f32;
+        values[11] = 0.05822f32;
+        values[12] = 0.0082598f32;
+        values[13] = 0.033831f32;
+        values[14] = 0.074063f32;
+        values[15] = 0.028595f32;
+        values[16] = 0.075003f32;
+        values[17] = 0.13552f32;
+        values[18] = 0.69154f32;
+        values[19] = 0.9213f32;
+        values[20] = 1.0f32;
+        values[21] = 0.76038f32;
+        values[22] = 1.0f32;
+        values[23] = 1.0f32;
+    }
+
+    let lut1_c = &lut1;
+    let lut2_c = &lut2;
+
+    {
+        let result = Lut1DOpData::compose(lut1_c, lut2_c, ComposeMethod::ResampleNo).unwrap();
+
+        assert_eq!(result.get_format_metadata().get_num_attributes(), 1);
+        assert_eq!(
+            result.get_format_metadata().get_attribute_name(0),
+            METADATA_ID
+        );
+        assert_eq!(
+            result.get_format_metadata().get_attribute_value(0),
+            b"lut1 + lut2"
+        );
+        assert_eq!(result.get_format_metadata().get_num_children_elements(), 2);
+        let desc1 = result.get_format_metadata().get_child_element(0).unwrap();
+        assert_eq!(desc1.get_element_name(), METADATA_DESCRIPTION);
+        assert_eq!(desc1.get_element_value(), b"description of 'lut1'");
+        let desc2 = result.get_format_metadata().get_child_element(1).unwrap();
+        assert_eq!(desc2.get_element_name(), METADATA_DESCRIPTION);
+        assert_eq!(desc2.get_element_value(), b"description of 'lut2'");
+
+        let values = result.get_array().get_values();
+
+        assert_eq!(result.get_array().get_length(), 8);
+
+        check_close(values[0], 0.0f32, 1e-6f32);
+        check_close(values[1], 0.0f32, 1e-6f32);
+        check_close(values[2], 0.00254739914f32, 1e-6f32);
+
+        check_close(values[3], 0.0f32, 1e-6f32);
+        check_close(values[4], 0.00669934973f32, 1e-6f32);
+        check_close(values[5], 0.00378420483f32, 1e-6f32);
+
+        check_close(values[6], 0.0f32, 1e-6f32);
+        check_close(values[7], 0.0121908365f32, 1e-6f32);
+        check_close(values[8], 0.0619750582f32, 1e-6f32);
+
+        check_close(values[9], 0.00682150759f32, 1e-6f32);
+        check_close(values[10], 0.0272925831f32, 1e-6f32);
+        check_close(values[11], 0.096942015f32, 1e-6f32);
+
+        check_close(values[12], 0.0206955168f32, 1e-6f32);
+        check_close(values[13], 0.0308703855f32, 1e-6f32);
+        check_close(values[14], 0.12295182f32, 1e-6f32);
+
+        check_close(values[15], 0.716288447f32, 1e-6f32);
+        check_close(values[16], 0.0731772855f32, 1e-6f32);
+        check_close(values[17], 1.0f32, 1e-6f32);
+
+        check_close(values[18], 0.725044191f32, 1e-6f32);
+        check_close(values[19], 0.857842028f32, 1e-6f32);
+        check_close(values[20], 1.0f32, 1e-6f32);
+    }
+
+    {
+        let result = Lut1DOpData::compose(lut1_c, lut2_c, ComposeMethod::ResampleBig).unwrap();
+
+        let values = result.get_array().get_values();
+
+        assert_eq!(result.get_array().get_length(), 65536);
+
+        check_close(values[0], 0.0f32, 1e-6f32);
+        check_close(values[1], 0.0f32, 1e-6f32);
+        check_close(values[2], 0.00254739914f32, 1e-6f32);
+
+        check_close(values[3], 0.0f32, 1e-6f32);
+        check_close(values[4], 6.34463504e-07f32, 1e-6f32);
+        check_close(values[5], 0.00254753046f32, 1e-6f32);
+
+        check_close(values[6], 0.0f32, 1e-6f32);
+        check_close(values[7], 1.26915984e-06f32, 1e-6f32);
+        check_close(values[8], 0.00254766271f32, 1e-6f32);
+
+        check_close(values[9], 0.0f32, 1e-6f32);
+        check_close(values[10], 1.90362334e-06f32, 1e-6f32);
+        check_close(values[11], 0.00254779495f32, 1e-6f32);
+
+        check_close(values[12], 0.0f32, 1e-6f32);
+        check_close(values[13], 2.53855251e-06f32, 1e-6f32);
+        check_close(values[14], 0.0025479272f32, 1e-6f32);
+
+        check_close(values[15], 0.0f32, 1e-6f32);
+        check_close(values[16], 3.17324884e-06f32, 1e-6f32);
+        check_close(values[17], 0.00254805945f32, 1e-6f32);
+
+        check_close(values[300], 0.0f32, 1e-6f32);
+        check_close(values[301], 6.3463347e-05f32, 1e-6f32);
+        check_close(values[302], 0.00256060902f32, 1e-6f32);
+
+        check_close(values[900], 0.0f32, 1e-6f32);
+        check_close(values[901], 0.000190390972f32, 1e-6f32);
+        check_close(values[902], 0.00258703064f32, 1e-6f32);
+
+        check_close(values[2700], 0.0f32, 1e-6f32);
+        check_close(values[2701], 0.000571172219f32, 1e-6f32);
+        check_close(values[2702], 0.00266629551f32, 1e-6f32);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Lut1DOpData, lut_1d_compose_sc)` @ v2.5.2.
+#[test]
+fn lut_1d_compose_sc() {
+    let mut lut1 = Lut1DOpData::new(2).unwrap();
+
+    lut1.get_array_mut().resize(2, 3).unwrap();
+    {
+        let values = lut1.get_array_mut().get_values_mut();
+        values[0] = 64.0f32;
+        values[1] = 64.0f32;
+        values[2] = 64.0f32;
+        values[3] = 196.0f32;
+        values[4] = 196.0f32;
+        values[5] = 196.0f32;
+    }
+    lut1.scale(1.0f32 / 255.0f32);
+
+    let mut lut2 = Lut1DOpData::new(2).unwrap();
+
+    lut2.get_array_mut().resize(32, 3).unwrap();
+    {
+        let values = lut2.get_array_mut().get_values_mut();
+
+        values[0] = 0.0000000f32;
+        values[1] = 0.0000000f32;
+        values[2] = 0.0023303f32;
+        values[3] = 0.0000000f32;
+        values[4] = 0.0001869f32;
+        values[5] = 0.0052544f32;
+        values[6] = 0.0000000f32;
+        values[7] = 0.0010572f32;
+        values[8] = 0.0096338f32;
+        values[9] = 0.0000000f32;
+        values[10] = 0.0029134f32;
+        values[11] = 0.0156240f32;
+        values[12] = 0.0001008f32;
+        values[13] = 0.0059806f32;
+        values[14] = 0.0233620f32;
+        values[15] = 0.0007034f32;
+        values[16] = 0.0104480f32;
+        values[17] = 0.0329680f32;
+        values[18] = 0.0021120f32;
+        values[19] = 0.0164810f32;
+        values[20] = 0.0445540f32;
+        values[21] = 0.0045628f32;
+        values[22] = 0.0242290f32;
+        values[23] = 0.0582200f32;
+        values[24] = 0.0082598f32;
+        values[25] = 0.0338310f32;
+        values[26] = 0.0740630f32;
+        values[27] = 0.0133870f32;
+        values[28] = 0.0454150f32;
+        values[29] = 0.0921710f32;
+        values[30] = 0.0201130f32;
+        values[31] = 0.0591010f32;
+        values[32] = 0.1126300f32;
+        values[33] = 0.0285950f32;
+        values[34] = 0.0750030f32;
+        values[35] = 0.1355200f32;
+        values[36] = 0.0389830f32;
+        values[37] = 0.0932290f32;
+        values[38] = 0.1609100f32;
+        values[39] = 0.0514180f32;
+        values[40] = 0.1138800f32;
+        values[41] = 0.1888800f32;
+        values[42] = 0.0660340f32;
+        values[43] = 0.1370600f32;
+        values[44] = 0.2195000f32;
+        values[45] = 0.0829620f32;
+        values[46] = 0.1628600f32;
+        values[47] = 0.2528300f32;
+        values[48] = 0.1023300f32;
+        values[49] = 0.1913800f32;
+        values[50] = 0.2889500f32;
+        values[51] = 0.1242500f32;
+        values[52] = 0.2227000f32;
+        values[53] = 0.3279000f32;
+        values[54] = 0.1488500f32;
+        values[55] = 0.2569100f32;
+        values[56] = 0.3697600f32;
+        values[57] = 0.1762300f32;
+        values[58] = 0.2940900f32;
+        values[59] = 0.4145900f32;
+        values[60] = 0.2065200f32;
+        values[61] = 0.3343300f32;
+        values[62] = 0.4624300f32;
+        values[63] = 0.2398200f32;
+        values[64] = 0.3777000f32;
+        values[65] = 0.5133400f32;
+        values[66] = 0.2762200f32;
+        values[67] = 0.4242800f32;
+        values[68] = 0.5673900f32;
+        values[69] = 0.3158500f32;
+        values[70] = 0.4741500f32;
+        values[71] = 0.6246100f32;
+        values[72] = 0.3587900f32;
+        values[73] = 0.5273800f32;
+        values[74] = 0.6850700f32;
+        values[75] = 0.4051500f32;
+        values[76] = 0.5840400f32;
+        values[77] = 0.7488100f32;
+        values[78] = 0.4550200f32;
+        values[79] = 0.6442100f32;
+        values[80] = 0.8158800f32;
+        values[81] = 0.5085000f32;
+        values[82] = 0.7079500f32;
+        values[83] = 0.8863300f32;
+        values[84] = 0.5656900f32;
+        values[85] = 0.7753400f32;
+        values[86] = 0.9602100f32;
+        values[87] = 0.6266700f32;
+        values[88] = 0.8464300f32;
+        values[89] = 1.0000000f32;
+        values[90] = 0.6915400f32;
+        values[91] = 0.9213000f32;
+        values[92] = 1.0000000f32;
+        values[93] = 0.7603800f32;
+        values[94] = 1.0000000f32;
+        values[95] = 1.0000000f32;
+    }
+
+    let lut1_c = &lut1;
+    let lut2_c = &lut2;
+
+    {
+        let l_comp = Lut1DOpData::compose(lut1_c, lut2_c, ComposeMethod::ResampleNo).unwrap();
+
+        assert_eq!(l_comp.get_array().get_length(), 2);
+        check_close(l_comp.get_array().get_values()[0], 0.00744791f32, 1e-6f32);
+        check_close(l_comp.get_array().get_values()[1], 0.03172233f32, 1e-6f32);
+        check_close(l_comp.get_array().get_values()[2], 0.07058375f32, 1e-6f32);
+        check_close(l_comp.get_array().get_values()[3], 0.3513808f32, 1e-6f32);
+        check_close(l_comp.get_array().get_values()[4], 0.51819527f32, 1e-6f32);
+        check_close(l_comp.get_array().get_values()[5], 0.67463773f32, 1e-6f32);
+    }
+
+    {
+        let l_comp = Lut1DOpData::compose(lut1_c, lut2_c, ComposeMethod::ResampleBig).unwrap();
+
+        assert_eq!(l_comp.get_array().get_length(), 65536);
+        check_close(l_comp.get_array().get_values()[0], 0.00744791f32, 1e-6f32);
+        check_close(l_comp.get_array().get_values()[1], 0.03172233f32, 1e-6f32);
+        check_close(l_comp.get_array().get_values()[2], 0.07058375f32, 1e-6f32);
+        check_close(
+            l_comp.get_array().get_values()[98688],
+            0.0991418f32,
+            1e-6f32,
+        );
+        check_close(
+            l_comp.get_array().get_values()[98689],
+            0.1866853f32,
+            1e-6f32,
+        );
+        check_close(
+            l_comp.get_array().get_values()[98690],
+            0.2830042f32,
+            1e-6f32,
+        );
+        check_close(
+            l_comp.get_array().get_values()[196605],
+            0.3513808f32,
+            1e-6f32,
+        );
+        check_close(
+            l_comp.get_array().get_values()[196606],
+            0.51819527f32,
+            1e-6f32,
+        );
+        check_close(
+            l_comp.get_array().get_values()[196607],
+            0.67463773f32,
+            1e-6f32,
+        );
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Lut1DOpData, compose_inverse_luts)` @ v2.5.2.
+#[test]
+fn compose_inverse_luts() {
+    let lut_ref = Lut1DOpData::new(17).unwrap();
+    let mut lut = Lut1DOpData::new(17).unwrap();
+
+    for val in lut.get_array_mut().get_values_mut().iter_mut() {
+        *val *= *val;
+    }
+
+    let lut_fwd1 = lut.clone();
+    let lut_fwd2 = lut_fwd1.clone();
+
+    // Forward + forward.
+    let comp_lut_fwd_fwd =
+        Lut1DOpData::compose(&lut_fwd1, &lut_fwd2, ComposeMethod::ResampleNo).unwrap();
+    assert_eq!(
+        comp_lut_fwd_fwd.get_direction(),
+        TransformDirection::Forward
+    );
+
+    // Inverse + inverse.
+    let mut lut_inv1_non_const = lut.inverse();
+    lut_inv1_non_const.finalize().unwrap();
+    let lut_inv1 = lut_inv1_non_const;
+    let mut lut_inv2_non_const = lut.inverse();
+    lut_inv2_non_const.finalize().unwrap();
+    let lut_inv2 = lut_inv2_non_const;
+    let comp_lut_inv_inv =
+        Lut1DOpData::compose(&lut_inv1, &lut_inv2, ComposeMethod::ResampleNo).unwrap();
+    assert_eq!(
+        comp_lut_inv_inv.get_direction(),
+        TransformDirection::Inverse
+    );
+
+    assert!(comp_lut_fwd_fwd.get_array().get_values() == comp_lut_inv_inv.get_array().get_values());
+
+    // Forward + inverse.
+    let comp_lut_fwd_inv =
+        Lut1DOpData::compose(&lut_fwd1, &lut_inv1, ComposeMethod::ResampleNo).unwrap();
+    assert_eq!(
+        comp_lut_fwd_inv.get_direction(),
+        TransformDirection::Forward
+    );
+
+    assert!(comp_lut_fwd_inv.get_array().get_values() == lut_ref.get_array().get_values());
+
+    // Inverse + forward.
+    let comp_lut_inv_fwd =
+        Lut1DOpData::compose(&lut_inv1, &lut_fwd1, ComposeMethod::ResampleNo).unwrap();
+    assert_eq!(
+        comp_lut_inv_fwd.get_direction(),
+        TransformDirection::Forward
+    );
+
+    assert!(comp_lut_inv_fwd.is_input_half_domain());
+    assert_eq!(comp_lut_inv_fwd.get_array().get_length(), 65536);
+    assert_eq!(comp_lut_inv_fwd.get_array()[14336 * 3], 0.5f32);
 }

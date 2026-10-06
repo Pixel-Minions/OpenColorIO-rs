@@ -60,8 +60,8 @@ fn simd_modes() -> Vec<CpuInfo> {
 /// `GetLut1DRenderer` picks a lookup for integer and half input that may use the LUT as it is,
 /// a float renderer for a half domain with float input, with or without hue adjust, and the
 /// hue-adjust renderer of a standard domain with float input, the standard domain's renderer,
-/// and the inverse renderers, for every output bit depth; the lookups that must resample the
-/// LUT are still to come.
+/// the inverse renderers, and the lookups of LUTs resampled for their input, for every output
+/// bit depth.
 #[test]
 fn dispatch() {
     let lut8 = Lut1DOpData::new(256).unwrap();
@@ -140,23 +140,10 @@ fn dispatch() {
             get_lut1d_renderer(lut, depth, out).unwrap();
         }
     }
-    assert_eq!(
-        message(get_lut1d_renderer(&hue, BitDepth::Uint10, BitDepth::F32)),
-        NOT_PORTED_COMPOSE
-    );
-    // A LUT the lookup must resample first.
-    assert_eq!(
-        message(get_lut1d_renderer(&lut8, BitDepth::Uint10, BitDepth::F32)),
-        NOT_PORTED_COMPOSE
-    );
-    assert_eq!(
-        message(get_lut1d_renderer(
-            &half_lut,
-            BitDepth::Uint16,
-            BitDepth::F32
-        )),
-        NOT_PORTED_COMPOSE
-    );
+    // LUTs the lookup must resample first.
+    get_lut1d_renderer(&hue, BitDepth::Uint10, BitDepth::F32).unwrap();
+    get_lut1d_renderer(&lut8, BitDepth::Uint10, BitDepth::F32).unwrap();
+    get_lut1d_renderer(&half_lut, BitDepth::Uint16, BitDepth::F32).unwrap();
     // The scalar profile is the standard domain's.
     for lut in [&half_lut, &lut8.inverse(), &hue] {
         assert!(message(get_lut1d_scalar_renderer(lut, BitDepth::F32)).contains("scalar profile"));

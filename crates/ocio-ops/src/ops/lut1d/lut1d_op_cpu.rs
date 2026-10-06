@@ -27,20 +27,20 @@
 //!   (`lut1d_op_cpu_sse2`, ...). A row of one pixel takes the scalar loop
 //!   ([`get_lut1d_scalar_renderer`]); [`get_lut1d_profile_renderer`] gives any profile.
 //!
-//! Not here yet, and an error until then: the lookups of a LUT that must first be resampled
-//! for the input bit depth (`Compose`, WP 2.1g).
+//! A lookup of a LUT whose entries aren't one per code of the input bit depth looks up the LUT
+//! resampled on that bit depth's lookup domain (`Lut1DOpData::compose`), which the CPU renders
+//! through the LUT's float renderer.
 
 use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use super::lut1d_op::NOT_PORTED_COMPOSE;
 use super::lut1d_op_cpu_avx::apply_lut_avx;
 use super::lut1d_op_cpu_avx2::apply_lut_avx2;
 use super::lut1d_op_cpu_avx512::apply_lut_avx512;
 use super::lut1d_op_cpu_sse2::apply_lut_sse2;
 use super::lut1d_op_data::ComponentProperties;
-use super::lut1d_op_data::Lut1DOpData;
+use super::lut1d_op_data::{ComposeMethod, Lut1DOpData};
 use super::{lut1d_op_cpu_avx, lut1d_op_cpu_avx2, lut1d_op_cpu_avx512, lut1d_op_cpu_sse2};
 use crate::bit_depth_utils::{
     BitDepthInfo, ChannelType, Converter, F16, F32, Uint8, Uint10, Uint12, Uint16,
@@ -1702,9 +1702,30 @@ impl<I: BitDepthInfo + 'static, O: LutOutput> CpuOp for InvLut1DRenderer<I, O> {
     }
 }
 
+/// The LUT a lookup with `in_bd` values uses: `lut` if it has an entry per code
+/// (`mayLookup`), else `lut` composed on the lookup domain of `in_bd`.
+///
+/// Port of `BaseLut1DRenderer::updateData`'s resampling (Lut1DOpCPU.cpp:388-406 @ v2.5.2).
+fn lookup_lut(lut: &Lut1DOpData, in_bd: BitDepth) -> Result<std::borrow::Cow<'_, Lut1DOpData>> {
+    let must_resample = !lut.may_lookup(in_bd)?;
+
+    // If we are able to lookup, need to resample the LUT based on inBitDepth.
+    if must_resample {
+        let new_lut_tmp = Lut1DOpData::make_lookup_domain(in_bd)?;
+
+        // Note: Compose should render at 32f, to avoid infinite recursion.
+        return Ok(std::borrow::Cow::Owned(Lut1DOpData::compose(
+            &new_lut_tmp,
+            lut,
+            // Prevent compose from modifying newLut domain.
+            ComposeMethod::ResampleNo,
+        )?));
+    }
+    Ok(std::borrow::Cow::Borrowed(lut))
+}
+
 /// The hue-adjust renderer of a forward LUT from `I` to `O`: a lookup for integer and half
-/// input, which may need the LUT resampled first ([`NOT_PORTED_COMPOSE`]), or the float
-/// renderer.
+/// input, of the LUT resampled if need be ([`lookup_lut`]), or the float renderer.
 ///
 /// Port of the constructors of `Lut1DRendererHueAdjust<inBD, outBD>` and
 /// `Lut1DRendererHalfCodeHueAdjust<inBD, outBD>` (Lut1DOpCPU.cpp:155-177, 311-443 @ v2.5.2).
@@ -1717,16 +1738,14 @@ where
     I::Type: LookupIndex,
 {
     if I::BIT_DEPTH != BitDepth::F32 {
-        if !lut.may_lookup(I::BIT_DEPTH)? {
-            return Err(Exception::new(NOT_PORTED_COMPOSE));
-        }
-        return Ok(Arc::new(Lut1DHueAdjustLookupRenderer::<I, O>::new(lut)));
+        let lut = lookup_lut(lut, I::BIT_DEPTH)?;
+        return Ok(Arc::new(Lut1DHueAdjustLookupRenderer::<I, O>::new(&lut)));
     }
     Ok(Arc::new(Lut1DHueAdjustFloatRenderer::<O>::new(lut)))
 }
 
 /// The renderer of a forward LUT without hue adjust from `I` to `O`: a lookup for integer and
-/// half input, which may need the LUT resampled first ([`NOT_PORTED_COMPOSE`]); for float
+/// half input, of the LUT resampled if need be ([`lookup_lut`]); for float
 /// input, a half domain's renderer, or a standard domain's with the SIMD kernel `cpu`
 /// dispatches to ([`lut1d_kernel`]).
 ///
@@ -1742,10 +1761,8 @@ where
 {
     if I::BIT_DEPTH != BitDepth::F32 {
         // `isLookup()`: a LUT the lookup can't use as it is is resampled first (`Compose`).
-        if !lut.may_lookup(I::BIT_DEPTH)? {
-            return Err(Exception::new(NOT_PORTED_COMPOSE));
-        }
-        return Ok(Arc::new(Lut1DLookupRenderer::<I, O>::new(lut)));
+        let lut = lookup_lut(lut, I::BIT_DEPTH)?;
+        return Ok(Arc::new(Lut1DLookupRenderer::<I, O>::new(&lut)));
     }
     if lut.is_input_half_domain() {
         // `Lut1DRendererHalfCode::apply` never calls `m_applyLutFunc`.
