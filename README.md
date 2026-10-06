@@ -96,6 +96,9 @@ milestone M1:
 
 **Merged so far in Phases 2 and 3:** the fixed functions' op data, the ACES 1.x fixed-function
 renderers (red modifier, glow, dark-to-dim and gamut compression) and FixedFunctionTransform;
+the rest of the fixed functions on the CPU (surround, HSV, HSY, xyY, u'v'Y, LUV, gamma-log and
+double-log) and ACES 2.0 on the CPU (the output transform, tone scale, gamut compression and
+RGB-to-JMh, with the color-matrix helpers they use);
 the config transforms ColorSpaceTransform, DisplayViewTransform, LookTransform, FileTransform
 and BuiltinTransform with its registry (their classes and text; their processors come with the
 config). The live oracle can now also drive a config, its context and its file rules call by
@@ -184,7 +187,7 @@ instead. Every such case, and every upstream bug the port reproduces, is listed 
 
 | Suite | Ported | Total |
 |---|---:|---:|
-| C++ | 325 | 1,191 |
+| C++ | 350 | 1,191 |
 | GPU | 0 | 264 |
 | Python | 0 | 384 |
 
