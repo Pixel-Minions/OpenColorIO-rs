@@ -363,6 +363,95 @@ fn groups_and_back_references_match_as_in_the_wheel() {
     check(groups().into_iter().map(|p| (p, paths.clone())).collect());
 }
 
+/// A lookahead is an expression of its own that starts where it stands: there `^` matches,
+/// and `\b`/`\B` see no character before it (the p3-regex verifier's cases).
+#[test]
+fn lookaheads_start_their_own_expression() {
+    let patterns = [
+        r"a(?=^b)b",
+        r"a(?=\bb)b",
+        r"ab(?=^)",
+        r"a(?=(?:^|x)b)b",
+        r"a(?=\Bb)b",
+        r"a(?!^b)b",
+        r"a(?=\B)b",
+        r".(?=\b)",
+        r"(?=^a)a",
+        r"a(?=(?=^b))b",
+        r"a(?=b(?=^))b",
+        r"a(?=b\b)b",
+        r"_(?=\b)",
+        r"a(?=$)",
+        r"a(?!$)b",
+        r"(?:a(?=^))*",
+        r"a(?=.^)",
+    ];
+    let paths: Vec<Vec<u8>> = ["ab", "a", "b", "", "a_", "ab_", "aab", "_"]
+        .iter()
+        .map(|p| p.as_bytes().to_vec())
+        .collect();
+    check(
+        patterns
+            .iter()
+            .map(|p| (p.to_string(), paths.clone()))
+            .collect(),
+    );
+}
+
+/// A brace copies its body, and each copy's loops count their entries at a position apart;
+/// `*`, `+` and `?` don't copy (the p3-regex verifier's cases).
+#[test]
+fn brace_copies_count_their_loops_apart() {
+    let bodies = [
+        r"(?:(?:()|()|())?){3}",
+        r"(?:(?:()|()|())*){2}",
+        r"(?:(?:()|()|())*){2,}",
+        r"(?:(?:()|()|())*){1,2}",
+        r"(?:(?:()|()|())*){1,2}?",
+        r"(?:(?:()|()|())*){3,}",
+        r"(?:(?:()|()|())*?){2}",
+        r"(?:(?:()|()|())??){3}",
+        r"(?:(?:()|()|()){0,1}){3}",
+        r"(?:(?:()|()|())+){2}",
+        r"(?:(?:()|()|())*)+",
+        r"(?:(?:()|()|())*)*",
+        r"(?:()|())*",
+        r"(?:()|()|())*",
+        r"(?:()|()|()){0,3}",
+    ];
+    let tails = [r"\1\2\3", r"\1\2", r"\1", r"\3", ""];
+    let paths = vec![b"".to_vec(), b"a".to_vec()];
+    let mut cases = Vec::new();
+    for body in bodies {
+        for tail in tails {
+            let pattern = format!("{body}{tail}");
+            if Regex::new(pattern.as_bytes(), Library::Libstdcxx).is_ok() {
+                cases.push((pattern, paths.clone()));
+            }
+        }
+    }
+    check(cases);
+}
+
+/// Inputs the p3-regex verifier's mutants needed: classes, escapes and anchors.
+#[test]
+fn classes_escapes_and_anchors_match_as_in_the_wheel() {
+    let cases: [(&str, &[&[u8]]); 6] = [
+        ("[[:blank:]]", &[b"\t", b" ", b"a", b"\x0b"]),
+        ("[[:print:]]", &[b" ", b"\t", b"~", b"\x7f"]),
+        (r"\v", &[b"\x0b", b"v"]),
+        (r"\0?a", &[b"0a", b"a"]),
+        ("a\n^b", &[b"a\nb"]),
+        (r"_\b", &[b"_"]),
+    ];
+    check(
+        cases
+            .iter()
+            .map(|(p, paths)| (p.to_string(), paths.iter().map(|x| x.to_vec()).collect()))
+            .collect(),
+    );
+}
+
 /// Paths of 8,192 bytes match as in the wheel; longer ones, and matches whose recursion would
 /// go past 100,000 levels, the port refuses (U-54).
 #[test]
