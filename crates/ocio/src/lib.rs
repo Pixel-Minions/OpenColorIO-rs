@@ -35,9 +35,10 @@ pub use named_transform::NamedTransform;
 pub use ocio_ops::exception::{Exception, ExceptionKind, Result};
 pub use ocio_ops::format_metadata::FormatMetadataImpl as FormatMetadata;
 pub use ocio_ops::open_color_types::{
-    Allocation, BSplineType, BitDepth, CdlStyle, ColorSpaceDirection, EnvironmentMode,
-    FixedFunctionStyle, GradingStyle, Lut1DHueAdjust, NegativeStyle, OptimizationFlags,
-    ReferenceSpaceType, RgbCurveType, TransformDirection, ViewTransformDirection,
+    Allocation, BSplineType, BitDepth, CdlStyle, ColorSpaceDirection, ColorSpaceVisibility,
+    EnvironmentMode, FixedFunctionStyle, GradingStyle, Lut1DHueAdjust, NegativeStyle,
+    OptimizationFlags, ReferenceSpaceType, RgbCurveType, SearchReferenceSpaceType,
+    TransformDirection, ViewTransformDirection,
 };
 pub use ocio_ops::ops::gradingrgbcurve::grading_b_spline_curve::{
     GradingBSplineCurve, GradingControlPoint,

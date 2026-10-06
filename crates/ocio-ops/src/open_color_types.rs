@@ -77,6 +77,32 @@ pub enum ReferenceSpaceType {
     Display,
 }
 
+/// Which reference space a search of color spaces keeps: the scene's, the display's, or both.
+///
+/// Port of `SearchReferenceSpaceType` (include/OpenColorIO/OpenColorTypes.h:316-321 @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SearchReferenceSpaceType {
+    /// `SEARCH_REFERENCE_SPACE_SCENE`.
+    Scene = 0,
+    /// `SEARCH_REFERENCE_SPACE_DISPLAY`.
+    Display,
+    /// `SEARCH_REFERENCE_SPACE_ALL`.
+    All,
+}
+
+/// Which color spaces a search keeps: the active ones, the inactive ones, or all.
+///
+/// Port of `ColorSpaceVisibility` (include/OpenColorIO/OpenColorTypes.h:323-328 @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ColorSpaceVisibility {
+    /// `COLORSPACE_ACTIVE`.
+    Active = 0,
+    /// `COLORSPACE_INACTIVE`.
+    Inactive,
+    /// `COLORSPACE_ALL`.
+    All,
+}
+
 /// Which of a color space's transforms: to its reference space, or from it.
 ///
 /// Port of `ColorSpaceDirection` (include/OpenColorIO/OpenColorTypes.h:343-347 @ v2.5.2).
