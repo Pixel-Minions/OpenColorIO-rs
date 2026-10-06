@@ -475,6 +475,26 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p3-rules` (3.9e-f); checked against the wheel
   (`crates/ocio/tests/config_oracle.rs`, `regex_rules_made_globs_match_the_wheel`).
 
+### I-140. The transform loaders word their messages unevenly
+
+- **Upstream:** the loaders of a config's transforms (`OCIOYaml.cpp`) report the same things
+  in different words:
+  - an unknown key gives "At line N, unknown key 'key' in 'MatrixTransform'." in most
+    classes, but "Unknown key in LogTransform: 'key'.", without its line, in the Log,
+    ExponentWithLinear, FixedFunction and grading loaders (`OCIOYaml.cpp:1118, 1476, 1748,
+    2056, 2239, 2443, 2920`, which call the other overload of `LogUnknownKeyWarning`);
+  - a `base` that isn't one number gives "LogTransform parse error, base must be a  single
+    double. Found 2." with two spaces, and no line (`OCIOYaml.cpp:2900-2901`);
+  - a node that isn't a map gives "Unsupported Transform type encountered: (2) in OCIO
+    profile.", the number of yaml-cpp's `NodeType` (2 a scalar, 3 a sequence) rather than its
+    name (`OCIOYaml.cpp:3198-3205`).
+  Seen through the wheel.
+- **Who notices:** anyone reading the warnings and errors of a config with mistakes in it.
+- **A fix:** one wording with the line for every unknown key; one space; the node type's
+  name.
+- **Status:** matched in `p3-yaml-load-1` (3.3g: the Log, Matrix and Range loaders; the others
+  with their chunks), checked against the wheel in `crates/ocio/src/ocio_yaml_oracle_tests.rs`.
+
 ## Numeric helpers
 
 ### I-20. Double values are compared to 0 and 1 in float precision
