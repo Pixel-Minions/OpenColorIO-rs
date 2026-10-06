@@ -21,7 +21,7 @@ use ocio_ops::open_color_types::{
 };
 use ocio_ops::parse_utils::{
     ROLE_DEFAULT, find_in_string_vec_case_ignore, intersect_string_vecs_case_ignore,
-    split_string_env_style,
+    join_string_env_style, split_string_env_style,
 };
 use ocio_ops::platform::strcasecmp;
 use ocio_ops::platform::{getenv, is_env_present};
@@ -247,6 +247,9 @@ pub struct Config {
     shared_views: ViewVec,
     /// `m_displayCache` (`mutable`): the active displays, computed when first needed.
     display_cache: OnceLock<StringVec>,
+    /// `m_virtualDisplay`: the views of the virtual display. It is temporary, so that the
+    /// displays instantiated from it aren't saved.
+    virtual_display: Display,
     /// `m_activeDisplaysEnvOverride`: the displays of `OCIO_ACTIVE_DISPLAYS`.
     active_displays_env_override: StringVec,
     /// `m_activeViewsEnvOverride`: the views of `OCIO_ACTIVE_VIEWS`.
@@ -302,6 +305,7 @@ impl Clone for Config {
             active_views: self.active_views.clone(),
             shared_views: self.shared_views.clone(),
             display_cache: self.display_cache.clone(),
+            virtual_display: self.virtual_display.clone(),
             active_displays_env_override: self.active_displays_env_override.clone(),
             active_views_env_override: self.active_views_env_override.clone(),
             default_luma_coefs: self.default_luma_coefs,
@@ -348,6 +352,12 @@ impl Config {
             active_views: StringVec::new(),
             shared_views: ViewVec::new(),
             display_cache: OnceLock::new(),
+            // This is used to allow the YAML writer to not save any virtual displays that were
+            // instantiated.
+            virtual_display: Display {
+                temporary: true,
+                ..Display::default()
+            },
             active_displays_env_override: StringVec::new(),
             active_views_env_override: StringVec::new(),
             default_luma_coefs: DEFAULT_LUMA_COEFFS,
@@ -2418,6 +2428,618 @@ impl Config {
             ViewType::DisplayDefined => index
                 .and_then(|i| self.displays[iter].1.views.get(i))
                 .map_or(&[], |v| &v.name),
+        }
+    }
+
+    // Virtual display /////////////////////////////////////////////////////////////////////////
+
+    /// Whether the virtual display has the view `view_name` (its own or a shared one).
+    ///
+    /// Port of `Config::hasVirtualView` (src/OpenColorIO/Config.cpp:3816-3822 @ v2.5.2).
+    #[doc(alias = "hasVirtualView")]
+    pub fn has_virtual_view(&self, view_name: impl AsRef<[u8]>) -> bool {
+        // All views must have a color space, so if it's not empty, the view exists.
+        !self
+            .virtual_display_view_color_space_name(view_name)
+            .is_empty()
+    }
+
+    /// Whether `view_name` is one of the virtual display's shared views, ignoring case.
+    ///
+    /// Port of `Config::isVirtualViewShared` (src/OpenColorIO/Config.cpp:3824-3838 @ v2.5.2).
+    #[doc(alias = "isVirtualViewShared")]
+    pub fn is_virtual_view_shared(&self, view_name: impl AsRef<[u8]>) -> bool {
+        let view_name = c_str(view_name.as_ref());
+        if view_name.is_empty() {
+            return false;
+        }
+
+        for v in 0..self.virtual_display_num_views(ViewType::Shared) {
+            let shared_view_name = self.virtual_display_view(ViewType::Shared, v);
+            if !shared_view_name.is_empty() && strcasecmp(shared_view_name, view_name).is_eq() {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Adds a view to the virtual display; refuses one of a name it has (ignoring case).
+    ///
+    /// Port of `Config::addVirtualDisplayView` (src/OpenColorIO/Config.cpp:3840-3874 @ v2.5.2).
+    #[doc(alias = "addVirtualDisplayView")]
+    pub fn add_virtual_display_view(
+        &mut self,
+        view: impl AsRef<[u8]>,
+        view_transform: impl AsRef<[u8]>,
+        color_space: impl AsRef<[u8]>,
+        looks: impl AsRef<[u8]>,
+        rule: impl AsRef<[u8]>,
+        description: impl AsRef<[u8]>,
+    ) -> Result<()> {
+        let view = c_str(view.as_ref());
+        let color_space = c_str(color_space.as_ref());
+        if view.is_empty() {
+            return Err(Exception::new(
+                "View could not be added to virtual_display in config: a non-empty view name is \
+                 needed.",
+            ));
+        }
+
+        if color_space.is_empty() {
+            return Err(Exception::new(
+                "View could not be added to virtual_display in config: a non-empty color space \
+                 name is needed.",
+            ));
+        }
+
+        if find_view(&self.virtual_display.views, view).is_some() {
+            return Err(Exception::new(
+                [
+                    b"View could not be added to virtual_display in config: View '".as_slice(),
+                    view,
+                    b"' already exists.",
+                ]
+                .concat(),
+            ));
+        }
+
+        self.virtual_display.views.push(View::new(
+            view,
+            view_transform.as_ref(),
+            color_space,
+            looks.as_ref(),
+            rule.as_ref(),
+            description.as_ref(),
+        ));
+
+        self.reset_cache_ids();
+        Ok(())
+    }
+
+    /// Adds a reference to the config's shared view `shared_view` to the virtual display.
+    ///
+    /// Port of `Config::addVirtualDisplaySharedView` (src/OpenColorIO/Config.cpp:3876-3898 @
+    /// v2.5.2).
+    #[doc(alias = "addVirtualDisplaySharedView")]
+    pub fn add_virtual_display_shared_view(&mut self, shared_view: impl AsRef<[u8]>) -> Result<()> {
+        let shared_view = c_str(shared_view.as_ref());
+        if shared_view.is_empty() {
+            return Err(Exception::new(
+                "Shared view could not be added to virtual_display: non-empty view name is \
+                 needed.",
+            ));
+        }
+
+        let views = &mut self.virtual_display.shared_views;
+        if contain(views, shared_view) {
+            return Err(Exception::new(
+                [
+                    b"Shared view could not be added to virtual_display: There is already a \
+                      shared view named '"
+                        .as_slice(),
+                    shared_view,
+                    b"'.",
+                ]
+                .concat(),
+            ));
+        }
+
+        views.push(shared_view.to_vec());
+
+        self.reset_cache_ids();
+        Ok(())
+    }
+
+    /// The number of the virtual display's shared or own views.
+    ///
+    /// Port of `Config::getVirtualDisplayNumViews` (src/OpenColorIO/Config.cpp:3900-3911 @
+    /// v2.5.2).
+    #[doc(alias = "getVirtualDisplayNumViews")]
+    pub fn virtual_display_num_views(&self, type_: ViewType) -> i32 {
+        match type_ {
+            ViewType::DisplayDefined => self.virtual_display.views.len() as i32,
+            ViewType::Shared => self.virtual_display.shared_views.len() as i32,
+        }
+    }
+
+    /// The virtual display's shared or own view at `index`; `""` outside them.
+    ///
+    /// Port of `Config::getVirtualDisplayView` (src/OpenColorIO/Config.cpp:3913-3938 @
+    /// v2.5.2).
+    #[doc(alias = "getVirtualDisplayView")]
+    pub fn virtual_display_view(&self, type_: ViewType, index: i32) -> &[u8] {
+        let index = usize::try_from(index).ok();
+        match type_ {
+            ViewType::DisplayDefined => index
+                .and_then(|i| self.virtual_display.views.get(i))
+                .map_or(&[], |v| &v.name),
+            ViewType::Shared => index
+                .and_then(|i| self.virtual_display.shared_views.get(i))
+                .map_or(&[], Vec::as_slice),
+        }
+    }
+
+    /// Whether the two configs' virtual displays have the view `view_name` with the same color
+    /// space, looks, view transform and rule, ignoring case (not the description).
+    ///
+    /// Port of `Config::AreVirtualViewsEqual` (src/OpenColorIO/Config.cpp:3940-3966 @ v2.5.2).
+    #[doc(alias = "AreVirtualViewsEqual")]
+    pub fn are_virtual_views_equal(
+        first: &Config,
+        second: &Config,
+        view_name: impl AsRef<[u8]>,
+    ) -> bool {
+        let view_name = view_name.as_ref();
+        let cs1 = first.virtual_display_view_color_space_name(view_name);
+        let cs2 = second.virtual_display_view_color_space_name(view_name);
+
+        // If the color space is not empty, the display and view exist.
+        if !cs1.is_empty() && !cs2.is_empty() && strcasecmp(cs1, cs2).is_eq() {
+            // Note the remaining strings may be empty in a valid view.
+            // Intentionally not checking the description since it is not a functional
+            // difference.
+            if strcasecmp(
+                first.virtual_display_view_looks(view_name),
+                second.virtual_display_view_looks(view_name),
+            )
+            .is_eq()
+                && strcasecmp(
+                    first.virtual_display_view_transform_name(view_name),
+                    second.virtual_display_view_transform_name(view_name),
+                )
+                .is_eq()
+                && strcasecmp(
+                    first.virtual_display_view_rule(view_name),
+                    second.virtual_display_view_rule(view_name),
+                )
+                .is_eq()
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// A field of the virtual display's view `view`: the config's shared view when the virtual
+    /// display shares it, else its own view of that name (ignoring case); `""` for none.
+    ///
+    /// The body of upstream's `getVirtualDisplayView*` getters (src/OpenColorIO/Config.cpp:
+    /// 3968-4061 @ v2.5.2).
+    fn virtual_display_view_field(&self, view: &[u8], field: fn(&View) -> &[u8]) -> &[u8] {
+        // Get the field for the case where a virtual view is shared.
+        if self.is_virtual_view_shared(view) {
+            return self.impl_view(b"", view).map_or(&[], field);
+        }
+
+        match find_view(&self.virtual_display.views, c_str(view)) {
+            Some(i) => field(&self.virtual_display.views[i]),
+            None => &[],
+        }
+    }
+
+    /// Port of `Config::getVirtualDisplayViewTransformName` (src/OpenColorIO/Config.cpp:
+    /// 3968-3985 @ v2.5.2).
+    #[doc(alias = "getVirtualDisplayViewTransformName")]
+    pub fn virtual_display_view_transform_name(&self, view: impl AsRef<[u8]>) -> &[u8] {
+        self.virtual_display_view_field(view.as_ref(), |v| &v.view_transform)
+    }
+
+    /// Port of `Config::getVirtualDisplayViewColorSpaceName` (src/OpenColorIO/Config.cpp:
+    /// 3987-4004 @ v2.5.2).
+    #[doc(alias = "getVirtualDisplayViewColorSpaceName")]
+    pub fn virtual_display_view_color_space_name(&self, view: impl AsRef<[u8]>) -> &[u8] {
+        self.virtual_display_view_field(view.as_ref(), |v| &v.colorspace)
+    }
+
+    /// Port of `Config::getVirtualDisplayViewLooks` (src/OpenColorIO/Config.cpp:4006-4023 @
+    /// v2.5.2).
+    #[doc(alias = "getVirtualDisplayViewLooks")]
+    pub fn virtual_display_view_looks(&self, view: impl AsRef<[u8]>) -> &[u8] {
+        self.virtual_display_view_field(view.as_ref(), |v| &v.looks)
+    }
+
+    /// Port of `Config::getVirtualDisplayViewRule` (src/OpenColorIO/Config.cpp:4025-4042 @
+    /// v2.5.2).
+    #[doc(alias = "getVirtualDisplayViewRule")]
+    pub fn virtual_display_view_rule(&self, view: impl AsRef<[u8]>) -> &[u8] {
+        self.virtual_display_view_field(view.as_ref(), |v| &v.rule)
+    }
+
+    /// Port of `Config::getVirtualDisplayViewDescription` (src/OpenColorIO/Config.cpp:
+    /// 4044-4061 @ v2.5.2).
+    #[doc(alias = "getVirtualDisplayViewDescription")]
+    pub fn virtual_display_view_description(&self, view: impl AsRef<[u8]>) -> &[u8] {
+        self.virtual_display_view_field(view.as_ref(), |v| &v.description)
+    }
+
+    /// Removes the virtual display's own view `view`, else its shared view `view` (ignoring
+    /// case); nothing for neither.
+    ///
+    /// Port of `Config::removeVirtualDisplayView` (src/OpenColorIO/Config.cpp:4063-4093 @
+    /// v2.5.2).
+    #[doc(alias = "removeVirtualDisplayView")]
+    pub fn remove_virtual_display_view(&mut self, view: impl AsRef<[u8]>) {
+        let view = c_str(view.as_ref());
+
+        if find_view(&self.virtual_display.views, view).is_some() {
+            let views = &mut self.virtual_display.views;
+
+            if let Some(it) = views.iter().position(|v| compare(&v.name, view)) {
+                views.remove(it);
+
+                self.reset_cache_ids();
+                return;
+            }
+        }
+
+        if remove(&mut self.virtual_display.shared_views, view) {
+            self.reset_cache_ids();
+        }
+    }
+
+    /// Removes the virtual display's views.
+    ///
+    /// Port of `Config::clearVirtualDisplay` (src/OpenColorIO/Config.cpp:4095-4102 @ v2.5.2).
+    #[doc(alias = "clearVirtualDisplay")]
+    pub fn clear_virtual_display(&mut self) {
+        self.virtual_display.views.clear();
+        self.virtual_display.shared_views.clear();
+
+        self.reset_cache_ids();
+    }
+
+    /// Makes a display from the virtual display for the monitor `monitor_name`. Its ICC
+    /// profile is found by `SystemMonitor` (Phase 9) and read by the ICC reader (WP 4.7), not
+    /// ported yet: past the check of the name, an error.
+    ///
+    /// Port of `Config::instantiateDisplayFromMonitorName` (src/OpenColorIO/Config.cpp:
+    /// 4104-4118 @ v2.5.2), in part.
+    #[doc(alias = "instantiateDisplayFromMonitorName")]
+    pub fn instantiate_display_from_monitor_name(
+        &mut self,
+        monitor_name: impl AsRef<[u8]>,
+    ) -> Result<i32> {
+        if c_str(monitor_name.as_ref()).is_empty() {
+            return Err(Exception::new("The system monitor name cannot be null."));
+        }
+        Err(Exception::new(
+            "Config::instantiateDisplayFromMonitorName: the system monitors and the ICC reader \
+             are not ported yet.",
+        ))
+    }
+
+    /// Makes a display from the virtual display for the ICC profile `icc_profile_filepath`.
+    /// The ICC reader (WP 4.7) is not ported yet: past the check of the path, an error.
+    ///
+    /// Port of `Config::instantiateDisplayFromICCProfile` (src/OpenColorIO/Config.cpp:
+    /// 4120-4131 @ v2.5.2), in part.
+    #[doc(alias = "instantiateDisplayFromICCProfile")]
+    pub fn instantiate_display_from_icc_profile(
+        &mut self,
+        icc_profile_filepath: impl AsRef<[u8]>,
+    ) -> Result<i32> {
+        if c_str(icc_profile_filepath.as_ref()).is_empty() {
+            return Err(Exception::new("The ICC profile filepath cannot be null."));
+        }
+        Err(Exception::new(
+            "Config::instantiateDisplayFromICCProfile: the ICC reader is not ported yet.",
+        ))
+    }
+
+    // Active displays and views ///////////////////////////////////////////////////////////////
+
+    /// The elements of `list` split as `SplitStringEnvStyle` does; a list that is one empty
+    /// element is empty.
+    ///
+    /// The shared body of `Config::setActiveDisplays` and `setActiveViews`
+    /// (src/OpenColorIO/Config.cpp:4133-4150, 4233-4250 @ v2.5.2).
+    fn split_active_list(list: &[u8]) -> Result<StringVec> {
+        let mut out = split_string_env_style(c_str(list))?;
+
+        // SplitStringEnvStyle needs to always return a result, even if empty, for look
+        // parsing. However, this does not count as an active display or view, so delete it.
+        if out.len() == 1 && out[0].is_empty() {
+            out.clear();
+        }
+        Ok(out)
+    }
+
+    /// Sets the config's list of active displays, split on `,` (or `:`).
+    ///
+    /// Port of `Config::setActiveDisplays` (src/OpenColorIO/Config.cpp:4133-4150 @ v2.5.2).
+    #[doc(alias = "setActiveDisplays")]
+    pub fn set_active_displays(&mut self, displays: impl AsRef<[u8]>) -> Result<()> {
+        self.active_displays.clear();
+        self.active_displays = Config::split_active_list(displays.as_ref())?;
+
+        self.clear_display_cache();
+
+        self.reset_cache_ids();
+        Ok(())
+    }
+
+    /// The config's list of active displays, joined with `, ` (quoting the names that hold
+    /// a separator).
+    ///
+    /// Port of `Config::getActiveDisplays` (src/OpenColorIO/Config.cpp:4152-4156 @ v2.5.2).
+    #[doc(alias = "getActiveDisplays")]
+    pub fn active_displays(&self) -> Vec<u8> {
+        join_string_env_style(&self.active_displays)
+    }
+
+    /// Adds `display` to the config's list of active displays (unless it is there, spelled the
+    /// same).
+    ///
+    /// Port of `Config::addActiveDisplay` (src/OpenColorIO/Config.cpp:4158-4179 @ v2.5.2).
+    #[doc(alias = "addActiveDisplay")]
+    pub fn add_active_display(&mut self, display: impl AsRef<[u8]>) -> Result<()> {
+        let display = c_str(display.as_ref());
+        if display.is_empty() {
+            return Err(Exception::new(
+                "Active display could not be added to config, display name was empty",
+            ));
+        }
+
+        if self.active_displays.iter().any(|d| d == display) {
+            // Display is already present.
+            return Ok(());
+        }
+
+        self.active_displays.push(display.to_vec());
+
+        self.clear_display_cache();
+        self.reset_cache_ids();
+        Ok(())
+    }
+
+    /// Removes `display` (spelled the same) from the config's list of active displays.
+    ///
+    /// Port of `Config::removeActiveDisplay` (src/OpenColorIO/Config.cpp:4181-4206 @ v2.5.2).
+    #[doc(alias = "removeActiveDisplay")]
+    pub fn remove_active_display(&mut self, display: impl AsRef<[u8]>) -> Result<()> {
+        let display = c_str(display.as_ref());
+        if display.is_empty() {
+            return Err(Exception::new(
+                "Active display could not be removed from config, display name was empty.",
+            ));
+        }
+
+        match self.active_displays.iter().position(|d| d == display) {
+            Some(it) => {
+                self.active_displays.remove(it);
+            }
+            None => {
+                return Err(Exception::new(
+                    [
+                        b"Active display could not be removed from config, display '".as_slice(),
+                        display,
+                        b"' was not found.",
+                    ]
+                    .concat(),
+                ));
+            }
+        }
+
+        self.clear_display_cache();
+        self.reset_cache_ids();
+        Ok(())
+    }
+
+    /// Port of `Config::clearActiveDisplays` (src/OpenColorIO/Config.cpp:4208-4215 @ v2.5.2).
+    #[doc(alias = "clearActiveDisplays")]
+    pub fn clear_active_displays(&mut self) {
+        self.active_displays.clear();
+
+        self.clear_display_cache();
+        self.reset_cache_ids();
+    }
+
+    /// The config's active display at `index`, or `None` (upstream's null pointer) outside the
+    /// list.
+    ///
+    /// Port of `Config::getActiveDisplay` (src/OpenColorIO/Config.cpp:4217-4226 @ v2.5.2).
+    #[doc(alias = "getActiveDisplay")]
+    pub fn active_display(&self, index: i32) -> Option<&[u8]> {
+        usize::try_from(index)
+            .ok()
+            .and_then(|i| self.active_displays.get(i))
+            .map(Vec::as_slice)
+    }
+
+    /// Port of `Config::getNumActiveDisplays` (src/OpenColorIO/Config.cpp:4228-4231 @ v2.5.2).
+    #[doc(alias = "getNumActiveDisplays")]
+    pub fn num_active_displays(&self) -> i32 {
+        self.active_displays.len() as i32
+    }
+
+    /// Sets the config's list of active views, split on `,` (or `:`).
+    ///
+    /// Port of `Config::setActiveViews` (src/OpenColorIO/Config.cpp:4233-4250 @ v2.5.2).
+    #[doc(alias = "setActiveViews")]
+    pub fn set_active_views(&mut self, views: impl AsRef<[u8]>) -> Result<()> {
+        self.active_views.clear();
+        self.active_views = Config::split_active_list(views.as_ref())?;
+
+        self.clear_display_cache();
+
+        self.reset_cache_ids();
+        Ok(())
+    }
+
+    /// The config's list of active views, joined with `, ` (quoting the names that hold a
+    /// separator).
+    ///
+    /// Port of `Config::getActiveViews` (src/OpenColorIO/Config.cpp:4252-4256 @ v2.5.2).
+    #[doc(alias = "getActiveViews")]
+    pub fn active_views(&self) -> Vec<u8> {
+        join_string_env_style(&self.active_views)
+    }
+
+    /// Adds `view` to the config's list of active views (unless it is there, spelled the
+    /// same).
+    ///
+    /// Port of `Config::addActiveView` (src/OpenColorIO/Config.cpp:4258-4279 @ v2.5.2).
+    #[doc(alias = "addActiveView")]
+    pub fn add_active_view(&mut self, view: impl AsRef<[u8]>) -> Result<()> {
+        let view = c_str(view.as_ref());
+        if view.is_empty() {
+            return Err(Exception::new(
+                "Active view could not be added to config, view name was empty.",
+            ));
+        }
+
+        if self.active_views.iter().any(|v| v == view) {
+            // View is already present.
+            return Ok(());
+        }
+
+        self.active_views.push(view.to_vec());
+
+        self.clear_display_cache();
+        self.reset_cache_ids();
+        Ok(())
+    }
+
+    /// Removes `view` (spelled the same) from the config's list of active views.
+    ///
+    /// Port of `Config::removeActiveView` (src/OpenColorIO/Config.cpp:4281-4306 @ v2.5.2).
+    #[doc(alias = "removeActiveView")]
+    pub fn remove_active_view(&mut self, view: impl AsRef<[u8]>) -> Result<()> {
+        let view = c_str(view.as_ref());
+        if view.is_empty() {
+            return Err(Exception::new(
+                "Active view could not be removed from config, view name was empty.",
+            ));
+        }
+
+        match self.active_views.iter().position(|v| v == view) {
+            Some(it) => {
+                self.active_views.remove(it);
+            }
+            None => {
+                return Err(Exception::new(
+                    [
+                        b"Active view could not be removed from config, view '".as_slice(),
+                        view,
+                        b"' was not found.",
+                    ]
+                    .concat(),
+                ));
+            }
+        }
+
+        self.clear_display_cache();
+        self.reset_cache_ids();
+        Ok(())
+    }
+
+    /// Port of `Config::clearActiveViews` (src/OpenColorIO/Config.cpp:4308-4315 @ v2.5.2).
+    #[doc(alias = "clearActiveViews")]
+    pub fn clear_active_views(&mut self) {
+        self.active_views.clear();
+
+        self.clear_display_cache();
+        self.reset_cache_ids();
+    }
+
+    /// The config's active view at `index`, or `None` (upstream's null pointer) outside the
+    /// list.
+    ///
+    /// Port of `Config::getActiveView` (src/OpenColorIO/Config.cpp:4317-4326 @ v2.5.2).
+    #[doc(alias = "getActiveView")]
+    pub fn active_view(&self, index: i32) -> Option<&[u8]> {
+        usize::try_from(index)
+            .ok()
+            .and_then(|i| self.active_views.get(i))
+            .map(Vec::as_slice)
+    }
+
+    /// Port of `Config::getNumActiveViews` (src/OpenColorIO/Config.cpp:4328-4331 @ v2.5.2).
+    #[doc(alias = "getNumActiveViews")]
+    pub fn num_active_views(&self) -> i32 {
+        self.active_views.len() as i32
+    }
+
+    /// The number of displays, active or not.
+    ///
+    /// Port of `Config::getNumDisplaysAll` (src/OpenColorIO/Config.cpp:4333-4336 @ v2.5.2).
+    #[doc(alias = "getNumDisplaysAll")]
+    pub fn num_displays_all(&self) -> i32 {
+        self.displays.len() as i32
+    }
+
+    /// The display at `index` among all of them; `""` outside them.
+    ///
+    /// Port of `Config::getDisplayAll` (src/OpenColorIO/Config.cpp:4338-4346 @ v2.5.2).
+    #[doc(alias = "getDisplayAll")]
+    pub fn display_all(&self, index: i32) -> &[u8] {
+        usize::try_from(index)
+            .ok()
+            .and_then(|i| self.displays.get(i))
+            .map_or(&[], |d| &d.0)
+    }
+
+    /// The index among all the displays of the display named `name` (spelled the same); -1 for
+    /// none or an empty name.
+    ///
+    /// Port of `Config::getDisplayAllByName` (src/OpenColorIO/Config.cpp:4348-4364 @ v2.5.2).
+    #[doc(alias = "getDisplayAllByName")]
+    pub fn display_all_by_name(&self, name: impl AsRef<[u8]>) -> i32 {
+        let name = c_str(name.as_ref());
+        if name.is_empty() {
+            return -1;
+        }
+
+        // strcmp: the names hold no NUL.
+        self.displays
+            .iter()
+            .position(|d| d.0 == name)
+            .map_or(-1, |idx| idx as i32)
+    }
+
+    /// Whether the display at `index` was made from the virtual display (and isn't saved).
+    ///
+    /// Port of `Config::isDisplayTemporary` (src/OpenColorIO/Config.cpp:4366-4374 @ v2.5.2).
+    #[doc(alias = "isDisplayTemporary")]
+    pub fn is_display_temporary(&self, index: i32) -> bool {
+        usize::try_from(index)
+            .ok()
+            .and_then(|i| self.displays.get(i))
+            .is_some_and(|d| d.1.temporary)
+    }
+
+    /// Port of `Config::setDisplayTemporary` (src/OpenColorIO/Config.cpp:4376-4386 @ v2.5.2).
+    #[doc(alias = "setDisplayTemporary")]
+    pub fn set_display_temporary(&mut self, index: i32, is_temporary: bool) {
+        if let Some(i) = usize::try_from(index)
+            .ok()
+            .filter(|&i| i < self.displays.len())
+        {
+            self.displays[i].1.temporary = is_temporary;
+
+            self.clear_display_cache();
+            self.reset_cache_ids();
         }
     }
 

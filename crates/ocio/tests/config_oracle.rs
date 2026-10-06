@@ -19,6 +19,7 @@ use ocio::{
 };
 use ocio_ops::open_color_types::EnvironmentMode;
 use ocio_ops::platform::{MapEnv, set_thread_env_provider, setenv};
+use ocio_ops::utils::string_utils::compare;
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle_values::{bytes_arg, hex, log};
 use serde_json::{Value, json};
@@ -831,6 +832,199 @@ fn display_getters(probes: &Probes) -> Vec<Step> {
     out
 }
 
+/// A step of a list setter of the config (`setActiveDisplays`, `addActiveView`, ...): its name,
+/// its argument, and the port's call.
+fn list_call(name: &str, value: &[u8], port: fn(&mut Config, &[u8]) -> ocio::Result<()>) -> Step {
+    let v = value.to_vec();
+    step(json!({"call": name, "args": [arg(&v)]}), move |c| {
+        unit_out(port(c, &v))
+    })
+}
+
+fn set_active_displays(v: &[u8]) -> Step {
+    list_call("setActiveDisplays", v, |c, v| c.set_active_displays(v))
+}
+
+fn add_active_display(v: &[u8]) -> Step {
+    list_call("addActiveDisplay", v, |c, v| c.add_active_display(v))
+}
+
+fn remove_active_display(v: &[u8]) -> Step {
+    list_call("removeActiveDisplay", v, |c, v| c.remove_active_display(v))
+}
+
+fn set_active_views(v: &[u8]) -> Step {
+    list_call("setActiveViews", v, |c, v| c.set_active_views(v))
+}
+
+fn add_active_view(v: &[u8]) -> Step {
+    list_call("addActiveView", v, |c, v| c.add_active_view(v))
+}
+
+fn remove_active_view(v: &[u8]) -> Step {
+    list_call("removeActiveView", v, |c, v| c.remove_active_view(v))
+}
+
+fn add_virtual_display_shared_view(v: &[u8]) -> Step {
+    list_call("addVirtualDisplaySharedView", v, |c, v| {
+        c.add_virtual_display_shared_view(v)
+    })
+}
+
+fn remove_virtual_display_view(v: &[u8]) -> Step {
+    list_call("removeVirtualDisplayView", v, |c, v| {
+        c.remove_virtual_display_view(v);
+        Ok(())
+    })
+}
+
+fn instantiate_display_from_icc_profile(v: &[u8]) -> Step {
+    let v = v.to_vec();
+    step(
+        json!({"call": "instantiateDisplayFromICCProfile", "args": [arg(&v)]}),
+        move |c| match c.instantiate_display_from_icc_profile(&v) {
+            Ok(i) => json!({ "result": i }),
+            Err(e) => unit_out(Err(e)),
+        },
+    )
+}
+
+fn instantiate_display_from_monitor_name(v: &[u8]) -> Step {
+    let v = v.to_vec();
+    step(
+        json!({"call": "instantiateDisplayFromMonitorName", "args": [arg(&v)]}),
+        move |c| match c.instantiate_display_from_monitor_name(&v) {
+            Ok(i) => json!({ "result": i }),
+            Err(e) => unit_out(Err(e)),
+        },
+    )
+}
+
+/// The simple steps of the config that take no argument.
+fn clear_step(name: &str, port: fn(&mut Config)) -> Step {
+    step(json!({ "call": name }), move |c| {
+        port(c);
+        json!({"result": null})
+    })
+}
+
+fn add_virtual_display_view(view: &[u8], vt: &[u8], cs: &[u8]) -> Step {
+    let (v, t, c) = (view.to_vec(), vt.to_vec(), cs.to_vec());
+    step(
+        json!({"call": "addVirtualDisplayView",
+               "args": [arg(&v), arg(&t), arg(&c), arg(b"l"), arg(b"r"), arg(b"d")]}),
+        move |config| unit_out(config.add_virtual_display_view(&v, &t, &c, b"l", b"r", b"d")),
+    )
+}
+
+/// The binding's `setDisplayTemporary(display, isTemporary)`: every display of that name
+/// (ignoring case).
+fn set_display_temporary(display: &[u8], temporary: bool) -> Step {
+    let d = display.to_vec();
+    step(
+        json!({"call": "setDisplayTemporary", "args": [arg(&d), temporary]}),
+        move |c| {
+            for i in 0..c.num_displays_all() {
+                let other = c.display_all(i).to_vec();
+                if compare(&d, &other) {
+                    c.set_display_temporary(i, temporary);
+                }
+            }
+            json!({"result": null})
+        },
+    )
+}
+
+/// The getters of the active lists, all the displays and the virtual display.
+fn virtual_display_getters(probes: &Probes) -> Vec<Step> {
+    let mut out = vec![
+        step(json!({"call": "getActiveDisplays"}), |c| {
+            let names: Vec<Vec<u8>> = (0..c.num_active_displays())
+                .map(|i| c.active_display(i).unwrap_or(&[]).to_vec())
+                .collect();
+            texts_out(&names)
+        }),
+        step(
+            json!({"call": "getNumActiveDisplays"}),
+            |c| json!({"result": c.num_active_displays()}),
+        ),
+        step(json!({"call": "getActiveViews"}), |c| {
+            let names: Vec<Vec<u8>> = (0..c.num_active_views())
+                .map(|i| c.active_view(i).unwrap_or(&[]).to_vec())
+                .collect();
+            texts_out(&names)
+        }),
+        step(
+            json!({"call": "getNumActiveViews"}),
+            |c| json!({"result": c.num_active_views()}),
+        ),
+        step(json!({"call": "getDisplaysAll"}), |c| {
+            let names: Vec<Vec<u8>> = (0..c.num_displays_all())
+                .map(|i| c.display_all(i).to_vec())
+                .collect();
+            texts_out(&names)
+        }),
+    ];
+    for (t, t_name) in VIEW_TYPES {
+        out.push(step(
+            json!({"call": "getVirtualDisplayViews", "args": [{"enum": t_name}]}),
+            move |c| {
+                let names: Vec<Vec<u8>> = (0..c.virtual_display_num_views(t))
+                    .map(|i| c.virtual_display_view(t, i).to_vec())
+                    .collect();
+                texts_out(&names)
+            },
+        ));
+    }
+    for display in &probes.displays {
+        let d = display.clone();
+        out.push(step(
+            json!({"call": "isDisplayTemporary", "args": [arg(display)]}),
+            move |c| {
+                let found = (0..c.num_displays_all()).find(|&i| compare(&d, c.display_all(i)));
+                json!({"result": found.is_some_and(|i| c.is_display_temporary(i))})
+            },
+        ));
+    }
+    for view in &probes.views {
+        let v = view.clone();
+        out.push(step(
+            json!({"call": "hasVirtualView", "args": [arg(view)]}),
+            move |c| json!({"result": c.has_virtual_view(&v)}),
+        ));
+        let v = view.clone();
+        out.push(step(
+            json!({"call": "isVirtualViewShared", "args": [arg(view)]}),
+            move |c| json!({"result": c.is_virtual_view_shared(&v)}),
+        ));
+        type Getter = fn(&Config, &[u8]) -> Vec<u8>;
+        let getters: [(&str, Getter); 5] = [
+            ("getVirtualDisplayViewTransformName", |c, v| {
+                c.virtual_display_view_transform_name(v).to_vec()
+            }),
+            ("getVirtualDisplayViewColorSpaceName", |c, v| {
+                c.virtual_display_view_color_space_name(v).to_vec()
+            }),
+            ("getVirtualDisplayViewLooks", |c, v| {
+                c.virtual_display_view_looks(v).to_vec()
+            }),
+            ("getVirtualDisplayViewRule", |c, v| {
+                c.virtual_display_view_rule(v).to_vec()
+            }),
+            ("getVirtualDisplayViewDescription", |c, v| {
+                c.virtual_display_view_description(v).to_vec()
+            }),
+        ];
+        for (name, getter) in getters {
+            let v = view.clone();
+            out.push(step(json!({"call": name, "args": [arg(view)]}), move |c| {
+                text_out(&getter(c, &v))
+            }));
+        }
+    }
+    out
+}
+
 /// The config's getters, then its context's `repr()`.
 fn getters() -> Vec<Step> {
     vec![
@@ -888,6 +1082,7 @@ fn all_getters(probes: &Probes) -> Vec<Step> {
     out.extend(color_space_getters(probes));
     out.extend(model_getters(probes));
     out.extend(display_getters(probes));
+    out.extend(virtual_display_getters(probes));
     out
 }
 
@@ -1579,4 +1774,93 @@ fn displays_and_views_match_the_wheel() {
 fn the_raw_config_display_matches_the_wheel() {
     let probes = probes(&[b"raw"], &[]).displays(&[b"sRGB"], &[b"Raw"]);
     check_items("raw display", "raw", &[], vec![], &probes);
+}
+
+/// The config's active displays and views over all of them (the environment's lists, when
+/// set, win), their setters and refusals; all the displays and the temporary ones; the virtual
+/// display's views, shared or its own, and their getters; the instantiation of displays,
+/// refused without a name or a path.
+#[test]
+fn active_lists_and_the_virtual_display_match_the_wheel() {
+    let items: Vec<Item> = vec![
+        add_color_space(cs(b"raw")).into(),
+        add_display_view(b"sRGB", b"Raw", b"raw", b"").into(),
+        add_display_view(b"sRGB", b"v2", b"raw", b"").into(),
+        add_display_view(b"P3", b"v1", b"raw", b"").into(),
+        add_display_view(b"P3", b"Raw", b"raw", b"").into(),
+        add_shared_view(b"shared1", b"vt", b"raw").into(),
+        set_active_displays(b"P3, unknown").into(),
+        set_active_views(b"v1:raw").into(),
+        set_active_displays(b"\"a,b\", P3").into(),
+        set_active_displays(b"\"a,b").into(),
+        set_active_displays(b"").into(),
+        set_active_displays(b"  ").into(),
+        add_active_display(b"sRGB").into(),
+        add_active_display(b"sRGB").into(),
+        add_active_display(b"SRGB").into(),
+        add_active_display(b"").into(),
+        remove_active_display(b"srgb").into(),
+        remove_active_display(b"SRGB").into(),
+        remove_active_display(b"").into(),
+        clear_step("clearActiveDisplays", |c| c.clear_active_displays()).into(),
+        add_active_view(b"v2").into(),
+        add_active_view(b"").into(),
+        add_active_view(b"Raw").into(),
+        remove_active_view(b"raw").into(),
+        remove_active_view(b"Raw").into(),
+        set_active_views(b"\"x:y").into(),
+        set_active_views(b"x:y, z").into(),
+        clear_step("clearActiveViews", |c| c.clear_active_views()).into(),
+        set_display_temporary(b"p3", true).into(),
+        set_display_temporary(b"unknown", true).into(),
+        add_virtual_display_view(b"vv", b"vt", b"<USE_DISPLAY_NAME>").into(),
+        add_virtual_display_view(b"VV", b"", b"raw").into(),
+        add_virtual_display_view(b"", b"", b"raw").into(),
+        add_virtual_display_view(b"w", b"", b"").into(),
+        add_virtual_display_view(b"shared1", b"", b"raw").into(),
+        add_virtual_display_shared_view(b"shared1").into(),
+        add_virtual_display_shared_view(b"SHARED1").into(),
+        add_virtual_display_shared_view(b"missing").into(),
+        add_virtual_display_shared_view(b"").into(),
+        instantiate_display_from_icc_profile(b"").into(),
+        instantiate_display_from_monitor_name(b"").into(),
+        Item::Copy,
+        remove_virtual_display_view(b"VV").into(),
+        remove_virtual_display_view(b"missing").into(),
+        remove_virtual_display_view(b"shared1").into(),
+        remove_virtual_display_view(b"shared1").into(),
+        add_virtual_display_view(b"vv", b"", b"raw").into(),
+        clear_step("clearVirtualDisplay", |c| c.clear_virtual_display()).into(),
+        set_display_temporary(b"P3", false).into(),
+    ];
+    let probes = probes(&[b"raw"], &[]).displays(
+        &[b"sRGB", b"P3", b"p3", b"unknown"],
+        &[b"Raw", b"v1", b"v2", b"vv", b"shared1", b"missing", b""],
+    );
+    check_items(
+        "active lists and virtual display",
+        "new",
+        &[],
+        items,
+        &probes,
+    );
+    let env: Env = &[
+        ("OCIO_ACTIVE_DISPLAYS", b"sRGB"),
+        ("OCIO_ACTIVE_VIEWS", b"v2"),
+    ];
+    let items: Vec<Item> = vec![
+        add_color_space(cs(b"raw")).into(),
+        add_display_view(b"sRGB", b"Raw", b"raw", b"").into(),
+        add_display_view(b"sRGB", b"v2", b"raw", b"").into(),
+        add_display_view(b"P3", b"v1", b"raw", b"").into(),
+        set_active_displays(b"P3").into(),
+        set_active_views(b"v1, Raw").into(),
+    ];
+    check_items(
+        "active lists under the environment's",
+        "new",
+        env,
+        items,
+        &probes,
+    );
 }
