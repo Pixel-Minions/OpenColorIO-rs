@@ -821,7 +821,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 - **Upstream:** `FixedFunctionOpData::ConvertStyle(FixedFunctionStyle, TransformDirection)` gives
   the forward op style of `FIXED_FUNCTION_RGB_TO_HSV`, `XYZ_TO_xyY`, `XYZ_TO_uvY` and
-  `XYZ_TO_LUV` whatever the direction (`ops/fixedfunction/FixedFunctionOpData.cpp:433-436, 450-463`),
+  `XYZ_TO_LUV` whatever the direction (`ops/fixedfunction/FixedFunctionOpData.cpp:433-436, 452-463`),
   where every other style takes the inverse op style in the inverse direction.
   `FixedFunctionTransform::setStyle` converts the style in the transform's current direction
   (`transforms/FixedFunctionTransform.cpp:122-126`), so setting one of these styles on an
@@ -836,6 +836,104 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p2-ff-cpu` (2.3a1, `FixedFunctionOpStyle::from_transform_style`; the
   transform's `set_style` in 2.3e); `fixed_function_op_data_oracle.rs` checks the styles the
   setters give in both directions against the wheel's validation messages.
+
+### I-81. Fixed function renderers order their NaNs per platform
+
+- **Upstream:** the fixed function renderers mix a pixel's channels in sums and products
+  (`ops/fixedfunction/FixedFunctionOpCPU.cpp`). Where two NaNs meet, x86 returns the first
+  operand's, and the two compilers ordered the operands differently:
+  - the glows' YC (`rgbToYC`, 759-766): MSVC adds the green term to the blue one, GCC the
+    blue term to the green one (Windows wheel `0x18018b37e`, Linux wheel `0x355195`), and the
+    glows' gain is the first factor of red, green and blue with MSVC but the second of blue
+    with GCC (`0x18018b4c5`, `0x35513f`);
+  - the Rec.2100 surround (1419-1454): MSVC computes `channel * factor`, GCC `factor *
+    channel` for red and green (`0x18018da66`, `0x3548b8`);
+  - XYZ to xyY (1830-1854): MSVC `(Y + X) + Z` and `d * X`, GCC `(X + Y) + Z` and `X * d`
+    (`0x18018e1f9`, `0x353a7e`); xyY to XYZ (1861-1884): MSVC `(Y * x) * d`, GCC
+    `(x * Y) * d` (`0x18018e703`, `0x353b40`);
+  - XYZ to CIELUV (1956-1987): MSVC `(9 * Y) * d`, GCC `d * (9 * Y)` (`0x18018ddbd`,
+    `0x35464f`); CIELUV to XYZ (1994-2026): MSVC `d * u*` and `(... * Y) * dd`, GCC `u* * d`
+    and `dd * (... * Y)` (`0x18018d5ac`, `0x353e2f`);
+  - RGB to HSY and back (`applyRGBToHSY`, `applyHSYToRGB`, 1591-1763): MSVC compiles one
+    function for the three styles, GCC a loop per style, and the luma's and the distance's
+    sums, the scaling by `luma / currY`, the linear style's quadratic and the result's
+    product each order their operands per compiler and, with GCC, per style (`0x18018ed10`
+    and `0x18018e8e0`; `0x358880` and `0x357ce0`; the port's `apply_rgb_to_hsy`,
+    `apply_hsy_to_rgb` and `hsy_lin_gain` list them).
+  - ACES 2.0's JMh model and chroma compression (`ACES2/Transform.cpp`, 175-250 and
+    335-462), which the ACES 2.0 renderers share: MSVC sums the matrices' rows as
+    `(p1 + p0) + p2` and GCC as `(p0 + p1) + p2`, except the last two rows of RGB to Aab's
+    second matrix, which MSVC sums `(p0 + p1) + p2`, and the middle row of both directions'
+    second matrices, which GCC sums `p2 + (p0 + p1)` (`sub_1802f9170` and `0x34b5f0`,
+    `sub_1802f8c00` and `0x34ba60`, `sub_1802f8ed0` and `0x34bcd0`); the chroma compression's
+    limit is `pow(..) * reachMaxM` with MSVC and `reachMaxM * pow(..)` with GCC, its
+    colourfulness `pow(..) * M` with MSVC and `M * pow(..)` with GCC, and the inverse's
+    `pow(..) * M` with MSVC and `M * pow(..)` with GCC (`sub_1802fa060` and `0x34c4d0`,
+    `sub_1802fa250` and `0x34c8b0`). Both compilers compute `a` as `cos_hr * M` in the copy
+    of `JMh_to_Aab` that JMh to RGB inlines, against the source's `M * cos_hr`. The toes,
+    `JMh_to_Aab`'s `b` and the inverse's `Mnorm * M` (GCC) order more operands per compiled
+    copy (the port's `ToeFwdOrder`, `toe_inv`, `jmh_to_aab_with` and `chroma_compress_inv`
+    list them), where the renderers can't show it: a NaN that reaches them has already
+    reached the operand that decides the result.
+  - ACES 2.0's gamut compression (`ACES2/Transform.cpp`, 932-1070): the compressed J is
+    `remapped_M * slope + J_intersect` with MSVC and `slope * remapped_M + J_intersect` with
+    GCC; the inverse Reinhard curve is `-(nd / (nd - 1)) * scale` with MSVC and `scale *
+    -(nd / (nd - 1))` with GCC, and GCC adds it to the threshold in the inverse, MSVC the
+    threshold to it (`sub_1802f88a0` and `sub_1802f8620`, `0x34ee70` and `0x34ac80`). GCC also
+    folded the source's negations in `solve_J_intersect` above the focus J (`-2c / (-s -
+    root)` with `s = -b`, where MSVC computes `-2c / (b - root)`), which can change a NaN's
+    sign. The other operations where two NaNs can meet (the J intersect, the hulls'
+    boundaries, the smooth minimum, the threshold) order their operands per compiler too (the
+    port's `solve_j_intersect`, `EstimateOrder`, `smin_scaled` and `remap_m` list them),
+    where the renderers can't show it.
+  Both compilers also reorder some of the source's operations the same way (for example
+  `13 * L* * (u - u'n)` as `(u - u'n) * (13 * L*)`), which only matters to the port.
+- **Who notices:** images whose pixels have NaNs of different signs or payloads in two or
+  more channels, through these styles: the output NaN's sign and payload differ between
+  Windows and Linux. For example, through a glow, a pixel with a NaN A in green, a NaN B in
+  blue and a finite red comes out with A in red and blue on Windows, B on Linux.
+  Through ACES 2.0's RGB to JMh (of AP0), a pixel with one NaN in red and blue and another
+  in green comes out with green's NaN in J, M and h on Windows, red's on Linux.
+- **A fix:** one operand order for both platforms.
+- **Status:** matched in `p2-ff-cpu` (the glows, 2.3b) and `p2-ff-cpu-2` (2.3c1, the HSYs in
+  2.3c2), and `p2-aces2-cpu` (ACES 2.0's JMh model and chroma compression, 2.4e1; its gamut
+  compression, 2.4e2), each wheel's order per platform (`cfg(target_os)`). The battery's NaN
+  buffers and `fixed_function_oracle.rs`'s `nan_combinations_match_the_wheel` (every
+  combination of NaNs, finite values and infinities in red, green and blue) compare them with
+  the wheel on both platforms.
+
+### I-82. RGB to HSV gives an all-negative-infinity pixel's saturation a different sign per platform
+
+- **Upstream:** for extended-range input, `Renderer_RGB_TO_HSV::apply` computes the saturation
+  as `(rgb_max - rgb_min) / -rgb_min` (`ops/fixedfunction/FixedFunctionOpCPU.cpp:1521-1524`).
+  MSVC divides by the negated minimum; GCC computes `-(rgb_max - rgb_min) / rgb_min` (Linux
+  wheel `0x35398c`: `subss`, `xorps` with the sign bit, `divss`), the same value for every
+  input but a NaN difference, whose sign it flips. The difference is a NaN when the maximum
+  and the minimum are the same infinity: for a pixel whose three channels are -Inf (where
+  `-rgb_min > rgb_max` holds), the saturation is the x86 default NaN (`0xffc00000`) on Windows
+  and its positive twin (`0x7fc00000`) on Linux.
+- **Who notices:** images with all-negative-infinity pixels through `RGB_TO_HSV`.
+- **A fix:** one formula for both platforms.
+- **Status:** matched in `p2-ff-cpu-2` (2.3c1, `RendererRgbToHsv`, `cfg(target_os)`); the
+  battery's specials and `nan_combinations_match_the_wheel` compare it on both platforms.
+
+### I-83. The gamma-log styles give a NaN a different sign per platform
+
+- **Upstream:** `Renderer_LIN_TO_GAMMA_LOG::apply` and `Renderer_GAMMA_LOG_TO_LIN::apply`
+  restore the sign below the mirror point with `value * std::copysign(1.0f, mirrorin)`
+  (`ops/fixedfunction/FixedFunctionOpCPU.cpp:2271, 2314`), where `value` comes from
+  `|mirrorin|`, so for a NaN pixel it is a positive NaN. MSVC builds `±1.0f` and multiplies
+  (Windows wheel `0x18018d39e`, `0x18018cd22`): the NaN keeps its sign. GCC turns the product
+  into its `xorsign` pattern, `value ^ signbit(mirrorin)` (Linux wheel `0x354dbb`,
+  `0x355077`): the NaN's sign flips where the input's is set, so a NaN pixel's output takes
+  the pixel's sign. Every value other than a NaN gives the same bits on both. It is the mirror
+  Gamma styles' difference (I-60) in another renderer.
+- **Who notices:** images with negative NaNs (the sign bit set) through a
+  `FIXED_FUNCTION_LIN_TO_GAMMA_LOG` transform, in either direction: the output NaN is positive
+  on Windows and negative on Linux.
+- **A fix:** one rule for both platforms, e.g. always the input's sign.
+- **Status:** matched in `p2-ff-cpu-2` (2.3d1, `times_copysign_one`, `cfg(target_os)`); the
+  battery's specials and NaN buffers compare it bit for bit on both platforms.
 
 ### I-120. A color space transform's text runs the data bypass into the destination
 
@@ -1512,7 +1610,7 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 
 - **Upstream:** `FixedFunctionOpData::GetStyle` refuses a null or empty name with "Unknown
   FixedFunction style: " followed by the name, appending the `const char *` to a `std::string`
-  (`ops/fixedfunction/FixedFunctionOpData.cpp:194-376`). For a null pointer that is undefined
+  (`ops/fixedfunction/FixedFunctionOpData.cpp:189-368`). For a null pointer that is undefined
   behaviour. The CTF reader calls it with an attribute's value, which is never null.
 - **Decided** (general rule): `FixedFunctionOpStyle::from_name(None)` refuses it as an empty
   name: "Unknown FixedFunction style: ".
@@ -1521,20 +1619,40 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 ### U-31. Queries of a FixedFunction op whose style has too few parameters
 
 - **Upstream:** the setters take any number of parameters, and only `validate` checks how many
-  the style takes (`ops/fixedfunction/FixedFunctionOpData.cpp:617-842`). Before that,
+  the style takes (`ops/fixedfunction/FixedFunctionOpData.cpp:617-840`). Before that,
   `isInverse` of two Rec.2100 surrounds of the same style reads both first parameters without
-  a check (`FixedFunctionOpData.cpp:844-856`), and the ACES 1.3 gamut compression's renderer
-  reads seven parameters (`ops/fixedfunction/FixedFunctionOpCPU.cpp:982-1001`): on a shorter
-  vector, they read past its end. The processors validate their ops first
-  (`OpRcPtrVec::finalize`), so only code that queries such data directly gets there.
-- **Decided** (general rule): `FixedFunctionOpData::is_inverse` and the gamut compression's
-  renderer (`RendererAcesGamutComp13Fwd::new`, so `get_fixed_function_cpu_renderer`) return an
-  error there, and only there: "FixedFunctionOp: the style has fewer parameters than it uses:
-  upstream reads past them."
+  a check (`FixedFunctionOpData.cpp:842-854`), and these renderers read their parameters
+  without one: the ACES 1.3 gamut compression's seven
+  (`ops/fixedfunction/FixedFunctionOpCPU.cpp:984-1002`), the Rec.2100 surround's one
+  (`FixedFunctionOpCPU.cpp:1406-1417`), the gamma-log's ten and the double-log's 13
+  (`FixedFunctionOpCPU.cpp:2230-2246, 2322-2344`). On a shorter vector, they read past its
+  end. The processors validate their ops first (`OpRcPtrVec::finalize`), so only code that
+  queries such data directly gets there.
+- **Decided** (general rule): `FixedFunctionOpData::is_inverse` and those renderers
+  (`RendererAcesGamutComp13Fwd::new`, `RendererRec2100Surround::new`,
+  `RendererLinToGammaLog::new`, `RendererLinToDoubleLog::new`, so
+  `get_fixed_function_cpu_renderer`) return an error there, and only there: "FixedFunctionOp:
+  the style has fewer parameters than it uses: upstream reads past them."
 - **Status:** matched in `p2-ff-cpu` (2.3a2); `fixed_function_op_data_tests.rs` checks the
   error, and that the comparisons upstream makes without reading (another style, or an inverse
-  that validation refuses) give upstream's answers. The renderer in 2.3b:
-  `fixed_function_op_cpu_tests.rs` checks its error.
+  that validation refuses) give upstream's answers. The renderers in 2.3b, and in 2.3c1 and
+  2.3d1 (`p2-ff-cpu-2`): `fixed_function_op_cpu_tests.rs` checks their errors.
+
+### U-32. ACES 2.0's hue table past its arrays
+
+- **Upstream:** the ACES 2.0 fixed functions build their hue table from the corners of the
+  limiting and the reach gamuts (`ops/fixedfunction/ACES2/Transform.cpp:646-736`).
+  `extract_sorted_cube_hues` merges the two sorted lists of corner hues with comparisons that
+  NaN hues never satisfy, so it reads past the 8 corners and writes past the 12 sorted hues;
+  `build_hue_table` writes `samples` entries into the 363-entry table from counts that, as
+  its own `BUG` notes say, can overrun it. Limiting primaries with a NaN coordinate, which
+  `FixedFunctionOpData::validate` accepts (it checks only the peak luminance), get there: the
+  wheel's process stops on Windows with `0xc0000409` (the stack cookie check) when it builds
+  the processor.
+- **Decided** (general rule): the port refuses such parameters where upstream would read or
+  write past an array: "ACES 2.0: the gamut's corner hues make the hue table read or write
+  past its arrays: upstream's behaviour is undefined." (`aces2::transform::CORNERS_OVERRUN`).
+- **Status:** matched in `p2-aces2-cpu` (2.4c); `aces2/transform_tests.rs` checks the error.
 
 ### U-45. The working directory when `_getcwd` fails
 
@@ -1606,3 +1724,7 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Decided** (general rule): return an error instead (its text is decided with the port).
 - **Status:** to port with `NamedTransform::GetTransform` (WP 3.2a, `p3-builders`), found by the
   `p3-model-objects` verifier.
+  that validation refuses) give upstream's answers. The renderers in 2.3b and 2.3c1
+  (`p2-ff-cpu-2`): `fixed_function_op_cpu_tests.rs` checks their errors.
+  that validation refuses) give upstream's answers. The renderers in 2.3b, and in 2.3c1 and
+  2.3d1 (`p2-ff-cpu-2`): `fixed_function_op_cpu_tests.rs` checks their errors.

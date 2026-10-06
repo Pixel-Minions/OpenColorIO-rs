@@ -136,14 +136,29 @@ const STYLES: [FixedFunctionStyle; 21] = [
     RgbToHsyVid,
 ];
 
-/// The styles whose CPU renderers are ported (2.3b): the processors' cases.
-const RENDERED: [FixedFunctionStyle; 6] = [
+/// The styles whose CPU renderers are ported (2.3b, 2.3c1, 2.3c2, 2.3d1, 2.4e1, 2.4e2): the
+/// processors' cases.
+const RENDERED: [FixedFunctionStyle; 20] = [
     AcesRedMod03,
     AcesRedMod10,
     AcesGlow03,
     AcesGlow10,
     AcesDarkToDim10,
     AcesGamutComp13,
+    AcesOutputTransform20,
+    AcesRgbToJmh20,
+    AcesTonescaleCompress20,
+    AcesGamutCompress20,
+    Rec2100Surround,
+    RgbToHsv,
+    XyzToXyy,
+    XyzToUvy,
+    XyzToLuv,
+    RgbToHsyLin,
+    RgbToHsyLog,
+    RgbToHsyVid,
+    LinToGammaLog,
+    LinToDoubleLog,
 ];
 
 /// Transforms of every style in both directions, valid and set up with other parameters, and
@@ -291,6 +306,23 @@ fn processor_cases() -> Vec<Case> {
         ],
     ] {
         cases.push(constructed(AcesGamutComp13, &params, Inverse));
+    }
+    // Two forward surrounds are inverses when `isInverse` finds `p0 == 1. / p1` in double
+    // (FixedFunctionOpData.cpp:842-854 @ v2.5.2), which the optimizer then removes. Pairs
+    // where that test, `p0 * p1 == 1` and `1 / p0 == p1` don't all agree, in both orders.
+    for gammas in [
+        [23.804083062918217, 0.04200959967064603],
+        [6.562230635388913, 0.1523872072717442],
+    ] {
+        for [a, b] in [gammas, [gammas[1], gammas[0]]] {
+            let first = constructed(Rec2100Surround, &[a], Forward);
+            let second = constructed(Rec2100Surround, &[b], Forward);
+            cases.push(group(
+                &format!("surrounds {a} and {b}"),
+                Forward,
+                &[first, second],
+            ));
+        }
     }
     cases
 }

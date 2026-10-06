@@ -2,7 +2,9 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Ported `tests/cpu/ops/fixedfunction/FixedFunctionOpCPU_tests.cpp` @ v2.5.2: the ACES 1.x
-//! styles (chunk 2.3b). The other styles' tests come with their renderers.
+//! styles (chunk 2.3b), the Rec.2100 surround, HSV and CIE styles (2.3c1), the HSY styles
+//! (2.3c2), the gamma-log and double-log styles (2.3d1). The other styles' tests come with
+//! their renderers.
 
 use super::*;
 use crate::ops::fixedfunction::fixed_function_op_data::Params;
@@ -360,9 +362,853 @@ fn aces_gamut_map_13() {
     apply_fixed_function(&mut output_32f, &input_32f, &inv, 1e-6, false);
 }
 
-/// U-31: the gamut compression's renderer reads seven parameters, which upstream does without
-/// a check; the port refuses data with fewer (set after the validating constructor). The
-/// styles whose renderers come later are refused, in both fast-math settings.
+/// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, aces_output_transform_20)` @ v2.5.2.
+#[test]
+fn aces_output_transform_20() {
+    #[rustfmt::skip]
+    let input_32f: [f32; 35 * 4] = [
+        // ACEScg primaries and secondaries scaled by 4
+        2.781808965, 0.179178253, -0.022103530, 1.0,
+        3.344523751, 3.617862727, -0.006002689, 1.0,
+        0.562714786, 3.438684474, 0.016100841, 1.0,
+        1.218191035, 3.820821747, 4.022103530, 1.0,
+        0.655476249, 0.382137273, 4.006002689, 1.0,
+        3.437285214, 0.561315526, 3.983899159, 1.0,
+        // OCIO test values
+        0.110000000, 0.020000000, 0.040000000, 0.5,
+        0.710000000, 0.510000000, 0.810000000, 1.0,
+        0.430000000, 0.820000000, 0.710000000, 0.0,
+        // ColorChecker24 (SMPTE 2065-1 2021)
+        0.118770000, 0.087090000, 0.058950000, 1.0,
+        0.400020000, 0.319160000, 0.237360000, 1.0,
+        0.184760000, 0.203980000, 0.313110000, 1.0,
+        0.109010000, 0.135110000, 0.064930000, 1.0,
+        0.266840000, 0.246040000, 0.409320000, 1.0,
+        0.322830000, 0.462080000, 0.406060000, 1.0,
+        0.386050000, 0.227430000, 0.057770000, 1.0,
+        0.138220000, 0.130370000, 0.337030000, 1.0,
+        0.302020000, 0.137520000, 0.127580000, 1.0,
+        0.093100000, 0.063470000, 0.135250000, 1.0,
+        0.348760000, 0.436540000, 0.106130000, 1.0,
+        0.486550000, 0.366850000, 0.080610000, 1.0,
+        0.087320000, 0.074430000, 0.272740000, 1.0,
+        0.153660000, 0.256920000, 0.090710000, 1.0,
+        0.217420000, 0.070700000, 0.051300000, 1.0,
+        0.589190000, 0.539430000, 0.091570000, 1.0,
+        0.309040000, 0.148180000, 0.274260000, 1.0,
+        0.149010000, 0.233780000, 0.359390000, 1.0,
+        0.866530000, 0.867920000, 0.858180000, 1.0,
+        0.573560000, 0.572560000, 0.571690000, 1.0,
+        0.353460000, 0.353370000, 0.353910000, 1.0,
+        0.202530000, 0.202430000, 0.202870000, 1.0,
+        0.094670000, 0.095200000, 0.096370000, 1.0,
+        0.037450000, 0.037660000, 0.038950000, 1.0,
+        // Spectrally non-selective 18 % reflecting diffuser
+        0.180000000, 0.180000000, 0.180000000, 1.0,
+        // Perfect reflecting diffuser
+        0.977840000, 0.977840000, 0.977840000, 1.0,
+    ];
+
+    let mut input2_32f = input_32f;
+
+    #[rustfmt::skip]
+    let expected_32f: [f32; 35 * 4] = [
+        // ACEScg primaries and secondaries scaled by 4
+        4.966013432, -0.033002287, 0.041583523, 1.0,
+        3.969460726, 3.825797558, -0.056160748, 1.0,
+        -0.075460039, 3.689072609, 0.270235062, 1.0,
+        -0.095436633, 3.650521517, 3.459975719, 1.0,
+        -0.028881177, 0.196473420, 2.796123743, 1.0,
+        4.900828362, -0.064385533, 3.838270903, 1.0,
+        // OCIO test values
+        0.096890487, -0.001135427, 0.018971475, 0.5,
+        0.809613585, 0.479857147, 0.814239979, 1.0,
+        0.107417941, 0.920530438, 0.726379037, 0.0,
+        // ColorChecker24 (SMPTE 2065-1 2021)
+        0.115475342, 0.050812997, 0.030212998, 1.0,
+        0.484880149, 0.301042914, 0.226769030, 1.0,
+        0.098463453, 0.160814837, 0.277010798, 1.0,
+        0.071130276, 0.107334509, 0.035097614, 1.0,
+        0.207111374, 0.198474824, 0.375326097, 1.0,
+        0.195447117, 0.481112540, 0.393299103, 1.0,
+        0.571913302, 0.196873263, 0.041634843, 1.0,
+        0.045791976, 0.069875412, 0.291233569, 1.0,
+        0.424848884, 0.083199054, 0.102153927, 1.0,
+        0.059589352, 0.022219239, 0.091246955, 1.0,
+        0.360364884, 0.478741497, 0.086726815, 1.0,
+        0.695661962, 0.371994466, 0.068298057, 1.0,
+        0.011806240, 0.021665439, 0.199594870, 1.0,
+        0.076526135, 0.256237596, 0.060564563, 1.0,
+        0.300064713, 0.023416281, 0.030360531, 1.0,
+        0.805483222, 0.596904039, 0.082996234, 1.0,
+        0.388385385, 0.079899333, 0.245818958, 1.0,
+        0.010951802, 0.196106046, 0.307181537, 1.0,
+        0.921020269, 0.921707630, 0.912857533, 1.0,
+        0.590191603, 0.588424563, 0.587825298, 1.0,
+        0.337743223, 0.337686002, 0.338155240, 1.0,
+        0.169266403, 0.169178575, 0.169557154, 1.0,
+        0.058346011, 0.059387885, 0.060296256, 1.0,
+        0.012581199, 0.012947144, 0.013654212, 1.0,
+        // Spectrally non-selective 18 % reflecting diffuser
+        0.145115077, 0.145115703, 0.145115480, 1.0,
+        // Perfect reflecting diffuser
+        1.041565537, 1.041566610, 1.041566253, 1.0,
+    ];
+
+    let params: Params = vec![
+        // Peak luminance
+        1000.0, // P3D65 gamut
+        0.680, 0.320, 0.265, 0.690, 0.150, 0.060, 0.3127, 0.3290,
+    ];
+    let func_data =
+        FixedFunctionOpData::with_params(AcesOutputTransform20Fwd, params.clone()).unwrap();
+
+    apply_fixed_function(&mut input2_32f, &expected_32f, &func_data, 1e-5, false);
+
+    let func_data2 = FixedFunctionOpData::with_params(AcesOutputTransform20Inv, params).unwrap();
+
+    apply_fixed_function(&mut input2_32f, &input_32f, &func_data2, 1e-4, false);
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, aces_ot_20_edge_cases)` @ v2.5.2.
+#[test]
+fn aces_ot_20_edge_cases() {
+    #[rustfmt::skip]
+    let mut input_32f: [f32; 2 * 4] = [
+        0.0, 0.0, 0.0, 1.0,
+        // Bug #2220: related to hue angle calculation triggering an out of bounds access in the
+        // tables at exactly 360 degrees
+        0.742242277, 0.0931933373, 0.321542144, 1.0,
+    ];
+    #[rustfmt::skip]
+    let expected_32f: [f32; 2 * 4] = [
+        0.0, 0.0, 0.0, 1.0,
+        // Note: exact output value is not significant to the test as the bug was in the internal
+        // table access logic
+        0.74736571311951, -0.0019352473318577, 0.19451357424259, 1.0,
+    ];
+
+    let params: Params = vec![
+        // Peak luminance
+        100.0, // Rec709 gamut
+        0.6400, 0.3300, 0.3000, 0.6000, 0.1500, 0.0600, 0.3127, 0.3290,
+    ];
+
+    let func_data = FixedFunctionOpData::with_params(AcesOutputTransform20Fwd, params).unwrap();
+
+    apply_fixed_function(&mut input_32f, &expected_32f, &func_data, 1e-4, false);
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, aces_rgb_to_jmh_20)` @ v2.5.2.
+#[test]
+fn aces_rgb_to_jmh_20() {
+    // The following input values are processed and carried over to the next FixedFunctionOp
+    // test along the ACES2 output transform steps.
+    #[rustfmt::skip]
+    let input_32f: [f32; 27 * 4] = [
+        // ACEScg primaries and secondaries scaled by 4
+        2.781808965, 0.179178253, -0.022103530, 1.0,
+        3.344523751, 3.617862727, -0.006002689, 1.0,
+        0.562714786, 3.438684474, 0.016100841, 1.0,
+        1.218191035, 3.820821747, 4.022103530, 1.0,
+        0.655476249, 0.382137273, 4.006002689, 1.0,
+        3.437285214, 0.561315526, 3.983899159, 1.0,
+        // OCIO test values
+        0.110000000, 0.020000000, 0.040000000, 0.5,
+        0.710000000, 0.510000000, 0.810000000, 1.0,
+        0.430000000, 0.820000000, 0.710000000, 0.0,
+        // ColorChecker24 (SMPTE 2065-1 2021)
+        0.118770000, 0.087090000, 0.058950000, 1.0,
+        0.400020000, 0.319160000, 0.237360000, 1.0,
+        0.184760000, 0.203980000, 0.313110000, 1.0,
+        0.109010000, 0.135110000, 0.064930000, 1.0,
+        0.266840000, 0.246040000, 0.409320000, 1.0,
+        0.322830000, 0.462080000, 0.406060000, 1.0,
+        0.386050000, 0.227430000, 0.057770000, 1.0,
+        0.138220000, 0.130370000, 0.337030000, 1.0,
+        0.302020000, 0.137520000, 0.127580000, 1.0,
+        0.093100000, 0.063470000, 0.135250000, 1.0,
+        0.348760000, 0.436540000, 0.106130000, 1.0,
+        0.486550000, 0.366850000, 0.080610000, 1.0,
+        0.087320000, 0.074430000, 0.272740000, 1.0,
+        0.153660000, 0.256920000, 0.090710000, 1.0,
+        0.217420000, 0.070700000, 0.051300000, 1.0,
+        0.589190000, 0.539430000, 0.091570000, 1.0,
+        0.309040000, 0.148180000, 0.274260000, 1.0,
+        0.149010000, 0.233780000, 0.359390000, 1.0,
+    ];
+
+    let mut input2_32f = input_32f;
+
+    #[rustfmt::skip]
+    let expected_32f: [f32; 27 * 4] = [
+        // ACEScg primaries and secondaries scaled by 4
+        107.480636597, 206.827301025, 25.025110245, 1.0,
+        173.194076538, 133.330886841, 106.183448792, 1.0,
+        139.210220337, 191.922363281, 147.056488037, 1.0,
+        157.905166626, 111.975311279, 192.204727173, 1.0,
+        79.229278564, 100.424659729, 268.442108154, 1.0,
+        132.888137817, 173.358779907, 341.715240479, 1.0,
+        // OCIO test values
+        26.112514496, 42.523605347, 4.173158169, 0.5,
+        79.190460205, 25.002300262, 332.159759521, 1.0,
+        81.912559509, 39.754810333, 182.925750732, 0.0,
+        // ColorChecker24 (SMPTE 2065-1 2021)
+        33.924663544, 12.254567146, 38.146659851, 1.0,
+        61.332393646, 15.169423103, 39.841842651, 1.0,
+        47.191543579, 11.839941978, 249.107116699, 1.0,
+        37.328300476, 13.224150658, 128.878036499, 1.0,
+        53.465549469, 13.121579170, 285.658966064, 1.0,
+        65.414512634, 19.172147751, 179.324264526, 1.0,
+        55.711513519, 37.182041168, 50.924011230, 1.0,
+        40.020961761, 20.762512207, 271.008331299, 1.0,
+        47.704769135, 35.791145325, 13.975610733, 1.0,
+        30.385913849, 14.544739723, 317.544281006, 1.0,
+        64.222846985, 33.487697601, 119.145133972, 1.0,
+        65.570358276, 35.864013672, 70.842193604, 1.0,
+        31.800464630, 23.920211792, 273.228973389, 1.0,
+        47.950405121, 28.027387619, 144.154159546, 1.0,
+        38.440967560, 42.604164124, 17.892261505, 1.0,
+        75.117736816, 40.952045441, 90.752044678, 1.0,
+        49.311210632, 33.812240601, 348.832092285, 1.0,
+        47.441757202, 22.915655136, 218.454376221, 1.0,
+    ];
+
+    // ACES AP0
+    let params: Params = vec![
+        0.7347, 0.2653, 0.0000, 1.0000, 0.0001, -0.0770, 0.32168, 0.33767,
+    ];
+    let func_data = FixedFunctionOpData::with_params(AcesRgbToJmh20, params.clone()).unwrap();
+
+    apply_fixed_function(&mut input2_32f, &expected_32f, &func_data, 1e-5, false);
+
+    let func_data2 = FixedFunctionOpData::with_params(AcesJmhToRgb20, params).unwrap();
+
+    apply_fixed_function(&mut input2_32f, &input_32f, &func_data2, 1e-4, false);
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, aces_tonescale_compress_20)` @ v2.5.2.
+#[test]
+fn aces_tonescale_compress_20() {
+    #[rustfmt::skip]
+    let input_32f: [f32; 27 * 4] = [
+        // ACEScg primaries and secondaries scaled by 4
+        107.480636597, 206.827301025, 25.025110245, 1.0,
+        173.194076538, 133.330886841, 106.183448792, 1.0,
+        139.210220337, 191.922363281, 147.056488037, 1.0,
+        157.905166626, 111.975311279, 192.204727173, 1.0,
+        79.229278564, 100.424659729, 268.442108154, 1.0,
+        132.888137817, 173.358779907, 341.715240479, 1.0,
+        // OCIO test values
+        26.112514496, 42.523605347, 4.173158169, 0.5,
+        79.190460205, 25.002300262, 332.159759521, 1.0,
+        81.912559509, 39.754810333, 182.925750732, 0.0,
+        // ColorChecker24 (SMPTE 2065-1 2021)
+        33.924663544, 12.254567146, 38.146659851, 1.0,
+        61.332393646, 15.169423103, 39.841842651, 1.0,
+        47.191543579, 11.839941978, 249.107116699, 1.0,
+        37.328300476, 13.224150658, 128.878036499, 1.0,
+        53.465549469, 13.121579170, 285.658966064, 1.0,
+        65.414512634, 19.172147751, 179.324264526, 1.0,
+        55.711513519, 37.182041168, 50.924011230, 1.0,
+        40.020961761, 20.762512207, 271.008331299, 1.0,
+        47.704769135, 35.791145325, 13.975610733, 1.0,
+        30.385913849, 14.544739723, 317.544281006, 1.0,
+        64.222846985, 33.487697601, 119.145133972, 1.0,
+        65.570358276, 35.864013672, 70.842193604, 1.0,
+        31.800464630, 23.920211792, 273.228973389, 1.0,
+        47.950405121, 28.027387619, 144.154159546, 1.0,
+        38.440967560, 42.604164124, 17.892261505, 1.0,
+        75.117736816, 40.952045441, 90.752044678, 1.0,
+        49.311210632, 33.812240601, 348.832092285, 1.0,
+        47.441757202, 22.915655136, 218.454376221, 1.0,
+    ];
+
+    let mut input2_32f = input_32f;
+
+    #[rustfmt::skip]
+    let expected_32f: [f32; 27 * 4] = [
+        // ACEScg primaries and secondaries scaled by 4
+        110.702453613, 211.251770020, 25.025110245,  1.0,
+        168.016815186, 129.796249390, 106.183448792, 1.0,
+        140.814849854, 193.459197998, 147.056488037, 1.0,
+        156.429504395, 110.938423157, 192.204727173, 1.0,
+        80.456558228, 98.490531921, 268.442108154,   1.0,
+        135.172225952, 175.559326172, 341.715240479, 1.0,
+        // OCIO test values
+        18.187316895, 33.819190979, 4.173158169,   0.5,
+        80.413101196, 21.309329987, 332.159759521, 1.0,
+        83.447883606, 37.852523804, 182.925750732, 0.0,
+        // ColorChecker24 (SMPTE 2065-1 2021)
+        27.411968231, 13.382784843, 38.146659851,  1.0,
+        59.987659454, 14.391894341, 39.841842651,  1.0,
+        43.298923492, 12.199877739, 249.107116699, 1.0,
+        31.489654541, 14.075141907, 128.878036499, 1.0,
+        50.749198914, 12.731806755, 285.658966064, 1.0,
+        64.728637695, 18.593791962, 179.324264526, 1.0,
+        53.399444580, 37.394416809, 50.924011230,  1.0,
+        34.719596863, 21.616765976, 271.008331299, 1.0,
+        43.910709381, 36.788166046, 13.975610733,  1.0,
+        23.196529388, 15.118354797, 317.544281006, 1.0,
+        63.348682404, 33.283519745, 119.145133972, 1.0,
+        64.908874512, 35.371063232, 70.842193604,  1.0,
+        24.876913071, 23.143159866, 273.228973389, 1.0,
+        44.203376770, 28.918329239, 144.154159546, 1.0,
+        32.824359894, 43.447853088, 17.892261505,  1.0,
+        75.830871582, 39.872489929, 90.752044678,  1.0,
+        45.823120117, 34.652057648, 348.832092285, 1.0,
+        43.597236633, 23.079071045, 218.454376221, 1.0,
+    ];
+
+    let params: Params = vec![1000.0];
+    let func_data =
+        FixedFunctionOpData::with_params(AcesTonescaleCompress20Fwd, params.clone()).unwrap();
+
+    apply_fixed_function(&mut input2_32f, &expected_32f, &func_data, 1e-5, false);
+
+    let func_data2 = FixedFunctionOpData::with_params(AcesTonescaleCompress20Inv, params).unwrap();
+
+    apply_fixed_function(&mut input2_32f, &input_32f, &func_data2, 1e-4, false);
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, aces_gamut_map_20)` @ v2.5.2.
+#[test]
+fn aces_gamut_map_20() {
+    #[rustfmt::skip]
+    let input_32f: [f32; 27 * 4] = [
+        // ACEScg primaries and secondaries scaled by 4
+        110.702453613, 211.251770020, 25.025110245, 1.0,
+        168.016815186, 129.796249390, 106.183448792, 1.0,
+        140.814849854, 193.459213257, 147.056488037, 1.0,
+        156.429519653, 110.938514709, 192.204727173, 1.0,
+        80.456542969, 98.490524292, 268.442108154, 1.0,
+        135.172195435, 175.559280396, 341.715240479, 1.0,
+        // OCIO test values
+        18.187314987, 33.819175720, 4.173158169, 0.5,
+        80.413116455, 21.309329987, 332.159759521, 1.0,
+        83.447891235, 37.852291107, 182.925750732, 0.0,
+        // ColorChecker24 (SMPTE 2065-1 2021)
+        27.411964417, 13.382769585, 38.146659851, 1.0,
+        59.987670898, 14.391894341, 39.841842651, 1.0,
+        43.298923492, 12.199877739, 249.107116699, 1.0,
+        31.489658356, 14.075142860, 128.878036499, 1.0,
+        50.749198914, 12.731814384, 285.658966064, 1.0,
+        64.728637695, 18.593795776, 179.324264526, 1.0,
+        53.399448395, 37.394428253, 50.924011230, 1.0,
+        34.719596863, 21.616765976, 271.008331299, 1.0,
+        43.910713196, 36.788166046, 13.975610733, 1.0,
+        23.196525574, 15.118354797, 317.544281006, 1.0,
+        63.348674774, 33.283493042, 119.145133972, 1.0,
+        64.908889771, 35.371044159, 70.842193604, 1.0,
+        24.876911163, 23.143159866, 273.228973389, 1.0,
+        44.203376770, 28.918329239, 144.154159546, 1.0,
+        32.824356079, 43.447875977, 17.892261505, 1.0,
+        75.830871582, 39.872474670, 90.752044678, 1.0,
+        45.823116302, 34.652069092, 348.832092285, 1.0,
+        43.597240448, 23.079078674, 218.454376221, 1.0,
+    ];
+
+    let mut input2_32f = input_32f;
+
+    #[rustfmt::skip]
+    let expected_32f: [f32; 27 * 4] = [
+        // ACEScg primaries and secondaries scaled by 4
+        107.829742432, 174.270156860, 25.025110245,  1.0,
+        168.028274536, 118.227561951, 106.183448792, 1.0,
+        140.030166626, 127.184478760, 147.056488037, 1.0,
+        156.512435913, 73.219184875,  192.204727173, 1.0,
+        79.378555298,  72.608604431,  268.442108154, 1.0,
+        133.827941895, 149.930618286, 341.715240479, 1.0,
+        // OCIO test values
+        18.193992615,  33.313068390,  4.173158169,   0.5,
+        80.413116455,  21.309329987,  332.159759521, 1.0,
+        83.467445374,  37.305030823,  182.925750732, 0.0,
+        // ColorChecker24 (SMPTE 2065-1 2021)
+        27.411962509,  13.382769585,  38.146659851,  1.0,
+        59.987674713,  14.391894341,  39.841842651,  1.0,
+        43.298919678,  12.199877739,  249.107116699, 1.0,
+        31.489658356,  14.075142860,  128.878036499, 1.0,
+        50.749198914,  12.731814384,  285.658966064, 1.0,
+        64.728637695,  18.593795776,  179.324264526, 1.0,
+        53.399448395,  37.394428253,  50.924011230,  1.0,
+        34.719596863,  21.616765976,  271.008331299, 1.0,
+        43.910713196,  36.788166046,  13.975610733,  1.0,
+        23.196525574,  15.118354797,  317.544281006, 1.0,
+        63.348674774,  33.283493042,  119.145133972, 1.0,
+        64.908882141,  35.371044159,  70.842193604,  1.0,
+        24.876911163,  23.143159866,  273.228973389, 1.0,
+        44.203376770,  28.918329239,  144.154159546, 1.0,
+        32.824356079,  43.447875977,  17.892261505,  1.0,
+        75.830871582,  39.872474670,  90.752044678,  1.0,
+        45.823112488,  34.652069092,  348.832092285, 1.0,
+        43.635547638,  21.629518509,  218.454376221, 1.0,
+    ];
+
+    let params: Params = vec![
+        // Peak luminance
+        1000.0, // P3D65 gamut
+        0.680, 0.320, 0.265, 0.690, 0.150, 0.060, 0.3127, 0.3290,
+    ];
+    let func_data =
+        FixedFunctionOpData::with_params(AcesGamutCompress20Fwd, params.clone()).unwrap();
+
+    apply_fixed_function(&mut input2_32f, &expected_32f, &func_data, 1e-5, false);
+
+    let func_data2 = FixedFunctionOpData::with_params(AcesGamutCompress20Inv, params).unwrap();
+
+    apply_fixed_function(&mut input2_32f, &input_32f, &func_data2, 1e-5, false);
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, rec2100_surround)` @ v2.5.2.
+#[test]
+fn rec2100_surround() {
+    let input_32f: [f32; 20] = [
+        8.4e-5, 2.4e-5, 1.4e-4, 0.1, //
+        0.11, 0.02, 0.04, 0.5, //
+        0.71, 0.51, 0.81, 1.0, //
+        0.43, 0.82, 0.71, 0.0, //
+        -1.00, -0.001, 1.2, 0.0,
+    ];
+    {
+        let params: Params = vec![0.78];
+
+        let mut output_32f = input_32f;
+
+        let expected_32f: [f32; 20] = [
+            0.000637205163,
+            0.000182058618,
+            0.001062008605,
+            0.1, //
+            0.21779590,
+            0.03959925,
+            0.07919850,
+            0.5, //
+            0.80029451,
+            0.57485944,
+            0.91301214,
+            1.0, //
+            0.46350446,
+            0.88389223,
+            0.76532131,
+            0.0, //
+            -1.43735918,
+            -0.00143735918,
+            1.72483102,
+            0.0,
+        ];
+
+        // Forward transform -- input to expected.
+        let func_data =
+            FixedFunctionOpData::with_params(Rec2100SurroundFwd, params.clone()).unwrap();
+        apply_fixed_function(&mut output_32f, &expected_32f, &func_data, 4e-7, false);
+
+        // Inverse transform -- output back to original.
+        let func_data_inv = FixedFunctionOpData::with_params(Rec2100SurroundInv, params).unwrap();
+        apply_fixed_function(&mut output_32f, &input_32f, &func_data_inv, 3e-7, false);
+    }
+    {
+        let params: Params = vec![1.2];
+
+        let mut output_32f = input_32f;
+
+        let expected_32f: [f32; 20] = [
+            1.331310281667e-05,
+            3.803743661907e-06,
+            2.218850469446e-05,
+            0.1, //
+            0.059115925805,
+            0.010748350146,
+            0.021496700293,
+            0.5, //
+            0.636785774786,
+            0.457409500198,
+            0.726473912080,
+            1.0, //
+            0.401647721515,
+            0.765932864285,
+            0.663185772735,
+            0.0, //
+            -7.190495367684e-01,
+            -7.190495367684e-04,
+            8.628594441221e-01,
+            0.0,
+        ];
+
+        // Forward transform -- input to expected.
+        let func_data =
+            FixedFunctionOpData::with_params(Rec2100SurroundFwd, params.clone()).unwrap();
+        apply_fixed_function(&mut output_32f, &expected_32f, &func_data, 2e-7, false);
+
+        // Inverse transform -- output back to original.
+        let func_data_inv = FixedFunctionOpData::with_params(Rec2100SurroundInv, params).unwrap();
+        apply_fixed_function(&mut output_32f, &input_32f, &func_data_inv, 2e-7, false);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, RGB_TO_HSV)` @ v2.5.2.
+#[test]
+fn rgb_to_hsv() {
+    #[rustfmt::skip]
+    let hsv_frame: Vec<f32> = vec![
+         3./12.,  0.80,  2.50,  0.50,      // val > 1
+        11./12.,  1.20,  2.50,  1.00,      // sat > 1
+        15./24.,  0.80, -2.00,  0.25,      // val < 0
+        19./24.,  1.50, -0.40,  0.25,      // sat > 1, val < 0
+       -89./24.,  0.50,  0.40,  2.00,      // under-range hue
+        81./24.,  1.50, -0.40, -0.25,      // over-range hue, sat > 1, val < 0
+        81./24., -0.50,  0.40,  0.00,      // sat < 0
+         0.5000,  2.50,  0.04,  0.00,      // sat > 2
+    ];
+
+    #[rustfmt::skip]
+    let rgb_frame: Vec<f32> = vec![
+        1.500,   2.500,   0.500,   0.50,
+        3.125,  -0.625,   1.250,   1.00,
+       -5./3., -4./3., -1./3.,  0.25,
+        0.100,  -0.800,   0.400,   0.25,
+        0.250,   0.400,   0.200,   2.00,
+       -0.800,   0.400,  -0.500,  -0.25,
+        0.400,   0.400,   0.400,   0.00,
+       -39.96,   40.00,   40.00,   0.00,
+    ];
+
+    let data_fwd = data(RgbToHsv);
+
+    let num_rgb = 4; // only the first 4 are relevant for RGB --> HSV
+    let mut img = rgb_frame.clone();
+    apply_fixed_function(
+        &mut img[..num_rgb * 4],
+        &hsv_frame[..num_rgb * 4],
+        &data_fwd,
+        1e-6,
+        false,
+    );
+
+    let data_f_inv = data(HsvToRgb);
+
+    let num_hsv = 7; // not using the last one as it requires a looser tolerance
+    let mut img = hsv_frame.clone();
+    apply_fixed_function(
+        &mut img[..num_hsv * 4],
+        &rgb_frame[..num_hsv * 4],
+        &data_f_inv,
+        1e-6,
+        false,
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, RGB_TO_HSY_LIN)` @ v2.5.2.
+#[test]
+fn rgb_to_hsy_lin() {
+    #[rustfmt::skip]
+    let hsy_frame: Vec<f32> = vec![
+         0.470554752,    9.12594033,   0.0326650218,  0.,   // hsy alpha == 1
+         0.75,           0.22196741,   0.38596,       0.,
+         0.08333333,     0.12976444,   0.034974,      0.,
+         0.333333333333, 0.606036032,  0.0056680,     1.,   // hsy mid alpha
+         0.241666666667, 0.8372990325, 0.0034440,     1.,
+         0.734693877551, 0.752099600,  0.0005572,     0.,   // hsy alpha == 0
+         0.96296296,     9.7034,      -0.1862,        0.,
+         0.730158730159, 0.811517000, -0.0009310,     0.,
+    ];
+
+    #[rustfmt::skip]
+    let rgb_frame: Vec<f32> = vec![
+        -0.075290,  0.078996, -0.108397, 0.,
+         0.3,       0.4,       0.5,      0.,
+         0.05,      0.03,      0.04,     0.,
+         0.01,      0.01,     -0.05,     1.,
+         0.05,     -0.005,    -0.05,     1.,
+        -0.048,     0.01,      0.05,     0.,
+         0.3,      -0.4,       0.5,      0.,
+        -0.055,     0.01,      0.05,     0.,
+    ];
+
+    let mut img = rgb_frame.clone();
+    apply_fixed_function(&mut img, &hsy_frame, &data(RgbToHsyLin), 1e-6, false);
+
+    let mut img = hsy_frame.clone();
+    apply_fixed_function(&mut img, &rgb_frame, &data(HsyLinToRgb), 1e-6, false);
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, RGB_TO_HSY_LOG)` @ v2.5.2.
+#[test]
+fn rgb_to_hsy_log() {
+    let hsy_frame: Vec<f32> = vec![
+        14563.0 / 65535.,
+        64392.0 / 65535.,
+        20899.0 / 65535.,
+        32007.0 / 65535.,
+        50061.0 / 65535.,
+        64310.0 / 65535.,
+        6328.0 / 65535.,
+        65535.0 / 65535.,
+    ];
+
+    let rgb_frame: Vec<f32> = vec![
+        1800.0 / 4095.,
+        1200.0 / 4095.,
+        900.0 / 4095.,
+        2000.0 / 4095.,
+        40.0 / 4095.,
+        440.0 / 4095.,
+        1000.0 / 4095.,
+        4095.0 / 4095.,
+    ];
+
+    let mut img = rgb_frame.clone();
+    apply_fixed_function(&mut img, &hsy_frame, &data(RgbToHsyLog), 1e-5, false);
+
+    let mut img = hsy_frame.clone();
+    apply_fixed_function(&mut img, &rgb_frame, &data(HsyLogToRgb), 1e-5, false);
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, RGB_TO_HSY_VID)` @ v2.5.2.
+#[test]
+fn rgb_to_hsy_vid() {
+    let hsy_frame: Vec<f32> = vec![
+        0.54190051555634,
+        1.0851333141327,
+        0.55111348628998,
+        0.48840048909187,
+        0.54262113571167,
+        1.4824789762497,
+        1.1281162500381,
+        1.,
+    ];
+
+    let rgb_frame: Vec<f32> = vec![
+        0.12152557820082,
+        0.70731294155121,
+        0.26879417896271,
+        0.48840048909187,
+        0.53938156366348,
+        1.3418402671814,
+        0.74459171295166,
+        1.,
+    ];
+
+    let mut img = rgb_frame.clone();
+    apply_fixed_function(&mut img, &hsy_frame, &data(RgbToHsyVid), 1e-6, false);
+
+    let mut img = hsy_frame.clone();
+    apply_fixed_function(&mut img, &rgb_frame, &data(HsyVidToRgb), 1e-6, false);
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, XYZ_TO_xyY)` @ v2.5.2.
+#[test]
+fn xyz_to_xyy() {
+    let input_frame: Vec<f32> = vec![
+        3600.0 / 4095.0,
+        250.0 / 4095.0,
+        900.0 / 4095.0,
+        2000.0 / 4095.0,
+        400.0 / 4095.0,
+        3000.0 / 4095.0,
+        4000.0 / 4095.0,
+        4095.0 / 4095.0,
+    ];
+
+    let output_frame: Vec<f32> = vec![
+        49669.0 / 65535.0,
+        3449.0 / 65535.0,
+        4001.0 / 65535.0,
+        32007.0 / 65535.0,
+        3542.0 / 65535.0,
+        26568.0 / 65535.0,
+        48011.0 / 65535.0,
+        65535.0 / 65535.0,
+    ];
+
+    let mut img = input_frame.clone();
+    apply_fixed_function(&mut img, &output_frame, &data(XyzToXyy), 1e-5, false);
+
+    let mut img = output_frame.clone();
+    apply_fixed_function(&mut img, &input_frame, &data(XyyToXyz), 1e-4, false);
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, XYZ_TO_uvY)` @ v2.5.2.
+#[test]
+fn xyz_to_uvy() {
+    let input_frame: Vec<f32> = vec![
+        3600.0 / 4095.0,
+        350.0 / 4095.0,
+        1900.0 / 4095.0,
+        2000.0 / 4095.0,
+        400.0 / 4095.0,
+        3000.0 / 4095.0,
+        4000.0 / 4095.0,
+        4095.0 / 4095.0,
+    ];
+
+    let output_frame: Vec<f32> = vec![
+        64859.0 / 65535.0,
+        14188.0 / 65535.0,
+        5601.0 / 65535.0,
+        32007.0 / 65535.0,
+        1827.0 / 65535.0,
+        30827.0 / 65535.0,
+        48011.0 / 65535.0,
+        65535.0 / 65535.0,
+    ];
+
+    let mut img = input_frame.clone();
+    apply_fixed_function(&mut img, &output_frame, &data(XyzToUvy), 1e-5, false);
+
+    let mut img = output_frame.clone();
+    apply_fixed_function(&mut img, &input_frame, &data(UvyToXyz), 1e-4, false);
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, XYZ_TO_LUV)` @ v2.5.2.
+#[test]
+fn xyz_to_luv() {
+    let input_frame: Vec<f32> = vec![
+        3600.0 / 4095.0,
+        3500.0 / 4095.0,
+        1900.0 / 4095.0,
+        2000.0 / 4095.0,
+        50.0 / 4095.0,
+        30.0 / 4095.0,
+        19.0 / 4095.0,
+        4095.0 / 4095.0, // below the L* break
+    ];
+
+    let output_frame: Vec<f32> = vec![
+        61659.0 / 65535.0,
+        28199.0 / 65535.0,
+        33176.0 / 65535.0,
+        32007.0 / 65535.0,
+        4337.0 / 65535.0,
+        9090.0 / 65535.0,
+        926.0 / 65535.0,
+        65535.0 / 65535.0,
+    ];
+
+    let mut img = input_frame.clone();
+    apply_fixed_function(&mut img, &output_frame, &data(XyzToLuv), 1e-5, false);
+
+    let mut img = output_frame.clone();
+    apply_fixed_function(&mut img, &input_frame, &data(LuvToXyz), 1e-5, false);
+}
+
+/// The Rec.2100 HLG curve's parameters (FixedFunctionOpCPU_tests.cpp:1311-1325 @ v2.5.2).
+fn hlg_params() -> Params {
+    vec![
+        0.0,  // mirror point
+        0.25, // break point
+        // Gamma segment.
+        0.5, // gamma power
+        1.0, // post-power scale
+        0.0, // pre-power offset
+        // Log segment.
+        1.0f64.exp(),   // log base (e)
+        0.17883277,     // log-side slope
+        0.807825590164, // log-side offset
+        1.0,            // lin-side slope
+        -0.07116723,    // lin-side offset
+    ]
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, LIN_TO_GAMMA_LOG)` @ v2.5.2.
+#[test]
+fn lin_to_gamma_log() {
+    // Parameters for the Rec.2100 HLG curve.
+    let params = hlg_params();
+
+    #[rustfmt::skip]
+    let hlg_frame: [f32; 40] = [
+      -0.60, -0.55, -0.50, -1.0, // negative log segment
+      -0.10, -0.05,  0.00,  1.0, // negative gamma Segment
+       0.05,  0.10,  0.15,  1.0,
+       0.20,  0.25,  0.30,  1.0,
+       0.35,  0.40,  0.45,  0.5,
+       0.50,  0.55,  0.60,  0.0,
+       0.65,  0.70,  0.75,  1.0,
+       0.80,  0.85,  0.90,  1.0,
+       0.95,  1.00,  1.05,  1.0,
+       1.10,  1.15,  1.20,  1.0, // over range
+    ];
+
+    #[rustfmt::skip]
+    let linear_frame: [f32; 40] = [
+       -0.383988768, -0.307689428, -0.250000000, -1.0,
+       -0.01000000,  -0.002500000,  0.00000000,   1.0,
+        0.002500000,  0.010000000,  0.02250000,   1.0,
+        0.040000000,  0.062500000,  0.09000000,   1.0,
+        0.122500000,  0.160000000,  0.202499986,  0.5,
+        0.250000000,  0.307689428,  0.383988768,  0.0,
+        0.484901309,  0.618367195,  0.794887662,  1.0,
+        1.02835166,   1.33712840,   1.74551260,   1.0,
+        2.28563738,   3.00000000,   3.94480681,   1.0,
+        5.19440079,   6.84709501,   9.03293514,   1.0,
+    ];
+
+    let data_fwd = FixedFunctionOpData::with_params(GammaLogToLin, params.clone()).unwrap();
+    let mut img = hlg_frame;
+    apply_fixed_function(&mut img, &linear_frame, &data_fwd, 5e-5, false);
+
+    let data_f_inv = FixedFunctionOpData::with_params(LinToGammaLog, params).unwrap();
+    let mut img = linear_frame;
+    apply_fixed_function(&mut img, &hlg_frame, &data_f_inv, 1e-5, false);
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, LIN_TO_DOUBLE_LOG)` @ v2.5.2.
+#[test]
+fn lin_to_double_log() {
+    // Note: Parameters are designed to result in a monotonically increasing but discontinuous
+    // function. Also the break points are chosen to be exact values in IEEE-754 to verify that
+    // they belong to the log segments.
+    #[rustfmt::skip]
+    let params: Params = vec![
+        10.0,                  // base for the log
+        0.25,                  // break point between log1 and linear segments
+        0.5,                   // break point between linear and log2 segments
+       -1.0, 0.0, -1.0, 1.25,  // log curve 1: LogSideSlope, LogSideOffset, LinSideSlope, LinSideOffset
+        1.0, 1.0, 1.0, 0.5,    // log curve 2: LogSideSlope, LogSideOffset, LinSideSlope, LinSideOffset
+        1.0, 0.0,              // linear segment slope and offset
+    ];
+
+    #[rustfmt::skip]
+    let linear_frame: [f32; 40] = [
+       -0.25, -0.20, -0.15, -1.00, // negative input
+       -0.10, -0.05,  0.00,  0.00,
+        0.05,  0.10,  0.15,  1.00,
+        0.20,  0.25,  0.30,  1.00, // 0.25 breakpoint belongs to log1
+        0.35,  0.40,  0.45,  1.00, // linear segment (y=x)
+        0.50,  0.55,  0.60,  1.00, // 0.50 breakpoint belongs to log2
+        0.65,  0.70,  0.75,  1.00,
+        0.80,  0.85,  0.90,  1.00,
+        0.95,  1.00,  1.05,  1.00,
+        1.10,  1.15,  1.20,  1.25, // over-range
+    ];
+
+    #[rustfmt::skip]
+    let log_frame: [f32; 40] = [
+        -0.17609126, -0.161368  , -0.14612804, -1.00, // negative input
+        -0.13033377, -0.11394335, -0.09691001,  0.00,
+        -0.07918125, -0.06069784, -0.04139269,  1.00,
+        -0.0211893 ,  0.0       ,  0.3       ,  1.00, // 0.25 breakpoint belongs to log1
+         0.35      ,  0.4       ,  0.45      ,  1.00, // linear segment (y=x)
+         1.0       ,  1.0211893 ,  1.04139269,  1.00, // 0.50 breakpoint belongs to log2
+         1.06069784,  1.07918125,  1.09691001,  1.00,
+         1.11394335,  1.13033377,  1.14612804,  1.00,
+         1.161368  ,  1.17609126,  1.1903317 ,  1.00,
+         1.20411998,  1.21748394,  1.23044892,  1.25, // over-range
+    ];
+
+    let data_fwd = FixedFunctionOpData::with_params(LinToDoubleLog, params.clone()).unwrap();
+    let mut img = linear_frame;
+    apply_fixed_function(&mut img, &log_frame, &data_fwd, 1e-6, false);
+
+    let data_f_inv = FixedFunctionOpData::with_params(DoubleLogToLin, params).unwrap();
+    let mut img = log_frame;
+    apply_fixed_function(&mut img, &linear_frame, &data_f_inv, 1e-6, false);
+}
+
+/// U-31: the gamut compression's renderer reads seven parameters, the Rec.2100 surround's
+/// one, the gamma-log's ten and the double-log's 13, which upstream does without a check; the
+/// port refuses data with fewer (set after the validating constructor). The styles whose renderers come later are refused, in both
+/// fast-math settings.
 #[test]
 fn short_params_and_unported_styles_are_refused() {
     let params: Params = vec![1.147, 1.264, 1.312, 0.815, 0.803, 0.880, 1.2];
@@ -374,11 +1220,35 @@ fn short_params_and_unported_styles_are_refused() {
             SHORT_PARAMS,
         );
     }
+    for style in [Rec2100SurroundFwd, Rec2100SurroundInv] {
+        let mut data = FixedFunctionOpData::with_params(style, vec![0.78]).unwrap();
+        data.set_params(Vec::new());
+        check_throw_what(
+            get_fixed_function_cpu_renderer(&data, false).map(|_| ()),
+            SHORT_PARAMS,
+        );
+    }
+    let double_log: Params = vec![
+        10.0, 0.25, 0.5, -1.0, 0.0, -1.0, 1.25, 1.0, 1.0, 1.0, 0.5, 1.0, 0.0,
+    ];
+    for (style, params) in [
+        (LinToGammaLog, hlg_params()),
+        (GammaLogToLin, hlg_params()),
+        (LinToDoubleLog, double_log.clone()),
+        (DoubleLogToLin, double_log),
+    ] {
+        let mut data = FixedFunctionOpData::with_params(style, params.clone()).unwrap();
+        data.set_params(params[..params.len() - 1].to_vec());
+        check_throw_what(
+            get_fixed_function_cpu_renderer(&data, false).map(|_| ()),
+            SHORT_PARAMS,
+        );
+    }
     for fast in [false, true] {
-        let data = FixedFunctionOpData::new(RgbToHsv).unwrap();
+        let data = FixedFunctionOpData::new(LinToPq).unwrap();
         check_throw_what(
             get_fixed_function_cpu_renderer(&data, fast).map(|_| ()),
-            "the CPU renderer of the style 'RGB_TO_HSV' is not ported yet",
+            "the CPU renderer of the style 'Lin_TO_PQ' is not ported yet",
         );
     }
 }

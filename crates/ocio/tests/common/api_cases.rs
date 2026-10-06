@@ -1080,6 +1080,13 @@ pub(crate) fn fixed_function() -> Cases {
         "FIXED_FUNCTION_ACES_GLOW_03",
         "FIXED_FUNCTION_ACES_GLOW_10",
         "FIXED_FUNCTION_ACES_DARK_TO_DIM_10",
+        "FIXED_FUNCTION_RGB_TO_HSV",
+        "FIXED_FUNCTION_RGB_TO_HSY_LIN",
+        "FIXED_FUNCTION_RGB_TO_HSY_LOG",
+        "FIXED_FUNCTION_RGB_TO_HSY_VID",
+        "FIXED_FUNCTION_XYZ_TO_xyY",
+        "FIXED_FUNCTION_XYZ_TO_uvY",
+        "FIXED_FUNCTION_XYZ_TO_LUV",
     ]
     .into_iter()
     .map(|style| Case::new(style, fixed_function_calls(style, &[])))
@@ -1088,7 +1095,7 @@ pub(crate) fn fixed_function() -> Cases {
         "ACES_GAMUT_COMP_13",
         fixed_function_calls("FIXED_FUNCTION_ACES_GAMUT_COMP_13", &GAMUT_COMP_13),
     );
-    let bases = vec![gamut.clone()];
+    let mut bases = vec![gamut.clone()];
     cases.push(gamut);
     for (label, params) in [
         ("lower bounds", [1.001, 1.001, 1.001, 0.0, 0.0, 0.0, 1.0]),
@@ -1101,6 +1108,92 @@ pub(crate) fn fixed_function() -> Cases {
         cases.push(Case::new(
             format!("ACES_GAMUT_COMP_13 {label}"),
             fixed_function_calls("FIXED_FUNCTION_ACES_GAMUT_COMP_13", &params),
+        ));
+    }
+    // Random sets within the bounds, as the op battery runs them
+    // (crates/ocio-ops/tests/common/fixed_function.rs, `random_gamut_comp_13_params`); the
+    // digest pins them.
+    let random = random_gamut_comp_13_params(6);
+    let bytes: Vec<u8> = random
+        .iter()
+        .flatten()
+        .flat_map(|v| v.to_le_bytes())
+        .collect();
+    assert_eq!(xxhash_rust::xxh3::xxh3_64(&bytes), 0xdec4_928a_cfc1_3ecc);
+    for (i, params) in random.iter().enumerate() {
+        cases.push(Case::new(
+            format!("ACES_GAMUT_COMP_13 random {i}"),
+            fixed_function_calls("FIXED_FUNCTION_ACES_GAMUT_COMP_13", params),
+        ));
+    }
+    // tests/cpu/ops/fixedfunction/FixedFunctionOpCPU_tests.cpp:996, 1030 @ v2.5.2.
+    let surround = Case::new(
+        "REC2100_SURROUND 0.78",
+        fixed_function_calls("FIXED_FUNCTION_REC2100_SURROUND", &[0.78]),
+    );
+    bases.push(surround.clone());
+    cases.push(surround);
+    cases.push(Case::new(
+        "REC2100_SURROUND 1.2",
+        fixed_function_calls("FIXED_FUNCTION_REC2100_SURROUND", &[1.2]),
+    ));
+    cases.push(Case::new(
+        "REC2100_SURROUND NaN",
+        fixed_function_calls("FIXED_FUNCTION_REC2100_SURROUND", &[f64::NAN]),
+    ));
+    // The Rec.2100 HLG curve, and a double log (tests/cpu/ops/fixedfunction/
+    // FixedFunctionOpCPU_tests.cpp:1311-1325, 1374-1382 @ v2.5.2).
+    let hlg = [
+        0.0,
+        0.25,
+        0.5,
+        1.0,
+        0.0,
+        std::f64::consts::E,
+        0.17883277,
+        0.807825590164,
+        1.0,
+        -0.07116723,
+    ];
+    let gamma_log = Case::new(
+        "LIN_TO_GAMMA_LOG HLG",
+        fixed_function_calls("FIXED_FUNCTION_LIN_TO_GAMMA_LOG", &hlg),
+    );
+    bases.push(gamma_log.clone());
+    cases.push(gamma_log);
+    let double_log = Case::new(
+        "LIN_TO_DOUBLE_LOG",
+        fixed_function_calls(
+            "FIXED_FUNCTION_LIN_TO_DOUBLE_LOG",
+            &[
+                10.0, 0.25, 0.5, -1.0, 0.0, -1.0, 1.25, 1.0, 1.0, 1.0, 0.5, 1.0, 0.0,
+            ],
+        ),
+    );
+    bases.push(double_log.clone());
+    cases.push(double_log);
+    // ACES 2.0, as upstream's tests run it (tests/cpu/ops/fixedfunction/
+    // FixedFunctionOpCPU_tests.cpp @ v2.5.2): the output transform and the gamut compression to
+    // P3-D65 at 1000 nits, the tone scale at 1000 nits, RGB to JMh of AP0 (773). Not bases: a
+    // NaN primary makes the wheel's hue table code write past its arrays (U-32).
+    let p3_d65_1000 = [
+        1000.0, 0.680, 0.320, 0.265, 0.690, 0.150, 0.060, 0.3127, 0.3290,
+    ];
+    let ap0 = [
+        0.7347, 0.2653, 0.0000, 1.0000, 0.0001, -0.0770, 0.32168, 0.33767,
+    ];
+    for (style, params) in [
+        ("FIXED_FUNCTION_ACES_OUTPUT_TRANSFORM_20", &p3_d65_1000[..]),
+        ("FIXED_FUNCTION_ACES_GAMUT_COMPRESS_20", &p3_d65_1000[..]),
+        (
+            "FIXED_FUNCTION_ACES_TONESCALE_COMPRESS_20",
+            &p3_d65_1000[..1],
+        ),
+        ("FIXED_FUNCTION_ACES_RGB_TO_JMH_20", &ap0[..]),
+    ] {
+        cases.push(Case::new(
+            style.trim_start_matches("FIXED_FUNCTION_"),
+            fixed_function_calls(style, params),
         ));
     }
     let mut nan = GAMUT_COMP_13;
@@ -1133,4 +1226,24 @@ pub(crate) fn fixed_function() -> Cases {
             ),
     ));
     Cases { cases, bases }
+}
+
+/// Random ACES 1.3 gamut compression parameters within `validate`'s bounds, as
+/// `crates/ocio-ops/tests/common/fixed_function.rs` generates them for the op battery.
+fn random_gamut_comp_13_params(n: usize) -> Vec<[f64; 7]> {
+    let mut rng = ocio_testkit::probe::Rng::new(0x6a3c_0013);
+    let mut unit = move || (rng.next_u64() >> 11) as f64 / (1u64 << 53) as f64;
+    (0..n)
+        .map(|_| {
+            let mut p = [0.0; 7];
+            for v in &mut p[..3] {
+                *v = 1.001 + 1.499 * unit();
+            }
+            for v in &mut p[3..6] {
+                *v = 0.9995 * unit();
+            }
+            p[6] = 1.0 + 4.0 * unit();
+            p
+        })
+        .collect()
 }

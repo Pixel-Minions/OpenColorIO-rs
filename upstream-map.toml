@@ -1244,31 +1244,36 @@ status = "todo"
 path = "src/OpenColorIO/ops/fixedfunction/ACES2/ColorLib.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/fixedfunction/aces2/color_lib.rs"]
-status = "todo"
+status = "done"
+note = "p2-aces2-cpu 2.4a"
 
 [[file]]
 path = "src/OpenColorIO/ops/fixedfunction/ACES2/Common.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/fixedfunction/aces2/common.rs"]
-status = "todo"
+status = "done"
+note = "p2-aces2-cpu 2.4a"
 
 [[file]]
 path = "src/OpenColorIO/ops/fixedfunction/ACES2/MatrixLib.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/fixedfunction/aces2/matrix_lib.rs"]
-status = "todo"
+status = "done"
+note = "p2-aces2-cpu 2.4a; 2.4e1: mult_f3_f33_rows, the orders of the wheels' compiled copies"
 
 [[file]]
 path = "src/OpenColorIO/ops/fixedfunction/ACES2/Transform.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/fixedfunction/aces2/transform.rs"]
-status = "todo"
+status = "done"
+note = "p2-aces2-cpu 2.4a: the table lookups, the CAM and RGB<->JMh (1-250), model_gamma and init_JMhParams (464-545); 2.4b: the tone scale and chroma compression (283-462), make_reach_m_table (857-910), init_ToneScaleParams, init_SharedCompressionParams, resolve_CompressionParams, init_ChromaCompressParams (1265-1356); 2.4c: the cusp corners, the hue and cusp tables (547-855); 2.4d: gamut compression, gamma fit, init_GamutCompressParams (912-1263, 1358-1402); 2.4e1: the wheels' NaN orders in the JMh model and the chroma compression; 2.4e2: and in the gamut compression"
 
 [[file]]
 path = "src/OpenColorIO/ops/fixedfunction/ACES2/Transform.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/fixedfunction/aces2/transform.rs"]
-status = "todo"
+status = "done"
+note = "p2-aces2-cpu 2.4a-2.4d: the declarations, in transform.rs"
 
 [[file]]
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOp.cpp"
@@ -1288,7 +1293,7 @@ path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op_cpu.rs"]
 status = "partial"
-note = "p2-ff-cpu 2.3b: the ACES 1.x renderers (red modifiers, glows, dark to dim, gamut compression 1.3, 1-132 and 558-1088) and GetFixedFunctionCPURenderer (2429-2645), its other arms not ported yet"
+note = "p2-ff-cpu 2.3b: the ACES 1.x renderers (red modifiers, glows, dark to dim, gamut compression 1.3, 1-132 and 558-1088) and GetFixedFunctionCPURenderer (2429-2645), its other arms not ported yet; p2-ff-cpu-2 2.3c1: Rec.2100 surround, RGB<->HSV, XYZ<->xyY, XYZ<->u'v'Y, XYZ<->LUV (210-239, 295-347, 1406-1589, 1825-2027); 2.3c2: RGB<->HSY lin, log and video (241-293, 1591-1823); 2.3d1: LIN_TO_GAMMA_LOG, GAMMA_LOG_TO_LIN, LIN_TO_DOUBLE_LOG, DOUBLE_LOG_TO_LIN (389-474, 2230-2423); p2-aces2-cpu 2.4e1: Renderer_ACES_RGB_TO_JMh_20 and Renderer_ACES_TONESCALE_COMPRESS_20 (153-187, 1168-1319); 2.4e2: Renderer_ACES_OutputTransform20 and Renderer_ACES_GAMUT_COMPRESS_20 (133-151, 189-205, 1057-1166, 1321-1404)"
 
 [[file]]
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.h"
@@ -2423,14 +2428,16 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/ColorMatrixHelpers.cpp"
 kind = "src"
-target = ["crates/ocio/src/transforms/builtins/color_matrix_helpers.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/transforms/builtins/color_matrix_helpers.rs"]
+status = "done"
+note = "p2-aces2-cpu: ported whole into ocio-ops, since the ACES 2.0 fixed functions (ACES2/ColorLib.h) use it; Phase 3's 3.2e only re-exports it from ocio"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/ColorMatrixHelpers.h"
 kind = "src"
-target = ["crates/ocio/src/transforms/builtins/color_matrix_helpers.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/transforms/builtins/color_matrix_helpers.rs"]
+status = "done"
+note = "p2-aces2-cpu: ported whole into ocio-ops, since the ACES 2.0 fixed functions (ACES2/ColorLib.h) use it; Phase 3's 3.2e only re-exports it from ocio"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/Displays.cpp"
@@ -4660,7 +4667,7 @@ path = "tests/cpu/ops/fixedfunction/FixedFunctionOpCPU_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op_cpu_tests.rs"]
 status = "partial"
-note = "p2-ff-cpu 2.3b: aces_red_mod_03, aces_red_mod_10, aces_glow_03, aces_glow_10, aces_dark_to_dim_10, aces_gamut_map_13. The others come with their renderers (2.3c, 2.3d, 2.4e)"
+note = "p2-ff-cpu 2.3b: aces_red_mod_03, aces_red_mod_10, aces_glow_03, aces_glow_10, aces_dark_to_dim_10, aces_gamut_map_13. p2-ff-cpu-2 2.3c1: rec2100_surround, RGB_TO_HSV, XYZ_TO_xyY, XYZ_TO_uvY, XYZ_TO_LUV; 2.3c2: RGB_TO_HSY_LIN, RGB_TO_HSY_LOG, RGB_TO_HSY_VID; 2.3d1: LIN_TO_GAMMA_LOG, LIN_TO_DOUBLE_LOG. The others come with their renderers (2.3d2, 2.4e); p2-aces2-cpu 2.4e1: aces_rgb_to_jmh_20, aces_tonescale_compress_20; 2.4e2: aces_output_transform_20, aces_ot_20_edge_cases, aces_gamut_map_20; the round trips aces_ot_20_rec709_100n_rt, aces_ot_20_p3d65_100n_rt and aces_ot_20_p3d65_1000n_rt wait for GenerateIdentityLut3D (the Lut3D tests' helper, not ported yet)"
 
 [[file]]
 path = "tests/cpu/ops/fixedfunction/FixedFunctionOpData_tests.cpp"
@@ -4674,7 +4681,7 @@ path = "tests/cpu/ops/fixedfunction/FixedFunctionOp_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op_tests.rs", "crates/ocio/src/transforms/fixed_function_transform_tests.rs"]
 status = "partial"
-note = "p2-ff-cpu 2.3e: basic, glow03_cpu_engine, darktodim10_cpu_engine, aces_red_mod_inv, aces_glow_inv, aces_darktodim10_inv, aces_gamutmap13_inv, rec2100_surround_inv, and create_transform (in fixed_function_transform_tests.rs). The FixedFunctionOps tests come with their renderers (2.3c, 2.3d)"
+note = "p2-ff-cpu 2.3e: basic, glow03_cpu_engine, darktodim10_cpu_engine, aces_red_mod_inv, aces_glow_inv, aces_darktodim10_inv, aces_gamutmap13_inv, rec2100_surround_inv, and create_transform (in fixed_function_transform_tests.rs). p2-ff-cpu-2 2.3c1: FixedFunctionOps RGB_TO_HSV, XYZ_TO_xyY, XYZ_TO_uvY, XYZ_TO_LUV; 2.3c2: FixedFunctionOps RGB_TO_HSY_LIN, RGB_TO_HSY_LOG, RGB_TO_HSY_VID; 2.3d1: FixedFunctionOps LIN_TO_GAMMA_LOG, LIN_TO_DOUBLE_LOG. LIN_TO_PQ comes with its renderers (2.3d2)"
 
 [[file]]
 path = "tests/cpu/ops/gamma/GammaOpCPU_tests.cpp"
@@ -4938,9 +4945,9 @@ note = "p1-transforms-fam1"
 [[file]]
 path = "tests/cpu/transforms/BuiltinTransform_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio/src/transforms/builtin_transform_tests.rs"]
+target = ["crates/ocio/src/transforms/builtin_transform_tests.rs", "crates/ocio-ops/src/transforms/builtins/color_matrix_helpers_tests.rs"]
 status = "partial"
-note = "p3-transforms (3.1b): creation, access; color_matrix_helpers comes with 3.2e; forward_inverse, interpolate, validate, aces2_displayview_roundtrip and aces2_Aab_to_RGB_nan build ops of Phase 2 (p3-after-p2)"
+note = "p3-transforms (3.1b): creation, access; p2-aces2-cpu: color_matrix_helpers, in ocio-ops (color_matrix_helpers_tests.rs); forward_inverse, interpolate, validate, aces2_displayview_roundtrip and aces2_Aab_to_RGB_nan build ops of Phase 2 (p3-after-p2)"
 
 [[file]]
 path = "tests/cpu/transforms/CDLTransform_tests.cpp"

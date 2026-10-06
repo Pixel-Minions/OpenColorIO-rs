@@ -3,7 +3,9 @@
 
 //! The FixedFunction renderers against the wheel, bit for bit, through the oracle test
 //! battery (`ocio_testkit::battery`): every case in both directions, with fast math on and
-//! off, on the tier's probe sets (`OCIO_RS_TIER`). So far the ACES 1.x styles (chunk 2.3b).
+//! off, on the tier's probe sets (`OCIO_RS_TIER`). So far the ACES 1.x styles (chunk 2.3b), the
+//! Rec.2100 surround, HSV and the CIE styles (2.3c1), the HSY styles (2.3c2), and the
+//! gamma-log and double-log styles (2.3d1).
 //!
 //! The oracle builds a FixedFunctionTransform in a raw config and applies its CPU processor
 //! to F32 RGBA pixels. The family builds the op data that upstream's transform and
@@ -42,7 +44,7 @@ mod common;
 
 use std::hint::black_box;
 
-use common::fixed_function::style_enum;
+use common::fixed_function::{params_digest, random_gamut_comp_13_params, style_enum};
 use ocio_ops::open_color_types::{FixedFunctionStyle, TransformDirection};
 use ocio_ops::ops::fixedfunction::FixedFunctionOpStyle;
 use ocio_ops::ops::fixedfunction::fixed_function_op_cpu::get_fixed_function_cpu_renderer;
@@ -87,6 +89,13 @@ impl Params for Fixed {
                 Slot::new("thr_yellow", p, B),
                 Slot::new("power", p, RGB),
             ],
+            // ACES 2.0: only the peak luminance is generated. Primaries with a NaN coordinate
+            // make the wheel's hue table code write past its arrays, and its process stops
+            // (U-32); the port's refusal is checked in aces2/transform_tests.rs.
+            (FixedFunctionStyle::AcesOutputTransform20, 9)
+            | (FixedFunctionStyle::AcesGamutCompress20, 9) => {
+                vec![Slot::new("peak_luminance", p, RGB)]
+            }
             _ => (0..self.params.len())
                 .map(|i| Slot::new(format!("params[{i}]"), p, RGB))
                 .collect(),
@@ -140,17 +149,18 @@ fn fixed_port(p: &Fixed, combo: &Combo) -> Result<Port, String> {
     Ok(Port::in_place(move |px| renderer.apply(px)))
 }
 
-/// The ACES 1.x styles.
-struct AcesFamily {
+/// A set of styles.
+struct FixedFamily {
+    name: &'static str,
     cases: Vec<Case<Fixed>>,
     bases: Vec<Case<Fixed>>,
 }
 
-impl Family for AcesFamily {
+impl Family for FixedFamily {
     type Params = Fixed;
 
     fn name(&self) -> String {
-        "FixedFunctionTransform (ACES 1.x)".to_string()
+        format!("FixedFunctionTransform ({})", self.name)
     }
     fn cases(&self) -> Vec<Case<Fixed>> {
         self.cases.clone()
@@ -183,7 +193,30 @@ impl Family for AcesFamily {
             FixedFunctionStyle::AcesGlow10 => Some(0.08),
             _ => None,
         };
-        mid.map_or_else(Vec::new, |mid| vec![mid * 2.0, mid * 2.0 / 3.0])
+        if let Some(mid) = mid {
+            return vec![mid * 2.0, mid * 2.0 / 3.0];
+        }
+        match p.style {
+            // L* switches from linear to the cube root at this Y, and back at this L*
+            // (FixedFunctionOpCPU.cpp:1974, 2012 @ v2.5.2).
+            FixedFunctionStyle::XyzToLuv => vec![0.008856451679, 0.08],
+            // The linear HSY blends its low and high saturations between these lumas
+            // (FixedFunctionOpCPU.cpp:1638-1640, 1714-1716 @ v2.5.2).
+            FixedFunctionStyle::RgbToHsyLin => vec![0.001, 0.01],
+            // The mirror and break points, and the break point after the gamma segment
+            // (FixedFunctionOpCPU.cpp:2260-2263, 2284-2285 @ v2.5.2).
+            FixedFunctionStyle::LinToGammaLog if p.params.len() == 10 => {
+                let q = |i: usize| p.params[i] as f32;
+                let prime_break = q(3) * (q(1) + q(4)).powf(q(2));
+                let prime_mirror = q(3) * (q(0) + q(4)).powf(q(2));
+                vec![q(0), q(1), prime_break, prime_mirror]
+            }
+            // The break points (FixedFunctionOpCPU.cpp:2359, 2363 @ v2.5.2).
+            FixedFunctionStyle::LinToDoubleLog if p.params.len() == 13 => {
+                vec![p.params[1] as f32, p.params[2] as f32]
+            }
+            _ => Vec::new(),
+        }
     }
     fn validation(&self) -> Validation {
         Validation::Ported
@@ -227,6 +260,16 @@ fn aces_1_styles_match_the_wheel() {
             Fixed::new(AcesGamutComp13, &params),
         ));
     }
+    // Random sets within the bounds (pinned by `random_gamut_comp_params_are_pinned`).
+    for (i, params) in random_gamut_comp_13_params(RANDOM_GAMUT_COMP_SETS)
+        .iter()
+        .enumerate()
+    {
+        cases.push(Case::new(
+            format!("AcesGamutComp13 random {i}"),
+            Fixed::new(AcesGamutComp13, params),
+        ));
+    }
     // A NaN power, which validation accepts: the route of the generated NaN cases, where a
     // bug in the spec would otherwise only show as refusals.
     let mut nan = GAMUT_COMP_13;
@@ -261,5 +304,389 @@ fn aces_1_styles_match_the_wheel() {
         Fixed::new(AcesGlow10, &[f64::INFINITY]),
     ));
 
-    battery::run(&AcesFamily { cases, bases });
+    battery::run(&FixedFamily {
+        name: "ACES 1.x",
+        cases,
+        bases,
+    });
+}
+
+#[test]
+fn surround_hsv_hsy_and_cie_styles_match_the_wheel() {
+    use FixedFunctionStyle::*;
+    let mut cases: Vec<Case<Fixed>> = [
+        RgbToHsv,
+        RgbToHsyLin,
+        RgbToHsyLog,
+        RgbToHsyVid,
+        XyzToXyy,
+        XyzToUvy,
+        XyzToLuv,
+    ]
+    .map(|style| Case::new(format!("{style:?}"), Fixed::new(style, &[])))
+    .to_vec();
+
+    // tests/cpu/ops/fixedfunction/FixedFunctionOpCPU_tests.cpp:996, 1030 @ v2.5.2.
+    let surround = Case::new("Rec2100Surround 0.78", Fixed::new(Rec2100Surround, &[0.78]));
+    let bases = vec![surround.clone()];
+    cases.push(surround);
+    cases.push(Case::new(
+        "Rec2100Surround 1.2",
+        Fixed::new(Rec2100Surround, &[1.2]),
+    ));
+    // The bounds.
+    cases.push(Case::new(
+        "Rec2100Surround 0.01",
+        Fixed::new(Rec2100Surround, &[0.01]),
+    ));
+    cases.push(Case::new(
+        "Rec2100Surround 100",
+        Fixed::new(Rec2100Surround, &[100.0]),
+    ));
+    // A NaN gamma, which validation accepts.
+    cases.push(Case::new(
+        "Rec2100Surround NaN",
+        Fixed::new(Rec2100Surround, &[f64::NAN]),
+    ));
+    // Refusals.
+    cases.push(Case::new(
+        "refused surround 0.001",
+        Fixed::new(Rec2100Surround, &[0.001]),
+    ));
+    cases.push(Case::new(
+        "refused surround no parameter",
+        Fixed::new(Rec2100Surround, &[]),
+    ));
+    cases.push(Case::new(
+        "refused HSV parameter",
+        Fixed::new(RgbToHsv, &[1.0]),
+    ));
+
+    battery::run(&FixedFamily {
+        name: "surround, HSV, HSY, CIE",
+        cases,
+        bases,
+    });
+}
+
+#[test]
+fn gamma_log_and_double_log_match_the_wheel() {
+    use FixedFunctionStyle::*;
+    // The Rec.2100 HLG curve (tests/cpu/ops/fixedfunction/FixedFunctionOpCPU_tests.cpp:1311-1325
+    // @ v2.5.2).
+    let hlg = [
+        0.0,
+        0.25,
+        0.5,
+        1.0,
+        0.0,
+        std::f64::consts::E,
+        0.17883277,
+        0.807825590164,
+        1.0,
+        -0.07116723,
+    ];
+    // FixedFunctionOpCPU_tests.cpp:1374-1382 and FixedFunctionOp_tests.cpp:536-543 @ v2.5.2.
+    let double_log = [
+        10.0, 0.25, 0.5, -1.0, 0.0, -1.0, 1.25, 1.0, 1.0, 1.0, 0.5, 1.0, 0.0,
+    ];
+    let double_log_2 = [
+        10.0, 0.5, 0.5, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0,
+    ];
+    let gamma_log = Case::new("LinToGammaLog HLG", Fixed::new(LinToGammaLog, &hlg));
+    let double = Case::new("LinToDoubleLog", Fixed::new(LinToDoubleLog, &double_log));
+    let bases = vec![gamma_log.clone(), double.clone()];
+    let mut cases = vec![
+        gamma_log,
+        double,
+        Case::new(
+            "LinToDoubleLog 2",
+            Fixed::new(LinToDoubleLog, &double_log_2),
+        ),
+    ];
+    // A mirror below 0, a gamma above 1 and an offset gamma segment.
+    let mut mirrored = hlg;
+    mirrored[0] = -0.1;
+    mirrored[2] = 2.4;
+    mirrored[4] = 0.055;
+    mirrored[5] = 2.0;
+    cases.push(Case::new(
+        "LinToGammaLog mirrored",
+        Fixed::new(LinToGammaLog, &mirrored),
+    ));
+    // NaN parameters, which validation accepts.
+    let mut nan = hlg;
+    nan[6] = f64::NAN;
+    cases.push(Case::new(
+        "LinToGammaLog NaN slope",
+        Fixed::new(LinToGammaLog, &nan),
+    ));
+    let mut nan = double_log;
+    nan[12] = f64::NAN;
+    cases.push(Case::new(
+        "LinToDoubleLog NaN offset",
+        Fixed::new(LinToDoubleLog, &nan),
+    ));
+    // Refusals.
+    for (label, i, v) in [
+        ("base 0", 5, 0.0),
+        ("mirror at the break", 0, 0.25),
+        ("gamma power 0", 2, 0.0),
+    ] {
+        let mut p = hlg;
+        p[i] = v;
+        cases.push(Case::new(
+            format!("refused LinToGammaLog {label}"),
+            Fixed::new(LinToGammaLog, &p),
+        ));
+    }
+    for (label, i, v) in [("base -1", 0, -1.0), ("break order", 1, 0.75)] {
+        let mut p = double_log;
+        p[i] = v;
+        cases.push(Case::new(
+            format!("refused LinToDoubleLog {label}"),
+            Fixed::new(LinToDoubleLog, &p),
+        ));
+    }
+    cases.push(Case::new(
+        "refused LinToDoubleLog 12 parameters",
+        Fixed::new(LinToDoubleLog, &double_log[..12]),
+    ));
+
+    battery::run(&FixedFamily {
+        name: "gamma-log, double-log",
+        cases,
+        bases,
+    });
+}
+
+/// The ACES 2.0 outputs' limiting primaries: Rec.709, P3-D65, Rec.2020, P3-DCI, P3-D60.
+const ACES2_PRIMARIES: [[f64; 8]; 5] = [
+    [0.64, 0.33, 0.30, 0.60, 0.15, 0.06, 0.3127, 0.3290],
+    [0.680, 0.320, 0.265, 0.690, 0.150, 0.060, 0.3127, 0.3290],
+    [0.708, 0.292, 0.170, 0.797, 0.131, 0.046, 0.3127, 0.3290],
+    [0.680, 0.320, 0.265, 0.690, 0.150, 0.060, 0.314, 0.351],
+    [0.680, 0.320, 0.265, 0.690, 0.150, 0.060, 0.32168, 0.33767],
+];
+
+/// ACES2065-1's primaries (AP0), as upstream's aces_rgb_to_jmh_20 gives them
+/// (tests/cpu/ops/fixedfunction/FixedFunctionOpCPU_tests.cpp:773 @ v2.5.2).
+const AP0: [f64; 8] = [
+    0.7347, 0.2653, 0.0000, 1.0000, 0.0001, -0.0770, 0.32168, 0.33767,
+];
+
+/// A peak luminance and limiting primaries, as the ACES 2.0 output transform and gamut
+/// compression take them.
+fn peak_and(peak: f64, primaries: &[f64; 8]) -> Vec<f64> {
+    std::iter::once(peak)
+        .chain(primaries.iter().copied())
+        .collect()
+}
+
+#[test]
+fn aces_2_styles_match_the_wheel() {
+    use FixedFunctionStyle::*;
+    // The parameters of upstream's aces_output_transform_20, aces_gamut_map_20 and
+    // aces_tonescale_compress_20 (tests/cpu/ops/fixedfunction/FixedFunctionOpCPU_tests.cpp @
+    // v2.5.2).
+    let ot = Case::new(
+        "AcesOutputTransform20 1000 P3-D65",
+        Fixed::new(
+            AcesOutputTransform20,
+            &peak_and(1000.0, &ACES2_PRIMARIES[1]),
+        ),
+    );
+    let gamut = Case::new(
+        "AcesGamutCompress20 1000 P3-D65",
+        Fixed::new(AcesGamutCompress20, &peak_and(1000.0, &ACES2_PRIMARIES[1])),
+    );
+    let tonescale = Case::new(
+        "AcesTonescaleCompress20 1000",
+        Fixed::new(AcesTonescaleCompress20, &[1000.0]),
+    );
+    let rgb_to_jmh = Case::new("AcesRgbToJmh20 AP0", Fixed::new(AcesRgbToJmh20, &AP0));
+    let bases = vec![
+        ot.clone(),
+        gamut.clone(),
+        tonescale.clone(),
+        rgb_to_jmh.clone(),
+    ];
+    let mut cases = vec![ot, gamut, tonescale, rgb_to_jmh];
+    for (peak, primaries) in [(100.0, 0), (4000.0, 2), (108.0, 3), (48.0, 4), (500.0, 0)] {
+        let params = peak_and(peak, &ACES2_PRIMARIES[primaries]);
+        cases.push(Case::new(
+            format!("AcesOutputTransform20 {peak} {primaries}"),
+            Fixed::new(AcesOutputTransform20, &params),
+        ));
+        cases.push(Case::new(
+            format!("AcesGamutCompress20 {peak} {primaries}"),
+            Fixed::new(AcesGamutCompress20, &params),
+        ));
+        cases.push(Case::new(
+            format!("AcesTonescaleCompress20 {peak}"),
+            Fixed::new(AcesTonescaleCompress20, &[peak]),
+        ));
+    }
+    // AP1, and the outputs'.
+    let ap1 = [0.713, 0.293, 0.165, 0.830, 0.128, 0.044, 0.32168, 0.33767];
+    for (i, primaries) in std::iter::once(&ap1).chain(&ACES2_PRIMARIES).enumerate() {
+        cases.push(Case::new(
+            format!("AcesRgbToJmh20 {i}"),
+            Fixed::new(AcesRgbToJmh20, primaries),
+        ));
+    }
+    // Refusals: the peak's bounds and its fraction, and short parameters.
+    for peak in [0.5, 10001.0, 100.5] {
+        cases.push(Case::new(
+            format!("refused AcesTonescaleCompress20 peak {peak}"),
+            Fixed::new(AcesTonescaleCompress20, &[peak]),
+        ));
+        cases.push(Case::new(
+            format!("refused AcesOutputTransform20 peak {peak}"),
+            Fixed::new(AcesOutputTransform20, &peak_and(peak, &ACES2_PRIMARIES[0])),
+        ));
+    }
+    cases.push(Case::new(
+        "refused AcesRgbToJmh20 7 parameters",
+        Fixed::new(AcesRgbToJmh20, &AP0[..7]),
+    ));
+    cases.push(Case::new(
+        "refused AcesTonescaleCompress20 no parameter",
+        Fixed::new(AcesTonescaleCompress20, &[]),
+    ));
+
+    battery::run(&FixedFamily {
+        name: "ACES 2.0",
+        cases,
+        bases,
+    });
+}
+
+/// The values of [`nan_combination_pixels`]: NaNs of different signs and payloads, quiet and
+/// signalling, with finite values and infinities of both signs.
+const COMBINATION_VALUES: [u32; 14] = [
+    0xffc0_0000, // the x86 default NaN
+    0x7fc1_2345,
+    0xffc5_4321,
+    0xff80_0001, // signalling
+    0x7fa0_0000, // signalling
+    0x0000_0000,
+    0x8000_0000,
+    0x3e38_51ec, // 0.18
+    0x3f80_0000, // 1
+    0xbf00_0000, // -0.5
+    0x4000_0000, // 2
+    0x3a83_126f, // 0.001
+    0x7f80_0000, // +inf
+    0xff80_0000, // -inf
+];
+
+/// Every combination of [`COMBINATION_VALUES`] in red, green and blue, one pixel each, alpha
+/// cycling through them too. The battery's NaN buffers put NaNs in all three channels at once;
+/// these also put two NaNs of different payloads next to a finite value or an infinity, which
+/// is where a renderer's arithmetic can meet two NaNs in a branch the all-NaN pixels skip.
+fn nan_combination_pixels() -> Vec<f32> {
+    let v = COMBINATION_VALUES.map(f32::from_bits);
+    let n = v.len();
+    (0..n * n * n)
+        .flat_map(|i| [v[i / (n * n)], v[i / n % n], v[i % n], v[i % (n - 1)]])
+        .collect()
+}
+
+/// Every style whose renderer mixes channels, in both directions and with fast math on and
+/// off, on [`nan_combination_pixels`]: where two NaNs of different payloads meet, the result
+/// is the one the wheel's machine code picks (`CLAUDE.md`, "NaN operand order").
+#[test]
+fn nan_combinations_match_the_wheel() {
+    use FixedFunctionStyle::*;
+    let cases = [
+        Fixed::new(AcesRedMod03, &[]),
+        Fixed::new(AcesRedMod10, &[]),
+        Fixed::new(AcesGlow03, &[]),
+        Fixed::new(AcesGlow10, &[]),
+        Fixed::new(AcesDarkToDim10, &[]),
+        Fixed::new(AcesGamutComp13, &GAMUT_COMP_13),
+        Fixed::new(Rec2100Surround, &[0.78]),
+        Fixed::new(RgbToHsv, &[]),
+        Fixed::new(RgbToHsyLin, &[]),
+        Fixed::new(RgbToHsyLog, &[]),
+        Fixed::new(RgbToHsyVid, &[]),
+        Fixed::new(XyzToXyy, &[]),
+        Fixed::new(XyzToUvy, &[]),
+        Fixed::new(XyzToLuv, &[]),
+        Fixed::new(AcesTonescaleCompress20, &[1000.0]),
+        Fixed::new(AcesRgbToJmh20, &AP0),
+        Fixed::new(
+            AcesOutputTransform20,
+            &peak_and(1000.0, &ACES2_PRIMARIES[1]),
+        ),
+        Fixed::new(AcesGamutCompress20, &peak_and(1000.0, &ACES2_PRIMARIES[1])),
+    ];
+    let family = FixedFamily {
+        name: "NaN combinations",
+        cases: Vec::new(),
+        bases: Vec::new(),
+    };
+    let input = nan_combination_pixels();
+    let bytes = ocio_testkit::oracle::f32_to_bytes(&input);
+    let mut combos = Vec::new();
+    for p in &cases {
+        for direction in [Direction::Forward, Direction::Inverse] {
+            for fast_math in [true, false] {
+                let combo = Combo {
+                    direction,
+                    fast_math,
+                    format: battery::Format::F32_RGBA,
+                };
+                combos.push((p, combo));
+            }
+        }
+    }
+    let calls: Vec<ocio_testkit::oracle::BatchCall<'_>> = combos
+        .iter()
+        .map(|(p, combo)| ocio_testkit::oracle::BatchCall {
+            cmd: "cpu_apply",
+            args: family.spec(p, combo.direction).cpu_apply_args(combo),
+            blobs: vec![&bytes],
+        })
+        .collect();
+    let responses = ocio_testkit::oracle::Oracle::get().batch(&calls, true);
+    let mut failures = Vec::new();
+    for ((p, combo), response) in combos.iter().zip(responses) {
+        let label = format!("{:?} {:?}, {combo}", p.style, p.params);
+        let response = response.unwrap_or_else(|e| panic!("{label}: the oracle failed: {e}"));
+        if let Some(exception) = response.result.get("exception") {
+            panic!("{label}: the wheel refused it: {exception}");
+        }
+        let expected = response.blob_f32(0);
+        let data = p
+            .transform_data(port_direction(combo.direction))
+            .unwrap_or_else(|e| panic!("{label}: the port refused it: {e}"));
+        let renderer = get_fixed_function_cpu_renderer(&black_box(data), combo.fast_math)
+            .unwrap_or_else(|e| panic!("{label}: {}", e.message()));
+        let mut actual = input.clone();
+        renderer.apply(&mut actual);
+        if let Some(report) =
+            ocio_testkit::compare::f32_bits_report(&expected, &actual, Some(&input), 4)
+        {
+            failures.push(format!("{label}: {report}"));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} of {} combinations differ:\n\n{}",
+        failures.len(),
+        combos.len(),
+        failures.join("\n")
+    );
+}
+
+/// How many random gamut compression parameter sets the battery runs.
+const RANDOM_GAMUT_COMP_SETS: usize = 16;
+
+/// The random gamut compression parameter sets can't change unnoticed.
+#[test]
+fn random_gamut_comp_params_are_pinned() {
+    let sets = random_gamut_comp_13_params(RANDOM_GAMUT_COMP_SETS);
+    assert_eq!(params_digest(&sets), 0x8fca_09f0_28f3_5149);
 }
