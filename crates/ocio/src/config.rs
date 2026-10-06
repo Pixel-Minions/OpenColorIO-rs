@@ -136,8 +136,25 @@ impl CurrentContext {
         self.0.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
-    fn set(&self, context: Arc<Context>) {
-        *self.0.write().unwrap_or_else(|e| e.into_inner()) = context;
+    /// Changes the shared context through `change`, as the config sees it from then on. It
+    /// keeps the config's cache IDs and processors, as a change through upstream's context
+    /// does. A copy of the context is changed (with its environment mode, which
+    /// `Context::createEditableCopy` doesn't keep) when a caller holds one from
+    /// [`CurrentContext::get`], which keeps the state it had.
+    ///
+    /// C++ callers get a `ConstContextRcPtr`, which they can't change; the Python binding casts
+    /// the constness away, so a Python caller changes the config's context through it
+    /// (`getCurrentContext().setSearchPath(...)`). This is for the Python module.
+    #[doc(hidden)]
+    pub fn update(&self, change: impl FnOnce(&mut Context)) {
+        let mut cell = self.0.write().unwrap_or_else(|e| e.into_inner());
+        if Arc::get_mut(&mut cell).is_none() {
+            let mode = cell.environment_mode();
+            let mut copy = (**cell).clone();
+            copy.set_environment_mode(mode);
+            *cell = Arc::new(copy);
+        }
+        change(Arc::get_mut(&mut cell).expect("a context of its own"));
     }
 }
 
@@ -213,9 +230,7 @@ pub struct Config {
     minor_version: u32,
     /// `m_env`: the environment variables and their default values.
     env: BTreeMap<Vec<u8>, Vec<u8>>,
-    /// `m_context`: the config's own reference to its current context.
-    context: Arc<Context>,
-    /// `m_context` as the callers of `getCurrentContext` share it: it always holds `context`.
+    /// `m_context`, which the callers of `getCurrentContext` share.
     shared_context: CurrentContext,
     /// `m_name`.
     name: Vec<u8>,
@@ -288,12 +303,11 @@ impl Clone for Config {
     /// Port of `Config::createEditableCopy` and `Config::Impl::operator=`
     /// (src/OpenColorIO/Config.cpp:379-457, 1352-1357 @ v2.5.2), in part.
     fn clone(&self) -> Config {
-        let context = Arc::new((*self.context).clone());
+        let context = Arc::new((*self.shared_context.get()).clone());
         let config = Config {
             major_version: self.major_version,
             minor_version: self.minor_version,
             env: self.env.clone(),
-            context: context.clone(),
             shared_context: CurrentContext::new(context),
             name: self.name.clone(),
             family_separator: self.family_separator,
@@ -343,7 +357,6 @@ impl Config {
             major_version: LAST_SUPPORTED_MAJOR_VERSION,
             minor_version: LAST_SUPPORTED_MINOR_VERSION[LAST_SUPPORTED_MAJOR_VERSION as usize - 1],
             env: BTreeMap::new(),
-            context: context.clone(),
             shared_context: CurrentContext::new(context),
             name: Vec::new(),
             family_separator: DEFAULT_FAMILY_SEPARATOR,
@@ -438,18 +451,10 @@ impl Config {
         self.processor_cache.clear();
     }
 
-    /// Changes the current context through `change`, as the callers of `getCurrentContext`
-    /// see it too. The config changes a copy of the context (with its environment mode, which
-    /// `Context::createEditableCopy` doesn't keep) and shares the copy: what callers took from
-    /// [`CurrentContext::get`] before keeps the state it had, as a value read from upstream's
-    /// context would.
+    /// Changes the current context through `change`, as the callers of `getCurrentContext` see
+    /// it too.
     fn update_context(&mut self, change: impl FnOnce(&mut Context)) {
-        let mode = self.context.environment_mode();
-        let mut copy = (*self.context).clone();
-        copy.set_environment_mode(mode);
-        change(&mut copy);
-        self.context = Arc::new(copy);
-        self.shared_context.set(self.context.clone());
+        self.shared_context.update(change);
     }
 
     /// The raw config: version 2.0, no strict parsing, its one color space `raw` and the role
@@ -711,7 +716,7 @@ impl Config {
     /// Port of `Config::getEnvironmentMode` (src/OpenColorIO/Config.cpp:2227-2230 @ v2.5.2).
     #[doc(alias = "getEnvironmentMode")]
     pub fn environment_mode(&self) -> EnvironmentMode {
-        self.context.environment_mode()
+        self.shared_context.get().environment_mode()
     }
 
     /// Loads the environment into the context (`Context::loadEnvironment`).
@@ -728,8 +733,8 @@ impl Config {
     ///
     /// Port of `Config::getSearchPath()` (src/OpenColorIO/Config.cpp:2240-2243 @ v2.5.2).
     #[doc(alias = "getSearchPath")]
-    pub fn search_path(&self) -> &[u8] {
-        self.context.search_path()
+    pub fn search_path(&self) -> Vec<u8> {
+        self.shared_context.get().search_path().to_vec()
     }
 
     /// Sets the search paths from `path`, split on `:` (`Context::setSearchPath`).
@@ -745,15 +750,18 @@ impl Config {
     /// Port of `Config::getNumSearchPaths` (src/OpenColorIO/Config.cpp:2253-2256 @ v2.5.2).
     #[doc(alias = "getNumSearchPaths")]
     pub fn num_search_paths(&self) -> i32 {
-        self.context.num_search_paths()
+        self.shared_context.get().num_search_paths()
     }
 
     /// The search path at `index`; `""` outside the list.
     ///
     /// Port of `Config::getSearchPath(int)` (src/OpenColorIO/Config.cpp:2258-2261 @ v2.5.2).
     #[doc(alias = "getSearchPath")]
-    pub fn search_path_with_index(&self, index: i32) -> &[u8] {
-        self.context.search_path_with_index(index)
+    pub fn search_path_with_index(&self, index: i32) -> Vec<u8> {
+        self.shared_context
+            .get()
+            .search_path_with_index(index)
+            .to_vec()
     }
 
     /// Port of `Config::clearSearchPaths` (src/OpenColorIO/Config.cpp:2263-2269 @ v2.5.2).
@@ -780,8 +788,8 @@ impl Config {
 
     /// Port of `Config::getWorkingDir` (src/OpenColorIO/Config.cpp:2280-2283 @ v2.5.2).
     #[doc(alias = "getWorkingDir")]
-    pub fn working_dir(&self) -> &[u8] {
-        self.context.working_dir()
+    pub fn working_dir(&self) -> Vec<u8> {
+        self.shared_context.get().working_dir().to_vec()
     }
 
     /// Port of `Config::setWorkingDir` (src/OpenColorIO/Config.cpp:2285-2291 @ v2.5.2).
@@ -1478,7 +1486,7 @@ impl Config {
     ) -> Result<Processor> {
         let mut processor = Processor::new();
         processor.set_processor_cache_flags(ProcessorCacheFlags::OFF);
-        processor.set_transform(self, &self.context, transform, direction)?;
+        processor.set_transform(self, &self.shared_context.get(), transform, direction)?;
         Ok(processor)
     }
 
@@ -3599,7 +3607,7 @@ impl Config {
         transform: &Transform,
         direction: TransformDirection,
     ) -> Result<Arc<Processor>> {
-        let context = self.context.clone();
+        let context = self.shared_context.get();
         self.processor_with_context(&context, transform, direction)
     }
 

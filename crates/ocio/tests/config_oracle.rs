@@ -1315,7 +1315,7 @@ fn getters() -> Vec<Step> {
             |c| json!({"result": mode(c.environment_mode())}),
         ),
         step(json!({"call": "getSearchPath"}), |c| {
-            text_out(c.search_path())
+            text_out(&c.search_path())
         }),
         step(json!({"call": "getSearchPaths"}), |c| {
             let paths: Vec<Vec<u8>> = (0..c.num_search_paths())
@@ -1324,7 +1324,7 @@ fn getters() -> Vec<Step> {
             texts_out(&paths)
         }),
         step(json!({"call": "getWorkingDir"}), |c| {
-            text_out(c.working_dir())
+            text_out(&c.working_dir())
         }),
         step(json!({"call": "getCurrentContext", "as": "context"}), |c| {
             let repr = c.current_context().get().to_bytes();
@@ -2757,4 +2757,95 @@ fn two_configs_and_edges_match_the_wheel() {
         ],
         &probes,
     );
+}
+
+/// A change through the current context the config gave is the config's own: the Python
+/// binding lets a caller change it (`getCurrentContext().setSearchPath(...)`), and the config
+/// then reads the changed context, without emptying its cache of processors. The port does it
+/// through `CurrentContext::update`, kept for the Python module.
+#[test]
+fn a_change_through_the_held_context_is_the_configs() {
+    let held: HeldProcessor = Rc::new(RefCell::new(None));
+    let again: HeldProcessor = Rc::new(RefCell::new(None));
+    let (get1, port_get1) = get_processor("p1", &held);
+    let (get2, port_get2) = get_processor("p2", &again);
+    type Change = fn(&mut ocio::Context);
+    let changes: [(Value, Change); 4] = [
+        (
+            json!({"call": "setSearchPath", "on": "ctx", "args": ["a:b"]}),
+            |c| c.set_search_path("a:b"),
+        ),
+        (
+            json!({"call": "setWorkingDir", "on": "ctx", "args": ["/w"]}),
+            |c| c.set_working_dir("/w"),
+        ),
+        (
+            json!({"call": "__setitem__", "on": "ctx", "args": ["V", "1"]}),
+            |c| c.set_string_var("V", Some(b"1")),
+        ),
+        (
+            json!({"call": "setEnvironmentMode", "on": "ctx",
+                   "args": [{"enum": "ENV_ENVIRONMENT_LOAD_ALL"}]}),
+            |c| c.set_environment_mode(EnvironmentMode::LoadAll),
+        ),
+    ];
+    let mut calls = vec![
+        json!({"call": "getCurrentContext", "on": "config", "as": "ctx"}),
+        {
+            let mut c = get1;
+            c["on"] = json!("config");
+            c
+        },
+    ];
+    calls.extend(changes.iter().map(|(c, _)| c.clone()));
+    calls.push({
+        let mut c = get2;
+        c["on"] = json!("config");
+        c
+    });
+    calls.push(json!({"call": "__eq__", "on": "p1", "args": [{"ref": "p2"}]}));
+    let getters = getters();
+    for g in &getters {
+        let mut c = g.call.clone();
+        c["on"] = json!("config");
+        calls.push(c);
+    }
+    let response = Oracle::get().call(
+        "config_calls",
+        json!({"config": "new", "env": {}, "calls": calls}),
+        &[],
+    );
+    let wheel = &response.result;
+    let results = wheel["calls"].as_array().expect("the calls' results");
+
+    set_thread_env_provider(Some(Arc::new(MapEnv::default())));
+    let mut config = Config::new().unwrap();
+    let ctx = config.current_context();
+    port_get1(&mut config);
+    for (_, change) in &changes {
+        ctx.update(change);
+    }
+    port_get2(&mut config);
+    let kept = Arc::ptr_eq(
+        held.borrow().as_ref().unwrap(),
+        again.borrow().as_ref().unwrap(),
+    );
+    let at = 2 + changes.len() + 1;
+    assert_eq!(
+        results[at]["result"] == json!(true),
+        kept,
+        "the cache of processors: wheel {}",
+        results[at]
+    );
+    let mut failures = Vec::new();
+    for (g, w) in getters.iter().zip(&results[at + 1..]) {
+        let mut w = w.clone();
+        w.as_object_mut().expect("a call's outcome").remove("log");
+        let port = (g.port)(&mut config);
+        if port != w {
+            failures.push(format!("{}: wheel {w}, port {port}", g.call));
+        }
+    }
+    set_thread_env_provider(None);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
