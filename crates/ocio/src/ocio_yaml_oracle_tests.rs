@@ -19,6 +19,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 
 use ocio_ops::logging::{reset_to_default_logging_function, set_logging_function};
+use ocio_ops::open_color_types::{CdlStyle, NegativeStyle};
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle::BatchCall;
 use ocio_testkit::oracle_values::{bytes, hex, log};
@@ -141,6 +142,21 @@ pub(super) fn bytes_out(v: &[u8]) -> Value {
     json!({"bytes": hex(v)})
 }
 
+/// Floats as the oracle writes a list of them.
+pub(super) fn f64s(values: &[f64]) -> Value {
+    Value::Array(values.iter().map(|&v| f64_out(v)).collect())
+}
+
+/// A negative style as the oracle writes it.
+fn negative_style_out(style: NegativeStyle) -> Value {
+    json!({"enum": match style {
+        NegativeStyle::Clamp => "NEGATIVE_CLAMP",
+        NegativeStyle::Mirror => "NEGATIVE_MIRROR",
+        NegativeStyle::PassThru => "NEGATIVE_PASS_THRU",
+        NegativeStyle::Linear => "NEGATIVE_LINEAR",
+    }})
+}
+
 /// A direction as the oracle writes it.
 pub(super) fn direction_out(dir: TransformDirection) -> Value {
     json!({"enum": match dir {
@@ -182,6 +198,67 @@ pub(super) fn getters(t: &Transform) -> Vec<(&'static str, Value)> {
             out.push(("hasMaxInValue", json!(t.has_max_in_value())));
             out.push(("hasMinOutValue", json!(t.has_min_out_value())));
             out.push(("hasMaxOutValue", json!(t.has_max_out_value())));
+            out.push(name(t.format_metadata()));
+        }
+        Transform::Allocation(t) => {
+            out.push((
+                "getAllocation",
+                json!({"enum": match t.allocation() {
+                    Allocation::Unknown => "ALLOCATION_UNKNOWN",
+                    Allocation::Uniform => "ALLOCATION_UNIFORM",
+                    Allocation::Lg2 => "ALLOCATION_LG2",
+                }}),
+            ));
+            out.push((
+                "getVars",
+                Value::Array(t.vars().iter().map(|&v| f64_out(f64::from(v))).collect()),
+            ));
+        }
+        Transform::Cdl(t) => {
+            out.push(("getSlope", f64s(&t.slope())));
+            out.push(("getOffset", f64s(&t.offset())));
+            out.push(("getPower", f64s(&t.power())));
+            out.push(("getSat", f64_out(t.sat())));
+            out.push((
+                "getStyle",
+                json!({"enum": match t.style() {
+                    CdlStyle::Asc => "CDL_ASC",
+                    CdlStyle::NoClamp => "CDL_NO_CLAMP",
+                }}),
+            ));
+            out.push(name(t.format_metadata()));
+        }
+        Transform::Exponent(t) => {
+            out.push(("getValue", f64s(&t.value())));
+            out.push(("getNegativeStyle", negative_style_out(t.negative_style())));
+            out.push(name(t.format_metadata()));
+        }
+        Transform::ExponentWithLinear(t) => {
+            out.push(("getGamma", f64s(&t.gamma())));
+            out.push(("getOffset", f64s(&t.offset())));
+            out.push(("getNegativeStyle", negative_style_out(t.negative_style())));
+            out.push(name(t.format_metadata()));
+        }
+        Transform::LogAffine(t) => {
+            out.push(("getBase", f64_out(t.base())));
+            out.push(("getLogSideSlopeValue", f64s(&t.log_side_slope_value())));
+            out.push(("getLogSideOffsetValue", f64s(&t.log_side_offset_value())));
+            out.push(("getLinSideSlopeValue", f64s(&t.lin_side_slope_value())));
+            out.push(("getLinSideOffsetValue", f64s(&t.lin_side_offset_value())));
+            out.push(name(t.format_metadata()));
+        }
+        Transform::LogCamera(t) => {
+            out.push(("getBase", f64_out(t.base())));
+            out.push(("getLogSideSlopeValue", f64s(&t.log_side_slope_value())));
+            out.push(("getLogSideOffsetValue", f64s(&t.log_side_offset_value())));
+            out.push(("getLinSideSlopeValue", f64s(&t.lin_side_slope_value())));
+            out.push(("getLinSideOffsetValue", f64s(&t.lin_side_offset_value())));
+            out.push(("getLinSideBreakValue", f64s(&t.lin_side_break_value())));
+            let slope = t.linear_slope_value();
+            out.push(("isLinearSlopeValueSet", json!(slope.is_some())));
+            if let Some(slope) = slope {
+                out.push(("getLinearSlopeValue", f64s(&slope)));
+            }
             out.push(name(t.format_metadata()));
         }
         _ => {}
@@ -479,5 +556,137 @@ fn range_transforms_load_as_in_the_wheel() {
         b"!<RangeTransform> {min_in_value: .nan}",
         b"!<RangeTransform> {direction: inverse, name: r}",
         b"!<RangeTransform> {min_in_value: 1, min_in_value: 1}",
+    ]);
+}
+
+/// The AllocationTransform's keys: its allocations, variables as floats, and their errors.
+#[test]
+fn allocation_transforms_load_as_in_the_wheel() {
+    check(&[
+        b"!<AllocationTransform> {}",
+        b"!<AllocationTransform> {allocation: lg2, vars: [-8, 5, 0.00390625]}",
+        b"!<AllocationTransform> {allocation: UNIFORM, vars: [0, 1]}",
+        b"!<AllocationTransform> {allocation: foo}",
+        b"!<AllocationTransform> {allocation: \"lg2\0x\"}",
+        b"!<AllocationTransform> {allocation: [lg2]}",
+        b"!<AllocationTransform> {vars: []}",
+        b"!<AllocationTransform> {vars: [0.1, 1e-50, 3.4028236e38, 1e39]}",
+        b"!<AllocationTransform> {vars: [1, 2, 3, 4, 5]}",
+        b"!<AllocationTransform> {vars: 1}",
+        b"!<AllocationTransform> {vars: [a]}",
+        b"!<AllocationTransform> {direction: inverse, name: a}",
+        b"!<AllocationTransform> {vars: [1], vars: [2]}",
+    ]);
+}
+
+/// The CDLTransform's keys, the sizes of its values, its styles and errors.
+#[test]
+fn cdl_transforms_load_as_in_the_wheel() {
+    check(&[
+        b"!<CDLTransform> {}",
+        b"!<CDLTransform> {slope: [1.1, 1.2, 1.3], offset: [-0.1, 0, 0.1], power: [0.9, 1, 1.1], \
+          sat: 0.8}",
+        b"!<CDLTransform> {saturation: 1.5, style: noclamp, name: grade}",
+        b"!<CDLTransform> {saturation: 1.5, sat: 0.5}",
+        b"!<CDLTransform> {slope: [1, 2]}",
+        b"!<CDLTransform> {offset: [1, 2, 3, 4]}",
+        b"!<CDLTransform> {power: []}",
+        b"!<CDLTransform> {slope: 1}",
+        b"!<CDLTransform> {slope: [a, b, c]}",
+        b"!<CDLTransform> {sat: [1]}",
+        b"!<CDLTransform> {style: Asc}",
+        b"!<CDLTransform> {style: v1.2}",
+        b"!<CDLTransform> {direction: inverse, foo: 1}",
+        b"!<CDLTransform> {slope: [1, 1, 1], slope: [2, 2, 2]}",
+    ]);
+}
+
+/// The ExponentTransform's values (four, or one for RGB), its styles in either order with
+/// the direction, and its errors.
+#[test]
+fn exponent_transforms_load_as_in_the_wheel() {
+    check(&[
+        b"!<ExponentTransform> {}",
+        b"!<ExponentTransform> {value: [2.2, 2.2, 2.2, 1]}",
+        b"!<ExponentTransform> {value: 2.4}",
+        b"!<ExponentTransform> {value: [1, 2, 3]}",
+        b"!<ExponentTransform> {value: []}",
+        b"!<ExponentTransform> {value: {a: 1}}",
+        b"!<ExponentTransform> {value: abc}",
+        b"!<ExponentTransform> {value: [a, 1, 1, 1]}",
+        b"!<ExponentTransform> {style: mirror}",
+        b"!<ExponentTransform> {style: pass_thru}",
+        b"!<ExponentTransform> {style: linear}",
+        b"!<ExponentTransform> {style: Clamp}",
+        b"!<ExponentTransform> {style: foo}",
+        b"!<ExponentTransform> {style: mirror, direction: inverse}",
+        b"!<ExponentTransform> {direction: inverse, style: mirror}",
+        b"!<ExponentTransform> {direction: inverse, style: pass_thru}",
+        b"!<ExponentTransform> {value: 2, name: e, foo: 1}",
+        b"!<ExponentTransform> {value: 2, value: 3}",
+    ]);
+}
+
+/// The ExponentWithLinearTransform's required gamma and offset, single values, styles, and
+/// its errors, which have no line.
+#[test]
+fn exponent_with_linear_transforms_load_as_in_the_wheel() {
+    check(&[
+        b"!<ExponentWithLinearTransform> {}",
+        b"!<ExponentWithLinearTransform> {gamma: 2.4}",
+        b"!<ExponentWithLinearTransform> {offset: 0.055}",
+        b"!<ExponentWithLinearTransform> {gamma: 2.4, offset: 0.055}",
+        b"!<ExponentWithLinearTransform> {gamma: [2.2, 2.4, 2.6, 1], offset: [0.1, 0.2, 0.3, 0]}",
+        b"!<ExponentWithLinearTransform> {gamma: [1, 2], offset: 0.1}",
+        b"!<ExponentWithLinearTransform> {gamma: 2, offset: [1, 2, 3, 4, 5]}",
+        b"!<ExponentWithLinearTransform> {gamma: x, offset: 0.1}",
+        b"!<ExponentWithLinearTransform> {gamma: 2, offset: 0.1, style: mirror}",
+        b"!<ExponentWithLinearTransform> {gamma: 2, offset: 0.1, style: pass_thru}",
+        b"!<ExponentWithLinearTransform> {gamma: 2, offset: 0.1, style: linear}",
+        b"!<ExponentWithLinearTransform> {gamma: 2, offset: 0.1, direction: inverse, \
+          name: ewl, foo: 1}",
+        b"!<ExponentWithLinearTransform> {gamma: 2, offset: 0.1, \"a\0b\": 1}",
+        b"!<ExponentWithLinearTransform> {gamma: 2, gamma: 3}",
+    ]);
+}
+
+/// The LogAffineTransform's base and parameters (three, or one for all), set once the map is
+/// read, and the errors of each.
+#[test]
+fn log_affine_transforms_load_as_in_the_wheel() {
+    check(&[
+        b"!<LogAffineTransform> {}",
+        b"!<LogAffineTransform> {base: 10, lin_side_offset: [0.1, 0.2, 0.3], \
+          lin_side_slope: 2, log_side_offset: [-1, 0, 1], log_side_slope: 0.5}",
+        b"!<LogAffineTransform> {base: [1]}",
+        b"!<LogAffineTransform> {base: {a: 1, b: 2}}",
+        b"!<LogAffineTransform> {base: x}",
+        b"!<LogAffineTransform> {lin_side_slope: [1, 2]}",
+        b"!<LogAffineTransform> {log_side_slope: []}",
+        b"!<LogAffineTransform> {lin_side_offset: {a: 1}}",
+        b"!<LogAffineTransform> {log_side_offset: [a, b, c]}",
+        b"!<LogAffineTransform> {direction: inverse, name: la, bar: 1}",
+        b"!<LogAffineTransform> {base: 2, base: 3}",
+    ]);
+}
+
+/// The LogCameraTransform's parameters, its required linear break and optional linear slope,
+/// and the errors of each.
+#[test]
+fn log_camera_transforms_load_as_in_the_wheel() {
+    check(&[
+        b"!<LogCameraTransform> {}",
+        b"!<LogCameraTransform> {base: 10}",
+        b"!<LogCameraTransform> {lin_side_break: 0.01}",
+        b"!<LogCameraTransform> {lin_side_break: [0.1, 0.2, 0.3], linear_slope: [1, 2, 3]}",
+        b"!<LogCameraTransform> {lin_side_break: 0.01, linear_slope: 5, base: 2.5, \
+          lin_side_offset: 0.1, lin_side_slope: 2, log_side_offset: 0.3, log_side_slope: 0.4}",
+        b"!<LogCameraTransform> {lin_side_break: [1, 2]}",
+        b"!<LogCameraTransform> {lin_side_break: x}",
+        b"!<LogCameraTransform> {lin_side_break: 0.01, linear_slope: [1]}",
+        b"!<LogCameraTransform> {lin_side_break: 0.01, base: [2, 3]}",
+        b"!<LogCameraTransform> {lin_side_break: 0.01, direction: inverse, name: lc, baz: 1}",
+        b"!<LogCameraTransform> {lin_side_break: 1, lin_side_break: 2}",
+        b"!<LogCameraTransform> {lin_side_break: }",
     ]);
 }
