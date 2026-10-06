@@ -496,6 +496,19 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   ExponentWithLinear loader; the FixedFunction and grading loaders with their cards), checked
   against the wheel in `crates/ocio/src/ocio_yaml_oracle_tests.rs`.
 
+### I-141. A transform an alias names is loaded again at each use
+
+- **Upstream:** a GroupTransform loads each child node it lists (`OCIOYaml.cpp:2520-2525`),
+  so a child given as an alias (`*m`) is loaded again for each use, and the config holds a
+  transform per use. Nested aliases multiply: n levels of groups whose children are two
+  aliases of the level below hold 2^n transforms, from a config of n lines.
+- **Who notices:** configs that repeat a transform through aliases (they load as written), and
+  machine-made configs that nest them, which take time and memory that grow exponentially.
+- **A fix:** share the transform an alias names, or bound the number of transforms a config
+  loads.
+- **Status:** matched in `p3-yaml-load-1` (3.3h2), checked against the wheel with aliases of a
+  matrix and of nested groups in `crates/ocio/src/ocio_yaml_oracle_tests.rs`.
+
 ## Numeric helpers
 
 ### I-20. Double values are compared to 0 and 1 in float precision
@@ -2319,3 +2332,26 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   strings, which can't be null; the Python module (Phase 6) refuses `None` with an error
   instead of crashing, and with Strcasecmp's message where the wheel raises it.
 - **Status:** matched in `p3-rules` (3.9g); the Python part is Phase 6's.
+
+### U-60. GroupTransforms nested deep enough to overflow the wheel's stack
+
+- **Upstream:** a GroupTransform loads each child through `load(const YAML::Node&,
+  TransformRcPtr&)`, which loads a child group the same way: the loader recurses once per
+  nested group (`OCIOYaml.cpp:2520-2525, 3196-3351`). YAML aliases let a short config nest
+  groups to any depth (each anchor a group of the one before), and a group that holds itself
+  through an alias (`&t !<GroupTransform> {children: [*t]}`) nests forever. The wheel's stack
+  then overflows (the process ends): at 1,182 levels in Python's main thread on Windows and
+  5,129 on Linux (an anchor chain, measured 2026-10-06), and on a group that holds itself on
+  both. The depth varies with the caller's stack. Without aliases, yaml-cpp refuses the flow
+  text of more than 247 nested groups first.
+- **Who notices:** machine-made configs; real configs nest groups a few levels deep.
+- **Decided** (general rule, the wheel crashes): the port refuses a group that 100 groups
+  hold, with "At line N, 'GroupTransform' parsing failed: GroupTransforms nested more than 100
+  deep can't be loaded: upstream's stack overflows.", which a group that holds itself reaches
+  too. The port loads nested groups without recursion, so the limit comes from its other
+  operations on a group: copying one recurses, about 4 KiB of stack per level at opt-level 0,
+  and 100 levels take about half of a 1 MiB thread. Between 101 levels and the wheel's crash
+  the port refuses what the wheel loads; the limit is a choice for the owner.
+- **Status:** matched in `p3-yaml-load-1` (3.3h2, `crates/ocio/src/ocio_yaml.rs`). Tests: 100
+  levels load as in the wheel, the wheel loads 101 where the port refuses them, groups that
+  hold themselves are refused, and loading, copying, printing and dropping fit a 1 MiB thread.
