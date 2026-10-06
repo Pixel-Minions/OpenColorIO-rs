@@ -79,7 +79,7 @@
 - **Byte-exact is achievable.**
   - OCIO 2.5.2 uses no hardware-approximate instructions.
   - FMA appears only in the AVX2/AVX-512 LUT kernels, which can be reproduced exactly.
-  - MSVC's SVML math library is only used for PQ with fast math off. On Windows the port uses `powf` there, under waiver W0001: an invisible difference (§3).
+  - MSVC's SVML math library is only used for PQ with fast math off. On Windows the port uses `powf` there, under waiver W0001: bounded and invisible in practice for inputs up to 1 in magnitude; above 1, near `PQ_TO_LIN`'s pole, any difference is waived (§3).
   - On Windows and on Linux (Rocky 9), pixels will be bit-identical to the wheel on the same machine. Text is identical everywhere (§3).
 - **Effort.** About 133 person-weeks of conventional work. With 2–3 agents at a time:
   - M0 (analytic transforms, CPU and GPU) in about 5–8 weeks;
@@ -184,7 +184,7 @@ These are the rules the agents port by.
 - **What was checked in 2.5.2:**
   - no hardware-approximate instructions (`rcp`, `rsqrt`);
   - FMA only in `Lut1DOpCPU_AVX2/AVX512` and `Lut3DOpCPU_AVX2/AVX512`;
-  - MSVC's SVML `_mm_pow_ps` only in PQ with fast math off (`FixedFunctionOpCPU.cpp:2133-2194`). **Decided (waiver W0001):** on Windows the port calls `powf`. 1.7% of values differ, at most about 4e-5 relative and only near black beyond that, so there is no visible difference. It is not tied to the MSVC toolset version. Linux stays bit-exact.
+  - MSVC's SVML `_mm_pow_ps` only in PQ with fast math off (`FixedFunctionOpCPU.cpp:2133-2194`). **Decided (waiver W0001, split by range on 2026-10-05):** on Windows the port calls `powf`. About 1.7% of values differ. `LIN_TO_PQ` everywhere, and `PQ_TO_LIN` for inputs up to 1 in magnitude, stay within a bound measured on every `f32` (339 and 3,356,700 ulp, the largest for subnormal outputs near black), with NaN positions and infinities exact: invisible in practice. `PQ_TO_LIN` above 1 in magnitude, through its pole near 1.992, is waived without bound. It is not tied to the MSVC toolset version. Linux stays bit-exact.
 
 ---
 
@@ -760,7 +760,7 @@ None right now. Answered on 2026-09-29:
   - WP 0.1–0.4 and most of 0.6: workspace, upstream submodule and map, oracle and test kit, hash-locked fixtures, guardrails (`cargo xtask ci`), the Rocky Linux 9 image, CI, and the agent rules (`CLAUDE.md`).
   - Logging moved to Phase 1 chunk 1.2e; the I/O trait belongs with config loading in 3.10.
 - **Spikes.** Each is bit-exact against the wheel on both platforms, in debug and release, and was reviewed independently. The reports are in `docs/spikes/`.
-  - **S2 + S5:** fast math, and the Log and Gamma CPU renderers. S5 found SVML only in PQ with fast math off (waiver W0001, invisible).
+  - **S2 + S5:** fast math, and the Log and Gamma CPU renderers. S5 found SVML only in PQ with fast math off (waiver W0001: bounded up to 1 in magnitude, waived above, near `PQ_TO_LIN`'s pole).
   - **S4:** CPU dispatch identical to the wheel's `ociocpuinfo`; the Lut3D forward kernels in every SIMD profile, including FMA; three half-float conversions compared on every input.
   - **S1 + WP 0.5:** C/C++ number formatting and parsing; a yaml-cpp 0.8.0 emitter port that re-emits the 8 built-in configs byte for byte, with byte-string semantics.
 - **Upstream tests ported:** 68 C++ (ratchet 68).

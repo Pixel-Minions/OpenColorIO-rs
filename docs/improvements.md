@@ -115,7 +115,12 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   call `apply`, so they don't see this.
 - **A fix:** convert through a separate pixel, as `apply` does; or refuse other bit depths.
   Either changes the results for those processors, and makes them the same on both platforms.
-- **Status:** matched in `p1-engine` (1.2d), each platform as its wheel compiled it.
+- **Status:** matched in `p1-engine` (1.2d), each platform as its wheel compiled it. The 1D
+  LUT lookups to F32 at the start of a processor convert in place the same way (`p1-optimizer`);
+  with hue adjust (`p2-lut1d-fwd`, 2.1b) they read the three colour codes first, then store the
+  floats before they read alpha, which is then a byte of red's float or half of green's, except
+  for 10-, 12- and 16-bit input on Linux, which reads alpha first
+  (`Lut1DRendererHueAdjust<inBD, F32>::apply`, `Lut1DRendererHalfCodeHueAdjust<F16, F32>`).
 
 ## Configs and cache IDs
 
@@ -663,6 +668,48 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p1-cdl` (1.3c1), checked against the wheel in
   `crates/ocio-ops/tests/cdl_op_data_oracle.rs` and the battery.
 
+### I-64. 1D LUT lookups cast floats to integers by their low bits
+
+- **Upstream:** the 1D LUT lookups write alpha to an integer output with a plain cast,
+  `OutType(in[3] * m_alphaScaling)` (`Lut1DRendererHalfCode::apply` and
+  `Lut1DRenderer::apply`, `ops/lut1d/Lut1DOpCPU.cpp:525, 646`), and so do the hue-adjust
+  lookups for their colour values, `OutType(RGB2[c])` (790-793, 886-889). The cast truncates,
+  where the other integer conversions add 0.5 first (`Converter<BD>::CastValue`), and
+  converting a NaN or a value outside the type's range is undefined behaviour. Both wheels
+  compile it as a 32-bit `cvttss2si` and keep the low 8 or 16 bits
+  (`Lut1DRendererHalfCode<F16, UINT8>::apply`: Windows 0x180274138, Linux 0x414c15): a NaN,
+  an infinity or a value past `INT_MAX` gives 0, and a value in range keeps its low bits, so
+  256 gives 0 in 8 bits.
+- **Who notices:** nothing through the API: the CPU engine renders a lookup to F32 only
+  (`CreateCPUEngine`, `CPUProcessor.cpp:140-146`). Code that calls `GetLut1DRenderer` for half
+  input to an integer output (upstream's unit tests do) gets 0 for a NaN or infinite alpha.
+- **A fix:** convert with `Converter<outBD>::CastValue`, which rounds and clamps.
+- **Status:** matched in `p2-lut1d-fwd` (2.1a for the lookups, 2.1b for the hue-adjust
+  lookups).
+
+### I-65. A 1D LUT's float results depend on the row length and the CPU
+
+- **Upstream:** `Lut1DRenderer<BIT_DEPTH_F32, outBD>::apply` renders a row of more than one
+  pixel with the SIMD kernel the CPU dispatches to (`ops/lut1d/Lut1DOpCPU.cpp:652-658`), and a
+  row of one pixel with its scalar loop (659-720). The two interpolate differently: the kernels
+  compute `p + (n - p) * d` from the lower node (`Lut1DOpCPU_SSE2.cpp:47-76`), with one
+  rounding on AVX2 and AVX-512 CPUs (`_mm256_fmadd_ps`, `_mm512_fmadd_ps`) and two on SSE2 and
+  AVX ones; the scalar loop computes `(low - high) * delta + high` from the upper node. So the
+  same input can give different last bits by row length and by CPU. On a node between entries
+  of `-FLT_MAX` and `FLT_MAX` (sanitized infinities), the kernels multiply an infinite
+  difference by 0 and give NaN, where the scalar loop gives the node's value. The kernels also
+  keep alpha's bits from F32 to F32, where the scalar loop multiplies it by 1, which quiets a
+  signalling NaN. The integer outputs round to nearest even in the kernels' packs, and add 0.5
+  and truncate in the scalar loop. On a CPU with AVX but not F16C, the AVX and AVX2 kernels
+  have no half output and replace the SSE2 one with none (`Lut1DOpCPU_AVX.cpp:153-157`,
+  `Lut1DOpCPU.cpp:289-294`), so every row to F16 takes the scalar loop.
+- **Who notices:** anyone comparing a pixel rendered alone (`applyRGBA`, a one-pixel-wide
+  image) with the same pixel in a row, or results across machines.
+- **A fix:** one interpolation for every row length (the kernels' arithmetic in the scalar
+  loop), and no FMA; that changes the scalar results, and the AVX2 and AVX-512 machines' ones.
+- **Status:** matched in `p2-lut1d-simd`, every kernel and the scalar loop; checked against the
+  wheel on rows of every length, and under SDE on each kernel's CPUs.
+
 ### I-68. Two half-domain 1D LUTs are never equal
 
 - **Upstream:** `Lut1DTransform::setLength` fills a half-domain LUT with each half code's
@@ -721,6 +768,65 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `get_linear_slope_libstdcxx` (p1-gpu-ops4, from the review of 1.3l4), read from both wheels'
   machine code; the wheel can't be given NaNs of opposite signs until the specs carry a
   double's bits, so no oracle test checks them yet.
+
+### I-90. A linear-style RGB curve changes alpha when it isn't the first op
+
+- **Upstream:** the linear style's renderers (`GradingRGBCurveLinearFwdOpCPU`,
+  `GradingRGBCurveLinearRevOpCPU`, `ops/gradingrgbcurve/GradingRGBCurveOpCPU.cpp:237-347`)
+  convert all four lanes to the grading log and back with the SSE2 `LinLog` and `LogLin`
+  (179-235), then restore alpha with `out[3] = in[3]`. That restores it only when the
+  renderer reads one buffer and writes another, as the CPU processor's first op does from a
+  packed F32 image (`ScanlineHelper.cpp:130-137`). Every other op of a chain, and every op of
+  `applyRGB`/`applyRGBA` and of an image processed in place, renders in place
+  (`CPUProcessor.cpp:400`), where `in[3]` is the converted alpha: alpha comes out as
+  `LogLin(LinLog(alpha))`, which isn't always alpha (the approximations round, and a
+  signalling NaN comes out quiet).
+- **Who notices:** anyone whose alpha goes through a GradingRGBCurveTransform of the linear
+  style that isn't the first op of the processor, or is applied in place.
+- **A fix:** leave alpha alone in the renderers, as the GPU shaders do.
+- **Status:** matched in `p2-rgbcurve` (2.6d): `grading_rgb_curve_op_cpu.rs` converts alpha
+  in `CpuOp::apply` and restores it in `CpuOp::apply_bit_depth`; the battery checks the first
+  op's alpha against the wheel, and `in_place_the_linear_style_converts_alpha`
+  (`crates/ocio-ops/tests/grading_rgb_curve_oracle.rs`) the alpha of `applyRGBA` in place.
+
+### I-91. The RGB curves' NaNs differ between Windows and Linux
+
+- **Upstream:** `KnotsCoefs::evalCurve` and `evalCurveRev`
+  (`ops/gradingrgbcurve/GradingBSplineCurve.cpp:1258-1381`) are scalar `float` code that the
+  two wheels compile with different operand orders (`docs/wheel-inspect.md`). MSVC computes the
+  segments' quadratic as `((t * A) + B) * t + C`, the low line as `(x - knStart) * B + C` and
+  the high line as `offs + slope * (x - knEnd)` (`sub_1801e87d0`); GCC computes `((A * t) +
+  B) * t + C`, `B * (x - knStart) + C` and `offs + (x - knEnd) * slope` (`0x3bc930`). In the
+  inverse, MSVC adds the knot after the quotient (`q + knStart`, as the source) and computes
+  the root as `kn - C0 / B` and `kn - (C0 + C0) / denom`, where GCC adds the knot first
+  (`knStart + q`) and keeps the source's `kn + (-C0) / B` and `kn + (C0 * -2) / denom`
+  (`sub_1801e8970`, `0x3bcab0`). The values are the same; where two NaNs meet (a NaN pixel
+  and the NaN coefficients of a degenerate curve, such as one with two control points at the
+  same x), the result keeps a different NaN, and a NaN `C0` comes out with its sign flipped
+  on Linux only.
+- **Upstream, the fitting:** `EstimateRGBSlopes` and `FitRGBSpline` (335-446) differ the same
+  way where a NaN y coordinate or slope meets the default NaN of an invalid operation. MSVC
+  computes a slope's numerator as `secantLen[k - 1] * secantSlope[k - 1] + secantLen[k] *
+  secantSlope[k]`, the middle segment's `(ksi - xi) * (s1 - s0)` and the second segment's
+  constant as `((ksi - xi) * s0 + yi) + q` (`sub_1801e5df0`, `sub_1801e6c80`); GCC computes
+  `secantSlope[k] * secantLen[k] + secantSlope[k - 1] * secantLen[k - 1]`, `(s1 - s0) * (ksi -
+  xi)` and `q + (yi + s0 * (ksi - xi))` (inlined in `computeKnotsAndCoefsForRGBCurve`,
+  `0x3bef40`, and `0x3be970`). Both add the knots and `s_bar`'s terms in the other order from
+  the source. Such a curve's coefficients keep a different NaN on each platform: the GPU
+  shader's constants (`nan` against `-nan(ind)`) and a dynamic op's uniform values.
+- **Who notices:** anyone comparing NaN pixels of a GradingRGBCurveTransform, or an ACES 1.x
+  output built-in, between a Windows and a Linux machine; and the shader text or uniforms of
+  a curve with a NaN y coordinate or slope.
+- **A fix:** one operand order on every platform, which changes NaN bits on at least one.
+- **Status:** matched in `p2-rgbcurve` (2.6b), `KnotsCoefs::eval_curve` and
+  `eval_curve_rev`, read from both wheels' machine code; the GradingRGBCurve battery (2.6d,
+  `crates/ocio-ops/tests/grading_rgb_curve_oracle.rs`, the "x repeated" case) checks it on
+  both platforms. The fitting is matched in `p2-rgbcurve`'s fix-forward chunk,
+  `estimate_rgb_slopes` and `fit_rgb_spline`, read from both wheels' machine code;
+  `nan_curves_shaders_match_the_wheel`
+  (`crates/ocio-gpu/tests/grading_rgb_curve_op_gpu_oracle.rs`) checks it on both platforms.
+  `AdjustRGBSlopes` differs too (MSVC's unrolled loop multiplies `slopes[i + 1] * adjust` or
+  `adjust * slopes[i + 1]` by the knot's index), but no two different NaNs meet there.
 
 ## Transforms
 
@@ -935,6 +1041,24 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p2-ff-cpu-2` (2.3d1, `times_copysign_one`, `cfg(target_os)`); the
   battery's specials and NaN buffers compare it bit for bit on both platforms.
 
+### I-84. PQ without fast math differs between Windows and Linux
+
+- **Upstream:** with fast math off, `GetFixedFunctionCPURenderer` picks the SSE PQ renderers
+  with `_mm_pow_ps` where the compiler is MSVC 2019 or later with AVX enabled, and the scalar
+  `Renderer_LIN_TO_PQ<float>` and `Renderer_PQ_TO_LIN<float>` with `powf` elsewhere
+  (`ops/fixedfunction/FixedFunctionOpCPU.cpp:2557-2590`). MSVC compiles `_mm_pow_ps` to
+  SVML's `__vdecl_powf4`, so the Windows wheel computes PQ with SVML and the Linux wheel with
+  glibc's `powf`: different results in about 1.7% of the values (every `f32` measured): up to
+  339 ulp for `LIN_TO_PQ`; for `PQ_TO_LIN`, up to 3,356,700 ulp up to 1 in magnitude (near
+  black, where the outputs are subnormal), and without bound above 1, through its pole near
+  1.992, where the two give infinities and NaNs at different inputs (W0001).
+- **Who notices:** `FIXED_FUNCTION_LIN_TO_PQ` transforms, in either direction, with fast math
+  off: Windows and Linux give different values.
+- **A fix:** one renderer and one `pow` on every platform.
+- **Status:** matched in `p2-ff-cpu-2` (2.3d2) on Linux, bit for bit; on Windows the port
+  calls `powf` where the wheel calls SVML (W0001: within its bound, and for `PQ_TO_LIN` above 1
+  in magnitude any difference, split by range in 2.3d3).
+
 ### I-120. A color space transform's text runs the data bypass into the destination
 
 - **Upstream:** `operator<<(std::ostream &, const ColorSpaceTransform &)` prints
@@ -1086,6 +1210,57 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   narrowed), and its inverse `vec3 log_slopeinv = vec3(0., ...)`; a `LogTransform` with a
   NaN base gives `vec3 log_slope = vec3(nan, nan, nan)`:
   `crates/ocio-gpu/tests/log_op_gpu_oracle.rs` (`extreme_parameters_write_the_wheels_shader`).
+
+### I-85. The gamma-log shader subtracts the gamma segment's offset
+
+- **Upstream:** the CPU renderer of `LIN_TO_GAMMA_LOG` computes the gamma segment as
+  `slope * pow(E + offset, power)` (`ops/fixedfunction/FixedFunctionOpCPU.cpp:2265`, as the
+  comment in the shader writer says too), and its inverse subtracts the offset after the
+  power. The shader writes `slope * pow(E - offset, power)`
+  (`ops/fixedfunction/FixedFunctionOpGPU.cpp:2024-2025`), while its inverse matches the CPU's.
+- **Who notices:** `FIXED_FUNCTION_LIN_TO_GAMMA_LOG` transforms whose gamma segment has an
+  offset (the fifth parameter; the Rec.2100 HLG curve's is 0), forward, on the GPU: the shader
+  gives other values than the CPU, and its inverse doesn't undo it.
+- **A fix:** `E + offset` in the shader.
+- **Status:** matched in `p2-ff-gpu` (2.3g2); `fixed_function_op_gpu_oracle.rs` compares a
+  curve with an offset with the wheel's shader.
+
+### I-86. The ACES 2.0 gamut compression shader compresses a J at or below 0
+
+- **Upstream:** the CPU's `gamut_compress_fwd` and `gamut_compress_inv` return `(0, 0, h)` for
+  a J at or below 0 (`ops/fixedfunction/ACES2/Transform.cpp:1099, 1119`). The shader's
+  compression function only returns early for an M at or below 0 or a J above the limit
+  (`ops/fixedfunction/FixedFunctionOpGPU.cpp:1175`), so it compresses such a JMh.
+- **Who notices:** `FIXED_FUNCTION_ACES_GAMUT_COMPRESS_20` and
+  `FIXED_FUNCTION_ACES_OUTPUT_TRANSFORM_20` transforms on the GPU, for JMh values with a
+  negative or zero J and a positive M: the GPU's output differs from the CPU's.
+- **A fix:** the CPU's test in the shader.
+- **Status:** matched in `p2-aces2-gpu` (2.4g); `fixed_function_op_gpu_oracle.rs` compares the
+  shader with the wheel's.
+
+### I-87. The inverse double-log shader's break points are NaNs of each platform's sign
+
+- **Upstream:** `Add_DOUBLE_LOG_TO_LIN` computes the break points in log space as
+  `logSlope * std::log(linSlope * break + linOff) + logOff` in `double`
+  (`ops/fixedfunction/FixedFunctionOpGPU.cpp:2180-2181`), and validation allows a negative
+  argument (it checks only the base and the breaks' order). The Windows wheel calls the
+  UCRT's `log`, which returns the negative x86 default NaN for it; the Linux wheel links
+  `log@GLIBC_2.2.5` (`Add_DOUBLE_LOG_TO_LIN` at 0x3711f0), whose compatibility wrapper returns
+  a positive NaN. The shader then compares the pixel with `vec3(-nan, -nan, -nan)` on Windows
+  and `vec3(nan, nan, nan)` on Linux. The CPU renderer computes its breaks with `logf`, which
+  both wheels link in its current version, and the other `log` calls of the gamma-log and
+  double-log writers and renderers take the log base, which validation keeps positive. The
+  gamma-log inverse shader's `std::pow(double, double)` (its break and mirror,
+  `FixedFunctionOpGPU.cpp:2055-2056`) is `pow@GLIBC_2.2.5` on Linux too, but its wrapper gives
+  a negative base with a non-integer power the same NaN as the current symbol.
+- **Who notices:** anyone comparing the shader text of such a `FIXED_FUNCTION_LIN_TO_DOUBLE_LOG`
+  inverse between a Windows and a Linux machine (the shader's results don't depend on the sign).
+- **A fix:** refuse a negative log argument at a break in `validate`, or one `log` on every
+  platform; either changes the port's results on at least one of them.
+- **Status:** matched in `p2-ff-gpu` (`log_as_linked` in `fixed_function_op_gpu.rs`, as
+  `log2_glibc_2_2_5` does for I-70); `fixed_function_op_gpu_oracle.rs`,
+  `double_log_break_points_match_the_wheel`, and for the `pow`
+  `gamma_log_negative_gamma_bases_match_the_wheel`, on both platforms.
 
 ## Python module (`ocio-py`)
 
@@ -1672,7 +1847,12 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Status:** matched in `p2-ff-cpu` (2.3a2); `fixed_function_op_data_tests.rs` checks the
   error, and that the comparisons upstream makes without reading (another style, or an inverse
   that validation refuses) give upstream's answers. The renderers in 2.3b, and in 2.3c1 and
-  2.3d1 (`p2-ff-cpu-2`): `fixed_function_op_cpu_tests.rs` checks their errors.
+  2.3d1 (`p2-ff-cpu-2`), and ACES 2.0's (`p2-aces2-cpu`, 2.4e1, 2.4e2, through `param_f32`):
+  `fixed_function_op_cpu_tests.rs` checks their errors.
+  The GPU writer reads the ACES 1.3 gamut compression's parameters the same way in `p2-ff-gpu`
+  (2.3f, `fixed_function_op_gpu.rs`), and the Rec.2100 surround's, the gamma-log's and the
+  double-log's (2.3g1, 2.3g2), and ACES 2.0's (`p2-aces2-gpu`, 2.4f1-2.4h);
+  `fixed_function_op_gpu.rs` checks their errors.
 
 ### U-32. ACES 2.0's hue table past its arrays
 
@@ -1689,6 +1869,26 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   write past an array: "ACES 2.0: the gamut's corner hues make the hue table read or write
   past its arrays: upstream's behaviour is undefined." (`aces2::transform::CORNERS_OVERRUN`).
 - **Status:** matched in `p2-aces2-cpu` (2.4c); `aces2/transform_tests.rs` checks the error.
+  The GPU writer refuses the same parameters before it writes anything (`p2-aces2-gpu`,
+  2.4f1-2.4h); `fixed_function_op_gpu.rs` checks it for the output transform and the gamut
+  compression, both directions.
+
+### U-35. An RGB curve with a NaN x coordinate
+
+- **Upstream:** `AdjustRGBSlopes` (`ops/gradingrgbcurve/GradingBSplineCurve.cpp:450-488`) walks
+  the fitted knots and pairs each knot that isn't a control point's x with the control
+  points `i` and `i + 1`, counting on every control point's x to match its own knot. A NaN x
+  matches nothing (`NaN != NaN`), so the walk counts that knot as a middle knot too, and
+  reaches `ctrlPnts[i + 1]` past the last control point: it reads memory it doesn't own. A
+  NaN x passes `GradingBSplineCurve::validate` (`x < lastX` is false), so a
+  GradingRGBCurveTransform with one renders after reading it.
+- **Who notices:** applications that set a NaN x coordinate on an RGB curve.
+- **Decided** (general rule): `adjust_rgb_slopes` returns "RGB curve: fitting the curve would
+  read past its control points." where upstream would read past them, so fitting the curves
+  (the dynamic property's `precompute`, building the op data) fails there.
+- **Status:** matched in `p2-rgbcurve` (2.6b), `grading_b_spline_curve.rs`; the GradingRGBCurve
+  battery (2.6d) doesn't vary x coordinates (only y and the slopes), so it never sends
+  such a curve to the wheel; `grading_b_spline_curve_tests.rs` checks the error.
 
 ### U-45. The working directory when `_getcwd` fails
 

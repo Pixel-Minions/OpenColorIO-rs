@@ -11,7 +11,8 @@ use std::fmt::Write as _;
 const MAX_LISTED: usize = 20;
 
 /// Distance in units in the last place between two non-NaN floats, counting `-0.0` and
-/// `0.0` as one step apart. For reports only: comparisons are always exact.
+/// `0.0` as one step apart. For reports, and for the bound of waiver W0001
+/// (`pixels_report_within_ulp`); other comparisons are exact.
 pub fn ulp_distance(a: f32, b: f32) -> Option<u64> {
     if a.is_nan() || b.is_nan() {
         return None;
@@ -177,6 +178,62 @@ pub(crate) fn pixels_report_except_nan_bits(
         None => Ok(waived),
         Some(report) => Err(format!(
             "(NaN bits waived by {waiver} in channels {waived_channels:?}): {report}"
+        )),
+    }
+}
+
+/// A range of inputs, by a description and a test: where waiver W0001 waives any difference
+/// (`battery::params::W0001Function::unbounded`).
+pub type InputRange = (&'static str, fn(f32) -> bool);
+
+/// The comparison of waiver W0001 (`waivers.toml`), in `waived_channels` (one entry per
+/// channel of a pixel): there, `actual` equals `expected` bit for bit, except that a value
+/// whose input `unbounded` accepts may differ in any way, a value that is NaN in both may
+/// differ in its sign and payload bits, and a value that is finite in both may differ by at
+/// most `bound` ulp ([`ulp_distance`]). NaN positions, infinities, every other value, and
+/// every value of the other channels compare exactly. `inputs` are the pixels the values came
+/// from, value for value. How many values differed within the waiver, or a report that starts
+/// with `(within <bound> ulp in channels [...], any difference where <description>, NaN bits
+/// waived, by <waiver>):`.
+///
+/// Only `battery::params::Case::compare_pixels` calls it, for the cases a family marks with
+/// `Case::w0001`; a test pins its callers.
+pub(crate) fn pixels_report_within_ulp(
+    waiver: &str,
+    bound: u64,
+    waived_channels: &[bool],
+    unbounded: Option<InputRange>,
+    inputs: &[f32],
+    expected: &[f32],
+    actual: &[f32],
+) -> Result<usize, String> {
+    assert!(!waived_channels.is_empty(), "no channels");
+    assert_eq!(inputs.len(), expected.len(), "an input per value");
+    let channels = waived_channels.len();
+    let mut compared = actual.to_vec();
+    let mut waived = 0;
+    for (i, (e, a)) in expected.iter().zip(actual).enumerate() {
+        if e.to_bits() == a.to_bits() || !waived_channels[i % channels] {
+            continue;
+        }
+        let within = if unbounded.is_some_and(|(_, waives)| waives(inputs[i])) {
+            true
+        } else if e.is_nan() || a.is_nan() {
+            e.is_nan() && a.is_nan()
+        } else {
+            e.is_finite() && a.is_finite() && ulp_distance(*e, *a).is_some_and(|d| d <= bound)
+        };
+        if within {
+            compared[i] = *e;
+            waived += 1;
+        }
+    }
+    match f32_bits_report(expected, &compared, Some(inputs), channels) {
+        None => Ok(waived),
+        Some(report) => Err(format!(
+            "(within {bound} ulp in channels {waived_channels:?}, any difference where {}, \
+             NaN bits waived, by {waiver}): {report}",
+            unbounded.map_or("nothing", |(description, _)| description)
         )),
     }
 }

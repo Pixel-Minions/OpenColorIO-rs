@@ -5,7 +5,9 @@
 
 pub mod cdl;
 pub mod exponent;
+pub mod fixedfunction;
 pub mod gamma;
+pub mod gradingrgbcurve;
 pub mod log;
 pub mod matrix;
 pub mod range;

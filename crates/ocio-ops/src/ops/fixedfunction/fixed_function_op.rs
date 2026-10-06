@@ -5,8 +5,8 @@
 //! `FixedFunctionOp.cpp` @ v2.5.2, what the CPU engine needs: the op's behaviors, and
 //! [`create_fixed_function_op`] and [`create_fixed_function_op_from_data`].
 //! `BuildFixedFunctionOp` and `CreateFixedFunctionTransform` work on the transform: they are in
-//! `ocio` (crates/ocio/src/transforms/fixed_function_transform.rs); `extractGpuShaderInfo` comes
-//! with the GPU writer (2.3f).
+//! `ocio` (crates/ocio/src/transforms/fixed_function_transform.rs); `extractGpuShaderInfo` is in
+//! `ocio-gpu`, the FixedFunction arm of `gpu_processor::extract_op_gpu_shader_info` (2.3f).
 //!
 //! As for every family, the op is its data, [`OpData::FixedFunction`]: [`Op`]'s methods match
 //! on it and call the methods here, `FixedFunctionOp`'s overrides. `FixedFunctionOp` keeps the
@@ -27,13 +27,13 @@ impl FixedFunctionOpData {
     /// which validates it).
     ///
     /// Port of `FixedFunctionOp::clone` (src/OpenColorIO/ops/fixedfunction/FixedFunctionOp.cpp:
-    /// 64-68 @ v2.5.2).
+    /// 62-66 @ v2.5.2).
     pub(crate) fn clone_op(&self) -> Result<Op> {
         Ok(Op::new(OpData::FixedFunction(self.try_clone()?)))
     }
 
     /// Port of `FixedFunctionOp::getInfo` (src/OpenColorIO/ops/fixedfunction/
-    /// FixedFunctionOp.cpp:74-77 @ v2.5.2).
+    /// FixedFunctionOp.cpp:72-75 @ v2.5.2).
     pub(crate) fn get_info(&self) -> &'static str {
         "<FixedFunctionOp>"
     }
@@ -42,7 +42,7 @@ impl FixedFunctionOpData {
     /// `FixedFunctionOp` finds.
     ///
     /// Port of `FixedFunctionOp::isSameType` (src/OpenColorIO/ops/fixedfunction/
-    /// FixedFunctionOp.cpp:84-88 @ v2.5.2).
+    /// FixedFunctionOp.cpp:82-86 @ v2.5.2).
     pub(crate) fn is_same_type(&self, op: &Op) -> bool {
         matches!(**op.data(), OpData::FixedFunction(_))
     }
@@ -50,14 +50,19 @@ impl FixedFunctionOpData {
     /// Whether `op` is a FixedFunction op whose data undoes this one's
     /// ([`FixedFunctionOpData::is_inverse`]).
     ///
-    /// Upstream's comparison raises where this op's data doesn't validate (its inverse is a
-    /// validated copy) or, for a Rec.2100 surround, where either op has no parameter (U-31).
-    /// The optimizer, its only caller, compares ops that `OpRcPtrVec::finalize` validated
-    /// first, so it never gets there; `Op::is_inverse` answers a `bool`, so a direct call on
-    /// such ops panics with the error.
+    /// # Panics
+    ///
+    /// Panics, with upstream's error text, where [`FixedFunctionOpData::is_inverse`] fails:
+    /// where this op's data doesn't validate, or, for a Rec.2100 surround, where either op has
+    /// no parameter. Upstream throws in the first case, since its comparison builds this
+    /// data's inverse, a copy it validates; in the second it reads a parameter past the end of
+    /// its vector, which the port refuses (`docs/improvements.md` U-31). `Op::is_inverse`
+    /// answers a `bool`, as upstream's does, so the error can't be returned. The `ocio` crate
+    /// never gets there: the optimizer, the only caller, compares ops of an `OpRcPtrVec` that
+    /// `finalize` validated first.
     ///
     /// Port of `FixedFunctionOp::isInverse` (src/OpenColorIO/ops/fixedfunction/
-    /// FixedFunctionOp.cpp:90-97 @ v2.5.2).
+    /// FixedFunctionOp.cpp:88-95 @ v2.5.2).
     pub(crate) fn is_inverse_op(&self, op: &Op) -> bool {
         match &**op.data() {
             OpData::FixedFunction(fn_op_data) => self
@@ -70,7 +75,7 @@ impl FixedFunctionOpData {
     /// Never: the op combines with nothing.
     ///
     /// Port of `FixedFunctionOp::canCombineWith` (src/OpenColorIO/ops/fixedfunction/
-    /// FixedFunctionOp.cpp:99-102 @ v2.5.2).
+    /// FixedFunctionOp.cpp:97-100 @ v2.5.2).
     pub(crate) fn can_combine_with(&self, _op: &Op) -> bool {
         false
     }
@@ -78,7 +83,7 @@ impl FixedFunctionOpData {
     /// Refuses: the caller must check [`can_combine_with`](Self::can_combine_with) first.
     ///
     /// Port of `FixedFunctionOp::combineWith` (src/OpenColorIO/ops/fixedfunction/
-    /// FixedFunctionOp.cpp:104-111 @ v2.5.2).
+    /// FixedFunctionOp.cpp:102-109 @ v2.5.2).
     pub(crate) fn combine_with(&self, _ops: &mut OpVec, second_op: &Op) -> Result<()> {
         if !self.can_combine_with(second_op) {
             return Err(Exception::new(
@@ -91,7 +96,7 @@ impl FixedFunctionOpData {
     /// The op's cache ID: `<FixedFunctionOp `, the data's cache ID, `>`.
     ///
     /// Port of `FixedFunctionOp::getCacheID` (src/OpenColorIO/ops/fixedfunction/
-    /// FixedFunctionOp.cpp:113-122 @ v2.5.2).
+    /// FixedFunctionOp.cpp:111-120 @ v2.5.2).
     pub(crate) fn get_op_cache_id(&self) -> Vec<u8> {
         let mut cache_id = b"<FixedFunctionOp ".to_vec();
         cache_id.extend_from_slice(&self.get_cache_id());
@@ -102,7 +107,7 @@ impl FixedFunctionOpData {
     /// The renderer of the style ([`get_fixed_function_cpu_renderer`]).
     ///
     /// Port of `FixedFunctionOp::getCPUOp` (src/OpenColorIO/ops/fixedfunction/
-    /// FixedFunctionOp.cpp:124-128 @ v2.5.2).
+    /// FixedFunctionOp.cpp:122-126 @ v2.5.2).
     pub(crate) fn get_cpu_op(&self, fast_log_exp_pow: bool) -> Result<Arc<dyn CpuOp>> {
         get_fixed_function_cpu_renderer(self, fast_log_exp_pow)
     }
@@ -111,7 +116,7 @@ impl FixedFunctionOpData {
 /// Appends a forward FixedFunction op of `style` and `params`, validated.
 ///
 /// Port of `CreateFixedFunctionOp(OpRcPtrVec &, FixedFunctionOpData::Style, const Params &)`
-/// (src/OpenColorIO/ops/fixedfunction/FixedFunctionOp.cpp:140-145 @ v2.5.2).
+/// (src/OpenColorIO/ops/fixedfunction/FixedFunctionOp.cpp:143-148 @ v2.5.2).
 pub fn create_fixed_function_op(
     ops: &mut OpVec,
     style: FixedFunctionOpStyle,
@@ -129,7 +134,7 @@ pub fn create_fixed_function_op(
 /// here the op owns the data, which nothing changes afterwards (`Op`'s docs).
 ///
 /// Port of `CreateFixedFunctionOp(OpRcPtrVec &, FixedFunctionOpDataRcPtr &,
-/// TransformDirection)` (src/OpenColorIO/ops/fixedfunction/FixedFunctionOp.cpp:147-157 @
+/// TransformDirection)` (src/OpenColorIO/ops/fixedfunction/FixedFunctionOp.cpp:150-161 @
 /// v2.5.2).
 pub fn create_fixed_function_op_from_data(
     ops: &mut OpVec,

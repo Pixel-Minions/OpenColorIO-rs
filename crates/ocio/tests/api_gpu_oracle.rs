@@ -9,9 +9,9 @@
 //! `getDefaultGPUProcessor()`, or `getOptimizedGPUProcessor` with `OPTIMIZATION_NONE`,
 //! `LOSSLESS`, `VERY_GOOD`, `GOOD`, `DRAFT` or `DEFAULT`. The GPU processor's cache ID and
 //! queries must be the wheel's, and so must the shader the extraction writes into a
-//! `GpuShaderDesc` of each language: its text, cache ID and names, and its uniforms, textures
-//! and dynamic properties, of which the analytic ops have none. Or both must raise the same
-//! message at the same stage.
+//! `GpuShaderDesc` of each language: its text, cache ID and names, its textures with their values
+//! (ACES 2.0's tables), and its uniforms, 3D textures and dynamic properties, of which these
+//! ops have none. Or both must raise the same message at the same stage.
 //!
 //! The `Lut1DTransform`'s GPU writer (`Lut1DOpGPU`) is Phase 2's, as are its inverse LUT and
 //! hue adjustment: where the wheel builds a GPU processor (then writes the shader, or refuses
@@ -26,7 +26,9 @@ use std::collections::BTreeMap;
 use common::api::{Calls, LEVELS, port_transform};
 use common::api_cases::{self, Cases};
 use ocio::{Config, Exception, TransformDirection};
+use ocio_gpu::gpu_shader::{TextureDimensions, TextureType};
 use ocio_gpu::{GpuLanguage, GpuShaderDesc};
+use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 use ocio_testkit::Oracle;
 use ocio_testkit::battery::Direction;
 use ocio_testkit::gpu::{self as oracle_gpu, GpuShaderReply, GpuShaderRequest, ShaderSettings};
@@ -145,13 +147,45 @@ fn wheel(reply: &GpuShaderReply) -> Outcome {
                 "pixel_name": shader.getters["pixel_name"],
                 "resource_prefix": shader.getters["resource_prefix"],
                 "uniforms": shader.uniforms.len(),
-                "textures": shader.textures.len(),
+                "textures": shader.textures.iter().map(|t| json!({
+                    "name": t.name, "sampler_name": t.sampler_name, "width": t.width,
+                    "height": t.height, "channel": t.channel, "dimensions": t.dimensions,
+                    "interpolation": t.interpolation, "binding_index": t.binding_index,
+                    "values": t.values.iter().map(|v| v.to_bits()).collect::<Vec<u32>>(),
+                })).collect::<Vec<Value>>(),
                 "textures_3d": shader.textures_3d.len(),
                 "dynamic_properties": shader.dynamic_properties.len(),
             }))
         }
     };
     Outcome::Gpu { processor, shader }
+}
+
+/// The port's texture `index`, as the wheel's outcome lists one (its values by their bits).
+fn port_texture(desc: &GpuShaderDesc, index: u32) -> Value {
+    let t = desc.texture(index).expect("a texture");
+    let text = |bytes: &[u8]| String::from_utf8(bytes.to_vec()).expect("UTF-8");
+    json!({
+        "name": text(t.texture_name()),
+        "sampler_name": text(t.sampler_name()),
+        "width": t.width(),
+        "height": t.height(),
+        "channel": match t.channel() {
+            TextureType::RedChannel => "TEXTURE_RED_CHANNEL",
+            TextureType::RgbChannel => "TEXTURE_RGB_CHANNEL",
+        },
+        "dimensions": match t.dimensions() {
+            TextureDimensions::D1 => "TEXTURE_1D",
+            TextureDimensions::D2 => "TEXTURE_2D",
+        },
+        "interpolation": match t.interpolation() {
+            Interpolation::Nearest => "INTERP_NEAREST",
+            Interpolation::Linear => "INTERP_LINEAR",
+            other => panic!("interpolation {other:?}"),
+        },
+        "binding_index": desc.texture_shader_binding_index(index).expect("its binding"),
+        "values": t.values().iter().map(|v| v.to_bits()).collect::<Vec<u32>>(),
+    })
 }
 
 /// The port's outcome for `job`.
@@ -199,7 +233,7 @@ fn port(class: &Class, job: &Job, calls: &Calls) -> Outcome {
                 "pixel_name": text(desc.pixel_name()),
                 "resource_prefix": text(desc.resource_prefix()),
                 "uniforms": desc.num_uniforms(),
-                "textures": desc.num_textures(),
+                "textures": (0..desc.num_textures()).map(|i| port_texture(&desc, i)).collect::<Vec<Value>>(),
                 "textures_3d": desc.num_textures_3d(),
                 "dynamic_properties": desc.num_dynamic_properties(),
             })
@@ -294,8 +328,8 @@ fn check(class: &Class) {
             match wheel {
                 Outcome::Gpu { shader: Ok(s), .. } => {
                     assert!(
-                        s["uniforms"] == 0 && s["textures"] == 0 && s["textures_3d"] == 0,
-                        "{what}: compare the uniforms and textures too: {s}"
+                        s["uniforms"] == 0 && s["textures_3d"] == 0,
+                        "{what}: compare the uniforms and 3D textures too: {s}"
                     );
                     compared += 1;
                 }
@@ -391,4 +425,12 @@ fn lut1d_transform_shaders_are_deferred_where_the_wheel_writes_them() {
         deferred: true,
         ..Class::new("Lut1DTransform", api_cases::lut1d())
     });
+}
+
+#[test]
+fn fixed_function_transform_shaders_match_the_wheel() {
+    check(&Class::new(
+        "FixedFunctionTransform",
+        api_cases::fixed_function(),
+    ));
 }

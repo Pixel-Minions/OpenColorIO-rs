@@ -25,13 +25,15 @@ use crate::exception::{Exception, Result};
 use crate::format_metadata::FormatMetadataImpl;
 use crate::logging::log_warning;
 use crate::op_data::{OpData, OpDataRcPtr, OpDataType, OpDataVec, get_type_name};
-use crate::open_color_types::{DynamicPropertyType, TransformDirection};
+use crate::open_color_types::{BitDepth, DynamicPropertyType, TransformDirection};
 use crate::ops::cdl::cdl_op::create_cdl_op;
 use crate::ops::exponent::exponent_op::create_exponent_op;
 use crate::ops::fixedfunction::fixed_function_op::create_fixed_function_op_from_data;
 use crate::ops::gamma::gamma_op::create_gamma_op;
+use crate::ops::gradingrgbcurve::grading_rgb_curve_op::create_grading_rgb_curve_op;
 use crate::ops::log::log_op::create_log_op;
-use crate::ops::lut1d::lut1d_op::{NOT_PORTED_F32, create_lut1d_op};
+use crate::ops::lut1d::lut1d_op::create_lut1d_op;
+use crate::ops::lut1d::lut1d_op_cpu::get_lut1d_renderer;
 use crate::ops::matrix::matrix_op::create_matrix_op;
 use crate::ops::range::range_op::create_range_op;
 
@@ -229,6 +231,7 @@ impl Op {
             OpData::Range(data) => data.clone_op(),
             OpData::Exponent(data) => Ok(data.clone_op()),
             OpData::FixedFunction(data) => data.clone_op(),
+            OpData::GradingRgbCurve(data) => Ok(data.clone_op()),
             OpData::Reference(_) => no_reference_op(),
             OpData::NoOp(data) => Ok(data.clone_op()),
         }
@@ -249,6 +252,7 @@ impl Op {
             OpData::Range(data) => data.get_info(),
             OpData::Exponent(data) => data.get_info(),
             OpData::FixedFunction(data) => data.get_info(),
+            OpData::GradingRgbCurve(data) => data.get_info(),
             OpData::Reference(_) => no_reference_op(),
             OpData::NoOp(data) => data.get_info(),
         }
@@ -278,6 +282,7 @@ impl Op {
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
+            | OpData::GradingRgbCurve(_)
             | OpData::NoOp(_) => self.data.is_no_op(),
         }
     }
@@ -297,6 +302,7 @@ impl Op {
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
+            | OpData::GradingRgbCurve(_)
             | OpData::NoOp(_) => self.data.is_identity(),
         }
     }
@@ -324,6 +330,7 @@ impl Op {
             | OpData::Gamma(_)
             | OpData::Exponent(_)
             | OpData::Lut1D(_)
+            | OpData::GradingRgbCurve(_)
             | OpData::Reference(_)
             | OpData::NoOp(_) => {
                 return Err(Exception::new(format!(
@@ -363,6 +370,7 @@ impl Op {
             OpData::Range(data) => data.is_same_type(op),
             OpData::Exponent(data) => data.is_same_type(op),
             OpData::FixedFunction(data) => data.is_same_type(op),
+            OpData::GradingRgbCurve(data) => data.is_same_type(op),
             OpData::Reference(_) => no_reference_op(),
             OpData::NoOp(data) => data.is_same_type(op),
         }
@@ -382,6 +390,7 @@ impl Op {
             OpData::Range(data) => data.is_inverse(op),
             OpData::Exponent(data) => data.is_inverse(op),
             OpData::FixedFunction(data) => data.is_inverse_op(op),
+            OpData::GradingRgbCurve(data) => data.is_inverse_op(op),
             OpData::Reference(_) => no_reference_op(),
             OpData::NoOp(data) => data.is_inverse(op),
         }
@@ -400,6 +409,7 @@ impl Op {
             OpData::Range(data) => data.can_combine_with(op),
             OpData::Exponent(data) => Ok(data.can_combine_with(op)),
             OpData::FixedFunction(data) => Ok(data.can_combine_with(op)),
+            OpData::GradingRgbCurve(data) => Ok(data.can_combine_with(op)),
             OpData::Reference(_) => no_reference_op(),
             OpData::Lut1D(data) => Ok(data.can_combine_with(op)),
             // The Op default.
@@ -420,6 +430,7 @@ impl Op {
             OpData::Range(data) => data.combine_with(ops, second_op),
             OpData::Exponent(data) => data.combine_with(ops, second_op),
             OpData::FixedFunction(data) => data.combine_with(ops, second_op),
+            OpData::GradingRgbCurve(data) => data.combine_with(ops, second_op),
             OpData::Reference(_) => no_reference_op(),
             OpData::Lut1D(data) => data.combine_with(ops, second_op),
             // The Op default.
@@ -451,6 +462,7 @@ impl Op {
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
+            | OpData::GradingRgbCurve(_)
             | OpData::NoOp(_) => self.data.has_channel_crosstalk(),
         }
     }
@@ -517,6 +529,7 @@ impl Op {
             | OpData::Log(_)
             | OpData::FixedFunction(_)
             | OpData::Exponent(_)
+            | OpData::GradingRgbCurve(_)
             | OpData::NoOp(_) => Ok(()),
         }
     }
@@ -535,6 +548,7 @@ impl Op {
             OpData::Range(data) => Ok(data.get_op_cache_id()),
             OpData::Exponent(data) => Ok(data.get_op_cache_id()),
             OpData::FixedFunction(data) => Ok(data.get_op_cache_id()),
+            OpData::GradingRgbCurve(data) => Ok(data.get_op_cache_id()),
             OpData::Reference(_) => no_reference_op(),
             OpData::NoOp(data) => Ok(data.get_op_cache_id()),
         }
@@ -547,9 +561,11 @@ impl Op {
     /// overrides.
     pub fn apply(&self, rgba: &mut [f32]) -> Result<()> {
         match &*self.data {
-            // The Op default: `getCPUOp(false)->apply(img, img, numPixels)`, whose float renderer
-            // waits for Phase 2 for a 1D LUT.
-            OpData::Lut1D(_) => Err(Exception::new(NOT_PORTED_F32)),
+            // The Op default: `getCPUOp(false)->apply(img, img, numPixels)`.
+            OpData::Lut1D(data) => {
+                get_lut1d_renderer(data, BitDepth::F32, BitDepth::F32)?.apply(rgba);
+                Ok(())
+            }
             OpData::Cdl(data) => {
                 data.get_cpu_op(false).apply(rgba);
                 Ok(())
@@ -578,6 +594,10 @@ impl Op {
                 data.get_cpu_op(false)?.apply(rgba);
                 Ok(())
             }
+            OpData::GradingRgbCurve(data) => {
+                data.get_cpu_op()?.apply(rgba);
+                Ok(())
+            }
             OpData::Reference(_) => no_reference_op(),
             // AllocationNoOp, FileNoOp and LookNoOp::apply do nothing
             // (src/OpenColorIO/ops/noop/NoOps.cpp:49, 320, 406 @ v2.5.2).
@@ -595,7 +615,12 @@ impl Op {
         match &*self.data {
             // The Op default: `getCPUOp(false)->apply(inImg, outImg, numPixels)`. The matrix
             // renderers read a pixel before writing it, so they render a copy in place.
-            OpData::Lut1D(_) => Err(Exception::new(NOT_PORTED_F32)),
+            OpData::Lut1D(data) => {
+                let renderer = get_lut1d_renderer(data, BitDepth::F32, BitDepth::F32)?;
+                output.copy_from_slice(input);
+                renderer.apply(output);
+                Ok(())
+            }
             // The CDL renderers read a pixel before writing it too.
             OpData::Cdl(data) => {
                 let renderer = data.get_cpu_op(false);
@@ -643,6 +668,12 @@ impl Op {
                 renderer.apply(output);
                 Ok(())
             }
+            // Between two buffers: the linear style's renderers restore alpha from the input.
+            OpData::GradingRgbCurve(data) => {
+                data.get_cpu_op()?
+                    .apply_bit_depth(Pixels::F32(input), PixelsMut::F32(output));
+                Ok(())
+            }
             OpData::Reference(_) => no_reference_op(),
             // The no-ops copy (src/OpenColorIO/ops/noop/NoOps.cpp:51-52, 322-323, 408-409 @
             // v2.5.2).
@@ -671,6 +702,7 @@ impl Op {
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
+            | OpData::GradingRgbCurve(_)
             | OpData::NoOp(_) => true,
         }
     }
@@ -681,6 +713,7 @@ impl Op {
     pub fn is_dynamic(&self) -> bool {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
+            OpData::GradingRgbCurve(data) => data.is_dynamic(),
             // The Op default.
             OpData::Log(_)
             | OpData::FixedFunction(_)
@@ -698,9 +731,10 @@ impl Op {
     ///
     /// Port of `Op::hasDynamicProperty` (src/OpenColorIO/Op.cpp:168-171 @ v2.5.2), and its
     /// overrides.
-    pub fn has_dynamic_property(&self, _type: DynamicPropertyType) -> bool {
+    pub fn has_dynamic_property(&self, type_: DynamicPropertyType) -> bool {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
+            OpData::GradingRgbCurve(data) => data.has_dynamic_property_op(type_),
             // The Op default.
             OpData::Log(_)
             | OpData::FixedFunction(_)
@@ -718,9 +752,10 @@ impl Op {
     ///
     /// Port of `Op::getDynamicProperty` (src/OpenColorIO/Op.cpp:173-176 @ v2.5.2), and its
     /// overrides.
-    pub fn get_dynamic_property(&self, _type: DynamicPropertyType) -> Result<DynamicPropertyRcPtr> {
+    pub fn get_dynamic_property(&self, type_: DynamicPropertyType) -> Result<DynamicPropertyRcPtr> {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
+            OpData::GradingRgbCurve(data) => data.get_dynamic_property_op(type_),
             // The Op default.
             OpData::Log(_)
             | OpData::FixedFunction(_)
@@ -741,11 +776,18 @@ impl Op {
     /// v2.5.2), one per class of property, and their overrides.
     pub fn replace_dynamic_property(
         &mut self,
-        _type: DynamicPropertyType,
+        type_: DynamicPropertyType,
         prop: &DynamicPropertyRcPtr,
     ) -> Result<()> {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
+            // The data is copied first if another op shares it (`Op`'s docs).
+            OpData::GradingRgbCurve(_) => {
+                let OpData::GradingRgbCurve(data) = Arc::make_mut(&mut self.data) else {
+                    unreachable!("the data is a GradingRGBCurve");
+                };
+                data.replace_dynamic_property_op(type_, prop)
+            }
             // The Op default: each overload's error.
             OpData::Log(_)
             | OpData::FixedFunction(_)
@@ -766,6 +808,9 @@ impl Op {
     pub fn remove_dynamic_properties(&mut self) {
         match &*self.data {
             OpData::Reference(_) => no_reference_op(),
+            // The property changes in place, for every op data that shares it, as upstream's
+            // does.
+            OpData::GradingRgbCurve(data) => data.remove_dynamic_property(),
             // The Op default: nothing.
             OpData::Log(_)
             | OpData::FixedFunction(_)
@@ -791,13 +836,17 @@ impl Op {
             OpData::Gamma(data) => Ok(Some(data.get_cpu_op(fast_log_exp_pow)?)),
             OpData::Log(data) => Ok(Some(data.get_cpu_op(fast_log_exp_pow)?)),
             // `GetLut1DRenderer(data, BIT_DEPTH_F32, BIT_DEPTH_F32)`
-            // (src/OpenColorIO/ops/lut1d/Lut1DOp.cpp:151-155 @ v2.5.2): the float renderers
-            // wait for Phase 2.
-            OpData::Lut1D(_) => Err(Exception::new(NOT_PORTED_F32)),
+            // (src/OpenColorIO/ops/lut1d/Lut1DOp.cpp:151-155 @ v2.5.2).
+            OpData::Lut1D(data) => Ok(Some(get_lut1d_renderer(
+                data,
+                BitDepth::F32,
+                BitDepth::F32,
+            )?)),
             OpData::Matrix(data) => Ok(Some(data.get_cpu_op()?)),
             OpData::Range(data) => Ok(Some(data.get_cpu_op()?)),
             OpData::Exponent(data) => Ok(Some(data.get_cpu_op())),
             OpData::FixedFunction(data) => Ok(Some(data.get_cpu_op(fast_log_exp_pow)?)),
+            OpData::GradingRgbCurve(data) => Ok(Some(data.get_cpu_op()?)),
             OpData::Reference(_) => no_reference_op(),
             // AllocationNoOp, FileNoOp and LookNoOp::getCPUOp return nullptr
             // (src/OpenColorIO/ops/noop/NoOps.cpp:47, 318, 404 @ v2.5.2).
@@ -814,10 +863,13 @@ fn no_reference_op() -> ! {
 
 /// The error of the base `Op::replaceDynamicProperty` overload for `prop`'s class
 /// (src/OpenColorIO/Op.h:256-280 @ v2.5.2).
-fn cannot_replace(prop: &DynamicPropertyRcPtr) -> Exception {
+pub(crate) fn cannot_replace(prop: &DynamicPropertyRcPtr) -> Exception {
     match prop {
         DynamicPropertyRcPtr::Double(_) => {
             Exception::new("Op does not implement double dynamic property.")
+        }
+        DynamicPropertyRcPtr::GradingRgbCurve(_) => {
+            Exception::new("Op does not implement grading rgb curve dynamic property.")
         }
     }
 }
@@ -1100,6 +1152,7 @@ fn is_class_of(dp: &DynamicPropertyRcPtr, type_: DynamicPropertyType) -> bool {
                 | DynamicPropertyType::Contrast
                 | DynamicPropertyType::Gamma
         ),
+        DynamicPropertyRcPtr::GradingRgbCurve(_) => type_ == DynamicPropertyType::GradingRgbCurve,
     }
 }
 
@@ -1167,6 +1220,11 @@ pub fn create_op_vec_from_op_data(
         OpData::FixedFunction(ff_src) => {
             let ff = ff_src.clone();
             create_fixed_function_op_from_data(ops, ff, dir)
+        }
+        OpData::GradingRgbCurve(rgb_src) => {
+            let rgb = rgb_src.clone();
+            create_grading_rgb_curve_op(ops, rgb, dir);
+            Ok(())
         }
         OpData::Reference(_) => Err(Exception::new(
             "ReferenceOpData should have been replaced by referenced ops",

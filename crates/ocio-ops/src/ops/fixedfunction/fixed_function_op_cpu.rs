@@ -4,13 +4,13 @@
 //! The FixedFunction op's CPU renderers: a port of
 //! `src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp` @ v2.5.2.
 //!
-//! So far the ACES 1.x styles: the red modifiers 0.3 and 1.0, the glows 0.3 and 1.0, the dark
+//! Every style: the ACES 1.x styles: the red modifiers 0.3 and 1.0, the glows 0.3 and 1.0, the dark
 //! to dim surround 1.0 and the gamut compression 1.3, forward and inverse (chunk 2.3b); the
 //! Rec.2100 surround, RGB to and from HSV, and XYZ to and from xyY, u'v'Y and CIELUV (2.3c1);
 //! RGB to and from the three HSYs (2.3c2); the gamma-log and double-log curves, both ways
-//! (2.3d1); ACES 2.0's RGB to and from JMh, and its tone scale and chroma compression (2.4e1),
-//! its output transform and gamut compression (2.4e2). The PQ curves' renderers come with
-//! chunk 2.3d2; until then [`get_fixed_function_cpu_renderer`] refuses them ([`not_ported`]).
+//! (2.3d1); PQ, both ways, scalar and SSE (2.3d2); ACES 2.0's RGB to and from JMh, and its
+//! tone scale and chroma compression (2.4e1), its output transform and gamut compression
+//! (2.4e2).
 //!
 //! The renderers work in place and never write alpha, which upstream copies (`out[3] =
 //! in[3]`), nor a channel upstream leaves as it was.
@@ -56,20 +56,13 @@ use super::aces2::transform::{
 use super::fixed_function_op_data::{FixedFunctionOpData, FixedFunctionOpStyle, SHORT_PARAMS};
 use crate::bit_depth_utils::clamp_macro;
 use crate::exception::{Exception, Result};
-use crate::math_utils::{clamp, sse_add, sse_cvttps_epi32, sse_mul, sse_sub, std_max, std_min};
+use crate::math_utils::{
+    clamp, sse_add, sse_cvttps_epi32, sse_max, sse_mul, sse_sub, std_max, std_min,
+};
 use crate::op::CpuOp;
 use crate::transforms::builtins::color_matrix_helpers::{
     Chromaticities, Primaries, aces_ap0, aces_ap1,
 };
-
-/// The error for a style whose renderer isn't ported yet.
-pub fn not_ported(style: FixedFunctionOpStyle) -> Exception {
-    Exception::new(format!(
-        "FixedFunctionOp: the CPU renderer of the style '{}' is not ported yet (Phase 2, WP \
-         2.3 and 2.4).",
-        style.to_str(true)
-    ))
-}
 
 /// The saturation measure, computed in a safe manner: the numerator is clamped to prevent
 /// problems from negative values, the denominator is clamped higher to prevent dark noise from
@@ -1864,6 +1857,179 @@ impl CpuOp for RendererHsyVidToRgb {
     }
 }
 
+/// The SMPTE ST 2084 (PQ) constants, in double as upstream declares them.
+///
+/// Port of `ST_2084` (src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp:2030-2048
+/// @ v2.5.2).
+mod st_2084 {
+    /// `m1`.
+    pub(super) const M1: f64 = 0.25 * 2610. / 4096.;
+    /// `m2`.
+    pub(super) const M2: f64 = 128. * 2523. / 4096.;
+    /// `c2`.
+    pub(super) const C2: f64 = 32. * 2413. / 4096.;
+    /// `c3`.
+    pub(super) const C3: f64 = 32. * 2392. / 4096.;
+    /// `c1`.
+    pub(super) const C1: f64 = C3 - C2 + 1.;
+}
+
+/// The RGB lanes' sign bits: `~abs_rgb_mask` (`ST_2084::abs_rgb_mask`,
+/// FixedFunctionOpCPU.cpp:2039 @ v2.5.2) for one RGB lane.
+const SIGN_BIT: u32 = 0x8000_0000;
+
+/// `_mm_or_ps(_mm_and_ps(abs_rgb_mask, value), _mm_andnot_ps(abs_rgb_mask, v))` for an RGB
+/// lane: `value`'s magnitude with `v`'s sign, the bits of `std::copysign(value, v)`.
+#[inline]
+fn with_sign_of(value: f32, v: f32) -> f32 {
+    f32::from_bits((value.to_bits() & !SIGN_BIT) | (v.to_bits() & SIGN_BIT))
+}
+
+/// The power function of the SSE PQ renderers: `ssePower` with fast math, and with fast math
+/// off the Windows wheel's `_mm_pow_ps`, which MSVC compiles to SVML's `__vdecl_powf4`. The port
+/// calls `powf` there instead (waiver W0001): SVML is not available to Rust, and its results
+/// differ from `powf`'s in about 1.7% of the values, by the bounds W0001 records.
+///
+/// Port of `Renderer_LIN_TO_PQ_SSE<FAST_POWER>::myPower` and
+/// `Renderer_PQ_TO_LIN_SSE<FAST_POWER>::myPower` (FixedFunctionOpCPU.cpp:2180-2195,
+/// 2125-2140 @ v2.5.2).
+#[inline]
+fn pq_power<const FAST_POWER: bool>(x: f32, exp: f32) -> f32 {
+    if FAST_POWER {
+        crate::sse::sse_power(x, exp)
+    } else {
+        x.powf(exp)
+    }
+}
+
+/// Linear (100 nits = 1) to PQ, mirrored around 0, in `float`: the renderer the Linux wheel
+/// takes with fast math off.
+///
+/// Port of `Renderer_LIN_TO_PQ<float>` (src/OpenColorIO/ops/fixedfunction/
+/// FixedFunctionOpCPU.cpp:349-356, 2082-2116 @ v2.5.2).
+#[derive(Debug, Default)]
+pub struct RendererLinToPq;
+
+impl CpuOp for RendererLinToPq {
+    /// Port of `Renderer_LIN_TO_PQ<float>::apply` (FixedFunctionOpCPU.cpp:2088-2116 @ v2.5.2).
+    fn apply(&self, rgba: &mut [f32]) {
+        use st_2084::*;
+        for pixel in rgba.as_chunks_mut::<4>().0 {
+            for value in &mut pixel[..3] {
+                let v = *value;
+                // Input is in nits/100, convert to [0,1], where 1 is 10000 nits.
+                let l = (v * 0.01f32).abs();
+                let y = l.powf(M1 as f32);
+                let ratpoly = (C1 as f32 + C2 as f32 * y) / (1.0f32 + C3 as f32 * y);
+                let n = ratpoly.powf(M2 as f32);
+                *value = n.copysign(v);
+                // Note: the PQ value for zero is 0.836^78.84 = 7.36e-07 so there is a very
+                // small jump in the mirroring at zero. However, this is 20x smaller than a
+                // single 16-bit code value, so it is not visually significant.
+            }
+        }
+    }
+}
+
+/// PQ to linear (100 nits = 1), mirrored around 0, in `float`: the renderer the Linux wheel
+/// takes with fast math off.
+///
+/// Port of `Renderer_PQ_TO_LIN<float>` (src/OpenColorIO/ops/fixedfunction/
+/// FixedFunctionOpCPU.cpp:358-365, 2051-2080 @ v2.5.2).
+#[derive(Debug, Default)]
+pub struct RendererPqToLin;
+
+impl CpuOp for RendererPqToLin {
+    /// Port of `Renderer_PQ_TO_LIN<float>::apply` (FixedFunctionOpCPU.cpp:2057-2080 @ v2.5.2).
+    fn apply(&self, rgba: &mut [f32]) {
+        use st_2084::*;
+        for pixel in rgba.as_chunks_mut::<4>().0 {
+            for value in &mut pixel[..3] {
+                let v = *value;
+                let vabs = v.abs();
+                let x = vabs.powf(1.0f32 / M2 as f32);
+                let nits = (std_max(0.0f32, x - C1 as f32) / (C2 as f32 - C3 as f32 * x))
+                    .powf(1.0f32 / M1 as f32);
+                // Output scale is 1.0 = 10000 nits, we map it to make 1.0 = 100 nits.
+                *value = (100.0f32 * nits).copysign(v);
+            }
+        }
+    }
+}
+
+/// Linear (100 nits = 1) to PQ, one SSE lane per channel: the renderer of both wheels with
+/// fast math (`FAST_POWER`, `ssePower`), and of the Windows wheel without (`_mm_pow_ps`,
+/// [`pq_power`], W0001).
+///
+/// Port of `Renderer_LIN_TO_PQ_SSE<FAST_POWER>` (src/OpenColorIO/ops/fixedfunction/
+/// FixedFunctionOpCPU.cpp:368-376, 2174-2227 @ v2.5.2).
+#[derive(Debug, Default)]
+pub struct RendererLinToPqSse<const FAST_POWER: bool>;
+
+impl<const FAST_POWER: bool> CpuOp for RendererLinToPqSse<FAST_POWER> {
+    /// The alpha lane goes through the masks unchanged, so the renderer never writes it.
+    ///
+    /// Port of `Renderer_LIN_TO_PQ_SSE<FAST_POWER>::apply` (FixedFunctionOpCPU.cpp:2198-2227
+    /// @ v2.5.2).
+    fn apply(&self, rgba: &mut [f32]) {
+        use st_2084::*;
+        for pixel in rgba.as_chunks_mut::<4>().0 {
+            for value in &mut pixel[..3] {
+                let v = *value;
+
+                // Clear sign bits of RGB.
+                let vabs = v.abs();
+                // Input is in nits/100, convert to [0,1], where 1 is 10000 nits.
+                let l = 0.01f32 * vabs;
+                let y = pq_power::<FAST_POWER>(l, M1 as f32);
+                let ratpoly = (C1 as f32 + C2 as f32 * y) / (1.0f32 + C3 as f32 * y);
+                let n = pq_power::<FAST_POWER>(ratpoly, M2 as f32);
+
+                // Restore sign bits.
+                *value = with_sign_of(n, v);
+            }
+        }
+    }
+}
+
+/// PQ to linear (100 nits = 1), one SSE lane per channel: the renderer of both wheels with
+/// fast math (`FAST_POWER`, `ssePower`), and of the Windows wheel without (`_mm_pow_ps`,
+/// [`pq_power`], W0001).
+///
+/// Port of `Renderer_PQ_TO_LIN_SSE<FAST_POWER>` (src/OpenColorIO/ops/fixedfunction/
+/// FixedFunctionOpCPU.cpp:378-386, 2119-2172 @ v2.5.2).
+#[derive(Debug, Default)]
+pub struct RendererPqToLinSse<const FAST_POWER: bool>;
+
+impl<const FAST_POWER: bool> CpuOp for RendererPqToLinSse<FAST_POWER> {
+    /// The alpha lane goes through the masks unchanged, so the renderer never writes it.
+    ///
+    /// Port of `Renderer_PQ_TO_LIN_SSE<FAST_POWER>::apply` (FixedFunctionOpCPU.cpp:2143-2172
+    /// @ v2.5.2).
+    fn apply(&self, rgba: &mut [f32]) {
+        use st_2084::*;
+        let vm1_inv = 1.0f32 / M1 as f32;
+        let vm2_inv = 1.0f32 / M2 as f32;
+        for pixel in rgba.as_chunks_mut::<4>().0 {
+            for value in &mut pixel[..3] {
+                let v = *value;
+
+                // Clear sign bits of RGB.
+                let vabs = v.abs();
+                let x = pq_power::<FAST_POWER>(vabs, vm2_inv);
+                let nom = sse_max(0.0f32, x - C1 as f32);
+                let denom = C2 as f32 - C3 as f32 * x;
+
+                // Output scale is 1.0 = 10000 nits, we map it to make 1.0 = 100 nits.
+                let nits100 = 100.0f32 * pq_power::<FAST_POWER>(nom / denom, vm1_inv);
+
+                // Restore the sign bits.
+                *value = with_sign_of(nits100, v);
+            }
+        }
+    }
+}
+
 /// `params[i]`, or [`SHORT_PARAMS`] where upstream would read past the parameters (U-31).
 fn param(params: &[f64], i: usize) -> Result<f64> {
     params
@@ -2223,8 +2389,7 @@ impl CpuOp for RendererDoubleLogToLin {
 }
 
 /// The renderer of `func`'s style. `fast_log_exp_pow` picks the fast-math variants of the
-/// styles that have one (PQ, chunk 2.3d). The styles whose renderers aren't ported yet are
-/// refused ([`not_ported`]).
+/// styles that have one (PQ).
 ///
 /// Port of `GetFixedFunctionCPURenderer` (src/OpenColorIO/ops/fixedfunction/
 /// FixedFunctionOpCPU.cpp:2429-2643 @ v2.5.2). Its "Unsupported FixedFunction style" for a
@@ -2234,7 +2399,6 @@ pub fn get_fixed_function_cpu_renderer(
     fast_log_exp_pow: bool,
 ) -> Result<Arc<dyn CpuOp>> {
     use FixedFunctionOpStyle::*;
-    let _ = fast_log_exp_pow;
     Ok(match func.style() {
         AcesRedMod03Fwd => Arc::new(RendererAcesRedMod03Fwd::new()),
         AcesRedMod03Inv => Arc::new(RendererAcesRedMod03Inv::default()),
@@ -2287,7 +2451,19 @@ pub fn get_fixed_function_cpu_renderer(
         RgbToHsyVid => Arc::new(RendererRgbToHsyVid),
         HsyVidToRgb => Arc::new(RendererHsyVidToRgb),
 
-        style @ (LinToPq | PqToLin) => return Err(not_ported(style)),
+        // The SSE renderers with fast math; without it, the Windows wheel (MSVC with AVX
+        // enabled) takes them with SVML's `_mm_pow_ps` (W0001), the Linux wheel the scalar
+        // ones.
+        LinToPq if fast_log_exp_pow => Arc::new(RendererLinToPqSse::<true>),
+        #[cfg(target_os = "windows")]
+        LinToPq => Arc::new(RendererLinToPqSse::<false>),
+        #[cfg(target_os = "linux")]
+        LinToPq => Arc::new(RendererLinToPq),
+        PqToLin if fast_log_exp_pow => Arc::new(RendererPqToLinSse::<true>),
+        #[cfg(target_os = "windows")]
+        PqToLin => Arc::new(RendererPqToLinSse::<false>),
+        #[cfg(target_os = "linux")]
+        PqToLin => Arc::new(RendererPqToLin),
 
         LinToGammaLog => Arc::new(RendererLinToGammaLog::new(func)?),
         GammaLogToLin => Arc::new(RendererGammaLogToLin::new(func)?),

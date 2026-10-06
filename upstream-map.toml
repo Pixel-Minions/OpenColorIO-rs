@@ -30,16 +30,16 @@ note = "1.1b-1.1c: AutoStride, ImageDesc, PackedImageDesc and PlanarImageDesc (i
 [[file]]
 path = "include/OpenColorIO/OpenColorTransforms.h"
 kind = "api"
-target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/format_metadata.rs", "crates/ocio-ops/src/dynamic_property.rs", "crates/ocio/src/transform.rs"]
+target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/format_metadata.rs", "crates/ocio-ops/src/dynamic_property.rs", "crates/ocio/src/transform.rs", "crates/ocio-ops/src/ops/gradingrgbcurve/grading_b_spline_curve.rs", "crates/ocio-ops/src/ops/gradingrgbcurve/grading_rgb_curve.rs"]
 status = "partial"
-note = "1.2a: the FormatMetadata interface (44-117) is FormatMetadataImpl's own methods in format_metadata.rs (upstream has no other implementation), and its operator<< is FormatMetadataImpl::write_to; 1.2b: DynamicProperty (766-779) is the DynamicPropertyRcPtr enum and DynamicPropertyDouble (810-824) is DynamicPropertyDoubleImpl, in dynamic_property.rs; p1-transforms T0: Transform (as enum Transform) and GroupTransform, in crates/ocio/src/transform.rs and transforms/group_transform.rs; each class comes with its card; p2-ff-cpu 2.3e: FixedFunctionTransform (1187-1221), in crates/ocio/src/transforms/fixed_function_transform.rs"
+note = "1.2a: the FormatMetadata interface (44-117) is FormatMetadataImpl's own methods in format_metadata.rs (upstream has no other implementation), and its operator<< is FormatMetadataImpl::write_to; 1.2b: DynamicProperty (766-779) is the DynamicPropertyRcPtr enum and DynamicPropertyDouble (810-824) is DynamicPropertyDoubleImpl, in dynamic_property.rs; p1-transforms T0: Transform (as enum Transform) and GroupTransform, in crates/ocio/src/transform.rs and transforms/group_transform.rs; each class comes with its card; p2-ff-cpu 2.3e: FixedFunctionTransform (1187-1221), in crates/ocio/src/transforms/fixed_function_transform.rs; p2-rgbcurve 2.6a: GradingControlPoint, GradingBSplineCurve (without the hue curves' types) and GradingRGBCurve (497-583) as values in ocio-ops, re-exported by ocio (GradingRgbCurve); 2.6b: DynamicPropertyGradingRGBCurve as DynamicPropertyGradingRgbCurveImpl"
 
 [[file]]
 path = "include/OpenColorIO/OpenColorTypes.h"
 kind = "api"
 target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs", "crates/ocio-ops/src/format_metadata.rs", "crates/ocio-ops/src/logging.rs", "crates/ocio-gpu/src/open_color_types.rs", "crates/ocio/src/transform.rs", "crates/ocio/src/transforms/range_transform.rs"]
 status = "partial"
-note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.1a: BitDepth, and BitDepthToString (defined in ParseUtils.cpp); 1.1b: ChannelOrdering; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does; 1.2b: DynamicPropertyType; 1.2e: LoggingLevel (288-297), in open_color_types.rs, and LoggingFunction (283-284), in logging.rs; 1.7a: GpuLanguage, in ocio-gpu/src/open_color_types.rs; 1.3n1: Allocation (459-463); 1.2d: OptimizationFlags (634-722), a bit-flags type over a C unsigned long; p1-optimizer A: Lut1DHueAdjust (441-447); p1-transforms T0: TransformType (361-386), in crates/ocio/src/transform.rs; p1-transforms-fam1 (1.8c): RangeStyle (491-496), in crates/ocio/src/transforms/range_transform.rs; p3-context 3.5c: EnvironmentMode (484-489); p2-ff-cpu 2.3a1: FixedFunctionStyle (499-524)"
+note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.1a: BitDepth, and BitDepthToString (defined in ParseUtils.cpp); 1.1b: ChannelOrdering; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does; 1.2b: DynamicPropertyType; 1.2e: LoggingLevel (288-297), in open_color_types.rs, and LoggingFunction (283-284), in logging.rs; 1.7a: GpuLanguage, in ocio-gpu/src/open_color_types.rs; 1.3n1: Allocation (459-463); 1.2d: OptimizationFlags (634-722), a bit-flags type over a C unsigned long; p1-optimizer A: Lut1DHueAdjust (441-447); p1-transforms T0: TransformType (361-386), in crates/ocio/src/transform.rs; p1-transforms-fam1 (1.8c): RangeStyle (491-496), in crates/ocio/src/transforms/range_transform.rs; p3-context 3.5c: EnvironmentMode (484-489); p2-ff-cpu 2.3a1: FixedFunctionStyle (499-524); p2-rgbcurve 2.6a: GradingStyle (560-566), RGBCurveType (580-588) and BSplineType (611-620), in open_color_types.rs, re-exported by ocio as GradingStyle, RgbCurveType and BSplineType"
 
 [[file]]
 path = "src/CMakeLists.txt"
@@ -231,7 +231,7 @@ path = "src/OpenColorIO/DynamicProperty.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/dynamic_property.rs"]
 status = "partial"
-note = "1.2b, in ocio-ops because op data holds it: DynamicPropertyImpl, DynamicPropertyDoubleImpl, equals for two double properties, and operator== (on DynamicPropertyDoubleImpl and the DynamicPropertyRcPtr enum). The value is an AtomicU64 and the dynamic flag an AtomicBool, so an Arc handle can change them (PLAN.md §9). Checked by upstream's tests only. A mutation that drops the same-dynamic-state test in equals (D4 in the p1-foundations review) survives them: it changes only a comparison of a non-dynamic left operand with a dynamic right one, which upstream's test doesn't make; ExposureContrast (Phase 5) will pin it through the wheel. Phase 5: the grading properties and DynamicPropertyValue::As* (18-47)"
+note = "1.2b, in ocio-ops because op data holds it: DynamicPropertyImpl, DynamicPropertyDoubleImpl, equals for two double properties, and operator== (on DynamicPropertyDoubleImpl and the DynamicPropertyRcPtr enum). The value is an AtomicU64 and the dynamic flag an AtomicBool, so an Arc handle can change them (PLAN.md §9). Checked by upstream's tests only. A mutation that drops the same-dynamic-state test in equals (D4 in the p1-foundations review) survives them: it changes only a comparison of a non-dynamic left operand with a dynamic right one, which upstream's test doesn't make; ExposureContrast (Phase 5) will pin it through the wheel. p2-rgbcurve 2.6b: DynamicPropertyGradingRGBCurveImpl (202-297) and its equals arm, the value and knots under an RwLock; Phase 5: the other grading properties and DynamicPropertyValue::As* (18-47)"
 
 [[file]]
 path = "src/OpenColorIO/DynamicProperty.h"
@@ -487,7 +487,7 @@ path = "src/OpenColorIO/ParseUtils.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/parse_utils.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-gpu/src/open_color_types.rs", "crates/ocio/src/transforms/range_transform.rs"]
 status = "partial"
-note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection; 1.1a: BitDepthToString, next to BitDepth; 1.2e: LoggingLevelToString and LoggingLevelFromString, next to LoggingLevel; 1.7c: GpuLanguageToString, next to GpuLanguage; 1.3n1: AllocationToString, next to Allocation; 1.3m1: TransformDirectionToString, next to TransformDirection; p1-optimizer A: InterpolationToString, in open_color_types.rs; p1-transforms-fam1 (1.8c): RangeStyleToString, next to RangeStyle; p1-transforms-fam2 (1.8d): NegativeStyleToString, next to NegativeStyle; p1-transforms-fam2 (1.8f): CDLStyleToString, next to CDLStyle; p3-context 3.5c: BoolToString/FromString, TransformDirectionFromString, BitDepthFromString, BitDepthIsFloat, BitDepthToInt, AllocationFromString, InterpolationFromString, EnvironmentModeToString/FromString, CDLStyleFromString, NegativeStyleFromString, StrEqualsCaseIgnore, SplitStringEnvStyle, JoinStringEnvStyle, IntersectStringVecsCaseIgnore, FindInStringVecCaseIgnore in parse_utils.rs; RangeStyleFromString next to RangeStyle; p2-ff-cpu 2.3a1: FixedFunctionStyleToString, next to FixedFunctionStyle. StringToInt, StringToFloat, FloatToString, the string-vector and XML helpers wait for Phase 4"
+note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection; 1.1a: BitDepthToString, next to BitDepth; 1.2e: LoggingLevelToString and LoggingLevelFromString, next to LoggingLevel; 1.7c: GpuLanguageToString, next to GpuLanguage; 1.3n1: AllocationToString, next to Allocation; 1.3m1: TransformDirectionToString, next to TransformDirection; p1-optimizer A: InterpolationToString, in open_color_types.rs; p1-transforms-fam1 (1.8c): RangeStyleToString, next to RangeStyle; p1-transforms-fam2 (1.8d): NegativeStyleToString, next to NegativeStyle; p1-transforms-fam2 (1.8f): CDLStyleToString, next to CDLStyle; p3-context 3.5c: BoolToString/FromString, TransformDirectionFromString, BitDepthFromString, BitDepthIsFloat, BitDepthToInt, AllocationFromString, InterpolationFromString, EnvironmentModeToString/FromString, CDLStyleFromString, NegativeStyleFromString, StrEqualsCaseIgnore, SplitStringEnvStyle, JoinStringEnvStyle, IntersectStringVecsCaseIgnore, FindInStringVecCaseIgnore in parse_utils.rs; RangeStyleFromString next to RangeStyle; p2-ff-cpu 2.3a1: FixedFunctionStyleToString, next to FixedFunctionStyle; p2-rgbcurve 2.6a: GradingStyleToString, next to GradingStyle. StringToInt, StringToFloat, FloatToString, the string-vector and XML helpers wait for Phase 4"
 
 [[file]]
 path = "src/OpenColorIO/ParseUtils.h"
@@ -1278,9 +1278,9 @@ note = "p2-aces2-cpu 2.4a-2.4d: the declarations, in transform.rs"
 [[file]]
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOp.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op.rs", "crates/ocio/src/transforms/fixed_function_transform.rs"]
-status = "partial"
-note = "p2-ff-cpu 2.3e: the op, CreateFixedFunctionOp (both), and in crates/ocio BuildFixedFunctionOp and CreateFixedFunctionTransform. Not yet: extractGpuShaderInfo (2.3f)"
+target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op.rs", "crates/ocio/src/transforms/fixed_function_transform.rs", "crates/ocio-gpu/src/gpu_processor.rs"]
+status = "done"
+note = "p2-ff-cpu 2.3e: the op, CreateFixedFunctionOp (both), and in crates/ocio BuildFixedFunctionOp and CreateFixedFunctionTransform. p2-ff-gpu 2.3f: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's FixedFunction arm (gpu_processor.rs)"
 
 [[file]]
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOp.h"
@@ -1292,8 +1292,8 @@ status = "done"
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op_cpu.rs"]
-status = "partial"
-note = "p2-ff-cpu 2.3b: the ACES 1.x renderers (red modifiers, glows, dark to dim, gamut compression 1.3, 1-132 and 558-1088) and GetFixedFunctionCPURenderer (2429-2645), its other arms not ported yet; p2-ff-cpu-2 2.3c1: Rec.2100 surround, RGB<->HSV, XYZ<->xyY, XYZ<->u'v'Y, XYZ<->LUV (210-239, 295-347, 1406-1589, 1825-2027); 2.3c2: RGB<->HSY lin, log and video (241-293, 1591-1823); 2.3d1: LIN_TO_GAMMA_LOG, GAMMA_LOG_TO_LIN, LIN_TO_DOUBLE_LOG, DOUBLE_LOG_TO_LIN (389-474, 2230-2423); p2-aces2-cpu 2.4e1: Renderer_ACES_RGB_TO_JMh_20 and Renderer_ACES_TONESCALE_COMPRESS_20 (153-187, 1168-1319); 2.4e2: Renderer_ACES_OutputTransform20 and Renderer_ACES_GAMUT_COMPRESS_20 (133-151, 189-205, 1057-1166, 1321-1404)"
+status = "done"
+note = "p2-ff-cpu 2.3b: the ACES 1.x renderers (red modifiers, glows, dark to dim, gamut compression 1.3, 1-132 and 558-1088) and GetFixedFunctionCPURenderer (2429-2645), whose every arm has its renderer since 2.3d2; p2-ff-cpu-2 2.3c1: Rec.2100 surround, RGB<->HSV, XYZ<->xyY, XYZ<->u'v'Y, XYZ<->LUV (210-239, 295-347, 1406-1589, 1825-2027); 2.3c2: RGB<->HSY lin, log and video (241-293, 1591-1823); 2.3d1: LIN_TO_GAMMA_LOG, GAMMA_LOG_TO_LIN, LIN_TO_DOUBLE_LOG, DOUBLE_LOG_TO_LIN (389-474, 2230-2423); p2-aces2-cpu 2.4e1: Renderer_ACES_RGB_TO_JMh_20 and Renderer_ACES_TONESCALE_COMPRESS_20 (153-187, 1168-1319); 2.4e2: Renderer_ACES_OutputTransform20 and Renderer_ACES_GAMUT_COMPRESS_20 (133-151, 189-205, 1057-1166, 1321-1404); p2-ff-cpu-2 2.3d2: LIN_TO_PQ and PQ_TO_LIN, scalar and SSE (349-386, 2030-2227)"
 
 [[file]]
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOpCPU.h"
@@ -1319,13 +1319,15 @@ note = "p2-ff-cpu 2.3a1: Style (FixedFunctionOpStyle); 2.3a2: the class"
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOpGPU.cpp"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/fixedfunction/fixed_function_op_gpu.rs"]
-status = "todo"
+status = "done"
+note = "p2-ff-gpu 2.3f: the ACES 1.x shaders (1-351, and Add_Surround_10_Fwd_Shader 1636-1649) and the dispatch (GetFixedFunctionGPUShaderProgram, GetFixedFunctionGPUProcessingText, 2225-2491), its other arms not ported yet; 2.3g1: the Rec.2100 surround, RGB<->HSV, the HSYs, XYZ<->xyY, u'v'Y and LUV (1651-1948); 2.3g2: PQ, gamma-log and double-log (1950-2223); p2-aces2-gpu 2.4f1: hue wrap, sin/cos, RGB<->Aab<->JMh (352-503), the RGB_TO_JMh entry points (1442-1492); 2.4f2: the reach table, toe, tone scale and chroma compression (505-805), the TONESCALE_COMPRESS entry points (1494-1548); 2.4g: the cusp table, focus gain, J intersection, gamut boundary and compression (807-1285), the GAMUT_COMPRESS entry points (1550-1634); 2.4h: the output transform (1287-1440), and the dispatch's last arms"
 
 [[file]]
 path = "src/OpenColorIO/ops/fixedfunction/FixedFunctionOpGPU.h"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/fixedfunction/fixed_function_op_gpu.rs"]
-status = "todo"
+status = "done"
+note = "p2-ff-gpu 2.3f: the two functions it declares"
 
 [[file]]
 path = "src/OpenColorIO/ops/gamma/GammaOp.cpp"
@@ -1520,74 +1522,81 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingBSplineCurve.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_b_spline_curve.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_b_spline_curve.rs", "crates/ocio-gpu/src/ops/gradingrgbcurve/grading_rgb_curve_op_gpu.rs"]
+status = "partial"
+note = "p2-rgbcurve 2.6a: the curve, its control points and slopes, validate, isIdentity and operator==; 2.6b: the RGB curves' fitting (EstimateRGBSlopes, FitRGBSpline, AdjustRGBSlopes with U-35's guard, computeKnotsAndCoefsForRGBCurve), KnotsCoefs and evalCurve/evalCurveRev, the fitting and the evaluation in each wheel's operand order (I-91); 2.6e: AddShaderEvalFwd/Rev, in ocio-gpu's grading_rgb_curve_op_gpu.rs; Phase 5: the hue curves' parts (PrepHueCurveData, CalcKsi, FitHueSpline, EstimateHueSlopes, computeKnotsAndCoefsForHueCurve, evalCurveRevHue, AddShaderEvalRevHue, the Create overloads with a HueCurveType), which compute_knots_and_coefs refuses as not ported yet"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingBSplineCurve.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_b_spline_curve.rs"]
-status = "todo"
+status = "partial"
+note = "see GradingBSplineCurve.cpp"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingRGBCurve.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_rgb_curve.rs"]
-status = "todo"
+status = "done"
+note = "p2-rgbcurve 2.6a: values, not shared pointers; the default curves as functions"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingRGBCurve.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_rgb_curve.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingRGBCurveOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_rgb_curve_op.rs"]
-status = "todo"
+status = "partial"
+note = "p2-rgbcurve 2.6d: the op (as GradingRgbCurveOpData's Op methods) and CreateGradingRGBCurveOp; Phase 3 (3.1): CreateGradingRGBCurveTransform, with GradingRGBCurveTransform"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingRGBCurveOp.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_rgb_curve_op.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingRGBCurveOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_rgb_curve_op_cpu.rs"]
-status = "todo"
+status = "done"
+note = "p2-rgbcurve 2.6d: the four renderers and their SSE2 LinLog/LogLin; alpha as I-90 says"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingRGBCurveOpCPU.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_rgb_curve_op_cpu.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingRGBCurveOpData.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_rgb_curve_op_data.rs"]
-status = "todo"
+status = "done"
+note = "p2-rgbcurve 2.6c"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingRGBCurveOpData.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_rgb_curve_op_data.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingRGBCurveOpGPU.cpp"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/gradingrgbcurve/grading_rgb_curve_op_gpu.rs"]
-status = "todo"
+status = "done"
+note = "p2-rgbcurve 2.6e"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingRGBCurveOpGPU.h"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/gradingrgbcurve/grading_rgb_curve_op_gpu.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingtone/GradingTone.cpp"
@@ -1724,7 +1733,7 @@ path = "src/OpenColorIO/ops/lut1d/Lut1DOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op.rs", "crates/ocio/src/transforms/lut1d_transform.rs"]
 status = "partial"
-note = "p1-optimizer B: Lut1DOp (clone, getInfo, isSameType, isInverse, canCombineWith, hasChannelCrosstalk, finalize, getCacheID, supportedByLegacyShader), CreateLut1DOp, GenerateIdentityLut1D; cache IDs and the optimizer's Lut1D rules against the wheel (tests/lut1d_op_oracle.rs). combineWith (Compose) and getCPUOp's float renderers are errors until Phase 2 (WP 2.5); p1-transforms-fam4: CreateLut1DTransform and BuildLut1DOp, in crates/ocio/src/transforms/lut1d_transform.rs. extractGpuShaderInfo and GenerateLinearScaleLut1D come later"
+note = "p1-optimizer B: Lut1DOp (clone, getInfo, isSameType, isInverse, canCombineWith, hasChannelCrosstalk, finalize, getCacheID, supportedByLegacyShader), CreateLut1DOp, GenerateIdentityLut1D; cache IDs and the optimizer's Lut1D rules against the wheel (tests/lut1d_op_oracle.rs). combineWith (Compose) is an error until Phase 2 (WP 2.1g); p2-lut1d-fwd 2.1a: getCPUOp (GetLut1DRenderer, F32 to F32); p1-transforms-fam4: CreateLut1DTransform and BuildLut1DOp, in crates/ocio/src/transforms/lut1d_transform.rs. extractGpuShaderInfo and GenerateLinearScaleLut1D come later"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOp.h"
@@ -1738,7 +1747,7 @@ path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu.rs"]
 status = "partial"
-note = "p1-optimizer C: the lookups of a forward LUT without hue adjust from 8-, 10-, 12-, 16-bit and half codes to F32 (LookupLut, BaseLut1DRenderer::updateData's lookup branch, the lookup branches of Lut1DRenderer and Lut1DRendererHalfCode), GetLut1DRenderer for them, each wheel's in-place order (I-41) and U-1's error; every code against the wheel (tests/lut1d_op_cpu_oracle.rs). Float input, resampling, hue adjust, the inverse renderers, other output bit depths and the SIMD kernels are Phase 2 (WP 2.5), errors until then"
+note = "p1-optimizer C: the lookups of a forward LUT without hue adjust from 8-, 10-, 12-, 16-bit and half codes to F32 (LookupLut, BaseLut1DRenderer::updateData's lookup branch, the lookup branches of Lut1DRenderer and Lut1DRendererHalfCode), GetLut1DRenderer for them, each wheel's in-place order (I-41) and U-1's error; every code against the wheel (tests/lut1d_op_cpu_oracle.rs). p2-lut1d-fwd 2.1a: the forward renderers to every output bit depth (L_ADJUST, BaseLut1DRenderer::updateData's float branch, the float branches of Lut1DRenderer (its scalar loop) and Lut1DRendererHalfCode, IndexPair::GetEdgeFloatValues), GetLut1DRenderer, GetLut1DRenderer_InBitDepth, _OutBitDepth and GetForwardLut1DRenderer for forward LUTs (I-64); the half domain through the battery and the scalar loop on single-pixel rows against the wheel (tests/lut1d_renderer_oracle.rs). 2.1b: GamutMapUtils::Order3, Lut1DRendererHueAdjust (its OCIO_USE_SSE2 branch) and Lut1DRendererHalfCodeHueAdjust, every output bit depth, each wheel's operand order and in-place alpha (I-41); through the battery, on single-pixel rows and every code (tests/lut1d_op_cpu_oracle.rs). p2-lut1d-simd: the first constructor's SIMD dispatch (273-309, lut1d_kernel) and Lut1DRenderer::apply's kernel branch (652-658). Still errors: the inverse renderers (2.1f), resampling (Compose, 2.1g)"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU.h"
@@ -1751,49 +1760,57 @@ note = "p1-optimizer C: GetLut1DRenderer"
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_AVX.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu_avx.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut1d-simd: linear1D<BIT_DEPTH_F32, outBD> as exact scalar lanes (apply_lut_avx, the pack Store); against the wheel through the battery (dispatched kernel, the others on alpha) and under SDE"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_AVX.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu_avx.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut1d-simd: AVXGetLut1DApplyFunc is lut1d_op_cpu::Lut1DKernel::Avx"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_AVX2.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu_avx2.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut1d-simd: linear1D<BIT_DEPTH_F32, outBD> as exact scalar lanes (apply_lut_avx2, the pack Store); against the wheel through the battery (dispatched kernel, the others on alpha) and under SDE"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_AVX2.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu_avx2.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut1d-simd: AVX2GetLut1DApplyFunc is lut1d_op_cpu::Lut1DKernel::Avx2"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_AVX512.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu_avx512.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut1d-simd: linear1D<BIT_DEPTH_F32, outBD> as exact scalar lanes (apply_lut_avx512, the pack Store); against the wheel through the battery (dispatched kernel, the others on alpha) and under SDE"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_AVX512.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu_avx512.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut1d-simd: AVX512GetLut1DApplyFunc is lut1d_op_cpu::Lut1DKernel::Avx512"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_SSE2.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu_sse2.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut1d-simd: linear1D<BIT_DEPTH_F32, outBD> as exact scalar lanes (apply_lut_sse2, the pack Store); against the wheel through the battery (dispatched kernel, the others on alpha) and under SDE"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpCPU_SSE2.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu_sse2.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut1d-simd: SSE2GetLut1DApplyFunc is lut1d_op_cpu::Lut1DKernel::Sse2"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpData.cpp"
@@ -2221,8 +2238,9 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/transforms/GradingRGBCurveTransform.cpp"
 kind = "src"
-target = ["crates/ocio/src/transforms/grading_rgb_curve_transform.rs"]
-status = "todo"
+target = ["crates/ocio/src/transforms/grading_rgb_curve_transform.rs", "crates/ocio-ops/src/ops/gradingrgbcurve/grading_b_spline_curve.rs", "crates/ocio-ops/src/ops/gradingrgbcurve/grading_rgb_curve.rs"]
+status = "partial"
+note = "p2-rgbcurve 2.6a: operator<< of GradingControlPoint, GradingBSplineCurve and GradingRGBCurve (155-190), as write_to and Display in ocio-ops' grading_b_spline_curve.rs and grading_rgb_curve.rs; Phase 3 (3.1): the transform"
 
 [[file]]
 path = "src/OpenColorIO/transforms/GradingRGBCurveTransform.h"
@@ -4255,7 +4273,7 @@ path = "tests/cpu/DynamicProperty_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/dynamic_property_tests.rs"]
 status = "partial"
-note = "1.2b: basic and equal_double. The others need the grading properties (Phase 5), or a processor that reads CTF files"
+note = "1.2b: basic and equal_double. The others need the grading properties (Phase 5), or a processor that reads CTF files; p2-rgbcurve 2.6b: equal_grading_rgb_curve and grading_rgb_curve_knots_coefs"
 
 [[file]]
 path = "tests/cpu/Exception_tests.cpp"
@@ -4667,7 +4685,7 @@ path = "tests/cpu/ops/fixedfunction/FixedFunctionOpCPU_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/fixedfunction/fixed_function_op_cpu_tests.rs"]
 status = "partial"
-note = "p2-ff-cpu 2.3b: aces_red_mod_03, aces_red_mod_10, aces_glow_03, aces_glow_10, aces_dark_to_dim_10, aces_gamut_map_13. p2-ff-cpu-2 2.3c1: rec2100_surround, RGB_TO_HSV, XYZ_TO_xyY, XYZ_TO_uvY, XYZ_TO_LUV; 2.3c2: RGB_TO_HSY_LIN, RGB_TO_HSY_LOG, RGB_TO_HSY_VID; 2.3d1: LIN_TO_GAMMA_LOG, LIN_TO_DOUBLE_LOG. The others come with their renderers (2.3d2, 2.4e); p2-aces2-cpu 2.4e1: aces_rgb_to_jmh_20, aces_tonescale_compress_20; 2.4e2: aces_output_transform_20, aces_ot_20_edge_cases, aces_gamut_map_20; the round trips aces_ot_20_rec709_100n_rt, aces_ot_20_p3d65_100n_rt and aces_ot_20_p3d65_1000n_rt wait for GenerateIdentityLut3D (the Lut3D tests' helper, not ported yet)"
+note = "p2-ff-cpu 2.3b: aces_red_mod_03, aces_red_mod_10, aces_glow_03, aces_glow_10, aces_dark_to_dim_10, aces_gamut_map_13. p2-ff-cpu-2 2.3c1: rec2100_surround, RGB_TO_HSV, XYZ_TO_xyY, XYZ_TO_uvY, XYZ_TO_LUV; 2.3c2: RGB_TO_HSY_LIN, RGB_TO_HSY_LOG, RGB_TO_HSY_VID; 2.3d1: LIN_TO_GAMMA_LOG, LIN_TO_DOUBLE_LOG. 2.3d2: LIN_TO_PQ; p2-aces2-cpu 2.4e1: aces_rgb_to_jmh_20, aces_tonescale_compress_20; 2.4e2: aces_output_transform_20, aces_ot_20_edge_cases, aces_gamut_map_20; the round trips aces_ot_20_rec709_100n_rt, aces_ot_20_p3d65_100n_rt and aces_ot_20_p3d65_1000n_rt wait for GenerateIdentityLut3D (the Lut3D tests' helper, not ported yet)"
 
 [[file]]
 path = "tests/cpu/ops/fixedfunction/FixedFunctionOpData_tests.cpp"
@@ -4763,31 +4781,33 @@ status = "todo"
 path = "tests/cpu/ops/gradingrgbcurve/GradingBSplineCurve_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_b_spline_curve_tests.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "tests/cpu/ops/gradingrgbcurve/GradingRGBCurveOpCPU_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_rgb_curve_op_cpu_tests.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "tests/cpu/ops/gradingrgbcurve/GradingRGBCurveOpData_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_rgb_curve_op_data_tests.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "tests/cpu/ops/gradingrgbcurve/GradingRGBCurveOp_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_rgb_curve_op_tests.rs"]
-status = "todo"
+status = "partial"
+note = "p2-rgbcurve 2.6d: create; Phase 3 (3.1): create_transform and build_ops, which need GradingRGBCurveTransform"
 
 [[file]]
 path = "tests/cpu/ops/gradingrgbcurve/GradingRGBCurve_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_rgb_curve_tests.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/ops/gradingrgbcurve/grading_rgb_curve_tests.rs", "crates/ocio-ops/src/dynamic_property_tests.rs"]
+status = "done"
+note = "p2-rgbcurve 2.6a: basic and curves; 2.6b: max_ctrl_pnts, in dynamic_property_tests.rs (it needs the dynamic property)"
 
 [[file]]
 path = "tests/cpu/ops/gradingtone/GradingToneOpCPU_tests.cpp"

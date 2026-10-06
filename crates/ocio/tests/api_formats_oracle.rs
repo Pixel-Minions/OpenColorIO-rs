@@ -31,12 +31,18 @@
 //! owner's extension of W0002, 2026-10-04). Everything else compares bit for bit, and what
 //! W0002 covers is counted. A test in `battery::params` pins the callers of both.
 //!
-//! The `Lut1DTransform`'s float renderers, composing LUTs, the inverse LUT and the hue
-//! adjustment are Phase 2's (WP 2.1, 2.5). [`lut1d_deferral`] says, from the renderer upstream
-//! picks for each combination, which ones the port must refuse with which "not ported yet"
-//! message, while the wheel renders them: the test counts those as deferrals, pins how many
-//! there are per message, and compares every other combination, the lookups of integer and
-//! half inputs, which every tier runs in full.
+//! Waiver W0001 applies to the PQ curves' case on Windows where the pixels render without
+//! fast math: there only the applies from `F32` to `F32` run, through `Case::compare_pixels`
+//! under it, and the others are counted as not run ([`w0001_skips`]); Linux, and fast math,
+//! compare everything bit for bit.
+//!
+//! Parts of the `Lut1DTransform`'s renderers are still to come in Phase 2: the inverse LUT
+//! (WP 2.1e, 2.1f) and composing LUTs (WP 2.1g). [`lut1d_deferral`] says, from the renderer
+//! upstream picks for each combination, which ones the port must refuse with which "not ported
+//! yet" message, while the wheel renders them: the test counts those as deferrals, pins how
+//! many there are per message, and compares every other combination: the lookups of integer
+//! and half inputs, and the float renderers (with the SIMD kernel the CPU dispatches to), with
+//! or without hue adjust, which every tier runs in full.
 
 mod common;
 
@@ -51,7 +57,7 @@ use ocio_ops::image_desc::{
     AUTO_STRIDE, Bytes, ImageDesc, ImageDescMut, PackedImageDesc, PixelData, PlanarImageDesc,
 };
 use ocio_ops::open_color_types::ChannelOrdering;
-use ocio_ops::ops::lut1d::lut1d_op::{NOT_PORTED_COMPOSE, NOT_PORTED_F32};
+use ocio_ops::ops::lut1d::lut1d_op::NOT_PORTED_COMPOSE;
 use ocio_testkit::Oracle;
 use ocio_testkit::battery::params::Comparison;
 use ocio_testkit::battery::{self, BitDepth as Depth, Direction, Tier};
@@ -454,13 +460,14 @@ fn destination_layout(job: &Job) -> Layout {
 /// Compares the buffers after a job, the wheel's and the port's: the source's (when it isn't
 /// the destination) byte for byte, and the destination image byte for byte or, where they
 /// differ, through the case's comparison ([`battery::params::Case::compare_pixels`]), which applies
-/// W0002 where it covers the case. Returns how many NaN values W0002 waived.
+/// W0002 or W0001 where they cover the case. Returns the comparison, `Exact` where the bytes
+/// are equal, or an error where a source buffer differs.
 fn compare_images(
     case: &battery::params::Case<Calls>,
     job: &Job,
     wheel: &[Vec<u8>],
     port: &[Vec<u8>],
-) -> Result<usize, String> {
+) -> Result<Comparison, String> {
     let sources = job.combo.layout.buffers();
     let output = if job.combo.in_place {
         0..sources
@@ -473,7 +480,7 @@ fn compare_images(
         sources..wheel.len()
     };
     if wheel[output.clone()] == port[output.clone()] {
-        return Ok(0);
+        return Ok(Comparison::Exact);
     }
     let (layout, depth) = if job.combo.in_place {
         (job.combo.layout, job.combo.input)
@@ -493,9 +500,8 @@ fn compare_images(
         &expected,
         &actual,
     ) {
-        Comparison::W0002 { waived } => Ok(waived),
         Comparison::Exact => Err("the destination's bytes differ, its values don't".into()),
-        Comparison::Mismatch(report) => Err(report),
+        comparison => Ok(comparison),
     }
 }
 
@@ -584,11 +590,14 @@ impl Lut1D {
     }
 
     /// Whether the spec is large (a setter per entry): the sweep runs it at its lookup's input
-    /// only, from and to packed RGBA images, to F32 and to its own bit depth, at
-    /// `OPTIMIZATION_NONE`, `LOSSLESS` and `DEFAULT`.
+    /// only (and a half domain at F32 input too, its float renderer), from and to packed RGBA
+    /// images, to F32 and to its own bit depth, at `OPTIMIZATION_NONE`, `LOSSLESS` and
+    /// `DEFAULT`.
     fn runs(&self, combo: &Combo) -> bool {
+        let input = Some(combo.input) == self.lookup_depth()
+            || (self.half_domain && combo.input == Depth::F32);
         self.length < 4096
-            || (Some(combo.input) == self.lookup_depth()
+            || (input
                 && combo.layout == Layout::PackedRgba
                 && (combo.output == Depth::F32 || combo.output == combo.input)
                 && matches!(combo.level, Some(0 | 1 | 5)))
@@ -599,8 +608,8 @@ impl Lut1D {
 const NOT_PORTED_INVERSE: &str = "Lut1D: the inverse 1D LUT is not ported yet (WP 2.1).";
 
 /// Where the port refuses a `Lut1DTransform` at `combo` because the renderer upstream picks is
-/// Phase 2's, with the stage and message; `None` where the renderer is a lookup, which the port
-/// has, and which must match the wheel.
+/// still to come in Phase 2, with the stage and message; `None` where the renderer is a lookup
+/// or a float renderer, which the port has, and which must match the wheel.
 ///
 /// Upstream (src/OpenColorIO @ v2.5.2):
 /// - an inverse LUT is set up when the processor finalizes it (`Lut1DOpData::finalize`, the
@@ -610,8 +619,8 @@ const NOT_PORTED_INVERSE: &str = "Lut1D: the inverse 1D LUT is not ported yet (W
 /// - `GetLut1DRenderer` (ops/lut1d/Lut1DOpCPU.cpp:1657-1754) picks the hue-adjust renderer, the
 ///   lookup where `mayLookup(inBD)` (one entry per integer code, or a half domain for half
 ///   codes), and otherwise the float renderer (F32 input) or one that interpolates the codes.
-///   The port has the lookup; the others are Phase 2's (WP 2.5), and the codes' interpolation
-///   is its "composing 1D LUTs" refusal.
+///   The port has the lookups and the float renderers; the codes' interpolation is the
+///   "composing 1D LUTs" refusal (WP 2.1g).
 fn lut1d_deferral(
     lut: &Lut1D,
     dir: Direction,
@@ -620,11 +629,8 @@ fn lut1d_deferral(
     if dir == Direction::Inverse {
         return Some(("processor", NOT_PORTED_INVERSE));
     }
-    if lut.hue_adjust {
-        return Some(("cpu_processor", NOT_PORTED_F32));
-    }
     if combo.input == Depth::F32 {
-        return Some(("cpu_processor", NOT_PORTED_F32));
+        return None;
     }
     if lut.lookup_depth() == Some(combo.input) {
         return None;
@@ -634,16 +640,10 @@ fn lut1d_deferral(
 
 /// The deferrals of the `Lut1DTransform`'s plan, per message, in the quick tier and in the
 /// others: a digest of the plan the test generates, so that it can't change unnoticed.
-const LUT1D_DEFERRALS_QUICK: [(&str, usize); 3] = [
-    (NOT_PORTED_COMPOSE, 1277),
-    (NOT_PORTED_F32, 674),
-    (NOT_PORTED_INVERSE, 2205),
-];
-const LUT1D_DEFERRALS_FULL: [(&str, usize); 3] = [
-    (NOT_PORTED_COMPOSE, 5145),
-    (NOT_PORTED_F32, 2695),
-    (NOT_PORTED_INVERSE, 8847),
-];
+const LUT1D_DEFERRALS_QUICK: [(&str, usize); 2] =
+    [(NOT_PORTED_COMPOSE, 1523), (NOT_PORTED_INVERSE, 2205)];
+const LUT1D_DEFERRALS_FULL: [(&str, usize); 2] =
+    [(NOT_PORTED_COMPOSE, 6125), (NOT_PORTED_INVERSE, 8853)];
 
 /// One apply: a case in a direction, a combination, and its request.
 struct Job {
@@ -831,6 +831,21 @@ struct Waived {
     cache_ids: usize,
     /// The NaN entries of those LUTs that differ in sign or payload bits only.
     lut_entries: usize,
+    /// Destination images of the PQ curves with values that differ within W0001.
+    w0001_images: usize,
+    /// Those values.
+    w0001_values: usize,
+}
+
+/// Whether waiver W0001 keeps `job` out of the sweep: where it applies to the case (the PQ
+/// curves, on Windows, rendered without fast math, which includes the 1D LUT the optimizer
+/// bakes for integer and half inputs), only applies from `F32` to `F32` are compared, through
+/// its comparison. The others would compare values rounded to an integer or half output, or
+/// looked up in a baked LUT, which the waiver's bound in ulp of `f32` doesn't describe.
+fn w0001_skips(case: &battery::params::Case<Calls>, job: &Job) -> bool {
+    case.w0001_applies(&w0002_combo(job.dir, &job.combo))
+        .is_some()
+        && !(job.combo.input == Depth::F32 && job.combo.output == Depth::F32)
 }
 
 /// Runs every job of `class` against the wheel; panics with a report if any differs.
@@ -858,6 +873,18 @@ fn check(class: &Class) {
             jobs.len()
         );
     }
+    let (jobs, skipped): (Vec<Job>, Vec<Job>) = jobs
+        .into_iter()
+        .partition(|job| !w0001_skips(&class.cases.cases[job.case], job));
+    // The applies W0001 covers that run: from F32 to F32 (Windows, without fast math).
+    let w0001_run = jobs
+        .iter()
+        .filter(|job| {
+            class.cases.cases[job.case]
+                .w0001_applies(&w0002_combo(job.dir, &job.combo))
+                .is_some()
+        })
+        .count();
     let mut failures = Vec::new();
     let mut deferred: BTreeMap<String, usize> = BTreeMap::new();
     let mut compared = 0;
@@ -914,12 +941,18 @@ fn check(class: &Class) {
                     });
                     compared += 1;
                     match compare_images(case, job, &reply.buffers, &buffers) {
-                        Ok(0) => {}
-                        Ok(n) => {
+                        Ok(Comparison::Exact) => {}
+                        Ok(Comparison::W0002 { waived: n }) => {
                             waived.images += 1;
                             waived.values += n;
                         }
-                        Err(report) => failures.push(format!("{what}\n  {report}")),
+                        Ok(Comparison::W0001 { waived: n }) => {
+                            waived.w0001_images += 1;
+                            waived.w0001_values += n;
+                        }
+                        Ok(Comparison::Mismatch(report)) | Err(report) => {
+                            failures.push(format!("{what}\n  {report}"));
+                        }
                     }
                     if wheel == result {
                         continue;
@@ -988,13 +1021,17 @@ fn check(class: &Class) {
                 waived.lut_entries += n;
             }
             Comparison::Exact => {}
+            // `compare_baked_luts` never compares under W0001.
+            Comparison::W0001 { .. } => failures.push(format!("{what}: W0001 on a baked LUT")),
             Comparison::Mismatch(report) => failures.push(format!("{what}\n  {report}")),
         }
     }
     println!(
         "{}: {} applies ({} tier): {compared} compared, {refusals} refusals compared, {} \
          deferred to Phase 2{}\n  W0002: {} images with {} NaN values differing in sign or \
-         payload bits only; {} cache IDs of 1D LUTs baked with {} such NaN entries",
+         payload bits only; {} cache IDs of 1D LUTs baked with {} such NaN entries\n  W0001: \
+         {w0001_run} applies under it, {} images with values within it ({} values); {} applies \
+         not run (not F32 to F32)",
         class.name,
         jobs.len(),
         tier.name(),
@@ -1006,7 +1043,10 @@ fn check(class: &Class) {
         waived.images,
         waived.values,
         waived.cache_ids,
-        waived.lut_entries
+        waived.lut_entries,
+        waived.w0001_images,
+        waived.w0001_values,
+        skipped.len()
     );
     assert!(
         failures.is_empty(),
@@ -1016,6 +1056,21 @@ fn check(class: &Class) {
         failures[..failures.len().min(20)].join("\n")
     );
     assert!(compared > 0, "{}: nothing compared", class.name);
+    // W0001 keeps out only what it must: where it covers a case, its F32-to-F32 applies run;
+    // on Linux it covers nothing, so everything runs.
+    assert!(
+        skipped.is_empty() || w0001_run > 0,
+        "{}: W0001 left out {} applies and ran none",
+        class.name,
+        skipped.len()
+    );
+    if !cfg!(target_os = "windows") {
+        assert!(
+            skipped.is_empty(),
+            "{}: W0001 left out applies on Linux",
+            class.name
+        );
+    }
 }
 
 #[test]
