@@ -106,7 +106,9 @@ pystring and ParseUtils helpers it uses. The test battery also checks LUT famili
 takes a LUT's values as a blob, and grading values as objects. The port now reads YAML with
 its own port of yaml-cpp 0.8.0, the parser the official library uses, numbers included: each
 platform's C++ library reads floats its own way (Windows accepts hex floats, Linux reads
-tiny values as 0), and the port does too, with yaml-cpp's own tests ported.
+tiny values as 0), and the port does too, with yaml-cpp's own tests ported. The config's model
+objects are merged too: ColorSpace, ColorSpaceSet, Look, ViewTransform and NamedTransform,
+with their text and errors byte for byte (names that aren't UTF-8 included).
 Each also went through an independent review before merging.
 
 **Done:** everything below is bit-exact against the official library on Windows and Linux, in
@@ -180,7 +182,7 @@ instead. Every such case, and every upstream bug the port reproduces, is listed 
 
 | Suite | Ported | Total |
 |---|---:|---:|
-| C++ | 315 | 1,191 |
+| C++ | 325 | 1,191 |
 | GPU | 0 | 264 |
 | Python | 0 | 384 |
 
