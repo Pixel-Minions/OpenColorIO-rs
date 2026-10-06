@@ -556,6 +556,14 @@ const PYTHON_RETRY_PAUSES: [Duration; 2] = [Duration::from_millis(500), Duration
 ///   ([`set_aside`]). Deleting it in place stopped part way on the files that processes running
 ///   from it held open, and left an environment with part of numpy's files gone, which
 ///   `uv sync` took for a complete one.
+///   - On Windows, a directory can't be renamed while a file in it is open without
+///     `FILE_SHARE_DELETE`, or while an interpreter of the environment runs (`WinError 5`).
+///     An environment in use then stays as it is, and `uv sync` reports whatever is wrong
+///     with it (an interpreter it can't query fails the sync) without deleting anything.
+///   - On Linux, the rename succeeds under the processes running from the environment, so an
+///     interpreter that failed to start three times for want of memory (`python -c pass`
+///     killed by the OOM killer) still gets the environment renamed away and deleted under
+///     them. Their later oracle calls then fail loudly, and a failed call is never cached.
 fn prepare_venv(
     venv: &Path,
     mut starts: impl FnMut() -> bool,
@@ -600,7 +608,9 @@ fn prepare_venv(
 
 /// Renames the environment `venv` aside (to `<venv>.old-<pid>-<time>`), then deletes it as far
 /// as it can: the files that processes still running from it hold open stay, and
-/// [`remove_set_aside`] deletes them later. Either way, nothing at `venv` is left half deleted.
+/// [`remove_set_aside`] deletes them later. When the rename fails (on Windows, while the
+/// environment is in use), it says so on stderr and leaves the environment as it is. Either
+/// way, nothing at `venv` is left half deleted.
 fn set_aside(venv: &Path) {
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -608,8 +618,15 @@ fn set_aside(venv: &Path) {
     let mut name = venv.file_name().unwrap_or_default().to_os_string();
     name.push(format!(".old-{}-{nanos:x}", std::process::id()));
     let aside = venv.with_file_name(name);
-    if std::fs::rename(venv, &aside).is_ok() {
-        let _ = std::fs::remove_dir_all(&aside);
+    match std::fs::rename(venv, &aside) {
+        Ok(()) => {
+            let _ = std::fs::remove_dir_all(&aside);
+        }
+        Err(e) => eprintln!(
+            "ocio-testkit: the oracle's environment {} is kept as it is: it could not be \
+             renamed aside ({e})",
+            venv.display()
+        ),
     }
 }
 
@@ -1631,6 +1648,39 @@ mod tests {
         assert_eq!(synced, Ok(true));
         assert_eq!(tries, 3);
         assert_eq!(std::fs::read_to_string(venv.join("marker")).unwrap(), "new");
+        assert_eq!(venv_dir_names(&venv), ["oracle-venv", "oracle-venv.lock"]);
+        std::fs::remove_dir_all(venv.parent().unwrap()).unwrap();
+    }
+
+    /// On Windows, an environment in use (here, a file in it held open without
+    /// `FILE_SHARE_DELETE`, as the C runtime's `open` holds files) can't be renamed aside:
+    /// when its interpreter fails to start, every one of its files stays where it is, and
+    /// nothing is set aside. Deleting it in place would delete all but the open file.
+    #[cfg(windows)]
+    #[test]
+    fn an_environment_in_use_is_never_deleted_on_windows() {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_SHARE_READ: u32 = 1;
+        const FILE_SHARE_WRITE: u32 = 2;
+        let venv = venv_fixture("in_use");
+        // A deletion goes through a directory in order, and stops at the open file: a file that
+        // comes before it (`Include` before `Lib`) is deleted first.
+        let first = venv.join("Include").join("a.h");
+        std::fs::create_dir_all(venv.join("Include")).unwrap();
+        std::fs::write(&first, "h").unwrap();
+        let held = venv.join("Lib").join("held.py");
+        std::fs::write(&held, "x").unwrap();
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .open(&held)
+            .unwrap();
+        let synced = prepare_venv(&venv, || false, || Ok(true), &NO_PAUSES);
+        drop(file);
+        assert_eq!(synced, Ok(true));
+        assert_eq!(std::fs::read_to_string(venv.join("marker")).unwrap(), "old");
+        assert_eq!(std::fs::read_to_string(&held).unwrap(), "x");
+        assert_eq!(std::fs::read_to_string(&first).unwrap(), "h");
         assert_eq!(venv_dir_names(&venv), ["oracle-venv", "oracle-venv.lock"]);
         std::fs::remove_dir_all(venv.parent().unwrap()).unwrap();
     }
