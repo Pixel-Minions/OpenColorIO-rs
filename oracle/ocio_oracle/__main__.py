@@ -9,6 +9,10 @@ Framed mode (no arguments): one request on stdin, one response on stdout.
 Request header: {"cmd": str, "args": object, "blobs": [len, ...]}
 Response header: {"ok": true, "result": any, "blobs": [len, ...]} or {"ok": false, "error": str}
 
+A command that raises gets the second form. If writing the response fails once part of it
+went out, nothing more is written: the traceback goes to stderr and the process exits with 1,
+so the caller never reads a frame cut short as a response.
+
 CLI mode: ``python -m ocio_oracle regen <group> <out_dir>`` writes fixture files and prints
 a JSON list of the files it wrote.
 """
@@ -20,28 +24,48 @@ import traceback
 
 from . import commands, regen
 
-
-def _read_exact(stream, n):
-    data = stream.read(n)
-    if data is None or len(data) != n:
-        raise EOFError(f"expected {n} bytes, got {0 if data is None else len(data)}")
-    return data
+# The most bytes one read or write moves through a pipe, as on the caller's side
+# (PIPE_PIECE, crates/ocio-testkit/src/oracle.rs). On Windows, a single pipe read or write of
+# several megabytes can fail when the system is short of memory.
+PIPE_PIECE = 64 * 1024
 
 
-def _write_frame(stream, header, blobs):
+def _read_exact(raw, n):
+    """Reads exactly n bytes from the unbuffered stream raw, at most PIPE_PIECE per read."""
+    data = bytearray(n)
+    view = memoryview(data)
+    got = 0
+    while got < n:
+        count = raw.readinto(view[got:got + PIPE_PIECE])
+        if not count:
+            raise EOFError(f"expected {n} bytes, got {got}")
+        got += count
+    return bytes(data)
+
+
+def _frame(header, blobs):
+    """The pieces of a response frame: the length and header, then each blob."""
     header = dict(header)
     header["blobs"] = [len(b) for b in blobs]
     encoded = json.dumps(header, separators=(",", ":"), allow_nan=False).encode("utf-8")
-    stream.write(struct.pack("<I", len(encoded)))
-    stream.write(encoded)
-    for blob in blobs:
-        stream.write(blob)
-    stream.flush()
+    return [struct.pack("<I", len(encoded)) + encoded, *blobs]
+
+
+def _write_all(raw, pieces):
+    """Writes every piece to the unbuffered stream raw, at most PIPE_PIECE per write."""
+    for piece in pieces:
+        view = memoryview(piece).cast("B")
+        sent = 0
+        while sent < len(view):
+            count = raw.write(view[sent:sent + PIPE_PIECE])
+            if not count:
+                raise OSError(f"writing the response stopped after {sent} bytes of a piece")
+            sent += count
 
 
 def serve_one():
-    stdin = sys.stdin.buffer
-    stdout = sys.stdout.buffer
+    stdin = sys.stdin.buffer.raw
+    stdout = sys.stdout.buffer.raw
     # Anything a command prints must not corrupt the framed response.
     sys.stdout = sys.stderr
     try:
@@ -52,9 +76,12 @@ def serve_one():
         if handler is None:
             raise KeyError(f"unknown oracle command {header['cmd']!r}")
         result, out_blobs = handler(header.get("args") or {}, blobs)
-        _write_frame(stdout, {"ok": True, "result": result}, out_blobs)
+        frame = _frame({"ok": True, "result": result}, out_blobs)
     except Exception:  # noqa: BLE001 - every failure is reported to the caller
-        _write_frame(stdout, {"ok": False, "error": traceback.format_exc()}, [])
+        frame = _frame({"ok": False, "error": traceback.format_exc()}, [])
+    # Nothing has been written yet. A failure from here on raises out of the process: once
+    # part of the frame went out, a second frame after it would read as a truncated response.
+    _write_all(stdout, frame)
 
 
 def main(argv):

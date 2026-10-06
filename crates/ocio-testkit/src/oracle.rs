@@ -42,6 +42,8 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use serde_json::{Value, json};
 use xxhash_rust::xxh3::Xxh3;
@@ -105,13 +107,6 @@ impl Oracle {
         } else {
             venv.join("bin").join("python")
         };
-        // A target directory restored from a build cache, or a moved uv Python install, can
-        // leave an environment whose interpreter no longer runs; uv refuses to reuse it.
-        // Rebuild it from the lock file instead.
-        if venv.exists() && !python_runs(&python) {
-            std::fs::remove_dir_all(&venv)
-                .map_err(|e| format!("could not remove the broken {}: {e}", venv.display()))?;
-        }
         let sync = || {
             Command::new(uv_program())
                 .arg("sync")
@@ -126,16 +121,22 @@ impl Oracle {
                     format!("could not run `uv` ({e}); install it: https://docs.astral.sh/uv/")
                 })
         };
-        let mut status = sync()?;
-        if !status.success() && venv.exists() {
-            // One retry from scratch, for any other kind of stale environment.
-            let _ = std::fs::remove_dir_all(&venv);
-            status = sync()?;
-        }
-        if !status.success() {
+        let mut status = None;
+        let synced = prepare_venv(
+            &venv,
+            || python_runs(&python),
+            || {
+                let last = sync()?;
+                status = Some(last);
+                Ok(last.success())
+            },
+            &PYTHON_RETRY_PAUSES,
+        )?;
+        if !synced {
             return Err(format!(
-                "`uv sync` for {} failed: {status}",
-                oracle_dir.display()
+                "`uv sync` for {} failed: {}",
+                oracle_dir.display(),
+                status.expect("uv ran")
             ));
         }
         let cache_dir = if std::env::var_os("OCIO_RS_ORACLE_NO_CACHE").is_some() {
@@ -296,12 +297,12 @@ impl Oracle {
             return Ok(response);
         }
 
-        let bytes = self.run(&request)?;
-        let response = parse_response(&bytes)?;
+        let output = self.run(&request)?;
+        let response = response_of(&output)?;
         if let Some(file) = &cache_file
             && cacheable(cmd, &response)
         {
-            write_atomically(file, &bytes);
+            write_atomically(file, &output.stdout);
         }
         Ok(response)
     }
@@ -316,7 +317,7 @@ impl Oracle {
         })
     }
 
-    fn run(&self, request: &[u8]) -> Result<Vec<u8>, String> {
+    fn run(&self, request: &[u8]) -> Result<Output, String> {
         let mut command = self.command();
         command.args(["-X", "utf8", "-m", "ocio_oracle"]);
         exchange(command, request)
@@ -347,16 +348,40 @@ fn isolate_from(
     command.env("PYTHONDONTWRITEBYTECODE", "1")
 }
 
-/// Starts `command`, writes `request` to its stdin, and returns its stdout once it exits
+/// What an oracle process that exited successfully wrote.
+#[derive(Debug)]
+struct Output {
+    /// The framed response.
+    stdout: Vec<u8>,
+    /// Anything else it printed, as text.
+    stderr: String,
+}
+
+/// The response in `output`. A response whose framing is broken (fewer or more bytes than its
+/// header declares) is an error that carries the oracle's stderr: the process exited
+/// successfully, so its stderr is the only trace of what went wrong while it wrote.
+fn response_of(output: &Output) -> Result<Response, String> {
+    let (header, blobs) = parse_frame(&output.stdout).map_err(|e| {
+        format!(
+            "{e}: the oracle exited successfully after writing {} bytes to stdout; its \
+             stderr:\n{}",
+            output.stdout.len(),
+            output.stderr
+        )
+    })?;
+    response_from_frame(&header, blobs)
+}
+
+/// Starts `command`, writes `request` to its stdin, and returns its output once it exits
 /// successfully, starting it again (at most [`SPAWN_RETRIES`] times) when it crashed as the
 /// oracle crashes under Intel SDE on Windows before it reads a request ([`crashed_unread`]).
 /// The final error says how many attempts were made, with each attempt's message and stderr;
 /// each retry also prints a line to the process's stderr.
-fn exchange(mut command: Command, request: &[u8]) -> Result<Vec<u8>, String> {
+fn exchange(mut command: Command, request: &[u8]) -> Result<Output, String> {
     let mut failures = Vec::new();
     loop {
         match exchange_once(&mut command, request) {
-            Ok(stdout) => return Ok(stdout),
+            Ok(output) => return Ok(output),
             Err(failure) => {
                 let retry = failure.crashed_unread && failures.len() < SPAWN_RETRIES;
                 failures.push(failure.message);
@@ -431,12 +456,12 @@ struct Failure {
     crashed_unread: bool,
 }
 
-/// Starts `command`, writes `request` to its stdin, and returns its stdout once it exits
+/// Starts `command`, writes `request` to its stdin, and returns its output once it exits
 /// successfully. Each pipe has its own thread or loop, so the process never waits on a full
 /// pipe: the request is written on a thread (a large response can't deadlock a large
 /// request), stderr is read on another (a process that writes more than a pipe holds to
 /// stderr before it closes stdout can't hang), and stdout is read here.
-fn exchange_once(command: &mut Command, request: &[u8]) -> Result<Vec<u8>, Failure> {
+fn exchange_once(command: &mut Command, request: &[u8]) -> Result<Output, Failure> {
     let fail = |message: String| Failure {
         message,
         crashed_unread: false,
@@ -491,7 +516,7 @@ fn exchange_once(command: &mut Command, request: &[u8]) -> Result<Vec<u8>, Failu
     if !status.success() {
         return Err(fail(format!("oracle exited with {status}\n{stderr}")));
     }
-    Ok(stdout)
+    Ok(Output { stdout, stderr })
 }
 
 /// The most bytes one read or write moves through a pipe to or from the oracle.
@@ -507,6 +532,115 @@ fn read_in_pieces(stream: &mut impl Read) -> std::io::Result<Vec<u8>> {
             Ok(n) => out.extend_from_slice(&piece[..n]),
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
             Err(e) => return Err(e),
+        }
+    }
+}
+
+/// The pauses before the second and third tries of the oracle's interpreter, when it didn't
+/// start ([`prepare_venv`]).
+const PYTHON_RETRY_PAUSES: [Duration; 2] = [Duration::from_millis(500), Duration::from_secs(2)];
+
+/// Brings the oracle's environment `venv` up to date with the lock file: `sync` runs `uv sync`
+/// on it and says whether that succeeded, and so does the result. `starts` says whether the
+/// environment's interpreter starts.
+///
+/// Every test process does this on its first oracle call, often while other processes already
+/// run the oracle from the same environment. So:
+/// - Processes take turns, under a lock file beside `venv` (`oracle-venv.lock`).
+/// - A target directory restored from a build cache, or a moved uv Python install, can leave an
+///   environment whose interpreter no longer runs, which uv refuses to reuse; it is rebuilt
+///   from the lock file. But only once the interpreter has failed to start three times,
+///   `pauses` apart: on a system short of memory, a process can fail to start
+///   (`STATUS_DLL_INIT_FAILED`) with nothing wrong with its environment.
+/// - An environment is never deleted where it is: it is renamed aside, then deleted
+///   ([`set_aside`]). Deleting it in place stopped part way on the files that processes running
+///   from it held open, and left an environment with part of numpy's files gone, which
+///   `uv sync` took for a complete one.
+///   - On Windows, a directory can't be renamed while a file in it is open without
+///     `FILE_SHARE_DELETE`, or while an interpreter of the environment runs (`WinError 5`).
+///     An environment in use then stays as it is, and `uv sync` reports whatever is wrong
+///     with it (an interpreter it can't query fails the sync) without deleting anything.
+///   - On Linux, the rename succeeds under the processes running from the environment, so an
+///     interpreter that failed to start three times for want of memory (`python -c pass`
+///     killed by the OOM killer) still gets the environment renamed away and deleted under
+///     them. Their later oracle calls then fail loudly, and a failed call is never cached.
+fn prepare_venv(
+    venv: &Path,
+    mut starts: impl FnMut() -> bool,
+    mut sync: impl FnMut() -> Result<bool, String>,
+    pauses: &[Duration],
+) -> Result<bool, String> {
+    let lock_path = venv.with_extension("lock");
+    if let Some(dir) = venv.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+        .map_err(|e| format!("{}: {e}", lock_path.display()))?;
+    lock.lock()
+        .map_err(|e| format!("could not lock {}: {e}", lock_path.display()))?;
+    remove_set_aside(venv);
+    if venv.exists() {
+        let mut started = starts();
+        for pause in pauses {
+            if started {
+                break;
+            }
+            std::thread::sleep(*pause);
+            started = starts();
+        }
+        if !started {
+            set_aside(venv);
+        }
+    }
+    let synced = sync()?;
+    if synced || !venv.exists() {
+        return Ok(synced);
+    }
+    // One retry from scratch, for any other kind of stale environment.
+    set_aside(venv);
+    sync()
+}
+
+/// Renames the environment `venv` aside (to `<venv>.old-<pid>-<time>`), then deletes it as far
+/// as it can: the files that processes still running from it hold open stay, and
+/// [`remove_set_aside`] deletes them later. When the rename fails (on Windows, while the
+/// environment is in use), it says so on stderr and leaves the environment as it is. Either
+/// way, nothing at `venv` is left half deleted.
+fn set_aside(venv: &Path) {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let mut name = venv.file_name().unwrap_or_default().to_os_string();
+    name.push(format!(".old-{}-{nanos:x}", std::process::id()));
+    let aside = venv.with_file_name(name);
+    match std::fs::rename(venv, &aside) {
+        Ok(()) => {
+            let _ = std::fs::remove_dir_all(&aside);
+        }
+        Err(e) => eprintln!(
+            "ocio-testkit: the oracle's environment {} is kept as it is: it could not be \
+             renamed aside ({e})",
+            venv.display()
+        ),
+    }
+}
+
+/// Deletes, as far as it can, the environments [`set_aside`] renamed aside and couldn't delete.
+fn remove_set_aside(venv: &Path) {
+    let (Some(dir), Some(name)) = (venv.parent(), venv.file_name()) else {
+        return;
+    };
+    let mut prefix = name.to_os_string();
+    prefix.push(".old-");
+    let prefix = prefix.to_string_lossy().into_owned();
+    for entry in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        if entry.file_name().to_string_lossy().starts_with(&prefix) {
+            let _ = std::fs::remove_dir_all(entry.path());
         }
     }
 }
@@ -769,7 +903,30 @@ fn frame(header: &Value, blobs: &[&[u8]]) -> Vec<u8> {
     out
 }
 
+/// The response framed in `bytes`, or what is wrong with it: its framing, or the error the
+/// oracle reported.
 fn parse_response(bytes: &[u8]) -> Result<Response, String> {
+    let (header, blobs) = parse_frame(bytes)?;
+    response_from_frame(&header, blobs)
+}
+
+/// The response of a well-framed `header` and its `blobs`, or the error the oracle reported.
+fn response_from_frame(header: &Value, blobs: Vec<Vec<u8>>) -> Result<Response, String> {
+    if header["ok"] != Value::Bool(true) {
+        return Err(header["error"]
+            .as_str()
+            .unwrap_or("unknown oracle error")
+            .to_string());
+    }
+    Ok(Response {
+        result: header["result"].clone(),
+        blobs,
+    })
+}
+
+/// The header and blobs of a framed response, or what is wrong with its framing: a header
+/// that is cut short or isn't JSON, or fewer or more bytes than its blob sizes add up to.
+fn parse_frame(bytes: &[u8]) -> Result<(Value, Vec<Vec<u8>>), String> {
     let len_bytes: [u8; 4] = bytes
         .get(..4)
         .and_then(|b| b.try_into().ok())
@@ -779,12 +936,6 @@ fn parse_response(bytes: &[u8]) -> Result<Response, String> {
         .get(4..4 + len)
         .ok_or("oracle response header is truncated")?;
     let header: Value = serde_json::from_slice(header_bytes).map_err(|e| e.to_string())?;
-    if header["ok"] != Value::Bool(true) {
-        return Err(header["error"]
-            .as_str()
-            .unwrap_or("unknown oracle error")
-            .to_string());
-    }
     let mut offset = 4 + len;
     let mut blobs = Vec::new();
     for size in header["blobs"].as_array().into_iter().flatten() {
@@ -801,17 +952,21 @@ fn parse_response(bytes: &[u8]) -> Result<Response, String> {
             bytes.len() - offset
         ));
     }
-    Ok(Response {
-        result: header["result"].clone(),
-        blobs,
-    })
+    Ok((header, blobs))
 }
 
+/// Writes `bytes` to `file` through a temporary file of its own, renamed over `file`, so a
+/// reader finds either the whole of `bytes` or what was there before. The temporary file's name
+/// is this write's alone: when it named only the process, two test threads writing the same
+/// entry at once shared it, and one could empty it while the other renamed it into place, so
+/// a reader found the entry part written.
 fn write_atomically(file: &Path, bytes: &[u8]) {
+    static WRITES: AtomicU64 = AtomicU64::new(0);
     if let Some(dir) = file.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
-    let tmp = file.with_extension(format!("tmp{}", std::process::id()));
+    let write = WRITES.fetch_add(1, Ordering::Relaxed);
+    let tmp = file.with_extension(format!("tmp{}-{write}", std::process::id()));
     if std::fs::write(&tmp, bytes).is_ok() && std::fs::rename(&tmp, file).is_err() {
         let _ = std::fs::remove_file(&tmp);
     }
@@ -992,7 +1147,8 @@ mod tests {
         let counter = counter("once");
         let request = large_request();
         let stdout = super::exchange(fake_oracle(&counter, 1, "unread"), &request)
-            .expect("the second start answers");
+            .expect("the second start answers")
+            .stdout;
         assert_eq!(stdout, request.iter().rev().copied().collect::<Vec<u8>>());
         assert_eq!(starts(&counter), "2");
     }
@@ -1033,6 +1189,214 @@ mod tests {
         assert!(!error.contains("attempts"), "{error}");
     }
 
+    /// A process that exits successfully with a response shorter than its header declares, as
+    /// the oracle did when writing a blob failed under memory pressure (it then appended an
+    /// error frame and exited with 0): the error says the blob is truncated and that the
+    /// process exited successfully, and carries its stderr.
+    #[test]
+    fn a_truncated_response_reports_the_oracle_stderr() {
+        let mut command = super::Oracle::get().command();
+        command.args([
+            "-c",
+            "import json, struct, sys\n\
+             sys.stdin.buffer.read()\n\
+             header = json.dumps({'ok': True, 'result': None, 'blobs': [1 << 20]}).encode()\n\
+             sys.stdout.buffer.write(struct.pack('<I', len(header)) + header + bytes(1000))\n\
+             error = json.dumps({'ok': False, 'error': 'OSError', 'blobs': []}).encode()\n\
+             sys.stdout.buffer.write(struct.pack('<I', len(error)) + error)\n\
+             sys.stderr.write('the write of blob 0 failed\\n')\n",
+        ]);
+        let output = super::exchange(command, b"request").expect("the process exits with 0");
+        let error = super::response_of(&output).expect_err("the response is truncated");
+        assert!(
+            error.starts_with("oracle response blob is truncated: the oracle exited successfully"),
+            "{error}"
+        );
+        assert!(error.contains("the write of blob 0 failed"), "{error}");
+    }
+
+    /// A process that exits successfully after a whole response followed by more bytes (here
+    /// an error frame, as the oracle wrote one after a failed write): the response is refused,
+    /// with the number of extra bytes, and the error carries its stderr.
+    #[test]
+    fn a_response_with_trailing_bytes_reports_the_oracle_stderr() {
+        let mut command = super::Oracle::get().command();
+        command.args([
+            "-c",
+            "import json, struct, sys\n\
+             sys.stdin.buffer.read()\n\
+             header = json.dumps({'ok': True, 'result': 1, 'blobs': []}).encode()\n\
+             sys.stdout.buffer.write(struct.pack('<I', len(header)) + header)\n\
+             error = json.dumps({'ok': False, 'error': 'OSError', 'blobs': []}).encode()\n\
+             sys.stdout.buffer.write(struct.pack('<I', len(error)) + error)\n\
+             sys.stderr.write('a second frame went out\\n')\n",
+        ]);
+        let output = super::exchange(command, b"request").expect("the process exits with 0");
+        let error = super::response_of(&output).expect_err("the response has trailing bytes");
+        let error_frame = 4 + r#"{"ok": false, "error": "OSError", "blobs": []}"#.len();
+        assert!(
+            error.starts_with(&format!(
+                "{error_frame} trailing bytes after the oracle response: the oracle exited \
+                 successfully"
+            )),
+            "{error}"
+        );
+        assert!(error.contains("a second frame went out"), "{error}");
+    }
+
+    /// A request shorter than its header declares, then the end of stdin: the oracle answers
+    /// with an `EOFError` and exits, rather than waiting for the rest forever. The process is
+    /// killed if it hasn't exited after a minute.
+    #[test]
+    fn the_oracle_reports_a_request_cut_short() {
+        let mut request = super::request("info", json!({}), &[&[0u8; 100]]);
+        request.truncate(request.len() - 90);
+        let mut child = super::Oracle::get()
+            .command()
+            .args(["-X", "utf8", "-m", "ocio_oracle"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("the oracle starts");
+        let mut stdin = child.stdin.take().unwrap();
+        stdin.write_all(&request).unwrap();
+        drop(stdin);
+        let mut stdout = child.stdout.take().unwrap();
+        let reader = std::thread::spawn(move || read_in_pieces(&mut stdout));
+        let deadline = std::time::Instant::now() + Duration::from_secs(60);
+        while child.try_wait().unwrap().is_none() {
+            if std::time::Instant::now() > deadline {
+                let _ = child.kill();
+                panic!("the oracle still waits for the rest of the request after a minute");
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let stdout = reader.join().unwrap().unwrap();
+        let (header, blobs) = super::parse_frame(&stdout).expect("one whole frame");
+        let error = super::response_from_frame(&header, blobs).expect_err("an error frame");
+        assert!(
+            error.contains("EOFError: expected 100 bytes, got 10"),
+            "{error}"
+        );
+    }
+
+    /// Runs the oracle (`python -m ocio_oracle`) on pipes it sees through a recorder: each read
+    /// and write goes to the real stdin or stdout, and the sizes are recorded. With
+    /// `fail_after`, the first write that would take stdout past that many bytes raises
+    /// `OSError` (errno 22, as Python reports a failed `WriteFile`), as one write does when the
+    /// system is short of memory; later writes go through. At exit it prints `pipes: <largest
+    /// read> <largest write> <bytes written> <writes after the failure>` to stderr.
+    fn recorded_oracle(fail_after: Option<usize>) -> Command {
+        let mut command = super::Oracle::get().command();
+        command.args([
+            "-X",
+            "utf8",
+            "-c",
+            "import atexit, io, os, runpy, sys\n\
+             limit = int(sys.argv[1]) if len(sys.argv) > 1 else None\n\
+             stats = {'read': 0, 'write': 0, 'sent': 0, 'after': 0, 'failed': False}\n\
+             class Pipe(io.RawIOBase):\n\
+             \x20   def __init__(self, fd): self.fd = fd\n\
+             \x20   def readable(self): return self.fd == 0\n\
+             \x20   def writable(self): return self.fd == 1\n\
+             \x20   def readinto(self, b):\n\
+             \x20       stats['read'] = max(stats['read'], len(b))\n\
+             \x20       data = os.read(self.fd, len(b))\n\
+             \x20       b[:len(data)] = data\n\
+             \x20       return len(data)\n\
+             \x20   def write(self, b):\n\
+             \x20       stats['write'] = max(stats['write'], len(b))\n\
+             \x20       if stats['failed']:\n\
+             \x20           stats['after'] += 1\n\
+             \x20       elif limit is not None and stats['sent'] + len(b) > limit:\n\
+             \x20           stats['failed'] = True\n\
+             \x20           raise OSError(22, 'Invalid argument')\n\
+             \x20       n = os.write(self.fd, b)\n\
+             \x20       stats['sent'] += n\n\
+             \x20       return n\n\
+             atexit.register(lambda: sys.__stderr__.write(\n\
+             \x20   'pipes: %(read)d %(write)d %(sent)d %(after)d\\n' % stats))\n\
+             # Held here too, as sys.__stdout__ holds the real one: the oracle replaces\n\
+             # sys.stdout, and that must not close the pipe.\n\
+             pipes = [io.TextIOWrapper(io.BufferedReader(Pipe(0))),\n\
+             \x20        io.TextIOWrapper(io.BufferedWriter(Pipe(1)))]\n\
+             sys.stdin, sys.stdout = pipes\n\
+             sys.argv = ['ocio_oracle']\n\
+             runpy.run_module('ocio_oracle', run_name='__main__', alter_sys=True)\n",
+        ]);
+        if let Some(limit) = fail_after {
+            command.arg(limit.to_string());
+        }
+        command
+    }
+
+    /// The recorder's `pipes:` line in `stderr`: the largest read and write, the bytes
+    /// written, and the writes after the failure.
+    fn pipe_stats(stderr: &str) -> [usize; 4] {
+        let line = stderr
+            .lines()
+            .find_map(|l| l.strip_prefix("pipes: "))
+            .unwrap_or_else(|| panic!("no pipe statistics in:\n{stderr}"));
+        let values: Vec<usize> = line.split(' ').map(|v| v.parse().unwrap()).collect();
+        values.try_into().unwrap()
+    }
+
+    /// A `cpu_apply` request and response of 1 MiB of pixels each, many pipe pieces long.
+    fn large_cpu_apply() -> Vec<u8> {
+        let pixels = f32_to_bytes(&[0.25f32, 0.5, 1.0, 1.0].repeat(1 << 16));
+        let args = json!({"transform": {"class": "LogTransform", "args": {"base": 2.0}}});
+        request("cpu_apply", args, &[&pixels])
+    }
+
+    /// The oracle reads its request and writes its response at most [`PIPE_PIECE`] bytes per
+    /// call, as the caller does: one pipe read or write of megabytes can fail on Windows when
+    /// the system is short of memory.
+    #[test]
+    fn the_oracle_moves_at_most_a_pipe_piece_per_call() {
+        let output =
+            super::exchange(recorded_oracle(None), &large_cpu_apply()).expect("a response");
+        let response = super::response_of(&output).expect("the response");
+        assert_eq!(response.blobs[0].len(), 1 << 20);
+        let [read, write, sent, _] = pipe_stats(&output.stderr);
+        assert!(read <= PIPE_PIECE, "a read of {read} bytes");
+        assert!(write <= PIPE_PIECE, "a write of {write} bytes");
+        assert_eq!(sent, output.stdout.len());
+    }
+
+    /// When writing the response fails after part of it went out (a blob, here), the oracle
+    /// writes nothing more and exits with an error and the traceback on stderr. It used to
+    /// append an error frame and exit with 0, which the caller read as a truncated blob
+    /// ("oracle response blob is truncated").
+    #[test]
+    fn the_oracle_fails_without_a_second_frame_when_its_response_is_cut() {
+        let limit = 100_000;
+        let error = match super::exchange(recorded_oracle(Some(limit)), &large_cpu_apply()) {
+            Err(error) => error,
+            Ok(output) => panic!(
+                "the oracle exited successfully: {:?}",
+                super::response_of(&output).map(|r| r.result)
+            ),
+        };
+        // `ExitStatus` displays as "exit code: 1" on Windows and "exit status: 1" on Linux.
+        let exit = if cfg!(windows) {
+            "exit code: 1"
+        } else {
+            "exit status: 1"
+        };
+        assert!(
+            error.starts_with(&format!("oracle exited with {exit}\n")),
+            "{error}"
+        );
+        assert!(
+            error.contains("OSError: [Errno 22] Invalid argument"),
+            "{error}"
+        );
+        let [_, _, sent, after] = pipe_stats(&error);
+        assert!(sent <= limit && sent > 0, "{sent} bytes written");
+        assert_eq!(after, 0, "the oracle kept writing after the failure");
+    }
+
     fn large_stderr_exchange() {
         let mut command = super::Oracle::get().command();
         command.args([
@@ -1044,7 +1408,9 @@ mod tests {
              sys.stdout.buffer.write(request[::-1])\n",
         ]);
         let request: Vec<u8> = (0..=255u8).cycle().take(200_000).collect();
-        let stdout = super::exchange(command, &request).expect("the exchange");
+        let stdout = super::exchange(command, &request)
+            .expect("the exchange")
+            .stdout;
         let reversed: Vec<u8> = request.iter().rev().copied().collect();
         assert_eq!(stdout, reversed);
     }
@@ -1208,5 +1574,247 @@ mod tests {
                 .any(|(k, v)| k == "PYTHONDONTWRITEBYTECODE" && v.as_deref() == Some("1")),
             "{envs:?}"
         );
+    }
+
+    /// A fresh directory for a [`prepare_venv`] test, with an environment `oracle-venv` in it
+    /// that holds a file `marker` reading "old". Returns the environment's path.
+    fn venv_fixture(test: &str) -> PathBuf {
+        let dir = paths::target_dir().join(format!("oracle_venv_{test}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let venv = dir.join("oracle-venv");
+        std::fs::create_dir_all(venv.join("Lib")).unwrap();
+        std::fs::write(venv.join("marker"), "old").unwrap();
+        venv
+    }
+
+    /// The names in the directory of `venv`, sorted.
+    fn venv_dir_names(venv: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(venv.parent().unwrap())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    const NO_PAUSES: [Duration; 2] = [Duration::ZERO, Duration::ZERO];
+
+    /// An interpreter that fails to start, then starts (a system short of memory), leaves the
+    /// environment where it is, untouched.
+    #[test]
+    fn an_environment_whose_python_starts_on_a_later_try_is_kept() {
+        let venv = venv_fixture("kept");
+        let mut tries = 0;
+        let mut syncs = 0;
+        let synced = prepare_venv(
+            &venv,
+            || {
+                tries += 1;
+                tries == 3
+            },
+            || {
+                syncs += 1;
+                Ok(true)
+            },
+            &NO_PAUSES,
+        );
+        assert_eq!(synced, Ok(true));
+        assert_eq!((tries, syncs), (3, 1));
+        assert_eq!(std::fs::read_to_string(venv.join("marker")).unwrap(), "old");
+        assert_eq!(venv_dir_names(&venv), ["oracle-venv", "oracle-venv.lock"]);
+        std::fs::remove_dir_all(venv.parent().unwrap()).unwrap();
+    }
+
+    /// An interpreter that never starts gets a new environment: the old one is renamed aside and
+    /// deleted, and `uv sync` builds the new one where it was.
+    #[test]
+    fn an_environment_whose_python_never_starts_is_set_aside_and_rebuilt() {
+        let venv = venv_fixture("rebuilt");
+        let mut tries = 0;
+        let synced = prepare_venv(
+            &venv,
+            || {
+                tries += 1;
+                false
+            },
+            || {
+                assert!(!venv.exists(), "the old environment is still there");
+                std::fs::create_dir_all(&venv).unwrap();
+                std::fs::write(venv.join("marker"), "new").unwrap();
+                Ok(true)
+            },
+            &NO_PAUSES,
+        );
+        assert_eq!(synced, Ok(true));
+        assert_eq!(tries, 3);
+        assert_eq!(std::fs::read_to_string(venv.join("marker")).unwrap(), "new");
+        assert_eq!(venv_dir_names(&venv), ["oracle-venv", "oracle-venv.lock"]);
+        std::fs::remove_dir_all(venv.parent().unwrap()).unwrap();
+    }
+
+    /// On Windows, an environment in use (here, a file in it held open without
+    /// `FILE_SHARE_DELETE`, as the C runtime's `open` holds files) can't be renamed aside:
+    /// when its interpreter fails to start, every one of its files stays where it is, and
+    /// nothing is set aside. Deleting it in place would delete all but the open file.
+    #[cfg(windows)]
+    #[test]
+    fn an_environment_in_use_is_never_deleted_on_windows() {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_SHARE_READ: u32 = 1;
+        const FILE_SHARE_WRITE: u32 = 2;
+        let venv = venv_fixture("in_use");
+        // A deletion goes through a directory in order, and stops at the open file: a file that
+        // comes before it (`Include` before `Lib`) is deleted first.
+        let first = venv.join("Include").join("a.h");
+        std::fs::create_dir_all(venv.join("Include")).unwrap();
+        std::fs::write(&first, "h").unwrap();
+        let held = venv.join("Lib").join("held.py");
+        std::fs::write(&held, "x").unwrap();
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+            .open(&held)
+            .unwrap();
+        let synced = prepare_venv(&venv, || false, || Ok(true), &NO_PAUSES);
+        drop(file);
+        assert_eq!(synced, Ok(true));
+        assert_eq!(std::fs::read_to_string(venv.join("marker")).unwrap(), "old");
+        assert_eq!(std::fs::read_to_string(&held).unwrap(), "x");
+        assert_eq!(std::fs::read_to_string(&first).unwrap(), "h");
+        assert_eq!(venv_dir_names(&venv), ["oracle-venv", "oracle-venv.lock"]);
+        std::fs::remove_dir_all(venv.parent().unwrap()).unwrap();
+    }
+
+    /// A failed `uv sync` is tried once more, on a new environment; what that one says is the
+    /// result.
+    #[test]
+    fn a_failed_sync_is_tried_again_from_scratch() {
+        let venv = venv_fixture("resync");
+        for second in [true, false] {
+            let mut syncs = 0;
+            let synced = prepare_venv(
+                &venv,
+                || true,
+                || {
+                    syncs += 1;
+                    if syncs == 1 {
+                        assert!(venv.exists());
+                        return Ok(false);
+                    }
+                    assert!(!venv.exists(), "the old environment is still there");
+                    std::fs::create_dir_all(&venv).unwrap();
+                    Ok(second)
+                },
+                &NO_PAUSES,
+            );
+            assert_eq!(synced, Ok(second));
+            assert_eq!(syncs, 2);
+        }
+        assert_eq!(venv_dir_names(&venv), ["oracle-venv", "oracle-venv.lock"]);
+        std::fs::remove_dir_all(venv.parent().unwrap()).unwrap();
+    }
+
+    /// What an earlier process set aside and couldn't delete (files that a running process held
+    /// open) is deleted by the next one; other names beside the environment stay.
+    #[test]
+    fn environments_left_aside_are_deleted_later() {
+        let venv = venv_fixture("aside");
+        let dir = venv.parent().unwrap().to_path_buf();
+        std::fs::create_dir_all(dir.join("oracle-venv.old-1-2").join("Lib")).unwrap();
+        std::fs::write(
+            dir.join("oracle-venv.old-1-2").join("Lib").join("a.py"),
+            "x",
+        )
+        .unwrap();
+        std::fs::create_dir_all(dir.join("oracle-cache")).unwrap();
+        let synced = prepare_venv(&venv, || true, || Ok(true), &NO_PAUSES);
+        assert_eq!(synced, Ok(true));
+        assert_eq!(
+            venv_dir_names(&venv),
+            ["oracle-cache", "oracle-venv", "oracle-venv.lock"]
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Processes (here threads, each with its own handle of the lock file) take turns: no two
+    /// prepare the environment at once.
+    #[test]
+    fn environments_are_prepared_one_at_a_time() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let venv = venv_fixture("turns");
+        let busy = AtomicUsize::new(0);
+        let most = AtomicUsize::new(0);
+        std::thread::scope(|scope| {
+            for _ in 0..4 {
+                scope.spawn(|| {
+                    let synced = prepare_venv(
+                        &venv,
+                        || true,
+                        || {
+                            let now = busy.fetch_add(1, Ordering::SeqCst) + 1;
+                            most.fetch_max(now, Ordering::SeqCst);
+                            std::thread::sleep(Duration::from_millis(50));
+                            busy.fetch_sub(1, Ordering::SeqCst);
+                            Ok(true)
+                        },
+                        &NO_PAUSES,
+                    );
+                    assert_eq!(synced, Ok(true));
+                });
+            }
+        });
+        assert_eq!(most.load(Ordering::SeqCst), 1);
+        std::fs::remove_dir_all(venv.parent().unwrap()).unwrap();
+    }
+
+    /// A cache entry that test threads of one process write at once, as two tests asking the
+    /// same question do, is never seen part written: each read finds either no entry or the
+    /// whole of it. The race needs a narrow interleaving: with a temporary file per process,
+    /// this test failed in 4 of 6 runs on Windows (1 to 5 part-written reads of about 1000).
+    #[test]
+    fn a_cache_entry_written_by_threads_at_once_is_read_whole_or_not_at_all() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let dir = paths::target_dir().join(format!("oracle_cache_race_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let file = dir.join("entry.bin");
+        let entry: Vec<u8> = (0..=255u8).cycle().take(64 * 1024).collect();
+        let done = AtomicBool::new(false);
+        let (mut reads, mut partial) = (0, 0);
+        std::thread::scope(|scope| {
+            let writers: Vec<_> = (0..4)
+                .map(|_| {
+                    scope.spawn(|| {
+                        for _ in 0..500 {
+                            write_atomically(&file, &entry);
+                        }
+                    })
+                })
+                .collect();
+            scope.spawn(|| {
+                for writer in writers {
+                    writer.join().unwrap();
+                }
+                done.store(true, Ordering::SeqCst);
+            });
+            while !done.load(Ordering::SeqCst) {
+                if let Ok(bytes) = std::fs::read(&file) {
+                    reads += 1;
+                    if bytes != entry {
+                        partial += 1;
+                    }
+                }
+            }
+        });
+        assert_eq!(
+            partial, 0,
+            "{partial} of {reads} reads found a part-written entry"
+        );
+        assert_eq!(std::fs::read(&file).unwrap(), entry);
+        assert_eq!(
+            std::fs::read_dir(&dir).unwrap().count(),
+            1,
+            "temporary files were left"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }
