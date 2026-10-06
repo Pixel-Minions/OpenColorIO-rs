@@ -15,7 +15,7 @@ use std::sync::Arc;
 
 use ocio::{
     ColorSpace, ColorSpaceDirection, ColorSpaceVisibility, Config, CurrentContext, LogTransform,
-    MatrixTransform, ReferenceSpaceType, SearchReferenceSpaceType, Transform,
+    MatrixTransform, ReferenceSpaceType, SearchReferenceSpaceType, Transform, ViewType,
 };
 use ocio_ops::open_color_types::EnvironmentMode;
 use ocio_ops::platform::{MapEnv, set_thread_env_provider, setenv};
@@ -441,12 +441,24 @@ const VISIBILITIES: [(ColorSpaceVisibility, &str); 3] = [
 struct Probes {
     names: Vec<Vec<u8>>,
     categories: Vec<Vec<u8>>,
+    /// Displays, and the views the getters ask them for.
+    displays: Vec<Vec<u8>>,
+    views: Vec<Vec<u8>>,
 }
 
 fn probes(names: &[&[u8]], categories: &[&[u8]]) -> Probes {
     Probes {
         names: names.iter().map(|n| n.to_vec()).collect(),
         categories: categories.iter().map(|n| n.to_vec()).collect(),
+        ..Probes::default()
+    }
+}
+
+impl Probes {
+    fn displays(mut self, displays: &[&[u8]], views: &[&[u8]]) -> Probes {
+        self.displays = displays.iter().map(|n| n.to_vec()).collect();
+        self.views = views.iter().map(|n| n.to_vec()).collect();
+        self
     }
 }
 
@@ -611,6 +623,214 @@ fn model_getters(probes: &Probes) -> Vec<Step> {
     out
 }
 
+fn add_display_view(display: &[u8], view: &[u8], cs: &[u8], looks: &[u8]) -> Step {
+    let (d, v, c, l) = (display.to_vec(), view.to_vec(), cs.to_vec(), looks.to_vec());
+    step(
+        json!({"call": "addDisplayView", "args": [arg(&d), arg(&v), arg(&c), arg(&l)]}),
+        move |config| unit_out(config.add_display_view(&d, &v, &c, &l)),
+    )
+}
+
+/// `addDisplayView` with a view transform, a rule and a description.
+fn add_display_view_full(display: &[u8], view: &[u8], vt: &[u8], cs: &[u8], rule: &[u8]) -> Step {
+    let (d, v, t, c, r) = (
+        display.to_vec(),
+        view.to_vec(),
+        vt.to_vec(),
+        cs.to_vec(),
+        rule.to_vec(),
+    );
+    step(
+        json!({"call": "addDisplayView",
+               "args": [arg(&d), arg(&v), arg(&t), arg(&c), arg(b"look"), arg(&r),
+                        arg(b"a description")]}),
+        move |config| {
+            unit_out(config.add_display_view_with_view_transform(
+                &d,
+                &v,
+                &t,
+                &c,
+                b"look",
+                &r,
+                b"a description",
+            ))
+        },
+    )
+}
+
+fn add_shared_view(view: &[u8], vt: &[u8], cs: &[u8]) -> Step {
+    let (v, t, c) = (view.to_vec(), vt.to_vec(), cs.to_vec());
+    step(
+        json!({"call": "addSharedView",
+               "args": [arg(&v), arg(&t), arg(&c), arg(b"l1, l2"), arg(b"rule"), arg(b"d")]}),
+        move |config| unit_out(config.add_shared_view(&v, &t, &c, b"l1, l2", b"rule", b"d")),
+    )
+}
+
+fn add_display_shared_view(display: &[u8], view: &[u8]) -> Step {
+    let (d, v) = (display.to_vec(), view.to_vec());
+    step(
+        json!({"call": "addDisplaySharedView", "args": [arg(&d), arg(&v)]}),
+        move |config| unit_out(config.add_display_shared_view(&d, &v)),
+    )
+}
+
+fn remove_shared_view(view: &[u8]) -> Step {
+    let v = view.to_vec();
+    step(
+        json!({"call": "removeSharedView", "args": [arg(&v)]}),
+        move |config| unit_out(config.remove_shared_view(&v)),
+    )
+}
+
+fn remove_display_view(display: &[u8], view: &[u8]) -> Step {
+    let (d, v) = (display.to_vec(), view.to_vec());
+    step(
+        json!({"call": "removeDisplayView", "args": [arg(&d), arg(&v)]}),
+        move |config| unit_out(config.remove_display_view(&d, &v)),
+    )
+}
+
+fn clear_shared_views() -> Step {
+    step(json!({"call": "clearSharedViews"}), |c| {
+        c.clear_shared_views();
+        json!({"result": null})
+    })
+}
+
+fn clear_displays() -> Step {
+    step(json!({"call": "clearDisplays"}), |c| {
+        c.clear_displays();
+        json!({"result": null})
+    })
+}
+
+const VIEW_TYPES: [(ViewType, &str); 2] = [
+    (ViewType::Shared, "VIEW_SHARED"),
+    (ViewType::DisplayDefined, "VIEW_DISPLAY_DEFINED"),
+];
+
+/// A list of strings the binding's iterator gives, or the exception reading it raised (the
+/// iterator itself is made, so the oracle writes the exception as the call's result).
+fn texts_or(r: ocio::Result<Vec<Vec<u8>>>) -> Value {
+    match r {
+        Ok(list) => texts_out(&list),
+        Err(e) => json!({"result": unit_out(Err(e))}),
+    }
+}
+
+/// The getters of the displays and views: the active displays, the shared views, and for each
+/// probe display its views (active, by type, and for each probe color space), and for each
+/// probe view what the display (and the config, for an empty display) says of it.
+fn display_getters(probes: &Probes) -> Vec<Step> {
+    let mut out = vec![
+        step(json!({"call": "getDisplays"}), |c| {
+            let names: Vec<Vec<u8>> = (0..c.num_displays())
+                .map(|i| c.display(i).to_vec())
+                .collect();
+            texts_out(&names)
+        }),
+        step(json!({"call": "getDefaultDisplay"}), |c| {
+            text_out(c.default_display())
+        }),
+        step(json!({"call": "getSharedViews"}), |c| {
+            let names: Vec<Vec<u8>> = (0..c.num_views_of_type(ViewType::Shared, b""))
+                .map(|i| c.view_of_type(ViewType::Shared, b"", i).to_vec())
+                .collect();
+            texts_out(&names)
+        }),
+    ];
+    for display in &probes.displays {
+        let d = display.clone();
+        out.push(step(
+            json!({"call": "getViews", "args": [arg(display)]}),
+            move |c| {
+                let names: Vec<Vec<u8>> = (0..c.num_views(&d))
+                    .map(|i| c.view(&d, i).to_vec())
+                    .collect();
+                texts_out(&names)
+            },
+        ));
+        let d = display.clone();
+        out.push(step(
+            json!({"call": "getDefaultView", "args": [arg(display)]}),
+            move |c| text_out(c.default_view(&d)),
+        ));
+        for (t, t_name) in VIEW_TYPES {
+            let d = display.clone();
+            out.push(step(
+                json!({"call": "getViews", "args": [{"enum": t_name}, arg(display)]}),
+                move |c| {
+                    let names: Vec<Vec<u8>> = (0..c.num_views_of_type(t, &d))
+                        .map(|i| c.view_of_type(t, &d, i).to_vec())
+                        .collect();
+                    texts_out(&names)
+                },
+            ));
+        }
+        for cs in &probes.names {
+            let (d, n) = (display.clone(), cs.clone());
+            out.push(step(
+                json!({"call": "getViews", "args": [arg(display), arg(cs)]}),
+                move |c| {
+                    texts_or((|| {
+                        let num = c.num_views_for_color_space(&d, &n)?;
+                        (0..num)
+                            .map(|i| c.view_for_color_space(&d, &n, i).map(<[u8]>::to_vec))
+                            .collect()
+                    })())
+                },
+            ));
+            let (d, n) = (display.clone(), cs.clone());
+            out.push(step(
+                json!({"call": "getDefaultView", "args": [arg(display), arg(cs)]}),
+                move |c| match c.default_view_for_color_space(&d, &n) {
+                    Ok(v) => text_out(v),
+                    Err(e) => unit_out(Err(e)),
+                },
+            ));
+        }
+        for view in &probes.views {
+            let (d, v) = (display.clone(), view.clone());
+            out.push(step(
+                json!({"call": "hasView", "args": [arg(display), arg(view)]}),
+                move |c| json!({"result": c.has_view(&d, &v)}),
+            ));
+            let (d, v) = (display.clone(), view.clone());
+            out.push(step(
+                json!({"call": "isViewShared", "args": [arg(display), arg(view)]}),
+                move |c| json!({"result": c.is_view_shared(&d, &v)}),
+            ));
+            type Getter = fn(&Config, &[u8], &[u8]) -> Vec<u8>;
+            let getters: [(&str, Getter); 5] = [
+                ("getDisplayViewTransformName", |c, d, v| {
+                    c.display_view_transform_name(d, v).to_vec()
+                }),
+                ("getDisplayViewColorSpaceName", |c, d, v| {
+                    c.display_view_color_space_name(d, v).to_vec()
+                }),
+                ("getDisplayViewLooks", |c, d, v| {
+                    c.display_view_looks(d, v).to_vec()
+                }),
+                ("getDisplayViewRule", |c, d, v| {
+                    c.display_view_rule(d, v).to_vec()
+                }),
+                ("getDisplayViewDescription", |c, d, v| {
+                    c.display_view_description(d, v).to_vec()
+                }),
+            ];
+            for (name, getter) in getters {
+                let (d, v) = (display.clone(), view.clone());
+                out.push(step(
+                    json!({"call": name, "args": [arg(display), arg(view)]}),
+                    move |c| text_out(&getter(c, &d, &v)),
+                ));
+            }
+        }
+    }
+    out
+}
+
 /// The config's getters, then its context's `repr()`.
 fn getters() -> Vec<Step> {
     vec![
@@ -667,6 +887,7 @@ fn all_getters(probes: &Probes) -> Vec<Step> {
     let mut out = getters();
     out.extend(color_space_getters(probes));
     out.extend(model_getters(probes));
+    out.extend(display_getters(probes));
     out
 }
 
@@ -1292,4 +1513,70 @@ fn a_held_context_sees_later_changes() {
         held_getters(&held).into(),
     ];
     check_items("held context", "new", env, items, &Probes::default());
+}
+
+/// Displays, their views and shared views: added, replaced, refused, removed (with the
+/// display when it has no view left) and cleared; the active displays and views of the
+/// environment; the views of each display, by type and for an image's color space (an unknown
+/// color space is an error); the getters of each (display, view) pair, and of the shared views
+/// with an empty display.
+#[test]
+fn displays_and_views_match_the_wheel() {
+    let env: Env = &[
+        ("OCIO_ACTIVE_DISPLAYS", b"sRGB, unknown, P3"),
+        ("OCIO_ACTIVE_VIEWS", b"v2, shared1,Raw"),
+    ];
+    let items: Vec<Item> = vec![
+        add_color_space(cs(b"raw")).into(),
+        add_color_space(cs(b"disp").display()).into(),
+        add_display_view(b"sRGB", b"Raw", b"raw", b"").into(),
+        add_display_view(b"sRGB", b"v2", b"disp", b"look1").into(),
+        add_display_view_full(b"P3", b"v1", b"vt", b"disp", b"").into(),
+        add_display_view_full(b"P3", b"ruled", b"vt", b"raw", b"some_rule").into(),
+        add_display_view(b"Other", b"v3", b"raw", b"").into(),
+        add_display_view(b"SRGB", b"RAW", b"<use_display_name>", b"").into(),
+        add_display_view(b"", b"v", b"raw", b"").into(),
+        add_display_view(b"sRGB", b"", b"raw", b"").into(),
+        add_display_view(b"sRGB", b"v", b"", b"").into(),
+        add_shared_view(b"shared1", b"vt", b"<USE_DISPLAY_NAME>").into(),
+        add_shared_view(b"shared2", b"", b"raw").into(),
+        add_shared_view(b"", b"", b"raw").into(),
+        add_shared_view(b"shared3", b"", b"").into(),
+        add_display_shared_view(b"sRGB", b"shared1").into(),
+        add_display_shared_view(b"sRGB", b"SHARED1").into(),
+        add_display_shared_view(b"sRGB", b"raw").into(),
+        add_display_shared_view(b"New", b"shared2").into(),
+        add_display_shared_view(b"New", b"missing").into(),
+        add_display_shared_view(b"", b"shared2").into(),
+        add_display_shared_view(b"P3", b"").into(),
+        add_display_view(b"sRGB", b"Shared1", b"raw", b"").into(),
+        Item::Copy,
+        remove_shared_view(b"SHARED2").into(),
+        remove_shared_view(b"shared2").into(),
+        remove_shared_view(b"").into(),
+        remove_display_view(b"New", b"shared2").into(),
+        remove_display_view(b"New", b"shared2").into(),
+        remove_display_view(b"sRGB", b"nope").into(),
+        remove_display_view(b"", b"v").into(),
+        remove_display_view(b"P3", b"").into(),
+        remove_display_view(b"other", b"V3").into(),
+        add_shared_view(b"shared4", b"", b"raw").into(),
+        clear_shared_views().into(),
+        clear_displays().into(),
+        add_display_view(b"P3", b"v1", b"raw", b"").into(),
+    ];
+    let probes = probes(&[b"raw", b"disp", b"RAW", b"unknown", b""], &[]).displays(
+        &[b"sRGB", b"srgb", b"P3", b"Other", b"New", b"unknown", b""],
+        &[
+            b"Raw", b"v2", b"v1", b"ruled", b"shared1", b"shared2", b"missing", b"",
+        ],
+    );
+    check_items("displays", "new", env, items, &probes);
+}
+
+/// The raw config's display and view.
+#[test]
+fn the_raw_config_display_matches_the_wheel() {
+    let probes = probes(&[b"raw"], &[]).displays(&[b"sRGB"], &[b"Raw"]);
+    check_items("raw display", "raw", &[], vec![], &probes);
 }

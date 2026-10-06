@@ -9,7 +9,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, RwLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, RwLock};
 
 use ocio_ops::exception::{Exception, Result};
 use ocio_ops::image_desc::PackedImageDesc;
@@ -17,18 +17,27 @@ use ocio_ops::math_utils::equal_with_abs_error;
 use ocio_ops::open_color_types::{
     Allocation, BitDepth, ChannelOrdering, ColorSpaceDirection, ColorSpaceVisibility,
     EnvironmentMode, OptimizationFlags, ReferenceSpaceType, SearchReferenceSpaceType,
-    TransformDirection,
+    TransformDirection, ViewType,
 };
-use ocio_ops::parse_utils::{ROLE_DEFAULT, split_string_env_style};
+use ocio_ops::parse_utils::{
+    ROLE_DEFAULT, find_in_string_vec_case_ignore, intersect_string_vecs_case_ignore,
+    split_string_env_style,
+};
+use ocio_ops::platform::strcasecmp;
 use ocio_ops::platform::{getenv, is_env_present};
 use ocio_ops::utils::pystring;
-use ocio_ops::utils::string_utils::{StringVec, c_str, compare, lower, split, trim};
+use ocio_ops::utils::string_utils::{
+    StringVec, c_str, compare, contain, lower, remove, split, trim,
+};
 
 use crate::caching::{OCIO_DISABLE_CACHE_FALLBACK, ProcessorCache, std_hash_string};
 use crate::color_space::ColorSpace;
 use crate::color_space_set::ColorSpaceSet;
 use crate::context::Context;
 use crate::context_variable_utils::{collect_context_variables, contains_context_variable_token};
+use crate::display::{
+    Display, DisplayMap, View, ViewVec, add_view, compute_displays, find_display, find_view,
+};
 use crate::named_transform::NamedTransform;
 use crate::processor::{Processor, ProcessorCacheFlags};
 use crate::transform::Transform;
@@ -136,6 +145,13 @@ impl fmt::Debug for CurrentContext {
     }
 }
 
+/// The names of `views`.
+///
+/// Port of `GetViewNames` (src/OpenColorIO/Config.cpp:202-210 @ v2.5.2).
+fn get_view_names(views: &[&View]) -> StringVec {
+    views.iter().map(|view| view.name.clone()).collect()
+}
+
 /// The result of the config's last validation.
 ///
 /// Port of `Config::Impl::Validation` (src/OpenColorIO/Config.cpp:257-262 @ v2.5.2).
@@ -221,6 +237,16 @@ pub struct Config {
     inactive_color_space_names_conf: Vec<u8>,
     /// `m_roles`: the color space of each role, by the role's lower-case name.
     roles: BTreeMap<Vec<u8>, Vec<u8>>,
+    /// `m_displays`: the displays, in config order.
+    displays: DisplayMap,
+    /// `m_activeDisplays`: the config's list of active displays.
+    active_displays: StringVec,
+    /// `m_activeViews`: the config's list of active views.
+    active_views: StringVec,
+    /// `m_sharedViews`: the config's shared views.
+    shared_views: ViewVec,
+    /// `m_displayCache` (`mutable`): the active displays, computed when first needed.
+    display_cache: OnceLock<StringVec>,
     /// `m_activeDisplaysEnvOverride`: the displays of `OCIO_ACTIVE_DISPLAYS`.
     active_displays_env_override: StringVec,
     /// `m_activeViewsEnvOverride`: the views of `OCIO_ACTIVE_VIEWS`.
@@ -271,6 +297,11 @@ impl Clone for Config {
             all_named_transforms: self.all_named_transforms.clone(),
             active_named_transform_names: self.active_named_transform_names.clone(),
             inactive_named_transform_names: self.inactive_named_transform_names.clone(),
+            displays: self.displays.clone(),
+            active_displays: self.active_displays.clone(),
+            active_views: self.active_views.clone(),
+            shared_views: self.shared_views.clone(),
+            display_cache: self.display_cache.clone(),
             active_displays_env_override: self.active_displays_env_override.clone(),
             active_views_env_override: self.active_views_env_override.clone(),
             default_luma_coefs: self.default_luma_coefs,
@@ -312,6 +343,11 @@ impl Config {
             all_named_transforms: Vec::new(),
             active_named_transform_names: StringVec::new(),
             inactive_named_transform_names: StringVec::new(),
+            displays: DisplayMap::new(),
+            active_displays: StringVec::new(),
+            active_views: StringVec::new(),
+            shared_views: ViewVec::new(),
+            display_cache: OnceLock::new(),
             active_displays_env_override: StringVec::new(),
             active_views_env_override: StringVec::new(),
             default_luma_coefs: DEFAULT_LUMA_COEFFS,
@@ -393,16 +429,17 @@ impl Config {
     }
 
     /// The raw config: version 2.0, no strict parsing, its one color space `raw` and the role
-    /// `default`, its display, and the whole environment in its context (its profile has no
-    /// `environment` section). So far its version, strict parsing, color space, role and
-    /// environment; the rest of its state comes with the displays and the file rules, built
-    /// directly until the YAML reader parses upstream's profile (3.7d). As any config, it reads
+    /// `default`, its display `sRGB` and view `Raw`, and the whole environment in its context
+    /// (its profile has no `environment` section). So far all but its file rules, which come
+    /// with them (p3-rules); built directly until the YAML reader parses upstream's profile
+    /// (3.7d). As any config, it reads
     /// the environment's active displays and views and inactive color spaces
     /// ([`Config::new`]), and fails as [`Config::new`] does.
     ///
     /// Port of `Config::CreateRaw` (src/OpenColorIO/Config.cpp:74-92, 1127-1133 @ v2.5.2), in
     /// part, with what `OCIOYaml`'s `load` sets from that profile (`setVersion`,
     /// `setStrictParsingEnabled`, `setRole`, the color space's setters and `addColorSpace`,
+    /// `addDisplayView`,
     /// `setEnvironmentMode`, `loadEnvironment`) and `Config::Impl::Read`'s refresh of the
     /// active color spaces (Config.cpp:5545-5561).
     #[doc(alias = "CreateRaw")]
@@ -421,6 +458,8 @@ impl Config {
         cs.set_allocation(Allocation::Uniform);
         cs.set_description("A raw color space. Conversions to and from this space are no-ops.");
         config.add_color_space(&cs)?;
+
+        config.add_display_view_with_view_transform("sRGB", "Raw", "", "raw", "", "", "")?;
 
         config.set_environment_mode(EnvironmentMode::LoadAll);
         config.load_environment();
@@ -1533,6 +1572,853 @@ impl Config {
         // Color space matches the desired reference space type, is not a data space, and has
         // no transforms, so it is equivalent to the reference space and hence linear.
         Ok(true)
+    }
+
+    // Displays and views //////////////////////////////////////////////////////////////////////
+
+    /// The views of `display`: its own, then the config's shared views it names (those that
+    /// exist), in their orders.
+    ///
+    /// Port of `Config::Impl::getViews` (src/OpenColorIO/Config.cpp:556-575 @ v2.5.2).
+    fn impl_views<'a>(&'a self, display: &'a Display) -> Vec<&'a View> {
+        let mut views: Vec<&View> = display.views.iter().collect();
+
+        for shared in &display.shared_views {
+            if let Some(i) = find_view(&self.shared_views, shared) {
+                views.push(&self.shared_views[i]);
+            }
+        }
+        views
+    }
+
+    /// The view `view` of `display`: its own, or the shared view it names; with an empty
+    /// display (upstream's null pointer too), the config's shared view of that name.
+    ///
+    /// Port of `Config::Impl::getView` (src/OpenColorIO/Config.cpp:783-806 @ v2.5.2).
+    fn impl_view(&self, display: &[u8], view: &[u8]) -> Option<&View> {
+        let display = c_str(display);
+        let view = c_str(view);
+        if view.is_empty() {
+            return None;
+        }
+
+        let mut search_shared = display.is_empty();
+
+        let mut iter = None;
+        if !search_shared {
+            let i = find_display(&self.displays, display)?;
+            iter = Some(i);
+
+            let shared_views = &self.displays[i].1.shared_views;
+            search_shared = contain(shared_views, view);
+        }
+
+        let views = match iter {
+            Some(i) if !search_shared => &self.displays[i].1.views,
+            _ => &self.shared_views,
+        };
+        find_view(views, view).map(|i| &views[i])
+    }
+
+    /// The active views among `views`: those of the environment's list, else of the config's
+    /// list, in that list's order and spelling; all of `views` when that leaves none.
+    ///
+    /// Port of `Config::Impl::getActiveViews` (src/OpenColorIO/Config.cpp:808-836 @ v2.5.2).
+    fn impl_active_views(&self, views: &[Vec<u8>]) -> StringVec {
+        let mut active_views = StringVec::new();
+        if !self.active_views_env_override.is_empty() {
+            let ordered_views =
+                intersect_string_vecs_case_ignore(&self.active_views_env_override, views);
+
+            if !ordered_views.is_empty() {
+                active_views = ordered_views;
+            }
+        } else if !self.active_views.is_empty() {
+            let ordered_views = intersect_string_vecs_case_ignore(&self.active_views, views);
+
+            if !ordered_views.is_empty() {
+                active_views = ordered_views;
+            }
+        }
+
+        if active_views.is_empty() {
+            active_views = views.to_vec();
+        }
+        active_views
+    }
+
+    /// The active views of `views` for an image in the color space `image_cs_name`: the views
+    /// without a viewing rule, and those whose rule names that color space or its encoding.
+    /// `view_names` gets the names of `views`.
+    ///
+    /// Port of `Config::Impl::getFilteredViews` (src/OpenColorIO/Config.cpp:838-901 @ v2.5.2),
+    /// but for the views with a rule: a config has no viewing rules until they are ported
+    /// (3.9e, `setViewingRules`), so upstream's `FindRule` finds none of them, and those views
+    /// are left out.
+    fn impl_filtered_views(
+        &self,
+        view_names: &mut StringVec,
+        views: &[&View],
+        image_cs_name: &[u8],
+    ) -> Result<StringVec> {
+        let image_cs_name = c_str(image_cs_name);
+        if self.impl_color_space(image_cs_name).is_none() {
+            return Err(Exception::new(
+                [
+                    b"Could not find source color space '".as_slice(),
+                    image_cs_name,
+                    b"'.",
+                ]
+                .concat(),
+            ));
+        }
+
+        *view_names = get_view_names(views);
+        let active_views = self.impl_active_views(view_names);
+
+        let mut filtered_active_views = StringVec::new();
+        for view in &active_views {
+            let idx = find_in_string_vec_case_ignore(view_names, view);
+            let rule_name = &views[idx as usize].rule;
+            if rule_name.is_empty() {
+                // Include all views that do not have a rule.
+                filtered_active_views.push(view.clone());
+            }
+        }
+        Ok(filtered_active_views)
+    }
+
+    /// The active displays, computed when first needed after a change.
+    ///
+    /// Port of `Config::Impl::updateDisplayCache` (src/OpenColorIO/Config.cpp:903-913 @
+    /// v2.5.2). Upstream recomputes an empty cache each time; the port computes it once after
+    /// each change, which gives the same displays, as every change of what it is computed
+    /// from clears it.
+    fn display_cache(&self) -> &StringVec {
+        self.display_cache.get_or_init(|| {
+            let mut cache = StringVec::new();
+            compute_displays(
+                &mut cache,
+                &self.displays,
+                &self.active_displays,
+                &self.active_displays_env_override,
+            );
+            cache
+        })
+    }
+
+    /// Empties the cache of active displays (`m_displayCache.clear()`).
+    fn clear_display_cache(&mut self) {
+        self.display_cache = OnceLock::new();
+    }
+
+    /// Whether `view_name` is one of the shared views of `disp_name` (with an empty display
+    /// name, of the config), ignoring case.
+    ///
+    /// Port of `Config::isViewShared` (src/OpenColorIO/Config.cpp:3345-3359 @ v2.5.2).
+    #[doc(alias = "isViewShared")]
+    pub fn is_view_shared(&self, disp_name: impl AsRef<[u8]>, view_name: impl AsRef<[u8]>) -> bool {
+        let disp_name = disp_name.as_ref();
+        let view_name = c_str(view_name.as_ref());
+        if view_name.is_empty() {
+            return false;
+        }
+
+        for v in 0..self.num_views_of_type(ViewType::Shared, disp_name) {
+            let shared_view_name = self.view_of_type(ViewType::Shared, disp_name, v);
+            if !shared_view_name.is_empty() && strcasecmp(shared_view_name, view_name).is_eq() {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    /// Adds a shared view to the config, or replaces the one of that name (ignoring case).
+    ///
+    /// Port of `Config::addSharedView` (src/OpenColorIO/Config.cpp:3361-3384 @ v2.5.2).
+    #[doc(alias = "addSharedView")]
+    pub fn add_shared_view(
+        &mut self,
+        view: impl AsRef<[u8]>,
+        view_transform: impl AsRef<[u8]>,
+        color_space: impl AsRef<[u8]>,
+        looks: impl AsRef<[u8]>,
+        rule: impl AsRef<[u8]>,
+        description: impl AsRef<[u8]>,
+    ) -> Result<()> {
+        let view = c_str(view.as_ref());
+        if view.is_empty() {
+            return Err(Exception::new(
+                "Shared view could not be added to config, view name has to be a non-empty name.",
+            ));
+        }
+
+        let color_space = c_str(color_space.as_ref());
+        if color_space.is_empty() {
+            return Err(Exception::new(
+                "Shared view could not be added to config, color space name has to be a \
+                 non-empty name.",
+            ));
+        }
+
+        add_view(
+            &mut self.shared_views,
+            view,
+            view_transform.as_ref(),
+            color_space,
+            looks.as_ref(),
+            rule.as_ref(),
+            description.as_ref(),
+        );
+
+        self.clear_display_cache();
+
+        self.reset_cache_ids();
+        Ok(())
+    }
+
+    /// Removes the config's shared view `view` (ignoring case).
+    ///
+    /// Port of `Config::removeSharedView` (src/OpenColorIO/Config.cpp:3386-3412 @ v2.5.2).
+    #[doc(alias = "removeSharedView")]
+    pub fn remove_shared_view(&mut self, view: impl AsRef<[u8]>) -> Result<()> {
+        let view = c_str(view.as_ref());
+        if view.is_empty() {
+            return Err(Exception::new(
+                "Shared view could not be removed from config, view name has to be a non-empty \
+                 name.",
+            ));
+        }
+
+        match find_view(&self.shared_views, view) {
+            Some(i) => {
+                self.shared_views.remove(i);
+
+                self.clear_display_cache();
+
+                self.reset_cache_ids();
+                Ok(())
+            }
+            None => Err(Exception::new(
+                [
+                    b"Shared view could not be removed from config. A shared view named '"
+                        .as_slice(),
+                    view,
+                    b"' could not be found.",
+                ]
+                .concat(),
+            )),
+        }
+    }
+
+    /// Removes the config's shared views, the last first.
+    ///
+    /// Port of `Config::clearSharedViews` (src/OpenColorIO/Config.cpp:3414-3425 @ v2.5.2).
+    #[doc(alias = "clearSharedViews")]
+    pub fn clear_shared_views(&mut self) {
+        let num_views = self.num_views_of_type(ViewType::Shared, b"");
+        for v in (0..num_views).rev() {
+            let shared_view_name = self.view_of_type(ViewType::Shared, b"", v).to_vec();
+            if !shared_view_name.is_empty() {
+                // The view exists: removing it can't fail.
+                let _ = self.remove_shared_view(&shared_view_name);
+            }
+        }
+    }
+
+    /// The first active display; `""` for none.
+    ///
+    /// Port of `Config::getDefaultDisplay` (src/OpenColorIO/Config.cpp:3427-3430 @ v2.5.2).
+    #[doc(alias = "getDefaultDisplay")]
+    pub fn default_display(&self) -> &[u8] {
+        self.display(0)
+    }
+
+    /// The number of active displays.
+    ///
+    /// Port of `Config::getNumDisplays` (src/OpenColorIO/Config.cpp:3432-3437 @ v2.5.2).
+    #[doc(alias = "getNumDisplays")]
+    pub fn num_displays(&self) -> i32 {
+        self.display_cache().len() as i32
+    }
+
+    /// The active display at `index`; `""` outside them.
+    ///
+    /// Port of `Config::getDisplay` (src/OpenColorIO/Config.cpp:3439-3449 @ v2.5.2).
+    #[doc(alias = "getDisplay")]
+    pub fn display(&self, index: i32) -> &[u8] {
+        usize::try_from(index)
+            .ok()
+            .and_then(|i| self.display_cache().get(i))
+            .map_or(&[], Vec::as_slice)
+    }
+
+    /// The first active view of `display`; `""` for none.
+    ///
+    /// Port of `Config::getDefaultView(const char *)` (src/OpenColorIO/Config.cpp:3451-3454 @
+    /// v2.5.2).
+    #[doc(alias = "getDefaultView")]
+    pub fn default_view(&self, display: impl AsRef<[u8]>) -> &[u8] {
+        self.view(display, 0)
+    }
+
+    /// The first view of `display` for an image in `colorspace_name` (see
+    /// [`Config::view_for_color_space`]).
+    ///
+    /// Port of `Config::getDefaultView(const char *, const char *)`
+    /// (src/OpenColorIO/Config.cpp:3456-3459 @ v2.5.2).
+    #[doc(alias = "getDefaultView")]
+    pub fn default_view_for_color_space(
+        &self,
+        display: impl AsRef<[u8]>,
+        colorspace_name: impl AsRef<[u8]>,
+    ) -> Result<&[u8]> {
+        self.view_for_color_space(display, colorspace_name, 0)
+    }
+
+    /// The number of active views of `display` (active or not, any display); 0 for an unknown
+    /// display.
+    ///
+    /// Port of `Config::getNumViews(const char *)` (src/OpenColorIO/Config.cpp:3461-3473 @
+    /// v2.5.2).
+    #[doc(alias = "getNumViews")]
+    pub fn num_views(&self, display: impl AsRef<[u8]>) -> i32 {
+        let display = c_str(display.as_ref());
+        if display.is_empty() {
+            return 0;
+        }
+
+        let Some(iter) = find_display(&self.displays, display) else {
+            return 0;
+        };
+
+        let views = self.impl_views(&self.displays[iter].1);
+
+        let master_views = get_view_names(&views);
+        let active_views = self.impl_active_views(&master_views);
+        active_views.len() as i32
+    }
+
+    /// The active view of `display` at `index`; `""` outside them.
+    ///
+    /// Port of `Config::getView(const char *, int)` (src/OpenColorIO/Config.cpp:3475-3500 @
+    /// v2.5.2).
+    #[doc(alias = "getView")]
+    pub fn view(&self, display: impl AsRef<[u8]>, index: i32) -> &[u8] {
+        let display = c_str(display.as_ref());
+        if display.is_empty() {
+            return &[];
+        }
+
+        // Include all displays, do not limit to active displays. Consider active views only.
+        let Some(iter) = find_display(&self.displays, display) else {
+            return &[];
+        };
+
+        let views = self.impl_views(&self.displays[iter].1);
+
+        let master_views = get_view_names(&views);
+        let active_views = self.impl_active_views(&master_views);
+
+        let Some(active) = usize::try_from(index)
+            .ok()
+            .and_then(|i| active_views.get(i))
+        else {
+            return &[];
+        };
+        let idx = find_in_string_vec_case_ignore(&master_views, active);
+
+        match usize::try_from(idx).ok().and_then(|i| views.get(i)) {
+            Some(view) => &view.name,
+            None => &[],
+        }
+    }
+
+    /// The number of active views of `display` for an image in the color space `colorspace`
+    /// (the views without a viewing rule); 0 for an unknown display or an empty color space
+    /// name, an error for an unknown color space.
+    ///
+    /// Port of `Config::getNumViews(const char *, const char *)`
+    /// (src/OpenColorIO/Config.cpp:3502-3517 @ v2.5.2).
+    #[doc(alias = "getNumViews")]
+    pub fn num_views_for_color_space(
+        &self,
+        display: impl AsRef<[u8]>,
+        colorspace: impl AsRef<[u8]>,
+    ) -> Result<i32> {
+        let display = c_str(display.as_ref());
+        let colorspace = c_str(colorspace.as_ref());
+        if display.is_empty() || colorspace.is_empty() {
+            return Ok(0);
+        }
+
+        let Some(iter) = find_display(&self.displays, display) else {
+            return Ok(0);
+        };
+
+        let views = self.impl_views(&self.displays[iter].1);
+
+        let mut view_names = StringVec::new();
+        let filtered_views = self.impl_filtered_views(&mut view_names, &views, colorspace)?;
+
+        Ok(filtered_views.len() as i32)
+    }
+
+    /// The view of `display` at `index` among those for an image in the color space
+    /// `colorspace`. When there are none, the view at `index` among all of the display's, else
+    /// its first view.
+    ///
+    /// Port of `Config::getView(const char *, const char *, int)`
+    /// (src/OpenColorIO/Config.cpp:3519-3554 @ v2.5.2).
+    #[doc(alias = "getView")]
+    pub fn view_for_color_space(
+        &self,
+        display: impl AsRef<[u8]>,
+        colorspace: impl AsRef<[u8]>,
+        index: i32,
+    ) -> Result<&[u8]> {
+        let display = c_str(display.as_ref());
+        let colorspace = c_str(colorspace.as_ref());
+        if display.is_empty() || colorspace.is_empty() {
+            return Ok(&[]);
+        }
+
+        let Some(iter) = find_display(&self.displays, display) else {
+            return Ok(&[]);
+        };
+
+        let views = self.impl_views(&self.displays[iter].1);
+
+        let mut view_names = StringVec::new();
+        let filtered_views = self.impl_filtered_views(&mut view_names, &views, colorspace)?;
+        let mut idx = index;
+
+        if !filtered_views.is_empty() {
+            let Some(filtered) = usize::try_from(index)
+                .ok()
+                .and_then(|i| filtered_views.get(i))
+            else {
+                return Ok(&[]);
+            };
+            idx = find_in_string_vec_case_ignore(&view_names, filtered);
+        }
+
+        if let Some(view) = usize::try_from(idx).ok().and_then(|i| views.get(i)) {
+            return Ok(&view.name);
+        }
+
+        if let Some(view) = views.first() {
+            return Ok(&view.name);
+        }
+
+        Ok(&[])
+    }
+
+    /// Whether the two configs have the view `view_name` of `disp_name` (or the shared view,
+    /// with an empty display name), with the same color space, looks, view transform and rule,
+    /// ignoring case (not the description).
+    ///
+    /// Port of `Config::AreViewsEqual` (src/OpenColorIO/Config.cpp:3557-3591 @ v2.5.2).
+    #[doc(alias = "AreViewsEqual")]
+    pub fn are_views_equal(
+        first: &Config,
+        second: &Config,
+        disp_name: impl AsRef<[u8]>,
+        view_name: impl AsRef<[u8]>,
+    ) -> bool {
+        let (disp_name, view_name) = (disp_name.as_ref(), view_name.as_ref());
+        // It's ok to call this even for displays/views that don't exist, it will simply return
+        // false.
+
+        let cs1 = first.display_view_color_space_name(disp_name, view_name);
+        let cs2 = second.display_view_color_space_name(disp_name, view_name);
+
+        // If the color space is not empty, the display and view exist.
+        if !cs1.is_empty() && !cs2.is_empty() && strcasecmp(cs1, cs2).is_eq() {
+            // Note the remaining strings may be empty in a valid view.
+            // Intentionally not checking the description since it is not a functional
+            // difference.
+            if strcasecmp(
+                first.display_view_looks(disp_name, view_name),
+                second.display_view_looks(disp_name, view_name),
+            )
+            .is_eq()
+                && strcasecmp(
+                    first.display_view_transform_name(disp_name, view_name),
+                    second.display_view_transform_name(disp_name, view_name),
+                )
+                .is_eq()
+                && strcasecmp(
+                    first.display_view_rule(disp_name, view_name),
+                    second.display_view_rule(disp_name, view_name),
+                )
+                .is_eq()
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// The view transform of the view `view` of `display` (see [`Config::has_view`]); `""` for
+    /// none.
+    ///
+    /// Port of `Config::getDisplayViewTransformName` (src/OpenColorIO/Config.cpp:3593-3599 @
+    /// v2.5.2).
+    #[doc(alias = "getDisplayViewTransformName")]
+    pub fn display_view_transform_name(
+        &self,
+        display: impl AsRef<[u8]>,
+        view: impl AsRef<[u8]>,
+    ) -> &[u8] {
+        self.impl_view(display.as_ref(), view.as_ref())
+            .map_or(&[], |v| &v.view_transform)
+    }
+
+    /// Port of `Config::getDisplayViewColorSpaceName` (src/OpenColorIO/Config.cpp:3601-3607 @
+    /// v2.5.2).
+    #[doc(alias = "getDisplayViewColorSpaceName")]
+    pub fn display_view_color_space_name(
+        &self,
+        display: impl AsRef<[u8]>,
+        view: impl AsRef<[u8]>,
+    ) -> &[u8] {
+        self.impl_view(display.as_ref(), view.as_ref())
+            .map_or(&[], |v| &v.colorspace)
+    }
+
+    /// Port of `Config::getDisplayViewLooks` (src/OpenColorIO/Config.cpp:3609-3615 @ v2.5.2).
+    #[doc(alias = "getDisplayViewLooks")]
+    pub fn display_view_looks(&self, display: impl AsRef<[u8]>, view: impl AsRef<[u8]>) -> &[u8] {
+        self.impl_view(display.as_ref(), view.as_ref())
+            .map_or(&[], |v| &v.looks)
+    }
+
+    /// Port of `Config::getDisplayViewRule` (src/OpenColorIO/Config.cpp:3617-3622 @ v2.5.2).
+    #[doc(alias = "getDisplayViewRule")]
+    pub fn display_view_rule(&self, display: impl AsRef<[u8]>, view: impl AsRef<[u8]>) -> &[u8] {
+        self.impl_view(display.as_ref(), view.as_ref())
+            .map_or(&[], |v| &v.rule)
+    }
+
+    /// Port of `Config::getDisplayViewDescription` (src/OpenColorIO/Config.cpp:3624-3629 @
+    /// v2.5.2).
+    #[doc(alias = "getDisplayViewDescription")]
+    pub fn display_view_description(
+        &self,
+        display: impl AsRef<[u8]>,
+        view: impl AsRef<[u8]>,
+    ) -> &[u8] {
+        self.impl_view(display.as_ref(), view.as_ref())
+            .map_or(&[], |v| &v.description)
+    }
+
+    /// Whether `disp_name` has the view `view_name` (its own or a shared one it names), active
+    /// or not; with an empty display name, whether the config has that shared view.
+    ///
+    /// Port of `Config::hasView` (src/OpenColorIO/Config.cpp:3631-3644 @ v2.5.2).
+    #[doc(alias = "hasView")]
+    pub fn has_view(&self, disp_name: impl AsRef<[u8]>, view_name: impl AsRef<[u8]>) -> bool {
+        // All views must have a color space, so if it's not empty, the view exists.
+        !self
+            .display_view_color_space_name(disp_name, view_name)
+            .is_empty()
+    }
+
+    /// Adds the config's shared view `shared_view` to `display` (made if needed).
+    ///
+    /// Port of `Config::addDisplaySharedView` (src/OpenColorIO/Config.cpp:3646-3695 @ v2.5.2).
+    #[doc(alias = "addDisplaySharedView")]
+    pub fn add_display_shared_view(
+        &mut self,
+        display: impl AsRef<[u8]>,
+        shared_view: impl AsRef<[u8]>,
+    ) -> Result<()> {
+        let display = c_str(display.as_ref());
+        let shared_view = c_str(shared_view.as_ref());
+        if display.is_empty() {
+            return Err(Exception::new(
+                "Shared view could not be added to display: non-empty display name is needed.",
+            ));
+        }
+        if shared_view.is_empty() {
+            return Err(Exception::new(
+                "Shared view could not be added to display: non-empty view name is needed.",
+            ));
+        }
+
+        let mut invalidate_cache = false;
+        let iter = match find_display(&self.displays, display) {
+            Some(i) => i,
+            None => {
+                self.displays.push((display.to_vec(), Display::default()));
+                invalidate_cache = true;
+                self.displays.len() - 1
+            }
+        };
+
+        let existing_views = &self.displays[iter].1.views;
+        if find_view(existing_views, shared_view).is_some() {
+            return Err(Exception::new(
+                [
+                    b"There is already a view named '".as_slice(),
+                    shared_view,
+                    b"' in the display '",
+                    display,
+                    b"'.",
+                ]
+                .concat(),
+            ));
+        }
+
+        let views = &mut self.displays[iter].1.shared_views;
+        if contain(views, shared_view) {
+            return Err(Exception::new(
+                [
+                    b"There is already a shared view named '".as_slice(),
+                    shared_view,
+                    b"' in the display '",
+                    display,
+                    b"'.",
+                ]
+                .concat(),
+            ));
+        }
+        views.push(shared_view.to_vec());
+        if invalidate_cache {
+            self.clear_display_cache();
+        }
+        self.reset_cache_ids();
+        Ok(())
+    }
+
+    /// Adds the view `view` of `display` (made if needed) for the color space `color_space`
+    /// with `looks`, or replaces the view of that name.
+    ///
+    /// Port of `Config::addDisplayView(const char *, const char *, const char *, const char *)`
+    /// (src/OpenColorIO/Config.cpp:3697-3701 @ v2.5.2).
+    #[doc(alias = "addDisplayView")]
+    pub fn add_display_view(
+        &mut self,
+        display: impl AsRef<[u8]>,
+        view: impl AsRef<[u8]>,
+        color_space: impl AsRef<[u8]>,
+        looks: impl AsRef<[u8]>,
+    ) -> Result<()> {
+        self.add_display_view_with_view_transform(display, view, b"", color_space, looks, b"", b"")
+    }
+
+    /// Adds the view `view` of `display` (made if needed), or replaces the view of that name
+    /// (ignoring case). Refuses a view named as one of the display's shared views.
+    ///
+    /// Port of `Config::addDisplayView(const char *, const char *, const char *, const char *,
+    /// const char *, const char *, const char *)` (src/OpenColorIO/Config.cpp:3703-3750 @
+    /// v2.5.2).
+    #[doc(alias = "addDisplayView")]
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_display_view_with_view_transform(
+        &mut self,
+        display: impl AsRef<[u8]>,
+        view: impl AsRef<[u8]>,
+        view_transform: impl AsRef<[u8]>,
+        color_space: impl AsRef<[u8]>,
+        looks: impl AsRef<[u8]>,
+        rule: impl AsRef<[u8]>,
+        description: impl AsRef<[u8]>,
+    ) -> Result<()> {
+        let display = c_str(display.as_ref());
+        let view = c_str(view.as_ref());
+        let color_space = c_str(color_space.as_ref());
+        if display.is_empty() {
+            return Err(Exception::new(
+                "View could not be added to display in config: a non-empty display name is \
+                 needed.",
+            ));
+        }
+        if view.is_empty() {
+            return Err(Exception::new(
+                "View could not be added to display in config: a non-empty view name is needed.",
+            ));
+        }
+        if color_space.is_empty() {
+            return Err(Exception::new(
+                "View could not be added to display in config: a non-empty color space name is \
+                 needed.",
+            ));
+        }
+
+        match find_display(&self.displays, display) {
+            None => {
+                let mut d = Display::default();
+                d.views.push(View::new(
+                    view,
+                    view_transform.as_ref(),
+                    color_space,
+                    looks.as_ref(),
+                    rule.as_ref(),
+                    description.as_ref(),
+                ));
+                self.displays.push((display.to_vec(), d));
+                self.clear_display_cache();
+            }
+            Some(iter) => {
+                if contain(&self.displays[iter].1.shared_views, view) {
+                    return Err(Exception::new(
+                        [
+                            b"There is already a shared view named '".as_slice(),
+                            view,
+                            b"' in the display '",
+                            display,
+                            b"'.",
+                        ]
+                        .concat(),
+                    ));
+                }
+
+                add_view(
+                    &mut self.displays[iter].1.views,
+                    view,
+                    view_transform.as_ref(),
+                    color_space,
+                    looks.as_ref(),
+                    rule.as_ref(),
+                    description.as_ref(),
+                );
+            }
+        }
+
+        self.reset_cache_ids();
+        Ok(())
+    }
+
+    /// Removes the view (or the reference to a shared view) `view` from `display`, and the
+    /// display when it has no view left.
+    ///
+    /// Port of `Config::removeDisplayView` (src/OpenColorIO/Config.cpp:3752-3805 @ v2.5.2).
+    #[doc(alias = "removeDisplayView")]
+    pub fn remove_display_view(
+        &mut self,
+        display: impl AsRef<[u8]>,
+        view: impl AsRef<[u8]>,
+    ) -> Result<()> {
+        let display = c_str(display.as_ref());
+        let view = c_str(view.as_ref());
+        if display.is_empty() {
+            return Err(Exception::new(
+                "Can't remove a view from a display with an empty display name.",
+            ));
+        }
+        if view.is_empty() {
+            return Err(Exception::new(
+                "Can't remove a view from a display with an empty view name.",
+            ));
+        }
+
+        // Check if the display exists.
+
+        let Some(iter) = find_display(&self.displays, display) else {
+            return Err(Exception::new(
+                [
+                    b"Could not find a display named '".as_slice(),
+                    display,
+                    b"' to be removed from config.",
+                ]
+                .concat(),
+            ));
+        };
+
+        let entry = &mut self.displays[iter].1;
+        if !remove(&mut entry.shared_views, view) {
+            // view is not a shared view.
+            // Is it a view?
+            let Some(view_it) = find_view(&entry.views, view) else {
+                return Err(Exception::new(
+                    [
+                        b"Could not find a view named '".as_slice(),
+                        view,
+                        b" to be removed from the display named '",
+                        display,
+                        b"'.",
+                    ]
+                    .concat(),
+                ));
+            };
+
+            entry.views.remove(view_it);
+        }
+
+        // Check if the display needs to be removed also.
+        if entry.views.is_empty() && entry.shared_views.is_empty() {
+            self.displays.remove(iter);
+        }
+
+        self.clear_display_cache();
+
+        self.reset_cache_ids();
+        Ok(())
+    }
+
+    /// Removes every display.
+    ///
+    /// Port of `Config::clearDisplays` (src/OpenColorIO/Config.cpp:3807-3814 @ v2.5.2).
+    #[doc(alias = "clearDisplays")]
+    pub fn clear_displays(&mut self) {
+        self.displays.clear();
+        self.clear_display_cache();
+
+        self.reset_cache_ids();
+    }
+
+    /// The number of views of `type_` of `display`: its shared or its own views; with an empty
+    /// display name, the config's shared views; 0 for an unknown display.
+    ///
+    /// Port of `Config::getNumViews(ViewType, const char *)` (src/OpenColorIO/Config.cpp:
+    /// 4388-4407 @ v2.5.2).
+    #[doc(alias = "getNumViews")]
+    pub fn num_views_of_type(&self, type_: ViewType, display: impl AsRef<[u8]>) -> i32 {
+        let display = c_str(display.as_ref());
+        if display.is_empty() {
+            return self.shared_views.len() as i32;
+        }
+
+        let Some(iter) = find_display(&self.displays, display) else {
+            return 0;
+        };
+
+        match type_ {
+            ViewType::Shared => self.displays[iter].1.shared_views.len() as i32,
+            ViewType::DisplayDefined => self.displays[iter].1.views.len() as i32,
+        }
+    }
+
+    /// The view of `type_` of `display` at `index` (see [`Config::num_views_of_type`]); `""`
+    /// outside them.
+    ///
+    /// Port of `Config::getView(ViewType, const char *, int)` (src/OpenColorIO/Config.cpp:
+    /// 4409-4446 @ v2.5.2).
+    #[doc(alias = "getView")]
+    pub fn view_of_type(&self, type_: ViewType, display: impl AsRef<[u8]>, index: i32) -> &[u8] {
+        let display = c_str(display.as_ref());
+        let index = usize::try_from(index).ok();
+        if display.is_empty() {
+            return index
+                .and_then(|i| self.shared_views.get(i))
+                .map_or(&[], |v| &v.name);
+        }
+
+        let Some(iter) = find_display(&self.displays, display) else {
+            return &[];
+        };
+
+        match type_ {
+            ViewType::Shared => index
+                .and_then(|i| self.displays[iter].1.shared_views.get(i))
+                .map_or(&[], Vec::as_slice),
+            ViewType::DisplayDefined => index
+                .and_then(|i| self.displays[iter].1.views.get(i))
+                .map_or(&[], |v| &v.name),
+        }
     }
 
     /// Port of `Config::getProcessorCacheFlags` (Config.cpp:924-927, 5333-5336 @ v2.5.2).
