@@ -173,7 +173,7 @@ path = "src/OpenColorIO/Config.cpp"
 kind = "src"
 target = ["crates/ocio/src/config.rs"]
 status = "partial"
-note = "p1-transforms T0: CreateRaw's version and context, getMajorVersion, getMinorVersion, getCurrentContext; p1-transforms-fam2 (1.8d): setMajorVersion, which empties the processor cache (resetCacheIDs); 1.8g: the processor cache, its flags (get/setProcessorCacheFlags, clearProcessorCache, the copy) and getProcessor of a transform (with a context, a direction, or neither), its key and its fallback. CreateRaw's color spaces and the rest come with Phase 3. Later: getProcessor's context-variables branch is a not-ported error until the context has its state, then usedContext->getCacheID() in the key; the key ignores the cache flags, a candidate I- entry once ExposureContrastTransform (dynamic properties) lands"
+note = "p1-transforms T0: CreateRaw's version and context, getMajorVersion, getMinorVersion, getCurrentContext; p1-transforms-fam2 (1.8d): setMajorVersion, which empties the processor cache (resetCacheIDs); 1.8g: the processor cache, its flags (get/setProcessorCacheFlags, clearProcessorCache, the copy) and getProcessor of a transform (with a context, a direction, or neither), its key and its fallback. p3-config-1 3.4d: Config::Create and Impl's constructor (the environment's active displays, views and inactive color spaces), the state, resetCacheIDs, the copy (createEditableCopy), LookupEnvironment, setMinorVersion, setVersion, name, description, family separator, environment variables and mode, loadEnvironment, search paths, working dir; CreateRaw built directly with its version and its environment (LOAD_ALL). Later: GetFileReferences with getCacheID (3.7d); upgradeToLatestVersion with the file rules (UpdateFileRulesFromV1ToV2, p3-rules); getProcessor's context-variables branch is a not-ported error until 3.2d, then usedContext->getCacheID() in the key; the key ignores the cache flags, a candidate I- entry once ExposureContrastTransform (dynamic properties) lands"
 
 [[file]]
 path = "src/OpenColorIO/ConfigUtils.cpp"
@@ -4221,7 +4221,7 @@ path = "tests/cpu/Config_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/config_tests.rs"]
 status = "todo"
-note = "p1-transforms-fam2 (1.8d): the setMajorVersion checks of version (2065-2067, 2104-2107), without the markers; the tests need configs read from YAML (Phase 3)"
+note = "p1-transforms-fam2 (1.8d): the setMajorVersion checks of version (2065-2067, 2104-2107); p3-config-1 3.4d: version's setMinorVersion and setVersion checks (2065-2107) and family_separator's API checks (7486-7500), on configs made without YAML, without the markers; the tests need configs read from YAML (Phase 3)"
 
 [[file]]
 path = "tests/cpu/ContextVariableUtils_tests.cpp"
