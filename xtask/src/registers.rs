@@ -43,7 +43,7 @@ pub(crate) fn check(root: &Path) -> Vec<String> {
 }
 
 /// An entry's series and number: `('U', 10)` for `U-10`.
-fn entry_id(heading: &str) -> Option<(char, u32)> {
+pub(crate) fn entry_id(heading: &str) -> Option<(char, u32)> {
     let rest = heading.strip_prefix("### ")?;
     let mut chars = rest.chars();
     let series = chars.next().filter(|c| *c == 'I' || *c == 'U')?;
