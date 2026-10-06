@@ -91,6 +91,7 @@ fn planned_buffers() -> Vec<Vec<f32>> {
             ulps: 1,
         },
         ProbeSet::RowLengths { max_pixels: ROWS },
+        ProbeSet::NanBuffers { max_pixels: 2 },
     ]
     .iter()
     .flat_map(ProbeSet::rgba_buffers)
@@ -144,6 +145,8 @@ struct LutFamily {
     bases: Vec<Case<Lut>>,
     directions: Vec<Direction>,
     bug: Bug,
+    /// Alpha passes through on buffers of at least this many pixels; `None`: no channel.
+    pass_through_from: Option<usize>,
 }
 
 impl Family for LutFamily {
@@ -179,6 +182,12 @@ impl Family for LutFamily {
     }
     fn breakpoints(&self, _: &Lut, _: Direction) -> Vec<f32> {
         lut_domain_points(ENTRIES)
+    }
+    fn pass_through(&self, _: &Lut, _: &Combo) -> [bool; 4] {
+        [false, false, false, self.pass_through_from.is_some()]
+    }
+    fn pass_through_min_pixels(&self) -> usize {
+        self.pass_through_from.unwrap_or(1)
     }
     fn extra_probes(&self, _: &Lut, _: Direction) -> Vec<ProbeSet> {
         vec![ProbeSet::RowLengths { max_pixels: ROWS }]
@@ -219,6 +228,7 @@ fn a_lut_given_as_a_blob_passes() {
         bases: Vec::new(),
         directions: Direction::BOTH.to_vec(),
         bug: Bug::None,
+        pass_through_from: None,
     };
     let summary: Summary = run_with(&family, &plan());
     assert_eq!(summary.failures, Vec::<String>::new());
@@ -237,6 +247,7 @@ fn a_port_wrong_on_one_row_length_fails() {
         bases: Vec::new(),
         directions: Direction::BOTH.to_vec(),
         bug: Bug::OnRowsOf(7),
+        pass_through_from: None,
     };
     let result = catch_unwind(AssertUnwindSafe(|| run_with(&family, &plan())));
     let payload = result.expect_err("the battery should fail");
@@ -261,6 +272,7 @@ fn generated_cases_change_one_chosen_entry() {
         bases: cases()[..1].to_vec(),
         directions: vec![Direction::Forward],
         bug: Bug::None,
+        pass_through_from: None,
     };
     let plan = Plan {
         mutations: Mutations::Sampled,
@@ -292,4 +304,78 @@ fn a_spec_with_blobs_gives_cpu_apply_its_blobs() {
     };
     assert_eq!(args["transform"], *transform);
     assert!(args.get("optimization").is_some_and(Value::is_array));
+}
+
+/// A plan of NaN buffers of 1 and 2 pixels only.
+fn nan_plan() -> Plan {
+    Plan {
+        probes: vec![ProbeSet::NanBuffers { max_pixels: 2 }],
+        generated_probes: vec![ProbeSet::NanBuffers { max_pixels: 2 }],
+        ..plan()
+    }
+}
+
+/// The family of [`pass_through_holds_from_its_minimum_row_length`]: the curves, forward,
+/// alpha passing through from rows of `from` pixels, without the row-length probes.
+fn alpha_family(from: usize) -> LutFamily {
+    LutFamily {
+        cases: cases()[..1].to_vec(),
+        bases: Vec::new(),
+        directions: vec![Direction::Forward],
+        bug: Bug::None,
+        pass_through_from: Some(from),
+    }
+}
+
+/// A pass-through channel holds from the family's minimum row length: the wheel's forward 1D
+/// LUT moves alpha unchanged through its SIMD kernel on rows of 2 pixels, but its scalar loop
+/// multiplies the alpha of a 1-pixel row by 1, which quiets the signalling NaN of the "nan
+/// rgba, 1 pixels" buffer. From 2 pixels the battery passes; from 1 it reports that row.
+#[test]
+fn pass_through_holds_from_its_minimum_row_length() {
+    let summary = run_with(&NoRows(alpha_family(2)), &nan_plan());
+    assert_eq!(summary.failures, Vec::<String>::new());
+
+    let result = catch_unwind(AssertUnwindSafe(|| {
+        run_with(&NoRows(alpha_family(1)), &nan_plan())
+    }));
+    let payload = result.expect_err("the battery should fail");
+    let message = payload
+        .downcast_ref::<String>()
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        message.contains("probe \"nan rgba, 1 pixels\" (1 pixels): the wheel changes channels"),
+        "{message}"
+    );
+    assert!(!message.contains("2 pixels"), "{message}");
+}
+
+/// A [`LutFamily`] without its row-length probes.
+struct NoRows(LutFamily);
+
+impl Family for NoRows {
+    type Params = Lut;
+
+    fn name(&self) -> String {
+        self.0.name()
+    }
+    fn cases(&self) -> Vec<Case<Lut>> {
+        self.0.cases()
+    }
+    fn directions(&self) -> Vec<Direction> {
+        self.0.directions()
+    }
+    fn spec(&self, lut: &Lut, direction: Direction) -> Spec {
+        self.0.spec(lut, direction)
+    }
+    fn port(&self, lut: &Lut, combo: &Combo) -> Result<Port, String> {
+        self.0.port(lut, combo)
+    }
+    fn pass_through(&self, lut: &Lut, combo: &Combo) -> [bool; 4] {
+        self.0.pass_through(lut, combo)
+    }
+    fn pass_through_min_pixels(&self) -> usize {
+        self.0.pass_through_min_pixels()
+    }
 }

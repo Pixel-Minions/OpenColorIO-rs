@@ -603,6 +603,15 @@ pub trait Family {
         [false; 4]
     }
 
+    /// The fewest pixels a buffer has for [`Family::pass_through`] to hold. A renderer that
+    /// renders shorter rows another way declares it: the 1D LUT's SIMD kernels move alpha
+    /// unchanged, but a row of one pixel takes a scalar loop that multiplies it by 1, which
+    /// quiets a signalling NaN. On shorter buffers no channel passes through, and the other
+    /// profiles are not compared. 1 by default.
+    fn pass_through_min_pixels(&self) -> usize {
+        1
+    }
+
     /// Points whose ±N ulp neighbourhoods to probe for `params` in `direction`, such as break
     /// points; none by default.
     fn breakpoints(&self, params: &Self::Params, direction: Direction) -> Vec<f32> {

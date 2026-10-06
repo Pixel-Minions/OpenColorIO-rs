@@ -491,6 +491,7 @@ impl<F: Family> Checker<'_, F> {
         let label = self.label(group);
         let input = &buffer.pixels;
         let expected = response.blob_f32(0);
+        let min_pixels = self.family.pass_through_min_pixels();
         let ports = self.ports(group);
         let port = match &ports.port {
             Ok(port) => port,
@@ -506,7 +507,12 @@ impl<F: Family> Checker<'_, F> {
         };
         let actual = port.apply(input);
         let comparison = case.compare_pixels(&combo, input, &expected, &actual);
-        let pass_through = ports.pass_through;
+        // Shorter buffers have no pass-through channel (`Family::pass_through_min_pixels`).
+        let pass_through = if input.len() / 4 >= min_pixels {
+            ports.pass_through
+        } else {
+            [false; 4]
+        };
         let mut failures = Vec::new();
         let mut pass_through_checks = 0;
         if pass_through.iter().any(|&p| p) {
