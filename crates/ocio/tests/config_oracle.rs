@@ -9,11 +9,13 @@
 //! The oracle's process holds exactly the request's variables, set one by one; the port reads
 //! a `MapEnv` the same variables are set in, through OCIO's `Setenv`, on the test's own thread.
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use ocio::{
-    ColorSpace, ColorSpaceDirection, ColorSpaceVisibility, Config, LogTransform, MatrixTransform,
-    ReferenceSpaceType, SearchReferenceSpaceType, Transform,
+    ColorSpace, ColorSpaceDirection, ColorSpaceVisibility, Config, CurrentContext, LogTransform,
+    MatrixTransform, ReferenceSpaceType, SearchReferenceSpaceType, Transform,
 };
 use ocio_ops::open_color_types::EnvironmentMode;
 use ocio_ops::platform::{MapEnv, set_thread_env_provider, setenv};
@@ -650,7 +652,7 @@ fn getters() -> Vec<Step> {
             text_out(c.working_dir())
         }),
         step(json!({"call": "getCurrentContext", "as": "context"}), |c| {
-            let repr = c.current_context().to_bytes();
+            let repr = c.current_context().get().to_bytes();
             let repr = match std::str::from_utf8(&repr) {
                 Ok(_) => bytes_arg(&repr),
                 Err(_) => json!({"undecodable": hex(&repr)}),
@@ -1204,4 +1206,90 @@ fn the_raw_config_reads_the_environment_lists() {
     check_items("raw, inactive", "raw", inactive, vec![Item::Copy], &probes);
     let refused: Env = &[("OCIO_ACTIVE_DISPLAYS", b"\"sRGB,b")];
     check_items("raw, refused", "raw", refused, vec![], &probes);
+}
+
+/// A context taken from the config before the calls that follow, kept on both sides.
+type Held = Rc<RefCell<Option<CurrentContext>>>;
+
+/// `getCurrentContext`, kept as `held`.
+fn hold_context(held: &Held) -> Step {
+    let held = held.clone();
+    step(
+        json!({"call": "getCurrentContext", "as": "held"}),
+        move |c| {
+            let ctx = c.current_context();
+            let repr = ctx.get().to_bytes();
+            *held.borrow_mut() = Some(ctx);
+            json!({"result": object_out("Context", &repr)})
+        },
+    )
+}
+
+/// What the held context says now: its `repr()`, search path, working directory, environment
+/// mode and variables.
+fn held_getters(held: &Held) -> Vec<Step> {
+    let get = |held: &Held| held.borrow().as_ref().expect("a held context").get();
+    let h = held.clone();
+    let repr = step(json!({"call": "__repr__", "on": "held"}), move |_| {
+        text_out(&get(&h).to_bytes())
+    });
+    let h = held.clone();
+    let path = step(json!({"call": "getSearchPath", "on": "held"}), move |_| {
+        text_out(get(&h).search_path())
+    });
+    let h = held.clone();
+    let dir = step(json!({"call": "getWorkingDir", "on": "held"}), move |_| {
+        text_out(get(&h).working_dir())
+    });
+    let h = held.clone();
+    let env_mode = step(
+        json!({"call": "getEnvironmentMode", "on": "held"}),
+        move |_| json!({"result": mode(get(&h).environment_mode())}),
+    );
+    let h = held.clone();
+    let vars = step(json!({"call": "getStringVars", "on": "held"}), move |_| {
+        let ctx = get(&h);
+        let pairs: Vec<Value> = (0..ctx.num_string_vars())
+            .map(|i| {
+                json!([
+                    bytes_arg(ctx.string_var_name_by_index(i)),
+                    bytes_arg(ctx.string_var_by_index(i))
+                ])
+            })
+            .collect();
+        json!({ "result": pairs })
+    });
+    vec![repr, path, dir, env_mode, vars]
+}
+
+/// A context taken from the config before a change sees the change, as upstream's config and
+/// the callers of `getCurrentContext` share one context; a copy of the config has its own.
+#[test]
+fn a_held_context_sees_later_changes() {
+    let held: Held = Rc::new(RefCell::new(None));
+    let env: Env = &[("OCIO_TEST_A", b"a")];
+    let items: Vec<Item> = vec![
+        hold_context(&held).into(),
+        held_getters(&held).into(),
+        set_search_path(b"a:b").into(),
+        held_getters(&held).into(),
+        add_search_path(b"c").into(),
+        set_working_dir(b"/w").into(),
+        add_environment_var(b"V", Some(b"1")).into(),
+        set_environment_mode(EnvironmentMode::LoadAll).into(),
+        load_environment().into(),
+        held_getters(&held).into(),
+        clear_search_paths().into(),
+        clear_environment_vars().into(),
+        held_getters(&held).into(),
+        Item::Copy,
+        set_search_path(b"copy").into(),
+        set_working_dir(b"/copy").into(),
+        held_getters(&held).into(),
+        hold_context(&held).into(),
+        held_getters(&held).into(),
+        add_search_path(b"after").into(),
+        held_getters(&held).into(),
+    ];
+    check_items("held context", "new", env, items, &Probes::default());
 }

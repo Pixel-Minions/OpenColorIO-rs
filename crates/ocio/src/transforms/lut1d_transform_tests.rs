@@ -226,7 +226,7 @@ fn build_op() {
     build_ops(
         &mut ops,
         &config,
-        config.current_context(),
+        &config.current_context().get(),
         &lut.into(),
         TransformDirection::Forward,
     )
