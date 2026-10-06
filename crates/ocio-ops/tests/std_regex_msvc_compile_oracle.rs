@@ -263,6 +263,9 @@ fn patterns() -> Vec<String> {
     out.push("()".repeat(998));
     out.push("()".repeat(999));
     out.push(format!("{}(a)", "()".repeat(998)));
+    out.push("()".repeat(1000));
+    out.push(r"[a-\xff]".to_string());
+    out.push(r"[\x80-\xff]".to_string());
     out
 }
 

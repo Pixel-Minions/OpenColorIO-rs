@@ -361,3 +361,60 @@ fn the_matchers_limits_are_the_wheels() {
     ];
     check(cases);
 }
+
+/// Inputs the p3-regex verifier's mutants needed: nested loops past their first iteration,
+/// ranges and escapes, lazy loops that fail, anchors after a newline, optional groups and back
+/// references, the matcher's limits (`error_stack` past 600 nested matches, `error_complexity`
+/// past ten million steps) and collating elements, which match when `_Lookup_coll`'s comparison
+/// (up to and including the first character that differs) ends at the end of the text:
+/// `b[[.a.]]` matches `bz`, and `[[.ab.]]` matches `z` but not `a`.
+#[test]
+fn the_verifiers_cases_match_as_in_the_wheel() {
+    let cases: Vec<(&str, Vec<Vec<u8>>)> = vec![
+        ("(?:(a*)*b)??a*", vec![vec![b'a'; 25]]),
+        ("(?:(?:a*)*b)??a*", vec![vec![b'a'; 25]]),
+        (
+            r"\x62[\d-]",
+            vec![b"bb".to_vec(), b"b-".to_vec(), b"b1".to_vec()],
+        ),
+        (r"\v", vec![b"\x0b".to_vec(), b"v".to_vec()]),
+        ("a?a*", vec![vec![b'a'; 4_999_998], vec![b'a'; 4_999_999]]),
+        ("()*", vec![Vec::new(), b"a".to_vec()]),
+        ("(?:a|)*?b", vec![b"c".to_vec(), b"ab".to_vec()]),
+        ("a\n^b", vec![b"a\nb".to_vec()]),
+        ("a*?(?:^a*|(?:a*)*c)", vec![vec![b'a'; 25]]),
+        (r"a*(?:(a)c)??\1$", vec![b"a".to_vec(), b"aac".to_vec()]),
+        ("(?:(?=a|b).)*", vec![vec![b'a'; 298], vec![b'a'; 299]]),
+        (
+            "(?:b|a)*",
+            vec![
+                vec![b'a'; 298],
+                vec![b'a'; 299],
+                vec![b'a'; 300],
+                vec![b'a'; 600],
+            ],
+        ),
+        (
+            "(?:c|b|a)*",
+            vec![vec![b'a'; 298], vec![b'a'; 299], vec![b'a'; 300]],
+        ),
+        (
+            r"[a-\xff]",
+            vec![b"a".to_vec(), b"\xff".to_vec(), b"\x80".to_vec()],
+        ),
+        (
+            "b[[.a.]]",
+            vec![b"bz".to_vec(), b"ba".to_vec(), b"baz".to_vec()],
+        ),
+        (
+            "[[.ab.]]",
+            vec![b"z".to_vec(), b"a".to_vec(), b"ab".to_vec()],
+        ),
+    ];
+    check(
+        cases
+            .into_iter()
+            .map(|(p, paths)| (p.to_string(), paths))
+            .collect(),
+    );
+}
