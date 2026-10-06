@@ -748,7 +748,7 @@ fn check_items(label: &str, source: &str, env: Env, items: Vec<Item>, probes: &P
     }
     let made = match source {
         "new" => Config::new(),
-        "raw" => Ok(Arc::try_unwrap(Config::create_raw()).expect("a config of its own")),
+        "raw" => Config::create_raw().map(|c| Arc::try_unwrap(c).expect("a config of its own")),
         _ => panic!("unknown source {source}"),
     };
     let mut failures = Vec::new();
@@ -1193,4 +1193,15 @@ fn color_space_linearity_matches_the_wheel() {
         &[],
     );
     check_items("linearity", "new", &[], items, &probes);
+}
+
+/// The raw config reads the environment's lists as any config does: its color space inactive
+/// by `OCIO_INACTIVE_COLORSPACES`, and refused for an unclosed quote in a list.
+#[test]
+fn the_raw_config_reads_the_environment_lists() {
+    let probes = probes(&[b"raw", b"default"], &[b""]);
+    let inactive: Env = &[("OCIO_INACTIVE_COLORSPACES", b"default")];
+    check_items("raw, inactive", "raw", inactive, vec![Item::Copy], &probes);
+    let refused: Env = &[("OCIO_ACTIVE_DISPLAYS", b"\"sRGB,b")];
+    check_items("raw, refused", "raw", refused, vec![], &probes);
 }

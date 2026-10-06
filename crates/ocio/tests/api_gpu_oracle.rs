@@ -162,7 +162,7 @@ fn port(class: &Class, job: &Job, calls: &Calls) -> Outcome {
         Ok(t) => t,
         Err(e) => return raised("transform", e),
     };
-    let mut config = (*Config::create_raw()).clone();
+    let mut config = (*Config::create_raw().unwrap()).clone();
     if class.v1 {
         config.set_major_version(1).expect("version 1");
     }

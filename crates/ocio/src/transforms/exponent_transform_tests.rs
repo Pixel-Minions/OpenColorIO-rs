@@ -89,7 +89,7 @@ fn build_ops() {
 
     // With v1 config, exponent transform is converted to ExponentOp that does not handle
     // negative styles.
-    let mut config = Config::create_raw();
+    let mut config = Config::create_raw().unwrap();
     Arc::get_mut(&mut config)
         .unwrap()
         .set_major_version(1)
@@ -235,7 +235,7 @@ fn build_exponent_op_validates_the_data() {
     exp.data.set_red_params(Vec::new());
     let validated = exp.validate().unwrap_err();
 
-    let config = Config::create_raw();
+    let config = Config::create_raw().unwrap();
     let mut ops = OpVec::new();
     let built =
         build_exponent_op(&mut ops, &config, &exp, TransformDirection::Forward).unwrap_err();

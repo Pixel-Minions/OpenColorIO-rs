@@ -346,7 +346,7 @@ fn processors_match_the_wheel() {
 
 #[test]
 fn version_1_processors_match_the_wheel() {
-    let mut config = Config::create_raw();
+    let mut config = Config::create_raw().unwrap();
     Arc::get_mut(&mut config)
         .unwrap()
         .set_major_version(1)

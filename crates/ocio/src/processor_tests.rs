@@ -635,7 +635,7 @@ fn optimized_processors_keep_the_cache_flags_and_metadata() {
 #[test]
 fn config_copy_keeps_the_flags_and_no_processor() {
     let _env = EnvGuard::new();
-    let config = Config::create_raw();
+    let config = Config::create_raw().unwrap();
     config.set_processor_cache_flags(ProcessorCacheFlags::ENABLED);
     let group = Transform::from(GroupTransform::new());
     let p1 = config.processor(&group).unwrap();
@@ -667,7 +667,7 @@ fn config_copy_keeps_the_flags_and_no_processor() {
 #[test]
 fn set_transform_needs_an_empty_processor() {
     let _env = EnvGuard::new();
-    let config = Config::create_raw();
+    let config = Config::create_raw().unwrap();
     let context = Context::new();
     let mut processor = processor_of(two_offsets());
     let group = Transform::from(GroupTransform::new());
@@ -685,7 +685,7 @@ fn set_transform_needs_an_empty_processor() {
 #[test]
 fn set_major_version_empties_the_processor_cache() {
     let _env = EnvGuard::new();
-    let mut config = Config::create_raw();
+    let mut config = Config::create_raw().unwrap();
     let group = Transform::from(GroupTransform::new());
     let p1 = config.processor(&group).unwrap();
     assert!(Arc::ptr_eq(&p1, &config.processor(&group).unwrap()));
