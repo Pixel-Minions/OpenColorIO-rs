@@ -6,8 +6,8 @@
 //! The `save` functions (the writer) are WP 3.7's.
 //!
 //! So far: the typed loaders and their messages, the helpers that report unknown keys, bad
-//! values and repeated keys, and the transforms ([`load_transform`]), except FixedFunction
-//! (p3-after-p2) and ExposureContrast and the grading transforms (Phase 5). The loaders of the
+//! values and repeated keys, and the transforms ([`load_transform`]), except ExposureContrast
+//! and the grading transforms (Phase 5). The loaders of the
 //! config's other objects, and of the descriptions, custom keys and interchange attributes
 //! they hold, come with them (WP 3.3j-m).
 //!
@@ -28,7 +28,9 @@ use std::collections::HashSet;
 
 use ocio_ops::exception::Exception;
 use ocio_ops::logging::log_warning;
-use ocio_ops::open_color_types::{Allocation, TransformDirection};
+use ocio_ops::open_color_types::{
+    Allocation, FixedFunctionStyle, TransformDirection, fixed_function_style_from_string,
+};
 use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 use ocio_ops::parse_utils::{
     allocation_from_string, cdl_style_from_string, interpolation_from_string,
@@ -45,6 +47,7 @@ use crate::transforms::display_view_transform::DisplayViewTransform;
 use crate::transforms::exponent_transform::ExponentTransform;
 use crate::transforms::exponent_with_linear_transform::ExponentWithLinearTransform;
 use crate::transforms::file_transform::FileTransform;
+use crate::transforms::fixed_function_transform::FixedFunctionTransform;
 use crate::transforms::group_transform::GroupTransform;
 use crate::transforms::log_affine_transform::LogAffineTransform;
 use crate::transforms::log_camera_transform::LogCameraTransform;
@@ -581,6 +584,66 @@ fn load_exponent_with_linear(node: &Node) -> LoadResult<ExponentWithLinearTransf
     Ok(t)
 }
 
+/// A `FixedFunctionTransform`: `params` (numbers, kept when there are any), `style`
+/// (required), `direction`, `name`. The ACES 2 styles log that they are experimental; unknown
+/// keys are reported with the node's tag (I-140).
+///
+/// Port of `load(const YAML::Node&, FixedFunctionTransformRcPtr&)` (OCIOYaml.cpp:1421-1483 @
+/// v2.5.2).
+fn load_fixed_function(node: &Node) -> LoadResult<FixedFunctionTransform> {
+    let mut t = FixedFunctionTransform::new(FixedFunctionStyle::AcesRedMod03, &[])?;
+
+    check_duplicates(node)?;
+
+    let mut style_found = false;
+
+    for iter in node.iter() {
+        let key = iter.first.as_::<Vec<u8>>()?;
+        if iter.second.is_null()? || !iter.second.is_defined() {
+            continue;
+        }
+        let value = &iter.second;
+        match key.as_slice() {
+            b"params" => {
+                let params = load_vec_f64(value)?;
+                if !params.is_empty() {
+                    t.set_params(&params);
+                }
+            }
+            b"style" => {
+                let style = load_string(value)?;
+                t.set_style(fixed_function_style_from_string(Some(c_str(&style)))?)?;
+                style_found = true;
+                if matches!(
+                    t.style(),
+                    FixedFunctionStyle::AcesOutputTransform20
+                        | FixedFunctionStyle::AcesRgbToJmh20
+                        | FixedFunctionStyle::AcesTonescaleCompress20
+                        | FixedFunctionStyle::AcesGamutCompress20
+                ) {
+                    let mut os = b"FixedFunction style is experimental and may be removed in a \
+                                   future release: '"
+                        .to_vec();
+                    os.extend_from_slice(&style);
+                    os.extend_from_slice(b"'.");
+                    log_warning(os);
+                }
+            }
+            b"direction" => t.set_direction(load_direction(value)?),
+            b"name" => {
+                let name = load_string(value)?;
+                t.format_metadata_mut().set_name(Some(c_str(&name)));
+            }
+            _ => log_unknown_key_warning_in(node.tag()?, &iter.first)?,
+        }
+    }
+
+    if !style_found {
+        return Err(throw_error(node, b"style value is missing."));
+    }
+    Ok(t)
+}
+
 /// A log parameter of 3 numbers, or one number for all three. A sequence of another size
 /// fails with "LogAffine/CameraTransform parse error, <key> value field must have 3
 /// components. Found 'N'.".
@@ -1052,7 +1115,7 @@ fn load_leaf(node: &Node) -> LoadResult<Transform> {
         | b"GradingRGBCurveTransform"
         | b"GradingHueCurveTransform"
         | b"GradingToneTransform" => return Err(not_ported_yet(&ty, "Phase 5")),
-        b"FixedFunctionTransform" => return Err(not_ported_yet(&ty, "p3-after-p2")),
+        b"FixedFunctionTransform" => load_fixed_function(node)?.into(),
         b"LogTransform" => load_log(node)?.into(),
         b"MatrixTransform" => load_matrix(node)?.into(),
         b"RangeTransform" => load_range(node)?.into(),

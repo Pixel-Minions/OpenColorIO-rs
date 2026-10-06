@@ -381,6 +381,45 @@ pub fn fixed_function_style_to_string(style: FixedFunctionStyle) -> Result<&'sta
     })
 }
 
+/// The style named `style`, in any ASCII case (the names [`fixed_function_style_to_string`]
+/// gives, but the two unimplemented styles'), or "Unknown Fixed FunctionOp style: 'style'.".
+/// `None` is upstream's null pointer, read as "".
+///
+/// Port of `FixedFunctionStyleFromString` (src/OpenColorIO/ParseUtils.cpp:390-421 @ v2.5.2).
+pub fn fixed_function_style_from_string(style: Option<&[u8]>) -> Result<FixedFunctionStyle> {
+    use FixedFunctionStyle::*;
+    let p = style.map_or(&[][..], crate::utils::string_utils::c_str);
+    Ok(match lower_c_str(Some(p)).as_slice() {
+        b"aces_redmod03" => AcesRedMod03,
+        b"aces_redmod10" => AcesRedMod10,
+        b"aces_glow03" => AcesGlow03,
+        b"aces_glow10" => AcesGlow10,
+        b"aces_darktodim10" => AcesDarkToDim10,
+        b"aces_gamutcomp13" => AcesGamutComp13,
+        b"aces2_outputtransform" => AcesOutputTransform20,
+        b"aces2_rgb_to_jmh" => AcesRgbToJmh20,
+        b"aces2_tonescalecompress" => AcesTonescaleCompress20,
+        b"aces2_gamutcompress" => AcesGamutCompress20,
+        b"rec2100_surround" => Rec2100Surround,
+        b"rgb_to_hsv" => RgbToHsv,
+        b"xyz_to_xyy" => XyzToXyy,
+        b"xyz_to_uvy" => XyzToUvy,
+        b"xyz_to_luv" => XyzToLuv,
+        b"lin_to_pq" => LinToPq,
+        b"lin_to_gammalog" => LinToGammaLog,
+        b"lin_to_doublelog" => LinToDoubleLog,
+        b"rgb_to_hsy_lin" => RgbToHsyLin,
+        b"rgb_to_hsy_log" => RgbToHsyLog,
+        b"rgb_to_hsy_vid" => RgbToHsyVid,
+        // Default style is meaningless.
+        _ => {
+            return Err(Exception::new(
+                [b"Unknown Fixed FunctionOp style: '".as_slice(), p, b"'."].concat(),
+            ));
+        }
+    })
+}
+
 /// What a dynamic property holds: a double for the first three, a grading value for the
 /// others.
 ///
