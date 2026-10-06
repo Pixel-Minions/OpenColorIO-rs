@@ -503,10 +503,14 @@ fn color_space_getters(probes: &Probes) -> Vec<Step> {
     out.push(step(json!({"call": "getRoles"}), |c| {
         let roles: Vec<Value> = (0..c.num_roles())
             .map(|i| {
-                json!([
-                    bytes_arg(c.role_name(i)),
-                    bytes_arg(c.role_color_space_by_index(i))
-                ])
+                // The binding decodes the pair: an element it can't decode is the bytes it
+                // refused.
+                let (name, cs) = (c.role_name(i), c.role_color_space_by_index(i));
+                match (std::str::from_utf8(name), std::str::from_utf8(cs)) {
+                    (Err(_), _) => json!({"undecodable": hex(name)}),
+                    (_, Err(_)) => json!({"undecodable": hex(cs)}),
+                    _ => json!([bytes_arg(name), bytes_arg(cs)]),
+                }
             })
             .collect();
         json!({ "result": roles })
@@ -2207,4 +2211,550 @@ fn looks_view_transforms_and_named_transforms_match_the_wheel() {
     ];
     let more = probes_of(&[b"nt1", b"nt2", b"raw"]);
     check_items("inactive named transforms", "new", env, items, &more);
+}
+
+// ---------------------------------------------------------------------------------------------
+// The cache of processors: which calls empty it (`Config::Impl::resetCacheIDs`), seen through
+// the identity of the processors getProcessor returns before and after each call. The
+// verifier's harness (2026-10-06), adapted.
+
+/// A processor taken from the config, kept on the port's side.
+type HeldProcessor = Rc<RefCell<Option<Arc<ocio::Processor>>>>;
+
+/// `getProcessor` of an offset, stored as `store` on both sides.
+/// A port action on the config, with no outcome.
+type ConfigAction = Box<dyn Fn(&mut Config)>;
+
+fn get_processor(store: &'static str, held: &HeldProcessor) -> (Value, ConfigAction) {
+    let (spec, t) = offset_transform(0.5);
+    let h = held.clone();
+    (
+        json!({"call": "getProcessor", "args": [{"transform": spec}], "as": store}),
+        Box::new(move |c: &mut Config| {
+            *h.borrow_mut() = Some(c.processor(&t).expect("a processor"));
+        }),
+    )
+}
+
+/// Every setter, failing and no-op calls included, keeps or empties the config's cache of
+/// processors as the wheel's does: the processor of the same transform after the call is the
+/// one before it (`p1 == p2` in the binding, `Arc::ptr_eq` here), or a new one.
+#[test]
+fn processor_cache_resets_match_the_wheel() {
+    let mut cases: Vec<(&str, Vec<Step>)> = vec![
+        ("setMajorVersion(2)", vec![set_major_version(2)]),
+        ("setMajorVersion(9) fails", vec![set_major_version(9)]),
+        ("setMinorVersion(3)", vec![set_minor_version(3)]),
+        ("setVersion(2,1)", vec![set_version(2, 1)]),
+        ("setName", vec![set_name(b"n")]),
+        ("setDescription", vec![set_description(b"d")]),
+        ("setFamilySeparator", vec![set_family_separator(b'~')]),
+        ("setFamilySeparator fails", vec![set_family_separator(0x80)]),
+        (
+            "addEnvironmentVar",
+            vec![add_environment_var(b"E", Some(b"1"))],
+        ),
+        (
+            "addEnvironmentVar empty",
+            vec![add_environment_var(b"", Some(b"1"))],
+        ),
+        (
+            "addEnvironmentVar None",
+            vec![add_environment_var(b"Q", None)],
+        ),
+        ("clearEnvironmentVars", vec![clear_environment_vars()]),
+        (
+            "setEnvironmentMode",
+            vec![set_environment_mode(EnvironmentMode::LoadAll)],
+        ),
+        ("loadEnvironment", vec![load_environment()]),
+        ("setSearchPath", vec![set_search_path(b"a")]),
+        ("addSearchPath empty", vec![add_search_path(b"")]),
+        ("addSearchPath", vec![add_search_path(b"b")]),
+        ("clearSearchPaths", vec![clear_search_paths()]),
+        ("setWorkingDir", vec![set_working_dir(b"/w")]),
+        ("addColorSpace", add_color_space(cs(b"a"))),
+        ("addColorSpace fails", add_color_space(cs(b""))),
+        (
+            "addColorSpace alias fails",
+            add_color_space(cs(b"q").alias(b"%")),
+        ),
+        ("removeColorSpace missing", vec![remove_color_space(b"zz")]),
+        ("removeColorSpace", vec![remove_color_space(b"a")]),
+        ("clearColorSpaces", vec![clear_color_spaces()]),
+        ("setRole", vec![set_role(b"r", Some(b"x"))]),
+        ("setRole None", vec![set_role(b"zz", None)]),
+        ("setRole fails", vec![set_role(b"", Some(b"x"))]),
+        (
+            "setInactiveColorSpaces",
+            vec![set_inactive_color_spaces(b"x")],
+        ),
+        (
+            "setStrictParsingEnabled",
+            vec![set_strict_parsing_enabled(false)],
+        ),
+        (
+            "setDefaultLumaCoefs",
+            vec![set_default_luma_coefs([0.1, 0.2, 0.7])],
+        ),
+        (
+            "addDisplayView",
+            vec![add_display_view(b"D", b"v", b"x", b"")],
+        ),
+        (
+            "addDisplayView fails",
+            vec![add_display_view(b"D", b"", b"x", b"")],
+        ),
+        (
+            "addDisplayView replace",
+            vec![add_display_view(b"D", b"V", b"y", b"")],
+        ),
+        ("clearSharedViews none", vec![clear_shared_views()]),
+        ("addSharedView", vec![add_shared_view(b"s", b"", b"x")]),
+        ("addSharedView fails", vec![add_shared_view(b"s", b"", b"")]),
+        (
+            "addDisplaySharedView",
+            vec![add_display_shared_view(b"D", b"s")],
+        ),
+        (
+            "addDisplaySharedView fails",
+            vec![add_display_shared_view(b"D", b"S")],
+        ),
+        (
+            "addDisplaySharedView new display",
+            vec![add_display_shared_view(b"E", b"s")],
+        ),
+        ("removeSharedView fails", vec![remove_shared_view(b"zz")]),
+        (
+            "removeDisplayView fails",
+            vec![remove_display_view(b"D", b"zz")],
+        ),
+        ("removeDisplayView", vec![remove_display_view(b"E", b"s")]),
+        ("clearSharedViews", vec![clear_shared_views()]),
+        ("addSharedView 2", vec![add_shared_view(b"s2", b"", b"x")]),
+        ("removeSharedView", vec![remove_shared_view(b"S2")]),
+        ("setActiveDisplays", vec![set_active_displays(b"D")]),
+        (
+            "setActiveDisplays fails",
+            vec![set_active_displays(b"\"D, E")],
+        ),
+        ("addActiveDisplay", vec![add_active_display(b"D")]),
+        ("addActiveDisplay dup", vec![add_active_display(b"D")]),
+        ("addActiveDisplay fails", vec![add_active_display(b"")]),
+        (
+            "removeActiveDisplay fails",
+            vec![remove_active_display(b"zz")],
+        ),
+        ("removeActiveDisplay", vec![remove_active_display(b"D")]),
+        (
+            "clearActiveDisplays",
+            vec![clear_step("clearActiveDisplays", |c| {
+                c.clear_active_displays()
+            })],
+        ),
+        ("setActiveViews", vec![set_active_views(b"v")]),
+        ("setActiveViews fails", vec![set_active_views(b"\"v, w")]),
+        ("addActiveView", vec![add_active_view(b"v")]),
+        ("addActiveView dup", vec![add_active_view(b"v")]),
+        ("removeActiveView fails", vec![remove_active_view(b"zz")]),
+        ("removeActiveView", vec![remove_active_view(b"v")]),
+        (
+            "clearActiveViews",
+            vec![clear_step("clearActiveViews", |c| c.clear_active_views())],
+        ),
+        (
+            "addVirtualDisplayView",
+            vec![add_virtual_display_view(b"vv", b"", b"x")],
+        ),
+        (
+            "addVirtualDisplayView dup",
+            vec![add_virtual_display_view(b"VV", b"", b"x")],
+        ),
+        (
+            "addVirtualDisplaySharedView",
+            vec![add_virtual_display_shared_view(b"s")],
+        ),
+        (
+            "addVirtualDisplaySharedView dup",
+            vec![add_virtual_display_shared_view(b"S")],
+        ),
+        (
+            "removeVirtualDisplayView missing",
+            vec![remove_virtual_display_view(b"zz")],
+        ),
+        (
+            "removeVirtualDisplayView own",
+            vec![remove_virtual_display_view(b"VV")],
+        ),
+        (
+            "removeVirtualDisplayView shared",
+            vec![remove_virtual_display_view(b"s")],
+        ),
+        (
+            "clearVirtualDisplay",
+            vec![clear_step("clearVirtualDisplay", |c| {
+                c.clear_virtual_display()
+            })],
+        ),
+        (
+            "setDisplayTemporary",
+            vec![set_display_temporary(b"D", true)],
+        ),
+        (
+            "setDisplayTemporary missing",
+            vec![set_display_temporary(b"zz", true)],
+        ),
+        (
+            "instantiateDisplayFromICCProfile fails",
+            vec![instantiate_display_from_icc_profile(b"")],
+        ),
+        ("addLook", add_look(b"lk", b"x", true)),
+        ("addLook fails", add_look(b"", b"x", true)),
+        (
+            "clearLooks",
+            vec![clear_step("clearLooks", |c| c.clear_looks())],
+        ),
+        (
+            "addViewTransform",
+            add_view_transform(
+                b"vt",
+                ReferenceSpaceType::Scene,
+                Some(ViewTransformDirection::ToReference),
+            ),
+        ),
+        (
+            "addViewTransform fails",
+            add_view_transform(b"vt2", ReferenceSpaceType::Scene, None),
+        ),
+        (
+            "setDefaultViewTransformName",
+            vec![set_default_view_transform_name(b"vt")],
+        ),
+        (
+            "clearViewTransforms",
+            vec![clear_step("clearViewTransforms", |c| {
+                c.clear_view_transforms()
+            })],
+        ),
+        (
+            "addNamedTransform",
+            add_named_transform(b"nt", &[b"nta"], Some(TransformDirection::Forward)),
+        ),
+        (
+            "addNamedTransform fails",
+            add_named_transform(b"nt2", &[], None),
+        ),
+        (
+            "clearNamedTransforms",
+            vec![clear_step("clearNamedTransforms", |c| {
+                c.clear_named_transforms()
+            })],
+        ),
+        ("clearDisplays", vec![clear_displays()]),
+    ];
+    let p1: HeldProcessor = Rc::new(RefCell::new(None));
+    let p2: HeldProcessor = Rc::new(RefCell::new(None));
+    let mut calls = Vec::new();
+    // (label, kind): kind 0 = run port step (ignore outcome), 1 = get p1, 2 = get p2, 3 = compare
+    enum K {
+        S(Step),
+        G(ConfigAction),
+        Cmp(String),
+    }
+    let mut plan: Vec<K> = Vec::new();
+    for (label, steps) in cases.drain(..) {
+        let (c, f) = get_processor("p1", &p1);
+        calls.push(c);
+        plan.push(K::G(f));
+        for s in steps {
+            let mut call = s.call.clone();
+            if call.get("call").is_some() && call.get("on").is_none() {
+                call["on"] = json!("config");
+            }
+            calls.push(call);
+            plan.push(K::S(s));
+        }
+        let (c, f) = get_processor("p2", &p2);
+        calls.push(c);
+        plan.push(K::G(f));
+        calls.push(json!({"call": "__eq__", "on": "p1", "args": [{"ref": "p2"}]}));
+        plan.push(K::Cmp(label.to_string()));
+    }
+    let response = Oracle::get().call(
+        "config_calls",
+        json!({"config": "new", "env": {}, "calls": calls}),
+        &[],
+    );
+    let wheel = &response.result;
+    set_thread_env_provider(Some(Arc::new(MapEnv::default())));
+    let mut config = Config::new().unwrap();
+    let results = wheel["calls"].as_array().unwrap();
+    assert_eq!(results.len(), plan.len());
+    let mut failures = Vec::new();
+    for (i, (k, w)) in plan.iter().zip(results).enumerate() {
+        match k {
+            K::S(s) => {
+                let port = (s.port)(&mut config);
+                let mut w = w.clone();
+                w.as_object_mut().unwrap().remove("log");
+                if port != w {
+                    failures.push(format!("call {i} {}: wheel {w}, port {port}", calls[i]));
+                }
+            }
+            K::G(f) => f(&mut config),
+            K::Cmp(label) => {
+                let same =
+                    Arc::ptr_eq(p1.borrow().as_ref().unwrap(), p2.borrow().as_ref().unwrap());
+                let wheel_same = w["result"] == json!(true);
+                if same != wheel_same {
+                    failures.push(format!(
+                        "{label}: wheel kept the processor: {wheel_same}, port: {same}"
+                    ));
+                }
+            }
+        }
+    }
+    set_thread_env_provider(None);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// What a two-config case does: a call on one of them, a call on both (a static function of
+/// the config class), or the copy of the first into the second.
+enum PairItem {
+    On(usize, Step),
+    Pair(Value, PairCall),
+    CopyTo1,
+}
+
+/// The port's side of a call on both configs.
+type PairCall = Box<dyn Fn(&Config, &Config) -> Value>;
+
+/// Runs `items` on `config` and `other` on both sides, in the environment `env`, with the
+/// getters every third item and at the end, and compares every outcome.
+fn run_pair(label: &str, env: &[(&str, Vec<u8>)], items: Vec<PairItem>, probes: &Probes) -> usize {
+    let names = ["config", "other"];
+    let mut calls = Vec::new();
+    let mut plan: Vec<PairItem> = Vec::new();
+    // `other` starts as a copy.
+    plan.push(PairItem::CopyTo1);
+    let cur = 0usize;
+    let mut k = 0;
+    for it in items {
+        plan.push(it);
+        k += 1;
+        if k % 3 == 0 {
+            for s in all_getters(probes) {
+                plan.push(PairItem::On(cur, s));
+            }
+        }
+    }
+    for t in 0..2 {
+        for s in all_getters(probes) {
+            plan.push(PairItem::On(t, s));
+        }
+    }
+    for p in &plan {
+        match p {
+            PairItem::On(i, s) => {
+                let mut call = s.call.clone();
+                if call.get("call").is_some() && call.get("on").is_none() {
+                    call["on"] = json!(names[*i]);
+                }
+                calls.push(call);
+            }
+            PairItem::Pair(c, _) => calls.push(c.clone()),
+            PairItem::CopyTo1 => calls.push(json!({"copy": "config", "as": "other"})),
+        }
+    }
+    let env_json: serde_json::Map<String, Value> = env
+        .iter()
+        .map(|(k, v)| (k.to_string(), json!(std::str::from_utf8(v).unwrap())))
+        .collect();
+    let response = Oracle::get().call(
+        "config_calls",
+        json!({"config": "new", "env": env_json, "calls": calls}),
+        &[],
+    );
+    let wheel = &response.result;
+    set_thread_env_provider(Some(Arc::new(MapEnv::default())));
+    for (name, value) in env {
+        setenv(name, value).expect("a request's variable");
+    }
+    let made = Config::new();
+    let mut cfgs = match made {
+        Ok(c) => {
+            assert_eq!(
+                wheel["config"],
+                Value::Null,
+                "{label}: the wheel refused the config"
+            );
+            [c.clone(), c]
+        }
+        Err(e) => {
+            set_thread_env_provider(None);
+            assert_eq!(
+                wheel["config"],
+                unit_out(Err(e)),
+                "{label}: refusal differs"
+            );
+            return 0;
+        }
+    };
+    let results = wheel["calls"].as_array().expect("the calls' results");
+    assert_eq!(results.len(), plan.len(), "{label}");
+    let mut failures = Vec::new();
+    let mut first_fail = None;
+    for (i, (p, w)) in plan.iter().zip(results).enumerate() {
+        let logged = log(&w["log"]);
+        if !logged.is_empty() {
+            failures.push(format!("{label}, call {i}: wheel logged {logged:?}"));
+            first_fail.get_or_insert(i);
+        }
+        let mut w = w.clone();
+        w.as_object_mut().expect("a call's outcome").remove("log");
+        let port = match p {
+            PairItem::On(t, s) => (s.port)(&mut cfgs[*t]),
+            PairItem::Pair(_, f) => f(&cfgs[0], &cfgs[1]),
+            PairItem::CopyTo1 => {
+                cfgs[1] = cfgs[0].clone();
+                continue;
+            }
+        };
+        if port != w {
+            failures.push(format!(
+                "{label}, call {i} {}: wheel {w}, port {port}",
+                calls[i]
+            ));
+            first_fail.get_or_insert(i);
+        }
+    }
+    set_thread_env_provider(None);
+    if let Some(first) = first_fail {
+        let mut seq = Vec::new();
+        for (i, c) in calls.iter().enumerate().take(first + 1) {
+            let name = c.get("call").and_then(Value::as_str).unwrap_or("");
+            if !name.starts_with("get") && !name.starts_with("is") && !name.starts_with("has") {
+                seq.push(format!("  #{i} {c}"));
+            }
+        }
+        panic!(
+            "{} failures; env {:?}; first:\n{}\nsequence:\n{}",
+            failures.len(),
+            env.iter()
+                .map(|(k, v)| format!("{k}={}", String::from_utf8_lossy(v)))
+                .collect::<Vec<_>>(),
+            failures[..failures.len().min(6)].join("\n"),
+            seq.join("\n")
+        );
+    }
+    plan.len()
+}
+
+// ---------------------------------------------------------------------------------------------
+// Two configs side by side (`config` and `other`, a copy at the start): the verifier's inputs
+// (2026-10-06) for what the cases above don't reach, each confirmed against the wheel.
+
+fn pair_views(d: &[u8], v: &[u8]) -> PairItem {
+    let (d2, v2) = (d.to_vec(), v.to_vec());
+    PairItem::Pair(
+        json!({"call": "AreViewsEqual", "on": "Config",
+               "args": [{"ref": "config"}, {"ref": "other"}, arg(d), arg(v)]}),
+        Box::new(move |a, b| json!({"result": Config::are_views_equal(a, b, &d2, &v2)})),
+    )
+}
+
+fn pair_virtual(v: &[u8]) -> PairItem {
+    let v2 = v.to_vec();
+    PairItem::Pair(
+        json!({"call": "AreVirtualViewsEqual", "on": "Config",
+               "args": [{"ref": "config"}, {"ref": "other"}, arg(v)]}),
+        Box::new(move |a, b| json!({"result": Config::are_virtual_views_equal(a, b, &v2)})),
+    )
+}
+
+fn virtual_view_looks(view: &[u8], looks: &[u8], rule: &[u8]) -> Step {
+    let (v, l, r) = (view.to_vec(), looks.to_vec(), rule.to_vec());
+    step(
+        json!({"call": "addVirtualDisplayView",
+               "args": [arg(&v), arg(b""), arg(b"raw"), arg(&l), arg(&r), arg(b"d")]}),
+        move |config| unit_out(config.add_virtual_display_view(&v, b"", b"raw", &l, &r, b"d")),
+    )
+}
+
+/// The environment's active lists naming nothing that exists (the config's lists then don't
+/// apply); a display made by `addDisplaySharedView` after the active displays were computed;
+/// `AreViewsEqual` and `AreVirtualViewsEqual` with rules and looks that differ; NULs in a
+/// view's looks and in the default view transform's name.
+#[test]
+fn two_configs_and_edges_match_the_wheel() {
+    let probes =
+        probes(&[b"raw"], &[]).displays(&[b"A", b"B", b"P3"], &[b"v1", b"v2", b"vv", b"s"]);
+    let on = |s: Step| PairItem::On(0, s);
+    let other = |s: Step| PairItem::On(1, s);
+
+    // C22: OCIO_ACTIVE_VIEWS names no view of the display: all its views, not the config's list.
+    run_pair(
+        "C22",
+        &[("OCIO_ACTIVE_VIEWS", b"nomatch".to_vec())],
+        vec![
+            on(add_display_view(b"A", b"v1", b"raw", b"")),
+            on(add_display_view(b"A", b"v2", b"raw", b"")),
+            on(set_active_views(b"v2")),
+        ],
+        &probes,
+    );
+    // D4: OCIO_ACTIVE_DISPLAYS names no display: all the displays, not the config's list.
+    run_pair(
+        "D4",
+        &[("OCIO_ACTIVE_DISPLAYS", b"nomatch".to_vec())],
+        vec![
+            on(add_display_view(b"A", b"v1", b"raw", b"")),
+            on(add_display_view(b"B", b"v1", b"raw", b"")),
+            on(set_active_displays(b"B")),
+        ],
+        &probes,
+    );
+    // C28: a display made by addDisplaySharedView after the active displays were computed.
+    run_pair(
+        "C28",
+        &[],
+        vec![
+            on(add_display_view(b"A", b"v1", b"raw", b"")),
+            on(add_shared_view(b"s", b"", b"raw")),
+            on(add_display_view(b"P3", b"v2", b"raw", b"")),
+            on(add_display_shared_view(b"B", b"s")),
+        ],
+        &probes,
+    );
+    // C53: same view, rules differ. C54: same virtual view, looks differ. Rules differ too.
+    run_pair(
+        "C53/C54",
+        &[],
+        vec![
+            on(add_display_view_full(b"A", b"v1", b"", b"raw", b"rule")),
+            on(virtual_view_looks(b"vv", b"l1", b"r")),
+            on(virtual_view_looks(b"vw", b"l", b"r1")),
+            PairItem::CopyTo1,
+            other(remove_display_view(b"A", b"v1")),
+            other(add_display_view_full(b"A", b"v1", b"", b"raw", b"")),
+            other(remove_virtual_display_view(b"vv")),
+            other(virtual_view_looks(b"vv", b"l2", b"r")),
+            other(remove_virtual_display_view(b"vw")),
+            other(virtual_view_looks(b"vw", b"l", b"r2")),
+            pair_views(b"A", b"v1"),
+            pair_virtual(b"vv"),
+            pair_virtual(b"vw"),
+        ],
+        &probes,
+    );
+    // D3 / C19: NULs in looks and in the default view transform's name.
+    run_pair(
+        "D3/C19",
+        &[],
+        vec![
+            on(add_display_view(b"A", b"v1", b"raw", b"l\0x")),
+            on(set_default_view_transform_name(b"vt\0x")),
+        ],
+        &probes,
+    );
 }
