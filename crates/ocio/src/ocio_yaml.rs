@@ -6,7 +6,8 @@
 //! The `save` functions (the writer) are WP 3.7's.
 //!
 //! So far: the typed loaders and their messages, the helpers that report unknown keys, bad
-//! values and repeated keys, and the transforms ([`load_transform`]). The loaders of the
+//! values and repeated keys, and the transforms ([`load_transform`]), except FixedFunction
+//! (p3-after-p2) and ExposureContrast and the grading transforms (Phase 5). The loaders of the
 //! config's other objects, and of the descriptions, custom keys and interchange attributes
 //! they hold, come with them (WP 3.3j-m).
 //!
@@ -28,21 +29,27 @@ use std::collections::HashSet;
 use ocio_ops::exception::Exception;
 use ocio_ops::logging::log_warning;
 use ocio_ops::open_color_types::{Allocation, TransformDirection};
+use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 use ocio_ops::parse_utils::{
-    allocation_from_string, cdl_style_from_string, negative_style_from_string,
-    transform_direction_from_string,
+    allocation_from_string, cdl_style_from_string, interpolation_from_string,
+    negative_style_from_string, transform_direction_from_string,
 };
 use ocio_ops::utils::string_utils::c_str;
 
 use crate::transform::Transform;
 use crate::transforms::allocation_transform::AllocationTransform;
+use crate::transforms::builtin_transform::BuiltinTransform;
 use crate::transforms::cdl_transform::CdlTransform;
+use crate::transforms::color_space_transform::ColorSpaceTransform;
+use crate::transforms::display_view_transform::DisplayViewTransform;
 use crate::transforms::exponent_transform::ExponentTransform;
 use crate::transforms::exponent_with_linear_transform::ExponentWithLinearTransform;
+use crate::transforms::file_transform::FileTransform;
 use crate::transforms::group_transform::GroupTransform;
 use crate::transforms::log_affine_transform::LogAffineTransform;
 use crate::transforms::log_camera_transform::LogCameraTransform;
 use crate::transforms::log_transform::LogTransform;
+use crate::transforms::look_transform::LookTransform;
 use crate::transforms::matrix_transform::MatrixTransform;
 use crate::transforms::range_transform::{RangeTransform, range_style_from_string};
 use crate::yaml_cpp::exceptions::Exception as YamlException;
@@ -830,6 +837,154 @@ fn load_group(node: &Node) -> LoadResult<GroupTransform> {
     }
 }
 
+/// The node as a `bool`: yaml-cpp's spellings (`true`, `yes`, `on`, ... in three cases).
+///
+/// Port of `load(const YAML::Node&, bool&)` (OCIOYaml.cpp:66-80 @ v2.5.2).
+pub(crate) fn load_bool(node: &Node) -> LoadResult<bool> {
+    node.as_::<bool>()
+        .map_err(|e| parsing_failed(node, "boolean", &e.into()))
+}
+
+/// The node as an interpolation: a string, then `InterpolationFromString`.
+///
+/// Port of `load(const YAML::Node&, Interpolation&)` (OCIOYaml.cpp:201-206 @ v2.5.2).
+pub(crate) fn load_interpolation(node: &Node) -> LoadResult<Interpolation> {
+    let s = load_string(node)?;
+    Ok(interpolation_from_string(Some(c_str(&s))))
+}
+
+/// A `BuiltinTransform`: `style` (a built-in transform's name, in any case), `direction`. It
+/// doesn't check for repeated keys: the last one wins.
+///
+/// Port of `load(const YAML::Node&, BuiltinTransformRcPtr&)` (OCIOYaml.cpp:600-629 @ v2.5.2).
+fn load_builtin(node: &Node) -> LoadResult<BuiltinTransform> {
+    let mut t = BuiltinTransform::new();
+
+    for iter in node.iter() {
+        let key = iter.first.as_::<Vec<u8>>()?;
+        if iter.second.is_null()? || !iter.second.is_defined() {
+            continue;
+        }
+        let value = &iter.second;
+        match key.as_slice() {
+            b"style" => {
+                let transform_style = load_string(value)?;
+                t.set_style(c_str(&transform_style))?;
+            }
+            b"direction" => t.set_direction(load_direction(value)?),
+            _ => log_unknown_key_warning(node, &iter.first)?,
+        }
+    }
+    Ok(t)
+}
+
+/// A `ColorSpaceTransform`: `src`, `dst`, `direction`, `data_bypass`.
+///
+/// Port of `load(const YAML::Node&, ColorSpaceTransformRcPtr&)` (OCIOYaml.cpp:778-819 @
+/// v2.5.2).
+fn load_color_space_transform(node: &Node) -> LoadResult<ColorSpaceTransform> {
+    let mut t = ColorSpaceTransform::new();
+
+    check_duplicates(node)?;
+
+    for iter in node.iter() {
+        let key = iter.first.as_::<Vec<u8>>()?;
+        if iter.second.is_null()? || !iter.second.is_defined() {
+            continue;
+        }
+        let value = &iter.second;
+        match key.as_slice() {
+            b"src" => t.set_src(c_str(&load_string(value)?)),
+            b"dst" => t.set_dst(c_str(&load_string(value)?)),
+            b"direction" => t.set_direction(load_direction(value)?),
+            b"data_bypass" => t.set_data_bypass(load_bool(value)?),
+            _ => log_unknown_key_warning(node, &iter.first)?,
+        }
+    }
+    Ok(t)
+}
+
+/// A `DisplayViewTransform`: `src`, `display`, `view`, `direction`, `looks_bypass`,
+/// `data_bypass`. It doesn't check for repeated keys: the last one wins.
+///
+/// Port of `load(const YAML::Node&, DisplayViewTransformRcPtr&)` (OCIOYaml.cpp:840-891 @
+/// v2.5.2).
+fn load_display_view(node: &Node) -> LoadResult<DisplayViewTransform> {
+    let mut t = DisplayViewTransform::new();
+
+    for iter in node.iter() {
+        let key = iter.first.as_::<Vec<u8>>()?;
+        if iter.second.is_null()? || !iter.second.is_defined() {
+            continue;
+        }
+        let value = &iter.second;
+        match key.as_slice() {
+            b"src" => t.set_src(c_str(&load_string(value)?)),
+            b"display" => t.set_display(c_str(&load_string(value)?)),
+            b"view" => t.set_view(c_str(&load_string(value)?)),
+            b"direction" => t.set_direction(load_direction(value)?),
+            b"looks_bypass" => t.set_looks_bypass(load_bool(value)?),
+            b"data_bypass" => t.set_data_bypass(load_bool(value)?),
+            _ => log_unknown_key_warning(node, &iter.first)?,
+        }
+    }
+    Ok(t)
+}
+
+/// A `FileTransform`: `src`, `cccid`, `cdl_style`, `interpolation`, `direction`.
+///
+/// Port of `load(const YAML::Node&, FileTransformRcPtr&)` (OCIOYaml.cpp:1336-1382 @ v2.5.2).
+fn load_file(node: &Node) -> LoadResult<FileTransform> {
+    let mut t = FileTransform::new();
+
+    check_duplicates(node)?;
+
+    for iter in node.iter() {
+        let key = iter.first.as_::<Vec<u8>>()?;
+        if iter.second.is_null()? || !iter.second.is_defined() {
+            continue;
+        }
+        let value = &iter.second;
+        match key.as_slice() {
+            b"src" => t.set_src(c_str(&load_string(value)?)),
+            b"cccid" => t.set_ccc_id(c_str(&load_string(value)?)),
+            b"cdl_style" => {
+                let stringval = load_string(value)?;
+                t.set_cdl_style(cdl_style_from_string(Some(c_str(&stringval)))?);
+            }
+            b"interpolation" => t.set_interpolation(load_interpolation(value)?),
+            b"direction" => t.set_direction(load_direction(value)?),
+            _ => log_unknown_key_warning(node, &iter.first)?,
+        }
+    }
+    Ok(t)
+}
+
+/// A `LookTransform`: `src`, `dst`, `looks`, `direction`.
+///
+/// Port of `load(const YAML::Node&, LookTransformRcPtr&)` (OCIOYaml.cpp:2946-2987 @ v2.5.2).
+fn load_look(node: &Node) -> LoadResult<LookTransform> {
+    let mut t = LookTransform::new();
+
+    check_duplicates(node)?;
+
+    for iter in node.iter() {
+        let key = iter.first.as_::<Vec<u8>>()?;
+        if iter.second.is_null()? || !iter.second.is_defined() {
+            continue;
+        }
+        let value = &iter.second;
+        match key.as_slice() {
+            b"src" => t.set_src(c_str(&load_string(value)?)),
+            b"dst" => t.set_dst(c_str(&load_string(value)?)),
+            b"looks" => t.set_looks(c_str(&load_string(value)?)),
+            b"direction" => t.set_direction(load_direction(value)?),
+            _ => log_unknown_key_warning(node, &iter.first)?,
+        }
+    }
+    Ok(t)
+}
+
 /// The error of a transform class whose loader is not ported yet: `work_package` ports it.
 fn not_ported_yet(tag: &[u8], work_package: &str) -> LoadError {
     let mut msg = b"Loading a !<".to_vec();
@@ -882,11 +1037,11 @@ fn nested_too_deep(node: &Node) -> LoadError {
 fn load_leaf(node: &Node) -> LoadResult<Transform> {
     let ty = node.tag()?.to_vec();
     Ok(match ty.as_slice() {
-        b"BuiltinTransform"
-        | b"ColorSpaceTransform"
-        | b"DisplayViewTransform"
-        | b"FileTransform"
-        | b"LookTransform" => return Err(not_ported_yet(&ty, "WP 3.3i")),
+        b"BuiltinTransform" => load_builtin(node)?.into(),
+        b"ColorSpaceTransform" => load_color_space_transform(node)?.into(),
+        b"DisplayViewTransform" => load_display_view(node)?.into(),
+        b"FileTransform" => load_file(node)?.into(),
+        b"LookTransform" => load_look(node)?.into(),
         b"AllocationTransform" => load_allocation_transform(node)?.into(),
         b"CDLTransform" => load_cdl(node)?.into(),
         b"ExponentTransform" => load_exponent(node)?.into(),

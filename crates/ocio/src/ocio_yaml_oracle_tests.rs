@@ -20,6 +20,7 @@ use std::thread;
 
 use ocio_ops::logging::{reset_to_default_logging_function, set_logging_function};
 use ocio_ops::open_color_types::{CdlStyle, NegativeStyle};
+use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle::BatchCall;
 use ocio_testkit::oracle_values::{bytes, hex, log};
@@ -147,6 +148,14 @@ pub(super) fn f64s(values: &[f64]) -> Value {
     Value::Array(values.iter().map(|&v| f64_out(v)).collect())
 }
 
+/// A CDL style as the oracle writes it.
+fn cdl_style_out(style: CdlStyle) -> Value {
+    json!({"enum": match style {
+        CdlStyle::Asc => "CDL_ASC",
+        CdlStyle::NoClamp => "CDL_NO_CLAMP",
+    }})
+}
+
 /// A negative style as the oracle writes it.
 fn negative_style_out(style: NegativeStyle) -> Value {
     json!({"enum": match style {
@@ -200,6 +209,48 @@ pub(super) fn getters(t: &Transform) -> Vec<(&'static str, Value)> {
             out.push(("hasMaxOutValue", json!(t.has_max_out_value())));
             out.push(name(t.format_metadata()));
         }
+        Transform::Builtin(t) => {
+            out.push(("getStyle", bytes_out(t.style())));
+            out.push(("getDescription", bytes_out(t.description())));
+        }
+        Transform::ColorSpace(t) => {
+            out.push(("getSrc", bytes_out(t.src())));
+            out.push(("getDst", bytes_out(t.dst())));
+            out.push(("getDataBypass", json!(t.data_bypass())));
+        }
+        Transform::DisplayView(t) => {
+            out.push(("getSrc", bytes_out(t.src())));
+            out.push(("getDisplay", bytes_out(t.display())));
+            out.push(("getView", bytes_out(t.view())));
+            out.push(("getLooksBypass", json!(t.looks_bypass())));
+            out.push(("getDataBypass", json!(t.data_bypass())));
+        }
+        Transform::File(t) => {
+            out.push(("getSrc", bytes_out(t.src())));
+            out.push(("getCCCId", bytes_out(t.ccc_id())));
+            out.push(("getCDLStyle", cdl_style_out(t.cdl_style())));
+            out.push((
+                "getInterpolation",
+                json!({"enum": match t.interpolation() {
+                    Interpolation::Unknown => "INTERP_UNKNOWN",
+                    Interpolation::Nearest => "INTERP_NEAREST",
+                    Interpolation::Linear => "INTERP_LINEAR",
+                    Interpolation::Tetrahedral => "INTERP_TETRAHEDRAL",
+                    Interpolation::Cubic => "INTERP_CUBIC",
+                    Interpolation::Default => "INTERP_DEFAULT",
+                    Interpolation::Best => "INTERP_BEST",
+                }}),
+            ));
+        }
+        Transform::Look(t) => {
+            out.push(("getSrc", bytes_out(t.src())));
+            out.push(("getDst", bytes_out(t.dst())));
+            out.push(("getLooks", bytes_out(t.looks())));
+            out.push((
+                "getSkipColorSpaceConversion",
+                json!(t.skip_color_space_conversion()),
+            ));
+        }
         Transform::Group(t) => {
             out.push(name(t.format_metadata()));
         }
@@ -222,13 +273,7 @@ pub(super) fn getters(t: &Transform) -> Vec<(&'static str, Value)> {
             out.push(("getOffset", f64s(&t.offset())));
             out.push(("getPower", f64s(&t.power())));
             out.push(("getSat", f64_out(t.sat())));
-            out.push((
-                "getStyle",
-                json!({"enum": match t.style() {
-                    CdlStyle::Asc => "CDL_ASC",
-                    CdlStyle::NoClamp => "CDL_NO_CLAMP",
-                }}),
-            ));
+            out.push(("getStyle", cdl_style_out(t.style())));
             out.push(name(t.format_metadata()));
         }
         Transform::Exponent(t) => {
@@ -303,6 +348,15 @@ fn getter_results(getters: &[(&'static str, Value)], calls: &[Value]) -> Vec<Val
     out
 }
 
+/// A string the oracle wrote as `{"bytes": hex}`, or as `{"undecodable": hex}` where the binding
+/// couldn't decode it, as `{"bytes": hex}`.
+fn as_bytes(v: &Value) -> Value {
+    match v.get("undecodable") {
+        Some(h) => json!({"bytes": h}),
+        None => v.clone(),
+    }
+}
+
 /// The error message of a config the wheel failed to make.
 fn wheel_error(config: &Value) -> Vec<u8> {
     if let Some(h) = config["undecodable"].as_str() {
@@ -365,7 +419,7 @@ pub(super) fn check(cases: &[&[u8]]) {
                     Some(t) => {
                         let class = format!("{}Transform", class_name(t));
                         let text = bytes_out(&t.to_bytes());
-                        if got["class"] != json!(class) || got["repr"] != text {
+                        if got["class"] != json!(class) || as_bytes(&got["repr"]) != text {
                             failures.push(format!(
                                 "{label}: transform\n  wheel {got}\n  port  {class} {}",
                                 String::from_utf8_lossy(&t.to_bytes())
@@ -809,4 +863,96 @@ fn deep_groups_fit_a_small_stack() {
         .unwrap()
         .join()
         .unwrap();
+}
+
+/// The BuiltinTransform's styles (any case), which it checks as it sets them, and its keys,
+/// which it doesn't check for repeats.
+#[test]
+fn builtin_transforms_load_as_in_the_wheel() {
+    check(&[
+        b"!<BuiltinTransform> {}",
+        b"!<BuiltinTransform> {style: ACES-AP0_to_CIE-XYZ-D65_BFD}",
+        b"!<BuiltinTransform> {style: aces-ap0_to_cie-xyz-d65_bfd, direction: inverse}",
+        b"!<BuiltinTransform> {style: UTILITY - ACES-AP0_to_CIE-XYZ-D65_BFD}",
+        b"!<BuiltinTransform> {style: foo}",
+        b"!<BuiltinTransform> {style: \"IDENTITY\\0x\"}",
+        b"!<BuiltinTransform> {style: [IDENTITY]}",
+        b"!<BuiltinTransform> {style: IDENTITY, style: foo}",
+        b"!<BuiltinTransform> {style: foo, style: IDENTITY}",
+        b"!<BuiltinTransform> {name: b, style: IDENTITY}",
+    ]);
+}
+
+/// The ColorSpaceTransform's names and data bypass, in every spelling of a boolean.
+#[test]
+fn color_space_transforms_load_as_in_the_wheel() {
+    check(&[
+        b"!<ColorSpaceTransform> {}",
+        b"!<ColorSpaceTransform> {src: a, dst: b}",
+        b"!<ColorSpaceTransform> {src: \"a\\0b\", dst: \xe9}",
+        b"!<ColorSpaceTransform> {src: a, dst: b, data_bypass: false, direction: inverse}",
+        b"!<ColorSpaceTransform> {data_bypass: NO}",
+        b"!<ColorSpaceTransform> {data_bypass: On}",
+        b"!<ColorSpaceTransform> {data_bypass: y}",
+        b"!<ColorSpaceTransform> {data_bypass: 1}",
+        b"!<ColorSpaceTransform> {data_bypass: tRUE}",
+        b"!<ColorSpaceTransform> {data_bypass: [true]}",
+        b"!<ColorSpaceTransform> {src: [a]}",
+        b"!<ColorSpaceTransform> {src: a, src: b}",
+        b"!<ColorSpaceTransform> {src: a, name: c}",
+    ]);
+}
+
+/// The DisplayViewTransform's names and bypasses, and its keys, which it doesn't check for
+/// repeats.
+#[test]
+fn display_view_transforms_load_as_in_the_wheel() {
+    check(&[
+        b"!<DisplayViewTransform> {}",
+        b"!<DisplayViewTransform> {src: a, display: d, view: v}",
+        b"!<DisplayViewTransform> {src: a, display: d, view: v, looks_bypass: true, \
+          data_bypass: false, direction: inverse}",
+        b"!<DisplayViewTransform> {looks_bypass: maybe}",
+        b"!<DisplayViewTransform> {data_bypass: {}}",
+        b"!<DisplayViewTransform> {view: \"v\\0w\"}",
+        b"!<DisplayViewTransform> {view: a, view: b}",
+        b"!<DisplayViewTransform> {display: [d]}",
+        b"!<DisplayViewTransform> {foo: 1}",
+    ]);
+}
+
+/// The FileTransform's keys: its path, CDL id and style, interpolations, and errors.
+#[test]
+fn file_transforms_load_as_in_the_wheel() {
+    check(&[
+        b"!<FileTransform> {}",
+        b"!<FileTransform> {src: lut.spi1d}",
+        b"!<FileTransform> {src: grade.ccc, cccid: shot_010, cdl_style: noclamp}",
+        b"!<FileTransform> {cdl_style: foo}",
+        b"!<FileTransform> {src: a, interpolation: linear}",
+        b"!<FileTransform> {src: a, interpolation: TETRAHEDRAL}",
+        b"!<FileTransform> {src: a, interpolation: best}",
+        b"!<FileTransform> {src: a, interpolation: cubic}",
+        b"!<FileTransform> {src: a, interpolation: nearest}",
+        b"!<FileTransform> {src: a, interpolation: default}",
+        b"!<FileTransform> {src: a, interpolation: foo}",
+        b"!<FileTransform> {src: a, interpolation: [linear]}",
+        b"!<FileTransform> {src: a, interpolation: \"linear\\0x\"}",
+        b"!<FileTransform> {cdl_style: \"noclamp\\0x\"}",
+        b"!<FileTransform> {src: \"a\\0b\", direction: inverse, name: f}",
+        b"!<FileTransform> {src: a, src: b}",
+    ]);
+}
+
+/// The LookTransform's keys and errors.
+#[test]
+fn look_transforms_load_as_in_the_wheel() {
+    check(&[
+        b"!<LookTransform> {}",
+        b"!<LookTransform> {src: a, dst: b, looks: \"+c, -d\"}",
+        b"!<LookTransform> {looks: \"x\\0y\", direction: inverse}",
+        b"!<LookTransform> {looks: [a, b]}",
+        b"!<LookTransform> {src: a, skip_color_space_conversion: true}",
+        b"!<LookTransform> {looks: a, looks: b}",
+    ]);
 }
