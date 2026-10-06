@@ -380,6 +380,19 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p3-config-1` (3.4g), checked against the wheel in
   `crates/ocio/tests/config_oracle.rs`.
 
+### I-132. Removing a named transform keeps it in the lists of active ones
+
+- **Upstream:** `Config::removeNamedTransform` (`Config.cpp:3300-3317`) returns as soon as it
+  has erased the named transform, before it resets the cache IDs and rebuilds the lists of
+  active and inactive named transforms; it does both only when no named transform has the
+  name. So after a removal, `getNamedTransformNames()` (the active ones) and
+  `getNamedTransformNames(NAMEDTRANSFORM_INACTIVE)` still give the removed name, and the
+  config's cache ID and validation stay as they were. Seen in the source: the wheel's Python
+  module doesn't bind `removeNamedTransform`, and upstream's tests don't call it.
+- **Who notices:** C++ applications that remove named transforms and list them after.
+- **A fix:** reset and rebuild after the removal, as `removeColorSpace` does.
+- **Status:** matched in `p3-config-2` (3.4j, `Config::remove_named_transform`).
+
 ## Numeric helpers
 
 ### I-20. Double values are compared to 0 and 1 in float precision

@@ -15,7 +15,9 @@ use std::sync::Arc;
 
 use ocio::{
     ColorSpace, ColorSpaceDirection, ColorSpaceVisibility, Config, CurrentContext, LogTransform,
-    MatrixTransform, ReferenceSpaceType, SearchReferenceSpaceType, Transform, ViewType,
+    Look, MatrixTransform, NamedTransform, NamedTransformVisibility, ReferenceSpaceType,
+    SearchReferenceSpaceType, Transform, TransformDirection, ViewTransform, ViewTransformDirection,
+    ViewType,
 };
 use ocio_ops::open_color_types::EnvironmentMode;
 use ocio_ops::platform::{MapEnv, set_thread_env_provider, setenv};
@@ -445,6 +447,11 @@ struct Probes {
     /// Displays, and the views the getters ask them for.
     displays: Vec<Vec<u8>>,
     views: Vec<Vec<u8>>,
+}
+
+/// Probes of names only.
+fn probes_of(names: &[&[u8]]) -> Probes {
+    probes(names, &[])
 }
 
 fn probes(names: &[&[u8]], categories: &[&[u8]]) -> Probes {
@@ -1025,6 +1032,256 @@ fn virtual_display_getters(probes: &Probes) -> Vec<Step> {
     out
 }
 
+/// A transform for the looks, view transforms and named transforms: its spec and the port's.
+fn offset_transform(v: f64) -> (Value, Transform) {
+    let mut m = MatrixTransform::new();
+    m.set_offset(&[v, 0.0, 0.0, 0.0]);
+    (
+        json!({"class": "MatrixTransform", "calls": [["setOffset", [v, 0.0, 0.0, 0.0]]]}),
+        Transform::from(m),
+    )
+}
+
+/// Makes a look (stored as `lk`) and adds it.
+fn add_look(name: &[u8], process_space: &[u8], with_transform: bool) -> Vec<Step> {
+    let (n, ps) = (name.to_vec(), process_space.to_vec());
+    let (spec, t) = offset_transform(0.25);
+    let mut out = vec![
+        step(
+            json!({"new": "Look", "as": "lk"}),
+            |_| json!({"result": object_out("Look", &Look::new().to_bytes())}),
+        ),
+        step(
+            json!({"call": "setName", "on": "lk", "args": [arg(&n)]}),
+            |_| json!({"result": null}),
+        ),
+        step(
+            json!({"call": "setProcessSpace", "on": "lk", "args": [arg(&ps)]}),
+            |_| json!({"result": null}),
+        ),
+    ];
+    if with_transform {
+        out.push(step(
+            json!({"call": "setTransform", "on": "lk", "args": [{"transform": spec}]}),
+            |_| json!({"result": null}),
+        ));
+    }
+    out.push(step(
+        json!({"call": "addLook", "args": [{"ref": "lk"}]}),
+        move |c| {
+            let mut look = Look::new();
+            look.set_name(&n);
+            look.set_process_space(&ps);
+            if with_transform {
+                look.set_transform(&t);
+            }
+            unit_out(c.add_look(&look))
+        },
+    ));
+    out
+}
+
+/// Makes a view transform (stored as `vt`) and adds it.
+fn add_view_transform(
+    name: &[u8],
+    reference: ReferenceSpaceType,
+    dir: Option<ViewTransformDirection>,
+) -> Vec<Step> {
+    let n = name.to_vec();
+    let (spec, t) = offset_transform(0.5);
+    let mut out = vec![
+        step(
+            json!({"new": "ViewTransform", "args": [{"enum": reference_name(reference)}],
+                   "as": "vt"}),
+            move |_| {
+                let vt = ViewTransform::new(reference);
+                json!({"result": object_out("ViewTransform", &vt.to_bytes())})
+            },
+        ),
+        step(
+            json!({"call": "setName", "on": "vt", "args": [arg(&n)]}),
+            |_| json!({"result": null}),
+        ),
+    ];
+    if let Some(d) = dir {
+        let d_name = match d {
+            ViewTransformDirection::ToReference => "VIEWTRANSFORM_DIR_TO_REFERENCE",
+            ViewTransformDirection::FromReference => "VIEWTRANSFORM_DIR_FROM_REFERENCE",
+        };
+        out.push(step(
+            json!({"call": "setTransform", "on": "vt",
+                   "args": [{"transform": spec}, {"enum": d_name}]}),
+            |_| json!({"result": null}),
+        ));
+    }
+    out.push(step(
+        json!({"call": "addViewTransform", "args": [{"ref": "vt"}]}),
+        move |c| {
+            let mut vt = ViewTransform::new(reference);
+            vt.set_name(&n);
+            if let Some(d) = dir {
+                vt.set_transform(Some(&t), d);
+            }
+            unit_out(c.add_view_transform(&vt))
+        },
+    ));
+    out
+}
+
+/// Makes a named transform (stored as `nt`) with `aliases`, and adds it.
+fn add_named_transform(
+    name: &[u8],
+    aliases: &[&[u8]],
+    dir: Option<TransformDirection>,
+) -> Vec<Step> {
+    let n = name.to_vec();
+    let aliases: Vec<Vec<u8>> = aliases.iter().map(|a| a.to_vec()).collect();
+    let (spec, t) = offset_transform(0.75);
+    let mut out = vec![
+        step(
+            json!({"new": "NamedTransform", "as": "nt"}),
+            |_| json!({"result": object_out("NamedTransform", &NamedTransform::new().to_bytes())}),
+        ),
+        step(
+            json!({"call": "setName", "on": "nt", "args": [arg(&n)]}),
+            |_| json!({"result": null}),
+        ),
+    ];
+    for a in &aliases {
+        out.push(step(
+            json!({"call": "addAlias", "on": "nt", "args": [arg(a)]}),
+            |_| json!({"result": null}),
+        ));
+    }
+    if let Some(d) = dir {
+        let d_name = match d {
+            TransformDirection::Forward => "TRANSFORM_DIR_FORWARD",
+            TransformDirection::Inverse => "TRANSFORM_DIR_INVERSE",
+        };
+        out.push(step(
+            json!({"call": "setTransform", "on": "nt",
+                   "args": [{"transform": spec}, {"enum": d_name}]}),
+            |_| json!({"result": null}),
+        ));
+    }
+    out.push(step(
+        json!({"call": "addNamedTransform", "args": [{"ref": "nt"}]}),
+        move |c| {
+            let mut nt = NamedTransform::new();
+            nt.set_name(&n);
+            for a in &aliases {
+                nt.add_alias(a);
+            }
+            if let Some(d) = dir {
+                nt.set_transform(Some(&t), d);
+            }
+            unit_out(c.add_named_transform(&nt))
+        },
+    ));
+    out
+}
+
+fn set_default_view_transform_name(name: &[u8]) -> Step {
+    list_call("setDefaultViewTransformName", name, |c, v| {
+        c.set_default_view_transform_name(v);
+        Ok(())
+    })
+}
+
+const NT_VISIBILITIES: [(NamedTransformVisibility, &str); 3] = [
+    (NamedTransformVisibility::Active, "NAMEDTRANSFORM_ACTIVE"),
+    (
+        NamedTransformVisibility::Inactive,
+        "NAMEDTRANSFORM_INACTIVE",
+    ),
+    (NamedTransformVisibility::All, "NAMEDTRANSFORM_ALL"),
+];
+
+/// An object the port may not find, as the oracle writes it.
+fn maybe_object(class: &str, repr: Option<Vec<u8>>) -> Value {
+    match repr {
+        Some(r) => json!({"result": object_out(class, &r)}),
+        None => json!({"result": null}),
+    }
+}
+
+/// The getters of the looks, the view transforms and the named transforms, and for each probe
+/// name the look, view transform and named transform of that name.
+fn transform_getters(probes: &Probes) -> Vec<Step> {
+    let mut out = vec![
+        step(json!({"call": "getLookNames"}), |c| {
+            let names: Vec<Vec<u8>> = (0..c.num_looks())
+                .map(|i| c.look_name_by_index(i).to_vec())
+                .collect();
+            texts_out(&names)
+        }),
+        step(json!({"call": "getViewTransformNames"}), |c| {
+            let names: Vec<Vec<u8>> = (0..c.num_view_transforms())
+                .map(|i| c.view_transform_name_by_index(i).to_vec())
+                .collect();
+            texts_out(&names)
+        }),
+        step(json!({"call": "getDefaultViewTransformName"}), |c| {
+            text_out(c.default_view_transform_name())
+        }),
+        step(
+            json!({"call": "getDefaultSceneToDisplayViewTransform"}),
+            |c| {
+                maybe_object(
+                    "ViewTransform",
+                    c.default_scene_to_display_view_transform()
+                        .map(ViewTransform::to_bytes),
+                )
+            },
+        ),
+        step(json!({"call": "getNamedTransformNames"}), |c| {
+            let names: Vec<Vec<u8>> = (0..c.num_named_transforms())
+                .map(|i| c.named_transform_name_by_index(i).to_vec())
+                .collect();
+            texts_out(&names)
+        }),
+    ];
+    for (v, v_name) in NT_VISIBILITIES {
+        out.push(step(
+            json!({"call": "getNamedTransformNames", "args": [{"enum": v_name}]}),
+            move |c| {
+                let names: Vec<Vec<u8>> = (0..c.num_named_transforms_with(v))
+                    .map(|i| c.named_transform_name_by_index_with(v, i).to_vec())
+                    .collect();
+                texts_out(&names)
+            },
+        ));
+    }
+    for name in &probes.names {
+        let n = name.clone();
+        out.push(step(
+            json!({"call": "getLook", "args": [arg(name)]}),
+            move |c| maybe_object("Look", c.look(&n).map(Look::to_bytes)),
+        ));
+        let n = name.clone();
+        out.push(step(
+            json!({"call": "getViewTransform", "args": [arg(name)]}),
+            move |c| {
+                maybe_object(
+                    "ViewTransform",
+                    c.view_transform(&n).map(ViewTransform::to_bytes),
+                )
+            },
+        ));
+        let n = name.clone();
+        out.push(step(
+            json!({"call": "getNamedTransform", "args": [arg(name)]}),
+            move |c| {
+                maybe_object(
+                    "NamedTransform",
+                    c.named_transform(&n).map(NamedTransform::to_bytes),
+                )
+            },
+        ));
+    }
+    out
+}
+
 /// The config's getters, then its context's `repr()`.
 fn getters() -> Vec<Step> {
     vec![
@@ -1083,6 +1340,7 @@ fn all_getters(probes: &Probes) -> Vec<Step> {
     out.extend(model_getters(probes));
     out.extend(display_getters(probes));
     out.extend(virtual_display_getters(probes));
+    out.extend(transform_getters(probes));
     out
 }
 
@@ -1863,4 +2121,90 @@ fn active_lists_and_the_virtual_display_match_the_wheel() {
         items,
         &probes,
     );
+}
+
+/// Looks, view transforms and the default one, and named transforms: added, replaced,
+/// refused (empty names, no transform, conflicts with roles, color spaces and each other's
+/// names and aliases, context variable tokens), looked up ignoring case and by alias,
+/// cleared; the named transforms made inactive by the API's list and the environment's; the
+/// canonical names of named transforms.
+#[test]
+fn looks_view_transforms_and_named_transforms_match_the_wheel() {
+    let fwd = Some(TransformDirection::Forward);
+    let inv = Some(TransformDirection::Inverse);
+    let to = Some(ViewTransformDirection::ToReference);
+    let from = Some(ViewTransformDirection::FromReference);
+    let items: Vec<Item> = vec![
+        add_color_space(cs(b"raw").alias(b"raw_alias")).into(),
+        set_role(b"role1", Some(b"raw")).into(),
+        add_look(b"look1", b"raw", true).into(),
+        add_look(b"Look2", b"other", false).into(),
+        add_look(b"LOOK1", b"raw2", false).into(),
+        add_look(b"", b"raw", true).into(),
+        add_view_transform(b"vt1", ReferenceSpaceType::Display, to).into(),
+        add_view_transform(b"vt2", ReferenceSpaceType::Scene, from).into(),
+        add_view_transform(b"VT3", ReferenceSpaceType::Scene, to).into(),
+        add_view_transform(b"vt4", ReferenceSpaceType::Scene, None).into(),
+        add_view_transform(b"", ReferenceSpaceType::Scene, to).into(),
+        set_default_view_transform_name(b"vt3").into(),
+        set_default_view_transform_name(b"vt1").into(),
+        set_default_view_transform_name(b"missing").into(),
+        add_view_transform(b"VT2", ReferenceSpaceType::Display, to).into(),
+        add_named_transform(b"nt1", &[b"nt_alias", b"NT1b"], fwd).into(),
+        add_named_transform(b"nt2", &[], inv).into(),
+        add_named_transform(b"nt3", &[], None).into(),
+        add_named_transform(b"", &[], fwd).into(),
+        add_named_transform(b"role1", &[], fwd).into(),
+        add_named_transform(b"RAW_ALIAS", &[], fwd).into(),
+        add_named_transform(b"nt$", &[], fwd).into(),
+        add_named_transform(b"nt4", &[b"Role1"], fwd).into(),
+        add_named_transform(b"nt4", &[b"raw"], fwd).into(),
+        add_named_transform(b"nt4", &[b"a%"], fwd).into(),
+        add_named_transform(b"nt4", &[b"NT_ALIAS"], fwd).into(),
+        add_named_transform(b"nt_alias", &[], fwd).into(),
+        add_named_transform(b"NT1", &[b"nt_alias"], inv).into(),
+        add_named_transform(b"nt5", &[b"nt2"], fwd).into(),
+        add_color_space(cs(b"nt2")).into(),
+        add_color_space(cs(b"x").alias(b"nt1b")).into(),
+        set_role(b"nt2", Some(b"raw")).into(),
+        set_inactive_color_spaces(b"nt2, raw, nt_alias").into(),
+        Item::Copy,
+        clear_step("clearLooks", |c| c.clear_looks()).into(),
+        clear_step("clearViewTransforms", |c| c.clear_view_transforms()).into(),
+        set_inactive_color_spaces(b"").into(),
+        clear_step("clearNamedTransforms", |c| c.clear_named_transforms()).into(),
+        add_named_transform(b"nt6", &[], fwd).into(),
+    ];
+    let probes = probes(
+        &[
+            b"look1",
+            b"LOOK2",
+            b"vt1",
+            b"vt2",
+            b"Vt3",
+            b"vt4",
+            b"nt1",
+            b"NT_ALIAS",
+            b"nt1b",
+            b"nt2",
+            b"nt3",
+            b"nt6",
+            b"raw",
+            b"raw_alias",
+            b"role1",
+            b"missing",
+            b"",
+        ],
+        &[],
+    );
+    check_items("looks and transforms", "new", &[], items, &probes);
+
+    let env: Env = &[("OCIO_INACTIVE_COLORSPACES", b"NT_ALIAS, raw")];
+    let items: Vec<Item> = vec![
+        add_color_space(cs(b"raw")).into(),
+        add_named_transform(b"nt1", &[b"nt_alias"], fwd).into(),
+        add_named_transform(b"nt2", &[], fwd).into(),
+    ];
+    let more = probes_of(&[b"nt1", b"nt2", b"raw"]);
+    check_items("inactive named transforms", "new", env, items, &more);
 }

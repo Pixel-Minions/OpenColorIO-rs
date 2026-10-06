@@ -38,8 +38,8 @@ pub use ocio_ops::exception::{Exception, ExceptionKind, Result};
 pub use ocio_ops::format_metadata::FormatMetadataImpl as FormatMetadata;
 pub use ocio_ops::open_color_types::{
     Allocation, BSplineType, BitDepth, CdlStyle, ColorSpaceDirection, ColorSpaceVisibility,
-    EnvironmentMode, FixedFunctionStyle, GradingStyle, Lut1DHueAdjust, NegativeStyle,
-    OptimizationFlags, ReferenceSpaceType, RgbCurveType, SearchReferenceSpaceType,
+    EnvironmentMode, FixedFunctionStyle, GradingStyle, Lut1DHueAdjust, NamedTransformVisibility,
+    NegativeStyle, OptimizationFlags, ReferenceSpaceType, RgbCurveType, SearchReferenceSpaceType,
     TransformDirection, ViewTransformDirection, ViewType,
 };
 pub use ocio_ops::ops::gradingrgbcurve::grading_b_spline_curve::{

@@ -103,6 +103,19 @@ pub enum ColorSpaceVisibility {
     All,
 }
 
+/// Which named transforms a search keeps: the active ones, the inactive ones, or all.
+///
+/// Port of `NamedTransformVisibility` (include/OpenColorIO/OpenColorTypes.h:330-335 @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NamedTransformVisibility {
+    /// `NAMEDTRANSFORM_ACTIVE`.
+    Active = 0,
+    /// `NAMEDTRANSFORM_INACTIVE`.
+    Inactive,
+    /// `NAMEDTRANSFORM_ALL`.
+    All,
+}
+
 /// Which views of a display: the shared views it uses, or its own.
 ///
 /// Port of `ViewType` (include/OpenColorIO/OpenColorTypes.h:337-341 @ v2.5.2).

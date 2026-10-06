@@ -9,6 +9,7 @@ use ocio_testkit::upstream::check_throw_what;
 
 use super::*;
 use crate::test_env::EnvGuard;
+use crate::transforms::matrix_transform::MatrixTransform;
 
 /// `setMajorVersion` takes 1 and 2 and refuses other versions (Config_tests.cpp:2065-2067,
 /// 2104-2107 @ v2.5.2); the minor version becomes the last one each major supports, which
@@ -101,10 +102,10 @@ fn family_separator_without_yaml() {
     assert!(cfg.set_family_separator(31).is_err());
 }
 
-/// `Config alias_validation`'s checks of `addColorSpace` (Config_tests.cpp:9415-9438 @ v2.5.2),
-/// without its `validate()` calls (3.8a) and its named transforms (3.4j).
+/// `Config alias_validation`'s checks (Config_tests.cpp:9411-9478 @ v2.5.2), without its
+/// `validate()` calls (3.8a; no marker).
 #[test]
-fn alias_validation_of_color_spaces() {
+fn alias_validation_without_validate() {
     let _env = EnvGuard::new();
     // NB: This tests ColorSpaceSet::addColorSpace.
 
@@ -141,6 +142,46 @@ fn alias_validation_of_color_spaces() {
     cs.remove_alias("test%test");
     cs.add_alias("namedtransform");
     cfg.add_color_space(&cs).unwrap();
+    let mut nt = NamedTransform::new();
+    nt.set_transform(
+        Some(&Transform::from(MatrixTransform::new())),
+        TransformDirection::Forward,
+    );
+    nt.set_name("namedtransform");
+    check_throw_what(
+        cfg.add_named_transform(&nt),
+        "Cannot add 'namedtransform' named transform, there is already a color space using this name as a name or as an alias: 'colorspace3",
+    );
+
+    nt.set_name("nt");
+    cfg.add_named_transform(&nt).unwrap();
+
+    nt.add_alias("namedtransform");
+    check_throw_what(
+        cfg.add_named_transform(&nt),
+        "Cannot add 'nt' named transform, it has an alias 'namedtransform' and there is already a color space using this name as a name or as an alias: 'colorspace3'",
+    );
+
+    nt.remove_alias("namedtransform");
+    nt.add_alias("colorspace3");
+    check_throw_what(
+        cfg.add_named_transform(&nt),
+        "Cannot add 'nt' named transform, it has an alias 'colorspace3' and there is already a color space using this name as a name or as an alias: 'colorspace3'",
+    );
+
+    nt.remove_alias("colorspace3");
+    nt.add_alias("alias");
+    check_throw_what(
+        cfg.add_named_transform(&nt),
+        "Cannot add 'nt' named transform, it has an alias 'alias' and there is already a role with this name",
+    );
+
+    nt.remove_alias("alias");
+    nt.add_alias("test%test");
+    check_throw_what(
+        cfg.add_named_transform(&nt),
+        "Cannot add 'nt' named transform, it has an alias 'test%test' that cannot contain a context variable reserved token i.e. % or $",
+    );
 }
 
 /// The two configs of `Config compare_displays` (Display_tests.cpp:242-326 @ v2.5.2), built
