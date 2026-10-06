@@ -158,6 +158,23 @@ pub fn regex_match(text: &[u8], re: &Regex) -> Result<bool, RegexError> {
     }
 }
 
+/// `regex_replace(text, re, fmt)` with `format_default`, for a format without `$` (the
+/// ECMAScript format rules then copy it as it is): `text` with each match of `re` replaced by
+/// `fmt`, as `library` searches it. OCIO calls it with two fixed expressions
+/// (`SanitizeRegularExpression`, FileRules.cpp:30-49), and these are what the wheels check;
+/// the searches it makes and the errors are those of `regex_match`.
+///
+/// Port of `regex_replace(const basic_string &, const basic_regex &, const char *)` (MSVC STL
+/// `<regex>`:2336-2400); for libstdc++, its behavior ([re.alg.replace], [re.regiter.incr]).
+pub fn regex_replace(text: &[u8], re: &Regex, fmt: &[u8]) -> Result<Vec<u8>, RegexError> {
+    debug_assert!(!fmt.contains(&b'$'), "a format without escapes");
+    match &re.program {
+        Program::Msvc(p) => on_stack(MSVC_MATCH_STACK, || msvc_match::regex_replace(p, text, fmt))
+            .unwrap_or_else(|| Err(msvc::error(ErrorType::Space))),
+        Program::Libstdcxx(p) => libstdcxx_match::regex_replace(p, text, fmt),
+    }
+}
+
 /// The stack MSVC's matcher needs at its depth limit (600 nested matches): at most 1.43 MiB
 /// measured at opt-level 0, where frames are largest (`(a|b|c)*` on 298 `c`, `(?:(?=a|b).)*`
 /// on 299 `a`), with a margin.

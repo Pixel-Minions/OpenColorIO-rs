@@ -72,8 +72,13 @@ struct Matcher<'a> {
     text: &'a [u8],
     /// Each loop's state.
     loops: RefCell<HashMap<LoopKey, LoopState>>,
-    /// Where the expression being matched starts: the text's start, or a lookahead's.
+    /// Where the expression being matched starts: the text's start, a search's start, or a
+    /// lookahead's.
     begin: Cell<usize>,
+    /// Whether the character before `begin` belongs to the text (`match_prev_avail`, set by a
+    /// search past its first start): `^` doesn't match at `begin` then, and `\b` sees that
+    /// character. A lookahead keeps it.
+    prev_avail: Cell<bool>,
     /// The estimated depth of the wheel's stack along the current path.
     cost: Cell<u32>,
     /// The address of a variable at the start of the thread, which the stack grows from.
@@ -149,10 +154,12 @@ impl<'a> Matcher<'a> {
             Node::Set(set) => {
                 pos < self.text.len() && set.contains(self.text[pos]) && k(pos + 1, caps)
             }
-            Node::LineBegin => pos == self.begin.get() && k(pos, caps),
+            Node::LineBegin => pos == self.begin.get() && !self.prev_avail.get() && k(pos, caps),
             Node::LineEnd => pos == self.text.len() && k(pos, caps),
             Node::WordBoundary { negated } => {
-                let before = pos > self.begin.get() && is_word(self.text[pos - 1]);
+                let before = (pos > self.begin.get() || self.prev_avail.get())
+                    && pos > 0
+                    && is_word(self.text[pos - 1]);
                 let after = pos < self.text.len() && is_word(self.text[pos]);
                 ((before != after) != *negated) && k(pos, caps)
             }
@@ -424,6 +431,7 @@ pub(super) fn regex_match(program: &Program, text: &[u8]) -> Result<bool, RegexE
             text,
             loops: RefCell::new(HashMap::new()),
             begin: Cell::new(0),
+            prev_avail: Cell::new(false),
             cost: Cell::new(0),
             stack_base: stack_address(),
             aborted: Cell::new(false),
@@ -436,6 +444,137 @@ pub(super) fn regex_match(program: &Program, text: &[u8]) -> Result<bool, RegexE
         } else {
             Ok(matched)
         }
+    };
+    super::on_stack(STACK_SIZE, run).unwrap_or(Err(RegexError {
+        code: ErrorType::Space,
+        what: "regex_error",
+    }))
+}
+
+/// The flags of a search: `match_prev_avail`, `match_not_null`, `match_continuous`.
+#[derive(Debug, Clone, Copy, Default)]
+struct SearchFlags {
+    prev_avail: bool,
+    not_null: bool,
+    continuous: bool,
+}
+
+impl Matcher<'_> {
+    /// A match that starts at `start`, `prev_avail` telling whether the character before it
+    /// belongs to the text (`match_prev_avail`): its end, the first the matcher's order finds
+    /// (a match of no character refused with `not_null`).
+    fn match_from(
+        &self,
+        program: &Program,
+        start: usize,
+        prev_avail: bool,
+        not_null: bool,
+    ) -> Option<usize> {
+        self.loops.borrow_mut().clear();
+        self.cost.set(0);
+        self.begin.set(start);
+        self.prev_avail.set(prev_avail);
+        let mut caps: Captures = vec![None; program.groups];
+        let mut end = None;
+        let matched = self.m(&program.root, start, &mut caps, 0, &mut |p, _| {
+            if not_null && p == start {
+                return false;
+            }
+            end = Some(p);
+            true
+        });
+        if matched { end } else { None }
+    }
+
+    /// `regex_search(text.begin() + first, text.end(), m, re, flags)`: the span of the first
+    /// match, trying each start from `first` to the end of the text included, in order; the
+    /// starts after `first` have the character before them (`match_prev_avail`).
+    fn search(
+        &self,
+        program: &Program,
+        first: usize,
+        flags: SearchFlags,
+    ) -> Option<(usize, usize)> {
+        if let Some(end) = self.match_from(program, first, flags.prev_avail, flags.not_null) {
+            return Some((first, end));
+        }
+        if flags.continuous || self.aborted.get() {
+            return None;
+        }
+        for start in first + 1..=self.text.len() {
+            if let Some(end) = self.match_from(program, start, true, flags.not_null) {
+                return Some((start, end));
+            }
+            if self.aborted.get() {
+                return None;
+            }
+        }
+        None
+    }
+}
+
+/// `regex_replace(s, re, fmt)` with `format_default`, for a format without `$`: `text` with
+/// each match replaced by `fmt`. The matches are those a `regex_iterator` gives
+/// ([re.regiter.incr]): after a match, the search goes on from its end with
+/// `match_prev_avail`; after an empty one, it first looks for a non-empty match there
+/// (`match_not_null | match_continuous`), then from the next character. The text between
+/// matches is copied ([re.alg.replace]).
+pub(super) fn regex_replace(
+    program: &Program,
+    text: &[u8],
+    fmt: &[u8],
+) -> Result<Vec<u8>, RegexError> {
+    if text.len() > MAX_TEXT {
+        return Err(refused());
+    }
+    let run = || {
+        let matcher = Matcher {
+            text,
+            loops: RefCell::new(HashMap::new()),
+            begin: Cell::new(0),
+            prev_avail: Cell::new(false),
+            cost: Cell::new(0),
+            stack_base: stack_address(),
+            aborted: Cell::new(false),
+        };
+        let end = text.len();
+        let mut out = Vec::new();
+        let mut flags = SearchFlags::default();
+        let mut found = matcher.search(program, 0, flags);
+        let mut prefix_first = 0;
+        while let Some((m_first, m_second)) = found {
+            out.extend_from_slice(&text[prefix_first..m_first]);
+            out.extend_from_slice(fmt);
+            prefix_first = m_second;
+
+            // ++iterator
+            let mut start = m_second;
+            if m_first == m_second {
+                if start == end {
+                    break;
+                }
+                let retry = SearchFlags {
+                    not_null: true,
+                    continuous: true,
+                    ..flags
+                };
+                if let Some(m) = matcher.search(program, start, retry) {
+                    found = Some(m);
+                    continue;
+                }
+                if matcher.aborted.get() {
+                    break;
+                }
+                start += 1;
+            }
+            flags.prev_avail = true;
+            found = matcher.search(program, start, flags);
+        }
+        if matcher.aborted.get() {
+            return Err(refused());
+        }
+        out.extend_from_slice(&text[prefix_first..end]);
+        Ok(out)
     };
     super::on_stack(STACK_SIZE, run).unwrap_or(Err(RegexError {
         code: ErrorType::Space,

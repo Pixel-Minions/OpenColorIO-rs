@@ -1553,6 +1553,27 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   parser and its NFA state limit (3.9c) and matcher (3.9d, with the lookahead and brace-copy
   rules of the fix chunk after its verifier).
 
+### I-133. A glob rule's expression is "sanitized" differently on Windows and Linux
+
+- **Upstream:** a glob rule's pattern and extension become a regular expression, which
+  `SanitizeRegularExpression` (`FileRules.cpp:30-49`) rewrites with two `regex_replace`
+  calls, to turn `*?`, `?*` and `**` into one `.*`. The first expression,
+  `(\.\*\.^\*)+|(^\\\.\.\*)+`, doesn't do what its comments say: its first alternative
+  requires a `^` in the middle of the text, and its second matches a literal `\..*` at the
+  start of the text, which the built expression never has (it starts with `^(`). So it never
+  changes an expression in the Linux wheel. In the Windows wheel, MSVC's `^` also matches
+  after a line feed (I-122), so a glob holding a line feed then `.*` (the pattern `\n.*`,
+  converted to `\n\..*`) has its `\..*` replaced by `.*`, which changes what the rule matches
+  (`\nfoo.exr` matches the pattern `\n.*` and extension `exr` on Windows, not on Linux). The
+  second expression, `(\.\*)+`, merges runs of `.*` on both, as intended.
+- **Who notices:** glob rules with a line feed in their pattern, shared between Windows and
+  Linux.
+- **A fix:** drop the first expression, or anchor nothing in it.
+- **Decided** (D12): the port does what each wheel does.
+- **Status:** matched in `p3-rules` (3.9e, `std_regex::regex_replace` and
+  `crates/ocio/src/file_rules.rs`); the messages of globs whose sanitized expression doesn't
+  compile show it, checked against both wheels in `crates/ocio/tests/file_rules_oracle.rs`.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on

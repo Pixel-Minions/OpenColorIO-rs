@@ -682,3 +682,276 @@ pub(super) fn regex_match(program: &Program, text: &[u8]) -> Result<bool, RegexE
     let mut mx = Matcher::new(text, 0, text.len(), program, MATCH_DEFAULT);
     mx.match_(true)
 }
+
+// ---------------------------------------------------------------------------------------------
+// regex_search and regex_replace
+
+/// `match_continuous` (`<regex>`:128).
+const MATCH_CONTINUOUS: u32 = 0x0040;
+/// `format_no_copy` (`<regex>`:132).
+const FORMAT_NO_COPY: u32 = 0x0800;
+/// `format_first_only` (`<regex>`:133).
+const FORMAT_FIRST_ONLY: u32 = 0x1000;
+/// `_Skip_zero_length` (`<regex>`:135).
+const SKIP_ZERO_LENGTH: u32 = 0x4000;
+
+impl Matcher<'_> {
+    /// Port of `_Matcher::_Setf` (`<regex>`:1603-1605).
+    fn setf(&mut self, mf: u32) {
+        self.mflags |= mf;
+    }
+
+    /// Port of `_Matcher::_Clearf` (`<regex>`:1607-1609).
+    fn clearf(&mut self, mf: u32) {
+        self.mflags &= !mf;
+    }
+
+    /// `_Matcher::_Match(_Pfirst, _Matches, false)` (`<regex>`:1611-1616) with results: the
+    /// whole match's span, or `None`.
+    fn match_at(&mut self, pfirst: usize) -> MatchResult<Option<(usize, usize)>> {
+        self.first = pfirst;
+        self.match_results()
+    }
+
+    /// `_Matcher::_Match(_Matches, false)` (`<regex>`:1618-1668) with results: the span of
+    /// group 0 (`_Matches->_At(0)`), or `None`.
+    fn match_results(&mut self) -> MatchResult<Option<(usize, usize)>> {
+        self.begin = self.first;
+        self.tgt_state.cur = self.first;
+        self.tgt_state.grp_valid.resize(self.ncap, false);
+        self.tgt_state.grps.resize(self.ncap, (0, 0));
+        self.cap = true;
+        self.full = false;
+        self.max_complexity_count = MAX_COMPLEXITY_COUNT;
+        self.max_stack_count = MAX_STACK_COUNT;
+
+        self.matched = false;
+
+        if !self.match_pat(Some(0))? {
+            return Ok(None);
+        }
+
+        // copy results to _Matches
+        Ok(Some(if self.res.grp_valid[0] {
+            self.res.grps[0]
+        } else {
+            (self.end, self.end)
+        }))
+    }
+
+    /// The first position from `first_arg` where a match could start: skips what the
+    /// expression's first nodes can't match.
+    ///
+    /// Port of `_Matcher::_Skip` (`<regex>`:3710-3846). It reads the character before
+    /// `first_arg`, which is valid.
+    fn skip(&self, mut first_arg: usize, mut last: usize, node_arg: Option<NodeId>) -> usize {
+        let mut nx = Some(node_arg.unwrap_or(0));
+
+        while first_arg != last {
+            let Some(n) = nx else { break };
+            // check current node
+            let node = &self.nodes[n];
+            match node.kind {
+                NodeType::Nop => {}
+
+                NodeType::Bol => {
+                    // check for embedded newline
+                    // return iterator to character just after the newline; for input like
+                    // "\nabc" matching "^abc", _First_arg could be pointing at 'a', so we
+                    // need to check --_First_arg for '\n'
+                    if self.text[first_arg - 1] != META_NL {
+                        first_arg = self.text[first_arg..last]
+                            .iter()
+                            .position(|&c| c == META_NL)
+                            .map_or(last, |i| first_arg + i);
+                        if first_arg != last {
+                            first_arg += 1;
+                        }
+                    }
+
+                    return first_arg;
+                }
+
+                NodeType::Eol => {
+                    return self.text[first_arg..last]
+                        .iter()
+                        .position(|&c| c == META_NL)
+                        .map_or(last, |i| first_arg + i);
+                }
+
+                NodeType::Str => {
+                    // check for string match
+                    let data = match &node.data {
+                        NodeData::Str(data) => data,
+                        _ => unreachable!("a string node"),
+                    };
+                    while first_arg != last {
+                        // look for starting match
+                        if compare(self.text, first_arg, first_arg + 1, &data[..1]) != first_arg {
+                            break;
+                        }
+                        first_arg += 1;
+                    }
+                    return first_arg;
+                }
+
+                NodeType::Class => {
+                    // check for string match
+                    let class = match &node.data {
+                        NodeData::Class(class) => class,
+                        _ => unreachable!("a bracket expression"),
+                    };
+                    let negated = node.flags & FL_NEGATE != 0;
+                    while first_arg != last {
+                        // look for starting match
+                        let ch = self.text[first_arg];
+                        let next = first_arg + 1;
+
+                        let found = if lookup_coll(self.text, first_arg, next, &class.coll)
+                            .is_some_and(|r| r != first_arg)
+                        {
+                            true
+                        } else {
+                            class.small.as_ref().is_some_and(|s| s.find(u32::from(ch)))
+                        };
+
+                        if found != negated {
+                            return first_arg;
+                        }
+                        first_arg += 1;
+                    }
+                    return first_arg;
+                }
+
+                NodeType::Group | NodeType::EndGroup => {}
+
+                NodeType::EndAssert => {
+                    nx = None;
+                    continue;
+                }
+
+                NodeType::Capture | NodeType::EndCapture => {}
+
+                NodeType::If => {
+                    // check for soonest string match
+                    let mut node_if = Some(n);
+                    while first_arg != last {
+                        let Some(i) = node_if else { break };
+                        last = self.skip(first_arg, last, self.nodes[i].next);
+                        node_if = match self.nodes[i].data {
+                            NodeData::If { child, .. } => child,
+                            _ => unreachable!("an alternative"),
+                        };
+                    }
+
+                    return last;
+                }
+
+                NodeType::Begin => {}
+
+                NodeType::End => {
+                    nx = None;
+                    continue;
+                }
+
+                NodeType::Wbound
+                | NodeType::Dot
+                | NodeType::Assert
+                | NodeType::NegAssert
+                | NodeType::Back
+                | NodeType::Endif
+                | NodeType::Rep
+                | NodeType::EndRep => return first_arg,
+            }
+            nx = self.nodes[n].next;
+        }
+        first_arg
+    }
+}
+
+/// `_Regex_search2(_First, _Last, &_Matches, _Re, _Flgs, _Org)`: the span of the first match
+/// in `text[first..last]`, `None` for none. `text` holds the characters before `first`, which
+/// `match_prev_avail` lets the matcher read.
+///
+/// Port of `_Regex_search2` (`<regex>`:2234-2276).
+fn regex_search2(
+    program: &Program,
+    text: &[u8],
+    mut first: usize,
+    last: usize,
+    flgs: u32,
+) -> MatchResult<Option<(usize, usize)>> {
+    // search for regular expression match in target text
+    if flgs & SKIP_ZERO_LENGTH != 0 && first != last {
+        first += 1;
+    }
+
+    let mut mx = Matcher::new(text, first, last, program, flgs);
+
+    let mut found = mx.match_results()?;
+    if found.is_none() && first != last && flgs & MATCH_CONTINUOUS == 0 {
+        // try more on suffixes
+        mx.setf(MATCH_PREV_AVAIL);
+        mx.clearf(MATCH_NOT_NULL_INTERNAL);
+        loop {
+            first = mx.skip(first + 1, last, None);
+            if first == last {
+                break;
+            }
+            if let Some(span) = mx.match_at(first)? {
+                // found match starting at _First
+                found = Some(span);
+                break;
+            }
+        }
+
+        if found.is_none() {
+            found = mx.match_at(last)?;
+        }
+    }
+
+    Ok(found)
+}
+
+/// `regex_replace(s, re, fmt)` with `format_default`, for a format without `$`: `text` with
+/// each match replaced by `fmt`, as the ECMAScript format rules copy a format without escapes
+/// (`_Format_default`, `<regex>`:2092-2135).
+///
+/// Port of `_Regex_replace1` (`<regex>`:2336-2366).
+pub(super) fn regex_replace(program: &Program, text: &[u8], fmt: &[u8]) -> MatchResult<Vec<u8>> {
+    let flgs = MATCH_DEFAULT;
+    let last = text.len();
+    let mut result = Vec::new();
+
+    // search and replace
+    let mut pos = 0;
+    let mut flags = flgs;
+    let mut not_null = 0;
+
+    while let Some((m_first, m_second)) = regex_search2(program, text, pos, last, flags | not_null)?
+    {
+        // replace at each match
+        if flgs & FORMAT_NO_COPY == 0 {
+            result.extend_from_slice(&text[pos..m_first]);
+        }
+
+        result.extend_from_slice(fmt);
+
+        pos = m_second;
+        if pos == last || flgs & FORMAT_FIRST_ONLY != 0 {
+            break;
+        }
+
+        if m_first == m_second {
+            not_null = MATCH_NOT_NULL_INTERNAL;
+        } else {
+            // non-null match, recognize earlier text
+            not_null = 0;
+            flags |= MATCH_PREV_AVAIL;
+        }
+    }
+    if flgs & FORMAT_NO_COPY == 0 {
+        result.extend_from_slice(&text[pos..last]);
+    }
+    Ok(result)
+}
