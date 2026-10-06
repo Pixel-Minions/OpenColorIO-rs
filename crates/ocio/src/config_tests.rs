@@ -81,7 +81,7 @@ fn version_without_yaml() {
 #[test]
 fn family_separator_without_yaml() {
     let _env = EnvGuard::new();
-    let mut cfg = (*Config::create_raw()).clone();
+    let mut cfg = (*Config::create_raw().unwrap()).clone();
 
     assert_eq!(cfg.family_separator(), b'/');
 
@@ -108,7 +108,7 @@ fn alias_validation_of_color_spaces() {
     let _env = EnvGuard::new();
     // NB: This tests ColorSpaceSet::addColorSpace.
 
-    let mut cfg = (*Config::create_raw()).clone();
+    let mut cfg = (*Config::create_raw().unwrap()).clone();
     let mut cs = ColorSpace::new();
     cs.set_name("colorspace1");
     cfg.add_color_space(&cs).unwrap();

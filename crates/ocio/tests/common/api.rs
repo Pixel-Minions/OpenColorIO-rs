@@ -467,7 +467,9 @@ pub(crate) fn port_transform(spec: &Value) -> Result<Transform, Exception> {
 /// oracle's is per request.
 pub(crate) fn port_processor(spec: &Value) -> Result<Arc<Processor>, Exception> {
     let transform = port_transform(spec)?;
-    Config::create_raw().processor_in_direction(&transform, TransformDirection::Forward)
+    Config::create_raw()
+        .unwrap()
+        .processor_in_direction(&transform, TransformDirection::Forward)
 }
 
 /// The optimization levels of `OptimizationFlags`, as the oracle names them, and the port's.

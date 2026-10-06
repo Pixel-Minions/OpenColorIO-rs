@@ -503,7 +503,7 @@ fn compare_images(
 /// entry, in order: the 1D LUTs its CPU processor renders.
 fn port_luts(class: &Class, job: &Job, calls: &Calls) -> Result<Vec<Vec<f32>>, Exception> {
     let transform = port_transform(&calls.spec(job.dir))?;
-    let mut config = (*Config::create_raw()).clone();
+    let mut config = (*Config::create_raw().unwrap()).clone();
     if class.v1 {
         config.set_major_version(1).expect("version 1");
     }
@@ -752,7 +752,7 @@ fn port(class: &Class, job: &Job, calls: &Calls) -> PortOutcome {
     let fail =
         |stage: &'static str| move |e: Exception| (stage.to_string(), e.message().to_string());
     let transform = port_transform(&calls.spec(job.dir)).map_err(fail("transform"))?;
-    let mut config = (*Config::create_raw()).clone();
+    let mut config = (*Config::create_raw().unwrap()).clone();
     if class.v1 {
         config.set_major_version(1).expect("version 1");
     }

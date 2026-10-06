@@ -27,7 +27,7 @@ fn set_major_version_matches_the_wheel() {
 
     let mut failures = Vec::new();
     for (&version, wheel) in tried.iter().zip(wheel) {
-        let mut raw = Config::create_raw();
+        let mut raw = Config::create_raw().unwrap();
         let config = Arc::get_mut(&mut raw).expect("a config of its own");
         let before = versions(config);
         let result = config.set_major_version(version);

@@ -253,7 +253,7 @@ fn processor_error(config: &Config, transform: &Transform, dir: TransformDirecti
 /// with the error `build_ops` documents: the class and the work package that ports it.
 #[test]
 fn processors_of_the_classes_without_builders_are_refused() {
-    let config = Config::create_raw();
+    let config = Config::create_raw().unwrap();
     let cases = [
         (TransformType::ColorSpace, "ColorSpaceTransform", "WP 3.2a"),
         (
@@ -282,7 +282,7 @@ fn processors_of_the_classes_without_builders_are_refused() {
 /// error the registry's creators document: the style, as the registry spells it.
 #[test]
 fn processors_of_every_builtin_transform_are_refused() {
-    let config = Config::create_raw();
+    let config = Config::create_raw().unwrap();
     let registry = BuiltinTransformRegistry::get();
     assert!(registry.num_builtins() > 0);
     for index in 0..registry.num_builtins() {

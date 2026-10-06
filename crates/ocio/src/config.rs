@@ -358,21 +358,21 @@ impl Config {
     /// `default`, its display, and the whole environment in its context (its profile has no
     /// `environment` section). So far its version, strict parsing, color space, role and
     /// environment; the rest of its state comes with the displays and the file rules, built
-    /// directly until the YAML reader parses upstream's profile (3.7d).
+    /// directly until the YAML reader parses upstream's profile (3.7d). As any config, it reads
+    /// the environment's active displays and views and inactive color spaces
+    /// ([`Config::new`]), and fails as [`Config::new`] does.
     ///
     /// Port of `Config::CreateRaw` (src/OpenColorIO/Config.cpp:74-92, 1127-1133 @ v2.5.2), in
     /// part, with what `OCIOYaml`'s `load` sets from that profile (`setVersion`,
-    /// `setStrictParsingEnabled`, `setRole`, the
-    /// color space's setters and `addColorSpace`, `setEnvironmentMode`, `loadEnvironment`) and
-    /// `Config::Impl::Read`'s refresh of the active color spaces (Config.cpp:5545-5561).
+    /// `setStrictParsingEnabled`, `setRole`, the color space's setters and `addColorSpace`,
+    /// `setEnvironmentMode`, `loadEnvironment`) and `Config::Impl::Read`'s refresh of the
+    /// active color spaces (Config.cpp:5545-5561).
     #[doc(alias = "CreateRaw")]
-    pub fn create_raw() -> Arc<Config> {
-        let mut config = Config::blank();
-        config.minor_version = 0;
+    pub fn create_raw() -> Result<Arc<Config>> {
+        let mut config = Config::new()?;
+        config.set_version(2, 0)?;
         config.set_strict_parsing_enabled(false);
-        config
-            .set_role(ROLE_DEFAULT, Some(b"raw"))
-            .expect("the raw config's role");
+        config.set_role(ROLE_DEFAULT, Some(b"raw"))?;
 
         let mut cs = ColorSpace::new();
         cs.set_name("raw");
@@ -382,16 +382,14 @@ impl Config {
         cs.set_is_data(true);
         cs.set_allocation(Allocation::Uniform);
         cs.set_description("A raw color space. Conversions to and from this space are no-ops.");
-        config
-            .add_color_space(&cs)
-            .expect("the raw config's color space");
+        config.add_color_space(&cs)?;
 
         config.set_environment_mode(EnvironmentMode::LoadAll);
         config.load_environment();
 
         config.inactive_color_space_names_api.clear();
         config.refresh_active_color_spaces();
-        Arc::new(config)
+        Ok(Arc::new(config))
     }
 
     /// Port of `Config::getMajorVersion` (src/OpenColorIO/Config.cpp:1280-1283 @ v2.5.2).

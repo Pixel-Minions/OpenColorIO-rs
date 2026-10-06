@@ -206,7 +206,7 @@ fn wheel_summary(p: &ProcessorDump) -> Value {
 /// processor, as the wheel's.
 #[test]
 fn group_processors_match_the_wheel() {
-    let config = Config::create_raw();
+    let config = Config::create_raw().unwrap();
     let mut requests = Vec::new();
     let mut ports = Vec::new();
     for group in groups() {
@@ -417,7 +417,7 @@ fn processor_metadata_matches_the_wheel() {
                 &files,
                 &looks,
                 std::slice::from_ref(group),
-                &Config::create_raw(),
+                &Config::create_raw().unwrap(),
             );
             (format!("{group:?}"), args, port)
         })
@@ -426,7 +426,7 @@ fn processor_metadata_matches_the_wheel() {
         "every group, one config".to_string(),
         json!({"files": files, "looks": looks,
             "groups": groups.iter().map(MetaGroup::spec).collect::<Vec<_>>()}),
-        port_processor_metadata(&files, &looks, &groups, &Config::create_raw()),
+        port_processor_metadata(&files, &looks, &groups, &Config::create_raw().unwrap()),
     ));
 
     let calls: Vec<BatchCall<'_>> = cases
