@@ -1004,6 +1004,30 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `AdjustRGBSlopes` differs too (MSVC's unrolled loop multiplies `slopes[i + 1] * adjust` or
   `adjust * slopes[i + 1]` by the knot's index), but no two different NaNs meet there.
 
+### I-140. A hue-adjust 1D LUT resampled on a domain renders green with red's curve
+
+- **Upstream:** `Lut1DOpData::Compose` evaluates the second LUT, hue adjust included, on the
+  entries of a lookup domain, whose three channels are equal (`ComposeVec`, `EvalTransform`;
+  `ops/lut1d/Lut1DOpData.cpp:683-830`), and gives the result that LUT's hue adjust
+  (`setHueAdjust(lut2->getHueAdjust())`). On equal channels `GamutMapUtils::Order3` names red
+  the minimum and green the middle, and the hue factor is 0, so the hue adjust sets each
+  entry's green to its red (`ops/lut1d/Lut1DOpCPU.cpp:723-745`, `771-788`): the new LUT's
+  green column is red's curve. That happens where the CPU renderers resample a hue-adjust LUT
+  for a lookup (`BaseLut1DRenderer::updateData`, 388-406) and where the optimizer replaces an
+  inverse hue-adjust LUT with its fast forward LUT (`MakeFastLut1DFromInverse`, 841-867). The
+  hue adjust after the lookup recomputes the middle channel of each pixel, so green is wrong
+  where it is a pixel's minimum or maximum. Through the wheel, the fast LUT of an inverse
+  hue-adjust LUT of three different curves has green equal to red in all of its 4096 entries.
+- **Who notices:** hue-adjust (`HUE_DW3`) LUTs whose green curve differs from red's, applied
+  to 8-, 10-, 12- or 16-bit or half images whose bit depth the LUT has no entry per code for,
+  or inverted with the default optimization (`OPTIMIZATION_LUT_INV_FAST`).
+- **A fix:** compose without the hue adjust and set it on the result afterwards, as a
+  comment in `Compose` suggests (overriding the hue adjust temporarily).
+- **Status:** matched in `p2-lut1d-inv` (2.1g); the API format sweep
+  (`crates/ocio/tests/api_formats_oracle.rs`, "256 entries, hue adjust" from 10-, 12- and
+  16-bit input) and the battery's inverse hue-adjust cases (`tests/lut1d_renderer_oracle.rs`)
+  compare them with the wheel.
+
 ## Transforms
 
 ### I-11. Copying a group transform shares its children

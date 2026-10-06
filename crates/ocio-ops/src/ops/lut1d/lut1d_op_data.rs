@@ -2,11 +2,9 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! 1D LUT op data: a port of `src/OpenColorIO/ops/lut1d/Lut1DOpData.h` and `Lut1DOpData.cpp`
-//! @ v2.5.2, with the inverse LUT's set-up (`initializeFromForward`, the component properties)
-//! and `getPairIdentityReplacement`.
-//!
-//! Not here yet (WP 2.1g): `Compose`, `MakeFastLut1DFromInverse`. The optimizer's bake makes
-//! forward LUTs, with [`Lut1DOpData::compose_vec`].
+//! @ v2.5.2, with the inverse LUT's set-up (`initializeFromForward`, the component properties),
+//! `getPairIdentityReplacement`, and the compositions: [`Lut1DOpData::compose_vec`] (the
+//! optimizer's bake), [`Lut1DOpData::compose`] and [`make_fast_lut1d_from_inverse`].
 
 use core::ffi::c_ulong;
 
@@ -22,6 +20,7 @@ use crate::open_color_types::{
     BitDepth, Lut1DHueAdjust, TransformDirection, bit_depth_to_string, interpolation_to_string,
     transform_direction_to_string,
 };
+use crate::ops::lut1d::lut1d_op::create_lut1d_op;
 use crate::ops::lut3d::lut3d_op_data::Interpolation;
 use crate::ops::matrix::MatrixOpData;
 use crate::ops::op_array::Array;
@@ -36,6 +35,56 @@ const HALF_DOMAIN_REQUIRED_ENTRIES: c_ulong = 65536;
 
 /// How a 1D LUT's indices and values are encoded: bit flags.
 ///
+/// How [`Lut1DOpData::compose`] chooses the composed LUT's domain.
+///
+/// Port of `Lut1DOpData::ComposeMethod` (src/OpenColorIO/ops/lut1d/Lut1DOpData.h:62-68 @
+/// v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ComposeMethod {
+    /// `COMPOSE_RESAMPLE_NO`: preserve original domain.
+    ResampleNo,
+    /// `COMPOSE_RESAMPLE_BIG`: min size is 65536.
+    ResampleBig,
+    /// `COMPOSE_RESAMPLE_HD`: half-domain.
+    ResampleHd,
+}
+
+/// The fast forward LUT of an inverse LUT (`OPTIMIZATION_LUT_INV_FAST`): the inverse LUT
+/// evaluated on a lookup domain, a half domain if the LUT has values outside [0, 1], else
+/// one entry per code of the LUT's file output bit depth (12-bit if that isn't one of the
+/// lookup's depths). "MakeFastLut1DFromInverse expects an inverse 1D LUT" for a forward one.
+///
+/// Port of `MakeFastLut1DFromInverse` (src/OpenColorIO/ops/lut1d/Lut1DOpData.cpp:841-867 @
+/// v2.5.2).
+pub fn make_fast_lut1d_from_inverse(lut: &Lut1DOpData) -> Result<Lut1DOpData> {
+    if lut.get_direction() != TransformDirection::Inverse {
+        return Err(Exception::new(
+            "MakeFastLut1DFromInverse expects an inverse 1D LUT",
+        ));
+    }
+
+    let mut depth = lut.get_file_output_bit_depth();
+    if matches!(
+        depth,
+        BitDepth::Unknown | BitDepth::Uint14 | BitDepth::Uint32
+    ) {
+        depth = BitDepth::Uint12;
+    }
+
+    // TODO: There may be cases where the FileDepth is 16f even though the use of a slower
+    // half-domain LUT is not needed.  This could be a performance hit, particularly on the GPU.
+
+    // If the LUT has values outside [0,1], use a half-domain fastLUT.
+    if lut.has_extended_range() {
+        depth = BitDepth::F16;
+    }
+
+    // Make a domain for the composed 1D LUT.
+    let new_domain_lut = Lut1DOpData::make_lookup_domain(depth)?;
+
+    Lut1DOpData::compose(&new_domain_lut, lut, ComposeMethod::ResampleNo)
+}
+
 /// Port of `Lut1DOpData::HalfFlags` (src/OpenColorIO/ops/lut1d/Lut1DOpData.h:39-49 @ v2.5.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct HalfFlags(pub u32);
@@ -414,6 +463,114 @@ impl Lut1DOpData {
             num_pixels as usize,
             ops,
         )
+    }
+
+    /// The composition of two LUTs, `lutc1` then `lutc2`, as one forward LUT (inverse when
+    /// both are): `lutc2` evaluated at F32 on a domain, `lutc1`'s entries, or with
+    /// `comp_flag` or an inverse `lutc1`, a resampled domain that goes through `lutc1` first.
+    /// The result takes `lutc2`'s hue adjust (which then doesn't compose as the two LUTs
+    /// would apply), and is finalized.
+    ///
+    /// Upstream swaps and changes the direction of the callers' LUTs while it composes two
+    /// inverse LUTs, and restores them; the port composes copies.
+    ///
+    /// Port of `Lut1DOpData::Compose` (src/OpenColorIO/ops/lut1d/Lut1DOpData.cpp:715-830 @
+    /// v2.5.2).
+    pub fn compose(
+        lutc1: &Lut1DOpData,
+        lutc2: &Lut1DOpData,
+        comp_flag: ComposeMethod,
+    ) -> Result<Lut1DOpData> {
+        let mut lut1 = lutc1.clone();
+        let mut lut2 = lutc2.clone();
+        let mut restore_inverse = false;
+        if lut1.get_direction() == TransformDirection::Inverse
+            && lut2.get_direction() == TransformDirection::Inverse
+        {
+            // Using the fact that: inv(l2 x l1) = inv(l1) x inv(l2).
+            // Compute l2 x l1 and invert the result.
+            std::mem::swap(&mut lut1, &mut lut2);
+
+            lut1.set_direction(TransformDirection::Forward);
+            lut2.set_direction(TransformDirection::Forward);
+            restore_inverse = true;
+        }
+
+        let mut ops = OpVec::new();
+
+        let (min_size, need_half_domain): (c_ulong, bool) = match comp_flag {
+            ComposeMethod::ResampleNo => (0, false),
+            ComposeMethod::ResampleBig => (65536, false),
+            ComposeMethod::ResampleHd => (65536, true),
+            // TODO: May want to add another style which is the maximum of lut2
+            //       size (careful of half domain), and in-depth ideal size.
+        };
+
+        // (The size of `lutc1`, the first LUT before the swap.)
+        let lut1_size = lutc1.get_array().get_length();
+        let good_domain =
+            lut1.is_input_half_domain() || ((lut1_size >= min_size) && !need_half_domain);
+        let use_orig_domain = comp_flag == ComposeMethod::ResampleNo;
+        let mut result;
+
+        // When lut1 is an inverse LUT (and lut2 is not), interpolate through both LUTs.
+        if (!good_domain && !use_orig_domain) || lut1.get_direction() == TransformDirection::Inverse
+        {
+            // Interpolate through both LUTs in this case (resample).
+            create_lut1d_op(&mut ops, lut1.clone(), TransformDirection::Forward);
+
+            // Create identity with finer domain.
+
+            if min_size == 0 || lut1.get_direction() == TransformDirection::Inverse {
+                // TODO: In this case, the composition is taking an inverse LUT and forward LUT
+                // and making a forward LUT, so it is essentially doing what makeFastLUT (below)
+                // does. Ideally we would also apply some heuristics here to try and minimize
+                // the size of the new domain.  But for now we took the brute force approach and
+                // always use a half-domain.
+                result = Self::make_lookup_domain(BitDepth::F16)?;
+            } else {
+                result = Lut1DOpData::with_half_flags(
+                    if need_half_domain {
+                        HalfFlags::INPUT_HALF_CODE
+                    } else {
+                        HalfFlags::STANDARD
+                    },
+                    min_size,
+                    true,
+                )?;
+            }
+
+            result.set_interpolation(lut1.get_interpolation());
+
+            result.metadata = lut1.get_format_metadata().clone();
+        } else {
+            result = lut1.clone();
+        }
+
+        create_lut1d_op(&mut ops, lut2.clone(), TransformDirection::Forward);
+
+        // Create the result LUT by composing the domain through the desired ops.
+        // This is always using exact inversion style.
+        Self::compose_vec(&mut result, &mut ops)?;
+
+        // Configure the metadata of the result LUT.
+        // TODO:  May want to revisit metadata propagation.
+        result
+            .get_format_metadata_mut()
+            .combine(lut2.get_format_metadata())?;
+
+        // See note above: Taking these from lut2 since the common use case is for lut2 to be
+        // the original LUT and lut1 to be a new domain (e.g. used in LUT1D renderers).
+        // TODO: Adjust domain in Lut1D renderer to be one channel.
+        result.set_hue_adjust(lut2.get_hue_adjust())?;
+
+        if restore_inverse {
+            result.set_direction(TransformDirection::Inverse);
+        }
+
+        // Result of the composition needs to be ready for further composition or CPU/GPU.
+        result.finalize()?;
+        Ok(result)
     }
 
     /// The number of entries a lookup needs for the bit depth: one per code for integer

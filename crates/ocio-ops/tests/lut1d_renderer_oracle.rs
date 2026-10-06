@@ -18,6 +18,11 @@
 //!   ..., [`Inverse`]), without `OPTIMIZATION_LUT_INV_FAST`, which would replace the inverse
 //!   LUT with a forward one.
 //!
+//! The first three run both directions: in the inverse one, the default optimization (with
+//! fast math on and off) replaces the LUT with its fast forward LUT
+//! (`MakeFastLut1DFromInverse`: the inverse LUT rendered on a 12-bit or half domain), which the
+//! renderers above then render ([`rendered`]).
+//!
 //! And to every output bit depth: on rows of one pixel ([`single_pixel_rows_match_the_wheel`]:
 //! the scalar code), and on whole rows ([`whole_rows_match_the_wheel`]: the dispatched kernel).
 //! These tests are CPU-dependent (`cpu-tests`): under SDE the wheel and the port both dispatch
@@ -33,7 +38,7 @@
 //! Without a kernel, a forward LUT's float renderers write alpha (`in[3] * m_alphaScaling`,
 //! which quiets a signalling NaN), so no channel passes through; with one, a row of one pixel
 //! still takes the scalar loop, so alpha passes through from rows of 2 pixels
-//! (`Family::pass_through_min_pixels`).
+//! (`Family::pass_through_min_pixels`), where the rendered LUT takes a kernel ([`takes_kernel`]).
 
 mod common;
 
@@ -48,7 +53,7 @@ use ocio_ops::ops::lut1d::lut1d_op_cpu::{
     Lut1DKernel, get_lut1d_profile_renderer, get_lut1d_renderer, get_lut1d_scalar_renderer,
     lut1d_kernel,
 };
-use ocio_ops::ops::lut1d::lut1d_op_data::Lut3by1DArray;
+use ocio_ops::ops::lut1d::lut1d_op_data::{Lut3by1DArray, make_fast_lut1d_from_inverse};
 use ocio_ops::ops::matrix::matrix_op::create_matrix_op_from_m44;
 use ocio_testkit::Oracle;
 use ocio_testkit::battery::params::{A, Channels as BatteryChannels};
@@ -235,6 +240,85 @@ impl Params for Lut {
     }
 }
 
+/// The LUT the default CPU processor renders in `direction`: the LUT, or for an inverse LUT
+/// its fast forward LUT, which `OPTIMIZATION_LUT_INV_FAST` (with fast math on and off) puts in
+/// its place (`ReplaceInverseLuts`, src/OpenColorIO/OpOptimizers.cpp:369-408 @ v2.5.2).
+fn rendered(lut: &Lut, direction: Direction) -> Result<Lut1DOpData> {
+    let data = lut.port_in(direction)?;
+    match direction {
+        Direction::Forward => Ok(data),
+        Direction::Inverse => make_fast_lut1d_from_inverse(&data),
+    }
+}
+
+/// The renderer of the LUT the processor renders in `combo` ([`rendered`]), F32 to F32.
+fn rendered_port(lut: &Lut, combo: &Combo) -> std::result::Result<Port, String> {
+    let renderer = rendered(lut, combo.direction)
+        .and_then(|data| get_lut1d_renderer(&data, BitDepth::F32, BitDepth::F32))
+        .map_err(|e| e.message().to_string())?;
+    Ok(Port::in_place(move |px| renderer.apply(px)))
+}
+
+/// Whether the LUT the processor renders in `combo` takes a SIMD kernel: a standard domain
+/// without hue adjust.
+fn takes_kernel(lut: &Lut, combo: &Combo) -> Option<Lut1DOpData> {
+    let data = rendered(lut, combo.direction).ok()?;
+    (!data.is_input_half_domain() && data.get_hue_adjust() == Lut1DHueAdjust::None).then_some(data)
+}
+
+/// The SIMD kernels this machine doesn't dispatch to, for a rendered LUT that takes one.
+fn kernel_profiles(lut: &Lut, combo: &Combo) -> Vec<(String, Port)> {
+    let Some(data) = takes_kernel(lut, combo) else {
+        return Vec::new();
+    };
+    let dispatched = lut1d_kernel(CpuInfo::instance(), BitDepth::F32);
+    [
+        Lut1DKernel::Sse2,
+        Lut1DKernel::Avx,
+        Lut1DKernel::Avx2,
+        Lut1DKernel::Avx512,
+    ]
+    .into_iter()
+    .filter(|&kernel| Some(kernel) != dispatched)
+    .map(|kernel| {
+        let renderer = get_lut1d_profile_renderer(&data, BitDepth::F32, Some(kernel))
+            .expect("a profile renderer");
+        (
+            format!("{kernel:?}"),
+            Port::in_place(move |px| renderer.apply(px)),
+        )
+    })
+    .collect()
+}
+
+/// Alpha passes through the kernels from F32 to F32 (from rows of 2 pixels); the other
+/// renderers write it.
+fn kernel_pass_through(lut: &Lut, combo: &Combo) -> BatteryChannels {
+    if takes_kernel(lut, combo).is_some() {
+        A
+    } else {
+        [false; 4]
+    }
+}
+
+/// An inverse LUT's breakpoints, the LUT's values: every finite one of a standard domain, the
+/// chosen entries' of a half domain.
+fn value_points(lut: &Lut) -> Vec<f32> {
+    let mut points: Vec<f32> = if lut.half_domain {
+        lut.entries
+            .indices()
+            .iter()
+            .flat_map(|&i| lut.values[i * 3..i * 3 + 3].to_vec())
+            .collect()
+    } else {
+        lut.values.clone()
+    };
+    points.retain(|v| v.is_finite());
+    points.sort_by(f32::total_cmp);
+    points.dedup_by(|a, b| a.to_bits() == b.to_bits());
+    points
+}
+
 /// The longest row the battery probes for the kernels: every remainder of 4, 8 and 16 pixels.
 const ROWS: usize = 33;
 
@@ -273,51 +357,27 @@ impl Family for StandardDomain {
         let cases = self.cases();
         vec![cases[8].clone(), cases[16].clone()]
     }
-    fn directions(&self) -> Vec<Direction> {
-        // The default optimization replaces an inverse LUT with a forward one, WP 2.1g's;
-        // `Inverse` renders inverse LUTs.
-        vec![Direction::Forward]
+    fn spec(&self, lut: &Lut, direction: Direction) -> Spec {
+        Spec::with_f32_blobs(lut.transform_in(direction), &[&lut.values])
     }
-    fn spec(&self, lut: &Lut, _direction: Direction) -> Spec {
-        Spec::with_f32_blobs(lut.transform(), &[&lut.values])
+    fn port(&self, lut: &Lut, combo: &Combo) -> std::result::Result<Port, String> {
+        rendered_port(lut, combo)
     }
-    fn port(&self, lut: &Lut, _combo: &Combo) -> std::result::Result<Port, String> {
-        let renderer = lut
-            .port()
-            .and_then(|data| get_lut1d_renderer(&data, BitDepth::F32, BitDepth::F32))
-            .map_err(|e| e.message().to_string())?;
-        Ok(Port::in_place(move |px| renderer.apply(px)))
+    fn other_profiles(&self, lut: &Lut, combo: &Combo) -> Vec<(String, Port)> {
+        kernel_profiles(lut, combo)
     }
-    fn other_profiles(&self, lut: &Lut, _combo: &Combo) -> Vec<(String, Port)> {
-        let data = lut.port().expect("the case's data");
-        let dispatched = lut1d_kernel(CpuInfo::instance(), BitDepth::F32);
-        [
-            Lut1DKernel::Sse2,
-            Lut1DKernel::Avx,
-            Lut1DKernel::Avx2,
-            Lut1DKernel::Avx512,
-        ]
-        .into_iter()
-        .filter(|&kernel| Some(kernel) != dispatched)
-        .map(|kernel| {
-            let renderer = get_lut1d_profile_renderer(&data, BitDepth::F32, Some(kernel))
-                .expect("a profile renderer");
-            (
-                format!("{kernel:?}"),
-                Port::in_place(move |px| renderer.apply(px)),
-            )
-        })
-        .collect()
-    }
-    fn pass_through(&self, _lut: &Lut, _combo: &Combo) -> BatteryChannels {
-        A
+    fn pass_through(&self, lut: &Lut, combo: &Combo) -> BatteryChannels {
+        kernel_pass_through(lut, combo)
     }
     /// A row of one pixel takes the scalar loop, which writes alpha times 1.
     fn pass_through_min_pixels(&self) -> usize {
         2
     }
-    fn breakpoints(&self, lut: &Lut, _direction: Direction) -> Vec<f32> {
-        probe::lut_domain_points(lut.length())
+    fn breakpoints(&self, lut: &Lut, direction: Direction) -> Vec<f32> {
+        match direction {
+            Direction::Forward => probe::lut_domain_points(lut.length()),
+            Direction::Inverse => value_points(lut),
+        }
     }
     fn extra_probes(&self, _lut: &Lut, _direction: Direction) -> Vec<ProbeSet> {
         vec![ProbeSet::RowLengths { max_pixels: ROWS }]
@@ -352,23 +412,27 @@ impl Family for HalfDomain {
     fn mutation_bases(&self) -> Vec<Case<Lut>> {
         self.cases()[..1].to_vec()
     }
-    fn directions(&self) -> Vec<Direction> {
-        // The default optimization replaces an inverse LUT with a forward one, WP 2.1g's;
-        // `Inverse` renders inverse LUTs.
-        vec![Direction::Forward]
+    fn spec(&self, lut: &Lut, direction: Direction) -> Spec {
+        Spec::with_f32_blobs(lut.transform_in(direction), &[&lut.values])
     }
-    fn spec(&self, lut: &Lut, _direction: Direction) -> Spec {
-        Spec::with_f32_blobs(lut.transform(), &[&lut.values])
+    fn port(&self, lut: &Lut, combo: &Combo) -> std::result::Result<Port, String> {
+        rendered_port(lut, combo)
     }
-    fn port(&self, lut: &Lut, _combo: &Combo) -> std::result::Result<Port, String> {
-        let renderer = lut
-            .port()
-            .and_then(|data| get_lut1d_renderer(&data, BitDepth::F32, BitDepth::F32))
-            .map_err(|e| e.message().to_string())?;
-        Ok(Port::in_place(move |px| renderer.apply(px)))
+    fn other_profiles(&self, lut: &Lut, combo: &Combo) -> Vec<(String, Port)> {
+        kernel_profiles(lut, combo)
     }
-    fn breakpoints(&self, lut: &Lut, _direction: Direction) -> Vec<f32> {
-        lut.entry_inputs()
+    fn pass_through(&self, lut: &Lut, combo: &Combo) -> BatteryChannels {
+        kernel_pass_through(lut, combo)
+    }
+    /// A row of one pixel takes the scalar loop, which writes alpha times 1.
+    fn pass_through_min_pixels(&self) -> usize {
+        2
+    }
+    fn breakpoints(&self, lut: &Lut, direction: Direction) -> Vec<f32> {
+        match direction {
+            Direction::Forward => lut.entry_inputs(),
+            Direction::Inverse => value_points(lut),
+        }
     }
 }
 
@@ -423,26 +487,17 @@ impl Family for HueAdjust {
         // The 17 entries' and the half domain's mixed curves.
         vec![self.cases()[0].clone(), self.cases()[3].clone()]
     }
-    fn directions(&self) -> Vec<Direction> {
-        // The default optimization replaces an inverse LUT with a forward one, WP 2.1g's;
-        // `Inverse` renders inverse LUTs.
-        vec![Direction::Forward]
+    fn spec(&self, lut: &Lut, direction: Direction) -> Spec {
+        Spec::with_f32_blobs(lut.transform_in(direction), &[&lut.values])
     }
-    fn spec(&self, lut: &Lut, _direction: Direction) -> Spec {
-        Spec::with_f32_blobs(lut.transform(), &[&lut.values])
+    fn port(&self, lut: &Lut, combo: &Combo) -> std::result::Result<Port, String> {
+        rendered_port(lut, combo)
     }
-    fn port(&self, lut: &Lut, _combo: &Combo) -> std::result::Result<Port, String> {
-        let renderer = lut
-            .port()
-            .and_then(|data| get_lut1d_renderer(&data, BitDepth::F32, BitDepth::F32))
-            .map_err(|e| e.message().to_string())?;
-        Ok(Port::in_place(move |px| renderer.apply(px)))
-    }
-    fn breakpoints(&self, lut: &Lut, _direction: Direction) -> Vec<f32> {
-        if lut.half_domain {
-            lut.entry_inputs()
-        } else {
-            probe::lut_domain_points(lut.length())
+    fn breakpoints(&self, lut: &Lut, direction: Direction) -> Vec<f32> {
+        match direction {
+            Direction::Inverse => value_points(lut),
+            Direction::Forward if lut.half_domain => lut.entry_inputs(),
+            Direction::Forward => probe::lut_domain_points(lut.length()),
         }
     }
 }
@@ -565,22 +620,8 @@ impl Family for Inverse {
             .map_err(|e| e.message().to_string())?;
         Ok(Port::in_place(move |px| renderer.apply(px)))
     }
-    /// The inverse's breakpoints are the LUT's values: every finite one of a standard domain,
-    /// the chosen entries' of a half domain.
     fn breakpoints(&self, lut: &Lut, _direction: Direction) -> Vec<f32> {
-        let mut points: Vec<f32> = if lut.half_domain {
-            lut.entries
-                .indices()
-                .iter()
-                .flat_map(|&i| lut.values[i * 3..i * 3 + 3].to_vec())
-                .collect()
-        } else {
-            lut.values.clone()
-        };
-        points.retain(|v| v.is_finite());
-        points.sort_by(f32::total_cmp);
-        points.dedup_by(|a, b| a.to_bits() == b.to_bits());
-        points
+        value_points(lut)
     }
 }
 
