@@ -473,7 +473,7 @@ path = "src/OpenColorIO/OpOptimizers.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/op_optimizers.rs"]
 status = "partial"
-note = "1.2c: FinalizeOps (132-139) and OpRcPtrVec::finalize (598-609); 1.2d (the owner's Option A): the optimizer's core, optimize (the pass loop, RemoveNoOpTypes, RemoveDynamicProperties, RemoveNoOps, ReplaceOps, ReplaceIdentityOps, RemoveInverseOps, CombineOps, IsPairInverseEnabled, IsCombineEnabled, the debug log) and optimizeForBitdepth (the clamp identities, FindSeparablePrefix). p1-optimizer B: the Lut1D arms of ReplaceInverseLuts and RemoveInverseOps (errors until Phase 2's inverse 1D LUT) and FindSeparablePrefix; p2-lut1d-inv 2.1g: ReplaceInverseLuts' Lut1D arm (MakeFastLut1DFromInverse); RemoveInverseOps' Lut1D pair is WP 2.5a's; p1-optimizer D: OptimizeSeparablePrefix, the Lut1D bake, entry for entry against the wheel (tests/lut1d_bake_oracle.rs). Not yet: the Lut3D arms (Phase 2); upstream's prefix tests that need CDL, gamma or files come when those families converge"
+note = "1.2c: FinalizeOps (132-139) and OpRcPtrVec::finalize (598-609); 1.2d (the owner's Option A): the optimizer's core, optimize (the pass loop, RemoveNoOpTypes, RemoveDynamicProperties, RemoveNoOps, ReplaceOps, ReplaceIdentityOps, RemoveInverseOps, CombineOps, IsPairInverseEnabled, IsCombineEnabled, the debug log) and optimizeForBitdepth (the clamp identities, FindSeparablePrefix). p1-optimizer B: the Lut1D arms of ReplaceInverseLuts and RemoveInverseOps (errors until Phase 2's inverse 1D LUT) and FindSeparablePrefix; p2-lut1d-inv 2.1g: ReplaceInverseLuts' Lut1D arm (MakeFastLut1DFromInverse); 2.5a: RemoveInverseOps' Lut1D pair (249-276); p1-optimizer D: OptimizeSeparablePrefix, the Lut1D bake, entry for entry against the wheel (tests/lut1d_bake_oracle.rs). Not yet: the Lut3D arms (Phase 2); upstream's prefix tests that need CDL, gamma or files come when those families converge"
 
 [[file]]
 path = "src/OpenColorIO/ParseUtils.cpp"
@@ -4308,7 +4308,7 @@ path = "tests/cpu/OpOptimizers_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/op_optimizers_tests.rs"]
 status = "partial"
-note = "p1-optimizer: gamma_prefix; p1-tests-catchup: remove_leading_clamp_identity, remove_trailing_clamp_identity, combine_ops, non_optimizable, optimizable, lut1d_identity_replacement, range_composition, gamma_comp_identity, replace_ops; p2-ff-cpu 2.3e: remove_inverse_ops. Not yet: the tests that read files through BuildOpsTest (optimization, optimization2, lut1d_identities, lut1d_identity_replacement_order, invlut_pair_identities, mntr_identities, gamma_comp, gamma_comp_test2, log_identities, range_lut, prefer_pair_inverse_over_combine, opt_prefix_test1: the CTF/CLF and spi1d readers, Phase 4); dynamic_ops and dyn_properties_prefix (the ExposureContrast op, Phase 5); lut1d_half_domain_keep_prior_range and multi_op_prefix (the inverse Lut1D and the Lut1D float renderers that CompareRender runs, Phase 2)"
+note = "p1-optimizer: gamma_prefix; p1-tests-catchup: remove_leading_clamp_identity, remove_trailing_clamp_identity, combine_ops, non_optimizable, optimizable, lut1d_identity_replacement, range_composition, gamma_comp_identity, replace_ops; p2-ff-cpu 2.3e: remove_inverse_ops; p2-lut1d-inv 2.5a: lut1d_half_domain_keep_prior_range, multi_op_prefix. Not yet: the tests that read files through BuildOpsTest (optimization, optimization2, lut1d_identities, lut1d_identity_replacement_order, invlut_pair_identities, mntr_identities, gamma_comp, gamma_comp_test2, log_identities, range_lut, prefer_pair_inverse_over_combine, opt_prefix_test1: the CTF/CLF and spi1d readers, Phase 4); dynamic_ops and dyn_properties_prefix (the ExposureContrast op, Phase 5)"
 
 [[file]]
 path = "tests/cpu/Op_tests.cpp"
@@ -4850,7 +4850,7 @@ path = "tests/cpu/ops/lut1d/Lut1DOp_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_tests.rs", "crates/ocio/src/transforms/lut1d_transform_tests.rs"]
 status = "partial"
-note = "gpu, identity_lut_1d; Lut1D create_transform and Lut1DTransform build_op need the transform: in crates/ocio/src/transforms/lut1d_transform_tests.rs (p1-transforms-fam4); p2-lut1d-fwd: extrapolation_errors; p2-lut1d-inv 2.1f: finite_value, Lut1D inverse_twice; 2.1g: Lut1DRenderer finite_value_hue_adjust, Lut1DOpData compose_only_forward, Lut1D compose_big_domain. inverse needs the optimizer's pair replacement (2.5a); lut_1d_compose_with_bit_depth reads a file (Phase 4)"
+note = "gpu, identity_lut_1d; Lut1D create_transform and Lut1DTransform build_op need the transform: in crates/ocio/src/transforms/lut1d_transform_tests.rs (p1-transforms-fam4); p2-lut1d-fwd: extrapolation_errors; p2-lut1d-inv 2.1f: finite_value, Lut1D inverse_twice; 2.1g: Lut1DRenderer finite_value_hue_adjust, Lut1DOpData compose_only_forward, Lut1D compose_big_domain; 2.5a: inverse. lut_1d_compose_with_bit_depth reads a file (Phase 4)"
 
 [[file]]
 path = "tests/cpu/ops/lut3d/Lut3DOpCPU_tests.cpp"

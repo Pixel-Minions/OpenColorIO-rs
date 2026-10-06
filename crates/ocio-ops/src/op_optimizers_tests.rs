@@ -12,9 +12,7 @@
 //!   `optimization`, `optimization2`, `lut1d_identities`, `lut1d_identity_replacement_order`,
 //!   `invlut_pair_identities`, `mntr_identities`, `gamma_comp`, `gamma_comp_test2`,
 //!   `log_identities`, `range_lut`, `prefer_pair_inverse_over_combine`, `opt_prefix_test1`;
-//! - the ExposureContrast op (Phase 5): `dynamic_ops`, `dyn_properties_prefix`;
-//! - the inverse Lut1D and the Lut1D's float renderers (Phase 2, WP 2.1), which `CompareRender`
-//!   runs: `lut1d_half_domain_keep_prior_range`, `multi_op_prefix`.
+//! - the ExposureContrast op (Phase 5): `dynamic_ops`, `dyn_properties_prefix`.
 
 use ocio_testkit::upstream::check_close;
 
@@ -512,6 +510,44 @@ fn lut1d_identity_replacement() {
     }
 }
 
+/// Port of `OCIO_ADD_TEST(OpOptimizers, lut1d_half_domain_keep_prior_range)` @ v2.5.2.
+#[test]
+fn lut1d_half_domain_keep_prior_range() {
+    // A half-domain LUT should not allow removal of a prior range op.
+
+    let mut ops = OpVec::new();
+    create_range_op_from_values(&mut ops, 0., 1., 0., 1., TransformDirection::Forward).unwrap();
+
+    let mut lut_data =
+        Lut1DOpData::with_half_flags(HalfFlags::INPUT_OUTPUT_HALF_CODE, 65536, false).unwrap();
+    lut_data.set_file_output_bit_depth(BitDepth::F32);
+
+    // Add no-op LUT.
+    create_lut1d_op(&mut ops, lut_data.clone(), TransformDirection::Inverse);
+
+    // Add another LUT.
+    let mut lut_data = lut_data.clone();
+    for val in lut_data.get_array_mut().get_values_mut().iter_mut() {
+        *val = -*val;
+    }
+    create_lut1d_op(&mut ops, lut_data, TransformDirection::Forward);
+
+    ops.finalize().unwrap();
+    assert_eq!(ops.len(), 3);
+
+    let mut opt_ops = ops.clone_ops().unwrap();
+    assert_eq!(opt_ops.len(), 3);
+    opt_ops.finalize().unwrap();
+    opt_ops.optimize(OptimizationFlags::DEFAULT).unwrap();
+    assert_eq!(opt_ops.len(), 2);
+
+    assert_eq!(opt_ops[0].get_info(), "<RangeOp>");
+    assert_eq!(opt_ops[1].get_info(), "<Lut1DOp>");
+
+    // Now check that the optimized transform renders the same as the original.
+    compare_render(&ops, &opt_ops, 1e-6f32);
+}
+
 /// Port of `OCIO_ADD_TEST(OpOptimizers, range_composition)` @ v2.5.2.
 #[test]
 fn range_composition() {
@@ -910,4 +946,94 @@ fn remove_inverse_ops_fixed_function() {
     assert_eq!(ops.len(), 1);
 
     assert_eq!(ops[0].get_info(), "<FixedFunctionOp>");
+}
+
+/// Port of `OCIO_ADD_TEST(OpOptimizers, multi_op_prefix)` @ v2.5.2.
+#[test]
+fn multi_op_prefix() {
+    // Test prefix optimization of a complex transform.
+
+    let mut original_ops = OpVec::new();
+
+    let mut matrix = MatrixOpData::new();
+    matrix.set_array_value(0, 2.);
+
+    create_matrix_op(&mut original_ops, matrix, TransformDirection::Forward);
+    assert_eq!(original_ops.len(), 1);
+
+    let range = RangeOpData::with_values(0., 1., -1000. / 65535., 66000. / 65535.).unwrap();
+
+    create_range_op(&mut original_ops, range, TransformDirection::Forward).unwrap();
+    assert_eq!(original_ops.len(), 2);
+
+    let mut optimized_ops = original_ops.clone_ops().unwrap();
+
+    // Nothing to optimize.
+    optimized_ops.finalize().unwrap();
+    optimized_ops.optimize(OptimizationFlags::DEFAULT).unwrap();
+    optimized_ops
+        .optimize_for_bitdepth(
+            BitDepth::Uint8,
+            BitDepth::F32,
+            OptimizationFlags::COMP_SEPARABLE_PREFIX,
+        )
+        .unwrap();
+
+    // Validate ops are unchanged.
+
+    assert_eq!(optimized_ops.len(), 2);
+
+    let original_id = original_ops[0].get_cache_id().unwrap();
+    let optimized_id = optimized_ops[0].get_cache_id().unwrap();
+
+    assert_eq!(original_id, optimized_id);
+
+    let original_id = original_ops[1].get_cache_id().unwrap();
+    let optimized_id = optimized_ops[1].get_cache_id().unwrap();
+
+    assert_eq!(original_id, optimized_id);
+
+    // Add more ops to originalOps.
+    let slope = ChannelParams::new(1.35, 1.1, 0.071);
+    let offset = ChannelParams::new(0.05, -0.23, 0.11);
+    let power = ChannelParams::new(1.27, 0.81, 0.2);
+    let saturation = 1.;
+
+    let cdl = CdlOpData::new(CdlOpStyle::V1_2Fwd, slope, offset, power, saturation).unwrap();
+
+    create_cdl_op(&mut original_ops, cdl, TransformDirection::Forward);
+
+    original_ops.finalize().unwrap();
+    assert_eq!(original_ops.len(), 3);
+
+    let mut optimized_ops = original_ops.clone_ops().unwrap();
+
+    // Optimize it.
+    optimized_ops.finalize().unwrap();
+    optimized_ops.optimize(OptimizationFlags::DEFAULT).unwrap();
+    optimized_ops
+        .optimize_for_bitdepth(
+            BitDepth::Uint8,
+            BitDepth::F32,
+            OptimizationFlags::COMP_SEPARABLE_PREFIX,
+        )
+        .unwrap();
+
+    // Validate the result.
+
+    assert_eq!(optimized_ops.len(), 1);
+
+    let o = &optimized_ops[0];
+    let OpData::Lut1D(o_data) = &**o.data() else {
+        panic!("a Lut1D op")
+    };
+    assert_eq!(o_data.get_type(), OpDataType::Lut1D);
+    assert_eq!(o_data.get_array().get_length(), 256);
+
+    // Make sure originalOps are ready to render.
+    original_ops.finalize().unwrap();
+
+    // Although finalized for UINT8, the transform may still be evaluated at 32f to verify that
+    // it is a good approximation to the original.
+    compare_render(&original_ops, &optimized_ops, 5e-5f32);
 }
