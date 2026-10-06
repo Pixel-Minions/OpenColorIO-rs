@@ -1092,21 +1092,29 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
     characters; `\cX` is `X` itself; `\0` is NUL and the digits after it ordinary characters;
     `\uNNNN` keeps the low byte; a range compares its ends as signed `char`s
     (`[\x7f-\x81]` is refused);
-  - `^` and `$` match only at the ends of the text (the Windows wheel also matches them after
-    and before a `\n`);
+  - `^` matches only at the start of the expression being matched and `$` only at the end of
+    the text, never at a `\n` (the Windows wheel also matches them after and before a `\n`);
+    a lookahead is matched as an expression of its own that starts where it stands, so `^`
+    matches there and `\b`/`\B` see no character before it (`a(?=^b)b` and `a(?=\bb)b`
+    match `ab`);
   - a back reference to a group that matched nothing fails (Windows: matches empty); a
     repetition keeps its groups' captures from one iteration to the next; an iteration may
-    match empty (at most twice at a position);
+    match empty (at most twice at a position); a brace copies its body (`{n,m}`: `n` copies
+    then `m - n` optional ones; `{n,}`: `n` copies then a loop), and each copy's loops count
+    those entries apart (`(?:(?:()|()|())?){3}\1\2\3` matches the empty text);
   - collating elements and equivalence classes take POSIX names (`[[.space.]]`); the errors are
-    libstdc++'s texts, or `regex_error` alone.
+    libstdc++'s texts, or `regex_error` alone: the text that the system's `libstdc++.so`
+    gives a `regex_error` built from a code only, at run time (the wheel links it
+    dynamically).
   In the Windows wheel, a collating element (`[[.a.]]`) matches only at the end of the text
   (`_Lookup_coll` compares up to the end of the text), and a match gives up with
   `error_stack` past 600 nested matches and `error_complexity` past ten million steps.
 - **Who notices:** configs whose regex file rules use these constructs, shared between Windows
   and Linux.
 - **Decided** (D12): the port does what each wheel does.
-- **Status:** matched in `p3-regex`: the MSVC parser (3.9a), the libstdc++ parser and its NFA
-  state limit (3.9c); the matchers come with 3.9b and 3.9d.
+- **Status:** matched in `p3-regex`: the MSVC parser (3.9a) and matcher (3.9b), the libstdc++
+  parser and its NFA state limit (3.9c) and matcher (3.9d, with the lookahead and brace-copy
+  rules of the fix chunk after its verifier).
 
 ## Undefined behaviour upstream
 
