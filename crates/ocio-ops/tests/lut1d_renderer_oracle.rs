@@ -3,11 +3,13 @@
 
 //! The forward 1D LUT renderers for float input against the wheel, bit for bit
 //! (src/OpenColorIO/ops/lut1d/Lut1DOpCPU.cpp @ v2.5.2):
-//! - the half domain's (`Lut1DRendererHalfCode<BIT_DEPTH_F32, outBD>`), which has no SIMD
-//!   kernel, through the oracle test battery: every case, with fast math on and off, on the
-//!   tier's probes, each buffer one renderer call ([`HalfDomain`]);
+//! - the half domain's (`Lut1DRendererHalfCode<BIT_DEPTH_F32, outBD>`) and the hue-adjust
+//!   renderers of both domains (`Lut1DRendererHueAdjust`, `Lut1DRendererHalfCodeHueAdjust`),
+//!   which have no SIMD kernel, through the oracle test battery: every case, with fast math on
+//!   and off, on the tier's probes, each buffer one renderer call ([`HalfDomain`],
+//!   [`HueAdjust`]);
 //! - the scalar code of the standard domain's (`Lut1DRenderer<BIT_DEPTH_F32, outBD>`), and the
-//!   half domain's, to every output bit depth, on rows of one pixel: upstream renders a row of
+//!   others', to every output bit depth, on rows of one pixel: upstream renders a row of
 //!   more than one pixel of a standard domain with a SIMD kernel (`m_applyLutFunc`, on every
 //!   x86-64 CPU), which waits for WP 2.1c and 2.1d, but a row of one pixel with the scalar
 //!   loop ([`single_pixel_rows_match_the_wheel`]).
@@ -28,7 +30,7 @@ use common::image::{depth_name, port_depth};
 use ocio_ops::Result;
 use ocio_ops::imath_half::half_to_float;
 use ocio_ops::op::{CpuOp, OpVec, Pixels, PixelsMut};
-use ocio_ops::open_color_types::{BitDepth, TransformDirection};
+use ocio_ops::open_color_types::{BitDepth, Lut1DHueAdjust, TransformDirection};
 use ocio_ops::ops::lut1d::Lut1DOpData;
 use ocio_ops::ops::lut1d::lut1d_op_cpu::{get_lut1d_renderer, get_lut1d_scalar_renderer};
 use ocio_ops::ops::lut1d::lut1d_op_data::Lut3by1DArray;
@@ -72,6 +74,8 @@ fn jagged(x: f64) -> [f64; 3] {
 #[derive(Debug, Clone)]
 struct Lut {
     half_domain: bool,
+    /// `HUE_DW3`, or `HUE_NONE`.
+    hue_adjust: bool,
     values: Vec<f32>,
     entries: LutEntries,
 }
@@ -105,9 +109,32 @@ impl Lut {
         };
         Lut {
             half_domain,
+            hue_adjust: false,
             values,
             entries,
         }
+    }
+
+    /// The LUT with every entry infinite, -Inf and +Inf in turn: between two nodes, the
+    /// renderers interpolate from `-FLT_MAX` to `FLT_MAX` (the infinities sanitized), which gives
+    /// infinities, so that with hue adjust two infinities of one sign meet (`new_chroma` is
+    /// NaN).
+    fn alternating_infinities(half_domain: bool, length: usize) -> Lut {
+        let mut lut = Lut::new(half_domain, length, mixed);
+        for (i, v) in lut.values.iter_mut().enumerate() {
+            *v = if (i / 3) % 2 == 0 {
+                f32::NEG_INFINITY
+            } else {
+                f32::INFINITY
+            };
+        }
+        lut
+    }
+
+    /// The LUT with hue adjust (`HUE_DW3`).
+    fn with_hue_adjust(mut self) -> Lut {
+        self.hue_adjust = true;
+        self
     }
 
     fn length(&self) -> usize {
@@ -116,19 +143,29 @@ impl Lut {
 
     /// The transform, its values as blob 0.
     fn transform(&self) -> Value {
+        let hue = if self.hue_adjust {
+            "HUE_DW3"
+        } else {
+            "HUE_NONE"
+        };
         json!({"class": "Lut1DTransform", "calls": [
             ["setData", {"blob": 0, "dtype": "float32"}],
             ["setInputHalfDomain", self.half_domain],
+            ["setHueAdjust", {"enum": hue}],
         ]})
     }
 
-    /// The port's data, as `Lut1DTransform::setData` and `setInputHalfDomain` make it, and
+    /// The port's data, as `Lut1DTransform::setData`, `setInputHalfDomain` and `setHueAdjust`
+    /// make it, and
     /// `BuildLut1DOp` validates it and the processor finalizes it
     /// (src/OpenColorIO/ops/lut1d/Lut1DOp.cpp:244-253, src/OpenColorIO/Processor.cpp:623-641
     /// @ v2.5.2).
     fn port(&self) -> Result<Lut1DOpData> {
         let mut data = Lut1DOpData::new(2)?;
         data.set_input_half_domain(self.half_domain);
+        if self.hue_adjust {
+            data.set_hue_adjust(Lut1DHueAdjust::Dw3)?;
+        }
         let mut array = Lut3by1DArray::new(data.get_half_flags(), 3, self.length() as _, false)?;
         array.get_values_mut().copy_from_slice(&self.values);
         *data.get_array_mut() = array;
@@ -180,6 +217,10 @@ impl Family for HalfDomain {
             Case::new("mixed", Lut::new(true, HALF_ENTRIES, mixed)),
             Case::new("extreme", Lut::new(true, HALF_ENTRIES, extreme)),
             Case::new("jagged", Lut::new(true, HALF_ENTRIES, jagged)),
+            Case::new(
+                "alternating infinities",
+                Lut::alternating_infinities(true, HALF_ENTRIES),
+            ),
         ]
     }
     fn mutation_bases(&self) -> Vec<Case<Lut>> {
@@ -207,6 +248,80 @@ impl Family for HalfDomain {
 #[test]
 fn half_domain_matches_the_wheel() {
     battery::run(&HalfDomain);
+}
+
+/// The hue-adjust renderers, F32 to F32, through the battery: standard domains of a few lengths
+/// and the half domain.
+struct HueAdjust;
+
+impl Family for HueAdjust {
+    type Params = Lut;
+
+    fn name(&self) -> String {
+        "Lut1DTransform (hue adjust)".to_string()
+    }
+    fn cases(&self) -> Vec<Case<Lut>> {
+        let mut cases = Vec::new();
+        for (half, n) in [(false, 17), (true, HALF_ENTRIES), (false, 2), (false, 4096)] {
+            for (name, curve) in [
+                ("mixed", mixed as Curve),
+                ("extreme", extreme),
+                ("jagged", jagged),
+            ] {
+                let domain = if half {
+                    "half domain".to_string()
+                } else {
+                    format!("{n} entries")
+                };
+                cases.push(Case::new(
+                    format!("{domain}, {name}"),
+                    Lut::new(half, n, curve).with_hue_adjust(),
+                ));
+            }
+        }
+        for (half, n) in [(false, 2), (false, 17), (true, HALF_ENTRIES)] {
+            let domain = if half {
+                "half domain".to_string()
+            } else {
+                format!("{n} entries")
+            };
+            cases.push(Case::new(
+                format!("{domain}, alternating infinities"),
+                Lut::alternating_infinities(half, n).with_hue_adjust(),
+            ));
+        }
+        cases
+    }
+    fn mutation_bases(&self) -> Vec<Case<Lut>> {
+        // The 17 entries' and the half domain's mixed curves.
+        vec![self.cases()[0].clone(), self.cases()[3].clone()]
+    }
+    fn directions(&self) -> Vec<Direction> {
+        // The inverse renderers are WP 2.1f's.
+        vec![Direction::Forward]
+    }
+    fn spec(&self, lut: &Lut, _direction: Direction) -> Spec {
+        Spec::with_f32_blobs(lut.transform(), &[&lut.values])
+    }
+    fn port(&self, lut: &Lut, _combo: &Combo) -> std::result::Result<Port, String> {
+        let renderer = lut
+            .port()
+            .and_then(|data| get_lut1d_renderer(&data, BitDepth::F32, BitDepth::F32))
+            .map_err(|e| e.message().to_string())?;
+        Ok(Port::in_place(move |px| renderer.apply(px)))
+    }
+    fn breakpoints(&self, lut: &Lut, _direction: Direction) -> Vec<f32> {
+        if lut.half_domain {
+            lut.entry_inputs()
+        } else {
+            probe::lut_domain_points(lut.length())
+        }
+    }
+}
+
+#[test]
+fn hue_adjust_matches_the_wheel() {
+    battery::run(&HueAdjust);
 }
 
 /// The matrix the processor applies before the LUT for the other output bit depths: halves
@@ -293,15 +408,17 @@ impl RowCase {
     }
 
     /// The port's output bytes: the matrix op's renderer if any, then the LUT's renderer from
-    /// F32 to the output bit depth, the scalar profile for a standard domain.
+    /// F32 to the output bit depth, the scalar profile for a standard domain without hue
+    /// adjust.
     fn port(&self, pixels: &[f32]) -> Result<Vec<u8>> {
         let data = self.lut.port()?;
         let out = port_depth(self.output);
-        let renderer = if data.is_input_half_domain() {
-            get_lut1d_renderer(&data, BitDepth::F32, out)?
-        } else {
-            get_lut1d_scalar_renderer(&data, out)?
-        };
+        let renderer =
+            if data.is_input_half_domain() || data.get_hue_adjust() != Lut1DHueAdjust::None {
+                get_lut1d_renderer(&data, BitDepth::F32, out)?
+            } else {
+                get_lut1d_scalar_renderer(&data, out)?
+            };
         let mut input = pixels.to_vec();
         if self.with_matrix() {
             let mut ops = OpVec::new();
@@ -343,7 +460,7 @@ fn render(renderer: &dyn CpuOp, input: &[f32], out: BitDepth) -> Vec<u8> {
 }
 
 /// The LUTs of the single-pixel-row test: standard domains of several lengths and the half
-/// domain, with the explicit curves, to every output bit depth; and the generated cases of
+/// domain, with the explicit curves, and two with hue adjust, to every output bit depth; and the generated cases of
 /// the mixed curves (extreme finite, NaN and infinite values in chosen entries: all of them
 /// beyond the quick tier, a sample in it), to F32 and 16-bit output.
 fn row_cases() -> Vec<RowCase> {
@@ -368,6 +485,17 @@ fn row_cases() -> Vec<RowCase> {
                 (format!("{domain}, {name}"), Lut::new(half, n, curve))
             })
         })
+        .chain([(false, 17), (true, HALF_ENTRIES)].map(|(half, n)| {
+            let domain = if half {
+                "half domain".to_string()
+            } else {
+                format!("{n} entries")
+            };
+            (
+                format!("{domain}, mixed, hue adjust"),
+                Lut::new(half, n, mixed).with_hue_adjust(),
+            )
+        }))
         .collect();
     for (label, lut) in &luts {
         for output in common::image::DEPTHS {

@@ -115,7 +115,12 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   call `apply`, so they don't see this.
 - **A fix:** convert through a separate pixel, as `apply` does; or refuse other bit depths.
   Either changes the results for those processors, and makes them the same on both platforms.
-- **Status:** matched in `p1-engine` (1.2d), each platform as its wheel compiled it.
+- **Status:** matched in `p1-engine` (1.2d), each platform as its wheel compiled it. The 1D
+  LUT lookups to F32 at the start of a processor convert in place the same way (`p1-optimizer`);
+  with hue adjust (`p2-lut1d-fwd`, 2.1b) they read the three colour codes first, then store the
+  floats before they read alpha, which is then a byte of red's float or half of green's, except
+  for 10-, 12- and 16-bit input on Linux, which reads alpha first
+  (`Lut1DRendererHueAdjust<inBD, F32>::apply`, `Lut1DRendererHalfCodeHueAdjust<F16, F32>`).
 
 ## Configs and cache IDs
 
@@ -679,8 +684,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   (`CreateCPUEngine`, `CPUProcessor.cpp:140-146`). Code that calls `GetLut1DRenderer` for half
   input to an integer output (upstream's unit tests do) gets 0 for a NaN or infinite alpha.
 - **A fix:** convert with `Converter<outBD>::CastValue`, which rounds and clamps.
-- **Status:** matched in `p2-lut1d-fwd` (2.1a) for the lookups; the hue-adjust lookups follow
-  in 2.1b.
+- **Status:** matched in `p2-lut1d-fwd` (2.1a for the lookups, 2.1b for the hue-adjust
+  lookups).
 
 ### I-68. Two half-domain 1D LUTs are never equal
 

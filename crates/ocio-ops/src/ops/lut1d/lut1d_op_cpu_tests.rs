@@ -34,9 +34,10 @@ fn float(value: half::f16) -> f32 {
 }
 
 /// `GetLut1DRenderer` picks a lookup for integer and half input that may use the LUT as it is,
-/// a float renderer for a half domain with float input, for every output bit depth; the
-/// standard domain with float input (its SIMD kernels), hue adjust, the inverse and the
-/// lookups that must resample the LUT are still to come.
+/// a float renderer for a half domain with float input, with or without hue adjust, and the
+/// hue-adjust renderer of a standard domain with float input, for every output bit depth; the
+/// standard domain's SIMD kernels, the inverse and the lookups that must resample the LUT are
+/// still to come.
 #[test]
 fn dispatch() {
     let lut8 = Lut1DOpData::new(256).unwrap();
@@ -91,9 +92,21 @@ fn dispatch() {
     );
     let mut hue = lut8.clone();
     hue.set_hue_adjust(Lut1DHueAdjust::Dw3).unwrap();
+    let mut half_hue = half_lut.clone();
+    half_hue.set_hue_adjust(Lut1DHueAdjust::Dw3).unwrap();
+    for out in [BitDepth::Uint8, BitDepth::F16, BitDepth::F32] {
+        for (lut, depth) in [
+            (&hue, BitDepth::Uint8),
+            (&hue, BitDepth::F32),
+            (&half_hue, BitDepth::F16),
+            (&half_hue, BitDepth::F32),
+        ] {
+            get_lut1d_renderer(lut, depth, out).unwrap();
+        }
+    }
     assert_eq!(
-        message(get_lut1d_renderer(&hue, BitDepth::Uint8, BitDepth::F32)),
-        NOT_PORTED_HUE_ADJUST
+        message(get_lut1d_renderer(&hue, BitDepth::Uint10, BitDepth::F32)),
+        NOT_PORTED_COMPOSE
     );
     // A LUT the lookup must resample first.
     assert_eq!(
@@ -116,6 +129,102 @@ fn dispatch() {
         message(get_lut1d_scalar_renderer(&lut8, BitDepth::Uint14)),
         "Unsupported output bit depth"
     );
+}
+
+/// `GamutMapUtils::Order3(RGB, min, mid, max)`.
+fn order3_of(rgb: [f32; 3]) -> (usize, usize, usize) {
+    order3(&rgb)
+}
+
+/// Port of `OCIO_ADD_TEST(GamutMapUtil, order3_test)` @ v2.5.2.
+#[test]
+fn order3_test() {
+    let posinf = f32::INFINITY;
+    let qnan = f32::NAN;
+
+    // { A, NaN, B } with A > B test (used to be a crash).
+    {
+        let (min, mid, max) = order3_of([65504.0, -qnan, 0.0]);
+        assert_eq!(max, 2);
+        assert_eq!(mid, 1);
+        assert_eq!(min, 0);
+    }
+    // Triple NaN test.
+    {
+        let (min, mid, max) = order3_of([qnan, qnan, -qnan]);
+        assert_eq!(max, 2);
+        assert_eq!(mid, 1);
+        assert_eq!(min, 0);
+    }
+    // -Inf test.
+    {
+        let (min, mid, max) = order3_of([65504.0, -posinf, 0.0]);
+        assert_eq!(max, 0);
+        assert_eq!(mid, 2);
+        assert_eq!(min, 1);
+    }
+    // Inf test.
+    {
+        let (min, mid, max) = order3_of([0.0, posinf, -65504.0]);
+        assert_eq!(max, 1);
+        assert_eq!(mid, 0);
+        assert_eq!(min, 2);
+    }
+    // Double Inf test.
+    {
+        let (min, mid, max) = order3_of([posinf, posinf, -65504.0]);
+        assert_eq!(max, 1);
+        assert_eq!(mid, 0);
+        assert_eq!(min, 2);
+    }
+
+    // Equal values.
+    {
+        let (min, mid, max) = order3_of([0.0, 0.0, 0.0]);
+        // In this case we only really care that they are distinct and in [0,2]
+        // so this test could be changed (it is ok, but overly restrictive).
+        assert_eq!(max, 2);
+        assert_eq!(mid, 1);
+        assert_eq!(min, 0);
+    }
+
+    // Now test the six typical possibilities.
+    {
+        let (min, mid, max) = order3_of([3.0, 2.0, 1.0]);
+        assert_eq!(max, 0);
+        assert_eq!(mid, 1);
+        assert_eq!(min, 2);
+    }
+    {
+        let (min, mid, max) = order3_of([-3.0, -2.0, 1.0]);
+        assert_eq!(max, 2);
+        assert_eq!(mid, 1);
+        assert_eq!(min, 0);
+    }
+    {
+        let (min, mid, max) = order3_of([-3.0, 2.0, 1.0]);
+        assert_eq!(max, 1);
+        assert_eq!(mid, 2);
+        assert_eq!(min, 0);
+    }
+    {
+        let (min, mid, max) = order3_of([-0.3, 2.0, -1.0]);
+        assert_eq!(max, 1);
+        assert_eq!(mid, 0);
+        assert_eq!(min, 2);
+    }
+    {
+        let (min, mid, max) = order3_of([3.0, -2.0, 1.0]);
+        assert_eq!(max, 0);
+        assert_eq!(mid, 2);
+        assert_eq!(min, 1);
+    }
+    {
+        let (min, mid, max) = order3_of([3.0, -2.0, 10.0]);
+        assert_eq!(max, 2);
+        assert_eq!(mid, 0);
+        assert_eq!(min, 1);
+    }
 }
 
 /// Through the scalar profile (module docs).

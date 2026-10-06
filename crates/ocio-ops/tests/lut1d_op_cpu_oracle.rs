@@ -6,15 +6,17 @@
 //! input bit depth, or a half domain for half input, without optimization, so that the LUT is
 //! the CPU engine's first op and its lookup the input's conversion (`CreateCPUEngine`,
 //! src/OpenColorIO/CPUProcessor.cpp:140-146 @ v2.5.2; `Lut1DRenderer` and
-//! `Lut1DRendererHalfCode`, src/OpenColorIO/ops/lut1d/Lut1DOpCPU.cpp:501-536, 622-650).
+//! `Lut1DRendererHalfCode`, src/OpenColorIO/ops/lut1d/Lut1DOpCPU.cpp:501-536, 622-650; with hue
+//! adjust, `Lut1DRendererHueAdjust` and `Lut1DRendererHalfCodeHueAdjust`, 753-894).
 //!
 //! - Every code of each input bit depth (8, 10, 12, 16 bits and half) on each channel, to F32,
 //!   and through the conversion to 8- and 16-bit and half output, for LUTs of negative, large
 //!   and tiny values and, in a half domain, the NaN and infinite entries `setLength` leaves
-//!   (which the renderer sanitizes);
+//!   (which the renderer sanitizes); with and without hue adjust;
 //! - `applyRGB` and `applyRGBA`, which convert the pixel's own bytes (docs/improvements.md,
 //!   I-41), through `apply(src, dst)` over one pixel's bytes, as
-//!   `cpu_processor_apply_rgb_oracle.rs` checks them, for 8-, 16-bit and half input. With 10-
+//!   `cpu_processor_apply_rgb_oracle.rs` checks them, for 8-, 16-bit and half input, with and
+//!   without hue adjust, whose renderers read alpha in another order. With 10-
 //!   and 12-bit input the lookups read past the tables there (U-1).
 
 mod common;
@@ -26,7 +28,7 @@ use ocio_ops::cpu_processor::CpuProcessor;
 use ocio_ops::exception::Result;
 use ocio_ops::image_desc::Bytes;
 use ocio_ops::op::OpVec;
-use ocio_ops::open_color_types::{BitDepth, OptimizationFlags, TransformDirection};
+use ocio_ops::open_color_types::{BitDepth, Lut1DHueAdjust, OptimizationFlags, TransformDirection};
 use ocio_ops::ops::lut1d::Lut1DOpData;
 use ocio_ops::ops::lut1d::lut1d_op::create_lut1d_op;
 use ocio_ops::ops::lut1d::lut1d_op_data::Lut3by1DArray;
@@ -43,6 +45,8 @@ struct Lut {
     half_domain: bool,
     length: c_ulong,
     curve: Option<fn(f32) -> [f32; 3]>,
+    /// `HUE_DW3`, or `HUE_NONE`.
+    hue_adjust: bool,
 }
 
 impl Lut {
@@ -72,6 +76,9 @@ impl Lut {
         for (index, rgb) in self.entries() {
             calls.push(json!(["setValue", index, rgb[0], rgb[1], rgb[2]]));
         }
+        if self.hue_adjust {
+            calls.push(json!(["setHueAdjust", {"enum": "HUE_DW3"}]));
+        }
         json!({"class": "Lut1DTransform", "args": {}, "calls": calls})
     }
 
@@ -79,6 +86,9 @@ impl Lut {
     fn port(&self) -> Lut1DOpData {
         let mut data = Lut1DOpData::new(2).unwrap();
         data.set_input_half_domain(self.half_domain);
+        if self.hue_adjust {
+            data.set_hue_adjust(Lut1DHueAdjust::Dw3).unwrap();
+        }
         *data.get_array_mut() = self.identity();
         for (index, rgb) in self.entries() {
             for (c, v) in rgb.into_iter().enumerate() {
@@ -96,7 +106,14 @@ impl Lut {
             half_domain,
             length,
             curve,
+            hue_adjust: false,
         }
+    }
+
+    /// The LUT with hue adjust.
+    fn with_hue_adjust(mut self) -> Lut {
+        self.hue_adjust = true;
+        self
     }
 }
 
@@ -183,6 +200,12 @@ fn every_code_matches_the_wheel() {
                 cases.push((Lut::for_depth(input, curve), input, output));
             }
         }
+        for curve in [Some(mixed as fn(f32) -> [f32; 3]), Some(extreme)] {
+            for output in OUT {
+                let lut = Lut::for_depth(input, curve).with_hue_adjust();
+                cases.push((lut, input, output));
+            }
+        }
     }
     let requests: Vec<Request> = cases
         .iter()
@@ -258,7 +281,9 @@ fn the_in_place_lookup_follows_the_wheel() {
                     .collect();
                 let mut rgb = rgba[..12].to_vec();
                 rgb.extend_from_slice(&0.0f32.to_ne_bytes());
-                cases.push((Lut::for_depth(input, curve), input, [rgba, rgb]));
+                let lut = Lut::for_depth(input, curve);
+                cases.push((lut, input, [rgba.clone(), rgb.clone()]));
+                cases.push((lut.with_hue_adjust(), input, [rgba, rgb]));
             }
         }
     }

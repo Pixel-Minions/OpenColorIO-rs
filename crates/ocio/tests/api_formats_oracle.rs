@@ -32,13 +32,13 @@
 //! W0002 covers is counted. A test in `battery::params` pins the callers of both.
 //!
 //! Parts of the `Lut1DTransform`'s renderers are still to come in Phase 2: the SIMD kernels of
-//! a standard domain with float input (WP 2.1c, 2.1d), the hue adjustment (WP 2.1b), the
-//! inverse LUT (WP 2.1e, 2.1f) and composing LUTs (WP 2.1g). [`lut1d_deferral`] says, from the
+//! a standard domain with float input (WP 2.1c, 2.1d), the inverse LUT (WP 2.1e, 2.1f) and
+//! composing LUTs (WP 2.1g). [`lut1d_deferral`] says, from the
 //! renderer upstream picks for each combination, which ones the port must refuse with which
 //! "not ported yet" message, while the wheel renders them: the test counts those as deferrals,
 //! pins how many there are per message, and compares every other combination: the lookups of
-//! integer and half inputs, and the half domain's float renderer, which every tier runs in
-//! full.
+//! integer and half inputs, the half domain's float renderer and the hue adjustment, which
+//! every tier runs in full.
 
 mod common;
 
@@ -53,7 +53,7 @@ use ocio_ops::image_desc::{
     AUTO_STRIDE, Bytes, ImageDesc, ImageDescMut, PackedImageDesc, PixelData, PlanarImageDesc,
 };
 use ocio_ops::open_color_types::ChannelOrdering;
-use ocio_ops::ops::lut1d::lut1d_op::{NOT_PORTED_COMPOSE, NOT_PORTED_HUE_ADJUST, NOT_PORTED_SIMD};
+use ocio_ops::ops::lut1d::lut1d_op::{NOT_PORTED_COMPOSE, NOT_PORTED_SIMD};
 use ocio_testkit::Oracle;
 use ocio_testkit::battery::params::Comparison;
 use ocio_testkit::battery::{self, BitDepth as Depth, Direction, Tier};
@@ -604,8 +604,9 @@ impl Lut1D {
 const NOT_PORTED_INVERSE: &str = "Lut1D: the inverse 1D LUT is not ported yet (WP 2.1).";
 
 /// Where the port refuses a `Lut1DTransform` at `combo` because the renderer upstream picks is
-/// still to come in Phase 2, with the stage and message; `None` where the renderer is a lookup
-/// or the half domain's float renderer, which the port has, and which must match the wheel.
+/// still to come in Phase 2, with the stage and message; `None` where the renderer is a lookup,
+/// the half domain's float renderer or a hue-adjust renderer, which the port has, and which
+/// must match the wheel.
 ///
 /// Upstream (src/OpenColorIO @ v2.5.2):
 /// - an inverse LUT is set up when the processor finalizes it (`Lut1DOpData::finalize`, the
@@ -615,9 +616,9 @@ const NOT_PORTED_INVERSE: &str = "Lut1D: the inverse 1D LUT is not ported yet (W
 /// - `GetLut1DRenderer` (ops/lut1d/Lut1DOpCPU.cpp:1657-1754) picks the hue-adjust renderer, the
 ///   lookup where `mayLookup(inBD)` (one entry per integer code, or a half domain for half
 ///   codes), and otherwise the float renderer (F32 input) or one that interpolates the codes.
-///   The port has the lookup and the float renderers; a standard domain's runs SIMD kernels
-///   on rows of more than one pixel (WP 2.1c, 2.1d), the hue adjustment is WP 2.1b's, and the
-///   codes' interpolation is the "composing 1D LUTs" refusal (WP 2.1g).
+///   The port has the lookups and the float renderers; a standard domain's without hue adjust
+///   runs SIMD kernels on rows of more than one pixel (WP 2.1c, 2.1d), and the codes'
+///   interpolation is the "composing 1D LUTs" refusal (WP 2.1g).
 fn lut1d_deferral(
     lut: &Lut1D,
     dir: Direction,
@@ -626,11 +627,8 @@ fn lut1d_deferral(
     if dir == Direction::Inverse {
         return Some(("processor", NOT_PORTED_INVERSE));
     }
-    if lut.hue_adjust {
-        return Some(("cpu_processor", NOT_PORTED_HUE_ADJUST));
-    }
     if combo.input == Depth::F32 {
-        if lut.half_domain {
+        if lut.half_domain || lut.hue_adjust {
             return None;
         }
         return Some(("cpu_processor", NOT_PORTED_SIMD));
@@ -643,15 +641,13 @@ fn lut1d_deferral(
 
 /// The deferrals of the `Lut1DTransform`'s plan, per message, in the quick tier and in the
 /// others: a digest of the plan the test generates, so that it can't change unnoticed.
-const LUT1D_DEFERRALS_QUICK: [(&str, usize); 4] = [
-    (NOT_PORTED_COMPOSE, 1277),
-    (NOT_PORTED_HUE_ADJUST, 369),
+const LUT1D_DEFERRALS_QUICK: [(&str, usize); 3] = [
+    (NOT_PORTED_COMPOSE, 1523),
     (NOT_PORTED_SIMD, 303),
     (NOT_PORTED_INVERSE, 2205),
 ];
-const LUT1D_DEFERRALS_FULL: [(&str, usize); 4] = [
-    (NOT_PORTED_COMPOSE, 5145),
-    (NOT_PORTED_HUE_ADJUST, 1470),
+const LUT1D_DEFERRALS_FULL: [(&str, usize); 3] = [
+    (NOT_PORTED_COMPOSE, 6125),
     (NOT_PORTED_SIMD, 1225),
     (NOT_PORTED_INVERSE, 8853),
 ];

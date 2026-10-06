@@ -10,8 +10,8 @@
 //! it is [`Op::finalize`]'s own arm.
 //!
 //! `getCPUOp` is [`Op::get_cpu_op`]'s arm: `GetLut1DRenderer` for F32 to F32
-//! (`ops::lut1d::lut1d_op_cpu`), whose SIMD, hue adjust and inverse renderers are still to
-//! come ([`NOT_PORTED_SIMD`], [`NOT_PORTED_HUE_ADJUST`], [`NOT_PORTED_INVERSE_RENDERER`]).
+//! (`ops::lut1d::lut1d_op_cpu`), whose SIMD and inverse renderers are still to come
+//! ([`NOT_PORTED_SIMD`], [`NOT_PORTED_INVERSE_RENDERER`]).
 //! Not here yet (Phase 2, WP 2.1g): `combineWith`, which composes two LUTs (`Compose`); until
 //! then it returns [`NOT_PORTED_COMPOSE`]. `extractGpuShaderInfo` comes with the GPU writer
 //! (WP 2.1h); `CreateLut1DTransform` and `BuildLut1DOp` are the `ocio` crate's, with the
@@ -28,10 +28,6 @@ use crate::open_color_types::TransformDirection;
 /// `_AVX2`, `_AVX512`), until they are ported (WP 2.1c, 2.1d).
 pub const NOT_PORTED_SIMD: &str =
     "Lut1D: the 1D LUT's SIMD kernels for float input are not ported yet (WP 2.1c, 2.1d).";
-
-/// The error of the hue adjust renderers until WP 2.1b.
-pub const NOT_PORTED_HUE_ADJUST: &str =
-    "Lut1D: the 1D LUT's hue adjust renderers are not ported yet (Phase 2, WP 2.1b).";
 
 /// The error of the inverse renderers until WP 2.1f.
 pub const NOT_PORTED_INVERSE_RENDERER: &str =
