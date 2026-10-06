@@ -1,12 +1,19 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Port of `tests/cpu/ops/lut1d/Lut1DOp_tests.cpp` @ v2.5.2: the tests that need no float
-//! renderer, composition or inverse (those come with Phase 2, WP 2.5), and tests of the
-//! refusals that stand in for them until then.
+//! Port of `tests/cpu/ops/lut1d/Lut1DOp_tests.cpp` @ v2.5.2: the tests that need no
+//! composition or inverse (WP 2.1e to 2.1g), and tests of the refusals that stand in for them
+//! until then.
+//!
+//! Upstream's `ops[0]->apply` of a standard domain renders rows of more than one pixel with a
+//! SIMD kernel, which the port refuses until WP 2.1c and 2.1d port them; such a test runs the
+//! renderer's scalar profile (`get_lut1d_scalar_renderer`) instead, with upstream's values and
+//! tolerances.
 
 use super::*;
-use crate::open_color_types::OptimizationFlags;
+use crate::open_color_types::{BitDepth, OptimizationFlags};
+use crate::ops::lut1d::lut1d_op_cpu::get_lut1d_scalar_renderer;
+use ocio_testkit::upstream::check_close;
 
 /// `CreateSquareLut` (tests/cpu/ops/lut1d/Lut1DOp_tests.cpp:126-144 @ v2.5.2): a LUT that
 /// squares the input.
@@ -24,6 +31,60 @@ fn create_square_lut() -> Lut1DOpData {
         }
     }
     lut
+}
+
+/// Through the scalar profile (module docs).
+///
+/// Port of `OCIO_ADD_TEST(Lut1DOp, extrapolation_errors)` @ v2.5.2.
+#[test]
+fn extrapolation_errors() {
+    let mut lut = Lut1DOpData::new(3).unwrap();
+    let lut_array = lut.get_array_mut();
+
+    // Simple y=x+0.1 LUT.
+    for i in 0..3 {
+        for c in 0..3 {
+            lut_array[c + i * 3] += 0.1f32;
+        }
+    }
+
+    let is_identity = lut.is_no_op();
+    assert!(!is_identity);
+
+    let mut ops = OpVec::new();
+    create_lut1d_op(&mut ops, lut, TransformDirection::Forward);
+
+    const PIXELS: usize = 5;
+    #[rustfmt::skip]
+    let mut input_buffer_linearforward: [f32; PIXELS * 4] = [
+        -0.1, -0.2, -10.0, 0.0,
+        0.5, 1.0, 1.1, 0.0,
+        10.1, 55.0, 2.3, 0.0,
+        9.1, 1.0e6, 1.0e9, 0.0,
+        4.0e9, 9.5e7, 0.5, 0.0,
+    ];
+    #[rustfmt::skip]
+    let output_buffer_linearforward: [f32; PIXELS * 4] = [
+        0.1, 0.1, 0.1, 0.0,
+        0.6, 1.1, 1.1, 0.0,
+        1.1, 1.1, 1.1, 0.0,
+        1.1, 1.1, 1.1, 0.0,
+        1.1, 1.1, 0.6, 0.0,
+    ];
+
+    let OpData::Lut1D(data) = &**ops[0].data() else {
+        unreachable!("a Lut1D op")
+    };
+    get_lut1d_scalar_renderer(data, BitDepth::F32)
+        .unwrap()
+        .apply(&mut input_buffer_linearforward);
+    for i in 0..input_buffer_linearforward.len() {
+        check_close(
+            input_buffer_linearforward[i],
+            output_buffer_linearforward[i],
+            1e-5f32,
+        );
+    }
 }
 
 /// Port of `OCIO_ADD_TEST(Lut1DOp, gpu)` @ v2.5.2.
@@ -66,9 +127,8 @@ fn identity_lut_1d() {
     }
 }
 
-/// What waits for Phase 2 is an error: the float renderers (`getCPUOp`, `apply`), composing
-/// two LUTs, and the inverse LUT's set-up (`finalize`). The CPU engine's lookups at the
-/// processor's ends don't need them (`lut1d_op_cpu`).
+/// What waits for the rest of Phase 2 is an error: the SIMD renderers of a standard domain
+/// (`getCPUOp`, `apply`), composing two LUTs, and the inverse LUT's set-up (`finalize`).
 #[test]
 fn phase_2_parts_are_errors() {
     let mut ops = OpVec::new();
@@ -80,12 +140,12 @@ fn phase_2_parts_are_errors() {
         Ok(_) => panic!("not an error"),
         Err(e) => e.message().to_string(),
     };
-    assert_eq!(message(ops[0].get_cpu_op(false)), NOT_PORTED_F32);
-    assert_eq!(message(ops[0].get_cpu_op(true)), NOT_PORTED_F32);
+    assert_eq!(message(ops[0].get_cpu_op(false)), NOT_PORTED_SIMD);
+    assert_eq!(message(ops[0].get_cpu_op(true)), NOT_PORTED_SIMD);
     let mut pixel = [0.5f32, 0.25, 0.125, 1.0];
     assert_eq!(
         ops[0].apply(&mut pixel).unwrap_err().message(),
-        NOT_PORTED_F32
+        NOT_PORTED_SIMD
     );
 
     // Two LUTs that may compose.

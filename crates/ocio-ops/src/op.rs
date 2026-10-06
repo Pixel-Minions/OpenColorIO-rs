@@ -25,13 +25,14 @@ use crate::exception::{Exception, Result};
 use crate::format_metadata::FormatMetadataImpl;
 use crate::logging::log_warning;
 use crate::op_data::{OpData, OpDataRcPtr, OpDataType, OpDataVec, get_type_name};
-use crate::open_color_types::{DynamicPropertyType, TransformDirection};
+use crate::open_color_types::{BitDepth, DynamicPropertyType, TransformDirection};
 use crate::ops::cdl::cdl_op::create_cdl_op;
 use crate::ops::exponent::exponent_op::create_exponent_op;
 use crate::ops::fixedfunction::fixed_function_op::create_fixed_function_op_from_data;
 use crate::ops::gamma::gamma_op::create_gamma_op;
 use crate::ops::log::log_op::create_log_op;
-use crate::ops::lut1d::lut1d_op::{NOT_PORTED_F32, create_lut1d_op};
+use crate::ops::lut1d::lut1d_op::create_lut1d_op;
+use crate::ops::lut1d::lut1d_op_cpu::get_lut1d_renderer;
 use crate::ops::matrix::matrix_op::create_matrix_op;
 use crate::ops::range::range_op::create_range_op;
 
@@ -547,9 +548,11 @@ impl Op {
     /// overrides.
     pub fn apply(&self, rgba: &mut [f32]) -> Result<()> {
         match &*self.data {
-            // The Op default: `getCPUOp(false)->apply(img, img, numPixels)`, whose float renderer
-            // waits for Phase 2 for a 1D LUT.
-            OpData::Lut1D(_) => Err(Exception::new(NOT_PORTED_F32)),
+            // The Op default: `getCPUOp(false)->apply(img, img, numPixels)`.
+            OpData::Lut1D(data) => {
+                get_lut1d_renderer(data, BitDepth::F32, BitDepth::F32)?.apply(rgba);
+                Ok(())
+            }
             OpData::Cdl(data) => {
                 data.get_cpu_op(false).apply(rgba);
                 Ok(())
@@ -595,7 +598,12 @@ impl Op {
         match &*self.data {
             // The Op default: `getCPUOp(false)->apply(inImg, outImg, numPixels)`. The matrix
             // renderers read a pixel before writing it, so they render a copy in place.
-            OpData::Lut1D(_) => Err(Exception::new(NOT_PORTED_F32)),
+            OpData::Lut1D(data) => {
+                let renderer = get_lut1d_renderer(data, BitDepth::F32, BitDepth::F32)?;
+                output.copy_from_slice(input);
+                renderer.apply(output);
+                Ok(())
+            }
             // The CDL renderers read a pixel before writing it too.
             OpData::Cdl(data) => {
                 let renderer = data.get_cpu_op(false);
@@ -791,9 +799,12 @@ impl Op {
             OpData::Gamma(data) => Ok(Some(data.get_cpu_op(fast_log_exp_pow)?)),
             OpData::Log(data) => Ok(Some(data.get_cpu_op(fast_log_exp_pow)?)),
             // `GetLut1DRenderer(data, BIT_DEPTH_F32, BIT_DEPTH_F32)`
-            // (src/OpenColorIO/ops/lut1d/Lut1DOp.cpp:151-155 @ v2.5.2): the float renderers
-            // wait for Phase 2.
-            OpData::Lut1D(_) => Err(Exception::new(NOT_PORTED_F32)),
+            // (src/OpenColorIO/ops/lut1d/Lut1DOp.cpp:151-155 @ v2.5.2).
+            OpData::Lut1D(data) => Ok(Some(get_lut1d_renderer(
+                data,
+                BitDepth::F32,
+                BitDepth::F32,
+            )?)),
             OpData::Matrix(data) => Ok(Some(data.get_cpu_op()?)),
             OpData::Range(data) => Ok(Some(data.get_cpu_op()?)),
             OpData::Exponent(data) => Ok(Some(data.get_cpu_op())),
