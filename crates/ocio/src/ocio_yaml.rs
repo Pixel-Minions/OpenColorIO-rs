@@ -738,12 +738,11 @@ fn load_log_camera(node: &Node) -> LoadResult<LogCameraTransform> {
     Ok(t)
 }
 
-/// The deepest the port nests GroupTransforms while loading them (U-60). The wheel recurses once
-/// per level and overflows its stack at 1,182 levels in Python's main thread on Windows (5,129
-/// on Linux), and on a group that contains itself through an alias. The port loads groups
-/// without recursion, but copying a group recurses, about 4 KiB per level at opt-level 0: 100
-/// levels take about half of a 1 MiB thread.
-pub(crate) const MAX_GROUP_DEPTH: usize = 100;
+/// The deepest the port nests GroupTransforms while loading them (U-60): about half the lowest
+/// depth at which the wheel's recursion overflows its stack, 1,182 levels in Python's main thread
+/// on Windows (5,129 on Linux), as it does on a group that contains itself through an alias.
+/// The port loads and copies groups without recursion.
+pub(crate) const MAX_GROUP_DEPTH: usize = 590;
 
 /// A group being loaded: its node, the transform so far, the pairs of its map still to read,
 /// and the `children` being read (the sequence, the next index and the size).

@@ -756,11 +756,30 @@ fn nested_groups(n: usize) -> Vec<u8> {
     text.into_bytes()
 }
 
+/// Groups nested `n` deep through aliases, around a MatrixTransform: past yaml-cpp's limit on
+/// nested flow collections. The top group lists the chain of anchors under a key it doesn't
+/// know (a warning), each anchor a group of the one before, and holds the last of them.
+fn aliased_groups(n: usize) -> Vec<u8> {
+    let mut chain = vec!["&g0 !<MatrixTransform> {}".to_string()];
+    for i in 1..n {
+        chain.push(format!(
+            "&g{i} !<GroupTransform> {{children: [*g{}]}}",
+            i - 1
+        ));
+    }
+    format!(
+        "!<GroupTransform> {{chain: [{}], children: [*g{}]}}",
+        chain.join(", "),
+        n - 1
+    )
+    .into_bytes()
+}
+
 /// The GroupTransform's children, in order, through aliases (each use loads the node again,
 /// I-141), nested, and the errors of a child; its other keys.
 #[test]
 fn group_transforms_load_as_in_the_wheel() {
-    let deepest = nested_groups(MAX_GROUP_DEPTH);
+    let deepest = aliased_groups(MAX_GROUP_DEPTH);
     check(&[
         b"!<GroupTransform> {}",
         b"!<GroupTransform> {children: []}",
@@ -791,6 +810,8 @@ fn group_transforms_load_as_in_the_wheel() {
           - !<MatrixTransform>\n          foo: 1\n        - !<GroupTransform>\n          \
           children: [!<LogTransform> {base: y}]",
         &nested_groups(10),
+        &aliased_groups(1),
+        &aliased_groups(3),
         &deepest,
     ]);
 }
@@ -799,11 +820,11 @@ fn group_transforms_load_as_in_the_wheel() {
 /// holds itself, which overflows the wheel's stack: the port refuses both (U-60).
 #[test]
 fn groups_nested_too_deep_are_refused() {
-    let too_deep = nested_groups(MAX_GROUP_DEPTH + 1);
+    let too_deep = aliased_groups(MAX_GROUP_DEPTH + 1);
     let wheel = run(vec![request(&too_deep, &[])]);
     assert!(
         wheel[0]["config"].is_null(),
-        "the wheel loads it: {}",
+        "the wheel refuses it: {}",
         wheel[0]
     );
 
@@ -829,14 +850,16 @@ fn groups_nested_too_deep_are_refused() {
 }
 
 /// Loading, copying, printing, validating and dropping the deepest group the port loads, and
-/// refusing deeper groups and a group that holds itself, fit a thread of 1 MiB: measured at opt-level 0, where
-/// copying a group takes about 4 KiB of stack per level (the port loads without recursion).
+/// refusing deeper groups and a group that holds itself, fit a thread of 1 MiB. Loading and
+/// copying walk the groups without recursion; printing, validating and dropping recurse in
+/// small frames: at opt-level 0, where frames are largest, all of them fit 2,360 levels (four
+/// times the limit) on 1 MiB, and building a CPU processor fits the limit.
 #[test]
 fn deep_groups_fit_a_small_stack() {
     // Parsed here: yaml-cpp's parser recurses per level of the text, which isn't the loader's.
     let nodes: Vec<Node> = [
-        nested_groups(MAX_GROUP_DEPTH),
-        nested_groups(MAX_GROUP_DEPTH + 1),
+        aliased_groups(MAX_GROUP_DEPTH),
+        aliased_groups(MAX_GROUP_DEPTH + 1),
         b"&t !<GroupTransform> {children: [*t, *t]}".to_vec(),
     ]
     .iter()
@@ -856,6 +879,9 @@ fn deep_groups_fit_a_small_stack() {
                     let copy = t.clone();
                     assert!(!t.to_bytes().is_empty());
                     let _ = t.validate();
+                    let config = crate::Config::create_raw();
+                    let processor = config.processor(&t).unwrap();
+                    processor.default_cpu_processor().unwrap();
                     drop(copy);
                 }
             }
