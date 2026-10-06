@@ -333,6 +333,9 @@ pub(super) enum Node {
         greedy: bool,
         /// How it was written, which decides the NFA states it takes.
         form: RepeatForm,
+        /// The NFA states it takes (`states`), kept so that a chain of quantifiers is not
+        /// walked again for each one.
+        states: (u64, u64),
     },
     /// Terms in sequence.
     Concat(Vec<Node>),
@@ -353,11 +356,58 @@ pub(super) enum RepeatForm {
     Brace,
 }
 
-/// A compiled expression: the tree, and the number of capture groups (group 0 included).
-#[derive(Debug, Clone)]
+/// Drops a tree without recursing: an expression may nest thousands of groups or
+/// quantifiers, deeper than a thread's stack could recurse.
+impl Drop for Node {
+    fn drop(&mut self) {
+        let mut stack = Vec::new();
+        take_children(self, &mut stack);
+        while let Some(mut node) = stack.pop() {
+            take_children(&mut node, &mut stack);
+        }
+    }
+}
+
+/// Moves the children of `node` that have children themselves onto `stack`.
+fn take_children(node: &mut Node, stack: &mut Vec<Node>) {
+    let has_children = |n: &Node| {
+        matches!(
+            n,
+            Node::Group { .. }
+                | Node::Lookahead { .. }
+                | Node::Repeat { .. }
+                | Node::Concat(_)
+                | Node::Alternation(_)
+        )
+    };
+    match node {
+        Node::Group { body, .. } | Node::Lookahead { body, .. } | Node::Repeat { body, .. } => {
+            if has_children(body) {
+                stack.push(std::mem::replace(&mut **body, Node::Empty));
+            }
+        }
+        Node::Concat(nodes) | Node::Alternation(nodes) => {
+            stack.extend(nodes.drain(..).filter(|n| has_children(n)));
+        }
+        _ => {}
+    }
+}
+
+/// A compiled expression: the tree, shared by the copies of the expression, and the number of
+/// capture groups (group 0 included).
+#[derive(Clone)]
 pub struct Program {
-    pub(super) root: Node,
+    pub(super) root: std::sync::Arc<Node>,
     pub(super) groups: usize,
+}
+
+/// The tree may be too deep to print recursively: the expression shows its groups only.
+impl std::fmt::Debug for Program {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Program")
+            .field("groups", &self.groups)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Program {
@@ -824,6 +874,7 @@ impl<'a> Parser<'a> {
 
     /// The quantifiers after an atom, each applying to all that precedes it.
     fn quantifiers(&mut self, mut node: Node) -> ParseResult<Node> {
+        let mut node_states = states(&node);
         loop {
             let (min, max, form) = match self.token {
                 Token::Star => {
@@ -844,7 +895,7 @@ impl<'a> Parser<'a> {
                         && max < min
                     {
                         // The wheel copies the body `min` times before it checks the range.
-                        self.add_states(min.saturating_mul(states(&node).1))?;
+                        self.add_states(min.saturating_mul(node_states.1))?;
                         return Err(error(ErrorType::Badbrace, GENERIC));
                     }
                     (min, max, RepeatForm::Brace)
@@ -857,19 +908,17 @@ impl<'a> Parser<'a> {
             } else {
                 true
             };
+            let repeat_states = repeat_states(node_states, min, max, form);
             node = Node::Repeat {
                 body: Box::new(node),
                 min,
                 max,
                 greedy,
                 form,
+                states: repeat_states,
             };
-            let (total, _) = states(&node);
-            let (body_total, _) = match &node {
-                Node::Repeat { body, .. } => states(body),
-                _ => unreachable!("a repetition"),
-            };
-            self.add_states(total - body_total)?;
+            self.add_states(repeat_states.0 - node_states.0)?;
+            node_states = repeat_states;
         }
     }
 
@@ -1091,30 +1140,26 @@ fn states(node: &Node) -> (u64, u64) {
                 r.saturating_add(LOOKAHEAD_CLOSE_STATES),
             )
         }
-        Node::Repeat {
-            body,
-            min,
-            max,
-            form,
-            ..
-        } => {
-            let (t, r) = states(body);
-            match form {
-                RepeatForm::Star | RepeatForm::Plus => (t + 1, r + 1),
-                RepeatForm::Question => (t + 2, r + 2),
-                RepeatForm::Brace => {
-                    // The original body is left unused: `n` copies, then a copy for the
-                    // loop or `m - n` optional copies, and two more states.
-                    let copies = match max {
-                        None => min.saturating_add(1).saturating_mul(r),
-                        Some(max) => min
-                            .saturating_mul(r)
-                            .saturating_add((max - min).saturating_mul(r.saturating_add(1))),
-                    };
-                    let used = copies.saturating_add(2);
-                    (t.saturating_add(used), used)
-                }
-            }
+        Node::Repeat { states, .. } => *states,
+    }
+}
+
+/// The NFA states of a repetition whose body takes `(t, r)` (`states`).
+fn repeat_states((t, r): (u64, u64), min: u64, max: Option<u64>, form: RepeatForm) -> (u64, u64) {
+    match form {
+        RepeatForm::Star | RepeatForm::Plus => (t + 1, r + 1),
+        RepeatForm::Question => (t + 2, r + 2),
+        RepeatForm::Brace => {
+            // The original body is left unused: `n` copies, then a copy for the loop or
+            // `m - n` optional copies, and two more states.
+            let copies = match max {
+                None => min.saturating_add(1).saturating_mul(r),
+                Some(max) => min
+                    .saturating_mul(r)
+                    .saturating_add((max - min).saturating_mul(r.saturating_add(1))),
+            };
+            let used = copies.saturating_add(2);
+            (t.saturating_add(used), used)
         }
     }
 }
@@ -1128,11 +1173,13 @@ fn disjunction_states(body: &Node) -> (u64, u64) {
     )
 }
 
-/// Up to this many `(` the compilation runs on the caller's thread.
-const INLINE_GROUPS: usize = 64;
+/// Up to this many `(` the compilation runs on the caller's thread: at most about 120 KiB of
+/// its stack at opt-level 0.
+const INLINE_GROUPS: usize = 16;
 
-/// The stack a compilation needs per level of nesting, with a margin.
-const STACK_PER_LEVEL: usize = 8192;
+/// The stack a compilation needs per level of nesting: about 7.3 KiB measured at opt-level 0,
+/// where frames are largest, doubled.
+const STACK_PER_LEVEL: usize = 16 * 1024;
 
 /// `std::regex(pattern)` as the Linux wheel compiles it. An expression with many `(`
 /// compiles on a thread with the stack its nesting may need.
@@ -1142,15 +1189,9 @@ pub(super) fn compile(pattern: &[u8]) -> Result<Program, RegexError> {
         return compile_here(pattern);
     }
     let levels = groups.min(MAX_NESTING as usize + 1);
-    let stack = 256 * 1024 + levels * STACK_PER_LEVEL;
-    std::thread::scope(|scope| {
-        std::thread::Builder::new()
-            .stack_size(stack)
-            .spawn_scoped(scope, || compile_here(pattern))
-            .expect("a thread to compile the expression")
-            .join()
-            .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
-    })
+    let stack = 1024 * 1024 + levels * STACK_PER_LEVEL;
+    super::on_stack(stack, || compile_here(pattern))
+        .unwrap_or_else(|| Err(error(ErrorType::Space, GENERIC)))
 }
 
 fn compile_here(pattern: &[u8]) -> Result<Program, RegexError> {
@@ -1167,10 +1208,10 @@ fn compile_here(pattern: &[u8]) -> Result<Program, RegexError> {
         START_STATES + END_STATES + disjunction_states(&root).0
     );
     Ok(Program {
-        root: Node::Group {
+        root: std::sync::Arc::new(Node::Group {
             index: Some(0),
             body: Box::new(root),
-        },
+        }),
         groups: parser.groups_opened + 1,
     })
 }

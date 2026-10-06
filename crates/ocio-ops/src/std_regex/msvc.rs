@@ -812,11 +812,12 @@ const MAX_GROUPS: u32 = 1000;
 /// groups (docs/improvements.md, U-53).
 const MAX_NESTING: i32 = 5000;
 
-/// The stack a compilation needs per level of nesting, with a margin: about 1.5 KiB in the
-/// test profile.
-const STACK_PER_LEVEL: usize = 4096;
+/// The stack a compilation needs per level of nesting: about 1.9 KiB measured at opt-level 0,
+/// where frames are largest, doubled.
+const STACK_PER_LEVEL: usize = 4 * 1024;
 
-/// Up to this many `(` the compilation runs on the caller's thread.
+/// Up to this many `(` the compilation runs on the caller's thread: at most about 120 KiB of
+/// its stack at opt-level 0.
 const INLINE_GROUPS: usize = 64;
 
 /// Port of `_Parser` (`<regex>`:1711-1764, 3850-4677) for the ECMAScript grammar, which sets
@@ -1572,13 +1573,7 @@ pub(super) fn compile(pattern: &[u8]) -> Result<Program, RegexError> {
 
     // Deep nesting: on a thread with the stack it needs (at most MAX_NESTING levels).
     let levels = groups.min(MAX_NESTING as usize + 1);
-    let stack = 256 * 1024 + levels * STACK_PER_LEVEL;
-    std::thread::scope(|scope| {
-        std::thread::Builder::new()
-            .stack_size(stack)
-            .spawn_scoped(scope, || Parser::new(pattern).compile())
-            .expect("a thread to compile the expression")
-            .join()
-            .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
-    })
+    let stack = 1024 * 1024 + levels * STACK_PER_LEVEL;
+    super::on_stack(stack, || Parser::new(pattern).compile())
+        .unwrap_or_else(|| Err(error(ErrorType::Space)))
 }
