@@ -1,23 +1,22 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Tests of the config's version. Upstream's `Config version` and `Config version_validation`
-//! (tests/cpu/Config_tests.cpp @ v2.5.2) need configs read from YAML (Phase 3); their checks of
-//! `setMajorVersion` are here, with upstream's expected messages.
-
-use std::sync::Arc;
+//! Tests of the config. Upstream's `Config version` and `Config family_separator`
+//! (tests/cpu/Config_tests.cpp @ v2.5.2) also read and write configs as YAML (Phase 3); their
+//! checks of the API alone are here, with upstream's expected messages, without the markers.
 
 use ocio_testkit::upstream::check_throw_what;
 
 use super::*;
+use crate::test_env::EnvGuard;
 
 /// `setMajorVersion` takes 1 and 2 and refuses other versions (Config_tests.cpp:2065-2067,
 /// 2104-2107 @ v2.5.2); the minor version becomes the last one each major supports, which
 /// upstream's tests read back as the serialized profile version (Config_tests.cpp:2069-2088).
 #[test]
 fn set_major_version() {
-    let mut config = Config::create_raw();
-    let config = Arc::get_mut(&mut config).unwrap();
+    let _env = EnvGuard::new();
+    let mut config = Config::new().unwrap();
 
     config.set_major_version(1).unwrap();
     assert_eq!(config.major_version(), 1);
@@ -37,4 +36,67 @@ fn set_major_version() {
 
     config.set_major_version(2).unwrap();
     assert_eq!(config.major_version(), 2);
+}
+
+/// `Config version`'s checks of `setMinorVersion` and `setVersion` (Config_tests.cpp:2065-2107
+/// @ v2.5.2), on a new config instead of one read from YAML.
+#[test]
+fn version_without_yaml() {
+    let _env = EnvGuard::new();
+    let mut config = Config::new().unwrap();
+
+    config.set_major_version(1).unwrap();
+    check_throw_what(
+        config.set_major_version(20000),
+        "version is 20000 where supported versions start at 1 and end at 2",
+    );
+
+    check_throw_what(
+        config.set_minor_version(1),
+        "The minor version 1 is not supported for major version 1. Maximum minor version is 0",
+    );
+
+    config.set_minor_version(0).unwrap();
+    config.set_major_version(2).unwrap();
+
+    check_throw_what(
+        config.set_version(2, 9),
+        "The minor version 9 is not supported for major version 2. Maximum minor version is 5",
+    );
+
+    config.set_major_version(2).unwrap();
+    check_throw_what(
+        config.set_minor_version(9),
+        "The minor version 9 is not supported for major version 2. Maximum minor version is 5",
+    );
+
+    check_throw_what(
+        config.set_version(3, 4),
+        "version is 3 where supported versions start at 1 and end at 2",
+    );
+}
+
+/// `Config family_separator`'s checks of the API (Config_tests.cpp:7486-7500 @ v2.5.2), on a
+/// copy of the raw config.
+#[test]
+fn family_separator_without_yaml() {
+    let _env = EnvGuard::new();
+    let mut cfg = (*Config::create_raw()).clone();
+
+    assert_eq!(cfg.family_separator(), b'/');
+
+    cfg.set_family_separator(b' ').unwrap();
+    assert_eq!(cfg.family_separator(), b' ');
+
+    cfg.set_family_separator(0).unwrap();
+    assert_eq!(cfg.family_separator(), 0);
+
+    // Reset to its default value.
+    assert_eq!(Config::default_family_separator(), b'/');
+    cfg.set_family_separator(Config::default_family_separator())
+        .unwrap();
+    assert_eq!(cfg.family_separator(), b'/');
+
+    assert!(cfg.set_family_separator(127).is_err());
+    assert!(cfg.set_family_separator(31).is_err());
 }
