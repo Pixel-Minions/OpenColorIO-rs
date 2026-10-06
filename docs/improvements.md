@@ -855,6 +855,20 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p2-lut1d-inv` (2.1e); `tests/lut1d_op_oracle.rs` compares the cache
   IDs of inverse half-domain LUTs with such reversals with the wheel's.
 
+### I-67. An inverse half-domain 1D LUT inverts blue's negative half with red's sign
+
+- **Upstream:** `InvLut1DRendererHalfCode::apply` and `InvLut1DRendererHalfCodeHueAdjust::apply`
+  invert a value on the negative half of a half-domain LUT with `-flipSign`, the channel's
+  sign flipped; for blue they pass `-this->m_paramsR.flipSign`, red's
+  (`ops/lut1d/Lut1DOpCPU.cpp:1519`, `1606`). Where blue rises and red falls, or the reverse,
+  blue's values on its negative half are clamped and searched with the wrong sign.
+- **Who notices:** inverse half-domain LUTs whose blue channel goes the other way from red,
+  for blue values on the negative half (at or above the value at +0 for a falling blue,
+  below it for a rising one).
+- **A fix:** pass `-this->m_paramsB.flipSign`.
+- **Status:** matched in `p2-lut1d-inv` (2.1f); `tests/lut1d_renderer_oracle.rs` compares
+  the inverse half domain's "crossed" curves (blue falls, red rises) with the wheel's.
+
 ### I-68. Two half-domain 1D LUTs are never equal
 
 - **Upstream:** `Lut1DTransform::setLength` fills a half-domain LUT with each half code's
@@ -872,6 +886,23 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p1-optimizer` (chunk A); `lut1d_op_data_oracle.rs` checks equality
   against the wheel, and `crates/ocio/tests/lut1d_transform_oracle.rs` checks it on the
   `Lut1DTransform`s (each half-domain case against a copy of itself, `p1-transforms-fam4`).
+
+### I-69. An inverse half-domain 1D LUT splits integer input at an unscaled point
+
+- **Upstream:** `InvLut1DRendererHalfCode::updateData` takes each channel's value at +0 as
+  the point that splits the domain's positive and negative halves (`bisectPoint`,
+  `ops/lut1d/Lut1DOpCPU.cpp:1393-1404`), as it is in the LUT, but scales the tables it
+  searches by the input bit depth's maximum (`lutScale`, 1406-1437), and `apply` compares
+  the input value, in the input bit depth's units, with the unscaled point (1460-1532). For
+  float and half input the maximum is 1; for integer input the point is `maxValue` times too
+  small, so the codes between it and the scaled point take the other half.
+- **Who notices:** inverse half-domain LUTs rendered from 8-, 10-, 12- or 16-bit images
+  (the CPU engine renders a processor's first 1D LUT from the input bit depth) whose value at
+  +0 is not 0.
+- **A fix:** scale `bisectPoint` by `lutScale`.
+- **Status:** matched in `p2-lut1d-inv` (2.1f); the API format sweep
+  (`crates/ocio/tests/api_formats_oracle.rs`) renders inverse half-domain LUTs from every
+  bit depth and compares them with the wheel's.
 
 ### I-70. A camera log's break differs between Windows and Linux
 

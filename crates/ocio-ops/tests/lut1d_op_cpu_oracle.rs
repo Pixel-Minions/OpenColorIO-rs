@@ -18,6 +18,13 @@
 //!   `cpu_processor_apply_rgb_oracle.rs` checks them, for 8-, 16-bit and half input, with and
 //!   without hue adjust, whose renderers read alpha in another order. With 10-
 //!   and 12-bit input the lookups read past the tables there (U-1).
+//!
+//! And the same for inverse LUTs, which the CPU engine renders from the input bit depth too,
+//! but never looks up (`InvLut1DRenderer`, `InvLut1DRendererHalfCode`,
+//! `InvLut1DRendererHueAdjust`, `InvLut1DRendererHalfCodeHueAdjust`, Lut1DOpCPU.cpp:1137-1625):
+//! every code, of LUTs of every length, a half domain from integer input included
+//! (docs/improvements.md, I-69), and `applyRGB` and `applyRGBA` from every integer and half
+//! input, standard and half domains, with and without hue adjust.
 
 mod common;
 
@@ -47,6 +54,8 @@ struct Lut {
     curve: Option<fn(f32) -> [f32; 3]>,
     /// `HUE_DW3`, or `HUE_NONE`.
     hue_adjust: bool,
+    /// `TRANSFORM_DIR_INVERSE`, or `TRANSFORM_DIR_FORWARD`.
+    inverse: bool,
 }
 
 impl Lut {
@@ -79,6 +88,9 @@ impl Lut {
         if self.hue_adjust {
             calls.push(json!(["setHueAdjust", {"enum": "HUE_DW3"}]));
         }
+        if self.inverse {
+            calls.push(json!(["setDirection", {"enum": "TRANSFORM_DIR_INVERSE"}]));
+        }
         json!({"class": "Lut1DTransform", "args": {}, "calls": calls})
     }
 
@@ -107,6 +119,18 @@ impl Lut {
             length,
             curve,
             hue_adjust: false,
+            inverse: false,
+        }
+    }
+
+    /// A half domain, or a standard domain of 256 entries.
+    fn of_domain(half_domain: bool, curve: fn(f32) -> [f32; 3]) -> Lut {
+        Lut {
+            half_domain,
+            length: if half_domain { 65536 } else { 256 },
+            curve: Some(curve),
+            hue_adjust: false,
+            inverse: false,
         }
     }
 
@@ -114,6 +138,20 @@ impl Lut {
     fn with_hue_adjust(mut self) -> Lut {
         self.hue_adjust = true;
         self
+    }
+
+    /// The LUT in the inverse direction.
+    fn inverted(mut self) -> Lut {
+        self.inverse = true;
+        self
+    }
+
+    fn direction(&self) -> TransformDirection {
+        if self.inverse {
+            TransformDirection::Inverse
+        } else {
+            TransformDirection::Forward
+        }
     }
 }
 
@@ -142,7 +180,7 @@ fn port_processor(lut: &Lut, input: Depth, output: Depth) -> Result<CpuProcessor
     let data = lut.port();
     data.validate()?;
     let mut raw = OpVec::new();
-    create_lut1d_op(&mut raw, data, TransformDirection::Forward);
+    create_lut1d_op(&mut raw, data, lut.direction());
     raw.finalize()?;
     CpuProcessor::new(
         &raw,
@@ -204,7 +242,24 @@ fn every_code_matches_the_wheel() {
             for output in OUT {
                 let lut = Lut::for_depth(input, curve).with_hue_adjust();
                 cases.push((lut, input, output));
+                // The inverse LUT, with and without hue adjust.
+                let lut = Lut::for_depth(input, curve).inverted();
+                cases.push((lut, input, output));
+                cases.push((lut.with_hue_adjust(), input, output));
             }
+        }
+    }
+    // Inverse LUTs whose domain isn't the input's: a half domain from integer input, a
+    // standard domain from half input.
+    for (half_domain, input) in [
+        (true, Depth::Uint8),
+        (true, Depth::Uint16),
+        (false, Depth::F16),
+    ] {
+        for curve in [mixed as fn(f32) -> [f32; 3], extreme] {
+            let lut = Lut::of_domain(half_domain, curve).inverted();
+            cases.push((lut, input, Depth::F32));
+            cases.push((lut.with_hue_adjust(), input, Depth::F32));
         }
     }
     let requests: Vec<Request> = cases
@@ -267,23 +322,48 @@ fn every_code_matches_the_wheel() {
 /// The pixels have no zero channel, so that every code the lookup reads, before or after the
 /// store of the float before it, is a byte of a non-zero float: the order of the reads and
 /// stores shows in the result, at 8 bits on red too.
+///
+/// The inverse LUTs' renderers, standard and half domains, with and without hue adjust, from
+/// 8-, 10-, 12-, 16-bit and half input, each in the order its wheel compiled
+/// (`InvLut1DRenderer::in_place_order`): they never index by the code, so 10- and 12-bit
+/// codes past the LUT are values like any other.
 #[test]
 fn the_in_place_lookup_follows_the_wheel() {
+    /// The RGBA pixel's bytes, and the RGB pixel's {r, g, b, 0.0f}.
+    fn pixels(seed: u16) -> [Vec<u8>; 2] {
+        let s = f32::from(seed);
+        let rgba: Vec<u8> = [0.13 + 0.071 * s, 0.61 - 0.043 * s, 0.37 + 0.05 * s, 0.9]
+            .iter()
+            .flat_map(|v: &f32| v.to_ne_bytes())
+            .collect();
+        let mut rgb = rgba[..12].to_vec();
+        rgb.extend_from_slice(&0.0f32.to_ne_bytes());
+        [rgba, rgb]
+    }
     let mut cases = Vec::new();
     for input in [Depth::Uint8, Depth::Uint16, Depth::F16] {
         for curve in [Some(mixed as fn(f32) -> [f32; 3]), Some(extreme)] {
             for seed in 0..8u16 {
-                // The RGBA pixel's bytes, and the RGB pixel's {r, g, b, 0.0f}.
-                let s = f32::from(seed);
-                let rgba: Vec<u8> = [0.13 + 0.071 * s, 0.61 - 0.043 * s, 0.37 + 0.05 * s, 0.9]
-                    .iter()
-                    .flat_map(|v: &f32| v.to_ne_bytes())
-                    .collect();
-                let mut rgb = rgba[..12].to_vec();
-                rgb.extend_from_slice(&0.0f32.to_ne_bytes());
                 let lut = Lut::for_depth(input, curve);
-                cases.push((lut, input, [rgba.clone(), rgb.clone()]));
-                cases.push((lut.with_hue_adjust(), input, [rgba, rgb]));
+                cases.push((lut, input, pixels(seed)));
+                cases.push((lut.with_hue_adjust(), input, pixels(seed)));
+            }
+        }
+    }
+    for input in [
+        Depth::Uint8,
+        Depth::Uint10,
+        Depth::Uint12,
+        Depth::Uint16,
+        Depth::F16,
+    ] {
+        for half_domain in [false, true] {
+            for curve in [mixed as fn(f32) -> [f32; 3], extreme] {
+                for seed in 0..8u16 {
+                    let lut = Lut::of_domain(half_domain, curve).inverted();
+                    cases.push((lut, input, pixels(seed)));
+                    cases.push((lut.with_hue_adjust(), input, pixels(seed)));
+                }
             }
         }
     }

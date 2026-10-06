@@ -10,8 +10,7 @@
 //! it is [`Op::finalize`]'s own arm.
 //!
 //! `getCPUOp` is [`Op::get_cpu_op`]'s arm: `GetLut1DRenderer` for F32 to F32
-//! (`ops::lut1d::lut1d_op_cpu`), whose inverse renderers are still to come
-//! ([`NOT_PORTED_INVERSE_RENDERER`]).
+//! (`ops::lut1d::lut1d_op_cpu`).
 //! Not here yet (Phase 2, WP 2.1g): `combineWith`, which composes two LUTs (`Compose`); until
 //! then it returns [`NOT_PORTED_COMPOSE`]. `extractGpuShaderInfo` comes with the GPU writer
 //! (WP 2.1h); `CreateLut1DTransform` and `BuildLut1DOp` are the `ocio` crate's, with the
@@ -22,10 +21,6 @@ use crate::exception::{Exception, Result};
 use crate::op::{Op, OpVec};
 use crate::op_data::OpData;
 use crate::open_color_types::TransformDirection;
-
-/// The error of the inverse renderers until WP 2.1f.
-pub const NOT_PORTED_INVERSE_RENDERER: &str =
-    "Lut1D: the inverse 1D LUT renderers are not ported yet (Phase 2, WP 2.1f).";
 
 /// The error of the optimizer's fast forward LUT of an inverse 1D LUT
 /// (`MakeFastLut1DFromInverse`, `OPTIMIZATION_LUT_INV_FAST`) until WP 2.1g.

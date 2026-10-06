@@ -2,8 +2,8 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Port of `tests/cpu/ops/lut1d/Lut1DOp_tests.cpp` @ v2.5.2: the tests that need no
-//! composition or inverse (WP 2.1e to 2.1g), and tests of the refusals that stand in for them
-//! until then.
+//! composition, fast inverse or optimizer pair replacement (WP 2.1g, 2.5a), and tests of the
+//! refusals that stand in for them until then.
 //!
 //! Upstream's test runner reruns every test in each SIMD mode the CPU supports
 //! (tests/cpu/UnitTestMain.cpp:104-153 @ v2.5.2); a test of a renderer with SIMD kernels runs
@@ -106,6 +106,88 @@ fn extrapolation_errors() {
     }
 }
 
+/// Port of `OCIO_ADD_TEST(Lut1DOp, finite_value)` @ v2.5.2.
+#[test]
+fn finite_value() {
+    let lut = create_square_lut();
+
+    let mut ops = OpVec::new();
+    create_lut1d_op(&mut ops, lut.clone(), TransformDirection::Forward);
+    create_lut1d_op(&mut ops, lut, TransformDirection::Inverse);
+    assert_eq!(ops.len(), 2);
+    ops.finalize().unwrap();
+
+    let mut input_buffer_linearforward: [f32; 4] = [0.5, 0.6, 0.7, 0.5];
+    let output_buffer_linearforward: [f32; 4] = [0.25, 0.36, 0.49, 0.5];
+    ops[0].apply(&mut input_buffer_linearforward).unwrap();
+    for i in 0..4 {
+        check_close(
+            input_buffer_linearforward[i],
+            output_buffer_linearforward[i],
+            1e-5f32,
+        );
+    }
+
+    let input_buffer_linearinverse: [f32; 4] = [0.5, 0.6, 0.7, 0.5];
+    let mut output_buffer_linearinverse: [f32; 4] = [0.25, 0.36, 0.49, 0.5];
+    ops[1].apply(&mut output_buffer_linearinverse).unwrap();
+    for i in 0..4 {
+        check_close(
+            input_buffer_linearinverse[i],
+            output_buffer_linearinverse[i],
+            1e-5f32,
+        );
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Lut1D, inverse_twice)` @ v2.5.2.
+#[test]
+fn inverse_twice() {
+    // Make a LUT that squares the input.
+    let lut = create_square_lut();
+
+    let output_buffer_linearinverse: [f32; 4] = [0.5, 0.6, 0.7, 0.5];
+
+    // Create inverse lut.
+    let mut ops = OpVec::new();
+    create_lut1d_op(&mut ops, lut, TransformDirection::Inverse);
+    assert_eq!(ops.len(), 1);
+
+    let lut1d_input_buffer_reference: [f32; 4] = [0.25, 0.36, 0.49, 0.5];
+    let mut lut1d_input_buffer_linearinverse: [f32; 4] = [0.25, 0.36, 0.49, 0.5];
+
+    ops.finalize().unwrap();
+    ops[0].apply(&mut lut1d_input_buffer_linearinverse).unwrap();
+    for i in 0..4 {
+        check_close(
+            lut1d_input_buffer_linearinverse[i],
+            output_buffer_linearinverse[i],
+            1e-5f32,
+        );
+    }
+
+    // Inverse the inverse.
+    let OpData::Lut1D(p_lut) = &**ops[0].data() else {
+        unreachable!("a Lut1D op")
+    };
+    let lut_data = p_lut.inverse();
+    create_lut1d_op(&mut ops, lut_data, TransformDirection::Forward);
+    assert_eq!(ops.len(), 2);
+
+    // Apply the inverse.
+    ops.finalize().unwrap();
+    ops[1].apply(&mut lut1d_input_buffer_linearinverse).unwrap();
+
+    // Verify we are back on the input.
+    for i in 0..4 {
+        check_close(
+            lut1d_input_buffer_linearinverse[i],
+            lut1d_input_buffer_reference[i],
+            1e-5f32,
+        );
+    }
+}
+
 /// Port of `OCIO_ADD_TEST(Lut1DOp, gpu)` @ v2.5.2.
 #[test]
 fn gpu() {
@@ -146,9 +228,8 @@ fn identity_lut_1d() {
     }
 }
 
-/// What waits for the rest of Phase 2 is an error: composing two LUTs, and the inverse LUT's
-/// renderers. The float renderers (`getCPUOp`, `apply`) and the inverse's set-up (`finalize`)
-/// exist.
+/// What waits for the rest of Phase 2 is an error: composing two LUTs. The float renderers
+/// (`getCPUOp`, `apply`), the inverse's set-up (`finalize`) and its renderers exist.
 #[test]
 fn phase_2_parts_are_errors() {
     let mut ops = OpVec::new();
@@ -186,10 +267,7 @@ fn phase_2_parts_are_errors() {
         TransformDirection::Inverse,
     );
     inverse.finalize().unwrap();
-    assert_eq!(
-        inverse[0].get_cpu_op(false).unwrap_err().message(),
-        crate::ops::lut1d::lut1d_op::NOT_PORTED_INVERSE_RENDERER
-    );
+    inverse[0].get_cpu_op(false).unwrap().expect("a renderer");
 }
 
 /// A Lut1D op's queries: its type, that a copy equals it and has its cache ID, and that the

@@ -36,13 +36,14 @@
 //! under it, and the others are counted as not run ([`w0001_skips`]); Linux, and fast math,
 //! compare everything bit for bit.
 //!
-//! Parts of the `Lut1DTransform`'s renderers are still to come in Phase 2: the inverse LUT
-//! (WP 2.1e, 2.1f) and composing LUTs (WP 2.1g). [`lut1d_deferral`] says, from the renderer
+//! Parts of the `Lut1DTransform`'s renderers are still to come in Phase 2: the inverse LUT's
+//! fast forward LUT and composing LUTs (WP 2.1g). [`lut1d_deferral`] says, from the renderer
 //! upstream picks for each combination, which ones the port must refuse with which "not ported
 //! yet" message, while the wheel renders them: the test counts those as deferrals, pins how
 //! many there are per message, and compares every other combination: the lookups of integer
-//! and half inputs, and the float renderers (with the SIMD kernel the CPU dispatches to), with
-//! or without hue adjust, which every tier runs in full.
+//! and half inputs, the float renderers (with the SIMD kernel the CPU dispatches to), with or
+//! without hue adjust, and the inverse renderers from every input bit depth, which every tier
+//! runs in full.
 
 mod common;
 
@@ -57,9 +58,7 @@ use ocio_ops::image_desc::{
     AUTO_STRIDE, Bytes, ImageDesc, ImageDescMut, PackedImageDesc, PixelData, PlanarImageDesc,
 };
 use ocio_ops::open_color_types::ChannelOrdering;
-use ocio_ops::ops::lut1d::lut1d_op::{
-    NOT_PORTED_COMPOSE, NOT_PORTED_FAST_INVERSE, NOT_PORTED_INVERSE_RENDERER,
-};
+use ocio_ops::ops::lut1d::lut1d_op::{NOT_PORTED_COMPOSE, NOT_PORTED_FAST_INVERSE};
 use ocio_testkit::Oracle;
 use ocio_testkit::battery::params::Comparison;
 use ocio_testkit::battery::{self, BitDepth as Depth, Direction, Tier};
@@ -613,10 +612,12 @@ impl Lut1D {
 /// Upstream (src/OpenColorIO @ v2.5.2):
 /// - an inverse LUT is set up when the processor finalizes it (`Lut1DOpData::finalize`); with
 ///   `OPTIMIZATION_LUT_INV_FAST` the CPU processor's optimizer replaces it with a fast forward
-///   LUT (`ReplaceInverseLuts`, WP 2.1g), and otherwise renders it (`InvLut1DRenderer`, WP
-///   2.1f);
+///   LUT (`ReplaceInverseLuts`, WP 2.1g), and otherwise renders it (`InvLut1DRenderer`),
+///   which the port has;
 /// - the optimizer leaves a single forward LUT alone: `FindSeparablePrefix` gives no prefix to
-///   bake for it (OpOptimizers.cpp:473-509), and a hue adjustment has crosstalk anyway;
+///   bake for it (OpOptimizers.cpp:473-509), and a hue adjustment has crosstalk anyway; for
+///   integer input it bakes a single inverse LUT without hue adjust into a lookup, through
+///   the inverse renderer;
 /// - `GetLut1DRenderer` (ops/lut1d/Lut1DOpCPU.cpp:1657-1754) picks the hue-adjust renderer, the
 ///   lookup where `mayLookup(inBD)` (one entry per integer code, or a half domain for half
 ///   codes), and otherwise the float renderer (F32 input) or one that interpolates the codes.
@@ -631,7 +632,7 @@ fn lut1d_deferral(
         if combo.flags().has_flag(OptimizationFlags::LUT_INV_FAST) {
             return Some(("cpu_processor", NOT_PORTED_FAST_INVERSE));
         }
-        return Some(("cpu_processor", NOT_PORTED_INVERSE_RENDERER));
+        return None;
     }
     if combo.input == Depth::F32 {
         return None;
@@ -644,16 +645,10 @@ fn lut1d_deferral(
 
 /// The deferrals of the `Lut1DTransform`'s plan, per message, in the quick tier and in the
 /// others: a digest of the plan the test generates, so that it can't change unnoticed.
-const LUT1D_DEFERRALS_QUICK: [(&str, usize); 3] = [
-    (NOT_PORTED_COMPOSE, 1523),
-    (NOT_PORTED_FAST_INVERSE, 1575),
-    (NOT_PORTED_INVERSE_RENDERER, 630),
-];
-const LUT1D_DEFERRALS_FULL: [(&str, usize); 3] = [
-    (NOT_PORTED_COMPOSE, 6125),
-    (NOT_PORTED_FAST_INVERSE, 6311),
-    (NOT_PORTED_INVERSE_RENDERER, 2542),
-];
+const LUT1D_DEFERRALS_QUICK: [(&str, usize); 2] =
+    [(NOT_PORTED_COMPOSE, 1523), (NOT_PORTED_FAST_INVERSE, 1575)];
+const LUT1D_DEFERRALS_FULL: [(&str, usize); 2] =
+    [(NOT_PORTED_COMPOSE, 6125), (NOT_PORTED_FAST_INVERSE, 6311)];
 
 /// One apply: a case in a direction, a combination, and its request.
 struct Job {

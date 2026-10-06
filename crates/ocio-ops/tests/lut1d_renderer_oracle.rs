@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! The forward 1D LUT renderers for float input against the wheel, bit for bit
+//! The 1D LUT renderers for float input against the wheel, bit for bit
 //! (src/OpenColorIO/ops/lut1d/Lut1DOpCPU.cpp, Lut1DOpCPU_SSE2.cpp, _AVX, _AVX2, _AVX512 @
 //! v2.5.2), through the oracle test battery (every case, with fast math on and off, on the
 //! tier's probes, each buffer one renderer call):
@@ -13,7 +13,10 @@
 //!   the kernels this machine doesn't dispatch to are compared on it;
 //! - the half domain's (`Lut1DRendererHalfCode`, [`HalfDomain`]) and the hue-adjust renderers
 //!   of both domains (`Lut1DRendererHueAdjust`, `Lut1DRendererHalfCodeHueAdjust`,
-//!   [`HueAdjust`]), which have no SIMD kernel.
+//!   [`HueAdjust`]), which have no SIMD kernel;
+//! - the inverse renderers of both domains, with and without hue adjust (`InvLut1DRenderer`,
+//!   ..., [`Inverse`]), without `OPTIMIZATION_LUT_INV_FAST`, which would replace the inverse
+//!   LUT with a forward one.
 //!
 //! And to every output bit depth: on rows of one pixel ([`single_pixel_rows_match_the_wheel`]:
 //! the scalar code), and on whole rows ([`whole_rows_match_the_wheel`]: the dispatched kernel).
@@ -156,6 +159,11 @@ impl Lut {
 
     /// The transform, its values as blob 0.
     fn transform(&self) -> Value {
+        self.transform_in(Direction::Forward)
+    }
+
+    /// The transform in `direction`, its values as blob 0.
+    fn transform_in(&self, direction: Direction) -> Value {
         let hue = if self.hue_adjust {
             "HUE_DW3"
         } else {
@@ -165,6 +173,7 @@ impl Lut {
             ["setData", {"blob": 0, "dtype": "float32"}],
             ["setInputHalfDomain", self.half_domain],
             ["setHueAdjust", {"enum": hue}],
+            ["setDirection", direction.oracle_enum()],
         ]})
     }
 
@@ -174,6 +183,13 @@ impl Lut {
     /// (src/OpenColorIO/ops/lut1d/Lut1DOp.cpp:244-253, src/OpenColorIO/Processor.cpp:623-641
     /// @ v2.5.2).
     fn port(&self) -> Result<Lut1DOpData> {
+        self.port_in(Direction::Forward)
+    }
+
+    /// [`Lut::port`] in `direction`: `BuildLut1DOp` validates the forward data, then
+    /// `CreateLut1DOp` inverts it (src/OpenColorIO/ops/lut1d/Lut1DOp.cpp:221-253 @ v2.5.2)
+    /// before the processor finalizes it.
+    fn port_in(&self, direction: Direction) -> Result<Lut1DOpData> {
         let mut data = Lut1DOpData::new(2)?;
         data.set_input_half_domain(self.half_domain);
         if self.hue_adjust {
@@ -183,6 +199,9 @@ impl Lut {
         array.get_values_mut().copy_from_slice(&self.values);
         *data.get_array_mut() = array;
         data.validate()?;
+        if direction == Direction::Inverse {
+            data = data.inverse();
+        }
         data.finalize()?;
         Ok(std::hint::black_box(data))
     }
@@ -255,7 +274,8 @@ impl Family for StandardDomain {
         vec![cases[8].clone(), cases[16].clone()]
     }
     fn directions(&self) -> Vec<Direction> {
-        // The inverse renderers are WP 2.1f's.
+        // The default optimization replaces an inverse LUT with a forward one, WP 2.1g's;
+        // `Inverse` renders inverse LUTs.
         vec![Direction::Forward]
     }
     fn spec(&self, lut: &Lut, _direction: Direction) -> Spec {
@@ -333,7 +353,8 @@ impl Family for HalfDomain {
         self.cases()[..1].to_vec()
     }
     fn directions(&self) -> Vec<Direction> {
-        // The inverse renderers are WP 2.1f's.
+        // The default optimization replaces an inverse LUT with a forward one, WP 2.1g's;
+        // `Inverse` renders inverse LUTs.
         vec![Direction::Forward]
     }
     fn spec(&self, lut: &Lut, _direction: Direction) -> Spec {
@@ -403,7 +424,8 @@ impl Family for HueAdjust {
         vec![self.cases()[0].clone(), self.cases()[3].clone()]
     }
     fn directions(&self) -> Vec<Direction> {
-        // The inverse renderers are WP 2.1f's.
+        // The default optimization replaces an inverse LUT with a forward one, WP 2.1g's;
+        // `Inverse` renders inverse LUTs.
         vec![Direction::Forward]
     }
     fn spec(&self, lut: &Lut, _direction: Direction) -> Spec {
@@ -428,6 +450,143 @@ impl Family for HueAdjust {
 #[test]
 fn hue_adjust_matches_the_wheel() {
     battery::run(&HueAdjust);
+}
+
+/// Rising in red and green, falling in blue: a half domain's blue then takes the negative half
+/// with red's sign (docs/improvements.md, I-67).
+fn crossed(x: f64) -> [f64; 3] {
+    [x * 2.0 - 0.25, x * x * x, 0.5 - x]
+}
+
+/// Flat at both ends and reversing in between: what an inverse LUT's set-up flattens and
+/// leaves out of its effective domain.
+fn flat_ends(x: f64) -> [f64; 3] {
+    let w = (x * 9.0).sin();
+    [w.clamp(-0.5, 0.5), -w, (x - 0.5).abs()]
+}
+
+/// The inverse renderers (`InvLut1DRenderer`, `InvLut1DRendererHalfCode`,
+/// `InvLut1DRendererHueAdjust`, `InvLut1DRendererHalfCodeHueAdjust`), F32 to F32, through the
+/// battery: standard domains of several lengths and the half domain, with and without hue
+/// adjust. The default optimization's `OPTIMIZATION_LUT_INV_FAST` replaces an inverse LUT with
+/// a forward one (`ReplaceInverseLuts`); without it, the processor renders the inverse LUT
+/// itself, and only that flag is off here ([`Family::optimization_off`]). They write alpha
+/// (`in[3] * m_alphaScaling`), so no channel passes through.
+struct Inverse;
+
+impl Inverse {
+    /// The curves of the inverse cases.
+    const CURVES: [(&str, Curve); 5] = [
+        ("mixed", mixed),
+        ("extreme", extreme),
+        ("jagged", jagged),
+        ("crossed", crossed),
+        ("flat ends", flat_ends),
+    ];
+}
+
+impl Family for Inverse {
+    type Params = Lut;
+
+    fn name(&self) -> String {
+        "Lut1DTransform (inverse, without OPTIMIZATION_LUT_INV_FAST)".to_string()
+    }
+    fn cases(&self) -> Vec<Case<Lut>> {
+        let mut cases = Vec::new();
+        for (half, n) in [
+            (false, 17),
+            (true, HALF_ENTRIES),
+            (false, 2),
+            (false, 3),
+            (false, 256),
+            (false, 4096),
+        ] {
+            let domain = if half {
+                "half domain".to_string()
+            } else {
+                format!("{n} entries")
+            };
+            for (name, curve) in Self::CURVES {
+                cases.push(Case::new(
+                    format!("{domain}, {name}"),
+                    Lut::new(half, n, curve),
+                ));
+            }
+            cases.push(Case::new(
+                format!("{domain}, alternating infinities"),
+                Lut::alternating_infinities(half, n),
+            ));
+        }
+        for (half, n) in [(false, 17), (true, HALF_ENTRIES), (false, 2)] {
+            let domain = if half {
+                "half domain".to_string()
+            } else {
+                format!("{n} entries")
+            };
+            for (name, curve) in Self::CURVES {
+                cases.push(Case::new(
+                    format!("{domain}, {name}, hue adjust"),
+                    Lut::new(half, n, curve).with_hue_adjust(),
+                ));
+            }
+        }
+        cases
+    }
+    fn mutation_bases(&self) -> Vec<Case<Lut>> {
+        // The mixed curves of 17 entries and of the half domain, without and with hue adjust.
+        let cases = self.cases();
+        let base = |label: &str| {
+            cases
+                .iter()
+                .find(|case| case.label() == label)
+                .unwrap_or_else(|| panic!("no case {label}"))
+                .clone()
+        };
+        vec![
+            base("17 entries, mixed"),
+            base("half domain, mixed"),
+            base("17 entries, mixed, hue adjust"),
+            base("half domain, mixed, hue adjust"),
+        ]
+    }
+    fn directions(&self) -> Vec<Direction> {
+        vec![Direction::Inverse]
+    }
+    fn optimization_off(&self) -> Vec<&'static str> {
+        vec!["OPTIMIZATION_LUT_INV_FAST"]
+    }
+    fn spec(&self, lut: &Lut, direction: Direction) -> Spec {
+        Spec::with_f32_blobs(lut.transform_in(direction), &[&lut.values])
+    }
+    fn port(&self, lut: &Lut, combo: &Combo) -> std::result::Result<Port, String> {
+        let renderer = lut
+            .port_in(combo.direction)
+            .and_then(|data| get_lut1d_renderer(&data, BitDepth::F32, BitDepth::F32))
+            .map_err(|e| e.message().to_string())?;
+        Ok(Port::in_place(move |px| renderer.apply(px)))
+    }
+    /// The inverse's breakpoints are the LUT's values: every finite one of a standard domain,
+    /// the chosen entries' of a half domain.
+    fn breakpoints(&self, lut: &Lut, _direction: Direction) -> Vec<f32> {
+        let mut points: Vec<f32> = if lut.half_domain {
+            lut.entries
+                .indices()
+                .iter()
+                .flat_map(|&i| lut.values[i * 3..i * 3 + 3].to_vec())
+                .collect()
+        } else {
+            lut.values.clone()
+        };
+        points.retain(|v| v.is_finite());
+        points.sort_by(f32::total_cmp);
+        points.dedup_by(|a, b| a.to_bits() == b.to_bits());
+        points
+    }
+}
+
+#[test]
+fn inverse_matches_the_wheel() {
+    battery::run(&Inverse);
 }
 
 /// The matrix the processor applies before the LUT for the other output bit depths: halves
