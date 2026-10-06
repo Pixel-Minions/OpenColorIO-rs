@@ -312,7 +312,7 @@ fn version_1_processors_match_the_wheel() {
         .into_iter()
         .filter(|case| matches!(case.port, Transform::Exponent(_)))
         .collect();
-    let mut config = Config::create_raw();
+    let mut config = Config::create_raw().unwrap();
     Arc::get_mut(&mut config)
         .unwrap()
         .set_major_version(1)

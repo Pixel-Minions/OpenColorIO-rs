@@ -43,7 +43,7 @@ fn equality() {
 /// from `Config::Create()`, the port from the raw config, only the major version matters to
 /// `BuildCDLOp`.
 fn config_of_version(version: u32) -> Arc<Config> {
-    let mut config = Config::create_raw();
+    let mut config = Config::create_raw().unwrap();
     Arc::get_mut(&mut config)
         .unwrap()
         .set_major_version(version)
@@ -188,7 +188,7 @@ fn style() {
     cdl.set_style(CdlStyle::NoClamp);
     assert_eq!(cdl.style(), CdlStyle::NoClamp);
 
-    let config = Config::create_raw();
+    let config = Config::create_raw().unwrap();
     let built = |cdl: &CdlTransform, dir| {
         let mut ops = OpVec::new();
         build_cdl_op(&mut ops, &config, cdl, dir).unwrap();
@@ -305,7 +305,7 @@ fn back_to_ops(config: &Config, cdl_transform: &CdlTransform) -> (CdlOpStyle, Cd
 /// `Config::Create()`; the port from the raw config (only the major version matters).
 #[test]
 fn create_transform() {
-    let config = Config::create_raw();
+    let config = Config::create_raw().unwrap();
     {
         // Forward direction.
         let ops = cdl_op_of(CdlOpStyle::V1_2Fwd, Some(b"Test look: 01-A."));
@@ -376,7 +376,7 @@ fn build_cdl_op_validates_the_data() {
     cdl.set_slope(&[-1.0, 1.0, 1.0]);
     let validated = cdl.validate().unwrap_err();
 
-    let config = Config::create_raw();
+    let config = Config::create_raw().unwrap();
     let mut ops = OpVec::new();
     let built = build_cdl_op(&mut ops, &config, &cdl, TransformDirection::Forward).unwrap_err();
     assert_eq!(
@@ -399,7 +399,7 @@ fn apply_optimize_simplify() {
     const OFFSET: [f64; 3] = [0.1, 0.05, -0.2];
     cdl.set_offset(&OFFSET);
     cdl.set_sat(1.23);
-    let config = Config::create_raw();
+    let config = Config::create_raw().unwrap();
     let proc = config.processor(&Transform::Cdl(cdl.clone())).unwrap();
 
     // Verify that non-simplified and simplified cpu processors are equivalent.
