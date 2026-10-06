@@ -17,7 +17,7 @@ use ocio::{
     ColorSpace, ColorSpaceDirection, ColorSpaceVisibility, Config, CurrentContext, FileRules,
     LogTransform, Look, MatrixTransform, NamedTransform, NamedTransformVisibility,
     ReferenceSpaceType, SearchReferenceSpaceType, Transform, TransformDirection, ViewTransform,
-    ViewTransformDirection, ViewType,
+    ViewTransformDirection, ViewType, ViewingRules,
 };
 use ocio_ops::logging::{LoggingFunction, reset_to_default_logging_function, set_logging_function};
 use ocio_ops::open_color_types::EnvironmentMode;
@@ -753,6 +753,10 @@ fn display_getters(probes: &Probes) -> Vec<Step> {
         step(json!({"call": "getDefaultDisplay"}), |c| {
             text_out(c.default_display())
         }),
+        step(
+            json!({"call": "getViewingRules"}),
+            |c| json!({"result": object_out("ViewingRules", &c.viewing_rules().to_bytes())}),
+        ),
         step(json!({"call": "getSharedViews"}), |c| {
             let names: Vec<Vec<u8>> = (0..c.num_views_of_type(ViewType::Shared, b""))
                 .map(|i| c.view_of_type(ViewType::Shared, b"", i).to_vec())
@@ -1344,6 +1348,58 @@ fn set_file_rules(rules: &[Rule], default: Option<&'static [u8]>) -> Vec<Step> {
                     .expect("a default color space");
             }
             c.set_file_rules(&fr);
+            json!({"result": null})
+        },
+    ));
+    out
+}
+
+/// A viewing rule for [`set_viewing_rules`]: its name, color spaces and encodings.
+type VRule = (
+    &'static [u8],
+    &'static [&'static [u8]],
+    &'static [&'static [u8]],
+);
+
+/// Makes viewing rules (stored as `vr`) and sets them on the config. The rules must insert.
+fn set_viewing_rules(rules: &'static [VRule]) -> Vec<Step> {
+    let mut out = vec![step(
+        json!({"new": "ViewingRules", "as": "vr"}),
+        |_| json!({"result": object_out("ViewingRules", &ViewingRules::new().to_bytes())}),
+    )];
+    for (i, (name, color_spaces, encodings)) in rules.iter().enumerate() {
+        out.push(step(
+            json!({"call": "insertRule", "on": "vr", "args": [i, arg(name)]}),
+            |_| json!({"result": null}),
+        ));
+        for c in *color_spaces {
+            out.push(step(
+                json!({"call": "addColorSpace", "on": "vr", "args": [i, arg(c)]}),
+                |_| json!({"result": null}),
+            ));
+        }
+        for e in *encodings {
+            out.push(step(
+                json!({"call": "addEncoding", "on": "vr", "args": [i, arg(e)]}),
+                |_| json!({"result": null}),
+            ));
+        }
+    }
+    out.push(step(
+        json!({"call": "setViewingRules", "args": [{"ref": "vr"}]}),
+        move |c| {
+            let mut vr = ViewingRules::new();
+            for (i, (name, color_spaces, encodings)) in rules.iter().enumerate() {
+                vr.insert_rule(i, name).expect("a rule the case inserts");
+                for cs in *color_spaces {
+                    vr.add_color_space(i, cs)
+                        .expect("a color space the case adds");
+                }
+                for e in *encodings {
+                    vr.add_encoding(i, e).expect("an encoding the case adds");
+                }
+            }
+            c.set_viewing_rules(&vr);
             json!({"result": null})
         },
     ));
@@ -3181,4 +3237,60 @@ fn upgrades_match_the_wheel() {
         let probes = probes(&[b"a", b"b", b"d"], &[]).paths(&[b"x_a.exr", b"b.exr"]);
         check_items(label, "new", &[], items, &probes);
     }
+}
+
+/// Views filtered by the viewing rules for an image's color space: rules that name color
+/// spaces, roles (resolved to their color spaces), aliases, unknown names, or encodings (in
+/// any case, against the color space's encoding as it is written); views with a rule that
+/// doesn't exist; shared views with rules; inactive views. The image's color space is given by
+/// its name, an alias, a role or in another case.
+#[test]
+fn views_by_viewing_rules_match_the_wheel() {
+    let items: Vec<Item> = vec![
+        add_color_space(cs(b"raw").data()).into(),
+        add_color_space(cs(b"lin").alias(b"linear").encoding(b"scene-linear")).into(),
+        add_color_space(cs(b"logc").encoding(b"log")).into(),
+        add_color_space(cs(b"Log2").encoding(b"Log")).into(),
+        add_color_space(cs(b"vid").encoding(b"sdr-video")).into(),
+        set_role(b"scene_linear", Some(b"lin")).into(),
+        set_role(b"compositing_log", Some(b"logc")).into(),
+        add_display_view_full(b"D", b"plain", b"", b"raw", b"").into(),
+        add_display_view_full(b"D", b"by_cs", b"", b"raw", b"rule_cs").into(),
+        add_display_view_full(b"D", b"by_role", b"", b"raw", b"RULE_ROLE").into(),
+        add_display_view_full(b"D", b"by_alias", b"", b"raw", b"rule_alias").into(),
+        add_display_view_full(b"D", b"by_enc", b"", b"raw", b"rule_enc").into(),
+        add_display_view_full(b"D", b"by_upper_enc", b"", b"raw", b"rule_upper_enc").into(),
+        add_display_view_full(b"D", b"missing_rule", b"", b"raw", b"no_such_rule").into(),
+        add_shared_view(b"shared", b"", b"raw").into(),
+        add_display_shared_view(b"D", b"shared").into(),
+        set_viewing_rules(&[
+            (b"rule_cs", &[b"LIN", b"vid"], &[]),
+            (b"rule_role", &[b"compositing_log", b"unknown"], &[]),
+            (b"rule_alias", &[b"linear"], &[]),
+            (b"rule_enc", &[], &[b"LOG", b"scene-linear"]),
+            (b"rule_upper_enc", &[], &[b"Log"]),
+            (b"Rule", &[], &[b"sdr-video"]),
+        ])
+        .into(),
+        Item::Copy,
+        set_active_views(b"by_role, by_enc, plain").into(),
+        set_viewing_rules(&[]).into(),
+    ];
+    let probes = probes(
+        &[
+            b"raw",
+            b"lin",
+            b"LIN",
+            b"linear",
+            b"scene_linear",
+            b"logc",
+            b"compositing_log",
+            b"Log2",
+            b"vid",
+            b"unknown",
+        ],
+        &[],
+    )
+    .displays(&[b"D"], &[b"by_cs", b"by_enc"]);
+    check_items("viewing rules", "new", &[], items, &probes);
 }
