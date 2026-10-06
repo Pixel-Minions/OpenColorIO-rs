@@ -816,7 +816,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   machine code; the wheel can't be given NaNs of opposite signs until the specs carry a
   double's bits, so no oracle test checks them yet.
 
-### I-140. A hue-adjust 1D LUT resampled on a domain renders green with red's curve
+### I-150. A hue-adjust 1D LUT resampled on a domain renders green with red's curve
 
 - **Upstream:** `Lut1DOpData::Compose` evaluates the second LUT, hue adjust included, on the
   entries of a lookup domain, whose three channels are equal (`ComposeVec`, `EvalTransform`;
