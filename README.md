@@ -103,7 +103,10 @@ call in the official library, which the Phase 3 cards are checked against. A con
 is merged too: its environment (byte for byte as each platform's C runtime and system apply
 it), its variables and their expansion, its search paths and how it finds files, with the
 pystring and ParseUtils helpers it uses. The test battery also checks LUT families now: the oracle
-takes a LUT's values as a blob, and grading values as objects.
+takes a LUT's values as a blob, and grading values as objects. The port now reads YAML with
+its own port of yaml-cpp 0.8.0, the parser the official library uses, numbers included: each
+platform's C++ library reads floats its own way (Windows accepts hex floats, Linux reads
+tiny values as 0), and the port does too, with yaml-cpp's own tests ported.
 Each also went through an independent review before merging.
 
 **Done:** everything below is bit-exact against the official library on Windows and Linux, in
