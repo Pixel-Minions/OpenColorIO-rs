@@ -2,17 +2,23 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! The forward 1D LUT renderers for float input against the wheel, bit for bit
-//! (src/OpenColorIO/ops/lut1d/Lut1DOpCPU.cpp @ v2.5.2):
-//! - the half domain's (`Lut1DRendererHalfCode<BIT_DEPTH_F32, outBD>`) and the hue-adjust
-//!   renderers of both domains (`Lut1DRendererHueAdjust`, `Lut1DRendererHalfCodeHueAdjust`),
-//!   which have no SIMD kernel, through the oracle test battery: every case, with fast math on
-//!   and off, on the tier's probes, each buffer one renderer call ([`HalfDomain`],
-//!   [`HueAdjust`]);
-//! - the scalar code of the standard domain's (`Lut1DRenderer<BIT_DEPTH_F32, outBD>`), and the
-//!   others', to every output bit depth, on rows of one pixel: upstream renders a row of
-//!   more than one pixel of a standard domain with a SIMD kernel (`m_applyLutFunc`, on every
-//!   x86-64 CPU), which waits for WP 2.1c and 2.1d, but a row of one pixel with the scalar
-//!   loop ([`single_pixel_rows_match_the_wheel`]).
+//! (src/OpenColorIO/ops/lut1d/Lut1DOpCPU.cpp, Lut1DOpCPU_SSE2.cpp, _AVX, _AVX2, _AVX512 @
+//! v2.5.2), through the oracle test battery (every case, with fast math on and off, on the
+//! tier's probes, each buffer one renderer call):
+//! - the standard domain's (`Lut1DRenderer<BIT_DEPTH_F32, outBD>`, [`StandardDomain`]), which
+//!   renders a row of more than one pixel with the SIMD kernel the CPU dispatches to
+//!   (`m_applyLutFunc`), and a row of one pixel with the scalar loop; rows of 1 to 33 pixels
+//!   leave every remainder of the 4-, 8- and 16-pixel kernels. The kernels move alpha through
+//!   their RGBA packs unchanged from F32 to F32, so it is a pass-through channel there, and
+//!   the kernels this machine doesn't dispatch to are compared on it;
+//! - the half domain's (`Lut1DRendererHalfCode`, [`HalfDomain`]) and the hue-adjust renderers
+//!   of both domains (`Lut1DRendererHueAdjust`, `Lut1DRendererHalfCodeHueAdjust`,
+//!   [`HueAdjust`]), which have no SIMD kernel.
+//!
+//! And to every output bit depth: on rows of one pixel ([`single_pixel_rows_match_the_wheel`]:
+//! the scalar code), and on whole rows ([`whole_rows_match_the_wheel`]: the dispatched kernel).
+//! These tests are CPU-dependent (`cpu-tests`): under SDE the wheel and the port both dispatch
+//! to the emulated CPU's kernel.
 //!
 //! The oracle builds a `Lut1DTransform` from the LUT's values, passed as a blob (`setData`).
 //! For the other output bit depths than F32, the LUT is the processor's last op, which the CPU
@@ -21,26 +27,33 @@
 //! halves every channel, then the LUT, without optimization, so that both ops stay. The port
 //! renders the same: the matrix op's renderer, then the LUT's.
 //!
-//! A forward LUT's float renderers write alpha (`in[3] * m_alphaScaling`, which quiets a
-//! signalling NaN), so no channel passes through.
+//! Without a kernel, a forward LUT's float renderers write alpha (`in[3] * m_alphaScaling`,
+//! which quiets a signalling NaN), so no channel passes through; with one, a row of one pixel
+//! still takes the scalar loop, so alpha passes through from rows of 2 pixels
+//! (`Family::pass_through_min_pixels`).
 
 mod common;
 
 use common::image::{depth_name, port_depth};
 use ocio_ops::Result;
+use ocio_ops::cpu_info::CpuInfo;
 use ocio_ops::imath_half::half_to_float;
 use ocio_ops::op::{CpuOp, OpVec, Pixels, PixelsMut};
 use ocio_ops::open_color_types::{BitDepth, Lut1DHueAdjust, TransformDirection};
 use ocio_ops::ops::lut1d::Lut1DOpData;
-use ocio_ops::ops::lut1d::lut1d_op_cpu::{get_lut1d_renderer, get_lut1d_scalar_renderer};
+use ocio_ops::ops::lut1d::lut1d_op_cpu::{
+    Lut1DKernel, get_lut1d_profile_renderer, get_lut1d_renderer, get_lut1d_scalar_renderer,
+    lut1d_kernel,
+};
 use ocio_ops::ops::lut1d::lut1d_op_data::Lut3by1DArray;
 use ocio_ops::ops::matrix::matrix_op::create_matrix_op_from_m44;
 use ocio_testkit::Oracle;
+use ocio_testkit::battery::params::{A, Channels as BatteryChannels};
 use ocio_testkit::battery::params::{Case, LutEntries, Params, Slot, mutations, sampled_mutations};
 use ocio_testkit::battery::{self, BitDepth as Depth, Combo, Direction, Family, Port, Spec, Tier};
 use ocio_testkit::image::{Buffer, Channels, Data, Packed, Request, Stride};
 use ocio_testkit::oracle::{BatchCall, f32_to_bytes};
-use ocio_testkit::probe::{self, RandomRange};
+use ocio_testkit::probe::{self, ProbeSet, RandomRange};
 use serde_json::{Value, json};
 
 /// The entries of a half domain.
@@ -203,6 +216,99 @@ impl Params for Lut {
     }
 }
 
+/// The longest row the battery probes for the kernels: every remainder of 4, 8 and 16 pixels.
+const ROWS: usize = 33;
+
+/// The standard domain's renderer, F32 to F32, through the battery: the kernel this machine
+/// dispatches to, and the others on alpha.
+struct StandardDomain;
+
+impl Family for StandardDomain {
+    type Params = Lut;
+
+    fn name(&self) -> String {
+        "Lut1DTransform (standard domain)".to_string()
+    }
+    fn cases(&self) -> Vec<Case<Lut>> {
+        let mut cases = Vec::new();
+        for n in [2, 3, 17, 256, 4096] {
+            for (name, curve) in [
+                ("mixed", mixed as Curve),
+                ("extreme", extreme),
+                ("jagged", jagged),
+            ] {
+                cases.push(Case::new(
+                    format!("{n} entries, {name}"),
+                    Lut::new(false, n, curve),
+                ));
+            }
+            cases.push(Case::new(
+                format!("{n} entries, alternating infinities"),
+                Lut::alternating_infinities(false, n),
+            ));
+        }
+        cases
+    }
+    fn mutation_bases(&self) -> Vec<Case<Lut>> {
+        // The 17 entries' and the 4096 entries' mixed curves.
+        let cases = self.cases();
+        vec![cases[8].clone(), cases[16].clone()]
+    }
+    fn directions(&self) -> Vec<Direction> {
+        // The inverse renderers are WP 2.1f's.
+        vec![Direction::Forward]
+    }
+    fn spec(&self, lut: &Lut, _direction: Direction) -> Spec {
+        Spec::with_f32_blobs(lut.transform(), &[&lut.values])
+    }
+    fn port(&self, lut: &Lut, _combo: &Combo) -> std::result::Result<Port, String> {
+        let renderer = lut
+            .port()
+            .and_then(|data| get_lut1d_renderer(&data, BitDepth::F32, BitDepth::F32))
+            .map_err(|e| e.message().to_string())?;
+        Ok(Port::in_place(move |px| renderer.apply(px)))
+    }
+    fn other_profiles(&self, lut: &Lut, _combo: &Combo) -> Vec<(String, Port)> {
+        let data = lut.port().expect("the case's data");
+        let dispatched = lut1d_kernel(CpuInfo::instance(), BitDepth::F32);
+        [
+            Lut1DKernel::Sse2,
+            Lut1DKernel::Avx,
+            Lut1DKernel::Avx2,
+            Lut1DKernel::Avx512,
+        ]
+        .into_iter()
+        .filter(|&kernel| Some(kernel) != dispatched)
+        .map(|kernel| {
+            let renderer = get_lut1d_profile_renderer(&data, BitDepth::F32, Some(kernel))
+                .expect("a profile renderer");
+            (
+                format!("{kernel:?}"),
+                Port::in_place(move |px| renderer.apply(px)),
+            )
+        })
+        .collect()
+    }
+    fn pass_through(&self, _lut: &Lut, _combo: &Combo) -> BatteryChannels {
+        A
+    }
+    /// A row of one pixel takes the scalar loop, which writes alpha times 1.
+    fn pass_through_min_pixels(&self) -> usize {
+        2
+    }
+    fn breakpoints(&self, lut: &Lut, _direction: Direction) -> Vec<f32> {
+        probe::lut_domain_points(lut.length())
+    }
+    fn extra_probes(&self, _lut: &Lut, _direction: Direction) -> Vec<ProbeSet> {
+        vec![ProbeSet::RowLengths { max_pixels: ROWS }]
+    }
+}
+
+#[test]
+fn standard_domain_matches_the_wheel() {
+    battery::run(&StandardDomain);
+}
+
 /// The half domain's renderer, F32 to F32, through the battery.
 struct HalfDomain;
 
@@ -356,12 +462,13 @@ fn probe_pixels(lut: &Lut, with_matrix: bool) -> Vec<f32> {
     probe::to_rgba_cycled(&values)
 }
 
-/// One single-pixel-row comparison: a LUT, with the matrix before it or not, to an output
-/// bit depth.
+/// One comparison of rows: a LUT, with the matrix before it or not, to an output bit depth, on
+/// rows of one pixel or on one row.
 struct RowCase {
     label: String,
     lut: Lut,
     output: Depth,
+    single_pixel_rows: bool,
 }
 
 impl RowCase {
@@ -369,8 +476,8 @@ impl RowCase {
         self.output != Depth::F32
     }
 
-    /// The `image_apply` request: the probes as a column of single-pixel rows, F32 RGBA, into
-    /// a column of the output bit depth.
+    /// The `image_apply` request: the probes as a column of single-pixel rows, or as one row,
+    /// F32 RGBA, into an image of the output bit depth of the same shape.
     fn request(&self, pixels: &[f32]) -> Request {
         let transform = if self.with_matrix() {
             json!({"class": "GroupTransform", "children": [
@@ -387,6 +494,11 @@ impl RowCase {
             "out_bitdepth": depth_name(port_depth(self.output)),
         }));
         let n = (pixels.len() / 4) as i64;
+        let (width, height) = if self.single_pixel_rows {
+            (1, n)
+        } else {
+            (n, 1)
+        };
         let src = request.buffer(Buffer::Bytes(f32_to_bytes(pixels)));
         let dst = request.buffer(Buffer::Bytes(vec![
             0;
@@ -396,11 +508,11 @@ impl RowCase {
                 )
         ]));
         request.image(
-            Packed::new(Data::at(src, 0), 1, n, Channels::Count(4))
+            Packed::new(Data::at(src, 0), width, height, Channels::Count(4))
                 .layout(Depth::F32, [Stride::Auto; 3]),
         );
         request.image(
-            Packed::new(Data::at(dst, 0), 1, n, Channels::Count(4))
+            Packed::new(Data::at(dst, 0), width, height, Channels::Count(4))
                 .layout(self.output, [Stride::Auto; 3]),
         );
         request.apply = vec![0, 1];
@@ -408,17 +520,19 @@ impl RowCase {
     }
 
     /// The port's output bytes: the matrix op's renderer if any, then the LUT's renderer from
-    /// F32 to the output bit depth, the scalar profile for a standard domain without hue
-    /// adjust.
+    /// F32 to the output bit depth, on the whole row; for single-pixel rows, the scalar profile
+    /// of a standard domain without hue adjust (the others have no kernel).
     fn port(&self, pixels: &[f32]) -> Result<Vec<u8>> {
         let data = self.lut.port()?;
         let out = port_depth(self.output);
-        let renderer =
-            if data.is_input_half_domain() || data.get_hue_adjust() != Lut1DHueAdjust::None {
-                get_lut1d_renderer(&data, BitDepth::F32, out)?
-            } else {
-                get_lut1d_scalar_renderer(&data, out)?
-            };
+        let scalar = self.single_pixel_rows
+            && !data.is_input_half_domain()
+            && data.get_hue_adjust() == Lut1DHueAdjust::None;
+        let renderer = if scalar {
+            get_lut1d_scalar_renderer(&data, out)?
+        } else {
+            get_lut1d_renderer(&data, BitDepth::F32, out)?
+        };
         let mut input = pixels.to_vec();
         if self.with_matrix() {
             let mut ops = OpVec::new();
@@ -459,11 +573,11 @@ fn render(renderer: &dyn CpuOp, input: &[f32], out: BitDepth) -> Vec<u8> {
     }
 }
 
-/// The LUTs of the single-pixel-row test: standard domains of several lengths and the half
-/// domain, with the explicit curves, and two with hue adjust, to every output bit depth; and the generated cases of
-/// the mixed curves (extreme finite, NaN and infinite values in chosen entries: all of them
-/// beyond the quick tier, a sample in it), to F32 and 16-bit output.
-fn row_cases() -> Vec<RowCase> {
+/// The LUTs of the row tests: standard domains of several lengths and the half domain, with
+/// the explicit curves, and two with hue adjust, to every output bit depth; and the generated
+/// cases of the mixed curves (extreme finite, NaN and infinite values in chosen entries: all of
+/// them beyond the quick tier, a sample in it), to F32 and 16-bit output.
+fn row_cases(single_pixel_rows: bool) -> Vec<RowCase> {
     let tier = Tier::current();
     let mut cases = Vec::new();
     let luts: Vec<(String, Lut)> = [2usize, 3, 17, 256, 4096]
@@ -503,6 +617,7 @@ fn row_cases() -> Vec<RowCase> {
                 label: format!("{label}, to {output:?}"),
                 lut: lut.clone(),
                 output,
+                single_pixel_rows,
             });
         }
     }
@@ -519,6 +634,7 @@ fn row_cases() -> Vec<RowCase> {
                     label: format!("{}, to {output:?}", case.label()),
                     lut: case.params().clone(),
                     output,
+                    single_pixel_rows,
                 });
             }
         }
@@ -530,7 +646,19 @@ fn row_cases() -> Vec<RowCase> {
 /// per pixel, the scalar code), equals the port's renderer byte for byte.
 #[test]
 fn single_pixel_rows_match_the_wheel() {
-    let cases = row_cases();
+    check_rows(true);
+}
+
+/// Every row case, applied by the wheel to one row (one renderer call, the dispatched kernel
+/// for a standard domain without hue adjust), equals the port's renderer byte for byte.
+#[test]
+fn whole_rows_match_the_wheel() {
+    check_rows(false);
+}
+
+/// The row cases, on single-pixel rows or one row.
+fn check_rows(single_pixel_rows: bool) {
+    let cases = row_cases(single_pixel_rows);
     let inputs: Vec<Vec<f32>> = cases
         .iter()
         .map(|case| probe_pixels(&case.lut, case.with_matrix()))

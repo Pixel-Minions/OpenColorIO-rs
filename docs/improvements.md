@@ -687,6 +687,29 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p2-lut1d-fwd` (2.1a for the lookups, 2.1b for the hue-adjust
   lookups).
 
+### I-65. A 1D LUT's float results depend on the row length and the CPU
+
+- **Upstream:** `Lut1DRenderer<BIT_DEPTH_F32, outBD>::apply` renders a row of more than one
+  pixel with the SIMD kernel the CPU dispatches to (`ops/lut1d/Lut1DOpCPU.cpp:652-658`), and a
+  row of one pixel with its scalar loop (659-720). The two interpolate differently: the kernels
+  compute `p + (n - p) * d` from the lower node (`Lut1DOpCPU_SSE2.cpp:47-76`), with one
+  rounding on AVX2 and AVX-512 CPUs (`_mm256_fmadd_ps`, `_mm512_fmadd_ps`) and two on SSE2 and
+  AVX ones; the scalar loop computes `(low - high) * delta + high` from the upper node. So the
+  same input can give different last bits by row length and by CPU. On a node between entries
+  of `-FLT_MAX` and `FLT_MAX` (sanitized infinities), the kernels multiply an infinite
+  difference by 0 and give NaN, where the scalar loop gives the node's value. The kernels also
+  keep alpha's bits from F32 to F32, where the scalar loop multiplies it by 1, which quiets a
+  signalling NaN. The integer outputs round to nearest even in the kernels' packs, and add 0.5
+  and truncate in the scalar loop. On a CPU with AVX but not F16C, the AVX and AVX2 kernels
+  have no half output and replace the SSE2 one with none (`Lut1DOpCPU_AVX.cpp:153-157`,
+  `Lut1DOpCPU.cpp:289-294`), so every row to F16 takes the scalar loop.
+- **Who notices:** anyone comparing a pixel rendered alone (`applyRGBA`, a one-pixel-wide
+  image) with the same pixel in a row, or results across machines.
+- **A fix:** one interpolation for every row length (the kernels' arithmetic in the scalar
+  loop), and no FMA; that changes the scalar results, and the AVX2 and AVX-512 machines' ones.
+- **Status:** matched in `p2-lut1d-simd`, every kernel and the scalar loop; checked against the
+  wheel on rows of every length, and under SDE on each kernel's CPUs.
+
 ### I-68. Two half-domain 1D LUTs are never equal
 
 - **Upstream:** `Lut1DTransform::setLength` fills a half-domain LUT with each half code's

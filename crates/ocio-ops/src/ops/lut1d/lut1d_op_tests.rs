@@ -5,14 +5,17 @@
 //! composition or inverse (WP 2.1e to 2.1g), and tests of the refusals that stand in for them
 //! until then.
 //!
-//! Upstream's `ops[0]->apply` of a standard domain renders rows of more than one pixel with a
-//! SIMD kernel, which the port refuses until WP 2.1c and 2.1d port them; such a test runs the
-//! renderer's scalar profile (`get_lut1d_scalar_renderer`) instead, with upstream's values and
-//! tolerances.
+//! Upstream's test runner reruns every test in each SIMD mode the CPU supports
+//! (tests/cpu/UnitTestMain.cpp:104-153 @ v2.5.2); a test of a renderer with SIMD kernels runs
+//! once per mode here, through `GetLut1DRenderer` with that mode's CPU flags (what
+//! `Op::apply`'s `getCPUOp(false)` builds).
 
 use super::*;
+use crate::cpu_info::{
+    CpuInfo, X86_CPU_FLAG_AVX, X86_CPU_FLAG_AVX2, X86_CPU_FLAG_AVX512, X86_CPU_FLAG_SSE2,
+};
 use crate::open_color_types::{BitDepth, OptimizationFlags};
-use crate::ops::lut1d::lut1d_op_cpu::get_lut1d_scalar_renderer;
+use crate::ops::lut1d::lut1d_op_cpu::get_lut1d_renderer_for_cpu;
 use ocio_testkit::upstream::check_close;
 
 /// `CreateSquareLut` (tests/cpu/ops/lut1d/Lut1DOp_tests.cpp:126-144 @ v2.5.2): a LUT that
@@ -33,7 +36,24 @@ fn create_square_lut() -> Lut1DOpData {
     lut
 }
 
-/// Through the scalar profile (module docs).
+/// The CPU flags of upstream's SIMD modes (`lut1d_op_cpu_tests.rs`).
+fn simd_modes() -> Vec<CpuInfo> {
+    let cpu = CpuInfo::instance();
+    let mut modes = vec![cpu.with_flags(0)];
+    for flag in [
+        X86_CPU_FLAG_SSE2,
+        X86_CPU_FLAG_AVX,
+        X86_CPU_FLAG_AVX2,
+        X86_CPU_FLAG_AVX512,
+    ] {
+        if cpu.flags & flag != 0 {
+            modes.push(cpu.with_flags(flag));
+        }
+    }
+    modes
+}
+
+/// Once per SIMD mode (module docs).
 ///
 /// Port of `OCIO_ADD_TEST(Lut1DOp, extrapolation_errors)` @ v2.5.2.
 #[test]
@@ -56,7 +76,7 @@ fn extrapolation_errors() {
 
     const PIXELS: usize = 5;
     #[rustfmt::skip]
-    let mut input_buffer_linearforward: [f32; PIXELS * 4] = [
+    let input_buffer_linearforward: [f32; PIXELS * 4] = [
         -0.1, -0.2, -10.0, 0.0,
         0.5, 1.0, 1.1, 0.0,
         10.1, 55.0, 2.3, 0.0,
@@ -75,15 +95,14 @@ fn extrapolation_errors() {
     let OpData::Lut1D(data) = &**ops[0].data() else {
         unreachable!("a Lut1D op")
     };
-    get_lut1d_scalar_renderer(data, BitDepth::F32)
-        .unwrap()
-        .apply(&mut input_buffer_linearforward);
-    for i in 0..input_buffer_linearforward.len() {
-        check_close(
-            input_buffer_linearforward[i],
-            output_buffer_linearforward[i],
-            1e-5f32,
-        );
+    for cpu in simd_modes() {
+        let mut buffer = input_buffer_linearforward;
+        get_lut1d_renderer_for_cpu(data, BitDepth::F32, BitDepth::F32, &cpu)
+            .unwrap()
+            .apply(&mut buffer);
+        for i in 0..buffer.len() {
+            check_close(buffer[i], output_buffer_linearforward[i], 1e-5f32);
+        }
     }
 }
 
@@ -127,8 +146,8 @@ fn identity_lut_1d() {
     }
 }
 
-/// What waits for the rest of Phase 2 is an error: the SIMD renderers of a standard domain
-/// (`getCPUOp`, `apply`), composing two LUTs, and the inverse LUT's set-up (`finalize`).
+/// What waits for the rest of Phase 2 is an error: composing two LUTs, and the inverse LUT's
+/// set-up (`finalize`). The float renderers (`getCPUOp`, `apply`) exist.
 #[test]
 fn phase_2_parts_are_errors() {
     let mut ops = OpVec::new();
@@ -136,17 +155,10 @@ fn phase_2_parts_are_errors() {
     create_lut1d_op(&mut ops, create_square_lut(), TransformDirection::Forward);
     ops.finalize().unwrap();
 
-    let message = |r: Result<_>| match r {
-        Ok(_) => panic!("not an error"),
-        Err(e) => e.message().to_string(),
-    };
-    assert_eq!(message(ops[0].get_cpu_op(false)), NOT_PORTED_SIMD);
-    assert_eq!(message(ops[0].get_cpu_op(true)), NOT_PORTED_SIMD);
+    ops[0].get_cpu_op(false).unwrap().expect("a renderer");
+    ops[0].get_cpu_op(true).unwrap().expect("a renderer");
     let mut pixel = [0.5f32, 0.25, 0.125, 1.0];
-    assert_eq!(
-        ops[0].apply(&mut pixel).unwrap_err().message(),
-        NOT_PORTED_SIMD
-    );
+    ops[0].apply(&mut pixel).unwrap();
 
     // Two LUTs that may compose.
     assert!(ops[0].can_combine_with(&ops[1]).unwrap());

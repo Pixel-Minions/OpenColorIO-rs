@@ -19,13 +19,13 @@
 //!   [`Lut1DHueAdjustFloatRenderer`]): the same lookups and interpolations, then the middle
 //!   channel is set from the input's hue ([`order3`], `adjust_hue`).
 //!
+//! - **SIMD kernels.** Every x86-64 CPU has SSE2, so upstream's `Lut1DRenderer<BIT_DEPTH_F32,
+//!   outBD>` renders every row of more than one pixel with the kernel the CPU dispatches to
+//!   ([`lut1d_kernel`]): `Lut1DOpCPU_SSE2.cpp`, `_AVX.cpp`, `_AVX2.cpp` and `_AVX512.cpp`
+//!   (`lut1d_op_cpu_sse2`, ...). A row of one pixel takes the scalar loop
+//!   ([`get_lut1d_scalar_renderer`]); [`get_lut1d_profile_renderer`] gives any profile.
+//!
 //! Not here yet, and an error until then:
-//! - the SIMD kernels of the standard domain with float input (`Lut1DOpCPU_SSE2.cpp`, `_AVX`,
-//!   `_AVX2`, `_AVX512`; WP 2.1c, 2.1d): every x86-64 CPU has SSE2, so upstream's
-//!   `Lut1DRenderer<BIT_DEPTH_F32, outBD>` renders every row of more than one pixel with one
-//!   of them. [`get_lut1d_renderer`] refuses that renderer ([`NOT_PORTED_SIMD`]) rather than
-//!   render those rows with the scalar code; [`get_lut1d_scalar_renderer`] is its scalar
-//!   profile, which upstream runs on rows of one pixel;
 //! - the inverse renderers (WP 2.1f), and the lookups of a LUT that must first be resampled
 //!   for the input bit depth (`Compose`, WP 2.1g).
 
@@ -33,11 +33,17 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use super::lut1d_op::{NOT_PORTED_COMPOSE, NOT_PORTED_INVERSE_RENDERER, NOT_PORTED_SIMD};
+use super::lut1d_op::{NOT_PORTED_COMPOSE, NOT_PORTED_INVERSE_RENDERER};
+use super::lut1d_op_cpu_avx::apply_lut_avx;
+use super::lut1d_op_cpu_avx2::apply_lut_avx2;
+use super::lut1d_op_cpu_avx512::apply_lut_avx512;
+use super::lut1d_op_cpu_sse2::apply_lut_sse2;
 use super::lut1d_op_data::Lut1DOpData;
+use super::{lut1d_op_cpu_avx, lut1d_op_cpu_avx2, lut1d_op_cpu_avx512, lut1d_op_cpu_sse2};
 use crate::bit_depth_utils::{
     BitDepthInfo, ChannelType, Converter, F16, F32, Uint8, Uint10, Uint12, Uint16,
 };
+use crate::cpu_info::CpuInfo;
 use crate::exception::{Exception, Result};
 use crate::imath_half::{float_to_half, half_to_float};
 use crate::math_utils::{
@@ -46,6 +52,7 @@ use crate::math_utils::{
 };
 use crate::op::{CpuOp, Pixels, PixelsMut};
 use crate::open_color_types::{BitDepth, Lut1DHueAdjust, TransformDirection};
+use crate::sse2::PackDepth;
 
 /// A channel value as a LUT index.
 ///
@@ -116,22 +123,120 @@ impl FromFloat for f32 {
 /// An output bit depth of the renderers, with C++'s conversion of a `float` to its channel
 /// type ([`FromFloat`]).
 pub(crate) trait LutOutput: Converter + 'static {
+    /// The bit depth as the SIMD kernels' RGBA packs name it.
+    const PACK: PackDepth;
+
     /// `OutType(value)`.
     fn from_float(value: f32) -> Self::Type;
+
+    /// The channel value a pack stores as `raw` (an integer, or the bits of a half or float).
+    fn from_pack(raw: u32) -> Self::Type;
 }
 
 macro_rules! lut_output {
-    ($($bd:ty),*) => {$(
+    ($($bd:ty => $pack:ident, |$raw:ident| $from_pack:expr;)*) => {$(
         impl LutOutput for $bd {
+            const PACK: PackDepth = PackDepth::$pack;
+
             #[inline]
             fn from_float(value: f32) -> Self::Type {
                 FromFloat::from_float(value)
+            }
+
+            #[inline]
+            fn from_pack($raw: u32) -> Self::Type {
+                $from_pack
             }
         }
     )*};
 }
 
-lut_output!(Uint8, Uint10, Uint12, Uint16, F16, F32);
+lut_output! {
+    Uint8 => Uint8, |raw| raw as u8;
+    Uint10 => Uint10, |raw| raw as u16;
+    Uint12 => Uint12, |raw| raw as u16;
+    Uint16 => Uint16, |raw| raw as u16;
+    F16 => F16, |raw| half::f16::from_bits(raw as u16);
+    F32 => F32, |raw| f32::from_bits(raw);
+}
+
+/// A SIMD kernel of the standard domain's renderer for float input, `m_applyLutFunc`
+/// (`Lut1DOpCPU_SSE2.cpp`, `_AVX.cpp`, `_AVX2.cpp`, `_AVX512.cpp`): `linear1D<BIT_DEPTH_F32,
+/// outBD>` of each. Upstream runs it on every row of more than one pixel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Lut1DKernel {
+    /// `SSE2GetLut1DApplyFunc`.
+    Sse2,
+    /// `AVXGetLut1DApplyFunc`.
+    Avx,
+    /// `AVX2GetLut1DApplyFunc`.
+    Avx2,
+    /// `AVX512GetLut1DApplyFunc`.
+    Avx512,
+}
+
+impl Lut1DKernel {
+    /// One lane of the kernel's `apply_lut_*`: `v` through the table `lut`.
+    fn apply_lut(self, lut: &[f32], v: f32, scale: f32, lut_max: f32) -> f32 {
+        match self {
+            Lut1DKernel::Sse2 => apply_lut_sse2(lut, v, scale, lut_max),
+            Lut1DKernel::Avx => apply_lut_avx(lut, v, scale, lut_max),
+            Lut1DKernel::Avx2 => apply_lut_avx2(lut, v, scale, lut_max),
+            Lut1DKernel::Avx512 => apply_lut_avx512(lut, v, scale, lut_max),
+        }
+    }
+
+    /// One value of the kernel's RGBA pack `Store`, as raw bits.
+    fn store(self, depth: PackDepth, value: f32) -> u32 {
+        match self {
+            Lut1DKernel::Sse2 => lut1d_op_cpu_sse2::store(depth, value),
+            Lut1DKernel::Avx => lut1d_op_cpu_avx::store(depth, value),
+            Lut1DKernel::Avx2 => lut1d_op_cpu_avx2::store(depth, value),
+            Lut1DKernel::Avx512 => lut1d_op_cpu_avx512::store(depth, value),
+        }
+    }
+}
+
+/// The kernel's `linear1D<BIT_DEPTH_F32, outBD>`, if it has one for `out_bd` on `cpu`: the AVX
+/// and AVX2 kernels write halfs only with F16C (`#if OCIO_USE_F16C`, defined in both wheels, and
+/// `CPUInfo::hasF16C()`), and give no function otherwise.
+///
+/// Port of `SSE2GetLut1DApplyFunc`, `AVXGetLut1DApplyFunc`, `AVX2GetLut1DApplyFunc` and
+/// `AVX512GetLut1DApplyFunc` for F32 input (Lut1DOpCPU_SSE2.cpp:153-204,
+/// Lut1DOpCPU_AVX.cpp:140-195, Lut1DOpCPU_AVX2.cpp:118-173, Lut1DOpCPU_AVX512.cpp:91-146 @
+/// v2.5.2).
+fn apply_func(kernel: Lut1DKernel, out_bd: BitDepth, cpu: &CpuInfo) -> Option<Lut1DKernel> {
+    match (kernel, out_bd) {
+        (Lut1DKernel::Avx | Lut1DKernel::Avx2, BitDepth::F16) if !cpu.has_f16c() => None,
+        _ => Some(kernel),
+    }
+}
+
+/// The kernel `Lut1DRenderer` dispatches to on `cpu` for `out_bd`, `m_applyLutFunc`: SSE2's,
+/// then AVX's, then AVX2's unless its gathers are slow, then AVX-512's, each replacing the one
+/// before, even with none ([`apply_func`]: AVX and AVX2 to F16 without F16C), which leaves the
+/// scalar loop; `None` too on a CPU without SSE2. Unlike the hue-adjust renderers' constructor
+/// (311-340), this one takes AVX-512 and doesn't check `AVXSlow()`. The `#if OCIO_USE_*` guards
+/// are part of `CpuInfo::has_*`.
+///
+/// Port of the dispatch of `BaseLut1DRenderer::BaseLut1DRenderer(ConstLut1DOpDataRcPtr &)`
+/// (src/OpenColorIO/ops/lut1d/Lut1DOpCPU.cpp:273-309 @ v2.5.2).
+pub fn lut1d_kernel(cpu: &CpuInfo, out_bd: BitDepth) -> Option<Lut1DKernel> {
+    let mut kernel = None;
+    if cpu.has_sse2() {
+        kernel = apply_func(Lut1DKernel::Sse2, out_bd, cpu);
+    }
+    if cpu.has_avx() {
+        kernel = apply_func(Lut1DKernel::Avx, out_bd, cpu);
+    }
+    if cpu.has_avx2() && !cpu.avx2_slow_gather() {
+        kernel = apply_func(Lut1DKernel::Avx2, out_bd, cpu);
+    }
+    if cpu.has_avx512() {
+        kernel = apply_func(Lut1DKernel::Avx512, out_bd, cpu);
+    }
+    kernel
+}
 
 /// `(float)GetBitDepthMaxValue(bd)`.
 fn max_value<B: BitDepthInfo>() -> f32 {
@@ -461,8 +566,9 @@ pub(crate) fn get_edge_float_values(f_in: f32) -> IndexPair {
 /// The renderer of a LUT for float input, to `O` values: a standard domain or a half domain.
 ///
 /// Port of `BaseLut1DRenderer<BIT_DEPTH_F32, outBD>` (its float tables, `updateData`,
-/// Lut1DOpCPU.cpp:374-443) and the float branches of `Lut1DRenderer::apply` (659-720, the
-/// scalar loop) and `Lut1DRendererHalfCode::apply` (531-566 @ v2.5.2).
+/// Lut1DOpCPU.cpp:374-443) and the float branches of `Lut1DRenderer::apply` (652-720: the SIMD
+/// kernel for more than one pixel, else the scalar loop) and `Lut1DRendererHalfCode::apply`
+/// (531-566 @ v2.5.2).
 pub(crate) struct Lut1DFloatRenderer<O: LutOutput> {
     /// `m_tmpLutR`, `m_tmpLutG` and `m_tmpLutB`: `SanitizeFloat(value * outMax)`.
     luts: Tables<f32>,
@@ -474,6 +580,10 @@ pub(crate) struct Lut1DFloatRenderer<O: LutOutput> {
     dim_minus_one: f32,
     /// Whether the LUT's domain is the half codes (`Lut1DRendererHalfCode`).
     half_code: bool,
+    /// `m_applyLutFunc`, a standard domain's SIMD kernel; `None` for the scalar profile.
+    kernel: Option<Lut1DKernel>,
+    /// The kernel's `rgb_scale`: `1.0f / (float)maxValue(BIT_DEPTH_F32) * ((float)dim - 1)`.
+    kernel_scale: f32,
     output: PhantomData<fn() -> O>,
 }
 
@@ -482,9 +592,10 @@ impl<O: LutOutput> fmt::Debug for Lut1DFloatRenderer<O> {
         f.debug_struct(if self.half_code {
             "Lut1DRendererHalfCode"
         } else {
-            "Lut1DRenderer (scalar)"
+            "Lut1DRenderer"
         })
         .field("out", &O::BIT_DEPTH)
+        .field("kernel", &self.kernel)
         .field("entries", &self.luts[0].len())
         .finish()
     }
@@ -492,8 +603,8 @@ impl<O: LutOutput> fmt::Debug for Lut1DFloatRenderer<O> {
 
 impl<O: LutOutput> Lut1DFloatRenderer<O> {
     /// Port of `BaseLut1DRenderer::updateData` (Lut1DOpCPU.cpp:374-443 @ v2.5.2) for float
-    /// input.
-    fn new(lut: &Lut1DOpData) -> Self {
+    /// input, with the SIMD kernel the constructor picked (`kernel`, for a standard domain).
+    fn new(lut: &Lut1DOpData, kernel: Option<Lut1DKernel>) -> Self {
         let dim = lut.get_array().get_length();
         // The input's maximum, `(float)GetBitDepthMaxValue(BIT_DEPTH_F32)`.
         let in_max = max_value::<F32>();
@@ -503,8 +614,31 @@ impl<O: LutOutput> Lut1DFloatRenderer<O> {
             step: (dim as f32 - 1.0f32) / in_max,
             dim_minus_one: dim as f32 - 1.0f32,
             half_code: lut.is_input_half_domain(),
+            kernel,
+            kernel_scale: 1.0f32 / in_max * (dim as f32 - 1.0f32),
             output: PhantomData,
         }
+    }
+
+    /// The kernel for a call of `values` floats: `m_applyLutFunc && numPixels > 1`.
+    fn kernel_for(&self, values: usize) -> Option<Lut1DKernel> {
+        self.kernel.filter(|_| values / 4 > 1)
+    }
+
+    /// The kernel's R, G and B for one pixel: `apply_lut_*` on the three tables, with
+    /// `lut_max = (float)dim - 1`.
+    fn kernel_rgb(&self, kernel: Lut1DKernel, px: &[f32; 4]) -> [f32; 3] {
+        std::array::from_fn(|c| {
+            kernel.apply_lut(&self.luts[c], px[c], self.kernel_scale, self.dim_minus_one)
+        })
+    }
+
+    /// One pixel of the kernel, to another output than F32: R, G and B, and alpha times
+    /// `alpha_scale` (`inBD != outBD`), through the pack's `Store`.
+    fn kernel_pixel(&self, kernel: Lut1DKernel, px: &[f32; 4]) -> [O::Type; 4] {
+        let [r, g, b] = self.kernel_rgb(kernel, px);
+        let a = sse_mul(px[3], self.alpha_scaling);
+        [r, g, b, a].map(|v| O::from_pack(kernel.store(O::PACK, v)))
     }
 
     /// `Converter<outBD>::CastValue(in[3] * m_alphaScaling)`.
@@ -579,7 +713,8 @@ impl<O: LutOutput> Lut1DFloatRenderer<O> {
 }
 
 impl<O: LutOutput> CpuOp for Lut1DFloatRenderer<O> {
-    /// `apply(img, img, numPixels)` on F32 pixels, for an F32 output.
+    /// `apply(img, img, numPixels)` on F32 pixels, for an F32 output. With the kernel
+    /// (`inBD == outBD`), alpha only moves through the packs: it is never written here.
     fn apply(&self, rgba: &mut [f32]) {
         assert_eq!(
             O::BIT_DEPTH,
@@ -587,6 +722,15 @@ impl<O: LutOutput> CpuOp for Lut1DFloatRenderer<O> {
             "{self:?} writes {:?} values; it can't work in place on floats",
             O::BIT_DEPTH
         );
+        if let Some(kernel) = self.kernel_for(rgba.len()) {
+            for px in rgba.as_chunks_mut::<4>().0 {
+                let rgb = self.kernel_rgb(kernel, px);
+                for c in 0..3 {
+                    px[c] = O::from_pack(kernel.store(O::PACK, rgb[c])).to_float();
+                }
+            }
+            return;
+        }
         for px in rgba.as_chunks_mut::<4>().0 {
             let out = self.render_pixel(px);
             *px = out.map(ChannelType::to_float);
@@ -594,10 +738,23 @@ impl<O: LutOutput> CpuOp for Lut1DFloatRenderer<O> {
     }
 
     /// Port of `Lut1DRenderer::apply` and `Lut1DRendererHalfCode::apply`, the float branches
-    /// (Lut1DOpCPU.cpp:531-566, 659-720 @ v2.5.2).
+    /// (Lut1DOpCPU.cpp:531-566, 652-720 @ v2.5.2).
     fn apply_bit_depth(&self, input: Pixels<'_>, output: PixelsMut<'_>) {
         let (in_name, out_name) = (input.type_name(), output.type_name());
-        let (Pixels::F32(input), Some(output)) = (input, O::Type::from_pixels_mut(output)) else {
+        let Pixels::F32(input) = input else {
+            panic!("{self:?} got {in_name} to {out_name}");
+        };
+        let kernel = self.kernel_for(input.len());
+        if kernel.is_some() && O::BIT_DEPTH == BitDepth::F32 {
+            // F32 to F32: the input's alpha is the output's; the rest in place.
+            let PixelsMut::F32(output) = output else {
+                panic!("{self:?} got {in_name} to {out_name}");
+            };
+            output.copy_from_slice(input);
+            self.apply(output);
+            return;
+        }
+        let Some(output) = O::Type::from_pixels_mut(output) else {
             panic!("{self:?} got {in_name} to {out_name}");
         };
         assert_eq!(
@@ -611,7 +768,10 @@ impl<O: LutOutput> CpuOp for Lut1DFloatRenderer<O> {
             .iter()
             .zip(output.as_chunks_mut::<4>().0)
         {
-            *out = self.render_pixel(inp);
+            *out = match kernel {
+                Some(kernel) => self.kernel_pixel(kernel, inp),
+                None => self.render_pixel(inp),
+            };
         }
     }
 
@@ -1060,14 +1220,15 @@ where
 
 /// The renderer of a forward LUT without hue adjust from `I` to `O`: a lookup for integer and
 /// half input, which may need the LUT resampled first ([`NOT_PORTED_COMPOSE`]); for float
-/// input, a half domain's renderer, or a standard domain's, whose SIMD kernels are Phase 2's
-/// ([`NOT_PORTED_SIMD`]).
+/// input, a half domain's renderer, or a standard domain's with the SIMD kernel `cpu`
+/// dispatches to ([`lut1d_kernel`]).
 ///
 /// Port of the constructors of `Lut1DRenderer<inBD, outBD>` and
 /// `Lut1DRendererHalfCode<inBD, outBD>` (`BaseLut1DRenderer::BaseLut1DRenderer`, `update`,
 /// `updateData`, Lut1DOpCPU.cpp:273-443 @ v2.5.2).
 fn forward_renderer<I: BitDepthInfo + 'static, O: LutOutput>(
     lut: &Lut1DOpData,
+    cpu: &CpuInfo,
 ) -> Result<Arc<dyn CpuOp>>
 where
     I::Type: LookupIndex,
@@ -1079,23 +1240,36 @@ where
         }
         return Ok(Arc::new(Lut1DLookupRenderer::<I, O>::new(lut)));
     }
-    if !lut.is_input_half_domain() {
-        // `m_applyLutFunc`: `SSE2GetLut1DApplyFunc(BIT_DEPTH_F32, outBD)` at least, on every
-        // x86-64 CPU (Lut1DOpCPU.cpp:282-308).
-        return Err(Exception::new(NOT_PORTED_SIMD));
+    if lut.is_input_half_domain() {
+        // `Lut1DRendererHalfCode::apply` never calls `m_applyLutFunc`.
+        return Ok(Arc::new(Lut1DFloatRenderer::<O>::new(lut, None)));
     }
-    Ok(Arc::new(Lut1DFloatRenderer::<O>::new(lut)))
+    Ok(Arc::new(Lut1DFloatRenderer::<O>::new(
+        lut,
+        lut1d_kernel(cpu, O::BIT_DEPTH),
+    )))
 }
 
 /// The scalar profile of the renderer of a forward standard-domain LUT without hue adjust for
 /// F32 input, to `out_bd`: what upstream's `Lut1DRenderer<BIT_DEPTH_F32, outBD>` computes for
-/// a row of one pixel, or for any row where no SIMD kernel is dispatched. Until the kernels
-/// are ported (WP 2.1c, 2.1d), [`get_lut1d_renderer`] refuses that renderer, and this is how
-/// tests reach its scalar code.
+/// a row of one pixel, or for any row where no SIMD kernel is dispatched.
 ///
 /// Port of `Lut1DRenderer<BIT_DEPTH_F32, outBD>` without `m_applyLutFunc`
 /// (Lut1DOpCPU.cpp:273-443, 659-720 @ v2.5.2).
 pub fn get_lut1d_scalar_renderer(lut: &Lut1DOpData, out_bd: BitDepth) -> Result<Arc<dyn CpuOp>> {
+    get_lut1d_profile_renderer(lut, out_bd, None)
+}
+
+/// The renderer of a forward standard-domain LUT without hue adjust for F32 input, to
+/// `out_bd`, with `kernel` as its SIMD kernel whatever this machine dispatches (`None`: the
+/// scalar profile): the numeric profiles the battery compares on every machine.
+///
+/// Port of `Lut1DRenderer<BIT_DEPTH_F32, outBD>` (Lut1DOpCPU.cpp:273-443, 652-720 @ v2.5.2).
+pub fn get_lut1d_profile_renderer(
+    lut: &Lut1DOpData,
+    out_bd: BitDepth,
+    kernel: Option<Lut1DKernel>,
+) -> Result<Arc<dyn CpuOp>> {
     if lut.get_direction() != TransformDirection::Forward
         || lut.get_hue_adjust() != Lut1DHueAdjust::None
         || lut.is_input_half_domain()
@@ -1105,16 +1279,16 @@ pub fn get_lut1d_scalar_renderer(lut: &Lut1DOpData, out_bd: BitDepth) -> Result<
              adjust.",
         ));
     }
-    fn scalar<O: LutOutput>(lut: &Lut1DOpData) -> Arc<dyn CpuOp> {
-        Arc::new(Lut1DFloatRenderer::<O>::new(lut))
+    fn profile<O: LutOutput>(lut: &Lut1DOpData, kernel: Option<Lut1DKernel>) -> Arc<dyn CpuOp> {
+        Arc::new(Lut1DFloatRenderer::<O>::new(lut, kernel))
     }
     Ok(match out_bd {
-        BitDepth::Uint8 => scalar::<Uint8>(lut),
-        BitDepth::Uint10 => scalar::<Uint10>(lut),
-        BitDepth::Uint12 => scalar::<Uint12>(lut),
-        BitDepth::Uint16 => scalar::<Uint16>(lut),
-        BitDepth::F16 => scalar::<F16>(lut),
-        BitDepth::F32 => scalar::<F32>(lut),
+        BitDepth::Uint8 => profile::<Uint8>(lut, kernel),
+        BitDepth::Uint10 => profile::<Uint10>(lut, kernel),
+        BitDepth::Uint12 => profile::<Uint12>(lut, kernel),
+        BitDepth::Uint16 => profile::<Uint16>(lut, kernel),
+        BitDepth::F16 => profile::<F16>(lut, kernel),
+        BitDepth::F32 => profile::<F32>(lut, kernel),
         BitDepth::Uint14 | BitDepth::Uint32 | BitDepth::Unknown => {
             return Err(Exception::new("Unsupported output bit depth"));
         }
@@ -1125,6 +1299,7 @@ pub fn get_lut1d_scalar_renderer(lut: &Lut1DOpData, out_bd: BitDepth) -> Result<
 /// `GetForwardLut1DRenderer` (1626-1653).
 fn renderer_for<I: BitDepthInfo + 'static, O: LutOutput>(
     lut: &Lut1DOpData,
+    cpu: &CpuInfo,
 ) -> Result<Arc<dyn CpuOp>>
 where
     I::Type: LookupIndex,
@@ -1134,7 +1309,7 @@ where
             // NB: Unlike bit-depth, the half domain status of a LUT
             //     may not be changed.
             if lut.get_hue_adjust() == Lut1DHueAdjust::None {
-                forward_renderer::<I, O>(lut)
+                forward_renderer::<I, O>(lut, cpu)
             } else {
                 forward_hue_adjust_renderer::<I, O>(lut)
             }
@@ -1147,17 +1322,18 @@ where
 fn renderer_in<I: BitDepthInfo + 'static>(
     lut: &Lut1DOpData,
     out_bd: BitDepth,
+    cpu: &CpuInfo,
 ) -> Result<Arc<dyn CpuOp>>
 where
     I::Type: LookupIndex,
 {
     match out_bd {
-        BitDepth::Uint8 => renderer_for::<I, Uint8>(lut),
-        BitDepth::Uint10 => renderer_for::<I, Uint10>(lut),
-        BitDepth::Uint12 => renderer_for::<I, Uint12>(lut),
-        BitDepth::Uint16 => renderer_for::<I, Uint16>(lut),
-        BitDepth::F16 => renderer_for::<I, F16>(lut),
-        BitDepth::F32 => renderer_for::<I, F32>(lut),
+        BitDepth::Uint8 => renderer_for::<I, Uint8>(lut, cpu),
+        BitDepth::Uint10 => renderer_for::<I, Uint10>(lut, cpu),
+        BitDepth::Uint12 => renderer_for::<I, Uint12>(lut, cpu),
+        BitDepth::Uint16 => renderer_for::<I, Uint16>(lut, cpu),
+        BitDepth::F16 => renderer_for::<I, F16>(lut, cpu),
+        BitDepth::F32 => renderer_for::<I, F32>(lut, cpu),
         BitDepth::Uint14 | BitDepth::Uint32 | BitDepth::Unknown => {
             Err(Exception::new("Unsupported output bit depth"))
         }
@@ -1174,7 +1350,8 @@ impl LookupIndex for f32 {
     }
 }
 
-/// The renderer of `lut` from `in_bd` values to `out_bd` values (module docs).
+/// The renderer of `lut` from `in_bd` values to `out_bd` values (module docs), with the SIMD
+/// kernel this machine dispatches to.
 ///
 /// Port of `GetLut1DRenderer` (src/OpenColorIO/ops/lut1d/Lut1DOpCPU.cpp:1726-1752 @ v2.5.2).
 pub fn get_lut1d_renderer(
@@ -1182,13 +1359,23 @@ pub fn get_lut1d_renderer(
     in_bd: BitDepth,
     out_bd: BitDepth,
 ) -> Result<Arc<dyn CpuOp>> {
+    get_lut1d_renderer_for_cpu(lut, in_bd, out_bd, CpuInfo::instance())
+}
+
+/// [`get_lut1d_renderer`] with the SIMD kernel `cpu` dispatches to.
+pub fn get_lut1d_renderer_for_cpu(
+    lut: &Lut1DOpData,
+    in_bd: BitDepth,
+    out_bd: BitDepth,
+    cpu: &CpuInfo,
+) -> Result<Arc<dyn CpuOp>> {
     match in_bd {
-        BitDepth::Uint8 => renderer_in::<Uint8>(lut, out_bd),
-        BitDepth::Uint10 => renderer_in::<Uint10>(lut, out_bd),
-        BitDepth::Uint12 => renderer_in::<Uint12>(lut, out_bd),
-        BitDepth::Uint16 => renderer_in::<Uint16>(lut, out_bd),
-        BitDepth::F16 => renderer_in::<F16>(lut, out_bd),
-        BitDepth::F32 => renderer_in::<F32>(lut, out_bd),
+        BitDepth::Uint8 => renderer_in::<Uint8>(lut, out_bd, cpu),
+        BitDepth::Uint10 => renderer_in::<Uint10>(lut, out_bd, cpu),
+        BitDepth::Uint12 => renderer_in::<Uint12>(lut, out_bd, cpu),
+        BitDepth::Uint16 => renderer_in::<Uint16>(lut, out_bd, cpu),
+        BitDepth::F16 => renderer_in::<F16>(lut, out_bd, cpu),
+        BitDepth::F32 => renderer_in::<F32>(lut, out_bd, cpu),
         BitDepth::Uint14 | BitDepth::Uint32 | BitDepth::Unknown => {
             Err(Exception::new("Unsupported input bit depth"))
         }
