@@ -11,7 +11,9 @@
 
 use std::sync::Arc;
 
-use ocio::Config;
+use ocio::{
+    ColorSpace, ColorSpaceVisibility, Config, ReferenceSpaceType, SearchReferenceSpaceType,
+};
 use ocio_ops::open_color_types::EnvironmentMode;
 use ocio_ops::platform::{MapEnv, set_thread_env_provider, setenv};
 use ocio_testkit::Oracle;
@@ -36,6 +38,35 @@ fn step(call: Value, port: impl Fn(&mut Config) -> Value + 'static) -> Step {
         call,
         port: Box::new(port),
     }
+}
+
+/// What a case does between two runs of the getters: a call, calls, or a copy of the config
+/// (`copy.deepcopy`: `createEditableCopy`), which the calls after it act on, on both sides.
+enum Item {
+    One(Step),
+    Group(Vec<Step>),
+    Copy,
+}
+
+impl From<Step> for Item {
+    fn from(s: Step) -> Item {
+        Item::One(s)
+    }
+}
+
+impl From<Vec<Step>> for Item {
+    fn from(s: Vec<Step>) -> Item {
+        Item::Group(s)
+    }
+}
+
+/// An object the library returned, as `{"class", "repr"}`.
+fn object_out(class: &str, repr: &[u8]) -> Value {
+    let repr = match std::str::from_utf8(repr) {
+        Ok(_) => bytes_arg(repr),
+        Err(_) => json!({"undecodable": hex(repr)}),
+    };
+    json!({"class": class, "repr": repr})
 }
 
 /// A string the library returned, as the binding gives it: `{"bytes": hex}` when it is UTF-8,
@@ -220,6 +251,238 @@ fn set_working_dir(dir: &[u8]) -> Step {
     )
 }
 
+/// A color space for a case: its reference space, name, aliases and categories.
+#[derive(Clone)]
+struct Cs {
+    reference: ReferenceSpaceType,
+    name: Vec<u8>,
+    aliases: Vec<Vec<u8>>,
+    categories: Vec<Vec<u8>>,
+}
+
+fn cs(name: &[u8]) -> Cs {
+    Cs {
+        reference: ReferenceSpaceType::Scene,
+        name: name.to_vec(),
+        aliases: Vec::new(),
+        categories: Vec::new(),
+    }
+}
+
+impl Cs {
+    fn display(mut self) -> Cs {
+        self.reference = ReferenceSpaceType::Display;
+        self
+    }
+    fn alias(mut self, alias: &[u8]) -> Cs {
+        self.aliases.push(alias.to_vec());
+        self
+    }
+    fn category(mut self, category: &[u8]) -> Cs {
+        self.categories.push(category.to_vec());
+        self
+    }
+    fn build(&self) -> ColorSpace {
+        let mut cs = ColorSpace::with_reference_space(self.reference);
+        cs.set_name(&self.name);
+        for a in &self.aliases {
+            cs.add_alias(a);
+        }
+        for c in &self.categories {
+            cs.add_category(c);
+        }
+        cs
+    }
+}
+
+fn reference_name(r: ReferenceSpaceType) -> &'static str {
+    match r {
+        ReferenceSpaceType::Scene => "REFERENCE_SPACE_SCENE",
+        ReferenceSpaceType::Display => "REFERENCE_SPACE_DISPLAY",
+    }
+}
+
+/// Makes the color space `spec` (stored as `cs`) and adds it to the config.
+fn add_color_space(spec: Cs) -> Vec<Step> {
+    let mut out = Vec::new();
+    let made = spec.clone();
+    out.push(step(
+        json!({"new": "ColorSpace", "args": [{"enum": reference_name(spec.reference)}],
+               "as": "cs"}),
+        move |_| {
+            let cs = ColorSpace::with_reference_space(made.reference);
+            json!({"result": object_out("ColorSpace", &cs.to_bytes())})
+        },
+    ));
+    out.push(step(
+        json!({"call": "setName", "on": "cs", "args": [arg(&spec.name)]}),
+        |_| json!({"result": null}),
+    ));
+    for a in &spec.aliases {
+        out.push(step(
+            json!({"call": "addAlias", "on": "cs", "args": [arg(a)]}),
+            |_| json!({"result": null}),
+        ));
+    }
+    for c in &spec.categories {
+        out.push(step(
+            json!({"call": "addCategory", "on": "cs", "args": [arg(c)]}),
+            |_| json!({"result": null}),
+        ));
+    }
+    out.push(step(
+        json!({"call": "addColorSpace", "args": [{"ref": "cs"}]}),
+        move |c| unit_out(c.add_color_space(&spec.build())),
+    ));
+    out
+}
+
+fn remove_color_space(name: &[u8]) -> Step {
+    let name = name.to_vec();
+    step(
+        json!({"call": "removeColorSpace", "args": [arg(&name)]}),
+        move |c| {
+            c.remove_color_space(&name);
+            json!({"result": null})
+        },
+    )
+}
+
+fn clear_color_spaces() -> Step {
+    step(json!({"call": "clearColorSpaces"}), |c| {
+        c.clear_color_spaces();
+        json!({"result": null})
+    })
+}
+
+fn set_role(role: &[u8], cs: Option<&[u8]>) -> Step {
+    let role = role.to_vec();
+    let cs = cs.map(<[u8]>::to_vec);
+    let cs_arg = cs.as_deref().map_or(Value::Null, arg);
+    step(
+        json!({"call": "setRole", "args": [arg(&role), cs_arg]}),
+        move |c| unit_out(c.set_role(&role, cs.as_deref())),
+    )
+}
+
+const SEARCH_TYPES: [(SearchReferenceSpaceType, &str); 3] = [
+    (
+        SearchReferenceSpaceType::Scene,
+        "SEARCH_REFERENCE_SPACE_SCENE",
+    ),
+    (
+        SearchReferenceSpaceType::Display,
+        "SEARCH_REFERENCE_SPACE_DISPLAY",
+    ),
+    (SearchReferenceSpaceType::All, "SEARCH_REFERENCE_SPACE_ALL"),
+];
+
+const VISIBILITIES: [(ColorSpaceVisibility, &str); 3] = [
+    (ColorSpaceVisibility::Active, "COLORSPACE_ACTIVE"),
+    (ColorSpaceVisibility::Inactive, "COLORSPACE_INACTIVE"),
+    (ColorSpaceVisibility::All, "COLORSPACE_ALL"),
+];
+
+/// The names and categories the getters look up, besides the config's own.
+#[derive(Clone, Default)]
+struct Probes {
+    names: Vec<Vec<u8>>,
+    categories: Vec<Vec<u8>>,
+}
+
+fn probes(names: &[&[u8]], categories: &[&[u8]]) -> Probes {
+    Probes {
+        names: names.iter().map(|n| n.to_vec()).collect(),
+        categories: categories.iter().map(|n| n.to_vec()).collect(),
+    }
+}
+
+/// The getters of the color spaces and roles: the names of each search, the roles, and for
+/// each probe name and category, what the config finds.
+fn color_space_getters(probes: &Probes) -> Vec<Step> {
+    let mut out = Vec::new();
+    for (t, t_name) in SEARCH_TYPES {
+        for (v, v_name) in VISIBILITIES {
+            out.push(step(
+                json!({"call": "getColorSpaceNames",
+                       "args": [{"enum": t_name}, {"enum": v_name}]}),
+                move |c| {
+                    let names: Vec<Vec<u8>> = (0..c.num_color_spaces_with(t, v))
+                        .map(|i| c.color_space_name_by_index_with(t, v, i).to_vec())
+                        .collect();
+                    texts_out(&names)
+                },
+            ));
+        }
+    }
+    out.push(step(json!({"call": "getColorSpaceNames"}), |c| {
+        let names: Vec<Vec<u8>> = (0..c.num_color_spaces())
+            .map(|i| c.color_space_name_by_index(i).to_vec())
+            .collect();
+        texts_out(&names)
+    }));
+    out.push(step(json!({"call": "getRoleNames"}), |c| {
+        let names: Vec<Vec<u8>> = (0..c.num_roles())
+            .map(|i| c.role_name(i).to_vec())
+            .collect();
+        texts_out(&names)
+    }));
+    out.push(step(json!({"call": "getRoles"}), |c| {
+        let roles: Vec<Value> = (0..c.num_roles())
+            .map(|i| {
+                json!([
+                    bytes_arg(c.role_name(i)),
+                    bytes_arg(c.role_color_space_by_index(i))
+                ])
+            })
+            .collect();
+        json!({ "result": roles })
+    }));
+    for name in &probes.names {
+        let n = name.clone();
+        out.push(step(
+            json!({"call": "getColorSpace", "args": [arg(name)]}),
+            move |c| match c.color_space(&n) {
+                Some(cs) => json!({"result": object_out("ColorSpace", &cs.to_bytes())}),
+                None => json!({"result": null}),
+            },
+        ));
+        let n = name.clone();
+        out.push(step(
+            json!({"call": "getCanonicalName", "args": [arg(name)]}),
+            move |c| text_out(c.canonical_name(&n)),
+        ));
+        let n = name.clone();
+        out.push(step(
+            json!({"call": "hasRole", "args": [arg(name)]}),
+            move |c| json!({"result": c.has_role(&n)}),
+        ));
+        let n = name.clone();
+        out.push(step(
+            json!({"call": "getRoleColorSpace", "args": [arg(name)]}),
+            move |c| text_out(c.role_color_space(&n)),
+        ));
+    }
+    for category in &probes.categories {
+        out.push(step(
+            json!({"call": "getColorSpaces", "args": [arg(category)], "as": "set"}),
+            |_| json!({"result": {"class": "ColorSpaceSet"}}),
+        ));
+        let cat = category.clone();
+        out.push(step(
+            json!({"call": "getColorSpaceNames", "on": "set"}),
+            move |c| {
+                let set = c.color_spaces(&cat);
+                let names: Vec<Vec<u8>> = (0..set.num_color_spaces())
+                    .map(|i| set.color_space_name_by_index(i).unwrap_or(&[]).to_vec())
+                    .collect();
+                texts_out(&names)
+            },
+        ));
+    }
+    out
+}
+
 /// The config's getters, then its context's `repr()`.
 fn getters() -> Vec<Step> {
     vec![
@@ -271,8 +534,14 @@ fn getters() -> Vec<Step> {
     ]
 }
 
-/// Copies the config (`copy.deepcopy`: `createEditableCopy`); the steps after it act on the
-/// copy, on both sides.
+/// The getters of a case: the config's own, then those of its color spaces and roles.
+fn all_getters(probes: &Probes) -> Vec<Step> {
+    let mut out = getters();
+    out.extend(color_space_getters(probes));
+    out
+}
+
+/// The name the copy of the config is stored as.
 const COPY: &str = "copy";
 
 // ---------------------------------------------------------------------------------------------
@@ -281,17 +550,34 @@ const COPY: &str = "copy";
 /// Runs `steps` (each followed by the getters) on a new config in the environment `env`, on
 /// both sides, and compares every outcome. `steps` may hold `None`: a copy of the config.
 fn check(label: &str, env: &[(&str, &[u8])], steps: Vec<Option<Step>>) {
-    check_source(label, "new", env, steps);
+    let items = steps
+        .into_iter()
+        .map(|s| s.map_or(Item::Copy, Item::One))
+        .collect();
+    check_items(label, "new", env, items, &Probes::default());
 }
 
 /// As [`check`], on the config of `source`: `"new"` (`Config()`) or `"raw"`
 /// (`Config.CreateRaw()`).
 fn check_source(label: &str, source: &str, env: &[(&str, &[u8])], steps: Vec<Option<Step>>) {
+    let items = steps
+        .into_iter()
+        .map(|s| s.map_or(Item::Copy, Item::One))
+        .collect();
+    check_items(label, source, env, items, &Probes::default());
+}
+
+/// Runs `items` on the config of `source`, each followed by the getters of `probes`.
+fn check_items(label: &str, source: &str, env: Env, items: Vec<Item>, probes: &Probes) {
     let mut sequence: Vec<Option<Step>> = Vec::new();
-    sequence.extend(getters().into_iter().map(Some));
-    for s in steps {
-        sequence.push(s);
-        sequence.extend(getters().into_iter().map(Some));
+    sequence.extend(all_getters(probes).into_iter().map(Some));
+    for item in items {
+        match item {
+            Item::One(s) => sequence.push(Some(s)),
+            Item::Group(g) => sequence.extend(g.into_iter().map(Some)),
+            Item::Copy => sequence.push(None),
+        }
+        sequence.extend(all_getters(probes).into_iter().map(Some));
     }
 
     let mut calls = Vec::new();
@@ -300,7 +586,7 @@ fn check_source(label: &str, source: &str, env: &[(&str, &[u8])], steps: Vec<Opt
         match s {
             Some(s) => {
                 let mut call = s.call.clone();
-                if call.get("on").is_none() {
+                if call.get("call").is_some() && call.get("on").is_none() {
                     call["on"] = json!(on);
                 }
                 calls.push(call);
@@ -565,5 +851,112 @@ fn the_raw_config_matches_the_wheel() {
             Some(add_environment_var(b"OCIO_TEST_A", Some(b"default"))),
             Some(load_environment()),
         ],
+    );
+}
+
+/// Color spaces: added, refused (empty names, conflicts with roles and other color spaces,
+/// context variable tokens in either version), replaced, looked up by name, alias and role,
+/// searched by reference space and category, removed and cleared; and roles: set, refused,
+/// unset, and set to an empty name.
+#[test]
+fn color_spaces_and_roles_match_the_wheel() {
+    let items: Vec<Item> = vec![
+        add_color_space(cs(b"a").alias(b"a1").alias(b"A2").category(b"cat1")).into(),
+        add_color_space(cs(b"b").display().category(b"cat1").category(b"Cat2")).into(),
+        add_color_space(cs(b"c")).into(),
+        add_color_space(cs(b"")).into(),
+        add_color_space(cs(b"A1")).into(),
+        add_color_space(cs(b"d").alias(b"C")).into(),
+        add_color_space(cs(b"A").alias(b"a3").display()).into(),
+        add_color_space(cs(b"e$")).into(),
+        add_color_space(cs(b"e").alias(b"%e")).into(),
+        set_role(b"role1", Some(b"b")).into(),
+        set_role(b"Role2", Some(b"A2")).into(),
+        add_color_space(cs(b"ROLE1")).into(),
+        add_color_space(cs(b"f").alias(b"role2")).into(),
+        set_role(b"a", Some(b"c")).into(),
+        set_role(b"A3", Some(b"c")).into(),
+        set_role(b"$r", Some(b"c")).into(),
+        set_role(b"", Some(b"c")).into(),
+        set_role(b"\0r", Some(b"c")).into(),
+        set_role(b"r3", Some(b"")).into(),
+        set_role(b"role1", Some(b"c")).into(),
+        set_role(b"unknown_cs", Some(b"nowhere")).into(),
+        set_role(b"ROLE2", None).into(),
+        set_role(b"never_set", None).into(),
+        set_major_version(1).into(),
+        add_color_space(cs(b"g$").alias(b"g%")).into(),
+        add_color_space(cs(b"g$")).into(),
+        set_role(b"$r", Some(b"c")).into(),
+        set_major_version(2).into(),
+        Item::Copy,
+        remove_color_space(b"a3").into(),
+        remove_color_space(b"B").into(),
+        remove_color_space(b"unknown").into(),
+        add_color_space(cs(b"h").category(b"cat1")).into(),
+        clear_color_spaces().into(),
+        add_color_space(cs(b"c")).into(),
+    ];
+    let probes = probes(
+        &[
+            b"a",
+            b"A",
+            b"a1",
+            b"A2",
+            b"a3",
+            b"b",
+            b"B",
+            b"c",
+            b"C",
+            b"d",
+            b"g$",
+            b"role1",
+            b"ROLE1",
+            b"role2",
+            b"r3",
+            b"$r",
+            b"unknown_cs",
+            b"unknown",
+            b"",
+        ],
+        &[b"cat1", b"CAT1", b"cat2", b"", b"missing"],
+    );
+    check_items("color spaces and roles", "new", &[], items, &probes);
+}
+
+/// The inactive color spaces of `OCIO_INACTIVE_COLORSPACES`, by name, alias or role, the
+/// unknown ones left out, as the color spaces come and go.
+#[test]
+fn inactive_color_spaces_of_the_environment_match_the_wheel() {
+    let env: Env = &[("OCIO_INACTIVE_COLORSPACES", b" b , A2,unknown, role1,, c")];
+    let items: Vec<Item> = vec![
+        add_color_space(cs(b"a").alias(b"a2")).into(),
+        add_color_space(cs(b"b").display()).into(),
+        add_color_space(cs(b"c").display()).into(),
+        add_color_space(cs(b"d")).into(),
+        set_role(b"role1", Some(b"d")).into(),
+        add_color_space(cs(b"e")).into(),
+        Item::Copy,
+        remove_color_space(b"b").into(),
+        set_role(b"role1", None).into(),
+        add_color_space(cs(b"f")).into(),
+    ];
+    let probes = probes(&[b"a", b"b", b"c", b"d", b"role1"], &[b""]);
+    check_items("inactive color spaces", "new", env, items, &probes);
+}
+
+/// The raw config's color space and role.
+#[test]
+fn the_raw_config_color_space_matches_the_wheel() {
+    let probes = probes(&[b"raw", b"RAW", b"default", b"Default", b"data"], &[b""]);
+    check_items(
+        "raw color space",
+        "raw",
+        &[],
+        vec![
+            add_color_space(cs(b"default")).into(),
+            set_role(b"raw", Some(b"raw")).into(),
+        ],
+        &probes,
     );
 }

@@ -341,6 +341,22 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in the YAML parser (`p3-yaml-parser`, `crates/ocio/src/yaml_cpp/stream.rs`),
   and checked against the wheel in `crates/ocio/tests/yaml_cpp_node_oracle.rs`.
 
+### I-130. Some setters keep a config's old cache ID
+
+- **Upstream:** a config caches its cache ID (`Config::getCacheID`, `Config.cpp:5250-5315`),
+  the hash of its `serialize()` text, and most setters reset it (`Impl::resetCacheIDs`). But
+  `setName`, `setDescription`, `setFamilySeparator` and `setMinorVersion`
+  (`Config.cpp:2115-2118, 2132-2145, 2154-2157, 1311-1324`) don't, though the text holds what
+  they set. Seen through the wheel: after each of them, `getCacheID()` returns the ID it
+  returned before, while `serialize()` changed (`ocio_profile_version: 2.3` after
+  `setMinorVersion(3)`); a later setter that resets the ID (`setStrictParsingEnabled`) gives a
+  new one. A config's validation result is kept the same way.
+- **Who notices:** applications that change a config's name, description, family separator or
+  minor version in code, and cache their results by the config's cache ID.
+- **A fix:** reset the cache IDs in these setters too.
+- **Status:** the setters are matched in `p3-config-1` (3.4d: they keep the cache IDs); the
+  cache ID itself comes with 3.7d, which checks it against the wheel.
+
 ## Numeric helpers
 
 ### I-20. Double values are compared to 0 and 1 in float precision

@@ -11,14 +11,20 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use ocio_ops::exception::{Exception, Result};
-use ocio_ops::open_color_types::{EnvironmentMode, TransformDirection};
-use ocio_ops::parse_utils::split_string_env_style;
+use ocio_ops::open_color_types::{
+    Allocation, BitDepth, ColorSpaceVisibility, EnvironmentMode, ReferenceSpaceType,
+    SearchReferenceSpaceType, TransformDirection,
+};
+use ocio_ops::parse_utils::{ROLE_DEFAULT, split_string_env_style};
 use ocio_ops::platform::{getenv, is_env_present};
-use ocio_ops::utils::string_utils::{StringVec, c_str, trim};
+use ocio_ops::utils::string_utils::{StringVec, c_str, lower, split, trim};
 
 use crate::caching::{OCIO_DISABLE_CACHE_FALLBACK, ProcessorCache, std_hash_string};
+use crate::color_space::ColorSpace;
+use crate::color_space_set::ColorSpaceSet;
 use crate::context::Context;
-use crate::context_variable_utils::collect_context_variables;
+use crate::context_variable_utils::{collect_context_variables, contains_context_variable_token};
+use crate::named_transform::NamedTransform;
 use crate::processor::{Processor, ProcessorCacheFlags};
 use crate::transform::Transform;
 
@@ -60,6 +66,37 @@ const DEFAULT_FAMILY_SEPARATOR: u8 = b'/';
 /// Port of `LookupEnvironment` (src/OpenColorIO/Config.cpp:132-138 @ v2.5.2).
 fn lookup_environment<'a>(env: &'a BTreeMap<Vec<u8>, Vec<u8>>, name: &[u8]) -> &'a [u8] {
     env.get(name).map_or(&[], Vec::as_slice)
+}
+
+/// The color space of the role `rolename`, ignoring case; `""` when there is no such role.
+/// The roles are stored by their lower-case names.
+///
+/// Port of `LookupRole` (src/OpenColorIO/Config.cpp:140-148 @ v2.5.2).
+fn lookup_role<'a>(roles: &'a BTreeMap<Vec<u8>, Vec<u8>>, rolename: &[u8]) -> &'a [u8] {
+    roles.get(&lower(rolename)).map_or(&[], Vec::as_slice)
+}
+
+/// Whether a color space of the reference space `t` is one a search of `st` keeps.
+///
+/// Port of `MatchReferenceType` (src/OpenColorIO/Config.cpp:2316-2330 @ v2.5.2).
+fn match_reference_type(st: SearchReferenceSpaceType, t: ReferenceSpaceType) -> bool {
+    match st {
+        SearchReferenceSpaceType::Scene => t == ReferenceSpaceType::Scene,
+        SearchReferenceSpaceType::Display => t == ReferenceSpaceType::Display,
+        SearchReferenceSpaceType::All => true,
+    }
+}
+
+/// What a list of inactive names is built for. Upstream's `INACTIVE_ALL` (the names as they
+/// are, for `validate`) comes with `validate` (3.8a).
+///
+/// Port of `Config::Impl::InactiveType` (src/OpenColorIO/Config.cpp:521-526 @ v2.5.2), in part.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InactiveType {
+    /// `INACTIVE_COLORSPACE`.
+    ColorSpace,
+    /// `INACTIVE_NAMEDTRANSFORM`.
+    NamedTransform,
 }
 
 /// The result of the config's last validation.
@@ -129,12 +166,32 @@ pub struct Config {
     family_separator: u8,
     /// `m_description`.
     description: Vec<u8>,
-    /// `m_inactiveColorSpaceNamesEnv`: `OCIO_INACTIVE_COLORSPACES`, trimmed.
+    /// `m_allColorSpaces`: all the color spaces, active or not.
+    all_color_spaces: ColorSpaceSet,
+    /// `m_activeColorSpaceNames`.
+    active_color_space_names: StringVec,
+    /// `m_inactiveColorSpaceNames`.
+    inactive_color_space_names: StringVec,
+    /// `m_inactiveColorSpaceNamesAPI`: the inactive color spaces and named transforms an API
+    /// request gives, which supersedes the two lists below.
+    inactive_color_space_names_api: Vec<u8>,
+    /// `m_inactiveColorSpaceNamesEnv`: `OCIO_INACTIVE_COLORSPACES`, trimmed, which supersedes
+    /// the config's list.
     inactive_color_space_names_env: Vec<u8>,
+    /// `m_inactiveColorSpaceNamesConf`: the config's list (`inactive_colorspaces`).
+    inactive_color_space_names_conf: Vec<u8>,
+    /// `m_roles`: the color space of each role, by the role's lower-case name.
+    roles: BTreeMap<Vec<u8>, Vec<u8>>,
     /// `m_activeDisplaysEnvOverride`: the displays of `OCIO_ACTIVE_DISPLAYS`.
     active_displays_env_override: StringVec,
     /// `m_activeViewsEnvOverride`: the views of `OCIO_ACTIVE_VIEWS`.
     active_views_env_override: StringVec,
+    /// `m_allNamedTransforms`: all the named transforms, active or not.
+    all_named_transforms: Vec<NamedTransform>,
+    /// `m_activeNamedTransformNames`.
+    active_named_transform_names: StringVec,
+    /// `m_inactiveNamedTransformNames`.
+    inactive_named_transform_names: StringVec,
     /// `m_defaultLumaCoefs`.
     default_luma_coefs: [f64; 3],
     /// `m_strictParsing`.
@@ -163,7 +220,16 @@ impl Clone for Config {
             name: self.name.clone(),
             family_separator: self.family_separator,
             description: self.description.clone(),
+            all_color_spaces: self.all_color_spaces.clone(),
+            active_color_space_names: self.active_color_space_names.clone(),
+            inactive_color_space_names: self.inactive_color_space_names.clone(),
+            inactive_color_space_names_api: self.inactive_color_space_names_api.clone(),
             inactive_color_space_names_env: self.inactive_color_space_names_env.clone(),
+            inactive_color_space_names_conf: self.inactive_color_space_names_conf.clone(),
+            roles: self.roles.clone(),
+            all_named_transforms: self.all_named_transforms.clone(),
+            active_named_transform_names: self.active_named_transform_names.clone(),
+            inactive_named_transform_names: self.inactive_named_transform_names.clone(),
             active_displays_env_override: self.active_displays_env_override.clone(),
             active_views_env_override: self.active_views_env_override.clone(),
             default_luma_coefs: self.default_luma_coefs,
@@ -193,7 +259,16 @@ impl Config {
             name: Vec::new(),
             family_separator: DEFAULT_FAMILY_SEPARATOR,
             description: Vec::new(),
+            all_color_spaces: ColorSpaceSet::new(),
+            active_color_space_names: StringVec::new(),
+            inactive_color_space_names: StringVec::new(),
+            inactive_color_space_names_api: Vec::new(),
             inactive_color_space_names_env: Vec::new(),
+            inactive_color_space_names_conf: Vec::new(),
+            roles: BTreeMap::new(),
+            all_named_transforms: Vec::new(),
+            active_named_transform_names: StringVec::new(),
+            inactive_named_transform_names: StringVec::new(),
             active_displays_env_override: StringVec::new(),
             active_views_env_override: StringVec::new(),
             default_luma_coefs: DEFAULT_LUMA_COEFFS,
@@ -275,21 +350,41 @@ impl Config {
         Arc::get_mut(&mut self.context).expect("a context of its own")
     }
 
-    /// The raw config: version 2.0, its one color space `raw`, its roles and its display, and
-    /// the whole environment in its context (its profile has no `environment` section). So far
-    /// its version and its environment; the rest of its state comes with the color spaces,
-    /// roles and displays, built directly until the YAML reader parses upstream's profile
-    /// (3.7d).
+    /// The raw config: version 2.0, its one color space `raw` and the role `default`, its
+    /// display, and the whole environment in its context (its profile has no `environment`
+    /// section). So far its version, color space, role and environment; the rest of its state
+    /// comes with the displays and the file rules, built directly until the YAML reader parses
+    /// upstream's profile (3.7d).
     ///
     /// Port of `Config::CreateRaw` (src/OpenColorIO/Config.cpp:74-92, 1127-1133 @ v2.5.2), in
-    /// part, with what `OCIOYaml`'s `load` sets from that profile (`setVersion`,
-    /// `setEnvironmentMode`, `loadEnvironment`, OCIOYaml.cpp:4454-4455, 5013-5014 @ v2.5.2).
+    /// part, with what `OCIOYaml`'s `load` sets from that profile (`setVersion`, `setRole`, the
+    /// color space's setters and `addColorSpace`, `setEnvironmentMode`, `loadEnvironment`) and
+    /// `Config::Impl::Read`'s refresh of the active color spaces (Config.cpp:5545-5561).
     #[doc(alias = "CreateRaw")]
     pub fn create_raw() -> Arc<Config> {
         let mut config = Config::blank();
         config.minor_version = 0;
+        config
+            .set_role(ROLE_DEFAULT, Some(b"raw"))
+            .expect("the raw config's role");
+
+        let mut cs = ColorSpace::new();
+        cs.set_name("raw");
+        cs.set_family("raw");
+        cs.set_equality_group("");
+        cs.set_bit_depth(BitDepth::F32);
+        cs.set_is_data(true);
+        cs.set_allocation(Allocation::Uniform);
+        cs.set_description("A raw color space. Conversions to and from this space are no-ops.");
+        config
+            .add_color_space(&cs)
+            .expect("the raw config's color space");
+
         config.set_environment_mode(EnvironmentMode::LoadAll);
         config.load_environment();
+
+        config.inactive_color_space_names_api.clear();
+        config.refresh_active_color_spaces();
         Arc::new(config)
     }
 
@@ -590,6 +685,606 @@ impl Config {
         self.context_mut().set_working_dir(dirname);
 
         self.reset_cache_ids();
+    }
+
+    // Color spaces ////////////////////////////////////////////////////////////////////////////
+
+    /// The color space named `name` (or with the alias `name`), ignoring case; else the color
+    /// space of the role `name`.
+    ///
+    /// Port of `Config::Impl::getColorSpace` (src/OpenColorIO/Config.cpp:459-471 @ v2.5.2).
+    fn impl_color_space(&self, name: &[u8]) -> Option<&ColorSpace> {
+        // Check to see if the name is a color space.
+        self.all_color_spaces.color_space(name).or_else(|| {
+            // Check to see if the name is a role.
+            let csname = lookup_role(&self.roles, c_str(name));
+            self.all_color_spaces.color_space(csname)
+        })
+    }
+
+    /// The named transform whose name or alias is `name`, ignoring case.
+    ///
+    /// Port of `Config::Impl::getNamedTransform` (src/OpenColorIO/Config.cpp:485-494 @
+    /// v2.5.2).
+    fn impl_named_transform(&self, name: &[u8]) -> Option<&NamedTransform> {
+        self.all_named_transforms
+            .get(self.impl_named_transform_index(name))
+    }
+
+    /// The index of the named transform whose name, or else one of whose aliases, is `name`,
+    /// ignoring case; `usize::MAX` (upstream's `static_cast<size_t>(-1)`) for none or an empty
+    /// name.
+    ///
+    /// Port of `Config::Impl::getNamedTransformIndex` (src/OpenColorIO/Config.cpp:496-519 @
+    /// v2.5.2).
+    fn impl_named_transform_index(&self, name: &[u8]) -> usize {
+        let name = c_str(name);
+        if !name.is_empty() {
+            let str = lower(name);
+            for (idx, nt) in self.all_named_transforms.iter().enumerate() {
+                if lower(nt.name()) == str {
+                    return idx;
+                }
+                for alias in 0..nt.num_aliases() {
+                    if lower(nt.alias(alias)) == str {
+                        return idx;
+                    }
+                }
+            }
+        }
+        usize::MAX
+    }
+
+    /// The inactive names: the list of the API, else of `OCIO_INACTIVE_COLORSPACES`, else of
+    /// the config, split on `,` and trimmed; for `ColorSpace` and `NamedTransform`, only those
+    /// that name one (by name, alias or, for a color space, role), as its own name.
+    ///
+    /// Port of `Config::Impl::buildInactiveNamesList` (src/OpenColorIO/Config.cpp:5351-5407 @
+    /// v2.5.2).
+    fn build_inactive_names_list(&self, kind: InactiveType) -> StringVec {
+        let mut inactive_names = StringVec::new();
+
+        // An API request always supersedes the other lists.
+        if !self.inactive_color_space_names_api.is_empty() {
+            inactive_names = split(&self.inactive_color_space_names_api, b',');
+        }
+        // The env. variable only supersedes the config list.
+        else if !self.inactive_color_space_names_env.is_empty() {
+            inactive_names = split(&self.inactive_color_space_names_env, b',');
+        } else if !self.inactive_color_space_names_conf.is_empty() {
+            inactive_names = split(&self.inactive_color_space_names_conf, b',');
+        }
+
+        let mut res = StringVec::new();
+        for v in &mut inactive_names {
+            *v = trim(v).to_vec();
+            match kind {
+                InactiveType::ColorSpace => {
+                    // Only add existing items.
+                    if let Some(cs) = self.impl_color_space(v) {
+                        // Use the canonical name (alias or role might have been used).
+                        res.push(cs.name().to_vec());
+                    }
+                }
+                InactiveType::NamedTransform => {
+                    // Only add existing items.
+                    if let Some(nt) = self.impl_named_transform(v) {
+                        // Use the canonical name (alias might have been used).
+                        res.push(nt.name().to_vec());
+                    }
+                }
+            }
+        }
+
+        res
+    }
+
+    /// Rebuilds the lists of active and inactive color spaces and named transforms.
+    ///
+    /// Port of `Config::Impl::refreshActiveColorSpaces` (src/OpenColorIO/Config.cpp:5409-5460
+    /// @ v2.5.2).
+    fn refresh_active_color_spaces(&mut self) {
+        self.active_color_space_names.clear();
+        self.active_named_transform_names.clear();
+
+        self.inactive_color_space_names = self.build_inactive_names_list(InactiveType::ColorSpace);
+
+        for i in 0..self.all_color_spaces.num_color_spaces() {
+            let cs = self
+                .all_color_spaces
+                .color_space_by_index(i)
+                .expect("an index of the set");
+            let name = cs.name();
+
+            let is_active = !self
+                .inactive_color_space_names
+                .iter()
+                .any(|cs_name| cs_name == name);
+
+            if is_active {
+                self.active_color_space_names.push(name.to_vec());
+            }
+        }
+
+        self.inactive_named_transform_names =
+            self.build_inactive_names_list(InactiveType::NamedTransform);
+
+        for nt in &self.all_named_transforms {
+            let name = nt.name();
+
+            let is_active = !self
+                .inactive_named_transform_names
+                .iter()
+                .any(|cs_name| cs_name == name);
+
+            if is_active {
+                self.active_named_transform_names.push(name.to_vec());
+            }
+        }
+    }
+
+    /// The active color spaces that have the category `category` (all of them for an empty
+    /// one), copied into a new set.
+    ///
+    /// Port of `Config::getColorSpaces(const char *)` (src/OpenColorIO/Config.cpp:2296-2314 @
+    /// v2.5.2).
+    #[doc(alias = "getColorSpaces")]
+    pub fn color_spaces(&self, category: impl AsRef<[u8]>) -> ColorSpaceSet {
+        let category = c_str(category.as_ref());
+        let mut res = ColorSpaceSet::new();
+
+        // Loop on the list of active color spaces.
+
+        for idx in 0..self.num_color_spaces() {
+            let cs_name = self.color_space_name_by_index(idx);
+            let cs = self
+                .all_color_spaces
+                .color_space(cs_name)
+                .expect("an active color space");
+            if category.is_empty() || cs.has_category(category) {
+                res.add_color_space(cs)
+                    .expect("the config's color spaces have distinct names and aliases");
+            }
+        }
+
+        res
+    }
+
+    /// The number of color spaces of the reference space `search_reference_type`, among those
+    /// of `visibility`.
+    ///
+    /// Port of `Config::getNumColorSpaces(SearchReferenceSpaceType, ColorSpaceVisibility)`
+    /// (src/OpenColorIO/Config.cpp:2332-2392 @ v2.5.2).
+    #[doc(alias = "getNumColorSpaces")]
+    pub fn num_color_spaces_with(
+        &self,
+        search_reference_type: SearchReferenceSpaceType,
+        visibility: ColorSpaceVisibility,
+    ) -> i32 {
+        let mut res = 0;
+        match visibility {
+            ColorSpaceVisibility::All => {
+                let nb_cs = self.all_color_spaces.num_color_spaces();
+                if search_reference_type == SearchReferenceSpaceType::All {
+                    return nb_cs;
+                }
+                for i in 0..nb_cs {
+                    let cs = self
+                        .all_color_spaces
+                        .color_space_by_index(i)
+                        .expect("an index of the set");
+                    if match_reference_type(search_reference_type, cs.reference_space_type()) {
+                        res += 1;
+                    }
+                }
+            }
+            ColorSpaceVisibility::Active => {
+                if search_reference_type == SearchReferenceSpaceType::All {
+                    return self.active_color_space_names.len() as i32;
+                }
+                for csname in &self.active_color_space_names {
+                    let cs = self.color_space(csname).expect("an active color space");
+                    if match_reference_type(search_reference_type, cs.reference_space_type()) {
+                        res += 1;
+                    }
+                }
+            }
+            ColorSpaceVisibility::Inactive => {
+                if search_reference_type == SearchReferenceSpaceType::All {
+                    return self.inactive_color_space_names.len() as i32;
+                }
+                for csname in &self.inactive_color_space_names {
+                    let cs = self.color_space(csname).expect("an inactive color space");
+                    if match_reference_type(search_reference_type, cs.reference_space_type()) {
+                        res += 1;
+                    }
+                }
+            }
+        }
+
+        res
+    }
+
+    /// The name of the color space at `index` among those of the reference space
+    /// `search_reference_type` and of `visibility`; `""` outside them.
+    ///
+    /// Port of `Config::getColorSpaceNameByIndex(SearchReferenceSpaceType,
+    /// ColorSpaceVisibility, int)` (src/OpenColorIO/Config.cpp:2394-2495 @ v2.5.2).
+    #[doc(alias = "getColorSpaceNameByIndex")]
+    pub fn color_space_name_by_index_with(
+        &self,
+        search_reference_type: SearchReferenceSpaceType,
+        visibility: ColorSpaceVisibility,
+        index: i32,
+    ) -> &[u8] {
+        if index < 0 {
+            return &[];
+        }
+
+        let mut current = 0;
+        match visibility {
+            ColorSpaceVisibility::All => {
+                if search_reference_type == SearchReferenceSpaceType::All {
+                    return self
+                        .all_color_spaces
+                        .color_space_name_by_index(index)
+                        .unwrap_or(&[]);
+                }
+                let nb_cs = self.all_color_spaces.num_color_spaces();
+                for i in 0..nb_cs {
+                    let cs = self
+                        .all_color_spaces
+                        .color_space_by_index(i)
+                        .expect("an index of the set");
+                    if match_reference_type(search_reference_type, cs.reference_space_type()) {
+                        if current == index {
+                            return cs.name();
+                        }
+                        current += 1;
+                    }
+                }
+            }
+            ColorSpaceVisibility::Active | ColorSpaceVisibility::Inactive => {
+                let names = if visibility == ColorSpaceVisibility::Active {
+                    &self.active_color_space_names
+                } else {
+                    &self.inactive_color_space_names
+                };
+                if search_reference_type == SearchReferenceSpaceType::All {
+                    return names.get(index as usize).map_or(&[], Vec::as_slice);
+                }
+                for csname in names {
+                    let cs = self.color_space(csname).expect("a listed color space");
+                    if match_reference_type(search_reference_type, cs.reference_space_type()) {
+                        if current == index {
+                            return cs.name();
+                        }
+                        current += 1;
+                    }
+                }
+            }
+        }
+
+        &[]
+    }
+
+    /// The color space named `name` (or with the alias `name`), ignoring case, else the color
+    /// space of the role `name`, among all the color spaces (inactive ones included).
+    ///
+    /// Port of `Config::getColorSpace` (src/OpenColorIO/Config.cpp:2497-2500 @ v2.5.2).
+    #[doc(alias = "getColorSpace")]
+    pub fn color_space(&self, name: impl AsRef<[u8]>) -> Option<&ColorSpace> {
+        self.impl_color_space(name.as_ref())
+    }
+
+    /// The name of the color space (by name, alias or role) or named transform (by name or
+    /// alias) `name`; `""` for none.
+    ///
+    /// Port of `Config::getCanonicalName` (src/OpenColorIO/Config.cpp:2502-2515 @ v2.5.2).
+    #[doc(alias = "getCanonicalName")]
+    pub fn canonical_name(&self, name: impl AsRef<[u8]>) -> &[u8] {
+        let name = name.as_ref();
+        if let Some(cs) = self.color_space(name) {
+            return cs.name();
+        }
+        if let Some(nt) = self.impl_named_transform(name) {
+            return nt.name();
+        }
+        &[]
+    }
+
+    /// The number of active color spaces.
+    ///
+    /// Port of `Config::getNumColorSpaces()` (src/OpenColorIO/Config.cpp:2517-2520 @ v2.5.2).
+    #[doc(alias = "getNumColorSpaces")]
+    pub fn num_color_spaces(&self) -> i32 {
+        self.num_color_spaces_with(SearchReferenceSpaceType::All, ColorSpaceVisibility::Active)
+    }
+
+    /// The name of the active color space at `index`; `""` outside them.
+    ///
+    /// Port of `Config::getColorSpaceNameByIndex(int)` (src/OpenColorIO/Config.cpp:2522-2525 @
+    /// v2.5.2).
+    #[doc(alias = "getColorSpaceNameByIndex")]
+    pub fn color_space_name_by_index(&self, index: i32) -> &[u8] {
+        self.color_space_name_by_index_with(
+            SearchReferenceSpaceType::All,
+            ColorSpaceVisibility::Active,
+            index,
+        )
+    }
+
+    /// The index among the active color spaces of the color space `name` (by name, alias or
+    /// role); -1 for none or an inactive one.
+    ///
+    /// Port of `Config::getIndexForColorSpace` (src/OpenColorIO/Config.cpp:2527-2549 @ v2.5.2).
+    #[doc(alias = "getIndexForColorSpace")]
+    pub fn index_for_color_space(&self, name: impl AsRef<[u8]>) -> i32 {
+        let Some(cs) = self.color_space(name) else {
+            return -1;
+        };
+
+        // Check to see if the name is an active color space.
+        let num =
+            self.num_color_spaces_with(SearchReferenceSpaceType::All, ColorSpaceVisibility::Active);
+        for idx in 0..num {
+            // strcmp: names hold no NUL.
+            if self.color_space_name_by_index_with(
+                SearchReferenceSpaceType::All,
+                ColorSpaceVisibility::Active,
+                idx,
+            ) == cs.name()
+            {
+                return idx;
+            }
+        }
+
+        // Requests for an inactive color space or a role mapping
+        // to an inactive color space will both fail.
+        -1
+    }
+
+    /// Adds a copy of `original`, or replaces the color space of the same name. Refuses a
+    /// color space without a name, one whose name or an alias is a role or names a named
+    /// transform, one whose name (in a version 2 config) or an alias holds `$` or `%`, and what
+    /// [`ColorSpaceSet::add_color_space`] refuses.
+    ///
+    /// Port of `Config::addColorSpace` (src/OpenColorIO/Config.cpp:2577-2648 @ v2.5.2).
+    #[doc(alias = "addColorSpace")]
+    pub fn add_color_space(&mut self, original: &ColorSpace) -> Result<()> {
+        let name = original.name();
+        if name.is_empty() {
+            return Err(Exception::new("Color space must have a non-empty name."));
+        }
+
+        // Check this is not an existing role or named transform.
+        if self.has_role(name) {
+            return Err(Exception::new(
+                [
+                    b"Cannot add '".as_slice(),
+                    name,
+                    b"' color space, there is already a role with this name.",
+                ]
+                .concat(),
+            ));
+        }
+        if let Some(nt) = self.impl_named_transform(name) {
+            return Err(Exception::new(
+                [
+                    b"Cannot add '".as_slice(),
+                    name,
+                    b"' color space, there is already a named transform using this name as a \
+                      name or as an alias: '",
+                    nt.name(),
+                    b"'.",
+                ]
+                .concat(),
+            ));
+        }
+
+        if self.major_version() >= 2 && contains_context_variable_token(name) {
+            return Err(Exception::new(
+                [
+                    b"A color space name '".as_slice(),
+                    name,
+                    b"' cannot contain a context variable reserved token i.e. % or $.",
+                ]
+                .concat(),
+            ));
+        }
+
+        let num_aliases = original.num_aliases();
+        for aidx in 0..num_aliases {
+            let alias = original.alias(aidx);
+
+            if self.has_role(alias) {
+                return Err(Exception::new(
+                    [
+                        b"Cannot add '".as_slice(),
+                        name,
+                        b"' color space, it has an alias '",
+                        alias,
+                        b"' and there is already a role with this name.",
+                    ]
+                    .concat(),
+                ));
+            }
+            if let Some(nt) = self.impl_named_transform(alias) {
+                return Err(Exception::new(
+                    [
+                        b"Cannot add '".as_slice(),
+                        name,
+                        b"' color space, it has an alias '",
+                        alias,
+                        b"' and there is already a named transform using this name as a name or \
+                          as an alias: '",
+                        nt.name(),
+                        b"'.",
+                    ]
+                    .concat(),
+                ));
+            }
+            if contains_context_variable_token(alias) {
+                return Err(Exception::new(
+                    [
+                        b"Cannot add '".as_slice(),
+                        name,
+                        b"' color space, it has an alias '",
+                        alias,
+                        b"' that cannot contain a context variable reserved token i.e. % or $.",
+                    ]
+                    .concat(),
+                ));
+            }
+        }
+
+        // This is verifying that name and aliases are fine with other color spaces.
+        self.all_color_spaces.add_color_space(original)?;
+
+        self.reset_cache_ids();
+        self.refresh_active_color_spaces();
+        Ok(())
+    }
+
+    /// Removes the color space whose name (not an alias) is `name`, ignoring case.
+    ///
+    /// Port of `Config::removeColorSpace` (src/OpenColorIO/Config.cpp:2650-2657 @ v2.5.2).
+    #[doc(alias = "removeColorSpace")]
+    pub fn remove_color_space(&mut self, name: impl AsRef<[u8]>) {
+        self.all_color_spaces.remove_color_space(name);
+
+        self.reset_cache_ids();
+        self.refresh_active_color_spaces();
+    }
+
+    /// Removes every color space.
+    ///
+    /// Port of `Config::clearColorSpaces` (src/OpenColorIO/Config.cpp:2773-2780 @ v2.5.2).
+    #[doc(alias = "clearColorSpaces")]
+    pub fn clear_color_spaces(&mut self) {
+        self.all_color_spaces.clear_color_spaces();
+
+        self.reset_cache_ids();
+        self.refresh_active_color_spaces();
+    }
+
+    // Roles ///////////////////////////////////////////////////////////////////////////////////
+
+    /// Sets the role `role` (stored in lower case) to the color space `color_space_name`, or
+    /// removes it for `None` (upstream's null pointer). A new role may not be the name or alias
+    /// of a color space or a named transform, nor hold `$` or `%` (in a version 2 config).
+    ///
+    /// Port of `Config::setRole` (src/OpenColorIO/Config.cpp:2978-3027 @ v2.5.2).
+    #[doc(alias = "setRole")]
+    pub fn set_role(
+        &mut self,
+        role: impl AsRef<[u8]>,
+        color_space_name: Option<&[u8]>,
+    ) -> Result<()> {
+        let role = c_str(role.as_ref());
+        if role.is_empty() {
+            return Err(Exception::new("The role name is null."));
+        }
+
+        // Set the role.
+        if let Some(color_space_name) = color_space_name {
+            if !self.has_role(role) {
+                if self.color_space(role).is_some() {
+                    return Err(Exception::new(
+                        [
+                            b"Cannot add '".as_slice(),
+                            role,
+                            b"' role, there is already a color space using this as a name or \
+                              an alias.",
+                        ]
+                        .concat(),
+                    ));
+                }
+                if self.impl_named_transform(role).is_some() {
+                    return Err(Exception::new(
+                        [
+                            b"Cannot add '".as_slice(),
+                            role,
+                            b"' role, there is already a named transform using this as a name \
+                              or an alias.",
+                        ]
+                        .concat(),
+                    ));
+                }
+                if self.major_version() >= 2 && contains_context_variable_token(role) {
+                    return Err(Exception::new(
+                        [
+                            b"Role name '".as_slice(),
+                            role,
+                            b"' cannot contain a context variable reserved token i.e. % or $.",
+                        ]
+                        .concat(),
+                    ));
+                }
+            }
+            self.roles
+                .insert(lower(role), c_str(color_space_name).to_vec());
+        }
+        // Unset the role.
+        else {
+            self.roles.remove(&lower(role));
+        }
+
+        self.reset_cache_ids();
+        Ok(())
+    }
+
+    /// Port of `Config::getNumRoles` (src/OpenColorIO/Config.cpp:3029-3032 @ v2.5.2).
+    #[doc(alias = "getNumRoles")]
+    pub fn num_roles(&self) -> i32 {
+        self.roles.len() as i32
+    }
+
+    /// Whether the role `role` (ignoring case) exists and names a color space (a role set to
+    /// `""` doesn't count).
+    ///
+    /// Port of `Config::hasRole` (src/OpenColorIO/Config.cpp:3034-3039 @ v2.5.2).
+    #[doc(alias = "hasRole")]
+    pub fn has_role(&self, role: impl AsRef<[u8]>) -> bool {
+        let role = c_str(role.as_ref());
+        if role.is_empty() {
+            return false;
+        }
+        let rname = lookup_role(&self.roles, role);
+        !rname.is_empty()
+    }
+
+    /// The name of the role at `index`, in lower case, in byte order; `""` outside them.
+    ///
+    /// Port of `Config::getRoleName` (src/OpenColorIO/Config.cpp:3041-3047 @ v2.5.2).
+    #[doc(alias = "getRoleName")]
+    pub fn role_name(&self, index: i32) -> &[u8] {
+        usize::try_from(index)
+            .ok()
+            .and_then(|i| self.roles.keys().nth(i))
+            .map_or(&[], Vec::as_slice)
+    }
+
+    /// The color space of the role at `index`; `""` outside them.
+    ///
+    /// Port of `Config::getRoleColorSpace(int)` (src/OpenColorIO/Config.cpp:3049-3052 @
+    /// v2.5.2).
+    #[doc(alias = "getRoleColorSpace")]
+    pub fn role_color_space_by_index(&self, index: i32) -> &[u8] {
+        lookup_role(&self.roles, self.role_name(index))
+    }
+
+    /// The color space of the role `role_name`, ignoring case; `""` for none.
+    ///
+    /// Port of `Config::getRoleColorSpace(const char *)` (src/OpenColorIO/Config.cpp:3054-3058
+    /// @ v2.5.2).
+    #[doc(alias = "getRoleColorSpace")]
+    pub fn role_color_space(&self, role_name: impl AsRef<[u8]>) -> &[u8] {
+        let role_name = c_str(role_name.as_ref());
+        if role_name.is_empty() {
+            return &[];
+        }
+        lookup_role(&self.roles, role_name)
     }
 
     /// Port of `Config::getProcessorCacheFlags` (Config.cpp:924-927, 5333-5336 @ v2.5.2).
