@@ -100,3 +100,45 @@ fn family_separator_without_yaml() {
     assert!(cfg.set_family_separator(127).is_err());
     assert!(cfg.set_family_separator(31).is_err());
 }
+
+/// `Config alias_validation`'s checks of `addColorSpace` (Config_tests.cpp:9415-9438 @ v2.5.2),
+/// without its `validate()` calls (3.8a) and its named transforms (3.4j).
+#[test]
+fn alias_validation_of_color_spaces() {
+    let _env = EnvGuard::new();
+    // NB: This tests ColorSpaceSet::addColorSpace.
+
+    let mut cfg = (*Config::create_raw()).clone();
+    let mut cs = ColorSpace::new();
+    cs.set_name("colorspace1");
+    cfg.add_color_space(&cs).unwrap();
+    cs.set_name("colorspace2");
+    cfg.add_color_space(&cs).unwrap();
+    cs.set_name("colorspace3");
+    cs.add_alias("colorspace1");
+    check_throw_what(
+        cfg.add_color_space(&cs),
+        "Cannot add 'colorspace3' color space, it has 'colorspace1' alias and existing color \
+         space, 'colorspace1' is using the same alias",
+    );
+    cs.remove_alias("colorspace1");
+
+    cfg.set_role("alias", Some(b"colorspace2")).unwrap();
+    cs.add_alias("alias");
+    check_throw_what(
+        cfg.add_color_space(&cs),
+        "Cannot add 'colorspace3' color space, it has an alias 'alias' and there is already a \
+         role with this name",
+    );
+    cs.remove_alias("alias");
+    cs.add_alias("test%test");
+    check_throw_what(
+        cfg.add_color_space(&cs),
+        "Cannot add 'colorspace3' color space, it has an alias 'test%test' that cannot contain \
+         a context variable reserved token i.e. % or $",
+    );
+
+    cs.remove_alias("test%test");
+    cs.add_alias("namedtransform");
+    cfg.add_color_space(&cs).unwrap();
+}

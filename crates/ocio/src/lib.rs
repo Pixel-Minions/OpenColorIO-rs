@@ -35,9 +35,9 @@ pub use named_transform::NamedTransform;
 pub use ocio_ops::exception::{Exception, ExceptionKind, Result};
 pub use ocio_ops::format_metadata::FormatMetadataImpl as FormatMetadata;
 pub use ocio_ops::open_color_types::{
-    Allocation, BitDepth, CdlStyle, ColorSpaceDirection, EnvironmentMode, FixedFunctionStyle,
-    Lut1DHueAdjust, NegativeStyle, OptimizationFlags, ReferenceSpaceType, TransformDirection,
-    ViewTransformDirection,
+    Allocation, BitDepth, CdlStyle, ColorSpaceDirection, ColorSpaceVisibility, EnvironmentMode,
+    FixedFunctionStyle, Lut1DHueAdjust, NegativeStyle, OptimizationFlags, ReferenceSpaceType,
+    SearchReferenceSpaceType, TransformDirection, ViewTransformDirection,
 };
 pub use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 pub use ocio_ops::platform::{
