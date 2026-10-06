@@ -74,7 +74,7 @@ fn build_ops_copies_the_first_group_metadata() {
     crate::transform::build_ops(
         &mut ops,
         &config,
-        config.current_context(),
+        &config.current_context().get(),
         &group.clone().into(),
         TransformDirection::Forward,
     )
@@ -111,7 +111,7 @@ fn build_ops_copies_the_metadata_of_the_groups_met_before_any_op() {
         crate::transform::build_ops(
             &mut ops,
             &config,
-            config.current_context(),
+            &config.current_context().get(),
             &group.clone().into(),
             dir,
         )
@@ -151,7 +151,7 @@ fn build_ops_copies_the_metadata_of_the_groups_met_before_any_op() {
         crate::transform::build_ops(
             &mut ops,
             &config,
-            config.current_context(),
+            &config.current_context().get(),
             &transform,
             TransformDirection::Forward,
         )
