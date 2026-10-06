@@ -12,7 +12,8 @@
 use std::sync::Arc;
 
 use ocio::{
-    ColorSpace, ColorSpaceVisibility, Config, ReferenceSpaceType, SearchReferenceSpaceType,
+    ColorSpace, ColorSpaceDirection, ColorSpaceVisibility, Config, LogTransform, MatrixTransform,
+    ReferenceSpaceType, SearchReferenceSpaceType, Transform,
 };
 use ocio_ops::open_color_types::EnvironmentMode;
 use ocio_ops::platform::{MapEnv, set_thread_env_provider, setenv};
@@ -258,6 +259,10 @@ struct Cs {
     name: Vec<u8>,
     aliases: Vec<Vec<u8>>,
     categories: Vec<Vec<u8>>,
+    encoding: Option<Vec<u8>>,
+    is_data: bool,
+    /// The transforms: their spec, the port's transform, and the direction.
+    transforms: Vec<(Value, Transform, ColorSpaceDirection)>,
 }
 
 fn cs(name: &[u8]) -> Cs {
@@ -266,6 +271,9 @@ fn cs(name: &[u8]) -> Cs {
         name: name.to_vec(),
         aliases: Vec::new(),
         categories: Vec::new(),
+        encoding: None,
+        is_data: false,
+        transforms: Vec::new(),
     }
 }
 
@@ -282,6 +290,18 @@ impl Cs {
         self.categories.push(category.to_vec());
         self
     }
+    fn encoding(mut self, encoding: &[u8]) -> Cs {
+        self.encoding = Some(encoding.to_vec());
+        self
+    }
+    fn data(mut self) -> Cs {
+        self.is_data = true;
+        self
+    }
+    fn transform(mut self, spec: Value, port: Transform, dir: ColorSpaceDirection) -> Cs {
+        self.transforms.push((spec, port, dir));
+        self
+    }
     fn build(&self) -> ColorSpace {
         let mut cs = ColorSpace::with_reference_space(self.reference);
         cs.set_name(&self.name);
@@ -290,6 +310,15 @@ impl Cs {
         }
         for c in &self.categories {
             cs.add_category(c);
+        }
+        if let Some(e) = &self.encoding {
+            cs.set_encoding(e);
+        }
+        if self.is_data {
+            cs.set_is_data(true);
+        }
+        for (_, t, dir) in &self.transforms {
+            cs.set_transform(Some(t), *dir);
         }
         cs
     }
@@ -327,6 +356,28 @@ fn add_color_space(spec: Cs) -> Vec<Step> {
     for c in &spec.categories {
         out.push(step(
             json!({"call": "addCategory", "on": "cs", "args": [arg(c)]}),
+            |_| json!({"result": null}),
+        ));
+    }
+    if let Some(e) = &spec.encoding {
+        out.push(step(
+            json!({"call": "setEncoding", "on": "cs", "args": [arg(e)]}),
+            |_| json!({"result": null}),
+        ));
+    }
+    if spec.is_data {
+        out.push(step(
+            json!({"call": "setIsData", "on": "cs", "args": [true]}),
+            |_| json!({"result": null}),
+        ));
+    }
+    for (t, _, dir) in &spec.transforms {
+        let dir = match dir {
+            ColorSpaceDirection::ToReference => "COLORSPACE_DIR_TO_REFERENCE",
+            ColorSpaceDirection::FromReference => "COLORSPACE_DIR_FROM_REFERENCE",
+        };
+        out.push(step(
+            json!({"call": "setTransform", "on": "cs", "args": [{"transform": t}, {"enum": dir}]}),
             |_| json!({"result": null}),
         ));
     }
@@ -483,6 +534,81 @@ fn color_space_getters(probes: &Probes) -> Vec<Step> {
     out
 }
 
+fn set_inactive_color_spaces(list: &[u8]) -> Step {
+    let list = list.to_vec();
+    step(
+        json!({"call": "setInactiveColorSpaces", "args": [arg(&list)]}),
+        move |c| {
+            c.set_inactive_color_spaces(&list);
+            json!({"result": null})
+        },
+    )
+}
+
+fn set_strict_parsing_enabled(enabled: bool) -> Step {
+    step(
+        json!({"call": "setStrictParsingEnabled", "args": [enabled]}),
+        move |c| {
+            c.set_strict_parsing_enabled(enabled);
+            json!({"result": null})
+        },
+    )
+}
+
+fn set_default_luma_coefs(c3: [f64; 3]) -> Step {
+    let bits: Vec<Value> = c3.iter().map(|v| json!({"f64": v.to_bits()})).collect();
+    step(
+        json!({"call": "setDefaultLumaCoefs", "args": [bits]}),
+        move |c| {
+            c.set_default_luma_coefs(&c3);
+            json!({"result": null})
+        },
+    )
+}
+
+/// The getters of the inactive list, strict parsing and the luma, and for each probe name
+/// `isInactiveColorSpace` and `isColorSpaceLinear` for both reference spaces.
+fn model_getters(probes: &Probes) -> Vec<Step> {
+    let mut out = vec![
+        step(json!({"call": "getInactiveColorSpaces"}), |c| {
+            text_out(c.inactive_color_spaces())
+        }),
+        step(
+            json!({"call": "isStrictParsingEnabled"}),
+            |c| json!({"result": c.is_strict_parsing_enabled()}),
+        ),
+        step(json!({"call": "getDefaultLumaCoefs"}), |c| {
+            let bits: Vec<Value> = c
+                .default_luma_coefs()
+                .iter()
+                .map(|v| json!({"f64": v.to_bits()}))
+                .collect();
+            json!({ "result": bits })
+        }),
+    ];
+    for name in &probes.names {
+        let n = name.clone();
+        out.push(step(
+            json!({"call": "isInactiveColorSpace", "args": [arg(name)]}),
+            move |c| json!({"result": c.is_inactive_color_space(&n)}),
+        ));
+        for (t, t_name) in [
+            (ReferenceSpaceType::Scene, "REFERENCE_SPACE_SCENE"),
+            (ReferenceSpaceType::Display, "REFERENCE_SPACE_DISPLAY"),
+        ] {
+            let n = name.clone();
+            out.push(step(
+                json!({"call": "isColorSpaceLinear", "args": [arg(name), {"enum": t_name}]}),
+                move |c| match c.is_color_space_linear(&n, t) {
+                    Ok(v) => json!({ "result": v }),
+                    Err(e) => unit_out(Err(e)),
+                },
+            ));
+        }
+    }
+    out
+}
+
 /// The config's getters, then its context's `repr()`.
 fn getters() -> Vec<Step> {
     vec![
@@ -538,6 +664,7 @@ fn getters() -> Vec<Step> {
 fn all_getters(probes: &Probes) -> Vec<Step> {
     let mut out = getters();
     out.extend(color_space_getters(probes));
+    out.extend(model_getters(probes));
     out
 }
 
@@ -959,4 +1086,111 @@ fn the_raw_config_color_space_matches_the_wheel() {
         ],
         &probes,
     );
+}
+
+/// The list of inactive color spaces of the API, which supersedes the environment's, and
+/// `isInactiveColorSpace`, which reads the config's list only; strict parsing; the default luma.
+#[test]
+fn inactive_lists_strict_parsing_and_luma_match_the_wheel() {
+    let env: Env = &[("OCIO_INACTIVE_COLORSPACES", b"b")];
+    let items: Vec<Item> = vec![
+        add_color_space(cs(b"a").alias(b"a2")).into(),
+        add_color_space(cs(b"b").display()).into(),
+        add_color_space(cs(b"c")).into(),
+        set_role(b"role1", Some(b"c")).into(),
+        set_inactive_color_spaces(b" a2, role1 ,unknown ").into(),
+        set_inactive_color_spaces(b"a, b").into(),
+        set_inactive_color_spaces(b"a,b").into(),
+        set_inactive_color_spaces(b"A, , c").into(),
+        Item::Copy,
+        set_inactive_color_spaces(b"").into(),
+        set_inactive_color_spaces(b"   ").into(),
+        set_inactive_color_spaces(b"c\0b").into(),
+        set_strict_parsing_enabled(false).into(),
+        set_default_luma_coefs([0.25, -0.0, f64::MAX]).into(),
+        Item::Copy,
+        set_strict_parsing_enabled(true).into(),
+        set_default_luma_coefs([1.0 / 3.0, f64::MIN_POSITIVE, 0.0]).into(),
+    ];
+    let probes = probes(
+        &[
+            b"a", b"A", b"a2", b"b", b"c", b"role1", b"unknown", b"", b"a, b",
+        ],
+        &[],
+    );
+    check_items("inactive lists", "new", env, items, &probes);
+}
+
+/// `isColorSpaceLinear`: data spaces, the other reference space, encodings, transforms in
+/// either direction (linear or not), no transform, and unknown spaces.
+#[test]
+fn color_space_linearity_matches_the_wheel() {
+    let matrix = || {
+        let mut m = MatrixTransform::new();
+        m.set_matrix(&[
+            2.0, 0.1, 0.0, 0.0, 0.0, 1.5, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0, 1.0,
+        ]);
+        (
+            json!({"class": "MatrixTransform", "calls": [["setMatrix",
+                [2.0, 0.1, 0.0, 0.0, 0.0, 1.5, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 0.0, 1.0]]]}),
+            Transform::from(m),
+        )
+    };
+    let offset = || {
+        let mut m = MatrixTransform::new();
+        m.set_offset(&[0.01, 0.0, 0.0, 0.0]);
+        (
+            json!({"class": "MatrixTransform", "calls": [["setOffset", [0.01, 0.0, 0.0, 0.0]]]}),
+            Transform::from(m),
+        )
+    };
+    let log = || {
+        (
+            json!({"class": "LogTransform"}),
+            Transform::from(LogTransform::new()),
+        )
+    };
+    let with = |c: Cs, (spec, t): (Value, Transform), dir| c.transform(spec, t, dir);
+    let to = ColorSpaceDirection::ToReference;
+    let from = ColorSpaceDirection::FromReference;
+    let items: Vec<Item> = vec![
+        add_color_space(cs(b"plain")).into(),
+        add_color_space(cs(b"plain_display").display()).into(),
+        add_color_space(cs(b"data").data()).into(),
+        add_color_space(cs(b"enc_scene").encoding(b"Scene-Linear")).into(),
+        add_color_space(cs(b"enc_display").display().encoding(b"display-linear")).into(),
+        add_color_space(cs(b"enc_other").encoding(b"log")).into(),
+        add_color_space(with(cs(b"matrix_to"), matrix(), to)).into(),
+        add_color_space(with(cs(b"matrix_from").display(), matrix(), from)).into(),
+        add_color_space(with(cs(b"log_to"), log(), to)).into(),
+        add_color_space(with(cs(b"log_from"), log(), from)).into(),
+        add_color_space(with(with(cs(b"both"), matrix(), to), log(), from)).into(),
+        add_color_space(with(cs(b"offset"), offset(), to)).into(),
+        add_color_space(with(cs(b"data_log").data(), log(), to)).into(),
+        add_color_space(with(cs(b"enc_log").encoding(b"scene-linear"), log(), to)).into(),
+        set_role(b"lin_role", Some(b"matrix_to")).into(),
+    ];
+    let probes = probes(
+        &[
+            b"plain",
+            b"plain_display",
+            b"data",
+            b"enc_scene",
+            b"enc_display",
+            b"enc_other",
+            b"matrix_to",
+            b"matrix_from",
+            b"log_to",
+            b"log_from",
+            b"both",
+            b"offset",
+            b"data_log",
+            b"enc_log",
+            b"lin_role",
+            b"unknown",
+            b"",
+        ],
+        &[],
+    );
+    check_items("linearity", "new", &[], items, &probes);
 }

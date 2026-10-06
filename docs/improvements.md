@@ -362,6 +362,24 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** the setters are matched in `p3-config-1` (3.4d: they keep the cache IDs); the
   cache ID itself comes with 3.7d, which checks it against the wheel.
 
+### I-131. `isInactiveColorSpace` reads its own list its own way
+
+- **Upstream:** `Config::isInactiveColorSpace` (`Config.cpp:2561-2575`) doesn't ask the list
+  the config uses (`getColorSpaceNames(..., COLORSPACE_INACTIVE)`, built from the API's, the
+  environment's or the config's list, split on `,` and trimmed, by name, alias or role,
+  `Config.cpp:5351-5407`). It splits the config's own list (`getInactiveColorSpaces`) on the
+  two characters `", "` and compares each piece with the name, ignoring case. So:
+  - `OCIO_INACTIVE_COLORSPACES` is ignored;
+  - `"a,b"` is one piece, so `a` is not inactive, though the config makes it so;
+  - aliases and roles don't count;
+  - an empty list splits into one empty piece, so `isInactiveColorSpace("")` is true on a
+    config without inactive color spaces.
+  Seen through the wheel, as in `crates/ocio/tests/config_oracle.rs`.
+- **Who notices:** applications that ask whether a color space is inactive by this function.
+- **A fix:** look the name up in the config's inactive color spaces.
+- **Status:** matched in `p3-config-1` (3.4g), checked against the wheel in
+  `crates/ocio/tests/config_oracle.rs`.
+
 ## Numeric helpers
 
 ### I-20. Double values are compared to 0 and 1 in float precision
