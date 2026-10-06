@@ -158,13 +158,15 @@ note = "1.8g: GenericCache and ProcessorCache, keyed by std::hash<std::string> (
 path = "src/OpenColorIO/ColorSpace.cpp"
 kind = "src"
 target = ["crates/ocio/src/color_space.rs"]
-status = "todo"
+status = "done"
+note = "p3-model-objects (3.4a): the class and its operator<<; BoolToString (ParseUtils.cpp:101-104) is a crate-private copy in color_space.rs until p3-context's parse_utils lands"
 
 [[file]]
 path = "src/OpenColorIO/ColorSpaceSet.cpp"
 kind = "src"
 target = ["crates/ocio/src/color_space_set.rs"]
-status = "todo"
+status = "done"
+note = "p3-model-objects (3.4b): the class and the operators ||, && and - (ColorSpaceSet::union, intersection, difference)"
 
 [[file]]
 path = "src/OpenColorIO/Config.cpp"
@@ -371,19 +373,22 @@ note = "see Logging.cpp"
 path = "src/OpenColorIO/Look.cpp"
 kind = "src"
 target = ["crates/ocio/src/look.rs"]
-status = "todo"
+status = "partial"
+note = "p3-model-objects (3.4b): the class and its operator<< (U-50); CollectContextVariables (198-271) comes with 3.2b"
 
 [[file]]
 path = "src/OpenColorIO/LookParse.cpp"
 kind = "src"
 target = ["crates/ocio/src/look_parse.rs"]
-status = "todo"
+status = "done"
+note = "p3-model-objects (3.4b); it splits with ocio_ops::parse_utils::split_string_env_style (p3-context 3.5c)"
 
 [[file]]
 path = "src/OpenColorIO/LookParse.h"
 kind = "src"
 target = ["crates/ocio/src/look_parse.rs"]
-status = "todo"
+status = "done"
+note = "p3-model-objects (3.4b)"
 
 [[file]]
 path = "src/OpenColorIO/LutLimits.h"
@@ -415,13 +420,15 @@ status = "todo"
 path = "src/OpenColorIO/NamedTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/named_transform.rs"]
-status = "todo"
+status = "partial"
+note = "p3-model-objects (3.4c): the class and its operator<<; NamedTransform::GetTransform and GetTransform(src, dst) (182-221, 310-334) come with 3.2a"
 
 [[file]]
 path = "src/OpenColorIO/NamedTransform.h"
 kind = "src"
 target = ["crates/ocio/src/named_transform.rs"]
-status = "todo"
+status = "partial"
+note = "p3-model-objects (3.4c): NamedTransformImpl; the GetTransform declaration comes with 3.2a"
 
 [[file]]
 path = "src/OpenColorIO/OCIOYaml.cpp"
@@ -593,7 +600,8 @@ status = "todo"
 path = "src/OpenColorIO/TokensManager.h"
 kind = "src"
 target = ["crates/ocio/src/tokens_manager.rs"]
-status = "todo"
+status = "done"
+note = "p3-model-objects (3.4a)"
 
 [[file]]
 path = "src/OpenColorIO/Transform.cpp"
@@ -612,7 +620,8 @@ status = "todo"
 path = "src/OpenColorIO/ViewTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/view_transform.rs"]
-status = "todo"
+status = "done"
+note = "p3-model-objects (3.4c)"
 
 [[file]]
 path = "src/OpenColorIO/ViewingRules.cpp"
@@ -4192,12 +4201,14 @@ path = "tests/cpu/ColorSpaceSet_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/color_space_set_tests.rs"]
 status = "todo"
+note = "all 4 tests build their sets with Config::getColorSpaces and addColorSpace: they move to p3-config-1 (3.4f). p3-model-objects (3.4b) tests the class on its own in color_space_set_tests.rs"
 
 [[file]]
 path = "tests/cpu/ColorSpace_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/color_space_tests.rs"]
-status = "todo"
+status = "partial"
+note = "p3-model-objects (3.4a): basic, alias, category, interop_id, amf_transform_ids, icc_profile_name, unknown_interchange_attrib; color_space_serialize, interop_id_serialization, icc_profile_name_serialization come with 3.7b, use_alias with 3.3j, is_colorspace_linear with p3-after-p2 (Lut3D), the two processor_to_known_colorspace tests with ConfigUtils (Phase 9)"
 
 [[file]]
 path = "tests/cpu/ConfigUtils_tests.cpp"
@@ -4274,7 +4285,8 @@ status = "done"
 path = "tests/cpu/LookParse_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/look_parse_tests.rs"]
-status = "todo"
+status = "done"
+note = "p3-model-objects (3.4b)"
 
 [[file]]
 path = "tests/cpu/MathUtils_tests.cpp"
@@ -4288,6 +4300,7 @@ path = "tests/cpu/NamedTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/named_transform_tests.rs"]
 status = "todo"
+note = "basic and alias add named transforms to a config (3.4j) and call NamedTransform::GetTransform (3.2a): they move to p3-config-2; p3-model-objects (3.4c) checks their parts without a config in named_transform_tests.rs. The others: static_get_transform (3.2a), the Config tests (3.2d, 3.3j, 3.8b)"
 
 [[file]]
 path = "tests/cpu/OCIOZArchive_tests.cpp"
@@ -4407,7 +4420,8 @@ note = "S2: EqualWithSafeRelError"
 path = "tests/cpu/ViewTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/view_transform_tests.rs"]
-status = "todo"
+status = "done"
+note = "p3-model-objects (3.4c)"
 
 [[file]]
 path = "tests/cpu/ViewingRules_tests.cpp"

@@ -1564,3 +1564,45 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Status:** p3-context, the fix chunk after the verifier's review (`crates/ocio-ops/src/
   platform.rs`, `put`); checked against the wheel, whose process ends, in
   `crates/ocio/tests/env_oracle.rs`.
+
+### U-50. A look's transform set to null
+
+- **Upstream:** `Look::setTransform` and `Look::setInverseTransform` call
+  `transform->createEditableCopy()` without checking the pointer (`Look.cpp:116-129`), so a
+  null transform dereferences null. Through the wheel, `Look().setTransform(None)` ends the
+  Python process with an access violation on both platforms: exit code 0xC0000005
+  (-1073741819) on Windows, a segmentation fault (a shell reports 139, 128 + SIGSEGV) on Linux.
+  The color space's, view transform's and named transform's setters check for null and remove
+  the transform instead.
+- **Who notices:** code and Python scripts that clear a look's transform by setting it to null.
+- **Decided** (general rule): the Rust setters take a `&Transform`, which can't be null; the
+  Python module (Phase 6) refuses `None` with an error instead of crashing.
+- **Status:** matched in `p3-model-objects` (3.4b, `look.rs`); the Python part is Phase 6's.
+
+### U-51. A color space set given a null color space or a null set
+
+- **Upstream:** `ColorSpaceSet` dereferences the pointers it is given without checking them:
+  `addColorSpace(nullptr)` (`cs->getName()`, `ColorSpaceSet.cpp:122`), `addColorSpaces(nullptr)`
+  and `removeColorSpaces(nullptr)` (`*css->m_impl`, 298, 308), and the operators `||`, `&&` and
+  `-` with a null right-hand set (`ColorSpaceSet.cpp:320, 329, 350`). Through the wheel,
+  `s.addColorSpace(None)`, `s.addColorSpaces(None)`, `s.removeColorSpaces(None)`, `s | None`,
+  `s & None` and `s - None` end the Python process with an access violation (0xC0000005 on
+  Windows, a segmentation fault on Linux). `s == None` is `False` (Python's own fallback).
+- **Who notices:** code and Python scripts that pass a missing color space or set.
+- **Decided** (general rule): the Rust methods take `&ColorSpace` and `&ColorSpaceSet`, which
+  can't be null; the Python module (Phase 6) refuses `None` with an error instead of crashing.
+- **Status:** matched in `p3-model-objects` (3.4b, `color_space_set.rs`); the Python part is
+  Phase 6's.
+
+### U-52. The transform of a named transform that has none
+
+- **Upstream:** `NamedTransform::GetTransform(nt, dir)` (`NamedTransform.cpp:182-221`) inverts
+  the other direction's transform when `dir`'s is null, without checking that one: for a named
+  transform with neither transform it dereferences null (`inverseTransform->createEditableCopy()`,
+  194, or `forwardTransform->...`, 209). Through the wheel,
+  `NamedTransform.GetTransform(NamedTransform(), TRANSFORM_DIR_FORWARD)` ends the Python process
+  with an access violation; so does any processor of such a named transform.
+- **Who notices:** code that asks a named transform without transforms for its transform.
+- **Decided** (general rule): return an error instead (its text is decided with the port).
+- **Status:** to port with `NamedTransform::GetTransform` (WP 3.2a, `p3-builders`), found by the
+  `p3-model-objects` verifier.
