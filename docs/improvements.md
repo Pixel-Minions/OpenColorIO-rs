@@ -387,11 +387,34 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   active and inactive named transforms; it does both only when no named transform has the
   name. So after a removal, `getNamedTransformNames()` (the active ones) and
   `getNamedTransformNames(NAMEDTRANSFORM_INACTIVE)` still give the removed name, and the
-  config's cache ID and validation stay as they were. Seen in the source: the wheel's Python
-  module doesn't bind `removeNamedTransform`, and upstream's tests don't call it.
+  config's cache ID and validation stay as they were. Seen in the source only: the wheel's
+  Python module doesn't bind `removeNamedTransform`, and upstream's tests don't call it. The
+  config merger calls it on its working copy of a config (`apphelpers/mergeconfigs/
+  SectionMerger.cpp:3288, 3415, 3563`), but builds the merged config with
+  `addNamedTransform`, which rebuilds the lists (`Config.cpp:3296-3297`), so a merged config
+  doesn't show the stale ones.
 - **Who notices:** C++ applications that remove named transforms and list them after.
 - **A fix:** reset and rebuild after the removal, as `removeColorSpace` does.
 - **Status:** matched in `p3-config-2` (3.4j, `Config::remove_named_transform`).
+
+### I-134. Copying a config reads the environment again
+
+- **Upstream:** `Config::createEditableCopy` (`Config.cpp:1352-1357`) makes a new config with
+  `Config::Create`, whose `Impl` constructor (`Config.cpp:335-374`) reads `OCIO_ACTIVE_DISPLAYS`,
+  `OCIO_ACTIVE_VIEWS` and `OCIO_INACTIVE_COLORSPACES` and splits the first two with
+  `SplitStringEnvStyle`, then overwrites all three with the copied config's. So the copy reads
+  the environment for nothing, and it throws (`SplitStringEnvStyle`'s error for a quote opened
+  and not closed before a separator) when the environment has changed since the config was
+  made and one of those lists is now malformed. The Python binding's `__deepcopy__`
+  (`PyConfig.cpp:193-196`) goes through it.
+- **Who notices:** a host that changes `OCIO_ACTIVE_DISPLAYS` or `OCIO_ACTIVE_VIEWS` to a
+  malformed list while it holds a config, then copies the config.
+- **A fix:** copy the state without constructing a new `Impl` from the environment.
+- **Status:** not matched, by Rust's `Clone`: `Clone for Config` can't fail, and copies without
+  reading the environment (`crates/ocio/src/config.rs`). A binding that must raise as the wheel
+  does can call `Config::new()` first and drop its result, as upstream's construction does.
+  Seen in the source; the oracle sets the environment once per process, before the config is
+  made, so it can't show the case.
 
 ## Numeric helpers
 

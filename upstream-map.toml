@@ -39,7 +39,7 @@ path = "include/OpenColorIO/OpenColorTypes.h"
 kind = "api"
 target = ["crates/ocio/src/lib.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs", "crates/ocio-ops/src/format_metadata.rs", "crates/ocio-ops/src/logging.rs", "crates/ocio-gpu/src/open_color_types.rs", "crates/ocio/src/transform.rs", "crates/ocio/src/transforms/range_transform.rs"]
 status = "partial"
-note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.1a: BitDepth, and BitDepthToString (defined in ParseUtils.cpp); 1.1b: ChannelOrdering; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does; 1.2b: DynamicPropertyType; 1.2e: LoggingLevel (288-297), in open_color_types.rs, and LoggingFunction (283-284), in logging.rs; 1.7a: GpuLanguage, in ocio-gpu/src/open_color_types.rs; 1.3n1: Allocation (459-463); 1.2d: OptimizationFlags (634-722), a bit-flags type over a C unsigned long; p1-optimizer A: Lut1DHueAdjust (441-447); p1-transforms T0: TransformType (361-386), in crates/ocio/src/transform.rs; p1-transforms-fam1 (1.8c): RangeStyle (491-496), in crates/ocio/src/transforms/range_transform.rs; p3-context 3.5c: EnvironmentMode (484-489); p2-ff-cpu 2.3a1: FixedFunctionStyle (499-524); p2-rgbcurve 2.6a: GradingStyle (560-566), RGBCurveType (580-588) and BSplineType (611-620), in open_color_types.rs, re-exported by ocio as GradingStyle, RgbCurveType and BSplineType; p3-config-1 3.4f: SearchReferenceSpaceType (316-321), ColorSpaceVisibility (323-328), and the ROLE_* constants (870-913, defined in ParseUtils.cpp)"
+note = "S2: TransformDirection and NegativeStyle, in ocio-ops for the op data; S4: Interpolation, in ops/lut3d/lut3d_op_data.rs until it moves to open_color_types.rs; 1.1a: BitDepth, and BitDepthToString (defined in ParseUtils.cpp); 1.1b: ChannelOrdering; 1.2a: the METADATA_* constants (941-978), in format_metadata.rs, which defines them as FormatMetadata.cpp does; 1.2b: DynamicPropertyType; 1.2e: LoggingLevel (288-297), in open_color_types.rs, and LoggingFunction (283-284), in logging.rs; 1.7a: GpuLanguage, in ocio-gpu/src/open_color_types.rs; 1.3n1: Allocation (459-463); 1.2d: OptimizationFlags (634-722), a bit-flags type over a C unsigned long; p1-optimizer A: Lut1DHueAdjust (441-447); p1-transforms T0: TransformType (361-386), in crates/ocio/src/transform.rs; p1-transforms-fam1 (1.8c): RangeStyle (491-496), in crates/ocio/src/transforms/range_transform.rs; p3-context 3.5c: EnvironmentMode (484-489); p2-ff-cpu 2.3a1: FixedFunctionStyle (499-524); p2-rgbcurve 2.6a: GradingStyle (560-566), RGBCurveType (580-588) and BSplineType (611-620), in open_color_types.rs, re-exported by ocio as GradingStyle, RgbCurveType and BSplineType; p3-config-1 3.4f: SearchReferenceSpaceType (316-321), ColorSpaceVisibility (323-328), and the ROLE_* constants (870-913, defined in ParseUtils.cpp); p3-config-2 3.4h-j: NamedTransformVisibility (330-335), ViewType (337-341)"
 
 [[file]]
 path = "src/CMakeLists.txt"
@@ -218,14 +218,14 @@ status = "todo"
 path = "src/OpenColorIO/Display.cpp"
 kind = "src"
 target = ["crates/ocio/src/display.rs"]
-status = "done"
+status = "partial"
 note = "p3-config-2 3.4h: View (UseDisplayName; useDisplayNameForColorspace comes with its callers, isColorSpaceUsed and validate), Display, FindView, AddView, FindDisplay, ComputeDisplays; OCIO_VIEW_USE_DISPLAY_NAME (Config.cpp:59)"
 
 [[file]]
 path = "src/OpenColorIO/Display.h"
 kind = "src"
 target = ["crates/ocio/src/display.rs"]
-status = "done"
+status = "partial"
 note = "p3-config-2 3.4h: View (UseDisplayName; useDisplayNameForColorspace comes with its callers, isColorSpaceUsed and validate), Display, FindView, AddView, FindDisplay, ComputeDisplays; OCIO_VIEW_USE_DISPLAY_NAME (Config.cpp:59)"
 
 [[file]]
