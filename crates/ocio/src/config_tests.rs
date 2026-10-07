@@ -456,9 +456,9 @@ fn upgrade_without_a_scene_color_space_is_refused() {
     config.add_color_space(&cs).unwrap();
     config.set_inactive_color_spaces("display_only");
     config.set_major_version(1).unwrap();
-    let rules = config.file_rules().to_bytes();
+    let rules = config.file_rules().get().to_bytes();
 
     assert!(config.upgrade_to_latest_version().is_err());
     assert_eq!(config.major_version(), 1);
-    assert_eq!(config.file_rules().to_bytes(), rules);
+    assert_eq!(config.file_rules().get().to_bytes(), rules);
 }
