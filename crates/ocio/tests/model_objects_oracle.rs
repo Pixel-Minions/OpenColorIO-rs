@@ -11,8 +11,9 @@
 
 use ocio::{
     Allocation, BitDepth, ColorSpace, ColorSpaceDirection, ColorSpaceSet, FixedFunctionStyle,
-    FixedFunctionTransform, LogTransform, Look, MatrixTransform, NamedTransform, RangeTransform,
-    ReferenceSpaceType, Transform, TransformDirection, ViewTransform, ViewTransformDirection,
+    FixedFunctionTransform, GroupTransform, LogTransform, Look, MatrixTransform, NamedTransform,
+    RangeTransform, ReferenceSpaceType, Transform, TransformDirection, ViewTransform,
+    ViewTransformDirection,
 };
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle_values::{bytes, exception, log};
@@ -1047,7 +1048,9 @@ fn a_named_transform_set_to_null_has_no_transform() {
 
 /// Fixed functions given to the objects: a valid one, then two that upstream's
 /// `createEditableCopy` refuses (styles given the wrong number of parameters after they were
-/// made), which leave the object's transform as it was.
+/// made), which leave the object's transform as it was; then a group holding the first invalid
+/// one (appended: the binding's `GroupTransform([ff])` validates), which the objects take, as a
+/// group's copy shares its children unvalidated.
 fn fixed_functions() -> Vec<(Value, Transform)> {
     let surround = FixedFunctionTransform::new(FixedFunctionStyle::Rec2100Surround, &[0.78])
         .expect("a valid fixed function");
@@ -1056,6 +1059,8 @@ fn fixed_functions() -> Vec<(Value, Transform)> {
     let mut glow = FixedFunctionTransform::new(FixedFunctionStyle::AcesGlow03, &[])
         .expect("a valid fixed function");
     glow.set_params(&[1.0]);
+    let mut group = GroupTransform::new();
+    group.append_transform(no_params.clone().into());
     let surround_spec = json!({"style": enum_spec("FIXED_FUNCTION_REC2100_SURROUND"),
                                "params": [0.78]});
     vec![
@@ -1073,6 +1078,12 @@ fn fixed_functions() -> Vec<(Value, Transform)> {
                    "args": {"style": enum_spec("FIXED_FUNCTION_ACES_GLOW_03")},
                    "calls": [["setParams", [1.0]]]}),
             glow.into(),
+        ),
+        (
+            json!({"class": "GroupTransform",
+                   "children": [{"class": "FixedFunctionTransform", "args": surround_spec,
+                                 "calls": [["setParams", []]]}]}),
+            group.into(),
         ),
     ]
 }

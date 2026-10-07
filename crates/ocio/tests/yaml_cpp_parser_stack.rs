@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! The port of yaml-cpp's parser parses the deepest documents yaml-cpp allows on a thread of
-//! 1 MiB (a program's main thread on Windows), and refuses one level deeper with yaml-cpp's
-//! "bad file", as the wheel does.
+//! The port of yaml-cpp's parser parses the deepest documents yaml-cpp allows from a thread of
+//! 64 KiB (far less than a program's main thread, 1 MiB on Windows: without its own thread
+//! the parser overflows there at opt-level 1 and in release too), and refuses one level deeper
+//! with yaml-cpp's "bad file", as the wheel does.
 //!
 //! `SingleDocParser` recurses once per nested node up to its `DepthGuard<500>`: 498 nodes
 //! nested in the document's root parse, 499 don't. The port parses each document on a thread
@@ -61,7 +62,7 @@ fn the_deepest_documents_parse_on_a_small_stack() {
 
     let inputs = docs.clone();
     let port: Vec<Option<Vec<u8>>> = std::thread::Builder::new()
-        .stack_size(1 << 20)
+        .stack_size(64 << 10)
         .spawn(move || {
             inputs
                 .iter()
