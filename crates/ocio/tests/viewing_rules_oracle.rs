@@ -348,3 +348,22 @@ fn large_indices_match_the_wheel() {
     ];
     check("large indices", steps, &[]);
 }
+
+/// One color space blocks encodings, and one encoding color spaces: the checks that refuse
+/// the other kind count from one.
+#[test]
+fn one_color_space_or_encoding_blocks_the_other_as_in_the_wheel() {
+    let steps = vec![
+        Some(insert(0, b"cs")),
+        Some(insert(1, b"enc")),
+        Some(add_color_space(0, b"a")),
+        Some(add_encoding(0, b"log")),
+        Some(add_encoding(1, b"log")),
+        Some(add_color_space(1, b"a")),
+        Some(remove_color_space(0, 0)),
+        Some(add_encoding(0, b"log")),
+        Some(remove_encoding(1, 0)),
+        Some(add_color_space(1, b"a")),
+    ];
+    check("one of a kind", steps, &[]);
+}
