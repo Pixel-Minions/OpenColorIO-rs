@@ -1041,6 +1041,105 @@ pub(crate) fn lut1d_lookups() -> Cases {
     }
 }
 
+/// A `Lut3DTransform` of `grid_size` entries per side, `f(r, g, b)` for each entry (its grid
+/// position scaled to [0, 1]), with `interpolation` (an `INTERP_*` name). The entries are not
+/// battery slots.
+pub(crate) fn lut3d_calls(
+    grid_size: u64,
+    interpolation: &str,
+    f: impl Fn([f32; 3]) -> [f32; 3],
+) -> Calls {
+    let mut calls = Calls::new("Lut3DTransform").fixed("setGridSize", serde_json::json!(grid_size));
+    let last = grid_size.saturating_sub(1).max(1) as f32;
+    for i in 0..grid_size {
+        for j in 0..grid_size {
+            for k in 0..grid_size {
+                let [r, g, b] = f([i, j, k].map(|x| x as f32 / last)).map(f64::from);
+                calls = calls.call(
+                    "setValue",
+                    [i, j, k]
+                        .map(|x| Arg::Fixed(serde_json::json!(x)))
+                        .into_iter()
+                        .chain([r, g, b].map(|v| Arg::Fixed(num(v))))
+                        .collect(),
+                );
+            }
+        }
+    }
+    calls.enumerated("setInterpolation", interpolation)
+}
+
+/// `Lut3DTransform`, forward only (the inverse LUT's renderer and fast forward LUT are WP
+/// 2.2d and 2.2e): smooth and folded cubes of 2 to 17 entries per side in each interpolation,
+/// the default cube of 1 entry per side (a NaN identity, I-152), and groups of a LUT and its
+/// inverse in either order, which the optimizer replaces with a [0, 1] range
+/// (`OPTIMIZATION_PAIR_IDENTITY_LUT3D`, `Lut3DOpData::getIdentityReplacement`), and of two
+/// LUTs, which it leaves (`OPTIMIZATION_COMP_LUT3D` isn't in the default).
+pub(crate) fn lut3d() -> Cases {
+    let smooth = |[r, g, b]: [f32; 3]| [r * r * 0.9 + 0.05, g.sqrt(), 0.2 + 0.6 * b + 0.1 * r];
+    let folded = |[r, g, b]: [f32; 3]| [1.5 * g - 0.25, (r - b).abs(), 1.0 - r * g];
+    let mut cases = Vec::new();
+    for interp in [
+        "INTERP_TETRAHEDRAL",
+        "INTERP_LINEAR",
+        "INTERP_BEST",
+        "INTERP_NEAREST",
+    ] {
+        cases.push(Case::new(
+            format!("smooth 5^3, {interp}"),
+            lut3d_calls(5, interp, smooth),
+        ));
+    }
+    cases.extend([
+        Case::new(
+            "folded 3^3, INTERP_DEFAULT",
+            lut3d_calls(3, "INTERP_DEFAULT", folded),
+        ),
+        Case::new(
+            "folded 2^3, INTERP_TETRAHEDRAL",
+            lut3d_calls(2, "INTERP_TETRAHEDRAL", folded),
+        ),
+        Case::new(
+            "smooth 17^3, INTERP_TETRAHEDRAL",
+            lut3d_calls(17, "INTERP_TETRAHEDRAL", smooth),
+        ),
+        Case::new(
+            "the default cube of 1 entry",
+            Calls::new("Lut3DTransform").fixed("setGridSize", serde_json::json!(1)),
+        ),
+    ]);
+    let group = || Calls::new("GroupTransform");
+    let inverse = Direction::Inverse;
+    for (fwd, inv) in [
+        ("INTERP_TETRAHEDRAL", "INTERP_TETRAHEDRAL"),
+        ("INTERP_LINEAR", "INTERP_LINEAR"),
+        ("INTERP_LINEAR", "INTERP_TETRAHEDRAL"),
+    ] {
+        cases.push(Case::new(
+            format!("a LUT ({fwd}) and its inverse ({inv})"),
+            group()
+                .child(lut3d_calls(3, fwd, folded))
+                .child_in(lut3d_calls(3, inv, folded), inverse),
+        ));
+        cases.push(Case::new(
+            format!("an inverse LUT ({inv}) and the LUT ({fwd})"),
+            group()
+                .child_in(lut3d_calls(3, inv, folded), inverse)
+                .child(lut3d_calls(3, fwd, folded)),
+        ));
+    }
+    cases.push(Case::new(
+        "two LUTs",
+        group()
+            .child(lut3d_calls(3, "INTERP_LINEAR", folded))
+            .child(lut3d_calls(5, "INTERP_TETRAHEDRAL", smooth)),
+    ));
+    Cases {
+        cases,
+        bases: Vec::new(),
+    }
+}
+
 /// A `FixedFunctionTransform` of `style` (a `FIXED_FUNCTION_*` name) and `params`: the
 /// binding's constructor of a style without parameters, `ACES_GLOW_03`, which validates, then
 /// `setStyle` and `setParams`, which don't. The ACES 1.3 gamut compression's limits and
