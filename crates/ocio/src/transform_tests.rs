@@ -7,7 +7,7 @@
 
 use super::*;
 use crate::transforms::builtins::builtin_transform_registry::BuiltinTransformRegistry;
-use crate::{Allocation, FixedFunctionStyle, RangeStyle, TransformType};
+use crate::{Allocation, FixedFunctionStyle, Interpolation, RangeStyle, TransformType};
 
 /// One transform of each class: a valid one, an invalid one where the class can be made
 /// invalid (its `validate` then fails), and its class as upstream's `getTransformType`
@@ -51,6 +51,8 @@ fn arms() -> Vec<Arm> {
     let mut group_invalid = GroupTransform::new();
     group_invalid.append_transform(FileTransform::new().into());
 
+    let mut lut3d_invalid = Lut3DTransform::new();
+    lut3d_invalid.set_interpolation(Interpolation::Cubic);
     let mut log_invalid = LogTransform::new();
     log_invalid.set_base(-1.0);
     let mut log_affine_invalid = LogAffineTransform::new();
@@ -150,6 +152,11 @@ fn arms() -> Vec<Arm> {
             invalid: None,
         },
         Arm {
+            class: TransformType::Lut3D,
+            valid: Lut3DTransform::new().into(),
+            invalid: Some(lut3d_invalid.into()),
+        },
+        Arm {
             class: TransformType::Matrix,
             valid: MatrixTransform::new().into(),
             invalid: None,
@@ -190,6 +197,7 @@ fn class_calls(transform: &Transform) -> (TransformDirection, Option<String>, St
         Transform::Log(t) => calls!(t),
         Transform::Look(t) => calls!(t),
         Transform::Lut1D(t) => calls!(t),
+        Transform::Lut3D(t) => calls!(t),
         Transform::Matrix(t) => calls!(t),
         Transform::Range(t) => calls!(t),
     }
@@ -201,7 +209,7 @@ fn class_calls(transform: &Transform) -> (TransformDirection, Option<String>, St
 #[test]
 fn every_arm_dispatches_to_its_class() {
     let arms = arms();
-    assert_eq!(arms.len(), 17, "one arm per variant");
+    assert_eq!(arms.len(), 18, "one arm per variant");
     for arm in arms {
         let class = arm.class;
         let mut transform = arm.valid;

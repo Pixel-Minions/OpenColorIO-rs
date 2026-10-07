@@ -44,6 +44,7 @@ use crate::transforms::log_camera_transform::LogCameraTransform;
 use crate::transforms::log_transform::{LogTransform, build_log_op, create_log_transform};
 use crate::transforms::look_transform::LookTransform;
 use crate::transforms::lut1d_transform::{Lut1DTransform, build_lut1d_op, create_lut1d_transform};
+use crate::transforms::lut3d_transform::{Lut3DTransform, build_lut3d_op, create_lut3d_transform};
 use crate::transforms::matrix_transform::{
     MatrixTransform, build_matrix_op, create_matrix_transform,
 };
@@ -143,6 +144,8 @@ pub enum Transform {
     Look(LookTransform),
     /// `Lut1DTransform`.
     Lut1D(Lut1DTransform),
+    /// `Lut3DTransform`.
+    Lut3D(Lut3DTransform),
     /// `MatrixTransform`.
     Matrix(MatrixTransform),
     /// `RangeTransform`.
@@ -239,6 +242,12 @@ impl From<Lut1DTransform> for Transform {
     }
 }
 
+impl From<Lut3DTransform> for Transform {
+    fn from(t: Lut3DTransform) -> Transform {
+        Transform::Lut3D(t)
+    }
+}
+
 impl From<MatrixTransform> for Transform {
     fn from(t: MatrixTransform) -> Transform {
         Transform::Matrix(t)
@@ -274,6 +283,7 @@ impl Transform {
             Transform::Log(_) => TransformType::Log,
             Transform::Look(_) => TransformType::Look,
             Transform::Lut1D(_) => TransformType::Lut1D,
+            Transform::Lut3D(_) => TransformType::Lut3D,
             Transform::Matrix(_) => TransformType::Matrix,
             Transform::Range(_) => TransformType::Range,
         }
@@ -299,6 +309,7 @@ impl Transform {
             Transform::Log(t) => t.direction(),
             Transform::Look(t) => t.direction(),
             Transform::Lut1D(t) => t.direction(),
+            Transform::Lut3D(t) => t.direction(),
             Transform::Matrix(t) => t.direction(),
             Transform::Range(t) => t.direction(),
         }
@@ -324,6 +335,7 @@ impl Transform {
             Transform::Log(t) => t.set_direction(dir),
             Transform::Look(t) => t.set_direction(dir),
             Transform::Lut1D(t) => t.set_direction(dir),
+            Transform::Lut3D(t) => t.set_direction(dir),
             Transform::Matrix(t) => t.set_direction(dir),
             Transform::Range(t) => t.set_direction(dir),
         }
@@ -350,6 +362,7 @@ impl Transform {
             Transform::Log(t) => t.validate(),
             Transform::Look(t) => t.validate(),
             Transform::Lut1D(t) => t.validate(),
+            Transform::Lut3D(t) => t.validate(),
             Transform::Matrix(t) => t.validate(),
             Transform::Range(t) => t.validate(),
         }
@@ -428,6 +441,7 @@ impl Transform {
             Transform::Log(t) => t.write_text(os),
             Transform::Look(t) => t.write_text(os),
             Transform::Lut1D(t) => t.write_text(os),
+            Transform::Lut3D(t) => t.write_text(os),
             Transform::Matrix(t) => t.write_text(os),
             Transform::Range(t) => t.write_text(os),
         }
@@ -479,6 +493,7 @@ pub(crate) fn build_ops(
         Transform::Log(log_transform) => build_log_op(ops, log_transform.data(), dir),
         Transform::Look(_) => Err(not_ported_yet("LookTransform", "WP 3.2b")),
         Transform::Lut1D(lut_transform) => build_lut1d_op(ops, lut_transform, dir),
+        Transform::Lut3D(lut_transform) => build_lut3d_op(ops, lut_transform, dir),
         Transform::Matrix(matrix_transform) => build_matrix_op(ops, matrix_transform, dir),
         Transform::Range(range_transform) => build_range_op(ops, range_transform, dir),
     }
@@ -515,11 +530,7 @@ pub(crate) fn create_transform(group: &mut GroupTransform, op: &Op) -> Result<()
         OpData::GradingRgbCurve(_) => Err(Exception::new(
             "CreateGradingRGBCurveTransform is not ported yet (Phase 3).",
         )),
-        // `CreateLut3DTransform` (src/OpenColorIO/ops/lut3d/Lut3DOp.cpp:235-249 @ v2.5.2)
-        // comes with `Lut3DTransform` (WP 2.2c).
-        OpData::Lut3D(_) => Err(Exception::new(
-            "CreateLut3DTransform is not ported yet (Phase 2, WP 2.2c).",
-        )),
+        OpData::Lut3D(_) => create_lut3d_transform(group, op),
         // No op holds a reference (the file readers replace it with the file's ops), and the
         // no-op types returned above.
         OpData::Reference(_) | OpData::NoOp(_) => {

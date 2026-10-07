@@ -1843,14 +1843,14 @@ path = "src/OpenColorIO/ops/lut3d/Lut3DOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op.rs"]
 status = "partial"
-note = "p2-lut3d 2.2b: GenerateIdentityLut3D, Get3DLutEdgeLenFromNumPixels, Lut3DOp (clone, getInfo, isSameType, isInverse, canCombineWith, hasChannelCrosstalk, getCacheID, getCPUOp, supportedByLegacyShader), CreateLut3DOp, the OpData::Lut3D arms. combineWith (Compose) is an error until 2.2e; extractGpuShaderInfo comes with 2.2f; CreateLut3DTransform and BuildLut3DOp with the transform (2.2c)"
+note = "p2-lut3d 2.2b: GenerateIdentityLut3D, Get3DLutEdgeLenFromNumPixels, Lut3DOp (clone, getInfo, isSameType, isInverse, canCombineWith, hasChannelCrosstalk, getCacheID, getCPUOp, supportedByLegacyShader), CreateLut3DOp, the OpData::Lut3D arms. 2.2c: CreateLut3DTransform and BuildLut3DOp, in crates/ocio/src/transforms/lut3d_transform.rs. combineWith (Compose) is an error until 2.2e; extractGpuShaderInfo comes with 2.2f"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOp.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op.rs"]
 status = "partial"
-note = "p2-lut3d 2.2b: GetLut3DIndex_RedFast, GetLut3DIndex_BlueFast, Lut3DOrder, the functions of Lut3DOp.cpp; CreateLut3DTransform with 2.2c"
+note = "p2-lut3d 2.2b: GetLut3DIndex_RedFast, GetLut3DIndex_BlueFast, Lut3DOrder, the functions of Lut3DOp.cpp; 2.2c: CreateLut3DTransform"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU.cpp"
@@ -2343,13 +2343,15 @@ note = "p1-transforms-fam4: Lut1DTransformImpl, as the struct Lut1DTransform"
 path = "src/OpenColorIO/transforms/Lut3DTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/lut3d_transform.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut3d 2.2c: the transform, its text, validation, equality and setters; CreateLut3DTransform and BuildLut3DOp (Lut3DOp.cpp) in the same file"
 
 [[file]]
 path = "src/OpenColorIO/transforms/Lut3DTransform.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/lut3d_transform.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut3d 2.2c"
 
 [[file]]
 path = "src/OpenColorIO/transforms/MatrixTransform.cpp"
@@ -4903,9 +4905,9 @@ note = "p2-lut3d 2.2a: empty, accessors, clone, not_supported_length, equality, 
 [[file]]
 path = "tests/cpu/ops/lut3d/Lut3DOp_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_tests.rs"]
+target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_tests.rs", "crates/ocio/src/transforms/lut3d_transform_tests.rs"]
 status = "partial"
-note = "p2-lut3d 2.2b: inverse_comparison_check, GenerateIdentityLut3D throw_lut, Lut3DOpData create_op, cache_id, edge_len_from_num_pixels, Lut3DOpStruct lut3d_order, Lut3DOpData lut_order, lut_combine, cpu_renderer_lut3d. Lut3D create_transform and Lut3DTransform build_op come with 2.2c; cpu_renderer_cloned, cpu_renderer_inverse and cpu_renderer_lut3d_with_nan read files (Phase 4); performance_check is commented out upstream"
+note = "p2-lut3d 2.2b: inverse_comparison_check, GenerateIdentityLut3D throw_lut, Lut3DOpData create_op, cache_id, edge_len_from_num_pixels, Lut3DOpStruct lut3d_order, Lut3DOpData lut_order, lut_combine, cpu_renderer_lut3d. 2.2c: Lut3D create_transform and Lut3DTransform build_op, in crates/ocio/src/transforms/lut3d_transform_tests.rs; cpu_renderer_cloned, cpu_renderer_inverse and cpu_renderer_lut3d_with_nan read files (Phase 4); performance_check is commented out upstream"
 
 [[file]]
 path = "tests/cpu/ops/matrix/MatrixOpCPU_tests.cpp"
@@ -5097,7 +5099,8 @@ note = "p1-transforms-fam4: basic, create_with_parameters, hue_adjust, format_me
 path = "tests/cpu/transforms/Lut3DTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/lut3d_transform_tests.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut3d 2.2c: basic, create_with_parameters"
 
 [[file]]
 path = "tests/cpu/transforms/MatrixTransform_tests.cpp"
