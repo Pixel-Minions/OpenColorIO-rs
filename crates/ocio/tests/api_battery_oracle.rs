@@ -180,48 +180,10 @@ fn fixed_function_transform_through_the_api_matches_the_wheel() {
     ));
 }
 
-/// The built-in transforms whose ops are ported (WP 3.2e-g): the identity, the ARRI, Panasonic,
-/// RED and Sony cameras, and the ACES and display entries built from Phase 1 ops.
-const BUILTINS: &[&str] = &[
-    "IDENTITY",
-    "ARRI_ALEXA-LOGC-EI800-AWG_to_ACES2065-1",
-    "ARRI_LOGC4_to_ACES2065-1",
-    "PANASONIC_VLOG-VGAMUT_to_ACES2065-1",
-    "RED_REDLOGFILM-RWG_to_ACES2065-1",
-    "RED_LOG3G10-RWG_to_ACES2065-1",
-    "SONY_SLOG3-SGAMUT3_to_ACES2065-1",
-    "SONY_SLOG3-SGAMUT3.CINE_to_ACES2065-1",
-    "SONY_SLOG3-SGAMUT3-VENICE_to_ACES2065-1",
-    "SONY_SLOG3-SGAMUT3.CINE-VENICE_to_ACES2065-1",
-    "UTILITY - ACES-AP0_to_CIE-XYZ-D65_BFD",
-    "UTILITY - ACES-AP1_to_CIE-XYZ-D65_BFD",
-    "UTILITY - ACES-AP1_to_LINEAR-REC709_BFD",
-    "CURVE - ACEScct-LOG_to_LINEAR",
-    "ACEScct_to_ACES2065-1",
-    "ACEScg_to_ACES2065-1",
-    "ACESproxy10i_to_ACES2065-1",
-    "ACES-LMT - BLUE_LIGHT_ARTIFACT_FIX",
-    "DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.709",
-    "DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.709 - MIRROR NEGS",
-    "DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.2020",
-    "DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.2020 - MIRROR NEGS",
-    "DISPLAY - CIE-XYZ-D65_to_G2.2-REC.709",
-    "DISPLAY - CIE-XYZ-D65_to_G2.2-REC.709 - MIRROR NEGS",
-    "DISPLAY - CIE-XYZ-D65_to_sRGB",
-    "DISPLAY - CIE-XYZ-D65_to_sRGB - MIRROR NEGS",
-    "DISPLAY - CIE-XYZ-D65_to_G2.6-P3-DCI-BFD",
-    "DISPLAY - CIE-XYZ-D65_to_G2.6-P3-D65",
-    "DISPLAY - CIE-XYZ-D65_to_G2.6-P3-D65 - MIRROR NEGS",
-    "DISPLAY - CIE-XYZ-D65_to_G2.6-P3-D60-BFD",
-    "DISPLAY - CIE-XYZ-D65_to_DCDM-D65",
-    "DISPLAY - CIE-XYZ-D65_to_DisplayP3",
-    "DISPLAY - CIE-XYZ-D65_to_DisplayP3-HDR",
-];
-
 #[test]
 fn builtin_transform_through_the_api_matches_the_wheel() {
     battery::run(&ApiFamily::new(
         "BuiltinTransform",
-        api_cases::builtin(BUILTINS),
+        api_cases::builtin(api_cases::BUILTINS_WITH_OPS),
     ));
 }
