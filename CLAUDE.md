@@ -52,6 +52,7 @@ Every card lands as a series of chunks. Each chunk is one commit that can be rev
   2. `cargo xtask gate --staged`, with the options above. It gates what is staged and nothing else, in a scratch worktree (`target/gate-staged/wt`); your working tree, with its other changes and untracked files, is left alone.
   3. `git commit`
   - Never use `git stash` for this. `refs/stash` is shared by every worktree of the repository, so with agents in parallel, your `git stash pop` can apply someone else's stash.
+- **Register merges.** `docs/improvements.md` merges entry by entry with `cargo xtask merge-register` (`.gitattributes`: `merge=ocio-register`). `xtask land` configures it; for your own cherry-picks and merges pass `git -c merge.ocio-register.driver="cargo xtask merge-register %O %A %B" cherry-pick <commit>`. Without it git merges the file as text and stops on a conflict.
 - **Commit messages.** The first line is `<card>: <what>`. The body lists the upstream files and line ranges ported, the tests, and the evidence (which checks ran and on which platforms). End with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
 
 ## Bit-exact porting
