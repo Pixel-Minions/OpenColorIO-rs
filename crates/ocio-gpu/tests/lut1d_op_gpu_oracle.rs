@@ -563,7 +563,8 @@ fn long_luts_match_the_wheel() {
     assert!(compared > 0);
 }
 
-/// Half-domain LUTs: a 2D texture with the half-code position helper.
+/// Half-domain LUTs: a 2D texture with the half-code position helper, in several rows at the
+/// default width limit and in one row at wider limits.
 #[test]
 fn half_domain_luts_match_the_wheel() {
     let luts = vec![
@@ -577,7 +578,18 @@ fn half_domain_luts_match_the_wheel() {
             }],
         ),
     ];
-    let compared = check(&cases(&luts, &[default_settings()]));
+    // Width limits that hold a half domain in one row: the half domain alone makes the texture
+    // 2D (Lut1DOpGPU.cpp:193-199), 65,536 texels by 1.
+    let wide = |width: u32| ShaderSettings {
+        texture_max_width: Some(width),
+        ..ShaderSettings::default()
+    };
+    let settings = vec![
+        default_settings(),
+        ("width 65537", wide(65537)),
+        ("width 131072", wide(131072)),
+    ];
+    let compared = check(&cases(&luts, &settings));
     assert!(compared > 0);
 }
 
