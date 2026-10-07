@@ -10,6 +10,7 @@
 //! a `MapEnv` the same variables are set in, through OCIO's `Setenv`, on the test's own thread.
 
 use std::cell::RefCell;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -755,7 +756,7 @@ fn display_getters(probes: &Probes) -> Vec<Step> {
         }),
         step(
             json!({"call": "getViewingRules"}),
-            |c| json!({"result": object_out("ViewingRules", &c.viewing_rules().to_bytes())}),
+            |c| json!({"result": object_out("ViewingRules", &c.viewing_rules().get().to_bytes())}),
         ),
         step(json!({"call": "getSharedViews"}), |c| {
             let names: Vec<Vec<u8>> = (0..c.num_views_of_type(ViewType::Shared, b""))
@@ -1435,7 +1436,7 @@ fn error_out(e: ocio::Exception) -> Value {
 fn file_rule_getters(probes: &Probes) -> Vec<Step> {
     let mut out = vec![step(
         json!({"call": "getFileRules"}),
-        |c| json!({"result": object_out("FileRules", &c.file_rules().to_bytes())}),
+        |c| json!({"result": object_out("FileRules", &c.file_rules().get().to_bytes())}),
     )];
     for path in &probes.paths {
         let p = path.clone();
@@ -2695,6 +2696,15 @@ fn processor_cache_resets_match_the_wheel() {
             })],
         ),
         ("clearDisplays", vec![clear_displays()]),
+        (
+            "setFileRules",
+            set_file_rules(&[Rule::Glob(b"g", b"x", b"*", b"exr")], None),
+        ),
+        (
+            "setViewingRules",
+            set_viewing_rules(&[(b"r", &[b"x"], &[])]),
+        ),
+        ("upgradeToLatestVersion", vec![upgrade_to_latest_version()]),
     ];
     let p1: HeldProcessor = Rc::new(RefCell::new(None));
     let p2: HeldProcessor = Rc::new(RefCell::new(None));
@@ -3293,4 +3303,312 @@ fn views_by_viewing_rules_match_the_wheel() {
     )
     .displays(&[b"D"], &[b"by_cs", b"by_enc"]);
     check_items("viewing rules", "new", &[], items, &probes);
+}
+
+// ---------------------------------------------------------------------------------------------
+// The rules the config shares: a change through the file rules or viewing rules a caller took
+// from the config is the config's own (the binding casts the constness away), and keeps its
+// cache of processors; `setFileRules` and `setViewingRules` give the config new rules, which
+// the earlier rules no longer change; a copy of the config has its own; the upgrade of a
+// version 1 config changes the shared file rules in place.
+
+/// The port's side of a held-rules case: the configs and the rules taken from them.
+#[derive(Default)]
+struct HeldRules {
+    configs: BTreeMap<&'static str, Config>,
+    file_rules: BTreeMap<&'static str, ocio::ConfigRules<FileRules>>,
+    viewing_rules: BTreeMap<&'static str, ocio::ConfigRules<ViewingRules>>,
+}
+
+type HeldCall = Box<dyn Fn(&mut HeldRules) -> Value>;
+
+/// A step of [`check_held_rules`]: the wheel's call and the port's (`Value::Null` for a call
+/// whose outcome isn't compared).
+struct HeldStep {
+    call: Value,
+    port: HeldCall,
+}
+
+fn held(call: Value, port: impl Fn(&mut HeldRules) -> Value + 'static) -> HeldStep {
+    HeldStep {
+        call,
+        port: Box::new(port),
+    }
+}
+
+/// A step on the config named `on`.
+fn on_config(on: &'static str, s: Step) -> HeldStep {
+    let mut call = s.call;
+    if call.get("call").is_some() && call.get("on").is_none() {
+        call["on"] = json!(on);
+    }
+    let port = s.port;
+    held(call, move |h| {
+        port(h.configs.get_mut(on).expect("a config"))
+    })
+}
+
+fn take_file_rules(config: &'static str, store: &'static str) -> HeldStep {
+    held(
+        json!({"call": "getFileRules", "on": config, "as": store}),
+        move |h| {
+            let fr = h.configs[config].file_rules();
+            let out = object_out("FileRules", &fr.get().to_bytes());
+            h.file_rules.insert(store, fr);
+            json!({ "result": out })
+        },
+    )
+}
+
+fn take_viewing_rules(config: &'static str, store: &'static str) -> HeldStep {
+    held(
+        json!({"call": "getViewingRules", "on": config, "as": store}),
+        move |h| {
+            let vr = h.configs[config].viewing_rules();
+            let out = object_out("ViewingRules", &vr.get().to_bytes());
+            h.viewing_rules.insert(store, vr);
+            json!({ "result": out })
+        },
+    )
+}
+
+/// `insertRule` (a glob of any name with the extension `ext`) on held file rules.
+fn held_insert_file_rule(
+    on: &'static str,
+    i: usize,
+    name: &[u8],
+    cs: &[u8],
+    ext: &[u8],
+) -> HeldStep {
+    let (n, c, e) = (name.to_vec(), cs.to_vec(), ext.to_vec());
+    held(
+        json!({"call": "insertRule", "on": on,
+               "args": [i, arg(&n), arg(&c), arg(b"*"), arg(&e)]}),
+        move |h| unit_out(h.file_rules[on].update(|r| r.insert_rule(i, &n, &c, b"*", &e))),
+    )
+}
+
+fn held_insert_path_search_rule(on: &'static str, i: usize) -> HeldStep {
+    held(
+        json!({"call": "insertPathSearchRule", "on": on, "args": [i]}),
+        move |h| unit_out(h.file_rules[on].update(|r| r.insert_path_search_rule(i))),
+    )
+}
+
+fn held_file_rules_repr(on: &'static str) -> HeldStep {
+    held(json!({"call": "__repr__", "on": on}), move |h| {
+        text_out(&h.file_rules[on].get().to_bytes())
+    })
+}
+
+fn held_file_rule_color_space(on: &'static str, i: usize) -> HeldStep {
+    held(
+        json!({"call": "getColorSpace", "on": on, "args": [i]}),
+        move |h| match h.file_rules[on].get().color_space(i) {
+            Ok(cs) => text_out(&cs),
+            Err(e) => unit_out(Err(e)),
+        },
+    )
+}
+
+fn held_insert_viewing_rule(on: &'static str, i: usize, name: &[u8]) -> HeldStep {
+    let n = name.to_vec();
+    held(
+        json!({"call": "insertRule", "on": on, "args": [i, arg(&n)]}),
+        move |h| unit_out(h.viewing_rules[on].update(|r| r.insert_rule(i, &n))),
+    )
+}
+
+fn held_add_viewing_color_space(on: &'static str, i: usize, cs: &[u8]) -> HeldStep {
+    let c = cs.to_vec();
+    held(
+        json!({"call": "addColorSpace", "on": on, "args": [i, arg(&c)]}),
+        move |h| unit_out(h.viewing_rules[on].update(|r| r.add_color_space(i, &c))),
+    )
+}
+
+fn held_viewing_rules_repr(on: &'static str) -> HeldStep {
+    held(json!({"call": "__repr__", "on": on}), move |h| {
+        text_out(&h.viewing_rules[on].get().to_bytes())
+    })
+}
+
+/// What a config says of the rules: its file rules and viewing rules, the color space of each
+/// path, and the views of display `D` for each color space.
+fn held_rules_getters(on: &'static str) -> Vec<HeldStep> {
+    let mut out = vec![
+        held(json!({"call": "getFileRules", "on": on}), move |h| {
+            let fr = h.configs[on].file_rules().get().to_bytes();
+            json!({ "result": object_out("FileRules", &fr) })
+        }),
+        held(json!({"call": "getViewingRules", "on": on}), move |h| {
+            let vr = h.configs[on].viewing_rules().get().to_bytes();
+            json!({ "result": object_out("ViewingRules", &vr) })
+        }),
+    ];
+    for path in [&b"a.exr"[..], b"a.tif", b"a.png", b"x_lin.dpx", b"x.dpx"] {
+        let p = path.to_vec();
+        out.push(held(
+            json!({"call": "getColorSpaceFromFilepath", "on": on, "args": [arg(path)]}),
+            move |h| match h.configs[on].color_space_from_filepath_with_index(&p) {
+                Ok((cs, i)) => json!({"result": [bytes_arg(&cs), i]}),
+                Err(e) => error_out(e),
+            },
+        ));
+    }
+    for cs in [&b"raw"[..], b"lin"] {
+        let n = cs.to_vec();
+        out.push(held(
+            json!({"call": "getViews", "on": on, "args": [arg(b"D"), arg(cs)]}),
+            move |h| {
+                let c = &h.configs[on];
+                texts_or((|| {
+                    let num = c.num_views_for_color_space(b"D", &n)?;
+                    (0..num)
+                        .map(|i| c.view_for_color_space(b"D", &n, i).map(<[u8]>::to_vec))
+                        .collect()
+                })())
+            },
+        ));
+    }
+    out
+}
+
+/// The processors `getProcessor` gave, by name.
+type ProcessorSlots = Rc<RefCell<BTreeMap<&'static str, Arc<ocio::Processor>>>>;
+
+/// `getProcessor` on `config`, stored as `store` on both sides, then whether it is the
+/// processor stored as `before` (`__eq__` in the binding, `Arc::ptr_eq` here, as
+/// `{"same": bool}`).
+fn held_same_processor(
+    config: &'static str,
+    store: &'static str,
+    before: &'static str,
+    slots: &ProcessorSlots,
+) -> Vec<HeldStep> {
+    let (spec, t) = offset_transform(0.5);
+    let s = slots.clone();
+    let get = held(
+        json!({"call": "getProcessor", "on": config, "args": [{"transform": spec}], "as": store}),
+        move |h| {
+            let config = h.configs.get_mut(config).expect("a config");
+            let p = config.processor(&t).expect("a processor");
+            s.borrow_mut().insert(store, p);
+            Value::Null
+        },
+    );
+    let s = slots.clone();
+    let same = held(
+        json!({"call": "__eq__", "on": before, "args": [{"ref": store}]}),
+        move |_| {
+            let s = s.borrow();
+            json!({ "same": Arc::ptr_eq(&s[before], &s[store]) })
+        },
+    );
+    vec![get, same]
+}
+
+/// Runs `steps` on both sides, on a new config named `config` (and the configs and rules the
+/// steps make), and compares every outcome but those the port gives as `Value::Null`.
+fn check_held_rules(steps: Vec<HeldStep>) {
+    let calls: Vec<Value> = steps.iter().map(|s| s.call.clone()).collect();
+    let response = Oracle::get().call(
+        "config_calls",
+        json!({"config": "new", "env": {}, "calls": calls}),
+        &[],
+    );
+    let wheel = &response.result;
+    assert_eq!(wheel["config"], Value::Null, "{wheel}");
+    let results = wheel["calls"].as_array().expect("the calls' results");
+    assert_eq!(results.len(), steps.len());
+
+    set_thread_env_provider(Some(Arc::new(MapEnv::default())));
+    let mut h = HeldRules::default();
+    h.configs.insert("config", Config::new().unwrap());
+    let mut failures = Vec::new();
+    for (i, (s, w)) in steps.iter().zip(results).enumerate() {
+        let port = (s.port)(&mut h);
+        if port.is_null() {
+            assert!(w.get("result").is_some(), "call {i} {}: {w}", s.call);
+            continue;
+        }
+        if let Some(same) = port.get("same") {
+            // The binding's processors compare by identity: `__eq__` of another processor is
+            // `NotImplemented`.
+            let wheel_same = w["result"] == json!(true);
+            if *same != json!(wheel_same) {
+                failures.push(format!("call {i} {}: wheel {w}, port {port}", s.call));
+            }
+            continue;
+        }
+        let mut w = w.clone();
+        w.as_object_mut().expect("a call's outcome").remove("log");
+        if port != w {
+            failures.push(format!("call {i} {}: wheel {w}, port {port}", s.call));
+        }
+    }
+    set_thread_env_provider(None);
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// A change through the file rules and viewing rules a caller holds is the config's (its
+/// matching and its views use it, and the path search rule's color space it sets shows in
+/// the held rules), and keeps its processors; after `setFileRules` and `setViewingRules` the
+/// held rules no longer change the config; a copy's rules are its own; the upgrade of a
+/// version 1 config changes the held file rules.
+#[test]
+fn a_change_through_the_held_rules_is_the_configs() {
+    let slots: ProcessorSlots = Rc::new(RefCell::new(BTreeMap::new()));
+    let mut steps: Vec<HeldStep> = Vec::new();
+    let c = |s: Step| on_config("config", s);
+    steps.extend(add_color_space(cs(b"raw").data()).into_iter().map(c));
+    steps.extend(add_color_space(cs(b"lin")).into_iter().map(c));
+    steps.push(c(set_role(b"default", Some(b"raw"))));
+    steps.push(c(add_display_view_full(b"D", b"v0", b"", b"raw", b"")));
+    steps.push(c(add_display_view_full(b"D", b"v1", b"", b"raw", b"vr1")));
+    steps.push(take_file_rules("config", "held_fr"));
+    steps.push(take_viewing_rules("config", "held_vr"));
+    steps.extend(held_same_processor("config", "p1", "p1", &slots));
+    steps.extend(held_rules_getters("config"));
+
+    // Changes through the held rules.
+    steps.push(held_insert_file_rule("held_fr", 0, b"exr", b"lin", b"exr"));
+    steps.push(held_insert_path_search_rule("held_fr", 1));
+    steps.push(held_insert_viewing_rule("held_vr", 0, b"vr1"));
+    steps.push(held_add_viewing_color_space("held_vr", 0, b"lin"));
+    steps.extend(held_same_processor("config", "p2", "p1", &slots));
+    steps.extend(held_rules_getters("config"));
+    steps.push(held_file_rule_color_space("held_fr", 1));
+    steps.push(held_file_rules_repr("held_fr"));
+    steps.push(held_viewing_rules_repr("held_vr"));
+
+    // New rules: the held ones no longer change the config.
+    let tif = [Rule::Glob(b"tif", b"raw", b"*", b"tif")];
+    steps.extend(set_file_rules(&tif, None).into_iter().map(c));
+    steps.extend(set_viewing_rules(&[]).into_iter().map(c));
+    steps.push(held_insert_file_rule("held_fr", 0, b"png", b"lin", b"png"));
+    steps.push(held_add_viewing_color_space("held_vr", 0, b"raw"));
+    steps.extend(held_same_processor("config", "p3", "p2", &slots));
+    steps.extend(held_rules_getters("config"));
+    steps.push(held_file_rules_repr("held_fr"));
+
+    // A copy has its own rules.
+    steps.push(take_file_rules("config", "held_fr3"));
+    steps.push(held(json!({"copy": "config", "as": "copy"}), |h| {
+        let copy = h.configs["config"].clone();
+        h.configs.insert("copy", copy);
+        Value::Null
+    }));
+    steps.push(take_file_rules("copy", "held_fr4"));
+    steps.push(held_insert_file_rule("held_fr4", 0, b"png", b"lin", b"png"));
+    steps.extend(held_rules_getters("config"));
+    steps.extend(held_rules_getters("copy"));
+
+    // The upgrade of a version 1 config changes the held file rules.
+    steps.push(c(set_major_version(1)));
+    steps.push(c(upgrade_to_latest_version()));
+    steps.push(held_file_rules_repr("held_fr3"));
+    steps.extend(held_rules_getters("config"));
+
+    check_held_rules(steps);
 }

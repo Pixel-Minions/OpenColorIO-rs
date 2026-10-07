@@ -167,6 +167,53 @@ impl fmt::Debug for CurrentContext {
     }
 }
 
+/// A config's file rules or viewing rules, shared with the config: what it reads is the rules
+/// as the config holds them at that moment. `setFileRules` and `setViewingRules` give the
+/// config a new copy, and a handle taken before keeps the rules it had; the config's copy
+/// (`createEditableCopy`) copies them too. The handle only reads the rules.
+///
+/// Port of the `ConstFileRulesRcPtr` and `ConstViewingRulesRcPtr` of `Config::getFileRules`
+/// and `Config::getViewingRules` (src/OpenColorIO/Config.cpp:4643-4646, 3332-3335 @ v2.5.2):
+/// the config and the callers share one rules object (`m_fileRules`, `m_viewingRules`).
+pub struct ConfigRules<T>(Arc<RwLock<Arc<T>>>);
+
+impl<T> Clone for ConfigRules<T> {
+    fn clone(&self) -> ConfigRules<T> {
+        ConfigRules(self.0.clone())
+    }
+}
+
+impl<T: Clone> ConfigRules<T> {
+    fn new(rules: T) -> ConfigRules<T> {
+        ConfigRules(Arc::new(RwLock::new(Arc::new(rules))))
+    }
+
+    /// The rules as the config holds them now.
+    pub fn get(&self) -> Arc<T> {
+        self.0.read().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Changes the shared rules through `change`, as the config sees them from then on. It
+    /// keeps the config's cache IDs and processors, as a change through upstream's rules
+    /// does. A copy of the rules is changed when a caller holds them from
+    /// [`ConfigRules::get`], which keeps the state it had.
+    ///
+    /// C++ callers get a const pointer, which they can't change; the Python binding casts the
+    /// constness away, so a Python caller changes the config's rules through it
+    /// (`getFileRules().insertRule(...)`). This is for the Python module.
+    #[doc(hidden)]
+    pub fn update<R>(&self, change: impl FnOnce(&mut T) -> R) -> R {
+        let mut cell = self.0.write().unwrap_or_else(|e| e.into_inner());
+        change(Arc::make_mut(&mut cell))
+    }
+}
+
+impl<T: Clone + fmt::Debug> fmt::Debug for ConfigRules<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&*self.get(), f)
+    }
+}
+
 /// The names of `views`.
 ///
 /// Port of `GetViewNames` (src/OpenColorIO/Config.cpp:202-210 @ v2.5.2).
@@ -325,9 +372,9 @@ pub struct Config {
     /// `m_strictParsing`.
     strict_parsing: bool,
     /// `m_fileRules`.
-    file_rules: FileRules,
+    file_rules: ConfigRules<FileRules>,
     /// `m_viewingRules`.
-    viewing_rules: ViewingRules,
+    viewing_rules: ConfigRules<ViewingRules>,
     /// The validation and the cache IDs, under `m_cacheidMutex`.
     cache_ids: Mutex<CacheIds>,
     /// `m_cacheFlags` (`mutable`: a const config changes it).
@@ -376,8 +423,8 @@ impl Clone for Config {
             active_views_env_override: self.active_views_env_override.clone(),
             default_luma_coefs: self.default_luma_coefs,
             strict_parsing: self.strict_parsing,
-            file_rules: self.file_rules.clone(),
-            viewing_rules: self.viewing_rules.clone(),
+            file_rules: ConfigRules::new((*self.file_rules.get()).clone()),
+            viewing_rules: ConfigRules::new((*self.viewing_rules.get()).clone()),
             cache_ids: Mutex::new(self.lock_cache_ids().clone()),
             cache_flags: AtomicU32::new(self.cache_flags.load(Ordering::Relaxed)),
             processor_cache: ProcessorCache::new(),
@@ -432,8 +479,8 @@ impl Config {
             active_views_env_override: StringVec::new(),
             default_luma_coefs: DEFAULT_LUMA_COEFFS,
             strict_parsing: true,
-            file_rules: FileRules::new(),
-            viewing_rules: ViewingRules::new(),
+            file_rules: ConfigRules::new(FileRules::new()),
+            viewing_rules: ConfigRules::new(ViewingRules::new()),
             cache_ids: Mutex::new(CacheIds::new()),
             cache_flags: AtomicU32::new(ProcessorCacheFlags::DEFAULT.0),
             processor_cache: ProcessorCache::new(),
@@ -1755,6 +1802,7 @@ impl Config {
         let active_views = self.impl_active_views(view_names);
 
         let image_color_space_name = lower(image_cs_name);
+        let viewing_rules = self.viewing_rules.get();
         let mut filtered_active_views = StringVec::new();
         for view in &active_views {
             let idx = find_in_string_vec_case_ignore(view_names, view);
@@ -1762,16 +1810,14 @@ impl Config {
             if rule_name.is_empty() {
                 // Include all views that do not have a rule.
                 filtered_active_views.push(view.clone());
-            } else if let Some(rule_idx) = find_rule(&self.viewing_rules, rule_name) {
-                let numcs = self
-                    .viewing_rules
+            } else if let Some(rule_idx) = find_rule(&viewing_rules, rule_name) {
+                let numcs = viewing_rules
                     .num_color_spaces(rule_idx)
                     .expect("a rule FindRule found");
                 let mut added = false;
                 for cs_idx in 0..numcs {
                     // Rule can use role names.
-                    let rolename = self
-                        .viewing_rules
+                    let rolename = viewing_rules
                         .color_space(rule_idx, cs_idx)
                         .expect("a rule FindRule found")
                         .expect("a color space in the list");
@@ -1786,13 +1832,11 @@ impl Config {
                     }
                 }
                 if !added && !view_encoding.is_empty() {
-                    let num_enc = self
-                        .viewing_rules
+                    let num_enc = viewing_rules
                         .num_encodings(rule_idx)
                         .expect("a rule FindRule found");
                     for enc_idx in 0..num_enc {
-                        let enc_name = self
-                            .viewing_rules
+                        let enc_name = viewing_rules
                             .encoding(rule_idx, enc_idx)
                             .expect("a rule FindRule found")
                             .expect("an encoding in the list");
@@ -1833,20 +1877,21 @@ impl Config {
         self.display_cache = OnceLock::new();
     }
 
-    /// The config's viewing rules.
+    /// The config's viewing rules, shared with the config (see [`ConfigRules`]).
     ///
     /// Port of `Config::getViewingRules` (src/OpenColorIO/Config.cpp:3332-3335 @ v2.5.2).
     #[doc(alias = "getViewingRules")]
-    pub fn viewing_rules(&self) -> &ViewingRules {
-        &self.viewing_rules
+    pub fn viewing_rules(&self) -> ConfigRules<ViewingRules> {
+        self.viewing_rules.clone()
     }
 
-    /// Sets the config's viewing rules to a copy of `viewing_rules`.
+    /// Sets the config's viewing rules to a copy of `viewing_rules`. Handles taken from
+    /// [`Config::viewing_rules`] before keep the rules they had.
     ///
     /// Port of `Config::setViewingRules` (src/OpenColorIO/Config.cpp:3337-3343 @ v2.5.2).
     #[doc(alias = "setViewingRules")]
     pub fn set_viewing_rules(&mut self, viewing_rules: &ViewingRules) {
-        self.viewing_rules = viewing_rules.clone();
+        self.viewing_rules = ConfigRules::new(viewing_rules.clone());
 
         self.reset_cache_ids();
     }
@@ -3672,20 +3717,21 @@ impl Config {
 
     // File rules //////////////////////////////////////////////////////////////////////////////
 
-    /// The config's file rules.
+    /// The config's file rules, shared with the config (see [`ConfigRules`]).
     ///
     /// Port of `Config::getFileRules` (src/OpenColorIO/Config.cpp:4643-4646 @ v2.5.2).
     #[doc(alias = "getFileRules")]
-    pub fn file_rules(&self) -> &FileRules {
-        &self.file_rules
+    pub fn file_rules(&self) -> ConfigRules<FileRules> {
+        self.file_rules.clone()
     }
 
-    /// Sets the config's file rules to a copy of `file_rules`.
+    /// Sets the config's file rules to a copy of `file_rules`. Handles taken from
+    /// [`Config::file_rules`] before keep the rules they had.
     ///
     /// Port of `Config::setFileRules` (src/OpenColorIO/Config.cpp:4648-4654 @ v2.5.2).
     #[doc(alias = "setFileRules")]
     pub fn set_file_rules(&mut self, file_rules: &FileRules) {
-        self.file_rules = file_rules.clone();
+        self.file_rules = ConfigRules::new(file_rules.clone());
 
         self.reset_cache_ids();
     }
@@ -3699,6 +3745,7 @@ impl Config {
     pub fn color_space_from_filepath(&self, file_path: impl AsRef<[u8]>) -> Result<Vec<u8>> {
         Ok(self
             .file_rules
+            .get()
             .color_space_from_filepath(self, c_str(file_path.as_ref()))?
             .0)
     }
@@ -3713,6 +3760,7 @@ impl Config {
         file_path: impl AsRef<[u8]>,
     ) -> Result<(Vec<u8>, usize)> {
         self.file_rules
+            .get()
             .color_space_from_filepath(self, c_str(file_path.as_ref()))
     }
 
@@ -3723,6 +3771,7 @@ impl Config {
     #[doc(alias = "filepathOnlyMatchesDefaultRule")]
     pub fn filepath_only_matches_default_rule(&self, file_path: impl AsRef<[u8]>) -> Result<bool> {
         self.file_rules
+            .get()
             .filepath_only_matches_default_rule(self, c_str(file_path.as_ref()))
     }
 
@@ -3772,9 +3821,11 @@ impl Config {
         let was_version = self.major_version;
         if was_version != LAST_SUPPORTED_MAJOR_VERSION {
             if was_version == 1 {
-                let mut file_rules = self.file_rules.clone();
+                // Upstream updates the shared rules in place: the callers that hold them see the
+                // update.
+                let mut file_rules = (*self.file_rules.get()).clone();
                 update_file_rules_from_v1_to_v2(self, &mut file_rules)?;
-                self.file_rules = file_rules;
+                self.file_rules.update(|rules| *rules = file_rules);
 
                 // The instance version is now 2.0
                 self.major_version = 2;
@@ -3948,7 +3999,7 @@ impl Config {
 
         // Check the file rules.
 
-        let rules = self.file_rules();
+        let rules = self.file_rules.get();
 
         let num_rules = rules.num_entries();
         for idx in 0..num_rules {

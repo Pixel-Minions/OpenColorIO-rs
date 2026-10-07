@@ -32,7 +32,7 @@ mod test_env;
 
 pub use color_space::ColorSpace;
 pub use color_space_set::ColorSpaceSet;
-pub use config::{Config, CurrentContext};
+pub use config::{Config, ConfigRules, CurrentContext};
 pub use context::Context;
 pub use display::OCIO_VIEW_USE_DISPLAY_NAME;
 pub use file_rules::FileRules;

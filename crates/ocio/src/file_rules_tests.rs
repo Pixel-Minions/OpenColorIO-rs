@@ -15,7 +15,7 @@ use crate::test_env::EnvGuard;
 fn config_read_only() {
     let _env = EnvGuard::new();
     let config = Config::create_raw().unwrap();
-    let file_rules = config.file_rules();
+    let file_rules = config.file_rules().get();
     assert_eq!(file_rules.num_entries(), 1);
     assert_eq!(
         file_rules.name(0).unwrap(),
@@ -49,8 +49,8 @@ fn config_insert_rule() {
     let _env = EnvGuard::new();
     let config_raw = Config::create_raw().unwrap();
     let config = (*config_raw).clone();
-    let fr = config.file_rules();
-    let mut file_rules = fr.clone();
+    let fr = config.file_rules().get();
+    let mut file_rules = (*fr).clone();
     assert_eq!(file_rules.num_entries(), 1);
     file_rules.insert_rule(0, "rule", "raw", "*", "a").unwrap();
     assert_eq!(file_rules.num_entries(), 2);
@@ -164,8 +164,8 @@ fn config_insert_rule() {
 fn pattern_error() {
     let _env = EnvGuard::new();
     let config_raw = Config::create_raw().unwrap();
-    let fr = config_raw.file_rules();
-    let mut rules = fr.clone();
+    let fr = config_raw.file_rules().get();
+    let mut rules = (*fr).clone();
 
     rules
         .insert_rule(0, FileRules::FILE_PATH_SEARCH_RULE_NAME, "", "", "")
@@ -195,7 +195,7 @@ fn with_defaults() {
     // Validate some default behaviours.
 
     let config = (*Config::create_raw().unwrap()).clone();
-    let mut rules = config.file_rules().clone();
+    let mut rules = (*config.file_rules().get()).clone();
 
     rules
         .insert_rule(0, FileRules::FILE_PATH_SEARCH_RULE_NAME, "", "", "")
@@ -221,8 +221,8 @@ fn with_defaults() {
 fn extension_error() {
     let _env = EnvGuard::new();
     let config_raw = Config::create_raw().unwrap();
-    let fr = config_raw.file_rules();
-    let mut rules = fr.clone();
+    let fr = config_raw.file_rules().get();
+    let mut rules = (*fr).clone();
 
     rules
         .insert_rule(0, FileRules::FILE_PATH_SEARCH_RULE_NAME, "", "", "")
@@ -247,7 +247,7 @@ fn clone() {
     // Validate that 'FileRules::createEditableCopy()' does not share FileRule instances.
 
     let config = (*Config::create_raw().unwrap()).clone();
-    let mut file_rules = config.file_rules().clone();
+    let mut file_rules = (*config.file_rules().get()).clone();
     file_rules
         .insert_rule(0, FileRules::FILE_PATH_SEARCH_RULE_NAME, "", "", "")
         .unwrap();
@@ -304,5 +304,5 @@ fn is_default() {
     assert!(!file_rules.is_default());
 
     let config = Config::create_raw().unwrap();
-    assert!(config.file_rules().is_default());
+    assert!(config.file_rules().get().is_default());
 }
