@@ -828,6 +828,23 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `AdjustRGBSlopes` differs too (MSVC's unrolled loop multiplies `slopes[i + 1] * adjust` or
   `adjust * slopes[i + 1]` by the knot's index), but no two different NaNs meet there.
 
+### I-152. A 3D LUT of one entry per side starts as NaNs
+
+- **Upstream:** a new 3D LUT is filled with the identity, each entry its grid position times
+  `1 / (length - 1)` (`Lut3DArray::fill`, `ops/lut3d/Lut3DOpData.cpp:174-192` @ v2.5.2). For
+  a grid size of 1 that step is `1 / 0`, infinity, and the only entry is `0 * inf`: the
+  default NaN in each channel (`getData()` gives `0xffc00000` three times on both
+  platforms). The forward renderers sanitize NaNs to 0, so such a LUT maps every color to
+  black; its text prints `FLT_MAX` and `-FLT_MAX` for each channel's range.
+- **Who notices:** anyone who makes a `Lut3DTransform` of grid size 1 (`setGridSize(1)`, or
+  `Lut3DTransform(gridSize=1)`) and reads its values, or renders it without setting them.
+- **A fix:** fill a grid of one entry with 0 (or refuse a grid size under 2); that changes
+  its values, its cache ID and its text, not its forward pixels.
+- **Status:** matched in `p2-lut3d` (2.2a), `Lut3DArray::fill`; `processors_match_the_wheel`
+  (`crates/ocio/tests/lut3d_transform_oracle.rs`, the "1 entry" case) compares the values bit
+  for bit, and `lut3d_transform_through_the_api_matches_the_wheel`
+  (`crates/ocio/tests/api_battery_oracle.rs`) the pixels.
+
 ## Transforms
 
 ### I-11. Copying a group transform shares its children
