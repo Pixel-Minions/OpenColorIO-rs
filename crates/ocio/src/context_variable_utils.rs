@@ -195,6 +195,7 @@ pub(crate) fn collect_context_variables(
         | Transform::LogAffine(_)
         | Transform::LogCamera(_)
         | Transform::Lut1D(_)
+        | Transform::Lut3D(_)
         | Transform::Log(_)
         | Transform::Matrix(_)
         | Transform::Range(_) => false,

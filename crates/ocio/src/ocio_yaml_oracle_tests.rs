@@ -546,6 +546,7 @@ fn class_name(t: &Transform) -> &'static str {
         Transform::Log(_) => "Log",
         Transform::Look(_) => "Look",
         Transform::Lut1D(_) => "Lut1D",
+        Transform::Lut3D(_) => "Lut3D",
         Transform::Matrix(_) => "Matrix",
         Transform::Range(_) => "Range",
     }
