@@ -1865,9 +1865,9 @@ note = "p2-lut3d 2.2b: GetLut3DIndex_RedFast, GetLut3DIndex_BlueFast, Lut3DOrder
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu.rs"]
+target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu.rs", "crates/ocio-ops/src/ops/lut3d/inv_lut3d.rs"]
 status = "partial"
-note = "S4: forward renderers (dispatch, generic tetrahedral, SSE2 and generic trilinear), bit-identical to the wheel on Windows and Rocky 9 for sizes 2-129; InvLut3DRenderer not ported. p2-lut3d 2.2b: the forward renderers as the op's CpuOp, GetLut3DRenderer (the inverse arm an error until 2.2d)"
+note = "S4: forward renderers (dispatch, generic tetrahedral, SSE2 and generic trilinear), bit-identical to the wheel on Windows and Rocky 9 for sizes 2-129; InvLut3DRenderer not ported. p2-lut3d 2.2b: the forward renderers as the op's CpuOp, GetLut3DRenderer (the inverse arm an error until 2.2d). p2-lut3d-inv 2.2d1: InvLut3DRenderer's RangeTree (78-196, 1080-1388) in inv_lut3d.rs"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU.h"
