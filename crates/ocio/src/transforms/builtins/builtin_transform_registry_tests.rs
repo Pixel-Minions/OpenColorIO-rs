@@ -2,15 +2,32 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Tests of the built-in transform registry:
-//! `tests/cpu/transforms/builtins/BuiltinTransformRegistry_tests.cpp` @ v2.5.2. `aces` builds
-//! the ops of three entries and `read_write` every entry's processor: they come with the
-//! builders (WP 3.2e-g, `p3-after-p2`); the `version_*_validation` tests with the config's
-//! validation (WP 3.8c). The registry's styles are compared with the wheel's in
-//! `tests/config_transforms_oracle.rs`.
+//! `tests/cpu/transforms/builtins/BuiltinTransformRegistry_tests.cpp` @ v2.5.2. `read_write`
+//! builds every entry's processor: it comes with the last builders (`p3-after-p2`); the
+//! `version_*_validation` tests with the config's validation (WP 3.8c). The registry's styles
+//! are compared with the wheel's in `tests/config_transforms_oracle.rs`.
 
 use super::*;
 use ocio_ops::platform::strcasecmp;
 use ocio_testkit::upstream::check_throw_what;
+
+/// Appends the ops of the global registry's built-in `name` (found ignoring case), in the
+/// direction `dir`; an unknown name fails the test.
+///
+/// Port of `CreateOps` (tests/cpu/transforms/builtins/BuiltinTransformRegistry_tests.cpp:45-61
+/// @ v2.5.2).
+fn create_ops(name: &str, dir: TransformDirection, ops: &mut OpVec) {
+    let reg = BuiltinTransformRegistry::get();
+
+    for index in 0..reg.num_builtins() {
+        if strcasecmp(name.as_bytes(), reg.builtin_style(index).unwrap()).is_eq() {
+            create_builtin_transform_ops(ops, index, dir).unwrap();
+            return;
+        }
+    }
+
+    panic!("Unknown built-in transform name '{name}'.");
+}
 
 /// Port of `OCIO_ADD_TEST(Builtins, basic)` @ v2.5.2.
 #[test]
@@ -79,4 +96,41 @@ fn ops_of_the_global_registry() {
         );
     }
     assert!(ops.is_empty());
+}
+
+/// Port of `OCIO_ADD_TEST(Builtins, aces)` @ v2.5.2.
+#[test]
+fn aces() {
+    // Tests only few default built-in transforms.
+
+    let mut ops = OpVec::new();
+
+    {
+        ops.clear();
+        create_ops("IDENTITY", TransformDirection::Forward, &mut ops);
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0].get_info(), "<MatrixOffsetOp>");
+    }
+
+    {
+        ops.clear();
+        create_ops(
+            "UTILITY - ACES-AP0_to_CIE-XYZ-D65_BFD",
+            TransformDirection::Forward,
+            &mut ops,
+        );
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0].get_info(), "<MatrixOffsetOp>");
+    }
+
+    {
+        ops.clear();
+        create_ops(
+            "CURVE - ACEScct-LOG_to_LINEAR",
+            TransformDirection::Forward,
+            &mut ops,
+        );
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0].get_info(), "<LogOp>");
+    }
 }
