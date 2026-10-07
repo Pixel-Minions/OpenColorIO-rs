@@ -11,7 +11,12 @@
 //!   messages, and of `getValue`;
 //! - the raw config's processor of each forward LUT: `BuildLut3DOp`, then
 //!   `CreateLut3DTransform` through `createGroupTransform()`, the values bit for bit (an
-//!   inverse LUT's processor needs the inverse 3D LUT, WP 2.2d and 2.2e).
+//!   inverse LUT's processor needs the inverse 3D LUT, WP 2.2d and 2.2e);
+//! - the optimized processors of a LUT and its inverse, which the optimizer replaces with
+//!   the LUT's identity replacement, a [0, 1] range;
+//! - the port's refusals until the inverse LUT and the composition of LUTs are ported.
+//!
+//! The pixels through the API are `api_battery_oracle.rs`'s.
 //!
 //! The binding passes a C `float` as a Python float, which quiets a signalling NaN, so the
 //! values set and compared are floats a double holds exactly: quiet NaNs, with their
@@ -22,13 +27,17 @@ mod common;
 use std::ffi::c_ulong;
 
 use common::transforms::{
-    BIT_DEPTHS, Case, bit_depth_spec, check_processors_dirs, check_text, direction_spec, group,
-    interpolation_name, setter_errors,
+    BIT_DEPTHS, Case, bit_depth_spec, check_optimized_processors, check_processors_dirs,
+    check_text, direction_spec, group, interpolation_name, setter_errors,
 };
 use ocio::{
-    BitDepth, Interpolation, Lut3DTransform, MatrixTransform, RangeTransform, Transform,
-    TransformDirection,
+    BitDepth, Config, GroupTransform, Interpolation, Lut3DTransform, MatrixTransform,
+    OptimizationFlags, RangeTransform, Transform, TransformDirection,
 };
+use ocio_ops::ops::lut3d::lut3d_op::{
+    NOT_PORTED_COMPOSE, NOT_PORTED_FAST_INVERSE, NOT_PORTED_INVERSE_RENDERER,
+};
+use ocio_testkit::battery::BitDepth as Depth;
 use ocio_testkit::transform_text::f64_spec;
 use serde_json::{Value, json};
 
@@ -454,4 +463,78 @@ fn processors_match_the_wheel() {
         ],
     ));
     check_processors_dirs(&cases, &[Forward]);
+}
+
+/// A LUT and its inverse, in either order and with either interpolation: the optimizer's
+/// pair removal (`OPTIMIZATION_PAIR_IDENTITY_LUT3D`, in the default) replaces them with
+/// `Lut3DOpData::getIdentityReplacement`, a [0, 1] range (src/OpenColorIO/ops/lut3d/
+/// Lut3DOpData.cpp:411-414 @ v2.5.2), for every bit depth pair the processor can take.
+#[test]
+fn a_lut_and_its_inverse_optimize_to_a_range() {
+    let interps = [Interpolation::Linear, Interpolation::Tetrahedral];
+    let mut cases = Vec::new();
+    for fwd in interps {
+        for inv in interps {
+            let lut = |interp, dir| {
+                curves(Lut::new().interpolation(interp).dir(dir), 3)
+                    .case(format!("{interp:?} {dir:?}"))
+            };
+            cases.push(group(
+                &format!("LUT ({fwd:?}), inverse ({inv:?})"),
+                Forward,
+                &[lut(fwd, Forward), lut(inv, Inverse)],
+            ));
+            cases.push(group(
+                &format!("inverse ({inv:?}), LUT ({fwd:?})"),
+                Forward,
+                &[lut(inv, Inverse), lut(fwd, Forward)],
+            ));
+        }
+    }
+    check_optimized_processors(
+        &cases,
+        &[
+            (Depth::F32, Depth::F32),
+            (Depth::Uint8, Depth::Uint8),
+            (Depth::Uint16, Depth::F16),
+        ],
+    );
+}
+
+/// The CPU processors the port refuses until the inverse 3D LUT (WP 2.2d, 2.2e) and the
+/// composition of 3D LUTs (WP 2.2e) are ported: an inverse LUT's, with the default
+/// optimization (its fast forward LUT) and without `OPTIMIZATION_LUT_INV_FAST` (its exact
+/// renderer), and two LUTs' with `OPTIMIZATION_COMP_LUT3D`.
+#[test]
+fn not_ported_yet_refusals() {
+    let config = Config::create_raw().expect("the raw config");
+    let message = |transform: Transform, flags: OptimizationFlags| {
+        config
+            .processor(&transform)
+            .expect("a processor")
+            .optimized_cpu_processor(flags)
+            .map(|_| ())
+            .map_err(|e| e.message().to_string())
+    };
+    let inverse: Transform = curves(Lut::new().dir(Inverse), 3).port.into();
+    let default = OptimizationFlags::DEFAULT;
+    assert_eq!(
+        message(inverse.clone(), default),
+        Err(NOT_PORTED_FAST_INVERSE.to_string())
+    );
+    let exact = OptimizationFlags(default.0 & !OptimizationFlags::LUT_INV_FAST.0);
+    assert_eq!(
+        message(inverse, exact),
+        Err(NOT_PORTED_INVERSE_RENDERER.to_string())
+    );
+    let mut two = GroupTransform::new();
+    two.append_transform(curves(Lut::new(), 3).port.into());
+    two.append_transform(curves(Lut::new(), 5).port.into());
+    let composing = OptimizationFlags(default.0 | OptimizationFlags::COMP_LUT3D.0);
+    assert_eq!(
+        message(two.clone().into(), composing),
+        Err(NOT_PORTED_COMPOSE.to_string())
+    );
+    // Without the flag, the two LUTs stay.
+    assert_eq!(message(two.into(), default), Ok(()));
 }

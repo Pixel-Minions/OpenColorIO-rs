@@ -269,13 +269,13 @@ impl OpData {
             OpData::Gamma(data) => Ok(data.get_identity_replacement()),
             OpData::Log(data) => data.get_identity_replacement(),
             OpData::Lut1D(data) => data.get_identity_replacement(),
+            OpData::Lut3D(data) => data.get_identity_replacement(),
             // The OpData default: `std::make_shared<MatrixOpData>()`, the identity.
             OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
             | OpData::FixedFunction(_)
             | OpData::GradingRgbCurve(_)
-            | OpData::Lut3D(_)
             | OpData::Reference(_)
             | OpData::NoOp(_) => Ok(OpData::Matrix(MatrixOpData::new())),
         }
