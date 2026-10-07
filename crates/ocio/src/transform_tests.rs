@@ -279,7 +279,18 @@ fn processors_of_the_classes_without_builders_are_refused() {
 
 /// The built-in transforms whose ops are ported (WP 3.2e-g); their pixels are compared with the
 /// wheel's in `tests/api_battery_oracle.rs`.
-const BUILTINS_WITH_OPS: &[&[u8]] = &[b"IDENTITY"];
+const BUILTINS_WITH_OPS: &[&[u8]] = &[
+    b"IDENTITY",
+    b"ARRI_ALEXA-LOGC-EI800-AWG_to_ACES2065-1",
+    b"ARRI_LOGC4_to_ACES2065-1",
+    b"PANASONIC_VLOG-VGAMUT_to_ACES2065-1",
+    b"RED_REDLOGFILM-RWG_to_ACES2065-1",
+    b"RED_LOG3G10-RWG_to_ACES2065-1",
+    b"SONY_SLOG3-SGAMUT3_to_ACES2065-1",
+    b"SONY_SLOG3-SGAMUT3.CINE_to_ACES2065-1",
+    b"SONY_SLOG3-SGAMUT3-VENICE_to_ACES2065-1",
+    b"SONY_SLOG3-SGAMUT3.CINE-VENICE_to_ACES2065-1",
+];
 
 /// A processor of every other built-in transform of the registry is refused in both
 /// directions, and with either direction of the transform itself, with the error the
