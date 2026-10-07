@@ -2390,7 +2390,7 @@ path = "src/OpenColorIO/transforms/builtins/ACES.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/aces.rs"]
 status = "partial"
-note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (576-1437), the ACES 2.0 table's names (1122-1419); the ops come with 3.2g and p3-after-p2"
+note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (576-1437), the ACES 2.0 table's names (1122-1419); p3-builtins 3.2g: AP1_to_CIE_XYZ_D65 (30-35), ACEScct_to_LINEAR (40-55) and the ops of the 8 entries built from Matrix, Log and Range ops (579-634, 691-715, 762-773), through the battery (tests/api_battery_oracle.rs); the LUT, fixed-function and output-transform entries come with p3-after-p2"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/ACES.h"
@@ -2471,7 +2471,7 @@ path = "src/OpenColorIO/transforms/builtins/Displays.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/displays.rs"]
 status = "partial"
-note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (177-556); the ops come with 3.2g and p3-after-p2"
+note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (177-556); p3-builtins 3.2g: the ops of the 15 SDR displays (Matrix or Scale then Gamma ops, 182-429), through the battery (tests/api_battery_oracle.rs); the PQ and HLG entries come with p3-after-p2"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/Displays.h"
