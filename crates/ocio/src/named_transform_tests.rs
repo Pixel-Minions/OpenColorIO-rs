@@ -32,7 +32,9 @@ fn basic_without_a_config() {
     assert_eq!(new_name.as_bytes(), named_transform.name());
 
     let mat: Transform = MatrixTransform::new().into();
-    named_transform.set_transform(Some(&mat), TransformDirection::Forward);
+    named_transform
+        .set_transform(Some(&mat), TransformDirection::Forward)
+        .unwrap();
     let fwd_transform = named_transform.transform(TransformDirection::Forward);
     assert!(matches!(fwd_transform, Some(Transform::Matrix(_))));
     assert!(
