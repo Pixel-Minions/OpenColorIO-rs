@@ -21,6 +21,7 @@ use crate::open_color_types::{BitDepth, OptimizationFlags, TransformDirection};
 use crate::ops::lut1d::Lut1DOpData;
 use crate::ops::lut1d::lut1d_op::create_lut1d_op;
 use crate::ops::lut1d::lut1d_op_data::make_fast_lut1d_from_inverse;
+use crate::ops::lut3d::lut3d_op::NOT_PORTED_FAST_INVERSE as NOT_PORTED_FAST_INVERSE_3D;
 use crate::ops::matrix::matrix_op::create_matrix_op;
 use crate::ops::range::range_op::create_range_op;
 
@@ -242,6 +243,7 @@ fn pair_identity_replacement(op1: &Op, op2: &Op) -> Result<Op> {
         | OpData::Range(_)
         | OpData::Exponent(_)
         | OpData::GradingRgbCurve(_)
+        | OpData::Lut3D(_)
         | OpData::Reference(_)
         | OpData::NoOp(_) => op1.get_identity_replacement(),
     }
@@ -391,7 +393,13 @@ fn replace_inverse_luts(op_vec: &mut OpVec) -> Result<i32> {
                     None
                 }
             }
-            // (The Lut3D arm: an inverse LUT becomes a fast forward one, counted.)
+            // `MakeFastLut3DFromInverse` is WP 2.2e's: until then an inverse Lut3D is an error.
+            OpData::Lut3D(lut) => {
+                if lut.get_direction() == TransformDirection::Inverse {
+                    return Err(Exception::new(NOT_PORTED_FAST_INVERSE_3D));
+                }
+                None
+            }
             OpData::Log(_)
             | OpData::FixedFunction(_)
             | OpData::Cdl(_)
@@ -463,6 +471,7 @@ fn is_forward_lut1d(op: &Op) -> bool {
         | OpData::Range(_)
         | OpData::Exponent(_)
         | OpData::GradingRgbCurve(_)
+        | OpData::Lut3D(_)
         | OpData::Reference(_)
         | OpData::NoOp(_) => false,
     }
