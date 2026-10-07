@@ -80,10 +80,10 @@ pub(super) fn capture_log<T>(f: impl FnOnce() -> T) -> (T, Vec<Vec<u8>>) {
 }
 
 /// What the port makes of a case: the error message as the wheel reports it, or the color
-/// space's transform (none where the value is null).
+/// space's transform (none where the value is null), boxed: a transform is large.
 pub(super) enum Loaded {
     Error(Vec<u8>),
-    Transform(Option<Transform>),
+    Transform(Option<Box<Transform>>),
 }
 
 /// The port's load of a case, as the color space loader reaches the transform: the config's
@@ -120,7 +120,8 @@ fn port_load_v(version: &[u8], case: &[u8]) -> (Loaded, Vec<Vec<u8>>) {
         match cs.set_transform(Some(&t), crate::ColorSpaceDirection::ToReference) {
             Ok(()) => Loaded::Transform(
                 cs.transform(crate::ColorSpaceDirection::ToReference)
-                    .cloned(),
+                    .cloned()
+                    .map(Box::new),
             ),
             Err(e) => failed(e.what().to_vec()),
         }
