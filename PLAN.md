@@ -515,13 +515,13 @@ print(OCIO.__version__)                       # "2.5.2"
 |---|---|---|
 | YAML reading | `saphyr-parser` 0.1 (parse events with source spans) | We build our own ordered tree, keeping verbatim tags and line numbers. No serde: it loses tags, line numbers and duplicate-key errors |
 | YAML writing | A hand-written emitter (~1K lines) | Must reproduce yaml-cpp's layout and float formatting byte for byte |
-| XML | `quick-xml` ≥ 0.41 | Needed for the RUSTSEC-2026-0194/0195 fixes. We track line numbers ourselves |
+| XML | A port of the parts of expat OCIO reaches, pinned per wheel, with expat's own tests | Decided by the owner, 2026-10-07 (P4-1, `docs/cards/phase4.md`): OCIO's messages carry expat's error texts and lines. Replaces `quick-xml` |
 | Half floats | `half` 2.7 | F16C and software conversions; spike S4 checks that they are equal |
 | SIMD | `core::arch` plus runtime detection | Each SIMD kernel must equal its scalar numeric profile |
 | Cache IDs | `xxhash-rust` (xxh3) | XXH3-128, printed low 64 bits then high 64 bits |
-| `.ocioz` archives | `zip` 8.x (deflate only), version pinned | — |
+| `.ocioz` archives | `zip` 8.x (deflate only), version pinned | Archives compared entry by entry; the deflate bytes are deviation D-6 (P4-3, decided 2026-10-07) |
 | Regex | `regex`, `fancy-regex` | — |
-| ICC | A hand-written reader (~400 lines) | OCIO reads only matrix/TRC profiles |
+| ICC | The subset of SampleICC 1.2.6 OCIO uses, translated, with its notice | OCIO reads only matrix/TRC profiles (P4-4, decided 2026-10-07) |
 | Python | `pyo3` 0.29, `numpy` 0.29, `maturin` 1.15 | Embedded via `append_to_inittab`; a standalone wheel for Python 3.13 |
 | GPU checks | naga + wgpu 30, glslang, DXC via `hassle-rs` | — |
 | Tests, benchmarks, CLI | `proptest`, `cargo-fuzz`, `cargo-mutants`, `criterion`, `clap` | No tolerance crates: comparisons are exact |

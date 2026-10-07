@@ -1,6 +1,6 @@
 # Phase 4 cards: file formats
 
-**Status: draft, 2026-10-07**, for the owner's decisions below. Phase 4 starts once its Phase 3
+**Status: planned, 2026-10-07.** The owner decided P4-1 to P4-9 on 2026-10-07, all as recommended. Phase 4 starts once its Phase 3
 prerequisites land (the context's file resolution, the `FileTransform` class, the config
 loaders); parts of it can start earlier, as "Order and parallelism" says.
 
@@ -269,13 +269,16 @@ does. Strings and file contents come back as bytes (hex or blobs). Each call cap
 - O4.1–O4.5 and T4.1 land first, in card `p4-oracle`. O4.6 lands with `p4-m2-parity`.
 - Pixels and GPU text of LUT files are never committed: O4.2 runs them live.
 
-## Owner decisions needed
+## Owner decisions
 
-| # | Decision | Recommendation |
+**Decided by the owner on 2026-10-07, all nine as recommended.** P4-3's deflate bytes are
+deviation D-6, added to `docs/deviations.md` with chunk 4.9b.
+
+| # | Decision | Recommendation (decided) |
 |---|---|---|
 | P4-1 | **The XML parser** (`dependency`). PLAN.md §9 picks `quick-xml` ≥ 0.41 | **Port the parts of expat that OCIO reaches** (MIT; `upstream/expat` pinned at the wheels' version, with expat's own tests copied), as D1 did for yaml-cpp. OCIO's messages carry expat's error texts ("no element found", "mismatched tag", "not well-formed (invalid token)") and the line it stops at, and its character-data splitting decides what text an element sees. `quick-xml` would read well-formed files the same, but its errors, encodings and DTD handling differ, and a compatibility layer could not reproduce which line expat stops at. ~4,300 lines (4.4a–b). Chunk 4.4a first pins the version each wheel bundles: the Windows DLL carries expat 2.7-era strings (`EXPAT_MALLOC_DEBUG`); CMake asks for ≥ 2.6.0 and recommends 2.7.2. If the two wheels bundle different versions, the port follows each (D12) |
 | P4-2 | **CTF elements of Phase 5's ops** (ExposureContrast, GradingPrimary, GradingTone, GradingHueCurve) | **Phase 4 refuses them with "not ported yet"; Phase 5 adds their reader and writer arms (4.5i, 4.6f) with its op data.** ~30 CTF tests wait. GradingRGBCurve's arms are Phase 4's, since its op data is Phase 2's. The alternative: port the four op data now, without renderers |
-| P4-3 | **`.ocioz` archives** (`dependency`). PLAN.md §9 picks `zip` 8.x | **Read with `zip` (pinned, deflate only), and compare archives by their entries, not their bytes.** Upstream's archives aren't reproducible: `Config::archive` stamps each entry with `time(NULL)` (`OCIOZArchive.cpp:272`) and lists directories in the file system's order, and zlib 1.3.1's deflate output (the Windows wheel's) would need its compressor ported. So the port writes the same entries, names, order of the config and its search paths, method and level, and its own deflate stream; reading archives is exact. The deflate bytes are a `D-` deviation for the owner |
+| P4-3 | **`.ocioz` archives** (`dependency`). PLAN.md §9 picks `zip` 8.x | **Read with `zip` (pinned, deflate only), and compare archives by their entries, not their bytes.** Upstream's archives aren't reproducible: `Config::archive` stamps each entry with `time(NULL)` (`OCIOZArchive.cpp:272`) and lists directories in the file system's order, and zlib 1.3.1's deflate output (the Windows wheel's) would need its compressor ported. So the port writes the same entries, names, order of the config and its search paths, method and level, and its own deflate stream; reading archives is exact. The deflate bytes are deviation D-6 |
 | P4-4 | **ICC** (`dependency`: a third-party source) | **Translate the subset of SampleICC 1.2.6 that `iccProfileReader.h` uses**, under the ICC Software License 0.2 (BSD-like, attribution) with its notice in `NOTICE`, as for pystring. ~600 lines. The alternative is to write the reader from the ICC specification and check it against the wheel |
 | P4-5 | **Public API** (`api`) | (a) `FileTransform::formats()` returns the registry's (name, extension, capabilities) in order, besides upstream's index getters. (b) `Baker` mirrors upstream (`new`, setters taking `impl AsRef<[u8]>`, `bake(&mut impl Write) -> Result<()>`). (c) `GroupTransform::write(&self, config, format, &mut impl Write)`; `Config::archive(&self, &mut impl Write)`; `extract_ocioz_archive(archive, destination)`. (d) `CdlTransform::from_file(src, cccid) -> Result<CdlTransform>` and `group_from_file(src)`. (e) `ConfigIoProxy::lut_data(path) -> Result<Vec<u8>>`, as 3.10c's trait grows. (f) `clear_all_caches()` also empties the file caches. Paths stay bytes (D4) |
 | P4-6 | **Windows text mode** | **Match it.** Readers open text formats with `std::ios_base::in` (`FileTransform.cpp:634, 703`): on Windows, `CR LF` reads as `LF`; on Linux, `CR` reaches the reader. A CRLF file can read differently on the two platforms (and through a `ConfigIOProxy`, which never translates). The port reproduces each (D12), with an `I-` entry. 4.0c pins `0x1A` and lone `CR` against MSVC's runtime |
@@ -342,23 +345,23 @@ are made, without waiting for other Phase 4 cards.
 | `p4-registry` | 4.1a–4.1c | 3, ~700 | C | `p4-parse`; 3.10c (`ConfigIOProxy`) for 4.1b's proxy branch | `api` (P4-5 a, f) |
 | `p4-lut-text-1` | 4.2a–4.2e | 5, ~2,100 | B | `p4-registry` | — |
 | `p4-lut-text-2` | 4.3a–4.3e | 5, ~2,950 | B | `p4-registry` | — |
-| `p4-xml` | 4.4a–4.4c | 3, ~5,300 | A | `p4-parse`; P4-1 | `dependency` (P4-1) |
+| `p4-xml` | 4.4a–4.4c | 3, ~5,300 | A | `p4-parse` | — (P4-1 decided) |
 | `p4-cdl` | 4.4d–4.4f | 3, ~1,850 | A | `p4-xml`, `p4-registry` | `api` (P4-5 d) |
 | `p4-ctf-read-1` | 4.5a–4.5d | 4, ~2,200 | A | `p4-xml`, `p4-registry` | — |
 | `p4-ctf-read-2` | 4.5e–4.5h | 4, ~2,500 | A | `p4-ctf-read-1` | — |
 | `p4-ctf-write` | 4.6a–4.6e | 5, ~1,550 | A | `p4-ctf-read-2` (round trips) | `api` (P4-5 c) |
-| `p4-icc` | 4.7a–4.7b | 2, ~1,300 | C | `p4-registry`; P4-4 | `dependency` (P4-4) |
+| `p4-icc` | 4.7a–4.7b | 2, ~1,300 | C | `p4-registry` | — (P4-4 decided; the `NOTICE` entry lands with 4.7a) |
 | `p4-baker-1` | 4.8a–4.8b | 2, ~900 | B | `p4-lut-text-1`; `p3-loading` (configs) | `api` (P4-5 b) |
 | `p4-baker-2` | 4.8c | 1, ~500 | B | `p4-baker-1`, `p4-lut-text-2` | — |
 | `p4-baker-3` | 4.8d | 1, ~150 | B | `p4-baker-1`, `p4-ctf-write` | — |
-| `p4-ocioz` | 4.9a–4.9b | 2, ~500 | C | `p4-registry`, `p3-loading`; P4-3 | `dependency`, `deviation` (P4-3), `api` (P4-5 c) |
+| `p4-ocioz` | 4.9a–4.9b | 2, ~500 | C | `p4-registry`, `p3-loading` | — (P4-3 decided: the `zip` pin and D-6 land with 4.9a-b) |
 | `p4-file-tests` | 4.10a–4.10b | 2 | C | every reader card, `p3-loading`, `p3-builders` | — |
 | `p4-m2-parity` | O4.6, then every file of `tests/data/files` and each reader's generator through the port's API against the wheel: ops, CPU at every bit depth, layout and optimization level, GPU in all 10 languages; written and baked text | 2–3 | any | every card above | `oracle` (O4.6) |
 | `p4-after-p5` | 4.5i, 4.6f | 2, ~1,450 | A | Phase 5's op data, `p4-ctf-write` | — |
 
 18 cards, 54 chunks. When a card grows past about 6 chunks, it splits at a dependency boundary.
 
-**Can start now** (given P4-1 and P4-9): `p4-oracle`, `p4-parse`, then `p4-registry` and
+**Can start now:** `p4-oracle`, `p4-parse`, then `p4-registry` and
 `p4-xml`. They need nothing beyond what Phase 3 has landed, except `p4-registry`'s
 `ConfigIOProxy` branch (3.10c, in `p3-loading`).
 
