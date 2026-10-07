@@ -28,6 +28,7 @@ use crate::ops::cdl::cdl_op_gpu::get_cdl_gpu_shader_program;
 use crate::ops::exponent::exponent_op_gpu::get_exponent_gpu_shader_program;
 use crate::ops::gamma::gamma_op_gpu::get_gamma_gpu_shader_program;
 use crate::ops::log::log_op_gpu::get_log_gpu_shader_program;
+use crate::ops::lut1d::lut1d_op_gpu::extract_lut1d_gpu_shader_info;
 use crate::ops::matrix::matrix_op_gpu::get_matrix_gpu_shader_program;
 use crate::ops::range::range_op_gpu::get_range_gpu_shader_program;
 
@@ -102,6 +103,8 @@ pub fn write_shader_footer(shader_creator: &mut GpuShaderDesc) {
 /// `MatrixOffsetOp::extractGpuShaderInfo`, src/OpenColorIO/ops/matrix/MatrixOp.cpp:190-198),
 /// and so is a Range op (`RangeOp::extractGpuShaderInfo`,
 /// src/OpenColorIO/ops/range/RangeOp.cpp:202-210).
+/// A Lut1D op writes its LUT's texture, an inverse one its fast forward LUT's
+/// (`Lut1DOp::extractGpuShaderInfo`, src/OpenColorIO/ops/lut1d/Lut1DOp.cpp:157-175).
 /// A family whose GPU writer isn't ported yet is the port's error, naming the op.
 ///
 /// Port of `Op::extractGpuShaderInfo`, pure virtual (src/OpenColorIO/Op.h:251 @ v2.5.2), and
@@ -127,6 +130,7 @@ pub(crate) fn extract_op_gpu_shader_info(
         OpData::Cdl(data) => get_cdl_gpu_shader_program(shader_creator, data),
         OpData::Gamma(data) => get_gamma_gpu_shader_program(shader_creator, data),
         OpData::Log(data) => get_log_gpu_shader_program(shader_creator, data),
+        OpData::Lut1D(data) => extract_lut1d_gpu_shader_info(shader_creator, data),
         OpData::NoOp(_) => Ok(()),
         OpData::Reference(_) => unreachable!("an op never holds a ReferenceOpData"),
         // The families whose GPU writer comes later.

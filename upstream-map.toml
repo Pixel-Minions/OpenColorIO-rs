@@ -1708,9 +1708,9 @@ note = "S2: GetLinearSlope, GetLogSideBreak (Windows and Linux variants), GetLin
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOp.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op.rs", "crates/ocio/src/transforms/lut1d_transform.rs"]
+target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op.rs", "crates/ocio/src/transforms/lut1d_transform.rs", "crates/ocio-gpu/src/ops/lut1d/lut1d_op_gpu.rs"]
 status = "partial"
-note = "p1-optimizer B: Lut1DOp (clone, getInfo, isSameType, isInverse, canCombineWith, hasChannelCrosstalk, finalize, getCacheID, supportedByLegacyShader), CreateLut1DOp, GenerateIdentityLut1D; cache IDs and the optimizer's Lut1D rules against the wheel (tests/lut1d_op_oracle.rs). p2-lut1d-inv 2.1g: combineWith (Compose); p2-lut1d-fwd 2.1a: getCPUOp (GetLut1DRenderer, F32 to F32); p1-transforms-fam4: CreateLut1DTransform and BuildLut1DOp, in crates/ocio/src/transforms/lut1d_transform.rs. extractGpuShaderInfo and GenerateLinearScaleLut1D come later"
+note = "p1-optimizer B: Lut1DOp (clone, getInfo, isSameType, isInverse, canCombineWith, hasChannelCrosstalk, finalize, getCacheID, supportedByLegacyShader), CreateLut1DOp, GenerateIdentityLut1D; cache IDs and the optimizer's Lut1D rules against the wheel (tests/lut1d_op_oracle.rs). p2-lut1d-inv 2.1g: combineWith (Compose); p2-lut1d-fwd 2.1a: getCPUOp (GetLut1DRenderer, F32 to F32); p1-transforms-fam4: CreateLut1DTransform and BuildLut1DOp, in crates/ocio/src/transforms/lut1d_transform.rs. p2-lut1d-gpu 2.1h: extractGpuShaderInfo (an inverse LUT made fast, I-137), in crates/ocio-gpu/src/ops/lut1d/lut1d_op_gpu.rs. GenerateLinearScaleLut1D comes with the file formats (Phase 4)"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOp.h"
@@ -1807,13 +1807,15 @@ note = "p1-optimizer A: the forward data; p2-lut1d-inv 2.1e: ComponentProperties
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpGPU.cpp"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/lut1d/lut1d_op_gpu.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut1d-gpu 2.1h: CreatePaddedLutChannels, CreatePaddedRedChannel, GetLut1DGPUShaderProgram; a LUT that doesn't fit its texture width is refused (docs/improvements.md U-5)"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpGPU.h"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/lut1d/lut1d_op_gpu.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut1d-gpu 2.1h"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOp.cpp"
@@ -4843,7 +4845,8 @@ note = "get_lut_ideal_size, constructor, accessors, is_identity, clone, equality
 path = "tests/cpu/ops/lut1d/Lut1DOpGPU_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-gpu/src/ops/lut1d/lut1d_op_gpu_tests.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut1d-gpu 2.1h: pad_lut_one_dimension, pad_lut_two_dimension_1, pad_lut_two_dimension_2"
 
 [[file]]
 path = "tests/cpu/ops/lut1d/Lut1DOp_tests.cpp"

@@ -1107,6 +1107,22 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   NaN base gives `vec3 log_slope = vec3(nan, nan, nan)`:
   `crates/ocio-gpu/tests/log_op_gpu_oracle.rs` (`extreme_parameters_write_the_wheels_shader`).
 
+### I-137. The GPU has only the fast inverse of a 1D LUT, and no OSL
+
+- **Upstream:** `Lut1DOp::extractGpuShaderInfo` replaces an inverse 1D LUT with its fast
+  forward LUT (`MakeFastLut1DFromInverse`) whatever the optimization flags say
+  (`ops/lut1d/Lut1DOp.cpp:157-175`, with a TODO for an exact GPU inverse), so a GPU processor
+  made with `OPTIMIZATION_NONE` (no `OPTIMIZATION_LUT_INV_FAST`) still writes the fast LUT, a
+  resampling of the inverse on a lookup domain, where the CPU processor inverts exactly.
+  `GetLut1DGPUShaderProgram` refuses the OSL translation ("The Lut1DOp is not yet supported
+  by the 'Open Shading language (OSL)' translation", `ops/lut1d/Lut1DOpGPU.cpp:148-151`).
+- **Who notices:** GPU renders of inverse 1D LUTs compared with the CPU's, and OSL users of
+  1D LUTs.
+- **A fix:** an exact inverse renderer on the GPU, and an OSL translation.
+- **Status:** matched in `p2-lut1d-gpu` (2.1h, `crates/ocio-gpu/src/ops/lut1d/lut1d_op_gpu.rs`);
+  checked against the wheel (`crates/ocio-gpu/tests/lut1d_op_gpu_oracle.rs`, the inverse LUTs
+  at `OPTIMIZATION_NONE`, and OSL in every case).
+
 ## Python module (`ocio-py`)
 
 ### I-12. A channel order passed without its keyword is misread
@@ -1390,9 +1406,12 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Who notices:** GPU shaders of 1D LUTs that don't fit the width limit: 8191, 12286 or 12287
   entries at the default width (32,640 lengths up to 2^20 in all), and most lengths at small
   widths.
-- **Options:** an error where the padding doesn't fit, or a layout that fits.
-- **Status:** open; decided in Phase 2, with the Lut1D GPU writer. The oracle refuses these
-  requests (`gpu_shader`, `_padding_fits`).
+- **Decided** (the owner's general rule, `docs/deviations.md`): the port refuses the LUT with
+  an error where the padding doesn't fit, the limit is 0, or a texture 1 texel wide has more
+  than one row ("The Lut1DOp of N entries doesn't fit in a texture at most W texels wide.").
+- **Status:** matched in `p2-lut1d-gpu` (2.1h, `padding_fits` in
+  `crates/ocio-gpu/src/ops/lut1d/lut1d_op_gpu.rs`, and its test of the lengths around the
+  limits). The oracle refuses these requests (`gpu_shader`, `_padding_fits`).
 
 ### U-6. Resource prefixes the Metal class wrapper reads past
 

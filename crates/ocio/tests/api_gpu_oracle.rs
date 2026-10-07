@@ -9,26 +9,23 @@
 //! `getDefaultGPUProcessor()`, or `getOptimizedGPUProcessor` with `OPTIMIZATION_NONE`,
 //! `LOSSLESS`, `VERY_GOOD`, `GOOD`, `DRAFT` or `DEFAULT`. The GPU processor's cache ID and
 //! queries must be the wheel's, and so must the shader the extraction writes into a
-//! `GpuShaderDesc` of each language: its text, cache ID and names, and its uniforms, textures
-//! and dynamic properties, of which the analytic ops have none. Or both must raise the same
-//! message at the same stage.
-//!
-//! The `Lut1DTransform`'s GPU writer (`Lut1DOpGPU`) is Phase 2's (WP 2.1h): where the wheel
-//! builds a GPU processor (then writes the shader, or refuses the OSL translation) and the
-//! port refuses with its "not ported yet" message, the test counts a deferral, and only for
-//! that class. The GPU processor's cache ID and queries are still compared.
+//! `GpuShaderDesc` of each language: its text, cache ID and names, its textures (every value's
+//! bits; the 1D LUTs' since WP 2.1h), and its uniforms and dynamic properties, of which these
+//! classes have none. Or both must raise the same message at the same stage.
 
 mod common;
-
-use std::collections::BTreeMap;
 
 use common::api::{Calls, LEVELS, port_transform};
 use common::api_cases::{self, Cases};
 use ocio::{Config, Exception, TransformDirection};
+use ocio_gpu::gpu_shader::{TextureDimensions, TextureType};
 use ocio_gpu::{GpuLanguage, GpuShaderDesc};
+use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 use ocio_testkit::Oracle;
 use ocio_testkit::battery::Direction;
-use ocio_testkit::gpu::{self as oracle_gpu, GpuShaderReply, GpuShaderRequest, ShaderSettings};
+use ocio_testkit::gpu::{
+    self as oracle_gpu, GpuShaderReply, GpuShaderRequest, ShaderSettings, Texture,
+};
 use serde_json::{Value, json};
 
 /// A version 1 config with one color space, for the classes that build other ops there.
@@ -43,14 +40,12 @@ colorspaces:
     name: raw
 ";
 
-/// A class of the sweep: its cases, the config, and whether it has Phase 2 deferrals.
+/// A class of the sweep: its cases and the config.
 struct Class {
     name: &'static str,
     cases: Cases,
     /// A version 1 config instead of the raw config.
     v1: bool,
-    /// The class's "not ported yet" refusals count as deferrals.
-    deferred: bool,
 }
 
 impl Class {
@@ -59,8 +54,56 @@ impl Class {
             name,
             cases,
             v1: false,
-            deferred: false,
         }
+    }
+}
+
+/// A texture as the comparison holds it: its settings, and its values' bits.
+fn texture_json(t: &Texture) -> Value {
+    json!({
+        "name": t.name,
+        "sampler_name": t.sampler_name,
+        "width": t.width,
+        "height": t.height,
+        "channel": t.channel,
+        "dimensions": t.dimensions,
+        "interpolation": t.interpolation,
+        "binding_index": t.binding_index,
+        "values": t.values.iter().map(|v| v.to_bits()).collect::<Vec<u32>>(),
+    })
+}
+
+/// The port's texture `index`, as the oracle reports the wheel's.
+fn port_texture(desc: &GpuShaderDesc, index: u32) -> Texture {
+    let utf8 = |bytes: &[u8]| String::from_utf8(bytes.to_vec()).expect("UTF-8");
+    let t = desc.texture(index).expect("a texture");
+    let interpolation = match t.interpolation() {
+        Interpolation::Unknown => "INTERP_UNKNOWN",
+        Interpolation::Nearest => "INTERP_NEAREST",
+        Interpolation::Linear => "INTERP_LINEAR",
+        Interpolation::Tetrahedral => "INTERP_TETRAHEDRAL",
+        Interpolation::Cubic => "INTERP_CUBIC",
+        Interpolation::Default => "INTERP_DEFAULT",
+        Interpolation::Best => "INTERP_BEST",
+    };
+    Texture {
+        name: utf8(t.texture_name()),
+        sampler_name: utf8(t.sampler_name()),
+        width: u64::from(t.width()),
+        height: u64::from(t.height()),
+        channel: match t.channel() {
+            TextureType::RedChannel => "TEXTURE_RED_CHANNEL",
+            TextureType::RgbChannel => "TEXTURE_RGB_CHANNEL",
+        }
+        .into(),
+        dimensions: match t.dimensions() {
+            TextureDimensions::D1 => "TEXTURE_1D",
+            TextureDimensions::D2 => "TEXTURE_2D",
+        }
+        .into(),
+        interpolation: interpolation.into(),
+        binding_index: u64::from(desc.texture_shader_binding_index(index).expect("a binding")),
+        values: t.values().to_vec(),
     }
 }
 
@@ -144,7 +187,7 @@ fn wheel(reply: &GpuShaderReply) -> Outcome {
                 "pixel_name": shader.getters["pixel_name"],
                 "resource_prefix": shader.getters["resource_prefix"],
                 "uniforms": shader.uniforms.len(),
-                "textures": shader.textures.len(),
+                "textures": shader.textures.iter().map(texture_json).collect::<Vec<_>>(),
                 "textures_3d": shader.textures_3d.len(),
                 "dynamic_properties": shader.dynamic_properties.len(),
             }))
@@ -198,7 +241,9 @@ fn port(class: &Class, job: &Job, calls: &Calls) -> Outcome {
                 "pixel_name": text(desc.pixel_name()),
                 "resource_prefix": text(desc.resource_prefix()),
                 "uniforms": desc.num_uniforms(),
-                "textures": desc.num_textures(),
+                "textures": (0..desc.num_textures())
+                    .map(|i| texture_json(&port_texture(&desc, i)))
+                    .collect::<Vec<_>>(),
                 "textures_3d": desc.num_textures_3d(),
                 "dynamic_properties": desc.num_dynamic_properties(),
             })
@@ -207,38 +252,10 @@ fn port(class: &Class, job: &Job, calls: &Calls) -> Outcome {
     Outcome::Gpu { processor, shader }
 }
 
-/// The `Lut1DTransform`'s Phase 2 deferral, the stage and message of the port's refusal: in
-/// either direction (an inverse LUT replaced by its fast forward one at the levels with
-/// `OPTIMIZATION_LUT_INV_FAST`, `MakeFastLut1DFromInverse`), the LUT reaches the GPU
-/// processor, whose extraction needs the Lut1D op's GPU writer (`GetLut1DGPUShaderProgram`,
-/// src/OpenColorIO/ops/lut1d/Lut1DOpGPU.cpp @ v2.5.2).
-fn lut1d_deferral() -> (&'static str, &'static str) {
-    ("extract", "The GPU writer of <Lut1DOp> is not ported yet.")
-}
-
-/// Whether the port's outcome is the `Lut1DTransform`'s deferral, where the wheel
-/// built a GPU processor: it then wrote a shader, or refused in the extraction with the
-/// writer's own message (upstream's Lut1D writer has no OSL translation).
-fn deferral(wheel: &Outcome, port: &Outcome) -> bool {
-    let Outcome::Gpu { .. } = wheel else {
-        return false;
-    };
-    let (stage, message) = lut1d_deferral();
-    match port {
-        Outcome::Raised(s, m)
-        | Outcome::Gpu {
-            shader: Err((s, m)),
-            ..
-        } => s == stage && m == message,
-        Outcome::Gpu { shader: Ok(_), .. } => false,
-    }
-}
-
 /// Runs every job of `class` against the wheel; panics with a report if any differs.
 fn check(class: &Class) {
     let jobs = jobs(class);
     let mut failures = Vec::new();
-    let mut deferred: BTreeMap<String, usize> = BTreeMap::new();
     let (mut compared, mut refusals) = (0, 0);
     for batch in jobs.chunks(500) {
         let calls: Vec<_> = batch.iter().map(|job| job.request.call()).collect();
@@ -259,26 +276,6 @@ fn check(class: &Class) {
             }
             let wheel = wheel(&reply);
             let port = port(class, job, case.params());
-            if class.deferred {
-                // Every extraction of the class is a deferral, at its stage, with its message.
-                if !deferral(&wheel, &port) {
-                    failures.push(format!(
-                        "{what}: the deferral {:?} was expected\n  wheel {wheel:?}\n  port  \
-                         {port:?}",
-                        lut1d_deferral()
-                    ));
-                    continue;
-                }
-                // What the port computed before it refused must still be the wheel's.
-                if let (Outcome::Gpu { processor: w, .. }, Outcome::Gpu { processor: p, .. }) =
-                    (&wheel, &port)
-                    && w != p
-                {
-                    failures.push(format!("{what}\n  wheel {w}\n  port  {p}"));
-                }
-                *deferred.entry(lut1d_deferral().1.to_string()).or_default() += 1;
-                continue;
-            }
             if wheel != port {
                 failures.push(format!("{what}\n  wheel {wheel:?}\n  port  {port:?}"));
                 continue;
@@ -286,8 +283,8 @@ fn check(class: &Class) {
             match wheel {
                 Outcome::Gpu { shader: Ok(s), .. } => {
                     assert!(
-                        s["uniforms"] == 0 && s["textures"] == 0 && s["textures_3d"] == 0,
-                        "{what}: compare the uniforms and textures too: {s}"
+                        s["uniforms"] == 0 && s["textures_3d"] == 0,
+                        "{what}: compare the uniforms and 3D textures too: {s}"
                     );
                     compared += 1;
                 }
@@ -296,15 +293,9 @@ fn check(class: &Class) {
         }
     }
     println!(
-        "{}: {} extractions: {compared} compared, {refusals} refusals compared, {} \
-         deferred to Phase 2{}",
+        "{}: {} extractions: {compared} compared, {refusals} refusals compared",
         class.name,
         jobs.len(),
-        deferred.values().sum::<usize>(),
-        deferred
-            .iter()
-            .map(|(m, n)| format!("\n  {n}: {m}"))
-            .collect::<String>()
     );
     assert!(
         failures.is_empty(),
@@ -313,11 +304,7 @@ fn check(class: &Class) {
         jobs.len(),
         failures[..failures.len().min(10)].join("\n")
     );
-    assert!(
-        compared > 0 || class.deferred,
-        "{}: nothing compared",
-        class.name
-    );
+    assert!(compared > 0, "{}: nothing compared", class.name);
 }
 
 #[test]
@@ -378,9 +365,6 @@ fn group_transform_shaders_match_the_wheel() {
 }
 
 #[test]
-fn lut1d_transform_shaders_are_deferred_where_the_wheel_writes_them() {
-    check(&Class {
-        deferred: true,
-        ..Class::new("Lut1DTransform", api_cases::lut1d())
-    });
+fn lut1d_transform_shaders_match_the_wheel() {
+    check(&Class::new("Lut1DTransform", api_cases::lut1d()));
 }
