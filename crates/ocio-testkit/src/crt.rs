@@ -54,6 +54,7 @@ mod ffi {
         pub(super) fn strtof(s: *const c_char, end: *mut *mut c_char) -> c_float;
         pub(super) fn strtol(s: *const c_char, end: *mut *mut c_char, base: c_int) -> c_long;
         pub(super) fn strtoul(s: *const c_char, end: *mut *mut c_char, base: c_int) -> c_ulong;
+        pub(super) fn frexp(x: c_double, exp: *mut c_int) -> c_double;
     }
 
     #[cfg(windows)]
@@ -333,6 +334,14 @@ pub fn strtol_c(input: &[u8], base: i32) -> Strto<i64> {
     strto(input, |s, end| {
         widen_long(unsafe { ffi::strtol(s, end, base) })
     })
+}
+
+/// `frexp(x, &exp)`: the mantissa in `[0.5, 1)` and the exponent of `x`.
+pub fn frexp_c(x: f64) -> (f64, i32) {
+    let mut exp: c_int = 0;
+    // SAFETY: `exp` is a valid out-pointer.
+    let mantissa = unsafe { ffi::frexp(x, &mut exp) };
+    (mantissa, exp)
 }
 
 /// `strtoul(input, &end, base)` in the "C" locale. `unsigned long` is 32 bits on Windows and
