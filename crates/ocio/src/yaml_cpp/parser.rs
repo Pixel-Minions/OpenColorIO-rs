@@ -14,6 +14,30 @@ use super::tag::Directives;
 use super::token::{Token, TokenType};
 use ocio_ops::utils::num_get::{self, Basefield};
 
+/// The stack a document is parsed on. `SingleDocParser` recurses once per nested node, up to
+/// its `DepthGuard<500>`: at opt-level 0, where frames are largest, the deepest documents it
+/// parses took at most 3.9 MiB (499 nested flow maps; 3.3 to 3.6 MiB for flow and block
+/// sequences, block maps and compact maps). Twice that leaves room for the caller's own stack
+/// not to matter, as the wheel parses on its caller's.
+const PARSER_STACK: usize = 8 * 1024 * 1024;
+
+/// Runs `parse` on a thread of [`PARSER_STACK`]: a document nested as deep as yaml-cpp allows
+/// parses whatever the caller's stack (a program's main thread on Windows has 1 MiB). A thread
+/// that can't be had is `std::bad_alloc`, what upstream throws when memory runs out.
+fn on_parser_stack<T: Send>(parse: impl FnOnce() -> Result<T> + Send) -> Result<T> {
+    std::thread::scope(|scope| {
+        match std::thread::Builder::new()
+            .stack_size(PARSER_STACK)
+            .spawn_scoped(scope, parse)
+        {
+            Ok(handle) => handle
+                .join()
+                .unwrap_or_else(|panic| std::panic::resume_unwind(panic)),
+            Err(_) => Err(Exception::bad_alloc()),
+        }
+    })
+}
+
 /// Port of `YAML::Parser` (parser.h:24-86).
 #[derive(Debug, Default)]
 pub struct Parser<'a> {
@@ -67,7 +91,7 @@ impl<'a> Parser<'a> {
         }
 
         let mut sdp = SingleDocParser::new(scanner, directives);
-        sdp.handle_document(event_handler)?;
+        on_parser_stack(|| sdp.handle_document(event_handler))?;
         Ok(true)
     }
 
