@@ -7,9 +7,9 @@
 //!
 //! So far: the typed loaders and their messages, the helpers that report unknown keys, bad
 //! values and repeated keys, and the transforms ([`load_transform`]), except ExposureContrast
-//! and the grading transforms (Phase 5). The loaders of the
-//! config's other objects, and of the descriptions, custom keys and interchange attributes
-//! they hold, come with them (WP 3.3j-m).
+//! and the grading transforms (Phase 5); and the color spaces, looks, view transforms and
+//! named transforms, with their descriptions and interchange attributes. The views, the rules
+//! and the config come with WP 3.3j-m.
 //!
 //! **Errors.** A loader fails with OCIO's `Exception` or with an exception of yaml-cpp, which
 //! upstream lets through (a key that isn't a string, a zombie node): [`LoadError`]. Upstream
@@ -29,15 +29,19 @@ use std::collections::HashSet;
 use ocio_ops::exception::Exception;
 use ocio_ops::logging::log_warning;
 use ocio_ops::open_color_types::{
-    Allocation, FixedFunctionStyle, TransformDirection, fixed_function_style_from_string,
+    Allocation, BitDepth, ColorSpaceDirection, FixedFunctionStyle, ReferenceSpaceType,
+    TransformDirection, ViewTransformDirection, fixed_function_style_from_string,
 };
 use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 use ocio_ops::parse_utils::{
-    allocation_from_string, cdl_style_from_string, interpolation_from_string,
-    negative_style_from_string, transform_direction_from_string,
+    allocation_from_string, bit_depth_from_string, cdl_style_from_string,
+    interpolation_from_string, negative_style_from_string, transform_direction_from_string,
 };
 use ocio_ops::utils::string_utils::c_str;
 
+use crate::color_space::ColorSpace;
+use crate::look::Look;
+use crate::named_transform::NamedTransform;
 use crate::transform::Transform;
 use crate::transforms::allocation_transform::AllocationTransform;
 use crate::transforms::builtin_transform::BuiltinTransform;
@@ -55,6 +59,7 @@ use crate::transforms::log_transform::LogTransform;
 use crate::transforms::look_transform::LookTransform;
 use crate::transforms::matrix_transform::MatrixTransform;
 use crate::transforms::range_transform::{RangeTransform, range_style_from_string};
+use crate::view_transform::ViewTransform;
 use crate::yaml_cpp::exceptions::Exception as YamlException;
 use crate::yaml_cpp::node::{Node, NodeIter, NodeType};
 
@@ -1025,7 +1030,7 @@ fn load_file(node: &Node) -> LoadResult<FileTransform> {
 /// A `LookTransform`: `src`, `dst`, `looks`, `direction`.
 ///
 /// Port of `load(const YAML::Node&, LookTransformRcPtr&)` (OCIOYaml.cpp:2946-2987 @ v2.5.2).
-fn load_look(node: &Node) -> LoadResult<LookTransform> {
+fn load_look_transform(node: &Node) -> LoadResult<LookTransform> {
     let mut t = LookTransform::new();
 
     check_duplicates(node)?;
@@ -1103,7 +1108,7 @@ fn load_leaf(node: &Node) -> LoadResult<Transform> {
         b"ColorSpaceTransform" => load_color_space_transform(node)?.into(),
         b"DisplayViewTransform" => load_display_view(node)?.into(),
         b"FileTransform" => load_file(node)?.into(),
-        b"LookTransform" => load_look(node)?.into(),
+        b"LookTransform" => load_look_transform(node)?.into(),
         b"AllocationTransform" => load_allocation_transform(node)?.into(),
         b"CDLTransform" => load_cdl(node)?.into(),
         b"ExponentTransform" => load_exponent(node)?.into(),
@@ -1128,6 +1133,398 @@ fn load_leaf(node: &Node) -> LoadResult<Transform> {
     })
 }
 
+/// The string without its trailing newlines: YAML keeps them inconsistently (a literal block
+/// reads back with one, a plain value with all), so a description loses them all.
+///
+/// Upstream reads `str.back()` of the string it has just emptied when every character was a
+/// newline (an access out of range), and drops the value: the loop stops as the string is
+/// empty, whatever was read (docs/improvements.md, I-143). The port reads nothing there.
+///
+/// Port of `SanitizeNewlines` (OCIOYaml.cpp:37-62 @ v2.5.2).
+pub(crate) fn sanitize_newlines(input: &[u8]) -> Vec<u8> {
+    if input.is_empty() {
+        return input.to_vec();
+    }
+
+    let mut str = input.to_vec();
+    let mut last = str.last().copied();
+    while last == Some(b'\n') && !str.is_empty() {
+        str.pop();
+        last = str.last().copied();
+    }
+
+    str
+}
+
+/// The node as a string without its trailing newlines: a description.
+///
+/// Port of `loadDescription` (OCIOYaml.cpp:213-217 @ v2.5.2).
+pub(crate) fn load_description(node: &Node) -> LoadResult<Vec<u8>> {
+    Ok(sanitize_newlines(&load_string(node)?))
+}
+
+/// The node as a `StringVec`, a list of strings.
+///
+/// Port of `load(const YAML::Node&, StringUtils::StringVec&)` (OCIOYaml.cpp:114-128 @ v2.5.2).
+pub(crate) fn load_string_vec(node: &Node) -> LoadResult<Vec<Vec<u8>>> {
+    node.as_::<Vec<Vec<u8>>>()
+        .map_err(|e| parsing_failed(node, "StringVec", &e.into()))
+}
+
+/// The node as a bit depth: a string, then `BitDepthFromString` (an unknown name is
+/// `BIT_DEPTH_UNKNOWN`).
+///
+/// Port of `load(const YAML::Node&, BitDepth&)` (OCIOYaml.cpp:164-169 @ v2.5.2).
+pub(crate) fn load_bit_depth(node: &Node) -> LoadResult<BitDepth> {
+    let s = load_string(node)?;
+    Ok(bit_depth_from_string(Some(c_str(&s))))
+}
+
+/// The pairs of a map, kept as nodes, or "Expected a YAML map in the <section> section."
+/// through [`throw_error`].
+///
+/// Port of `CustomKeysLoader` and `loadCustomKeys` (OCIOYaml.cpp:325-346 @ v2.5.2).
+pub(crate) fn load_custom_keys(node: &Node, section_name: &str) -> LoadResult<Vec<(Node, Node)>> {
+    if node.node_type()? == NodeType::Map {
+        Ok(node.iter().map(|iter| (iter.first, iter.second)).collect())
+    } else {
+        let ss = format!("Expected a YAML map in the {section_name} section.");
+        Err(throw_error(node, ss.as_bytes()))
+    }
+}
+
+/// Sets the interchange attributes of a map through `set_attribute` (each value without its
+/// trailing newlines); an attribute the owner refuses (it doesn't know its name) is a warning,
+/// "Unknown key in interchange: 'key'.". A node that isn't a map fails with "The 'interchange'
+/// content needs to be a map.".
+///
+/// Port of `loadInterchangeAttributes` (OCIOYaml.cpp:375-404 @ v2.5.2).
+pub(crate) fn load_interchange_attributes(
+    node: &Node,
+    mut set_attribute: impl FnMut(&[u8], &[u8]) -> ocio_ops::exception::Result<()>,
+) -> LoadResult<()> {
+    if node.node_type()? != NodeType::Map {
+        return Err(throw_error(
+            node,
+            b"The 'interchange' content needs to be a map.",
+        ));
+    }
+
+    let kv = load_custom_keys(node, "interchange")?;
+
+    for (key, value) in &kv {
+        let keystr = key.as_::<Vec<u8>>()?;
+        let valstr = value.as_::<Vec<u8>>()?;
+        let valstr = sanitize_newlines(&valstr);
+
+        // OCIO exception means the key is not recognized. Convert that to a warning.
+        if set_attribute(c_str(&keystr), c_str(&valstr)).is_err() {
+            log_unknown_key_warning_in(b"interchange", key)?;
+        }
+    }
+    Ok(())
+}
+
+/// A color space's map, into `cs` (created by the config with the reference space of its
+/// section). A node not tagged `!<ColorSpace>` is left alone. The scene-referred transform
+/// keys `to_scene_reference` and `from_scene_reference` exist from version 2 on; earlier, they
+/// are unknown keys.
+///
+/// Port of `load(const YAML::Node&, ColorSpaceRcPtr&, unsigned int)` (OCIOYaml.cpp:3424-3572
+/// @ v2.5.2).
+pub(crate) fn load_color_space(
+    node: &Node,
+    cs: &mut ColorSpace,
+    major_version: u32,
+) -> LoadResult<()> {
+    if node.tag()? != b"ColorSpace" {
+        return Ok(()); // not a !<ColorSpace> tag
+    }
+
+    if node.node_type()? != NodeType::Map {
+        return Err(throw_error(
+            node,
+            b"The '!<ColorSpace>' content needs to be a map.",
+        ));
+    }
+
+    check_duplicates(node)?;
+
+    for iter in node.iter() {
+        let key = iter.first.as_::<Vec<u8>>()?;
+        if iter.second.is_null()? || !iter.second.is_defined() {
+            continue;
+        }
+        let value = &iter.second;
+        match key.as_slice() {
+            b"name" => cs.set_name(c_str(&load_string(value)?)),
+            b"aliases" => {
+                for alias in load_string_vec(value)? {
+                    cs.add_alias(c_str(&alias));
+                }
+            }
+            b"interop_id" => cs.set_interop_id(c_str(&load_string(value)?))?,
+            b"description" => cs.set_description(c_str(&load_description(value)?)),
+            b"interchange" => {
+                load_interchange_attributes(value, |k, v| cs.set_interchange_attribute(k, v))?
+            }
+            b"family" => cs.set_family(c_str(&load_string(value)?)),
+            b"equalitygroup" => cs.set_equality_group(c_str(&load_string(value)?)),
+            b"bitdepth" => cs.set_bit_depth(load_bit_depth(value)?),
+            b"isdata" => cs.set_is_data(load_bool(value)?),
+            b"categories" => {
+                for name in load_string_vec(value)? {
+                    cs.add_category(c_str(&name));
+                }
+            }
+            b"encoding" => cs.set_encoding(c_str(&load_string(value)?)),
+            b"allocation" => cs.set_allocation(load_allocation(value)?),
+            b"allocationvars" => {
+                let val = load_vec_f32(value)?;
+                if !val.is_empty() {
+                    cs.set_allocation_vars(&val);
+                }
+            }
+            b"to_reference" | b"to_scene_reference"
+                if key == b"to_reference" || major_version >= 2 =>
+            {
+                if cs.reference_space_type() == ReferenceSpaceType::Display {
+                    return Err(throw_error(
+                        node,
+                        b"'to_reference' or 'to_scene_reference' cannot be used for a display \
+                          color space.",
+                    ));
+                }
+                let val = load_transform(value)?;
+                cs.set_transform(Some(&val), ColorSpaceDirection::ToReference)?;
+            }
+            b"to_display_reference" => {
+                if cs.reference_space_type() == ReferenceSpaceType::Scene {
+                    return Err(throw_error(
+                        node,
+                        b"'to_display_reference' cannot be used for a non-display color space.",
+                    ));
+                }
+                let val = load_transform(value)?;
+                cs.set_transform(Some(&val), ColorSpaceDirection::ToReference)?;
+            }
+            b"from_reference" | b"from_scene_reference"
+                if key == b"from_reference" || major_version >= 2 =>
+            {
+                if cs.reference_space_type() == ReferenceSpaceType::Display {
+                    return Err(throw_error(
+                        node,
+                        b"'from_reference' or 'from_scene_reference' cannot be used for a \
+                          display color space.",
+                    ));
+                }
+                let val = load_transform(value)?;
+                cs.set_transform(Some(&val), ColorSpaceDirection::FromReference)?;
+            }
+            b"from_display_reference" => {
+                if cs.reference_space_type() == ReferenceSpaceType::Scene {
+                    return Err(throw_error(
+                        node,
+                        b"'from_display_reference' cannot be used for a non-display color \
+                          space.",
+                    ));
+                }
+                let val = load_transform(value)?;
+                cs.set_transform(Some(&val), ColorSpaceDirection::FromReference)?;
+            }
+            _ => log_unknown_key_warning(node, &iter.first)?,
+        }
+    }
+    Ok(())
+}
+
+/// A look's map, into `look`. A node not tagged `!<Look>` is left alone.
+///
+/// Port of `load(const YAML::Node&, LookRcPtr&)` (OCIOYaml.cpp:3667-3719 @ v2.5.2).
+pub(crate) fn load_look(node: &Node, look: &mut Look) -> LoadResult<()> {
+    if node.tag()? != b"Look" {
+        return Ok(());
+    }
+
+    check_duplicates(node)?;
+
+    for iter in node.iter() {
+        let key = iter.first.as_::<Vec<u8>>()?;
+        if iter.second.is_null()? || !iter.second.is_defined() {
+            continue;
+        }
+        let value = &iter.second;
+        match key.as_slice() {
+            b"name" => look.set_name(c_str(&load_string(value)?)),
+            b"process_space" => look.set_process_space(c_str(&load_string(value)?)),
+            b"transform" => look.set_transform(&load_transform(value)?)?,
+            b"inverse_transform" => look.set_inverse_transform(&load_transform(value)?)?,
+            b"description" => look.set_description(c_str(&load_description(value)?)),
+            b"interchange" => {
+                load_interchange_attributes(value, |k, v| look.set_interchange_attribute(k, v))?
+            }
+            _ => log_unknown_key_warning(node, &iter.first)?,
+        }
+    }
+    Ok(())
+}
+
+/// The reference space of a view transform, from the transform keys of its map: display when
+/// it has `to_display_reference` or `from_display_reference`, scene when it has the scene
+/// ones; neither or both are errors.
+///
+/// Port of `peekViewTransformReferenceSpace` (OCIOYaml.cpp:3750-3795 @ v2.5.2).
+pub(crate) fn peek_view_transform_reference_space(node: &Node) -> LoadResult<ReferenceSpaceType> {
+    if node.node_type()? != NodeType::Map {
+        return Err(throw_error(
+            node,
+            b"The '!<ViewTransform>' content needs to be a map.",
+        ));
+    }
+
+    let mut is_scene = false;
+    let mut is_display = false;
+
+    for iter in node.iter() {
+        let key = iter.first.as_::<Vec<u8>>()?;
+        if iter.second.is_null()? || !iter.second.is_defined() {
+            continue;
+        }
+        match key.as_slice() {
+            b"to_scene_reference" | b"from_scene_reference" => is_scene = true,
+            b"to_display_reference" | b"from_display_reference" => is_display = true,
+            _ => {}
+        }
+    }
+
+    if !is_scene && !is_display {
+        return Err(throw_error(
+            node,
+            b"The '!<ViewTransform>' needs to refer to a transform.",
+        ));
+    } else if is_scene && is_display {
+        return Err(throw_error(
+            node,
+            b"The '!<ViewTransform>' cannot have both to/from_reference and \
+              to/from_display_reference transforms.",
+        ));
+    }
+    Ok(if is_display {
+        ReferenceSpaceType::Display
+    } else {
+        ReferenceSpaceType::Scene
+    })
+}
+
+/// A view transform's map, into `vt` (created with the reference space
+/// [`peek_view_transform_reference_space`] finds). A node not tagged `!<ViewTransform>` is
+/// left alone.
+///
+/// Port of `load(const YAML::Node&, ViewTransformRcPtr&)` (OCIOYaml.cpp:3797-3879 @ v2.5.2).
+pub(crate) fn load_view_transform(node: &Node, vt: &mut ViewTransform) -> LoadResult<()> {
+    if node.tag()? != b"ViewTransform" {
+        return Ok(()); // not a !<ViewTransform> tag
+    }
+
+    if node.node_type()? != NodeType::Map {
+        return Err(throw_error(
+            node,
+            b"The '!<ViewTransform>' content needs to be a map.",
+        ));
+    }
+
+    check_duplicates(node)?;
+
+    for iter in node.iter() {
+        let key = iter.first.as_::<Vec<u8>>()?;
+        if iter.second.is_null()? || !iter.second.is_defined() {
+            continue;
+        }
+        let value = &iter.second;
+        match key.as_slice() {
+            b"name" => vt.set_name(c_str(&load_string(value)?)),
+            b"description" => vt.set_description(c_str(&load_description(value)?)),
+            b"interchange" => {
+                load_interchange_attributes(value, |k, v| vt.set_interchange_attribute(k, v))?
+            }
+            b"family" => vt.set_family(c_str(&load_string(value)?)),
+            b"categories" => {
+                for name in load_string_vec(value)? {
+                    vt.add_category(c_str(&name));
+                }
+            }
+            b"to_scene_reference" | b"to_display_reference" => {
+                let val = load_transform(value)?;
+                vt.set_transform(Some(&val), ViewTransformDirection::ToReference)?;
+            }
+            b"from_scene_reference" | b"from_display_reference" => {
+                let val = load_transform(value)?;
+                vt.set_transform(Some(&val), ViewTransformDirection::FromReference)?;
+            }
+            _ => log_unknown_key_warning(node, &iter.first)?,
+        }
+    }
+    Ok(())
+}
+
+/// A named transform's map, into `nt`. A node not tagged `!<NamedTransform>` is left alone.
+/// Its description keeps its trailing newlines (upstream reads it with the plain string
+/// loader, I-144).
+///
+/// Port of `load(const YAML::Node&, NamedTransformRcPtr&)` (OCIOYaml.cpp:3927-4006 @ v2.5.2).
+pub(crate) fn load_named_transform(node: &Node, nt: &mut NamedTransform) -> LoadResult<()> {
+    if node.tag()? != b"NamedTransform" {
+        return Ok(()); // not a !<NamedTransform> tag
+    }
+
+    if node.node_type()? != NodeType::Map {
+        return Err(throw_error(
+            node,
+            b"The '!<NamedTransform>' content needs to be a map.",
+        ));
+    }
+
+    check_duplicates(node)?;
+
+    for iter in node.iter() {
+        let key = iter.first.as_::<Vec<u8>>()?;
+        if iter.second.is_null()? || !iter.second.is_defined() {
+            continue;
+        }
+        let value = &iter.second;
+        match key.as_slice() {
+            b"name" => nt.set_name(c_str(&load_string(value)?)),
+            b"aliases" => {
+                for alias in load_string_vec(value)? {
+                    nt.add_alias(c_str(&alias));
+                }
+            }
+            b"description" => nt.set_description(c_str(&load_string(value)?)),
+            b"family" => nt.set_family(c_str(&load_string(value)?)),
+            b"categories" => {
+                for name in load_string_vec(value)? {
+                    nt.add_category(c_str(&name));
+                }
+            }
+            b"encoding" => nt.set_encoding(c_str(&load_string(value)?)),
+            b"transform" => {
+                let val = load_transform(value)?;
+                nt.set_transform(Some(&val), TransformDirection::Forward)?;
+            }
+            b"inverse_transform" => {
+                let val = load_transform(value)?;
+                nt.set_transform(Some(&val), TransformDirection::Inverse)?;
+            }
+            _ => log_unknown_key_warning(node, &iter.first)?,
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 #[path = "ocio_yaml_oracle_tests.rs"]
 mod oracle_tests;
+
+#[cfg(test)]
+#[path = "ocio_yaml_objects_oracle_tests.rs"]
+mod objects_oracle_tests;
