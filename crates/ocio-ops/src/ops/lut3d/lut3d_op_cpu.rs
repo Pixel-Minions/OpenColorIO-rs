@@ -35,15 +35,22 @@
 //! lane next to the color channels, and that quiets a signaling NaN. With rustc 1.98.1 it did
 //! so in the SSE2 and AVX kernels.
 //!
-//! Not ported yet: `InvLut3DRenderer` (the exact inverse).
+//! [`get_lut3d_renderer`] is the op's `getCPUOp`. Not ported yet: `InvLut3DRenderer` (the exact
+//! inverse, WP 2.2d), an error until then.
 
 use super::lut3d_op_cpu_avx::apply_tetrahedral_avx;
 use super::lut3d_op_cpu_avx2::apply_tetrahedral_avx2;
 use super::lut3d_op_cpu_avx512::apply_tetrahedral_avx512;
 use super::lut3d_op_cpu_sse2::apply_tetrahedral_sse2;
+use std::sync::Arc;
+
+use super::lut3d_op::NOT_PORTED_INVERSE_RENDERER;
 use super::lut3d_op_data::{Interpolation, Lut3DOpData};
 use crate::cpu_info::CpuInfo;
+use crate::exception::{Exception, Result};
 use crate::math_utils::{clamp, sse_add, sse_cvttps_epi32, sse_max, sse_min, sse_mul};
+use crate::op::CpuOp;
+use crate::open_color_types::TransformDirection;
 
 /// A tetrahedral SIMD kernel: the functions `m_applyLutFunc` can point to
 /// (src/OpenColorIO/ops/lut3d/Lut3DOpCPU.cpp:386-416 @ v2.5.2).
@@ -461,6 +468,31 @@ pub fn get_forward_lut3d_renderer(lut: &Lut3DOpData, cpu: &CpuInfo) -> ForwardLu
         ForwardLut3DRenderer::Tetrahedral(Lut3DTetrahedralRenderer::new(lut, cpu))
     } else {
         ForwardLut3DRenderer::Trilinear(Lut3DRenderer::new(lut, cpu))
+    }
+}
+
+/// The forward renderers process `float` pixels in place ([`ForwardLut3DRenderer::apply`]);
+/// the CPU engine uses them between F32 buffers only.
+impl CpuOp for ForwardLut3DRenderer {
+    fn apply(&self, rgba: &mut [f32]) {
+        ForwardLut3DRenderer::apply(self, rgba);
+    }
+}
+
+/// The renderer of `lut` with the SIMD kernel this machine dispatches to: a forward LUT's
+/// ([`get_forward_lut3d_renderer`]); an inverse LUT's exact renderer is WP 2.2d's
+/// ([`NOT_PORTED_INVERSE_RENDERER`]).
+///
+/// Port of `GetLut3DRenderer` (src/OpenColorIO/ops/lut3d/Lut3DOpCPU.cpp:1751-1763 @ v2.5.2).
+pub fn get_lut3d_renderer(lut: &Lut3DOpData) -> Result<Arc<dyn CpuOp>> {
+    get_lut3d_renderer_for_cpu(lut, CpuInfo::instance())
+}
+
+/// [`get_lut3d_renderer`] with the kernel `cpu` dispatches to.
+pub fn get_lut3d_renderer_for_cpu(lut: &Lut3DOpData, cpu: &CpuInfo) -> Result<Arc<dyn CpuOp>> {
+    match lut.get_direction() {
+        TransformDirection::Forward => Ok(Arc::new(get_forward_lut3d_renderer(lut, cpu))),
+        TransformDirection::Inverse => Err(Exception::new(NOT_PORTED_INVERSE_RENDERER)),
     }
 }
 

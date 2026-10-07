@@ -368,6 +368,7 @@ fn create_cpu_engine(
             | OpData::Range(_)
             | OpData::Exponent(_)
             | OpData::GradingRgbCurve(_)
+            | OpData::Lut3D(_)
             | OpData::Reference(_)
             | OpData::NoOp(_) => None,
         };

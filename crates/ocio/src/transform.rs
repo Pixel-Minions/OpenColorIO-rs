@@ -531,6 +531,11 @@ pub(crate) fn create_transform(group: &mut GroupTransform, op: &Op) -> Result<()
         OpData::GradingRgbCurve(_) => Err(Exception::new(
             "CreateGradingRGBCurveTransform is not ported yet (Phase 3).",
         )),
+        // `CreateLut3DTransform` (src/OpenColorIO/ops/lut3d/Lut3DOp.cpp:235-249 @ v2.5.2)
+        // comes with `Lut3DTransform` (WP 2.2c).
+        OpData::Lut3D(_) => Err(Exception::new(
+            "CreateLut3DTransform is not ported yet (Phase 2, WP 2.2c).",
+        )),
         // No op holds a reference (the file readers replace it with the file's ops), and the
         // no-op types returned above.
         OpData::Reference(_) | OpData::NoOp(_) => {

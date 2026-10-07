@@ -34,6 +34,8 @@ use crate::ops::gradingrgbcurve::grading_rgb_curve_op::create_grading_rgb_curve_
 use crate::ops::log::log_op::create_log_op;
 use crate::ops::lut1d::lut1d_op::create_lut1d_op;
 use crate::ops::lut1d::lut1d_op_cpu::get_lut1d_renderer;
+use crate::ops::lut3d::lut3d_op::create_lut3d_op;
+use crate::ops::lut3d::lut3d_op_cpu::get_lut3d_renderer;
 use crate::ops::matrix::matrix_op::create_matrix_op;
 use crate::ops::range::range_op::create_range_op;
 
@@ -232,6 +234,7 @@ impl Op {
             OpData::Exponent(data) => Ok(data.clone_op()),
             OpData::FixedFunction(data) => data.clone_op(),
             OpData::GradingRgbCurve(data) => Ok(data.clone_op()),
+            OpData::Lut3D(data) => Ok(data.clone_op()),
             OpData::Reference(_) => no_reference_op(),
             OpData::NoOp(data) => Ok(data.clone_op()),
         }
@@ -253,6 +256,7 @@ impl Op {
             OpData::Exponent(data) => data.get_info(),
             OpData::FixedFunction(data) => data.get_info(),
             OpData::GradingRgbCurve(data) => data.get_info(),
+            OpData::Lut3D(data) => data.get_info(),
             OpData::Reference(_) => no_reference_op(),
             OpData::NoOp(data) => data.get_info(),
         }
@@ -283,6 +287,7 @@ impl Op {
             | OpData::Range(_)
             | OpData::Exponent(_)
             | OpData::GradingRgbCurve(_)
+            | OpData::Lut3D(_)
             | OpData::NoOp(_) => self.data.is_no_op(),
         }
     }
@@ -303,6 +308,7 @@ impl Op {
             | OpData::Range(_)
             | OpData::Exponent(_)
             | OpData::GradingRgbCurve(_)
+            | OpData::Lut3D(_)
             | OpData::NoOp(_) => self.data.is_identity(),
         }
     }
@@ -331,6 +337,7 @@ impl Op {
             | OpData::Exponent(_)
             | OpData::Lut1D(_)
             | OpData::GradingRgbCurve(_)
+            | OpData::Lut3D(_)
             | OpData::Reference(_)
             | OpData::NoOp(_) => {
                 return Err(Exception::new(format!(
@@ -371,6 +378,7 @@ impl Op {
             OpData::Exponent(data) => data.is_same_type(op),
             OpData::FixedFunction(data) => data.is_same_type(op),
             OpData::GradingRgbCurve(data) => data.is_same_type(op),
+            OpData::Lut3D(data) => data.is_same_type(op),
             OpData::Reference(_) => no_reference_op(),
             OpData::NoOp(data) => data.is_same_type(op),
         }
@@ -391,6 +399,7 @@ impl Op {
             OpData::Exponent(data) => data.is_inverse(op),
             OpData::FixedFunction(data) => data.is_inverse_op(op),
             OpData::GradingRgbCurve(data) => data.is_inverse_op(op),
+            OpData::Lut3D(data) => data.is_inverse_op(op),
             OpData::Reference(_) => no_reference_op(),
             OpData::NoOp(data) => data.is_inverse(op),
         }
@@ -410,6 +419,7 @@ impl Op {
             OpData::Exponent(data) => Ok(data.can_combine_with(op)),
             OpData::FixedFunction(data) => Ok(data.can_combine_with(op)),
             OpData::GradingRgbCurve(data) => Ok(data.can_combine_with(op)),
+            OpData::Lut3D(data) => Ok(data.can_combine_with(op)),
             OpData::Reference(_) => no_reference_op(),
             OpData::Lut1D(data) => Ok(data.can_combine_with(op)),
             // The Op default.
@@ -431,6 +441,7 @@ impl Op {
             OpData::Exponent(data) => data.combine_with(ops, second_op),
             OpData::FixedFunction(data) => data.combine_with(ops, second_op),
             OpData::GradingRgbCurve(data) => data.combine_with(ops, second_op),
+            OpData::Lut3D(data) => data.combine_with(ops, second_op),
             OpData::Reference(_) => no_reference_op(),
             OpData::Lut1D(data) => data.combine_with(ops, second_op),
             // The Op default.
@@ -463,6 +474,7 @@ impl Op {
             | OpData::Range(_)
             | OpData::Exponent(_)
             | OpData::GradingRgbCurve(_)
+            | OpData::Lut3D(_)
             | OpData::NoOp(_) => self.data.has_channel_crosstalk(),
         }
     }
@@ -530,6 +542,7 @@ impl Op {
             | OpData::FixedFunction(_)
             | OpData::Exponent(_)
             | OpData::GradingRgbCurve(_)
+            | OpData::Lut3D(_)
             | OpData::NoOp(_) => Ok(()),
         }
     }
@@ -549,6 +562,7 @@ impl Op {
             OpData::Exponent(data) => Ok(data.get_op_cache_id()),
             OpData::FixedFunction(data) => Ok(data.get_op_cache_id()),
             OpData::GradingRgbCurve(data) => Ok(data.get_op_cache_id()),
+            OpData::Lut3D(data) => Ok(data.get_op_cache_id()),
             OpData::Reference(_) => no_reference_op(),
             OpData::NoOp(data) => Ok(data.get_op_cache_id()),
         }
@@ -596,6 +610,10 @@ impl Op {
             }
             OpData::GradingRgbCurve(data) => {
                 data.get_cpu_op()?.apply(rgba);
+                Ok(())
+            }
+            OpData::Lut3D(data) => {
+                get_lut3d_renderer(data)?.apply(rgba);
                 Ok(())
             }
             OpData::Reference(_) => no_reference_op(),
@@ -668,6 +686,13 @@ impl Op {
                 renderer.apply(output);
                 Ok(())
             }
+            // The Lut3D renderers read a pixel before writing it too.
+            OpData::Lut3D(data) => {
+                let renderer = get_lut3d_renderer(data)?;
+                output.copy_from_slice(input);
+                renderer.apply(output);
+                Ok(())
+            }
             // Between two buffers: the linear style's renderers restore alpha from the input.
             OpData::GradingRgbCurve(data) => {
                 data.get_cpu_op()?
@@ -695,6 +720,9 @@ impl Op {
             // Port of `Lut1DOp::supportedByLegacyShader` (src/OpenColorIO/ops/lut1d/Lut1DOp.cpp:54
             // @ v2.5.2).
             OpData::Lut1D(_) => false,
+            // Port of `Lut3DOp::supportedByLegacyShader` (src/OpenColorIO/ops/lut3d/
+            // Lut3DOp.cpp:100 @ v2.5.2).
+            OpData::Lut3D(_) => false,
             OpData::Log(_)
             | OpData::FixedFunction(_)
             | OpData::Cdl(_)
@@ -720,6 +748,7 @@ impl Op {
             | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Lut1D(_)
+            | OpData::Lut3D(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
@@ -741,6 +770,7 @@ impl Op {
             | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Lut1D(_)
+            | OpData::Lut3D(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
@@ -762,6 +792,7 @@ impl Op {
             | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Lut1D(_)
+            | OpData::Lut3D(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
@@ -794,6 +825,7 @@ impl Op {
             | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Lut1D(_)
+            | OpData::Lut3D(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
@@ -817,6 +849,7 @@ impl Op {
             | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Lut1D(_)
+            | OpData::Lut3D(_)
             | OpData::Matrix(_)
             | OpData::Range(_)
             | OpData::Exponent(_)
@@ -847,6 +880,8 @@ impl Op {
             OpData::Exponent(data) => Ok(Some(data.get_cpu_op())),
             OpData::FixedFunction(data) => Ok(Some(data.get_cpu_op(fast_log_exp_pow)?)),
             OpData::GradingRgbCurve(data) => Ok(Some(data.get_cpu_op()?)),
+            // `GetLut3DRenderer(data)` (src/OpenColorIO/ops/lut3d/Lut3DOp.cpp:197-201 @ v2.5.2).
+            OpData::Lut3D(data) => Ok(Some(get_lut3d_renderer(data)?)),
             OpData::Reference(_) => no_reference_op(),
             // AllocationNoOp, FileNoOp and LookNoOp::getCPUOp return nullptr
             // (src/OpenColorIO/ops/noop/NoOps.cpp:47, 318, 404 @ v2.5.2).
@@ -1202,6 +1237,11 @@ pub fn create_op_vec_from_op_data(
         OpData::Lut1D(lut_src) => {
             let lut = lut_src.clone();
             create_lut1d_op(ops, lut, dir);
+            Ok(())
+        }
+        OpData::Lut3D(lut_src) => {
+            let lut = lut_src.clone();
+            create_lut3d_op(ops, lut, dir);
             Ok(())
         }
         OpData::Matrix(matrix_src) => {

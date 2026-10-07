@@ -1850,27 +1850,29 @@ status = "todo"
 path = "src/OpenColorIO/ops/lut3d/Lut3DOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op.rs"]
-status = "todo"
+status = "partial"
+note = "p2-lut3d 2.2b: GenerateIdentityLut3D, Get3DLutEdgeLenFromNumPixels, Lut3DOp (clone, getInfo, isSameType, isInverse, canCombineWith, hasChannelCrosstalk, getCacheID, getCPUOp, supportedByLegacyShader), CreateLut3DOp, the OpData::Lut3D arms. combineWith (Compose) is an error until 2.2e; extractGpuShaderInfo comes with 2.2f; CreateLut3DTransform and BuildLut3DOp with the transform (2.2c)"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOp.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op.rs"]
-status = "todo"
+status = "partial"
+note = "p2-lut3d 2.2b: GetLut3DIndex_RedFast, GetLut3DIndex_BlueFast, Lut3DOrder, the functions of Lut3DOp.cpp; CreateLut3DTransform with 2.2c"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu.rs"]
 status = "partial"
-note = "S4: forward renderers (dispatch, generic tetrahedral, SSE2 and generic trilinear), bit-identical to the wheel on Windows and Rocky 9 for sizes 2-129; InvLut3DRenderer not ported"
+note = "S4: forward renderers (dispatch, generic tetrahedral, SSE2 and generic trilinear), bit-identical to the wheel on Windows and Rocky 9 for sizes 2-129; InvLut3DRenderer not ported. p2-lut3d 2.2b: the forward renderers as the op's CpuOp, GetLut3DRenderer (the inverse arm an error until 2.2d)"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu.rs"]
 status = "partial"
-note = "S4: GetLut3DRenderer covers forward LUTs only"
+note = "S4, p2-lut3d 2.2b: GetLut3DRenderer covers forward LUTs only until 2.2d"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_AVX.cpp"
@@ -4914,7 +4916,8 @@ note = "p2-lut3d 2.2a: empty, accessors, clone, not_supported_length, equality, 
 path = "tests/cpu/ops/lut3d/Lut3DOp_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_tests.rs"]
-status = "todo"
+status = "partial"
+note = "p2-lut3d 2.2b: inverse_comparison_check, GenerateIdentityLut3D throw_lut, Lut3DOpData create_op, cache_id, edge_len_from_num_pixels, Lut3DOpStruct lut3d_order, Lut3DOpData lut_order, lut_combine, cpu_renderer_lut3d. Lut3D create_transform and Lut3DTransform build_op come with 2.2c; cpu_renderer_cloned, cpu_renderer_inverse and cpu_renderer_lut3d_with_nan read files (Phase 4); performance_check is commented out upstream"
 
 [[file]]
 path = "tests/cpu/ops/matrix/MatrixOpCPU_tests.cpp"
