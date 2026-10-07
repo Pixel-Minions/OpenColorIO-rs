@@ -201,7 +201,7 @@ fn port_cache_ids(chain: &[T], flags: OptimizationFlags) -> Result<(String, Stri
 }
 
 fn wheel_cache_ids(
-    chains: &[(Vec<T>, &str)],
+    chains: &[(Vec<T>, Value)],
 ) -> Vec<std::result::Result<(String, String), String>> {
     let calls: Vec<BatchCall<'_>> = chains
         .iter()
@@ -294,16 +294,26 @@ fn cache_ids_match_the_wheel() {
 /// Each chain's processor and optimized processor at each of [`FLAGS`] have the wheel's cache
 /// IDs; returns how many optimized processors' differ from their processors'.
 fn check_chains(chains: Vec<Vec<T>>) -> usize {
+    let flags: Vec<(Value, OptimizationFlags)> = FLAGS
+        .iter()
+        .map(|(name, flags)| (json!(name), *flags))
+        .collect();
+    check_chains_at(chains, &flags)
+}
+
+/// [`check_chains`] at each of `flag_sets`: the oracle's optimization (a flag's name or a list
+/// of names) and the port's flags.
+fn check_chains_at(chains: Vec<Vec<T>>, flag_sets: &[(Value, OptimizationFlags)]) -> usize {
     let mut cases = Vec::new();
     for chain in chains {
-        for (name, flags) in FLAGS {
-            cases.push((chain.clone(), name, flags));
+        for (name, flags) in flag_sets {
+            cases.push((chain.clone(), name, *flags));
         }
     }
     let wheel = wheel_cache_ids(
         &cases
             .iter()
-            .map(|(chain, name, _)| (chain.clone(), *name))
+            .map(|(chain, name, _)| (chain.clone(), (*name).clone()))
             .collect::<Vec<_>>(),
     );
     let mut failures = Vec::new();
@@ -331,7 +341,10 @@ fn check_chains(chains: Vec<Vec<T>>) -> usize {
 /// entries) and inverse LUTs replaced by their fast forward LUTs (`OPTIMIZATION_LUT_INV_FAST`,
 /// `MakeFastLut1DFromInverse`: a 12-bit lookup domain, or a half domain for values outside
 /// [0, 1]), standard and half domains, with hue adjust: the optimized processors' cache IDs,
-/// which hash the new LUTs' values, are the wheel's.
+/// which hash the new LUTs' values, are the wheel's. Two inverse LUTs without
+/// `OPTIMIZATION_LUT_INV_FAST` (`OPTIMIZATION_LOSSLESS | OPTIMIZATION_COMP_LUT1D`) compose
+/// through `Compose`'s swap, which takes the domain's size from the first LUT before it
+/// swaps them (`lutc1`).
 #[test]
 fn compositions_match_the_wheel() {
     let sq = T::Lut(Lut::std(17, Some(square)));
@@ -350,6 +363,7 @@ fn compositions_match_the_wheel() {
         hue: Lut1DHueAdjust::Dw3,
         ..Lut::std(33, Some(square))
     });
+    let inv_big = inverse(Lut::std(65536, Some(ramp)));
     let chains = vec![
         vec![sq, sq],
         vec![sq, half_scale],
@@ -361,8 +375,25 @@ fn compositions_match_the_wheel() {
         vec![inv_hue],
         vec![inv_sq, inv_wavy],
         vec![inv_wavy, sq],
+        vec![inv_big, inv_sq],
     ];
     assert!(check_chains(chains) > 0);
+
+    let without_fast = [(
+        json!(["OPTIMIZATION_LOSSLESS", "OPTIMIZATION_COMP_LUT1D"]),
+        OptimizationFlags::LOSSLESS | OptimizationFlags::COMP_LUT1D,
+    )];
+    let chains = vec![
+        vec![inv_big, inv_sq],
+        vec![inv_sq, inv_big],
+        vec![inv_sq, inv_wavy],
+    ];
+    assert!(check_chains_at(chains, &without_fast) > 0);
+}
+
+/// Rising in red, a square in green, falling in blue.
+fn ramp(x: f32) -> [f32; 3] {
+    [x * 0.8 + 0.05, x * x, 1.0 - x]
 }
 
 /// A LUT next to its inverse, which the optimizer replaces with the pair's own identity
@@ -432,7 +463,7 @@ fn inverse_luts_without_optimization_match_the_wheel() {
     let wheel = wheel_cache_ids(
         &chains
             .iter()
-            .map(|chain| (chain.clone(), "OPTIMIZATION_NONE"))
+            .map(|chain| (chain.clone(), json!("OPTIMIZATION_NONE")))
             .collect::<Vec<_>>(),
     );
     for (chain, wheel) in chains.iter().zip(wheel) {

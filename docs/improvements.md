@@ -1028,6 +1028,25 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   16-bit input) and the battery's inverse hue-adjust cases (`tests/lut1d_renderer_oracle.rs`)
   compare them with the wheel.
 
+### I-151. A hue-adjust 1D LUT misses its nodes' values from float input
+
+- **Upstream:** the hue-adjust renderer of a standard-domain LUT from float input
+  (`Lut1DRendererHueAdjust::apply`, its `OCIO_USE_SSE2` branch, `ops/lut1d/Lut1DOpCPU.cpp:909-941`,
+  which every x86-64 wheel compiles) truncates the index, takes the next index up as the high
+  one, and interpolates down from the high node with `delta = highIdx - idx`:
+  `lerpf(lut[high], lut[low], delta)`. An input that lands exactly on a node gets
+  `high + 1 * (low - high)`, not the node's value: through the wheel, a pixel of 0 gets
+  0.10000002 from the LUT `[0.1, 0.7, 0.3]`; the LUT `[-FLT_MAX, FLT_MAX]` gives -Inf for 0
+  (`FLT_MAX + (-FLT_MAX - FLT_MAX)`) and a NaN green for a grey pixel. The other renderers
+  interpolate up from the low node.
+- **Who notices:** hue-adjust (`HUE_DW3`) LUTs of a standard domain applied to float images:
+  values on the nodes are off by a rounding error, and LUTs with values near `FLT_MAX` give
+  infinities and NaNs.
+- **A fix:** interpolate up from the low node, as the forward renderer without hue adjust
+  does (`lerpf(lut[low], lut[high], idx - lowIdx)`).
+- **Status:** matched in `p2-lut1d-fwd` (2.1b); `tests/lut1d_renderer_oracle.rs`
+  (`hue_adjust_on_nodes_matches_the_wheel`) compares those LUTs' nodes with the wheel's.
+
 ## Transforms
 
 ### I-11. Copying a group transform shares its children

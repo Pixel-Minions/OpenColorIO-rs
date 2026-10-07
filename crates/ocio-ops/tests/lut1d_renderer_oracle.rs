@@ -919,3 +919,72 @@ fn check_rows(single_pixel_rows: bool) {
         failures[..failures.len().min(20)].join("\n")
     );
 }
+
+/// A hue-adjust LUT of a standard domain, from float input, on the LUT's nodes: the renderer
+/// interpolates from the next node down to the node with a weight of 1 (`high + 1 * (low -
+/// high)`), which rounds off the node's own value (docs/improvements.md, I-151). Through the
+/// wheel, a pixel of 0 doesn't get 0.1 from the LUT `[0.1, 0.7, 0.3]`, and gets -Inf from
+/// `[-FLT_MAX, FLT_MAX]`, whose grey pixel gets a NaN green. The port renders each pixel
+/// byte for byte as the wheel does, on rows of one pixel and on one row.
+#[test]
+fn hue_adjust_on_nodes_matches_the_wheel() {
+    let luts: [(&str, Vec<f32>); 3] = [
+        ("[-FLT_MAX, FLT_MAX]", vec![-f32::MAX, f32::MAX]),
+        ("[0.1, 0.7, 0.3]", vec![0.1, 0.7, 0.3]),
+        ("[0, 1/3, 1]", vec![0.0, 1.0 / 3.0, 1.0]),
+    ];
+    // Node 0, the middle, node 1.
+    let pixels: Vec<f32> = vec![
+        0.0, 0.0, 0.0, 1.0, //
+        0.5, 0.5, 0.5, 1.0, //
+        1.0, 1.0, 1.0, 1.0,
+    ];
+    let mut cases = Vec::new();
+    for (label, gray) in &luts {
+        let values: Vec<f32> = gray.iter().flat_map(|&v| [v, v, v]).collect();
+        let lut = Lut {
+            half_domain: false,
+            hue_adjust: true,
+            entries: LutEntries::first_second_middle_last("lut", gray.len()),
+            values,
+        };
+        for single_pixel_rows in [true, false] {
+            cases.push(RowCase {
+                label: format!("{label}, single-pixel rows {single_pixel_rows}"),
+                lut: lut.clone(),
+                output: Depth::F32,
+                single_pixel_rows,
+            });
+        }
+    }
+    let requests: Vec<Request> = cases.iter().map(|case| case.request(&pixels)).collect();
+    let blobs: Vec<Vec<u8>> = cases.iter().map(|c| f32_to_bytes(&c.lut.values)).collect();
+    let calls: Vec<BatchCall<'_>> = requests
+        .iter()
+        .zip(&blobs)
+        .map(|(request, lut)| {
+            let mut call = request.call();
+            call.blobs.push(lut.as_slice());
+            call
+        })
+        .collect();
+    let responses = Oracle::get().batch(&calls, true);
+    for (case, (request, response)) in cases.iter().zip(requests.iter().zip(responses)) {
+        let reply = request.reply(response.unwrap_or_else(|e| panic!("{}: {e}", case.label)));
+        assert!(reply.raised().is_none(), "{}", case.label);
+        let wheel: Vec<f32> = reply.buffers[1]
+            .chunks(4)
+            .map(|b| f32::from_ne_bytes(b.try_into().expect("4 bytes")))
+            .collect();
+        // What I-151 describes, as the wheel renders it.
+        if case.lut.values[0] == 0.1 {
+            assert_ne!(wheel[0].to_bits(), 0.1f32.to_bits(), "{}", case.label);
+        }
+        if case.lut.values[0] == -f32::MAX {
+            assert_eq!(wheel[0], f32::NEG_INFINITY, "{}", case.label);
+            assert!(wheel[5].is_nan(), "{}: the grey pixel's green", case.label);
+        }
+        let port = case.port(&pixels).expect("the port's renderer");
+        assert_eq!(port, reply.buffers[1], "{}", case.label);
+    }
+}
