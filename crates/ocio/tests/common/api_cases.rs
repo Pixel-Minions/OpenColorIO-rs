@@ -1256,3 +1256,21 @@ fn random_gamut_comp_13_params(n: usize) -> Vec<[f64; 7]> {
         })
         .collect()
 }
+
+/// `BuiltinTransform`: the built-in transforms named, each a case. They have no parameters, so
+/// the battery generates no cases from them.
+pub(crate) fn builtin(styles: &[&str]) -> Cases {
+    let cases = styles
+        .iter()
+        .map(|style| {
+            Case::new(
+                *style,
+                Calls::new("BuiltinTransform").fixed("setStyle", serde_json::json!(style)),
+            )
+        })
+        .collect();
+    Cases {
+        cases,
+        bases: Vec::new(),
+    }
+}

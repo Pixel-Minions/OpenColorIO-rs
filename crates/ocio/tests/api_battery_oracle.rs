@@ -179,3 +179,14 @@ fn fixed_function_transform_through_the_api_matches_the_wheel() {
         api_cases::fixed_function(),
     ));
 }
+
+/// The built-in transforms whose ops are ported (WP 3.2e-g): the identity.
+const BUILTINS: &[&str] = &["IDENTITY"];
+
+#[test]
+fn builtin_transform_through_the_api_matches_the_wheel() {
+    battery::run(&ApiFamily::new(
+        "BuiltinTransform",
+        api_cases::builtin(BUILTINS),
+    ));
+}

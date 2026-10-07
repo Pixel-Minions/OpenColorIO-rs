@@ -16,6 +16,7 @@ use std::sync::{Arc, OnceLock};
 use ocio_ops::exception::{Exception, Result};
 use ocio_ops::op::OpVec;
 use ocio_ops::open_color_types::TransformDirection;
+use ocio_ops::ops::matrix::matrix_op::create_identity_matrix_op;
 use ocio_ops::platform::strcasecmp;
 use ocio_ops::utils::string_utils::c_str;
 
@@ -194,11 +195,13 @@ impl BuiltinTransformRegistry {
     pub(crate) fn register_all(&mut self) {
         self.builtins.clear();
 
-        // The identity's op, an identity matrix (`CreateIdentityMatrixOp`), comes with WP 3.2e.
         self.builtins.push(BuiltinData::new(
             b"IDENTITY",
             Some(b""),
-            not_ported_yet(b"IDENTITY"),
+            Arc::new(|ops: &mut OpVec| {
+                create_identity_matrix_op(ops);
+                Ok(())
+            }),
         ));
 
         // ACES support.

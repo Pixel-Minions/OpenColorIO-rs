@@ -20,11 +20,11 @@
 use std::sync::Arc;
 
 use ocio::{
-    Allocation, AllocationTransform, BitDepth, CdlTransform, Config, Exception, ExponentTransform,
-    ExponentWithLinearTransform, FixedFunctionStyle, FixedFunctionTransform, GroupTransform,
-    Interpolation, LogAffineTransform, LogCameraTransform, LogTransform, Lut1DHueAdjust,
-    Lut1DTransform, MatrixTransform, NegativeStyle, OptimizationFlags, Processor, RangeStyle,
-    RangeTransform, Transform, TransformDirection,
+    Allocation, AllocationTransform, BitDepth, BuiltinTransform, CdlTransform, Config, Exception,
+    ExponentTransform, ExponentWithLinearTransform, FixedFunctionStyle, FixedFunctionTransform,
+    GroupTransform, Interpolation, LogAffineTransform, LogCameraTransform, LogTransform,
+    Lut1DHueAdjust, Lut1DTransform, MatrixTransform, NegativeStyle, OptimizationFlags, Processor,
+    RangeStyle, RangeTransform, Transform, TransformDirection,
 };
 use ocio_ops::open_color_types::CdlStyle;
 use ocio_testkit::battery::Direction;
@@ -445,6 +445,19 @@ pub(crate) fn port_transform(spec: &Value) -> Result<Transform, Exception> {
                             .collect();
                         t.set_params(&params);
                     }
+                    _ => unknown(name),
+                }
+            }
+            t.into()
+        }
+        "BuiltinTransform" => {
+            check_args(&[]);
+            let mut t = BuiltinTransform::new();
+            for call in calls {
+                let (name, a) = args_of(call);
+                match name {
+                    "setDirection" => t.set_direction(direction(one(name, a))),
+                    "setStyle" => t.set_style(one(name, a).as_str().expect("a style"))?,
                     _ => unknown(name),
                 }
             }

@@ -2420,8 +2420,8 @@ status = "todo"
 path = "src/OpenColorIO/transforms/builtins/BuiltinTransformRegistry.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/builtin_transform_registry.rs"]
-status = "partial"
-note = "p3-transforms (3.1b): Get, addBuiltin, the getters, createOps, registerAll and CreateBuiltinTransformOps; the identity's op (CreateIdentityMatrixOp) comes with 3.2e"
+status = "done"
+note = "p3-transforms (3.1b): Get, addBuiltin, the getters, createOps, registerAll and CreateBuiltinTransformOps; p3-builtins 3.2e: the identity's op (CreateIdentityMatrixOp), through the battery (tests/api_battery_oracle.rs)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/BuiltinTransformRegistry.h"
@@ -2475,6 +2475,7 @@ path = "src/OpenColorIO/transforms/builtins/OpHelpers.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/op_helpers.rs"]
 status = "todo"
+note = "p3-builtins: comes with its first callers, the LUT entries of p3-after-p2 (the inverse 1D LUT renderers are Phase 2's 2.1f), so it lands with the tests that exercise it"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/OpHelpers.h"
