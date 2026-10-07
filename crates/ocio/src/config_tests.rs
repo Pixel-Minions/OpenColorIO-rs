@@ -146,7 +146,8 @@ fn alias_validation_without_validate() {
     nt.set_transform(
         Some(&Transform::from(MatrixTransform::new())),
         TransformDirection::Forward,
-    );
+    )
+    .unwrap();
     nt.set_name("namedtransform");
     check_throw_what(
         cfg.add_named_transform(&nt),

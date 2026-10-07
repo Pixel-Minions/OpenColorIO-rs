@@ -325,7 +325,7 @@ impl Cs {
             cs.set_is_data(true);
         }
         for (_, t, dir) in &self.transforms {
-            cs.set_transform(Some(t), *dir);
+            cs.set_transform(Some(t), *dir).unwrap();
         }
         cs
     }
@@ -1090,7 +1090,7 @@ fn add_look(name: &[u8], process_space: &[u8], with_transform: bool) -> Vec<Step
             look.set_name(&n);
             look.set_process_space(&ps);
             if with_transform {
-                look.set_transform(&t);
+                look.set_transform(&t).unwrap();
             }
             unit_out(c.add_look(&look))
         },
@@ -1137,7 +1137,7 @@ fn add_view_transform(
             let mut vt = ViewTransform::new(reference);
             vt.set_name(&n);
             if let Some(d) = dir {
-                vt.set_transform(Some(&t), d);
+                vt.set_transform(Some(&t), d).unwrap();
             }
             unit_out(c.add_view_transform(&vt))
         },
@@ -1190,7 +1190,7 @@ fn add_named_transform(
                 nt.add_alias(a);
             }
             if let Some(d) = dir {
-                nt.set_transform(Some(&t), d);
+                nt.set_transform(Some(&t), d).unwrap();
             }
             unit_out(c.add_named_transform(&nt))
         },
@@ -3905,9 +3905,9 @@ fn add_look_with(
             let mut look = Look::new();
             look.set_name(name);
             look.set_process_space(ps);
-            look.set_transform(&ft);
+            look.set_transform(&ft).unwrap();
             if let Some(t) = &inv_t {
-                look.set_inverse_transform(t);
+                look.set_inverse_transform(t).unwrap();
             }
             unit_out(c.add_look(&look))
         },
@@ -3974,8 +3974,10 @@ fn color_spaces_used_match_the_wheel() {
                     move |c| {
                         let mut vt = ViewTransform::new(ReferenceSpaceType::Scene);
                         vt.set_name("VT");
-                        vt.set_transform(Some(&ft), ViewTransformDirection::ToReference);
-                        vt.set_transform(Some(&it), ViewTransformDirection::FromReference);
+                        vt.set_transform(Some(&ft), ViewTransformDirection::ToReference)
+                            .unwrap();
+                        vt.set_transform(Some(&it), ViewTransformDirection::FromReference)
+                            .unwrap();
                         unit_out(c.add_view_transform(&vt))
                     },
                 ),
@@ -4010,8 +4012,8 @@ fn color_spaces_used_match_the_wheel() {
                     move |c| {
                         let mut nt = NamedTransform::new();
                         nt.set_name("NT");
-                        nt.set_transform(Some(&ft), TransformDirection::Forward);
-                        nt.set_transform(Some(&it), TransformDirection::Inverse);
+                        nt.set_transform(Some(&ft), TransformDirection::Forward).unwrap();
+                        nt.set_transform(Some(&it), TransformDirection::Inverse).unwrap();
                         unit_out(c.add_named_transform(&nt))
                     },
                 ),

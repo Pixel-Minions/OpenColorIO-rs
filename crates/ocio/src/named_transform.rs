@@ -218,16 +218,23 @@ impl NamedTransform {
     }
 
     /// Sets a copy of `transform` as the forward or the inverse transform; `None` (upstream's
-    /// null pointer) removes it.
+    /// null pointer) removes it. The copy is upstream's `createEditableCopy`
+    /// ([`Transform::create_editable_copy`]): an invalid FixedFunctionTransform is refused with
+    /// its error, and the named transform keeps its transform.
     ///
     /// Port of `NamedTransformImpl::setTransform` (NamedTransform.cpp:223-251 @ v2.5.2).
     #[doc(alias = "setTransform")]
-    pub fn set_transform(&mut self, transform: Option<&Transform>, dir: TransformDirection) {
-        let transform = transform.cloned();
+    pub fn set_transform(
+        &mut self,
+        transform: Option<&Transform>,
+        dir: TransformDirection,
+    ) -> ocio_ops::exception::Result<()> {
+        let transform = transform.map(Transform::create_editable_copy).transpose()?;
         match dir {
             TransformDirection::Forward => self.forward_transform = transform,
             TransformDirection::Inverse => self.inverse_transform = transform,
         }
+        Ok(())
     }
 
     /// Writes the named transform's text to `os`; the transforms on the same stream.

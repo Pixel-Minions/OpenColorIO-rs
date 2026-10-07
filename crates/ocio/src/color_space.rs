@@ -535,17 +535,24 @@ impl ColorSpace {
     }
 
     /// Sets a copy of `transform` as the transform to the reference space or from it; `None`
-    /// (upstream's null pointer) removes it.
+    /// (upstream's null pointer) removes it. The copy is upstream's `createEditableCopy`
+    /// ([`Transform::create_editable_copy`]): an invalid FixedFunctionTransform is refused with
+    /// its error, and the color space keeps its transform.
     ///
     /// Port of `ColorSpace::setTransform` (ColorSpace.cpp:476-491 @ v2.5.2).
     #[doc(alias = "setTransform")]
-    pub fn set_transform(&mut self, transform: Option<&Transform>, dir: ColorSpaceDirection) {
-        let transform_copy = transform.cloned();
+    pub fn set_transform(
+        &mut self,
+        transform: Option<&Transform>,
+        dir: ColorSpaceDirection,
+    ) -> Result<()> {
+        let transform_copy = transform.map(Transform::create_editable_copy).transpose()?;
 
         match dir {
             ColorSpaceDirection::ToReference => self.to_ref_transform = transform_copy,
             ColorSpaceDirection::FromReference => self.from_ref_transform = transform_copy,
         }
+        Ok(())
     }
 
     /// The color space's text, as Python's `repr()` prints it, in bytes: names and

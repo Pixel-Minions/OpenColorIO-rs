@@ -213,17 +213,24 @@ impl ViewTransform {
     }
 
     /// Sets a copy of `transform` as the transform to the reference space or from it; `None`
-    /// (upstream's null pointer) removes it.
+    /// (upstream's null pointer) removes it. The copy is upstream's `createEditableCopy`
+    /// ([`Transform::create_editable_copy`]): an invalid FixedFunctionTransform is refused with
+    /// its error, and the view transform keeps its transform.
     ///
     /// Port of `ViewTransform::setTransform` (ViewTransform.cpp:228-245 @ v2.5.2).
     #[doc(alias = "setTransform")]
-    pub fn set_transform(&mut self, transform: Option<&Transform>, dir: ViewTransformDirection) {
-        let transform_copy = transform.cloned();
+    pub fn set_transform(
+        &mut self,
+        transform: Option<&Transform>,
+        dir: ViewTransformDirection,
+    ) -> Result<()> {
+        let transform_copy = transform.map(Transform::create_editable_copy).transpose()?;
 
         match dir {
             ViewTransformDirection::ToReference => self.to_ref_transform = transform_copy,
             ViewTransformDirection::FromReference => self.from_ref_transform = transform_copy,
         }
+        Ok(())
     }
 
     /// Writes the view transform's text to `os`; the transforms on the same stream. The

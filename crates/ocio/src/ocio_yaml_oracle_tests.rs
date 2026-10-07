@@ -95,8 +95,8 @@ pub(super) fn port_load(case: &[u8]) -> (Loaded, Vec<Vec<u8>>) {
 
 /// [`port_load`] in a config of the profile version `version`. The color space keeps a copy of
 /// the transform (`ColorSpace::setTransform`, ColorSpace.cpp:476-490 @ v2.5.2): upstream's
-/// `createEditableCopy`, which validates a FixedFunctionTransform (the port's
-/// `ColorSpace::set_transform` doesn't yet: the test copies it so).
+/// `createEditableCopy`, which validates a FixedFunctionTransform: the port's
+/// `ColorSpace::set_transform`.
 fn port_load_v(version: &[u8], case: &[u8]) -> (Loaded, Vec<Vec<u8>>) {
     capture_log(|| {
         let failed = |what: Vec<u8>| Loaded::Error([READ_ERROR, &what].concat());
@@ -112,13 +112,17 @@ fn port_load_v(version: &[u8], case: &[u8]) -> (Loaded, Vec<Vec<u8>>) {
         if node.is_null().unwrap() || !node.is_defined() {
             return Loaded::Transform(None);
         }
-        match load_transform(&node) {
-            Ok(Transform::FixedFunction(t)) => match t.create_editable_copy() {
-                Ok(copy) => Loaded::Transform(Some(copy.into())),
-                Err(e) => failed(e.what().to_vec()),
-            },
-            Ok(t) => Loaded::Transform(Some(t)),
-            Err(e) => failed(e.what()),
+        let t = match load_transform(&node) {
+            Ok(t) => t,
+            Err(e) => return failed(e.what()),
+        };
+        let mut cs = crate::ColorSpace::new();
+        match cs.set_transform(Some(&t), crate::ColorSpaceDirection::ToReference) {
+            Ok(()) => Loaded::Transform(
+                cs.transform(crate::ColorSpaceDirection::ToReference)
+                    .cloned(),
+            ),
+            Err(e) => failed(e.what().to_vec()),
         }
     })
 }
