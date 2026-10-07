@@ -441,6 +441,35 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p3-rules` (3.9g, `Config::impl_filtered_views`); checked against the
   wheel (`crates/ocio/tests/config_oracle.rs`, `views_by_viewing_rules_match_the_wheel`).
 
+### I-138. Upgrading a version 1 config gives the rule at index 1 the default color space
+
+- **Upstream:** `UpdateFileRulesFromV1ToV2` (`FileRules.cpp:960-1047`), which
+  `Config::upgradeToLatestVersion` calls for a version 1 config without a `default` role,
+  gives its choice of color space (a data `raw`, the first data color space, the first active
+  one, or the first one) to the rule at index 1 (`setColorSpace(1, ...)`), meant as the
+  default rule after the path search rule it inserts first. When the config already has
+  other rules, index 1 is one of them: through the wheel, rules `[ColorSpaceNamePathSearch,
+  g (color space b), Default]` upgrade to `g` with the chosen color space and `Default` left
+  as `default`; when it is the path search rule, the upgrade ends the program (U-55).
+- **Who notices:** version 1 configs made in code with file rules, then upgraded.
+- **A fix:** set the color space of the default rule (the last one).
+- **Status:** matched in `p3-rules` (3.9f); checked against the wheel
+  (`crates/ocio/tests/config_oracle.rs`, `upgrades_match_the_wheel`, "a rule at index 1").
+
+### I-139. A regular-expression rule given a pattern or an extension becomes a partial glob
+
+- **Upstream:** `FileRule::setPattern` and `setExtension` on a regular-expression rule
+  (`FileRules.cpp:360-413`) make it a glob with the other part empty, a glob that
+  `insertRule` and these setters can't make (they refuse an empty pattern or extension). An
+  empty extension builds `(\..*)`: the rule takes any extension but not a name without one
+  (`abc.x` and `abc.`, not `abc`), and its `repr()` shows no extension; an empty pattern
+  builds `(.*)`.
+- **Who notices:** code and Python scripts that turn regular-expression rules into globs one
+  part at a time.
+- **A fix:** refuse the change, or give the other part `*`.
+- **Status:** matched in `p3-rules` (3.9e-f); checked against the wheel
+  (`crates/ocio/tests/config_oracle.rs`, `regex_rules_made_globs_match_the_wheel`).
+
 ## Numeric helpers
 
 ### I-20. Double values are compared to 0 and 1 in float precision
@@ -1420,14 +1449,19 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   after a line feed (I-122), so a glob holding a line feed then `.*` (the pattern `\n.*`,
   converted to `\n\..*`) has its `\..*` replaced by `.*`, which changes what the rule matches
   (`\nfoo.exr` matches the pattern `\n.*` and extension `exr` on Windows, not on Linux). The
-  second expression, `(\.\*)+`, merges runs of `.*` on both, as intended.
+  second expression, `(\.\*)+`, merges runs of `.*` on both; after a backslash, which escapes
+  the first `.`, that changes what the glob matches: the pattern `\**` builds `\.*.*` (dots,
+  then anything), merged into `\.*` (dots only), so with the extension `exr` the rule takes
+  `...exr` but not `abc.exr`, in both wheels.
 - **Who notices:** glob rules with a line feed in their pattern, shared between Windows and
   Linux.
 - **A fix:** drop the first expression, or anchor nothing in it.
 - **Decided** (D12): the port does what each wheel does.
 - **Status:** matched in `p3-rules` (3.9e, `std_regex::regex_replace` and
   `crates/ocio/src/file_rules.rs`); the messages of globs whose sanitized expression doesn't
-  compile show it, checked against both wheels in `crates/ocio/tests/file_rules_oracle.rs`.
+  compile show it, checked against both wheels in `crates/ocio/tests/file_rules_oracle.rs`;
+  the paths such globs send to each rule in `crates/ocio/tests/config_oracle.rs`
+  (`sanitized_globs_on_a_config_match_the_wheel`).
 
 ## Undefined behaviour upstream
 
@@ -1948,13 +1982,19 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   and no active color space, gives the default rule the first scene color space: `""` when
   there is none (no color space, or only display ones). `FileRules::setColorSpace` throws for
   an empty name, and the exception leaving a `noexcept` function ends the program
-  (`std::terminate`). Seen in the source; not run against the wheel, whose process would end.
+  (`std::terminate`). The same happens when the rule at index 1, which gets that color space
+  (I-138), is the path search rule (rules `[g, ColorSpaceNamePathSearch, Default]` on a
+  version 1 config without a `default` role): `setColorSpace` throws "File rules:
+  ColorSpaceNamePathSearch rule does not accept any color space."; through the Windows wheel
+  the process exits with 127. Seen in the source and in that probe; the oracle can't run a
+  case whose process ends.
 - **Who notices:** applications that upgrade a version 1 config made in code before giving it
   color spaces.
 - **Decided** (the owner's general rule, `docs/deviations.md`): the port returns that error
   from `Config::upgrade_to_latest_version`, and leaves the config as it was.
-- **Status:** matched in `p3-rules` (3.9f); the other paths of the upgrade are checked against
-  the wheel in `crates/ocio/tests/config_oracle.rs`.
+- **Status:** matched in `p3-rules` (3.9f; both triggers tested in
+  `crates/ocio/src/config_tests.rs`); the other paths of the upgrade are checked against the
+  wheel in `crates/ocio/tests/config_oracle.rs`.
 
 ### U-56. Null rules, and a null rule name for empty viewing rules
 

@@ -462,3 +462,29 @@ fn upgrade_without_a_scene_color_space_is_refused() {
     assert_eq!(config.major_version(), 1);
     assert_eq!(config.file_rules().get().to_bytes(), rules);
 }
+
+/// U-55's other trigger: the default rule's color space goes to the rule at index 1
+/// (I-138), which the path search rule refuses; upstream's `noexcept` upgrade then ends the
+/// program (the wheel's process exits with 127). The port returns the path search rule's error
+/// and leaves the config as it was.
+#[test]
+fn upgrade_with_the_path_search_rule_at_index_1_is_refused() {
+    let _env = EnvGuard::new();
+    let mut config = Config::new().unwrap();
+    let mut cs = ColorSpace::with_reference_space(ReferenceSpaceType::Scene);
+    cs.set_name("a");
+    config.add_color_space(&cs).unwrap();
+    let mut rules = FileRules::new();
+    rules.insert_rule(0, "g", "a", "*", "x").unwrap();
+    rules.insert_path_search_rule(1).unwrap();
+    config.set_file_rules(&rules);
+    config.set_major_version(1).unwrap();
+    let before = config.file_rules().get().to_bytes();
+
+    check_throw_what(
+        config.upgrade_to_latest_version(),
+        "File rules: ColorSpaceNamePathSearch rule does not accept any color space.",
+    );
+    assert_eq!(config.major_version(), 1);
+    assert_eq!(config.file_rules().get().to_bytes(), before);
+}

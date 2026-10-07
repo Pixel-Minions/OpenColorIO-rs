@@ -3173,6 +3173,8 @@ fn file_rules_on_a_config_match_the_wheel() {
         b"img.TIFF",
         b"/shots/acescg/linear_x.dpx",
         b"/shots/x_lin_srgb_srgb.dpx",
+        b"/Shots/X_LIN_SRGB.dpx",
+        b"/a/AcesCG_Lin_Srgb.dpx",
         b"nothing.dpx",
         b"\nfoo.png",
         b"
@@ -3242,9 +3244,52 @@ fn upgrades_match_the_wheel() {
                 upgrade_to_latest_version().into(),
             ],
         ),
+        // The default rule's color space goes to the rule at index 1, a glob here (I-138).
+        (
+            "raw, a rule at index 1",
+            vec![
+                add_color_space(cs(b"a")).into(),
+                add_color_space(cs(b"raw").data()).into(),
+                set_file_rules(
+                    &[Rule::PathSearch, Rule::Glob(b"g", b"b", b"*", b"x")],
+                    None,
+                )
+                .into(),
+                set_major_version(1).into(),
+                upgrade_to_latest_version().into(),
+            ],
+        ),
+        (
+            "first data, a rule at index 1",
+            vec![
+                add_color_space(cs(b"a")).into(),
+                add_color_space(cs(b"d").data()).into(),
+                set_file_rules(
+                    &[Rule::PathSearch, Rule::Glob(b"g", b"b", b"*", b"x")],
+                    None,
+                )
+                .into(),
+                set_major_version(1).into(),
+                upgrade_to_latest_version().into(),
+            ],
+        ),
+        (
+            "first active, a rule at index 1",
+            vec![
+                add_color_space(cs(b"a")).into(),
+                add_color_space(cs(b"b")).into(),
+                set_file_rules(
+                    &[Rule::PathSearch, Rule::Glob(b"g", b"b", b"*", b"x")],
+                    None,
+                )
+                .into(),
+                set_major_version(1).into(),
+                upgrade_to_latest_version().into(),
+            ],
+        ),
     ];
     for (label, items) in cases {
-        let probes = probes(&[b"a", b"b", b"d"], &[]).paths(&[b"x_a.exr", b"b.exr"]);
+        let probes = probes(&[b"a", b"b", b"d"], &[]).paths(&[b"x_a.exr", b"b.exr", b"q.x"]);
         check_items(label, "new", &[], items, &probes);
     }
 }
@@ -3611,4 +3656,376 @@ fn a_change_through_the_held_rules_is_the_configs() {
     steps.extend(held_rules_getters("config"));
 
     check_held_rules(steps);
+}
+
+// ---------------------------------------------------------------------------------------------
+// From the verifier of p3-rules (2026-10-07): file rules built call by call, some calls
+// refused; the color spaces each part of a config uses.
+
+/// File rules built call by call on both sides (stored as `fr`), each call's outcome compared.
+type HeldFileRules = Rc<RefCell<FileRules>>;
+
+/// New file rules, stored as `fr`.
+fn new_file_rules(fr: &HeldFileRules) -> Step {
+    let fr = fr.clone();
+    step(json!({"new": "FileRules", "as": "fr"}), move |_| {
+        *fr.borrow_mut() = FileRules::new();
+        json!({"result": object_out("FileRules", &FileRules::new().to_bytes())})
+    })
+}
+
+/// A call on the rules stored as `fr`.
+fn file_rules_call(
+    mut call: Value,
+    port: impl Fn(&mut FileRules) -> ocio::Result<()> + 'static,
+    fr: &HeldFileRules,
+) -> Step {
+    let fr = fr.clone();
+    call["on"] = json!("fr");
+    step(call, move |_| unit_out(port(&mut fr.borrow_mut())))
+}
+
+/// `insertRule` of a glob on the rules stored as `fr`.
+fn insert_glob(fr: &HeldFileRules, i: usize, name: &[u8], cs: &[u8], p: &[u8], e: &[u8]) -> Step {
+    let (n, c, p, e) = (name.to_vec(), cs.to_vec(), p.to_vec(), e.to_vec());
+    file_rules_call(
+        json!({"call": "insertRule", "args": [i, arg(&n), arg(&c), arg(&p), arg(&e)]}),
+        move |r| r.insert_rule(i, &n, &c, &p, &e),
+        fr,
+    )
+}
+
+/// `insertRule` of a regular expression on the rules stored as `fr`.
+fn insert_regex(fr: &HeldFileRules, i: usize, name: &[u8], cs: &[u8], x: &[u8]) -> Step {
+    let (n, c, x) = (name.to_vec(), cs.to_vec(), x.to_vec());
+    file_rules_call(
+        json!({"call": "insertRule", "args": [i, arg(&n), arg(&c), arg(&x)]}),
+        move |r| r.insert_regex_rule(i, &n, &c, &x),
+        fr,
+    )
+}
+
+/// `setFileRules` with the rules stored as `fr`.
+fn set_held_file_rules(fr: &HeldFileRules) -> Step {
+    let fr = fr.clone();
+    step(
+        json!({"call": "setFileRules", "args": [{"ref": "fr"}]}),
+        move |c| {
+            c.set_file_rules(&fr.borrow());
+            json!({"result": null})
+        },
+    )
+}
+
+/// Globs whose expressions the sanitizing changes (the MSVC library's `^` after a line feed,
+/// docs/improvements.md I-133; runs of `.*` after a backslash), some refused, then the paths
+/// they send to each rule; and a glob of a mixed-case extension.
+#[test]
+fn sanitized_globs_on_a_config_match_the_wheel() {
+    let patterns: [&[u8]; 14] = [
+        b"\n.*.*",
+        b"\n.*.*.*",
+        b"\n.*\n.*",
+        b"\n\n.*",
+        b"a\n.*b.*",
+        b"\n.*x.*",
+        b"\n.*.*\\",
+        b"\n.*.*.*\\",
+        b"\n.*\n.*\\",
+        b"\n.**.*\\",
+        b"\\**",
+        b"\\**\\",
+        b"\\*.*",
+        b"\n\\**.*\\",
+    ];
+    let paths: [&[u8]; 15] = [
+        b"\n.x.exr",
+        b"\nab.exr",
+        b"\n..exr",
+        b"\n.a.b.exr",
+        b"\n.a\n.b.exr",
+        b"\n\n.exr",
+        b"\n\n.a.exr",
+        b"a\n.xb.exr",
+        b"\n.ax.y.exr",
+        b"abc.exr",
+        b"...exr",
+        b".exr",
+        b"..exr",
+        b"ABC.Exr",
+        b"abc.EXR",
+    ];
+    let fr: HeldFileRules = Rc::new(RefCell::new(FileRules::new()));
+    // Each pattern alone with the extension `exr`, then as an extension.
+    for (k, p) in patterns.iter().enumerate() {
+        let mut items: Vec<Item> = vec![
+            add_color_space(cs(b"cs1")).into(),
+            add_color_space(cs(b"raw")).into(),
+            set_role(b"default", Some(b"raw")).into(),
+        ];
+        items.push(
+            vec![
+                new_file_rules(&fr),
+                insert_glob(&fr, 0, b"p", b"cs1", p, b"exr"),
+                insert_glob(&fr, 1, b"e", b"cs1", b"q*", p),
+                insert_glob(&fr, 2, b"mixed", b"raw", b"zz*", b"eXr"),
+                set_held_file_rules(&fr),
+            ]
+            .into(),
+        );
+        let probes = probes(&[b"cs1"], &[]).paths(&paths);
+        check_items(&format!("sanitized {k}"), "new", &[], items, &probes);
+    }
+}
+
+/// A regular-expression rule given a pattern, or an extension, becomes a glob of an empty
+/// extension, or pattern: an empty extension takes any extension, but not none
+/// (docs/improvements.md I-139).
+#[test]
+fn regex_rules_made_globs_match_the_wheel() {
+    let fr: HeldFileRules = Rc::new(RefCell::new(FileRules::new()));
+    let items: Vec<Item> = vec![
+        add_color_space(cs(b"a")).into(),
+        add_color_space(cs(b"b")).into(),
+        set_role(b"default", Some(b"b")).into(),
+        vec![
+            new_file_rules(&fr),
+            insert_regex(&fr, 0, b"rx", b"a", b".*"),
+            file_rules_call(
+                json!({"call": "setPattern", "args": [0, "abc"]}),
+                |r| r.set_pattern(0, "abc"),
+                &fr,
+            ),
+            insert_regex(&fr, 1, b"rx2", b"a", b".*"),
+            file_rules_call(
+                json!({"call": "setExtension", "args": [1, "zz"]}),
+                |r| r.set_extension(1, "zz"),
+                &fr,
+            ),
+            file_rules_call(
+                json!({"call": "setExtension", "args": [0, ""]}),
+                |r| r.set_extension(0, ""),
+                &fr,
+            ),
+            file_rules_call(
+                json!({"call": "setPattern", "args": [1, "("]}),
+                |r| r.set_pattern(1, "("),
+                &fr,
+            ),
+            set_held_file_rules(&fr),
+        ]
+        .into(),
+    ];
+    let probes =
+        probes(&[b"a"], &[]).paths(&[b"abc", b"abc.x", b"abc.", b"q.zz", b".zz", b"zz", b"abc.zz"]);
+    check_items("regex made glob", "new", &[], items, &probes);
+}
+
+fn cst_of(s: &str, d: &str) -> (Value, Transform) {
+    let mut t = ocio::ColorSpaceTransform::new();
+    t.set_src(s);
+    t.set_dst(d);
+    (
+        json!({"class": "ColorSpaceTransform", "calls": [["setSrc", s], ["setDst", d]]}),
+        Transform::from(t),
+    )
+}
+
+fn look_transform_of(s: &str, d: &str) -> (Value, Transform) {
+    let mut t = ocio::LookTransform::new();
+    t.set_src(s);
+    t.set_dst(d);
+    (
+        json!({"class": "LookTransform", "calls": [["setSrc", s], ["setDst", d]]}),
+        Transform::from(t),
+    )
+}
+
+fn display_view_transform_of(s: &str) -> (Value, Transform) {
+    let mut t = ocio::DisplayViewTransform::new();
+    t.set_src(s);
+    t.set_display("D");
+    t.set_view("v");
+    (
+        json!({"class": "DisplayViewTransform",
+               "calls": [["setSrc", s], ["setDisplay", "D"], ["setView", "v"]]}),
+        Transform::from(t),
+    )
+}
+
+fn group_of(children: Vec<(Value, Transform)>) -> (Value, Transform) {
+    let mut g = ocio::GroupTransform::new();
+    let mut specs = Vec::new();
+    for (s, t) in children {
+        specs.push(s);
+        g.append_transform(t);
+    }
+    (
+        json!({"class": "GroupTransform", "children": specs}),
+        Transform::from(g),
+    )
+}
+
+/// A look with its process space, its transform and (if any) its inverse transform.
+fn add_look_with(
+    name: &'static str,
+    ps: &'static str,
+    fwd: (Value, Transform),
+    inv: Option<(Value, Transform)>,
+) -> Vec<Step> {
+    let mut out = vec![
+        step(
+            json!({"new": "Look", "as": "lk"}),
+            |_| json!({"result": object_out("Look", &Look::new().to_bytes())}),
+        ),
+        step(
+            json!({"call": "setName", "on": "lk", "args": [name]}),
+            |_| json!({"result": null}),
+        ),
+        step(
+            json!({"call": "setProcessSpace", "on": "lk", "args": [ps]}),
+            |_| json!({"result": null}),
+        ),
+        step(
+            json!({"call": "setTransform", "on": "lk", "args": [{"transform": fwd.0}]}),
+            |_| json!({"result": null}),
+        ),
+    ];
+    let inv_t = inv.as_ref().map(|i| i.1.clone());
+    if let Some((spec, _)) = inv {
+        out.push(step(
+            json!({"call": "setInverseTransform", "on": "lk", "args": [{"transform": spec}]}),
+            |_| json!({"result": null}),
+        ));
+    }
+    let ft = fwd.1;
+    out.push(step(
+        json!({"call": "addLook", "args": [{"ref": "lk"}]}),
+        move |c| {
+            let mut look = Look::new();
+            look.set_name(name);
+            look.set_process_space(ps);
+            look.set_transform(&ft);
+            if let Some(t) = &inv_t {
+                look.set_inverse_transform(t);
+            }
+            unit_out(c.add_look(&look))
+        },
+    ));
+    out
+}
+
+/// `isColorSpaceUsed` of the color spaces each part of a config names: a look's process space,
+/// its transform's source and destination, its inverse transform; a view transform's groups
+/// and display view transforms; a named transform's transforms; shared views (and
+/// `<USE_DISPLAY_NAME>`, which uses the display's color space); a display's view.
+#[test]
+fn color_spaces_used_match_the_wheel() {
+    let names: [&'static str; 15] = [
+        "cs_lk", "cs_lkd", "cs_lki", "cs_ps", "cs_vt", "cs_vti", "cs_grp", "cs_dvt", "cs_nt",
+        "cs_nti", "cs_sv", "cs_dv", "DispX", "DispY", "unused",
+    ];
+    let mut items: Vec<Item> = Vec::new();
+    for n in &names {
+        items.push(add_color_space(cs(n.as_bytes())).into());
+    }
+    items.push(
+        add_look_with(
+            "L1",
+            "cs_ps",
+            look_transform_of("cs_lk", "cs_lkd"),
+            Some(cst_of("cs_lki", "unused_x")),
+        )
+        .into(),
+    );
+    // A view transform whose transforms name color spaces.
+    {
+        let (fspec, ft) = group_of(vec![
+            cst_of("cs_grp", "x1"),
+            display_view_transform_of("cs_dvt"),
+        ]);
+        let (ispec, it) = cst_of("cs_vti", "x2");
+        items.push(
+            vec![
+                step(
+                    json!({"new": "ViewTransform",
+                           "args": [{"enum": "REFERENCE_SPACE_SCENE"}], "as": "vt"}),
+                    |_| {
+                        let vt = ViewTransform::new(ReferenceSpaceType::Scene);
+                        json!({"result": object_out("ViewTransform", &vt.to_bytes())})
+                    },
+                ),
+                step(
+                    json!({"call": "setName", "on": "vt", "args": ["VT"]}),
+                    |_| json!({"result": null}),
+                ),
+                step(
+                    json!({"call": "setTransform", "on": "vt", "args": [{"transform": fspec},
+                           {"enum": "VIEWTRANSFORM_DIR_TO_REFERENCE"}]}),
+                    |_| json!({"result": null}),
+                ),
+                step(
+                    json!({"call": "setTransform", "on": "vt", "args": [{"transform": ispec},
+                           {"enum": "VIEWTRANSFORM_DIR_FROM_REFERENCE"}]}),
+                    |_| json!({"result": null}),
+                ),
+                step(
+                    json!({"call": "addViewTransform", "args": [{"ref": "vt"}]}),
+                    move |c| {
+                        let mut vt = ViewTransform::new(ReferenceSpaceType::Scene);
+                        vt.set_name("VT");
+                        vt.set_transform(Some(&ft), ViewTransformDirection::ToReference);
+                        vt.set_transform(Some(&it), ViewTransformDirection::FromReference);
+                        unit_out(c.add_view_transform(&vt))
+                    },
+                ),
+            ]
+            .into(),
+        );
+    }
+    {
+        let (fspec, ft) = cst_of("cs_nt", "x3");
+        let (ispec, it) = cst_of("x4", "cs_nti");
+        items.push(
+            vec![
+                step(json!({"new": "NamedTransform", "as": "nt"}), |_| {
+                    json!({"result": object_out("NamedTransform", &NamedTransform::new().to_bytes())})
+                }),
+                step(
+                    json!({"call": "setName", "on": "nt", "args": ["NT"]}),
+                    |_| json!({"result": null}),
+                ),
+                step(
+                    json!({"call": "setTransform", "on": "nt", "args": [{"transform": fspec},
+                           {"enum": "TRANSFORM_DIR_FORWARD"}]}),
+                    |_| json!({"result": null}),
+                ),
+                step(
+                    json!({"call": "setTransform", "on": "nt", "args": [{"transform": ispec},
+                           {"enum": "TRANSFORM_DIR_INVERSE"}]}),
+                    |_| json!({"result": null}),
+                ),
+                step(
+                    json!({"call": "addNamedTransform", "args": [{"ref": "nt"}]}),
+                    move |c| {
+                        let mut nt = NamedTransform::new();
+                        nt.set_name("NT");
+                        nt.set_transform(Some(&ft), TransformDirection::Forward);
+                        nt.set_transform(Some(&it), TransformDirection::Inverse);
+                        unit_out(c.add_named_transform(&nt))
+                    },
+                ),
+            ]
+            .into(),
+        );
+    }
+    items.push(add_shared_view(b"sv", b"", b"cs_sv").into());
+    items.push(add_shared_view(b"svd", b"VT", b"<USE_DISPLAY_NAME>").into());
+    items.push(add_shared_view(b"svn", b"", b"<USE_DISPLAY_NAME>").into());
+    items.push(add_display_shared_view(b"DispX", b"svd").into());
+    items.push(add_display_shared_view(b"DispY", b"svn").into());
+    items.push(add_display_view_full(b"D", b"v", b"", b"cs_dv", b"").into());
+    let refs: Vec<&[u8]> = names.iter().map(|n| n.as_bytes()).collect();
+    let probes = probes(&refs, &[]);
+    check_items("color spaces used", "new", &[], items, &probes);
 }
