@@ -180,8 +180,20 @@ fn fixed_function_transform_through_the_api_matches_the_wheel() {
     ));
 }
 
-/// The built-in transforms whose ops are ported (WP 3.2e-g): the identity.
-const BUILTINS: &[&str] = &["IDENTITY"];
+/// The built-in transforms whose ops are ported (WP 3.2e-g): the identity and the ARRI,
+/// Panasonic, RED and Sony cameras.
+const BUILTINS: &[&str] = &[
+    "IDENTITY",
+    "ARRI_ALEXA-LOGC-EI800-AWG_to_ACES2065-1",
+    "ARRI_LOGC4_to_ACES2065-1",
+    "PANASONIC_VLOG-VGAMUT_to_ACES2065-1",
+    "RED_REDLOGFILM-RWG_to_ACES2065-1",
+    "RED_LOG3G10-RWG_to_ACES2065-1",
+    "SONY_SLOG3-SGAMUT3_to_ACES2065-1",
+    "SONY_SLOG3-SGAMUT3.CINE_to_ACES2065-1",
+    "SONY_SLOG3-SGAMUT3-VENICE_to_ACES2065-1",
+    "SONY_SLOG3-SGAMUT3.CINE-VENICE_to_ACES2065-1",
+];
 
 #[test]
 fn builtin_transform_through_the_api_matches_the_wheel() {

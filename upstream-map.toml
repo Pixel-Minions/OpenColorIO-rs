@@ -2415,14 +2415,15 @@ status = "todo"
 path = "src/OpenColorIO/transforms/builtins/ArriCameras.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/arri_cameras.rs"]
-status = "partial"
-note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (75-108); the ops come with 3.2f"
+status = "done"
+note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (75-108); p3-builtins 3.2f: the primaries, the log curves and the op creators, through the battery (tests/api_battery_oracle.rs)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/ArriCameras.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/arri_cameras.rs"]
-status = "todo"
+status = "done"
+note = "p3-builtins 3.2f: RegisterAll"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/BuiltinTransformRegistry.cpp"
@@ -2495,40 +2496,43 @@ status = "todo"
 path = "src/OpenColorIO/transforms/builtins/PanasonicCameras.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/panasonic_cameras.rs"]
-status = "partial"
-note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (58-75); the ops come with 3.2f"
+status = "done"
+note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (58-75); p3-builtins 3.2f: the primaries, the log curves and the op creators, through the battery (tests/api_battery_oracle.rs)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/PanasonicCameras.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/panasonic_cameras.rs"]
-status = "todo"
+status = "done"
+note = "p3-builtins 3.2f: RegisterAll"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/RedCameras.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/red_cameras.rs"]
-status = "partial"
-note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (77-113); the ops come with 3.2f"
+status = "done"
+note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (77-113); p3-builtins 3.2f: the primaries, the log curves and the op creators, through the battery (tests/api_battery_oracle.rs)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/RedCameras.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/red_cameras.rs"]
-status = "todo"
+status = "done"
+note = "p3-builtins 3.2f: RegisterAll"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/SonyCameras.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/sony_cameras.rs"]
-status = "partial"
-note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (64-143); the ops come with 3.2f"
+status = "done"
+note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (64-143); p3-builtins 3.2f: the primaries, the log curves and the op creators, through the battery (tests/api_battery_oracle.rs)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/SonyCameras.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/sony_cameras.rs"]
-status = "todo"
+status = "done"
+note = "p3-builtins 3.2f: RegisterAll"
 
 [[file]]
 path = "src/apps/CMakeLists.txt"
