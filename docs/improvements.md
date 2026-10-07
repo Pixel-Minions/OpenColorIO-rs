@@ -521,6 +521,31 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p3-yaml-load-1` (3.3i), checked against the wheel in
   `crates/ocio/src/ocio_yaml_oracle_tests.rs`.
 
+### I-143. A description of newlines only is read past its start
+
+- **Upstream:** `SanitizeNewlines` removes a description's trailing newlines one by one, and
+  reads the last character again after each (`OCIOYaml.cpp:50-55`). When every character was a
+  newline, it reads `back()` of the string it has just emptied, an access out of range (the
+  byte before its buffer); the loop then stops whatever the byte is, as the string is empty.
+  Both wheels give the empty description (`description: "\n\n"`), seen through the wheel.
+- **Who notices:** no one: the value read is never used. Decided (coordinator, 2026-10-07):
+  match the result, as both wheels give it predictably.
+- **A fix:** test the length before reading the last character.
+- **Status:** matched in `p3-yaml-load-2` (3.3j), checked against the wheel in
+  `crates/ocio/src/ocio_yaml_objects_oracle_tests.rs`.
+
+### I-144. A named transform's description keeps its trailing newlines
+
+- **Upstream:** the loaders of color spaces, looks and view transforms read a description with
+  `loadDescription`, which drops its trailing newlines (`SanitizeNewlines`); the named
+  transform's loader reads it as a plain string (`OCIOYaml.cpp:3965-3969`), so `"d\n\n"` stays
+  `d` and two newlines. Seen through the wheel.
+- **Who notices:** configs whose named transforms have descriptions ending in newlines (a
+  literal block `|` adds one).
+- **A fix:** read it with `loadDescription`, as the others.
+- **Status:** matched in `p3-yaml-load-2` (3.3j), checked against the wheel in
+  `crates/ocio/src/ocio_yaml_objects_oracle_tests.rs`.
+
 ## Numeric helpers
 
 ### I-20. Double values are compared to 0 and 1 in float precision
