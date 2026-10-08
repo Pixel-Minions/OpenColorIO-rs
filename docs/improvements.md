@@ -560,6 +560,18 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p3-yaml-load-2` (3.3l), checked against the wheel in
   `crates/ocio/tests/config_load_oracle.rs` ("name and description").
 
+### I-146. Two misspelled version-consistency messages
+
+- **Upstream:** the config's version check (`Config::Impl::checkVersionConsistency`) refuses a
+  BuiltinTransform in a version 1 config with "Only config version 2 (or higher) can have
+  BuiltinInTransform." (`Config.cpp:5594`), and a FileTransform's CDL style with "Only config
+  version 2 (or higher) can use CDL style' for FileTransform." (`Config.cpp:5719`), a stray
+  quote. Seen through the wheel.
+- **Who notices:** anyone who reads the messages.
+- **A fix:** "BuiltinTransform"; "CDL style".
+- **Status:** matched in `p3-yaml-load-2`, checked against the wheel in
+  `crates/ocio/tests/config_load_oracle.rs` ("v1 builtin", "v1 file cdl style").
+
 ## Numeric helpers
 
 ### I-20. Double values are compared to 0 and 1 in float precision
