@@ -934,8 +934,9 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatSpiMtx.cpp"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/file_format_spi_mtx.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_spimtx.rs"]
+status = "done"
+note = "p4-registry 4.2a1: the reader (istream::read of 1024 bytes, input_stream.rs) and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_spimtx_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatTruelight.cpp"
@@ -4448,9 +4449,9 @@ status = "todo"
 [[file]]
 path = "tests/cpu/UnitTestUtils.h"
 kind = "test-support"
-target = ["crates/ocio-testkit/src/upstream/mod.rs"]
+target = ["crates/ocio-testkit/src/upstream/mod.rs", "crates/ocio/src/fileformats/test_utils.rs"]
 status = "partial"
-note = "S2: EqualWithSafeRelError"
+note = "S2: EqualWithSafeRelError; p4-registry 4.2a1: GetTestFilesDir and LoadTestFile in crates/ocio/src/fileformats/test_utils.rs"
 
 [[file]]
 path = "tests/cpu/ViewTransform_tests.cpp"
@@ -4607,8 +4608,8 @@ status = "todo"
 [[file]]
 path = "tests/cpu/fileformats/FileFormatSpiMtx_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-formats/src/fileformats/file_format_spi_mtx_tests.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_spimtx_tests.rs"]
+status = "done"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatTruelight_tests.cpp"

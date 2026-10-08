@@ -7,6 +7,7 @@
 
 pub(crate) mod api;
 pub(crate) mod api_cases;
+pub(crate) mod lut_files;
 pub(crate) mod ocio_writer;
 pub(crate) mod transforms;
 pub(crate) mod yaml_tree;
