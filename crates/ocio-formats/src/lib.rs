@@ -5,3 +5,4 @@
 #![forbid(unsafe_code)]
 
 pub mod expat;
+pub mod fileformats;
