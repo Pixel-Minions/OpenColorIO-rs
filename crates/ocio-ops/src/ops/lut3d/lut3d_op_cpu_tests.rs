@@ -32,11 +32,11 @@ fn simd_modes() -> Vec<CpuInfo> {
 
 /// Port of `Lut3DRendererNaNTest` (tests/cpu/ops/lut3d/Lut3DOpCPU_tests.cpp:14-46 @ v2.5.2).
 fn lut3d_renderer_nan_test(interpol: Interpolation, cpu: &CpuInfo) {
-    let mut lut = Lut3DOpData::new(interpol, 4).expect("a 4^3 LUT");
+    let mut lut = Lut3DOpData::with_interpolation(interpol, 4).expect("a 4^3 LUT");
 
     // Change LUT so that it is not identity.
-    lut.array_mut().values_mut()[65] += 0.001f32;
-    let values = lut.array().values().to_vec();
+    lut.get_array_mut().get_values_mut()[65] += 0.001f32;
+    let values = lut.get_array().get_values().clone();
 
     // GetLut3DRenderer of a forward LUT is GetForwardLut3DRenderer.
     let renderer = get_forward_lut3d_renderer(&lut, cpu);

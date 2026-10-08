@@ -20,11 +20,11 @@
 use std::sync::Arc;
 
 use ocio::{
-    Allocation, AllocationTransform, BitDepth, CdlTransform, Config, Exception, ExponentTransform,
-    ExponentWithLinearTransform, FixedFunctionStyle, FixedFunctionTransform, GroupTransform,
-    Interpolation, LogAffineTransform, LogCameraTransform, LogTransform, Lut1DHueAdjust,
-    Lut1DTransform, MatrixTransform, NegativeStyle, OptimizationFlags, Processor, RangeStyle,
-    RangeTransform, Transform, TransformDirection,
+    Allocation, AllocationTransform, BitDepth, BuiltinTransform, CdlTransform, Config, Exception,
+    ExponentTransform, ExponentWithLinearTransform, FixedFunctionStyle, FixedFunctionTransform,
+    GroupTransform, Interpolation, LogAffineTransform, LogCameraTransform, LogTransform,
+    Lut1DHueAdjust, Lut1DTransform, Lut3DTransform, MatrixTransform, NegativeStyle,
+    OptimizationFlags, Processor, RangeStyle, RangeTransform, Transform, TransformDirection,
 };
 use ocio_ops::open_color_types::CdlStyle;
 use ocio_testkit::battery::Direction;
@@ -420,6 +420,42 @@ pub(crate) fn port_transform(spec: &Value) -> Result<Transform, Exception> {
             }
             t.into()
         }
+        "Lut3DTransform" => {
+            check_args(&["gridSize"]);
+            let mut t = match args.get("gridSize") {
+                Some(gs) => Lut3DTransform::with_grid_size(unsigned(gs))?,
+                None => Lut3DTransform::new(),
+            };
+            for call in calls {
+                let (name, a) = args_of(call);
+                match name {
+                    "setDirection" => t.set_direction(direction(one(name, a))),
+                    "setGridSize" => t.set_grid_size(unsigned(one(name, a)))?,
+                    // `setValue(indexR, indexG, indexB, r, g, b)`: the binding narrows each
+                    // float.
+                    "setValue" => {
+                        assert_eq!(a.len(), 6, "{name} takes 6 arguments");
+                        let [r, g, b] = [3, 4, 5].map(|k| number(&a[k]) as f32);
+                        t.set_value(unsigned(&a[0]), unsigned(&a[1]), unsigned(&a[2]), r, g, b)?;
+                    }
+                    "setInterpolation" => t.set_interpolation(match enum_name(one(name, a)) {
+                        "INTERP_UNKNOWN" => Interpolation::Unknown,
+                        "INTERP_NEAREST" => Interpolation::Nearest,
+                        "INTERP_LINEAR" => Interpolation::Linear,
+                        "INTERP_TETRAHEDRAL" => Interpolation::Tetrahedral,
+                        "INTERP_CUBIC" => Interpolation::Cubic,
+                        "INTERP_DEFAULT" => Interpolation::Default,
+                        "INTERP_BEST" => Interpolation::Best,
+                        other => panic!("interpolation {other}"),
+                    }),
+                    "setFileOutputBitDepth" => {
+                        t.set_file_output_bit_depth(bit_depth(one(name, a)));
+                    }
+                    _ => unknown(name),
+                }
+            }
+            t.into()
+        }
         "FixedFunctionTransform" => {
             check_args(&["style"]);
             // The binding's constructor: `Create(style)` (validating), then `setDirection` to
@@ -445,6 +481,19 @@ pub(crate) fn port_transform(spec: &Value) -> Result<Transform, Exception> {
                             .collect();
                         t.set_params(&params);
                     }
+                    _ => unknown(name),
+                }
+            }
+            t.into()
+        }
+        "BuiltinTransform" => {
+            check_args(&[]);
+            let mut t = BuiltinTransform::new();
+            for call in calls {
+                let (name, a) = args_of(call);
+                match name {
+                    "setDirection" => t.set_direction(direction(one(name, a))),
+                    "setStyle" => t.set_style(one(name, a).as_str().expect("a style"))?,
                     _ => unknown(name),
                 }
             }

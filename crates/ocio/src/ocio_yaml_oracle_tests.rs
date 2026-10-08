@@ -15,10 +15,6 @@
 //!   matched;
 //! - and the warnings logged while loading, byte for byte.
 
-use std::sync::{Arc, Mutex, PoisonError};
-use std::thread;
-
-use ocio_ops::logging::{reset_to_default_logging_function, set_logging_function};
 use ocio_ops::open_color_types::{CdlStyle, FixedFunctionStyle, NegativeStyle};
 use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 use ocio_testkit::Oracle;
@@ -54,30 +50,7 @@ fn config_text_v(version: &[u8], case: &[u8]) -> Vec<u8> {
     [b"ocio_profile_version: ", version, HEAD, case, b"\n"].concat()
 }
 
-/// Serializes the tests that replace the logging function.
-static LOGGING: Mutex<()> = Mutex::new(());
-
-/// Runs `f`, and gives the messages OCIO logged on this thread meanwhile, each as the logging
-/// function receives it (with its prefix and line feed). Messages of other threads go to
-/// stderr, as with the default logging function.
-pub(super) fn capture_log<T>(f: impl FnOnce() -> T) -> (T, Vec<Vec<u8>>) {
-    let _lock = LOGGING.lock().unwrap_or_else(PoisonError::into_inner);
-    let me = thread::current().id();
-    let messages = Arc::new(Mutex::new(Vec::new()));
-    let sink = Arc::clone(&messages);
-    set_logging_function(Some(Arc::new(move |message: &[u8]| {
-        if thread::current().id() == me {
-            sink.lock().unwrap().push(message.to_vec());
-        } else {
-            eprint!("{}", String::from_utf8_lossy(message));
-        }
-    })))
-    .unwrap();
-    let out = f();
-    reset_to_default_logging_function();
-    let log = messages.lock().unwrap().clone();
-    (out, log)
-}
+pub(super) use crate::test_env::capture_log;
 
 /// What the port makes of a case: the error message as the wheel reports it, or the color
 /// space's transform (none where the value is null), boxed: a transform is large.
@@ -546,6 +519,7 @@ fn class_name(t: &Transform) -> &'static str {
         Transform::Log(_) => "Log",
         Transform::Look(_) => "Look",
         Transform::Lut1D(_) => "Lut1D",
+        Transform::Lut3D(_) => "Lut3D",
         Transform::Matrix(_) => "Matrix",
         Transform::Range(_) => "Range",
     }
@@ -921,11 +895,12 @@ fn groups_nested_too_deep_are_refused() {
     refused(b"\n      &t !<GroupTransform>\n      children: [*t]", 8);
 }
 
-/// Loading, copying, printing, validating and dropping the deepest group the port loads, and
-/// refusing deeper groups and a group that holds itself, fit a thread of 1 MiB. Loading and
-/// copying walk the groups without recursion; printing, validating and dropping recurse in
-/// small frames: at opt-level 0, where frames are largest, all of them fit 2,360 levels (four
-/// times the limit) on 1 MiB, and building a CPU processor fits the limit.
+/// Loading, copying, printing, validating, saving and dropping the deepest group the port
+/// loads, and refusing deeper groups and a group that holds itself, fit a thread of 1 MiB.
+/// Loading and copying walk the groups without recursion; printing, validating, saving and
+/// dropping recurse in small frames: at opt-level 0, where frames are largest, printing,
+/// validating and dropping fit 2,360 levels (four times the limit) on 1 MiB, saving 1,200
+/// (twice the limit), and building a CPU processor fits the limit.
 #[test]
 fn deep_groups_fit_a_small_stack() {
     // Parsed here: yaml-cpp's parser recurses per level of the text, which isn't the loader's.
@@ -951,6 +926,8 @@ fn deep_groups_fit_a_small_stack() {
                     let copy = t.clone();
                     assert!(!t.to_bytes().is_empty());
                     let _ = t.validate();
+                    let mut out = crate::yaml_cpp::emitter::Emitter::new();
+                    save_transform(&mut out, &t, 2).unwrap();
                     let config = crate::Config::create_raw().unwrap();
                     let processor = config.processor(&t).unwrap();
                     processor.default_cpu_processor().unwrap();

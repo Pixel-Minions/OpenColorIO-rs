@@ -22,6 +22,7 @@ use crate::ops::gamma::GammaOpData;
 use crate::ops::gradingrgbcurve::grading_rgb_curve_op_data::GradingRgbCurveOpData;
 use crate::ops::log::log_op_data::LogOpData;
 use crate::ops::lut1d::Lut1DOpData;
+use crate::ops::lut3d::lut3d_op_data::Lut3DOpData;
 use crate::ops::matrix::MatrixOpData;
 use crate::ops::noop::NoOpData;
 use crate::ops::range::RangeOpData;
@@ -119,6 +120,8 @@ pub enum OpData {
     FixedFunction(FixedFunctionOpData),
     /// `GradingRGBCurveOpData`.
     GradingRgbCurve(GradingRgbCurveOpData),
+    /// `Lut3DOpData`.
+    Lut3D(Lut3DOpData),
     /// `ReferenceOpData`.
     Reference(ReferenceOpData),
     /// `NoOpData` and its subclass `FileNoOpData`.
@@ -146,6 +149,7 @@ impl OpData {
             OpData::Exponent(data) => data.get_type(),
             OpData::FixedFunction(data) => data.get_type(),
             OpData::GradingRgbCurve(data) => data.get_type(),
+            OpData::Lut3D(data) => data.get_type(),
             OpData::Reference(_) => OpDataType::Reference,
             OpData::NoOp(_) => OpDataType::NoOp,
         }
@@ -171,6 +175,7 @@ impl OpData {
             }
             OpData::FixedFunction(data) => data.validate(),
             OpData::GradingRgbCurve(data) => data.validate(),
+            OpData::Lut3D(data) => data.validate(),
             OpData::Reference(data) => {
                 data.validate();
                 Ok(())
@@ -196,6 +201,7 @@ impl OpData {
             OpData::Exponent(data) => Ok(data.is_no_op()),
             OpData::FixedFunction(data) => Ok(data.is_no_op()),
             OpData::GradingRgbCurve(data) => Ok(data.is_no_op()),
+            OpData::Lut3D(data) => Ok(data.is_no_op()),
             OpData::Reference(data) => Ok(data.is_no_op()),
             OpData::NoOp(data) => Ok(data.is_no_op()),
         }
@@ -216,6 +222,7 @@ impl OpData {
             OpData::Exponent(data) => Ok(data.is_identity()),
             OpData::FixedFunction(data) => Ok(data.is_identity()),
             OpData::GradingRgbCurve(data) => Ok(data.is_identity()),
+            OpData::Lut3D(data) => Ok(data.is_identity()),
             OpData::Reference(data) => Ok(data.is_identity()),
             OpData::NoOp(data) => Ok(data.is_identity()),
         }
@@ -242,6 +249,7 @@ impl OpData {
             | OpData::Range(_)
             | OpData::Exponent(_)
             | OpData::GradingRgbCurve(_)
+            | OpData::Lut3D(_)
             | OpData::Reference(_)
             | OpData::NoOp(_) => Ok(()),
         }
@@ -261,6 +269,7 @@ impl OpData {
             OpData::Gamma(data) => Ok(data.get_identity_replacement()),
             OpData::Log(data) => data.get_identity_replacement(),
             OpData::Lut1D(data) => data.get_identity_replacement(),
+            OpData::Lut3D(data) => data.get_identity_replacement(),
             // The OpData default: `std::make_shared<MatrixOpData>()`, the identity.
             OpData::Matrix(_)
             | OpData::Range(_)
@@ -288,6 +297,7 @@ impl OpData {
             OpData::Exponent(data) => data.has_channel_crosstalk(),
             OpData::FixedFunction(data) => data.has_channel_crosstalk(),
             OpData::GradingRgbCurve(data) => data.has_channel_crosstalk(),
+            OpData::Lut3D(data) => data.has_channel_crosstalk(),
             OpData::Reference(data) => data.has_channel_crosstalk(),
             OpData::NoOp(data) => data.has_channel_crosstalk(),
         }
@@ -312,6 +322,7 @@ impl OpData {
             OpData::GradingRgbCurve(data) => {
                 matches!(other, OpData::GradingRgbCurve(other) if data.equals(other))
             }
+            OpData::Lut3D(data) => matches!(other, OpData::Lut3D(other) if data.equals(other)),
             OpData::Reference(data) => {
                 matches!(other, OpData::Reference(other) if data.equals(other))
             }
@@ -336,6 +347,7 @@ impl OpData {
             OpData::Exponent(data) => Ok(data.get_cache_id()),
             OpData::FixedFunction(data) => Ok(data.get_cache_id()),
             OpData::GradingRgbCurve(data) => Ok(data.get_cache_id()),
+            OpData::Lut3D(data) => Ok(data.get_cache_id()),
             OpData::Reference(data) => data.get_cache_id(),
             OpData::NoOp(data) => Ok(data.get_cache_id()),
         }
@@ -355,6 +367,7 @@ impl OpData {
             OpData::Exponent(data) => data.get_format_metadata(),
             OpData::FixedFunction(data) => data.get_format_metadata(),
             OpData::GradingRgbCurve(data) => data.get_format_metadata(),
+            OpData::Lut3D(data) => data.get_format_metadata(),
             OpData::Reference(data) => data.get_format_metadata(),
             OpData::NoOp(data) => data.get_format_metadata(),
         }
@@ -374,6 +387,7 @@ impl OpData {
             OpData::Exponent(data) => data.get_format_metadata_mut(),
             OpData::FixedFunction(data) => data.get_format_metadata_mut(),
             OpData::GradingRgbCurve(data) => data.get_format_metadata_mut(),
+            OpData::Lut3D(data) => data.get_format_metadata_mut(),
             OpData::Reference(data) => data.get_format_metadata_mut(),
             OpData::NoOp(data) => data.get_format_metadata_mut(),
         }

@@ -35,15 +35,22 @@
 //! lane next to the color channels, and that quiets a signaling NaN. With rustc 1.98.1 it did
 //! so in the SSE2 and AVX kernels.
 //!
-//! Not ported yet: `InvLut3DRenderer` (the exact inverse).
+//! [`get_lut3d_renderer`] is the op's `getCPUOp`. The exact inverse, `InvLut3DRenderer`, is in
+//! [`super::inv_lut3d`].
 
 use super::lut3d_op_cpu_avx::apply_tetrahedral_avx;
 use super::lut3d_op_cpu_avx2::apply_tetrahedral_avx2;
 use super::lut3d_op_cpu_avx512::apply_tetrahedral_avx512;
 use super::lut3d_op_cpu_sse2::apply_tetrahedral_sse2;
+use std::sync::Arc;
+
+use super::inv_lut3d::InvLut3DRenderer;
 use super::lut3d_op_data::{Interpolation, Lut3DOpData};
 use crate::cpu_info::CpuInfo;
+use crate::exception::Result;
 use crate::math_utils::{clamp, sse_add, sse_cvttps_epi32, sse_max, sse_min, sse_mul};
+use crate::op::CpuOp;
+use crate::open_color_types::TransformDirection;
 
 /// A tetrahedral SIMD kernel: the functions `m_applyLutFunc` can point to
 /// (src/OpenColorIO/ops/lut3d/Lut3DOpCPU.cpp:386-416 @ v2.5.2).
@@ -117,11 +124,12 @@ impl BaseLut3D {
     /// Port of `BaseLut3DRenderer::updateData` and both `createOptLut`
     /// (src/OpenColorIO/ops/lut3d/Lut3DOpCPU.cpp:327-384 @ v2.5.2).
     fn new(lut: &Lut3DOpData, use_sse2: bool) -> BaseLut3D {
-        let dim = lut.array().length();
+        // (A grid size of at most 129, `unsigned long` upstream.)
+        let dim = lut.get_array().get_length() as usize as u32;
         let step = dim as f32 - 1.0f32;
         let components = if use_sse2 { 4 } else { 3 };
 
-        let values = lut.array().values();
+        let values = lut.get_array().get_values();
         let max_entries = dim as usize * dim as usize * dim as usize;
         let mut opt_lut = Vec::with_capacity(max_entries * components);
         for idx in 0..max_entries {
@@ -456,10 +464,35 @@ impl ForwardLut3DRenderer {
 /// The renderer OCIO uses for a forward LUT. Port of `GetForwardLut3DRenderer`
 /// (src/OpenColorIO/ops/lut3d/Lut3DOpCPU.cpp:1736-1747 @ v2.5.2).
 pub fn get_forward_lut3d_renderer(lut: &Lut3DOpData, cpu: &CpuInfo) -> ForwardLut3DRenderer {
-    if lut.concrete_interpolation() == Interpolation::Tetrahedral {
+    if lut.get_concrete_interpolation() == Interpolation::Tetrahedral {
         ForwardLut3DRenderer::Tetrahedral(Lut3DTetrahedralRenderer::new(lut, cpu))
     } else {
         ForwardLut3DRenderer::Trilinear(Lut3DRenderer::new(lut, cpu))
+    }
+}
+
+/// The forward renderers process `float` pixels in place ([`ForwardLut3DRenderer::apply`]);
+/// the CPU engine uses them between F32 buffers only.
+impl CpuOp for ForwardLut3DRenderer {
+    fn apply(&self, rgba: &mut [f32]) {
+        ForwardLut3DRenderer::apply(self, rgba);
+    }
+}
+
+/// The renderer of `lut` with the SIMD kernel this machine dispatches to: a forward LUT's
+/// ([`get_forward_lut3d_renderer`]), or an inverse LUT's exact renderer ([`InvLut3DRenderer`],
+/// which fails for some grid sizes).
+///
+/// Port of `GetLut3DRenderer` (src/OpenColorIO/ops/lut3d/Lut3DOpCPU.cpp:1751-1763 @ v2.5.2).
+pub fn get_lut3d_renderer(lut: &Lut3DOpData) -> Result<Arc<dyn CpuOp>> {
+    get_lut3d_renderer_for_cpu(lut, CpuInfo::instance())
+}
+
+/// [`get_lut3d_renderer`] with the kernel `cpu` dispatches to.
+pub fn get_lut3d_renderer_for_cpu(lut: &Lut3DOpData, cpu: &CpuInfo) -> Result<Arc<dyn CpuOp>> {
+    match lut.get_direction() {
+        TransformDirection::Forward => Ok(Arc::new(get_forward_lut3d_renderer(lut, cpu))),
+        TransformDirection::Inverse => Ok(Arc::new(InvLut3DRenderer::new(lut)?)),
     }
 }
 

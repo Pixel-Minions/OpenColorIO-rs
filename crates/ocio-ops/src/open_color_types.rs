@@ -590,14 +590,33 @@ pub enum Lut1DHueAdjust {
     Wypn,
 }
 
+/// Interpolation algorithms.
+///
+/// Port of `enum Interpolation` (include/OpenColorIO/OpenColorTypes.h:410-420 @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Interpolation {
+    /// `INTERP_UNKNOWN`
+    Unknown = 0,
+    /// `INTERP_NEAREST`: nearest neighbor.
+    Nearest = 1,
+    /// `INTERP_LINEAR`: linear interpolation (trilinear for Lut3D).
+    Linear = 2,
+    /// `INTERP_TETRAHEDRAL`: tetrahedral interpolation (Lut3D only).
+    Tetrahedral = 3,
+    /// `INTERP_CUBIC`: cubic interpolation (not supported).
+    Cubic = 4,
+    /// `INTERP_DEFAULT`: the default interpolation type.
+    Default = 254,
+    /// `INTERP_BEST`: the 'best' suitable interpolation type.
+    Best = 255,
+}
+
 /// The interpolation's name: `nearest`, `linear`, `tetrahedral`, `best`, `default`, `cubic`,
 /// or `unknown`.
 ///
 /// Port of `InterpolationToString` (src/OpenColorIO/ParseUtils.cpp:234-244 @ v2.5.2).
-pub fn interpolation_to_string(
-    interp: crate::ops::lut3d::lut3d_op_data::Interpolation,
-) -> &'static str {
-    use crate::ops::lut3d::lut3d_op_data::Interpolation;
+pub fn interpolation_to_string(interp: Interpolation) -> &'static str {
     match interp {
         Interpolation::Nearest => "nearest",
         Interpolation::Linear => "linear",

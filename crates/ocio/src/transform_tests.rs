@@ -7,7 +7,7 @@
 
 use super::*;
 use crate::transforms::builtins::builtin_transform_registry::BuiltinTransformRegistry;
-use crate::{Allocation, FixedFunctionStyle, RangeStyle, TransformType};
+use crate::{Allocation, FixedFunctionStyle, Interpolation, RangeStyle, TransformType};
 
 /// One transform of each class: a valid one, an invalid one where the class can be made
 /// invalid (its `validate` then fails), and its class as upstream's `getTransformType`
@@ -51,6 +51,8 @@ fn arms() -> Vec<Arm> {
     let mut group_invalid = GroupTransform::new();
     group_invalid.append_transform(FileTransform::new().into());
 
+    let mut lut3d_invalid = Lut3DTransform::new();
+    lut3d_invalid.set_interpolation(Interpolation::Cubic);
     let mut log_invalid = LogTransform::new();
     log_invalid.set_base(-1.0);
     let mut log_affine_invalid = LogAffineTransform::new();
@@ -150,6 +152,11 @@ fn arms() -> Vec<Arm> {
             invalid: None,
         },
         Arm {
+            class: TransformType::Lut3D,
+            valid: Lut3DTransform::new().into(),
+            invalid: Some(lut3d_invalid.into()),
+        },
+        Arm {
             class: TransformType::Matrix,
             valid: MatrixTransform::new().into(),
             invalid: None,
@@ -190,6 +197,7 @@ fn class_calls(transform: &Transform) -> (TransformDirection, Option<String>, St
         Transform::Log(t) => calls!(t),
         Transform::Look(t) => calls!(t),
         Transform::Lut1D(t) => calls!(t),
+        Transform::Lut3D(t) => calls!(t),
         Transform::Matrix(t) => calls!(t),
         Transform::Range(t) => calls!(t),
     }
@@ -201,7 +209,7 @@ fn class_calls(transform: &Transform) -> (TransformDirection, Option<String>, St
 #[test]
 fn every_arm_dispatches_to_its_class() {
     let arms = arms();
-    assert_eq!(arms.len(), 17, "one arm per variant");
+    assert_eq!(arms.len(), 18, "one arm per variant");
     for arm in arms {
         let class = arm.class;
         let mut transform = arm.valid;
@@ -277,16 +285,57 @@ fn processors_of_the_classes_without_builders_are_refused() {
     }
 }
 
-/// A processor of every built-in transform of the registry (`IDENTITY` included) is
-/// refused in both directions, and with either direction of the transform itself, with the
-/// error the registry's creators document: the style, as the registry spells it.
+/// The built-in transforms whose ops are ported (WP 3.2e-g); their pixels are compared with the
+/// wheel's in `tests/api_battery_oracle.rs`.
+const BUILTINS_WITH_OPS: &[&[u8]] = &[
+    b"IDENTITY",
+    b"ARRI_ALEXA-LOGC-EI800-AWG_to_ACES2065-1",
+    b"ARRI_LOGC4_to_ACES2065-1",
+    b"PANASONIC_VLOG-VGAMUT_to_ACES2065-1",
+    b"RED_REDLOGFILM-RWG_to_ACES2065-1",
+    b"RED_LOG3G10-RWG_to_ACES2065-1",
+    b"SONY_SLOG3-SGAMUT3_to_ACES2065-1",
+    b"SONY_SLOG3-SGAMUT3.CINE_to_ACES2065-1",
+    b"SONY_SLOG3-SGAMUT3-VENICE_to_ACES2065-1",
+    b"SONY_SLOG3-SGAMUT3.CINE-VENICE_to_ACES2065-1",
+    b"UTILITY - ACES-AP0_to_CIE-XYZ-D65_BFD",
+    b"UTILITY - ACES-AP1_to_CIE-XYZ-D65_BFD",
+    b"UTILITY - ACES-AP1_to_LINEAR-REC709_BFD",
+    b"CURVE - ACEScct-LOG_to_LINEAR",
+    b"ACEScct_to_ACES2065-1",
+    b"ACEScg_to_ACES2065-1",
+    b"ACESproxy10i_to_ACES2065-1",
+    b"ACES-LMT - BLUE_LIGHT_ARTIFACT_FIX",
+    b"DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.709",
+    b"DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.709 - MIRROR NEGS",
+    b"DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.2020",
+    b"DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.2020 - MIRROR NEGS",
+    b"DISPLAY - CIE-XYZ-D65_to_G2.2-REC.709",
+    b"DISPLAY - CIE-XYZ-D65_to_G2.2-REC.709 - MIRROR NEGS",
+    b"DISPLAY - CIE-XYZ-D65_to_sRGB",
+    b"DISPLAY - CIE-XYZ-D65_to_sRGB - MIRROR NEGS",
+    b"DISPLAY - CIE-XYZ-D65_to_G2.6-P3-DCI-BFD",
+    b"DISPLAY - CIE-XYZ-D65_to_G2.6-P3-D65",
+    b"DISPLAY - CIE-XYZ-D65_to_G2.6-P3-D65 - MIRROR NEGS",
+    b"DISPLAY - CIE-XYZ-D65_to_G2.6-P3-D60-BFD",
+    b"DISPLAY - CIE-XYZ-D65_to_DCDM-D65",
+    b"DISPLAY - CIE-XYZ-D65_to_DisplayP3",
+    b"DISPLAY - CIE-XYZ-D65_to_DisplayP3-HDR",
+];
+
+/// A processor of every other built-in transform of the registry is refused in both
+/// directions, and with either direction of the transform itself, with the error the
+/// registry's creators document: the style, as the registry spells it.
 #[test]
-fn processors_of_every_builtin_transform_are_refused() {
+fn processors_of_the_builtin_transforms_without_ops_are_refused() {
     let config = Config::create_raw().unwrap();
     let registry = BuiltinTransformRegistry::get();
     assert!(registry.num_builtins() > 0);
     for index in 0..registry.num_builtins() {
         let style = registry.builtin_style(index).unwrap();
+        if BUILTINS_WITH_OPS.contains(&style) {
+            continue;
+        }
         let expected = format!(
             "BuiltinTransform: the ops of '{}' are not ported yet.",
             String::from_utf8_lossy(style)

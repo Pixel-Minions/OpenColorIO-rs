@@ -521,6 +521,57 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p3-yaml-load-1` (3.3i), checked against the wheel in
   `crates/ocio/src/ocio_yaml_oracle_tests.rs`.
 
+### I-143. A description of newlines only is read past its start
+
+- **Upstream:** `SanitizeNewlines` removes a description's trailing newlines one by one, and
+  reads the last character again after each (`OCIOYaml.cpp:50-55`). When every character was a
+  newline, it reads `back()` of the string it has just emptied, an access out of range (the
+  byte before its buffer); the loop then stops whatever the byte is, as the string is empty.
+  Both wheels give the empty description (`description: "\n\n"`), seen through the wheel.
+- **Who notices:** no one: the value read is never used. Decided (coordinator, 2026-10-07):
+  match the result, as both wheels give it predictably.
+- **A fix:** test the length before reading the last character.
+- **Status:** matched in `p3-yaml-load-2` (3.3j), checked against the wheel in
+  `crates/ocio/src/ocio_yaml_objects_oracle_tests.rs`.
+
+### I-144. Named transforms' and views' descriptions keep their trailing newlines
+
+- **Upstream:** the loaders of color spaces, looks, view transforms and the config read a
+  description with `loadDescription`, which drops its trailing newlines (`SanitizeNewlines`);
+  the named transform's loader (`OCIOYaml.cpp:3965-3969`) and the view's, for displays, shared
+  views and the virtual display (`OCIOYaml.cpp:452-455`), read it as a plain string, so
+  `"d\n\n"` stays `d` and two newlines. Seen through the wheel.
+- **Who notices:** configs whose named transforms or views have descriptions ending in newlines
+  (a literal block `|` adds one).
+- **A fix:** read them with `loadDescription`, as the others.
+- **Status:** matched in `p3-yaml-load-2` (3.3j; views in 3.3k), checked against the wheel in
+  `crates/ocio/src/ocio_yaml_objects_oracle_tests.rs` and
+  `crates/ocio/tests/config_load_oracle.rs`.
+
+### I-145. A config's name loses its trailing newlines
+
+- **Upstream:** the config loader reads the `name` key with `loadDescription`
+  (`OCIOYaml.cpp:4531-4535`), so `SanitizeNewlines` drops its trailing newlines: `name: "n\n\n"`
+  gives the name `n`. Names of color spaces, looks and the other objects are read as plain
+  strings. Seen through the wheel.
+- **Who notices:** configs whose name ends in a newline (a literal block `|` adds one); the name
+  read back differs from the one written.
+- **A fix:** read the name with the string loader, as the other names.
+- **Status:** matched in `p3-yaml-load-2` (3.3l), checked against the wheel in
+  `crates/ocio/tests/config_load_oracle.rs` ("name and description").
+
+### I-146. Two misspelled version-consistency messages
+
+- **Upstream:** the config's version check (`Config::Impl::checkVersionConsistency`) refuses a
+  BuiltinTransform in a version 1 config with "Only config version 2 (or higher) can have
+  BuiltinInTransform." (`Config.cpp:5594`), and a FileTransform's CDL style with "Only config
+  version 2 (or higher) can use CDL style' for FileTransform." (`Config.cpp:5719`), a stray
+  quote. Seen through the wheel.
+- **Who notices:** anyone who reads the messages.
+- **A fix:** "BuiltinTransform"; "CDL style".
+- **Status:** matched in `p3-yaml-load-2`, checked against the wheel in
+  `crates/ocio/tests/config_load_oracle.rs` ("v1 builtin", "v1 file cdl style").
+
 ## Numeric helpers
 
 ### I-20. Double values are compared to 0 and 1 in float precision
@@ -1093,6 +1144,100 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p2-lut1d-fwd` (2.1b); `tests/lut1d_renderer_oracle.rs`
   (`hue_adjust_on_nodes_matches_the_wheel`) compares those LUTs' nodes with the wheel's.
 
+### I-152. A 3D LUT of one entry per side starts as NaNs
+
+- **Upstream:** a new 3D LUT is filled with the identity, each entry its grid position times
+  `1 / (length - 1)` (`Lut3DArray::fill`, `ops/lut3d/Lut3DOpData.cpp:174-192` @ v2.5.2). For
+  a grid size of 1 that step is `1 / 0`, infinity, and the only entry is `0 * inf`: the
+  default NaN in each channel (`getData()` gives `0xffc00000` three times on both
+  platforms). The forward renderers sanitize NaNs to 0, so such a LUT maps every color to
+  black; its text prints `FLT_MAX` and `-FLT_MAX` for each channel's range.
+- **Who notices:** anyone who makes a `Lut3DTransform` of grid size 1 (`setGridSize(1)`, or
+  `Lut3DTransform(gridSize=1)`) and reads its values, or renders it without setting them.
+- **A fix:** fill a grid of one entry with 0 (or refuse a grid size under 2); that changes
+  its values, its cache ID and its text, not its forward pixels.
+- **Status:** matched in `p2-lut3d` (2.2a), `Lut3DArray::fill`; `processors_match_the_wheel`
+  (`crates/ocio/tests/lut3d_transform_oracle.rs`, the "1 entry" case) compares the values bit
+  for bit, and `lut3d_transform_through_the_api_matches_the_wheel`
+  (`crates/ocio/tests/api_battery_oracle.rs`) the pixels.
+
+### I-153. A 3D LUT of 128 or 129 entries per side can't be inverted
+
+- **Upstream:** the exact inverse renderer grows the LUT by one entry on each side
+  (`InvLut3DRenderer::extrapolate3DArray`, `ops/lut3d/Lut3DOpCPU.cpp:1461-1470` @ v2.5.2) into
+  a `Lut3DArray`, which refuses more than 129 entries per side (`Lut3DOpData.cpp:194-204`).
+  So creating the CPU processor of an inverse LUT of 128 or 129 entries throws "LUT 3D: Grid
+  size '130' must not be greater than '129'." (or '131'), with or without
+  `OPTIMIZATION_LUT_INV_FAST`: the fast path builds its forward LUT through the same renderer
+  (`MakeFastLut3DFromInverse`, `Lut3DOpData.cpp:29-58`). A forward LUT of those sizes works.
+- **Who notices:** anyone inverting a 3D LUT of 128 or 129 entries per side on the CPU (129 is
+  a common size for high-quality LUTs).
+- **A fix:** keep the extrapolated values in a plain array, not limited to 129 entries; such
+  LUTs then invert.
+- **Status:** matched in `p2-lut3d-inv` (2.2d2), `InvLut3DRenderer::new`;
+  `grid_sizes_128_and_129_are_refused` (`crates/ocio-ops/tests/lut3d_inv_oracle.rs`) checks
+  the message against the wheel.
+
+### I-154. The exact 3D LUT inverse can undo its own column pivot
+
+- **Upstream:** when `invert_hypercube` meets a (nearly) zero pivot column, its rank-revealing
+  search looks through the later columns for the largest entry and swaps that column in; but
+  the swap is inside the loop over those columns, so each later column whose entries are no
+  larger swaps the same pair again (`ops/lut3d/Lut3DOpCPU.cpp:953-972` @ v2.5.2). With three
+  channels, a column found first is swapped back out when the next column is no larger, and
+  the factorization goes on with the zero pivot. The cube is then judged by a factorization
+  the search meant to avoid, so a color can be found in another cube, or in none (giving 0).
+- **Who notices:** inverses of 3D LUTs with coinciding or nearly coinciding corners (flat or
+  quantized areas), for colors on those areas, without `OPTIMIZATION_LUT_INV_FAST`, and with
+  it through the fast LUT built from the exact inverse.
+- **A fix:** swap once, after the search over all later columns; that changes the inverse of
+  such colors.
+- **Status:** matched in `p2-lut3d-inv` (2.2d2), `invert_hypercube`;
+  `degenerate_cubes_match_the_wheel` (`crates/ocio-ops/tests/lut3d_inv_oracle.rs`) includes
+  LUTs where the swap back changes the result.
+
+### I-155. The exact 3D LUT inverse clamps its input to [0, 1] and gives 0 when it finds none
+
+- **Upstream:** `InvLut3DRenderer::apply` clamps each channel to [0, 1] before searching,
+  though a LUT's values may lie outside it ("TODO: Should improve this based on actual LUT
+  contents", `ops/lut3d/Lut3DOpCPU.cpp:1655-1663` @ v2.5.2), and returns 0 in every channel
+  when no cube of the extrapolated LUT holds the color ("For now, if no result is found,
+  return 0", 1672). It reads the LUT's values as they are, where the forward renderers
+  sanitize them (`SanitizeFloat`): a NaN at a cube's base entry stays in the tree's ranges
+  (C++'s `std::min` and `std::max` keep a NaN met first, and a parent's range starts from its
+  first child's), so that cube, and the rest of the sub-tree it starts, never match; a NaN at
+  another entry is skipped, and a cube with it gives a NaN inverse, which the output clamp
+  turns into 0.
+- **Who notices:** inverses of LUTs whose output range isn't [0, 1] (scene-referred or
+  extended-range LUTs) and colors outside the LUT's gamut, which come out as 0 rather than
+  near the closest color; LUTs with NaN values.
+- **A fix:** clamp to the LUT's own range; return the closest point on the LUT's surface; and
+  sanitize the values as the forward renderers do. Each changes those outputs.
+- **Status:** matched in `p2-lut3d-inv` (2.2d2), `InvLut3DRenderer::apply` and `RangeTree`;
+  the battery of `crates/ocio-ops/tests/lut3d_inv_oracle.rs` checks random LUTs (values in
+  [-0.5, 1.5)), LUTs with NaNs and infinities, and LUTs with one NaN.
+
+### I-156. The fast inverse of a 3D LUT is a trilinear cube of 48 entries over [0, 1]
+
+- **Upstream:** with `OPTIMIZATION_LUT_INV_FAST` (in every level from `VERY_GOOD` down, the
+  default included), an inverse 3D LUT becomes a forward one: the exact inverse sampled on an
+  identity of 48 entries per side, or of the LUT's own size when larger
+  (`MakeFastLut3DFromInverse`, `ops/lut3d/Lut3DOpData.cpp:29-58` @ v2.5.2, and `Compose`,
+  60-153). The cube keeps the identity's `INTERP_DEFAULT`, so it renders trilinear, though
+  the exact inverse inverts the tetrahedral forward LUT (the code that would make it
+  tetrahedral is commented out, "it does not seem to help accuracy"); and its domain is
+  [0, 1], so values outside it clamp ("TODO: The FastLut will limit inputs to [0,1]").
+  Upstream's own test needs a tolerance of 0.015 for a round trip through it
+  (`Lut3DOp_tests.cpp`, `cpu_renderer_inverse`).
+- **Who notices:** every inverse 3D LUT at the default optimization (CPU and GPU), whose
+  results differ from the exact inverse by up to about a hundredth, and more for colors
+  outside [0, 1].
+- **A fix:** a larger or tetrahedral cube, or the LUT's own output range as its domain; each
+  changes those results.
+- **Status:** matched in `p2-lut3d-inv` (2.2e), `make_fast_lut3d_from_inverse`;
+  `optimized_luts_match_the_wheel` (`crates/ocio/tests/lut3d_transform_oracle.rs`) compares
+  the cubes entry for entry, and the API battery and format sweep the pixels.
+
 ## Transforms
 
 ### I-11. Copying a group transform shares its children
@@ -1527,6 +1672,22 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `double_log_break_points_match_the_wheel`, and for the `pow`
   `gamma_log_negative_gamma_bases_match_the_wheel`, on both platforms.
 
+### I-137. The GPU has only the fast inverse of a 1D LUT, and no OSL
+
+- **Upstream:** `Lut1DOp::extractGpuShaderInfo` replaces an inverse 1D LUT with its fast
+  forward LUT (`MakeFastLut1DFromInverse`) whatever the optimization flags say
+  (`ops/lut1d/Lut1DOp.cpp:157-175`, with a TODO for an exact GPU inverse), so a GPU processor
+  made with `OPTIMIZATION_NONE` (no `OPTIMIZATION_LUT_INV_FAST`) still writes the fast LUT, a
+  resampling of the inverse on a lookup domain, where the CPU processor inverts exactly.
+  `GetLut1DGPUShaderProgram` refuses the OSL translation ("The Lut1DOp is not yet supported
+  by the 'Open Shading language (OSL)' translation", `ops/lut1d/Lut1DOpGPU.cpp:148-151`).
+- **Who notices:** GPU renders of inverse 1D LUTs compared with the CPU's, and OSL users of
+  1D LUTs.
+- **A fix:** an exact inverse renderer on the GPU, and an OSL translation.
+- **Status:** matched in `p2-lut1d-gpu` (2.1h, `crates/ocio-gpu/src/ops/lut1d/lut1d_op_gpu.rs`);
+  checked against the wheel (`crates/ocio-gpu/tests/lut1d_op_gpu_oracle.rs`, the inverse LUTs
+  at `OPTIMIZATION_NONE`, and OSL in every case).
+
 ## Python module (`ocio-py`)
 
 ### I-12. A channel order passed without its keyword is misread
@@ -1872,9 +2033,12 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Who notices:** GPU shaders of 1D LUTs that don't fit the width limit: 8191, 12286 or 12287
   entries at the default width (32,640 lengths up to 2^20 in all), and most lengths at small
   widths.
-- **Options:** an error where the padding doesn't fit, or a layout that fits.
-- **Status:** open; decided in Phase 2, with the Lut1D GPU writer. The oracle refuses these
-  requests (`gpu_shader`, `_padding_fits`).
+- **Decided** (the owner's general rule, `docs/deviations.md`): the port refuses the LUT with
+  an error where the padding doesn't fit, the limit is 0, or a texture 1 texel wide has more
+  than one row ("The Lut1DOp of N entries doesn't fit in a texture at most W texels wide.").
+- **Status:** matched in `p2-lut1d-gpu` (2.1h, `padding_fits` in
+  `crates/ocio-gpu/src/ops/lut1d/lut1d_op_gpu.rs`, and its test of the lengths around the
+  limits). The oracle refuses these requests (`gpu_shader`, `_padding_fits`).
 
 ### U-6. Resource prefixes the Metal class wrapper reads past
 
@@ -2363,10 +2527,32 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   590 deep can't be loaded: upstream's stack overflows.", which a group that holds itself
   reaches too. The port loads and copies nested groups without recursion; printing,
   validating and dropping a group recurse in small frames, and at opt-level 0 they fit 2,360
-  levels (four times the limit) on a 1 MiB thread. Between 591 levels and the wheel's crash the
-  port refuses what the wheel loads.
+  levels (four times the limit) on a 1 MiB thread; saving a group (`p3-yaml-save`) recurses
+  too, as upstream's writer does, and fits 1,200 levels (twice the limit). Between 591 levels
+  and the wheel's crash the port refuses what the wheel loads.
 - **Status:** matched in `p3-yaml-load-1` (3.3h2, raised from 100 to 590 in a later chunk;
   `crates/ocio/src/ocio_yaml.rs`, the copy in `crates/ocio/src/transforms/group_transform.rs`).
   Tests: 590 levels load as in the wheel, the wheel loads 591 where the port refuses them, groups
   that hold themselves are refused, and loading, copying, printing, validating, building a CPU
   processor and dropping 590 levels fit a 1 MiB thread (also at opt-level 0).
+
+### U-65. The inverse of a 3D LUT of one entry per side never finishes
+
+- **Upstream:** the exact inverse renderer grows the LUT by one entry on each side, and its
+  loops over the two ends of a side step by `dim - 1` (`InvLut3DRenderer::extrapolate3DArray`,
+  `ops/lut3d/Lut3DOpCPU.cpp:1461-1591` @ v2.5.2). For a grid size of 1 that step is 0, and the
+  first such loop never ends: creating the CPU processor of an inverse `Lut3DTransform` of grid
+  size 1 never returns, with or without `OPTIMIZATION_LUT_INV_FAST` (the fast path builds its
+  forward LUT through the same renderer, `MakeFastLut3DFromInverse`, `Lut3DOpData.cpp:29-58`),
+  and neither do its GPU processor (whose shader bakes that fast forward LUT) nor
+  `getOptimizedProcessor` with `OPTIMIZATION_LUT_INV_FAST`.
+  Both wheels were still running after 30 s (probed 2026-10-07, under Python with a time
+  limit); a grid size of 2 returns at once. The oracle can't run a case that never returns.
+- **Who notices:** applications that invert a 3D LUT of one entry per side, on the CPU or the
+  GPU.
+- **Decided** (the owner's general rule, `docs/deviations.md`, as for U-5's endless loops):
+  the port refuses it with "Lut3D: the exact inverse of a 3D LUT needs a grid size of at
+  least 2.", when the renderer is made.
+- **Status:** matched in `p2-lut3d-inv` (2.2d2), `InvLut3DRenderer::new`
+  (`crates/ocio-ops/src/ops/lut3d/inv_lut3d.rs`, `GRID_SIZE_1_INVERSE`); `grid_size_1_is_refused`
+  (`crates/ocio-ops/tests/lut3d_inv_oracle.rs`).

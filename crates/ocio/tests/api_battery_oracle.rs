@@ -75,6 +75,7 @@ struct ApiFamily {
     name: &'static str,
     cases: Vec<Case<Calls>>,
     bases: Vec<Case<Calls>>,
+    directions: Vec<Direction>,
 }
 
 impl ApiFamily {
@@ -83,6 +84,15 @@ impl ApiFamily {
             name,
             cases: cases.cases,
             bases: cases.bases,
+            directions: Direction::BOTH.to_vec(),
+        }
+    }
+
+    /// The family in the forward direction only.
+    fn forward_only(self) -> ApiFamily {
+        ApiFamily {
+            directions: vec![Direction::Forward],
+            ..self
         }
     }
 }
@@ -98,6 +108,9 @@ impl Family for ApiFamily {
     }
     fn mutation_bases(&self) -> Vec<Case<Calls>> {
         self.bases.clone()
+    }
+    fn directions(&self) -> Vec<Direction> {
+        self.directions.clone()
     }
     fn spec(&self, p: &Calls, direction: Direction) -> Spec {
         Spec::Transform(p.spec(direction))
@@ -178,4 +191,21 @@ fn fixed_function_transform_through_the_api_matches_the_wheel() {
         "FixedFunctionTransform",
         api_cases::fixed_function(),
     ));
+}
+
+#[test]
+fn builtin_transform_through_the_api_matches_the_wheel() {
+    battery::run(&ApiFamily::new(
+        "BuiltinTransform",
+        api_cases::builtin(api_cases::BUILTINS_WITH_OPS),
+    ));
+}
+
+#[test]
+fn lut3d_transform_through_the_api_matches_the_wheel() {
+    battery::run(&ApiFamily::new("Lut3DTransform", api_cases::lut3d()));
+    // Forward only: the inverse of a cube of one entry never returns in the wheel (U-65).
+    battery::run(
+        &ApiFamily::new("Lut3DTransform (one entry)", api_cases::lut3d_one_entry()).forward_only(),
+    );
 }

@@ -15,10 +15,12 @@ use ocio_ops::exception::{Exception, Result};
 use ocio_ops::image_desc::PackedImageDesc;
 use ocio_ops::math_utils::equal_with_abs_error;
 use ocio_ops::open_color_types::{
-    Allocation, BitDepth, ChannelOrdering, ColorSpaceDirection, ColorSpaceVisibility,
-    EnvironmentMode, NamedTransformVisibility, OptimizationFlags, ReferenceSpaceType,
-    SearchReferenceSpaceType, TransformDirection, ViewTransformDirection, ViewType,
+    CdlStyle, ChannelOrdering, ColorSpaceDirection, ColorSpaceVisibility, EnvironmentMode,
+    FixedFunctionStyle, NamedTransformVisibility, NegativeStyle, OptimizationFlags,
+    ReferenceSpaceType, SearchReferenceSpaceType, TransformDirection, ViewTransformDirection,
+    ViewType, fixed_function_style_to_string,
 };
+use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 use ocio_ops::parse_utils::{
     ROLE_DEFAULT, find_in_string_vec_case_ignore, intersect_string_vecs_case_ignore,
     join_string_env_style, split_string_env_style,
@@ -41,11 +43,12 @@ use crate::display::{
 use crate::file_rules::{FileRules, update_file_rules_from_v1_to_v2};
 use crate::look::Look;
 use crate::named_transform::NamedTransform;
-use crate::path_utils::parse_color_space_from_string;
+use crate::path_utils::{get_fast_file_hash, parse_color_space_from_string};
 use crate::processor::{Processor, ProcessorCacheFlags};
 use crate::transform::Transform;
 use crate::view_transform::ViewTransform;
 use crate::viewing_rules::{ViewingRules, find_rule};
+use ocio_ops::hash_utils::cache_id_hash;
 
 /// `OCIO_ACTIVE_DISPLAYS`: the displays a config shows, overriding its own list.
 ///
@@ -80,6 +83,81 @@ const LAST_SUPPORTED_MINOR_VERSION: [u32; 2] = [0, 5];
 /// Port of `Config::Impl::DefaultFamilySeparator` (src/OpenColorIO/Config.cpp:270 @ v2.5.2).
 const DEFAULT_FAMILY_SEPARATOR: u8 = b'/';
 
+/// The raw config's profile ([`Config::create_raw`]).
+///
+/// Port of `INTERNAL_RAW_PROFILE` (src/OpenColorIO/Config.cpp:74-92 @ v2.5.2).
+pub(crate) const INTERNAL_RAW_PROFILE: &str = concat!(
+    "ocio_profile_version: 2\n",
+    "strictparsing: false\n",
+    "roles:\n",
+    "  default: raw\n",
+    "file_rules:\n",
+    "  - !<Rule> {name: Default, colorspace: default}\n",
+    "displays:\n",
+    "  sRGB:\n",
+    "  - !<View> {name: Raw, colorspace: raw}\n",
+    "colorspaces:\n",
+    "  - !<ColorSpace>\n",
+    "      name: raw\n",
+    "      family: raw\n",
+    "      equalitygroup:\n",
+    "      bitdepth: 32f\n",
+    "      isdata: true\n",
+    "      allocation: uniform\n",
+    "      description: 'A raw color space. Conversions to and from this space are no-ops.'\n",
+);
+
+/// The built-in transform styles a config needs version 2.2 for (src/OpenColorIO/Config.cpp:
+/// 5603-5614 @ v2.5.2).
+const BUILTIN_STYLES_2_2: [&str; 3] = [
+    "ARRI_LOGC4_to_ACES2065-1",
+    "CURVE - CANON_CLOG2_to_LINEAR",
+    "CURVE - CANON_CLOG3_to_LINEAR",
+];
+
+/// The built-in transform styles a config needs version 2.4 for (src/OpenColorIO/Config.cpp:
+/// 5620-5666 @ v2.5.2), the last one added in OCIO 2.4.1.
+const BUILTIN_STYLES_2_4: [&str; 38] = [
+    "APPLE_LOG_to_ACES2065-1",
+    "CURVE - APPLE_LOG_to_LINEAR",
+    "CURVE - HLG-OETF",
+    "CURVE - HLG-OETF-INVERSE",
+    "DISPLAY - CIE-XYZ-D65_to_DCDM-D65",
+    "DISPLAY - CIE-XYZ-D65_to_ST2084-DCDM-D65",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-100nit-REC709_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-100nit-P3-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-108nit-P3-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-300nit-P3-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-500nit-P3-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-1000nit-P3-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-2000nit-P3-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-4000nit-P3-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-500nit-REC2020_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-1000nit-REC2020_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-2000nit-REC2020_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-4000nit-REC2020_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-100nit-REC709-D60-in-REC709-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-100nit-REC709-D60-in-P3-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-100nit-REC709-D60-in-REC2020-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-100nit-P3-D60-in-P3-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-100nit-P3-D60-in-XYZ-E_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-108nit-P3-D60-in-P3-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-300nit-P3-D60-in-XYZ-E_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-500nit-P3-D60-in-P3-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-1000nit-P3-D60-in-P3-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-2000nit-P3-D60-in-P3-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-4000nit-P3-D60-in-P3-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-500nit-P3-D60-in-REC2020-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-1000nit-P3-D60-in-REC2020-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-2000nit-P3-D60-in-REC2020-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-4000nit-P3-D60-in-REC2020-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-500nit-REC2020-D60-in-REC2020-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-1000nit-REC2020-D60-in-REC2020-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-2000nit-REC2020-D60-in-REC2020-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-4000nit-REC2020-D60-in-REC2020-D65_2.0",
+    "DISPLAY - CIE-XYZ-D65_to_DisplayP3-HDR",
+];
+
 /// The default value of the environment variable `name`, `""` when the config has none.
 ///
 /// Port of `LookupEnvironment` (src/OpenColorIO/Config.cpp:132-138 @ v2.5.2).
@@ -93,6 +171,26 @@ fn lookup_environment<'a>(env: &'a BTreeMap<Vec<u8>, Vec<u8>>, name: &[u8]) -> &
 /// Port of `LookupRole` (src/OpenColorIO/Config.cpp:140-148 @ v2.5.2).
 fn lookup_role<'a>(roles: &'a BTreeMap<Vec<u8>, Vec<u8>>, rolename: &[u8]) -> &'a [u8] {
     roles.get(&lower(rolename)).map_or(&[], Vec::as_slice)
+}
+
+/// Adds to `files` the sources of the FileTransforms of `transform` (its own, or a group's,
+/// recursively), each up to its first NUL.
+///
+/// Port of `GetFileReferences` (src/OpenColorIO/Config.cpp:154-171 @ v2.5.2).
+fn get_file_references(files: &mut BTreeSet<Vec<u8>>, transform: &Transform) {
+    match transform {
+        Transform::Group(group_transform) => {
+            for i in 0..group_transform.num_transforms() {
+                if let Ok(t) = group_transform.transform(i) {
+                    get_file_references(files, t);
+                }
+            }
+        }
+        Transform::File(file_transform) => {
+            files.insert(c_str(file_transform.src()).to_vec());
+        }
+        _ => {}
+    }
 }
 
 /// Whether a color space of the reference space `t` is one a search of `st` keeps.
@@ -549,44 +647,140 @@ impl Config {
         self.shared_context.update(change);
     }
 
-    /// The raw config: version 2.0, no strict parsing, its one color space `raw` and the role
-    /// `default`, its display `sRGB` and view `Raw`, and the whole environment in its context
-    /// (its profile has no `environment` section). So far all but its file rules, which come
-    /// with them (p3-rules); built directly until the YAML reader parses upstream's profile
-    /// (3.7d). As any config, it reads
-    /// the environment's active displays and views and inactive color spaces
-    /// ([`Config::new`]), and fails as [`Config::new`] does.
+    /// The raw config, read from upstream's internal profile ([`INTERNAL_RAW_PROFILE`]):
+    /// version 2.0, no strict parsing, its one color space `raw` and the role `default`, its
+    /// display `sRGB` and view `Raw`, and the whole environment in its context (the profile has
+    /// no `environment` section). As any config, it reads the environment's active displays and
+    /// views and inactive color spaces ([`Config::new`]), and fails as [`Config::new`] does.
     ///
-    /// Port of `Config::CreateRaw` (src/OpenColorIO/Config.cpp:74-92, 1127-1133 @ v2.5.2), in
-    /// part, with what `OCIOYaml`'s `load` sets from that profile (`setVersion`,
-    /// `setStrictParsingEnabled`, `setRole`, the color space's setters and `addColorSpace`,
-    /// `addDisplayView`,
-    /// `setEnvironmentMode`, `loadEnvironment`) and `Config::Impl::Read`'s refresh of the
-    /// active color spaces (Config.cpp:5545-5561).
+    /// Port of `Config::CreateRaw` (src/OpenColorIO/Config.cpp:1127-1133 @ v2.5.2).
     #[doc(alias = "CreateRaw")]
     pub fn create_raw() -> Result<Arc<Config>> {
+        Config::create_from_stream(INTERNAL_RAW_PROFILE.as_bytes())
+    }
+
+    /// A config read from the YAML text `istream`, or the reader's error, "Error: Loading the
+    /// OCIO profile failed. ..." (see [`Config::read`]).
+    ///
+    /// Port of `Config::CreateFromStream` (src/OpenColorIO/Config.cpp:1209-1212 @ v2.5.2).
+    #[doc(alias = "CreateFromStream")]
+    pub fn create_from_stream(istream: &[u8]) -> Result<Arc<Config>> {
+        Config::read(istream, None)
+    }
+
+    /// The config's YAML text: checked against its version
+    /// ([`Config::check_version_consistency`]), then written (`OCIOYaml::Write`). Either's
+    /// error is "Error building YAML: " and its message. It is also the config's text as
+    /// upstream's `operator<<` writes it.
+    ///
+    /// Port of `Config::serialize(std::ostream&)` (src/OpenColorIO/Config.cpp:5317-5331 @
+    /// v2.5.2) and `operator<<(std::ostream&, const Config&)` (Config.cpp:5236-5240), into a
+    /// buffer: upstream writes nothing to the stream when it fails.
+    pub fn serialize(&self) -> Result<Vec<u8>> {
+        self.check_version_consistency()
+            .and_then(|()| crate::ocio_yaml::write(self))
+            .map_err(|e| {
+                let mut error = b"Error building YAML: ".to_vec();
+                error.extend_from_slice(e.what());
+                Exception::new(error)
+            })
+    }
+
+    /// The config's cache ID with its current context ([`Config::cache_id_with_context`]).
+    ///
+    /// Port of `Config::getCacheID()` (src/OpenColorIO/Config.cpp:5245-5248 @ v2.5.2).
+    #[doc(alias = "getCacheID")]
+    pub fn cache_id(&self) -> Result<String> {
+        self.cache_id_with_context(Some(&self.current_context().get()))
+    }
+
+    /// The config's cache ID with `context` (`None`: upstream's null context): the hash of its
+    /// text ([`Config::serialize`]), a colon, and with a context the hash of the files its
+    /// FileTransforms name, each resolved in the context and hashed, or `?` when it can't be.
+    /// Computed once per context cache ID, until the config changes; serializing can fail.
+    ///
+    /// Port of `Config::getCacheID(const ConstContextRcPtr&)` (src/OpenColorIO/Config.cpp:
+    /// 5250-5312 @ v2.5.2).
+    #[doc(alias = "getCacheID")]
+    pub fn cache_id_with_context(&self, context: Option<&Context>) -> Result<String> {
+        let mut cache_ids = self.lock_cache_ids();
+
+        // A null context will use the empty cacheid
+        let contextcacheid = context.map(Context::cache_id).unwrap_or_default();
+
+        if let Some(id) = cache_ids.cache_ids.get(&contextcacheid) {
+            return Ok(id.clone());
+        }
+
+        // Include the hash of the yaml config serialization
+        if cache_ids.cache_id_no_context.is_empty() {
+            let fullstr = self.serialize()?;
+            cache_ids.cache_id_no_context = cache_id_hash(&fullstr);
+        }
+
+        // Also include all file references, using the context (if specified)
+        let mut file_references_fast_hash = String::new();
+        if let Some(context) = context {
+            let mut filehash = Vec::new();
+
+            let mut files = BTreeSet::new();
+            for transform in self.all_internal_transforms() {
+                get_file_references(&mut files, transform);
+            }
+
+            for iter in &files {
+                if iter.is_empty() {
+                    continue;
+                }
+
+                filehash.extend_from_slice(iter);
+                filehash.push(b'=');
+
+                match context
+                    .resolve_file_location(iter)
+                    .and_then(|resolved| get_fast_file_hash(&resolved, context))
+                {
+                    Ok(hash) => {
+                        filehash.extend_from_slice(&hash);
+                        filehash.push(b' ');
+                    }
+                    Err(_) => {
+                        filehash.extend_from_slice(b"? ");
+                        continue;
+                    }
+                }
+            }
+
+            file_references_fast_hash = cache_id_hash(&filehash);
+        }
+
+        let id = format!(
+            "{}:{}",
+            cache_ids.cache_id_no_context, file_references_fast_hash
+        );
+        cache_ids.cache_ids.insert(contextcacheid, id.clone());
+        Ok(id)
+    }
+
+    /// A new config ([`Config::new`]) read from the YAML text `input` (`OCIOYaml::Read`), checked
+    /// against its version ([`Config::check_version_consistency`]), then its inactive color
+    /// spaces refreshed from the config's and the environment's lists only: what the reader set
+    /// through the API doesn't supersede them. `filename` is the config's file (`None`, a null
+    /// pointer, for a stream).
+    ///
+    /// Port of `Config::Impl::Read(std::istream&, const char*)` (src/OpenColorIO/
+    /// Config.cpp:5548-5562 @ v2.5.2).
+    pub(crate) fn read(input: &[u8], filename: Option<&[u8]>) -> Result<Arc<Config>> {
         let mut config = Config::new()?;
-        config.set_version(2, 0)?;
-        config.set_strict_parsing_enabled(false);
-        config.set_role(ROLE_DEFAULT, Some(b"raw"))?;
+        crate::ocio_yaml::read(input, &mut config, filename)?;
+        config.check_version_consistency()?;
 
-        let mut cs = ColorSpace::new();
-        cs.set_name("raw");
-        cs.set_family("raw");
-        cs.set_equality_group("");
-        cs.set_bit_depth(BitDepth::F32);
-        cs.set_is_data(true);
-        cs.set_allocation(Allocation::Uniform);
-        cs.set_description("A raw color space. Conversions to and from this space are no-ops.");
-        config.add_color_space(&cs)?;
-
-        config.add_display_view_with_view_transform("sRGB", "Raw", "", "raw", "", "", "")?;
-
-        config.set_environment_mode(EnvironmentMode::LoadAll);
-        config.load_environment();
-
+        // An API request always supersedes the env. variable. As the OCIOYaml helper methods
+        // use the Config public API, the variable reset highlights that only the
+        // env. variable and the config contents are valid after a config file read.
         config.inactive_color_space_names_api.clear();
         config.refresh_active_color_spaces();
+
         Ok(Arc::new(config))
     }
 
@@ -3905,6 +4099,359 @@ impl Config {
         }
 
         transform_vec
+    }
+
+    /// Refuses a transform the config's version can't have: in version 1, the classes and
+    /// styles version 2 brought; in versions 2.0 to 2.4, the built-in and fixed function
+    /// styles of later minor versions. A group's children are checked the same way.
+    ///
+    /// Port of `Config::Impl::checkVersionConsistency(ConstTransformRcPtr&)`
+    /// (src/OpenColorIO/Config.cpp:5586-5832 @ v2.5.2). Its ExposureContrast and grading arms
+    /// come with those classes (Phase 5); until then their tags can't be loaded. Two messages
+    /// keep upstream's misspellings (docs/improvements.md, I-146).
+    fn check_transform_version_consistency(&self, transform: &Transform) -> Result<()> {
+        let major = self.major_version;
+        let minor = self.minor_version;
+        match transform {
+            Transform::Builtin(blt) => {
+                if major < 2 {
+                    return Err(Exception::new(
+                        "Only config version 2 (or higher) can have BuiltinInTransform.",
+                    ));
+                }
+
+                let style = blt.style();
+                let is = |name: &str| strcasecmp(style, name).is_eq();
+                if major == 2 && minor < 1 && is("ACES-LMT - ACES 1.3 Reference Gamut Compression")
+                {
+                    return Err(Exception::new(
+                        "Only config version 2.1 (or higher) can have BuiltinTransform style \
+                         'ACES-LMT - ACES 1.3 Reference Gamut Compression'.",
+                    ));
+                }
+                if major == 2 && minor < 2 && BUILTIN_STYLES_2_2.iter().any(|s| is(s)) {
+                    let mut os = b"Only config version 2.2 (or higher) can have BuiltinTransform \
+                                   style '"
+                        .to_vec();
+                    os.extend_from_slice(style);
+                    os.extend_from_slice(b"'.");
+                    return Err(Exception::new(os));
+                }
+                if major == 2 && minor < 3 && is("DISPLAY - CIE-XYZ-D65_to_DisplayP3") {
+                    return Err(Exception::new(
+                        "Only config version 2.3 (or higher) can have BuiltinTransform style \
+                         'DISPLAY - CIE-XYZ-D65_to_DisplayP3'.",
+                    ));
+                }
+                if major == 2 && minor < 4 && BUILTIN_STYLES_2_4.iter().any(|s| is(s)) {
+                    let mut os = b"Only config version 2.4 (or higher) can have BuiltinTransform \
+                                   style '"
+                        .to_vec();
+                    os.extend_from_slice(style);
+                    os.extend_from_slice(b"'.");
+                    return Err(Exception::new(os));
+                }
+            }
+            Transform::Cdl(cdl) => {
+                if major < 2 && cdl.style() != CdlStyle::TRANSFORM_DEFAULT {
+                    return Err(Exception::new(
+                        "Only config version 2 (or higher) can have style for CDLTransform.",
+                    ));
+                }
+            }
+            Transform::DisplayView(_) => {
+                if major < 2 {
+                    return Err(Exception::new(
+                        "Only config version 2 (or higher) can have DisplayViewTransform.",
+                    ));
+                }
+            }
+            Transform::Exponent(ex) => {
+                if major < 2 && ex.negative_style() != NegativeStyle::Clamp {
+                    return Err(Exception::new(
+                        "Config version 1 only supports ExponentTransform clamping negative \
+                         values.",
+                    ));
+                }
+            }
+            Transform::ExponentWithLinear(_) => {
+                if major < 2 {
+                    return Err(Exception::new(
+                        "Only config version 2 (or higher) can have ExponentWithLinearTransform.",
+                    ));
+                }
+            }
+            Transform::File(ft) => {
+                if major < 2 {
+                    if ft.interpolation() == Interpolation::Cubic {
+                        return Err(Exception::new(
+                            "Only config version 2 (or higher) can use 'cubic' interpolation \
+                             with FileTransform.",
+                        ));
+                    }
+                    if ft.cdl_style() != CdlStyle::TRANSFORM_DEFAULT {
+                        return Err(Exception::new(
+                            "Only config version 2 (or higher) can use CDL style' for \
+                             FileTransform.",
+                        ));
+                    }
+                }
+            }
+            Transform::FixedFunction(ff) => {
+                use FixedFunctionStyle::*;
+                let ffstyle = ff.style();
+                if major < 2 {
+                    return Err(Exception::new(
+                        "Only config version 2 (or higher) can have FixedFunctionTransform.",
+                    ));
+                }
+
+                if major == 2 && minor < 1 && ffstyle == AcesGamutComp13 {
+                    return Err(Exception::new(
+                        "Only config version 2.1 (or higher) can have FixedFunctionTransform \
+                         style 'ACES_GAMUT_COMP_13'.",
+                    ));
+                }
+
+                if major == 2
+                    && minor < 4
+                    && matches!(
+                        ffstyle,
+                        LinToPq
+                            | LinToGammaLog
+                            | LinToDoubleLog
+                            | AcesOutputTransform20
+                            | AcesRgbToJmh20
+                            | AcesTonescaleCompress20
+                            | AcesGamutCompress20
+                    )
+                {
+                    return Err(Exception::new(format!(
+                        "Only config version 2.4 (or higher) can have FixedFunctionTransform \
+                         style '{}'.",
+                        fixed_function_style_to_string(ffstyle)?
+                    )));
+                }
+
+                if major == 2
+                    && minor < 5
+                    && matches!(ffstyle, RgbToHsyLin | RgbToHsyLog | RgbToHsyVid)
+                {
+                    return Err(Exception::new(format!(
+                        "Only config version 2.5 (or higher) can have FixedFunctionTransform \
+                         style '{}'.",
+                        fixed_function_style_to_string(ffstyle)?
+                    )));
+                }
+            }
+            Transform::LogAffine(_) => {
+                if major < 2 {
+                    return Err(Exception::new(
+                        "Only config version 2 (or higher) can have LogAffineTransform.",
+                    ));
+                }
+            }
+            Transform::LogCamera(_) => {
+                if major < 2 {
+                    return Err(Exception::new(
+                        "Only config version 2 (or higher) can have LogCameraTransform.",
+                    ));
+                }
+            }
+            Transform::Range(_) => {
+                if major < 2 {
+                    return Err(Exception::new(
+                        "Only config version 2 (or higher) can have RangeTransform.",
+                    ));
+                }
+            }
+            Transform::Group(grp) => {
+                for idx in 0..grp.num_transforms() {
+                    let tr = grp.transform(idx)?;
+                    self.check_transform_version_consistency(tr)?;
+                }
+            }
+            Transform::Allocation(_)
+            | Transform::ColorSpace(_)
+            | Transform::Log(_)
+            | Transform::Look(_)
+            | Transform::Lut1D(_)
+            | Transform::Lut3D(_)
+            | Transform::Matrix(_) => {}
+        }
+        Ok(())
+    }
+
+    /// Refuses what the config's version can't have: the transforms
+    /// ([`Config::check_transform_version_consistency`]); in version 1 a family separator, file
+    /// rules, inactive color spaces, viewing rules, shared views, a virtual display, display
+    /// color spaces, interop IDs, view transforms and named transforms; before 2.5 interchange
+    /// attributes.
+    ///
+    /// Port of `Config::Impl::checkVersionConsistency()` (src/OpenColorIO/Config.cpp:5834-5993
+    /// @ v2.5.2).
+    pub(crate) fn check_version_consistency(&self) -> Result<()> {
+        let hex_version: u32 = (self.major_version << 24) | (self.minor_version << 16);
+
+        // Check for the Transforms.
+
+        for transform in self.all_internal_transforms() {
+            self.check_transform_version_consistency(transform)?;
+        }
+
+        // Check for the family separator.
+
+        if self.major_version < 2 && self.family_separator != b'/' {
+            return Err(Exception::new(
+                "Only version 2 (or higher) can have a family separator.",
+            ));
+        }
+
+        // Check for the file rules.
+
+        if self.major_version < 2 && self.file_rules.get().num_entries() > 2 {
+            return Err(Exception::new(
+                "Only version 2 (or higher) can have file rules.",
+            ));
+        }
+
+        // Check for inactive color spaces.
+
+        if self.major_version < 2 && !self.inactive_color_space_names_conf.is_empty() {
+            return Err(Exception::new(
+                "Only version 2 (or higher) can have inactive color spaces.",
+            ));
+        }
+
+        // Check for ViewingRules.
+
+        if self.major_version < 2 && self.viewing_rules.get().num_entries() != 0 {
+            return Err(Exception::new(
+                "Only version 2 (or higher) can have viewing rules.",
+            ));
+        }
+
+        // Check for shared views.
+
+        if self.major_version < 2 {
+            if !self.shared_views.is_empty() {
+                return Err(Exception::new(
+                    "Only version 2 (or higher) can have shared views.",
+                ));
+            }
+            for (name, display) in &self.displays {
+                if !display.shared_views.is_empty() {
+                    let mut os = b"Config failed validation. The display '".to_vec();
+                    os.extend_from_slice(name);
+                    os.extend_from_slice(b"' uses shared views and config version is less than 2.");
+                    return Err(Exception::new(os));
+                }
+            }
+        }
+
+        // Check for virtual display.
+
+        if self.major_version < 2
+            && (!self.virtual_display.views.is_empty()
+                || !self.virtual_display.shared_views.is_empty())
+        {
+            return Err(Exception::new(
+                "Only version 2 (or higher) can have a virtual display.",
+            ));
+        }
+
+        // Check ColorSpace properties.
+
+        for i in 0..self.all_color_spaces.num_color_spaces() {
+            // Check for display color spaces.
+
+            let cs = self
+                .all_color_spaces
+                .color_space_by_index(i)
+                .expect("an index of the set");
+            if self.major_version < 2
+                && match_reference_type(
+                    SearchReferenceSpaceType::Display,
+                    cs.reference_space_type(),
+                )
+            {
+                return Err(Exception::new(
+                    "Only version 2 (or higher) can have DisplayColorSpaces.",
+                ));
+            }
+
+            // Check for new color space attributes.
+
+            if self.major_version < 2 && !c_str(cs.interop_id()).is_empty() {
+                let mut os = b"Config failed validation. The color space '".to_vec();
+                os.extend_from_slice(c_str(cs.name()));
+                os.extend_from_slice(
+                    b"' has non-empty InteropID and config version is less than 2.0.",
+                );
+                return Err(Exception::new(os));
+            }
+
+            if hex_version < 0x02050000 && !cs.interchange_attributes().is_empty() {
+                let mut os = b"Config failed validation. The color space '".to_vec();
+                os.extend_from_slice(c_str(cs.name()));
+                os.extend_from_slice(
+                    b"' has non-empty interchange attributes and config version is less than \
+                      2.5.",
+                );
+                return Err(Exception::new(os));
+            }
+        }
+
+        // Check for the ViewTransforms.
+
+        if self.major_version < 2
+            && (!self.view_transforms.is_empty() || !self.default_view_transform.is_empty())
+        {
+            return Err(Exception::new(
+                "Only version 2 (or higher) can have ViewTransforms.",
+            ));
+        }
+
+        // Check for new ViewTransform properties.
+
+        if hex_version < 0x02050000 {
+            for vt in &self.view_transforms {
+                if !vt.interchange_attributes().is_empty() {
+                    let mut os = b"Config failed validation. The view transform '".to_vec();
+                    os.extend_from_slice(c_str(vt.name()));
+                    os.extend_from_slice(
+                        b"' has non-empty interchange attributes and config version is less \
+                          than 2.5.",
+                    );
+                    return Err(Exception::new(os));
+                }
+            }
+        }
+
+        // Check for new Look properties.
+
+        if hex_version < 0x02050000 {
+            for look in &self.looks_list {
+                if !look.interchange_attributes().is_empty() {
+                    let mut os = b"Config failed validation. The look '".to_vec();
+                    os.extend_from_slice(c_str(look.name()));
+                    os.extend_from_slice(
+                        b"' has non-empty interchange attributes and config version is less \
+                          than 2.5.",
+                    );
+                    return Err(Exception::new(os));
+                }
+            }
+        }
+
+        // Check for the NamedTransforms.
+
+        if self.major_version < 2 && !self.all_named_transforms.is_empty() {
+            return Err(Exception::new(
+                "Only version 2 (or higher) can have NamedTransforms.",
+            ));
+        }
+        Ok(())
     }
 
     /// Whether a color space named `name` is used other than where it is defined: by a

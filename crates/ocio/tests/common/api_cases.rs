@@ -1041,6 +1041,114 @@ pub(crate) fn lut1d_lookups() -> Cases {
     }
 }
 
+/// A `Lut3DTransform` of `grid_size` entries per side, `f(r, g, b)` for each entry (its grid
+/// position scaled to [0, 1]), with `interpolation` (an `INTERP_*` name). The entries are not
+/// battery slots.
+pub(crate) fn lut3d_calls(
+    grid_size: u64,
+    interpolation: &str,
+    f: impl Fn([f32; 3]) -> [f32; 3],
+) -> Calls {
+    let mut calls = Calls::new("Lut3DTransform").fixed("setGridSize", serde_json::json!(grid_size));
+    let last = grid_size.saturating_sub(1).max(1) as f32;
+    for i in 0..grid_size {
+        for j in 0..grid_size {
+            for k in 0..grid_size {
+                let [r, g, b] = f([i, j, k].map(|x| x as f32 / last)).map(f64::from);
+                calls = calls.call(
+                    "setValue",
+                    [i, j, k]
+                        .map(|x| Arg::Fixed(serde_json::json!(x)))
+                        .into_iter()
+                        .chain([r, g, b].map(|v| Arg::Fixed(num(v))))
+                        .collect(),
+                );
+            }
+        }
+    }
+    calls.enumerated("setInterpolation", interpolation)
+}
+
+/// `Lut3DTransform`: smooth and folded cubes of 2 to 17 entries per side in each
+/// interpolation, and groups of a LUT and its inverse in either order, which the optimizer
+/// replaces with a [0, 1] range (`OPTIMIZATION_PAIR_IDENTITY_LUT3D`,
+/// `Lut3DOpData::getIdentityReplacement`), and of two LUTs, which it composes where the level
+/// has `OPTIMIZATION_COMP_LUT3D`. An inverse LUT renders with its fast forward LUT
+/// (`OPTIMIZATION_LUT_INV_FAST`), or without the flag with its exact inverse. The cube of one
+/// entry is [`lut3d_one_entry`]'s.
+pub(crate) fn lut3d() -> Cases {
+    let smooth = |[r, g, b]: [f32; 3]| [r * r * 0.9 + 0.05, g.sqrt(), 0.2 + 0.6 * b + 0.1 * r];
+    let folded = |[r, g, b]: [f32; 3]| [1.5 * g - 0.25, (r - b).abs(), 1.0 - r * g];
+    let mut cases = Vec::new();
+    for interp in [
+        "INTERP_TETRAHEDRAL",
+        "INTERP_LINEAR",
+        "INTERP_BEST",
+        "INTERP_NEAREST",
+    ] {
+        cases.push(Case::new(
+            format!("smooth 5^3, {interp}"),
+            lut3d_calls(5, interp, smooth),
+        ));
+    }
+    cases.extend([
+        Case::new(
+            "folded 3^3, INTERP_DEFAULT",
+            lut3d_calls(3, "INTERP_DEFAULT", folded),
+        ),
+        Case::new(
+            "folded 2^3, INTERP_TETRAHEDRAL",
+            lut3d_calls(2, "INTERP_TETRAHEDRAL", folded),
+        ),
+        Case::new(
+            "smooth 17^3, INTERP_TETRAHEDRAL",
+            lut3d_calls(17, "INTERP_TETRAHEDRAL", smooth),
+        ),
+    ]);
+    let group = || Calls::new("GroupTransform");
+    let inverse = Direction::Inverse;
+    for (fwd, inv) in [
+        ("INTERP_TETRAHEDRAL", "INTERP_TETRAHEDRAL"),
+        ("INTERP_LINEAR", "INTERP_LINEAR"),
+        ("INTERP_LINEAR", "INTERP_TETRAHEDRAL"),
+    ] {
+        cases.push(Case::new(
+            format!("a LUT ({fwd}) and its inverse ({inv})"),
+            group()
+                .child(lut3d_calls(3, fwd, folded))
+                .child_in(lut3d_calls(3, inv, folded), inverse),
+        ));
+        cases.push(Case::new(
+            format!("an inverse LUT ({inv}) and the LUT ({fwd})"),
+            group()
+                .child_in(lut3d_calls(3, inv, folded), inverse)
+                .child(lut3d_calls(3, fwd, folded)),
+        ));
+    }
+    cases.push(Case::new(
+        "two LUTs",
+        group()
+            .child(lut3d_calls(3, "INTERP_LINEAR", folded))
+            .child(lut3d_calls(5, "INTERP_TETRAHEDRAL", smooth)),
+    ));
+    Cases {
+        cases,
+        bases: Vec::new(),
+    }
+}
+
+/// The `Lut3DTransform` of one entry per side, the default cube (a NaN identity, I-152), for
+/// the forward direction only: its inverse never returns in the wheel (U-65).
+pub(crate) fn lut3d_one_entry() -> Cases {
+    Cases {
+        cases: vec![Case::new(
+            "the default cube of 1 entry",
+            Calls::new("Lut3DTransform").fixed("setGridSize", serde_json::json!(1)),
+        )],
+        bases: Vec::new(),
+    }
+}
+
 /// A `FixedFunctionTransform` of `style` (a `FIXED_FUNCTION_*` name) and `params`: the
 /// binding's constructor of a style without parameters, `ACES_GLOW_03`, which validates, then
 /// `setStyle` and `setParams`, which don't. The ACES 1.3 gamut compression's limits and
@@ -1256,3 +1364,59 @@ fn random_gamut_comp_13_params(n: usize) -> Vec<[f64; 7]> {
         })
         .collect()
 }
+
+/// `BuiltinTransform`: the built-in transforms named, each a case. They have no parameters, so
+/// the battery generates no cases from them.
+pub(crate) fn builtin(styles: &[&str]) -> Cases {
+    let cases = styles
+        .iter()
+        .map(|style| {
+            Case::new(
+                *style,
+                Calls::new("BuiltinTransform").fixed("setStyle", serde_json::json!(style)),
+            )
+        })
+        .collect();
+    Cases {
+        cases,
+        bases: Vec::new(),
+    }
+}
+
+/// The built-in transforms whose ops are ported (WP 3.2e-g): the identity, the ARRI, Panasonic,
+/// RED and Sony cameras, and the ACES and display entries built from Phase 1 ops.
+pub(crate) const BUILTINS_WITH_OPS: &[&str] = &[
+    "IDENTITY",
+    "ARRI_ALEXA-LOGC-EI800-AWG_to_ACES2065-1",
+    "ARRI_LOGC4_to_ACES2065-1",
+    "PANASONIC_VLOG-VGAMUT_to_ACES2065-1",
+    "RED_REDLOGFILM-RWG_to_ACES2065-1",
+    "RED_LOG3G10-RWG_to_ACES2065-1",
+    "SONY_SLOG3-SGAMUT3_to_ACES2065-1",
+    "SONY_SLOG3-SGAMUT3.CINE_to_ACES2065-1",
+    "SONY_SLOG3-SGAMUT3-VENICE_to_ACES2065-1",
+    "SONY_SLOG3-SGAMUT3.CINE-VENICE_to_ACES2065-1",
+    "UTILITY - ACES-AP0_to_CIE-XYZ-D65_BFD",
+    "UTILITY - ACES-AP1_to_CIE-XYZ-D65_BFD",
+    "UTILITY - ACES-AP1_to_LINEAR-REC709_BFD",
+    "CURVE - ACEScct-LOG_to_LINEAR",
+    "ACEScct_to_ACES2065-1",
+    "ACEScg_to_ACES2065-1",
+    "ACESproxy10i_to_ACES2065-1",
+    "ACES-LMT - BLUE_LIGHT_ARTIFACT_FIX",
+    "DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.709",
+    "DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.709 - MIRROR NEGS",
+    "DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.2020",
+    "DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.2020 - MIRROR NEGS",
+    "DISPLAY - CIE-XYZ-D65_to_G2.2-REC.709",
+    "DISPLAY - CIE-XYZ-D65_to_G2.2-REC.709 - MIRROR NEGS",
+    "DISPLAY - CIE-XYZ-D65_to_sRGB",
+    "DISPLAY - CIE-XYZ-D65_to_sRGB - MIRROR NEGS",
+    "DISPLAY - CIE-XYZ-D65_to_G2.6-P3-DCI-BFD",
+    "DISPLAY - CIE-XYZ-D65_to_G2.6-P3-D65",
+    "DISPLAY - CIE-XYZ-D65_to_G2.6-P3-D65 - MIRROR NEGS",
+    "DISPLAY - CIE-XYZ-D65_to_G2.6-P3-D60-BFD",
+    "DISPLAY - CIE-XYZ-D65_to_DCDM-D65",
+    "DISPLAY - CIE-XYZ-D65_to_DisplayP3",
+    "DISPLAY - CIE-XYZ-D65_to_DisplayP3-HDR",
+];

@@ -73,6 +73,7 @@ pub use transforms::log_camera_transform::LogCameraTransform;
 pub use transforms::log_transform::LogTransform;
 pub use transforms::look_transform::LookTransform;
 pub use transforms::lut1d_transform::Lut1DTransform;
+pub use transforms::lut3d_transform::Lut3DTransform;
 pub use transforms::matrix_transform::MatrixTransform;
 pub use transforms::range_transform::{RangeStyle, RangeTransform};
 pub use view_transform::ViewTransform;

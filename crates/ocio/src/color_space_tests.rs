@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Tests of the color space: `tests/cpu/ColorSpace_tests.cpp` @ v2.5.2. The tests that load or
-//! serialize configs come with the YAML reader and writer (WP 3.3j, 3.7b), the processor ones
-//! with Phase 2 and ConfigUtils (Phase 9). The text is compared with the wheel's in
-//! `tests/model_objects_oracle.rs`.
+//! Tests of the color space: `tests/cpu/ColorSpace_tests.cpp` @ v2.5.2, with the two that
+//! serialize configs and don't validate them (WP 3.7b). Those that validate configs come with
+//! WP 3.8, the processor ones with Phase 2 and ConfigUtils (Phase 9). The text is compared
+//! with the wheel's in `tests/model_objects_oracle.rs`.
 
 use super::*;
 use ocio_testkit::upstream::check_throw_what;
@@ -443,4 +443,112 @@ fn unknown_interchange_attrib() {
     // Make sure none of the above was stored.
     let attr_map = cs.interchange_attributes();
     assert_eq!(attr_map.len(), 0);
+}
+
+/// Whether `haystack` holds `needle` (upstream's `std::string::find(...) != npos`).
+fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack.windows(needle.len()).any(|w| w == needle)
+}
+
+/// Port of `OCIO_ADD_TEST(ColorSpace, interop_id_serialization)` @ v2.5.2.
+#[test]
+fn interop_id_serialization() {
+    let _env = crate::test_env::EnvGuard::new();
+    // Test YAML serialization and deserialization of InteropID.
+    let mut cfg = crate::Config::new().unwrap();
+    let mut cs = ColorSpace::new();
+    cs.set_name("test_colorspace");
+
+    let interop_id = "lin_rec709_scene";
+
+    cs.set_interop_id(interop_id).unwrap();
+    cfg.add_color_space(&cs).unwrap();
+
+    // Serialize the Config.
+    let yaml_str = cfg.serialize().unwrap();
+
+    // Verify interop_id appears in YAML.
+    assert!(contains_bytes(&yaml_str, b"interop_id"));
+    assert!(contains_bytes(&yaml_str, interop_id.as_bytes()));
+
+    // Deserialize and verify.
+    let deserialized_cfg = crate::Config::create_from_stream(&yaml_str).unwrap();
+
+    // Verify interop_id is preserved.
+    let deserialized_cs = deserialized_cfg.color_space("test_colorspace").unwrap();
+    assert_eq!(deserialized_cs.interop_id(), interop_id.as_bytes());
+
+    // verify that that versions earlier than 2.0 reject interop_id.
+    let mut cfg_copy = cfg.clone();
+    cfg_copy.set_version(2, 0).unwrap();
+    cfg_copy.serialize().unwrap();
+
+    cfg_copy.set_version(1, 0).unwrap();
+    check_throw_what(
+        cfg_copy.serialize(),
+        "Config failed validation. The color space 'test_colorspace' has non-empty InteropID \
+         and config version is less than 2.0.",
+    );
+
+    // Test with empty interop_id (should not appear in YAML).
+    // (Upstream's null pointer.)
+    cs.set_interop_id("").unwrap();
+    cfg.add_color_space(&cs).unwrap(); // Replace the existing CS.
+    let yaml_str2 = cfg.serialize().unwrap();
+
+    // Verify empty interop_id does not appear in YAML.
+    assert!(!contains_bytes(&yaml_str2, b"interop_id"));
+}
+
+/// Port of `OCIO_ADD_TEST(ColorSpace, icc_profile_name_serialization)` @ v2.5.2.
+#[test]
+fn icc_profile_name_serialization() {
+    let _env = crate::test_env::EnvGuard::new();
+    // Test YAML serialization and deserialization of IccProfileName.
+    let mut cfg = crate::Config::new().unwrap();
+    let mut cs = ColorSpace::new();
+    cs.set_name("test_colorspace");
+
+    let profile_name = "sRGB IEC61966-2.1";
+
+    cs.set_interchange_attribute("icc_profile_name", profile_name)
+        .unwrap();
+    cfg.add_color_space(&cs).unwrap();
+
+    // Serialize the Config.
+    let yaml_str = cfg.serialize().unwrap();
+
+    // Verify IccProfileName appears in YAML.
+    assert!(contains_bytes(&yaml_str, b"icc_profile_name"));
+    assert!(contains_bytes(&yaml_str, profile_name.as_bytes()));
+
+    // Deserialize and verify.
+    let deserialized_cfg = crate::Config::create_from_stream(&yaml_str).unwrap();
+
+    // Verify IccProfileName is preserved.
+    let deserialized_cs = deserialized_cfg.color_space("test_colorspace").unwrap();
+    assert_eq!(
+        deserialized_cs
+            .interchange_attribute("icc_profile_name")
+            .unwrap(),
+        profile_name.as_bytes()
+    );
+
+    // verify that that earlier versions reject icc_profile_name.
+    let mut cfg_copy = cfg.clone();
+    cfg_copy.set_version(2, 4).unwrap();
+    check_throw_what(
+        cfg_copy.serialize(),
+        "has non-empty interchange attributes and config version is less than 2.5.",
+    );
+
+    // Test with empty IccProfileName (should not appear in YAML, and so won't invalidate a 2.4
+    // config). (Upstream's null pointer.)
+    cs.set_interchange_attribute("icc_profile_name", "")
+        .unwrap();
+    cfg.add_color_space(&cs).unwrap(); // replace the existing CS
+    let yaml_str2 = cfg.serialize().unwrap();
+
+    // Verify empty IccProfileName does not appear in YAML.
+    assert!(!contains_bytes(&yaml_str2, b"icc_profile_name"));
 }

@@ -8,9 +8,10 @@
 //! steps, which ask the ops only through [`Op`]'s methods) and `optimizeForBitdepth`, with
 //! `OptimizeSeparablePrefix`, which bakes a prefix of separable ops into a Lut1D for integer
 //! and half input. The steps that act on LUT data match over [`OpData`] without a wildcard:
-//! - `ReplaceInverseLuts` replaces an inverse Lut1D with its fast forward LUT, and
+//! - `ReplaceInverseLuts` replaces an inverse Lut1D or Lut3D with its fast forward LUT, and
 //!   `RemoveInverseOps` replaces a pair of inverse Lut1Ds with the pair's own identity
-//!   replacement (`Lut1DOpData::getPairIdentityReplacement`). The Lut3D arms come with Lut3D.
+//!   replacement (`Lut1DOpData::getPairIdentityReplacement`), a pair of Lut3Ds with the
+//!   first's (`OpData::getIdentityReplacement`).
 
 use crate::bit_depth_utils::is_float_bit_depth;
 use crate::exception::{Exception, Result};
@@ -21,6 +22,8 @@ use crate::open_color_types::{BitDepth, OptimizationFlags, TransformDirection};
 use crate::ops::lut1d::Lut1DOpData;
 use crate::ops::lut1d::lut1d_op::create_lut1d_op;
 use crate::ops::lut1d::lut1d_op_data::make_fast_lut1d_from_inverse;
+use crate::ops::lut3d::lut3d_op::create_lut3d_op;
+use crate::ops::lut3d::lut3d_op_data::make_fast_lut3d_from_inverse;
 use crate::ops::matrix::matrix_op::create_matrix_op;
 use crate::ops::range::range_op::create_range_op;
 
@@ -242,6 +245,7 @@ fn pair_identity_replacement(op1: &Op, op2: &Op) -> Result<Op> {
         | OpData::Range(_)
         | OpData::Exponent(_)
         | OpData::GradingRgbCurve(_)
+        | OpData::Lut3D(_)
         | OpData::Reference(_)
         | OpData::NoOp(_) => op1.get_identity_replacement(),
     }
@@ -369,8 +373,8 @@ fn combine_ops(op_vec: &mut OpVec, o_flags: OptimizationFlags) -> Result<i32> {
 }
 
 /// Replaces each Lut1D or Lut3D evaluated inverse with a faster forward approximation, and
-/// returns how many: an inverse Lut1D becomes its fast forward LUT
-/// ([`make_fast_lut1d_from_inverse`]). The Lut3D arm comes with its variant; no other op is
+/// returns how many: an inverse Lut1D or Lut3D becomes its fast forward LUT
+/// ([`make_fast_lut1d_from_inverse`], [`make_fast_lut3d_from_inverse`]); no other op is
 /// replaced.
 ///
 /// Port of `ReplaceInverseLuts` (src/OpenColorIO/OpOptimizers.cpp:369-408 @ v2.5.2).
@@ -391,7 +395,17 @@ fn replace_inverse_luts(op_vec: &mut OpVec) -> Result<i32> {
                     None
                 }
             }
-            // (The Lut3D arm: an inverse LUT becomes a fast forward one, counted.)
+            OpData::Lut3D(lut_data) => {
+                if lut_data.get_direction() == TransformDirection::Inverse {
+                    let inv_lut_data = make_fast_lut3d_from_inverse(lut_data)?;
+                    let mut tmpops = OpVec::new();
+                    create_lut3d_op(&mut tmpops, inv_lut_data, TransformDirection::Forward);
+                    finalize_ops(&mut tmpops)?;
+                    Some(tmpops[0].clone())
+                } else {
+                    None
+                }
+            }
             OpData::Log(_)
             | OpData::FixedFunction(_)
             | OpData::Cdl(_)
@@ -463,6 +477,7 @@ fn is_forward_lut1d(op: &Op) -> bool {
         | OpData::Range(_)
         | OpData::Exponent(_)
         | OpData::GradingRgbCurve(_)
+        | OpData::Lut3D(_)
         | OpData::Reference(_)
         | OpData::NoOp(_) => false,
     }

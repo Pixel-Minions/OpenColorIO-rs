@@ -228,6 +228,7 @@ fn port_equals(a: &Transform, b: &Transform) -> Option<bool> {
         (Transform::Matrix(a), Transform::Matrix(b)) => Some(a.equals(b)),
         (Transform::Range(a), Transform::Range(b)) => Some(a.equals(b)),
         (Transform::Lut1D(a), Transform::Lut1D(b)) => Some(a.equals(b)),
+        (Transform::Lut3D(a), Transform::Lut3D(b)) => Some(a.equals(b)),
         (Transform::Cdl(a), Transform::Cdl(b)) => Some(a.equals(b)),
         (Transform::Log(a), Transform::Log(b)) => Some(a.equals(b)),
         (Transform::LogAffine(a), Transform::LogAffine(b)) => Some(a.equals(b)),
@@ -683,6 +684,39 @@ pub(crate) fn dump_transform(transform: &Transform) -> (String, BTreeMap<String,
             );
             "Lut1DTransform"
         }
+        Transform::Lut3D(t) => {
+            put("getTransformType", dumped_enum("TRANSFORM_TYPE_LUT3D"));
+            put(
+                "getFileOutputBitDepth",
+                dumped_enum(bit_depth_name(t.file_output_bit_depth())),
+            );
+            put("getFormatMetadata", dump_metadata(t.format_metadata()));
+            put(
+                "getInterpolation",
+                dumped_enum(interpolation_name(t.interpolation())),
+            );
+            put("getGridSize", Dumped::Int(t.grid_size() as i64));
+            // The binding's getData(): the values of each entry, blue fastest, in a flat
+            // float32 array.
+            let n = t.grid_size();
+            let mut values: Vec<f32> = Vec::new();
+            for r in 0..n {
+                for g in 0..n {
+                    for b in 0..n {
+                        values.extend(t.value(r, g, b).expect("an entry"));
+                    }
+                }
+            }
+            put(
+                "getData",
+                Dumped::Array {
+                    dtype: "float32".to_string(),
+                    shape: vec![values.len() as u64],
+                    bytes: values.iter().flat_map(|v| v.to_le_bytes()).collect(),
+                },
+            );
+            "Lut3DTransform"
+        }
         Transform::FixedFunction(t) => {
             put(
                 "getTransformType",
@@ -707,6 +741,22 @@ pub(crate) fn dump_transform(transform: &Transform) -> (String, BTreeMap<String,
 /// ([`port_processors`]): the processors' cache IDs and flags, and every getter, a LUT's values
 /// bit for bit. Returns, per case, how many of its optimized processors hold a Lut1DTransform.
 pub(crate) fn check_optimized_processors(cases: &[Case], depths: &[(Depth, Depth)]) -> Vec<usize> {
+    check_optimized_processors_at(
+        cases,
+        depths,
+        &json!("OPTIMIZATION_DEFAULT"),
+        OptimizationFlags::DEFAULT,
+    )
+}
+
+/// [`check_optimized_processors`] with the optimization flags `flags`, `oracle_flags` as the
+/// oracle names them (a flag's name, or a list of names).
+pub(crate) fn check_optimized_processors_at(
+    cases: &[Case],
+    depths: &[(Depth, Depth)],
+    oracle_flags: &Value,
+    flags: OptimizationFlags,
+) -> Vec<usize> {
     let requests: Vec<(usize, Depth, Depth, ProcessorOpsRequest)> = cases
         .iter()
         .enumerate()
@@ -717,7 +767,7 @@ pub(crate) fn check_optimized_processors(cases: &[Case], depths: &[(Depth, Depth
                 );
                 request.in_bitdepth = Some(input);
                 request.out_bitdepth = Some(output);
-                request.optimization = Some(json!("OPTIMIZATION_DEFAULT"));
+                request.optimization = Some(oracle_flags.clone());
                 (k, input, output, request)
             })
         })
@@ -739,11 +789,7 @@ pub(crate) fn check_optimized_processors(cases: &[Case], depths: &[(Depth, Depth
             &config,
             &case.port,
             TransformDirection::Forward,
-            (
-                port_depth(*input),
-                port_depth(*output),
-                OptimizationFlags::DEFAULT,
-            ),
+            (port_depth(*input), port_depth(*output), flags),
         );
         let outcome = compare_reply(&reply, &port);
         if let Some(failure) = outcome {

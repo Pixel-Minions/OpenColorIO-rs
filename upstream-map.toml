@@ -173,7 +173,7 @@ path = "src/OpenColorIO/Config.cpp"
 kind = "src"
 target = ["crates/ocio/src/config.rs"]
 status = "partial"
-note = "p1-transforms T0: CreateRaw's version and context, getMajorVersion, getMinorVersion, getCurrentContext; p1-transforms-fam2 (1.8d): setMajorVersion, which empties the processor cache (resetCacheIDs); 1.8g: the processor cache, its flags (get/setProcessorCacheFlags, clearProcessorCache, the copy) and getProcessor of a transform (with a context, a direction, or neither), its key and its fallback. p3-config-1 3.4d: Config::Create and Impl's constructor (the environment's active displays, views and inactive color spaces), the state, resetCacheIDs, the copy (createEditableCopy), LookupEnvironment, setMinorVersion, setVersion, name, description, family separator, environment variables and mode, loadEnvironment, search paths, working dir; CreateRaw built directly with its version and its environment (LOAD_ALL); p3-config-1 (C5): CreateRaw starts from Config::Create, so it reads the environment's lists and fails as Create does. p3-config-2: getCurrentContext returns a CurrentContext the config shares, so a context taken earlier sees later changes (owner decision 2026-10-06); a change through it (CurrentContext::update, hidden, for the Python binding, which casts the constness away) is the config's and keeps its processor cache, so getSearchPath, getSearchPath(index) and getWorkingDir return owned bytes. p3-rules 3.9f: getFileRules, setFileRules, getColorSpaceFromFilepath (both), filepathOnlyMatchesDefaultRule, parseColorSpaceFromString, upgradeToLatestVersion (fallible, U-55), isColorSpaceUsed, GetColorSpaceReferences, Impl::getAllInternalTransforms. p3-rules 3.9g: getViewingRules, setViewingRules. p3-rules: getFileRules and getViewingRules return a ConfigRules the config shares (owner decision 2026-10-07), whose hidden update, for the Python binding, changes the config's rules without emptying its processor cache; setFileRules and setViewingRules give the config new rules, and the upgrade changes them in place. p3-config-2 3.4h: the displays and views (3332-3815, 4388-4446: isViewShared, addSharedView, removeSharedView, clearSharedViews, getDefaultDisplay, getNumDisplays, getDisplay, getDefaultView both ways, getNumViews and getView by display, by color space and by type, AreViewsEqual, getDisplayView*, hasView, addDisplaySharedView, addDisplayView both ways, removeDisplayView, clearDisplays), GetViewNames, Impl::getViews, getView, getActiveViews, getFilteredViews (p3-rules 3.9g: its viewing-rule branch, docs/improvements.md I-136), updateDisplayCache; CreateRaw's display. p3-config-2 3.4i: the virtual display (3816-4102: hasVirtualView, isVirtualViewShared, addVirtualDisplayView, addVirtualDisplaySharedView, getVirtualDisplayNumViews, getVirtualDisplayView, AreVirtualViewsEqual, getVirtualDisplayView*, removeVirtualDisplayView, clearVirtualDisplay), the active displays and views (4133-4331), getNumDisplaysAll, getDisplayAll, getDisplayAllByName, isDisplayTemporary, setDisplayTemporary; instantiateDisplayFromMonitorName and instantiateDisplayFromICCProfile check their argument, then are not ported yet (SystemMonitor, Phase 9; the ICC reader, WP 4.7), with Impl::instantiateDisplay. p3-config-2 3.4j: the named transforms (3065-3325: getNumNamedTransforms, getNamedTransformNameByIndex both ways, getNamedTransform, getIndexForNamedTransform, addNamedTransform, removeNamedTransform with its early return (docs/improvements.md I-132), clearNamedTransforms), the looks (4473-4528, Impl::getLook), the view transforms and the default one (4532-4639, Impl::getViewTransform). p3-config-1 3.4f: the color spaces (getColorSpaces by category, getNumColorSpaces and getColorSpaceNameByIndex by reference type and visibility, getColorSpace, getCanonicalName, getIndexForColorSpace, addColorSpace, removeColorSpace, clearColorSpaces), the roles (setRole, getNumRoles, hasRole, getRoleName, getRoleColorSpace both ways), LookupRole, MatchReferenceType, Impl::getColorSpace, Impl::getNamedTransform and getNamedTransformIndex, buildInactiveNamesList and refreshActiveColorSpaces (5351-5460); CreateRaw's color space and role. p3-config-1 3.4g: setInactiveColorSpaces (Impl's too), getInactiveColorSpaces, isInactiveColorSpace, isStrictParsingEnabled, setStrictParsingEnabled, getDefaultLumaCoefs, setDefaultLumaCoefs, isColorSpaceLinear and Impl::getProcessorWithoutCaching; CreateRaw's strict parsing. Later: Impl::hasColorSpace and buildInactiveNamesList's INACTIVE_ALL with validate (3.8a); GetFileReferences with getCacheID (3.7d); getProcessor's context-variables branch is a not-ported error until 3.2d, then usedContext->getCacheID() in the key; the key ignores the cache flags, a candidate I- entry once ExposureContrastTransform (dynamic properties) lands"
+note = "p1-transforms T0: CreateRaw's version and context, getMajorVersion, getMinorVersion, getCurrentContext; p1-transforms-fam2 (1.8d): setMajorVersion, which empties the processor cache (resetCacheIDs); 1.8g: the processor cache, its flags (get/setProcessorCacheFlags, clearProcessorCache, the copy) and getProcessor of a transform (with a context, a direction, or neither), its key and its fallback. p3-config-1 3.4d: Config::Create and Impl's constructor (the environment's active displays, views and inactive color spaces), the state, resetCacheIDs, the copy (createEditableCopy), LookupEnvironment, setMinorVersion, setVersion, name, description, family separator, environment variables and mode, loadEnvironment, search paths, working dir; CreateRaw built directly with its version and its environment (LOAD_ALL); p3-config-1 (C5): CreateRaw starts from Config::Create, so it reads the environment's lists and fails as Create does. p3-config-2: getCurrentContext returns a CurrentContext the config shares, so a context taken earlier sees later changes (owner decision 2026-10-06); a change through it (CurrentContext::update, hidden, for the Python binding, which casts the constness away) is the config's and keeps its processor cache, so getSearchPath, getSearchPath(index) and getWorkingDir return owned bytes. p3-rules 3.9f: getFileRules, setFileRules, getColorSpaceFromFilepath (both), filepathOnlyMatchesDefaultRule, parseColorSpaceFromString, upgradeToLatestVersion (fallible, U-55), isColorSpaceUsed, GetColorSpaceReferences, Impl::getAllInternalTransforms. p3-rules 3.9g: getViewingRules, setViewingRules. p3-rules: getFileRules and getViewingRules return a ConfigRules the config shares (owner decision 2026-10-07), whose hidden update, for the Python binding, changes the config's rules without emptying its processor cache; setFileRules and setViewingRules give the config new rules, and the upgrade changes them in place. p3-config-2 3.4h: the displays and views (3332-3815, 4388-4446: isViewShared, addSharedView, removeSharedView, clearSharedViews, getDefaultDisplay, getNumDisplays, getDisplay, getDefaultView both ways, getNumViews and getView by display, by color space and by type, AreViewsEqual, getDisplayView*, hasView, addDisplaySharedView, addDisplayView both ways, removeDisplayView, clearDisplays), GetViewNames, Impl::getViews, getView, getActiveViews, getFilteredViews (p3-rules 3.9g: its viewing-rule branch, docs/improvements.md I-136), updateDisplayCache; CreateRaw's display. p3-config-2 3.4i: the virtual display (3816-4102: hasVirtualView, isVirtualViewShared, addVirtualDisplayView, addVirtualDisplaySharedView, getVirtualDisplayNumViews, getVirtualDisplayView, AreVirtualViewsEqual, getVirtualDisplayView*, removeVirtualDisplayView, clearVirtualDisplay), the active displays and views (4133-4331), getNumDisplaysAll, getDisplayAll, getDisplayAllByName, isDisplayTemporary, setDisplayTemporary; instantiateDisplayFromMonitorName and instantiateDisplayFromICCProfile check their argument, then are not ported yet (SystemMonitor, Phase 9; the ICC reader, WP 4.7), with Impl::instantiateDisplay. p3-config-2 3.4j: the named transforms (3065-3325: getNumNamedTransforms, getNamedTransformNameByIndex both ways, getNamedTransform, getIndexForNamedTransform, addNamedTransform, removeNamedTransform with its early return (docs/improvements.md I-132), clearNamedTransforms), the looks (4473-4528, Impl::getLook), the view transforms and the default one (4532-4639, Impl::getViewTransform). p3-config-1 3.4f: the color spaces (getColorSpaces by category, getNumColorSpaces and getColorSpaceNameByIndex by reference type and visibility, getColorSpace, getCanonicalName, getIndexForColorSpace, addColorSpace, removeColorSpace, clearColorSpaces), the roles (setRole, getNumRoles, hasRole, getRoleName, getRoleColorSpace both ways), LookupRole, MatchReferenceType, Impl::getColorSpace, Impl::getNamedTransform and getNamedTransformIndex, buildInactiveNamesList and refreshActiveColorSpaces (5351-5460); CreateRaw's color space and role. p3-config-1 3.4g: setInactiveColorSpaces (Impl's too), getInactiveColorSpaces, isInactiveColorSpace, isStrictParsingEnabled, setStrictParsingEnabled, getDefaultLumaCoefs, setDefaultLumaCoefs, isColorSpaceLinear and Impl::getProcessorWithoutCaching; CreateRaw's strict parsing. Later: Impl::hasColorSpace and buildInactiveNamesList's INACTIVE_ALL with validate (3.8a); getProcessor's context-variables branch is a not-ported error until 3.2d, then usedContext->getCacheID() in the key; the key ignores the cache flags, a candidate I- entry once ExposureContrastTransform (dynamic properties) lands. p3-yaml-load-2 3.3l-m: CreateFromStream (1209-1212) and Impl::Read from a stream (5548-5562); checkVersionConsistency, both overloads (5586-5993, pulled forward from 3.8c; its ExposureContrast and grading arms come with those classes in Phase 5); the card's note on a 3-byte file `00 00 FE` (it loads as an empty document through CreateFromFile on Windows, MSVC filebuf putback after EOF, but fails through a stream) goes with CreateFromFile (3.10b), as the port reads only streams until then"
 
 [[file]]
 path = "src/OpenColorIO/ConfigUtils.cpp"
@@ -440,7 +440,7 @@ path = "src/OpenColorIO/OCIOYaml.cpp"
 kind = "src"
 target = ["crates/ocio/src/ocio_yaml.rs"]
 status = "partial"
-note = "p3-yaml-load-1 3.3g: the typed loaders of double, string and vector<double> (82-112, 146-160), the TransformDirection loader (189-194), LogUnknownKeyWarning (235-257), throwError and throwValueError (259-283), CheckDuplicates (301-321), the Log, Matrix and Range loaders (2877-2923, 3002-3057, 3091-3151) and the transform dispatch (3196-3351), which gives a not-ported-yet error for the other classes; 3.3h: the vector<float> and Allocation loaders (130-144, 176-181), the Allocation, CDL, Exponent, ExponentWithLinear, LogAffine and LogCamera loaders (537-575, 646-726, 917-977, 1018-1140, 2614-2685, 2740-2834) and loadLogParam (2584-2612); 3.3h2: the GroupTransform loader (2507-2556), iterative, with a depth limit (U-60); 3.3i: the bool and Interpolation loaders (66-80, 201-206), the Builtin, ColorSpace, DisplayView, File and Look transform loaders (600-629, 778-819, 840-891, 1336-1382, 2946-2987); 3.3i2: the FixedFunctionTransform loader (1421-1483)"
+note = "p3-yaml-load-1 3.3g: the typed loaders of double, string and vector<double> (82-112, 146-160), the TransformDirection loader (189-194), LogUnknownKeyWarning (235-257), throwError and throwValueError (259-283), CheckDuplicates (301-321), the Log, Matrix and Range loaders (2877-2923, 3002-3057, 3091-3151) and the transform dispatch (3196-3351), which gives a not-ported-yet error for the other classes; 3.3h: the vector<float> and Allocation loaders (130-144, 176-181), the Allocation, CDL, Exponent, ExponentWithLinear, LogAffine and LogCamera loaders (537-575, 646-726, 917-977, 1018-1140, 2614-2685, 2740-2834) and loadLogParam (2584-2612); 3.3h2: the GroupTransform loader (2507-2556), iterative, with a depth limit (U-60); 3.3i: the bool and Interpolation loaders (66-80, 201-206), the Builtin, ColorSpace, DisplayView, File and Look transform loaders (600-629, 778-819, 840-891, 1336-1382, 2946-2987); 3.3i2: the FixedFunctionTransform loader (1421-1483); p3-yaml-load-2 3.3j: SanitizeNewlines (37-62), the StringVec and BitDepth loaders (114-128, 164-169), loadDescription (213-217), loadCustomKeys and loadInterchangeAttributes (325-346, 375-404), the ColorSpace, Look, ViewTransform (with peekViewTransformReferenceSpace) and NamedTransform loaders (3424-3572, 3667-3719, 3750-3879, 3927-4006); 3.3k: the View loader (409-478), the FileRules and ViewingRules loaders (4072-4204, 4251-4338); 3.3l-m: the Config loader (4398-5031) and OCIOYaml::Read (5420-5439); p3-yaml-save 3.7a: the Allocation, TransformDirection and Interpolation savers (183-186, 196-199, 208-211), EmitBaseTransformKeyValues and EmitTransformName (509-533), the savers of the Allocation, Builtin, CDL, ColorSpace, DisplayView, Exponent, ExponentWithLinear, File, FixedFunction, Group, LogAffine (with saveLogParam), LogCamera, Log, Look, Matrix and Range transforms (577-596, 631-642, 728-774, 821-836, 893-913, 979-1014, 1142-1190, 1384-1417, 1485-1517, 2558-2580, 2687-2736, 2836-2873, 2925-2942, 2989-2998, 3059-3087, 3153-3192) and the transform dispatch (3353-3420); 3.7b: the BitDepth saver (171-174), saveDescription (219-233), saveInterchangeAttributes (350-373), the View, ColorSpace, Look, ViewTransform, NamedTransform, FileRules and ViewingRules savers (480-505, 3576-3663, 3721-3746, 3881-3923, 4008-4068, 4206-4247, 4340-4393); 3.7c: the Config saver (5033-5414) and OCIOYaml::Write (5441-5448)"
 
 [[file]]
 path = "src/OpenColorIO/OCIOYaml.h"
@@ -486,7 +486,7 @@ path = "src/OpenColorIO/OpOptimizers.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/op_optimizers.rs"]
 status = "partial"
-note = "1.2c: FinalizeOps (132-139) and OpRcPtrVec::finalize (598-609); 1.2d (the owner's Option A): the optimizer's core, optimize (the pass loop, RemoveNoOpTypes, RemoveDynamicProperties, RemoveNoOps, ReplaceOps, ReplaceIdentityOps, RemoveInverseOps, CombineOps, IsPairInverseEnabled, IsCombineEnabled, the debug log) and optimizeForBitdepth (the clamp identities, FindSeparablePrefix). p1-optimizer B: the Lut1D arms of ReplaceInverseLuts and RemoveInverseOps (errors until Phase 2's inverse 1D LUT) and FindSeparablePrefix; p2-lut1d-inv 2.1g: ReplaceInverseLuts' Lut1D arm (MakeFastLut1DFromInverse); 2.5a: RemoveInverseOps' Lut1D pair (249-276); p1-optimizer D: OptimizeSeparablePrefix, the Lut1D bake, entry for entry against the wheel (tests/lut1d_bake_oracle.rs). Not yet: the Lut3D arms (Phase 2); upstream's prefix tests that need CDL, gamma or files come when those families converge"
+note = "1.2c: FinalizeOps (132-139) and OpRcPtrVec::finalize (598-609); 1.2d (the owner's Option A): the optimizer's core, optimize (the pass loop, RemoveNoOpTypes, RemoveDynamicProperties, RemoveNoOps, ReplaceOps, ReplaceIdentityOps, RemoveInverseOps, CombineOps, IsPairInverseEnabled, IsCombineEnabled, the debug log) and optimizeForBitdepth (the clamp identities, FindSeparablePrefix). p1-optimizer B: the Lut1D arms of ReplaceInverseLuts and RemoveInverseOps (errors until Phase 2's inverse 1D LUT) and FindSeparablePrefix; p2-lut1d-inv 2.1g: ReplaceInverseLuts' Lut1D arm (MakeFastLut1DFromInverse); 2.5a: RemoveInverseOps' Lut1D pair (249-276); p1-optimizer D: OptimizeSeparablePrefix, the Lut1D bake, entry for entry against the wheel (tests/lut1d_bake_oracle.rs). p2-lut3d 2.2b: the Lut3D arms of RemoveInverseOps and CombineOps (pair identity, combine flags); p2-lut3d-inv 2.2e: ReplaceInverseLuts' Lut3D arm (393-405). Not yet: upstream's prefix tests that need CDL, gamma or files come when those families converge"
 
 [[file]]
 path = "src/OpenColorIO/ParseUtils.cpp"
@@ -1739,9 +1739,9 @@ note = "S2: GetLinearSlope, GetLogSideBreak (Windows and Linux variants), GetLin
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOp.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op.rs", "crates/ocio/src/transforms/lut1d_transform.rs"]
+target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op.rs", "crates/ocio/src/transforms/lut1d_transform.rs", "crates/ocio-gpu/src/ops/lut1d/lut1d_op_gpu.rs"]
 status = "partial"
-note = "p1-optimizer B: Lut1DOp (clone, getInfo, isSameType, isInverse, canCombineWith, hasChannelCrosstalk, finalize, getCacheID, supportedByLegacyShader), CreateLut1DOp, GenerateIdentityLut1D; cache IDs and the optimizer's Lut1D rules against the wheel (tests/lut1d_op_oracle.rs). p2-lut1d-inv 2.1g: combineWith (Compose); p2-lut1d-fwd 2.1a: getCPUOp (GetLut1DRenderer, F32 to F32); p1-transforms-fam4: CreateLut1DTransform and BuildLut1DOp, in crates/ocio/src/transforms/lut1d_transform.rs. extractGpuShaderInfo and GenerateLinearScaleLut1D come later"
+note = "p1-optimizer B: Lut1DOp (clone, getInfo, isSameType, isInverse, canCombineWith, hasChannelCrosstalk, finalize, getCacheID, supportedByLegacyShader), CreateLut1DOp, GenerateIdentityLut1D; cache IDs and the optimizer's Lut1D rules against the wheel (tests/lut1d_op_oracle.rs). p2-lut1d-inv 2.1g: combineWith (Compose); p2-lut1d-fwd 2.1a: getCPUOp (GetLut1DRenderer, F32 to F32); p1-transforms-fam4: CreateLut1DTransform and BuildLut1DOp, in crates/ocio/src/transforms/lut1d_transform.rs. p2-lut1d-gpu 2.1h: extractGpuShaderInfo (an inverse LUT made fast, I-137), in crates/ocio-gpu/src/ops/lut1d/lut1d_op_gpu.rs. GenerateLinearScaleLut1D comes with the file formats (Phase 4)"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOp.h"
@@ -1838,39 +1838,43 @@ note = "p1-optimizer A: the forward data; p2-lut1d-inv 2.1e: ComponentProperties
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpGPU.cpp"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/lut1d/lut1d_op_gpu.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut1d-gpu 2.1h: CreatePaddedLutChannels, CreatePaddedRedChannel, GetLut1DGPUShaderProgram; a LUT that doesn't fit its texture width is refused (docs/improvements.md U-5)"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOpGPU.h"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/lut1d/lut1d_op_gpu.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut1d-gpu 2.1h"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut3d 2.2b: GenerateIdentityLut3D, Get3DLutEdgeLenFromNumPixels, Lut3DOp (clone, getInfo, isSameType, isInverse, canCombineWith, hasChannelCrosstalk, getCacheID, getCPUOp, supportedByLegacyShader), CreateLut3DOp, the OpData::Lut3D arms. 2.2c: CreateLut3DTransform and BuildLut3DOp, in crates/ocio/src/transforms/lut3d_transform.rs. p2-lut3d-inv 2.2e: combineWith; 2.2f: extractGpuShaderInfo, in crates/ocio-gpu/src/ops/lut3d/lut3d_op_gpu.rs"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOp.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut3d 2.2b: GetLut3DIndex_RedFast, GetLut3DIndex_BlueFast, Lut3DOrder, the functions of Lut3DOp.cpp; 2.2c: CreateLut3DTransform"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu.rs"]
-status = "partial"
-note = "S4: forward renderers (dispatch, generic tetrahedral, SSE2 and generic trilinear), bit-identical to the wheel on Windows and Rocky 9 for sizes 2-129; InvLut3DRenderer not ported"
+target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu.rs", "crates/ocio-ops/src/ops/lut3d/inv_lut3d.rs"]
+status = "done"
+note = "S4: forward renderers (dispatch, generic tetrahedral, SSE2 and generic trilinear), bit-identical to the wheel on Windows and Rocky 9 for sizes 2-129. p2-lut3d 2.2b: the forward renderers as the op's CpuOp, GetLut3DRenderer. p2-lut3d-inv 2.2d1: InvLut3DRenderer's RangeTree (78-196, 1080-1388) in inv_lut3d.rs; 2.2d2: invert_hypercube, extrapolate, InvLut3DRenderer (822-1078, 1424-1734) in inv_lut3d.rs, GetLut3DRenderer's inverse arm. A grid size of 1 is refused (U-65, upstream never returns)"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu.rs"]
-status = "partial"
-note = "S4: GetLut3DRenderer covers forward LUTs only"
+status = "done"
+note = "S4, p2-lut3d 2.2b: GetLut3DRenderer; p2-lut3d-inv 2.2d2: its inverse arm"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpCPU_AVX.cpp"
@@ -1932,27 +1936,29 @@ note = "S4"
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpData.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs"]
-status = "partial"
-note = "S4: array (identity fill, size limit), interpolation and GetConcreteInterpolation; not composition, inversion, validation or cache IDs"
+status = "done"
+note = "S4: array (identity fill, size limit), interpolation and GetConcreteInterpolation. p2-lut3d 2.2a: Lut3DArray on ArrayT (resize, getNumValues, getRGB, setRGB, scale), the constructors, setArrayFromRedFastestOrder, IsValidInterpolation, validate, isNoOp, isIdentity, getIdentityReplacement, equals, clone, isInverse, inverse, getCacheID, scale, operator==. p2-lut3d-inv 2.2e: Compose and MakeFastLut3DFromInverse (20-153)"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpData.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs"]
 status = "partial"
-note = "S4: see Lut3DOpData.cpp"
+note = "S4, p2-lut3d 2.2a: see Lut3DOpData.cpp; Compose and MakeFastLut3DFromInverse come with 2.2e"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpGPU.cpp"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/lut3d/lut3d_op_gpu.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut3d-inv 2.2f: GetLut3DGPUShaderProgram, and Lut3DOp::extractGpuShaderInfo (an inverse LUT as its fast forward LUT)"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpGPU.h"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/lut3d/lut3d_op_gpu.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut3d-inv 2.2f: GetLut3DGPUShaderProgram, and Lut3DOp::extractGpuShaderInfo (an inverse LUT as its fast forward LUT)"
 
 [[file]]
 path = "src/OpenColorIO/ops/matrix/MatrixOp.cpp"
@@ -2349,13 +2355,15 @@ note = "p1-transforms-fam4: Lut1DTransformImpl, as the struct Lut1DTransform"
 path = "src/OpenColorIO/transforms/Lut3DTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/lut3d_transform.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut3d 2.2c: the transform, its text, validation, equality and setters; CreateLut3DTransform and BuildLut3DOp (Lut3DOp.cpp) in the same file"
 
 [[file]]
 path = "src/OpenColorIO/transforms/Lut3DTransform.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/lut3d_transform.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut3d 2.2c"
 
 [[file]]
 path = "src/OpenColorIO/transforms/MatrixTransform.cpp"
@@ -2390,7 +2398,7 @@ path = "src/OpenColorIO/transforms/builtins/ACES.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/aces.rs"]
 status = "partial"
-note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (576-1437), the ACES 2.0 table's names (1122-1419); the ops come with 3.2g and p3-after-p2"
+note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (576-1437), the ACES 2.0 table's names (1122-1419); p3-builtins 3.2g: AP1_to_CIE_XYZ_D65 (30-35), ACEScct_to_LINEAR (40-55) and the ops of the 8 entries built from Matrix, Log and Range ops (579-634, 691-715, 762-773), through the battery (tests/api_battery_oracle.rs); the LUT, fixed-function and output-transform entries come with p3-after-p2"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/ACES.h"
@@ -2415,21 +2423,22 @@ status = "todo"
 path = "src/OpenColorIO/transforms/builtins/ArriCameras.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/arri_cameras.rs"]
-status = "partial"
-note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (75-108); the ops come with 3.2f"
+status = "done"
+note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (75-108); p3-builtins 3.2f: the primaries, the log curves and the op creators, through the battery (tests/api_battery_oracle.rs)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/ArriCameras.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/arri_cameras.rs"]
-status = "todo"
+status = "done"
+note = "p3-builtins 3.2f: RegisterAll"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/BuiltinTransformRegistry.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/builtin_transform_registry.rs"]
-status = "partial"
-note = "p3-transforms (3.1b): Get, addBuiltin, the getters, createOps, registerAll and CreateBuiltinTransformOps; the identity's op (CreateIdentityMatrixOp) comes with 3.2e"
+status = "done"
+note = "p3-transforms (3.1b): Get, addBuiltin, the getters, createOps, registerAll and CreateBuiltinTransformOps; p3-builtins 3.2e: the identity's op (CreateIdentityMatrixOp), through the battery (tests/api_battery_oracle.rs)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/BuiltinTransformRegistry.h"
@@ -2470,7 +2479,7 @@ path = "src/OpenColorIO/transforms/builtins/Displays.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/displays.rs"]
 status = "partial"
-note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (177-556); the ops come with 3.2g and p3-after-p2"
+note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (177-556); p3-builtins 3.2g: the ops of the 15 SDR displays (Matrix or Scale then Gamma ops, 182-429), through the battery (tests/api_battery_oracle.rs); the PQ and HLG entries come with p3-after-p2"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/Displays.h"
@@ -2483,6 +2492,7 @@ path = "src/OpenColorIO/transforms/builtins/OpHelpers.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/op_helpers.rs"]
 status = "todo"
+note = "p3-builtins: comes with its first callers, the LUT entries of p3-after-p2 (the inverse 1D LUT renderers are Phase 2's 2.1f), so it lands with the tests that exercise it"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/OpHelpers.h"
@@ -2494,40 +2504,43 @@ status = "todo"
 path = "src/OpenColorIO/transforms/builtins/PanasonicCameras.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/panasonic_cameras.rs"]
-status = "partial"
-note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (58-75); the ops come with 3.2f"
+status = "done"
+note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (58-75); p3-builtins 3.2f: the primaries, the log curves and the op creators, through the battery (tests/api_battery_oracle.rs)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/PanasonicCameras.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/panasonic_cameras.rs"]
-status = "todo"
+status = "done"
+note = "p3-builtins 3.2f: RegisterAll"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/RedCameras.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/red_cameras.rs"]
-status = "partial"
-note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (77-113); the ops come with 3.2f"
+status = "done"
+note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (77-113); p3-builtins 3.2f: the primaries, the log curves and the op creators, through the battery (tests/api_battery_oracle.rs)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/RedCameras.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/red_cameras.rs"]
-status = "todo"
+status = "done"
+note = "p3-builtins 3.2f: RegisterAll"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/SonyCameras.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/sony_cameras.rs"]
-status = "partial"
-note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (64-143); the ops come with 3.2f"
+status = "done"
+note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (64-143); p3-builtins 3.2f: the primaries, the log curves and the op creators, through the battery (tests/api_battery_oracle.rs)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/SonyCameras.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/sony_cameras.rs"]
-status = "todo"
+status = "done"
+note = "p3-builtins 3.2f: RegisterAll"
 
 [[file]]
 path = "src/apps/CMakeLists.txt"
@@ -4241,7 +4254,7 @@ path = "tests/cpu/ColorSpace_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/color_space_tests.rs"]
 status = "partial"
-note = "p3-model-objects (3.4a): basic, alias, category, interop_id, amf_transform_ids, icc_profile_name, unknown_interchange_attrib; color_space_serialize, interop_id_serialization, icc_profile_name_serialization come with 3.7b, use_alias with 3.3j, is_colorspace_linear with p3-after-p2 (Lut3D), the two processor_to_known_colorspace tests with ConfigUtils (Phase 9)"
+note = "p3-model-objects (3.4a): basic, alias, category, interop_id, amf_transform_ids, icc_profile_name, unknown_interchange_attrib; interop_id_serialization and icc_profile_name_serialization with p3-yaml-save (3.7b), color_space_serialize (it validates) with 3.8b, use_alias (Config, use_alias) reads its config with 3.3j but validates it: with 3.8b; is_colorspace_linear with p3-after-p2 (Lut3D), the two processor_to_known_colorspace tests with ConfigUtils (Phase 9)"
 
 [[file]]
 path = "tests/cpu/ConfigUtils_tests.cpp"
@@ -4253,8 +4266,8 @@ status = "todo"
 path = "tests/cpu/Config_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/config_tests.rs"]
-status = "todo"
-note = "p1-transforms-fam2 (1.8d): the setMajorVersion checks of version (2065-2067, 2104-2107); p3-config-1 3.4d: version's setMinorVersion and setVersion checks (2065-2107) and family_separator's API checks (7486-7500), on configs made without YAML, without the markers; the tests need configs read from YAML (Phase 3)"
+status = "partial"
+note = "p1-transforms-fam2 (1.8d): the setMajorVersion checks of version (2065-2067, 2104-2107); p3-config-1 3.4d: version's setMinorVersion and setVersion checks (2065-2107) and family_separator's API checks (7486-7500), on configs made without YAML, without the markers; the tests need configs read from YAML (Phase 3). p3-yaml-load-2 3.3l-m: group A (roles, colorspace_duplicate, cdltransform_duplicate, searchpath_duplicate, key_value_error, unknown_key_error, faulty_config_file, display_color_spaces_errors); view, completed with its serialization checks in p3-yaml-save. p3-yaml-save 3.7: group C's serialize_group_transform, serialize_searchpath, serialize_environment, active_displayview_lists, file_transform_serialization_v1, transform_versions, description_and_name; internal_raw_profile (3.7d); the rest of group C validates (3.8)"
 
 [[file]]
 path = "tests/cpu/ContextVariableUtils_tests.cpp"
@@ -4295,7 +4308,7 @@ path = "tests/cpu/FileRules_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/file_rules_tests.rs"]
 status = "partial"
-note = "p3-rules 3.9f: config_read_only, config_insert_rule, pattern_error, with_defaults, extension_error, clone, isDefault. The others read YAML (3.3k), serialize (3.7b) or validate (3.8b)"
+note = "p3-rules 3.9f: config_read_only, config_insert_rule, pattern_error, with_defaults, extension_error, clone, isDefault. p3-yaml-load-2 3.3k: rules_filepattern, rules_regex, rules_long_filepattern, rules_test, rules_priority, config_no_default, config_default_missmatch, config_default_no_colorspace, config_no_default_rule, config_filerule_no_colorspace, config_v1_faulty, config_v2_wrong_rule. p3-yaml-save (3.7b): config_rule_customkeys, config_rule_u8. The other serializing tests (config_v1, multiple_rules, read_write_incomplete_configs) validate too (3.8b) or validate (3.8b: rule_invalid, config_no_default_role, config_v1_to_v2_from_file, config_v1_to_v2_from_memory, rule_move)"
 
 [[file]]
 path = "tests/cpu/GpuShaderUtils_tests.cpp"
@@ -4335,7 +4348,7 @@ path = "tests/cpu/NamedTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/named_transform_tests.rs"]
 status = "todo"
-note = "basic and alias add named transforms to a config (3.4j) and call NamedTransform::GetTransform (3.2a): they move to p3-config-2; p3-model-objects (3.4c) checks their parts without a config in named_transform_tests.rs. The others: static_get_transform (3.2a), the Config tests (3.2d, 3.3j, 3.8b)"
+note = "basic and alias add named transforms to a config (3.4j) and call NamedTransform::GetTransform (3.2a): they move to p3-config-2; p3-model-objects (3.4c) checks their parts without a config in named_transform_tests.rs. The others: static_get_transform (3.2a), the Config tests (3.2d, 3.8b); named_transform_io reads its configs with 3.3j but validates and serializes them: with the later of 3.7b and 3.8b"
 
 [[file]]
 path = "tests/cpu/OCIOZArchive_tests.cpp"
@@ -4463,7 +4476,7 @@ path = "tests/cpu/ViewingRules_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/viewing_rules_tests.rs"]
 status = "partial"
-note = "p3-rules 3.9g: basic. config_io and filtered_views read YAML (3.3k)"
+note = "p3-rules 3.9g: basic. config_io and filtered_views read YAML, but also validate (3.8b) and serialize (3.7b): with the later of the two"
 
 [[file]]
 path = "tests/cpu/apphelpers/CategoryHelpers_tests.cpp"
@@ -4887,7 +4900,8 @@ note = "get_lut_ideal_size, constructor, accessors, is_identity, clone, equality
 path = "tests/cpu/ops/lut1d/Lut1DOpGPU_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-gpu/src/ops/lut1d/lut1d_op_gpu_tests.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut1d-gpu 2.1h: pad_lut_one_dimension, pad_lut_two_dimension_1, pad_lut_two_dimension_2"
 
 [[file]]
 path = "tests/cpu/ops/lut1d/Lut1DOp_tests.cpp"
@@ -4907,13 +4921,15 @@ note = "S4: both tests, each run in every SIMD mode the CPU supports"
 path = "tests/cpu/ops/lut3d/Lut3DOpData_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_data_tests.rs"]
-status = "todo"
+status = "partial"
+note = "p2-lut3d 2.2a: empty, accessors, clone, not_supported_length, equality, interpolation, is_inverse. compose_inverse_luts comes with 2.2e; compose, compose_2 and inv_lut3d_lut_size read files (Phase 4)"
 
 [[file]]
 path = "tests/cpu/ops/lut3d/Lut3DOp_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_tests.rs"]
-status = "todo"
+target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_tests.rs", "crates/ocio/src/transforms/lut3d_transform_tests.rs"]
+status = "partial"
+note = "p2-lut3d 2.2b: inverse_comparison_check, GenerateIdentityLut3D throw_lut, Lut3DOpData create_op, cache_id, edge_len_from_num_pixels, Lut3DOpStruct lut3d_order, Lut3DOpData lut_order, lut_combine, cpu_renderer_lut3d. 2.2c: Lut3D create_transform and Lut3DTransform build_op, in crates/ocio/src/transforms/lut3d_transform_tests.rs; cpu_renderer_cloned, cpu_renderer_inverse and cpu_renderer_lut3d_with_nan read files (Phase 4); performance_check is commented out upstream"
 
 [[file]]
 path = "tests/cpu/ops/matrix/MatrixOpCPU_tests.cpp"
@@ -5105,7 +5121,8 @@ note = "p1-transforms-fam4: basic, create_with_parameters, hue_adjust, format_me
 path = "tests/cpu/transforms/Lut3DTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/lut3d_transform_tests.rs"]
-status = "todo"
+status = "done"
+note = "p2-lut3d 2.2c: basic, create_with_parameters"
 
 [[file]]
 path = "tests/cpu/transforms/MatrixTransform_tests.cpp"
@@ -5126,7 +5143,7 @@ path = "tests/cpu/transforms/builtins/BuiltinTransformRegistry_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/builtins/builtin_transform_registry_tests.rs"]
 status = "partial"
-note = "p3-transforms (3.1b): basic; aces builds the ops of IDENTITY, an ACES matrix and ACEScct (3.2e, 3.2g), read_write every entry's processor (p3-after-p2), the version_*_validation tests come with 3.8c"
+note = "p3-transforms (3.1b): basic; aces builds the ops of IDENTITY, an ACES matrix and ACEScct (3.2e, 3.2g), read_write every entry's processor (p3-after-p2), the version_*_validation tests with p3-yaml-load-2 (checkVersionConsistency, pulled forward from 3.8c)"
 
 [[file]]
 path = "tests/gpu/CDLOp_test.cpp"

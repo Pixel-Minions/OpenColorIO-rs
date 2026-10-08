@@ -1048,6 +1048,13 @@ fn lut1d_transform_matches_the_wheel_at_every_format_and_level() {
     });
 }
 
+/// The cube of one entry is the API battery's (`api_battery_oracle.rs`), forward only: its
+/// inverse never returns in the wheel (U-65).
+#[test]
+fn lut3d_transform_matches_the_wheel_at_every_format_and_level() {
+    check(&Class::new("Lut3DTransform", api_cases::lut3d()));
+}
+
 #[test]
 fn fixed_function_transform_matches_the_wheel_at_every_format_and_level() {
     check(&Class::new(

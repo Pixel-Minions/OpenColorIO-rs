@@ -6,140 +6,71 @@
 //! keys, special floats and precision edges.
 //!
 //! The oracle builds each config through the Python API (`ocio_oracle/text.py`
-//! `serialize_built_config`) and returns `serialize()`. The test reads that text into a tree and
-//! writes it again with the calls OCIO makes (`common::ocio_writer`), giving the emitter the
-//! exact numbers of the spec, and the output must equal OCIO's byte for byte.
-//!
-//! Texts that can't be read back into the strings the config held (flow-map long keys,
-//! noncharacters in quoted and literal scalars, literal blocks with a CR or a leading space)
-//! are replayed by substitution: the tree comes from the same config with placeholders
-//! (`placeholder.ocio`), and the writer puts the strings back.
+//! `serialize_built_config`) and returns `serialize()`; the port builds the same config
+//! through its API with the same calls (`common::built_config`) and serializes it
+//! (`Config::serialize`), and the texts must be equal byte for byte. The fixtures' cases
+//! (`yaml_emitter/*/spec.json`) are the wheel's committed texts; the random numbers are
+//! compared live.
 
 mod common;
 
-use std::collections::VecDeque;
-
-use common::ocio_writer::{Number, OcioWriter};
-use common::yaml_tree::{self, Node};
+use common::built_config::build_config;
 use ocio_testkit::probe::Rng;
 use ocio_testkit::{Oracle, assert_text_eq, fixtures};
 use serde_json::{Value, json};
 
-fn u64s(bits: &Value) -> impl Iterator<Item = u64> + '_ {
-    bits.as_array()
-        .expect("an array of bits")
-        .iter()
-        .map(|b| b.as_u64().expect("u64 bits"))
-}
-
-fn u32s(bits: &Value) -> impl Iterator<Item = u32> + '_ {
-    u64s(bits).map(|b| u32::try_from(b).expect("u32 bits"))
-}
-
-fn arrays(spec: &Value, key: &str) -> Vec<Value> {
-    spec.get(key)
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default()
-}
-
-/// The numbers a config built from `spec` holds, in the order OCIO writes them: the luma
-/// coefficients, then for each color space its allocation variables, the 16 values and 4
-/// offsets of each to_reference matrix, and the variables of each from_reference
-/// allocation transform. Without `luma_bits` the config keeps `Config()`'s coefficients,
-/// taken from the text.
-fn spec_numbers(spec: &Value, tree: &Node) -> VecDeque<Number> {
-    let mut numbers = VecDeque::new();
-    match spec.get("luma_bits") {
-        Some(bits) => numbers.extend(u64s(bits).map(|b| Number::F64(f64::from_bits(b)))),
-        None => numbers.extend(
-            tree.get("luma")
-                .expect("luma")
-                .items()
-                .iter()
-                .map(|v| Number::F64(v.text().parse().expect("a default luma coefficient"))),
-        ),
-    }
-    for cs in arrays(spec, "colorspaces") {
-        if let Some(bits) = cs.get("allocation_vars_bits") {
-            numbers.extend(u32s(bits).map(|b| Number::F32(f32::from_bits(b))));
-        }
-        for matrix in arrays(&cs, "matrices_bits") {
-            numbers.extend(u64s(&matrix).map(|b| Number::F64(f64::from_bits(b))));
-        }
-        for vars in arrays(&cs, "allocations_bits") {
-            numbers.extend(u32s(&vars).map(|b| Number::F32(f32::from_bits(b))));
-        }
-    }
-    numbers
-}
-
-/// Writes `expected` again from its tree and `spec`'s numbers, and compares.
-fn reemit(label: &str, spec: &Value, expected: &str) {
-    reemit_substituted(label, spec, expected, Vec::new(), expected);
-}
-
-/// Writes the config of `source` (a text with placeholders) with `substitutions` put back
-/// and `spec`'s numbers, and compares with `expected`.
-fn reemit_substituted(
-    label: &str,
-    spec: &Value,
-    source: &str,
-    substitutions: Vec<(String, Vec<u8>)>,
-    expected: &str,
-) {
-    let tree = yaml_tree::parse(source);
-    let mut writer = OcioWriter::new();
-    writer.values = Some(spec_numbers(spec, &tree));
-    let count = substitutions.len();
-    writer.substitutions = substitutions;
-    writer.save_config(&tree);
-    assert_text_eq(label, expected, writer.text());
-    let left = writer.values.as_ref().map_or(0, VecDeque::len);
-    assert_eq!(left, 0, "{label}: numbers of the spec not written");
-    assert_eq!(
-        writer.substituted.len(),
-        count,
-        "{label}: placeholders put back"
-    );
-}
-
-/// A case's `[[placeholder, string], ...]`.
-fn substitutions(case: &Value) -> Vec<(String, Vec<u8>)> {
-    case["substitutions"]
-        .as_array()
-        .expect("substitutions")
-        .iter()
-        .map(|pair| {
-            let text = |v: &Value| v.as_str().expect("a string").to_string();
-            (text(&pair[0]), text(&pair[1]).into_bytes())
-        })
-        .collect()
+/// Serializes the port's config of `spec` and compares with `expected`.
+fn check(label: &str, spec: &Value, expected: &str) {
+    let text = build_config(spec)
+        .serialize()
+        .unwrap_or_else(|e| panic!("{label}: {e}"));
+    assert_text_eq(label, expected, std::str::from_utf8(&text).unwrap());
 }
 
 #[test]
-fn edge_cases_reemit_byte_identically() {
+fn edge_cases_serialize_byte_identically() {
     let specs: Vec<String> = fixtures::list("yaml_emitter/")
         .into_iter()
         .filter(|p| p.ends_with("/spec.json"))
         .collect();
     assert_eq!(specs.len(), 11, "the yaml_emitter cases: {specs:?}");
-    let mut substituted = 0;
     for spec_path in specs {
         let case: Value = serde_json::from_str(&fixtures::read_text(&spec_path))
             .unwrap_or_else(|e| panic!("{spec_path}: {e}"));
         let text_path = spec_path.replace("/spec.json", "/serialize.ocio");
         let expected = fixtures::read_text(&text_path);
-        if case.get("substitutions").is_some() {
-            let source = fixtures::read_text(&spec_path.replace("/spec.json", "/placeholder.ocio"));
-            let subs = substitutions(&case);
-            reemit_substituted(&text_path, &case["spec"], &source, subs, &expected);
-            substituted += 1;
-        } else {
-            reemit(&text_path, &case, &expected);
+        // The cases with substitutions keep their spec under "spec", with placeholders for
+        // the strings in "substitutions" (for the test-only writer this test used before the
+        // port's): the spec gets its strings back.
+        match case.get("substitutions") {
+            Some(subs) => {
+                let mut spec = case["spec"].clone();
+                for pair in subs.as_array().expect("substitutions") {
+                    substitute(&mut spec, &pair[0], &pair[1]);
+                }
+                check(&text_path, &spec, &expected);
+            }
+            None => check(&text_path, &case, &expected),
         }
     }
-    assert_eq!(substituted, 3, "the substitution cases");
+}
+
+/// Replaces every string `placeholder` of `spec` with `string`.
+fn substitute(spec: &mut Value, placeholder: &Value, string: &Value) {
+    match spec {
+        Value::String(_) if spec == placeholder => *spec = string.clone(),
+        Value::Array(items) => {
+            for v in items {
+                substitute(v, placeholder, string);
+            }
+        }
+        Value::Object(map) => {
+            for v in map.values_mut() {
+                substitute(v, placeholder, string);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Numbers per kind in `random_numbers_serialize_like_the_wheel`: `OCIO_RS_S1_SWEEP`, or
@@ -254,7 +185,7 @@ fn random_numbers_serialize_like_the_wheel() {
             "{:?}",
             response.result
         );
-        reemit(
+        check(
             &format!("random numbers {done}..{}", done + n),
             &spec,
             response.blob_text(0),
