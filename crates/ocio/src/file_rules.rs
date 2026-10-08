@@ -529,8 +529,7 @@ enum DefaultAllowed {
 /// A copy is upstream's `createEditableCopy`: a copy of each rule.
 ///
 /// Port of `FileRules` and `FileRules::Impl` (include/OpenColorIO/OpenColorIO.h:1726-1880,
-/// src/OpenColorIO/FileRules.h:30-71, FileRules.cpp:537-958 @ v2.5.2), but `Impl::validate`,
-/// which comes with the config's (3.8b).
+/// src/OpenColorIO/FileRules.h:30-71, FileRules.cpp:537-958 @ v2.5.2).
 #[derive(Debug, Clone)]
 pub struct FileRules {
     /// `m_rules`: all rules, default rule always at the end.
@@ -978,6 +977,28 @@ impl FileRules {
 }
 
 impl FileRule {
+    /// Refuses a rule (but the path search rule) whose color space is neither a color space (or
+    /// role) nor a named transform of `cfg`.
+    ///
+    /// Port of `FileRule::validate` (src/OpenColorIO/FileRules.cpp:506-523 @ v2.5.2).
+    fn validate(&self, cfg: &Config) -> Result<()> {
+        if self.rule_type != RuleType::ParseFilepath {
+            let color_space = self.color_space();
+            // Can be a color space, a role (all color spaces) or a named transform.
+            if cfg.color_space(c_str(&color_space)).is_none()
+                && cfg.named_transform(c_str(&color_space)).is_none()
+            {
+                let mut oss = b"File rules: rule named '".to_vec();
+                oss.extend_from_slice(&self.name);
+                oss.extend_from_slice(b"' is referencing '");
+                oss.extend_from_slice(&color_space);
+                oss.extend_from_slice(b"' that is neither a color space nor a named transform.");
+                return Err(Exception::new(oss));
+            }
+        }
+        Ok(())
+    }
+
     /// Whether the rule matches `path`: the default rule always; the path search rule when a
     /// color space name (or alias) is in it, which becomes the rule's color space; the others
     /// by `regex_match` with their expression (which can fail past the matcher's limits).
@@ -1019,6 +1040,29 @@ fn regex_exception(e: RegexError) -> Exception {
 }
 
 impl FileRules {
+    /// Validates each rule ([`FileRule::validate`]): the first error stops it. A version 1
+    /// config with only its two upgraded rules isn't checked.
+    ///
+    /// Port of `FileRules::Impl::validate` (src/OpenColorIO/FileRules.cpp:665-685 @ v2.5.2).
+    pub(crate) fn validate(&self, cfg: &Config) -> Result<()> {
+        // All Config objects have a fileRules object, regardless of version. This object is
+        // initialized to have a defaultRule with the color space set to "default" (i.e., the
+        // default role). The fileRules->validate call will validate that all color spaces used
+        // in rules exist, or if they are roles that they point to a color space that exists.
+        //
+        // Because this would cause validate to improperly fail on v1 configs (since they are
+        // not required to actually contain file rules), we don't do this check on v1 configs
+        // when there is only two rules. In some case (e.g. load a v1 config from disk), the two
+        // expected rules are the 'Default' and 'ColorSpaceNamePathSearch' ones.
+
+        if cfg.major_version() >= 2 || (cfg.major_version() == 1 && self.rules.len() > 2) {
+            for rule in &self.rules {
+                rule.validate(cfg)?;
+            }
+        }
+        Ok(())
+    }
+
     /// The color space of the first rule that matches `file_path`, and its index.
     ///
     /// Port of `FileRules::Impl::getRuleFromFilepath` (src/OpenColorIO/FileRules.cpp:634-648

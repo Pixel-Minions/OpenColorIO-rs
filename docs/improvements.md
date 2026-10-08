@@ -572,6 +572,19 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p3-yaml-load-2`, checked against the wheel in
   `crates/ocio/tests/config_load_oracle.rs` ("v1 builtin", "v1 file cdl style").
 
+### I-147. A config that failed validation can fail again with an empty message
+
+- **Upstream:** `Config::validate` keeps its result: a failed config throws its kept message
+  (`m_validationtext`) again on the next call (`Config.cpp:1361-1365`). Most failures set it
+  before throwing, but four don't: an environment variable whose default names another variable
+  (`Config.cpp:1396-1402`), a transform's own `validate()` (`Config.cpp:1818`), a view's looks
+  that can't be parsed (`Config.cpp:670`), and the version check (`Config.cpp:2101`). For those,
+  the second `validate()` throws an empty message. Seen through the wheel.
+- **Who notices:** a caller that validates a config twice and reads the second message.
+- **A fix:** set the kept message in those four places too.
+- **Status:** matched in `p3-validate`, checked against the wheel in
+  `crates/ocio/tests/config_load_oracle.rs` (`validating_twice_as_in_the_wheel`).
+
 ## Numeric helpers
 
 ### I-20. Double values are compared to 0 and 1 in float precision
