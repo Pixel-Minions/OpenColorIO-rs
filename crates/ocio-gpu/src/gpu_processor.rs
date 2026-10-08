@@ -30,6 +30,7 @@ use crate::ops::fixedfunction::fixed_function_op_gpu::get_fixed_function_gpu_sha
 use crate::ops::gamma::gamma_op_gpu::get_gamma_gpu_shader_program;
 use crate::ops::gradingrgbcurve::grading_rgb_curve_op_gpu::get_grading_rgb_curve_gpu_shader_program;
 use crate::ops::log::log_op_gpu::get_log_gpu_shader_program;
+use crate::ops::lut3d::lut3d_op_gpu::extract_lut3d_gpu_shader_info;
 use crate::ops::matrix::matrix_op_gpu::get_matrix_gpu_shader_program;
 use crate::ops::range::range_op_gpu::get_range_gpu_shader_program;
 
@@ -133,6 +134,7 @@ pub(crate) fn extract_op_gpu_shader_info(
         OpData::GradingRgbCurve(data) => {
             get_grading_rgb_curve_gpu_shader_program(shader_creator, data)
         }
+        OpData::Lut3D(data) => extract_lut3d_gpu_shader_info(shader_creator, data),
         OpData::NoOp(_) => Ok(()),
         OpData::Reference(_) => unreachable!("an op never holds a ReferenceOpData"),
         // The families whose GPU writer comes later.

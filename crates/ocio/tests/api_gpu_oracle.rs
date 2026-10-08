@@ -9,9 +9,10 @@
 //! `getDefaultGPUProcessor()`, or `getOptimizedGPUProcessor` with `OPTIMIZATION_NONE`,
 //! `LOSSLESS`, `VERY_GOOD`, `GOOD`, `DRAFT` or `DEFAULT`. The GPU processor's cache ID and
 //! queries must be the wheel's, and so must the shader the extraction writes into a
-//! `GpuShaderDesc` of each language: its text, cache ID and names, its textures with their values
-//! (ACES 2.0's tables), and its uniforms, 3D textures and dynamic properties, of which these
-//! ops have none. Or both must raise the same message at the same stage.
+//! `GpuShaderDesc` of each language: its text, cache ID and names, its textures (ACES 2.0's
+//! tables) and 3D textures (the 3D LUTs) with their values, and its uniforms and dynamic
+//! properties, of which these ops have none. Or both must raise the same message at the same
+//! stage.
 //!
 //! The `Lut1DTransform`'s GPU writer (`Lut1DOpGPU`) is Phase 2's (WP 2.1h): where the wheel
 //! builds a GPU processor (then writes the shader, or refuses the OSL translation) and the
@@ -152,7 +153,11 @@ fn wheel(reply: &GpuShaderReply) -> Outcome {
                     "interpolation": t.interpolation, "binding_index": t.binding_index,
                     "values": t.values.iter().map(|v| v.to_bits()).collect::<Vec<u32>>(),
                 })).collect::<Vec<Value>>(),
-                "textures_3d": shader.textures_3d.len(),
+                "textures_3d": shader.textures_3d.iter().map(|t| json!({
+                    "name": t.name, "sampler_name": t.sampler_name, "edge_len": t.edge_len,
+                    "interpolation": t.interpolation, "binding_index": t.binding_index,
+                    "values": t.values.iter().map(|v| v.to_bits()).collect::<Vec<u32>>(),
+                })).collect::<Vec<Value>>(),
                 "dynamic_properties": shader.dynamic_properties.len(),
             }))
         }
@@ -183,6 +188,24 @@ fn port_texture(desc: &GpuShaderDesc, index: u32) -> Value {
             other => panic!("interpolation {other:?}"),
         },
         "binding_index": desc.texture_shader_binding_index(index).expect("its binding"),
+        "values": t.values().iter().map(|v| v.to_bits()).collect::<Vec<u32>>(),
+    })
+}
+
+/// The port's 3D texture `index`, as the wheel's outcome lists one (its values by their bits).
+fn port_texture_3d(desc: &GpuShaderDesc, index: u32) -> Value {
+    let t = desc.texture_3d(index).expect("a 3D texture");
+    let text = |bytes: &[u8]| String::from_utf8(bytes.to_vec()).expect("UTF-8");
+    json!({
+        "name": text(t.texture_name()),
+        "sampler_name": text(t.sampler_name()),
+        "edge_len": t.edge_len(),
+        "interpolation": match t.interpolation() {
+            Interpolation::Nearest => "INTERP_NEAREST",
+            Interpolation::Linear => "INTERP_LINEAR",
+            other => panic!("interpolation {other:?}"),
+        },
+        "binding_index": desc.texture_3d_shader_binding_index(index).expect("its binding"),
         "values": t.values().iter().map(|v| v.to_bits()).collect::<Vec<u32>>(),
     })
 }
@@ -233,7 +256,7 @@ fn port(class: &Class, job: &Job, calls: &Calls) -> Outcome {
                 "resource_prefix": text(desc.resource_prefix()),
                 "uniforms": desc.num_uniforms(),
                 "textures": (0..desc.num_textures()).map(|i| port_texture(&desc, i)).collect::<Vec<Value>>(),
-                "textures_3d": desc.num_textures_3d(),
+                "textures_3d": (0..desc.num_textures_3d()).map(|i| port_texture_3d(&desc, i)).collect::<Vec<Value>>(),
                 "dynamic_properties": desc.num_dynamic_properties(),
             })
         })
@@ -319,10 +342,7 @@ fn check(class: &Class) {
             }
             match wheel {
                 Outcome::Gpu { shader: Ok(s), .. } => {
-                    assert!(
-                        s["uniforms"] == 0 && s["textures_3d"] == 0,
-                        "{what}: compare the uniforms and 3D textures too: {s}"
-                    );
+                    assert!(s["uniforms"] == 0, "{what}: compare the uniforms too: {s}");
                     compared += 1;
                 }
                 _ => refusals += 1,
@@ -417,6 +437,12 @@ fn lut1d_transform_shaders_are_deferred_where_the_wheel_writes_them() {
         deferred: true,
         ..Class::new("Lut1DTransform", api_cases::lut1d())
     });
+}
+
+/// The cube of one entry is left out: its inverse never returns in the wheel (U-65).
+#[test]
+fn lut3d_transform_shaders_match_the_wheel() {
+    check(&Class::new("Lut3DTransform", api_cases::lut3d()));
 }
 
 #[test]
