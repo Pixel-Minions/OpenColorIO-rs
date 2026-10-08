@@ -2,9 +2,8 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! The built-in transforms: a port of `src/OpenColorIO/transforms/builtins/` @ v2.5.2: the
-//! registry and every entry's style and description, and the ops of the identity, the
-//! cameras, the displays and the ACES entries. The ACES output transforms' ops come with
-//! `p3-after-p2`.
+//! registry and every entry's style, description and ops: the identity, the cameras, the
+//! displays and the ACES entries.
 
 pub mod builtin_transform_registry;
 

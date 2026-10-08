@@ -2,11 +2,10 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Tests of the `Transform` dispatch: every arm's class, direction, validation and text through
-//! the enum, and the processors' refusal to build the ops of the classes and built-in transforms
-//! whose builders are not ported yet.
+//! the enum, and the processors' refusal to build the ops of the classes whose builders are not
+//! ported yet.
 
 use super::*;
-use crate::transforms::builtins::builtin_transform_registry::BuiltinTransformRegistry;
 use crate::{Allocation, FixedFunctionStyle, Interpolation, RangeStyle, TransformType};
 
 /// One transform of each class: a valid one, an invalid one where the class can be made
@@ -281,95 +280,6 @@ fn processors_of_the_classes_without_builders_are_refused() {
                 format!("{name}: building its ops is not ported yet ({work_package})."),
                 "{dir:?}"
             );
-        }
-    }
-}
-
-/// The built-in transforms whose ops are ported (WP 3.2e-g, `p3-after-p2`); their pixels are
-/// compared with the wheel's in `tests/api_battery_oracle.rs`.
-const BUILTINS_WITH_OPS: &[&[u8]] = &[
-    b"IDENTITY",
-    b"ARRI_ALEXA-LOGC-EI800-AWG_to_ACES2065-1",
-    b"ARRI_LOGC4_to_ACES2065-1",
-    b"PANASONIC_VLOG-VGAMUT_to_ACES2065-1",
-    b"RED_REDLOGFILM-RWG_to_ACES2065-1",
-    b"RED_LOG3G10-RWG_to_ACES2065-1",
-    b"SONY_SLOG3-SGAMUT3_to_ACES2065-1",
-    b"SONY_SLOG3-SGAMUT3.CINE_to_ACES2065-1",
-    b"SONY_SLOG3-SGAMUT3-VENICE_to_ACES2065-1",
-    b"SONY_SLOG3-SGAMUT3.CINE-VENICE_to_ACES2065-1",
-    b"CANON_CLOG2-CGAMUT_to_ACES2065-1",
-    b"CURVE - CANON_CLOG2_to_LINEAR",
-    b"CANON_CLOG3-CGAMUT_to_ACES2065-1",
-    b"CURVE - CANON_CLOG3_to_LINEAR",
-    b"APPLE_LOG_to_ACES2065-1",
-    b"CURVE - APPLE_LOG_to_LINEAR",
-    b"UTILITY - ACES-AP0_to_CIE-XYZ-D65_BFD",
-    b"UTILITY - ACES-AP1_to_CIE-XYZ-D65_BFD",
-    b"UTILITY - ACES-AP1_to_LINEAR-REC709_BFD",
-    b"CURVE - ACEScct-LOG_to_LINEAR",
-    b"ACEScct_to_ACES2065-1",
-    b"ACEScc_to_ACES2065-1",
-    b"ACEScg_to_ACES2065-1",
-    b"ACESproxy10i_to_ACES2065-1",
-    b"ADX10_to_ACES2065-1",
-    b"ADX16_to_ACES2065-1",
-    b"ACES-LMT - BLUE_LIGHT_ARTIFACT_FIX",
-    b"ACES-LMT - ACES 1.3 Reference Gamut Compression",
-    b"DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.709",
-    b"DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.709 - MIRROR NEGS",
-    b"DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.2020",
-    b"DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.2020 - MIRROR NEGS",
-    b"DISPLAY - CIE-XYZ-D65_to_G2.2-REC.709",
-    b"DISPLAY - CIE-XYZ-D65_to_G2.2-REC.709 - MIRROR NEGS",
-    b"DISPLAY - CIE-XYZ-D65_to_sRGB",
-    b"DISPLAY - CIE-XYZ-D65_to_sRGB - MIRROR NEGS",
-    b"DISPLAY - CIE-XYZ-D65_to_G2.6-P3-DCI-BFD",
-    b"DISPLAY - CIE-XYZ-D65_to_G2.6-P3-D65",
-    b"DISPLAY - CIE-XYZ-D65_to_G2.6-P3-D65 - MIRROR NEGS",
-    b"DISPLAY - CIE-XYZ-D65_to_G2.6-P3-D60-BFD",
-    b"DISPLAY - CIE-XYZ-D65_to_DCDM-D65",
-    b"DISPLAY - CIE-XYZ-D65_to_DisplayP3",
-    b"DISPLAY - CIE-XYZ-D65_to_DisplayP3-HDR",
-    b"CURVE - ST-2084_to_LINEAR",
-    b"CURVE - LINEAR_to_ST-2084",
-    b"DISPLAY - CIE-XYZ-D65_to_REC.2100-PQ",
-    b"DISPLAY - CIE-XYZ-D65_to_ST2084-P3-D65",
-    b"DISPLAY - CIE-XYZ-D65_to_ST2084-DCDM-D65",
-    b"CURVE - HLG-OETF-INVERSE",
-    b"CURVE - HLG-OETF",
-    b"DISPLAY - CIE-XYZ-D65_to_REC.2100-HLG-1000nit",
-];
-
-/// A processor of every other built-in transform of the registry is refused in both
-/// directions, and with either direction of the transform itself, with the error the
-/// registry's creators document: the style, as the registry spells it.
-#[test]
-fn processors_of_the_builtin_transforms_without_ops_are_refused() {
-    let config = Config::create_raw().unwrap();
-    let registry = BuiltinTransformRegistry::get();
-    assert!(registry.num_builtins() > 0);
-    for index in 0..registry.num_builtins() {
-        let style = registry.builtin_style(index).unwrap();
-        if BUILTINS_WITH_OPS.contains(&style) {
-            continue;
-        }
-        let expected = format!(
-            "BuiltinTransform: the ops of '{}' are not ported yet.",
-            String::from_utf8_lossy(style)
-        );
-        for own_dir in [TransformDirection::Forward, TransformDirection::Inverse] {
-            let mut builtin = BuiltinTransform::new();
-            builtin.set_style(style).unwrap();
-            builtin.set_direction(own_dir);
-            let transform = Transform::from(builtin);
-            for dir in [TransformDirection::Forward, TransformDirection::Inverse] {
-                assert_eq!(
-                    processor_error(&config, &transform, dir),
-                    expected,
-                    "{own_dir:?} {dir:?}"
-                );
-            }
         }
     }
 }

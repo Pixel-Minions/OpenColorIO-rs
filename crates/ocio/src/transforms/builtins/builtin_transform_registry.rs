@@ -5,10 +5,8 @@
 //! `src/OpenColorIO/transforms/builtins/BuiltinTransformRegistry.h` and
 //! `BuiltinTransformRegistry.cpp` @ v2.5.2.
 //!
-//! Every entry upstream registers is here, with its style and description in upstream's order,
-//! so built-in transforms can be named, printed and compared before their ops exist. The
-//! creators of the entries whose ops are not ported yet return an error ([`not_ported_yet`]);
-//! each builder chunk replaces its entries' creators (WP 3.2e-g, `p3-after-p2`).
+//! Every entry upstream registers is here, with its style, its description and its op creator,
+//! in upstream's order.
 
 use std::fmt;
 use std::sync::{Arc, OnceLock};
@@ -28,19 +26,9 @@ use crate::transforms::builtins::{
 /// A built-in transform's op creator: appends its ops, forward.
 ///
 /// Port of `BuiltinTransformRegistryImpl::OpCreator` (BuiltinTransformRegistry.h:21 @ v2.5.2),
-/// a `std::function<void(OpRcPtrVec &)>`; it returns an error here, for the entries whose ops
-/// are not ported yet.
+/// a `std::function<void(OpRcPtrVec &)>`; it returns the error where upstream's creator
+/// throws.
 pub(crate) type OpCreator = Arc<dyn Fn(&mut OpVec) -> Result<()> + Send + Sync>;
-
-/// The creator of an entry whose ops are not ported yet: it returns an error naming the style.
-pub(crate) fn not_ported_yet(style: &'static [u8]) -> OpCreator {
-    Arc::new(move |_ops: &mut OpVec| {
-        Err(Exception::new(format!(
-            "BuiltinTransform: the ops of '{}' are not ported yet.",
-            String::from_utf8_lossy(style)
-        )))
-    })
-}
 
 /// One built-in transform: its style, its description and its op creator.
 ///
