@@ -45,6 +45,8 @@
 //! `XML_UNICODE` (`XML_Char` is `char`, and handlers see UTF-8), no `XML_MIN_SIZE`, no
 //! `XML_LARGE_SIZE`.
 //!
+//! - [`xmlparse`]: the parser, `XML_Parse` and its handlers (`xmlparse.c`, `expat.h`).
+//! - [`xmlrole`]: the prolog's state machine (`xmlrole.c`, `xmlrole.h`).
 //! - [`xmltok`]: the tokenizer's encodings, the XML declaration, the conversions to UTF-8
 //!   (`xmltok.c`, `xmltok_ns.c`).
 //! - [`xmltok_impl`]: the tokenizer's scanners (`xmltok_impl.c`).
@@ -54,5 +56,7 @@
 //! and applies to this module.
 
 mod tables;
+pub mod xmlparse;
+pub mod xmlrole;
 pub mod xmltok;
 pub mod xmltok_impl;
