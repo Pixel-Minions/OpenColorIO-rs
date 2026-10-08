@@ -157,6 +157,109 @@ impl InputStream {
             }
         }
     }
+
+    /// Extracts a line into `line` (cleared first), without its `\n`: up to the `\n`, which is
+    /// extracted, or to the end of the stream, which sets `eofbit`; nothing extracted sets
+    /// `failbit`. A stream that isn't `good()` extracts nothing, leaves `line` alone and sets
+    /// `failbit` (its sentry).
+    ///
+    /// Port of `std::getline(std::istream &, std::string &)` (C++17 [string.io]
+    /// 24.3.3.9/6-8), as libstdc++ and the MSVC STL implement it.
+    pub fn getline(&mut self, line: &mut Vec<u8>) {
+        if !self.good() {
+            self.fail = true;
+            return;
+        }
+        line.clear();
+        let mut extracted = 0usize;
+        loop {
+            match self.peek_byte() {
+                Some(b) => {
+                    self.pos += 1;
+                    extracted += 1;
+                    if b == b'\n' {
+                        break;
+                    }
+                    line.push(b);
+                }
+                None => {
+                    if !self.bad {
+                        self.eof = true;
+                    }
+                    break;
+                }
+            }
+        }
+        if extracted == 0 {
+            self.fail = true;
+        }
+    }
+
+    /// Extracts a line into the start of `buf`, as a C string: at most `n - 1` bytes, then a
+    /// NUL. It stops at the `\n` (extracted, not stored), at the end of the stream (`eofbit`),
+    /// or with `n - 1` bytes stored and more to come (`failbit`); nothing extracted sets
+    /// `failbit`. A stream that isn't `good()` extracts nothing and sets `failbit`.
+    ///
+    /// Port of `std::istream::getline(char *, std::streamsize)` (C++17 [istream.unformatted]
+    /// 30.7.4.3/18-24), as libstdc++ and the MSVC STL implement it.
+    pub fn getline_buf(&mut self, buf: &mut [u8], n: usize) {
+        self.gcount = 0;
+        let mut stored = 0usize;
+        if self.good() {
+            loop {
+                match self.peek_byte() {
+                    None => {
+                        if !self.bad {
+                            self.eof = true;
+                        }
+                        break;
+                    }
+                    Some(b'\n') => {
+                        self.pos += 1;
+                        self.gcount += 1;
+                        break;
+                    }
+                    Some(_) if stored + 1 >= n => {
+                        self.fail = true;
+                        break;
+                    }
+                    Some(b) => {
+                        buf[stored] = b;
+                        stored += 1;
+                        self.pos += 1;
+                        self.gcount += 1;
+                    }
+                }
+            }
+        }
+        if n > 0 {
+            buf[stored] = 0;
+        }
+        if self.gcount == 0 {
+            self.fail = true;
+        }
+    }
+
+    /// Clears the state bits.
+    ///
+    /// Port of `std::ios::clear()`.
+    pub fn clear(&mut self) {
+        self.eof = false;
+        self.fail = false;
+        self.bad = false;
+    }
+
+    /// Moves back to the start: `eofbit` is cleared first (C++11), and a failed stream doesn't
+    /// move.
+    ///
+    /// Port of `std::istream::seekg(0, std::ios::beg)` (C++17 [istream.unformatted]
+    /// 30.7.4.3/43).
+    pub fn seekg_begin(&mut self) {
+        self.eof = false;
+        if !self.fail() {
+            self.pos = 0;
+        }
+    }
 }
 
 /// The bytes a text-mode read of `raw` gives in the UCRT (`_read` of a text-mode file):

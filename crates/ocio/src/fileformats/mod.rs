@@ -3,6 +3,8 @@
 
 //! The file formats: what reads, bakes and writes LUT files (src/OpenColorIO/fileformats).
 
+pub mod cdl;
+pub mod file_format_cc;
 pub mod file_format_spimtx;
 pub mod input_stream;
 

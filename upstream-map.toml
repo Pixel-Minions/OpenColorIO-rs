@@ -838,8 +838,9 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatCC.cpp"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/file_format_cc.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_cc.rs"]
+status = "partial"
+note = "p4-cdl 4.4d: LocalCachedFile, getFormatInfo, read, buildFileOps; write and getCDLGroup come with 4.4e"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatCCC.cpp"
@@ -979,26 +980,26 @@ note = "see FormatMetadata.cpp"
 [[file]]
 path = "src/OpenColorIO/fileformats/cdl/CDLParser.cpp"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/cdl/cdl_parser.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/cdl/cdl_parser.rs"]
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/cdl/CDLParser.h"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/cdl/cdl_parser.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/cdl/cdl_parser.rs"]
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/cdl/CDLReaderHelper.cpp"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/cdl/cdl_reader_helper.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/cdl/cdl_reader_helper.rs"]
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/cdl/CDLReaderHelper.h"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/cdl/cdl_reader_helper.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/cdl/cdl_reader_helper.rs"]
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/cdl/CDLWriter.cpp"
@@ -4524,8 +4525,9 @@ status = "todo"
 [[file]]
 path = "tests/cpu/fileformats/FileFormatCC_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-formats/src/fileformats/file_format_cc_tests.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_cc_tests.rs"]
+status = "partial"
+note = "p4-cdl 4.4d: test_cc1, test_cc2, test_cc_sat_node, test_cc_asc_sat, test_cc_asc_sop; test_cc2_load_save comes with the writer (4.4e)"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatCDL_tests.cpp"

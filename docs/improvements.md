@@ -2476,3 +2476,22 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   Tests: 590 levels load as in the wheel, the wheel loads 591 where the port refuses them, groups
   that hold themselves are refused, and loading, copying, printing, validating, building a CPU
   processor and dropping 590 levels fit a 1 MiB thread (also at opt-level 0).
+
+### U-75. A CDL or CCC file whose root element never starts
+
+- **Upstream:** the CDL parser picks the schema from the first 5 KiB of the file: the first
+  of "<ColorDecisionList", "<ColorCorrectionCollection" and "<ColorCorrection" found anywhere
+  in it (`FindRootElement`, `fileformats/cdl/CDLParser.cpp:286-325` @ v2.5.2). A CDL or CCC
+  binds its parsing info when its root element starts (`CDLParser.cpp:496-580`); when the
+  text is found but the element never starts (in a comment, an attribute, a misspelled or
+  other root), `validateParsing` dereferences the null parsing info (`CDLParser.cpp:337`),
+  and the wheel crashes (Windows, probed 2026-10-08: `<!-- <ColorDecisionList --><Foo/>` as a
+  .cdl, and as a .ccc with the collection's name, end the process on a file transform's
+  processor). A CC creates its parsing info up front and isn't affected.
+- **Who notices:** malformed or hostile CDL and CCC files.
+- **Decided** (the owner's general rule): the port refuses the file with the parser's message
+  "Error parsing <root> (<file>). Error is: CDL parsing error: the root element '<root>' is
+  missing. At line (<n>)", as its `validateParsing` (and its transform getters) find no
+  parsing info.
+- **Status:** matched in `p4-cdl` (4.4d, `crates/ocio/src/fileformats/cdl/cdl_parser.rs`,
+  `missing_root_error`; `a_cdl_or_ccc_without_its_root_element_is_refused`).
