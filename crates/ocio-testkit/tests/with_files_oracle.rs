@@ -3,9 +3,15 @@
 
 //! The oracle's `with_files` command (`oracle/ocio_oracle/files_api.py`): a command run next
 //! to given files gives what it gives on the same files written by the test itself, with the
-//! directory's path written as `$FILES`; files can come as text, bytes or blobs; `$FILES` is
-//! replaced in strings and in `{"bytes": hex}` values, both ways; the requests it can't read
-//! are refused.
+//! directory's path written as `$FILES`; files can come as text, bytes or blobs, and keep
+//! their exact bytes; the command gets the request's blobs after the files'; `$FILES` is
+//! replaced in strings and in `{"bytes": hex}` values, both ways; a reader's error that isn't
+//! UTF-8 comes back as bytes; the requests it can't read are refused.
+//!
+//! Not checked here: that OCIO's caches are cleared before the command runs
+//! (`ClearAllCaches`). Each request gets a new temporary directory, so no two requests in this
+//! file read the same path; the readers' tests depend on it instead
+//! (`crates/ocio/tests/common/lut_files.rs`).
 
 use std::path::{Path, PathBuf};
 
@@ -155,6 +161,7 @@ fn files_in_bytes_both_ways() {
         {"new": "FileTransform", "as": "ft"},
         {"call": "setSrc", "on": "ft", "args": [{"bytes": hex(src)}]},
         {"call": "getSrc", "on": "ft"},
+        {"call": "getProcessor", "args": [{"ref": "ft"}]},
     ]);
     let result = Oracle::get()
         .call(
@@ -166,6 +173,101 @@ fn files_in_bytes_both_ways() {
         .result;
     let got = &result["calls"][2]["result"];
     assert_eq!(bytes(got), src.to_vec(), "{result}");
+    // The library got the path: the file is found and read.
+    assert!(
+        result["calls"][3].get("result").is_some(),
+        "{}",
+        result["calls"][3]
+    );
+}
+
+/// The request's blobs after `file_blobs` are the command's own, from its first: `cpu_apply`
+/// next to a file given as a blob gives what it gives on the same file written by the test.
+#[test]
+fn the_commands_blobs_follow_the_files() {
+    let dir = TempDir::new("blobs");
+    std::fs::write(dir.path().join("a").join("lut.spi1d"), SPI1D).unwrap();
+    let root = plain(dir.path());
+    let pixels: Vec<u8> = [0.25f32, 0.5, 0.75, 1.0]
+        .iter()
+        .flat_map(|v| v.to_le_bytes())
+        .collect();
+    let direct = Oracle::get().call(
+        "cpu_apply",
+        json!({"transform": file_transform(&format!("{root}/a/lut.spi1d"))}),
+        &[&pixels],
+    );
+    assert!(
+        direct.result.get("exception").is_none(),
+        "{}",
+        direct.result
+    );
+    let next_to = Oracle::get().call(
+        "with_files",
+        json!({"files": {"a/lut.spi1d": {"blob": 0}}, "file_blobs": 1, "command": "cpu_apply",
+               "args": {"transform": file_transform("$FILES/a/lut.spi1d")}}),
+        &[SPI1D.as_bytes(), &pixels],
+    );
+    assert_eq!(next_to.result, restored(&direct.result, &root));
+    assert_eq!(next_to.blobs, direct.blobs);
+}
+
+/// A config of one color space, searching its own directory.
+const CONFIG: &str = "ocio_profile_version: 2\nsearch_path: .\nroles: {default: raw}\n\
+                      colorspaces:\n  - !<ColorSpace> {name: raw}\n";
+
+/// Files keep their exact bytes, line ends, `0x1A` and NUL included, as text and as bytes:
+/// the archiver (`ocioz`) reads them back.
+#[test]
+fn files_keep_their_exact_bytes() {
+    let odd: &[u8] = b"a\r\nb\rc\x1ad\x00e\n\xff";
+    for content in [json!({"bytes": hex(odd)}), json!({"blob": 0})] {
+        let response = Oracle::get().call(
+            "with_files",
+            json!({"files": {"config.ocio": CONFIG, "a.spi1d": content,
+                             "b.spi1d": "x\r\ny\rz\u{1a}\u{0}"},
+                   "file_blobs": 1, "command": "ocioz",
+                   "args": {"archive": {"config": {"file": "$FILES/config.ocio"}}}}),
+            &[odd],
+        );
+        let entries = response.result["entries"].as_array().unwrap();
+        let contents = |name: &[u8]| {
+            let entry = entries
+                .iter()
+                .find(|e| bytes(&e["name"]) == name)
+                .unwrap_or_else(|| panic!("{}", response.result));
+            response.blobs[entry["contents"].as_u64().unwrap() as usize].clone()
+        };
+        assert_eq!(contents(b"a.spi1d"), odd);
+        assert_eq!(contents(b"b.spi1d"), b"x\r\ny\rz\x1a\x00");
+    }
+}
+
+/// A reader's error that isn't UTF-8 (the reader quotes the file's bytes) comes back as
+/// `{"type": "UnicodeDecodeError", "undecodable": hex}`, its bytes with `$FILES` for the
+/// directory: the binding can't decode the message, and loses OCIO's exception type.
+#[test]
+fn an_error_that_is_not_utf8_comes_back_as_bytes() {
+    let spi1d = b"Version 1\nFrom 0.0 1.0\nLength\x853\nComponents 1\n{\n0\n1\n0.5\n}\n";
+    let result = Oracle::get()
+        .call(
+            "with_files",
+            json!({"files": {"lut.spi1d": {"bytes": hex(spi1d)}}, "command": "processor_ops",
+                   "args": {"transform": file_transform("$FILES/lut.spi1d")}}),
+            &[],
+        )
+        .result;
+    let exception = &result["exception"];
+    assert_eq!(exception["type"], "UnicodeDecodeError", "{result}");
+    assert_eq!(result["stage"], "processor", "{result}");
+    let message = bytes(&json!({"bytes": exception["undecodable"]}));
+    let needle: &[u8] = b"Length\x853";
+    assert!(
+        message.windows(needle.len()).any(|w| w == needle),
+        "{result}"
+    );
+    let path: &[u8] = b"$FILES";
+    assert!(message.windows(path.len()).any(|w| w == path), "{result}");
 }
 
 /// Requests it can't read are refused.

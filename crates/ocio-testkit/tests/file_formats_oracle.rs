@@ -3,8 +3,9 @@
 
 //! The oracle's `file_formats` command (`oracle/ocio_oracle/file_formats_api.py`), against the
 //! wheel and upstream's tests: the read, bake and write lists have upstream's counts and hold
-//! the (name, extension) pairs upstream's tests look for; extensions are supported as upstream's
-//! tests say; the requests it can't read are refused.
+//! the (name, extension) pairs upstream's tests look for, in the order the binding's iterators
+//! give them by index (through `config_calls`); extensions are supported as upstream's tests
+//! say; the requests it can't read are refused.
 
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle_values::bytes;
@@ -72,7 +73,8 @@ fn the_lists_hold_upstreams_formats() {
         ("icc", "International Color Consortium profile"),
         // Upstream's `("icm", "International Color Consortium profile")` looks the name up as
         // a format, whose extensions include `icm`; the binding's list pairs each extension
-        // with the name its format declares for it, so it has no such pair.
+        // with the name its format declares for it, so it has no such pair: the ICC format
+        // declares `icm` under its own name (below).
         ("look", "iridas_look"),
         ("lut", "houdini"),
         ("lut", "Discreet 1D LUT"),
@@ -89,11 +91,59 @@ fn the_lists_hold_upstreams_formats() {
             "({name}, {extension}) is not in {read:?}"
         );
     }
+    // FileFormatICC.cpp:108-109 @ v2.5.2: the name the ICC format declares for `icm`.
+    let icc = std::fs::read_to_string(
+        upstream_dir().join("src/OpenColorIO/fileformats/FileFormatICC.cpp"),
+    )
+    .unwrap();
+    let lines: Vec<&str> = icc.lines().collect();
+    let icm = lines
+        .iter()
+        .position(|l| l.trim() == r#"info.extension = "icm";"#)
+        .unwrap();
+    let quoted = |l: &str| l[l.find('"').unwrap() + 1..l.rfind('"').unwrap()].to_string();
+    assert!(lines[icm - 1].trim().starts_with("info.name = "));
+    let icm_name = quoted(lines[icm - 1]);
+    assert!(
+        read.contains(&(icm_name.clone(), "icm".to_string())),
+        "({icm_name}, icm) is not in {read:?}"
+    );
     // Every bake and write format is a read format too.
     for pair in bake.iter().chain(&write) {
         assert!(read.contains(pair), "{pair:?} is not in {read:?}");
     }
     assert!(result["log"].as_array().unwrap().is_empty(), "{result}");
+}
+
+/// Each list is in the order the binding's own iterator gives it by index
+/// (`FileTransform.getFormats()`, `Baker.getFormats()`, `GroupTransform.GetWriteFormats()`
+/// called through `config_calls`, which reads an iterator element by element).
+#[test]
+fn the_lists_are_in_the_iterators_order() {
+    let result = call(json!({}));
+    let calls = json!([
+        {"new": "FileTransform", "as": "ft"},
+        {"call": "getFormats", "on": "ft"},
+        {"new": "Baker", "as": "baker"},
+        {"call": "getFormats", "on": "baker"},
+        {"new": "GroupTransform", "as": "group"},
+        {"call": "GetWriteFormats", "on": "group"},
+    ]);
+    let by_index = Oracle::get()
+        .call(
+            "config_calls",
+            json!({"config": "raw", "calls": calls}),
+            &[],
+        )
+        .result;
+    for (key, call) in [("read", 1), ("bake", 3), ("write", 5)] {
+        let listed = &by_index["calls"][call]["result"];
+        assert_eq!(
+            pairs(&result[key]),
+            pairs(listed),
+            "{key}: {result} {by_index}"
+        );
+    }
 }
 
 /// `OCIO_ADD_TEST(FileTransform, is_format_extension_supported)` @ v2.5.2, through the binding.

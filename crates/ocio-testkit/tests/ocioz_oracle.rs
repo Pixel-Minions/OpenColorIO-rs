@@ -4,7 +4,8 @@
 //! The oracle's `ocioz` command (`oracle/ocio_oracle/ocioz_api.py`), against the wheel, the file
 //! system and upstream's test data: archiving `tests/data/files/configs/context_test1` gives the
 //! config first and then every file of its directory the archiver takes, each entry's contents
-//! the file's; extracting that archive (through `with_files`) writes the same files; refusals
+//! the file's; the entries are the archive's, in its order and with its flags; extracting that
+//! archive (through `with_files`) writes the same files; refusals
 //! report their stage; the requests it can't read are refused.
 
 use std::collections::BTreeMap;
@@ -91,6 +92,59 @@ fn archive_and_extract_context_test1() {
     let config_text = &response.blobs[entries[0]["contents"].as_u64().unwrap() as usize];
     assert_eq!(written.remove("config.ocio").as_ref(), Some(config_text));
     assert_eq!(written, archived);
+}
+
+/// The central directory of a zip archive: each entry's name and general purpose flags, in
+/// the archive's order (PKWARE APPNOTE 4.3.12, 4.3.16).
+fn central_directory(archive: &[u8]) -> Vec<(Vec<u8>, u16)> {
+    let u16_at = |i: usize| u16::from_le_bytes([archive[i], archive[i + 1]]);
+    let u32_at = |i: usize| u32::from_le_bytes(archive[i..i + 4].try_into().unwrap());
+    let end = (0..=archive.len() - 22)
+        .rev()
+        .find(|&i| u32_at(i) == 0x0605_4b50)
+        .expect("an end of central directory record");
+    let count = usize::from(u16_at(end + 10));
+    let mut at = u32_at(end + 16) as usize;
+    let mut entries = Vec::new();
+    for _ in 0..count {
+        assert_eq!(u32_at(at), 0x0201_4b50, "a central directory header");
+        let flags = u16_at(at + 8);
+        let name_len = usize::from(u16_at(at + 28));
+        let extra_len = usize::from(u16_at(at + 30));
+        let comment_len = usize::from(u16_at(at + 32));
+        entries.push((archive[at + 46..at + 46 + name_len].to_vec(), flags));
+        at += 46 + name_len + extra_len + comment_len;
+    }
+    entries
+}
+
+/// The entries are the archive's own, in its order and with its flags (read from the archive's
+/// central directory), and that order isn't the names' sorted order here: the config comes
+/// first, before `a.spi1d`.
+#[test]
+fn entries_are_the_archives_own() {
+    let config = "ocio_profile_version: 2\nsearch_path: .\nroles: {default: raw}\n\
+                  colorspaces:\n  - !<ColorSpace> {name: raw}\n";
+    let response = Oracle::get().call(
+        "with_files",
+        json!({"files": {"config.ocio": config, "a.spi1d": "Version 1\n"},
+               "command": "ocioz",
+               "args": {"archive": {"config": {"file": "$FILES/config.ocio"}}}}),
+        &[],
+    );
+    let result = &response.result;
+    let entries: Vec<(Vec<u8>, u16)> = result["entries"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{result}"))
+        .iter()
+        .map(|e| (bytes(&e["name"]), e["flag_bits"].as_u64().unwrap() as u16))
+        .collect();
+    let archive = &response.blobs[result["archive"].as_u64().unwrap() as usize];
+    assert_eq!(entries, central_directory(archive), "{result}");
+    let names: Vec<&Vec<u8>> = entries.iter().map(|(n, _)| n).collect();
+    let mut sorted = names.clone();
+    sorted.sort();
+    assert_ne!(names, sorted, "{result}");
 }
 
 /// An archive that isn't one, and a config that can't be archived, are refused at their stage.

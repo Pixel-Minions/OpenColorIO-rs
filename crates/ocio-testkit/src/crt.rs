@@ -96,6 +96,7 @@ mod ffi {
             locale: *const c_char,
             base: *mut c_void,
         ) -> *mut c_void;
+        pub(super) fn uselocale(locale: *mut c_void) -> *mut c_void;
         pub(super) fn strtod_l(
             s: *const c_char,
             end: *mut *mut c_char,
@@ -752,8 +753,9 @@ mod scan_ffi {
     // UCRT's `sscanf_s` is an inline function of <stdio.h> over this one
     // (ucrt/corecrt_wstdio.h, ucrt/stdio.h `_vsscanf_s_l`): `_Options` is the local scanf
     // options (0 unless legacy mode) with `_CRT_INTERNAL_SCANF_SECURECRT` (1) for the `_s`
-    // form, `_BufferCount` is `(size_t)-1`, `_Locale` is null, and `_ArgList` is the variadic
-    // arguments as x64's `va_list`: a pointer to 8-byte slots.
+    // form, `_BufferCount` is `(size_t)-1`, `_Locale` is null (the thread's locale; the
+    // reference passes the "C" locale instead), and `_ArgList` is the variadic arguments as
+    // x64's `va_list`: a pointer to 8-byte slots.
     #[cfg(windows)]
     unsafe extern "C" {
         pub(super) fn __stdio_common_vsscanf(
@@ -862,6 +864,13 @@ fn scan_args(format: &str) -> Vec<ScanArg> {
 /// wheel calls it: `sscanf_s` on Windows (UCRT, each `%s` and `%c` given its buffer's size),
 /// `sscanf` on Linux (glibc). Formats are limited to what OCIO's LUT readers use: `%d`, `%Ns`,
 /// `%c`, `%*s`, `%%`, literal characters and whitespace.
+///
+/// The scan runs in the classic "C" locale, explicitly: on Windows through the call's locale
+/// argument, on Linux through `uselocale` for the call. White space is then `\t`, `\n`, `\v`,
+/// `\f`, `\r` and space. The wheels scan in their process's locale: under Python the Windows
+/// wheel runs in the ANSI code page's (1252), where the UCRT also takes 0xA0 for white space
+/// (format white space, and what `%d` and `%s` skip first; a `%s` word still doesn't end at
+/// it). The port follows the "C" locale, as OCIO in a C++ application does (deviation D-1).
 pub fn sscanf(input: &[u8], format: &str) -> Scan {
     let kinds = scan_args(format);
     let len = input.iter().position(|&b| b == 0).unwrap_or(input.len());
@@ -916,13 +925,18 @@ pub fn sscanf(input: &[u8], format: &str) -> Scan {
     // slots past `n` are never read.
     #[cfg(windows)]
     let count = unsafe {
-        scan_ffi::__stdio_common_vsscanf(1, s, usize::MAX, f, std::ptr::null_mut(), slots.as_ptr())
+        scan_ffi::__stdio_common_vsscanf(1, s, usize::MAX, f, c_locale(), slots.as_ptr())
     };
+    // SAFETY: as above; `uselocale` sets this thread's locale to the "C" locale object, which
+    // lives for the process, and puts the previous one back after the call.
     #[cfg(target_os = "linux")]
     let count = unsafe {
-        scan_ffi::sscanf(
+        let previous = ffi::uselocale(c_locale());
+        let count = scan_ffi::sscanf(
             s, f, slots[0], slots[1], slots[2], slots[3], slots[4], slots[5], slots[6], slots[7],
-        )
+        );
+        ffi::uselocale(previous);
+        count
     };
     let values = kinds
         .iter()
@@ -1115,6 +1129,21 @@ mod tests {
         let s = sscanf(b"LUT: 3 4096 16f", "%*s %d %d %15s");
         assert_eq!(s.count, 3);
         assert_eq!(s.values[2], Scanned::Str(b"16f".to_vec()));
+    }
+
+    /// The scan runs in the "C" locale, whose white space is `isspace`'s in C17 7.4.1.10p2:
+    /// space, `\f`, `\n`, `\r`, `\t`, `\v`. So 0xA0 (a no-break space in code page 1252) is
+    /// neither skipped nor matched by white space in the format.
+    #[test]
+    fn scans_run_in_the_c_locale() {
+        let s = sscanf(b"Length\x0b\x0c\r\t\n 7", "Length %d");
+        assert_eq!((s.count, &s.values[..]), (1, &[Scanned::Int(7)][..]));
+        let s = sscanf(b"Length\xa07", "Length %d");
+        assert_eq!((s.count, &s.values[..]), (0, &[Scanned::Int(0)][..]));
+        let s = sscanf(b"\xa07", "%d");
+        assert_eq!(s.count, 0);
+        let s = sscanf(b"\xa0ab", "%3s");
+        assert_eq!(s.values, vec![Scanned::Str(b"\xa0ab".to_vec())]);
     }
 
     #[test]
