@@ -2,10 +2,10 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! The file transform: a port of the class in `src/OpenColorIO/transforms/FileTransform.cpp`
-//! @ v2.5.2. The format registry (`GetNumFormats`, `GetFormatNameByIndex`,
-//! `GetFormatExtensionByIndex`, `IsFormatExtensionSupported`), the file loading and
-//! `BuildFileTransformOps` come with the file formats (WP 4.1), its `CollectContextVariables`
-//! with WP 3.2a.
+//! @ v2.5.2, and of its format queries (`GetNumFormats`, `GetFormatNameByIndex`,
+//! `GetFormatExtensionByIndex`, `IsFormatExtensionSupported`) over the format registry
+//! (`file_format.rs`). The file loading and `BuildFileTransformOps` come with WP 4.1b-c, its
+//! `CollectContextVariables` with WP 3.2a.
 
 use std::fmt;
 
@@ -19,6 +19,7 @@ use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 use ocio_ops::utils::string_utils::c_str;
 
 use crate::transform::{put_c_str, validate_direction};
+use crate::transforms::file_format::{FormatCapabilities, FormatInfo, FormatRegistry};
 
 /// A transform read from a file (a LUT, a CDL, a CLF or CTF, ...), by path: relative paths are
 /// found through the config's search path. For the CDL formats, the CCC ID picks the CDL and
@@ -181,6 +182,52 @@ impl FileTransform {
             os.put_str(cdl_style_to_string(cdl_style));
         }
         os.put_str(">");
+    }
+}
+
+impl FileTransform {
+    /// The number of format names a file transform reads.
+    ///
+    /// Port of `FileTransform::GetNumFormats` (FileTransform.cpp:146-149 @ v2.5.2).
+    #[doc(alias = "GetNumFormats")]
+    pub fn num_formats() -> i32 {
+        FormatRegistry::instance().num_formats(FormatCapabilities::READ)
+    }
+
+    /// The name of the read format at `index`; `""` outside the list.
+    ///
+    /// Port of `FileTransform::GetFormatNameByIndex` (FileTransform.cpp:151-154 @ v2.5.2).
+    #[doc(alias = "GetFormatNameByIndex")]
+    pub fn format_name_by_index(index: i32) -> &'static [u8] {
+        FormatRegistry::instance()
+            .format_name_by_index(FormatCapabilities::READ, index)
+            .as_bytes()
+    }
+
+    /// The extension of the read format at `index`; `""` outside the list.
+    ///
+    /// Port of `FileTransform::GetFormatExtensionByIndex` (FileTransform.cpp:156-159 @
+    /// v2.5.2).
+    #[doc(alias = "GetFormatExtensionByIndex")]
+    pub fn format_extension_by_index(index: i32) -> &'static [u8] {
+        FormatRegistry::instance()
+            .format_extension_by_index(FormatCapabilities::READ, index)
+            .as_bytes()
+    }
+
+    /// Whether a format reads files of `extension`, ignoring case and a leading `.`.
+    ///
+    /// Port of `FileTransform::IsFormatExtensionSupported` (FileTransform.cpp:161-164 @
+    /// v2.5.2).
+    #[doc(alias = "IsFormatExtensionSupported")]
+    pub fn is_format_extension_supported(extension: impl AsRef<[u8]>) -> bool {
+        FormatRegistry::instance().is_format_extension_supported(extension)
+    }
+
+    /// Every format's names, extensions and capabilities, in the registry's order (owner
+    /// decision P4-5).
+    pub fn formats() -> Vec<FormatInfo> {
+        FormatRegistry::instance().format_infos()
     }
 }
 

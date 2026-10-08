@@ -2196,15 +2196,16 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/transforms/FileTransform.cpp"
 kind = "src"
-target = ["crates/ocio/src/transforms/file_transform.rs"]
+target = ["crates/ocio/src/transforms/file_transform.rs", "crates/ocio/src/transforms/file_format.rs"]
 status = "partial"
-note = "p3-transforms (3.1c): the class (28-144) and its operator<< (166-185), checked against the wheel in crates/ocio/tests/config_transforms_oracle.rs; the format registry, getLutData, loading and BuildFileTransformOps come with WP 4.1, CollectContextVariables with 3.2a"
+note = "p3-transforms (3.1c): the class (28-144) and its operator<< (166-185), checked against the wheel in crates/ocio/tests/config_transforms_oracle.rs; p4-registry 4.1a: the format statics (146-164) and the format registry (315-554) and FileFormat's defaults (556-593) in file_format.rs, checked against the wheel in crates/ocio/tests/file_formats_registry_oracle.rs; getLutData, loading and BuildFileTransformOps come with 4.1b-c, CollectContextVariables with 3.2a"
 
 [[file]]
 path = "src/OpenColorIO/transforms/FileTransform.h"
 kind = "src"
-target = ["crates/ocio/src/transforms/file_transform.rs"]
-status = "todo"
+target = ["crates/ocio/src/transforms/file_transform.rs", "crates/ocio/src/transforms/file_format.rs"]
+status = "partial"
+note = "p4-registry 4.1a: FormatInfo, FileFormat and FormatRegistry (53-157) in file_format.rs; CachedFile and the loading functions come with 4.1b-c"
 
 [[file]]
 path = "src/OpenColorIO/transforms/FixedFunctionTransform.cpp"
@@ -5027,7 +5028,7 @@ path = "tests/cpu/transforms/FileTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/file_transform_tests.rs"]
 status = "partial"
-note = "p3-transforms (3.1c): basic, validate; the others read LUT files (Phase 4), context_variables comes with 3.2a"
+note = "p3-transforms (3.1c): basic, validate; p4-registry 4.1a: all_formats, format_by_index, is_format_extension_supported and their helpers; the others read LUT files (Phase 4), context_variables comes with 3.2a"
 
 [[file]]
 path = "tests/cpu/transforms/FixedFunctionTransform_tests.cpp"
