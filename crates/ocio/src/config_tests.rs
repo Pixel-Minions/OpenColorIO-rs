@@ -489,3 +489,497 @@ fn upgrade_with_the_path_search_rule_at_index_1_is_refused() {
     assert_eq!(config.major_version(), 1);
     assert_eq!(config.file_rules().get().to_bytes(), before);
 }
+
+// The profiles of upstream's tests read as YAML (tests/cpu/Config_tests.cpp:2192-2313, 6890 @
+// v2.5.2).
+
+const PROFILE_V2: &str = "ocio_profile_version: 2\n\
+\n\
+environment:\n  \
+{}\n";
+
+const SIMPLE_PROFILE_A: &str = "search_path: luts\n\
+strictparsing: true\n\
+luma: [0.2126, 0.7152, 0.0722]\n\
+\n\
+roles:\n  \
+default: raw\n  \
+scene_linear: lnh\n\
+\n";
+
+const SIMPLE_PROFILE_DISPLAYS_LOOKS: &str = "displays:\n  \
+sRGB:\n    \
+- !<View> {name: RawView, colorspace: raw}\n    \
+- !<View> {name: LnhView, colorspace: lnh, looks: beauty}\n\
+\n\
+active_displays: []\n\
+active_views: []\n\
+\n\
+looks:\n  \
+- !<Look>\n    \
+name: beauty\n    \
+process_space: lnh\n    \
+transform: !<CDLTransform> {slope: [1, 2, 1]}\n\
+\n";
+
+const SIMPLE_PROFILE_CS_V2: &str = "\n\
+colorspaces:\n  \
+- !<ColorSpace>\n    \
+name: raw\n    \
+family: \"\"\n    \
+equalitygroup: \"\"\n    \
+bitdepth: unknown\n    \
+isdata: false\n    \
+allocation: uniform\n\
+\n  \
+- !<ColorSpace>\n    \
+name: log\n    \
+family: \"\"\n    \
+equalitygroup: \"\"\n    \
+bitdepth: unknown\n    \
+isdata: false\n    \
+allocation: uniform\n    \
+from_scene_reference: !<LogTransform> {base: 10}\n\
+\n  \
+- !<ColorSpace>\n    \
+name: lnh\n    \
+family: \"\"\n    \
+equalitygroup: \"\"\n    \
+bitdepth: unknown\n    \
+isdata: false\n    \
+allocation: uniform\n";
+
+const DEFAULT_RULES: &str = "file_rules:\n  \
+- !<Rule> {name: Default, colorspace: default}\n\
+\n";
+
+/// `PROFILE_V2_START` (Config_tests.cpp:2311-2312 @ v2.5.2).
+fn profile_v2_start() -> String {
+    [
+        PROFILE_V2,
+        SIMPLE_PROFILE_A,
+        DEFAULT_RULES,
+        SIMPLE_PROFILE_DISPLAYS_LOOKS,
+        SIMPLE_PROFILE_CS_V2,
+    ]
+    .concat()
+}
+
+/// `PROFILE_V2_DCS_START` (Config_tests.cpp:6890-6891 @ v2.5.2).
+fn profile_v2_dcs_start() -> String {
+    [
+        PROFILE_V2,
+        SIMPLE_PROFILE_A,
+        DEFAULT_RULES,
+        SIMPLE_PROFILE_DISPLAYS_LOOKS,
+    ]
+    .concat()
+}
+
+/// Port of `OCIO_ADD_TEST(Config, colorspace_duplicate)` @ v2.5.2.
+#[test]
+fn colorspace_duplicate() {
+    let _env = EnvGuard::new();
+    const SIMPLE_PROFILE: &str = "ocio_profile_version: 2\n\
+search_path: luts\n\
+roles:\n  \
+default: raw\n\
+file_rules:\n  \
+- !<Rule> {name: Default, colorspace: default}\n\
+displays:\n  \
+Disp1:\n    \
+- !<View> {name: View1, colorspace: raw}\n\
+active_displays: []\n\
+active_views: []\n\
+colorspaces:\n  \
+- !<ColorSpace>\n    \
+name: raw_duplicated\n    \
+name: raw\n\
+\n";
+
+    check_throw_what(
+        Config::create_from_stream(SIMPLE_PROFILE.as_bytes()),
+        "Key-value pair with key 'name' specified more than once. ",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(Config, cdltransform_duplicate)` @ v2.5.2.
+#[test]
+fn cdltransform_duplicate() {
+    let _env = EnvGuard::new();
+    const SIMPLE_PROFILE: &str = "ocio_profile_version: 2\n\
+search_path: luts\n\
+roles:\n  \
+default: raw\n\
+file_rules:\n  \
+- !<Rule> {name: Default, colorspace: default}\n\
+displays:\n  \
+Disp1:\n    \
+- !<View> {name: View1, colorspace: raw}\n\
+active_displays: []\n\
+active_views: []\n\
+colorspaces:\n  \
+- !<ColorSpace>\n    \
+name: raw\n    \
+to_scene_reference: !<CDLTransform> {slope: [1, 2, 1], slope: [1, 2, 1]}\n\
+\n";
+
+    check_throw_what(
+        Config::create_from_stream(SIMPLE_PROFILE.as_bytes()),
+        "Key-value pair with key 'slope' specified more than once. ",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(Config, searchpath_duplicate)` @ v2.5.2.
+#[test]
+fn searchpath_duplicate() {
+    let _env = EnvGuard::new();
+    const SIMPLE_PROFILE: &str = "ocio_profile_version: 2\n\
+search_path: luts\n\
+search_path: luts-dir\n\
+roles:\n  \
+default: raw\n\
+file_rules:\n  \
+- !<Rule> {name: Default, colorspace: default}\n\
+displays:\n  \
+Disp1:\n    \
+- !<View> {name: View1, colorspace: raw}\n\
+active_displays: []\n\
+active_views: []\n\
+colorspaces:\n  \
+- !<ColorSpace>\n    \
+name: raw\n\
+\n";
+
+    check_throw_what(
+        Config::create_from_stream(SIMPLE_PROFILE.as_bytes()),
+        "Key-value pair with key 'search_path' specified more than once. ",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(Config, roles)` @ v2.5.2.
+#[test]
+fn roles() {
+    let _env = EnvGuard::new();
+    const SIMPLE_PROFILE: &str = "ocio_profile_version: 1\n\
+strictparsing: false\n\
+roles:\n  \
+compositing_log: lgh\n  \
+default: raw\n  \
+scene_linear: lnh\n\
+colorspaces:\n  \
+- !<ColorSpace>\n      \
+name: raw\n  \
+- !<ColorSpace>\n      \
+name: lnh\n  \
+- !<ColorSpace>\n      \
+name: lgh\n\
+\n";
+
+    let config = Config::create_from_stream(SIMPLE_PROFILE.as_bytes()).unwrap();
+
+    assert_eq!(config.num_roles(), 3);
+
+    assert!(config.has_role("compositing_log"));
+    assert!(!config.has_role("cheese"));
+    assert!(!config.has_role(""));
+
+    assert_eq!(config.role_name(2), b"scene_linear");
+    assert_eq!(config.role_color_space_by_index(2), b"lnh");
+
+    assert_eq!(config.role_name(0), b"compositing_log");
+    assert_eq!(config.role_color_space_by_index(0), b"lgh");
+
+    assert_eq!(config.role_name(1), b"default");
+
+    assert_eq!(config.role_name(10), b"");
+    assert_eq!(config.role_color_space_by_index(10), b"");
+
+    assert_eq!(config.role_name(-4), b"");
+    assert_eq!(config.role_color_space_by_index(-4), b"");
+
+    // Test existing roles.
+    assert_eq!(config.role_color_space("scene_linear"), b"lnh");
+    assert_eq!(config.role_color_space("compositing_log"), b"lgh");
+
+    // Test a unknown role.
+    assert_eq!(config.role_color_space("wrong_role"), b"");
+
+    // Test an empty input.
+    assert_eq!(config.role_color_space(""), b"");
+}
+
+/// The views of `Config view` (Config_tests.cpp:3481-3698 @ v2.5.2), but its checks of the
+/// serialized config (`operator<<`), which come with the writer (WP 3.7): without its marker
+/// until then.
+#[test]
+fn view_without_serialization() {
+    const SIMPLE_PROFILE_HEADER: &str = "ocio_profile_version: 1\n\
+\n\
+search_path: luts\n\
+strictparsing: true\n\
+luma: [0.2126, 0.7152, 0.0722]\n\
+\n\
+roles:\n  \
+default: raw\n  \
+scene_linear: lnh\n\
+\n\
+displays:\n  \
+sRGB_1:\n    \
+- !<View> {name: View_1, colorspace: raw}\n    \
+- !<View> {name: View_2, colorspace: raw}\n  \
+sRGB_2:\n    \
+- !<View> {name: View_2, colorspace: raw}\n    \
+- !<View> {name: View_3, colorspace: raw}\n  \
+sRGB_3:\n    \
+- !<View> {name: View_3, colorspace: raw}\n    \
+- !<View> {name: View_1, colorspace: raw}\n\
+\n";
+
+    const SIMPLE_PROFILE_FOOTER: &str = "\n\
+colorspaces:\n  \
+- !<ColorSpace>\n    \
+name: raw\n    \
+family: \"\"\n    \
+equalitygroup: \"\"\n    \
+bitdepth: unknown\n    \
+isdata: false\n    \
+allocation: uniform\n\
+\n  \
+- !<ColorSpace>\n    \
+name: lnh\n    \
+family: \"\"\n    \
+equalitygroup: \"\"\n    \
+bitdepth: unknown\n    \
+isdata: false\n    \
+allocation: uniform\n";
+
+    let profile = |active: &str| [SIMPLE_PROFILE_HEADER, active, SIMPLE_PROFILE_FOOTER].concat();
+
+    let env = EnvGuard::new();
+    {
+        let config = Config::create_from_stream(
+            profile("active_displays: []\nactive_views: []\n").as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(config.default_view("sRGB_1"), b"View_1");
+        assert_eq!(config.num_views("sRGB_1"), 2);
+        assert_eq!(config.view("sRGB_1", 0), b"View_1");
+        assert_eq!(config.view("sRGB_1", 1), b"View_2");
+        // Invalid index.
+        assert_eq!(config.view("sRGB_1", 42), b"");
+
+        assert_eq!(config.default_view("sRGB_2"), b"View_2");
+        assert_eq!(config.num_views("sRGB_2"), 2);
+        assert_eq!(config.view("sRGB_2", 0), b"View_2");
+        assert_eq!(config.view("sRGB_2", 1), b"View_3");
+        assert_eq!(config.default_view("sRGB_3"), b"View_3");
+        assert_eq!(config.num_views("sRGB_3"), 2);
+        assert_eq!(config.view("sRGB_3", 0), b"View_3");
+        assert_eq!(config.view("sRGB_3", 1), b"View_1");
+    }
+
+    {
+        let config = Config::create_from_stream(
+            profile("active_displays: []\nactive_views: [View_3]\n").as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(config.default_view("sRGB_1"), b"View_1");
+        // The active views list is ignored, for a display, if it would remove all views.
+        assert_eq!(config.num_views("sRGB_1"), 2);
+        assert_eq!(config.view("sRGB_1", 0), b"View_1");
+        assert_eq!(config.view("sRGB_1", 1), b"View_2");
+        assert_eq!(config.default_view("sRGB_2"), b"View_3");
+        assert_eq!(config.num_views("sRGB_2"), 1);
+        assert_eq!(config.view("sRGB_2", 0), b"View_3");
+        assert_eq!(config.default_view("sRGB_3"), b"View_3");
+        assert_eq!(config.num_views("sRGB_3"), 1);
+        assert_eq!(config.view("sRGB_3", 0), b"View_3");
+
+        assert_eq!(
+            config.num_views_of_type(ViewType::DisplayDefined, "sRGB_1"),
+            2
+        );
+        assert_eq!(
+            config.num_views_of_type(ViewType::DisplayDefined, "sRGB_2"),
+            2
+        );
+        assert_eq!(
+            config.num_views_of_type(ViewType::DisplayDefined, "sRGB_3"),
+            2
+        );
+    }
+
+    {
+        let config = Config::create_from_stream(
+            profile("active_displays: []\nactive_views: [View_3, View_2, View_1]\n").as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(config.default_view("sRGB_1"), b"View_2");
+        assert_eq!(config.num_views("sRGB_1"), 2);
+        assert_eq!(config.view("sRGB_1", 0), b"View_2");
+        assert_eq!(config.view("sRGB_1", 1), b"View_1");
+        assert_eq!(config.default_view("sRGB_2"), b"View_3");
+        assert_eq!(config.num_views("sRGB_2"), 2);
+        assert_eq!(config.view("sRGB_2", 0), b"View_3");
+        assert_eq!(config.view("sRGB_2", 1), b"View_2");
+        assert_eq!(config.default_view("sRGB_3"), b"View_3");
+        assert_eq!(config.num_views("sRGB_3"), 2);
+        assert_eq!(config.view("sRGB_3", 0), b"View_3");
+        assert_eq!(config.view("sRGB_3", 1), b"View_1");
+    }
+
+    {
+        env.set(&[("OCIO_ACTIVE_VIEWS", " View_3, View_2")]);
+        let config = Config::create_from_stream(
+            profile("active_displays: []\nactive_views: []\n").as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(config.default_view("sRGB_1"), b"View_2");
+        assert_eq!(config.num_views("sRGB_1"), 1);
+        assert_eq!(config.view("sRGB_1", 0), b"View_2");
+        assert_eq!(config.default_view("sRGB_2"), b"View_3");
+        assert_eq!(config.num_views("sRGB_2"), 2);
+        assert_eq!(config.view("sRGB_2", 0), b"View_3");
+        assert_eq!(config.view("sRGB_2", 1), b"View_2");
+        assert_eq!(config.default_view("sRGB_3"), b"View_3");
+        assert_eq!(config.num_views("sRGB_3"), 1);
+        assert_eq!(config.view("sRGB_3", 0), b"View_3");
+    }
+
+    // No value, and no value but a misleading space.
+    for value in ["", " "] {
+        env.set(&[("OCIO_ACTIVE_VIEWS", value)]);
+        let config = Config::create_from_stream(
+            profile("active_displays: []\nactive_views: []\n").as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(config.default_view("sRGB_1"), b"View_1");
+        assert_eq!(config.num_views("sRGB_1"), 2);
+        assert_eq!(config.view("sRGB_1", 0), b"View_1");
+        assert_eq!(config.view("sRGB_1", 1), b"View_2");
+        assert_eq!(config.default_view("sRGB_2"), b"View_2");
+        assert_eq!(config.num_views("sRGB_2"), 2);
+        assert_eq!(config.view("sRGB_2", 0), b"View_2");
+        assert_eq!(config.view("sRGB_2", 1), b"View_3");
+        assert_eq!(config.default_view("sRGB_3"), b"View_3");
+        assert_eq!(config.num_views("sRGB_3"), 2);
+        assert_eq!(config.view("sRGB_3", 0), b"View_3");
+        assert_eq!(config.view("sRGB_3", 1), b"View_1");
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Config, key_value_error)` @ v2.5.2.
+#[test]
+fn key_value_error() {
+    let _env = EnvGuard::new();
+    // Check the line number contained in the parser error messages.
+
+    const SHORT_PROFILE: &str = "ocio_profile_version: 2\n\
+strictparsing: false\n\
+roles:\n  \
+default: raw\n\
+displays:\n  \
+sRGB:\n  \
+- !<View> {name: Raw, colorspace: raw}\n\
+\n\
+colorspaces:\n  \
+- !<ColorSpace>\n    \
+name: raw\n    \
+to_scene_reference: !<MatrixTransform> \n                      \
+{\n                           \
+matrix: [1, 0, 0, 0, 0, 1]\n                      \
+}\n    \
+allocation: uniform\n\
+\n";
+
+    check_throw_what(
+        Config::create_from_stream(SHORT_PROFILE.as_bytes()),
+        "Error: Loading the OCIO profile failed. At line 14, the value parsing of the key \
+         'matrix' from 'MatrixTransform' failed: 'matrix' values must be 16 numbers. Found '6'.",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(Config, unknown_key_error)` @ v2.5.2.
+#[test]
+fn unknown_key_error() {
+    let _env = EnvGuard::new();
+    let oss = profile_v2_start() + "    dummyKey: dummyValue\n";
+
+    let (config, log) = crate::test_env::capture_log(|| Config::create_from_stream(oss.as_bytes()));
+    assert!(config.is_ok());
+    let output = log.concat();
+    assert!(output.starts_with(
+        b"[OpenColorIO Warning]: At line 56, unknown key 'dummyKey' in 'ColorSpace'."
+    ));
+}
+
+/// Port of `OCIO_ADD_TEST(Config, faulty_config_file)` @ v2.5.2.
+#[test]
+fn faulty_config_file() {
+    let _env = EnvGuard::new();
+    check_throw_what(
+        Config::create_from_stream(b"/usr/tmp/not_existing.ocio"),
+        "Error: Loading the OCIO profile failed.",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(Config, display_color_spaces_errors)` @ v2.5.2.
+#[test]
+fn display_color_spaces_errors() {
+    let _env = EnvGuard::new();
+    {
+        const STR_DCS: &str = "\n\
+display_colorspaces:\n  \
+- !<ColorSpace>\n    \
+name: dcs1\n    \
+family: \"\"\n    \
+equalitygroup: \"\"\n    \
+bitdepth: unknown\n    \
+isdata: false\n    \
+allocation: uniform\n    \
+from_scene_reference: !<ExponentTransform> {value: [2.4, 2.4, 2.4, 1], direction: inverse}\n\
+\n  \
+- !<ColorSpace>\n    \
+name: dcs2\n    \
+family: \"\"\n    \
+equalitygroup: \"\"\n    \
+bitdepth: unknown\n    \
+isdata: false\n    \
+allocation: uniform\n    \
+to_display_reference: !<ExponentTransform> {value: [2.4, 2.4, 2.4, 1]}\n";
+        let s = profile_v2_dcs_start() + STR_DCS + SIMPLE_PROFILE_CS_V2;
+
+        check_throw_what(
+            Config::create_from_stream(s.as_bytes()),
+            "'from_scene_reference' cannot be used for a display color space",
+        );
+    }
+    {
+        const STR_DCS: &str = "\n\
+display_colorspaces:\n  \
+- !<ColorSpace>\n    \
+name: dcs1\n    \
+family: \"\"\n    \
+equalitygroup: \"\"\n    \
+bitdepth: unknown\n    \
+isdata: false\n    \
+allocation: uniform\n    \
+from_display_reference: !<ExponentTransform> {value: [2.4, 2.4, 2.4, 1], direction: inverse}\n\
+\n  \
+- !<ColorSpace>\n    \
+name: dcs2\n    \
+family: \"\"\n    \
+equalitygroup: \"\"\n    \
+bitdepth: unknown\n    \
+isdata: false\n    \
+allocation: uniform\n    \
+to_scene_reference: !<ExponentTransform> {value: [2.4, 2.4, 2.4, 1]}\n";
+        let s = profile_v2_dcs_start() + STR_DCS + SIMPLE_PROFILE_CS_V2;
+
+        check_throw_what(
+            Config::create_from_stream(s.as_bytes()),
+            "'to_scene_reference' cannot be used for a display color space",
+        );
+    }
+}

@@ -1,0 +1,681 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright Contributors to the OpenColorIO Project.
+
+//! Configs read from YAML (`Config::CreateFromStream`) against the wheel, through the
+//! oracle's `config_calls`: the error, byte for byte, or the config's state through its
+//! getters (the version, name, description, family separator, search path, environment and its
+//! mode, strict parsing, luma, roles, color spaces, displays and their views with each view's
+//! getters, shared and virtual views, active and inactive lists, looks, view transforms,
+//! named transforms, and the file and viewing rules by their text); and the warnings logged.
+//!
+//! The configs: hand-written ones for each key of the config's loader and its errors, and the
+//! wheel's built-in configs (their YAML, `builtin_config_source`).
+//!
+//! Upstream's reader checks the config against its version after loading
+//! (`checkVersionConsistency`, WP 3.8c): the cases use only what their versions allow.
+
+use std::sync::{Arc, Mutex, PoisonError};
+
+use ocio::{
+    ColorSpaceVisibility, Config, EnvironmentMode, NamedTransformVisibility,
+    SearchReferenceSpaceType, ViewType,
+};
+use ocio_ops::logging::{reset_to_default_logging_function, set_logging_function};
+use ocio_testkit::Oracle;
+use ocio_testkit::oracle::BatchCall;
+use ocio_testkit::oracle_values::{bytes, hex, log};
+use serde_json::{Value, json};
+
+/// Serializes the tests that replace the logging function.
+static LOGGING: Mutex<()> = Mutex::new(());
+
+/// A config, or the message of the error that refused it.
+type Loaded = Result<Arc<Config>, Vec<u8>>;
+
+/// The port's config of `text`, or its error's message, and what OCIO logged meanwhile.
+fn port_load(text: &[u8]) -> (Loaded, Vec<Vec<u8>>) {
+    let _lock = LOGGING.lock().unwrap_or_else(PoisonError::into_inner);
+    let messages = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&messages);
+    set_logging_function(Some(Arc::new(move |m: &[u8]| {
+        sink.lock().unwrap().push(m.to_vec());
+    })))
+    .unwrap();
+    let loaded = Config::create_from_stream(text).map_err(|e| e.what().to_vec());
+    reset_to_default_logging_function();
+    let log = messages.lock().unwrap().clone();
+    (loaded, log)
+}
+
+fn s(v: &[u8]) -> Value {
+    json!({"bytes": hex(v)})
+}
+
+fn list(items: impl Iterator<Item = Vec<u8>>) -> Value {
+    Value::Array(items.map(|v| s(&v)).collect())
+}
+
+fn view_type(t: ViewType) -> &'static str {
+    match t {
+        ViewType::Shared => "VIEW_SHARED",
+        ViewType::DisplayDefined => "VIEW_DISPLAY_DEFINED",
+    }
+}
+
+/// A getter call on the config: its name, its arguments, and the port's value as the oracle
+/// writes it (an object by its text alone).
+type Getter = (String, Vec<Value>, Value);
+
+fn g(name: &str, args: Vec<Value>, port: Value) -> Getter {
+    (name.to_string(), args, port)
+}
+
+/// The getters of the config, and the port's values.
+fn getters(c: &Config) -> Vec<Getter> {
+    let mut out = vec![
+        g("getMajorVersion", vec![], json!(c.major_version())),
+        g("getMinorVersion", vec![], json!(c.minor_version())),
+        g("getName", vec![], s(c.name())),
+        g("getDescription", vec![], s(c.description())),
+        g("getFamilySeparator", vec![], s(&[c.family_separator()])),
+        g("getSearchPath", vec![], s(&c.search_path())),
+        g("getWorkingDir", vec![], s(&c.working_dir())),
+        g(
+            "getEnvironmentMode",
+            vec![],
+            json!({"enum": match c.environment_mode() {
+                EnvironmentMode::Unknown => "ENV_ENVIRONMENT_UNKNOWN",
+                EnvironmentMode::LoadPredefined => "ENV_ENVIRONMENT_LOAD_PREDEFINED",
+                EnvironmentMode::LoadAll => "ENV_ENVIRONMENT_LOAD_ALL",
+            }}),
+        ),
+        g(
+            "getEnvironmentVarNames",
+            vec![],
+            list(
+                (0..c.num_environment_vars()).map(|i| c.environment_var_name_by_index(i).to_vec()),
+            ),
+        ),
+        g(
+            "isStrictParsingEnabled",
+            vec![],
+            json!(c.is_strict_parsing_enabled()),
+        ),
+        g(
+            "getDefaultLumaCoefs",
+            vec![],
+            Value::Array(
+                c.default_luma_coefs()
+                    .iter()
+                    .map(|v| json!({"f64": v.to_bits()}))
+                    .collect(),
+            ),
+        ),
+        g(
+            "getRoleNames",
+            vec![],
+            list((0..c.num_roles()).map(|i| c.role_name(i).to_vec())),
+        ),
+        g(
+            "getColorSpaceNames",
+            vec![
+                json!({"enum": "SEARCH_REFERENCE_SPACE_ALL"}),
+                json!({"enum": "COLORSPACE_ALL"}),
+            ],
+            list(
+                (0..c.num_color_spaces_with(
+                    SearchReferenceSpaceType::All,
+                    ColorSpaceVisibility::All,
+                ))
+                    .map(|i| {
+                        c.color_space_name_by_index_with(
+                            SearchReferenceSpaceType::All,
+                            ColorSpaceVisibility::All,
+                            i,
+                        )
+                        .to_vec()
+                    }),
+            ),
+        ),
+        g(
+            "getActiveDisplays",
+            vec![],
+            list(
+                (0..c.num_active_displays())
+                    .map(|i| c.active_display(i).unwrap_or_default().to_vec()),
+            ),
+        ),
+        g(
+            "getActiveViews",
+            vec![],
+            list((0..c.num_active_views()).map(|i| c.active_view(i).unwrap_or_default().to_vec())),
+        ),
+        g(
+            "getInactiveColorSpaces",
+            vec![],
+            s(c.inactive_color_spaces()),
+        ),
+        g(
+            "getLookNames",
+            vec![],
+            list((0..c.num_looks()).map(|i| c.look_name_by_index(i).to_vec())),
+        ),
+        g(
+            "getViewTransformNames",
+            vec![],
+            list((0..c.num_view_transforms()).map(|i| c.view_transform_name_by_index(i).to_vec())),
+        ),
+        g(
+            "getDefaultViewTransformName",
+            vec![],
+            s(c.default_view_transform_name()),
+        ),
+        g(
+            "getNamedTransformNames",
+            vec![json!({"enum": "NAMEDTRANSFORM_ALL"})],
+            list(
+                (0..c.num_named_transforms_with(NamedTransformVisibility::All)).map(|i| {
+                    c.named_transform_name_by_index_with(NamedTransformVisibility::All, i)
+                        .to_vec()
+                }),
+            ),
+        ),
+        g("getFileRules", vec![], s(&c.file_rules().get().to_bytes())),
+        g(
+            "getViewingRules",
+            vec![],
+            s(&c.viewing_rules().get().to_bytes()),
+        ),
+        g(
+            "getDisplaysAll",
+            vec![],
+            list((0..c.num_displays_all()).map(|i| c.display_all(i).to_vec())),
+        ),
+    ];
+    for i in 0..c.num_roles() {
+        let role = c.role_name(i);
+        out.push(g(
+            "getRoleColorSpace",
+            vec![s(role)],
+            s(c.role_color_space(role)),
+        ));
+    }
+    let view_getters = |out: &mut Vec<Getter>, display: &[u8], view: &[u8]| {
+        let args = vec![s(display), s(view)];
+        out.push(g("hasView", args.clone(), json!(c.has_view(display, view))));
+        out.push(g(
+            "isViewShared",
+            args.clone(),
+            json!(c.is_view_shared(display, view)),
+        ));
+        out.push(g(
+            "getDisplayViewTransformName",
+            args.clone(),
+            s(c.display_view_transform_name(display, view)),
+        ));
+        out.push(g(
+            "getDisplayViewColorSpaceName",
+            args.clone(),
+            s(c.display_view_color_space_name(display, view)),
+        ));
+        out.push(g(
+            "getDisplayViewLooks",
+            args.clone(),
+            s(c.display_view_looks(display, view)),
+        ));
+        out.push(g(
+            "getDisplayViewRule",
+            args.clone(),
+            s(c.display_view_rule(display, view)),
+        ));
+        out.push(g(
+            "getDisplayViewDescription",
+            args,
+            s(c.display_view_description(display, view)),
+        ));
+    };
+    for i in 0..c.num_displays_all() {
+        let display = c.display_all(i).to_vec();
+        out.push(g(
+            "getViews",
+            vec![s(&display)],
+            list((0..c.num_views(&display)).map(|j| c.view(&display, j).to_vec())),
+        ));
+        for t in [ViewType::Shared, ViewType::DisplayDefined] {
+            let views: Vec<Vec<u8>> = (0..c.num_views_of_type(t, &display))
+                .map(|j| c.view_of_type(t, &display, j).to_vec())
+                .collect();
+            out.push(g(
+                "getViews",
+                vec![json!({"enum": view_type(t)}), s(&display)],
+                list(views.iter().cloned()),
+            ));
+            for view in views {
+                view_getters(&mut out, &display, &view);
+            }
+        }
+    }
+    for j in 0..c.num_views_of_type(ViewType::Shared, b"") {
+        let view = c.view_of_type(ViewType::Shared, b"", j).to_vec();
+        view_getters(&mut out, b"", &view);
+    }
+    for t in [ViewType::Shared, ViewType::DisplayDefined] {
+        out.push(g(
+            "getVirtualDisplayViews",
+            vec![json!({"enum": view_type(t)})],
+            list(
+                (0..c.virtual_display_num_views(t)).map(|j| c.virtual_display_view(t, j).to_vec()),
+            ),
+        ));
+    }
+    out
+}
+
+/// A result as the port writes it: a string the binding couldn't decode as its bytes, an
+/// object by its text.
+fn normalized(call: &Value) -> Value {
+    match (call.get("result"), call.get("undecodable")) {
+        (Some(result), _) => match result.get("repr") {
+            Some(repr) => match repr.get("undecodable") {
+                Some(h) => json!({"bytes": h}),
+                None => repr.clone(),
+            },
+            None => result.clone(),
+        },
+        (None, Some(h)) => json!({"bytes": h}),
+        _ => call.clone(),
+    }
+}
+
+/// Checks each config against the wheel; panics listing every difference.
+fn check(cases: &[(&str, Vec<u8>)]) {
+    let ported: Vec<_> = cases.iter().map(|(_, text)| port_load(text)).collect();
+    let calls: Vec<BatchCall<'_>> = cases
+        .iter()
+        .zip(&ported)
+        .map(|((_, text), (loaded, _))| {
+            let calls: Vec<Value> = match loaded {
+                Ok(config) => getters(config)
+                    .into_iter()
+                    .map(|(name, args, _)| json!({"call": name, "args": args}))
+                    .collect(),
+                Err(_) => Vec::new(),
+            };
+            BatchCall {
+                cmd: "config_calls",
+                args: json!({"config": {"yaml": {"bytes": hex(text)}}, "calls": calls}),
+                blobs: Vec::new(),
+            }
+        })
+        .collect();
+    let wheel: Vec<Value> = Oracle::get()
+        .batch(&calls, true)
+        .into_iter()
+        .map(|r| r.expect("config_calls").result)
+        .collect();
+
+    let mut failures = Vec::new();
+    for (((label, _), (loaded, port_log)), w) in cases.iter().zip(&ported).zip(&wheel) {
+        let wheel_log = log(&w["config_log"]);
+        if &wheel_log != port_log {
+            failures.push(format!(
+                "{label}: log\n  wheel {:?}\n  port  {:?}",
+                wheel_log
+                    .iter()
+                    .map(|m| String::from_utf8_lossy(m).into_owned())
+                    .collect::<Vec<_>>(),
+                port_log
+                    .iter()
+                    .map(|m| String::from_utf8_lossy(m).into_owned())
+                    .collect::<Vec<_>>()
+            ));
+        }
+        let config = &w["config"];
+        match loaded {
+            Err(message) => {
+                let wheel_message = match config.get("undecodable") {
+                    Some(h) => bytes(&json!({"bytes": h})),
+                    None if config.is_null() => b"(the wheel loads it)".to_vec(),
+                    None => bytes(&config["exception"]["message"]),
+                };
+                if &wheel_message != message {
+                    failures.push(format!(
+                        "{label}: error\n  wheel {}\n  port  {}",
+                        String::from_utf8_lossy(&wheel_message),
+                        String::from_utf8_lossy(message)
+                    ));
+                }
+            }
+            Ok(c) => {
+                if !config.is_null() {
+                    failures.push(format!("{label}: the wheel fails: {config}"));
+                    continue;
+                }
+                let results = w["calls"].as_array().unwrap();
+                for ((name, args, port), call) in getters(c).iter().zip(results) {
+                    let wheel = normalized(call);
+                    if &wheel != port {
+                        failures.push(format!(
+                            "{label}: {name}{args:?}\n  wheel {wheel}\n  port  {port}"
+                        ));
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} differences:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+/// A version 2 config of a color space `raw`, the default role's, with `extra` after it.
+fn v2(extra: &str) -> Vec<u8> {
+    format!(
+        "ocio_profile_version: 2\nenvironment: {{}}\nroles: {{default: raw}}\ncolorspaces:\n  \
+         - !<ColorSpace> {{name: raw}}\n{extra}"
+    )
+    .into_bytes()
+}
+
+/// Each key of the config's loader, its values and its errors.
+#[test]
+fn configs_load_as_in_the_wheel() {
+    let cases: Vec<(&str, Vec<u8>)> = vec![
+        ("minimal", v2("")),
+        (
+            "version 1",
+            b"ocio_profile_version: 1\nroles: {default: raw}\ncolorspaces:\n  - !<ColorSpace> \
+              {name: raw, to_reference: !<LogTransform> {}}\n"
+                .to_vec(),
+        ),
+        (
+            "version 2.5",
+            b"ocio_profile_version: 2.5\nroles: {default: raw}\n".to_vec(),
+        ),
+        ("no version", b"roles: {default: raw}\n".to_vec()),
+        ("version x", b"ocio_profile_version: x\n".to_vec()),
+        ("version 2.x", b"ocio_profile_version: 2.x\n".to_vec()),
+        ("version 1.2.3", b"ocio_profile_version: 1.2.3\n".to_vec()),
+        ("version 3", b"ocio_profile_version: 3\n".to_vec()),
+        ("version 2.9", b"ocio_profile_version: 2.9\n".to_vec()),
+        ("version 0", b"ocio_profile_version: 0\n".to_vec()),
+        ("version -1", b"ocio_profile_version: -1\n".to_vec()),
+        (
+            "version ' 2'",
+            b"ocio_profile_version: \" 2\"\nroles: {default: raw}\n".to_vec(),
+        ),
+        (
+            "version 2abc",
+            b"ocio_profile_version: 2abc\nroles: {default: raw}\n".to_vec(),
+        ),
+        ("version []", b"ocio_profile_version: [2]\n".to_vec()),
+        (
+            "version 99999999999",
+            b"ocio_profile_version: 99999999999\n".to_vec(),
+        ),
+        ("empty", b"".to_vec()),
+        ("a scalar", b"abc".to_vec()),
+        ("a sequence", b"[1, 2]".to_vec()),
+        ("parse error", b"ocio_profile_version: [2\n".to_vec()),
+        ("no default role", b"ocio_profile_version: 2\n".to_vec()),
+        (
+            "environment",
+            b"ocio_profile_version: 2\nenvironment: {A: a, B: \"\", C: ~}\nroles: {default: \
+              raw}\n"
+                .to_vec(),
+        ),
+        (
+            "no environment",
+            b"ocio_profile_version: 2\nroles: {default: raw}\n".to_vec(),
+        ),
+        (
+            "environment twice",
+            b"ocio_profile_version: 2\nenvironment: {}\nenvironment: {}\n".to_vec(),
+        ),
+        (
+            "environment list",
+            b"ocio_profile_version: 2\nenvironment: [a]\nroles: {default: raw}\n".to_vec(),
+        ),
+        (
+            "search paths",
+            b"ocio_profile_version: 2\nsearch_path: a:b:c\nroles: {default: raw}\n".to_vec(),
+        ),
+        (
+            "search path list",
+            b"ocio_profile_version: 2\nsearch_path: [a, \"b:c\", \"\"]\nroles: {default: raw}\n"
+                .to_vec(),
+        ),
+        (
+            "resource path",
+            b"ocio_profile_version: 2\nresource_path: r\nroles: {default: raw}\n".to_vec(),
+        ),
+        (
+            "strictparsing",
+            b"ocio_profile_version: 2\nstrictparsing: false\nroles: {default: raw}\n".to_vec(),
+        ),
+        (
+            "strictparsing bad",
+            b"ocio_profile_version: 2\nstrictparsing: maybe\nroles: {default: raw}\n".to_vec(),
+        ),
+        (
+            "name and description",
+            b"ocio_profile_version: 2\nname: \"n\\n\\n\"\ndescription: |\n  a\n  b\n\nroles: \
+              {default: raw}\n"
+                .to_vec(),
+        ),
+        (
+            "family separator",
+            b"ocio_profile_version: 2\nfamily_separator: \"-\"\nroles: {default: raw}\n".to_vec(),
+        ),
+        (
+            "family separator long",
+            b"ocio_profile_version: 2\nfamily_separator: ab\nroles: {default: raw}\n".to_vec(),
+        ),
+        (
+            "family separator bad",
+            b"ocio_profile_version: 2\nfamily_separator: \"\\t\"\nroles: {default: raw}\n".to_vec(),
+        ),
+        (
+            "family separator v1",
+            b"ocio_profile_version: 1\nfamily_separator: \"-\"\nroles: {default: raw}\n".to_vec(),
+        ),
+        (
+            "luma",
+            b"ocio_profile_version: 2\nluma: [0.1, 0.2, 0.7]\nroles: {default: raw}\n".to_vec(),
+        ),
+        (
+            "luma short",
+            b"ocio_profile_version: 2\nluma: [0.1, 0.2]\nroles: {default: raw}\n".to_vec(),
+        ),
+        (
+            "roles list",
+            b"ocio_profile_version: 2\nroles: [default]\n".to_vec(),
+        ),
+        (
+            "roles many",
+            b"ocio_profile_version: 2\nroles: {default: raw, scene_linear: lin, Data: d, b: }\n"
+                .to_vec(),
+        ),
+        (
+            "displays",
+            v2(
+                "displays:\n  sRGB:\n    - !<View> {name: Raw, colorspace: raw}\n    - \
+                !<View> {name: Film, colorspace: raw, looks: \"+a\", rule: r, description: \
+                \"d\\n\"}\n  P3:\n    - !<View> {name: Raw, colorspace: raw}\n",
+            ),
+        ),
+        ("displays not a map", v2("displays: [sRGB]\n")),
+        ("display views not a list", v2("displays:\n  sRGB: x\n")),
+        (
+            "view without name",
+            v2("displays:\n  sRGB:\n    - !<View> {colorspace: raw}\n"),
+        ),
+        (
+            "view without color space",
+            v2("displays:\n  sRGB:\n    - !<View> {name: v}\n"),
+        ),
+        (
+            "view with both",
+            v2(
+                "displays:\n  sRGB:\n    - !<View> {name: v, colorspace: raw, view_transform: \
+                vt, display_colorspace: raw}\n",
+            ),
+        ),
+        (
+            "view transform view",
+            v2(
+                "displays:\n  sRGB:\n    - !<View> {name: v, view_transform: vt, \
+                display_colorspace: raw}\n",
+            ),
+        ),
+        (
+            "view unknown key",
+            v2("displays:\n  sRGB:\n    - !<View> {name: v, colorspace: raw, foo: 1}\n"),
+        ),
+        (
+            "view other tag",
+            v2(
+                "displays:\n  sRGB:\n    - !<Foo> {name: v, colorspace: raw}\n    - !<View> \
+                {name: w, colorspace: raw}\n",
+            ),
+        ),
+        (
+            "shared views",
+            v2(
+                "shared_views:\n  - !<View> {name: s, colorspace: raw}\ndisplays:\n  sRGB:\n    \
+                - !<View> {name: Raw, colorspace: raw}\n    - !<Views> [s]\n",
+            ),
+        ),
+        ("shared views not a list", v2("shared_views: {a: b}\n")),
+        (
+            "virtual display",
+            v2(
+                "shared_views:\n  - !<View> {name: s, colorspace: raw}\nvirtual_display:\n  - \
+                !<View> {name: v, colorspace: raw}\n  - !<Views> [s]\n  - !<Foo> {}\n",
+            ),
+        ),
+        (
+            "active lists",
+            v2(
+                "displays:\n  sRGB:\n    - !<View> {name: Raw, colorspace: raw}\n  P3:\n    - \
+                !<View> {name: Raw, colorspace: raw}\nactive_displays: [P3, \"a, b\"]\n\
+                active_views: [Raw]\ninactive_colorspaces: [raw, x]\n",
+            ),
+        ),
+        ("active displays not a list", v2("active_displays: P3\n")),
+        (
+            "colorspaces",
+            v2(
+                "  - !<ColorSpace> {name: lin, family: f}\n  - !<Foo> {name: x}\ndisplay_colorspaces:\n  \
+                - !<ColorSpace> {name: d, to_display_reference: !<LogTransform> {}}\n",
+            ),
+        ),
+        (
+            "colorspace defined twice",
+            v2("  - !<ColorSpace> {name: raw}\n"),
+        ),
+        (
+            "colorspaces not a list",
+            b"ocio_profile_version: 2\nroles: {default: raw}\ncolorspaces: {a: b}\n".to_vec(),
+        ),
+        (
+            "looks",
+            v2("looks:\n  - !<Look> {name: l, process_space: raw}\n  - !<Foo> {}\n"),
+        ),
+        (
+            "view transforms",
+            v2(
+                "view_transforms:\n  - !<ViewTransform> {name: vt, from_scene_reference: \
+                !<LogTransform> {}}\ndefault_view_transform: vt\n",
+            ),
+        ),
+        (
+            "named transforms",
+            v2(
+                "named_transforms:\n  - !<NamedTransform> {name: nt, transform: \
+                !<LogTransform> {}}\n  - !<NamedTransform> {name: nt, transform: \
+                !<LogTransform> {}}\n",
+            ),
+        ),
+        (
+            "file rules",
+            v2(
+                "file_rules:\n  - !<Rule> {name: exr, colorspace: raw, pattern: \"*\", \
+                extension: exr}\n  - !<Rule> {name: re, colorspace: raw, regex: \".*\\\\.dpx\"}\n  \
+                - !<Rule> {name: ColorSpaceNamePathSearch}\n  - !<Rule> {name: Default, \
+                colorspace: raw, custom: {a: b}}\n",
+            ),
+        ),
+        (
+            "file rules without default",
+            v2(
+                "file_rules:\n  - !<Rule> {name: exr, colorspace: raw, pattern: \"*\", \
+                extension: exr}\n",
+            ),
+        ),
+        (
+            "file rules default not last",
+            v2(
+                "file_rules:\n  - !<Rule> {name: Default, colorspace: raw}\n  - !<Rule> {name: \
+                exr, colorspace: raw, pattern: \"*\", extension: exr}\n",
+            ),
+        ),
+        (
+            "file rules errors",
+            v2(
+                "file_rules:\n  - !<Rule> {name: r, colorspace: raw, regex: x, pattern: y}\n  - \
+                !<Rule> {name: Default, colorspace: raw}\n",
+            ),
+        ),
+        (
+            "file rules default mismatch",
+            v2("file_rules:\n  - !<Rule> {name: Default, colorspace: other}\n"),
+        ),
+        (
+            "file rules v1",
+            b"ocio_profile_version: 1\nfile_rules:\n  - !<Rule> {name: Default, colorspace: \
+              raw}\n"
+                .to_vec(),
+        ),
+        (
+            "viewing rules",
+            v2(
+                "viewing_rules:\n  - !<Rule> {name: r1, colorspaces: raw}\n  - !<Rule> {name: \
+                r2, encodings: [log, sdr-video], custom: {k: v}}\n  - !<Foo> {}\n",
+            ),
+        ),
+        (
+            "viewing rules errors",
+            v2("viewing_rules:\n  - !<Rule> {name: r1}\n"),
+        ),
+        ("unknown keys", v2("foo: 1\n\"b\\0r\": 2\n")),
+        (
+            "keys twice",
+            b"ocio_profile_version: 2\nroles: {default: raw}\nname: a\nname: b\n".to_vec(),
+        ),
+    ];
+    check(&cases);
+}
+
+/// The wheel's built-in configs, from their YAML.
+#[test]
+fn builtin_configs_load_as_in_the_wheel() {
+    let names = Oracle::get()
+        .call("builtin_config_names", json!({}), &[])
+        .result;
+    let mut cases = Vec::new();
+    let names: Vec<String> = names
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n["name"].as_str().unwrap().to_string())
+        .collect();
+    for name in &names {
+        let source = Oracle::get().call("builtin_config_source", json!({"name": name}), &[]);
+        cases.push((name.as_str(), source.blobs[0].clone()));
+    }
+    check(&cases);
+}

@@ -8,8 +8,8 @@
 //! So far: the typed loaders and their messages, the helpers that report unknown keys, bad
 //! values and repeated keys, and the transforms ([`load_transform`]), except ExposureContrast
 //! and the grading transforms (Phase 5); and the color spaces, looks, view transforms and
-//! named transforms, with their descriptions and interchange attributes. The views, the rules
-//! and the config come with WP 3.3j-m.
+//! named transforms, with their descriptions and interchange attributes; the views, the file and
+//! viewing rules, and the config itself ([`load_config`], [`read`]: `Config::CreateFromStream`).
 //!
 //! **Errors.** A loader fails with OCIO's `Exception` or with an exception of yaml-cpp, which
 //! upstream lets through (a key that isn't a string, a zombie node): [`LoadError`]. Upstream
@@ -21,27 +21,32 @@
 //! passes a `std::string` on with `c_str()` (to a setter, an enum's `FromString`), the port
 //! passes the bytes up to the first NUL.
 
-// The config loader (WP 3.3l-m) calls these; until then only the tests do.
-#![allow(dead_code)]
-
 use std::collections::HashSet;
 
 use ocio_ops::exception::Exception;
-use ocio_ops::logging::log_warning;
+use ocio_ops::logging::{log_debug, log_warning};
 use ocio_ops::open_color_types::{
-    Allocation, BitDepth, ColorSpaceDirection, FixedFunctionStyle, ReferenceSpaceType,
-    TransformDirection, ViewTransformDirection, fixed_function_style_from_string,
+    Allocation, BitDepth, ColorSpaceDirection, EnvironmentMode, FixedFunctionStyle,
+    ReferenceSpaceType, TransformDirection, ViewTransformDirection,
+    fixed_function_style_from_string,
 };
 use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 use ocio_ops::parse_utils::{
-    allocation_from_string, bit_depth_from_string, cdl_style_from_string,
-    interpolation_from_string, negative_style_from_string, transform_direction_from_string,
+    ROLE_DEFAULT, allocation_from_string, bit_depth_from_string, cdl_style_from_string,
+    interpolation_from_string, join_string_env_style, negative_style_from_string,
+    transform_direction_from_string,
 };
-use ocio_ops::utils::string_utils::c_str;
+use ocio_ops::platform::strcasecmp;
+use ocio_ops::utils::pystring::os_path;
+use ocio_ops::utils::string_utils::{c_str, split};
 
 use crate::color_space::ColorSpace;
+use crate::config::Config;
+use crate::display::View;
+use crate::file_rules::{FileRules, update_file_rules_from_v1_to_v2};
 use crate::look::Look;
 use crate::named_transform::NamedTransform;
+use crate::path_utils::abs_path;
 use crate::transform::Transform;
 use crate::transforms::allocation_transform::AllocationTransform;
 use crate::transforms::builtin_transform::BuiltinTransform;
@@ -60,8 +65,10 @@ use crate::transforms::look_transform::LookTransform;
 use crate::transforms::matrix_transform::MatrixTransform;
 use crate::transforms::range_transform::{RangeTransform, range_style_from_string};
 use crate::view_transform::ViewTransform;
+use crate::viewing_rules::ViewingRules;
 use crate::yaml_cpp::exceptions::Exception as YamlException;
 use crate::yaml_cpp::node::{Node, NodeIter, NodeType};
+use crate::yaml_cpp::parse::load;
 
 /// Why loading failed: OCIO's `Exception`, or an exception of yaml-cpp that upstream doesn't
 /// catch on the way.
@@ -1519,6 +1526,880 @@ pub(crate) fn load_named_transform(node: &Node, nt: &mut NamedTransform) -> Load
         }
     }
     Ok(())
+}
+
+/// Wraps an OCIO exception of a rule's setters as upstream's `catch (Exception & ex)` does,
+/// "<prefix><what()>" through [`throw_error`]; a yaml-cpp exception passes through.
+fn rule_error(node: &Node, prefix: &[u8], e: LoadError) -> LoadError {
+    match e {
+        LoadError::Ocio(ex) => {
+            let mut os = prefix.to_vec();
+            os.extend_from_slice(ex.what());
+            throw_error(node, c_str(&os))
+        }
+        yaml => yaml,
+    }
+}
+
+/// A file rule's map, inserted before the default rule of `fr`; the `Default` rule sets the
+/// default rule's color space instead, and sets `default_rule_found`. A node not tagged
+/// `!<Rule>` is left alone. The setters' errors become "File rules: <what()>" through
+/// [`throw_error`].
+///
+/// Port of `load(const YAML::Node&, FileRulesRcPtr&, bool&)` (OCIOYaml.cpp:4072-4204 @
+/// v2.5.2).
+pub(crate) fn load_file_rule(
+    node: &Node,
+    fr: &mut FileRules,
+    default_rule_found: &mut bool,
+) -> LoadResult<()> {
+    if node.tag()? != b"Rule" {
+        return Ok(());
+    }
+
+    check_duplicates(node)?;
+
+    let mut name = Vec::new();
+    let mut colorspace = Vec::new();
+    let mut pattern = Vec::new();
+    let mut extension = Vec::new();
+    let mut regex = Vec::new();
+    let mut key_vals = Vec::new();
+
+    for iter in node.iter() {
+        let key = iter.first.as_::<Vec<u8>>()?;
+        if iter.second.is_null()? || !iter.second.is_defined() {
+            continue;
+        }
+        let value = &iter.second;
+        match key.as_slice() {
+            b"name" => name = load_string(value)?,
+            b"colorspace" => colorspace = load_string(value)?,
+            b"pattern" => pattern = load_string(value)?,
+            b"extension" => extension = load_string(value)?,
+            b"regex" => regex = load_string(value)?,
+            b"custom" => key_vals = load_custom_keys(value, "file_rules custom attribute")?,
+            _ => log_unknown_key_warning(node, &iter.first)?,
+        }
+    }
+
+    let mut set = || -> LoadResult<()> {
+        let pos = fr.num_entries() - 1;
+        if strcasecmp(c_str(&name), FileRules::DEFAULT_RULE_NAME).is_eq() {
+            if !regex.is_empty() || !pattern.is_empty() || !extension.is_empty() {
+                return Err(Exception::new(format!(
+                    "'{}' rule can't use pattern, extension or regex.",
+                    FileRules::DEFAULT_RULE_NAME
+                ))
+                .into());
+            }
+            if colorspace.is_empty() {
+                return Err(Exception::new(format!(
+                    "'{}' rule cannot have an empty color space name.",
+                    FileRules::DEFAULT_RULE_NAME
+                ))
+                .into());
+            }
+            *default_rule_found = true;
+            fr.set_color_space(pos, c_str(&colorspace))?;
+        } else if strcasecmp(c_str(&name), FileRules::FILE_PATH_SEARCH_RULE_NAME).is_eq() {
+            if !regex.is_empty() || !pattern.is_empty() || !extension.is_empty() {
+                return Err(Exception::new(format!(
+                    "'{}' rule can't use pattern, extension or regex.",
+                    FileRules::FILE_PATH_SEARCH_RULE_NAME
+                ))
+                .into());
+            }
+            fr.insert_path_search_rule(pos)?;
+        } else {
+            if !regex.is_empty() && (!pattern.is_empty() || !extension.is_empty()) {
+                let mut oss = b"File rule '".to_vec();
+                oss.extend_from_slice(&name);
+                oss.extend_from_slice(b"' can't use regex '");
+                oss.extend_from_slice(&regex);
+                oss.extend_from_slice(b"' and pattern & extension '");
+                oss.extend_from_slice(&pattern);
+                oss.extend_from_slice(b"' '");
+                oss.extend_from_slice(&extension);
+                oss.extend_from_slice(b"'.");
+                return Err(Exception::new(oss).into());
+            }
+            if colorspace.is_empty() {
+                let mut oss = b"File rule '".to_vec();
+                oss.extend_from_slice(&name);
+                oss.extend_from_slice(b"' cannot have an empty color space name.");
+                return Err(Exception::new(oss).into());
+            }
+            if regex.is_empty() {
+                fr.insert_rule(
+                    pos,
+                    c_str(&name),
+                    c_str(&colorspace),
+                    c_str(&pattern),
+                    c_str(&extension),
+                )?;
+            } else {
+                fr.insert_regex_rule(pos, c_str(&name), c_str(&colorspace), c_str(&regex))?;
+            }
+        }
+        for (key, value) in &key_vals {
+            let key = key.as_::<Vec<u8>>()?;
+            let value = value.as_::<Vec<u8>>()?;
+            fr.set_custom_key(pos, c_str(&key), c_str(&value))?;
+        }
+        Ok(())
+    };
+    set().map_err(|e| rule_error(node, b"File rules: ", e))
+}
+
+/// A viewing rule's map, appended to `vr`. A node not tagged `!<Rule>` is left alone. Its
+/// `colorspaces` and `encodings` are lists, or one name. The setters' errors become "Viewing
+/// rules: <what()>" through [`throw_error`].
+///
+/// Port of `load(const YAML::Node&, ViewingRulesRcPtr&)` (OCIOYaml.cpp:4251-4338 @ v2.5.2).
+pub(crate) fn load_viewing_rule(node: &Node, vr: &mut ViewingRules) -> LoadResult<()> {
+    if node.tag()? != b"Rule" {
+        return Ok(());
+    }
+
+    let mut name = Vec::new();
+    let mut colorspaces = Vec::new();
+    let mut encodings = Vec::new();
+    let mut key_vals = Vec::new();
+
+    for iter in node.iter() {
+        let key = iter.first.as_::<Vec<u8>>()?;
+        if iter.second.is_null()? || !iter.second.is_defined() {
+            continue;
+        }
+        let value = &iter.second;
+        match key.as_slice() {
+            b"name" => name = load_string(value)?,
+            b"colorspaces" => {
+                if value.node_type()? == NodeType::Sequence {
+                    colorspaces = load_string_vec(value)?;
+                } else {
+                    // If a single value is supplied...
+                    colorspaces.push(load_string(value)?);
+                }
+            }
+            b"encodings" => {
+                if value.node_type()? == NodeType::Sequence {
+                    encodings = load_string_vec(value)?;
+                } else {
+                    // If a single value is supplied...
+                    encodings.push(load_string(value)?);
+                }
+            }
+            b"custom" => {
+                key_vals = load_custom_keys(value, "viewing_rules custom attribute")?;
+            }
+            _ => log_unknown_key_warning(node, &iter.first)?,
+        }
+    }
+
+    let mut set = || -> LoadResult<()> {
+        let pos = vr.num_entries();
+        vr.insert_rule(pos, c_str(&name))?;
+        for cs in &colorspaces {
+            vr.add_color_space(pos, c_str(cs))?;
+        }
+        for is in &encodings {
+            vr.add_encoding(pos, c_str(is))?;
+        }
+        for (key, value) in &key_vals {
+            let key = key.as_::<Vec<u8>>()?;
+            let value = value.as_::<Vec<u8>>()?;
+            vr.set_custom_key(pos, c_str(&key), c_str(&value))?;
+        }
+        Ok(())
+    };
+    set().map_err(|e| rule_error(node, b"Viewing rules: ", e))
+}
+
+/// A view's map, into `v` (fresh, all fields empty). A node not tagged `!<View>` is left
+/// alone. The fields take the strings whole (a NUL included; the config's setters then read
+/// them up to it), and the description keeps its trailing newlines (I-144). A view needs a
+/// name, and either a color space or a view transform with a display color space.
+///
+/// Port of `load(const YAML::Node&, View&)` (OCIOYaml.cpp:409-478 @ v2.5.2).
+pub(crate) fn load_view(node: &Node, v: &mut View) -> LoadResult<()> {
+    if node.tag()? != b"View" {
+        return Ok(());
+    }
+
+    check_duplicates(node)?;
+
+    let mut expecting_scene_cs = false;
+    let mut expecting_display_cs = false;
+
+    for iter in node.iter() {
+        let key = iter.first.as_::<Vec<u8>>()?;
+        if iter.second.is_null()? || !iter.second.is_defined() {
+            continue;
+        }
+        let value = &iter.second;
+        match key.as_slice() {
+            b"name" => v.name = load_string(value)?,
+            b"view_transform" => {
+                expecting_display_cs = true;
+                v.view_transform = load_string(value)?;
+            }
+            b"colorspace" => {
+                expecting_scene_cs = true;
+                v.colorspace = load_string(value)?;
+            }
+            b"display_colorspace" => {
+                expecting_display_cs = true;
+                v.colorspace = load_string(value)?;
+            }
+            b"looks" | b"look" => v.looks = load_string(value)?,
+            b"rule" => v.rule = load_string(value)?,
+            b"description" => v.description = load_string(value)?,
+            _ => log_unknown_key_warning(node, &iter.first)?,
+        }
+    }
+    if v.name.is_empty() {
+        return Err(throw_error(node, b"View does not specify 'name'."));
+    }
+    if expecting_display_cs == expecting_scene_cs {
+        let mut os = b"View '".to_vec();
+        os.extend_from_slice(&v.name);
+        os.extend_from_slice(
+            b"' must specify colorspace or view_transform and display_colorspace.",
+        );
+        return Err(throw_error(node, c_str(&os)));
+    }
+    if v.colorspace.is_empty() {
+        let mut os = b"View '".to_vec();
+        os.extend_from_slice(&v.name);
+        os.extend_from_slice(b"' does not specify colorspace.");
+        return Err(throw_error(node, c_str(&os)));
+    }
+    Ok(())
+}
+
+/// `std::stoi(str)`: `strtol` in base 10 (white space skipped, a sign, digits), or `None`
+/// where `stoi` throws: no digits (`std::invalid_argument`) or a value outside `int`
+/// (`std::out_of_range`). Both wheels' C++ libraries agree.
+fn stoi(s: &[u8]) -> Option<i32> {
+    let s = c_str(s);
+    let mut i = 0;
+    // isspace in the C locale: space, \t, \n, \v, \f, \r.
+    while i < s.len() && matches!(s[i], b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r') {
+        i += 1;
+    }
+    let negative = match s.get(i) {
+        Some(b'-') => {
+            i += 1;
+            true
+        }
+        Some(b'+') => {
+            i += 1;
+            false
+        }
+        _ => false,
+    };
+    let start = i;
+    let mut value: i64 = 0;
+    while i < s.len() && s[i].is_ascii_digit() {
+        value = value
+            .saturating_mul(10)
+            .saturating_add(i64::from(s[i] - b'0'));
+        i += 1;
+    }
+    if i == start {
+        return None;
+    }
+    let value = if negative { -value } else { value };
+    i32::try_from(value).ok()
+}
+
+/// The configs that report their errors without a file name: the config read from an I/O
+/// proxy (`Config::Impl::Read(std::istream&, ConfigIOProxyRcPtr)`).
+const FROM_ARCHIVE: &str = "from Archive/ConfigIOProxy";
+
+/// Whether `filename` names the config's file: given, not empty, and not [`FROM_ARCHIVE`].
+fn names_a_file(filename: Option<&[u8]>) -> Option<&[u8]> {
+    filename.filter(|f| !c_str(f).is_empty() && strcasecmp(c_str(f), FROM_ARCHIVE).is_ne())
+}
+
+/// The config's document, into `config` (a new config): the profile version first, then
+/// each key in its order, then the file rules' default, the working directory (the file's
+/// directory, when `filename` names a file) and the environment. `filename` is upstream's
+/// `const char *`, `None` for a null pointer (a config read from a stream).
+///
+/// Port of `load(const YAML::Node&, ConfigRcPtr&, const char*)` (OCIOYaml.cpp:4398-5031 @
+/// v2.5.2).
+pub(crate) fn load_config(
+    node: &Node,
+    config: &mut Config,
+    filename: Option<&[u8]>,
+) -> LoadResult<()> {
+    // check profile version
+    let mut profile_major_version: i32 = 0;
+    let mut profile_minor_version: i32 = 0;
+
+    let version_node = node.get("ocio_profile_version")?;
+    let mut faulty_version = !version_node.is_defined();
+
+    let mut version = Vec::new();
+
+    if !faulty_version {
+        version = load_string(&version_node)?;
+
+        let results = split(&version, b'.');
+
+        let parsed = match results.len() {
+            1 => stoi(&results[0]).map(|major| (major, 0)),
+            2 => stoi(&results[0]).zip(stoi(&results[1])),
+            _ => None,
+        };
+        match parsed {
+            Some((major, minor)) => {
+                profile_major_version = major;
+                profile_minor_version = minor;
+            }
+            None => faulty_version = true,
+        }
+    }
+
+    if faulty_version {
+        let mut os = b"The specified OCIO configuration file ".to_vec();
+        match filename.filter(|f| !c_str(f).is_empty()) {
+            Some(f) => os.extend_from_slice(c_str(f)),
+            None => os.extend_from_slice(b"<null>"),
+        }
+        os.extend_from_slice(b" does not appear to have a valid version ");
+        if version.is_empty() {
+            os.extend_from_slice(b"<null>");
+        } else {
+            os.extend_from_slice(&version);
+        }
+        os.extend_from_slice(b".");
+
+        return Err(throw_error(node, &os));
+    }
+
+    if let Err(ex) = config.set_version(profile_major_version as u32, profile_minor_version as u32)
+    {
+        let mut os = b"This .ocio config ".to_vec();
+        if let Some(f) = filename.filter(|f| !c_str(f).is_empty()) {
+            os.extend_from_slice(b" '");
+            os.extend_from_slice(c_str(f));
+            os.extend_from_slice(b"' ");
+        }
+        os.extend_from_slice(
+            format!("is version {profile_major_version}.{profile_minor_version}. ").as_bytes(),
+        );
+        os.extend_from_slice(
+            format!(
+                "This version of the OpenColorIO library ({}) is not able to load that config \
+                 version.",
+                crate::version()
+            )
+            .as_bytes(),
+        );
+        os.push(b'\n');
+        os.extend_from_slice(ex.what());
+
+        return Err(Exception::new(os).into());
+    }
+
+    let mut file_rules_found = false;
+    let mut default_file_rule_found = false;
+    let mut file_rules = (*config.file_rules().get()).clone();
+
+    check_duplicates(node)?;
+
+    let mut mode = EnvironmentMode::LoadAll;
+
+    for iter in node.iter() {
+        let key = iter.first.as_::<Vec<u8>>()?;
+        if iter.second.is_null()? || !iter.second.is_defined() {
+            continue;
+        }
+        let value = &iter.second;
+        match key.as_slice() {
+            b"ocio_profile_version" => {} // Already handled above.
+            b"environment" => {
+                mode = EnvironmentMode::LoadPredefined;
+                if value.node_type()? != NodeType::Map {
+                    return Err(throw_value_error(
+                        node.tag()?,
+                        &iter.first,
+                        b"The value type of key 'environment' needs to be a map.",
+                    ));
+                }
+                for it in value.iter() {
+                    let k = it.first.as_::<Vec<u8>>()?;
+                    let v = it.second.as_::<Vec<u8>>()?;
+                    config.add_environment_var(c_str(&k), Some(c_str(&v)));
+                }
+            }
+            b"search_path" | b"resource_path" => {
+                if value.size()? == 0 {
+                    let stringval = load_string(value)?;
+                    config.set_search_path(c_str(&stringval));
+                } else {
+                    for path in load_string_vec(value)? {
+                        config.add_search_path(c_str(&path));
+                    }
+                }
+            }
+            b"strictparsing" => config.set_strict_parsing_enabled(load_bool(value)?),
+            b"name" => config.set_name(c_str(&load_description(value)?)),
+            b"family_separator" => {
+                // Check that the key is not present in a v1 config (checkVersionConsistency
+                // is not able to detect this).
+                if config.major_version() < 2 {
+                    return Err(throw_error(
+                        &iter.first,
+                        b"Config v1 can't have 'family_separator'.",
+                    ));
+                }
+
+                let stringval = load_string(value)?;
+                if stringval.len() != 1 {
+                    let mut os =
+                        b"'family_separator' value must be a single character. Found '".to_vec();
+                    os.extend_from_slice(&stringval);
+                    os.extend_from_slice(b"'.");
+                    return Err(throw_value_error(node.tag()?, &iter.first, &os));
+                }
+                config.set_family_separator(stringval[0])?;
+            }
+            b"description" => config.set_description(c_str(&load_description(value)?)),
+            b"luma" => {
+                let val = load_vec_f64(value)?;
+                let Ok(luma) = <[f64; 3]>::try_from(val.as_slice()) else {
+                    let os = format!("'luma' values must be 3 floats. Found '{}'.", val.len());
+                    return Err(throw_value_error(node.tag()?, &iter.first, os.as_bytes()));
+                };
+                config.set_default_luma_coefs(&luma);
+            }
+            b"roles" => {
+                if value.node_type()? != NodeType::Map {
+                    return Err(throw_value_error(
+                        node.tag()?,
+                        &iter.first,
+                        b"The value type of the key 'roles' needs to be a map.",
+                    ));
+                }
+                for it in value.iter() {
+                    let k = it.first.as_::<Vec<u8>>()?;
+                    let v = it.second.as_::<Vec<u8>>()?;
+                    config.set_role(c_str(&k), Some(c_str(&v)))?;
+                }
+            }
+            b"file_rules" => {
+                // Check that the key is not present in a v1 config (checkVersionConsistency
+                // is not able to detect this).
+                if config.major_version() < 2 {
+                    return Err(throw_error(
+                        &iter.first,
+                        b"Config v1 can't use 'file_rules'",
+                    ));
+                }
+
+                if value.node_type()? != NodeType::Sequence {
+                    return Err(throw_error(
+                        value,
+                        b"The 'file_rules' field needs to be a (- !<Rule>) list.",
+                    ));
+                }
+
+                for i in 0..value.size()? {
+                    let val = value.get(i)?;
+
+                    if val.tag()? == b"Rule" {
+                        if default_file_rule_found {
+                            return Err(throw_error(
+                                value,
+                                b"The 'file_rules' Default rule has to be the last rule.",
+                            ));
+                        }
+                        load_file_rule(&val, &mut file_rules, &mut default_file_rule_found)?;
+                    } else {
+                        let mut os = b"Unknown element found in file_rules:".to_vec();
+                        os.extend_from_slice(val.tag()?);
+                        os.extend_from_slice(b". Only Rule(s) are currently handled.");
+                        log_warning(os);
+                    }
+                }
+
+                if !default_file_rule_found {
+                    return Err(throw_error(
+                        &iter.first,
+                        b"The 'file_rules' does not contain a Default <Rule>.",
+                    ));
+                }
+                file_rules_found = true;
+            }
+            b"viewing_rules" => {
+                if value.node_type()? != NodeType::Sequence {
+                    return Err(throw_error(
+                        value,
+                        b"The 'viewing_rules' field needs to be a (- !<Rule>) list.",
+                    ));
+                }
+
+                let mut viewing_rules = ViewingRules::new();
+
+                for i in 0..value.size()? {
+                    let val = value.get(i)?;
+
+                    if val.tag()? == b"Rule" {
+                        load_viewing_rule(&val, &mut viewing_rules)?;
+                    } else {
+                        let mut os = b"Unknown element found in viewing_rules:".to_vec();
+                        os.extend_from_slice(val.tag()?);
+                        os.extend_from_slice(b". Only Rule(s) are currently handled.");
+                        log_warning(os);
+                    }
+                }
+
+                config.set_viewing_rules(&viewing_rules);
+            }
+            b"shared_views" => {
+                if value.node_type()? != NodeType::Sequence {
+                    return Err(throw_value_error(
+                        node.tag()?,
+                        &iter.first,
+                        b"The view list is a sequence.",
+                    ));
+                }
+
+                for i in 0..value.size()? {
+                    let val = value.get(i)?;
+
+                    let mut view = View::default();
+                    load_view(&val, &mut view)?;
+                    config.add_shared_view(
+                        c_str(&view.name),
+                        c_str(&view.view_transform),
+                        c_str(&view.colorspace),
+                        c_str(&view.looks),
+                        c_str(&view.rule),
+                        c_str(&view.description),
+                    )?;
+                }
+            }
+            b"displays" => {
+                if value.node_type()? != NodeType::Map {
+                    return Err(throw_value_error(
+                        node.tag()?,
+                        &iter.first,
+                        b"The value type of the key 'displays' needs to be a map.",
+                    ));
+                }
+                for it in value.iter() {
+                    let display = it.first.as_::<Vec<u8>>()?;
+
+                    if it.second.node_type()? != NodeType::Sequence {
+                        return Err(throw_value_error(
+                            node.tag()?,
+                            &iter.first,
+                            b"The view list is a sequence.",
+                        ));
+                    }
+
+                    for i in 0..it.second.size()? {
+                        let n = it.second.get(i)?;
+
+                        if n.tag()? == b"View" {
+                            let mut view = View::default();
+                            load_view(&n, &mut view)?;
+                            config.add_display_view_with_view_transform(
+                                c_str(&display),
+                                c_str(&view.name),
+                                c_str(&view.view_transform),
+                                c_str(&view.colorspace),
+                                c_str(&view.looks),
+                                c_str(&view.rule),
+                                c_str(&view.description),
+                            )?;
+                        } else if n.tag()? == b"Views" {
+                            for shared_view in load_string_vec(&n)? {
+                                config.add_display_shared_view(
+                                    c_str(&display),
+                                    c_str(&shared_view),
+                                )?;
+                            }
+                        }
+                    }
+                }
+            }
+            b"virtual_display" => {
+                if value.node_type()? != NodeType::Sequence {
+                    return Err(throw_value_error(
+                        node.tag()?,
+                        &iter.first,
+                        b"The view list is a sequence.",
+                    ));
+                }
+
+                for i in 0..value.size()? {
+                    let val = value.get(i)?;
+
+                    if val.tag()? == b"View" {
+                        let mut view = View::default();
+                        load_view(&val, &mut view)?;
+                        config.add_virtual_display_view(
+                            c_str(&view.name),
+                            c_str(&view.view_transform),
+                            c_str(&view.colorspace),
+                            c_str(&view.looks),
+                            c_str(&view.rule),
+                            c_str(&view.description),
+                        )?;
+                    } else if val.tag()? == b"Views" {
+                        for shared_view in load_string_vec(&val)? {
+                            config.add_virtual_display_shared_view(c_str(&shared_view))?;
+                        }
+                    } else {
+                        let mut os = b"Unknown element found in virtual_display:".to_vec();
+                        os.extend_from_slice(val.tag()?);
+                        os.extend_from_slice(b".");
+                        log_warning(os);
+                    }
+                }
+            }
+            b"active_displays" => {
+                let displays = join_string_env_style(&load_string_vec(value)?);
+                config.set_active_displays(c_str(&displays))?;
+            }
+            b"active_views" => {
+                let views = join_string_env_style(&load_string_vec(value)?);
+                config.set_active_views(c_str(&views))?;
+            }
+            b"inactive_colorspaces" => {
+                let inactive = join_string_env_style(&load_string_vec(value)?);
+                config.set_inactive_color_spaces(c_str(&inactive));
+            }
+            b"colorspaces" | b"display_colorspaces" => {
+                let (reference, list_error): (_, &[u8]) = if key == b"colorspaces" {
+                    (
+                        ReferenceSpaceType::Scene,
+                        b"'colorspaces' field needs to be a (- !<ColorSpace>) list.",
+                    )
+                } else {
+                    (
+                        ReferenceSpaceType::Display,
+                        b"'display_colorspaces' field needs to be a (- !<ColorSpace>) list.",
+                    )
+                };
+                if value.node_type()? != NodeType::Sequence {
+                    return Err(throw_error(value, list_error));
+                }
+
+                for i in 0..value.size()? {
+                    let val = value.get(i)?;
+
+                    if val.tag()? == b"ColorSpace" {
+                        let mut cs = ColorSpace::with_reference_space(reference);
+                        load_color_space(&val, &mut cs, config.major_version())?;
+                        for ii in 0..config.num_color_spaces() {
+                            if config.color_space_name_by_index(ii) == cs.name() {
+                                let mut os = b"Colorspace with name '".to_vec();
+                                os.extend_from_slice(cs.name());
+                                os.extend_from_slice(b"' already defined.");
+                                return Err(throw_error(value, &os));
+                            }
+                        }
+                        config.add_color_space(&cs)?;
+                    } else {
+                        let mut os = b"Unknown element found in colorspaces:".to_vec();
+                        os.extend_from_slice(val.tag()?);
+                        os.extend_from_slice(b". Only ColorSpace(s) currently handled.");
+                        log_warning(os);
+                    }
+                }
+            }
+            b"looks" => {
+                if value.node_type()? != NodeType::Sequence {
+                    return Err(throw_error(
+                        value,
+                        b"'looks' field needs to be a (- !<Look>) list.",
+                    ));
+                }
+
+                for i in 0..value.size()? {
+                    let val = value.get(i)?;
+
+                    if val.tag()? == b"Look" {
+                        let mut look = Look::new();
+                        load_look(&val, &mut look)?;
+                        config.add_look(&look)?;
+                    } else {
+                        let mut os = b"Unknown element found in looks:".to_vec();
+                        os.extend_from_slice(val.tag()?);
+                        os.extend_from_slice(b". Only Look(s) currently handled.");
+                        log_warning(os);
+                    }
+                }
+            }
+            b"view_transforms" => {
+                if value.node_type()? != NodeType::Sequence {
+                    return Err(throw_error(
+                        value,
+                        b"'view_transforms' field needs to be a (- !<ViewTransform>) list.",
+                    ));
+                }
+
+                for i in 0..value.size()? {
+                    let val = value.get(i)?;
+
+                    if val.tag()? == b"ViewTransform" {
+                        let rst = peek_view_transform_reference_space(&val)?;
+                        let mut vt = ViewTransform::new(rst);
+                        load_view_transform(&val, &mut vt)?;
+                        config.add_view_transform(&vt)?;
+                    } else {
+                        let mut os = b"Unknown element found in view_transforms:".to_vec();
+                        os.extend_from_slice(val.tag()?);
+                        os.extend_from_slice(b". Only ViewTransform(s) currently handled.");
+                        log_warning(os);
+                    }
+                }
+            }
+            b"default_view_transform" => {
+                let stringval = load_string(value)?;
+                config.set_default_view_transform_name(c_str(&stringval));
+            }
+            b"named_transforms" => {
+                if value.node_type()? != NodeType::Sequence {
+                    return Err(throw_error(
+                        value,
+                        b"'named_transforms' field needs to be a (- !<NamedTransform>) list.",
+                    ));
+                }
+
+                for i in 0..value.size()? {
+                    let val = value.get(i)?;
+
+                    if val.tag()? == b"NamedTransform" {
+                        let mut nt = NamedTransform::new();
+                        load_named_transform(&val, &mut nt)?;
+                        // Upstream tests `if (nt->getName())`, a C string never null.
+                        // Test that the name transform definitions are unique.
+                        if config.named_transform(nt.name()).is_some() {
+                            let mut oss =
+                                b"NamedTransform: There is already one NamedTransform named: '"
+                                    .to_vec();
+                            oss.extend_from_slice(nt.name());
+                            oss.extend_from_slice(b"'.");
+                            return Err(Exception::new(oss).into());
+                        }
+                        // Will throw if name is empty.
+                        config.add_named_transform(&nt)?;
+                    } else {
+                        let mut os = b"Unknown element found in named_transforms:".to_vec();
+                        os.extend_from_slice(val.tag()?);
+                        os.extend_from_slice(b". Only NamedTransform(s) currently handled.");
+                        log_warning(os);
+                    }
+                }
+            }
+            _ => log_unknown_key_warning_in(b"profile", &iter.first)?,
+        }
+    }
+
+    // Do not set the working dir when the filename is empty or contains the special string
+    // "from Archive/ConfigIOProxy".
+    if let Some(f) = names_a_file(filename) {
+        let realfilename = abs_path(c_str(f))?;
+        let configrootdir = os_path::dirname(&realfilename);
+        config.set_working_dir(c_str(&configrootdir));
+    }
+
+    if !file_rules_found {
+        if config.major_version() >= 2 {
+            if !config.has_role(ROLE_DEFAULT) {
+                // Note that no validation of the default color space is done (e.g. to check that
+                // it exists in the config) in order to enable loading configs that are only
+                // partially complete. The caller may use config->validate() after, if desired.
+                return Err(throw_error(
+                    node,
+                    b"The config must contain either a Default file rule or the 'default' role.",
+                ));
+            }
+        } else {
+            // In order to use Config::getColorSpaceFromFilepath() method for any version of
+            // config instance, the method updates the in-memory file rules created by a v1
+            // config to have valid file rules and most importantly, to mimic
+            // Config::parseColorSpaceFromString() which is now deprecated since v2.
+            update_file_rules_from_v1_to_v2(config, &mut file_rules)?;
+
+            config.set_file_rules(&file_rules);
+        }
+    } else {
+        // If default role is also defined.
+        if let Some(default_cs) = config.color_space(ROLE_DEFAULT) {
+            let default_rule = file_rules.num_entries() - 1;
+            let default_rule_cs = file_rules.color_space(default_rule)?;
+            if default_rule_cs != ROLE_DEFAULT.as_bytes() && default_rule_cs != default_cs.name() {
+                let mut oss = b"file_rules: defines a default rule using color-space '".to_vec();
+                oss.extend_from_slice(&default_rule_cs);
+                oss.extend_from_slice(b"' that does not match the default role '");
+                oss.extend_from_slice(default_cs.name());
+                oss.extend_from_slice(b"'.");
+                log_warning(oss);
+            }
+        }
+        config.set_file_rules(&file_rules);
+    }
+
+    config.set_environment_mode(mode);
+    config.load_environment();
+
+    if mode == EnvironmentMode::LoadAll {
+        let mut os = b"This .ocio config ".to_vec();
+        if let Some(f) = filename.filter(|f| !c_str(f).is_empty()) {
+            os.extend_from_slice(b" '");
+            os.extend_from_slice(c_str(f));
+            os.extend_from_slice(b"' ");
+        }
+        os.extend_from_slice(
+            format!(
+                "has no environment section defined. The default behaviour is to load all \
+                 environment variables ({}), which reduces the efficiency of OCIO's caching. \
+                 Consider predefining the environment variables used.",
+                config.num_environment_vars()
+            )
+            .as_bytes(),
+        );
+
+        log_debug(os);
+    }
+    Ok(())
+}
+
+/// Reads a config from `input` into `config`: yaml-cpp's document, then [`load_config`].
+/// What either throws becomes "Error: Loading the OCIO profile failed. <what()>" (with the
+/// file's name in quotes after "profile " when `filename` names a file); `what()` is read as
+/// a C string.
+///
+/// Port of `OCIOYaml::Read` (OCIOYaml.cpp:5420-5439 @ v2.5.2).
+pub(crate) fn read(
+    input: &[u8],
+    config: &mut Config,
+    filename: Option<&[u8]>,
+) -> ocio_ops::exception::Result<()> {
+    let loaded = load(input)
+        .map_err(LoadError::from)
+        .and_then(|node| load_config(&node, config, filename));
+    loaded.map_err(|e| {
+        let mut os = b"Error: Loading the OCIO profile ".to_vec();
+        if let Some(f) = names_a_file(filename) {
+            os.extend_from_slice(b"'");
+            os.extend_from_slice(c_str(f));
+            os.extend_from_slice(b"' ");
+        }
+        os.extend_from_slice(b"failed. ");
+        os.extend_from_slice(&e.what());
+        Exception::new(os)
+    })
 }
 
 #[cfg(test)]

@@ -534,17 +534,19 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p3-yaml-load-2` (3.3j), checked against the wheel in
   `crates/ocio/src/ocio_yaml_objects_oracle_tests.rs`.
 
-### I-144. A named transform's description keeps its trailing newlines
+### I-144. Named transforms' and views' descriptions keep their trailing newlines
 
-- **Upstream:** the loaders of color spaces, looks and view transforms read a description with
-  `loadDescription`, which drops its trailing newlines (`SanitizeNewlines`); the named
-  transform's loader reads it as a plain string (`OCIOYaml.cpp:3965-3969`), so `"d\n\n"` stays
-  `d` and two newlines. Seen through the wheel.
-- **Who notices:** configs whose named transforms have descriptions ending in newlines (a
-  literal block `|` adds one).
-- **A fix:** read it with `loadDescription`, as the others.
-- **Status:** matched in `p3-yaml-load-2` (3.3j), checked against the wheel in
-  `crates/ocio/src/ocio_yaml_objects_oracle_tests.rs`.
+- **Upstream:** the loaders of color spaces, looks, view transforms and the config read a
+  description with `loadDescription`, which drops its trailing newlines (`SanitizeNewlines`);
+  the named transform's loader (`OCIOYaml.cpp:3965-3969`) and the view's, for displays and
+  shared views (`OCIOYaml.cpp:452-455`), read it as a plain string, so `"d\n\n"` stays `d` and
+  two newlines. Seen through the wheel.
+- **Who notices:** configs whose named transforms or views have descriptions ending in newlines
+  (a literal block `|` adds one).
+- **A fix:** read them with `loadDescription`, as the others.
+- **Status:** matched in `p3-yaml-load-2` (3.3j; views in 3.3k), checked against the wheel in
+  `crates/ocio/src/ocio_yaml_objects_oracle_tests.rs` and
+  `crates/ocio/tests/config_load_oracle.rs`.
 
 ## Numeric helpers
 
