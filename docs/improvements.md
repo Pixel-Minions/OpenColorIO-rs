@@ -1815,6 +1815,21 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p4-xml` (4.4b fix chunk, `crates/ocio-formats/src/expat/xmlparse.rs`,
   `expat_malloc` and the `charge*` methods; `documents_past_the_memory_limit_are_refused`).
 
+### I-172. The XML readers read a number out of range as 0 on Linux, and as infinity on Windows
+
+- **Upstream:** `ParseNumber` (`fileformats/xmlutils/XMLReaderUtils.h:140-208` @ v2.5.2)
+  checks `NumberUtils::from_chars`'s `invalid_argument` only: a `result_out_of_range` passes,
+  with the value `from_chars` left. On Windows (`std::from_chars`) that is the overflow's
+  infinity, the underflow's 0, and a subnormal read as such; on Linux (`strtod_l`, which sets
+  `ERANGE` for an overflow, an underflow and a subnormal result) the value is not stored, and
+  `ParseNumber`'s local stays 0. So a CTF matrix entry of `1e999` reads as `inf` on Windows
+  and `0` on Linux, `-1e999` as `-inf` and `0`, and `1e-310` as `1e-310` and `0` (wheel
+  probes of a CTF `Matrix` read through `FileTransform`, 2026-10-08).
+- **Who notices:** CTF, CLF and CDL files with numbers past the double range, or subnormal.
+- **A fix:** refuse `result_out_of_range`, or read it the same way on both platforms.
+- **Status:** matched in `p4-xml` (4.4c, `crates/ocio-formats/src/fileformats/xmlutils/
+  xml_reader_utils.rs`, `parse_number`); its oracle tests come with the CTF reader (4.5).
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on

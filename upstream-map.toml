@@ -1063,37 +1063,37 @@ status = "todo"
 path = "src/OpenColorIO/fileformats/xmlutils/XMLReaderHelper.cpp"
 kind = "src"
 target = ["crates/ocio-formats/src/fileformats/xmlutils/xml_reader_helper.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/xmlutils/XMLReaderHelper.h"
 kind = "src"
 target = ["crates/ocio-formats/src/fileformats/xmlutils/xml_reader_helper.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/xmlutils/XMLReaderUtils.cpp"
 kind = "src"
 target = ["crates/ocio-formats/src/fileformats/xmlutils/xml_reader_utils.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/xmlutils/XMLReaderUtils.h"
 kind = "src"
 target = ["crates/ocio-formats/src/fileformats/xmlutils/xml_reader_utils.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/xmlutils/XMLWriterUtils.cpp"
 kind = "src"
 target = ["crates/ocio-formats/src/fileformats/xmlutils/xml_writer_utils.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/xmlutils/XMLWriterUtils.h"
 kind = "src"
 target = ["crates/ocio-formats/src/fileformats/xmlutils/xml_writer_utils.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/ops/OpArray.h"
@@ -4643,7 +4643,7 @@ status = "todo"
 path = "tests/cpu/fileformats/xmlutils/XMLReaderUtils_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-formats/src/fileformats/xmlutils/xml_reader_utils_tests.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "tests/cpu/ops/allocation/AllocationOp_tests.cpp"
