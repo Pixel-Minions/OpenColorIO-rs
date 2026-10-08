@@ -1483,6 +1483,38 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   parser and its NFA state limit (3.9c) and matcher (3.9d, with the lookahead and brace-copy
   rules of the fix chunk after its verifier).
 
+### I-160. A LUT header's `%d` out of `int`'s range
+
+- **Upstream:** the spi1d, Iridas cube and Discreet 1DL readers read their header numbers with
+  `sscanf`'s `%d` (`FileFormatSpi1D.cpp`, `FileFormatIridasCube.cpp`, `FileFormatDiscreet1DL.cpp`),
+  and C leaves a number outside `int`'s range undefined (C17 7.21.6.2p10). Both wheels' C
+  runtimes do the same: they read the number as `strtoll` would (saturating to the 64-bit
+  range) and store its low 32 bits, so `Length 4294967297` is a length of 1, and
+  `Length 9223372036854775808` one of -1.
+- **Who notices:** files with absurd sizes: they read as other sizes rather than failing.
+- **A fix:** read the numbers with a range check.
+- **Status:** matched in `p4-parse` (4.0b, `ocio-ops/src/utils/cscan.rs`), compared with both C
+  runtimes over generated scans (`crates/ocio-ops/tests/cscan_crt.rs`).
+
+### I-161. `sscanf` reads a lone sign and a 0xFF byte differently on Windows and Linux
+
+- **Upstream:** the same readers call `sscanf_s` on Windows (UCRT) and `sscanf` on Linux
+  (glibc). For `%d`:
+  - a `+` or `-` at the end of the line is an input failure in the UCRT (the call returns
+    `EOF`, -1, when nothing was stored before) and a matching failure in glibc (it returns 0);
+  - the UCRT reads a 0xFF byte as `EOF` (a signed `char` of -1) and consumes it: where a digit
+    or sign is needed it fails there (an input failure if it was the last byte), and after
+    digits it ends the number and is lost, so `12\xff34` reads as 12 then 34. glibc reads 0xFF
+    as any other byte.
+  The readers compare the count with the one they expect, so valid files, and most malformed
+  ones, read alike on both wheels; the port follows each runtime, so the rest do too.
+- **Who notices:** malformed LUT files, read on both platforms.
+- **A fix:** none needed for valid files; a hand-written header parser would remove the
+  difference.
+- **Decided** (D12): the port does what each wheel does.
+- **Status:** matched in `p4-parse` (4.0b, `ocio-ops/src/utils/cscan.rs`), compared with each
+  platform's C runtime (`crates/ocio-ops/tests/cscan_crt.rs`).
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
