@@ -4254,7 +4254,7 @@ path = "tests/cpu/Config_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/config_tests.rs"]
 status = "partial"
-note = "p1-transforms-fam2 (1.8d): the setMajorVersion checks of version (2065-2067, 2104-2107); p3-config-1 3.4d: version's setMinorVersion and setVersion checks (2065-2107) and family_separator's API checks (7486-7500), on configs made without YAML, without the markers; the tests need configs read from YAML (Phase 3). p3-yaml-load-2 3.3l-m: group A (roles, colorspace_duplicate, cdltransform_duplicate, searchpath_duplicate, key_value_error, unknown_key_error, faulty_config_file, display_color_spaces_errors); view, completed with its serialization checks in p3-yaml-save. p3-yaml-save 3.7: group C's serialize_group_transform, serialize_searchpath, serialize_environment, active_displayview_lists, file_transform_serialization_v1, transform_versions, description_and_name; internal_raw_profile (3.7d); the rest of group C validates (3.8)"
+note = "p1-transforms-fam2 (1.8d): the setMajorVersion checks of version (2065-2067, 2104-2107), set_major_version, without a marker. p3-yaml-load-2 3.3l-m: group A (roles, colorspace_duplicate, cdltransform_duplicate, searchpath_duplicate, key_value_error, unknown_key_error, faulty_config_file, display_color_spaces_errors); view, completed with its serialization checks in p3-yaml-save. p3-yaml-save 3.7: group C's serialize_group_transform, serialize_searchpath, serialize_environment, active_displayview_lists, file_transform_serialization_v1, transform_versions, description_and_name; internal_raw_profile (3.7d); p3-validate 3.8: simple_config, validation, version, version_validation, config_v1, not_case_sensitive, look_transform, add_remove_display, family_separator, alias_validation, colorspacename_with_reserved_token, serialize_colorspace_displayview_transforms, matrix_serialization, cdl_serialization, file_transform_serialization, add_color_space, remove_color_space, display_color_spaces_serialization, categories, display, display_view, display_view_order, view_transforms, is_colorspace_used, inactive_color_space_precedence, inactive_color_space_read_write, virtual_display_v2_only, virtual_display_exceptions, interchange_attributes. Later: virtual_display_with_active_displays (SystemMonitor, Phase 9, on Windows and macOS)"
 
 [[file]]
 path = "tests/cpu/ContextVariableUtils_tests.cpp"
@@ -4274,8 +4274,8 @@ note = "p3-context 3.5e: search_paths, string_vars; 3.5f: abs_path, var_search_p
 path = "tests/cpu/Display_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/display_tests.rs", "crates/ocio/src/config_tests.rs"]
-status = "todo"
-note = "p3-config-2 (3.4i): compare_displays's checks on configs built through the API, without the marker (crates/ocio/src/config_tests.rs, compare_displays_without_yaml); the tests read YAML (3.3m) and validate (3.8b)"
+status = "done"
+note = "p3-validate 3.8: SharedViews basic (display_tests.rs), Config compare_displays and compare_virtual_displays (config_tests.rs, which shares check_compare_displays with them)"
 
 [[file]]
 path = "tests/cpu/DynamicProperty_tests.cpp"
@@ -4334,8 +4334,8 @@ note = "All 13 tests: clamp (S2); is_scalar_equal_to_zero, float_diff_keep_denor
 path = "tests/cpu/NamedTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/named_transform_tests.rs"]
-status = "todo"
-note = "basic and alias add named transforms to a config (3.4j) and call NamedTransform::GetTransform (3.2a): they move to p3-config-2; p3-model-objects (3.4c) checks their parts without a config in named_transform_tests.rs. The others: static_get_transform (3.2a), the Config tests (3.2d, 3.8b); named_transform_io reads its configs with 3.3j but validates and serializes them: with the later of 3.7b and 3.8b"
+status = "partial"
+note = "basic and alias add named transforms to a config (3.4j) and call NamedTransform::GetTransform (3.2a): they move to p3-config-2; p3-model-objects (3.4c) checks their parts without a config in named_transform_tests.rs. p3-validate 3.8: named_transform_io, colorspace_transform_named_transform, inactive_named_transform_precedence. The others build processors: static_get_transform (3.2a), named_transform_processor, named_transform_validation, inactive_named_transforms (3.2d)"
 
 [[file]]
 path = "tests/cpu/OCIOZArchive_tests.cpp"

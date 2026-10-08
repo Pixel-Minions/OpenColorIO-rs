@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Tests of the config (tests/cpu/Config_tests.cpp @ v2.5.2): those that read configs (group
-//! A), and those that write them without validating them (group C, WP 3.7). Upstream's `Config
-//! version` and `Config family_separator` also validate configs (WP 3.8); their checks of the
-//! API alone are here, with upstream's expected messages, without the markers.
+//! Tests of the config (tests/cpu/Config_tests.cpp @ v2.5.2) that read, write and validate
+//! configs without building processors (WP 3.3, 3.7, 3.8), and the two `Config` tests of
+//! tests/cpu/Display_tests.cpp. The tests that build processors come with the builders (WP
+//! 3.2d).
 
 use ocio_testkit::upstream::check_throw_what;
 
@@ -46,50 +46,14 @@ fn set_major_version() {
     assert_eq!(config.major_version(), 2);
 }
 
-/// `Config version`'s checks of `setMinorVersion` and `setVersion` (Config_tests.cpp:2065-2107
-/// @ v2.5.2), on a new config instead of one read from YAML.
+/// Port of `OCIO_ADD_TEST(Config, family_separator)` @ v2.5.2.
 #[test]
-fn version_without_yaml() {
+fn family_separator() {
     let _env = EnvGuard::new();
-    let mut config = Config::new().unwrap();
+    // Test the family separator.
 
-    config.set_major_version(1).unwrap();
-    check_throw_what(
-        config.set_major_version(20000),
-        "version is 20000 where supported versions start at 1 and end at 2",
-    );
-
-    check_throw_what(
-        config.set_minor_version(1),
-        "The minor version 1 is not supported for major version 1. Maximum minor version is 0",
-    );
-
-    config.set_minor_version(0).unwrap();
-    config.set_major_version(2).unwrap();
-
-    check_throw_what(
-        config.set_version(2, 9),
-        "The minor version 9 is not supported for major version 2. Maximum minor version is 5",
-    );
-
-    config.set_major_version(2).unwrap();
-    check_throw_what(
-        config.set_minor_version(9),
-        "The minor version 9 is not supported for major version 2. Maximum minor version is 5",
-    );
-
-    check_throw_what(
-        config.set_version(3, 4),
-        "version is 3 where supported versions start at 1 and end at 2",
-    );
-}
-
-/// `Config family_separator`'s checks of the API (Config_tests.cpp:7486-7500 @ v2.5.2), on a
-/// copy of the raw config.
-#[test]
-fn family_separator_without_yaml() {
-    let _env = EnvGuard::new();
     let mut cfg = (*Config::create_raw().unwrap()).clone();
+    cfg.validate().unwrap();
 
     assert_eq!(cfg.family_separator(), b'/');
 
@@ -107,12 +71,111 @@ fn family_separator_without_yaml() {
 
     assert!(cfg.set_family_separator(127).is_err());
     assert!(cfg.set_family_separator(31).is_err());
+
+    // Test read/write.
+
+    const CONFIG: &str = concat!(
+        "ocio_profile_version: 2\n",
+        "\n",
+        "environment:\n",
+        "  {}\n",
+        "search_path: \"\"\n",
+        "strictparsing: false\n",
+        "family_separator: \" \"\n",
+        "luma: [0.2126, 0.7152, 0.0722]\n",
+        "\n",
+        "roles:\n",
+        "  default: raw\n",
+        "\n",
+        "file_rules:\n",
+        "  - !<Rule> {name: Default, colorspace: default}\n",
+        "\n",
+        "displays:\n",
+        "  sRGB:\n",
+        "    - !<View> {name: Raw, colorspace: raw}\n",
+        "\n",
+        "active_displays: []\n",
+        "active_views: []\n",
+        "\n",
+        "colorspaces:\n",
+        "  - !<ColorSpace>\n",
+        "    name: raw\n",
+        "    family: raw\n",
+        "    equalitygroup: \"\"\n",
+        "    bitdepth: 32f\n",
+        "    description: A raw color space. Conversions to and from this space are no-ops.\n",
+        "    isdata: true\n",
+        "    allocation: uniform\n",
+    );
+
+    cfg.set_family_separator(b' ').unwrap();
+
+    check_serialized(&cfg.serialize().unwrap(), CONFIG);
+
+    // v1 does not support family separators different from the default value i.e. '/'.
+
+    const CONFIG_V1: &str = concat!(
+        "ocio_profile_version: 1\n",
+        "\n",
+        "search_path: \"\"\n",
+        "\n",
+        "roles:\n",
+        "  reference: raw\n",
+        "\n",
+        "displays:\n",
+        "  sRGB:\n",
+        "    - !<View> {name: Raw, colorspace: raw}\n",
+        "\n",
+        "colorspaces:\n",
+        "  - !<ColorSpace>\n",
+        "    name: raw\n",
+        "    allocation: uniform\n",
+    );
+
+    let mut cfg = (*Config::create_from_stream(CONFIG_V1.as_bytes()).unwrap()).clone();
+    assert_eq!(cfg.family_separator(), b'/'); // v1 default family separator
+
+    cfg.set_family_separator(b'&').unwrap();
+    check_throw_what(
+        cfg.validate(),
+        "Only version 2 (or higher) can have a family separator.",
+    );
+
+    check_throw_what(
+        cfg.serialize(),
+        "Only version 2 (or higher) can have a family separator.",
+    );
+
+    // Even with the default value, v1 config file must not contain the family_separator key.
+
+    const CONFIG_V1BIS: &str = concat!(
+        "ocio_profile_version: 1\n",
+        "\n",
+        "search_path: \"\"\n",
+        "family_separator: \"/\"\n",
+        "\n",
+        "roles:\n",
+        "  reference: raw\n",
+        "\n",
+        "displays:\n",
+        "  sRGB:\n",
+        "    - !<View> {name: Raw, colorspace: raw}\n",
+        "\n",
+        "colorspaces:\n",
+        "  - !<ColorSpace>\n",
+        "    name: raw\n",
+        "    allocation: uniform\n",
+    );
+
+    check_throw_what(
+        Config::create_from_stream(CONFIG_V1BIS.as_bytes()),
+        "Config v1 can't have 'family_separator'.",
+    );
 }
 
-/// `Config alias_validation`'s checks (Config_tests.cpp:9411-9478 @ v2.5.2), without its
-/// `validate()` calls (3.8a; no marker).
+/// Port of `OCIO_ADD_TEST(Config, alias_validation)` @ v2.5.2.
 #[test]
-fn alias_validation_without_validate() {
+fn alias_validation() {
     let _env = EnvGuard::new();
     // NB: This tests ColorSpaceSet::addColorSpace.
 
@@ -122,6 +185,7 @@ fn alias_validation_without_validate() {
     cfg.add_color_space(&cs).unwrap();
     cs.set_name("colorspace2");
     cfg.add_color_space(&cs).unwrap();
+    cfg.validate().unwrap();
     cs.set_name("colorspace3");
     cs.add_alias("colorspace1");
     check_throw_what(
@@ -163,6 +227,7 @@ fn alias_validation_without_validate() {
 
     nt.set_name("nt");
     cfg.add_named_transform(&nt).unwrap();
+    cfg.validate().unwrap();
 
     nt.add_alias("namedtransform");
     check_throw_what(
@@ -192,65 +257,9 @@ fn alias_validation_without_validate() {
     );
 }
 
-/// The two configs of `Config compare_displays` (Display_tests.cpp:242-326 @ v2.5.2), built
-/// through the API as the YAML reader builds them (without their roles, file rules and view
-/// transforms, which these checks never read).
-fn compare_displays_configs() -> (Config, Config) {
-    let mut config1 = Config::new().unwrap();
-    for (name, display) in [(&b"raw"[..], false), (b"display_cs", true)] {
-        let mut cs = if display {
-            ColorSpace::with_reference_space(ReferenceSpaceType::Display)
-        } else {
-            ColorSpace::new()
-        };
-        cs.set_name(name);
-        config1.add_color_space(&cs).unwrap();
-    }
-    let mut config2 = config1.clone();
-
-    config1
-        .add_shared_view("sview1", "", "raw", "", "", "")
-        .unwrap();
-    config1.add_display_view("Raw", "Raw", "raw", "").unwrap();
-    config1.add_display_view("sRGB", "Raw", "raw", "").unwrap();
-    config1
-        .add_display_view_with_view_transform(
-            "sRGB",
-            "view",
-            "display_vt",
-            "display_cs",
-            "",
-            "",
-            "",
-        )
-        .unwrap();
-    config1.add_display_shared_view("sRGB", "sview1").unwrap();
-    config1.set_active_displays("sRGB").unwrap();
-    config1.set_active_views("view, sview1").unwrap();
-
-    config2
-        .add_shared_view("view", "display_vt", "display_cs", "", "", "")
-        .unwrap();
-    config2
-        .add_shared_view("sview1", "", "raw", "", "", "")
-        .unwrap();
-    config2.add_display_view("Raw", "Raw", "raw", "").unwrap();
-    config2.add_display_view("sRGB", "Raw", "raw", "").unwrap();
-    config2.add_display_shared_view("sRGB", "view").unwrap();
-    config2.add_display_shared_view("sRGB", "sview1").unwrap();
-    config2.set_active_displays("Raw").unwrap();
-    config2.set_active_views("Raw").unwrap();
-    (config1, config2)
-}
-
-/// `Config compare_displays`'s checks (Display_tests.cpp:328-515 @ v2.5.2) on configs built
-/// through the API instead of read from YAML, without its `validate()` calls (no marker: the
-/// test reads YAML).
-#[test]
-fn compare_displays_without_yaml() {
-    let _env = EnvGuard::new();
-    let (config1, config2) = compare_displays_configs();
-
+/// The checks of `Config compare_displays` (Display_tests.cpp:335-514 @ v2.5.2) on its two
+/// configs.
+fn check_compare_displays(config1: Config, config2: Config) {
     {
         // Active (display, view) pair where the view is display-defined.
         assert_eq!(1, config1.num_displays());
@@ -1660,4 +1669,2533 @@ colorspaces:
 fn internal_raw_profile() {
     let _env = EnvGuard::new();
     Config::create_from_stream(INTERNAL_RAW_PROFILE.as_bytes()).unwrap();
+}
+
+/// Port of `OCIO_ADD_TEST(Config, compare_displays)` @ v2.5.2 (Display_tests.cpp).
+#[test]
+fn compare_displays() {
+    let _env = EnvGuard::new();
+    const CONFIG1: &str = r#"ocio_profile_version: 2
+
+roles:
+  default: raw
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+
+shared_views:
+  - !<View> {name: sview1, colorspace: raw}
+
+displays:
+  Raw:
+    - !<View> {name: Raw, colorspace: raw}
+  sRGB:
+    - !<View> {name: Raw, colorspace: raw}
+    - !<View> {name: view, view_transform: display_vt, display_colorspace: display_cs}
+    - !<Views> [sview1]
+
+active_displays: [sRGB]
+active_views: [view, sview1]
+
+view_transforms:
+  - !<ViewTransform>
+    name: default_vt
+    to_scene_reference: !<CDLTransform> {sat: 1.5}
+
+  - !<ViewTransform>
+    name: display_vt
+    to_display_reference: !<CDLTransform> {sat: 1.5}
+
+display_colorspaces:
+  - !<ColorSpace>
+    name: display_cs
+    to_display_reference: !<CDLTransform> {sat: 1.5}
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+"#;
+
+    const CONFIG2: &str = r#"ocio_profile_version: 2
+
+roles:
+  default: raw
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+
+shared_views:
+  - !<View> {name: view, view_transform: display_vt, display_colorspace: display_cs}
+  - !<View> {name: sview1, colorspace: raw}
+
+displays:
+  Raw:
+    - !<View> {name: Raw, colorspace: raw}
+  sRGB:
+    - !<View> {name: Raw, colorspace: raw}
+    - !<Views> [view, sview1]
+
+active_displays: [Raw]
+active_views: [Raw]
+
+view_transforms:
+  - !<ViewTransform>
+    name: default_vt
+    to_scene_reference: !<CDLTransform> {sat: 1.5}
+
+  - !<ViewTransform>
+    name: display_vt
+    to_display_reference: !<CDLTransform> {sat: 1.5}
+
+display_colorspaces:
+  - !<ColorSpace>
+    name: display_cs
+    to_display_reference: !<CDLTransform> {sat: 1.5}
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+"#;
+
+    let config1 = Config::create_from_stream(CONFIG1.as_bytes()).unwrap();
+    let config2 = Config::create_from_stream(CONFIG2.as_bytes()).unwrap();
+    config1.validate().unwrap();
+    config2.validate().unwrap();
+
+    check_compare_displays((*config1).clone(), (*config2).clone());
+}
+
+/// Port of `OCIO_ADD_TEST(Config, compare_virtual_displays)` @ v2.5.2 (Display_tests.cpp).
+#[test]
+fn compare_virtual_displays() {
+    let _env = EnvGuard::new();
+    const CONFIG1: &str = r#"ocio_profile_version: 2
+
+roles:
+  default: raw
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+
+viewing_rules:
+  - !<Rule> {name: Linear, colorspaces: default}
+
+shared_views:
+  - !<View> {name: Film, view_transform: display_vt, display_colorspace: <USE_DISPLAY_NAME>, looks: look1, rule: Linear, description: Test view}
+  - !<View> {name: view, view_transform: display_vt, display_colorspace: display_cs}
+
+displays:
+  Raw:
+    - !<View> {name: Raw, colorspace: raw}
+  sRGB:
+    - !<View> {name: Raw, colorspace: raw}
+
+virtual_display:
+  - !<View> {name: Raw, colorspace: raw}
+  - !<Views> [Film, view]
+
+looks:
+  - !<Look>
+    name: look1
+    process_space: default
+
+view_transforms:
+  - !<ViewTransform>
+    name: default_vt
+    to_scene_reference: !<CDLTransform> {sat: 1.5}
+
+  - !<ViewTransform>
+    name: display_vt
+    to_display_reference: !<CDLTransform> {sat: 1.5}
+
+display_colorspaces:
+  - !<ColorSpace>
+    name: display_cs
+    to_display_reference: !<CDLTransform> {sat: 1.5}
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+"#;
+
+    const CONFIG2: &str = r#"ocio_profile_version: 2
+
+roles:
+  default: raw
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+
+viewing_rules:
+  - !<Rule> {name: Linear, colorspaces: default}
+
+shared_views:
+  - !<View> {name: view, view_transform: display_vt, display_colorspace: display_cs}
+
+displays:
+  Raw:
+    - !<View> {name: Raw, colorspace: raw}
+  sRGB:
+    - !<View> {name: Raw, colorspace: raw}
+    - !<Views> [view]
+
+virtual_display:
+  - !<View> {name: Raw, colorspace: raw}
+  - !<View> {name: Film, view_transform: display_vt, display_colorspace: <USE_DISPLAY_NAME>, looks: look1, rule: Linear, description: Test view}
+  - !<Views> [view]
+
+looks:
+  - !<Look>
+    name: look1
+    process_space: default
+
+view_transforms:
+  - !<ViewTransform>
+    name: default_vt
+    to_scene_reference: !<CDLTransform> {sat: 1.5}
+
+  - !<ViewTransform>
+    name: display_vt
+    to_display_reference: !<CDLTransform> {sat: 1.5}
+
+display_colorspaces:
+  - !<ColorSpace>
+    name: display_cs
+    to_display_reference: !<CDLTransform> {sat: 1.5}
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+"#;
+
+    let config1 = Config::create_from_stream(CONFIG1.as_bytes()).unwrap();
+    let config2 = Config::create_from_stream(CONFIG2.as_bytes()).unwrap();
+    config1.validate().unwrap();
+    config2.validate().unwrap();
+
+    // The getters of a virtual view: view transform, color space, looks, rule, description.
+    let props = |c: &Config, v: &[u8]| {
+        [
+            c.virtual_display_view_transform_name(v).to_vec(),
+            c.virtual_display_view_color_space_name(v).to_vec(),
+            c.virtual_display_view_looks(v).to_vec(),
+            c.virtual_display_view_rule(v).to_vec(),
+            c.virtual_display_view_description(v).to_vec(),
+        ]
+    };
+    let strs = |a: [&str; 5]| a.map(|s| s.as_bytes().to_vec());
+
+    {
+        // Test that Config::AreVirtualViewsEqual works for a matching virtual view pair across
+        // separate configs. Works regardless of if the virtual view is display-defined in one
+        // config and shared in the other.
+
+        // Virtual view is a reference to a shared view.
+        assert_eq!(2, config1.virtual_display_num_views(ViewType::Shared));
+
+        let view_name1 = config1.virtual_display_view(ViewType::Shared, 0).to_vec();
+
+        assert_eq!(b"Film", view_name1.as_slice());
+        assert_eq!(
+            props(&config1, &view_name1),
+            strs([
+                "display_vt",
+                "<USE_DISPLAY_NAME>",
+                "look1",
+                "Linear",
+                "Test view"
+            ])
+        );
+
+        // Virtual view is a reference to a display-defined view.
+        assert_eq!(
+            2,
+            config2.virtual_display_num_views(ViewType::DisplayDefined)
+        );
+
+        let view_name2 = config2
+            .virtual_display_view(ViewType::DisplayDefined, 1)
+            .to_vec();
+
+        assert_eq!(b"Film", view_name2.as_slice());
+        assert_eq!(
+            props(&config2, &view_name2),
+            strs([
+                "display_vt",
+                "<USE_DISPLAY_NAME>",
+                "look1",
+                "Linear",
+                "Test view"
+            ])
+        );
+
+        assert_eq!(view_name1, view_name2);
+        assert!(Config::are_virtual_views_equal(
+            &config1,
+            &config2,
+            &view_name1
+        ));
+    }
+    {
+        // Virtual views are both display-defined.
+        assert_eq!(
+            1,
+            config1.virtual_display_num_views(ViewType::DisplayDefined)
+        );
+
+        let view_name1 = config1
+            .virtual_display_view(ViewType::DisplayDefined, 0)
+            .to_vec();
+
+        assert_eq!(b"Raw", view_name1.as_slice());
+        assert_eq!(props(&config1, &view_name1), strs(["", "raw", "", "", ""]));
+
+        let view_name2 = config2
+            .virtual_display_view(ViewType::DisplayDefined, 0)
+            .to_vec();
+
+        assert_eq!(b"Raw", view_name2.as_slice());
+        assert_eq!(props(&config2, &view_name2), strs(["", "raw", "", "", ""]));
+
+        assert_eq!(view_name1, view_name2);
+        assert!(Config::are_virtual_views_equal(
+            &config1,
+            &config2,
+            &view_name1
+        ));
+    }
+    {
+        // Virtual views are both shared.
+        let view_name1 = config1.virtual_display_view(ViewType::Shared, 1).to_vec();
+
+        assert_eq!(b"view", view_name1.as_slice());
+        assert_eq!(
+            props(&config1, &view_name1),
+            strs(["display_vt", "display_cs", "", "", ""])
+        );
+
+        assert_eq!(1, config2.virtual_display_num_views(ViewType::Shared));
+
+        let view_name2 = config2.virtual_display_view(ViewType::Shared, 0).to_vec();
+
+        assert_eq!(b"view", view_name2.as_slice());
+        assert_eq!(
+            props(&config2, &view_name2),
+            strs(["display_vt", "display_cs", "", "", ""])
+        );
+
+        assert_eq!(view_name1, view_name2);
+        assert!(Config::are_virtual_views_equal(
+            &config1,
+            &config2,
+            &view_name1
+        ));
+
+        assert_eq!(view_name1, view_name2);
+        assert!(Config::are_virtual_views_equal(
+            &config1,
+            &config2,
+            &view_name1
+        ));
+    }
+    {
+        // Test when a shared virtual view exists in one config but not the other.
+        let mut cfg = (*config1).clone();
+
+        assert!(config1.has_virtual_view("Film"));
+        assert!(config1.is_virtual_view_shared("Film"));
+
+        assert_eq!(2, cfg.virtual_display_num_views(ViewType::Shared));
+        assert!(cfg.has_virtual_view("Film"));
+        assert!(cfg.is_virtual_view_shared("Film"));
+
+        assert!(Config::are_virtual_views_equal(&config1, &cfg, "Film"));
+
+        // Check against another config where the virtual view is display-defined.
+        assert!(Config::are_virtual_views_equal(&config2, &cfg, "Film"));
+
+        // Remove a shared view from the virtual display.
+        cfg.remove_virtual_display_view("Film");
+
+        assert_eq!(1, cfg.virtual_display_num_views(ViewType::Shared));
+        assert!(!cfg.has_virtual_view("Film"));
+        assert!(!cfg.is_virtual_view_shared("Film"));
+
+        assert!(!Config::are_virtual_views_equal(&config1, &cfg, "Film"));
+        assert!(!Config::are_virtual_views_equal(&config2, &cfg, "Film"));
+    }
+    {
+        // Test when a display-defined virtual view exists in one config but not the other.
+        let mut cfg = (*config2).clone();
+
+        // Remove a display-defined view from the virtual display.
+        assert!(config2.has_virtual_view("Film"));
+        assert!(!config2.is_virtual_view_shared("Film")); // Confirm display-defined
+
+        assert_eq!(2, cfg.virtual_display_num_views(ViewType::DisplayDefined));
+        assert!(cfg.has_virtual_view("Film"));
+        assert!(!cfg.is_virtual_view_shared("Film")); // Confirm display-defined
+
+        assert!(Config::are_virtual_views_equal(&config2, &cfg, "Film"));
+
+        // Check against another config where the virtual view is a reference to a shared view.
+        assert!(Config::are_virtual_views_equal(&config1, &cfg, "Film"));
+
+        // Remove a display-defined view from the virtual display.
+        cfg.remove_virtual_display_view("Film");
+
+        assert_eq!(1, cfg.virtual_display_num_views(ViewType::DisplayDefined));
+        assert!(!cfg.has_virtual_view("Film"));
+
+        assert!(!Config::are_virtual_views_equal(&config2, &cfg, "Film"));
+        assert!(!Config::are_virtual_views_equal(&config1, &cfg, "Film"));
+    }
+}
+
+// Group B: the tests that validate configs (WP 3.8).
+
+/// Port of `OCIO_ADD_TEST(Config, simple_config)` @ v2.5.2.
+#[test]
+fn simple_config() {
+    let _env = EnvGuard::new();
+    const SIMPLE_PROFILE: &str = concat!(
+        "ocio_profile_version: 1\n",
+        "resource_path: luts\n",
+        "strictparsing: false\n",
+        "luma: [0.2126, 0.7152, 0.0722]\n",
+        "roles:\n",
+        "  default: raw\n",
+        "  scene_linear: lnh\n",
+        "displays:\n",
+        "  sRGB:\n",
+        "  - !<View> {name: Film1D, colorspace: loads_of_transforms}\n",
+        "  - !<View> {name: Ln, colorspace: lnh}\n",
+        "  - !<View> {name: Raw, colorspace: raw}\n",
+        "colorspaces:\n",
+        "  - !<ColorSpace>\n",
+        "      name: raw\n",
+        "      family: raw\n",
+        "      equalitygroup: \n",
+        "      bitdepth: 32f\n",
+        "      description: |\n",
+        "        A raw color space. Conversions to and from this space are no-ops.\n",
+        "      isdata: true\n",
+        "      allocation: uniform\n",
+        "  - !<ColorSpace>\n",
+        "      name: lnh\n",
+        "      family: ln\n",
+        "      equalitygroup: \n",
+        "      bitdepth: 16f\n",
+        "      description: |\n",
+        "        The show reference space. This is a sensor referred linear\n",
+        "        representation of the scene with primaries that correspond to\n",
+        "        scanned film. 0.18 in this space corresponds to a properly\n",
+        "        exposed 18% grey card.\n",
+        "      isdata: false\n",
+        "      allocation: lg2\n",
+        "  - !<ColorSpace>\n",
+        "      name: loads_of_transforms\n",
+        "      family: vd8\n",
+        "      equalitygroup: \n",
+        "      bitdepth: 8ui\n",
+        "      description: 'how many transforms can we use?'\n",
+        "      isdata: false\n",
+        "      allocation: uniform\n",
+        "      to_reference: !<GroupTransform>\n",
+        "        direction: forward\n",
+        "        children:\n",
+        "          - !<FileTransform>\n",
+        "            src: diffusemult.spimtx\n",
+        "            interpolation: unknown\n",
+        "          - !<ColorSpaceTransform>\n",
+        "            src: raw\n",
+        "            dst: lnh\n",
+        "          - !<ExponentTransform>\n",
+        "            value: [2.2, 2.2, 2.2, 1]\n",
+        "          - !<MatrixTransform>\n",
+        "            matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]\n",
+        "            offset: [0, 0, 0, 0]\n",
+        "          - !<CDLTransform>\n",
+        "            slope: [1, 1, 1]\n",
+        "            offset: [0, 0, 0]\n",
+        "            power: [1, 1, 1]\n",
+        "            saturation: 1\n",
+        "\n",
+    );
+
+    let config = Config::create_from_stream(SIMPLE_PROFILE.as_bytes()).unwrap();
+    config.validate().unwrap();
+}
+
+/// Port of `OCIO_ADD_TEST(Config, validation)` @ v2.5.2.
+#[test]
+fn validation() {
+    let _env = EnvGuard::new();
+    {
+        let simple_profile = concat!(
+            "ocio_profile_version: 1\n",
+            "colorspaces:\n",
+            "  - !<ColorSpace>\n",
+            "      name: raw\n",
+            "  - !<ColorSpace>\n",
+            "      name: raw\n",
+            "strictparsing: false\n",
+            "roles:\n",
+            "  default: raw\n",
+            "displays:\n",
+            "  sRGB:\n",
+            "  - !<View> {name: Raw, colorspace: raw}\n",
+            "\n",
+        );
+
+        check_throw_what(
+            Config::create_from_stream(simple_profile.as_bytes()),
+            "Colorspace with name 'raw' already defined",
+        );
+    }
+
+    {
+        let simple_profile = concat!(
+            "ocio_profile_version: 1\n",
+            "colorspaces:\n",
+            "  - !<ColorSpace>\n",
+            "      name: raw\n",
+            "strictparsing: false\n",
+            "roles:\n",
+            "  default: raw\n",
+            "displays:\n",
+            "  sRGB:\n",
+            "  - !<View> {name: Raw, colorspace: raw}\n",
+            "\n",
+        );
+
+        let config = Config::create_from_stream(simple_profile.as_bytes()).unwrap();
+
+        config.validate().unwrap();
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Config, version)` @ v2.5.2.
+#[test]
+fn version() {
+    let _env = EnvGuard::new();
+    let simple_profile = concat!(
+        "ocio_profile_version: 2\n",
+        "environment:\n",
+        "  {}\n",
+        "colorspaces:\n",
+        "  - !<ColorSpace>\n",
+        "      name: raw\n",
+        "strictparsing: false\n",
+        "roles:\n",
+        "  default: raw\n",
+        "displays:\n",
+        "  sRGB:\n",
+        "  - !<View> {name: Raw, colorspace: raw}\n",
+        "\n",
+    );
+
+    let mut config = (*Config::create_from_stream(simple_profile.as_bytes()).unwrap()).clone();
+
+    config.validate().unwrap();
+
+    config.set_major_version(1).unwrap();
+    check_throw_what(
+        config.set_major_version(20000),
+        "version is 20000 where supported versions start at 1 and end at 2",
+    );
+
+    {
+        check_throw_what(
+            config.set_minor_version(1),
+            "The minor version 1 is not supported for major version 1. Maximum minor version is 0",
+        );
+    }
+
+    let starts_with_lowered = |config: &Config, prefix: &str| {
+        lower(&config.serialize().unwrap()).starts_with(prefix.as_bytes())
+    };
+
+    {
+        config.set_minor_version(0).unwrap();
+
+        assert!(starts_with_lowered(&config, "ocio_profile_version: 1"));
+    }
+
+    {
+        config.set_major_version(2).unwrap();
+
+        assert!(starts_with_lowered(&config, "ocio_profile_version: 2"));
+    }
+
+    {
+        check_throw_what(
+            config.set_version(2, 9),
+            "The minor version 9 is not supported for major version 2. Maximum minor version is 5",
+        );
+
+        config.set_major_version(2).unwrap();
+        check_throw_what(
+            config.set_minor_version(9),
+            "The minor version 9 is not supported for major version 2. Maximum minor version is 5",
+        );
+    }
+
+    {
+        check_throw_what(
+            config.set_version(3, 4),
+            "version is 3 where supported versions start at 1 and end at 2",
+        );
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Config, version_validation)` @ v2.5.2.
+#[test]
+fn version_validation() {
+    let _env = EnvGuard::new();
+    const SIMPLE_PROFILE_END: &str = concat!(
+        "colorspaces:\n",
+        "  - !<ColorSpace>\n",
+        "      name: raw\n",
+        "strictparsing: false\n",
+        "roles:\n",
+        "  default: raw\n",
+        "displays:\n",
+        "  sRGB:\n",
+        "  - !<View> {name: Raw, colorspace: raw}\n",
+        "\n",
+    );
+    let read = |version: &str| {
+        Config::create_from_stream(
+            format!("ocio_profile_version: {version}\n{SIMPLE_PROFILE_END}").as_bytes(),
+        )
+    };
+
+    check_throw_what(
+        read("2.0.1"),
+        "does not appear to have a valid version 2.0.1",
+    );
+
+    check_throw_what(
+        read("2.9"),
+        "The minor version 9 is not supported for major version 2",
+    );
+
+    check_throw_what(
+        read("3"),
+        "The version is 3 where supported versions start at 1 and end at 2",
+    );
+
+    check_throw_what(
+        read("3.0"),
+        "The version is 3 where supported versions start at 1 and end at 2",
+    );
+
+    {
+        let config = read("1.0").unwrap();
+        assert_eq!(config.major_version(), 1);
+        assert_eq!(config.minor_version(), 0);
+    }
+
+    {
+        let config = read("2.0").unwrap();
+        assert_eq!(config.major_version(), 2);
+        assert_eq!(config.minor_version(), 0);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Config, config_v1)` @ v2.5.2.
+#[test]
+fn config_v1() {
+    let _env = EnvGuard::new();
+    const CONFIG: &str = concat!(
+        "ocio_profile_version: 1\n",
+        "strictparsing: false\n",
+        "roles:\n",
+        "  default: raw\n",
+        "displays:\n",
+        "  sRGB:\n",
+        "  - !<View> {name: Raw, colorspace: raw}\n",
+        "colorspaces:\n",
+        "  - !<ColorSpace>\n",
+        "      name: raw\n",
+    );
+
+    let config = Config::create_from_stream(CONFIG.as_bytes()).unwrap();
+    config.validate().unwrap();
+
+    assert_eq!(config.num_view_transforms(), 0);
+    assert_eq!(
+        config.num_color_spaces_with(SearchReferenceSpaceType::Display, ColorSpaceVisibility::All),
+        0
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(Config, not_case_sensitive)` @ v2.5.2.
+#[test]
+fn not_case_sensitive() {
+    let _env = EnvGuard::new();
+    // Validate that the color spaces and roles are case insensitive.
+
+    let config = Config::create_from_stream(profile_v2_start().as_bytes()).unwrap();
+    config.validate().unwrap();
+
+    assert!(config.color_space("lnh").is_some());
+
+    assert!(config.color_space("LNH").is_some());
+
+    assert!(config.color_space("RaW").is_some());
+
+    assert!(config.has_role("default"));
+    assert!(config.has_role("Default"));
+    assert!(config.has_role("DEFAULT"));
+
+    assert!(config.has_role("scene_linear"));
+    assert!(config.has_role("Scene_Linear"));
+
+    assert!(!config.has_role("reference"));
+    assert!(!config.has_role("REFERENCE"));
+}
+
+/// Port of `OCIO_ADD_TEST(Config, look_transform)` @ v2.5.2.
+#[test]
+fn look_transform() {
+    let _env = EnvGuard::new();
+    // Validate Config::validate() on config file containing look transforms.
+
+    const OCIO_CONFIG: &str = r#"
+ocio_profile_version: 2
+
+environment:
+  {}
+
+roles:
+  default: raw
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+
+displays:
+  Disp1:
+  - !<View> {name: View1, colorspace: raw, looks: look1}
+
+looks:
+  - !<Look>
+    name: look1
+    process_space: default
+    transform: !<ColorSpaceTransform> {src: default, dst: raw}
+  - !<Look>
+    name: look2
+    process_space: default
+    transform: !<LookTransform> {src: default, dst: raw, looks:+look1}
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+    allocation: uniform
+"#;
+
+    let config = Config::create_from_stream(OCIO_CONFIG.as_bytes()).unwrap();
+    config.validate().unwrap();
+}
+
+/// Port of `OCIO_ADD_TEST(Config, add_remove_display)` @ v2.5.2.
+#[test]
+fn add_remove_display() {
+    let _env = EnvGuard::new();
+    let mut config = (*Config::create_raw().unwrap()).clone();
+    config.validate().unwrap();
+
+    assert_eq!(config.num_displays(), 1);
+    assert_eq!(config.display(0), b"sRGB");
+    assert_eq!(config.num_views("sRGB"), 1);
+    assert_eq!(config.view("sRGB", 0), b"Raw");
+
+    // Add a (display, view) pair.
+
+    config
+        .add_display_view("disp1", "view1", "raw", "")
+        .unwrap();
+    assert!(config.has_view("disp1", "view1"));
+    assert_eq!(config.num_displays(), 2);
+    assert_eq!(config.display(0), b"sRGB");
+    assert_eq!(config.display(1), b"disp1");
+    assert_eq!(config.num_views("disp1"), 1);
+
+    // Remove a (display, view) pair.
+
+    config.remove_display_view("disp1", "view1").unwrap();
+    assert!(!config.has_view("disp1", "view1"));
+    assert_eq!(config.num_displays(), 1);
+    assert_eq!(config.display(0), b"sRGB");
+}
+
+/// `PROFILE_V1` (Config_tests.cpp:2192-2194 @ v2.5.2).
+const PROFILE_V1: &str = "ocio_profile_version: 1\n\
+\n";
+
+/// `SIMPLE_PROFILE_CS_V1` (Config_tests.cpp:2245-2271 @ v2.5.2).
+const SIMPLE_PROFILE_CS_V1: &str = "\n\
+colorspaces:\n  \
+- !<ColorSpace>\n    \
+name: raw\n    \
+family: \"\"\n    \
+equalitygroup: \"\"\n    \
+bitdepth: unknown\n    \
+isdata: false\n    \
+allocation: uniform\n\
+\n  \
+- !<ColorSpace>\n    \
+name: log\n    \
+family: \"\"\n    \
+equalitygroup: \"\"\n    \
+bitdepth: unknown\n    \
+isdata: false\n    \
+allocation: uniform\n    \
+from_reference: !<LogTransform> {base: 10}\n\
+\n  \
+- !<ColorSpace>\n    \
+name: lnh\n    \
+family: \"\"\n    \
+equalitygroup: \"\"\n    \
+bitdepth: unknown\n    \
+isdata: false\n    \
+allocation: uniform\n";
+
+/// `PROFILE_V1 + SIMPLE_PROFILE_A + SIMPLE_PROFILE_B_V1` (Config_tests.cpp:2303 @ v2.5.2).
+fn profile_v1_start() -> String {
+    [
+        PROFILE_V1,
+        SIMPLE_PROFILE_A,
+        SIMPLE_PROFILE_DISPLAYS_LOOKS,
+        SIMPLE_PROFILE_CS_V1,
+    ]
+    .concat()
+}
+
+/// Compares serialized bytes with upstream's expected text.
+#[track_caller]
+fn check_serialized(actual: &[u8], expected: &str) {
+    ocio_testkit::compare::assert_text_eq(
+        "serialize",
+        expected,
+        std::str::from_utf8(actual).unwrap(),
+    );
+}
+
+/// Reads `text`, validates it, and checks that the config serializes back to `text`, as
+/// upstream's serialization tests do.
+fn check_round_trip(text: &str) {
+    let config = Config::create_from_stream(text.as_bytes()).unwrap();
+    config.validate().unwrap();
+    check_serialized(&config.serialize().unwrap(), text);
+}
+
+/// Port of `OCIO_ADD_TEST(Config, colorspacename_with_reserved_token)` @ v2.5.2.
+#[test]
+fn colorspacename_with_reserved_token() {
+    let _env = EnvGuard::new();
+    // Using context variable tokens (i.e. $ and %) in color space names is forbidden.
+
+    let mut cfg = (*Config::create_raw().unwrap()).clone();
+    let mut cs = ColorSpace::new();
+    cs.set_name("cs1$VAR");
+    check_throw_what(
+        cfg.add_color_space(&cs),
+        "A color space name 'cs1$VAR' cannot contain a context variable reserved token i.e. % \
+         or $.",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(Config, serialize_colorspace_displayview_transforms)` @ v2.5.2.
+#[test]
+fn serialize_colorspace_displayview_transforms() {
+    let _env = EnvGuard::new();
+    // Validate that a ColorSpaceTransform and DisplayViewTransform are correctly serialized.
+    let str_end = concat!(
+        "    from_scene_reference: !<GroupTransform>\n",
+        "      children:\n",
+        "        - !<ColorSpaceTransform> {src: raw, dst: log}\n",
+        "        - !<ColorSpaceTransform> {src: raw, dst: log, direction: inverse}\n",
+        "        - !<ColorSpaceTransform> {src: default, dst: log, data_bypass: false}\n",
+        "        - !<DisplayViewTransform> {src: raw, display: sRGB, view: RawView}\n",
+        "        - !<DisplayViewTransform> {src: default, display: sRGB, view: RawView, direction: inverse}\n",
+        "        - !<DisplayViewTransform> {src: log, display: sRGB, view: RawView, looks_bypass: true, data_bypass: false}\n",
+    );
+
+    check_round_trip(&(profile_v2_start() + str_end));
+}
+
+/// Port of `OCIO_ADD_TEST(Config, matrix_serialization)` @ v2.5.2.
+#[test]
+fn matrix_serialization() {
+    let _env = EnvGuard::new();
+    let str_end = concat!(
+        "    from_reference: !<GroupTransform>\n",
+        "      children:\n",
+        // Check the value serialization.
+        "        - !<MatrixTransform> {matrix: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],",
+        " offset: [-1, -2, -3, -4]}\n",
+        // Check the value precision.
+        "        - !<MatrixTransform> {offset: [0.123456789876, 1.23456789876, 12.3456789876, 123.456789876]}\n",
+        "        - !<MatrixTransform> {matrix: [0.123456789876, 1.23456789876, 12.3456789876, 123.456789876, ",
+        "1234.56789876, 12345.6789876, 123456.789876, 1234567.89876, ",
+        "0, 0, 1, 0, 0, 0, 0, 1]}\n",
+    );
+
+    check_round_trip(&(profile_v1_start() + str_end));
+}
+
+/// Port of `OCIO_ADD_TEST(Config, cdl_serialization)` @ v2.5.2.
+#[test]
+fn cdl_serialization() {
+    let _env = EnvGuard::new();
+    // Config v2.
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<CDLTransform> {slope: [1, 2, 1]}\n",
+            "        - !<CDLTransform> {offset: [0.1, 0.2, 0.1]}\n",
+            "        - !<CDLTransform> {power: [1.1, 1.2, 1.1]}\n",
+            "        - !<CDLTransform> {sat: 0.1, direction: inverse}\n",
+            "        - !<CDLTransform> {slope: [2, 2, 3], offset: [0.2, 0.3, 0.1], power: [1.2, 1.1, 1], sat: 0.2, style: asc}\n",
+        );
+
+        check_round_trip(&(profile_v2_start() + str_end));
+    }
+
+    // Config v1.
+    {
+        let str_end = concat!(
+            "    from_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<CDLTransform> {slope: [1, 2, 1]}\n",
+            "        - !<CDLTransform> {offset: [0.1, 0.2, 0.1]}\n",
+            "        - !<CDLTransform> {power: [1.1, 1.2, 1.1]}\n",
+            "        - !<CDLTransform> {sat: 0.1}\n",
+        );
+
+        check_round_trip(&(profile_v1_start() + str_end));
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Config, file_transform_serialization)` @ v2.5.2.
+#[test]
+fn file_transform_serialization() {
+    let _env = EnvGuard::new();
+    // Config v2.
+    let str_end = concat!(
+        "    from_scene_reference: !<GroupTransform>\n",
+        "      children:\n",
+        "        - !<FileTransform> {src: a.clf}\n",
+        "        - !<FileTransform> {src: b.ccc, cccid: cdl1, interpolation: best}\n",
+        "        - !<FileTransform> {src: b.ccc, cccid: cdl2, cdl_style: asc, interpolation: linear}\n",
+        "        - !<FileTransform> {src: a.clf, direction: inverse}\n",
+    );
+
+    check_round_trip(&(profile_v2_start() + str_end));
+}
+
+/// Port of `OCIO_ADD_TEST(Config, add_color_space)` @ v2.5.2.
+#[test]
+fn add_color_space() {
+    use crate::transforms::fixed_function_transform::FixedFunctionTransform;
+    use ocio_ops::open_color_types::FixedFunctionStyle;
+
+    let _env = EnvGuard::new();
+    // The unit test validates that the color space is correctly added to the configuration.
+
+    // Note that the new C++11 u8 notation for UTF-8 string literals is used
+    // to partially validate non-english language support.
+
+    let str = profile_v2_start()
+        + "    from_scene_reference: !<MatrixTransform> {offset: [-1, -2, -3, -4]}\n";
+
+    let mut config = (*Config::create_from_stream(str.as_bytes()).unwrap()).clone();
+    config.validate().unwrap();
+    assert_eq!(config.num_color_spaces(), 3);
+
+    let mut cs = ColorSpace::new();
+    cs.set_name("ast\u{e9}ro\u{ef}de"); // Color space name with accents.
+    // Some accents and some money symbols.
+    cs.set_description(
+        "\u{e9} \u{c0} \u{c2} \u{c7} \u{c9} \u{c8} \u{e7} -- $ \u{20ac} \u{5186} \u{a3} \u{5143}",
+    );
+
+    let tr = FixedFunctionTransform::new(FixedFunctionStyle::AcesRedMod03, &[]).unwrap();
+
+    cs.set_transform(Some(&Transform::from(tr)), ColorSpaceDirection::ToReference)
+        .unwrap();
+
+    let cs_name = "ast\u{e9}ro\u{ef}de";
+
+    assert_eq!(config.index_for_color_space(cs_name), -1);
+    config.add_color_space(&cs).unwrap();
+    assert_eq!(config.index_for_color_space(cs_name), 3);
+
+    let res = str
+        + "\n"
+        + "  - !<ColorSpace>\n"
+        + "    name: "
+        + cs_name
+        + "\n"
+        + "    family: \"\"\n"
+        + "    equalitygroup: \"\"\n"
+        + "    bitdepth: unknown\n"
+        + "    description: \u{e9} \u{c0} \u{c2} \u{c7} \u{c9} \u{c8} \u{e7} -- $ \u{20ac} \u{5186} \u{a3} \u{5143}\n"
+        + "    isdata: false\n"
+        + "    allocation: uniform\n"
+        + "    to_scene_reference: !<FixedFunctionTransform> {style: ACES_RedMod03}\n";
+
+    check_serialized(&config.serialize().unwrap(), &res);
+
+    config.remove_color_space(cs_name);
+    assert_eq!(config.num_color_spaces(), 3);
+    assert_eq!(config.index_for_color_space(cs_name), -1);
+
+    config.clear_color_spaces();
+    assert_eq!(config.num_color_spaces(), 0);
+}
+
+/// Port of `OCIO_ADD_TEST(Config, display_color_spaces_serialization)` @ v2.5.2.
+#[test]
+fn display_color_spaces_serialization() {
+    let _env = EnvGuard::new();
+    {
+        let str_dcs = concat!(
+            "\n",
+            "view_transforms:\n",
+            "  - !<ViewTransform>\n",
+            "    name: display\n",
+            "    from_display_reference: !<MatrixTransform> {}\n",
+            "\n",
+            "  - !<ViewTransform>\n",
+            "    name: scene\n",
+            "    from_scene_reference: !<MatrixTransform> {}\n",
+            "\n",
+            "display_colorspaces:\n",
+            "  - !<ColorSpace>\n",
+            "    name: dcs1\n",
+            "    family: \"\"\n",
+            "    equalitygroup: \"\"\n",
+            "    bitdepth: unknown\n",
+            "    isdata: false\n",
+            "    allocation: uniform\n",
+            "    from_display_reference: !<ExponentTransform> {value: 2.4, direction: inverse}\n",
+            "\n",
+            "  - !<ColorSpace>\n",
+            "    name: dcs2\n",
+            "    family: \"\"\n",
+            "    equalitygroup: \"\"\n",
+            "    bitdepth: unknown\n",
+            "    isdata: false\n",
+            "    allocation: uniform\n",
+            "    to_display_reference: !<ExponentTransform> {value: 2.4}\n",
+        );
+
+        let str = profile_v2_dcs_start() + str_dcs + SIMPLE_PROFILE_CS_V2;
+
+        let config = Config::create_from_stream(str.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        let ss = config.serialize().unwrap();
+        assert_eq!(ss.len(), str.len());
+        check_serialized(&ss, &str);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Config, categories)` @ v2.5.2.
+#[test]
+fn categories() {
+    let _env = EnvGuard::new();
+    const MY_OCIO_CONFIG: &str = concat!(
+        "ocio_profile_version: 2\n",
+        "\n",
+        "environment:\n",
+        "  {}\n",
+        "search_path: luts\n",
+        "strictparsing: true\n",
+        "luma: [0.2126, 0.7152, 0.0722]\n",
+        "\n",
+        "roles:\n",
+        "  default: raw1\n",
+        "  scene_linear: raw1\n",
+        "\n",
+        "file_rules:\n",
+        "  - !<Rule> {name: Default, colorspace: default}\n",
+        "\n",
+        "displays:\n",
+        "  sRGB:\n",
+        "    - !<View> {name: Raw, colorspace: raw1}\n",
+        "\n",
+        "active_displays: []\n",
+        "active_views: []\n",
+        "\n",
+        "colorspaces:\n",
+        "  - !<ColorSpace>\n",
+        "    name: raw1\n",
+        "    family: \"\"\n",
+        "    equalitygroup: \"\"\n",
+        "    bitdepth: unknown\n",
+        "    isdata: false\n",
+        "    categories: [rendering, linear]\n",
+        "    encoding: scene-linear\n",
+        "    allocation: uniform\n",
+        "    allocationvars: [-0.125, 1.125]\n",
+        "\n",
+        "  - !<ColorSpace>\n",
+        "    name: raw2\n",
+        "    family: \"\"\n",
+        "    equalitygroup: \"\"\n",
+        "    bitdepth: unknown\n",
+        "    isdata: false\n",
+        "    categories: [rendering]\n",
+        "    encoding: data\n",
+        "    allocation: uniform\n",
+        "    allocationvars: [-0.125, 1.125]\n",
+    );
+
+    let config = Config::create_from_stream(MY_OCIO_CONFIG.as_bytes()).unwrap();
+    config.validate().unwrap();
+
+    // Test the serialization & deserialization.
+
+    check_serialized(&config.serialize().unwrap(), MY_OCIO_CONFIG);
+
+    // Test the config content.
+
+    // Upstream's null category is the empty one.
+    let css = config.color_spaces("");
+    assert_eq!(css.num_color_spaces(), 2);
+    let cs = css.color_space_by_index(0).unwrap();
+    assert_eq!(cs.num_categories(), 2);
+    assert_eq!(cs.category(0).unwrap(), b"rendering");
+    assert_eq!(cs.category(1).unwrap(), b"linear");
+
+    let css = config.color_spaces("linear");
+    assert_eq!(css.num_color_spaces(), 1);
+    let cs = css.color_space_by_index(0).unwrap();
+    assert_eq!(cs.num_categories(), 2);
+    assert_eq!(cs.category(0).unwrap(), b"rendering");
+    assert_eq!(cs.category(1).unwrap(), b"linear");
+
+    let css = config.color_spaces("rendering");
+    assert_eq!(css.num_color_spaces(), 2);
+
+    assert_eq!(config.num_color_spaces(), 2);
+    assert_eq!(config.color_space_name_by_index(0), b"raw1");
+    assert_eq!(config.color_space_name_by_index(1), b"raw2");
+    assert_eq!(config.index_for_color_space("raw1"), 0);
+    assert_eq!(config.index_for_color_space("raw2"), 1);
+    let cs = config.color_space("raw1").unwrap();
+    assert_eq!(cs.name(), b"raw1");
+    assert_eq!(cs.encoding(), b"scene-linear");
+    let cs = config.color_space("raw2").unwrap();
+    assert_eq!(cs.name(), b"raw2");
+    assert_eq!(cs.encoding(), b"data");
+}
+
+/// Port of `OCIO_ADD_TEST(Config, display_view_order)` @ v2.5.2.
+#[test]
+fn display_view_order() {
+    let _env = EnvGuard::new();
+    const SIMPLE_CONFIG: &str = r#"
+        ocio_profile_version: 2
+
+        environment:
+          {}
+
+        displays:
+          sRGB_B:
+            - !<View> {name: View_2, colorspace: raw}
+            - !<View> {name: View_1, colorspace: raw}
+          sRGB_D:
+            - !<View> {name: View_2, colorspace: raw}
+            - !<View> {name: View_3, colorspace: raw}
+          sRGB_A:
+            - !<View> {name: View_3, colorspace: raw}
+            - !<View> {name: View_1, colorspace: raw}
+          sRGB_C:
+            - !<View> {name: View_4, colorspace: raw}
+            - !<View> {name: View_1, colorspace: raw}
+
+        colorspaces:
+          - !<ColorSpace>
+            name: raw
+            allocation: uniform
+
+          - !<ColorSpace>
+            name: lnh
+            allocation: uniform
+
+        file_rules:
+          - !<Rule> {name: Default, colorspace: raw}
+        "#;
+
+    let config = Config::create_from_stream(SIMPLE_CONFIG.as_bytes()).unwrap();
+    config.validate().unwrap();
+
+    assert_eq!(config.num_displays(), 4);
+
+    // When active_displays is not defined, the displays are returned in config order.
+
+    assert_eq!(config.default_display(), b"sRGB_B");
+
+    assert_eq!(config.display(0), b"sRGB_B");
+    assert_eq!(config.display(1), b"sRGB_D");
+    assert_eq!(config.display(2), b"sRGB_A");
+    assert_eq!(config.display(3), b"sRGB_C");
+
+    // When active_views is not defined, the views are returned in config order.
+
+    assert_eq!(config.default_view("sRGB_B"), b"View_2");
+
+    assert_eq!(config.num_views("sRGB_B"), 2);
+    assert_eq!(config.view("sRGB_B", 0), b"View_2");
+    assert_eq!(config.view("sRGB_B", 1), b"View_1");
+}
+
+/// Upstream's `InactiveCSConfigStart` (Config_tests.cpp:5905-5927 @ v2.5.2).
+const INACTIVE_CS_CONFIG_START: &str = concat!(
+    "ocio_profile_version: 2\n",
+    "\n",
+    "environment:\n",
+    "  {}\n",
+    "search_path: luts\n",
+    "strictparsing: true\n",
+    "luma: [0.2126, 0.7152, 0.0722]\n",
+    "\n",
+    "roles:\n",
+    "  default: raw\n",
+    "  scene_linear: lnh\n",
+    "\n",
+    "file_rules:\n",
+    "  - !<Rule> {name: Default, colorspace: default}\n",
+    "\n",
+    "displays:\n",
+    "  sRGB:\n",
+    "    - !<View> {name: Raw, colorspace: raw}\n",
+    "    - !<View> {name: Lnh, colorspace: lnh, looks: beauty}\n",
+    "\n",
+    "active_displays: []\n",
+    "active_views: []\n",
+);
+
+/// Upstream's `InactiveCSConfigEnd` (Config_tests.cpp:5929-5986 @ v2.5.2).
+const INACTIVE_CS_CONFIG_END: &str = concat!(
+    "\n",
+    "looks:\n",
+    "  - !<Look>\n",
+    "    name: beauty\n",
+    "    process_space: lnh\n",
+    "    transform: !<CDLTransform> {slope: [1, 2, 1]}\n",
+    "\n",
+    "\n",
+    "colorspaces:\n",
+    "  - !<ColorSpace>\n",
+    "    name: raw\n",
+    "    family: \"\"\n",
+    "    equalitygroup: \"\"\n",
+    "    bitdepth: unknown\n",
+    "    isdata: false\n",
+    "    allocation: uniform\n",
+    "\n",
+    "  - !<ColorSpace>\n",
+    "    name: lnh\n",
+    "    family: \"\"\n",
+    "    equalitygroup: \"\"\n",
+    "    bitdepth: unknown\n",
+    "    isdata: false\n",
+    "    allocation: uniform\n",
+    "\n",
+    "  - !<ColorSpace>\n",
+    "    name: cs1\n",
+    "    aliases: [alias1]\n",
+    "    family: \"\"\n",
+    "    equalitygroup: \"\"\n",
+    "    bitdepth: unknown\n",
+    "    isdata: false\n",
+    "    categories: [file-io]\n",
+    "    allocation: uniform\n",
+    "    from_scene_reference: !<CDLTransform> {offset: [0.1, 0.1, 0.1]}\n",
+    "\n",
+    "  - !<ColorSpace>\n",
+    "    name: cs2\n",
+    "    family: \"\"\n",
+    "    equalitygroup: \"\"\n",
+    "    bitdepth: unknown\n",
+    "    isdata: false\n",
+    "    categories: [working-space]\n",
+    "    allocation: uniform\n",
+    "    from_scene_reference: !<CDLTransform> {offset: [0.2, 0.2, 0.2]}\n",
+    "\n",
+    "  - !<ColorSpace>\n",
+    "    name: cs3\n",
+    "    family: \"\"\n",
+    "    equalitygroup: \"\"\n",
+    "    bitdepth: unknown\n",
+    "    isdata: false\n",
+    "    categories: [cat3]\n",
+    "    allocation: uniform\n",
+    "    from_scene_reference: !<CDLTransform> {offset: [0.3, 0.3, 0.3]}\n",
+);
+
+/// Port of `OCIO_ADD_TEST(Config, inactive_color_space_precedence)` @ v2.5.2.
+#[test]
+fn inactive_color_space_precedence() {
+    // EnvGuard::new() unsets OCIO_INACTIVE_COLORSPACES, as upstream's Platform::Unsetenv.
+    let env = EnvGuard::new();
+    // The test demonstrates that an API request supersedes the env. variable and the
+    // config file contents.
+
+    let config_str = [
+        INACTIVE_CS_CONFIG_START,
+        "inactive_colorspaces: [cs2]\n",
+        INACTIVE_CS_CONFIG_END,
+    ]
+    .concat();
+
+    let num = |c: &Config, v| c.num_color_spaces_with(SearchReferenceSpaceType::All, v);
+
+    let config = (*Config::create_from_stream(config_str.as_bytes()).unwrap()).clone();
+    config.validate().unwrap();
+
+    assert_eq!(num(&config, ColorSpaceVisibility::Inactive), 1);
+    assert_eq!(num(&config, ColorSpaceVisibility::Active), 4);
+    assert_eq!(num(&config, ColorSpaceVisibility::All), 5);
+
+    assert_eq!(config.color_space_name_by_index(0), b"raw");
+    assert_eq!(config.color_space_name_by_index(1), b"lnh");
+    assert_eq!(config.color_space_name_by_index(2), b"cs1");
+    assert_eq!(config.color_space_name_by_index(3), b"cs3");
+
+    // Env. variable supersedes the config content.
+
+    env.set(&[("OCIO_INACTIVE_COLORSPACES", "cs3, cs1, lnh")]);
+
+    let mut config = (*Config::create_from_stream(config_str.as_bytes()).unwrap()).clone();
+    config.validate().unwrap();
+
+    assert_eq!(num(&config, ColorSpaceVisibility::Inactive), 3);
+    assert_eq!(num(&config, ColorSpaceVisibility::Active), 2);
+    assert_eq!(num(&config, ColorSpaceVisibility::All), 5);
+
+    assert_eq!(config.color_space_name_by_index(0), b"raw");
+    assert_eq!(config.color_space_name_by_index(1), b"cs2");
+
+    // An API request supersedes the lists from the env. variable and the config file.
+
+    config.set_inactive_color_spaces("cs1, lnh");
+
+    assert_eq!(num(&config, ColorSpaceVisibility::Inactive), 2);
+    assert_eq!(num(&config, ColorSpaceVisibility::Active), 3);
+    assert_eq!(num(&config, ColorSpaceVisibility::All), 5);
+
+    assert_eq!(config.color_space_name_by_index(0), b"raw");
+    assert_eq!(config.color_space_name_by_index(1), b"cs2");
+    assert_eq!(config.color_space_name_by_index(2), b"cs3");
+}
+
+/// Port of `OCIO_ADD_TEST(Config, is_colorspace_used)` @ v2.5.2.
+#[test]
+fn is_colorspace_used() {
+    let _env = EnvGuard::new();
+    // Test Config::isColorSpaceUsed() i.e. a color space could be defined but not used.
+
+    const CONFIG: &str = concat!(
+        "ocio_profile_version: 2\n",
+        "\n",
+        "environment:\n",
+        "  {}\n",
+        "\n",
+        "search_path: luts\n",
+        "strictparsing: true\n",
+        "luma: [0.2126, 0.7152, 0.0722]\n",
+        "\n",
+        "roles:\n",
+        "  default: cs1\n",
+        "\n",
+        "view_transforms:\n",
+        "  - !<ViewTransform>\n",
+        "    name: vt1\n",
+        "    from_scene_reference: !<ColorSpaceTransform> {src: cs11, dst: cs11}\n",
+        "\n",
+        "displays:\n",
+        "  disp1:\n",
+        "    - !<View> {name: view1, colorspace: cs2}\n",
+        "    - !<View> {name: view2, colorspace: cs9}\n",
+        "\n",
+        "active_displays: [disp1]\n",
+        "active_views: [view1]\n",
+        "\n",
+        "file_rules:\n",
+        "  - !<Rule> {name: rule1, colorspace: cs10, pattern: \"*\", extension: \"*\"}\n",
+        "  - !<Rule> {name: Default, colorspace: default}\n",
+        "\n",
+        "looks:\n",
+        "  - !<Look>\n",
+        "    name: beauty\n",
+        "    process_space: cs5\n",
+        "    transform: !<ColorSpaceTransform> {src: cs6, dst: cs6}\n",
+        "\n",
+        "\n",
+        "colorspaces:\n",
+        "  - !<ColorSpace>\n",
+        "    name: cs1\n",
+        "\n",
+        "  - !<ColorSpace>\n",
+        "    name: cs2\n",
+        "\n",
+        "  - !<ColorSpace>\n",
+        "    name: cs3\n",
+        "\n",
+        "  - !<ColorSpace>\n",
+        "    name: cs4\n",
+        "    from_scene_reference: !<ColorSpaceTransform> {src: cs3, dst: cs3}\n",
+        "\n",
+        "  - !<ColorSpace>\n",
+        "    name: cs5\n",
+        "\n",
+        "  - !<ColorSpace>\n",
+        "    name: cs6\n",
+        "\n",
+        "  - !<ColorSpace>\n",
+        "    name: cs7\n",
+        "\n",
+        "  - !<ColorSpace>\n",
+        "    name: cs8\n",
+        "    from_scene_reference: !<GroupTransform>\n",
+        "      children:\n",
+        "        - !<ColorSpaceTransform> {src: cs7, dst: cs7}\n",
+        "\n",
+        "  - !<ColorSpace>\n",
+        "    name: cs9\n",
+        "    from_scene_reference: !<GroupTransform>\n",
+        "      children:\n",
+        "        - !<GroupTransform>\n",
+        "             children:\n",
+        "               - !<LookTransform> {src: cs8, dst: cs8}\n",
+        "\n",
+        "  - !<ColorSpace>\n",
+        "    name: cs10\n",
+        "\n",
+        "  - !<ColorSpace>\n",
+        "    name: cs11\n",
+    );
+
+    let config = Config::create_from_stream(CONFIG.as_bytes()).unwrap();
+    config.validate().unwrap();
+
+    assert!(config.is_color_space_used("cs1")); // Used by a role.
+    assert!(config.is_color_space_used("cs2")); // Used by a (display, view) pair.
+    assert!(config.is_color_space_used("cs3")); // Used by another color space.
+    assert!(config.is_color_space_used("cs5")); // Used by a look i.e. process_space.
+    assert!(config.is_color_space_used("cs6")); // Used by a look i.e. ColorSpaceTransform.
+    assert!(config.is_color_space_used("cs7")); // Indirectly used by a ColorSpaceTransform.
+    assert!(config.is_color_space_used("cs8")); // Indirectly used by a LookTransform.
+    assert!(config.is_color_space_used("cs9")); // Used by a inactive (display, view) pair.
+    assert!(config.is_color_space_used("cs10")); // Used by a file rule.
+    assert!(config.is_color_space_used("cs11")); // Used by a view transform.
+
+    assert!(!config.is_color_space_used("cs4")); // Present but not used.
+
+    // Upstream's null pointer is the empty string.
+    assert!(!config.is_color_space_used(""));
+    assert!(!config.is_color_space_used(""));
+    assert!(!config.is_color_space_used("cs65")); // Unknown color spaces are not used.
+}
+
+/// Port of `OCIO_ADD_TEST(Config, view_transforms)` @ v2.5.2.
+#[test]
+fn view_transforms() {
+    use crate::transforms::log_transform::LogTransform;
+    use crate::view_transform::ViewTransform;
+    use ocio_ops::open_color_types::{ReferenceSpaceType, ViewTransformDirection};
+
+    let _env = EnvGuard::new();
+    let str = profile_v2_dcs_start() + SIMPLE_PROFILE_CS_V2;
+
+    let config = Config::create_from_stream(str.as_bytes()).unwrap();
+    config.validate().unwrap();
+
+    let mut config_edit = (*config).clone();
+    // Create display-referred view transform and add it to the config.
+    let mut vt = ViewTransform::new(ReferenceSpaceType::Display);
+    check_throw_what(
+        config_edit.add_view_transform(&vt),
+        "Cannot add view transform with an empty name",
+    );
+    let vt_display = "display";
+    vt.set_name(vt_display);
+    check_throw_what(
+        config_edit.add_view_transform(&vt),
+        "Cannot add view transform 'display' with no transform",
+    );
+    vt.set_transform(
+        Some(&Transform::from(MatrixTransform::new())),
+        ViewTransformDirection::FromReference,
+    )
+    .unwrap();
+    config_edit.add_view_transform(&vt).unwrap();
+    assert_eq!(config_edit.num_view_transforms(), 1);
+    // Need at least one scene-referred view transform.
+    check_throw_what(
+        config_edit.validate(),
+        "at least one must use the scene reference space",
+    );
+    assert!(
+        config_edit
+            .default_scene_to_display_view_transform()
+            .is_none()
+    );
+
+    // Create scene-referred view transform and add it to the config.
+    let mut vt = ViewTransform::new(ReferenceSpaceType::Scene);
+    let vt_scene = "scene";
+    vt.set_name(vt_scene);
+    vt.set_transform(
+        Some(&Transform::from(MatrixTransform::new())),
+        ViewTransformDirection::FromReference,
+    )
+    .unwrap();
+    config_edit.add_view_transform(&vt).unwrap();
+    assert_eq!(config_edit.num_view_transforms(), 2);
+    config_edit.validate().unwrap();
+
+    let scene_vt = config_edit
+        .default_scene_to_display_view_transform()
+        .unwrap()
+        .clone();
+
+    assert_eq!(
+        vt_display.as_bytes(),
+        config_edit.view_transform_name_by_index(0)
+    );
+    assert_eq!(
+        vt_scene.as_bytes(),
+        config_edit.view_transform_name_by_index(1)
+    );
+    assert_eq!(b"", config_edit.view_transform_name_by_index(42));
+    assert!(config_edit.view_transform(vt_scene).is_some());
+    assert!(config_edit.view_transform("not a view transform").is_none());
+
+    // Default view transform.
+
+    assert_eq!(b"", config_edit.default_view_transform_name());
+
+    config_edit.set_default_view_transform_name("not valid");
+    assert_eq!(b"not valid", config_edit.default_view_transform_name());
+
+    check_throw_what(
+        config_edit.validate(),
+        "Default view transform is defined as: 'not valid' but this does not correspond to an \
+         existing scene-referred view transform",
+    );
+
+    config_edit.set_default_view_transform_name(vt_display);
+    check_throw_what(
+        config_edit.validate(),
+        "Default view transform is defined as: 'display' but this does not correspond to an \
+         existing scene-referred view transform",
+    );
+
+    let mut new_scene_vt = scene_vt.clone();
+    new_scene_vt.set_name("NotFirst");
+    config_edit.add_view_transform(&new_scene_vt).unwrap();
+
+    config_edit.set_default_view_transform_name("NotFirst");
+    config_edit.validate().unwrap();
+
+    // Save and reload to test file io for viewTransform.
+    let os = config_edit.serialize().unwrap();
+
+    let config_reloaded = Config::create_from_stream(&os).unwrap();
+    config_reloaded.validate().unwrap();
+
+    // Setting a view transform with the same name replaces the earlier one.
+    vt.set_transform(
+        Some(&Transform::from(LogTransform::new())),
+        ViewTransformDirection::FromReference,
+    )
+    .unwrap();
+    config_edit.add_view_transform(&vt).unwrap();
+    assert_eq!(config_edit.num_view_transforms(), 3);
+    let scene_vt = config_edit.view_transform(vt_scene).unwrap();
+    let trans = scene_vt
+        .transform(ViewTransformDirection::FromReference)
+        .unwrap();
+    assert!(matches!(trans, Transform::Log(_)));
+
+    assert_eq!(config_reloaded.num_view_transforms(), 3);
+
+    assert_eq!(b"NotFirst", config_reloaded.default_view_transform_name());
+
+    // Clear all view transforms does not clear the config's default view transform string.
+
+    config_edit.clear_view_transforms();
+    assert_eq!(config_edit.num_view_transforms(), 0);
+
+    assert_eq!(b"NotFirst", config_edit.default_view_transform_name());
+}
+
+/// Port of `OCIO_ADD_TEST(Config, virtual_display_v2_only)` @ v2.5.2.
+#[test]
+fn virtual_display_v2_only() {
+    use crate::file_rules::FileRules;
+
+    let _env = EnvGuard::new();
+    // Test that the virtual display is only supported by v2 or higher.
+
+    const CONFIG: &str = r#"ocio_profile_version: 1
+
+roles:
+  default: raw
+
+displays:
+  sRGB:
+    - !<View> {name: Raw, colorspace: raw}
+
+virtual_display:
+  - !<View> {name: Raw, colorspace: raw}
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+"#;
+
+    check_throw_what(
+        Config::create_from_stream(CONFIG.as_bytes()),
+        "Only version 2 (or higher) can have a virtual display.",
+    );
+
+    let mut cfg = (*Config::create_raw().unwrap()).clone();
+    cfg.add_virtual_display_shared_view("sview").unwrap();
+    cfg.set_major_version(1).unwrap();
+    cfg.set_file_rules(&FileRules::new());
+
+    check_throw_what(
+        cfg.validate(),
+        "Only version 2 (or higher) can have a virtual display.",
+    );
+
+    check_throw_what(
+        cfg.serialize(),
+        "Only version 2 (or higher) can have a virtual display.",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(Config, virtual_display_exceptions)` @ v2.5.2.
+#[test]
+fn virtual_display_exceptions() {
+    let _env = EnvGuard::new();
+    // Test the validations around the virtual display definition.
+
+    const CONFIG: &str = r#"ocio_profile_version: 2
+
+roles:
+  default: raw
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+
+shared_views:
+  - !<View> {name: sview1, colorspace: raw}
+
+displays:
+  Raw:
+    - !<View> {name: Raw, colorspace: raw}
+
+virtual_display:
+  - !<View> {name: Raw, colorspace: raw}
+  - !<Views> [sview1]
+
+view_transforms:
+  - !<ViewTransform>
+    name: default_vt
+    to_scene_reference: !<CDLTransform> {sat: 1.5}
+
+  - !<ViewTransform>
+    name: display_vt
+    to_display_reference: !<CDLTransform> {sat: 1.5}
+
+display_colorspaces:
+  - !<ColorSpace>
+    name: display_cs
+    to_display_reference: !<CDLTransform> {sat: 1.5}
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+"#;
+
+    let mut cfg = (*Config::create_from_stream(CONFIG.as_bytes()).unwrap()).clone();
+    cfg.validate().unwrap();
+
+    // Test failures for shared views.
+
+    check_throw_what(
+        cfg.add_virtual_display_shared_view("sview1"),
+        "Shared view could not be added to virtual_display: There is already a shared view \
+         named 'sview1'.",
+    );
+
+    cfg.add_virtual_display_shared_view("sview2").unwrap();
+    check_throw_what(
+        cfg.validate(),
+        "The display 'virtual_display' contains a shared view 'sview2' that is not defined.",
+    );
+
+    cfg.remove_virtual_display_view("sview2");
+    cfg.validate().unwrap();
+
+    // Test failures for views. (Upstream's null pointers are empty strings.)
+
+    check_throw_what(
+        cfg.add_virtual_display_view("Raw", "", "raw", "", "", ""),
+        "View could not be added to virtual_display in config: View 'Raw' already exists.",
+    );
+
+    cfg.add_virtual_display_view("Raw1", "", "raw1", "", "", "")
+        .unwrap();
+    check_throw_what(
+        cfg.validate(),
+        "Display 'virtual_display' has a view 'Raw1' that refers to a color space or a named \
+         transform, 'raw1', which is not defined.",
+    );
+
+    cfg.remove_virtual_display_view("Raw1");
+    cfg.validate().unwrap();
+
+    cfg.add_virtual_display_view("Raw1", "", "raw", "look", "", "")
+        .unwrap();
+    check_throw_what(
+        cfg.validate(),
+        "Display 'virtual_display' has a view 'Raw1' refers to a look, 'look', which is not \
+         defined.",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(Config, remove_color_space)` @ v2.5.2.
+#[test]
+fn remove_color_space() {
+    let _env = EnvGuard::new();
+    // The unit test validates that a color space is correctly removed from a configuration.
+
+    let str = profile_v2_start()
+        + "    from_scene_reference: !<MatrixTransform> {offset: [-1, -2, -3, -4]}\n"
+        + "\n"
+        + "  - !<ColorSpace>\n"
+        + "    name: cs5\n"
+        + "    allocation: uniform\n"
+        + "    to_scene_reference: !<FixedFunctionTransform> {style: ACES_RedMod03}\n";
+
+    let mut config = (*Config::create_from_stream(str.as_bytes()).unwrap()).clone();
+    config.validate().unwrap();
+    assert_eq!(config.num_color_spaces(), 4);
+
+    // Step 1 - Validate the remove.
+
+    assert_eq!(config.index_for_color_space("cs5"), 3);
+    config.remove_color_space("cs5");
+    assert_eq!(config.num_color_spaces(), 3);
+    assert_eq!(config.index_for_color_space("cs5"), -1);
+
+    // Step 2 - Validate some faulty removes.
+
+    // As documented, removing a color space that doesn't exist fails without any notice.
+    config.remove_color_space("cs5");
+    config.validate().unwrap();
+
+    // Since the method does not support role names, a role name removal fails
+    // without any notice except if it's also an existing color space.
+    config.remove_color_space("scene_linear");
+    config.validate().unwrap();
+
+    // Successfully remove a color space unfortunately used by a role.
+    config.remove_color_space("raw");
+    // As discussed only validation traps the issue.
+    check_throw_what(
+        config.validate(),
+        "Config failed role validation. The role 'default' refers to a color space, 'raw', \
+         which is not defined.",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(Config, display_view)` @ v2.5.2.
+#[test]
+fn display_view() {
+    use crate::view_transform::ViewTransform;
+    use ocio_ops::open_color_types::{ReferenceSpaceType, ViewTransformDirection};
+
+    let _env = EnvGuard::new();
+    // Create a config with a display that has 2 kinds of views.
+    let mut config = Config::new().unwrap();
+    {
+        // Add default color space.
+        let mut cs = ColorSpace::new();
+        cs.set_name("default");
+        cs.set_is_data(true);
+        config.add_color_space(&cs).unwrap();
+    }
+
+    config.set_version(2, 1).unwrap();
+
+    // Add a scene-referred and a display-referred color space.
+    let mut cs = ColorSpace::with_reference_space(ReferenceSpaceType::Scene);
+    cs.set_name("scs");
+    config.add_color_space(&cs).unwrap();
+    let mut cs = ColorSpace::with_reference_space(ReferenceSpaceType::Display);
+    cs.set_name("dcs");
+    config.add_color_space(&cs).unwrap();
+
+    // Add a scene-referred and a display-referred view transform.
+    let mut vt = ViewTransform::new(ReferenceSpaceType::Display);
+    vt.set_name("display");
+    vt.set_transform(
+        Some(&Transform::from(MatrixTransform::new())),
+        ViewTransformDirection::FromReference,
+    )
+    .unwrap();
+    config.add_view_transform(&vt).unwrap();
+    let mut vt = ViewTransform::new(ReferenceSpaceType::Scene);
+    vt.set_name("view_transform");
+    vt.set_transform(
+        Some(&Transform::from(MatrixTransform::new())),
+        ViewTransformDirection::FromReference,
+    )
+    .unwrap();
+    config.add_view_transform(&vt).unwrap();
+
+    config.set_default_view_transform_name("view_transform");
+
+    // Add a simple view.
+    let display = "display";
+
+    assert!(!config.has_view(display, "view1"));
+
+    config
+        .add_display_view(display, "view1", "scs", "")
+        .unwrap();
+
+    assert!(config.has_view(display, "view1"));
+
+    config.validate().unwrap();
+
+    assert!(!config.has_view(display, "view2"));
+
+    config
+        .add_display_view_with_view_transform(display, "view2", "view_transform", "scs", "", "", "")
+        .unwrap();
+    check_throw_what(
+        config.validate(),
+        "color space, 'scs', that is not a display-referred",
+    );
+
+    assert!(config.has_view(display, "view2"));
+
+    config
+        .add_display_view_with_view_transform(display, "view2", "view_transform", "dcs", "", "", "")
+        .unwrap();
+    assert!(config.has_view(display, "view2"));
+
+    config.validate().unwrap();
+
+    // Validate how the config is serialized.
+
+    let os = config.serialize().unwrap();
+    const EXPECTED: &str = r#"ocio_profile_version: 2.1
+
+environment:
+  {}
+search_path: ""
+strictparsing: true
+luma: [0.2126, 0.7152, 0.0722]
+
+roles:
+  {}
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+
+displays:
+  display:
+    - !<View> {name: view1, colorspace: scs}
+    - !<View> {name: view2, view_transform: view_transform, display_colorspace: dcs}
+
+active_displays: []
+active_views: []
+
+default_view_transform: view_transform
+
+view_transforms:
+  - !<ViewTransform>
+    name: display
+    from_display_reference: !<MatrixTransform> {}
+
+  - !<ViewTransform>
+    name: view_transform
+    from_scene_reference: !<MatrixTransform> {}
+
+display_colorspaces:
+  - !<ColorSpace>
+    name: dcs
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+
+colorspaces:
+  - !<ColorSpace>
+    name: default
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: true
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: scs
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+"#;
+
+    check_serialized(&os, EXPECTED);
+
+    let config_read = Config::create_from_stream(&os).unwrap();
+    assert_eq!(config_read.num_views("display"), 2);
+    let v1 = config_read.view("display", 0).to_vec();
+    assert_eq!(v1, b"view1");
+    assert_eq!(
+        b"scs",
+        config_read.display_view_color_space_name("display", &v1)
+    );
+    assert_eq!(b"", config_read.display_view_transform_name("display", &v1));
+    let v2 = config_read.view("display", 1).to_vec();
+    assert_eq!(v2, b"view2");
+    assert_eq!(
+        b"dcs",
+        config_read.display_view_color_space_name("display", &v2)
+    );
+    assert_eq!(
+        b"view_transform",
+        config_read.display_view_transform_name("display", &v2)
+    );
+    assert_eq!(b"view_transform", config_read.default_view_transform_name());
+
+    // Check some faulty calls related to displays & views.
+
+    // Using nullptr or empty string for required parameters with throw. (Upstream's null
+    // pointers are empty strings, so each of its pairs of checks runs twice here.)
+    for _ in 0..2 {
+        check_throw_what(
+            config.add_display_view("", "view1", "scs", ""),
+            "a non-empty display name is needed",
+        );
+        check_throw_what(
+            config.add_display_view(display, "", "scs", ""),
+            "a non-empty view name is needed",
+        );
+        check_throw_what(
+            config.add_display_view(display, "view3", "", ""),
+            "a non-empty color space name is needed",
+        );
+        check_throw_what(
+            config.add_display_view_with_view_transform(
+                display,
+                "view4",
+                "view_transform",
+                "",
+                "",
+                "",
+                "",
+            ),
+            "a non-empty color space name is needed",
+        );
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Config, display)` @ v2.5.2.
+#[test]
+fn display() {
+    // EnvGuard::new() unsets the env. variable to make sure the test start in the right
+    // environment, as upstream's Platform::Unsetenv; upstream's EnvironmentVariableGuard is
+    // env.set(), and the guard's end is the next env.set().
+    let env = EnvGuard::new();
+    const ACTIVE_DISPLAYS: &str = "OCIO_ACTIVE_DISPLAYS";
+
+    const SIMPLE_PROFILE_HEADER: &str = concat!(
+        "ocio_profile_version: 2\n",
+        "\n",
+        "environment:\n",
+        "  {}\n",
+        "search_path: luts\n",
+        "strictparsing: true\n",
+        "luma: [0.2126, 0.7152, 0.0722]\n",
+        "\n",
+        "roles:\n",
+        "  default: raw\n",
+        "  scene_linear: lnh\n",
+        "\n",
+        "file_rules:\n",
+        "  - !<Rule> {name: Default, colorspace: default}\n",
+        "\n",
+        "displays:\n",
+        "  sRGB_2:\n",
+        "    - !<View> {name: Raw, colorspace: raw}\n",
+        "  sRGB_F:\n",
+        "    - !<View> {name: Raw, colorspace: raw}\n",
+        "  sRGB_1:\n",
+        "    - !<View> {name: Raw, colorspace: raw}\n",
+        "  sRGB_3:\n",
+        "    - !<View> {name: Raw, colorspace: raw}\n",
+        "  sRGB_B:\n",
+        "    - !<View> {name: Raw, colorspace: raw}\n",
+        "  sRGB_A:\n",
+        "    - !<View> {name: Raw, colorspace: raw}\n",
+        "\n",
+    );
+
+    const SIMPLE_PROFILE_FOOTER: &str = concat!(
+        "\n",
+        "colorspaces:\n",
+        "  - !<ColorSpace>\n",
+        "    name: raw\n",
+        "    family: \"\"\n",
+        "    equalitygroup: \"\"\n",
+        "    bitdepth: unknown\n",
+        "    isdata: false\n",
+        "    allocation: uniform\n",
+        "\n",
+        "  - !<ColorSpace>\n",
+        "    name: lnh\n",
+        "    family: \"\"\n",
+        "    equalitygroup: \"\"\n",
+        "    bitdepth: unknown\n",
+        "    isdata: false\n",
+        "    allocation: uniform\n",
+    );
+
+    let profile = |active: &str| {
+        [
+            SIMPLE_PROFILE_HEADER,
+            active,
+            "active_views: []\n",
+            SIMPLE_PROFILE_FOOTER,
+        ]
+        .concat()
+    };
+
+    {
+        let my_profile = profile("active_displays: []\n");
+
+        let config = Config::create_from_stream(my_profile.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        assert_eq!(config.num_displays(), 6);
+        assert_eq!(config.display(0), b"sRGB_2");
+        assert_eq!(config.display(1), b"sRGB_F");
+        assert_eq!(config.display(2), b"sRGB_1");
+        assert_eq!(config.display(3), b"sRGB_3");
+        assert_eq!(config.display(4), b"sRGB_B");
+        assert_eq!(config.display(5), b"sRGB_A");
+        assert_eq!(config.default_display(), b"sRGB_2");
+
+        check_serialized(&config.serialize().unwrap(), &my_profile);
+    }
+
+    {
+        let my_profile = profile("active_displays: [sRGB_1]\n");
+
+        let config = Config::create_from_stream(my_profile.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        assert_eq!(config.num_displays(), 1);
+        assert_eq!(config.display(0), b"sRGB_1");
+        assert_eq!(config.default_display(), b"sRGB_1");
+
+        assert_eq!(config.num_displays_all(), 6);
+
+        // Test that all displays are saved.
+        check_serialized(&config.serialize().unwrap(), &my_profile);
+    }
+
+    {
+        let my_profile = profile("active_displays: [sRGB_2, sRGB_1]\n");
+
+        let config = Config::create_from_stream(my_profile.as_bytes()).unwrap();
+
+        assert_eq!(config.num_displays(), 2);
+        assert_eq!(config.display(0), b"sRGB_2");
+        assert_eq!(config.display(1), b"sRGB_1");
+        assert_eq!(config.default_display(), b"sRGB_2");
+    }
+
+    {
+        let my_profile = profile("active_displays: []\n");
+
+        env.set(&[(ACTIVE_DISPLAYS, " sRGB_3, sRGB_2")]);
+
+        let config = Config::create_from_stream(my_profile.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        assert_eq!(config.num_displays(), 2);
+        assert_eq!(config.display(0), b"sRGB_3");
+        assert_eq!(config.display(1), b"sRGB_2");
+        assert_eq!(config.default_display(), b"sRGB_3");
+        env.set(&[]);
+    }
+
+    {
+        let my_profile = profile("active_displays: [sRGB_2, sRGB_1]\n");
+
+        env.set(&[(ACTIVE_DISPLAYS, " sRGB_3, sRGB_2")]);
+
+        let config = Config::create_from_stream(my_profile.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        assert_eq!(config.num_displays(), 2);
+        assert_eq!(config.display(0), b"sRGB_3");
+        assert_eq!(config.display(1), b"sRGB_2");
+        assert_eq!(config.default_display(), b"sRGB_3");
+        env.set(&[]);
+    }
+
+    {
+        env.set(&[(ACTIVE_DISPLAYS, "")]); // No value
+
+        let my_profile = profile("active_displays: [sRGB_2, sRGB_1]\n");
+
+        let config = Config::create_from_stream(my_profile.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        assert_eq!(config.num_displays(), 2);
+        assert_eq!(config.display(0), b"sRGB_2");
+        assert_eq!(config.display(1), b"sRGB_1");
+        assert_eq!(config.default_display(), b"sRGB_2");
+        env.set(&[]);
+    }
+
+    {
+        // No value, but misleading space.
+        env.set(&[(ACTIVE_DISPLAYS, " ")]);
+
+        let my_profile = profile("active_displays: [sRGB_2, sRGB_1]\n");
+
+        let config = Config::create_from_stream(my_profile.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        assert_eq!(config.num_displays(), 2);
+        assert_eq!(config.display(0), b"sRGB_2");
+        assert_eq!(config.display(1), b"sRGB_1");
+        assert_eq!(config.default_display(), b"sRGB_2");
+        env.set(&[]);
+    }
+
+    {
+        // Test an unknown display name using the env. variable.
+
+        env.set(&[(ACTIVE_DISPLAYS, "ABCDEF")]);
+
+        let my_profile = profile("active_displays: [sRGB_2, sRGB_1]\n");
+
+        let config = Config::create_from_stream(my_profile.as_bytes()).unwrap();
+        check_throw_what(
+            config.validate(),
+            "The content of the env. variable for the list of active displays [ABCDEF] is \
+             invalid.",
+        );
+        env.set(&[]);
+    }
+
+    {
+        // Test an unknown display name using the env. variable.
+
+        env.set(&[(ACTIVE_DISPLAYS, "sRGB_2, sRGB_1, ABCDEF")]);
+
+        let my_profile = profile("active_displays: [sRGB_2, sRGB_1]\n");
+
+        let config = Config::create_from_stream(my_profile.as_bytes()).unwrap();
+        check_throw_what(
+            config.validate(),
+            "The content of the env. variable for the list of active displays [sRGB_2, sRGB_1, \
+             ABCDEF] contains invalid display name(s).",
+        );
+        env.set(&[]);
+    }
+
+    {
+        // Test an unknown display name in the config active displays.
+
+        env.set(&[]); // Remove the env. variable.
+
+        let my_profile = profile("active_displays: [ABCDEF]\n");
+
+        let config = Config::create_from_stream(my_profile.as_bytes()).unwrap();
+
+        // The active displays list is ignored if it would remove all displays.
+        assert_eq!(config.num_displays(), 6);
+        assert_eq!(config.display(0), b"sRGB_2");
+        assert_eq!(config.display(1), b"sRGB_F");
+        assert_eq!(config.default_display(), b"sRGB_2");
+
+        check_throw_what(
+            config.validate(),
+            "The list of active displays [ABCDEF] from the config file is invalid.",
+        );
+    }
+
+    {
+        // Test an unknown display name in the config active displays.
+
+        env.set(&[]); // Remove the env. variable.
+
+        let my_profile = profile("active_displays: [sRGB_2, sRGB_1, ABCDEF]\n");
+
+        let config = Config::create_from_stream(my_profile.as_bytes()).unwrap();
+        check_throw_what(
+            config.validate(),
+            "The list of active displays [sRGB_2, sRGB_1, ABCDEF] from the config file contains \
+             invalid display name(s)",
+        );
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Config, inactive_color_space_read_write)` @ v2.5.2.
+#[test]
+fn inactive_color_space_read_write() {
+    // The unit tests validate the read/write.
+
+    // EnvGuard::new() unsets OCIO_INACTIVE_COLORSPACES, as upstream's Platform::Unsetenv.
+    let env = EnvGuard::new();
+
+    let all = |c: &Config| {
+        c.num_color_spaces_with(SearchReferenceSpaceType::All, ColorSpaceVisibility::All)
+    };
+
+    {
+        let config_str = [
+            INACTIVE_CS_CONFIG_START,
+            "inactive_colorspaces: [cs2]\n",
+            INACTIVE_CS_CONFIG_END,
+        ]
+        .concat();
+
+        let config = Config::create_from_stream(config_str.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        assert_eq!(all(&config), 5);
+        assert_eq!(config.num_color_spaces(), 4);
+
+        check_serialized(&config.serialize().unwrap(), &config_str);
+    }
+
+    {
+        env.set(&[("OCIO_INACTIVE_COLORSPACES", "cs3, cs1, lnh")]);
+
+        let config_str = [
+            INACTIVE_CS_CONFIG_START,
+            "inactive_colorspaces: [cs2]\n",
+            INACTIVE_CS_CONFIG_END,
+        ]
+        .concat();
+
+        let config = Config::create_from_stream(config_str.as_bytes()).unwrap();
+        {
+            // Mute the warnings.
+            let (result, _log) = crate::test_env::capture_log(|| config.validate());
+            result.unwrap();
+        }
+
+        assert_eq!(all(&config), 5);
+        assert_eq!(config.num_color_spaces(), 2);
+
+        check_serialized(&config.serialize().unwrap(), &config_str);
+        env.set(&[]);
+    }
+
+    {
+        let config_str = [
+            INACTIVE_CS_CONFIG_START,
+            // Test a multi-line list.
+            "inactive_colorspaces: [cs1\t\n   \n,   \ncs2]\n",
+            INACTIVE_CS_CONFIG_END,
+        ]
+        .concat();
+
+        let config = Config::create_from_stream(config_str.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        assert_eq!(all(&config), 5);
+        assert_eq!(config.num_color_spaces(), 3);
+
+        let result_str = [
+            INACTIVE_CS_CONFIG_START,
+            "inactive_colorspaces: [cs1, cs2]\n",
+            INACTIVE_CS_CONFIG_END,
+        ]
+        .concat();
+
+        check_serialized(&config.serialize().unwrap(), &result_str);
+    }
+
+    // Do not save an empty 'inactive_colorspaces'.
+    {
+        let config_str = [
+            INACTIVE_CS_CONFIG_START,
+            "inactive_colorspaces: []\n",
+            INACTIVE_CS_CONFIG_END,
+        ]
+        .concat();
+
+        let config = Config::create_from_stream(config_str.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        assert_eq!(all(&config), 5);
+        assert_eq!(config.num_color_spaces(), 5);
+
+        let result_str = [INACTIVE_CS_CONFIG_START, INACTIVE_CS_CONFIG_END].concat();
+
+        check_serialized(&config.serialize().unwrap(), &result_str);
+    }
+
+    // Inactive 'unknown' color space ends up to not filter out any color space
+    // but still preserved by the read/write.
+    {
+        let config_str = [
+            INACTIVE_CS_CONFIG_START,
+            "inactive_colorspaces: [unknown]\n",
+            INACTIVE_CS_CONFIG_END,
+        ]
+        .concat();
+
+        let config = Config::create_from_stream(config_str.as_bytes()).unwrap();
+
+        {
+            let (result, log) = crate::test_env::capture_log(|| config.validate());
+            result.unwrap();
+            assert_eq!(
+                String::from_utf8(log.concat()).unwrap(),
+                "[OpenColorIO Info]: Inactive 'unknown' is neither a color space nor a named \
+                 transform.\n"
+            );
+        }
+
+        assert_eq!(all(&config), 5);
+        assert_eq!(config.num_color_spaces(), 5);
+
+        check_serialized(&config.serialize().unwrap(), &config_str);
+    }
+}
+
+/// `SIMPLE_PROFILE_B` (Config_tests.cpp:216-227 @ v2.5.2).
+const SIMPLE_PROFILE_B: &str = "search_path: luts\n\
+strictparsing: true\n\
+luma: [0.2126, 0.7152, 0.0722]\n\
+\n\
+roles:\n  \
+aces_interchange: lnh\n  \
+color_timing: log\n  \
+compositing_log: log\n  \
+default: raw\n  \
+scene_linear: lnh\n\
+\n";
+
+/// `PROFILE_V<Major, Minor>()` (Config_tests.cpp:2175-2190 @ v2.5.2).
+fn profile_v(major: u32, minor: u32) -> String {
+    let mut s = format!("ocio_profile_version: {major}.{minor}\n");
+
+    if major >= 2 {
+        s += "\nenvironment:\n  {}\n";
+    }
+
+    s
+}
+
+/// `PROFILE_START_V<Major, Minor>()` (Config_tests.cpp:2318-2327 @ v2.5.2).
+fn profile_start_v(major: u32, minor: u32) -> String {
+    if major <= 1 {
+        return profile_v(major, minor)
+            + SIMPLE_PROFILE_A
+            + SIMPLE_PROFILE_DISPLAYS_LOOKS
+            + SIMPLE_PROFILE_CS_V1;
+    }
+
+    profile_v(major, minor)
+        + SIMPLE_PROFILE_B
+        + DEFAULT_RULES
+        + SIMPLE_PROFILE_DISPLAYS_LOOKS
+        + SIMPLE_PROFILE_CS_V2
+}
+
+/// Port of `OCIO_ADD_TEST(Config, interchange_attributes)` @ v2.5.2.
+#[test]
+fn interchange_attributes() {
+    let _env = EnvGuard::new();
+    let end = r#"
+view_transforms:
+  - !<ViewTransform>
+    name: vt1
+    from_scene_reference: !<RangeTransform> {min_in_value: 0., min_out_value: 0.}"#;
+
+    let str = profile_start_v(2, 5) + end;
+
+    let mut config = (*Config::create_from_stream(str.as_bytes()).unwrap()).clone();
+    config.validate().unwrap();
+
+    let contains = |text: &[u8], what: &str| text.windows(what.len()).any(|w| w == what.as_bytes());
+
+    // Color Space
+
+    {
+        let mut cs = config.color_space("log").unwrap().clone();
+
+        // Set amf_transform_ids attribute and validate.
+
+        cs.set_interchange_attribute("amf_transform_ids", "sample amf id")
+            .unwrap();
+        config.add_color_space(&cs).unwrap();
+        config.validate().unwrap();
+
+        // Check that the attribute is in the serialized config.
+
+        let ss = config.serialize().unwrap();
+        assert!(contains(&ss, "amf_transform_ids: sample amf id"));
+
+        // Check that loading the serialized config works with the attribute.
+
+        let _cfg2 = Config::create_from_stream(&ss).unwrap();
+
+        let cs2 = config.color_space("log").unwrap();
+        assert_eq!(
+            cs2.interchange_attribute("amf_transform_ids").unwrap(),
+            b"sample amf id"
+        );
+
+        // Check that the config can NOT be downgraded to 2.4 with the attribute.
+
+        config.set_version(2, 4).unwrap();
+        check_throw_what(
+            config.validate(),
+            "Config failed validation. The color space 'log' has non-empty interchange \
+             attributes and config version is less than 2.5.",
+        );
+
+        // Remove the attribute and check that the config can be downgraded to 2.4.
+
+        cs.set_interchange_attribute("amf_transform_ids", "")
+            .unwrap();
+        config.add_color_space(&cs).unwrap();
+        config.validate().unwrap();
+
+        // Restore version 2.5.
+
+        config.set_version(2, 5).unwrap();
+    }
+
+    // View Transform
+
+    {
+        let mut vt = config.view_transform("vt1").unwrap().clone();
+
+        // Set amf_transform_ids attribute and validate.
+
+        vt.set_interchange_attribute("amf_transform_ids", "sample amf id")
+            .unwrap();
+        config.add_view_transform(&vt).unwrap();
+        config.validate().unwrap();
+
+        // Setting the icc_profile_name attribute should throw.
+        check_throw_what(
+            vt.set_interchange_attribute("icc_profile_name", "some icc profile"),
+            "Unknown attribute name 'icc_profile_name'.",
+        );
+
+        // Check that the attribute is in the serialized config.
+
+        let ss = config.serialize().unwrap();
+        assert!(contains(&ss, "amf_transform_ids: sample amf id"));
+
+        // Check that loading the serialized config works with the attribute.
+
+        let _cfg2 = Config::create_from_stream(&ss).unwrap();
+
+        let vt2 = config.view_transform("vt1").unwrap();
+        assert_eq!(
+            vt2.interchange_attribute("amf_transform_ids").unwrap(),
+            b"sample amf id"
+        );
+
+        // Check that the config can NOT be downgraded to 2.4 with the attribute.
+
+        config.set_version(2, 4).unwrap();
+        check_throw_what(
+            config.validate(),
+            "Config failed validation. The view transform 'vt1' has non-empty interchange \
+             attributes and config version is less than 2.5.",
+        );
+
+        // Remove the attribute and check that the config can be downgraded to 2.4.
+
+        vt.set_interchange_attribute("amf_transform_ids", "")
+            .unwrap();
+        config.add_view_transform(&vt).unwrap();
+        config.validate().unwrap();
+
+        // Restore version 2.5.
+
+        config.set_version(2, 5).unwrap();
+    }
+
+    // Look
+
+    {
+        let mut lk = config.look("beauty").unwrap().clone();
+
+        // Set amf_transform_ids attribute and validate.
+
+        lk.set_interchange_attribute("amf_transform_ids", "sample amf id")
+            .unwrap();
+        config.add_look(&lk).unwrap();
+        config.validate().unwrap();
+
+        // Check that the attribute is in the serialized config.
+
+        let ss = config.serialize().unwrap();
+        assert!(contains(&ss, "amf_transform_ids: sample amf id"));
+
+        // Check that loading the serialized config works with the attribute.
+
+        let _cfg2 = Config::create_from_stream(&ss).unwrap();
+
+        let lk2 = config.look("beauty").unwrap();
+        assert_eq!(
+            lk2.interchange_attribute("amf_transform_ids").unwrap(),
+            b"sample amf id"
+        );
+
+        // Check that the config can NOT be downgraded to 2.4 with the attribute.
+
+        config.set_version(2, 4).unwrap();
+        check_throw_what(
+            config.validate(),
+            "Config failed validation. The look 'beauty' has non-empty interchange attributes \
+             and config version is less than 2.5.",
+        );
+
+        // Remove the attribute and check that the config can be downgraded to 2.4.
+
+        lk.set_interchange_attribute("amf_transform_ids", "")
+            .unwrap();
+        config.add_look(&lk).unwrap();
+        config.validate().unwrap();
+
+        // Restore version 2.5.
+
+        config.set_version(2, 5).unwrap();
+    }
 }
