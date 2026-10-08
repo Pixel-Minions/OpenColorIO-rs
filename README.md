@@ -104,7 +104,10 @@ RGB-to-JMh, with the color-matrix helpers they use) and on the GPU in all 10 sha
 as are the other fixed functions; the forward 1D LUT renderers with their SSE2, AVX, AVX2 and
 AVX-512 kernels; the GradingRGBCurve op and transform that the ACES 1.x built-ins use; and
 std::regex as each wheel's C++ library implements it (for file rules), with the Linux crash
-limits replaced by errors;
+limits replaced by errors; the inverse 1D LUT, composing 1D LUTs and the fast inverse; the Config
+object itself (its color spaces, roles, displays, views, looks, view and named transforms, its
+environment and context, and the file and viewing rules); and loading every transform type from
+a config's YAML;
 the config transforms ColorSpaceTransform, DisplayViewTransform, LookTransform, FileTransform
 and BuiltinTransform with its registry (their classes and text; their processors come with the
 config). The live oracle can now also drive a config, its context and its file rules call by
@@ -194,7 +197,7 @@ instead. Every such case, and every upstream bug the port reproduces, is listed 
 
 | Suite | Ported | Total |
 |---|---:|---:|
-| C++ | 379 | 1,191 |
+| C++ | 429 | 1,191 |
 | GPU | 0 | 264 |
 | Python | 0 | 384 |
 
