@@ -2606,3 +2606,166 @@ fn test_accounting_precision() {
         }
     });
 }
+
+// ---- The allocation tracker ----
+
+/// Port of expat 2.7.2 `START_TEST(test_alloc_tracker_size_recorded)`
+/// (tests/alloc_tests.c:2094-2126): the port counts blocks without allocating them, so the
+/// memory suite makes no difference, and `Block::size` is the recorded size.
+#[test]
+fn test_alloc_tracker_size_recorded() {
+    each_run(|run| {
+        for use_mem_suite in [true, false] {
+            let mut parser = run.parser();
+
+            let mut ptr = parser.expat_malloc(10).expect("a block");
+            assert_eq!(ptr.size, 10, "{run:?} useMemSuite={use_mem_suite}");
+
+            assert!(!parser.expat_realloc(&mut ptr, usize::MAX / 2));
+
+            assert_eq!(ptr.size, 10); // i.e. unchanged
+
+            assert!(parser.expat_realloc(&mut ptr, 20));
+            assert_eq!(ptr.size, 20);
+
+            parser.expat_free(ptr);
+        }
+    });
+}
+
+/// Port of expat 2.7.2 `START_TEST(test_alloc_tracker_maximum_amplification)`
+/// (tests/alloc_tests.c:2128-2160).
+#[test]
+fn test_alloc_tracker_maximum_amplification() {
+    each_run(|run| {
+        if run.deferral {
+            return;
+        }
+
+        let mut parser = run.parser();
+
+        // Get .m_accounting.countBytesDirect from 0 to 3
+        let chunk = b"<e>";
+        assert_eq!(
+            run.parse(&mut parser, chunk, false),
+            XmlStatus::Ok,
+            "{run:?}"
+        );
+
+        // Stop activation threshold from interfering
+        assert!(parser.set_alloc_tracker_activation_threshold(0));
+
+        // Exceed maximum amplification: should be rejected.
+        assert!(parser.expat_malloc(1000).is_none(), "{run:?}");
+
+        // Increase maximum amplification, and try the same amount once more: should work.
+        assert!(parser.set_alloc_tracker_maximum_amplification(3000.0f32));
+
+        let ptr = parser.expat_malloc(1000);
+        assert!(ptr.is_some(), "{run:?}");
+        parser.expat_free(ptr.expect("a block"));
+    });
+}
+
+/// Port of expat 2.7.2 `START_TEST(test_alloc_tracker_threshold)` (tests/alloc_tests.c:2162-2178).
+#[test]
+fn test_alloc_tracker_threshold() {
+    each_run(|run| {
+        let mut parser = run.parser();
+
+        // Exceed maximum amplification *before* (default) threshold: should work.
+        let ptr = parser.expat_malloc(1000);
+        assert!(ptr.is_some(), "{run:?}");
+        parser.expat_free(ptr.expect("a block"));
+
+        // Exceed maximum amplification *after* threshold: should be rejected.
+        assert!(parser.set_alloc_tracker_activation_threshold(999));
+        assert!(parser.expat_malloc(1000).is_none(), "{run:?}");
+    });
+}
+
+/// Port of expat 2.7.2 `START_TEST(test_alloc_tracker_getbuffer_unlimited)`
+/// (tests/alloc_tests.c:2180-2195).
+#[test]
+fn test_alloc_tracker_getbuffer_unlimited() {
+    each_run(|run| {
+        let mut parser = run.parser();
+
+        // Artificially lower threshold
+        assert!(parser.set_alloc_tracker_activation_threshold(0));
+
+        // Self-test: Prove that threshold is as rejecting as expected
+        assert!(parser.expat_malloc(1000).is_none(), "{run:?}");
+        // XML_GetBuffer should be allowed to pass, though
+        assert!(parser.get_buffer(1000).is_some(), "{run:?}");
+    });
+}
+
+/// Port of expat 2.7.2 `START_TEST(test_alloc_tracker_api)` (tests/alloc_tests.c:2197-2249),
+/// without the calls on a NULL parser or a parser with a parent, which the port has not.
+#[test]
+fn test_alloc_tracker_api() {
+    each_run(|run| {
+        let mut parser_without_parent = run.parser();
+
+        // XML_SetAllocTrackerMaximumAmplification, error cases
+        assert!(
+            !parser_without_parent.set_alloc_tracker_maximum_amplification(f32::NAN),
+            "Call with NaN limit is NOT supposed to succeed"
+        );
+        assert!(
+            !parser_without_parent.set_alloc_tracker_maximum_amplification(-1.0f32),
+            "Call with negative limit is NOT supposed to succeed"
+        );
+        assert!(
+            !parser_without_parent.set_alloc_tracker_maximum_amplification(0.9f32),
+            "Call with positive limit <1.0 is NOT supposed to succeed"
+        );
+
+        // XML_SetAllocTrackerMaximumAmplification, success cases
+        assert!(
+            parser_without_parent.set_alloc_tracker_maximum_amplification(1.0f32),
+            "Call with positive limit >=1.0 is supposed to succeed"
+        );
+        assert!(
+            parser_without_parent.set_alloc_tracker_maximum_amplification(123456.789f32),
+            "Call with positive limit >=1.0 is supposed to succeed"
+        );
+        assert!(
+            parser_without_parent.set_alloc_tracker_maximum_amplification(f32::INFINITY),
+            "Call with positive limit >=1.0 is supposed to succeed"
+        );
+
+        // XML_SetAllocTrackerActivationThreshold, success cases
+        assert!(
+            parser_without_parent.set_alloc_tracker_activation_threshold(123),
+            "Call with non-NULL parentless parser is supposed to succeed"
+        );
+    });
+}
+
+/// The port's own memory limit (owner decision 2026-10-08, I-171): with the tracker's
+/// threshold at 0, the first structure a document makes the parser charge is refused, and
+/// the parse fails with `XML_ERROR_NO_MEMORY`, where expat's `MALLOC` would have failed.
+#[test]
+fn documents_past_the_memory_limit_are_refused() {
+    each_run(|run| {
+        let docs: [&[u8]; 4] = [
+            b"<e/>",
+            b"<e a='1'>text</e>",
+            b"<!DOCTYPE e [<!ENTITY x 'y'>]><e/>",
+            b"<!DOCTYPE e [<!ATTLIST e a CDATA 'v'>]><e/>",
+        ];
+        for doc in docs {
+            let mut parser = run.parser();
+            assert!(parser.set_alloc_tracker_activation_threshold(0));
+            assert_eq!(
+                run.parse(&mut parser, doc, true),
+                XmlStatus::Error,
+                "{run:?}"
+            );
+            assert_eq!(parser.error_code(), XmlError::NoMemory, "{run:?}");
+            assert_eq!(xml_error_string(parser.error_code()), Some("out of memory"));
+        }
+    });
+}

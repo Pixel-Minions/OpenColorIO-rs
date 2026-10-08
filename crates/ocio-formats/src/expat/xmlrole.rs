@@ -163,7 +163,7 @@ pub struct PrologState {
     pub in_entity_value: bool,
 }
 
-/// The type keywords of `attlist2`, in the order of their roles (xmlrole.c:746-749).
+/// The type keywords of `attlist2`, in the order of their roles (xmlrole.c:747-750).
 const ATTRIBUTE_TYPES: [&[u8]; 8] = [
     b"CDATA",
     b"ID",
@@ -193,7 +193,7 @@ impl PrologState {
 
     /// The state of an external entity's: the external subset.
     ///
-    /// Port of `XmlPrologStateInitExternalEntity` (xmlrole.c:1246-1253).
+    /// Port of `XmlPrologStateInitExternalEntity` (xmlrole.c:1248-1253).
     pub fn new_external_entity() -> PrologState {
         PrologState {
             handler: Handler::ExternalSubset0,
