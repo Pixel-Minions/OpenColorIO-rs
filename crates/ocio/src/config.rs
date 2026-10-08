@@ -15,10 +15,10 @@ use ocio_ops::exception::{Exception, Result};
 use ocio_ops::image_desc::PackedImageDesc;
 use ocio_ops::math_utils::equal_with_abs_error;
 use ocio_ops::open_color_types::{
-    Allocation, BitDepth, CdlStyle, ChannelOrdering, ColorSpaceDirection, ColorSpaceVisibility,
-    EnvironmentMode, FixedFunctionStyle, NamedTransformVisibility, NegativeStyle,
-    OptimizationFlags, ReferenceSpaceType, SearchReferenceSpaceType, TransformDirection,
-    ViewTransformDirection, ViewType, fixed_function_style_to_string,
+    CdlStyle, ChannelOrdering, ColorSpaceDirection, ColorSpaceVisibility, EnvironmentMode,
+    FixedFunctionStyle, NamedTransformVisibility, NegativeStyle, OptimizationFlags,
+    ReferenceSpaceType, SearchReferenceSpaceType, TransformDirection, ViewTransformDirection,
+    ViewType, fixed_function_style_to_string,
 };
 use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 use ocio_ops::parse_utils::{
@@ -43,11 +43,12 @@ use crate::display::{
 use crate::file_rules::{FileRules, update_file_rules_from_v1_to_v2};
 use crate::look::Look;
 use crate::named_transform::NamedTransform;
-use crate::path_utils::parse_color_space_from_string;
+use crate::path_utils::{get_fast_file_hash, parse_color_space_from_string};
 use crate::processor::{Processor, ProcessorCacheFlags};
 use crate::transform::Transform;
 use crate::view_transform::ViewTransform;
 use crate::viewing_rules::{ViewingRules, find_rule};
+use ocio_ops::hash_utils::cache_id_hash;
 
 /// `OCIO_ACTIVE_DISPLAYS`: the displays a config shows, overriding its own list.
 ///
@@ -81,6 +82,30 @@ const LAST_SUPPORTED_MINOR_VERSION: [u32; 2] = [0, 5];
 
 /// Port of `Config::Impl::DefaultFamilySeparator` (src/OpenColorIO/Config.cpp:270 @ v2.5.2).
 const DEFAULT_FAMILY_SEPARATOR: u8 = b'/';
+
+/// The raw config's profile ([`Config::create_raw`]).
+///
+/// Port of `INTERNAL_RAW_PROFILE` (src/OpenColorIO/Config.cpp:74-92 @ v2.5.2).
+pub(crate) const INTERNAL_RAW_PROFILE: &str = concat!(
+    "ocio_profile_version: 2\n",
+    "strictparsing: false\n",
+    "roles:\n",
+    "  default: raw\n",
+    "file_rules:\n",
+    "  - !<Rule> {name: Default, colorspace: default}\n",
+    "displays:\n",
+    "  sRGB:\n",
+    "  - !<View> {name: Raw, colorspace: raw}\n",
+    "colorspaces:\n",
+    "  - !<ColorSpace>\n",
+    "      name: raw\n",
+    "      family: raw\n",
+    "      equalitygroup:\n",
+    "      bitdepth: 32f\n",
+    "      isdata: true\n",
+    "      allocation: uniform\n",
+    "      description: 'A raw color space. Conversions to and from this space are no-ops.'\n",
+);
 
 /// The built-in transform styles a config needs version 2.2 for (src/OpenColorIO/Config.cpp:
 /// 5603-5614 @ v2.5.2).
@@ -146,6 +171,26 @@ fn lookup_environment<'a>(env: &'a BTreeMap<Vec<u8>, Vec<u8>>, name: &[u8]) -> &
 /// Port of `LookupRole` (src/OpenColorIO/Config.cpp:140-148 @ v2.5.2).
 fn lookup_role<'a>(roles: &'a BTreeMap<Vec<u8>, Vec<u8>>, rolename: &[u8]) -> &'a [u8] {
     roles.get(&lower(rolename)).map_or(&[], Vec::as_slice)
+}
+
+/// Adds to `files` the sources of the FileTransforms of `transform` (its own, or a group's,
+/// recursively), each up to its first NUL.
+///
+/// Port of `GetFileReferences` (src/OpenColorIO/Config.cpp:154-171 @ v2.5.2).
+fn get_file_references(files: &mut BTreeSet<Vec<u8>>, transform: &Transform) {
+    match transform {
+        Transform::Group(group_transform) => {
+            for i in 0..group_transform.num_transforms() {
+                if let Ok(t) = group_transform.transform(i) {
+                    get_file_references(files, t);
+                }
+            }
+        }
+        Transform::File(file_transform) => {
+            files.insert(c_str(file_transform.src()).to_vec());
+        }
+        _ => {}
+    }
 }
 
 /// Whether a color space of the reference space `t` is one a search of `st` keeps.
@@ -602,45 +647,16 @@ impl Config {
         self.shared_context.update(change);
     }
 
-    /// The raw config: version 2.0, no strict parsing, its one color space `raw` and the role
-    /// `default`, its display `sRGB` and view `Raw`, and the whole environment in its context
-    /// (its profile has no `environment` section). So far all but its file rules, which come
-    /// with them (p3-rules); built directly until the YAML reader parses upstream's profile
-    /// (3.7d). As any config, it reads
-    /// the environment's active displays and views and inactive color spaces
-    /// ([`Config::new`]), and fails as [`Config::new`] does.
+    /// The raw config, read from upstream's internal profile ([`INTERNAL_RAW_PROFILE`]):
+    /// version 2.0, no strict parsing, its one color space `raw` and the role `default`, its
+    /// display `sRGB` and view `Raw`, and the whole environment in its context (the profile has
+    /// no `environment` section). As any config, it reads the environment's active displays and
+    /// views and inactive color spaces ([`Config::new`]), and fails as [`Config::new`] does.
     ///
-    /// Port of `Config::CreateRaw` (src/OpenColorIO/Config.cpp:74-92, 1127-1133 @ v2.5.2), in
-    /// part, with what `OCIOYaml`'s `load` sets from that profile (`setVersion`,
-    /// `setStrictParsingEnabled`, `setRole`, the color space's setters and `addColorSpace`,
-    /// `addDisplayView`,
-    /// `setEnvironmentMode`, `loadEnvironment`) and `Config::Impl::Read`'s refresh of the
-    /// active color spaces (Config.cpp:5545-5561).
+    /// Port of `Config::CreateRaw` (src/OpenColorIO/Config.cpp:1127-1133 @ v2.5.2).
     #[doc(alias = "CreateRaw")]
     pub fn create_raw() -> Result<Arc<Config>> {
-        let mut config = Config::new()?;
-        config.set_version(2, 0)?;
-        config.set_strict_parsing_enabled(false);
-        config.set_role(ROLE_DEFAULT, Some(b"raw"))?;
-
-        let mut cs = ColorSpace::new();
-        cs.set_name("raw");
-        cs.set_family("raw");
-        cs.set_equality_group("");
-        cs.set_bit_depth(BitDepth::F32);
-        cs.set_is_data(true);
-        cs.set_allocation(Allocation::Uniform);
-        cs.set_description("A raw color space. Conversions to and from this space are no-ops.");
-        config.add_color_space(&cs)?;
-
-        config.add_display_view_with_view_transform("sRGB", "Raw", "", "raw", "", "", "")?;
-
-        config.set_environment_mode(EnvironmentMode::LoadAll);
-        config.load_environment();
-
-        config.inactive_color_space_names_api.clear();
-        config.refresh_active_color_spaces();
-        Ok(Arc::new(config))
+        Config::create_from_stream(INTERNAL_RAW_PROFILE.as_bytes())
     }
 
     /// A config read from the YAML text `istream`, or the reader's error, "Error: Loading the
@@ -668,6 +684,82 @@ impl Config {
                 error.extend_from_slice(e.what());
                 Exception::new(error)
             })
+    }
+
+    /// The config's cache ID with its current context ([`Config::cache_id_with_context`]).
+    ///
+    /// Port of `Config::getCacheID()` (src/OpenColorIO/Config.cpp:5245-5248 @ v2.5.2).
+    #[doc(alias = "getCacheID")]
+    pub fn cache_id(&self) -> Result<String> {
+        self.cache_id_with_context(Some(&self.current_context().get()))
+    }
+
+    /// The config's cache ID with `context` (`None`: upstream's null context): the hash of its
+    /// text ([`Config::serialize`]), a colon, and with a context the hash of the files its
+    /// FileTransforms name, each resolved in the context and hashed, or `?` when it can't be.
+    /// Computed once per context cache ID, until the config changes; serializing can fail.
+    ///
+    /// Port of `Config::getCacheID(const ConstContextRcPtr&)` (src/OpenColorIO/Config.cpp:
+    /// 5250-5312 @ v2.5.2).
+    #[doc(alias = "getCacheID")]
+    pub fn cache_id_with_context(&self, context: Option<&Context>) -> Result<String> {
+        let mut cache_ids = self.lock_cache_ids();
+
+        // A null context will use the empty cacheid
+        let contextcacheid = context.map(Context::cache_id).unwrap_or_default();
+
+        if let Some(id) = cache_ids.cache_ids.get(&contextcacheid) {
+            return Ok(id.clone());
+        }
+
+        // Include the hash of the yaml config serialization
+        if cache_ids.cache_id_no_context.is_empty() {
+            let fullstr = self.serialize()?;
+            cache_ids.cache_id_no_context = cache_id_hash(&fullstr);
+        }
+
+        // Also include all file references, using the context (if specified)
+        let mut file_references_fast_hash = String::new();
+        if let Some(context) = context {
+            let mut filehash = Vec::new();
+
+            let mut files = BTreeSet::new();
+            for transform in self.all_internal_transforms() {
+                get_file_references(&mut files, transform);
+            }
+
+            for iter in &files {
+                if iter.is_empty() {
+                    continue;
+                }
+
+                filehash.extend_from_slice(iter);
+                filehash.push(b'=');
+
+                match context
+                    .resolve_file_location(iter)
+                    .and_then(|resolved| get_fast_file_hash(&resolved, context))
+                {
+                    Ok(hash) => {
+                        filehash.extend_from_slice(&hash);
+                        filehash.push(b' ');
+                    }
+                    Err(_) => {
+                        filehash.extend_from_slice(b"? ");
+                        continue;
+                    }
+                }
+            }
+
+            file_references_fast_hash = cache_id_hash(&filehash);
+        }
+
+        let id = format!(
+            "{}:{}",
+            cache_ids.cache_id_no_context, file_references_fast_hash
+        );
+        cache_ids.cache_ids.insert(contextcacheid, id.clone());
+        Ok(id)
     }
 
     /// A new config ([`Config::new`]) read from the YAML text `input` (`OCIOYaml::Read`), checked

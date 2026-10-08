@@ -1654,3 +1654,10 @@ colorspaces:
         CONFIG_DESC_MULTILINES
     );
 }
+
+/// Port of `OCIO_ADD_TEST(Config, internal_raw_profile)` @ v2.5.2.
+#[test]
+fn internal_raw_profile() {
+    let _env = EnvGuard::new();
+    Config::create_from_stream(INTERNAL_RAW_PROFILE.as_bytes()).unwrap();
+}

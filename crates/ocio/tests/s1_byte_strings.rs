@@ -11,29 +11,16 @@
 //!
 //! `serialize()` fails in Python on text that is not UTF-8, so the oracle writes
 //! `serialize(fileName)` (a `std::ofstream` in text mode: CRLF on Windows) and reports
-//! `getCacheID()` (`ocio_oracle/text.py` `serialize_built_config_to_file`). The test reads the
-//! same config with a placeholder in place of the bytes, writes it again with the bytes put
-//! back (`common::ocio_writer`), and compares the file's bytes and the cache ID.
+//! `getCacheID()` (`ocio_oracle/text.py` `serialize_built_config_to_file`). The port builds the
+//! same config through its API (`common::built_config`), serializes it (`Config::serialize`)
+//! and gives its cache ID (`Config::cache_id`); the file's bytes and the cache ID must be the
+//! wheel's.
 
 mod common;
 
-use common::ocio_writer::OcioWriter;
-use common::yaml_tree;
-use ocio_testkit::{Oracle, assert_bytes_eq, assert_text_eq, fixtures};
+use common::built_config::build_config;
+use ocio_testkit::{Oracle, assert_bytes_eq};
 use serde_json::{Value, json};
-
-/// Port of `CacheIDHash` (HashUtils.cpp:20-30 @ v2.5.2): XXH3-128 of the bytes, printed as its
-/// low then its high 64 bits in zero-padded lowercase hex.
-fn cache_id_hash(bytes: &[u8]) -> String {
-    let hash = xxhash_rust::xxh3::xxh3_128(bytes);
-    format!("{:016x}{:016x}", hash as u64, (hash >> 64) as u64)
-}
-
-/// `Config::getCacheID()` for a config without file references (Config.cpp:5250-5311): the
-/// hash of `serialize()`, a colon, and the hash of the empty file-reference list.
-fn config_cache_id(serialized: &[u8]) -> String {
-    format!("{}:{}", cache_id_hash(serialized), cache_id_hash(b""))
-}
 
 /// The bytes a `std::ofstream` opened in text mode writes for `text`: on Windows every `\n`
 /// becomes `\r\n` (the MSVC runtime's text mode); elsewhere nothing changes.
@@ -115,26 +102,14 @@ const CASES: &[(&str, &[u8])] = &[
     ("display", b"d\xe9"),
 ];
 
-/// Writes the config of `slot` holding `bytes` and compares with the wheel's file and
-/// cache ID. Returns the wheel's cache ID.
+/// Serializes the port's config of `slot` holding `bytes` and compares with the wheel's file
+/// and cache ID. Returns the wheel's cache ID.
 fn check(slot: &str, bytes: &[u8]) -> String {
     let label = format!("{slot} {bytes:x?}");
-    let placeholder = "phxq0000";
-    let oracle = Oracle::get();
-
-    let text = oracle.call(
-        "serialize_built_config",
-        json!({"spec": slot_spec(slot, json!(placeholder))}),
-        &[],
-    );
-    assert!(
-        text.result.get("exception").is_none(),
-        "{label}: {}",
-        text.result
-    );
-    let file = oracle.call(
+    let spec = slot_spec(slot, json!({"hex": hex(bytes)}));
+    let file = Oracle::get().call(
         "serialize_built_config_to_file",
-        json!({"spec": slot_spec(slot, json!({"hex": hex(bytes)}))}),
+        json!({ "spec": spec }),
         &[],
     );
     assert!(
@@ -143,16 +118,13 @@ fn check(slot: &str, bytes: &[u8]) -> String {
         file.result
     );
 
-    let tree = yaml_tree::parse(text.blob_text(0));
-    let mut writer = OcioWriter::new();
-    writer.substitutions = vec![(placeholder.to_string(), bytes.to_vec())];
-    writer.save_config(&tree);
-    assert_eq!(writer.substituted.len(), 1, "{label}: placeholder put back");
-
-    let written = writer.out.c_str();
-    assert_bytes_eq(&label, &file.blobs[0], &text_mode(written));
+    let config = build_config(&spec);
+    let written = config
+        .serialize()
+        .unwrap_or_else(|e| panic!("{label}: {e}"));
+    assert_bytes_eq(&label, &file.blobs[0], &text_mode(&written));
     let cache_id = file.result["cache_id"].as_str().expect("a cache ID");
-    assert_eq!(config_cache_id(written), cache_id, "{label}: cache ID");
+    assert_eq!(config.cache_id().unwrap(), cache_id, "{label}: cache ID");
     cache_id.to_string()
 }
 
@@ -170,19 +142,4 @@ fn text_after_an_overlong_nul_is_lost() {
     let a = check("cs_description", b"x\n\xc0\x80A");
     let b = check("cs_description", b"x\n\xc0\x80B");
     assert_eq!(a, b);
-}
-
-/// The cache ID port against the wheel's own: the built-in configs' serialize() text and
-/// cache ID fixtures.
-#[test]
-fn cache_ids_of_the_builtin_configs() {
-    let paths: Vec<String> = fixtures::list("builtin_configs/")
-        .into_iter()
-        .filter(|p| p.ends_with("/cache_id.txt"))
-        .collect();
-    assert_eq!(paths.len(), 8, "the eight built-in configs: {paths:?}");
-    for path in paths {
-        let text = fixtures::read(&path.replace("/cache_id.txt", "/serialize.ocio"));
-        assert_text_eq(&path, &fixtures::read_text(&path), &config_cache_id(&text));
-    }
 }
