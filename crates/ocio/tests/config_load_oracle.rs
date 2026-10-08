@@ -12,8 +12,8 @@
 //! wheel's built-in configs (their YAML, `builtin_config_source`), and upstream's test configs
 //! (`tests/data/files/configs`).
 //!
-//! Upstream's reader checks the config against its version after loading
-//! (`checkVersionConsistency`, WP 3.8c): the cases use only what their versions allow.
+//! The reader checks the config against its version after loading (`checkVersionConsistency`):
+//! [`configs_their_versions_cant_have_are_refused`] checks each of its arms.
 
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -720,4 +720,277 @@ fn upstream_test_configs_load_as_in_the_wheel() {
         .map(|(label, f)| (label.as_str(), std::fs::read(f).unwrap()))
         .collect();
     check(&cases);
+}
+
+/// A config of the profile version `version`, of a color space `raw` (the default role's), with
+/// `extra` after it.
+fn ver(version: &str, extra: &str) -> Vec<u8> {
+    format!(
+        "ocio_profile_version: {version}\nenvironment: {{}}\nroles: {{default: raw}}\n\
+         colorspaces:\n  - !<ColorSpace> {{name: raw}}\n{extra}"
+    )
+    .into_bytes()
+}
+
+/// A config of the profile version `version` whose second color space has the transform `t`
+/// (`to_reference`, read in every version).
+fn ver_transform(version: &str, t: &str) -> Vec<u8> {
+    ver(
+        version,
+        &format!("  - !<ColorSpace> {{name: b, to_reference: {t}}}\n"),
+    )
+}
+
+/// What a config's version can't have, refused after loading (`checkVersionConsistency`), and
+/// the same at the versions that allow it.
+#[test]
+fn configs_their_versions_cant_have_are_refused() {
+    let builtin = "!<BuiltinTransform> {style: ACEScct_to_ACES2065-1}";
+    let mut cases: Vec<(String, Vec<u8>)> = vec![
+        // Version 1 transforms, as a color space's, in a group, and as a look's.
+        ("v1 builtin".into(), ver_transform("1", builtin)),
+        (
+            "v1 group builtin".into(),
+            ver_transform(
+                "1",
+                &format!("!<GroupTransform> {{children: [!<LogTransform> {{}}, {builtin}]}}"),
+            ),
+        ),
+        (
+            "v1 look builtin".into(),
+            ver(
+                "1",
+                &format!(
+                    "looks:\n  - !<Look> {{name: l, process_space: raw, transform: {builtin}}}\n"
+                ),
+            ),
+        ),
+        (
+            "v1 look inverse group".into(),
+            ver(
+                "1",
+                "looks:\n  - !<Look> {name: l, process_space: raw, inverse_transform: \
+                 !<GroupTransform> {children: [!<RangeTransform> {}]}}\n",
+            ),
+        ),
+        (
+            "v1 display view transform".into(),
+            ver_transform(
+                "1",
+                "!<DisplayViewTransform> {src: raw, display: d, view: v}",
+            ),
+        ),
+        (
+            "v1 exponent with linear".into(),
+            ver_transform(
+                "1",
+                "!<ExponentWithLinearTransform> {gamma: 2.4, offset: 0.055}",
+            ),
+        ),
+        (
+            "v1 fixed function".into(),
+            ver_transform("1", "!<FixedFunctionTransform> {style: ACES_RedMod03}"),
+        ),
+        (
+            "v1 log affine".into(),
+            ver_transform("1", "!<LogAffineTransform> {base: 10}"),
+        ),
+        (
+            "v1 log camera".into(),
+            ver_transform("1", "!<LogCameraTransform> {lin_side_break: 0.1}"),
+        ),
+        (
+            "v1 range".into(),
+            ver_transform("1", "!<RangeTransform> {min_in_value: 0, max_in_value: 1}"),
+        ),
+        (
+            "v1 cdl style".into(),
+            ver_transform("1", "!<CDLTransform> {slope: [2, 2, 2], style: asc}"),
+        ),
+        (
+            "v1 cdl default style".into(),
+            ver_transform("1", "!<CDLTransform> {slope: [2, 2, 2], style: noclamp}"),
+        ),
+        (
+            "v1 exponent style".into(),
+            ver_transform("1", "!<ExponentTransform> {value: 2, style: mirror}"),
+        ),
+        (
+            "v1 exponent clamp".into(),
+            ver_transform(
+                "1",
+                "!<ExponentTransform> {value: [2, 2, 2, 1], style: clamp}",
+            ),
+        ),
+        (
+            "v1 file cubic".into(),
+            ver_transform("1", "!<FileTransform> {src: a.lut, interpolation: cubic}"),
+        ),
+        (
+            "v1 file cdl style".into(),
+            ver_transform("1", "!<FileTransform> {src: a.cc, cdl_style: asc}"),
+        ),
+        (
+            "v1 v1 transforms".into(),
+            ver_transform(
+                "1",
+                "!<GroupTransform> {children: [!<LogTransform> {}, !<MatrixTransform> {}, \
+                 !<AllocationTransform> {}, !<ColorSpaceTransform> {src: raw, dst: raw}, \
+                 !<LookTransform> {src: raw, dst: raw, looks: l}, !<FileTransform> {src: a.lut, \
+                 interpolation: best}]}",
+            ),
+        ),
+        // Version 1 config sections.
+        (
+            "v1 inactive".into(),
+            ver("1", "inactive_colorspaces: [raw]\n"),
+        ),
+        (
+            "v1 viewing rules".into(),
+            ver(
+                "1",
+                "viewing_rules:\n  - !<Rule> {name: r, colorspaces: raw}\n",
+            ),
+        ),
+        (
+            "v1 shared views".into(),
+            ver(
+                "1",
+                "shared_views:\n  - !<View> {name: s, colorspace: raw}\n",
+            ),
+        ),
+        (
+            "v1 display views".into(),
+            ver(
+                "1",
+                "displays:\n  d:\n    - !<View> {name: v, colorspace: raw}\n    - !<Views> [s]\n",
+            ),
+        ),
+        (
+            "v1 virtual display".into(),
+            ver(
+                "1",
+                "virtual_display:\n  - !<View> {name: s, colorspace: raw}\n",
+            ),
+        ),
+        (
+            "v1 display colorspaces".into(),
+            ver("1", "display_colorspaces:\n  - !<ColorSpace> {name: d}\n"),
+        ),
+        (
+            "v1 interop".into(),
+            ver("1", "  - !<ColorSpace> {name: b, interop_id: abc}\n"),
+        ),
+        (
+            "v1 view transforms".into(),
+            ver(
+                "1",
+                "view_transforms:\n  - !<ViewTransform> {name: vt, from_reference: \
+                 !<LogTransform> {}}\n",
+            ),
+        ),
+        (
+            "v1 default vt".into(),
+            ver("1", "default_view_transform: vt\n"),
+        ),
+        (
+            "v1 named transforms".into(),
+            ver(
+                "1",
+                "named_transforms:\n  - !<NamedTransform> {name: nt, transform: !<LogTransform> \
+                 {}}\n",
+            ),
+        ),
+        // Interchange attributes before 2.5.
+        (
+            "v2.4 cs interchange".into(),
+            ver(
+                "2.4",
+                "  - !<ColorSpace> {name: b, interchange: {amf_transform_ids: x}}\n",
+            ),
+        ),
+        (
+            "v2.4 look interchange".into(),
+            ver(
+                "2.4",
+                "looks:\n  - !<Look> {name: l, process_space: raw, interchange: \
+                 {amf_transform_ids: x}}\n",
+            ),
+        ),
+        (
+            "v2.4 vt interchange".into(),
+            ver(
+                "2.4",
+                "view_transforms:\n  - !<ViewTransform> {name: vt, from_scene_reference: \
+                 !<LogTransform> {}, interchange: {amf_transform_ids: x}}\n",
+            ),
+        ),
+        (
+            "v2.5 interchange".into(),
+            ver(
+                "2.5",
+                "  - !<ColorSpace> {name: b, interchange: {amf_transform_ids: x}}\nlooks:\n  - \
+                 !<Look> {name: l, process_space: raw, interchange: {amf_transform_ids: y}}\n",
+            ),
+        ),
+    ];
+    // Built-in styles of later minor versions, a version before and at the first that allows
+    // them; the names compare ignoring case.
+    for (style, first) in [
+        ("ACES-LMT - ACES 1.3 Reference Gamut Compression", 1),
+        ("aces-lmt - aces 1.3 reference gamut compression", 1),
+        ("ARRI_LOGC4_to_ACES2065-1", 2),
+        ("CURVE - CANON_CLOG2_to_LINEAR", 2),
+        ("CURVE - CANON_CLOG3_to_LINEAR", 2),
+        ("DISPLAY - CIE-XYZ-D65_to_DisplayP3", 3),
+        ("APPLE_LOG_to_ACES2065-1", 4),
+        ("CURVE - HLG-OETF-INVERSE", 4),
+        (
+            "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-1000nit-P3-D60-in-REC2020-D65_2.0",
+            4,
+        ),
+        ("DISPLAY - CIE-XYZ-D65_to_DisplayP3-HDR", 4),
+        ("display - cie-xyz-d65_to_displayp3-hdr", 4),
+    ] {
+        for minor in [first - 1, first] {
+            cases.push((
+                format!("{style} in 2.{minor}"),
+                ver_transform(
+                    &format!("2.{minor}"),
+                    &format!("!<BuiltinTransform> {{style: {style}}}"),
+                ),
+            ));
+        }
+    }
+    // Fixed function styles of later minor versions.
+    for (style, first) in [
+        ("ACES_GamutComp13", 1),
+        ("Lin_TO_PQ", 4),
+        ("ACES2_OutputTransform", 4),
+        ("RGB_TO_HSY_LIN", 5),
+        ("RGB_TO_HSY_LOG", 5),
+        ("RGB_TO_HSY_VID", 5),
+    ] {
+        let params = match style {
+            "ACES_GamutComp13" => ", params: [1.147, 1.264, 1.312, 0.815, 0.803, 0.880, 1.2]",
+            "ACES2_OutputTransform" => {
+                ", params: [100, 0.7347, 0.2653, 0, 1, 0.0001, -0.077, 0.3127, 0.329]"
+            }
+            _ => "",
+        };
+        for minor in [first - 1, first] {
+            cases.push((
+                format!("{style} in 2.{minor}"),
+                ver_transform(
+                    &format!("2.{minor}"),
+                    &format!(
+                        "!<GroupTransform> {{children: [!<FixedFunctionTransform> {{style: \
+                         {style}{params}}}]}}"
+                    ),
+                ),
+            ));
+        }
+    }
+    let refs: Vec<(&str, Vec<u8>)> = cases.iter().map(|(l, t)| (l.as_str(), t.clone())).collect();
+    check(&refs);
 }
