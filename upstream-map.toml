@@ -4241,7 +4241,7 @@ path = "tests/cpu/ColorSpace_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/color_space_tests.rs"]
 status = "partial"
-note = "p3-model-objects (3.4a): basic, alias, category, interop_id, amf_transform_ids, icc_profile_name, unknown_interchange_attrib; interop_id_serialization and icc_profile_name_serialization with p3-yaml-save (3.7b), color_space_serialize (it validates) with 3.8b, use_alias (Config, use_alias) reads its config with 3.3j but validates it: with 3.8b; is_colorspace_linear with p3-after-p2 (Lut3D), the two processor_to_known_colorspace tests with ConfigUtils (Phase 9)"
+note = "p3-model-objects (3.4a): basic, alias, category, interop_id, amf_transform_ids, icc_profile_name, unknown_interchange_attrib; interop_id_serialization and icc_profile_name_serialization with p3-yaml-save (3.7b), color_space_serialize and (Config, use_alias) with p3-validate (3.8); is_colorspace_linear with p3-after-p2 (Lut3D), the two processor_to_known_colorspace tests with ConfigUtils (Phase 9)"
 
 [[file]]
 path = "tests/cpu/ConfigUtils_tests.cpp"
@@ -4294,8 +4294,8 @@ status = "todo"
 path = "tests/cpu/FileRules_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/file_rules_tests.rs"]
-status = "partial"
-note = "p3-rules 3.9f: config_read_only, config_insert_rule, pattern_error, with_defaults, extension_error, clone, isDefault. p3-yaml-load-2 3.3k: rules_filepattern, rules_regex, rules_long_filepattern, rules_test, rules_priority, config_no_default, config_default_missmatch, config_default_no_colorspace, config_no_default_rule, config_filerule_no_colorspace, config_v1_faulty, config_v2_wrong_rule. p3-yaml-save (3.7b): config_rule_customkeys, config_rule_u8. The other serializing tests (config_v1, multiple_rules, read_write_incomplete_configs) validate too (3.8b) or validate (3.8b: rule_invalid, config_no_default_role, config_v1_to_v2_from_file, config_v1_to_v2_from_memory, rule_move)"
+status = "done"
+note = "p3-rules 3.9f: config_read_only, config_insert_rule, pattern_error, with_defaults, extension_error, clone, isDefault. p3-yaml-load-2 3.3k: rules_filepattern, rules_regex, rules_long_filepattern, rules_test, rules_priority, config_no_default, config_default_missmatch, config_default_no_colorspace, config_no_default_rule, config_filerule_no_colorspace, config_v1_faulty, config_v2_wrong_rule. p3-yaml-save (3.7b): config_rule_customkeys, config_rule_u8. p3-validate (3.8): config_v1, rule_invalid, multiple_rules, config_no_default_role, config_v1_to_v2_from_file, config_v1_to_v2_from_memory, read_write_incomplete_configs, rule_move"
 
 [[file]]
 path = "tests/cpu/GpuShaderUtils_tests.cpp"
@@ -4409,9 +4409,9 @@ note = "S2: all 11 tests; the ULP check (GetULPDifference, AreAllClose) is in oc
 [[file]]
 path = "tests/cpu/UnitTestLogUtils.cpp"
 kind = "test-support"
-target = ["crates/ocio-ops/src/unit_test_log_utils.rs"]
+target = ["crates/ocio-ops/src/unit_test_log_utils.rs", "crates/ocio/src/test_env.rs"]
 status = "partial"
-note = "1.2e: LogGuard (both constructors, output, clear, empty), for ocio-ops's unit tests: it must set the logging state of the crate under test, which ocio-testkit can't reach. It holds a reentrant lock and keeps only its own thread's messages, because Rust runs tests in parallel, and makes OCIO read OCIO_LOGGING_LEVEL from an empty environment, so no test depends on the developer's. Still to port, with the first tests that use them: findAndRemove, findAllAndRemove, print, MuteLogging and the checkAndMute helpers"
+note = "1.2e: LogGuard (both constructors, output, clear, empty), for ocio-ops's unit tests: it must set the logging state of the crate under test, which ocio-testkit can't reach. It holds a reentrant lock and keeps only its own thread's messages, because Rust runs tests in parallel, and makes OCIO read OCIO_LOGGING_LEVEL from an empty environment, so no test depends on the developer's. Still to port, with the first tests that use them: findAndRemove, findAllAndRemove, print, MuteLogging and the checkAndMute helpers. p3-validate: findAndRemove and the checkAndMute*RoleError helpers, over ocio's test_env::capture_log, for ocio's unit tests (crates/ocio/src/test_env.rs)"
 
 [[file]]
 path = "tests/cpu/UnitTestLogUtils.h"
@@ -4462,8 +4462,8 @@ note = "p3-model-objects (3.4c)"
 path = "tests/cpu/ViewingRules_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/viewing_rules_tests.rs"]
-status = "partial"
-note = "p3-rules 3.9g: basic. config_io and filtered_views read YAML, but also validate (3.8b) and serialize (3.7b): with the later of the two"
+status = "done"
+note = "p3-rules 3.9g: basic. p3-validate (3.8): config_io, filtered_views"
 
 [[file]]
 path = "tests/cpu/apphelpers/CategoryHelpers_tests.cpp"
