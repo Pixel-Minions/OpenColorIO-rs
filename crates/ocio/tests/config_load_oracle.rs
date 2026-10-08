@@ -232,6 +232,19 @@ fn getters(c: &Config) -> Vec<Getter> {
             Err(e) => json!({"exception": s(e.what())}),
         },
     ));
+    // Its validation (WP 3.8), and what it logged.
+    let (valid, validate_log) = captured(&[], || c.validate());
+    out.push(g(
+        "validate",
+        vec![],
+        json!({
+            "result": match valid {
+                Ok(()) => Value::Null,
+                Err(e) => json!({"exception": s(e.what())}),
+            },
+            "log": validate_log.iter().map(|m| s(m)).collect::<Vec<_>>(),
+        }),
+    ));
     for i in 0..c.num_roles() {
         let role = c.role_name(i);
         out.push(g(
@@ -385,27 +398,33 @@ fn check(cases: &[(&str, Vec<u8>)]) {
 /// panics listing every difference.
 fn check_env(env: &[(&str, &str)], cases: &[(&str, Vec<u8>)]) {
     let ported: Vec<_> = cases.iter().map(|(_, text)| port_load(text, env)).collect();
+    // The getters once per config: what a call keeps (validate's result) and logs is the
+    // first call's.
+    let port_getters: Vec<Vec<Getter>> = ported
+        .iter()
+        .map(|(loaded, _)| match loaded {
+            Ok(config) => getters(config),
+            Err(_) => Vec::new(),
+        })
+        .collect();
     let env_json: serde_json::Map<String, Value> =
         env.iter().map(|(k, v)| (k.to_string(), json!(v))).collect();
     let calls: Vec<BatchCall<'_>> = cases
         .iter()
-        .zip(&ported)
-        .map(|((_, text), (loaded, _))| {
-            let calls: Vec<Value> = match loaded {
-                Ok(config) => getters(config)
-                    .into_iter()
-                    .map(|(name, args, _)| {
-                        if name == "getCurrentContext" {
-                            json!({"call": name, "args": args, "as": "ctx"})
-                        } else if let Some(m) = name.strip_prefix("ctx.") {
-                            json!({"call": m, "on": "ctx", "args": args})
-                        } else {
-                            json!({"call": name, "args": args})
-                        }
-                    })
-                    .collect(),
-                Err(_) => Vec::new(),
-            };
+        .zip(&port_getters)
+        .map(|((_, text), getters)| {
+            let calls: Vec<Value> = getters
+                .iter()
+                .map(|(name, args, _)| {
+                    if name == "getCurrentContext" {
+                        json!({"call": name, "args": args, "as": "ctx"})
+                    } else if let Some(m) = name.strip_prefix("ctx.") {
+                        json!({"call": m, "on": "ctx", "args": args})
+                    } else {
+                        json!({"call": name, "args": args})
+                    }
+                })
+                .collect();
             BatchCall {
                 cmd: "config_calls",
                 args: json!({"config": {"yaml": {"bytes": hex(text)}}, "calls": calls,
@@ -421,7 +440,9 @@ fn check_env(env: &[(&str, &str)], cases: &[(&str, Vec<u8>)]) {
         .collect();
 
     let mut failures = Vec::new();
-    for (((label, _), (loaded, port_log)), w) in cases.iter().zip(&ported).zip(&wheel) {
+    for ((((label, _), (loaded, port_log)), w), port_getters_of) in
+        cases.iter().zip(&ported).zip(&wheel).zip(&port_getters)
+    {
         let wheel_log = log(&w["config_log"]);
         if &wheel_log != port_log {
             failures.push(format!(
@@ -452,17 +473,17 @@ fn check_env(env: &[(&str, &str)], cases: &[(&str, Vec<u8>)]) {
                     ));
                 }
             }
-            Ok(c) => {
+            Ok(_) => {
                 if !config.is_null() {
                     failures.push(format!("{label}: the wheel fails: {config}"));
                     continue;
                 }
                 let results = w["calls"].as_array().unwrap();
-                for ((name, args, port), call) in getters(c).iter().zip(results) {
+                for ((name, args, port), call) in port_getters_of.iter().zip(results) {
                     if name == "getCurrentContext" {
                         continue;
                     }
-                    let wheel = if name == "serialize" {
+                    let wheel = if name == "serialize" || name == "validate" {
                         json!({"result": normalized(call), "log": call["log"]})
                     } else {
                         normalized(call)
@@ -1230,4 +1251,56 @@ fn configs_load_in_an_environment_as_in_the_wheel() {
     ] {
         check_env(env, &cases);
     }
+}
+
+/// A config validated twice: the second call gives the first result again, the message
+/// upstream kept (`m_validationtext`), which is empty where the first failure didn't set it
+/// (docs/improvements.md, I-147).
+#[test]
+fn validating_twice_as_in_the_wheel() {
+    let cases: Vec<(&str, Vec<u8>)> = vec![
+        ("passes", v2("displays:\n  d:\n    - !<View> {name: v, colorspace: raw}\n")),
+        ("no displays", v2("")),
+        (
+            "unresolved environment variable",
+            b"ocio_profile_version: 2\nenvironment: {A: $B}\nroles: {default: raw}\ncolorspaces:\n  \
+              - !<ColorSpace> {name: raw}\ndisplays:\n  d:\n    - !<View> {name: v, colorspace: \
+              raw}\n"
+                .to_vec(),
+        ),
+        (
+            "bad looks",
+            v2("displays:\n  d:\n    - !<View> {name: v, colorspace: raw, looks: \"a, |\"}\n"),
+        ),
+    ];
+    let calls: Vec<BatchCall<'_>> = cases
+        .iter()
+        .map(|(_, text)| BatchCall {
+            cmd: "config_calls",
+            args: json!({"config": {"yaml": {"bytes": hex(text)}},
+                         "calls": [{"call": "validate"}, {"call": "validate"}]}),
+            blobs: Vec::new(),
+        })
+        .collect();
+    let wheel = Oracle::get().batch(&calls, true);
+    let mut failures = Vec::new();
+    for ((label, text), w) in cases.iter().zip(wheel) {
+        let w = w.expect("config_calls").result;
+        let (loaded, _) = port_load(text, &[]);
+        let config = loaded.unwrap_or_else(|e| panic!("{label}: {}", String::from_utf8_lossy(&e)));
+        for i in 0..2 {
+            let (port, _) = captured(&[], || config.validate());
+            let port = match port {
+                Ok(()) => Value::Null,
+                Err(e) => json!({"exception": s(e.what())}),
+            };
+            let wheel = normalized(&w["calls"][i]);
+            if wheel != port {
+                failures.push(format!(
+                    "{label}: validate #{i}\n  wheel {wheel}\n  port  {port}"
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

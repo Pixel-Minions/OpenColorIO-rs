@@ -11,9 +11,12 @@
 use std::fmt;
 
 use ocio_ops::exception::{Exception, Result};
+use ocio_ops::logging::log_info;
 use ocio_ops::parse_utils::str_equals_case_ignore;
 use ocio_ops::platform::strcasecmp;
-use ocio_ops::utils::string_utils::{c_str, trim};
+use ocio_ops::utils::string_utils::{c_str, lower, trim};
+
+use crate::color_space_set::ColorSpaceSet;
 
 use crate::custom_keys::CustomKeysContainer;
 use crate::tokens_manager::TokensManager;
@@ -44,13 +47,73 @@ impl ViewingRule {
             name: name.to_vec(),
         }
     }
+
+    /// Refuses a rule whose color space (or role) the config doesn't have, one with neither color
+    /// spaces nor encodings, and one with both; logs an encoding no color space uses.
+    /// `color_space_accessor` is the config's `getColorSpace`, as a test of existence.
+    ///
+    /// Port of `ViewingRule::validate` (src/OpenColorIO/ViewingRules.cpp:66-111 @ v2.5.2).
+    fn validate(
+        &self,
+        color_space_accessor: &dyn Fn(&[u8]) -> bool,
+        colorspaces: &ColorSpaceSet,
+    ) -> Result<()> {
+        let num_cs = self.color_spaces.num_tokens();
+        for cs_idx in 0..num_cs {
+            let csname = self.color_spaces.token(cs_idx).unwrap_or_default();
+            // Can be a color space or a role (all color spaces).
+            if !color_space_accessor(csname) {
+                let mut os = b"The rule '".to_vec();
+                os.extend_from_slice(&self.name);
+                os.extend_from_slice(b"' refers to color space '");
+                os.extend_from_slice(csname);
+                os.extend_from_slice(b"' which is not defined.");
+                return Err(Exception::new(os));
+            }
+        }
+        let num_enc = self.encodings.num_tokens();
+        for enc_idx in 0..num_enc {
+            let enc_name = self.encodings.token(enc_idx).unwrap_or_default();
+            if !is_encoding_used(colorspaces, enc_name) {
+                let mut os = b"The rule '".to_vec();
+                os.extend_from_slice(&self.name);
+                os.extend_from_slice(b"' refers to encoding '");
+                os.extend_from_slice(enc_name);
+                os.extend_from_slice(b"' that is not used by any of the color spaces.");
+                log_info(os);
+            }
+        }
+        if num_cs + num_enc == 0 {
+            let mut os = b"The rule '".to_vec();
+            os.extend_from_slice(&self.name);
+            os.extend_from_slice(b"' must have either a color space or an encoding.");
+            return Err(Exception::new(os));
+        } else if num_cs != 0 && num_enc != 0 {
+            let mut os = b"The rule '".to_vec();
+            os.extend_from_slice(&self.name);
+            os.extend_from_slice(b"' cannot refer to both a color space and an encoding.");
+            return Err(Exception::new(os));
+        }
+        Ok(())
+    }
+}
+
+/// Whether a color space of `colorspaces` has the encoding `enc_name`, ignoring case.
+///
+/// Port of `IsEncodingUsed` (src/OpenColorIO/ViewingRules.cpp:20-34 @ v2.5.2).
+fn is_encoding_used(colorspaces: &ColorSpaceSet, enc_name: &[u8]) -> bool {
+    let teststr = lower(enc_name);
+    (0..colorspaces.num_color_spaces()).any(|cs| {
+        colorspaces
+            .color_space_by_index(cs)
+            .is_some_and(|colorspace| lower(c_str(colorspace.encoding())) == teststr)
+    })
 }
 
 /// The viewing rules of a config, in order.
 ///
 /// Port of `ViewingRules` and `ViewingRules::Impl` (include/OpenColorIO/OpenColorIO.h:
-/// 1875-1967, src/OpenColorIO/ViewingRules.h:31-52, ViewingRules.cpp:123-406 @ v2.5.2), but
-/// `Impl::validate`, which comes with the config's (3.8b). `Clone` is `createEditableCopy`, a
+/// 1875-1967, src/OpenColorIO/ViewingRules.h:31-52, ViewingRules.cpp:123-406 @ v2.5.2). `Clone` is `createEditableCopy`, a
 /// deep copy (ViewingRules.cpp:144-164).
 #[derive(Debug, Clone, Default)]
 pub struct ViewingRules {
@@ -76,6 +139,21 @@ impl ViewingRules {
                 "Viewing rules: rule index '{rule_index}' invalid. There are only \
                  '{num_rules}' rules."
             )));
+        }
+        Ok(())
+    }
+
+    /// Validates each rule (`ViewingRule::validate`): the first error stops it.
+    ///
+    /// Port of `ViewingRules::Impl::validate` (src/OpenColorIO/ViewingRules.cpp:197-205 @
+    /// v2.5.2).
+    pub(crate) fn validate(
+        &self,
+        color_space_accessor: &dyn Fn(&[u8]) -> bool,
+        colorspaces: &ColorSpaceSet,
+    ) -> Result<()> {
+        for rule in &self.rules {
+            rule.validate(color_space_accessor, colorspaces)?;
         }
         Ok(())
     }
