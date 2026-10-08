@@ -6,7 +6,9 @@
 //! getters (the version, name, description, family separator, search path, environment and its
 //! mode, strict parsing, luma, roles, color spaces, displays and their views with each view's
 //! getters, shared and virtual views, active and inactive lists, looks, view transforms,
-//! named transforms, and the file and viewing rules by their text); and the warnings logged.
+//! named transforms, the file and viewing rules by their text, the current context's
+//! variables) and its text (`Config::serialize`, byte for byte, with what serializing logged);
+//! and the warnings logged loading it.
 //!
 //! The configs: hand-written ones for each key of the config's loader and its errors, the
 //! wheel's built-in configs (their YAML, `builtin_config_source`), and upstream's test configs
@@ -34,9 +36,9 @@ static LOGGING: Mutex<()> = Mutex::new(());
 /// A config, or the message of the error that refused it.
 type Loaded = Result<Arc<Config>, Vec<u8>>;
 
-/// The port's config of `text`, or its error's message, and what OCIO logged meanwhile. OCIO
-/// reads the environment `env` and nothing else meanwhile.
-fn port_load(text: &[u8], env: &[(&str, &str)]) -> (Loaded, Vec<Vec<u8>>) {
+/// `f`'s result and what OCIO logged meanwhile, while OCIO reads the environment `env` and
+/// nothing else.
+fn captured<T>(env: &[(&str, &str)], f: impl FnOnce() -> T) -> (T, Vec<Vec<u8>>) {
     let _lock = LOGGING.lock().unwrap_or_else(PoisonError::into_inner);
     let messages = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&messages);
@@ -45,11 +47,19 @@ fn port_load(text: &[u8], env: &[(&str, &str)]) -> (Loaded, Vec<Vec<u8>>) {
     })))
     .unwrap();
     set_thread_env_provider(Some(Arc::new(MapEnv::from_entries(env))));
-    let loaded = Config::create_from_stream(text).map_err(|e| e.what().to_vec());
+    let result = f();
     set_thread_env_provider(None);
     reset_to_default_logging_function();
     let log = messages.lock().unwrap().clone();
-    (loaded, log)
+    (result, log)
+}
+
+/// The port's config of `text`, or its error's message, and what OCIO logged meanwhile. OCIO
+/// reads the environment `env` and nothing else meanwhile.
+fn port_load(text: &[u8], env: &[(&str, &str)]) -> (Loaded, Vec<Vec<u8>>) {
+    captured(env, || {
+        Config::create_from_stream(text).map_err(|e| e.what().to_vec())
+    })
 }
 
 fn s(v: &[u8]) -> Value {
@@ -197,6 +207,20 @@ fn getters(c: &Config) -> Vec<Getter> {
             list((0..c.num_displays_all()).map(|i| c.display_all(i).to_vec())),
         ),
     ];
+    // The config's text (WP 3.7), or the message of the error that stopped it, and what
+    // serializing logged.
+    let (text, serialize_log) = captured(&[], || c.serialize());
+    out.push(g(
+        "serialize",
+        vec![],
+        json!({
+            "result": match text {
+                Ok(text) => s(&text),
+                Err(e) => json!({"exception": s(e.what())}),
+            },
+            "log": serialize_log.iter().map(|m| s(m)).collect::<Vec<_>>(),
+        }),
+    ));
     for i in 0..c.num_roles() {
         let role = c.role_name(i);
         out.push(g(
@@ -333,7 +357,10 @@ fn normalized(call: &Value) -> Value {
             None => result.clone(),
         },
         (None, Some(h)) => json!({"bytes": h}),
-        _ => call.clone(),
+        _ => match call.get("exception") {
+            Some(e) => json!({"exception": e["message"]}),
+            None => call.clone(),
+        },
     }
 }
 
@@ -424,7 +451,11 @@ fn check_env(env: &[(&str, &str)], cases: &[(&str, Vec<u8>)]) {
                     if name == "getCurrentContext" {
                         continue;
                     }
-                    let wheel = normalized(call);
+                    let wheel = if name == "serialize" {
+                        json!({"result": normalized(call), "log": call["log"]})
+                    } else {
+                        normalized(call)
+                    };
                     if &wheel != port {
                         failures.push(format!(
                             "{label}: {name}{args:?}\n  wheel {wheel}\n  port  {port}"

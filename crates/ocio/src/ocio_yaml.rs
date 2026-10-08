@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! OCIO's YAML reader: a port of the `load` functions of `src/OpenColorIO/OCIOYaml.cpp` @
-//! v2.5.2, which read a config's nodes (parsed by [`crate::yaml_cpp`]) into OCIO's objects.
-//! The `save` functions (the writer) are WP 3.7's.
+//! OCIO's YAML reader and writer: a port of the `load` functions of
+//! `src/OpenColorIO/OCIOYaml.cpp` @ v2.5.2, which read a config's nodes (parsed by
+//! [`crate::yaml_cpp`]) into OCIO's objects, and of its `save` functions, which write them
+//! through yaml-cpp's emitter ([`save_transform`], [`write`]: `Config::serialize`).
 //!
-//! So far: the typed loaders and their messages, the helpers that report unknown keys, bad
+//! The reader: the typed loaders and their messages, the helpers that report unknown keys, bad
 //! values and repeated keys, and the transforms ([`load_transform`]), except ExposureContrast
 //! and the grading transforms (Phase 5); and the color spaces, looks, view transforms and
 //! named transforms, with their descriptions and interchange attributes; the views, the file and
 //! viewing rules, and the config itself ([`load_config`], [`read`]: `Config::CreateFromStream`).
+//! The writer: every saver but those of ExposureContrast and the grading transforms (Phase 5).
 //!
 //! **Errors.** A loader fails with OCIO's `Exception` or with an exception of yaml-cpp, which
 //! upstream lets through (a key that isn't a string, a zombie node): [`LoadError`]. Upstream
@@ -21,7 +23,7 @@
 //! passes a `std::string` on with `c_str()` (to a setter, an enum's `FromString`), the port
 //! passes the bytes up to the first NUL.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use ocio_ops::exception::Exception;
 use ocio_ops::format_metadata::FormatMetadataImpl;
@@ -30,17 +32,18 @@ use ocio_ops::math_utils::{
     is_m44_identity, is_scalar_equal_to_one, is_vec_equal_to_one, is_vec_equal_to_zero,
 };
 use ocio_ops::open_color_types::{
-    Allocation, BitDepth, CdlStyle, ColorSpaceDirection, EnvironmentMode, FixedFunctionStyle,
-    NegativeStyle, ReferenceSpaceType, TransformDirection, ViewTransformDirection,
-    allocation_to_string, cdl_style_to_string, fixed_function_style_from_string,
-    fixed_function_style_to_string, interpolation_to_string, negative_style_to_string,
-    transform_direction_to_string,
+    Allocation, BitDepth, CdlStyle, ColorSpaceDirection, ColorSpaceVisibility, EnvironmentMode,
+    FixedFunctionStyle, NamedTransformVisibility, NegativeStyle, ReferenceSpaceType,
+    SearchReferenceSpaceType, TransformDirection, ViewTransformDirection, ViewType,
+    allocation_to_string, bit_depth_to_string, cdl_style_to_string,
+    fixed_function_style_from_string, fixed_function_style_to_string, interpolation_to_string,
+    negative_style_to_string, transform_direction_to_string,
 };
 use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 use ocio_ops::parse_utils::{
     ROLE_DEFAULT, allocation_from_string, bit_depth_from_string, cdl_style_from_string,
     interpolation_from_string, join_string_env_style, negative_style_from_string,
-    transform_direction_from_string,
+    split_string_env_style, transform_direction_from_string,
 };
 use ocio_ops::platform::strcasecmp;
 use ocio_ops::utils::pystring::os_path;
@@ -76,7 +79,7 @@ use crate::view_transform::ViewTransform;
 use crate::viewing_rules::ViewingRules;
 use crate::yaml_cpp::emitter::Emitter;
 use crate::yaml_cpp::emitter_manip::EmitterManip::{
-    BeginMap, BeginSeq, EndMap, EndSeq, Flow, Key, Value,
+    BeginMap, BeginSeq, Block, EndMap, EndSeq, Flow, Key, Literal, Newline, Value,
 };
 use crate::yaml_cpp::emitter_manip::verbatim_tag;
 use crate::yaml_cpp::exceptions::Exception as YamlException;
@@ -2953,8 +2956,6 @@ fn save_range(out: &mut Emitter, t: &RangeTransform) {
 ///
 /// Port of `save(YAML::Emitter&, ConstTransformRcPtr, unsigned int)` (OCIOYaml.cpp:3353-3420 @
 /// v2.5.2). The ExposureContrast and grading savers come with their classes (Phase 5).
-// The config writer (3.7c) calls it; until then only the tests do.
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn save_transform(out: &mut Emitter, t: &Transform, major_version: u32) -> SaveResult {
     match t {
         Transform::Allocation(t) => save_allocation_transform(out, t),
@@ -2980,6 +2981,873 @@ pub(crate) fn save_transform(out: &mut Emitter, t: &Transform, major_version: u3
         }
     }
     Ok(())
+}
+/// A sequence of strings, as `out << std::vector<std::string>` writes it (stlemitter.h:16-28):
+/// each as its bytes.
+fn put_strings(out: &mut Emitter, values: &[Vec<u8>]) {
+    out.put(BeginSeq);
+    for v in values {
+        out.put(v.as_slice());
+    }
+    out.put(EndSeq);
+}
+
+/// The bit depth's name.
+///
+/// Port of `save(YAML::Emitter&, BitDepth)` (OCIOYaml.cpp:171-174 @ v2.5.2).
+fn save_bit_depth(out: &mut Emitter, depth: BitDepth) {
+    out.put(bit_depth_to_string(depth));
+}
+
+/// A non-empty description as the `description` key, without its trailing newlines, in the
+/// literal style when it holds a newline. `desc` is upstream's `const char *`: up to its first
+/// NUL.
+///
+/// Port of `saveDescription` (OCIOYaml.cpp:219-233 @ v2.5.2).
+pub(crate) fn save_description(out: &mut Emitter, desc: &[u8]) {
+    let desc = c_str(desc);
+    if !desc.is_empty() {
+        // Remove trailing newlines so that only one is saved because they won't be read back.
+        let desc_str = sanitize_newlines(desc);
+
+        out.put(Key).put("description").put(Value);
+        if desc_str.contains(&b'\n') {
+            out.put(Literal);
+        }
+        out.put(desc_str.as_slice());
+    }
+}
+
+/// The interchange attributes, when there are some, as the `interchange` map: each value
+/// without its trailing newlines, in the literal style when it holds a newline.
+///
+/// Port of `saveInterchangeAttributes` (OCIOYaml.cpp:350-373 @ v2.5.2).
+pub(crate) fn save_interchange_attributes(
+    out: &mut Emitter,
+    interchangemap: &BTreeMap<Vec<u8>, Vec<u8>>,
+) {
+    if interchangemap.is_empty() {
+        return;
+    }
+
+    out.put(Key).put("interchange");
+    out.put(Value);
+    out.put(BeginMap);
+    for (key, value) in interchangemap {
+        let val_str = sanitize_newlines(value);
+
+        out.put(Key).put(key.as_slice()).put(Value);
+        if val_str.contains(&b'\n') {
+            out.put(Literal);
+        }
+        out.put(val_str.as_slice());
+    }
+
+    out.put(EndMap);
+}
+
+/// A view, a flow map: its name, its color space (or its view transform and display color
+/// space), its looks and rule when set, and its description. The fields are written whole, as
+/// `std::string`s.
+///
+/// Port of `save(YAML::Emitter&, const View&)` (OCIOYaml.cpp:480-505 @ v2.5.2).
+pub(crate) fn save_view(out: &mut Emitter, view: &View) {
+    out.put(verbatim_tag("View"));
+    out.put(Flow);
+    out.put(BeginMap);
+    out.put(Key)
+        .put("name")
+        .put(Value)
+        .put(view.name.as_slice());
+    if view.view_transform.is_empty() {
+        out.put(Key)
+            .put("colorspace")
+            .put(Value)
+            .put(view.colorspace.as_slice());
+    } else {
+        out.put(Key)
+            .put("view_transform")
+            .put(Value)
+            .put(view.view_transform.as_slice());
+        out.put(Key)
+            .put("display_colorspace")
+            .put(Value)
+            .put(view.colorspace.as_slice());
+    }
+    if !view.looks.is_empty() {
+        out.put(Key)
+            .put("looks")
+            .put(Value)
+            .put(view.looks.as_slice());
+    }
+    if !view.rule.is_empty() {
+        out.put(Key)
+            .put("rule")
+            .put(Value)
+            .put(view.rule.as_slice());
+    }
+    save_description(out, &view.description);
+    out.put(EndMap);
+}
+
+/// The names of `n` items (a color space's aliases, categories, ...) up to their first NUL, as
+/// upstream's `StringVec` of `const char *`s.
+fn names(n: usize, item: impl Fn(usize) -> Vec<u8>) -> Vec<Vec<u8>> {
+    (0..n).map(|i| c_str(&item(i)).to_vec()).collect()
+}
+
+/// A color space, a block map: name, aliases (from version 2), interop ID, family, equality
+/// group, bit depth, description, `isdata`, categories, encoding, interchange attributes,
+/// allocation and its variables, and its transforms under the keys of its reference space and
+/// version; then a newline.
+///
+/// Port of `save(YAML::Emitter&, ConstColorSpaceRcPtr, unsigned int)` (OCIOYaml.cpp:3576-3663
+/// @ v2.5.2).
+pub(crate) fn save_color_space(
+    out: &mut Emitter,
+    cs: &ColorSpace,
+    major_version: u32,
+) -> SaveResult {
+    out.put(verbatim_tag("ColorSpace"));
+    out.put(BeginMap);
+
+    out.put(Key).put("name").put(Value).put(c_str(cs.name()));
+    let num_aliases = cs.num_aliases();
+    if major_version >= 2 && num_aliases != 0 {
+        out.put(Key).put("aliases");
+        let aliases = names(num_aliases, |i| cs.alias(i).to_vec());
+        out.put(Flow).put(Value);
+        put_strings(out, &aliases);
+    }
+
+    let interop_id = c_str(cs.interop_id());
+    if !interop_id.is_empty() {
+        out.put(Key).put("interop_id");
+        out.put(Value).put(interop_id);
+    }
+
+    out.put(Key)
+        .put("family")
+        .put(Value)
+        .put(c_str(cs.family()));
+
+    out.put(Key)
+        .put("equalitygroup")
+        .put(Value)
+        .put(c_str(cs.equality_group()));
+
+    out.put(Key).put("bitdepth").put(Value);
+    save_bit_depth(out, cs.bit_depth());
+
+    save_description(out, cs.description());
+
+    out.put(Key).put("isdata").put(Value).put(cs.is_data());
+
+    if cs.num_categories() > 0 {
+        let categories = names(cs.num_categories() as usize, |i| {
+            cs.category(i as i32).unwrap_or_default().to_vec()
+        });
+        out.put(Key).put("categories");
+        out.put(Flow).put(Value);
+        put_strings(out, &categories);
+    }
+
+    let is = c_str(cs.encoding());
+    if !is.is_empty() {
+        out.put(Key).put("encoding");
+        out.put(Value).put(is);
+    }
+
+    save_interchange_attributes(out, cs.interchange_attributes());
+
+    out.put(Key).put("allocation").put(Value);
+    save_allocation(out, cs.allocation());
+    if cs.allocation_num_vars() > 0 {
+        out.put(Key).put("allocationvars");
+        out.put(Flow).put(Value).put(cs.allocation_vars());
+    }
+
+    let is_display = cs.reference_space_type() == ReferenceSpaceType::Display;
+    if let Some(toref) = cs.transform(ColorSpaceDirection::ToReference) {
+        out.put(Key)
+            .put(if is_display {
+                "to_display_reference"
+            } else if major_version < 2 {
+                "to_reference"
+            } else {
+                "to_scene_reference"
+            })
+            .put(Value);
+        save_transform(out, toref, major_version)?;
+    }
+
+    if let Some(fromref) = cs.transform(ColorSpaceDirection::FromReference) {
+        out.put(Key)
+            .put(if is_display {
+                "from_display_reference"
+            } else if major_version < 2 {
+                "from_reference"
+            } else {
+                "from_scene_reference"
+            })
+            .put(Value);
+        save_transform(out, fromref, major_version)?;
+    }
+
+    out.put(EndMap);
+    out.put(Newline);
+    Ok(())
+}
+
+/// A look, a block map: name, process space, description, interchange attributes and its
+/// transforms; then a newline.
+///
+/// Port of `save(YAML::Emitter&, ConstLookRcPtr, unsigned int)` (OCIOYaml.cpp:3721-3746 @
+/// v2.5.2).
+pub(crate) fn save_look(out: &mut Emitter, look: &Look, major_version: u32) -> SaveResult {
+    out.put(verbatim_tag("Look"));
+    out.put(BeginMap);
+    out.put(Key).put("name").put(Value).put(c_str(look.name()));
+    out.put(Key)
+        .put("process_space")
+        .put(Value)
+        .put(c_str(look.process_space()));
+    save_description(out, look.description());
+    save_interchange_attributes(out, look.interchange_attributes());
+
+    if let Some(t) = look.transform() {
+        out.put(Key).put("transform");
+        out.put(Value);
+        save_transform(out, t, major_version)?;
+    }
+
+    if let Some(t) = look.inverse_transform() {
+        out.put(Key).put("inverse_transform");
+        out.put(Value);
+        save_transform(out, t, major_version)?;
+    }
+
+    out.put(EndMap);
+    out.put(Newline);
+    Ok(())
+}
+
+/// A view transform, a block map: name, family when set, description, interchange
+/// attributes, categories, and its transforms under the keys of its reference space; then a
+/// newline.
+///
+/// Port of `save(YAML::Emitter&, ConstViewTransformRcPtr&, unsigned int)` (OCIOYaml.cpp:
+/// 3881-3923 @ v2.5.2).
+pub(crate) fn save_view_transform(
+    out: &mut Emitter,
+    vt: &ViewTransform,
+    major_version: u32,
+) -> SaveResult {
+    out.put(verbatim_tag("ViewTransform"));
+    out.put(BeginMap);
+
+    out.put(Key).put("name").put(Value).put(c_str(vt.name()));
+    let family = c_str(vt.family());
+    if !family.is_empty() {
+        out.put(Key).put("family").put(Value).put(family);
+    }
+    save_description(out, vt.description());
+    save_interchange_attributes(out, vt.interchange_attributes());
+
+    if vt.num_categories() > 0 {
+        let categories = names(vt.num_categories() as usize, |i| {
+            vt.category(i as i32).unwrap_or_default().to_vec()
+        });
+        out.put(Key).put("categories");
+        out.put(Flow).put(Value);
+        put_strings(out, &categories);
+    }
+
+    let is_display = vt.reference_space_type() == ReferenceSpaceType::Display;
+    if let Some(toref) = vt.transform(ViewTransformDirection::ToReference) {
+        out.put(Key)
+            .put(if is_display {
+                "to_display_reference"
+            } else {
+                "to_scene_reference"
+            })
+            .put(Value);
+        save_transform(out, toref, major_version)?;
+    }
+
+    if let Some(fromref) = vt.transform(ViewTransformDirection::FromReference) {
+        out.put(Key)
+            .put(if is_display {
+                "from_display_reference"
+            } else {
+                "from_scene_reference"
+            })
+            .put(Value);
+        save_transform(out, fromref, major_version)?;
+    }
+
+    out.put(EndMap);
+    out.put(Newline);
+    Ok(())
+}
+
+/// A named transform, a block map: name, aliases (from version 2), description, family,
+/// categories and encoding when set, and its transforms; then a newline.
+///
+/// Port of `save(YAML::Emitter&, ConstNamedTransformRcPtr&, unsigned int)` (OCIOYaml.cpp:
+/// 4008-4068 @ v2.5.2).
+pub(crate) fn save_named_transform(
+    out: &mut Emitter,
+    nt: &NamedTransform,
+    major_version: u32,
+) -> SaveResult {
+    out.put(verbatim_tag("NamedTransform"));
+    out.put(BeginMap);
+
+    out.put(Key).put("name").put(Value).put(c_str(nt.name()));
+
+    let num_aliases = nt.num_aliases();
+    if major_version >= 2 && num_aliases != 0 {
+        out.put(Key).put("aliases");
+        let aliases = names(num_aliases, |i| nt.alias(i).to_vec());
+        out.put(Flow).put(Value);
+        put_strings(out, &aliases);
+    }
+
+    save_description(out, nt.description());
+
+    let family = c_str(nt.family());
+    if !family.is_empty() {
+        out.put(Key).put("family").put(Value).put(family);
+    }
+
+    if nt.num_categories() > 0 {
+        let categories = names(nt.num_categories() as usize, |i| {
+            nt.category(i as i32).unwrap_or_default().to_vec()
+        });
+        out.put(Key).put("categories");
+        out.put(Flow).put(Value);
+        put_strings(out, &categories);
+    }
+
+    let encoding = c_str(nt.encoding());
+    if !encoding.is_empty() {
+        out.put(Key).put("encoding").put(Value).put(encoding);
+    }
+
+    if let Some(t) = nt.transform(TransformDirection::Forward) {
+        out.put(Key).put("transform").put(Value);
+        save_transform(out, t, major_version)?;
+    }
+
+    if let Some(t) = nt.transform(TransformDirection::Inverse) {
+        out.put(Key).put("inverse_transform").put(Value);
+        save_transform(out, t, major_version)?;
+    }
+
+    out.put(EndMap);
+    out.put(Newline);
+    Ok(())
+}
+
+/// The custom keys of a rule, as the `custom` map, when there are some.
+fn save_custom_keys(
+    out: &mut Emitter,
+    num_keys: usize,
+    key: impl Fn(usize) -> ocio_ops::exception::Result<(Vec<u8>, Vec<u8>)>,
+) -> SaveResult {
+    if num_keys != 0 {
+        out.put(Key).put("custom");
+        out.put(Value);
+        out.put(BeginMap);
+
+        for i in 0..num_keys {
+            let (name, value) = key(i)?;
+            out.put(Key).put(c_str(&name)).put(Value).put(c_str(&value));
+        }
+        out.put(EndMap);
+    }
+    Ok(())
+}
+
+/// The file rule at `position`, a flow map: its name, and its color space, regex, pattern,
+/// extension and custom keys when set.
+///
+/// Port of `save(YAML::Emitter&, ConstFileRulesRcPtr&, size_t)` (OCIOYaml.cpp:4206-4247 @
+/// v2.5.2).
+pub(crate) fn save_file_rule(out: &mut Emitter, fr: &FileRules, position: usize) -> SaveResult {
+    out.put(verbatim_tag("Rule"));
+    out.put(Flow);
+    out.put(BeginMap);
+    out.put(Key)
+        .put("name")
+        .put(Value)
+        .put(c_str(fr.name(position)?));
+    let cs = fr.color_space(position)?;
+    if !c_str(&cs).is_empty() {
+        out.put(Key).put("colorspace").put(Value).put(c_str(&cs));
+    }
+    let regex = c_str(fr.regex(position)?);
+    if !regex.is_empty() {
+        out.put(Key).put("regex").put(Value).put(regex);
+    }
+    let pattern = c_str(fr.pattern(position)?);
+    if !pattern.is_empty() {
+        out.put(Key).put("pattern").put(Value).put(pattern);
+    }
+    let extension = c_str(fr.extension(position)?);
+    if !extension.is_empty() {
+        out.put(Key).put("extension").put(Value).put(extension);
+    }
+    save_custom_keys(out, fr.num_custom_keys(position)?, |i| {
+        Ok((
+            fr.custom_key_name(position, i)?.to_vec(),
+            fr.custom_key_value(position, i)?.to_vec(),
+        ))
+    })?;
+    out.put(EndMap);
+    Ok(())
+}
+
+/// The viewing rule at `position`, a flow map: its name, its color spaces and encodings (one
+/// as a string, more as a list) and its custom keys.
+///
+/// Port of `save(YAML::Emitter&, ConstViewingRulesRcPtr&, size_t)` (OCIOYaml.cpp:4340-4393 @
+/// v2.5.2).
+pub(crate) fn save_viewing_rule(
+    out: &mut Emitter,
+    vr: &ViewingRules,
+    position: usize,
+) -> SaveResult {
+    out.put(verbatim_tag("Rule"));
+    out.put(Flow);
+    out.put(BeginMap);
+    out.put(Key)
+        .put("name")
+        .put(Value)
+        .put(c_str(vr.name(position)?));
+    let numcs = vr.num_color_spaces(position)?;
+    if numcs == 1 {
+        out.put(Key).put("colorspaces");
+        out.put(Value)
+            .put(c_str(vr.color_space(position, 0)?.unwrap_or_default()));
+    } else if numcs > 1 {
+        let mut colorspaces = Vec::new();
+        for i in 0..numcs {
+            colorspaces.push(c_str(vr.color_space(position, i)?.unwrap_or_default()).to_vec());
+        }
+        out.put(Key).put("colorspaces");
+        out.put(Value).put(Flow);
+        put_strings(out, &colorspaces);
+    }
+    let numenc = vr.num_encodings(position)?;
+    if numenc == 1 {
+        out.put(Key).put("encodings");
+        out.put(Value)
+            .put(c_str(vr.encoding(position, 0)?.unwrap_or_default()));
+    } else if numenc > 1 {
+        let mut encodings = Vec::new();
+        for i in 0..numenc {
+            encodings.push(c_str(vr.encoding(position, i)?.unwrap_or_default()).to_vec());
+        }
+        out.put(Key).put("encodings");
+        out.put(Value).put(Flow);
+        put_strings(out, &encodings);
+    }
+    save_custom_keys(out, vr.num_custom_keys(position)?, |i| {
+        Ok((
+            vr.custom_key_name(position, i)?.to_vec(),
+            vr.custom_key_value(position, i)?.to_vec(),
+        ))
+    })?;
+    out.put(EndMap);
+    Ok(())
+}
+
+/// The view `name` of `display` (`""`: the config's shared views) as the config's getters give
+/// it, each string up to its first NUL.
+fn config_view(config: &Config, display: &[u8], name: &[u8]) -> View {
+    View::new(
+        name,
+        config.display_view_transform_name(display, name),
+        config.display_view_color_space_name(display, name),
+        config.display_view_looks(display, name),
+        config.display_view_rule(display, name),
+        config.display_view_description(display, name),
+    )
+}
+
+/// The config, a block map in upstream's order: the profile version; the environment (always
+/// from version 2); the search path (version 1: one string; version 2: `""`, one path, or a
+/// list); strict parsing; the family separator unless it's `/` (version 2); the luma; the name
+/// (version 2) and description; the roles; the file rules (version 2) and viewing rules
+/// (version 2, when there are some); the shared views; the displays, but those a virtual
+/// display made, with their views and shared views; the virtual display (version 2); the active
+/// displays and views and the inactive color spaces; the looks; the default view transform and
+/// the view transforms; the display color spaces (but those a virtual display made) and the
+/// color spaces; the named transforms.
+///
+/// Port of `save(YAML::Emitter&, const Config&)` (OCIOYaml.cpp:5033-5414 @ v2.5.2).
+fn save_config(out: &mut Emitter, config: &Config) -> SaveResult {
+    let config_major_version = config.major_version();
+    let config_minor_version = config.minor_version();
+
+    let mut ss = config_major_version.to_string();
+    if config_minor_version != 0 {
+        ss.push('.');
+        ss.push_str(&config_minor_version.to_string());
+    }
+
+    out.put(Block);
+    out.put(BeginMap);
+    out.put(Key)
+        .put("ocio_profile_version")
+        .put(Value)
+        .put(ss.as_str());
+    out.put(Newline);
+    out.put(Newline);
+
+    if config_major_version >= 2 || config.num_environment_vars() > 0 {
+        // For v2 configs, write the environment section, even if empty.
+        out.put(Key).put("environment");
+        out.put(Value).put(BeginMap);
+        for i in 0..config.num_environment_vars() {
+            let name = c_str(config.environment_var_name_by_index(i));
+            out.put(Key).put(name);
+            out.put(Value)
+                .put(c_str(config.environment_var_default(name)));
+        }
+        out.put(EndMap);
+        out.put(Newline);
+    }
+
+    if config_major_version < 2 {
+        // Save search paths as a single string.
+        out.put(Key)
+            .put("search_path")
+            .put(Value)
+            .put(c_str(&config.search_path()));
+    } else {
+        let num_sp = config.num_search_paths();
+        let search_paths: Vec<Vec<u8>> = (0..num_sp)
+            .map(|i| c_str(&config.search_path_with_index(i)).to_vec())
+            .collect();
+
+        if num_sp == 0 {
+            out.put(Key).put("search_path").put(Value).put("");
+        } else if num_sp == 1 {
+            out.put(Key)
+                .put("search_path")
+                .put(Value)
+                .put(search_paths[0].as_slice());
+        } else {
+            out.put(Key).put("search_path").put(Value);
+            put_strings(out, &search_paths);
+        }
+    }
+    out.put(Key)
+        .put("strictparsing")
+        .put(Value)
+        .put(config.is_strict_parsing_enabled());
+
+    if config_major_version >= 2 {
+        let family_separator = config.family_separator();
+        if family_separator != b'/' {
+            out.put(Key)
+                .put("family_separator")
+                .put(Value)
+                .put(family_separator);
+        }
+    }
+
+    let luma = config.default_luma_coefs();
+    out.put(Key).put("luma").put(Value).put(Flow).put(&luma[..]);
+
+    if config_major_version >= 2 {
+        let name = c_str(config.name());
+        if !name.is_empty() {
+            out.put(Key).put("name").put(Value).put(name);
+        }
+    }
+    save_description(out, config.description());
+
+    // Roles
+    out.put(Newline);
+    out.put(Newline);
+    out.put(Key).put("roles");
+    out.put(Value).put(BeginMap);
+    for i in 0..config.num_roles() {
+        let role = c_str(config.role_name(i));
+        if !role.is_empty() {
+            // Note that no validation of the name strings is done here (e.g. to check that
+            // they exist in the config) in order to enable serializing configs that are only
+            // partially complete. The caller may use config->validate() first, if desired.
+            out.put(Key).put(role);
+            out.put(Value)
+                .put(c_str(config.role_color_space_by_index(i)));
+        }
+    }
+    out.put(EndMap);
+    out.put(Newline);
+
+    // File rules
+    if config_major_version >= 2 {
+        let rules = config.file_rules().get();
+        out.put(Newline);
+        out.put(Key).put("file_rules");
+        out.put(Value).put(BeginSeq);
+        for i in 0..rules.num_entries() {
+            save_file_rule(out, &rules, i)?;
+        }
+        out.put(EndSeq);
+        out.put(Newline);
+    }
+
+    // Viewing rules
+    if config_major_version >= 2 {
+        let rules = config.viewing_rules().get();
+        let num_rules = rules.num_entries();
+        if num_rules != 0 {
+            out.put(Newline);
+            out.put(Key).put("viewing_rules");
+            out.put(Value).put(BeginSeq);
+            for i in 0..num_rules {
+                save_viewing_rule(out, &rules, i)?;
+            }
+            out.put(EndSeq);
+            out.put(Newline);
+        }
+    }
+
+    // Shared views
+    let num_shared_views = config.num_views_of_type(ViewType::Shared, b"");
+    if num_shared_views != 0 {
+        out.put(Newline);
+        out.put(Key).put("shared_views");
+        out.put(Value).put(BeginSeq);
+        for v in 0..num_shared_views {
+            let name = config.view_of_type(ViewType::Shared, b"", v);
+            save_view(out, &config_view(config, b"", name));
+        }
+        out.put(EndSeq);
+        out.put(Newline);
+    }
+
+    // Displays.
+    out.put(Newline);
+    out.put(Key).put("displays");
+    out.put(Value).put(BeginMap);
+    // All displays are saved (not just active ones).
+    for i in 0..config.num_displays_all() {
+        // Do not save displays instantiated from a virtual display.
+        if !config.is_display_temporary(i) {
+            let display = c_str(config.display_all(i));
+
+            out.put(Key).put(display);
+            out.put(Value).put(BeginSeq);
+            for v in 0..config.num_views_of_type(ViewType::DisplayDefined, display) {
+                let name = config.view_of_type(ViewType::DisplayDefined, display, v);
+                save_view(out, &config_view(config, display, name));
+            }
+
+            let shared_views: Vec<Vec<u8>> = (0..config
+                .num_views_of_type(ViewType::Shared, display))
+                .map(|v| c_str(config.view_of_type(ViewType::Shared, display, v)).to_vec())
+                .collect();
+            if !shared_views.is_empty() {
+                out.put(verbatim_tag("Views"));
+                out.put(Flow);
+                put_strings(out, &shared_views);
+            }
+            out.put(EndSeq);
+        }
+    }
+    out.put(EndMap);
+
+    // Virtual Display.
+    let num_virtual_display_views = config.virtual_display_num_views(ViewType::DisplayDefined)
+        + config.virtual_display_num_views(ViewType::Shared);
+
+    if config_major_version >= 2 && num_virtual_display_views > 0 {
+        out.put(Newline);
+        out.put(Newline);
+        out.put(Key).put("virtual_display");
+        out.put(Value).put(BeginSeq);
+
+        for idx in 0..config.virtual_display_num_views(ViewType::DisplayDefined) {
+            let view_name = config.virtual_display_view(ViewType::DisplayDefined, idx);
+            let view = View::new(
+                view_name,
+                config.virtual_display_view_transform_name(view_name),
+                config.virtual_display_view_color_space_name(view_name),
+                config.virtual_display_view_looks(view_name),
+                config.virtual_display_view_rule(view_name),
+                config.virtual_display_view_description(view_name),
+            );
+            save_view(out, &view);
+        }
+
+        let shared_views: Vec<Vec<u8>> = (0..config.virtual_display_num_views(ViewType::Shared))
+            .map(|idx| c_str(config.virtual_display_view(ViewType::Shared, idx)).to_vec())
+            .collect();
+        if !shared_views.is_empty() {
+            out.put(verbatim_tag("Views"));
+            out.put(Flow);
+            put_strings(out, &shared_views);
+        }
+
+        out.put(EndSeq);
+    }
+
+    out.put(Newline);
+    out.put(Newline);
+    out.put(Key).put("active_displays");
+    let active_displays: Vec<Vec<u8>> = (0..config.num_active_displays())
+        .map(|i| c_str(config.active_display(i).unwrap_or_default()).to_vec())
+        .collect();
+
+    // The YAML library will wrap names that use a comma in quotes.
+    out.put(Value).put(Flow);
+    put_strings(out, &active_displays);
+
+    out.put(Key).put("active_views");
+    let active_views: Vec<Vec<u8>> = (0..config.num_active_views())
+        .map(|i| c_str(config.active_view(i).unwrap_or_default()).to_vec())
+        .collect();
+
+    // The YAML library will wrap names that use a comma in quotes.
+    out.put(Value).put(Flow);
+    put_strings(out, &active_views);
+
+    let inactive_css = c_str(config.inactive_color_spaces());
+    if !inactive_css.is_empty() {
+        let inactive_colorspaces = split_string_env_style(inactive_css)?;
+        out.put(Key).put("inactive_colorspaces");
+        out.put(Value).put(Flow);
+        put_strings(out, &inactive_colorspaces);
+    }
+
+    out.put(Newline);
+
+    // Looks
+    if config.num_looks() > 0 {
+        out.put(Newline);
+        out.put(Key).put("looks");
+        out.put(Value).put(BeginSeq);
+        for i in 0..config.num_looks() {
+            let name = config.look_name_by_index(i);
+            let look = config
+                .look(name)
+                .expect("the look of a name the config lists");
+            save_look(out, look, config_major_version)?;
+        }
+        out.put(EndSeq);
+        out.put(Newline);
+    }
+
+    // View transforms.
+    let def_vt = c_str(config.default_view_transform_name());
+    if !def_vt.is_empty() {
+        out.put(Newline);
+        out.put(Key)
+            .put("default_view_transform")
+            .put(Value)
+            .put(def_vt);
+        out.put(Newline);
+    }
+    let num_vt = config.num_view_transforms();
+    if num_vt > 0 {
+        out.put(Newline);
+        out.put(Key).put("view_transforms");
+        out.put(Value).put(BeginSeq);
+        for i in 0..num_vt {
+            let name = config.view_transform_name_by_index(i);
+            let vt = config
+                .view_transform(name)
+                .expect("the view transform of a name the config lists");
+            save_view_transform(out, vt, config_major_version)?;
+        }
+        out.put(EndSeq);
+    }
+
+    let mut scene_cs = Vec::new();
+    let mut display_cs = Vec::new();
+    let num_cs =
+        config.num_color_spaces_with(SearchReferenceSpaceType::All, ColorSpaceVisibility::All);
+    for i in 0..num_cs {
+        let name = config.color_space_name_by_index_with(
+            SearchReferenceSpaceType::All,
+            ColorSpaceVisibility::All,
+            i,
+        );
+
+        let cs = config
+            .color_space(name)
+            .expect("the color space of a name the config lists");
+        if cs.reference_space_type() == ReferenceSpaceType::Display {
+            // Display color spaces instantiated from a virtual display must not be saved.
+            // Check them using their name as they have the same name as the display.
+
+            let idx = config.display_all_by_name(name);
+            if idx == -1 || !config.is_display_temporary(idx) {
+                display_cs.push(cs);
+            }
+        } else {
+            scene_cs.push(cs);
+        }
+    }
+
+    // Display ColorSpaces
+    if !display_cs.is_empty() {
+        out.put(Newline);
+        out.put(Key).put("display_colorspaces");
+        out.put(Value).put(BeginSeq);
+        for cs in &display_cs {
+            save_color_space(out, cs, config_major_version)?;
+        }
+        out.put(EndSeq);
+    }
+
+    // ColorSpaces
+    {
+        out.put(Newline);
+        out.put(Key).put("colorspaces");
+        out.put(Value).put(BeginSeq);
+        for cs in &scene_cs {
+            save_color_space(out, cs, config_major_version)?;
+        }
+        out.put(EndSeq);
+    }
+
+    // Named transforms.
+    let num_nt = config.num_named_transforms_with(NamedTransformVisibility::All);
+    if num_nt > 0 {
+        out.put(Newline);
+        out.put(Key).put("named_transforms");
+        out.put(Value).put(BeginSeq);
+        for i in 0..num_nt {
+            let name = config.named_transform_name_by_index_with(NamedTransformVisibility::All, i);
+            let nt = config
+                .named_transform(name)
+                .expect("the named transform of a name the config lists");
+            save_named_transform(out, nt, config_major_version)?;
+        }
+        out.put(EndSeq);
+    }
+
+    out.put(EndMap);
+    Ok(())
+}
+
+/// The config's YAML text, with doubles at precision 15 (`digits10`) and floats at 7.
+///
+/// Port of `OCIOYaml::Write` (OCIOYaml.cpp:5441-5448 @ v2.5.2).
+pub(crate) fn write(config: &Config) -> ocio_ops::exception::Result<Vec<u8>> {
+    let mut out = Emitter::new();
+    out.set_double_precision(f64::DIGITS as usize);
+    out.set_float_precision(7);
+    save_config(&mut out, config)?;
+    Ok(c_str(out.c_str()).to_vec())
 }
 
 #[cfg(test)]
