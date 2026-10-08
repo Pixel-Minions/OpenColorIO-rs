@@ -868,8 +868,9 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatDiscreet1DL.cpp"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/file_format_discreet1dl.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_discreet1dl.rs"]
+status = "done"
+note = "p4-registry 4.3d: the reader (getline, sscanf/sscanf_s, std::stoi, the depth hints, I-164) and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_discreet1dl_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatHDL.cpp"
@@ -4551,8 +4552,8 @@ status = "todo"
 [[file]]
 path = "tests/cpu/fileformats/FileFormatDiscreet1DL_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-formats/src/fileformats/file_format_discreet1dl_tests.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_discreet1dl_tests.rs"]
+status = "done"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatHDL_tests.cpp"

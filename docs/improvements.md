@@ -1848,6 +1848,20 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   run every request after `ClearAllCaches`, `crates/ocio/tests/common/lut_files.rs`). Matching
   would mean sharing mutable op data between the file cache and processors.
 
+### I-164. The Discreet 1D LUT header check reads past the line's end
+
+- **Upstream:** `IMLutGet` checks the header with `std::string subStr(InString, 5)`
+  (`FileFormatDiscreet1DL.cpp:435`): the first 5 bytes of the 200-byte line buffer, whatever
+  the line's length. For a line shorter than 5 bytes it reads past the line's NUL, into bytes
+  of earlier lines or never written (an uninitialized `char` array, whose read is undefined).
+  Both wheels give the same result whatever those bytes are: the copy holds the line's NUL
+  among its 5 bytes, so it is never `"lut: "` in lower case, and the line is a syntax error.
+- **Who notices:** nobody: a header line shorter than 5 bytes is an error either way.
+- **A fix:** compare the line itself (`StartsWith`).
+- **Status:** matched in `p4-registry` (4.3d, `crates/ocio/src/fileformats/file_format_discreet1dl.rs`):
+  a line shorter than 5 bytes never matches; checked against the wheel with headers around
+  that length (`crates/ocio/tests/file_format_discreet1dl_oracle.rs`).
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on

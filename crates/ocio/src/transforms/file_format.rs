@@ -295,12 +295,7 @@ fn create_formats() -> Vec<Box<dyn FileFormat>> {
             B::LUT_3D | B::LUT_1D_3D,
         )]),
         // FileFormatDiscreet1DL.cpp:675-682.
-        stub(vec![FormatInfo::new(
-            "Discreet 1D LUT",
-            "lut",
-            C::READ,
-            B::NONE,
-        )]),
+        Box::new(crate::fileformats::file_format_discreet1dl::LocalFileFormat),
         // FileFormatHDL.cpp:295-305.
         stub(vec![FormatInfo::new(
             "houdini", "lut", read_bake, all_bakes,
