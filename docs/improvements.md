@@ -1483,6 +1483,25 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   parser and its NFA state limit (3.9c) and matcher (3.9d, with the lookahead and brace-copy
   rules of the fix chunk after its verifier).
 
+## File formats
+
+### I-170. expat counts a start tag's attribute values twice
+
+- **Upstream:** expat 2.7.2's billion laughs protection counts the bytes of each token it
+  reads, once. A start tag (`<e a='x&amp;y'>`, not an empty element) is counted as one token
+  in `doContent`, then `storeAtts` passes the same accounting class (`XML_ACCOUNT_DIRECT` in
+  the document) to `storeAttributeValue`, which counts the tokens of each value that needs
+  normalizing (a reference, or white space other than single spaces) again
+  (`expat/lib/xmlparse.c:3321-3326, 3508-3509, 3956-3958, 6567-6571` @ R_2_7_2). An empty
+  element's tag passes `XML_ACCOUNT_NONE` there ("token spans whole start tag"). The direct
+  count, the denominator of the amplification factor, grows by those values' bytes once more.
+- **Who notices:** documents over the protection's 8 MiB activation threshold whose
+  amplification by internal entities is near the limit of 100: start tags with such values
+  lower the factor, so a document that the limit would refuse can pass.
+- **A fix:** pass `XML_ACCOUNT_NONE` for start tags too, as for empty elements.
+- **Status:** matched in `p4-xml` (4.4b, `crates/ocio-formats/src/expat/xmlparse.rs`,
+  `do_content`).
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
