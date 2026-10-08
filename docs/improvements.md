@@ -1110,6 +1110,62 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   for bit, and `lut3d_transform_through_the_api_matches_the_wheel`
   (`crates/ocio/tests/api_battery_oracle.rs`) the pixels.
 
+### I-153. A 3D LUT of 128 or 129 entries per side can't be inverted
+
+- **Upstream:** the exact inverse renderer grows the LUT by one entry on each side
+  (`InvLut3DRenderer::extrapolate3DArray`, `ops/lut3d/Lut3DOpCPU.cpp:1461-1470` @ v2.5.2) into
+  a `Lut3DArray`, which refuses more than 129 entries per side (`Lut3DOpData.cpp:194-204`).
+  So creating the CPU processor of an inverse LUT of 128 or 129 entries throws "LUT 3D: Grid
+  size '130' must not be greater than '129'." (or '131'), with or without
+  `OPTIMIZATION_LUT_INV_FAST`: the fast path builds its forward LUT through the same renderer
+  (`MakeFastLut3DFromInverse`, `Lut3DOpData.cpp:29-58`). A forward LUT of those sizes works.
+- **Who notices:** anyone inverting a 3D LUT of 128 or 129 entries per side on the CPU (129 is
+  a common size for high-quality LUTs).
+- **A fix:** keep the extrapolated values in a plain array, not limited to 129 entries; such
+  LUTs then invert.
+- **Status:** matched in `p2-lut3d-inv` (2.2d2), `InvLut3DRenderer::new`;
+  `grid_sizes_128_and_129_are_refused` (`crates/ocio-ops/tests/lut3d_inv_oracle.rs`) checks
+  the message against the wheel.
+
+### I-154. The exact 3D LUT inverse can undo its own column pivot
+
+- **Upstream:** when `invert_hypercube` meets a (nearly) zero pivot column, its rank-revealing
+  search looks through the later columns for the largest entry and swaps that column in; but
+  the swap is inside the loop over those columns, so each later column whose entries are no
+  larger swaps the same pair again (`ops/lut3d/Lut3DOpCPU.cpp:953-972` @ v2.5.2). With three
+  channels, a column found first is swapped back out when the next column is no larger, and
+  the factorization goes on with the zero pivot. The cube is then judged by a factorization
+  the search meant to avoid, so a color can be found in another cube, or in none (giving 0).
+- **Who notices:** inverses of 3D LUTs with coinciding or nearly coinciding corners (flat or
+  quantized areas), for colors on those areas, without `OPTIMIZATION_LUT_INV_FAST`, and with
+  it through the fast LUT built from the exact inverse.
+- **A fix:** swap once, after the search over all later columns; that changes the inverse of
+  such colors.
+- **Status:** matched in `p2-lut3d-inv` (2.2d2), `invert_hypercube`;
+  `degenerate_cubes_match_the_wheel` (`crates/ocio-ops/tests/lut3d_inv_oracle.rs`) includes
+  LUTs where the swap back changes the result.
+
+### I-155. The exact 3D LUT inverse clamps its input to [0, 1] and gives 0 when it finds none
+
+- **Upstream:** `InvLut3DRenderer::apply` clamps each channel to [0, 1] before searching,
+  though a LUT's values may lie outside it ("TODO: Should improve this based on actual LUT
+  contents", `ops/lut3d/Lut3DOpCPU.cpp:1655-1663` @ v2.5.2), and returns 0 in every channel
+  when no cube of the extrapolated LUT holds the color ("For now, if no result is found,
+  return 0", 1672). It reads the LUT's values as they are, where the forward renderers
+  sanitize them (`SanitizeFloat`): a NaN at a cube's base entry stays in the tree's ranges
+  (C++'s `std::min` and `std::max` keep a NaN met first, and a parent's range starts from its
+  first child's), so that cube, and the rest of the sub-tree it starts, never match; a NaN at
+  another entry is skipped, and a cube with it gives a NaN inverse, which the output clamp
+  turns into 0.
+- **Who notices:** inverses of LUTs whose output range isn't [0, 1] (scene-referred or
+  extended-range LUTs) and colors outside the LUT's gamut, which come out as 0 rather than
+  near the closest color; LUTs with NaN values.
+- **A fix:** clamp to the LUT's own range; return the closest point on the LUT's surface; and
+  sanitize the values as the forward renderers do. Each changes those outputs.
+- **Status:** matched in `p2-lut3d-inv` (2.2d2), `InvLut3DRenderer::apply` and `RangeTree`;
+  the battery of `crates/ocio-ops/tests/lut3d_inv_oracle.rs` checks random LUTs (values in
+  [-0.5, 1.5)), LUTs with NaNs and infinities, and LUTs with one NaN.
+
 ## Transforms
 
 ### I-11. Copying a group transform shares its children
@@ -2387,3 +2443,21 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   Tests: 590 levels load as in the wheel, the wheel loads 591 where the port refuses them, groups
   that hold themselves are refused, and loading, copying, printing, validating, building a CPU
   processor and dropping 590 levels fit a 1 MiB thread (also at opt-level 0).
+
+### U-65. The inverse of a 3D LUT of one entry per side never finishes
+
+- **Upstream:** the exact inverse renderer grows the LUT by one entry on each side, and its
+  loops over the two ends of a side step by `dim - 1` (`InvLut3DRenderer::extrapolate3DArray`,
+  `ops/lut3d/Lut3DOpCPU.cpp:1461-1591` @ v2.5.2). For a grid size of 1 that step is 0, and the
+  first such loop never ends: creating the CPU processor of an inverse `Lut3DTransform` of grid
+  size 1 never returns, with or without `OPTIMIZATION_LUT_INV_FAST` (the fast path builds its
+  forward LUT through the same renderer, `MakeFastLut3DFromInverse`, `Lut3DOpData.cpp:29-58`).
+  Both wheels were still running after 30 s (probed 2026-10-07, under Python with a time
+  limit); a grid size of 2 returns at once. The oracle can't run a case that never returns.
+- **Who notices:** applications that invert a 3D LUT of one entry per side, on the CPU.
+- **Decided** (the owner's general rule, `docs/deviations.md`, as for U-5's endless loops):
+  the port refuses it with "Lut3D: the exact inverse of a 3D LUT needs a grid size of at
+  least 2.", when the renderer is made.
+- **Status:** matched in `p2-lut3d-inv` (2.2d2), `InvLut3DRenderer::new`
+  (`crates/ocio-ops/src/ops/lut3d/inv_lut3d.rs`, `GRID_SIZE_1_INVERSE`); `grid_size_1_is_refused`
+  (`crates/ocio-ops/tests/lut3d_inv_oracle.rs`).
