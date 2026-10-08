@@ -58,10 +58,12 @@ fn replacing_ignores_case() {
 }
 
 /// The global registry's ops: an index past its entries is upstream's error, and an entry whose
-/// ops are not ported yet says so, in both directions.
+/// ops are not ported yet (the last one, Rec.2100 HLG, a fixed function of `p3-after-p2`) says
+/// so, in both directions.
 #[test]
 fn ops_of_the_global_registry() {
     let registry = BuiltinTransformRegistry::get();
+    let last = registry.num_builtins() - 1;
     let mut ops = OpVec::new();
     for dir in [TransformDirection::Forward, TransformDirection::Inverse] {
         check_throw_what(
@@ -69,8 +71,11 @@ fn ops_of_the_global_registry() {
             "Invalid built-in transform name.",
         );
         check_throw_what(
-            create_builtin_transform_ops(&mut ops, 0, dir),
-            "BuiltinTransform: the ops of 'IDENTITY' are not ported yet.",
+            create_builtin_transform_ops(&mut ops, last, dir),
+            concat!(
+                "BuiltinTransform: the ops of 'DISPLAY - CIE-XYZ-D65_to_REC.2100-HLG-1000nit' ",
+                "are not ported yet."
+            ),
         );
     }
     assert!(ops.is_empty());

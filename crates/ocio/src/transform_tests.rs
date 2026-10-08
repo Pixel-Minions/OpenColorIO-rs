@@ -277,16 +277,23 @@ fn processors_of_the_classes_without_builders_are_refused() {
     }
 }
 
-/// A processor of every built-in transform of the registry (`IDENTITY` included) is
-/// refused in both directions, and with either direction of the transform itself, with the
-/// error the registry's creators document: the style, as the registry spells it.
+/// The built-in transforms whose ops are ported (WP 3.2e-g); their pixels are compared with the
+/// wheel's in `tests/api_battery_oracle.rs`.
+const BUILTINS_WITH_OPS: &[&[u8]] = &[b"IDENTITY"];
+
+/// A processor of every other built-in transform of the registry is refused in both
+/// directions, and with either direction of the transform itself, with the error the
+/// registry's creators document: the style, as the registry spells it.
 #[test]
-fn processors_of_every_builtin_transform_are_refused() {
+fn processors_of_the_builtin_transforms_without_ops_are_refused() {
     let config = Config::create_raw().unwrap();
     let registry = BuiltinTransformRegistry::get();
     assert!(registry.num_builtins() > 0);
     for index in 0..registry.num_builtins() {
         let style = registry.builtin_style(index).unwrap();
+        if BUILTINS_WITH_OPS.contains(&style) {
+            continue;
+        }
         let expected = format!(
             "BuiltinTransform: the ops of '{}' are not ported yet.",
             String::from_utf8_lossy(style)
