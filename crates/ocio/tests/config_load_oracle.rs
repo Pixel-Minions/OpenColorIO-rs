@@ -221,6 +221,17 @@ fn getters(c: &Config) -> Vec<Getter> {
             "log": serialize_log.iter().map(|m| s(m)).collect::<Vec<_>>(),
         }),
     ));
+    // Its cache ID with its current context (which serializes it again: what that logs is
+    // kept from the other tests' logs).
+    let (cache_id, _) = captured(&[], || c.cache_id());
+    out.push(g(
+        "getCacheID",
+        vec![],
+        match cache_id {
+            Ok(id) => s(id.as_bytes()),
+            Err(e) => json!({"exception": s(e.what())}),
+        },
+    ));
     for i in 0..c.num_roles() {
         let role = c.role_name(i);
         out.push(g(

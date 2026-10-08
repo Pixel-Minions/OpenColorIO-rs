@@ -40,8 +40,6 @@ ocio-testkit = { path = "crates/ocio-testkit" }
 
 # Third-party dependencies are pinned to exact versions: a dependency update is a reviewed change.
 half = "=2.7.1"
-# YAML event reader with styles, tags and spans (PLAN.md §9); test code only for now (S1).
-saphyr-parser = "=0.1.0"
 serde = { version = "=1.0.229", features = ["derive"] }
 serde_json = "=1.0.151"
 sha2 = "=0.11.0"
