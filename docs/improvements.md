@@ -548,6 +548,18 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `crates/ocio/src/ocio_yaml_objects_oracle_tests.rs` and
   `crates/ocio/tests/config_load_oracle.rs`.
 
+### I-145. A config's name loses its trailing newlines
+
+- **Upstream:** the config loader reads the `name` key with `loadDescription`
+  (`OCIOYaml.cpp:4531-4535`), so `SanitizeNewlines` drops its trailing newlines: `name: "n\n\n"`
+  gives the name `n`. Names of color spaces, looks and the other objects are read as plain
+  strings. Seen through the wheel.
+- **Who notices:** configs whose name ends in a newline (a literal block `|` adds one); the name
+  read back differs from the one written.
+- **A fix:** read the name with the string loader, as the other names.
+- **Status:** matched in `p3-yaml-load-2` (3.3l), checked against the wheel in
+  `crates/ocio/tests/config_load_oracle.rs` ("name and description").
+
 ## Numeric helpers
 
 ### I-20. Double values are compared to 0 and 1 in float precision
