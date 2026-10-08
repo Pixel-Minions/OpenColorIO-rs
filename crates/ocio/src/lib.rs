@@ -32,6 +32,7 @@ pub mod yaml_cpp;
 #[cfg(test)]
 mod test_env;
 
+pub use caching::clear_all_caches;
 pub use color_space::ColorSpace;
 pub use color_space_set::ColorSpaceSet;
 pub use config::{Config, ConfigRules, CurrentContext};
