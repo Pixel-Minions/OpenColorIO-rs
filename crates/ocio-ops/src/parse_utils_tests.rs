@@ -286,3 +286,143 @@ fn intersect_string_vecs_case_ignore_test() {
     let res_inter = intersect_string_vecs_case_ignore(&source1, &source2);
     check_equal(vec_of(&["This", "is", "a", "test"]), res_inter);
 }
+
+/// Port of `OCIO_ADD_TEST(ParseUtils, xml_text)` @ v2.5.2.
+#[test]
+fn xml_text() {
+    let input = b"abc \" def ' ghi < jkl > mnop & efg";
+    let reference = b"abc &quot; def &apos; ghi &lt; jkl &gt; mnop &amp; efg";
+
+    let out = convert_special_char_to_xml_token(input);
+    assert_eq!(out, reference);
+
+    let back = convert_xml_token_to_special_char(reference).unwrap();
+    assert_eq!(back, input);
+}
+
+/// Port of `OCIO_ADD_TEST(ParseUtils, string_to_int)` @ v2.5.2.
+#[test]
+fn string_to_int_test() {
+    let mut ival = 0;
+
+    assert!(!string_to_int(&mut ival, b"", false));
+
+    assert!(string_to_int(&mut ival, b"9", false));
+    assert_eq!(ival, 9);
+
+    assert!(string_to_int(&mut ival, b" 10 ", false));
+    assert_eq!(ival, 10);
+
+    assert!(string_to_int(&mut ival, b" 101", true));
+    assert_eq!(ival, 101);
+
+    assert!(string_to_int(&mut ival, b" 11x ", false));
+    assert_eq!(ival, 11);
+
+    assert!(!string_to_int(&mut ival, b" 12x ", true));
+
+    assert!(string_to_int(&mut ival, b"13", true));
+    assert_eq!(ival, 13);
+
+    assert!(string_to_int(&mut ival, b"-14", true));
+    assert_eq!(ival, -14);
+
+    assert!(!string_to_int(&mut ival, b"x-15", false));
+
+    assert!(!string_to_int(&mut ival, b"x-16", false));
+}
+
+/// Port of `OCIO_ADD_TEST(ParseUtils, string_to_float)` @ v2.5.2.
+#[test]
+fn string_to_float_test() {
+    assert_eq!(string_to_float(b""), None);
+
+    assert_eq!(
+        string_to_float(b"1.0").map(f32::to_bits),
+        Some(1.0f32.to_bits())
+    );
+
+    assert_eq!(
+        string_to_float(b"1").map(f32::to_bits),
+        Some(1.0f32.to_bits())
+    );
+
+    assert_eq!(string_to_float(b"a1"), None);
+
+    assert_eq!(
+        string_to_float(b"1 do we really want this to succeed?").map(f32::to_bits),
+        Some(1.0f32.to_bits())
+    );
+
+    assert_eq!(
+        string_to_float(b"1Success").map(f32::to_bits),
+        Some(1.0f32.to_bits())
+    );
+
+    assert_eq!(
+        string_to_float(b"1.0000000000000000000000000000000000000000000001").map(f32::to_bits),
+        Some(1.0f32.to_bits())
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(ParseUtils, float_double)` @ v2.5.2.
+#[test]
+fn float_double() {
+    assert_eq!(float_to_string(0.0f32), b"0");
+    assert_eq!(float_to_string(0.1111001f32), b"0.1111001");
+    assert_eq!(float_to_string(0.11000001f32), b"0.11");
+    assert_eq!(double_to_string(0.11000001), b"0.11000001");
+    assert_eq!(double_to_string(0.1100000000000001), b"0.1100000000000001");
+    assert_eq!(double_to_string(0.11000000000000001), b"0.11");
+}
+
+/// Port of `OCIO_ADD_TEST(ParseUtils, string_vec_to_int_vec)` @ v2.5.2.
+#[test]
+fn string_vec_to_int_vec_test() {
+    let mut int_array: Vec<i32> = Vec::new();
+    let mut line_parts: Vec<Vec<u8>> = Vec::new();
+    assert!(string_vec_to_int_vec(&mut int_array, &line_parts));
+    assert_eq!(int_array.len(), 0);
+
+    line_parts.push(b"42".to_vec());
+    line_parts.push(b"".to_vec());
+
+    assert!(!string_vec_to_int_vec(&mut int_array, &line_parts));
+    assert_eq!(int_array.len(), 2);
+
+    int_array.clear();
+    line_parts.clear();
+
+    line_parts.push(b"42".to_vec());
+    line_parts.push(b"0".to_vec());
+
+    assert!(string_vec_to_int_vec(&mut int_array, &line_parts));
+    assert_eq!(int_array, [42, 0]);
+
+    int_array.clear();
+    line_parts.clear();
+
+    line_parts.push(b"42".to_vec());
+    line_parts.push(b"021".to_vec());
+
+    assert!(string_vec_to_int_vec(&mut int_array, &line_parts));
+    assert_eq!(int_array, [42, 21]);
+
+    int_array.clear();
+    line_parts.clear();
+
+    line_parts.push(b"42".to_vec());
+    line_parts.push(b"0x21".to_vec());
+
+    assert!(!string_vec_to_int_vec(&mut int_array, &line_parts));
+    assert_eq!(int_array.len(), 2);
+
+    int_array.clear();
+    line_parts.clear();
+
+    line_parts.push(b"42u".to_vec());
+    line_parts.push(b"21".to_vec());
+
+    assert!(!string_vec_to_int_vec(&mut int_array, &line_parts));
+    assert_eq!(int_array.len(), 2);
+}
