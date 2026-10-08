@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Tests of the color space: `tests/cpu/ColorSpace_tests.cpp` @ v2.5.2, with the two that
-//! serialize configs and don't validate them (WP 3.7b). Those that validate configs come with
-//! WP 3.8, the processor ones with Phase 2 and ConfigUtils (Phase 9). The text is compared
-//! with the wheel's in `tests/model_objects_oracle.rs`.
+//! Tests of the color space: `tests/cpu/ColorSpace_tests.cpp` @ v2.5.2, with those that read,
+//! write and validate configs (WP 3.3j, 3.7b, 3.8). The processor ones come with Phase 2 and
+//! ConfigUtils (Phase 9). The text is compared with the wheel's in
+//! `tests/model_objects_oracle.rs`.
 
 use super::*;
 use ocio_testkit::upstream::check_throw_what;
@@ -551,4 +551,687 @@ fn icc_profile_name_serialization() {
 
     // Verify empty IccProfileName does not appear in YAML.
     assert!(!contains_bytes(&yaml_str2, b"icc_profile_name"));
+}
+
+/// Port of `OCIO_ADD_TEST(Config, use_alias)` @ v2.5.2.
+#[test]
+fn use_alias() {
+    let _env = crate::test_env::EnvGuard::new();
+    const CONFIG: &str = r#"ocio_profile_version: 2
+
+environment:
+  {}
+search_path: ""
+strictparsing: false
+luma: [0.2126, 0.7152, 0.0722]
+
+roles:
+  testAlias: aces
+  default: raw
+
+file_rules:
+  - !<Rule> {name: ColorSpaceNamePathSearch}
+  - !<Rule> {name: Default, colorspace: default}
+
+displays:
+  sRGB:
+    - !<View> {name: Raw, colorspace: aces}
+
+active_displays: []
+active_views: []
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+    aliases: [ colorspaceAlias ]
+    family: raw
+    equalitygroup: ""
+    bitdepth: 32f
+    description: A raw color space. Conversions to and from this space are no-ops.
+    isdata: true
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: colorspace
+    aliases: [ aces, aces2065-1, ACES - ACES2065-1, "ACES AP0, scene-linear" ]
+    family: family
+    equalitygroup: group
+    bitdepth: 16f
+    description: |
+      A raw color space.
+      Second line.
+    isdata: false
+    categories: [one, two]
+    encoding: scene-linear
+    allocation: lg2
+    allocationvars: [0.1, 0.9, 0.15]
+    to_reference: !<LogTransform> {}
+    from_reference: !<LogTransform> {}
+"#;
+
+    // Load config.
+
+    let config = crate::Config::create_from_stream(CONFIG.as_bytes()).unwrap();
+    config.validate().unwrap();
+
+    // Get a color space from alias.
+
+    let cs = config.color_space("aces2065-1").unwrap();
+    assert_eq!(cs.name(), b"colorspace");
+
+    let cs = config.color_space("ACES - ACES2065-1").unwrap();
+    assert_eq!(cs.name(), b"colorspace");
+
+    assert!(config.color_space("alias no valid").is_none());
+
+    // Get the canonical name.
+
+    assert_eq!(config.canonical_name("aces"), b"colorspace");
+    assert_eq!(
+        config.canonical_name("ACES AP0, scene-linear"),
+        b"colorspace"
+    );
+    assert_eq!(config.canonical_name("colorspace"), b"colorspace");
+    assert_eq!(config.canonical_name("default"), b"raw");
+    assert_eq!(config.canonical_name("DEFault"), b"raw");
+    assert_eq!(config.canonical_name("not an alias"), b"");
+    assert_eq!(config.canonical_name(""), b"");
+
+    // Get the index.
+
+    assert_eq!(config.index_for_color_space("AceS"), 1); // Case insensitve
+    assert_eq!(config.index_for_color_space("aces2065-1"), 1);
+    assert_eq!(config.index_for_color_space("not an alias"), -1);
+
+    // Get color space referenced by alias in role.
+
+    let cs = config.color_space("testAlias").unwrap();
+    assert_eq!(cs.name(), b"colorspace");
+
+    // Color space from string.
+
+    assert_eq!(
+        config.color_space_from_filepath("test_aces_test").unwrap(),
+        b"colorspace"
+    );
+    // "colorspace" is present but "ColorspaceAlias" is longer (and at the same position).
+    assert_eq!(
+        config
+            .color_space_from_filepath("skdj_ColorspaceAlias_dfjdk")
+            .unwrap(),
+        b"raw"
+    );
+
+    // With inactive color spaces.
+
+    let mut cfg = (*config).clone();
+    cfg.set_inactive_color_spaces("colorspace");
+
+    assert_eq!(
+        cfg.color_space_from_filepath("test_aces_test").unwrap(),
+        b"colorspace"
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(Config, color_space_serialize)` @ v2.5.2.
+#[test]
+fn color_space_serialize() {
+    let _env = crate::test_env::EnvGuard::new();
+    const START: &str = r#"ocio_profile_version: 2
+
+environment:
+  {}
+search_path: ""
+strictparsing: false
+luma: [0.2126, 0.7152, 0.0722]
+
+roles:
+  default: raw
+
+file_rules:
+  - !<Rule> {name: ColorSpaceNamePathSearch}
+  - !<Rule> {name: Default, colorspace: default}
+
+displays:
+  sRGB:
+    - !<View> {name: Raw, colorspace: raw}
+
+active_displays: []
+active_views: []
+
+"#;
+    let load = |cfg_string: &str| crate::Config::create_from_stream(cfg_string.as_bytes()).unwrap();
+    let cs_at = |config: &crate::Config, i: i32| {
+        config
+            .color_space(config.color_space_name_by_index(i))
+            .unwrap()
+            .clone()
+    };
+
+    // The raw config.
+    {
+        const END: &str = r#"colorspaces:
+  - !<ColorSpace>
+    name: raw
+    family: raw
+    equalitygroup: ""
+    bitdepth: 32f
+    description: A raw color space. Conversions to and from this space are no-ops.
+    isdata: true
+    allocation: uniform
+"#;
+        let cfg_string = [START, END].concat();
+
+        // Load config.
+
+        let config = load(&cfg_string);
+        config.validate().unwrap();
+
+        // Check colorspace.
+
+        assert_eq!(config.num_color_spaces(), 1);
+        let cs = cs_at(&config, 0);
+        assert_eq!(cs.allocation(), Allocation::Uniform);
+        assert_eq!(cs.allocation_num_vars(), 0);
+        assert_eq!(cs.bit_depth(), BitDepth::F32);
+        assert_eq!(
+            cs.description(),
+            b"A raw color space. Conversions to and from this space are no-ops."
+        );
+        assert_eq!(cs.encoding(), b"");
+        assert_eq!(cs.equality_group(), b"");
+        assert_eq!(cs.family(), b"raw");
+        assert_eq!(cs.name(), b"raw");
+        assert_eq!(cs.num_categories(), 0);
+        assert_eq!(cs.reference_space_type(), ReferenceSpaceType::Scene);
+        assert!(cs.transform(ColorSpaceDirection::ToReference).is_none());
+        assert!(cs.transform(ColorSpaceDirection::FromReference).is_none());
+        assert!(cs.is_data());
+
+        // Save and compare output with input.
+
+        assert_eq!(cfg_string.as_bytes(), config.serialize().unwrap());
+    }
+
+    // Adding a color space that uses all parameters (as of 2.0).
+    {
+        const END: &str = r#"colorspaces:
+  - !<ColorSpace>
+    name: raw
+    family: raw
+    equalitygroup: ""
+    bitdepth: 32f
+    description: A raw color space. Conversions to and from this space are no-ops.
+    isdata: true
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: colorspace
+    aliases: [alias1, alias2]
+    family: family
+    equalitygroup: group
+    bitdepth: 16f
+    description: |
+      A raw color space.
+      Second line.
+    isdata: false
+    categories: [one, two]
+    encoding: scene-linear
+    allocation: lg2
+    allocationvars: [0.1, 0.9, 0.15]
+    to_scene_reference: !<LogTransform> {}
+    from_scene_reference: !<LogTransform> {}
+"#;
+        let cfg_string = [START, END].concat();
+
+        // Load config.
+
+        let config = load(&cfg_string);
+        config.validate().unwrap();
+
+        // Check colorspace.
+
+        assert_eq!(config.num_color_spaces(), 2);
+        let cs = cs_at(&config, 1);
+        assert_eq!(cs.allocation(), Allocation::Lg2);
+        assert_eq!(cs.allocation_num_vars(), 3);
+        let vars = cs.allocation_vars();
+        assert_eq!(vars[0], 0.1f32);
+        assert_eq!(vars[1], 0.9f32);
+        assert_eq!(vars[2], 0.15f32);
+        assert_eq!(cs.bit_depth(), BitDepth::F16);
+        assert_eq!(cs.description(), b"A raw color space.\nSecond line.");
+        assert_eq!(cs.encoding(), b"scene-linear");
+        assert_eq!(cs.equality_group(), b"group");
+        assert_eq!(cs.family(), b"family");
+        assert_eq!(cs.name(), b"colorspace");
+        assert_eq!(cs.num_aliases(), 2);
+        assert_eq!(cs.alias(0), b"alias1");
+        assert_eq!(cs.alias(1), b"alias2");
+        assert_eq!(cs.num_categories(), 2);
+        assert_eq!(cs.category(0).unwrap(), b"one");
+        assert_eq!(cs.category(1).unwrap(), b"two");
+        assert_eq!(cs.reference_space_type(), ReferenceSpaceType::Scene);
+        assert!(cs.transform(ColorSpaceDirection::ToReference).is_some());
+        assert!(cs.transform(ColorSpaceDirection::FromReference).is_some());
+        assert!(!cs.is_data());
+
+        // Save and compare output with input.
+
+        assert_eq!(cfg_string.as_bytes(), config.serialize().unwrap());
+    }
+
+    // Description trailing newlines are removed.
+    {
+        const END: &str = r#"colorspaces:
+  - !<ColorSpace>
+    name: raw
+    family: raw
+    equalitygroup: ""
+    bitdepth: 32f
+    description: Some text.
+    isdata: true
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: raw2
+    family: raw
+    equalitygroup: ""
+    bitdepth: 32f
+    description: |
+      One line.
+
+      Other line.
+    isdata: true
+    allocation: uniform
+"#;
+        let cfg_string = [START, END].concat();
+
+        // Load config.
+
+        let config = load(&cfg_string);
+        config.validate().unwrap();
+
+        // Check colorspace.
+
+        assert_eq!(config.num_color_spaces(), 2);
+        let cs = cs_at(&config, 0);
+        // Description has no trailing \n.
+        assert_eq!(cs.description(), b"Some text.");
+
+        let cs = cs_at(&config, 1);
+        // Description has no trailing \n.
+        assert_eq!(cs.description(), b"One line.\n\nOther line.");
+
+        // Save and compare output with input.
+
+        assert_eq!(cfg_string.as_bytes(), config.serialize().unwrap());
+
+        // Even if some line feeds are added to the end of description they won't be saved.
+        let mut cs_edit = cs.clone();
+
+        cs_edit.set_description("One line.\n\nOther line.\n");
+
+        let mut config_edit = (*config).clone();
+        config_edit.add_color_space(&cs_edit).unwrap();
+
+        assert_eq!(cfg_string.as_bytes(), config_edit.serialize().unwrap());
+
+        // Even if several line feeds are added.
+
+        cs_edit.set_description("One line.\n\nOther line.\n\n\n\n");
+        config_edit.add_color_space(&cs_edit).unwrap();
+
+        assert_eq!(cfg_string.as_bytes(), config_edit.serialize().unwrap());
+
+        // Single line descriptions are saved on one line and trailing \n are ignored.
+
+        let cs = cs_at(&config, 0);
+        assert_eq!(cs.description(), b"Some text.");
+
+        let mut cs_edit = cs.clone();
+        cs_edit.set_description("Some text.\n\n\n");
+        config_edit.add_color_space(&cs_edit).unwrap();
+
+        assert_eq!(cfg_string.as_bytes(), config_edit.serialize().unwrap());
+    }
+
+    // Test different way of writing description, some are not written as they would be saved.
+    {
+        const END: &str = r#"colorspaces:
+  - !<ColorSpace>
+    name: raw
+    description: |
+      "Some text."
+
+  - !<ColorSpace>
+    name: raw2
+    description: "Multiple lines\n\nOther line.\n\n\n"
+
+  - !<ColorSpace>
+    name: raw3
+    description: |
+      Test \n backslash+n.
+
+  - !<ColorSpace>
+    name: raw4
+    description: "One"
+
+  - !<ColorSpace>
+    name: raw5
+    description: More "than" one
+
+  - !<ColorSpace>
+    name: raw6
+    description: Other \n test.
+
+  - !<ColorSpace>
+    name: raw7
+    description: Double backslash+n \\n test.
+
+  - !<ColorSpace>
+    name: raw8
+    description: "Double backslash+n \\n in quotes."
+"#;
+        let cfg_string = [START, END].concat();
+
+        // Load config.
+
+        let config = load(&cfg_string);
+        config.validate().unwrap();
+
+        // Check colorspace descriptions.
+
+        assert_eq!(config.num_color_spaces(), 8);
+        // description: |
+        //   "Some text."
+        // A single line comment can be written using the multi-line syntax. Note that
+        // surounding quotes are preserved when multi-line syntax is used.
+        assert_eq!(cs_at(&config, 0).description(), b"\"Some text.\"");
+
+        // description: "Multiple lines\n\nOther line.\n\n\n"
+        // Multi-lines comment can be written using the single line syntax when "" are used.
+        // Note that trailing newlines are removed.
+        assert_eq!(
+            cs_at(&config, 1).description(),
+            b"Multiple lines\n\nOther line."
+        );
+
+        // description: |
+        //     Test \n backslash+n.
+        // Without "" \n is just a backslash '\' on a 'n'. Would be written using single line
+        // syntax.
+        assert_eq!(cs_at(&config, 2).description(), b"Test \\n backslash+n.");
+
+        // description: "One"
+        // Surrounding "" for single line comment are removed.
+        assert_eq!(cs_at(&config, 3).description(), b"One");
+
+        // description: More "than" one
+        // In between "" are preserved.
+        assert_eq!(cs_at(&config, 4).description(), b"More \"than\" one");
+
+        // description: Other \n test.
+        assert_eq!(cs_at(&config, 5).description(), b"Other \\n test.");
+
+        // description: Double backslash+n \\n test.
+        assert_eq!(
+            cs_at(&config, 6).description(),
+            b"Double backslash+n \\\\n test."
+        );
+
+        // description: "Double backslash+n \\n in quotes."
+        assert_eq!(
+            cs_at(&config, 7).description(),
+            b"Double backslash+n \\n in quotes."
+        );
+
+        const END_RES: &str = r#"colorspaces:
+  - !<ColorSpace>
+    name: raw
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: "\"Some text.\""
+    isdata: false
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: raw2
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: |
+      Multiple lines
+
+      Other line.
+    isdata: false
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: raw3
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: Test \n backslash+n.
+    isdata: false
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: raw4
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: One
+    isdata: false
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: raw5
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: More "than" one
+    isdata: false
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: raw6
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: Other \n test.
+    isdata: false
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: raw7
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: Double backslash+n \\n test.
+    isdata: false
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: raw8
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    description: Double backslash+n \n in quotes.
+    isdata: false
+    allocation: uniform
+"#;
+        let cfg_res = [START, END_RES].concat();
+
+        assert_eq!(cfg_res.as_bytes(), config.serialize().unwrap());
+    }
+
+    // Test that the interop_id is valid in v2.0 config too.
+    {
+        const END: &str = r#"colorspaces:
+  - !<ColorSpace>
+    name: raw
+    aliases: [ data ]
+    interop_id: data
+    family: raw
+    equalitygroup: ""
+    bitdepth: 32f
+    description: Some text.
+    isdata: true
+    allocation: uniform
+"#;
+        let config = load(&[START, END].concat());
+        let cs = config.color_space("raw").unwrap();
+        assert_eq!(cs.interop_id(), b"data");
+
+        config.validate().unwrap();
+    }
+
+    // Test that the undefined interop_id does not pass validation
+    {
+        const END: &str = r#"colorspaces:
+  - !<ColorSpace>
+    name: raw
+    interop_id: data
+    family: raw
+    equalitygroup: ""
+    bitdepth: 32f
+    description: Some text.
+    isdata: true
+    allocation: uniform
+"#;
+        let config = load(&[START, END].concat());
+        let cs = config.color_space("raw").unwrap();
+        assert_eq!(cs.interop_id(), b"data");
+
+        check_throw_what(
+            config.validate(),
+            "Config failed color space validation. The color space 'raw' refers to an interop \
+             ID, 'data', which is not a color space name or alias.",
+        );
+    }
+
+    // Test that the interop id can be found in another color space.
+    {
+        const END: &str = r#"colorspaces:
+  - !<ColorSpace>
+    name: raw
+    interop_id: data
+    family: raw
+    equalitygroup: ""
+    bitdepth: 32f
+    description: one data color space.
+    isdata: true
+    allocation: uniform
+  - !<ColorSpace>
+    name: data
+    interop_id: data
+    family: raw
+    equalitygroup: ""
+    bitdepth: 32f
+    description: another data color space.
+    isdata: true
+    allocation: uniform
+"#;
+        let config = load(&[START, END].concat());
+
+        config.validate().unwrap();
+    }
+
+    // Test that the interchange is NOT valid in v2.0 config.
+    {
+        const END: &str = r#"colorspaces:
+  - !<ColorSpace>
+    name: raw
+    interchange:
+        amf_transform_ids: should NOT be valid in 2.0 config
+    family: raw
+    equalitygroup: ""
+    bitdepth: 32f
+    description: Some text.
+    isdata: true
+    allocation: uniform
+"#;
+        check_throw_what(
+            crate::Config::create_from_stream([START, END].concat().as_bytes()),
+            "Config failed validation. The color space 'raw' has non-empty interchange \
+             attributes and config version is less than 2.5.",
+        );
+    }
+
+    // Interchange tests in 2.5
+    const START_2_5: &str = r#"ocio_profile_version: 2.5
+
+environment:
+  {}
+search_path: ""
+strictparsing: false
+luma: [0.2126, 0.7152, 0.0722]
+
+roles:
+  default: raw
+
+file_rules:
+  - !<Rule> {name: ColorSpaceNamePathSearch}
+  - !<Rule> {name: Default, colorspace: default}
+
+displays:
+  sRGB:
+    - !<View> {name: Raw, colorspace: raw}
+
+active_displays: []
+active_views: []
+
+"#;
+
+    // Test that the interchange is valid in v2.5 config.
+    {
+        const END_AMF: &str = r#"
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+    interchange:
+        amf_transform_ids: This is valid in 2.5 config
+    family: raw
+    equalitygroup: ""
+    bitdepth: 32f
+    description: Some text.
+    isdata: true
+    allocation: uniform
+"#;
+
+        let config = load(&[START_2_5, END_AMF].concat());
+        let attr_map = config.color_space("raw").unwrap().interchange_attributes();
+        assert_eq!(attr_map.len(), 1);
+    }
+
+    // Test that the unknown interchange attrib will be ignored in 2.5.
+    {
+        const END_UNKOWN: &str = r#"
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+    interchange:
+        my-attrib: will be ignored
+    family: raw
+    equalitygroup: ""
+    bitdepth: 32f
+    description: Some text.
+    isdata: true
+    allocation: uniform
+"#;
+
+        let cfg_string = [START_2_5, END_UNKOWN].concat();
+        let (config, log) = crate::test_env::capture_log(|| {
+            crate::Config::create_from_stream(cfg_string.as_bytes())
+        });
+        let config = config.unwrap();
+        assert_eq!(
+            log.concat(),
+            b"[OpenColorIO Warning]: Unknown key in interchange: 'my-attrib'.\n"
+        );
+        let attr_map = config.color_space("raw").unwrap().interchange_attributes();
+        assert_eq!(attr_map.len(), 0);
+    }
 }
