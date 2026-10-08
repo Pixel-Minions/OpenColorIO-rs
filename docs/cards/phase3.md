@@ -84,9 +84,10 @@ included. So:
   uses context variables.
 - `Processor`, `CpuProcessor`, `GpuProcessor`, `create_group_transform`, `ProcessorMetadata`;
   `caching.rs` (`std::hash` per platform).
-- `crates/ocio/src/yaml_cpp/`: the yaml-cpp 0.8.0 **emitter** (spike S1). Test code replays
-  OCIO's writer with it (`tests/common/ocio_writer.rs`) and re-emits the 8 built-in configs
-  byte for byte (`tests/s1_builtin_configs.rs`). `exp.rs` and `regex_yaml.rs` are shared by
+- `crates/ocio/src/yaml_cpp/`: the yaml-cpp 0.8.0 **emitter** (spike S1). Test code replayed
+  OCIO's writer with it (`tests/common/ocio_writer.rs`) and re-emitted the 8 built-in configs
+  byte for byte (`tests/s1_builtin_configs.rs`), until 3.7d put the port's reader and writer in
+  its place (D7). `exp.rs` and `regex_yaml.rs` are shared by
   yaml-cpp's scanner, so the parser reuses them.
 - `ocio_ops`: `cfmt` (C and iostream formatting), `number_utils` (`from_chars`, both wheels'
   branches), `string_utils`, `hash_utils` (XXH3 cache IDs), `platform` (`getenv`,
@@ -249,7 +250,7 @@ writer replay.
 | 3.7d | `Config::getCacheID` with and without a context (`Config.cpp:5245-5316`): the serialization's hash, the file references' fast hashes; `Impl::resetCacheIDs`, `getAllInternalTransforms` (~130); `Config::CreateRaw()` parsed from upstream's internal profile | `config.rs` | `Config_tests.cpp` `internal_raw_profile`; the `builtin_configs` cache IDs; `s1_builtin_configs.rs` and `s1_emitter_edges.rs` read through the real reader and writer |
 
 - 3.7d replaces `tests/common/yaml_tree.rs` and `ocio_writer.rs` with the port's reader and
-  writer. The `saphyr-parser` dev-dependency then goes (owner item D7).
+  writer. The `saphyr-parser` dev-dependency then goes (owner item D7). Done in `p3-yaml-save`.
 - The savers of FixedFunction (`p3-after-p2`), ExposureContrast and Grading (P5) come with
   their loaders.
 
@@ -382,7 +383,7 @@ survives. Each call captures the log.
 | D4 | **Public API of the config model** (`api`) | (a) Getters return `&[u8]`; setters take `impl AsRef<[u8]>` and stop at the first NUL, as the CDL ID and `FormatMetadata` already do. No new string type. (b) `Config::new()` (`Create`) returns an editable `Config`; the loaders `from_stream`, `from_file`, `from_env`, `from_builtin_config`, `from_config_io_proxy` return `Arc<Config>`, like `create_raw()`; editing a shared config is `(*config).clone()` (`createEditableCopy`). (c) `ColorSpace`, `Look`, `ViewTransform`, `NamedTransform`, `ColorSpaceSet`, `FileRules`, `ViewingRules` and `Context` are `Clone` structs; the config copies what it is given and lends `&T`. (d) Upstream's null pointers become `Option`; by-index getters keep upstream's `""` and `-1`. (e) Lazily computed text (cache IDs, `serialize()`) is returned owned. (f) The `getProcessor` overloads: `processor_with_names(src, dst)`, `processor_with_color_spaces`, `processor_with_display_view(src, display, view, dir)`, `processor_with_named_transform(nt, dir)`, `processor_with_named_transform_name(name, dir)`, and `processor_with_context_and_…` for each context variant. (g) `ConfigIoProxy` is a trait held as `Arc<dyn ConfigIoProxy>`. (h) The current config is `ocio::current_config()` and `set_current_config()`, over a `RwLock<Option<Arc<Config>>>`: no `arc-swap`. (i) Errors stay `ocio::Exception`; yaml-cpp's exceptions are an internal type turned into upstream's text where OCIO catches them |
 | D5 | **ExposureContrast and Grading transforms in configs** | **Wait for Phase 5.** Their classes wrap their op data (~3,000 lines with the B-spline and tone precomputations, which WP 2.4 also touches). Until then the YAML reader gives "not ported yet" for their 5 tags, and 7 config tests wait. The alternative: port the classes and op data here without renderers, so the reader and writer are complete in M1 |
 | D6 | **ConfigUtils stays in Phase 9** | Keep `GetProcessorFromConfigs`, the built-in color space processors, `Identify*`, `setColorSpaceConversion` and `concatenate` in Phase 9, as PLAN.md has it. `instantiateDisplayFrom*` waits for the ICC reader (WP 4.7) and `SystemMonitor` (Phase 9) |
-| D7 | **Retiring S1's test reader** | Once 3.7d passes the same fixtures through the real reader and writer, remove `tests/common/yaml_tree.rs`, `ocio_writer.rs` and the `saphyr-parser` dev-dependency. The checks get stronger, not weaker |
+| D7 | **Retiring S1's test reader** | Once 3.7d passes the same fixtures through the real reader and writer, remove `tests/common/yaml_tree.rs`, `ocio_writer.rs` and the `saphyr-parser` dev-dependency. The checks get stronger, not weaker. **Done** in `p3-yaml-save` (3.7d) |
 | D8 | **The corpus** (`dependency`). `corpus/` is empty | Fetch OpenColorIO-Config-ACES v1.0.0 to v4.0.0 and the legacy v1 configs (spi-vfx, spi-anim, nuke-default, aces_1.x, from imageworks/OpenColorIO-Configs) at pinned hashes, after a licence check. That is a download, so the owner or the orchestrator does it. Then O3.7 |
 | D9 | **The built-in configs' text** | Embed upstream's 8 `.ocio` files byte for byte. On Windows, return them with CRLF line endings, as the Windows wheel does (PLAN.md Appendix B), and list it as an `I-` entry |
 | D10 | **The Windows file hash** | `CreateFileContentHash` prints `_wstat`'s `st_dev`. Compute it as the UCRT does (the drive number of the full path) without FFI, and check it against the UCRT in `ocio-testkit`'s `crt.rs`. Cache IDs with file references are machine-specific on both platforms, so they are checked live only |
