@@ -9,12 +9,13 @@
 //!   `equals()` between LUTs that differ in each part;
 //! - the errors of its setters (`setGridSize`, `setValue`) and of its constructor, by their
 //!   messages, and of `getValue`;
-//! - the raw config's processor of each forward LUT: `BuildLut3DOp`, then
-//!   `CreateLut3DTransform` through `createGroupTransform()`, the values bit for bit (an
-//!   inverse LUT's default processor needs its fast forward LUT, WP 2.2e);
+//! - the raw config's processor of each LUT: `BuildLut3DOp`, then `CreateLut3DTransform`
+//!   through `createGroupTransform()`, the values bit for bit;
 //! - the optimized processors of a LUT and its inverse, which the optimizer replaces with
 //!   the LUT's identity replacement, a [0, 1] range;
-//! - the port's refusals until the inverse LUT and the composition of LUTs are ported.
+//! - the 3D LUTs the optimizer makes: an inverse LUT's fast forward LUT and the composition
+//!   of two LUTs, entry for entry. They render the forward LUTs with the CPU's SIMD kernel,
+//!   so this target is in `cpu-tests`.
 //!
 //! The pixels through the API are `api_battery_oracle.rs`'s.
 //!
@@ -27,14 +28,13 @@ mod common;
 use std::ffi::c_ulong;
 
 use common::transforms::{
-    BIT_DEPTHS, Case, bit_depth_spec, check_optimized_processors, check_processors_dirs,
-    check_text, direction_spec, group, interpolation_name, setter_errors,
+    BIT_DEPTHS, Case, bit_depth_spec, check_optimized_processors, check_optimized_processors_at,
+    check_processors_dirs, check_text, direction_spec, group, interpolation_name, setter_errors,
 };
 use ocio::{
-    BitDepth, Config, GroupTransform, Interpolation, Lut3DTransform, MatrixTransform,
-    OptimizationFlags, RangeTransform, Transform, TransformDirection,
+    BitDepth, Interpolation, Lut3DTransform, MatrixTransform, OptimizationFlags, RangeTransform,
+    Transform, TransformDirection,
 };
-use ocio_ops::ops::lut3d::lut3d_op::{NOT_PORTED_COMPOSE, NOT_PORTED_FAST_INVERSE};
 use ocio_testkit::battery::BitDepth as Depth;
 use ocio_testkit::transform_text::f64_spec;
 use serde_json::{Value, json};
@@ -446,10 +446,7 @@ fn get_value_errors_match_the_wheel() {
 
 #[test]
 fn processors_match_the_wheel() {
-    let mut cases: Vec<Case> = lut_cases()
-        .into_iter()
-        .filter(|c| c.port.direction() == Forward)
-        .collect();
+    let mut cases: Vec<Case> = lut_cases();
     cases.push(group(
         "LUTs in a group",
         Forward,
@@ -460,7 +457,7 @@ fn processors_match_the_wheel() {
                 .case("tetrahedral"),
         ],
     ));
-    check_processors_dirs(&cases, &[Forward]);
+    check_processors_dirs(&cases, &[Forward, Inverse]);
 }
 
 /// A LUT and its inverse, in either order and with either interpolation: the optimizer's
@@ -499,38 +496,133 @@ fn a_lut_and_its_inverse_optimize_to_a_range() {
     );
 }
 
-/// The CPU processors the port refuses until the fast forward LUT of an inverse 3D LUT and the
-/// composition of 3D LUTs (WP 2.2e) are ported: an inverse LUT's with the default
-/// optimization, and two LUTs' with `OPTIMIZATION_COMP_LUT3D`. Without
-/// `OPTIMIZATION_LUT_INV_FAST`, an inverse LUT renders with its exact inverse
-/// (`crates/ocio-ops/tests/lut3d_inv_oracle.rs`).
+/// A cube of `grid_size` entries per side, `f` of the identity's values, with `interp`.
+fn lut_of(
+    grid_size: c_ulong,
+    interp: Interpolation,
+    dir: TransformDirection,
+    f: impl Fn([f32; 3]) -> [f32; 3],
+) -> Lut {
+    let mut lut = Lut::new().grid(grid_size).interpolation(interp).dir(dir);
+    let last = (grid_size - 1) as f32;
+    for i in 0..grid_size {
+        for j in 0..grid_size {
+            for k in 0..grid_size {
+                let x = [i, j, k].map(|v| v as f32 / last);
+                lut = lut.value([i, j, k], f(x));
+            }
+        }
+    }
+    lut
+}
+
+/// Smooth and invertible, with some crosstalk.
+fn smooth([r, g, b]: [f32; 3]) -> [f32; 3] {
+    let curve = |c: f32| 0.06 + 0.88 * (0.6 * c * c + 0.4 * c);
+    [
+        curve(r) + 0.03 * (g - b),
+        curve(g) + 0.03 * (b - r),
+        curve(b) + 0.03 * (r - g),
+    ]
+}
+
+/// Folded: not invertible, and partly outside [0, 1].
+fn folded([r, g, b]: [f32; 3]) -> [f32; 3] {
+    [1.5 * g - 0.25, (r - b).abs(), 1.0 - r * g]
+}
+
+/// Each channel rounded down to a quarter: flat areas.
+fn quantized(x: [f32; 3]) -> [f32; 3] {
+    x.map(|c| (c * 4.0).floor() / 4.0)
+}
+
+/// The optimizer's 3D LUTs, entry for entry (the optimized processors' `getData`, and their
+/// cache IDs, which hash the values): an inverse LUT's fast forward LUT
+/// (`MakeFastLut3DFromInverse`, src/OpenColorIO/ops/lut3d/Lut3DOpData.cpp:29-58 @ v2.5.2) on
+/// the default domain of 48 entries per side and on a larger LUT's own, with its file output
+/// bit depth; and compositions of two LUTs (`Lut3DOpData::Compose`, 60-153, through
+/// `Lut3DOp::combineWith`): forward, smaller then larger and the reverse, with an inverse first,
+/// second or both, at `OPTIMIZATION_GOOD` (the inverse LUTs replaced by their fast forward LUTs
+/// first) and at `OPTIMIZATION_LOSSLESS | OPTIMIZATION_COMP_LUT3D` (composed through their exact
+/// inverse). The forward LUTs render with the SIMD kernel the CPU dispatches to: this target is
+/// in `cpu-tests`.
 #[test]
-fn not_ported_yet_refusals() {
-    let config = Config::create_raw().expect("the raw config");
-    let message = |transform: Transform, flags: OptimizationFlags| {
-        config
-            .processor(&transform)
-            .expect("a processor")
-            .optimized_cpu_processor(flags)
-            .map(|_| ())
-            .map_err(|e| e.message().to_string())
-    };
-    let inverse: Transform = curves(Lut::new().dir(Inverse), 3).port.into();
-    let default = OptimizationFlags::DEFAULT;
-    assert_eq!(
-        message(inverse.clone(), default),
-        Err(NOT_PORTED_FAST_INVERSE.to_string())
+fn optimized_luts_match_the_wheel() {
+    use Interpolation::{Default as D, Linear as L, Tetrahedral as T};
+    let case = |label: &str, lut: Lut| lut.case(label.to_string());
+    let inverses = vec![
+        case("smooth 5^3", lut_of(5, T, Inverse, smooth)),
+        case("smooth 17^3, linear", lut_of(17, L, Inverse, smooth)),
+        case("quantized 9^3", lut_of(9, T, Inverse, quantized)),
+        case("folded 4^3", lut_of(4, D, Inverse, folded)),
+        case(
+            "smooth 5^3, 10-bit file depth",
+            lut_of(5, T, Inverse, smooth).depth(BitDepth::Uint10),
+        ),
+        case("smooth 49^3", lut_of(49, T, Inverse, smooth)),
+    ];
+    check_optimized_processors(&inverses, &[(Depth::F32, Depth::F32)]);
+
+    let pair =
+        |label: &str, a: Lut, b: Lut| group(label, Forward, &[a.case("first"), b.case("second")]);
+    let pairs = vec![
+        pair(
+            "3^3 then 5^3",
+            lut_of(3, L, Forward, folded),
+            lut_of(5, T, Forward, smooth),
+        ),
+        pair(
+            "5^3 then 3^3",
+            lut_of(5, T, Forward, smooth),
+            lut_of(3, L, Forward, folded),
+        ),
+        pair(
+            "17^3 twice",
+            lut_of(17, T, Forward, smooth),
+            lut_of(17, D, Forward, quantized),
+        ),
+        // Equal sizes keep the first LUT's own values (`lut1->clone()`), NaN and infinities
+        // included, which the second LUT's renderer then meets as inputs.
+        pair(
+            "3^3 with a NaN and an infinity, then 3^3",
+            lut_of(3, T, Forward, smooth)
+                .value([1, 1, 1], [f32::NAN, 0.5, f32::INFINITY])
+                .value([0, 2, 1], [-f32::INFINITY, 0.25, 0.75]),
+            lut_of(3, L, Forward, folded),
+        ),
+        pair(
+            "inverse 5^3 then 3^3",
+            lut_of(5, T, Inverse, smooth),
+            lut_of(3, L, Forward, folded),
+        ),
+        pair(
+            "3^3 then inverse 5^3",
+            lut_of(3, L, Forward, folded),
+            lut_of(5, T, Inverse, smooth),
+        ),
+        pair(
+            "inverse 4^3 then inverse 6^3",
+            lut_of(4, T, Inverse, quantized),
+            lut_of(6, L, Inverse, smooth),
+        ),
+        pair(
+            "inverse 6^3 then inverse 4^3",
+            lut_of(6, L, Inverse, smooth),
+            lut_of(4, T, Inverse, quantized),
+        ),
+    ];
+    let good = OptimizationFlags::GOOD;
+    check_optimized_processors_at(
+        &pairs,
+        &[(Depth::F32, Depth::F32)],
+        &json!("OPTIMIZATION_GOOD"),
+        good,
     );
-    let exact = OptimizationFlags(default.0 & !OptimizationFlags::LUT_INV_FAST.0);
-    assert_eq!(message(inverse, exact), Ok(()));
-    let mut two = GroupTransform::new();
-    two.append_transform(curves(Lut::new(), 3).port.into());
-    two.append_transform(curves(Lut::new(), 5).port.into());
-    let composing = OptimizationFlags(default.0 | OptimizationFlags::COMP_LUT3D.0);
-    assert_eq!(
-        message(two.clone().into(), composing),
-        Err(NOT_PORTED_COMPOSE.to_string())
+    let exact = OptimizationFlags(OptimizationFlags::LOSSLESS.0 | OptimizationFlags::COMP_LUT3D.0);
+    check_optimized_processors_at(
+        &pairs,
+        &[(Depth::F32, Depth::F32)],
+        &json!(["OPTIMIZATION_LOSSLESS", "OPTIMIZATION_COMP_LUT3D"]),
+        exact,
     );
-    // Without the flag, the two LUTs stay.
-    assert_eq!(message(two.into(), default), Ok(()));
 }

@@ -1166,6 +1166,27 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   the battery of `crates/ocio-ops/tests/lut3d_inv_oracle.rs` checks random LUTs (values in
   [-0.5, 1.5)), LUTs with NaNs and infinities, and LUTs with one NaN.
 
+### I-156. The fast inverse of a 3D LUT is a trilinear cube of 48 entries over [0, 1]
+
+- **Upstream:** with `OPTIMIZATION_LUT_INV_FAST` (in every level from `VERY_GOOD` down, the
+  default included), an inverse 3D LUT becomes a forward one: the exact inverse sampled on an
+  identity of 48 entries per side, or of the LUT's own size when larger
+  (`MakeFastLut3DFromInverse`, `ops/lut3d/Lut3DOpData.cpp:29-58` @ v2.5.2, and `Compose`,
+  60-153). The cube keeps the identity's `INTERP_DEFAULT`, so it renders trilinear, though
+  the exact inverse inverts the tetrahedral forward LUT (the code that would make it
+  tetrahedral is commented out, "it does not seem to help accuracy"); and its domain is
+  [0, 1], so values outside it clamp ("TODO: The FastLut will limit inputs to [0,1]").
+  Upstream's own test needs a tolerance of 0.015 for a round trip through it
+  (`Lut3DOp_tests.cpp`, `cpu_renderer_inverse`).
+- **Who notices:** every inverse 3D LUT at the default optimization (CPU and GPU), whose
+  results differ from the exact inverse by up to about a hundredth, and more for colors
+  outside [0, 1].
+- **A fix:** a larger or tetrahedral cube, or the LUT's own output range as its domain; each
+  changes those results.
+- **Status:** matched in `p2-lut3d-inv` (2.2e), `make_fast_lut3d_from_inverse`;
+  `optimized_luts_match_the_wheel` (`crates/ocio/tests/lut3d_transform_oracle.rs`) compares
+  the cubes entry for entry, and the API battery and format sweep the pixels.
+
 ## Transforms
 
 ### I-11. Copying a group transform shares its children

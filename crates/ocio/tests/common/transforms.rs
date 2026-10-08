@@ -741,6 +741,22 @@ pub(crate) fn dump_transform(transform: &Transform) -> (String, BTreeMap<String,
 /// ([`port_processors`]): the processors' cache IDs and flags, and every getter, a LUT's values
 /// bit for bit. Returns, per case, how many of its optimized processors hold a Lut1DTransform.
 pub(crate) fn check_optimized_processors(cases: &[Case], depths: &[(Depth, Depth)]) -> Vec<usize> {
+    check_optimized_processors_at(
+        cases,
+        depths,
+        &json!("OPTIMIZATION_DEFAULT"),
+        OptimizationFlags::DEFAULT,
+    )
+}
+
+/// [`check_optimized_processors`] with the optimization flags `flags`, `oracle_flags` as the
+/// oracle names them (a flag's name, or a list of names).
+pub(crate) fn check_optimized_processors_at(
+    cases: &[Case],
+    depths: &[(Depth, Depth)],
+    oracle_flags: &Value,
+    flags: OptimizationFlags,
+) -> Vec<usize> {
     let requests: Vec<(usize, Depth, Depth, ProcessorOpsRequest)> = cases
         .iter()
         .enumerate()
@@ -751,7 +767,7 @@ pub(crate) fn check_optimized_processors(cases: &[Case], depths: &[(Depth, Depth
                 );
                 request.in_bitdepth = Some(input);
                 request.out_bitdepth = Some(output);
-                request.optimization = Some(json!("OPTIMIZATION_DEFAULT"));
+                request.optimization = Some(oracle_flags.clone());
                 (k, input, output, request)
             })
         })
@@ -773,11 +789,7 @@ pub(crate) fn check_optimized_processors(cases: &[Case], depths: &[(Depth, Depth
             &config,
             &case.port,
             TransformDirection::Forward,
-            (
-                port_depth(*input),
-                port_depth(*output),
-                OptimizationFlags::DEFAULT,
-            ),
+            (port_depth(*input), port_depth(*output), flags),
         );
         let outcome = compare_reply(&reply, &port);
         if let Some(failure) = outcome {

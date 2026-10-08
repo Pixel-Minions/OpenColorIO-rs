@@ -201,8 +201,11 @@ fn builtin_transform_through_the_api_matches_the_wheel() {
     ));
 }
 
-/// Forward only until the inverse 3D LUT is ported (WP 2.2d, 2.2e).
 #[test]
 fn lut3d_transform_through_the_api_matches_the_wheel() {
-    battery::run(&ApiFamily::new("Lut3DTransform", api_cases::lut3d()).forward_only());
+    battery::run(&ApiFamily::new("Lut3DTransform", api_cases::lut3d()));
+    // Forward only: the inverse of a cube of one entry never returns in the wheel (U-65).
+    battery::run(
+        &ApiFamily::new("Lut3DTransform (one entry)", api_cases::lut3d_one_entry()).forward_only(),
+    );
 }

@@ -1069,12 +1069,13 @@ pub(crate) fn lut3d_calls(
     calls.enumerated("setInterpolation", interpolation)
 }
 
-/// `Lut3DTransform`, forward only (the inverse LUT's renderer and fast forward LUT are WP
-/// 2.2d and 2.2e): smooth and folded cubes of 2 to 17 entries per side in each interpolation,
-/// the default cube of 1 entry per side (a NaN identity, I-152), and groups of a LUT and its
-/// inverse in either order, which the optimizer replaces with a [0, 1] range
-/// (`OPTIMIZATION_PAIR_IDENTITY_LUT3D`, `Lut3DOpData::getIdentityReplacement`), and of two
-/// LUTs, which it leaves (`OPTIMIZATION_COMP_LUT3D` isn't in the default).
+/// `Lut3DTransform`: smooth and folded cubes of 2 to 17 entries per side in each
+/// interpolation, and groups of a LUT and its inverse in either order, which the optimizer
+/// replaces with a [0, 1] range (`OPTIMIZATION_PAIR_IDENTITY_LUT3D`,
+/// `Lut3DOpData::getIdentityReplacement`), and of two LUTs, which it composes where the level
+/// has `OPTIMIZATION_COMP_LUT3D`. An inverse LUT renders with its fast forward LUT
+/// (`OPTIMIZATION_LUT_INV_FAST`), or without the flag with its exact inverse. The cube of one
+/// entry is [`lut3d_one_entry`]'s.
 pub(crate) fn lut3d() -> Cases {
     let smooth = |[r, g, b]: [f32; 3]| [r * r * 0.9 + 0.05, g.sqrt(), 0.2 + 0.6 * b + 0.1 * r];
     let folded = |[r, g, b]: [f32; 3]| [1.5 * g - 0.25, (r - b).abs(), 1.0 - r * g];
@@ -1102,10 +1103,6 @@ pub(crate) fn lut3d() -> Cases {
         Case::new(
             "smooth 17^3, INTERP_TETRAHEDRAL",
             lut3d_calls(17, "INTERP_TETRAHEDRAL", smooth),
-        ),
-        Case::new(
-            "the default cube of 1 entry",
-            Calls::new("Lut3DTransform").fixed("setGridSize", serde_json::json!(1)),
         ),
     ]);
     let group = || Calls::new("GroupTransform");
@@ -1136,6 +1133,18 @@ pub(crate) fn lut3d() -> Cases {
     ));
     Cases {
         cases,
+        bases: Vec::new(),
+    }
+}
+
+/// The `Lut3DTransform` of one entry per side, the default cube (a NaN identity, I-152), for
+/// the forward direction only: its inverse never returns in the wheel (U-65).
+pub(crate) fn lut3d_one_entry() -> Cases {
+    Cases {
+        cases: vec![Case::new(
+            "the default cube of 1 entry",
+            Calls::new("Lut3DTransform").fixed("setGridSize", serde_json::json!(1)),
+        )],
         bases: Vec::new(),
     }
 }

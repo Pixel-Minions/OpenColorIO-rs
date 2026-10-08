@@ -231,8 +231,9 @@ impl Family for Lut3DFamily {
             .collect()
     }
     fn directions(&self) -> Vec<Direction> {
-        // The inverse LUT's fast forward LUT is WP 2.2e's; its exact renderer is checked in
-        // `lut3d_inv_oracle.rs`.
+        // The inverse LUT's exact renderer is checked in `lut3d_inv_oracle.rs`, its fast
+        // forward LUT (a forward LUT these renderers render) in `ocio`'s
+        // `lut3d_transform_oracle.rs`, `api_battery_oracle.rs` and `api_formats_oracle.rs`.
         vec![Direction::Forward]
     }
     fn spec(&self, lut: &Lut3D, _direction: Direction) -> Spec {
