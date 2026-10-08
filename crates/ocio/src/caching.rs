@@ -220,3 +220,13 @@ impl<K, V> std::ops::Deref for ProcessorCache<K, V> {
 #[cfg(test)]
 #[path = "caching_tests.rs"]
 mod tests;
+
+/// Empties the caches of files: the paths' file hashes
+/// ([`crate::path_utils::clear_path_caches`]). Upstream also empties the file transforms'
+/// caches of LUT files, which the port doesn't have until their readers (Phase 4).
+///
+/// Port of `ClearAllCaches` (src/OpenColorIO/Caching.cpp:24-28 @ v2.5.2).
+#[doc(alias = "ClearAllCaches")]
+pub fn clear_all_caches() {
+    crate::path_utils::clear_path_caches();
+}

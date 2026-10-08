@@ -2,9 +2,8 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Tests of the built-in configs: `tests/cpu/builtinconfigs/BuiltinConfig_tests.cpp` @ v2.5.2.
-//! `create_builtin_config` reads them through `Config::CreateFromEnv` and
-//! `Config::CreateFromFile` too, and comes with them (WP 3.10b). The registry's texts, names
-//! and flags are compared with the wheel's in `tests/builtin_configs_oracle.rs`.
+//! The registry's texts, names and flags are compared with the wheel's in
+//! `tests/builtin_configs_oracle.rs`.
 
 use ocio_testkit::upstream::check_throw_what;
 
@@ -20,6 +19,8 @@ use super::studio::{
     STUDIO_CONFIG_V220_ACES_V13_OCIO_V24, STUDIO_CONFIG_V400_ACES_V20_OCIO_V25,
 };
 use super::{embedded_len, embedded_text};
+use crate::config::Config;
+use crate::test_env::EnvGuard;
 
 /// Port of `OCIO_ADD_TEST(BuiltinConfigs, basic)` @ v2.5.2.
 #[test]
@@ -287,4 +288,252 @@ fn embedded_texts_end_lines_as_the_wheel_of_the_platform() {
     let expected: &[u8] = if cfg!(windows) { CRLF } else { LF };
     assert_eq!(from_lf, expected);
     assert_eq!(from_crlf, expected);
+}
+
+/// `config.validate()` under upstream's `LogGuard`, with the messages of the initial CG
+/// config's inactive color spaces muted (`muteInactiveColorspaceInfo`); the rest is printed
+/// (`logGuard.print()`).
+fn validate_muted(config: &Config) {
+    let (result, log) = crate::test_env::capture_log(|| config.validate());
+    result.unwrap();
+    let mut log = log.concat();
+    crate::test_env::mute_inactive_colorspace_info(&mut log);
+    print!("{}", String::from_utf8_lossy(&log));
+}
+
+/// Port of `OCIO_ADD_TEST(BuiltinConfigs, create_builtin_config)` @ v2.5.2.
+#[test]
+fn create_builtin_config() {
+    let env = EnvGuard::new();
+
+    let test_from_builtin_config =
+        |name: &str, number_of_expected_colorspaces: i32, expected_config_name: &str| {
+            // Testing CreateFromBuiltinConfig with a known built-in config name.
+
+            let config = Config::create_from_builtin_config(name).unwrap();
+
+            validate_muted(&config);
+
+            assert_eq!(
+                config.name(),
+                if expected_config_name.is_empty() {
+                    name
+                } else {
+                    expected_config_name
+                }
+                .as_bytes(),
+                "{name}"
+            );
+            assert_eq!(
+                config.num_color_spaces(),
+                number_of_expected_colorspaces,
+                "{name}"
+            );
+        };
+
+    let test_from_env_and_from_file =
+        |uri: &str, number_of_expected_colorspaces: i32, expected_config_name: &str| {
+            {
+                // Testing CreateFromEnv using URI Syntax.
+
+                env.set(&[("OCIO", uri)]);
+
+                let config = Config::create_from_env().unwrap();
+
+                validate_muted(&config);
+
+                if !expected_config_name.is_empty() {
+                    assert_eq!(config.name(), expected_config_name.as_bytes(), "{uri}");
+                }
+                assert_eq!(
+                    config.num_color_spaces(),
+                    number_of_expected_colorspaces,
+                    "{uri}"
+                );
+                env.set(&[]);
+            }
+
+            {
+                // Testing CreateFromFile using URI Syntax.
+
+                let config = Config::create_from_file(uri).unwrap();
+
+                let (result, log) = crate::test_env::capture_log(|| config.validate());
+                result.unwrap();
+                let mut log = log.concat();
+                crate::test_env::mute_inactive_colorspace_info(&mut log);
+
+                if !expected_config_name.is_empty() {
+                    assert_eq!(config.name(), expected_config_name.as_bytes(), "{uri}");
+                }
+                assert_eq!(
+                    config.num_color_spaces(),
+                    number_of_expected_colorspaces,
+                    "{uri}"
+                );
+            }
+        };
+
+    let uri_prefix = OCIO_BUILTIN_URI_PREFIX;
+    let default_name = "default";
+    let latest_cg_name = "cg-config-latest";
+    let latest_studio_name = "studio-config-latest";
+
+    // Test that CreateFromFile does not work without ocio:// prefix for built-in config.
+    check_throw_what(
+        Config::create_from_file("cg-config-v1.0.0_aces-v1.3_ocio-v2.1"),
+        "Error could not read 'cg-config-v1.0.0_aces-v1.3_ocio-v2.1' OCIO profile.",
+    );
+
+    {
+        let cg_config_name = "cg-config-v1.0.0_aces-v1.3_ocio-v2.1";
+        let studio_config_name = "studio-config-v1.0.0_aces-v1.3_ocio-v2.1";
+        // Test CG builtin config #1
+        let nb_of_colorspaces_for_cg_config1 = 14;
+        test_from_builtin_config(cg_config_name, nb_of_colorspaces_for_cg_config1, "");
+        test_from_env_and_from_file(
+            &format!("{uri_prefix}{cg_config_name}"),
+            nb_of_colorspaces_for_cg_config1,
+            cg_config_name,
+        );
+
+        // Test STUDIO builtin config #1
+        let nb_of_colorspaces_for_studio_config1 = 39;
+        test_from_builtin_config(studio_config_name, nb_of_colorspaces_for_studio_config1, "");
+        test_from_env_and_from_file(
+            &format!("{uri_prefix}{studio_config_name}"),
+            nb_of_colorspaces_for_studio_config1,
+            studio_config_name,
+        );
+    }
+
+    {
+        let cg_config_name = "cg-config-v2.1.0_aces-v1.3_ocio-v2.3";
+        let studio_config_name = "studio-config-v2.1.0_aces-v1.3_ocio-v2.3";
+        // Test CG builtin config #2
+        let nb_of_colorspaces_for_cg_config1 = 15;
+        test_from_builtin_config(cg_config_name, nb_of_colorspaces_for_cg_config1, "");
+        test_from_env_and_from_file(
+            &format!("{uri_prefix}{cg_config_name}"),
+            nb_of_colorspaces_for_cg_config1,
+            cg_config_name,
+        );
+
+        // Test STUDIO builtin config #2
+        let nb_of_colorspaces_for_studio_config1 = 41;
+        test_from_builtin_config(studio_config_name, nb_of_colorspaces_for_studio_config1, "");
+        test_from_env_and_from_file(
+            &format!("{uri_prefix}{studio_config_name}"),
+            nb_of_colorspaces_for_studio_config1,
+            studio_config_name,
+        );
+    }
+
+    {
+        let cg_config_name = "cg-config-v2.2.0_aces-v1.3_ocio-v2.4";
+        let studio_config_name = "studio-config-v2.2.0_aces-v1.3_ocio-v2.4";
+        // Test CG builtin config #3
+        let nb_of_colorspaces_for_cg_config1 = 23;
+        test_from_builtin_config(cg_config_name, nb_of_colorspaces_for_cg_config1, "");
+        test_from_env_and_from_file(
+            &format!("{uri_prefix}{cg_config_name}"),
+            nb_of_colorspaces_for_cg_config1,
+            cg_config_name,
+        );
+
+        // Test STUDIO builtin config #3
+        let nb_of_colorspaces_for_studio_config1 = 54;
+        test_from_builtin_config(studio_config_name, nb_of_colorspaces_for_studio_config1, "");
+        test_from_env_and_from_file(
+            &format!("{uri_prefix}{studio_config_name}"),
+            nb_of_colorspaces_for_studio_config1,
+            studio_config_name,
+        );
+    }
+
+    {
+        // Test default config.
+        let nb_of_colorspaces_for_default_cg_config = 25;
+        let nb_of_colorspaces_for_default_studio_config = 55;
+        let expected_cg_name = "cg-config-v4.0.0_aces-v2.0_ocio-v2.5";
+        let expected_studio_name = "studio-config-v4.0.0_aces-v2.0_ocio-v2.5";
+
+        test_from_builtin_config(
+            default_name,
+            nb_of_colorspaces_for_default_cg_config,
+            expected_cg_name,
+        );
+        test_from_builtin_config(
+            &format!("{uri_prefix}{default_name}"),
+            nb_of_colorspaces_for_default_cg_config,
+            expected_cg_name,
+        );
+        test_from_env_and_from_file(
+            &format!("{uri_prefix}{default_name}"),
+            nb_of_colorspaces_for_default_cg_config,
+            expected_cg_name,
+        );
+
+        // Test cg-config-latest.
+        test_from_builtin_config(
+            latest_cg_name,
+            nb_of_colorspaces_for_default_cg_config,
+            expected_cg_name,
+        );
+        test_from_builtin_config(
+            &format!("{uri_prefix}{latest_cg_name}"),
+            nb_of_colorspaces_for_default_cg_config,
+            expected_cg_name,
+        );
+        test_from_env_and_from_file(
+            &format!("{uri_prefix}{latest_cg_name}"),
+            nb_of_colorspaces_for_default_cg_config,
+            expected_cg_name,
+        );
+
+        // Test studio-config-latest.
+        test_from_builtin_config(
+            latest_studio_name,
+            nb_of_colorspaces_for_default_studio_config,
+            expected_studio_name,
+        );
+        test_from_builtin_config(
+            &format!("{uri_prefix}{latest_studio_name}"),
+            nb_of_colorspaces_for_default_studio_config,
+            expected_studio_name,
+        );
+        test_from_env_and_from_file(
+            &format!("{uri_prefix}{latest_studio_name}"),
+            nb_of_colorspaces_for_default_studio_config,
+            expected_studio_name,
+        );
+    }
+
+    // ********************************
+    // Test some expected failures.
+    // ********************************
+
+    // Test CreateFromBuiltinConfig with an unknown built-in config name.
+    check_throw_what(
+        Config::create_from_builtin_config("I-do-not-exist"),
+        "Could not find 'I-do-not-exist' in the built-in configurations.",
+    );
+
+    // Test CreateFromFile with an unknown built-in config name using URI syntax.
+    check_throw_what(
+        Config::create_from_file("ocio://I-do-not-exist"),
+        "Could not find 'I-do-not-exist' in the built-in configurations.",
+    );
+
+    {
+        // Testing CreateFromEnv with an unknown built-in config.
+
+        env.set(&[("OCIO", "ocio://thedefault")]);
+
+        check_throw_what(
+            Config::create_from_env(),
+            "Could not find 'thedefault' in the built-in configurations.",
+        );
+        env.set(&[]);
+    }
 }
