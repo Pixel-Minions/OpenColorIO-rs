@@ -93,4 +93,4 @@ Shared facts:
    - Also emit hand-built event streams for the cases the configs don't cover: empty containers, special characters needing quotes, multi-line descriptions, long lines, non-ASCII, `.inf`/`.nan`. Their expected text must come from the oracle: add a `yaml_emit` probe that builds the same content through a real OCIO config and serializes it.
 4. **Report** anything in yaml-cpp's behavior that OCIO depends on and that is surprising.
 
-**Done when:** as S2, with the report in `docs/spikes/s1-wp05.md`. New dependencies (e.g. `saphyr-parser`) are pinned exactly in the root `Cargo.toml`.
+**Done when:** as S2, with the report in `docs/spikes/s1-wp05.md`. New dependencies (e.g. `saphyr-parser`) are pinned exactly in the root `Cargo.toml`. (`saphyr-parser` was removed in Phase 3, 3.7d, when the S1 tests moved to the port's reader and writer: owner item D7.)
