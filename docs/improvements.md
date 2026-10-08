@@ -538,9 +538,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 
 - **Upstream:** the loaders of color spaces, looks, view transforms and the config read a
   description with `loadDescription`, which drops its trailing newlines (`SanitizeNewlines`);
-  the named transform's loader (`OCIOYaml.cpp:3965-3969`) and the view's, for displays and
-  shared views (`OCIOYaml.cpp:452-455`), read it as a plain string, so `"d\n\n"` stays `d` and
-  two newlines. Seen through the wheel.
+  the named transform's loader (`OCIOYaml.cpp:3965-3969`) and the view's, for displays, shared
+  views and the virtual display (`OCIOYaml.cpp:452-455`), read it as a plain string, so
+  `"d\n\n"` stays `d` and two newlines. Seen through the wheel.
 - **Who notices:** configs whose named transforms or views have descriptions ending in newlines
   (a literal block `|` adds one).
 - **A fix:** read them with `loadDescription`, as the others.
