@@ -7,3 +7,6 @@
 [submodule "upstream/yaml-cpp"]
 	path = upstream/yaml-cpp
 	url = https://github.com/jbeder/yaml-cpp
+[submodule "upstream/expat"]
+	path = upstream/expat
+	url = https://github.com/libexpat/libexpat
