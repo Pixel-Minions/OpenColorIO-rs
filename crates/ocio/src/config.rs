@@ -652,6 +652,24 @@ impl Config {
         Config::read(istream, None)
     }
 
+    /// The config's YAML text: checked against its version
+    /// ([`Config::check_version_consistency`]), then written (`OCIOYaml::Write`). Either's
+    /// error is "Error building YAML: " and its message. It is also the config's text as
+    /// upstream's `operator<<` writes it.
+    ///
+    /// Port of `Config::serialize(std::ostream&)` (src/OpenColorIO/Config.cpp:5317-5331 @
+    /// v2.5.2) and `operator<<(std::ostream&, const Config&)` (Config.cpp:5236-5240), into a
+    /// buffer: upstream writes nothing to the stream when it fails.
+    pub fn serialize(&self) -> Result<Vec<u8>> {
+        self.check_version_consistency()
+            .and_then(|()| crate::ocio_yaml::write(self))
+            .map_err(|e| {
+                let mut error = b"Error building YAML: ".to_vec();
+                error.extend_from_slice(e.what());
+                Exception::new(error)
+            })
+    }
+
     /// A new config ([`Config::new`]) read from the YAML text `input` (`OCIOYaml::Read`), checked
     /// against its version ([`Config::check_version_consistency`]), then its inactive color
     /// spaces refreshed from the config's and the environment's lists only: what the reader set

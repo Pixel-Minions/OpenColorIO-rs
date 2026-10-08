@@ -302,3 +302,39 @@ fn transforms_save_in_version_1_as_in_the_wheel() {
         ],
     );
 }
+
+/// A class without a saver: serializing a config whose color space holds a `Lut1DTransform`
+/// fails with the dispatch's message, as `Config::serialize` wraps it, in the wheel too.
+#[test]
+fn a_config_with_a_lut1d_transform_is_not_serialized() {
+    let _env = crate::test_env::EnvGuard::new();
+    let mut config = (*Config::create_raw().unwrap()).clone();
+    let mut cs = ColorSpace::new();
+    cs.set_name("lut");
+    let t = Transform::from(crate::transforms::lut1d_transform::Lut1DTransform::new());
+    cs.set_transform(Some(&t), ColorSpaceDirection::ToReference)
+        .unwrap();
+    config.add_color_space(&cs).unwrap();
+    let e = config.serialize().unwrap_err();
+
+    let r = Oracle::get()
+        .call(
+            "config_calls",
+            json!({"config": "raw", "calls": [
+                {"new": "Lut1DTransform", "as": "t"},
+                {"new": "ColorSpace", "as": "cs"},
+                {"call": "setName", "on": "cs", "args": ["lut"]},
+                {"call": "setTransform", "on": "cs",
+                 "args": [{"ref": "t"}, {"enum": "COLORSPACE_DIR_TO_REFERENCE"}]},
+                {"call": "addColorSpace", "args": [{"ref": "cs"}]},
+                {"call": "serialize"},
+            ]}),
+            &[],
+        )
+        .result;
+    let wheel = bytes(&r["calls"][5]["exception"]["message"]);
+    assert_eq!(
+        String::from_utf8_lossy(e.what()),
+        String::from_utf8_lossy(&wheel)
+    );
+}
