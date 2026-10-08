@@ -590,6 +590,39 @@ impl Config {
         Ok(Arc::new(config))
     }
 
+    /// A config read from the YAML text `istream`, or the reader's error, "Error: Loading the
+    /// OCIO profile failed. ..." (see [`Config::read`]).
+    ///
+    /// Port of `Config::CreateFromStream` (src/OpenColorIO/Config.cpp:1209-1212 @ v2.5.2).
+    #[doc(alias = "CreateFromStream")]
+    pub fn create_from_stream(istream: &[u8]) -> Result<Arc<Config>> {
+        Config::read(istream, None)
+    }
+
+    /// A new config ([`Config::new`]) read from the YAML text `input` (`OCIOYaml::Read`), then
+    /// its inactive color spaces refreshed from the config's and the environment's lists only:
+    /// what the reader set through the API doesn't supersede them. `filename` is the config's
+    /// file (`None`, a null pointer, for a stream).
+    ///
+    /// Upstream checks the config's transforms and keys against its version between the two
+    /// (`checkVersionConsistency`), which comes with the validation (WP 3.8c): until then the
+    /// port loads configs that use what their version doesn't allow.
+    ///
+    /// Port of `Config::Impl::Read(std::istream&, const char*)` (src/OpenColorIO/
+    /// Config.cpp:5548-5562 @ v2.5.2).
+    pub(crate) fn read(input: &[u8], filename: Option<&[u8]>) -> Result<Arc<Config>> {
+        let mut config = Config::new()?;
+        crate::ocio_yaml::read(input, &mut config, filename)?;
+
+        // An API request always supersedes the env. variable. As the OCIOYaml helper methods
+        // use the Config public API, the variable reset highlights that only the
+        // env. variable and the config contents are valid after a config file read.
+        config.inactive_color_space_names_api.clear();
+        config.refresh_active_color_spaces();
+
+        Ok(Arc::new(config))
+    }
+
     /// Port of `Config::getMajorVersion` (src/OpenColorIO/Config.cpp:1280-1283 @ v2.5.2).
     #[doc(alias = "getMajorVersion")]
     pub fn major_version(&self) -> u32 {
