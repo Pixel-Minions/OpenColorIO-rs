@@ -10,5 +10,6 @@ pub mod gamma;
 pub mod gradingrgbcurve;
 pub mod log;
 pub mod lut1d;
+pub mod lut3d;
 pub mod matrix;
 pub mod range;

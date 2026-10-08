@@ -9,10 +9,10 @@
 //! `getDefaultGPUProcessor()`, or `getOptimizedGPUProcessor` with `OPTIMIZATION_NONE`,
 //! `LOSSLESS`, `VERY_GOOD`, `GOOD`, `DRAFT` or `DEFAULT`. The GPU processor's cache ID and
 //! queries must be the wheel's, and so must the shader the extraction writes into a
-//! `GpuShaderDesc` of each language: its text, cache ID and names, its textures (every value's
-//! bits: ACES 2.0's tables, and the 1D LUTs' since WP 2.1h), and its uniforms, 3D textures and
-//! dynamic properties, of which these classes have none. Or both must raise the same message
-//! at the same stage.
+//! `GpuShaderDesc` of each language: its text, cache ID and names, its textures (ACES 2.0's
+//! tables, and the 1D LUTs' since WP 2.1h) and 3D textures (the 3D LUTs) with their values'
+//! bits, and its uniforms and dynamic properties, of which these classes have none. Or both
+//! must raise the same message at the same stage.
 
 mod common;
 
@@ -189,12 +189,34 @@ fn wheel(reply: &GpuShaderReply) -> Outcome {
                 "resource_prefix": shader.getters["resource_prefix"],
                 "uniforms": shader.uniforms.len(),
                 "textures": shader.textures.iter().map(texture_json).collect::<Vec<_>>(),
-                "textures_3d": shader.textures_3d.len(),
+                "textures_3d": shader.textures_3d.iter().map(|t| json!({
+                    "name": t.name, "sampler_name": t.sampler_name, "edge_len": t.edge_len,
+                    "interpolation": t.interpolation, "binding_index": t.binding_index,
+                    "values": t.values.iter().map(|v| v.to_bits()).collect::<Vec<u32>>(),
+                })).collect::<Vec<Value>>(),
                 "dynamic_properties": shader.dynamic_properties.len(),
             }))
         }
     };
     Outcome::Gpu { processor, shader }
+}
+
+/// The port's 3D texture `index`, as the wheel's outcome lists one (its values by their bits).
+fn port_texture_3d(desc: &GpuShaderDesc, index: u32) -> Value {
+    let t = desc.texture_3d(index).expect("a 3D texture");
+    let text = |bytes: &[u8]| String::from_utf8(bytes.to_vec()).expect("UTF-8");
+    json!({
+        "name": text(t.texture_name()),
+        "sampler_name": text(t.sampler_name()),
+        "edge_len": t.edge_len(),
+        "interpolation": match t.interpolation() {
+            Interpolation::Nearest => "INTERP_NEAREST",
+            Interpolation::Linear => "INTERP_LINEAR",
+            other => panic!("interpolation {other:?}"),
+        },
+        "binding_index": desc.texture_3d_shader_binding_index(index).expect("its binding"),
+        "values": t.values().iter().map(|v| v.to_bits()).collect::<Vec<u32>>(),
+    })
 }
 
 /// The port's outcome for `job`.
@@ -245,7 +267,7 @@ fn port(class: &Class, job: &Job, calls: &Calls) -> Outcome {
                 "textures": (0..desc.num_textures())
                     .map(|i| texture_json(&port_texture(&desc, i)))
                     .collect::<Vec<_>>(),
-                "textures_3d": desc.num_textures_3d(),
+                "textures_3d": (0..desc.num_textures_3d()).map(|i| port_texture_3d(&desc, i)).collect::<Vec<Value>>(),
                 "dynamic_properties": desc.num_dynamic_properties(),
             })
         })
@@ -283,10 +305,7 @@ fn check(class: &Class) {
             }
             match wheel {
                 Outcome::Gpu { shader: Ok(s), .. } => {
-                    assert!(
-                        s["uniforms"] == 0 && s["textures_3d"] == 0,
-                        "{what}: compare the uniforms and 3D textures too: {s}"
-                    );
+                    assert!(s["uniforms"] == 0, "{what}: compare the uniforms too: {s}");
                     compared += 1;
                 }
                 _ => refusals += 1,
@@ -368,6 +387,12 @@ fn group_transform_shaders_match_the_wheel() {
 #[test]
 fn lut1d_transform_shaders_match_the_wheel() {
     check(&Class::new("Lut1DTransform", api_cases::lut1d()));
+}
+
+/// The cube of one entry is left out: its inverse never returns in the wheel (U-65).
+#[test]
+fn lut3d_transform_shaders_match_the_wheel() {
+    check(&Class::new("Lut3DTransform", api_cases::lut3d()));
 }
 
 #[test]
