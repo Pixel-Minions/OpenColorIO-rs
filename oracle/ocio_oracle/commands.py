@@ -53,20 +53,35 @@ def captured_log():
 # Lut3DTransform.setData's "Incompatible buffer dimensions"). Every command reports them as
 # {"exception": exception_result(exc), "stage": ...}; anything else the oracle raises refuses
 # the request, and so do Python's own subclasses of RuntimeError (wheel_raised).
-RAISED = (OCIO.Exception, OCIO.ExceptionMissingFile, RuntimeError)
+class UndecodableMessage(Exception):
+    """An exception of the library whose message isn't UTF-8: pybind11's translator hands the
+    message to PyErr_SetString, which can't decode it, so Python raises UnicodeDecodeError in
+    its place, and the exception's own type (Exception or ExceptionMissingFile) is lost. It
+    holds the message's bytes (the decode error's `object`)."""
+
+    def __init__(self, error):
+        super().__init__("an OCIO exception whose message isn't UTF-8")
+        self.message = bytes(error.object)
+
+
+RAISED = (OCIO.Exception, OCIO.ExceptionMissingFile, RuntimeError, UndecodableMessage)
 
 
 def wheel_raised(exc):
-    """Whether an exception a RAISED clause caught is the wheel's: an OCIO exception, or a
-    RuntimeError itself. Python's own subclasses of RuntimeError (RecursionError,
-    NotImplementedError, PythonFinalizationError) come from the interpreter or the oracle, never
-    from pybind11's std::runtime_error: the commands raise them again, which refuses the request
-    rather than report them as the wheel's."""
-    return (isinstance(exc, (OCIO.Exception, OCIO.ExceptionMissingFile))
+    """Whether an exception a RAISED clause caught is the wheel's: an OCIO exception (one whose
+    message isn't UTF-8 included), or a RuntimeError itself. Python's own subclasses of
+    RuntimeError (RecursionError, NotImplementedError, PythonFinalizationError) come from the
+    interpreter or the oracle, never from pybind11's std::runtime_error: the commands raise
+    them again, which refuses the request rather than report them as the wheel's."""
+    return (isinstance(exc, (OCIO.Exception, OCIO.ExceptionMissingFile, UndecodableMessage))
             or type(exc) is RuntimeError)
 
 
 def exception_result(exc):
+    """{"type", "message"}; for a message that isn't UTF-8, {"type": "UnicodeDecodeError",
+    "undecodable": hex of the message} (the type the binding raised; OCIO's is lost)."""
+    if isinstance(exc, UndecodableMessage):
+        return {"type": "UnicodeDecodeError", "undecodable": exc.message.hex()}
     return {"type": type(exc).__name__, "message": str(exc)}
 
 
@@ -126,13 +141,20 @@ def _processor(args, stage, blobs=()):
     config = spec.config(args.get("config"))
     stage[0] = "transform"
     direction = getattr(OCIO, args.get("direction", "TRANSFORM_DIR_FORWARD"))
-    if "transform" in args:
-        transform = spec.transform(args["transform"], blobs)
-        stage[0] = "processor"
-        return config, config.getProcessor(transform, direction)
-    if "src" in args:
-        stage[0] = "processor"
-        return config, config.getProcessor(args["src"], args["dst"])
+    try:
+        if "transform" in args:
+            transform = spec.transform(args["transform"], blobs)
+            stage[0] = "processor"
+            return config, config.getProcessor(transform, direction)
+        if "src" in args:
+            stage[0] = "processor"
+            return config, config.getProcessor(args["src"], args["dst"])
+    except UnicodeDecodeError as exc:
+        # The library raised a message that isn't UTF-8 (a LUT file's bytes in a reader's
+        # error); the request's own strings are already text.
+        if stage[0] != "processor":
+            raise
+        raise UndecodableMessage(exc) from exc
     raise ValueError("cpu_apply needs a transform or src/dst color spaces")
 
 

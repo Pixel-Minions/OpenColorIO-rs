@@ -3,7 +3,7 @@
 
 //! The oracle's `write_transform` command (`oracle/ocio_oracle/write_api.py`), against the
 //! wheel and upstream's tests: a group written as CLF is upstream's expected text; a
-//! processor's group writes the same; the file overload writes the text in text mode; text
+//! processor's group writes the same, with its optimization flags; the file overload writes the text in text mode; text
 //! that isn't UTF-8 comes back as its bytes; refusals report their stage; the requests it can't
 //! read are refused.
 
@@ -120,6 +120,44 @@ fn a_processors_group_writes_the_same() {
         "format": "Academy/ASC Common LUT Format",
     }));
     assert_eq!(processor["text"], group["text"], "{processor}");
+}
+
+/// The processor's flags are honoured: written with `OPTIMIZATION_NONE` and with
+/// `OPTIMIZATION_DEFAULT`, a group of two matrices writes as many `<Matrix>` elements as the
+/// optimized processor of the same flags has transforms (`processor_ops`), and the two flags
+/// differ.
+#[test]
+fn a_processors_flags_are_honoured() {
+    let scale = |k: f64| {
+        json!({"class": "MatrixTransform", "calls": [
+            ["setMatrix", [k, 0., 0., 0., 0., k, 0., 0., 0., 0., k, 0., 0., 0., 0., 1.]],
+            ["setOffset", [0.125, 0.25, 0.5, 0.]],
+        ]})
+    };
+    let group = json!({"class": "GroupTransform", "children": [scale(2.), scale(0.75)]});
+    let mut counts = Vec::new();
+    for flags in ["OPTIMIZATION_NONE", "OPTIMIZATION_DEFAULT"] {
+        let written = call(json!({
+            "processor": {"transform": group, "optimization": flags},
+            "format": "Academy/ASC Common LUT Format",
+        }));
+        let text = String::from_utf8(bytes(&written["text"])).unwrap();
+        let matrices = text.matches("<Matrix ").count();
+        let ops = Oracle::get()
+            .call(
+                "processor_ops",
+                json!({"transform": group, "optimization": flags}),
+                &[],
+            )
+            .result;
+        let children = ops["optimized"]["group"]["children"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{ops}"))
+            .len();
+        assert_eq!(matrices, children, "{flags}: {text} {ops}");
+        counts.push(matrices);
+    }
+    assert_ne!(counts[0], counts[1], "{counts:?}");
 }
 
 /// Text that isn't UTF-8 comes back as its bytes; a format the registry doesn't have is the
