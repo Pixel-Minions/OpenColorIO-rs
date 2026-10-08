@@ -585,6 +585,38 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p3-validate`, checked against the wheel in
   `crates/ocio/tests/config_load_oracle.rs` (`validating_twice_as_in_the_wheel`).
 
+### I-148. The built-in configs' texts end their lines with CR LF on Windows
+
+- **Upstream:** the build embeds each `builtinconfigs/configs/*.ocio` file byte for byte, as the
+  build's checkout wrote it (`src/OpenColorIO/CMakeLists.txt:262-298`). The Windows wheel's
+  checkout wrote them with CR LF line ends and the Linux wheel's with LF, so
+  `BuiltinConfigRegistry::getBuiltinConfig` (Python: `BuiltinConfigRegistry()[name]`) gives
+  different texts on the two platforms. Seen through the wheels. The configs read from them are
+  the same: their `serialize()` and cache IDs match.
+- **Who notices:** a caller that writes or hashes a built-in config's text as the registry gives
+  it.
+- **A fix:** embed the files with LF on every platform (a `.gitattributes` rule for them, or
+  normalize them in the build).
+- **Status:** matched in `p3-loading` (3.10a, `crates/ocio/src/builtinconfigs/mod.rs`), checked
+  against the wheel live on each platform (`crates/ocio/tests/builtin_configs_oracle.rs`).
+
+### I-149. An `ocio://` URI is found anywhere in a path
+
+- **Upstream:** `ResolveConfigPath`, `Config::CreateFromFile` and
+  `Config::CreateFromBuiltinConfig` look for a URI with `std::regex_search` of
+  `ocio:\/\/([^\s]+)` (`BuiltinConfigRegistry.cpp:36-39`, `Config.cpp:1160-1164, 1246-1252`),
+  which matches anywhere in the text, not only at its start: `x ocio://default` resolves to the
+  default config's URI, and a file path with `ocio://` inside is read as a built-in config's name,
+  whatever follows up to the next space. `CreateFromBuiltinConfig` adds the prefix only when the
+  name doesn't start with `ocio://` in lowercase, so `OCIO://default` becomes the name
+  `OCIO://default`, which no built-in config has. Seen through the wheel.
+- **Who notices:** a caller that passes a path containing `ocio://`, or a URI in another case.
+- **A fix:** match the URI at the start of the path only (`std::regex_match` or a prefix
+  check), ignoring the prefix's case if wanted.
+- **Status:** matched in `p3-loading` (3.10a,
+  `crates/ocio/src/builtinconfigs/builtin_config_registry.rs`, `search_builtin_uri`), checked
+  against the wheel (`crates/ocio/tests/builtin_configs_oracle.rs`).
+
 ## Numeric helpers
 
 ### I-20. Double values are compared to 0 and 1 in float precision
