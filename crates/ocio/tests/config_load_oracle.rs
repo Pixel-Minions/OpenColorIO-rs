@@ -8,8 +8,9 @@
 //! getters, shared and virtual views, active and inactive lists, looks, view transforms,
 //! named transforms, and the file and viewing rules by their text); and the warnings logged.
 //!
-//! The configs: hand-written ones for each key of the config's loader and its errors, and the
-//! wheel's built-in configs (their YAML, `builtin_config_source`).
+//! The configs: hand-written ones for each key of the config's loader and its errors, the
+//! wheel's built-in configs (their YAML, `builtin_config_source`), and upstream's test configs
+//! (`tests/data/files/configs`).
 //!
 //! Upstream's reader checks the config against its version after loading
 //! (`checkVersionConsistency`, WP 3.8c): the cases use only what their versions allow.
@@ -677,5 +678,46 @@ fn builtin_configs_load_as_in_the_wheel() {
         let source = Oracle::get().call("builtin_config_source", json!({"name": name}), &[]);
         cases.push((name.as_str(), source.blobs[0].clone()));
     }
+    check(&cases);
+}
+
+/// Upstream's test configs (every `.ocio` and config `.yaml` of `tests/data/files/configs`),
+/// read from a stream.
+#[test]
+fn upstream_test_configs_load_as_in_the_wheel() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../upstream/OpenColorIO/tests/data/files/configs");
+    let mut files = Vec::new();
+    let mut dirs = vec![root.clone()];
+    while let Some(dir) = dirs.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                dirs.push(path);
+            } else if matches!(
+                path.extension().and_then(|e| e.to_str()),
+                Some("ocio" | "yaml")
+            ) {
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+    let labels: Vec<String> = files
+        .iter()
+        .map(|f| {
+            f.strip_prefix(&root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect();
+    // The configs of upstream's tests as of v2.5.2: if this changes, so did the submodule.
+    assert_eq!(labels.len(), 12, "{labels:?}");
+    let cases: Vec<(&str, Vec<u8>)> = labels
+        .iter()
+        .zip(&files)
+        .map(|(label, f)| (label.as_str(), std::fs::read(f).unwrap()))
+        .collect();
     check(&cases);
 }

@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Port of the tests of `tests/cpu/FileRules_tests.cpp` @ v2.5.2 that read no YAML. Those
-//! that read or write configs come with the YAML reader (3.3k) and writer (3.7b);
+//! Port of the tests of `tests/cpu/FileRules_tests.cpp` @ v2.5.2 that need no config writer
+//! nor `Config::validate`: those that read no YAML, and those that read configs (3.3k). The
+//! ones that write configs come with the writer (3.7b), and those that validate with 3.8;
 //! `crates/ocio/tests/file_rules_oracle.rs` checks the rules against the wheel.
 
 use ocio_testkit::upstream::check_throw_what;
@@ -305,4 +306,870 @@ fn is_default() {
 
     let config = Config::create_raw().unwrap();
     assert!(config.file_rules().get().is_default());
+}
+
+// The tests that read configs (3.3k).
+
+/// Upstream's `g_config` (`FileRules_tests.cpp:466-486`).
+const G_CONFIG: &str = r#"ocio_profile_version: 2
+environment:
+  {}
+strictparsing: true
+roles:
+  default: raw
+  role1: cs1
+  role2: cs2
+displays:
+  sRGB:
+  - !<View> {name: Raw, colorspace: raw}
+colorspaces:
+  - !<ColorSpace>
+      name: raw
+  - !<ColorSpace>
+      name: cs1
+  - !<ColorSpace>
+      name: cs2
+  - !<ColorSpace>
+      name: other_cs1
+"#;
+
+const G_NAME: &str = "rule1";
+
+/// An editable copy of the config of [`G_CONFIG`].
+fn g_config() -> Config {
+    (*Config::create_from_stream(G_CONFIG.as_bytes()).unwrap()).clone()
+}
+
+/// The index of the rule that matches `path` (upstream's `rulePosition`).
+fn rule_position(config: &Config, path: &str) -> usize {
+    config.color_space_from_filepath_with_index(path).unwrap().1
+}
+
+/// The color space of the rule that matches `path`, and the rule's index.
+fn color_space_and_position(config: &Config, path: &str) -> (Vec<u8>, usize) {
+    config.color_space_from_filepath_with_index(path).unwrap()
+}
+
+/// Port of `OCIO_ADD_TEST(FileRules, rules_filepattern)` @ v2.5.2.
+#[test]
+fn rules_filepattern() {
+    let _env = EnvGuard::new();
+    let mut config = g_config();
+    let mut rules = (*config.file_rules().get()).clone();
+
+    // Add pattern + extension rule.
+    rules
+        .insert_rule(0, G_NAME, "cs1", "*", "[eE][xX][r]")
+        .unwrap();
+    config.set_file_rules(&rules);
+
+    assert_eq!(rule_position(&config, "/An/Arbitrary/Path/MyFile.exr"), 0);
+    assert_eq!(rule_position(&config, "/An/Arbitrary/Path/MyFile.eXr"), 0);
+    // Default rule. R must be lower case.
+    assert_eq!(rule_position(&config, "/An/Arbitrary/Path/MyFile.EXR"), 1);
+    assert_eq!(rule_position(&config, "/An/Arbitrary/Path/MyFileexr"), 1); // Default rule.
+    assert_eq!(rule_position(&config, "/An/Arbitrary/Path/MyFile.jpeg"), 1); // Default rule.
+    assert_eq!(
+        rule_position(&config, "/An/Arbitrary.exr/Path/MyFileexr"),
+        1
+    ); // Default rule.
+    assert_eq!(rule_position(&config, ""), 1); // Default rule.
+    // Upstream's null pointer, which the config reads as "".
+    assert_eq!(rule_position(&config, ""), 1); // Default rule.
+
+    rules.set_pattern(0, "gamma").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(
+        rule_position(&config, "/An/gamma/Arbitrary/Path/MyFile.exr"),
+        1
+    ); // Default rule.
+
+    rules.set_pattern(0, "*gamma").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(
+        rule_position(&config, "/An/gamma/Arbitrary/Path/MyFile.exr"),
+        1
+    ); // Default rule.
+
+    rules.set_pattern(0, "gamma*").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(
+        rule_position(&config, "/An/gamma/Arbitrary/Path/MyFile.exr"),
+        1
+    ); // Default rule.
+
+    rules.set_pattern(0, "*gamma*").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(rule_position(&config, "/An/Arbitrary/Path/MyFile.exr"), 1); // Default rule.
+    assert_eq!(
+        rule_position(&config, "/An/GaMma/Arbitrary/Path/MyFile.exr"),
+        1
+    ); // Default rule.
+    assert_eq!(
+        rule_position(&config, "/An/gamma/Arbitrary/Path/MyFile.exr"),
+        0
+    );
+    assert_eq!(
+        rule_position(&config, "/An/gammaArbitrary/Path/MyFile.exr"),
+        0
+    );
+
+    rules.set_pattern(0, "*ga?ma*").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(rule_position(&config, "/An/Arbitrary/Path/MyFile.exr"), 1); // Default rule.
+    assert_eq!(
+        rule_position(&config, "/An/GaMma/Arbitrary/Path/MyFile.exr"),
+        1
+    ); // Default rule.
+    assert_eq!(
+        rule_position(&config, "/An/gamma/Arbitrary/Path/MyFile.exr"),
+        0
+    );
+    assert_eq!(
+        rule_position(&config, "/An/gammaArbitrary/Path/MyFile.exr"),
+        0
+    );
+    assert_eq!(
+        rule_position(&config, "/An/gatmaArbitrary/Path/MyFile.exr"),
+        0
+    );
+    assert_eq!(
+        rule_position(&config, "/An/gatmaArbitrary/Path/MyFile.exr"),
+        0
+    );
+    // Default rule.
+    assert_eq!(
+        rule_position(&config, "/An/gatttttttmaArbitrary/Path/MyFile.exr"),
+        1
+    );
+    assert_eq!(
+        rule_position(&config, "/An/gamaArbitrary/Path/MyFile.exr"),
+        1
+    ); // Default rule.
+
+    rules.set_pattern(0, "*ga*ma*").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(rule_position(&config, "/An/Arbitrary/Path/MyFile.exr"), 1); // Default rule.
+    assert_eq!(
+        rule_position(&config, "/An/GaMma/Arbitrary/Path/MyFile.exr"),
+        1
+    ); // Default rule.
+    assert_eq!(
+        rule_position(&config, "/An/gamma/Arbitrary/Path/MyFile.exr"),
+        0
+    );
+    assert_eq!(
+        rule_position(&config, "/An/gammaArbitrary/Path/MyFile.exr"),
+        0
+    );
+    assert_eq!(
+        rule_position(&config, "/An/gatmaArbitrary/Path/MyFile.exr"),
+        0
+    );
+    assert_eq!(
+        rule_position(&config, "/An/gatmaArbitrary/Path/MyFile.exr"),
+        0
+    );
+    assert_eq!(
+        rule_position(&config, "/An/gatttttttmaArbitrary/Path/MyFile.exr"),
+        0
+    );
+    assert_eq!(
+        rule_position(&config, "/An/gamaArbitrary/Path/MyFile.exr"),
+        0
+    );
+
+    rules.set_pattern(0, "*g?mm*").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(
+        rule_position(&config, "/An/gamma/Arbitrary/Path/MyFile.exr"),
+        0
+    );
+    assert_eq!(
+        rule_position(&config, "/An/gImma/Arbitrary/Path/MyFile.exr"),
+        0
+    );
+    assert_eq!(
+        rule_position(&config, "/An/gImmaaa/Arbitrary/Path/MyFile.exr"),
+        0
+    );
+
+    rules.set_pattern(0, "*g*mm*").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(
+        rule_position(&config, "/An/gamma/Arbitrary/Path/MyFile.exr"),
+        0
+    );
+    assert_eq!(
+        rule_position(&config, "/An/gImma/Arbitrary/Path/MyFile.exr"),
+        0
+    );
+    assert_eq!(
+        rule_position(&config, "/An/gIIImmaaa/Arbitrary/Path/MyFile.exr"),
+        0
+    );
+    assert_eq!(
+        rule_position(&config, "/An/gmm/Arbitrary/Path/MyFile.exr"),
+        0
+    );
+
+    rules.set_pattern(0, "*g?m?a*").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(
+        rule_position(&config, "/An/gamma/Arbitrary/Path/MyFile.exr"),
+        0
+    );
+    assert_eq!(
+        rule_position(&config, "/An/gImma/Arbitrary/Path/MyFile.exr"),
+        0
+    );
+    assert_eq!(
+        rule_position(&config, "/An/gImIa/Arbitrary/Path/MyFile.exr"),
+        0
+    );
+    assert_eq!(
+        rule_position(&config, "/An/gma/Arbitrary/Path/MyFile.exr"),
+        1
+    ); // Default rule.
+    // Default rule.
+    assert_eq!(
+        rule_position(&config, "/An/gIIImmaaa/Arbitrary/Path/MyFile.exr"),
+        1
+    );
+
+    rules.set_pattern(0, "*g[a]mma*").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(
+        rule_position(&config, "/An/gmma/Arbitrary/Path/MyFile.exr"),
+        1
+    ); // Default rule.
+    assert_eq!(
+        rule_position(&config, "/An/gamma/Arbitrary/Path/MyFile.exr"),
+        0
+    );
+    assert_eq!(
+        rule_position(&config, "/An/gbmma/Arbitrary/Path/MyFile.exr"),
+        1
+    ); // Default rule.
+
+    rules.set_pattern(0, "*g[!a]mma*").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(
+        rule_position(&config, "/An/gmma/Arbitrary/Path/MyFile.exr"),
+        1
+    ); // Default rule.
+    assert_eq!(
+        rule_position(&config, "/An/gamma/Arbitrary/Path/MyFile.exr"),
+        1
+    ); // Default rule.
+    assert_eq!(
+        rule_position(&config, "/An/gbmma/Arbitrary/Path/MyFile.exr"),
+        0
+    );
+
+    rules.set_pattern(0, "*g[abcd]mma*").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(
+        rule_position(&config, "/An/gamma/Arbitrary/Path/MyFile.exr"),
+        0
+    );
+    assert_eq!(
+        rule_position(&config, "/An/gbmma/Arbitrary/Path/MyFile.exr"),
+        0
+    );
+    assert_eq!(
+        rule_position(&config, "/An/gcmma/Arbitrary/Path/MyFile.exr"),
+        0
+    );
+    assert_eq!(
+        rule_position(&config, "/An/gdmma/Arbitrary/Path/MyFile.exr"),
+        0
+    );
+    assert_eq!(
+        rule_position(&config, "/An/gmma/Arbitrary/Path/MyFile.exr"),
+        1
+    ); // Default rule.
+    assert_eq!(
+        rule_position(&config, "/An/gemma/Arbitrary/Path/MyFile.exr"),
+        1
+    ); // Default rule.
+    assert_eq!(
+        rule_position(&config, "/An/gabmma/Arbitrary/Path/MyFile.exr"),
+        1
+    ); // Default rule.
+
+    rules.set_pattern(0, "*g[!abcd]mma*").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(
+        rule_position(&config, "/An/gamma/Arbitrary/Path/MyFile.exr"),
+        1
+    ); // Default rule.
+    assert_eq!(
+        rule_position(&config, "/An/gbmma/Arbitrary/Path/MyFile.exr"),
+        1
+    ); // Default rule.
+    assert_eq!(
+        rule_position(&config, "/An/gcmma/Arbitrary/Path/MyFile.exr"),
+        1
+    ); // Default rule.
+    assert_eq!(
+        rule_position(&config, "/An/gdmma/Arbitrary/Path/MyFile.exr"),
+        1
+    ); // Default rule.
+    assert_eq!(
+        rule_position(&config, "/An/gmma/Arbitrary/Path/MyFile.exr"),
+        1
+    ); // Default rule.
+    assert_eq!(
+        rule_position(&config, "/An/gemma/Arbitrary/Path/MyFile.exr"),
+        0
+    );
+    assert_eq!(
+        rule_position(&config, "/An/gabmma/Arbitrary/Path/MyFile.exr"),
+        1
+    ); // Default rule.
+    assert_eq!(
+        rule_position(&config, "/An/gefmma/Arbitrary/Path/MyFile.exr"),
+        1
+    ); // Default rule.
+
+    rules.set_pattern(0, "*g[a-d]mma*").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(
+        rule_position(&config, "/An/gamma/Arbitrary/Path/MyFile.exr"),
+        0
+    );
+    assert_eq!(
+        rule_position(&config, "/An/gbmma/Arbitrary/Path/MyFile.exr"),
+        0
+    );
+    assert_eq!(
+        rule_position(&config, "/An/gcmma/Arbitrary/Path/MyFile.exr"),
+        0
+    );
+    assert_eq!(
+        rule_position(&config, "/An/gdmma/Arbitrary/Path/MyFile.exr"),
+        0
+    );
+    assert_eq!(
+        rule_position(&config, "/An/gmma/Arbitrary/Path/MyFile.exr"),
+        1
+    ); // Default rule.
+    assert_eq!(
+        rule_position(&config, "/An/gemma/Arbitrary/Path/MyFile.exr"),
+        1
+    ); // Default rule.
+    assert_eq!(
+        rule_position(&config, "/An/gabmma/Arbitrary/Path/MyFile.exr"),
+        1
+    ); // Default rule.
+    assert_eq!(
+        rule_position(&config, "/An/gefmma/Arbitrary/Path/MyFile.exr"),
+        1
+    ); // Default rule.
+
+    rules.set_pattern(0, "g[!a-d]mma*").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(rule_position(&config, "gamma/Arbitrary/Path/MyFile.exr"), 1); // Default rule.
+    assert_eq!(rule_position(&config, "gbmma/Arbitrary/Path/MyFile.exr"), 1); // Default rule.
+    assert_eq!(rule_position(&config, "gcmma/Arbitrary/Path/MyFile.exr"), 1); // Default rule.
+    assert_eq!(rule_position(&config, "gdmma/Arbitrary/Path/MyFile.exr"), 1); // Default rule.
+    assert_eq!(rule_position(&config, "gmma/Arbitrary/Path/MyFile.exr"), 1); // Default rule.
+    assert_eq!(rule_position(&config, "gemma/Arbitrary/Path/MyFile.exr"), 0);
+    assert_eq!(
+        rule_position(&config, "gabmma/Arbitrary/Path/MyFile.exr"),
+        1
+    ); // Default rule.
+    assert_eq!(
+        rule_position(&config, "gefmma/Arbitrary/Path/MyFile.exr"),
+        1
+    ); // Default rule.
+
+    rules.set_pattern(0, r"g[!a-d][\*][e-g]mma").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(rule_position(&config, "ge*fmma.exr"), 0);
+
+    // Add pattern + extension rule.
+    rules.insert_rule(0, "rule0", "cs1", "*", "jpg").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(rule_position(&config, "test.jpg"), 0);
+    assert_eq!(rule_position(&config, "test.Jpg"), 0);
+    assert_eq!(rule_position(&config, "test.jpG"), 0);
+    assert_eq!(rule_position(&config, "test.Jpeg"), 2); // Default rule.
+
+    rules.set_extension(0, "jp[gG]").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(rule_position(&config, "test.jpg"), 0);
+    assert_eq!(rule_position(&config, "test.jpG"), 0);
+    assert_eq!(rule_position(&config, "test.Jpg"), 2); // Default rule.
+
+    rules.set_extension(0, "[Jj]pg").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(rule_position(&config, "/mnt/media/image.Jpg"), 0);
+
+    rules.set_extension(0, "?pg").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(rule_position(&config, "/mnt/media/image.Jpg"), 0);
+
+    rules.set_extension(0, "jpg").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(rule_position(&config, "/mnt/media/image.Jpg"), 0);
+
+    rules.set_extension(0, "JPG").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(rule_position(&config, "/mnt/media/image.Jpg"), 0);
+
+    rules.set_extension(0, "jp[gG]").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(rule_position(&config, "/mnt/media/image.Jpg"), 2);
+
+    rules.set_extension(0, "?PG").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(rule_position(&config, "/mnt/media/image.Jpg"), 2);
+
+    rules.set_extension(0, "jP*").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(rule_position(&config, "/mnt/media/image.Jpg"), 2);
+
+    rules.set_extension(0, "*g").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(rule_position(&config, "/mnt/media/image.Jpg"), 0);
+
+    rules.set_pattern(0, "*[^]*").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(rule_position(&config, "/mnt/me^ia/image.Jpg"), 0);
+
+    assert_eq!(rule_position(&config, "/mnt/media/image.Jpg"), 2);
+
+    rules.set_pattern(0, "*(name)*").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(rule_position(&config, "/mnt/(name)/image.Jpg"), 0);
+}
+
+/// Port of `OCIO_ADD_TEST(FileRules, rules_regex)` @ v2.5.2.
+#[test]
+fn rules_regex() {
+    let _env = EnvGuard::new();
+    let mut config = g_config();
+    let mut rules = (*config.file_rules().get()).clone();
+
+    // Add pattern + extension rule.
+    rules
+        .insert_regex_rule(0, G_NAME, "cs1", r"(.*)(\bmine\b|\byours\b)(.*)")
+        .unwrap();
+    config.set_file_rules(&rules);
+
+    assert_eq!(rule_position(&config, r"mnt/mine/media/image.jpg"), 0);
+
+    assert_eq!(rule_position(&config, r"mnt/miner/media/image.jpg"), 1);
+
+    assert_eq!(rule_position(&config, r"yours/mnt/media/image.jpg"), 0);
+
+    assert_eq!(rule_position(&config, r"mnt\media\yours\image.jpg"), 0);
+
+    assert_eq!(rule_position(&config, r"mine/media/image.jpg"), 0);
+
+    // The error details may be different on each platform.
+    check_throw_what(
+        rules.insert_regex_rule(1, "invalid", "cs1", r"(.*)(\bmine\b|\byours\b(.*)"),
+        "invalid regular expression",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(FileRules, rules_long_filepattern)` @ v2.5.2.
+#[test]
+fn rules_long_filepattern() {
+    let _env = EnvGuard::new();
+    let mut config = g_config();
+    let mut rules = (*config.file_rules().get()).clone();
+
+    // Add pattern + extension rule.
+    rules.insert_rule(0, G_NAME, "cs1", "*", "exr").unwrap();
+    config.set_file_rules(&rules);
+
+    // The file path existence is not tested
+    const ARBITRARY_PATH: &str = concat!(
+        "/Users/hodoulp/Documents/work/Color Management/ocio-images",
+        ".1.0v4/spi-vfx/marci_512_srgb.exr"
+    );
+
+    assert_eq!(rule_position(&config, ARBITRARY_PATH), 0);
+
+    rules.set_pattern(0, "*Col?r*").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(rule_position(&config, ARBITRARY_PATH), 0);
+
+    rules
+        .set_pattern(
+            0,
+            concat!(
+                "*****************************************************",
+                "*******"
+            ),
+        )
+        .unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(rule_position(&config, ARBITRARY_PATH), 0);
+
+    rules.set_pattern(0, "*?").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(rule_position(&config, ARBITRARY_PATH), 0);
+
+    rules.set_pattern(0, "?*").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(rule_position(&config, ARBITRARY_PATH), 0);
+
+    rules.set_pattern(0, "?*").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(rule_position(&config, ARBITRARY_PATH), 0);
+
+    rules.set_pattern(0, "*?*").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(rule_position(&config, ARBITRARY_PATH), 0);
+
+    rules.set_pattern(0, "*.1.0v4*").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(rule_position(&config, ARBITRARY_PATH), 0);
+
+    rules.set_pattern(0, "*.1.*").unwrap();
+    config.set_file_rules(&rules);
+    assert_eq!(rule_position(&config, ARBITRARY_PATH), 0);
+}
+
+/// Port of `OCIO_ADD_TEST(FileRules, rules_test)` @ v2.5.2.
+#[test]
+fn rules_test() {
+    let _env = EnvGuard::new();
+    let mut config = g_config();
+    let mut rules = (*config.file_rules().get()).clone();
+    rules.insert_path_search_rule(0).unwrap();
+    rules.insert_rule(1, "dpx file", "raw", "*", "dpx").unwrap();
+    config.set_file_rules(&rules);
+
+    let (color_space, rule_pos) = color_space_and_position(&config, "/mnt/user/show/img_cs1.dpx");
+    assert_eq!(rule_pos, 0);
+    assert_eq!(color_space, b"cs1");
+
+    let (color_space, rule_pos) = color_space_and_position(&config, "show/cs2/img_cs1.exr");
+    assert_eq!(rule_pos, 0);
+    // The first color space name from the right.
+    assert_eq!(color_space, b"cs1");
+
+    let (color_space, rule_pos) = color_space_and_position(&config, "show/cs1/img_other_cs1.exr");
+    assert_eq!(rule_pos, 0);
+    // If there are 2 cs names ending the same position, the longest is used.
+    assert_eq!(color_space, b"other_cs1");
+
+    let (color_space, rule_pos) = color_space_and_position(&config, "show/other_cs1/img_cs1.exr");
+    assert_eq!(rule_pos, 0);
+    assert_eq!(color_space, b"cs1");
+
+    let (color_space, rule_pos) = color_space_and_position(&config, "/mnt/user/unknown.dpx");
+    assert_eq!(rule_pos, 1);
+    assert_eq!(color_space, b"raw");
+
+    let (color_space, rule_pos) = color_space_and_position(&config, "/mnt/user/unknown.jpg");
+    assert_eq!(rule_pos, 2); // The default rule.
+    assert_eq!(color_space, ROLE_DEFAULT.as_bytes());
+
+    // Note that parseColorSpaceFromString (used by the pathSearch rule) is tested with aliases
+    // and inactive color spaces in OCIO_ADD_TEST(Config, use_alias).
+}
+
+/// Port of `OCIO_ADD_TEST(FileRules, rules_priority)` @ v2.5.2.
+#[test]
+fn rules_priority() {
+    let _env = EnvGuard::new();
+    let mut config = g_config();
+    let mut rules = (*config.file_rules().get()).clone();
+    rules
+        .insert_rule(0, "pattern dpx file", "raw", "*cs2*", "dpx")
+        .unwrap();
+    rules.insert_path_search_rule(1).unwrap();
+    rules
+        .insert_regex_rule(2, "regex rule", "cs5", ".*cs5.dpx")
+        .unwrap();
+    config.set_file_rules(&rules);
+
+    let (color_space, rule_pos) = color_space_and_position(&config, "/mnt/media/cs2.dpx");
+    assert_eq!(rule_pos, 0);
+    assert_eq!(color_space, b"raw");
+
+    let (color_space, rule_pos) = color_space_and_position(&config, "/mnt/media/cs2.exr");
+    assert_eq!(rule_pos, 1);
+    assert_eq!(color_space, b"cs2");
+
+    let (color_space, rule_pos) = color_space_and_position(&config, "/mnt/media/cs5.dpx");
+    assert_eq!(rule_pos, 2);
+    assert_eq!(color_space, b"cs5");
+
+    let (color_space, rule_pos) = color_space_and_position(&config, "/mnt/media/cs5.DPX");
+    assert_eq!(rule_pos, 3);
+    assert_eq!(color_space, ROLE_DEFAULT.as_bytes());
+}
+
+/// Port of `OCIO_ADD_TEST(FileRules, config_no_default)` @ v2.5.2.
+#[test]
+fn config_no_default() {
+    let _env = EnvGuard::new();
+    const CONFIG_NO_DEFAULT: &str = r#"ocio_profile_version: 2
+strictparsing: true
+roles:
+  role1: cs1
+  role2: cs2
+displays:
+  sRGB:
+  - !<View> {name: Raw, colorspace: raw}
+colorspaces:
+  - !<ColorSpace>
+      name: raw
+  - !<ColorSpace>
+      name: cs1
+  - !<ColorSpace>
+      name: cs2
+"#;
+
+    check_throw_what(
+        Config::create_from_stream(CONFIG_NO_DEFAULT.as_bytes()),
+        "must contain either a Default file rule or the 'default' role",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(FileRules, config_default_missmatch)` @ v2.5.2.
+#[test]
+fn config_default_missmatch() {
+    let _env = EnvGuard::new();
+    const CONFIG_DEFAULT_MISSMATCH: &str = r#"ocio_profile_version: 2
+environment:
+  {}
+strictparsing: true
+roles:
+  default: raw
+  role1: cs1
+  role2: cs2
+displays:
+  sRGB:
+  - !<View> {name: Raw, colorspace: raw}
+colorspaces:
+  - !<ColorSpace>
+      name: raw
+  - !<ColorSpace>
+      name: cs1
+  - !<ColorSpace>
+      name: cs2
+file_rules:
+  - !<Rule> {name: Default, colorspace: cs1}
+"#;
+
+    // As a warning message is expected, please mute it.
+    let (config, log) = crate::test_env::capture_log(|| {
+        Config::create_from_stream(CONFIG_DEFAULT_MISSMATCH.as_bytes())
+    });
+    let config = (*config.unwrap()).clone();
+
+    let output = String::from_utf8(log.concat()).unwrap();
+    assert!(output.contains("that does not match the default role"));
+
+    let rules = config.file_rules().get();
+    assert_eq!(rules.num_entries(), 1);
+    assert_eq!(
+        rules.name(0).unwrap(),
+        FileRules::DEFAULT_RULE_NAME.as_bytes()
+    );
+    assert_eq!(rules.color_space(0).unwrap(), b"cs1");
+    assert_eq!(
+        config.color_space_from_filepath("anything").unwrap(),
+        b"cs1"
+    );
+
+    // The color space of the default role is preserved.
+    let cs = config.color_space(ROLE_DEFAULT).unwrap();
+    assert_eq!(cs.name(), b"raw");
+}
+
+/// Port of `OCIO_ADD_TEST(FileRules, config_default_no_colorspace)` @ v2.5.2.
+#[test]
+fn config_default_no_colorspace() {
+    let _env = EnvGuard::new();
+    const CONFIG_DEFAULT_MISSMATCH: &str = r#"ocio_profile_version: 2
+strictparsing: true
+roles:
+  default: raw
+  role1: cs1
+  role2: cs2
+displays:
+  sRGB:
+  - !<View> {name: Raw, colorspace: raw}
+colorspaces:
+  - !<ColorSpace>
+      name: raw
+  - !<ColorSpace>
+      name: cs1
+  - !<ColorSpace>
+      name: cs2
+file_rules:
+  - !<Rule> {name: Default}
+"#;
+
+    check_throw_what(
+        Config::create_from_stream(CONFIG_DEFAULT_MISSMATCH.as_bytes()),
+        "'Default' rule cannot have an empty color space name",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(FileRules, config_no_default_rule)` @ v2.5.2.
+#[test]
+fn config_no_default_rule() {
+    let _env = EnvGuard::new();
+    const CONFIG_NO_DEFAULT_RULE: &str = r#"ocio_profile_version: 2
+strictparsing: true
+roles:
+  default: raw
+  role1: cs1
+  role2: cs2
+displays:
+  sRGB:
+  - !<View> {name: Raw, colorspace: raw}
+colorspaces:
+  - !<ColorSpace>
+      name: raw
+  - !<ColorSpace>
+      name: cs1
+  - !<ColorSpace>
+      name: cs2
+file_rules:
+  - !<Rule> {name: Custom, pattern: "*", extension: jpg, colorspace: cs1}
+"#;
+
+    check_throw_what(
+        Config::create_from_stream(CONFIG_NO_DEFAULT_RULE.as_bytes()),
+        "'file_rules' does not contain a Default <Rule>",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(FileRules, config_filerule_no_colorspace)` @ v2.5.2.
+#[test]
+fn config_filerule_no_colorspace() {
+    let _env = EnvGuard::new();
+    const CONFIG_NO_DEFAULT_RULE: &str = r#"ocio_profile_version: 2
+strictparsing: true
+roles:
+  default: raw
+  role1: cs1
+  role2: cs2
+displays:
+  sRGB:
+  - !<View> {name: Raw, colorspace: raw}
+colorspaces:
+  - !<ColorSpace>
+      name: raw
+  - !<ColorSpace>
+      name: cs1
+  - !<ColorSpace>
+      name: cs2
+file_rules:
+  - !<Rule> {name: Custom, pattern: "*", extension: jpg}
+  - !<Rule> {name: Default, colorspace: default}
+"#;
+
+    check_throw_what(
+        Config::create_from_stream(CONFIG_NO_DEFAULT_RULE.as_bytes()),
+        "File rule 'Custom' cannot have an empty color space name",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(FileRules, config_v1_faulty)` @ v2.5.2.
+#[test]
+fn config_v1_faulty() {
+    let _env = EnvGuard::new();
+    const CONFIG_V1: &str = r#"ocio_profile_version: 1
+strictparsing: true
+roles:
+  default: raw
+  role1: cs1
+  role2: cs2
+displays:
+  sRGB:
+  - !<View> {name: Raw, colorspace: raw}
+colorspaces:
+  - !<ColorSpace>
+      name: raw
+  - !<ColorSpace>
+      name: cs1
+  - !<ColorSpace>
+      name: cs2
+file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+"#;
+
+    check_throw_what(
+        Config::create_from_stream(CONFIG_V1.as_bytes()),
+        "Config v1 can't use 'file_rules'",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(FileRules, config_v2_wrong_rule)` @ v2.5.2.
+#[test]
+fn config_v2_wrong_rule() {
+    let _env = EnvGuard::new();
+    // 2 default rules.
+    {
+        let config_v2 = G_CONFIG.to_string()
+            + r#"file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+  - !<Rule> {name: Default, colorspace: cs1}
+"#;
+        check_throw_what(
+            Config::create_from_stream(config_v2.as_bytes()),
+            "Default rule has to be the last rule",
+        );
+    }
+    // Default rule parameters.
+    {
+        let config_v2 = G_CONFIG.to_string()
+            + r#"file_rules:
+  - !<Rule> {name: Default, colorspace: cs2, regex: ".*\\.TIF?F$"}
+"#;
+        check_throw_what(
+            Config::create_from_stream(config_v2.as_bytes()),
+            "'Default' rule can't use pattern, extension or regex.",
+        );
+    }
+    // Default should be at the end.
+    {
+        let config_v2 = G_CONFIG.to_string()
+            + r#"file_rules:
+  - !<Rule> {name: Default, colorspace: raw}
+  - !<Rule> {name: Custom, colorspace: cs1, pattern: "*", extension: jpg}
+"#;
+        check_throw_what(
+            Config::create_from_stream(config_v2.as_bytes()),
+            "Default rule has to be the last rule",
+        );
+    }
+    // 2 parse rules.
+    {
+        let config_v2 = G_CONFIG.to_string()
+            + r#"file_rules:
+  - !<Rule> {name: ColorSpaceNamePathSearch}
+  - !<Rule> {name: ColorSpaceNamePathSearch}
+  - !<Rule> {name: Default, colorspace: cs1}
+"#;
+        check_throw_what(
+            Config::create_from_stream(config_v2.as_bytes()),
+            "A rule named 'ColorSpaceNamePathSearch' already exists",
+        );
+    }
+    // Rule with regex & glob.
+    {
+        let config_v2 = G_CONFIG.to_string()
+            + r#"file_rules:
+  - !<Rule> {name: Custom, colorspace: cs1, pattern: "*", extension: jpg, regex: ".*\\.TIF?F$"}
+  - !<Rule> {name: Default, colorspace: cs1}
+"#;
+        check_throw_what(
+            Config::create_from_stream(config_v2.as_bytes()),
+            r"can't use regex '.*\.TIF?F$' and pattern & extension",
+        );
+    }
 }
