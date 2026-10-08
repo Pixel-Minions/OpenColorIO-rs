@@ -51,10 +51,13 @@ use common::api::{Calls, LEVELS, port_transform};
 use common::api_cases::{self, Cases};
 use ocio::{BitDepth, Config, Exception, OptimizationFlags, Transform, TransformDirection};
 use ocio_ops::cpu_processor::CpuProcessor;
+use ocio_ops::hash_utils::cache_id_hash;
 use ocio_ops::image_desc::{
     AUTO_STRIDE, Bytes, ImageDesc, ImageDescMut, PackedImageDesc, PixelData, PlanarImageDesc,
 };
+use ocio_ops::op::OpVec;
 use ocio_ops::open_color_types::ChannelOrdering;
+use ocio_ops::ops::gradingrgbcurve::grading_rgb_curve_op::create_grading_rgb_curve_op;
 use ocio_testkit::Oracle;
 use ocio_testkit::battery::params::Comparison;
 use ocio_testkit::battery::{self, BitDepth as Depth, Direction, Tier};
@@ -304,6 +307,10 @@ where
     Ok(PortImage::Packed(desc))
 }
 
+/// The port's ops of case `i` in a direction, for a class the port builds from op data
+/// ([`Class::ops`]).
+type OpsOf = Box<dyn Fn(usize, Direction) -> Result<OpVec, Exception>>;
+
 /// A class of the sweep: its cases, the config, and whether it is the `Lut1DTransform`.
 struct Class {
     name: &'static str,
@@ -312,6 +319,11 @@ struct Class {
     v1: bool,
     /// The `Lut1DTransform`, which every tier runs in full.
     lut1d: bool,
+    /// For a class whose transform the port doesn't have yet (`GradingRGBCurveTransform` until
+    /// Phase 3): the processor's ops, as `Processor::Impl::setTransform` builds and finalizes
+    /// them, which the port's processors are then made from as the port's `Processor` makes
+    /// them ([`port`]). The wheel builds the transform.
+    ops: Option<OpsOf>,
 }
 
 impl Class {
@@ -321,6 +333,7 @@ impl Class {
             cases,
             v1: false,
             lut1d: false,
+            ops: None,
         }
     }
 }
@@ -505,6 +518,11 @@ fn compare_images(
 /// The values of the Lut1DTransforms of the port's optimized processor of `job`, three per
 /// entry, in order: the 1D LUTs its CPU processor renders.
 fn port_luts(class: &Class, job: &Job, calls: &Calls) -> Result<Vec<Vec<f32>>, Exception> {
+    if class.ops.is_some() {
+        return Err(Exception::new(
+            "the port has no transform of this class to read its LUTs back from",
+        ));
+    }
     let transform = port_transform(&calls.spec(job.dir))?;
     let mut config = (*Config::create_raw().unwrap()).clone();
     if class.v1 {
@@ -702,6 +720,9 @@ type PortOutcome = Result<(Value, Vec<Vec<u8>>), (String, String)>;
 fn port(class: &Class, job: &Job, calls: &Calls) -> PortOutcome {
     let fail =
         |stage: &'static str| move |e: Exception| (stage.to_string(), e.message().to_string());
+    if let Some(ops_of) = &class.ops {
+        return port_of_ops(ops_of, job);
+    }
     let transform = port_transform(&calls.spec(job.dir)).map_err(fail("transform"))?;
     let mut config = (*Config::create_raw().unwrap()).clone();
     if class.v1 {
@@ -725,8 +746,16 @@ fn port(class: &Class, job: &Job, calls: &Calls) -> PortOutcome {
         }
     }
     .map_err(fail("cpu_processor"))?;
+    let processor_cache_id = processor.cache_id().map_err(fail("processor"))?;
+    apply_job(job, &cpu, processor_cache_id)
+}
+
+/// The getters of `cpu` and the job's buffers after `cpu` applied it.
+fn apply_job(job: &Job, cpu: &CpuProcessor, processor_cache_id: String) -> PortOutcome {
+    let fail =
+        |stage: &'static str| move |e: Exception| (stage.to_string(), e.message().to_string());
     let result = json!({
-        "processor_cache_id": processor.cache_id().map_err(fail("processor"))?,
+        "processor_cache_id": processor_cache_id,
         "cpu_cache_id": String::from_utf8(cpu.get_cache_id().to_vec()).expect("UTF-8"),
         "cpu_processor": {
             "getInputBitDepth": depth_name(cpu.get_input_bit_depth()),
@@ -769,6 +798,30 @@ fn port(class: &Class, job: &Job, calls: &Calls) -> PortOutcome {
             .map_err(fail("apply"))?;
     }
     Ok((result, buffers))
+}
+
+/// [`port`] for a class the port builds from op data: the processor's ops; its cache ID
+/// (`<NOOP>` without ops, else the hash of the ops' cache IDs); and its CPU processor, made as
+/// the port's `Processor` makes it (`Processor::optimized_cpu_processor_with_bit_depths`,
+/// crates/ocio/src/processor.rs, a port of `Processor::Impl::getOptimizedCPUProcessor`,
+/// src/OpenColorIO/Processor.cpp:537-582 @ v2.5.2, without `OCIO_OPTIMIZATION_FLAGS`, which no
+/// test sets).
+fn port_of_ops(ops_of: &OpsOf, job: &Job) -> PortOutcome {
+    let fail =
+        |stage: &'static str| move |e: Exception| (stage.to_string(), e.message().to_string());
+    let ops = ops_of(job.case, job.dir).map_err(fail("processor"))?;
+    let processor_cache_id = if ops.is_empty() {
+        "<NOOP>".to_string()
+    } else {
+        cache_id_hash(&ops.get_cache_id().map_err(fail("processor"))?)
+    };
+    let (input, output) = (port_depth(job.combo.input), port_depth(job.combo.output));
+    let flags = match job.combo.level {
+        None => OptimizationFlags::DEFAULT,
+        Some(level) => LEVELS[level].1,
+    };
+    let cpu = CpuProcessor::new(&ops, input, output, flags).map_err(fail("cpu_processor"))?;
+    apply_job(job, &cpu, processor_cache_id)
 }
 
 /// What W0002 covered in a class's jobs.
@@ -1053,6 +1106,38 @@ fn lut1d_transform_matches_the_wheel_at_every_format_and_level() {
 #[test]
 fn lut3d_transform_matches_the_wheel_at_every_format_and_level() {
     check(&Class::new("Lut3DTransform", api_cases::lut3d()));
+}
+
+/// The built-in transforms whose ops are ported (`api_cases::BUILTINS_WITH_OPS`).
+#[test]
+fn builtin_transform_matches_the_wheel_at_every_format_and_level() {
+    check(&Class::new(
+        "BuiltinTransform",
+        api_cases::builtin(api_cases::BUILTINS_WITH_OPS),
+    ));
+}
+
+/// The `GradingRGBCurveTransform` through its op data until Phase 3 ports the transform
+/// ([`Class::ops`]): the port builds the op as `BuildGradingRGBCurveOp` does
+/// (src/OpenColorIO/ops/gradingrgbcurve/GradingRGBCurveOp.cpp:238-249 @ v2.5.2) and finalizes
+/// the ops as `Processor::Impl::setTransform` does (src/OpenColorIO/Processor.cpp:623-641).
+#[test]
+fn grading_rgb_curve_transform_matches_the_wheel_at_every_format_and_level() {
+    let curves = api_cases::rgb_curve();
+    check(&Class {
+        ops: Some(Box::new(move |i, dir| {
+            let mut ops = OpVec::new();
+            create_grading_rgb_curve_op(
+                &mut ops,
+                curves[i].1.op_data(dir)?,
+                TransformDirection::Forward,
+            );
+            ops.finalize()?;
+            ops.validate_dynamic_properties()?;
+            Ok(ops)
+        })),
+        ..Class::new("GradingRGBCurveTransform", api_cases::rgb_curve_cases())
+    });
 }
 
 #[test]
