@@ -106,7 +106,8 @@ pub struct FormatInfo {
 }
 
 impl FormatInfo {
-    const fn new(
+    /// An info.
+    pub(crate) const fn new(
         name: &'static str,
         extension: &'static str,
         capabilities: FormatCapabilities,
@@ -367,7 +368,7 @@ fn create_formats() -> Vec<Box<dyn FileFormat>> {
             B::LUT_3D,
         )]),
         // FileFormatSpiMtx.cpp:57-64.
-        stub(vec![FormatInfo::new("spimtx", "spimtx", C::READ, B::NONE)]),
+        Box::new(crate::fileformats::file_format_spimtx::LocalFileFormat),
         // FileFormatTruelight.cpp:79-87.
         stub(vec![FormatInfo::new(
             "truelight",

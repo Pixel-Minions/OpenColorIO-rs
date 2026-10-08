@@ -8,7 +8,11 @@
 //! `basic_filebuf` opens it with `_Fiopen`, without `b`), whose low-level reads translate the
 //! text: `CR LF` reads as `LF`, a lone `CR` is kept, and `0x1A` ends the file. On Linux text
 //! and binary mode read the same bytes (docs/improvements.md, I-162). The file is read whole
-//! when it opens; the readers' extractions (`getline`, `>>`) come with the readers (4.0c).
+//! when it opens. A `std::istringstream` (the readers' tests, a `ConfigIOProxy`'s data) holds
+//! its bytes as given.
+//!
+//! The extractions follow the C++ standard's unformatted and formatted input ([istream]),
+//! which both wheels' libraries implement; each comes with the first reader that uses it.
 
 use std::io::Read;
 
@@ -27,6 +31,10 @@ pub enum OpenMode {
 #[derive(Clone, Debug, Default)]
 pub struct InputStream {
     data: Vec<u8>,
+    /// The position of the next byte to extract.
+    pos: usize,
+    /// The number of bytes the last unformatted extraction extracted (`gcount`).
+    gcount: usize,
     eof: bool,
     fail: bool,
     bad: bool,
@@ -62,6 +70,14 @@ impl InputStream {
         }
     }
 
+    /// A stream of `data`, as a `std::istringstream` of it holds it.
+    pub fn from_bytes(data: impl Into<Vec<u8>>) -> InputStream {
+        InputStream {
+            data: data.into(),
+            ..InputStream::default()
+        }
+    }
+
     /// Whether no state bit is set.
     ///
     /// Port of `std::ios::good`.
@@ -77,6 +93,69 @@ impl InputStream {
     /// Whether reading the file failed after it opened: the next extraction sets `badbit`.
     pub fn read_error(&self) -> bool {
         self.read_error
+    }
+
+    /// Port of `std::ios::eof`.
+    pub fn eof(&self) -> bool {
+        self.eof
+    }
+
+    /// Whether `failbit` or `badbit` is set.
+    ///
+    /// Port of `std::ios::fail`.
+    pub fn fail(&self) -> bool {
+        self.fail || self.bad
+    }
+
+    /// The number of bytes the last unformatted extraction extracted.
+    ///
+    /// Port of `std::istream::gcount`.
+    pub fn gcount(&self) -> usize {
+        self.gcount
+    }
+
+    /// The next byte, or `None` at the end of the stream; at the end of a file that failed to
+    /// read, `badbit` is set (the underflow's exception, which the extraction catches).
+    fn peek_byte(&mut self) -> Option<u8> {
+        match self.data.get(self.pos) {
+            Some(&b) => Some(b),
+            None => {
+                if self.read_error {
+                    self.bad = true;
+                }
+                None
+            }
+        }
+    }
+
+    /// Extracts up to `n` bytes into the start of `buf`: all `n`, or those up to the end of the
+    /// stream, which sets `eofbit` and `failbit`; a stream that isn't `good()` extracts
+    /// nothing and sets `failbit` (its sentry).
+    ///
+    /// Port of `std::istream::read(char *, std::streamsize)` (C++17 [istream.unformatted]
+    /// 30.7.4.3/28-30).
+    pub fn read(&mut self, buf: &mut [u8], n: usize) {
+        self.gcount = 0;
+        if !self.good() {
+            self.fail = true;
+            return;
+        }
+        while self.gcount < n {
+            match self.peek_byte() {
+                Some(b) => {
+                    buf[self.gcount] = b;
+                    self.pos += 1;
+                    self.gcount += 1;
+                }
+                None => {
+                    if !self.bad {
+                        self.eof = true;
+                        self.fail = true;
+                    }
+                    return;
+                }
+            }
+        }
     }
 }
 
