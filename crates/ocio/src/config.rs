@@ -31,9 +31,12 @@ use ocio_ops::platform::strcasecmp;
 use ocio_ops::platform::{getenv, is_env_present};
 use ocio_ops::utils::pystring;
 use ocio_ops::utils::string_utils::{
-    StringVec, c_str, compare, contain, lower, remove, split, trim,
+    StringVec, c_str, compare, contain, lower, remove, split, starts_with, trim,
 };
 
+use crate::builtinconfigs::builtin_config_registry::{
+    BuiltinConfigRegistry, OCIO_BUILTIN_URI_PREFIX, resolve_config_path, search_builtin_uri,
+};
 use crate::caching::{OCIO_DISABLE_CACHE_FALLBACK, ProcessorCache, std_hash_string};
 use crate::color_space::ColorSpace;
 use crate::color_space_set::ColorSpaceSet;
@@ -695,6 +698,40 @@ impl Config {
     #[doc(alias = "CreateFromStream")]
     pub fn create_from_stream(istream: &[u8]) -> Result<Arc<Config>> {
         Config::read(istream, None)
+    }
+
+    /// The built-in config that `config_name` names, with or without the `ocio://` prefix:
+    /// a name of the registry, ignoring case, or `default`, `cg-config-latest` or
+    /// `studio-config-latest` ([`resolve_config_path`]). Otherwise "Could not find '<name>' in
+    /// the built-in configurations.". The name ends at its first NUL.
+    ///
+    /// Port of `Config::CreateFromBuiltinConfig` (src/OpenColorIO/Config.cpp:1233-1262 @
+    /// v2.5.2).
+    #[doc(alias = "CreateFromBuiltinConfig")]
+    pub fn create_from_builtin_config(config_name: impl AsRef<[u8]>) -> Result<Arc<Config>> {
+        let mut builtin_config_name = c_str(config_name.as_ref()).to_vec();
+
+        // Normalize the input to the URI format.
+        if !starts_with(&builtin_config_name, OCIO_BUILTIN_URI_PREFIX.as_bytes()) {
+            let mut uri = OCIO_BUILTIN_URI_PREFIX.as_bytes().to_vec();
+            uri.extend_from_slice(&builtin_config_name);
+            builtin_config_name = uri;
+        }
+
+        // Resolve the URI if needed.
+        let uri = resolve_config_path(&builtin_config_name).to_vec();
+
+        // Check if the config path starts with ocio://
+        if let Some(name) = search_builtin_uri(&uri) {
+            // Store config path without the "ocio://" prefix, if present.
+            builtin_config_name = name.to_vec();
+        }
+
+        let reg = BuiltinConfigRegistry::get();
+
+        // getBuiltinConfigByName will throw if config name not found.
+        let builtin_config_str = reg.builtin_config_by_name(&builtin_config_name)?;
+        Config::create_from_stream(builtin_config_str)
     }
 
     /// The config's YAML text: checked against its version

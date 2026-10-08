@@ -5,6 +5,7 @@
 //! (PLAN.md §2): results, text output, errors and accepted configs.
 #![forbid(unsafe_code)]
 
+pub mod builtinconfigs;
 pub mod caching;
 pub mod color_space;
 pub mod color_space_set;
@@ -31,6 +32,9 @@ pub mod yaml_cpp;
 #[cfg(test)]
 mod test_env;
 
+pub use builtinconfigs::builtin_config_registry::{
+    BuiltinConfigRegistry, OCIO_BUILTIN_URI_PREFIX, resolve_config_path,
+};
 pub use color_space::ColorSpace;
 pub use color_space_set::ColorSpaceSet;
 pub use config::{Config, ConfigRules, CurrentContext};

@@ -5429,3 +5429,29 @@ fn required_roles_for_version_2_2() {
         assert!(validate_logged(&config).is_empty());
     }
 }
+
+/// Port of `OCIO_ADD_TEST(Config, is_inactive)` @ v2.5.2.
+#[test]
+fn is_inactive() {
+    let _env = EnvGuard::new();
+    // Using Built-in config to test the getInactiveColorSpace method.
+    let cg_config_name = "studio-config-v1.0.0_aces-v1.3_ocio-v2.1";
+
+    let config = Config::create_from_builtin_config(cg_config_name).unwrap();
+    config.validate().unwrap();
+
+    {
+        // Test various combinations of input.
+
+        assert!(!config.is_inactive_color_space(""));
+        assert!(!config.is_inactive_color_space("fake-colorspace-name"));
+
+        // Test existing colorspaces from cg-config-v1.0.0_aces-v1.3_ocio-v2.1.
+
+        // Colorspace exists and is active.
+        assert!(!config.is_inactive_color_space("Linear P3-D65"));
+
+        // Colorspace exists and is inactive.
+        assert!(config.is_inactive_color_space("Rec.1886 Rec.2020 - Display"));
+    }
+}
