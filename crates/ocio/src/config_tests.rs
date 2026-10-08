@@ -5455,3 +5455,34 @@ fn is_inactive() {
         assert!(config.is_inactive_color_space("Rec.1886 Rec.2020 - Display"));
     }
 }
+
+/// `GetCurrentConfig` without a current config reads `$OCIO` (`CreateFromEnv`, here the raw
+/// config, with its message), and `SetCurrentConfig` gives it a copy of a config
+/// (Config.cpp:115-132 @ v2.5.2). The only test of the process's current config.
+#[test]
+fn current_config() {
+    let _env = EnvGuard::new();
+
+    let (current, log) = crate::test_env::capture_log(get_current_config);
+    let current = current.unwrap();
+    assert_eq!(
+        log.concat(),
+        b"[OpenColorIO Info]: Color management disabled. (Specify the $OCIO environment \
+          variable to enable.)\n"
+    );
+    assert_eq!(
+        current.serialize().unwrap(),
+        Config::create_raw().unwrap().serialize().unwrap()
+    );
+
+    // Asked again, it is the same config.
+    let (again, log) = crate::test_env::capture_log(get_current_config);
+    assert!(Arc::ptr_eq(&current, &again.unwrap()));
+    assert!(log.is_empty());
+
+    let config = Config::create_from_builtin_config("cg-config-latest").unwrap();
+    set_current_config(&config);
+    let current = get_current_config().unwrap();
+    assert!(!Arc::ptr_eq(&current, &config));
+    assert_eq!(current.serialize().unwrap(), config.serialize().unwrap());
+}

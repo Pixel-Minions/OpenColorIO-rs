@@ -28,7 +28,7 @@ use ocio_ops::parse_utils::{
     intersect_string_vecs_case_ignore, join_string_env_style, split_string_env_style,
 };
 use ocio_ops::platform::strcasecmp;
-use ocio_ops::platform::{getenv, is_env_present};
+use ocio_ops::platform::{create_input_file_stream, getenv, is_env_present};
 use ocio_ops::utils::pystring;
 use ocio_ops::utils::string_utils::{
     StringVec, c_str, compare, contain, lower, remove, split, starts_with, trim,
@@ -57,10 +57,16 @@ use crate::processor::{Processor, ProcessorCacheFlags};
 use crate::transform::Transform;
 use crate::view_transform::ViewTransform;
 use crate::viewing_rules::{ViewingRules, find_rule};
+use crate::yaml_cpp::stream::IStream;
 use ocio_ops::hash_utils::cache_id_hash;
 
 /// `OCIO_ACTIVE_DISPLAYS`: the displays a config shows, overriding its own list.
 ///
+/// `$OCIO`: the config that [`Config::create_from_env`] reads.
+///
+/// Port of `OCIO_CONFIG_ENVVAR` (src/OpenColorIO/Config.cpp:47 @ v2.5.2).
+pub const OCIO_CONFIG_ENVVAR: &str = "OCIO";
+
 /// Port of `OCIO_ACTIVE_DISPLAYS_ENVVAR` (src/OpenColorIO/Config.cpp:49 @ v2.5.2).
 pub const OCIO_ACTIVE_DISPLAYS_ENVVAR: &str = "OCIO_ACTIVE_DISPLAYS";
 
@@ -569,6 +575,48 @@ impl Clone for Config {
     }
 }
 
+/// The C library's `strerror` of an I/O error: its text without Rust's " (os error N)".
+fn strerror(e: &std::io::Error) -> String {
+    let text = e.to_string();
+    match (e.raw_os_error(), text.rfind(" (os error ")) {
+        (Some(_), Some(at)) => text[..at].to_string(),
+        _ => text,
+    }
+}
+
+/// `g_currentConfig`, under its lock `g_currentConfigLock` (Config.cpp:110-113 @ v2.5.2).
+static CURRENT_CONFIG: Mutex<Option<Arc<Config>>> = Mutex::new(None);
+
+/// The process's current config: the one [`set_current_config`] gave, or, the first time
+/// without one, [`Config::create_from_env`]'s (whose error leaves no current config).
+///
+/// Port of `GetCurrentConfig` (src/OpenColorIO/Config.cpp:115-125 @ v2.5.2).
+#[doc(alias = "GetCurrentConfig")]
+pub fn get_current_config() -> Result<Arc<Config>> {
+    let mut current = CURRENT_CONFIG
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+    if current.is_none() {
+        *current = Some(Config::create_from_env()?);
+    }
+
+    Ok(Arc::clone(current.as_ref().expect("set above")))
+}
+
+/// Makes a copy of `config` ([`Config`]'s `Clone`, `createEditableCopy`) the process's current
+/// config.
+///
+/// Port of `SetCurrentConfig` (src/OpenColorIO/Config.cpp:127-132 @ v2.5.2).
+#[doc(alias = "SetCurrentConfig")]
+pub fn set_current_config(config: &Config) {
+    let mut current = CURRENT_CONFIG
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+    *current = Some(Arc::new(config.clone()));
+}
+
 impl Config {
     /// The state `Config::Impl::Impl` gives a config before it reads the environment.
     fn blank() -> Config {
@@ -734,6 +782,91 @@ impl Config {
         Config::create_from_stream(builtin_config_str)
     }
 
+    /// The config that `$OCIO` names (a file, an archive or a built-in config's URI, read by
+    /// [`Config::create_from_file`]); without it, or empty, the raw config, after logging
+    /// "Color management disabled. (Specify the $OCIO environment variable to enable.)".
+    ///
+    /// Port of `Config::CreateFromEnv` (src/OpenColorIO/Config.cpp:1135-1152 @ v2.5.2).
+    #[doc(alias = "CreateFromEnv")]
+    pub fn create_from_env() -> Result<Arc<Config>> {
+        let file = getenv(OCIO_CONFIG_ENVVAR).unwrap_or_default();
+
+        // File may be one of the following:
+        //   1) Path to a config file (e.g. /home/user/ocio/config.ocio)
+        //   2) Path to an archived config file (e.g. /home/user/ocio/archived_config.ocioz)
+        //   3) URI to a built-in config (e.g. ocio://cg-config-v0.1.0_aces-v1.3_ocio-v2.1.1)
+        if !file.is_empty() {
+            return Config::create_from_file(&file);
+        }
+
+        log_info("Color management disabled. (Specify the $OCIO environment variable to enable.)");
+
+        Config::create_raw()
+    }
+
+    /// The config in the file `filename` (up to its first NUL), or the built-in config of the
+    /// `ocio://` URI in it ([`Config::create_from_builtin_config`], docs/improvements.md I-149).
+    /// The errors: "The config filepath is missing." (a missing-file exception) for an
+    /// empty name, "Error could not read '<filename>' OCIO profile." for a file that can't be
+    /// opened, and the reader's, which names the file.
+    ///
+    /// A file that starts with `PK` is an OCIOZ archive, whose reader is not ported yet (WP
+    /// 4.x): an error. The file's bytes are read as `CreateFromFile`'s `std::ifstream` gives
+    /// them to yaml-cpp ([`IStream::file`]): on Windows, a file of fewer than four bytes that
+    /// makes yaml-cpp put back three of them reads as an empty document.
+    ///
+    /// Port of `Config::CreateFromFile` (src/OpenColorIO/Config.cpp:1154-1207 @ v2.5.2).
+    #[doc(alias = "CreateFromFile")]
+    pub fn create_from_file(filename: impl AsRef<[u8]>) -> Result<Arc<Config>> {
+        let filename = c_str(filename.as_ref());
+        if filename.is_empty() {
+            return Err(Exception::missing_file("The config filepath is missing."));
+        }
+
+        // Check for URI Pattern: ocio://<config name>
+        if search_builtin_uri(filename).is_some() {
+            return Config::create_from_builtin_config(filename);
+        }
+
+        let could_not_read = || {
+            let mut os = b"Error could not read '".to_vec();
+            os.extend_from_slice(filename);
+            os.extend_from_slice(b"' OCIO profile.");
+            Exception::new(os)
+        };
+        let mut ifstream = create_input_file_stream(filename).map_err(|_| could_not_read())?;
+
+        // The stream's bytes, up to a read that fails (a directory, which Linux opens).
+        let mut data = Vec::new();
+        let read = std::io::Read::read_to_end(&mut ifstream, &mut data);
+        drop(ifstream);
+
+        if data.starts_with(b"PK") {
+            // The file should be an OCIOZ archive file.
+            return Err(Exception::new(
+                "Config::CreateFromFile: reading an OCIOZ archive is not ported yet.",
+            ));
+        }
+
+        // A read that fails ends MSVC's file stream, as the end of the file does. libstdc++'s
+        // throws `std::ios_base::failure` from `basic_filebuf::underflow`: the stream's own reads
+        // swallow it, but yaml-cpp reads its bytes from the stream buffer (`sgetn`), so it
+        // reaches `OCIOYaml::Read`, which wraps its `what()`. (The port fails before reading the
+        // bytes before the failure; only a directory has been seen to fail, at the first read.)
+        if let Err(e) = read
+            && !cfg!(windows)
+        {
+            let mut os = b"Error: Loading the OCIO profile '".to_vec();
+            os.extend_from_slice(filename);
+            os.extend_from_slice(b"' failed. basic_filebuf::underflow error reading the file: ");
+            os.extend_from_slice(strerror(&e).as_bytes());
+            return Err(Exception::new(os));
+        }
+
+        // Not an OCIOZ archive. Continue as usual.
+        Config::read(IStream::file(&data), Some(filename))
+    }
+
     /// The config's YAML text: checked against its version
     /// ([`Config::check_version_consistency`]), then written (`OCIOYaml::Write`). Either's
     /// error is "Error building YAML: " and its message. It is also the config's text as
@@ -836,7 +969,10 @@ impl Config {
     ///
     /// Port of `Config::Impl::Read(std::istream&, const char*)` (src/OpenColorIO/
     /// Config.cpp:5548-5562 @ v2.5.2).
-    pub(crate) fn read(input: &[u8], filename: Option<&[u8]>) -> Result<Arc<Config>> {
+    pub(crate) fn read<'a>(
+        input: impl Into<IStream<'a>>,
+        filename: Option<&[u8]>,
+    ) -> Result<Arc<Config>> {
         let mut config = Config::new()?;
         crate::ocio_yaml::read(input, &mut config, filename)?;
         config.check_version_consistency()?;

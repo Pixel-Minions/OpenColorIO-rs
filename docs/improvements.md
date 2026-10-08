@@ -617,6 +617,29 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `crates/ocio/src/builtinconfigs/builtin_config_registry.rs`, `search_builtin_uri`), checked
   against the wheel (`crates/ocio/tests/builtin_configs_oracle.rs`).
 
+### I-157. A config file of fewer than four bytes can read as empty on Windows
+
+- **Upstream:** `Config::CreateFromFile` hands yaml-cpp an `std::ifstream` (`Config.cpp:1176-1206`).
+  yaml-cpp's detection of the encoding reads up to four bytes and puts back those that aren't a
+  byte order mark (yaml-cpp 0.8.0 `stream.cpp:189-245`). When the file ends first, it puts them
+  back after the end: libstdc++'s file stream (Linux) seeks back for each, as a string stream
+  does, but MSVC's (Windows) puts back one byte with the C runtime's `ungetc` and one in its own
+  putback character, and fails on a third, which sets `badbit`: the stream then reads as an
+  empty document. So on Windows the files `00 00 FE` and `61 00 00` give "does not appear to
+  have a valid version", where Linux and `CreateFromStream` give yaml-cpp's errors. Seen
+  through the wheels.
+  A file that can't be read differs too: a directory, which Linux opens, makes libstdc++'s
+  `basic_filebuf::underflow` throw, which reaches `OCIOYaml::Read` through yaml-cpp's
+  `sgetn` ("... failed. basic_filebuf::underflow error reading the file: Is a directory"),
+  where Windows can't open it ("Error could not read '<path>' OCIO profile.").
+- **Who notices:** nobody with a real config: only files of three bytes or fewer differ, and
+  directories given as configs.
+- **A fix:** read the file into a string stream first.
+- **Status:** matched in `p3-loading` (3.10b, `crates/ocio/src/yaml_cpp/stream.rs`,
+  `IStream::file` and `MsvcFileBuf`), checked against the wheel on each platform for every file
+  of up to three bytes of the bytes that matter and 256 of four
+  (`crates/ocio/tests/config_files_oracle.rs`).
+
 ## Numeric helpers
 
 ### I-20. Double values are compared to 0 and 1 in float precision

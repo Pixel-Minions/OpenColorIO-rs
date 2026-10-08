@@ -35,9 +35,12 @@ mod test_env;
 pub use builtinconfigs::builtin_config_registry::{
     BuiltinConfigRegistry, OCIO_BUILTIN_URI_PREFIX, resolve_config_path,
 };
+pub use caching::clear_all_caches;
 pub use color_space::ColorSpace;
 pub use color_space_set::ColorSpaceSet;
-pub use config::{Config, ConfigRules, CurrentContext};
+pub use config::{
+    Config, ConfigRules, CurrentContext, OCIO_CONFIG_ENVVAR, get_current_config, set_current_config,
+};
 pub use context::Context;
 pub use display::OCIO_VIEW_USE_DISPLAY_NAME;
 pub use file_rules::FileRules;

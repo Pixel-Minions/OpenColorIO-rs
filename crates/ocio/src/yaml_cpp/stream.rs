@@ -27,22 +27,68 @@ pub const STREAM_EOF: u8 = 0x04;
 /// `CP_REPLACEMENT_CHARACTER` (stream.cpp:12).
 const CP_REPLACEMENT_CHARACTER: u32 = 0xFFFD;
 
-/// The part of `std::istream` yaml-cpp's `Stream` uses, over bytes in memory: the read
-/// position and the `eofbit` and `failbit` states.
+/// The part of `std::istream` yaml-cpp's `Stream` uses, over the bytes the stream holds: the
+/// stream buffer ([`StreamBuf`]) and the `eofbit` and `failbit` states (`badbit`, which only a
+/// failed `putback` sets, counts as `failbit`: no caller tells them apart).
 #[derive(Debug)]
 pub struct IStream<'a> {
-    data: &'a [u8],
-    pos: usize,
+    source: StreamBuf<'a>,
     eof: bool,
     fail: bool,
 }
 
+/// The stream buffer of an [`IStream`].
+#[derive(Debug)]
+enum StreamBuf<'a> {
+    /// A `std::stringbuf` (OCIO's `std::istringstream`), or libstdc++'s `std::filebuf` (an
+    /// `std::ifstream` on Linux), which puts back what was read wherever it is: a position in
+    /// the bytes.
+    Memory { data: &'a [u8], pos: usize },
+    /// MSVC's `std::basic_filebuf<char>` (an `std::ifstream` on Windows).
+    MsvcFile(MsvcFileBuf<'a>),
+}
+
+impl<'a> From<&'a [u8]> for IStream<'a> {
+    fn from(data: &'a [u8]) -> IStream<'a> {
+        IStream::new(data)
+    }
+}
+
+impl<'a, const N: usize> From<&'a [u8; N]> for IStream<'a> {
+    fn from(data: &'a [u8; N]) -> IStream<'a> {
+        IStream::new(data)
+    }
+}
+
+impl<'a> From<&'a Vec<u8>> for IStream<'a> {
+    fn from(data: &'a Vec<u8>) -> IStream<'a> {
+        IStream::new(data)
+    }
+}
+
 impl<'a> IStream<'a> {
-    /// A stream over `data`, in the good state.
+    /// A string stream over `data` (`std::istringstream`), in the good state.
     pub fn new(data: &'a [u8]) -> IStream<'a> {
         IStream {
-            data,
-            pos: 0,
+            source: StreamBuf::Memory { data, pos: 0 },
+            eof: false,
+            fail: false,
+        }
+    }
+
+    /// The file stream OCIO's `Config::CreateFromFile` hands yaml-cpp, over the file's bytes
+    /// `data`, in the good state: the stream after `read(magicNumber, 2)`, `clear()` and
+    /// `seekg(0)` (Config.cpp:1176-1206 @ v2.5.2). On Windows it is MSVC's `std::filebuf`
+    /// over the C runtime's `FILE`, whose putback differs from a string stream's at the end of
+    /// the file ([`MsvcFileBuf`]); libstdc++'s seeks back in the file, as a string stream.
+    pub fn file(data: &'a [u8]) -> IStream<'a> {
+        let source = if cfg!(windows) {
+            StreamBuf::MsvcFile(MsvcFileBuf::new(data))
+        } else {
+            StreamBuf::Memory { data, pos: 0 }
+        };
+        IStream {
+            source,
             eof: false,
             fail: false,
         }
@@ -60,25 +106,42 @@ impl<'a> IStream<'a> {
             self.fail = true;
             return None;
         }
-        match self.data.get(self.pos) {
-            Some(&b) => {
-                self.pos += 1;
-                Some(b)
-            }
-            None => {
-                self.eof = true;
-                self.fail = true;
-                None
-            }
+        let next = match &mut self.source {
+            StreamBuf::Memory { data, pos } => data.get(*pos).map(|&b| {
+                *pos += 1;
+                b
+            }),
+            StreamBuf::MsvcFile(buf) => buf.sbumpc(),
+        };
+        if next.is_none() {
+            self.eof = true;
+            self.fail = true;
         }
+        next
     }
 
-    /// `putback(c)` of the byte just read: the streams OCIO hands yaml-cpp step back over it.
-    fn putback(&mut self) {
+    /// `putback(c)` of `c`, the byte just read. A stream buffer that can't put it back sets
+    /// `badbit`.
+    fn putback(&mut self, c: u8) {
         // C++11 putback clears eofbit first; the sentry then needs a good stream.
         self.eof = false;
-        if self.good() && self.pos > 0 {
-            self.pos -= 1;
+        if !self.good() {
+            self.fail = true;
+            return;
+        }
+        let put_back = match &mut self.source {
+            StreamBuf::Memory { pos, .. } => {
+                // The bytes are in memory (or the file is seeked back): stepping back over the
+                // byte just read always succeeds.
+                if *pos > 0 {
+                    *pos -= 1;
+                }
+                true
+            }
+            StreamBuf::MsvcFile(buf) => buf.sputbackc(c),
+        };
+        if !put_back {
+            self.fail = true;
         }
     }
 
@@ -90,19 +153,207 @@ impl<'a> IStream<'a> {
 
     /// `GetNextByte` (stream.cpp:388-404): the next byte through the stream buffer, bypassing
     /// the stream's state. At the end it sets `eofbit` and gives 0. (yaml-cpp reads ahead
-    /// `YAML_PREFETCH_SIZE` bytes at a time; reading them one by one gives the same bytes and
-    /// sets `eofbit` at the same read.)
+    /// `YAML_PREFETCH_SIZE` bytes at a time with `sgetn`; reading them one by one gives the
+    /// same bytes and sets `eofbit` at the same read.)
     fn next_byte(&mut self) -> u8 {
-        match self.data.get(self.pos) {
-            Some(&b) => {
-                self.pos += 1;
+        let next = match &mut self.source {
+            StreamBuf::Memory { data, pos } => data.get(*pos).map(|&b| {
+                *pos += 1;
                 b
-            }
+            }),
+            StreamBuf::MsvcFile(buf) => buf.xsgetn_byte(),
+        };
+        match next {
+            Some(b) => b,
             None => {
                 self.eof = true;
                 0
             }
         }
+    }
+}
+
+/// MSVC's `std::basic_filebuf<char>` (`<__msvc_filebuf.hpp>`) over a `FILE` of the Universal C
+/// Runtime opened for reading, as `Config::CreateFromFile` leaves it (after `seekg(0)`): the
+/// `FILE`'s buffer, read position and count, which the filebuf's get area shares
+/// (`_get_stream_buffer_pointers`), and the filebuf's one-byte putback area `_Mychar`.
+///
+/// It puts back a byte by stepping back in the get area when the byte before is the one put
+/// back; otherwise with the C runtime's `ungetc`, which fails when the `FILE` already holds a
+/// pushed-back byte at the start of its buffer; otherwise in `_Mychar`, unless the get area is
+/// already `_Mychar`. At the end of the file the `FILE`'s read position is the start of its
+/// buffer, so after a read past the end two bytes can be put back, and a third fails. A string
+/// stream (and libstdc++'s filebuf) puts back any number: yaml-cpp's detection of the
+/// encoding puts back three bytes after the end of a file of fewer than four, such as
+/// `00 00 FE`, which then reads as an empty document on Windows only.
+#[derive(Debug)]
+struct MsvcFileBuf<'a> {
+    /// The file's bytes.
+    data: &'a [u8],
+    /// The position of the next byte `_read` gives.
+    file_pos: usize,
+    /// The `FILE`'s buffer (`_base`), as large as `_INTERNAL_BUFSIZ`.
+    buf: Vec<u8>,
+    /// `_bufsiz`: the size of the next refill. After a seek it is `_SMALL_BUFSIZ` (512) for
+    /// one refill, then `_INTERNAL_BUFSIZ` (4096).
+    bufsiz: usize,
+    /// `_ptr`, as an index into `buf`.
+    ptr: usize,
+    /// `_cnt`.
+    cnt: usize,
+    /// `_Mychar`.
+    mychar: u8,
+    /// Whether the get area is `_Mychar`'s (`eback() == &_Mychar`): with whether its byte was
+    /// read (`gptr()` past it), and the end of the `FILE`'s get area saved (`_Set_egptr`).
+    back: Option<MsvcBack>,
+}
+
+/// The get area of [`MsvcFileBuf`] while it is `_Mychar`'s.
+#[derive(Debug, Clone, Copy)]
+struct MsvcBack {
+    consumed: bool,
+    saved_egptr: usize,
+}
+
+impl<'a> MsvcFileBuf<'a> {
+    /// `_INTERNAL_BUFSIZ`.
+    const INTERNAL_BUFSIZ: usize = 4096;
+    /// `_SMALL_BUFSIZ`.
+    const SMALL_BUFSIZ: usize = 512;
+
+    fn new(data: &'a [u8]) -> MsvcFileBuf<'a> {
+        MsvcFileBuf {
+            data,
+            file_pos: 0,
+            buf: vec![0; Self::INTERNAL_BUFSIZ],
+            bufsiz: Self::SMALL_BUFSIZ,
+            ptr: 0,
+            cnt: 0,
+            mychar: 0,
+            back: None,
+        }
+    }
+
+    /// `_filbuf` (`common_refill_and_read_nolock`): reads the next `_bufsiz` bytes into the
+    /// buffer from its start; the first of them, or `None` at the end, which leaves the read
+    /// position at the start of the buffer and nothing in it.
+    fn refill(&mut self) -> Option<u8> {
+        self.ptr = 0;
+        let n = self.bufsiz.min(self.data.len() - self.file_pos);
+        self.buf[..n].copy_from_slice(&self.data[self.file_pos..self.file_pos + n]);
+        self.file_pos += n;
+        self.bufsiz = Self::INTERNAL_BUFSIZ;
+        if n == 0 {
+            self.cnt = 0;
+            return None;
+        }
+        self.cnt = n - 1;
+        self.ptr = 1;
+        Some(self.buf[0])
+    }
+
+    /// `fgetc` (and `fread`, a byte at a time).
+    fn fgetc(&mut self) -> Option<u8> {
+        if self.cnt > 0 {
+            self.cnt -= 1;
+            self.ptr += 1;
+            Some(self.buf[self.ptr - 1])
+        } else {
+            self.refill()
+        }
+    }
+
+    /// `_Reset_back`: the get area is the `FILE`'s again, from the start of its buffer
+    /// (`setg(_Set_eback, _Set_eback, _Set_egptr)`).
+    fn reset_back(&mut self) {
+        if let Some(back) = self.back.take() {
+            self.ptr = 0;
+            self.cnt = back.saved_egptr;
+        }
+    }
+
+    /// `sbumpc()`, through `uflow` when the get area is empty.
+    fn sbumpc(&mut self) -> Option<u8> {
+        if let Some(back) = &mut self.back
+            && !back.consumed
+        {
+            back.consumed = true;
+            return Some(self.mychar);
+        }
+        self.reset_back();
+        self.fgetc()
+    }
+
+    /// One byte of `xsgetn`: the get area's, then (after `_Reset_back`) the `FILE`'s, through
+    /// `fread`.
+    fn xsgetn_byte(&mut self) -> Option<u8> {
+        self.sbumpc()
+    }
+
+    /// `sputbackc(c)`: steps back when the byte before the get position is `c`, otherwise
+    /// `pbackfail(c)`.
+    fn sputbackc(&mut self, c: u8) -> bool {
+        match &mut self.back {
+            Some(back) => {
+                if back.consumed && self.mychar == c {
+                    back.consumed = false;
+                    return true;
+                }
+            }
+            None => {
+                if self.ptr > 0 && self.buf[self.ptr - 1] == c {
+                    self.ptr -= 1;
+                    self.cnt += 1;
+                    return true;
+                }
+            }
+        }
+        self.pbackfail(c)
+    }
+
+    /// `pbackfail(c)` past its first branch (the step back `sputbackc` tried): `ungetc`, else
+    /// `_Mychar` unless the get position is already there, else failure.
+    fn pbackfail(&mut self, c: u8) -> bool {
+        if self.ungetc(c) {
+            return true;
+        }
+        let at_mychar = matches!(
+            self.back,
+            Some(MsvcBack {
+                consumed: false,
+                ..
+            })
+        );
+        if at_mychar {
+            return false;
+        }
+        self.mychar = c;
+        // _Set_back: the FILE's get area is saved unless the area is already _Mychar's.
+        let saved_egptr = match self.back {
+            Some(back) => back.saved_egptr,
+            None => self.ptr + self.cnt,
+        };
+        self.back = Some(MsvcBack {
+            consumed: false,
+            saved_egptr,
+        });
+        true
+    }
+
+    /// The Universal C Runtime's `_ungetc_nolock` on a file opened for reading, with its
+    /// buffer: at the start of the buffer it fails if the buffer holds a byte, and otherwise
+    /// writes the byte there.
+    fn ungetc(&mut self, c: u8) -> bool {
+        if self.ptr == 0 {
+            if self.cnt != 0 {
+                return false;
+            }
+            self.ptr = 1;
+        }
+        self.ptr -= 1;
+        self.buf[self.ptr] = c;
+        self.cnt += 1;
+        true
     }
 }
 
@@ -316,8 +567,8 @@ impl<'a> Stream<'a> {
     /// `Stream(std::istream&)` (stream.cpp:189-245): detects the encoding from the first bytes
     /// (yaml-cpp's state machine for the YAML specification's algorithm), steps back over the
     /// bytes that aren't a byte order mark, and reads the first character.
-    pub fn new(input: &'a [u8]) -> Stream<'a> {
-        let mut input = IStream::new(input);
+    pub fn new(input: impl Into<IStream<'a>>) -> Stream<'a> {
+        let mut input = input.into();
 
         let mut intro: [Option<u8>; 4] = [None; 4];
         let mut n_intro_used = 0usize;
@@ -333,8 +584,8 @@ impl<'a> Stream<'a> {
                 input.clear();
                 while n_ungets > 0 {
                     n_intro_used -= 1;
-                    if intro[n_intro_used].is_some() {
-                        input.putback();
+                    if let Some(c) = intro[n_intro_used] {
+                        input.putback(c);
                     }
                     n_ungets -= 1;
                 }
