@@ -312,7 +312,8 @@ impl XmlReaderPlainEltBase {
 pub struct XmlReaderComplexEltBase {
     /// The base class.
     pub element: XmlReaderElementBase,
-    parent: ContainerEltRcPtr,
+    /// The parent: `None` for a root, which upstream's readers make with a null parent.
+    parent: Option<ContainerEltRcPtr>,
 }
 
 impl XmlReaderComplexEltBase {
@@ -320,7 +321,7 @@ impl XmlReaderComplexEltBase {
     /// v2.5.2).
     pub fn new(
         name: &[u8],
-        parent: ContainerEltRcPtr,
+        parent: Option<ContainerEltRcPtr>,
         xml_line_number: u32,
         xml_file: &[u8],
     ) -> XmlReaderComplexEltBase {
@@ -331,8 +332,8 @@ impl XmlReaderComplexEltBase {
     }
 
     /// Port of `XmlReaderComplexElt::getParent` (XMLReaderHelper.h:322-325 @ v2.5.2).
-    pub fn get_parent(&self) -> &ContainerEltRcPtr {
-        &self.parent
+    pub fn get_parent(&self) -> Option<&ContainerEltRcPtr> {
+        self.parent.as_ref()
     }
 }
 
@@ -594,7 +595,7 @@ impl XmlReaderPlainElt for XmlReaderDescriptionElt {
 /// v2.5.2) its children call.
 pub trait XmlReaderSopNodeBaseElt {
     /// `getCDL`.
-    fn get_cdl(&self) -> &CdlOpDataRcPtr;
+    fn get_cdl(&self) -> CdlOpDataRcPtr;
     /// The node's [`XmlReaderSopNodeBase`].
     fn sop_node(&mut self) -> &mut XmlReaderSopNodeBase;
 }
@@ -621,7 +622,7 @@ impl XmlReaderSopNodeBase {
         xml_file: &[u8],
     ) -> XmlReaderSopNodeBase {
         XmlReaderSopNodeBase {
-            complex: XmlReaderComplexEltBase::new(name, parent, xml_line_number, xml_file),
+            complex: XmlReaderComplexEltBase::new(name, Some(parent), xml_line_number, xml_file),
             is_slope_init: false,
             is_offset_init: false,
             is_power_init: false,
@@ -695,7 +696,7 @@ impl XmlReaderSopNodeBase {
 /// v2.5.2) its children call.
 pub trait XmlReaderSatNodeBaseElt {
     /// `getCDL`.
-    fn get_cdl(&self) -> &CdlOpDataRcPtr;
+    fn get_cdl(&self) -> CdlOpDataRcPtr;
 }
 
 /// Adds the description `value` to the CDL's metadata (the name is ignored).
@@ -782,7 +783,7 @@ impl XmlReaderElement for XmlReaderSopValueElt {
         let sop_node_elt = parent
             .as_sop_node_base_mut()
             .expect("the parent of a SOP value is a SOP node");
-        let cdl = sop_node_elt.get_cdl().clone();
+        let cdl = sop_node_elt.get_cdl();
         let params = ChannelParams::new(data[0], data[1], data[2]);
 
         let name = self.plain.element.get_name();
@@ -881,7 +882,7 @@ impl XmlReaderElement for XmlReaderSaturationElt {
         let sat_node_elt = parent
             .as_sat_node_base_mut()
             .expect("the parent of a saturation is a SatNode");
-        let cdl = sat_node_elt.get_cdl().clone();
+        let cdl = sat_node_elt.get_cdl();
 
         if self.plain.element.get_name() == TAG_SATURATION {
             cdl.borrow_mut().set_saturation(data[0]);

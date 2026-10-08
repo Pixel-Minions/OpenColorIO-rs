@@ -254,12 +254,7 @@ fn create_formats() -> Vec<Box<dyn FileFormat>> {
             FormatInfo::new("lustre", "3dl", read_bake, B::LUT_3D),
         ]),
         // FileFormatCC.cpp:69-76.
-        stub(vec![FormatInfo::new(
-            FILEFORMAT_COLOR_CORRECTION,
-            "cc",
-            read_write,
-            B::NONE,
-        )]),
+        Box::new(crate::fileformats::file_format_cc::LocalFileFormat),
         // FileFormatCCC.cpp:79-86.
         stub(vec![FormatInfo::new(
             FILEFORMAT_COLOR_CORRECTION_COLLECTION,
