@@ -2527,8 +2527,9 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   590 deep can't be loaded: upstream's stack overflows.", which a group that holds itself
   reaches too. The port loads and copies nested groups without recursion; printing,
   validating and dropping a group recurse in small frames, and at opt-level 0 they fit 2,360
-  levels (four times the limit) on a 1 MiB thread. Between 591 levels and the wheel's crash the
-  port refuses what the wheel loads.
+  levels (four times the limit) on a 1 MiB thread; saving a group (`p3-yaml-save`) recurses
+  too, as upstream's writer does, and fits 1,200 levels (twice the limit). Between 591 levels
+  and the wheel's crash the port refuses what the wheel loads.
 - **Status:** matched in `p3-yaml-load-1` (3.3h2, raised from 100 to 590 in a later chunk;
   `crates/ocio/src/ocio_yaml.rs`, the copy in `crates/ocio/src/transforms/group_transform.rs`).
   Tests: 590 levels load as in the wheel, the wheel loads 591 where the port refuses them, groups

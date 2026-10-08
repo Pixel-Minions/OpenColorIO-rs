@@ -24,11 +24,17 @@
 use std::collections::HashSet;
 
 use ocio_ops::exception::Exception;
+use ocio_ops::format_metadata::FormatMetadataImpl;
 use ocio_ops::logging::{log_debug, log_warning};
+use ocio_ops::math_utils::{
+    is_m44_identity, is_scalar_equal_to_one, is_vec_equal_to_one, is_vec_equal_to_zero,
+};
 use ocio_ops::open_color_types::{
-    Allocation, BitDepth, ColorSpaceDirection, EnvironmentMode, FixedFunctionStyle,
-    ReferenceSpaceType, TransformDirection, ViewTransformDirection,
-    fixed_function_style_from_string,
+    Allocation, BitDepth, CdlStyle, ColorSpaceDirection, EnvironmentMode, FixedFunctionStyle,
+    NegativeStyle, ReferenceSpaceType, TransformDirection, ViewTransformDirection,
+    allocation_to_string, cdl_style_to_string, fixed_function_style_from_string,
+    fixed_function_style_to_string, interpolation_to_string, negative_style_to_string,
+    transform_direction_to_string,
 };
 use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 use ocio_ops::parse_utils::{
@@ -63,9 +69,16 @@ use crate::transforms::log_camera_transform::LogCameraTransform;
 use crate::transforms::log_transform::LogTransform;
 use crate::transforms::look_transform::LookTransform;
 use crate::transforms::matrix_transform::MatrixTransform;
-use crate::transforms::range_transform::{RangeTransform, range_style_from_string};
+use crate::transforms::range_transform::{
+    RangeStyle, RangeTransform, range_style_from_string, range_style_to_string,
+};
 use crate::view_transform::ViewTransform;
 use crate::viewing_rules::ViewingRules;
+use crate::yaml_cpp::emitter::Emitter;
+use crate::yaml_cpp::emitter_manip::EmitterManip::{
+    BeginMap, BeginSeq, EndMap, EndSeq, Flow, Key, Value,
+};
+use crate::yaml_cpp::emitter_manip::verbatim_tag;
 use crate::yaml_cpp::exceptions::Exception as YamlException;
 use crate::yaml_cpp::node::{Node, NodeIter, NodeType};
 use crate::yaml_cpp::parse::load;
@@ -2403,6 +2416,572 @@ pub(crate) fn read(
     })
 }
 
+// The writer (WP 3.7) ////////////////////////////////////////////////////////////////////////
+
+/// What a saver gives: nothing, or the exception that stopped it.
+pub(crate) type SaveResult = ocio_ops::exception::Result<()>;
+
+/// The allocation's name.
+///
+/// Port of `save(YAML::Emitter&, Allocation)` (OCIOYaml.cpp:183-186 @ v2.5.2).
+fn save_allocation(out: &mut Emitter, alloc: Allocation) {
+    out.put(allocation_to_string(alloc));
+}
+
+/// The direction's name.
+///
+/// Port of `save(YAML::Emitter&, TransformDirection)` (OCIOYaml.cpp:196-199 @ v2.5.2).
+fn save_direction(out: &mut Emitter, dir: TransformDirection) {
+    out.put(transform_direction_to_string(dir));
+}
+
+/// The interpolation's name.
+///
+/// Port of `save(YAML::Emitter&, Interpolation)` (OCIOYaml.cpp:208-211 @ v2.5.2).
+fn save_interpolation(out: &mut Emitter, interp: Interpolation) {
+    out.put(interpolation_to_string(interp));
+}
+
+/// The transform's `direction` key, for an inverse transform only.
+///
+/// Port of `EmitBaseTransformKeyValues` (OCIOYaml.cpp:509-522 @ v2.5.2).
+fn emit_base_transform_key_values(out: &mut Emitter, direction: TransformDirection) {
+    match direction {
+        TransformDirection::Forward => {}
+        TransformDirection::Inverse => {
+            out.put(Key).put("direction");
+            out.put(Value).put(Flow);
+            save_direction(out, direction);
+        }
+    }
+}
+
+/// The transform's `name` key, when its format metadata has a name.
+///
+/// Port of `EmitTransformName` (OCIOYaml.cpp:524-533 @ v2.5.2).
+fn emit_transform_name(out: &mut Emitter, metadata: &FormatMetadataImpl) {
+    let name = metadata.get_name();
+    if !name.is_empty() {
+        out.put(Key).put("name").put(Value).put(name);
+    }
+}
+
+/// Port of `save(YAML::Emitter&, ConstAllocationTransformRcPtr)` (OCIOYaml.cpp:577-596 @
+/// v2.5.2).
+fn save_allocation_transform(out: &mut Emitter, t: &AllocationTransform) {
+    out.put(verbatim_tag("AllocationTransform"));
+    out.put(Flow).put(BeginMap);
+
+    out.put(Key).put("allocation");
+    out.put(Value).put(Flow);
+    save_allocation(out, t.allocation());
+
+    if t.num_vars() > 0 {
+        out.put(Key).put("vars");
+        out.put(Flow).put(Value).put(t.vars());
+    }
+
+    emit_base_transform_key_values(out, t.direction());
+    out.put(EndMap);
+}
+
+/// Port of `save(YAML::Emitter&, const ConstBuiltinTransformRcPtr&)` (OCIOYaml.cpp:631-642 @
+/// v2.5.2).
+fn save_builtin(out: &mut Emitter, t: &BuiltinTransform) {
+    out.put(verbatim_tag("BuiltinTransform"));
+    out.put(Flow).put(BeginMap);
+
+    out.put(Key).put("style");
+    out.put(Value).put(Flow).put(t.style());
+
+    emit_base_transform_key_values(out, t.direction());
+
+    out.put(EndMap);
+}
+
+/// The slope, offset and power that aren't their defaults (compared in float precision,
+/// I-20), the saturation, the style, and the name from version 2.
+///
+/// Port of `save(YAML::Emitter&, ConstCDLTransformRcPtr, unsigned int)` (OCIOYaml.cpp:728-774
+/// @ v2.5.2).
+fn save_cdl(out: &mut Emitter, t: &CdlTransform, major_version: u32) {
+    out.put(verbatim_tag("CDLTransform"));
+    out.put(Flow).put(BeginMap);
+
+    if major_version >= 2 {
+        emit_transform_name(out, t.format_metadata());
+    }
+
+    let slope = t.slope();
+    if !is_vec_equal_to_one(&slope) {
+        out.put(Key).put("slope");
+        out.put(Value).put(Flow).put(&slope[..]);
+    }
+
+    let offset = t.offset();
+    if !is_vec_equal_to_zero(&offset) {
+        out.put(Key).put("offset");
+        out.put(Value).put(Flow).put(&offset[..]);
+    }
+
+    let power = t.power();
+    if !is_vec_equal_to_one(&power) {
+        out.put(Key).put("power");
+        out.put(Value).put(Flow).put(&power[..]);
+    }
+
+    if !is_scalar_equal_to_one(t.sat()) {
+        out.put(Key).put("sat").put(Value).put(t.sat());
+    }
+
+    if t.style() != CdlStyle::TRANSFORM_DEFAULT {
+        out.put(Key)
+            .put("style")
+            .put(Value)
+            .put(cdl_style_to_string(t.style()));
+    }
+
+    emit_base_transform_key_values(out, t.direction());
+    out.put(EndMap);
+}
+
+/// Port of `save(YAML::Emitter&, ConstColorSpaceTransformRcPtr)` (OCIOYaml.cpp:821-836 @
+/// v2.5.2).
+fn save_color_space_transform(out: &mut Emitter, t: &ColorSpaceTransform) {
+    out.put(verbatim_tag("ColorSpaceTransform"));
+    out.put(Flow).put(BeginMap);
+    out.put(Key).put("src").put(Value).put(c_str(t.src()));
+    out.put(Key).put("dst").put(Value).put(c_str(t.dst()));
+    let bypass = t.data_bypass();
+    if !bypass {
+        // NB: Will log a warning if read by a v1 library.
+        out.put(Key).put("data_bypass").put(Value).put(bypass);
+    }
+
+    emit_base_transform_key_values(out, t.direction());
+    out.put(EndMap);
+}
+
+/// Port of `save(YAML::Emitter&, ConstDisplayViewTransformRcPtr)` (OCIOYaml.cpp:893-913 @
+/// v2.5.2).
+fn save_display_view(out: &mut Emitter, t: &DisplayViewTransform) {
+    out.put(verbatim_tag("DisplayViewTransform"));
+    out.put(Flow).put(BeginMap);
+    out.put(Key).put("src").put(Value).put(c_str(t.src()));
+    out.put(Key)
+        .put("display")
+        .put(Value)
+        .put(c_str(t.display()));
+    out.put(Key).put("view").put(Value).put(c_str(t.view()));
+    let looks_bypass = t.looks_bypass();
+    if looks_bypass {
+        out.put(Key)
+            .put("looks_bypass")
+            .put(Value)
+            .put(looks_bypass);
+    }
+    let data_bypass = t.data_bypass();
+    if !data_bypass {
+        out.put(Key).put("data_bypass").put(Value).put(data_bypass);
+    }
+
+    emit_base_transform_key_values(out, t.direction());
+    out.put(EndMap);
+}
+
+/// The value as one number from version 2 when the RGB values are equal and alpha is 1, else
+/// the four; the negative style unless it's `clamp`; the name from version 2.
+///
+/// Port of `save(YAML::Emitter&, ConstExponentTransformRcPtr, unsigned int)`
+/// (OCIOYaml.cpp:979-1014 @ v2.5.2).
+fn save_exponent(out: &mut Emitter, t: &ExponentTransform, major_version: u32) {
+    out.put(verbatim_tag("ExponentTransform"));
+    out.put(Flow).put(BeginMap);
+
+    if major_version >= 2 {
+        emit_transform_name(out, t.format_metadata());
+    }
+
+    let value = t.value();
+    if major_version >= 2 && value[0] == value[1] && value[0] == value[2] && value[3] == 1.0 {
+        out.put(Key).put("value").put(Value).put(value[0]);
+    } else {
+        out.put(Key).put("value");
+        out.put(Value).put(Flow).put(&value[..]);
+    }
+
+    let style = t.negative_style();
+    if style != NegativeStyle::Clamp {
+        // NB: Will log a warning if read by a v1 library.
+        out.put(Key).put("style");
+        out.put(Value)
+            .put(Flow)
+            .put(negative_style_to_string(style));
+    }
+    emit_base_transform_key_values(out, t.direction());
+
+    out.put(EndMap);
+}
+
+/// The gamma and the offset, each as one number when the RGB values are equal and alpha is
+/// the default, else the four; the negative style unless it's `linear`.
+///
+/// Port of `save(YAML::Emitter&, ConstExponentWithLinearTransformRcPtr)` (OCIOYaml.cpp:
+/// 1142-1190 @ v2.5.2).
+fn save_exponent_with_linear(out: &mut Emitter, t: &ExponentWithLinearTransform) {
+    out.put(verbatim_tag("ExponentWithLinearTransform"));
+    out.put(Flow).put(BeginMap);
+
+    emit_transform_name(out, t.format_metadata());
+
+    let gamma = t.gamma();
+    if gamma[0] == gamma[1] && gamma[0] == gamma[2] && gamma[3] == 1.0 {
+        out.put(Key).put("gamma").put(Value).put(gamma[0]);
+    } else {
+        out.put(Key).put("gamma");
+        out.put(Value).put(Flow).put(&gamma[..]);
+    }
+
+    let offset = t.offset();
+
+    if offset[0] == offset[1] && offset[0] == offset[2] && offset[3] == 0.0 {
+        out.put(Key).put("offset").put(Value).put(offset[0]);
+    } else {
+        out.put(Key).put("offset");
+        out.put(Value).put(Flow).put(&offset[..]);
+    }
+
+    // Only save style if not default
+    let style = t.negative_style();
+    if style != NegativeStyle::Linear {
+        out.put(Key).put("style");
+        out.put(Value)
+            .put(Flow)
+            .put(negative_style_to_string(style));
+    }
+
+    emit_base_transform_key_values(out, t.direction());
+    out.put(EndMap);
+}
+
+/// The source, the CCC ID when there is one, the CDL style unless it's the default, and the
+/// interpolation unless it's `default` (in version 1, `default` is written `linear`).
+///
+/// Port of `save(YAML::Emitter&, ConstFileTransformRcPtr, unsigned int)` (OCIOYaml.cpp:
+/// 1384-1417 @ v2.5.2).
+fn save_file(out: &mut Emitter, t: &FileTransform, major_version: u32) {
+    out.put(verbatim_tag("FileTransform"));
+    out.put(Flow).put(BeginMap);
+    out.put(Key).put("src").put(Value).put(c_str(t.src()));
+    let cccid = c_str(t.ccc_id());
+    if !cccid.is_empty() {
+        out.put(Key).put("cccid").put(Value).put(cccid);
+    }
+    if t.cdl_style() != CdlStyle::TRANSFORM_DEFAULT {
+        // NB: Will log a warning if read by a v1 library.
+        out.put(Key)
+            .put("cdl_style")
+            .put(Value)
+            .put(cdl_style_to_string(t.cdl_style()));
+    }
+    let mut interp = t.interpolation();
+    if major_version == 1 && interp == Interpolation::Default {
+        // The DEFAULT method is not available in a v1 library.  If the v1 config is read by a v1
+        // library and the file is a LUT, a missing interp would end up set to UNKNOWN and a
+        // throw would happen when the processor is built.  Setting to LINEAR to provide more
+        // robust compatibility.
+        interp = Interpolation::Linear;
+    }
+    if interp != Interpolation::Default {
+        out.put(Key).put("interpolation");
+        out.put(Value);
+        save_interpolation(out, interp);
+    }
+
+    emit_base_transform_key_values(out, t.direction());
+    out.put(EndMap);
+}
+
+/// The style, a warning for the experimental ACES 2 styles, and the parameters when there are
+/// some.
+///
+/// Port of `save(YAML::Emitter&, ConstFixedFunctionTransformRcPtr)` (OCIOYaml.cpp:1485-1517 @
+/// v2.5.2).
+fn save_fixed_function(out: &mut Emitter, t: &FixedFunctionTransform) -> SaveResult {
+    out.put(verbatim_tag("FixedFunctionTransform"));
+    out.put(Flow).put(BeginMap);
+
+    emit_transform_name(out, t.format_metadata());
+
+    out.put(Key).put("style");
+    out.put(Value)
+        .put(Flow)
+        .put(fixed_function_style_to_string(t.style())?);
+
+    let style_id = t.style();
+    if matches!(
+        style_id,
+        FixedFunctionStyle::AcesOutputTransform20
+            | FixedFunctionStyle::AcesRgbToJmh20
+            | FixedFunctionStyle::AcesTonescaleCompress20
+            | FixedFunctionStyle::AcesGamutCompress20
+    ) {
+        let mut os =
+            b"FixedFunction style is experimental and may be removed in a future release: '"
+                .to_vec();
+        os.extend_from_slice(fixed_function_style_to_string(t.style())?.as_bytes());
+        os.extend_from_slice(b"'.");
+        log_warning(os);
+    }
+
+    let params = t.params();
+    if !params.is_empty() {
+        out.put(Key).put("params");
+        out.put(Value).put(Flow).put(&params);
+    }
+
+    emit_base_transform_key_values(out, t.direction());
+    out.put(EndMap);
+    Ok(())
+}
+
+/// A block map: the name from version 2, the direction, then the children. It recurses once
+/// per nested group, in a small frame, as printing and validating do (U-60).
+///
+/// Port of `save(YAML::Emitter&, ConstGroupTransformRcPtr, unsigned int)` (OCIOYaml.cpp:
+/// 2558-2580 @ v2.5.2).
+fn save_group(out: &mut Emitter, t: &GroupTransform, major_version: u32) -> SaveResult {
+    out.put(verbatim_tag("GroupTransform"));
+    out.put(BeginMap);
+
+    if major_version >= 2 {
+        emit_transform_name(out, t.format_metadata());
+    }
+    emit_base_transform_key_values(out, t.direction());
+
+    out.put(Key).put("children");
+    out.put(Value);
+
+    out.put(BeginSeq);
+    for i in 0..t.num_transforms() {
+        save_transform(out, t.transform(i)?, major_version)?;
+    }
+    out.put(EndSeq);
+
+    out.put(EndMap);
+    Ok(())
+}
+
+/// A log parameter: one number when the three are equal (none when it is `default_val`; a NaN
+/// default writes it always), else the three.
+///
+/// Port of `saveLogParam` (OCIOYaml.cpp:2687-2706 @ v2.5.2).
+fn save_log_param(out: &mut Emitter, param: &[f64; 3], default_val: f64, param_name: &str) {
+    // (See test in Config_test.cpp that verifies double precision is preserved.)
+    if param[0] == param[1] && param[0] == param[2] {
+        // Set defaultVal to NaN if there is no default value. It will always write param,
+        // otherwise default params are not saved.
+        if param[0] != default_val {
+            out.put(Key).put(param_name).put(Value).put(param[0]);
+        }
+    } else {
+        out.put(Key).put(param_name).put(Value).put(&param[..]);
+    }
+}
+
+/// Port of `save(YAML::Emitter&, ConstLogAffineTransformRcPtr)` (OCIOYaml.cpp:2708-2736 @
+/// v2.5.2).
+fn save_log_affine(out: &mut Emitter, t: &LogAffineTransform) {
+    out.put(verbatim_tag("LogAffineTransform"));
+    out.put(Flow).put(BeginMap);
+
+    emit_transform_name(out, t.format_metadata());
+
+    let log_slope = t.log_side_slope_value();
+    let log_offset = t.log_side_offset_value();
+    let lin_slope = t.lin_side_slope_value();
+    let lin_offset = t.lin_side_offset_value();
+
+    let base_val = t.base();
+    if base_val != 2.0 {
+        out.put(Key).put("base").put(Value).put(base_val);
+    }
+    save_log_param(out, &log_slope, 1.0, "log_side_slope");
+    save_log_param(out, &log_offset, 0.0, "log_side_offset");
+    save_log_param(out, &lin_slope, 1.0, "lin_side_slope");
+    save_log_param(out, &lin_offset, 0.0, "lin_side_offset");
+
+    emit_base_transform_key_values(out, t.direction());
+    out.put(EndMap);
+}
+
+/// Port of `save(YAML::Emitter&, ConstLogCameraTransformRcPtr)` (OCIOYaml.cpp:2836-2873 @
+/// v2.5.2).
+fn save_log_camera(out: &mut Emitter, t: &LogCameraTransform) {
+    out.put(verbatim_tag("LogCameraTransform"));
+    out.put(Flow).put(BeginMap);
+
+    emit_transform_name(out, t.format_metadata());
+
+    let log_slope = t.log_side_slope_value();
+    let log_offset = t.log_side_offset_value();
+    let lin_slope = t.lin_side_slope_value();
+    let lin_offset = t.lin_side_offset_value();
+    let lin_break = t.lin_side_break_value();
+    let linear_slope = t.linear_slope_value();
+
+    let base_val = t.base();
+    if base_val != 2.0 {
+        out.put(Key).put("base").put(Value).put(base_val);
+    }
+    save_log_param(out, &log_slope, 1.0, "log_side_slope");
+    save_log_param(out, &log_offset, 0.0, "log_side_offset");
+    save_log_param(out, &lin_slope, 1.0, "lin_side_slope");
+    save_log_param(out, &lin_offset, 0.0, "lin_side_offset");
+    save_log_param(out, &lin_break, f64::NAN, "lin_side_break");
+    if let Some(linear_slope) = linear_slope {
+        save_log_param(out, &linear_slope, f64::NAN, "linear_slope");
+    }
+
+    emit_base_transform_key_values(out, t.direction());
+    out.put(EndMap);
+}
+
+/// The base, unless it's 2 in version 2; the name from version 2.
+///
+/// Port of `save(YAML::Emitter&, ConstLogTransformRcPtr, unsigned int)` (OCIOYaml.cpp:
+/// 2925-2942 @ v2.5.2).
+fn save_log(out: &mut Emitter, t: &LogTransform, major_version: u32) {
+    out.put(verbatim_tag("LogTransform"));
+    out.put(Flow).put(BeginMap);
+
+    if major_version >= 2 {
+        emit_transform_name(out, t.format_metadata());
+    }
+
+    let base_val = t.base();
+    if base_val != 2.0 || major_version < 2 {
+        out.put(Key).put("base").put(Value).put(base_val);
+    }
+    emit_base_transform_key_values(out, t.direction());
+    out.put(EndMap);
+}
+
+/// Port of `save(YAML::Emitter&, ConstLookTransformRcPtr)` (OCIOYaml.cpp:2989-2998 @ v2.5.2).
+fn save_look_transform(out: &mut Emitter, t: &LookTransform) {
+    out.put(verbatim_tag("LookTransform"));
+    out.put(Flow).put(BeginMap);
+    out.put(Key).put("src").put(Value).put(c_str(t.src()));
+    out.put(Key).put("dst").put(Value).put(c_str(t.dst()));
+    out.put(Key).put("looks").put(Value).put(c_str(t.looks()));
+    emit_base_transform_key_values(out, t.direction());
+    out.put(EndMap);
+}
+
+/// The matrix unless it's the identity, and the offset unless it's zero (compared in float
+/// precision, I-20); the name from version 2.
+///
+/// Port of `save(YAML::Emitter&, ConstMatrixTransformRcPtr, unsigned int)` (OCIOYaml.cpp:
+/// 3059-3087 @ v2.5.2).
+fn save_matrix(out: &mut Emitter, t: &MatrixTransform, major_version: u32) {
+    out.put(verbatim_tag("MatrixTransform"));
+    out.put(Flow).put(BeginMap);
+
+    if major_version >= 2 {
+        emit_transform_name(out, t.format_metadata());
+    }
+
+    let matrix = t.matrix();
+    if !is_m44_identity(&matrix) {
+        out.put(Key).put("matrix");
+        out.put(Value).put(Flow).put(&matrix[..]);
+    }
+
+    let offset = t.offset();
+    if !is_vec_equal_to_zero(&offset) {
+        out.put(Key).put("offset");
+        out.put(Value).put(Flow).put(&offset[..]);
+    }
+
+    emit_base_transform_key_values(out, t.direction());
+    out.put(EndMap);
+}
+
+/// The bounds that are set, and the style unless it's `Clamp`.
+///
+/// Port of `save(YAML::Emitter&, ConstRangeTransformRcPtr)` (OCIOYaml.cpp:3153-3192 @
+/// v2.5.2).
+fn save_range(out: &mut Emitter, t: &RangeTransform) {
+    out.put(verbatim_tag("RangeTransform"));
+    out.put(Flow).put(BeginMap);
+
+    emit_transform_name(out, t.format_metadata());
+
+    if t.has_min_in_value() {
+        out.put(Key).put("min_in_value");
+        out.put(Value).put(Flow).put(t.min_in_value());
+    }
+
+    if t.has_max_in_value() {
+        out.put(Key).put("max_in_value");
+        out.put(Value).put(Flow).put(t.max_in_value());
+    }
+
+    if t.has_min_out_value() {
+        out.put(Key).put("min_out_value");
+        out.put(Value).put(Flow).put(t.min_out_value());
+    }
+
+    if t.has_max_out_value() {
+        out.put(Key).put("max_out_value");
+        out.put(Value).put(Flow).put(t.max_out_value());
+    }
+
+    if t.style() != RangeStyle::Clamp {
+        out.put(Key).put("style");
+        out.put(Value)
+            .put(Flow)
+            .put(range_style_to_string(t.style()));
+    }
+
+    emit_base_transform_key_values(out, t.direction());
+    out.put(EndMap);
+}
+
+/// A transform, by its class. A class without a saver (`Lut1DTransform`, `Lut3DTransform`) is
+/// refused with "Unsupported Transform() type for serialization.".
+///
+/// Port of `save(YAML::Emitter&, ConstTransformRcPtr, unsigned int)` (OCIOYaml.cpp:3353-3420 @
+/// v2.5.2). The ExposureContrast and grading savers come with their classes (Phase 5).
+// The config writer (3.7c) calls it; until then only the tests do.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn save_transform(out: &mut Emitter, t: &Transform, major_version: u32) -> SaveResult {
+    match t {
+        Transform::Allocation(t) => save_allocation_transform(out, t),
+        Transform::Builtin(t) => save_builtin(out, t),
+        Transform::Cdl(t) => save_cdl(out, t, major_version),
+        Transform::ColorSpace(t) => save_color_space_transform(out, t),
+        Transform::DisplayView(t) => save_display_view(out, t),
+        Transform::Exponent(t) => save_exponent(out, t, major_version),
+        Transform::ExponentWithLinear(t) => save_exponent_with_linear(out, t),
+        Transform::File(t) => save_file(out, t, major_version),
+        Transform::FixedFunction(t) => save_fixed_function(out, t)?,
+        Transform::Group(t) => save_group(out, t, major_version)?,
+        Transform::LogAffine(t) => save_log_affine(out, t),
+        Transform::LogCamera(t) => save_log_camera(out, t),
+        Transform::Log(t) => save_log(out, t, major_version),
+        Transform::Look(t) => save_look_transform(out, t),
+        Transform::Matrix(t) => save_matrix(out, t, major_version),
+        Transform::Range(t) => save_range(out, t),
+        Transform::Lut1D(_) | Transform::Lut3D(_) => {
+            return Err(Exception::new(
+                "Unsupported Transform() type for serialization.",
+            ));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 #[path = "ocio_yaml_oracle_tests.rs"]
 mod oracle_tests;
@@ -2410,3 +2989,7 @@ mod oracle_tests;
 #[cfg(test)]
 #[path = "ocio_yaml_objects_oracle_tests.rs"]
 mod objects_oracle_tests;
+
+#[cfg(test)]
+#[path = "ocio_yaml_save_oracle_tests.rs"]
+mod save_oracle_tests;

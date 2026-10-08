@@ -895,11 +895,12 @@ fn groups_nested_too_deep_are_refused() {
     refused(b"\n      &t !<GroupTransform>\n      children: [*t]", 8);
 }
 
-/// Loading, copying, printing, validating and dropping the deepest group the port loads, and
-/// refusing deeper groups and a group that holds itself, fit a thread of 1 MiB. Loading and
-/// copying walk the groups without recursion; printing, validating and dropping recurse in
-/// small frames: at opt-level 0, where frames are largest, all of them fit 2,360 levels (four
-/// times the limit) on 1 MiB, and building a CPU processor fits the limit.
+/// Loading, copying, printing, validating, saving and dropping the deepest group the port
+/// loads, and refusing deeper groups and a group that holds itself, fit a thread of 1 MiB.
+/// Loading and copying walk the groups without recursion; printing, validating, saving and
+/// dropping recurse in small frames: at opt-level 0, where frames are largest, printing,
+/// validating and dropping fit 2,360 levels (four times the limit) on 1 MiB, saving 1,200
+/// (twice the limit), and building a CPU processor fits the limit.
 #[test]
 fn deep_groups_fit_a_small_stack() {
     // Parsed here: yaml-cpp's parser recurses per level of the text, which isn't the loader's.
@@ -925,6 +926,8 @@ fn deep_groups_fit_a_small_stack() {
                     let copy = t.clone();
                     assert!(!t.to_bytes().is_empty());
                     let _ = t.validate();
+                    let mut out = crate::yaml_cpp::emitter::Emitter::new();
+                    save_transform(&mut out, &t, 2).unwrap();
                     let config = crate::Config::create_raw().unwrap();
                     let processor = config.processor(&t).unwrap();
                     processor.default_cpu_processor().unwrap();
