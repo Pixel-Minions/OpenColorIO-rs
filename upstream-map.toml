@@ -2398,7 +2398,7 @@ path = "src/OpenColorIO/transforms/builtins/ACES.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/aces.rs"]
 status = "partial"
-note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (576-1437), the ACES 2.0 table's names (1122-1419); p3-builtins 3.2g: AP1_to_CIE_XYZ_D65 (30-35), ACEScct_to_LINEAR (40-55) and the ops of the 8 entries built from Matrix, Log and Range ops (579-634, 691-715, 762-773), through the battery (tests/api_battery_oracle.rs); the LUT, fixed-function and output-transform entries come with p3-after-p2"
+note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (576-1437), the ACES 2.0 table's names (1122-1419); p3-builtins 3.2g: AP1_to_CIE_XYZ_D65 (30-35), ACEScct_to_LINEAR (40-55) and the ops of the 8 entries built from Matrix, Log and Range ops (579-634, 691-715, 762-773), through the battery (tests/api_battery_oracle.rs); p3-after-p2: ADX_to_ACES (57-137), ACEScc, ADX10, ADX16 and the ACES 1.3 gamut compression (641-684, 717-756, 775-791), through the API sweeps (api_cases::BUILTINS_WITH_OPS); the ACES 1.x and 2.0 output transforms come with p3-after-p2"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/ACES.h"
@@ -2410,14 +2410,15 @@ status = "todo"
 path = "src/OpenColorIO/transforms/builtins/AppleCameras.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/apple_cameras.rs"]
-status = "partial"
-note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (96-122); the ops (fixed functions) come with p3-after-p2"
+status = "done"
+note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (96-122); p3-after-p2: GenerateAppleLogToLinearOps (30-86, the OCIO_LUT_SUPPORT branch the file defines), the op creators, through the API sweeps (api_cases::BUILTINS_WITH_OPS)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/AppleCameras.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/apple_cameras.rs"]
-status = "todo"
+status = "done"
+note = "p3-after-p2: RegisterAll"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/ArriCameras.cpp"
@@ -2451,14 +2452,15 @@ note = "p3-transforms (3.1b)"
 path = "src/OpenColorIO/transforms/builtins/CanonCameras.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/canon_cameras.rs"]
-status = "partial"
-note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (146-197); the ops (fixed functions) come with p3-after-p2"
+status = "done"
+note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (146-197); p3-after-p2: the Cinema Gamut primaries and the C-Log2 and C-Log3 LUTs (26-138, the OCIO_LUT_SUPPORT branches the file defines), the op creators, through the API sweeps (api_cases::BUILTINS_WITH_OPS)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/CanonCameras.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/canon_cameras.rs"]
-status = "todo"
+status = "done"
+note = "p3-after-p2: RegisterAll"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/ColorMatrixHelpers.cpp"
@@ -2478,27 +2480,29 @@ note = "p2-aces2-cpu: ported whole into ocio-ops, since the ACES 2.0 fixed funct
 path = "src/OpenColorIO/transforms/builtins/Displays.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/displays.rs"]
-status = "partial"
-note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (177-556); p3-builtins 3.2g: the ops of the 15 SDR displays (Matrix or Scale then Gamma ops, 182-429), through the battery (tests/api_battery_oracle.rs); the PQ and HLG entries come with p3-after-p2"
+status = "done"
+note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (177-556); p3-builtins 3.2g: the ops of the 15 SDR displays (Matrix or Scale then Gamma ops, 182-429); p3-after-p2: ST_2084 and HLG (29-175, the OCIO_LUT_SUPPORT branches the file defines; the #else branches are not compiled) and the PQ and HLG entries (442-556), through the API sweeps (api_cases::BUILTINS_WITH_OPS)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/Displays.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/displays.rs"]
-status = "todo"
+status = "done"
+note = "p3-after-p2: RegisterAll"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/OpHelpers.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/op_helpers.rs"]
-status = "todo"
-note = "p3-builtins: comes with its first callers, the LUT entries of p3-after-p2 (the inverse 1D LUT renderers are Phase 2's 2.1f), so it lands with the tests that exercise it"
+status = "done"
+note = "p3-after-p2: Interpolate1D, CreateLut and CreateHalfLut (the CreateLut overload of three doubles, 76-104, has no caller in v2.5.2 and is not ported), with OCIO_ADD_TEST(Builtins, interpolate) and through their callers' API sweeps (api_cases::BUILTINS_WITH_OPS)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/OpHelpers.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/op_helpers.rs"]
-status = "todo"
+status = "done"
+note = "p3-after-p2: the declarations"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/PanasonicCameras.cpp"
@@ -4993,9 +4997,9 @@ note = "p1-transforms-fam1"
 [[file]]
 path = "tests/cpu/transforms/BuiltinTransform_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio/src/transforms/builtin_transform_tests.rs", "crates/ocio-ops/src/transforms/builtins/color_matrix_helpers_tests.rs"]
+target = ["crates/ocio/src/transforms/builtin_transform_tests.rs", "crates/ocio-ops/src/transforms/builtins/color_matrix_helpers_tests.rs", "crates/ocio/src/transforms/builtins/op_helpers_tests.rs"]
 status = "partial"
-note = "p3-transforms (3.1b): creation, access; p2-aces2-cpu: color_matrix_helpers, in ocio-ops (color_matrix_helpers_tests.rs); p2-api-parity: forward_inverse; interpolate (the builders' Interpolate1D), validate, aces2_displayview_roundtrip and aces2_Aab_to_RGB_nan build ops of the built-ins that wait for Phase 2 (p3-after-p2)"
+note = "p3-transforms (3.1b): creation, access; p2-aces2-cpu: color_matrix_helpers, in ocio-ops (color_matrix_helpers_tests.rs); p2-api-parity: forward_inverse; p3-after-p2: interpolate (op_helpers_tests.rs, next to Interpolate1D); validate, aces2_displayview_roundtrip and aces2_Aab_to_RGB_nan build ops of the output transforms (p3-after-p2)"
 
 [[file]]
 path = "tests/cpu/transforms/CDLTransform_tests.cpp"

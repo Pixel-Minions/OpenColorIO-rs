@@ -76,12 +76,15 @@ fn replacing_ignores_case() {
 }
 
 /// The global registry's ops: an index past its entries is upstream's error, and an entry whose
-/// ops are not ported yet (the last one, Rec.2100 HLG, a fixed function of `p3-after-p2`) says
-/// so, in both directions.
+/// ops are not ported yet (the first ACES 1.x output transform, of `p3-after-p2`) says so, in
+/// both directions.
 #[test]
 fn ops_of_the_global_registry() {
     let registry = BuiltinTransformRegistry::get();
-    let last = registry.num_builtins() - 1;
+    const STYLE: &str = "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-CINEMA_1.0";
+    let index = (0..registry.num_builtins())
+        .find(|&i| registry.builtin_style(i).unwrap() == STYLE.as_bytes())
+        .unwrap();
     let mut ops = OpVec::new();
     for dir in [TransformDirection::Forward, TransformDirection::Inverse] {
         check_throw_what(
@@ -89,10 +92,10 @@ fn ops_of_the_global_registry() {
             "Invalid built-in transform name.",
         );
         check_throw_what(
-            create_builtin_transform_ops(&mut ops, last, dir),
+            create_builtin_transform_ops(&mut ops, index, dir),
             concat!(
-                "BuiltinTransform: the ops of 'DISPLAY - CIE-XYZ-D65_to_REC.2100-HLG-1000nit' ",
-                "are not ported yet."
+                "BuiltinTransform: the ops of 'ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - ",
+                "SDR-CINEMA_1.0' are not ported yet."
             ),
         );
     }
