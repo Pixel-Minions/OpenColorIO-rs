@@ -576,6 +576,12 @@ fn optimized_luts_match_the_wheel() {
             lut_of(5, T, Forward, smooth),
             lut_of(3, L, Forward, folded),
         ),
+        // Equal sizes off the 1/16 nodes: the first LUT's own values, not a resampling.
+        pair(
+            "8^3 twice",
+            lut_of(8, T, Forward, smooth),
+            lut_of(8, L, Forward, folded),
+        ),
         pair(
             "17^3 twice",
             lut_of(17, T, Forward, smooth),
@@ -625,4 +631,92 @@ fn optimized_luts_match_the_wheel() {
         &json!(["OPTIMIZATION_LOSSLESS", "OPTIMIZATION_COMP_LUT3D"]),
         exact,
     );
+}
+
+/// Compositions of two LUTs with different file output bit depths
+/// (`Lut3DOpData::Compose`, src/OpenColorIO/ops/lut3d/Lut3DOpData.cpp:60-153 @ v2.5.2: the
+/// result keeps the first LUT's), forward and inverse, at `OPTIMIZATION_GOOD`,
+/// `OPTIMIZATION_DRAFT` and `OPTIMIZATION_LOSSLESS | OPTIMIZATION_COMP_LUT3D`.
+#[test]
+fn compositions_with_file_depths_match_the_wheel() {
+    use Interpolation::{Linear as L, Tetrahedral as T};
+    let pair =
+        |label: &str, a: Lut, b: Lut| group(label, Forward, &[a.case("first"), b.case("second")]);
+    let pairs = vec![
+        pair(
+            "3^3 (10i) then 5^3 (12i)",
+            lut_of(3, L, Forward, folded).depth(BitDepth::Uint10),
+            lut_of(5, T, Forward, smooth).depth(BitDepth::Uint12),
+        ),
+        pair(
+            "5^3 (10i) then 3^3 (12i)",
+            lut_of(5, T, Forward, smooth).depth(BitDepth::Uint10),
+            lut_of(3, L, Forward, folded).depth(BitDepth::Uint12),
+        ),
+        pair(
+            "inverse 4^3 (8i) then inverse 6^3 (16f)",
+            lut_of(4, T, Inverse, smooth).depth(BitDepth::Uint8),
+            lut_of(6, L, Inverse, smooth).depth(BitDepth::F16),
+        ),
+        pair(
+            "inverse 6^3 (8i) then 3^3 (32f)",
+            lut_of(6, T, Inverse, smooth).depth(BitDepth::Uint8),
+            lut_of(3, L, Forward, folded).depth(BitDepth::F32),
+        ),
+    ];
+    for (name, flags) in [
+        ("OPTIMIZATION_GOOD", OptimizationFlags::GOOD),
+        ("OPTIMIZATION_DRAFT", OptimizationFlags::DRAFT),
+    ] {
+        check_optimized_processors_at(&pairs, &[(Depth::F32, Depth::F32)], &json!(name), flags);
+    }
+    let exact = OptimizationFlags(OptimizationFlags::LOSSLESS.0 | OptimizationFlags::COMP_LUT3D.0);
+    check_optimized_processors_at(
+        &pairs,
+        &[(Depth::F32, Depth::F32)],
+        &json!(["OPTIMIZATION_LOSSLESS", "OPTIMIZATION_COMP_LUT3D"]),
+        exact,
+    );
+}
+
+/// An inverse LUT of one entry per side: every path that builds its renderer refuses it
+/// (U-65): the CPU processor with and without `OPTIMIZATION_LUT_INV_FAST`, the optimized
+/// processor with it, and the GPU processor, which bakes the fast forward LUT. The wheel
+/// never returns from any of them, so there is nothing to ask it.
+#[test]
+fn an_inverse_lut_of_grid_size_1_is_refused_on_every_path() {
+    use ocio_ops::ops::lut3d::inv_lut3d::GRID_SIZE_1_INVERSE;
+    let mut lut = Lut3DTransform::with_grid_size(1).unwrap();
+    lut.set_value(0, 0, 0, 0.25, 0.5, 0.75).unwrap();
+    lut.set_direction(Inverse);
+    let transform: Transform = lut.into();
+    let config = ocio::Config::create_raw().unwrap();
+    let processor = config.processor(&transform).unwrap();
+    let exact =
+        OptimizationFlags(OptimizationFlags::DEFAULT.0 & !OptimizationFlags::LUT_INV_FAST.0);
+    let message = |r: Result<(), ocio::Exception>| r.unwrap_err().message().to_string();
+    for (label, refused) in [
+        (
+            "default CPU",
+            message(processor.default_cpu_processor().map(|_| ())),
+        ),
+        (
+            "CPU without LUT_INV_FAST",
+            message(processor.optimized_cpu_processor(exact).map(|_| ())),
+        ),
+        (
+            "optimized with LUT_INV_FAST",
+            message(
+                processor
+                    .optimized_processor(OptimizationFlags::DEFAULT)
+                    .map(|_| ()),
+            ),
+        ),
+        (
+            "default GPU",
+            message(processor.default_gpu_processor().map(|_| ())),
+        ),
+    ] {
+        assert_eq!(refused, GRID_SIZE_1_INVERSE, "{label}");
+    }
 }
