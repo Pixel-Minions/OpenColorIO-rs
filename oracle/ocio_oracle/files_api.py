@@ -9,7 +9,11 @@
 
 The commands that read LUT files (processor_ops, cpu_apply, image_apply, gpu_shader,
 config_calls, transform_text, ...) then need no change: a FileTransform spec names
-"$FILES/lut.spi1d", and the result names it the same way on every machine.
+"$FILES/lut.spi1d", and the result names it the same way on every machine. A reader's error
+can hold bytes of the file that aren't UTF-8: the commands that build a processor through
+commands._processor report it as {"type": "UnicodeDecodeError", "undecodable": hex}, and
+config_calls as {"undecodable": hex}; the directory's path is written back as "$FILES" in
+those bytes too.
 
 Like every oracle command, it reports what the library does and never computes expected
 values.
@@ -63,15 +67,26 @@ def _restore(value, roots):
         if set(value) <= {"bytes", "undecodable"} and len(value) == 1:
             key = next(iter(value))
             if isinstance(value[key], str):
-                try:
-                    data = bytes.fromhex(value[key])
-                except ValueError:
-                    return value
-                for root in roots:
-                    data = data.replace(root.encode("utf-8"), b"$FILES")
-                return {key: data.hex()}
+                return {key: _restore_hex(value[key], roots)}
+        # An exception whose message isn't UTF-8: {"type", "undecodable": hex}
+        # (commands.exception_result).
+        if set(value) == {"type", "undecodable"} and isinstance(value["undecodable"], str):
+            return {"type": _restore(value["type"], roots),
+                    "undecodable": _restore_hex(value["undecodable"], roots)}
         return {_restore(k, roots): _restore(v, roots) for k, v in value.items()}
     return value
+
+
+def _restore_hex(value, roots):
+    """The hex of bytes, with each spelling of the directory's path written back as "$FILES";
+    `value` as is when it isn't hex."""
+    try:
+        data = bytes.fromhex(value)
+    except ValueError:
+        return value
+    for root in roots:
+        data = data.replace(root.encode("utf-8"), b"$FILES")
+    return data.hex()
 
 
 @command
@@ -90,7 +105,8 @@ def with_files(args, blobs):
     result:
       the command's result, with the directory's path (also with "/" for "\\" on Windows)
       written back as "$FILES" in strings and in the bytes of {"bytes": hex} and
-      {"undecodable": hex} values
+      {"undecodable": hex} values, and of the "undecodable" of an exception's
+      {"type", "undecodable": hex}
     blobs: the command's
 
     The directory is the working directory while the command runs, and is deleted after.
