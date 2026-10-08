@@ -18,7 +18,7 @@ use crate::context::Context;
 use crate::transform::{Nesting, Transform};
 use crate::transforms::color_space_transform::collect_color_space_transform_context_variables;
 use crate::transforms::display_view_transform::collect_display_view_transform_context_variables;
-use crate::transforms::file_transform::collect_file_transform_context_variables;
+use crate::transforms::file_transform;
 use crate::transforms::look_transform::collect_look_transform_context_variables;
 
 /// A context variable's name, ordered as `EnvMapKey` orders them: longer names first, then
@@ -192,7 +192,8 @@ pub(crate) fn collect_context_variables(
         Transform::ColorSpace(tr) => {
             collect_color_space_transform_context_variables(config, context, tr, used_context_vars)
         }
-        Transform::File(tr) => Ok(collect_file_transform_context_variables(
+        Transform::File(tr) => Ok(file_transform::collect_context_variables(
+            config,
             context,
             tr,
             used_context_vars,

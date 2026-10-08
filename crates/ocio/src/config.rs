@@ -11,6 +11,7 @@ use std::fmt;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, RwLock};
 
+use ocio_ops::cfmt::{Crt, OStringStream};
 use ocio_ops::exception::{Exception, Result};
 use ocio_ops::image_desc::PackedImageDesc;
 use ocio_ops::logging::{log_error, log_info};
@@ -6059,15 +6060,16 @@ impl Config {
         if let Some(mut cache) = self.processor_cache.lock() {
             // Note that the key includes a string description of the transform which does not
             // include all the LUT entries (just the arguments of the FileTransforms for LUTs).
-            // `oss << usedContext->getCacheID() << *transform << direction` (the cache ID only
-            // when the transform needs context variables): the direction prints as its value.
-            let mut text = Vec::new();
+            // `oss << usedContext->getCacheID() << *transform << direction` on one stream (the
+            // cache ID only when the transform needs context variables): the direction prints as
+            // its value, after whatever state the transform's text leaves on the stream.
+            let mut oss = OStringStream::new(Crt::NATIVE);
             if need_context_variables {
-                text.extend_from_slice(used_context.cache_id().as_bytes());
+                oss.put_str(&used_context.cache_id());
             }
-            text.extend_from_slice(&transform.to_bytes());
-            text.extend_from_slice((direction as i32).to_string().as_bytes());
-            let key = std_hash_string(&text);
+            transform.write_text(&mut oss);
+            oss.put_i32(direction as i32);
+            let key = std_hash_string(oss.str());
 
             // Upstream's `m_processorCache[key]` adds an empty entry before it creates the
             // processor, which stays empty when the creation throws; the fallback below skips
