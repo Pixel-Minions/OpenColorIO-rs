@@ -11,6 +11,7 @@ use std::fmt;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, RwLock};
 
+use ocio_ops::cfmt::{Crt, OStringStream};
 use ocio_ops::exception::{Exception, Result};
 use ocio_ops::image_desc::PackedImageDesc;
 use ocio_ops::math_utils::equal_with_abs_error;
@@ -4079,10 +4080,10 @@ impl Config {
         // used for this transform. This allows the cache to be more efficient. However, there
         // are still some various TODOs since the usedContext will sometimes contain more vars
         // than are needed.
-        //
-        // The context's search path, working directory and IO proxy, which upstream copies
-        // into it, come with the context's state (Phase 3).
         let mut used_context = Context::new();
+        used_context.set_search_path(context.search_path());
+        used_context.set_working_dir(context.working_dir());
+        used_context.set_config_io_proxy(context.config_io_proxy().cloned());
 
         let need_context_variables =
             collect_context_variables(self, context, transform, &mut used_context);
@@ -4099,17 +4100,14 @@ impl Config {
         if let Some(mut cache) = self.processor_cache.lock() {
             // Note that the key includes a string description of the transform which does not
             // include all the LUT entries (just the arguments of the FileTransforms for LUTs).
+            // The direction prints as its value; the transform's text as its bytes.
+            let mut oss = OStringStream::new(Crt::NATIVE);
             if need_context_variables {
-                // Only the transforms that read context variables (color space, display view,
-                // file and look transforms) need them, and none of those is ported yet; the
-                // used context's cache ID comes with them.
-                return Err(Exception::new(
-                    "Config::getProcessor: the cache ID of a context is not ported yet.",
-                ));
+                oss.put_str(&used_context.cache_id());
             }
-            // `oss << "" << *transform << direction`: the direction prints as its value.
-            let text = format!("{transform}{}", direction as i32);
-            let key = std_hash_string(text.as_bytes());
+            transform.write_text(&mut oss);
+            oss.put_i32(direction as i32);
+            let key = std_hash_string(oss.str());
 
             // Upstream's `m_processorCache[key]` adds an empty entry before it creates the
             // processor, which stays empty when the creation throws; the fallback below skips

@@ -10,11 +10,20 @@
 //! start. A format whose reader isn't ported yet is [`NotPortedFormat`], which holds its
 //! `getFormatInfo` and refuses to read; each format's chunk replaces it (WP 4.2-4.9).
 
+use std::any::Any;
 use std::collections::BTreeMap;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 use ocio_ops::exception::{Exception, Result};
+use ocio_ops::op::OpVec;
+use ocio_ops::open_color_types::TransformDirection;
+use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 use ocio_ops::utils::string_utils::{c_str, lower};
+
+use crate::config::Config;
+use crate::context::Context;
+use crate::fileformats::input_stream::InputStream;
+use crate::transforms::file_transform::FileTransform;
 
 /// `FILEFORMAT_CLF`.
 pub const FILEFORMAT_CLF: &str = "Academy/ASC Common LUT Format";
@@ -112,14 +121,49 @@ impl FormatInfo {
     }
 }
 
-/// A file format: its infos, and (as its chunk ports them) reading, baking and writing.
+/// What a format read from a file, which the format's `build_file_ops` turns into ops (it
+/// downcasts it to its own type). The file cache keeps it.
+///
+/// Port of `CachedFile` (FileTransform.h:23-33 @ v2.5.2); `getCDLGroup` comes with the CDL
+/// formats (WP 4.4).
+pub trait CachedFile: Any + Send + Sync {}
+
+/// A shared [`CachedFile`].
+pub type CachedFileRcPtr = Arc<dyn CachedFile>;
+
+/// A file format: its infos, reading, and (as their chunks port them) baking and writing.
 ///
 /// Port of `FileFormat` (FileTransform.h:66-106, FileTransform.cpp:556-593 @ v2.5.2), so far
-/// `getFormatInfo`, `isBinary` and `getName`; `read`, `buildFileOps`, `bake` and `write` come
-/// with the loader (4.1b), the baker (WP 4.8) and the writers.
+/// `getFormatInfo`, `read`, `buildFileOps`, `isBinary` and `getName`; `bake` and `write` come
+/// with the baker (WP 4.8) and the writers.
 pub trait FileFormat: Send + Sync {
     /// Port of `FileFormat::getFormatInfo`.
     fn format_info(&self) -> Vec<FormatInfo>;
+
+    /// Reads the file `stream` holds. `original_file_name` is the file's path, which some
+    /// readers parse; it may be empty when unknown.
+    ///
+    /// Port of `FileFormat::read` (FileTransform.h:74-79 @ v2.5.2).
+    fn read(
+        &self,
+        stream: &mut InputStream,
+        original_file_name: &[u8],
+        interp: Interpolation,
+    ) -> Result<CachedFileRcPtr>;
+
+    /// Appends the ops of `cached_file`, which this format read, for `file_transform` in the
+    /// direction `dir`.
+    ///
+    /// Port of `FileFormat::buildFileOps` (FileTransform.h:90-95 @ v2.5.2).
+    fn build_file_ops(
+        &self,
+        ops: &mut OpVec,
+        config: &Config,
+        context: &Context,
+        cached_file: &CachedFileRcPtr,
+        file_transform: &FileTransform,
+        dir: TransformDirection,
+    ) -> Result<()>;
 
     /// Whether the format reads its files in binary rather than text mode.
     ///
@@ -159,6 +203,25 @@ impl NotPortedFormat {
 impl FileFormat for NotPortedFormat {
     fn format_info(&self) -> Vec<FormatInfo> {
         self.infos.clone()
+    }
+
+    /// Refuses: the reader isn't ported yet. The loader takes it for a failed read and tries
+    /// the next format.
+    fn read(&self, _: &mut InputStream, _: &[u8], _: Interpolation) -> Result<CachedFileRcPtr> {
+        Err(self.not_ported())
+    }
+
+    /// Refuses, as [`read`](Self::read) never gives a file to build.
+    fn build_file_ops(
+        &self,
+        _: &mut OpVec,
+        _: &Config,
+        _: &Context,
+        _: &CachedFileRcPtr,
+        _: &FileTransform,
+        _: TransformDirection,
+    ) -> Result<()> {
+        Err(self.not_ported())
     }
 
     fn is_binary(&self) -> bool {

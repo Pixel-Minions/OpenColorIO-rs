@@ -26,6 +26,16 @@ pub const OCIO_DISABLE_PROCESSOR_CACHES: &str = "OCIO_DISABLE_PROCESSOR_CACHES";
 /// Port of `OCIO_DISABLE_CACHE_FALLBACK` (src/OpenColorIO/Caching.cpp:18 @ v2.5.2).
 pub const OCIO_DISABLE_CACHE_FALLBACK: &str = "OCIO_DISABLE_CACHE_FALLBACK";
 
+/// Forgets every file hash and every file load, so files are read again (the processors'
+/// caches stay).
+///
+/// Port of `ClearAllCaches` (src/OpenColorIO/Caching.cpp:24-28 @ v2.5.2).
+#[doc(alias = "ClearAllCaches")]
+pub fn clear_all_caches() {
+    crate::path_utils::clear_path_caches();
+    crate::transforms::file_transform::clear_file_transform_caches();
+}
+
 /// `std::hash<std::string>{}(text)`, as each wheel's C++ library computes it: MSVC's FNV-1a
 /// (64 bits) on Windows, libstdc++'s `_Hash_bytes` with the seed `0xc70f6907` on Linux. The
 /// caches key their entries with it, so two texts with the same hash share an entry, on one

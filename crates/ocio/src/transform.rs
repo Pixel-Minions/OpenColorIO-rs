@@ -34,7 +34,7 @@ use crate::transforms::exponent_transform::{
 use crate::transforms::exponent_with_linear_transform::{
     ExponentWithLinearTransform, build_exponent_with_linear_op, create_gamma_transform,
 };
-use crate::transforms::file_transform::FileTransform;
+use crate::transforms::file_transform::{FileTransform, build_file_transform_ops};
 use crate::transforms::fixed_function_transform::{
     FixedFunctionTransform, build_fixed_function_op, create_fixed_function_transform,
 };
@@ -485,7 +485,9 @@ pub(crate) fn build_ops(
         Transform::ExponentWithLinear(exponent_transform) => {
             build_exponent_with_linear_op(ops, exponent_transform, dir)
         }
-        Transform::File(_) => Err(not_ported_yet("FileTransform", "WP 4.1")),
+        Transform::File(file_transform) => {
+            build_file_transform_ops(ops, config, context, file_transform, dir)
+        }
         Transform::FixedFunction(ff_transform) => build_fixed_function_op(ops, ff_transform, dir),
         Transform::Group(group_transform) => {
             build_group_ops(ops, config, context, group_transform, dir)
