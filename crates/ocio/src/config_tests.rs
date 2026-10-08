@@ -4199,3 +4199,1233 @@ view_transforms:
         config.set_version(2, 5).unwrap();
     }
 }
+
+/// `PROFILE_V2 + SIMPLE_PROFILE_A + SIMPLE_PROFILE_B_V2`, without the default rules
+/// (Config_tests.cpp:2304 @ v2.5.2).
+fn profile_v2_without_rules() -> String {
+    [
+        PROFILE_V2,
+        SIMPLE_PROFILE_A,
+        SIMPLE_PROFILE_DISPLAYS_LOOKS,
+        SIMPLE_PROFILE_CS_V2,
+    ]
+    .concat()
+}
+
+/// Reads `text`, checks that `validate()` fails with `what`, and that the config serializes
+/// back to `text`.
+fn check_invalid_round_trip(text: &str, what: &str) {
+    let config = Config::create_from_stream(text.as_bytes()).unwrap();
+    check_throw_what(config.validate(), what);
+    check_serialized(&config.serialize().unwrap(), text);
+}
+
+/// Port of `OCIO_ADD_TEST(Config, range_serialization)` @ v2.5.2.
+#[test]
+fn range_serialization() {
+    let _env = EnvGuard::new();
+    {
+        let str_end =
+            "    from_scene_reference: !<RangeTransform> {min_in_value: 0, min_out_value: 0}\n";
+        check_round_trip(&(profile_v2_start() + str_end));
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<RangeTransform> {min_in_value: 0, min_out_value: 0, ",
+            "direction: inverse}\n",
+        );
+        check_round_trip(&(profile_v2_start() + str_end));
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<RangeTransform> {min_in_value: 0, min_out_value: 0, ",
+            "style: noClamp}\n",
+        );
+        let str = profile_v2_start() + str_end;
+
+        let config = Config::create_from_stream(str.as_bytes()).unwrap();
+        check_throw_what(
+            config.validate(),
+            "non clamping range must have min and max values defined",
+        );
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<RangeTransform> {min_in_value: 0, max_in_value: 1, ",
+            "min_out_value: 0, max_out_value: 1, style: noClamp, direction: inverse}\n",
+        );
+        check_round_trip(&(profile_v2_start() + str_end));
+    }
+
+    {
+        // Test Range with clamp style (i.e. default one)
+        let str_end = concat!(
+            "    from_scene_reference: !<RangeTransform> {min_in_value: -0.0109, ",
+            "max_in_value: 1.0505, min_out_value: 0.0009, max_out_value: 2.5001, ",
+            "direction: inverse}\n",
+        );
+        check_round_trip(&(profile_v2_start() + str_end));
+    }
+
+    {
+        // Test Range with clamp style
+        let in_str_end = concat!(
+            "    from_scene_reference: !<RangeTransform> {min_in_value: -0.0109, ",
+            "max_in_value: 1.0505, min_out_value: 0.0009, max_out_value: 2.5001, ",
+            "style: Clamp, direction: inverse}\n",
+        );
+        let in_str = profile_v2_start() + in_str_end;
+
+        let config = Config::create_from_stream(in_str.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        // Clamp style is not saved
+        let out_str_end = concat!(
+            "    from_scene_reference: !<RangeTransform> {min_in_value: -0.0109, ",
+            "max_in_value: 1.0505, min_out_value: 0.0009, max_out_value: 2.5001, ",
+            "direction: inverse}\n",
+        );
+        let out_str = profile_v2_start() + out_str_end;
+
+        check_serialized(&config.serialize().unwrap(), &out_str);
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<RangeTransform> ",
+            "{min_in_value: 0, max_out_value: 1}\n",
+        );
+        check_invalid_round_trip(
+            &(profile_v2_start() + str_end),
+            "must be both set or both missing",
+        );
+    }
+
+    {
+        // max_in_value has an illegal second number.
+        let str_end_fail = concat!(
+            "    from_scene_reference: !<RangeTransform> {min_in_value: -0.01, ",
+            "max_in_value: 1.05  10, min_out_value: 0.0009, max_out_value: 2.5}\n",
+        );
+        let str_end = concat!(
+            "    from_scene_reference: !<RangeTransform> {min_in_value: -0.01, ",
+            "max_in_value: 1.05, min_out_value: 0.0009, max_out_value: 2.5}\n",
+        );
+
+        let str = profile_v2_without_rules() + str_end_fail;
+        let str_saved = profile_v2_start() + str_end;
+
+        check_throw_what(
+            Config::create_from_stream(str.as_bytes()),
+            "parsing double failed",
+        );
+
+        // Re-serialize and test that it matches the expected text.
+        check_round_trip(&str_saved);
+    }
+
+    {
+        // max_in_value & max_out_value have no value, they will not be defined.
+        let str_end = concat!(
+            "    from_scene_reference: !<RangeTransform> {min_in_value: -0.01, ",
+            "max_in_value: , min_out_value: -0.01, max_out_value: }\n",
+        );
+        let str_end_saved = concat!(
+            "    from_scene_reference: !<RangeTransform> {min_in_value: -0.01, ",
+            "min_out_value: -0.01}\n",
+        );
+        let str = profile_v2_without_rules() + str_end;
+        let str_saved = profile_v2_start() + str_end_saved;
+
+        let config = Config::create_from_stream(str.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        // Re-serialize and test that it matches the expected text.
+        check_serialized(&config.serialize().unwrap(), &str_saved);
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<RangeTransform> ",
+            "{min_in_value: 0.12345678901234, max_out_value: 1.23456789012345}\n",
+        );
+        check_invalid_round_trip(
+            &(profile_v2_start() + str_end),
+            "must be both set or both missing",
+        );
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<RangeTransform> {min_in_value: -0.01, ",
+            "max_in_value: 1.05, min_out_value: 0.0009, max_out_value: 2.5}\n",
+        );
+        // Re-serialize and test that it matches the original text.
+        check_round_trip(&(profile_v2_start() + str_end));
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<RangeTransform> {min_out_value: 0.0009, ",
+            "max_out_value: 2.5}\n",
+        );
+        check_invalid_round_trip(
+            &(profile_v2_start() + str_end),
+            "must be both set or both missing",
+        );
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<RangeTransform> {min_in_value: -0.01, max_in_value: 1.05, ",
+            "min_out_value: 0.0009, max_out_value: 2.5}\n",
+            "        - !<RangeTransform> {min_out_value: 0.0009, max_out_value: 2.1}\n",
+            "        - !<RangeTransform> {min_out_value: 0.1, max_out_value: 0.9}\n",
+        );
+        // Re-serialize and test that it matches the original text.
+        check_invalid_round_trip(
+            &(profile_v2_start() + str_end),
+            "must be both set or both missing",
+        );
+    }
+
+    // Some faulty cases
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            // missing { (and mInValue is wrong -> that's a warning)
+            "        - !<RangeTransform> mInValue: -0.01, max_in_value: 1.05, ",
+            "min_out_value: 0.0009, max_out_value: 2.5}\n",
+        );
+        let str = profile_v2_start() + str_end;
+
+        check_throw_what(
+            Config::create_from_stream(str.as_bytes()),
+            "Loading the OCIO profile failed",
+        );
+    }
+
+    {
+        let str_end = concat!(
+            // The comma is missing after the min_in_value value.
+            "    from_scene_reference: !<RangeTransform> {min_in_value: -0.01 ",
+            "max_in_value: 1.05, min_out_value: 0.0009, max_out_value: 2.5}\n",
+        );
+        let str = profile_v2_start() + str_end;
+
+        check_throw_what(
+            Config::create_from_stream(str.as_bytes()),
+            "Loading the OCIO profile failed",
+        );
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<RangeTransform> {min_in_value: -0.01, ",
+            // The comma is missing between the min_out_value value and
+            // the max_out_value tag.
+            "max_in_value: 1.05, min_out_value: 0.0009maxOutValue: 2.5}\n",
+        );
+        let str = profile_v2_start() + str_end;
+
+        check_throw_what(
+            Config::create_from_stream(str.as_bytes()),
+            "Loading the OCIO profile failed",
+        );
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Config, exponent_serialization)` @ v2.5.2.
+#[test]
+fn exponent_serialization() {
+    let _env = EnvGuard::new();
+    let simple_profile_v1 = profile_v1_start();
+    {
+        let str_end = concat!(
+            "    from_reference: !<ExponentTransform> ",
+            "{value: [1.101, 1.202, 1.303, 1.404]}\n",
+        );
+        check_round_trip(&(simple_profile_v1.clone() + str_end));
+    }
+
+    // If R==G==B and A==1, and the version is > 1, it is serialized using a more compact syntax.
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<ExponentTransform> ",
+            "{value: 1.101}\n",
+        );
+        check_round_trip(&(profile_v2_start() + str_end));
+    }
+
+    // If version==1, then write all values for compatibility with the v1 library.
+    {
+        let str_end = concat!(
+            "    from_reference: !<ExponentTransform> ",
+            "{value: [1.101, 1.101, 1.101, 1]}\n",
+        );
+        check_round_trip(&(simple_profile_v1.clone() + str_end));
+    }
+
+    {
+        let str_end = concat!(
+            "    from_reference: !<ExponentTransform> ",
+            "{value: [1.101, 1.202, 1.303, 1.404], direction: inverse}\n",
+        );
+        check_round_trip(&(simple_profile_v1.clone() + str_end));
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<ExponentTransform> ",
+            "{value: [1.101, 1.202, 1.303, 1.404], style: mirror, direction: inverse}\n",
+        );
+        check_round_trip(&(profile_v2_start() + str_end));
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<ExponentTransform> ",
+            "{value: [1.101, 1.202, 1.303, 1.404], style: pass_thru, direction: inverse}\n",
+        );
+        check_round_trip(&(profile_v2_start() + str_end));
+    }
+
+    // Errors
+
+    {
+        // Some gamma values are missing.
+        let str_end = concat!(
+            "    from_reference: !<ExponentTransform> ",
+            "{value: [1.1, 1.2, 1.3]}\n",
+        );
+        let str = simple_profile_v1.clone() + str_end;
+
+        check_throw_what(
+            Config::create_from_stream(str.as_bytes()),
+            "'value' values must be 4 floats. Found '3'",
+        );
+    }
+
+    {
+        // Wrong style.
+        let str_end = concat!(
+            "    from_reference: !<ExponentTransform> ",
+            "{value: [1.101, 1.202, 1.303, 1.404], style: wrong,}\n",
+        );
+        let str = simple_profile_v1 + str_end;
+
+        check_throw_what(
+            Config::create_from_stream(str.as_bytes()),
+            "Unknown exponent style",
+        );
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Config, exponent_with_linear_serialization)` @ v2.5.2.
+#[test]
+fn exponent_with_linear_serialization() {
+    let _env = EnvGuard::new();
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<ExponentWithLinearTransform> ",
+            "{gamma: [1.1, 1.2, 1.3, 1.4], offset: [0.101, 0.102, 0.103, 0.1]}\n",
+        );
+        check_round_trip(&(profile_v2_start() + str_end));
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<ExponentWithLinearTransform> ",
+            "{gamma: [1.1, 1.2, 1.3, 1.4], offset: [0.101, 0.102, 0.103, 0.1], style: mirror}\n",
+        );
+        check_round_trip(&(profile_v2_start() + str_end));
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<ExponentWithLinearTransform> ",
+            "{gamma: [1.1, 1.2, 1.3, 1.4], offset: [0.101, 0.102, 0.103, 0.1], ",
+            "direction: inverse}\n",
+        );
+        // check_serialized compares the sizes too.
+        check_round_trip(&(profile_v2_start() + str_end));
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<ExponentWithLinearTransform> ",
+            "{gamma: [1.1, 1.2, 1.3, 1.4], offset: [0.101, 0.102, 0.103, 0.1], style: mirror, ",
+            "direction: inverse}\n",
+        );
+        check_round_trip(&(profile_v2_start() + str_end));
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<ExponentWithLinearTransform> ",
+            "{gamma: 1.1, offset: 0.101, ",
+            "direction: inverse}\n",
+        );
+        check_round_trip(&(profile_v2_start() + str_end));
+    }
+
+    // Errors
+
+    let check_load_error = |str_end: &str, what: &str| {
+        let str = profile_v2_start() + str_end;
+        check_throw_what(Config::create_from_stream(str.as_bytes()), what);
+    };
+
+    check_load_error(
+        "    from_scene_reference: !<ExponentWithLinearTransform> {}\n",
+        "ExponentWithLinear parse error, gamma and offset fields are missing",
+    );
+
+    // Offset values are missing.
+    check_load_error(
+        concat!(
+            "    from_scene_reference: !<ExponentWithLinearTransform> ",
+            "{gamma: [1.1, 1.2, 1.3, 1.4]}\n",
+        ),
+        "ExponentWithLinear parse error, offset field is missing",
+    );
+
+    // Gamma values are missing.
+    check_load_error(
+        concat!(
+            "    from_scene_reference: !<ExponentWithLinearTransform> ",
+            "{offset: [1.1, 1.2, 1.3, 1.4]}\n",
+        ),
+        "ExponentWithLinear parse error, gamma field is missing",
+    );
+
+    // Some gamma values are missing.
+    check_load_error(
+        concat!(
+            "    from_scene_reference: !<ExponentWithLinearTransform> ",
+            "{gamma: [1.1, 1.2, 1.3]}\n",
+        ),
+        "ExponentWithLinear parse error, gamma field must be 4 floats",
+    );
+
+    // Some offset values are missing.
+    check_load_error(
+        concat!(
+            "    from_scene_reference: !<ExponentWithLinearTransform> ",
+            "{gamma: [1.1, 1.2, 1.3, 1.4], offset: [0.101, 0.102]}\n",
+        ),
+        "ExponentWithLinear parse error, offset field must be 4 floats",
+    );
+
+    check_load_error(
+        concat!(
+            "    from_scene_reference: !<ExponentWithLinearTransform> ",
+            "{gamma: [1.1, 1.2, 1.3, 1.4], offset: [0.101, 0.102, 0.103, 0.1], ",
+            "direction: inverse, style: pass_thru}\n",
+        ),
+        "Pass thru negative extrapolation is not valid for MonCurve",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(Config, log_serialization)` @ v2.5.2.
+#[test]
+fn log_serialization() {
+    let _env = EnvGuard::new();
+    let v1 = |str_end: &str| profile_v1_start() + str_end;
+    let v2 = |str_end: &str| profile_v2_start() + str_end;
+
+    // Log with default base value (saved in V1) and default direction.
+    check_round_trip(&v1("    from_reference: !<LogTransform> {base: 2}\n"));
+
+    // Log with default base value (not saved in V2) and default direction.
+    check_round_trip(&v2("    from_scene_reference: !<LogTransform> {}\n"));
+
+    // Log with default base value.
+    check_round_trip(&v1(
+        "    from_reference: !<LogTransform> {base: 2, direction: inverse}\n",
+    ));
+
+    // Log with default base value.
+    check_round_trip(&v2(
+        "    from_scene_reference: !<LogTransform> {direction: inverse}\n",
+    ));
+
+    // Log with specified base value.
+    check_round_trip(&v1("    from_reference: !<LogTransform> {base: 5}\n"));
+
+    // Log with specified base value and direction.
+    check_round_trip(&v1(
+        "    from_reference: !<LogTransform> {base: 7, direction: inverse}\n",
+    ));
+
+    // LogAffine with specified values 3 components.
+    check_round_trip(&v2(concat!(
+        "    from_scene_reference: !<LogAffineTransform> {",
+        "base: 10, ",
+        "log_side_slope: [1.3, 1.4, 1.5], ",
+        "log_side_offset: [0, 0, 0.1], ",
+        "lin_side_slope: [1, 1, 1.1], ",
+        "lin_side_offset: [0.1234567890123, 0.5, 0.1]}\n",
+    )));
+
+    // LogAffine with default value for base.
+    check_round_trip(&v2(concat!(
+        "    from_scene_reference: !<LogAffineTransform> {",
+        "log_side_slope: [1, 1, 1.1], ",
+        "log_side_offset: [0.1234567890123, 0.5, 0.1], ",
+        "lin_side_slope: [1.3, 1.4, 1.5], ",
+        "lin_side_offset: [0, 0, 0.1]}\n",
+    )));
+
+    // LogAffine with single value for lin_side_offset.
+    check_round_trip(&v2(concat!(
+        "    from_scene_reference: !<LogAffineTransform> {",
+        "base: 10, ",
+        "log_side_slope: [1, 1, 1.1], ",
+        "log_side_offset: [0.1234567890123, 0.5, 0.1], ",
+        "lin_side_slope: [1.3, 1.4, 1.5], ",
+        "lin_side_offset: 0.5}\n",
+    )));
+
+    // LogAffine with single value for lin_side_slope.
+    check_round_trip(&v2(concat!(
+        "    from_scene_reference: !<LogAffineTransform> {",
+        "log_side_slope: [1, 1, 1.1], ",
+        "lin_side_slope: 1.3, ",
+        "lin_side_offset: [0, 0, 0.1]}\n",
+    )));
+
+    // LogAffine with single value for log_side_offset.
+    check_round_trip(&v2(concat!(
+        "    from_scene_reference: !<LogAffineTransform> {",
+        "log_side_slope: [1, 1, 1.1], ",
+        "log_side_offset: 0.5, ",
+        "lin_side_slope: [1.3, 1, 1], ",
+        "lin_side_offset: [0, 0, 0.1]}\n",
+    )));
+
+    // LogAffine with single value for log_side_slope.
+    check_round_trip(&v2(concat!(
+        "    from_scene_reference: !<LogAffineTransform> {",
+        "log_side_slope: 1.1, ",
+        "log_side_offset: [0.5, 0, 0], ",
+        "lin_side_slope: [1.3, 1, 1], ",
+        "lin_side_offset: [0, 0, 0.1]}\n",
+    )));
+
+    // LogAffine with default value for log_side_slope.
+    check_round_trip(&v2(concat!(
+        "    from_scene_reference: !<LogAffineTransform> {",
+        "log_side_offset: [0.1234567890123, 0.5, 0.1], ",
+        "lin_side_slope: [1.3, 1.4, 1.5], ",
+        "lin_side_offset: [0.1, 0, 0]}\n",
+    )));
+
+    // LogAffine with default value for all but base.
+    check_round_trip(&v2(
+        "    from_scene_reference: !<LogAffineTransform> {base: 10}\n",
+    ));
+
+    // LogAffine with wrong size for log_side_slope.
+    check_throw_what(
+        Config::create_from_stream(
+            v2(concat!(
+                "    from_scene_reference: !<LogAffineTransform> {",
+                "log_side_slope: [1, 1], ",
+                "log_side_offset: [0.1234567890123, 0.5, 0.1]}\n",
+            ))
+            .as_bytes(),
+        ),
+        "log_side_slope value field must have 3 components",
+    );
+
+    // LogAffine with 3 values for base.
+    check_throw_what(
+        Config::create_from_stream(
+            v2(concat!(
+                "    from_scene_reference: !<LogAffineTransform> {",
+                "base: [2, 2, 2], ",
+                "log_side_offset: [0.1234567890123, 0.5, 0.1]}\n",
+            ))
+            .as_bytes(),
+        ),
+        "base must be a single double",
+    );
+
+    // LogCamera with default value for base.
+    check_round_trip(&v2(concat!(
+        "    from_scene_reference: !<LogCameraTransform> {",
+        "log_side_slope: [1, 1, 1.1], ",
+        "log_side_offset: [0.1234567890123, 0.5, 0.1], ",
+        "lin_side_slope: [1.3, 1.4, 1.5], ",
+        "lin_side_offset: [0, 0, 0.1], ",
+        "lin_side_break: [0.1, 0.2, 0.3]}\n",
+    )));
+
+    // LogCamera with default values and identical lin_side_break.
+    check_round_trip(&v2(concat!(
+        "    from_scene_reference: !<LogCameraTransform> {",
+        "lin_side_break: 0.2}\n",
+    )));
+
+    // LogCamera with linear slope.
+    check_round_trip(&v2(concat!(
+        "    from_scene_reference: !<LogCameraTransform> {",
+        "lin_side_break: 0.2, ",
+        "linear_slope: [1.1, 0.9, 1.2]}\n",
+    )));
+
+    // LogCamera with missing linSideBreak.
+    check_throw_what(
+        Config::create_from_stream(
+            v2(concat!(
+                "    from_scene_reference: !<LogCameraTransform> {",
+                "base: 5}\n",
+            ))
+            .as_bytes(),
+        ),
+        "lin_side_break values are missing",
+    );
+}
+
+/// `PROFILE_V21` (Config_tests.cpp:2202-2206 @ v2.5.2).
+const PROFILE_V21: &str = "ocio_profile_version: 2.1\n\
+\n\
+environment:\n  \
+{}\n";
+
+/// `PROFILE_V21_START` (Config_tests.cpp:2314-2315 @ v2.5.2).
+fn profile_v21_start() -> String {
+    [
+        PROFILE_V21,
+        SIMPLE_PROFILE_A,
+        DEFAULT_RULES,
+        SIMPLE_PROFILE_DISPLAYS_LOOKS,
+        SIMPLE_PROFILE_CS_V2,
+    ]
+    .concat()
+}
+
+/// Port of `OCIO_ADD_TEST(Config, fixed_function_serialization)` @ v2.5.2.
+#[test]
+fn fixed_function_serialization() {
+    let _env = EnvGuard::new();
+    let load_error = |str: String, what: &str| {
+        check_throw_what(Config::create_from_stream(str.as_bytes()), what);
+    };
+    let validate_error = |str: String, what: &str| {
+        let config = Config::create_from_stream(str.as_bytes()).unwrap();
+        check_throw_what(config.validate(), what);
+    };
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<FixedFunctionTransform> {style: ACES_RedMod03}\n",
+            "        - !<FixedFunctionTransform> {style: ACES_RedMod03, direction: inverse}\n",
+            "        - !<FixedFunctionTransform> {style: ACES_RedMod10}\n",
+            "        - !<FixedFunctionTransform> {style: ACES_RedMod10, direction: inverse}\n",
+            "        - !<FixedFunctionTransform> {style: ACES_Glow03}\n",
+            "        - !<FixedFunctionTransform> {style: ACES_Glow03, direction: inverse}\n",
+            "        - !<FixedFunctionTransform> {style: ACES_Glow10}\n",
+            "        - !<FixedFunctionTransform> {style: ACES_Glow10, direction: inverse}\n",
+            "        - !<FixedFunctionTransform> {style: ACES_DarkToDim10}\n",
+            "        - !<FixedFunctionTransform> {style: ACES_DarkToDim10, direction: inverse}\n",
+            "        - !<FixedFunctionTransform> {style: REC2100_Surround, params: [0.75]}\n",
+            "        - !<FixedFunctionTransform> {style: REC2100_Surround, params: [0.75], direction: inverse}\n",
+            "        - !<FixedFunctionTransform> {style: RGB_TO_HSV}\n",
+            "        - !<FixedFunctionTransform> {style: RGB_TO_HSV, direction: inverse}\n",
+            "        - !<FixedFunctionTransform> {style: XYZ_TO_xyY}\n",
+            "        - !<FixedFunctionTransform> {style: XYZ_TO_xyY, direction: inverse}\n",
+            "        - !<FixedFunctionTransform> {style: XYZ_TO_uvY}\n",
+            "        - !<FixedFunctionTransform> {style: XYZ_TO_uvY, direction: inverse}\n",
+            "        - !<FixedFunctionTransform> {style: XYZ_TO_LUV}\n",
+            "        - !<FixedFunctionTransform> {style: XYZ_TO_LUV, direction: inverse}\n",
+        );
+
+        // Write the config.
+        check_round_trip(&(profile_v2_start() + str_end));
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<FixedFunctionTransform> {style: ACES_GamutComp13, params: [1.147, 1.264, 1.312, 0.815, 0.803, 0.88, 1.2]}\n",
+            "        - !<FixedFunctionTransform> {style: ACES_GamutComp13, params: [1.147, 1.264, 1.312, 0.815, 0.803, 0.88, 1.2], direction: inverse}\n",
+        );
+
+        // Write the config.
+        check_round_trip(&(profile_v21_start() + str_end));
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<FixedFunctionTransform> {style: ACES_GamutComp13, params: [1.147, 1.264, 1.312, 0.815, 0.803, 0.88, 1.2]}\n",
+            "        - !<FixedFunctionTransform> {style: ACES_GamutComp13, params: [1.147, 1.264, 1.312, 0.815, 0.803, 0.88, 1.2], direction: inverse}\n",
+        );
+
+        load_error(
+            profile_v2_start() + str_end,
+            "Only config version 2.1 (or higher) can have FixedFunctionTransform style \
+             'ACES_GAMUT_COMP_13'.",
+        );
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<FixedFunctionTransform> {style: ACES_DarkToDim10, params: [0.75]}\n",
+        );
+
+        validate_error(
+            profile_v2_start() + str_end,
+            "The style 'ACES_DarkToDim10 (Forward)' must have zero parameters but 1 found.",
+        );
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<FixedFunctionTransform> {style: ACES_GamutComp13}\n",
+        );
+
+        load_error(
+            profile_v2_start() + str_end,
+            "Only config version 2.1 (or higher) can have FixedFunctionTransform style \
+             'ACES_GAMUT_COMP_13'.",
+        );
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<FixedFunctionTransform> {style: ACES_GamutComp13}\n",
+        );
+
+        validate_error(
+            profile_v21_start() + str_end,
+            "The style 'ACES_GamutComp13 (Forward)' must have seven parameters but 0 found.",
+        );
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<FixedFunctionTransform> {style: REC2100_Surround, direction: inverse}\n",
+        );
+
+        validate_error(
+            profile_v2_start() + str_end,
+            "The style 'REC2100_Surround (Inverse)' must have one parameter but 0 found.",
+        );
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<FixedFunctionTransform> {direction: inverse}\n",
+        );
+
+        load_error(
+            profile_v2_start() + str_end,
+            "'FixedFunctionTransform' parsing failed: style value is missing.",
+        );
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<FixedFunctionTransform> {style: Lin_TO_PQ}\n",
+        );
+        load_error(
+            profile_start_v(2, 3) + str_end,
+            "Only config version 2.4 (or higher) can have FixedFunctionTransform style \
+             'Lin_TO_PQ'.",
+        );
+        Config::create_from_stream((profile_start_v(2, 4) + str_end).as_bytes()).unwrap();
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<FixedFunctionTransform> {style: Lin_TO_GammaLog, params: [0.0, 0.25, 0.5, 1.0, 0.0, 2.718, 0.17883277, 0.807825590164, 1.0, -0.07116723]}\n",
+        );
+        load_error(
+            profile_start_v(2, 3) + str_end,
+            "Only config version 2.4 (or higher) can have FixedFunctionTransform style \
+             'Lin_TO_GammaLog'.",
+        );
+        Config::create_from_stream((profile_start_v(2, 4) + str_end).as_bytes()).unwrap();
+        {
+            let str2_end = concat!(
+                "    from_scene_reference: !<GroupTransform>\n",
+                "      children:\n",
+                "        - !<FixedFunctionTransform> {style: Lin_TO_GammaLog, params: [0.0, 0.25, 0.5, 1.0, 0.0, 2.718, 0.17, 0.80, 1.0]}\n",
+            );
+            validate_error(
+                profile_start_v(2, 4) + str2_end,
+                "The style 'Lin_TO_GammaLog' must have 10 parameters but 9 found.",
+            );
+        }
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<FixedFunctionTransform> {style: Lin_TO_DoubleLog, params: [10.0, 0.25, 0.5, -1.0, 0.0, -1.0, 1.25, 1.0, 1.0, 1.0, 0.5, 1.0, 0.0]}\n",
+        );
+        load_error(
+            profile_start_v(2, 3) + str_end,
+            "Only config version 2.4 (or higher) can have FixedFunctionTransform style \
+             'Lin_TO_DoubleLog'.",
+        );
+        Config::create_from_stream((profile_start_v(2, 4) + str_end).as_bytes()).unwrap();
+        {
+            let str2_end = concat!(
+                "    from_scene_reference: !<GroupTransform>\n",
+                "      children:\n",
+                "        - !<FixedFunctionTransform> {style: Lin_TO_DoubleLog, params: [10.0, 0.25, 0.5, -1.0, 0.0, -1.0, 1.25, 1.0, 1.0, 1.0, 0.5, 1.0]}\n",
+            );
+            validate_error(
+                profile_start_v(2, 4) + str2_end,
+                "The style 'Lin_TO_DoubleLog' must have 13 parameters but 12 found.",
+            );
+        }
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<FixedFunctionTransform> {style: ACES2_OutputTransform, params: [100, 0.64, 0.33, 0.3, 0.6, 0.15, 0.06, 0.3127, 0.329]}\n",
+            "        - !<FixedFunctionTransform> {style: ACES2_OutputTransform, params: [100, 0.64, 0.33, 0.3, 0.6, 0.15, 0.06, 0.3127, 0.329], direction: inverse}\n",
+            "        - !<FixedFunctionTransform> {style: ACES2_RGB_TO_JMh, params: [0.64, 0.33, 0.3, 0.6, 0.15, 0.06, 0.3127, 0.329]}\n",
+            "        - !<FixedFunctionTransform> {style: ACES2_RGB_TO_JMh, params: [0.64, 0.33, 0.3, 0.6, 0.15, 0.06, 0.3127, 0.329], direction: inverse}\n",
+            "        - !<FixedFunctionTransform> {style: ACES2_TonescaleCompress, params: [100]}\n",
+            "        - !<FixedFunctionTransform> {style: ACES2_TonescaleCompress, params: [100], direction: inverse}\n",
+            "        - !<FixedFunctionTransform> {style: ACES2_GamutCompress, params: [100, 0.64, 0.33, 0.3, 0.6, 0.15, 0.06, 0.3127, 0.329]}\n",
+            "        - !<FixedFunctionTransform> {style: ACES2_GamutCompress, params: [100, 0.64, 0.33, 0.3, 0.6, 0.15, 0.06, 0.3127, 0.329], direction: inverse}\n",
+        );
+        let str = profile_start_v(2, 4) + str_end;
+        let config = {
+            // Mute the experimental warnings.
+            let (config, log) = crate::test_env::capture_log(|| {
+                let config = Config::create_from_stream(str.as_bytes()).unwrap();
+                config.validate().unwrap();
+                config
+            });
+            let expected_log = r#"[OpenColorIO Warning]: FixedFunction style is experimental and may be removed in a future release: 'ACES2_OutputTransform'.
+[OpenColorIO Warning]: FixedFunction style is experimental and may be removed in a future release: 'ACES2_OutputTransform'.
+[OpenColorIO Warning]: FixedFunction style is experimental and may be removed in a future release: 'ACES2_RGB_TO_JMh'.
+[OpenColorIO Warning]: FixedFunction style is experimental and may be removed in a future release: 'ACES2_RGB_TO_JMh'.
+[OpenColorIO Warning]: FixedFunction style is experimental and may be removed in a future release: 'ACES2_TonescaleCompress'.
+[OpenColorIO Warning]: FixedFunction style is experimental and may be removed in a future release: 'ACES2_TonescaleCompress'.
+[OpenColorIO Warning]: FixedFunction style is experimental and may be removed in a future release: 'ACES2_GamutCompress'.
+[OpenColorIO Warning]: FixedFunction style is experimental and may be removed in a future release: 'ACES2_GamutCompress'.
+"#;
+            assert_eq!(String::from_utf8(log.concat()).unwrap(), expected_log);
+            config
+        };
+        {
+            // Mute the experimental warnings.
+            let (ss, _log) = crate::test_env::capture_log(|| config.serialize().unwrap());
+            check_serialized(&ss, &str);
+        }
+    }
+
+    // Mute the experimental warnings.
+    let muted = |f: &dyn Fn()| {
+        crate::test_env::capture_log(f);
+    };
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<FixedFunctionTransform> {style: ACES2_OutputTransform, params: [100, 0.64, 0.33, 0.3, 0.6, 0.15, 0.06, 0.3127, 0.329]}\n",
+            "        - !<FixedFunctionTransform> {style: ACES2_OutputTransform, params: [100, 0.64, 0.33, 0.3, 0.6, 0.15, 0.06, 0.3127, 0.329], direction: inverse}\n",
+        );
+        muted(&|| {
+            load_error(
+                profile_start_v(2, 3) + str_end,
+                "Only config version 2.4 (or higher) can have FixedFunctionTransform style \
+                 'ACES2_OutputTransform'.",
+            )
+        });
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<FixedFunctionTransform> {style: ACES2_RGB_TO_JMh, params: [100, 0.64, 0.33, 0.3, 0.6, 0.15, 0.06, 0.3127, 0.329]}\n",
+            "        - !<FixedFunctionTransform> {style: ACES2_RGB_TO_JMh, params: [100, 0.64, 0.33, 0.3, 0.6, 0.15, 0.06, 0.3127, 0.329], direction: inverse}\n",
+        );
+        muted(&|| {
+            load_error(
+                profile_start_v(2, 3) + str_end,
+                "Only config version 2.4 (or higher) can have FixedFunctionTransform style \
+                 'ACES2_RGB_TO_JMh'.",
+            )
+        });
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<FixedFunctionTransform> {style: ACES2_TonescaleCompress, params: [100, 0.64, 0.33, 0.3, 0.6, 0.15, 0.06, 0.3127, 0.329]}\n",
+            "        - !<FixedFunctionTransform> {style: ACES2_TonescaleCompress, params: [100, 0.64, 0.33, 0.3, 0.6, 0.15, 0.06, 0.3127, 0.329], direction: inverse}\n",
+        );
+        muted(&|| {
+            load_error(
+                profile_start_v(2, 3) + str_end,
+                "Only config version 2.4 (or higher) can have FixedFunctionTransform style \
+                 'ACES2_TonescaleCompress'.",
+            )
+        });
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<FixedFunctionTransform> {style: ACES2_GamutCompress, params: [100, 0.64, 0.33, 0.3, 0.6, 0.15, 0.06, 0.3127, 0.329]}\n",
+            "        - !<FixedFunctionTransform> {style: ACES2_GamutCompress, params: [100, 0.64, 0.33, 0.3, 0.6, 0.15, 0.06, 0.3127, 0.329], direction: inverse}\n",
+        );
+        muted(&|| {
+            load_error(
+                profile_start_v(2, 3) + str_end,
+                "Only config version 2.4 (or higher) can have FixedFunctionTransform style \
+                 'ACES2_GamutCompress'.",
+            )
+        });
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<FixedFunctionTransform> {style: ACES2_OutputTransform, params: []}\n",
+        );
+        muted(&|| {
+            validate_error(
+                profile_start_v(2, 4) + str_end,
+                "The style 'ACES_OutputTransform20 (Forward)' must have 9 parameters but 0 found.",
+            )
+        });
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<FixedFunctionTransform> {style: ACES2_OutputTransform, params: [-1, 0.64, 0.33, 0.3, 0.6, 0.15, 0.06, 0.3127, 0.329]}\n",
+        );
+        muted(&|| {
+            validate_error(
+                profile_start_v(2, 4) + str_end,
+                "FixedFunctionTransform validation failed: Parameter -1 (peak_luminance) is \
+                 outside valid range [1,10000]",
+            )
+        });
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<FixedFunctionTransform> {style: ACES2_OutputTransform, params: [100.5, 0.64, 0.33, 0.3, 0.6, 0.15, 0.06, 0.3127, 0.329]}\n",
+        );
+        muted(&|| {
+            validate_error(
+                profile_start_v(2, 4) + str_end,
+                "FixedFunctionTransform validation failed: Parameter 100.5 (peak_luminance) \
+                 cannot include any fractional component",
+            )
+        });
+    }
+
+    {
+        let str_end = concat!(
+            "    from_scene_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<FixedFunctionTransform> {style: RGB_TO_HSY_LOG}\n",
+            "        - !<FixedFunctionTransform> {style: RGB_TO_HSY_LOG, direction: inverse}\n",
+            "        - !<FixedFunctionTransform> {style: RGB_TO_HSY_LIN}\n",
+            "        - !<FixedFunctionTransform> {style: RGB_TO_HSY_LIN, direction: inverse}\n",
+            "        - !<FixedFunctionTransform> {style: RGB_TO_HSY_VID}\n",
+            "        - !<FixedFunctionTransform> {style: RGB_TO_HSY_VID, direction: inverse}\n",
+        );
+        load_error(
+            profile_start_v(2, 4) + str_end,
+            "Only config version 2.5 (or higher) can have FixedFunctionTransform style \
+             'RGB_TO_HSY_LOG'.",
+        );
+        check_round_trip(&(profile_start_v(2, 5) + str_end));
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Config, required_roles_for_version_2_2)` @ v2.5.2.
+#[test]
+fn required_roles_for_version_2_2() {
+    use crate::test_env::{
+        capture_log, check_and_mute_aces_interchange_role_error,
+        check_and_mute_color_timing_role_error, check_and_mute_compositing_log_role_error,
+        check_and_mute_display_interchange_role_error, check_and_mute_scene_linear_role_error,
+    };
+    use crate::view_transform::ViewTransform;
+    use ocio_ops::open_color_types::{ReferenceSpaceType, ViewTransformDirection};
+    use ocio_ops::parse_utils::{
+        ROLE_COLOR_TIMING, ROLE_INTERCHANGE_DISPLAY, ROLE_INTERCHANGE_SCENE, ROLE_SCENE_LINEAR,
+    };
+    use ocio_ops::utils::string_utils::{contain, starts_with};
+
+    let _env = EnvGuard::new();
+    // Upstream's LogGuard around config.validate(): what it logged.
+    let validate_logged = |config: &Config| {
+        let (result, log) = capture_log(|| config.validate());
+        result.unwrap();
+        log.concat()
+    };
+
+    // Test Setup
+
+    let mut config = Config::new().unwrap();
+
+    // Add default color space for file rules.
+    let mut cs = ColorSpace::with_reference_space(ReferenceSpaceType::Scene);
+    cs.set_name("default");
+    config.add_color_space(&cs).unwrap();
+
+    // Add a simple view.
+    let display = "display";
+    config
+        .add_display_view(display, "view1", "default", "")
+        .unwrap();
+
+    // Add a scene-referred color space.
+    let mut scs = ColorSpace::with_reference_space(ReferenceSpaceType::Scene);
+    scs.set_name("scs");
+    config.add_color_space(&scs).unwrap();
+
+    // Add a display-referred color space.
+    let mut dcs = ColorSpace::with_reference_space(ReferenceSpaceType::Display);
+    dcs.set_name("dcs");
+    config.add_color_space(&dcs).unwrap();
+
+    let mut vt = ViewTransform::new(ReferenceSpaceType::Scene);
+    vt.set_name("view_transform");
+    vt.set_transform(
+        Some(&Transform::from(MatrixTransform::new())),
+        ViewTransformDirection::FromReference,
+    )
+    .unwrap();
+    config.add_view_transform(&vt).unwrap();
+
+    // End of setup.
+
+    // Interchange roles tests
+
+    {
+        // Test that the config version is >= 2.2.
+
+        assert!(config.major_version() >= 2);
+        assert!(config.minor_version() >= 2);
+    }
+
+    {
+        // Test that all errors appear when all required roles are missing.
+
+        let mut log = validate_logged(&config);
+        // Check that the log contains the expected error messages for the missing roles and
+        // mute them so that (only) those messages don't appear in the test output.
+        assert!(check_and_mute_scene_linear_role_error(&mut log));
+        assert!(check_and_mute_compositing_log_role_error(&mut log));
+        assert!(check_and_mute_color_timing_role_error(&mut log));
+        assert!(check_and_mute_aces_interchange_role_error(&mut log));
+        assert!(check_and_mute_display_interchange_role_error(&mut log));
+        // If there are any unexpected log messages, print them to the shell.
+        eprint!("{}", String::from_utf8_lossy(&log));
+    }
+
+    // Set colorspace for all required roles.
+    config
+        .set_role(ROLE_SCENE_LINEAR, Some(scs.name()))
+        .unwrap();
+    config
+        .set_role(ROLE_COMPOSITING_LOG, Some(dcs.name()))
+        .unwrap();
+    config
+        .set_role(ROLE_COLOR_TIMING, Some(dcs.name()))
+        .unwrap();
+    config
+        .set_role(ROLE_INTERCHANGE_SCENE, Some(scs.name()))
+        .unwrap();
+    config
+        .set_role(ROLE_INTERCHANGE_DISPLAY, Some(dcs.name()))
+        .unwrap();
+
+    {
+        // Check that no warning is logged when all required roles are set.
+
+        assert!(validate_logged(&config).is_empty());
+    }
+
+    {
+        // Test that scene_linear role is missing.
+
+        // Unset scene_linear role.
+        config.set_role(ROLE_SCENE_LINEAR, None).unwrap();
+
+        let log = validate_logged(&config);
+
+        let svec = split_by_lines(&log);
+        assert!(contain(
+            &svec,
+            b"[OpenColorIO Error]: The scene_linear role is required for a config version 2.2 \
+              or higher."
+        ));
+
+        // Set scene_linear for next test.
+        config
+            .set_role(ROLE_SCENE_LINEAR, Some(dcs.name()))
+            .unwrap();
+    }
+
+    {
+        // Test that compositing_log role is missing.
+
+        // Unset compositing_log role.
+        config.set_role(ROLE_COMPOSITING_LOG, None).unwrap();
+
+        let mut log = validate_logged(&config);
+
+        let _svec = split_by_lines(&log);
+        check_and_mute_compositing_log_role_error(&mut log);
+
+        // Set compositing_log for next test.
+        config
+            .set_role(ROLE_COMPOSITING_LOG, Some(dcs.name()))
+            .unwrap();
+    }
+
+    {
+        // Test that color_timing role is missing.
+
+        // Unset color_timing role.
+        config.set_role(ROLE_COLOR_TIMING, None).unwrap();
+
+        let mut log = validate_logged(&config);
+
+        let _svec = split_by_lines(&log);
+        check_and_mute_color_timing_role_error(&mut log);
+
+        // Set color_timing for next test.
+        config
+            .set_role(ROLE_COLOR_TIMING, Some(dcs.name()))
+            .unwrap();
+    }
+
+    {
+        // Test that aces_interchange role is missing.
+
+        // Unset aces_interchange role.
+        config.set_role(ROLE_INTERCHANGE_SCENE, None).unwrap();
+
+        let mut log = validate_logged(&config);
+        check_and_mute_aces_interchange_role_error(&mut log);
+
+        // Set aces_interchange for next test.
+        config
+            .set_role(ROLE_INTERCHANGE_SCENE, Some(scs.name()))
+            .unwrap();
+    }
+
+    {
+        // Test that cie_xyz_d65_interchange role is missing.
+
+        // Unset cie_xyz_d65_interchange role.
+        config.set_role(ROLE_INTERCHANGE_DISPLAY, None).unwrap();
+
+        let mut log = validate_logged(&config);
+        check_and_mute_display_interchange_role_error(&mut log);
+
+        // Set cie_xyz_d65_interchange for next test.
+        config
+            .set_role(ROLE_INTERCHANGE_DISPLAY, Some(dcs.name()))
+            .unwrap();
+    }
+
+    {
+        // Test detection of the aces_interchange role having the wrong colorspace type.
+
+        // Set a display-referred colorspace to both interchange roles.
+        config
+            .set_role(ROLE_INTERCHANGE_SCENE, Some(dcs.name()))
+            .unwrap();
+        config
+            .set_role(ROLE_INTERCHANGE_DISPLAY, Some(dcs.name()))
+            .unwrap();
+
+        let log = validate_logged(&config);
+        assert!(starts_with(
+            &log,
+            b"[OpenColorIO Error]: The aces_interchange role must be a scene-referred color space."
+        ));
+    }
+
+    {
+        // Test detection of the cie_xyz_d65_interchange role having the wrong colorspace type.
+
+        // Set a scene-referred colorspace to both interchange roles.
+        config
+            .set_role(ROLE_INTERCHANGE_SCENE, Some(scs.name()))
+            .unwrap();
+        config
+            .set_role(ROLE_INTERCHANGE_DISPLAY, Some(scs.name()))
+            .unwrap();
+
+        let log = validate_logged(&config);
+        assert!(starts_with(
+            &log,
+            b"[OpenColorIO Error]: The cie_xyz_d65_interchange role must be a display-referred \
+              color space."
+        ));
+    }
+
+    {
+        // Set the config to 2.1, delete the roles and check that no warning is logged.
+
+        config.set_major_version(2).unwrap();
+        config.set_minor_version(1).unwrap();
+
+        // Unset all required roles
+        config.set_role(ROLE_SCENE_LINEAR, None).unwrap();
+        config.set_role(ROLE_COMPOSITING_LOG, None).unwrap();
+        config.set_role(ROLE_COLOR_TIMING, None).unwrap();
+        config.set_role(ROLE_INTERCHANGE_SCENE, None).unwrap();
+        config.set_role(ROLE_INTERCHANGE_DISPLAY, None).unwrap();
+
+        assert!(validate_logged(&config).is_empty());
+    }
+}

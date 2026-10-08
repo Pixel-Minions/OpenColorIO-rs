@@ -137,6 +137,16 @@ pub(crate) fn check_and_mute_aces_interchange_role_error(output: &mut Vec<u8>) -
     )
 }
 
+/// Port of `checkAndMuteDisplayInterchangeRoleError` (tests/cpu/UnitTestLogUtils.cpp:147-153
+/// @ v2.5.2).
+pub(crate) fn check_and_mute_display_interchange_role_error(output: &mut Vec<u8>) -> bool {
+    find_and_remove(
+        output,
+        "[OpenColorIO Error]: The cie_xyz_d65_interchange role is required when there are \
+         display-referred color spaces and the config version is 2.2 or higher.",
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::EnvGuard;
