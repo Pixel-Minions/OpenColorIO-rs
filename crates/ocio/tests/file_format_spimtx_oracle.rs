@@ -9,8 +9,8 @@
 
 mod common;
 
-use common::lut_files::{Entry, file, file_case, write_files};
-use common::transforms::{Case, check_processors};
+use common::lut_files::{Entry, check_file_processors, file, file_case, write_files};
+use common::transforms::Case;
 use ocio::{Interpolation, TransformDirection};
 
 /// The case of a set of one file, `lut.spimtx`, holding `bytes`.
@@ -128,5 +128,5 @@ fn spimtx_files_read_as_in_the_wheel() {
         TransformDirection::Forward,
     ));
 
-    check_processors(&cases);
+    check_file_processors(&cases);
 }

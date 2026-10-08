@@ -128,6 +128,54 @@ impl InputStream {
         }
     }
 
+    /// Extracts a line into `line` (cleared first): bytes up to a line feed, which is
+    /// extracted and not stored; the end of the stream sets `eofbit`; a line of `n - 1` bytes
+    /// or more stops after `n - 1` and sets `failbit`; nothing extracted sets `failbit`. A
+    /// stream that isn't `good()` extracts nothing (its sentry). `line` holds what upstream's
+    /// buffer holds before the NUL the call writes after it.
+    ///
+    /// Port of `std::istream::getline(char *, std::streamsize)` (C++17 [istream.unformatted]
+    /// 30.7.4.3/18-21; MSVC's and libstdc++'s implementations test the end of the stream, the
+    /// delimiter, then the full buffer, in that order).
+    pub fn getline(&mut self, line: &mut Vec<u8>, n: usize) {
+        line.clear();
+        self.gcount = 0;
+        if self.good() && n > 0 {
+            let mut count = n;
+            loop {
+                match self.peek_byte() {
+                    None => {
+                        if !self.bad {
+                            self.eof = true;
+                        }
+                        break;
+                    }
+                    Some(b'\n') => {
+                        self.gcount += 1;
+                        self.pos += 1;
+                        break;
+                    }
+                    Some(b) => {
+                        count -= 1;
+                        if count == 0 {
+                            // buffer full, quit
+                            self.fail = true;
+                            break;
+                        }
+                        line.push(b);
+                        self.gcount += 1;
+                        self.pos += 1;
+                    }
+                }
+            }
+        } else if !self.good() {
+            self.fail = true;
+        }
+        if self.gcount == 0 {
+            self.fail = true;
+        }
+    }
+
     /// Extracts up to `n` bytes into the start of `buf`: all `n`, or those up to the end of the
     /// stream, which sets `eofbit` and `failbit`; a stream that isn't `good()` extracts
     /// nothing and sets `failbit` (its sentry).

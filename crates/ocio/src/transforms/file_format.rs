@@ -354,12 +354,7 @@ fn create_formats() -> Vec<Box<dyn FileFormat>> {
             all_bakes,
         )]),
         // FileFormatSpi1D.cpp:82-90.
-        stub(vec![FormatInfo::new(
-            "spi1d",
-            "spi1d",
-            read_bake,
-            B::LUT_1D,
-        )]),
+        Box::new(crate::fileformats::file_format_spi1d::LocalFileFormat),
         // FileFormatSpi3D.cpp:72-80.
         stub(vec![FormatInfo::new(
             "spi3d",
