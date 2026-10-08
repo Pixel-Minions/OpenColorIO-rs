@@ -285,8 +285,8 @@ fn processors_of_the_classes_without_builders_are_refused() {
     }
 }
 
-/// The built-in transforms whose ops are ported (WP 3.2e-g); their pixels are compared with the
-/// wheel's in `tests/api_battery_oracle.rs`.
+/// The built-in transforms whose ops are ported (WP 3.2e-g, `p3-after-p2`); their pixels are
+/// compared with the wheel's in `tests/api_battery_oracle.rs`.
 const BUILTINS_WITH_OPS: &[&[u8]] = &[
     b"IDENTITY",
     b"ARRI_ALEXA-LOGC-EI800-AWG_to_ACES2065-1",
@@ -298,14 +298,24 @@ const BUILTINS_WITH_OPS: &[&[u8]] = &[
     b"SONY_SLOG3-SGAMUT3.CINE_to_ACES2065-1",
     b"SONY_SLOG3-SGAMUT3-VENICE_to_ACES2065-1",
     b"SONY_SLOG3-SGAMUT3.CINE-VENICE_to_ACES2065-1",
+    b"CANON_CLOG2-CGAMUT_to_ACES2065-1",
+    b"CURVE - CANON_CLOG2_to_LINEAR",
+    b"CANON_CLOG3-CGAMUT_to_ACES2065-1",
+    b"CURVE - CANON_CLOG3_to_LINEAR",
+    b"APPLE_LOG_to_ACES2065-1",
+    b"CURVE - APPLE_LOG_to_LINEAR",
     b"UTILITY - ACES-AP0_to_CIE-XYZ-D65_BFD",
     b"UTILITY - ACES-AP1_to_CIE-XYZ-D65_BFD",
     b"UTILITY - ACES-AP1_to_LINEAR-REC709_BFD",
     b"CURVE - ACEScct-LOG_to_LINEAR",
     b"ACEScct_to_ACES2065-1",
+    b"ACEScc_to_ACES2065-1",
     b"ACEScg_to_ACES2065-1",
     b"ACESproxy10i_to_ACES2065-1",
+    b"ADX10_to_ACES2065-1",
+    b"ADX16_to_ACES2065-1",
     b"ACES-LMT - BLUE_LIGHT_ARTIFACT_FIX",
+    b"ACES-LMT - ACES 1.3 Reference Gamut Compression",
     b"DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.709",
     b"DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.709 - MIRROR NEGS",
     b"DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.2020",
@@ -321,6 +331,14 @@ const BUILTINS_WITH_OPS: &[&[u8]] = &[
     b"DISPLAY - CIE-XYZ-D65_to_DCDM-D65",
     b"DISPLAY - CIE-XYZ-D65_to_DisplayP3",
     b"DISPLAY - CIE-XYZ-D65_to_DisplayP3-HDR",
+    b"CURVE - ST-2084_to_LINEAR",
+    b"CURVE - LINEAR_to_ST-2084",
+    b"DISPLAY - CIE-XYZ-D65_to_REC.2100-PQ",
+    b"DISPLAY - CIE-XYZ-D65_to_ST2084-P3-D65",
+    b"DISPLAY - CIE-XYZ-D65_to_ST2084-DCDM-D65",
+    b"CURVE - HLG-OETF-INVERSE",
+    b"CURVE - HLG-OETF",
+    b"DISPLAY - CIE-XYZ-D65_to_REC.2100-HLG-1000nit",
 ];
 
 /// A processor of every other built-in transform of the registry is refused in both

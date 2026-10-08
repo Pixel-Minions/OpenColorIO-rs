@@ -1391,8 +1391,8 @@ pub(crate) fn builtin(styles: &[&str]) -> Cases {
     }
 }
 
-/// The built-in transforms whose ops are ported (WP 3.2e-g): the identity, the ARRI, Panasonic,
-/// RED and Sony cameras, and the ACES and display entries built from Phase 1 ops.
+/// The built-in transforms whose ops are ported (WP 3.2e-g, `p3-after-p2`): the identity, the
+/// cameras, the ACES entries but the output transforms, and the display entries.
 pub(crate) const BUILTINS_WITH_OPS: &[&str] = &[
     "IDENTITY",
     "ARRI_ALEXA-LOGC-EI800-AWG_to_ACES2065-1",
@@ -1404,14 +1404,24 @@ pub(crate) const BUILTINS_WITH_OPS: &[&str] = &[
     "SONY_SLOG3-SGAMUT3.CINE_to_ACES2065-1",
     "SONY_SLOG3-SGAMUT3-VENICE_to_ACES2065-1",
     "SONY_SLOG3-SGAMUT3.CINE-VENICE_to_ACES2065-1",
+    "CANON_CLOG2-CGAMUT_to_ACES2065-1",
+    "CURVE - CANON_CLOG2_to_LINEAR",
+    "CANON_CLOG3-CGAMUT_to_ACES2065-1",
+    "CURVE - CANON_CLOG3_to_LINEAR",
+    "APPLE_LOG_to_ACES2065-1",
+    "CURVE - APPLE_LOG_to_LINEAR",
     "UTILITY - ACES-AP0_to_CIE-XYZ-D65_BFD",
     "UTILITY - ACES-AP1_to_CIE-XYZ-D65_BFD",
     "UTILITY - ACES-AP1_to_LINEAR-REC709_BFD",
     "CURVE - ACEScct-LOG_to_LINEAR",
     "ACEScct_to_ACES2065-1",
+    "ACEScc_to_ACES2065-1",
     "ACEScg_to_ACES2065-1",
     "ACESproxy10i_to_ACES2065-1",
+    "ADX10_to_ACES2065-1",
+    "ADX16_to_ACES2065-1",
     "ACES-LMT - BLUE_LIGHT_ARTIFACT_FIX",
+    "ACES-LMT - ACES 1.3 Reference Gamut Compression",
     "DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.709",
     "DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.709 - MIRROR NEGS",
     "DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.2020",
@@ -1427,6 +1437,14 @@ pub(crate) const BUILTINS_WITH_OPS: &[&str] = &[
     "DISPLAY - CIE-XYZ-D65_to_DCDM-D65",
     "DISPLAY - CIE-XYZ-D65_to_DisplayP3",
     "DISPLAY - CIE-XYZ-D65_to_DisplayP3-HDR",
+    "CURVE - ST-2084_to_LINEAR",
+    "CURVE - LINEAR_to_ST-2084",
+    "DISPLAY - CIE-XYZ-D65_to_REC.2100-PQ",
+    "DISPLAY - CIE-XYZ-D65_to_ST2084-P3-D65",
+    "DISPLAY - CIE-XYZ-D65_to_ST2084-DCDM-D65",
+    "CURVE - HLG-OETF-INVERSE",
+    "CURVE - HLG-OETF",
+    "DISPLAY - CIE-XYZ-D65_to_REC.2100-HLG-1000nit",
 ];
 
 /// One `GradingRGBCurveTransform`: its style, its four curves (red, green, blue, master) with

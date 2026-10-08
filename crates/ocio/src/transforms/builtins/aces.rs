@@ -4,19 +4,23 @@
 //! The ACES built-in transforms: a port of `ACES::RegisterAll`
 //! (src/OpenColorIO/transforms/builtins/ACES.cpp:576-1437 @ v2.5.2), each entry's style and
 //! description in upstream's order, the ACES 2.0 output transforms' table included. The
-//! entries built from Matrix, Log and Range ops build them; those built on half-domain or
-//! sampled LUTs and fixed functions (ACEScc, ADX, the gamut compression, the ACES 1.x and 2.0
-//! output transforms) return an error until `p3-after-p2`.
+//! entries build their ops, but the ACES 1.x and 2.0 output transforms, which return an error
+//! until `p3-after-p2` ports them.
 
 use std::sync::Arc;
 
 use ocio_ops::exception::Result;
 use ocio_ops::op::OpVec;
 use ocio_ops::open_color_types::TransformDirection;
+use ocio_ops::ops::fixedfunction::fixed_function_op::create_fixed_function_op;
+use ocio_ops::ops::fixedfunction::fixed_function_op_data::FixedFunctionOpStyle;
 use ocio_ops::ops::log::log_op::{create_log_op, create_log_op_from_base};
 use ocio_ops::ops::log::log_op_data::LogOpData;
-use ocio_ops::ops::matrix::matrix_op::{create_matrix_op_from_array, create_matrix_op_from_m44};
+use ocio_ops::ops::matrix::matrix_op::{
+    create_matrix_op_from_array, create_matrix_op_from_m44, create_scale_offset_op,
+};
 use ocio_ops::ops::range::range_op::create_range_op_from_values;
+use ocio_ops::ops::range::range_op_data::RangeOpData;
 
 use crate::transforms::builtins::builtin_transform_registry::{
     BuiltinTransformRegistry, OpCreator, not_ported_yet,
@@ -25,6 +29,7 @@ use crate::transforms::builtins::color_matrix_helpers::{
     AdaptationMethod, aces_ap0, aces_ap1, build_conversion_matrix,
     build_conversion_matrix_to_xyz_d65, rec709,
 };
+use crate::transforms::builtins::op_helpers::{create_half_lut, create_lut, interpolate_1d};
 
 /// An entry's op creator.
 fn creator(f: fn(&mut OpVec) -> Result<()>) -> OpCreator {
@@ -132,6 +137,199 @@ fn acesproxy10i_to_aces2065_1(ops: &mut OpVec) -> Result<()> {
     create_log_op_from_base(ops, 2., TransformDirection::Inverse);
 
     ap1_to_ap0(ops)
+}
+
+/// ADX's Channel Independent Density to Relative Log Exposure, as `{in, out}` pairs.
+///
+/// Port of `ADX_to_ACES::nonuniform_LUT` (ACES.cpp:60-73 @ v2.5.2).
+const ADX_LUT_SIZE: usize = 11;
+#[rustfmt::skip]
+const ADX_NONUNIFORM_LUT: [f64; ADX_LUT_SIZE * 2] = [
+    -0.190000000000000, -6.000000000000000,
+     0.010000000000000, -2.721718645000000,
+     0.028000000000000, -2.521718645000000,
+     0.054000000000000, -2.321718645000000,
+     0.095000000000000, -2.121718645000000,
+     0.145000000000000, -1.921718645000000,
+     0.220000000000000, -1.721718645000000,
+     0.300000000000000, -1.521718645000000,
+     0.400000000000000, -1.321718645000000,
+     0.500000000000000, -1.121718645000000,
+     0.600000000000000, -0.926545676714876,
+];
+
+/// ADX Channel Dependent Density to ACES2065-1: a matrix to Channel Independent Density, a
+/// half-domain LUT to Relative Log Exposure, an inverse log to Relative Exposure, a matrix to
+/// ACES.
+///
+/// Port of `ADX_to_ACES::GenerateOps` (ACES.cpp:76-137 @ v2.5.2).
+fn adx_to_aces(ops: &mut OpVec) -> Result<()> {
+    // Note that in CTL, the matrices are stored transposed.
+    #[rustfmt::skip]
+    const CDD_TO_CID: [f64; 4 * 4] = [
+        0.75573,  0.22197,  0.02230,  0.,
+        0.05901,  0.96928, -0.02829,  0.,
+        0.16134,  0.07406,  0.76460,  0.,
+        0.,       0.,       0.,       1.,
+    ];
+
+    // Convert Channel Dependent Density values into Channel Independent Density values.
+    create_matrix_op_from_m44(ops, &CDD_TO_CID, TransformDirection::Forward);
+
+    let lut = &ADX_NONUNIFORM_LUT;
+    // `Interpolate1D` throws for an input no pair brackets, which the half-domain LUT's inputs
+    // (NaN codes as 0) never are; the first such error is returned after the LUT is built.
+    let interpolation_error = std::cell::RefCell::new(None);
+    let generate_lut_values = |in_: f64| -> f32 {
+        let mut out;
+
+        if in_ < lut[0] {
+            // Lower bound i.e. in < nonuniform_LUT[0, 0].
+            // Extrapolate to ease conversion to LUT1D.
+            let slope = (lut[3] - lut[1]) / (lut[2] - lut[0]);
+
+            out = lut[1] - slope * (lut[0] - in_);
+
+            if out < -10. {
+                out = -10.;
+            }
+        } else if in_ <= lut[(ADX_LUT_SIZE - 1) * 2] {
+            out = interpolate_1d(ADX_LUT_SIZE, lut, in_).unwrap_or_else(|e| {
+                interpolation_error.borrow_mut().get_or_insert(e);
+                0.
+            });
+        } else {
+            // Upper bound i.e. in > nonuniform_LUT[lutSize-1, 0].
+            let ref_pt = (7120. - 1520.) / 8000. * (100. / 55.) - 0.18f64.log10();
+
+            out = (100. / 55.) * in_ - ref_pt;
+
+            if out > 4.8162678 {
+                out = 4.8162678; // log10(HALF_MAX)
+            }
+        }
+
+        out as f32
+    };
+
+    // Convert Channel Independent Density values to Relative Log Exposure values.
+    create_half_lut(ops, generate_lut_values)?;
+    if let Some(e) = interpolation_error.into_inner() {
+        return Err(e);
+    }
+
+    // Convert Relative Log Exposure values to Relative Exposure values.
+    create_log_op_from_base(ops, 10., TransformDirection::Inverse);
+
+    #[rustfmt::skip]
+    const EXP_TO_ACES: [f64; 4 * 4] = [
+        0.72286,  0.12630,  0.15084,  0.,
+        0.11923,  0.76418,  0.11659,  0.,
+        0.01427,  0.08213,  0.90359,  0.,
+        0.,       0.,       0.,       1.,
+    ];
+
+    // Convert Relative Exposure values to ACES values.
+    create_matrix_op_from_m44(ops, &EXP_TO_ACES, TransformDirection::Forward);
+    Ok(())
+}
+
+/// ACEScc: a range to [0, 1], a 4096-entry LUT of the ACEScc curve over [-0.36, 1.5], AP1 to
+/// AP0, and a clamp at 0.
+///
+/// Port of `ACEScc_to_ACES2065_1_Functor` (ACES.cpp:641-684 @ v2.5.2).
+fn acescc_to_aces2065_1(ops: &mut OpVec) -> Result<()> {
+    let generate_lut_values = |input: f64| -> f32 {
+        // The functor input will be [0,1].  Remap this to a wider domain to better capture
+        // the full extent of ACEScc.
+        const IN_MIN: f64 = -0.36;
+        const IN_MAX: f64 = 1.50;
+        let in_ = input * (IN_MAX - IN_MIN) + IN_MIN;
+
+        let out = if in_ < ((9.72 - 15.0) / 17.52) {
+            (2f64.powf(in_ * 17.52 - 9.72) - 2f64.powf(-16.)) * 2.0
+        } else {
+            2f64.powf(in_ * 17.52 - 9.72)
+        };
+        // The CTL clamps at HALF_MAX, but it's better to avoid a slope discontinuity in a LUT.
+
+        out as f32
+    };
+
+    // Allow the LUT to work over a wider input range to better capture the ACEScc extent.
+    create_range_op_from_values(ops, -0.36, 1.5, 0.00, 1.0, TransformDirection::Forward)?;
+
+    create_lut(ops, 4096, generate_lut_values)?;
+
+    ap1_to_ap0(ops)?;
+
+    // This helps when the transform is inverted to match the CTL, which clamps incoming
+    // ACES2065-1 values.
+    create_range_op_from_values(
+        ops,
+        0.00,
+        RangeOpData::empty_value(), // don't clamp high end,
+        0.00,
+        RangeOpData::empty_value(), // don't clamp high end
+        TransformDirection::Forward,
+    )
+}
+
+/// ADX10: its codes to Channel Dependent Density, then to ACES.
+///
+/// Port of `ADX10_to_ACES2065_1_Functor` (ACES.cpp:722-735 @ v2.5.2).
+fn adx10_to_aces2065_1(ops: &mut OpVec) -> Result<()> {
+    const SCALE: f64 = 1023. / 500.;
+    const SCALE4: [f64; 4] = [SCALE, SCALE, SCALE, 1.];
+
+    const OFFSET: f64 = -95. / 500.;
+    const OFFSET4: [f64; 4] = [OFFSET, OFFSET, OFFSET, 0.];
+
+    // Convert ADX10 values to Channel Dependent Density values.
+    create_scale_offset_op(ops, &SCALE4, &OFFSET4, TransformDirection::Forward);
+
+    // Convert to ACES2065-1.
+    adx_to_aces(ops)
+}
+
+/// ADX16: its codes to Channel Dependent Density, then to ACES.
+///
+/// Port of `ADX16_to_ACES2065_1_Functor` (ACES.cpp:742-755 @ v2.5.2).
+fn adx16_to_aces2065_1(ops: &mut OpVec) -> Result<()> {
+    const SCALE: f64 = 65535. / 8000.;
+    const SCALE4: [f64; 4] = [SCALE, SCALE, SCALE, 1.];
+
+    const OFFSET: f64 = -1520. / 8000.;
+    const OFFSET4: [f64; 4] = [OFFSET, OFFSET, OFFSET, 0.];
+
+    // Convert ADX16 values to Channel Dependent Density values.
+    create_scale_offset_op(ops, &SCALE4, &OFFSET4, TransformDirection::Forward);
+
+    // Convert to ACES2065-1.
+    adx_to_aces(ops)
+}
+
+/// The ACES 1.3 reference gamut compression, applied in ACES2065-1: AP0 to AP1, the fixed
+/// function with the reference parameters, and back.
+///
+/// Port of `GAMUT_COMP_13_Functor` (ACES.cpp:780-791 @ v2.5.2).
+fn gamut_comp_13(ops: &mut OpVec) -> Result<()> {
+    let matrix = build_conversion_matrix(
+        &aces_ap0::PRIMARIES,
+        &aces_ap1::PRIMARIES,
+        AdaptationMethod::None,
+    )?;
+
+    create_matrix_op_from_array(ops, &matrix, TransformDirection::Forward);
+
+    create_fixed_function_op(
+        ops,
+        FixedFunctionOpStyle::AcesGamutComp13Fwd,
+        &vec![1.147, 1.264, 1.312, 0.815, 0.803, 0.880, 1.2],
+    )?;
+
+    create_matrix_op_from_array(ops, &matrix, TransformDirection::Inverse);
+    Ok(())
 }
 
 /// The LMT that desaturates blue hues to reduce clipping artifacts: a matrix (stored
@@ -371,7 +569,7 @@ pub(crate) fn register_all(registry: &mut BuiltinTransformRegistry) {
     registry.add_builtin(
         b"ACEScc_to_ACES2065-1",
         Some(b"Convert ACEScc to ACES2065-1"),
-        not_ported_yet(b"ACEScc_to_ACES2065-1"),
+        creator(acescc_to_aces2065_1),
     );
     // ACES.cpp:698
     registry.add_builtin(
@@ -389,13 +587,13 @@ pub(crate) fn register_all(registry: &mut BuiltinTransformRegistry) {
     registry.add_builtin(
         b"ADX10_to_ACES2065-1",
         Some(b"Convert ADX10 to ACES2065-1"),
-        not_ported_yet(b"ADX10_to_ACES2065-1"),
+        creator(adx10_to_aces2065_1),
     );
     // ACES.cpp:757
     registry.add_builtin(
         b"ADX16_to_ACES2065-1",
         Some(b"Convert ADX16 to ACES2065-1"),
-        not_ported_yet(b"ADX16_to_ACES2065-1"),
+        creator(adx16_to_aces2065_1),
     );
     // ACES.cpp:775
     registry.add_builtin(
@@ -407,7 +605,7 @@ pub(crate) fn register_all(registry: &mut BuiltinTransformRegistry) {
     registry.add_builtin(
         b"ACES-LMT - ACES 1.3 Reference Gamut Compression",
         Some(b"LMT (applied in ACES2065-1) to compress scene-referred values from common cameras into the AP1 gamut"),
-        not_ported_yet(b"ACES-LMT - ACES 1.3 Reference Gamut Compression"),
+        creator(gamut_comp_13),
     );
     // ACES.cpp:812
     registry.add_builtin(
