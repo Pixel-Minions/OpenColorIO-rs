@@ -31,26 +31,26 @@ pub use super::xmltok_impl::{
     XML_TOK_BOM, XML_TOK_NONE, XML_TOK_PARTIAL, XML_TOK_PARTIAL_CHAR, XML_TOK_TRAILING_CR,
 };
 
-/// `XML_PROLOG_STATE` (xmltok.h:136).
+/// `XML_PROLOG_STATE` (xmltok.h:130).
 pub const XML_PROLOG_STATE: i32 = 0;
-/// `XML_CONTENT_STATE` (xmltok.h:137).
+/// `XML_CONTENT_STATE` (xmltok.h:131).
 pub const XML_CONTENT_STATE: i32 = 1;
-/// `XML_CDATA_SECTION_STATE` (xmltok.h:138).
+/// `XML_CDATA_SECTION_STATE` (xmltok.h:132).
 pub const XML_CDATA_SECTION_STATE: i32 = 2;
-/// `XML_IGNORE_SECTION_STATE` (xmltok.h:140), with `XML_DTD`, as the wheels are built.
+/// `XML_IGNORE_SECTION_STATE` (xmltok.h:134), with `XML_DTD`, as the wheels are built.
 pub const XML_IGNORE_SECTION_STATE: i32 = 3;
 
-/// `XML_ATTRIBUTE_VALUE_LITERAL` (xmltok.h:145).
+/// `XML_ATTRIBUTE_VALUE_LITERAL` (xmltok.h:138).
 pub const XML_ATTRIBUTE_VALUE_LITERAL: i32 = 0;
-/// `XML_ENTITY_VALUE_LITERAL` (xmltok.h:146).
+/// `XML_ENTITY_VALUE_LITERAL` (xmltok.h:139).
 pub const XML_ENTITY_VALUE_LITERAL: i32 = 1;
 
-/// `XML_UTF8_ENCODE_MAX`: the most bytes `XmlUtf8Encode` writes (xmltok.h:149).
+/// `XML_UTF8_ENCODE_MAX`: the most bytes `XmlUtf8Encode` writes (xmltok.h:142).
 pub const XML_UTF8_ENCODE_MAX: usize = 4;
 
 /// A position in a document: first line and first column are 0, not 1.
 ///
-/// Port of `POSITION` (xmltok.h:153-157). `XML_Size` is `unsigned long` in the wheels' builds
+/// Port of `POSITION` (xmltok.h:146-150). `XML_Size` is `unsigned long` in the wheels' builds
 /// (no `XML_LARGE_SIZE`); the port counts in `u64`, and only OCIO's own line count reaches its
 /// messages.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -79,7 +79,7 @@ pub struct Attribute {
 
 /// The outcome of a conversion.
 ///
-/// Port of `enum XML_Convert_Result` (xmltok.h:171-176).
+/// Port of `enum XML_Convert_Result` (xmltok.h:165-170).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConvertResult {
     /// `XML_CONVERT_COMPLETED`.
@@ -118,7 +118,7 @@ enum ToUtf8 {
 
 /// One of expat's built-in encodings.
 ///
-/// Port of `struct encoding` and `struct normal_encoding` (xmltok.h:178-205, xmltok.c:187-206)
+/// Port of `struct encoding` and `struct normal_encoding` (xmltok.h:172-200, xmltok.c:187-206)
 /// for the encodings without namespace processing.
 #[derive(Debug)]
 pub struct Encoding {
