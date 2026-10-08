@@ -839,20 +839,22 @@ status = "todo"
 path = "src/OpenColorIO/fileformats/FileFormatCC.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/file_format_cc.rs"]
-status = "partial"
-note = "p4-cdl 4.4d: LocalCachedFile, getFormatInfo, read, buildFileOps; write and getCDLGroup come with 4.4e"
+status = "done"
+note = "p4-cdl 4.4d: LocalCachedFile, getFormatInfo, read, buildFileOps; 4.4e: write, getCDLGroup (a copy, I-174)"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatCCC.cpp"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/file_format_ccc.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_ccc.rs"]
+status = "done"
+note = "p4-cdl 4.4e; buildFileOps' cccid lookup, shared with the CDL format, is build_cdl_file_ops"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatCDL.cpp"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/file_format_cdl.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_cdl.rs"]
+status = "done"
+note = "p4-cdl 4.4e"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatCSP.cpp"
@@ -1004,14 +1006,16 @@ status = "done"
 [[file]]
 path = "src/OpenColorIO/fileformats/cdl/CDLWriter.cpp"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/cdl/cdl_writer.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/cdl/cdl_writer.rs"]
+status = "done"
+note = "p4-cdl 4.4e (I-173)"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/cdl/CDLWriter.h"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/cdl/cdl_writer.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/cdl/cdl_writer.rs"]
+status = "done"
+note = "p4-cdl 4.4e (I-173)"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/ctf/CTFReaderHelper.cpp"
@@ -2131,15 +2135,15 @@ note = "p3-transforms (3.1b)"
 path = "src/OpenColorIO/transforms/CDLTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/cdl_transform.rs"]
-status = "partial"
-note = "p1-transforms-fam2 (1.8f): CDLTransform without its files (Create, the parameters, style, ID, first SOP description, validation, equals, operator<< on the shared stream, I-73), checked against the wheel in crates/ocio/tests/cdl_transform_oracle.rs. GetCDL, CreateFromFile and CreateGroupFromFile come with the CDL readers (Phase 4)"
+status = "done"
+note = "p1-transforms-fam2 (1.8f): CDLTransform without its files (Create, the parameters, style, ID, first SOP description, validation, equals, operator<< on the shared stream, I-73), checked against the wheel in crates/ocio/tests/cdl_transform_oracle.rs. p4-cdl 4.4e: GetCDL, CreateFromFile and CreateGroupFromFile (copies, I-174)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/CDLTransform.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/cdl_transform.rs"]
 status = "partial"
-note = "p1-transforms-fam2 (1.8f): the class and the METADATA_*_DESCRIPTION names; the file caches' types come with the CDL readers (Phase 4)"
+note = "p1-transforms-fam2 (1.8f): the class and the METADATA_*_DESCRIPTION names; p4-cdl 4.4d: CDLTransformMap and CDLTransformVec (in fileformats/cdl/)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/ColorSpaceTransform.cpp"
@@ -2276,7 +2280,7 @@ path = "src/OpenColorIO/transforms/GroupTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/group_transform.rs"]
 status = "partial"
-note = "p1-transforms T0: GroupTransform (Create, direction, validate, metadata, the children, operator<<) and BuildGroupOps; p1-transforms-fam1 (1.8b): operator<< writes the children on the group's stream (I-73); text and validation against the wheel (crates/ocio/tests/transform_oracle.rs). write and its format queries (Phase 4) and CollectContextVariables (Phase 3) come later"
+note = "p1-transforms T0: GroupTransform (Create, direction, validate, metadata, the children, operator<<) and BuildGroupOps; p1-transforms-fam1 (1.8b): operator<< writes the children on the group's stream (I-73); text and validation against the wheel (crates/ocio/tests/transform_oracle.rs). p4-cdl 4.4e: write (GroupTransform.cpp:114-139). Its format queries (4.6e) and CollectContextVariables (Phase 3) come later"
 
 [[file]]
 path = "src/OpenColorIO/transforms/GroupTransform.h"
@@ -4519,21 +4523,23 @@ status = "todo"
 [[file]]
 path = "tests/cpu/fileformats/FileFormatCCC_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-formats/src/fileformats/file_format_ccc_tests.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_ccc_tests.rs"]
+status = "done"
+note = "p4-cdl 4.4e: read, write"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatCC_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/fileformats/file_format_cc_tests.rs"]
-status = "partial"
-note = "p4-cdl 4.4d: test_cc1, test_cc2, test_cc_sat_node, test_cc_asc_sat, test_cc_asc_sop; test_cc2_load_save comes with the writer (4.4e)"
+status = "done"
+note = "p4-cdl 4.4d: test_cc1, test_cc2, test_cc_sat_node, test_cc_asc_sat, test_cc_asc_sop; 4.4e: test_cc2_load_save"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatCDL_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-formats/src/fileformats/file_format_cdl_tests.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_cdl_tests.rs"]
+status = "done"
+note = "p4-cdl 4.4e: test_cdl, write"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatCSP_tests.cpp"
@@ -4988,9 +4994,9 @@ note = "p3-transforms (3.1b): creation, access; p2-aces2-cpu: color_matrix_helpe
 [[file]]
 path = "tests/cpu/transforms/CDLTransform_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio/src/transforms/cdl_transform_tests.rs"]
+target = ["crates/ocio/src/transforms/cdl_transform_tests.rs", "crates/ocio/tests/cdl_transform_files_tests.rs"]
 status = "partial"
-note = "p1-transforms-fam2 (1.8f): equality, buildops, description, style; p1-tests-catchup: apply_optimize_simplify. The file tests come with the CDL readers (Phase 4)"
+note = "p1-transforms-fam2 (1.8f): equality, buildops, description, style; p1-tests-catchup: apply_optimize_simplify. p4-cdl 4.4e: create_from_cc_file, create_from_ccc_file, create_from_cdl_file, escape_xml, clear_caches (a test target of their own, as clear_caches empties the global caches); faulty_file_content comes with the CTF reader (4.5), as its last case reads a CTF file"
 
 [[file]]
 path = "tests/cpu/transforms/ColorSpaceTransform_tests.cpp"

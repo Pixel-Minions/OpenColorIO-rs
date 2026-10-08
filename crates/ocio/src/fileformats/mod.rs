@@ -5,6 +5,8 @@
 
 pub mod cdl;
 pub mod file_format_cc;
+pub mod file_format_ccc;
+pub mod file_format_cdl;
 pub mod file_format_spimtx;
 pub mod input_stream;
 

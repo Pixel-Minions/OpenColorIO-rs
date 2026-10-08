@@ -1,15 +1,16 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Port of `tests/cpu/fileformats/FileFormatCC_tests.cpp` (@ v2.5.2), its read tests;
-//! `test_cc2_load_save` comes with the writer (4.4e). Upstream mutes the warnings two tests
-//! expect (`MuteLogging`); here they go to the default logging function.
+//! Port of `tests/cpu/fileformats/FileFormatCC_tests.cpp` (@ v2.5.2). Upstream mutes the
+//! warnings two tests expect (`MuteLogging`); here they go to the default logging function.
 
+use ocio_testkit::assert_text_eq;
 use ocio_testkit::upstream::check_equal;
 
 use super::*;
 use crate::fileformats::input_stream::OpenMode;
 use crate::fileformats::test_utils::load_test_file;
+use crate::transforms::file_format::FILEFORMAT_COLOR_CORRECTION;
 
 /// Port of `LoadCCFile` (FileFormatCC_tests.cpp:16-20 @ v2.5.2).
 fn load_cc_file(file_name: &str) -> Result<LocalCachedFile> {
@@ -154,4 +155,39 @@ fn test_cc_asc_sop() {
     check_equal(0.0, offset[0]);
     let power = cc_file.transform.power();
     check_equal(1.0, power[0]);
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCC, test_cc2_load_save)` @ v2.5.2.
+#[test]
+fn test_cc2_load_save() {
+    let file_path = format!(
+        "{}/cdl_test2.cc",
+        crate::fileformats::test_utils::get_test_files_dir()
+    );
+
+    let group = CdlTransform::group_from_file(&file_path).expect("OCIO_CHECK_NO_THROW");
+
+    let mut output_transform = Vec::new();
+    let cfg = Config::create_raw().expect("a config");
+    group
+        .write(&cfg, FILEFORMAT_COLOR_CORRECTION, &mut output_transform)
+        .expect("OCIO_CHECK_NO_THROW");
+    let expected = r#"<ColorCorrection id="cc0001">
+    <SOPNode>
+        <Description>Example look</Description>
+        <Slope>1 1 0.9</Slope>
+        <Offset>-0.03 -0.02 0</Offset>
+        <Power>1.25 1 1</Power>
+    </SOPNode>
+    <SatNode>
+        <Description>boosting sat</Description>
+        <Saturation>1.7</Saturation>
+    </SatNode>
+</ColorCorrection>
+"#;
+    assert_text_eq(
+        "write",
+        expected,
+        std::str::from_utf8(&output_transform).expect("UTF-8"),
+    );
 }

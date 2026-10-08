@@ -361,8 +361,13 @@ fn load_file_uncached(
 
     let format_registry = FormatRegistry::instance();
 
-    let possible_formats = format_registry.file_formats_for_extension(&extension);
-    for &try_format in &possible_formats {
+    // By index: the formats without data share an address (FormatRegistry's
+    // `file_format_indices_for_extension`).
+    let possible_formats = format_registry.file_format_indices_for_extension(&extension);
+    for &index in &possible_formats {
+        let try_format = format_registry
+            .raw_format_by_index(index)
+            .expect("an index of the registry");
         match open_and_read(try_format, filepath, interp, config) {
             Ok(cached_file) => {
                 if is_debug_logging_enabled() {
@@ -398,10 +403,7 @@ fn load_file_uncached(
             .expect("an index of the registry");
 
         // Do not try primary formats twice.
-        if possible_formats
-            .iter()
-            .any(|&f| std::ptr::addr_eq(f, alt_format))
-        {
+        if possible_formats.contains(&findex) {
             continue;
         }
 

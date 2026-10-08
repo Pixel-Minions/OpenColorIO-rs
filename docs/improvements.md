@@ -1880,6 +1880,40 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p4-xml` (4.4c, `crates/ocio-formats/src/fileformats/xmlutils/
   xml_reader_utils.rs`, `parse_number`); its oracle tests come with the CTF reader (4.5).
 
+### I-173. The CDL writers escape descriptions twice
+
+- **Upstream:** the CC, CCC and CDL writers collect the descriptions of the metadata already
+  escaped for XML (`ExtractCDLMetadata`, `fileformats/cdl/CDLWriter.cpp:23-55` @ v2.5.2), and
+  the formatter escapes them again as it writes them (`XmlFormatter::writeContentTag`,
+  `XMLWriterUtils.cpp:68-83, 124-127`). A description "x < y & z" is written
+  `x &amp;lt; y &amp;amp; z`, which reads back as "x &lt; y &amp; z" (probed 2026-10-08 with
+  `GroupTransform.write` in the three formats). The id and name attributes, and the numbers,
+  are escaped once.
+- **Who notices:** CC, CCC and CDL files written from transforms whose descriptions hold `<`,
+  `>`, `&`, `"` or `'`: each write and read adds a level of escaping.
+- **A fix:** collect the descriptions as they are, and let the formatter escape them; written
+  files of such descriptions change.
+- **Status:** matched in `p4-cdl` (4.4e, `crates/ocio/src/fileformats/cdl/cdl_writer.rs`).
+
+### I-174. A CDL read from a file is shared with the file cache
+
+- **Upstream:** `CDLTransform::CreateFromFile` and `CreateGroupFromFile` return the
+  transforms the file cache holds, not copies (`getCDLGroup` of the CC, CCC and CDL formats,
+  `FileFormatCC.cpp:29-34`, `FileFormatCCC.cpp:32-41`, `FileFormatCDL.cpp:55-64`;
+  `CDLTransform.cpp:34-118` @ v2.5.2). Editing one edits the cached file: later reads of the
+  file give the edited values, and so do the processors of file transforms of it, until
+  `ClearAllCaches` (probed 2026-10-08: `setSlope` on the CDL `CreateFromFile` gave, and a
+  second `CreateFromFile`, `CreateGroupFromFile` and a `FileTransform`'s processor all give
+  the new slope).
+- **Who notices:** applications that edit a CDL they read with `CreateFromFile` or
+  `CreateGroupFromFile`, and then read the file again or process it through a file
+  transform.
+- **A fix:** the port's `CdlTransform::from_file` and `group_from_file` return copies (the
+  owner's API, `docs/cards/phase4.md` P4-5 d), so the cache never changes, as a fix would
+  have it. Matching upstream would need transforms shared by handle; the Python binding
+  (`ocio-py`) decides whether its objects share the cached ones.
+- **Status:** open: the port gives copies, which differs from the wheel after such an edit.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on

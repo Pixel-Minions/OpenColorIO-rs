@@ -14,6 +14,7 @@ use std::any::Any;
 use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
 
+use ocio_ops::cfmt::OStringStream;
 use ocio_ops::exception::{Exception, Result};
 use ocio_ops::op::OpVec;
 use ocio_ops::open_color_types::TransformDirection;
@@ -24,6 +25,7 @@ use crate::config::Config;
 use crate::context::Context;
 use crate::fileformats::input_stream::InputStream;
 use crate::transforms::file_transform::FileTransform;
+use crate::transforms::group_transform::GroupTransform;
 
 /// `FILEFORMAT_CLF`.
 pub const FILEFORMAT_CLF: &str = "Academy/ASC Common LUT Format";
@@ -125,9 +127,16 @@ impl FormatInfo {
 /// What a format read from a file, which the format's `build_file_ops` turns into ops (it
 /// downcasts it to its own type). The file cache keeps it.
 ///
-/// Port of `CachedFile` (FileTransform.h:23-33 @ v2.5.2); `getCDLGroup` comes with the CDL
-/// formats (WP 4.4).
-pub trait CachedFile: Any + Send + Sync {}
+/// Port of `CachedFile` (FileTransform.h:23-33 @ v2.5.2).
+pub trait CachedFile: Any + Send + Sync {
+    /// The CDLs of a CC, CCC or CDL file, as a group with the file's metadata.
+    ///
+    /// Port of `CachedFile::getCDLGroup` (FileTransform.h:29-32 @ v2.5.2), which other
+    /// formats leave to refuse.
+    fn get_cdl_group(&self) -> Result<GroupTransform> {
+        Err(Exception::new("Not a CDL file format."))
+    }
+}
 
 /// A shared [`CachedFile`].
 pub type CachedFileRcPtr = Arc<dyn CachedFile>;
@@ -135,8 +144,8 @@ pub type CachedFileRcPtr = Arc<dyn CachedFile>;
 /// A file format: its infos, reading, and (as their chunks port them) baking and writing.
 ///
 /// Port of `FileFormat` (FileTransform.h:66-106, FileTransform.cpp:556-593 @ v2.5.2), so far
-/// `getFormatInfo`, `read`, `buildFileOps`, `isBinary` and `getName`; `bake` and `write` come
-/// with the baker (WP 4.8) and the writers.
+/// `getFormatInfo`, `read`, `write`, `buildFileOps`, `isBinary` and `getName`; `bake` comes
+/// with the baker (WP 4.8).
 pub trait FileFormat: Send + Sync {
     /// Port of `FileFormat::getFormatInfo`.
     fn format_info(&self) -> Vec<FormatInfo>;
@@ -151,6 +160,23 @@ pub trait FileFormat: Send + Sync {
         original_file_name: &[u8],
         interp: Interpolation,
     ) -> Result<CachedFileRcPtr>;
+
+    /// Writes `group` in the format `format_name` (one of this format's names) to `ostream`;
+    /// formats that don't write refuse.
+    ///
+    /// Port of `FileFormat::write` (FileTransform.h:86-90, FileTransform.cpp:581-590 @
+    /// v2.5.2). Upstream writes to a `std::ostream`; the writers format through an
+    /// [`OStringStream`], whose bytes the caller copies out.
+    fn write(
+        &self,
+        _config: &Config,
+        _context: &Context,
+        _group: &GroupTransform,
+        format_name: &[u8],
+        _ostream: &mut OStringStream,
+    ) -> Result<()> {
+        Err(write_not_supported(format_name))
+    }
 
     /// Appends the ops of `cached_file`, which this format read, for `file_transform` in the
     /// direction `dir`.
@@ -239,7 +265,6 @@ fn create_formats() -> Vec<Box<dyn FileFormat>> {
     use FormatBakeCapabilities as B;
     use FormatCapabilities as C;
     let read_bake = C::READ | C::BAKE;
-    let read_write = C::READ | C::WRITE;
     let all_bakes = B::LUT_3D | B::LUT_1D | B::LUT_1D_3D;
     let stub = |infos: Vec<FormatInfo>| -> Box<dyn FileFormat> {
         Box::new(NotPortedFormat {
@@ -256,19 +281,9 @@ fn create_formats() -> Vec<Box<dyn FileFormat>> {
         // FileFormatCC.cpp:69-76.
         Box::new(crate::fileformats::file_format_cc::LocalFileFormat),
         // FileFormatCCC.cpp:79-86.
-        stub(vec![FormatInfo::new(
-            FILEFORMAT_COLOR_CORRECTION_COLLECTION,
-            "ccc",
-            read_write,
-            B::NONE,
-        )]),
+        Box::new(crate::fileformats::file_format_ccc::LocalFileFormat),
         // FileFormatCDL.cpp:102-109.
-        stub(vec![FormatInfo::new(
-            FILEFORMAT_COLOR_DECISION_LIST,
-            "cdl",
-            read_write,
-            B::NONE,
-        )]),
+        Box::new(crate::fileformats::file_format_cdl::LocalFileFormat),
         // FileFormatCTF.cpp:147-170. Upstream sets the bake capabilities of the CTF info on the
         // CLF one a second time (`info.bake_capabilities = ...` after `info2.capabilities`), so
         // the CTF info has none. No caller sees it: the baker reads a format's first info
@@ -445,6 +460,20 @@ impl FormatRegistry {
         self.formats_by_extension
             .get(&lower(extension.as_ref()))
             .map(|v| v.iter().map(|&i| self.raw_formats[i].as_ref()).collect())
+            .unwrap_or_default()
+    }
+
+    /// The indices (as [`raw_format_by_index`](Self::raw_format_by_index) takes them) of the
+    /// formats of an extension (ignoring case), in registration order. Upstream tells the
+    /// formats apart by their addresses; formats without data (zero-sized) share one, so the
+    /// port tells them apart by index.
+    ///
+    /// Port of `FormatRegistry::getFileFormatForExtension` (FileTransform.cpp:367-375 @
+    /// v2.5.2).
+    pub fn file_format_indices_for_extension(&self, extension: impl AsRef<[u8]>) -> Vec<i32> {
+        self.formats_by_extension
+            .get(&lower(extension.as_ref()))
+            .map(|v| v.iter().map(|&i| i as i32).collect())
             .unwrap_or_default()
     }
 
