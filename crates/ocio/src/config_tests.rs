@@ -5486,3 +5486,251 @@ fn current_config() {
     assert!(!Arc::ptr_eq(&current, &config));
     assert_eq!(current.serialize().unwrap(), config.serialize().unwrap());
 }
+
+/// Port of `OCIO_ADD_TEST(OCIOZArchive, is_config_archivable)` @ v2.5.2
+/// (tests/cpu/OCIOZArchive_tests.cpp; it tests `Config::isArchivable` only, and the archive
+/// comes in Phase 4).
+#[test]
+fn is_config_archivable() {
+    use crate::transforms::file_transform::FileTransform;
+    use ocio_ops::utils::pystring::os_path;
+
+    let _env = EnvGuard::new();
+    // This test primarily tests the isArchivable method from the Config object
+
+    const CONFIG: &str = concat!(
+        "ocio_profile_version: 2\n",
+        "\n",
+        "search_path:\n",
+        "  - abc\n",
+        "  - def\n",
+        "environment:\n",
+        "  MYLUT: exposure_contrast_linear.ctf\n",
+        "\n",
+        "roles:\n",
+        "  default: cs1\n",
+        "\n",
+        "displays:\n",
+        "  disp1:\n",
+        "    - !<View> {name: view1, colorspace: cs2}\n",
+        "\n",
+        "colorspaces:\n",
+        "  - !<ColorSpace>\n",
+        "    name: cs1\n",
+        "\n",
+        "  - !<ColorSpace>\n",
+        "    name: cs2\n",
+        "    from_scene_reference: !<FileTransform> {src: ./$MYLUT}\n",
+    );
+
+    let mut cfg = (*Config::create_from_stream(CONFIG.as_bytes()).unwrap()).clone();
+    // Since a working directory is needed to archive a config, setting a fake working directory
+    // in order to test the search paths and FileTransform source logic.
+    if cfg!(windows) {
+        cfg.set_working_dir(r"C:\fake_working_dir");
+    } else {
+        cfg.set_working_dir("/fake_working_dir");
+    }
+    cfg.validate().unwrap();
+
+    // Testing a few scenario by modifying the search_paths.
+
+    // Testing search paths
+    {
+        /*
+         * Legal scenarios
+         */
+
+        // Valid search path.
+        cfg.set_search_path("luts");
+        assert!(cfg.is_archivable());
+
+        cfg.set_search_path(r"luts/myluts1");
+        assert!(cfg.is_archivable());
+
+        cfg.set_search_path(r"luts\myluts1");
+        assert!(cfg.is_archivable());
+
+        // Valid Search path starting with "./" or ".\".
+        cfg.set_search_path(r"./myLuts");
+        assert!(cfg.is_archivable());
+
+        cfg.set_search_path(r".\myLuts");
+        assert!(cfg.is_archivable());
+
+        // Valid search path starting with "./" or ".\" and a context variable.
+        cfg.set_search_path(r"./$SHOT/myluts");
+        assert!(cfg.is_archivable());
+
+        cfg.set_search_path(r".\$SHOT\myluts");
+        assert!(cfg.is_archivable());
+
+        cfg.set_search_path(r"luts/$SHOT");
+        assert!(cfg.is_archivable());
+
+        cfg.set_search_path(r"luts/$SHOT/luts1");
+        assert!(cfg.is_archivable());
+
+        cfg.set_search_path(r"luts\$SHOT");
+        assert!(cfg.is_archivable());
+
+        cfg.set_search_path(r"luts\$SHOT\luts1");
+        assert!(cfg.is_archivable());
+
+        /*
+         * Illegal scenarios
+         */
+
+        // Illegal search path starting with "..".
+        cfg.set_search_path(r"luts:../luts");
+        assert!(!cfg.is_archivable());
+
+        cfg.set_search_path(r"luts:..\myLuts");
+        assert!(!cfg.is_archivable());
+
+        // Illegal search path starting with a context variable.
+        cfg.set_search_path(r"luts:$SHOT");
+        assert!(!cfg.is_archivable());
+
+        // Illegal search path with absolute path.
+        cfg.set_search_path(r"luts:/luts");
+        assert!(!cfg.is_archivable());
+
+        cfg.set_search_path(r"luts:/$SHOT");
+        assert!(!cfg.is_archivable());
+
+        if cfg!(windows) {
+            cfg.clear_search_paths();
+            cfg.add_search_path(r"C:\luts");
+            assert!(!cfg.is_archivable());
+
+            cfg.clear_search_paths();
+            cfg.add_search_path(r"C:\");
+            assert!(!cfg.is_archivable());
+
+            cfg.clear_search_paths();
+            cfg.add_search_path(r"C:\$SHOT");
+            assert!(!cfg.is_archivable());
+        }
+    }
+
+    // Clear search paths so it doesn't affect the tests below.
+    cfg.clear_search_paths();
+
+    // Lambda function to facilitate adding a new FileTransform to a config.
+    let mut add_ft_and_test_is_archivable = |path: &str, is_archivable: bool| {
+        let full_path = os_path::join(path.as_bytes(), b"fake_lut.clf");
+        let mut ft = FileTransform::new();
+        ft.set_src(&full_path);
+        let mut cs = ColorSpace::new();
+        cs.set_name("csTest");
+        cs.set_transform(Some(&Transform::from(ft)), ColorSpaceDirection::ToReference)
+            .unwrap();
+        cfg.add_color_space(&cs).unwrap();
+        assert_eq!(is_archivable, cfg.is_archivable(), "{path}");
+        cfg.remove_color_space("csTest");
+    };
+
+    // Testing FileTransfrom paths
+    {
+        /*
+         * Legal scenarios
+         */
+
+        // Valid FileTransform path.
+        add_ft_and_test_is_archivable("luts", true);
+        add_ft_and_test_is_archivable(r"luts/myluts1", true);
+        add_ft_and_test_is_archivable(r"luts\myluts1", true);
+
+        // Valid Search path starting with "./" or ".\".
+        add_ft_and_test_is_archivable(r"./myLuts", true);
+        add_ft_and_test_is_archivable(r".\myLuts", true);
+
+        // Valid search path starting with "./" or ".\" and a context variable.
+        add_ft_and_test_is_archivable(r"./$SHOT/myluts", true);
+        add_ft_and_test_is_archivable(r".\$SHOT\myluts", true);
+        add_ft_and_test_is_archivable(r"luts/$SHOT", true);
+        add_ft_and_test_is_archivable(r"luts/$SHOT/luts1", true);
+        add_ft_and_test_is_archivable(r"luts\$SHOT", true);
+        add_ft_and_test_is_archivable(r"luts\$SHOT\luts1", true);
+
+        /*
+         * Illegal scenarios
+         */
+
+        // Illegal search path starting with "..".
+        add_ft_and_test_is_archivable(r"../luts", false);
+        add_ft_and_test_is_archivable(r"..\myLuts", false);
+
+        // Illegal search path starting with a context variable.
+        add_ft_and_test_is_archivable(r"$SHOT", false);
+
+        // Illegal search path with absolute path.
+        add_ft_and_test_is_archivable(r"/luts", false);
+        add_ft_and_test_is_archivable(r"/$SHOT", false);
+
+        if cfg!(windows) {
+            add_ft_and_test_is_archivable(r"C:\luts", false);
+            add_ft_and_test_is_archivable(r"C:\", false);
+            add_ft_and_test_is_archivable(r"\$SHOT", false);
+        }
+    }
+}
+
+/// A proxy that serves a config's text and no LUT file.
+struct TextProxy(std::result::Result<Vec<u8>, &'static str>);
+
+impl crate::config_io_proxy::ConfigIoProxy for TextProxy {
+    fn lut_data(&self, _filepath: &[u8]) -> Result<Vec<u8>> {
+        Err(Exception::new("no LUT files"))
+    }
+
+    fn config_data(&self) -> Result<Vec<u8>> {
+        self.0.clone().map_err(Exception::new)
+    }
+
+    fn fast_lut_file_hash(&self, _filepath: &[u8]) -> Result<Vec<u8>> {
+        Ok(Vec::new())
+    }
+}
+
+/// `Config create_from_config_io_proxy`'s config and checks (Config_tests.cpp:10030-10145 @
+/// v2.5.2) through a proxy that serves no LUT file (the test's processor reads LUT files,
+/// Phase 4; no marker), and the proxy's other outcomes: the config keeps the proxy, the
+/// reader's error doesn't name a file (`Config::Impl::Read`'s "from Archive/ConfigIOProxy"),
+/// and the proxy's own error.
+#[test]
+fn config_from_a_proxy() {
+    use crate::config_io_proxy::ConfigIoProxy;
+
+    let _env = EnvGuard::new();
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../upstream/OpenColorIO/tests/data/files/configs/context_test1/config.ocio");
+    let text = std::fs::read(path).unwrap();
+
+    let ciop: Arc<dyn ConfigIoProxy> = Arc::new(TextProxy(Ok(text)));
+    let config = Config::create_from_config_io_proxy(Arc::clone(&ciop)).unwrap();
+    config.validate().unwrap();
+
+    // Simple check on the number of color spaces in the test config.
+    assert_eq!(config.num_color_spaces(), 13);
+    assert!(Arc::ptr_eq(&config.config_io_proxy().unwrap(), &ciop));
+
+    // The reader's error is a stream's.
+    let bad = b"ocio_profile_version: 2\nroles: {default: raw\n".to_vec();
+    let from_stream = Config::create_from_stream(&bad).unwrap_err();
+    let from_proxy = Config::create_from_config_io_proxy(Arc::new(TextProxy(Ok(bad)))).unwrap_err();
+    assert_eq!(from_proxy.what(), from_stream.what());
+
+    // The proxy's error.
+    check_throw_what(
+        Config::create_from_config_io_proxy(Arc::new(TextProxy(Err("no config here")))),
+        "no config here",
+    );
+
+    // A copy keeps the proxy; setting none drops it.
+    let mut copy = (*config).clone();
+    assert!(Arc::ptr_eq(&copy.config_io_proxy().unwrap(), &ciop));
+    copy.set_config_io_proxy(None);
+    assert!(copy.config_io_proxy().is_none());
+}
