@@ -10,8 +10,7 @@
 //! `GetLut3DRenderer` (`ops::lut3d::lut3d_op_cpu`).
 //!
 //! Not here yet, and an error until then: `combineWith`, which composes two LUTs (`Compose`,
-//! WP 2.2e, [`NOT_PORTED_COMPOSE`]); the inverse LUT's exact renderer (WP 2.2d,
-//! [`NOT_PORTED_INVERSE_RENDERER`]) and its fast forward LUT (WP 2.2e,
+//! WP 2.2e, [`NOT_PORTED_COMPOSE`]), and the inverse LUT's fast forward LUT (WP 2.2e,
 //! [`NOT_PORTED_FAST_INVERSE`]). `extractGpuShaderInfo` comes with the GPU writer (WP 2.2f);
 //! `CreateLut3DTransform` and `BuildLut3DOp` are the `ocio` crate's, with the
 //! `Lut3DTransform` (WP 2.2c).
@@ -25,10 +24,6 @@ use crate::open_color_types::TransformDirection;
 /// The error of composing two 3D LUTs until WP 2.2e.
 pub const NOT_PORTED_COMPOSE: &str =
     "Lut3D: composing 3D LUTs is not ported yet (Phase 2, WP 2.2e).";
-
-/// The error of the inverse 3D LUT's exact renderer until WP 2.2d.
-pub const NOT_PORTED_INVERSE_RENDERER: &str =
-    "Lut3D: the inverse 3D LUT renderer is not ported yet (Phase 2, WP 2.2d).";
 
 /// The error of the optimizer's fast forward LUT of an inverse 3D LUT
 /// (`MakeFastLut3DFromInverse`, `OPTIMIZATION_LUT_INV_FAST`) until WP 2.2e.

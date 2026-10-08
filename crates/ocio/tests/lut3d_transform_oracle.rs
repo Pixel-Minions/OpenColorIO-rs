@@ -11,7 +11,7 @@
 //!   messages, and of `getValue`;
 //! - the raw config's processor of each forward LUT: `BuildLut3DOp`, then
 //!   `CreateLut3DTransform` through `createGroupTransform()`, the values bit for bit (an
-//!   inverse LUT's processor needs the inverse 3D LUT, WP 2.2d and 2.2e);
+//!   inverse LUT's default processor needs its fast forward LUT, WP 2.2e);
 //! - the optimized processors of a LUT and its inverse, which the optimizer replaces with
 //!   the LUT's identity replacement, a [0, 1] range;
 //! - the port's refusals until the inverse LUT and the composition of LUTs are ported.
@@ -34,9 +34,7 @@ use ocio::{
     BitDepth, Config, GroupTransform, Interpolation, Lut3DTransform, MatrixTransform,
     OptimizationFlags, RangeTransform, Transform, TransformDirection,
 };
-use ocio_ops::ops::lut3d::lut3d_op::{
-    NOT_PORTED_COMPOSE, NOT_PORTED_FAST_INVERSE, NOT_PORTED_INVERSE_RENDERER,
-};
+use ocio_ops::ops::lut3d::lut3d_op::{NOT_PORTED_COMPOSE, NOT_PORTED_FAST_INVERSE};
 use ocio_testkit::battery::BitDepth as Depth;
 use ocio_testkit::transform_text::f64_spec;
 use serde_json::{Value, json};
@@ -501,10 +499,11 @@ fn a_lut_and_its_inverse_optimize_to_a_range() {
     );
 }
 
-/// The CPU processors the port refuses until the inverse 3D LUT (WP 2.2d, 2.2e) and the
-/// composition of 3D LUTs (WP 2.2e) are ported: an inverse LUT's, with the default
-/// optimization (its fast forward LUT) and without `OPTIMIZATION_LUT_INV_FAST` (its exact
-/// renderer), and two LUTs' with `OPTIMIZATION_COMP_LUT3D`.
+/// The CPU processors the port refuses until the fast forward LUT of an inverse 3D LUT and the
+/// composition of 3D LUTs (WP 2.2e) are ported: an inverse LUT's with the default
+/// optimization, and two LUTs' with `OPTIMIZATION_COMP_LUT3D`. Without
+/// `OPTIMIZATION_LUT_INV_FAST`, an inverse LUT renders with its exact inverse
+/// (`crates/ocio-ops/tests/lut3d_inv_oracle.rs`).
 #[test]
 fn not_ported_yet_refusals() {
     let config = Config::create_raw().expect("the raw config");
@@ -523,10 +522,7 @@ fn not_ported_yet_refusals() {
         Err(NOT_PORTED_FAST_INVERSE.to_string())
     );
     let exact = OptimizationFlags(default.0 & !OptimizationFlags::LUT_INV_FAST.0);
-    assert_eq!(
-        message(inverse, exact),
-        Err(NOT_PORTED_INVERSE_RENDERER.to_string())
-    );
+    assert_eq!(message(inverse, exact), Ok(()));
     let mut two = GroupTransform::new();
     two.append_transform(curves(Lut::new(), 3).port.into());
     two.append_transform(curves(Lut::new(), 5).port.into());
