@@ -14,10 +14,12 @@ use ocio_ops::op::OpVec;
 use ocio_ops::open_color_types::{
     TransformDirection, combine_transform_directions, transform_direction_to_string,
 };
+use ocio_ops::utils::string_utils::c_str;
 
 use crate::config::Config;
 use crate::context::Context;
 use crate::transform::{Transform, build_ops, validate_direction};
+use crate::transforms::file_format::FormatRegistry;
 
 /// A list of transforms, applied in order (in reverse order, each inverted, when the group is
 /// inverse), with format metadata.
@@ -186,6 +188,50 @@ impl GroupTransform {
     #[doc(alias = "prependTransform")]
     pub fn prepend_transform(&mut self, transform: Transform) {
         self.transforms.insert(0, transform);
+    }
+
+    /// Writes the group to `os` in the file format named `format_name` (a name of
+    /// `GetFormatNameByIndex`, matched without case), with the config's current context.
+    ///
+    /// Port of `GroupTransformImpl::write` (GroupTransform.cpp:114-139 @ v2.5.2). The format
+    /// writes into a string stream, as upstream's tests do, whose bytes go to `os` once the
+    /// format is done (also when it fails); an error of `os` itself, which a C++ stream keeps
+    /// in its state, is returned with its text.
+    pub fn write(
+        &self,
+        config: &Config,
+        format_name: impl AsRef<[u8]>,
+        os: &mut impl std::io::Write,
+    ) -> Result<()> {
+        let format_name = c_str(format_name.as_ref());
+        let Some(fmt) = FormatRegistry::instance().file_format_by_name(format_name) else {
+            let mut err = OStringStream::new(Crt::NATIVE);
+            err.put_str("The format named '");
+            err.put_bytes(format_name);
+            err.put_str("' could not be found. ");
+            return Err(Exception::new(err.into_bytes()));
+        };
+
+        let mut stream = OStringStream::new(Crt::NATIVE);
+        let written = fmt.write(
+            config,
+            &config.current_context().get(),
+            self,
+            format_name,
+            &mut stream,
+        );
+        // What the format wrote before an error stays written, as on upstream's stream.
+        os.write_all(&stream.into_bytes())
+            .map_err(|e| Exception::new(e.to_string()))?;
+        if let Err(e) = written {
+            let mut err = OStringStream::new(Crt::NATIVE);
+            err.put_str("Error writing format '");
+            err.put_bytes(format_name);
+            err.put_str("': ");
+            err.put_c_str(e.what());
+            return Err(Exception::new(err.into_bytes()));
+        }
+        Ok(())
     }
 }
 

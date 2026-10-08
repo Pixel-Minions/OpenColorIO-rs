@@ -2,9 +2,8 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! The CDL transform: a port of `src/OpenColorIO/transforms/CDLTransform.h` and
-//! `CDLTransform.cpp` @ v2.5.2, without its files (`CreateFromFile`, `CreateGroupFromFile` and
-//! `GetCDL`, which read .cc, .ccc and .cdl files: Phase 4), with its op glue from
-//! `src/OpenColorIO/ops/cdl/CDLOp.cpp` (`CreateCDLTransform`, `BuildCDLOp`).
+//! `CDLTransform.cpp` @ v2.5.2, with its op glue from `src/OpenColorIO/ops/cdl/CDLOp.cpp`
+//! (`CreateCDLTransform`, `BuildCDLOp`).
 
 use std::fmt;
 
@@ -20,27 +19,27 @@ use ocio_ops::open_color_types::{
 use ocio_ops::ops::cdl::cdl_op::create_cdl_op;
 use ocio_ops::ops::cdl::{CdlOpData, ChannelParams};
 use ocio_ops::ops::exponent::exponent_op::create_exponent_op_from_values;
+use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 use ocio_ops::ops::matrix::matrix_op::{create_saturation_op, create_scale_offset_op};
+use ocio_ops::parse_utils::string_to_int;
 use ocio_ops::utils::string_utils::c_str;
 
 use crate::config::Config;
-use crate::transform::validate_direction;
+use crate::transform::{Transform, validate_direction};
+use crate::transforms::file_transform::get_cached_file_and_format;
 use crate::transforms::group_transform::GroupTransform;
 
 // The CDL metadata's element names: private, as in upstream's CDLTransform.h (not part of
-// the public headers). The CDL and CTF readers and writers use the others (Phase 4).
+// the public headers).
 
 /// `METADATA_INPUT_DESCRIPTION` (src/OpenColorIO/transforms/CDLTransform.h:17 @ v2.5.2).
-#[allow(dead_code)]
 pub(crate) const METADATA_INPUT_DESCRIPTION: &[u8] = b"InputDescription";
 /// `METADATA_VIEWING_DESCRIPTION` (src/OpenColorIO/transforms/CDLTransform.h:18 @ v2.5.2).
-#[allow(dead_code)]
 pub(crate) const METADATA_VIEWING_DESCRIPTION: &[u8] = b"ViewingDescription";
 /// `METADATA_SOP_DESCRIPTION` (src/OpenColorIO/transforms/CDLTransform.h:19 @ v2.5.2): the name
 /// of the metadata's children that hold the slope, offset and power's descriptions.
 pub(crate) const METADATA_SOP_DESCRIPTION: &[u8] = b"SOPDescription";
 /// `METADATA_SAT_DESCRIPTION` (src/OpenColorIO/transforms/CDLTransform.h:20 @ v2.5.2).
-#[allow(dead_code)]
 pub(crate) const METADATA_SAT_DESCRIPTION: &[u8] = b"SATDescription";
 
 /// An ASC Color Decision List: `out = clamp((in * slope + offset) ^ power)`, then the
@@ -57,6 +56,108 @@ pub(crate) const METADATA_SAT_DESCRIPTION: &[u8] = b"SATDescription";
 pub struct CdlTransform {
     /// `m_data`.
     data: CdlOpData,
+}
+
+/// The CDL of `group`, a group of a CC, CCC or CDL file, that `cdl_id` names: the first one
+/// for an empty id, else the one of that id (case sensitive), else the one at that index.
+///
+/// Port of `GetCDL` (CDLTransform.cpp:34-82 @ v2.5.2).
+fn get_cdl(group: &GroupTransform, cdl_id: &[u8]) -> Result<CdlTransform> {
+    // The groups of CDL files hold CDLs only (`getCDLGroup`).
+    let cdl_at = |i: i32| match group.transform(i) {
+        Ok(Transform::Cdl(cdl)) => cdl.clone(),
+        _ => unreachable!("a CDL file's group holds CDLs"),
+    };
+
+    if cdl_id.is_empty() {
+        // No cccid, return first cdl.
+        let num_cdl = group.num_transforms();
+        if num_cdl > 0 {
+            return Ok(cdl_at(0));
+        } else {
+            return Err(Exception::new("File contains no CDL."));
+        }
+    }
+
+    // Try to parse the cccid as a string id.
+    for i in 0..group.num_transforms() {
+        let cdl = cdl_at(i);
+        // Case sensitive.
+        let id = cdl.format_metadata().get_id();
+        if !id.is_empty() && cdl_id == id {
+            return Ok(cdl);
+        }
+    }
+
+    // Try to parse the cccid as an integer index. We want to be strict, so fail if leftover chars
+    // in the parse.
+    let mut cdlindex: i32 = 0;
+    if string_to_int(&mut cdlindex, cdl_id, true) {
+        let maxindex = group.num_transforms() - 1;
+        if cdlindex < 0 || cdlindex > maxindex {
+            let mut os = OStringStream::new(Crt::NATIVE);
+            os.put_str("The specified CDL index ");
+            os.put_i32(cdlindex);
+            os.put_str(" is outside the valid range for this file [0,");
+            os.put_i32(maxindex);
+            os.put_str("]");
+            return Err(Exception::missing_file(os.into_bytes()));
+        }
+
+        return Ok(cdl_at(cdlindex));
+    }
+
+    let mut os = OStringStream::new(Crt::NATIVE);
+    os.put_str("The specified CDL Id/Index '");
+    os.put_bytes(cdl_id);
+    os.put_str("' could not be loaded from the file.");
+    Err(Exception::new(os.into_bytes()))
+}
+
+impl CdlTransform {
+    /// The CDL of the CC, CCC or CDL file `src` that `cdl_id` names (see `GetCDL`; empty for
+    /// the first one). The file is read once per path, through the file cache, with an empty
+    /// config. Upstream returns the cached transform itself, so that editing it edits what
+    /// later reads of the file give; the port returns a copy (I-174).
+    ///
+    /// Port of `CDLTransform::CreateFromFile` (CDLTransform.cpp:84-101 @ v2.5.2).
+    #[doc(alias = "CreateFromFile")]
+    pub fn from_file(src: impl AsRef<[u8]>, cdl_id: impl AsRef<[u8]>) -> Result<CdlTransform> {
+        let src = c_str(src.as_ref());
+        if src.is_empty() {
+            return Err(Exception::new(
+                "Error loading CDL. Source file not specified.",
+            ));
+        }
+
+        // The config object won't be used in this use-case. Empty config.
+        let (_format, cached_file) =
+            get_cached_file_and_format(src, Interpolation::Default, &Config::new()?)?;
+        let group = cached_file.get_cdl_group()?;
+
+        get_cdl(&group, c_str(cdl_id.as_ref()))
+    }
+
+    /// The CDLs of the CC, CCC or CDL file `src`, in the file's order, as a group with the
+    /// file's metadata. Upstream's group shares the cached transforms; the port's holds copies
+    /// (I-174).
+    ///
+    /// Port of `CDLTransform::CreateGroupFromFile` (CDLTransform.cpp:103-118 @ v2.5.2).
+    #[doc(alias = "CreateGroupFromFile")]
+    pub fn group_from_file(src: impl AsRef<[u8]>) -> Result<GroupTransform> {
+        let src = c_str(src.as_ref());
+        if src.is_empty() {
+            return Err(Exception::new(
+                "Error loading CDL. Source file not specified.",
+            ));
+        }
+
+        // The config object won't be used in this use-case. Empty config.
+        let (_format, cached_file) =
+            get_cached_file_and_format(src, Interpolation::Default, &Config::new()?)?;
+
+        cached_file.get_cdl_group()
+    }
 }
 
 impl Default for CdlTransform {

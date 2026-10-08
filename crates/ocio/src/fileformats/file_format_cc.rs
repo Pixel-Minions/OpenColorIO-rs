@@ -2,8 +2,7 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! The CC format: one ASC CDL `ColorCorrection`. A port of
-//! `src/OpenColorIO/fileformats/FileFormatCC.cpp` @ v2.5.2, so far its reader and its ops; its
-//! writer comes with the CDL writer (4.4e).
+//! `src/OpenColorIO/fileformats/FileFormatCC.cpp` @ v2.5.2.
 
 use std::any::Any;
 use std::sync::Arc;
@@ -18,25 +17,38 @@ use crate::config::Config;
 use crate::context::Context;
 use crate::fileformats::cdl::cdl_parser::CdlParser;
 use crate::fileformats::cdl::cdl_reader_helper::CdlTransformRcPtr;
+use crate::fileformats::cdl::cdl_writer;
 use crate::fileformats::input_stream::InputStream;
+use crate::transform::Transform;
 use crate::transforms::cdl_transform::{CdlTransform, build_cdl_op};
 use crate::transforms::file_format::{
     CachedFile, CachedFileRcPtr, FILEFORMAT_COLOR_CORRECTION, FileFormat, FormatBakeCapabilities,
     FormatCapabilities, FormatInfo,
 };
 use crate::transforms::file_transform::FileTransform;
+use crate::transforms::group_transform::GroupTransform;
+use ocio_formats::fileformats::xmlutils::xml_writer_utils::XmlFormatter;
 
 /// A CC file's transform.
 ///
-/// Port of `LocalCachedFile` (FileFormatCC.cpp:19-37 @ v2.5.2); `getCDLGroup` comes with
-/// `CDLTransform::CreateFromFile` (4.4e).
+/// Port of `LocalCachedFile` (FileFormatCC.cpp:19-37 @ v2.5.2).
 #[derive(Debug, Clone)]
 pub struct LocalCachedFile {
     /// `m_transform`.
     pub transform: CdlTransformRcPtr,
 }
 
-impl CachedFile for LocalCachedFile {}
+impl CachedFile for LocalCachedFile {
+    /// A group of the file's CDL. Upstream's group shares the cached transform; the port's
+    /// holds a copy (I-174).
+    ///
+    /// Port of `LocalCachedFile::getCDLGroup` (FileFormatCC.cpp:29-34 @ v2.5.2).
+    fn get_cdl_group(&self) -> Result<GroupTransform> {
+        let mut group = GroupTransform::new();
+        group.append_transform((*self.transform).clone().into());
+        Ok(group)
+    }
+}
 
 /// The CC format.
 ///
@@ -98,6 +110,29 @@ impl FileFormat for LocalFileFormat {
         _interp: Interpolation,
     ) -> Result<CachedFileRcPtr> {
         Ok(Arc::new(self.read_file(istream, file_name)?))
+    }
+
+    /// Writes the group's one CDL as a `ColorCorrection`.
+    ///
+    /// Port of `LocalFileFormat::write` (FileFormatCC.cpp:111-129 @ v2.5.2).
+    fn write(
+        &self,
+        _config: &Config,
+        _context: &Context,
+        group: &GroupTransform,
+        _format_name: &[u8],
+        ostream: &mut OStringStream,
+    ) -> Result<()> {
+        if group.num_transforms() != 1 {
+            return Err(Exception::new("CDL write: there should be a single CDL."));
+        }
+        let Ok(Transform::Cdl(cdl)) = group.transform(0) else {
+            return Err(Exception::new("CDL write: only CDL can be written."));
+        };
+
+        let mut fmt = XmlFormatter::new(ostream);
+        cdl_writer::write(&mut fmt, cdl);
+        Ok(())
     }
 
     /// Appends the CDL's ops, with the file transform's CDL style if not the default, in the
