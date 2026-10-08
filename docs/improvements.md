@@ -1774,6 +1774,24 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   the paths such globs send to each rule in `crates/ocio/tests/config_oracle.rs`
   (`sanitized_globs_on_a_config_match_the_wheel`).
 
+### I-162. Text LUT files read differently on Windows and Linux
+
+- **Upstream:** `getLutData` (`FileTransform.cpp:218-220`) opens the file of every format that
+  isn't binary in text mode (`std::ios_base::in`). On Windows, MSVC's `std::ifstream` reads
+  through the C runtime's text-mode `FILE`: `CR LF` reads as `LF`, a lone `CR` is kept (so
+  `CR CR LF` reads as `CR LF`), and a `0x1A` byte ends the file, whatever follows. On Linux the
+  reader gets the file's bytes, `CR` included. Through a `ConfigIOProxy` (a `std::stringstream`)
+  it gets the bytes on both. So a file with Windows line ends, or with a `0x1A` in it, can read
+  differently on the two platforms; a directory, which glibc opens, fails to read on Linux and
+  fails to open on Windows.
+- **Who notices:** LUT files with `CR LF` line ends whose readers keep the `CR` (in a name or a
+  last token), and files with a `0x1A` byte, shared between Windows and Linux.
+- **A fix:** open text formats in binary mode and treat `CR LF` as a line end on both platforms.
+- **Decided** (P4-6, D12): the port does what each wheel does.
+- **Status:** matched in `p4-registry` (`crates/ocio/src/fileformats/input_stream.rs`, the open
+  of 4.0c), compared with the platform's C runtime (`fopen` and `fread`) on generated files in
+  `crates/ocio/tests/input_stream_crt.rs`.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on

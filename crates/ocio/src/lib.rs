@@ -15,6 +15,7 @@ pub mod context_variable_utils;
 pub(crate) mod custom_keys;
 pub(crate) mod display;
 pub mod file_rules;
+pub mod fileformats;
 pub mod look;
 pub(crate) mod look_parse;
 pub mod named_transform;
