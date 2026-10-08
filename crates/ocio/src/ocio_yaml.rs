@@ -1948,6 +1948,7 @@ pub(crate) fn load_config(
                 }
             }
             b"strictparsing" => config.set_strict_parsing_enabled(load_bool(value)?),
+            // Read as a description: its trailing newlines go (docs/improvements.md, I-145).
             b"name" => config.set_name(c_str(&load_description(value)?)),
             b"family_separator" => {
                 // Check that the key is not present in a v1 config (checkVersionConsistency
