@@ -9,9 +9,13 @@ use ocio_ops::utils::cscan::{ScanArg, ScanCrt, sscanf};
 use ocio_testkit::crt::{self, Scanned};
 use ocio_testkit::probe::Rng;
 
-/// The formats of the readers (FileFormatSpi1D.cpp, FileFormatIridasCube.cpp,
-/// FileFormatDiscreet1DL.cpp @ v2.5.2) and a few more of the same directives.
+/// The formats of the readers (FileFormatSpi1D.cpp, FileFormatSpi3D.cpp:108 and 167,
+/// FileFormatIridasCube.cpp, FileFormatDiscreet1DL.cpp, ctf/CTFReaderHelper.cpp:759,
+/// ctf/CTFTransform.cpp:85 @ v2.5.2) and a few more of the same directives.
 const FORMATS: &[&str] = &[
+    "%d %d %d",
+    "%d %d %d %63s %63s %63s",
+    "%d.%d.%d",
     "Version %d",
     "From %63s %63s",
     "Length %d",
@@ -31,7 +35,8 @@ const FORMATS: &[&str] = &[
 ];
 
 /// Pieces the inputs are made of: the formats' words, numbers at the limits, signs, white
-/// space of every kind, and bytes past ASCII.
+/// space of every kind, and bytes past ASCII (0xA0 among them: white space in code page 1252,
+/// not in the "C" locale both follow).
 const PIECES: &[&[u8]] = &[
     b"Version",
     b"From",
@@ -71,6 +76,8 @@ const PIECES: &[&[u8]] = &[
     b"b",
     b"\xff",
     b"\x80",
+    b"\xa0",
+    b".",
     b"%",
 ];
 
@@ -148,4 +155,60 @@ fn scans_match_the_c_runtime() {
         failures.len(),
         failures[..failures.len().min(20)].join("\n")
     );
+}
+
+/// Deviation D-1, pinned: under Python the Windows wheel scans in code page 1252's locale,
+/// where 0xA0 is white space, so its spi1d reader takes `Length\xa03` for a length of 3; the
+/// Linux wheel, in a C or UTF-8 locale, doesn't. The port scans in the "C" locale on both, as
+/// the C runtime's reference does (`ocio_testkit::crt::sscanf`).
+#[test]
+fn a_no_break_space_is_white_space_only_in_the_windows_wheel() {
+    use ocio_testkit::Oracle;
+    use serde_json::json;
+
+    let line = b"Length\xa03";
+    let reference = crt::sscanf(line, "Length %d");
+    assert_eq!(reference.count, 0);
+    let mut length = 0;
+    let count = sscanf(
+        ScanCrt::NATIVE,
+        line,
+        b"Length %d",
+        &mut [ScanArg::Int(&mut length)],
+    );
+    assert_eq!((count, length), (reference.count, 0));
+
+    let spi1d = [
+        b"Version 1\nFrom 0.0 1.0\n".as_slice(),
+        line,
+        b"\nComponents 1\n{\n0\n0.5\n1\n}\n",
+    ]
+    .concat();
+    let hex: String = spi1d.iter().map(|b| format!("{b:02x}")).collect();
+    let result = Oracle::get()
+        .call(
+            "with_files",
+            json!({"files": {"lut.spi1d": {"bytes": hex}}, "command": "processor_ops",
+                   "args": {"transform": {"class": "FileTransform",
+                                          "calls": [["setSrc", "$FILES/lut.spi1d"]]}}}),
+            &[],
+        )
+        .result;
+    if cfg!(windows) {
+        assert!(result.get("exception").is_none(), "{result}");
+    } else {
+        // The reader quotes the line, which isn't UTF-8.
+        assert_eq!(
+            result["exception"]["type"], "UnicodeDecodeError",
+            "{result}"
+        );
+        let message = ocio_testkit::oracle_values::bytes(
+            &json!({"bytes": result["exception"]["undecodable"]}),
+        );
+        let needle = b"Invalid 'Length' Tag";
+        assert!(
+            message.windows(needle.len()).any(|w| w == needle),
+            "{result}"
+        );
+    }
 }

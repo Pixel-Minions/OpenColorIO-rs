@@ -1798,7 +1798,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
     digits it ends the number and is lost, so `12\xff34` reads as 12 then 34. glibc reads 0xFF
     as any other byte.
   The readers compare the count with the one they expect, so valid files, and most malformed
-  ones, read alike on both wheels; the port follows each runtime, so the rest do too.
+  ones, read alike on both wheels; the port follows each runtime, so the rest do too. Both
+  scan in the "C" locale here; the Windows wheel under Python scans in code page 1252's, where
+  0xA0 is white space too (deviation D-1).
 - **Who notices:** malformed LUT files, read on both platforms.
 - **A fix:** none needed for valid files; a hand-written header parser would remove the
   difference.

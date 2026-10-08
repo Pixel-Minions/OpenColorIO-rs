@@ -426,3 +426,131 @@ fn string_vec_to_int_vec_test() {
     assert!(!string_vec_to_int_vec(&mut int_array, &line_parts));
     assert_eq!(int_array.len(), 2);
 }
+
+// More cases of the Phase 4 helpers (the p4-parse verifier's, 2026-10-08).
+
+/// The text upstream throws for an unknown XML entity: the literal of
+/// `ConvertXmlTokenToSpecialChar` (src/OpenColorIO/ParseUtils.cpp:86 @ v2.5.2), read from the
+/// source.
+fn unknown_xml_tag_literal() -> Vec<u8> {
+    let source = std::fs::read_to_string(
+        ocio_testkit::paths::upstream_dir().join("src/OpenColorIO/ParseUtils.cpp"),
+    )
+    .unwrap();
+    let line = source
+        .lines()
+        .find(|l| l.contains("oss << \"Unknown XML tag"))
+        .expect("the message's line");
+    let start = line.find('"').unwrap() + 1;
+    let end = start + line[start..].find('"').unwrap();
+    line.as_bytes()[start..end].to_vec()
+}
+
+/// An unknown entity, or a lone `&`, is upstream's error with the rest of the text from the
+/// `&` (`std::string(&(*it))`: up to a NUL); a token cut short by the end doesn't match.
+#[test]
+fn xml_tokens_that_are_unknown() {
+    let literal = unknown_xml_tag_literal();
+    for (input, rest) in [
+        (&b"a &foo; b"[..], &b"&foo; b"[..]),
+        (b"&", b"&"),
+        (b"x &am", b"&am"),
+        (b"&foo\0bar", b"&foo"),
+        (b"&lt;&#39;", b"&#39;"),
+    ] {
+        let error = convert_xml_token_to_special_char(input).unwrap_err();
+        assert_eq!(
+            error.what(),
+            [literal.as_slice(), rest].concat(),
+            "{}",
+            input.escape_ascii()
+        );
+    }
+}
+
+/// The float helpers write as the C runtime's `%.7g` does (`FLOAT_DECIMALS`), and the double
+/// helpers as `%.16g` (`DOUBLE_DECIMALS`), the vectors' values separated by single spaces
+/// (ParseUtils.cpp:567, 619 @ v2.5.2).
+#[test]
+fn numbers_to_text_as_the_c_runtime_writes_them() {
+    use ocio_testkit::crt::format_f64;
+    let floats = [
+        0.1f32,
+        1.0 / 3.0,
+        -2.5e-8,
+        123456789.0,
+        f32::MAX,
+        f32::MIN_POSITIVE,
+        -0.0,
+    ];
+    let doubles = [
+        0.1f64,
+        1.0 / 3.0,
+        -2.5e-300,
+        1234567890123456789.0,
+        f64::MAX,
+        0.30000000000000004,
+    ];
+    for &f in &floats {
+        assert_eq!(
+            float_to_string(f),
+            format_f64("%.7g", f64::from(f)).into_bytes()
+        );
+    }
+    for &d in &doubles {
+        assert_eq!(double_to_string(d), format_f64("%.16g", d).into_bytes());
+    }
+    let joined = |parts: Vec<String>| parts.join(" ").into_bytes();
+    assert_eq!(
+        float_vec_to_string(&floats),
+        joined(
+            floats
+                .iter()
+                .map(|&f| format_f64("%.7g", f64::from(f)))
+                .collect()
+        )
+    );
+    assert_eq!(
+        double_vec_to_string(&doubles),
+        joined(doubles.iter().map(|&d| format_f64("%.16g", d)).collect())
+    );
+    assert_eq!(float_vec_to_string(&[]), b"");
+    assert_eq!(double_vec_to_string(&[]), b"");
+}
+
+/// A part that isn't a number fails the whole vector, after the parts before it; the C
+/// runtime's `strtod` reads none of `x` (the reference of a number that doesn't parse).
+#[test]
+fn a_float_vector_with_a_word_fails() {
+    assert_eq!(ocio_testkit::crt::strtod_c(b"x").end, 0);
+    let mut values = Vec::new();
+    let parts: Vec<Vec<u8>> = vec![b"1.5".to_vec(), b"x".to_vec(), b"3".to_vec()];
+    assert!(!string_vec_to_float_vec(&mut values, &parts));
+    assert_eq!(values.len(), 3);
+    assert_eq!(values[0], ocio_testkit::crt::strtof_c(b"1.5").value);
+    assert_eq!(values[2], 0.0);
+}
+
+/// `>> int` on text that is white space only stores nothing (the sentry fails before
+/// `num_get`, C++17 [istream.formatted.reqmts]); `int`'s limits read, one past them fails
+/// and stores the limit (C++17 [facet.num.get.virtuals]/3.3).
+#[test]
+fn ints_at_the_limits_and_none() {
+    let mut ival = 5;
+    assert!(!string_to_int(&mut ival, b" \t\n", false));
+    assert_eq!(ival, 5);
+    assert!(!string_to_int(&mut ival, b"\0 1", false));
+    assert_eq!(ival, 5);
+
+    assert!(string_to_int(&mut ival, b"2147483647", true));
+    assert_eq!(ival, i32::MAX);
+    assert!(string_to_int(&mut ival, b"-2147483648", true));
+    assert_eq!(ival, i32::MIN);
+    assert!(!string_to_int(&mut ival, b"2147483648", false));
+    assert_eq!(ival, i32::MAX);
+    assert!(!string_to_int(&mut ival, b"-2147483649", false));
+    assert_eq!(ival, i32::MIN);
+    // The text ends at a NUL, as the `std::string` built from a C string does.
+    assert!(string_to_int(&mut ival, b"12\0x", true));
+    assert_eq!(ival, 12);
+}

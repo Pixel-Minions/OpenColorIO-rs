@@ -3,7 +3,18 @@
 
 //! The C runtime's `sscanf` as OCIO's LUT readers call it: `sscanf_s` on Windows (the
 //! Universal CRT) and `sscanf` on Linux (glibc), for the directives the readers use: `%d`,
-//! `%Ns`, `%c`, `%*s`, literal characters and white space (spi1d, Iridas cube, Discreet 1DL).
+//! `%Ns`, `%c`, `%*s`, literal characters and white space (spi1d, spi3d, Iridas cube,
+//! Discreet 1DL, and the CTF reader's version numbers).
+//!
+//! The scans run in the "C" locale, as OCIO in a C++ application does: its white space is
+//! space, `\t`, `\n`, `\v`, `\f` and `\r`. The wheels scan in their process's locale, and
+//! under Python the Windows wheel runs in code page 1252's, where the UCRT also takes 0xA0 for
+//! white space (in the format, and what `%d` and `%s` skip first), so `Length\xa03` reads as a
+//! length of 3 there and as no length in the port and on Linux (deviation D-1).
+//!
+//! The readers' other extractions, `istream::getline` and `istream::read`, are the input
+//! stream's (`ocio/src/fileformats/input_stream.rs`, with the spimtx and spi1d readers);
+//! `istream >> std::string` comes with the Houdini reader (4.3c).
 //!
 //! The behaviour follows C17 7.21.6.2 and what each runtime does where the standard leaves
 //! room, as `ocio-testkit`'s `crt.rs` shows it on each platform (`tests/cscan_crt.rs` compares
