@@ -3,9 +3,8 @@
 
 //! 3D LUT op data: a port of `src/OpenColorIO/ops/lut3d/Lut3DOpData.h` and `Lut3DOpData.cpp`
 //! @ v2.5.2: the LUT's array ([`Lut3DArray`], on [`Array`]), its interpolation, direction
-//! and file output bit depth, and the queries the optimizer and the processor ask of it.
-//!
-//! Not here yet (WP 2.2e): `Compose` and `MakeFastLut3DFromInverse`.
+//! and file output bit depth, the queries the optimizer and the processor ask of it, and the
+//! composition of two LUTs ([`Lut3DOpData::compose`], [`make_fast_lut3d_from_inverse`]).
 
 use core::ffi::c_ulong;
 use std::ops::{Index, IndexMut};
@@ -14,15 +13,59 @@ use crate::exception::{Exception, Result};
 use crate::format_metadata::{FormatMetadataImpl, METADATA_ID};
 use crate::hash_utils::cache_id_hash;
 use crate::math_utils::sse_mul;
+use crate::op::OpVec;
 use crate::op_data::{OpData, OpDataType};
 use crate::open_color_types::{
     BitDepth, TransformDirection, interpolation_to_string, transform_direction_to_string,
 };
+use crate::ops::lut3d::lut3d_op::create_lut3d_op;
 use crate::ops::op_array::Array;
+use crate::ops::op_tools::eval_transform;
 use crate::ops::range::RangeOpData;
 
 /// The interpolations, now in [`crate::open_color_types`]; re-exported where they were.
 pub use crate::open_color_types::Interpolation;
+
+// There are two inversion algorithms provided for 3D LUT, an exact method (that assumes use of
+// tetrahedral in the forward direction) and a fast method that bakes the inverse out as
+// another forward 3D LUT. The exact method is currently unavailable on the GPU. Both methods
+// assume that the input and output to the 3D LUT are roughly perceptually uniform. Values
+// outside the range of the forward 3D LUT are clamped to someplace on the exterior surface of
+// the 3D LUT.
+
+/// The fast forward LUT of an inverse LUT (`OPTIMIZATION_LUT_INV_FAST`): the inverse, with
+/// its exact renderer, composed onto an identity of 48 entries per side (or of the LUT's own
+/// size, when larger), with the LUT's file output bit depth. "MakeFastLut3DFromInverse
+/// expects an inverse LUT" for a forward one.
+///
+/// Port of `MakeFastLut3DFromInverse` (src/OpenColorIO/ops/lut3d/Lut3DOpData.cpp:29-58 @
+/// v2.5.2).
+pub fn make_fast_lut3d_from_inverse(lut: &Lut3DOpData) -> Result<Lut3DOpData> {
+    if lut.get_direction() != TransformDirection::Inverse {
+        return Err(Exception::new(
+            "MakeFastLut3DFromInverse expects an inverse LUT",
+        ));
+    }
+
+    // TODO: The FastLut will limit inputs to [0,1].  If the forward LUT has an extended range
+    // output, perhaps add a Range op before the FastLut to bring values into [0,1].
+
+    // Make a domain for the composed Lut3D.
+    // TODO: Using a large number like 48 here is better for accuracy,
+    // but it causes a delay when creating the renderer.
+    const GRID_SIZE: c_ulong = 48;
+    let mut new_domain = Lut3DOpData::new(GRID_SIZE)?;
+
+    new_domain.set_file_output_bit_depth(lut.get_file_output_bit_depth());
+
+    // Compose the LUT newDomain with our inverse LUT (using INV_EXACT style).
+    // The INV_EXACT inversion style computes an inverse to the tetrahedral style of forward
+    // evaluation.
+    // TODO: Although this seems like the "correct" thing to do, it does not seem to help
+    // accuracy (and is slower).  To investigate ...
+    //result->setInterpolation(INTERP_TETRAHEDRAL);
+    Lut3DOpData::compose(&new_domain, lut)
+}
 
 /// The largest 3D LUT grid size. Port of `Max3DLUTLength` (src/OpenColorIO/LutLimits.h:15 @ v2.5.2).
 pub const MAX_3D_LUT_LENGTH: u32 = 129;
@@ -557,6 +600,98 @@ impl Lut3DOpData {
     /// Port of `OpData::getID` (src/OpenColorIO/Op.cpp @ v2.5.2).
     pub fn get_id(&self) -> &[u8] {
         self.metadata.get_attribute_value_string(Some(METADATA_ID))
+    }
+}
+
+impl Lut3DOpData {
+    /// The composition of two LUTs, `lutc1` then `lutc2`, as one LUT that takes the domain of
+    /// the first into the range of the last: `lutc2` evaluated at F32 on `lutc1`'s entries,
+    /// or, when `lutc2` is larger or `lutc1` is an inverse, on an identity of the larger size
+    /// that goes through `lutc1` first. The result is forward, or inverse when both are
+    /// (`inv(l2 x l1) = inv(l1) x inv(l2)`); it has `lutc1`'s metadata combined with
+    /// `lutc2`'s, and `lutc1`'s file output bit depth.
+    ///
+    /// Upstream swaps and changes the direction of the callers' LUTs while it composes two
+    /// inverse LUTs, and restores them; the port composes copies.
+    ///
+    /// Port of `Lut3DOpData::Compose` (src/OpenColorIO/ops/lut3d/Lut3DOpData.cpp:60-153 @
+    /// v2.5.2).
+    pub fn compose(lutc1: &Lut3DOpData, lutc2: &Lut3DOpData) -> Result<Lut3DOpData> {
+        // TODO: Composition of LUTs is a potentially lossy operation.
+        // We try to be safe by making the result at least as big as either lut1 or lut2 but we
+        // may want to even increase the resolution further.  However, currently composition is
+        // done pairs at a time and we would want to determine the increase size once at the
+        // start rather than bumping it up as each pair is done.
+
+        let mut lut1 = lutc1.clone();
+        let mut lut2 = lutc2.clone();
+        let mut restore_inverse = false;
+        if lut1.get_direction() == TransformDirection::Inverse
+            && lut2.get_direction() == TransformDirection::Inverse
+        {
+            // Using the fact that: iInv(l2 x l1) = inv(l1) x inv(l2).
+            // Compute l2 x l1 and inverse the result.
+            std::mem::swap(&mut lut1, &mut lut2);
+
+            lut1.set_direction(TransformDirection::Forward);
+            lut2.set_direction(TransformDirection::Forward);
+            restore_inverse = true;
+        }
+
+        // (Grid sizes are at most 129.)
+        let min_sz = lut2.get_array().get_length() as i64;
+        let n = lut1.get_array().get_length() as i64;
+        let domain_size = std::cmp::max(min_sz, n);
+        let mut ops = OpVec::new();
+
+        let mut result;
+
+        if n >= min_sz && lut1.get_direction() != TransformDirection::Inverse {
+            // The range of the first LUT becomes the domain to interp in the second.
+            // Use the original domain.
+            result = lut1.clone();
+        } else {
+            // Since the 2nd LUT is more finely sampled, use its grid size.
+
+            // Create identity with finer domain.
+
+            result =
+                Lut3DOpData::with_interpolation(lut1.get_interpolation(), domain_size as c_ulong)?;
+
+            result.metadata = lut1.get_format_metadata().clone();
+
+            // Interpolate through both LUTs in this case (resample).
+            create_lut3d_op(&mut ops, lut1.clone(), TransformDirection::Forward);
+        }
+
+        // (Upstream's op shares lut2; it is not modified.)
+        create_lut3d_op(&mut ops, lut2.clone(), TransformDirection::Forward);
+
+        let file_out_bd = lut1.get_file_output_bit_depth();
+
+        // TODO: May want to revisit metadata propagation.
+        result
+            .get_format_metadata_mut()
+            .combine(lut2.get_format_metadata())?;
+
+        result.set_file_output_bit_depth(file_out_bd);
+
+        let grid_size = result.get_array().get_length() as usize;
+        let num_pixels = grid_size * grid_size * grid_size;
+
+        let domain = result.get_array().get_values().clone();
+        eval_transform(
+            &domain,
+            result.get_array_mut().get_values_mut(),
+            num_pixels,
+            &mut ops,
+        )?;
+
+        if restore_inverse {
+            result.set_direction(TransformDirection::Inverse);
+        }
+
+        Ok(result)
     }
 }
 

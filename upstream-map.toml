@@ -486,7 +486,7 @@ path = "src/OpenColorIO/OpOptimizers.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/op_optimizers.rs"]
 status = "partial"
-note = "1.2c: FinalizeOps (132-139) and OpRcPtrVec::finalize (598-609); 1.2d (the owner's Option A): the optimizer's core, optimize (the pass loop, RemoveNoOpTypes, RemoveDynamicProperties, RemoveNoOps, ReplaceOps, ReplaceIdentityOps, RemoveInverseOps, CombineOps, IsPairInverseEnabled, IsCombineEnabled, the debug log) and optimizeForBitdepth (the clamp identities, FindSeparablePrefix). p1-optimizer B: the Lut1D arms of ReplaceInverseLuts and RemoveInverseOps (errors until Phase 2's inverse 1D LUT) and FindSeparablePrefix; p2-lut1d-inv 2.1g: ReplaceInverseLuts' Lut1D arm (MakeFastLut1DFromInverse); 2.5a: RemoveInverseOps' Lut1D pair (249-276); p1-optimizer D: OptimizeSeparablePrefix, the Lut1D bake, entry for entry against the wheel (tests/lut1d_bake_oracle.rs). Not yet: the Lut3D arms (Phase 2); upstream's prefix tests that need CDL, gamma or files come when those families converge"
+note = "1.2c: FinalizeOps (132-139) and OpRcPtrVec::finalize (598-609); 1.2d (the owner's Option A): the optimizer's core, optimize (the pass loop, RemoveNoOpTypes, RemoveDynamicProperties, RemoveNoOps, ReplaceOps, ReplaceIdentityOps, RemoveInverseOps, CombineOps, IsPairInverseEnabled, IsCombineEnabled, the debug log) and optimizeForBitdepth (the clamp identities, FindSeparablePrefix). p1-optimizer B: the Lut1D arms of ReplaceInverseLuts and RemoveInverseOps (errors until Phase 2's inverse 1D LUT) and FindSeparablePrefix; p2-lut1d-inv 2.1g: ReplaceInverseLuts' Lut1D arm (MakeFastLut1DFromInverse); 2.5a: RemoveInverseOps' Lut1D pair (249-276); p1-optimizer D: OptimizeSeparablePrefix, the Lut1D bake, entry for entry against the wheel (tests/lut1d_bake_oracle.rs). p2-lut3d 2.2b: the Lut3D arms of RemoveInverseOps and CombineOps (pair identity, combine flags); p2-lut3d-inv 2.2e: ReplaceInverseLuts' Lut3D arm (393-405). Not yet: upstream's prefix tests that need CDL, gamma or files come when those families converge"
 
 [[file]]
 path = "src/OpenColorIO/ParseUtils.cpp"
@@ -1851,7 +1851,7 @@ path = "src/OpenColorIO/ops/lut3d/Lut3DOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op.rs"]
 status = "partial"
-note = "p2-lut3d 2.2b: GenerateIdentityLut3D, Get3DLutEdgeLenFromNumPixels, Lut3DOp (clone, getInfo, isSameType, isInverse, canCombineWith, hasChannelCrosstalk, getCacheID, getCPUOp, supportedByLegacyShader), CreateLut3DOp, the OpData::Lut3D arms. 2.2c: CreateLut3DTransform and BuildLut3DOp, in crates/ocio/src/transforms/lut3d_transform.rs. combineWith (Compose) is an error until 2.2e; extractGpuShaderInfo comes with 2.2f"
+note = "p2-lut3d 2.2b: GenerateIdentityLut3D, Get3DLutEdgeLenFromNumPixels, Lut3DOp (clone, getInfo, isSameType, isInverse, canCombineWith, hasChannelCrosstalk, getCacheID, getCPUOp, supportedByLegacyShader), CreateLut3DOp, the OpData::Lut3D arms. 2.2c: CreateLut3DTransform and BuildLut3DOp, in crates/ocio/src/transforms/lut3d_transform.rs. p2-lut3d-inv 2.2e: combineWith; extractGpuShaderInfo comes with 2.2f"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOp.h"
@@ -1934,8 +1934,8 @@ note = "S4"
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpData.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_data.rs"]
-status = "partial"
-note = "S4: array (identity fill, size limit), interpolation and GetConcreteInterpolation. p2-lut3d 2.2a: Lut3DArray on ArrayT (resize, getNumValues, getRGB, setRGB, scale), the constructors, setArrayFromRedFastestOrder, IsValidInterpolation, validate, isNoOp, isIdentity, getIdentityReplacement, equals, clone, isInverse, inverse, getCacheID, scale, operator==. Compose and MakeFastLut3DFromInverse come with 2.2e"
+status = "done"
+note = "S4: array (identity fill, size limit), interpolation and GetConcreteInterpolation. p2-lut3d 2.2a: Lut3DArray on ArrayT (resize, getNumValues, getRGB, setRGB, scale), the constructors, setArrayFromRedFastestOrder, IsValidInterpolation, validate, isNoOp, isIdentity, getIdentityReplacement, equals, clone, isInverse, inverse, getCacheID, scale, operator==. p2-lut3d-inv 2.2e: Compose and MakeFastLut3DFromInverse (20-153)"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut3d/Lut3DOpData.h"

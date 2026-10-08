@@ -2,10 +2,10 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Port of `tests/cpu/ops/lut3d/Lut3DOpData_tests.cpp` @ v2.5.2: the tests of the data. The
-//! tests of `Compose` and of the inverse's LUT size come with WP 2.2e (`compose_inverse_luts`)
-//! or read files (Phase 4: `compose`, `compose_2`, `inv_lut3d_lut_size`).
+//! tests that read files wait for the file readers (Phase 4: `compose`, `compose_2`,
+//! `inv_lut3d_lut_size`).
 
-use ocio_testkit::upstream::check_throw_what;
+use ocio_testkit::upstream::{check_close, check_throw_what};
 
 use super::*;
 
@@ -170,4 +170,66 @@ fn is_inverse() {
     // Check isInverse.
     assert!(l1.is_inverse(&l2));
     assert!(l2.is_inverse(&l1));
+}
+
+/// Upstream's LUTs are shared pointers, cloned for each composition; here each composition
+/// takes references to the data.
+///
+/// Port of `OCIO_ADD_TEST(Lut3DOpData, compose_inverse_luts)` @ v2.5.2.
+#[test]
+fn compose_inverse_luts() {
+    let lut_ref = Lut3DOpData::new(5).unwrap();
+    let mut lut = lut_ref.clone();
+
+    let lut_values = lut.get_array_mut().get_values_mut();
+    for val in lut_values.iter_mut() {
+        *val *= *val;
+    }
+
+    let lut_fwd1 = lut.clone();
+    let lut_fwd2 = lut_fwd1.clone();
+
+    // Forward + forward.
+    let comp_lut_fwd_fwd = Lut3DOpData::compose(&lut_fwd1, &lut_fwd2).unwrap();
+    assert_eq!(
+        comp_lut_fwd_fwd.get_direction(),
+        TransformDirection::Forward
+    );
+
+    // Inverse + inverse.
+    lut.set_direction(TransformDirection::Inverse);
+    let lut_inv1 = lut.clone();
+    let _lut_inv2 = lut_inv1.clone();
+    let comp_lut_inv_inv = Lut3DOpData::compose(&lut_inv1, &lut_inv1).unwrap();
+    assert_eq!(
+        comp_lut_inv_inv.get_direction(),
+        TransformDirection::Inverse
+    );
+
+    assert!(comp_lut_fwd_fwd.get_array().get_values() == comp_lut_inv_inv.get_array().get_values());
+
+    // Forward + inverse.
+    let comp_lut_fwd_inv = Lut3DOpData::compose(&lut_fwd1, &lut_inv1).unwrap();
+    assert_eq!(
+        comp_lut_fwd_inv.get_direction(),
+        TransformDirection::Forward
+    );
+
+    assert!(comp_lut_fwd_inv.get_array().get_values() == lut_ref.get_array().get_values());
+
+    // Inverse + forward.
+    let comp_lut_inv_fwd = Lut3DOpData::compose(&lut_inv1, &lut_fwd1).unwrap();
+    assert_eq!(
+        comp_lut_inv_fwd.get_direction(),
+        TransformDirection::Forward
+    );
+
+    const TOL: f32 = 1e-5f32;
+    for i in 0..comp_lut_inv_fwd.get_array().get_values().len() / 3 {
+        check_close(
+            comp_lut_inv_fwd.get_array().get_values()[i * 3],
+            lut_ref.get_array().get_values()[i * 3],
+            TOL,
+        );
+    }
 }
