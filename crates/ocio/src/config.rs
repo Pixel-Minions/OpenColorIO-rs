@@ -29,9 +29,9 @@ use ocio_ops::parse_utils::{
 };
 use ocio_ops::platform::strcasecmp;
 use ocio_ops::platform::{create_input_file_stream, getenv, is_env_present};
-use ocio_ops::utils::pystring;
+use ocio_ops::utils::pystring::{self, os_path};
 use ocio_ops::utils::string_utils::{
-    StringVec, c_str, compare, contain, lower, remove, split, starts_with, trim,
+    StringVec, c_str, compare, contain, find, lower, remove, split, starts_with, trim,
 };
 
 use crate::builtinconfigs::builtin_config_registry::{
@@ -40,6 +40,7 @@ use crate::builtinconfigs::builtin_config_registry::{
 use crate::caching::{OCIO_DISABLE_CACHE_FALLBACK, ProcessorCache, std_hash_string};
 use crate::color_space::ColorSpace;
 use crate::color_space_set::ColorSpaceSet;
+use crate::config_io_proxy::ConfigIoProxy;
 use crate::context::Context;
 use crate::context_variable_utils::{
     collect_context_variables, contains_context_variable_token, contains_context_variables,
@@ -865,6 +866,114 @@ impl Config {
 
         // Not an OCIOZ archive. Continue as usual.
         Config::read(IStream::file(&data), Some(filename))
+    }
+
+    /// The config whose text `ciop` gives ([`ConfigIoProxy::config_data`]), read with the proxy:
+    /// the reader's errors name the file "from Archive/ConfigIOProxy" (and the config's working
+    /// directory isn't set from it), and the config keeps the proxy for its LUT files.
+    ///
+    /// Port of `Config::CreateFromConfigIOProxy` (src/OpenColorIO/Config.cpp:1214-1231 @
+    /// v2.5.2) and `Config::Impl::Read(std::istream&, ConfigIOProxyRcPtr)` (Config.cpp:
+    /// 5564-5584). Upstream's check for a null config can't fail: the reader throws instead.
+    #[doc(alias = "CreateFromConfigIOProxy")]
+    pub fn create_from_config_io_proxy(ciop: Arc<dyn ConfigIoProxy>) -> Result<Arc<Config>> {
+        // Get a stream of the config.
+        let config_str = ciop.config_data()?;
+
+        let mut config = Config::new()?;
+        // Passing special string for the file path to enable the parser to provide a more
+        // meaningful error message if a problem is encountered.  (The working directory is not
+        // set to this string.)
+        crate::ocio_yaml::read(
+            config_str.as_slice(),
+            &mut config,
+            Some(b"from Archive/ConfigIOProxy"),
+        )?;
+
+        config.check_version_consistency()?;
+
+        // An API request always supersedes the env. variable. As the OCIOYaml helper methods
+        // use the Config public API, the variable reset highlights that only the
+        // env. variable and the config contents are valid after a config file read.
+        config.inactive_color_space_names_api.clear();
+        config.refresh_active_color_spaces();
+
+        // Set the ConfigIOProxy object.
+        config.set_config_io_proxy(Some(ciop));
+
+        Ok(Arc::new(config))
+    }
+
+    /// Gives the config's context the I/O proxy `ciop` (or none), and resets its cache IDs.
+    ///
+    /// Port of `Config::setConfigIOProxy` (src/OpenColorIO/Config.cpp:5995-6001 @ v2.5.2).
+    #[doc(alias = "setConfigIOProxy")]
+    pub fn set_config_io_proxy(&mut self, ciop: Option<Arc<dyn ConfigIoProxy>>) {
+        self.update_context(|c| c.set_config_io_proxy(ciop));
+
+        self.reset_cache_ids();
+    }
+
+    /// The I/O proxy of the config's context.
+    ///
+    /// Port of `Config::getConfigIOProxy` (src/OpenColorIO/Config.cpp:6003-6006 @ v2.5.2).
+    #[doc(alias = "getConfigIOProxy")]
+    pub fn config_io_proxy(&self) -> Option<Arc<dyn ConfigIoProxy>> {
+        self.shared_context.get().config_io_proxy().cloned()
+    }
+
+    /// Whether the config can be archived: its working directory is absolute, and none of its
+    /// search paths and file transforms' files is absolute, starts with `..` once normalized, or
+    /// starts with a context variable (`$` or `%` first).
+    ///
+    /// Port of `Config::isArchivable` (src/OpenColorIO/Config.cpp:6008-6082 @ v2.5.2).
+    #[doc(alias = "isArchivable")]
+    pub fn is_archivable(&self) -> bool {
+        // Current archive implementation needs a working directory to look for LUT files and
+        // working directory must be an absolute path.
+        let working_directory = self.working_dir();
+        if working_directory.is_empty() || !os_path::isabs(&working_directory) {
+            return false;
+        }
+
+        // Utility lambda to check the following criteria.
+        let validate_path_for_archiving = |path: &[u8]| {
+            // Using the normalized path.
+            let norm_path = os_path::normpath(path);
+            // 1) Path may not be absolute.
+            // 2) Path may not start with double dot ".." (going above working directory).
+            // 3) A context variable may not be located at the start of the path.
+            !(os_path::isabs(&norm_path)
+                || pystring::startswith(&norm_path, b"..", 0, pystring::MAX_32BIT_INT)
+                || (contains_context_variables(path)
+                    && (find(path, b"$") == Some(0) || find(path, b"%") == Some(0))))
+        };
+
+        ///////////////////////////////
+        // Search path verification. //
+        ///////////////////////////////
+        // Check that search paths are not absolute nor have context variables outside of config
+        // working directory.
+        let num_search_paths = self.num_search_paths();
+        for i in 0..num_search_paths {
+            let current_path = self.search_path_with_index(i);
+            if !validate_path_for_archiving(&current_path) {
+                // Exit and return false.
+                return false;
+            }
+        }
+
+        /////////////////////////////////
+        // FileTransform verification. //
+        /////////////////////////////////
+        let mut files = BTreeSet::new();
+        for transform in self.all_internal_transforms() {
+            get_file_references(&mut files, transform);
+        }
+
+        // Check that FileTransform sources are not absolute nor have context variables outside
+        // of config working directory.
+        files.iter().all(|path| validate_path_for_archiving(path))
     }
 
     /// The config's YAML text: checked against its version
