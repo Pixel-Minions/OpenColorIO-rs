@@ -4,9 +4,9 @@
 //! Tests of the built-in transform registry:
 //! `tests/cpu/transforms/builtins/BuiltinTransformRegistry_tests.cpp` @ v2.5.2. `aces` builds
 //! the ops of three entries and `read_write` every entry's processor: they come with the
-//! builders (WP 3.2e-g, `p3-after-p2`); the `version_*_validation` tests with the config's
-//! validation (WP 3.8c). The registry's styles are compared with the wheel's in
-//! `tests/config_transforms_oracle.rs`.
+//! builders (WP 3.2e-g, `p3-after-p2`). The `version_*_validation` tests read configs, which
+//! `checkVersionConsistency` refuses (`p3-yaml-load-2`). The registry's styles are compared
+//! with the wheel's in `tests/config_transforms_oracle.rs`.
 
 use super::*;
 use ocio_ops::platform::strcasecmp;
@@ -74,4 +74,223 @@ fn ops_of_the_global_registry() {
         );
     }
     assert!(ops.is_empty());
+}
+
+/// Port of `OCIO_ADD_TEST(Builtins, version_1_validation)` @ v2.5.2.
+#[test]
+fn version_1_validation() {
+    let _env = crate::test_env::EnvGuard::new();
+    // The unit test validates that the config reader throws for version 1 configs containing
+    // a builtin transform.
+
+    const CONFIG: &str = r#"ocio_profile_version: 1
+
+search_path: ""
+strictparsing: true
+luma: [0.2126, 0.7152, 0.0722]
+
+roles:
+  default: ref
+
+displays:
+  Disp1:
+    - !<View> {name: View1, colorspace: test}
+
+colorspaces:
+  - !<ColorSpace>
+    name: ref
+
+  - !<ColorSpace>
+    name: test
+    to_reference: !<BuiltinTransform> {style: ACEScct_to_ACES2065-1}"#;
+
+    check_throw_what(
+        crate::Config::create_from_stream(CONFIG.as_bytes()),
+        "Only config version 2 (or higher) can have BuiltinInTransform.",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(Builtins, version_2_validation)` @ v2.5.2.
+#[test]
+fn version_2_validation() {
+    let _env = crate::test_env::EnvGuard::new();
+    // The unit test validates that the config reader throws for version 2 configs containing
+    // a builtin transform with the style 'ACES-LMT - ACES 1.3 Reference Gamut Compression'.
+
+    const CONFIG: &str = r#"ocio_profile_version: 2
+
+environment:
+  {}
+search_path: ""
+strictparsing: true
+luma: [0.2126, 0.7152, 0.0722]
+
+roles:
+  default: ref
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+
+displays:
+  Disp1:
+    - !<View> {name: View1, colorspace: test}
+
+active_displays: []
+active_views: []
+
+colorspaces:
+  - !<ColorSpace>
+    name: ref
+
+  - !<ColorSpace>
+    name: test
+    from_scene_reference: !<BuiltinTransform> {style: ACES-LMT - ACES 1.3 Reference Gamut Compression}"#;
+
+    check_throw_what(
+        crate::Config::create_from_stream(CONFIG.as_bytes()),
+        "Only config version 2.1 (or higher) can have BuiltinTransform style 'ACES-LMT - ACES \
+         1.3 Reference Gamut Compression'.",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(Builtins, version_2_1_validation)` @ v2.5.2.
+#[test]
+fn version_2_1_validation() {
+    let _env = crate::test_env::EnvGuard::new();
+    // The unit test validates that the config reader checkVersionConsistency check throws for
+    // version 2.1 configs containing a Builtin Transform with the 2.2 style for ARRI LogC4.
+
+    const CONFIG: &str = r#"ocio_profile_version: 2.1
+
+environment:
+  {}
+search_path: ""
+strictparsing: true
+luma: [0.2126, 0.7152, 0.0722]
+
+roles:
+  default: ref
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+
+displays:
+  Disp1:
+    - !<View> {name: View1, colorspace: test}
+
+active_displays: []
+active_views: []
+
+colorspaces:
+  - !<ColorSpace>
+    name: ref
+
+  - !<ColorSpace>
+    name: test
+    from_scene_reference: !<BuiltinTransform> {style: ARRI_LOGC4_to_ACES2065-1}"#;
+
+    check_throw_what(
+        crate::Config::create_from_stream(CONFIG.as_bytes()),
+        "Only config version 2.2 (or higher) can have BuiltinTransform style \
+         'ARRI_LOGC4_to_ACES2065-1'.",
+    );
+}
+
+/// Upstream's `TestStyle` (BuiltinTransformRegistry_tests.cpp:315-360 @ v2.5.2): a version 2.3
+/// config with a built-in transform of `style` is refused.
+fn test_style(style: &str) {
+    const BASE: &str = r#"ocio_profile_version: 2.3
+
+environment:
+  {}
+search_path: ""
+strictparsing: true
+luma: [0.2126, 0.7152, 0.0722]
+
+roles:
+  default: ref
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+
+displays:
+  Disp1:
+    - !<View> {name: View1, colorspace: test}
+
+active_displays: []
+active_views: []
+
+colorspaces:
+  - !<ColorSpace>
+    name: ref
+
+  - !<ColorSpace>
+    name: test
+    from_scene_reference: !<BuiltinTransform> {style: "#;
+
+    let config = format!("{BASE}{style}}}");
+
+    let err_msg =
+        format!("Only config version 2.4 (or higher) can have BuiltinTransform style '{style}'.");
+
+    check_throw_what(
+        crate::Config::create_from_stream(config.as_bytes()),
+        &err_msg,
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(Builtins, version_2_3_validation)` @ v2.5.2.
+#[test]
+fn version_2_3_validation() {
+    let _env = crate::test_env::EnvGuard::new();
+    // The unit test validates that the config reader checkVersionConsistency check throws for
+    // version 2.3 configs containing a Builtin Transform with the new 2.4 styles.
+
+    test_style("APPLE_LOG_to_ACES2065-1");
+    test_style("CURVE - APPLE_LOG_to_LINEAR");
+    test_style("CURVE - HLG-OETF");
+    test_style("CURVE - HLG-OETF-INVERSE");
+    test_style("DISPLAY - CIE-XYZ-D65_to_DCDM-D65");
+    test_style("DISPLAY - CIE-XYZ-D65_to_ST2084-DCDM-D65");
+    test_style("ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-100nit-REC709_2.0");
+    test_style("ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-100nit-P3-D65_2.0");
+    test_style("ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-108nit-P3-D65_2.0");
+    test_style("ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-300nit-P3-D65_2.0");
+    test_style("ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-500nit-P3-D65_2.0");
+    test_style("ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-1000nit-P3-D65_2.0");
+    test_style("ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-2000nit-P3-D65_2.0");
+    test_style("ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-4000nit-P3-D65_2.0");
+    test_style("ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-500nit-REC2020_2.0");
+    test_style("ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-1000nit-REC2020_2.0");
+    test_style("ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-2000nit-REC2020_2.0");
+    test_style("ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-4000nit-REC2020_2.0");
+    test_style("ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-100nit-REC709-D60-in-REC709-D65_2.0");
+    test_style("ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-100nit-REC709-D60-in-P3-D65_2.0");
+    test_style(
+        "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-100nit-REC709-D60-in-REC2020-D65_2.0",
+    );
+    test_style("ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-100nit-P3-D60-in-P3-D65_2.0");
+    test_style("ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-100nit-P3-D60-in-XYZ-E_2.0");
+    test_style("ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-108nit-P3-D60-in-P3-D65_2.0");
+    test_style("ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-300nit-P3-D60-in-XYZ-E_2.0");
+    test_style("ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-500nit-P3-D60-in-P3-D65_2.0");
+    test_style("ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-1000nit-P3-D60-in-P3-D65_2.0");
+    test_style("ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-2000nit-P3-D60-in-P3-D65_2.0");
+    test_style("ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-4000nit-P3-D60-in-P3-D65_2.0");
+    test_style("ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-500nit-P3-D60-in-REC2020-D65_2.0");
+    test_style("ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-1000nit-P3-D60-in-REC2020-D65_2.0");
+    test_style("ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-2000nit-P3-D60-in-REC2020-D65_2.0");
+    test_style("ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-4000nit-P3-D60-in-REC2020-D65_2.0");
+    test_style(
+        "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-500nit-REC2020-D60-in-REC2020-D65_2.0",
+    );
+    test_style(
+        "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-1000nit-REC2020-D60-in-REC2020-D65_2.0",
+    );
+    test_style(
+        "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-2000nit-REC2020-D60-in-REC2020-D65_2.0",
+    );
+    test_style(
+        "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-4000nit-REC2020-D60-in-REC2020-D65_2.0",
+    );
 }
