@@ -2397,14 +2397,15 @@ note = "p1-transforms-fam1 (1.8c)"
 path = "src/OpenColorIO/transforms/builtins/ACES.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/aces.rs"]
-status = "partial"
-note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (576-1437), the ACES 2.0 table's names (1122-1419); p3-builtins 3.2g: AP1_to_CIE_XYZ_D65 (30-35), ACEScct_to_LINEAR (40-55) and the ops of the 8 entries built from Matrix, Log and Range ops (579-634, 691-715, 762-773), through the battery (tests/api_battery_oracle.rs); p3-after-p2: ADX_to_ACES (57-137), ACEScc, ADX10, ADX16 and the ACES 1.3 gamut compression (641-684, 717-756, 775-791), through the API sweeps (api_cases::BUILTINS_WITH_OPS); the ACES 1.x and 2.0 output transforms come with p3-after-p2"
+status = "done"
+note = "p3-transforms (3.1b): RegisterAll's styles and descriptions (576-1437), the ACES 2.0 table's names (1122-1419); p3-builtins 3.2g: AP1_to_CIE_XYZ_D65 (30-35), ACEScct_to_LINEAR (40-55) and the ops of the 8 entries built from Matrix, Log and Range ops (579-634, 691-715, 762-773), through the battery (tests/api_battery_oracle.rs); p3-after-p2: ADX_to_ACES (57-137), ACEScc, ADX10, ADX16 and the ACES 1.3 gamut compression (641-684, 717-756, 775-791), through the API sweeps (api_cases::BUILTINS_WITH_OPS); p3-after-p2: ACES_OUTPUT (141-498) and ACES2_OUTPUT (500-566), the ACES 1.x output entries (802-1116) and the ACES 2.0 table's parameters and functor (1122-1435), through the API sweeps"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/ACES.h"
 kind = "src"
 target = ["crates/ocio/src/transforms/builtins/aces.rs"]
-status = "todo"
+status = "done"
+note = "p3-after-p2: RegisterAll"
 
 [[file]]
 path = "src/OpenColorIO/transforms/builtins/AppleCameras.cpp"
@@ -4998,8 +4999,8 @@ note = "p1-transforms-fam1"
 path = "tests/cpu/transforms/BuiltinTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/builtin_transform_tests.rs", "crates/ocio-ops/src/transforms/builtins/color_matrix_helpers_tests.rs", "crates/ocio/src/transforms/builtins/op_helpers_tests.rs"]
-status = "partial"
-note = "p3-transforms (3.1b): creation, access; p2-aces2-cpu: color_matrix_helpers, in ocio-ops (color_matrix_helpers_tests.rs); p2-api-parity: forward_inverse; p3-after-p2: interpolate (op_helpers_tests.rs, next to Interpolate1D); validate, aces2_displayview_roundtrip and aces2_Aab_to_RGB_nan build ops of the output transforms (p3-after-p2)"
+status = "done"
+note = "p3-transforms (3.1b): creation, access; p2-aces2-cpu: color_matrix_helpers, in ocio-ops (color_matrix_helpers_tests.rs); p2-api-parity: forward_inverse; p3-after-p2: interpolate (op_helpers_tests.rs, next to Interpolate1D), validate, aces2_displayview_roundtrip, aces2_Aab_to_RGB_nan"
 
 [[file]]
 path = "tests/cpu/transforms/CDLTransform_tests.cpp"
@@ -5147,7 +5148,7 @@ path = "tests/cpu/transforms/builtins/BuiltinTransformRegistry_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/builtins/builtin_transform_registry_tests.rs"]
 status = "partial"
-note = "p3-transforms (3.1b): basic; aces builds the ops of IDENTITY, an ACES matrix and ACEScct (3.2e, 3.2g), read_write every entry's processor (p3-after-p2), the version_*_validation tests with p3-yaml-load-2 (checkVersionConsistency, pulled forward from 3.8c)"
+note = "p3-transforms (3.1b): basic; aces builds the ops of IDENTITY, an ACES matrix and ACEScct (3.2e, 3.2g), the version_*_validation tests with p3-yaml-load-2 (checkVersionConsistency, pulled forward from 3.8c); read_write, which builds every entry's processor (p3-after-p2 ports the ops), also needs Config::validate and the processor between two color spaces (Config::getProcessor(src, dst), ColorSpaceTransform's ops, WP 3.2a), which are not ported yet"
 
 [[file]]
 path = "tests/gpu/CDLOp_test.cpp"
