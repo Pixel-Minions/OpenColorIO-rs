@@ -22,6 +22,7 @@ use ocio::{
     SearchReferenceSpaceType, ViewType,
 };
 use ocio_ops::logging::{reset_to_default_logging_function, set_logging_function};
+use ocio_ops::platform::{MapEnv, set_thread_env_provider};
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle::BatchCall;
 use ocio_testkit::oracle_values::{bytes, hex, log};
@@ -33,8 +34,9 @@ static LOGGING: Mutex<()> = Mutex::new(());
 /// A config, or the message of the error that refused it.
 type Loaded = Result<Arc<Config>, Vec<u8>>;
 
-/// The port's config of `text`, or its error's message, and what OCIO logged meanwhile.
-fn port_load(text: &[u8]) -> (Loaded, Vec<Vec<u8>>) {
+/// The port's config of `text`, or its error's message, and what OCIO logged meanwhile. OCIO
+/// reads the environment `env` and nothing else meanwhile.
+fn port_load(text: &[u8], env: &[(&str, &str)]) -> (Loaded, Vec<Vec<u8>>) {
     let _lock = LOGGING.lock().unwrap_or_else(PoisonError::into_inner);
     let messages = Arc::new(Mutex::new(Vec::new()));
     let sink = Arc::clone(&messages);
@@ -42,7 +44,9 @@ fn port_load(text: &[u8]) -> (Loaded, Vec<Vec<u8>>) {
         sink.lock().unwrap().push(m.to_vec());
     })))
     .unwrap();
+    set_thread_env_provider(Some(Arc::new(MapEnv::from_entries(env))));
     let loaded = Config::create_from_stream(text).map_err(|e| e.what().to_vec());
+    set_thread_env_provider(None);
     reset_to_default_logging_function();
     let log = messages.lock().unwrap().clone();
     (loaded, log)
@@ -201,6 +205,51 @@ fn getters(c: &Config) -> Vec<Getter> {
             s(c.role_color_space(role)),
         ));
     }
+    out.push(g(
+        "getColorSpaceNames",
+        vec![
+            json!({"enum": "SEARCH_REFERENCE_SPACE_ALL"}),
+            json!({"enum": "COLORSPACE_ACTIVE"}),
+        ],
+        list(
+            (0..c.num_color_spaces_with(
+                SearchReferenceSpaceType::All,
+                ColorSpaceVisibility::Active,
+            ))
+                .map(|i| {
+                    c.color_space_name_by_index_with(
+                        SearchReferenceSpaceType::All,
+                        ColorSpaceVisibility::Active,
+                        i,
+                    )
+                    .to_vec()
+                }),
+        ),
+    ));
+    for i in 0..c.num_color_spaces_with(SearchReferenceSpaceType::All, ColorSpaceVisibility::All) {
+        let name = c
+            .color_space_name_by_index_with(
+                SearchReferenceSpaceType::All,
+                ColorSpaceVisibility::All,
+                i,
+            )
+            .to_vec();
+        out.push(g(
+            "isInactiveColorSpace",
+            vec![s(&name)],
+            json!(c.is_inactive_color_space(&name)),
+        ));
+    }
+    // The current context, then strings it resolves (the oracle stores it as `ctx`).
+    out.push(g("getCurrentContext", vec![], Value::Null));
+    let ctx = c.current_context().get();
+    for v in ["$A", "$B", "$Z", "${A}/${Z}", "%A%"] {
+        out.push(g(
+            "ctx.resolveStringVar",
+            vec![json!(v)],
+            s(&ctx.resolve_string_var(v)),
+        ));
+    }
     let view_getters = |out: &mut Vec<Getter>, display: &[u8], view: &[u8]| {
         let args = vec![s(display), s(view)];
         out.push(g("hasView", args.clone(), json!(c.has_view(display, view))));
@@ -288,9 +337,18 @@ fn normalized(call: &Value) -> Value {
     }
 }
 
-/// Checks each config against the wheel; panics listing every difference.
+/// Checks each config against the wheel, both reading an empty environment; panics listing
+/// every difference.
 fn check(cases: &[(&str, Vec<u8>)]) {
-    let ported: Vec<_> = cases.iter().map(|(_, text)| port_load(text)).collect();
+    check_env(&[], cases);
+}
+
+/// Checks each config against the wheel, both reading the environment `env` and nothing else;
+/// panics listing every difference.
+fn check_env(env: &[(&str, &str)], cases: &[(&str, Vec<u8>)]) {
+    let ported: Vec<_> = cases.iter().map(|(_, text)| port_load(text, env)).collect();
+    let env_json: serde_json::Map<String, Value> =
+        env.iter().map(|(k, v)| (k.to_string(), json!(v))).collect();
     let calls: Vec<BatchCall<'_>> = cases
         .iter()
         .zip(&ported)
@@ -298,13 +356,22 @@ fn check(cases: &[(&str, Vec<u8>)]) {
             let calls: Vec<Value> = match loaded {
                 Ok(config) => getters(config)
                     .into_iter()
-                    .map(|(name, args, _)| json!({"call": name, "args": args}))
+                    .map(|(name, args, _)| {
+                        if name == "getCurrentContext" {
+                            json!({"call": name, "args": args, "as": "ctx"})
+                        } else if let Some(m) = name.strip_prefix("ctx.") {
+                            json!({"call": m, "on": "ctx", "args": args})
+                        } else {
+                            json!({"call": name, "args": args})
+                        }
+                    })
                     .collect(),
                 Err(_) => Vec::new(),
             };
             BatchCall {
                 cmd: "config_calls",
-                args: json!({"config": {"yaml": {"bytes": hex(text)}}, "calls": calls}),
+                args: json!({"config": {"yaml": {"bytes": hex(text)}}, "calls": calls,
+                             "env": env_json}),
                 blobs: Vec::new(),
             }
         })
@@ -354,6 +421,9 @@ fn check(cases: &[(&str, Vec<u8>)]) {
                 }
                 let results = w["calls"].as_array().unwrap();
                 for ((name, args, port), call) in getters(c).iter().zip(results) {
+                    if name == "getCurrentContext" {
+                        continue;
+                    }
                     let wheel = normalized(call);
                     if &wheel != port {
                         failures.push(format!(
@@ -993,4 +1063,129 @@ fn configs_their_versions_cant_have_are_refused() {
     }
     let refs: Vec<(&str, Vec<u8>)> = cases.iter().map(|(l, t)| (l.as_str(), t.clone())).collect();
     check(&refs);
+}
+
+/// Views, search paths and descriptions at the edges of their loaders.
+#[test]
+fn view_search_path_and_description_edges_load_as_in_the_wheel() {
+    let cases: Vec<(&str, Vec<u8>)> = vec![
+        // A shared view without its tag is no view: its name stays empty.
+        (
+            "shared view untagged",
+            v2("shared_views:\n  - {name: s, colorspace: raw}\n"),
+        ),
+        // `look` is read as `looks`, the later key wins.
+        (
+            "view look and looks",
+            v2("displays:\n  d:\n    - !<View> {name: v, colorspace: raw, look: a, looks: b}\n"),
+        ),
+        (
+            "view looks and look",
+            v2("displays:\n  d:\n    - !<View> {name: v, colorspace: raw, looks: b, look: a}\n"),
+        ),
+        (
+            "view transform only",
+            v2("displays:\n  d:\n    - !<View> {name: v, view_transform: vt}\n"),
+        ),
+        (
+            "view empty color space",
+            v2("displays:\n  d:\n    - !<View> {name: v, colorspace: \"\"}\n"),
+        ),
+        (
+            "view empty display color space",
+            v2(
+                "displays:\n  d:\n    - !<View> {name: v, view_transform: vt, \
+                 display_colorspace: \"\"}\n",
+            ),
+        ),
+        // A display's untagged list isn't its shared views; an empty verbatim tag is no tag.
+        (
+            "display untagged list",
+            v2(
+                "shared_views:\n  - !<View> {name: s, colorspace: raw}\ndisplays:\n  d:\n    - \
+                 !<View> {name: v, colorspace: raw}\n    - [s]\n",
+            ),
+        ),
+        (
+            "display empty tag",
+            v2(
+                "shared_views:\n  - !<View> {name: s, colorspace: raw}\ndisplays:\n  d:\n    - \
+                 !<View> {name: v, colorspace: raw}\n    - !<> [s]\n",
+            ),
+        ),
+        ("search path [a]", v2("search_path: [a]\n")),
+        ("search path [\"\"]", v2("search_path: [\"\"]\n")),
+        ("search path {a: b}", v2("search_path: {a: b}\n")),
+        // Descriptions ending in a carriage return keep it; the virtual display's views keep
+        // their trailing newlines (I-144).
+        (
+            "descriptions with carriage returns",
+            v2(
+                "  - !<ColorSpace> {name: b, description: \"c\\r\\n\\n\"}\ndescription: \
+                 \"d\\r\"\ndisplays:\n  d:\n    - !<View> {name: v, colorspace: raw, \
+                 description: \"x\\r\\n\"}\n",
+            ),
+        ),
+        (
+            "virtual display view description",
+            v2(
+                "virtual_display:\n  - !<View> {name: v, colorspace: raw, description: \
+                 \"d\\n\\n\"}\n",
+            ),
+        ),
+    ];
+    check(&cases);
+}
+
+/// Configs read in an environment: the active and inactive lists the environment overrides
+/// (`OCIO_ACTIVE_DISPLAYS`, `OCIO_ACTIVE_VIEWS`, `OCIO_INACTIVE_COLORSPACES`), and the current
+/// context's variables, with and without an `environment` section.
+#[test]
+fn configs_load_in_an_environment_as_in_the_wheel() {
+    const COLOR_SPACES: &str = "colorspaces:\n  - !<ColorSpace> {name: raw}\n  - \
+                                !<ColorSpace> {name: b}\n  - !<ColorSpace> {name: c}\n";
+    const DISPLAYS: &str = "displays:\n  D1:\n    - !<View> {name: v1, colorspace: raw}\n    - \
+                            !<View> {name: v2, colorspace: b}\n  D2:\n    - !<View> {name: v1, \
+                            colorspace: raw}\n";
+    let mut owned = Vec::new();
+    for environment in [
+        "environment: {}\n",
+        "environment: {A: adef, B: bdef}\n",
+        "",
+        "environment: {A: \"$Z\"}\n",
+    ] {
+        for extra in [
+            "",
+            "inactive_colorspaces: [b]\n",
+            "inactive_colorspaces: [c, b]\nactive_displays: [D1]\nactive_views: [v2]\n",
+            "search_path: \"$A:x\"\n",
+        ] {
+            owned.push((
+                format!("{}|{}", environment.trim(), extra.trim()),
+                format!(
+                    "ocio_profile_version: 2\n{environment}roles: {{default: raw}}\n\
+                     {COLOR_SPACES}{DISPLAYS}{extra}"
+                )
+                .into_bytes(),
+            ));
+        }
+    }
+    owned.push((
+        "version 1 environment".to_string(),
+        format!(
+            "ocio_profile_version: 1\nenvironment: {{A: adef}}\nroles: {{default: raw}}\n\
+             {COLOR_SPACES}{DISPLAYS}"
+        )
+        .into_bytes(),
+    ));
+    let cases: Vec<(&str, Vec<u8>)> = owned.iter().map(|(l, t)| (l.as_str(), t.clone())).collect();
+    for env in [
+        &[("A", "aenv"), ("Z", "zenv")][..],
+        &[("OCIO_INACTIVE_COLORSPACES", "b"), ("A", "aenv")],
+        &[("OCIO_INACTIVE_COLORSPACES", "c, raw"), ("B", "benv")],
+        &[("OCIO_ACTIVE_DISPLAYS", "D2"), ("OCIO_ACTIVE_VIEWS", "v1")],
+        &[("OCIO_INACTIVE_COLORSPACES", "")],
+    ] {
+        check_env(env, &cases);
+    }
 }
