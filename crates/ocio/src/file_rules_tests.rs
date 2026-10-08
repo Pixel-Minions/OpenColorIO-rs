@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Port of the tests of `tests/cpu/FileRules_tests.cpp` @ v2.5.2 that need no config writer
-//! nor `Config::validate`: those that read no YAML, and those that read configs (3.3k). The
-//! ones that write configs come with the writer (3.7b), and those that validate with 3.8;
+//! Port of the tests of `tests/cpu/FileRules_tests.cpp` @ v2.5.2 that don't need
+//! `Config::validate`: those that read no YAML, those that read configs (3.3k), and those that
+//! write them (3.7b). Those that validate come with 3.8;
 //! `crates/ocio/tests/file_rules_oracle.rs` checks the rules against the wheel.
 
 use ocio_testkit::upstream::check_throw_what;
@@ -1172,4 +1172,165 @@ fn config_v2_wrong_rule() {
             r"can't use regex '.*\.TIF?F$' and pattern & extension",
         );
     }
+}
+
+/// Port of `OCIO_ADD_TEST(FileRules, config_rule_customkeys)` @ v2.5.2.
+#[test]
+fn config_rule_customkeys() {
+    let _env = EnvGuard::new();
+    let config_raw = Config::create_raw().unwrap();
+    let fr = config_raw.file_rules().get();
+    let mut file_rules = (*fr).clone();
+    assert_eq!(file_rules.num_entries(), 1);
+    file_rules.insert_rule(0, "rule", "raw", "*", "a").unwrap();
+    assert_eq!(file_rules.num_entries(), 2);
+    assert_eq!(file_rules.num_custom_keys(0).unwrap(), 0);
+    assert_eq!(file_rules.num_custom_keys(1).unwrap(), 0);
+    check_throw_what(file_rules.num_custom_keys(2), "rule index '2' invalid");
+    check_throw_what(file_rules.custom_key_name(0, 0), "Key index '0' is invalid");
+    check_throw_what(file_rules.custom_key_name(1, 0), "Key index '0' is invalid");
+    check_throw_what(
+        file_rules.custom_key_value(0, 0),
+        "Key index '0' is invalid",
+    );
+    check_throw_what(
+        file_rules.custom_key_value(1, 0),
+        "Key index '0' is invalid",
+    );
+    file_rules.set_custom_key(0, "key", "val").unwrap();
+    file_rules.set_custom_key(1, "keyDef", "valDef").unwrap();
+    // Upstream's null pointer, then the empty string.
+    check_throw_what(
+        file_rules.set_custom_key(0, "", "val"),
+        "Key has to be a non-empty string",
+    );
+    check_throw_what(
+        file_rules.set_custom_key(0, "", "val"),
+        "Key has to be a non-empty string",
+    );
+    assert_eq!(file_rules.num_custom_keys(0).unwrap(), 1);
+    assert_eq!(file_rules.num_custom_keys(1).unwrap(), 1);
+    assert_eq!(file_rules.custom_key_name(0, 0).unwrap(), b"key");
+    assert_eq!(file_rules.custom_key_value(0, 0).unwrap(), b"val");
+    file_rules.set_custom_key(0, "key", "").unwrap();
+    assert_eq!(file_rules.num_custom_keys(0).unwrap(), 0);
+    file_rules.set_custom_key(0, "key", "val").unwrap();
+    // Upstream's null pointer.
+    file_rules.set_custom_key(0, "key", "").unwrap();
+    assert_eq!(file_rules.num_custom_keys(0).unwrap(), 0);
+    file_rules.set_custom_key(0, "key1", "val").unwrap();
+    assert_eq!(file_rules.num_custom_keys(0).unwrap(), 1);
+    file_rules.set_custom_key(0, "key1", "new val").unwrap();
+    assert_eq!(file_rules.num_custom_keys(0).unwrap(), 1);
+    assert_eq!(file_rules.custom_key_value(0, 0).unwrap(), b"new val");
+    file_rules.set_custom_key(0, "key2", "val2").unwrap();
+    assert_eq!(file_rules.num_custom_keys(0).unwrap(), 2);
+    file_rules.set_custom_key(0, "key3", "3").unwrap();
+    assert_eq!(file_rules.num_custom_keys(0).unwrap(), 3);
+    file_rules.set_custom_key(0, "4", "val4").unwrap();
+    assert_eq!(file_rules.num_custom_keys(0).unwrap(), 4);
+    assert_eq!(file_rules.custom_key_name(0, 1).unwrap(), b"key1");
+    assert_eq!(file_rules.custom_key_value(0, 1).unwrap(), b"new val");
+    assert_eq!(file_rules.custom_key_name(0, 2).unwrap(), b"key2");
+    assert_eq!(file_rules.custom_key_value(0, 2).unwrap(), b"val2");
+    assert_eq!(file_rules.custom_key_name(0, 3).unwrap(), b"key3");
+    assert_eq!(file_rules.custom_key_value(0, 3).unwrap(), b"3");
+    assert_eq!(file_rules.custom_key_name(0, 0).unwrap(), b"4");
+    assert_eq!(file_rules.custom_key_value(0, 0).unwrap(), b"val4");
+
+    let mut config = (*config_raw).clone();
+    config.set_file_rules(&file_rules);
+
+    let os = config.serialize().unwrap();
+
+    const EXPECTED: &str = r#"ocio_profile_version: 2
+
+environment:
+  {}
+search_path: ""
+strictparsing: false
+luma: [0.2126, 0.7152, 0.0722]
+
+roles:
+  default: raw
+
+file_rules:
+  - !<Rule> {name: rule, colorspace: raw, pattern: "*", extension: a, custom: {4: val4, key1: new val, key2: val2, key3: 3}}
+  - !<Rule> {name: Default, colorspace: default, custom: {keyDef: valDef}}
+
+displays:
+  sRGB:
+    - !<View> {name: Raw, colorspace: raw}
+
+active_displays: []
+active_views: []
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+    family: raw
+    equalitygroup: ""
+    bitdepth: 32f
+    description: A raw color space. Conversions to and from this space are no-ops.
+    isdata: true
+    allocation: uniform
+"#;
+
+    assert_eq!(EXPECTED, String::from_utf8(os).unwrap());
+
+    // Reload.
+    let config_reloaded = Config::create_from_stream(EXPECTED.as_bytes()).unwrap();
+    let rules_reloaded = config_reloaded.file_rules().get();
+
+    assert_eq!(rules_reloaded.num_entries(), 2);
+
+    assert_eq!(rules_reloaded.num_custom_keys(0).unwrap(), 4);
+    assert_eq!(rules_reloaded.custom_key_name(0, 1).unwrap(), b"key1");
+    assert_eq!(rules_reloaded.custom_key_value(0, 1).unwrap(), b"new val");
+    assert_eq!(rules_reloaded.custom_key_name(0, 2).unwrap(), b"key2");
+    assert_eq!(rules_reloaded.custom_key_value(0, 2).unwrap(), b"val2");
+    assert_eq!(rules_reloaded.custom_key_name(0, 3).unwrap(), b"key3");
+    assert_eq!(rules_reloaded.custom_key_value(0, 3).unwrap(), b"3");
+    assert_eq!(rules_reloaded.custom_key_name(0, 0).unwrap(), b"4");
+    assert_eq!(rules_reloaded.custom_key_value(0, 0).unwrap(), b"val4");
+
+    assert_eq!(rules_reloaded.num_custom_keys(1).unwrap(), 1);
+    assert_eq!(rules_reloaded.custom_key_name(1, 0).unwrap(), b"keyDef");
+    assert_eq!(rules_reloaded.custom_key_value(1, 0).unwrap(), b"valDef");
+}
+
+/// Port of `OCIO_ADD_TEST(FileRules, config_rule_u8)` @ v2.5.2. Upstream's `U8` strings are
+/// written as escapes.
+#[test]
+fn config_rule_u8() {
+    let _env = EnvGuard::new();
+    const NAME: &str = "\u{e9}\u{c0}\u{c2}\u{c7}\u{c9}\u{c8}\u{e7}$\u{20ac}";
+    const KEY: &str = "key\u{a3}";
+    const VALUE: &str = "val\u{20ac}";
+    let config_raw = Config::create_raw().unwrap();
+    let fr = config_raw.file_rules().get();
+    let mut file_rules = (*fr).clone();
+    assert_eq!(file_rules.num_entries(), 1);
+    file_rules.insert_rule(0, NAME, "raw", "*", "a").unwrap();
+    assert_eq!(file_rules.num_entries(), 2);
+    file_rules.set_custom_key(0, KEY, VALUE).unwrap();
+    assert_eq!(file_rules.custom_key_name(0, 0).unwrap(), KEY.as_bytes());
+    assert_eq!(file_rules.custom_key_value(0, 0).unwrap(), VALUE.as_bytes());
+
+    let mut config = (*config_raw).clone();
+    config.set_file_rules(&file_rules);
+
+    let os = config.serialize().unwrap();
+
+    // Reload.
+    let config_reloaded = Config::create_from_stream(&os).unwrap();
+    let rules_reloaded = config_reloaded.file_rules().get();
+
+    assert_eq!(rules_reloaded.num_entries(), 2);
+
+    assert_eq!(file_rules.name(0).unwrap(), NAME.as_bytes());
+
+    assert_eq!(rules_reloaded.num_custom_keys(0).unwrap(), 1);
+    assert_eq!(file_rules.custom_key_name(0, 0).unwrap(), KEY.as_bytes());
+    assert_eq!(file_rules.custom_key_value(0, 0).unwrap(), VALUE.as_bytes());
 }
