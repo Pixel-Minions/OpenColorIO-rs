@@ -18,8 +18,10 @@
 //! (src/OpenColorIO/ops/lut1d/Lut1DOp.cpp:244-253), `BuildRangeOp` and `BuildMatrixOp`
 //! likewise; the processor finalizes them (Processor.cpp:623-641).
 //!
-//! Composing two LUTs and inverse LUTs wait for Phase 2 (WP 2.5);
-//! `phase_2_cases_wait_for_their_ports` pins the port's refusals where the wheel succeeds.
+//! Compositions and fast inverse LUTs ([`compositions_match_the_wheel`]) render the LUTs on
+//! new domains through their float renderers, whose SIMD kernel is the CPU's: this test target
+//! is in `cpu-tests`. A pair of a LUT and its inverse waits for the optimizer's pair
+//! replacement (WP 2.5a).
 
 use core::ffi::c_ulong;
 
@@ -28,7 +30,7 @@ use ocio_ops::hash_utils::cache_id_hash;
 use ocio_ops::op::OpVec;
 use ocio_ops::open_color_types::{BitDepth, Lut1DHueAdjust, OptimizationFlags, TransformDirection};
 use ocio_ops::ops::lut1d::Lut1DOpData;
-use ocio_ops::ops::lut1d::lut1d_op::{NOT_PORTED_COMPOSE, create_lut1d_op};
+use ocio_ops::ops::lut1d::lut1d_op::create_lut1d_op;
 use ocio_ops::ops::lut1d::lut1d_op_data::Lut3by1DArray;
 use ocio_ops::ops::matrix::MatrixOpData;
 use ocio_ops::ops::matrix::matrix_op::create_matrix_op;
@@ -199,7 +201,7 @@ fn port_cache_ids(chain: &[T], flags: OptimizationFlags) -> Result<(String, Stri
 }
 
 fn wheel_cache_ids(
-    chains: &[(Vec<T>, &str)],
+    chains: &[(Vec<T>, Value)],
 ) -> Vec<std::result::Result<(String, String), String>> {
     let calls: Vec<BatchCall<'_>> = chains
         .iter()
@@ -285,16 +287,33 @@ fn chains() -> Vec<Vec<T>> {
 
 #[test]
 fn cache_ids_match_the_wheel() {
+    // The optimizer changes some.
+    assert!(check_chains(chains()) > 0);
+}
+
+/// Each chain's processor and optimized processor at each of [`FLAGS`] have the wheel's cache
+/// IDs; returns how many optimized processors' differ from their processors'.
+fn check_chains(chains: Vec<Vec<T>>) -> usize {
+    let flags: Vec<(Value, OptimizationFlags)> = FLAGS
+        .iter()
+        .map(|(name, flags)| (json!(name), *flags))
+        .collect();
+    check_chains_at(chains, &flags)
+}
+
+/// [`check_chains`] at each of `flag_sets`: the oracle's optimization (a flag's name or a list
+/// of names) and the port's flags.
+fn check_chains_at(chains: Vec<Vec<T>>, flag_sets: &[(Value, OptimizationFlags)]) -> usize {
     let mut cases = Vec::new();
-    for chain in chains() {
-        for (name, flags) in FLAGS {
-            cases.push((chain.clone(), name, flags));
+    for chain in chains {
+        for (name, flags) in flag_sets {
+            cases.push((chain.clone(), name, *flags));
         }
     }
     let wheel = wheel_cache_ids(
         &cases
             .iter()
-            .map(|(chain, name, _)| (chain.clone(), *name))
+            .map(|(chain, name, _)| (chain.clone(), (*name).clone()))
             .collect::<Vec<_>>(),
     );
     let mut failures = Vec::new();
@@ -315,47 +334,147 @@ fn cache_ids_match_the_wheel() {
         cases.len(),
         failures.join("\n")
     );
-    // The optimizer changes some.
-    assert!(optimized_differs > 0);
+    optimized_differs
 }
 
-/// Two LUTs that compose, and an inverse LUT: the wheel builds and optimizes them, the port
-/// refuses until Phase 2 (WP 2.5). When it ports them, this test fails: compare these cases
-/// like the others.
+/// LUTs that compose (`Lut1DOp::combineWith`: `Lut1DOpData::Compose`, resampled to 65536
+/// entries) and inverse LUTs replaced by their fast forward LUTs (`OPTIMIZATION_LUT_INV_FAST`,
+/// `MakeFastLut1DFromInverse`: a 12-bit lookup domain, or a half domain for values outside
+/// [0, 1]), standard and half domains, with hue adjust: the optimized processors' cache IDs,
+/// which hash the new LUTs' values, are the wheel's. Two inverse LUTs without
+/// `OPTIMIZATION_LUT_INV_FAST` (`OPTIMIZATION_LOSSLESS | OPTIMIZATION_COMP_LUT1D`) compose
+/// through `Compose`'s swap, which takes the domain's size from the first LUT before it
+/// swaps them (`lutc1`).
 #[test]
-fn phase_2_cases_wait_for_their_ports() {
+fn compositions_match_the_wheel() {
     let sq = T::Lut(Lut::std(17, Some(square)));
-    let inverse = T::Lut(Lut {
+    let half_scale = T::Lut(Lut {
+        half_domain: true,
+        ..Lut::std(65536, Some(scale_half))
+    });
+    let inverse = |lut: Lut| T::Lut(Lut { dir: I, ..lut });
+    let inv_sq = inverse(Lut::std(17, Some(square)));
+    let inv_wavy = inverse(Lut::std(33, Some(wavy)));
+    let inv_half = inverse(Lut {
+        half_domain: true,
+        ..Lut::std(65536, Some(scale_half))
+    });
+    let inv_hue = inverse(Lut {
+        hue: Lut1DHueAdjust::Dw3,
+        ..Lut::std(33, Some(square))
+    });
+    let inv_big = inverse(Lut::std(65536, Some(ramp)));
+    let chains = vec![
+        vec![sq, sq],
+        vec![sq, half_scale],
+        vec![half_scale, sq],
+        vec![T::Matrix, sq, T::Lut(Lut::std(1024, Some(wavy)))],
+        vec![inv_sq],
+        vec![inv_wavy],
+        vec![inv_half],
+        vec![inv_hue],
+        vec![inv_sq, inv_wavy],
+        vec![inv_wavy, sq],
+        vec![inv_big, inv_sq],
+    ];
+    assert!(check_chains(chains) > 0);
+
+    let without_fast = [(
+        json!(["OPTIMIZATION_LOSSLESS", "OPTIMIZATION_COMP_LUT1D"]),
+        OptimizationFlags::LOSSLESS | OptimizationFlags::COMP_LUT1D,
+    )];
+    let chains = vec![
+        vec![inv_big, inv_sq],
+        vec![inv_sq, inv_big],
+        vec![inv_sq, inv_wavy],
+    ];
+    assert!(check_chains_at(chains, &without_fast) > 0);
+}
+
+/// Rising in red, a square in green, falling in blue.
+fn ramp(x: f32) -> [f32; 3] {
+    [x * 0.8 + 0.05, x * x, 1.0 - x]
+}
+
+/// A LUT next to its inverse, which the optimizer replaces with the pair's own identity
+/// replacement (`RemoveInverseOps`, `Lut1DOpData::getPairIdentityReplacement`: a Range that
+/// clamps to the LUT's range, or a no-op Matrix), nested pairs, a pair between ranges, and a
+/// half domain's pair, which is not one (docs/improvements.md, I-68): the optimized processors'
+/// cache IDs are the wheel's.
+#[test]
+fn pairs_of_inverses_match_the_wheel() {
+    let sq = T::Lut(Lut::std(17, Some(square)));
+    let inv_sq = T::Lut(Lut {
         dir: I,
         ..Lut::std(17, Some(square))
     });
-    let cases = [
-        (
-            vec![sq, sq],
-            "OPTIMIZATION_DEFAULT",
-            OptimizationFlags::DEFAULT,
-            NOT_PORTED_COMPOSE,
-        ),
-        (
-            vec![inverse],
-            "OPTIMIZATION_NONE",
-            OptimizationFlags::NONE,
-            "Lut1D: the inverse 1D LUT is not ported yet (WP 2.1).",
-        ),
+    let identity = T::Lut(Lut::std(17, None));
+    let inv_identity = T::Lut(Lut {
+        dir: I,
+        ..Lut::std(17, None)
+    });
+    let wide = T::Lut(Lut::std(9, Some(scale_half)));
+    let inv_wide = T::Lut(Lut {
+        dir: I,
+        ..Lut::std(9, Some(scale_half))
+    });
+    let half_scale = T::Lut(Lut {
+        half_domain: true,
+        ..Lut::std(65536, Some(scale_half))
+    });
+    let inv_half_scale = T::Lut(Lut {
+        dir: I,
+        half_domain: true,
+        ..Lut::std(65536, Some(scale_half))
+    });
+    let unit = T::Range([0., 1., 0., 1.]);
+    let chains = vec![
+        vec![sq, inv_sq],
+        vec![inv_sq, sq],
+        vec![wide, inv_wide],
+        vec![inv_wide, wide],
+        vec![identity, inv_identity],
+        vec![sq, wide, inv_wide, inv_sq],
+        vec![unit, sq, inv_sq, unit],
+        vec![T::Matrix, wide, inv_wide],
+        vec![half_scale, inv_half_scale],
+    ];
+    assert!(check_chains(chains) > 0);
+}
+
+/// An inverse LUT, set up by the processor's `finalize` (`Lut1DOpData::initializeFromForward`)
+/// and not optimized: its cache IDs equal the wheel's, as do those of the reversal-flattening
+/// and flat-ended LUTs whose values `finalize` changes.
+#[test]
+fn inverse_luts_without_optimization_match_the_wheel() {
+    let inverse = |length, curve: fn(f32) -> [f32; 3], half_domain| {
+        T::Lut(Lut {
+            dir: I,
+            half_domain,
+            ..Lut::std(length, Some(curve))
+        })
+    };
+    let chains = [
+        vec![inverse(17, square, false)],
+        vec![inverse(17, wavy, false)],
+        vec![inverse(65536, scale_half, true)],
+        vec![inverse(65536, wavy, true)],
     ];
     let wheel = wheel_cache_ids(
-        &cases
+        &chains
             .iter()
-            .map(|(chain, name, _, _)| (chain.clone(), *name))
+            .map(|chain| (chain.clone(), json!("OPTIMIZATION_NONE")))
             .collect::<Vec<_>>(),
     );
-    for ((chain, _, flags, message), wheel) in cases.iter().zip(wheel) {
-        assert!(wheel.is_ok(), "{chain:?}: {wheel:?}");
-        let port = port_cache_ids(chain, *flags);
-        assert_eq!(
-            port.map_err(|e| e.message().to_string()),
-            Err(message.to_string()),
-            "{chain:?}"
-        );
+    for (chain, wheel) in chains.iter().zip(wheel) {
+        let port =
+            port_cache_ids(chain, OptimizationFlags::NONE).map_err(|e| e.message().to_string());
+        assert_eq!(port, wheel, "{chain:?}");
     }
+}
+
+/// A curve that goes back and forth, with flat ends: what an inverse LUT's set-up flattens.
+fn wavy(x: f32) -> [f32; 3] {
+    let w = (x * 9.0).sin();
+    [w.clamp(-0.5, 0.5), -w, (x - 0.5).abs()]
 }

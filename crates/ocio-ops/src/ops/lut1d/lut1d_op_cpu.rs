@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! The 1D LUT's CPU renderers: a port of `src/OpenColorIO/ops/lut1d/Lut1DOpCPU.cpp` @ v2.5.2,
-//! its forward renderers.
+//! The 1D LUT's CPU renderers: a port of `src/OpenColorIO/ops/lut1d/Lut1DOpCPU.cpp` @ v2.5.2.
 //!
 //! [`get_lut1d_renderer`] picks the renderer of a LUT from an input bit depth to an output bit
 //! depth, as upstream's `GetLut1DRenderer` does:
@@ -19,26 +18,29 @@
 //!   [`Lut1DHueAdjustFloatRenderer`]): the same lookups and interpolations, then the middle
 //!   channel is set from the input's hue ([`order3`], `adjust_hue`).
 //!
+//! - **Inverse** ([`InvLut1DRenderer`]): for any input bit depth, each value is inverted
+//!   through the forward LUT's interpolation, by a search of its values ([`find_lut_inv`],
+//!   [`find_lut_inv_half`]), with or without hue adjust.
 //! - **SIMD kernels.** Every x86-64 CPU has SSE2, so upstream's `Lut1DRenderer<BIT_DEPTH_F32,
 //!   outBD>` renders every row of more than one pixel with the kernel the CPU dispatches to
 //!   ([`lut1d_kernel`]): `Lut1DOpCPU_SSE2.cpp`, `_AVX.cpp`, `_AVX2.cpp` and `_AVX512.cpp`
 //!   (`lut1d_op_cpu_sse2`, ...). A row of one pixel takes the scalar loop
 //!   ([`get_lut1d_scalar_renderer`]); [`get_lut1d_profile_renderer`] gives any profile.
 //!
-//! Not here yet, and an error until then:
-//! - the inverse renderers (WP 2.1f), and the lookups of a LUT that must first be resampled
-//!   for the input bit depth (`Compose`, WP 2.1g).
+//! A lookup of a LUT whose entries aren't one per code of the input bit depth looks up the LUT
+//! resampled on that bit depth's lookup domain (`Lut1DOpData::compose`), which the CPU renders
+//! through the LUT's float renderer.
 
 use std::fmt;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use super::lut1d_op::{NOT_PORTED_COMPOSE, NOT_PORTED_INVERSE_RENDERER};
 use super::lut1d_op_cpu_avx::apply_lut_avx;
 use super::lut1d_op_cpu_avx2::apply_lut_avx2;
 use super::lut1d_op_cpu_avx512::apply_lut_avx512;
 use super::lut1d_op_cpu_sse2::apply_lut_sse2;
-use super::lut1d_op_data::Lut1DOpData;
+use super::lut1d_op_data::ComponentProperties;
+use super::lut1d_op_data::{ComposeMethod, Lut1DOpData};
 use super::{lut1d_op_cpu_avx, lut1d_op_cpu_avx2, lut1d_op_cpu_avx512, lut1d_op_cpu_sse2};
 use crate::bit_depth_utils::{
     BitDepthInfo, ChannelType, Converter, F16, F32, Uint8, Uint10, Uint12, Uint16,
@@ -1195,9 +1197,535 @@ impl<O: LutOutput> CpuOp for Lut1DHueAdjustFloatRenderer<O> {
     }
 }
 
+/// `std::lower_bound(first, last, value)` on `values[first..last]`: the first index whose value
+/// does not compare less than `value` (`last` if none), by the halving steps of libstdc++ and
+/// the MSVC STL, which decide the result where the values hold NaNs. Both give `first` for a
+/// range that ends before it starts (a negative distance), which an inverse LUT's effective
+/// domains never are (`Lut1DOpData::initializeFromForward`).
+fn lower_bound(values: &[f32], first: usize, last: usize, value: f32) -> usize {
+    let mut first = first;
+    let mut len = last.saturating_sub(first);
+    while len > 0 {
+        let half = len / 2;
+        let mid = first + half;
+        if values[mid] < value {
+            first = mid + 1;
+            len = len - half - 1;
+        } else {
+            len = half;
+        }
+    }
+    first
+}
+
+/// The shared part of `FindLutInv` and `FindLutInvHalf` (Lut1DOpCPU.cpp:1015-1063, 1077-1122
+/// @ v2.5.2): `val` clamped to `lut[start..=end]` (increasing), the index of the entry at or
+/// below it from the LUT's start (`totalInds`), and its fraction of the way to the next entry
+/// (`delta`).
+fn find_lut_inv_bracket(
+    lut: &[f32],
+    start: usize,
+    start_offset: f32,
+    end: usize,
+    flip_sign: f32,
+    val: f32,
+) -> (f32, f32) {
+    // Note that the LUT data pointed to by start/end must be in increasing order,
+    // regardless of whether the original LUT was increasing or decreasing because
+    // this function uses std::lower_bound().
+
+    // Clamp the value to the range of the LUT.
+    let cv = std_min(std_max(sse_mul(val, flip_sign), lut[start]), lut[end]);
+
+    // std::lower_bound()
+    // "Returns an iterator pointing to the first element in the range [first,last)
+    // which does not compare less than val (but could be equal)."
+    // (NB: This is correct using either end or end+1 since lower_bound will return a
+    //  value one greater than the second argument if no values in the array are >= cv.)
+    let mut lowbound = lower_bound(lut, start, end, cv);
+
+    // lower_bound() returns first entry >= val so decrement it unless val == *start.
+    if lowbound > start {
+        lowbound -= 1;
+    }
+
+    let mut highbound = lowbound;
+    if highbound < end {
+        highbound += 1;
+    }
+
+    // Delta is the fractional distance of val between the adjacent LUT entries.
+    let mut delta = 0.0f32;
+    if lut[highbound] > lut[lowbound] {
+        // (handle flat spots by leaving delta = 0)
+        delta = (cv - lut[lowbound]) / (lut[highbound] - lut[lowbound]);
+    }
+
+    // Inds is the index difference from the effective start to lowbound.
+    let inds = (lowbound - start) as f32;
+
+    // Correct for the fact that start is not the beginning of the LUT if it
+    // starts with a flat spot.
+    // (NB: It may seem like lower_bound would automatically find the end of the
+    //  flat spot, so start could always simply be the start of the LUT, however
+    //  this fails when val equals the flat spot value.)
+    let total_inds = inds + start_offset;
+    (total_inds, delta)
+}
+
+/// The inverse of `val` through a forward LUT's linear interpolation: the input that would
+/// give `val`, in index units times `scale`. `lut[start..=end]` is the effective, increasing
+/// table (`flip_sign` -1 negates the value for a decreasing LUT); `start_offset` is `start`'s
+/// index in the LUT.
+///
+/// Port of `FindLutInv` (src/OpenColorIO/ops/lut1d/Lut1DOpCPU.cpp:1015-1063 @ v2.5.2).
+fn find_lut_inv(
+    lut: &[f32],
+    start: usize,
+    start_offset: f32,
+    end: usize,
+    flip_sign: f32,
+    scale: f32,
+    val: f32,
+) -> f32 {
+    let (total_inds, delta) = find_lut_inv_bracket(lut, start, start_offset, end, flip_sign, val);
+
+    // Scale converts from units of [0,dim] to [0,outDepth].
+    (total_inds + delta) * scale
+}
+
+/// [`find_lut_inv`] for a half domain: the index pair's halfs, interpolated by `delta`.
+///
+/// Port of `FindLutInvHalf` (src/OpenColorIO/ops/lut1d/Lut1DOpCPU.cpp:1077-1135 @ v2.5.2).
+fn find_lut_inv_half(
+    lut: &[f32],
+    start: usize,
+    start_offset: f32,
+    end: usize,
+    flip_sign: f32,
+    scale: f32,
+    val: f32,
+) -> f32 {
+    let (total_inds, delta) = find_lut_inv_bracket(lut, start, start_offset, end, flip_sign, val);
+
+    // For a half domain LUT, the entries are not a constant distance apart,
+    // so convert the indices (which are half floats) into real floats in order
+    // to calculate what distance the delta factor is working over.
+    let base = half_to_float(<u16 as FromFloat>::from_float(total_inds));
+    let base_plus1 = half_to_float(<u16 as FromFloat>::from_float(total_inds + 1.0));
+    let domain = base + delta * (base_plus1 - base);
+
+    // Scale converts from units of [0,dim] to [0,outDepth].
+    domain * scale
+}
+
+/// The parameters of one color component of an inverse LUT's renderer: indices into the
+/// renderer's table `table` where upstream holds pointers into `m_tmpLutR`, `G` or `B`.
+///
+/// Port of `ComponentParams` (src/OpenColorIO/ops/lut1d/Lut1DOpCPU.cpp:179-207 @ v2.5.2).
+#[derive(Debug, Clone, Copy)]
+struct ComponentParams {
+    /// The renderer's table the indices refer to.
+    table: usize,
+    /// Copy of the pointer to start of effective lutData.
+    lut_start: usize,
+    /// Difference between real and effective start of lut.
+    start_offset: f32,
+    /// Copy of the pointer to end of effective lutData.
+    lut_end: usize,
+    /// lutStart for negative part of half domain LUT.
+    neg_lut_start: usize,
+    /// startOffset for negative part of half domain LUT.
+    neg_start_offset: f32,
+    /// lutEnd for negative part of half domain LUT.
+    neg_lut_end: usize,
+    /// Flip the sign of value to handle decreasing luts.
+    flip_sign: f32,
+    /// Point of switching from pos to neg of half domain.
+    bisect_point: f32,
+}
+
+impl ComponentParams {
+    /// Port of `ComponentParams::setComponentParams` (Lut1DOpCPU.cpp:1158-1171 @ v2.5.2).
+    fn new(properties: &ComponentProperties, table: usize, lut_zero_entry: f32) -> Self {
+        ComponentParams {
+            table,
+            flip_sign: if properties.is_increasing { 1.0 } else { -1.0 },
+            bisect_point: lut_zero_entry,
+            start_offset: properties.start_domain as f32,
+            lut_start: properties.start_domain as usize,
+            lut_end: properties.end_domain as usize,
+            neg_start_offset: properties.neg_start_domain as f32,
+            neg_lut_start: properties.neg_start_domain as usize,
+            neg_lut_end: properties.neg_end_domain as usize,
+        }
+    }
+}
+
+/// How an inverse renderer's `apply(pixel, pixel, 1)` orders its reads of the pixel's codes
+/// and its stores of the floats over them, as each wheel compiled it (docs/improvements.md,
+/// I-41).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InPlaceOrder {
+    /// Each code read after the store of the float before it.
+    Sequential,
+    /// Each code read one step ahead, before the store of the float before it.
+    OneAhead,
+    /// The three colour codes read first; alpha after the colour floats are stored.
+    ColorsFirst,
+    /// Every code read before any store.
+    AllFirst,
+}
+
+/// The renderer of an inverse LUT from `I` values to `O` values: a standard or half domain,
+/// with or without hue adjust. It inverts each value through the forward LUT's interpolation
+/// ([`find_lut_inv`], [`find_lut_inv_half`]), whatever the input bit depth: an inverse LUT is
+/// never looked up.
+///
+/// Port of `InvLut1DRenderer`, `InvLut1DRendererHalfCode`, `InvLut1DRendererHueAdjust` and
+/// `InvLut1DRendererHalfCodeHueAdjust` (src/OpenColorIO/ops/lut1d/Lut1DOpCPU.cpp:209-270,
+/// 1137-1625 @ v2.5.2).
+pub(crate) struct InvLut1DRenderer<I: BitDepthInfo, O: LutOutput> {
+    /// `m_tmpLutR`, and for a LUT of three components `m_tmpLutG` and `m_tmpLutB`: the values
+    /// times the input's maximum, negated where a channel is decreasing (and, in a half
+    /// domain, its negative half the other way), so that each sorts increasing.
+    tables: Vec<Vec<f32>>,
+    /// `m_paramsR`, `m_paramsG`, `m_paramsB`.
+    params: [ComponentParams; 3],
+    /// `m_scale`: from index units to the output's units (`outMax / (dim - 1)`, or `outMax`
+    /// for a half domain).
+    scale: f32,
+    /// `m_alphaScaling`: `(float)maxValue(outBD) / (float)maxValue(inBD)`.
+    alpha_scaling: f32,
+    half_code: bool,
+    hue_adjust: bool,
+    bit_depths: PhantomData<fn() -> (I, O)>,
+}
+
+impl<I: BitDepthInfo, O: LutOutput> fmt::Debug for InvLut1DRenderer<I, O> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("InvLut1DRenderer")
+            .field("in", &I::BIT_DEPTH)
+            .field("out", &O::BIT_DEPTH)
+            .field("half_code", &self.half_code)
+            .field("hue_adjust", &self.hue_adjust)
+            .finish()
+    }
+}
+
+impl<I: BitDepthInfo, O: LutOutput> InvLut1DRenderer<I, O> {
+    /// Port of `InvLut1DRenderer::updateData` (Lut1DOpCPU.cpp:1181-1243 @ v2.5.2) and
+    /// `InvLut1DRendererHalfCode::updateData` (1360-1437).
+    fn new(lut: &Lut1DOpData) -> Self {
+        let half_code = lut.is_input_half_domain();
+        let has_single_lut = lut.has_single_lut();
+        let dim = lut.get_array().get_length() as usize;
+        let lut_values = lut.get_array().get_values();
+
+        // Get component properties and initialize component parameters structure.
+        let properties = [
+            *lut.get_red_properties(),
+            *lut.get_green_properties(),
+            *lut.get_blue_properties(),
+        ];
+        // The half domain's bisect point is the channel's value at +0, not scaled as the
+        // tables are (docs/improvements.md, I-69).
+        let zero_entry = |c: usize| if half_code { lut_values[c] } else { 0.0 };
+        let params = if has_single_lut {
+            // NB: All pointers refer to _tmpLutR.
+            let r = ComponentParams::new(&properties[0], 0, zero_entry(0));
+            [r, r, r]
+        } else {
+            std::array::from_fn(|c| ComponentParams::new(&properties[c], c, zero_entry(c)))
+        };
+
+        // Fill temporary LUT.
+        // Note: Since FindLutInv requires increasing arrays, if the LUT is
+        // decreasing we negate the values to obtain the required sort order
+        // of smallest to largest.
+        let lut_scale = max_value::<I>();
+        let tables_count = if has_single_lut { 1 } else { 3 };
+        let tables = (0..tables_count)
+            .map(|c| {
+                let increasing = properties[c].is_increasing;
+                (0..dim)
+                    .map(|i| {
+                        let v = lut_values[i * 3 + c];
+                        // (Per above, the LUT must be increasing, so negative half domain is
+                        // sign reversed.)
+                        let positive = !half_code || i < 32768;
+                        if increasing == positive {
+                            sse_mul(v, lut_scale)
+                        } else {
+                            sse_mul(-v, lut_scale)
+                        }
+                    })
+                    .collect()
+            })
+            .collect();
+
+        let out_max = max_value::<O>();
+        InvLut1DRenderer {
+            tables,
+            params,
+            // Converts from index units to inDepth units of the original LUT.
+            // (Note that inDepth of the original LUT is outDepth of the inverse LUT.)
+            // Note the difference for half domain LUTs, since the distance between
+            // between adjacent entries is not constant, we cannot roll it into the
+            // scale.
+            scale: if half_code {
+                out_max
+            } else {
+                out_max / (dim - 1) as f32
+            },
+            alpha_scaling: out_max / max_value::<I>(),
+            half_code,
+            hue_adjust: lut.get_hue_adjust() != Lut1DHueAdjust::None,
+            bit_depths: PhantomData,
+        }
+    }
+
+    /// One component of a standard domain: `FindLutInv` with its parameters.
+    fn invert(&self, c: usize, val: f32) -> f32 {
+        let p = &self.params[c];
+        find_lut_inv(
+            &self.tables[p.table],
+            p.lut_start,
+            p.start_offset,
+            p.lut_end,
+            p.flip_sign,
+            self.scale,
+            val,
+        )
+    }
+
+    /// One component of a half domain: `FindLutInvHalf` on the half of the domain the value's
+    /// side of the bisect point gives. Blue's negative half takes red's `flipSign`, as upstream
+    /// does (docs/improvements.md, I-67).
+    ///
+    /// Port of `InvLut1DRendererHalfCode::apply`'s per-channel code
+    /// (Lut1DOpCPU.cpp:1460-1532 @ v2.5.2).
+    fn invert_half(&self, c: usize, val: f32) -> f32 {
+        let p = &self.params[c];
+        let is_increasing = p.flip_sign > 0.0;
+        let lut = &self.tables[p.table];
+        if is_increasing == (val >= p.bisect_point) {
+            find_lut_inv_half(
+                lut,
+                p.lut_start,
+                p.start_offset,
+                p.lut_end,
+                p.flip_sign,
+                self.scale,
+                val,
+            )
+        } else {
+            let flip_sign = if c == 2 {
+                self.params[0].flip_sign
+            } else {
+                p.flip_sign
+            };
+            find_lut_inv_half(
+                lut,
+                p.neg_lut_start,
+                p.neg_start_offset,
+                p.neg_lut_end,
+                -flip_sign,
+                self.scale,
+                val,
+            )
+        }
+    }
+
+    /// One pixel's output values, from its input values as floats.
+    ///
+    /// Port of the `apply` of `InvLut1DRenderer` (Lut1DOpCPU.cpp:1245-1286),
+    /// `InvLut1DRendererHueAdjust` (1293-1347), `InvLut1DRendererHalfCode` (1439-1540) and
+    /// `InvLut1DRendererHalfCodeHueAdjust` (1549-1623 @ v2.5.2).
+    fn render(&self, rgba: [f32; 4]) -> [O::Type; 4] {
+        let rgb = [rgba[0], rgba[1], rgba[2]];
+        let mut rgb2: [f32; 3] = std::array::from_fn(|c| {
+            if self.half_code {
+                self.invert_half(c, rgb[c])
+            } else {
+                self.invert(c, rgb[c])
+            }
+        });
+        if self.hue_adjust {
+            adjust_hue(&rgb, &mut rgb2);
+        }
+        [
+            O::cast_value(rgb2[0]),
+            O::cast_value(rgb2[1]),
+            O::cast_value(rgb2[2]),
+            O::cast_value(sse_mul(rgba[3], self.alpha_scaling)),
+        ]
+    }
+
+    /// How the wheel compiled this renderer's `apply(pixel, pixel, 1)` (`InPlaceOrder`):
+    /// - `InvLut1DRenderer`: each code after the float before it on Windows (0x18025d830
+    ///   8-bit, 0x18025e150 10-, 12- and 16-bit, 0x18025f2e0 half) and for 8 bits on Linux
+    ///   (0x40b870); one step ahead for 16-bit types on Linux (0x40bfd0, 0x40c730, 0x40ce90,
+    ///   0x41f680);
+    /// - the half-domain and hue-adjust renderers: the colour codes first, alpha after the
+    ///   colour floats on Windows (0x180260cb0, 0x180261d50, 0x1802636e0; 0x18026c780,
+    ///   0x18026da20, 0x18026f480; 0x180266040, 0x180267900), and on Linux for 8 bits
+    ///   (0x42e230, 0x414d20, 0x42e460) and for half input with hue adjust (0x423ba0); every
+    ///   code first for 16-bit types on Linux (0x430550, 0x432830, 0x434b10, 0x414f20,
+    ///   0x415130, 0x415340, 0x430740) and for half input without hue adjust (0x4373c0).
+    fn in_place_order(&self) -> InPlaceOrder {
+        let size = size_of::<I::Type>();
+        let windows = cfg!(target_os = "windows");
+        if !self.half_code && !self.hue_adjust {
+            if windows || size == 1 {
+                InPlaceOrder::Sequential
+            } else {
+                InPlaceOrder::OneAhead
+            }
+        } else if windows || size == 1 || (I::BIT_DEPTH == BitDepth::F16 && self.hue_adjust) {
+            InPlaceOrder::ColorsFirst
+        } else {
+            InPlaceOrder::AllFirst
+        }
+    }
+}
+
+impl<I: BitDepthInfo + 'static, O: LutOutput> CpuOp for InvLut1DRenderer<I, O> {
+    /// `apply(img, img, numPixels)` on F32 pixels, F32 to F32.
+    fn apply(&self, rgba: &mut [f32]) {
+        assert!(
+            I::BIT_DEPTH == BitDepth::F32 && O::BIT_DEPTH == BitDepth::F32,
+            "{self:?} can't work in place on floats"
+        );
+        for px in rgba.as_chunks_mut::<4>().0 {
+            *px = self.render(*px).map(ChannelType::to_float);
+        }
+    }
+
+    fn apply_bit_depth(&self, input: Pixels<'_>, output: PixelsMut<'_>) {
+        let (in_name, out_name) = (input.type_name(), output.type_name());
+        let (Some(input), Some(output)) = (
+            I::Type::from_pixels(input),
+            O::Type::from_pixels_mut(output),
+        ) else {
+            panic!("{self:?} got {in_name} to {out_name}");
+        };
+        assert_eq!(
+            input.len(),
+            output.len(),
+            "{self:?}: the pixel counts differ"
+        );
+        for (inp, out) in input
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .zip(output.as_chunks_mut::<4>().0)
+        {
+            *out = self.render(inp.map(ChannelType::to_float));
+        }
+    }
+
+    /// `apply(pixel, pixel, 1)`, as `applyRGB` and `applyRGBA` call it (docs/improvements.md,
+    /// I-41): the renderer reads the pixel's first bytes as `I` values and writes `O` values
+    /// over them, in the order the wheel compiled ([`InPlaceOrder`]). The CPU engine runs an
+    /// inverse LUT in place only to F32 output, or from F32 input.
+    fn apply_pixel_in_place(&self, pixel: &mut [f32; 4]) -> Result<()> {
+        let mut bytes = [0u8; 16];
+        for (k, value) in pixel.iter().enumerate() {
+            bytes[4 * k..4 * k + 4].copy_from_slice(&value.to_ne_bytes());
+        }
+        let in_size = size_of::<I::Type>();
+        let out_size = size_of::<O::Type>();
+        let read = |bytes: &[u8; 16], k: usize| I::Type::read_ne(&bytes[k * in_size..]).to_float();
+        let write = |bytes: &mut [u8; 16], k: usize, value: O::Type| {
+            value.write_ne(&mut bytes[k * out_size..]);
+        };
+
+        if in_size >= out_size {
+            // Each output value overwrites only values already read.
+            let values = [0, 1, 2, 3].map(|k| read(&bytes, k));
+            for (k, value) in self.render(values).into_iter().enumerate() {
+                write(&mut bytes, k, value);
+            }
+        } else {
+            assert_eq!(
+                O::BIT_DEPTH,
+                BitDepth::F32,
+                "{self:?}: the CPU engine runs an inverse LUT in place to F32 only"
+            );
+            match self.in_place_order() {
+                InPlaceOrder::Sequential | InPlaceOrder::OneAhead => {
+                    debug_assert!(!self.half_code && !self.hue_adjust);
+                    let one_ahead = self.in_place_order() == InPlaceOrder::OneAhead;
+                    let mut next = read(&bytes, 0);
+                    for c in 0..3 {
+                        let value = next;
+                        if one_ahead {
+                            next = read(&bytes, c + 1);
+                        }
+                        write(&mut bytes, c, O::cast_value(self.invert(c, value)));
+                        if !one_ahead {
+                            next = read(&bytes, c + 1);
+                        }
+                    }
+                    write(
+                        &mut bytes,
+                        3,
+                        O::cast_value(sse_mul(next, self.alpha_scaling)),
+                    );
+                }
+                order @ (InPlaceOrder::ColorsFirst | InPlaceOrder::AllFirst) => {
+                    let rgb = [read(&bytes, 0), read(&bytes, 1), read(&bytes, 2)];
+                    let early_alpha = read(&bytes, 3);
+                    let out = self.render([rgb[0], rgb[1], rgb[2], early_alpha]);
+                    for (k, value) in out.into_iter().take(3).enumerate() {
+                        write(&mut bytes, k, value);
+                    }
+                    let alpha = if order == InPlaceOrder::AllFirst {
+                        early_alpha
+                    } else {
+                        read(&bytes, 3)
+                    };
+                    write(
+                        &mut bytes,
+                        3,
+                        O::cast_value(sse_mul(alpha, self.alpha_scaling)),
+                    );
+                }
+            }
+        }
+
+        for (k, value) in pixel.iter_mut().enumerate() {
+            *value = f32::from_ne_bytes(bytes[4 * k..4 * k + 4].try_into().expect("4 bytes"));
+        }
+        Ok(())
+    }
+}
+
+/// The LUT a lookup with `in_bd` values uses: `lut` if it has an entry per code
+/// (`mayLookup`), else `lut` composed on the lookup domain of `in_bd`.
+///
+/// Port of `BaseLut1DRenderer::updateData`'s resampling (Lut1DOpCPU.cpp:388-406 @ v2.5.2).
+fn lookup_lut(lut: &Lut1DOpData, in_bd: BitDepth) -> Result<std::borrow::Cow<'_, Lut1DOpData>> {
+    let must_resample = !lut.may_lookup(in_bd)?;
+
+    // If we are able to lookup, need to resample the LUT based on inBitDepth.
+    if must_resample {
+        let new_lut_tmp = Lut1DOpData::make_lookup_domain(in_bd)?;
+
+        // Note: Compose should render at 32f, to avoid infinite recursion.
+        return Ok(std::borrow::Cow::Owned(Lut1DOpData::compose(
+            &new_lut_tmp,
+            lut,
+            // Prevent compose from modifying newLut domain.
+            ComposeMethod::ResampleNo,
+        )?));
+    }
+    Ok(std::borrow::Cow::Borrowed(lut))
+}
+
 /// The hue-adjust renderer of a forward LUT from `I` to `O`: a lookup for integer and half
-/// input, which may need the LUT resampled first ([`NOT_PORTED_COMPOSE`]), or the float
-/// renderer.
+/// input, of the LUT resampled if need be ([`lookup_lut`]), or the float renderer.
 ///
 /// Port of the constructors of `Lut1DRendererHueAdjust<inBD, outBD>` and
 /// `Lut1DRendererHalfCodeHueAdjust<inBD, outBD>` (Lut1DOpCPU.cpp:155-177, 311-443 @ v2.5.2).
@@ -1210,16 +1738,14 @@ where
     I::Type: LookupIndex,
 {
     if I::BIT_DEPTH != BitDepth::F32 {
-        if !lut.may_lookup(I::BIT_DEPTH)? {
-            return Err(Exception::new(NOT_PORTED_COMPOSE));
-        }
-        return Ok(Arc::new(Lut1DHueAdjustLookupRenderer::<I, O>::new(lut)));
+        let lut = lookup_lut(lut, I::BIT_DEPTH)?;
+        return Ok(Arc::new(Lut1DHueAdjustLookupRenderer::<I, O>::new(&lut)));
     }
     Ok(Arc::new(Lut1DHueAdjustFloatRenderer::<O>::new(lut)))
 }
 
 /// The renderer of a forward LUT without hue adjust from `I` to `O`: a lookup for integer and
-/// half input, which may need the LUT resampled first ([`NOT_PORTED_COMPOSE`]); for float
+/// half input, of the LUT resampled if need be ([`lookup_lut`]); for float
 /// input, a half domain's renderer, or a standard domain's with the SIMD kernel `cpu`
 /// dispatches to ([`lut1d_kernel`]).
 ///
@@ -1235,10 +1761,8 @@ where
 {
     if I::BIT_DEPTH != BitDepth::F32 {
         // `isLookup()`: a LUT the lookup can't use as it is is resampled first (`Compose`).
-        if !lut.may_lookup(I::BIT_DEPTH)? {
-            return Err(Exception::new(NOT_PORTED_COMPOSE));
-        }
-        return Ok(Arc::new(Lut1DLookupRenderer::<I, O>::new(lut)));
+        let lut = lookup_lut(lut, I::BIT_DEPTH)?;
+        return Ok(Arc::new(Lut1DLookupRenderer::<I, O>::new(&lut)));
     }
     if lut.is_input_half_domain() {
         // `Lut1DRendererHalfCode::apply` never calls `m_applyLutFunc`.
@@ -1296,7 +1820,8 @@ pub fn get_lut1d_profile_renderer(
 }
 
 /// Port of `GetLut1DRenderer_OutBitDepth` (Lut1DOpCPU.cpp:1657-1695 @ v2.5.2) and
-/// `GetForwardLut1DRenderer` (1626-1653).
+/// `GetForwardLut1DRenderer` (1626-1653). The inverse arm's four renderers are one
+/// ([`InvLut1DRenderer`]).
 fn renderer_for<I: BitDepthInfo + 'static, O: LutOutput>(
     lut: &Lut1DOpData,
     cpu: &CpuInfo,
@@ -1314,7 +1839,7 @@ where
                 forward_hue_adjust_renderer::<I, O>(lut)
             }
         }
-        TransformDirection::Inverse => Err(Exception::new(NOT_PORTED_INVERSE_RENDERER)),
+        TransformDirection::Inverse => Ok(Arc::new(InvLut1DRenderer::<I, O>::new(lut))),
     }
 }
 

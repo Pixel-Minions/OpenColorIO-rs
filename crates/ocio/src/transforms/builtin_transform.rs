@@ -118,10 +118,14 @@ impl BuiltinTransform {
             }
         }
 
-        Err(Exception::new(format!(
-            "BuiltinTransform: invalid built-in transform style '{}'.",
-            String::from_utf8_lossy(style)
-        )))
+        Err(Exception::new(
+            [
+                b"BuiltinTransform: invalid built-in transform style '".as_slice(),
+                style,
+                b"'.",
+            ]
+            .concat(),
+        ))
     }
 
     /// Writes the transform's text to `os`.

@@ -13,11 +13,10 @@
 //! (ACES 2.0's tables), and its uniforms, 3D textures and dynamic properties, of which these
 //! ops have none. Or both must raise the same message at the same stage.
 //!
-//! The `Lut1DTransform`'s GPU writer (`Lut1DOpGPU`) is Phase 2's, as are its inverse LUT and
-//! hue adjustment: where the wheel builds a GPU processor (then writes the shader, or refuses
-//! the OSL translation) and the port refuses with its "not ported yet" message, the test
-//! counts a deferral, and only for that class. The GPU processor's cache ID and queries are
-//! still compared when the port gets that far.
+//! The `Lut1DTransform`'s GPU writer (`Lut1DOpGPU`) is Phase 2's (WP 2.1h): where the wheel
+//! builds a GPU processor (then writes the shader, or refuses the OSL translation) and the
+//! port refuses with its "not ported yet" message, the test counts a deferral, and only for
+//! that class. The GPU processor's cache ID and queries are still compared.
 
 mod common;
 
@@ -196,7 +195,7 @@ fn port(class: &Class, job: &Job, calls: &Calls) -> Outcome {
         Ok(t) => t,
         Err(e) => return raised("transform", e),
     };
-    let mut config = (*Config::create_raw()).clone();
+    let mut config = (*Config::create_raw().unwrap()).clone();
     if class.v1 {
         config.set_major_version(1).expect("version 1");
     }
@@ -242,28 +241,23 @@ fn port(class: &Class, job: &Job, calls: &Calls) -> Outcome {
     Outcome::Gpu { processor, shader }
 }
 
-/// The `Lut1DTransform`'s Phase 2 deferral in `dir`, the stage and message of the port's
-/// refusal: an inverse LUT is set up when the processor finalizes it (`Lut1DOpData::finalize`,
-/// WP 2.1); a forward one reaches the GPU processor, whose extraction needs the Lut1D op's GPU
-/// writer (`GetLut1DGPUShaderProgram`, src/OpenColorIO/ops/lut1d/Lut1DOpGPU.cpp @ v2.5.2).
-fn lut1d_deferral(dir: Direction) -> (&'static str, &'static str) {
-    match dir {
-        Direction::Inverse => (
-            "processor",
-            "Lut1D: the inverse 1D LUT is not ported yet (WP 2.1).",
-        ),
-        Direction::Forward => ("extract", "The GPU writer of <Lut1DOp> is not ported yet."),
-    }
+/// The `Lut1DTransform`'s Phase 2 deferral, the stage and message of the port's refusal: in
+/// either direction (an inverse LUT replaced by its fast forward one at the levels with
+/// `OPTIMIZATION_LUT_INV_FAST`, `MakeFastLut1DFromInverse`), the LUT reaches the GPU
+/// processor, whose extraction needs the Lut1D op's GPU writer (`GetLut1DGPUShaderProgram`,
+/// src/OpenColorIO/ops/lut1d/Lut1DOpGPU.cpp @ v2.5.2).
+fn lut1d_deferral() -> (&'static str, &'static str) {
+    ("extract", "The GPU writer of <Lut1DOp> is not ported yet.")
 }
 
-/// Whether the port's outcome is the `Lut1DTransform`'s deferral in `dir`, where the wheel
+/// Whether the port's outcome is the `Lut1DTransform`'s deferral, where the wheel
 /// built a GPU processor: it then wrote a shader, or refused in the extraction with the
 /// writer's own message (upstream's Lut1D writer has no OSL translation).
-fn deferral(wheel: &Outcome, port: &Outcome, dir: Direction) -> bool {
+fn deferral(wheel: &Outcome, port: &Outcome) -> bool {
     let Outcome::Gpu { .. } = wheel else {
         return false;
     };
-    let (stage, message) = lut1d_deferral(dir);
+    let (stage, message) = lut1d_deferral();
     match port {
         Outcome::Raised(s, m)
         | Outcome::Gpu {
@@ -301,11 +295,11 @@ fn check(class: &Class) {
             let port = port(class, job, case.params());
             if class.deferred {
                 // Every extraction of the class is a deferral, at its stage, with its message.
-                if !deferral(&wheel, &port, job.dir) {
+                if !deferral(&wheel, &port) {
                     failures.push(format!(
                         "{what}: the deferral {:?} was expected\n  wheel {wheel:?}\n  port  \
                          {port:?}",
-                        lut1d_deferral(job.dir)
+                        lut1d_deferral()
                     ));
                     continue;
                 }
@@ -316,9 +310,7 @@ fn check(class: &Class) {
                 {
                     failures.push(format!("{what}\n  wheel {w}\n  port  {p}"));
                 }
-                *deferred
-                    .entry(lut1d_deferral(job.dir).1.to_string())
-                    .or_default() += 1;
+                *deferred.entry(lut1d_deferral().1.to_string()).or_default() += 1;
                 continue;
             }
             if wheel != port {

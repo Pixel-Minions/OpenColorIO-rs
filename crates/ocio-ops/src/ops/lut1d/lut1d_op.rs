@@ -10,26 +10,17 @@
 //! it is [`Op::finalize`]'s own arm.
 //!
 //! `getCPUOp` is [`Op::get_cpu_op`]'s arm: `GetLut1DRenderer` for F32 to F32
-//! (`ops::lut1d::lut1d_op_cpu`), whose inverse renderers are still to come
-//! ([`NOT_PORTED_INVERSE_RENDERER`]).
-//! Not here yet (Phase 2, WP 2.1g): `combineWith`, which composes two LUTs (`Compose`); until
-//! then it returns [`NOT_PORTED_COMPOSE`]. `extractGpuShaderInfo` comes with the GPU writer
-//! (WP 2.1h); `CreateLut1DTransform` and `BuildLut1DOp` are the `ocio` crate's, with the
+//! (`ops::lut1d::lut1d_op_cpu`).
+//! `combineWith` composes two LUTs (`Lut1DOpData::compose`).
+//! Not here yet: `extractGpuShaderInfo` comes with the GPU writer (WP 2.1h);
+//! `CreateLut1DTransform` and `BuildLut1DOp` are the `ocio` crate's, with the
 //! `Lut1DTransform`. `GenerateLinearScaleLut1D` comes with the file readers that use it.
 
-use super::lut1d_op_data::Lut1DOpData;
+use super::lut1d_op_data::{ComposeMethod, Lut1DOpData};
 use crate::exception::{Exception, Result};
 use crate::op::{Op, OpVec};
 use crate::op_data::OpData;
 use crate::open_color_types::TransformDirection;
-
-/// The error of the inverse renderers until WP 2.1f.
-pub const NOT_PORTED_INVERSE_RENDERER: &str =
-    "Lut1D: the inverse 1D LUT renderers are not ported yet (Phase 2, WP 2.1f).";
-
-/// The error of composing two 1D LUTs until Phase 2 (WP 2.5).
-pub const NOT_PORTED_COMPOSE: &str =
-    "Lut1D: composing 1D LUTs is not ported yet (Phase 2, WP 2.5).";
 
 impl Lut1DOpData {
     /// A new Lut1D op with a copy of the data.
@@ -73,17 +64,25 @@ impl Lut1DOpData {
         }
     }
 
-    /// The composition of this LUT and `second_op`'s, which waits for `Compose` (Phase 2):
-    /// [`NOT_PORTED_COMPOSE`]. Only two 1D LUTs combine, and Phase 1 makes one at most.
+    /// Appends the composition of this LUT and `second_op`'s, resampled to at least 65536
+    /// entries ([`Lut1DOpData::compose`]).
     ///
-    /// Port of `Lut1DOp::combineWith` (Lut1DOp.cpp:112-128 @ v2.5.2), up to the composition.
-    pub(crate) fn combine_with(&self, _ops: &mut OpVec, second_op: &Op) -> Result<()> {
+    /// Port of `Lut1DOp::combineWith` (Lut1DOp.cpp:112-128 @ v2.5.2).
+    pub(crate) fn combine_with(&self, ops: &mut OpVec, second_op: &Op) -> Result<()> {
         if !self.can_combine_with(second_op) {
             return Err(Exception::new(
                 "Lut1DOp: canCombineWith must be checked before calling combineWith.",
             ));
         }
-        Err(Exception::new(NOT_PORTED_COMPOSE))
+        let OpData::Lut1D(second_lut) = &**second_op.data() else {
+            unreachable!("canCombineWith holds for a Lut1D op only")
+        };
+
+        // We want compose to upsample the LUTs to minimize precision loss.
+        let comp_flag = ComposeMethod::ResampleBig;
+        let result = Lut1DOpData::compose(self, second_lut, comp_flag)?;
+        ops.push_back(Op::new(OpData::Lut1D(result)));
+        Ok(())
     }
 
     /// The op's cache ID: `<Lut1D `, the data's cache ID, `>`.

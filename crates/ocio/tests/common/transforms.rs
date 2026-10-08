@@ -348,7 +348,7 @@ fn compare_processor(
 
 /// The raw config's processors of `cases`, in both directions, the wheel's against the port's.
 pub(crate) fn check_processors(cases: &[Case]) {
-    check_processors_in(cases, None, &Config::create_raw());
+    check_processors_in(cases, None, &Config::create_raw().unwrap());
 }
 
 /// The processors of `cases` in a config, in both directions, the wheel's against the port's:
@@ -362,7 +362,7 @@ pub(crate) fn check_processors_in(cases: &[Case], config_spec: Option<&Value>, c
 /// The raw config's processors of `cases` in the directions `dirs`, the wheel's against the
 /// port's.
 pub(crate) fn check_processors_dirs(cases: &[Case], dirs: &[TransformDirection]) {
-    check_processors_in_dirs(cases, None, &Config::create_raw(), dirs);
+    check_processors_in_dirs(cases, None, &Config::create_raw().unwrap(), dirs);
 }
 
 /// The processors of `cases` in a config, in the directions `dirs`, the wheel's against the
@@ -723,7 +723,7 @@ pub(crate) fn check_optimized_processors(cases: &[Case], depths: &[(Depth, Depth
         })
         .collect();
     let calls: Vec<BatchCall<'_>> = requests.iter().map(|(.., r)| r.call()).collect();
-    let config = Config::create_raw();
+    let config = Config::create_raw().unwrap();
     let mut failures = Vec::new();
     let mut luts = vec![0; cases.len()];
     for ((k, input, output, _), response) in requests.iter().zip(Oracle::get().batch(&calls, true))

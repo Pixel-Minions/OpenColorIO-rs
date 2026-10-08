@@ -64,7 +64,7 @@ fn children_and_indices() {
 /// The first group's metadata becomes the ops' metadata, and an empty group builds no ops.
 #[test]
 fn build_ops_copies_the_first_group_metadata() {
-    let config = Config::create_raw();
+    let config = Config::create_raw().unwrap();
     let mut group = GroupTransform::new();
     group
         .format_metadata_mut()
@@ -74,7 +74,7 @@ fn build_ops_copies_the_first_group_metadata() {
     crate::transform::build_ops(
         &mut ops,
         &config,
-        config.current_context(),
+        &config.current_context().get(),
         &group.clone().into(),
         TransformDirection::Forward,
     )
@@ -105,13 +105,13 @@ fn group_with(name: &[u8], dir: TransformDirection, children: Vec<Transform>) ->
 fn build_ops_copies_the_metadata_of_the_groups_met_before_any_op() {
     use crate::transforms::matrix_transform::MatrixTransform;
 
-    let config = Config::create_raw();
+    let config = Config::create_raw().unwrap();
     let build = |group: &GroupTransform, dir: TransformDirection| {
         let mut ops = OpVec::new();
         crate::transform::build_ops(
             &mut ops,
             &config,
-            config.current_context(),
+            &config.current_context().get(),
             &group.clone().into(),
             dir,
         )
@@ -151,7 +151,7 @@ fn build_ops_copies_the_metadata_of_the_groups_met_before_any_op() {
         crate::transform::build_ops(
             &mut ops,
             &config,
-            config.current_context(),
+            &config.current_context().get(),
             &transform,
             TransformDirection::Forward,
         )

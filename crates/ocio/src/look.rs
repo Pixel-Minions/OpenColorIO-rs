@@ -88,12 +88,15 @@ impl Look {
     }
 
     /// Sets a copy of `transform` as the look's transform. Upstream dereferences a null
-    /// pointer here (docs/improvements.md, U-50), which a reference can't be.
+    /// pointer here (docs/improvements.md, U-50), which a reference can't be. The copy is
+    /// upstream's `createEditableCopy` ([`Transform::create_editable_copy`]): an invalid
+    /// FixedFunctionTransform is refused with its error, and the look keeps its transform.
     ///
     /// Port of `Look::setTransform` (Look.cpp:116-119 @ v2.5.2).
     #[doc(alias = "setTransform")]
-    pub fn set_transform(&mut self, transform: &Transform) {
-        self.transform = Some(transform.clone());
+    pub fn set_transform(&mut self, transform: &Transform) -> Result<()> {
+        self.transform = Some(transform.create_editable_copy()?);
+        Ok(())
     }
 
     /// The transform that undoes the look, if it is set.
@@ -104,13 +107,14 @@ impl Look {
         self.inverse_transform.as_ref()
     }
 
-    /// Sets a copy of `transform` as the look's inverse transform (U-50 as
+    /// Sets a copy of `transform` as the look's inverse transform (U-50 and the copy as
     /// [`set_transform`](Self::set_transform)).
     ///
     /// Port of `Look::setInverseTransform` (Look.cpp:126-129 @ v2.5.2).
     #[doc(alias = "setInverseTransform")]
-    pub fn set_inverse_transform(&mut self, transform: &Transform) {
-        self.inverse_transform = Some(transform.clone());
+    pub fn set_inverse_transform(&mut self, transform: &Transform) -> Result<()> {
+        self.inverse_transform = Some(transform.create_editable_copy()?);
+        Ok(())
     }
 
     /// Port of `Look::getDescription` (Look.cpp:131-134 @ v2.5.2).

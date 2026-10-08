@@ -220,7 +220,7 @@ fn run_port(case: &Case) -> Value {
     for step in &case.steps {
         let result: ocio::Result<()> = (|| {
             match step {
-                Step::Config => config = Some(Config::create_raw()),
+                Step::Config => config = Some(Config::create_raw().unwrap()),
                 Step::Env(name, value) => {
                     match value {
                         Some(v) => env.insert(name.to_string(), v.clone()),

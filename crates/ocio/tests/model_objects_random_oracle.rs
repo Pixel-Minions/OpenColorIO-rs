@@ -484,7 +484,8 @@ fn named_transform_random() {
             || {
                 let mut n = NamedTransform::new();
                 let m: ocio::Transform = ocio::MatrixTransform::new().into();
-                n.set_transform(Some(&m), ocio::TransformDirection::Forward);
+                n.set_transform(Some(&m), ocio::TransformDirection::Forward)
+                    .unwrap();
                 n
             },
             nt_gen,
@@ -728,8 +729,10 @@ fn view_transform_shares_the_stream_between_its_transforms() {
         "v",
     );
     let mut v = ViewTransform::new(ReferenceSpaceType::Scene);
-    v.set_transform(Some(&mp), ocio::ViewTransformDirection::ToReference);
-    v.set_transform(Some(&rp), ocio::ViewTransformDirection::FromReference);
+    v.set_transform(Some(&mp), ocio::ViewTransformDirection::ToReference)
+        .unwrap();
+    v.set_transform(Some(&rp), ocio::ViewTransformDirection::FromReference)
+        .unwrap();
     println!("{}", String::from_utf8_lossy(&wheel));
     assert_eq!(wheel, v.to_bytes());
 }
@@ -746,8 +749,10 @@ fn named_transform_shares_the_stream_between_its_transforms() {
         "n",
     );
     let mut n = NamedTransform::new();
-    n.set_transform(Some(&mp), ocio::TransformDirection::Forward);
-    n.set_transform(Some(&rp), ocio::TransformDirection::Inverse);
+    n.set_transform(Some(&mp), ocio::TransformDirection::Forward)
+        .unwrap();
+    n.set_transform(Some(&rp), ocio::TransformDirection::Inverse)
+        .unwrap();
     println!("{}", String::from_utf8_lossy(&wheel));
     assert_eq!(wheel, n.to_bytes());
 }

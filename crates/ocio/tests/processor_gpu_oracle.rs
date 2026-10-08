@@ -75,7 +75,7 @@ fn group_gpu_processors_match_the_wheel() {
         Some((OptimizationFlags::DEFAULT, "OPTIMIZATION_DEFAULT")),
         Some((OptimizationFlags::ALL, "OPTIMIZATION_ALL")),
     ];
-    let config = Config::create_raw();
+    let config = Config::create_raw().unwrap();
     let mut cases = Vec::new();
     for group in groups() {
         for dir in [TransformDirection::Forward, TransformDirection::Inverse] {

@@ -36,17 +36,15 @@
 //! under it, and the others are counted as not run ([`w0001_skips`]); Linux, and fast math,
 //! compare everything bit for bit.
 //!
-//! Parts of the `Lut1DTransform`'s renderers are still to come in Phase 2: the inverse LUT
-//! (WP 2.1e, 2.1f) and composing LUTs (WP 2.1g). [`lut1d_deferral`] says, from the renderer
-//! upstream picks for each combination, which ones the port must refuse with which "not ported
-//! yet" message, while the wheel renders them: the test counts those as deferrals, pins how
-//! many there are per message, and compares every other combination: the lookups of integer
-//! and half inputs, and the float renderers (with the SIMD kernel the CPU dispatches to), with
-//! or without hue adjust, which every tier runs in full.
+//! Every tier runs the `Lut1DTransform` in full, every case and direction at every combination
+//! (less for its large specs, [`Lut1D::runs`]): the lookups of integer and half inputs, of the
+//! LUT as it is or resampled for the input (`Lut1DOpData::Compose`), the float renderers (with
+//! the SIMD kernel the CPU dispatches to), with or without hue adjust, and the inverse LUT,
+//! rendered from every input bit depth or replaced by its fast forward LUT
+//! (`OPTIMIZATION_LUT_INV_FAST`).
 
 mod common;
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use common::api::{Calls, LEVELS, port_transform};
@@ -57,7 +55,6 @@ use ocio_ops::image_desc::{
     AUTO_STRIDE, Bytes, ImageDesc, ImageDescMut, PackedImageDesc, PixelData, PlanarImageDesc,
 };
 use ocio_ops::open_color_types::ChannelOrdering;
-use ocio_ops::ops::lut1d::lut1d_op::NOT_PORTED_COMPOSE;
 use ocio_testkit::Oracle;
 use ocio_testkit::battery::params::Comparison;
 use ocio_testkit::battery::{self, BitDepth as Depth, Direction, Tier};
@@ -313,7 +310,7 @@ struct Class {
     cases: Cases,
     /// A version 1 config instead of the raw config.
     v1: bool,
-    /// The `Lut1DTransform`, whose Phase 2 deferrals [`lut1d_deferral`] lists.
+    /// The `Lut1DTransform`, which every tier runs in full.
     lut1d: bool,
 }
 
@@ -509,7 +506,7 @@ fn compare_images(
 /// entry, in order: the 1D LUTs its CPU processor renders.
 fn port_luts(class: &Class, job: &Job, calls: &Calls) -> Result<Vec<Vec<f32>>, Exception> {
     let transform = port_transform(&calls.spec(job.dir))?;
-    let mut config = (*Config::create_raw()).clone();
+    let mut config = (*Config::create_raw().unwrap()).clone();
     if class.v1 {
         config.set_major_version(1).expect("version 1");
     }
@@ -604,55 +601,12 @@ impl Lut1D {
     }
 }
 
-/// The inverse LUT's deferral (its set-up in the processor's `finalize`, WP 2.1).
-const NOT_PORTED_INVERSE: &str = "Lut1D: the inverse 1D LUT is not ported yet (WP 2.1).";
-
-/// Where the port refuses a `Lut1DTransform` at `combo` because the renderer upstream picks is
-/// still to come in Phase 2, with the stage and message; `None` where the renderer is a lookup
-/// or a float renderer, which the port has, and which must match the wheel.
-///
-/// Upstream (src/OpenColorIO @ v2.5.2):
-/// - an inverse LUT is set up when the processor finalizes it (`Lut1DOpData::finalize`, the
-///   inverse's domain); the port refuses there;
-/// - the optimizer leaves a single forward LUT alone: `FindSeparablePrefix` gives no prefix to
-///   bake for it (OpOptimizers.cpp:473-509), and a hue adjustment has crosstalk anyway;
-/// - `GetLut1DRenderer` (ops/lut1d/Lut1DOpCPU.cpp:1657-1754) picks the hue-adjust renderer, the
-///   lookup where `mayLookup(inBD)` (one entry per integer code, or a half domain for half
-///   codes), and otherwise the float renderer (F32 input) or one that interpolates the codes.
-///   The port has the lookups and the float renderers; the codes' interpolation is the
-///   "composing 1D LUTs" refusal (WP 2.1g).
-fn lut1d_deferral(
-    lut: &Lut1D,
-    dir: Direction,
-    combo: &Combo,
-) -> Option<(&'static str, &'static str)> {
-    if dir == Direction::Inverse {
-        return Some(("processor", NOT_PORTED_INVERSE));
-    }
-    if combo.input == Depth::F32 {
-        return None;
-    }
-    if lut.lookup_depth() == Some(combo.input) {
-        return None;
-    }
-    Some(("cpu_processor", NOT_PORTED_COMPOSE))
-}
-
-/// The deferrals of the `Lut1DTransform`'s plan, per message, in the quick tier and in the
-/// others: a digest of the plan the test generates, so that it can't change unnoticed.
-const LUT1D_DEFERRALS_QUICK: [(&str, usize); 2] =
-    [(NOT_PORTED_COMPOSE, 1523), (NOT_PORTED_INVERSE, 2205)];
-const LUT1D_DEFERRALS_FULL: [(&str, usize); 2] =
-    [(NOT_PORTED_COMPOSE, 6125), (NOT_PORTED_INVERSE, 8853)];
-
 /// One apply: a case in a direction, a combination, and its request.
 struct Job {
     case: usize,
     dir: Direction,
     combo: Combo,
     request: Request,
-    /// For the `Lut1DTransform`: its Phase 2 deferral at this combination, if any.
-    deferral: Option<(&'static str, &'static str)>,
 }
 
 /// The jobs of `class`: in the quick tier, each combination for [`QUICK_TURNS`] of the cases and
@@ -676,14 +630,12 @@ fn jobs(class: &Class, tier: Tier) -> Vec<Job> {
             .copied()
             .filter(|&(c, _)| luts[c].is_none_or(|lut| lut.runs(combo)))
             .collect();
-        let deferral =
-            |(c, dir): (usize, Direction)| luts[c].and_then(|lut| lut1d_deferral(&lut, dir, combo));
         let picked: Vec<(usize, Direction)> = if tier == Tier::Quick && !runs.is_empty() {
             let mut picked: Vec<(usize, Direction)> = (0..QUICK_TURNS.min(runs.len()))
                 .map(|t| runs[(k * QUICK_TURNS + t) % runs.len()])
                 .collect();
             for &turn in &runs {
-                if class.lut1d && deferral(turn).is_none() && !picked.contains(&turn) {
+                if class.lut1d && !picked.contains(&turn) {
                     picked.push(turn);
                 }
             }
@@ -723,7 +675,6 @@ fn jobs(class: &Class, tier: Tier) -> Vec<Job> {
                 dir,
                 combo: *combo,
                 request,
-                deferral: deferral((case, dir)),
             });
         }
     }
@@ -752,7 +703,7 @@ fn port(class: &Class, job: &Job, calls: &Calls) -> PortOutcome {
     let fail =
         |stage: &'static str| move |e: Exception| (stage.to_string(), e.message().to_string());
     let transform = port_transform(&calls.spec(job.dir)).map_err(fail("transform"))?;
-    let mut config = (*Config::create_raw()).clone();
+    let mut config = (*Config::create_raw().unwrap()).clone();
     if class.v1 {
         config.set_major_version(1).expect("version 1");
     }
@@ -852,27 +803,6 @@ fn w0001_skips(case: &battery::params::Case<Calls>, job: &Job) -> bool {
 fn check(class: &Class) {
     let tier = Tier::current();
     let jobs = jobs(class, tier);
-    if class.lut1d {
-        let mut planned: BTreeMap<&str, usize> = BTreeMap::new();
-        for job in &jobs {
-            if let Some((_, message)) = job.deferral {
-                *planned.entry(message).or_default() += 1;
-            }
-        }
-        let pinned = if tier == Tier::Quick {
-            LUT1D_DEFERRALS_QUICK
-        } else {
-            LUT1D_DEFERRALS_FULL
-        };
-        let pinned: BTreeMap<&str, usize> = pinned.into_iter().collect();
-        assert_eq!(
-            planned,
-            pinned,
-            "the {} tier's plan of {} applies has other deferrals than pinned",
-            tier.name(),
-            jobs.len()
-        );
-    }
     let (jobs, skipped): (Vec<Job>, Vec<Job>) = jobs
         .into_iter()
         .partition(|job| !w0001_skips(&class.cases.cases[job.case], job));
@@ -886,7 +816,6 @@ fn check(class: &Class) {
         })
         .count();
     let mut failures = Vec::new();
-    let mut deferred: BTreeMap<String, usize> = BTreeMap::new();
     let mut compared = 0;
     let mut refusals = 0;
     let mut waived = Waived::default();
@@ -912,21 +841,6 @@ fn check(class: &Class) {
                 failures.push(format!("{what}: OCIO logged {:?}", reply.log()));
             }
             let port = port(class, job, case.params());
-            if let Some((stage, message)) = job.deferral {
-                // The wheel renders it; the port refuses it, there, with that message.
-                match (reply.raised(), &port) {
-                    (None, Err((s, m))) if s == stage && m == message => {
-                        *deferred.entry(message.to_string()).or_default() += 1;
-                    }
-                    (raised, port) => failures.push(format!(
-                        "{what}: a Phase 2 deferral ({stage}: {message}) was expected\n  \
-                         wheel {:?}\n  port  {:?}",
-                        raised.map(|r| (r.stage, r.message)),
-                        port.as_ref().map(|_| ())
-                    )),
-                }
-                continue;
-            }
             match (reply.raised(), port) {
                 (Some(raised), Err((stage, message)))
                     if raised.stage == stage && raised.message == message =>
@@ -1027,19 +941,13 @@ fn check(class: &Class) {
         }
     }
     println!(
-        "{}: {} applies ({} tier): {compared} compared, {refusals} refusals compared, {} \
-         deferred to Phase 2{}\n  W0002: {} images with {} NaN values differing in sign or \
-         payload bits only; {} cache IDs of 1D LUTs baked with {} such NaN entries\n  W0001: \
-         {w0001_run} applies under it, {} images with values within it ({} values); {} applies \
-         not run (not F32 to F32)",
+        "{}: {} applies ({} tier): {compared} compared, {refusals} refusals compared\n  W0002: \
+         {} images with {} NaN values differing in sign or payload bits only; {} cache IDs of \
+         1D LUTs baked with {} such NaN entries\n  W0001: {w0001_run} applies under it, {} \
+         images with values within it ({} values); {} applies not run (not F32 to F32)",
         class.name,
         jobs.len(),
         tier.name(),
-        deferred.values().sum::<usize>(),
-        deferred
-            .iter()
-            .map(|(m, n)| format!("\n  {n}: {m}"))
-            .collect::<String>(),
         waived.images,
         waived.values,
         waived.cache_ids,

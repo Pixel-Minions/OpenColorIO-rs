@@ -346,6 +346,181 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in the YAML parser (`p3-yaml-parser`, `crates/ocio/src/yaml_cpp/stream.rs`),
   and checked against the wheel in `crates/ocio/tests/yaml_cpp_node_oracle.rs`.
 
+### I-130. Some setters keep a config's old cache ID
+
+- **Upstream:** a config caches its cache ID (`Config::getCacheID`, `Config.cpp:5250-5315`),
+  the hash of its `serialize()` text, and most setters reset it (`Impl::resetCacheIDs`). But
+  `setName`, `setDescription`, `setFamilySeparator` and `setMinorVersion`
+  (`Config.cpp:2115-2118, 2132-2145, 2154-2157, 1311-1324`) don't, though the text holds what
+  they set. Seen through the wheel: after each of them, `getCacheID()` returns the ID it
+  returned before, while `serialize()` changed (`ocio_profile_version: 2.3` after
+  `setMinorVersion(3)`); a later setter that resets the ID (`setStrictParsingEnabled`) gives a
+  new one. A config's validation result is kept the same way.
+- **Who notices:** applications that change a config's name, description, family separator or
+  minor version in code, and cache their results by the config's cache ID.
+- **A fix:** reset the cache IDs in these setters too.
+- **Status:** the setters are matched in `p3-config-1` (3.4d: they keep the cache IDs); the
+  cache ID itself comes with 3.7d, which checks it against the wheel.
+
+### I-131. `isInactiveColorSpace` reads its own list its own way
+
+- **Upstream:** `Config::isInactiveColorSpace` (`Config.cpp:2561-2575`) doesn't ask the list
+  the config uses (`getColorSpaceNames(..., COLORSPACE_INACTIVE)`, built from the API's, the
+  environment's or the config's list, split on `,` and trimmed, by name, alias or role,
+  `Config.cpp:5351-5407`). It splits the config's own list (`getInactiveColorSpaces`) on the
+  two characters `", "` and compares each piece with the name, ignoring case. So:
+  - `OCIO_INACTIVE_COLORSPACES` is ignored;
+  - `"a,b"` is one piece, so `a` is not inactive, though the config makes it so;
+  - aliases and roles don't count;
+  - an empty list splits into one empty piece, so `isInactiveColorSpace("")` is true on a
+    config without inactive color spaces.
+  Seen through the wheel, as in `crates/ocio/tests/config_oracle.rs`.
+- **Who notices:** applications that ask whether a color space is inactive by this function.
+- **A fix:** look the name up in the config's inactive color spaces.
+- **Status:** matched in `p3-config-1` (3.4g), checked against the wheel in
+  `crates/ocio/tests/config_oracle.rs`.
+
+### I-132. Removing a named transform keeps it in the lists of active ones
+
+- **Upstream:** `Config::removeNamedTransform` (`Config.cpp:3300-3317`) returns as soon as it
+  has erased the named transform, before it resets the cache IDs and rebuilds the lists of
+  active and inactive named transforms; it does both only when no named transform has the
+  name. So after a removal, `getNamedTransformNames()` (the active ones) and
+  `getNamedTransformNames(NAMEDTRANSFORM_INACTIVE)` still give the removed name, and the
+  config's cache ID and validation stay as they were. Seen in the source only: the wheel's
+  Python module doesn't bind `removeNamedTransform`, and upstream's tests don't call it. The
+  config merger calls it on its working copy of a config (`apphelpers/mergeconfigs/
+  SectionMerger.cpp:3288, 3415, 3563`), but builds the merged config with
+  `addNamedTransform`, which rebuilds the lists (`Config.cpp:3296-3297`), so a merged config
+  doesn't show the stale ones.
+- **Who notices:** C++ applications that remove named transforms and list them after.
+- **A fix:** reset and rebuild after the removal, as `removeColorSpace` does.
+- **Status:** matched in `p3-config-2` (3.4j, `Config::remove_named_transform`).
+
+### I-134. Copying a config reads the environment again
+
+- **Upstream:** `Config::createEditableCopy` (`Config.cpp:1352-1357`) makes a new config with
+  `Config::Create`, whose `Impl` constructor (`Config.cpp:335-374`) reads `OCIO_ACTIVE_DISPLAYS`,
+  `OCIO_ACTIVE_VIEWS` and `OCIO_INACTIVE_COLORSPACES` and splits the first two with
+  `SplitStringEnvStyle`, then overwrites all three with the copied config's. So the copy reads
+  the environment for nothing, and it throws (`SplitStringEnvStyle`'s error for a quote opened
+  and not closed before a separator) when the environment has changed since the config was
+  made and one of those lists is now malformed. The Python binding's `__deepcopy__`
+  (`PyConfig.cpp:193-196`) goes through it.
+- **Who notices:** a host that changes `OCIO_ACTIVE_DISPLAYS` or `OCIO_ACTIVE_VIEWS` to a
+  malformed list while it holds a config, then copies the config.
+- **A fix:** copy the state without constructing a new `Impl` from the environment.
+- **Status:** not matched, by Rust's `Clone`: `Clone for Config` can't fail, and copies without
+  reading the environment (`crates/ocio/src/config.rs`). A binding that must raise as the wheel
+  does can call `Config::new()` first and drop its result, as upstream's construction does.
+  Seen in the source; the oracle sets the environment once per process, before the config is
+  made, so it can't show the case.
+
+### I-135. A viewing rule's color space and encoding indices are cut to `int`
+
+- **Upstream:** `ViewingRules::getColorSpace` and `getEncoding` (`ViewingRules.cpp:240-253,
+  288-301`) check a `size_t` index after `static_cast<int>`, which both wheels compile as the
+  low 32 bits, signed. So an index of 2^32 + n is index n, and an index whose low 32 bits are
+  2^31 or more is negative: it passes the check, and `TokensManager::getToken` gives a null
+  pointer. `removeColorSpace` and `removeEncoding` go through them: through the wheel,
+  `removeColorSpace(0, 2**32)` removes the rule's first color space, and
+  `removeColorSpace(0, 2**31)` removes nothing, without an error.
+- **Who notices:** code and Python scripts that pass a wrong, large index.
+- **A fix:** check the `size_t` index against the count, as `getName` does.
+- **Status:** matched in `p3-rules` (3.9g, `crates/ocio/src/viewing_rules.rs`): the getters
+  return `Option` for the null pointer; checked against the wheel
+  (`crates/ocio/tests/viewing_rules_oracle.rs`, `large_indices_match_the_wheel`).
+
+### I-136. Views for a color space miss rules on an alias, a role or an encoding's case
+
+- **Upstream:** `Config::Impl::getFilteredViews` (`Config.cpp:838-901`), behind
+  `getViews(display, colorSpaceName)`, finds the image's color space by any of its names, but
+  compares the rules' color spaces (roles resolved) with the name it was given, in lower case:
+  given an alias or a role, it misses the rules that name the color space, and a rule that
+  names an alias matches only an image given by that alias. It compares each of a rule's
+  encodings, in lower case, with the color space's encoding as the color space writes it: a
+  color space whose encoding has an upper-case letter matches no rule.
+- **Who notices:** applications that ask for the views of an image by an alias or a role, and
+  configs whose color spaces write their encodings with capitals.
+- **A fix:** compare with the found color space's name, and both encodings in lower case.
+- **Status:** matched in `p3-rules` (3.9g, `Config::impl_filtered_views`); checked against the
+  wheel (`crates/ocio/tests/config_oracle.rs`, `views_by_viewing_rules_match_the_wheel`).
+
+### I-138. Upgrading a version 1 config gives the rule at index 1 the default color space
+
+- **Upstream:** `UpdateFileRulesFromV1ToV2` (`FileRules.cpp:960-1047`), which
+  `Config::upgradeToLatestVersion` calls for a version 1 config without a `default` role,
+  gives its choice of color space (a data `raw`, the first data color space, the first active
+  one, or the first one) to the rule at index 1 (`setColorSpace(1, ...)`), meant as the
+  default rule after the path search rule it inserts first. When the config already has
+  other rules, index 1 is one of them: through the wheel, rules `[ColorSpaceNamePathSearch,
+  g (color space b), Default]` upgrade to `g` with the chosen color space and `Default` left
+  as `default`; when it is the path search rule, the upgrade ends the program (U-55).
+- **Who notices:** version 1 configs made in code with file rules, then upgraded.
+- **A fix:** set the color space of the default rule (the last one).
+- **Status:** matched in `p3-rules` (3.9f); checked against the wheel
+  (`crates/ocio/tests/config_oracle.rs`, `upgrades_match_the_wheel`, "a rule at index 1").
+
+### I-139. A regular-expression rule given a pattern or an extension becomes a partial glob
+
+- **Upstream:** `FileRule::setPattern` and `setExtension` on a regular-expression rule
+  (`FileRules.cpp:360-413`) make it a glob with the other part empty, a glob that
+  `insertRule` and these setters can't make (they refuse an empty pattern or extension). An
+  empty extension builds `(\..*)`: the rule takes any extension but not a name without one
+  (`abc.x` and `abc.`, not `abc`), and its `repr()` shows no extension; an empty pattern
+  builds `(.*)`.
+- **Who notices:** code and Python scripts that turn regular-expression rules into globs one
+  part at a time.
+- **A fix:** refuse the change, or give the other part `*`.
+- **Status:** matched in `p3-rules` (3.9e-f); checked against the wheel
+  (`crates/ocio/tests/config_oracle.rs`, `regex_rules_made_globs_match_the_wheel`).
+
+### I-140. The transform loaders word their messages unevenly
+
+- **Upstream:** the loaders of a config's transforms (`OCIOYaml.cpp`) report the same things
+  in different words:
+  - an unknown key gives "At line N, unknown key 'key' in 'MatrixTransform'." in most
+    classes, but "Unknown key in LogTransform: 'key'.", without its line, in the Log,
+    ExponentWithLinear, FixedFunction and grading loaders (`OCIOYaml.cpp:1118, 1476, 1748,
+    2056, 2239, 2443, 2920`, which call the other overload of `LogUnknownKeyWarning`);
+  - a `base` that isn't one number gives "LogTransform parse error, base must be a  single
+    double. Found 2." with two spaces, and no line (`OCIOYaml.cpp:2900-2901`);
+  - a node that isn't a map gives "Unsupported Transform type encountered: (2) in OCIO
+    profile.", the number of yaml-cpp's `NodeType` (2 a scalar, 3 a sequence) rather than its
+    name (`OCIOYaml.cpp:3198-3205`).
+  Seen through the wheel.
+- **Who notices:** anyone reading the warnings and errors of a config with mistakes in it.
+- **A fix:** one wording with the line for every unknown key; one space; the node type's
+  name.
+- **Status:** matched in `p3-yaml-load-1` (3.3g: the Log, Matrix and Range loaders; 3.3h: the
+  ExponentWithLinear loader; 3.3i2: the FixedFunction loader; the grading loaders with Phase 5),
+  checked against the wheel in `crates/ocio/src/ocio_yaml_oracle_tests.rs`.
+
+### I-141. A transform an alias names is loaded again at each use
+
+- **Upstream:** a GroupTransform loads each child node it lists (`OCIOYaml.cpp:2520-2525`),
+  so a child given as an alias (`*m`) is loaded again for each use, and the config holds a
+  transform per use. Nested aliases multiply: n levels of groups whose children are two
+  aliases of the level below hold 2^n transforms, from a config of n lines.
+- **Who notices:** configs that repeat a transform through aliases (they load as written), and
+  machine-made configs that nest them, which take time and memory that grow exponentially.
+- **A fix:** share the transform an alias names, or bound the number of transforms a config
+  loads.
+- **Status:** matched in `p3-yaml-load-1` (3.3h2), checked against the wheel with aliases of a
+  matrix and of nested groups in `crates/ocio/src/ocio_yaml_oracle_tests.rs`.
+
+### I-142. Two transform loaders take a repeated key
+
+- **Upstream:** the loaders of the BuiltinTransform and the DisplayViewTransform don't call
+  `CheckDuplicates` (`OCIOYaml.cpp:600-629, 840-891`), so a key given twice is read twice and
+  the last value wins (`{view: a, view: b}` loads view `b`), where every other transform
+  refuses it ("Key-value pair with key 'view' specified more than once. "). Seen through the
+  wheel.
+- **Who notices:** configs that repeat a key of these two transforms by mistake.
+- **A fix:** check for repeated keys in both, as in the others.
+- **Status:** matched in `p3-yaml-load-1` (3.3i), checked against the wheel in
+  `crates/ocio/src/ocio_yaml_oracle_tests.rs`.
+
 ## Numeric helpers
 
 ### I-20. Double values are compared to 0 and 1 in float precision
@@ -710,6 +885,36 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p2-lut1d-simd`, every kernel and the scalar loop; checked against the
   wheel on rows of every length, and under SDE on each kernel's CPUs.
 
+### I-66. An inverse half-domain 1D LUT keeps a reversal at ±Inf in green and blue
+
+- **Upstream:** `Lut1DOpData::initializeFromForward` flattens the reversals of a half-domain
+  LUT's positive half up to index `31744u * maxChannels` and of its negative half up to
+  `64512u * maxChannels` (`ops/lut1d/Lut1DOpData.cpp:994`, `1013`), without the channel's
+  offset `+ c` that its start indices have. For red the last entry flattened is +Inf's (and
+  -Inf's); for green and blue the loop stops one entry before them, so a reversal at the +Inf
+  or -Inf code stays in those channels.
+- **Who notices:** inverse half-domain LUTs whose green or blue values at +Inf or -Inf go the
+  wrong way: the processor's cache ID hashes the unflattened value. The inverse renderer's
+  effective domain ends at 65504 and -65504 (`31743`, `64511`), so the pixels don't see it.
+- **A fix:** end the loops at `31744u * maxChannels + c` and `64512u * maxChannels + c`. That
+  changes the LUT's values and its cache ID for such LUTs.
+- **Status:** matched in `p2-lut1d-inv` (2.1e); `tests/lut1d_op_oracle.rs` compares the cache
+  IDs of inverse half-domain LUTs with such reversals with the wheel's.
+
+### I-67. An inverse half-domain 1D LUT inverts blue's negative half with red's sign
+
+- **Upstream:** `InvLut1DRendererHalfCode::apply` and `InvLut1DRendererHalfCodeHueAdjust::apply`
+  invert a value on the negative half of a half-domain LUT with `-flipSign`, the channel's
+  sign flipped; for blue they pass `-this->m_paramsR.flipSign`, red's
+  (`ops/lut1d/Lut1DOpCPU.cpp:1519`, `1606`). Where blue rises and red falls, or the reverse,
+  blue's values on its negative half are clamped and searched with the wrong sign.
+- **Who notices:** inverse half-domain LUTs whose blue channel goes the other way from red,
+  for blue values on the negative half (at or above the value at +0 for a falling blue,
+  below it for a rising one).
+- **A fix:** pass `-this->m_paramsB.flipSign`.
+- **Status:** matched in `p2-lut1d-inv` (2.1f); `tests/lut1d_renderer_oracle.rs` compares
+  the inverse half domain's "crossed" curves (blue falls, red rises) with the wheel's.
+
 ### I-68. Two half-domain 1D LUTs are never equal
 
 - **Upstream:** `Lut1DTransform::setLength` fills a half-domain LUT with each half code's
@@ -727,6 +932,23 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p1-optimizer` (chunk A); `lut1d_op_data_oracle.rs` checks equality
   against the wheel, and `crates/ocio/tests/lut1d_transform_oracle.rs` checks it on the
   `Lut1DTransform`s (each half-domain case against a copy of itself, `p1-transforms-fam4`).
+
+### I-69. An inverse half-domain 1D LUT splits integer input at an unscaled point
+
+- **Upstream:** `InvLut1DRendererHalfCode::updateData` takes each channel's value at +0 as
+  the point that splits the domain's positive and negative halves (`bisectPoint`,
+  `ops/lut1d/Lut1DOpCPU.cpp:1393-1404`), as it is in the LUT, but scales the tables it
+  searches by the input bit depth's maximum (`lutScale`, 1406-1437), and `apply` compares
+  the input value, in the input bit depth's units, with the unscaled point (1460-1532). For
+  float and half input the maximum is 1; for integer input the point is `maxValue` times too
+  small, so the codes between it and the scaled point take the other half.
+- **Who notices:** inverse half-domain LUTs rendered from 8-, 10-, 12- or 16-bit images
+  (the CPU engine renders a processor's first 1D LUT from the input bit depth) whose value at
+  +0 is not 0.
+- **A fix:** scale `bisectPoint` by `lutScale`.
+- **Status:** matched in `p2-lut1d-inv` (2.1f); the API format sweep
+  (`crates/ocio/tests/api_formats_oracle.rs`) renders inverse half-domain LUTs from every
+  bit depth and compares them with the wheel's.
 
 ### I-70. A camera log's break differs between Windows and Linux
 
@@ -827,6 +1049,49 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   (`crates/ocio-gpu/tests/grading_rgb_curve_op_gpu_oracle.rs`) checks it on both platforms.
   `AdjustRGBSlopes` differs too (MSVC's unrolled loop multiplies `slopes[i + 1] * adjust` or
   `adjust * slopes[i + 1]` by the knot's index), but no two different NaNs meet there.
+
+### I-150. A hue-adjust 1D LUT resampled on a domain renders green with red's curve
+
+- **Upstream:** `Lut1DOpData::Compose` evaluates the second LUT, hue adjust included, on the
+  entries of a lookup domain, whose three channels are equal (`ComposeVec`, `EvalTransform`;
+  `ops/lut1d/Lut1DOpData.cpp:683-830`), and gives the result that LUT's hue adjust
+  (`setHueAdjust(lut2->getHueAdjust())`). On equal channels `GamutMapUtils::Order3` names red
+  the minimum and green the middle, and the hue factor is 0, so the hue adjust sets each
+  entry's green to its red (`ops/lut1d/Lut1DOpCPU.cpp:723-745`, `771-788`): the new LUT's
+  green column is red's curve. That happens where the CPU renderers resample a hue-adjust LUT
+  for a lookup (`BaseLut1DRenderer::updateData`, 388-406) and where the optimizer replaces an
+  inverse hue-adjust LUT with its fast forward LUT (`MakeFastLut1DFromInverse`, 841-867). The
+  hue adjust after the lookup recomputes the middle channel of each pixel, so green is wrong
+  where it is a pixel's minimum or maximum. Through the wheel, the fast LUT of an inverse
+  hue-adjust LUT of three different curves has green equal to red in all of its 4096 entries.
+- **Who notices:** hue-adjust (`HUE_DW3`) LUTs whose green curve differs from red's, applied
+  to 8-, 10-, 12- or 16-bit or half images whose bit depth the LUT has no entry per code for,
+  or inverted with the default optimization (`OPTIMIZATION_LUT_INV_FAST`).
+- **A fix:** compose without the hue adjust and set it on the result afterwards, as a
+  comment in `Compose` suggests (overriding the hue adjust temporarily).
+- **Status:** matched in `p2-lut1d-inv` (2.1g); the API format sweep
+  (`crates/ocio/tests/api_formats_oracle.rs`, "256 entries, hue adjust" from 10-, 12- and
+  16-bit input) and the battery's inverse hue-adjust cases (`tests/lut1d_renderer_oracle.rs`)
+  compare them with the wheel.
+
+### I-151. A hue-adjust 1D LUT misses its nodes' values from float input
+
+- **Upstream:** the hue-adjust renderer of a standard-domain LUT from float input
+  (`Lut1DRendererHueAdjust::apply`, its `OCIO_USE_SSE2` branch, `ops/lut1d/Lut1DOpCPU.cpp:909-941`,
+  which every x86-64 wheel compiles) truncates the index, takes the next index up as the high
+  one, and interpolates down from the high node with `delta = highIdx - idx`:
+  `lerpf(lut[high], lut[low], delta)`. An input that lands exactly on a node gets
+  `high + 1 * (low - high)`, not the node's value: through the wheel, a pixel of 0 gets
+  0.10000002 from the LUT `[0.1, 0.7, 0.3]`; the LUT `[-FLT_MAX, FLT_MAX]` gives -Inf for 0
+  (`FLT_MAX + (-FLT_MAX - FLT_MAX)`) and a NaN green for a grey pixel. The other renderers
+  interpolate up from the low node.
+- **Who notices:** hue-adjust (`HUE_DW3`) LUTs of a standard domain applied to float images:
+  values on the nodes are off by a rounding error, and LUTs with values near `FLT_MAX` give
+  infinities and NaNs.
+- **A fix:** interpolate up from the low node, as the forward renderer without hue adjust
+  does (`lerpf(lut[low], lut[high], idx - lowIdx)`).
+- **Status:** matched in `p2-lut1d-fwd` (2.1b); `tests/lut1d_renderer_oracle.rs`
+  (`hue_adjust_on_nodes_matches_the_wheel`) compares those LUTs' nodes with the wheel's.
 
 ## Transforms
 
@@ -1483,6 +1748,32 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   parser and its NFA state limit (3.9c) and matcher (3.9d, with the lookahead and brace-copy
   rules of the fix chunk after its verifier).
 
+### I-133. A glob rule's expression is "sanitized" differently on Windows and Linux
+
+- **Upstream:** a glob rule's pattern and extension become a regular expression, which
+  `SanitizeRegularExpression` (`FileRules.cpp:30-49`) rewrites with two `regex_replace`
+  calls, to turn `*?`, `?*` and `**` into one `.*`. The first expression,
+  `(\.\*\.^\*)+|(^\\\.\.\*)+`, doesn't do what its comments say: its first alternative
+  requires a `^` in the middle of the text, and its second matches a literal `\..*` at the
+  start of the text, which the built expression never has (it starts with `^(`). So it never
+  changes an expression in the Linux wheel. In the Windows wheel, MSVC's `^` also matches
+  after a line feed (I-122), so a glob holding a line feed then `.*` (the pattern `\n.*`,
+  converted to `\n\..*`) has its `\..*` replaced by `.*`, which changes what the rule matches
+  (`\nfoo.exr` matches the pattern `\n.*` and extension `exr` on Windows, not on Linux). The
+  second expression, `(\.\*)+`, merges runs of `.*` on both; after a backslash, which escapes
+  the first `.`, that changes what the glob matches: the pattern `\**` builds `\.*.*` (dots,
+  then anything), merged into `\.*` (dots only), so with the extension `exr` the rule takes
+  `...exr` but not `abc.exr`, in both wheels.
+- **Who notices:** glob rules with a line feed in their pattern, shared between Windows and
+  Linux.
+- **A fix:** drop the first expression, or anchor nothing in it.
+- **Decided** (D12): the port does what each wheel does.
+- **Status:** matched in `p3-rules` (3.9e, `std_regex::regex_replace` and
+  `crates/ocio/src/file_rules.rs`); the messages of globs whose sanitized expression doesn't
+  compile show it, checked against both wheels in `crates/ocio/tests/file_rules_oracle.rs`;
+  the paths such globs send to each rule in `crates/ocio/tests/config_oracle.rs`
+  (`sanitized_globs_on_a_config_match_the_wheel`).
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
@@ -2014,3 +2305,68 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   match limits in the fix chunk after 3.9d's verifier (`std_regex/libstdcxx_match.rs`). Tests:
   the exact bound, the wheel surviving (in a process of its own) where the port starts
   refusing, and typical file rules on 4,096-byte paths never refused.
+
+### U-55. Upgrading a version 1 config without a scene color space for the default rule
+
+- **Upstream:** `Config::upgradeToLatestVersion` is `noexcept` (`Config.cpp:1332-1350`). For a
+  version 1 config, it calls `UpdateFileRulesFromV1ToV2` (`FileRules.cpp:960-1047`), which,
+  when the config has no `default` role, no data `raw` color space, no data scene color space
+  and no active color space, gives the default rule the first scene color space: `""` when
+  there is none (no color space, or only display ones). `FileRules::setColorSpace` throws for
+  an empty name, and the exception leaving a `noexcept` function ends the program
+  (`std::terminate`). The same happens when the rule at index 1, which gets that color space
+  (I-138), is the path search rule (rules `[g, ColorSpaceNamePathSearch, Default]` on a
+  version 1 config without a `default` role): `setColorSpace` throws "File rules:
+  ColorSpaceNamePathSearch rule does not accept any color space."; through the Windows wheel
+  the process exits with 127. Seen in the source and in that probe; the oracle can't run a
+  case whose process ends.
+- **Who notices:** applications that upgrade a version 1 config made in code before giving it
+  color spaces.
+- **Decided** (the owner's general rule, `docs/deviations.md`): the port returns that error
+  from `Config::upgrade_to_latest_version`, and leaves the config as it was.
+- **Status:** matched in `p3-rules` (3.9f; both triggers tested in
+  `crates/ocio/src/config_tests.rs`); the other paths of the upgrade are checked against the
+  wheel in `crates/ocio/tests/config_oracle.rs`.
+
+### U-56. Null rules, and a null rule name for empty viewing rules
+
+- **Upstream:** `Config::setFileRules(nullptr)` and `setViewingRules(nullptr)` call
+  `createEditableCopy` on the null pointer (`Config.cpp:4648-4654, 3337-3343`), and
+  `ViewingRules::getIndexForRule(nullptr)` on rules without a rule writes the null pointer to a
+  stream for its message (`ViewingRules.cpp:212-226`). Through the Windows wheel,
+  `config.setFileRules(None)`, `config.setViewingRules(None)` and
+  `OCIO.ViewingRules().getIndexForRule(None)` end the Python process with an access violation.
+  With a rule, `getIndexForRule(None)` raises `Platform::Strcasecmp`'s "String pointer for
+  comparison must not be null." (`Platform.cpp:155-160`), as `FileRules.getIndexForRule(None)`
+  always does (its rules have the default rule).
+- **Who notices:** code and Python scripts that pass a missing rules object or rule name.
+- **Decided** (general rule): the Rust methods take `&FileRules`, `&ViewingRules` and byte
+  strings, which can't be null; the Python module (Phase 6) refuses `None` with an error
+  instead of crashing, and with Strcasecmp's message where the wheel raises it.
+- **Status:** matched in `p3-rules` (3.9g); the Python part is Phase 6's.
+
+### U-60. GroupTransforms nested deep enough to overflow the wheel's stack
+
+- **Upstream:** a GroupTransform loads each child through `load(const YAML::Node&,
+  TransformRcPtr&)`, which loads a child group the same way: the loader recurses once per
+  nested group (`OCIOYaml.cpp:2520-2525, 3196-3351`). YAML aliases let a short config nest
+  groups to any depth (each anchor a group of the one before), and a group that holds itself
+  through an alias (`&t !<GroupTransform> {children: [*t]}`) nests forever. The wheel's stack
+  then overflows (the process ends): at 1,182 levels in Python's main thread on Windows and
+  5,129 on Linux (an anchor chain, measured 2026-10-06), and on a group that holds itself on
+  both. The depth varies with the caller's stack. Without aliases, yaml-cpp refuses the flow
+  text of more than 247 nested groups first.
+- **Who notices:** machine-made configs; real configs nest groups a few levels deep.
+- **Decided** (owner's precedent for the regular expressions, U-54: refuse at about half the
+  lowest measured crash; coordinator, 2026-10-06): the port refuses a group that 590 groups
+  hold, with "At line N, 'GroupTransform' parsing failed: GroupTransforms nested more than
+  590 deep can't be loaded: upstream's stack overflows.", which a group that holds itself
+  reaches too. The port loads and copies nested groups without recursion; printing,
+  validating and dropping a group recurse in small frames, and at opt-level 0 they fit 2,360
+  levels (four times the limit) on a 1 MiB thread. Between 591 levels and the wheel's crash the
+  port refuses what the wheel loads.
+- **Status:** matched in `p3-yaml-load-1` (3.3h2, raised from 100 to 590 in a later chunk;
+  `crates/ocio/src/ocio_yaml.rs`, the copy in `crates/ocio/src/transforms/group_transform.rs`).
+  Tests: 590 levels load as in the wheel, the wheel loads 591 where the port refuses them, groups
+  that hold themselves are refused, and loading, copying, printing, validating, building a CPU
+  processor and dropping 590 levels fit a 1 MiB thread (also at opt-level 0).

@@ -77,6 +77,56 @@ pub enum ReferenceSpaceType {
     Display,
 }
 
+/// Which reference space a search of color spaces keeps: the scene's, the display's, or both.
+///
+/// Port of `SearchReferenceSpaceType` (include/OpenColorIO/OpenColorTypes.h:316-321 @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SearchReferenceSpaceType {
+    /// `SEARCH_REFERENCE_SPACE_SCENE`.
+    Scene = 0,
+    /// `SEARCH_REFERENCE_SPACE_DISPLAY`.
+    Display,
+    /// `SEARCH_REFERENCE_SPACE_ALL`.
+    All,
+}
+
+/// Which color spaces a search keeps: the active ones, the inactive ones, or all.
+///
+/// Port of `ColorSpaceVisibility` (include/OpenColorIO/OpenColorTypes.h:323-328 @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ColorSpaceVisibility {
+    /// `COLORSPACE_ACTIVE`.
+    Active = 0,
+    /// `COLORSPACE_INACTIVE`.
+    Inactive,
+    /// `COLORSPACE_ALL`.
+    All,
+}
+
+/// Which named transforms a search keeps: the active ones, the inactive ones, or all.
+///
+/// Port of `NamedTransformVisibility` (include/OpenColorIO/OpenColorTypes.h:330-335 @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum NamedTransformVisibility {
+    /// `NAMEDTRANSFORM_ACTIVE`.
+    Active = 0,
+    /// `NAMEDTRANSFORM_INACTIVE`.
+    Inactive,
+    /// `NAMEDTRANSFORM_ALL`.
+    All,
+}
+
+/// Which views of a display: the shared views it uses, or its own.
+///
+/// Port of `ViewType` (include/OpenColorIO/OpenColorTypes.h:337-341 @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ViewType {
+    /// `VIEW_SHARED`.
+    Shared = 0,
+    /// `VIEW_DISPLAY_DEFINED`.
+    DisplayDefined,
+}
+
 /// Which of a color space's transforms: to its reference space, or from it.
 ///
 /// Port of `ColorSpaceDirection` (include/OpenColorIO/OpenColorTypes.h:343-347 @ v2.5.2).
@@ -327,6 +377,45 @@ pub fn fixed_function_style_to_string(style: FixedFunctionStyle) -> Result<&'sta
         RgbToHsyVid => "RGB_TO_HSY_VID",
         AcesGamutMap02 | AcesGamutMap07 => {
             return Err(Exception::new(UNIMPLEMENTED_GAMUTMAP));
+        }
+    })
+}
+
+/// The style named `style`, in any ASCII case (the names [`fixed_function_style_to_string`]
+/// gives, but the two unimplemented styles'), or "Unknown Fixed FunctionOp style: 'style'.".
+/// `None` is upstream's null pointer, read as "".
+///
+/// Port of `FixedFunctionStyleFromString` (src/OpenColorIO/ParseUtils.cpp:390-421 @ v2.5.2).
+pub fn fixed_function_style_from_string(style: Option<&[u8]>) -> Result<FixedFunctionStyle> {
+    use FixedFunctionStyle::*;
+    let p = style.map_or(&[][..], crate::utils::string_utils::c_str);
+    Ok(match lower_c_str(Some(p)).as_slice() {
+        b"aces_redmod03" => AcesRedMod03,
+        b"aces_redmod10" => AcesRedMod10,
+        b"aces_glow03" => AcesGlow03,
+        b"aces_glow10" => AcesGlow10,
+        b"aces_darktodim10" => AcesDarkToDim10,
+        b"aces_gamutcomp13" => AcesGamutComp13,
+        b"aces2_outputtransform" => AcesOutputTransform20,
+        b"aces2_rgb_to_jmh" => AcesRgbToJmh20,
+        b"aces2_tonescalecompress" => AcesTonescaleCompress20,
+        b"aces2_gamutcompress" => AcesGamutCompress20,
+        b"rec2100_surround" => Rec2100Surround,
+        b"rgb_to_hsv" => RgbToHsv,
+        b"xyz_to_xyy" => XyzToXyy,
+        b"xyz_to_uvy" => XyzToUvy,
+        b"xyz_to_luv" => XyzToLuv,
+        b"lin_to_pq" => LinToPq,
+        b"lin_to_gammalog" => LinToGammaLog,
+        b"lin_to_doublelog" => LinToDoubleLog,
+        b"rgb_to_hsy_lin" => RgbToHsyLin,
+        b"rgb_to_hsy_log" => RgbToHsyLog,
+        b"rgb_to_hsy_vid" => RgbToHsyVid,
+        // Default style is meaningless.
+        _ => {
+            return Err(Exception::new(
+                [b"Unknown Fixed FunctionOp style: '".as_slice(), p, b"'."].concat(),
+            ));
         }
     })
 }

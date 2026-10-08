@@ -29,6 +29,36 @@ fn msg(parts: &[&[u8]]) -> Vec<u8> {
     parts.concat()
 }
 
+// The roles' names, declared in OpenColorTypes.h.
+//
+// Port of the `ROLE_*` constants (src/OpenColorIO/ParseUtils.cpp:530-542 @ v2.5.2;
+// include/OpenColorIO/OpenColorTypes.h:870-913).
+
+/// `ROLE_DEFAULT`.
+pub const ROLE_DEFAULT: &str = "default";
+/// `ROLE_REFERENCE`.
+pub const ROLE_REFERENCE: &str = "reference";
+/// `ROLE_DATA`.
+pub const ROLE_DATA: &str = "data";
+/// `ROLE_COLOR_PICKING`.
+pub const ROLE_COLOR_PICKING: &str = "color_picking";
+/// `ROLE_SCENE_LINEAR`.
+pub const ROLE_SCENE_LINEAR: &str = "scene_linear";
+/// `ROLE_COMPOSITING_LOG`.
+pub const ROLE_COMPOSITING_LOG: &str = "compositing_log";
+/// `ROLE_COLOR_TIMING`.
+pub const ROLE_COLOR_TIMING: &str = "color_timing";
+/// `ROLE_TEXTURE_PAINT`: the transform for painting textures.
+pub const ROLE_TEXTURE_PAINT: &str = "texture_paint";
+/// `ROLE_MATTE_PAINT`: the transform for matte painting.
+pub const ROLE_MATTE_PAINT: &str = "matte_paint";
+/// `ROLE_RENDERING`: the color space CGI renderers use.
+pub const ROLE_RENDERING: &str = "rendering";
+/// `ROLE_INTERCHANGE_SCENE`: the config's ACES2065-1 color space.
+pub const ROLE_INTERCHANGE_SCENE: &str = "aces_interchange";
+/// `ROLE_INTERCHANGE_DISPLAY`: the config's CIE XYZ D65 color space.
+pub const ROLE_INTERCHANGE_DISPLAY: &str = "cie_xyz_d65_interchange";
+
 /// `"true"` or `"false"`.
 ///
 /// Port of `BoolToString` (src/OpenColorIO/ParseUtils.cpp:101-104 @ v2.5.2).

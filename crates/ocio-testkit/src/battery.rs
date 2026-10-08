@@ -175,7 +175,8 @@
 //!   (O1.2). Then [`Port`] gets a variant that applies typed buffers, and the engine compares
 //!   the output in its bit depth.
 //! - **Optimization levels.** A [`Combo`] holds `fast_math`; other levels become another field
-//!   and another dimension in the engine.
+//!   and another dimension in the engine. A family can turn other flags off in every
+//!   combination ([`Family::optimization_off`]).
 //! - **Logs.** The oracle's `cpu_apply` also returns OCIO's log messages; the port's logging
 //!   (WP 1.2e) can be compared there.
 
@@ -410,6 +411,24 @@ impl Spec {
     /// with fast math off, and the bit depths and channel count of other formats. A
     /// [`Spec::TransformWithBlobs`]'s blobs go after the pixels ([`Spec::blobs`]).
     pub fn cpu_apply_args(&self, combo: &Combo) -> Value {
+        self.cpu_apply_args_without(combo, &[])
+    }
+
+    /// [`Spec::cpu_apply_args`] with the default flags in `off` (names of `OPTIMIZATION_*`
+    /// flags, [`Family::optimization_off`]) turned off too.
+    ///
+    /// # Panics
+    ///
+    /// If `off` names a flag that isn't one of the default's but fast math, which
+    /// [`Combo::fast_math`] turns off.
+    pub fn cpu_apply_args_without(&self, combo: &Combo, off: &[&str]) -> Value {
+        for flag in off {
+            assert!(
+                DEFAULT_WITHOUT_FAST_MATH.contains(flag),
+                "{flag} is not one of the default optimization's flags that a family may turn \
+                 off: {DEFAULT_WITHOUT_FAST_MATH:?}"
+            );
+        }
         let mut args = match self {
             Spec::Transform(transform) | Spec::TransformWithBlobs(transform, _) => {
                 if let Some(path) = null_path(transform, "") {
@@ -435,8 +454,15 @@ impl Spec {
                 "dst": "cs",
             }),
         };
-        if !combo.fast_math {
-            args["optimization"] = json!(DEFAULT_WITHOUT_FAST_MATH);
+        if !combo.fast_math || !off.is_empty() {
+            let mut flags: Vec<&str> = DEFAULT_WITHOUT_FAST_MATH
+                .into_iter()
+                .filter(|flag| !off.contains(flag))
+                .collect();
+            if combo.fast_math {
+                flags.push("OPTIMIZATION_FAST_LOG_EXP_POW");
+            }
+            args["optimization"] = json!(flags);
         }
         if combo.format != Format::F32_RGBA {
             args["in_bitdepth"] = json!(combo.format.input.oracle_name());
@@ -632,6 +658,15 @@ pub trait Family {
     /// remainder (each buffer is one row, one renderer call). None by default.
     fn extra_probes(&self, params: &Self::Params, direction: Direction) -> Vec<ProbeSet> {
         let _ = (params, direction);
+        Vec::new()
+    }
+
+    /// Flags of the default optimization (`OPTIMIZATION_*` names) that the family turns off in
+    /// every combination, beside fast math, which [`Combo::fast_math`] turns on and off: an
+    /// inverse 1D LUT's own renderers need `OPTIMIZATION_LUT_INV_FAST` off, which otherwise
+    /// replaces the LUT with a forward one. The family's [`Family::port`] renders what the
+    /// wheel's processor does with those flags off. None by default.
+    fn optimization_off(&self) -> Vec<&'static str> {
         Vec::new()
     }
 
@@ -889,5 +924,67 @@ mod tests {
             Direction::Forward.oracle_enum(),
             json!({"enum": "TRANSFORM_DIR_FORWARD"})
         );
+    }
+
+    #[test]
+    fn families_turn_default_flags_off() {
+        let spec = Spec::Transform(json!({"class": "ExponentTransform"}));
+        let on = Combo {
+            direction: Direction::Forward,
+            fast_math: true,
+            format: Format::F32_RGBA,
+        };
+        let off = Combo {
+            fast_math: false,
+            ..on
+        };
+        // The default CPU processor, and the default flags without fast math.
+        assert_eq!(
+            spec.cpu_apply_args_without(&on, &[]).get("optimization"),
+            None
+        );
+        assert_eq!(
+            spec.cpu_apply_args_without(&off, &[])["optimization"],
+            json!([
+                "OPTIMIZATION_LOSSLESS",
+                "OPTIMIZATION_COMP_LUT1D",
+                "OPTIMIZATION_LUT_INV_FAST",
+                "OPTIMIZATION_COMP_SEPARABLE_PREFIX",
+            ])
+        );
+        assert_eq!(
+            spec.cpu_apply_args(&off),
+            spec.cpu_apply_args_without(&off, &[])
+        );
+        // A flag off, with fast math on and off.
+        assert_eq!(
+            spec.cpu_apply_args_without(&on, &["OPTIMIZATION_LUT_INV_FAST"])["optimization"],
+            json!([
+                "OPTIMIZATION_LOSSLESS",
+                "OPTIMIZATION_COMP_LUT1D",
+                "OPTIMIZATION_COMP_SEPARABLE_PREFIX",
+                "OPTIMIZATION_FAST_LOG_EXP_POW",
+            ])
+        );
+        assert_eq!(
+            spec.cpu_apply_args_without(&off, &["OPTIMIZATION_LUT_INV_FAST"])["optimization"],
+            json!([
+                "OPTIMIZATION_LOSSLESS",
+                "OPTIMIZATION_COMP_LUT1D",
+                "OPTIMIZATION_COMP_SEPARABLE_PREFIX",
+            ])
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "OPTIMIZATION_FAST_LOG_EXP_POW is not one of the default")]
+    fn fast_math_is_the_combos_to_turn_off() {
+        let spec = Spec::Transform(json!({"class": "ExponentTransform"}));
+        let combo = Combo {
+            direction: Direction::Forward,
+            fast_math: true,
+            format: Format::F32_RGBA,
+        };
+        spec.cpu_apply_args_without(&combo, &["OPTIMIZATION_FAST_LOG_EXP_POW"]);
     }
 }

@@ -28,7 +28,7 @@ use crate::transform::{Transform, build_ops, validate_direction};
 /// Port of `GroupTransform` and `GroupTransformImpl` (include/OpenColorIO/
 /// OpenColorTransforms.h:1530-1589, src/OpenColorIO/transforms/GroupTransform.h,
 /// GroupTransform.cpp:17-112 @ v2.5.2).
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct GroupTransform {
     /// `m_metadata`.
     metadata: FormatMetadataImpl,
@@ -36,6 +36,36 @@ pub struct GroupTransform {
     dir: TransformDirection,
     /// `m_vec`.
     transforms: Vec<Transform>,
+}
+
+/// A copy of the group and of its children, nested groups included. It walks the nested groups
+/// with a stack of its own: a group nested hundreds deep (a config's, U-60) copies without
+/// overflowing the caller's stack, where a derived `clone` takes about 4 KiB of stack per
+/// level at opt-level 0.
+impl Clone for GroupTransform {
+    fn clone(&self) -> Self {
+        // Each level: the group being copied, its copy so far, and its next child.
+        let mut stack = vec![(self, self.empty_copy(), 0)];
+        loop {
+            let (source, copy, next) = stack.last_mut().expect("a group");
+            if let Some(child) = source.transforms.get(*next) {
+                *next += 1;
+                match child {
+                    Transform::Group(group) => {
+                        let level = (group, group.empty_copy(), 0);
+                        stack.push(level);
+                    }
+                    other => copy.transforms.push(other.clone()),
+                }
+                continue;
+            }
+            let (_, done, _) = stack.pop().expect("a group");
+            match stack.last_mut() {
+                Some((_, parent, _)) => parent.transforms.push(Transform::Group(done)),
+                None => return done,
+            }
+        }
+    }
 }
 
 impl Default for GroupTransform {
@@ -55,6 +85,15 @@ impl GroupTransform {
             metadata: FormatMetadataImpl::default(),
             dir: TransformDirection::Forward,
             transforms: Vec::new(),
+        }
+    }
+
+    /// A copy of the group's metadata and direction, without its children.
+    fn empty_copy(&self) -> GroupTransform {
+        GroupTransform {
+            metadata: self.metadata.clone(),
+            dir: self.dir,
+            transforms: Vec::with_capacity(self.transforms.len()),
         }
     }
 

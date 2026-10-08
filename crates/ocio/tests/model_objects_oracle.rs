@@ -10,9 +10,10 @@
 //! The binding's `setAllocationVars` takes 2 or 3 variables, so the cases set 2 or 3.
 
 use ocio::{
-    Allocation, BitDepth, ColorSpace, ColorSpaceDirection, ColorSpaceSet, LogTransform, Look,
-    MatrixTransform, NamedTransform, RangeTransform, ReferenceSpaceType, Transform,
-    TransformDirection, ViewTransform, ViewTransformDirection,
+    Allocation, BitDepth, ColorSpace, ColorSpaceDirection, ColorSpaceSet, FixedFunctionStyle,
+    FixedFunctionTransform, GroupTransform, LogTransform, Look, MatrixTransform, NamedTransform,
+    RangeTransform, ReferenceSpaceType, Transform, TransformDirection, ViewTransform,
+    ViewTransformDirection,
 };
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle_values::{bytes, exception, log};
@@ -417,8 +418,9 @@ fn color_space_cases() -> Vec<Case<ColorSpace>> {
             ops.push(op(
                 json!({"call": "setTransform", "args": [{"transform": spec}, enum_spec(dir.1)]}),
                 move |c: &mut ColorSpace| {
-                    c.set_transform(Some(&port), dir.0);
-                    None
+                    c.set_transform(Some(&port), dir.0)
+                        .err()
+                        .map(|e| e.what().to_vec())
                 },
             ));
         }
@@ -567,10 +569,7 @@ fn look_cases() -> Vec<Case<Look>> {
                 let (spec, port) = transforms[k % 3].clone();
                 ops.push(op(
                     json!({"call": "setTransform", "args": [{"transform": spec}]}),
-                    move |l: &mut Look| {
-                        l.set_transform(&port);
-                        None
-                    },
+                    move |l: &mut Look| l.set_transform(&port).err().map(|e| e.what().to_vec()),
                 ));
             }
             if k % 2 == 1 {
@@ -578,8 +577,9 @@ fn look_cases() -> Vec<Case<Look>> {
                 ops.push(op(
                     json!({"call": "setInverseTransform", "args": [{"transform": spec}]}),
                     move |l: &mut Look| {
-                        l.set_inverse_transform(&port);
-                        None
+                        l.set_inverse_transform(&port)
+                            .err()
+                            .map(|e| e.what().to_vec())
                     },
                 ));
             }
@@ -697,8 +697,9 @@ fn view_transform_cases() -> Vec<Case<ViewTransform>> {
                 ops.push(op(
                     json!({"call": "setTransform", "args": [{"transform": spec}, enum_spec(dir.1)]}),
                     move |v: &mut ViewTransform| {
-                        v.set_transform(Some(&port), dir.0);
-                        None
+                        v.set_transform(Some(&port), dir.0)
+                            .err()
+                            .map(|e| e.what().to_vec())
                     },
                 ));
             }
@@ -822,8 +823,9 @@ fn named_transform_cases() -> Vec<Case<NamedTransform>> {
                 ops.push(op(
                     json!({"call": "setTransform", "args": [{"transform": spec}, enum_spec(dir.1)]}),
                     move |t: &mut NamedTransform| {
-                        t.set_transform(Some(&port), dir.0);
-                        None
+                        t.set_transform(Some(&port), dir.0)
+                            .err()
+                            .map(|e| e.what().to_vec())
                     },
                 ));
             }
@@ -1035,10 +1037,152 @@ fn a_named_transform_set_to_null_has_no_transform() {
     let mut nt = NamedTransform::new();
     nt.set_name("NewName");
     let matrix: Transform = MatrixTransform::new().into();
-    nt.set_transform(Some(&matrix), TransformDirection::Forward);
-    nt.set_transform(None, TransformDirection::Forward);
+    nt.set_transform(Some(&matrix), TransformDirection::Forward)
+        .unwrap();
+    nt.set_transform(None, TransformDirection::Forward).unwrap();
     assert!(results[3].get("result").is_some(), "{}", results[3]);
     assert_eq!(results[4]["result"], Value::Null);
     assert!(nt.transform(TransformDirection::Forward).is_none());
     assert_eq!(bytes(&results[5]["result"]), nt.to_bytes());
+}
+
+/// Fixed functions given to the objects: a valid one, then two that upstream's
+/// `createEditableCopy` refuses (styles given the wrong number of parameters after they were
+/// made), which leave the object's transform as it was; then a group holding the first invalid
+/// one (appended: the binding's `GroupTransform([ff])` validates), which the objects take, as a
+/// group's copy shares its children unvalidated.
+fn fixed_functions() -> Vec<(Value, Transform)> {
+    let surround = FixedFunctionTransform::new(FixedFunctionStyle::Rec2100Surround, &[0.78])
+        .expect("a valid fixed function");
+    let mut no_params = surround.clone();
+    no_params.set_params(&[]);
+    let mut glow = FixedFunctionTransform::new(FixedFunctionStyle::AcesGlow03, &[])
+        .expect("a valid fixed function");
+    glow.set_params(&[1.0]);
+    let mut group = GroupTransform::new();
+    group.append_transform(no_params.clone().into());
+    let surround_spec = json!({"style": enum_spec("FIXED_FUNCTION_REC2100_SURROUND"),
+                               "params": [0.78]});
+    vec![
+        (
+            json!({"class": "FixedFunctionTransform", "args": surround_spec}),
+            surround.into(),
+        ),
+        (
+            json!({"class": "FixedFunctionTransform", "args": surround_spec,
+                   "calls": [["setParams", []]]}),
+            no_params.into(),
+        ),
+        (
+            json!({"class": "FixedFunctionTransform",
+                   "args": {"style": enum_spec("FIXED_FUNCTION_ACES_GLOW_03")},
+                   "calls": [["setParams", [1.0]]]}),
+            glow.into(),
+        ),
+        (
+            json!({"class": "GroupTransform",
+                   "children": [{"class": "FixedFunctionTransform", "args": surround_spec,
+                                 "calls": [["setParams", []]]}]}),
+            group.into(),
+        ),
+    ]
+}
+
+/// The objects keep a copy of a transform as upstream's `createEditableCopy` makes it, which
+/// validates a FixedFunctionTransform: an invalid one is refused with its error, and the
+/// object keeps the transform it had.
+#[test]
+fn objects_refuse_invalid_fixed_functions_as_in_the_wheel() {
+    let ffs = fixed_functions();
+
+    let mut cs_ops = Vec::new();
+    let mut vt_ops = Vec::new();
+    let mut nt_ops = Vec::new();
+    let mut look_ops = Vec::new();
+    for (spec, port) in ffs {
+        let p = port.clone();
+        cs_ops.push(op(
+            json!({"call": "setTransform", "args": [{"transform": spec},
+                   enum_spec("COLORSPACE_DIR_TO_REFERENCE")]}),
+            move |c: &mut ColorSpace| {
+                c.set_transform(Some(&p), ColorSpaceDirection::ToReference)
+                    .err()
+                    .map(|e| e.what().to_vec())
+            },
+        ));
+        let p = port.clone();
+        vt_ops.push(op(
+            json!({"call": "setTransform", "args": [{"transform": spec},
+                   enum_spec("VIEWTRANSFORM_DIR_FROM_REFERENCE")]}),
+            move |v: &mut ViewTransform| {
+                v.set_transform(Some(&p), ViewTransformDirection::FromReference)
+                    .err()
+                    .map(|e| e.what().to_vec())
+            },
+        ));
+        let p = port.clone();
+        nt_ops.push(op(
+            json!({"call": "setTransform", "args": [{"transform": spec},
+                   enum_spec("TRANSFORM_DIR_INVERSE")]}),
+            move |t: &mut NamedTransform| {
+                t.set_transform(Some(&p), TransformDirection::Inverse)
+                    .err()
+                    .map(|e| e.what().to_vec())
+            },
+        ));
+        let p = port.clone();
+        look_ops.push(op(
+            json!({"call": "setTransform", "args": [{"transform": spec}]}),
+            move |l: &mut Look| l.set_transform(&p).err().map(|e| e.what().to_vec()),
+        ));
+        look_ops.push(op(
+            json!({"call": "setInverseTransform", "args": [{"transform": spec}]}),
+            move |l: &mut Look| {
+                l.set_inverse_transform(&port)
+                    .err()
+                    .map(|e| e.what().to_vec())
+            },
+        ));
+    }
+
+    check(
+        "ColorSpace",
+        vec![Case {
+            label: "ColorSpace".into(),
+            new_args: json!([enum_spec("REFERENCE_SPACE_SCENE")]),
+            port: ColorSpace::with_reference_space(ReferenceSpaceType::Scene),
+            ops: cs_ops,
+        }],
+        compare_color_space,
+    );
+    check(
+        "ViewTransform",
+        vec![Case {
+            label: "ViewTransform".into(),
+            new_args: json!([enum_spec("REFERENCE_SPACE_SCENE")]),
+            port: ViewTransform::new(ReferenceSpaceType::Scene),
+            ops: vt_ops,
+        }],
+        compare_view_transform,
+    );
+    check(
+        "NamedTransform",
+        vec![Case {
+            label: "NamedTransform".into(),
+            new_args: json!([]),
+            port: NamedTransform::new(),
+            ops: nt_ops,
+        }],
+        compare_named_transform,
+    );
+    check(
+        "Look",
+        vec![Case {
+            label: "Look".into(),
+            new_args: json!([]),
+            port: Look::new(),
+            ops: look_ops,
+        }],
+        compare_look,
+    );
 }

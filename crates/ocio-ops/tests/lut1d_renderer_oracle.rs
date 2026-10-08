@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! The forward 1D LUT renderers for float input against the wheel, bit for bit
+//! The 1D LUT renderers for float input against the wheel, bit for bit
 //! (src/OpenColorIO/ops/lut1d/Lut1DOpCPU.cpp, Lut1DOpCPU_SSE2.cpp, _AVX, _AVX2, _AVX512 @
 //! v2.5.2), through the oracle test battery (every case, with fast math on and off, on the
 //! tier's probes, each buffer one renderer call):
@@ -13,7 +13,15 @@
 //!   the kernels this machine doesn't dispatch to are compared on it;
 //! - the half domain's (`Lut1DRendererHalfCode`, [`HalfDomain`]) and the hue-adjust renderers
 //!   of both domains (`Lut1DRendererHueAdjust`, `Lut1DRendererHalfCodeHueAdjust`,
-//!   [`HueAdjust`]), which have no SIMD kernel.
+//!   [`HueAdjust`]), which have no SIMD kernel;
+//! - the inverse renderers of both domains, with and without hue adjust (`InvLut1DRenderer`,
+//!   ..., [`Inverse`]), without `OPTIMIZATION_LUT_INV_FAST`, which would replace the inverse
+//!   LUT with a forward one.
+//!
+//! The first three run both directions: in the inverse one, the default optimization (with
+//! fast math on and off) replaces the LUT with its fast forward LUT
+//! (`MakeFastLut1DFromInverse`: the inverse LUT rendered on a 12-bit or half domain), which the
+//! renderers above then render ([`rendered`]).
 //!
 //! And to every output bit depth: on rows of one pixel ([`single_pixel_rows_match_the_wheel`]:
 //! the scalar code), and on whole rows ([`whole_rows_match_the_wheel`]: the dispatched kernel).
@@ -30,7 +38,7 @@
 //! Without a kernel, a forward LUT's float renderers write alpha (`in[3] * m_alphaScaling`,
 //! which quiets a signalling NaN), so no channel passes through; with one, a row of one pixel
 //! still takes the scalar loop, so alpha passes through from rows of 2 pixels
-//! (`Family::pass_through_min_pixels`).
+//! (`Family::pass_through_min_pixels`), where the rendered LUT takes a kernel ([`takes_kernel`]).
 
 mod common;
 
@@ -45,7 +53,7 @@ use ocio_ops::ops::lut1d::lut1d_op_cpu::{
     Lut1DKernel, get_lut1d_profile_renderer, get_lut1d_renderer, get_lut1d_scalar_renderer,
     lut1d_kernel,
 };
-use ocio_ops::ops::lut1d::lut1d_op_data::Lut3by1DArray;
+use ocio_ops::ops::lut1d::lut1d_op_data::{Lut3by1DArray, make_fast_lut1d_from_inverse};
 use ocio_ops::ops::matrix::matrix_op::create_matrix_op_from_m44;
 use ocio_testkit::Oracle;
 use ocio_testkit::battery::params::{A, Channels as BatteryChannels};
@@ -156,6 +164,11 @@ impl Lut {
 
     /// The transform, its values as blob 0.
     fn transform(&self) -> Value {
+        self.transform_in(Direction::Forward)
+    }
+
+    /// The transform in `direction`, its values as blob 0.
+    fn transform_in(&self, direction: Direction) -> Value {
         let hue = if self.hue_adjust {
             "HUE_DW3"
         } else {
@@ -165,6 +178,7 @@ impl Lut {
             ["setData", {"blob": 0, "dtype": "float32"}],
             ["setInputHalfDomain", self.half_domain],
             ["setHueAdjust", {"enum": hue}],
+            ["setDirection", direction.oracle_enum()],
         ]})
     }
 
@@ -174,6 +188,13 @@ impl Lut {
     /// (src/OpenColorIO/ops/lut1d/Lut1DOp.cpp:244-253, src/OpenColorIO/Processor.cpp:623-641
     /// @ v2.5.2).
     fn port(&self) -> Result<Lut1DOpData> {
+        self.port_in(Direction::Forward)
+    }
+
+    /// [`Lut::port`] in `direction`: `BuildLut1DOp` validates the forward data, then
+    /// `CreateLut1DOp` inverts it (src/OpenColorIO/ops/lut1d/Lut1DOp.cpp:221-253 @ v2.5.2)
+    /// before the processor finalizes it.
+    fn port_in(&self, direction: Direction) -> Result<Lut1DOpData> {
         let mut data = Lut1DOpData::new(2)?;
         data.set_input_half_domain(self.half_domain);
         if self.hue_adjust {
@@ -183,6 +204,9 @@ impl Lut {
         array.get_values_mut().copy_from_slice(&self.values);
         *data.get_array_mut() = array;
         data.validate()?;
+        if direction == Direction::Inverse {
+            data = data.inverse();
+        }
         data.finalize()?;
         Ok(std::hint::black_box(data))
     }
@@ -214,6 +238,85 @@ impl Params for Lut {
     fn set(&mut self, index: usize, value: f64) {
         self.entries.set(&mut self.values, index, value);
     }
+}
+
+/// The LUT the default CPU processor renders in `direction`: the LUT, or for an inverse LUT
+/// its fast forward LUT, which `OPTIMIZATION_LUT_INV_FAST` (with fast math on and off) puts in
+/// its place (`ReplaceInverseLuts`, src/OpenColorIO/OpOptimizers.cpp:369-408 @ v2.5.2).
+fn rendered(lut: &Lut, direction: Direction) -> Result<Lut1DOpData> {
+    let data = lut.port_in(direction)?;
+    match direction {
+        Direction::Forward => Ok(data),
+        Direction::Inverse => make_fast_lut1d_from_inverse(&data),
+    }
+}
+
+/// The renderer of the LUT the processor renders in `combo` ([`rendered`]), F32 to F32.
+fn rendered_port(lut: &Lut, combo: &Combo) -> std::result::Result<Port, String> {
+    let renderer = rendered(lut, combo.direction)
+        .and_then(|data| get_lut1d_renderer(&data, BitDepth::F32, BitDepth::F32))
+        .map_err(|e| e.message().to_string())?;
+    Ok(Port::in_place(move |px| renderer.apply(px)))
+}
+
+/// Whether the LUT the processor renders in `combo` takes a SIMD kernel: a standard domain
+/// without hue adjust.
+fn takes_kernel(lut: &Lut, combo: &Combo) -> Option<Lut1DOpData> {
+    let data = rendered(lut, combo.direction).ok()?;
+    (!data.is_input_half_domain() && data.get_hue_adjust() == Lut1DHueAdjust::None).then_some(data)
+}
+
+/// The SIMD kernels this machine doesn't dispatch to, for a rendered LUT that takes one.
+fn kernel_profiles(lut: &Lut, combo: &Combo) -> Vec<(String, Port)> {
+    let Some(data) = takes_kernel(lut, combo) else {
+        return Vec::new();
+    };
+    let dispatched = lut1d_kernel(CpuInfo::instance(), BitDepth::F32);
+    [
+        Lut1DKernel::Sse2,
+        Lut1DKernel::Avx,
+        Lut1DKernel::Avx2,
+        Lut1DKernel::Avx512,
+    ]
+    .into_iter()
+    .filter(|&kernel| Some(kernel) != dispatched)
+    .map(|kernel| {
+        let renderer = get_lut1d_profile_renderer(&data, BitDepth::F32, Some(kernel))
+            .expect("a profile renderer");
+        (
+            format!("{kernel:?}"),
+            Port::in_place(move |px| renderer.apply(px)),
+        )
+    })
+    .collect()
+}
+
+/// Alpha passes through the kernels from F32 to F32 (from rows of 2 pixels); the other
+/// renderers write it.
+fn kernel_pass_through(lut: &Lut, combo: &Combo) -> BatteryChannels {
+    if takes_kernel(lut, combo).is_some() {
+        A
+    } else {
+        [false; 4]
+    }
+}
+
+/// An inverse LUT's breakpoints, the LUT's values: every finite one of a standard domain, the
+/// chosen entries' of a half domain.
+fn value_points(lut: &Lut) -> Vec<f32> {
+    let mut points: Vec<f32> = if lut.half_domain {
+        lut.entries
+            .indices()
+            .iter()
+            .flat_map(|&i| lut.values[i * 3..i * 3 + 3].to_vec())
+            .collect()
+    } else {
+        lut.values.clone()
+    };
+    points.retain(|v| v.is_finite());
+    points.sort_by(f32::total_cmp);
+    points.dedup_by(|a, b| a.to_bits() == b.to_bits());
+    points
 }
 
 /// The longest row the battery probes for the kernels: every remainder of 4, 8 and 16 pixels.
@@ -254,50 +357,27 @@ impl Family for StandardDomain {
         let cases = self.cases();
         vec![cases[8].clone(), cases[16].clone()]
     }
-    fn directions(&self) -> Vec<Direction> {
-        // The inverse renderers are WP 2.1f's.
-        vec![Direction::Forward]
+    fn spec(&self, lut: &Lut, direction: Direction) -> Spec {
+        Spec::with_f32_blobs(lut.transform_in(direction), &[&lut.values])
     }
-    fn spec(&self, lut: &Lut, _direction: Direction) -> Spec {
-        Spec::with_f32_blobs(lut.transform(), &[&lut.values])
+    fn port(&self, lut: &Lut, combo: &Combo) -> std::result::Result<Port, String> {
+        rendered_port(lut, combo)
     }
-    fn port(&self, lut: &Lut, _combo: &Combo) -> std::result::Result<Port, String> {
-        let renderer = lut
-            .port()
-            .and_then(|data| get_lut1d_renderer(&data, BitDepth::F32, BitDepth::F32))
-            .map_err(|e| e.message().to_string())?;
-        Ok(Port::in_place(move |px| renderer.apply(px)))
+    fn other_profiles(&self, lut: &Lut, combo: &Combo) -> Vec<(String, Port)> {
+        kernel_profiles(lut, combo)
     }
-    fn other_profiles(&self, lut: &Lut, _combo: &Combo) -> Vec<(String, Port)> {
-        let data = lut.port().expect("the case's data");
-        let dispatched = lut1d_kernel(CpuInfo::instance(), BitDepth::F32);
-        [
-            Lut1DKernel::Sse2,
-            Lut1DKernel::Avx,
-            Lut1DKernel::Avx2,
-            Lut1DKernel::Avx512,
-        ]
-        .into_iter()
-        .filter(|&kernel| Some(kernel) != dispatched)
-        .map(|kernel| {
-            let renderer = get_lut1d_profile_renderer(&data, BitDepth::F32, Some(kernel))
-                .expect("a profile renderer");
-            (
-                format!("{kernel:?}"),
-                Port::in_place(move |px| renderer.apply(px)),
-            )
-        })
-        .collect()
-    }
-    fn pass_through(&self, _lut: &Lut, _combo: &Combo) -> BatteryChannels {
-        A
+    fn pass_through(&self, lut: &Lut, combo: &Combo) -> BatteryChannels {
+        kernel_pass_through(lut, combo)
     }
     /// A row of one pixel takes the scalar loop, which writes alpha times 1.
     fn pass_through_min_pixels(&self) -> usize {
         2
     }
-    fn breakpoints(&self, lut: &Lut, _direction: Direction) -> Vec<f32> {
-        probe::lut_domain_points(lut.length())
+    fn breakpoints(&self, lut: &Lut, direction: Direction) -> Vec<f32> {
+        match direction {
+            Direction::Forward => probe::lut_domain_points(lut.length()),
+            Direction::Inverse => value_points(lut),
+        }
     }
     fn extra_probes(&self, _lut: &Lut, _direction: Direction) -> Vec<ProbeSet> {
         vec![ProbeSet::RowLengths { max_pixels: ROWS }]
@@ -332,22 +412,27 @@ impl Family for HalfDomain {
     fn mutation_bases(&self) -> Vec<Case<Lut>> {
         self.cases()[..1].to_vec()
     }
-    fn directions(&self) -> Vec<Direction> {
-        // The inverse renderers are WP 2.1f's.
-        vec![Direction::Forward]
+    fn spec(&self, lut: &Lut, direction: Direction) -> Spec {
+        Spec::with_f32_blobs(lut.transform_in(direction), &[&lut.values])
     }
-    fn spec(&self, lut: &Lut, _direction: Direction) -> Spec {
-        Spec::with_f32_blobs(lut.transform(), &[&lut.values])
+    fn port(&self, lut: &Lut, combo: &Combo) -> std::result::Result<Port, String> {
+        rendered_port(lut, combo)
     }
-    fn port(&self, lut: &Lut, _combo: &Combo) -> std::result::Result<Port, String> {
-        let renderer = lut
-            .port()
-            .and_then(|data| get_lut1d_renderer(&data, BitDepth::F32, BitDepth::F32))
-            .map_err(|e| e.message().to_string())?;
-        Ok(Port::in_place(move |px| renderer.apply(px)))
+    fn other_profiles(&self, lut: &Lut, combo: &Combo) -> Vec<(String, Port)> {
+        kernel_profiles(lut, combo)
     }
-    fn breakpoints(&self, lut: &Lut, _direction: Direction) -> Vec<f32> {
-        lut.entry_inputs()
+    fn pass_through(&self, lut: &Lut, combo: &Combo) -> BatteryChannels {
+        kernel_pass_through(lut, combo)
+    }
+    /// A row of one pixel takes the scalar loop, which writes alpha times 1.
+    fn pass_through_min_pixels(&self) -> usize {
+        2
+    }
+    fn breakpoints(&self, lut: &Lut, direction: Direction) -> Vec<f32> {
+        match direction {
+            Direction::Forward => lut.entry_inputs(),
+            Direction::Inverse => value_points(lut),
+        }
     }
 }
 
@@ -402,25 +487,17 @@ impl Family for HueAdjust {
         // The 17 entries' and the half domain's mixed curves.
         vec![self.cases()[0].clone(), self.cases()[3].clone()]
     }
-    fn directions(&self) -> Vec<Direction> {
-        // The inverse renderers are WP 2.1f's.
-        vec![Direction::Forward]
+    fn spec(&self, lut: &Lut, direction: Direction) -> Spec {
+        Spec::with_f32_blobs(lut.transform_in(direction), &[&lut.values])
     }
-    fn spec(&self, lut: &Lut, _direction: Direction) -> Spec {
-        Spec::with_f32_blobs(lut.transform(), &[&lut.values])
+    fn port(&self, lut: &Lut, combo: &Combo) -> std::result::Result<Port, String> {
+        rendered_port(lut, combo)
     }
-    fn port(&self, lut: &Lut, _combo: &Combo) -> std::result::Result<Port, String> {
-        let renderer = lut
-            .port()
-            .and_then(|data| get_lut1d_renderer(&data, BitDepth::F32, BitDepth::F32))
-            .map_err(|e| e.message().to_string())?;
-        Ok(Port::in_place(move |px| renderer.apply(px)))
-    }
-    fn breakpoints(&self, lut: &Lut, _direction: Direction) -> Vec<f32> {
-        if lut.half_domain {
-            lut.entry_inputs()
-        } else {
-            probe::lut_domain_points(lut.length())
+    fn breakpoints(&self, lut: &Lut, direction: Direction) -> Vec<f32> {
+        match direction {
+            Direction::Inverse => value_points(lut),
+            Direction::Forward if lut.half_domain => lut.entry_inputs(),
+            Direction::Forward => probe::lut_domain_points(lut.length()),
         }
     }
 }
@@ -428,6 +505,129 @@ impl Family for HueAdjust {
 #[test]
 fn hue_adjust_matches_the_wheel() {
     battery::run(&HueAdjust);
+}
+
+/// Rising in red and green, falling in blue: a half domain's blue then takes the negative half
+/// with red's sign (docs/improvements.md, I-67).
+fn crossed(x: f64) -> [f64; 3] {
+    [x * 2.0 - 0.25, x * x * x, 0.5 - x]
+}
+
+/// Flat at both ends and reversing in between: what an inverse LUT's set-up flattens and
+/// leaves out of its effective domain.
+fn flat_ends(x: f64) -> [f64; 3] {
+    let w = (x * 9.0).sin();
+    [w.clamp(-0.5, 0.5), -w, (x - 0.5).abs()]
+}
+
+/// The inverse renderers (`InvLut1DRenderer`, `InvLut1DRendererHalfCode`,
+/// `InvLut1DRendererHueAdjust`, `InvLut1DRendererHalfCodeHueAdjust`), F32 to F32, through the
+/// battery: standard domains of several lengths and the half domain, with and without hue
+/// adjust. The default optimization's `OPTIMIZATION_LUT_INV_FAST` replaces an inverse LUT with
+/// a forward one (`ReplaceInverseLuts`); without it, the processor renders the inverse LUT
+/// itself, and only that flag is off here ([`Family::optimization_off`]). They write alpha
+/// (`in[3] * m_alphaScaling`), so no channel passes through.
+struct Inverse;
+
+impl Inverse {
+    /// The curves of the inverse cases.
+    const CURVES: [(&str, Curve); 5] = [
+        ("mixed", mixed),
+        ("extreme", extreme),
+        ("jagged", jagged),
+        ("crossed", crossed),
+        ("flat ends", flat_ends),
+    ];
+}
+
+impl Family for Inverse {
+    type Params = Lut;
+
+    fn name(&self) -> String {
+        "Lut1DTransform (inverse, without OPTIMIZATION_LUT_INV_FAST)".to_string()
+    }
+    fn cases(&self) -> Vec<Case<Lut>> {
+        let mut cases = Vec::new();
+        for (half, n) in [
+            (false, 17),
+            (true, HALF_ENTRIES),
+            (false, 2),
+            (false, 3),
+            (false, 256),
+            (false, 4096),
+        ] {
+            let domain = if half {
+                "half domain".to_string()
+            } else {
+                format!("{n} entries")
+            };
+            for (name, curve) in Self::CURVES {
+                cases.push(Case::new(
+                    format!("{domain}, {name}"),
+                    Lut::new(half, n, curve),
+                ));
+            }
+            cases.push(Case::new(
+                format!("{domain}, alternating infinities"),
+                Lut::alternating_infinities(half, n),
+            ));
+        }
+        for (half, n) in [(false, 17), (true, HALF_ENTRIES), (false, 2)] {
+            let domain = if half {
+                "half domain".to_string()
+            } else {
+                format!("{n} entries")
+            };
+            for (name, curve) in Self::CURVES {
+                cases.push(Case::new(
+                    format!("{domain}, {name}, hue adjust"),
+                    Lut::new(half, n, curve).with_hue_adjust(),
+                ));
+            }
+        }
+        cases
+    }
+    fn mutation_bases(&self) -> Vec<Case<Lut>> {
+        // The mixed curves of 17 entries and of the half domain, without and with hue adjust.
+        let cases = self.cases();
+        let base = |label: &str| {
+            cases
+                .iter()
+                .find(|case| case.label() == label)
+                .unwrap_or_else(|| panic!("no case {label}"))
+                .clone()
+        };
+        vec![
+            base("17 entries, mixed"),
+            base("half domain, mixed"),
+            base("17 entries, mixed, hue adjust"),
+            base("half domain, mixed, hue adjust"),
+        ]
+    }
+    fn directions(&self) -> Vec<Direction> {
+        vec![Direction::Inverse]
+    }
+    fn optimization_off(&self) -> Vec<&'static str> {
+        vec!["OPTIMIZATION_LUT_INV_FAST"]
+    }
+    fn spec(&self, lut: &Lut, direction: Direction) -> Spec {
+        Spec::with_f32_blobs(lut.transform_in(direction), &[&lut.values])
+    }
+    fn port(&self, lut: &Lut, combo: &Combo) -> std::result::Result<Port, String> {
+        let renderer = lut
+            .port_in(combo.direction)
+            .and_then(|data| get_lut1d_renderer(&data, BitDepth::F32, BitDepth::F32))
+            .map_err(|e| e.message().to_string())?;
+        Ok(Port::in_place(move |px| renderer.apply(px)))
+    }
+    fn breakpoints(&self, lut: &Lut, _direction: Direction) -> Vec<f32> {
+        value_points(lut)
+    }
+}
+
+#[test]
+fn inverse_matches_the_wheel() {
+    battery::run(&Inverse);
 }
 
 /// The matrix the processor applies before the LUT for the other output bit depths: halves
@@ -718,4 +918,73 @@ fn check_rows(single_pixel_rows: bool) {
         cases.len(),
         failures[..failures.len().min(20)].join("\n")
     );
+}
+
+/// A hue-adjust LUT of a standard domain, from float input, on the LUT's nodes: the renderer
+/// interpolates from the next node down to the node with a weight of 1 (`high + 1 * (low -
+/// high)`), which rounds off the node's own value (docs/improvements.md, I-151). Through the
+/// wheel, a pixel of 0 doesn't get 0.1 from the LUT `[0.1, 0.7, 0.3]`, and gets -Inf from
+/// `[-FLT_MAX, FLT_MAX]`, whose grey pixel gets a NaN green. The port renders each pixel
+/// byte for byte as the wheel does, on rows of one pixel and on one row.
+#[test]
+fn hue_adjust_on_nodes_matches_the_wheel() {
+    let luts: [(&str, Vec<f32>); 3] = [
+        ("[-FLT_MAX, FLT_MAX]", vec![-f32::MAX, f32::MAX]),
+        ("[0.1, 0.7, 0.3]", vec![0.1, 0.7, 0.3]),
+        ("[0, 1/3, 1]", vec![0.0, 1.0 / 3.0, 1.0]),
+    ];
+    // Node 0, the middle, node 1.
+    let pixels: Vec<f32> = vec![
+        0.0, 0.0, 0.0, 1.0, //
+        0.5, 0.5, 0.5, 1.0, //
+        1.0, 1.0, 1.0, 1.0,
+    ];
+    let mut cases = Vec::new();
+    for (label, gray) in &luts {
+        let values: Vec<f32> = gray.iter().flat_map(|&v| [v, v, v]).collect();
+        let lut = Lut {
+            half_domain: false,
+            hue_adjust: true,
+            entries: LutEntries::first_second_middle_last("lut", gray.len()),
+            values,
+        };
+        for single_pixel_rows in [true, false] {
+            cases.push(RowCase {
+                label: format!("{label}, single-pixel rows {single_pixel_rows}"),
+                lut: lut.clone(),
+                output: Depth::F32,
+                single_pixel_rows,
+            });
+        }
+    }
+    let requests: Vec<Request> = cases.iter().map(|case| case.request(&pixels)).collect();
+    let blobs: Vec<Vec<u8>> = cases.iter().map(|c| f32_to_bytes(&c.lut.values)).collect();
+    let calls: Vec<BatchCall<'_>> = requests
+        .iter()
+        .zip(&blobs)
+        .map(|(request, lut)| {
+            let mut call = request.call();
+            call.blobs.push(lut.as_slice());
+            call
+        })
+        .collect();
+    let responses = Oracle::get().batch(&calls, true);
+    for (case, (request, response)) in cases.iter().zip(requests.iter().zip(responses)) {
+        let reply = request.reply(response.unwrap_or_else(|e| panic!("{}: {e}", case.label)));
+        assert!(reply.raised().is_none(), "{}", case.label);
+        let wheel: Vec<f32> = reply.buffers[1]
+            .chunks(4)
+            .map(|b| f32::from_ne_bytes(b.try_into().expect("4 bytes")))
+            .collect();
+        // What I-151 describes, as the wheel renders it.
+        if case.lut.values[0] == 0.1 {
+            assert_ne!(wheel[0].to_bits(), 0.1f32.to_bits(), "{}", case.label);
+        }
+        if case.lut.values[0] == -f32::MAX {
+            assert_eq!(wheel[0], f32::NEG_INFINITY, "{}", case.label);
+            assert!(wheel[5].is_nan(), "{}: the grey pixel's green", case.label);
+        }
+        let port = case.port(&pixels).expect("the port's renderer");
+        assert_eq!(port, reply.buffers[1], "{}", case.label);
+    }
 }

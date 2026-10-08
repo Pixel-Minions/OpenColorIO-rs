@@ -259,7 +259,7 @@ fn check(cases: &[Case]) {
             .map(|m| m.as_str().unwrap().to_string())
             .collect();
 
-        let mut config = Config::create_raw();
+        let mut config = Config::create_raw().unwrap();
         if case.v1 {
             Arc::get_mut(&mut config)
                 .unwrap()

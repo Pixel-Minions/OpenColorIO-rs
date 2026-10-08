@@ -220,13 +220,13 @@ fn build_op() {
     let b = 0.53f32;
     lut.set_value(1, r, g, b).unwrap();
 
-    let config = Config::create_raw();
+    let config = Config::create_raw().unwrap();
 
     let mut ops = OpVec::new();
     build_ops(
         &mut ops,
         &config,
-        config.current_context(),
+        &config.current_context().get(),
         &lut.into(),
         TransformDirection::Forward,
     )

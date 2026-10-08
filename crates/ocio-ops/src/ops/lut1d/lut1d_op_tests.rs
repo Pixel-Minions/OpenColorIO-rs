@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Port of `tests/cpu/ops/lut1d/Lut1DOp_tests.cpp` @ v2.5.2: the tests that need no
-//! composition or inverse (WP 2.1e to 2.1g), and tests of the refusals that stand in for them
-//! until then.
+//! Port of `tests/cpu/ops/lut1d/Lut1DOp_tests.cpp` @ v2.5.2: the tests that need no file
+//! (`lut_1d_compose_with_bit_depth` reads one, Phase 4).
 //!
 //! Upstream's test runner reruns every test in each SIMD mode the CPU supports
 //! (tests/cpu/UnitTestMain.cpp:104-153 @ v2.5.2); a test of a renderer with SIMD kernels runs
@@ -14,7 +13,7 @@ use super::*;
 use crate::cpu_info::{
     CpuInfo, X86_CPU_FLAG_AVX, X86_CPU_FLAG_AVX2, X86_CPU_FLAG_AVX512, X86_CPU_FLAG_SSE2,
 };
-use crate::open_color_types::{BitDepth, OptimizationFlags};
+use crate::open_color_types::{BitDepth, Lut1DHueAdjust, OptimizationFlags};
 use crate::ops::lut1d::lut1d_op_cpu::get_lut1d_renderer_for_cpu;
 use ocio_testkit::upstream::check_close;
 
@@ -106,6 +105,88 @@ fn extrapolation_errors() {
     }
 }
 
+/// Port of `OCIO_ADD_TEST(Lut1DOp, finite_value)` @ v2.5.2.
+#[test]
+fn finite_value() {
+    let lut = create_square_lut();
+
+    let mut ops = OpVec::new();
+    create_lut1d_op(&mut ops, lut.clone(), TransformDirection::Forward);
+    create_lut1d_op(&mut ops, lut, TransformDirection::Inverse);
+    assert_eq!(ops.len(), 2);
+    ops.finalize().unwrap();
+
+    let mut input_buffer_linearforward: [f32; 4] = [0.5, 0.6, 0.7, 0.5];
+    let output_buffer_linearforward: [f32; 4] = [0.25, 0.36, 0.49, 0.5];
+    ops[0].apply(&mut input_buffer_linearforward).unwrap();
+    for i in 0..4 {
+        check_close(
+            input_buffer_linearforward[i],
+            output_buffer_linearforward[i],
+            1e-5f32,
+        );
+    }
+
+    let input_buffer_linearinverse: [f32; 4] = [0.5, 0.6, 0.7, 0.5];
+    let mut output_buffer_linearinverse: [f32; 4] = [0.25, 0.36, 0.49, 0.5];
+    ops[1].apply(&mut output_buffer_linearinverse).unwrap();
+    for i in 0..4 {
+        check_close(
+            input_buffer_linearinverse[i],
+            output_buffer_linearinverse[i],
+            1e-5f32,
+        );
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Lut1D, inverse_twice)` @ v2.5.2.
+#[test]
+fn inverse_twice() {
+    // Make a LUT that squares the input.
+    let lut = create_square_lut();
+
+    let output_buffer_linearinverse: [f32; 4] = [0.5, 0.6, 0.7, 0.5];
+
+    // Create inverse lut.
+    let mut ops = OpVec::new();
+    create_lut1d_op(&mut ops, lut, TransformDirection::Inverse);
+    assert_eq!(ops.len(), 1);
+
+    let lut1d_input_buffer_reference: [f32; 4] = [0.25, 0.36, 0.49, 0.5];
+    let mut lut1d_input_buffer_linearinverse: [f32; 4] = [0.25, 0.36, 0.49, 0.5];
+
+    ops.finalize().unwrap();
+    ops[0].apply(&mut lut1d_input_buffer_linearinverse).unwrap();
+    for i in 0..4 {
+        check_close(
+            lut1d_input_buffer_linearinverse[i],
+            output_buffer_linearinverse[i],
+            1e-5f32,
+        );
+    }
+
+    // Inverse the inverse.
+    let OpData::Lut1D(p_lut) = &**ops[0].data() else {
+        unreachable!("a Lut1D op")
+    };
+    let lut_data = p_lut.inverse();
+    create_lut1d_op(&mut ops, lut_data, TransformDirection::Forward);
+    assert_eq!(ops.len(), 2);
+
+    // Apply the inverse.
+    ops.finalize().unwrap();
+    ops[1].apply(&mut lut1d_input_buffer_linearinverse).unwrap();
+
+    // Verify we are back on the input.
+    for i in 0..4 {
+        check_close(
+            lut1d_input_buffer_linearinverse[i],
+            lut1d_input_buffer_reference[i],
+            1e-5f32,
+        );
+    }
+}
+
 /// Port of `OCIO_ADD_TEST(Lut1DOp, gpu)` @ v2.5.2.
 #[test]
 fn gpu() {
@@ -146,10 +227,11 @@ fn identity_lut_1d() {
     }
 }
 
-/// What waits for the rest of Phase 2 is an error: composing two LUTs, and the inverse LUT's
-/// set-up (`finalize`). The float renderers (`getCPUOp`, `apply`) exist.
+/// The Lut1D op's parts that waited for Phase 2 work: its renderers, composing LUTs, the
+/// inverse's set-up, renderers and fast forward LUT, and the replacement of a LUT and its
+/// inverse.
 #[test]
-fn phase_2_parts_are_errors() {
+fn phase_2_parts_work() {
     let mut ops = OpVec::new();
     create_lut1d_op(&mut ops, create_square_lut(), TransformDirection::Forward);
     create_lut1d_op(&mut ops, create_square_lut(), TransformDirection::Forward);
@@ -160,34 +242,226 @@ fn phase_2_parts_are_errors() {
     let mut pixel = [0.5f32, 0.25, 0.125, 1.0];
     ops[0].apply(&mut pixel).unwrap();
 
-    // Two LUTs that may compose.
+    // Two LUTs that compose.
     assert!(ops[0].can_combine_with(&ops[1]).unwrap());
     let mut out = OpVec::new();
-    assert_eq!(
-        ops[0]
-            .combine_with(&mut out, &ops[1])
-            .unwrap_err()
-            .message(),
-        NOT_PORTED_COMPOSE
-    );
-    assert_eq!(
-        ops.optimize(OptimizationFlags::DEFAULT)
-            .unwrap_err()
-            .message(),
-        NOT_PORTED_COMPOSE
-    );
+    ops[0].combine_with(&mut out, &ops[1]).unwrap();
+    assert_eq!(out.len(), 1);
+    ops.optimize(OptimizationFlags::DEFAULT).unwrap();
+    assert_eq!(ops.len(), 1);
 
-    // An inverse LUT.
+    // An inverse LUT, rendered and replaced by its fast forward LUT.
     let mut inverse = OpVec::new();
     create_lut1d_op(
         &mut inverse,
         create_square_lut(),
         TransformDirection::Inverse,
     );
-    assert_eq!(
-        inverse.finalize().unwrap_err().message(),
-        "Lut1D: the inverse 1D LUT is not ported yet (WP 2.1)."
-    );
+    inverse.finalize().unwrap();
+    inverse[0].get_cpu_op(false).unwrap().expect("a renderer");
+    inverse.optimize(OptimizationFlags::DEFAULT).unwrap();
+
+    // A LUT and its inverse.
+    let mut pair = OpVec::new();
+    create_lut1d_op(&mut pair, create_square_lut(), TransformDirection::Forward);
+    create_lut1d_op(&mut pair, create_square_lut(), TransformDirection::Inverse);
+    pair.finalize().unwrap();
+    pair.optimize(OptimizationFlags::DEFAULT).unwrap();
+    assert_eq!(pair.len(), 1);
+    assert_eq!(pair[0].get_info(), "<RangeOp>");
+}
+
+/// Port of `OCIO_ADD_TEST(Lut1DOp, inverse)` @ v2.5.2.
+#[test]
+fn inverse() {
+    let mut luta = Lut1DOpData::new(3).unwrap();
+    luta.get_array_mut()[0] = 0.1f32;
+
+    let lutb = luta.clone();
+    let mut lutc = luta.clone();
+    lutc.get_array_mut()[0] = 0.2f32;
+
+    let mut ops = OpVec::new();
+    create_lut1d_op(&mut ops, luta.clone(), TransformDirection::Forward);
+    create_lut1d_op(&mut ops, luta, TransformDirection::Inverse);
+    create_lut1d_op(&mut ops, lutb.clone(), TransformDirection::Forward);
+    create_lut1d_op(&mut ops, lutb, TransformDirection::Inverse);
+    create_lut1d_op(&mut ops, lutc.clone(), TransformDirection::Forward);
+    create_lut1d_op(&mut ops, lutc, TransformDirection::Inverse);
+
+    assert_eq!(ops.len(), 6);
+    ops.finalize().unwrap();
+
+    let op0 = &ops[0];
+    let op1 = &ops[1];
+    let op2 = &ops[2];
+    let op3 = &ops[3];
+    let op4 = &ops[4];
+    let op5 = &ops[5];
+
+    assert!(op0.is_inverse(op1));
+    assert!(op2.is_inverse(op3));
+    assert!(op4.is_inverse(op5));
+
+    assert!(!op0.is_inverse(op2));
+    assert!(op0.is_inverse(op3));
+    assert!(op1.is_inverse(op2));
+    assert!(!op1.is_inverse(op3));
+
+    assert!(!op0.is_inverse(op4));
+    assert!(!op0.is_inverse(op5));
+    assert!(!op1.is_inverse(op4));
+    assert!(!op1.is_inverse(op5));
+
+    let cache_id0 = ops[0].get_cache_id().unwrap();
+    let cache_id1 = ops[1].get_cache_id().unwrap();
+    let cache_id2 = ops[2].get_cache_id().unwrap();
+    let cache_id3 = ops[3].get_cache_id().unwrap();
+    let cache_id4 = ops[4].get_cache_id().unwrap();
+    let cache_id5 = ops[5].get_cache_id().unwrap();
+    assert_eq!(cache_id0, cache_id2);
+    assert_eq!(cache_id1, cache_id3);
+
+    assert_ne!(cache_id0, cache_id4);
+    assert_ne!(cache_id0, cache_id5);
+    assert_ne!(cache_id1, cache_id4);
+    assert_ne!(cache_id1, cache_id5);
+
+    // Optimize will remove LUT forward and inverse (0+1, 2+3 and 4+5)
+    // and replace them by a clamping range.
+    ops.finalize().unwrap();
+    ops.optimize(OptimizationFlags::DEFAULT).unwrap();
+    assert_eq!(ops.len(), 1);
+    assert_eq!(ops[0].get_info(), "<RangeOp>");
+}
+
+/// Port of `OCIO_ADD_TEST(Lut1DRenderer, finite_value_hue_adjust)` @ v2.5.2.
+#[test]
+fn finite_value_hue_adjust() {
+    // Make a LUT that squares the input.
+    let mut lut_data = create_square_lut();
+    lut_data.set_hue_adjust(Lut1DHueAdjust::Dw3).unwrap();
+
+    lut_data.finalize().unwrap();
+    let lut = Op::new(OpData::Lut1D(lut_data.clone()));
+    assert!(!lut.is_identity().unwrap());
+
+    let output_buffer_linearforward: [f32; 4] = [
+        0.25, 0.37000, // (Hue adj modifies green here.)
+        0.49, 0.5,
+    ];
+    let mut lut1d_input_buffer_linearforward: [f32; 4] = [0.5, 0.6, 0.7, 0.5];
+
+    lut.apply(&mut lut1d_input_buffer_linearforward).unwrap();
+    for i in 0..4 {
+        check_close(
+            lut1d_input_buffer_linearforward[i],
+            output_buffer_linearforward[i],
+            1e-5f32,
+        );
+    }
+
+    let inv_data = lut_data.inverse();
+    let inv_data_exact = inv_data.clone();
+
+    let mut ops_fast = OpVec::new();
+    let mut ops_exact = OpVec::new();
+    create_lut1d_op(&mut ops_fast, inv_data, TransformDirection::Forward);
+    create_lut1d_op(&mut ops_exact, inv_data_exact, TransformDirection::Forward);
+
+    assert_eq!(ops_fast.len(), 1);
+    assert_eq!(ops_exact.len(), 1);
+
+    let input_buffer_linearinverse: [f32; 4] = [0.5, 0.6, 0.7, 0.5];
+    let mut lut1d_output_buffer_linearinverse: [f32; 4] = [0.25, 0.37, 0.49, 0.5];
+    let mut lut1d_output_buffer_linearinverse_ex: [f32; 4] = [0.25, 0.37, 0.49, 0.5];
+
+    ops_fast.finalize().unwrap();
+    ops_fast.optimize(OptimizationFlags::LUT_INV_FAST).unwrap();
+
+    ops_exact.finalize().unwrap(); // No optimizations.
+
+    assert_eq!(ops_fast.len(), 1);
+    assert_eq!(ops_exact.len(), 1);
+
+    let OpData::Lut1D(lut_fast) = &**ops_fast[0].data() else {
+        panic!("a Lut1D op")
+    };
+    assert_eq!(lut_fast.get_direction(), TransformDirection::Forward);
+
+    let OpData::Lut1D(lut_exact) = &**ops_exact[0].data() else {
+        panic!("a Lut1D op")
+    };
+    assert_eq!(lut_exact.get_direction(), TransformDirection::Inverse);
+
+    ops_fast[0]
+        .apply(&mut lut1d_output_buffer_linearinverse)
+        .unwrap(); // fast
+    ops_exact[0]
+        .apply(&mut lut1d_output_buffer_linearinverse_ex)
+        .unwrap(); // exact
+    for i in 0..4 {
+        check_close(
+            lut1d_output_buffer_linearinverse[i],
+            input_buffer_linearinverse[i],
+            1e-5f32,
+        );
+        check_close(
+            lut1d_output_buffer_linearinverse_ex[i],
+            input_buffer_linearinverse[i],
+            1e-5f32,
+        );
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Lut1DOpData, compose_only_forward)` @ v2.5.2.
+#[test]
+fn compose_only_forward() {
+    let l1 = create_square_lut();
+
+    let mut ops = OpVec::new();
+    create_lut1d_op(&mut ops, l1.clone(), TransformDirection::Forward);
+    create_lut1d_op(&mut ops, l1.clone(), TransformDirection::Forward);
+    create_lut1d_op(&mut ops, l1.clone(), TransformDirection::Inverse);
+    create_lut1d_op(&mut ops, l1, TransformDirection::Inverse);
+
+    assert_eq!(ops.len(), 4);
+    let l1f = &ops[1];
+    let l1b = &ops[3];
+
+    // Forward + forward.
+    assert!(ops[0].can_combine_with(l1f).unwrap());
+    // Inverse + inverse.
+    assert!(ops[2].can_combine_with(l1b).unwrap());
+    // Forward + Inverse.
+    assert!(ops[0].can_combine_with(l1b).unwrap());
+    // Inverse + forward.
+    assert!(ops[2].can_combine_with(l1f).unwrap());
+}
+
+/// Port of `OCIO_ADD_TEST(Lut1D, compose_big_domain)` @ v2.5.2.
+#[test]
+fn compose_big_domain() {
+    let mut lut1 = Lut1DOpData::new(10).unwrap();
+    let lut2 = Lut1DOpData::new(10).unwrap();
+    lut1.get_array_mut()[9 * 3] = 1.0001f32;
+
+    let mut ops = OpVec::new();
+    create_lut1d_op(&mut ops, lut1, TransformDirection::Forward);
+    create_lut1d_op(&mut ops, lut2, TransformDirection::Forward);
+
+    assert_eq!(ops.len(), 2);
+
+    let op0 = ops[0].clone();
+    let op1 = ops[1].clone();
+    op0.combine_with(&mut ops, &op1).unwrap();
+    assert_eq!(ops.len(), 3);
+
+    let OpData::Lut1D(lut) = &**ops[2].data() else {
+        panic!("a Lut1D op")
+    };
+    assert_eq!(lut.get_array().get_length(), 65536);
+    assert!(!lut.is_input_half_domain());
 }
 
 /// A Lut1D op's queries: its type, that a copy equals it and has its cache ID, and that the

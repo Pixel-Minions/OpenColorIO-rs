@@ -194,6 +194,9 @@ pub enum ExceptionType {
     Emitter,
     /// `BadFile`
     BadFile,
+    /// `std::bad_alloc`, which yaml-cpp lets through when memory runs out: the port's parser
+    /// when it can't have the thread it parses a document on.
+    BadAlloc,
 }
 
 /// Port of `YAML::Exception` and its subclasses (exceptions.h:162-301): the mark, the message
@@ -250,6 +253,12 @@ impl Exception {
             mark,
             bad_subscript_with_key(key),
         )
+    }
+
+    /// A `std::bad_alloc`: its `what()` is the C++ library's text, with no mark.
+    pub fn bad_alloc() -> Exception {
+        let what = ocio_ops::exception::Exception::bad_alloc().what().to_vec();
+        Exception::new(ExceptionType::BadAlloc, Mark::null_mark(), what)
     }
 
     /// Whether the exception is a `ParserException` (a `DeepRecursion` is one).

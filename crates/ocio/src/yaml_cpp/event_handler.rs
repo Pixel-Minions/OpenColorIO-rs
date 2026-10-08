@@ -24,8 +24,10 @@ pub enum EmitterStyle {
     Flow,
 }
 
-/// Port of `YAML::EventHandler` (eventhandler.h:17-40). Tags and scalars are bytes.
-pub trait EventHandler {
+/// Port of `YAML::EventHandler` (eventhandler.h:17-40). Tags and scalars are bytes. A handler is
+/// `Send`: the parser reports the events of a document from a thread of its own
+/// ([`Parser::handle_next_document`](super::parser::Parser::handle_next_document)).
+pub trait EventHandler: Send {
     fn on_document_start(&mut self, mark: Mark);
     fn on_document_end(&mut self);
 
