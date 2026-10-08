@@ -1824,6 +1824,28 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   of 4.0c), compared with the platform's C runtime (`fopen` and `fread`) on generated files in
   `crates/ocio/tests/input_stream_crt.rs`.
 
+### I-163. A file's LUT changes in the file cache once a processor uses it
+
+- **Upstream:** the file cache keeps what a reader read (`GetCachedFileAndFormat`,
+  `FileTransform.cpp:801-888`), and the spi1d reader's `buildFileOps` hands the cached
+  `Lut1DOpDataRcPtr` itself to the forward LUT op (`HandleLUT1D` never clones a 1D LUT, and
+  `CreateLut1DOp` shares the pointer forward). The processor then finalizes its ops in place:
+  `Lut1DOpData::finalize` calls `adjustColorComponentNumber`, which marks the cached LUT as one
+  component when its three channels are equal. A later processor of the same file in the
+  inverse direction clones that LUT, and `initializeFromForward` makes only the first channel
+  monotonic; from a fresh cache it makes all three. So the inverse of a non-monotonic LUT
+  differs (values and cache ID) depending on whether a forward processor of the file was made
+  before, in the same process: for `0, 1, 0.5, 1`, green and blue keep `0.5` after a forward
+  processor, and become `1` otherwise. The other readers that share op data with the cache
+  (the CTF and CLF reader) likely do the same.
+- **Who notices:** applications that make processors of a non-monotonic LUT file in both
+  directions; their inverse depends on the order.
+- **A fix:** clone the cached op data when building ops, or finalize copies.
+- **Status:** not matched (p4-registry 4.2a2), for the owner: the port's processors never
+  change the cached file, so they give what the wheel gives from empty caches (the oracle tests
+  run every request after `ClearAllCaches`, `crates/ocio/tests/common/lut_files.rs`). Matching
+  would mean sharing mutable op data between the file cache and processors.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on

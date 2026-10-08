@@ -18,6 +18,7 @@ pub mod file_rules;
 pub mod fileformats;
 pub mod look;
 pub(crate) mod look_parse;
+pub mod lut_limits;
 pub mod named_transform;
 pub(crate) mod ocio_yaml;
 pub mod path_utils;

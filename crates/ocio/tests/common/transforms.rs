@@ -272,7 +272,7 @@ pub(crate) fn port_processors(
 
 /// The wheel's reply to a `processor_ops` request against the port's processors: `None` when
 /// they agree.
-fn compare_reply(
+pub(crate) fn compare_reply(
     reply: &ProcessorOpsReply,
     port: &Result<(ProcessorAndGroup, ProcessorAndGroup), (&'static str, ocio::Exception)>,
 ) -> Option<String> {

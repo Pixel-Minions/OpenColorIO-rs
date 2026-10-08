@@ -399,7 +399,7 @@ note = "p3-model-objects (3.4b)"
 path = "src/OpenColorIO/LutLimits.h"
 kind = "src"
 target = ["crates/ocio/src/lut_limits.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/MathUtils.cpp"
@@ -922,8 +922,9 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatSpi1D.cpp"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/file_format_spi1d.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_spi1d.rs"]
+status = "partial"
+note = "p4-registry 4.2a2: the reader (istream::getline, sscanf, from_chars) and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_spi1d_oracle.rs; bake comes with WP 4.8"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatSpi3D.cpp"
@@ -947,14 +948,16 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatUtils.cpp"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/file_format_utils.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_utils.rs"]
+status = "partial"
+note = "p4-registry 4.2a2: HandleLUT, HandleLUT1D, LogWarningInterpolationNotUsed; HandleLUT3D comes with the 3D LUT readers"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatUtils.h"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/file_format_utils.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_utils.rs"]
+status = "partial"
+note = "p4-registry 4.2a2: as FileFormatUtils.cpp"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatVF.cpp"
@@ -4596,8 +4599,9 @@ status = "todo"
 [[file]]
 path = "tests/cpu/fileformats/FileFormatSpi1D_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-formats/src/fileformats/file_format_spi1d_tests.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_spi1d_tests.rs"]
+status = "partial"
+note = "p4-registry 4.2a2: format_info, test, read_failure, identity; bake_1d and bake_1d_shaper come with WP 4.8"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatSpi3D_tests.cpp"
