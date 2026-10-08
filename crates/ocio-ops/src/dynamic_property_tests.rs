@@ -289,8 +289,8 @@ fn grading_rgb_curve_knots_coefs() {
     check_equal(dp_pointer, Arc::as_ptr(&dp));
 }
 
-/// Port of `OCIO_ADD_TEST(GradingRGBCurve, max_ctrl_pnts)` @ v2.5.2
-/// (tests/cpu/ops/gradingrgbcurve/GradingRGBCurve_tests.cpp), which needs this property.
+/// Port of `OCIO_ADD_TEST(GradingRGBCurve, max_ctrl_pnts)` @ v2.5.2. Upstream's test is in
+/// tests/cpu/ops/gradingrgbcurve/GradingRGBCurve_tests.cpp; it needs this property.
 #[test]
 fn max_ctrl_pnts() {
     let xy = [
