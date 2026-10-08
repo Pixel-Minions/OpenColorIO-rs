@@ -2472,10 +2472,13 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `ops/lut3d/Lut3DOpCPU.cpp:1461-1591` @ v2.5.2). For a grid size of 1 that step is 0, and the
   first such loop never ends: creating the CPU processor of an inverse `Lut3DTransform` of grid
   size 1 never returns, with or without `OPTIMIZATION_LUT_INV_FAST` (the fast path builds its
-  forward LUT through the same renderer, `MakeFastLut3DFromInverse`, `Lut3DOpData.cpp:29-58`).
+  forward LUT through the same renderer, `MakeFastLut3DFromInverse`, `Lut3DOpData.cpp:29-58`),
+  and neither do its GPU processor (whose shader bakes that fast forward LUT) nor
+  `getOptimizedProcessor` with `OPTIMIZATION_LUT_INV_FAST`.
   Both wheels were still running after 30 s (probed 2026-10-07, under Python with a time
   limit); a grid size of 2 returns at once. The oracle can't run a case that never returns.
-- **Who notices:** applications that invert a 3D LUT of one entry per side, on the CPU.
+- **Who notices:** applications that invert a 3D LUT of one entry per side, on the CPU or the
+  GPU.
 - **Decided** (the owner's general rule, `docs/deviations.md`, as for U-5's endless loops):
   the port refuses it with "Lut3D: the exact inverse of a 3D LUT needs a grid size of at
   least 2.", when the renderer is made.

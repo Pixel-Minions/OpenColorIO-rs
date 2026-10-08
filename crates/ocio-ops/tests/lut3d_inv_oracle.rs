@@ -459,6 +459,53 @@ fn degenerate_cubes_match_the_wheel() {
     check(&luts, &values);
 }
 
+/// 2^3 LUTs with one steep corner, on pixels at a cube's channel bounds and one step inside:
+/// the search's in-range tests (`>=` and `<=`, `InvLut3DRenderer::apply`,
+/// src/OpenColorIO/ops/lut3d/Lut3DOpCPU.cpp @ v2.5.2) decide which cube inverts them. The
+/// entries are computed in `f32`, so that the bounds are the LUT's own values.
+#[test]
+fn range_bounds_match_the_wheel() {
+    let lut = |f: fn(f32) -> f32, corner: f32| {
+        let mut v = Vec::with_capacity(24);
+        for r in 0..2 {
+            for g in 0..2 {
+                for b in 0..2 {
+                    let [r, g, b] = [r, g, b].map(|i| i as f32);
+                    v.extend([f(r), 0.1 + 0.8 * g, 0.1 + 0.8 * b]);
+                }
+            }
+        }
+        v[0] = corner;
+        v
+    };
+    let decreasing: fn(f32) -> f32 = |r| 0.9 - 0.8 * r;
+    let increasing: fn(f32) -> f32 = |r| 0.1 + 0.8 * r;
+    let lo = (0.9f32 - 0.8f32) - 1e-6f32;
+    let hi = (0.1f32 + 0.8f32) + 1e-6f32;
+    let mut pixels = Vec::new();
+    for g in [0.2f32, 0.3, 0.5, 0.7, 0.8] {
+        for b in [0.2f32, 0.3, 0.5, 0.7, 0.8] {
+            let above_lo = f32::from_bits(lo.to_bits() + 1);
+            pixels.extend([lo, g, b, 1.0, hi, g, b, 1.0, above_lo, g, b, 1.0]);
+        }
+    }
+    let mut luts = Vec::new();
+    for big in [5000.0f32, 50000.0, 1e7] {
+        for (name, f, corner) in [
+            ("decreasing", decreasing, big),
+            ("increasing", increasing, -big),
+            ("decreasing, negative corner", decreasing, -big),
+            ("increasing, positive corner", increasing, big),
+        ] {
+            luts.push((
+                format!("{name} {big}"),
+                Lut3D::new(2, Interpolation::Tetrahedral, lut(f, corner)),
+            ));
+        }
+    }
+    check(&luts, &pixels);
+}
+
 /// LUTs of 128 and 129 entries per side: the renderer's extrapolated LUT has 130 or 131,
 /// over the 3D LUT's limit, and its constructor throws the 3D LUT's error (I-153).
 #[test]
