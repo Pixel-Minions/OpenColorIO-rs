@@ -8,6 +8,7 @@
 
 use super::*;
 use crate::ops::fixedfunction::fixed_function_op_data::Params;
+use crate::ops::lut3d::lut3d_op::{Lut3DOrder, generate_identity_lut3d};
 use FixedFunctionOpStyle::*;
 use ocio_testkit::upstream::{check_throw_what, equal_with_safe_rel_error};
 
@@ -470,6 +471,48 @@ fn aces_output_transform_20() {
     apply_fixed_function(&mut input2_32f, &input_32f, &func_data2, 1e-4, false);
 }
 
+/// Upstream's round trips of the ACES 2.0 output transform: an identity 3D LUT of 8 entries
+/// per side (scaled by `scale`) through the inverse output transform, out of place, then back
+/// through the forward one, against the identity, with upstream's tolerance.
+fn aces_ot_20_round_trip(params: Params, scale: f32, error_threshold: f32) {
+    const LUT_SIZE: i32 = 8;
+    const NUM_CHANNELS: i32 = 4;
+    let num_samples = (LUT_SIZE * LUT_SIZE * LUT_SIZE) as usize;
+    let mut input_32f = vec![0.0f32; num_samples * NUM_CHANNELS as usize];
+
+    generate_identity_lut3d(&mut input_32f, LUT_SIZE, NUM_CHANNELS, Lut3DOrder::FastRed).unwrap();
+    for v in &mut input_32f {
+        *v *= scale;
+    }
+
+    let func_data =
+        FixedFunctionOpData::with_params(AcesOutputTransform20Inv, params.clone()).unwrap();
+    let op = get_fixed_function_cpu_renderer(&func_data, false).unwrap();
+    // `op->apply(&input_32f[0], &output_32f[0], num_samples)`: the renderers work in place.
+    let mut output_32f = input_32f.clone();
+    op.apply(&mut output_32f);
+
+    let func_data2 = FixedFunctionOpData::with_params(AcesOutputTransform20Fwd, params).unwrap();
+    apply_fixed_function(
+        &mut output_32f,
+        &input_32f,
+        &func_data2,
+        error_threshold,
+        false,
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, aces_ot_20_rec709_100n_rt)` @ v2.5.2.
+#[test]
+fn aces_ot_20_rec709_100n_rt() {
+    let params: Params = vec![
+        // Peak luminance
+        100.0, // Rec709 gamut
+        0.6400, 0.3300, 0.3000, 0.6000, 0.1500, 0.0600, 0.3127, 0.3290,
+    ];
+    aces_ot_20_round_trip(params, 1.0, 1e-3);
+}
+
 /// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, aces_ot_20_edge_cases)` @ v2.5.2.
 #[test]
 fn aces_ot_20_edge_cases() {
@@ -497,6 +540,29 @@ fn aces_ot_20_edge_cases() {
     let func_data = FixedFunctionOpData::with_params(AcesOutputTransform20Fwd, params).unwrap();
 
     apply_fixed_function(&mut input_32f, &expected_32f, &func_data, 1e-4, false);
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, aces_ot_20_p3d65_100n_rt)` @ v2.5.2.
+#[test]
+fn aces_ot_20_p3d65_100n_rt() {
+    let params: Params = vec![
+        // Peak luminance
+        100.0, // P3D65 gamut
+        0.680, 0.320, 0.265, 0.690, 0.150, 0.060, 0.3127, 0.3290,
+    ];
+    aces_ot_20_round_trip(params, 1.0, 1e-2);
+}
+
+/// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, aces_ot_20_p3d65_1000n_rt)` @ v2.5.2.
+#[test]
+fn aces_ot_20_p3d65_1000n_rt() {
+    let norm_peak_luminance = 10.0f32;
+    let params: Params = vec![
+        // Peak luminance
+        1000.0, // P3D65 gamut
+        0.680, 0.320, 0.265, 0.690, 0.150, 0.060, 0.3127, 0.3290,
+    ];
+    aces_ot_20_round_trip(params, norm_peak_luminance, 1e-3);
 }
 
 /// Port of `OCIO_ADD_TEST(FixedFunctionOpCPU, aces_rgb_to_jmh_20)` @ v2.5.2.
