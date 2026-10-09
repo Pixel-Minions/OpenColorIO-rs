@@ -2113,9 +2113,10 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Upstream:** SampleICC's `mluc` reader reads a record's string with
   `Read16(istream, &unicodeStr[0], nNumChar)` (`ext/sampleicc/src/include/iccProfileReader.h:
   366-369` @ OCIO v2.5.2), whose byte count is `num << 1` on an `icInt32Number`: for 2^30
-  characters or more the shift overflows (undefined in C++), and both compilers' shift wraps
-  it to a negative count, which reads nothing (I-166). `Read16` then returns half that
-  negative count, never the length the record claims, and the tag's reader fails.
+  characters or more the doubled count no longer fits. C++17 defines the shift there (the
+  value in the unsigned type, converted to `int`, which both compilers wrap), so it is a
+  negative count, which reads nothing (I-166). `Read16` then returns half that negative
+  count, never the length the record claims, and the tag's reader fails.
 - **Who notices:** nobody: such a record claims a string of 2 GiB or more.
 - **A fix:** check the length against the tag's size before reading.
 - **Status:** matched in `p4-readers` (4.7a, `crates/ocio/src/fileformats/icc/
@@ -2146,11 +2147,13 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   FileFormatICC.cpp:298-302` @ v2.5.2) rounds with `std::lround(float)`, the C runtime's
   `lroundf`, to a `long`: 32 bits on Windows, 64 on Linux. For a NaN (the power law of a
   negative argument, checked only after the discontinuity check) or a value out of range,
-  the UCRT returns 0 (`LONG_MIN` for exactly 2^31) and glibc `LONG_MIN`. So a type 3 curve
-  whose power law has a negative argument fails with `Expecting no negative arguments to the
-  power law.` on Windows and `Expecting no negative discontinuity at linear segment
-  boundary.` on Linux, and a curve with a segment past 2^31 / 1023 checks (and warns)
-  differently.
+  the UCRT returns 0 (`LONG_MIN` for exactly 2^31) and glibc `LONG_MIN`. So a type 3 or 4
+  curve whose power law has a negative argument, and whose linear segment quantizes to 0 or
+  less at `d` (`c * d` of type 3, `c * d + f` of type 4: `c = 0`, or `d < 0`), fails with
+  `Expecting no negative arguments to the power law.` on Windows and `Expecting no negative
+  discontinuity at linear segment boundary.` on Linux; where the segment quantizes above 0
+  (`{2.4, 0.5, -0.6, 0.1, 0.5}`), both give the discontinuity error. A curve with a segment
+  past 2^31 / 1023 checks (and warns) differently too.
 - **Who notices:** nobody but malformed profiles: their curves are errors or out of any
   display's range either way.
 - **A fix:** check the parameters before computing, and quantize in a type that holds them.
@@ -3009,9 +3012,12 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   depends on the machine's memory.
 - **Who notices:** hostile or corrupt profiles.
 - **A fix:** check the size against the tag's size first.
-- **Decided** (P4-7, the general rule): the port reads such a string in pieces as far as the
-  file goes, never allocating more than the file holds, and the tag's reader fails as it does
-  in the wheel when the allocation succeeds.
+- **Decided** (P4-7, the general rule): the port never allocates what the tag claims. A
+  string `Read8` is asked for with a positive count (a `desc` size below 2^31 bytes, an
+  `mluc` string below 2^30 characters) is read in pieces as far as the file goes, and the
+  tag's reader fails as it does in the wheel when the allocation succeeds. A larger one is
+  read with a negative count, which reads nothing (I-165, I-166): the port allocates nothing
+  and gives the reader's result per platform.
 - **Status:** matched in `p4-readers` (4.7a, `read_bytes` in `crates/ocio/src/fileformats/icc/
   icc_profile_reader.rs`); the wheel's results for such profiles are compared in 4.7b.
 

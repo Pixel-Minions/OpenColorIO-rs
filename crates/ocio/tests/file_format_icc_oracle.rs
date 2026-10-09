@@ -186,6 +186,11 @@ fn generated() -> Vec<(String, Vec<u8>)> {
         .collect();
     add("curv of 256 entries", &profile_with_trc(curv(&ramp)));
     add("curv of 2 entries", &profile_with_trc(curv(&[0, 65535])));
+    // The largest curve SampleICC reads (65536 entries), and one entry more.
+    let full: Vec<u16> = (0..65536u32).map(|i| i as u16).collect();
+    add("curv of 65536 entries", &profile_with_trc(curv(&full)));
+    let over: Vec<u16> = (0..65537u32).map(|i| i as u16).collect();
+    add("curv of 65537 entries", &profile_with_trc(curv(&over)));
     let flat: Vec<u16> = vec![30000; 16];
     add("a flat curv", &profile_with_trc(curv(&flat)));
     let decreasing: Vec<u16> = (0..64u32).map(|i| (65535 - i * 1000) as u16).collect();
@@ -223,6 +228,34 @@ fn generated() -> Vec<(String, Vec<u8>)> {
             vec![2.4, 0.5, -0.6, 0.0, 0.5],
         ),
         ("para 3, not smooth", 3, vec![2.2, 0.95, 0.05, 0.0773, 0.04]),
+        (
+            "para 3, a power-law argument of 0",
+            3,
+            vec![2.4, 1.0, -0.5, 0.0, 0.5],
+        ),
+        (
+            "para 3, d = 0",
+            3,
+            vec![2.4, 1.0 / 1.055, 0.055 / 1.055, 1.0 / 12.92, 0.0],
+        ),
+        ("para 3, a negative d", 3, vec![2.4, 0.5, 0.6, 0.1, -0.5]),
+        (
+            "para 3, a negative argument, c * d > 0",
+            3,
+            vec![2.4, 0.5, -0.6, 0.1, 0.5],
+        ),
+        (
+            "para 3, a negative argument, d < 0",
+            3,
+            vec![2.4, 0.5, 0.1, 0.1, -0.5],
+        ),
+        ("para 1, gamma of 1", 1, vec![1.0, 1.1, -0.1]),
+        ("para 2, gamma of 1", 2, vec![1.0, 1.1, -0.1, 0.05]),
+        (
+            "para 4, gamma of 1",
+            4,
+            vec![1.0, 0.905, 0.052, 0.073, 0.04, 0.1, 0.1],
+        ),
         // 30000 * 100 * 1023 code values: past a 32-bit `long` (Windows), not a 64-bit one.
         (
             "para 3, a linear segment past 2^31 codes",
