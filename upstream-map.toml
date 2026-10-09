@@ -921,8 +921,9 @@ note = "p4-readers 4.2c: the reader and buildFileOps, checked against the wheel 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatIridasItx.cpp"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/file_format_iridas_itx.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_iridas_itx.rs"]
+status = "partial"
+note = "p4-readers 4.2d: the reader and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_iridas_itx_oracle.rs; bake comes with WP 4.8"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatIridasLook.cpp"
@@ -4628,8 +4629,9 @@ note = "p4-readers 4.2c: format_info, read_failure, whitespace_handling, load_1d
 [[file]]
 path = "tests/cpu/fileformats/FileFormatIridasItx_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-formats/src/fileformats/file_format_iridas_itx_tests.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_iridas_itx_tests.rs"]
+status = "done"
+note = "p4-readers 4.2d"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatIridasLook_tests.cpp"

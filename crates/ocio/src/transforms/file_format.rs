@@ -342,12 +342,7 @@ fn create_formats() -> Vec<Box<dyn FileFormat>> {
         // FileFormatIridasCube.cpp:140-148.
         Box::new(crate::fileformats::file_format_iridas_cube::LocalFileFormat),
         // FileFormatIridasItx.cpp:113-121.
-        stub(vec![FormatInfo::new(
-            "iridas_itx",
-            "itx",
-            read_bake,
-            B::LUT_3D,
-        )]),
+        Box::new(crate::fileformats::file_format_iridas_itx::LocalFileFormat),
         // FileFormatIridasLook.cpp:514-521.
         stub(vec![FormatInfo::new(
             "iridas_look",
