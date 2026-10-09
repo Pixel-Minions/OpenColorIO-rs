@@ -1052,50 +1052,56 @@ note = "p4-cdl 4.4e (I-173)"
 [[file]]
 path = "src/OpenColorIO/fileformats/ctf/CTFReaderHelper.cpp"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/ctf/ctf_reader_helper.rs"]
+target = ["crates/ocio/src/fileformats/ctf/ctf_reader_helper.rs"]
 status = "todo"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/ctf/CTFReaderHelper.h"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/ctf/ctf_reader_helper.rs"]
+target = ["crates/ocio/src/fileformats/ctf/ctf_reader_helper.rs"]
 status = "todo"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/ctf/CTFReaderUtils.cpp"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/ctf/ctf_reader_utils.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/ctf/ctf_reader_utils.rs"]
+status = "done"
+note = "p4-ctf-read-1 4.5a"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/ctf/CTFReaderUtils.h"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/ctf/ctf_reader_utils.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/ctf/ctf_reader_utils.rs"]
+status = "done"
+note = "p4-ctf-read-1 4.5a: the element and attribute names"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/ctf/CTFTransform.cpp"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/ctf/ctf_transform.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/ctf/ctf_transform.rs"]
+status = "partial"
+note = "p4-ctf-read-1 4.5a (1-505): CTFVersion, CTFReaderTransform, GetElementsValues, fromMetadata, toMetadata; the writers (505-3006, with GetOpMinimumVersion and GetMinimumVersion) come with WP 4.6"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/ctf/CTFTransform.h"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/ctf/ctf_transform.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/ctf/ctf_transform.rs"]
+status = "partial"
+note = "p4-ctf-read-1 4.5a: CTFVersion, the versions, CTFReaderTransform, GetElementsValues; TransformWriter comes with WP 4.6"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/ctf/IndexMapping.cpp"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/ctf/index_mapping.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/ctf/index_mapping.rs"]
+status = "done"
+note = "p4-ctf-read-1 4.5a"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/ctf/IndexMapping.h"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/ctf/index_mapping.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/ctf/index_mapping.rs"]
+status = "done"
+note = "p4-ctf-read-1 4.5a"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/xmlutils/XMLReaderHelper.cpp"
@@ -4705,14 +4711,16 @@ status = "done"
 [[file]]
 path = "tests/cpu/fileformats/ctf/CTFTransform_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-formats/src/fileformats/ctf/ctf_transform_tests.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/ctf/ctf_transform_tests.rs"]
+status = "partial"
+note = "p4-ctf-read-1 4.5a: read_version, accessors; version_write comes with the writer (4.6e)"
 
 [[file]]
 path = "tests/cpu/fileformats/ctf/IndexMapping_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-formats/src/fileformats/ctf/index_mapping_tests.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/ctf/index_mapping_tests.rs"]
+status = "done"
+note = "p4-ctf-read-1 4.5a"
 
 [[file]]
 path = "tests/cpu/fileformats/xmlutils/XMLReaderUtils_tests.cpp"
