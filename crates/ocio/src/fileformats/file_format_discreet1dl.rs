@@ -7,7 +7,7 @@
 //! `src/OpenColorIO/fileformats/FileFormatDiscreet1DL.cpp` @ v2.5.2.
 //!
 //! The reader's buffers are C strings: a line is what `istream::getline` stored, up to its
-//! first NUL.
+//! first NUL (`InputStream::getline_buf`).
 
 use std::any::Any;
 use std::ffi::c_ulong;
@@ -201,16 +201,15 @@ fn table_load(
     line: &mut i32,
     error_line: &mut Vec<u8>,
 ) -> std::result::Result<(), ImLutStatus> {
-    let mut in_string = Vec::new();
+    let mut buffer = [0u8; LINE_SIZE];
     let mut count = ptablestart;
     while istream.good() {
         *line += 1;
-        istream.getline(&mut in_string, LINE_SIZE);
+        istream.getline_buf(&mut buffer, LINE_SIZE);
         if !istream.good() {
             return Err(ImLutStatus::UnexpectedEof);
         }
-        let len = c_str(&in_string).len();
-        in_string.truncate(len);
+        let mut in_string = c_str(&buffer).to_vec();
         replace_tabs_and_strip_spaces(&mut in_string);
         strip_end_new_line(&mut in_string);
 
@@ -244,10 +243,10 @@ fn find_non_comment(istream: &mut InputStream, line: &mut i32, in_string: &mut V
     let mut read_on = true;
     while istream.good() && read_on {
         read_on = false;
-        istream.getline(in_string, LINE_SIZE);
+        let mut buffer = [0u8; LINE_SIZE];
+        istream.getline_buf(&mut buffer, LINE_SIZE);
         *line += 1;
-        let len = c_str(in_string).len();
-        in_string.truncate(len);
+        *in_string = c_str(&buffer).to_vec();
         replace_tabs_and_strip_spaces(in_string);
         strip_end_new_line(in_string);
         if in_string.is_empty() || in_string[0] == b'#' {

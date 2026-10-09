@@ -107,13 +107,13 @@ impl LocalFileFormat {
         let mut version: i32 = -1;
         let mut components: i32 = -1;
 
-        let mut line_buffer = Vec::new();
+        let mut line_buffer = [0u8; MAX_LINE_SIZE];
         let mut current_line: i32 = 0;
 
         // PARSE HEADER INFO
         {
             loop {
-                istream.getline(&mut line_buffer, MAX_LINE_SIZE);
+                istream.getline_buf(&mut line_buffer, MAX_LINE_SIZE);
                 current_line += 1;
                 let header_line = c_str(&line_buffer);
 
@@ -240,7 +240,7 @@ impl LocalFileFormat {
             let lut_array = lut1d.get_array_mut().get_values_mut();
             let mut i: usize = 0;
 
-            istream.getline(&mut line_buffer, MAX_LINE_SIZE);
+            istream.getline_buf(&mut line_buffer, MAX_LINE_SIZE);
             current_line += 1;
 
             let mut line_count: i32 = 0;
@@ -328,7 +328,7 @@ impl LocalFileFormat {
                     // No other case, components is in [1..3].
                 }
 
-                istream.getline(&mut line_buffer, MAX_LINE_SIZE);
+                istream.getline_buf(&mut line_buffer, MAX_LINE_SIZE);
                 current_line += 1;
             }
 

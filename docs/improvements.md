@@ -2074,20 +2074,25 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `Lut1DOpDataRcPtr` itself to the forward LUT op (`HandleLUT1D` never clones a 1D LUT, and
   `CreateLut1DOp` shares the pointer forward). The processor then finalizes its ops in place:
   `Lut1DOpData::finalize` calls `adjustColorComponentNumber`, which marks the cached LUT as one
-  component when its three channels are equal. A later processor of the same file in the
-  inverse direction clones that LUT, and `initializeFromForward` makes only the first channel
-  monotonic; from a fresh cache it makes all three. So the inverse of a non-monotonic LUT
-  differs (values and cache ID) depending on whether a forward processor of the file was made
-  before, in the same process: for `0, 1, 0.5, 1`, green and blue keep `0.5` after a forward
-  processor, and become `1` otherwise. The other readers that share op data with the cache
-  (the CTF and CLF reader) likely do the same.
+  component when its three channels are equal. A later inverse processor of the same file
+  clones that LUT, and `initializeFromForward` makes only its first channel monotonic; from a
+  fresh cache it makes all three. So the inverse of a non-monotonic LUT holds other values in
+  green and blue, and has another cache ID, once a forward processor of the file was made in
+  the process (probed 2026-10-08: for the entries `0, 1, 0.5, 1`, green and blue keep `0.5`
+  after a forward processor and become `1` from a fresh cache; the inverse processor's cache
+  ID is `91c3bdd33553011dfc45941c59ca1de5` after a forward processor and
+  `8caceefb8952f416f8747d8a34fc639a` from a fresh cache; the pixels agree, as the one-component
+  LUT renders from red). The other readers that share op data with the cache (the CTF and CLF
+  readers) likely do the same.
 - **Who notices:** applications that make processors of a non-monotonic LUT file in both
-  directions; their inverse depends on the order.
+  directions: the inverse's cache ID and data depend on the order.
 - **A fix:** clone the cached op data when building ops, or finalize copies.
-- **Status:** not matched (p4-registry 4.2a2), for the owner: the port's processors never
-  change the cached file, so they give what the wheel gives from empty caches (the oracle tests
-  run every request after `ClearAllCaches`, `crates/ocio/tests/common/lut_files.rs`). Matching
-  would mean sharing mutable op data between the file cache and processors.
+- **Decided** (owner, 2026-10-08, as for I-174): the port keeps copies. Its processors never
+  change the cached file, so they give what the wheel gives from a fresh cache, and differ from
+  the wheel's inverse processors made after a forward one in the same process (their cache ID
+  and the inverse LUT's green and blue entries). The oracle tests run every request after
+  `ClearAllCaches` (`crates/ocio/tests/common/lut_files.rs`).
+- **Status:** not reproduced (p4-registry 4.2a2).
 
 ### I-164. The Discreet 1D LUT header check reads past the line's end
 
