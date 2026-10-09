@@ -35,14 +35,14 @@ use super::cdl_reader_helper::{
 use crate::fileformats::input_stream::InputStream;
 use crate::transforms::cdl_transform::{METADATA_INPUT_DESCRIPTION, METADATA_VIEWING_DESCRIPTION};
 
-/// `CDL_TAG_COLOR_DECISION_LIST` (CDLParser.h:50 @ v2.5.2).
+/// `CDL_TAG_COLOR_DECISION_LIST` (CDLParser.h:48 @ v2.5.2).
 pub const CDL_TAG_COLOR_DECISION_LIST: &[u8] = b"ColorDecisionList";
-/// `CDL_TAG_COLOR_CORRECTION_COLLECTION` (CDLParser.h:51 @ v2.5.2).
+/// `CDL_TAG_COLOR_CORRECTION_COLLECTION` (CDLParser.h:49 @ v2.5.2).
 pub const CDL_TAG_COLOR_CORRECTION_COLLECTION: &[u8] = b"ColorCorrectionCollection";
-/// `CDL_TAG_COLOR_DECISION` (CDLParser.h:52 @ v2.5.2).
+/// `CDL_TAG_COLOR_DECISION` (CDLParser.h:50 @ v2.5.2).
 pub const CDL_TAG_COLOR_DECISION: &[u8] = b"ColorDecision";
 
-/// `CDLTransformMap` (src/OpenColorIO/transforms/CDLTransform.h:22 @ v2.5.2): the transforms
+/// `CDLTransformMap` (src/OpenColorIO/transforms/CDLTransform.h:25 @ v2.5.2): the transforms
 /// by id, ordered as a `std::map<std::string, ...>` orders them.
 pub type CdlTransformMap = BTreeMap<Vec<u8>, CdlTransformRcPtr>;
 
@@ -680,7 +680,7 @@ fn find_root_element(header: &[u8], tag: &[u8]) -> bool {
 
 /// The parser of a CDL, CCC or CC file.
 ///
-/// Port of `CDLParser` (CDLParser.h:19-48, CDLParser.cpp:956-1019 @ v2.5.2) and of its
+/// Port of `CDLParser` (CDLParser.h:19-46, CDLParser.cpp:956-1019 @ v2.5.2) and of its
 /// `Impl`.
 pub struct CdlParser {
     state: StateRc,

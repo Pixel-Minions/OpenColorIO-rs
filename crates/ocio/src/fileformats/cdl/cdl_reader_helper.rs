@@ -25,7 +25,7 @@ use crate::transforms::cdl_transform::CdlTransform;
 
 /// A shared CDL transform: `CDLTransformImplRcPtr`.
 pub type CdlTransformRcPtr = Arc<CdlTransform>;
-/// `CDLTransformVec` (src/OpenColorIO/transforms/CDLTransform.h:23 @ v2.5.2).
+/// `CDLTransformVec` (src/OpenColorIO/transforms/CDLTransform.h:26 @ v2.5.2).
 pub type CdlTransformVec = Vec<CdlTransformRcPtr>;
 
 /// What a parse found: the transforms and the root's metadata.
@@ -284,7 +284,7 @@ impl CdlReaderColorCorrectionElt {
         &self.transform_data
     }
 
-    /// Port of `CDLReaderColorCorrectionElt::setCDLParsingInfo` (CDLReaderHelper.cpp:74-77 @
+    /// Port of `CDLReaderColorCorrectionElt::setCDLParsingInfo` (CDLReaderHelper.cpp:75-78 @
     /// v2.5.2).
     pub fn set_cdl_parsing_info(&mut self, parsing_info: &CdlParsingInfoRcPtr) {
         self.parsing_info = Some(parsing_info.clone());
@@ -306,7 +306,7 @@ impl XmlReaderElement for CdlReaderColorCorrectionElt {
 
     /// Takes the `id` attribute.
     ///
-    /// Port of `CDLReaderColorCorrectionElt::start` (CDLReaderHelper.cpp:20-40 @ v2.5.2):
+    /// Port of `CDLReaderColorCorrectionElt::start` (CDLReaderHelper.cpp:20-41 @ v2.5.2):
     /// expat gives every attribute a value, so its "Missing attribute value for id" error is
     /// never thrown.
     fn start(&mut self, atts: &[&[u8]]) -> Result<()> {
@@ -322,7 +322,7 @@ impl XmlReaderElement for CdlReaderColorCorrectionElt {
 
     /// Makes the CDL transform of the element's data, validated, and adds it to the parse's.
     ///
-    /// Port of `CDLReaderColorCorrectionElt::end` (CDLReaderHelper.cpp:42-72 @ v2.5.2).
+    /// Port of `CDLReaderColorCorrectionElt::end` (CDLReaderHelper.cpp:43-73 @ v2.5.2).
     fn end(&mut self) -> Result<()> {
         let mut transform = CdlTransform::new();
 
@@ -377,7 +377,7 @@ impl XmlReaderElement for CdlReaderColorCorrectionElt {
 impl XmlReaderContainerElt for CdlReaderColorCorrectionElt {
     /// Keeps description as metadata with supplied name.
     ///
-    /// Port of `CDLReaderColorCorrectionElt::appendMetadata` (CDLReaderHelper.cpp:79-84 @
+    /// Port of `CDLReaderColorCorrectionElt::appendMetadata` (CDLReaderHelper.cpp:80-85 @
     /// v2.5.2).
     fn append_metadata(&mut self, name: &[u8], value: &[u8]) -> Result<()> {
         let item = FormatMetadataImpl::new(name, value)?;
@@ -406,7 +406,7 @@ fn parent_cdl(parent: Option<&ContainerEltRcPtr>) -> CdlOpDataRcPtr {
 
 /// The `SOPNode` element in the CDL/CCC/CC schemas.
 ///
-/// Port of `CDLReaderSOPNodeCCElt` (CDLReaderHelper.h:179-195 @ v2.5.2).
+/// Port of `CDLReaderSOPNodeCCElt` (CDLReaderHelper.h:180-195 @ v2.5.2).
 #[derive(Debug)]
 pub struct CdlReaderSopNodeCcElt {
     sop: XmlReaderSopNodeBase,
@@ -472,7 +472,7 @@ impl XmlReaderSopNodeBaseElt for CdlReaderSopNodeCcElt {
 
 /// The `SatNode` element in the CDL/CCC/CC schemas.
 ///
-/// Port of `CDLReaderSatNodeCCElt` (CDLReaderHelper.h:197-213 @ v2.5.2), on
+/// Port of `CDLReaderSatNodeCCElt` (CDLReaderHelper.h:198-213 @ v2.5.2), on
 /// `XmlReaderSatNodeBaseElt` (whose `start` and `end` do nothing).
 #[derive(Debug)]
 pub struct CdlReaderSatNodeCcElt {

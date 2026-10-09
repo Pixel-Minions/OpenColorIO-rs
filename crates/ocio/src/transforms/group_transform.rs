@@ -195,8 +195,9 @@ impl GroupTransform {
     ///
     /// Port of `GroupTransformImpl::write` (GroupTransform.cpp:114-139 @ v2.5.2). The format
     /// writes into a string stream, as upstream's tests do, whose bytes go to `os` once the
-    /// format is done (also when it fails); an error of `os` itself, which a C++ stream keeps
-    /// in its state, is returned with its text.
+    /// format is done (also when it fails); an error of `os` itself is lost, as a C++
+    /// stream keeps it in its state bits and `write` doesn't look (docs/improvements.md,
+    /// I-178).
     pub fn write(
         &self,
         config: &Config,
@@ -220,9 +221,10 @@ impl GroupTransform {
             format_name,
             &mut stream,
         );
-        // What the format wrote before an error stays written, as on upstream's stream.
-        os.write_all(&stream.into_bytes())
-            .map_err(|e| Exception::new(e.to_string()))?;
+        // What the format wrote before an error stays written, as on upstream's stream. A
+        // failure of the stream itself goes unreported: a C++ stream keeps it in its state
+        // bits and throws nothing (I-178).
+        let _ = os.write_all(&stream.into_bytes());
         if let Err(e) = written {
             let mut err = OStringStream::new(Crt::NATIVE);
             err.put_str("Error writing format '");

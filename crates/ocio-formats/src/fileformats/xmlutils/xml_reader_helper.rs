@@ -43,9 +43,9 @@ pub const METADATA_SOP_DESCRIPTION: &[u8] = b"SOPDescription";
 /// `METADATA_SAT_DESCRIPTION` (src/OpenColorIO/transforms/CDLTransform.h:20 @ v2.5.2).
 pub const METADATA_SAT_DESCRIPTION: &[u8] = b"SATDescription";
 
-/// A shared element: `ElementRcPtr` (XMLReaderHelper.h:119).
+/// A shared element: `ElementRcPtr` (XMLReaderHelper.h:115).
 pub type ElementRcPtr = Rc<RefCell<dyn XmlReaderElement>>;
-/// A shared container element: `ContainerEltRcPtr` (XMLReaderHelper.h:146). Its
+/// A shared container element: `ContainerEltRcPtr` (XMLReaderHelper.h:145). Its
 /// `as_container_mut` is `Some`.
 pub type ContainerEltRcPtr = Rc<RefCell<dyn XmlReaderElement>>;
 /// A shared CDL op data: `CDLOpDataRcPtr`, which the CDL readers' elements share.
@@ -53,7 +53,7 @@ pub type CdlOpDataRcPtr = Rc<RefCell<CdlOpData>>;
 
 /// The data members of `XmlReaderElement`, and its non-virtual functions.
 ///
-/// Port of `XmlReaderElement` (XMLReaderHelper.h:20-117, XMLReaderHelper.cpp:13-56 @ v2.5.2).
+/// Port of `XmlReaderElement` (XMLReaderHelper.h:22-113, XMLReaderHelper.cpp:14-56 @ v2.5.2).
 #[derive(Debug, Clone)]
 pub struct XmlReaderElementBase {
     name: Vec<u8>,
@@ -71,12 +71,12 @@ impl XmlReaderElementBase {
         }
     }
 
-    /// Port of `XmlReaderElement::getName` (XMLReaderHelper.h:38-41 @ v2.5.2).
+    /// Port of `XmlReaderElement::getName` (XMLReaderHelper.h:40-43 @ v2.5.2).
     pub fn get_name(&self) -> &[u8] {
         &self.name
     }
 
-    /// Port of `XmlReaderElement::getXmlLineNumber` (XMLReaderHelper.h:45-48 @ v2.5.2).
+    /// Port of `XmlReaderElement::getXmlLineNumber` (XMLReaderHelper.h:47-50 @ v2.5.2).
     pub fn get_xml_line_number(&self) -> u32 {
         self.xml_line_number
     }
@@ -130,7 +130,7 @@ impl XmlReaderElementBase {
 
     /// The single number of the attribute `name`'s value `attrib`.
     ///
-    /// Port of `XmlReaderElement::parseScalarAttribute` (XMLReaderHelper.h:72-103 @ v2.5.2).
+    /// Port of `XmlReaderElement::parseScalarAttribute` (XMLReaderHelper.h:73-102 @ v2.5.2).
     pub fn parse_scalar_attribute<T: XmlNumber>(&self, name: &[u8], attrib: &[u8]) -> Result<T> {
         let attrib = c_str(attrib);
         let len = attrib.len();
@@ -169,7 +169,7 @@ fn c_str(s: &[u8]) -> &[u8] {
 
 /// An element of the XML readers.
 ///
-/// Port of the virtual functions of `XmlReaderElement` (XMLReaderHelper.h:20-117 @ v2.5.2),
+/// Port of the virtual functions of `XmlReaderElement` (XMLReaderHelper.h:22-113 @ v2.5.2),
 /// and of the casts the readers make.
 pub trait XmlReaderElement: Any {
     /// The base class's data.
@@ -254,7 +254,7 @@ impl std::fmt::Debug for dyn XmlReaderElement {
 
 /// An element that could contain sub-elements.
 ///
-/// Port of `XmlReaderContainerElt` (XMLReaderHelper.h:121-144 @ v2.5.2): its
+/// Port of `XmlReaderContainerElt` (XMLReaderHelper.h:118-143 @ v2.5.2): its
 /// `isContainer` is true.
 pub trait XmlReaderContainerElt: XmlReaderElement {
     /// `appendMetadata`.
@@ -263,7 +263,7 @@ pub trait XmlReaderContainerElt: XmlReaderElement {
 
 /// A basic element, which holds text.
 ///
-/// Port of `XmlReaderPlainElt` (XMLReaderHelper.h:148-190 @ v2.5.2): its `isContainer` is
+/// Port of `XmlReaderPlainElt` (XMLReaderHelper.h:148-193 @ v2.5.2): its `isContainer` is
 /// false, and its identifier and type name are its name.
 pub trait XmlReaderPlainElt: XmlReaderElement {
     /// `setRawData`.
@@ -275,7 +275,7 @@ pub trait XmlReaderPlainElt: XmlReaderElement {
 
 /// The data members of `XmlReaderPlainElt`.
 ///
-/// Port of `XmlReaderPlainElt` (XMLReaderHelper.h:148-190 @ v2.5.2).
+/// Port of `XmlReaderPlainElt` (XMLReaderHelper.h:148-193 @ v2.5.2).
 #[derive(Debug, Clone)]
 pub struct XmlReaderPlainEltBase {
     /// The base class.
@@ -285,7 +285,7 @@ pub struct XmlReaderPlainEltBase {
 }
 
 impl XmlReaderPlainEltBase {
-    /// Port of `XmlReaderPlainElt::XmlReaderPlainElt` (XMLReaderHelper.h:151-159 @ v2.5.2).
+    /// Port of `XmlReaderPlainElt::XmlReaderPlainElt` (XMLReaderHelper.h:151-158 @ v2.5.2).
     pub fn new(
         name: &[u8],
         parent: ContainerEltRcPtr,
@@ -298,7 +298,7 @@ impl XmlReaderPlainEltBase {
         }
     }
 
-    /// Port of `XmlReaderPlainElt::getParent` (XMLReaderHelper.h:174-177 @ v2.5.2).
+    /// Port of `XmlReaderPlainElt::getParent` (XMLReaderHelper.h:173-176 @ v2.5.2).
     pub fn get_parent(&self) -> &ContainerEltRcPtr {
         &self.parent
     }
@@ -306,7 +306,7 @@ impl XmlReaderPlainEltBase {
 
 /// The data members of `XmlReaderComplexElt`, a container nested in another.
 ///
-/// Port of `XmlReaderComplexElt` (XMLReaderHelper.h:306-344 @ v2.5.2): its identifier and
+/// Port of `XmlReaderComplexElt` (XMLReaderHelper.h:311-350 @ v2.5.2): its identifier and
 /// type name are its name, and its `appendMetadata` does nothing.
 #[derive(Debug, Clone)]
 pub struct XmlReaderComplexEltBase {
@@ -317,7 +317,7 @@ pub struct XmlReaderComplexEltBase {
 }
 
 impl XmlReaderComplexEltBase {
-    /// Port of `XmlReaderComplexElt::XmlReaderComplexElt` (XMLReaderHelper.h:309-316 @
+    /// Port of `XmlReaderComplexElt::XmlReaderComplexElt` (XMLReaderHelper.h:314-321 @
     /// v2.5.2).
     pub fn new(
         name: &[u8],
@@ -331,7 +331,7 @@ impl XmlReaderComplexEltBase {
         }
     }
 
-    /// Port of `XmlReaderComplexElt::getParent` (XMLReaderHelper.h:322-325 @ v2.5.2).
+    /// Port of `XmlReaderComplexElt::getParent` (XMLReaderHelper.h:327-330 @ v2.5.2).
     pub fn get_parent(&self) -> Option<&ContainerEltRcPtr> {
         self.parent.as_ref()
     }
@@ -339,7 +339,7 @@ impl XmlReaderComplexEltBase {
 
 /// Dummy to address unexpected parent for the DummyElt.
 ///
-/// Port of `XmlReaderDummyElt::DummyParent` (XMLReaderHelper.h:197-232,
+/// Port of `XmlReaderDummyElt::DummyParent` (XMLReaderHelper.h:200-232,
 /// XMLReaderHelper.cpp:60-64 @ v2.5.2).
 #[derive(Debug)]
 struct DummyParent {
@@ -401,7 +401,7 @@ impl XmlReaderContainerElt for DummyParent {
 /// Dummy to address unknown Element. When parsing meets some unrecognized data, a dummy is
 /// used to continue parsing.
 ///
-/// Port of `XmlReaderDummyElt` (XMLReaderHelper.h:192-268, XMLReaderHelper.cpp:66-92 @
+/// Port of `XmlReaderDummyElt` (XMLReaderHelper.h:197-267, XMLReaderHelper.cpp:60-94 @
 /// v2.5.2).
 #[derive(Debug)]
 pub struct XmlReaderDummyElt {
@@ -413,7 +413,7 @@ impl XmlReaderDummyElt {
     /// A dummy for the element `name` under `parent`, logging that it is unrecognized (with
     /// `msg`, if any).
     ///
-    /// Port of `XmlReaderDummyElt::XmlReaderDummyElt` (XMLReaderHelper.cpp:66-86 @ v2.5.2).
+    /// Port of `XmlReaderDummyElt::XmlReaderDummyElt` (XMLReaderHelper.cpp:66-88 @ v2.5.2).
     pub fn new(
         name: &[u8],
         parent: Option<ElementRcPtr>,
@@ -473,7 +473,7 @@ impl XmlReaderElement for XmlReaderDummyElt {
     fn is_container(&self) -> bool {
         false
     }
-    /// Port of `XmlReaderDummyElt::getIdentifier` (XMLReaderHelper.cpp:88-92 @ v2.5.2).
+    /// Port of `XmlReaderDummyElt::getIdentifier` (XMLReaderHelper.cpp:90-94 @ v2.5.2).
     fn get_identifier(&self) -> &[u8] {
         b""
     }
@@ -506,7 +506,7 @@ impl XmlReaderPlainElt for XmlReaderDummyElt {
 
 /// The description's element: its text goes to its parent's metadata.
 ///
-/// Port of `XmlReaderDescriptionElt` (XMLReaderHelper.h:270-304, XMLReaderHelper.cpp:96-104
+/// Port of `XmlReaderDescriptionElt` (XMLReaderHelper.h:272-308, XMLReaderHelper.cpp:98-106
 /// @ v2.5.2).
 #[derive(Debug)]
 pub struct XmlReaderDescriptionElt {
@@ -516,7 +516,7 @@ pub struct XmlReaderDescriptionElt {
 }
 
 impl XmlReaderDescriptionElt {
-    /// Port of `XmlReaderDescriptionElt::XmlReaderDescriptionElt` (XMLReaderHelper.h:274-282
+    /// Port of `XmlReaderDescriptionElt::XmlReaderDescriptionElt` (XMLReaderHelper.h:276-283
     /// @ v2.5.2).
     pub fn new(
         name: &[u8],
@@ -544,7 +544,7 @@ impl XmlReaderElement for XmlReaderDescriptionElt {
         self.changed = false;
         Ok(())
     }
-    /// Port of `XmlReaderDescriptionElt::end` (XMLReaderHelper.cpp:96-104 @ v2.5.2).
+    /// Port of `XmlReaderDescriptionElt::end` (XMLReaderHelper.cpp:98-106 @ v2.5.2).
     fn end(&mut self) -> Result<()> {
         if self.changed {
             // Note: eXpat automatically replaces escaped characters with their original
@@ -591,7 +591,7 @@ impl XmlReaderPlainElt for XmlReaderDescriptionElt {
 
 /// The SOP node's base class, which its slope, offset and power elements fill.
 ///
-/// Port of the virtual functions of `XmlReaderSOPNodeBaseElt` (XMLReaderHelper.h:346-406 @
+/// Port of the virtual functions of `XmlReaderSOPNodeBaseElt` (XMLReaderHelper.h:352-408 @
 /// v2.5.2) its children call.
 pub trait XmlReaderSopNodeBaseElt {
     /// `getCDL`.
@@ -602,7 +602,7 @@ pub trait XmlReaderSopNodeBaseElt {
 
 /// The data members of `XmlReaderSOPNodeBaseElt`, and its non-virtual functions.
 ///
-/// Port of `XmlReaderSOPNodeBaseElt` (XMLReaderHelper.h:346-406 @ v2.5.2).
+/// Port of `XmlReaderSOPNodeBaseElt` (XMLReaderHelper.h:352-408 @ v2.5.2).
 #[derive(Debug, Clone)]
 pub struct XmlReaderSopNodeBase {
     /// The base class.
@@ -613,7 +613,7 @@ pub struct XmlReaderSopNodeBase {
 }
 
 impl XmlReaderSopNodeBase {
-    /// Port of `XmlReaderSOPNodeBaseElt::XmlReaderSOPNodeBaseElt` (XMLReaderHelper.h:349-359
+    /// Port of `XmlReaderSOPNodeBaseElt::XmlReaderSOPNodeBaseElt` (XMLReaderHelper.h:355-364
     /// @ v2.5.2).
     pub fn new(
         name: &[u8],
@@ -629,7 +629,7 @@ impl XmlReaderSopNodeBase {
         }
     }
 
-    /// Port of `XmlReaderSOPNodeBaseElt::start` (XMLReaderHelper.h:361-364 @ v2.5.2).
+    /// Port of `XmlReaderSOPNodeBaseElt::start` (XMLReaderHelper.h:366-369 @ v2.5.2).
     pub fn start(&mut self) -> Result<()> {
         self.is_slope_init = false;
         self.is_offset_init = false;
@@ -637,7 +637,7 @@ impl XmlReaderSopNodeBase {
         Ok(())
     }
 
-    /// Port of `XmlReaderSOPNodeBaseElt::end` (XMLReaderHelper.h:366-382 @ v2.5.2).
+    /// Port of `XmlReaderSOPNodeBaseElt::end` (XMLReaderHelper.h:371-387 @ v2.5.2).
     pub fn end(&mut self) -> Result<()> {
         if !self.is_slope_init {
             return Err(self
@@ -660,24 +660,24 @@ impl XmlReaderSopNodeBase {
         Ok(())
     }
 
-    /// Port of `XmlReaderSOPNodeBaseElt::setIsSlopeInit` (XMLReaderHelper.h:386 @ v2.5.2).
+    /// Port of `XmlReaderSOPNodeBaseElt::setIsSlopeInit` (XMLReaderHelper.h:391 @ v2.5.2).
     pub fn set_is_slope_init(&mut self, status: bool) {
         self.is_slope_init = status;
     }
 
-    /// Port of `XmlReaderSOPNodeBaseElt::setIsOffsetInit` (XMLReaderHelper.h:387 @ v2.5.2).
+    /// Port of `XmlReaderSOPNodeBaseElt::setIsOffsetInit` (XMLReaderHelper.h:392 @ v2.5.2).
     pub fn set_is_offset_init(&mut self, status: bool) {
         self.is_offset_init = status;
     }
 
-    /// Port of `XmlReaderSOPNodeBaseElt::setIsPowerInit` (XMLReaderHelper.h:388 @ v2.5.2).
+    /// Port of `XmlReaderSOPNodeBaseElt::setIsPowerInit` (XMLReaderHelper.h:393 @ v2.5.2).
     pub fn set_is_power_init(&mut self, status: bool) {
         self.is_power_init = status;
     }
 
     /// Adds the description `value` to the CDL's metadata (the name is ignored).
     ///
-    /// Port of `XmlReaderSOPNodeBaseElt::appendMetadata` (XMLReaderHelper.h:390-395 @
+    /// Port of `XmlReaderSOPNodeBaseElt::appendMetadata` (XMLReaderHelper.h:395-400 @
     /// v2.5.2).
     pub fn append_metadata(cdl: &CdlOpDataRcPtr, _name: &[u8], value: &[u8]) -> Result<()> {
         // Add description to parent and override name.
@@ -692,7 +692,7 @@ impl XmlReaderSopNodeBase {
 
 /// The SatNode's base class, which its saturation element fills.
 ///
-/// Port of the virtual functions of `XmlReaderSatNodeBaseElt` (XMLReaderHelper.h:432-464 @
+/// Port of the virtual functions of `XmlReaderSatNodeBaseElt` (XMLReaderHelper.h:434-465 @
 /// v2.5.2) its children call.
 pub trait XmlReaderSatNodeBaseElt {
     /// `getCDL`.
@@ -701,7 +701,7 @@ pub trait XmlReaderSatNodeBaseElt {
 
 /// Adds the description `value` to the CDL's metadata (the name is ignored).
 ///
-/// Port of `XmlReaderSatNodeBaseElt::appendMetadata` (XMLReaderHelper.h:453-458 @ v2.5.2).
+/// Port of `XmlReaderSatNodeBaseElt::appendMetadata` (XMLReaderHelper.h:455-460 @ v2.5.2).
 /// `XmlReaderSatNodeBaseElt`'s `start` and `end` do nothing, and its data members are
 /// [`XmlReaderComplexEltBase`]'s.
 pub fn sat_node_append_metadata(cdl: &CdlOpDataRcPtr, _name: &[u8], value: &[u8]) -> Result<()> {
@@ -734,7 +734,7 @@ fn content_numbers(element: &XmlReaderElementBase, content_data: &mut Vec<u8>) -
 
 /// The slope, offset and power elements.
 ///
-/// Port of `XmlReaderSOPValueElt` (XMLReaderHelper.h:408-430, XMLReaderHelper.cpp:153-224 @
+/// Port of `XmlReaderSOPValueElt` (XMLReaderHelper.h:411-431, XMLReaderHelper.cpp:156-224 @
 /// v2.5.2).
 #[derive(Debug)]
 pub struct XmlReaderSopValueElt {
@@ -743,7 +743,7 @@ pub struct XmlReaderSopValueElt {
 }
 
 impl XmlReaderSopValueElt {
-    /// Port of `XmlReaderSOPValueElt::XmlReaderSOPValueElt` (XMLReaderHelper.cpp:153-160 @
+    /// Port of `XmlReaderSOPValueElt::XmlReaderSOPValueElt` (XMLReaderHelper.cpp:156-163 @
     /// v2.5.2).
     pub fn new(
         name: &[u8],
@@ -765,12 +765,12 @@ impl XmlReaderElement for XmlReaderSopValueElt {
     fn element_mut(&mut self) -> &mut XmlReaderElementBase {
         &mut self.plain.element
     }
-    /// Port of `XmlReaderSOPValueElt::start` (XMLReaderHelper.cpp:166-169 @ v2.5.2).
+    /// Port of `XmlReaderSOPValueElt::start` (XMLReaderHelper.cpp:169-172 @ v2.5.2).
     fn start(&mut self, _atts: &[&[u8]]) -> Result<()> {
         self.content_data.clear();
         Ok(())
     }
-    /// Port of `XmlReaderSOPValueElt::end` (XMLReaderHelper.cpp:171-217 @ v2.5.2).
+    /// Port of `XmlReaderSOPValueElt::end` (XMLReaderHelper.cpp:174-217 @ v2.5.2).
     fn end(&mut self) -> Result<()> {
         let data = content_numbers(&self.plain.element, &mut self.content_data)?;
 
@@ -833,7 +833,7 @@ impl XmlReaderPlainElt for XmlReaderSopValueElt {
 
 /// The CDL Saturation element.
 ///
-/// Port of `XmlReaderSaturationElt` (XMLReaderHelper.h:466-488, XMLReaderHelper.cpp:228-282 @
+/// Port of `XmlReaderSaturationElt` (XMLReaderHelper.h:468-488, XMLReaderHelper.cpp:228-282 @
 /// v2.5.2).
 #[derive(Debug)]
 pub struct XmlReaderSaturationElt {
@@ -869,7 +869,7 @@ impl XmlReaderElement for XmlReaderSaturationElt {
         self.content_data.clear();
         Ok(())
     }
-    /// Port of `XmlReaderSaturationElt::end` (XMLReaderHelper.cpp:245-275 @ v2.5.2).
+    /// Port of `XmlReaderSaturationElt::end` (XMLReaderHelper.cpp:245-277 @ v2.5.2).
     fn end(&mut self) -> Result<()> {
         let data = content_numbers(&self.plain.element, &mut self.content_data)?;
 
@@ -910,7 +910,7 @@ impl XmlReaderElement for XmlReaderSaturationElt {
 }
 
 impl XmlReaderPlainElt for XmlReaderSaturationElt {
-    /// Port of `XmlReaderSaturationElt::setRawData` (XMLReaderHelper.cpp:277-280 @ v2.5.2).
+    /// Port of `XmlReaderSaturationElt::setRawData` (XMLReaderHelper.cpp:279-282 @ v2.5.2).
     fn set_raw_data(&mut self, s: &[u8], _xml_line: u32) -> Result<()> {
         self.content_data.extend_from_slice(s);
         self.content_data.push(b' ');
@@ -923,7 +923,7 @@ impl XmlReaderPlainElt for XmlReaderSaturationElt {
 
 /// Stack of elements.
 ///
-/// Port of `XmlReaderElementStack` (XMLReaderHelper.h:490-519, XMLReaderHelper.cpp:108-149 @
+/// Port of `XmlReaderElementStack` (XMLReaderHelper.h:491-519, XMLReaderHelper.cpp:110-152 @
 /// v2.5.2). `back` and `front` of an empty stack are undefined in C++; here they are `None`.
 #[derive(Debug, Default)]
 pub struct XmlReaderElementStack {
@@ -931,43 +931,43 @@ pub struct XmlReaderElementStack {
 }
 
 impl XmlReaderElementStack {
-    /// Port of `XmlReaderElementStack::XmlReaderElementStack` (XMLReaderHelper.cpp:108-110 @
+    /// Port of `XmlReaderElementStack::XmlReaderElementStack` (XMLReaderHelper.cpp:110-112 @
     /// v2.5.2).
     pub fn new() -> XmlReaderElementStack {
         XmlReaderElementStack { elms: Vec::new() }
     }
 
-    /// Port of `XmlReaderElementStack::empty` (XMLReaderHelper.cpp:122-125 @ v2.5.2).
+    /// Port of `XmlReaderElementStack::empty` (XMLReaderHelper.cpp:124-127 @ v2.5.2).
     pub fn empty(&self) -> bool {
         self.elms.is_empty()
     }
 
-    /// Port of `XmlReaderElementStack::size` (XMLReaderHelper.cpp:117-120 @ v2.5.2).
+    /// Port of `XmlReaderElementStack::size` (XMLReaderHelper.cpp:119-122 @ v2.5.2).
     pub fn size(&self) -> u32 {
         self.elms.len() as u32
     }
 
-    /// Port of `XmlReaderElementStack::push_back` (XMLReaderHelper.cpp:127-130 @ v2.5.2).
+    /// Port of `XmlReaderElementStack::push_back` (XMLReaderHelper.cpp:129-132 @ v2.5.2).
     pub fn push_back(&mut self, elt: ElementRcPtr) {
         self.elms.push(elt);
     }
 
-    /// Port of `XmlReaderElementStack::pop_back` (XMLReaderHelper.cpp:132-135 @ v2.5.2).
+    /// Port of `XmlReaderElementStack::pop_back` (XMLReaderHelper.cpp:134-137 @ v2.5.2).
     pub fn pop_back(&mut self) {
         self.elms.pop();
     }
 
-    /// Port of `XmlReaderElementStack::back` (XMLReaderHelper.cpp:137-140 @ v2.5.2).
+    /// Port of `XmlReaderElementStack::back` (XMLReaderHelper.cpp:139-142 @ v2.5.2).
     pub fn back(&self) -> Option<ElementRcPtr> {
         self.elms.last().cloned()
     }
 
-    /// Port of `XmlReaderElementStack::front` (XMLReaderHelper.cpp:142-145 @ v2.5.2).
+    /// Port of `XmlReaderElementStack::front` (XMLReaderHelper.cpp:144-147 @ v2.5.2).
     pub fn front(&self) -> Option<ElementRcPtr> {
         self.elms.first().cloned()
     }
 
-    /// Port of `XmlReaderElementStack::clear` (XMLReaderHelper.cpp:147-150 @ v2.5.2).
+    /// Port of `XmlReaderElementStack::clear` (XMLReaderHelper.cpp:149-152 @ v2.5.2).
     pub fn clear(&mut self) {
         self.elms.clear();
     }

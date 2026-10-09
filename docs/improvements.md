@@ -2167,7 +2167,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-173. The CDL writers escape descriptions twice
 
 - **Upstream:** the CC, CCC and CDL writers collect the descriptions of the metadata already
-  escaped for XML (`ExtractCDLMetadata`, `fileformats/cdl/CDLWriter.cpp:23-55` @ v2.5.2), and
+  escaped for XML (`ExtractCDLMetadata`, `fileformats/cdl/CDLWriter.cpp:24-56` @ v2.5.2), and
   the formatter escapes them again as it writes them (`XmlFormatter::writeContentTag`,
   `XMLWriterUtils.cpp:68-83, 124-127`). A description "x < y & z" is written
   `x &amp;lt; y &amp;amp; z`, which reads back as "x &lt; y &amp; z" (probed 2026-10-08 with
@@ -2201,6 +2201,68 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** not reproduced: the port gives copies (`p4-cdl` 4.4e,
   `crates/ocio/src/transforms/cdl_transform.rs`), which differs from the wheel after such an
   edit.
+
+### I-175. The CDL reader drops content in four places
+
+- **Upstream:** the CDL, CCC and CC parser (`fileformats/cdl/CDLParser.cpp` @ v2.5.2):
+  - ignores character data that is a single line feed (`CharacterDataHandler`, 896-897),
+    wherever it is: a description, a value or text where none belongs, which elsewhere is an
+    error ("... not allowed ...") or part of the value, as long as expat hands it over alone
+    (a line feed alone on its line);
+  - lets a second root element inside the first, while the first has no correction yet,
+    take the parsing info over (`HandleColorDecisionListStartElement`,
+    `HandleColorCorrectionCollectionStartElement`, 496-580): the outer root's descriptions
+    and the corrections after the inner root ends are lost (probed 2026-10-08: a collection
+    holding a collection with one correction, then a second correction, reads as the first
+    correction alone, with the inner collection's description);
+  - drops the descriptions of a `ColorDecision` (its element keeps none);
+  - does not know `ColorCorrectionRef`: a `ColorDecision` that refers to a correction holds
+    none, with an "Unknown element" warning (probed).
+- **Who notices:** CDL files with such content: corrections and descriptions go missing
+  without an error.
+- **A fix:** keep the line feed as data where the element takes data; refuse a nested root;
+  keep the decision's descriptions; resolve `ColorCorrectionRef` by id.
+- **Status:** matched in `p4-cdl` (4.4d, `crates/ocio/src/fileformats/cdl/cdl_parser.rs`,
+  `cdl_reader_helper.rs`); the oracle cases of `crates/ocio/tests/file_format_cc_oracle.rs`
+  and `file_format_ccc_cdl_oracle.rs`.
+
+### I-176. A CDL file's root element must be named in its first 5 KiB
+
+- **Upstream:** the CDL parser reads the lines of the first 5 KiB of the file to find the
+  root element's name ("<ColorDecisionList", "<ColorCorrectionCollection" or
+  "<ColorCorrection", in that order, anywhere in that text) and picks the schema from it
+  (`loadHeader`, `initializeHandlers`, `fileformats/cdl/CDLParser.cpp:177-195, 286-325` @
+  v2.5.2); a file whose root starts later (after a long comment or DOCTYPE) fails with
+  "Missing CDL tag".
+- **Who notices:** valid CDL, CCC and CC files with more than 5 KiB before their root.
+- **A fix:** pick the schema from the root element expat reports.
+- **Status:** matched in `p4-cdl` (4.4d, `crates/ocio/src/fileformats/cdl/cdl_parser.rs`);
+  the "past 5 KiB" cases of `crates/ocio/tests/file_format_cc_oracle.rs`.
+
+### I-177. The XML readers parse a line of 4 GiB or more modulo 2^32
+
+- **Upstream:** the CDL, Iridas look and CTF readers give expat each line with
+  `XML_Parse(parser, line.c_str(), (int)line.size(), done)` (`CDLParser.cpp:241-279`,
+  `FileFormatIridasLook.cpp:173-191`, `FileFormatCTF.cpp:238-274` @ v2.5.2). The cast keeps
+  the low 32 bits: a line of 2 GiB to 4 GiB has a negative length, which expat refuses
+  ("invalid argument"); one of 4 GiB or more is parsed as its first `size mod 2^32` bytes, and
+  the rest of the line is skipped.
+- **Who notices:** files with lines of 2 GiB or more (hostile files).
+- **A fix:** refuse lines longer than `INT_MAX`, or give expat long lines in pieces.
+- **Status:** matched in `p4-cdl` (`crates/ocio-formats/src/expat/xmlparse.rs`, `parse` and
+  `c_int_length`; `a_line_of_4_gib_or_more_parses_its_length_mod_2_32`).
+
+### I-178. `GroupTransform::write` ignores a failing output stream
+
+- **Upstream:** the writers write to the caller's `std::ostream`, whose failures set its
+  state bits without throwing; `GroupTransformImpl::write` (`transforms/GroupTransform.cpp:
+  114-139` @ v2.5.2) never checks them, so a write to a full disk or a closed stream
+  "succeeds".
+- **Who notices:** C++ callers that write to a file stream and don't check it, and the
+  port's callers, whose `std::io::Write` errors are dropped the same way.
+- **A fix:** raise an error when the stream fails.
+- **Status:** matched in `p4-cdl` (`crates/ocio/src/transforms/group_transform.rs`, `write`;
+  `a_failing_output_stream_is_not_an_error`).
 
 ## Undefined behaviour upstream
 
@@ -2897,8 +2959,11 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   other root), `validateParsing` dereferences the null parsing info (`CDLParser.cpp:337`),
   and the wheel crashes (Windows, probed 2026-10-08: `<!-- <ColorDecisionList --><Foo/>` as a
   .cdl, and as a .ccc with the collection's name, end the process on a file transform's
-  processor). A CC creates its parsing info up front and isn't affected.
-- **Who notices:** malformed or hostile CDL and CCC files.
+  processor). A CC creates its parsing info up front, but the schema is the first name found,
+  whatever the extension: a .cc whose first 5 KiB mention "<ColorDecisionList" or
+  "<ColorCorrectionCollection" (in a comment, say) before its "<ColorCorrection" root is
+  parsed as a CDL or a CCC, and takes the same path.
+- **Who notices:** malformed or hostile CDL, CCC and CC files.
 - **Decided** (the owner's general rule): the port refuses the file with the parser's message
   "Error parsing <root> (<file>). Error is: CDL parsing error: the root element '<root>' is
   missing. At line (<n>)", as its `validateParsing` (and its transform getters) find no

@@ -25,7 +25,7 @@ use crate::transforms::cdl_transform::{
 
 /// Writes a content element `tag` for each of `strings`.
 ///
-/// Port of `WriteStrings` (CDLWriter.cpp:15-21 @ v2.5.2).
+/// Port of `WriteStrings` (CDLWriter.cpp:16-22 @ v2.5.2).
 pub fn write_strings(fmt: &mut XmlFormatter<'_>, tag: &[u8], strings: &[Vec<u8>]) {
     for it in strings {
         fmt.write_content_tag(tag, it);
@@ -36,7 +36,7 @@ pub fn write_strings(fmt: &mut XmlFormatter<'_>, tag: &[u8], strings: &[Vec<u8>]
 /// without case), each escaped for XML. The formatter escapes them again when it writes them
 /// (I-173).
 ///
-/// Port of `ExtractCDLMetadata` (CDLWriter.cpp:23-55 @ v2.5.2).
+/// Port of `ExtractCDLMetadata` (CDLWriter.cpp:24-56 @ v2.5.2).
 pub fn extract_cdl_metadata(
     metadata: &FormatMetadataImpl,
     main_desc: &mut Vec<Vec<u8>>,
@@ -69,7 +69,7 @@ pub fn extract_cdl_metadata(
 /// Writes `cdl` as a `ColorCorrection` element: its id and name attributes when not empty, its
 /// descriptions, and its SOP and Sat nodes.
 ///
-/// Port of `Write` (CDLWriter.cpp:57-111 @ v2.5.2).
+/// Port of `Write` (CDLWriter.cpp:58-112 @ v2.5.2).
 pub fn write(fmt: &mut XmlFormatter<'_>, cdl: &CdlTransform) {
     let metadata = cdl.format_metadata();
 

@@ -222,7 +222,7 @@ impl FileFormat for LocalFileFormat {
 /// cccid names: `buildFileOps` of both formats, whose texts differ only in the extension
 /// `ext` they name.
 ///
-/// Port of `LocalFileFormat::buildFileOps` (FileFormatCCC.cpp:175-251, and
+/// Port of `LocalFileFormat::buildFileOps` (FileFormatCCC.cpp:158-252, and
 /// FileFormatCDL.cpp:204-282 @ v2.5.2), past the cast of the cached file.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_cdl_file_ops(

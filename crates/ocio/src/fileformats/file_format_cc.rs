@@ -59,7 +59,7 @@ pub struct LocalFileFormat;
 impl LocalFileFormat {
     /// Reads a CC file: its ColorCorrection, through the CDL parser.
     ///
-    /// Port of `LocalFileFormat::read` (FileFormatCC.cpp:81-107 @ v2.5.2).
+    /// Port of `LocalFileFormat::read` (FileFormatCC.cpp:81-109 @ v2.5.2).
     pub fn read_file(
         &self,
         istream: &mut InputStream,
@@ -102,7 +102,7 @@ impl FileFormat for LocalFileFormat {
         )]
     }
 
-    /// Port of `LocalFileFormat::read` (FileFormatCC.cpp:81-107 @ v2.5.2).
+    /// Port of `LocalFileFormat::read` (FileFormatCC.cpp:81-109 @ v2.5.2).
     fn read(
         &self,
         istream: &mut InputStream,
@@ -138,7 +138,7 @@ impl FileFormat for LocalFileFormat {
     /// Appends the CDL's ops, with the file transform's CDL style if not the default, in the
     /// direction `dir` combined with the transform's.
     ///
-    /// Port of `LocalFileFormat::buildFileOps` (FileFormatCC.cpp:129-159 @ v2.5.2).
+    /// Port of `LocalFileFormat::buildFileOps` (FileFormatCC.cpp:131-160 @ v2.5.2).
     fn build_file_ops(
         &self,
         ops: &mut OpVec,

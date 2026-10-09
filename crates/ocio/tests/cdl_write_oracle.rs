@@ -19,12 +19,14 @@ use ocio_testkit::oracle_values;
 use ocio_testkit::transform_text::f64_spec;
 use serde_json::{Value, json};
 
-/// The formats of the cases, as the user names them.
-const FORMATS: [&str; 5] = [
+/// The formats of the cases, as the user names them: also one that doesn't write (flame),
+/// and one that doesn't exist.
+const FORMATS: [&str; 6] = [
     "ColorCorrection",
     "ColorCorrectionCollection",
     "ColorDecisionList",
     "colordecisionlist",
+    "flame",
     "Not a format",
 ];
 

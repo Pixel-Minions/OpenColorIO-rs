@@ -61,7 +61,7 @@ pub struct CdlTransform {
 /// The CDL of `group`, a group of a CC, CCC or CDL file, that `cdl_id` names: the first one
 /// for an empty id, else the one of that id (case sensitive), else the one at that index.
 ///
-/// Port of `GetCDL` (CDLTransform.cpp:34-82 @ v2.5.2).
+/// Port of `GetCDL` (CDLTransform.cpp:34-84 @ v2.5.2).
 fn get_cdl(group: &GroupTransform, cdl_id: &[u8]) -> Result<CdlTransform> {
     // The groups of CDL files hold CDLs only (`getCDLGroup`).
     let cdl_at = |i: i32| match group.transform(i) {
@@ -120,7 +120,7 @@ impl CdlTransform {
     /// config. Upstream returns the cached transform itself, so that editing it edits what
     /// later reads of the file give; the port returns a copy (I-174).
     ///
-    /// Port of `CDLTransform::CreateFromFile` (CDLTransform.cpp:84-101 @ v2.5.2).
+    /// Port of `CDLTransform::CreateFromFile` (CDLTransform.cpp:86-102 @ v2.5.2).
     #[doc(alias = "CreateFromFile")]
     pub fn from_file(src: impl AsRef<[u8]>, cdl_id: impl AsRef<[u8]>) -> Result<CdlTransform> {
         let src = c_str(src.as_ref());
@@ -142,7 +142,7 @@ impl CdlTransform {
     /// file's metadata. Upstream's group shares the cached transforms; the port's holds copies
     /// (I-174).
     ///
-    /// Port of `CDLTransform::CreateGroupFromFile` (CDLTransform.cpp:103-118 @ v2.5.2).
+    /// Port of `CDLTransform::CreateGroupFromFile` (CDLTransform.cpp:104-118 @ v2.5.2).
     #[doc(alias = "CreateGroupFromFile")]
     pub fn group_from_file(src: impl AsRef<[u8]>) -> Result<GroupTransform> {
         let src = c_str(src.as_ref());

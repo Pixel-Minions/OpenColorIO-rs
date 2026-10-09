@@ -7,6 +7,7 @@
 //! context variable), the CDL style of the file transform, duplicate ids, the elements of
 //! each schema, and files of one schema under another's extension.
 
+mod cdl_common;
 mod common;
 
 use common::lut_files::{file, file_case, write_files};
@@ -150,8 +151,8 @@ fn upstream_files_by_cccid_as_in_the_wheel() {
     check_processors(&cases);
 }
 
-#[test]
-fn generated_files_as_in_the_wheel() {
+/// The generated CCC and CDL files, each with seven cccids.
+fn generated_cases() -> Vec<Case> {
     let two = format!("{}{}", cc(Some("a"), "1.1 1.2 1.3"), cc(Some("b"), "2 2 2"));
     let files: Vec<(&str, String)> = vec![
         ("two.ccc", ccc(&two)),
@@ -258,7 +259,28 @@ fn generated_files_as_in_the_wheel() {
             cases.push(ccc_case(&format!("{label} [{cccid}]"), &src, cccid));
         }
     }
-    check_processors(&cases);
+    cases
+}
+
+#[test]
+fn generated_files_as_in_the_wheel() {
+    check_processors(&generated_cases());
+}
+
+/// The warnings of the reads, message by message: the generated files (one cccid each, as
+/// the read doesn't depend on it) and upstream's.
+#[test]
+fn ccc_and_cdl_files_log_as_in_the_wheel() {
+    let mut cases: Vec<Case> = generated_cases().into_iter().step_by(7).collect();
+    for name in [
+        "cdl_test1.ccc",
+        "cdl_test1.cdl",
+        "cdl_test_cc_file_with_extension.ccc",
+        "cdl_test_cc_file_with_extension.cdl",
+    ] {
+        cases.push(ccc_case(name, &upstream_file(name), ""));
+    }
+    cdl_common::check_logs(&cases);
 }
 
 /// The cccid is resolved in the config's context.

@@ -238,6 +238,33 @@ impl FileFormat for NotPortedFormat {
         Err(self.not_ported())
     }
 
+    /// Refuses: a format that writes (CLF and CTF) gives the port's "not ported yet" error;
+    /// one that doesn't gives upstream's refusal, as its `write` will.
+    fn write(
+        &self,
+        _: &Config,
+        _: &Context,
+        _: &GroupTransform,
+        format_name: &[u8],
+        _: &mut OStringStream,
+    ) -> Result<()> {
+        if self
+            .infos
+            .iter()
+            .any(|info| info.capabilities.contains(FormatCapabilities::WRITE))
+        {
+            return Err(Exception::new(
+                [
+                    b"The writer of the '".as_slice(),
+                    format_name,
+                    b"' file format is not ported yet.",
+                ]
+                .concat(),
+            ));
+        }
+        Err(write_not_supported(format_name))
+    }
+
     /// Refuses, as [`read`](Self::read) never gives a file to build.
     fn build_file_ops(
         &self,

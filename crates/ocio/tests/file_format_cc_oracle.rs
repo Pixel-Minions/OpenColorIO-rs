@@ -8,6 +8,7 @@
 //! belongs, XML errors on each line, encodings, entities, line ends, numbers past the double
 //! range (I-172), and a header past the 5 KiB the parser scans for the root element.
 
+mod cdl_common;
 mod common;
 
 use common::lut_files::{file, file_case, write_files};
@@ -40,8 +41,8 @@ const SOP: &str = "        <Slope>1.1 1.2 1.3</Slope>\n\
                    \x20       <Power>1.25 1.0 0.9</Power>\n";
 const SAT: &str = "        <Saturation>0.8</Saturation>\n";
 
-#[test]
-fn cc_files_read_as_in_the_wheel() {
+/// The generated CC files and upstream's.
+fn cc_cases() -> Vec<Case> {
     let valid = cc("a", SOP, SAT);
     let mut cases = vec![
         case("valid", valid.as_bytes()),
@@ -239,6 +240,56 @@ fn cc_files_read_as_in_the_wheel() {
             "an unknown encoding",
             format!("<?xml version=\"1.0\" encoding=\"klingon\"?>\n{valid}").as_bytes(),
         ),
+        // Public ids: expat checks their characters in DOCTYPE, ENTITY and NOTATION
+        // declarations.
+        case(
+            "a bad public id in a NOTATION (&)",
+            format!("<!DOCTYPE ColorCorrection [<!NOTATION n PUBLIC \"a&b\">]>\n{valid}").as_bytes(),
+        ),
+        case(
+            "a bad public id in a NOTATION (tab)",
+            format!("<!DOCTYPE ColorCorrection [<!NOTATION n PUBLIC \"a\tb\">]>\n{valid}").as_bytes(),
+        ),
+        case(
+            "a public id in a NOTATION",
+            format!("<!DOCTYPE ColorCorrection [<!NOTATION n PUBLIC \"a b-c\">]>\n{valid}").as_bytes(),
+        ),
+        case(
+            "a NOTATION with a public and a system id",
+            format!("<!DOCTYPE ColorCorrection [<!NOTATION n PUBLIC \"ab\" \"x\">]>\n{valid}")
+                .as_bytes(),
+        ),
+        case(
+            "a bad public id in the DOCTYPE",
+            format!("<!DOCTYPE ColorCorrection PUBLIC \"a\tb\" \"x.dtd\">\n{valid}").as_bytes(),
+        ),
+        case(
+            "a public id in the DOCTYPE",
+            format!("<!DOCTYPE ColorCorrection PUBLIC \"ab\" \"x.dtd\">\n{valid}").as_bytes(),
+        ),
+        case(
+            "a bad public id in an ENTITY",
+            format!("<!DOCTYPE ColorCorrection [<!ENTITY e PUBLIC \"a{{b\" \"x\">]>\n{valid}")
+                .as_bytes(),
+        ),
+        case(
+            "a public id in an ENTITY",
+            format!("<!DOCTYPE ColorCorrection [<!ENTITY e PUBLIC \"ab\" \"x\">]>\n{valid}")
+                .as_bytes(),
+        ),
+        // The last line, without a line end, inside a comment or a processing instruction.
+        case(
+            "the end inside a comment",
+            format!("{valid}<!-- not closed").as_bytes(),
+        ),
+        case(
+            "the end inside a processing instruction",
+            format!("{valid}<?pi not closed").as_bytes(),
+        ),
+        case(
+            "a comment ending the file",
+            format!("{valid}<!-- closed -->").as_bytes(),
+        ),
         // The root element.
         case("no CC tag", b"<Foo>\n</Foo>\n".as_slice()),
         case(
@@ -287,8 +338,18 @@ fn cc_files_read_as_in_the_wheel() {
             TransformDirection::Forward,
         ));
     }
+    cases
+}
 
-    check_processors(&cases);
+#[test]
+fn cc_files_read_as_in_the_wheel() {
+    check_processors(&cc_cases());
+}
+
+/// The warnings of the reads (unknown elements, misplaced ones, ...), message by message.
+#[test]
+fn cc_files_log_as_in_the_wheel() {
+    cdl_common::check_logs(&cc_cases());
 }
 
 /// A file transform's direction combines with the processor's (`buildFileOps`), and an

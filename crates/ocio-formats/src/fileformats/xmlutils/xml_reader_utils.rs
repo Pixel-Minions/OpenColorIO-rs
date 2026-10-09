@@ -67,7 +67,7 @@ pub fn truncate_string(p_str: &[u8], len: usize) -> Vec<u8> {
 
 /// Is `c` a 'space' character ( '\n', '\t', ' ' ... )? (Not `std::isspace`.)
 ///
-/// Port of `IsSpace` (XMLReaderUtils.h:64-71 @ v2.5.2).
+/// Port of `IsSpace` (XMLReaderUtils.h:66-71 @ v2.5.2).
 pub fn is_space(c: u8) -> bool {
     // Note: \n is unix while \r\n is windows line feed.
     c == b' ' || c == b'\n' || c == b'\t' || c == b'\r' || c == 0x0b || c == 0x0c
@@ -75,7 +75,7 @@ pub fn is_space(c: u8) -> bool {
 
 /// Is the character a valid number delimiter?
 ///
-/// Port of `IsNumberDelimiter` (XMLReaderUtils.h:73-77 @ v2.5.2).
+/// Port of `IsNumberDelimiter` (XMLReaderUtils.h:74-77 @ v2.5.2).
 pub fn is_number_delimiter(c: u8) -> bool {
     is_space(c) || c == b','
 }
@@ -87,7 +87,7 @@ pub fn is_not_space(c: u8) -> bool {
 
 /// Trim from start.
 ///
-/// Port of `LTrim` (XMLReaderUtils.cpp:16-21 @ v2.5.2).
+/// Port of `LTrim` (XMLReaderUtils.cpp:17-21 @ v2.5.2).
 pub(crate) fn l_trim(s: &mut Vec<u8>) {
     let first = s.iter().position(|&c| is_not_space(c)).unwrap_or(s.len());
     s.drain(..first);
@@ -95,7 +95,7 @@ pub(crate) fn l_trim(s: &mut Vec<u8>) {
 
 /// Trim from end.
 ///
-/// Port of `RTrim` (XMLReaderUtils.cpp:23-28 @ v2.5.2).
+/// Port of `RTrim` (XMLReaderUtils.cpp:24-28 @ v2.5.2).
 pub(crate) fn r_trim(s: &mut Vec<u8>) {
     let end = s
         .iter()
@@ -106,7 +106,7 @@ pub(crate) fn r_trim(s: &mut Vec<u8>) {
 
 /// Trim from both ends.
 ///
-/// Port of `Trim` (XMLReaderUtils.cpp:30-35 @ v2.5.2).
+/// Port of `Trim` (XMLReaderUtils.cpp:31-35 @ v2.5.2).
 pub fn trim(s: &mut Vec<u8>) {
     l_trim(s);
     r_trim(s);
@@ -115,7 +115,7 @@ pub fn trim(s: &mut Vec<u8>) {
 /// The position of the first non-whitespace character of `s`'s first `len` bytes, or `len`.
 /// Reads the byte at `len` too.
 ///
-/// Port of `FindFirstNonWhiteSpace` (XMLReaderUtils.cpp:37-58 @ v2.5.2).
+/// Port of `FindFirstNonWhiteSpace` (XMLReaderUtils.cpp:41-58 @ v2.5.2).
 fn find_first_non_white_space(s: &[u8], len: usize) -> usize {
     let mut pos = 0usize;
     loop {
@@ -132,7 +132,7 @@ fn find_first_non_white_space(s: &[u8], len: usize) -> usize {
 /// The position of the last non-whitespace character of `s`'s first `len` bytes (`len` > 0),
 /// or 0.
 ///
-/// Port of `FindLastNonWhiteSpace` (XMLReaderUtils.cpp:60-82 @ v2.5.2).
+/// Port of `FindLastNonWhiteSpace` (XMLReaderUtils.cpp:64-82 @ v2.5.2).
 fn find_last_non_white_space(s: &[u8], len: usize) -> usize {
     let mut pos = len - 1;
     loop {
@@ -150,7 +150,7 @@ fn find_last_non_white_space(s: &[u8], len: usize) -> usize {
 /// of `s`'s first `length` bytes; `(0, 0)` when there are none, or when `s` starts with a
 /// null.
 ///
-/// Port of `FindSubString` (XMLReaderUtils.cpp:84-114 @ v2.5.2).
+/// Port of `FindSubString` (XMLReaderUtils.cpp:86-113 @ v2.5.2).
 pub fn find_sub_string(s: &[u8], length: usize) -> (usize, usize) {
     if at(s, 0) == 0 {
         return (0, 0); // nothing to Trim.
@@ -177,7 +177,7 @@ pub fn find_sub_string(s: &[u8], length: usize) -> (usize, usize) {
 /// The position of the next character to start scanning at: past the delimiters (spaces,
 /// commas, tabs and newlines) from `pos`, or `len`.
 ///
-/// Port of `FindNextTokenStart` (XMLReaderUtils.h:79-101 @ v2.5.2).
+/// Port of `FindNextTokenStart` (XMLReaderUtils.h:81-101 @ v2.5.2).
 pub fn find_next_token_start(s: &[u8], len: usize, mut pos: usize) -> usize {
     if pos >= len {
         return len;
@@ -193,7 +193,7 @@ pub fn find_next_token_start(s: &[u8], len: usize, mut pos: usize) -> usize {
 
 /// The position of the next delimiter (spaces and commas) from `pos`, or `len`.
 ///
-/// Port of `FindDelim` (XMLReaderUtils.h:103-125 @ v2.5.2).
+/// Port of `FindDelim` (XMLReaderUtils.h:105-125 @ v2.5.2).
 pub fn find_delim(s: &[u8], len: usize, mut pos: usize) -> usize {
     if pos >= len {
         return len;
@@ -266,7 +266,7 @@ impl XmlNumber for u32 {
 /// When using an integer `ParseNumber` template, it is an error if the string actually
 /// contains a number with a decimal part.
 ///
-/// Port of `IsValid` (XMLReaderUtils.h:128-138 @ v2.5.2).
+/// Port of `IsValid` (XMLReaderUtils.h:132-139 @ v2.5.2).
 fn is_valid<T: XmlNumber>(value: T, val: f64) -> bool {
     // Returns true, if T is the type float, double or long double.
     if T::IS_FLOATING_POINT {
@@ -297,7 +297,7 @@ fn parse_number_error(
 /// The first number of `s[start_pos..end_pos]`, which must hold nothing else but white space;
 /// the byte at `end_pos` (or the null past `s`) must not continue the number.
 ///
-/// Port of `ParseNumber` (XMLReaderUtils.h:140-208 @ v2.5.2), with this platform's
+/// Port of `ParseNumber` (XMLReaderUtils.h:150-205 @ v2.5.2), with this platform's
 /// `NumberUtils::from_chars`.
 pub fn parse_number<T: XmlNumber>(
     s: &[u8],
@@ -357,7 +357,7 @@ pub fn parse_number<T: XmlNumber>(
 /// Extracts the next number of `s`'s first `len` bytes from `*pos`; `*pos` moves to the start
 /// of the following one, or `len`.
 ///
-/// Port of `GetNextNumber` (XMLReaderUtils.h:210-228 @ v2.5.2).
+/// Port of `GetNextNumber` (XMLReaderUtils.h:210-226 @ v2.5.2).
 pub fn get_next_number<T: XmlNumber>(
     s: &[u8],
     len: usize,
@@ -380,7 +380,7 @@ pub fn get_next_number<T: XmlNumber>(
 
 /// The numbers of a string like "0 1 2" (`s`'s first `len` bytes).
 ///
-/// Port of `GetNumbers` (XMLReaderUtils.h:230-246 @ v2.5.2).
+/// Port of `GetNumbers` (XMLReaderUtils.h:230-244 @ v2.5.2).
 pub fn get_numbers<T: XmlNumber>(s: &[u8], len: usize) -> Result<Vec<T>> {
     let mut numbers = Vec::new();
 

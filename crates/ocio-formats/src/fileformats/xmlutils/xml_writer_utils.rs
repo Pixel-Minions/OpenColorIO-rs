@@ -21,7 +21,7 @@ pub type Attributes = Vec<Attribute>;
 
 /// Provides all services to write xml to an output stream.
 ///
-/// Port of `XmlFormatter` (XMLWriterUtils.h:15-70, XMLWriterUtils.cpp:12-127 @ v2.5.2).
+/// Port of `XmlFormatter` (XMLWriterUtils.h:16-70, XMLWriterUtils.cpp:12-127 @ v2.5.2).
 #[derive(Debug)]
 pub struct XmlFormatter<'s> {
     stream: &'s mut OStringStream,
@@ -121,7 +121,7 @@ impl<'s> XmlFormatter<'s> {
 
     /// Write the content using escaped characters if needed.
     ///
-    /// Port of `XmlFormatter::writeContent` (XMLWriterUtils.cpp:85-91 @ v2.5.2).
+    /// Port of `XmlFormatter::writeContent` (XMLWriterUtils.cpp:86-91 @ v2.5.2).
     pub fn write_content(&mut self, content: &[u8]) {
         self.write_indent();
         self.write_string(content);
@@ -162,7 +162,7 @@ impl<'s> XmlFormatter<'s> {
 
 /// A transform element's XML writer.
 ///
-/// Port of `XmlElementWriter` (XMLWriterUtils.h:72-87, XMLWriterUtils.cpp:141-148 @ v2.5.2).
+/// Port of `XmlElementWriter` (XMLWriterUtils.h:73-87, XMLWriterUtils.cpp:141-148 @ v2.5.2).
 /// Upstream's writers hold their formatter; here `write` is given it.
 pub trait XmlElementWriter {
     /// `write`.
@@ -171,7 +171,7 @@ pub trait XmlElementWriter {
 
 /// Increments the formatter's indentation while it lives, and gives access to the formatter.
 ///
-/// Port of `XmlScopeIndent` (XMLWriterUtils.h:89-103, XMLWriterUtils.cpp:129-139 @ v2.5.2).
+/// Port of `XmlScopeIndent` (XMLWriterUtils.h:91-103, XMLWriterUtils.cpp:129-139 @ v2.5.2).
 #[derive(Debug)]
 pub struct XmlScopeIndent<'f, 's> {
     formatter: &'f mut XmlFormatter<'s>,
@@ -186,7 +186,7 @@ impl<'f, 's> XmlScopeIndent<'f, 's> {
 }
 
 impl Drop for XmlScopeIndent<'_, '_> {
-    /// Port of `XmlScopeIndent::~XmlScopeIndent` (XMLWriterUtils.cpp:135-139 @ v2.5.2).
+    /// Port of `XmlScopeIndent::~XmlScopeIndent` (XMLWriterUtils.cpp:135-138 @ v2.5.2).
     fn drop(&mut self) {
         self.formatter.decrement_indent();
     }

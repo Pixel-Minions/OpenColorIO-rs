@@ -115,6 +115,13 @@ pub enum XmlError {
     NotStarted,
 }
 
+/// A buffer's length as OCIO's readers give it to `XML_Parse`: `(int)buffer.size()`, the low
+/// 32 bits of the `size_t` read as a two's complement `int` (both wheels' compilers convert
+/// so; C++20 defines it).
+pub fn c_int_length(len: usize) -> i32 {
+    len as u32 as i32
+}
+
 /// The message of an error code, or `None` for `XML_ERROR_NONE`.
 ///
 /// Port of `XML_ErrorString` (xmlparse.c:2855-2961).
@@ -1003,16 +1010,36 @@ impl<'a, E> Parser<'a, E> {
         }
     }
 
-    /// Parses `s`, the document's next bytes; `is_final` for its last.
+    /// Parses `buffer`, the document's next bytes, as OCIO's XML readers pass a line:
+    /// `XML_Parse(parser, buffer.c_str(), (int)buffer.size(), done)`. The length is cast to
+    /// `int` as there: a buffer of 2 GiB or more wraps, so a negative length is refused
+    /// ("invalid argument") and one of 4 GiB or more parses only its first `len mod 2^32`
+    /// bytes (docs/improvements.md, I-177).
+    pub fn parse(&mut self, buffer: &[u8], is_final: bool) -> Result<XmlStatus, ParseError<E>> {
+        self.parse_len(buffer, c_int_length(buffer.len()), is_final)
+    }
+
+    /// Parses the first `len` bytes of `s`, the document's next bytes; `is_final` for its
+    /// last. A negative `len` is refused (`XML_ERROR_INVALID_ARGUMENT`).
     ///
     /// Port of `XML_Parse` (xmlparse.c:2324-2433) with `XML_CONTEXT_BYTES` 1024: the bytes go
     /// into the parser's buffer (`XML_GetBuffer`) and are parsed there (`XML_ParseBuffer`).
-    pub fn parse(&mut self, s: &[u8], is_final: bool) -> Result<XmlStatus, ParseError<E>> {
-        let Ok(len) = i32::try_from(s.len()) else {
-            // `int len`: a C caller can't pass more.
+    ///
+    /// # Panics
+    ///
+    /// When `len` is more than `s.len()`, which a C caller can't express safely.
+    pub fn parse_len(
+        &mut self,
+        s: &[u8],
+        len: i32,
+        is_final: bool,
+    ) -> Result<XmlStatus, ParseError<E>> {
+        if len < 0 {
             self.error_code = XmlError::InvalidArgument;
             return Ok(XmlStatus::Error);
-        };
+        }
+        assert!(len as usize <= s.len(), "len is past the bytes");
+        let s = &s[..len as usize];
         match self.parsing {
             ParsingStatus::Finished => {
                 self.error_code = XmlError::Finished;
@@ -1593,6 +1620,15 @@ impl<'a, E> Parser<'a, E> {
                     }
                     // Falls through to XML_ROLE_ENTITY_SYSTEM_ID: the system id itself is read
                     // only by handlers.
+                }
+                XML_ROLE_NOTATION_PUBLIC_ID => {
+                    // xmlparse.c:5821-5836: the public id is checked; without a notation
+                    // declaration handler (m_declNotationName stays NULL) nothing is stored.
+                    let mut bad = 0usize;
+                    if !enc.is_public_id(b, s, next, &mut bad) {
+                        self.event_ptr = Some(bad);
+                        return Ok(XmlError::Publicid);
+                    }
                 }
                 XML_ROLE_ENTITY_NOTATION_NAME => {
                     if self.dtd.keep_processing

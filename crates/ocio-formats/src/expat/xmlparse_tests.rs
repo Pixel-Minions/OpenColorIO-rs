@@ -15,8 +15,7 @@
 //! Not ported, beyond those that need what the port leaves out: the tests that query the
 //! parser from inside a handler (`test_line_and_column_numbers_inside_handlers`,
 //! `test_attributes`, `test_deep_nested_attribute_entity`, `test_misc_expected_event_ptr_issue_980`):
-//! the port's handlers can't reach their parser, and OCIO's don't; `test_negative_len_parse`:
-//! the port's `parse` takes a slice, whose length can't be negative;
+//! the port's handlers can't reach their parser, and OCIO's don't;
 //! `test_buffer_can_grow_to_max`: it switches off the allocation tracker, which is not
 //! ported, and grows buffers to 1 GiB; `test_misc_error_string`: a Rust enum has no
 //! out-of-range values; `test_siphash_*`, `test_hash_collision`: the port's maps don't hash
@@ -1246,6 +1245,67 @@ fn test_empty_parse() {
         if parse(&mut parser, b"", true) != XmlStatus::Error {
             panic!("{run:?}: Parsing final incomplete empty string not faulted");
         }
+    });
+}
+
+/// Port of expat 2.7.2 `START_TEST(test_negative_len_parse)`
+/// (tests/basic_tests.c:2939-2960).
+#[test]
+fn test_negative_len_parse() {
+    each_run(|run| {
+        let doc = b"<root/>";
+        for is_final in [false, true] {
+            let mut parser = run.parser();
+
+            assert_eq!(
+                parser.error_code(),
+                XmlError::None,
+                "{run:?}: There was not supposed to be any initial parse error."
+            );
+
+            let status = match parser.parse_len(doc, -1, is_final) {
+                Ok(status) => status,
+                Err(ParseError::Handler(never)) => match never {},
+            };
+
+            assert_eq!(
+                status,
+                XmlStatus::Error,
+                "{run:?}: Negative len was expected to fail the parse but did not."
+            );
+
+            assert_eq!(
+                parser.error_code(),
+                XmlError::InvalidArgument,
+                "{run:?}: Parse error does not match XML_ERROR_INVALID_ARGUMENT."
+            );
+        }
+    });
+}
+
+/// OCIO's readers pass `(int)buffer.size()` (I-177): the low 32 bits of the length, as a
+/// two's complement `int`. A length of 2 GiB to 4 GiB is negative, refused by `XML_Parse`; one
+/// of 4 GiB or more parses its first `len mod 2^32` bytes. (The values are the definition of
+/// the conversion; no buffer of that size is made.)
+#[test]
+fn a_line_of_4_gib_or_more_parses_its_length_mod_2_32() {
+    assert_eq!(c_int_length(0), 0);
+    assert_eq!(c_int_length(7), 7);
+    assert_eq!(c_int_length(0x7fff_ffff), i32::MAX);
+    assert_eq!(c_int_length(0x8000_0000), i32::MIN);
+    assert_eq!(c_int_length(0xffff_ffff), -1);
+    assert_eq!(c_int_length(0x1_0000_0000), 0);
+    assert_eq!(c_int_length(0x1_0000_0007), 7);
+
+    // What a length mod 2^32 does: only those bytes are parsed.
+    each_run(|_run| {
+        let mut parser: P<'_> = Parser::new();
+        let doc = b"<root/><junk";
+        let status = match parser.parse_len(doc, 7, true) {
+            Ok(status) => status,
+            Err(ParseError::Handler(never)) => match never {},
+        };
+        assert_eq!(status, XmlStatus::Ok);
     });
 }
 
@@ -2768,4 +2828,115 @@ fn documents_past_the_memory_limit_are_refused() {
             assert_eq!(xml_error_string(parser.error_code()), Some("out of memory"));
         }
     });
+}
+
+/// Every error code's number and message are expat 2.7.2's: the order of `enum XML_Error`
+/// (expat.h) and the strings `XML_ErrorString` returns (xmlparse.c), read from the pinned
+/// sources.
+#[test]
+fn the_error_strings_are_expat_s() {
+    use XmlError::*;
+    let all = [
+        None,
+        NoMemory,
+        Syntax,
+        NoElements,
+        InvalidToken,
+        UnclosedToken,
+        PartialChar,
+        TagMismatch,
+        DuplicateAttribute,
+        JunkAfterDocElement,
+        ParamEntityRef,
+        UndefinedEntity,
+        RecursiveEntityRef,
+        AsyncEntity,
+        BadCharRef,
+        BinaryEntityRef,
+        AttributeExternalEntityRef,
+        MisplacedXmlPi,
+        UnknownEncoding,
+        IncorrectEncoding,
+        UnclosedCdataSection,
+        ExternalEntityHandling,
+        NotStandalone,
+        UnexpectedState,
+        EntityDeclaredInPe,
+        FeatureRequiresXmlDtd,
+        CantChangeFeatureOnceParsing,
+        UnboundPrefix,
+        UndeclaringPrefix,
+        IncompletePe,
+        XmlDecl,
+        TextDecl,
+        Publicid,
+        Suspended,
+        NotSuspended,
+        Aborted,
+        Finished,
+        SuspendPe,
+        ReservedPrefixXml,
+        ReservedPrefixXmlns,
+        ReservedNamespaceUri,
+        InvalidArgument,
+        NoBuffer,
+        AmplificationLimitBreach,
+        NotStarted,
+    ];
+    let lib =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../upstream/expat/expat/lib");
+    let header = std::fs::read_to_string(lib.join("expat.h")).expect("expat.h");
+    let source = std::fs::read_to_string(lib.join("xmlparse.c")).expect("xmlparse.c");
+
+    // The names of `enum XML_Error`, in order.
+    let body = &header[header.find("enum XML_Error {").expect("the enum")..];
+    let body = &body[..body.find('}').expect("its end")];
+    let names: Vec<&str> = body
+        .lines()
+        .skip(1)
+        .map(|l| l.trim().trim_end_matches(','))
+        .filter(|l| l.starts_with("XML_ERROR_"))
+        .map(|l| l.split_whitespace().next().expect("a name"))
+        .collect();
+    assert_eq!(names.len(), all.len(), "the number of error codes");
+
+    // `case XML_ERROR_X: return XML_L("text");` (or `return NULL;`).
+    let strings = &source[source
+        .find("XML_ErrorString(enum XML_Error code) {")
+        .expect("the function")..];
+    for (index, (name, code)) in names.iter().zip(all).enumerate() {
+        assert_eq!(code as i32, index as i32, "{name}");
+        let camel: String = name["XML_ERROR_".len()..]
+            .split('_')
+            .map(|w| {
+                let w = w.to_ascii_lowercase();
+                w[..1].to_ascii_uppercase() + &w[1..]
+            })
+            .collect();
+        assert_eq!(format!("{code:?}"), camel, "{name}");
+        let case = format!("case {name}:");
+        let at = strings.find(&case).unwrap_or_else(|| panic!("{case}"));
+        let ret = &strings[at + case.len()..];
+        // Past a comment on the case's line.
+        let ret = match ret.trim_start().strip_prefix("/*") {
+            Some(rest) => &rest[rest.find("*/").expect("the comment's end") + 2..],
+            Option::None => ret,
+        }
+        .trim_start();
+        let expected = if ret.starts_with("return NULL;") {
+            Option::None
+        } else {
+            // The literals of `XML_L(...)`, concatenated (some span lines).
+            let args = ret
+                .strip_prefix("return XML_L(")
+                .unwrap_or_else(|| panic!("{name}: {}", &ret[..40]));
+            let args = &args[..args.find(");").expect("the call's end")];
+            Some(args.split('"').skip(1).step_by(2).collect::<String>())
+        };
+        assert_eq!(
+            xml_error_string(code).map(str::to_owned),
+            expected,
+            "{name}"
+        );
+    }
 }
