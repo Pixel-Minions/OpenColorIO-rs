@@ -4608,8 +4608,9 @@ status = "todo"
 [[file]]
 path = "tests/cpu/fileformats/FileFormatICC_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-formats/src/fileformats/file_format_icc_tests.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/icc/icc_profile_reader_tests.rs", "crates/ocio/src/fileformats/file_format_icc_tests.rs"]
+status = "partial"
+note = "p4-readers 4.7a: types and endian (icc_profile_reader_tests.rs); the others come with the reader (4.7b)"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatIridasCube_tests.cpp"

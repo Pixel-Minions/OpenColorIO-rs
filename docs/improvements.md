@@ -2108,6 +2108,38 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   a line shorter than 5 bytes never matches; checked against the wheel with headers around
   that length (`crates/ocio/tests/file_format_discreet1dl_oracle.rs`).
 
+### I-165. An ICC `mluc` string of 2^30 characters or more wraps its byte count
+
+- **Upstream:** SampleICC's `mluc` reader reads a record's string with
+  `Read16(istream, &unicodeStr[0], nNumChar)` (`ext/sampleicc/src/include/iccProfileReader.h:
+  366-369` @ OCIO v2.5.2), whose byte count is `num << 1` on an `icInt32Number`: for 2^30
+  characters or more the shift overflows (undefined in C++), and both compilers' shift wraps
+  it to a negative count, which reads nothing (I-166). `Read16` then returns half that
+  negative count, never the length the record claims, and the tag's reader fails.
+- **Who notices:** nobody: such a record claims a string of 2 GiB or more.
+- **A fix:** check the length against the tag's size before reading.
+- **Status:** matched in `p4-readers` (4.7a, `crates/ocio/src/fileformats/icc/
+  icc_profile_reader.rs`): the count wraps as the wheels' does.
+
+### I-166. SampleICC reads a negative count differently on Windows and Linux
+
+- **Upstream:** `SampleICC::Read8` (`iccProfileReader.h:144-156` @ OCIO v2.5.2) passes its
+  `icInt32Number` count to `istream::read`, and the `desc` reader passes a 32-bit text size
+  of 2^31 or more there as a negative count (`iccProfileReader.h:259-264`), as the `mluc`
+  reader does a wrapped one (I-165). MSVC's `istream::read` reads nothing for a count below 1
+  and leaves the stream good, so `Read8` returns the count; libstdc++'s asks the buffer for no
+  bytes, finds it didn't get the count, and fails the stream. So on Windows a `desc` tag of
+  such a size reads as an empty description (after allocating up to 4 GiB, U-70), and the
+  profile reads on; on Linux the tag's reader fails, and so does every later read of the
+  profile (a failed stream doesn't seek), which gives `Illegal matrix tag in ICC profile.`
+  An `mluc` string of 2^30 characters or more fails its reader on both, but leaves the
+  stream good on Windows only.
+- **Who notices:** nobody but a corrupt profile: the size claims 2 GiB or more.
+- **A fix:** check the size against the tag's size before reading.
+- **Status:** matched in `p4-readers` (4.7a, `crates/ocio/src/fileformats/icc/
+  icc_profile_reader.rs`), per platform; checked against the wheel on both
+  (`crates/ocio/tests/file_format_icc_oracle.rs`, "a desc of size 2^32 - 1").
+
 ## File formats
 
 ### I-170. expat counts a start tag's attribute values twice
@@ -2948,6 +2980,22 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Status:** matched in `p2-lut3d-inv` (2.2d2), `InvLut3DRenderer::new`
   (`crates/ocio-ops/src/ops/lut3d/inv_lut3d.rs`, `GRID_SIZE_1_INVERSE`); `grid_size_1_is_refused`
   (`crates/ocio-ops/tests/lut3d_inv_oracle.rs`).
+
+### U-70. ICC description strings longer than the file
+
+- **Upstream:** SampleICC's `desc` and `mluc` readers allocate the string a tag claims before
+  reading it (`mText.resize(textSize + 1)`, `std::vector<icUInt16Number> unicodeStr(nNumChar)`,
+  `iccProfileReader.h:261-264, 366-369` @ OCIO v2.5.2): up to 4 GiB for a size the file can't
+  hold. Where the allocation succeeds, the read then fails and so does the tag's reader; where
+  it doesn't, `std::bad_alloc` escapes the reader and the load fails with its message, which
+  depends on the machine's memory.
+- **Who notices:** hostile or corrupt profiles.
+- **A fix:** check the size against the tag's size first.
+- **Decided** (P4-7, the general rule): the port reads such a string in pieces as far as the
+  file goes, never allocating more than the file holds, and the tag's reader fails as it does
+  in the wheel when the allocation succeeds.
+- **Status:** matched in `p4-readers` (4.7a, `read_bytes` in `crates/ocio/src/fileformats/icc/
+  icc_profile_reader.rs`); the wheel's results for such profiles are compared in 4.7b.
 
 ### U-75. A CDL or CCC file whose root element never starts
 

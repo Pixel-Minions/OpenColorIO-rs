@@ -260,6 +260,19 @@ impl InputStream {
             self.pos = 0;
         }
     }
+
+    /// Moves to the absolute position `pos`: `eofbit` is cleared first (C++11), and a failed
+    /// stream doesn't move. A file's stream moves past its end too (`basic_filebuf::seekpos`
+    /// succeeds there), and the next read then reaches the end.
+    ///
+    /// Port of `std::istream::seekg(pos_type)` (C++17 [istream.unformatted] 30.7.4.3/41), on
+    /// a file's stream.
+    pub fn seekg(&mut self, pos: u64) {
+        self.eof = false;
+        if !self.fail() {
+            self.pos = usize::try_from(pos).unwrap_or(usize::MAX);
+        }
+    }
 }
 
 /// The bytes a text-mode read of `raw` gives in the UCRT (`_read` of a text-mode file):

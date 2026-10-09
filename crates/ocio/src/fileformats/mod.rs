@@ -11,6 +11,7 @@ pub mod file_format_discreet1dl;
 pub mod file_format_spi1d;
 pub mod file_format_spimtx;
 pub mod file_format_utils;
+pub mod icc;
 pub mod input_stream;
 
 #[cfg(test)]
