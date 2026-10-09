@@ -876,8 +876,9 @@ note = "p4-cdl 4.4e"
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatCSP.cpp"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/file_format_csp.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_csp.rs"]
+status = "partial"
+note = "p4-readers 4.3e: the reader (the cubic prelut interpolator in each wheel's operand order) and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_csp_oracle.rs; a metadata block never closed is an error (U-72); bake comes with WP 4.8"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatCTF.cpp"
@@ -4597,8 +4598,9 @@ note = "p4-cdl 4.4e: test_cdl, write"
 [[file]]
 path = "tests/cpu/fileformats/FileFormatCSP_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-formats/src/fileformats/file_format_csp_tests.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_csp_tests.rs"]
+status = "partial"
+note = "p4-readers 4.3e: simple_1d, simple_3d, less_strict_parse, failures_1d, failures_3d; complete_3d, shaper_hdr and no_shaper bake, and come with WP 4.8"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatCTF_tests.cpp"

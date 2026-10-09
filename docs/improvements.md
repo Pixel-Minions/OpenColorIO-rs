@@ -3034,6 +3034,23 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Status:** matched with an error in `p4-readers` (4.3b, `crates/ocio/src/fileformats/
   file_format_hdl.rs`).
 
+### U-72. A cineSpace metadata block never closed
+
+- **Upstream:** the `.csp` reader reads its metadata block with
+  `while (!startswithU(line, "END METADATA") || !istream) { nextline(istream, line); ... }`
+  (`src/OpenColorIO/fileformats/FileFormatCSP.cpp:403-413` @ v2.5.2). At the end of the file
+  `nextline` returns an empty line, so a block without `END METADATA` never ends: reading such
+  a file never returns (and appends a line feed to the metadata on every turn).
+- **Who notices:** applications that read a truncated or malformed `.csp` file.
+- **A fix:** stop at the end of the file with an error.
+- **Decided** (the owner's general rule for endless loops, as U-5 and U-65): the port's error
+  "Metadata block of csp LUT <file> is not closed. Expected 'END METADATA' before the end of
+  the file.", raised where `nextline` finds the end of the file inside the block: the wheel
+  never returns from any file that gets there, and returns from every other.
+- **Status:** matched with an error in `p4-readers` (4.3e, `crates/ocio/src/fileformats/
+  file_format_csp.rs`); `a_metadata_block_never_closed_is_an_error`
+  (`file_format_csp_tests.rs`).
+
 ### U-75. A CDL or CCC file whose root element never starts
 
 - **Upstream:** the CDL parser picks the schema from the first 5 KiB of the file: the first

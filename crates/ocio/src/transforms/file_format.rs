@@ -291,7 +291,6 @@ impl FileFormat for NotPortedFormat {
 fn create_formats() -> Vec<Box<dyn FileFormat>> {
     use FormatBakeCapabilities as B;
     use FormatCapabilities as C;
-    let read_bake = C::READ | C::BAKE;
     let all_bakes = B::LUT_3D | B::LUT_1D | B::LUT_1D_3D;
     let stub = |infos: Vec<FormatInfo>| -> Box<dyn FileFormat> {
         Box::new(NotPortedFormat {
@@ -322,12 +321,7 @@ fn create_formats() -> Vec<Box<dyn FileFormat>> {
             FormatInfo::new(FILEFORMAT_CTF, "ctf", C::READ | C::BAKE | C::WRITE, B::NONE),
         ]),
         // FileFormatCSP.cpp:351-359.
-        stub(vec![FormatInfo::new(
-            "cinespace",
-            "csp",
-            read_bake,
-            B::LUT_3D | B::LUT_1D_3D,
-        )]),
+        Box::new(crate::fileformats::file_format_csp::LocalFileFormat),
         // FileFormatDiscreet1DL.cpp:675-682.
         Box::new(crate::fileformats::file_format_discreet1dl::LocalFileFormat),
         // FileFormatHDL.cpp:295-305.
