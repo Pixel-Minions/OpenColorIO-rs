@@ -3,7 +3,7 @@
 //
 // Translated from SampleICC 1.2.6 (`ext/sampleicc/src/include/iccProfileReader.h` and the
 // parts of `icProfileHeader.h` it uses, as OpenColorIO 2.5.2 carries them), under the ICC
-// Software License, Version 0.2 (NOTICE):
+// Software License, Version 0.2 (THIRD-PARTY-NOTICES.md):
 //
 // Copyright (c) 2003-2010 The International Color Consortium. All rights reserved.
 

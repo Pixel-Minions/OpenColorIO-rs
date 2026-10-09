@@ -536,7 +536,7 @@ The order follows OCIO's own layering, and each milestone is a complete section 
 
 | WP | Scope |
 |---|---|
-| 0.1 | Workspace; CI on Windows x86-64 and Rocky Linux 9; `cargo-deny`; LICENSE and NOTICE |
+| 0.1 | Workspace; CI on Windows x86-64 and Rocky Linux 9; `cargo-deny`; LICENSE and NOTICE (third-party notices: `THIRD-PARTY-NOTICES.md`, since 2026-10-09) |
 | 0.2 | The `upstream/` submodule at v2.5.2; `upstream-map.toml` listing every upstream file; `xtask upstream-status` |
 | 0.3 | The oracle and `ocio-testkit`: exact comparators and bit-level diff reports |
 | 0.4 | Guardrails: fixture manifest, CODEOWNERS, `waivers.toml`, test-count ratchet, parity dashboard |

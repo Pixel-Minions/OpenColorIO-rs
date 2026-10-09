@@ -256,6 +256,8 @@ cargo xtask ci --main              # also: the parity dashboard and the ratchet 
 ## License
 
 BSD-3-Clause, the same license as OpenColorIO. This project is a derivative work of
-OpenColorIO (Copyright Contributors to the OpenColorIO Project). [`NOTICE`](NOTICE) lists the
-third-party code it ports: Imath (BSD-3-Clause) and yaml-cpp (MIT). OpenColorIO-rs is not
+OpenColorIO (Copyright Contributors to the OpenColorIO Project); [`NOTICE`](NOTICE) is its
+notice. [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md) lists the third-party code it ports,
+with each notice: Imath, yaml-cpp, pystring, expat, the Microsoft C++ Standard Library,
+SampleICC, and the OpenColorIO files that carry their own notices. OpenColorIO-rs is not
 affiliated with the Academy Software Foundation.
