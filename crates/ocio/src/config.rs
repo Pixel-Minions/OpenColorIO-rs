@@ -5867,7 +5867,7 @@ impl Config {
         used_context.set_config_io_proxy(context.config_io_proxy().cloned());
 
         let need_context_variables =
-            collect_context_variables(self, context, transform, &mut used_context);
+            collect_context_variables(self, context, transform, &mut used_context)?;
 
         // Create helper method.
         let create_processor = || -> Result<Arc<Processor>> {

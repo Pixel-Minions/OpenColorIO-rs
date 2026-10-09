@@ -454,20 +454,20 @@ pub(crate) fn collect_named_transform_context_variables(
     context: &Context,
     nt: Option<&NamedTransform>,
     used_context_vars: &mut Context,
-) -> bool {
+) -> Result<bool> {
     let mut found_context_vars = false;
 
     if let Some(nt) = nt {
         for dir in [TransformDirection::Forward, TransformDirection::Inverse] {
             if let Some(t) = nt.transform(dir)
-                && collect_context_variables(config, context, t, used_context_vars)
+                && collect_context_variables(config, context, t, used_context_vars)?
             {
                 found_context_vars = true;
             }
         }
     }
 
-    found_context_vars
+    Ok(found_context_vars)
 }
 
 /// Whether the color space `cs` uses context variables, which it adds to `used_context_vars`:
@@ -480,7 +480,7 @@ pub(crate) fn collect_color_space_context_variables(
     context: &Context,
     cs: Option<&ColorSpace>,
     used_context_vars: &mut Context,
-) -> bool {
+) -> Result<bool> {
     let mut found_context_vars = false;
 
     if let Some(cs) = cs {
@@ -489,14 +489,14 @@ pub(crate) fn collect_color_space_context_variables(
             ColorSpaceDirection::FromReference,
         ] {
             if let Some(t) = cs.transform(dir)
-                && collect_context_variables(config, context, t, used_context_vars)
+                && collect_context_variables(config, context, t, used_context_vars)?
             {
                 found_context_vars = true;
             }
         }
     }
 
-    found_context_vars
+    Ok(found_context_vars)
 }
 
 /// Whether `tr` uses context variables, which it adds to `used_context_vars`: those its source
@@ -510,7 +510,7 @@ pub(crate) fn collect_color_space_transform_context_variables(
     context: &Context,
     tr: &ColorSpaceTransform,
     used_context_vars: &mut Context,
-) -> bool {
+) -> Result<bool> {
     let mut found_context_vars = false;
 
     // NB: The search could return false positive but should not miss anything i.e. it looks
@@ -529,21 +529,21 @@ pub(crate) fn collect_color_space_transform_context_variables(
     for name in [&src_name, &dst_name] {
         let found = match config.color_space(name) {
             Some(cs) => {
-                collect_color_space_context_variables(config, context, Some(cs), used_context_vars)
+                collect_color_space_context_variables(config, context, Some(cs), used_context_vars)?
             }
             None => collect_named_transform_context_variables(
                 config,
                 context,
                 config.named_transform(name),
                 used_context_vars,
-            ),
+            )?,
         };
         if found {
             found_context_vars = true;
         }
     }
 
-    found_context_vars
+    Ok(found_context_vars)
 }
 
 #[cfg(test)]

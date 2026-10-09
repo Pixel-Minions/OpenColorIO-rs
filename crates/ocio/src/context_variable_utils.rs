@@ -9,6 +9,7 @@
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
+use ocio_ops::exception::Result;
 use ocio_ops::platform::env_provider;
 use ocio_ops::utils::string_utils::{find, replace_in_place, reverse_find};
 
@@ -17,6 +18,7 @@ use crate::context::Context;
 use crate::transform::Transform;
 use crate::transforms::color_space_transform::collect_color_space_transform_context_variables;
 use crate::transforms::file_transform::collect_file_transform_context_variables;
+use crate::transforms::look_transform::collect_look_transform_context_variables;
 
 /// A context variable's name, ordered as `EnvMapKey` orders them: longer names first, then
 /// bytes in order, so that `$TEST1NG` is replaced before `$TEST1`.
@@ -151,42 +153,46 @@ pub fn resolve_context_variables(str: &[u8], map: &EnvMap, used: &mut UsedEnvs) 
 }
 
 /// Whether `transform` uses context variables, which it adds to `used_context_vars`: the
-/// color space and file transforms' overloads, and a group asks its children.
+/// color space, file and look transforms' overloads, and a group asks its children. A look list
+/// that can't be parsed is an error, as upstream's parser throws through it.
 ///
 /// Port of `CollectContextVariables(const Config &, const Context &, ConstTransformRcPtr,
 /// ContextRcPtr &)` (src/OpenColorIO/ContextVariableUtils.cpp:179-206 @ v2.5.2) and its
-/// `GroupTransform` overload (transforms/GroupTransform.cpp:206-223 @ v2.5.2). The overloads of
-/// the display view and look transforms come with their builders (WP 3.2b-c); the other classes
-/// use none.
+/// `GroupTransform` overload (transforms/GroupTransform.cpp:206-223 @ v2.5.2). The overload of
+/// the display view transform comes with its builder (WP 3.2c); the other classes use none.
 pub(crate) fn collect_context_variables(
     config: &Config,
     context: &Context,
     transform: &Transform,
     used_context_vars: &mut Context,
-) -> bool {
+) -> Result<bool> {
     match transform {
         Transform::Group(tr) => {
             let mut found_context_vars = false;
 
             for idx in 0..tr.num_transforms() {
                 let child = tr.transform(idx).expect("an index inside the group");
-                if collect_context_variables(config, context, child, used_context_vars) {
+                if collect_context_variables(config, context, child, used_context_vars)? {
                     found_context_vars = true;
                 }
             }
 
-            found_context_vars
+            Ok(found_context_vars)
         }
         Transform::ColorSpace(tr) => {
             collect_color_space_transform_context_variables(config, context, tr, used_context_vars)
         }
-        Transform::File(tr) => {
-            collect_file_transform_context_variables(context, tr, used_context_vars)
+        Transform::File(tr) => Ok(collect_file_transform_context_variables(
+            context,
+            tr,
+            used_context_vars,
+        )),
+        Transform::Look(tr) => {
+            collect_look_transform_context_variables(config, context, tr, used_context_vars)
         }
-        // Their overloads read the names and the config's displays, views and looks; they come
-        // with their op builders (WP 3.2b-c), and until then the processor refuses to build their
-        // ops.
-        Transform::DisplayView(_) | Transform::Look(_) => false,
+        // Its overload reads the names and the config's displays, views and looks; it comes with
+        // its op builder (WP 3.2c), and until then the processor refuses to build its ops.
+        Transform::DisplayView(_) => Ok(false),
         // The classes that use no context variable.
         Transform::Allocation(_)
         | Transform::Builtin(_)
@@ -200,7 +206,7 @@ pub(crate) fn collect_context_variables(
         | Transform::Lut3D(_)
         | Transform::Log(_)
         | Transform::Matrix(_)
-        | Transform::Range(_) => false,
+        | Transform::Range(_) => Ok(false),
     }
 }
 

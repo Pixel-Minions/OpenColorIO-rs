@@ -268,7 +268,6 @@ fn processors_of_the_classes_without_builders_are_refused() {
             "WP 3.2c",
         ),
         (TransformType::File, "FileTransform", "WP 4.1"),
-        (TransformType::Look, "LookTransform", "WP 3.2b"),
     ];
     let arms = arms();
     for (class, name, work_package) in cases {

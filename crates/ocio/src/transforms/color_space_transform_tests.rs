@@ -818,12 +818,10 @@ fn context_variables() {
 
     // Case 1 - No context variables.
 
-    assert!(!collect_color_space_transform_context_variables(
-        &cfg,
-        &ctx,
-        &cst,
-        &mut used_context_vars
-    ));
+    assert!(
+        !collect_color_space_transform_context_variables(&cfg, &ctx, &cst, &mut used_context_vars)
+            .unwrap()
+    );
     assert_eq!(0, used_context_vars.num_string_vars());
 
     // Case 2 - The source color space name is now a context variable.
@@ -831,12 +829,10 @@ fn context_variables() {
     ctx.set_string_var("ENV1", Some(b"cs1"));
     cst.set_src("$ENV1");
     let mut used_context_vars = Context::new(); // New & empty instance.
-    assert!(collect_color_space_transform_context_variables(
-        &cfg,
-        &ctx,
-        &cst,
-        &mut used_context_vars
-    ));
+    assert!(
+        collect_color_space_transform_context_variables(&cfg, &ctx, &cst, &mut used_context_vars)
+            .unwrap()
+    );
     assert_eq!(1, used_context_vars.num_string_vars());
     assert_eq!(b"ENV1", used_context_vars.string_var_name_by_index(0));
     assert_eq!(b"cs1", used_context_vars.string_var_by_index(0));
@@ -845,12 +841,10 @@ fn context_variables() {
 
     cst.set_src("cs1");
     let mut used_context_vars = Context::new(); // New & empty instance.
-    assert!(!collect_color_space_transform_context_variables(
-        &cfg,
-        &ctx,
-        &cst,
-        &mut used_context_vars
-    ));
+    assert!(
+        !collect_color_space_transform_context_variables(&cfg, &ctx, &cst, &mut used_context_vars)
+            .unwrap()
+    );
     assert_eq!(0, used_context_vars.num_string_vars());
 
     // Case 4 - Context variable indirectly used.
@@ -868,12 +862,10 @@ fn context_variables() {
     // 'cst' now uses 'cs4' which is a FileTransform where the file name is a context variable.
     cst.set_src("cs4");
     let mut used_context_vars = Context::new(); // New & empty instance.
-    assert!(collect_color_space_transform_context_variables(
-        &cfg,
-        &ctx,
-        &cst,
-        &mut used_context_vars
-    ));
+    assert!(
+        collect_color_space_transform_context_variables(&cfg, &ctx, &cst, &mut used_context_vars)
+            .unwrap()
+    );
     assert_eq!(1, used_context_vars.num_string_vars());
     assert_eq!(b"ENV1", used_context_vars.string_var_name_by_index(0));
     assert_eq!(
@@ -895,12 +887,10 @@ fn context_variables() {
     // 'cst' now uses 'nt' which is a NamedTransform whose transform uses a context variable.
     cst.set_src("nt");
     let mut used_context_vars = Context::new(); // New & empty instance.
-    assert!(collect_color_space_transform_context_variables(
-        &cfg,
-        &ctx,
-        &cst,
-        &mut used_context_vars
-    ));
+    assert!(
+        collect_color_space_transform_context_variables(&cfg, &ctx, &cst, &mut used_context_vars)
+            .unwrap()
+    );
     assert_eq!(1, used_context_vars.num_string_vars());
     assert_eq!(b"ENV1", used_context_vars.string_var_name_by_index(0));
     assert_eq!(

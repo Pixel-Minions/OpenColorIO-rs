@@ -199,7 +199,7 @@ path = "src/OpenColorIO/ContextVariableUtils.cpp"
 kind = "src"
 target = ["crates/ocio/src/context_variable_utils.rs"]
 status = "partial"
-note = "1.8g: CollectContextVariables for the classes in the port (the group overload of transforms/GroupTransform.cpp:206-223 included); p3-context 3.5d: ContainsContextVariableToken, ContainsContextVariables, LoadEnvironment, ResolveContextVariables. The other CollectContextVariables overloads come with their transform classes; p3-builders 3.2a: the dispatch to the color space and file transforms' overloads"
+note = "1.8g: CollectContextVariables for the classes in the port (the group overload of transforms/GroupTransform.cpp:206-223 included); p3-context 3.5d: ContainsContextVariableToken, ContainsContextVariables, LoadEnvironment, ResolveContextVariables. The other CollectContextVariables overloads come with their transform classes; p3-builders 3.2a: the dispatch to the color space and file transforms' overloads; p3-builders 3.2b: the look transform's overload, and the overloads return the look parser's error as upstream throws it"
 
 [[file]]
 path = "src/OpenColorIO/ContextVariableUtils.h"
@@ -378,8 +378,8 @@ note = "see Logging.cpp"
 path = "src/OpenColorIO/Look.cpp"
 kind = "src"
 target = ["crates/ocio/src/look.rs"]
-status = "partial"
-note = "p3-model-objects (3.4b): the class and its operator<< (U-50); CollectContextVariables (198-271) comes with 3.2b"
+status = "done"
+note = "p3-model-objects (3.4b): the class and its operator<< (U-50); p3-builders 3.2b: CollectContextVariables (198-271)"
 
 [[file]]
 path = "src/OpenColorIO/LookParse.cpp"
@@ -2350,8 +2350,8 @@ note = "p1-transforms-fam2 (1.8e)"
 path = "src/OpenColorIO/transforms/LookTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/look_transform.rs"]
-status = "partial"
-note = "p3-transforms (3.1a): the class (18-147, 181-191), its validation and operator<<, checked against the wheel in crates/ocio/tests/config_transforms_oracle.rs; GetLooksResultColorSpace, BuildLookOps and CollectContextVariables come with p3-builders (3.2b)"
+status = "done"
+note = "p3-transforms (3.1a): the class (18-147, 181-191), its validation and operator<<, checked against the wheel in crates/ocio/tests/config_transforms_oracle.rs; p3-builders 3.2b: LooksResultColorSpace and GetLooksResultColorSpace (148-178), RunLookTokens, both BuildLookOps and CollectContextVariables (193-479)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/Lut1DTransform.cpp"
@@ -5132,7 +5132,7 @@ path = "tests/cpu/transforms/LookTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/look_transform_tests.rs"]
 status = "partial"
-note = "p3-transforms (3.1a): basic (it uses no fixed function); inverse_look_transform and context_variables come with 3.2b, build_look_ops and build_look_options_ops use fixed functions (p3-after-p2)"
+note = "p3-transforms (3.1a): basic; p3-builders 3.2b: build_look_ops, context_variables, inverse_look_transform; build_look_options_ops builds a FileTransform whose file is missing (WP 4.1)"
 
 [[file]]
 path = "tests/cpu/transforms/Lut1DTransform_tests.cpp"

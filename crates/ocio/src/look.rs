@@ -9,9 +9,13 @@ use std::fmt;
 
 use ocio_ops::cfmt::{Crt, OStringStream};
 use ocio_ops::exception::Result;
+use ocio_ops::open_color_types::{ColorSpaceDirection, TransformDirection};
 use ocio_ops::utils::string_utils::c_str;
 
 use crate::color_space::{get_interchange_attribute, set_interchange_attribute};
+use crate::config::Config;
+use crate::context::Context;
+use crate::context_variable_utils::collect_context_variables;
 use crate::transform::{Transform, put_c_str};
 
 /// The interchange attributes a look knows.
@@ -216,6 +220,47 @@ impl Look {
         self.write_text(&mut os);
         os.into_bytes()
     }
+}
+
+/// Whether `look` uses context variables, which it adds to `used_context_vars`: those of the
+/// transform applied in the direction `direction` (its own, else the other one inverted), and
+/// those of its process space's transforms.
+///
+/// Port of `CollectContextVariables(const Config &, const Context &, TransformDirection, const
+/// Look &, ContextRcPtr &)` (src/OpenColorIO/Look.cpp:198-271 @ v2.5.2).
+pub(crate) fn collect_look_context_variables(
+    config: &Config,
+    context: &Context,
+    direction: TransformDirection,
+    look: &Look,
+    used_context_vars: &mut Context,
+) -> Result<bool> {
+    let mut found_context_vars = false;
+
+    let (own, other) = match direction {
+        TransformDirection::Forward => (look.transform(), look.inverse_transform()),
+        TransformDirection::Inverse => (look.inverse_transform(), look.transform()),
+    };
+    if let Some(tr) = own.or(other)
+        && collect_context_variables(config, context, tr, used_context_vars)?
+    {
+        found_context_vars = true;
+    }
+
+    if let Some(cs) = config.color_space(look.process_space()) {
+        for dir in [
+            ColorSpaceDirection::ToReference,
+            ColorSpaceDirection::FromReference,
+        ] {
+            if let Some(tr) = cs.transform(dir)
+                && collect_context_variables(config, context, tr, used_context_vars)?
+            {
+                found_context_vars = true;
+            }
+        }
+    }
+
+    Ok(found_context_vars)
 }
 
 impl fmt::Display for Look {

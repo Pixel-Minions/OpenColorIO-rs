@@ -413,3 +413,117 @@ fn color_space_transform_processors_match_the_wheel() {
     }
     check_processors_in(&cases, Some(&json!({"yaml": PROCESSOR_CONFIG})), &config);
 }
+
+/// A config of looks applied forward, inverse or both ways, in process spaces scene- and
+/// display-referred, data, the source's own, and one that doesn't exist, for the processors of
+/// look transforms (WP 3.2b).
+const LOOK_CONFIG: &str = "ocio_profile_version: 2
+environment: {}
+roles:
+  default: raw
+displays:
+  d:
+    - !<View> {name: v, colorspace: raw}
+view_transforms:
+  - !<ViewTransform>
+    name: vt
+    from_scene_reference: !<MatrixTransform> {offset: [0.01, 0.02, 0.03, 0]}
+looks:
+  - !<Look>
+    name: fwd
+    process_space: log
+    transform: !<CDLTransform> {slope: [1.1, 1, 0.9]}
+  - !<Look>
+    name: inv
+    process_space: lin
+    inverse_transform: !<CDLTransform> {offset: [0.1, 0, 0]}
+  - !<Look>
+    name: both
+    process_space: log
+    transform: !<CDLTransform> {sat: 0.8}
+    inverse_transform: !<ExponentTransform> {value: 2}
+  - !<Look>
+    name: none
+    process_space: lin
+  - !<Look>
+    name: data
+    process_space: raw
+    transform: !<MatrixTransform> {offset: [0.5, 0, 0, 0]}
+  - !<Look>
+    name: disp
+    process_space: disp
+    transform: !<RangeTransform> {min_in_value: 0, max_in_value: 1, min_out_value: 0, max_out_value: 2}
+  - !<Look>
+    name: lost
+    process_space: nowhere
+    transform: !<CDLTransform> {}
+display_colorspaces:
+  - !<ColorSpace>
+    name: disp
+    from_display_reference: !<ExponentTransform> {value: 2.4}
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+    isdata: true
+  - !<ColorSpace>
+    name: lin
+    aliases: [lin_alias]
+    to_scene_reference: !<MatrixTransform> {offset: [0.1, 0.2, 0.3, 0]}
+  - !<ColorSpace>
+    name: log
+    from_scene_reference: !<LogTransform> {base: 2}
+";
+
+/// The processors of look transforms: sources and destinations (the same, aliases, data,
+/// display-referred, missing), single looks, lists of looks, options of fall-back looks,
+/// inverse looks, empty names, missing looks and process spaces, with and without the color
+/// space conversion, both directions.
+#[test]
+fn look_transform_processors_match_the_wheel() {
+    let config = ocio::Config::create_from_stream(LOOK_CONFIG.as_bytes()).unwrap();
+    let ends = [
+        ("lin", "log"),
+        ("log", "lin"),
+        ("lin", "lin_alias"),
+        ("raw", "lin"),
+        ("lin", "disp"),
+        ("disp", "raw"),
+        ("missing", "lin"),
+        ("lin", "missing"),
+    ];
+    let looks = [
+        "",
+        "fwd",
+        "+fwd",
+        "-fwd",
+        "inv",
+        "-inv",
+        "both",
+        "-both",
+        "none",
+        "data",
+        "disp",
+        "fwd, inv, -both",
+        "-inv, data, +disp",
+        "fwd, , inv",
+        "lost",
+        "absent",
+        "absent | fwd",
+        "fwd | inv",
+        "lost | fwd",
+        "fwd:inv",
+        "\"fwd\", inv",
+        "\"fwd, inv",
+    ];
+    let mut cases = Vec::new();
+    for (i, (src, dst)) in ends.iter().enumerate() {
+        for (j, looks) in looks.iter().enumerate() {
+            let skip = (i + j) % 3 == 0;
+            cases.push(look_case([src, dst, looks], skip, Forward));
+            if (i + j) % 2 == 0 {
+                cases.push(look_case([src, dst, looks], !skip, Inverse));
+            }
+        }
+    }
+    check_processors_in(&cases, Some(&json!({"yaml": LOOK_CONFIG})), &config);
+}

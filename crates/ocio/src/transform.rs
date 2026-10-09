@@ -42,7 +42,7 @@ use crate::transforms::group_transform::{GroupTransform, build_group_ops};
 use crate::transforms::log_affine_transform::LogAffineTransform;
 use crate::transforms::log_camera_transform::LogCameraTransform;
 use crate::transforms::log_transform::{LogTransform, build_log_op, create_log_transform};
-use crate::transforms::look_transform::LookTransform;
+use crate::transforms::look_transform::{LookTransform, build_look_ops};
 use crate::transforms::lut1d_transform::{Lut1DTransform, build_lut1d_op, create_lut1d_transform};
 use crate::transforms::lut3d_transform::{Lut3DTransform, build_lut3d_op, create_lut3d_transform};
 use crate::transforms::matrix_transform::{
@@ -509,7 +509,9 @@ pub(crate) fn build_ops(
         Transform::LogAffine(log_transform) => build_log_op(ops, log_transform.data(), dir),
         Transform::LogCamera(log_transform) => build_log_op(ops, log_transform.data(), dir),
         Transform::Log(log_transform) => build_log_op(ops, log_transform.data(), dir),
-        Transform::Look(_) => Err(not_ported_yet("LookTransform", "WP 3.2b")),
+        Transform::Look(look_transform) => {
+            build_look_ops(ops, config, context, look_transform, dir)
+        }
         Transform::Lut1D(lut_transform) => build_lut1d_op(ops, lut_transform, dir),
         Transform::Lut3D(lut_transform) => build_lut3d_op(ops, lut_transform, dir),
         Transform::Matrix(matrix_transform) => build_matrix_op(ops, matrix_transform, dir),
