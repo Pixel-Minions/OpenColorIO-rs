@@ -232,19 +232,22 @@ fn getters(c: &Config) -> Vec<Getter> {
             Err(e) => json!({"exception": s(e.what())}),
         },
     ));
-    // Its validation (WP 3.8), and what it logged.
-    let (valid, validate_log) = captured(&[], || c.validate());
-    out.push(g(
-        "validate",
-        vec![],
-        json!({
-            "result": match valid {
-                Ok(()) => Value::Null,
-                Err(e) => json!({"exception": s(e.what())}),
-            },
-            "log": validate_log.iter().map(|m| s(m)).collect::<Vec<_>>(),
-        }),
-    ));
+    // Its validation (WP 3.8), and what it logged; then again: the second call gives the result
+    // the config kept, and logs nothing (I-147).
+    for _ in 0..2 {
+        let (valid, validate_log) = captured(&[], || c.validate());
+        out.push(g(
+            "validate",
+            vec![],
+            json!({
+                "result": match valid {
+                    Ok(()) => Value::Null,
+                    Err(e) => json!({"exception": s(e.what())}),
+                },
+                "log": validate_log.iter().map(|m| s(m)).collect::<Vec<_>>(),
+            }),
+        ));
+    }
     for i in 0..c.num_roles() {
         let role = c.role_name(i);
         out.push(g(
@@ -504,6 +507,9 @@ fn check_env(env: &[(&str, &str)], cases: &[(&str, Vec<u8>)]) {
         failures.join("\n")
     );
 }
+
+/// A display of one view of `raw`, so that validate reaches its checks after the displays'.
+const DISPLAY: &str = "displays:\n  d:\n    - !<View> {name: v, colorspace: raw}\n";
 
 /// A version 2 config of a color space `raw`, the default role's, with `extra` after it.
 fn v2(extra: &str) -> Vec<u8> {
@@ -784,6 +790,102 @@ fn configs_load_as_in_the_wheel() {
         (
             "viewing rules errors",
             v2("viewing_rules:\n  - !<Rule> {name: r1}\n"),
+        ),
+        // The checks of validate past its display check: configs with a display.
+        (
+            "environment default naming itself with %",
+            b"ocio_profile_version: 2\nenvironment: {A: \"%A%\"}\nroles: {default: raw}\n\
+              colorspaces:\n  - !<ColorSpace> {name: raw}\ndisplays:\n  d:\n    - !<View> \
+              {name: v, colorspace: raw}\n"
+                .to_vec(),
+        ),
+        (
+            "environment default naming itself with braces",
+            b"ocio_profile_version: 2\nenvironment: {A: \"${A}\"}\nroles: {default: raw}\n\
+              colorspaces:\n  - !<ColorSpace> {name: raw}\ndisplays:\n  d:\n    - !<View> \
+              {name: v, colorspace: raw}\n"
+                .to_vec(),
+        ),
+        (
+            "default view transform in another case",
+            v2(&format!(
+                "{DISPLAY}view_transforms:\n  - !<ViewTransform> {{name: vt, \
+                 from_scene_reference: !<MatrixTransform> {{}}}}\ndefault_view_transform: VT\n"
+            )),
+        ),
+        (
+            "file transform source resolving to empty",
+            b"ocio_profile_version: 2\nenvironment: {F: \"\"}\nroles: {default: raw}\n\
+              colorspaces:\n  - !<ColorSpace> {name: raw}\n  - !<ColorSpace> {name: f, \
+              from_scene_reference: !<FileTransform> {src: $F}}\ndisplays:\n  d:\n    - \
+              !<View> {name: v, colorspace: raw}\n"
+                .to_vec(),
+        ),
+        (
+            "search paths with variables and an empty one",
+            v2(&format!(
+                "{DISPLAY}search_path: [\"$Q\", \"x/$R/y\", \"\"]\n"
+            )),
+        ),
+        (
+            "an empty search path",
+            v2(&format!("{DISPLAY}search_path: \"\"\n")),
+        ),
+        ("no search path", v2(DISPLAY)),
+        (
+            "encodings differing in case, one unused",
+            b"ocio_profile_version: 2\nenvironment: {}\nroles: {default: raw}\ncolorspaces:\n  \
+              - !<ColorSpace> {name: raw, encoding: sdr-video}\ndisplays:\n  d:\n    - !<View> \
+              {name: v, colorspace: raw}\nviewing_rules:\n  - !<Rule> {name: r1, encodings: \
+              [SDR-Video, hdr-video]}\n"
+                .to_vec(),
+        ),
+        (
+            "an undefined shared view in the virtual display",
+            v2(&format!(
+                "{DISPLAY}virtual_display:\n  - !<Views> [nosuch]\n"
+            )),
+        ),
+        (
+            "a look as its own process space",
+            v2(&format!(
+                "{DISPLAY}looks:\n  - !<Look> {{name: lk, process_space: lk}}\n"
+            )),
+        ),
+        (
+            "a look named as a named transform",
+            v2(&format!(
+                "{DISPLAY}named_transforms:\n  - !<NamedTransform> {{name: lk, transform: \
+                 !<MatrixTransform> {{}}}}\nlooks:\n  - !<Look> {{name: lk, process_space: \
+                 raw}}\n"
+            )),
+        ),
+        (
+            "an interop ID naming a role",
+            ver(
+                "2.5",
+                &format!("  - !<ColorSpace> {{name: b, interop_id: default}}\n{DISPLAY}"),
+            ),
+        ),
+        (
+            "an interop ID naming an alias",
+            ver(
+                "2.5",
+                &format!(
+                    "  - !<ColorSpace> {{name: b, aliases: [al]}}\n  - !<ColorSpace> {{name: \
+                     c, interop_id: al}}\n{DISPLAY}"
+                ),
+            ),
+        ),
+        (
+            "an interop ID naming a named transform",
+            ver(
+                "2.5",
+                &format!(
+                    "  - !<ColorSpace> {{name: b, interop_id: nt}}\n{DISPLAY}named_transforms:\n  \
+                     - !<NamedTransform> {{name: nt, transform: !<MatrixTransform> {{}}}}\n"
+                ),
+            ),
         ),
         ("unknown keys", v2("foo: 1\n\"b\\0r\": 2\n")),
         (
@@ -1303,4 +1405,14 @@ fn validating_twice_as_in_the_wheel() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// `OCIO_ACTIVE_DISPLAYS` naming no display of the config, or a separator only, with a config
+/// whose `active_displays` names none either: validate's checks of both lists.
+#[test]
+fn active_displays_from_the_environment_as_in_the_wheel() {
+    let text = v2(&format!("{DISPLAY}active_displays: [zz]\n"));
+    for value in ["qq:d", "qq", " , "] {
+        check_env(&[("OCIO_ACTIVE_DISPLAYS", value)], &[(value, text.clone())]);
+    }
 }

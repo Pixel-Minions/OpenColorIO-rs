@@ -5456,26 +5456,18 @@ fn is_inactive() {
     }
 }
 
-/// `GetCurrentConfig` without a current config reads `$OCIO` (`CreateFromEnv`, here the raw
-/// config, with its message), and `SetCurrentConfig` gives it a copy of a config
-/// (Config.cpp:115-132 @ v2.5.2). The only test of the process's current config.
+/// `GetCurrentConfig` makes the current config once (`CreateFromEnv`, whose configs and
+/// messages `tests/config_files_oracle.rs` compares with the wheel's), and `SetCurrentConfig`
+/// gives it a copy of a config (Config.cpp:115-132 @ v2.5.2). The only test of the process's
+/// current config.
 #[test]
 fn current_config() {
     let _env = EnvGuard::new();
 
-    let (current, log) = crate::test_env::capture_log(get_current_config);
+    let (current, _) = crate::test_env::capture_log(get_current_config);
     let current = current.unwrap();
-    assert_eq!(
-        log.concat(),
-        b"[OpenColorIO Info]: Color management disabled. (Specify the $OCIO environment \
-          variable to enable.)\n"
-    );
-    assert_eq!(
-        current.serialize().unwrap(),
-        Config::create_raw().unwrap().serialize().unwrap()
-    );
 
-    // Asked again, it is the same config.
+    // Asked again, it is the same config, made once.
     let (again, log) = crate::test_env::capture_log(get_current_config);
     assert!(Arc::ptr_eq(&current, &again.unwrap()));
     assert!(log.is_empty());
@@ -5733,4 +5725,46 @@ fn config_from_a_proxy() {
     assert!(Arc::ptr_eq(&copy.config_io_proxy().unwrap(), &ciop));
     copy.set_config_io_proxy(None);
     assert!(copy.config_io_proxy().is_none());
+}
+
+/// A config read through a proxy is read as from a stream (Config.cpp:5564-5584 against
+/// 5548-5562 @ v2.5.2): the version check refuses what the stream's refuses, with its message,
+/// and the environment's inactive color spaces supersede the config's.
+#[test]
+fn a_proxy_reads_as_a_stream() {
+    let env = EnvGuard::new();
+    env.set(&[("OCIO_INACTIVE_COLORSPACES", "b")]);
+
+    let read_both = |text: &[u8]| {
+        let proxy = Arc::new(TextProxy(Ok(text.to_vec())));
+        (
+            Config::create_from_stream(text),
+            Config::create_from_config_io_proxy(proxy),
+        )
+    };
+
+    // A version 1 config can't have an ExponentWithLinearTransform.
+    let (stream, proxy) = read_both(
+        b"ocio_profile_version: 1\nroles: {default: raw}\ncolorspaces:\n  - !<ColorSpace> \
+          {name: raw, to_reference: !<ExponentWithLinearTransform> {gamma: 2, offset: 0.1}}\n",
+    );
+    let (stream, proxy) = (stream.unwrap_err(), proxy.unwrap_err());
+    assert!(!stream.what().is_empty());
+    assert_eq!(proxy.what(), stream.what());
+
+    let (stream, proxy) = read_both(
+        b"ocio_profile_version: 2\nroles: {default: raw}\ncolorspaces:\n  - !<ColorSpace> \
+          {name: raw}\n  - !<ColorSpace> {name: b}\ninactive_colorspaces: [raw]\n",
+    );
+    let (stream, proxy) = (stream.unwrap(), proxy.unwrap());
+    let names = |c: &Config| -> Vec<Vec<u8>> {
+        (0..c.num_color_spaces())
+            .map(|i| c.color_space_name_by_index(i).to_vec())
+            .collect()
+    };
+    assert_eq!(names(&proxy), names(&stream));
+    assert_eq!(
+        proxy.inactive_color_spaces(),
+        stream.inactive_color_spaces()
+    );
 }

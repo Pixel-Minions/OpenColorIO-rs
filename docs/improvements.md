@@ -640,6 +640,18 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   of up to three bytes of the bytes that matter and 256 of four
   (`crates/ocio/tests/config_files_oracle.rs`).
 
+### I-158. Until Phase 4, an OCIOZ archive given to `CreateFromFile` is an error
+
+- **Upstream:** `Config::CreateFromFile` reads a file that starts with `PK` as an OCIOZ archive,
+  through `CIOPOciozArchive` and `CreateFromConfigIOProxy` (`Config.cpp:1188-1200`).
+- **Who notices:** a caller that loads an `.ocioz` file, or any file starting with `PK`, before
+  the archive reader is ported.
+- **A fix:** none: this is the port's interim state, not upstream's. Until the archive reader
+  lands (Phase 4, the archive card), the port returns "Config::CreateFromFile: reading an OCIOZ
+  archive is not ported yet." (`crates/ocio/src/config.rs`, `Config::create_from_file`); that card
+  replaces the error with the reader and removes this entry.
+- **Status:** interim, in `p3-loading` (3.10b).
+
 ## Numeric helpers
 
 ### I-20. Double values are compared to 0 and 1 in float precision
