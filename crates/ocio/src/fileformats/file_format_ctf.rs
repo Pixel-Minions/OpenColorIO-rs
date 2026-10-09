@@ -45,8 +45,8 @@ use ocio_ops::utils::string_utils::{c_str, lower};
 use crate::config::Config;
 use crate::context::Context;
 use crate::fileformats::ctf::ctf_reader_helper::{
-    CtfReaderArrayElt, CtfReaderDescriptorElt, CtfReaderGammaParamsElt, CtfReaderKind,
-    CtfReaderLogParamsElt, CtfReaderMetadataElt, CtfReaderOpElt, CtfReaderOpType,
+    CtfReaderArrayElt, CtfReaderDescriptorElt, CtfReaderGammaParamsElt, CtfReaderIndexMapElt,
+    CtfReaderKind, CtfReaderLogParamsElt, CtfReaderMetadataElt, CtfReaderOpElt, CtfReaderOpType,
     CtfReaderRangeValueElt, CtfReaderSatNodeElt, CtfReaderSopNodeElt, CtfReaderTransformElt,
     CtfReaderTransformRc, Descriptor, equal_ignoring_case, get_reader,
 };
@@ -832,7 +832,30 @@ fn push_element(st: &mut State, name: &[u8]) -> Result<()> {
     } else if supported_element(name, &p_elt, TAG_INDEX_MAP, TAG_LUT1D, r)
         || supported_element(name, &p_elt, TAG_INDEX_MAP, TAG_LUT3D, r)
     {
-        return Err(operator_part_not_ported(st, "CTFReaderIndexMapElt"));
+        let (is_index_map_mgt, is_completed_im) = {
+            let container = p_container.borrow();
+            match container.as_any().downcast_ref::<CtfReaderOpElt>() {
+                Some(op) if op.is_index_map_mgt() => (true, op.is_completed_im()),
+                _ => (false, false),
+            }
+        };
+        if !is_index_map_mgt {
+            st.dummy(
+                name,
+                st.elms.back(),
+                Some(b"IndexMap not allowed in this element"),
+            )
+        } else if is_completed_im {
+            // Currently only support a single IndexMap per LUT.
+            return Err(st.throw_message(b"Only one IndexMap allowed per LUT. "));
+        } else {
+            Rc::new(RefCell::new(CtfReaderIndexMapElt::new(
+                name,
+                p_container,
+                st.get_xm_line_number(),
+                st.get_xml_filename(),
+            )))
+        }
     } else if supported_element(name, &p_elt, TAG_INFO, TAG_PROCESS_LIST, r) {
         Rc::new(RefCell::new(CtfReaderMetadataElt::new_info(
             name,

@@ -1501,3 +1501,419 @@ fn gamma_log_and_cdl_files_read_as_in_the_wheel() {
 fn gamma_log_and_cdl_files_log_as_in_the_wheel() {
     cdl_common::check_logs(&op_cases_e());
 }
+
+/// A LUT1D (or another tag) of the attributes `attrs`, with an Array of `dim` and `values`
+/// and `extra` elements before it.
+fn lut(tag: &str, attrs: &str, extra: &str, dim: &str, values: &str) -> String {
+    format!(
+        "    <{tag} {attrs}>\n{extra}\
+         \x20       <Array dim=\"{dim}\">\n{values}\n        </Array>\n\
+         \x20   </{tag}>\n"
+    )
+}
+
+/// `n` values from 0 to 1023, rising.
+fn ramp(n: usize) -> String {
+    (0..n)
+        .map(|i| format!("{}", (i * 1023) / (n - 1)))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The Lut1D and InverseLUT1D readers' files, and IndexMaps.
+fn op_cases_f() -> Vec<Case> {
+    let bd = "inBitDepth=\"10i\" outBitDepth=\"10i\"";
+    let mut cases = Vec::new();
+    for (label, version, tag, attrs, extra, dim, values) in [
+        (
+            "1 component",
+            "1.3",
+            "LUT1D",
+            bd.to_owned(),
+            "",
+            "8 1",
+            ramp(8),
+        ),
+        (
+            "3 components",
+            "1.3",
+            "LUT1D",
+            bd.to_owned(),
+            "",
+            "4 3",
+            ramp(12),
+        ),
+        (
+            "12i to 16f",
+            "1.3",
+            "LUT1D",
+            "inBitDepth=\"12i\" outBitDepth=\"16f\"".to_owned(),
+            "",
+            "4 1",
+            "0 0.25 0.5 1".to_owned(),
+        ),
+        (
+            "linear interpolation",
+            "1.3",
+            "LUT1D",
+            format!("{bd} interpolation=\"linear\""),
+            "",
+            "4 1",
+            ramp(4),
+        ),
+        (
+            "a bad interpolation",
+            "1.3",
+            "LUT1D",
+            format!("{bd} interpolation=\"cubic\""),
+            "",
+            "4 1",
+            ramp(4),
+        ),
+        (
+            "hueAdjust in CTF 1.3",
+            "1.3",
+            "LUT1D",
+            format!("{bd} hueAdjust=\"dw3\""),
+            "",
+            "4 3",
+            ramp(12),
+        ),
+        (
+            "hueAdjust in CTF 1.4",
+            "1.4",
+            "LUT1D",
+            format!("{bd} hueAdjust=\"dw3\""),
+            "",
+            "4 3",
+            ramp(12),
+        ),
+        (
+            "a bad hueAdjust",
+            "1.7",
+            "LUT1D",
+            format!("{bd} hueAdjust=\"dw2\""),
+            "",
+            "4 3",
+            ramp(12),
+        ),
+        (
+            "raw halfs",
+            "1.7",
+            "LUT1D",
+            "inBitDepth=\"10i\" outBitDepth=\"16f\" rawHalfs=\"true\"".to_owned(),
+            "",
+            "4 1",
+            "0 15360 48128 31744".to_owned(),
+        ),
+        (
+            "raw halfs out of range",
+            "1.7",
+            "LUT1D",
+            "inBitDepth=\"10i\" outBitDepth=\"16f\" rawHalfs=\"true\"".to_owned(),
+            "",
+            "12 1",
+            "70000 -1 -65536.5 1e10 -3e9 nan inf -inf 65535.9 0.9 -0.5 131071".to_owned(),
+        ),
+        (
+            "a bad halfDomain",
+            "1.7",
+            "LUT1D",
+            format!("{bd} halfDomain=\"yes\""),
+            "",
+            "4 1",
+            ramp(4),
+        ),
+        ("dim 4 2", "1.7", "LUT1D", bd.to_owned(), "", "4 2", ramp(8)),
+        ("dim 1 1", "1.7", "LUT1D", bd.to_owned(), "", "1 1", ramp(2)),
+        ("dim 4", "1.7", "LUT1D", bd.to_owned(), "", "4", ramp(4)),
+        (
+            "dim 300001 1",
+            "1.7",
+            "LUT1D",
+            bd.to_owned(),
+            "",
+            "300001 1",
+            ramp(2),
+        ),
+        (
+            "too few values",
+            "1.7",
+            "LUT1D",
+            bd.to_owned(),
+            "",
+            "4 3",
+            ramp(8),
+        ),
+        (
+            "too many values",
+            "1.7",
+            "LUT1D",
+            bd.to_owned(),
+            "",
+            "4 3",
+            ramp(13),
+        ),
+        (
+            "too many values of 1 component",
+            "1.7",
+            "LUT1D",
+            bd.to_owned(),
+            "",
+            "4 1",
+            ramp(5),
+        ),
+        // IndexMaps.
+        (
+            "an IndexMap in CTF 1.7",
+            "1.7",
+            "LUT1D",
+            bd.to_owned(),
+            "        <IndexMap dim=\"2\">64.5@0 940 @ 7</IndexMap>\n",
+            "8 1",
+            ramp(8),
+        ),
+        (
+            "an IndexMap in CTF 1.4",
+            "1.4",
+            "LUT1D",
+            bd.to_owned(),
+            "        <IndexMap dim=\"2\">64.5@0 940@7</IndexMap>\n",
+            "8 1",
+            ramp(8),
+        ),
+        (
+            "an IndexMap in CTF 2.0",
+            "2.0",
+            "LUT1D",
+            bd.to_owned(),
+            "        <IndexMap dim=\"2\">64.5@0 940@7</IndexMap>\n",
+            "8 1",
+            ramp(8),
+        ),
+        (
+            "an IndexMap of 3 entries",
+            "1.7",
+            "LUT1D",
+            bd.to_owned(),
+            "        <IndexMap dim=\"3\">0@0 64.5@1 940@7</IndexMap>\n",
+            "8 1",
+            ramp(8),
+        ),
+        (
+            "two IndexMaps",
+            "1.7",
+            "LUT1D",
+            bd.to_owned(),
+            "        <IndexMap dim=\"2\">0@0 940@7</IndexMap>\n\
+             \x20       <IndexMap dim=\"2\">0@0 940@7</IndexMap>\n",
+            "8 1",
+            ramp(8),
+        ),
+        (
+            "an IndexMap's bad dim",
+            "1.7",
+            "LUT1D",
+            bd.to_owned(),
+            "        <IndexMap dim=\"2 2\">0@0 940@7</IndexMap>\n",
+            "8 1",
+            ramp(8),
+        ),
+        (
+            "an IndexMap without dim",
+            "1.7",
+            "LUT1D",
+            bd.to_owned(),
+            "        <IndexMap foo=\"2\">0@0 940@7</IndexMap>\n",
+            "8 1",
+            ramp(8),
+        ),
+        (
+            "an IndexMap's bad values",
+            "1.7",
+            "LUT1D",
+            bd.to_owned(),
+            "        <IndexMap dim=\"2\">0@0 x@7</IndexMap>\n",
+            "8 1",
+            ramp(8),
+        ),
+        (
+            "an IndexMap's half pair",
+            "1.7",
+            "LUT1D",
+            bd.to_owned(),
+            "        <IndexMap dim=\"2\">0@0 940</IndexMap>\n",
+            "8 1",
+            ramp(8),
+        ),
+        (
+            "an IndexMap's extra pair",
+            "1.7",
+            "LUT1D",
+            bd.to_owned(),
+            "        <IndexMap dim=\"2\">0@0 940@7 1000@7</IndexMap>\n",
+            "8 1",
+            ramp(8),
+        ),
+        (
+            "an IndexMap's missing pair",
+            "1.7",
+            "LUT1D",
+            bd.to_owned(),
+            "        <IndexMap dim=\"2\">0@0</IndexMap>\n",
+            "8 1",
+            ramp(8),
+        ),
+        (
+            "an IndexMap under a Matrix",
+            "1.7",
+            "Matrix",
+            "inBitDepth=\"32f\" outBitDepth=\"32f\"".to_owned(),
+            "        <IndexMap dim=\"2\">0@0 1@1</IndexMap>\n",
+            "3 3 3",
+            "1 0 0 0 1 0 0 0 1".to_owned(),
+        ),
+        // InverseLUT1D.
+        (
+            "an inverse",
+            "1.3",
+            "InverseLUT1D",
+            bd.to_owned(),
+            "",
+            "8 1",
+            ramp(8),
+        ),
+        (
+            "an inverse from 16i",
+            "1.7",
+            "InverseLUT1D",
+            "inBitDepth=\"16i\" outBitDepth=\"32f\" hueAdjust=\"dw3\"".to_owned(),
+            "",
+            "4 3",
+            "0 0 0 1000 2000 3000 40000 50000 60000 65535 65535 65535".to_owned(),
+        ),
+        (
+            "an inverse's bad rawHalfs",
+            "1.7",
+            "InverseLUT1D",
+            format!("{bd} rawHalfs=\"false\""),
+            "",
+            "4 1",
+            ramp(4),
+        ),
+        (
+            "an inverse's bad hueAdjust",
+            "1.7",
+            "InverseLUT1D",
+            format!("{bd} hueAdjust=\"x\""),
+            "",
+            "4 1",
+            ramp(4),
+        ),
+        (
+            "an inverse's raw halfs out of range",
+            "2.0",
+            "InverseLUT1D",
+            "inBitDepth=\"16f\" outBitDepth=\"10i\" rawHalfs=\"true\"".to_owned(),
+            "",
+            "4 1",
+            "0 15360 70000 15872".to_owned(),
+        ),
+        (
+            "an inverse with too few values",
+            "1.7",
+            "InverseLUT1D",
+            bd.to_owned(),
+            "",
+            "4 3",
+            ramp(4),
+        ),
+        (
+            "an inverse with an IndexMap",
+            "1.7",
+            "InverseLUT1D",
+            bd.to_owned(),
+            "        <IndexMap dim=\"2\">0@0 940@7</IndexMap>\n",
+            "8 1",
+            ramp(8),
+        ),
+    ] {
+        cases.push(ctf(
+            &format!("a {tag}: {label}"),
+            &format!("id=\"a\" version=\"{version}\""),
+            &lut(tag, &attrs, extra, dim, &values),
+        ));
+    }
+    cases.push(clf(
+        "a LUT1D in CLF 2 with an IndexMap",
+        "id=\"a\" compCLFversion=\"2\"",
+        &lut(
+            "LUT1D",
+            bd,
+            "        <IndexMap dim=\"2\">64.5@0 940@7</IndexMap>\n",
+            "8 1",
+            &ramp(8),
+        ),
+    ));
+    cases.push(clf(
+        "a LUT1D with halfDomain",
+        "id=\"a\" compCLFversion=\"3\"",
+        &lut(
+            "LUT1D",
+            "inBitDepth=\"16f\" outBitDepth=\"16f\" halfDomain=\"true\" rawHalfs=\"true\"",
+            "",
+            "65536 1",
+            &(0..65536u32)
+                .map(|i| (i ^ 0x8000).to_string())
+                .collect::<Vec<_>>()
+                .join(" "),
+        ),
+    ));
+
+    // Upstream's files.
+    for name in [
+        "lut1d_32_10i_10i.ctf",
+        "lut1d_hue_adjust_test.ctf",
+        "lut1d_hue_adjust_invalid_style.ctf",
+        "lut3by1d_nan_infinity_example.clf",
+        "clf/illegal/lut1d_half_domain_set_false.clf",
+        "clf/illegal/lut1d_raw_half_set_false.clf",
+        "clf/lut1d_half_domain_raw_half_set.clf",
+        "clf/illegal/lut1d_half_domain_missing_values.clf",
+        "clf/xyz_to_rgb.clf",
+        "clf/lut1d_long.clf",
+        "lut1d_inv.ctf",
+        "lut1d_inverse_halfdom_slog_fclut.ctf",
+        "clf/difficult_syntax.clf",
+        "difficult_test1_v1.ctf",
+        "indexMap_test.ctf",
+        "indexMap_test1_clfv2.clf",
+        "indexMap_test3.ctf",
+        "indexMap_test4_clfv2.clf",
+        "indexMap_test_clfv2.clf",
+        "clf/illegal/transform_missing_inbitdepth.clf",
+        "clf/illegal/transform_missing_outbitdepth.clf",
+        "clf/illegal/transform_bitdepth_mismatch.clf",
+        "clf/inverseOf_id_test.clf",
+    ] {
+        cases.push(file_case(
+            name,
+            &upstream_file(name),
+            Interpolation::Default,
+            TransformDirection::Forward,
+        ));
+    }
+    cases
+}
+
+/// The processors of the Lut1D and InverseLUT1D readers' files, in both directions.
+#[test]
+fn lut1d_files_read_as_in_the_wheel() {
+    check_processors(&op_cases_f());
+}
+
+/// The warnings of reading the Lut1D and InverseLUT1D readers' files, message by message.
+#[test]
+fn lut1d_files_log_as_in_the_wheel() {
+    cdl_common::check_logs(&op_cases_f());
+}

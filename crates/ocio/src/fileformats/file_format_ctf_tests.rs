@@ -16,14 +16,16 @@ use crate::fileformats::input_stream::OpenMode;
 use crate::fileformats::test_utils::load_test_file;
 use ocio_ops::bit_depth_utils::get_bit_depth_max_value;
 use ocio_ops::format_metadata::{METADATA_DESCRIPTION, METADATA_INFO};
+use ocio_ops::math_utils::convert_half_bits_to_float;
 use ocio_ops::op_data::OpDataType;
-use ocio_ops::open_color_types::{BitDepth, TransformDirection};
+use ocio_ops::open_color_types::{BitDepth, Lut1DHueAdjust, TransformDirection};
 use ocio_ops::ops::cdl::cdl_op_data::{CdlOpData, CdlOpStyle, ChannelParams};
 use ocio_ops::ops::gamma::gamma_op_data::{GammaOpData, GammaStyle};
 use ocio_ops::ops::log::log_op_data::{
     LIN_SIDE_BREAK, LIN_SIDE_OFFSET, LIN_SIDE_SLOPE, LINEAR_SLOPE, LOG_SIDE_OFFSET, LOG_SIDE_SLOPE,
     LogOpData,
 };
+use ocio_ops::ops::lut1d::lut1d_op_data::Lut1DOpData;
 use ocio_ops::ops::matrix::matrix_op_data::{MatrixArray, MatrixOpData};
 use ocio_ops::ops::range::range_op_data::RangeOpData;
 use ocio_testkit::upstream::{check_close, check_throw_what};
@@ -2064,4 +2066,432 @@ fn log_default_params() {
     assert_eq!(green_params[LOG_SIDE_SLOPE], 1.);
     assert_eq!(green_params[LOG_SIDE_OFFSET], 0.);
     assert_eq!(green_params[LIN_SIDE_BREAK], 0.1);
+}
+
+/// The LUT of an op data, which must be one (`dynamic_pointer_cast<const Lut1DOpData>`).
+fn as_lut1d(op: &OpData) -> &Lut1DOpData {
+    match op {
+        OpData::Lut1D(lut) => lut,
+        _ => panic!("not a Lut1D: {:?}", op.get_type()),
+    }
+}
+
+/// The 16 values of the matrix of `lut1d_inv` and `3by1d_lut`.
+const XYZ_TO_RGB: [f64; 16] = [
+    3.24, -1.537, -0.49850, 0.0, -0.96930, 1.876, 0.04156, 0.0, 0.05560, -0.204, 1.0573, 0.0, 0.0,
+    0.0, 0.0, 1.0,
+];
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, lut_1d)` @ v2.5.2.
+#[test]
+fn lut_1d() {
+    {
+        let ctf_file = "lut1d_32_10i_10i.ctf";
+        let cached_file = load_clf_file(ctf_file).unwrap();
+        let transform = &cached_file.transform;
+        assert_eq!(transform.get_name(), b"1d-lut example");
+        assert_eq!(transform.get_id(), b"9843a859-e41e-40a8-a51c-840889c3774e");
+        assert_eq!(transform.get_descriptions().len(), 1);
+        assert_eq!(transform.get_descriptions()[0], b"Apply a 1/2.2 gamma.");
+        assert_eq!(transform.get_input_descriptor(), b"RGB");
+        assert_eq!(transform.get_output_descriptor(), b"RGB");
+        let op_list = transform.get_ops();
+        assert_eq!(op_list.len(), 1);
+
+        let p_lut = as_lut1d(&op_list[0]);
+
+        let desc = descriptions(&op_list[0]);
+        assert_eq!(desc.len(), 1);
+
+        assert!(!p_lut.is_input_half_domain());
+        assert!(!p_lut.is_output_raw_halfs());
+        assert_eq!(p_lut.get_hue_adjust(), Lut1DHueAdjust::None);
+
+        assert_eq!(p_lut.get_file_output_bit_depth(), BitDepth::Uint10);
+        assert!(op_list[0].get_name() == b"1d-lut example op");
+
+        // LUT is defined with a 32x1 array. Array is extended to 32x3 by duplicating the
+        // available component.
+        let array = p_lut.get_array();
+        assert_eq!(array.get_length(), 32);
+        assert_eq!(array.get_num_color_components(), 1);
+        assert_eq!(
+            array.get_num_values(),
+            array.get_length() * p_lut.get_array().get_max_color_components()
+        );
+
+        assert_eq!(array.get_values().len(), 96);
+        let values = array.get_values();
+        assert_eq!(values[0], 0.0f32);
+        assert_eq!(values[1], 0.0f32);
+        assert_eq!(values[2], 0.0f32);
+        assert_eq!(values[3], 215.0f32 / 1023.0f32);
+        assert_eq!(values[4], 215.0f32 / 1023.0f32);
+        assert_eq!(values[5], 215.0f32 / 1023.0f32);
+        assert_eq!(values[6], 294.0f32 / 1023.0f32);
+        // and many more
+        assert_eq!(values[92], 1008.0f32 / 1023.0f32);
+        assert_eq!(values[93], 1023.0f32 / 1023.0f32);
+        assert_eq!(values[94], 1023.0f32 / 1023.0f32);
+        assert_eq!(values[95], 1023.0f32 / 1023.0f32);
+    }
+
+    // Test the hue adjust attribute.
+    {
+        let ctf_file = "lut1d_hue_adjust_test.ctf";
+        let cached_file = load_clf_file(ctf_file).unwrap();
+
+        let op_list = cached_file.transform.get_ops();
+        assert_eq!(op_list.len(), 1);
+        let p_lut = as_lut1d(&op_list[0]);
+        assert_eq!(p_lut.get_hue_adjust(), Lut1DHueAdjust::Dw3);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, lut1d_hue_adjust_invalid_style)` @ v2.5.2.
+#[test]
+fn lut1d_hue_adjust_invalid_style() {
+    let ctf_file = "lut1d_hue_adjust_invalid_style.ctf";
+    check_throw_what(load_clf_file(ctf_file), "Illegal 'hueAdjust' attribute");
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, lut_3by1d_with_nan_infinity)` @ v2.5.2.
+#[test]
+fn lut_3by1d_with_nan_infinity() {
+    let ctf_file = "lut3by1d_nan_infinity_example.clf";
+    let cached_file = load_clf_file(ctf_file).unwrap();
+
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 1);
+    let p_lut1d = as_lut1d(&op_list[0]);
+
+    let array = p_lut1d.get_array();
+
+    assert_eq!(array.get_values().len() as c_ulong, array.get_num_values());
+    let values = array.get_values();
+    assert!(values[0].is_nan());
+    assert!(values[1].is_nan());
+    assert!(values[2].is_nan());
+    assert!(values[3].is_nan());
+    assert!(values[4].is_nan());
+    assert_eq!(values[5], f32::INFINITY);
+    assert_eq!(values[6], f32::INFINITY);
+    assert_eq!(values[7], f32::INFINITY);
+    assert_eq!(values[8], -f32::INFINITY);
+    assert_eq!(values[9], -f32::INFINITY);
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, lut1d_half_domain_set_false)` @ v2.5.2.
+#[test]
+fn lut1d_half_domain_set_false() {
+    // Should throw an exception because the 'half_domain' tag was found but set to something
+    // other than 'true'.
+    let ctf_file = "clf/illegal/lut1d_half_domain_set_false.clf";
+    check_throw_what(load_clf_file(ctf_file), "Illegal 'halfDomain' attribute");
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, lut1d_raw_half_set_false)` @ v2.5.2.
+#[test]
+fn lut1d_raw_half_set_false() {
+    // Should throw an exception because the 'raw_halfs' tag was found but set to something
+    // other than 'true'.
+    let ctf_file = "clf/illegal/lut1d_raw_half_set_false.clf";
+    check_throw_what(load_clf_file(ctf_file), "Illegal 'rawHalfs' attribute");
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, lut1d_half_domain_raw_half_set)` @ v2.5.2.
+#[test]
+fn lut1d_half_domain_raw_half_set() {
+    let ctf_file = "clf/lut1d_half_domain_raw_half_set.clf";
+    let cached_file = load_clf_file(ctf_file).unwrap();
+
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 1);
+    let p_lut1d = as_lut1d(&op_list[0]);
+
+    assert!(p_lut1d.is_input_half_domain());
+    assert!(p_lut1d.is_output_raw_halfs());
+
+    let values = p_lut1d.get_array().get_values();
+    assert_eq!(values[0], convert_half_bits_to_float(44646));
+    assert_eq!(values[3], convert_half_bits_to_float(44637));
+    assert_eq!(values[6], convert_half_bits_to_float(44634));
+    assert_eq!(values[9], convert_half_bits_to_float(44631));
+    assert_eq!(values[12], convert_half_bits_to_float(44629));
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, lut1d_half_domain_missing_values)` @ v2.5.2.
+#[test]
+fn lut1d_half_domain_missing_values() {
+    let ctf_file = "clf/illegal/lut1d_half_domain_missing_values.clf";
+    // This should fail with invalid entries exception because the number of entries in the
+    // op is not 65536 (required when using half domain).
+    check_throw_what(load_clf_file(ctf_file), "65536 required for halfDomain");
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, 3by1d_lut)` @ v2.5.2.
+#[test]
+fn three_by_1d_lut() {
+    let ctf_file = "clf/xyz_to_rgb.clf";
+    let cached_file = load_clf_file(ctf_file).unwrap();
+
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 3);
+    let p_matrix = as_matrix(&op_list[0]);
+
+    let a1 = p_matrix.get_array();
+    assert_eq!(a1.get_length(), 4);
+    assert_eq!(a1.get_num_color_components(), 4);
+    assert_eq!(a1.get_num_values(), a1.get_length() * a1.get_length());
+    check_values(a1, XYZ_TO_RGB);
+
+    as_range(&op_list[1]);
+
+    let p_lut = as_lut1d(&op_list[2]);
+    assert_eq!(p_lut.get_direction(), TransformDirection::Forward);
+    assert_eq!(p_lut.get_file_output_bit_depth(), BitDepth::F32);
+
+    let a2 = p_lut.get_array();
+    assert_eq!(a2.get_length(), 128);
+    assert_eq!(a2.get_num_color_components(), 3);
+    assert_eq!(
+        a2.get_num_values(),
+        a2.get_length() * p_lut.get_array().get_max_color_components()
+    );
+
+    assert_eq!(a2.get_values().len() as c_ulong, a2.get_num_values());
+    let values = a2.get_values();
+    assert_eq!(values[0], 0.0f32);
+    assert_eq!(values[1], 0.0f32);
+    assert_eq!(values[2], 0.0f32);
+    assert_eq!(values[3], 0.06780f32);
+
+    assert_eq!(values[21], 0.19986f32);
+    assert_eq!(values[22], 0.18986f32);
+    assert_eq!(values[23], 0.17987f32);
+
+    assert_eq!(values[48], 0.31636f32);
+    assert_eq!(values[49], 0.30054f32);
+    assert_eq!(values[50], 0.28472f32);
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, lut1d_long_lut)` @ v2.5.2.
+#[test]
+fn lut1d_long_lut() {
+    let ctf_file = "clf/lut1d_long.clf";
+    let cached_file = load_clf_file(ctf_file).unwrap();
+
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 1);
+    let p_lut = as_lut1d(&op_list[0]);
+
+    let a = p_lut.get_array();
+    assert_eq!(a.get_length(), 131072);
+    assert_eq!(a.get_num_color_components(), 1);
+    assert_eq!(
+        a.get_num_values(),
+        a.get_length() * p_lut.get_array().get_max_color_components()
+    );
+    assert_eq!(a.get_values()[393215], 1.293f32);
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, lut1d_inv)` @ v2.5.2.
+#[test]
+fn lut1d_inv() {
+    let ctf_file = "lut1d_inv.ctf";
+    let cached_file = load_clf_file(ctf_file).unwrap();
+
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 2);
+
+    let p_matrix = as_matrix(&op_list[0]);
+
+    let a1 = p_matrix.get_array();
+    assert_eq!(a1.get_length(), 4);
+    assert_eq!(a1.get_num_color_components(), 4);
+    assert_eq!(a1.get_num_values(), a1.get_length() * a1.get_length());
+    check_values(a1, XYZ_TO_RGB);
+
+    let p_lut = as_lut1d(&op_list[1]);
+    assert_eq!(p_lut.get_file_output_bit_depth(), BitDepth::F32);
+    assert_eq!(p_lut.get_direction(), TransformDirection::Inverse);
+
+    let a2 = p_lut.get_array();
+    assert_eq!(a2.get_num_color_components(), 3);
+
+    assert_eq!(a2.get_length(), 17);
+    assert_eq!(
+        a2.get_num_values(),
+        a2.get_length() * a2.get_max_color_components()
+    );
+
+    let error = 1e-6f32;
+    assert_eq!(a2.get_values().len() as c_ulong, a2.get_num_values());
+
+    let values = a2.get_values();
+    check_close(values[0], 0.0f32, error);
+    check_close(values[1], 0.0f32, error);
+    check_close(values[2], 0.0f32, error);
+    check_close(values[3], 0.28358f32, error);
+
+    check_close(values[21], 0.68677f32, error);
+    check_close(values[22], 0.68677f32, error);
+    check_close(values[23], 0.68677f32, error);
+
+    check_close(values[48], 1.0f32, error);
+    check_close(values[49], 1.0f32, error);
+    check_close(values[50], 1.0f32, error);
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, lut1d_inv_scaling)` @ v2.5.2.
+#[test]
+fn lut1d_inv_scaling() {
+    // Validate that the InverseLUT1D array values are scaled based on inBitDepth. (The
+    // previous example had inBitDepth=32f, so it does not validate that.)
+
+    let ctf_file = "lut1d_inverse_halfdom_slog_fclut.ctf";
+    let cached_file = load_clf_file(ctf_file).unwrap();
+
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 1);
+
+    let p_lut = as_lut1d(&op_list[0]);
+    // For an InverseLUT1D, the file "out" depth is actually taken from inBitDepth.
+    assert_eq!(p_lut.get_file_output_bit_depth(), BitDepth::Uint16);
+    assert_eq!(p_lut.get_direction(), TransformDirection::Inverse);
+
+    let a2 = p_lut.get_array();
+    assert_eq!(a2.get_num_color_components(), 1);
+
+    assert_eq!(a2.get_length(), 65536);
+    assert_eq!(
+        a2.get_num_values(),
+        a2.get_length() * a2.get_max_color_components()
+    );
+
+    let error = 1e-6f32;
+    assert_eq!(a2.get_values().len() as c_ulong, a2.get_num_values());
+
+    // Input value 17830 scaled by 65535.
+    check_close(a2.get_values()[0], 0.27206836f32, error);
+    // Input value 55070 scaled by 65535.
+    check_close(a2.get_values()[31743 * 3], 0.84031434f32, error);
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, invlut1d_clf)` @ v2.5.2.
+#[test]
+fn invlut1d_clf() {
+    let clf = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList compCLFversion="3" id="UIDLUT42">
+    <InverseLUT1D id="lut01" name="test-lut" inBitDepth="32f" outBitDepth="10i">
+        <Array dim="16 3">
+   0    1    2
+   3    4    5
+   6    7    8
+   9   10   11
+  12   13   14
+  15   16   17
+  18   19   20
+  21   22   23
+  24   25   26
+  27   28   29
+  30   31   32
+  33   34   35
+  36   37   38
+  39   40   41
+  42   43   44
+  45   46   47
+        </Array>
+    </InverseLUT1D>
+</ProcessList>
+"#;
+
+    check_throw_what(
+        parse_string(clf),
+        "CLF file version '3' does not support operator 'InverseLUT1D'",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, indexMap_test)` @ v2.5.2.
+#[test]
+fn index_map_test() {
+    let ctf_file = "indexMap_test.ctf";
+    check_throw_what(
+        load_clf_file(ctf_file),
+        "Only two entry IndexMaps are supported",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, indexMap_test1_clfv2)` @ v2.5.2.
+#[test]
+fn index_map_test1_clfv2() {
+    // IndexMaps were allowed in CLF v2 (were removed in v3).
+    let ctf_file = "indexMap_test1_clfv2.clf";
+    let cached_file = load_clf_file(ctf_file).unwrap();
+
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 2);
+    let p_r = as_range(&op_list[0]);
+
+    // Check that the indexMap caused a Range to be inserted.
+    assert_eq!(p_r.get_min_in_value() * 1023., 64.5);
+    assert_eq!(p_r.get_max_in_value() * 1023., 940.);
+    assert_eq!(p_r.get_min_out_value() * 1023.0, 132.0); // 4*1023/31
+    assert_eq!(p_r.get_max_out_value() * 1023.0, 1089.0); // 33*1023/31
+    assert_eq!(p_r.get_file_input_bit_depth(), BitDepth::Uint10);
+    assert_eq!(p_r.get_file_output_bit_depth(), BitDepth::Uint10);
+
+    // Check the LUT is ok.
+    let p_l = as_lut1d(&op_list[1]);
+    assert_eq!(p_l.get_array().get_length(), 32);
+    assert_eq!(p_l.get_file_output_bit_depth(), BitDepth::Uint12);
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, indexMap_test3)` @ v2.5.2.
+#[test]
+fn index_map_test3() {
+    let ctf_file = "indexMap_test3.ctf";
+    check_throw_what(load_clf_file(ctf_file), "Only one IndexMap allowed per LUT");
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, indexMap_test4_clfv2)` @ v2.5.2.
+#[test]
+fn index_map_test4_clfv2() {
+    let ctf_file = "indexMap_test4_clfv2.clf";
+    check_throw_what(
+        load_clf_file(ctf_file),
+        "Only two entry IndexMaps are supported",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, transform_missing_inbitdepth)` @ v2.5.2.
+#[test]
+fn transform_missing_inbitdepth() {
+    let ctf_file = "clf/illegal/transform_missing_inbitdepth.clf";
+    check_throw_what(load_clf_file(ctf_file), "inBitDepth is missing");
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, transform_missing_outbitdepth)` @ v2.5.2.
+#[test]
+fn transform_missing_outbitdepth() {
+    let ctf_file = "clf/illegal/transform_missing_outbitdepth.clf";
+    check_throw_what(load_clf_file(ctf_file), "outBitDepth is missing");
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, transform_with_bitdepth_mismatch)` @ v2.5.2.
+#[test]
+fn transform_with_bitdepth_mismatch() {
+    // Even though we normalize the bit-depths after reading, any mismatches in the file are
+    // an indication of improper/unreliable formatting and an exception should be thrown.
+    let ctf_file = "clf/illegal/transform_bitdepth_mismatch.clf";
+    check_throw_what(load_clf_file(ctf_file), "Bit-depth mismatch");
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, inverse_of_id_test)` @ v2.5.2.
+#[test]
+fn inverse_of_id_test() {
+    let ctf_file = "clf/inverseOf_id_test.clf";
+    let cached_file = load_clf_file(ctf_file).unwrap();
+
+    assert!(cached_file.transform.get_inverse_of_id() == b"inverseOfIdTest");
 }

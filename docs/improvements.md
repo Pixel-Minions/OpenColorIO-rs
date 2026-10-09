@@ -2330,6 +2330,22 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p4-ctf-read-1` (`crates/ocio/src/fileformats/file_format_ctf.rs`,
   `format_info`).
 
+### I-181. A CTF LUT's raw halfs outside [0, 65536) keep the low 16 bits of their `int`
+
+- **Upstream:** with `rawHalfs="true"`, `CTFReaderLut1DElt::endArray` and
+  `CTFReaderInvLut1DElt::endArray` (`fileformats/ctf/CTFReaderHelper.cpp:4201-4246,
+  3378-3429` @ v2.5.2) read each value as `ConvertHalfBitsToFloat((unsigned short)value)`. The
+  cast of a `float` outside `[0, 65536)` (negative, too large, NaN) is undefined. Both wheels
+  compile it as `cvttss2si` to a 32-bit `int` (Windows `0x1800a76f3` and `0x1800a7d06`; Linux
+  `0x209ad0`), then keep its low 16 bits: `70000` reads as half `0x1170`, `-1` as `0xffff`,
+  NaN, infinities and values past the `int` range as `0x0000`.
+- **Who notices:** a CLF whose raw half values aren't half bit patterns, which no valid file
+  has.
+- **A fix:** reject values that aren't integers in `[0, 65535]`.
+- **Status:** matched in `p4-ctf-read-2` (`crates/ocio/src/fileformats/ctf/ctf_reader_helper.rs`,
+  `lut1d_end_array`; `crates/ocio/tests/file_format_ctf_oracle.rs` checks such values with
+  the wheel).
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on

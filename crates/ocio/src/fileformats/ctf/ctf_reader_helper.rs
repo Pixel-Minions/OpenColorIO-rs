@@ -27,14 +27,18 @@ use ocio_formats::fileformats::xmlutils::xml_reader_helper::{
     sat_node_append_metadata,
 };
 use ocio_formats::fileformats::xmlutils::xml_reader_utils::{
-    ATTR_ID, ATTR_NAME, find_next_token_start, get_next_number, get_numbers, truncate_string,
+    ATTR_ID, ATTR_NAME, find_delim, find_next_token_start, get_next_number, get_numbers,
+    is_number_delimiter, is_space, parse_number, truncate_string,
 };
 use ocio_ops::bit_depth_utils::get_bit_depth_max_value;
 use ocio_ops::cfmt::{Crt, OStringStream};
 use ocio_ops::format_metadata::FormatMetadataImpl;
-use ocio_ops::logging::{is_debug_logging_enabled, log_debug};
+use ocio_ops::logging::{is_debug_logging_enabled, log_debug, log_warning};
+use ocio_ops::math_utils::{convert_half_bits_to_float, sse_cvttps_epi32};
 use ocio_ops::op_data::{OpData, OpDataType};
-use ocio_ops::open_color_types::{BitDepth, TransformDirection, bit_depth_to_string};
+use ocio_ops::open_color_types::{
+    BitDepth, Interpolation, Lut1DHueAdjust, TransformDirection, bit_depth_to_string,
+};
 use ocio_ops::ops::cdl::cdl_op_data::{CdlOpData, CdlOpStyle};
 use ocio_ops::ops::gamma::gamma_op_data::{GammaOpData, GammaStyle};
 use ocio_ops::ops::log::log_op_data::{
@@ -45,6 +49,7 @@ use ocio_ops::ops::log::log_utils::{
     convert_string_to_style as log_convert_string_to_style,
     convert_style_to_string as log_convert_style_to_string, ctf_values, get_log_direction,
 };
+use ocio_ops::ops::lut1d::lut1d_op_data::Lut1DOpData;
 use ocio_ops::ops::matrix::matrix_op_data::MatrixOpData;
 use ocio_ops::ops::range::range_op_data::RangeOpData;
 use ocio_ops::platform::strcasecmp;
@@ -60,12 +65,17 @@ use super::ctf_reader_utils::{
     ATTR_VERSION, TAG_MAX_IN_VALUE, TAG_MAX_OUT_VALUE, TAG_MIN_IN_VALUE, TAG_MIN_OUT_VALUE,
     TAG_PROCESS_LIST,
 };
+use super::ctf_reader_utils::{
+    ATTR_HALF_DOMAIN, ATTR_HUE_ADJUST, ATTR_INTERPOLATION, ATTR_RAW_HALFS, get_interpolation_1d,
+};
 use super::ctf_transform::{
     CTF_INFO_ELEMENT_VERSION, CTF_PROCESS_LIST_VERSION, CTF_PROCESS_LIST_VERSION_1_2,
     CTF_PROCESS_LIST_VERSION_1_3, CTF_PROCESS_LIST_VERSION_1_4, CTF_PROCESS_LIST_VERSION_1_5,
     CTF_PROCESS_LIST_VERSION_1_6, CTF_PROCESS_LIST_VERSION_1_7, CTF_PROCESS_LIST_VERSION_1_8,
     CTF_PROCESS_LIST_VERSION_2_0, CTF_PROCESS_LIST_VERSION_2_5, CtfReaderTransform, CtfVersion,
 };
+use super::index_mapping::IndexMapping;
+use crate::lut_limits::MAX_1D_LUT_LENGTH;
 
 /// The transform a parse fills, which the parser and the elements share.
 pub type CtfReaderTransformRc = Rc<RefCell<CtfReaderTransform>>;
@@ -903,6 +913,14 @@ fn wide(v: c_ulong) -> u64 {
     u64::from(v)
 }
 
+/// An `unsigned long` (32 bits on Windows, 64 on Linux) passed as an `unsigned int`: its low
+/// 32 bits.
+// `unsigned long` is already `u32` on Windows.
+#[allow(clippy::unnecessary_cast)]
+fn narrow(v: c_ulong) -> u32 {
+    v as u32
+}
+
 /// The bit depth a CLF names: `8i`, `10i`, `12i`, `16i`, `16f` or `32f`, ignoring case.
 ///
 /// Port of `CTFReaderOpElt::GetBitDepth` (CTFReaderHelper.cpp:1185-1195 @ v2.5.2).
@@ -955,15 +973,19 @@ pub struct CtfReaderOpElt {
     base_set: bool,
     /// The op's id, which `getIdentifier` returns.
     id: Vec<u8>,
+    /// `CTFReaderLut1DElt::m_indexMapping`.
+    index_mapping: IndexMapping,
+    /// `CTFIndexMapMgt::m_completed`.
+    index_map_completed: bool,
 }
 
 impl CtfReaderOpElt {
     /// The reader of `kind`, if ported (WP 4.5c-4.5i port the others).
     ///
     /// Port of the constructors of the `CTFReaderOpElt` subclasses: `CTFReaderCDLElt`
-    /// (CTFReaderHelper.cpp:1327-1332), `CTFReaderGammaElt` (1862-1865), `CTFReaderLogElt`
-    /// (3545-3549), `CTFReaderMatrixElt` (4561-4566) and `CTFReaderRangeElt` (4858-4862) @
-    /// v2.5.2.
+    /// (CTFReaderHelper.cpp:1327-1332), `CTFReaderGammaElt` (1862-1865), `CTFReaderInvLut1DElt`
+    /// (3245-3248), `CTFReaderLogElt` (3545-3549), `CTFReaderLut1DElt` (4085-4092),
+    /// `CTFReaderMatrixElt` (4561-4566) and `CTFReaderRangeElt` (4858-4862) @ v2.5.2.
     pub fn create(kind: CtfReaderKind) -> Option<CtfReaderOpElt> {
         let op = match kind {
             CtfReaderKind::Matrix | CtfReaderKind::Matrix1_3 => OpData::Matrix(MatrixOpData::new()),
@@ -977,6 +999,13 @@ impl CtfReaderOpElt {
             CtfReaderKind::Log | CtfReaderKind::Log2_0 => {
                 OpData::Log(LogOpData::new(2.0, TransformDirection::Forward))
             }
+            CtfReaderKind::Lut1D | CtfReaderKind::Lut1D1_4 | CtfReaderKind::Lut1D1_7 => {
+                OpData::Lut1D(Lut1DOpData::new(2).expect("a LUT of 2 entries"))
+            }
+            CtfReaderKind::InvLut1D => OpData::Lut1D(
+                Lut1DOpData::with_direction(2, TransformDirection::Inverse)
+                    .expect("a LUT of 2 entries"),
+            ),
             _ => return None,
         };
         let cdl = match &op {
@@ -997,6 +1026,8 @@ impl CtfReaderOpElt {
             ctf_params: CtfParams::default(),
             base_set: false,
             id: Vec::new(),
+            index_mapping: IndexMapping::new(0),
+            index_map_completed: false,
         })
     }
 
@@ -1191,6 +1222,9 @@ impl CtfReaderOpElt {
     /// Port of `CTFReaderOpElt::isOpParameterValid` (CTFReaderHelper.cpp:949-957),
     /// `CTFReaderCDLElt::isOpParameterValid` (1361-1365), `CTFReaderGammaElt::isOpParameterValid`
     /// (1918-1922), `CTFReaderLogElt::isOpParameterValid` (3582-3586) and
+    /// `CTFReaderInvLut1DElt::isOpParameterValid` (3322-3329),
+    /// `CTFReaderLut1DElt::isOpParameterValid` (4149-4155),
+    /// `CTFReaderLut1DElt_1_4::isOpParameterValid` (4344-4351) and
     /// `CTFReaderRangeElt_1_7::isOpParameterValid` (4917-4921) @ v2.5.2.
     fn is_op_parameter_valid(&self, att: &[u8]) -> bool {
         let base = equal_ignoring_case(ATTR_ID, att)
@@ -1208,13 +1242,32 @@ impl CtfReaderOpElt {
             | CtfReaderKind::GammaClf3_0
             | CtfReaderKind::Log
             | CtfReaderKind::Log2_0 => base || equal_ignoring_case(ATTR_STYLE, att),
+            CtfReaderKind::Lut1D => {
+                base || equal_ignoring_case(ATTR_INTERPOLATION, att)
+                    || equal_ignoring_case(ATTR_HALF_DOMAIN, att)
+                    || equal_ignoring_case(ATTR_RAW_HALFS, att)
+            }
+            CtfReaderKind::Lut1D1_4 | CtfReaderKind::Lut1D1_7 | CtfReaderKind::InvLut1D => {
+                base || equal_ignoring_case(ATTR_INTERPOLATION, att)
+                    || equal_ignoring_case(ATTR_HALF_DOMAIN, att)
+                    || equal_ignoring_case(ATTR_RAW_HALFS, att)
+                    || equal_ignoring_case(ATTR_HUE_ADJUST, att)
+            }
             _ => base,
         }
     }
 
     /// Whether the reader holds an array (`dynamic_cast<CTFArrayMgt *>`).
     pub fn is_array_mgt(&self) -> bool {
-        matches!(self.kind, CtfReaderKind::Matrix | CtfReaderKind::Matrix1_3)
+        matches!(
+            self.kind,
+            CtfReaderKind::Matrix
+                | CtfReaderKind::Matrix1_3
+                | CtfReaderKind::Lut1D
+                | CtfReaderKind::Lut1D1_4
+                | CtfReaderKind::Lut1D1_7
+                | CtfReaderKind::InvLut1D
+        )
     }
 
     /// Port of `CTFArrayMgt::isCompleted` (CTFReaderHelper.h:233-236 @ v2.5.2).
@@ -1230,8 +1283,9 @@ impl CtfReaderOpElt {
     /// Sizes the array for the dimensions `dims`: whether the reader takes them (upstream
     /// returns the array, or null).
     ///
-    /// Port of `CTFReaderMatrixElt::updateDimension` (CTFReaderHelper.cpp:4590-4616) and
-    /// `CTFReaderMatrixElt_1_3::updateDimension` (4684-4743) @ v2.5.2.
+    /// Port of `CTFReaderInvLut1DElt::updateDimension` (CTFReaderHelper.cpp:3353-3376),
+    /// `CTFReaderLut1DElt::updateDimension` (4176-4199), `CTFReaderMatrixElt::updateDimension`
+    /// (4590-4616) and `CTFReaderMatrixElt_1_3::updateDimension` (4684-4743) @ v2.5.2.
     pub fn update_dimension(&mut self, dims: &[u32]) -> bool {
         match self.kind {
             CtfReaderKind::Matrix => {
@@ -1309,30 +1363,71 @@ impl CtfReaderOpElt {
                     .resize(dims[1] as c_ulong, dims[0] as c_ulong);
                 true
             }
+            CtfReaderKind::Lut1D
+            | CtfReaderKind::Lut1D1_4
+            | CtfReaderKind::Lut1D1_7
+            | CtfReaderKind::InvLut1D => {
+                if dims.len() != 2 {
+                    return false;
+                }
+
+                let max = if dims.is_empty() { 0 } else { dims.len() - 1 };
+                let num_color_components = dims[max];
+
+                if dims[1] != 3 && dims[1] != 1 {
+                    return false;
+                }
+
+                if dims[0] < 2 || c_ulong::from(dims[0]) > MAX_1D_LUT_LENGTH {
+                    return false;
+                }
+
+                self.lut1d_mut()
+                    .get_array_mut()
+                    .resize(c_ulong::from(dims[0]), c_ulong::from(num_color_components))
+                    .expect("a length the reader allows");
+                true
+            }
             _ => false,
         }
     }
 
     /// The number of values of the array `update_dimension` sized: `ArrayBase::getNumValues`.
     pub fn array_num_values(&self) -> c_ulong {
-        self.matrix().get_array().get_num_values()
+        match &self.op {
+            OpData::Lut1D(lut) => lut.get_array().get_num_values(),
+            _ => self.matrix().get_array().get_num_values(),
+        }
     }
 
     /// The array's length: `ArrayBase::getLength`.
     pub fn array_length(&self) -> c_ulong {
-        self.matrix().get_array().get_length()
+        match &self.op {
+            OpData::Lut1D(lut) => lut.get_array().get_length(),
+            _ => self.matrix().get_array().get_length(),
+        }
     }
 
     /// The array's number of color components: `ArrayBase::getNumColorComponents`.
     pub fn array_num_color_components(&self) -> c_ulong {
-        self.matrix().get_array().get_num_color_components()
+        match &self.op {
+            OpData::Lut1D(lut) => lut.get_array().get_num_color_components(),
+            _ => self.matrix().get_array().get_num_color_components(),
+        }
     }
 
-    /// Sets the array's value at `index`: `ArrayBase::setDoubleValue`.
+    /// Sets the array's value at `index`: `ArrayBase::setDoubleValue`, a `float` for a LUT
+    /// (OpArray.h:73-76 @ v2.5.2).
     pub fn array_set_double_value(&mut self, index: c_ulong, value: f64) {
-        self.matrix_mut()
-            .get_array_mut()
-            .set_double_value(index, value);
+        match &mut self.op {
+            OpData::Lut1D(lut) => {
+                lut.get_array_mut().get_values_mut()[index as usize] = value as f32
+            }
+            _ => self
+                .matrix_mut()
+                .get_array_mut()
+                .set_double_value(index, value),
+        }
     }
 
     /// Finalizes the array, `position` values read.
@@ -1361,6 +1456,10 @@ impl CtfReaderOpElt {
                 self.convert_1_2_to_latest()
             }
             CtfReaderKind::Matrix1_3 => self.end_array_1_3(position),
+            CtfReaderKind::Lut1D
+            | CtfReaderKind::Lut1D1_4
+            | CtfReaderKind::Lut1D1_7
+            | CtfReaderKind::InvLut1D => self.lut1d_end_array(position),
             _ => Ok(()),
         }
     }
@@ -1906,6 +2005,330 @@ fn utf8(value: &[u8]) -> &str {
     std::str::from_utf8(value).expect("expat gives UTF-8")
 }
 
+impl CtfReaderOpElt {
+    /// The LUT of a Lut1D or InverseLUT1D reader.
+    fn lut1d_mut(&mut self) -> &mut Lut1DOpData {
+        match &mut self.op {
+            OpData::Lut1D(lut) => lut,
+            _ => panic!("not a Lut1D reader"),
+        }
+    }
+
+    /// The LUT of a Lut1D or InverseLUT1D reader.
+    fn lut1d(&self) -> &Lut1DOpData {
+        match &self.op {
+            OpData::Lut1D(lut) => lut,
+            _ => panic!("not a Lut1D reader"),
+        }
+    }
+
+    /// Whether this is a Lut1D reader of any version.
+    fn is_lut1d(&self) -> bool {
+        matches!(
+            self.kind,
+            CtfReaderKind::Lut1D | CtfReaderKind::Lut1D1_4 | CtfReaderKind::Lut1D1_7
+        )
+    }
+
+    /// Whether the reader holds an IndexMap (`dynamic_cast<CTFIndexMapMgt *>`).
+    pub fn is_index_map_mgt(&self) -> bool {
+        self.is_lut1d()
+    }
+
+    /// Port of `CTFIndexMapMgt::isCompletedIM` (CTFReaderHelper.h:290-293 @ v2.5.2).
+    pub fn is_completed_im(&self) -> bool {
+        self.index_map_completed
+    }
+
+    /// Sizes the IndexMap for the dimensions `dims`: whether the reader takes them (upstream
+    /// returns the map, or null).
+    ///
+    /// Port of `CTFReaderLut1DElt::updateDimensionIM` (CTFReaderHelper.cpp:4248-4264 @
+    /// v2.5.2).
+    pub fn update_dimension_im(&mut self, dims: &[u32]) -> bool {
+        if dims.len() != 1 {
+            return false;
+        }
+
+        let num_components = dims[0];
+
+        if dims[0] < 2 || c_ulong::from(dims[0]) > MAX_1D_LUT_LENGTH {
+            return false;
+        }
+
+        self.index_mapping.resize(num_components as usize);
+        true
+    }
+
+    /// The IndexMap's dimension: `IndexMapping::getDimension`.
+    pub fn index_map_dimension(&self) -> usize {
+        self.index_mapping.get_dimension()
+    }
+
+    /// Sets the IndexMap's pair at `index`: `IndexMapping::setPair`.
+    pub fn index_map_set_pair(&mut self, index: usize, first: f32, second: f32) -> Result<()> {
+        self.index_mapping.set_pair(index, first, second)
+    }
+
+    /// Finalizes the IndexMap, `position` pairs read.
+    ///
+    /// Port of `CTFReaderLut1DElt::endIndexMap` (CTFReaderHelper.cpp:4266-4276 @ v2.5.2).
+    pub fn end_index_map(&mut self, position: u32) -> Result<()> {
+        if self.index_mapping.get_dimension() != position as usize {
+            return Err(self.throw_m(&[
+                b"Expected ",
+                self.index_mapping.get_dimension().to_string().as_bytes(),
+                b" IndexMap values, found ",
+                position.to_string().as_bytes(),
+                b".",
+            ]));
+        }
+
+        self.index_mapping.validate()?;
+        self.index_map_completed = true;
+        Ok(())
+    }
+
+    /// The interpolation (optional), half domain, raw halfs and, from CTF 1.4, hue adjust of
+    /// a Lut1D or an InverseLUT1D.
+    ///
+    /// Port of `CTFReaderLut1DElt::start` (CTFReaderHelper.cpp:4098-4147),
+    /// `CTFReaderLut1DElt_1_4::start` (4280-4342) and `CTFReaderInvLut1DElt::start`
+    /// (3254-3320) @ v2.5.2, after `CTFReaderOpElt::start`.
+    fn lut1d_start(&mut self, atts: &[&[u8]]) -> Result<()> {
+        let inverse = self.kind == CtfReaderKind::InvLut1D;
+        let hue_adjust = self.kind != CtfReaderKind::Lut1D;
+
+        // The interpolation attribute is optional in CLF/CTF. The INTERP_DEFAULT enum
+        // indicates that the value was not specified in the file. When writing, this means no
+        // interpolation attribute will be added.
+        self.lut1d_mut().set_interpolation(Interpolation::Default);
+
+        // The errors of an illegal value, the reader's own and the inverse's.
+        let illegal = |this: &Self, att: &[u8], value: &[u8]| {
+            if inverse {
+                this.throw_m(&[
+                    b"Unknown ",
+                    att,
+                    b" value: '",
+                    value,
+                    b"' while parsing InvLut1D.",
+                ])
+            } else {
+                this.throw_m(&[
+                    b"Illegal '",
+                    att,
+                    b"' attribute '",
+                    value,
+                    b"' while parsing Lut1D.",
+                ])
+            }
+        };
+
+        let mut i = 0;
+        while i < atts.len() {
+            let (att, value) = (atts[i], atts[i + 1]);
+            if equal_ignoring_case(ATTR_INTERPOLATION, att) {
+                match get_interpolation_1d(Some(value)) {
+                    Ok(interp) => self.lut1d_mut().set_interpolation(interp),
+                    Err(e) => return Err(self.throw_message(e.what())),
+                }
+            }
+
+            if equal_ignoring_case(ATTR_HALF_DOMAIN, att) {
+                if !equal_ignoring_case(b"true", value) {
+                    return Err(illegal(self, b"halfDomain", c_str(value)));
+                }
+
+                self.lut1d_mut().set_input_half_domain(true);
+            }
+
+            if equal_ignoring_case(ATTR_RAW_HALFS, att) {
+                if !equal_ignoring_case(b"true", value) {
+                    return Err(illegal(self, b"rawHalfs", c_str(value)));
+                }
+
+                self.lut1d_mut().set_output_raw_halfs(true);
+            }
+
+            // This was added in v1.4.
+            if hue_adjust && equal_ignoring_case(ATTR_HUE_ADJUST, att) {
+                if !equal_ignoring_case(b"dw3", value) {
+                    return Err(illegal(self, b"hueAdjust", c_str(value)));
+                }
+
+                self.lut1d_mut().set_hue_adjust(Lut1DHueAdjust::Dw3)?;
+            }
+
+            i += 2;
+        }
+        Ok(())
+    }
+
+    /// The array scaled from the file's output bit depth (the input one for an inverse),
+    /// that bit depth recorded, the LUT validated; for CTF 1.7 and later, a 2-entry IndexMap
+    /// becomes a Range inserted before the LUT.
+    ///
+    /// Port of `CTFReaderLut1DElt::end` (CTFReaderHelper.cpp:4157-4169),
+    /// `CTFReaderLut1DElt_1_7::end` (4355-4385) and `CTFReaderInvLut1DElt::end` (3331-3346)
+    /// @ v2.5.2, after `CTFReaderOpElt::end`.
+    fn lut1d_end(&mut self) -> Result<()> {
+        // Array values for inverse LUTs are scaled based on the inBitDepth (rather than
+        // outBD), normalize them.
+        let bit_depth = if self.kind == CtfReaderKind::InvLut1D {
+            self.in_bit_depth
+        } else {
+            self.out_bit_depth
+        };
+        let scale = 1.0f32 / get_bit_depth_max_value(bit_depth)? as f32;
+        let lut = self.lut1d_mut();
+        lut.scale(scale);
+
+        // Record the original array scaling present in the file. This is used by a heuristic
+        // involved with LUT inversion. The bit-depth of ops is typically changed after the
+        // file is read, hence the need to store it now.
+        lut.set_file_output_bit_depth(bit_depth);
+        lut.validate()
+    }
+
+    /// The Range a 2-entry IndexMap makes, inserted before the LUT in the transform's ops.
+    ///
+    /// Port of the IndexMap part of `CTFReaderLut1DElt_1_7::end` (CTFReaderHelper.cpp:
+    /// 4365-4384 @ v2.5.2).
+    fn insert_index_map_range(&mut self) -> Result<()> {
+        // The LUT renderers do not currently support an indexMap, however for compliance
+        // with the CLF spec we want to support the case of a single 2-entry indexMap by
+        // converting it into a RangeOp which we insert before the LUT.
+        if self.is_completed_im() {
+            // This will throw if the indexMap is not length 2.
+            let p_rng = range_from_index_mapping(
+                &self.index_mapping,
+                narrow(self.lut1d().get_array().get_length()),
+                self.in_bit_depth,
+            )?;
+
+            // Insert the range before the LUT that was appended to m_transform in
+            // OpElt::start. This code assumes that the current LUT is at the end of the
+            // opList. In other words, that this LUT's end() method will be called before any
+            // other Op's start().
+            let mut transform = self.get_transform().borrow_mut();
+            let ops = transform.get_ops_mut();
+            let len = ops.len();
+            let pos = len - 1;
+            ops.insert(pos, Arc::new(OpData::Range(p_rng)));
+        }
+        Ok(())
+    }
+
+    /// Finalizes a Lut1D's or an InverseLUT1D's array, `position` values read: raw halfs
+    /// converted, a single channel spread to the three.
+    ///
+    /// Port of `CTFReaderLut1DElt::endArray` (CTFReaderHelper.cpp:4201-4246) and
+    /// `CTFReaderInvLut1DElt::endArray` (3378-3429) @ v2.5.2. The raw halfs' `(unsigned
+    /// short)` cast of a `float` is undefined outside `[0, 65536)`; both wheels compile it as
+    /// `cvttss2si` to a 32-bit `int`, whose low 16 bits they keep (I-181).
+    fn lut1d_end_array(&mut self, position: u32) -> Result<()> {
+        let inverse = self.kind == CtfReaderKind::InvLut1D;
+        let raw_halfs = self.lut1d().is_output_raw_halfs();
+        let array = self.lut1d_mut().get_array_mut();
+
+        // Convert half bits to float values if needed.
+        if raw_halfs {
+            let max_values = array.get_num_values() as usize;
+            for i in 0..max_values {
+                let bits = sse_cvttps_epi32(array.get_values()[i]) as u16;
+                array.get_values_mut()[i] = convert_half_bits_to_float(bits);
+            }
+        }
+
+        if array.get_num_values() != c_ulong::from(position) {
+            let num_color_components = array.get_num_color_components();
+            let max_color_components = array.get_max_color_components();
+
+            let dimensions = array.get_length();
+
+            if num_color_components != 1 || c_ulong::from(position) != dimensions {
+                let message = [
+                    b"Expected ".as_slice(),
+                    dimensions.to_string().as_bytes(),
+                    b"x",
+                    num_color_components.to_string().as_bytes(),
+                    b" Array values, found ",
+                    position.to_string().as_bytes(),
+                    b".",
+                ]
+                .concat();
+                return Err(if inverse {
+                    self.throw_message(&message)
+                } else {
+                    self.throw_m(&[&message])
+                });
+            }
+
+            // Convert a 1D LUT to a 3by1D LUT (duplicate values from the Red to the Green and
+            // Blue).
+            let num_luts = max_color_components as usize;
+
+            // TODO: Should improve Lut1DOp so that the copy is unnecessary.
+            let values = array.get_values_mut();
+            for i in (0..dimensions as usize).rev() {
+                for j in 0..num_luts {
+                    values[(i * num_luts) + j] = values[i];
+                }
+            }
+        }
+
+        self.lut1d().get_array().validate()?;
+
+        self.set_completed(true);
+        Ok(())
+    }
+}
+
+/// The Range of a CTF LUT's 2-entry IndexMap: its first pair's halves, scaled to the LUT's
+/// input bit depth and to its `len` entries, as the minimums, the second pair's as the
+/// maximums.
+///
+/// Port of `RangeOpData::RangeOpData(const IndexMapping &, unsigned int, BitDepth)`
+/// (src/OpenColorIO/ops/range/RangeOpData.cpp:67-103 @ v2.5.2), which needs the CTF reader's
+/// `IndexMapping`.
+fn range_from_index_mapping(
+    p_im: &IndexMapping,
+    len: u32,
+    bitdepth: BitDepth,
+) -> Result<RangeOpData> {
+    let mut range = RangeOpData::new();
+    range.set_file_input_bit_depth(bitdepth);
+    range.set_file_output_bit_depth(bitdepth);
+
+    if p_im.get_dimension() != 2 {
+        return Err(Exception::new(
+            "CTF/CLF parsing error. Only two entry IndexMaps are supported.",
+        ));
+    }
+
+    let scale_in = 1.0 / get_bit_depth_max_value(bitdepth)?;
+
+    let (first, second) = p_im.get_pair(0)?;
+
+    // The first half of the pair is scaled to the LUT's input bit depth.
+    range.set_min_in_value(f64::from(first) * scale_in);
+    // The second half is scaled to the number of entries in the LUT.
+    range.set_min_out_value(f64::from(second) / f64::from(len.wrapping_sub(1)));
+
+    // Note: The CLF spec does not say how to handle out-of-range values. E.g., a user could
+    // specify an index longer than the LUT length. For now, we are not preventing this (no
+    // harm is done since those values are already clipped safely on input to the LUT
+    // renderers).
+
+    let (first, second) = p_im.get_pair(1)?;
+    range.set_max_in_value(f64::from(first) * scale_in);
+    range.set_max_out_value(f64::from(second) / f64::from(len.wrapping_sub(1)));
+
+    range.validate()?;
+    Ok(range)
+}
+
 impl XmlReaderElement for CtfReaderOpElt {
     fn element(&self) -> &XmlReaderElementBase {
         &self.element
@@ -1926,6 +2349,10 @@ impl XmlReaderElement for CtfReaderOpElt {
             | CtfReaderKind::GammaCtf2_0
             | CtfReaderKind::GammaClf3_0 => return self.gamma_start(atts),
             CtfReaderKind::Log | CtfReaderKind::Log2_0 => return self.log_start(atts),
+            CtfReaderKind::Lut1D
+            | CtfReaderKind::Lut1D1_4
+            | CtfReaderKind::Lut1D1_7
+            | CtfReaderKind::InvLut1D => return self.lut1d_start(atts),
             _ => {}
         }
         if self.kind == CtfReaderKind::Range1_7 {
@@ -1964,9 +2391,16 @@ impl XmlReaderElement for CtfReaderOpElt {
             | CtfReaderKind::GammaClf3_0 => self.gamma_end()?,
             CtfReaderKind::Log => self.log_end()?,
             CtfReaderKind::Log2_0 => self.log_end_2_0()?,
+            CtfReaderKind::Lut1D
+            | CtfReaderKind::Lut1D1_4
+            | CtfReaderKind::Lut1D1_7
+            | CtfReaderKind::InvLut1D => self.lut1d_end()?,
             _ => {}
         }
         self.commit_op();
+        if self.kind == CtfReaderKind::Lut1D1_7 {
+            self.insert_index_map_range()?;
+        }
 
         // Adding support for the noClamp style introduced in the CLF spec. We convert our
         // RangeOp (which always clamps) into an equivalent MatrixOp.
@@ -3181,5 +3615,292 @@ impl XmlReaderSopNodeBaseElt for CtfReaderSopNodeElt {
     }
     fn sop_node(&mut self) -> &mut XmlReaderSopNodeBase {
         &mut self.sop
+    }
+}
+
+/// Like `FindDelim` but looks for whitespace or an at sign (for IndexMap).
+///
+/// Port of `FindIndexDelim` (CTFReaderHelper.cpp:539-554 @ v2.5.2).
+fn find_index_delim(s: &[u8], len: usize, mut pos: usize) -> usize {
+    let at = |i: usize| s.get(i).copied().unwrap_or(0);
+    while !is_space(at(pos)) && at(pos) != b'@' {
+        pos += 1;
+
+        if pos >= len {
+            return len;
+        }
+    }
+
+    pos
+}
+
+/// Like `FindNextTokenStart` but also skips at signs.
+///
+/// Port of `FindNextTokenStart_IndexMap` (CTFReaderHelper.cpp:557-577 @ v2.5.2).
+fn find_next_token_start_index_map(s: &[u8], len: usize, mut pos: usize) -> usize {
+    let at = |i: usize| s.get(i).copied().unwrap_or(0);
+    if pos == len {
+        return pos;
+    }
+
+    while is_number_delimiter(at(pos)) || at(pos) == b'@' {
+        pos += 1;
+
+        if pos >= len {
+            return len;
+        }
+    }
+
+    pos
+}
+
+/// The next pair of IndexMap numbers of `s` (its first `len` bytes) from `*pos`, like
+/// `64.5@0` or `1 @2`; `*pos` moves to the next token, or `len`.
+///
+/// Port of `GetNextIndexPair` (CTFReaderHelper.cpp:590-629 @ v2.5.2).
+fn get_next_index_pair(
+    s: &[u8],
+    len: usize,
+    pos: &mut usize,
+    num1: &mut f32,
+    num2: &mut f32,
+) -> Result<()> {
+    // s might not be null terminated. Set pos to how much leading white space there is.
+    *pos = find_next_token_start(s, len, *pos);
+
+    if *pos != len {
+        // Note, the len may here include the @ at the end of the string for ParseNumber (e.g.
+        // "10.5@") but it does not cause the sscanf to fail. Set pos to advance over the
+        // numbers we just parsed. Note that we stop either at white space or an ampersand.
+        let mut end_pos = find_index_delim(s, len, *pos);
+        if end_pos == len {
+            let mut oss = OStringStream::new(Crt::NATIVE);
+            oss.put_str("GetNextIndexPair: First number of a pair is the end of the string '");
+            oss.put_bytes(&truncate_string(s, len));
+            oss.put_str("'.");
+            return Err(Exception::new(oss.into_bytes()));
+        }
+
+        // Extract a number at pos.
+        parse_number(s, *pos, end_pos, num1)?;
+
+        // Set pos to the start of the next number, advancing over white space or an @.
+        *pos = find_next_token_start_index_map(s, len, end_pos);
+
+        end_pos = find_delim(s, len, *pos);
+
+        // Extract the other half of the index pair. Set pos to advance over the numbers we
+        // just parsed.
+        parse_number(s, *pos, end_pos, num2)?;
+
+        *pos = end_pos;
+        if *pos != len {
+            *pos = find_next_token_start(s, len, *pos);
+        }
+    }
+    Ok(())
+}
+
+/// A LUT's IndexMap: its dimension, then its pairs.
+///
+/// Port of `CTFReaderIndexMapElt` (CTFReaderHelper.h:248-272, CTFReaderHelper.cpp:433-534,
+/// 632-671 @ v2.5.2). Upstream keeps a pointer to the map the parent's `updateDimensionIM`
+/// returns; here the parent holds it.
+#[derive(Debug)]
+pub struct CtfReaderIndexMapElt {
+    plain: XmlReaderPlainEltBase,
+    /// The parent's type name, which `getTypeName` returns.
+    type_name: Vec<u8>,
+    /// `m_position`: the current position to fill.
+    position: u32,
+}
+
+impl CtfReaderIndexMapElt {
+    /// Port of `CTFReaderIndexMapElt::CTFReaderIndexMapElt` (CTFReaderHelper.cpp:433-441 @
+    /// v2.5.2).
+    pub fn new(
+        name: &[u8],
+        parent: ContainerEltRcPtr,
+        xml_line_number: u32,
+        xml_file: &[u8],
+    ) -> CtfReaderIndexMapElt {
+        let type_name = parent.borrow().get_type_name().to_vec();
+        CtfReaderIndexMapElt {
+            plain: XmlReaderPlainEltBase::new(name, parent, xml_line_number, xml_file),
+            type_name,
+            position: 0,
+        }
+    }
+
+    /// The exception of `ThrowM(*this, ...)`.
+    fn throw_m(&self, parts: &[&[u8]]) -> Exception {
+        self.throw_message(&parts.concat())
+    }
+}
+
+impl XmlReaderElement for CtfReaderIndexMapElt {
+    fn element(&self) -> &XmlReaderElementBase {
+        &self.plain.element
+    }
+    fn element_mut(&mut self) -> &mut XmlReaderElementBase {
+        &mut self.plain.element
+    }
+
+    /// The `dim` attribute (required): the parent sizes its IndexMap.
+    ///
+    /// Port of `CTFReaderIndexMapElt::start` (CTFReaderHelper.cpp:448-510 @ v2.5.2).
+    fn start(&mut self, atts: &[&[u8]]) -> Result<()> {
+        let mut is_dim_found = false;
+
+        let mut i = 0;
+        while i < atts.len() && !atts[i].is_empty() {
+            if equal_ignoring_case(ATTR_DIMENSION, atts[i]) {
+                is_dim_found = true;
+
+                let dim_str = c_str(atts[i + 1]);
+                let len = dim_str.len();
+
+                let illegal = |this: &Self| {
+                    this.throw_m(&[
+                        b"Illegal '",
+                        this.get_type_name(),
+                        b"' IndexMap dimensions ",
+                        &truncate_string(dim_str, len),
+                        b".",
+                    ])
+                };
+
+                let dims = match get_numbers::<u32>(dim_str, len) {
+                    Ok(dims) => dims,
+                    Err(_ce) => return Err(illegal(self)),
+                };
+
+                let parent = self.plain.get_parent().clone();
+                let mut parent = parent.borrow_mut();
+                let p_arr = parent
+                    .as_any_mut()
+                    .downcast_mut::<CtfReaderOpElt>()
+                    .filter(|op| op.is_index_map_mgt());
+                let Some(p_arr) = p_arr else {
+                    return Err(illegal(self));
+                };
+                if dims.len() != 1 {
+                    return Err(illegal(self));
+                }
+
+                if !p_arr.update_dimension_im(&dims) {
+                    return Err(illegal(self));
+                }
+            } else {
+                self.plain.element.log_parameter_warning(atts[i]);
+            }
+
+            i += 2;
+        }
+
+        // Check mandatory elements
+        if !is_dim_found {
+            return Err(self.throw_message(b"Required attribute 'dim' is missing."));
+        }
+
+        self.position = 0;
+        Ok(())
+    }
+
+    /// The parent finalizes its IndexMap before CTF 2.0 (CLF 3); from it, the element is
+    /// logged as not valid.
+    ///
+    /// Port of `CTFReaderIndexMapElt::end` (CTFReaderHelper.cpp:512-534 @ v2.5.2).
+    fn end(&mut self) -> Result<()> {
+        // A known element (e.g. an IndexMap) in a dummy element, no need to validate it.
+        if self.plain.get_parent().borrow().is_dummy() {
+            return Ok(());
+        }
+
+        let parent = self.plain.get_parent().clone();
+        let mut p_op_elt = op_parent(&parent);
+        if p_op_elt.get_transform().borrow().get_ctf_version() < CTF_PROCESS_LIST_VERSION_2_0 {
+            p_op_elt.end_index_map(self.position)
+        } else {
+            let mut dbg = OStringStream::new(Crt::NATIVE);
+            dbg.put_c_str(self.get_xml_file());
+            dbg.put_str("(");
+            dbg.put_u32(self.get_xml_line_number());
+            dbg.put_str("): ");
+            dbg.put_str("Element '");
+            dbg.put_bytes(self.get_name());
+            dbg.put_str("' is not valid since CLF 3 (or CTF 2).");
+            log_warning(dbg.str());
+            Ok(())
+        }
+    }
+
+    fn is_container(&self) -> bool {
+        false
+    }
+    fn get_identifier(&self) -> &[u8] {
+        self.get_name()
+    }
+
+    /// The parent's type name.
+    ///
+    /// Port of `CTFReaderIndexMapElt::getTypeName` (CTFReaderHelper.cpp:668-671 @ v2.5.2).
+    fn get_type_name(&self) -> &[u8] {
+        &self.type_name
+    }
+
+    fn as_plain_mut(&mut self) -> Option<&mut dyn XmlReaderPlainElt> {
+        Some(self)
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+impl XmlReaderPlainElt for CtfReaderIndexMapElt {
+    /// The pairs, up to the IndexMap's dimension.
+    ///
+    /// Port of `CTFReaderIndexMapElt::setRawData` (CTFReaderHelper.cpp:632-666 @ v2.5.2).
+    fn set_raw_data(&mut self, s: &[u8], _xml_line: u32) -> Result<()> {
+        let len = s.len();
+        let parent = self.plain.get_parent().clone();
+        let mut p = op_parent(&parent);
+        let max_values = p.index_map_dimension();
+
+        let mut pos = find_next_token_start(s, len, 0);
+        while pos != len {
+            let mut data1 = 0.0f32;
+            let mut data2 = 0.0f32;
+
+            if get_next_index_pair(s, len, &mut pos, &mut data1, &mut data2).is_err() {
+                return Err(self.throw_m(&[
+                    b"Illegal values '",
+                    &truncate_string(s, len),
+                    b"' in '",
+                    self.get_type_name(),
+                    b"' IndexMap.",
+                ]));
+            }
+
+            if (self.position as usize) < max_values {
+                p.index_map_set_pair(self.position as usize, data1, data2)?;
+                self.position += 1;
+            } else {
+                return Err(self.throw_m(&[
+                    b"Expected ",
+                    max_values.to_string().as_bytes(),
+                    b" entries, found too many values in '",
+                    self.get_type_name(),
+                    b"' IndexMap.",
+                ]));
+            }
+        }
+        Ok(())
+    }
+    fn get_parent(&self) -> &ContainerEltRcPtr {
+        self.plain.get_parent()
     }
 }
