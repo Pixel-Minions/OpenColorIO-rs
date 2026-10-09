@@ -5993,12 +5993,17 @@ sRGB:\n  \
     // As a debug message is expected, trap & check its content (upstream's LogGuard, which
     // sets the debug level).
     let ((), log) = crate::test_env::capture_log(|| {
-        let level = get_logging_level();
+        // The debug level while the guard lives, as upstream's LogGuard sets it.
+        struct DebugLevel(LoggingLevel);
+        impl Drop for DebugLevel {
+            fn drop(&mut self) {
+                set_logging_level(self.0);
+            }
+        }
+        let _level = DebugLevel(get_logging_level());
         set_logging_level(LoggingLevel::Debug);
 
-        let noenv = Config::create_from_stream(SIMPLE_PROFILE2.as_bytes());
-        set_logging_level(level);
-        let noenv = noenv.unwrap();
+        let noenv = Config::create_from_stream(SIMPLE_PROFILE2.as_bytes()).unwrap();
         noenv.validate().unwrap();
         assert_eq!(noenv.environment_mode(), EnvironmentMode::LoadAll);
         // In all mode, use all system env. variables as potential context variables.

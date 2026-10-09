@@ -13,7 +13,9 @@
 //! [`Transform::set_direction`], [`Transform::validate`], `Display`, [`build_ops`] and, for its
 //! op data, [`create_transform`].
 
+use std::cell::Cell;
 use std::fmt;
+use std::thread::LocalKey;
 
 use ocio_ops::cfmt::{Crt, OStringStream};
 use ocio_ops::exception::{Exception, Result};
@@ -471,11 +473,67 @@ fn not_ported_yet(class: &str, work_package: &str) -> Exception {
     ))
 }
 
+/// The deepest nesting of transforms that [`build_ops`] and
+/// [`collect_context_variables`](crate::context_variable_utils::collect_context_variables)
+/// follow: a color space, look, view transform or named transform whose transform refers back
+/// to it nests without end. Group transforms don't count: they name nothing, and the loader
+/// refuses groups nested more than 590 deep (docs/improvements.md, U-60).
+///
+/// Upstream has no limit: it recurses until the stack overflows, which ends the process (the
+/// wheel at 573 nested display view transforms on Windows, docs/improvements.md U-58). The port
+/// refuses deeper nesting with an error instead (the owner's general rule), about half the
+/// shallowest depth at which the wheel crashes.
+pub(crate) const MAX_TRANSFORM_NESTING: usize = 256;
+
+thread_local! {
+    /// How deep [`build_ops`] is nested on this thread.
+    static BUILD_NESTING: Cell<usize> = const { Cell::new(0) };
+    /// How deep `collect_context_variables` is nested on this thread.
+    static COLLECT_NESTING: Cell<usize> = const { Cell::new(0) };
+}
+
+/// One level of nesting of [`build_ops`] or `collect_context_variables`, given back when it
+/// is dropped.
+pub(crate) struct Nesting(&'static LocalKey<Cell<usize>>);
+
+impl Nesting {
+    fn enter(counter: &'static LocalKey<Cell<usize>>) -> Result<Nesting> {
+        let depth = counter.get() + 1;
+        if depth > MAX_TRANSFORM_NESTING {
+            return Err(Exception::new(format!(
+                "The transforms nest more than {MAX_TRANSFORM_NESTING} levels deep: a color \
+                 space, look, view transform or named transform may refer to itself."
+            )));
+        }
+        counter.set(depth);
+        Ok(Nesting(counter))
+    }
+
+    /// One more level of [`build_ops`]; an error past [`MAX_TRANSFORM_NESTING`].
+    pub(crate) fn build() -> Result<Nesting> {
+        Nesting::enter(&BUILD_NESTING)
+    }
+
+    /// One more level of `collect_context_variables`; an error past
+    /// [`MAX_TRANSFORM_NESTING`].
+    pub(crate) fn collect() -> Result<Nesting> {
+        Nesting::enter(&COLLECT_NESTING)
+    }
+}
+
+impl Drop for Nesting {
+    fn drop(&mut self) {
+        self.0.set(self.0.get() - 1);
+    }
+}
+
 /// Appends the ops of `transform` in the direction `dir`.
 ///
 /// Port of `BuildOps` (src/OpenColorIO/Transform.cpp:42-175 @ v2.5.2). A null transform, which
 /// upstream builds as no ops, can't be passed: the callers hold transforms. Its "Unknown
-/// transform type for creation" can't happen with an enum.
+/// transform type for creation" can't happen with an enum. Transforms nested deeper than
+/// [`MAX_TRANSFORM_NESTING`] are an error, where upstream overflows the stack
+/// (docs/improvements.md, U-58).
 ///
 /// Internal to the processors (crate-private, the owner's decision of 2026-10-04).
 pub(crate) fn build_ops(
@@ -485,6 +543,12 @@ pub(crate) fn build_ops(
     transform: &Transform,
     dir: TransformDirection,
 ) -> Result<()> {
+    // A group names nothing, so it can't refer to itself, and the loader bounds its nesting
+    // (U-60): only the transforms inside it count.
+    let _nesting = match transform {
+        Transform::Group(_) => None,
+        _ => Some(Nesting::build()?),
+    };
     match transform {
         Transform::Allocation(allocation_transform) => {
             build_allocation_op(ops, allocation_transform, dir)

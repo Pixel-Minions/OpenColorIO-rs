@@ -550,6 +550,7 @@ displays:
     - !<View> {name: nt_vt, view_transform: nt, display_colorspace: dout}
     - !<View> {name: data, colorspace: raw}
     - !<View> {name: empty_looks, colorspace: out, looks: \", \"}
+    - !<View> {name: vt_data, view_transform: vt_scene, display_colorspace: ddata}
     - !<Views> [shared]
   dout:
     - !<Views> [shared]
@@ -576,6 +577,10 @@ display_colorspaces:
   - !<ColorSpace>
     name: dproc
     to_display_reference: !<RangeTransform> {min_in_value: 0, max_in_value: 1, min_out_value: 0, max_out_value: 2}
+  - !<ColorSpace>
+    name: ddata
+    isdata: true
+    from_display_reference: !<MatrixTransform> {offset: [0, 0, 0.2, 0]}
 colorspaces:
   - !<ColorSpace>
     name: raw
@@ -616,6 +621,7 @@ fn display_view_transform_processors_match_the_wheel() {
         ("dout", "shared"),
         ("missing", "cs"),
         ("d", "missing"),
+        ("d", "vt_data"),
     ];
     let mut cases = Vec::new();
     for (k, (display, view)) in views.iter().enumerate() {

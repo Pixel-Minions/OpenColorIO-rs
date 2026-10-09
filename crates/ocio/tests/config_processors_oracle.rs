@@ -11,6 +11,11 @@
 //!
 //! The context passed is a copy of the config's current context that sets the context
 //! variable a color space's transform names, so the processor differs from the one without.
+//!
+//! Also: the processor cache keyed by a context variable of the destination only; transforms
+//! that refer to themselves, where the wheel's stack overflows and the port refuses them; and
+//! the longest chains of transforms the port accepts below its nesting limit
+//! (docs/improvements.md, U-58).
 
 mod common;
 
@@ -346,4 +351,228 @@ fn every_get_processor_overload_matches_the_wheel() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The port's error for transforms nested deeper than its limit (docs/improvements.md, U-58).
+const TOO_DEEP: &str = "levels deep: a color space, look, view transform or named transform may \
+                        refer to itself.";
+
+/// A config whose color space `self` converts from itself, and whose color space `p`, the
+/// process space of the look `k`, applies `k` to go to the reference: both nest without end.
+const CYCLES: &str = r#"ocio_profile_version: 2
+environment: {}
+roles:
+  default: lin
+displays:
+  d:
+    - !<View> {name: v, colorspace: lin}
+looks:
+  - !<Look> {name: k, process_space: p, transform: !<MatrixTransform> {offset: [0.1, 0, 0, 0]}}
+colorspaces:
+  - !<ColorSpace>
+    name: lin
+  - !<ColorSpace>
+    name: self
+    to_scene_reference: !<ColorSpaceTransform> {src: self, dst: lin}
+  - !<ColorSpace>
+    name: p
+    to_scene_reference: !<LookTransform> {src: lin, dst: lin, looks: k}
+"#;
+
+/// A color space that refers to itself, directly or through a look: the wheel overflows its
+/// stack, which ends the process (the oracle reports no response); the port refuses it with an
+/// error.
+#[test]
+fn transforms_that_refer_to_themselves_are_refused() {
+    let config = Config::create_from_stream(CYCLES.as_bytes()).unwrap();
+    for (src, dst) in [("self", "lin"), ("lin", "self"), ("p", "lin"), ("lin", "p")] {
+        let wheel = Oracle::get().try_call(
+            "config_processor",
+            json!({"config": {"yaml": CYCLES}, "overload": {"names": [src, dst]}}),
+            &[],
+        );
+        assert!(
+            wheel.is_err(),
+            "{src} -> {dst}: the wheel answered {:?}",
+            wheel.map(|r| r.result)
+        );
+
+        let message = config
+            .processor_between(src, dst)
+            .err()
+            .unwrap_or_else(|| panic!("{src} -> {dst}: no error"))
+            .to_string();
+        assert!(message.ends_with(TOO_DEEP), "{src} -> {dst}: {message}");
+    }
+}
+
+/// A config of `n` color spaces `c1`..`cn`, each converting from the one before by `kind`: a
+/// color space transform, a look transform, a group holding a color space transform, or a
+/// display view transform of a view with a look, without or with a view transform.
+fn chain(kind: &str, n: usize) -> String {
+    let mut s = String::from(
+        "ocio_profile_version: 2
+environment: {}
+roles:
+  default: c0
+displays:
+  d:
+    - !<View> {name: v, colorspace: c0}
+    - !<View> {name: lk, colorspace: c0, looks: k}
+    - !<View> {name: vt, view_transform: t, display_colorspace: dc, looks: k}
+view_transforms:
+  - !<ViewTransform> {name: t, from_scene_reference: !<MatrixTransform> {offset: [0, 0.1, 0, 0]}}
+display_colorspaces:
+  - !<ColorSpace> {name: dc, from_display_reference: !<MatrixTransform> {offset: [0, 0, 0.1, 0]}}
+looks:
+  - !<Look> {name: k, process_space: c0, transform: !<MatrixTransform> {offset: [0.1, 0, 0, 0]}}
+colorspaces:
+  - !<ColorSpace>
+    name: c0
+",
+    );
+    for i in 1..=n {
+        let prev = i - 1;
+        let transform = match kind {
+            "cst" => format!("!<ColorSpaceTransform> {{src: c{prev}, dst: c0}}"),
+            "look" => format!("!<LookTransform> {{src: c{prev}, dst: c0, looks: k}}"),
+            "group" => format!(
+                "!<GroupTransform> {{children: [!<ColorSpaceTransform> {{src: c{prev}, dst: c0}}]}}"
+            ),
+            "dv" => format!("!<DisplayViewTransform> {{src: c{prev}, display: d, view: lk}}"),
+            "dvvt" => format!("!<DisplayViewTransform> {{src: c{prev}, display: d, view: vt}}"),
+            _ => unreachable!("{kind}"),
+        };
+        s += &format!("  - !<ColorSpace>\n    name: c{i}\n    to_scene_reference: {transform}\n");
+    }
+    s
+}
+
+/// The port's processor from the last color space of a chain of `n` to `c0`, or its error.
+fn port_chain(kind: &str, n: usize) -> ocio::Result<Arc<Processor>> {
+    let config = Config::create_from_stream(chain(kind, n).as_bytes())?;
+    config.processor_between(format!("c{n}"), "c0")
+}
+
+/// The longest chains of each kind the port accepts match the wheel, processor and optimized
+/// processor, on the test thread's stack; one more link is the port's error (the wheel goes
+/// on to more than twice as deep before its stack overflows, docs/improvements.md U-58).
+#[test]
+fn the_deepest_chains_below_the_limit_match_the_wheel() {
+    for kind in ["cst", "look", "group", "dv", "dvvt"] {
+        // The longest chain the port accepts: a binary search for the first refused length.
+        let refused = |n: usize| match port_chain(kind, n) {
+            Ok(_) => false,
+            Err(e) => {
+                assert!(e.to_string().ends_with(TOO_DEEP), "{kind} {n}: {e}");
+                true
+            }
+        };
+        let (mut ok, mut too_deep) = (1, 1024);
+        assert!(!refused(ok) && refused(too_deep), "{kind}");
+        while too_deep - ok > 1 {
+            let mid = (ok + too_deep) / 2;
+            if refused(mid) {
+                too_deep = mid;
+            } else {
+                ok = mid;
+            }
+        }
+
+        let requests: Vec<(usize, Value)> = [ok, too_deep]
+            .into_iter()
+            .map(|n| {
+                let args = json!({
+                    "config": {"yaml": chain(kind, n)},
+                    "overload": {"names": [format!("c{n}"), "c0"]},
+                    "ops": {"optimization": "OPTIMIZATION_NONE"},
+                });
+                (n, args)
+            })
+            .collect();
+        let calls: Vec<BatchCall<'_>> = requests
+            .iter()
+            .map(|(_, args)| BatchCall {
+                cmd: "config_processor",
+                args: args.clone(),
+                blobs: vec![],
+            })
+            .collect();
+        let replies: Vec<Response> = Oracle::get()
+            .batch(&calls, true)
+            .into_iter()
+            .map(|r| r.unwrap_or_else(|e| panic!("{kind}: {e}")))
+            .collect();
+
+        // The deepest chain the port accepts is the wheel's processor.
+        if let Some(failure) = compare(&replies[0], &port_processors(port_chain(kind, ok))) {
+            panic!("{kind} {ok}: {failure}");
+        }
+        // One link more, the wheel still makes a processor where the port refuses.
+        assert!(
+            replies[1].result["processor"]["cache_id"].is_object(),
+            "{kind} {too_deep}: {}",
+            replies[1].result["processor"]
+        );
+    }
+}
+
+/// A context variable in the destination name only: the processors for each value of the
+/// variable are the wheel's, through the port's one config and its processor cache (the cache
+/// key holds the variable's value, `CollectContextVariables` of the destination).
+#[test]
+fn a_context_variable_of_the_destination_keys_the_cache() {
+    const CONFIG: &str = "ocio_profile_version: 2
+environment: {DST: a}
+roles:
+  default: lin
+displays:
+  d:
+    - !<View> {name: v, colorspace: lin}
+colorspaces:
+  - !<ColorSpace>
+    name: lin
+  - !<ColorSpace>
+    name: a
+    from_scene_reference: !<MatrixTransform> {offset: [0.1, 0, 0, 0]}
+  - !<ColorSpace>
+    name: b
+    from_scene_reference: !<MatrixTransform> {offset: [0, 0.2, 0, 0]}
+";
+    let config = Config::create_from_stream(CONFIG.as_bytes()).unwrap();
+    let values = ["a", "b", "a"];
+    let args: Vec<Value> = values
+        .iter()
+        .map(|value| {
+            json!({"config": {"yaml": CONFIG}, "overload": {"names": ["lin", "$DST"]},
+                   "context": {"calls": [{"call": "setStringVar", "args": ["DST", value]}]}})
+        })
+        .collect();
+    let calls: Vec<BatchCall<'_>> = args
+        .iter()
+        .map(|args| BatchCall {
+            cmd: "config_processor",
+            args: args.clone(),
+            blobs: vec![],
+        })
+        .collect();
+    let wheel: Vec<String> = Oracle::get()
+        .batch(&calls, true)
+        .into_iter()
+        .map(|r| bytes(&r.unwrap_or_else(|e| panic!("{e}")).result["processor"]["cache_id"]))
+        .map(|id| String::from_utf8(id).unwrap())
+        .collect();
+    let port: Vec<String> = values
+        .iter()
+        .map(|value| {
+            let mut context = (*config.current_context().get()).clone();
+            context.set_string_var("DST", Some(value.as_bytes()));
+            let processor = config
+                .processor_between_with_context(&context, "lin", "$DST")
+                .unwrap();
+            processor.cache_id().unwrap()
+        })
+        .collect();
+    assert_eq!(port, wheel);
+    assert_ne!(port[0], port[1]);
 }

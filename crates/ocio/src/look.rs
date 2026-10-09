@@ -227,7 +227,7 @@ impl Look {
 /// those of its process space's transforms.
 ///
 /// Port of `CollectContextVariables(const Config &, const Context &, TransformDirection, const
-/// Look &, ContextRcPtr &)` (src/OpenColorIO/Look.cpp:198-271 @ v2.5.2).
+/// Look &, ContextRcPtr &)` (src/OpenColorIO/Look.cpp:196-271 @ v2.5.2).
 pub(crate) fn collect_look_context_variables(
     config: &Config,
     context: &Context,

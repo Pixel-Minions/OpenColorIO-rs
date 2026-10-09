@@ -6026,7 +6026,7 @@ impl Config {
     /// with the same cache ID; otherwise a new one, which the cache keeps.
     ///
     /// Port of `Config::getProcessor(const ConstContextRcPtr &, const ConstTransformRcPtr &,
-    /// TransformDirection)` (Config.cpp:4791-4880 @ v2.5.2). Its errors for a null context or
+    /// TransformDirection)` (Config.cpp:4791-4886 @ v2.5.2). Its errors for a null context or
     /// transform can't happen with references.
     #[doc(alias = "getProcessor")]
     pub fn processor_with_context(

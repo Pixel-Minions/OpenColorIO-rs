@@ -213,7 +213,7 @@ impl fmt::Display for LookTransform {
 /// space of their last look, or of the option of fall-back looks that applies; `""` without
 /// looks.
 ///
-/// Port of `LooksResultColorSpace` (src/OpenColorIO/transforms/LookTransform.cpp:148-166 @
+/// Port of `LooksResultColorSpace` (src/OpenColorIO/transforms/LookTransform.cpp:149-167 @
 /// v2.5.2).
 pub(crate) fn looks_result_color_space<'c>(
     config: &'c Config,
@@ -246,7 +246,7 @@ impl LookTransform {
     /// [`looks_result_color_space`]), or `""` for no looks.
     ///
     /// Port of `LookTransform::GetLooksResultColorSpace` (src/OpenColorIO/transforms/
-    /// LookTransform.cpp:168-178 @ v2.5.2).
+    /// LookTransform.cpp:169-179 @ v2.5.2).
     #[doc(alias = "GetLooksResultColorSpace")]
     pub fn looks_result_color_space<'c>(
         config: &'c Config,
@@ -290,7 +290,7 @@ fn look_not_found(config: &Config, look_name: &[u8]) -> Exception {
 /// space to its process space (unless `skip_color_space_conversion`), which becomes the current
 /// color space. An empty name is skipped.
 ///
-/// Port of `RunLookTokens` (src/OpenColorIO/transforms/LookTransform.cpp:197-293 @ v2.5.2).
+/// Port of `RunLookTokens` (src/OpenColorIO/transforms/LookTransform.cpp:203-305 @ v2.5.2).
 fn run_look_tokens<'c>(
     ops: &mut OpVec,
     current_color_space: &mut Option<&'c ColorSpace>,
@@ -392,7 +392,7 @@ fn run_look_tokens<'c>(
 /// `skipColorSpaceConversion`. Inverse, the source and destination swap and the looks reverse.
 ///
 /// Port of `BuildLookOps(OpRcPtrVec &, const Config &, const ConstContextRcPtr &, const
-/// LookTransform &, TransformDirection)` (src/OpenColorIO/transforms/LookTransform.cpp:299-348
+/// LookTransform &, TransformDirection)` (src/OpenColorIO/transforms/LookTransform.cpp:309-361
 /// @ v2.5.2).
 pub(crate) fn build_look_ops(
     ops: &mut OpVec,
@@ -456,7 +456,7 @@ pub(crate) fn build_look_ops(
 ///
 /// Port of `BuildLookOps(OpRcPtrVec &, ConstColorSpaceRcPtr &, bool, const Config &, const
 /// ConstContextRcPtr &, const LookParseResult &)` (src/OpenColorIO/transforms/
-/// LookTransform.cpp:350-418 @ v2.5.2).
+/// LookTransform.cpp:363-435 @ v2.5.2).
 pub(crate) fn build_look_ops_from<'c>(
     ops: &mut OpVec,
     current_color_space: &mut Option<&'c ColorSpace>,
@@ -527,7 +527,7 @@ pub(crate) fn build_look_ops_from<'c>(
 /// the option that would apply).
 ///
 /// Port of `CollectContextVariables(const Config &, const Context &, const LookTransform &,
-/// ContextRcPtr &)` (src/OpenColorIO/transforms/LookTransform.cpp:420-479 @ v2.5.2). A look
+/// ContextRcPtr &)` (src/OpenColorIO/transforms/LookTransform.cpp:437-482 @ v2.5.2). A look
 /// list it can't parse is the parser's error.
 pub(crate) fn collect_look_transform_context_variables(
     config: &Config,

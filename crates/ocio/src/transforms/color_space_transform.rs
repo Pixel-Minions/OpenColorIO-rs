@@ -190,7 +190,7 @@ impl fmt::Display for ColorSpaceTransform {
 
 /// "Color space '<cs>' could not be found."
 ///
-/// Port of `ThrowMissingCS` (src/OpenColorIO/transforms/ColorSpaceTransform.cpp:157-162 @
+/// Port of `ThrowMissingCS` (src/OpenColorIO/transforms/ColorSpaceTransform.cpp:157-163 @
 /// v2.5.2).
 fn missing_cs(cs: &[u8]) -> Exception {
     let mut os = b"Color space '".to_vec();
@@ -205,7 +205,7 @@ fn missing_cs(cs: &[u8]) -> Exception {
 ///
 /// Port of `BuildColorSpaceOps(OpRcPtrVec &, const Config &, const ConstContextRcPtr &, const
 /// ColorSpaceTransform &, TransformDirection)` (src/OpenColorIO/transforms/
-/// ColorSpaceTransform.cpp:164-220 @ v2.5.2).
+/// ColorSpaceTransform.cpp:165-217 @ v2.5.2).
 pub(crate) fn build_color_space_ops(
     ops: &mut OpVec,
     config: &Config,
@@ -274,7 +274,7 @@ pub(crate) fn build_color_space_ops(
 /// equality group.
 ///
 /// Port of `AreColorSpacesInSameEqualityGroup` (src/OpenColorIO/transforms/
-/// ColorSpaceTransform.cpp:224-235 @ v2.5.2).
+/// ColorSpaceTransform.cpp:221-234 @ v2.5.2).
 fn are_color_spaces_in_same_equality_group(csa: &ColorSpace, csb: &ColorSpace) -> bool {
     // See issue #602. Using names in case one of the color space would be a copy.
     if compare(csa.name(), csb.name()) {
@@ -296,7 +296,7 @@ fn are_color_spaces_in_same_equality_group(csa: &ColorSpace, csb: &ColorSpace) -
 ///
 /// Port of `BuildColorSpaceOps(OpRcPtrVec &, const Config &, const ConstContextRcPtr &, const
 /// ConstColorSpaceRcPtr &, const ConstColorSpaceRcPtr &, bool)` (src/OpenColorIO/transforms/
-/// ColorSpaceTransform.cpp:239-276 @ v2.5.2): `None` is upstream's null color space, which a
+/// ColorSpaceTransform.cpp:236-270 @ v2.5.2): `None` is upstream's null color space, which a
 /// display view transform's inverse can pass.
 pub(crate) fn build_color_space_ops_between(
     ops: &mut OpVec,
@@ -360,7 +360,7 @@ fn allocation_of(color_space: &ColorSpace) -> AllocationData {
 /// with `data_bypass` for a data color space.
 ///
 /// Port of `BuildColorSpaceToReferenceOps` (src/OpenColorIO/transforms/
-/// ColorSpaceTransform.cpp:278-311 @ v2.5.2); `None` is upstream's null color space.
+/// ColorSpaceTransform.cpp:272-308 @ v2.5.2); `None` is upstream's null color space.
 pub(crate) fn build_color_space_to_reference_ops(
     ops: &mut OpVec,
     config: &Config,
@@ -397,7 +397,7 @@ pub(crate) fn build_color_space_to_reference_ops(
 /// None with `data_bypass` for a data color space.
 ///
 /// Port of `BuildColorSpaceFromReferenceOps` (src/OpenColorIO/transforms/
-/// ColorSpaceTransform.cpp:313-345 @ v2.5.2); `None` is upstream's null color space.
+/// ColorSpaceTransform.cpp:310-346 @ v2.5.2); `None` is upstream's null color space.
 pub(crate) fn build_color_space_from_reference_ops(
     ops: &mut OpVec,
     config: &Config,
@@ -435,7 +435,7 @@ pub(crate) fn build_color_space_from_reference_ops(
 /// it; display to scene the other way), or an error without one.
 ///
 /// Port of `BuildReferenceConversionOps` (src/OpenColorIO/transforms/
-/// ColorSpaceTransform.cpp:347-394 @ v2.5.2).
+/// ColorSpaceTransform.cpp:348-394 @ v2.5.2).
 pub(crate) fn build_reference_conversion_ops(
     ops: &mut OpVec,
     config: &Config,
@@ -528,7 +528,7 @@ pub(crate) fn collect_color_space_context_variables(
 /// name. It may count variables the direction in use doesn't need.
 ///
 /// Port of `CollectContextVariables(const Config &, const Context &, const ColorSpaceTransform &,
-/// ContextRcPtr &)` (src/OpenColorIO/transforms/ColorSpaceTransform.cpp:446-503 @ v2.5.2).
+/// ContextRcPtr &)` (src/OpenColorIO/transforms/ColorSpaceTransform.cpp:446-505 @ v2.5.2).
 pub(crate) fn collect_color_space_transform_context_variables(
     config: &Config,
     context: &Context,

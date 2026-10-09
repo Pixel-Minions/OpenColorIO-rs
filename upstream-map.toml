@@ -199,7 +199,7 @@ path = "src/OpenColorIO/ContextVariableUtils.cpp"
 kind = "src"
 target = ["crates/ocio/src/context_variable_utils.rs"]
 status = "partial"
-note = "1.8g: CollectContextVariables for the classes in the port (the group overload of transforms/GroupTransform.cpp:206-223 included); p3-context 3.5d: ContainsContextVariableToken, ContainsContextVariables, LoadEnvironment, ResolveContextVariables. The other CollectContextVariables overloads come with their transform classes; p3-builders 3.2a: the dispatch to the color space and file transforms' overloads; p3-builders 3.2b: the look transform's overload, and the overloads return the look parser's error as upstream throws it; p3-builders 3.2c: the display view transform's overload"
+note = "1.8g: CollectContextVariables for the classes in the port (the group overload of transforms/GroupTransform.cpp:206-223 included); p3-context 3.5d: ContainsContextVariableToken, ContainsContextVariables, LoadEnvironment, ResolveContextVariables. The other CollectContextVariables overloads come with their transform classes; p3-builders 3.2a: the dispatch to the color space and file transforms' overloads; p3-builders 3.2b: the look transform's overload, and the overloads return the look parser's error as upstream throws it; p3-builders 3.2c: the display view transform's overload; p3-builders 3.2d: a nesting limit of 256 levels where upstream overflows the stack (U-58) in CollectContextVariables"
 
 [[file]]
 path = "src/OpenColorIO/ContextVariableUtils.h"
@@ -614,7 +614,7 @@ path = "src/OpenColorIO/Transform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transform.rs"]
 status = "partial"
-note = "p1-transforms T0: Transform::validate's direction check (the typeid text unreachable), BuildOps, operator<< and CreateTransform as exhaustive matches over enum Transform, with the classes ported so far; each class adds its arms"
+note = "p1-transforms T0: Transform::validate's direction check (the typeid text unreachable), BuildOps, operator<< and CreateTransform as exhaustive matches over enum Transform, with the classes ported so far; each class adds its arms; p3-builders 3.2d: a nesting limit of 256 levels where upstream overflows the stack (U-58) in BuildOps"
 
 [[file]]
 path = "src/OpenColorIO/TransformBuilder.h"
@@ -2166,14 +2166,14 @@ path = "src/OpenColorIO/transforms/ColorSpaceTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/color_space_transform.rs"]
 status = "done"
-note = "p3-transforms (3.1a): the class (18-151), its validation and operator<< (I-120), checked against the wheel in crates/ocio/tests/config_transforms_oracle.rs; p3-builders 3.2a: BuildColorSpaceOps (both), BuildColorSpaceToReferenceOps, BuildColorSpaceFromReferenceOps, BuildReferenceConversionOps (155-394) and the three CollectContextVariables (396-503)"
+note = "p3-transforms (3.1a): the class (18-151), its validation and operator<< (I-120), checked against the wheel in crates/ocio/tests/config_transforms_oracle.rs; p3-builders 3.2a: BuildColorSpaceOps (both), BuildColorSpaceToReferenceOps, BuildColorSpaceFromReferenceOps, BuildReferenceConversionOps (157-394) and the three CollectContextVariables (396-505)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/DisplayViewTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/display_view_transform.rs"]
 status = "done"
-note = "p3-transforms (3.1a): the class (18-171), its validation and operator<< (I-121), checked against the wheel in crates/ocio/tests/config_transforms_oracle.rs; p3-builders 3.2c: BuildSourceToDisplay, BuildDisplayToSource, BuildNamedTransformToDisplay, BuildDisplayToNamedTransform, BuildDisplayOps and CollectContextVariables (175-598), an error where upstream dereferences a null source color space (U-57)"
+note = "p3-transforms (3.1a): the class (18-171), its validation and operator<< (I-121), checked against the wheel in crates/ocio/tests/config_transforms_oracle.rs; p3-builders 3.2c: BuildSourceToDisplay, BuildDisplayToSource, BuildNamedTransformToDisplay, BuildDisplayToNamedTransform, BuildDisplayOps and CollectContextVariables (177-600), an error where upstream dereferences a null source color space (U-57)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/ExponentTransform.cpp"
@@ -2351,7 +2351,7 @@ path = "src/OpenColorIO/transforms/LookTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/look_transform.rs"]
 status = "done"
-note = "p3-transforms (3.1a): the class (18-147, 181-191), its validation and operator<<, checked against the wheel in crates/ocio/tests/config_transforms_oracle.rs; p3-builders 3.2b: LooksResultColorSpace and GetLooksResultColorSpace (148-178), RunLookTokens, both BuildLookOps and CollectContextVariables (193-479)"
+note = "p3-transforms (3.1a): the class (18-147, 181-191), its validation and operator<<, checked against the wheel in crates/ocio/tests/config_transforms_oracle.rs; p3-builders 3.2b: LooksResultColorSpace and GetLooksResultColorSpace (149-179), RunLookTokens, both BuildLookOps and CollectContextVariables (203-482)"
 
 [[file]]
 path = "src/OpenColorIO/transforms/Lut1DTransform.cpp"

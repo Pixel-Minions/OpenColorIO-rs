@@ -257,8 +257,8 @@ fn view_transform_without_transform(view_transform: &ViewTransform) -> Exception
 }
 
 /// The reference space type of the source color space of a view transform, which upstream reads
-/// through a pointer that is null when looks that all have empty names leave no color space
-/// (docs/improvements.md, U-57): an error instead.
+/// through a pointer that is null when the looks' first option names no look and so leaves no
+/// color space (docs/improvements.md, U-57): an error instead.
 fn source_reference_space(source_cs: Option<&ColorSpace>) -> Result<ReferenceSpaceType> {
     source_cs
         .map(ColorSpace::reference_space_type)
@@ -275,7 +275,7 @@ fn source_reference_space(source_cs: Option<&ColorSpace>) -> Result<ReferenceSpa
 /// transform, from the display reference space.
 ///
 /// Port of `BuildSourceToDisplay` (src/OpenColorIO/transforms/DisplayViewTransform.cpp:
-/// 175-216 @ v2.5.2).
+/// 177-218 @ v2.5.2).
 fn build_source_to_display(
     ops: &mut OpVec,
     config: &Config,
@@ -312,7 +312,7 @@ fn build_source_to_display(
 /// of `view_transform`.
 ///
 /// Port of `BuildDisplayToSource` (src/OpenColorIO/transforms/DisplayViewTransform.cpp:
-/// 218-260 @ v2.5.2).
+/// 222-262 @ v2.5.2).
 fn build_display_to_source(
     ops: &mut OpVec,
     config: &Config,
@@ -348,7 +348,7 @@ fn build_display_to_source(
 /// reference space to `display_cs`.
 ///
 /// Port of `BuildNamedTransformToDisplay` (src/OpenColorIO/transforms/
-/// DisplayViewTransform.cpp:262-275 @ v2.5.2).
+/// DisplayViewTransform.cpp:264-277 @ v2.5.2).
 fn build_named_transform_to_display(
     ops: &mut OpVec,
     config: &Config,
@@ -376,7 +376,7 @@ fn build_named_transform_to_display(
 /// transform of a view, inverse.
 ///
 /// Port of `BuildDisplayToNamedTransform` (src/OpenColorIO/transforms/
-/// DisplayViewTransform.cpp:277-290 @ v2.5.2).
+/// DisplayViewTransform.cpp:279-292 @ v2.5.2).
 fn build_display_to_named_transform(
     ops: &mut OpVec,
     config: &Config,
@@ -413,7 +413,7 @@ fn dvt_error(rest: &[&[u8]]) -> Exception {
 /// space, through the view's looks, to the view's color space or through its view transform (or
 /// named transform) to its display color space; inverse, the other way.
 ///
-/// Port of `BuildDisplayOps` (src/OpenColorIO/transforms/DisplayViewTransform.cpp:292-529 @
+/// Port of `BuildDisplayOps` (src/OpenColorIO/transforms/DisplayViewTransform.cpp:295-528 @
 /// v2.5.2).
 pub(crate) fn build_display_ops(
     ops: &mut OpVec,
@@ -677,7 +677,7 @@ pub(crate) fn build_display_ops(
 /// direction in use doesn't need.
 ///
 /// Port of `CollectContextVariables(const Config &, const Context &, const DisplayViewTransform
-/// &, ContextRcPtr &)` (src/OpenColorIO/transforms/DisplayViewTransform.cpp:531-598 @ v2.5.2).
+/// &, ContextRcPtr &)` (src/OpenColorIO/transforms/DisplayViewTransform.cpp:530-600 @ v2.5.2).
 pub(crate) fn collect_display_view_transform_context_variables(
     config: &Config,
     context: &Context,

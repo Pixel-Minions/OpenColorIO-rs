@@ -1018,34 +1018,50 @@ colorspaces:
     }
 }
 
-/// Inverse, a view transform after looks of empty names only has no source color space, which
-/// upstream dereferences (docs/improvements.md, U-57): an error instead.
+/// Inverse, a view transform after looks whose first option names no look has no source color
+/// space, which upstream dereferences (docs/improvements.md, U-57): an error instead. The
+/// looks lists are those the wheel crashes on.
 #[test]
 fn an_inverse_view_transform_after_empty_looks_is_refused() {
     let _env = EnvGuard::new();
-    const CONFIG: &str = r#"ocio_profile_version: 2
-roles: {default: raw}
+    for looks in [
+        "\", \"",
+        "\"+\"",
+        "\"-\"",
+        "'\"\"'",
+        "\"+, -\"",
+        "\"|x\"",
+        "\" | x\"",
+        "\" | x|x\"",
+    ] {
+        let config_text = format!(
+            "ocio_profile_version: 2
+roles: {{default: raw}}
 displays:
   d:
-    - !<View> {name: v, view_transform: vt, display_colorspace: dout, looks: ", "}
+    - !<View> {{name: v, view_transform: vt, display_colorspace: dout, looks: {looks}}}
 view_transforms:
-  - !<ViewTransform> {name: vt, from_scene_reference: !<MatrixTransform> {}}
+  - !<ViewTransform> {{name: vt, from_scene_reference: !<MatrixTransform> {{}}}}
+looks:
+  - !<Look> {{name: x, process_space: raw, transform: !<MatrixTransform> {{}}}}
 display_colorspaces:
-  - !<ColorSpace> {name: dout}
+  - !<ColorSpace> {{name: dout}}
 colorspaces:
-  - !<ColorSpace> {name: raw}
-  - !<ColorSpace> {name: in}
-"#;
-    let config = Config::create_from_stream(CONFIG.as_bytes()).unwrap();
-    let mut dt = DisplayViewTransform::new();
-    dt.set_src("in");
-    dt.set_display("d");
-    dt.set_view("v");
-    check_throw_what(
-        build(&config, &dt, TransformDirection::Inverse),
-        "DisplayViewTransform error. The looks leave no color space to apply the view transform \
-         from.",
-    );
-    // Forward, the looks leave the source color space as it is.
-    build(&config, &dt, TransformDirection::Forward).unwrap();
+  - !<ColorSpace> {{name: raw}}
+  - !<ColorSpace> {{name: in}}
+"
+        );
+        let config = Config::create_from_stream(config_text.as_bytes()).unwrap();
+        let mut dt = DisplayViewTransform::new();
+        dt.set_src("in");
+        dt.set_display("d");
+        dt.set_view("v");
+        check_throw_what(
+            build(&config, &dt, TransformDirection::Inverse),
+            "DisplayViewTransform error. The looks leave no color space to apply the view \
+             transform from.",
+        );
+        // Forward, the looks leave the source color space as it is.
+        build(&config, &dt, TransformDirection::Forward).unwrap();
+    }
 }
