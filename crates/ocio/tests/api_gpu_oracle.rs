@@ -395,6 +395,15 @@ fn lut3d_transform_shaders_match_the_wheel() {
     check(&Class::new("Lut3DTransform", api_cases::lut3d()));
 }
 
+/// The built-in transforms whose ops are ported (`api_cases::BUILTINS_WITH_OPS`).
+#[test]
+fn builtin_transform_shaders_match_the_wheel() {
+    check(&Class::new(
+        "BuiltinTransform",
+        api_cases::builtin(api_cases::BUILTINS_WITH_OPS),
+    ));
+}
+
 #[test]
 fn fixed_function_transform_shaders_match_the_wheel() {
     check(&Class::new(

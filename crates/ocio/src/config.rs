@@ -13,6 +13,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, RwLock};
 
 use ocio_ops::exception::{Exception, Result};
 use ocio_ops::image_desc::PackedImageDesc;
+use ocio_ops::logging::{log_error, log_info};
 use ocio_ops::math_utils::equal_with_abs_error;
 use ocio_ops::open_color_types::{
     CdlStyle, ChannelOrdering, ColorSpaceDirection, ColorSpaceVisibility, EnvironmentMode,
@@ -22,36 +23,51 @@ use ocio_ops::open_color_types::{
 };
 use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 use ocio_ops::parse_utils::{
-    ROLE_DEFAULT, find_in_string_vec_case_ignore, intersect_string_vecs_case_ignore,
-    join_string_env_style, split_string_env_style,
+    ROLE_COLOR_TIMING, ROLE_COMPOSITING_LOG, ROLE_DEFAULT, ROLE_INTERCHANGE_DISPLAY,
+    ROLE_INTERCHANGE_SCENE, ROLE_SCENE_LINEAR, find_in_string_vec_case_ignore,
+    intersect_string_vecs_case_ignore, join_string_env_style, split_string_env_style,
 };
 use ocio_ops::platform::strcasecmp;
-use ocio_ops::platform::{getenv, is_env_present};
-use ocio_ops::utils::pystring;
+use ocio_ops::platform::{create_input_file_stream, getenv, is_env_present};
+use ocio_ops::utils::pystring::{self, os_path};
 use ocio_ops::utils::string_utils::{
-    StringVec, c_str, compare, contain, lower, remove, split, trim,
+    StringVec, c_str, compare, contain, find, lower, remove, split, starts_with, trim,
 };
 
+use crate::builtinconfigs::builtin_config_registry::{
+    BuiltinConfigRegistry, OCIO_BUILTIN_URI_PREFIX, resolve_config_path, search_builtin_uri,
+};
 use crate::caching::{OCIO_DISABLE_CACHE_FALLBACK, ProcessorCache, std_hash_string};
 use crate::color_space::ColorSpace;
 use crate::color_space_set::ColorSpaceSet;
+use crate::config_io_proxy::ConfigIoProxy;
 use crate::context::Context;
-use crate::context_variable_utils::{collect_context_variables, contains_context_variable_token};
+use crate::context_variable_utils::{
+    collect_context_variables, contains_context_variable_token, contains_context_variables,
+};
 use crate::display::{
-    Display, DisplayMap, View, ViewVec, add_view, compute_displays, find_display, find_view,
+    Display, DisplayMap, OCIO_VIEW_USE_DISPLAY_NAME, View, ViewVec, add_view, compute_displays,
+    find_display, find_view,
 };
 use crate::file_rules::{FileRules, update_file_rules_from_v1_to_v2};
 use crate::look::Look;
+use crate::look_parse::LookParseResult;
 use crate::named_transform::NamedTransform;
 use crate::path_utils::{get_fast_file_hash, parse_color_space_from_string};
 use crate::processor::{Processor, ProcessorCacheFlags};
 use crate::transform::Transform;
 use crate::view_transform::ViewTransform;
 use crate::viewing_rules::{ViewingRules, find_rule};
+use crate::yaml_cpp::stream::IStream;
 use ocio_ops::hash_utils::cache_id_hash;
 
 /// `OCIO_ACTIVE_DISPLAYS`: the displays a config shows, overriding its own list.
 ///
+/// `$OCIO`: the config that [`Config::create_from_env`] reads.
+///
+/// Port of `OCIO_CONFIG_ENVVAR` (src/OpenColorIO/Config.cpp:47 @ v2.5.2).
+pub const OCIO_CONFIG_ENVVAR: &str = "OCIO";
+
 /// Port of `OCIO_ACTIVE_DISPLAYS_ENVVAR` (src/OpenColorIO/Config.cpp:49 @ v2.5.2).
 pub const OCIO_ACTIVE_DISPLAYS_ENVVAR: &str = "OCIO_ACTIVE_DISPLAYS";
 
@@ -193,6 +209,30 @@ fn get_file_references(files: &mut BTreeSet<Vec<u8>>, transform: &Transform) {
     }
 }
 
+/// The start of a view's validation message: "Config failed display view validation. ", then
+/// "Shared " (`display` empty) or "Display '<display>' has a ", then "view with an empty name."
+/// or "view '<name>' ".
+///
+/// Port of `GetDisplayViewPrefixErrorMsg` (src/OpenColorIO/Config.cpp:222-243 @ v2.5.2).
+fn get_display_view_prefix_error_msg(display: &[u8], view: &View) -> Vec<u8> {
+    let mut oss = b"Config failed display view validation. ".to_vec();
+    if display.is_empty() {
+        oss.extend_from_slice(b"Shared ");
+    } else {
+        oss.extend_from_slice(b"Display '");
+        oss.extend_from_slice(display);
+        oss.extend_from_slice(b"' has a ");
+    }
+    if view.name.is_empty() {
+        oss.extend_from_slice(b"view with an empty name.");
+    } else {
+        oss.extend_from_slice(b"view '");
+        oss.extend_from_slice(&view.name);
+        oss.extend_from_slice(b"' ");
+    }
+    oss
+}
+
 /// Whether a color space of the reference space `t` is one a search of `st` keeps.
 ///
 /// Port of `MatchReferenceType` (src/OpenColorIO/Config.cpp:2316-2330 @ v2.5.2).
@@ -204,16 +244,17 @@ fn match_reference_type(st: SearchReferenceSpaceType, t: ReferenceSpaceType) -> 
     }
 }
 
-/// What a list of inactive names is built for. Upstream's `INACTIVE_ALL` (the names as they
-/// are, for `validate`) comes with `validate` (3.8a).
+/// What a list of inactive names is built for.
 ///
-/// Port of `Config::Impl::InactiveType` (src/OpenColorIO/Config.cpp:521-526 @ v2.5.2), in part.
+/// Port of `Config::Impl::InactiveType` (src/OpenColorIO/Config.cpp:521-526 @ v2.5.2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InactiveType {
     /// `INACTIVE_COLORSPACE`.
     ColorSpace,
     /// `INACTIVE_NAMEDTRANSFORM`.
     NamedTransform,
+    /// `INACTIVE_ALL`: the names as they are, for `validate`.
+    All,
 }
 
 /// A config's current context, shared with the config: what it reads is the context as the
@@ -360,11 +401,9 @@ fn get_color_space_references(
 enum Validation {
     /// `VALIDATION_UNKNOWN`.
     Unknown,
-    /// `VALIDATION_PASSED`: set by `validate` (3.8a).
-    #[allow(dead_code)]
+    /// `VALIDATION_PASSED`.
     Passed,
-    /// `VALIDATION_FAILED`: set by `validate` (3.8a).
-    #[allow(dead_code)]
+    /// `VALIDATION_FAILED`.
     Failed,
 }
 
@@ -537,6 +576,48 @@ impl Clone for Config {
     }
 }
 
+/// The C library's `strerror` of an I/O error: its text without Rust's " (os error N)".
+fn strerror(e: &std::io::Error) -> String {
+    let text = e.to_string();
+    match (e.raw_os_error(), text.rfind(" (os error ")) {
+        (Some(_), Some(at)) => text[..at].to_string(),
+        _ => text,
+    }
+}
+
+/// `g_currentConfig`, under its lock `g_currentConfigLock` (Config.cpp:110-113 @ v2.5.2).
+static CURRENT_CONFIG: Mutex<Option<Arc<Config>>> = Mutex::new(None);
+
+/// The process's current config: the one [`set_current_config`] gave, or, the first time
+/// without one, [`Config::create_from_env`]'s (whose error leaves no current config).
+///
+/// Port of `GetCurrentConfig` (src/OpenColorIO/Config.cpp:115-125 @ v2.5.2).
+#[doc(alias = "GetCurrentConfig")]
+pub fn get_current_config() -> Result<Arc<Config>> {
+    let mut current = CURRENT_CONFIG
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+    if current.is_none() {
+        *current = Some(Config::create_from_env()?);
+    }
+
+    Ok(Arc::clone(current.as_ref().expect("set above")))
+}
+
+/// Makes a copy of `config` ([`Config`]'s `Clone`, `createEditableCopy`) the process's current
+/// config.
+///
+/// Port of `SetCurrentConfig` (src/OpenColorIO/Config.cpp:127-132 @ v2.5.2).
+#[doc(alias = "SetCurrentConfig")]
+pub fn set_current_config(config: &Config) {
+    let mut current = CURRENT_CONFIG
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+
+    *current = Some(Arc::new(config.clone()));
+}
+
 impl Config {
     /// The state `Config::Impl::Impl` gives a config before it reads the environment.
     fn blank() -> Config {
@@ -668,6 +749,233 @@ impl Config {
         Config::read(istream, None)
     }
 
+    /// The built-in config that `config_name` names, with or without the `ocio://` prefix:
+    /// a name of the registry, ignoring case, or `default`, `cg-config-latest` or
+    /// `studio-config-latest` ([`resolve_config_path`]). Otherwise "Could not find '<name>' in
+    /// the built-in configurations.". The name ends at its first NUL.
+    ///
+    /// Port of `Config::CreateFromBuiltinConfig` (src/OpenColorIO/Config.cpp:1233-1262 @
+    /// v2.5.2).
+    #[doc(alias = "CreateFromBuiltinConfig")]
+    pub fn create_from_builtin_config(config_name: impl AsRef<[u8]>) -> Result<Arc<Config>> {
+        let mut builtin_config_name = c_str(config_name.as_ref()).to_vec();
+
+        // Normalize the input to the URI format.
+        if !starts_with(&builtin_config_name, OCIO_BUILTIN_URI_PREFIX.as_bytes()) {
+            let mut uri = OCIO_BUILTIN_URI_PREFIX.as_bytes().to_vec();
+            uri.extend_from_slice(&builtin_config_name);
+            builtin_config_name = uri;
+        }
+
+        // Resolve the URI if needed.
+        let uri = resolve_config_path(&builtin_config_name).to_vec();
+
+        // Check if the config path starts with ocio://
+        if let Some(name) = search_builtin_uri(&uri) {
+            // Store config path without the "ocio://" prefix, if present.
+            builtin_config_name = name.to_vec();
+        }
+
+        let reg = BuiltinConfigRegistry::get();
+
+        // getBuiltinConfigByName will throw if config name not found.
+        let builtin_config_str = reg.builtin_config_by_name(&builtin_config_name)?;
+        Config::create_from_stream(builtin_config_str)
+    }
+
+    /// The config that `$OCIO` names (a file, an archive or a built-in config's URI, read by
+    /// [`Config::create_from_file`]); without it, or empty, the raw config, after logging
+    /// "Color management disabled. (Specify the $OCIO environment variable to enable.)".
+    ///
+    /// Port of `Config::CreateFromEnv` (src/OpenColorIO/Config.cpp:1135-1152 @ v2.5.2).
+    #[doc(alias = "CreateFromEnv")]
+    pub fn create_from_env() -> Result<Arc<Config>> {
+        let file = getenv(OCIO_CONFIG_ENVVAR).unwrap_or_default();
+
+        // File may be one of the following:
+        //   1) Path to a config file (e.g. /home/user/ocio/config.ocio)
+        //   2) Path to an archived config file (e.g. /home/user/ocio/archived_config.ocioz)
+        //   3) URI to a built-in config (e.g. ocio://cg-config-v0.1.0_aces-v1.3_ocio-v2.1.1)
+        if !file.is_empty() {
+            return Config::create_from_file(&file);
+        }
+
+        log_info("Color management disabled. (Specify the $OCIO environment variable to enable.)");
+
+        Config::create_raw()
+    }
+
+    /// The config in the file `filename` (up to its first NUL), or the built-in config of the
+    /// `ocio://` URI in it ([`Config::create_from_builtin_config`], docs/improvements.md I-149).
+    /// The errors: "The config filepath is missing." (a missing-file exception) for an
+    /// empty name, "Error could not read '<filename>' OCIO profile." for a file that can't be
+    /// opened, and the reader's, which names the file.
+    ///
+    /// A file that starts with `PK` is an OCIOZ archive, whose reader is not ported yet (WP
+    /// 4.x): an error. The file's bytes are read as `CreateFromFile`'s `std::ifstream` gives
+    /// them to yaml-cpp ([`IStream::file`]): on Windows, a file of fewer than four bytes that
+    /// makes yaml-cpp put back three of them reads as an empty document.
+    ///
+    /// Port of `Config::CreateFromFile` (src/OpenColorIO/Config.cpp:1154-1207 @ v2.5.2).
+    #[doc(alias = "CreateFromFile")]
+    pub fn create_from_file(filename: impl AsRef<[u8]>) -> Result<Arc<Config>> {
+        let filename = c_str(filename.as_ref());
+        if filename.is_empty() {
+            return Err(Exception::missing_file("The config filepath is missing."));
+        }
+
+        // Check for URI Pattern: ocio://<config name>
+        if search_builtin_uri(filename).is_some() {
+            return Config::create_from_builtin_config(filename);
+        }
+
+        let could_not_read = || {
+            let mut os = b"Error could not read '".to_vec();
+            os.extend_from_slice(filename);
+            os.extend_from_slice(b"' OCIO profile.");
+            Exception::new(os)
+        };
+        let mut ifstream = create_input_file_stream(filename).map_err(|_| could_not_read())?;
+
+        // The stream's bytes, up to a read that fails (a directory, which Linux opens).
+        let mut data = Vec::new();
+        let read = std::io::Read::read_to_end(&mut ifstream, &mut data);
+        drop(ifstream);
+
+        if data.starts_with(b"PK") {
+            // The file should be an OCIOZ archive file.
+            return Err(Exception::new(
+                "Config::CreateFromFile: reading an OCIOZ archive is not ported yet.",
+            ));
+        }
+
+        // A read that fails ends MSVC's file stream, as the end of the file does. libstdc++'s
+        // throws `std::ios_base::failure` from `basic_filebuf::underflow`: the stream's own reads
+        // swallow it, but yaml-cpp reads its bytes from the stream buffer (`sgetn`), so it
+        // reaches `OCIOYaml::Read`, which wraps its `what()`. (The port fails before reading the
+        // bytes before the failure; only a directory has been seen to fail, at the first read.)
+        if let Err(e) = read
+            && !cfg!(windows)
+        {
+            let mut os = b"Error: Loading the OCIO profile '".to_vec();
+            os.extend_from_slice(filename);
+            os.extend_from_slice(b"' failed. basic_filebuf::underflow error reading the file: ");
+            os.extend_from_slice(strerror(&e).as_bytes());
+            return Err(Exception::new(os));
+        }
+
+        // Not an OCIOZ archive. Continue as usual.
+        Config::read(IStream::file(&data), Some(filename))
+    }
+
+    /// The config whose text `ciop` gives ([`ConfigIoProxy::config_data`]), read with the proxy:
+    /// the reader's errors name the file "from Archive/ConfigIOProxy" (and the config's working
+    /// directory isn't set from it), and the config keeps the proxy for its LUT files.
+    ///
+    /// Port of `Config::CreateFromConfigIOProxy` (src/OpenColorIO/Config.cpp:1214-1231 @
+    /// v2.5.2) and `Config::Impl::Read(std::istream&, ConfigIOProxyRcPtr)` (Config.cpp:
+    /// 5564-5584). Upstream's check for a null config can't fail: the reader throws instead.
+    #[doc(alias = "CreateFromConfigIOProxy")]
+    pub fn create_from_config_io_proxy(ciop: Arc<dyn ConfigIoProxy>) -> Result<Arc<Config>> {
+        // Get a stream of the config.
+        let config_str = ciop.config_data()?;
+
+        let mut config = Config::new()?;
+        // Passing special string for the file path to enable the parser to provide a more
+        // meaningful error message if a problem is encountered.  (The working directory is not
+        // set to this string.)
+        crate::ocio_yaml::read(
+            config_str.as_slice(),
+            &mut config,
+            Some(b"from Archive/ConfigIOProxy"),
+        )?;
+
+        config.check_version_consistency()?;
+
+        // An API request always supersedes the env. variable. As the OCIOYaml helper methods
+        // use the Config public API, the variable reset highlights that only the
+        // env. variable and the config contents are valid after a config file read.
+        config.inactive_color_space_names_api.clear();
+        config.refresh_active_color_spaces();
+
+        // Set the ConfigIOProxy object.
+        config.set_config_io_proxy(Some(ciop));
+
+        Ok(Arc::new(config))
+    }
+
+    /// Gives the config's context the I/O proxy `ciop` (or none), and resets its cache IDs.
+    ///
+    /// Port of `Config::setConfigIOProxy` (src/OpenColorIO/Config.cpp:5995-6001 @ v2.5.2).
+    #[doc(alias = "setConfigIOProxy")]
+    pub fn set_config_io_proxy(&mut self, ciop: Option<Arc<dyn ConfigIoProxy>>) {
+        self.update_context(|c| c.set_config_io_proxy(ciop));
+
+        self.reset_cache_ids();
+    }
+
+    /// The I/O proxy of the config's context.
+    ///
+    /// Port of `Config::getConfigIOProxy` (src/OpenColorIO/Config.cpp:6003-6006 @ v2.5.2).
+    #[doc(alias = "getConfigIOProxy")]
+    pub fn config_io_proxy(&self) -> Option<Arc<dyn ConfigIoProxy>> {
+        self.shared_context.get().config_io_proxy().cloned()
+    }
+
+    /// Whether the config can be archived: its working directory is absolute, and none of its
+    /// search paths and file transforms' files is absolute, starts with `..` once normalized, or
+    /// starts with a context variable (`$` or `%` first).
+    ///
+    /// Port of `Config::isArchivable` (src/OpenColorIO/Config.cpp:6008-6082 @ v2.5.2).
+    #[doc(alias = "isArchivable")]
+    pub fn is_archivable(&self) -> bool {
+        // Current archive implementation needs a working directory to look for LUT files and
+        // working directory must be an absolute path.
+        let working_directory = self.working_dir();
+        if working_directory.is_empty() || !os_path::isabs(&working_directory) {
+            return false;
+        }
+
+        // Utility lambda to check the following criteria.
+        let validate_path_for_archiving = |path: &[u8]| {
+            // Using the normalized path.
+            let norm_path = os_path::normpath(path);
+            // 1) Path may not be absolute.
+            // 2) Path may not start with double dot ".." (going above working directory).
+            // 3) A context variable may not be located at the start of the path.
+            !(os_path::isabs(&norm_path)
+                || pystring::startswith(&norm_path, b"..", 0, pystring::MAX_32BIT_INT)
+                || (contains_context_variables(path)
+                    && (find(path, b"$") == Some(0) || find(path, b"%") == Some(0))))
+        };
+
+        ///////////////////////////////
+        // Search path verification. //
+        ///////////////////////////////
+        // Check that search paths are not absolute nor have context variables outside of config
+        // working directory.
+        let num_search_paths = self.num_search_paths();
+        for i in 0..num_search_paths {
+            let current_path = self.search_path_with_index(i);
+            if !validate_path_for_archiving(&current_path) {
+                // Exit and return false.
+                return false;
+            }
+        }
+
+        /////////////////////////////////
+        // FileTransform verification. //
+        /////////////////////////////////
+        let mut files = BTreeSet::new();
+        for transform in self.all_internal_transforms() {
+            get_file_references(&mut files, transform);
+        }
+
+        // Check that FileTransform sources are not absolute nor have context variables outside
+        // of config working directory.
+        files.iter().all(|path| validate_path_for_archiving(path))
+    }
+
     /// The config's YAML text: checked against its version
     /// ([`Config::check_version_consistency`]), then written (`OCIOYaml::Write`). Either's
     /// error is "Error building YAML: " and its message. It is also the config's text as
@@ -770,7 +1078,10 @@ impl Config {
     ///
     /// Port of `Config::Impl::Read(std::istream&, const char*)` (src/OpenColorIO/
     /// Config.cpp:5548-5562 @ v2.5.2).
-    pub(crate) fn read(input: &[u8], filename: Option<&[u8]>) -> Result<Arc<Config>> {
+    pub(crate) fn read<'a>(
+        input: impl Into<IStream<'a>>,
+        filename: Option<&[u8]>,
+    ) -> Result<Arc<Config>> {
         let mut config = Config::new()?;
         crate::ocio_yaml::read(input, &mut config, filename)?;
         config.check_version_consistency()?;
@@ -1171,6 +1482,11 @@ impl Config {
                         // Use the canonical name (alias might have been used).
                         res.push(nt.name().to_vec());
                     }
+                }
+                InactiveType::All => {
+                    // This is only used to verify that all items of the list do exists (only
+                    // used by the validate() function.
+                    res.push(v.clone());
                 }
             }
         }
@@ -4450,6 +4766,887 @@ impl Config {
             return Err(Exception::new(
                 "Only version 2 (or higher) can have NamedTransforms.",
             ));
+        }
+        Ok(())
+    }
+
+    // Validation //////////////////////////////////////////////////////////////////////////////
+
+    /// Checks the config: its predefined context variables, color spaces, roles (and the
+    /// interchange roles version 2.2 asks for, which only log errors), inactive lists, viewing
+    /// rules, displays and views, the virtual display, the active displays, the transforms and
+    /// the color spaces they name, looks, view transforms, file rules, search paths and file
+    /// transform paths, named transforms, and the version
+    /// ([`Config::check_version_consistency`]). The result is kept until the config changes: a
+    /// failed config fails again with the same message, which is empty where upstream throws
+    /// without setting it (docs/improvements.md, I-147).
+    ///
+    /// Port of `Config::validate` (src/OpenColorIO/Config.cpp:1359-2106 @ v2.5.2).
+    pub fn validate(&self) -> Result<()> {
+        {
+            let mut cache_ids = self.lock_cache_ids();
+            match cache_ids.validation {
+                Validation::Passed => return Ok(()),
+                Validation::Failed => {
+                    return Err(Exception::new(cache_ids.validation_text.clone()));
+                }
+                Validation::Unknown => {}
+            }
+
+            cache_ids.validation = Validation::Failed;
+            cache_ids.validation_text.clear();
+        }
+
+        let mut validation_text = Vec::new();
+        let result = self.validate_impl(&mut validation_text);
+        let mut cache_ids = self.lock_cache_ids();
+        cache_ids.validation_text = validation_text;
+        if result.is_ok() {
+            // Everything is groovy.
+            cache_ids.validation = Validation::Passed;
+        }
+        result
+    }
+
+    /// The checks of [`Config::validate`]; `validation_text` is upstream's `m_validationtext`,
+    /// which most failures set to their message before throwing it.
+    fn validate_impl(&self, validation_text: &mut Vec<u8>) -> Result<()> {
+        // Sets the validation text and gives its exception.
+        let fail = |validation_text: &mut Vec<u8>, os: Vec<u8>| {
+            *validation_text = os;
+            Exception::new(validation_text.clone())
+        };
+
+        ///// PREDEFINED CONTEXT VARIABLES
+
+        // Only the 'predefined' mode imposes to have all the context variables explicitely
+        // defined in the config file. The 'all' mode exclusively relies on the environment
+        // variables.
+        if self.major_version() >= 2
+            && self.shared_context.get().environment_mode() == EnvironmentMode::LoadPredefined
+        {
+            for (name, value) in &self.env {
+                let ctx_value = value;
+
+                if contains_context_variables(ctx_value) {
+                    // When a context variable default value contains another context variable,
+                    // the only legal case is ENV = $ENV. It means that there is no default
+                    // value i.e. an system env. variable must exist.
+
+                    let ctx_variable1 = [b"$".as_slice(), name].concat();
+                    let ctx_variable2 = [b"${".as_slice(), name, b"}"].concat();
+                    let ctx_variable3 = [b"%".as_slice(), name, b"%"].concat();
+
+                    let is_valid = &ctx_variable1 == ctx_value
+                        || &ctx_variable2 == ctx_value
+                        || &ctx_variable3 == ctx_value;
+
+                    if !is_valid {
+                        let mut oss =
+                            b"Unresolved context variable in environment declaration \x27".to_vec();
+                        oss.extend_from_slice(name);
+                        oss.extend_from_slice(b" = ");
+                        oss.extend_from_slice(value);
+                        oss.extend_from_slice(b"\x27.");
+                        return Err(Exception::new(oss));
+                    }
+                }
+            }
+        }
+
+        ///// COLORSPACES
+
+        let mut has_display_referred_colorspace = false;
+        let mut has_scene_referred_colorspace = false;
+
+        // Confirm all ColorSpaces are valid.
+        for i in 0..self.all_color_spaces.num_color_spaces() {
+            let cs = self
+                .all_color_spaces
+                .color_space_by_index(i)
+                .expect("an index of the set");
+
+            let name = c_str(cs.name());
+            // Name is not empty and unique (checked by addColorSpace ).
+
+            // Retest that name does not contain reserved characters (vesion might have change).
+            if self.major_version() >= 2 && contains_context_variable_token(name) {
+                let mut oss =
+                    b"Config failed color space validation. A color space name \x27".to_vec();
+                oss.extend_from_slice(name);
+                oss.extend_from_slice(
+                    b"\x27 cannot contain a context variable reserved token i.e. % or $.",
+                );
+                return Err(fail(validation_text, oss));
+            }
+
+            let num_aliases = cs.num_aliases();
+            if num_aliases != 0 && self.major_version() < 2 {
+                let mut oss = b"Config failed color space validation. Aliases may not be used \
+                                in a v1 config.  Color space name: \x27"
+                    .to_vec();
+                oss.extend_from_slice(name);
+                oss.extend_from_slice(b"\x27.");
+                return Err(fail(validation_text, oss));
+            }
+
+            // Make sure that all used interopIDs are available in this config.
+            let interop = c_str(cs.interop_id());
+            if !interop.is_empty() && self.color_space(interop).is_none() {
+                let mut os = b"Config failed color space validation. The color space \x27".to_vec();
+                os.extend_from_slice(name);
+                os.extend_from_slice(b"\x27 refers to an interop ID, \x27");
+                os.extend_from_slice(interop);
+                os.extend_from_slice(b"\x27, which is not a color space name or alias.");
+                return Err(fail(validation_text, os));
+            }
+
+            // AddColorSpace, addNamedTransform & setRole already check there is no name & alias
+            // conflict.
+
+            if cs.reference_space_type() == ReferenceSpaceType::Display {
+                has_display_referred_colorspace = true;
+            } else if cs.reference_space_type() == ReferenceSpaceType::Scene {
+                has_scene_referred_colorspace = true;
+            }
+        }
+
+        // Confirm all roles used by the config are valid and that essential roles are present.
+        {
+            for (role, colorspace) in &self.roles {
+                // Retest in case version did change.
+                if self.major_version() >= 2 && contains_context_variable_token(role) {
+                    let mut oss = b"Config failed role validation. A role name \x27".to_vec();
+                    oss.extend_from_slice(role);
+                    oss.extend_from_slice(
+                        b"\x27 cannot contain a context variable reserved token i.e. % or $.",
+                    );
+                    return Err(fail(validation_text, oss));
+                }
+
+                if !self.has_color_space(c_str(colorspace)) {
+                    let mut os = b"Config failed role validation. The role \x27".to_vec();
+                    os.extend_from_slice(role);
+                    os.extend_from_slice(b"\x27 refers to a color space, \x27");
+                    os.extend_from_slice(colorspace);
+                    os.extend_from_slice(b"\x27, which is not defined.");
+                    return Err(fail(validation_text, os));
+                }
+
+                // AddColorSpace, addNamedTransform & setRole already check there is no name
+                // conflict.
+            }
+
+            // Check for interchange roles requirements - scene-referred and display-referred.
+            let version_hex: u32 = (self.major_version() << 24) | (self.minor_version() << 16);
+            if version_hex >= 0x02020000 {
+                // v2.2 or higher
+                let mut has_role_scene_linear = false;
+                let mut has_role_compositing_log = false;
+                let mut has_role_color_timing = false;
+
+                let mut has_role_aces_interchange = false;
+                let mut aces_inter_has_scene_ref_colorspace = false;
+                let mut has_role_cie_xyz_d65_interchange = false;
+                let mut cie_inter_has_display_ref_colorspace = false;
+
+                for (role, colorspace) in &self.roles {
+                    let role = c_str(role);
+                    if strcasecmp(role, ROLE_SCENE_LINEAR).is_eq() {
+                        has_role_scene_linear = true;
+                    } else if strcasecmp(role, ROLE_COMPOSITING_LOG).is_eq() {
+                        has_role_compositing_log = true;
+                    } else if strcasecmp(role, ROLE_COLOR_TIMING).is_eq() {
+                        has_role_color_timing = true;
+                    } else if strcasecmp(role, ROLE_INTERCHANGE_SCENE).is_eq() {
+                        has_role_aces_interchange = true;
+
+                        let cs = self
+                            .color_space(c_str(colorspace))
+                            .expect("a role\x27s color space, checked above");
+                        aces_inter_has_scene_ref_colorspace =
+                            cs.reference_space_type() == ReferenceSpaceType::Scene;
+                    } else if strcasecmp(role, ROLE_INTERCHANGE_DISPLAY).is_eq() {
+                        has_role_cie_xyz_d65_interchange = true;
+
+                        let cs = self
+                            .color_space(c_str(colorspace))
+                            .expect("a role\x27s color space, checked above");
+                        cie_inter_has_display_ref_colorspace =
+                            cs.reference_space_type() == ReferenceSpaceType::Display;
+                    }
+                }
+
+                // All LogError below are technically a validation failure, but only logging a
+                // message rather than throwing (for now). This is to make it possible for
+                // upgradeToLatestVersion to always result in a config that does not fail
+                // validation.
+
+                if !has_role_scene_linear {
+                    log_error(
+                        "The scene_linear role is required for a config version 2.2 or higher.",
+                    );
+                }
+
+                if !has_role_compositing_log {
+                    log_error(
+                        "The compositing_log role is required for a config version 2.2 or higher.",
+                    );
+                }
+
+                if !has_role_color_timing {
+                    log_error(
+                        "The color_timing role is required for a config version 2.2 or higher.",
+                    );
+                }
+
+                if has_scene_referred_colorspace && !has_role_aces_interchange {
+                    log_error(
+                        "The aces_interchange role is required when there are scene-referred \
+                         color spaces and the config version is 2.2 or higher.",
+                    );
+                } else if has_role_aces_interchange && !aces_inter_has_scene_ref_colorspace {
+                    log_error("The aces_interchange role must be a scene-referred color space.");
+                }
+
+                if has_display_referred_colorspace && !has_role_cie_xyz_d65_interchange {
+                    log_error(
+                        "The cie_xyz_d65_interchange role is required when there are \
+                         display-referred color spaces and the config version is 2.2 or higher.",
+                    );
+                } else if has_role_cie_xyz_d65_interchange && !cie_inter_has_display_ref_colorspace
+                {
+                    log_error(
+                        "The cie_xyz_d65_interchange role must be a display-referred color space.",
+                    );
+                }
+            }
+        }
+
+        // Confirm all inactive color spaces or named transforms exist.
+        let inactive_color_space_names = self.build_inactive_names_list(InactiveType::All);
+
+        for name in &inactive_color_space_names {
+            if self.impl_color_space(name).is_none() && self.impl_named_transform(name).is_none() {
+                let mut os = b"Inactive \x27".to_vec();
+                os.extend_from_slice(name);
+                os.extend_from_slice(b"\x27 is neither a color space nor a named transform.");
+                log_info(os);
+            }
+        }
+
+        ///// DISPLAYS / VIEWS
+
+        // Viewing rules.
+
+        let color_space_accessor = |name: &[u8]| self.color_space(name).is_some();
+        if let Err(e) = self
+            .viewing_rules
+            .get()
+            .validate(&color_space_accessor, &self.all_color_spaces)
+        {
+            let mut os =
+                b"Config failed validation. Viewing rules failed validation with: ".to_vec();
+            os.extend_from_slice(e.what());
+            return Err(fail(validation_text, os));
+        }
+
+        // Shared views.
+        for view in &self.shared_views {
+            self.validate_view(b"", view, true, validation_text)?;
+        }
+
+        let mut numdisplays = 0;
+
+        // Confirm all Display transforms refer to colorspaces that exist.
+        for (display, d) in &self.displays {
+            let views = &d.views;
+            let shared_views = &d.shared_views;
+            if views.is_empty() && shared_views.is_empty() {
+                let mut os = b"Config failed display validation. The display \x27".to_vec();
+                os.extend_from_slice(display);
+                os.extend_from_slice(b"\x27 does not define any views.");
+                return Err(fail(validation_text, os));
+            }
+            numdisplays += 1;
+
+            // Confirm shared view exist and do not conflict with views.
+            for shared_view in shared_views {
+                self.validate_shared_view(display, views, shared_view, true, validation_text)?;
+            }
+
+            // Confirm view references exist.
+            for view in views {
+                self.validate_view(display, view, true, validation_text)?;
+            }
+        }
+
+        // Confirm at least one display entry exists.
+        if numdisplays == 0 {
+            return Err(fail(
+                validation_text,
+                b"Config failed display validation. No displays are specified.".to_vec(),
+            ));
+        }
+
+        ///// VIRTUAL DISPLAY.
+
+        if self.major_version() >= 2 {
+            // Confirm shared view exist and do not conflict with views.
+            for shared_view in &self.virtual_display.shared_views {
+                // Bypass the <USE_DISPLAY_NAME> validation.
+                self.validate_shared_view(
+                    b"virtual_display",
+                    &self.virtual_display.views,
+                    shared_view,
+                    false,
+                    validation_text,
+                )?;
+            }
+
+            // Confirm view references exist.
+            for view in &self.virtual_display.views {
+                // Bypass the <USE_DISPLAY_NAME> validation.
+                self.validate_view(b"virtual_display", view, false, validation_text)?;
+            }
+        }
+
+        ///// ACTIVE DISPLAYS & VIEWS
+
+        let displays: StringVec = self.displays.iter().map(|(name, _)| name.clone()).collect();
+
+        if !self.active_displays_env_override.is_empty() {
+            let use_all_displays = self.active_displays_env_override.len() == 1
+                && self.active_displays_env_override[0].is_empty();
+
+            if !use_all_displays {
+                let ordered_displays = intersect_string_vecs_case_ignore(
+                    &self.active_displays_env_override,
+                    &displays,
+                );
+                if ordered_displays.is_empty() {
+                    let mut os =
+                        b"The content of the env. variable for the list of active displays ["
+                            .to_vec();
+                    os.extend_from_slice(&join_string_env_style(
+                        &self.active_displays_env_override,
+                    ));
+                    os.extend_from_slice(b"] is invalid.");
+                    return Err(fail(validation_text, os));
+                }
+                if ordered_displays.len() != self.active_displays_env_override.len() {
+                    let mut os =
+                        b"The content of the env. variable for the list of active displays ["
+                            .to_vec();
+                    os.extend_from_slice(&join_string_env_style(
+                        &self.active_displays_env_override,
+                    ));
+                    os.extend_from_slice(b"] contains invalid display name(s).");
+                    return Err(fail(validation_text, os));
+                }
+            }
+        } else if !self.active_displays.is_empty() {
+            let use_all_displays =
+                self.active_displays.len() == 1 && self.active_displays[0].is_empty();
+
+            if !use_all_displays {
+                let ordered_displays =
+                    intersect_string_vecs_case_ignore(&self.active_displays, &displays);
+                if ordered_displays.is_empty() {
+                    let mut os = b"The list of active displays [".to_vec();
+                    os.extend_from_slice(&join_string_env_style(&self.active_displays));
+                    os.extend_from_slice(b"] from the config file is invalid.");
+                    return Err(fail(validation_text, os));
+                }
+                if ordered_displays.len() != self.active_displays.len() {
+                    let mut os = b"The list of active displays [".to_vec();
+                    os.extend_from_slice(&join_string_env_style(&self.active_displays));
+                    os.extend_from_slice(
+                        b"] from the config file contains invalid display name(s).",
+                    );
+                    return Err(fail(validation_text, os));
+                }
+            }
+        }
+
+        // TODO: Add validation for active views.
+
+        ///// TRANSFORMS
+
+        // Confirm for all transforms that reference internal color spaces,
+        // the named color space exists and that all transforms are valid.
+        {
+            let all_transforms = self.all_internal_transforms();
+
+            let context = self.current_context().get();
+
+            let mut color_space_names = BTreeSet::new();
+            for transform in &all_transforms {
+                transform.validate()?;
+                get_color_space_references(&mut color_space_names, transform, &context);
+            }
+
+            for name in &color_space_names {
+                let name = c_str(name);
+                // Check to see if the name is a color space.
+                if !self.has_color_space(name) {
+                    // As a role name forbids the use of context variable keywords and
+                    // GetColorSpaceReferences() should expand context variables, throw if a
+                    // context variable keyword is still present.
+                    if contains_context_variables(name) {
+                        let mut oss = b"Config failed transform validation. This config \
+                                        references a color space \x27"
+                            .to_vec();
+                        oss.extend_from_slice(name);
+                        oss.extend_from_slice(b"\x27 using an unknown context variable.");
+                        return Err(fail(validation_text, oss));
+                    }
+
+                    // Check to see if the name is a role.
+                    let csname = lookup_role(&self.roles, name);
+
+                    let mut os = b"Config failed transform validation. This config references \
+                                   a color space, \x27"
+                        .to_vec();
+
+                    if csname.is_empty() {
+                        // It's not a role, check to see if it's a named transform.
+                        if self.impl_named_transform(name).is_none() {
+                            // It's not a color space, a role, or a named transform.
+                            os.extend_from_slice(name);
+                            os.extend_from_slice(b"\x27, which is not defined.");
+                            return Err(fail(validation_text, os));
+                        }
+                    } else if !self.has_color_space(c_str(csname)) {
+                        // It's a role, but the color space it points to doesn't exist.
+                        os.extend_from_slice(csname);
+                        os.extend_from_slice(b"\x27 (for role \x27");
+                        os.extend_from_slice(name);
+                        os.extend_from_slice(b"\x27), which is not defined.");
+                        return Err(fail(validation_text, os));
+                    }
+                }
+            }
+        }
+
+        ///// LOOKS
+
+        // For all looks, confirm the process space exists and the look is named.
+        for (i, look) in self.looks_list.iter().enumerate() {
+            let look_name = c_str(look.name());
+            if look_name.is_empty() {
+                return Err(fail(
+                    validation_text,
+                    format!(
+                        "Config failed Look validation. The look at index \x27{i}\x27 does not \
+                         specify a name."
+                    )
+                    .into_bytes(),
+                ));
+            }
+
+            let process_space = c_str(look.process_space());
+            if process_space.is_empty() {
+                let mut os = b"Config failed Look validation. The look \x27".to_vec();
+                os.extend_from_slice(look_name);
+                os.extend_from_slice(b"\x27 does not specify a process space.");
+                return Err(fail(validation_text, os));
+            }
+
+            if !self.has_color_space(process_space) {
+                // Check to see if the processSpace is a role.
+                let csname = lookup_role(&self.roles, process_space);
+
+                let mut os = b"Config failed Look validation. The look \x27".to_vec();
+                os.extend_from_slice(look_name);
+                os.extend_from_slice(b"\x27 specifies a process color space, \x27");
+
+                if csname.is_empty() {
+                    os.extend_from_slice(process_space);
+                    os.extend_from_slice(b"\x27, which is not defined.");
+                    return Err(fail(validation_text, os));
+                } else if !self.has_color_space(c_str(csname)) {
+                    os.extend_from_slice(csname);
+                    os.extend_from_slice(b"\x27 (for role \x27");
+                    os.extend_from_slice(process_space);
+                    os.extend_from_slice(b"\x27), which is not defined.");
+                    return Err(fail(validation_text, os));
+                }
+            }
+        }
+
+        ///// ViewTransforms
+
+        if !self.view_transforms.is_empty() {
+            // Note: Config::addViewTransform validates that view_transforms have a unique,
+            // non-empty name and define a transform.
+
+            let from_scene = self.default_scene_to_display_view_transform();
+            // If there are view transforms, there must be one from the scene reference space.
+            if from_scene.is_none() {
+                return Err(fail(
+                    validation_text,
+                    b"Config failed validation. If there are view_transforms, at least one must \
+                      use the scene reference space."
+                        .to_vec(),
+                ));
+            }
+        } else if has_display_referred_colorspace {
+            return Err(fail(
+                validation_text,
+                b"Config failed validation. If there are display-referred color spaces, there \
+                  must be view_transforms."
+                    .to_vec(),
+            ));
+        }
+
+        if !self.default_view_transform.is_empty() {
+            let vt = self.default_scene_to_display_view_transform();
+            if vt.is_none_or(|vt| !compare(vt.name(), &self.default_view_transform)) {
+                let mut os =
+                    b"Config failed validation. Default view transform is defined as: \x27"
+                        .to_vec();
+                os.extend_from_slice(&self.default_view_transform);
+                os.extend_from_slice(
+                    b"\x27 but this does not correspond to an existing scene-referred view \
+                      transform.",
+                );
+                return Err(fail(validation_text, os));
+            }
+        }
+
+        ///// FileRules
+
+        if let Err(e) = self.file_rules.get().validate(self) {
+            let mut os = b"Config failed validation. File rules failed with: ".to_vec();
+            os.extend_from_slice(e.what());
+            return Err(fail(validation_text, os));
+        }
+
+        ///// Resolve all file Transforms using context variables.
+
+        {
+            let all_transforms = self.all_internal_transforms();
+
+            let mut files = BTreeSet::new();
+            for transform in &all_transforms {
+                get_file_references(&mut files, transform);
+            }
+
+            // Check that at least one of the search paths can be resolved into a valid path.
+            // Note that a search path without context variable(s) always correctly resolves.
+
+            let context = self.shared_context.get();
+            if !files.is_empty() {
+                let mut found_one = false;
+                let mut err_msg = b"Config failed search path validation.".to_vec();
+
+                for idx in 0..context.num_search_paths() {
+                    let path = c_str(context.search_path_with_index(idx));
+                    if path.is_empty() {
+                        err_msg.extend_from_slice(
+                            b" The search_path must not be an empty string if there are \
+                              FileTransforms.",
+                        );
+                        continue;
+                    }
+
+                    let resolved_search_path = context.resolve_string_var(path);
+                    if contains_context_variables(&resolved_search_path) {
+                        let mut oss = b"  The search_path \x27".to_vec();
+                        oss.extend_from_slice(path);
+                        oss.extend_from_slice(b"\x27 cannot be resolved");
+
+                        if path != resolved_search_path.as_slice() {
+                            // Adjust the error message when the search_path is defined with
+                            // some context variable(s).
+                            oss.extend_from_slice(b" by \x27");
+                            oss.extend_from_slice(&resolved_search_path);
+                            oss.extend_from_slice(b"\x27");
+                        }
+
+                        oss.extend_from_slice(b".");
+                        err_msg.extend_from_slice(&oss);
+                        continue;
+                    }
+
+                    found_one = true;
+                }
+
+                // After looping over all the search paths, none of them can be successfully
+                // resolved.
+                if !found_one {
+                    if context.num_search_paths() == 0 {
+                        err_msg.extend_from_slice(
+                            b" The search_path must not be empty if there are FileTransforms.",
+                        );
+                    }
+                    return Err(fail(validation_text, err_msg));
+                }
+            }
+
+            // Expand all file transform paths.
+
+            for file in &files {
+                // Resolve the file name without testing if it exists (which could add an
+                // unnecessary performance hit).
+                let resolved_file = context.resolve_string_var(file);
+                if resolved_file.is_empty() || contains_context_variables(&resolved_file) {
+                    let mut oss = b"Config failed validation expanding file transform paths. \
+                                    The file transform source cannot be resolved: \x27"
+                        .to_vec();
+
+                    if file != &resolved_file {
+                        oss.extend_from_slice(file);
+                        oss.extend_from_slice(b"\x27 vs. \x27");
+                        oss.extend_from_slice(&resolved_file);
+                        oss.extend_from_slice(b"\x27.");
+                    } else {
+                        oss.extend_from_slice(file);
+                        oss.extend_from_slice(b"\x27.");
+                    }
+
+                    return Err(fail(validation_text, oss));
+                }
+            }
+        }
+
+        ///// NamedTransforms
+
+        // As Config::addNamedTransform() already validates some properties of the instance
+        // (i.e. name is not null, at least forward or inverse transform exits, etc.), the code
+        // below only has to validate name conflicts. The NamedTransform name can not use a role,
+        // a color space, a look, or a view transform name.  All transforms are validated above.
+
+        for nt in &self.all_named_transforms {
+            let name = c_str(nt.name());
+
+            if self.look(name).is_some() {
+                let mut os =
+                    b"Config failed validation. NamedTransform can\x27t be named \x27".to_vec();
+                os.extend_from_slice(name);
+                os.extend_from_slice(b"\x27. This name is already used for a look.");
+                return Err(fail(validation_text, os));
+            }
+            if self.view_transform(name).is_some() {
+                let mut os =
+                    b"Config failed validation. NamedTransform can\x27t be named \x27".to_vec();
+                os.extend_from_slice(name);
+                os.extend_from_slice(b"\x27. This name is already used for a view transform.");
+                return Err(fail(validation_text, os));
+            }
+
+            // AddColorSpace, addNamedTransform & setRole already check there is no name & alias
+            // conflict.
+        }
+
+        ///// Check new features are not used with older config versions.
+
+        self.check_version_consistency()
+    }
+
+    /// Whether the config has the color space (or alias) `csname`, ignoring case; roles don't
+    /// count.
+    ///
+    /// Port of `Config::Impl::hasColorSpace` (src/OpenColorIO/Config.cpp:480-483 @ v2.5.2).
+    fn has_color_space(&self, csname: &[u8]) -> bool {
+        self.all_color_spaces.has_color_space(csname)
+    }
+
+    /// Refuses a view (of `display`, or a shared view when `display` is empty) without a name or
+    /// a color space, one that uses `<USE_DISPLAY_NAME>` where it can't (with
+    /// `check_use_display_name`), one whose color space, view transform (and its display color
+    /// space), looks or viewing rule the config doesn't have. `validation_text` is upstream's
+    /// `m_validationtext`, which each refusal sets.
+    ///
+    /// Port of `Config::Impl::validateView` (src/OpenColorIO/Config.cpp:592-701 @ v2.5.2).
+    fn validate_view(
+        &self,
+        display: &[u8],
+        view: &View,
+        check_use_display_name: bool,
+        validation_text: &mut Vec<u8>,
+    ) -> Result<()> {
+        let mut fail = |os: Vec<u8>| {
+            *validation_text = os;
+            Err(Exception::new(validation_text.clone()))
+        };
+
+        if view.name.is_empty() {
+            return fail(get_display_view_prefix_error_msg(display, view));
+        }
+
+        let shared_view_with_view_transform = display.is_empty() && !view.view_transform.is_empty();
+
+        // Validate color space name is not empty.
+        if view.colorspace.is_empty() {
+            let mut os = get_display_view_prefix_error_msg(display, view);
+            os.extend_from_slice(b"does not refer to a color space.");
+            return fail(os);
+        }
+
+        // USE_DISPLAY_NAME can only be used by shared views.
+        if check_use_display_name
+            && !shared_view_with_view_transform
+            && view.use_display_name_for_colorspace()
+        {
+            let mut os = get_display_view_prefix_error_msg(display, view);
+            os.extend_from_slice(b"can not use \x27");
+            os.extend_from_slice(OCIO_VIEW_USE_DISPLAY_NAME.as_bytes());
+            os.extend_from_slice(b"\x27 keyword for the color space name.");
+            return fail(os);
+        }
+
+        // If USE_DISPLAY_NAME is not present, a valid color space must be specified.
+        if !view.use_display_name_for_colorspace()
+            && !self.has_color_space(c_str(&view.colorspace))
+            && self.impl_named_transform(c_str(&view.colorspace)).is_none()
+        {
+            let mut os = get_display_view_prefix_error_msg(display, view);
+            os.extend_from_slice(b"that refers to a color space or a named transform, \x27");
+            os.extend_from_slice(&view.colorspace);
+            os.extend_from_slice(b"\x27, which is not defined.");
+            return fail(os);
+        }
+
+        // If there is a view transform, it must exist (or be a named transform) and its color
+        // space must be a display-referred color space.
+        if !view.view_transform.is_empty() {
+            if self
+                .impl_named_transform(c_str(&view.view_transform))
+                .is_none()
+                && self.view_transform(c_str(&view.view_transform)).is_none()
+            {
+                let mut os = get_display_view_prefix_error_msg(display, view);
+                os.extend_from_slice(b"that refers to a view transform, \x27");
+                os.extend_from_slice(&view.view_transform);
+                os.extend_from_slice(
+                    b"\x27, which is neither a view transform nor a named transform.",
+                );
+                return fail(os);
+            }
+            let display_cs = if view.use_display_name_for_colorspace() {
+                c_str(display)
+            } else {
+                c_str(&view.colorspace)
+            };
+            if let Some(cs) = self.color_space(display_cs)
+                && cs.reference_space_type() != ReferenceSpaceType::Display
+            {
+                let mut os = get_display_view_prefix_error_msg(display, view);
+                os.extend_from_slice(b"refers to a color space, \x27");
+                os.extend_from_slice(display_cs);
+                os.extend_from_slice(b"\x27, that is not a display-referred color space.");
+                return fail(os);
+            }
+        }
+
+        // Confirm looks references exist.
+        let mut looks = LookParseResult::default();
+        let options = looks.parse(&view.looks)?;
+
+        for option in options {
+            for token in option {
+                let look = &token.name;
+
+                if !look.is_empty() && self.look(c_str(look)).is_none() {
+                    let mut os = get_display_view_prefix_error_msg(display, view);
+                    os.extend_from_slice(b"refers to a look, \x27");
+                    os.extend_from_slice(look);
+                    os.extend_from_slice(b"\x27, which is not defined.");
+                    return fail(os);
+                }
+            }
+        }
+
+        if !view.rule.is_empty() && find_rule(&self.viewing_rules.get(), &view.rule).is_none() {
+            let mut os = get_display_view_prefix_error_msg(display, view);
+            os.extend_from_slice(b"refers to a viewing rule, \x27");
+            os.extend_from_slice(&view.rule);
+            os.extend_from_slice(b"\x27, which is not defined.");
+            return fail(os);
+        }
+        Ok(())
+    }
+
+    /// Refuses a shared view of `display` that is also one of its own views, one the config
+    /// doesn't define, and (with `check_use_display_name`) a shared view with a view transform
+    /// and `<USE_DISPLAY_NAME>` whose display has no display-referred color space of its name.
+    ///
+    /// Port of `Config::Impl::validateSharedView` (src/OpenColorIO/Config.cpp:704-765 @
+    /// v2.5.2).
+    fn validate_shared_view(
+        &self,
+        display: &[u8],
+        views_of_display: &[View],
+        shared_view: &[u8],
+        check_use_display_name: bool,
+        validation_text: &mut Vec<u8>,
+    ) -> Result<()> {
+        let mut fail = |os: Vec<u8>| {
+            *validation_text = os;
+            Err(Exception::new(validation_text.clone()))
+        };
+
+        // Is the name already used for a display-defined view?
+        // This should never happen because this is checked when adding a view.
+        if find_view(views_of_display, shared_view).is_some() {
+            let mut os = b"Config failed view validation. The display \x27".to_vec();
+            os.extend_from_slice(display);
+            os.extend_from_slice(b"\x27 contains a shared view \x27");
+            os.extend_from_slice(shared_view);
+            os.extend_from_slice(b"\x27 that is already defined as a view.");
+            return fail(os);
+        }
+
+        // Is the shared view defined?
+        match find_view(&self.shared_views, shared_view) {
+            None => {
+                let mut os = b"Config failed view validation. The display \x27".to_vec();
+                os.extend_from_slice(display);
+                os.extend_from_slice(b"\x27 contains a shared view \x27");
+                os.extend_from_slice(shared_view);
+                os.extend_from_slice(b"\x27 that is not defined.");
+                return fail(os);
+            }
+            Some(idx) if check_use_display_name => {
+                let view = &self.shared_views[idx];
+                if !view.view_transform.is_empty() && view.use_display_name_for_colorspace() {
+                    // Shared views using a view transform can omit the colorspace, in that
+                    // case the color space to use should be named from the display.
+                    match self.color_space(c_str(display)) {
+                        None => {
+                            let mut os =
+                                b"Config failed view validation. The display \x27".to_vec();
+                            os.extend_from_slice(display);
+                            os.extend_from_slice(b"\x27 contains a shared view \x27");
+                            os.extend_from_slice(&view.name);
+                            os.extend_from_slice(
+                                b"\x27 which does not define a color space and there is no \
+                                  color space that matches the display name.",
+                            );
+                            return fail(os);
+                        }
+                        Some(display_cs)
+                            if display_cs.reference_space_type() != ReferenceSpaceType::Display =>
+                        {
+                            let mut os =
+                                b"Config failed view validation. The display \x27".to_vec();
+                            os.extend_from_slice(display);
+                            os.extend_from_slice(b"\x27 contains a shared view \x27");
+                            os.extend_from_slice(&view.name);
+                            os.extend_from_slice(b"\x27 that refers to a color space, \x27");
+                            os.extend_from_slice(display);
+                            os.extend_from_slice(
+                                b"\x27, that is not a display-referred color space.",
+                            );
+                            return fail(os);
+                        }
+                        Some(_) => {}
+                    }
+                }
+            }
+            Some(_) => {}
         }
         Ok(())
     }

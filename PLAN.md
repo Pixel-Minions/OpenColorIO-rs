@@ -513,7 +513,7 @@ print(OCIO.__version__)                       # "2.5.2"
 
 | Need | Pick | Notes |
 |---|---|---|
-| YAML reading | `saphyr-parser` 0.1 (parse events with source spans) | We build our own ordered tree, keeping verbatim tags and line numbers. No serde: it loses tags, line numbers and duplicate-key errors |
+| YAML reading | yaml-cpp 0.8.0's parser, ported (owner item D1, `crates/ocio/src/yaml_cpp/`) | OCIO's messages embed yaml-cpp's texts and marks, and its decoding and conversions decide which configs load. `saphyr-parser` served only S1's test reader and was removed in 3.7d (owner item D7) |
 | YAML writing | A hand-written emitter (~1K lines) | Must reproduce yaml-cpp's layout and float formatting byte for byte |
 | XML | `quick-xml` ≥ 0.41 | Needed for the RUSTSEC-2026-0194/0195 fixes. We track line numbers ourselves |
 | Half floats | `half` 2.7 | F16C and software conversions; spike S4 checks that they are equal |

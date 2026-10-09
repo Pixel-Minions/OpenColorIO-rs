@@ -161,12 +161,18 @@ impl Op {
     }
 }
 
-/// The optimization levels, as the oracle takes them; `None` is `getDefaultGPUProcessor`.
+/// The optimization levels, as the oracle takes them; `None` is `getDefaultGPUProcessor`. Every
+/// level the API sweeps run (`crates/ocio/tests/common/api.rs`, `LEVELS`), and `ALL`.
 fn levels() -> Vec<(Option<Value>, OptimizationFlags)> {
     let name = |n: &str| Some(json!(n));
     vec![
         (None, OptimizationFlags::DEFAULT),
         (name("OPTIMIZATION_NONE"), OptimizationFlags::NONE),
+        (name("OPTIMIZATION_LOSSLESS"), OptimizationFlags::LOSSLESS),
+        (name("OPTIMIZATION_VERY_GOOD"), OptimizationFlags::VERY_GOOD),
+        (name("OPTIMIZATION_GOOD"), OptimizationFlags::GOOD),
+        (name("OPTIMIZATION_DRAFT"), OptimizationFlags::DRAFT),
+        (name("OPTIMIZATION_DEFAULT"), OptimizationFlags::DEFAULT),
         (name("OPTIMIZATION_ALL"), OptimizationFlags::ALL),
     ]
 }

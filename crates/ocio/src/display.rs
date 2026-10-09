@@ -181,3 +181,7 @@ pub(crate) fn compute_displays(
 
     *display_cache = display_master_list;
 }
+
+#[cfg(test)]
+#[path = "display_tests.rs"]
+mod tests;

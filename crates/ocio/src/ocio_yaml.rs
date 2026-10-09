@@ -85,6 +85,7 @@ use crate::yaml_cpp::emitter_manip::verbatim_tag;
 use crate::yaml_cpp::exceptions::Exception as YamlException;
 use crate::yaml_cpp::node::{Node, NodeIter, NodeType};
 use crate::yaml_cpp::parse::load;
+use crate::yaml_cpp::stream::IStream;
 
 /// Why loading failed: OCIO's `Exception`, or an exception of yaml-cpp that upstream doesn't
 /// catch on the way.
@@ -2398,8 +2399,8 @@ pub(crate) fn load_config(
 /// a C string.
 ///
 /// Port of `OCIOYaml::Read` (OCIOYaml.cpp:5420-5439 @ v2.5.2).
-pub(crate) fn read(
-    input: &[u8],
+pub(crate) fn read<'a>(
+    input: impl Into<IStream<'a>>,
     config: &mut Config,
     filename: Option<&[u8]>,
 ) -> ocio_ops::exception::Result<()> {

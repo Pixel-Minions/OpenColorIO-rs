@@ -289,3 +289,49 @@ fn length_errors() {
     assert_eq!(lut.length(), 2);
     assert_eq!(lut.value(1).unwrap(), [0.25, 0.5, 0.75]);
 }
+
+/// Port of `OCIO_ADD_TEST(Lut1DTransform, non_monotonic)` @ v2.5.2.
+#[test]
+fn non_monotonic() {
+    let mut lut = Lut1DTransform::new();
+
+    // Make a non-monotonic LUT.
+    lut.set_length(5).unwrap();
+    let (r, g, b) = (0.1f32, 0.1f32, 0.1f32);
+    lut.set_value(2, r, g, b).unwrap();
+
+    lut.validate().unwrap();
+    let config = Config::create_raw().unwrap();
+
+    // Processor from forward LUT.
+    let proc = config.processor(&Transform::from(lut.clone())).unwrap();
+
+    // Make a transform from the processor.
+    let transform_from_proc = proc.create_group_transform().unwrap();
+    assert_eq!(transform_from_proc.num_transforms(), 1);
+    let Transform::Lut1D(lut_from_transform) = transform_from_proc.transform(0).unwrap() else {
+        panic!("a Lut1DTransform");
+    };
+
+    // Transform is still a non-montonic LUT.
+    let [r, g, b] = lut_from_transform.value(2).unwrap();
+    assert_eq!(r, 0.1f32);
+    assert_eq!(g, 0.1f32);
+    assert_eq!(b, 0.1f32);
+
+    // Now with inverse LUT.
+    lut.set_direction(TransformDirection::Inverse);
+    let proc = config.processor(&Transform::from(lut)).unwrap();
+
+    let transform_from_proc = proc.create_group_transform().unwrap();
+    assert_eq!(transform_from_proc.num_transforms(), 1);
+    let Transform::Lut1D(lut_from_transform) = transform_from_proc.transform(0).unwrap() else {
+        panic!("a Lut1DTransform");
+    };
+
+    // LUT has been made monotonic.
+    let [r, g, b] = lut_from_transform.value(2).unwrap();
+    assert_eq!(r, 0.25f32);
+    assert_eq!(g, 0.25f32);
+    assert_eq!(b, 0.25f32);
+}

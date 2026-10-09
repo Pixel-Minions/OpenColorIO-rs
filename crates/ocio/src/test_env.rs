@@ -73,6 +73,114 @@ pub(crate) fn capture_log<T>(f: impl FnOnce() -> T) -> (T, Vec<Vec<u8>>) {
     (out, log)
 }
 
+/// Removes from `output` the first `line` that a line break follows, with the line breaks
+/// after it; whether it found one.
+///
+/// Port of `LogGuard::findAndRemove` (tests/cpu/UnitTestLogUtils.cpp:71-86 @ v2.5.2): the
+/// escaped `line` and `[\r\n]+` as a regular expression, which matches the text itself.
+pub(crate) fn find_and_remove(output: &mut Vec<u8>, line: &str) -> bool {
+    let line = line.as_bytes();
+    let is_break = |b: &u8| *b == b'\r' || *b == b'\n';
+    let found = (0..output.len().saturating_sub(line.len())).find(|&i| {
+        output[i..].starts_with(line) && output.get(i + line.len()).is_some_and(is_break)
+    });
+    match found {
+        Some(start) => {
+            let mut end = start + line.len();
+            while output.get(end).is_some_and(is_break) {
+                end += 1;
+            }
+            output.drain(start..end);
+            true
+        }
+        None => false,
+    }
+}
+
+/// Port of `checkAndMuteSceneLinearRoleError` (tests/cpu/UnitTestLogUtils.cpp:118-123 @
+/// v2.5.2).
+pub(crate) fn check_and_mute_scene_linear_role_error(output: &mut Vec<u8>) -> bool {
+    find_and_remove(
+        output,
+        "[OpenColorIO Error]: The scene_linear role is required for a config version 2.2 or \
+         higher.",
+    )
+}
+
+/// Port of `checkAndMuteCompositingLogRoleError` (tests/cpu/UnitTestLogUtils.cpp:125-130 @
+/// v2.5.2).
+pub(crate) fn check_and_mute_compositing_log_role_error(output: &mut Vec<u8>) -> bool {
+    find_and_remove(
+        output,
+        "[OpenColorIO Error]: The compositing_log role is required for a config version 2.2 or \
+         higher.",
+    )
+}
+
+/// Port of `checkAndMuteColorTimingRoleError` (tests/cpu/UnitTestLogUtils.cpp:132-137 @
+/// v2.5.2).
+pub(crate) fn check_and_mute_color_timing_role_error(output: &mut Vec<u8>) -> bool {
+    find_and_remove(
+        output,
+        "[OpenColorIO Error]: The color_timing role is required for a config version 2.2 or \
+         higher.",
+    )
+}
+
+/// Port of `checkAndMuteAcesInterchangeRoleError` (tests/cpu/UnitTestLogUtils.cpp:139-145 @
+/// v2.5.2).
+pub(crate) fn check_and_mute_aces_interchange_role_error(output: &mut Vec<u8>) -> bool {
+    find_and_remove(
+        output,
+        "[OpenColorIO Error]: The aces_interchange role is required when there are \
+         scene-referred color spaces and the config version is 2.2 or higher.",
+    )
+}
+
+/// Removes from `output` every message "[OpenColorIO Info]: Inactive ..." whose line ends with
+/// "- Display' is neither a color space nor a named transform" and one more byte, with the line
+/// breaks after it.
+///
+/// Port of `muteInactiveColorspaceInfo` (tests/cpu/UnitTestLogUtils.cpp:155-160 @ v2.5.2) and
+/// `LogGuard::findAllAndRemove` (UnitTestLogUtils.cpp:88-101): its regular expression
+/// `\[OpenColorIO Info\]: Inactive.*- Display' is neither a color space nor a named
+/// transform.[\r\n]+`, whose `.` matches any byte but a line break, so the match ends its line.
+pub(crate) fn mute_inactive_colorspace_info(output: &mut Vec<u8>) {
+    const PREFIX: &[u8] = b"[OpenColorIO Info]: Inactive";
+    const SUFFIX: &[u8] = b"- Display' is neither a color space nor a named transform";
+    let is_break = |b: &u8| *b == b'\r' || *b == b'\n';
+    loop {
+        let found = (0..output.len()).find_map(|start| {
+            if !output[start..].starts_with(PREFIX) {
+                return None;
+            }
+            let after = start + PREFIX.len();
+            let line_end = after + output[after..].iter().position(is_break)?;
+            // SUFFIX, then the `.` byte, end the line.
+            let suffix_start = line_end.checked_sub(SUFFIX.len() + 1)?;
+            (suffix_start >= after && output[suffix_start..].starts_with(SUFFIX))
+                .then_some((start, line_end))
+        });
+        let Some((start, mut end)) = found else {
+            return;
+        };
+        while output.get(end).is_some_and(is_break) {
+            end += 1;
+        }
+        output.drain(start..end);
+    }
+}
+
+/// Port of `checkAndMuteDisplayInterchangeRoleError` (tests/cpu/UnitTestLogUtils.cpp:147-153
+/// @ v2.5.2).
+pub(crate) fn check_and_mute_display_interchange_role_error(output: &mut Vec<u8>) -> bool {
+    find_and_remove(
+        output,
+        "[OpenColorIO Error]: The cie_xyz_d65_interchange role is required when there are \
+         display-referred color spaces and the config version is 2.2 or higher.",
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::EnvGuard;

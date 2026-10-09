@@ -1,15 +1,20 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Port of the tests of `tests/cpu/FileRules_tests.cpp` @ v2.5.2 that don't need
-//! `Config::validate`: those that read no YAML, those that read configs (3.3k), and those that
-//! write them (3.7b). Those that validate come with 3.8;
+//! Port of the tests of `tests/cpu/FileRules_tests.cpp` @ v2.5.2: those that read no YAML,
+//! those that read configs (3.3k), those that write them (3.7b), and those that validate them
+//! (3.8);
 //! `crates/ocio/tests/file_rules_oracle.rs` checks the rules against the wheel.
 
 use ocio_testkit::upstream::check_throw_what;
 
 use super::*;
-use crate::test_env::EnvGuard;
+use crate::color_space::ColorSpace;
+use crate::test_env::{
+    EnvGuard, check_and_mute_aces_interchange_role_error, check_and_mute_color_timing_role_error,
+    check_and_mute_compositing_log_role_error, check_and_mute_scene_linear_role_error,
+};
+use ocio_ops::utils::string_utils::split_by_lines;
 
 /// Port of `OCIO_ADD_TEST(FileRules, config_read_only)` @ v2.5.2.
 #[test]
@@ -1333,4 +1338,949 @@ fn config_rule_u8() {
     assert_eq!(rules_reloaded.num_custom_keys(0).unwrap(), 1);
     assert_eq!(file_rules.custom_key_name(0, 0).unwrap(), KEY.as_bytes());
     assert_eq!(file_rules.custom_key_value(0, 0).unwrap(), VALUE.as_bytes());
+}
+
+// The tests that validate configs (3.8).
+
+/// `config.validate()`, and what it logged (upstream's `LogGuard` around it).
+fn validate_logged(config: &Config) -> (Result<()>, Vec<u8>) {
+    let (result, log) = crate::test_env::capture_log(|| config.validate());
+    (result, log.concat())
+}
+
+/// Upstream's check that the roles version 2.2 asks for were reported (and muted): the scene
+/// linear, compositing log, color timing and ACES interchange role errors.
+fn check_and_mute_role_errors(log: &mut Vec<u8>) {
+    assert!(check_and_mute_scene_linear_role_error(log));
+    assert!(check_and_mute_compositing_log_role_error(log));
+    assert!(check_and_mute_color_timing_role_error(log));
+    assert!(check_and_mute_aces_interchange_role_error(log));
+}
+
+/// Port of `OCIO_ADD_TEST(FileRules, config_v1)` @ v2.5.2.
+#[test]
+fn config_v1() {
+    let _env = EnvGuard::new();
+    // From a v1 config create valid file rules.
+
+    {
+        const CONFIG: &str = concat!(
+            "ocio_profile_version: 1\n",
+            "\n",
+            "search_path: \"\"\n",
+            "strictparsing: false\n",
+            "luma: [0.2126, 0.7152, 0.0722]\n",
+            "\n",
+            "roles:\n",
+            "  default: raw\n",
+            "\n",
+            "displays:\n",
+            "  sRGB:\n",
+            "    - !<View> {name: Raw, colorspace: raw}\n",
+            "\n",
+            "active_displays: []\n",
+            "active_views: []\n",
+            "\n",
+            "colorspaces:\n",
+            "  - !<ColorSpace>\n",
+            "    name: raw\n",
+            "    family: \"\"\n",
+            "    equalitygroup: \"\"\n",
+            "    bitdepth: unknown\n",
+            "    isdata: false\n",
+            "    allocation: uniform\n",
+        );
+
+        let config = Config::create_from_stream(CONFIG.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        let rules = config.file_rules().get();
+        assert_eq!(rules.num_entries(), 2);
+        assert_eq!(
+            rules.name(0).unwrap(),
+            FileRules::FILE_PATH_SEARCH_RULE_NAME.as_bytes()
+        );
+        assert_eq!(
+            rules.name(1).unwrap(),
+            FileRules::DEFAULT_RULE_NAME.as_bytes()
+        );
+
+        assert_eq!(rules.color_space(1).unwrap(), b"default");
+
+        // Check that the file rules are not saved in a v1 config.
+        assert_eq!(config.serialize().unwrap(), CONFIG.as_bytes());
+    }
+
+    // Test fallback 1: The default role is missing and there is a data color space named 'raw'.
+
+    {
+        const CONFIG: &str = concat!(
+            "ocio_profile_version: 1\n",
+            "displays:\n",
+            "  sRGB:\n",
+            "    - !<View> {name: Raw, colorspace: raw}\n",
+            "colorspaces:\n",
+            "  - !<ColorSpace>\n",
+            "    name: cs2\n",
+            "  - !<ColorSpace>\n",
+            "    name: raw\n",
+            "    isdata: true\n",
+        );
+
+        let config = Config::create_from_stream(CONFIG.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        let rules = config.file_rules().get();
+        assert_eq!(rules.num_entries(), 2);
+        assert_eq!(
+            rules.name(0).unwrap(),
+            FileRules::FILE_PATH_SEARCH_RULE_NAME.as_bytes()
+        );
+        assert_eq!(
+            rules.name(1).unwrap(),
+            FileRules::DEFAULT_RULE_NAME.as_bytes()
+        );
+
+        assert_eq!(rules.color_space(1).unwrap(), b"raw");
+    }
+
+    // Test fallback 2: The default role is missing and there is a data color space.
+    // But 'raw' is not a data color space.
+
+    {
+        const CONFIG: &str = concat!(
+            "ocio_profile_version: 1\n",
+            "displays:\n",
+            "  sRGB:\n",
+            "    - !<View> {name: Raw, colorspace: raw}\n",
+            "colorspaces:\n",
+            "  - !<ColorSpace>\n",
+            "    name: cs2\n",
+            "  - !<ColorSpace>\n",
+            "    name: raw\n",
+            "  - !<ColorSpace>\n",
+            "    name: cs3\n",
+            "    isdata: true\n",
+        );
+
+        let config = Config::create_from_stream(CONFIG.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        let rules = config.file_rules().get();
+        assert_eq!(rules.num_entries(), 2);
+        assert_eq!(
+            rules.name(0).unwrap(),
+            FileRules::FILE_PATH_SEARCH_RULE_NAME.as_bytes()
+        );
+        assert_eq!(
+            rules.name(1).unwrap(),
+            FileRules::DEFAULT_RULE_NAME.as_bytes()
+        );
+
+        assert_eq!(rules.color_space(1).unwrap(), b"cs3");
+    }
+
+    // Test fallback 3: The default role is missing and there is no data color space but there is
+    // an active color space.
+
+    {
+        const CONFIG: &str = concat!(
+            "ocio_profile_version: 1\n",
+            "displays:\n",
+            "  sRGB:\n",
+            "    - !<View> {name: Raw, colorspace: raw}\n",
+            "colorspaces:\n",
+            "  - !<ColorSpace>\n",
+            "    name: cs2\n",
+            "  - !<ColorSpace>\n",
+            "    name: raw\n",
+        );
+
+        let config = Config::create_from_stream(CONFIG.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        let rules = config.file_rules().get();
+        assert_eq!(rules.num_entries(), 2);
+        assert_eq!(
+            rules.name(0).unwrap(),
+            FileRules::FILE_PATH_SEARCH_RULE_NAME.as_bytes()
+        );
+        assert_eq!(
+            rules.name(1).unwrap(),
+            FileRules::DEFAULT_RULE_NAME.as_bytes()
+        );
+
+        assert_eq!(rules.color_space(1).unwrap(), b"cs2");
+    }
+
+    // Test that getColorSpaceFromFilePath works even with a v1 config (that pre-dates the
+    // introduction of file rules).
+
+    {
+        const CONFIG: &str = concat!(
+            "ocio_profile_version: 1\n",
+            "roles:\n",
+            "  default: raw\n",
+            "displays:\n",
+            "  sRGB:\n",
+            "    - !<View> {name: Raw, colorspace: raw}\n",
+            "colorspaces:\n",
+            "  - !<ColorSpace>\n",
+            "    name: cs2\n",
+            "  - !<ColorSpace>\n",
+            "    name: raw\n",
+            "  - !<ColorSpace>\n",
+            "    name: cs3\n",
+            "    isdata: true\n",
+        );
+
+        let config = Config::create_from_stream(CONFIG.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        let rules = config.file_rules().get();
+        assert_eq!(rules.num_entries(), 2);
+        assert_eq!(
+            rules.name(0).unwrap(),
+            FileRules::FILE_PATH_SEARCH_RULE_NAME.as_bytes()
+        );
+        assert_eq!(
+            rules.name(1).unwrap(),
+            FileRules::DEFAULT_RULE_NAME.as_bytes()
+        );
+
+        assert_eq!(rules.color_space(1).unwrap(), b"default");
+
+        // Test the file path search rule i.e. implemented using Config::parseColorSpaceFromString()
+
+        assert_eq!(
+            color_space_and_position(&config, "/usr/cs2_file.exr"),
+            (b"cs2".to_vec(), 0)
+        );
+        assert!(
+            !config
+                .filepath_only_matches_default_rule("/usr/cs2_file.exr")
+                .unwrap()
+        );
+
+        assert_eq!(
+            color_space_and_position(&config, "/usr/cs3/file.exr"),
+            (b"cs3".to_vec(), 0)
+        );
+        assert!(
+            !config
+                .filepath_only_matches_default_rule("/usr/cs3/file.exr")
+                .unwrap()
+        );
+
+        assert_eq!(
+            color_space_and_position(&config, "/usr/cs3/cs2_file.exr"),
+            (b"cs2".to_vec(), 0)
+        );
+        assert!(
+            !config
+                .filepath_only_matches_default_rule("/usr/cs3/cs2_file.exr")
+                .unwrap()
+        );
+
+        // Test that it fallbacks to the default rule when nothing found.
+
+        assert_eq!(
+            color_space_and_position(&config, "/usr/file.exr"),
+            (b"default".to_vec(), 1)
+        );
+        assert!(
+            config
+                .filepath_only_matches_default_rule("/usr/file.exr")
+                .unwrap()
+        );
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(FileRules, rule_invalid)` @ v2.5.2.
+#[test]
+fn rule_invalid() {
+    let _env = EnvGuard::new();
+    let mut config = g_config();
+
+    config.validate().unwrap();
+    let mut rules = (*config.file_rules().get()).clone();
+    assert_eq!(rules.num_entries(), 1);
+
+    rules.insert_rule(0, G_NAME, "cs1", "*", "exr").unwrap();
+    config.set_file_rules(&rules);
+    config.validate().unwrap();
+
+    rules.set_color_space(0, "role1").unwrap();
+    config.set_file_rules(&rules);
+    config.validate().unwrap();
+
+    rules.set_color_space(0, "invalid_color_space").unwrap();
+    config.set_file_rules(&rules);
+    check_throw_what(
+        config.validate(),
+        "rule named 'rule1' is referencing 'invalid_color_space' that is neither a color space \
+         nor a named transform",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(FileRules, multiple_rules)` @ v2.5.2.
+#[test]
+fn multiple_rules() {
+    let _env = EnvGuard::new();
+    let mut config = g_config();
+
+    config.validate().unwrap();
+    let mut rules = (*config.file_rules().get()).clone();
+
+    // Create multiple rules.
+    let nb_rules_to_create = 42;
+    let nb_default_rules = rules.num_entries();
+    let mut nb_rules_created = 0;
+    while nb_rules_created < nb_rules_to_create {
+        let rule_name = format!("rule{nb_rules_created}");
+        rules.insert_rule(0, &rule_name, "cs1", "*", "exr").unwrap();
+        nb_rules_created += 1;
+        assert_eq!(rules.num_entries(), nb_rules_created + nb_default_rules);
+    }
+
+    config.set_file_rules(&rules);
+
+    // Serialize the config.
+    let oss = config.serialize().unwrap();
+
+    // Reload config.
+    let config_reloaded = Config::create_from_stream(&oss).unwrap();
+    let rules_reloaded = config_reloaded.file_rules().get();
+
+    // Validate that we have the correct number of rules.
+    assert_eq!(
+        rules_reloaded.num_entries(),
+        nb_rules_created + nb_default_rules
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(FileRules, config_no_default_role)` @ v2.5.2.
+#[test]
+fn config_no_default_role() {
+    let _env = EnvGuard::new();
+    // Test with a config that does not have a default role, nor a default color space.
+    // Default rule points to an existing color space.
+    const CONFIG_NO_DEFAULT: &str = r#"ocio_profile_version: 2
+environment:
+  {}
+strictparsing: true
+roles:
+  role1: cs1
+  role2: cs2
+displays:
+  sRGB:
+  - !<View> {name: Raw, colorspace: raw}
+colorspaces:
+  - !<ColorSpace>
+      name: raw
+  - !<ColorSpace>
+      name: cs1
+  - !<ColorSpace>
+      name: cs2
+file_rules:
+  - !<Rule> {name: Default, colorspace: cs1}
+"#;
+
+    // As a warning message is expected, please mute it.
+    let (config, log) =
+        crate::test_env::capture_log(|| Config::create_from_stream(CONFIG_NO_DEFAULT.as_bytes()));
+    let config = config.unwrap();
+
+    assert!(log.is_empty());
+
+    config.validate().unwrap();
+}
+
+/// The checks of `config_v1_to_v2_from_file` after an upgrade: the version, and the two file
+/// rules with the default rule's color space `default_cs`.
+fn check_upgraded_rules(config: &Config, default_cs: &[u8]) {
+    // Check the new version.
+
+    assert_eq!(config.major_version(), 2);
+
+    // Check the new file rules.
+
+    let rules = config.file_rules().get();
+    assert_eq!(rules.num_entries(), 2);
+    assert_eq!(
+        rules.name(0).unwrap(),
+        FileRules::FILE_PATH_SEARCH_RULE_NAME.as_bytes()
+    );
+    assert_eq!(
+        rules.name(1).unwrap(),
+        FileRules::DEFAULT_RULE_NAME.as_bytes()
+    );
+    assert_eq!(rules.color_space(1).unwrap(), default_cs);
+}
+
+/// Port of `OCIO_ADD_TEST(FileRules, config_v1_to_v2_from_file)` @ v2.5.2.
+#[test]
+fn config_v1_to_v2_from_file() {
+    let _env = EnvGuard::new();
+    // The unit test checks the file rules when loading a v1 config, the upgrade from v1 to v2
+    // and finally, the use of file rules with the upgraded v2 in-memory config.
+    //
+    // Note: For now, only the file rules and the versions are impacted by the upgrade.
+
+    {
+        // Test the common use case i.e. read a v1 config file and upgrade it to v2.
+
+        const CONFIG_V1: &str = r#"ocio_profile_version: 1
+strictparsing: true
+roles:
+  default: raw
+  role1: cs1
+  role2: cs2
+displays:
+  sRGB:
+  - !<View> {name: Raw, colorspace: raw}
+colorspaces:
+  - !<ColorSpace>
+      name: raw
+  - !<ColorSpace>
+      name: cs1
+  - !<ColorSpace>
+      name: cs2
+"#;
+
+        let mut config = (*Config::create_from_stream(CONFIG_V1.as_bytes()).unwrap()).clone();
+        config.validate().unwrap();
+
+        // Check the version.
+
+        assert_eq!(config.major_version(), 1);
+
+        // Check the file rules.
+
+        let rules = config.file_rules().get();
+        assert_eq!(rules.num_entries(), 2);
+        assert_eq!(
+            rules.name(0).unwrap(),
+            FileRules::FILE_PATH_SEARCH_RULE_NAME.as_bytes()
+        );
+        assert_eq!(
+            rules.name(1).unwrap(),
+            FileRules::DEFAULT_RULE_NAME.as_bytes()
+        );
+        assert_eq!(rules.color_space(1).unwrap(), b"default");
+
+        // Check the v1 in-memory file rules are working.
+
+        // It checks that the rule 'FileRules::FilePathSearchRuleName' exists.
+        assert_eq!(
+            config
+                .color_space_from_filepath("/usr/cs2_file.exr")
+                .unwrap(),
+            b"cs2"
+        );
+        // It checks that the rule 'Default' exists.
+        assert_eq!(
+            config.color_space_from_filepath("/usr/file.exr").unwrap(),
+            b"default"
+        );
+
+        // Upgrading is making sure to build a valid v2 config.
+
+        config.upgrade_to_latest_version().unwrap();
+
+        {
+            let (result, mut log) = validate_logged(&config);
+            result.unwrap();
+            // Check that the log contains the expected error messages for the missing roles and
+            // mute them so that (only) those messages don't appear in the test output.
+            check_and_mute_role_errors(&mut log);
+        }
+
+        check_upgraded_rules(&config, b"default");
+
+        // Check the v1 in-memory file rules are working.
+
+        assert_eq!(
+            config
+                .color_space_from_filepath("/usr/cs2_file.exr")
+                .unwrap(),
+            b"cs2"
+        );
+        assert_eq!(
+            config.color_space_from_filepath("/usr/file.exr").unwrap(),
+            b"default"
+        );
+    }
+
+    {
+        // The default role is missing and there is a 'data' color space named rAw.
+
+        const CONFIG_V1: &str = r#"ocio_profile_version: 1
+strictparsing: true
+roles:
+  role1: cs1
+  role2: cs2
+displays:
+  sRGB:
+  - !<View> {name: Raw, colorspace: rAw}
+colorspaces:
+  - !<ColorSpace>
+      name: rAw
+      isdata: true
+  - !<ColorSpace>
+      name: cs1
+  - !<ColorSpace>
+      name: cs2
+"#;
+
+        let mut config = (*Config::create_from_stream(CONFIG_V1.as_bytes()).unwrap()).clone();
+        config.validate().unwrap();
+
+        // Check the version.
+
+        assert_eq!(config.major_version(), 1);
+
+        // Check the file rules.
+
+        let rules = config.file_rules().get();
+        assert_eq!(rules.num_entries(), 2);
+        assert_eq!(
+            rules.name(0).unwrap(),
+            FileRules::FILE_PATH_SEARCH_RULE_NAME.as_bytes()
+        );
+        assert_eq!(
+            rules.name(1).unwrap(),
+            FileRules::DEFAULT_RULE_NAME.as_bytes()
+        );
+        assert_eq!(rules.color_space(1).unwrap(), b"rAw");
+
+        // Check the v1 in-memory file rules are working.
+
+        assert_eq!(
+            config
+                .color_space_from_filepath("/usr/cs2_file.exr")
+                .unwrap(),
+            b"cs2"
+        );
+        assert_eq!(
+            config.color_space_from_filepath("/usr/file.exr").unwrap(),
+            b"rAw"
+        );
+
+        // Upgrading is making sure to build a valid v2 config.
+
+        config.upgrade_to_latest_version().unwrap();
+
+        {
+            let (result, mut log) = validate_logged(&config);
+            result.unwrap();
+            // Ignore (only) the errors logged regarding the missing roles that are required in
+            // configs with version >= 2.2.
+            check_and_mute_role_errors(&mut log);
+        }
+
+        check_upgraded_rules(&config, b"rAw");
+
+        assert_eq!(
+            config
+                .color_space_from_filepath("/usr/cs2_file.exr")
+                .unwrap(),
+            b"cs2"
+        );
+        assert_eq!(
+            config.color_space_from_filepath("/usr/file.exr").unwrap(),
+            b"rAw"
+        );
+    }
+
+    {
+        // The default role is missing and there is no 'data' color space so, the first
+        // color space is used in v1, and the first active color space is used in v2.
+
+        // Note that inactive color spaces do not exist in v1 explaining why the first color
+        // space is used.
+
+        const CONFIG_V1: &str = r#"ocio_profile_version: 1
+strictparsing: true
+roles:
+  role1: cs1
+  role2: cs2
+displays:
+  sRGB:
+  - !<View> {name: Raw, colorspace: rAw}
+colorspaces:
+  - !<ColorSpace>
+      name: cs1
+  - !<ColorSpace>
+      name: cs2
+  - !<ColorSpace>
+      name: rAw
+"#;
+
+        let config = Config::create_from_stream(CONFIG_V1.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        // Check the version.
+
+        assert_eq!(config.major_version(), 1);
+
+        // Check the file rules.
+
+        let rules = config.file_rules().get();
+        assert_eq!(rules.num_entries(), 2);
+        assert_eq!(
+            rules.name(0).unwrap(),
+            FileRules::FILE_PATH_SEARCH_RULE_NAME.as_bytes()
+        );
+        assert_eq!(
+            rules.name(1).unwrap(),
+            FileRules::DEFAULT_RULE_NAME.as_bytes()
+        );
+        assert_eq!(rules.color_space(1).unwrap(), b"cs1");
+
+        // Check the v1 in-memory file rules are working.
+
+        assert_eq!(
+            config
+                .color_space_from_filepath("/usr/cs2_file.exr")
+                .unwrap(),
+            b"cs2"
+        );
+        assert_eq!(
+            config.color_space_from_filepath("/usr/file.exr").unwrap(),
+            b"cs1"
+        );
+
+        {
+            // In v2, the first active color space is then used for the 'Default' rule.
+
+            let mut cfg = (*config).clone();
+
+            // Upgrading is making sure to build a valid v2 config.
+
+            cfg.set_inactive_color_spaces("cs1");
+            cfg.upgrade_to_latest_version().unwrap();
+
+            {
+                let (result, mut log) = validate_logged(&cfg);
+                result.unwrap();
+                // Ignore (only) the errors logged regarding the missing roles that are required
+                // in configs with version >= 2.2.
+                check_and_mute_role_errors(&mut log);
+            }
+
+            check_upgraded_rules(&cfg, b"cs2");
+
+            assert_eq!(
+                cfg.color_space_from_filepath("/usr/cs1_file.exr").unwrap(),
+                b"cs1"
+            );
+            assert_eq!(
+                cfg.color_space_from_filepath("/usr/file.exr").unwrap(),
+                b"cs2"
+            );
+        }
+
+        {
+            // In v2, the first color space is used for the 'Default' rule because there no
+            // active color spaces.
+
+            let mut cfg = (*config).clone();
+
+            // Upgrading is making sure to build a valid v2 config.
+
+            cfg.set_inactive_color_spaces("cs1, cs2, raw");
+
+            {
+                let (upgraded, l) =
+                    crate::test_env::capture_log(|| cfg.upgrade_to_latest_version());
+                upgraded.unwrap();
+
+                assert_eq!(
+                    String::from_utf8(l.concat()).unwrap(),
+                    "[OpenColorIO Warning]: The default rule creation falls back to the first \
+                     color space because no suitable color space exists.\n"
+                );
+            }
+
+            {
+                let (result, mut log) = validate_logged(&cfg);
+                result.unwrap();
+                // Ignore (only) the errors logged regarding the missing roles that are required
+                // in configs with version >= 2.2.
+                check_and_mute_role_errors(&mut log);
+            }
+
+            check_upgraded_rules(&cfg, b"cs1");
+
+            assert_eq!(
+                cfg.color_space_from_filepath("/usr/raw_file.exr").unwrap(),
+                b"rAw"
+            );
+            assert_eq!(
+                cfg.color_space_from_filepath("/usr/file.exr").unwrap(),
+                b"cs1"
+            );
+        }
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(FileRules, config_v1_to_v2_from_memory)` @ v2.5.2.
+#[test]
+fn config_v1_to_v2_from_memory() {
+    let _env = EnvGuard::new();
+    // The unit test checks the file rules from an in-memory v1 config, the upgrade from v1 to
+    // v2, and finally, the file rules in the upgraded v2 in-memory config.
+    //
+    // Note: For now, only the file rules and the versions are impacted by the upgrade.
+
+    // The following tests manually create an in-memory v1 config with faulty file rules. As the
+    // config file read (which automatically updates in-memory v1 file rules like in previous
+    // tests) is not used, only an explicit upgrade to the latest version, can fix the file
+    // rules.
+
+    // The 'Default' rule refers to the 'default' role, which doesn't exist: the role errors are
+    // logged, then validate throws.
+    let check_default_rule_fails = |config: &Config| {
+        let (result, mut log) = validate_logged(config);
+        check_throw_what(
+            result,
+            "rule named 'Default' is referencing 'default' that is neither a color space nor a \
+             named transform",
+        );
+        // Ignore (only) the errors logged regarding the missing roles that are required in
+        // configs with version >= 2.2.
+        check_and_mute_role_errors(&mut log);
+    };
+    let check_validates = |config: &Config| {
+        let (result, mut log) = validate_logged(config);
+        result.unwrap();
+        // Ignore (only) the errors logged regarding the missing roles that are required in
+        // configs with version >= 2.2.
+        check_and_mute_role_errors(&mut log);
+    };
+
+    {
+        // The default role is missing but there is an active 'data' color space.
+
+        let mut config = Config::new().unwrap();
+        config.set_major_version(1).unwrap();
+        config
+            .add_display_view("disp1", "view1", "cs1", "")
+            .unwrap();
+        let mut cs1 = ColorSpace::new();
+        cs1.set_name("cs1");
+        cs1.set_is_data(true);
+        config.add_color_space(&cs1).unwrap();
+        let mut raw = ColorSpace::new();
+        raw.set_name("rAw");
+        config.add_color_space(&raw).unwrap();
+        config.validate().unwrap(); // (does not fail since the major version is 1)
+
+        // Default rule is using 'Default' role that does not exist.
+        config.set_major_version(2).unwrap();
+
+        check_default_rule_fails(&config);
+
+        // Upgrading is making sure to build a valid v2 config.
+        config.set_major_version(1).unwrap();
+        config.upgrade_to_latest_version().unwrap();
+
+        check_validates(&config);
+
+        // 'cs1' is an active & 'data' color space.
+
+        check_upgraded_rules(&config, b"cs1");
+    }
+
+    // The default role is missing and there is no 'data' color space.
+
+    {
+        let mut config = Config::new().unwrap();
+        config.set_major_version(1).unwrap();
+        config
+            .add_display_view("disp1", "view1", "cs1", "")
+            .unwrap();
+        let mut cs1 = ColorSpace::new();
+        cs1.set_name("cs1");
+        config.add_color_space(&cs1).unwrap();
+        let mut raw = ColorSpace::new();
+        raw.set_name("rAw");
+        config.add_color_space(&raw).unwrap();
+        config.validate().unwrap(); // (does not fail since the major version is 1)
+
+        // Default rule is using 'Default' role but the associated color space does not exist.
+        config.set_major_version(2).unwrap();
+
+        check_default_rule_fails(&config);
+
+        // Upgrading is making sure to build a valid v2 config.
+        config.set_major_version(1).unwrap();
+        config.upgrade_to_latest_version().unwrap();
+
+        check_validates(&config);
+
+        // 'Default' role does not exist, 'Raw' is not a data color-space, so use the first
+        // active color space.
+
+        check_upgraded_rules(&config, b"cs1");
+    }
+
+    // The default role is missing and there is no 'data' & active color space. The algorithm
+    // then fallbacks to the first available color space and logs a warning.
+
+    {
+        let mut config = Config::new().unwrap();
+        config.set_major_version(1).unwrap();
+        config
+            .add_display_view("disp1", "view1", "cs1", "")
+            .unwrap();
+        let mut cs1 = ColorSpace::new();
+        cs1.set_name("cs1");
+        config.add_color_space(&cs1).unwrap();
+        config.validate().unwrap(); // (does not fail since the major version is 1)
+
+        // Default rule is using 'Default' role but the associated color space does not exist.
+        config.set_inactive_color_spaces("cs1");
+        config.set_major_version(2).unwrap();
+
+        check_default_rule_fails(&config);
+
+        config.set_major_version(1).unwrap();
+
+        {
+            let (upgraded, log) =
+                crate::test_env::capture_log(|| config.upgrade_to_latest_version());
+            upgraded.unwrap();
+            let svec = split_by_lines(&log.concat());
+            assert!(svec.iter().any(|l| {
+                l.as_slice()
+                    == b"[OpenColorIO Warning]: The default rule creation falls back to the first \
+                     color space because no suitable color space exists."
+                        .as_slice()
+            }));
+        }
+
+        check_validates(&config);
+
+        // Check the 'default' rule. As there is not 'data' or active color space, the default
+        // rule is using an inactive color space.
+
+        check_upgraded_rules(&config, b"cs1");
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(FileRules, read_write_incomplete_configs)` @ v2.5.2.
+#[test]
+fn read_write_incomplete_configs() {
+    let _env = EnvGuard::new();
+    // It should be possible to read and write configs where that are syntactically valid
+    // but which are incomplete and hence would not pass validation.
+
+    // The default role references a color space that has not been defined yet.
+    {
+        const CONFIG: &str = r#"ocio_profile_version: 2
+roles:
+  default: cs2
+
+colorspaces:
+  - !<ColorSpace>
+      name: raw
+"#;
+
+        // Test read works.
+        let cfg = Config::create_from_stream(CONFIG.as_bytes()).unwrap();
+
+        // Test write works.
+        cfg.serialize().unwrap();
+
+        // Test that validate catches the problem.
+        check_throw_what(
+            cfg.validate(),
+            "Config failed role validation. The role 'default' refers to a color space, 'cs2', \
+             which is not defined.",
+        );
+    }
+
+    // FileRules Default rule references a color space that has not been defined yet.
+    {
+        const CONFIG: &str = r#"ocio_profile_version: 2
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: cs2}
+
+displays:
+  sRGB:
+  - !<View> {name: Raw, colorspace: raw}
+colorspaces:
+  - !<ColorSpace>
+      name: raw
+"#;
+
+        // Test read works.
+        let cfg = Config::create_from_stream(CONFIG.as_bytes()).unwrap();
+
+        // Test write works.
+        cfg.serialize().unwrap();
+
+        // Test that validate catches the problem.
+        check_throw_what(
+            cfg.validate(),
+            "File rules: rule named 'Default' is referencing 'cs2' that is neither a color space \
+             nor a named transform.",
+        );
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(FileRules, rule_move)` @ v2.5.2.
+#[test]
+fn rule_move() {
+    let _env = EnvGuard::new();
+    let config = g_config();
+
+    config.validate().unwrap();
+    let mut rules = (*config.file_rules().get()).clone();
+
+    rules.insert_rule(0, "rule0", "cs1", "*", "exr").unwrap();
+    rules.insert_rule(1, "rule1", "cs1", "*", "exr").unwrap();
+    rules.insert_rule(2, "rule2", "cs1", "*", "exr").unwrap();
+    rules.insert_rule(3, "rule3", "cs1", "*", "exr").unwrap();
+    rules.insert_rule(4, "rule4", "cs1", "*", "exr").unwrap();
+    assert_eq!(rules.num_entries(), 6);
+
+    check_throw_what(
+        rules.increase_rule_priority(0),
+        "may not be moved to index '-1'",
+    );
+    check_throw_what(
+        rules.decrease_rule_priority(4),
+        "may not be moved to index '5'",
+    );
+
+    check_throw_what(rules.increase_rule_priority(5), "is the default rule");
+    check_throw_what(rules.decrease_rule_priority(5), "is the default rule");
+
+    rules.decrease_rule_priority(2).unwrap();
+    assert_eq!(rules.num_entries(), 6);
+    assert_eq!(rules.name(2).unwrap(), b"rule3");
+    assert_eq!(rules.name(3).unwrap(), b"rule2");
+
+    rules.increase_rule_priority(3).unwrap();
+    assert_eq!(rules.num_entries(), 6);
+    assert_eq!(rules.name(2).unwrap(), b"rule2");
+    assert_eq!(rules.name(3).unwrap(), b"rule3");
+
+    rules.decrease_rule_priority(2).unwrap();
+    rules.decrease_rule_priority(3).unwrap();
+    assert_eq!(rules.num_entries(), 6);
+    assert_eq!(rules.name(2).unwrap(), b"rule3");
+    assert_eq!(rules.name(3).unwrap(), b"rule4");
+    assert_eq!(rules.name(4).unwrap(), b"rule2");
+
+    rules.increase_rule_priority(4).unwrap();
+    rules.increase_rule_priority(3).unwrap();
+    assert_eq!(rules.num_entries(), 6);
+    assert_eq!(rules.name(2).unwrap(), b"rule2");
+    assert_eq!(rules.name(3).unwrap(), b"rule3");
+    assert_eq!(rules.name(4).unwrap(), b"rule4");
 }

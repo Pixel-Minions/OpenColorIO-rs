@@ -22,7 +22,7 @@ use super::exceptions::{Exception, Result, error_msg};
 use super::exp::{self, keys};
 use super::mark::Mark;
 use super::regex_yaml::RegEx;
-use super::stream::Stream;
+use super::stream::{IStream, Stream};
 use super::token::{Token, TokenStatus, TokenType};
 
 /// `Scanner::IndentMarker::INDENT_TYPE` (scanner.h:43).
@@ -109,7 +109,7 @@ pub struct Scanner<'a> {
 
 impl<'a> Scanner<'a> {
     /// `Scanner(std::istream&)` (scanner.cpp:10-20).
-    pub fn new(input: &'a [u8]) -> Scanner<'a> {
+    pub fn new(input: impl Into<IStream<'a>>) -> Scanner<'a> {
         Scanner {
             input: Stream::new(input),
             tokens: VecDeque::new(),

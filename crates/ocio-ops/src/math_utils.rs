@@ -736,6 +736,25 @@ pub fn get_mxb_inverse(m: &[f32; 16], v: &[f32; 4]) -> Option<([f32; 16], [f32; 
     Some((mout, vout))
 }
 
+/// C++ `std::pow(base, x)` on `double`s: libm's `pow`, whatever `base` is.
+///
+/// In optimized builds LLVM rewrites `pow` of a constant base 2 into `exp2(x)` (the release
+/// builds of both targets call `exp2` for `2f64.powf(x)`), which differs from `pow` in the last
+/// bit for some inputs (with glibc, 4 of the 4096 entries of the ACEScc LUT). The wheel calls
+/// `pow`. Hiding the base from the optimizer keeps the `pow` call, in every build. Use it
+/// wherever upstream calls `pow` (or `std::pow`) with a constant base.
+#[inline]
+pub fn std_pow(base: f64, x: f64) -> f64 {
+    std::hint::black_box(base).powf(x)
+}
+
+/// C++ `powf(base, x)` (or `std::pow` of two `float`s): libm's `powf`, whatever `base` is.
+/// See [`std_pow`]: LLVM rewrites `powf` of a constant base 2 into `exp2f`.
+#[inline]
+pub fn std_powf(base: f32, x: f32) -> f32 {
+    std::hint::black_box(base).powf(x)
+}
+
 #[cfg(test)]
 #[path = "math_utils_tests.rs"]
 mod tests;

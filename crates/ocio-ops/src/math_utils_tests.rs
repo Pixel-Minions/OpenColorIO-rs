@@ -913,3 +913,123 @@ fn halfs_differ_test() {
     assert!(!halfs_differ(pos_2, pos_1, tol));
     assert!(!halfs_differ(neg_2, neg_1, tol));
 }
+
+/// The exponents of 2 that the built-ins' LUTs raise (the ACEScc curve over its 4096 entries,
+/// the Apple Log curve over every half code), and a spread of others.
+fn pow2_exponents() -> Vec<f64> {
+    let mut out = Vec::new();
+    for i in 0..4096u32 {
+        let in_ = f64::from(i) / 4095. * (1.50 - -0.36) + -0.36;
+        out.push(in_ * 17.52 - 9.72);
+    }
+    for bits in 0..=u16::MAX {
+        let v = f64::from(crate::imath_half::half_to_float(bits));
+        if v.is_finite() {
+            out.push((v - 0.69336945) / 0.08550479);
+        }
+    }
+    for i in -2000..2000 {
+        out.push(f64::from(i) * 0.0137);
+    }
+    out
+}
+
+/// [`std_pow`] and [`std_powf`] are libm's `pow` and `powf` in every build, including where
+/// `exp2` gives other bits: the C runtime's `pow` is the reference (`ocio_testkit::crt`).
+#[test]
+fn std_pow_is_the_c_runtime_pow() {
+    use ocio_testkit::crt::{exp2_c, exp2f_c, pow_c, powf_c};
+
+    let mut exp2_differs = 0;
+    for x in pow2_exponents() {
+        let pow = pow_c(2.0, x);
+        assert_eq!(std_pow(2.0, x).to_bits(), pow.to_bits(), "pow(2, {x:e})");
+        if exp2_c(x).to_bits() != pow.to_bits() {
+            exp2_differs += 1;
+        }
+
+        let xf = x as f32;
+        let powf = powf_c(2.0, xf);
+        assert_eq!(
+            std_powf(2.0, xf).to_bits(),
+            powf.to_bits(),
+            "powf(2, {xf:e})"
+        );
+        if exp2f_c(xf).to_bits() != powf.to_bits() {
+            exp2_differs += 1;
+        }
+    }
+    // Both C runtimes have inputs where they differ, so the test tells `pow` from `exp2`.
+    assert!(exp2_differs > 0, "exp2 equals pow on every input");
+}
+
+/// The places where a constant base 2 would let LLVM call `exp2` instead of `pow`: a literal 2
+/// before `.powf(`, or as the first argument of `f32::powf`/`f64::powf`. Source files of the
+/// workspace's crates use [`std_pow`] or [`std_powf`] instead (comments aside).
+#[test]
+fn no_powf_of_a_literal_2() {
+    fn is_two(token: &str) -> bool {
+        let t = token
+            .trim_end_matches("f64")
+            .trim_end_matches("f32")
+            .trim_end_matches('_');
+        !t.is_empty() && t.parse::<f64>() == Ok(2.0)
+    }
+    fn scan(dir: &std::path::Path, found: &mut Vec<String>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                if path.file_name().is_some_and(|n| n != "target") {
+                    scan(&path, found);
+                }
+                continue;
+            }
+            if path.extension().is_none_or(|e| e != "rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            for (n, line) in text.lines().enumerate() {
+                if line.trim_start().starts_with("//") {
+                    continue;
+                }
+                let method = [".", "powf("].concat();
+                let mut rest = line;
+                while let Some(at) = rest.find(&method) {
+                    let receiver: String = rest[..at]
+                        .chars()
+                        .rev()
+                        .take_while(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '_')
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .rev()
+                        .collect();
+                    if is_two(&receiver) {
+                        found.push(format!("{}:{}: {line}", path.display(), n + 1));
+                    }
+                    rest = &rest[at + method.len()..];
+                }
+                for ty in ["f32", "f64"] {
+                    let call = [ty, "::", "powf("].concat();
+                    if let Some(at) = line.find(&call) {
+                        let arg: String = line[at + call.len()..]
+                            .trim_start()
+                            .chars()
+                            .take_while(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '_')
+                            .collect();
+                        if is_two(&arg) {
+                            found.push(format!("{}:{}: {line}", path.display(), n + 1));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let mut found = Vec::new();
+    scan(&crates, &mut found);
+    assert!(
+        found.is_empty(),
+        "use std_pow or std_powf:\n{}",
+        found.join("\n")
+    );
+}

@@ -186,6 +186,11 @@ fn group_transform_through_the_api_matches_the_wheel() {
 }
 
 #[test]
+fn lut1d_transform_through_the_api_matches_the_wheel() {
+    battery::run(&ApiFamily::new("Lut1DTransform", api_cases::lut1d()));
+}
+
+#[test]
 fn fixed_function_transform_through_the_api_matches_the_wheel() {
     battery::run(&ApiFamily::new(
         "FixedFunctionTransform",

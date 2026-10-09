@@ -572,6 +572,86 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p3-yaml-load-2`, checked against the wheel in
   `crates/ocio/tests/config_load_oracle.rs` ("v1 builtin", "v1 file cdl style").
 
+### I-147. A config that failed validation can fail again with an empty message
+
+- **Upstream:** `Config::validate` keeps its result: a failed config throws its kept message
+  (`m_validationtext`) again on the next call (`Config.cpp:1361-1365`). Most failures set it
+  before throwing, but four don't: an environment variable whose default names another variable
+  (`Config.cpp:1396-1402`), a transform's own `validate()` (`Config.cpp:1818`), a view's looks
+  that can't be parsed (`Config.cpp:670`), and the version check (`Config.cpp:2101`). For those,
+  the second `validate()` throws an empty message. Seen through the wheel.
+- **Who notices:** a caller that validates a config twice and reads the second message.
+- **A fix:** set the kept message in those four places too.
+- **Status:** matched in `p3-validate`, checked against the wheel in
+  `crates/ocio/tests/config_load_oracle.rs` (`validating_twice_as_in_the_wheel`).
+
+### I-148. The built-in configs' texts end their lines with CR LF on Windows
+
+- **Upstream:** the build embeds each `builtinconfigs/configs/*.ocio` file byte for byte, as the
+  build's checkout wrote it (`src/OpenColorIO/CMakeLists.txt:262-298`). The Windows wheel's
+  checkout wrote them with CR LF line ends and the Linux wheel's with LF, so
+  `BuiltinConfigRegistry::getBuiltinConfig` (Python: `BuiltinConfigRegistry()[name]`) gives
+  different texts on the two platforms. Seen through the wheels. The configs read from them are
+  the same: their `serialize()` and cache IDs match.
+- **Who notices:** a caller that writes or hashes a built-in config's text as the registry gives
+  it.
+- **A fix:** embed the files with LF on every platform (a `.gitattributes` rule for them, or
+  normalize them in the build).
+- **Status:** matched in `p3-loading` (3.10a, `crates/ocio/src/builtinconfigs/mod.rs`), checked
+  against the wheel live on each platform (`crates/ocio/tests/builtin_configs_oracle.rs`).
+
+### I-149. An `ocio://` URI is found anywhere in a path
+
+- **Upstream:** `ResolveConfigPath`, `Config::CreateFromFile` and
+  `Config::CreateFromBuiltinConfig` look for a URI with `std::regex_search` of
+  `ocio:\/\/([^\s]+)` (`BuiltinConfigRegistry.cpp:36-39`, `Config.cpp:1160-1164, 1246-1252`),
+  which matches anywhere in the text, not only at its start: `x ocio://default` resolves to the
+  default config's URI, and a file path with `ocio://` inside is read as a built-in config's name,
+  whatever follows up to the next space. `CreateFromBuiltinConfig` adds the prefix only when the
+  name doesn't start with `ocio://` in lowercase, so `OCIO://default` becomes the name
+  `OCIO://default`, which no built-in config has. Seen through the wheel.
+- **Who notices:** a caller that passes a path containing `ocio://`, or a URI in another case.
+- **A fix:** match the URI at the start of the path only (`std::regex_match` or a prefix
+  check), ignoring the prefix's case if wanted.
+- **Status:** matched in `p3-loading` (3.10a,
+  `crates/ocio/src/builtinconfigs/builtin_config_registry.rs`, `search_builtin_uri`), checked
+  against the wheel (`crates/ocio/tests/builtin_configs_oracle.rs`).
+
+### I-157. A config file of fewer than four bytes can read as empty on Windows
+
+- **Upstream:** `Config::CreateFromFile` hands yaml-cpp an `std::ifstream` (`Config.cpp:1176-1206`).
+  yaml-cpp's detection of the encoding reads up to four bytes and puts back those that aren't a
+  byte order mark (yaml-cpp 0.8.0 `stream.cpp:189-245`). When the file ends first, it puts them
+  back after the end: libstdc++'s file stream (Linux) seeks back for each, as a string stream
+  does, but MSVC's (Windows) puts back one byte with the C runtime's `ungetc` and one in its own
+  putback character, and fails on a third, which sets `badbit`: the stream then reads as an
+  empty document. So on Windows the files `00 00 FE` and `61 00 00` give "does not appear to
+  have a valid version", where Linux and `CreateFromStream` give yaml-cpp's errors. Seen
+  through the wheels.
+  A file that can't be read differs too: a directory, which Linux opens, makes libstdc++'s
+  `basic_filebuf::underflow` throw, which reaches `OCIOYaml::Read` through yaml-cpp's
+  `sgetn` ("... failed. basic_filebuf::underflow error reading the file: Is a directory"),
+  where Windows can't open it ("Error could not read '<path>' OCIO profile.").
+- **Who notices:** nobody with a real config: only files of three bytes or fewer differ, and
+  directories given as configs.
+- **A fix:** read the file into a string stream first.
+- **Status:** matched in `p3-loading` (3.10b, `crates/ocio/src/yaml_cpp/stream.rs`,
+  `IStream::file` and `MsvcFileBuf`), checked against the wheel on each platform for every file
+  of up to three bytes of the bytes that matter and 256 of four
+  (`crates/ocio/tests/config_files_oracle.rs`).
+
+### I-158. Until Phase 4, an OCIOZ archive given to `CreateFromFile` is an error
+
+- **Upstream:** `Config::CreateFromFile` reads a file that starts with `PK` as an OCIOZ archive,
+  through `CIOPOciozArchive` and `CreateFromConfigIOProxy` (`Config.cpp:1188-1200`).
+- **Who notices:** a caller that loads an `.ocioz` file, or any file starting with `PK`, before
+  the archive reader is ported.
+- **A fix:** none: this is the port's interim state, not upstream's. Until the archive reader
+  lands (Phase 4, the archive card), the port returns "Config::CreateFromFile: reading an OCIOZ
+  archive is not ported yet." (`crates/ocio/src/config.rs`, `Config::create_from_file`); that card
+  replaces the error with the reader and removes this entry.
+- **Status:** interim, in `p3-loading` (3.10b).
+
 ## Numeric helpers
 
 ### I-20. Double values are compared to 0 and 1 in float precision

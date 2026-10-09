@@ -2,9 +2,8 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! The built-in transforms: a port of `src/OpenColorIO/transforms/builtins/` @ v2.5.2: the
-//! registry and every entry's style and description, and the ops of the identity, the
-//! ARRI, Panasonic, RED and Sony cameras, and the ACES and display entries built from Matrix,
-//! Log, Range and Gamma ops. The other entries' ops come with `p3-after-p2`.
+//! registry and every entry's style, description and ops: the identity, the cameras, the
+//! displays and the ACES entries.
 
 pub mod builtin_transform_registry;
 
@@ -17,6 +16,7 @@ mod apple_cameras;
 mod arri_cameras;
 mod canon_cameras;
 mod displays;
+mod op_helpers;
 mod panasonic_cameras;
 mod red_cameras;
 mod sony_cameras;

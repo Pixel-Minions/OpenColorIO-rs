@@ -10,10 +10,11 @@ use super::exceptions::Result;
 use super::node::Node;
 use super::node_builder::NodeBuilder;
 use super::parser::Parser;
+use super::stream::IStream;
 
 /// `Load(std::istream&)` (parse.cpp:22-30): the first document, or `Node()` if there is
 /// none. OCIO reads a config with it (`OCIOYaml::Read`, OCIOYaml.cpp:5424 @ v2.5.2).
-pub fn load(input: &[u8]) -> Result<Node> {
+pub fn load<'a>(input: impl Into<IStream<'a>>) -> Result<Node> {
     let mut parser = Parser::new(input);
     let mut builder = NodeBuilder::new();
     if !parser.handle_next_document(&mut builder)? {
@@ -23,7 +24,7 @@ pub fn load(input: &[u8]) -> Result<Node> {
 }
 
 /// `LoadAll(std::istream&)` (parse.cpp:50-63): every document.
-pub fn load_all(input: &[u8]) -> Result<Vec<Node>> {
+pub fn load_all<'a>(input: impl Into<IStream<'a>>) -> Result<Vec<Node>> {
     let mut docs = Vec::new();
     let mut parser = Parser::new(input);
     loop {

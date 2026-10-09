@@ -10,6 +10,7 @@ use super::event_handler::EventHandler;
 use super::exceptions::{Exception, Result, error_msg};
 use super::scanner::Scanner;
 use super::single_doc_parser::SingleDocParser;
+use super::stream::IStream;
 use super::tag::Directives;
 use super::token::{Token, TokenType};
 use ocio_ops::utils::num_get::{self, Basefield};
@@ -55,7 +56,7 @@ impl<'a> Parser<'a> {
     }
 
     /// `Parser(std::istream&)` (parser.cpp:15).
-    pub fn new(input: &'a [u8]) -> Parser<'a> {
+    pub fn new(input: impl Into<IStream<'a>>) -> Parser<'a> {
         let mut parser = Parser::empty();
         parser.load(input);
         parser
@@ -70,7 +71,7 @@ impl<'a> Parser<'a> {
     }
 
     /// `Load(std::istream&)` (parser.cpp:23-26): resets the parser to new input.
-    pub fn load(&mut self, input: &'a [u8]) {
+    pub fn load(&mut self, input: impl Into<IStream<'a>>) {
         self.scanner = Some(Scanner::new(input));
         self.directives = Some(Directives::default());
     }

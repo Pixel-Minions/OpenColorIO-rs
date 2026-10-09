@@ -12,8 +12,16 @@
 //! src/OpenColorIO/Processor.cpp:623-641 @ v2.5.2), and NaN and infinite parameters take the
 //! same route as finite ones.
 
+use ocio::TransformDirection;
+use ocio_ops::open_color_types::GradingStyle;
+use ocio_ops::ops::gradingrgbcurve::grading_b_spline_curve::{
+    GradingBSplineCurve, GradingControlPoint,
+};
+use ocio_ops::ops::gradingrgbcurve::grading_rgb_curve::GradingRgbCurve;
+use ocio_ops::ops::gradingrgbcurve::grading_rgb_curve_op_data::GradingRgbCurveOpData;
 use ocio_testkit::battery::Direction;
 use ocio_testkit::battery::params::{Case, RGB, W0001Function};
+use ocio_testkit::transform_text::f64_spec;
 
 use super::api::{Arg, Calls, num};
 
@@ -1383,8 +1391,8 @@ pub(crate) fn builtin(styles: &[&str]) -> Cases {
     }
 }
 
-/// The built-in transforms whose ops are ported (WP 3.2e-g): the identity, the ARRI, Panasonic,
-/// RED and Sony cameras, and the ACES and display entries built from Phase 1 ops.
+/// The built-in transforms, all of whose ops are ported (WP 3.2e-g, `p3-after-p2`): the
+/// identity, the cameras, the ACES entries and the display entries.
 pub(crate) const BUILTINS_WITH_OPS: &[&str] = &[
     "IDENTITY",
     "ARRI_ALEXA-LOGC-EI800-AWG_to_ACES2065-1",
@@ -1396,14 +1404,71 @@ pub(crate) const BUILTINS_WITH_OPS: &[&str] = &[
     "SONY_SLOG3-SGAMUT3.CINE_to_ACES2065-1",
     "SONY_SLOG3-SGAMUT3-VENICE_to_ACES2065-1",
     "SONY_SLOG3-SGAMUT3.CINE-VENICE_to_ACES2065-1",
+    "CANON_CLOG2-CGAMUT_to_ACES2065-1",
+    "CURVE - CANON_CLOG2_to_LINEAR",
+    "CANON_CLOG3-CGAMUT_to_ACES2065-1",
+    "CURVE - CANON_CLOG3_to_LINEAR",
+    "APPLE_LOG_to_ACES2065-1",
+    "CURVE - APPLE_LOG_to_LINEAR",
     "UTILITY - ACES-AP0_to_CIE-XYZ-D65_BFD",
     "UTILITY - ACES-AP1_to_CIE-XYZ-D65_BFD",
     "UTILITY - ACES-AP1_to_LINEAR-REC709_BFD",
     "CURVE - ACEScct-LOG_to_LINEAR",
     "ACEScct_to_ACES2065-1",
+    "ACEScc_to_ACES2065-1",
     "ACEScg_to_ACES2065-1",
     "ACESproxy10i_to_ACES2065-1",
+    "ADX10_to_ACES2065-1",
+    "ADX16_to_ACES2065-1",
     "ACES-LMT - BLUE_LIGHT_ARTIFACT_FIX",
+    "ACES-LMT - ACES 1.3 Reference Gamut Compression",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-100nit-REC709_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-100nit-P3-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-108nit-P3-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-300nit-P3-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-500nit-P3-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-1000nit-P3-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-2000nit-P3-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-4000nit-P3-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-500nit-REC2020_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-1000nit-REC2020_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-2000nit-REC2020_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-4000nit-REC2020_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-100nit-REC709-D60-in-REC709-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-100nit-REC709-D60-in-P3-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-100nit-REC709-D60-in-REC2020-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-100nit-P3-D60-in-P3-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-100nit-P3-D60-in-XYZ-E_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-108nit-P3-D60-in-P3-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-300nit-P3-D60-in-XYZ-E_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-500nit-P3-D60-in-P3-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-1000nit-P3-D60-in-P3-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-2000nit-P3-D60-in-P3-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-4000nit-P3-D60-in-P3-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-500nit-P3-D60-in-REC2020-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-1000nit-P3-D60-in-REC2020-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-2000nit-P3-D60-in-REC2020-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-4000nit-P3-D60-in-REC2020-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-500nit-REC2020-D60-in-REC2020-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-1000nit-REC2020-D60-in-REC2020-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-2000nit-REC2020-D60-in-REC2020-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-4000nit-REC2020-D60-in-REC2020-D65_2.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-CINEMA_1.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-VIDEO_1.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-CINEMA-REC709lim_1.1",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-VIDEO-REC709lim_1.1",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-VIDEO-P3lim_1.1",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-CINEMA-D60sim-D65_1.1",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-VIDEO-D60sim-D65_1.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-CINEMA-D60sim-DCI_1.0",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - SDR-CINEMA-D65sim-DCI_1.1",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-VIDEO-1000nit-15nit-REC2020lim_1.1",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-VIDEO-1000nit-15nit-P3lim_1.1",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-VIDEO-2000nit-15nit-REC2020lim_1.1",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-VIDEO-2000nit-15nit-P3lim_1.1",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-VIDEO-4000nit-15nit-REC2020lim_1.1",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-VIDEO-4000nit-15nit-P3lim_1.1",
+    "ACES-OUTPUT - ACES2065-1_to_CIE-XYZ-D65 - HDR-CINEMA-108nit-7.2nit-P3lim_1.1",
     "DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.709",
     "DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.709 - MIRROR NEGS",
     "DISPLAY - CIE-XYZ-D65_to_REC.1886-REC.2020",
@@ -1419,4 +1484,189 @@ pub(crate) const BUILTINS_WITH_OPS: &[&str] = &[
     "DISPLAY - CIE-XYZ-D65_to_DCDM-D65",
     "DISPLAY - CIE-XYZ-D65_to_DisplayP3",
     "DISPLAY - CIE-XYZ-D65_to_DisplayP3-HDR",
+    "CURVE - ST-2084_to_LINEAR",
+    "CURVE - LINEAR_to_ST-2084",
+    "DISPLAY - CIE-XYZ-D65_to_REC.2100-PQ",
+    "DISPLAY - CIE-XYZ-D65_to_ST2084-P3-D65",
+    "DISPLAY - CIE-XYZ-D65_to_ST2084-DCDM-D65",
+    "CURVE - HLG-OETF-INVERSE",
+    "CURVE - HLG-OETF",
+    "DISPLAY - CIE-XYZ-D65_to_REC.2100-HLG-1000nit",
 ];
+
+/// One `GradingRGBCurveTransform`: its style, its four curves (red, green, blue, master) with
+/// their slopes, and whether it bypasses the lin-to-log conversion and is dynamic. The port
+/// builds it as op data until Phase 3 ports the transform ([`RgbCurve::op_data`]); the wheel
+/// builds the transform from its spec ([`RgbCurve::calls`]).
+#[derive(Debug, Clone)]
+pub(crate) struct RgbCurve {
+    style: GradingStyle,
+    curves: [Vec<(f32, f32)>; 4],
+    slopes: [Vec<f32>; 4],
+    bypass: bool,
+    dynamic: bool,
+}
+
+impl RgbCurve {
+    fn new(style: GradingStyle, curves: [&[(f32, f32)]; 4]) -> RgbCurve {
+        RgbCurve {
+            style,
+            curves: curves.map(<[(f32, f32)]>::to_vec),
+            slopes: curves.map(|c| vec![0.0; c.len()]),
+            bypass: false,
+            dynamic: false,
+        }
+    }
+
+    fn bypass(mut self) -> RgbCurve {
+        self.bypass = true;
+        self
+    }
+
+    fn dynamic(mut self) -> RgbCurve {
+        self.dynamic = true;
+        self
+    }
+
+    fn slopes(mut self, c: usize, slopes: &[f32]) -> RgbCurve {
+        self.slopes[c] = slopes.to_vec();
+        self
+    }
+
+    fn curve(&self, c: usize) -> GradingBSplineCurve {
+        let points: Vec<GradingControlPoint> = self.curves[c]
+            .iter()
+            .map(|&(x, y)| GradingControlPoint::new(x, y))
+            .collect();
+        let mut curve = GradingBSplineCurve::with_points(&points);
+        for (i, &s) in self.slopes[c].iter().enumerate() {
+            curve.set_slope(i, s).expect("a slope per point");
+        }
+        curve
+    }
+
+    /// The transform's spec: the binding's constructor of the curves (object specs), the
+    /// style and whether it is dynamic, then `setBypassLinToLog` (the direction follows).
+    pub(crate) fn calls(&self) -> Calls {
+        let f = |v: f32| f64_spec(f64::from(v));
+        let curve = |c: usize| {
+            let values: Vec<serde_json::Value> = self.curves[c]
+                .iter()
+                .flat_map(|&(x, y)| [f(x), f(y)])
+                .collect();
+            let slopes: Vec<serde_json::Value> = self.slopes[c].iter().map(|&s| f(s)).collect();
+            serde_json::json!({"object": {"class": "GradingBSplineCurve", "args": [values],
+                "calls": [["setSlopes", slopes]]}})
+        };
+        let style = match self.style {
+            GradingStyle::Log => "GRADING_LOG",
+            GradingStyle::Lin => "GRADING_LIN",
+            GradingStyle::Video => "GRADING_VIDEO",
+        };
+        Calls::new("GradingRGBCurveTransform")
+            .arg_fixed(
+                "values",
+                serde_json::json!({"object": {"class": "GradingRGBCurve", "args": {
+                    "red": curve(0), "green": curve(1), "blue": curve(2), "master": curve(3),
+                }}}),
+            )
+            .arg_fixed("style", serde_json::json!({"enum": style}))
+            .arg_fixed("dynamic", serde_json::json!(self.dynamic))
+            .fixed("setBypassLinToLog", serde_json::json!(self.bypass))
+    }
+
+    /// The op data the transform holds in the direction `dir`, as the binding's constructor,
+    /// `setBypassLinToLog` and `setDirection` make it, validated as
+    /// `Processor::Impl::setTransform` validates the transform
+    /// (src/bindings/python/transforms/PyGradingRGBCurveTransform.cpp:17-34,
+    /// src/OpenColorIO/Processor.cpp:623-641 @ v2.5.2).
+    pub(crate) fn op_data(&self, dir: Direction) -> ocio_ops::Result<GradingRgbCurveOpData> {
+        let curves = GradingRgbCurve::with_curves(
+            &self.curve(0),
+            &self.curve(1),
+            &self.curve(2),
+            &self.curve(3),
+        );
+        let mut data = GradingRgbCurveOpData::new(self.style);
+        data.set_value(&curves)?;
+        if self.dynamic {
+            data.get_dynamic_property_internal().make_dynamic();
+        }
+        data.set_bypass_lin_to_log(self.bypass);
+        data.set_direction(match dir {
+            Direction::Forward => TransformDirection::Forward,
+            Direction::Inverse => TransformDirection::Inverse,
+        });
+        data.validate()?;
+        Ok(data)
+    }
+}
+
+/// `GradingRGBCurveTransform`, through its op data until Phase 3 ports the transform: upstream's
+/// CPU test curves (tests/cpu/ops/gradingrgbcurve/GradingRGBCurveOpCPU_tests.cpp @ v2.5.2) and
+/// the ACES RRT shaper (src/OpenColorIO/transforms/builtins/ACES.cpp:178-199), in each style,
+/// bypassed, dynamic and not, as the GPU writer's test runs them
+/// (crates/ocio-gpu/tests/grading_rgb_curve_op_gpu_oracle.rs). Finite curves only: NaN ones
+/// are W0002's, which the op battery covers (crates/ocio-ops/tests/grading_rgb_curve_oracle.rs).
+pub(crate) fn rgb_curve() -> Vec<(&'static str, RgbCurve)> {
+    use GradingStyle::{Lin, Log, Video};
+    let identity: &[(f32, f32)] = &[(0.0, 0.0), (1.0, 1.0)];
+    let lin_rgb: &[(f32, f32)] = &[(-6.0, -8.0), (-2.0, -5.0), (2.0, 4.0), (5.0, 6.0)];
+    let lin_m: &[(f32, f32)] = &[(0.0, 0.0), (0.5, 0.5), (1.0, 1.0)];
+    let log = RgbCurve::new(
+        Log,
+        [
+            &[(0.1, 0.15), (0.55, 0.45), (0.9, 1.1)],
+            &[(0.1, 0.15), (0.55, 0.35), (0.9, 1.1)],
+            &[(0.1, 0.15), (0.55, 0.85), (0.9, 1.1)],
+            &[(-0.1, 0.1), (1.1, 1.3)],
+        ],
+    );
+    let lin = RgbCurve::new(Lin, [lin_rgb, lin_rgb, lin_rgb, lin_m]);
+    let rrt = RgbCurve::new(
+        Log,
+        [
+            identity,
+            identity,
+            identity,
+            &[
+                (-5.26017743, -4.0),
+                (-3.75502745, -3.57868829),
+                (-2.24987747, -1.82131329),
+                (-0.74472749, 0.68124124),
+                (1.06145248, 2.87457742),
+                (2.86763245, 3.83406206),
+                (4.67381243, 4.0),
+            ],
+        ],
+    )
+    .slopes(
+        3,
+        &[
+            0.0, 0.55982688, 1.77532247, 1.55, 0.8787017, 0.18374463, 0.0,
+        ],
+    );
+    let video = RgbCurve::new(Video, [lin_m; 4]);
+    vec![
+        ("log", log.clone()),
+        ("log dynamic", log.dynamic()),
+        ("lin", lin.clone()),
+        ("lin bypass", lin.clone().bypass()),
+        ("lin dynamic", lin.dynamic()),
+        ("ACES RRT shaper", rrt),
+        ("video identity", video.clone()),
+        ("video identity dynamic", video.dynamic()),
+    ]
+}
+
+/// [`rgb_curve`]'s transforms as the sweeps' cases (no numbers to mutate: the curves are
+/// object specs).
+pub(crate) fn rgb_curve_cases() -> Cases {
+    Cases {
+        cases: rgb_curve()
+            .into_iter()
+            .map(|(label, c)| Case::new(label, c.calls()))
+            .collect(),
+        bases: Vec::new(),
+    }
+}
