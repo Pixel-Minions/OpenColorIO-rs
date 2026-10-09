@@ -359,7 +359,7 @@ fn build_colorspace_ops() {
             &mut ops,
             &config,
             &config.current_context().get(),
-            &cs_scene_from_ref,
+            Some(&cs_scene_from_ref),
             false,
         )
         .unwrap();
@@ -378,7 +378,7 @@ fn build_colorspace_ops() {
             &mut ops,
             &config,
             &config.current_context().get(),
-            &cs_scene_from_ref,
+            Some(&cs_scene_from_ref),
             true,
         )
         .unwrap();
@@ -407,14 +407,26 @@ fn build_colorspace_ops() {
         // If data is bypassed, nothing is created.
         let context = config.current_context().get();
         let mut ops = OpVec::new();
-        build_color_space_from_reference_ops(&mut ops, &config, &context, &cs_scene_both, true)
-            .unwrap();
+        build_color_space_from_reference_ops(
+            &mut ops,
+            &config,
+            &context,
+            Some(&cs_scene_both),
+            true,
+        )
+        .unwrap();
         ops.validate().unwrap();
         assert_eq!(ops.len(), 0);
 
         // If data is not bypassed ops are created.
-        build_color_space_from_reference_ops(&mut ops, &config, &context, &cs_scene_both, false)
-            .unwrap();
+        build_color_space_from_reference_ops(
+            &mut ops,
+            &config,
+            &context,
+            Some(&cs_scene_both),
+            false,
+        )
+        .unwrap();
         ops.validate().unwrap();
         assert_eq!(ops.len(), 2);
         assert_eq!(op_type(&ops, 0), OpDataType::FixedFunction);
@@ -423,7 +435,7 @@ fn build_colorspace_ops() {
         // Remove the data property and try in the other direction.
         cs_scene_both.set_is_data(false);
         ops.clear();
-        build_color_space_to_reference_ops(&mut ops, &config, &context, &cs_scene_both, true)
+        build_color_space_to_reference_ops(&mut ops, &config, &context, Some(&cs_scene_both), true)
             .unwrap();
         ops.validate().unwrap();
         assert_eq!(ops.len(), 2);

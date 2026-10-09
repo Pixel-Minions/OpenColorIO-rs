@@ -375,8 +375,8 @@ fn run_look_tokens<'c>(
                 ops,
                 config,
                 context,
-                current,
-                process_color_space,
+                Some(current),
+                Some(process_color_space),
                 true,
             )?;
             *current_color_space = Some(process_color_space);
@@ -444,7 +444,7 @@ pub(crate) fn build_look_ops(
     // If current color space is already the dst space skip the conversion.
     if !skip_color_space_conversion && !std::ptr::eq(current, dst) {
         // Default behavior is to bypass data color space.
-        build_color_space_ops_between(ops, config, context, current, dst, true)?;
+        build_color_space_ops_between(ops, config, context, Some(current), Some(dst), true)?;
     }
     Ok(())
 }

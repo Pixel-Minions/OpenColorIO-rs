@@ -17,6 +17,7 @@ use crate::config::Config;
 use crate::context::Context;
 use crate::transform::Transform;
 use crate::transforms::color_space_transform::collect_color_space_transform_context_variables;
+use crate::transforms::display_view_transform::collect_display_view_transform_context_variables;
 use crate::transforms::file_transform::collect_file_transform_context_variables;
 use crate::transforms::look_transform::collect_look_transform_context_variables;
 
@@ -153,13 +154,14 @@ pub fn resolve_context_variables(str: &[u8], map: &EnvMap, used: &mut UsedEnvs) 
 }
 
 /// Whether `transform` uses context variables, which it adds to `used_context_vars`: the
-/// color space, file and look transforms' overloads, and a group asks its children. A look list
-/// that can't be parsed is an error, as upstream's parser throws through it.
+/// color space, display view, file and look transforms' overloads, and a group asks its
+/// children. A look list that can't be parsed is an error, as upstream's parser throws through
+/// it.
 ///
 /// Port of `CollectContextVariables(const Config &, const Context &, ConstTransformRcPtr,
 /// ContextRcPtr &)` (src/OpenColorIO/ContextVariableUtils.cpp:179-206 @ v2.5.2) and its
-/// `GroupTransform` overload (transforms/GroupTransform.cpp:206-223 @ v2.5.2). The overload of
-/// the display view transform comes with its builder (WP 3.2c); the other classes use none.
+/// `GroupTransform` overload (transforms/GroupTransform.cpp:206-223 @ v2.5.2). The other classes
+/// use none.
 pub(crate) fn collect_context_variables(
     config: &Config,
     context: &Context,
@@ -190,9 +192,9 @@ pub(crate) fn collect_context_variables(
         Transform::Look(tr) => {
             collect_look_transform_context_variables(config, context, tr, used_context_vars)
         }
-        // Its overload reads the names and the config's displays, views and looks; it comes with
-        // its op builder (WP 3.2c), and until then the processor refuses to build its ops.
-        Transform::DisplayView(_) => Ok(false),
+        Transform::DisplayView(tr) => {
+            collect_display_view_transform_context_variables(config, context, tr, used_context_vars)
+        }
         // The classes that use no context variable.
         Transform::Allocation(_)
         | Transform::Builtin(_)

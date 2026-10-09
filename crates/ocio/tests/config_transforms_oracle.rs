@@ -527,3 +527,112 @@ fn look_transform_processors_match_the_wheel() {
     }
     check_processors_in(&cases, Some(&json!({"yaml": LOOK_CONFIG})), &config);
 }
+
+/// A config of views of every kind, for the processors of display view transforms (WP 3.2c):
+/// a color space alone or with looks, a view transform (scene- or display-referred) with a
+/// display color space and looks, named transforms as the view's color space or view
+/// transform, a shared view using the display's name, data, and looks of empty names only.
+const DISPLAY_VIEW_CONFIG: &str = "ocio_profile_version: 2
+environment: {}
+roles:
+  default: raw
+shared_views:
+  - !<View> {name: shared, view_transform: vt_scene, display_colorspace: <USE_DISPLAY_NAME>}
+displays:
+  d:
+    - !<View> {name: cs, colorspace: out}
+    - !<View> {name: cs_looks, colorspace: out, looks: \"lk_scene, -lk_display\"}
+    - !<View> {name: vt, view_transform: vt_scene, display_colorspace: dout}
+    - !<View> {name: vt_looks, view_transform: vt_scene, display_colorspace: dout, looks: \"lk_scene | lk_display\"}
+    - !<View> {name: vt_display, view_transform: vt_display, display_colorspace: dout}
+    - !<View> {name: vt_display_looks, view_transform: vt_display, display_colorspace: dout, looks: lk_display}
+    - !<View> {name: nt_cs, colorspace: nt, looks: lk_scene}
+    - !<View> {name: nt_vt, view_transform: nt, display_colorspace: dout}
+    - !<View> {name: data, colorspace: raw}
+    - !<View> {name: empty_looks, colorspace: out, looks: \", \"}
+    - !<Views> [shared]
+  dout:
+    - !<Views> [shared]
+view_transforms:
+  - !<ViewTransform>
+    name: vt_scene
+    from_scene_reference: !<MatrixTransform> {matrix: [2, 0, 0, 0, 0, 3, 0, 0, 0, 0, 4, 0, 0, 0, 0, 1]}
+  - !<ViewTransform>
+    name: vt_display
+    to_display_reference: !<ExponentTransform> {value: 1.5}
+looks:
+  - !<Look>
+    name: lk_scene
+    process_space: log
+    transform: !<CDLTransform> {slope: [1.1, 1, 0.9]}
+  - !<Look>
+    name: lk_display
+    process_space: dproc
+    inverse_transform: !<CDLTransform> {offset: [0.1, 0, 0]}
+display_colorspaces:
+  - !<ColorSpace>
+    name: dout
+    from_display_reference: !<ExponentTransform> {value: 2.4}
+  - !<ColorSpace>
+    name: dproc
+    to_display_reference: !<RangeTransform> {min_in_value: 0, max_in_value: 1, min_out_value: 0, max_out_value: 2}
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+    isdata: true
+  - !<ColorSpace>
+    name: in
+    to_scene_reference: !<MatrixTransform> {offset: [0.1, 0.2, 0.3, 0]}
+  - !<ColorSpace>
+    name: out
+    from_scene_reference: !<LogTransform> {base: 10}
+  - !<ColorSpace>
+    name: log
+    from_scene_reference: !<LogTransform> {base: 2}
+named_transforms:
+  - !<NamedTransform>
+    name: nt
+    transform: !<MatrixTransform> {offset: [0.5, 0, 0, 0]}
+";
+
+/// The processors of display view transforms: every view of the config from a scene-referred,
+/// a data and a missing source, with and without the looks and data bypasses, both directions;
+/// a missing display and view.
+#[test]
+fn display_view_transform_processors_match_the_wheel() {
+    let config = ocio::Config::create_from_stream(DISPLAY_VIEW_CONFIG.as_bytes()).unwrap();
+    let views = [
+        ("d", "cs"),
+        ("d", "cs_looks"),
+        ("d", "vt"),
+        ("d", "vt_looks"),
+        ("d", "vt_display"),
+        ("d", "vt_display_looks"),
+        ("d", "nt_cs"),
+        ("d", "nt_vt"),
+        ("d", "data"),
+        ("d", "empty_looks"),
+        ("d", "shared"),
+        ("dout", "shared"),
+        ("missing", "cs"),
+        ("d", "missing"),
+    ];
+    let mut cases = Vec::new();
+    for (k, (display, view)) in views.iter().enumerate() {
+        for src in ["in", "raw", "missing"] {
+            for (j, (looks_bypass, data_bypass)) in [(false, true), (true, true), (false, false)]
+                .into_iter()
+                .enumerate()
+            {
+                let dir = if (k + j) % 2 == 0 { Forward } else { Inverse };
+                cases.push(display_view_case(
+                    [src, display, view],
+                    looks_bypass,
+                    data_bypass,
+                    dir,
+                ));
+            }
+        }
+    }
+    check_processors_in(&cases, Some(&json!({"yaml": DISPLAY_VIEW_CONFIG})), &config);
+}

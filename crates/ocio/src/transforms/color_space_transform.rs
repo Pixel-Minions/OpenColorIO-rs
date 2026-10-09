@@ -264,8 +264,8 @@ pub(crate) fn build_color_space_ops(
         ops,
         config,
         context,
-        src.expect("found above"),
-        dst.expect("found above"),
+        src,
+        dst,
         color_space_transform.data_bypass(),
     )
 }
@@ -296,15 +296,27 @@ fn are_color_spaces_in_same_equality_group(csa: &ColorSpace, csb: &ColorSpace) -
 ///
 /// Port of `BuildColorSpaceOps(OpRcPtrVec &, const Config &, const ConstContextRcPtr &, const
 /// ConstColorSpaceRcPtr &, const ConstColorSpaceRcPtr &, bool)` (src/OpenColorIO/transforms/
-/// ColorSpaceTransform.cpp:239-276 @ v2.5.2). Its errors for null color spaces can't happen.
+/// ColorSpaceTransform.cpp:239-276 @ v2.5.2): `None` is upstream's null color space, which a
+/// display view transform's inverse can pass.
 pub(crate) fn build_color_space_ops_between(
     ops: &mut OpVec,
     config: &Config,
     context: &Context,
-    src_color_space: &ColorSpace,
-    dst_color_space: &ColorSpace,
+    src_color_space: Option<&ColorSpace>,
+    dst_color_space: Option<&ColorSpace>,
     data_bypass: bool,
 ) -> Result<()> {
+    let Some(src_color_space) = src_color_space else {
+        return Err(Exception::new(
+            "BuildColorSpaceOps failed, null srcColorSpace.",
+        ));
+    };
+    let Some(dst_color_space) = dst_color_space else {
+        return Err(Exception::new(
+            "BuildColorSpaceOps failed, null dstColorSpace.",
+        ));
+    };
+
     if are_color_spaces_in_same_equality_group(src_color_space, dst_color_space) {
         return Ok(());
     }
@@ -318,7 +330,7 @@ pub(crate) fn build_color_space_ops_between(
     // ever encountered in transit, we'd want to short circuit the result.
 
     // Go from the srcColorSpace to the reference space.
-    build_color_space_to_reference_ops(ops, config, context, src_color_space, data_bypass)?;
+    build_color_space_to_reference_ops(ops, config, context, Some(src_color_space), data_bypass)?;
 
     // There are two possible reference spaces, the main (scene-referred) one and the
     // display-referred one.  If the src and dst use different reference spaces, use the
@@ -332,7 +344,7 @@ pub(crate) fn build_color_space_ops_between(
     )?;
 
     // Go from the reference space to dstColorSpace.
-    build_color_space_from_reference_ops(ops, config, context, dst_color_space, data_bypass)
+    build_color_space_from_reference_ops(ops, config, context, Some(dst_color_space), data_bypass)
 }
 
 /// The allocation of `color_space`, for its GPU allocation no-op.
@@ -348,14 +360,20 @@ fn allocation_of(color_space: &ColorSpace) -> AllocationData {
 /// with `data_bypass` for a data color space.
 ///
 /// Port of `BuildColorSpaceToReferenceOps` (src/OpenColorIO/transforms/
-/// ColorSpaceTransform.cpp:278-311 @ v2.5.2). Its error for a null color space can't happen.
+/// ColorSpaceTransform.cpp:278-311 @ v2.5.2); `None` is upstream's null color space.
 pub(crate) fn build_color_space_to_reference_ops(
     ops: &mut OpVec,
     config: &Config,
     context: &Context,
-    src_color_space: &ColorSpace,
+    src_color_space: Option<&ColorSpace>,
     data_bypass: bool,
 ) -> Result<()> {
+    let Some(src_color_space) = src_color_space else {
+        return Err(Exception::new(
+            "BuildColorSpaceOps failed, null colorSpace.",
+        ));
+    };
+
     if data_bypass && src_color_space.is_data() {
         return Ok(());
     }
@@ -379,14 +397,20 @@ pub(crate) fn build_color_space_to_reference_ops(
 /// None with `data_bypass` for a data color space.
 ///
 /// Port of `BuildColorSpaceFromReferenceOps` (src/OpenColorIO/transforms/
-/// ColorSpaceTransform.cpp:313-345 @ v2.5.2). Its error for a null color space can't happen.
+/// ColorSpaceTransform.cpp:313-345 @ v2.5.2); `None` is upstream's null color space.
 pub(crate) fn build_color_space_from_reference_ops(
     ops: &mut OpVec,
     config: &Config,
     context: &Context,
-    dst_color_space: &ColorSpace,
+    dst_color_space: Option<&ColorSpace>,
     data_bypass: bool,
 ) -> Result<()> {
+    let Some(dst_color_space) = dst_color_space else {
+        return Err(Exception::new(
+            "BuildColorSpaceOps failed, null colorSpace.",
+        ));
+    };
+
     if data_bypass && dst_color_space.is_data() {
         return Ok(());
     }

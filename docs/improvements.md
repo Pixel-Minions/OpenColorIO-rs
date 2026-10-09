@@ -2590,6 +2590,24 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   instead of crashing, and with Strcasecmp's message where the wheel raises it.
 - **Status:** matched in `p3-rules` (3.9g); the Python part is Phase 6's.
 
+### U-57. An inverse view transform after looks of empty names only
+
+- **Upstream:** inverse, `BuildDisplayOps` finds the color space the view transform starts from
+  as the result of the view's looks (`LooksResultColorSpace`,
+  `transforms/DisplayViewTransform.cpp:470-476`). When the looks are only empty names (a view
+  with `looks: ", "`), no look runs and the result is `""`, which no color space has: the
+  source color space is null, and `BuildDisplayToSource` reads its reference space type through
+  it (`DisplayViewTransform.cpp:246-249`). Through the wheel,
+  `getProcessor(DisplayViewTransform(src, display, view, direction=TRANSFORM_DIR_INVERSE))`
+  ends the Python process (a segmentation fault). Without a view transform the same null color
+  space gives the defined "BuildColorSpaceOps failed, null dstColorSpace.", which the port
+  matches.
+- **Who notices:** a config with such a view, inverted.
+- **Decided** (general rule): return an error instead: "DisplayViewTransform error. The looks
+  leave no color space to apply the view transform from."
+- **Status:** done in `p3-builders` (3.2c, `crates/ocio/src/transforms/
+  display_view_transform.rs`, `source_reference_space`).
+
 ### U-60. GroupTransforms nested deep enough to overflow the wheel's stack
 
 - **Upstream:** a GroupTransform loads each child through `load(const YAML::Node&,

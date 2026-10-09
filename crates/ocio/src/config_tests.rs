@@ -5768,3 +5768,122 @@ fn a_proxy_reads_as_a_stream() {
         stream.inactive_color_spaces()
     );
 }
+
+/// Port of `OCIO_ADD_TEST(Config, create_raw_config)` @ v2.5.2.
+#[test]
+fn create_raw_config() {
+    let _env = EnvGuard::new();
+    let config = Config::create_raw().unwrap();
+    config.validate().unwrap();
+    assert_eq!(config.num_color_spaces(), 1);
+    assert_eq!(config.color_space_name_by_index(0), b"raw");
+
+    let proc = config.processor_between("raw", "raw").unwrap();
+    proc.default_cpu_processor().unwrap();
+
+    check_throw_what(
+        config.processor_between("not_found", "raw"),
+        "Color space 'not_found' could not be found",
+    );
+    check_throw_what(
+        config.processor_between("raw", "not_found"),
+        "Color space 'not_found' could not be found",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(Config, look_is_noop)` @ v2.5.2.
+#[test]
+fn look_is_noop() {
+    use ocio_ops::open_color_types::OptimizationFlags;
+
+    let _env = EnvGuard::new();
+    // Test that the processor creation from a color space to a (dislay, view) pair succeeds
+    // even if the look transformation is a 'no-op'.
+
+    {
+        const CONFIG: &str = r#"ocio_profile_version: 1
+roles:
+  scene_linear: cs
+
+displays:
+  disp1:
+    - !<View>
+      name: view1
+      colorspace: cs
+      looks: cdl
+
+looks:
+  - !<Look>
+    name: cdl
+    process_space: cs
+    transform: !<CDLTransform> {}
+
+colorspaces:
+  - !<ColorSpace>
+    name: cs
+"#;
+
+        let config = Config::create_from_stream(CONFIG.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        let proc = config
+            .processor_for_display_view("cs", "disp1", "view1", TransformDirection::Forward)
+            .unwrap();
+        assert!(proc.is_no_op().unwrap());
+
+        let proc = config
+            .processor_for_display_view("cs", "disp1", "view1", TransformDirection::Inverse)
+            .unwrap();
+        assert!(proc.is_no_op().unwrap());
+    }
+
+    {
+        const CONFIG: &str = r#"ocio_profile_version: 1
+roles:
+  scene_linear: cs
+
+displays:
+  disp1:
+    - !<View>
+      name: view1
+      colorspace: cs
+      looks: cdl
+
+looks:
+  - !<Look>
+    name: cdl
+    process_space: cs1
+    transform: !<CDLTransform> {}
+
+colorspaces:
+  - !<ColorSpace>
+    name: cs
+  - !<ColorSpace>
+    name: cs1
+    from_reference: !<CDLTransform> {offset: [0.3, 0.3, 0.3]}
+"#;
+
+        let config = Config::create_from_stream(CONFIG.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        let proc = config
+            .processor_for_display_view("cs", "disp1", "view1", TransformDirection::Forward)
+            .unwrap();
+        // Because the look process space is not a no-op.
+        assert!(!proc.is_no_op().unwrap());
+        let proc = proc
+            .optimized_processor(OptimizationFlags::DEFAULT)
+            .unwrap();
+        // Because the look process space forward and inverse ops are then optimized.
+        assert!(proc.is_no_op().unwrap());
+
+        let proc = config
+            .processor_for_display_view("cs", "disp1", "view1", TransformDirection::Inverse)
+            .unwrap();
+        assert!(!proc.is_no_op().unwrap());
+        let proc = proc
+            .optimized_processor(OptimizationFlags::DEFAULT)
+            .unwrap();
+        assert!(proc.is_no_op().unwrap());
+    }
+}

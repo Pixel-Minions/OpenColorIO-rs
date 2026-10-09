@@ -57,6 +57,7 @@ use crate::path_utils::{get_fast_file_hash, parse_color_space_from_string};
 use crate::processor::{Processor, ProcessorCacheFlags};
 use crate::transform::Transform;
 use crate::transforms::color_space_transform::ColorSpaceTransform;
+use crate::transforms::display_view_transform::DisplayViewTransform;
 use crate::view_transform::ViewTransform;
 use crate::viewing_rules::{ViewingRules, find_rule};
 use crate::yaml_cpp::stream::IStream;
@@ -5785,7 +5786,7 @@ impl Config {
     /// The processor from `src_name` to `dst_name` (each a color space, a role, an alias or a
     /// named transform, by name: a color space transform's), forward, in the current context.
     ///
-    /// Port of `Config::getProcessor(const char *, const char *)` (Config.cpp:4704-4708 @
+    /// Port of `Config::getProcessor(const char *, const char *)` (Config.cpp:4706-4710 @
     /// v2.5.2).
     #[doc(alias = "getProcessor")]
     pub fn processor_between(
@@ -5801,7 +5802,7 @@ impl Config {
     /// `context`.
     ///
     /// Port of `Config::getProcessor(const ConstContextRcPtr &, const char *, const char *)`
-    /// (Config.cpp:4710-4719 @ v2.5.2).
+    /// (Config.cpp:4712-4721 @ v2.5.2).
     #[doc(alias = "getProcessor")]
     pub fn processor_between_with_context(
         &self,
@@ -5817,6 +5818,53 @@ impl Config {
             &Transform::from(cs_transform),
             TransformDirection::Forward,
         )
+    }
+
+    /// The processor from the color space `src_color_space_name` to the view `view` of the
+    /// display `display` (a display view transform's), in the direction `direction`, in the
+    /// current context.
+    ///
+    /// Port of `Config::getProcessor(const char *, const char *, const char *,
+    /// TransformDirection)` (Config.cpp:4724-4731 @ v2.5.2).
+    #[doc(alias = "getProcessor")]
+    pub fn processor_for_display_view(
+        &self,
+        src_color_space_name: impl AsRef<[u8]>,
+        display: impl AsRef<[u8]>,
+        view: impl AsRef<[u8]>,
+        direction: TransformDirection,
+    ) -> Result<Arc<Processor>> {
+        let context = self.shared_context.get();
+        self.processor_for_display_view_with_context(
+            &context,
+            src_color_space_name,
+            display,
+            view,
+            direction,
+        )
+    }
+
+    /// The processor from a color space to a (display, view) pair (see
+    /// [`Config::processor_for_display_view`]) in `context`: the display view transform is
+    /// validated first.
+    ///
+    /// Port of `Config::getProcessor(const ConstContextRcPtr &, const char *, const char *, const
+    /// char *, TransformDirection)` (Config.cpp:4733-4745 @ v2.5.2).
+    #[doc(alias = "getProcessor")]
+    pub fn processor_for_display_view_with_context(
+        &self,
+        context: &Context,
+        src_color_space_name: impl AsRef<[u8]>,
+        display: impl AsRef<[u8]>,
+        view: impl AsRef<[u8]>,
+        direction: TransformDirection,
+    ) -> Result<Arc<Processor>> {
+        let mut dt = DisplayViewTransform::new();
+        dt.set_src(src_color_space_name);
+        dt.set_display(display);
+        dt.set_view(view);
+        dt.validate()?;
+        self.processor_with_context(context, &Transform::from(dt), direction)
     }
 
     /// The processor of `transform`, forward, in the current context.

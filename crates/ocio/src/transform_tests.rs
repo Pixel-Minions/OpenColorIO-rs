@@ -261,14 +261,7 @@ fn processor_error(config: &Config, transform: &Transform, dir: TransformDirecti
 #[test]
 fn processors_of_the_classes_without_builders_are_refused() {
     let config = Config::create_raw().unwrap();
-    let cases = [
-        (
-            TransformType::DisplayView,
-            "DisplayViewTransform",
-            "WP 3.2c",
-        ),
-        (TransformType::File, "FileTransform", "WP 4.1"),
-    ];
+    let cases = [(TransformType::File, "FileTransform", "WP 4.1")];
     let arms = arms();
     for (class, name, work_package) in cases {
         let arm = arms.iter().find(|arm| arm.class == class).unwrap();

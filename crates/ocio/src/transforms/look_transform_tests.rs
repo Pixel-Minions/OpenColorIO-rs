@@ -436,8 +436,8 @@ colorspaces:
         &mut ops,
         &config,
         &context,
-        src_color_space,
-        dst_color_space,
+        Some(src_color_space),
+        Some(dst_color_space),
         true,
     )
     .unwrap();
@@ -461,8 +461,8 @@ colorspaces:
         &mut ops,
         &config,
         &context,
-        dst_color_space,
-        src_color_space,
+        Some(dst_color_space),
+        Some(src_color_space),
         true,
     )
     .unwrap();
@@ -490,8 +490,8 @@ colorspaces:
         &mut ops2,
         &config,
         &context,
-        dst_color_space_inv,
-        src_color_space,
+        Some(dst_color_space_inv),
+        Some(src_color_space),
         true,
     )
     .unwrap();
