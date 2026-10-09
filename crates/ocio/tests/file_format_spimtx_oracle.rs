@@ -127,6 +127,17 @@ fn spimtx_files_read_as_in_the_wheel() {
         Interpolation::Default,
         TransformDirection::Forward,
     ));
+    // A spimtx file under another format's extension: that format fails, and the loader tries
+    // every other format in registration order, spimtx among them.
+    for name in ["matrix.spi1d", "matrix.lut", "matrix"] {
+        let dir = write_files(&[file(name, numbers(" "))]);
+        cases.push(file_case(
+            format!("a spimtx file named {name}"),
+            &format!("{dir}/{name}"),
+            Interpolation::Default,
+            TransformDirection::Forward,
+        ));
+    }
 
     check_file_processors(&cases);
 }

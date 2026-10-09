@@ -443,6 +443,20 @@ impl FormatRegistry {
             .unwrap_or_default()
     }
 
+    /// The indices (as [`raw_format_by_index`](Self::raw_format_by_index) takes them) of the
+    /// formats of an extension (ignoring case), in registration order. Upstream tells the
+    /// formats apart by their addresses; formats without data (zero-sized) share one, so the
+    /// port tells them apart by index.
+    ///
+    /// Port of `FormatRegistry::getFileFormatForExtension` (FileTransform.cpp:367-375 @
+    /// v2.5.2).
+    pub fn file_format_indices_for_extension(&self, extension: impl AsRef<[u8]>) -> Vec<i32> {
+        self.formats_by_extension
+            .get(&lower(extension.as_ref()))
+            .map(|v| v.iter().map(|&i| i as i32).collect())
+            .unwrap_or_default()
+    }
+
     /// Port of `FormatRegistry::registerFileFormat` (FileTransform.cpp:377-433 @ v2.5.2).
     fn register_file_format(&mut self, format: Box<dyn FileFormat>) -> Result<()> {
         let infos = format.format_info();
