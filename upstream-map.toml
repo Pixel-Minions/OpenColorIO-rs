@@ -936,8 +936,9 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatPandora.cpp"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/file_format_pandora.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_pandora.rs"]
+status = "done"
+note = "p4-readers 4.3d: checked against the wheel in crates/ocio/tests/file_format_pandora_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatResolveCube.cpp"
@@ -991,8 +992,9 @@ note = "p4-registry 4.2a2, p4-readers 4.2b: as FileFormatUtils.cpp"
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatVF.cpp"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/file_format_vf.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_vf.rs"]
+status = "done"
+note = "p4-readers 4.3d: checked against the wheel in crates/ocio/tests/file_format_vf_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FormatMetadata.cpp"
@@ -4647,8 +4649,9 @@ status = "todo"
 [[file]]
 path = "tests/cpu/fileformats/FileFormatPandora_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-formats/src/fileformats/file_format_pandora_tests.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_pandora_tests.rs"]
+status = "done"
+note = "p4-readers 4.3d"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatResolveCube_tests.cpp"
@@ -4687,8 +4690,9 @@ note = "p4-readers 4.3c"
 [[file]]
 path = "tests/cpu/fileformats/FileFormatVF_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-formats/src/fileformats/file_format_vf_tests.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_vf_tests.rs"]
+status = "done"
+note = "p4-readers 4.3d"
 
 [[file]]
 path = "tests/cpu/fileformats/FormatMetadata_tests.cpp"

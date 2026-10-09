@@ -346,10 +346,7 @@ fn create_formats() -> Vec<Box<dyn FileFormat>> {
             B::NONE,
         )]),
         // FileFormatPandora.cpp:82-95.
-        stub(vec![
-            FormatInfo::new("pandora_mga", "mga", C::READ, B::NONE),
-            FormatInfo::new("pandora_m3d", "m3d", C::READ, B::NONE),
-        ]),
+        Box::new(crate::fileformats::file_format_pandora::LocalFileFormat),
         // FileFormatResolveCube.cpp:247-257.
         Box::new(crate::fileformats::file_format_resolve_cube::LocalFileFormat),
         // FileFormatSpi1D.cpp:82-90.
@@ -361,7 +358,7 @@ fn create_formats() -> Vec<Box<dyn FileFormat>> {
         // FileFormatTruelight.cpp:79-87.
         Box::new(crate::fileformats::file_format_truelight::LocalFileFormat),
         // FileFormatVF.cpp:83-90.
-        stub(vec![FormatInfo::new("nukevf", "vf", C::READ, B::NONE)]),
+        Box::new(crate::fileformats::file_format_vf::LocalFileFormat),
     ]
 }
 
