@@ -32,19 +32,20 @@
 //! declaration and ignore sections belong to external entities, and are not reached either.
 //!
 //! **The allocation tracker** (`MALLOC_TRACKER`, new in 2.7.2) fails an allocation with
-//! `XML_ERROR_NO_MEMORY` once expat's own heap use passes 64 MiB at more than 100 times the
-//! document's direct bytes. Its rule, limits and setters are ported; what it counts is the
-//! port's own structures, charged where expat allocates (the parser, the DTD's entries,
-//! names, entity texts and default attributes, the tag stack, the attribute arrays and
-//! values, the open entities, the group connectors), so the document where the limit starts
-//! differs from the wheel's (owner decision 2026-10-08, `docs/improvements.md` I-171).
+//! `XML_ERROR_NO_MEMORY` once expat's own heap use reaches 64 MiB at more than 100 times the
+//! document's direct bytes. The port counts what expat would allocate, block for block
+//! ([`super::heap`]): its pools' blocks, its hash tables, its tags' buffers, its attribute
+//! array, its open entities, its default attributes and its group connector, with the sizes
+//! the wheels' compilers give expat's structures; so it refuses the same documents, at the
+//! same allocation (checked against both wheels by `crates/ocio/tests/xml_memory_oracle.rs`).
 //!
 //! **Memory.** Upstream keeps strings in pools and positions as pointers; the port owns its
 //! strings and keeps positions as indices into the text being parsed (the parse buffer, or an
-//! entity's replacement text). A tag's raw name is copied when the tag opens, so
-//! `storeRawNames` has nothing left to do. Hash tables are maps: expat's salted hashes order
-//! nothing visible. The port's allocations don't fail, so the `XML_ERROR_NO_MEMORY` returns
-//! of failed allocations are not ported; the ones of size checks are.
+//! entity's replacement text), and keeps the sizes of expat's pools and tables beside them
+//! for the tracker. A tag's raw name is copied when the tag opens, so `storeRawNames` only
+//! counts its allocations. Hash tables are maps: expat's salted hashes order nothing visible.
+//! An allocation fails only where the tracker refuses it (the port's own allocations don't
+//! fail); the `XML_ERROR_NO_MEMORY` returns of size checks are ported too.
 //!
 //! **Handlers and errors.** A handler returns `Result<(), E>`. OCIO's handlers throw C++
 //! exceptions, which unwind through expat and end the parse; a handler's `Err` likewise ends
@@ -55,6 +56,12 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
+#[cfg(test)]
+use super::heap::Block;
+use super::heap::{
+    EntityList, Heap, MallocTracker, PoolId, SIZEOF_ATTRIBUTE_ID, SIZEOF_ELEMENT_TYPE,
+    SIZEOF_ENTITY, SIZEOF_PREFIX,
+};
 use super::xmlrole::*;
 use super::xmltok::{
     Attribute, ConvertResult, Encoding, InitEncoding, Position, XML_PROLOG_STATE,
@@ -326,6 +333,9 @@ struct Dtd {
     elements: Vec<ElementType>,
     attribute_ids: HashMap<Vec<u8>, usize>,
     att_ids: Vec<AttributeId>,
+    /// The names of `prefixes` (only element types declared with a colon in their name make
+    /// one without namespace processing).
+    prefixes: std::collections::HashSet<Vec<u8>>,
     /// `keepProcessing`: false once a parameter entity reference has been skipped.
     keep_processing: bool,
     /// `hasParamEntityRefs`: true once a parameter entity reference has been encountered,
@@ -346,6 +356,7 @@ impl Dtd {
             elements: Vec::new(),
             attribute_ids: HashMap::new(),
             att_ids: Vec::new(),
+            prefixes: std::collections::HashSet::new(),
             keep_processing: true,
             has_param_entity_refs: false,
             standalone: false,
@@ -430,27 +441,6 @@ const ALLOC_TRACKER_MAXIMUM_AMPLIFICATION_DEFAULT: f32 = 100.0f32;
 /// `EXPAT_ALLOC_TRACKER_ACTIVATION_THRESHOLD_DEFAULT` (internal.h:153-154): 64 MiB.
 const ALLOC_TRACKER_ACTIVATION_THRESHOLD_DEFAULT: u64 = 67108864;
 
-/// The allocation tracker.
-///
-/// Port of `MALLOC_TRACKER` (xmlparse.c:455-461), without the debug fields.
-#[derive(Debug, Clone, Copy)]
-struct MallocTracker {
-    /// `bytesAllocated`.
-    bytes_allocated: u64,
-    /// `maximumAmplificationFactor`.
-    maximum_amplification_factor: f32,
-    /// `activationThresholdBytes`.
-    activation_threshold_bytes: u64,
-}
-
-/// A block `expat_malloc` counted: the size it recorded in the `size_t` before the block.
-#[derive(Debug)]
-struct Block {
-    size: usize,
-}
-
-/// `INIT_TAG_BUF_SIZE` (xmlparse.c:262).
-const INIT_TAG_BUF_SIZE: usize = 32;
 /// `INIT_DATA_BUF_SIZE` (xmlparse.c:263): the buffer character data is converted into.
 const INIT_DATA_BUF_SIZE: usize = 1024;
 /// `INIT_ATTS_SIZE` (xmlparse.c:264).
@@ -600,18 +590,8 @@ pub struct Parser<'a, E> {
     /// `g_bytesScanned` (a global of expat's test builds, `XML_TESTING`): the bytes the
     /// processor was run on. Only the tests read it.
     bytes_scanned: u32,
-    /// `m_alloc_tracker`.
-    alloc_tracker: MallocTracker,
-    /// The DTD's bytes, as one counted block a reset frees.
-    dtd_block: Option<Block>,
-    /// `m_atts`'s block, and `m_groupConnector`'s once allocated.
-    atts_block: Option<Block>,
-    group_block: Option<Block>,
-    /// The most tags, open entities and attribute value bytes so far: expat keeps their
-    /// memory (free lists, the pool's blocks) for reuse, so only growth past them is charged.
-    tags_high_water: usize,
-    open_entities_high_water: usize,
-    temp_pool_high_water: usize,
+    /// What expat allocates, for its allocation tracker (`m_alloc_tracker`).
+    heap: Heap,
 }
 
 impl<'a, E> Parser<'a, E> {
@@ -626,7 +606,7 @@ impl<'a, E> Parser<'a, E> {
     /// A parser made while `g_reparseDeferralEnabledDefault` is `deferral`: the switch
     /// expat's own tests use.
     pub fn with_deferral_default(deferral: bool) -> Parser<'a, E> {
-        let mut parser = Parser {
+        Parser {
             start_element_handler: None,
             end_element_handler: None,
             character_data_handler: None,
@@ -674,27 +654,13 @@ impl<'a, E> Parser<'a, E> {
             },
             reenter: false,
             bytes_scanned: 0,
-            alloc_tracker: MallocTracker {
+            heap: Heap::new(MallocTracker {
                 bytes_allocated: 0,
                 maximum_amplification_factor: ALLOC_TRACKER_MAXIMUM_AMPLIFICATION_DEFAULT,
                 activation_threshold_bytes: ALLOC_TRACKER_ACTIVATION_THRESHOLD_DEFAULT,
-            },
-            dtd_block: None,
-            atts_block: None,
-            group_block: None,
-            tags_high_water: 0,
-            open_entities_high_water: 0,
-            temp_pool_high_water: 0,
-        };
-        // Record XML_ParserStruct allocation we did a few lines up before (parserCreate,
-        // xmlparse.c:1410-1414), then m_atts, m_dataBuf and the DTD (1436-1466).
-        parser.alloc_tracker.bytes_allocated =
-            (size_of::<usize>() + size_of::<Parser<'a, E>>()) as u64;
-        // With nothing parsed, the activation threshold can't be reached.
-        let _ = parser.expat_malloc(INIT_DATA_BUF_SIZE);
-        parser.atts_block = parser.expat_malloc(INIT_ATTS_SIZE * size_of::<Attribute>());
-        let _ = parser.expat_malloc(size_of::<Dtd>());
-        parser
+                count_bytes_direct: 0,
+            }),
+        }
     }
 
     /// Clears the parser's state and handlers for a new document, keeping its buffer.
@@ -711,16 +677,10 @@ impl<'a, E> Parser<'a, E> {
         fresh.id_att_index = self.id_att_index;
         fresh.final_buffer = self.final_buffer;
         fresh.bytes_scanned = self.bytes_scanned;
-        // parserInit leaves m_alloc_tracker alone; dtdReset frees the DTD.
-        if let Some(block) = self.dtd_block.take() {
-            self.expat_free(block);
-        }
-        fresh.alloc_tracker = self.alloc_tracker;
-        fresh.atts_block = self.atts_block.take();
-        fresh.group_block = self.group_block.take();
-        fresh.tags_high_water = self.tags_high_water;
-        fresh.open_entities_high_water = self.open_entities_high_water;
-        fresh.temp_pool_high_water = self.temp_pool_high_water;
+        // parserInit leaves m_alloc_tracker alone; the free lists keep their memory, and
+        // dtdReset frees the DTD's entries and default attributes.
+        std::mem::swap(&mut fresh.heap, &mut self.heap);
+        fresh.heap.reset();
         *self = fresh;
     }
 
@@ -765,152 +725,39 @@ impl<'a, E> Parser<'a, E> {
         if factor.is_nan() || factor < 1.0f32 {
             return false;
         }
-        self.alloc_tracker.maximum_amplification_factor = factor;
+        self.heap.tracker.maximum_amplification_factor = factor;
         true
     }
 
     /// Port of `XML_SetAllocTrackerActivationThreshold` (xmlparse.c:3086-3094) for a parser
     /// without parent.
     pub fn set_alloc_tracker_activation_threshold(&mut self, bytes: u64) -> bool {
-        self.alloc_tracker.activation_threshold_bytes = bytes;
+        self.heap.tracker.activation_threshold_bytes = bytes;
         true
     }
 
-    /// Whether the tracker allows `increase` more bytes.
-    ///
-    /// Port of `expat_heap_increase_tolerable` (xmlparse.c:812-844), without the report.
-    fn expat_heap_increase_tolerable(&self, increase: u64) -> bool {
-        // Detect integer overflow
-        if u64::MAX - self.alloc_tracker.bytes_allocated < increase {
-            return false;
-        }
-        let new_total = self.alloc_tracker.bytes_allocated + increase;
-        if new_total >= self.alloc_tracker.activation_threshold_bytes {
-            // NOTE: This can be +infinity when dividing by zero but not -nan
-            let amplification = new_total as f32 / self.accounting.count_bytes_direct as f32;
-            if amplification > self.alloc_tracker.maximum_amplification_factor {
-                return false;
-            }
-        }
-        true
-    }
-
-    /// Counts a block of `size` bytes, or refuses it (`NULL`, out of memory).
-    ///
-    /// Port of `expat_malloc` (xmlparse.c:846-898): the tracker's accounting, without the
-    /// allocation itself, which the port's structures make.
+    /// `expat_malloc(parser, size)` (xmlparse.c:846-898): the tracker's accounting.
+    #[cfg(test)]
     fn expat_malloc(&mut self, size: usize) -> Option<Block> {
-        // Detect integer overflow
-        if usize::MAX - size < size_of::<usize>() {
-            return None;
-        }
-        let bytes_to_allocate = (size_of::<usize>() + size) as u64;
-        if u64::MAX - self.alloc_tracker.bytes_allocated < bytes_to_allocate {
-            return None; // i.e. signal integer overflow as out-of-memory
-        }
-        if !self.expat_heap_increase_tolerable(bytes_to_allocate) {
-            return None; // i.e. signal violation as out-of-memory
-        }
-        // Update accounting
-        self.alloc_tracker.bytes_allocated += bytes_to_allocate;
-        Some(Block { size })
+        self.heap.tracker.malloc(size).ok()
     }
 
-    /// Port of `expat_free` (xmlparse.c:900-933): the tracker's accounting.
+    /// `expat_free(parser, ptr)` (xmlparse.c:900-933): the tracker's accounting.
+    #[cfg(test)]
     fn expat_free(&mut self, block: Block) {
-        self.alloc_tracker.bytes_allocated -= (size_of::<usize>() + block.size) as u64;
+        self.heap.tracker.free(block);
     }
 
-    /// Resizes a counted block to `size` bytes; `false`, the block unchanged, when the tracker
-    /// refuses the increase.
-    ///
-    /// Port of `expat_realloc` (xmlparse.c:935-1005) for a block (`ptr` not null) and a size
-    /// not 0: the tracker's accounting.
+    /// `expat_realloc(parser, ptr, size)` (xmlparse.c:935-1005) of a block: the tracker's
+    /// accounting; `false`, the block unchanged, when refused.
+    #[cfg(test)]
     fn expat_realloc(&mut self, block: &mut Block, size: usize) -> bool {
-        let prev_size = block.size;
-        // Classify upcoming change
-        let is_increase = size > prev_size;
-        let abs_diff = size.abs_diff(prev_size) as u64;
-        // Ask for permission from accounting
-        if is_increase && !self.expat_heap_increase_tolerable(abs_diff) {
-            return false; // i.e. signal violation as out-of-memory
-        }
-        if is_increase {
-            self.alloc_tracker.bytes_allocated += abs_diff;
-        } else {
-            self.alloc_tracker.bytes_allocated -= abs_diff;
-        }
-        // Update in-block recorded size
-        block.size = size;
-        true
-    }
-
-    /// Charges a block of `size` bytes the parser keeps, or `Err(XML_ERROR_NO_MEMORY)` where
-    /// expat's `MALLOC` would return null.
-    fn charge(&mut self, size: usize) -> Result<(), XmlError> {
-        match self.expat_malloc(size) {
-            Some(_) => Ok(()),
-            None => Err(XmlError::NoMemory),
-        }
-    }
-
-    /// [`Parser::charge`] for the DTD, whose bytes a reset frees.
-    fn charge_dtd(&mut self, size: usize) -> Result<(), XmlError> {
-        let block = match self.dtd_block.take() {
-            None => self.expat_malloc(size),
-            Some(mut block) => {
-                let new_size = block.size + size;
-                let grown = self.expat_realloc(&mut block, new_size);
-                self.dtd_block = Some(block);
-                if !grown {
-                    return Err(XmlError::NoMemory);
-                }
-                return Ok(());
-            }
-        };
-        self.dtd_block = Some(block.ok_or(XmlError::NoMemory)?);
-        Ok(())
-    }
-
-    /// Resizes one of the parser's counted blocks (`REALLOC`), or `Err(XML_ERROR_NO_MEMORY)`.
-    fn charge_realloc(
-        &mut self,
-        which: fn(&mut Self) -> &mut Option<Block>,
-        size: usize,
-    ) -> Result<(), XmlError> {
-        let ok = match which(self).take() {
-            None => {
-                let block = self.expat_malloc(size);
-                let ok = block.is_some();
-                *which(self) = block;
-                ok
-            }
-            Some(mut block) => {
-                let ok = self.expat_realloc(&mut block, size);
-                *which(self) = Some(block);
-                ok
-            }
-        };
-        if ok { Ok(()) } else { Err(XmlError::NoMemory) }
-    }
-
-    /// Charges the growth of a structure expat keeps for reuse past its most so far.
-    fn charge_growth(
-        &mut self,
-        high_water: usize,
-        now: usize,
-        unit: usize,
-    ) -> Result<usize, XmlError> {
-        if now > high_water {
-            self.charge((now - high_water) * unit)?;
-            return Ok(now);
-        }
-        Ok(high_water)
+        self.heap.tracker.realloc(block, size).is_ok()
     }
 
     /// `lookup(parser, table, name, sizeof(ENTITY))` on the general or the parameter
-    /// entities (xmlparse.c:7811-7898), the name in the DTD's pool: the entity `name`, made if
-    /// missing (charged: the entry, its name and its table slot); and whether it was made.
+    /// entities (xmlparse.c:7811-7898): the entity `name`, made if missing (the table's
+    /// allocations counted); and whether it was made.
     fn lookup_entity(&mut self, param: bool, name: &[u8]) -> Result<(usize, bool), XmlError> {
         let table = if param {
             &self.dtd.param_entities
@@ -920,17 +767,57 @@ impl<'a, E> Parser<'a, E> {
         if let Some(&id) = table.get(name) {
             return Ok((id, false));
         }
-        self.charge_dtd(size_of::<Entity>() + name.len() + 1 + size_of::<usize>())?;
+        let h = &mut self.heap;
+        if param {
+            h.param_entities.insert(&mut h.tracker, SIZEOF_ENTITY)?;
+        } else {
+            h.general_entities.insert(&mut h.tracker, SIZEOF_ENTITY)?;
+        }
         Ok(self.dtd.lookup_entity(param, name))
     }
 
-    /// The element type `name`, made if missing (charged as [`Parser::lookup_entity`]).
-    fn lookup_element_type(&mut self, name: &[u8]) -> Result<usize, XmlError> {
+    /// `lookup(parser, &dtd->elementTypes, name, sizeof(ELEMENT_TYPE))` (xmlparse.c:7811-7898):
+    /// the element type `name`, made if missing; and whether it was made.
+    fn lookup_element_type(&mut self, name: &[u8]) -> Result<(usize, bool), XmlError> {
         if let Some(&id) = self.dtd.element_types.get(name) {
-            return Ok(id);
+            return Ok((id, false));
         }
-        self.charge_dtd(size_of::<ElementType>() + name.len() + 1 + size_of::<usize>())?;
-        Ok(self.dtd.lookup_element_type(name))
+        let h = &mut self.heap;
+        h.element_types
+            .insert(&mut h.tracker, SIZEOF_ELEMENT_TYPE)?;
+        Ok((self.dtd.lookup_element_type(name), true))
+    }
+
+    /// The element type `name` (UTF-8) a declaration names, made if missing: its name stored
+    /// in the DTD's pool, then the prefix before its first colon, if any.
+    ///
+    /// Port of `getElementType` (xmlparse.c:8397-8418) and `setElementTypePrefix`
+    /// (7201-7228).
+    fn get_element_type(&mut self, name: &[u8]) -> Result<usize, XmlError> {
+        let (pool, t) = self.heap.pool(PoolId::Dtd);
+        pool.store_string(t, name)?;
+        let (id, made) = self.lookup_element_type(name)?;
+        if !made {
+            self.heap.dtd_pool.discard();
+        } else {
+            self.heap.dtd_pool.finish();
+            // setElementTypePrefix
+            if let Some(colon) = name.iter().position(|&c| c == b':') {
+                let (pool, t) = self.heap.pool(PoolId::Dtd);
+                pool.append_string(t, colon)?;
+                pool.append_char(t)?;
+                let prefix = &name[..colon];
+                if self.dtd.prefixes.contains(prefix) {
+                    self.heap.dtd_pool.discard();
+                } else {
+                    let h = &mut self.heap;
+                    h.prefixes.insert(&mut h.tracker, SIZEOF_PREFIX)?;
+                    self.dtd.prefixes.insert(prefix.to_vec());
+                    self.heap.dtd_pool.finish();
+                }
+            }
+        }
+        Ok(id)
     }
 
     /// Port of `XML_GetErrorCode` (xmlparse.c:2729-2734).
@@ -1365,6 +1252,8 @@ impl<'a, E> Parser<'a, E> {
             return false;
         }
         *addition_target += bytes_more;
+        // The allocation tracker reads the direct bytes.
+        self.heap.tracker.count_bytes_direct = self.accounting.count_bytes_direct;
 
         let count_bytes_output = self
             .accounting
@@ -1519,7 +1408,18 @@ impl<'a, E> Parser<'a, E> {
                         self.event_ptr = Some(bad);
                         return Ok(XmlError::Publicid);
                     }
-                    // The public id itself is read only by handlers.
+                    // alreadyChecked: the entity's public id, in the DTD's pool (only handlers
+                    // read it).
+                    if self.dtd.keep_processing && self.decl_entity.is_some() {
+                        let mbpc = enc.min_bytes_per_char;
+                        let public_id = pool_store_string(enc, b, s + mbpc, next - mbpc);
+                        let (pool, t) = self.heap.pool(PoolId::Dtd);
+                        if let Err(result) = pool.store_string(t, &public_id) {
+                            return Ok(result);
+                        }
+                        // normalizePublicId shortens the string in place.
+                        pool.finish();
+                    }
                 }
                 XML_ROLE_DOCTYPE_CLOSE => {
                     // m_doctypeSysid is non-NULL after a system id, even without a doctype
@@ -1535,7 +1435,7 @@ impl<'a, E> Parser<'a, E> {
                 }
                 XML_ROLE_ATTLIST_ELEMENT_NAME => {
                     let name = pool_store_string(enc, b, s, next);
-                    self.decl_element_type = match self.lookup_element_type(&name) {
+                    self.decl_element_type = match self.get_element_type(&name) {
                         Ok(id) => Some(id),
                         Err(result) => return Ok(result),
                     };
@@ -1560,6 +1460,7 @@ impl<'a, E> Parser<'a, E> {
                     {
                         return Ok(result);
                     }
+                    self.heap.temp_pool.clear();
                 }
                 XML_ROLE_DEFAULT_ATTRIBUTE_VALUE | XML_ROLE_FIXED_ATTRIBUTE_VALUE => {
                     if self.dtd.keep_processing {
@@ -1577,14 +1478,13 @@ impl<'a, E> Parser<'a, E> {
                             Ok(value) => value,
                             Err(result) => return Ok(result),
                         };
+                        self.heap.dtd_pool.finish();
                         // ID attributes aren't allowed to have a default
-                        if let Err(result) = self.charge_dtd(att_val.len() + 1).and_then(|()| {
-                            self.define_attribute(
-                                self.decl_attribute_is_cdata,
-                                false,
-                                Some(att_val.into()),
-                            )
-                        }) {
+                        if let Err(result) = self.define_attribute(
+                            self.decl_attribute_is_cdata,
+                            false,
+                            Some(att_val.into()),
+                        ) {
                             return Ok(result);
                         }
                     }
@@ -1595,12 +1495,11 @@ impl<'a, E> Parser<'a, E> {
                         // This will store the given replacement text in the entity.
                         let (result, text) =
                             self.call_store_entity_value(enc, b, s + mbpc, next - mbpc);
-                        // The entity value pool's bytes.
-                        if let Err(result) = self.charge_dtd(text.len()) {
-                            return Ok(result);
-                        }
                         if let Some(id) = self.decl_entity {
                             self.dtd.entities[id].text = Some(text.into());
+                            self.heap.entity_value_pool.finish();
+                        } else {
+                            self.heap.entity_value_pool.discard();
                         }
                         if result != XmlError::None {
                             return Ok(result);
@@ -1618,8 +1517,15 @@ impl<'a, E> Parser<'a, E> {
                             Err(result) => return Ok(result),
                         };
                     }
-                    // Falls through to XML_ROLE_ENTITY_SYSTEM_ID: the system id itself is read
-                    // only by handlers.
+                    // Falls through to XML_ROLE_ENTITY_SYSTEM_ID.
+                    if let Err(result) = self.store_system_id(enc, b, s, next) {
+                        return Ok(result);
+                    }
+                }
+                XML_ROLE_ENTITY_SYSTEM_ID => {
+                    if let Err(result) = self.store_system_id(enc, b, s, next) {
+                        return Ok(result);
+                    }
                 }
                 XML_ROLE_NOTATION_PUBLIC_ID => {
                     // xmlparse.c:5821-5836: the public id is checked; without a notation
@@ -1634,8 +1540,20 @@ impl<'a, E> Parser<'a, E> {
                     if self.dtd.keep_processing
                         && let Some(id) = self.decl_entity
                     {
+                        // The notation's name, in the DTD's pool.
+                        let notation = pool_store_string(enc, b, s, next);
+                        let (pool, t) = self.heap.pool(PoolId::Dtd);
+                        if let Err(result) = pool.store_string(t, &notation) {
+                            return Ok(result);
+                        }
+                        pool.finish();
                         self.dtd.entities[id].has_notation = true;
                     }
+                }
+                XML_ROLE_NOTATION_SYSTEM_ID | XML_ROLE_NOTATION_NO_SYSTEM_ID => {
+                    // Without a notation declaration handler, only the temporary pool's
+                    // clearing (xmlparse.c:5850, 5860).
+                    self.heap.temp_pool.clear();
                 }
                 XML_ROLE_GENERAL_ENTITY_NAME => {
                     if enc.predefined_entity_name(b, s, next) != 0 {
@@ -1647,6 +1565,7 @@ impl<'a, E> Parser<'a, E> {
                             Err(result) => return Ok(result),
                         };
                     } else {
+                        self.heap.dtd_pool.discard();
                         self.decl_entity = None;
                     }
                 }
@@ -1658,6 +1577,7 @@ impl<'a, E> Parser<'a, E> {
                             Err(result) => return Ok(result),
                         };
                     } else {
+                        self.heap.dtd_pool.discard();
                         self.decl_entity = None;
                     }
                 }
@@ -1678,7 +1598,8 @@ impl<'a, E> Parser<'a, E> {
                         } else {
                             self.group_connector.len() * 2
                         };
-                        if let Err(result) = self.charge_realloc(|p| &mut p.group_block, size) {
+                        let h = &mut self.heap;
+                        if let Err(result) = h.tracker.realloc_opt(&mut h.group_connector, size) {
                             return Ok(result);
                         }
                         self.group_connector.resize(size, 0);
@@ -1719,14 +1640,38 @@ impl<'a, E> Parser<'a, E> {
     /// (xmlparse.c:5743-5808): the entity `name` if this declares it first, `None` if it was
     /// declared before.
     fn declare_entity(&mut self, is_param: bool, name: &[u8]) -> Result<Option<usize>, XmlError> {
+        let (pool, t) = self.heap.pool(PoolId::Dtd);
+        pool.store_string(t, name)?;
         let (id, made) = self.lookup_entity(is_param, name)?;
         if !made {
+            self.heap.dtd_pool.discard();
             return Ok(None);
         }
+        self.heap.dtd_pool.finish();
         // if we have a parent parser or are reading an internal parameter entity, then the
         // entity declaration is not considered "internal"
         self.dtd.entities[id].is_internal = self.open_internal_entities.is_empty();
         Ok(Some(id))
+    }
+
+    /// The system id of the entity being declared, in the DTD's pool (only handlers read it).
+    ///
+    /// Port of `XML_ROLE_ENTITY_SYSTEM_ID` in `doProlog` (xmlparse.c:5682-5697).
+    fn store_system_id(
+        &mut self,
+        enc: &Encoding,
+        b: &[u8],
+        s: usize,
+        next: usize,
+    ) -> Result<(), XmlError> {
+        if self.dtd.keep_processing && self.decl_entity.is_some() {
+            let mbpc = enc.min_bytes_per_char;
+            let system_id = pool_store_string(enc, b, s + mbpc, next - mbpc);
+            let (pool, t) = self.heap.pool(PoolId::Dtd);
+            pool.store_string(t, &system_id)?;
+            pool.finish();
+        }
+        Ok(())
     }
 
     /// Port of `processXmlDecl(parser, 0, s, next)` (xmlparse.c:4841-4931) for the document
@@ -1762,6 +1707,15 @@ impl<'a, E> Parser<'a, E> {
                 self.encoding = EncState::Known(new_encoding);
             }
             Some(None) => {
+                // The name is stored in the second temporary pool, which is then cleared.
+                if let Some(at) = decl.encoding_name {
+                    let name = pool_store_string(encoding, b, at, at + encoding.name_length(b, at));
+                    let (pool, t) = self.heap.pool(PoolId::Temp2);
+                    if let Err(result) = pool.store_string(t, &name) {
+                        return result;
+                    }
+                    pool.clear();
+                }
                 // handleUnknownEncoding without a handler (xmlparse.c:4933-4965).
                 self.event_ptr = decl.encoding_name;
                 return XmlError::UnknownEncoding;
@@ -1782,11 +1736,18 @@ impl<'a, E> Parser<'a, E> {
         end: usize,
     ) -> Result<usize, XmlError> {
         let name = pool_store_string(enc, b, start, end);
+        // The byte before the name, then the name.
+        let (pool, t) = self.heap.pool(PoolId::Dtd);
+        pool.append_char(t)?;
+        pool.store_string(t, &name)?;
         if let Some(&id) = self.dtd.attribute_ids.get(&name) {
+            self.heap.dtd_pool.discard();
             return Ok(id);
         }
-        // The entry, its name with the byte before it, and its table slot.
-        self.charge_dtd(size_of::<AttributeId>() + name.len() + 2 + size_of::<usize>())?;
+        let h = &mut self.heap;
+        h.attribute_ids
+            .insert(&mut h.tracker, SIZEOF_ATTRIBUTE_ID)?;
+        self.heap.dtd_pool.finish();
         let id = self.dtd.att_ids.len();
         self.dtd.att_ids.push(AttributeId {
             name: name.as_slice().into(),
@@ -1826,10 +1787,7 @@ impl<'a, E> Parser<'a, E> {
         }
         // defaultAtts: 8 at first, then twice as many.
         let len = element.default_atts.len();
-        if len == 0 || (len >= 8 && len.is_power_of_two()) {
-            let grow = if len == 0 { 8 } else { len };
-            self.charge_dtd(grow * size_of::<DefaultAttribute>())?;
-        }
+        self.heap.grow_default_atts(ty, len)?;
         let element = &mut self.dtd.elements[ty];
         element.default_atts.push(DefaultAttribute {
             id: att_id,
@@ -1872,6 +1830,16 @@ impl<'a, E> Parser<'a, E> {
         let old_in_entity_value = self.prolog_state.in_entity_value;
         self.prolog_state.in_entity_value = true;
         let mbpc = enc.min_bytes_per_char;
+        // never return Null for the value argument in EntityDeclHandler, since this would
+        // indicate an external entity; therefore we have to make sure that
+        // entityValuePool.start is not null
+        if !self.heap.entity_value_pool.has_blocks() {
+            let (pool, t) = self.heap.pool(PoolId::EntityValue);
+            if let Err(result) = pool.grow(t) {
+                self.prolog_state.in_entity_value = old_in_entity_value;
+                return result;
+            }
+        }
         let result = loop {
             // XmlEntityValueTok doesn't always set the last arg
             let mut next = entity_text_ptr;
@@ -1890,11 +1858,20 @@ impl<'a, E> Parser<'a, E> {
                 }
                 XML_TOK_NONE => break XmlError::None,
                 XML_TOK_ENTITY_REF | XML_TOK_DATA_CHARS => {
+                    let before = pool.len();
                     pool_append(enc, b, entity_text_ptr, next, pool);
+                    let (model, t) = self.heap.pool(PoolId::EntityValue);
+                    if let Err(result) = model.append(t, &pool[before..]) {
+                        break result;
+                    }
                 }
                 XML_TOK_TRAILING_CR | XML_TOK_DATA_NEWLINE => {
                     if tok == XML_TOK_TRAILING_CR {
                         next = entity_text_ptr + mbpc;
+                    }
+                    let (model, t) = self.heap.pool(PoolId::EntityValue);
+                    if let Err(result) = model.append_char(t) {
+                        break result;
                     }
                     pool.push(0xA);
                 }
@@ -1906,6 +1883,10 @@ impl<'a, E> Parser<'a, E> {
                     }
                     let mut buf = [0u8; XML_UTF8_ENCODE_MAX];
                     let n = xml_utf8_encode(n, &mut buf);
+                    let (model, t) = self.heap.pool(PoolId::EntityValue);
+                    if let Err(result) = model.append_string(t, n) {
+                        break result;
+                    }
                     pool.extend_from_slice(&buf[..n]);
                 }
                 XML_TOK_PARTIAL => {
@@ -1939,7 +1920,7 @@ impl<'a, E> Parser<'a, E> {
     ) -> HResult<E> {
         let enc = self.known_encoding();
         let have_more = !self.final_buffer;
-        self.do_content(
+        let result = self.do_content(
             Src::Main,
             0,
             enc,
@@ -1949,7 +1930,14 @@ impl<'a, E> Parser<'a, E> {
             end_ptr,
             have_more,
             Account::Direct,
-        )
+        )?;
+        // storeRawNames: the port's tags own their raw names; only the allocations remain.
+        if result == XmlError::None
+            && let Err(result) = self.heap.store_raw_names()
+        {
+            return Ok(result);
+        }
+        Ok(result)
     }
 
     /// Port of `doContent` (xmlparse.c:3295-3778) without namespace processing.
@@ -2043,7 +2031,12 @@ impl<'a, E> Parser<'a, E> {
                         self.report_char_data(&[ch as u8])?;
                     } else {
                         let name = pool_store_string(enc, b, s + mbpc, next - mbpc);
+                        let (pool, t) = self.heap.pool(PoolId::Dtd);
+                        if let Err(result) = pool.store_string(t, &name) {
+                            return Ok(result);
+                        }
                         let entity = self.dtd.general_entities.get(&name).copied();
+                        self.heap.dtd_pool.discard();
                         // First, determine if a check for an existing declaration is needed;
                         // if yes, check that the entity exists, and that it is internal,
                         // otherwise call the skipped entity or default handler.
@@ -2079,19 +2072,15 @@ impl<'a, E> Parser<'a, E> {
                     let raw_name = s + mbpc;
                     let raw_name_length = enc.name_length(b, raw_name);
                     let raw_name_end = raw_name + raw_name_length;
-                    // A TAG and its buffer, beyond those on the free list.
-                    match self.charge_growth(
-                        self.tags_high_water,
-                        self.tag_stack.len() + 1,
-                        size_of::<Tag>() + INIT_TAG_BUF_SIZE,
-                    ) {
-                        Ok(high_water) => self.tags_high_water = high_water,
-                        Err(result) => return Ok(result),
-                    }
-                    self.tag_stack.push(Tag {
+                    // A TAG and its name buffer, then the name converted into it.
+                    let tag = Tag {
                         raw_name: b[raw_name..raw_name_end].to_vec(),
                         name: pool_store_string(enc, b, raw_name, raw_name_end),
-                    });
+                    };
+                    if let Err(result) = self.heap.push_tag(tag.name.len(), raw_name_length) {
+                        return Ok(result);
+                    }
+                    self.tag_stack.push(tag);
                     self.tag_level += 1;
                     let name = self.tag_stack.last().expect("pushed").name.clone();
                     let app_atts =
@@ -2103,6 +2092,7 @@ impl<'a, E> Parser<'a, E> {
                         let atts: Vec<&[u8]> = app_atts.iter().map(|a| &a[..]).collect();
                         handler(&name, &atts)?;
                     }
+                    self.heap.temp_pool.clear();
                 }
                 XML_TOK_EMPTY_ELEMENT_NO_ATTS | XML_TOK_EMPTY_ELEMENT_WITH_ATTS => {
                     let raw_name = s + mbpc;
@@ -2112,12 +2102,18 @@ impl<'a, E> Parser<'a, E> {
                         raw_name,
                         raw_name + enc.name_length(b, raw_name),
                     );
+                    let (pool, t) = self.heap.pool(PoolId::Temp);
+                    if let Err(result) = pool.store_string(t, &name) {
+                        return Ok(result);
+                    }
+                    pool.finish();
                     // token spans whole start tag
                     let app_atts =
                         match self.store_atts(src == Src::Main, enc, b, s, &name, Account::None) {
                             Ok(atts) => atts,
                             Err(result) => return Ok(result),
                         };
+                    self.heap.temp_pool.finish();
                     if let Some(handler) = self.start_element_handler.as_mut() {
                         let atts: Vec<&[u8]> = app_atts.iter().map(|a| &a[..]).collect();
                         handler(&name, &atts)?;
@@ -2132,6 +2128,7 @@ impl<'a, E> Parser<'a, E> {
                             handler(&name)?;
                         }
                     }
+                    self.heap.temp_pool.clear();
                     if self.tag_level == 0 {
                         if self.reenter {
                             self.processor = Processor::Epilog;
@@ -2153,6 +2150,7 @@ impl<'a, E> Parser<'a, E> {
                         return Ok(XmlError::TagMismatch);
                     }
                     let tag = self.tag_stack.pop().expect("tag level above zero");
+                    self.heap.pop_tag();
                     self.tag_level -= 1;
                     if let Some(handler) = self.end_element_handler.as_mut() {
                         handler(&tag.name)?;
@@ -2280,7 +2278,15 @@ impl<'a, E> Parser<'a, E> {
         account: Account,
     ) -> Result<Vec<Rc<[u8]>>, XmlError> {
         // lookup the element type name
-        let element_type = self.lookup_element_type(tag_name)?;
+        let element_type = match self.dtd.element_types.get(tag_name) {
+            Some(&id) => id,
+            None => {
+                // The name copied into the DTD's pool, then the type made.
+                let (pool, t) = self.heap.pool(PoolId::Dtd);
+                pool.copy_string(t, tag_name.len())?;
+                self.lookup_element_type(tag_name)?.0
+            }
+        };
         let n_default_atts = self.dtd.elements[element_type].default_atts.len();
 
         // get the attributes from the tokenizer
@@ -2289,7 +2295,7 @@ impl<'a, E> Parser<'a, E> {
         if n + n_default_atts > self.atts.len() {
             let old_atts_size = self.atts.len();
             let new_size = n + n_default_atts + INIT_ATTS_SIZE;
-            self.charge_realloc(|p| &mut p.atts_block, new_size * size_of::<Attribute>())?;
+            self.heap.realloc_atts(new_size)?;
             self.atts
                 .resize(n + n_default_atts + INIT_ATTS_SIZE, Attribute::default());
             if n > old_atts_size {
@@ -2299,7 +2305,6 @@ impl<'a, E> Parser<'a, E> {
 
         let mut app_atts: Vec<Rc<[u8]>> = Vec::with_capacity(2 * (n + n_default_atts));
         let mut app_ids: Vec<usize> = Vec::with_capacity(n + n_default_atts);
-        let mut temp_pool_used = 0usize;
         for i in 0..n {
             let curr_att = self.atts[i];
             // add the name and value to the attribute list
@@ -2333,7 +2338,7 @@ impl<'a, E> Parser<'a, E> {
                 }
 
                 // normalize the attribute value
-                self.store_attribute_value(
+                let value = self.store_attribute_value(
                     main,
                     enc,
                     is_cdata,
@@ -2342,15 +2347,17 @@ impl<'a, E> Parser<'a, E> {
                     curr_att.value_end,
                     false,
                     account,
-                )?
+                )?;
+                self.heap.temp_pool.finish();
+                value
             } else {
                 // the value did not need normalizing
-                pool_store_string(enc, b, curr_att.value_ptr, curr_att.value_end)
+                let value = pool_store_string(enc, b, curr_att.value_ptr, curr_att.value_end);
+                let (pool, t) = self.heap.pool(PoolId::Temp);
+                pool.store_string(t, &value)?;
+                pool.finish();
+                value
             };
-            // The temporary pool's bytes, kept for the next tags.
-            temp_pool_used += value.len() + 1;
-            self.temp_pool_high_water =
-                self.charge_growth(self.temp_pool_high_water, temp_pool_used, 1)?;
             app_atts.push(value.into());
         }
 
@@ -2466,6 +2473,7 @@ impl<'a, E> Parser<'a, E> {
                     // Remove fully processed openEntity from open entity list.
                     self.dtd.entities[id].open = false;
                     self.open_attribute_entities.pop();
+                    self.heap.close_entity(EntityList::Attribute);
                     result = XmlError::None;
                 }
             }
@@ -2480,9 +2488,17 @@ impl<'a, E> Parser<'a, E> {
         if result != XmlError::None {
             return Err(result);
         }
+        let target = if from_prolog {
+            PoolId::Dtd
+        } else {
+            PoolId::Temp
+        };
         if !is_cdata && pool.last() == Some(&0x20) {
             pool.pop();
+            self.heap.pool(target).0.chop();
         }
+        let (model, t) = self.heap.pool(target);
+        model.append_char(t)?;
         Ok(pool)
     }
 
@@ -2502,6 +2518,13 @@ impl<'a, E> Parser<'a, E> {
         next_ptr: &mut usize,
     ) -> XmlError {
         let mbpc = enc.min_bytes_per_char;
+        // The pool the value is stored in: the DTD's for a default value, else the temporary
+        // one.
+        let target = if from_prolog {
+            PoolId::Dtd
+        } else {
+            PoolId::Temp
+        };
         loop {
             // XmlAttributeValueTok doesn't always set the last arg
             let mut next = ptr;
@@ -2538,15 +2561,30 @@ impl<'a, E> Parser<'a, E> {
                     {
                         let mut buf = [0u8; XML_UTF8_ENCODE_MAX];
                         let n = xml_utf8_encode(n, &mut buf);
+                        let (model, t) = self.heap.pool(target);
+                        if let Err(result) = model.append_string(t, n) {
+                            return result;
+                        }
                         pool.extend_from_slice(&buf[..n]);
                     }
                 }
-                XML_TOK_DATA_CHARS => pool_append(enc, b, ptr, next, pool),
+                XML_TOK_DATA_CHARS => {
+                    let before = pool.len();
+                    pool_append(enc, b, ptr, next, pool);
+                    let (model, t) = self.heap.pool(target);
+                    if let Err(result) = model.append(t, &pool[before..]) {
+                        return result;
+                    }
+                }
                 XML_TOK_TRAILING_CR | XML_TOK_ATTRIBUTE_VALUE_S | XML_TOK_DATA_NEWLINE => {
                     if tok == XML_TOK_TRAILING_CR {
                         next = ptr + mbpc;
                     }
                     if !(!is_cdata && (pool.is_empty() || pool.last() == Some(&0x20))) {
+                        let (model, t) = self.heap.pool(target);
+                        if let Err(result) = model.append_char(t) {
+                            return result;
+                        }
                         pool.push(0x20);
                     }
                 }
@@ -2557,10 +2595,19 @@ impl<'a, E> Parser<'a, E> {
                         // character so there is no amplification and hence recording without
                         // protection.
                         self.accounting_diff_tolerated(tok, 1, Account::EntityExpansion);
+                        let (model, t) = self.heap.pool(target);
+                        if let Err(result) = model.append_char(t) {
+                            return result;
+                        }
                         pool.push(ch as u8);
                     } else {
                         let name = pool_store_string(enc, b, ptr + mbpc, next - mbpc);
+                        let (model, t) = self.heap.pool(PoolId::Temp2);
+                        if let Err(result) = model.store_string(t, &name) {
+                            return result;
+                        }
                         let entity = self.dtd.general_entities.get(&name).copied();
+                        self.heap.temp2_pool.discard();
                         // First, determine if a check for an existing declaration is needed;
                         // if yes, check that the entity exists, and that it is internal.
                         let check_entity_decl = if from_prolog {
@@ -2811,15 +2858,13 @@ impl<'a, E> Parser<'a, E> {
     ///
     /// Port of `processEntity` (xmlparse.c:6328-6387) for general entities.
     fn process_entity(&mut self, id: usize, ty: EntityType) -> XmlError {
-        // An OPEN_INTERNAL_ENTITY, beyond those on the free lists.
-        let open = self.open_internal_entities.len() + self.open_attribute_entities.len();
-        match self.charge_growth(
-            self.open_entities_high_water,
-            open + 1,
-            size_of::<OpenEntity>(),
-        ) {
-            Ok(high_water) => self.open_entities_high_water = high_water,
-            Err(result) => return result,
+        // An OPEN_INTERNAL_ENTITY of the list's free list, or a new one.
+        let list = match ty {
+            EntityType::Internal => EntityList::Internal,
+            EntityType::Attribute => EntityList::Attribute,
+        };
+        if let Err(result) = self.heap.open_entity(list) {
+            return result;
         }
         let open_entity = OpenEntity {
             internal_event_ptr: None,
@@ -2892,6 +2937,8 @@ impl<'a, E> Parser<'a, E> {
         // Remove fully processed openEntity from open entity list.
         self.dtd.entities[id].open = false;
         self.open_internal_entities.pop();
+        // put openEntity back in list of free instances
+        self.heap.close_entity(EntityList::Internal);
 
         if self.open_internal_entities.is_empty() {
             self.processor = Processor::Content;

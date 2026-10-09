@@ -41,6 +41,31 @@ const SOP: &str = "        <Slope>1.1 1.2 1.3</Slope>\n\
                    \x20       <Power>1.25 1.0 0.9</Power>\n";
 const SAT: &str = "        <Saturation>0.8</Saturation>\n";
 
+/// A CC whose root start tag spans 35 lines of `len` bytes (one attribute each) after
+/// `comments` lines of comments of 100 bytes, with an invalid character on its line `bad`.
+///
+/// The readers give expat a line at a time, and expat 2.7.2 parses a partial token again
+/// only once it has twice the bytes of its last try, or once the line's length is more than
+/// the buffer's free space past its `XML_CONTEXT_BYTES` (`callProcessor`, xmlparse.c:
+/// 1252-1273 in expat 2.7.2): the line the error names is the first try past the invalid character.
+fn long_start_tag(comments: usize, len: usize, bad: usize) -> String {
+    let mut doc = format!("<!-- {} -->\n", "c".repeat(92)).repeat(comments);
+    doc.push_str("<ColorCorrection id=\"a\"\n");
+    for i in 0..35 {
+        if i == bad {
+            doc.push_str(" $\n");
+        } else {
+            let name = format!(" a{i}=\"\"\n");
+            let value = "v".repeat(len.saturating_sub(name.len()).max(1));
+            doc.push_str(&format!(" a{i}=\"{value}\"\n"));
+        }
+    }
+    doc.push_str(">\n    <SOPNode>\n");
+    doc.push_str(SOP);
+    doc.push_str("    </SOPNode>\n</ColorCorrection>\n");
+    doc
+}
+
 /// The generated CC files and upstream's.
 fn cc_cases() -> Vec<Case> {
     let valid = cc("a", SOP, SAT);
@@ -317,6 +342,15 @@ fn cc_cases() -> Vec<Case> {
             format!("<!-- {} -->{valid}", "z".repeat(5200)).as_bytes(),
         ),
     ];
+
+    // When expat parses a partial token again (`long_start_tag`): the error's line moves with
+    // either test of the heuristic, the `>` of the second and its XML_CONTEXT_BYTES.
+    for (comments, len, bad) in [(12, 145, 14), (3, 538, 6), (25, 301, 14)] {
+        cases.push(case(
+            &format!("a start tag of 35 lines of {len} bytes, after {comments} comments, invalid on its line {bad}"),
+            long_start_tag(comments, len, bad).as_bytes(),
+        ));
+    }
 
     // Upstream's files.
     for name in [

@@ -2127,31 +2127,31 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p4-xml` (4.4b, `crates/ocio-formats/src/expat/xmlparse.rs`,
   `do_content`).
 
-### I-171. The XML parser's memory limit counts the port's structures, not expat's
+### I-171. The XML parser's memory limit is 40 bytes apart on Windows and Linux
 
 - **Upstream:** expat 2.7.2's allocation tracker fails an allocation, and with it the parse
-  (`XML_ERROR_NO_MEMORY`, "out of memory"), once the heap expat allocated through its
-  `MALLOC` passes 64 MiB and more than 100 times the document's direct bytes
-  (`expat_heap_increase_tolerable`, `expat_malloc`, `expat_realloc`,
-  `expat/lib/xmlparse.c:812-1005` @ R_2_7_2; the defaults in `internal.h:152-154`). The bytes
-  it counts are the sizes of expat's C structures, pool blocks and hash tables, which differ
-  between the wheels' builds (`unsigned long` is 4 bytes on Windows and 8 on Linux).
-- **The port** (owner decision 2026-10-08, the hostile files rule P4-7): the tracker's rule,
-  limits, setters and `NO_MEMORY` are ported, but what it counts is the port's own
-  structures, charged where expat allocates (the parser, the DTD's entries, names, entity
-  texts and default attributes, the tag stack, the attribute arrays and values, the open
-  entities, the group connectors). So the document at which the limit starts to refuse
-  differs from either wheel's; documents far from it read the same.
-- **Who notices:** only documents near the limit: tens of MiB of parser structures from a
-  document a hundred times smaller, which no LUT or CDL file comes near.
-- **A fix:** count expat's exact allocation sizes per platform, or drop the tracker as later
-  expat releases may tune it.
-- **Status:** matched in `p4-xml` (4.4b fix chunk, `crates/ocio-formats/src/expat/xmlparse.rs`,
-  `expat_malloc` and the `charge*` methods; `documents_past_the_memory_limit_are_refused`).
+  (`XML_ERROR_NO_MEMORY`, "out of memory"), once the heap expat allocated reaches 64 MiB and
+  more than 100 times the document's direct bytes (`expat_heap_increase_tolerable`,
+  `expat_malloc`, `expat_realloc`, `expat/lib/xmlparse.c:812-1005` @ R_2_7_2; the defaults in
+  `internal.h:152-154`). It counts the sizes of expat's own blocks: its parser structure,
+  pools, hash tables, tags, attribute arrays, open entities and default attributes, each
+  with an 8-byte header. They are the same in both wheels but the parser structure's, which
+  holds `long` and `unsigned long` fields: 1,048 bytes as MSVC lays it out and 1,088 with GCC.
+  So a document within 40 bytes of the limit (a pool block of 32 MiB, say, filled to within
+  20 bytes of it) is refused on Linux and read on Windows.
+- **Who notices:** only documents at the limit: tens of MiB of parser memory from a document a
+  hundred times smaller, which no LUT or CDL file comes near.
+- **A fix:** none needed; dropping the parser structure from the count would make the
+  platforms agree.
+- **Status:** matched in `p4-cdl` (`crates/ocio-formats/src/expat/heap.rs`, which counts what
+  expat allocates block for block, with each platform's structure size;
+  `crates/ocio/tests/xml_memory_oracle.rs` finds where families of documents start being
+  refused, and both wheels agree to the byte). Before that chunk the port counted its own
+  structures (the owner's decision of 2026-10-08, superseded once the exact count worked).
 
 ### I-172. The XML readers read a number out of range as 0 on Linux, and as infinity on Windows
 
-- **Upstream:** `ParseNumber` (`fileformats/xmlutils/XMLReaderUtils.h:140-208` @ v2.5.2)
+- **Upstream:** `ParseNumber` (`fileformats/xmlutils/XMLReaderUtils.h:150-205` @ v2.5.2)
   checks `NumberUtils::from_chars`'s `invalid_argument` only: a `result_out_of_range` passes,
   with the value `from_chars` left. On Windows (`std::from_chars`) that is the overflow's
   infinity, the underflow's 0, and a subnormal read as such; on Linux (`strtod_l`, which sets

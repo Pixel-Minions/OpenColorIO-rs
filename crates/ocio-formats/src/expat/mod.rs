@@ -55,6 +55,7 @@
 //! Each item cites the expat source it translates. expat is MIT-licensed; its notice is above
 //! and applies to this module.
 
+mod heap;
 mod tables;
 pub mod xmlparse;
 pub mod xmlrole;

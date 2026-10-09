@@ -2804,9 +2804,9 @@ fn test_alloc_tracker_api() {
     });
 }
 
-/// The port's own memory limit (owner decision 2026-10-08, I-171): with the tracker's
-/// threshold at 0, the first structure a document makes the parser charge is refused, and
-/// the parse fails with `XML_ERROR_NO_MEMORY`, where expat's `MALLOC` would have failed.
+/// With the tracker's threshold at 0, the first block a document makes expat allocate is
+/// refused, and the parse fails with `XML_ERROR_NO_MEMORY`: the tag stack, the pools, the
+/// entity table, the default attributes.
 #[test]
 fn documents_past_the_memory_limit_are_refused() {
     each_run(|run| {
