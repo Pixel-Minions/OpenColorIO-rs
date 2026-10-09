@@ -2,9 +2,8 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Tests of the config (tests/cpu/Config_tests.cpp @ v2.5.2) that read, write and validate
-//! configs without building processors (WP 3.3, 3.7, 3.8), and the two `Config` tests of
-//! tests/cpu/Display_tests.cpp. The tests that build processors come with the builders (WP
-//! 3.2d).
+//! configs (WP 3.3, 3.7, 3.8) and build their processors (WP 3.2), and the two `Config` tests
+//! of tests/cpu/Display_tests.cpp.
 
 use ocio_testkit::upstream::check_throw_what;
 
@@ -5886,4 +5885,1391 @@ colorspaces:
             .unwrap();
         assert!(proc.is_no_op().unwrap());
     }
+}
+
+/// Port of `OCIO_ADD_TEST(Config, context_variable_v1)` @ v2.5.2.
+#[test]
+fn context_variable_v1() {
+    use ocio_ops::logging::{get_logging_level, set_logging_level};
+    use ocio_ops::open_color_types::LoggingLevel;
+
+    let env = EnvGuard::new();
+    const SIMPLE_PROFILE: &str = "ocio_profile_version: 1\n\
+environment:\n  \
+SHOW: super\n  \
+SHOT: test\n  \
+SEQ: foo\n  \
+test: bar${cheese}\n  \
+cheese: chedder\n\
+colorspaces:\n  \
+- !<ColorSpace>\n      \
+name: raw\n\
+strictparsing: false\n\
+roles:\n  \
+default: raw\n\
+displays:\n  \
+sRGB:\n  \
+- !<View> {name: Raw, colorspace: raw}\n\
+\n";
+
+    const SIMPLE_PROFILE2: &str = "ocio_profile_version: 1\n\
+colorspaces:\n  \
+- !<ColorSpace>\n      \
+name: raw\n\
+strictparsing: false\n\
+roles:\n  \
+default: raw\n\
+displays:\n  \
+sRGB:\n  \
+- !<View> {name: Raw, colorspace: raw}\n\
+\n";
+
+    // Upstream's EnvironmentVariableGuards of SHOW and TASK.
+    env.set(&[("SHOW", "bar"), ("TASK", "lighting")]);
+
+    let config = Config::create_from_stream(SIMPLE_PROFILE.as_bytes()).unwrap();
+    config.validate().unwrap();
+    assert_eq!(config.num_environment_vars(), 5);
+
+    let mut used_context_vars = Context::new();
+
+    // Test context variable resolution.
+
+    assert_eq!(
+        config
+            .current_context()
+            .get()
+            .resolve_string_var_with_used("test${test}", &mut used_context_vars),
+        b"testbarchedder"
+    );
+    assert_eq!(2, used_context_vars.num_string_vars());
+    assert_eq!(used_context_vars.string_var_name_by_index(0), b"cheese");
+    assert_eq!(used_context_vars.string_var_by_index(0), b"chedder");
+    assert_eq!(used_context_vars.string_var_name_by_index(1), b"test");
+    assert_eq!(used_context_vars.string_var_by_index(1), b"bar${cheese}");
+
+    used_context_vars.clear_string_vars();
+    assert_eq!(
+        config
+            .current_context()
+            .get()
+            .resolve_string_var_with_used("${SHOW}", &mut used_context_vars),
+        b"bar"
+    );
+    assert_eq!(1, used_context_vars.num_string_vars());
+    assert_eq!(used_context_vars.string_var_name_by_index(0), b"SHOW");
+    assert_eq!(used_context_vars.string_var_by_index(0), b"bar");
+    // Even if an environment variable overrides $SHOW, its default value is still "super".
+    assert_eq!(config.environment_var_default("SHOW"), b"super");
+
+    // Test default context variables.
+
+    let mut edit = (*config).clone();
+    assert_eq!(edit.num_environment_vars(), 5);
+    edit.clear_environment_vars();
+    assert_eq!(edit.num_environment_vars(), 0);
+
+    edit.add_environment_var("testing", Some(b"dupvar"));
+    assert_eq!(edit.num_environment_vars(), 1);
+    edit.add_environment_var("testing", Some(b"dupvar")); // No duplications.
+    assert_eq!(edit.num_environment_vars(), 1);
+    edit.add_environment_var("foobar", Some(b"testing"));
+    assert_eq!(edit.num_environment_vars(), 2);
+    edit.add_environment_var("blank", Some(b""));
+    assert_eq!(edit.num_environment_vars(), 3);
+    edit.add_environment_var("dontadd", None);
+    assert_eq!(edit.num_environment_vars(), 3);
+    edit.add_environment_var("foobar", None); // Remove an entry.
+    assert_eq!(edit.num_environment_vars(), 2);
+    edit.clear_environment_vars();
+    assert_eq!(edit.num_environment_vars(), 0);
+
+    assert_eq!(edit.environment_mode(), EnvironmentMode::LoadPredefined);
+    edit.set_environment_mode(EnvironmentMode::LoadAll);
+    assert_eq!(edit.environment_mode(), EnvironmentMode::LoadAll);
+
+    // Test the second config i.e. not in predefined mode.
+
+    // As a debug message is expected, trap & check its content (upstream's LogGuard, which
+    // sets the debug level).
+    let ((), log) = crate::test_env::capture_log(|| {
+        let level = get_logging_level();
+        set_logging_level(LoggingLevel::Debug);
+
+        let noenv = Config::create_from_stream(SIMPLE_PROFILE2.as_bytes());
+        set_logging_level(level);
+        let noenv = noenv.unwrap();
+        noenv.validate().unwrap();
+        assert_eq!(noenv.environment_mode(), EnvironmentMode::LoadAll);
+        // In all mode, use all system env. variables as potential context variables.
+        assert_eq!(
+            noenv.current_context().get().resolve_string_var("${TASK}"),
+            b"lighting"
+        );
+    });
+
+    assert_eq!(
+        log.concat(),
+        b"[OpenColorIO Debug]: This .ocio config has no environment section defined. The \
+          default behaviour is to load all environment variables (0), which reduces the \
+          efficiency of OCIO's caching. Consider predefining the environment variables used.\n"
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(Config, context_variable_faulty_cases)` @ v2.5.2.
+#[test]
+fn context_variable_faulty_cases() {
+    let _env = EnvGuard::new();
+    // Check that all transforms using color space names correctly support the context variable
+    // validation.
+
+    const CONFIG: &str = "ocio_profile_version: 2\n\
+\n\
+search_path: luts\n\
+\n\
+environment:\n  \
+DST1: cs2\n  \
+DST2: cs2\n  \
+DST3: cs2\n\
+\n\
+roles:\n  \
+default: cs1\n\
+\n\
+view_transforms:\n  \
+- !<ViewTransform>\n    \
+name: vt1\n    \
+from_scene_reference: !<ColorSpaceTransform> {src: cs1, dst: $DST3}\n\
+\n\
+displays:\n  \
+disp1:\n    \
+- !<View> {name: view1, view_transform: vt1, display_colorspace: dcs1}\n    \
+- !<View> {name: view2, colorspace: cs3, looks: look1}\n\
+\n\
+looks:\n  \
+- !<Look>\n    \
+name: look1\n    \
+process_space: cs2\n    \
+transform: !<ColorSpaceTransform> {src: cs1, dst: $DST1}\n\
+\n\
+colorspaces:\n  \
+- !<ColorSpace>\n    \
+name: cs1\n\
+\n  \
+- !<ColorSpace>\n    \
+name: cs2\n    \
+from_scene_reference: !<MatrixTransform> {offset: [0.11, 0.12, 0.13, 0]}\n\
+\n  \
+- !<ColorSpace>\n    \
+name: cs3\n    \
+from_scene_reference: !<ColorSpaceTransform> {src: cs1, dst: $DST2}\n\
+\n\
+display_colorspaces:\n  \
+- !<ColorSpace>\n    \
+name: dcs1\n    \
+allocation: uniform\n    \
+from_display_reference: !<CDLTransform> {slope: [1, 2, 1]}\n";
+
+    let mut cfg = (*Config::create_from_stream(CONFIG.as_bytes()).unwrap()).clone();
+    cfg.validate().unwrap();
+    cfg.processor_for_display_view("cs1", "disp1", "view1", TransformDirection::Forward)
+        .unwrap();
+
+    {
+        // Remove environment variable DST3.
+
+        cfg.add_environment_var("DST3", None);
+        assert_eq!(cfg.num_environment_vars(), 2);
+
+        check_throw_what(
+            cfg.validate(),
+            "references a color space '$DST3' using an unknown context variable",
+        );
+
+        check_throw_what(
+            cfg.processor_for_display_view("cs1", "disp1", "view1", TransformDirection::Forward),
+            "Color space '$DST3' could not be found",
+        );
+    }
+
+    {
+        cfg.add_environment_var("DST2", None);
+        assert_eq!(cfg.num_environment_vars(), 1);
+
+        check_throw_what(
+            cfg.validate(),
+            "references a color space '$DST2' using an unknown context variable",
+        );
+
+        check_throw_what(
+            cfg.processor_for_display_view("cs1", "disp1", "view2", TransformDirection::Forward),
+            "Color space '$DST2' could not be found",
+        );
+    }
+
+    {
+        cfg.add_environment_var("DST2", Some(b"cs1"));
+        cfg.add_environment_var("DST1", None);
+        assert_eq!(cfg.num_environment_vars(), 1);
+
+        check_throw_what(
+            cfg.validate(),
+            "references a color space '$DST1' using an unknown context variable",
+        );
+
+        check_throw_what(
+            cfg.processor_for_display_view("cs1", "disp1", "view2", TransformDirection::Forward),
+            "Color space '$DST1' could not be found",
+        );
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Config, context_variable)` @ v2.5.2.
+#[test]
+fn context_variable() {
+    let env = EnvGuard::new();
+    // Test the context "predefined" mode (this is where the config contains the "environment"
+    // section).
+
+    const CONFIG: &str = "ocio_profile_version: 2\n\
+\n\
+environment:\n  \
+VAR1: $VAR1\n  \
+VAR2: var2\n  \
+VAR3: env3\n\
+search_path: luts\n\
+strictparsing: true\n\
+luma: [0.2126, 0.7152, 0.0722]\n\
+\n\
+roles:\n  \
+default: cs1\n\
+\n\
+file_rules:\n  \
+- !<Rule> {name: Default, colorspace: default}\n\
+\n\
+displays:\n  \
+disp1:\n    \
+- !<View> {name: view1, colorspace: cs1}\n\
+\n\
+active_displays: []\n\
+active_views: []\n\
+\n\
+colorspaces:\n  \
+- !<ColorSpace>\n    \
+name: cs1\n    \
+family: \"\"\n    \
+equalitygroup: \"\"\n    \
+bitdepth: unknown\n    \
+isdata: false\n    \
+allocation: uniform\n";
+    // VAR1 has no default value so the env. variable must exist; VAR2 and VAR3 have default
+    // values for when the env. variable does not exist.
+
+    // Upstream's EnvironmentVariableGuards of VAR1 and VAR2.
+    env.set(&[("VAR1", "env1"), ("VAR2", "env2")]);
+
+    let config = Config::create_from_stream(CONFIG.as_bytes()).unwrap();
+    config.validate().unwrap();
+    assert_eq!(config.environment_mode(), EnvironmentMode::LoadPredefined);
+
+    let resolve = |c: &Config, s: &str| c.current_context().get().resolve_string_var(s);
+    assert_eq!(resolve(&config, "$VAR1"), b"env1");
+    assert_eq!(resolve(&config, "$VAR2"), b"env2");
+    assert_eq!(resolve(&config, "$VAR3"), b"env3");
+
+    check_serialized(&config.serialize().unwrap(), CONFIG);
+
+    // VAR2 reverts to its default value.
+
+    env.set(&[("VAR1", "env1")]);
+    let config = Config::create_from_stream(CONFIG.as_bytes()).unwrap();
+    config.validate().unwrap();
+
+    assert_eq!(resolve(&config, "$VAR1"), b"env1");
+    assert_eq!(resolve(&config, "$VAR2"), b"var2");
+    assert_eq!(resolve(&config, "$VAR3"), b"env3");
+
+    // System env. variable VAR1 is now missing but the context variable VAR1 is still a valid one.
+
+    env.set(&[]);
+    let config = Config::create_from_stream(CONFIG.as_bytes()).unwrap();
+    config.validate().unwrap();
+
+    assert_eq!(resolve(&config, "$VAR1"), b"$VAR1");
+    assert_eq!(resolve(&config, "$VAR2"), b"var2");
+    assert_eq!(resolve(&config, "$VAR3"), b"env3");
+}
+
+/// Port of `OCIO_ADD_TEST(Config, context_variable_unresolved)` @ v2.5.2.
+#[test]
+fn context_variable_unresolved() {
+    let _env = EnvGuard::new();
+    // Test for invalid unresolved context variables.
+
+    const BODY_CONFIG: &str = "\n\
+search_path: luts\n\
+\n\
+roles:\n  \
+default: cs1\n  \
+reference: cs1\n\
+\n\
+displays:\n  \
+disp1:\n    \
+- !<View> {name: view1, colorspace: cs2}\n\
+\n\
+colorspaces:\n  \
+- !<ColorSpace>\n    \
+name: cs1\n\
+\n  \
+- !<ColorSpace>\n    \
+name: cs2\n    \
+from_reference: !<MatrixTransform> {offset: [0.1, 0.2, 0.3, 0.0]}\n";
+
+    let config_of = |header: &str| {
+        let text = [header, BODY_CONFIG].concat();
+        Config::create_from_stream(text.as_bytes()).unwrap()
+    };
+
+    config_of("ocio_profile_version: 2\nenvironment: {ENV1: $ENV1}\n")
+        .validate()
+        .unwrap();
+
+    config_of("ocio_profile_version: 2\nenvironment:\n  ENV1: ${ENV1}\n")
+        .validate()
+        .unwrap();
+
+    for (header, what) in [
+        (
+            "ocio_profile_version: 2\nenvironment: {ENV1: $ENV2}\n",
+            "Unresolved context variable in environment declaration 'ENV1 = $ENV2'.",
+        ),
+        (
+            "ocio_profile_version: 2\nenvironment: {ENV1: env, ENV2: $ENV1}\n",
+            "Unresolved context variable in environment declaration 'ENV2 = $ENV1'.",
+        ),
+        (
+            "ocio_profile_version: 2\nenvironment: {ENV1: env$ENV1}\n",
+            "Unresolved context variable in environment declaration 'ENV1 = env$ENV1'.",
+        ),
+        (
+            "ocio_profile_version: 2\nenvironment:\n ENV1: env${ENV2}\n",
+            "Unresolved context variable in environment declaration 'ENV1 = env${ENV2}'.",
+        ),
+        (
+            "ocio_profile_version: 2\nenvironment: {ENV1: $ENV1$ENV2}\n",
+            "Unresolved context variable in environment declaration 'ENV1 = $ENV1$ENV2'.",
+        ),
+    ] {
+        check_throw_what(config_of(header).validate(), what);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Config, context_variable_with_colorspacename)` @ v2.5.2.
+#[test]
+fn context_variable_with_colorspacename() {
+    let _env = EnvGuard::new();
+    // Test some faulty context variable use cases.
+
+    // Note: In predefined mode, the environment section must be self-contain and complete.
+    // It means that all context variables must be present in the config i.e. in the environment
+    // section.
+
+    const CONFIG: &str = "ocio_profile_version: 2\n\
+\n\
+environment: {ENV1: file.clf}\n\
+\n\
+search_path: luts\n\
+\n\
+roles:\n  \
+default: cs1\n  \
+reference: cs1\n\
+\n\
+displays:\n  \
+disp1:\n    \
+- !<View> {name: view1, colorspace: cs2}\n\
+\n\
+colorspaces:\n  \
+- !<ColorSpace>\n    \
+name: cs1\n\
+\n  \
+- !<ColorSpace>\n    \
+name: cs2\n";
+
+    let config_of = |end: &str| {
+        let text = [CONFIG, end].concat();
+        (*Config::create_from_stream(text.as_bytes()).unwrap()).clone()
+    };
+
+    {
+        // Add a new context variable not defined in the environment section.  The context does not
+        // contain a value for this variable.
+
+        let mut cfg = config_of("    from_scene_reference: !<FileTransform> {src: $VAR3}\n");
+        check_throw_what(
+            cfg.validate(),
+            "The file transform source cannot be resolved: '$VAR3'.",
+        );
+
+        // Set $VAR3 and check again.
+
+        cfg.add_environment_var("VAR3", Some(b"file.clf"));
+        cfg.validate().unwrap();
+    }
+
+    {
+        let mut cfg =
+            config_of("    from_scene_reference: !<ColorSpaceTransform> {src: $VAR3, dst: cs1}\n");
+        check_throw_what(
+            cfg.validate(),
+            "This config references a color space '$VAR3' using an unknown context variable.",
+        );
+
+        // Set $VAR3 and check again.
+
+        // Set a valid color space name.
+        cfg.add_environment_var("VAR3", Some(b"cs1"));
+        cfg.validate().unwrap();
+
+        // Set a valid role name.
+        cfg.add_environment_var("VAR3", Some(b"reference"));
+        cfg.validate().unwrap();
+
+        // Set an invalid color space name.
+        cfg.add_environment_var("VAR3", Some(b"cs1234"));
+        check_throw_what(
+            cfg.validate(),
+            "This config references a color space, 'cs1234', which is not defined.",
+        );
+
+        // Set an invalid color space name.
+        cfg.add_environment_var("VAR3", Some(b"reference1234"));
+        check_throw_what(
+            cfg.validate(),
+            "This config references a color space, 'reference1234', which is not defined.",
+        );
+
+        // Remove the context variable.
+        cfg.add_environment_var("VAR3", None);
+        check_throw_what(
+            cfg.validate(),
+            "This config references a color space '$VAR3' using an unknown context variable.",
+        );
+    }
+
+    // Repeat the test using Config::getProcessor() with a non-default context.
+
+    {
+        let cfg =
+            config_of("    from_scene_reference: !<ColorSpaceTransform> {src: $VAR3, dst: cs1}\n");
+
+        check_throw_what(
+            cfg.processor_between("cs1", "cs2"),
+            "Color space '$VAR3' could not be found.",
+        );
+
+        let mut ctx = (*cfg.current_context().get()).clone();
+        check_throw_what(
+            cfg.processor_between_with_context(&ctx, "cs1", "cs2"),
+            "Color space '$VAR3' could not be found.",
+        );
+
+        ctx.set_string_var("VAR3", Some(b"cs1"));
+        cfg.processor_between_with_context(&ctx, "cs1", "cs2")
+            .unwrap();
+
+        ctx.set_string_var("VAR3", Some(b"reference"));
+        cfg.processor_between_with_context(&ctx, "cs1", "cs2")
+            .unwrap();
+
+        ctx.set_string_var("VAR3", Some(b""));
+        check_throw_what(
+            cfg.processor_between_with_context(&ctx, "cs1", "cs2"),
+            "Color space '$VAR3' could not be found.",
+        );
+    }
+
+    // Repeat the test using a NamedTransform for one of the color spaces.
+
+    {
+        let mut cfg = config_of(concat!(
+            "    from_scene_reference: !<ColorSpaceTransform> {src: $VAR3, dst: cs1}\n",
+            "named_transforms:\n",
+            "  - !<NamedTransform>\n",
+            "    name: nt1\n",
+            "    transform: !<RangeTransform> {min_in_value: 0, min_out_value: 0}\n",
+        ));
+
+        cfg.add_environment_var("VAR3", Some(b"nt1"));
+        cfg.validate().unwrap();
+
+        let ctx = (*cfg.current_context().get()).clone();
+        cfg.processor_between_with_context(&ctx, "cs1", "cs2")
+            .unwrap();
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Config, context_variable_with_role)` @ v2.5.2.
+#[test]
+fn context_variable_with_role() {
+    let _env = EnvGuard::new();
+    // Test that a role cannot point to a context variable.
+
+    const CONFIG: &str = "ocio_profile_version: 2\n\
+\n\
+environment: {ENV1: cs1}\n\
+\n\
+search_path: luts\n\
+\n\
+roles:\n  \
+default: cs1\n  \
+reference: $ENV1\n\
+\n\
+displays:\n  \
+disp1:\n    \
+- !<View> {name: view1, colorspace: cs2}\n\
+\n\
+colorspaces:\n  \
+- !<ColorSpace>\n    \
+name: cs1\n\
+\n  \
+- !<ColorSpace>\n    \
+name: cs2\n    \
+from_scene_reference: !<CDLTransform> {offset: [0.1, 0.1, 0.1]}\n\
+\n  \
+- !<ColorSpace>\n    \
+name: cs3\n    \
+from_scene_reference: !<ColorSpaceTransform> {src: reference, dst: cs2}\n";
+
+    {
+        let cfg = (*Config::create_from_stream(CONFIG.as_bytes()).unwrap()).clone();
+
+        // The internal cache serializes the config throwing an exception because the role
+        // color space does not exist so disable the internal cache.
+        cfg.set_processor_cache_flags(ProcessorCacheFlags::OFF);
+
+        check_throw_what(
+            cfg.validate(),
+            "The role 'reference' refers to a color space, '$ENV1', which is not defined.",
+        );
+
+        check_throw_what(
+            cfg.processor_between("cs1", "cs3"),
+            "Color space 'reference' could not be found.",
+        );
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Config, context_variable_with_display_view)` @ v2.5.2.
+#[test]
+fn context_variable_with_display_view() {
+    let _env = EnvGuard::new();
+    // Test that a (display, view) pair cannot point to a context variable.
+
+    const CONFIG: &str = "ocio_profile_version: 2\n\
+\n\
+environment: {ENV1: cs2}\n\
+\n\
+search_path: luts\n\
+\n\
+roles:\n  \
+default: cs1\n  \
+reference: cs1\n\
+\n\
+displays:\n  \
+disp1:\n    \
+- !<View> {name: view1, colorspace: $ENV1}\n\
+\n\
+colorspaces:\n  \
+- !<ColorSpace>\n    \
+name: cs1\n\
+\n  \
+- !<ColorSpace>\n    \
+name: cs2\n    \
+from_scene_reference: !<CDLTransform> {offset: [0.1, 0.1, 0.1]}\n";
+
+    {
+        let config = Config::create_from_stream(CONFIG.as_bytes()).unwrap();
+
+        check_throw_what(
+            config.validate(),
+            "Display 'disp1' has a view 'view1' that refers to a color space or a named \
+             transform, '$ENV1', which is not defined.",
+        );
+
+        check_throw_what(
+            config.processor_for_display_view("cs1", "disp1", "view1", TransformDirection::Forward),
+            "DisplayViewTransform error. Cannot find color space or named transform with name \
+             '$ENV1'.",
+        );
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Config, env_colorspace_name)` @ v2.5.2.
+#[test]
+fn env_colorspace_name() {
+    // Unset the env. variable to make sure the test start in the right environment.
+    let env = EnvGuard::new();
+
+    const MY_OCIO_CONFIG: &str = "ocio_profile_version: 1\n\
+\n\
+search_path: luts\n\
+strictparsing: true\n\
+luma: [0.2126, 0.7152, 0.0722]\n\
+\n\
+roles:\n  \
+compositing_log: lgh\n  \
+default: raw\n  \
+scene_linear: lnh\n\
+\n\
+displays:\n  \
+sRGB:\n    \
+- !<View> {name: Raw, colorspace: raw}\n\
+\n\
+active_displays: []\n\
+active_views: []\n\
+\n\
+colorspaces:\n  \
+- !<ColorSpace>\n    \
+name: raw\n    \
+family: \"\"\n    \
+equalitygroup: \"\"\n    \
+bitdepth: unknown\n    \
+isdata: false\n    \
+allocation: uniform\n\
+\n  \
+- !<ColorSpace>\n    \
+name: lnh\n    \
+family: \"\"\n    \
+equalitygroup: \"\"\n    \
+bitdepth: unknown\n    \
+isdata: false\n    \
+allocation: uniform\n\
+\n  \
+- !<ColorSpace>\n    \
+name: lgh\n    \
+family: \"\"\n    \
+equalitygroup: \"\"\n    \
+bitdepth: unknown\n    \
+isdata: false\n    \
+allocation: uniform\n    \
+allocationvars: [-0.125, 1.125]\n";
+
+    {
+        // Test when the env. variable is missing
+
+        let my_config_str = [
+            MY_OCIO_CONFIG,
+            "    from_reference: !<ColorSpaceTransform> {src: raw, dst: $MISSING_ENV}\n",
+        ]
+        .concat();
+
+        let config = Config::create_from_stream(my_config_str.as_bytes()).unwrap();
+        check_throw_what(
+            config.validate(),
+            "This config references a color space '$MISSING_ENV' using an unknown context \
+             variable",
+        );
+        check_throw_what(
+            config.processor_between("raw", "lgh"),
+            "Color space '$MISSING_ENV' could not be found",
+        );
+    }
+
+    let with_ocio_test = [
+        MY_OCIO_CONFIG,
+        "    from_reference: !<ColorSpaceTransform> {src: raw, dst: $OCIO_TEST}\n",
+    ]
+    .concat();
+
+    {
+        // Test when the env. variable exists but its content is wrong
+        env.set(&[("OCIO_TEST", "FaultyColorSpaceName")]);
+
+        let config = Config::create_from_stream(with_ocio_test.as_bytes()).unwrap();
+        check_throw_what(
+            config.validate(),
+            "color space, 'FaultyColorSpaceName', which is not defined",
+        );
+        check_throw_what(
+            config.processor_between("raw", "lgh"),
+            "Color space '$OCIO_TEST' could not be found",
+        );
+    }
+
+    {
+        // Test when the env. variable exists and its content is right
+        env.set(&[("OCIO_TEST", "lnh")]);
+
+        let config = Config::create_from_stream(with_ocio_test.as_bytes()).unwrap();
+        config.validate().unwrap();
+        config.processor_between("raw", "lgh").unwrap();
+    }
+
+    {
+        // Check that the serialization preserves the env. variable
+        env.set(&[("OCIO_TEST", "lnh")]);
+
+        let config = Config::create_from_stream(with_ocio_test.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        check_serialized(&config.serialize().unwrap(), &with_ocio_test);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Config, exponent_vs_config_version)` @ v2.5.2.
+#[test]
+fn exponent_vs_config_version() {
+    use ocio_testkit::upstream::{check_close, check_equal};
+
+    let _env = EnvGuard::new();
+    // The config i.e. SIMPLE_PROFILE is a version 2.
+
+    let apply = |text: &str| -> [f32; 4] {
+        let config = Config::create_from_stream(text.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        let processor = config.processor_between("raw", "lnh").unwrap();
+        let cpu_processor = processor.default_cpu_processor().unwrap();
+
+        let mut img = [-0.5f32, 0.0, 1.0, 1.0];
+        cpu_processor.apply_rgba(&mut img).unwrap();
+        img
+    };
+
+    // OCIO config file version == 1  and exponent == 1
+
+    let str_end = "    from_reference: !<ExponentTransform> {value: [1, 1, 1, 1]}\n";
+    let img1 = apply(&(profile_v1_start() + str_end));
+
+    check_equal(img1[0], -0.5f32);
+    check_equal(img1[1], 0.0f32);
+    check_equal(img1[2], 1.0f32);
+    check_equal(img1[3], 1.0f32);
+
+    // OCIO config file version == 1  and exponent != 1
+
+    let str_end2 = "    from_reference: !<ExponentTransform> {value: [2, 2, 2, 1]}\n";
+    let img2 = apply(&(profile_v1_start() + str_end2));
+
+    check_equal(img2[0], 0.0f32);
+    check_equal(img2[1], 0.0f32);
+    check_equal(img2[2], 1.0f32);
+    check_equal(img2[3], 1.0f32);
+
+    // OCIO config file version > 1  and exponent == 1
+
+    let img3 = apply(&(profile_v2_start() + str_end));
+
+    check_equal(img3[0], 0.0f32);
+    check_equal(img3[1], 0.0f32);
+    check_close(img3[2], 1.0f32, 2e-5f32); // Because of SSE optimizations.
+    check_close(img3[3], 1.0f32, 2e-5f32); // Because of SSE optimizations.
+
+    // OCIO config file version > 1  and exponent != 1
+
+    let img4 = apply(&(profile_v2_start() + str_end2));
+
+    check_equal(img4[0], 0.0f32);
+    check_equal(img4[1], 0.0f32);
+    check_close(img4[2], 1.0f32, 3e-5f32); // Because of SSE optimizations.
+    check_close(img4[3], 1.0f32, 2e-5f32); // Because of SSE optimizations.
+}
+
+/// Port of `OCIO_ADD_TEST(Config, transform_with_roles)` @ v2.5.2.
+#[test]
+fn transform_with_roles() {
+    let _env = EnvGuard::new();
+    // Validate that Config::validate() on config file containing transforms
+    // with color space names (such as ColorSpaceTransform), correctly checks for role names
+    // for those transforms.
+
+    const OCIO_CONFIG: &str = r#"
+ocio_profile_version: 1
+
+roles:
+  DEFAULT: raw
+  scene_linear: cs1
+
+displays:
+  Disp1:
+  - !<View> {name: View1, colorspace: RaW, looks: beauty}
+
+looks:
+  - !<Look>
+    name: beauty
+    process_space: SCENE_LINEAR
+    transform: !<ColorSpaceTransform> {src: SCENE_LINEAR, dst: raw}
+
+colorspaces:
+  - !<ColorSpace>
+    name: RAW
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: CS1
+    allocation: uniform
+    from_reference: !<MatrixTransform> {offset: [0.11, 0.12, 0.13, 0]}
+
+  - !<ColorSpace>
+    name: cs2
+    allocation: uniform
+    to_reference: !<ColorSpaceTransform> {src: SCENE_LINEAR, dst: raw}
+
+  - !<ColorSpace>
+    name: cs3
+    allocation: uniform
+    to_reference: !<ColorSpaceTransform> {src: SCENE_LINEAR, dst: raw, data_bypass: false}
+"#;
+
+    let config = Config::create_from_stream(OCIO_CONFIG.as_bytes()).unwrap();
+    config.validate().unwrap();
+
+    // Validate the color spaces.
+
+    config.processor_between("raw", "cs1").unwrap();
+    config.processor_between("raw", "cs2").unwrap();
+    config.processor_between("cs1", "cs2").unwrap();
+
+    let cs2 = config.color_space("cs2").unwrap();
+    let Some(Transform::ColorSpace(cs2_tr)) = cs2.transform(ColorSpaceDirection::ToReference)
+    else {
+        panic!("cs2's transform to the reference is not a color space transform");
+    };
+    assert!(cs2_tr.data_bypass());
+
+    let cs3 = config.color_space("cs3").unwrap();
+    let Some(Transform::ColorSpace(cs3_tr)) = cs3.transform(ColorSpaceDirection::ToReference)
+    else {
+        panic!("cs3's transform to the reference is not a color space transform");
+    };
+    assert!(!cs3_tr.data_bypass());
+
+    // Validate the (display, view) pair with looks.
+
+    let mut display = DisplayViewTransform::new();
+    display.set_src("raw");
+    display.set_display("Disp1");
+    display.set_view("View1");
+
+    config.processor(&display.clone().into()).unwrap();
+
+    display.set_src("cs1");
+
+    config.processor(&display.clone().into()).unwrap();
+
+    display.set_src("cs2");
+
+    config.processor(&display.into()).unwrap();
+}
+
+/// Port of `OCIO_ADD_TEST(Config, processor_cache_with_context_variables)` @ v2.5.2.
+#[test]
+fn processor_cache_with_context_variables() {
+    let _env = EnvGuard::new();
+    // Validation of the processor cache of the Config class with context variables.
+
+    const CONFIG_CUSTOM: &str = r#"ocio_profile_version: 2
+
+environment: { VAR: cs1 }
+
+search_path: ""
+strictparsing: true
+luma: [0.2126, 0.7152, 0.0722]
+
+roles:
+  default: ref
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+
+displays:
+  Disp1:
+    - !<View> {name: View1, colorspace: cs1}
+
+colorspaces:
+  - !<ColorSpace>
+    name: ref
+
+  - !<ColorSpace>
+    name: cs1
+    from_scene_reference: !<BuiltinTransform> {style: ACEScct_to_ACES2065-1}
+
+  - !<ColorSpace>
+    name: cs2
+    from_scene_reference: !<ColorSpaceTransform> {src: ref, dst: cs1}
+
+  - !<ColorSpace>
+    name: cs3
+    from_scene_reference: !<ColorSpaceTransform> {src: ref, dst: $VAR}
+"#;
+
+    let config = Config::create_from_stream(CONFIG_CUSTOM.as_bytes()).unwrap();
+
+    {
+        // Some basic validations before testing anything else.
+
+        config.validate().unwrap();
+        config.processor_between("ref", "cs1").unwrap();
+    }
+
+    let proc = |c: &Config, src: &str, dst: &str| c.processor_between(src, dst).unwrap();
+
+    {
+        // Test that the cache detects identical processors (e.g. when $VAR == cs1)
+        // even if the cache keys are different.
+
+        // Keys are identical i.e. normal case.
+        assert!(Arc::ptr_eq(
+            &proc(&config, "ref", "cs1"),
+            &proc(&config, "ref", "cs1")
+        ));
+
+        // Keys are different but processors are identical so it returns the same instance.
+        assert!(Arc::ptr_eq(
+            &proc(&config, "ref", "cs1"),
+            &proc(&config, "ref", "cs2")
+        ));
+
+        // Keys are different but processors are identical.
+        assert!(Arc::ptr_eq(
+            &proc(&config, "ref", "cs2"),
+            &proc(&config, "ref", "cs3")
+        ));
+
+        // Making a copy also flushes the internal processor cache.
+        let mut cfg = (*config).clone();
+
+        // Check that caches are different between Config instances.
+        assert!(!Arc::ptr_eq(
+            &proc(&config, "ref", "cs1"),
+            &proc(&cfg, "ref", "cs1")
+        ));
+
+        cfg.add_environment_var("VAR", Some(b"ref"));
+
+        // Keys are different but processors are identical
+        // i.e. unchanged because it does not need $VAR.
+        assert!(Arc::ptr_eq(
+            &proc(&cfg, "ref", "cs1"),
+            &proc(&cfg, "ref", "cs2")
+        ));
+
+        // Keys are different but processors are now different because $VAR != cs1.
+        assert!(!Arc::ptr_eq(
+            &proc(&cfg, "ref", "cs2"),
+            &proc(&cfg, "ref", "cs3")
+        ));
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Config, builtin_transforms)` @ v2.5.2.
+#[test]
+fn builtin_transforms() {
+    let _env = EnvGuard::new();
+    // Test some default built-in transforms.
+
+    const CONFIG_BUILTIN_TRANSFORMS: &str = r#"ocio_profile_version: 2
+
+environment:
+  {}
+search_path: ""
+strictparsing: true
+luma: [0.2126, 0.7152, 0.0722]
+
+roles:
+  default: ref
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: default}
+
+displays:
+  Disp1:
+    - !<View> {name: View1, colorspace: test}
+
+active_displays: []
+active_views: []
+
+colorspaces:
+  - !<ColorSpace>
+    name: ref
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: test
+    family: ""
+    equalitygroup: ""
+    bitdepth: unknown
+    isdata: false
+    allocation: uniform
+    from_scene_reference: !<GroupTransform>
+      children:
+        - !<BuiltinTransform> {style: ACEScct_to_ACES2065-1}
+        - !<BuiltinTransform> {style: ACEScct_to_ACES2065-1, direction: inverse}
+"#;
+
+    let config = Config::create_from_stream(CONFIG_BUILTIN_TRANSFORMS.as_bytes()).unwrap();
+
+    {
+        // Test loading the config.
+
+        config.validate().unwrap();
+        assert_eq!(config.num_color_spaces(), 2);
+
+        config.processor_between("ref", "test").unwrap();
+    }
+
+    {
+        // Test saving the config.
+
+        check_serialized(&config.serialize().unwrap(), CONFIG_BUILTIN_TRANSFORMS);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Config, get_processor_alias)` @ v2.5.2.
+#[test]
+fn get_processor_alias() {
+    use crate::transforms::fixed_function_transform::FixedFunctionTransform;
+    use ocio_ops::open_color_types::{FixedFunctionStyle, ReferenceSpaceType};
+
+    let _env = EnvGuard::new();
+    let mut config = (*Config::create_raw().unwrap()).clone();
+    let mut cs_scene_to_ref = ColorSpace::with_reference_space(ReferenceSpaceType::Scene);
+    cs_scene_to_ref.set_name("source");
+    let mut mat = MatrixTransform::new();
+    let offset = [0., 0.1, 0.2, 0.];
+    mat.set_offset(&offset);
+    cs_scene_to_ref
+        .set_transform(Some(&mat.into()), ColorSpaceDirection::ToReference)
+        .unwrap();
+    cs_scene_to_ref.add_alias("alias source");
+    cs_scene_to_ref.add_alias("src");
+    config.add_color_space(&cs_scene_to_ref).unwrap();
+
+    let mut cs_scene_from_ref = ColorSpace::with_reference_space(ReferenceSpaceType::Scene);
+    cs_scene_from_ref.set_name("destination");
+    let ff = FixedFunctionTransform::new(FixedFunctionStyle::AcesGlow03, &[]).unwrap();
+    cs_scene_from_ref
+        .set_transform(Some(&ff.into()), ColorSpaceDirection::FromReference)
+        .unwrap();
+    cs_scene_from_ref.add_alias("alias destination");
+    cs_scene_from_ref.add_alias("dst");
+    config.add_color_space(&cs_scene_from_ref).unwrap();
+
+    config.validate().unwrap();
+
+    use crate::TransformType;
+
+    let types = |proc: &Processor| -> Vec<TransformType> {
+        let grp = proc.create_group_transform().unwrap();
+        (0..grp.num_transforms())
+            .map(|i| grp.transform(i).unwrap().transform_type())
+            .collect()
+    };
+
+    let ref_proc = config.processor_between("source", "destination").unwrap();
+    assert_eq!(
+        types(&ref_proc),
+        [TransformType::Matrix, TransformType::FixedFunction]
+    );
+
+    {
+        let with_alias = config
+            .processor_between("alias source", "destination")
+            .unwrap();
+        // TODO: Resolve the aliases before creating the new processor. Code currently creates a
+        // second processor but only keeps the first one because they have the same cacheID.
+        assert!(Arc::ptr_eq(&with_alias, &ref_proc));
+    }
+
+    config.set_processor_cache_flags(ProcessorCacheFlags::OFF);
+    {
+        let with_alias = config
+            .processor_between("alias source", "destination")
+            .unwrap();
+        assert_eq!(
+            types(&with_alias),
+            [TransformType::Matrix, TransformType::FixedFunction]
+        );
+    }
+
+    {
+        let with_alias = config.processor_between("alias source", "dst").unwrap();
+        assert_eq!(
+            types(&with_alias),
+            [TransformType::Matrix, TransformType::FixedFunction]
+        );
+    }
+
+    let mut nt = NamedTransform::new();
+    nt.set_name("named_transform");
+    nt.add_alias("nt");
+    nt.set_transform(
+        Some(&ExponentTransform::new().into()),
+        TransformDirection::Forward,
+    )
+    .unwrap();
+    config.add_named_transform(&nt).unwrap();
+
+    {
+        let with_alias = config.processor_between("nt", "dst").unwrap();
+        assert_eq!(types(&with_alias), [TransformType::Exponent]);
+    }
+
+    config
+        .add_display_view("display", "view", "alias destination", "")
+        .unwrap();
+
+    {
+        let with_alias = config
+            .processor_for_display_view(
+                "alias source",
+                "display",
+                "view",
+                TransformDirection::Forward,
+            )
+            .unwrap();
+        assert_eq!(
+            types(&with_alias),
+            [TransformType::Matrix, TransformType::FixedFunction]
+        );
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Config, inactive_color_space)` @ v2.5.2.
+#[test]
+fn inactive_color_space() {
+    use ColorSpaceVisibility as Vis;
+    use SearchReferenceSpaceType as Ref;
+    use ocio_ops::open_color_types::{ColorSpaceVisibility, SearchReferenceSpaceType};
+
+    // EnvGuard::new() unsets OCIO_INACTIVE_COLORSPACES, as upstream's Platform::Unsetenv.
+    let _env = EnvGuard::new();
+    // The unit test validates the inactive color space behavior.
+
+    let config_str = [INACTIVE_CS_CONFIG_START, INACTIVE_CS_CONFIG_END].concat();
+
+    let mut config = (*Config::create_from_stream(config_str.as_bytes()).unwrap()).clone();
+    config.validate().unwrap();
+
+    let num = |c: &Config, r, v| c.num_color_spaces_with(r, v);
+    let name = |c: &Config, r, v, i| c.color_space_name_by_index_with(r, v, i).to_vec();
+
+    // Step 1 - No inactive color spaces.
+
+    assert_eq!(num(&config, Ref::All, Vis::Inactive), 0);
+    assert_eq!(num(&config, Ref::All, Vis::Active), 5);
+    assert_eq!(num(&config, Ref::All, Vis::All), 5);
+
+    for (i, n) in ["raw", "lnh", "cs1", "cs2", "cs3"].iter().enumerate() {
+        assert_eq!(name(&config, Ref::All, Vis::All, i as i32), n.as_bytes());
+    }
+    // Check a faulty call.
+    assert_eq!(name(&config, Ref::All, Vis::All, 5), b"");
+
+    assert_eq!(config.num_color_spaces(), 5);
+    for (i, n) in ["raw", "lnh", "cs1", "cs2", "cs3"].iter().enumerate() {
+        assert_eq!(config.color_space_name_by_index(i as i32), n.as_bytes());
+    }
+    // Check a faulty call.
+    assert_eq!(config.color_space_name_by_index(5), b"");
+
+    let css = config.color_spaces("");
+    assert_eq!(css.num_color_spaces(), 5);
+
+    let cs = config.color_space("scene_linear").unwrap();
+    assert_eq!(cs.name(), b"lnh");
+
+    assert_eq!(config.index_for_color_space("scene_linear"), 1);
+    assert_eq!(config.index_for_color_space("lnh"), 1);
+
+    // Step 2 - Some inactive color spaces.
+
+    config.set_inactive_color_spaces("lnh, cs1");
+    assert_eq!(config.inactive_color_spaces(), b"lnh, cs1");
+
+    assert_eq!(num(&config, Ref::All, Vis::Inactive), 2);
+    assert_eq!(num(&config, Ref::All, Vis::Active), 3);
+    assert_eq!(num(&config, Ref::All, Vis::All), 5);
+
+    assert_eq!(num(&config, Ref::Scene, Vis::Inactive), 2);
+    assert_eq!(num(&config, Ref::Scene, Vis::Active), 3);
+    assert_eq!(num(&config, Ref::Scene, Vis::All), 5);
+
+    assert_eq!(num(&config, Ref::Display, Vis::Inactive), 0);
+    assert_eq!(num(&config, Ref::Display, Vis::Active), 0);
+    assert_eq!(num(&config, Ref::Display, Vis::All), 0);
+
+    // Check methods working on all color spaces.
+    assert_eq!(num(&config, Ref::All, Vis::All), 5);
+    for (i, n) in ["raw", "lnh", "cs1", "cs2", "cs3"].iter().enumerate() {
+        assert_eq!(name(&config, Ref::All, Vis::All, i as i32), n.as_bytes());
+    }
+
+    // Check methods working on only active color spaces.
+    assert_eq!(config.num_color_spaces(), 3);
+    for (i, n) in ["raw", "cs2", "cs3"].iter().enumerate() {
+        assert_eq!(config.color_space_name_by_index(i as i32), n.as_bytes());
+    }
+
+    // Asking for a color space set with no categories returns active color spaces only.
+    let css = config.color_spaces("");
+    assert_eq!(css.num_color_spaces(), 3);
+
+    // Search using a category 'file-io' with no active color space.
+    let css = config.color_spaces("file-io");
+    assert_eq!(css.num_color_spaces(), 0);
+
+    // Search using a category 'working-space' with some active color spaces.
+    let css = config.color_spaces("working-space");
+    assert_eq!(css.num_color_spaces(), 1);
+
+    // Request an active color space.
+    let cs = config.color_space("cs2").unwrap();
+    assert_eq!(cs.name(), b"cs2");
+
+    // Request an inactive color space.
+    let cs = config.color_space("cs1").unwrap();
+    assert_eq!(cs.name(), b"cs1");
+
+    // Request a role with an active color space.
+    let cs = config.color_space("default").unwrap();
+    assert_eq!(cs.name(), b"raw");
+
+    // Request a role with an inactive color space.
+    let cs = config.color_space("scene_linear").unwrap();
+    assert_eq!(cs.name(), b"lnh");
+    // ... the color is not an active color space.
+    assert_eq!(config.index_for_color_space("scene_linear"), -1);
+    assert_eq!(config.index_for_color_space("lnh"), -1);
+
+    // Request a (display, view) processor with an inactive color space and
+    // a look with an inactive process space.
+    {
+        let mut look_transform = crate::LookTransform::new();
+        look_transform.set_looks("beauty"); // Process space (i.e. lnh) inactive.
+        look_transform.set_src("raw");
+
+        let cs_name = config.display_view_color_space_name("sRGB", "Lnh").to_vec();
+        look_transform.set_dst(cs_name); // Color space inactive (i.e. lnh).
+
+        config
+            .processor_in_direction(&look_transform.into(), TransformDirection::Forward)
+            .unwrap();
+    }
+
+    // Check a faulty call.
+    assert_eq!(config.color_space_name_by_index(3), b"");
+    // ... but getColorSpace() must still succeed.
+    assert!(config.color_space("cs1").is_some());
+
+    // Create a processor with one or more inactive color spaces.
+    config.processor_between("lnh", "cs1").unwrap();
+    config.processor_between("raw", "cs1").unwrap();
+    config.processor_between("lnh", "cs2").unwrap();
+    config.processor_between("cs2", "scene_linear").unwrap();
+
+    // Step 3 - Same as 2, but using role name.
+
+    // Setting a role to an inactive space is actually setting the space that it points to as
+    // being inactive.  In this case, scene_linear is lnh.
+
+    config.set_inactive_color_spaces("scene_linear, cs1");
+    assert_eq!(config.inactive_color_spaces(), b"scene_linear, cs1");
+
+    // Steps 3 and 4 count the same.
+    let check_steps_3_4 = |config: &Config| {
+        assert_eq!(num(config, Ref::All, Vis::Inactive), 2);
+        assert_eq!(num(config, Ref::All, Vis::Active), 3);
+        assert_eq!(num(config, Ref::All, Vis::All), 5);
+
+        assert_eq!(num(config, Ref::Scene, Vis::Inactive), 2);
+        assert_eq!(num(config, Ref::Scene, Vis::Active), 3);
+        assert_eq!(num(config, Ref::Scene, Vis::All), 5);
+
+        assert_eq!(num(config, Ref::Display, Vis::Inactive), 0);
+        assert_eq!(num(config, Ref::Display, Vis::Active), 0);
+        assert_eq!(num(config, Ref::Display, Vis::All), 0);
+
+        // Check methods working on only active color spaces.
+        assert_eq!(config.num_color_spaces(), 3);
+        for (i, n) in ["raw", "cs2", "cs3"].iter().enumerate() {
+            assert_eq!(config.color_space_name_by_index(i as i32), n.as_bytes());
+        }
+    };
+    check_steps_3_4(&config);
+
+    assert!(config.has_role("scene_linear"));
+
+    // Step 4 - Same as 2, but using an alias.
+
+    // Setting an alias to an inactive space is actually setting the space that it refers to as
+    // being inactive.  In this case, alias1 is cs1.
+
+    config.set_inactive_color_spaces("lnh, alias1");
+    assert_eq!(config.inactive_color_spaces(), b"lnh, alias1");
+
+    check_steps_3_4(&config);
+
+    // Step 5 - No inactive color spaces.
+
+    config.set_inactive_color_spaces("");
+    assert_eq!(config.inactive_color_spaces(), b"");
+
+    assert_eq!(num(&config, Ref::All, Vis::All), 5);
+    assert_eq!(config.num_color_spaces(), 5);
+
+    // Step 6 - No inactive color spaces (upstream's nullptr, the empty text for the port's
+    // setter).
+
+    config.set_inactive_color_spaces("");
+    assert_eq!(config.inactive_color_spaces(), b"");
+
+    assert_eq!(num(&config, Ref::All, Vis::All), 5);
+    assert_eq!(config.num_color_spaces(), 5);
+
+    assert_eq!(num(&config, Ref::Scene, Vis::All), 5);
+    assert_eq!(num(&config, Ref::Display, Vis::All), 0);
+
+    // Step 7 - Add display color spaces.
+
+    for display in ["display0", "display1", "display2"] {
+        let mut dcs = ColorSpace::with_reference_space(ReferenceSpaceType::Display);
+        dcs.set_name(display);
+        config.add_color_space(&dcs).unwrap();
+    }
+
+    assert_eq!(num(&config, Ref::All, Vis::All), 8);
+
+    assert_eq!(num(&config, Ref::Scene, Vis::All), 5);
+    assert_eq!(num(&config, Ref::Display, Vis::All), 3);
+
+    // Step 8 - Some inactive color spaces.
+
+    config.set_inactive_color_spaces("cs1, display1");
+    assert_eq!(config.inactive_color_spaces(), b"cs1, display1");
+
+    assert_eq!(num(&config, Ref::Scene, Vis::Inactive), 1);
+    assert_eq!(num(&config, Ref::Display, Vis::Inactive), 1);
+    assert_eq!(num(&config, Ref::All, Vis::Inactive), 2);
+    assert_eq!(name(&config, Ref::Scene, Vis::Inactive, 0), b"cs1");
+    assert_eq!(name(&config, Ref::Display, Vis::Inactive, 0), b"display1");
+    assert_eq!(name(&config, Ref::Scene, Vis::Inactive, 1), b"");
+    assert_eq!(name(&config, Ref::Display, Vis::Inactive, 1), b"");
+
+    assert_eq!(num(&config, Ref::Scene, Vis::Active), 4);
+    assert_eq!(num(&config, Ref::Display, Vis::Active), 2);
+    assert_eq!(num(&config, Ref::All, Vis::Active), 6);
+    assert_eq!(name(&config, Ref::Scene, Vis::Active, 2), b"cs2");
+    assert_eq!(name(&config, Ref::Display, Vis::Active, 1), b"display2");
+
+    assert_eq!(num(&config, Ref::Scene, Vis::All), 5);
+    assert_eq!(num(&config, Ref::Display, Vis::All), 3);
+    assert_eq!(num(&config, Ref::All, Vis::All), 8);
+    assert_eq!(name(&config, Ref::Scene, Vis::All, 0), b"raw");
+    assert_eq!(name(&config, Ref::Scene, Vis::All, 3), b"cs2");
+    assert_eq!(name(&config, Ref::Scene, Vis::All, 10), b"");
+    assert_eq!(name(&config, Ref::Display, Vis::All, 1), b"display1");
 }
