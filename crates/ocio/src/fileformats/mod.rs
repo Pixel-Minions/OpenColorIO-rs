@@ -4,6 +4,7 @@
 //! The file formats: what reads, bakes and writes LUT files (src/OpenColorIO/fileformats).
 
 pub mod cdl;
+pub mod file_format_3dl;
 pub mod file_format_cc;
 pub mod file_format_ccc;
 pub mod file_format_cdl;

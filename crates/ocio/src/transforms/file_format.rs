@@ -300,11 +300,8 @@ fn create_formats() -> Vec<Box<dyn FileFormat>> {
         })
     };
     vec![
-        // FileFormat3DL.cpp:196-208: "lustre" is a copy of the "flame" info.
-        stub(vec![
-            FormatInfo::new("flame", "3dl", read_bake, B::LUT_3D),
-            FormatInfo::new("lustre", "3dl", read_bake, B::LUT_3D),
-        ]),
+        // FileFormat3DL.cpp:196-208.
+        Box::new(crate::fileformats::file_format_3dl::LocalFileFormat),
         // FileFormatCC.cpp:69-76.
         Box::new(crate::fileformats::file_format_cc::LocalFileFormat),
         // FileFormatCCC.cpp:79-86.

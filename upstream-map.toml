@@ -848,8 +848,9 @@ note = "p3-loading 3.10a: embedded by include_bytes! from the submodule (no copy
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormat3DL.cpp"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/file_format_3dl.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_3dl.rs"]
+status = "partial"
+note = "p4-readers 4.3a: the reader (GetLikelyLutBitDepth, GetOCIOBitdepth, IsIdentity) and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_3dl_oracle.rs; bake (GetMaxValueFromIntegerBitDepth, GetClampedIntFromNormFloat, CubeDimensionLenToLustreBitDepth) comes with WP 4.8"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatCC.cpp"
@@ -4564,8 +4565,9 @@ note = "p3-loading 3.10a: basic, basic_impl, resolve_config_path; 3.10b: create_
 [[file]]
 path = "tests/cpu/fileformats/FileFormat3DL_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-formats/src/fileformats/file_format_3dl_tests.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_3dl_tests.rs"]
+status = "partial"
+note = "p4-readers 4.3a: format_info, get_likely_lut_bitdepth, load, parse_1d; bake comes with WP 4.8"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatCCC_tests.cpp"
