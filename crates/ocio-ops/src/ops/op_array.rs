@@ -132,6 +132,24 @@ impl<T: Copy + Default> ArrayT<T> {
     }
 }
 
+impl ArrayT<f64> {
+    /// Sets the value at `index`.
+    ///
+    /// Port of `ArrayT<double>::setDoubleValue` (OpArray.h:73-76 @ v2.5.2).
+    pub fn set_double_value(&mut self, index: c_ulong, value: f64) {
+        self.data[index as usize] = value;
+    }
+}
+
+impl ArrayT<f32> {
+    /// Sets the value at `index`, converted to `float`.
+    ///
+    /// Port of `ArrayT<float>::setDoubleValue` (OpArray.h:73-76 @ v2.5.2).
+    pub fn set_double_value(&mut self, index: c_ulong, value: f64) {
+        self.data[index as usize] = value as f32;
+    }
+}
+
 impl<T: PartialEq> ArrayT<T> {
     /// Whether `other` is this array, or has its dimensions and values: a NaN value is unequal
     /// to itself, except in the same array.

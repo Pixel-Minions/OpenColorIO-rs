@@ -439,3 +439,519 @@ fn ctf_files_read_as_in_the_wheel() {
 fn ctf_files_log_as_in_the_wheel() {
     cdl_common::check_logs(&ctf_cases());
 }
+
+/// A Matrix of the attributes `attrs`, with an Array of the dimensions `dim` and `values`.
+fn matrix(attrs: &str, dim: &str, values: &str) -> String {
+    format!(
+        "    <Matrix {attrs}>\n\
+         \x20       <Array dim=\"{dim}\">\n{values}\n        </Array>\n\
+         \x20   </Matrix>\n"
+    )
+}
+
+/// A Range of the attributes `attrs` holding `body`.
+fn range(attrs: &str, body: &str) -> String {
+    format!("    <Range {attrs}>\n{body}    </Range>\n")
+}
+
+/// The values of a matrix of `n` values: 0.1, 0.2, ... and a few exact ones.
+fn values(n: usize) -> String {
+    (0..n)
+        .map(|i| format!("{}", 0.1 * (i as f64 + 1.0) - 0.35))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The Matrix and Range readers' files.
+fn op_cases() -> Vec<Case> {
+    let f32s = "inBitDepth=\"32f\" outBitDepth=\"32f\"";
+    let mut cases = Vec::new();
+
+    // Matrix dimensions, by version.
+    for (version, dim, n) in [
+        ("1.2", "3 3 3", 9),
+        ("1.2", "4 4 3", 16),
+        ("1.2", "4 4 4", 16),
+        ("1.2", "3 3", 9),
+        ("1.2", "3 4 3", 12),
+        ("1.2", "4 4 3", 12),
+        ("1.2", "5 5 3", 25),
+        ("1.3", "3 3 3", 9),
+        ("1.3", "3 3", 9),
+        ("1.3", "3 4 3", 12),
+        ("1.3", "3 4", 12),
+        ("1.3", "4 4 4", 16),
+        ("1.3", "4 4", 16),
+        ("1.3", "4 5 4", 20),
+        ("1.3", "4 5", 20),
+        ("1.3", "4 4 3", 16),
+        ("1.3", "3 4 4", 12),
+        ("1.3", "3", 3),
+        ("1.3", "3 3 3 3", 9),
+        ("1.3", "5 5", 25),
+        ("2.0", "3 3 3", 9),
+        ("2.0", "3 4", 12),
+        ("2.5", "4 5", 20),
+        ("1.3", "3 3", 8),
+        ("1.3", "3 4", 16),
+        ("1.3", "4 4", 15),
+        ("1.3", "4 5", 19),
+        ("1.2", "3 3 3", 8),
+        ("1.2", "4 4 3", 15),
+        ("1.3", "3 3", 10),
+        ("1.2", "4 4 3", 17),
+        ("1.3", "4 5", 21),
+    ] {
+        cases.push(ctf(
+            &format!("a matrix {dim} in CTF {version} with {n} values"),
+            &format!("id=\"a\" version=\"{version}\""),
+            &matrix(f32s, dim, &values(n)),
+        ));
+    }
+    cases.push(clf(
+        "a matrix 3 4 in CLF 3",
+        "id=\"a\" compCLFversion=\"3\"",
+        &matrix(f32s, "3 4", &values(12)),
+    ));
+    cases.push(clf(
+        "a matrix 3 3 3 in CLF 2",
+        "id=\"a\" compCLFversion=\"2\"",
+        &matrix(f32s, "3 3 3", &values(9)),
+    ));
+
+    // Bit depths.
+    for (bd_in, bd_out) in [
+        ("8i", "8i"),
+        ("10i", "12i"),
+        ("12i", "16i"),
+        ("16i", "16f"),
+        ("16f", "32f"),
+        ("32f", "10I"),
+        ("32F", "8i"),
+        ("8u", "32f"),
+        ("32f", "10ui"),
+        ("", "32f"),
+    ] {
+        cases.push(ctf(
+            &format!("a matrix from {bd_in} to {bd_out}"),
+            "id=\"a\" version=\"1.3\"",
+            &matrix(
+                &format!("inBitDepth=\"{bd_in}\" outBitDepth=\"{bd_out}\""),
+                "3 4",
+                &values(12),
+            ),
+        ));
+    }
+    cases.extend([
+        ctf(
+            "a matrix without an inBitDepth",
+            "id=\"a\"",
+            &matrix("outBitDepth=\"32f\"", "3 3 3", &values(9)),
+        ),
+        ctf(
+            "a matrix without bit depths",
+            "id=\"a\"",
+            &matrix("id=\"m\"", "3 3 3", &values(9)),
+        ),
+        ctf(
+            "two matrices whose bit depths don't match",
+            "id=\"a\"",
+            &format!(
+                "{}{}",
+                matrix(
+                    "inBitDepth=\"32f\" outBitDepth=\"10i\"",
+                    "3 3 3",
+                    &values(9)
+                ),
+                matrix(
+                    "inBitDepth=\"12i\" outBitDepth=\"32f\"",
+                    "3 3 3",
+                    &values(9)
+                )
+            ),
+        ),
+        ctf(
+            "two matrices whose bit depths match",
+            "id=\"a\"",
+            &format!(
+                "{}{}",
+                matrix(
+                    "inBitDepth=\"32f\" outBitDepth=\"10i\"",
+                    "3 3 3",
+                    &values(9)
+                ),
+                matrix(
+                    "inBitDepth=\"10i\" outBitDepth=\"32f\"",
+                    "3 3 3",
+                    &values(9)
+                )
+            ),
+        ),
+        // The operator's attributes.
+        ctf(
+            "a matrix's id, name, bypass and an unknown attribute",
+            "id=\"a\" version=\"2.0\"",
+            &matrix(
+                "id=\"m1\" name=\"the matrix\" bypass=\"true\" foo=\"1\" inBitDepth=\"32f\" \
+                 outBitDepth=\"32f\"",
+                "3 3",
+                &values(9),
+            ),
+        ),
+        clf(
+            "a matrix's bypass in a CLF",
+            "id=\"a\" compCLFversion=\"3\"",
+            &matrix(
+                "bypass=\"true\" inBitDepth=\"32f\" outBitDepth=\"32f\"",
+                "3 3",
+                &values(9),
+            ),
+        ),
+        ctf(
+            "a matrix's descriptions",
+            "id=\"a\" version=\"2.0\"",
+            "    <Matrix inBitDepth=\"32f\" outBitDepth=\"32f\">\n\
+             \x20       <Description>one</Description>\n\
+             \x20       <Description>two</Description>\n\
+             \x20       <Array dim=\"3 3\">1 0 0 0 1 0 0 0 1</Array>\n\
+             \x20       <Foo/>\n\
+             \x20   </Matrix>\n",
+        ),
+        // The array element.
+        ctf(
+            "a matrix without an array",
+            "id=\"a\" version=\"2.0\"",
+            "    <Matrix inBitDepth=\"32f\" outBitDepth=\"32f\"/>\n",
+        ),
+        ctf(
+            "a matrix with two arrays",
+            "id=\"a\" version=\"2.0\"",
+            "    <Matrix inBitDepth=\"32f\" outBitDepth=\"32f\">\n\
+             \x20       <Array dim=\"3 3\">1 0 0 0 1 0 0 0 1</Array>\n\
+             \x20       <Array dim=\"3 3\">1 0 0 0 1 0 0 0 1</Array>\n\
+             \x20   </Matrix>\n",
+        ),
+        ctf(
+            "an array without dim",
+            "id=\"a\" version=\"2.0\"",
+            "    <Matrix inBitDepth=\"32f\" outBitDepth=\"32f\">\n\
+             \x20       <Array foo=\"3 3\">1 0 0 0 1 0 0 0 1</Array>\n\
+             \x20   </Matrix>\n",
+        ),
+        ctf(
+            "an array's unknown attribute",
+            "id=\"a\" version=\"2.0\"",
+            "    <Matrix inBitDepth=\"32f\" outBitDepth=\"32f\">\n\
+             \x20       <Array foo=\"1\" dim=\"3 3\">1 0 0 0 1 0 0 0 1</Array>\n\
+             \x20   </Matrix>\n",
+        ),
+        ctf(
+            "an array's dim in upper case",
+            "id=\"a\" version=\"2.0\"",
+            "    <Matrix inBitDepth=\"32f\" outBitDepth=\"32f\">\n\
+             \x20       <Array DIM=\"3 3\">1 0 0 0 1 0 0 0 1</Array>\n\
+             \x20   </Matrix>\n",
+        ),
+        ctf(
+            "an array's dim twice",
+            "id=\"a\" version=\"2.0\"",
+            "    <Matrix inBitDepth=\"32f\" outBitDepth=\"32f\">\n\
+             \x20       <Array dim=\"4 4\" Dim=\"3 3\">1 0 0 0 1 0 0 0 1</Array>\n\
+             \x20   </Matrix>\n",
+        ),
+        ctf(
+            "an array's bad dim",
+            "id=\"a\" version=\"2.0\"",
+            &matrix(f32s, "3 x", &values(9)),
+        ),
+        ctf(
+            "an array's negative dim",
+            "id=\"a\" version=\"2.0\"",
+            &matrix(f32s, "-3 3", &values(9)),
+        ),
+        ctf(
+            "an array's empty dim",
+            "id=\"a\" version=\"2.0\"",
+            &matrix(f32s, "", &values(9)),
+        ),
+        ctf(
+            "an array's long bad dim",
+            "id=\"a\" version=\"2.0\"",
+            &matrix(f32s, &"3 ".repeat(100), &values(9)),
+        ),
+        ctf(
+            "an array's bad value",
+            "id=\"a\" version=\"2.0\"",
+            &matrix(f32s, "3 3", "1 0 0 0 1 x 0 0 1"),
+        ),
+        ctf(
+            "an array's values with inf and nan",
+            "id=\"a\" version=\"2.0\"",
+            &matrix(f32s, "3 3", "1 0 0 0 inf 0 0 0 nan"),
+        ),
+        ctf(
+            "an array's values over several lines and tabs",
+            "id=\"a\" version=\"2.0\"",
+            &matrix(f32s, "3 3", "1\t0 0\n\n 0 1e0 0\n0 0\t\t1\n"),
+        ),
+        ctf(
+            "an array's long bad values",
+            "id=\"a\" version=\"2.0\"",
+            &matrix(
+                f32s,
+                "3 3",
+                &format!("1 0 0 0 1 0 0 0 1{}", " x".repeat(200)),
+            ),
+        ),
+        ctf(
+            "an array of a non-invertible inverse",
+            "id=\"a\" version=\"2.0\"",
+            &matrix(f32s, "3 3", "0 0 0 0 0 0 0 0 0"),
+        ),
+        ctf(
+            "an Array under a Range",
+            "id=\"a\" version=\"2.0\"",
+            &range(f32s, "        <Array dim=\"3 3\"/>\n"),
+        ),
+        ctf(
+            "an Array under an Array",
+            "id=\"a\" version=\"2.0\"",
+            "    <Matrix inBitDepth=\"32f\" outBitDepth=\"32f\">\n\
+             \x20       <Array dim=\"3 3\">1 0 0 0 1 0 0 0 1<Array/></Array>\n\
+             \x20   </Matrix>\n",
+        ),
+        ctf(
+            "text in a matrix",
+            "id=\"a\" version=\"2.0\"",
+            "    <Matrix inBitDepth=\"32f\" outBitDepth=\"32f\">x\n\
+             \x20       <Array dim=\"3 3\">1 0 0 0 1 0 0 0 1</Array>\n\
+             \x20   </Matrix>\n",
+        ),
+        // Ranges.
+        ctf(
+            "a range",
+            "id=\"a\" version=\"1.7\"",
+            &range(
+                "inBitDepth=\"10i\" outBitDepth=\"12i\"",
+                "        <minInValue>64</minInValue>\n\
+                 \x20       <maxInValue>940</maxInValue>\n\
+                 \x20       <minOutValue>256</minOutValue>\n\
+                 \x20       <maxOutValue>3760</maxOutValue>\n",
+            ),
+        ),
+        ctf(
+            "a range with its minimums only",
+            "id=\"a\" version=\"2.0\"",
+            &range(
+                f32s,
+                "        <minInValue>0.1</minInValue>\n        <minOutValue>0.2</minOutValue>\n",
+            ),
+        ),
+        ctf(
+            "a range with its maximums only",
+            "id=\"a\" version=\"2.0\"",
+            &range(
+                "inBitDepth=\"16f\" outBitDepth=\"8i\"",
+                "        <maxInValue>0.9</maxInValue>\n        <maxOutValue>200</maxOutValue>\n",
+            ),
+        ),
+        ctf(
+            "a range without values",
+            "id=\"a\" version=\"2.0\"",
+            &range(f32s, ""),
+        ),
+        ctf(
+            "a range with one minimum",
+            "id=\"a\" version=\"2.0\"",
+            &range(f32s, "        <minInValue>0.1</minInValue>\n"),
+        ),
+        ctf(
+            "a noClamp range",
+            "id=\"a\" version=\"2.0\"",
+            &range(
+                "inBitDepth=\"8i\" outBitDepth=\"32f\" style=\"noClamp\"",
+                "        <minInValue>16</minInValue>\n\
+                 \x20       <maxInValue>235</maxInValue>\n\
+                 \x20       <minOutValue>-0.05</minOutValue>\n\
+                 \x20       <maxOutValue>1.05</maxOutValue>\n",
+            ),
+        ),
+        ctf(
+            "a noClamp range in CTF 1.6",
+            "id=\"a\" version=\"1.6\"",
+            &range(
+                "inBitDepth=\"8i\" outBitDepth=\"32f\" style=\"noClamp\"",
+                "        <minInValue>16</minInValue>\n\
+                 \x20       <maxInValue>235</maxInValue>\n\
+                 \x20       <minOutValue>-0.05</minOutValue>\n\
+                 \x20       <maxOutValue>1.05</maxOutValue>\n",
+            ),
+        ),
+        ctf(
+            "a NOCLAMP range",
+            "id=\"a\" version=\"2.0\"",
+            &range(
+                "inBitDepth=\"32f\" outBitDepth=\"32f\" STYLE=\"NOCLAMP\"",
+                "        <minInValue>0</minInValue>\n\
+                 \x20       <maxInValue>1</maxInValue>\n\
+                 \x20       <minOutValue>0.5</minOutValue>\n\
+                 \x20       <maxOutValue>2</maxOutValue>\n",
+            ),
+        ),
+        ctf(
+            "a noClamp range without maximums",
+            "id=\"a\" version=\"2.0\"",
+            &range(
+                "inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"noClamp\"",
+                "        <minInValue>0</minInValue>\n        <minOutValue>0.5</minOutValue>\n",
+            ),
+        ),
+        ctf(
+            "a clamp style range",
+            "id=\"a\" version=\"2.0\"",
+            &range(
+                "inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"Clamp\"",
+                "        <minInValue>0</minInValue>\n        <minOutValue>0.5</minOutValue>\n",
+            ),
+        ),
+        ctf(
+            "an unknown range style",
+            "id=\"a\" version=\"2.0\"",
+            &range(
+                "inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"foo\"",
+                "        <minInValue>0</minInValue>\n        <minOutValue>0.5</minOutValue>\n",
+            ),
+        ),
+        ctf(
+            "a range value of two numbers",
+            "id=\"a\" version=\"2.0\"",
+            &range(f32s, "        <minInValue>0 1</minInValue>\n"),
+        ),
+        ctf(
+            "a bad range value",
+            "id=\"a\" version=\"2.0\"",
+            &range(f32s, "        <minInValue>abc</minInValue>\n"),
+        ),
+        ctf(
+            "an empty range value",
+            "id=\"a\" version=\"2.0\"",
+            &range(
+                f32s,
+                "        <minInValue></minInValue>\n        <minOutValue>0.5</minOutValue>\n",
+            ),
+        ),
+        ctf(
+            "a range value's attributes",
+            "id=\"a\" version=\"2.0\"",
+            &range(
+                f32s,
+                "        <minInValue a=\"1\" b=\"2\">0</minInValue>\n\
+                 \x20       <MINOUTVALUE>0.5</MINOUTVALUE>\n",
+            ),
+        ),
+        ctf(
+            "a range value twice",
+            "id=\"a\" version=\"2.0\"",
+            &range(
+                f32s,
+                "        <minInValue>0</minInValue>\n        <minInValue>0.25</minInValue>\n\
+                 \x20       <minOutValue>0.5</minOutValue>\n",
+            ),
+        ),
+        ctf(
+            "a range value under the ProcessList",
+            "id=\"a\" version=\"2.0\"",
+            "    <minInValue>0</minInValue>\n",
+        ),
+        ctf(
+            "a range value under a matrix",
+            "id=\"a\" version=\"2.0\"",
+            "    <Matrix inBitDepth=\"32f\" outBitDepth=\"32f\">\n\
+             \x20       <minInValue>0</minInValue>\n\
+             \x20       <Array dim=\"3 3\">1 0 0 0 1 0 0 0 1</Array>\n\
+             \x20   </Matrix>\n",
+        ),
+        ctf(
+            "a range then a matrix",
+            "id=\"a\" version=\"2.0\"",
+            &format!(
+                "{}{}",
+                range(
+                    "inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"noClamp\"",
+                    "        <minInValue>0</minInValue>\n\
+                     \x20       <maxInValue>1</maxInValue>\n\
+                     \x20       <minOutValue>0.5</minOutValue>\n\
+                     \x20       <maxOutValue>2</maxOutValue>\n",
+                ),
+                matrix(f32s, "3 4", &values(12))
+            ),
+        ),
+        ctf(
+            "a range in CTF 1.2",
+            "id=\"a\" version=\"1.2\"",
+            &range(
+                "inBitDepth=\"16i\" outBitDepth=\"16i\" style=\"noClamp\"",
+                "        <minInValue>0</minInValue>\n\
+                 \x20       <maxInValue>65535</maxInValue>\n\
+                 \x20       <minOutValue>100</minOutValue>\n\
+                 \x20       <maxOutValue>200</maxOutValue>\n",
+            ),
+        ),
+    ]);
+
+    // Upstream's files of matrices and ranges.
+    for name in [
+        "matrix_example4x4.ctf",
+        "matrix_offsets_example.ctf",
+        "matrix_offsets_example_1_3.ctf",
+        "matrix_example_1_3_3x3.ctf",
+        "matrix_example_1_3_4x4.ctf",
+        "matrix_example_1_3_offsets.ctf",
+        "matrix_example_1_3_alpha_offsets.ctf",
+        "clf/matrix_windows.clf",
+        "clf/matrix_no_newlines.clf",
+        "clf/matrix_example_utf8.clf",
+        "clf/info_example.clf",
+        "process_list_valid_version.ctf",
+        "process_list_version_revision.ctf",
+        "process_list_no_version.ctf",
+        "info_version_without.ctf",
+        "info_version_valid_minor.ctf",
+        "clf/illegal/transform_element_end_missing.clf",
+        "clf/illegal/transform_corrupted_tag.clf",
+        "clf/illegal/array_missing_values.clf",
+        "clf/illegal/array_bad_value.clf",
+        "clf/illegal/array_bad_dimension.clf",
+        "clf/illegal/array_too_many_values.clf",
+        "clf/illegal/matrix_end_missing.clf",
+        "clf/illegal/transform_bad_outdepth.clf",
+        "clf/range.clf",
+        "clf/range_test1_clamp.clf",
+        "clf/range_test1_noclamp.clf",
+        "clf/range_test2.clf",
+        "clf/illegal/range_nonmatching_clamp.clf",
+        "clf/illegal/range_empty.clf",
+        "clf/illegal/range_bad_noclamp.clf",
+        "clf/illegal/range_bad_values.clf",
+    ] {
+        cases.push(file_case(
+            name,
+            &upstream_file(name),
+            Interpolation::Default,
+            TransformDirection::Forward,
+        ));
+    }
+    cases
+}
+
+/// The processors of the Matrix and Range readers' files, in both directions.
+#[test]
+fn matrix_and_range_files_read_as_in_the_wheel() {
+    check_processors(&op_cases());
+}
+
+/// The warnings of reading the Matrix and Range readers' files, message by message.
+#[test]
+fn matrix_and_range_files_log_as_in_the_wheel() {
+    cdl_common::check_logs(&op_cases());
+}

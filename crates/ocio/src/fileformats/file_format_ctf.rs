@@ -13,6 +13,7 @@
 //! the closures that are expat's handlers; a handler's exception is its `Err`, which ends
 //! `XML_Parse` and is returned as is, as upstream's C++ exceptions propagate.
 
+use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -28,17 +29,23 @@ use ocio_formats::fileformats::xmlutils::xml_reader_utils::{
 use ocio_ops::cfmt::{Crt, OStringStream};
 use ocio_ops::exception::{Exception, Result};
 use ocio_ops::format_metadata::{METADATA_INPUT_DESCRIPTOR, METADATA_OUTPUT_DESCRIPTOR};
-use ocio_ops::op::OpVec;
-use ocio_ops::open_color_types::TransformDirection;
-use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
+use ocio_ops::op::{OpVec, create_op_vec_from_op_data};
+use ocio_ops::op_data::{OpData, OpDataRcPtr};
+use ocio_ops::open_color_types::{TransformDirection, combine_transform_directions};
+use ocio_ops::ops::lut1d::lut1d_op_data::Lut1DOpData;
+use ocio_ops::ops::lut3d::lut3d_op_data::{
+    Interpolation, Lut3DOpData, get_concrete_interpolation as lut3d_get_concrete_interpolation,
+};
+use ocio_ops::ops::reference::reference_op_data::ReferenceStyle;
 use ocio_ops::utils::pystring::os_path;
 use ocio_ops::utils::string_utils::{c_str, lower};
 
 use crate::config::Config;
 use crate::context::Context;
 use crate::fileformats::ctf::ctf_reader_helper::{
-    CtfReaderDescriptorElt, CtfReaderKind, CtfReaderMetadataElt, CtfReaderOpType,
-    CtfReaderTransformElt, CtfReaderTransformRc, Descriptor, equal_ignoring_case, get_reader,
+    CtfReaderArrayElt, CtfReaderDescriptorElt, CtfReaderKind, CtfReaderMetadataElt, CtfReaderOpElt,
+    CtfReaderOpType, CtfReaderRangeValueElt, CtfReaderTransformElt, CtfReaderTransformRc,
+    Descriptor, equal_ignoring_case, get_reader,
 };
 use crate::fileformats::ctf::ctf_reader_utils::{
     TAG_ACES, TAG_ACES_PARAMS, TAG_ARRAY, TAG_CDL, TAG_CURVE_CTRL_PNTS, TAG_CURVE_SLOPES,
@@ -62,7 +69,7 @@ use crate::transforms::file_format::{
     CachedFile, CachedFileRcPtr, FILEFORMAT_CLF, FILEFORMAT_CTF, FileFormat,
     FormatBakeCapabilities, FormatCapabilities, FormatInfo,
 };
-use crate::transforms::file_transform::FileTransform;
+use crate::transforms::file_transform::{FileTransform, build_file_transform_ops};
 use crate::transforms::group_transform::GroupTransform;
 
 /// A CTF/CLF file's transform.
@@ -168,19 +175,161 @@ impl FileFormat for LocalFileFormat {
         ))
     }
 
-    /// The ops of a CTF/CLF come with WP 4.5h.
+    /// Appends the file's ops in the direction `dir` combined with the file transform's
+    /// (in reverse order for the inverse), with the ProcessList's metadata; a LUT without
+    /// an interpolation of its own takes the file transform's, if valid for it.
+    ///
+    /// Port of `LocalFileFormat::buildFileOps` (FileFormatCTF.cpp:1288-1341 @ v2.5.2).
     fn build_file_ops(
         &self,
-        _ops: &mut OpVec,
-        _config: &Config,
-        _context: &Context,
-        _cached_file: &CachedFileRcPtr,
-        _file_transform: &FileTransform,
-        _dir: TransformDirection,
+        ops: &mut OpVec,
+        config: &Config,
+        context: &Context,
+        untyped_cached_file: &CachedFileRcPtr,
+        file_transform: &FileTransform,
+        dir: TransformDirection,
     ) -> Result<()> {
-        Err(Exception::new(
-            "The ops of a CTF/CLF file are not ported yet (WP 4.5h).",
-        ))
+        let any: &dyn Any = untyped_cached_file.as_ref();
+        let Some(cached_file) = any.downcast_ref::<LocalCachedFile>() else {
+            // This should never happen.
+            return Err(Exception::new("Cannot build clf ops. Invalid cache type."));
+        };
+
+        let new_dir = combine_transform_directions(dir, file_transform.direction());
+
+        // Put CTF processList information into the FormatMetadata.
+        cached_file
+            .transform
+            .to_metadata(ops.get_format_metadata_mut())?;
+
+        // Resolve reference path using context and load referenced files.
+        let op_data_vec = cached_file.transform.get_ops();
+
+        // Try to use the FileTransform interpolation for any Lut1D or Lut3D that does not
+        // specify an interpolation in the CTF itself. If the interpolation can not be used,
+        // ignore it.
+
+        let file_interpolation = file_transform.interpolation();
+
+        match new_dir {
+            TransformDirection::Forward => {
+                for op_data in op_data_vec {
+                    let mut op_data = op_data.clone();
+                    // Note: HandleLUT does nothing if opData is not a LUT.
+                    handle_lut(&mut op_data, file_interpolation);
+                    build_op(ops, config, context, &op_data, new_dir)?;
+                }
+            }
+            TransformDirection::Inverse => {
+                for op_data in op_data_vec.iter().rev() {
+                    let mut op_data = op_data.clone();
+                    handle_lut(&mut op_data, file_interpolation);
+                    build_op(ops, config, context, &op_data, new_dir)?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Appends the ops of an op data: a reference to a file is resolved (the file's ops).
+///
+/// Port of `BuildOp` (FileFormatCTF.cpp:1219-1249 @ v2.5.2).
+fn build_op(
+    ops: &mut OpVec,
+    config: &Config,
+    context: &Context,
+    op_data: &OpDataRcPtr,
+    dir: TransformDirection,
+) -> Result<()> {
+    if let OpData::Reference(reference) = &**op_data {
+        // Recursively resolve the op.
+        if reference.get_reference_style() == ReferenceStyle::Path {
+            let dir = combine_transform_directions(dir, reference.get_direction());
+            let mut file_transform = FileTransform::new();
+            file_transform.set_interpolation(Interpolation::Default);
+            file_transform.set_direction(TransformDirection::Forward);
+            file_transform.set_src(reference.get_path());
+
+            // This might call LocalFileFormat::buildFileOps if the file is a CTF.
+            // BuildFileTransformOps is making sure there is no cycling recursion.
+            build_file_transform_ops(ops, config, context, &file_transform, dir)?;
+        }
+        Ok(())
+    } else {
+        create_op_vec_from_op_data(ops, op_data, dir)
+    }
+}
+
+/// The interpolation a Lut1D renders with: always linear.
+///
+/// Port of `Lut1DOpData::GetConcreteInterpolation` (ops/lut1d/Lut1DOpData.cpp:221-231 @
+/// v2.5.2).
+fn lut1d_get_concrete_interpolation(_interp: Interpolation) -> Interpolation {
+    Interpolation::Linear
+}
+
+/// A copy of a Lut1D that specifies no interpolation with the file transform's, if valid
+/// for it and rendered differently; else none (the cached LUT is used).
+///
+/// Port of `HandleLUTInterpolation<Lut1DOpData>` (FileFormatCTF.cpp:1254-1274 @ v2.5.2).
+fn handle_lut1d_interpolation(
+    lut: &Lut1DOpData,
+    file_interp: Interpolation,
+) -> Option<Lut1DOpData> {
+    if Lut1DOpData::is_valid_interpolation(file_interp) {
+        let lut_interpolation = lut.get_interpolation();
+        if lut_interpolation == Interpolation::Default
+            && lut1d_get_concrete_interpolation(lut_interpolation)
+                != lut1d_get_concrete_interpolation(file_interp)
+        {
+            // The FileTransform interpolation does not match the cached file LUT
+            // interpolation, so clone the LUT.
+            let mut new_lut = lut.clone();
+            new_lut.set_interpolation(file_interp);
+            return Some(new_lut);
+        }
+        // Else, use the cached LUT.
+    }
+    None
+}
+
+/// [`handle_lut1d_interpolation`] for a Lut3D.
+///
+/// Port of `HandleLUTInterpolation<Lut3DOpData>` (FileFormatCTF.cpp:1254-1274 @ v2.5.2).
+fn handle_lut3d_interpolation(
+    lut: &Lut3DOpData,
+    file_interp: Interpolation,
+) -> Option<Lut3DOpData> {
+    if Lut3DOpData::is_valid_interpolation(file_interp) {
+        let lut_interpolation = lut.get_interpolation();
+        if lut_interpolation == Interpolation::Default
+            && lut3d_get_concrete_interpolation(lut_interpolation)
+                != lut3d_get_concrete_interpolation(file_interp)
+        {
+            // The FileTransform interpolation does not match the cached file LUT
+            // interpolation, so clone the LUT.
+            let mut new_lut = lut.clone();
+            new_lut.set_interpolation(file_interp);
+            return Some(new_lut);
+        }
+        // Else, use the cached LUT.
+    }
+    None
+}
+
+/// A LUT that specifies no interpolation takes the file transform's, if valid for it and
+/// rendered differently: a copy of the cached LUT with it.
+///
+/// Port of `HandleLUT` (FileFormatCTF.cpp:1276-1286 @ v2.5.2).
+fn handle_lut(op_data: &mut OpDataRcPtr, file_interp: Interpolation) {
+    let new_lut = match &**op_data {
+        OpData::Lut1D(lut) => handle_lut1d_interpolation(lut, file_interp).map(OpData::Lut1D),
+        OpData::Lut3D(lut) => handle_lut3d_interpolation(lut, file_interp).map(OpData::Lut3D),
+        _ => None,
+    };
+    if let Some(new_lut) = new_lut {
+        *op_data = Arc::new(new_lut);
     }
 }
 
@@ -279,8 +428,8 @@ impl State {
     /// operator is an error.
     ///
     /// Port of `XMLParserHelper::AddOpReader` (FileFormatCTF.cpp:283-323 @ v2.5.2). The
-    /// operators' readers come with WP 4.5c-4.5i; until then, a supported operator is
-    /// refused as not ported yet.
+    /// readers of the operators but Matrix and Range come with WP 4.5e-4.5i; until then,
+    /// such an operator is refused as not ported yet.
     fn add_op_reader(&mut self, op_type: CtfReaderOpType, xml_tag: &[u8]) -> Result<()> {
         if self.elms.size() != 1 {
             let mut ss = OStringStream::new(Crt::NATIVE);
@@ -317,7 +466,19 @@ impl State {
             return Err(self.throw_message(ss.str()));
         };
 
-        Err(self.throw_message(&not_ported(kind, xml_tag)))
+        let Some(mut p_op) = CtfReaderOpElt::create(kind) else {
+            return Err(self.throw_message(&not_ported(kind, xml_tag)));
+        };
+
+        p_op.set_context(
+            xml_tag,
+            &self.transform,
+            self.get_xm_line_number(),
+            self.get_xml_filename(),
+        )?;
+
+        self.elms.push_back(Rc::new(RefCell::new(p_op)));
+        Ok(())
     }
 }
 
@@ -478,10 +639,9 @@ fn operator_part_not_ported(state: &State, class: &str) -> Exception {
     state.throw_message(format!("The CTF reader's {class} is not ported yet").as_bytes())
 }
 
-/// Whether `elt` is an operator's reader (`dynamic_pointer_cast<CTFReaderOpElt>`): none is
-/// ported yet (WP 4.5c-4.5i).
-fn is_op_elt(_elt: &ElementRcPtr) -> bool {
-    false
+/// Whether `elt` is an operator's reader (`dynamic_pointer_cast<CTFReaderOpElt>`).
+fn is_op_elt(elt: &ElementRcPtr) -> bool {
+    elt.borrow().as_any().is::<CtfReaderOpElt>()
 }
 
 /// Start the parsing of one element.
@@ -607,7 +767,29 @@ fn push_element(st: &mut State, name: &[u8]) -> Result<()> {
         || supported_element(name, &p_elt, TAG_ARRAY, TAG_INVLUT3D, r)
         || supported_element(name, &p_elt, TAG_ARRAY, TAG_MATRIX, r)
     {
-        return Err(operator_part_not_ported(st, "CTFReaderArrayElt"));
+        let (is_array_mgt, is_completed) = {
+            let container = p_container.borrow();
+            match container.as_any().downcast_ref::<CtfReaderOpElt>() {
+                Some(op) if op.is_array_mgt() => (true, op.is_completed()),
+                _ => (false, false),
+            }
+        };
+        if !is_array_mgt {
+            st.dummy(
+                name,
+                st.elms.back(),
+                Some(b"Array not allowed in this element"),
+            )
+        } else if is_completed {
+            st.dummy(name, st.elms.back(), Some(b"Only one Array allowed per op"))
+        } else {
+            Rc::new(RefCell::new(CtfReaderArrayElt::new(
+                name,
+                p_container,
+                st.get_xm_line_number(),
+                st.get_xml_filename(),
+            )))
+        }
     } else if supported_element(name, &p_elt, TAG_DESCRIPTION, b"", r)
         || supported_element(name, &p_elt, METADATA_INPUT_DESCRIPTION, TAG_CDL, r)
         || supported_element(name, &p_elt, METADATA_VIEWING_DESCRIPTION, TAG_CDL, r)
@@ -668,7 +850,12 @@ fn push_element(st: &mut State, name: &[u8]) -> Result<()> {
             Descriptor::Output,
         )))
     } else if supported_element_tags(name, &p_elt, &RANGE_SUB_ELEMENTS, TAG_RANGE, r) {
-        return Err(operator_part_not_ported(st, "CTFReaderRangeValueElt"));
+        Rc::new(RefCell::new(CtfReaderRangeValueElt::new(
+            name,
+            p_container,
+            st.get_xm_line_number(),
+            st.get_xml_filename(),
+        )))
     } else if supported_element(name, &p_elt, TAG_SATNODE, TAG_CDL, r)
         || supported_element(name, &p_elt, TAG_SATNODEALT, TAG_CDL, r)
     {
