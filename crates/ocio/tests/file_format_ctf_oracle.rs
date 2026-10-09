@@ -1917,3 +1917,240 @@ fn lut1d_files_read_as_in_the_wheel() {
 fn lut1d_files_log_as_in_the_wheel() {
     cdl_common::check_logs(&op_cases_f());
 }
+
+/// The Lut3D and InverseLUT3D readers' files.
+fn op_cases_f2() -> Vec<Case> {
+    let bd = "inBitDepth=\"10i\" outBitDepth=\"12i\"";
+    let grid2 =
+        "0 0 0 0 0 4095 0 4095 0 0 4095 4095 4095 0 0 4095 0 4095 4095 4095 0 4095 4095 4095";
+    let mut cases = Vec::new();
+    for (label, version, tag, attrs, extra, dim, values) in [
+        (
+            "a 2x2x2 grid",
+            "1.6",
+            "LUT3D",
+            bd.to_owned(),
+            "",
+            "2 2 2 3",
+            grid2.to_owned(),
+        ),
+        (
+            "tetrahedral",
+            "1.7",
+            "LUT3D",
+            format!("{bd} interpolation=\"tetrahedral\""),
+            "",
+            "2 2 2 3",
+            grid2.to_owned(),
+        ),
+        (
+            "trilinear",
+            "2.0",
+            "LUT3D",
+            format!("{bd} interpolation=\"trilinear\""),
+            "",
+            "2 2 2 3",
+            grid2.to_owned(),
+        ),
+        (
+            "a bad interpolation",
+            "2.0",
+            "LUT3D",
+            format!("{bd} interpolation=\"linear\""),
+            "",
+            "2 2 2 3",
+            grid2.to_owned(),
+        ),
+        (
+            "hueAdjust",
+            "2.0",
+            "LUT3D",
+            format!("{bd} hueAdjust=\"dw3\""),
+            "",
+            "2 2 2 3",
+            grid2.to_owned(),
+        ),
+        (
+            "an IndexMap in CTF 1.7",
+            "1.7",
+            "LUT3D",
+            bd.to_owned(),
+            "        <IndexMap dim=\"2\">64@0 940@1</IndexMap>\n",
+            "2 2 2 3",
+            grid2.to_owned(),
+        ),
+        (
+            "an IndexMap in CTF 1.6",
+            "1.6",
+            "LUT3D",
+            bd.to_owned(),
+            "        <IndexMap dim=\"2\">64@0 940@1</IndexMap>\n",
+            "2 2 2 3",
+            grid2.to_owned(),
+        ),
+        (
+            "an IndexMap of 130 entries",
+            "1.7",
+            "LUT3D",
+            bd.to_owned(),
+            "        <IndexMap dim=\"130\">64@0 940@1</IndexMap>\n",
+            "2 2 2 3",
+            grid2.to_owned(),
+        ),
+        (
+            "an IndexMap of 3 entries",
+            "1.7",
+            "LUT3D",
+            bd.to_owned(),
+            "        <IndexMap dim=\"3\">0@0 64@0 940@1</IndexMap>\n",
+            "2 2 2 3",
+            grid2.to_owned(),
+        ),
+        (
+            "dim 2 2 2 4",
+            "2.0",
+            "LUT3D",
+            bd.to_owned(),
+            "",
+            "2 2 2 4",
+            grid2.to_owned(),
+        ),
+        (
+            "dim 2 2 3 3",
+            "2.0",
+            "LUT3D",
+            bd.to_owned(),
+            "",
+            "2 2 3 3",
+            grid2.to_owned(),
+        ),
+        (
+            "dim 1 1 1 3",
+            "2.0",
+            "LUT3D",
+            bd.to_owned(),
+            "",
+            "1 1 1 3",
+            "0 0 0".to_owned(),
+        ),
+        (
+            "dim 130",
+            "2.0",
+            "LUT3D",
+            bd.to_owned(),
+            "",
+            "130 130 130 3",
+            grid2.to_owned(),
+        ),
+        (
+            "dim 2 2 3",
+            "2.0",
+            "LUT3D",
+            bd.to_owned(),
+            "",
+            "2 2 3",
+            grid2.to_owned(),
+        ),
+        (
+            "too few values",
+            "2.0",
+            "LUT3D",
+            bd.to_owned(),
+            "",
+            "2 2 2 3",
+            "0 0 0 0 0 4095".to_owned(),
+        ),
+        (
+            "too many values",
+            "2.0",
+            "LUT3D",
+            bd.to_owned(),
+            "",
+            "2 2 2 3",
+            format!("{grid2} 1"),
+        ),
+        (
+            "an inverse",
+            "1.6",
+            "InverseLUT3D",
+            bd.to_owned(),
+            "",
+            "2 2 2 3",
+            "0 0 0 0 0 1023 0 1023 0 0 1023 1023 1023 0 0 1023 0 1023 1023 1023 0 1023 1023 1023"
+                .to_owned(),
+        ),
+        (
+            "an inverse, tetrahedral",
+            "2.0",
+            "InverseLUT3D",
+            "inBitDepth=\"32f\" outBitDepth=\"10i\" interpolation=\"tetrahedral\"".to_owned(),
+            "",
+            "2 2 2 3",
+            "0 0 0 0 0 1 0 1 0 0 1 1 1 0 0 1 0 1 1 1 0 1 1 1".to_owned(),
+        ),
+        (
+            "an inverse with too few values",
+            "2.0",
+            "InverseLUT3D",
+            bd.to_owned(),
+            "",
+            "2 2 2 3",
+            "0 0 0".to_owned(),
+        ),
+        (
+            "an inverse with an IndexMap",
+            "1.7",
+            "InverseLUT3D",
+            bd.to_owned(),
+            "        <IndexMap dim=\"2\">64@0 940@1</IndexMap>\n",
+            "2 2 2 3",
+            grid2.to_owned(),
+        ),
+    ] {
+        cases.push(ctf(
+            &format!("a {tag}: {label}"),
+            &format!("id=\"a\" version=\"{version}\""),
+            &lut(tag, &attrs, extra, dim, &values),
+        ));
+    }
+
+    // Upstream's files.
+    for name in [
+        "lut3d_example_Inv.ctf",
+        "lut_inv_pairs.ctf",
+        "opt_test2.ctf",
+        "indexMap_test2_clfv2.clf",
+        "clf/aces_to_video_with_look.clf",
+        "clf/lut1d_lut3d_lut1d.clf",
+        "clf/lut3d_17x17x17_10i_12i.clf",
+        "clf/lut3d_as_matrix.clf",
+        "clf/lut3d_bizarre.clf",
+        "clf/lut3d_identity_12i_16f.clf",
+        "clf/lut3d_preview_tier_test.clf",
+        "clf/multiple_ops.clf",
+        "clf/tabulation_support.clf",
+        "clf/illegal/indexMap_test2.clf",
+        "clf/illegal/lut3d_unequal_size.clf",
+        "clf/illegal/unknown_elements.clf",
+    ] {
+        cases.push(file_case(
+            name,
+            &upstream_file(name),
+            Interpolation::Default,
+            TransformDirection::Forward,
+        ));
+    }
+    cases
+}
+
+/// The processors of the Lut3D and InverseLUT3D readers' files, in both directions.
+#[test]
+fn lut3d_files_read_as_in_the_wheel() {
+    check_processors(&op_cases_f2());
+}
+
+/// The warnings of reading the Lut3D and InverseLUT3D readers' files, message by message.
+#[test]
+fn lut3d_files_log_as_in_the_wheel() {
+    cdl_common::check_logs(&op_cases_f2());
+}

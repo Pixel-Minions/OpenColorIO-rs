@@ -431,8 +431,9 @@ impl State {
     /// operator is an error.
     ///
     /// Port of `XMLParserHelper::AddOpReader` (FileFormatCTF.cpp:283-323 @ v2.5.2). The
-    /// readers of the operators but Matrix, Range, Log, Gamma (and Exponent) and ASC_CDL come
-    /// with WP 4.5f-4.5i; until then, such an operator is refused as not ported yet.
+    /// readers of ACES, FixedFunction, Function, Reference and the grading and
+    /// exposure-contrast operators come with WP 4.5g-4.5i; until then, such an operator is
+    /// refused as not ported yet.
     fn add_op_reader(&mut self, op_type: CtfReaderOpType, xml_tag: &[u8]) -> Result<()> {
         if self.elms.size() != 1 {
             let mut ss = OStringStream::new(Crt::NATIVE);

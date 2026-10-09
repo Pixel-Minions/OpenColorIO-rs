@@ -18,7 +18,7 @@ use ocio_ops::bit_depth_utils::get_bit_depth_max_value;
 use ocio_ops::format_metadata::{METADATA_DESCRIPTION, METADATA_INFO};
 use ocio_ops::math_utils::convert_half_bits_to_float;
 use ocio_ops::op_data::OpDataType;
-use ocio_ops::open_color_types::{BitDepth, Lut1DHueAdjust, TransformDirection};
+use ocio_ops::open_color_types::{BitDepth, Interpolation, Lut1DHueAdjust, TransformDirection};
 use ocio_ops::ops::cdl::cdl_op_data::{CdlOpData, CdlOpStyle, ChannelParams};
 use ocio_ops::ops::gamma::gamma_op_data::{GammaOpData, GammaStyle};
 use ocio_ops::ops::log::log_op_data::{
@@ -26,6 +26,7 @@ use ocio_ops::ops::log::log_op_data::{
     LogOpData,
 };
 use ocio_ops::ops::lut1d::lut1d_op_data::Lut1DOpData;
+use ocio_ops::ops::lut3d::lut3d_op_data::Lut3DOpData;
 use ocio_ops::ops::matrix::matrix_op_data::{MatrixArray, MatrixOpData};
 use ocio_ops::ops::range::range_op_data::RangeOpData;
 use ocio_testkit::upstream::{check_close, check_throw_what};
@@ -2494,4 +2495,175 @@ fn inverse_of_id_test() {
     let cached_file = load_clf_file(ctf_file).unwrap();
 
     assert!(cached_file.transform.get_inverse_of_id() == b"inverseOfIdTest");
+}
+
+/// The LUT of an op data, which must be one (`dynamic_pointer_cast<const Lut3DOpData>`).
+fn as_lut3d(op: &OpData) -> &Lut3DOpData {
+    match op {
+        OpData::Lut3D(lut) => lut,
+        _ => panic!("not a Lut3D: {:?}", op.get_type()),
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, lut3d)` @ v2.5.2.
+#[test]
+fn lut3d() {
+    let ctf_file = "clf/lut3d_17x17x17_10i_12i.clf";
+    let cached_file = load_clf_file(ctf_file).unwrap();
+
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 1);
+
+    let p_lut = as_lut3d(&op_list[0]);
+    assert_eq!(p_lut.get_direction(), TransformDirection::Forward);
+    assert_eq!(p_lut.get_file_output_bit_depth(), BitDepth::Uint12);
+    // Interpolation is not defined in the file.
+    assert_eq!(p_lut.get_interpolation(), Interpolation::Default);
+
+    let array = p_lut.get_array();
+    assert_eq!(array.get_length(), 17);
+    assert_eq!(array.get_num_color_components(), 3);
+    assert_eq!(
+        array.get_num_values(),
+        array.get_length()
+            * array.get_length()
+            * array.get_length()
+            * p_lut.get_array().get_max_color_components()
+    );
+
+    assert_eq!(array.get_values().len() as c_ulong, array.get_num_values());
+    let tol = 2e-8f32;
+    let values = array.get_values();
+    check_close(values[0], 0.0f32 / 4095.0f32, tol);
+    check_close(values[1], 12.0f32 / 4095.0f32, tol);
+    check_close(values[2], 13.0f32 / 4095.0f32, tol);
+
+    check_close(values[18], 0.0f32 / 4095.0f32, tol);
+    check_close(values[19], 203.0f32 / 4095.0f32, tol);
+    check_close(values[20], 399.0f32 / 4095.0f32, tol);
+
+    check_close(values[30], 54.0f32 / 4095.0f32, tol);
+    check_close(values[31], 490.0f32 / 4095.0f32, tol);
+    check_close(values[32], 987.0f32 / 4095.0f32, tol);
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, lut3d_inv)` @ v2.5.2.
+#[test]
+fn lut3d_inv() {
+    let ctf_file = "lut3d_example_Inv.ctf";
+
+    let cached_file = load_clf_file(ctf_file).unwrap();
+
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 1);
+
+    let p_lut = as_lut3d(&op_list[0]);
+
+    // For an InverseLUT3D, the file "out" depth is set by the inBitDepth of the file.
+    assert_eq!(p_lut.get_file_output_bit_depth(), BitDepth::Uint12);
+
+    assert_eq!(p_lut.get_interpolation(), Interpolation::Tetrahedral);
+    assert_eq!(p_lut.get_direction(), TransformDirection::Inverse);
+
+    let array = p_lut.get_array();
+    assert_eq!(array.get_num_color_components(), 3);
+    assert_eq!(
+        array.get_num_values(),
+        array.get_length()
+            * array.get_length()
+            * array.get_length()
+            * array.get_max_color_components()
+    );
+    assert_eq!(array.get_values().len() as c_ulong, array.get_num_values());
+
+    // Validate that the array was scaled by the inBitDepth of the file.
+    assert_eq!(array.get_length(), 17);
+    let values = array.get_values();
+    check_close(values[0], 25.0f32 / 4095.0f32, 1e-8f32);
+    check_close(values[1], 30.0f32 / 4095.0f32, 1e-8f32);
+    assert_eq!(values[2], 33.0f32 / 4095.0f32);
+
+    check_close(values[18], 26.0f32 / 4095.0f32, 1e-8f32);
+    assert_eq!(values[19], 308.0f32 / 4095.0f32);
+    assert_eq!(values[20], 580.0f32 / 4095.0f32);
+
+    assert_eq!(values[30], 0.0f32);
+    assert_eq!(values[31], 586.0f32 / 4095.0f32);
+    assert_eq!(values[32], 1350.0f32 / 4095.0f32);
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, lut3d_unequal_size)` @ v2.5.2.
+#[test]
+fn lut3d_unequal_size() {
+    let file_name = "clf/illegal/lut3d_unequal_size.clf";
+    check_throw_what(load_clf_file(file_name), "Illegal array dimensions 2 2 3 3");
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, tabluation_support)` @ v2.5.2.
+#[test]
+fn tabluation_support() {
+    // This clf file contains tabulations used as delimiters for a series of numbers.
+    let ctf_file = "clf/tabulation_support.clf";
+    let cached_file = load_clf_file(ctf_file).unwrap();
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(
+        cached_file.transform.get_id(),
+        b"e0a0ae4b-adc2-4c25-ad70-fa6f31ba219d"
+    );
+    assert_eq!(op_list.len(), 1);
+
+    let p_l = as_lut3d(&op_list[0]);
+
+    assert_eq!(p_l.get_file_output_bit_depth(), BitDepth::Uint10);
+    assert_eq!(p_l.get_interpolation(), Interpolation::Tetrahedral);
+
+    let array = p_l.get_array();
+    assert_eq!(array.get_length(), 3);
+    assert_eq!(array.get_num_color_components(), 3);
+    assert_eq!(array.get_num_values(), 81);
+    assert_eq!(array.get_values().len(), 81);
+
+    let scale = get_bit_depth_max_value(BitDepth::Uint10).unwrap() as f32;
+    let values = array.get_values();
+    assert_eq!(values[0] * scale, -60.0f32);
+    assert_eq!(values[1] * scale, 5.0f32);
+    assert_eq!(values[2] * scale, 75.0f32);
+
+    assert_eq!(values[3] * scale, -10.0f32);
+    check_close(values[4] * scale, 50.0f32, 1e-5f32);
+    check_close(values[5] * scale, 400.0f32, 1e-4f32);
+
+    assert_eq!(values[6] * scale, 0.0f32);
+    check_close(values[7] * scale, 100.0f32, 1e-4f32);
+    assert_eq!(values[8] * scale, 1200.0f32);
+
+    assert_eq!(values[9] * scale, -40.0f32);
+    assert_eq!(values[10] * scale, 500.0f32);
+    assert_eq!(values[11] * scale, -30.0f32);
+
+    assert_eq!(values[3 * 26] * scale, 1110.0f32);
+    assert_eq!(values[3 * 26 + 1] * scale, 900.0f32);
+    assert_eq!(values[3 * 26 + 2] * scale, 1200.0f32);
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, indexMap_test2_clfv2)` @ v2.5.2.
+#[test]
+fn index_map_test2_clfv2() {
+    let ctf_file = "indexMap_test2_clfv2.clf";
+    let cached_file = load_clf_file(ctf_file).unwrap();
+
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 2);
+    let p_r = as_range(&op_list[0]);
+    assert_eq!(p_r.get_min_in_value(), f64::from(-0.1f32));
+    assert_eq!(p_r.get_max_in_value(), f64::from(19.0f32));
+    assert_eq!(p_r.get_min_out_value(), f64::from(0.0f32));
+    assert_eq!(p_r.get_max_out_value(), f64::from(1.0f32));
+    assert_eq!(p_r.get_file_input_bit_depth(), BitDepth::F32);
+    assert_eq!(p_r.get_file_output_bit_depth(), BitDepth::F32);
+
+    // Check the LUT is ok.
+    let p_l = as_lut3d(&op_list[1]);
+    assert_eq!(p_l.get_array().get_length(), 2);
+    assert_eq!(p_l.get_file_output_bit_depth(), BitDepth::Uint10);
 }
