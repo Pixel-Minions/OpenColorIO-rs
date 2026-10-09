@@ -2140,6 +2140,24 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   icc_profile_reader.rs`), per platform; checked against the wheel on both
   (`crates/ocio/tests/file_format_icc_oracle.rs`, "a desc of size 2^32 - 1").
 
+### I-167. ICC parametric curves past a `long`'s range check differently on Windows and Linux
+
+- **Upstream:** `ValidateParametricCurve`'s `QuantizeF` (`src/OpenColorIO/fileformats/
+  FileFormatICC.cpp:298-302` @ v2.5.2) rounds with `std::lround(float)`, the C runtime's
+  `lroundf`, to a `long`: 32 bits on Windows, 64 on Linux. For a NaN (the power law of a
+  negative argument, checked only after the discontinuity check) or a value out of range,
+  the UCRT returns 0 (`LONG_MIN` for exactly 2^31) and glibc `LONG_MIN`. So a type 3 curve
+  whose power law has a negative argument fails with `Expecting no negative arguments to the
+  power law.` on Windows and `Expecting no negative discontinuity at linear segment
+  boundary.` on Linux, and a curve with a segment past 2^31 / 1023 checks (and warns)
+  differently.
+- **Who notices:** nobody but malformed profiles: their curves are errors or out of any
+  display's range either way.
+- **A fix:** check the parameters before computing, and quantize in a type that holds them.
+- **Status:** matched in `p4-readers` (4.7b, `lround` in
+  `crates/ocio/src/fileformats/file_format_icc.rs`, checked against the platform's `lroundf`);
+  checked against the wheel on both (`crates/ocio/tests/file_format_icc_oracle.rs`).
+
 ## File formats
 
 ### I-170. expat counts a start tag's attribute values twice

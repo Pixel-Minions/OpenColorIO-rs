@@ -4,8 +4,13 @@
 //! What the readers' ported tests share: a port of the file helpers of
 //! `tests/cpu/UnitTestUtils.h` and `UnitTestUtils.cpp` @ v2.5.2.
 
+use crate::config::Config;
+use crate::context::Context;
 use crate::fileformats::input_stream::{InputStream, OpenMode};
+use crate::transforms::file_transform::{FileTransform, build_file_transform_ops};
 use ocio_ops::exception::{Exception, Result};
+use ocio_ops::op::OpVec;
+use ocio_ops::open_color_types::TransformDirection;
 
 /// The directory of upstream's test files, with `/` separators (not a Windows verbatim path).
 ///
@@ -37,4 +42,20 @@ pub(crate) fn load_test_file<T>(
 
     // Read file
     read(&mut filestream, file_path.as_bytes())
+}
+
+/// Port of `BuildOpsTest` (tests/cpu/UnitTestUtils.cpp:50-61 @ v2.5.2): the ops of a file
+/// transform of the test file `file_name`, in an empty config.
+pub(crate) fn build_ops_test(
+    file_ops: &mut OpVec,
+    file_name: &str,
+    context: &Context,
+    dir: TransformDirection,
+) -> Result<()> {
+    let mut file_transform = FileTransform::new();
+    file_transform.set_src(format!("{}/{file_name}", get_test_files_dir()));
+
+    // Create empty Config to use
+    let config = Config::new()?;
+    build_file_transform_ops(file_ops, &config, context, &file_transform, dir)
 }

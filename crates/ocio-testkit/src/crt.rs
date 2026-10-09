@@ -62,6 +62,7 @@ mod ffi {
         pub(super) fn exp2(x: c_double) -> c_double;
         pub(super) fn powf(x: c_float, y: c_float) -> c_float;
         pub(super) fn exp2f(x: c_float) -> c_float;
+        pub(super) fn lroundf(x: c_float) -> c_long;
     }
 
     #[cfg(windows)]
@@ -379,6 +380,16 @@ pub fn exp2f_c(x: f32) -> f32 {
     let x = std::hint::black_box(x);
     // SAFETY: `exp2f` takes and returns plain values.
     unsafe { ffi::exp2f(x) }
+}
+
+/// `lroundf(x)`: `x` rounded to the nearest integer, halves away from zero, as a `long` (32
+/// bits on Windows, 64 on Linux), widened to `i64`; what each library returns for a NaN or a
+/// value out of range is its own.
+// `long` is already `i64` on Linux.
+#[allow(clippy::useless_conversion)]
+pub fn lroundf_c(x: f32) -> i64 {
+    // SAFETY: a plain function of a float.
+    i64::from(unsafe { ffi::lroundf(x) })
 }
 
 /// `strtoul(input, &end, base)` in the "C" locale. `unsigned long` is 32 bits on Windows and

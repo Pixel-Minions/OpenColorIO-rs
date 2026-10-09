@@ -9,6 +9,8 @@
 //! The oracle's process holds exactly the request's variables, set one by one; the port reads
 //! a `MapEnv` the same variables are set in, through OCIO's `Setenv`, on the test's own thread.
 
+mod common;
+
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -4030,4 +4032,119 @@ fn color_spaces_used_match_the_wheel() {
     let refs: Vec<&[u8]> = names.iter().map(|n| n.as_bytes()).collect();
     let probes = probes(&refs, &[]);
     check_items("color spaces used", "new", &[], items, &probes);
+}
+
+/// A display profile of the tags `tags` (signature, data), as `instantiateDisplayFromICCProfile`
+/// reads it: the header, the tag table, the tags' data.
+fn icc_profile(tags: &[(&[u8; 4], Vec<u8>)]) -> Vec<u8> {
+    let mut out = vec![0u8; 128];
+    out[12..16].copy_from_slice(b"mntr");
+    out[16..20].copy_from_slice(b"RGB ");
+    out[20..24].copy_from_slice(b"XYZ ");
+    out[36..40].copy_from_slice(b"acsp");
+    out.extend_from_slice(&(tags.len() as u32).to_be_bytes());
+    let mut offset = 128 + 4 + 12 * tags.len();
+    let mut data = Vec::new();
+    for (sig, d) in tags {
+        out.extend_from_slice(*sig);
+        out.extend_from_slice(&(offset as u32).to_be_bytes());
+        out.extend_from_slice(&(d.len() as u32).to_be_bytes());
+        data.extend_from_slice(d);
+        offset += d.len();
+    }
+    out.extend_from_slice(&data);
+    let size = out.len() as u32;
+    out[0..4].copy_from_slice(&size.to_be_bytes());
+    out
+}
+
+/// A `desc` tag of `text`.
+fn icc_desc(text: &[u8]) -> Vec<u8> {
+    let mut d = b"desc\0\0\0\0".to_vec();
+    d.extend_from_slice(&(text.len() as u32).to_be_bytes());
+    d.extend_from_slice(text);
+    d
+}
+
+/// `instantiateDisplayFromICCProfile` on a raw config: without a virtual display, then with
+/// one; the display and its color space named by the profile's description (`$` and `%` as
+/// `_`), or by the file's name without one; the same profile twice; active displays and views;
+/// a description naming an existing color space; files that don't open or read; and with
+/// `OCIO_ACTIVE_DISPLAYS` set.
+#[test]
+fn instantiate_display_from_icc_profile_matches_the_wheel() {
+    let xyz = b"XYZ \0\0\0\0\0\0\xf6\xd6\0\x01\0\0\0\0\xd3\x2d".to_vec();
+    let dir = common::lut_files::write_files(&[
+        common::lut_files::file(
+            "monitor.icc",
+            icc_profile(&[(b"desc", icc_desc(b"Monitor $1 %2\0"))]),
+        ),
+        common::lut_files::file("second.icc", icc_profile(&[(b"desc", icc_desc(b"Second"))])),
+        common::lut_files::file("nodesc.icc", icc_profile(&[(b"wtpt", xyz.clone())])),
+        common::lut_files::file("empty.icc", icc_profile(&[(b"desc", icc_desc(b"\0"))])),
+        common::lut_files::file("raw.icc", icc_profile(&[(b"desc", icc_desc(b"raw"))])),
+        common::lut_files::file("cafe.icc", icc_profile(&[(b"desc", icc_desc(b"Caf\xe9"))])),
+        common::lut_files::file(
+            "dscm.icc",
+            icc_profile(&[(b"desc", icc_desc(b"desc")), (b"dscm", xyz)]),
+        ),
+        common::lut_files::file("short.icc", vec![0u8; 100]),
+        common::lut_files::file("label.txt", "instantiate_display_from_icc_profile"),
+    ]);
+    let path = |name: &str| format!("{dir}/{name}").into_bytes();
+    let upstream = ocio_testkit::paths::upstream_dir()
+        .join("tests/data/files/icc-test-3.icm")
+        .to_string_lossy()
+        .replace('\\', "/")
+        .into_bytes();
+    let items: Vec<Item> = vec![
+        instantiate_display_from_icc_profile(&path("monitor.icc")).into(),
+        add_virtual_display_view(b"vv", b"", b"<USE_DISPLAY_NAME>").into(),
+        add_virtual_display_shared_view(b"sv").into(),
+        instantiate_display_from_icc_profile(&path("monitor.icc")).into(),
+        instantiate_display_from_icc_profile(&path("monitor.icc")).into(),
+        instantiate_display_from_icc_profile(&path("nodesc.icc")).into(),
+        instantiate_display_from_icc_profile(&path("empty.icc")).into(),
+        instantiate_display_from_icc_profile(&path("dscm.icc")).into(),
+        instantiate_display_from_icc_profile(&upstream).into(),
+        set_active_displays(b"Other").into(),
+        set_active_views(b"x").into(),
+        instantiate_display_from_icc_profile(&path("second.icc")).into(),
+        instantiate_display_from_icc_profile(&path("raw.icc")).into(),
+        instantiate_display_from_icc_profile(&path("cafe.icc")).into(),
+        Item::Copy,
+        instantiate_display_from_icc_profile(&path("missing.icc")).into(),
+        instantiate_display_from_icc_profile(&path("short.icc")).into(),
+        instantiate_display_from_icc_profile(&path("second.icc")).into(),
+    ];
+    let probes = probes_of(&[b"raw", b"Second", b"Monitor _1 _2"]).displays(
+        &[
+            b"Monitor _1 _2",
+            b"nodesc.icc",
+            b"empty.icc",
+            b"Second",
+            b"raw",
+            b"Other",
+        ],
+        &[b"vv", b"sv", b"x"],
+    );
+    check_items(
+        "instantiateDisplayFromICCProfile",
+        "raw",
+        &[],
+        items,
+        &probes,
+    );
+
+    let env: &[(&str, &[u8])] = &[("OCIO_ACTIVE_DISPLAYS", b"A, B")];
+    check_items(
+        "instantiateDisplayFromICCProfile, OCIO_ACTIVE_DISPLAYS",
+        "raw",
+        env,
+        vec![
+            add_virtual_display_view(b"vv", b"", b"<USE_DISPLAY_NAME>").into(),
+            instantiate_display_from_icc_profile(&path("second.icc")).into(),
+        ],
+        &probes,
+    );
 }

@@ -337,21 +337,8 @@ fn create_formats() -> Vec<Box<dyn FileFormat>> {
         stub(vec![FormatInfo::new(
             "houdini", "lut", read_bake, all_bakes,
         )]),
-        // FileFormatICC.cpp:81-84, 98-115: binary; the three infos share one `FormatInfo`, its
-        // name and extension changed.
-        Box::new(NotPortedFormat {
-            infos: vec![
-                FormatInfo::new(
-                    "International Color Consortium profile",
-                    "icc",
-                    C::READ,
-                    B::NONE,
-                ),
-                FormatInfo::new("Image Color Matching profile", "icm", C::READ, B::NONE),
-                FormatInfo::new("ICC profile", "pf", C::READ, B::NONE),
-            ],
-            binary: true,
-        }),
+        // FileFormatICC.cpp:80-83, 98-115.
+        Box::new(crate::fileformats::file_format_icc::LocalFileFormat),
         // FileFormatIridasCube.cpp:140-148.
         stub(vec![FormatInfo::new(
             "iridas_cube",
