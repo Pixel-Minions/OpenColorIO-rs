@@ -9,6 +9,8 @@ pub mod file_format_ccc;
 pub mod file_format_cdl;
 pub mod file_format_discreet1dl;
 pub mod file_format_icc;
+pub mod file_format_iridas_cube;
+pub mod file_format_resolve_cube;
 pub mod file_format_spi1d;
 pub mod file_format_spi3d;
 pub mod file_format_spimtx;

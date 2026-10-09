@@ -340,12 +340,7 @@ fn create_formats() -> Vec<Box<dyn FileFormat>> {
         // FileFormatICC.cpp:80-83, 98-115.
         Box::new(crate::fileformats::file_format_icc::LocalFileFormat),
         // FileFormatIridasCube.cpp:140-148.
-        stub(vec![FormatInfo::new(
-            "iridas_cube",
-            "cube",
-            read_bake,
-            B::LUT_3D,
-        )]),
+        Box::new(crate::fileformats::file_format_iridas_cube::LocalFileFormat),
         // FileFormatIridasItx.cpp:113-121.
         stub(vec![FormatInfo::new(
             "iridas_itx",
@@ -366,12 +361,7 @@ fn create_formats() -> Vec<Box<dyn FileFormat>> {
             FormatInfo::new("pandora_m3d", "m3d", C::READ, B::NONE),
         ]),
         // FileFormatResolveCube.cpp:247-257.
-        stub(vec![FormatInfo::new(
-            "resolve_cube",
-            "cube",
-            read_bake,
-            all_bakes,
-        )]),
+        Box::new(crate::fileformats::file_format_resolve_cube::LocalFileFormat),
         // FileFormatSpi1D.cpp:82-90.
         Box::new(crate::fileformats::file_format_spi1d::LocalFileFormat),
         // FileFormatSpi3D.cpp:72-80.

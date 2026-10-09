@@ -22,6 +22,7 @@ pub(crate) mod look_parse;
 pub mod lut_limits;
 pub mod named_transform;
 pub(crate) mod ocio_yaml;
+pub mod parse_utils;
 pub mod path_utils;
 pub mod processor;
 pub(crate) mod tokens_manager;

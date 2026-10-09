@@ -491,9 +491,9 @@ note = "1.2c: FinalizeOps (132-139) and OpRcPtrVec::finalize (598-609); 1.2d (th
 [[file]]
 path = "src/OpenColorIO/ParseUtils.cpp"
 kind = "src"
-target = ["crates/ocio-ops/src/parse_utils.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-gpu/src/open_color_types.rs", "crates/ocio/src/transforms/range_transform.rs"]
+target = ["crates/ocio-ops/src/parse_utils.rs", "crates/ocio-ops/src/open_color_types.rs", "crates/ocio-gpu/src/open_color_types.rs", "crates/ocio/src/transforms/range_transform.rs", "crates/ocio/src/parse_utils.rs"]
 status = "partial"
-note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection; 1.1a: BitDepthToString, next to BitDepth; 1.2e: LoggingLevelToString and LoggingLevelFromString, next to LoggingLevel; 1.7c: GpuLanguageToString, next to GpuLanguage; 1.3n1: AllocationToString, next to Allocation; 1.3m1: TransformDirectionToString, next to TransformDirection; p1-optimizer A: InterpolationToString, in open_color_types.rs; p1-transforms-fam1 (1.8c): RangeStyleToString, next to RangeStyle; p1-transforms-fam2 (1.8d): NegativeStyleToString, next to NegativeStyle; p1-transforms-fam2 (1.8f): CDLStyleToString, next to CDLStyle; p3-context 3.5c: BoolToString/FromString, TransformDirectionFromString, BitDepthFromString, BitDepthIsFloat, BitDepthToInt, AllocationFromString, InterpolationFromString, EnvironmentModeToString/FromString, CDLStyleFromString, NegativeStyleFromString, StrEqualsCaseIgnore, SplitStringEnvStyle, JoinStringEnvStyle, IntersectStringVecsCaseIgnore, FindInStringVecCaseIgnore in parse_utils.rs; RangeStyleFromString next to RangeStyle; p2-ff-cpu 2.3a1: FixedFunctionStyleToString, next to FixedFunctionStyle; p2-rgbcurve 2.6a: GradingStyleToString, next to GradingStyle; p3-config-1 3.4f: the ROLE_* constants (530-542) in parse_utils.rs; p3-yaml-load-1 3.3i2: FixedFunctionStyleFromString (390-421), next to FixedFunctionStyle. StringToInt, StringToFloat, FloatToString, the string-vector and XML helpers wait for Phase 4. StringToInt, StringToFloat, FloatToString, the string-vector and XML helpers wait for Phase 4. StringToInt, StringToFloat, FloatToString, the string-vector and XML helpers wait for Phase 4; p2-rgbcurve 2.6a: GradingStyleToString, next to GradingStyle. p4-parse 4.0a: ConvertSpecialCharToXmlToken, ConvertXmlTokenToSpecialChar, FloatToString, FloatVecToString, DoubleToString, DoubleVecToString, StringToFloat, StringToInt (num_get), StringVecToFloatVec, StringVecToIntVec in parse_utils.rs. nextline comes with the readers' input streams (4.0c)"
+note = "S2: GetInverseTransformDirection and CombineTransformDirections, next to TransformDirection; 1.1a: BitDepthToString, next to BitDepth; 1.2e: LoggingLevelToString and LoggingLevelFromString, next to LoggingLevel; 1.7c: GpuLanguageToString, next to GpuLanguage; 1.3n1: AllocationToString, next to Allocation; 1.3m1: TransformDirectionToString, next to TransformDirection; p1-optimizer A: InterpolationToString, in open_color_types.rs; p1-transforms-fam1 (1.8c): RangeStyleToString, next to RangeStyle; p1-transforms-fam2 (1.8d): NegativeStyleToString, next to NegativeStyle; p1-transforms-fam2 (1.8f): CDLStyleToString, next to CDLStyle; p3-context 3.5c: BoolToString/FromString, TransformDirectionFromString, BitDepthFromString, BitDepthIsFloat, BitDepthToInt, AllocationFromString, InterpolationFromString, EnvironmentModeToString/FromString, CDLStyleFromString, NegativeStyleFromString, StrEqualsCaseIgnore, SplitStringEnvStyle, JoinStringEnvStyle, IntersectStringVecsCaseIgnore, FindInStringVecCaseIgnore in parse_utils.rs; RangeStyleFromString next to RangeStyle; p2-ff-cpu 2.3a1: FixedFunctionStyleToString, next to FixedFunctionStyle; p2-rgbcurve 2.6a: GradingStyleToString, next to GradingStyle; p3-config-1 3.4f: the ROLE_* constants (530-542) in parse_utils.rs; p3-yaml-load-1 3.3i2: FixedFunctionStyleFromString (390-421), next to FixedFunctionStyle. StringToInt, StringToFloat, FloatToString, the string-vector and XML helpers wait for Phase 4. StringToInt, StringToFloat, FloatToString, the string-vector and XML helpers wait for Phase 4. StringToInt, StringToFloat, FloatToString, the string-vector and XML helpers wait for Phase 4; p2-rgbcurve 2.6a: GradingStyleToString, next to GradingStyle. p4-parse 4.0a: ConvertSpecialCharToXmlToken, ConvertXmlTokenToSpecialChar, FloatToString, FloatVecToString, DoubleToString, DoubleVecToString, StringToFloat, StringToInt (num_get), StringVecToFloatVec, StringVecToIntVec in parse_utils.rs. nextline comes with the readers' input streams (4.0c); p3-yaml-load-1 3.3i2: FixedFunctionStyleFromString (390-421), next to FixedFunctionStyle. p4-parse 4.0a: ConvertSpecialCharToXmlToken, ConvertXmlTokenToSpecialChar, FloatToString, FloatVecToString, DoubleToString, DoubleVecToString, StringToFloat, StringToInt (num_get), StringVecToFloatVec, StringVecToIntVec in parse_utils.rs. p4-readers 4.2c: nextline (674-691), in crates/ocio/src/parse_utils.rs next to the input stream"
 
 [[file]]
 path = "src/OpenColorIO/ParseUtils.h"
@@ -914,8 +914,9 @@ note = "p4-readers 4.7b; the SampleICC subset it reads with (ext/sampleicc/src/i
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatIridasCube.cpp"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/file_format_iridas_cube.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_iridas_cube.rs"]
+status = "partial"
+note = "p4-readers 4.2c: the reader and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_cube_oracle.rs; bake comes with WP 4.8"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatIridasItx.cpp"
@@ -938,8 +939,9 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatResolveCube.cpp"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/file_format_resolve_cube.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_resolve_cube.rs"]
+status = "partial"
+note = "p4-readers 4.2c: the reader and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_cube_oracle.rs; bake comes with WP 4.8"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatSpi1D.cpp"
@@ -4619,8 +4621,9 @@ note = "p4-readers 4.7a: types and endian (icc_profile_reader_tests.rs); 4.7b: t
 [[file]]
 path = "tests/cpu/fileformats/FileFormatIridasCube_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-formats/src/fileformats/file_format_iridas_cube_tests.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_iridas_cube_tests.rs"]
+status = "partial"
+note = "p4-readers 4.2c: format_info, read_failure, whitespace_handling, load_1d_op, load_3d_op; no_shaper bakes, and comes with WP 4.8"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatIridasItx_tests.cpp"
@@ -4643,8 +4646,9 @@ status = "todo"
 [[file]]
 path = "tests/cpu/fileformats/FileFormatResolveCube_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-formats/src/fileformats/file_format_resolve_cube_tests.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_resolve_cube_tests.rs"]
+status = "partial"
+note = "p4-readers 4.2c: format_info, read_1d, read_3d, read_1d_3d, read_default_range, read_failure, load_ops; bake_1d, bake_1d_shaper, bake_3d and bake_1d_3d come with WP 4.8"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatSpi1D_tests.cpp"
