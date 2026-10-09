@@ -156,6 +156,17 @@ fn readable_cases() -> Vec<Case> {
             new_format("LUT: 3 256", 3, 256, 255).as_bytes(),
         ));
     }
+    // Only the file's own name gives the hint, not its directory's.
+    cases.push(case(
+        "a directory named to8",
+        "a_to8/lut.lut",
+        new_format("LUT: 3 1024", 3, 1024, 1023).as_bytes(),
+    ));
+    cases.push(case(
+        "a directory named to8, the file to12",
+        "a_to8/b_to12.lut",
+        new_format("LUT: 3 1024", 3, 1024, 1023).as_bytes(),
+    ));
     cases
 }
 

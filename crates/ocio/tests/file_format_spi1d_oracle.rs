@@ -129,6 +129,32 @@ fn generated_cases() -> Vec<Case> {
         let header: Vec<&str> = HEADER.iter().filter(|h| **h != skipped).copied().collect();
         add(format!("without {skipped}"), spi1d(&header, &DATA1, "\n"));
     }
+    // Only a line that starts with `{` ends the header.
+    add(
+        "a brace inside header lines".into(),
+        spi1d(
+            &[
+                "Version 1",
+                "From 0 1 {",
+                " {",
+                "x{",
+                "Length 4",
+                "Components 1",
+            ],
+            &DATA1,
+            "
+",
+        ),
+    );
+    add(
+        "a brace inside a tag's line".into(),
+        spi1d(
+            &["Version 1", "From 0 1", "Length 4 {", "Components 1"],
+            &DATA1,
+            "
+",
+        ),
+    );
     add(
         "tags reversed, comments".into(),
         spi1d(

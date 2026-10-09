@@ -7,6 +7,8 @@
 //! config, as type and bytes; with debug logging, the error and the log of the load
 //! (`processor_debug_log`). The readers' own errors come with the readers (WP 4.2-4.9).
 
+mod common;
+
 use std::sync::{Arc, Mutex};
 
 use ocio::{Config, ExceptionKind, FileTransform, Transform};
@@ -216,6 +218,67 @@ fn debug_logging_logs_each_format_tried_as_in_the_wheel() {
             wheel_error.escape_ascii().to_string(),
             "{src}"
         );
+        assert_eq!(loader_log(&port_log), loader_log(&wheel_log), "{src}");
+    }
+}
+
+/// With debug logging, a file its extension's format reads logs the file it opens and the
+/// format that loaded it ("Loaded primary format"), then what building the processor logs; a
+/// file another format reads logs each failed primary format and the alternative that loaded
+/// it. Each request starts from empty caches (`with_files`), as the port does here.
+#[test]
+fn debug_logging_logs_the_format_that_loads_as_in_the_wheel() {
+    let _logging = LOGGING.lock().unwrap_or_else(|e| e.into_inner());
+    let dir = test_files_dir();
+    // A spimtx file under the spi1d extension: the spi1d format fails, spimtx reads it.
+    let matrix = std::fs::read(format!("{dir}/camera_to_aces.spimtx")).unwrap();
+    let alt = common::lut_files::write_files(&[common::lut_files::file("matrix.spi1d", matrix)]);
+    let srcs = [
+        format!("{dir}/cpf.spi1d"),
+        format!("{dir}/camera_to_aces.spimtx"),
+        format!("{alt}/matrix.spi1d"),
+    ];
+    let calls: Vec<BatchCall<'_>> = srcs
+        .iter()
+        .map(|src| BatchCall {
+            cmd: "with_files",
+            args: json!({"files": {}, "command": "processor_debug_log", "args": {
+                "transform": {"class": "FileTransform", "calls": [["setSrc", src]]}}}),
+            blobs: Vec::new(),
+        })
+        .collect();
+    let results = Oracle::get().batch(&calls, true);
+
+    let messages = Arc::new(Mutex::new(Vec::<Vec<u8>>::new()));
+    let sink = messages.clone();
+    let function: LoggingFunction = Arc::new(move |m: &[u8]| {
+        sink.lock().unwrap().push(m.to_vec());
+    });
+    let level = get_logging_level();
+    for (src, result) in srcs.iter().zip(results) {
+        let wheel = result.unwrap_or_else(|e| panic!("{src}: {e}")).result;
+        assert!(wheel.get("exception").is_none(), "{src}: {wheel}");
+        let wheel_log: Vec<Vec<u8>> = wheel["processor"]
+            .as_array()
+            .expect("the processor's log")
+            .iter()
+            .map(|m| m.as_str().expect("a message").as_bytes().to_vec())
+            .collect();
+
+        let mut file_transform = FileTransform::new();
+        file_transform.set_src(src);
+        let config = Config::create_raw().unwrap();
+        ocio::clear_all_caches();
+        messages.lock().unwrap().clear();
+        set_logging_function(Some(function.clone())).unwrap();
+        set_logging_level(LoggingLevel::Debug);
+        let built = config.processor(&Transform::File(file_transform));
+        set_logging_level(level);
+        reset_to_default_logging_function();
+        assert!(built.is_ok(), "{src}: {built:?}");
+        let port_log = messages.lock().unwrap().clone();
+        // The failed formats' lines up to their readers' errors (some readers aren't
+        // ported yet), the other lines whole.
         assert_eq!(loader_log(&port_log), loader_log(&wheel_log), "{src}");
     }
 }
