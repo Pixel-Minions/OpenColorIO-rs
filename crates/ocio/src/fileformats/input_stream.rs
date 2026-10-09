@@ -273,6 +273,52 @@ impl InputStream {
             self.pos = usize::try_from(pos).unwrap_or(usize::MAX);
         }
     }
+
+    /// Extracts a word into `word`: white space skipped first (the classic locale's: space,
+    /// `\t`, `\n`, `\v`, `\f`, `\r`), then the bytes up to the next white space (not
+    /// extracted) or the end of the stream (`eofbit`). The end reached while skipping sets
+    /// `eofbit` and `failbit`, and leaves `word` alone, as a stream that isn't `good()` does
+    /// (`failbit`, its sentry).
+    ///
+    /// Port of `std::operator>>(std::istream &, std::string &)` (C++17 [string.io] 24.3.3.9/
+    /// 1-3), as libstdc++ and the MSVC STL implement it, with no field width set.
+    pub fn extract_word(&mut self, word: &mut Vec<u8>) {
+        let is_space = |c: u8| matches!(c, b' ' | b'\t' | b'\n' | 0x0b | 0x0c | b'\r');
+        if !self.good() {
+            self.fail = true;
+            return;
+        }
+        // The sentry skips white space.
+        loop {
+            match self.peek_byte() {
+                Some(c) if is_space(c) => self.pos += 1,
+                Some(_) => break,
+                None => {
+                    if !self.bad {
+                        self.eof = true;
+                    }
+                    self.fail = true;
+                    return;
+                }
+            }
+        }
+        word.clear();
+        loop {
+            match self.peek_byte() {
+                Some(c) if !is_space(c) => {
+                    word.push(c);
+                    self.pos += 1;
+                }
+                Some(_) => break,
+                None => {
+                    if !self.bad {
+                        self.eof = true;
+                    }
+                    break;
+                }
+            }
+        }
+    }
 }
 
 /// The bytes a text-mode read of `raw` gives in the UCRT (`_read` of a text-mode file):

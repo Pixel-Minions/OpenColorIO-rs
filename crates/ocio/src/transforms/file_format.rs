@@ -331,9 +331,7 @@ fn create_formats() -> Vec<Box<dyn FileFormat>> {
         // FileFormatDiscreet1DL.cpp:675-682.
         Box::new(crate::fileformats::file_format_discreet1dl::LocalFileFormat),
         // FileFormatHDL.cpp:295-305.
-        stub(vec![FormatInfo::new(
-            "houdini", "lut", read_bake, all_bakes,
-        )]),
+        Box::new(crate::fileformats::file_format_hdl::LocalFileFormat),
         // FileFormatICC.cpp:80-83, 98-115.
         Box::new(crate::fileformats::file_format_icc::LocalFileFormat),
         // FileFormatIridasCube.cpp:140-148.

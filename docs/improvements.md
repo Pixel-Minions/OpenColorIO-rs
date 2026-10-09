@@ -3021,6 +3021,19 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Status:** matched in `p4-readers` (4.7a, `read_bytes` in `crates/ocio/src/fileformats/icc/
   icc_profile_reader.rs`); the wheel's results for such profiles are compared in 4.7b.
 
+### U-71. A Houdini `3D+1D` LUT without a prelut size
+
+- **Upstream:** the Houdini reader takes a `Length` line of one or two sizes, and for a
+  `3D+1D` LUT reads the second, `lut_sizes[1]` (`src/OpenColorIO/fileformats/
+  FileFormatHDL.cpp:488-490` @ v2.5.2), whether the line gave it or not: with one size, past
+  the end of the vector it read the sizes into.
+- **Who notices:** malformed files: a `3D+1D` LUT always has a prelut.
+- **A fix:** require two sizes for `3D+1D`.
+- **Decided** (the general rule): the port's error, "A 3D+1D Houdini LUT needs a prelut size
+  on the 'Length' line, after the cube size (...)".
+- **Status:** matched with an error in `p4-readers` (4.3b, `crates/ocio/src/fileformats/
+  file_format_hdl.rs`).
+
 ### U-75. A CDL or CCC file whose root element never starts
 
 - **Upstream:** the CDL parser picks the schema from the first 5 KiB of the file: the first

@@ -895,8 +895,9 @@ note = "p4-registry 4.3d: the reader (getline, sscanf/sscanf_s, std::stoi, the d
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatHDL.cpp"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/file_format_hdl.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_hdl.rs"]
+status = "partial"
+note = "p4-readers 4.3b: the reader (readHeaders, findHeaderItem, readLuts, CachedFileHDL) and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_hdl_oracle.rs; a 3D+1D Length of one size is an error (U-71); bake comes with WP 4.8"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatICC.cpp"
@@ -4611,8 +4612,9 @@ status = "done"
 [[file]]
 path = "tests/cpu/fileformats/FileFormatHDL_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-formats/src/fileformats/file_format_hdl_tests.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_hdl_tests.rs"]
+status = "partial"
+note = "p4-readers 4.3b: read_1d, read_3d, read_3d_1d; bake_1d, bake_1d_shaper, bake_3d, bake_3d_1d and look_test bake, and come with WP 4.8"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatICC_tests.cpp"
