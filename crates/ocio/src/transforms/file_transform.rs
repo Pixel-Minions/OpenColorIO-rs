@@ -4,8 +4,7 @@
 //! The file transform: a port of the class in `src/OpenColorIO/transforms/FileTransform.cpp`
 //! @ v2.5.2. The format registry (`GetNumFormats`, `GetFormatNameByIndex`,
 //! `GetFormatExtensionByIndex`, `IsFormatExtensionSupported`), the file loading and
-//! `BuildFileTransformOps` come with the file formats (WP 4.1), its `CollectContextVariables`
-//! with WP 3.2a.
+//! `BuildFileTransformOps` come with the file formats (WP 4.1).
 
 use std::fmt;
 
@@ -18,6 +17,7 @@ use ocio_ops::open_color_types::{
 use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 use ocio_ops::utils::string_utils::c_str;
 
+use crate::context::Context;
 use crate::transform::{put_c_str, validate_direction};
 
 /// A transform read from a file (a LUT, a CDL, a CLF or CTF, ...), by path: relative paths are
@@ -195,6 +195,84 @@ impl fmt::Display for FileTransform {
         self.write_text(&mut os);
         f.write_str(&os.to_string_lossy())
     }
+}
+
+/// A new context with the search path, working directory and I/O proxy of `context`, and no
+/// variables (`Context::Create` and its three setters).
+fn context_with_paths_of(context: &Context) -> Context {
+    let mut ctx = Context::new();
+    ctx.set_search_path(context.search_path());
+    ctx.set_working_dir(context.working_dir());
+    ctx.set_config_io_proxy(context.config_io_proxy().cloned());
+    ctx
+}
+
+/// Whether `tr` uses context variables, which it adds to `used_context_vars`: those its source
+/// resolves with; those of the search path, when the file's location depends on them (or when
+/// it can't be found: upstream then counts them, to be safe); and those of its CCC ID.
+///
+/// Port of `CollectContextVariables(const Config &, const Context &, const FileTransform &,
+/// ContextRcPtr &)` (src/OpenColorIO/transforms/FileTransform.cpp:224-298 @ v2.5.2).
+pub(crate) fn collect_file_transform_context_variables(
+    context: &Context,
+    tr: &FileTransform,
+    used_context_vars: &mut Context,
+) -> bool {
+    let src = c_str(tr.src());
+
+    if src.is_empty() {
+        return false;
+    }
+
+    let mut found_context_vars = false;
+
+    // Used to collect the context variables needed to resolve the src string itself (not
+    // involving the search_path yet).
+    let mut ctx_filename = context_with_paths_of(context);
+
+    let resolved_string = context.resolve_string_var_with_used(src, &mut ctx_filename);
+    if resolved_string.as_slice() != src {
+        found_context_vars = true;
+        used_context_vars.add_string_vars(&ctx_filename);
+    }
+
+    // We want to determine if any context vars are needed to resolve the filename. Currently,
+    // resolveFileLocation returns all usedContextVars in the search_path, regardless of whether
+    // they are needed for the given file.  The work-around is to compare the resolved location
+    // with and without using the environment -- if they are the same, it means the environment
+    // was not used. So we create an empty context for this purpose.
+
+    let empty_context = context_with_paths_of(context);
+
+    // Used to collect the context variables needed to resolve the search_path. Note that this
+    // may contain some variables that are not actually used.
+    let mut ctx_filepath = context_with_paths_of(context);
+
+    // TODO: resolveFileLocation() tests the file existence (i.e. uses FileExists()) which is
+    // useless here, and it could potentially add some performance penalty.
+    let compared = context
+        .resolve_file_location_with_used(&resolved_string, &mut ctx_filepath)
+        .and_then(|resolved_filename| {
+            Ok(resolved_filename != empty_context.resolve_file_location(&resolved_string)?)
+        });
+    // It could fail if the file does not exist. That's not the mandate of the method to report
+    // that kind of problem.  To be safe, it returns true i.e. there is a context variable.
+    if compared.unwrap_or(true) {
+        found_context_vars = true;
+        used_context_vars.add_string_vars(&ctx_filepath);
+    }
+
+    // Check if the CCCID is using a context variable and add it to the context if that's the
+    // case.
+    let mut ctx_cccid = Context::new();
+    let cccid = c_str(tr.ccc_id());
+    let resolved_cccid = context.resolve_string_var_with_used(cccid, &mut ctx_cccid);
+    if resolved_cccid.as_slice() != cccid {
+        found_context_vars = true;
+        used_context_vars.add_string_vars(&ctx_cccid);
+    }
+
+    found_context_vars
 }
 
 #[cfg(test)]

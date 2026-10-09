@@ -26,7 +26,7 @@ use crate::context::Context;
 use crate::transforms::allocation_transform::{AllocationTransform, build_allocation_op};
 use crate::transforms::builtin_transform::{BuiltinTransform, build_builtin_ops};
 use crate::transforms::cdl_transform::{CdlTransform, build_cdl_op, create_cdl_transform};
-use crate::transforms::color_space_transform::ColorSpaceTransform;
+use crate::transforms::color_space_transform::{ColorSpaceTransform, build_color_space_ops};
 use crate::transforms::display_view_transform::DisplayViewTransform;
 use crate::transforms::exponent_transform::{
     ExponentTransform, build_exponent_op, create_exponent_transform,
@@ -491,7 +491,9 @@ pub(crate) fn build_ops(
         }
         Transform::Builtin(builtin_transform) => build_builtin_ops(ops, builtin_transform, dir),
         Transform::Cdl(cdl_transform) => build_cdl_op(ops, config, cdl_transform, dir),
-        Transform::ColorSpace(_) => Err(not_ported_yet("ColorSpaceTransform", "WP 3.2a")),
+        Transform::ColorSpace(color_space_transform) => {
+            build_color_space_ops(ops, config, context, color_space_transform, dir)
+        }
         Transform::DisplayView(_) => Err(not_ported_yet("DisplayViewTransform", "WP 3.2c")),
         Transform::Exponent(exponent_transform) => {
             build_exponent_op(ops, config, exponent_transform, dir)

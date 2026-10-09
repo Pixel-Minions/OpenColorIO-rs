@@ -2,18 +2,21 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! The named transform: a port of `src/OpenColorIO/NamedTransform.h` and
-//! `NamedTransform.cpp` @ v2.5.2. `NamedTransform::GetTransform` and the `GetTransform` of a
-//! source and a destination come with the color space transform's op builder (WP 3.2a).
+//! `NamedTransform.cpp` @ v2.5.2, with `NamedTransform::GetTransform` and the `GetTransform`
+//! of a source and a destination, which the color space transform's op builder uses.
 
+use std::borrow::Cow;
 use std::fmt;
 
 use ocio_ops::cfmt::{Crt, OStringStream};
-use ocio_ops::open_color_types::TransformDirection;
+use ocio_ops::exception::{Exception, Result};
+use ocio_ops::open_color_types::{TransformDirection, get_inverse_transform_direction};
 use ocio_ops::platform::strcasecmp;
 use ocio_ops::utils::string_utils::{self, c_str};
 
 use crate::tokens_manager::TokensManager;
 use crate::transform::{Transform, put_c_str};
+use crate::transforms::group_transform::GroupTransform;
 
 /// A named transform: a transform a config names, usable in place of a color space, with
 /// aliases, a family, a description, categories and an encoding, and its forward and inverse
@@ -302,6 +305,75 @@ impl NamedTransform {
         let mut os = OStringStream::new(Crt::NATIVE);
         self.write_text(&mut os);
         os.into_bytes()
+    }
+}
+
+impl NamedTransform {
+    /// The named transform in the direction `dir`: its transform of that direction, or a copy
+    /// of the other one with its direction inverted.
+    ///
+    /// Upstream dereferences the missing transform when the named transform has neither, which
+    /// is undefined behaviour; the port returns "Named transform: it has neither a forward nor
+    /// an inverse transform." instead (docs/improvements.md, U-52). A config's named transforms
+    /// always have one (`addNamedTransform` refuses one without).
+    ///
+    /// Port of `NamedTransform::GetTransform` (src/OpenColorIO/NamedTransform.cpp:182-221 @
+    /// v2.5.2). Its "Named transform: Unspecified TransformDirection." can't happen with a
+    /// [`TransformDirection`].
+    #[doc(alias = "GetTransform")]
+    pub fn get_transform(
+        nt: &NamedTransform,
+        dir: TransformDirection,
+    ) -> Result<Cow<'_, Transform>> {
+        let forward_transform = nt.transform(TransformDirection::Forward);
+        let inverse_transform = nt.transform(TransformDirection::Inverse);
+        let (own, other) = match dir {
+            TransformDirection::Forward => (forward_transform, inverse_transform),
+            TransformDirection::Inverse => (inverse_transform, forward_transform),
+        };
+        if let Some(transform) = own {
+            return Ok(Cow::Borrowed(transform));
+        }
+        // If the transform of this direction does not exist, inverse the other one.
+        let Some(other) = other else {
+            return Err(Exception::new(
+                "Named transform: it has neither a forward nor an inverse transform.",
+            ));
+        };
+        let mut transform = other.create_editable_copy()?;
+        let dir = get_inverse_transform_direction(transform.direction());
+        transform.set_direction(dir);
+        Ok(Cow::Owned(transform))
+    }
+}
+
+/// The transform from the named transform `src` to the named transform `dst`: `src` forward
+/// then `dst` inverse in a group when both are given, else the one given (the color space on
+/// the other side is ignored).
+///
+/// Port of `GetTransform(const ConstNamedTransformRcPtr &, const ConstNamedTransformRcPtr &)`
+/// (src/OpenColorIO/NamedTransform.cpp:310-334 @ v2.5.2).
+pub(crate) fn get_transform<'a>(
+    src: Option<&'a NamedTransform>,
+    dst: Option<&'a NamedTransform>,
+) -> Result<Cow<'a, Transform>> {
+    match (src, dst) {
+        (Some(src), Some(dst)) => {
+            // Both are named transforms.
+            let mut group = GroupTransform::new();
+            let src_transform = NamedTransform::get_transform(src, TransformDirection::Forward)?;
+            group.append_transform(src_transform.create_editable_copy()?);
+            let dst_transform = NamedTransform::get_transform(dst, TransformDirection::Inverse)?;
+            group.append_transform(dst_transform.create_editable_copy()?);
+            Ok(Cow::Owned(Transform::from(group)))
+        }
+        // Src is a named transform, ignore dst color space.
+        (Some(src), None) => NamedTransform::get_transform(src, TransformDirection::Forward),
+        // Dst is a named transform, ignore src color space.
+        (None, Some(dst)) => NamedTransform::get_transform(dst, TransformDirection::Inverse),
+        (None, None) => Err(Exception::new(
+            "GetTransform: one of the parameters has to be not null.",
+        )),
     }
 }
 

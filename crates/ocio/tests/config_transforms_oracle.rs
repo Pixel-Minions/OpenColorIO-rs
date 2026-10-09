@@ -9,11 +9,13 @@
 //! style the port registers, in any case, and the styles the wheel refuses, with its message.
 //! The binding gives them no `equals()`.
 //!
-//! Their processors need their op builders (WP 3.2).
+//! The processors of color space transforms (WP 3.2a), in a config of every kind of color space
+//! and named transform; the display view and look transforms' come with their op builders (WP
+//! 3.2b-c).
 
 mod common;
 
-use common::transforms::{Case, check_text, direction_spec, group};
+use common::transforms::{Case, check_processors_in, check_text, direction_spec, group};
 use ocio::{
     BuiltinTransform, BuiltinTransformRegistry, ColorSpaceTransform, DisplayViewTransform,
     LookTransform, TransformDirection,
@@ -307,4 +309,107 @@ fn file_transforms_match_the_wheel() {
         })
         .collect();
     check_text(&groups, &[]);
+}
+
+/// A config of scene-referred and display-referred color spaces, data, an equality group, an
+/// alias, roles, view transforms and named transforms (one by its forward transform, one by its
+/// inverse), for the processors of color space transforms (WP 3.2a).
+const PROCESSOR_CONFIG: &str = "ocio_profile_version: 2
+environment: {}
+roles:
+  default: raw
+  scene_linear: lin
+displays:
+  d:
+    - !<View> {name: v, colorspace: raw}
+view_transforms:
+  - !<ViewTransform>
+    name: vt
+    from_scene_reference: !<MatrixTransform> {matrix: [2, 0, 0, 0, 0, 3, 0, 0, 0, 0, 4, 0, 0, 0, 0, 1]}
+  - !<ViewTransform>
+    name: vt_display
+    from_display_reference: !<ExponentTransform> {value: 1.5}
+display_colorspaces:
+  - !<ColorSpace>
+    name: disp
+    allocation: lg2
+    allocationvars: [-8, 5, 0.00390625]
+    from_display_reference: !<ExponentTransform> {value: 2.4}
+  - !<ColorSpace>
+    name: disp_to
+    to_display_reference: !<LogTransform> {base: 10}
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+    isdata: true
+  - !<ColorSpace>
+    name: lin
+    aliases: [linear_alias]
+    to_scene_reference: !<MatrixTransform> {offset: [0.1, 0.2, 0.3, 0]}
+  - !<ColorSpace>
+    name: log
+    allocation: lg2
+    from_scene_reference: !<LogTransform> {base: 2}
+  - !<ColorSpace>
+    name: both
+    to_scene_reference: !<CDLTransform> {slope: [1.1, 1, 0.9]}
+    from_scene_reference: !<CDLTransform> {offset: [0.1, 0, 0]}
+  - !<ColorSpace>
+    name: glow
+    from_scene_reference: !<FixedFunctionTransform> {style: ACES_Glow03}
+  - !<ColorSpace>
+    name: eq_a
+    equalitygroup: g
+    to_scene_reference: !<RangeTransform> {min_in_value: 0, max_in_value: 1, min_out_value: 0, max_out_value: 2}
+  - !<ColorSpace>
+    name: eq_b
+    equalitygroup: g
+    to_scene_reference: !<RangeTransform> {min_in_value: 0, max_in_value: 1, min_out_value: 0, max_out_value: 3}
+  - !<ColorSpace>
+    name: none
+named_transforms:
+  - !<NamedTransform>
+    name: nt
+    aliases: [nt_alias]
+    transform: !<MatrixTransform> {offset: [0.5, 0, 0, 0]}
+  - !<NamedTransform>
+    name: nt_inv
+    inverse_transform: !<LogTransform> {base: 10, direction: inverse}
+";
+
+/// The processors of color space transforms between every pair of the config's names (color
+/// spaces, a role, an alias, named transforms and their alias, and missing names), with and
+/// without data bypass, both directions.
+#[test]
+fn color_space_transform_processors_match_the_wheel() {
+    let config = ocio::Config::create_from_stream(PROCESSOR_CONFIG.as_bytes()).unwrap();
+    let names = [
+        "raw",
+        "lin",
+        "linear_alias",
+        "scene_linear",
+        "LOG",
+        "both",
+        "glow",
+        "eq_a",
+        "eq_b",
+        "none",
+        "disp",
+        "disp_to",
+        "nt",
+        "nt_alias",
+        "nt_inv",
+        "missing",
+    ];
+    let mut cases = Vec::new();
+    for (i, &src) in names.iter().enumerate() {
+        for (j, &dst) in names.iter().enumerate() {
+            let bypass = (i + j) % 3 != 0;
+            cases.push(color_space_case(src, dst, bypass, Forward));
+            if (i * names.len() + j).is_multiple_of(4) {
+                cases.push(color_space_case(src, dst, !bypass, Inverse));
+            }
+        }
+    }
+    check_processors_in(&cases, Some(&json!({"yaml": PROCESSOR_CONFIG})), &config);
 }

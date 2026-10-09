@@ -262,7 +262,6 @@ fn processor_error(config: &Config, transform: &Transform, dir: TransformDirecti
 fn processors_of_the_classes_without_builders_are_refused() {
     let config = Config::create_raw().unwrap();
     let cases = [
-        (TransformType::ColorSpace, "ColorSpaceTransform", "WP 3.2a"),
         (
             TransformType::DisplayView,
             "DisplayViewTransform",

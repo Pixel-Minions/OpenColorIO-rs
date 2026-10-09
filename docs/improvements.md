@@ -2493,8 +2493,9 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   with an access violation; so does any processor of such a named transform.
 - **Who notices:** code that asks a named transform without transforms for its transform.
 - **Decided** (general rule): return an error instead (its text is decided with the port).
-- **Status:** to port with `NamedTransform::GetTransform` (WP 3.2a, `p3-builders`), found by the
-  `p3-model-objects` verifier.
+- **Status:** done in `p3-builders` (3.2a, `crates/ocio/src/named_transform.rs`,
+  `NamedTransform::get_transform`): "Named transform: it has neither a forward nor an inverse
+  transform."; found by the `p3-model-objects` verifier.
 
 ### U-53. Regular expressions nested too deep for the wheel's stack
 

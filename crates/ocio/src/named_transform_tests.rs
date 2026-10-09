@@ -119,6 +119,76 @@ fn alias_without_a_config() {
     assert!(!nt.has_alias("other"));
 }
 
+/// Port of `OCIO_ADD_TEST(NamedTransform, static_get_transform)` @ v2.5.2.
+#[test]
+fn static_get_transform() {
+    let _env = crate::test_env::EnvGuard::new();
+    let config = crate::Config::create_raw().unwrap();
+
+    let offset_f: [f64; 4] = [0.1, 0.2, 0.3, 0.4];
+    let offset_i: [f64; 4] = [-offset_f[0], -offset_f[1], -offset_f[2], -offset_f[3]];
+
+    let mut mat1 = MatrixTransform::new();
+    mat1.set_offset(&offset_f);
+    let mut nt1 = NamedTransform::new();
+    nt1.set_transform(Some(&Transform::from(mat1)), TransformDirection::Forward)
+        .unwrap();
+
+    let mut mat2 = MatrixTransform::new();
+    mat2.set_offset(&offset_i);
+    let mut nt2 = NamedTransform::new();
+    nt2.set_transform(Some(&Transform::from(mat2)), TransformDirection::Inverse)
+        .unwrap();
+
+    // The offsets of the one transform of the processor of `src_tf`.
+    let processed_offset = |src_tf: &Transform| {
+        let proc = config.processor(src_tf).unwrap();
+        let group = proc.create_group_transform().unwrap();
+        assert_eq!(group.num_transforms(), 1);
+        match group.transform(0).unwrap() {
+            Transform::Matrix(mat) => mat.offset(),
+            other => panic!("not a MatrixTransform: {other:?}"),
+        }
+    };
+
+    // Forward transform from forward-only named transform
+    {
+        let src_tf = NamedTransform::get_transform(&nt1, TransformDirection::Forward).unwrap();
+        assert_eq!(processed_offset(&src_tf), offset_f);
+    }
+
+    // Inverse transform from forward-only named transform
+    {
+        let src_tf = NamedTransform::get_transform(&nt1, TransformDirection::Inverse).unwrap();
+        assert_eq!(processed_offset(&src_tf), offset_i);
+    }
+
+    // Forward transform from inverse-only named transform
+    {
+        let src_tf = NamedTransform::get_transform(&nt2, TransformDirection::Forward).unwrap();
+        assert_eq!(processed_offset(&src_tf), offset_f);
+    }
+
+    // Inverse transform from inverse-only named transform
+    {
+        let src_tf = NamedTransform::get_transform(&nt2, TransformDirection::Inverse).unwrap();
+        assert_eq!(processed_offset(&src_tf), offset_i);
+    }
+}
+
+/// A named transform with neither transform has no transform in either direction, where
+/// upstream dereferences null (docs/improvements.md, U-52).
+#[test]
+fn get_transform_of_a_named_transform_without_transforms() {
+    let nt = NamedTransform::new();
+    for dir in [TransformDirection::Forward, TransformDirection::Inverse] {
+        check_throw_what(
+            NamedTransform::get_transform(&nt, dir),
+            "Named transform: it has neither a forward nor an inverse transform.",
+        );
+    }
+}
+
 // The tests that read, write and validate configs (WP 3.3j, 3.7, 3.8).
 
 /// Port of `OCIO_ADD_TEST(Config, named_transform_io)` @ v2.5.2.

@@ -15,6 +15,8 @@ use ocio_ops::utils::string_utils::{find, replace_in_place, reverse_find};
 use crate::config::Config;
 use crate::context::Context;
 use crate::transform::Transform;
+use crate::transforms::color_space_transform::collect_color_space_transform_context_variables;
+use crate::transforms::file_transform::collect_file_transform_context_variables;
 
 /// A context variable's name, ordered as `EnvMapKey` orders them: longer names first, then
 /// bytes in order, so that `$TEST1NG` is replaced before `$TEST1`.
@@ -148,17 +150,14 @@ pub fn resolve_context_variables(str: &[u8], map: &EnvMap, used: &mut UsedEnvs) 
     resolve_context_variables_impl(str, map, used, 0)
 }
 
-/// Whether `transform` uses context variables, which it adds to `used_context_vars`: so far
-/// none of the classes in the port use any, and a group asks its children.
+/// Whether `transform` uses context variables, which it adds to `used_context_vars`: the
+/// color space and file transforms' overloads, and a group asks its children.
 ///
 /// Port of `CollectContextVariables(const Config &, const Context &, ConstTransformRcPtr,
 /// ContextRcPtr &)` (src/OpenColorIO/ContextVariableUtils.cpp:179-206 @ v2.5.2) and its
 /// `GroupTransform` overload (transforms/GroupTransform.cpp:206-223 @ v2.5.2). The overloads of
-/// the color space, display view, file and look transforms come with those classes; the other
-/// classes use none.
-// The color space, display view, file and look transforms read the config, the context and
-// the used variables; the group only passes them on.
-#[allow(clippy::only_used_in_recursion)]
+/// the display view and look transforms come with their builders (WP 3.2b-c); the other classes
+/// use none.
 pub(crate) fn collect_context_variables(
     config: &Config,
     context: &Context,
@@ -178,13 +177,16 @@ pub(crate) fn collect_context_variables(
 
             found_context_vars
         }
-        // Their overloads read the names and the config's color spaces, displays, views and
-        // looks; they come with their op builders (WP 3.2a-c), and until then the processor
-        // refuses to build their ops.
-        Transform::ColorSpace(_)
-        | Transform::DisplayView(_)
-        | Transform::File(_)
-        | Transform::Look(_) => false,
+        Transform::ColorSpace(tr) => {
+            collect_color_space_transform_context_variables(config, context, tr, used_context_vars)
+        }
+        Transform::File(tr) => {
+            collect_file_transform_context_variables(context, tr, used_context_vars)
+        }
+        // Their overloads read the names and the config's displays, views and looks; they come
+        // with their op builders (WP 3.2b-c), and until then the processor refuses to build their
+        // ops.
+        Transform::DisplayView(_) | Transform::Look(_) => false,
         // The classes that use no context variable.
         Transform::Allocation(_)
         | Transform::Builtin(_)

@@ -56,6 +56,7 @@ use crate::named_transform::NamedTransform;
 use crate::path_utils::{get_fast_file_hash, parse_color_space_from_string};
 use crate::processor::{Processor, ProcessorCacheFlags};
 use crate::transform::Transform;
+use crate::transforms::color_space_transform::ColorSpaceTransform;
 use crate::view_transform::ViewTransform;
 use crate::viewing_rules::{ViewingRules, find_rule};
 use crate::yaml_cpp::stream::IStream;
@@ -5781,6 +5782,43 @@ impl Config {
         self.processor_cache.clear();
     }
 
+    /// The processor from `src_name` to `dst_name` (each a color space, a role, an alias or a
+    /// named transform, by name: a color space transform's), forward, in the current context.
+    ///
+    /// Port of `Config::getProcessor(const char *, const char *)` (Config.cpp:4704-4708 @
+    /// v2.5.2).
+    #[doc(alias = "getProcessor")]
+    pub fn processor_between(
+        &self,
+        src_name: impl AsRef<[u8]>,
+        dst_name: impl AsRef<[u8]>,
+    ) -> Result<Arc<Processor>> {
+        let context = self.shared_context.get();
+        self.processor_between_with_context(&context, src_name, dst_name)
+    }
+
+    /// The processor from `src_name` to `dst_name` (see [`Config::processor_between`]) in
+    /// `context`.
+    ///
+    /// Port of `Config::getProcessor(const ConstContextRcPtr &, const char *, const char *)`
+    /// (Config.cpp:4710-4719 @ v2.5.2).
+    #[doc(alias = "getProcessor")]
+    pub fn processor_between_with_context(
+        &self,
+        context: &Context,
+        src_name: impl AsRef<[u8]>,
+        dst_name: impl AsRef<[u8]>,
+    ) -> Result<Arc<Processor>> {
+        let mut cs_transform = ColorSpaceTransform::new();
+        cs_transform.set_src(src_name);
+        cs_transform.set_dst(dst_name);
+        self.processor_with_context(
+            context,
+            &Transform::from(cs_transform),
+            TransformDirection::Forward,
+        )
+    }
+
     /// The processor of `transform`, forward, in the current context.
     ///
     /// Port of `Config::getProcessor(const ConstTransformRcPtr &)` (Config.cpp:4779-4782 @
@@ -5823,10 +5861,10 @@ impl Config {
         // used for this transform. This allows the cache to be more efficient. However, there
         // are still some various TODOs since the usedContext will sometimes contain more vars
         // than are needed.
-        //
-        // The context's search path, working directory and IO proxy, which upstream copies
-        // into it, come with the context's state (Phase 3).
         let mut used_context = Context::new();
+        used_context.set_search_path(context.search_path());
+        used_context.set_working_dir(context.working_dir());
+        used_context.set_config_io_proxy(context.config_io_proxy().cloned());
 
         let need_context_variables =
             collect_context_variables(self, context, transform, &mut used_context);
@@ -5843,17 +5881,15 @@ impl Config {
         if let Some(mut cache) = self.processor_cache.lock() {
             // Note that the key includes a string description of the transform which does not
             // include all the LUT entries (just the arguments of the FileTransforms for LUTs).
+            // `oss << usedContext->getCacheID() << *transform << direction` (the cache ID only
+            // when the transform needs context variables): the direction prints as its value.
+            let mut text = Vec::new();
             if need_context_variables {
-                // Only the transforms that read context variables (color space, display view,
-                // file and look transforms) need them, and none of those is ported yet; the
-                // used context's cache ID comes with them.
-                return Err(Exception::new(
-                    "Config::getProcessor: the cache ID of a context is not ported yet.",
-                ));
+                text.extend_from_slice(used_context.cache_id().as_bytes());
             }
-            // `oss << "" << *transform << direction`: the direction prints as its value.
-            let text = format!("{transform}{}", direction as i32);
-            let key = std_hash_string(text.as_bytes());
+            text.extend_from_slice(&transform.to_bytes());
+            text.extend_from_slice((direction as i32).to_string().as_bytes());
+            let key = std_hash_string(&text);
 
             // Upstream's `m_processorCache[key]` adds an empty entry before it creates the
             // processor, which stays empty when the creation throws; the fallback below skips
