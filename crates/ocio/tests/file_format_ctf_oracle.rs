@@ -955,3 +955,549 @@ fn matrix_and_range_files_read_as_in_the_wheel() {
 fn matrix_and_range_files_log_as_in_the_wheel() {
     cdl_common::check_logs(&op_cases());
 }
+
+/// An operator `op` of the attributes `attrs` holding `body`.
+fn op(op: &str, attrs: &str, body: &str) -> String {
+    format!("    <{op} {attrs}>\n{body}    </{op}>\n")
+}
+
+/// The Gamma, Exponent, Log and ASC_CDL readers' files.
+fn op_cases_e() -> Vec<Case> {
+    let f32s = "inBitDepth=\"32f\" outBitDepth=\"32f\"";
+    let mut cases = Vec::new();
+
+    // Gamma and Exponent.
+    for (label, version, tag, style, params) in [
+        (
+            "basicFwd",
+            "1.4",
+            "Gamma",
+            "basicFwd",
+            "<GammaParams gamma=\"2.2\"/>",
+        ),
+        (
+            "basicRev by channel",
+            "1.4",
+            "Gamma",
+            "basicRev",
+            "<GammaParams channel=\"R\" gamma=\"2.2\"/><GammaParams channel=\"g\" gamma=\"2.4\"/>\
+             <GammaParams channel=\"B\" gamma=\"2.6\"/>",
+        ),
+        (
+            "alpha in CTF 1.4",
+            "1.4",
+            "Gamma",
+            "basicFwd",
+            "<GammaParams channel=\"A\" gamma=\"2.2\"/>",
+        ),
+        (
+            "alpha in CTF 1.5",
+            "1.5",
+            "Gamma",
+            "basicFwd",
+            "<GammaParams gamma=\"2.2\"/><GammaParams channel=\"A\" gamma=\"1.5\"/>",
+        ),
+        (
+            "an unknown channel",
+            "1.5",
+            "Gamma",
+            "basicFwd",
+            "<GammaParams channel=\"X\" gamma=\"2.2\"/>",
+        ),
+        (
+            "moncurveFwd",
+            "1.5",
+            "Gamma",
+            "moncurveFwd",
+            "<GammaParams gamma=\"2.4\" offset=\"0.055\"/>",
+        ),
+        (
+            "moncurveRev without its offset",
+            "1.5",
+            "Gamma",
+            "moncurveRev",
+            "<GammaParams gamma=\"2.4\"/>",
+        ),
+        (
+            "basicFwd with an offset",
+            "1.5",
+            "Gamma",
+            "basicFwd",
+            "<GammaParams gamma=\"2.4\" offset=\"0.055\"/>",
+        ),
+        (
+            "basicFwd without its gamma",
+            "1.5",
+            "Gamma",
+            "basicFwd",
+            "<GammaParams foo=\"1\"/>",
+        ),
+        (
+            "an unknown style",
+            "1.5",
+            "Gamma",
+            "foo",
+            "<GammaParams gamma=\"2.2\"/>",
+        ),
+        (
+            "basicMirrorFwd in CTF 1.8",
+            "1.8",
+            "Gamma",
+            "basicMirrorFwd",
+            "<GammaParams gamma=\"2.2\"/>",
+        ),
+        (
+            "basicMirrorFwd in CTF 2.0",
+            "2.0",
+            "Gamma",
+            "basicMirrorFwd",
+            "<GammaParams gamma=\"2.2\"/>",
+        ),
+        (
+            "monCurveMirrorRev in CTF 2.0",
+            "2.0",
+            "Exponent",
+            "monCurveMirrorRev",
+            "<ExponentParams exponent=\"3\" offset=\"0.16\"/>",
+        ),
+        (
+            "basicPassThruFwd with alpha in CTF 2.0",
+            "2.0",
+            "Exponent",
+            "basicPassThruFwd",
+            "<ExponentParams exponent=\"2\"/><ExponentParams channel=\"a\" exponent=\"1.2\"/>",
+        ),
+        (
+            "a gamma out of bounds",
+            "2.0",
+            "Gamma",
+            "basicFwd",
+            "<GammaParams gamma=\"0.001\"/>",
+        ),
+        (
+            "a moncurve offset out of bounds",
+            "2.0",
+            "Gamma",
+            "moncurveFwd",
+            "<GammaParams gamma=\"2\" offset=\"0.95\"/>",
+        ),
+        (
+            "a bad gamma",
+            "2.0",
+            "Gamma",
+            "basicFwd",
+            "<GammaParams gamma=\"x\"/>",
+        ),
+        (
+            "two gammas",
+            "2.0",
+            "Gamma",
+            "basicFwd",
+            "<GammaParams gamma=\"1 2\"/>",
+        ),
+        (
+            "GammaParams under an Exponent",
+            "2.0",
+            "Exponent",
+            "basicFwd",
+            "<GammaParams gamma=\"2\"/><ExponentParams exponent=\"2\"/>",
+        ),
+        (
+            "ExponentParams under a Gamma",
+            "2.0",
+            "Gamma",
+            "basicFwd",
+            "<ExponentParams exponent=\"2\"/><GammaParams gamma=\"2\"/>",
+        ),
+        ("no params", "2.0", "Gamma", "basicFwd", ""),
+        (
+            "text in params",
+            "2.0",
+            "Gamma",
+            "basicFwd",
+            "<GammaParams gamma=\"2\">x</GammaParams>",
+        ),
+    ] {
+        cases.push(ctf(
+            &format!("a {tag}: {label}"),
+            &format!("id=\"a\" version=\"{version}\""),
+            &op(
+                tag,
+                &format!("{f32s} style=\"{style}\""),
+                &format!("        {params}\n"),
+            ),
+        ));
+    }
+    cases.extend([
+        ctf(
+            "a Gamma without a style",
+            "id=\"a\" version=\"2.0\"",
+            &op("Gamma", f32s, "        <GammaParams gamma=\"2\"/>\n"),
+        ),
+        clf(
+            "an Exponent in CLF 3 with alpha",
+            "id=\"a\" compCLFversion=\"3\"",
+            &op(
+                "Exponent",
+                &format!("{f32s} style=\"basicRev\""),
+                "        <ExponentParams exponent=\"2.6\"/>\n\
+                 \x20       <ExponentParams channel=\"A\" exponent=\"1.7\"/>\n",
+            ),
+        ),
+        clf(
+            "an Exponent in CLF 3",
+            "id=\"a\" compCLFversion=\"3\"",
+            &op(
+                "Exponent",
+                &format!("{f32s} style=\"monCurveFwd\" bypass=\"true\""),
+                "        <ExponentParams channel=\"R\" exponent=\"2.4\" offset=\"0.055\"/>\n",
+            ),
+        ),
+    ]);
+
+    // Log.
+    let cineon = "gamma=\"0.6\" refWhite=\"685\" refBlack=\"95\" highlight=\"1\" shadow=\"0\"";
+    for (label, version, style, params) in [
+        ("log10 in CTF 1.3", "1.3", "log10", String::new()),
+        ("antiLog2 in CTF 1.3", "1.3", "antiLog2", String::new()),
+        (
+            "linToLog in CTF 1.3",
+            "1.3",
+            "linToLog",
+            format!("<LogParams {cineon}/>"),
+        ),
+        (
+            "logToLin by channel in CTF 1.3",
+            "1.3",
+            "logToLin",
+            format!(
+                "<LogParams channel=\"R\" {cineon}/><LogParams channel=\"G\" {cineon}/>\
+                 <LogParams channel=\"B\" {cineon}/>"
+            ),
+        ),
+        (
+            "linToLog without its shadow in CTF 1.3",
+            "1.3",
+            "linToLog",
+            "<LogParams gamma=\"0.6\" refWhite=\"685\" refBlack=\"95\" highlight=\"1\"/>"
+                .to_owned(),
+        ),
+        (
+            "linToLog with an OCIO parameter in CTF 1.3",
+            "1.3",
+            "linToLog",
+            format!("<LogParams {cineon} base=\"10\"/>"),
+        ),
+        (
+            "an unknown channel in CTF 1.3",
+            "1.3",
+            "linToLog",
+            format!("<LogParams channel=\"A\" {cineon}/>"),
+        ),
+        (
+            "LogParams of log10",
+            "1.3",
+            "log10",
+            format!("<LogParams {cineon}/>"),
+        ),
+        ("a bad style", "2.0", "logarithm", String::new()),
+        ("log2 in CTF 2.0", "2.0", "log2", String::new()),
+        ("antiLog10 in CTF 2.0", "2.0", "antiLog10", String::new()),
+        (
+            "linToLog with OCIO parameters",
+            "2.0",
+            "linToLog",
+            "<LogParams linSideSlope=\"1.1\" linSideOffset=\"0.1\" logSideSlope=\"0.9\" \
+             logSideOffset=\"0.2\" base=\"10\"/>"
+                .to_owned(),
+        ),
+        (
+            "linToLog with legacy parameters in CTF 2.0",
+            "2.0",
+            "linToLog",
+            format!("<LogParams {cineon}/>"),
+        ),
+        (
+            "mixed parameters",
+            "2.0",
+            "linToLog",
+            format!("<LogParams {cineon} base=\"10\"/>"),
+        ),
+        (
+            "a base mismatch",
+            "2.0",
+            "logToLin",
+            "<LogParams channel=\"R\" base=\"2\"/><LogParams channel=\"G\" base=\"2.5\"/>"
+                .to_owned(),
+        ),
+        (
+            "a camera style",
+            "2.0",
+            "cameraLinToLog",
+            "<LogParams linSideBreak=\"0.1\" linearSlope=\"1.5\" base=\"10\" \
+             logSideSlope=\"0.25\" logSideOffset=\"0.4\"/>"
+                .to_owned(),
+        ),
+        (
+            "a camera style without its break",
+            "2.0",
+            "cameraLogToLin",
+            "<LogParams logSideSlope=\"0.25\"/>".to_owned(),
+        ),
+        (
+            "a break for a non-camera style",
+            "2.0",
+            "linToLog",
+            "<LogParams linSideBreak=\"0.1\"/>".to_owned(),
+        ),
+        (
+            "a linear slope for a non-camera style",
+            "2.0",
+            "linToLog",
+            "<LogParams linearSlope=\"0.1\"/>".to_owned(),
+        ),
+        (
+            "legacy parameters for a camera style",
+            "2.0",
+            "cameraLinToLog",
+            format!("<LogParams linSideBreak=\"0.1\" {cineon}/>"),
+        ),
+        (
+            "a bad base",
+            "2.0",
+            "linToLog",
+            "<LogParams base=\"x\"/>".to_owned(),
+        ),
+        (
+            "a log side slope of 0",
+            "2.0",
+            "linToLog",
+            "<LogParams logSideSlope=\"0\"/>".to_owned(),
+        ),
+    ] {
+        cases.push(ctf(
+            &format!("a Log: {label}"),
+            &format!("id=\"a\" version=\"{version}\""),
+            &op(
+                "Log",
+                &format!("{f32s} style=\"{style}\""),
+                &format!("        {params}\n"),
+            ),
+        ));
+    }
+    cases.extend([
+        ctf(
+            "a Log without a style",
+            "id=\"a\" version=\"2.0\"",
+            &op("Log", f32s, ""),
+        ),
+        clf(
+            "a Log with legacy parameters in CLF 3",
+            "id=\"a\" compCLFversion=\"3\"",
+            &op(
+                "Log",
+                &format!("{f32s} style=\"linToLog\""),
+                &format!("        <LogParams {cineon} linSideSlope=\"1.2\"/>\n"),
+            ),
+        ),
+        clf(
+            "a camera Log in CLF 3",
+            "id=\"a\" compCLFversion=\"3\"",
+            &op(
+                "Log",
+                &format!("{f32s} style=\"cameraLogToLin\""),
+                "        <LogParams channel=\"R\" linSideBreak=\"0.01\"/>\n\
+                 \x20       <LogParams channel=\"G\" linSideBreak=\"0.02\"/>\n\
+                 \x20       <LogParams channel=\"B\" linSideBreak=\"0.03\"/>\n",
+            ),
+        ),
+    ]);
+
+    // ASC_CDL.
+    let sop = "        <SOPNode>\n\
+               \x20           <Slope>1.35 1.1 0.71</Slope>\n\
+               \x20           <Offset>0.05 -0.23 0.11</Offset>\n\
+               \x20           <Power>0.93 0.81 1.27</Power>\n\
+               \x20       </SOPNode>\n";
+    let sat = "        <SatNode>\n            <Saturation>1.239</Saturation>\n        </SatNode>\n";
+    for style in [
+        "Fwd",
+        "Rev",
+        "FwdNoClamp",
+        "RevNoClamp",
+        "v1.2_Fwd",
+        "v1.2_Rev",
+        "noClampFwd",
+        "noClampRev",
+        "FWD",
+        "foo",
+    ] {
+        cases.push(clf(
+            &format!("an ASC_CDL of style {style}"),
+            "id=\"a\" compCLFversion=\"3\"",
+            &op(
+                "ASC_CDL",
+                &format!("{f32s} style=\"{style}\""),
+                &format!("{sop}{sat}"),
+            ),
+        ));
+    }
+    let sop_of = |slope: &str, offset: &str, power: &str| {
+        format!("        <SOPNode>\n{slope}{offset}{power}        </SOPNode>\n",)
+    };
+    let slope = "            <Slope>1.35 1.1 0.71</Slope>\n";
+    let offset = "            <Offset>0.05 -0.23 0.11</Offset>\n";
+    let power = "            <Power>0.93 0.81 1.27</Power>\n";
+    for (label, version, body) in [
+        ("no style", "2.0", format!("{sop}{sat}")),
+        ("no SOPNode", "2.0", sat.to_owned()),
+        ("no SatNode", "2.0", sop.to_owned()),
+        ("nothing", "2.0", String::new()),
+        ("no slope", "2.0", sop_of("", offset, power)),
+        ("no offset", "2.0", sop_of(slope, "", power)),
+        ("no power", "2.0", sop_of(slope, offset, "")),
+        (
+            "two slope values",
+            "2.0",
+            sop_of("            <Slope>1.35 1.1</Slope>\n", offset, power),
+        ),
+        (
+            "a bad slope",
+            "2.0",
+            sop_of("            <Slope>1.35 x 1</Slope>\n", offset, power),
+        ),
+        (
+            "a power of 0",
+            "2.0",
+            sop_of(slope, offset, "            <Power>0 1 1</Power>\n"),
+        ),
+        (
+            "two saturations",
+            "2.0",
+            "        <SatNode><Saturation>1 2</Saturation></SatNode>\n".to_owned(),
+        ),
+        (
+            "a SATNode",
+            "2.0",
+            "        <SATNode><Saturation>0.8</Saturation></SATNode>\n".to_owned(),
+        ),
+        (
+            "descriptions",
+            "2.0",
+            format!(
+                "        <Description>cdl</Description>\n\
+                 \x20       <InputDescription>in</InputDescription>\n\
+                 \x20       <ViewingDescription>view</ViewingDescription>\n\
+                 \x20       <SOPNode>\n\
+                 \x20           <Description>sop</Description>\n{slope}{offset}{power}\
+                 \x20       </SOPNode>\n\
+                 \x20       <SatNode>\n\
+                 \x20           <Description>sat</Description>\n\
+                 \x20           <Saturation>1.1</Saturation>\n\
+                 \x20       </SatNode>\n"
+            ),
+        ),
+        ("a Slope under the ASC_CDL", "2.0", format!("{slope}{sop}")),
+        (
+            "a Saturation under the SOPNode",
+            "2.0",
+            sop_of(
+                slope,
+                offset,
+                &format!("{power}            <Saturation>1</Saturation>\n"),
+            ),
+        ),
+        ("a SOPNode in CTF 1.3", "1.3", format!("{sop}{sat}")),
+    ] {
+        cases.push(ctf(
+            &format!("an ASC_CDL: {label}"),
+            &format!("id=\"a\" version=\"{version}\""),
+            &op("ASC_CDL", &format!("{f32s} style=\"Fwd\""), &body),
+        ));
+    }
+    cases.push(ctf(
+        "an ASC_CDL without a style",
+        "id=\"a\" version=\"2.0\"",
+        &op("ASC_CDL", f32s, &format!("{sop}{sat}")),
+    ));
+    cases.push(ctf(
+        "operators in a row",
+        "id=\"a\" version=\"2.0\"",
+        &format!(
+            "{}{}{}",
+            op("Log", &format!("{f32s} style=\"log10\""), ""),
+            op(
+                "Gamma",
+                &format!("{f32s} style=\"basicFwd\""),
+                "        <GammaParams gamma=\"2.2\"/>\n",
+            ),
+            op(
+                "ASC_CDL",
+                &format!("{f32s} style=\"Rev\""),
+                &format!("{sop}{sat}")
+            ),
+        ),
+    ));
+
+    // Upstream's files.
+    for name in [
+        "gamma_test1.ctf",
+        "gamma_test2.ctf",
+        "gamma_test3.ctf",
+        "gamma_test4.ctf",
+        "gamma_test5.ctf",
+        "gamma_test6.ctf",
+        "gamma_alpha_test1.ctf",
+        "gamma_alpha_test2.ctf",
+        "gamma_alpha_test3.ctf",
+        "gamma_alpha_test4.ctf",
+        "gamma_alpha_test5.ctf",
+        "gamma_alpha_test6.ctf",
+        "clf/illegal/exponent_bad_value.clf",
+        "clf/illegal/exponent_bad_param.clf",
+        "clf/exponent_all_styles.clf",
+        "clf/cdl_clamp_fwd.clf",
+        "clf/cdl_missing_style.clf",
+        "clf/cdl_all_styles.clf",
+        "clf/illegal/cdl_bad_slope.clf",
+        "clf/illegal/cdl_bad_sat.clf",
+        "clf/illegal/cdl_bad_power.clf",
+        "clf/illegal/cdl_missing_slope.clf",
+        "clf/illegal/cdl_missing_offset.clf",
+        "clf/illegal/cdl_missing_power.clf",
+        "clf/illegal/cdl_bad_style.clf",
+        "clf/cdl_missing_sop.clf",
+        "clf/cdl_missing_sat.clf",
+        "cdl_various.ctf",
+        "clf/log_all_styles.clf",
+        "log_logtolin.ctf",
+        "log_logtolinv2.ctf",
+        "log_lintolog_3chan.ctf",
+        "clf/illegal/log_bad_style.clf",
+        "clf/illegal/log_bad_version.clf",
+        "clf/illegal/log_bad_param.clf",
+        "clf/illegal/log_missing_breakpnt.clf",
+    ] {
+        cases.push(file_case(
+            name,
+            &upstream_file(name),
+            Interpolation::Default,
+            TransformDirection::Forward,
+        ));
+    }
+    cases
+}
+
+/// The processors of the Gamma, Exponent, Log and ASC_CDL readers' files, in both
+/// directions.
+#[test]
+fn gamma_log_and_cdl_files_read_as_in_the_wheel() {
+    check_processors(&op_cases_e());
+}
+
+/// The warnings of reading the Gamma, Exponent, Log and ASC_CDL readers' files, message by
+/// message.
+#[test]
+fn gamma_log_and_cdl_files_log_as_in_the_wheel() {
+    cdl_common::check_logs(&op_cases_e());
+}

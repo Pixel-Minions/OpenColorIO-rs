@@ -17,7 +17,13 @@ use crate::fileformats::test_utils::load_test_file;
 use ocio_ops::bit_depth_utils::get_bit_depth_max_value;
 use ocio_ops::format_metadata::{METADATA_DESCRIPTION, METADATA_INFO};
 use ocio_ops::op_data::OpDataType;
-use ocio_ops::open_color_types::BitDepth;
+use ocio_ops::open_color_types::{BitDepth, TransformDirection};
+use ocio_ops::ops::cdl::cdl_op_data::{CdlOpData, CdlOpStyle, ChannelParams};
+use ocio_ops::ops::gamma::gamma_op_data::{GammaOpData, GammaStyle};
+use ocio_ops::ops::log::log_op_data::{
+    LIN_SIDE_BREAK, LIN_SIDE_OFFSET, LIN_SIDE_SLOPE, LINEAR_SLOPE, LOG_SIDE_OFFSET, LOG_SIDE_SLOPE,
+    LogOpData,
+};
 use ocio_ops::ops::matrix::matrix_op_data::{MatrixArray, MatrixOpData};
 use ocio_ops::ops::range::range_op_data::RangeOpData;
 use ocio_testkit::upstream::{check_close, check_throw_what};
@@ -980,4 +986,1082 @@ fn range_bad_values() {
         load_clf_file(ctf_file),
         "Range maxInValue is too close to minInValue",
     );
+}
+
+/// The gamma of an op data, which must be one (`dynamic_pointer_cast<const GammaOpData>`).
+fn as_gamma(op: &OpData) -> &GammaOpData {
+    match op {
+        OpData::Gamma(gamma) => gamma,
+        _ => panic!("not a gamma: {:?}", op.get_type()),
+    }
+}
+
+/// The log of an op data, which must be one (`dynamic_pointer_cast<const LogOpData>`).
+fn as_log(op: &OpData) -> &LogOpData {
+    match op {
+        OpData::Log(log) => log,
+        _ => panic!("not a log: {:?}", op.get_type()),
+    }
+}
+
+/// The CDL of an op data, which must be one (`dynamic_pointer_cast<const CDLOpData>`).
+fn as_cdl(op: &OpData) -> &CdlOpData {
+    match op {
+        OpData::Cdl(cdl) => cdl,
+        _ => panic!("not a CDL: {:?}", op.get_type()),
+    }
+}
+
+/// The op's descriptions (`GetElementsValues` of its metadata's children).
+fn descriptions(op: &OpData) -> Vec<Vec<u8>> {
+    let mut desc = Vec::new();
+    get_elements_values(
+        op.get_format_metadata().get_children_elements(),
+        TAG_DESCRIPTION,
+        &mut desc,
+    );
+    desc
+}
+
+/// Port of `ParseString` (FileFormatCTF_tests.cpp:996-1007 @ v2.5.2).
+fn parse_string(str: &str) -> Result<LocalCachedFile> {
+    let mut ctf = InputStream::from_bytes(str.as_bytes());
+
+    // Parse stream.
+    LocalFileFormat.read_file(&mut ctf, b"")
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, gamma_test1)` @ v2.5.2.
+#[test]
+fn gamma_test1() {
+    let ctf_file = "gamma_test1.ctf";
+    let cached_file = load_clf_file(ctf_file).unwrap();
+
+    assert_eq!(cached_file.transform.get_id(), b"id");
+
+    assert_eq!(cached_file.transform.get_descriptions().len(), 1);
+    assert_eq!(cached_file.transform.get_descriptions()[0], b"2.4 gamma");
+
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 1);
+    let p_g = as_gamma(&op_list[0]);
+
+    assert_eq!(p_g.style(), GammaStyle::BasicFwd);
+
+    let params = vec![2.4];
+
+    assert!(p_g.red_params() == &params);
+    assert!(p_g.green_params() == &params);
+    assert!(p_g.blue_params() == &params);
+    // Version of the ctf is less than 1.5, so alpha must be identity.
+    assert!(GammaOpData::is_identity_parameters(
+        p_g.alpha_params(),
+        p_g.style()
+    ));
+
+    assert!(!p_g.are_all_components_equal());
+    assert!(p_g.is_non_channel_dependent()); // RGB are equal, A is an identity
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, gamma_test2)` @ v2.5.2.
+#[test]
+fn gamma_test2() {
+    let ctf_file = "gamma_test2.ctf";
+    let cached_file = load_clf_file(ctf_file).unwrap();
+
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 1);
+    let p_g = as_gamma(&op_list[0]);
+
+    assert_eq!(p_g.style(), GammaStyle::BasicRev);
+    let params_r = vec![2.4];
+    let params_g = vec![2.35];
+    let params_b = vec![2.2];
+
+    assert!(p_g.red_params() == &params_r);
+    assert!(p_g.green_params() == &params_g);
+    assert!(p_g.blue_params() == &params_b);
+    assert!(GammaOpData::is_identity_parameters(
+        p_g.alpha_params(),
+        p_g.style()
+    ));
+
+    assert!(!p_g.are_all_components_equal());
+    assert!(!p_g.is_non_channel_dependent());
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, gamma_test3)` @ v2.5.2.
+#[test]
+fn gamma_test3() {
+    let ctf_file = "gamma_test3.ctf";
+    let cached_file = load_clf_file(ctf_file).unwrap();
+
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 1);
+    let p_g = as_gamma(&op_list[0]);
+
+    assert_eq!(p_g.style(), GammaStyle::MoncurveFwd);
+    let params = vec![1. / 0.45, 0.099];
+
+    // This is a precision test to ensure we can recreate a double that is exactly equal to
+    // 1/0.45, which is required to implement rec 709 exactly.
+    assert!(p_g.red_params() == &params);
+    assert!(p_g.green_params() == &params);
+    assert!(p_g.blue_params() == &params);
+    assert!(GammaOpData::is_identity_parameters(
+        p_g.alpha_params(),
+        p_g.style()
+    ));
+
+    assert!(!p_g.are_all_components_equal());
+    assert!(p_g.is_non_channel_dependent());
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, gamma_test4)` @ v2.5.2.
+#[test]
+fn gamma_test4() {
+    let ctf_file = "gamma_test4.ctf";
+    let cached_file = load_clf_file(ctf_file).unwrap();
+
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 1);
+    let p_g = as_gamma(&op_list[0]);
+
+    assert_eq!(p_g.style(), GammaStyle::MoncurveRev);
+    let params_r = vec![2.2, 0.001];
+    let params_g = vec![2.4, 0.01];
+    let params_b = vec![2.6, 0.1];
+
+    assert!(p_g.red_params() == &params_r);
+    assert!(p_g.green_params() == &params_g);
+    assert!(p_g.blue_params() == &params_b);
+    assert!(GammaOpData::is_identity_parameters(
+        p_g.alpha_params(),
+        p_g.style()
+    ));
+
+    assert!(!p_g.are_all_components_equal());
+    assert!(!p_g.is_non_channel_dependent());
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, gamma_test5)` @ v2.5.2.
+#[test]
+fn gamma_test5() {
+    // This test is for an old (< 1.5) transform file that contains an invalid GammaParams for
+    // the A channel.
+    let ctf_file = "gamma_test5.ctf";
+    check_throw_what(load_clf_file(ctf_file), "Invalid channel");
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, gamma_test6)` @ v2.5.2.
+#[test]
+fn gamma_test6() {
+    // This test is for an old (< 1.5) transform file that contains a single GammaParams with
+    // identity values:
+    // - R, G and B set to identity parameters (identity test).
+    // - A set to identity.
+    let ctf_file = "gamma_test6.ctf";
+    let cached_file = load_clf_file(ctf_file).unwrap();
+
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 1);
+    let p_g = as_gamma(&op_list[0]);
+
+    assert_eq!(p_g.style(), GammaStyle::MoncurveFwd);
+    assert!(p_g.are_all_components_equal());
+    assert!(p_g.is_non_channel_dependent());
+    assert!(p_g.is_identity().unwrap());
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, gamma_alpha_test1)` @ v2.5.2.
+#[test]
+fn gamma_alpha_test1() {
+    // This test is for a new (>= 1.5) transform file that contains a single GammaParams:
+    // - R, G and B set to same parameters.
+    // - A set to identity.
+    let ctf_file = "gamma_alpha_test1.ctf";
+    let cached_file = load_clf_file(ctf_file).unwrap();
+
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 1);
+    let p_g = as_gamma(&op_list[0]);
+
+    assert_eq!(p_g.style(), GammaStyle::BasicFwd);
+
+    let params = vec![2.4];
+
+    assert!(p_g.red_params() == &params);
+    assert!(p_g.green_params() == &params);
+    assert!(p_g.blue_params() == &params);
+    assert!(GammaOpData::is_identity_parameters(
+        p_g.alpha_params(),
+        p_g.style()
+    ));
+
+    assert!(!p_g.are_all_components_equal());
+    assert!(p_g.is_non_channel_dependent());
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, gamma_alpha_test2)` @ v2.5.2.
+#[test]
+fn gamma_alpha_test2() {
+    // This test is for a new (>= 1.5) transform file that contains a different GammaParams
+    // for every channel:
+    // - R, G, B and A set to different parameters.
+    let ctf_file = "gamma_alpha_test2.ctf";
+    let cached_file = load_clf_file(ctf_file).unwrap();
+
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 1);
+    let p_g = as_gamma(&op_list[0]);
+
+    assert_eq!(p_g.style(), GammaStyle::BasicRev);
+
+    let params_r = vec![2.4];
+    let params_g = vec![2.35];
+    let params_b = vec![2.2];
+    let params_a = vec![2.5];
+
+    assert!(p_g.red_params() == &params_r);
+    assert!(p_g.green_params() == &params_g);
+    assert!(p_g.blue_params() == &params_b);
+    assert!(p_g.alpha_params() == &params_a);
+
+    assert!(!p_g.are_all_components_equal());
+    assert!(!p_g.is_non_channel_dependent());
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, gamma_alpha_test3)` @ v2.5.2.
+#[test]
+fn gamma_alpha_test3() {
+    // This test is for a new (>= 1.5) transform file that contains a single GammaParams:
+    // - R, G and B set to same parameters (precision test).
+    // - A set to identity.
+    let ctf_file = "gamma_alpha_test3.ctf";
+    let cached_file = load_clf_file(ctf_file).unwrap();
+
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 1);
+    let p_g = as_gamma(&op_list[0]);
+
+    assert_eq!(p_g.style(), GammaStyle::MoncurveFwd);
+
+    let params = vec![1. / 0.45, 0.099];
+
+    assert!(p_g.red_params() == &params);
+    assert!(p_g.green_params() == &params);
+    assert!(p_g.blue_params() == &params);
+    assert!(GammaOpData::is_identity_parameters(
+        p_g.alpha_params(),
+        p_g.style()
+    ));
+
+    assert!(!p_g.are_all_components_equal());
+    assert!(p_g.is_non_channel_dependent());
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, gamma_alpha_test4)` @ v2.5.2.
+#[test]
+fn gamma_alpha_test4() {
+    // This test is for a new (>= 1.5) transform file that contains a different GammaParams
+    // for every channel:
+    // - R, G, B and A set to different parameters (attributes order test).
+    let ctf_file = "gamma_alpha_test4.ctf";
+    let cached_file = load_clf_file(ctf_file).unwrap();
+
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 1);
+    let p_g = as_gamma(&op_list[0]);
+
+    assert_eq!(p_g.style(), GammaStyle::MoncurveRev);
+
+    let params_r = vec![2.2, 0.001];
+    let params_g = vec![2.4, 0.01];
+    let params_b = vec![2.6, 0.1];
+    let params_a = vec![2.0, 0.0001];
+
+    assert!(p_g.red_params() == &params_r);
+    assert!(p_g.green_params() == &params_g);
+    assert!(p_g.blue_params() == &params_b);
+    assert!(p_g.alpha_params() == &params_a);
+
+    assert!(!p_g.are_all_components_equal());
+    assert!(!p_g.is_non_channel_dependent());
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, gamma_alpha_test5)` @ v2.5.2.
+#[test]
+fn gamma_alpha_test5() {
+    // This test is for a new (>= 1.5) transform file that contains a GammaParams with no
+    // channel specified:
+    // - R, G and B set to same parameters.
+    // and a GammaParams for the A channel:
+    // - A set to different parameters.
+    let ctf_file = "gamma_alpha_test5.ctf";
+    let cached_file = load_clf_file(ctf_file).unwrap();
+
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 1);
+    let p_g = as_gamma(&op_list[0]);
+
+    assert_eq!(p_g.style(), GammaStyle::MoncurveFwd);
+
+    let params = vec![1. / 0.45, 0.099];
+    let params_a = vec![1.7, 0.33];
+
+    assert!(p_g.red_params() == &params);
+    assert!(p_g.green_params() == &params);
+    assert!(p_g.blue_params() == &params);
+    assert!(p_g.alpha_params() == &params_a);
+
+    assert!(!p_g.are_all_components_equal());
+    assert!(!p_g.is_non_channel_dependent());
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, gamma_alpha_test6)` @ v2.5.2.
+#[test]
+fn gamma_alpha_test6() {
+    // This test is for an new (>= 1.5) transform file that contains an invalid GammaParams
+    // for the A channel (missing offset attribute).
+    let ctf_file = "gamma_alpha_test6.ctf";
+    check_throw_what(load_clf_file(ctf_file), "Missing required offset parameter");
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, exponent_bad_value)` @ v2.5.2.
+#[test]
+fn exponent_bad_value() {
+    // The moncurve style requires a gamma value >= 1.
+    let ctf_file = "clf/illegal/exponent_bad_value.clf";
+    check_throw_what(load_clf_file(ctf_file), "is less than lower bound");
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, exponent_bad_param)` @ v2.5.2.
+#[test]
+fn exponent_bad_param() {
+    // The basic style cannot use offset.
+    let ctf_file = "clf/illegal/exponent_bad_param.clf";
+    check_throw_what(load_clf_file(ctf_file), "Illegal offset parameter");
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, exponent_all_styles)` @ v2.5.2.
+#[test]
+fn exponent_all_styles() {
+    // Note: This is somewhat repetitive of the CTF Gamma tests above, but it is worth having
+    // both due to changes in the format over time (e.g. moncurveFwd->monCurveFwd, and
+    // gamma->exponent), and the fact that CLF and early CTF does not support alpha.
+    let file_name = "clf/exponent_all_styles.clf";
+    let cached_file = load_clf_file(file_name).unwrap();
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 12);
+
+    {
+        // Op 0 == basicFwd.
+        let op_data = as_gamma(&op_list[0]);
+        let desc = descriptions(&op_list[0]);
+        assert_eq!(desc.len(), 1);
+        assert_eq!(
+            desc[0],
+            b"If there is only one Params, use it for R, G, and B."
+        );
+        assert_eq!(op_data.direction(), TransformDirection::Forward);
+        assert_eq!(op_data.style(), GammaStyle::BasicFwd);
+        assert!(op_data.is_non_channel_dependent()); // RGB are equal, A is an identity
+        assert!(op_data.is_alpha_component_identity());
+        let params = vec![2.4];
+        assert!(op_data.red_params() == &params);
+    }
+    {
+        // Op 1 == basicRev.
+        let op_data = as_gamma(&op_list[1]);
+        assert_eq!(op_list[1].get_id(), b"a1");
+        assert_eq!(op_list[1].get_name(), b"gamma");
+        assert_eq!(op_data.direction(), TransformDirection::Inverse);
+        assert_eq!(op_data.style(), GammaStyle::BasicRev);
+        assert!(!op_data.is_non_channel_dependent());
+        assert!(op_data.is_alpha_component_identity());
+        let params_r = vec![2.4];
+        let params_g = vec![2.35];
+        let params_b = vec![2.2];
+        assert!(op_data.red_params() == &params_r);
+        assert!(op_data.green_params() == &params_g);
+        assert!(op_data.blue_params() == &params_b);
+    }
+    {
+        // Op 2 == monCurveFwd.
+        let op_data = as_gamma(&op_list[2]);
+        assert_eq!(op_data.direction(), TransformDirection::Forward);
+        assert_eq!(op_data.style(), GammaStyle::MoncurveFwd);
+        assert!(op_data.is_non_channel_dependent()); // RGB are equal, A is an identity
+        assert!(op_data.is_alpha_component_identity());
+        let params = vec![1. / 0.45, 0.099];
+        assert!(op_data.red_params() == &params);
+    }
+    {
+        // Op 3 == monCurveRev.
+        let op_data = as_gamma(&op_list[3]);
+        assert_eq!(op_data.direction(), TransformDirection::Inverse);
+        assert_eq!(op_data.style(), GammaStyle::MoncurveRev);
+        assert!(!op_data.is_non_channel_dependent());
+        assert!(op_data.is_alpha_component_identity());
+        let params_r = vec![2.2, 0.001];
+        let params_g = vec![2.4, 0.01];
+        let params_b = vec![2.6, 0.1];
+        assert!(op_data.red_params() == &params_r);
+        assert!(op_data.green_params() == &params_g);
+        assert!(op_data.blue_params() == &params_b);
+    }
+    {
+        // Op 4 == monCurveFwd.
+        let op_data = as_gamma(&op_list[4]);
+        assert_eq!(op_data.direction(), TransformDirection::Forward);
+        assert_eq!(op_data.style(), GammaStyle::MoncurveFwd);
+        assert!(op_data.are_all_components_equal());
+        assert!(op_data.is_non_channel_dependent()); // RGB are equal, A is an identity
+        assert!(op_data.is_alpha_component_identity());
+        assert!(GammaOpData::is_identity_parameters(
+            op_data.red_params(),
+            op_data.style()
+        ));
+    }
+    {
+        // Op 5 == basicMirrorFwd.
+        let op_data = as_gamma(&op_list[5]);
+        assert_eq!(op_data.direction(), TransformDirection::Forward);
+        assert_eq!(op_data.style(), GammaStyle::BasicMirrorFwd);
+        assert!(!op_data.are_all_components_equal());
+        assert!(op_data.is_non_channel_dependent()); // RGB are equal, A is an identity
+        assert!(op_data.is_alpha_component_identity());
+    }
+    {
+        // Op 6 == basicMirrorRev.
+        let op_data = as_gamma(&op_list[6]);
+        assert_eq!(op_data.direction(), TransformDirection::Inverse);
+        assert_eq!(op_data.style(), GammaStyle::BasicMirrorRev);
+        assert!(op_data.is_non_channel_dependent()); // RGB are equal, A is an identity
+    }
+    {
+        // Op 7 == basicPassThruFwd.
+        let op_data = as_gamma(&op_list[7]);
+        assert_eq!(op_data.direction(), TransformDirection::Forward);
+        assert_eq!(op_data.style(), GammaStyle::BasicPassThruFwd);
+        assert!(op_data.is_non_channel_dependent()); // RGB are equal, A is an identity
+    }
+    {
+        // Op 8 == basicPassThruRev.
+        let op_data = as_gamma(&op_list[8]);
+        assert_eq!(op_data.direction(), TransformDirection::Inverse);
+        assert_eq!(op_data.style(), GammaStyle::BasicPassThruRev);
+        assert!(op_data.is_non_channel_dependent()); // RGB are equal, A is an identity
+    }
+    {
+        // Op 9 == monCurveMirrorFwd.
+        let op_data = as_gamma(&op_list[9]);
+        assert_eq!(op_data.direction(), TransformDirection::Forward);
+        assert_eq!(op_data.style(), GammaStyle::MoncurveMirrorFwd);
+        assert!(op_data.is_non_channel_dependent()); // RGB are equal, A is an identity
+    }
+    {
+        // Op 10 == monCurveMirrorRev.
+        let op_data = as_gamma(&op_list[10]);
+        assert_eq!(op_data.direction(), TransformDirection::Inverse);
+        assert_eq!(op_data.style(), GammaStyle::MoncurveMirrorRev);
+        assert!(!op_data.is_non_channel_dependent());
+        let params_r = vec![3.0, 0.16];
+        assert!(op_data.red_params() == &params_r);
+        assert!(GammaOpData::is_identity_parameters(
+            op_data.green_params(),
+            op_data.style()
+        ));
+        assert!(GammaOpData::is_identity_parameters(
+            op_data.blue_params(),
+            op_data.style()
+        ));
+    }
+    {
+        // Op 11 == Range.
+        as_range(&op_list[11]);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, clf2_exponent_parse)` @ v2.5.2.
+#[test]
+fn clf2_exponent_parse() {
+    let gamma_clf2 = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList compCLFversion="2" id="UID42">
+    <Exponent inBitDepth="32f" outBitDepth="32f" style="basicRev">
+        <ExponentParams gamma="2.6" />
+    </Exponent>
+</ProcessList>
+"#;
+
+    check_throw_what(
+        parse_string(gamma_clf2),
+        "CLF file version '2' does not support operator 'Exponent'",
+    );
+
+    let gamma_clf_alpha = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList compCLFversion="3" id="UID42">
+    <Exponent inBitDepth="32f" outBitDepth="32f" style="basicRev">
+        <ExponentParams gamma="2.6" />
+        <ExponentParams channel="A" gamma="1.7" offset="0.33" />
+    </Exponent>
+</ProcessList>
+"#;
+
+    check_throw_what(parse_string(gamma_clf_alpha), "Invalid channel: A");
+
+    let gamma_ctf_mirror_1_7 = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="1.7" id="UID42">
+    <Exponent inBitDepth="32f" outBitDepth="32f" style="basicMirrorRev">
+        <ExponentParams gamma="2.6" />
+    </Exponent>
+</ProcessList>
+"#;
+
+    check_throw_what(
+        parse_string(gamma_ctf_mirror_1_7),
+        "Style not handled: 'basicMirrorRev'",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, cdl_clamp_fwd)` @ v2.5.2.
+#[test]
+fn cdl_clamp_fwd() {
+    let ctf_file = "clf/cdl_clamp_fwd.clf";
+    let cached_file = load_clf_file(ctf_file).unwrap();
+
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(cached_file.transform.get_input_descriptor(), b"inputDesc");
+    assert_eq!(cached_file.transform.get_output_descriptor(), b"outputDesc");
+    assert_eq!(op_list.len(), 1);
+    let p_cdl = as_cdl(&op_list[0]);
+
+    assert_eq!(p_cdl.get_id(), b"look 1");
+    assert_eq!(p_cdl.get_name(), b"cdl");
+
+    let descriptions = descriptions(&op_list[0]);
+
+    assert_eq!(descriptions.len(), 1);
+    assert_eq!(descriptions[0], b"ASC CDL operation");
+
+    assert_eq!(p_cdl.get_style(), CdlOpStyle::V1_2Fwd);
+    let style_name = CdlOpData::get_style_name(p_cdl.get_style());
+    assert_eq!(style_name, "Fwd");
+
+    assert!(*p_cdl.get_slope_params() == ChannelParams::new(1.35, 1.1, 0.71));
+    assert!(*p_cdl.get_offset_params() == ChannelParams::new(0.05, -0.23, 0.11));
+    assert!(*p_cdl.get_power_params() == ChannelParams::new(0.93, 0.81, 1.27));
+    assert_eq!(p_cdl.get_saturation(), 1.239);
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, cdl_missing_style)` @ v2.5.2.
+#[test]
+fn cdl_missing_style() {
+    let ctf_file = "clf/cdl_missing_style.clf";
+    let cached_file = load_clf_file(ctf_file).unwrap();
+
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 1);
+    let p_cdl = as_cdl(&op_list[0]);
+
+    // Note: Default for CLF is different from OCIO default.
+    assert_eq!(p_cdl.get_style(), CdlOpStyle::V1_2Fwd);
+
+    assert!(*p_cdl.get_slope_params() == ChannelParams::new(1.35, 1.1, 0.71));
+    assert!(*p_cdl.get_offset_params() == ChannelParams::new(0.05, -0.23, 0.11));
+    assert!(*p_cdl.get_power_params() == ChannelParams::new(0.93, 0.81, 1.27));
+    assert_eq!(p_cdl.get_saturation(), 1.239);
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, cdl_all_styles)` @ v2.5.2.
+#[test]
+fn cdl_all_styles() {
+    let ctf_file = "clf/cdl_all_styles.clf";
+    let cached_file = load_clf_file(ctf_file).unwrap();
+
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 4);
+
+    assert_eq!(as_cdl(&op_list[0]).get_style(), CdlOpStyle::V1_2Fwd);
+    assert_eq!(as_cdl(&op_list[1]).get_style(), CdlOpStyle::V1_2Rev);
+    assert_eq!(as_cdl(&op_list[2]).get_style(), CdlOpStyle::NoClampFwd);
+    assert_eq!(as_cdl(&op_list[3]).get_style(), CdlOpStyle::NoClampRev);
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, cdl_bad_slope)` @ v2.5.2.
+#[test]
+fn cdl_bad_slope() {
+    let ctf_file = "clf/illegal/cdl_bad_slope.clf";
+    check_throw_what(load_clf_file(ctf_file), "SOPNode: 3 values required");
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, cdl_bad_sat)` @ v2.5.2.
+#[test]
+fn cdl_bad_sat() {
+    let ctf_file = "clf/illegal/cdl_bad_sat.clf";
+    check_throw_what(load_clf_file(ctf_file), "SatNode: non-single value");
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, cdl_bad_power)` @ v2.5.2.
+#[test]
+fn cdl_bad_power() {
+    let ctf_file = "clf/illegal/cdl_bad_power.clf";
+    check_throw_what(
+        load_clf_file(ctf_file),
+        "CDLOpData: Invalid 'power' 0 should be greater than 0.",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, cdl_missing_slope)` @ v2.5.2.
+#[test]
+fn cdl_missing_slope() {
+    let ctf_file = "clf/illegal/cdl_missing_slope.clf";
+    check_throw_what(load_clf_file(ctf_file), "Required node 'Slope' is missing");
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, cdl_missing_offset)` @ v2.5.2.
+#[test]
+fn cdl_missing_offset() {
+    let ctf_file = "clf/illegal/cdl_missing_offset.clf";
+    check_throw_what(load_clf_file(ctf_file), "Required node 'Offset' is missing");
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, cdl_missing_power)` @ v2.5.2.
+#[test]
+fn cdl_missing_power() {
+    let ctf_file = "clf/illegal/cdl_missing_power.clf";
+    check_throw_what(load_clf_file(ctf_file), "Required node 'Power' is missing");
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, cdl_bad_style)` @ v2.5.2.
+#[test]
+fn cdl_bad_style() {
+    let ctf_file = "clf/illegal/cdl_bad_style.clf";
+    check_throw_what(load_clf_file(ctf_file), "Unknown style for CDL");
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, cdl_missing_sop)` @ v2.5.2.
+#[test]
+fn cdl_missing_sop() {
+    let ctf_file = "clf/cdl_missing_sop.clf";
+    let cached_file = load_clf_file(ctf_file).unwrap();
+
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 1);
+    let p_cdl = as_cdl(&op_list[0]);
+
+    assert!(*p_cdl.get_slope_params() == ChannelParams::splat(1.0));
+    assert!(*p_cdl.get_offset_params() == ChannelParams::splat(0.0));
+    assert!(*p_cdl.get_power_params() == ChannelParams::splat(1.0));
+    assert_eq!(p_cdl.get_saturation(), 1.239);
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, cdl_missing_sat)` @ v2.5.2.
+#[test]
+fn cdl_missing_sat() {
+    let ctf_file = "clf/cdl_missing_sat.clf";
+    let cached_file = load_clf_file(ctf_file).unwrap();
+
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 1);
+    let p_cdl = as_cdl(&op_list[0]);
+
+    assert!(*p_cdl.get_slope_params() == ChannelParams::new(1.35, 1.1, 0.71));
+    assert!(*p_cdl.get_offset_params() == ChannelParams::new(0.05, -0.23, 0.11));
+    assert!(*p_cdl.get_power_params() == ChannelParams::new(0.93, 0.81, 1.27));
+    assert_eq!(p_cdl.get_saturation(), 1.0);
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, cdl_various_in_ctf)` @ v2.5.2.
+#[test]
+fn cdl_various_in_ctf() {
+    // When CDL was added to the CLF spec in v2, the style names were changed. Test that both
+    // the new and old style names work.
+    let ctf_file = "cdl_various.ctf";
+    let cached_file = load_clf_file(ctf_file).unwrap();
+
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 8);
+
+    let styles = [
+        CdlOpStyle::V1_2Fwd,
+        CdlOpStyle::V1_2Fwd,
+        CdlOpStyle::V1_2Rev,
+        CdlOpStyle::V1_2Rev,
+        CdlOpStyle::NoClampFwd,
+        CdlOpStyle::NoClampFwd,
+        CdlOpStyle::NoClampRev,
+        CdlOpStyle::NoClampRev,
+    ];
+    for (op, style) in op_list.iter().zip(styles) {
+        assert_eq!(as_cdl(op).get_style(), style);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, log_all_styles)` @ v2.5.2.
+#[test]
+fn log_all_styles() {
+    let file_name = "clf/log_all_styles.clf";
+    let cached_file = load_clf_file(file_name).unwrap();
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 11);
+    let error = 1e-9;
+
+    {
+        // Op 0 == antiLog2.
+        let op_data = as_log(&op_list[0]);
+        let desc = descriptions(&op_list[0]);
+        assert_eq!(desc.len(), 1);
+        assert_eq!(desc[0], b"AntiLog2 logarithm operation");
+        assert_eq!(op_data.direction(), TransformDirection::Inverse);
+        assert!(op_data.is_log2());
+    }
+    {
+        // Op 1 == log2.
+        let op_data = as_log(&op_list[1]);
+        assert_eq!(op_list[1].get_id(), b"a1");
+        assert_eq!(op_list[1].get_name(), b"logarithm");
+        assert_eq!(op_data.direction(), TransformDirection::Forward);
+        assert!(op_data.is_log2());
+        assert!(!op_data.is_log10());
+        assert!(!op_data.is_camera());
+    }
+    {
+        // Op 2 == linToLog.
+        let op_data = as_log(&op_list[2]);
+        assert_eq!(op_data.direction(), TransformDirection::Forward);
+        assert!(!op_data.is_log2());
+        assert!(!op_data.is_log10());
+        assert!(!op_data.is_camera());
+        assert!(op_data.all_components_equal());
+        let param = op_data.red_params();
+        assert_eq!(param.len(), 4);
+        check_close(param[LOG_SIDE_SLOPE], 0.29325513196, error);
+        check_close(param[LOG_SIDE_OFFSET], 0.66959921799, error);
+        check_close(param[LIN_SIDE_SLOPE], 0.98920224838, error);
+        check_close(param[LIN_SIDE_OFFSET], 0.01079775162, error);
+        assert_eq!(op_data.base(), 10.);
+    }
+    {
+        // Op 3 == antiLog10.
+        let op_data = as_log(&op_list[3]);
+        assert_eq!(op_data.direction(), TransformDirection::Inverse);
+        assert!(!op_data.is_log2());
+        assert!(op_data.is_log10());
+    }
+    {
+        // Op 4 == log10.
+        let op_data = as_log(&op_list[4]);
+        assert_eq!(op_data.direction(), TransformDirection::Forward);
+        assert!(!op_data.is_log2());
+        assert!(op_data.is_log10());
+    }
+    {
+        // Op 5 == logToLin.
+        let op_data = as_log(&op_list[5]);
+        assert_eq!(op_data.direction(), TransformDirection::Inverse);
+        assert!(!op_data.is_log2());
+        assert!(!op_data.is_log10());
+        assert!(!op_data.is_camera());
+        assert!(op_data.all_components_equal());
+        let param = op_data.red_params();
+        assert_eq!(param.len(), 4);
+        check_close(param[LOG_SIDE_SLOPE], 0.29325513196, error);
+        check_close(param[LOG_SIDE_OFFSET], 0.66959921799, error);
+        check_close(param[LIN_SIDE_SLOPE], 0.98920224838, error);
+        check_close(param[LIN_SIDE_OFFSET], 0.01079775162, error);
+        assert_eq!(op_data.base(), 10.);
+    }
+    {
+        // Op 6 == cameraLinToLog.
+        let op_data = as_log(&op_list[6]);
+        assert_eq!(op_data.direction(), TransformDirection::Forward);
+        assert!(!op_data.is_log2());
+        assert!(!op_data.is_log10());
+        assert!(op_data.is_camera());
+        assert!(op_data.all_components_equal());
+        let param = op_data.red_params();
+        assert_eq!(param.len(), 5);
+        check_close(param[LOG_SIDE_SLOPE], 0.05707762557, error);
+        check_close(param[LOG_SIDE_OFFSET], 0.55479452050, error);
+        check_close(param[LIN_SIDE_SLOPE], 1., error);
+        check_close(param[LIN_SIDE_OFFSET], 0., error);
+        check_close(param[LIN_SIDE_BREAK], 0.00781250000, error);
+        // Default base value is 2.
+        assert_eq!(op_data.base(), 2.);
+    }
+    {
+        // Op 7 == cameraLogToLin.
+        let op_data = as_log(&op_list[7]);
+        assert_eq!(op_data.direction(), TransformDirection::Inverse);
+        assert!(!op_data.is_log2());
+        assert!(!op_data.is_log10());
+        assert!(op_data.is_camera());
+        assert!(op_data.all_components_equal());
+        let param = op_data.red_params();
+        assert_eq!(param.len(), 5);
+        check_close(param[LOG_SIDE_SLOPE], 0.05707762557, error);
+        check_close(param[LOG_SIDE_OFFSET], 0.55479452050, error);
+        check_close(param[LIN_SIDE_SLOPE], 1., error);
+        check_close(param[LIN_SIDE_OFFSET], 0., error);
+        check_close(param[LIN_SIDE_BREAK], 0.00781250000, error);
+        assert_eq!(op_data.base(), 2.);
+    }
+    {
+        // Op 8 == cameraLogToLin.
+        let op_data = as_log(&op_list[8]);
+        assert_eq!(op_data.direction(), TransformDirection::Inverse);
+        assert!(!op_data.is_log2());
+        assert!(!op_data.is_log10());
+        assert!(op_data.is_camera());
+        assert!(op_data.all_components_equal());
+        let param = op_data.red_params();
+        assert_eq!(param.len(), 6);
+        check_close(param[LOG_SIDE_SLOPE], 0.25562072336, error);
+        check_close(param[LOG_SIDE_OFFSET], 0.41055718475, error);
+        check_close(param[LIN_SIDE_SLOPE], 5.26315789474, error);
+        check_close(param[LIN_SIDE_OFFSET], 0.05263157895, error);
+        check_close(param[LIN_SIDE_BREAK], 0.01125000000, error);
+        check_close(param[LINEAR_SLOPE], 6.62194371178, error);
+        assert_eq!(op_data.base(), 10.);
+    }
+    {
+        // Op 9 == linToLog.
+        let op_data = as_log(&op_list[9]);
+        assert_eq!(op_data.direction(), TransformDirection::Forward);
+        assert!(!op_data.is_log2());
+        assert!(!op_data.is_log10());
+        assert!(!op_data.is_camera());
+        assert!(!op_data.all_components_equal());
+        {
+            let param = op_data.red_params();
+            assert_eq!(param.len(), 4);
+            assert_eq!(param[LOG_SIDE_SLOPE], 0.3);
+            assert_eq!(param[LOG_SIDE_OFFSET], 0.6);
+            assert_eq!(param[LIN_SIDE_SLOPE], 0.9);
+            assert_eq!(param[LIN_SIDE_OFFSET], 0.05);
+            assert_eq!(op_data.base(), 8.);
+        }
+        {
+            let param = op_data.green_params();
+            assert_eq!(param.len(), 4);
+            assert_eq!(param[LOG_SIDE_SLOPE], 0.25);
+            assert_eq!(param[LOG_SIDE_OFFSET], 0.4);
+            assert_eq!(param[LIN_SIDE_SLOPE], 5.0);
+            assert_eq!(param[LIN_SIDE_OFFSET], 0.05);
+            assert_eq!(op_data.base(), 8.);
+        }
+        {
+            let param = op_data.blue_params();
+            assert_eq!(param.len(), 4);
+            assert_eq!(param[LOG_SIDE_SLOPE], 0.28);
+            assert_eq!(param[LOG_SIDE_OFFSET], 0.5);
+            assert_eq!(param[LIN_SIDE_SLOPE], 2.0);
+            assert_eq!(param[LIN_SIDE_OFFSET], 0.1);
+            assert_eq!(op_data.base(), 8.);
+        }
+    }
+    {
+        // Op 10 == Range.
+        as_range(&op_list[10]);
+    }
+}
+
+/// The checks of `log_logtolin` and `log_logtolinv2`.
+#[track_caller]
+fn check_log_to_lin(file_name: &str) {
+    let cached_file = load_clf_file(file_name).unwrap();
+    let file_ops = cached_file.transform.get_ops();
+    assert_eq!(file_ops.len(), 1);
+    let log = as_log(&file_ops[0]);
+
+    assert_eq!(log.direction(), TransformDirection::Inverse);
+    assert!(!log.is_log2());
+    assert!(!log.is_log10());
+    assert!(log.all_components_equal());
+    let param = log.red_params();
+    assert_eq!(param.len(), 4);
+    let error = 1e-9;
+    // This file uses the original CTF/Cineon style params, verify they are converted properly
+    // to the new OCIO style params.
+    check_close(param[LOG_SIDE_SLOPE], 0.29325513196, error);
+    check_close(param[LOG_SIDE_OFFSET], 0.66959921799, error);
+    check_close(param[LIN_SIDE_SLOPE], 0.98969709693, error);
+    check_close(param[LIN_SIDE_OFFSET], 0.01030290307, error);
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, log_logtolin)` @ v2.5.2.
+#[test]
+fn log_logtolin() {
+    check_log_to_lin("log_logtolin.ctf");
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, log_logtolinv2)` @ v2.5.2.
+#[test]
+fn log_logtolinv2() {
+    // Same as previous test, but CTF version set to 2.
+    check_log_to_lin("log_logtolinv2.ctf");
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, log_lintolog_3chan)` @ v2.5.2.
+#[test]
+fn log_lintolog_3chan() {
+    let file_name = "log_lintolog_3chan.ctf";
+    let cached_file = load_clf_file(file_name).unwrap();
+    let file_ops = cached_file.transform.get_ops();
+    assert_eq!(file_ops.len(), 1);
+    let log = as_log(&file_ops[0]);
+
+    assert_eq!(log.direction(), TransformDirection::Forward);
+    assert!(!log.all_components_equal());
+
+    let r_param = log.red_params();
+    assert_eq!(r_param.len(), 4);
+    let error = 1e-9;
+    // This file uses the original CTF/Cineon style params, verify they are converted properly
+    // to the new OCIO style params.
+    check_close(r_param[LOG_SIDE_SLOPE], 0.244379276637, error);
+    check_close(r_param[LOG_SIDE_OFFSET], 0.665689149560, error);
+    check_close(r_param[LIN_SIDE_SLOPE], 1.111637101285, error);
+    check_close(r_param[LIN_SIDE_OFFSET], -0.000473391157, error);
+
+    let g_param = log.green_params();
+    assert_eq!(g_param.len(), 4);
+    check_close(g_param[LOG_SIDE_SLOPE], 0.293255131964, error);
+    check_close(g_param[LOG_SIDE_OFFSET], 0.666666666667, error);
+    check_close(g_param[LIN_SIDE_SLOPE], 0.991514003046, error);
+    check_close(g_param[LIN_SIDE_OFFSET], 0.008485996954, error);
+
+    let b_param = log.blue_params();
+    assert_eq!(b_param.len(), 4);
+    check_close(b_param[LOG_SIDE_SLOPE], 0.317693059628, error);
+    check_close(b_param[LOG_SIDE_OFFSET], 0.667644183773, error);
+    check_close(b_param[LIN_SIDE_SLOPE], 1.236287104632, error);
+    check_close(b_param[LIN_SIDE_OFFSET], 0.010970316295, error);
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, log_bad_style)` @ v2.5.2.
+#[test]
+fn log_bad_style() {
+    let file_name = "clf/illegal/log_bad_style.clf";
+    check_throw_what(load_clf_file(file_name), "is invalid");
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, log_bad_version)` @ v2.5.2.
+#[test]
+fn log_bad_version() {
+    let file_name = "clf/illegal/log_bad_version.clf";
+    check_throw_what(
+        load_clf_file(file_name),
+        "CLF file version '2' does not support operator 'Log'",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, log_bad_param)` @ v2.5.2.
+#[test]
+fn log_bad_param() {
+    let file_name = "clf/illegal/log_bad_param.clf";
+    check_throw_what(
+        load_clf_file(file_name),
+        "Parameter 'linSideBreak' is only allowed for style",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, log_missing_breakpnt)` @ v2.5.2.
+#[test]
+fn log_missing_breakpnt() {
+    let file_name = "clf/illegal/log_missing_breakpnt.clf";
+    check_throw_what(
+        load_clf_file(file_name),
+        "Parameter 'linSideBreak' should be defined for style",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, log_ocio_params_channels)` @ v2.5.2.
+#[test]
+fn log_ocio_params_channels() {
+    // NB: The blue channel is missing and will use default values. Base can be specified in
+    // any channel but has to be specified.
+    let strebuf = "<?xml version='1.0' encoding='UTF-8'?>\n\
+                   <ProcessList id='none' version='2'>\n\
+                   <Log inBitDepth='10i' outBitDepth='16f' style='linToLog'>\n\
+                   <LogParams channel='R' linSideSlope='1.1' linSideOffset='0.1' \
+                   logSideSlope='0.9' logSideOffset='0.2' base='10.0' />\n\
+                   <LogParams channel='G' logSideSlope='0.9' logSideOffset='0.23456' />\n\
+                   </Log>\n\
+                   </ProcessList>\n";
+
+    let cached_file = parse_string(strebuf).unwrap();
+    let file_ops = cached_file.transform.get_ops();
+
+    assert_eq!(file_ops.len(), 1);
+    let log = as_log(&file_ops[0]);
+    assert_eq!(log.base(), 10.0);
+    assert!(!log.all_components_equal());
+    let r_params = log.red_params();
+    assert_eq!(r_params[LIN_SIDE_SLOPE], 1.1);
+    assert_eq!(r_params[LIN_SIDE_OFFSET], 0.1);
+    assert_eq!(r_params[LOG_SIDE_SLOPE], 0.9);
+    assert_eq!(r_params[LOG_SIDE_OFFSET], 0.2);
+    let g_params = log.green_params();
+    assert_eq!(g_params[LIN_SIDE_SLOPE], 1.0);
+    assert_eq!(g_params[LIN_SIDE_OFFSET], 0.0);
+    assert_eq!(g_params[LOG_SIDE_SLOPE], 0.9);
+    assert_eq!(g_params[LOG_SIDE_OFFSET], 0.23456);
+    let b_params = log.blue_params();
+    assert_eq!(b_params[LIN_SIDE_SLOPE], 1.0);
+    assert_eq!(b_params[LIN_SIDE_OFFSET], 0.0);
+    assert_eq!(b_params[LOG_SIDE_SLOPE], 1.0);
+    assert_eq!(b_params[LOG_SIDE_OFFSET], 0.0);
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, log_ocio_params_base_missmatch)` @ v2.5.2.
+#[test]
+fn log_ocio_params_base_missmatch() {
+    let strebuf = "<?xml version='1.0' encoding='UTF-8'?>\n\
+                   <ProcessList id='none' version='2'>\n\
+                   <Log inBitDepth='32f' outBitDepth='32f' style='linToLog'>\n\
+                   <LogParams channel='R' linSideSlope='1.1' base='2.0'/>\n\
+                   <LogParams channel='G' linSideSlope='1.2' base='2.5'/>\n\
+                   </Log>\n\
+                   </ProcessList>\n";
+
+    check_throw_what(parse_string(strebuf), "base has to be the same");
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, log_default_params)` @ v2.5.2.
+#[test]
+fn log_default_params() {
+    let strebuf = "<?xml version='1.0' encoding='UTF-8'?>\n\
+                   <ProcessList id='none' version='2'>\n\
+                   <Log inBitDepth='32f' outBitDepth='32f' style='linToLog' />\n\
+                   <Log inBitDepth='32f' outBitDepth='32f' style='cameraLinToLog'>\n\
+                   <LogParams linSideBreak='0.1'/>\n\
+                   </Log>\n\
+                   </ProcessList>\n";
+
+    let cached_file = parse_string(strebuf).unwrap();
+    let file_ops = cached_file.transform.get_ops();
+
+    assert_eq!(file_ops.len(), 2);
+    let log = as_log(&file_ops[0]);
+    // Default value is 2.
+    assert_eq!(log.base(), 2.0);
+    let red_params = log.red_params();
+    assert_eq!(red_params.len(), 4);
+    assert_eq!(red_params[LIN_SIDE_SLOPE], 1.);
+    assert_eq!(red_params[LIN_SIDE_OFFSET], 0.);
+    assert_eq!(red_params[LOG_SIDE_SLOPE], 1.);
+    assert_eq!(red_params[LOG_SIDE_OFFSET], 0.);
+
+    let log = as_log(&file_ops[1]);
+    // Default value is 2.
+    assert_eq!(log.base(), 2.0);
+    let green_params = log.green_params();
+    assert_eq!(green_params.len(), 5);
+    assert_eq!(green_params[LIN_SIDE_SLOPE], 1.);
+    assert_eq!(green_params[LIN_SIDE_OFFSET], 0.);
+    assert_eq!(green_params[LOG_SIDE_SLOPE], 1.);
+    assert_eq!(green_params[LOG_SIDE_OFFSET], 0.);
+    assert_eq!(green_params[LIN_SIDE_BREAK], 0.1);
 }

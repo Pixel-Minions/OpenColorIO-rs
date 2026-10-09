@@ -21,6 +21,7 @@ use std::sync::Arc;
 use ocio_formats::expat::xmlparse::{ParseError, Parser, XmlError, XmlStatus, xml_error_string};
 use ocio_formats::fileformats::xmlutils::xml_reader_helper::{
     ElementRcPtr, XmlReaderDescriptionElt, XmlReaderDummyElt, XmlReaderElementStack,
+    XmlReaderSaturationElt, XmlReaderSopValueElt,
 };
 use ocio_formats::fileformats::xmlutils::xml_reader_utils::{
     TAG_DESCRIPTION, TAG_OFFSET, TAG_POWER, TAG_SATNODE, TAG_SATNODEALT, TAG_SATURATION, TAG_SLOPE,
@@ -32,6 +33,7 @@ use ocio_ops::format_metadata::{METADATA_INPUT_DESCRIPTOR, METADATA_OUTPUT_DESCR
 use ocio_ops::op::{OpVec, create_op_vec_from_op_data};
 use ocio_ops::op_data::{OpData, OpDataRcPtr};
 use ocio_ops::open_color_types::{TransformDirection, combine_transform_directions};
+use ocio_ops::ops::log::log_utils::LogStyle;
 use ocio_ops::ops::lut1d::lut1d_op_data::Lut1DOpData;
 use ocio_ops::ops::lut3d::lut3d_op_data::{
     Interpolation, Lut3DOpData, get_concrete_interpolation as lut3d_get_concrete_interpolation,
@@ -43,9 +45,10 @@ use ocio_ops::utils::string_utils::{c_str, lower};
 use crate::config::Config;
 use crate::context::Context;
 use crate::fileformats::ctf::ctf_reader_helper::{
-    CtfReaderArrayElt, CtfReaderDescriptorElt, CtfReaderKind, CtfReaderMetadataElt, CtfReaderOpElt,
-    CtfReaderOpType, CtfReaderRangeValueElt, CtfReaderTransformElt, CtfReaderTransformRc,
-    Descriptor, equal_ignoring_case, get_reader,
+    CtfReaderArrayElt, CtfReaderDescriptorElt, CtfReaderGammaParamsElt, CtfReaderKind,
+    CtfReaderLogParamsElt, CtfReaderMetadataElt, CtfReaderOpElt, CtfReaderOpType,
+    CtfReaderRangeValueElt, CtfReaderSatNodeElt, CtfReaderSopNodeElt, CtfReaderTransformElt,
+    CtfReaderTransformRc, Descriptor, equal_ignoring_case, get_reader,
 };
 use crate::fileformats::ctf::ctf_reader_utils::{
     TAG_ACES, TAG_ACES_PARAMS, TAG_ARRAY, TAG_CDL, TAG_CURVE_CTRL_PNTS, TAG_CURVE_SLOPES,
@@ -428,8 +431,8 @@ impl State {
     /// operator is an error.
     ///
     /// Port of `XMLParserHelper::AddOpReader` (FileFormatCTF.cpp:283-323 @ v2.5.2). The
-    /// readers of the operators but Matrix and Range come with WP 4.5e-4.5i; until then,
-    /// such an operator is refused as not ported yet.
+    /// readers of the operators but Matrix, Range, Log, Gamma (and Exponent) and ASC_CDL come
+    /// with WP 4.5f-4.5i; until then, such an operator is refused as not ported yet.
     fn add_op_reader(&mut self, op_type: CtfReaderOpType, xml_tag: &[u8]) -> Result<()> {
         if self.elms.size() != 1 {
             let mut ss = OStringStream::new(Crt::NATIVE);
@@ -813,7 +816,19 @@ fn push_element(st: &mut State, name: &[u8]) -> Result<()> {
     } else if supported_element(name, &p_elt, TAG_GAMMA_PARAMS, TAG_GAMMA, r)
         || supported_element(name, &p_elt, TAG_EXPONENT_PARAMS, TAG_EXPONENT, r)
     {
-        return Err(operator_part_not_ported(st, "CTFReaderGammaParamsElt"));
+        let alpha = p_container
+            .borrow()
+            .as_any()
+            .downcast_ref::<CtfReaderOpElt>()
+            .expect("a Gamma or an Exponent is a Gamma reader")
+            .gamma_params_allow_alpha();
+        Rc::new(RefCell::new(CtfReaderGammaParamsElt::new(
+            name,
+            p_container,
+            st.get_xm_line_number(),
+            st.get_xml_filename(),
+            alpha,
+        )))
     } else if supported_element(name, &p_elt, TAG_INDEX_MAP, TAG_LUT1D, r)
         || supported_element(name, &p_elt, TAG_INDEX_MAP, TAG_LUT3D, r)
     {
@@ -834,7 +849,33 @@ fn push_element(st: &mut State, name: &[u8]) -> Result<()> {
             Descriptor::Input,
         )))
     } else if supported_element(name, &p_elt, TAG_LOG_PARAMS, TAG_LOG, r) {
-        return Err(operator_part_not_ported(st, "CTFReaderLogParamsElt"));
+        let (style, v2_0) = {
+            let container = p_container.borrow();
+            let p_log = container
+                .as_any()
+                .downcast_ref::<CtfReaderOpElt>()
+                .expect("a Log is a Log reader");
+            (p_log.get_ctf_params().style, p_log.log_params_are_2_0())
+        };
+        if !(style == LogStyle::LogToLin
+            || style == LogStyle::LinToLog
+            || style == LogStyle::CameraLogToLin
+            || style == LogStyle::CameraLinToLog)
+        {
+            st.dummy(
+                name,
+                st.elms.back(),
+                Some(b"Log Params not allowed in this element"),
+            )
+        } else {
+            Rc::new(RefCell::new(CtfReaderLogParamsElt::new(
+                name,
+                p_container,
+                st.get_xm_line_number(),
+                st.get_xml_filename(),
+                v2_0,
+            )))
+        }
     } else if supported_element(
         name,
         &p_elt,
@@ -859,13 +900,33 @@ fn push_element(st: &mut State, name: &[u8]) -> Result<()> {
     } else if supported_element(name, &p_elt, TAG_SATNODE, TAG_CDL, r)
         || supported_element(name, &p_elt, TAG_SATNODEALT, TAG_CDL, r)
     {
-        return Err(operator_part_not_ported(st, "CTFReaderSatNodeElt"));
+        Rc::new(RefCell::new(CtfReaderSatNodeElt::new(
+            name,
+            p_container,
+            st.get_xm_line_number(),
+            st.get_xml_filename(),
+        )))
     } else if supported_element(name, &p_elt, TAG_SATURATION, TAG_SATNODE, r) {
-        return Err(operator_part_not_ported(st, "XmlReaderSaturationElt"));
+        Rc::new(RefCell::new(XmlReaderSaturationElt::new(
+            name,
+            p_container,
+            st.get_xm_line_number(),
+            st.get_xml_filename(),
+        )))
     } else if supported_element(name, &p_elt, TAG_SOPNODE, TAG_CDL, r) {
-        return Err(operator_part_not_ported(st, "CTFReaderSOPNodeElt"));
+        Rc::new(RefCell::new(CtfReaderSopNodeElt::new(
+            name,
+            p_container,
+            st.get_xm_line_number(),
+            st.get_xml_filename(),
+        )))
     } else if supported_element_tags(name, &p_elt, &SOP_SUB_ELEMENTS, TAG_SOPNODE, r) {
-        return Err(operator_part_not_ported(st, "XmlReaderSOPValueElt"));
+        Rc::new(RefCell::new(XmlReaderSopValueElt::new(
+            name,
+            p_container,
+            st.get_xm_line_number(),
+            st.get_xml_filename(),
+        )))
     } else if supported_element_tags(name, &p_elt, &GRADING_PRIMARY_SUB_ELEMENTS, TAG_PRIMARY, r) {
         return Err(operator_part_not_ported(
             st,

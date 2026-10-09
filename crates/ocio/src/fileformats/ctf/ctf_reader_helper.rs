@@ -21,8 +21,10 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use ocio_formats::fileformats::xmlutils::xml_reader_helper::{
-    ContainerEltRcPtr, XmlReaderComplexEltBase, XmlReaderContainerElt, XmlReaderElement,
-    XmlReaderElementBase, XmlReaderPlainElt, XmlReaderPlainEltBase,
+    CdlOpDataRcPtr, ContainerEltRcPtr, XmlReaderComplexEltBase, XmlReaderContainerElt,
+    XmlReaderElement, XmlReaderElementBase, XmlReaderPlainElt, XmlReaderPlainEltBase,
+    XmlReaderSatNodeBaseElt, XmlReaderSopNodeBase, XmlReaderSopNodeBaseElt,
+    sat_node_append_metadata,
 };
 use ocio_formats::fileformats::xmlutils::xml_reader_utils::{
     ATTR_ID, ATTR_NAME, find_next_token_start, get_next_number, get_numbers, truncate_string,
@@ -32,7 +34,17 @@ use ocio_ops::cfmt::{Crt, OStringStream};
 use ocio_ops::format_metadata::FormatMetadataImpl;
 use ocio_ops::logging::{is_debug_logging_enabled, log_debug};
 use ocio_ops::op_data::{OpData, OpDataType};
-use ocio_ops::open_color_types::{BitDepth, bit_depth_to_string};
+use ocio_ops::open_color_types::{BitDepth, TransformDirection, bit_depth_to_string};
+use ocio_ops::ops::cdl::cdl_op_data::{CdlOpData, CdlOpStyle};
+use ocio_ops::ops::gamma::gamma_op_data::{GammaOpData, GammaStyle};
+use ocio_ops::ops::log::log_op_data::{
+    LIN_SIDE_OFFSET, LIN_SIDE_SLOPE, LOG_SIDE_OFFSET, LOG_SIDE_SLOPE, LogOpData,
+};
+use ocio_ops::ops::log::log_utils::{
+    CtfParams, CtfParamsType, LogStyle, convert_log_parameters,
+    convert_string_to_style as log_convert_string_to_style,
+    convert_style_to_string as log_convert_style_to_string, ctf_values, get_log_direction,
+};
 use ocio_ops::ops::matrix::matrix_op_data::MatrixOpData;
 use ocio_ops::ops::range::range_op_data::RangeOpData;
 use ocio_ops::platform::strcasecmp;
@@ -41,9 +53,12 @@ use ocio_ops::utils::string_utils::{c_str, lower};
 use ocio_ops::{Exception, Result};
 
 use super::ctf_reader_utils::{
-    ATTR_BITDEPTH_IN, ATTR_BITDEPTH_OUT, ATTR_BYPASS, ATTR_COMP_CLF_VERSION, ATTR_DIMENSION,
-    ATTR_INVERSE_OF, ATTR_STYLE, ATTR_VERSION, TAG_MAX_IN_VALUE, TAG_MAX_OUT_VALUE,
-    TAG_MIN_IN_VALUE, TAG_MIN_OUT_VALUE, TAG_PROCESS_LIST,
+    ATTR_BASE, ATTR_BITDEPTH_IN, ATTR_BITDEPTH_OUT, ATTR_BYPASS, ATTR_CHAN, ATTR_COMP_CLF_VERSION,
+    ATTR_DIMENSION, ATTR_EXPONENT, ATTR_GAMMA, ATTR_HIGHLIGHT, ATTR_INVERSE_OF, ATTR_LINEARSLOPE,
+    ATTR_LINSIDEBREAK, ATTR_LINSIDEOFFSET, ATTR_LINSIDESLOPE, ATTR_LOGSIDEOFFSET,
+    ATTR_LOGSIDESLOPE, ATTR_OFFSET, ATTR_REFBLACK, ATTR_REFWHITE, ATTR_SHADOW, ATTR_STYLE,
+    ATTR_VERSION, TAG_MAX_IN_VALUE, TAG_MAX_OUT_VALUE, TAG_MIN_IN_VALUE, TAG_MIN_OUT_VALUE,
+    TAG_PROCESS_LIST,
 };
 use super::ctf_transform::{
     CTF_INFO_ELEMENT_VERSION, CTF_PROCESS_LIST_VERSION, CTF_PROCESS_LIST_VERSION_1_2,
@@ -931,18 +946,42 @@ pub struct CtfReaderOpElt {
     array_completed: bool,
     /// `CTFReaderRangeElt_1_7::m_isNoClamp`.
     is_no_clamp: bool,
+    /// `CTFReaderCDLElt::m_cdl`, which the SOPNode and SatNode elements share: the op data of
+    /// a CDL reader.
+    cdl: Option<CdlOpDataRcPtr>,
+    /// `CTFReaderLogElt::m_ctfParams`.
+    ctf_params: CtfParams,
+    /// `CTFReaderLogElt::m_baseSet`.
+    base_set: bool,
+    /// The op's id, which `getIdentifier` returns.
+    id: Vec<u8>,
 }
 
 impl CtfReaderOpElt {
     /// The reader of `kind`, if ported (WP 4.5c-4.5i port the others).
     ///
-    /// Port of the constructors of the `CTFReaderOpElt` subclasses: `CTFReaderMatrixElt`
-    /// (CTFReaderHelper.cpp:4561-4566) and `CTFReaderRangeElt` (4858-4862) @ v2.5.2.
+    /// Port of the constructors of the `CTFReaderOpElt` subclasses: `CTFReaderCDLElt`
+    /// (CTFReaderHelper.cpp:1327-1332), `CTFReaderGammaElt` (1862-1865), `CTFReaderLogElt`
+    /// (3545-3549), `CTFReaderMatrixElt` (4561-4566) and `CTFReaderRangeElt` (4858-4862) @
+    /// v2.5.2.
     pub fn create(kind: CtfReaderKind) -> Option<CtfReaderOpElt> {
         let op = match kind {
             CtfReaderKind::Matrix | CtfReaderKind::Matrix1_3 => OpData::Matrix(MatrixOpData::new()),
             CtfReaderKind::Range | CtfReaderKind::Range1_7 => OpData::Range(RangeOpData::new()),
+            // CDL op is already initialized to identity.
+            CtfReaderKind::Cdl => OpData::Cdl(CdlOpData::new_default()),
+            CtfReaderKind::Gamma
+            | CtfReaderKind::Gamma1_5
+            | CtfReaderKind::GammaCtf2_0
+            | CtfReaderKind::GammaClf3_0 => OpData::Gamma(GammaOpData::default()),
+            CtfReaderKind::Log | CtfReaderKind::Log2_0 => {
+                OpData::Log(LogOpData::new(2.0, TransformDirection::Forward))
+            }
             _ => return None,
+        };
+        let cdl = match &op {
+            OpData::Cdl(cdl) => Some(Rc::new(RefCell::new(cdl.clone()))),
+            _ => None,
         };
         Some(CtfReaderOpElt {
             element: XmlReaderElementBase::new(b"", 0, b""),
@@ -954,6 +993,10 @@ impl CtfReaderOpElt {
             op_index: 0,
             array_completed: false,
             is_no_clamp: false,
+            cdl,
+            ctf_params: CtfParams::default(),
+            base_set: false,
+            id: Vec::new(),
         })
     }
 
@@ -1065,9 +1108,19 @@ impl CtfReaderOpElt {
         while i < atts.len() {
             let (att, value) = (atts[i], atts[i + 1]);
             if equal_ignoring_case(ATTR_ID, att) {
-                self.op.set_id(value);
+                self.id = c_str(value).to_vec();
+                match &self.cdl {
+                    Some(cdl) => cdl.borrow_mut().set_id(value),
+                    None => self.op.set_id(value),
+                }
             } else if equal_ignoring_case(ATTR_NAME, att) {
-                self.op.set_name(value);
+                match &self.cdl {
+                    Some(cdl) => cdl
+                        .borrow_mut()
+                        .get_format_metadata_mut()
+                        .set_name(Some(value)),
+                    None => self.op.set_name(value),
+                }
             } else if equal_ignoring_case(ATTR_BITDEPTH_IN, att) {
                 let bitdepth = get_bit_depth(value);
                 if bitdepth == BitDepth::Unknown {
@@ -1135,7 +1188,9 @@ impl CtfReaderOpElt {
     /// The attributes of the operator: `id`, `name`, `inBitDepth`, `outBitDepth`, `bypass`
     /// (CTF only), and the subclass's.
     ///
-    /// Port of `CTFReaderOpElt::isOpParameterValid` (CTFReaderHelper.cpp:949-957) and
+    /// Port of `CTFReaderOpElt::isOpParameterValid` (CTFReaderHelper.cpp:949-957),
+    /// `CTFReaderCDLElt::isOpParameterValid` (1361-1365), `CTFReaderGammaElt::isOpParameterValid`
+    /// (1918-1922), `CTFReaderLogElt::isOpParameterValid` (3582-3586) and
     /// `CTFReaderRangeElt_1_7::isOpParameterValid` (4917-4921) @ v2.5.2.
     fn is_op_parameter_valid(&self, att: &[u8]) -> bool {
         let base = equal_ignoring_case(ATTR_ID, att)
@@ -1145,7 +1200,14 @@ impl CtfReaderOpElt {
             // Allow bypass attribute in CTF.
             || (equal_ignoring_case(ATTR_BYPASS, att) && !self.get_transform().borrow().is_clf());
         match self.kind {
-            CtfReaderKind::Range1_7 => base || equal_ignoring_case(ATTR_STYLE, att),
+            CtfReaderKind::Range1_7
+            | CtfReaderKind::Cdl
+            | CtfReaderKind::Gamma
+            | CtfReaderKind::Gamma1_5
+            | CtfReaderKind::GammaCtf2_0
+            | CtfReaderKind::GammaClf3_0
+            | CtfReaderKind::Log
+            | CtfReaderKind::Log2_0 => base || equal_ignoring_case(ATTR_STYLE, att),
             _ => base,
         }
     }
@@ -1496,10 +1558,352 @@ impl CtfReaderOpElt {
     }
 
     /// Writes the reader's op to the transform's ops, where `start` appended it.
-    fn commit_op(&self) {
+    fn commit_op(&mut self) {
+        if let Some(cdl) = &self.cdl {
+            self.op = OpData::Cdl(cdl.borrow().clone());
+        }
         let mut transform = self.get_transform().borrow_mut();
         transform.get_ops_mut()[self.op_index] = Arc::new(self.op.clone());
     }
+}
+
+impl CtfReaderOpElt {
+    /// The CDL of a CDL reader, which its SOPNode and SatNode elements fill.
+    ///
+    /// Port of `CTFReaderCDLElt::getCDL` (CTFReaderHelper.cpp:1380-1383 @ v2.5.2).
+    pub fn get_cdl(&self) -> &CdlOpDataRcPtr {
+        self.cdl.as_ref().expect("a CDL reader")
+    }
+
+    /// The style (required by CLF v3, which defaults it to ASC; unknown styles are errors).
+    ///
+    /// Port of `CTFReaderCDLElt::start` (CTFReaderHelper.cpp:1338-1359 @ v2.5.2), after
+    /// `CTFReaderOpElt::start`.
+    fn cdl_start(&mut self, atts: &[&[u8]]) -> Result<()> {
+        let mut is_style_found = false;
+        let mut i = 0;
+        while i < atts.len() {
+            if equal_ignoring_case(ATTR_STYLE, atts[i]) {
+                // Unrecognized CDL styles will throw an exception.
+                let style = CdlOpData::get_style_from_name(Some(utf8(atts[i + 1])))?;
+                self.get_cdl().borrow_mut().set_style(style);
+                is_style_found = true;
+            }
+            i += 2;
+        }
+
+        // Although the OCIO default for CDL style is no-clamp, the default specified in the
+        // CLF v3 spec is ASC.
+        if !is_style_found {
+            self.get_cdl().borrow_mut().set_style(CdlOpStyle::V1_2Fwd);
+        }
+        Ok(())
+    }
+
+    /// The gamma of a Gamma reader.
+    ///
+    /// Port of `CTFReaderGammaElt::getGamma` (CTFReaderHelper.h:532 @ v2.5.2).
+    pub fn gamma_mut(&mut self) -> &mut GammaOpData {
+        match &mut self.op {
+            OpData::Gamma(gamma) => gamma,
+            _ => panic!("not a Gamma reader"),
+        }
+    }
+
+    /// Whether this is a Gamma reader (`dynamic_cast<CTFReaderGammaElt *>`).
+    pub fn is_gamma(&self) -> bool {
+        matches!(
+            self.kind,
+            CtfReaderKind::Gamma
+                | CtfReaderKind::Gamma1_5
+                | CtfReaderKind::GammaCtf2_0
+                | CtfReaderKind::GammaClf3_0
+        )
+    }
+
+    /// Whether the reader's version handles the style: the basic and moncurve ones before
+    /// CTF 2.0, all from CTF 2.0 and CLF 3.0.
+    ///
+    /// Port of `CTFReaderGammaElt::isValid` (CTFReaderHelper.cpp:1953-1971) and
+    /// `CTFReaderGammaElt_CTF_2_0::isValid` (1984-2001) @ v2.5.2.
+    fn gamma_is_valid(&self, style: GammaStyle) -> bool {
+        match self.kind {
+            CtfReaderKind::GammaCtf2_0 | CtfReaderKind::GammaClf3_0 => true,
+            _ => matches!(
+                style,
+                GammaStyle::BasicFwd
+                    | GammaStyle::BasicRev
+                    | GammaStyle::MoncurveFwd
+                    | GammaStyle::MoncurveRev
+            ),
+        }
+    }
+
+    /// Whether the GammaParams elements of this reader take the alpha channel: the reader
+    /// `createGammaParamsElt` makes is `CTFReaderGammaParamsElt_1_5` for the CTF 1.5 and 2.0
+    /// readers, `CTFReaderGammaParamsElt` for the others.
+    ///
+    /// Port of `CTFReaderGammaElt::createGammaParamsElt` (CTFReaderHelper.cpp:1944-1951),
+    /// `CTFReaderGammaElt_1_5::createGammaParamsElt` (1973-1982) and
+    /// `CTFReaderGammaElt_CLF_3_0::createGammaParamsElt` (2003-2012) @ v2.5.2.
+    pub fn gamma_params_allow_alpha(&self) -> bool {
+        matches!(
+            self.kind,
+            CtfReaderKind::Gamma1_5 | CtfReaderKind::GammaCtf2_0
+        )
+    }
+
+    /// The style (required, and handled by the reader's version), with its identity
+    /// parameters for all channels.
+    ///
+    /// Port of `CTFReaderGammaElt::start` (CTFReaderHelper.cpp:1871-1916 @ v2.5.2), after
+    /// `CTFReaderOpElt::start`.
+    fn gamma_start(&mut self, atts: &[&[u8]]) -> Result<()> {
+        let mut is_style_found = false;
+
+        let mut i = 0;
+        while i < atts.len() {
+            if equal_ignoring_case(ATTR_STYLE, atts[i]) {
+                // We need a valid style to parse the parameters. This will throw on
+                // unrecognized styles.
+                let style = GammaOpData::convert_string_to_style(Some(utf8(atts[i + 1])))?;
+                if !self.gamma_is_valid(style) {
+                    let mut oss = OStringStream::new(Crt::NATIVE);
+                    oss.put_str("Style not handled: '");
+                    oss.put_c_str(atts[i + 1]);
+                    oss.put_str("' for ");
+
+                    let transform = self.get_transform().borrow();
+                    if transform.is_clf() {
+                        oss.put_str("CLF file version '");
+                        oss.put_bytes(transform.get_clf_version().to_string().as_bytes());
+                    } else {
+                        oss.put_str("CTF file version '");
+                        oss.put_bytes(transform.get_ctf_version().to_string().as_bytes());
+                    }
+                    oss.put_str("'.");
+
+                    return Err(self.throw_message(oss.str()));
+                }
+                let gamma = self.gamma_mut();
+                gamma.set_style(style);
+                is_style_found = true;
+
+                // Set default parameters for all channels.
+                let params = GammaOpData::identity_parameters(gamma.style());
+                gamma.set_params(&params);
+            }
+
+            i += 2;
+        }
+        if !is_style_found {
+            return Err(self.throw_message(b"Missing parameter 'style'."));
+        }
+        Ok(())
+    }
+
+    /// The parameters' check.
+    ///
+    /// Port of `CTFReaderGammaElt::end` (CTFReaderHelper.cpp:1924-1937 @ v2.5.2), after
+    /// `CTFReaderOpElt::end`.
+    fn gamma_end(&mut self) -> Result<()> {
+        // Validate the end result.
+        if let Err(ce) = self.gamma_mut().validate() {
+            return Err(self.throw_m(&[b"Invalid parameters: ", c_str(ce.what()), b"."]));
+        }
+        Ok(())
+    }
+
+    /// The log of a Log reader.
+    ///
+    /// Port of `CTFReaderLogElt::getLog` (CTFReaderHelper.h:897 @ v2.5.2).
+    fn log_mut(&mut self) -> &mut LogOpData {
+        match &mut self.op {
+            OpData::Log(log) => log,
+            _ => panic!("not a Log reader"),
+        }
+    }
+
+    /// Whether this is a Log reader (`dynamic_cast<CTFReaderLogElt *>`).
+    pub fn is_log(&self) -> bool {
+        matches!(self.kind, CtfReaderKind::Log | CtfReaderKind::Log2_0)
+    }
+
+    /// Whether the LogParams elements of this reader are CTF 2.0's: the reader
+    /// `createLogParamsElt` makes is `CTFReaderLogParamsElt_2_0` for `CTFReaderLogElt_2_0`.
+    ///
+    /// Port of `CTFReaderLogElt::createLogParamsElt` (CTFReaderHelper.cpp:3655-3662) and
+    /// `CTFReaderLogElt_2_0::createLogParamsElt` (3719-3726) @ v2.5.2.
+    pub fn log_params_are_2_0(&self) -> bool {
+        self.kind == CtfReaderKind::Log2_0
+    }
+
+    /// The parameters as the file gives them.
+    ///
+    /// Port of `CTFReaderLogElt::getCTFParams` (CTFReaderHelper.h:899-900 @ v2.5.2).
+    pub fn get_ctf_params(&self) -> &CtfParams {
+        &self.ctf_params
+    }
+
+    /// Port of `CTFReaderLogElt::getCTFParams` (CTFReaderHelper.h:899-900 @ v2.5.2).
+    pub fn get_ctf_params_mut(&mut self) -> &mut CtfParams {
+        &mut self.ctf_params
+    }
+
+    /// Port of `CTFReaderLogElt::isBaseSet` (CTFReaderHelper.h:903 @ v2.5.2).
+    fn is_base_set(&self) -> bool {
+        self.base_set
+    }
+
+    /// Sets the log's base, which all the channels must share.
+    ///
+    /// Port of `CTFReaderLogElt::setBase` (CTFReaderHelper.cpp:3629-3645 @ v2.5.2).
+    pub fn set_base(&mut self, base: f64) -> Result<()> {
+        if self.base_set {
+            let cur_base = self.log_mut().base();
+            if cur_base != base {
+                let mut oss = OStringStream::new(Crt::NATIVE);
+                oss.put_str("Log base has to be the same on all components: ");
+                oss.put_str("Current base: ");
+                oss.put_f64(cur_base);
+                oss.put_str(", new base: ");
+                oss.put_f64(base);
+                oss.put_str(".");
+                return Err(self.throw_message(oss.str()));
+            }
+        } else {
+            self.base_set = true;
+            self.log_mut().set_base(base);
+        }
+        Ok(())
+    }
+
+    /// The style (required).
+    ///
+    /// Port of `CTFReaderLogElt::start` (CTFReaderHelper.cpp:3555-3580 @ v2.5.2), after
+    /// `CTFReaderOpElt::start`.
+    fn log_start(&mut self, atts: &[&[u8]]) -> Result<()> {
+        let mut is_style_found = false;
+        let mut i = 0;
+        while i < atts.len() {
+            if equal_ignoring_case(ATTR_STYLE, atts[i]) {
+                match log_convert_string_to_style(Some(utf8(atts[i + 1]))) {
+                    Ok(style) => self.ctf_params.style = style,
+                    Err(_) => {
+                        return Err(self.throw_m(&[
+                            b"Required attribute 'style' '",
+                            c_str(atts[i + 1]),
+                            b"' is invalid.",
+                        ]));
+                    }
+                }
+                is_style_found = true;
+            }
+            i += 2;
+        }
+
+        if !is_style_found {
+            return Err(
+                self.throw_message(b"CTF/CLF Log parsing. Required attribute 'style' is missing.")
+            );
+        }
+        Ok(())
+    }
+
+    /// The log of a CTF before 2.0: its base, direction and parameters from the style and
+    /// the legacy parameters, then its check.
+    ///
+    /// Port of `CTFReaderLogElt::end` (CTFReaderHelper.cpp:3588-3622 @ v2.5.2), after
+    /// `CTFReaderOpElt::end`.
+    fn log_end(&mut self) -> Result<()> {
+        // When style is log2, log10 (or anti), there are no params.
+        let mut base = 2.0;
+        let mut r_params = Vec::new();
+        let mut g_params = Vec::new();
+        let mut b_params = Vec::new();
+        let dir = get_log_direction(self.ctf_params.style);
+
+        // This handles all log styles.
+        if let Err(ce) = convert_log_parameters(
+            &self.ctf_params,
+            &mut base,
+            &mut r_params,
+            &mut g_params,
+            &mut b_params,
+        ) {
+            return Err(self.throw_m(&[b"Parameters are not valid: '", c_str(ce.what()), b"'."]));
+        }
+
+        let log = self.log_mut();
+        log.set_base(base);
+        log.set_direction(dir);
+        log.set_red_params(r_params);
+        log.set_green_params(g_params);
+        log.set_blue_params(b_params);
+
+        self.log_validate()
+    }
+
+    /// The log's check.
+    fn log_validate(&mut self) -> Result<()> {
+        // Validate the end result.
+        if let Err(ce) = self.log_mut().validate() {
+            return Err(self.throw_m(&[b"Log is not valid: '", c_str(ce.what()), b"'."]));
+        }
+        Ok(())
+    }
+
+    /// The log of CTF 2.0 and CLF 3.0: its direction from the style; the legacy parameters
+    /// converted, or the base of the plain logarithms if no LogParams set it; then its check.
+    ///
+    /// Port of `CTFReaderLogElt_2_0::end` (CTFReaderHelper.cpp:3664-3717 @ v2.5.2), after
+    /// `CTFReaderOpElt::end`.
+    fn log_end_2_0(&mut self) -> Result<()> {
+        let dir = get_log_direction(self.ctf_params.style);
+        self.log_mut().set_direction(dir);
+
+        if self.ctf_params.get_type() == CtfParamsType::Cineon {
+            let mut base = 2.0;
+            let mut r_params = Vec::new();
+            let mut g_params = Vec::new();
+            let mut b_params = Vec::new();
+
+            // This handles all log styles.
+            if let Err(ce) = convert_log_parameters(
+                &self.ctf_params,
+                &mut base,
+                &mut r_params,
+                &mut g_params,
+                &mut b_params,
+            ) {
+                return Err(self.throw_m(&[
+                    b"Parameters are not valid: '",
+                    c_str(ce.what()),
+                    b"'.",
+                ]));
+            }
+
+            let log = self.log_mut();
+            log.set_base(base);
+            log.set_red_params(r_params);
+            log.set_green_params(g_params);
+            log.set_blue_params(b_params);
+        } else if !self.is_base_set() {
+            let style = self.ctf_params.style;
+            if style == LogStyle::Log2 || style == LogStyle::AntiLog2 {
+                self.set_base(2.0)?;
+            } else if style == LogStyle::Log10 || style == LogStyle::AntiLog10 {
+                self.set_base(10.0)?;
+            }
+        }
+
+        self.log_validate()
+    }
+}
+
+/// An attribute's value, which expat gives in UTF-8, as the `&str` the style parsers take.
+fn utf8(value: &[u8]) -> &str {
+    std::str::from_utf8(value).expect("expat gives UTF-8")
 }
 
 impl XmlReaderElement for CtfReaderOpElt {
@@ -1510,10 +1914,20 @@ impl XmlReaderElement for CtfReaderOpElt {
         &mut self.element
     }
 
-    /// Port of `CTFReaderOpElt::start` (CTFReaderHelper.cpp:837-924) and
-    /// `CTFReaderRangeElt_1_7::start` (4897-4915) @ v2.5.2.
+    /// Port of `CTFReaderOpElt::start` (CTFReaderHelper.cpp:837-924), `CTFReaderCDLElt::start`
+    /// (1338-1359), `CTFReaderGammaElt::start` (1871-1916), `CTFReaderLogElt::start`
+    /// (3555-3580) and `CTFReaderRangeElt_1_7::start` (4897-4915) @ v2.5.2.
     fn start(&mut self, atts: &[&[u8]]) -> Result<()> {
         self.op_start(atts)?;
+        match self.kind {
+            CtfReaderKind::Cdl => return self.cdl_start(atts),
+            CtfReaderKind::Gamma
+            | CtfReaderKind::Gamma1_5
+            | CtfReaderKind::GammaCtf2_0
+            | CtfReaderKind::GammaClf3_0 => return self.gamma_start(atts),
+            CtfReaderKind::Log | CtfReaderKind::Log2_0 => return self.log_start(atts),
+            _ => {}
+        }
         if self.kind == CtfReaderKind::Range1_7 {
             self.is_no_clamp = false;
 
@@ -1531,13 +1945,25 @@ impl XmlReaderElement for CtfReaderOpElt {
         Ok(())
     }
 
-    /// Port of `CTFReaderOpElt::end` (CTFReaderHelper.cpp:926-928), `CTFReaderMatrixElt::end`
-    /// (4572-4583), `CTFReaderRangeElt::end` (4868-4879) and `CTFReaderRangeElt_1_7::end`
-    /// (4923-4943) @ v2.5.2.
+    /// Port of `CTFReaderOpElt::end` (CTFReaderHelper.cpp:926-928), `CTFReaderCDLElt::end`
+    /// (1367-1373), `CTFReaderGammaElt::end` (1924-1937), `CTFReaderLogElt::end` (3588-3622),
+    /// `CTFReaderLogElt_2_0::end` (3664-3717), `CTFReaderMatrixElt::end` (4572-4583),
+    /// `CTFReaderRangeElt::end` (4868-4879) and `CTFReaderRangeElt_1_7::end` (4923-4943) @
+    /// v2.5.2.
     fn end(&mut self) -> Result<()> {
         match self.kind {
             CtfReaderKind::Matrix | CtfReaderKind::Matrix1_3 => self.matrix_end()?,
             CtfReaderKind::Range | CtfReaderKind::Range1_7 => self.range_end()?,
+            CtfReaderKind::Cdl => {
+                // Validate the end result.
+                self.get_cdl().borrow().validate()?;
+            }
+            CtfReaderKind::Gamma
+            | CtfReaderKind::Gamma1_5
+            | CtfReaderKind::GammaCtf2_0
+            | CtfReaderKind::GammaClf3_0 => self.gamma_end()?,
+            CtfReaderKind::Log => self.log_end()?,
+            CtfReaderKind::Log2_0 => self.log_end_2_0()?,
             _ => {}
         }
         self.commit_op();
@@ -1569,7 +1995,7 @@ impl XmlReaderElement for CtfReaderOpElt {
 
     /// Port of `CTFReaderOpElt::getIdentifier` (CTFReaderHelper.cpp:826-829 @ v2.5.2).
     fn get_identifier(&self) -> &[u8] {
-        self.op.get_id()
+        &self.id
     }
 
     /// Port of `CTFReaderOpElt::getTypeName` (CTFReaderHelper.cpp:930-933 @ v2.5.2).
@@ -1594,10 +2020,18 @@ impl XmlReaderContainerElt for CtfReaderOpElt {
     /// Port of `CTFReaderOpElt::appendMetadata` (CTFReaderHelper.cpp:831-835 @ v2.5.2).
     fn append_metadata(&mut self, name: &[u8], value: &[u8]) -> Result<()> {
         let item = FormatMetadataImpl::new(name, value)?;
-        self.op
-            .get_format_metadata_mut()
-            .get_children_elements_mut()
-            .push(item);
+        match &self.cdl {
+            Some(cdl) => cdl
+                .borrow_mut()
+                .get_format_metadata_mut()
+                .get_children_elements_mut()
+                .push(item),
+            None => self
+                .op
+                .get_format_metadata_mut()
+                .get_children_elements_mut()
+                .push(item),
+        }
         Ok(())
     }
 }
@@ -1958,5 +2392,794 @@ impl XmlReaderPlainElt for CtfReaderRangeValueElt {
     }
     fn get_parent(&self) -> &ContainerEltRcPtr {
         self.plain.get_parent()
+    }
+}
+
+/// The parameters of a Gamma (`GammaParams`) or an Exponent (`ExponentParams`): a channel
+/// (optional) and the style's gamma and offset.
+///
+/// Port of `CTFReaderGammaParamsElt` and `CTFReaderGammaParamsElt_1_5` (CTFReaderHelper.h:
+/// 585-615, CTFReaderHelper.cpp:2016-2200 @ v2.5.2): `alpha` is the second's channel `A`.
+#[derive(Debug)]
+pub struct CtfReaderGammaParamsElt {
+    plain: XmlReaderPlainEltBase,
+    /// Whether the channel `A` is allowed (`CTFReaderGammaParamsElt_1_5`).
+    alpha: bool,
+}
+
+impl CtfReaderGammaParamsElt {
+    /// Port of `CTFReaderGammaParamsElt::CTFReaderGammaParamsElt` (CTFReaderHelper.cpp:
+    /// 2016-2022) and `CTFReaderGammaParamsElt_1_5::CTFReaderGammaParamsElt_1_5` (2174-2180)
+    /// @ v2.5.2.
+    pub fn new(
+        name: &[u8],
+        parent: ContainerEltRcPtr,
+        xml_line_number: u32,
+        xml_file: &[u8],
+        alpha: bool,
+    ) -> CtfReaderGammaParamsElt {
+        CtfReaderGammaParamsElt {
+            plain: XmlReaderPlainEltBase::new(name, parent, xml_line_number, xml_file),
+            alpha,
+        }
+    }
+
+    /// The channel `name` names: `R`, `G`, `B` (0 to 2), and `A` (3) from CTF 1.5; -1 for
+    /// another.
+    ///
+    /// Port of `CTFReaderGammaParamsElt::getChannelNumber` (CTFReaderHelper.cpp:2154-2172) and
+    /// `CTFReaderGammaParamsElt_1_5::getChannelNumber` (2186-2200) @ v2.5.2.
+    fn get_channel_number(&self, name: &[u8]) -> i32 {
+        if self.alpha && equal_ignoring_case(b"A", name) {
+            return 3;
+        }
+        // Version prior to 1.3 only supports R, G and B channels.
+        if equal_ignoring_case(b"R", name) {
+            0
+        } else if equal_ignoring_case(b"G", name) {
+            1
+        } else if equal_ignoring_case(b"B", name) {
+            2
+        } else {
+            -1
+        }
+    }
+}
+
+impl XmlReaderElement for CtfReaderGammaParamsElt {
+    fn element(&self) -> &XmlReaderElementBase {
+        &self.plain.element
+    }
+    fn element_mut(&mut self) -> &mut XmlReaderElementBase {
+        &mut self.plain.element
+    }
+
+    /// The channel, gamma (or exponent) and offset, checked against the parent's style, set
+    /// on its channel or all.
+    ///
+    /// Port of `CTFReaderGammaParamsElt::start` (CTFReaderHelper.cpp:2028-2144 @ v2.5.2).
+    fn start(&mut self, atts: &[&[u8]]) -> Result<()> {
+        // Attributes we want to extract.
+        let mut chan: i32 = -1;
+        let mut gamma = f64::NAN;
+        let mut offset = f64::NAN;
+
+        // Try extracting the attributes.
+        let mut i = 0;
+        while i < atts.len() {
+            let (att, value) = (atts[i], atts[i + 1]);
+            if equal_ignoring_case(ATTR_CHAN, att) {
+                chan = self.get_channel_number(value);
+
+                // Chan is optional but, if present, must be legal.
+                if chan == -1 {
+                    return Err(self.throw_message(
+                        &[b"Invalid channel: ".as_slice(), c_str(value), b"."].concat(),
+                    ));
+                }
+            } else if equal_ignoring_case(ATTR_GAMMA, att)
+                || equal_ignoring_case(ATTR_EXPONENT, att)
+            {
+                gamma = self
+                    .plain
+                    .element
+                    .parse_scalar_attribute::<f64>(att, value)?;
+            } else if equal_ignoring_case(ATTR_OFFSET, att) {
+                offset = self
+                    .plain
+                    .element
+                    .parse_scalar_attribute::<f64>(att, value)?;
+            } else {
+                self.plain.element.log_parameter_warning(att);
+            }
+
+            i += 2;
+        }
+
+        // Validate the attributes are appropriate for the gamma style and set the parameters
+        // (numeric validation is done by GammaOp::validate).
+
+        let parent = self.plain.get_parent().clone();
+        let mut p_gamma = op_parent(&parent);
+
+        let mut params = Vec::new();
+
+        let style = p_gamma.gamma_mut().style();
+        let style_name = GammaOpData::convert_style_to_string(style).as_bytes();
+        let missing_gamma = || {
+            self.throw_message(
+                &[
+                    b"Missing required gamma parameter for style: ".as_slice(),
+                    style_name,
+                    b".",
+                ]
+                .concat(),
+            )
+        };
+        if style.is_basic() {
+            if gamma.is_nan() {
+                return Err(missing_gamma());
+            }
+            params.push(gamma);
+
+            if !offset.is_nan() {
+                return Err(self.throw_message(
+                    &[
+                        b"Illegal offset parameter for style: ".as_slice(),
+                        style_name,
+                        b".",
+                    ]
+                    .concat(),
+                ));
+            }
+        } else {
+            if gamma.is_nan() {
+                return Err(missing_gamma());
+            }
+            params.push(gamma);
+
+            if offset.is_nan() {
+                return Err(self.throw_message(
+                    &[
+                        b"Missing required offset parameter for style: ".as_slice(),
+                        style_name,
+                        b".",
+                    ]
+                    .concat(),
+                ));
+            }
+            params.push(offset);
+        }
+
+        // Assign the parameters to the object.
+        let gamma_op = p_gamma.gamma_mut();
+        match chan {
+            -1 => gamma_op.set_params(&params),
+            0 => gamma_op.set_red_params(params),
+            1 => gamma_op.set_green_params(params),
+            2 => gamma_op.set_blue_params(params),
+            3 => gamma_op.set_alpha_params(params),
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Port of `CTFReaderGammaParamsElt::end` (CTFReaderHelper.cpp:2146-2148 @ v2.5.2).
+    fn end(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    fn is_container(&self) -> bool {
+        false
+    }
+    fn get_identifier(&self) -> &[u8] {
+        self.get_name()
+    }
+    fn get_type_name(&self) -> &[u8] {
+        self.get_name()
+    }
+    fn as_plain_mut(&mut self) -> Option<&mut dyn XmlReaderPlainElt> {
+        Some(self)
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+impl XmlReaderPlainElt for CtfReaderGammaParamsElt {
+    /// The text is ignored.
+    ///
+    /// Port of `CTFReaderGammaParamsElt::setRawData` (CTFReaderHelper.cpp:2150-2152 @
+    /// v2.5.2).
+    fn set_raw_data(&mut self, _s: &[u8], _xml_line: u32) -> Result<()> {
+        Ok(())
+    }
+    fn get_parent(&self) -> &ContainerEltRcPtr {
+        self.plain.get_parent()
+    }
+}
+
+/// The parameters of a Log (`LogParams`): a channel (optional) and the legacy (Cineon)
+/// parameters, or from CTF 2.0 and CLF 3.0 the OCIO ones.
+///
+/// Port of `CTFReaderLogParamsElt` and `CTFReaderLogParamsElt_2_0` (CTFReaderHelper.h:
+/// 933-967, CTFReaderHelper.cpp:3728-4081 @ v2.5.2): `v2_0` is the second.
+#[derive(Debug)]
+pub struct CtfReaderLogParamsElt {
+    plain: XmlReaderPlainEltBase,
+    /// Whether this is a `CTFReaderLogParamsElt_2_0`.
+    v2_0: bool,
+}
+
+/// The legacy (Cineon) parameters of a LogParams element: gamma, refWhite, refBlack,
+/// highlight and shadow.
+#[derive(Debug, Clone, Copy)]
+struct Cineon {
+    gamma: f64,
+    ref_white: f64,
+    ref_black: f64,
+    highlight: f64,
+    shadow: f64,
+}
+
+impl CtfReaderLogParamsElt {
+    /// Port of `CTFReaderLogParamsElt::CTFReaderLogParamsElt` (CTFReaderHelper.cpp:
+    /// 3728-3734 @ v2.5.2).
+    pub fn new(
+        name: &[u8],
+        parent: ContainerEltRcPtr,
+        xml_line_number: u32,
+        xml_file: &[u8],
+        v2_0: bool,
+    ) -> CtfReaderLogParamsElt {
+        CtfReaderLogParamsElt {
+            plain: XmlReaderPlainEltBase::new(name, parent, xml_line_number, xml_file),
+            v2_0,
+        }
+    }
+
+    /// Reads the attribute `att` if it is a legacy parameter: whether it is one.
+    ///
+    /// Port of `CTFReaderLogParamsElt::parseCineon` (CTFReaderHelper.cpp:3740-3770 @ v2.5.2).
+    fn parse_cineon(&self, att: &[u8], value: &[u8], cineon: &mut Cineon) -> Result<bool> {
+        let element = &self.plain.element;
+        if equal_ignoring_case(ATTR_GAMMA, att) {
+            cineon.gamma = element.parse_scalar_attribute::<f64>(att, value)?;
+            return Ok(true);
+        } else if equal_ignoring_case(ATTR_REFWHITE, att) {
+            cineon.ref_white = element.parse_scalar_attribute::<f64>(att, value)?;
+            return Ok(true);
+        } else if equal_ignoring_case(ATTR_REFBLACK, att) {
+            cineon.ref_black = element.parse_scalar_attribute::<f64>(att, value)?;
+            return Ok(true);
+        } else if equal_ignoring_case(ATTR_HIGHLIGHT, att) {
+            cineon.highlight = element.parse_scalar_attribute::<f64>(att, value)?;
+            return Ok(true);
+        } else if equal_ignoring_case(ATTR_SHADOW, att) {
+            cineon.shadow = element.parse_scalar_attribute::<f64>(att, value)?;
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    /// Sets the legacy parameters of the channel `chan` (-1 for all), each required.
+    ///
+    /// Port of `CTFReaderLogParamsElt::setCineon` (CTFReaderHelper.cpp:3772-3832 @ v2.5.2).
+    fn set_cineon(&self, legacy_params: &mut CtfParams, chan: i32, cineon: Cineon) -> Result<()> {
+        // Validate the attributes are appropriate for the log style and set the parameters
+        // (numeric validation is done by LogOpData::validate).
+
+        // Legacy parameters are set on the CTFReaderLogElt and will be transferred to the op
+        // on the end() call.
+        let mut ctf_values = vec![0.0; 5];
+
+        let missing = |att: &[u8]| {
+            self.throw_message(
+                &[b"Required attribute '".as_slice(), att, b"' is missing."].concat(),
+            )
+        };
+
+        if cineon.gamma.is_nan() {
+            return Err(missing(ATTR_GAMMA));
+        }
+        ctf_values[ctf_values::GAMMA] = cineon.gamma;
+
+        if cineon.ref_white.is_nan() {
+            return Err(missing(ATTR_REFWHITE));
+        }
+        ctf_values[ctf_values::REF_WHITE] = cineon.ref_white;
+
+        if cineon.ref_black.is_nan() {
+            return Err(missing(ATTR_REFBLACK));
+        }
+        ctf_values[ctf_values::REF_BLACK] = cineon.ref_black;
+
+        if cineon.highlight.is_nan() {
+            return Err(missing(ATTR_HIGHLIGHT));
+        }
+        ctf_values[ctf_values::HIGHLIGHT] = cineon.highlight;
+
+        if cineon.shadow.is_nan() {
+            return Err(missing(ATTR_SHADOW));
+        }
+        ctf_values[ctf_values::SHADOW] = cineon.shadow;
+
+        // Assign the parameters to the object.
+
+        match chan {
+            -1 => {
+                legacy_params.params[0] = ctf_values.clone();
+                legacy_params.params[1] = ctf_values.clone();
+                legacy_params.params[2] = ctf_values;
+            }
+            0 => legacy_params.params[0] = ctf_values,
+            1 => legacy_params.params[1] = ctf_values,
+            2 => legacy_params.params[2] = ctf_values,
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// The channel: `R`, `G` or `B` (0 to 2), else an error.
+    fn channel(&self, value: &[u8]) -> Result<i32> {
+        if equal_ignoring_case(b"R", value) {
+            Ok(0)
+        } else if equal_ignoring_case(b"G", value) {
+            Ok(1)
+        } else if equal_ignoring_case(b"B", value) {
+            Ok(2)
+        }
+        // Chan is optional but, if present, must be legal.
+        else {
+            let mut arg = OStringStream::new(Crt::NATIVE);
+            arg.put_str("Illegal channel attribute value '");
+            arg.put_c_str(value);
+            arg.put_str("'.");
+
+            Err(self.throw_message(arg.str()))
+        }
+    }
+
+    /// The legacy parameters of a CTF before 2.0.
+    ///
+    /// Port of `CTFReaderLogParamsElt::start` (CTFReaderHelper.cpp:3834-3888 @ v2.5.2).
+    fn start_legacy(&mut self, atts: &[&[u8]]) -> Result<()> {
+        let parent = self.plain.get_parent().clone();
+        let mut p_log_elt = op_parent(&parent);
+
+        // Attributes we want to extract.
+
+        let mut chan: i32 = -1;
+
+        // Legacy Log/Lin parameters:
+        let mut cineon = Cineon {
+            gamma: f64::NAN,
+            ref_white: f64::NAN,
+            ref_black: f64::NAN,
+            highlight: f64::NAN,
+            shadow: f64::NAN,
+        };
+
+        // Try extracting the attributes.
+        let mut i = 0;
+        while i < atts.len() {
+            let (att, value) = (atts[i], atts[i + 1]);
+            if equal_ignoring_case(ATTR_CHAN, att) {
+                chan = self.channel(value)?;
+            } else if !self.parse_cineon(att, value, &mut cineon)? {
+                self.plain.element.log_parameter_warning(att);
+            }
+
+            i += 2;
+        }
+
+        self.set_cineon(p_log_elt.get_ctf_params_mut(), chan, cineon)
+    }
+
+    /// The parameters of CTF 2.0 and CLF 3.0: the OCIO ones (the camera styles' break and
+    /// linear slope included), or the legacy ones in a CTF of a non-camera style, not mixed.
+    ///
+    /// Port of `CTFReaderLogParamsElt_2_0::start` (CTFReaderHelper.cpp:3898-4081 @ v2.5.2).
+    fn start_2_0(&mut self, atts: &[&[u8]]) -> Result<()> {
+        let parent = self.plain.get_parent().clone();
+        let mut p_log_elt = op_parent(&parent);
+        let style = p_log_elt.get_ctf_params().style;
+
+        let camera_style = style == LogStyle::CameraLinToLog || style == LogStyle::CameraLogToLin;
+
+        let allow_cineon = !camera_style && !p_log_elt.get_transform().borrow().is_clf();
+
+        // Attributes we want to extract.
+
+        let mut chan: i32 = -1;
+
+        // Log/Lin parameters (CTF v2, CLF v3 and onward):
+        let mut lin_side_slope = f64::NAN;
+        let mut lin_side_offset = f64::NAN;
+        let mut log_side_slope = f64::NAN;
+        let mut log_side_offset = f64::NAN;
+        let mut base = f64::NAN;
+        let mut lin_side_break = f64::NAN;
+        let mut linear_slope = f64::NAN;
+
+        // Legacy Log/Lin parameters (if allowed for CTF v2 onward:
+        let mut cineon = Cineon {
+            gamma: f64::NAN,
+            ref_white: f64::NAN,
+            ref_black: f64::NAN,
+            highlight: f64::NAN,
+            shadow: f64::NAN,
+        };
+
+        // Try extracting the attributes.
+        let mut i = 0;
+        let mut valid_type = true;
+        while i < atts.len() {
+            let (att, value) = (atts[i], atts[i + 1]);
+            let element = &self.plain.element;
+            if equal_ignoring_case(ATTR_CHAN, att) {
+                chan = self.channel(value)?;
+            } else if equal_ignoring_case(ATTR_LINSIDESLOPE, att) {
+                lin_side_slope = element.parse_scalar_attribute::<f64>(att, value)?;
+                valid_type = p_log_elt.get_ctf_params_mut().set_type(CtfParamsType::Clf);
+            } else if equal_ignoring_case(ATTR_LINSIDEOFFSET, att) {
+                lin_side_offset = element.parse_scalar_attribute::<f64>(att, value)?;
+                valid_type = p_log_elt.get_ctf_params_mut().set_type(CtfParamsType::Clf);
+            } else if equal_ignoring_case(ATTR_LOGSIDESLOPE, att) {
+                log_side_slope = element.parse_scalar_attribute::<f64>(att, value)?;
+                valid_type = p_log_elt.get_ctf_params_mut().set_type(CtfParamsType::Clf);
+            } else if equal_ignoring_case(ATTR_LOGSIDEOFFSET, att) {
+                log_side_offset = element.parse_scalar_attribute::<f64>(att, value)?;
+                valid_type = p_log_elt.get_ctf_params_mut().set_type(CtfParamsType::Clf);
+            } else if equal_ignoring_case(ATTR_BASE, att) {
+                base = element.parse_scalar_attribute::<f64>(att, value)?;
+                valid_type = p_log_elt.get_ctf_params_mut().set_type(CtfParamsType::Clf);
+            } else if equal_ignoring_case(ATTR_LINEARSLOPE, att) {
+                linear_slope = element.parse_scalar_attribute::<f64>(att, value)?;
+                valid_type = p_log_elt.get_ctf_params_mut().set_type(CtfParamsType::Clf);
+            } else if equal_ignoring_case(ATTR_LINSIDEBREAK, att) {
+                lin_side_break = element.parse_scalar_attribute::<f64>(att, value)?;
+                valid_type = p_log_elt.get_ctf_params_mut().set_type(CtfParamsType::Clf);
+            } else if allow_cineon && self.parse_cineon(att, value, &mut cineon)? {
+                valid_type = p_log_elt
+                    .get_ctf_params_mut()
+                    .set_type(CtfParamsType::Cineon);
+            } else {
+                element.log_parameter_warning(att);
+            }
+
+            if !valid_type {
+                return Err(
+                    self.throw_message(b"CLF type and Cineon types parameters can not be mixed.")
+                );
+            }
+
+            i += 2;
+        }
+
+        if p_log_elt.get_ctf_params().get_type() == CtfParamsType::Cineon {
+            return self.set_cineon(p_log_elt.get_ctf_params_mut(), chan, cineon);
+        }
+
+        // Validate the attributes are appropriate for the log style and set the parameters
+        // (numeric validation is done by LogOpData::validate).
+
+        // New parameters are set directly on the op.
+        let mut new_params = vec![0.0; 4];
+
+        new_params[LIN_SIDE_SLOPE] = if lin_side_slope.is_nan() {
+            1.0
+        } else {
+            lin_side_slope
+        };
+        new_params[LIN_SIDE_OFFSET] = if lin_side_offset.is_nan() {
+            0.0
+        } else {
+            lin_side_offset
+        };
+        new_params[LOG_SIDE_SLOPE] = if log_side_slope.is_nan() {
+            1.0
+        } else {
+            log_side_slope
+        };
+        new_params[LOG_SIDE_OFFSET] = if log_side_offset.is_nan() {
+            0.0
+        } else {
+            log_side_offset
+        };
+
+        if !base.is_nan() {
+            p_log_elt.set_base(base)?;
+        }
+
+        // The LogOpData does not have a style member, so some validation needs to happen
+        // here.
+
+        let camera_styles = |message: &[u8], att: &[u8], end: &[u8]| {
+            self.throw_message(
+                &[
+                    b"Parameter '".as_slice(),
+                    att,
+                    message,
+                    log_convert_style_to_string(LogStyle::CameraLogToLin).as_bytes(),
+                    b"' or '",
+                    log_convert_style_to_string(LogStyle::CameraLinToLog).as_bytes(),
+                    end,
+                ]
+                .concat(),
+            )
+        };
+
+        if !lin_side_break.is_nan() {
+            if !camera_style {
+                return Err(camera_styles(
+                    b"' is only allowed for style '",
+                    ATTR_LINSIDEBREAK,
+                    b"'.",
+                ));
+            }
+            new_params.push(lin_side_break);
+        } else if camera_style {
+            return Err(camera_styles(
+                b"' should be defined for style '",
+                ATTR_LINSIDEBREAK,
+                b"'. ",
+            ));
+        }
+
+        if !linear_slope.is_nan() {
+            if !camera_style {
+                return Err(camera_styles(
+                    b"' is only allowed for style '",
+                    ATTR_LINEARSLOPE,
+                    b"'. ",
+                ));
+            }
+            new_params.push(linear_slope);
+        }
+
+        let log_op = p_log_elt.log_mut();
+
+        match chan {
+            -1 => {
+                log_op.set_red_params(new_params.clone());
+                log_op.set_green_params(new_params.clone());
+                log_op.set_blue_params(new_params);
+            }
+            0 => log_op.set_red_params(new_params),
+            1 => log_op.set_green_params(new_params),
+            2 => log_op.set_blue_params(new_params),
+            _ => {}
+        }
+        Ok(())
+    }
+}
+
+impl XmlReaderElement for CtfReaderLogParamsElt {
+    fn element(&self) -> &XmlReaderElementBase {
+        &self.plain.element
+    }
+    fn element_mut(&mut self) -> &mut XmlReaderElementBase {
+        &mut self.plain.element
+    }
+
+    /// Port of `CTFReaderLogParamsElt::start` (CTFReaderHelper.cpp:3834-3888) and
+    /// `CTFReaderLogParamsElt_2_0::start` (3898-4081) @ v2.5.2.
+    fn start(&mut self, atts: &[&[u8]]) -> Result<()> {
+        if self.v2_0 {
+            self.start_2_0(atts)
+        } else {
+            self.start_legacy(atts)
+        }
+    }
+
+    /// Port of `CTFReaderLogParamsElt::end` (CTFReaderHelper.cpp:3890-3892 @ v2.5.2).
+    fn end(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    fn is_container(&self) -> bool {
+        false
+    }
+    fn get_identifier(&self) -> &[u8] {
+        self.get_name()
+    }
+    fn get_type_name(&self) -> &[u8] {
+        self.get_name()
+    }
+    fn as_plain_mut(&mut self) -> Option<&mut dyn XmlReaderPlainElt> {
+        Some(self)
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+impl XmlReaderPlainElt for CtfReaderLogParamsElt {
+    /// The text is ignored.
+    ///
+    /// Port of `CTFReaderLogParamsElt::setRawData` (CTFReaderHelper.cpp:3894-3896 @ v2.5.2).
+    fn set_raw_data(&mut self, _s: &[u8], _xml_line: u32) -> Result<()> {
+        Ok(())
+    }
+    fn get_parent(&self) -> &ContainerEltRcPtr {
+        self.plain.get_parent()
+    }
+}
+
+/// The CDL of the parent, an ASC_CDL reader.
+fn parent_cdl(parent: &ContainerEltRcPtr) -> CdlOpDataRcPtr {
+    parent
+        .borrow()
+        .as_any()
+        .downcast_ref::<CtfReaderOpElt>()
+        .expect("the parent is an ASC_CDL reader")
+        .get_cdl()
+        .clone()
+}
+
+/// The SatNode of an ASC_CDL.
+///
+/// Port of `CTFReaderSatNodeElt` (CTFReaderHelper.h:444-456, CTFReaderHelper.cpp:1387-1398 @
+/// v2.5.2), on `XmlReaderSatNodeBaseElt` (whose `start` and `end` do nothing).
+#[derive(Debug)]
+pub struct CtfReaderSatNodeElt {
+    complex: XmlReaderComplexEltBase,
+}
+
+impl CtfReaderSatNodeElt {
+    /// Port of `CTFReaderSatNodeElt::CTFReaderSatNodeElt` (CTFReaderHelper.cpp:1387-1393 @
+    /// v2.5.2).
+    pub fn new(
+        name: &[u8],
+        parent: ContainerEltRcPtr,
+        xml_line_number: u32,
+        xml_file: &[u8],
+    ) -> CtfReaderSatNodeElt {
+        CtfReaderSatNodeElt {
+            complex: XmlReaderComplexEltBase::new(name, Some(parent), xml_line_number, xml_file),
+        }
+    }
+}
+
+impl XmlReaderElement for CtfReaderSatNodeElt {
+    fn element(&self) -> &XmlReaderElementBase {
+        &self.complex.element
+    }
+    fn element_mut(&mut self) -> &mut XmlReaderElementBase {
+        &mut self.complex.element
+    }
+    fn start(&mut self, _atts: &[&[u8]]) -> Result<()> {
+        Ok(())
+    }
+    fn end(&mut self) -> Result<()> {
+        Ok(())
+    }
+    fn is_container(&self) -> bool {
+        true
+    }
+    fn get_identifier(&self) -> &[u8] {
+        self.get_name()
+    }
+    fn get_type_name(&self) -> &[u8] {
+        self.get_name()
+    }
+    fn as_container_mut(&mut self) -> Option<&mut dyn XmlReaderContainerElt> {
+        Some(self)
+    }
+    fn as_sat_node_base_mut(&mut self) -> Option<&mut dyn XmlReaderSatNodeBaseElt> {
+        Some(self)
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+impl XmlReaderContainerElt for CtfReaderSatNodeElt {
+    fn append_metadata(&mut self, name: &[u8], value: &[u8]) -> Result<()> {
+        let cdl = self.get_cdl();
+        sat_node_append_metadata(&cdl, name, value)
+    }
+}
+
+impl XmlReaderSatNodeBaseElt for CtfReaderSatNodeElt {
+    /// Port of `CTFReaderSatNodeElt::getCDL` (CTFReaderHelper.cpp:1395-1398 @ v2.5.2).
+    fn get_cdl(&self) -> CdlOpDataRcPtr {
+        parent_cdl(
+            self.complex
+                .get_parent()
+                .expect("a SatNode is under an ASC_CDL"),
+        )
+    }
+}
+
+/// The SOPNode of an ASC_CDL.
+///
+/// Port of `CTFReaderSOPNodeElt` (CTFReaderHelper.h:458-469, CTFReaderHelper.cpp:1402-1413 @
+/// v2.5.2), on `XmlReaderSOPNodeBaseElt`.
+#[derive(Debug)]
+pub struct CtfReaderSopNodeElt {
+    sop: XmlReaderSopNodeBase,
+}
+
+impl CtfReaderSopNodeElt {
+    /// Port of `CTFReaderSOPNodeElt::CTFReaderSOPNodeElt` (CTFReaderHelper.cpp:1402-1408 @
+    /// v2.5.2).
+    pub fn new(
+        name: &[u8],
+        parent: ContainerEltRcPtr,
+        xml_line_number: u32,
+        xml_file: &[u8],
+    ) -> CtfReaderSopNodeElt {
+        CtfReaderSopNodeElt {
+            sop: XmlReaderSopNodeBase::new(name, parent, xml_line_number, xml_file),
+        }
+    }
+}
+
+impl XmlReaderElement for CtfReaderSopNodeElt {
+    fn element(&self) -> &XmlReaderElementBase {
+        &self.sop.complex.element
+    }
+    fn element_mut(&mut self) -> &mut XmlReaderElementBase {
+        &mut self.sop.complex.element
+    }
+    fn start(&mut self, _atts: &[&[u8]]) -> Result<()> {
+        self.sop.start()
+    }
+    fn end(&mut self) -> Result<()> {
+        self.sop.end()
+    }
+    fn is_container(&self) -> bool {
+        true
+    }
+    fn get_identifier(&self) -> &[u8] {
+        self.get_name()
+    }
+    fn get_type_name(&self) -> &[u8] {
+        self.get_name()
+    }
+    fn as_container_mut(&mut self) -> Option<&mut dyn XmlReaderContainerElt> {
+        Some(self)
+    }
+    fn as_sop_node_base_mut(&mut self) -> Option<&mut dyn XmlReaderSopNodeBaseElt> {
+        Some(self)
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+impl XmlReaderContainerElt for CtfReaderSopNodeElt {
+    fn append_metadata(&mut self, name: &[u8], value: &[u8]) -> Result<()> {
+        let cdl = self.get_cdl();
+        XmlReaderSopNodeBase::append_metadata(&cdl, name, value)
+    }
+}
+
+impl XmlReaderSopNodeBaseElt for CtfReaderSopNodeElt {
+    /// Port of `CTFReaderSOPNodeElt::getCDL` (CTFReaderHelper.cpp:1410-1413 @ v2.5.2).
+    fn get_cdl(&self) -> CdlOpDataRcPtr {
+        parent_cdl(
+            self.sop
+                .complex
+                .get_parent()
+                .expect("a SOPNode is under an ASC_CDL"),
+        )
+    }
+    fn sop_node(&mut self) -> &mut XmlReaderSopNodeBase {
+        &mut self.sop
     }
 }
