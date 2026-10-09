@@ -883,8 +883,9 @@ note = "p4-readers 4.3e: the reader (the cubic prelut interpolator in each wheel
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatCTF.cpp"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/file_format_ctf.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_ctf.rs"]
+status = "partial"
+note = "p4-ctf-read-1 4.5b: 1-1213 (the format infos, I-180; isLoadableCTF; XMLParserHelper; read); the operators' readers 4.5c-4.5i, buildFileOps 4.5h, bake WP 4.8, write WP 4.6"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatDiscreet1DL.cpp"
@@ -1053,13 +1054,15 @@ note = "p4-cdl 4.4e (I-173)"
 path = "src/OpenColorIO/fileformats/ctf/CTFReaderHelper.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/ctf/ctf_reader_helper.rs"]
-status = "todo"
+status = "partial"
+note = "p4-ctf-read-1 4.5b: CTFReaderTransformElt (19-266), CTFReaderMetadataElt and CTFReaderInfoElt (671-805), GetReader's version table (950-1186); the rest 4.5c-4.5i"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/ctf/CTFReaderHelper.h"
 kind = "src"
 target = ["crates/ocio/src/fileformats/ctf/ctf_reader_helper.rs"]
-status = "todo"
+status = "partial"
+note = "p4-ctf-read-1 4.5b: the transform, metadata, info and descriptor elements, CTFReaderOpElt::Type; the rest 4.5c-4.5i"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/ctf/CTFReaderUtils.cpp"
@@ -4611,8 +4614,9 @@ note = "p4-readers 4.3e: simple_1d, simple_3d, less_strict_parse, failures_1d, f
 [[file]]
 path = "tests/cpu/fileformats/FileFormatCTF_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-formats/src/fileformats/file_format_ctf_tests.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_ctf_tests.rs"]
+status = "partial"
+note = "p4-ctf-read-1 4.5b: missing_file, wrong_format, binary_file, process_list_invalid_version, clf_process_list_bad_version, process_list_higher_version, clf_process_list_higher_version, process_list_missing, transform_missing, transform_missing_id, transform_empty, transform_id_empty; the rest with the operators' readers and the writer"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatDiscreet1DL_tests.cpp"

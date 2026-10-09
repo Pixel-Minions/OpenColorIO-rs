@@ -291,7 +291,6 @@ impl FileFormat for NotPortedFormat {
 fn create_formats() -> Vec<Box<dyn FileFormat>> {
     use FormatBakeCapabilities as B;
     use FormatCapabilities as C;
-    let all_bakes = B::LUT_3D | B::LUT_1D | B::LUT_1D_3D;
     let stub = |infos: Vec<FormatInfo>| -> Box<dyn FileFormat> {
         Box::new(NotPortedFormat {
             infos,
@@ -307,19 +306,8 @@ fn create_formats() -> Vec<Box<dyn FileFormat>> {
         Box::new(crate::fileformats::file_format_ccc::LocalFileFormat),
         // FileFormatCDL.cpp:102-109.
         Box::new(crate::fileformats::file_format_cdl::LocalFileFormat),
-        // FileFormatCTF.cpp:147-170. Upstream sets the bake capabilities of the CTF info on the
-        // CLF one a second time (`info.bake_capabilities = ...` after `info2.capabilities`), so
-        // the CTF info has none. No caller sees it: the baker reads a format's first info
-        // (Baker.cpp:249-251), the CLF one.
-        stub(vec![
-            FormatInfo::new(
-                FILEFORMAT_CLF,
-                "clf",
-                C::READ | C::BAKE | C::WRITE,
-                all_bakes,
-            ),
-            FormatInfo::new(FILEFORMAT_CTF, "ctf", C::READ | C::BAKE | C::WRITE, B::NONE),
-        ]),
+        // FileFormatCTF.cpp:147-170.
+        Box::new(crate::fileformats::file_format_ctf::LocalFileFormat),
         // FileFormatCSP.cpp:351-359.
         Box::new(crate::fileformats::file_format_csp::LocalFileFormat),
         // FileFormatDiscreet1DL.cpp:675-682.

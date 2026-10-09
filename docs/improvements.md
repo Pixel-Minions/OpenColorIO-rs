@@ -2317,6 +2317,19 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p4-cdl` (`crates/ocio/src/transforms/group_transform.rs`, `write`;
   `a_failing_output_stream_is_not_an_error`).
 
+### I-180. The CTF format's info has no bake capabilities
+
+- **Upstream:** `LocalFileFormat::getFormatInfo` (`fileformats/FileFormatCTF.cpp:147-170` @
+  v2.5.2) sets the bake capabilities of its second info, "Color Transform Format", on its
+  first, the CLF one, a second time (`info.bake_capabilities = ...` after
+  `info2.capabilities`), so the CTF info has none.
+- **Who notices:** no one through the API: the baker reads a format's first info
+  (`Baker.cpp:249-251`), the CLF one, which has its capabilities, and no other code reads
+  them.
+- **A fix:** set `info2.bake_capabilities`.
+- **Status:** matched in `p4-ctf-read-1` (`crates/ocio/src/fileformats/file_format_ctf.rs`,
+  `format_info`).
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
