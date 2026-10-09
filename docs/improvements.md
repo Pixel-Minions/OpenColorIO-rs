@@ -2196,7 +2196,11 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   owner's API, `docs/cards/phase4.md` P4-5 d), so the cache never changes, as a fix would
   have it. Matching upstream would need transforms shared by handle; the Python binding
   (`ocio-py`) decides whether its objects share the cached ones.
-- **Status:** open: the port gives copies, which differs from the wheel after such an edit.
+- **Decided** (the owner, 2026-10-08): the port keeps copies; the Python binding decides later
+  whether its objects share the cached ones.
+- **Status:** not reproduced: the port gives copies (`p4-cdl` 4.4e,
+  `crates/ocio/src/transforms/cdl_transform.rs`), which differs from the wheel after such an
+  edit.
 
 ## Undefined behaviour upstream
 
