@@ -5,6 +5,9 @@
 //! iostream number formatting), `ocio_ops::utils::number_utils` (number parsing) and
 //! `ocio_ops::platform`'s case-insensitive comparisons are checked against.
 //!
+//! It is also the reference for the math library's `pow` and `exp2`, which an optimizing
+//! compiler may substitute for each other ([`pow_c`]).
+//!
 //! On Windows this is the Universal CRT (`ucrtbase.dll`); on Linux it is glibc. These are the
 //! libraries OCIO 2.5.2 itself calls: MSVC's `num_put` formats through UCRT `sprintf_s`, and
 //! libstdc++'s through `vsnprintf`, while the Linux wheel parses numbers with `strtod_l`,
@@ -55,6 +58,10 @@ mod ffi {
         pub(super) fn strtol(s: *const c_char, end: *mut *mut c_char, base: c_int) -> c_long;
         pub(super) fn strtoul(s: *const c_char, end: *mut *mut c_char, base: c_int) -> c_ulong;
         pub(super) fn frexp(x: c_double, exp: *mut c_int) -> c_double;
+        pub(super) fn pow(x: c_double, y: c_double) -> c_double;
+        pub(super) fn exp2(x: c_double) -> c_double;
+        pub(super) fn powf(x: c_float, y: c_float) -> c_float;
+        pub(super) fn exp2f(x: c_float) -> c_float;
     }
 
     #[cfg(windows)]
@@ -342,6 +349,35 @@ pub fn frexp_c(x: f64) -> (f64, i32) {
     // SAFETY: `exp` is a valid out-pointer.
     let mantissa = unsafe { ffi::frexp(x, &mut exp) };
     (mantissa, exp)
+}
+
+/// `pow(x, y)`, libm's. The arguments go through `black_box`: LLVM knows `pow` and would turn
+/// a constant base 2 into `exp2`.
+pub fn pow_c(x: f64, y: f64) -> f64 {
+    let (x, y) = (std::hint::black_box(x), std::hint::black_box(y));
+    // SAFETY: `pow` takes and returns plain values.
+    unsafe { ffi::pow(x, y) }
+}
+
+/// `exp2(x)`, libm's.
+pub fn exp2_c(x: f64) -> f64 {
+    let x = std::hint::black_box(x);
+    // SAFETY: `exp2` takes and returns plain values.
+    unsafe { ffi::exp2(x) }
+}
+
+/// `powf(x, y)`, libm's (see [`pow_c`]).
+pub fn powf_c(x: f32, y: f32) -> f32 {
+    let (x, y) = (std::hint::black_box(x), std::hint::black_box(y));
+    // SAFETY: `powf` takes and returns plain values.
+    unsafe { ffi::powf(x, y) }
+}
+
+/// `exp2f(x)`, libm's.
+pub fn exp2f_c(x: f32) -> f32 {
+    let x = std::hint::black_box(x);
+    // SAFETY: `exp2f` takes and returns plain values.
+    unsafe { ffi::exp2f(x) }
 }
 
 /// `strtoul(input, &end, base)` in the "C" locale. `unsigned long` is 32 bits on Windows and

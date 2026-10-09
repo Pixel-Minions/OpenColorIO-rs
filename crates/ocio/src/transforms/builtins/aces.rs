@@ -9,6 +9,7 @@
 use std::sync::Arc;
 
 use ocio_ops::exception::Result;
+use ocio_ops::math_utils::std_pow;
 use ocio_ops::op::OpVec;
 use ocio_ops::open_color_types::{GradingStyle, TransformDirection};
 use ocio_ops::ops::fixedfunction::fixed_function_op::create_fixed_function_op;
@@ -35,7 +36,9 @@ use crate::transforms::builtins::color_matrix_helpers::{
     build_conversion_matrix_to_xyz_d65, build_vonkries_adapt, cie_xyz_illum_e, p3_d60, p3_d65,
     rec709, rec709_d60, rec2020, rec2020_d60, rgb2xyz_from_xy, whitepoint,
 };
-use crate::transforms::builtins::op_helpers::{create_half_lut, create_lut, interpolate_1d};
+use crate::transforms::builtins::op_helpers::{
+    create_half_lut, create_lut, interpolate_1d, try_create_half_lut,
+};
 
 /// An entry's op creator.
 fn creator(f: fn(&mut OpVec) -> Result<()>) -> OpCreator {
@@ -184,9 +187,9 @@ fn adx_to_aces(ops: &mut OpVec) -> Result<()> {
 
     let lut = &ADX_NONUNIFORM_LUT;
     // `Interpolate1D` throws for an input no pair brackets, which the half-domain LUT's inputs
-    // (NaN codes as 0) never are; the first such error is returned after the LUT is built.
-    let interpolation_error = std::cell::RefCell::new(None);
-    let generate_lut_values = |in_: f64| -> f32 {
+    // (NaN codes as 0) never are; its error leaves the ops as they were, as upstream's throw out
+    // of `CreateHalfLut` does.
+    let generate_lut_values = |in_: f64| -> Result<f32> {
         let mut out;
 
         if in_ < lut[0] {
@@ -200,10 +203,7 @@ fn adx_to_aces(ops: &mut OpVec) -> Result<()> {
                 out = -10.;
             }
         } else if in_ <= lut[(ADX_LUT_SIZE - 1) * 2] {
-            out = interpolate_1d(ADX_LUT_SIZE, lut, in_).unwrap_or_else(|e| {
-                interpolation_error.borrow_mut().get_or_insert(e);
-                0.
-            });
+            out = interpolate_1d(ADX_LUT_SIZE, lut, in_)?;
         } else {
             // Upper bound i.e. in > nonuniform_LUT[lutSize-1, 0].
             let ref_pt = (7120. - 1520.) / 8000. * (100. / 55.) - 0.18f64.log10();
@@ -215,14 +215,11 @@ fn adx_to_aces(ops: &mut OpVec) -> Result<()> {
             }
         }
 
-        out as f32
+        Ok(out as f32)
     };
 
     // Convert Channel Independent Density values to Relative Log Exposure values.
-    create_half_lut(ops, generate_lut_values)?;
-    if let Some(e) = interpolation_error.into_inner() {
-        return Err(e);
-    }
+    try_create_half_lut(ops, generate_lut_values)?;
 
     // Convert Relative Log Exposure values to Relative Exposure values.
     create_log_op_from_base(ops, 10., TransformDirection::Inverse);
@@ -253,9 +250,9 @@ fn acescc_to_aces2065_1(ops: &mut OpVec) -> Result<()> {
         let in_ = input * (IN_MAX - IN_MIN) + IN_MIN;
 
         let out = if in_ < ((9.72 - 15.0) / 17.52) {
-            (2f64.powf(in_ * 17.52 - 9.72) - 2f64.powf(-16.)) * 2.0
+            (std_pow(2., in_ * 17.52 - 9.72) - std_pow(2., -16.)) * 2.0
         } else {
-            2f64.powf(in_ * 17.52 - 9.72)
+            std_pow(2., in_ * 17.52 - 9.72)
         };
         // The CTL clamps at HALF_MAX, but it's better to avoid a slope discontinuity in a LUT.
 

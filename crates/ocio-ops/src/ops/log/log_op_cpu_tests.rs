@@ -6,7 +6,7 @@
 //! The wheel is built with `OCIO_USE_SSE2`, so the ports keep the `#if OCIO_USE_SSE2` branches.
 
 use super::*;
-use crate::math_utils::std_min;
+use crate::math_utils::{std_min, std_powf};
 use crate::open_color_types::TransformDirection;
 use crate::ops::log::log_op_data::Params;
 use crate::ops::log::log_utils::{
@@ -137,7 +137,7 @@ fn test_anti_log(log_base: f32) {
     let rgba = apply(renderer.as_ref(), &RGBA_IMAGE);
 
     // Relative error tolerance for the log2 approximation.
-    let rtol = 2.0f32.powf(-14.0f32);
+    let rtol = std_powf(2.0f32, -14.0f32);
 
     for i in 0..8 {
         let is_alpha = i % 4 == 3;
@@ -270,7 +270,7 @@ fn log2lin_test() {
     let rgba = apply(renderer.as_ref(), &RGBA_IMAGE);
 
     // Relative error tolerance for the log2 approximation.
-    let rtol = 2.0f32.powf(-14.0f32);
+    let rtol = std_powf(2.0f32, -14.0f32);
 
     for i in 0..8 {
         let is_alpha = i % 4 == 3;

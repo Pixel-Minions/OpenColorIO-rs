@@ -9,7 +9,7 @@
 //! same value, so each check is made once.
 
 use super::*;
-use crate::math_utils::add_ulp;
+use crate::math_utils::{add_ulp, std_pow, std_powf};
 use ocio_testkit::upstream::{are_all_close, check_close, equal_with_abs_error};
 
 // ---------------------------------------------------------------------------------------------
@@ -27,7 +27,7 @@ fn check_float(operation: &str, expected: f32, actual: f32, precision: u32) {
     if (is_infinity(expected) && is_infinity(actual)) || (expected.is_nan() && actual.is_nan()) {
         return;
     }
-    let rtol = 2.0f32.powf(-(precision as f32));
+    let rtol = std_powf(2.0f32, -(precision as f32));
     assert!(
         equal_with_abs_error(expected, actual, rtol),
         "Output differs on {operation} : expected: {expected:e} != actual: {actual:e}"
@@ -45,7 +45,7 @@ fn sse2_log2_test() {
     ];
 
     // The sse approx should have about 15 good digits of mantissa.
-    let rtol = 2.0f32.powf(-14.0f32);
+    let rtol = std_powf(2.0f32, -14.0f32);
 
     for v in values {
         let cpu_result = v.ln() / 2.0f32.ln();
@@ -94,7 +94,7 @@ fn sse2_exp2_test() {
 
     // Check positive test values.
     for v in values {
-        let expected = 2.0f32.powf(v);
+        let expected = std_powf(2.0f32, v);
         let result = sse_exp2(v);
         assert!(
             are_all_close(&[result], expected, ulp_tolerance),
@@ -104,7 +104,7 @@ fn sse2_exp2_test() {
 
     // Check negative test values.
     for v in values {
-        let expected = 2.0f32.powf(-v);
+        let expected = std_powf(2.0f32, -v);
         let result = sse_exp2(-v);
         assert!(
             are_all_close(&[result], expected, ulp_tolerance),
@@ -138,14 +138,14 @@ fn sse2_exp2_test() {
     {
         // The result should be a large number, but not infinity. Create a tight bound for the
         // large number based on the log2_max_float limit.
-        let large_threshold = 2.0f64.powf(add_ulp(log2_max_float, -2) as f64) as f32;
+        let large_threshold = std_pow(2.0, add_ulp(log2_max_float, -2) as f64) as f32;
 
         let r = sse_exp2(log2_max_float_inside_one_ulp);
         assert!(r > large_threshold && r < f32::INFINITY, "{r:e}");
 
         // The result should be a small number, but not zero. Create a tight bound for the
         // small number based on the log2_min_float limit.
-        let small_threshold = 2.0f64.powf(add_ulp(log2_min_float, -2) as f64) as f32;
+        let small_threshold = std_pow(2.0, add_ulp(log2_min_float, -2) as f64) as f32;
 
         let r = sse_exp2(log2_min_float_inside_one_ulp);
         assert!(r > 0.0f32 && r < small_threshold, "{r:e}");

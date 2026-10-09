@@ -9,6 +9,7 @@
 use std::sync::Arc;
 
 use ocio_ops::exception::Result;
+use ocio_ops::math_utils::std_pow;
 use ocio_ops::op::OpVec;
 use ocio_ops::open_color_types::TransformDirection;
 use ocio_ops::ops::matrix::matrix_op::create_matrix_op_from_array;
@@ -33,7 +34,7 @@ fn apple_log_to_linear(ops: &mut OpVec) -> Result<()> {
     let p_t = C * (R_T - R_0).powf(2.0);
     let generate_lut_values = |in_: f64| -> f32 {
         if in_ >= p_t {
-            (2.0f64.powf((in_ - DELTA) / GAMMA) - BETA) as f32
+            (std_pow(2.0, (in_ - DELTA) / GAMMA) - BETA) as f32
         } else if in_ < p_t && in_ >= 0.0 {
             ((in_ / C).sqrt() + R_0) as f32
         } else {

@@ -50,3 +50,23 @@ fn interpolating_a_nan_is_refused() {
         "Invalid interpolation value."
     );
 }
+
+/// A generator's error comes out of the half-domain LUT's builder, as upstream's throw does,
+/// and no op is appended; without one, the builder appends its LUT.
+#[test]
+fn a_half_lut_generator_error_appends_nothing() {
+    let mut ops = OpVec::new();
+    let error = try_create_half_lut(&mut ops, |value| {
+        if value > 1.0 {
+            interpolate_1d(2, &[0., 1.0, 1., 3.], f64::NAN).map(|v| v as f32)
+        } else {
+            Ok(value as f32)
+        }
+    })
+    .unwrap_err();
+    assert_eq!(error.message(), "Invalid interpolation value.");
+    assert!(ops.is_empty());
+
+    try_create_half_lut(&mut ops, |value| Ok(value as f32)).unwrap();
+    assert_eq!(ops.len(), 1);
+}

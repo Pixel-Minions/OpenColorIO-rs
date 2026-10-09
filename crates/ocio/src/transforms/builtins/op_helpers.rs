@@ -101,6 +101,17 @@ pub(crate) fn create_half_lut(
     ops: &mut OpVec,
     lut_value_generator: impl Fn(f64) -> f32,
 ) -> Result<()> {
+    try_create_half_lut(ops, |value| Ok(lut_value_generator(value)))
+}
+
+/// [`create_half_lut`] with a generator that can fail, as upstream's can throw: its first
+/// error is returned, and nothing is appended to `ops`.
+///
+/// Port of `CreateHalfLut` (OpHelpers.cpp:106-139 @ v2.5.2).
+pub(crate) fn try_create_half_lut(
+    ops: &mut OpVec,
+    lut_value_generator: impl Fn(f64) -> Result<f32>,
+) -> Result<()> {
     let mut lut = Lut1DOpData::with_half_flags(HalfFlags::INPUT_HALF_CODE, 65536, true)?;
     lut.set_interpolation(Interpolation::Linear);
     lut.set_direction(TransformDirection::Forward);
@@ -126,9 +137,9 @@ pub(crate) fn create_half_lut(
         }
 
         let i = idx as usize;
-        values[i * 3] = lut_value_generator(value);
-        values[i * 3 + 1] = lut_value_generator(value);
-        values[i * 3 + 2] = lut_value_generator(value);
+        values[i * 3] = lut_value_generator(value)?;
+        values[i * 3 + 1] = lut_value_generator(value)?;
+        values[i * 3 + 2] = lut_value_generator(value)?;
     }
 
     create_lut1d_op(ops, lut, TransformDirection::Forward);
