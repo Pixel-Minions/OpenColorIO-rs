@@ -970,8 +970,9 @@ note = "p4-registry 4.2a1: the reader (istream::read of 1024 bytes, input_stream
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatTruelight.cpp"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/file_format_truelight.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_truelight.rs"]
+status = "partial"
+note = "p4-readers 4.3c: the reader and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_truelight_oracle.rs; bake comes with WP 4.8"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatUtils.cpp"
@@ -4679,8 +4680,9 @@ status = "done"
 [[file]]
 path = "tests/cpu/fileformats/FileFormatTruelight_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-formats/src/fileformats/file_format_truelight_tests.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_truelight_tests.rs"]
+status = "done"
+note = "p4-readers 4.3c"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatVF_tests.cpp"

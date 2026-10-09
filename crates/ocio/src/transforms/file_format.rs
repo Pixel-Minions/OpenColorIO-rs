@@ -359,12 +359,7 @@ fn create_formats() -> Vec<Box<dyn FileFormat>> {
         // FileFormatSpiMtx.cpp:57-64.
         Box::new(crate::fileformats::file_format_spimtx::LocalFileFormat),
         // FileFormatTruelight.cpp:79-87.
-        stub(vec![FormatInfo::new(
-            "truelight",
-            "cub",
-            read_bake,
-            B::LUT_3D,
-        )]),
+        Box::new(crate::fileformats::file_format_truelight::LocalFileFormat),
         // FileFormatVF.cpp:83-90.
         stub(vec![FormatInfo::new("nukevf", "vf", C::READ, B::NONE)]),
     ]
