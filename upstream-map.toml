@@ -4401,7 +4401,7 @@ path = "tests/cpu/Processor_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/processor_tests.rs"]
 status = "partial"
-note = "optimization_env_override_basic; p3-config-1 3.4e: basic_cache, channel_crosstalk and optimized_processor, with Config::Create(). cache_optimized_processors, cache_cpu_processors, cache_gpu_processors, is_noop and dynamic_properties wait for ExposureContrastTransform (Phase 5); basic_cache_lut for Lut3DTransform (Phase 2); unique_dynamic_properties for the ExposureContrast op (Phase 5). Cache tests on ops built directly stand in meanwhile (cache_optimized_processors, cache_cpu_processors in crates/ocio/src/processor_tests.rs), with the wheel comparisons of crates/ocio/tests/processor_cache_oracle.rs"
+note = "optimization_env_override_basic; p3-config-1 3.4e: basic_cache, channel_crosstalk and optimized_processor, with Config::Create(); p3-after-p2: basic_cache_lut. cache_optimized_processors, cache_cpu_processors, cache_gpu_processors, is_noop and dynamic_properties wait for ExposureContrastTransform (Phase 5); unique_dynamic_properties for the ExposureContrast op (Phase 5). Cache tests on ops built directly stand in meanwhile (cache_optimized_processors, cache_cpu_processors in crates/ocio/src/processor_tests.rs), with the wheel comparisons of crates/ocio/tests/processor_cache_oracle.rs"
 
 [[file]]
 path = "tests/cpu/SIMD_tests.cpp"
@@ -5085,7 +5085,8 @@ status = "todo"
 path = "tests/cpu/transforms/GroupTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/group_transform_tests.rs"]
-status = "todo"
+status = "partial"
+note = "p3-after-p2: basic; write_formats and write_with_noops need the file writers (Phase 4)"
 
 [[file]]
 path = "tests/cpu/transforms/LogAffineTransform_tests.cpp"

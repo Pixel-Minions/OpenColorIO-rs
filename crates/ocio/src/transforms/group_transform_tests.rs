@@ -1,12 +1,59 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Tests of the group transform. Upstream's (`tests/cpu/transforms/GroupTransform_tests.cpp`)
-//! need the Matrix and FixedFunction transforms (`basic`) or the file writers
-//! (`write_formats`, `write_with_noops`); they come with them. The text and the validation are
-//! compared with the wheel's in `tests/transform_oracle.rs`.
+//! Tests of the group transform: `tests/cpu/transforms/GroupTransform_tests.cpp` @ v2.5.2.
+//! `basic` came with the FixedFunction transform (`p3-after-p2`); `write_formats` and
+//! `write_with_noops` need the file writers and come with them. The text and the validation
+//! are compared with the wheel's in `tests/transform_oracle.rs`.
 
 use super::*;
+
+/// Port of `OCIO_ADD_TEST(GroupTransform, basic)` @ v2.5.2.
+#[test]
+fn basic() {
+    use crate::transforms::fixed_function_transform::FixedFunctionTransform;
+    use crate::transforms::matrix_transform::MatrixTransform;
+    use ocio_ops::format_metadata::METADATA_ROOT;
+    use ocio_ops::open_color_types::FixedFunctionStyle;
+
+    let mut group = GroupTransform::new();
+    assert_eq!(group.direction(), TransformDirection::Forward);
+
+    group.set_direction(TransformDirection::Inverse);
+    assert_eq!(group.direction(), TransformDirection::Inverse);
+
+    assert_eq!(group.num_transforms(), 0);
+
+    let group_data = group.format_metadata();
+    assert_eq!(group_data.get_element_name(), METADATA_ROOT);
+    assert_eq!(group_data.get_num_attributes(), 0);
+    assert_eq!(group_data.get_num_children_elements(), 0);
+
+    let matrix = MatrixTransform::new();
+    group.append_transform(matrix.into());
+    let ff = FixedFunctionTransform::new(FixedFunctionStyle::AcesRedMod03, &[]).unwrap();
+    group.append_transform(ff.into());
+
+    assert_eq!(group.num_transforms(), 2);
+
+    let t0 = group.transform(0).unwrap();
+    assert!(matches!(t0, Transform::Matrix(_)));
+
+    let t1 = group.transform(1).unwrap();
+    assert!(matches!(t1, Transform::FixedFunction(_)));
+
+    let metadata = group.format_metadata_mut();
+    assert_eq!(metadata.get_element_name(), METADATA_ROOT);
+    assert_eq!(metadata.get_element_value(), b"");
+    assert_eq!(metadata.get_num_attributes(), 0);
+    assert_eq!(metadata.get_num_children_elements(), 0);
+    metadata
+        .add_attribute(Some(b"att1"), Some(b"val1"))
+        .unwrap();
+    metadata
+        .add_child_element(Some(b"child1"), Some(b"content1"))
+        .unwrap();
+}
 
 /// A new group is forward, empty, with the root metadata; children keep their order, and an
 /// index outside them is upstream's error.

@@ -11,11 +11,11 @@
 //! cache tests here run the checks of upstream's own cache tests on processors of matrix ops
 //! built directly.
 //!
-//! `basic_cache`, `channel_crosstalk` and `optimized_processor` get their processors from
-//! `Config::Create()`. The others wait: `cache_optimized_processors`, `cache_cpu_processors`,
-//! `cache_gpu_processors`, `is_noop` and `dynamic_properties` need `ExposureContrastTransform`
-//! (Phase 5); `basic_cache_lut` needs `Lut3DTransform` (Phase 2); `unique_dynamic_properties`
-//! needs the ExposureContrast op (Phase 5).
+//! `basic_cache`, `basic_cache_lut`, `channel_crosstalk` and `optimized_processor` get their
+//! processors from `Config::Create()`. The others wait: `cache_optimized_processors`,
+//! `cache_cpu_processors`, `cache_gpu_processors`, `is_noop` and `dynamic_properties` need
+//! `ExposureContrastTransform` (Phase 5); `unique_dynamic_properties` needs the
+//! ExposureContrast op (Phase 5).
 
 use std::sync::Arc;
 
@@ -143,6 +143,49 @@ fn basic_cache() {
     assert_eq!(
         processor_mat.cache_id().unwrap(),
         "1b1880136f7669351adb0dcae0f4f9fd"
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(Processor, basic_cache_lut)` @ v2.5.2.
+#[test]
+fn basic_cache_lut() {
+    use crate::transforms::lut3d_transform::Lut3DTransform;
+
+    let _env = EnvGuard::new();
+    let config = Config::new().unwrap();
+    let group = GroupTransform::new();
+
+    let processor_empty_group = config.processor(&Transform::from(group)).unwrap();
+    assert_eq!(processor_empty_group.num_transforms(), 0);
+    assert_eq!(processor_empty_group.cache_id().unwrap(), "<NOOP>");
+
+    let mut lut = Lut3DTransform::with_grid_size(3).unwrap();
+    // Make sure it's not an identity.
+    lut.set_value(2, 2, 2, 2., 3., 4.).unwrap();
+
+    let mut processor_lut = config.processor(&Transform::from(lut.clone())).unwrap();
+    assert_eq!(processor_lut.num_transforms(), 1);
+    assert_eq!(
+        processor_lut.cache_id().unwrap(),
+        "2b26d0097cdcf8f141fe3b3d6e21b5ec"
+    );
+
+    // Check behaviour of the cacheID
+
+    // Change a value and check that the cacheID changes.
+    lut.set_value(2, 2, 2, 1., 3., 4.).unwrap();
+    processor_lut = config.processor(&Transform::from(lut.clone())).unwrap();
+    assert_eq!(
+        processor_lut.cache_id().unwrap(),
+        "288ec8ea132adaca5b5aed24a296a1a2"
+    );
+
+    // Restore the original value, check that the cache ID matches what it used to be.
+    lut.set_value(2, 2, 2, 2., 3., 4.).unwrap();
+    processor_lut = config.processor(&Transform::from(lut.clone())).unwrap();
+    assert_eq!(
+        processor_lut.cache_id().unwrap(),
+        "2b26d0097cdcf8f141fe3b3d6e21b5ec"
     );
 }
 
