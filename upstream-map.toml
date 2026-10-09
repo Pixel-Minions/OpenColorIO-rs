@@ -951,8 +951,9 @@ note = "p4-registry 4.2a2: the reader (istream::getline, sscanf, from_chars) and
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatSpi3D.cpp"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/file_format_spi3d.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_spi3d.rs"]
+status = "partial"
+note = "p4-readers 4.2b: the reader (istream::getline, sscanf, from_chars) and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_spi3d_oracle.rs; bake comes with WP 4.8"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatSpiMtx.cpp"
@@ -971,15 +972,15 @@ status = "todo"
 path = "src/OpenColorIO/fileformats/FileFormatUtils.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/file_format_utils.rs"]
-status = "partial"
-note = "p4-registry 4.2a2: HandleLUT, HandleLUT1D, LogWarningInterpolationNotUsed; HandleLUT3D comes with the 3D LUT readers"
+status = "done"
+note = "p4-registry 4.2a2: HandleLUT, HandleLUT1D, LogWarningInterpolationNotUsed; p4-readers 4.2b: HandleLUT3D"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatUtils.h"
 kind = "src"
 target = ["crates/ocio/src/fileformats/file_format_utils.rs"]
-status = "partial"
-note = "p4-registry 4.2a2: as FileFormatUtils.cpp"
+status = "done"
+note = "p4-registry 4.2a2, p4-readers 4.2b: as FileFormatUtils.cpp"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatVF.cpp"
@@ -4655,8 +4656,9 @@ note = "p4-registry 4.2a2: format_info, test, read_failure, identity; bake_1d an
 [[file]]
 path = "tests/cpu/fileformats/FileFormatSpi3D_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-formats/src/fileformats/file_format_spi3d_tests.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_spi3d_tests.rs"]
+status = "partial"
+note = "p4-readers 4.2b: format_info, test, read_failure, lut_interpolation_option; bake_3d comes with WP 4.8"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatSpiMtx_tests.cpp"

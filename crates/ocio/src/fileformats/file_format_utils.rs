@@ -2,13 +2,12 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! What the readers share when they build their ops: a port of
-//! `src/OpenColorIO/fileformats/FileFormatUtils.cpp` @ v2.5.2. `HandleLUT3D` comes with the
-//! 3D LUT readers.
+//! `src/OpenColorIO/fileformats/FileFormatUtils.cpp` @ v2.5.2.
 
 use ocio_ops::logging::log_warning;
 use ocio_ops::open_color_types::interpolation_to_string;
 use ocio_ops::ops::lut1d::Lut1DOpData;
-use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
+use ocio_ops::ops::lut3d::lut3d_op_data::{Interpolation, Lut3DOpData, get_concrete_interpolation};
 
 use crate::transforms::file_transform::FileTransform;
 
@@ -40,11 +39,29 @@ impl HandledLut for Lut1DOpData {
     }
 }
 
+impl HandledLut for Lut3DOpData {
+    fn is_valid_interpolation(interp: Interpolation) -> bool {
+        Lut3DOpData::is_valid_interpolation(interp)
+    }
+
+    fn concrete_interpolation(interp: Interpolation) -> Interpolation {
+        get_concrete_interpolation(interp)
+    }
+
+    fn interpolation(&self) -> Interpolation {
+        self.get_interpolation()
+    }
+
+    fn set_interpolation(&mut self, interp: Interpolation) {
+        Lut3DOpData::set_interpolation(self, interp);
+    }
+}
+
 /// The file's LUT, or a copy of it with the file transform's interpolation when its concrete
 /// interpolation differs; `file_interp_used` is set when that interpolation is valid for the
 /// LUT (an invalid one counts as the default).
 ///
-/// Port of `HandleLUT` (FileFormatUtils.cpp:11-41 @ v2.5.2).
+/// Port of `HandleLUT` (FileFormatUtils.cpp:11-42 @ v2.5.2).
 fn handle_lut<L: HandledLut>(
     file_lut: Option<&L>,
     mut file_interp: Interpolation,
@@ -73,7 +90,7 @@ fn handle_lut<L: HandledLut>(
     }
 }
 
-/// Port of `HandleLUT1D` (FileFormatUtils.cpp:43-48 @ v2.5.2).
+/// Port of `HandleLUT1D` (FileFormatUtils.cpp:44-49 @ v2.5.2).
 pub(crate) fn handle_lut1d(
     file_lut1d: Option<&Lut1DOpData>,
     file_interp: Interpolation,
@@ -82,9 +99,18 @@ pub(crate) fn handle_lut1d(
     handle_lut(file_lut1d, file_interp, file_interp_used)
 }
 
+/// Port of `HandleLUT3D` (FileFormatUtils.cpp:51-56 @ v2.5.2).
+pub(crate) fn handle_lut3d(
+    file_lut3d: Option<&Lut3DOpData>,
+    file_interp: Interpolation,
+    file_interp_used: &mut bool,
+) -> Option<Lut3DOpData> {
+    handle_lut(file_lut3d, file_interp, file_interp_used)
+}
+
 /// Logs that the file transform's interpolation isn't valid for its file.
 ///
-/// Port of `LogWarningInterpolationNotUsed` (FileFormatUtils.cpp:57-65 @ v2.5.2).
+/// Port of `LogWarningInterpolationNotUsed` (FileFormatUtils.cpp:58-66 @ v2.5.2).
 pub(crate) fn log_warning_interpolation_not_used(
     interp: Interpolation,
     file_transform: &FileTransform,

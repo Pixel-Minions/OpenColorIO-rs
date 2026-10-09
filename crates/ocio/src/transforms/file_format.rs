@@ -375,12 +375,7 @@ fn create_formats() -> Vec<Box<dyn FileFormat>> {
         // FileFormatSpi1D.cpp:82-90.
         Box::new(crate::fileformats::file_format_spi1d::LocalFileFormat),
         // FileFormatSpi3D.cpp:72-80.
-        stub(vec![FormatInfo::new(
-            "spi3d",
-            "spi3d",
-            read_bake,
-            B::LUT_3D,
-        )]),
+        Box::new(crate::fileformats::file_format_spi3d::LocalFileFormat),
         // FileFormatSpiMtx.cpp:57-64.
         Box::new(crate::fileformats::file_format_spimtx::LocalFileFormat),
         // FileFormatTruelight.cpp:79-87.

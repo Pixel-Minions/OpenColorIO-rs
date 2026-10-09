@@ -10,6 +10,7 @@ pub mod file_format_cdl;
 pub mod file_format_discreet1dl;
 pub mod file_format_icc;
 pub mod file_format_spi1d;
+pub mod file_format_spi3d;
 pub mod file_format_spimtx;
 pub mod file_format_utils;
 pub mod icc;
