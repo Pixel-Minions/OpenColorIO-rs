@@ -8,11 +8,10 @@ project ports it to Rust one upstream release at a time. The current line matche
 2.5.2**: the same results, the same text output, the same errors and the same accepted configs,
 from Rust and, later, from Python.
 
-> **Status: under development, about half done.** Milestone M0 (the op engine and the analytic
-> transforms) is complete, and M1 (LUTs, fixed functions, ACES 2.0, built-ins and configs) is
-> close: all of it is merged and matches the official library on the CPU and the GPU, except the
-> processor builders, which are written and land next. File formats (M2) have started. Python comes later. See
-> [Progress](#progress).
+> **Status: under development, about half done.** Milestones M0 (the op engine and the analytic
+> transforms) and M1 (LUTs, fixed functions, ACES 2.0, built-ins and configs) are complete: all
+> of it is merged and matches the official library on the CPU and the GPU. File formats (M2) are
+> well under way. Python comes later. See [Progress](#progress).
 
 ## How precise: byte for byte
 
@@ -86,10 +85,10 @@ one.
 
 ## Progress
 
-Status as of 2026-10-09: **milestone M0 is complete and M1 is close**, about half of the planned
-work. Phases 1 (the op engine and the analytic transforms) and 2 are done. Phase 3 is merged
-except the processor builders (a processor between two color spaces), which are written and land
-next. Phase 4 (file formats, toward M2) is well under way.
+Status as of 2026-10-16: **milestones M0 and M1 are complete**, about half of the planned
+work. Phases 1 (the op engine and the analytic transforms), 2 and 3 are done; the last piece of
+Phase 3 was the processor builders (a processor between two color spaces, displays and views,
+looks and named transforms). Phase 4 (file formats, toward M2) is well under way.
 The phases toward milestone M1:
 - **Phase 2:** LUTs (1D and 3D, with their inverses), fixed functions, ACES 2.0 and the
   GradingRGBCurve op that the ACES 1.x built-ins use
@@ -117,8 +116,8 @@ through the API at every format and level); all 98 built-in transforms building 
 including the ACES 1.x and 2.0 output transforms; `validate()`; and configs from files, the
 environment, an I/O proxy and the built-in configs (`ocio://` URIs);
 the config transforms ColorSpaceTransform, DisplayViewTransform, LookTransform, FileTransform
-and BuiltinTransform with its registry (their classes and text; their processors come with the
-config). The live oracle can now also drive a config, its context and its file rules call by
+and BuiltinTransform with its registry, with their processors: the builders that turn a config's
+color spaces, displays and views, looks and named transforms into ops. The live oracle can now also drive a config, its context and its file rules call by
 call in the official library, which the Phase 3 cards are checked against. A config's context
 is merged too: its environment (byte for byte as each platform's C runtime and system apply
 it), its variables and their expansion, its search paths and how it finds files, with the
@@ -205,7 +204,7 @@ instead. Every such case, and every upstream bug the port reproduces, is listed 
 
 | Suite | Ported | Total |
 |---|---:|---:|
-| C++ | 559 | 1,191 |
+| C++ | 589 | 1,191 |
 | GPU | 0 | 264 |
 | Python | 0 | 384 |
 
@@ -217,11 +216,11 @@ compared with the official library's, text for text.
 
 Each milestone is a complete section of OCIO, byte-exact on CPU and GPU:
 
-| Milestone | Section | Status (2026-10-09) | Version |
+| Milestone | Section | Status (2026-10-16) | Version |
 |---|---|---|---|
 | **M0** | Analytic transforms (matrix, range, exponent, log, CDL), the op engine and the processor API | **Done** | `0.1.0` |
-| **M1** | LUTs, fixed functions (including ACES 2.0), built-in transforms and configs, config read and write | **Almost done.** Merged: all LUTs and fixed functions on CPU and GPU, ACES 2.0, all 98 built-in transforms, the config model and rules, config read and write, `validate()`, configs from files and the built-in configs. Written, landing next: the processor builders | `0.2.0` |
-| **M2** | All 24 file formats, file-based configs and `.ocioz`, the baker | **Started.** Written: the oracle, parsing, the format registry, the XML parser (expat), the CDL/CC/CCC readers and writer, and the spimtx, spi1d, spi3d, Discreet 1DL, cube, ICC, ITX, 3DL, Houdini, Truelight, Pandora and Nuke `.vf` readers; CLF/CTF reading is under way. Next: CSP, then the writers and the baker | `0.3.0` |
+| **M1** | LUTs, fixed functions (including ACES 2.0), built-in transforms and configs, config read and write | **Done** | `0.2.0` |
+| **M2** | All 24 file formats, file-based configs and `.ocioz`, the baker | **Started.** Written: the oracle, parsing, the format registry, the XML parser (expat), the CDL/CC/CCC readers and writer, and the spimtx, spi1d, spi3d, Discreet 1DL, cube, ICC, ITX, 3DL, Houdini, Truelight, Pandora and Nuke `.vf` readers; CSP and most of CLF/CTF reading are written, and the `.look` reader is under way. Next: the rest of CLF/CTF, then the writers and the baker | `0.3.0` |
 | **M3** | Dynamic properties, grading ops, app helpers | Not started | `0.4.0` |
 | **M4** | The `PyOpenColorIO`-compatible Python module | Not started | `0.5.0` |
 | **M5** | Full OCIO 2.5.2 parity | Not started | `1.0.0` |
