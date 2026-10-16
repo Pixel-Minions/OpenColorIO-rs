@@ -223,6 +223,20 @@ fn generated_cases() -> Vec<Case> {
         l[9] = "1 0 x 0".into();
         l
     });
+    // Comments and tags among the entries, and a format line of 3 words.
+    for (label, line) in [
+        ("a comment among the entries", "# a comment"),
+        ("a comment glued to an entry", "#4 1 1 1"),
+        ("an in tag among the entries", "in 27"),
+    ] {
+        let mut l = basic();
+        l.insert(9, line.into());
+        add(label, l);
+    }
+    add(
+        "a format line of 3 words",
+        replace(&basic(), "format", Some("format lut lut")),
+    );
     cases.push(case_with(
         ".mga",
         "mga",

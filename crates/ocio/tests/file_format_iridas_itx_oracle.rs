@@ -176,6 +176,23 @@ fn generated_cases() -> Vec<Case> {
         "the line number after blank lines and comments",
         itx(&["# a", "", "LUT_3D_SIZE 2", "   "], &numbered, "\n"),
     );
+    // A second LUT_3D_SIZE after entries: before all of them, and among them.
+    let mut twice = vec![
+        "0 0 0".to_owned(),
+        "1 1 1".to_owned(),
+        "LUT_3D_SIZE 2".to_owned(),
+    ];
+    twice.extend(d.iter().cloned());
+    add(
+        "a second size after 2 entries",
+        itx(&["LUT_3D_SIZE 2"], &twice, "\n"),
+    );
+    let mut mid = d.clone();
+    mid.insert(4, "LUT_3D_SIZE 2".into());
+    add(
+        "a second size among the entries",
+        itx(&["LUT_3D_SIZE 2"], &mid, "\n"),
+    );
     cases
 }
 

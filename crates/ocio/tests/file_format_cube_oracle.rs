@@ -301,6 +301,43 @@ fn generated_cases() -> Vec<Case> {
         "the line number after blank lines and comments",
         cube(&["# a", "", "LUT_3D_SIZE 2", "   "], &numbered, "\n"),
     );
+    // Iridas domains of NaNs, infinities, and equal bounds (the min-max op refuses them).
+    for (label, min, max) in [
+        ("NaN and -NaN", "nan 0 -nan", "1 1 1"),
+        ("NaNs at both ends", "nan nan -nan", "-nan 1 nan"),
+        ("infinities", "-inf 0 0", "inf 1 1"),
+        ("a signaling NaN", "nan(snan) 0 0", "1 1 1"),
+        ("equal bounds", "1 1 1", "1 1 1"),
+        ("a NaN maximum", "0 0 0", "nan -nan 1"),
+        ("a minimum above the maximum", "1 0 0", "0 1 1"),
+        ("0x", "0x 0 0", "1 1 1"),
+        ("a hex float", "-0x1p-2 0 0", "1 1 1"),
+    ] {
+        let domain_min = format!("DOMAIN_MIN {min}");
+        let domain_max = format!("DOMAIN_MAX {max}");
+        add(
+            &format!("an Iridas domain of {label}"),
+            cube(&["LUT_3D_SIZE 2", &domain_min, &domain_max], &d3, "\n"),
+        );
+    }
+    // Resolve ranges of the same kinds.
+    for (label, range_1d, range_3d) in [
+        ("NaN", "nan 1", "0 1"),
+        ("NaNs", "-nan nan", "nan -nan"),
+        ("equal 1D bounds", "1 1", "0 1"),
+        ("equal 3D bounds", "0 1", "2 2"),
+        ("infinities", "-inf inf", "0 inf"),
+        ("0x", "0x 1", "0 1"),
+    ] {
+        let r1 = format!("LUT_1D_INPUT_RANGE {range_1d}");
+        let r3 = format!("LUT_3D_INPUT_RANGE {range_3d}");
+        let header = ["LUT_1D_SIZE 2", &r1, "LUT_3D_SIZE 2", &r3];
+        let data = [vec!["0 0 0".to_owned(), "1 1 1".to_owned()], d3.clone()].concat();
+        add(
+            &format!("a Resolve range of {label}"),
+            cube(&header, &data, "\n"),
+        );
+    }
     cases
 }
 

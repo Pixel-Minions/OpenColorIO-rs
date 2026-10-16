@@ -391,6 +391,40 @@ fn generated_cases() -> Vec<Case> {
         "values separated by vertical tabs and form feeds",
         text(&[header("C", "9"), block("RGB", &[packed])].concat(), "\n"),
     );
+    // From ranges the min-max op refuses (equal bounds) and others it takes, on 1D and 3D+1D
+    // LUTs.
+    for (label, from) in [
+        ("equal bounds", "1 1"),
+        ("a NaN", "nan 1"),
+        ("NaNs", "-nan nan"),
+        ("infinities", "-inf inf"),
+        ("a reversed range", "2 1"),
+    ] {
+        let line = format!("From\t\t{from}");
+        add(
+            &format!("a 1D LUT from {label}"),
+            text(&replace(&lut_1d(), "From", Some(&line)), "\n"),
+        );
+        add(
+            &format!("a 3D+1D LUT from {label}"),
+            text(&replace(&lut_3d_1d(), "From", Some(&line)), "\n"),
+        );
+    }
+    // A block's opening brace on the `LUT:` line, which the header reader consumes.
+    let mut lut_line = replace(&header("3D", "2"), "LUT:", Some("LUT: {"));
+    lut_line.extend(cube_values(2));
+    lut_line.push("}".into());
+    add(
+        "the 3D block's brace on the LUT: line",
+        text(&lut_line, "\n"),
+    );
+    let mut lut_line = replace(&header("C", "9"), "LUT:", Some("LUT: RGB {"));
+    lut_line.extend(values_1d(9));
+    lut_line.push("}".into());
+    add(
+        "the RGB block's name on the LUT: line",
+        text(&lut_line, "\n"),
+    );
     add("empty", String::new());
     cases
 }

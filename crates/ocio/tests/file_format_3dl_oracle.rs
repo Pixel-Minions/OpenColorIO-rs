@@ -231,6 +231,50 @@ fn generated_cases() -> Vec<Case> {
     let mut long = d.clone();
     long.insert(3, format!("0 0 0 {}", "1 ".repeat(3000)));
     add("a line past the buffer", lut3dl(&[], &long, "\n"));
+    // Shaper lines around the 4096-byte line buffer (4095 bytes and the line feed fit): the
+    // last value, 1023, is cut once the line is longer.
+    for len in [4094usize, 4095, 4096, 4097] {
+        let mut shaper_line = String::from("0 300 600");
+        while shaper_line.len() + 2 <= len - 5 {
+            shaper_line.push_str(" 0");
+        }
+        shaper_line.push_str(&" ".repeat(len - 5 - shaper_line.len()));
+        shaper_line.push_str(" 1023");
+        assert_eq!(shaper_line.len(), len);
+        add(
+            &format!("a shaper line of {len} bytes"),
+            lut3dl(&[&shaper_line], &entries(2, 1000), "\n"),
+        );
+    }
+    // The bit depth comes from the largest shaper value and the largest 3D value, wherever
+    // they are; a 3D table of negative values only leaves its maximum at 0.
+    let offset = |off: i64| -> Vec<String> {
+        entries(2, 1000)
+            .iter()
+            .map(|l| {
+                l.split(' ')
+                    .map(|v| (v.parse::<i64>().unwrap() + off).to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .collect()
+    };
+    add(
+        "a shaper whose largest value isn't its last",
+        lut3dl(&["0 500 1023 300"], &offset(5), "\n"),
+    );
+    add(
+        "a shaper whose largest value is its second",
+        lut3dl(&["0 4000 200 300"], &offset(5), "\n"),
+    );
+    add(
+        "a 3D table of negative values only",
+        lut3dl(&["0 300 600 1023"], &offset(-3000), "\n"),
+    );
+    add(
+        "a shaper of negative values only",
+        lut3dl(&["-5 -300 -600 -1023"], &[], "\n"),
+    );
     add(
         "keywords only",
         lut3dl(&["3DMESH", "Mesh 4 12", "LUT8", "gamma 1.0"], &[], "\n"),

@@ -525,6 +525,39 @@ fn generated_cases() -> Vec<Case> {
             .concat(),
         ),
     );
+    // The identity test's tolerance, 1e-6 relative to the input (`EqualWithRelError`): 1 + 8
+    // ulp is within it, 1 + 9 ulp isn't, on either side of a positive or a negative input.
+    for (label, inputs, outputs) in [
+        ("1 + 8 ulp", "0 0.5 1", "0 0.5 1.0000009536743164"),
+        ("1 + 9 ulp", "0 0.5 1", "0 0.5 1.000001072883606"),
+        ("1 - 8 ulp", "0 0.5 1", "0 0.5 0.99999904632568359"),
+        ("1 - 9 ulp", "0 0.5 1", "0 0.5 0.99999892711639404"),
+        ("-1 - 8 ulp", "-1 0 1", "-1.0000009536743164 0 1"),
+        ("-1 - 9 ulp", "-1 0 1", "-1.000001072883606 0 1"),
+        ("0 against -0", "0 0.5 1", "-0 0.5 1"),
+        ("-0 against 0", "-0 0.5 1", "0 0.5 1"),
+    ] {
+        add(
+            &format!("identity tolerance, {label}"),
+            csp_3d(&[channel(inputs, outputs), identity(), identity()]),
+        );
+    }
+    // Signed zeros in a prelut that is used: its range (the min-max op) and its coefficients.
+    for (label, inputs, outputs) in [
+        ("-0 first input", "-0 0.5 1", "0 0.3 1"),
+        ("-0 last input", "-1 -0.5 -0", "0 0.3 1"),
+        ("-0 first output", "0 0.5 1", "-0 0.3 1"),
+        ("-0 outputs", "0 0.5 1", "-0 -0 1"),
+        ("-0 last output", "0 0.5 1", "1 0.3 -0"),
+        ("-0 input and output", "-0 0.5 1", "-0 0.3 1"),
+        ("-0 2 points", "-0 1", "-0 2"),
+    ] {
+        add(
+            &format!("signed zeros, {label}"),
+            csp_3d(&[channel(inputs, outputs), identity(), gamma()]),
+        );
+    }
+
     add("the header alone", vec!["CSPLUTV100".into()]);
     add("empty", Vec::new());
     add("white space only", vec!["   ".into(), "".into()]);

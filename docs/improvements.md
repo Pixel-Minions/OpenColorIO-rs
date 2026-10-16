@@ -2082,8 +2082,14 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   after a forward processor and become `1` from a fresh cache; the inverse processor's cache
   ID is `91c3bdd33553011dfc45941c59ca1de5` after a forward processor and
   `8caceefb8952f416f8747d8a34fc639a` from a fresh cache; the pixels agree, as the one-component
-  LUT renders from red). The other readers that share op data with the cache (the CTF and CLF
-  readers) likely do the same.
+  LUT renders from red). Every reader that builds its 1D LUT ops through `HandleLUT1D` hands
+  over the cached LUT the same way: the Discreet 1D LUT (`FileFormatDiscreet1DL.cpp:776-783`),
+  ICC (`FileFormatICC.cpp:793-862`), Iridas `.cube` (`FileFormatIridasCube.cpp:538-572`),
+  Resolve `.cube` (`FileFormatResolveCube.cpp:767-800`), `.3dl` shaper
+  (`FileFormat3DL.cpp:612-639`), Truelight shaper (`FileFormatTruelight.cpp:380-409`),
+  Houdini 1D and prelut (`FileFormatHDL.cpp:849-896`) and cineSpace prelut and 1D LUT
+  (`FileFormatCSP.cpp:875-918`) readers. The CTF and CLF readers, which share op data with
+  the cache too, likely do the same.
 - **Who notices:** applications that make processors of a non-monotonic LUT file in both
   directions: the inverse's cache ID and data depend on the order.
 - **A fix:** clone the cached op data when building ops, or finalize copies.
@@ -2345,6 +2351,75 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p4-ctf-read-2` (`crates/ocio/src/fileformats/ctf/ctf_reader_helper.rs`,
   `lut1d_end_array`; `crates/ocio/tests/file_format_ctf_oracle.rs` checks such values with
   the wheel).
+
+### I-182. A `.3dl` line over 4095 bytes ends the file there
+
+- **Upstream:** the `.3dl` reader reads lines with `istream.getline(lineBuffer, 4096)`
+  (`src/OpenColorIO/fileformats/FileFormat3DL.cpp:247-258` @ v2.5.2). A longer line fills the
+  buffer with its first 4095 bytes and fails the stream: the reader parses those bytes, so the
+  value they cut is read cut (`1023` as `10`), and `while (istream.good())` stops, so nothing
+  after that line is read. Its bit-depth errors also lack a space: "Error parsing .3dl
+  file.The maximum 3D LUT value, ..." (`FileFormat3DL.cpp:438-457`; the shaper's messages
+  have it, 376-395).
+- **Who notices:** `.3dl` files with a line of 4096 bytes or more (a shaper of about 800
+  values or more on one line): their LUT is cut or refused with a misleading error.
+- **A fix:** read lines of any length; add the space.
+- **Status:** matched in `p4-readers` (4.3a, `crates/ocio/src/fileformats/file_format_3dl.rs`);
+  the oracle cases "a shaper line of 4094 bytes" to "4097 bytes" and "a line past the buffer"
+  (`crates/ocio/tests/file_format_3dl_oracle.rs`).
+
+### I-183. Four Houdini LUT messages and blocks that mislead
+
+- **Upstream:** the Houdini reader (`src/OpenColorIO/fileformats/FileFormatHDL.cpp` @ v2.5.2):
+  - reports a type `C` file without an `RGB` block as "3D+1D LUT should contain Pre{} LUT
+    section" (565-572);
+  - swaps the words of "Malformed LUT - Unknown word '<LUT name>' after LUT name '<next
+    word>'" (165-175);
+  - quotes the first size of the `Length` line when a later one doesn't parse: "Invalid
+    integer on 'Length' line: '<first size>'" (443-453);
+  - drops the rest of the `LUT:` line (`readHeaders`, 55-78), so `LUT: {` or `LUT: RGB {`
+    loses its brace or block name, and the block then reads as malformed.
+- **Who notices:** authors of malformed Houdini LUTs, whose errors name the wrong block or
+  word.
+- **A fix:** name the `RGB` block, swap the words back, quote the size that doesn't parse, and
+  read a block that starts on the `LUT:` line.
+- **Status:** matched in `p4-readers` (4.3b, `crates/ocio/src/fileformats/file_format_hdl.rs`);
+  the oracle cases "no RGB block", "a name not followed by {", "a second Length that doesn't
+  parse" and "the 3D block's brace on the LUT: line" (`crates/ocio/tests/
+  file_format_hdl_oracle.rs`).
+
+### I-184. Two cineSpace messages with a missing space and a stray quote
+
+- **Upstream:** the `.csp` reader's "Prelut does not specify the expected number of data
+  points. Expected: <n>.Found: <a>, <b>. In <file>." has no space after the period
+  (`src/OpenColorIO/fileformats/FileFormatCSP.cpp:449-455` @ v2.5.2), and "A csp 3D LUT with
+  invalid cube size (<n>): <line>' in <file>." closes a quote it never opened (573-579).
+- **Who notices:** readers of those errors.
+- **A fix:** add the space; quote the line on both sides.
+- **Status:** matched in `p4-readers` (4.3e, `crates/ocio/src/fileformats/file_format_csp.rs`);
+  the oracle cases of prelut counts and cube sizes (`crates/ocio/tests/
+  file_format_csp_oracle.rs`).
+
+### I-185. The line readers read some numbers differently on Windows and Linux
+
+- **Upstream:** `NumberUtils::from_chars` (`src/utils/NumberUtils.h:104-256` @ v2.5.2) is
+  `std::from_chars` where the compiler declares it (`__cpp_lib_to_chars`, 18-21), and
+  `strtod_l`, `strtof_l` and `strtol_l` in the C locale otherwise. The Windows wheel (MSVC)
+  compiled the first, the Linux wheel (GCC 14, whose `<charconv>` isn't included there) the
+  second. The two agree on ordinary numbers and differ on edge cases: a sign before `0x`, a
+  hex float, subnormal and out-of-range values, NaN payloads, octal integers, and the width of
+  `long`. The line readers parse their values with it (`StringToFloat`, `StringToInt`,
+  `ParseUtils.cpp:575-608`), so a file holding such a number reads differently: in an Iridas `.cube`,
+  `-0x1p-2` reads as `-0` on Windows and `-0.25` on Linux, and `1e-40` reads as that
+  subnormal on Windows while Linux refuses the file (wheel probes, 2026-10-15).
+- **Who notices:** LUT files with hex floats, subnormal values, or other edge-case numbers,
+  shared between Windows and Linux.
+- **A fix:** one parser on both platforms (`std::from_chars` where it exists, or a port of
+  it).
+- **Decided** (PLAN.md D12): the port does what each wheel does.
+- **Status:** matched (`crates/ocio-ops/src/utils/number_utils.rs`, `Flavor`);
+  checked in every line reader against the wheel of each platform
+  (`crates/ocio/tests/file_format_number_forms_oracle.rs`).
 
 ## Undefined behaviour upstream
 
@@ -3056,6 +3131,9 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `3D+1D` LUT reads the second, `lut_sizes[1]` (`src/OpenColorIO/fileformats/
   FileFormatHDL.cpp:488-490` @ v2.5.2), whether the line gave it or not: with one size, past
   the end of the vector it read the sizes into.
+  The wheel reads whatever follows the vector's storage: four runs of the same file
+  (`Type 3D+1D`, `Length 2`) gave "Prelut size must be between 2 and 300000, found: 0" three
+  times and "found: 3241057" once (Windows, the p4-readers verifier, 2026-10-09).
 - **Who notices:** malformed files: a `3D+1D` LUT always has a prelut.
 - **A fix:** require two sizes for `3D+1D`.
 - **Decided** (the general rule): the port's error, "A 3D+1D Houdini LUT needs a prelut size
@@ -3068,14 +3146,18 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Upstream:** the `.csp` reader reads its metadata block with
   `while (!startswithU(line, "END METADATA") || !istream) { nextline(istream, line); ... }`
   (`src/OpenColorIO/fileformats/FileFormatCSP.cpp:403-413` @ v2.5.2). At the end of the file
-  `nextline` returns an empty line, so a block without `END METADATA` never ends: reading such
-  a file never returns (and appends a line feed to the metadata on every turn).
+  `nextline` returns an empty line, so a block without `END METADATA` never ends, and each turn
+  appends a line feed to the metadata string. Reading such a file runs until that allocation
+  fails or the system ends the process: the wheel's memory grew from 61 to 158 MB in 6 seconds
+  on a file of the lines `CSPLUTV100`, `3D`, an empty line, `BEGIN METADATA` and `foo`
+  (Windows, the p4-readers verifier, 2026-10-09).
 - **Who notices:** applications that read a truncated or malformed `.csp` file.
 - **A fix:** stop at the end of the file with an error.
 - **Decided** (the owner's general rule for endless loops, as U-5 and U-65): the port's error
   "Metadata block of csp LUT <file> is not closed. Expected 'END METADATA' before the end of
   the file.", raised where `nextline` finds the end of the file inside the block: the wheel
-  never returns from any file that gets there, and returns from every other.
+  reads no file that gets there (it runs out of memory instead), and reads every other as
+  before.
 - **Status:** matched with an error in `p4-readers` (4.3e, `crates/ocio/src/fileformats/
   file_format_csp.rs`); `a_metadata_block_never_closed_is_an_error`
   (`file_format_csp_tests.rs`).
