@@ -40,6 +40,7 @@ use ocio_ops::ops::lut1d::lut1d_op_data::Lut1DOpData;
 use ocio_ops::ops::lut3d::lut3d_op_data::Lut3DOpData;
 use ocio_ops::ops::matrix::matrix_op_data::{MatrixArray, MatrixOpData};
 use ocio_ops::ops::range::range_op_data::RangeOpData;
+use ocio_ops::ops::reference::reference_op_data::{ReferenceOpData, ReferenceStyle};
 use ocio_testkit::upstream::{check_close, check_throw_what};
 
 /// Port of `LoadCLFFile` (FileFormatCTF_tests.cpp:25-29 @ v2.5.2).
@@ -3684,4 +3685,101 @@ fn load_grading_rgbcurves_log() {
     assert_eq!(master.control_point(2).unwrap().y, 12.5f32);
     assert_eq!(master.control_point(3).unwrap().x, 26.5f32);
     assert_eq!(master.control_point(3).unwrap().y, 15.0f32);
+}
+
+/// The reference of a reader's op.
+fn as_reference(op: &OpData) -> &ReferenceOpData {
+    match op {
+        OpData::Reference(reference) => reference,
+        _ => panic!("not a Reference"),
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, reference_load_alias)` @ v2.5.2.
+#[test]
+fn reference_load_alias() {
+    let file_name = "reference_alias.ctf";
+    let cached_file = load_clf_file(file_name).unwrap();
+    let file_ops = cached_file.transform.get_ops();
+
+    assert_eq!(file_ops.len(), 1);
+    let op = &file_ops[0];
+    let reference = as_reference(op);
+    assert_eq!(op.get_name(), b"name");
+    assert_eq!(op.get_id(), b"uuid");
+    assert_eq!(reference.get_reference_style(), ReferenceStyle::Alias);
+    assert_eq!(reference.get_path(), b"");
+    assert_eq!(reference.get_alias(), b"alias");
+    assert_eq!(reference.get_direction(), TransformDirection::Forward);
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, reference_load_path)` @ v2.5.2.
+#[test]
+fn reference_load_path() {
+    let file_name = "reference_path_missing_file.ctf";
+    let cached_file = load_clf_file(file_name).unwrap();
+    let file_ops = cached_file.transform.get_ops();
+
+    assert_eq!(file_ops.len(), 1);
+    let reference = as_reference(&file_ops[0]);
+    assert_eq!(reference.get_reference_style(), ReferenceStyle::Path);
+    assert_eq!(reference.get_path(), b"toto/toto.ctf");
+    assert_eq!(reference.get_alias(), b"");
+    assert_eq!(reference.get_direction(), TransformDirection::Inverse);
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, reference_load_multiple)` @ v2.5.2.
+#[test]
+fn reference_load_multiple() {
+    // File contains 2 references, 1 range and 1 reference.
+    let file_name = "references_some_inverted.ctf";
+    let cached_file = load_clf_file(file_name).unwrap();
+    let file_ops = cached_file.transform.get_ops();
+
+    assert_eq!(file_ops.len(), 4);
+    let ref0 = as_reference(&file_ops[0]);
+    assert_eq!(ref0.get_reference_style(), ReferenceStyle::Path);
+    assert_eq!(ref0.get_path(), b"matrix_example_1_3_offsets.ctf");
+    assert_eq!(ref0.get_direction(), TransformDirection::Forward);
+
+    let ref1 = as_reference(&file_ops[1]);
+    assert_eq!(ref1.get_reference_style(), ReferenceStyle::Path);
+    assert_eq!(ref1.get_path(), b"clf/xyz_to_rgb.clf");
+    assert_eq!(ref1.get_direction(), TransformDirection::Inverse);
+
+    as_range(&file_ops[2]);
+
+    let ref3 = as_reference(&file_ops[3]);
+    assert_eq!(ref3.get_reference_style(), ReferenceStyle::Path);
+    assert_eq!(ref3.get_path(), b"clf/cdl_clamp_fwd.clf");
+    // Note: This tests that the "inverted" attribute set to anything other than true does not
+    // result in an inverted transform.
+    assert_eq!(ref3.get_direction(), TransformDirection::Forward);
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, reference_load_path_utf8)` @ v2.5.2.
+#[test]
+fn reference_load_path_utf8() {
+    let file_name = "reference_utf8.ctf";
+    let cached_file = load_clf_file(file_name).unwrap();
+    let file_ops = cached_file.transform.get_ops();
+    assert_eq!(file_ops.len(), 1);
+    let reference = as_reference(&file_ops[0]);
+    assert_eq!(reference.get_reference_style(), ReferenceStyle::Path);
+    assert_eq!(
+        reference.get_path(),
+        b"\xE6\xA8\x99\xE6\xBA\x96\xE8\x90\xAC\xE5\x9C\x8B\xE7\xA2\xBC"
+    );
+    assert_eq!(reference.get_alias(), b"");
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, reference_load_alias_path)` @ v2.5.2.
+#[test]
+fn reference_load_alias_path() {
+    let file_name = "reference_alias_path.ctf";
+    // Can't have alias and path at the same time.
+    check_throw_what(
+        load_clf_file(file_name),
+        "alias & path attributes for Reference should not be both defined",
+    );
 }

@@ -59,11 +59,22 @@ use ocio_ops::ops::lut1d::lut1d_op_data::Lut1DOpData;
 use ocio_ops::ops::lut3d::lut3d_op_data::Lut3DOpData;
 use ocio_ops::ops::matrix::matrix_op_data::MatrixOpData;
 use ocio_ops::ops::range::range_op_data::RangeOpData;
+use ocio_ops::ops::reference::reference_op_data::ReferenceOpData;
 use ocio_ops::platform::strcasecmp;
 use ocio_ops::utils::cscan::{ScanArg, ScanCrt, sscanf};
 use ocio_ops::utils::string_utils::{c_str, lower};
 use ocio_ops::{Exception, Result};
 
+use super::ctf_reader_utils::{
+    ATTR_ALIAS, ATTR_BASE_PATH, ATTR_HALF_DOMAIN, ATTR_HUE_ADJUST, ATTR_INTERPOLATION,
+    ATTR_IS_INVERTED, ATTR_PARAM, ATTR_PATH, ATTR_RAW_HALFS, TAG_DYN_PROP_CONTRAST,
+    TAG_DYN_PROP_EXPOSURE, TAG_DYN_PROP_GAMMA, TAG_DYN_PROP_HUECURVE, TAG_DYN_PROP_LOOK,
+    TAG_DYN_PROP_PRIMARY, TAG_DYN_PROP_RGBCURVE, TAG_DYN_PROP_TONE, TAG_HUE_CURVE_HUE_FX,
+    TAG_HUE_CURVE_HUE_HUE, TAG_HUE_CURVE_HUE_LUM, TAG_HUE_CURVE_HUE_SAT, TAG_HUE_CURVE_LUM_LUM,
+    TAG_HUE_CURVE_LUM_SAT, TAG_HUE_CURVE_SAT_LUM, TAG_HUE_CURVE_SAT_SAT, TAG_RGB_CURVE_BLUE,
+    TAG_RGB_CURVE_GREEN, TAG_RGB_CURVE_MASTER, TAG_RGB_CURVE_RED,
+    convert_string_to_grading_style_and_dir, get_interpolation_1d, get_interpolation_3d,
+};
 use super::ctf_reader_utils::{
     ATTR_BASE, ATTR_BITDEPTH_IN, ATTR_BITDEPTH_OUT, ATTR_BYPASS, ATTR_BYPASS_LIN_TO_LOG, ATTR_CHAN,
     ATTR_COMP_CLF_VERSION, ATTR_DIMENSION, ATTR_EXPONENT, ATTR_GAMMA, ATTR_HIGHLIGHT,
@@ -71,15 +82,6 @@ use super::ctf_reader_utils::{
     ATTR_LOGSIDEOFFSET, ATTR_LOGSIDESLOPE, ATTR_OFFSET, ATTR_PARAMS, ATTR_REFBLACK, ATTR_REFWHITE,
     ATTR_SHADOW, ATTR_STYLE, ATTR_VERSION, TAG_MAX_IN_VALUE, TAG_MAX_OUT_VALUE, TAG_MIN_IN_VALUE,
     TAG_MIN_OUT_VALUE, TAG_PROCESS_LIST,
-};
-use super::ctf_reader_utils::{
-    ATTR_HALF_DOMAIN, ATTR_HUE_ADJUST, ATTR_INTERPOLATION, ATTR_PARAM, ATTR_RAW_HALFS,
-    TAG_DYN_PROP_CONTRAST, TAG_DYN_PROP_EXPOSURE, TAG_DYN_PROP_GAMMA, TAG_DYN_PROP_HUECURVE,
-    TAG_DYN_PROP_LOOK, TAG_DYN_PROP_PRIMARY, TAG_DYN_PROP_RGBCURVE, TAG_DYN_PROP_TONE,
-    TAG_HUE_CURVE_HUE_FX, TAG_HUE_CURVE_HUE_HUE, TAG_HUE_CURVE_HUE_LUM, TAG_HUE_CURVE_HUE_SAT,
-    TAG_HUE_CURVE_LUM_LUM, TAG_HUE_CURVE_LUM_SAT, TAG_HUE_CURVE_SAT_LUM, TAG_HUE_CURVE_SAT_SAT,
-    TAG_RGB_CURVE_BLUE, TAG_RGB_CURVE_GREEN, TAG_RGB_CURVE_MASTER, TAG_RGB_CURVE_RED,
-    convert_string_to_grading_style_and_dir, get_interpolation_1d, get_interpolation_3d,
 };
 use super::ctf_transform::{
     CTF_INFO_ELEMENT_VERSION, CTF_PROCESS_LIST_VERSION, CTF_PROCESS_LIST_VERSION_1_2,
@@ -1002,6 +1004,7 @@ impl CtfReaderOpElt {
     /// (CTFReaderHelper.cpp:1199-1203), `CTFReaderCDLElt` (1327-1332),
     /// `CTFReaderFixedFunctionElt` (1417-1421), `CTFReaderFunctionElt` (1496-1500),
     /// `CTFReaderGammaElt` (1862-1865), `CTFReaderGradingRGBCurveElt` (2580-2583),
+    /// `CTFReaderReferenceElt` (5014-5018),
     /// `CTFReaderInvLut1DElt`
     /// (3245-3248), `CTFReaderInvLut3DElt` (3433-3436), `CTFReaderLogElt` (3545-3549),
     /// `CTFReaderLut1DElt` (4085-4092), `CTFReaderLut3DElt` (4389-4396),
@@ -1035,6 +1038,7 @@ impl CtfReaderOpElt {
             CtfReaderKind::GradingRgbCurve => {
                 OpData::GradingRgbCurve(GradingRgbCurveOpData::new(GradingStyle::Log))
             }
+            CtfReaderKind::Reference => OpData::Reference(ReferenceOpData::new()),
             CtfReaderKind::Aces | CtfReaderKind::FixedFunction | CtfReaderKind::Function => {
                 OpData::FixedFunction(
                     FixedFunctionOpData::new(FixedFunctionOpStyle::AcesRedMod03Fwd)
@@ -1265,6 +1269,7 @@ impl CtfReaderOpElt {
     /// `CTFReaderFixedFunctionElt::isOpParameterValid` (1475-1480),
     /// `CTFReaderFunctionElt::isOpParameterValid` (1537-1541),
     /// `CTFReaderGradingRGBCurveElt::isOpParameterValid` (2585-2590),
+    /// `CTFReaderReferenceElt::isOpParameterValid` (5095-5102),
     /// `CTFReaderInvLut3DElt::isOpParameterValid` (3471-3475),
     /// `CTFReaderLut3DElt::isOpParameterValid` (4431-4435) and
     /// `CTFReaderRangeElt_1_7::isOpParameterValid` (4917-4921) @ v2.5.2.
@@ -1293,6 +1298,12 @@ impl CtfReaderOpElt {
             CtfReaderKind::GradingRgbCurve => {
                 base || equal_ignoring_case(ATTR_STYLE, att)
                     || equal_ignoring_case(ATTR_BYPASS_LIN_TO_LOG, att)
+            }
+            CtfReaderKind::Reference => {
+                base || equal_ignoring_case(ATTR_PATH, att)
+                    || equal_ignoring_case(ATTR_BASE_PATH, att)
+                    || equal_ignoring_case(ATTR_ALIAS, att)
+                    || equal_ignoring_case(ATTR_IS_INVERTED, att)
             }
             CtfReaderKind::Lut1D => {
                 base || equal_ignoring_case(ATTR_INTERPOLATION, att)
@@ -2628,6 +2639,77 @@ impl CtfReaderOpElt {
     }
 }
 
+impl CtfReaderOpElt {
+    /// The reference of a Reference reader.
+    ///
+    /// Port of `CTFReaderReferenceElt::getReference` (CTFReaderHelper.h:1180-1183 @ v2.5.2).
+    fn reference_mut(&mut self) -> &mut ReferenceOpData {
+        match &mut self.op {
+            OpData::Reference(reference) => reference,
+            _ => panic!("not a Reference reader"),
+        }
+    }
+
+    /// The path (required) or the alias (not `currentMonitor`, and without a path or a
+    /// basePath, which is ignored), and the direction (`inverted="true"`, ignoring case).
+    ///
+    /// Port of `CTFReaderReferenceElt::start` (CTFReaderHelper.cpp:5024-5093 @ v2.5.2), after
+    /// `CTFReaderOpElt::start`.
+    fn reference_start(&mut self, atts: &[&[u8]]) -> Result<()> {
+        let mut alias: Vec<u8> = Vec::new();
+        let mut path: Vec<u8> = Vec::new();
+        let mut base_path_found = false;
+
+        let mut i = 0;
+        while i < atts.len() {
+            if equal_ignoring_case(ATTR_PATH, atts[i]) {
+                path = c_str(atts[i + 1]).to_vec();
+            } else if equal_ignoring_case(ATTR_BASE_PATH, atts[i]) {
+                // Ignore BasePath for now: BasePath could be used to point to a specific
+                // folder, but for OCIO all folders have to be reacheable through the Context.
+                // All paths might be absolute or relative.
+                base_path_found = true;
+            } else if equal_ignoring_case(ATTR_ALIAS, atts[i]) {
+                // Most alias operators may be ignored, with the exception of currentMonitor.
+                // Since we cannot apply that transform here, we need to throw.
+                alias = c_str(atts[i + 1]).to_vec();
+                if equal_ignoring_case(&alias, b"currentMonitor") {
+                    return Err(self.throw_message(b"The 'currentMonitor' alias is not supported."));
+                }
+            } else if equal_ignoring_case(ATTR_IS_INVERTED, atts[i])
+                && equal_ignoring_case(b"true", atts[i + 1])
+            {
+                self.reference_mut()
+                    .set_direction(TransformDirection::Inverse);
+            }
+
+            i += 2;
+        }
+        if !alias.is_empty() {
+            if !path.is_empty() {
+                return Err(self.throw_message(
+                    b"alias & path attributes for Reference should not be both defined.",
+                ));
+            }
+
+            if base_path_found {
+                return Err(self.throw_message(
+                    b"alias & basepath attributes for Reference should not be both defined.",
+                ));
+            }
+
+            self.reference_mut().set_alias(&alias);
+        } else {
+            if path.is_empty() {
+                return Err(self.throw_message(b"path attribute for Reference is missing."));
+            }
+
+            self.reference_mut().set_path(&path);
+        }
+        Ok(())
+    }
+}
+
 /// The Range of a CTF LUT's 2-entry IndexMap: its first pair's halves, scaled to the LUT's
 /// input bit depth and to its `len` entries, as the minimums, the second pair's as the
 /// maximums.
@@ -2683,7 +2765,8 @@ impl XmlReaderElement for CtfReaderOpElt {
     /// Port of `CTFReaderOpElt::start` (CTFReaderHelper.cpp:837-924), `CTFReaderACESElt::start`
     /// (1209-1239), `CTFReaderCDLElt::start` (1338-1359), `CTFReaderFixedFunctionElt::start`
     /// (1427-1473), `CTFReaderFunctionElt::start` (1506-1534),
-    /// `CTFReaderGradingRGBCurveElt::start` (2592-2640), `CTFReaderGammaElt::start` (1871-1916), `CTFReaderLogElt::start`
+    /// `CTFReaderGradingRGBCurveElt::start` (2592-2640), `CTFReaderReferenceElt::start`
+    /// (5024-5093), `CTFReaderGammaElt::start` (1871-1916), `CTFReaderLogElt::start`
     /// (3555-3580) and `CTFReaderRangeElt_1_7::start` (4897-4915) @ v2.5.2.
     fn start(&mut self, atts: &[&[u8]]) -> Result<()> {
         self.op_start(atts)?;
@@ -2705,6 +2788,7 @@ impl XmlReaderElement for CtfReaderOpElt {
                 return self.fixed_function_start(atts);
             }
             CtfReaderKind::GradingRgbCurve => return self.grading_rgb_curve_start(atts),
+            CtfReaderKind::Reference => return self.reference_start(atts),
             _ => {}
         }
         if self.kind == CtfReaderKind::Range1_7 {
@@ -2727,7 +2811,8 @@ impl XmlReaderElement for CtfReaderOpElt {
     /// Port of `CTFReaderOpElt::end` (CTFReaderHelper.cpp:926-928), `CTFReaderACESElt::end`
     /// (1247-1252), `CTFReaderCDLElt::end` (1367-1373), `CTFReaderFixedFunctionElt::end`
     /// (1482-1487), `CTFReaderFunctionElt::end` (1543-1548),
-    /// `CTFReaderGradingRGBCurveElt::end` (2642-2650), `CTFReaderGammaElt::end` (1924-1937), `CTFReaderLogElt::end` (3588-3622),
+    /// `CTFReaderGradingRGBCurveElt::end` (2642-2650), `CTFReaderReferenceElt::end`
+    /// (5104-5109), `CTFReaderGammaElt::end` (1924-1937), `CTFReaderLogElt::end` (3588-3622),
     /// `CTFReaderLogElt_2_0::end` (3664-3717), `CTFReaderMatrixElt::end` (4572-4583),
     /// `CTFReaderRangeElt::end` (4868-4879) and `CTFReaderRangeElt_1_7::end` (4923-4943) @
     /// v2.5.2.
@@ -2756,6 +2841,7 @@ impl XmlReaderElement for CtfReaderOpElt {
                 self.fixed_function_mut().validate()?
             }
             CtfReaderKind::GradingRgbCurve => self.grading_rgb_curve_end()?,
+            CtfReaderKind::Reference => self.reference_mut().validate(),
             _ => {}
         }
         self.commit_op();

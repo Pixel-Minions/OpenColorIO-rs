@@ -3394,3 +3394,187 @@ fn check_applied(cases: &[Case]) {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
+
+/// The Reference reader's files. Every path is absolute: a relative one resolves against the
+/// process's working directory with the raw config, which the oracle's and the port's don't
+/// share (relative references and their resolution are R2's, with a config's search path).
+fn op_cases_h() -> Vec<Case> {
+    let f32s = "inBitDepth=\"32f\" outBitDepth=\"32f\"";
+    // The referenced files.
+    let dir = write_files(&[
+        file(
+            "matrix.ctf",
+            pl(
+                "id=\"m\" version=\"1.7\"",
+                &op(
+                    "Matrix",
+                    f32s,
+                    "        <Array dim=\"3 3 3\">2 0 0 0 3 0 0 0 4</Array>\n",
+                ),
+            )
+            .as_bytes(),
+        ),
+        file(
+            "range.clf",
+            pl(
+                "id=\"r\" compCLFversion=\"3\"",
+                &op(
+                    "Range",
+                    f32s,
+                    "        <minInValue>0.1</minInValue>\n        <maxInValue>0.9</maxInValue>\n\
+                     \x20       <minOutValue>0</minOutValue>\n        <maxOutValue>1</maxOutValue>\n",
+                ),
+            )
+            .as_bytes(),
+        ),
+    ]);
+    let matrix = format!("{dir}/matrix.ctf");
+    let range = format!("{dir}/range.clf");
+    let reference = |attrs: &str| format!("    <Reference {f32s} {attrs}/>\n");
+    let mut cases = Vec::new();
+
+    // CTF files: (label, version, body).
+    for (label, version, body) in [
+        ("a path", "1.7", reference(&format!("path=\"{matrix}\""))),
+        (
+            "a path to a CLF, inverted",
+            "1.7",
+            reference(&format!("path=\"{range}\" inverted=\"true\"")),
+        ),
+        (
+            "inverted of another case",
+            "2",
+            reference(&format!("PATH=\"{matrix}\" Inverted=\"TRUE\"")),
+        ),
+        (
+            "inverted other than true",
+            "2",
+            reference(&format!("path=\"{matrix}\" inverted=\"yes\"")),
+        ),
+        (
+            "inverted false",
+            "2",
+            reference(&format!("path=\"{matrix}\" inverted=\"false\"")),
+        ),
+        (
+            "a path and a basePath",
+            "1.7",
+            reference(&format!("path=\"{matrix}\" basePath=\"Shared\"")),
+        ),
+        (
+            "two paths",
+            "1.7",
+            reference(&format!("path=\"{matrix}\" Path=\"{range}\"")),
+        ),
+        (
+            "the same file twice, between other operators",
+            "1.7",
+            format!(
+                "{}{}{}",
+                reference(&format!("path=\"{matrix}\"")),
+                op(
+                    "Matrix",
+                    f32s,
+                    "        <Array dim=\"3 3 3\">1 0 0 0 1 0 0 0 1</Array>\n",
+                ),
+                reference(&format!("path=\"{matrix}\" inverted=\"true\""))
+            ),
+        ),
+        (
+            "an id, a name and descriptions",
+            "1.7",
+            format!(
+                "    <Reference id=\"uuid\" name=\"name\" {f32s} path=\"{matrix}\">\n\
+                 \x20       <Description>a reference</Description>\n    </Reference>\n"
+            ),
+        ),
+        ("an alias", "1.7", reference("alias=\"alias\"")),
+        (
+            "an alias, inverted",
+            "1.7",
+            reference("alias=\"alias\" inverted=\"true\""),
+        ),
+        (
+            "an alias and a path",
+            "1.7",
+            reference(&format!("alias=\"alias\" path=\"{matrix}\"")),
+        ),
+        (
+            "a path and an alias",
+            "1.7",
+            reference(&format!("path=\"{matrix}\" alias=\"alias\"")),
+        ),
+        (
+            "an alias and a basePath",
+            "1.7",
+            reference("alias=\"alias\" basePath=\"Shared\""),
+        ),
+        (
+            "an empty alias and a path",
+            "1.7",
+            reference(&format!("alias=\"\" path=\"{matrix}\"")),
+        ),
+        (
+            "the currentMonitor alias",
+            "1.7",
+            reference("alias=\"currentMonitor\""),
+        ),
+        (
+            "the currentMonitor alias of another case",
+            "1.7",
+            reference(&format!("path=\"{matrix}\" ALIAS=\"CURRENTMONITOR\"")),
+        ),
+        ("no path", "1.7", reference("")),
+        ("an empty path", "1.7", reference("path=\"\"")),
+        ("only a basePath", "1.7", reference("basePath=\"Shared\"")),
+        (
+            "a missing file",
+            "1.7",
+            reference(&format!("path=\"{dir}/missing.ctf\"")),
+        ),
+        (
+            "an unknown attribute",
+            "1.7",
+            reference(&format!("path=\"{matrix}\" style=\"x\"")),
+        ),
+        (
+            "a Reference in CTF 1.2",
+            "1.2",
+            reference(&format!("path=\"{matrix}\"")),
+        ),
+    ] {
+        cases.push(ctf(
+            &format!("a Reference: {label}"),
+            &format!("id=\"a\" version=\"{version}\""),
+            &body,
+        ));
+    }
+    cases.push(clf(
+        "a CLF Reference",
+        "id=\"a\" compCLFversion=\"3\"",
+        &reference(&format!("path=\"{matrix}\"")),
+    ));
+
+    // Upstream's files that don't resolve a relative path.
+    for name in ["reference_alias.ctf", "reference_alias_path.ctf"] {
+        cases.push(file_case(
+            name,
+            &upstream_file(name),
+            Interpolation::Default,
+            TransformDirection::Forward,
+        ));
+    }
+    cases
+}
+
+/// The processors of the Reference reader's files, in both directions.
+#[test]
+fn reference_files_read_as_in_the_wheel() {
+    check_processors(&op_cases_h());
+}
+
+/// The warnings of reading the Reference reader's files, message by message.
+#[test]
+fn reference_files_log_as_in_the_wheel() {
+    cdl_common::check_logs(&op_cases_h());
+}
