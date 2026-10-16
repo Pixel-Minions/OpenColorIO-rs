@@ -46,7 +46,8 @@ use crate::config::Config;
 use crate::context::Context;
 use crate::fileformats::ctf::ctf_reader_helper::{
     CtfReaderAcesParamsElt, CtfReaderArrayElt, CtfReaderDescriptorElt, CtfReaderDynamicParamElt,
-    CtfReaderGammaParamsElt, CtfReaderIndexMapElt, CtfReaderKind, CtfReaderLogParamsElt,
+    CtfReaderGammaParamsElt, CtfReaderGradingCurveElt, CtfReaderGradingCurvePointsElt,
+    CtfReaderGradingCurveSlopesElt, CtfReaderIndexMapElt, CtfReaderKind, CtfReaderLogParamsElt,
     CtfReaderMetadataElt, CtfReaderOpElt, CtfReaderOpType, CtfReaderRangeValueElt,
     CtfReaderSatNodeElt, CtfReaderSopNodeElt, CtfReaderTransformElt, CtfReaderTransformRc,
     Descriptor, equal_ignoring_case, get_reader,
@@ -980,7 +981,12 @@ fn push_element(st: &mut State, name: &[u8]) -> Result<()> {
         TAG_HUE_CURVE,
         r,
     ) {
-        return Err(operator_part_not_ported(st, "CTFReaderGradingCurveElt"));
+        Rc::new(RefCell::new(CtfReaderGradingCurveElt::new(
+            name,
+            p_container,
+            st.get_xm_line_number(),
+            st.get_xml_filename(),
+        )))
     } else if supported_element_parents(
         name,
         &p_elt,
@@ -994,10 +1000,12 @@ fn push_element(st: &mut State, name: &[u8]) -> Result<()> {
         &GRADING_HUE_CURVE_SUB_ELEMENTS,
         r,
     ) {
-        return Err(operator_part_not_ported(
-            st,
-            "CTFReaderGradingCurvePointsElt",
-        ));
+        Rc::new(RefCell::new(CtfReaderGradingCurvePointsElt::new(
+            name,
+            p_container,
+            st.get_xm_line_number(),
+            st.get_xml_filename(),
+        )))
     } else if supported_element_parents(
         name,
         &p_elt,
@@ -1011,10 +1019,12 @@ fn push_element(st: &mut State, name: &[u8]) -> Result<()> {
         &GRADING_HUE_CURVE_SUB_ELEMENTS,
         r,
     ) {
-        return Err(operator_part_not_ported(
-            st,
-            "CTFReaderGradingCurveSlopesElt",
-        ));
+        Rc::new(RefCell::new(CtfReaderGradingCurveSlopesElt::new(
+            name,
+            p_container,
+            st.get_xm_line_number(),
+            st.get_xml_filename(),
+        )))
     } else if supported_element_tags(name, &p_elt, &GRADING_TONE_SUB_ELEMENTS, TAG_TONE, r) {
         return Err(operator_part_not_ported(st, "CTFReaderGradingToneParamElt"));
     } else if recognized_name {

@@ -21,13 +21,17 @@ use ocio_ops::logging::{get_logging_level, set_logging_level};
 use ocio_ops::math_utils::convert_half_bits_to_float;
 use ocio_ops::op_data::OpDataType;
 use ocio_ops::open_color_types::{
-    BitDepth, Interpolation, LoggingLevel, Lut1DHueAdjust, TransformDirection,
+    BitDepth, GradingStyle, Interpolation, LoggingLevel, Lut1DHueAdjust, RgbCurveType,
+    TransformDirection,
 };
 use ocio_ops::ops::cdl::cdl_op_data::{CdlOpData, CdlOpStyle, ChannelParams};
 use ocio_ops::ops::fixedfunction::fixed_function_op_data::{
     FixedFunctionOpData, FixedFunctionOpStyle,
 };
 use ocio_ops::ops::gamma::gamma_op_data::{GammaOpData, GammaStyle};
+use ocio_ops::ops::gradingrgbcurve::grading_b_spline_curve::GradingControlPoint;
+use ocio_ops::ops::gradingrgbcurve::grading_rgb_curve::default_lin_curve;
+use ocio_ops::ops::gradingrgbcurve::grading_rgb_curve_op_data::GradingRgbCurveOpData;
 use ocio_ops::ops::log::log_op_data::{
     LIN_SIDE_BREAK, LIN_SIDE_OFFSET, LIN_SIDE_SLOPE, LINEAR_SLOPE, LOG_SIDE_OFFSET, LOG_SIDE_SLOPE,
     LogOpData,
@@ -3509,4 +3513,175 @@ fn load_ff_aces_fail_missing_param() {
     strebuf.push_str("</ProcessList>\n");
 
     check_throw_what(parse_string(&strebuf), "must have one parameter");
+}
+
+/// The grading RGB curves of a reader's op.
+fn as_grading_rgb_curve(op: &OpData) -> &GradingRgbCurveOpData {
+    match op {
+        OpData::GradingRgbCurve(curves) => curves,
+        _ => panic!("not a GradingRGBCurve"),
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, load_grading_rgbcurves_lin)` @ v2.5.2.
+#[test]
+fn load_grading_rgbcurves_lin() {
+    let ctf_lin = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2" id="UIDGradingCurves">
+    <GradingRGBCurve inBitDepth="32f" outBitDepth="32f" style="linear">
+        <Red>
+            <ControlPoints>
+                         -7 -6
+                          0 0
+                          7 7
+            </ControlPoints>
+        </Red>
+        <Master>
+            <ControlPoints>
+                         -7 -7
+                          0 0
+                          7 7
+                         16 10
+            </ControlPoints>
+        </Master>
+    </GradingRGBCurve>
+    <GradingRGBCurve inBitDepth="32f" outBitDepth="32f" style="linear" bypassLinToLog="true">
+        <DynamicParameter param="RGB_CURVE" />
+    </GradingRGBCurve>
+    <GradingRGBCurve inBitDepth="32f" outBitDepth="32f" style="video">
+        <Master>
+            <ControlPoints>
+                          0 0 1 1
+                        1.5 1.4
+            </ControlPoints>
+            <Slopes> 0 0.7 1.1 </Slopes>
+        </Master>
+    </GradingRGBCurve>
+</ProcessList>
+"#;
+
+    // Load file.
+    let cached_file = parse_string(ctf_lin).unwrap();
+    let file_ops = cached_file.transform.get_ops();
+
+    assert_eq!(file_ops.len(), 3);
+    let grading_curves0 = as_grading_rgb_curve(&file_ops[0]);
+    assert_eq!(grading_curves0.get_style(), GradingStyle::Lin);
+    assert!(!grading_curves0.get_bypass_lin_to_log());
+    assert!(!grading_curves0.is_dynamic());
+    let curves = grading_curves0.get_value();
+    assert_eq!(
+        curves
+            .curve(RgbCurveType::Master)
+            .unwrap()
+            .num_control_points(),
+        4
+    );
+    assert!(*curves.curve(RgbCurveType::Blue).unwrap() == default_lin_curve());
+    assert!(*curves.curve(RgbCurveType::Red).unwrap() != default_lin_curve());
+
+    let grading_curves1 = as_grading_rgb_curve(&file_ops[1]);
+    assert_eq!(grading_curves1.get_style(), GradingStyle::Lin);
+    assert!(grading_curves1.get_bypass_lin_to_log());
+    assert!(grading_curves1.is_dynamic());
+    let curves = grading_curves1.get_value();
+    assert!(*curves.curve(RgbCurveType::Red).unwrap() == default_lin_curve());
+    assert!(
+        curves
+            .curve(RgbCurveType::Red)
+            .unwrap()
+            .slopes_are_default()
+    );
+
+    let grading_curves2 = as_grading_rgb_curve(&file_ops[2]);
+    assert_eq!(grading_curves2.get_style(), GradingStyle::Video);
+    assert!(!grading_curves2.get_bypass_lin_to_log());
+    assert!(!grading_curves2.is_dynamic());
+    let curves = grading_curves2.get_value();
+    let master = curves.curve(RgbCurveType::Master).unwrap();
+    assert_eq!(master.num_control_points(), 3);
+    assert_eq!(
+        *master.control_point(0).unwrap(),
+        GradingControlPoint::new(0.0f32, 0.0f32)
+    );
+    assert_eq!(
+        *master.control_point(1).unwrap(),
+        GradingControlPoint::new(1.0f32, 1.0f32)
+    );
+    assert_eq!(
+        *master.control_point(2).unwrap(),
+        GradingControlPoint::new(1.5f32, 1.4f32)
+    );
+    assert!(!master.slopes_are_default());
+    assert_eq!(master.slope(0).unwrap(), 0.0f32);
+    assert_eq!(master.slope(1).unwrap(), 0.7f32);
+    assert_eq!(master.slope(2).unwrap(), 1.1f32);
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, load_grading_rgbcurves_log)` @ v2.5.2.
+#[test]
+fn load_grading_rgbcurves_log() {
+    let ctf_log = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2" id="empty">
+   <GradingRGBCurve inBitDepth="16f" outBitDepth="32f" style="logRev">
+      <Red>
+         <ControlPoints>
+            0.015625 0
+            0.5 0.5
+            2 2
+         </ControlPoints>
+      </Red>
+      <Green>
+         <ControlPoints>
+            0.015625 0.1
+            2.5 0.5
+            3.5 1.5
+         </ControlPoints>
+      </Green>
+      <Blue>
+         <ControlPoints>
+            -4 -4
+            4.5 0.5
+            5 3
+         </ControlPoints>
+      </Blue>
+      <Master>
+         <ControlPoints>
+            11 11 12.5 11.5 13.5 12.5 26.5 15
+         </ControlPoints>
+      </Master>
+      <DynamicParameter param="RGB_CURVE" />
+   </GradingRGBCurve>
+</ProcessList>"#;
+
+    // Load file.
+    let cached_file = parse_string(ctf_log).unwrap();
+    let file_ops = cached_file.transform.get_ops();
+
+    assert_eq!(file_ops.len(), 1);
+    let grading_curves0 = as_grading_rgb_curve(&file_ops[0]);
+    assert_eq!(grading_curves0.get_style(), GradingStyle::Log);
+    assert_eq!(grading_curves0.get_direction(), TransformDirection::Inverse);
+    assert!(!grading_curves0.get_bypass_lin_to_log());
+    assert!(grading_curves0.is_dynamic());
+    let curves = grading_curves0.get_value();
+    let red = curves.curve(RgbCurveType::Red).unwrap();
+    assert_eq!(red.num_control_points(), 3);
+    assert_eq!(red.control_point(0).unwrap().x, 0.015625f32);
+    assert_eq!(red.control_point(0).unwrap().y, 0.0f32);
+    assert_eq!(red.control_point(1).unwrap().x, 0.5f32);
+    assert_eq!(red.control_point(1).unwrap().y, 0.5f32);
+    assert_eq!(red.control_point(2).unwrap().x, 2.0f32);
+    assert_eq!(red.control_point(2).unwrap().y, 2.0f32);
+
+    let master = curves.curve(RgbCurveType::Master).unwrap();
+    assert_eq!(master.num_control_points(), 4);
+    assert_eq!(master.control_point(0).unwrap().x, 11.0f32);
+    assert_eq!(master.control_point(0).unwrap().y, 11.0f32);
+    assert_eq!(master.control_point(1).unwrap().x, 12.5f32);
+    assert_eq!(master.control_point(1).unwrap().y, 11.5f32);
+    assert_eq!(master.control_point(2).unwrap().x, 13.5f32);
+    assert_eq!(master.control_point(2).unwrap().y, 12.5f32);
+    assert_eq!(master.control_point(3).unwrap().x, 26.5f32);
+    assert_eq!(master.control_point(3).unwrap().y, 15.0f32);
 }

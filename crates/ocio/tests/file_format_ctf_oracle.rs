@@ -12,7 +12,7 @@ mod cdl_common;
 mod common;
 
 use common::lut_files::{file, file_case, write_files};
-use common::transforms::{Case, check_processors};
+use common::transforms::{Case, check_processors, direction_name};
 use ocio::{Interpolation, TransformDirection};
 
 /// The case of a set of one file, `name`, holding `bytes`.
@@ -2971,4 +2971,426 @@ fn fixed_function_files_read_as_in_the_wheel() {
 #[test]
 fn fixed_function_files_log_as_in_the_wheel() {
     cdl_common::check_logs(&op_cases_g());
+}
+
+/// A curve element `tag` holding `body`.
+fn curve(tag: &str, body: &str) -> String {
+    format!("        <{tag}>\n{body}        </{tag}>\n")
+}
+
+/// A ControlPoints element of `values`.
+fn points(values: &str) -> String {
+    format!("            <ControlPoints>{values}</ControlPoints>\n")
+}
+
+/// A Slopes element of `values`.
+fn slopes(values: &str) -> String {
+    format!("            <Slopes>{values}</Slopes>\n")
+}
+
+/// The GradingRGBCurve reader's files.
+fn op_cases_g2() -> Vec<Case> {
+    let f32s = "inBitDepth=\"32f\" outBitDepth=\"32f\"";
+    let style = |s: &str| format!("{f32s} style=\"{s}\"");
+    let mut cases = Vec::new();
+
+    // CTF files: (label, version, the GradingRGBCurve's attributes, its body).
+    for (label, version, attrs, body) in [
+        ("the log defaults", "2", style("log"), String::new()),
+        ("the linear defaults", "2", style("linear"), String::new()),
+        (
+            "the video defaults, inverse",
+            "2",
+            style("videoRev"),
+            String::new(),
+        ),
+        (
+            "linear curves",
+            "2",
+            style("linear"),
+            format!(
+                "{}{}",
+                curve("Red", &points(" -7 -6\n 0 0\n 7 7 ")),
+                curve("Master", &points("-7 -7 0 0 7 7 16 10"))
+            ),
+        ),
+        (
+            "video curves with slopes",
+            "2",
+            style("video"),
+            curve(
+                "Master",
+                &format!("{}{}", points("0 0 1 1 1.5 1.4"), slopes(" 0 0.7 1.1 ")),
+            ),
+        ),
+        (
+            "every log curve, inverse",
+            "2",
+            style("logRev"),
+            format!(
+                "{}{}{}{}",
+                curve("Red", &points("0.015625 0 0.5 0.5 2 2")),
+                curve("Green", &points("0.015625 0.1 2.5 0.5 3.5 1.5")),
+                curve("Blue", &points("-4 -4 4.5 0.5 5 3")),
+                curve("Master", &points("11 11 12.5 11.5 13.5 12.5 26.5 15"))
+            ),
+        ),
+        (
+            "curve names of another case",
+            "2.5",
+            style("LOG"),
+            format!(
+                "{}{}",
+                curve("red", &points("0 0 1 2")),
+                curve("MASTER", &points("0 0 1 0.5"))
+            ),
+        ),
+        (
+            "bypassLinToLog",
+            "2",
+            format!("{} bypassLinToLog=\"true\"", style("linear")),
+            curve("Green", &points("-1 -1 0 0.5 1 1")),
+        ),
+        (
+            "bypassLinToLog of another case",
+            "2",
+            format!("{} BypassLinToLog=\"TRUE\"", style("linearRev")),
+            String::new(),
+        ),
+        (
+            "bypassLinToLog false",
+            "2",
+            format!("{} bypassLinToLog=\"false\"", style("linear")),
+            String::new(),
+        ),
+        (
+            "bypassLinToLog before the style",
+            "2",
+            format!("{f32s} bypassLinToLog=\"true\" style=\"video\""),
+            String::new(),
+        ),
+        ("an invalid style", "2", style("logx"), String::new()),
+        ("an empty style", "2", style(""), String::new()),
+        ("a missing style", "2", f32s.to_owned(), String::new()),
+        (
+            "two styles",
+            "2",
+            format!("{} Style=\"video\"", style("linear")),
+            curve("Master", &points("0 0 0.5 0.3 1 1")),
+        ),
+        (
+            "an unknown attribute",
+            "2",
+            format!("{} gamma=\"2\"", style("log")),
+            String::new(),
+        ),
+        (
+            "an odd number of values",
+            "2",
+            style("linear"),
+            curve("Red", &points("-7 -6 0 0 7")),
+        ),
+        (
+            "one control point",
+            "2",
+            style("linear"),
+            curve("Red", &points("0 1")),
+        ),
+        (
+            "no control point",
+            "2",
+            style("linear"),
+            curve("Red", "            <ControlPoints/>\n"),
+        ),
+        (
+            "decreasing x",
+            "2",
+            style("linear"),
+            curve("Red", &points("-7 -6 0 0 -1 7")),
+        ),
+        (
+            "decreasing y",
+            "2",
+            style("video"),
+            curve("Blue", &points("0 0.5 0.5 0.2 1 1")),
+        ),
+        // A NaN x coordinate is refused where upstream would read past the control points
+        // (`docs/improvements.md` U-35), so the files' tests leave it out.
+        (
+            "a NaN y coordinate",
+            "2",
+            style("video"),
+            curve("Blue", &points("0 0 0.5 nan 1 1")),
+        ),
+        (
+            "too many slopes",
+            "2",
+            style("linear"),
+            curve(
+                "Red",
+                &format!("{}{}", points("-7 -6 0 0 1 7"), slopes("1 1 1 1")),
+            ),
+        ),
+        (
+            "slopes before the control points",
+            "2",
+            style("log"),
+            curve(
+                "Red",
+                &format!("{}{}", slopes("1 1.5 2"), points("0 0 0.5 0.5 1 1 2 2")),
+            ),
+        ),
+        (
+            "slopes of the default curve",
+            "2",
+            style("video"),
+            curve("Red", &slopes("1 1")),
+        ),
+        (
+            "control points twice",
+            "2",
+            style("video"),
+            curve(
+                "Red",
+                &format!("{}{}", points("0 0 1 1 2 3"), points("0 0 2 1")),
+            ),
+        ),
+        (
+            "control points in two parts",
+            "2",
+            style("video"),
+            curve(
+                "Red",
+                "            <ControlPoints>0 0 1 1<!-- c -->1.5 1.6</ControlPoints>\n",
+            ),
+        ),
+        (
+            "a curve twice",
+            "2",
+            style("video"),
+            format!(
+                "{}{}",
+                curve("Red", &points("0 0 1 1 2 3")),
+                curve("Red", &slopes("1 1 1"))
+            ),
+        ),
+        (
+            "illegal values",
+            "2",
+            style("video"),
+            curve("Red", &points("0 0 1 x")),
+        ),
+        (
+            "long illegal values",
+            "2",
+            style("video"),
+            curve("Red", &points("0 0 0.25 0.25 0.5 0.5 1 1 x")),
+        ),
+        (
+            "illegal slopes",
+            "2",
+            style("video"),
+            curve("Red", &format!("{}{}", points("0 0 1 1"), slopes("1 1e"))),
+        ),
+        (
+            "an unknown curve",
+            "2",
+            style("linear"),
+            curve("Grn", &points("0 1 1 2 2 3")),
+        ),
+        (
+            "a hue curve",
+            "2",
+            style("linear"),
+            curve("HueHue", &points("0 1 1 2 2 3")),
+        ),
+        (
+            "control points in the operator",
+            "2",
+            style("linear"),
+            points("0 1 1 2 2 3"),
+        ),
+        (
+            "slopes in the operator",
+            "2",
+            style("linear"),
+            slopes("1 1"),
+        ),
+        (
+            "attributes and descriptions",
+            "2",
+            style("video"),
+            format!(
+                "        <Description>curves</Description>\n{}",
+                curve(
+                    "Red",
+                    "            <Description>red</Description>\n\
+                     \x20           <ControlPoints a=\"1\">0 0 1 1</ControlPoints>\n\
+                     \x20           <Slopes b=\"2\">1 1</Slopes>\n"
+                )
+            ),
+        ),
+        (
+            "text in a curve",
+            "2",
+            style("video"),
+            curve("Red", "            text\n"),
+        ),
+        (
+            "an element in the control points",
+            "2",
+            style("video"),
+            curve(
+                "Red",
+                "            <ControlPoints>0 0 1 1<Slopes>1 1</Slopes></ControlPoints>\n",
+            ),
+        ),
+        (
+            "a GradingRGBCurve in CTF 1.8",
+            "1.8",
+            style("video"),
+            String::new(),
+        ),
+    ] {
+        cases.push(ctf(
+            &format!("a GradingRGBCurve: {label}"),
+            &format!("id=\"a\" version=\"{version}\""),
+            &op("GradingRGBCurve", &attrs, &body),
+        ));
+    }
+
+    cases.push(clf(
+        "a CLF GradingRGBCurve",
+        "id=\"a\" compCLFversion=\"3\"",
+        &op("GradingRGBCurve", &style("video"), ""),
+    ));
+    cases
+}
+
+/// The processors of the GradingRGBCurve reader's files, in both directions: their cache IDs
+/// and pixels (its transform, which `check_processors` compares, comes with Phase 3).
+#[test]
+fn grading_rgb_curve_files_read_as_in_the_wheel() {
+    check_applied(&op_cases_g2());
+}
+
+/// The warnings of reading the GradingRGBCurve reader's files, message by message.
+#[test]
+fn grading_rgb_curve_files_log_as_in_the_wheel() {
+    cdl_common::check_logs(&op_cases_g2());
+}
+
+/// RGBA probes for the processors' pixels: values across the log, linear and video ranges,
+/// distinct per channel, with two alphas.
+fn rgba_probes() -> Vec<f32> {
+    let values: [f32; 12] = [
+        -0.5, 0.0, 0.01, 0.1, 0.18, 0.5, 0.9, 1.0, 1.5, 4.0, 16.0, 100.0,
+    ];
+    let mut probes = Vec::new();
+    for (i, &v) in values.iter().enumerate() {
+        probes.extend_from_slice(&[
+            v,
+            values[(i + 4) % values.len()],
+            values[(i + 8) % values.len()],
+            if i % 2 == 0 { 1.0 } else { 0.5 },
+        ]);
+    }
+    probes
+}
+
+/// The processors of `cases` in both directions, the wheel's (`cpu_apply`, live) against the
+/// port's: the error and its stage, or the processor's and the CPU processor's cache IDs and
+/// the probes' pixels, bit for bit. For operators whose transform isn't ported yet
+/// (`createGroupTransform`), such as GradingRGBCurve's (Phase 3, WP 3.1), which
+/// `check_processors` compares.
+fn check_applied(cases: &[Case]) {
+    use ocio::Config;
+    use ocio_ops::image_desc::PackedImageDesc;
+    use ocio_testkit::Oracle;
+    use ocio_testkit::oracle::BatchCall;
+
+    let probes = rgba_probes();
+    let bytes: Vec<u8> = probes.iter().flat_map(|v| v.to_le_bytes()).collect();
+    let dirs = [TransformDirection::Forward, TransformDirection::Inverse];
+    let requests: Vec<(usize, TransformDirection)> = (0..cases.len())
+        .flat_map(|k| dirs.iter().map(move |&dir| (k, dir)))
+        .collect();
+    let calls: Vec<BatchCall<'_>> = requests
+        .iter()
+        .map(|&(k, dir)| BatchCall {
+            cmd: "cpu_apply",
+            args: serde_json::json!({
+                "transform": cases[k].spec,
+                "direction": direction_name(dir),
+            }),
+            blobs: vec![&bytes],
+        })
+        .collect();
+    // Pixels always run live: the kernels and the math library belong to the machine.
+    let responses = Oracle::get().batch(&calls, false);
+
+    let config = Config::create_raw().unwrap();
+    let mut failures = Vec::new();
+    for (&(k, dir), response) in requests.iter().zip(responses) {
+        let case = &cases[k];
+        let response = response.unwrap_or_else(|e| panic!("{e}"));
+        let wheel = match response.result.get("exception") {
+            Some(exception) => Err((
+                response.result["stage"].as_str().unwrap().to_owned(),
+                exception["message"].as_str().unwrap().to_owned(),
+            )),
+            None => Ok((
+                response.result["processor_cache_id"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned(),
+                response.result["cpu_cache_id"].as_str().unwrap().to_owned(),
+                response.blob_f32(0),
+            )),
+        };
+        let port = (|| {
+            let processor = config
+                .processor_in_direction(&case.port, dir)
+                .map_err(|e| ("processor".to_owned(), e.message().to_owned()))?;
+            let processor_cache_id = processor
+                .cache_id()
+                .map_err(|e| ("processor".to_owned(), e.message().to_owned()))?;
+            let cpu = processor
+                .default_cpu_processor()
+                .map_err(|e| ("cpu_processor".to_owned(), e.message().to_owned()))?;
+            // From one buffer to another, as `cpu_apply` does: in place, the linear style
+            // converts alpha (`docs/improvements.md` I-90).
+            let mut pixels = vec![0.0f32; probes.len()];
+            {
+                let src = PackedImageDesc::new(&probes[..], probes.len() / 4, 1, 4)
+                    .map_err(|e| ("apply".to_owned(), e.message().to_owned()))?;
+                let mut dst = PackedImageDesc::new(&mut pixels[..], probes.len() / 4, 1, 4)
+                    .map_err(|e| ("apply".to_owned(), e.message().to_owned()))?;
+                cpu.apply_src_dst(&src, &mut dst)
+                    .map_err(|e| ("apply".to_owned(), e.message().to_owned()))?;
+            }
+            let cpu_cache_id = String::from_utf8(cpu.get_cache_id().to_vec()).unwrap();
+            Ok((processor_cache_id, cpu_cache_id, pixels))
+        })();
+        let same = match (&wheel, &port) {
+            (Err(w), Err(p)) => w == p,
+            (Ok((wp, wc, wpix)), Ok((pp, pc, ppix))) => {
+                wp == pp
+                    && wc == pc
+                    && wpix.len() == ppix.len()
+                    && wpix
+                        .iter()
+                        .zip(ppix)
+                        .all(|(a, b)| a.to_bits() == b.to_bits())
+            }
+            _ => false,
+        };
+        if !same {
+            failures.push(format!(
+                "{} ({dir:?}):\n  wheel {wheel:?}\n  port  {port:?}",
+                case.label
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
