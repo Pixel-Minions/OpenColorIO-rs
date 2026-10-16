@@ -1056,14 +1056,14 @@ path = "src/OpenColorIO/fileformats/ctf/CTFReaderHelper.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/ctf/ctf_reader_helper.rs"]
 status = "partial"
-note = "p4-ctf-read-1 4.5b: CTFReaderTransformElt (19-261), CTFReaderMetadataElt and CTFReaderInfoElt (675-798), GetReader's version table (997-1183); 4.5c: CTFReaderArrayElt and CTFArrayMgt (265-418), CTFReaderOpElt (802-957, 1185-1195), the Matrix and Range readers and CTFReaderRangeValueElt (4561-5010); p4-ctf-read-2 4.5e: the ASC_CDL reader and its SatNode and SOPNode (1327-1413), the Gamma readers and GammaParams (1862-2200), the Log readers and LogParams (3545-4081); 4.5f: CTFReaderIndexMapElt and CTFIndexMapMgt (433-671), the Lut1D readers (4085-4385) and CTFReaderInvLut1DElt (3245-3429), RangeOpData's constructor from an IndexMap (as range_from_index_mapping, I-181 for raw halfs), the Lut3D readers (4389-4557) and CTFReaderInvLut3DElt (3433-3541); the rest 4.5g-4.5i"
+note = "p4-ctf-read-1 4.5b: CTFReaderTransformElt (19-261), CTFReaderMetadataElt and CTFReaderInfoElt (675-798), GetReader's version table (997-1183); 4.5c: CTFReaderArrayElt and CTFArrayMgt (265-418), CTFReaderOpElt (802-957, 1185-1195), the Matrix and Range readers and CTFReaderRangeValueElt (4561-5010); p4-ctf-read-2 4.5e: the ASC_CDL reader and its SatNode and SOPNode (1327-1413), the Gamma readers and GammaParams (1862-2200), the Log readers and LogParams (3545-4081); 4.5f: CTFReaderIndexMapElt and CTFIndexMapMgt (433-671), the Lut1D readers (4085-4385) and CTFReaderInvLut1DElt (3245-3429), RangeOpData's constructor from an IndexMap (as range_from_index_mapping, I-181 for raw halfs), the Lut3D readers (4389-4557) and CTFReaderInvLut3DElt (3433-3541); p4-ctf-read-3 (verifier fix): CTFReaderDynamicParamElt (1556-1695), whose ExposureContrast, grading and RGB curve branches wait for their readers; the rest 4.5g-4.5i"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/ctf/CTFReaderHelper.h"
 kind = "src"
 target = ["crates/ocio/src/fileformats/ctf/ctf_reader_helper.rs"]
 status = "partial"
-note = "p4-ctf-read-1 4.5b: the transform, metadata, info and descriptor elements, CTFReaderOpElt::Type; 4.5c: CTFReaderArrayElt, CTFArrayMgt, CTFReaderOpElt, the Matrix and Range readers, CTFReaderRangeValueElt; p4-ctf-read-2 4.5e: the CDL, Gamma and Log readers and their parameter elements; 4.5f: the IndexMap element and manager, the Lut1D, InverseLUT1D, Lut3D and InverseLUT3D readers; the rest 4.5g-4.5i"
+note = "p4-ctf-read-1 4.5b: the transform, metadata, info and descriptor elements, CTFReaderOpElt::Type; 4.5c: CTFReaderArrayElt, CTFArrayMgt, CTFReaderOpElt, the Matrix and Range readers, CTFReaderRangeValueElt; p4-ctf-read-2 4.5e: the CDL, Gamma and Log readers and their parameter elements; 4.5f: the IndexMap element and manager, the Lut1D, InverseLUT1D, Lut3D and InverseLUT3D readers; p4-ctf-read-3 (verifier fix): CTFReaderDynamicParamElt; the rest 4.5g-4.5i"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/ctf/CTFReaderUtils.cpp"

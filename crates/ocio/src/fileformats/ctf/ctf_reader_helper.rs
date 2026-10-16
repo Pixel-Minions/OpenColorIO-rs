@@ -67,8 +67,10 @@ use super::ctf_reader_utils::{
     TAG_PROCESS_LIST,
 };
 use super::ctf_reader_utils::{
-    ATTR_HALF_DOMAIN, ATTR_HUE_ADJUST, ATTR_INTERPOLATION, ATTR_RAW_HALFS, get_interpolation_1d,
-    get_interpolation_3d,
+    ATTR_HALF_DOMAIN, ATTR_HUE_ADJUST, ATTR_INTERPOLATION, ATTR_PARAM, ATTR_RAW_HALFS,
+    TAG_DYN_PROP_CONTRAST, TAG_DYN_PROP_EXPOSURE, TAG_DYN_PROP_GAMMA, TAG_DYN_PROP_HUECURVE,
+    TAG_DYN_PROP_LOOK, TAG_DYN_PROP_PRIMARY, TAG_DYN_PROP_RGBCURVE, TAG_DYN_PROP_TONE,
+    get_interpolation_1d, get_interpolation_3d,
 };
 use super::ctf_transform::{
     CTF_INFO_ELEMENT_VERSION, CTF_PROCESS_LIST_VERSION, CTF_PROCESS_LIST_VERSION_1_2,
@@ -3590,6 +3592,168 @@ impl XmlReaderPlainElt for CtfReaderLogParamsElt {
     /// The text is ignored.
     ///
     /// Port of `CTFReaderLogParamsElt::setRawData` (CTFReaderHelper.cpp:3894-3896 @ v2.5.2).
+    fn set_raw_data(&mut self, _s: &[u8], _xml_line: u32) -> Result<()> {
+        Ok(())
+    }
+    fn get_parent(&self) -> &ContainerEltRcPtr {
+        self.plain.get_parent()
+    }
+}
+
+/// A dynamic parameter of an operator: makes the property `param` names dynamic.
+///
+/// Port of `CTFReaderDynamicParamElt` (CTFReaderHelper.h:1231-1244, CTFReaderHelper.cpp:
+/// 1556-1695 @ v2.5.2).
+#[derive(Debug)]
+pub struct CtfReaderDynamicParamElt {
+    plain: XmlReaderPlainEltBase,
+}
+
+impl CtfReaderDynamicParamElt {
+    /// Port of `CTFReaderDynamicParamElt::CTFReaderDynamicParamElt` (CTFReaderHelper.cpp:
+    /// 1556-1562 @ v2.5.2).
+    pub fn new(
+        name: &[u8],
+        parent: ContainerEltRcPtr,
+        xml_line_number: u32,
+        xml_file: &[u8],
+    ) -> CtfReaderDynamicParamElt {
+        CtfReaderDynamicParamElt {
+            plain: XmlReaderPlainEltBase::new(name, parent, xml_line_number, xml_file),
+        }
+    }
+
+    /// The error of a dynamic parameter the parent doesn't have.
+    fn not_supported(&self, param: &[u8], container: &[u8]) -> Exception {
+        self.throw_message(
+            &[
+                b"Dynamic parameter '".as_slice(),
+                c_str(param),
+                b"' is not supported in '",
+                c_str(container),
+                b"'.",
+            ]
+            .concat(),
+        )
+    }
+}
+
+impl XmlReaderElement for CtfReaderDynamicParamElt {
+    fn element(&self) -> &XmlReaderElementBase {
+        &self.plain.element
+    }
+    fn element_mut(&mut self) -> &mut XmlReaderElementBase {
+        &mut self.plain.element
+    }
+
+    /// The property `param` names made dynamic, if the parent has it; `LOOK_SWITCH` is
+    /// ignored with a warning, and another name is an error.
+    ///
+    /// Port of `CTFReaderDynamicParamElt::start` (CTFReaderHelper.cpp:1568-1695 @ v2.5.2). The
+    /// ExposureContrast, GradingPrimary, GradingRGBCurve, GradingHueCurve and GradingTone
+    /// readers come with WP 4.5g and 4.5i: until then no such parent is made, and their
+    /// branches refuse the parameter as not ported.
+    fn start(&mut self, atts: &[&[u8]]) -> Result<()> {
+        let container = self.plain.get_parent().clone();
+        let (kind, container_name) = {
+            let container = container.borrow();
+            let kind = container
+                .as_any()
+                .downcast_ref::<CtfReaderOpElt>()
+                .map(CtfReaderOpElt::get_kind);
+            (kind, container.get_name().to_vec())
+        };
+
+        // Try extracting the attributes.
+        let mut i = 0;
+        while i < atts.len() {
+            if equal_ignoring_case(ATTR_PARAM, atts[i]) {
+                let param = atts[i + 1];
+                let parent_kind = if equal_ignoring_case(TAG_DYN_PROP_EXPOSURE, param)
+                    || equal_ignoring_case(TAG_DYN_PROP_CONTRAST, param)
+                    || equal_ignoring_case(TAG_DYN_PROP_GAMMA, param)
+                {
+                    Some(CtfReaderKind::ExposureContrast)
+                } else if equal_ignoring_case(TAG_DYN_PROP_PRIMARY, param) {
+                    Some(CtfReaderKind::GradingPrimary)
+                } else if equal_ignoring_case(TAG_DYN_PROP_RGBCURVE, param) {
+                    Some(CtfReaderKind::GradingRgbCurve)
+                } else if equal_ignoring_case(TAG_DYN_PROP_HUECURVE, param) {
+                    Some(CtfReaderKind::GradingHueCurve)
+                } else if equal_ignoring_case(TAG_DYN_PROP_TONE, param) {
+                    Some(CtfReaderKind::GradingTone)
+                } else {
+                    None
+                };
+                if let Some(parent_kind) = parent_kind {
+                    if kind != Some(parent_kind) {
+                        return Err(self.not_supported(param, &container_name));
+                    }
+                    return Err(self.throw_message(
+                        format!("The CTF reader's {parent_kind:?} reader is not ported yet")
+                            .as_bytes(),
+                    ));
+                } else if equal_ignoring_case(TAG_DYN_PROP_LOOK, param) {
+                    // The LOOK_SWITCH was used in CTF files from SynColor but is not supported
+                    // yet in OCIO. Ignoring it is similar to setting LOOK_SWITCH to 'on' but
+                    // this is harmless since the defaultLook is also ignored.
+                    let mut dbg = OStringStream::new(Crt::NATIVE);
+                    dbg.put_c_str(self.get_xml_file());
+                    dbg.put_str("(");
+                    dbg.put_u32(self.get_xml_line_number());
+                    dbg.put_str("): ");
+                    dbg.put_str("Dynamic parameter '");
+                    dbg.put_c_str(param);
+                    dbg.put_str("' on '");
+                    dbg.put_bytes(&container_name);
+                    dbg.put_str("' is ignored.");
+                    log_warning(c_str(dbg.str()));
+                } else {
+                    return Err(self.throw_message(
+                        &[
+                            b"Dynamic parameter '".as_slice(),
+                            c_str(param),
+                            b"' is not valid in '",
+                            c_str(&container_name),
+                            b"'.",
+                        ]
+                        .concat(),
+                    ));
+                }
+            }
+
+            i += 2;
+        }
+        Ok(())
+    }
+
+    /// Port of `CTFReaderDynamicParamElt::end` (CTFReaderHelper.h:1241 @ v2.5.2).
+    fn end(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    fn is_container(&self) -> bool {
+        false
+    }
+    fn get_identifier(&self) -> &[u8] {
+        self.get_name()
+    }
+    fn get_type_name(&self) -> &[u8] {
+        self.get_name()
+    }
+    fn as_plain_mut(&mut self) -> Option<&mut dyn XmlReaderPlainElt> {
+        Some(self)
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+impl XmlReaderPlainElt for CtfReaderDynamicParamElt {
+    /// Port of `CTFReaderDynamicParamElt::setRawData` (CTFReaderHelper.h:1243 @ v2.5.2).
     fn set_raw_data(&mut self, _s: &[u8], _xml_line: u32) -> Result<()> {
         Ok(())
     }

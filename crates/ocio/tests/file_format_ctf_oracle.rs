@@ -2371,3 +2371,162 @@ fn structure_files_read_as_in_the_wheel() {
 fn structure_files_log_as_in_the_wheel() {
     cdl_common::check_logs(&structure_cases());
 }
+
+/// DynamicParameter elements under the ported operators.
+fn dynamic_parameter_cases() -> Vec<Case> {
+    let b10 = "inBitDepth=\"10i\" outBitDepth=\"10i\"";
+    let f32s = "inBitDepth=\"32f\" outBitDepth=\"32f\"";
+    let dp = |attrs: &str| format!("        <DynamicParameter {attrs}/>\n");
+    let lut1 = |extra: &str| lut("LUT1D", b10, extra, "4 1", &ramp(4));
+    let mut cases = Vec::new();
+
+    // CTF files: (label, version, body).
+    let mut files = vec![
+        (
+            "LOOK_SWITCH on a LUT1D".to_owned(),
+            "2.0",
+            lut1(&dp("param=\"LOOK_SWITCH\"")),
+        ),
+        (
+            "LOOK_SWITCH of another case".to_owned(),
+            "2.0",
+            lut1(&dp("PARAM=\"look_switch\"")),
+        ),
+        (
+            "LOOK_SWITCH after the Array".to_owned(),
+            "2.0",
+            format!(
+                "    <LUT1D {b10}>\n        <Array dim=\"4 1\">{}</Array>\n{}    </LUT1D>\n",
+                ramp(4),
+                dp("param=\"LOOK_SWITCH\"")
+            ),
+        ),
+        (
+            "LOOK_SWITCH twice".to_owned(),
+            "1.7",
+            lut1(&format!(
+                "{}{}",
+                dp("param=\"LOOK_SWITCH\""),
+                dp("param=\"LOOK_SWITCH\" Param=\"LOOK_SWITCH\"")
+            )),
+        ),
+        (
+            "LOOK_SWITCH then EXPOSURE".to_owned(),
+            "2.0",
+            lut1(&dp("param=\"LOOK_SWITCH\" Param=\"EXPOSURE\"")),
+        ),
+        ("no param".to_owned(), "2.0", lut1(&dp("other=\"1\""))),
+        ("an empty param".to_owned(), "2.0", lut1(&dp("param=\"\""))),
+        (
+            "an unknown param".to_owned(),
+            "2.0",
+            lut1(&dp("param=\"FOO\"")),
+        ),
+        (
+            "text".to_owned(),
+            "2.0",
+            lut1("        <DynamicParameter param=\"LOOK_SWITCH\">text</DynamicParameter>\n"),
+        ),
+        (
+            "under an Array".to_owned(),
+            "2.0",
+            format!(
+                "    <LUT1D {b10}>\n        <Array dim=\"4 1\">{}{}</Array>\n    </LUT1D>\n",
+                ramp(4),
+                dp("param=\"LOOK_SWITCH\"")
+            ),
+        ),
+        (
+            "under the ProcessList".to_owned(),
+            "2.0",
+            format!("{}{}", dp("param=\"LOOK_SWITCH\""), lut1("")),
+        ),
+        (
+            "under a SOPNode".to_owned(),
+            "2.0",
+            op(
+                "ASC_CDL",
+                &format!("{f32s} style=\"Fwd\""),
+                &format!(
+                    "        <SOPNode>\n{}            <Slope>1 1 1</Slope>\n\
+                     \x20           <Offset>0 0 0</Offset>\n\
+                     \x20           <Power>1 1 1</Power>\n        </SOPNode>\n",
+                    dp("param=\"LOOK_SWITCH\"")
+                ),
+            ),
+        ),
+    ];
+    for param in [
+        "EXPOSURE",
+        "contrast",
+        "GAMMA",
+        "PRIMARY",
+        "RGB_CURVE",
+        "HUE_CURVE",
+        "TONE",
+    ] {
+        files.push((
+            format!("{param} on a LUT1D"),
+            "2.0",
+            lut1(&dp(&format!("param=\"{param}\""))),
+        ));
+    }
+    for (tag, attrs, body) in [
+        (
+            "Matrix",
+            f32s.to_owned(),
+            "        <Array dim=\"3 3 3\">1 0 0 0 1 0 0 0 1</Array>\n".to_owned(),
+        ),
+        ("Range", f32s.to_owned(), String::new()),
+        ("Log", format!("{f32s} style=\"log10\""), String::new()),
+        (
+            "Exponent",
+            format!("{f32s} style=\"basicFwd\""),
+            "        <ExponentParams exponent=\"2.2\"/>\n".to_owned(),
+        ),
+        ("ASC_CDL", format!("{f32s} style=\"Fwd\""), String::new()),
+        (
+            "LUT3D",
+            b10.to_owned(),
+            format!("        <Array dim=\"2 2 2 3\">{}</Array>\n", ramp(24)),
+        ),
+        (
+            "InverseLUT1D",
+            b10.to_owned(),
+            format!("        <Array dim=\"4 1\">{}</Array>\n", ramp(4)),
+        ),
+    ] {
+        for param in ["param=\"LOOK_SWITCH\"", "param=\"EXPOSURE\"", ""] {
+            files.push((
+                format!("[{param}] on a {tag}"),
+                "2.0",
+                op(tag, &attrs, &format!("{}{body}", dp(param))),
+            ));
+        }
+    }
+    for (label, version, body) in files {
+        cases.push(ctf(
+            &format!("a DynamicParameter: {label}"),
+            &format!("id=\"a\" version=\"{version}\""),
+            &body,
+        ));
+    }
+    cases.push(clf(
+        "a DynamicParameter in a CLF",
+        "id=\"a\" compCLFversion=\"3\"",
+        &lut1(&dp("param=\"LOOK_SWITCH\"")),
+    ));
+    cases
+}
+
+/// The processors of files with DynamicParameter elements, in both directions.
+#[test]
+fn dynamic_parameter_files_read_as_in_the_wheel() {
+    check_processors(&dynamic_parameter_cases());
+}
+
+/// The warnings of reading files with DynamicParameter elements, message by message.
+#[test]
+fn dynamic_parameter_files_log_as_in_the_wheel() {
+    cdl_common::check_logs(&dynamic_parameter_cases());
+}
