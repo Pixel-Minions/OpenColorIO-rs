@@ -932,8 +932,9 @@ note = "p4-readers 4.2d: the reader and buildFileOps, checked against the wheel 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatIridasLook.cpp"
 kind = "src"
-target = ["crates/ocio-formats/src/fileformats/file_format_iridas_look.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_iridas_look.rs"]
+status = "done"
+note = "p4-look 4.4f: the XML parser, the hex floats, the reader and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_iridas_look_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatPandora.cpp"
@@ -4655,8 +4656,9 @@ note = "p4-readers 4.2d"
 [[file]]
 path = "tests/cpu/fileformats/FileFormatIridasLook_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-formats/src/fileformats/file_format_iridas_look_tests.rs"]
-status = "todo"
+target = ["crates/ocio/src/fileformats/file_format_iridas_look_tests.rs"]
+status = "done"
+note = "p4-look 4.4f: all 4 tests"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatPandora_tests.cpp"

@@ -2409,9 +2409,12 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   second. The two agree on ordinary numbers and differ on edge cases: a sign before `0x`, a
   hex float, subnormal and out-of-range values, NaN payloads, octal integers, and the width of
   `long`. The line readers parse their values with it (`StringToFloat`, `StringToInt`,
-  `ParseUtils.cpp:575-608`), so a file holding such a number reads differently: in an Iridas `.cube`,
-  `-0x1p-2` reads as `-0` on Windows and `-0.25` on Linux, and `1e-40` reads as that
-  subnormal on Windows while Linux refuses the file (wheel probes, 2026-10-15).
+  `ParseUtils.cpp:575-608`), so a file holding such a number reads differently: in an Iridas
+  `.cube`, `-0x1p-2` reads as `-0` on Windows and `-0.25` on Linux, and `1e-40` reads as that
+  subnormal on Windows while Linux refuses the file (wheel probes, 2026-10-15). The `.look`
+  reader parses its size as a `long`: `"4294967298"` is out of range on Windows ("Invalid LUT
+  size value: '"4294967298"'. Expected quoted integer") and too large on Linux ("... Expected
+  value between 2 and 129") (wheel probes, 2026-10-15).
 - **Who notices:** LUT files with hex floats, subnormal values, or other edge-case numbers,
   shared between Windows and Linux.
 - **A fix:** one parser on both platforms (`std::from_chars` where it exists, or a port of
@@ -2419,7 +2422,26 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Decided** (PLAN.md D12): the port does what each wheel does.
 - **Status:** matched (`crates/ocio-ops/src/utils/number_utils.rs`, `Flavor`);
   checked in every line reader against the wheel of each platform
-  (`crates/ocio/tests/file_format_number_forms_oracle.rs`).
+  (`crates/ocio/tests/file_format_number_forms_oracle.rs`), and in the `.look` reader's size
+  (`crates/ocio/tests/file_format_iridas_look_oracle.rs`).
+
+### I-186. A `.look` file's closed mask still refuses later skipped elements
+
+- **Upstream:** the `.look` parser sets `m_inMask` when a `<mask>` element starts, and skips
+  its content (`StartElementHandler`, `src/OpenColorIO/fileformats/FileFormatIridasLook.cpp:
+  303-315` @ v2.5.2). The mask's end only lowers the skip depth: `m_inMask` is cleared by the
+  `else if (pImpl->m_inMask)` branch of `EndElementHandler` (385-393), which the skip branch
+  before it always takes (343-346). So after any mask, empty or not, an element nested in a
+  later skipped element (`<shaders><base/></shaders>`) fails with "Cannot load .look LUT
+  containing mask" (272-276), though that element is no mask (wheel probes, Windows and Linux,
+  2026-10-15: `<mask/>` then `<shaders><base/></shaders>` is refused, `<mask/>` then
+  `<shaders/>` reads).
+- **Who notices:** `.look` files with an empty mask before shaders or other sections with
+  child elements: they are refused as files with a mask.
+- **A fix:** clear `m_inMask` when the mask element ends.
+- **Status:** matched in `p4-look` (4.4f, `crates/ocio/src/fileformats/
+  file_format_iridas_look.rs`); the "empty mask" oracle cases
+  (`crates/ocio/tests/file_format_iridas_look_oracle.rs`).
 
 ## Undefined behaviour upstream
 

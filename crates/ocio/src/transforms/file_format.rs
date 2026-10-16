@@ -7,8 +7,8 @@
 //!
 //! The registry holds upstream's 19 formats in upstream's order, so the lists of names and
 //! extensions, and the order in which a file's formats are tried, are upstream's from the
-//! start. A format whose reader isn't ported yet is [`NotPortedFormat`], which holds its
-//! `getFormatInfo` and refuses to read; each format's chunk replaces it (WP 4.2-4.9).
+//! start. Until each format's reader was ported (WP 4.2-4.9), a stand-in that refused to read
+//! held its place.
 
 use std::any::Any;
 use std::collections::BTreeMap;
@@ -209,94 +209,12 @@ pub trait FileFormat: Send + Sync {
     }
 }
 
-/// A format whose reader isn't ported yet: its infos as upstream's `getFormatInfo` declares
-/// them, and whether it reads in binary.
-#[derive(Debug, Clone)]
-pub struct NotPortedFormat {
-    infos: Vec<FormatInfo>,
-    binary: bool,
-}
-
-impl NotPortedFormat {
-    /// The port's error for reading a file of this format.
-    pub fn not_ported(&self) -> Exception {
-        Exception::new(format!(
-            "The reader of the '{}' file format is not ported yet.",
-            self.name()
-        ))
-    }
-}
-
-impl FileFormat for NotPortedFormat {
-    fn format_info(&self) -> Vec<FormatInfo> {
-        self.infos.clone()
-    }
-
-    /// Refuses: the reader isn't ported yet. The loader takes it for a failed read and tries
-    /// the next format.
-    fn read(&self, _: &mut InputStream, _: &[u8], _: Interpolation) -> Result<CachedFileRcPtr> {
-        Err(self.not_ported())
-    }
-
-    /// Refuses: a format that writes (CLF and CTF) gives the port's "not ported yet" error;
-    /// one that doesn't gives upstream's refusal, as its `write` will.
-    fn write(
-        &self,
-        _: &Config,
-        _: &Context,
-        _: &GroupTransform,
-        format_name: &[u8],
-        _: &mut OStringStream,
-    ) -> Result<()> {
-        if self
-            .infos
-            .iter()
-            .any(|info| info.capabilities.contains(FormatCapabilities::WRITE))
-        {
-            return Err(Exception::new(
-                [
-                    b"The writer of the '".as_slice(),
-                    format_name,
-                    b"' file format is not ported yet.",
-                ]
-                .concat(),
-            ));
-        }
-        Err(write_not_supported(format_name))
-    }
-
-    /// Refuses, as [`read`](Self::read) never gives a file to build.
-    fn build_file_ops(
-        &self,
-        _: &mut OpVec,
-        _: &Config,
-        _: &Context,
-        _: &CachedFileRcPtr,
-        _: &FileTransform,
-        _: TransformDirection,
-    ) -> Result<()> {
-        Err(self.not_ported())
-    }
-
-    fn is_binary(&self) -> bool {
-        self.binary
-    }
-}
-
 /// The 19 formats in upstream's registration order, each with its `getFormatInfo`.
 ///
 /// Port of `FormatRegistry::FormatRegistry` (FileTransform.cpp:331-352 @ v2.5.2) and of each
 /// format's `LocalFileFormat::getFormatInfo` and `isBinary` (src/OpenColorIO/fileformats/ @
 /// v2.5.2, the lines below).
 fn create_formats() -> Vec<Box<dyn FileFormat>> {
-    use FormatBakeCapabilities as B;
-    use FormatCapabilities as C;
-    let stub = |infos: Vec<FormatInfo>| -> Box<dyn FileFormat> {
-        Box::new(NotPortedFormat {
-            infos,
-            binary: false,
-        })
-    };
     vec![
         // FileFormat3DL.cpp:196-208.
         Box::new(crate::fileformats::file_format_3dl::LocalFileFormat),
@@ -321,12 +239,7 @@ fn create_formats() -> Vec<Box<dyn FileFormat>> {
         // FileFormatIridasItx.cpp:113-121.
         Box::new(crate::fileformats::file_format_iridas_itx::LocalFileFormat),
         // FileFormatIridasLook.cpp:514-521.
-        stub(vec![FormatInfo::new(
-            "iridas_look",
-            "look",
-            C::READ,
-            B::NONE,
-        )]),
+        Box::new(crate::fileformats::file_format_iridas_look::LocalFileFormat),
         // FileFormatPandora.cpp:82-95.
         Box::new(crate::fileformats::file_format_pandora::LocalFileFormat),
         // FileFormatResolveCube.cpp:247-257.

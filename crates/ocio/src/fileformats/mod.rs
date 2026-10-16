@@ -16,6 +16,7 @@ pub mod file_format_hdl;
 pub mod file_format_icc;
 pub mod file_format_iridas_cube;
 pub mod file_format_iridas_itx;
+pub mod file_format_iridas_look;
 pub mod file_format_pandora;
 pub mod file_format_resolve_cube;
 pub mod file_format_spi1d;
