@@ -9,12 +9,17 @@
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
+use ocio_ops::exception::Result;
 use ocio_ops::platform::env_provider;
 use ocio_ops::utils::string_utils::{find, replace_in_place, reverse_find};
 
 use crate::config::Config;
 use crate::context::Context;
-use crate::transform::Transform;
+use crate::transform::{Nesting, Transform};
+use crate::transforms::color_space_transform::collect_color_space_transform_context_variables;
+use crate::transforms::display_view_transform::collect_display_view_transform_context_variables;
+use crate::transforms::file_transform::collect_file_transform_context_variables;
+use crate::transforms::look_transform::collect_look_transform_context_variables;
 
 /// A context variable's name, ordered as `EnvMapKey` orders them: longer names first, then
 /// bytes in order, so that `$TEST1NG` is replaced before `$TEST1`.
@@ -148,43 +153,56 @@ pub fn resolve_context_variables(str: &[u8], map: &EnvMap, used: &mut UsedEnvs) 
     resolve_context_variables_impl(str, map, used, 0)
 }
 
-/// Whether `transform` uses context variables, which it adds to `used_context_vars`: so far
-/// none of the classes in the port use any, and a group asks its children.
+/// Whether `transform` uses context variables, which it adds to `used_context_vars`: the
+/// color space, display view, file and look transforms' overloads, and a group asks its
+/// children. A look list that can't be parsed is an error, as upstream's parser throws through
+/// it.
 ///
 /// Port of `CollectContextVariables(const Config &, const Context &, ConstTransformRcPtr,
 /// ContextRcPtr &)` (src/OpenColorIO/ContextVariableUtils.cpp:179-206 @ v2.5.2) and its
-/// `GroupTransform` overload (transforms/GroupTransform.cpp:206-223 @ v2.5.2). The overloads of
-/// the color space, display view, file and look transforms come with those classes; the other
-/// classes use none.
-// The color space, display view, file and look transforms read the config, the context and
-// the used variables; the group only passes them on.
-#[allow(clippy::only_used_in_recursion)]
+/// `GroupTransform` overload (transforms/GroupTransform.cpp:206-223 @ v2.5.2). The other classes
+/// use none. Transforms nested deeper than
+/// [`MAX_TRANSFORM_NESTING`](crate::transform::MAX_TRANSFORM_NESTING) are an error, where
+/// upstream overflows the stack (docs/improvements.md, U-58).
 pub(crate) fn collect_context_variables(
     config: &Config,
     context: &Context,
     transform: &Transform,
     used_context_vars: &mut Context,
-) -> bool {
+) -> Result<bool> {
+    // A group names nothing, so it can't refer to itself, and the loader bounds its nesting
+    // (U-60): only the transforms inside it count.
+    let _nesting = match transform {
+        Transform::Group(_) => None,
+        _ => Some(Nesting::collect()?),
+    };
     match transform {
         Transform::Group(tr) => {
             let mut found_context_vars = false;
 
             for idx in 0..tr.num_transforms() {
                 let child = tr.transform(idx).expect("an index inside the group");
-                if collect_context_variables(config, context, child, used_context_vars) {
+                if collect_context_variables(config, context, child, used_context_vars)? {
                     found_context_vars = true;
                 }
             }
 
-            found_context_vars
+            Ok(found_context_vars)
         }
-        // Their overloads read the names and the config's color spaces, displays, views and
-        // looks; they come with their op builders (WP 3.2a-c), and until then the processor
-        // refuses to build their ops.
-        Transform::ColorSpace(_)
-        | Transform::DisplayView(_)
-        | Transform::File(_)
-        | Transform::Look(_) => false,
+        Transform::ColorSpace(tr) => {
+            collect_color_space_transform_context_variables(config, context, tr, used_context_vars)
+        }
+        Transform::File(tr) => Ok(collect_file_transform_context_variables(
+            context,
+            tr,
+            used_context_vars,
+        )),
+        Transform::Look(tr) => {
+            collect_look_transform_context_variables(config, context, tr, used_context_vars)
+        }
+        Transform::DisplayView(tr) => {
+            collect_display_view_transform_context_variables(config, context, tr, used_context_vars)
+        }
         // The classes that use no context variable.
         Transform::Allocation(_)
         | Transform::Builtin(_)
@@ -198,7 +216,7 @@ pub(crate) fn collect_context_variables(
         | Transform::Lut3D(_)
         | Transform::Log(_)
         | Transform::Matrix(_)
-        | Transform::Range(_) => false,
+        | Transform::Range(_) => Ok(false),
     }
 }
 

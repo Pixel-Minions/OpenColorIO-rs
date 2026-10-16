@@ -2493,8 +2493,9 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   with an access violation; so does any processor of such a named transform.
 - **Who notices:** code that asks a named transform without transforms for its transform.
 - **Decided** (general rule): return an error instead (its text is decided with the port).
-- **Status:** to port with `NamedTransform::GetTransform` (WP 3.2a, `p3-builders`), found by the
-  `p3-model-objects` verifier.
+- **Status:** done in `p3-builders` (3.2a, `crates/ocio/src/named_transform.rs`,
+  `NamedTransform::get_transform`): "Named transform: it has neither a forward nor an inverse
+  transform."; found by the `p3-model-objects` verifier.
 
 ### U-53. Regular expressions nested too deep for the wheel's stack
 
@@ -2588,6 +2589,68 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   strings, which can't be null; the Python module (Phase 6) refuses `None` with an error
   instead of crashing, and with Strcasecmp's message where the wheel raises it.
 - **Status:** matched in `p3-rules` (3.9g); the Python part is Phase 6's.
+
+### U-57. An inverse view transform after looks that name no look
+
+- **Upstream:** inverse, `BuildDisplayOps` finds the color space the view transform starts from
+  as the result of the view's looks (`LooksResultColorSpace`,
+  `transforms/DisplayViewTransform.cpp:486-491`). When the first option of the looks names no
+  look, no look runs and the result is `""`, which no color space has. That happens for a list
+  of empty names (`looks: ", "`, `"+"`, `"-"`, `'""'`, `"+, -"`), also when fallback options
+  follow it (`"|x"`, `" | x"`, `" | lk0|lk0"`). The source color space is then null, and
+  `BuildDisplayToSource` reads its reference space type through it
+  (`DisplayViewTransform.cpp:256-258`). Through the wheel,
+  `getProcessor(DisplayViewTransform(src, display, view, direction=TRANSFORM_DIR_INVERSE))`
+  ends the Python process (an access violation, 0xC0000005, for each of these lists on
+  Windows, 2026-10-09). Without a view transform the same null color
+  space gives the defined "BuildColorSpaceOps failed, null dstColorSpace.", which the port
+  matches.
+- **Who notices:** a config with such a view, inverted.
+- **Decided** (general rule): return an error instead: "DisplayViewTransform error. The looks
+  leave no color space to apply the view transform from."
+- **Status:** done in `p3-builders` (3.2c, `crates/ocio/src/transforms/
+  display_view_transform.rs`, `source_reference_space`). Tests: each of these lists, inverse
+  refused and forward built.
+
+### U-58. Transforms that refer to themselves, or nest deep enough to overflow the stack
+
+- **Upstream:** building a processor follows the transforms a transform names, recursively, in
+  `CollectContextVariables` and in `BuildOps`: a color space transform builds its color spaces'
+  transforms (`transforms/ColorSpaceTransform.cpp:165-346`), a look transform its looks' and
+  their process spaces' (`transforms/LookTransform.cpp:203-305`), a display view transform its
+  view's (`transforms/DisplayViewTransform.cpp:177-528`). Nothing bounds the depth, so a color
+  space whose transform names itself (`to_scene_reference: !<ColorSpaceTransform> {src: self,
+  dst: lin}`), or reaches itself through a look's process space or a default view transform,
+  recurses until the stack overflows and the process ends (0xC00000FD on Windows). A long
+  legal chain of color spaces, each converting from the one before, does the same. The wheel's
+  `getProcessor` crashes at these chain lengths (capped binary searches, 2026-10-09):
+
+  | Each link | Windows | Linux |
+  |---|---|---|
+  | `ColorSpaceTransform` | 1,363 | 8,058 |
+  | `LookTransform` with a look | 618 | 4,154 |
+  | `GroupTransform` holding a `ColorSpaceTransform` | 794 | 5,185 |
+  | `DisplayViewTransform`, a view with a look | 573 | 3,609 |
+  | `DisplayViewTransform`, a view transform and a look | 573 | 3,611 |
+
+- **Who notices:** a config with a cycle (a mistake: upstream crashes on it), or a
+  machine-made chain hundreds of color spaces deep.
+- **Decided** (general rule, precedent U-60: refuse at about half the lowest measured crash;
+  coordinator, 2026-10-09): `BuildOps` and `CollectContextVariables` each refuse to nest more
+  than 256 levels (`MAX_TRANSFORM_NESTING`), with "The transforms nest more than 256 levels
+  deep: a color space, look, view transform or named transform may refer to itself." Group
+  transforms don't count: they name nothing, so they can't refer to themselves, and the loader
+  refuses groups nested more than 590 deep (U-60), whose processors the port builds as the
+  wheel does. The port accepts chains of 255 color space transforms (in groups or not) and of
+  254 look or display view transforms. Between that and the wheel's crash the port refuses
+  what the wheel builds.
+- **Status:** done in `p3-builders` (3.2d follow-up; `crates/ocio/src/transform.rs`, `Nesting`;
+  `build_ops`, and `collect_context_variables` in `crates/ocio/src/context_variable_utils.rs`).
+  Tests (`crates/ocio/tests/config_processors_oracle.rs`): a color space that names itself and
+  one that reaches itself through a look are refused in both directions where the wheel
+  crashes; the longest chain of each kind the port accepts is the wheel's processor (on a
+  test thread's stack, debug and release), and one link more the wheel still builds while the
+  port refuses.
 
 ### U-60. GroupTransforms nested deep enough to overflow the wheel's stack
 

@@ -56,6 +56,8 @@ use crate::named_transform::NamedTransform;
 use crate::path_utils::{get_fast_file_hash, parse_color_space_from_string};
 use crate::processor::{Processor, ProcessorCacheFlags};
 use crate::transform::Transform;
+use crate::transforms::color_space_transform::ColorSpaceTransform;
+use crate::transforms::display_view_transform::DisplayViewTransform;
 use crate::view_transform::ViewTransform;
 use crate::viewing_rules::{ViewingRules, find_rule};
 use crate::yaml_cpp::stream::IStream;
@@ -5781,6 +5783,220 @@ impl Config {
         self.processor_cache.clear();
     }
 
+    /// The processor from the color space `src` to the color space `dst` (a color space
+    /// transform's between their names), forward, in the current context.
+    ///
+    /// Port of `Config::getProcessor(const ConstColorSpaceRcPtr &, const ConstColorSpaceRcPtr &)`
+    /// (Config.cpp:4679-4684 @ v2.5.2).
+    #[doc(alias = "getProcessor")]
+    pub fn processor_between_color_spaces(
+        &self,
+        src: Option<&ColorSpace>,
+        dst: Option<&ColorSpace>,
+    ) -> Result<Arc<Processor>> {
+        let context = self.shared_context.get();
+        self.processor_between_color_spaces_with_context(&context, src, dst)
+    }
+
+    /// The processor from the color space `src` to the color space `dst` (see
+    /// [`Config::processor_between_color_spaces`]) in `context`. A missing color space is
+    /// upstream's null pointer, which `getColorSpace` returns for a name it doesn't find: an
+    /// error.
+    ///
+    /// Port of `Config::getProcessor(const ConstContextRcPtr &, const ConstColorSpaceRcPtr &,
+    /// const ConstColorSpaceRcPtr &)` (Config.cpp:4686-4704 @ v2.5.2).
+    #[doc(alias = "getProcessor")]
+    pub fn processor_between_color_spaces_with_context(
+        &self,
+        context: &Context,
+        src: Option<&ColorSpace>,
+        dst: Option<&ColorSpace>,
+    ) -> Result<Arc<Processor>> {
+        let Some(src) = src else {
+            return Err(Exception::new(
+                "Config::GetProcessor failed. Source color space is null.",
+            ));
+        };
+        let Some(dst) = dst else {
+            return Err(Exception::new(
+                "Config::GetProcessor failed. Destination color space is null.",
+            ));
+        };
+        let mut transform = ColorSpaceTransform::new();
+        transform.set_src(src.name());
+        transform.set_dst(dst.name());
+        self.processor_with_context(
+            context,
+            &Transform::from(transform),
+            TransformDirection::Forward,
+        )
+    }
+
+    /// The processor from `src_name` to `dst_name` (each a color space, a role, an alias or a
+    /// named transform, by name: a color space transform's), forward, in the current context.
+    ///
+    /// Port of `Config::getProcessor(const char *, const char *)` (Config.cpp:4706-4710 @
+    /// v2.5.2).
+    #[doc(alias = "getProcessor")]
+    pub fn processor_between(
+        &self,
+        src_name: impl AsRef<[u8]>,
+        dst_name: impl AsRef<[u8]>,
+    ) -> Result<Arc<Processor>> {
+        let context = self.shared_context.get();
+        self.processor_between_with_context(&context, src_name, dst_name)
+    }
+
+    /// The processor from `src_name` to `dst_name` (see [`Config::processor_between`]) in
+    /// `context`.
+    ///
+    /// Port of `Config::getProcessor(const ConstContextRcPtr &, const char *, const char *)`
+    /// (Config.cpp:4712-4721 @ v2.5.2).
+    #[doc(alias = "getProcessor")]
+    pub fn processor_between_with_context(
+        &self,
+        context: &Context,
+        src_name: impl AsRef<[u8]>,
+        dst_name: impl AsRef<[u8]>,
+    ) -> Result<Arc<Processor>> {
+        let mut cs_transform = ColorSpaceTransform::new();
+        cs_transform.set_src(src_name);
+        cs_transform.set_dst(dst_name);
+        self.processor_with_context(
+            context,
+            &Transform::from(cs_transform),
+            TransformDirection::Forward,
+        )
+    }
+
+    /// The processor from the color space `src_color_space_name` to the view `view` of the
+    /// display `display` (a display view transform's), in the direction `direction`, in the
+    /// current context.
+    ///
+    /// Port of `Config::getProcessor(const char *, const char *, const char *,
+    /// TransformDirection)` (Config.cpp:4724-4731 @ v2.5.2).
+    #[doc(alias = "getProcessor")]
+    pub fn processor_for_display_view(
+        &self,
+        src_color_space_name: impl AsRef<[u8]>,
+        display: impl AsRef<[u8]>,
+        view: impl AsRef<[u8]>,
+        direction: TransformDirection,
+    ) -> Result<Arc<Processor>> {
+        let context = self.shared_context.get();
+        self.processor_for_display_view_with_context(
+            &context,
+            src_color_space_name,
+            display,
+            view,
+            direction,
+        )
+    }
+
+    /// The processor from a color space to a (display, view) pair (see
+    /// [`Config::processor_for_display_view`]) in `context`: the display view transform is
+    /// validated first.
+    ///
+    /// Port of `Config::getProcessor(const ConstContextRcPtr &, const char *, const char *, const
+    /// char *, TransformDirection)` (Config.cpp:4733-4745 @ v2.5.2).
+    #[doc(alias = "getProcessor")]
+    pub fn processor_for_display_view_with_context(
+        &self,
+        context: &Context,
+        src_color_space_name: impl AsRef<[u8]>,
+        display: impl AsRef<[u8]>,
+        view: impl AsRef<[u8]>,
+        direction: TransformDirection,
+    ) -> Result<Arc<Processor>> {
+        let mut dt = DisplayViewTransform::new();
+        dt.set_src(src_color_space_name);
+        dt.set_display(display);
+        dt.set_view(view);
+        dt.validate()?;
+        self.processor_with_context(context, &Transform::from(dt), direction)
+    }
+
+    /// The processor of the named transform `named_transform` in the direction `direction`, in
+    /// the current context.
+    ///
+    /// Port of `Config::getProcessor(const ConstNamedTransformRcPtr &, TransformDirection)`
+    /// (Config.cpp:4747-4752 @ v2.5.2).
+    #[doc(alias = "getProcessor")]
+    pub fn processor_for_named_transform(
+        &self,
+        named_transform: Option<&NamedTransform>,
+        direction: TransformDirection,
+    ) -> Result<Arc<Processor>> {
+        let context = self.shared_context.get();
+        self.processor_for_named_transform_with_context(&context, named_transform, direction)
+    }
+
+    /// The processor of the named transform `named_transform` in the direction `direction`, in
+    /// `context`: its transform for that direction (its own, or the other one inverted,
+    /// [`NamedTransform::get_transform`]), applied forward.
+    ///
+    /// A missing named transform is upstream's null pointer, which `getNamedTransform` returns
+    /// for a name it doesn't find: `NamedTransform::GetTransform` then skips to its last line
+    /// and raises "Named transform: Unspecified TransformDirection." (NamedTransform.cpp:220
+    /// @ v2.5.2), as the wheel does.
+    ///
+    /// Port of `Config::getProcessor(const ConstContextRcPtr &, const ConstNamedTransformRcPtr
+    /// &, TransformDirection)` (Config.cpp:4754-4762 @ v2.5.2).
+    #[doc(alias = "getProcessor")]
+    pub fn processor_for_named_transform_with_context(
+        &self,
+        context: &Context,
+        named_transform: Option<&NamedTransform>,
+        direction: TransformDirection,
+    ) -> Result<Arc<Processor>> {
+        // This gets or calculates the named transform in the requested direction. The result
+        // is always applied in the forward direction.
+        let Some(named_transform) = named_transform else {
+            return Err(Exception::new(
+                "Named transform: Unspecified TransformDirection.",
+            ));
+        };
+        let transform = NamedTransform::get_transform(named_transform, direction)?;
+        self.processor_with_context(context, &transform, TransformDirection::Forward)
+    }
+
+    /// The processor of the named transform called `named_transform_name` (a name or an alias)
+    /// in the direction `direction`, in the current context.
+    ///
+    /// Port of `Config::getProcessor(const char *, TransformDirection)` (Config.cpp:4764-4769 @
+    /// v2.5.2).
+    #[doc(alias = "getProcessor")]
+    pub fn processor_for_named_transform_by_name(
+        &self,
+        named_transform_name: impl AsRef<[u8]>,
+        direction: TransformDirection,
+    ) -> Result<Arc<Processor>> {
+        let context = self.shared_context.get();
+        self.processor_for_named_transform_by_name_with_context(
+            &context,
+            named_transform_name,
+            direction,
+        )
+    }
+
+    /// The processor of the named transform called `named_transform_name` (see
+    /// [`Config::processor_for_named_transform_by_name`]) in `context`; a name no named
+    /// transform has gives the error of a missing one
+    /// ([`Config::processor_for_named_transform_with_context`]).
+    ///
+    /// Port of `Config::getProcessor(const ConstContextRcPtr &, const char *,
+    /// TransformDirection)` (Config.cpp:4771-4777 @ v2.5.2).
+    #[doc(alias = "getProcessor")]
+    pub fn processor_for_named_transform_by_name_with_context(
+        &self,
+        context: &Context,
+        named_transform_name: impl AsRef<[u8]>,
+        direction: TransformDirection,
+    ) -> Result<Arc<Processor>> {
+        let named_transform = self.named_transform(named_transform_name);
+        self.processor_for_named_transform_with_context(context, named_transform, direction)
+    }
+
     /// The processor of `transform`, forward, in the current context.
     ///
     /// Port of `Config::getProcessor(const ConstTransformRcPtr &)` (Config.cpp:4779-4782 @
@@ -5810,7 +6026,7 @@ impl Config {
     /// with the same cache ID; otherwise a new one, which the cache keeps.
     ///
     /// Port of `Config::getProcessor(const ConstContextRcPtr &, const ConstTransformRcPtr &,
-    /// TransformDirection)` (Config.cpp:4791-4880 @ v2.5.2). Its errors for a null context or
+    /// TransformDirection)` (Config.cpp:4791-4886 @ v2.5.2). Its errors for a null context or
     /// transform can't happen with references.
     #[doc(alias = "getProcessor")]
     pub fn processor_with_context(
@@ -5823,13 +6039,13 @@ impl Config {
         // used for this transform. This allows the cache to be more efficient. However, there
         // are still some various TODOs since the usedContext will sometimes contain more vars
         // than are needed.
-        //
-        // The context's search path, working directory and IO proxy, which upstream copies
-        // into it, come with the context's state (Phase 3).
         let mut used_context = Context::new();
+        used_context.set_search_path(context.search_path());
+        used_context.set_working_dir(context.working_dir());
+        used_context.set_config_io_proxy(context.config_io_proxy().cloned());
 
         let need_context_variables =
-            collect_context_variables(self, context, transform, &mut used_context);
+            collect_context_variables(self, context, transform, &mut used_context)?;
 
         // Create helper method.
         let create_processor = || -> Result<Arc<Processor>> {
@@ -5843,17 +6059,15 @@ impl Config {
         if let Some(mut cache) = self.processor_cache.lock() {
             // Note that the key includes a string description of the transform which does not
             // include all the LUT entries (just the arguments of the FileTransforms for LUTs).
+            // `oss << usedContext->getCacheID() << *transform << direction` (the cache ID only
+            // when the transform needs context variables): the direction prints as its value.
+            let mut text = Vec::new();
             if need_context_variables {
-                // Only the transforms that read context variables (color space, display view,
-                // file and look transforms) need them, and none of those is ported yet; the
-                // used context's cache ID comes with them.
-                return Err(Exception::new(
-                    "Config::getProcessor: the cache ID of a context is not ported yet.",
-                ));
+                text.extend_from_slice(used_context.cache_id().as_bytes());
             }
-            // `oss << "" << *transform << direction`: the direction prints as its value.
-            let text = format!("{transform}{}", direction as i32);
-            let key = std_hash_string(text.as_bytes());
+            text.extend_from_slice(&transform.to_bytes());
+            text.extend_from_slice((direction as i32).to_string().as_bytes());
+            let key = std_hash_string(&text);
 
             // Upstream's `m_processorCache[key]` adds an empty entry before it creates the
             // processor, which stays empty when the creation throws; the fallback below skips

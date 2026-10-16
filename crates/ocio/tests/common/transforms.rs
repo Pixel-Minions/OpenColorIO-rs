@@ -302,8 +302,10 @@ fn compare_reply(
     }
 }
 
-/// The wheel's processor, as `processor_ops` writes it out, against the port's.
-fn compare_processor(
+/// The wheel's processor, as `processor_ops` writes it out, against the port's: their cache
+/// IDs, `isNoOp`, `hasChannelCrosstalk`, `isDynamic`, the files and looks they read, and
+/// `createGroupTransform()`.
+pub(crate) fn compare_processor(
     wheel: &ProcessorDump,
     port: &Processor,
     group: &GroupTransform,

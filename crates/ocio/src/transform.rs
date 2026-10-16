@@ -13,7 +13,9 @@
 //! [`Transform::set_direction`], [`Transform::validate`], `Display`, [`build_ops`] and, for its
 //! op data, [`create_transform`].
 
+use std::cell::Cell;
 use std::fmt;
+use std::thread::LocalKey;
 
 use ocio_ops::cfmt::{Crt, OStringStream};
 use ocio_ops::exception::{Exception, Result};
@@ -26,8 +28,8 @@ use crate::context::Context;
 use crate::transforms::allocation_transform::{AllocationTransform, build_allocation_op};
 use crate::transforms::builtin_transform::{BuiltinTransform, build_builtin_ops};
 use crate::transforms::cdl_transform::{CdlTransform, build_cdl_op, create_cdl_transform};
-use crate::transforms::color_space_transform::ColorSpaceTransform;
-use crate::transforms::display_view_transform::DisplayViewTransform;
+use crate::transforms::color_space_transform::{ColorSpaceTransform, build_color_space_ops};
+use crate::transforms::display_view_transform::{DisplayViewTransform, build_display_ops};
 use crate::transforms::exponent_transform::{
     ExponentTransform, build_exponent_op, create_exponent_transform,
 };
@@ -42,7 +44,7 @@ use crate::transforms::group_transform::{GroupTransform, build_group_ops};
 use crate::transforms::log_affine_transform::LogAffineTransform;
 use crate::transforms::log_camera_transform::LogCameraTransform;
 use crate::transforms::log_transform::{LogTransform, build_log_op, create_log_transform};
-use crate::transforms::look_transform::LookTransform;
+use crate::transforms::look_transform::{LookTransform, build_look_ops};
 use crate::transforms::lut1d_transform::{Lut1DTransform, build_lut1d_op, create_lut1d_transform};
 use crate::transforms::lut3d_transform::{Lut3DTransform, build_lut3d_op, create_lut3d_transform};
 use crate::transforms::matrix_transform::{
@@ -471,11 +473,67 @@ fn not_ported_yet(class: &str, work_package: &str) -> Exception {
     ))
 }
 
+/// The deepest nesting of transforms that [`build_ops`] and
+/// [`collect_context_variables`](crate::context_variable_utils::collect_context_variables)
+/// follow: a color space, look, view transform or named transform whose transform refers back
+/// to it nests without end. Group transforms don't count: they name nothing, and the loader
+/// refuses groups nested more than 590 deep (docs/improvements.md, U-60).
+///
+/// Upstream has no limit: it recurses until the stack overflows, which ends the process (the
+/// wheel at 573 nested display view transforms on Windows, docs/improvements.md U-58). The port
+/// refuses deeper nesting with an error instead (the owner's general rule), about half the
+/// shallowest depth at which the wheel crashes.
+pub(crate) const MAX_TRANSFORM_NESTING: usize = 256;
+
+thread_local! {
+    /// How deep [`build_ops`] is nested on this thread.
+    static BUILD_NESTING: Cell<usize> = const { Cell::new(0) };
+    /// How deep `collect_context_variables` is nested on this thread.
+    static COLLECT_NESTING: Cell<usize> = const { Cell::new(0) };
+}
+
+/// One level of nesting of [`build_ops`] or `collect_context_variables`, given back when it
+/// is dropped.
+pub(crate) struct Nesting(&'static LocalKey<Cell<usize>>);
+
+impl Nesting {
+    fn enter(counter: &'static LocalKey<Cell<usize>>) -> Result<Nesting> {
+        let depth = counter.get() + 1;
+        if depth > MAX_TRANSFORM_NESTING {
+            return Err(Exception::new(format!(
+                "The transforms nest more than {MAX_TRANSFORM_NESTING} levels deep: a color \
+                 space, look, view transform or named transform may refer to itself."
+            )));
+        }
+        counter.set(depth);
+        Ok(Nesting(counter))
+    }
+
+    /// One more level of [`build_ops`]; an error past [`MAX_TRANSFORM_NESTING`].
+    pub(crate) fn build() -> Result<Nesting> {
+        Nesting::enter(&BUILD_NESTING)
+    }
+
+    /// One more level of `collect_context_variables`; an error past
+    /// [`MAX_TRANSFORM_NESTING`].
+    pub(crate) fn collect() -> Result<Nesting> {
+        Nesting::enter(&COLLECT_NESTING)
+    }
+}
+
+impl Drop for Nesting {
+    fn drop(&mut self) {
+        self.0.set(self.0.get() - 1);
+    }
+}
+
 /// Appends the ops of `transform` in the direction `dir`.
 ///
 /// Port of `BuildOps` (src/OpenColorIO/Transform.cpp:42-175 @ v2.5.2). A null transform, which
 /// upstream builds as no ops, can't be passed: the callers hold transforms. Its "Unknown
-/// transform type for creation" can't happen with an enum.
+/// transform type for creation" can't happen with an enum. Transforms nested deeper than
+/// [`MAX_TRANSFORM_NESTING`] are an error, where upstream overflows the stack
+/// (docs/improvements.md, U-58).
 ///
 /// Internal to the processors (crate-private, the owner's decision of 2026-10-04).
 pub(crate) fn build_ops(
@@ -485,14 +543,24 @@ pub(crate) fn build_ops(
     transform: &Transform,
     dir: TransformDirection,
 ) -> Result<()> {
+    // A group names nothing, so it can't refer to itself, and the loader bounds its nesting
+    // (U-60): only the transforms inside it count.
+    let _nesting = match transform {
+        Transform::Group(_) => None,
+        _ => Some(Nesting::build()?),
+    };
     match transform {
         Transform::Allocation(allocation_transform) => {
             build_allocation_op(ops, allocation_transform, dir)
         }
         Transform::Builtin(builtin_transform) => build_builtin_ops(ops, builtin_transform, dir),
         Transform::Cdl(cdl_transform) => build_cdl_op(ops, config, cdl_transform, dir),
-        Transform::ColorSpace(_) => Err(not_ported_yet("ColorSpaceTransform", "WP 3.2a")),
-        Transform::DisplayView(_) => Err(not_ported_yet("DisplayViewTransform", "WP 3.2c")),
+        Transform::ColorSpace(color_space_transform) => {
+            build_color_space_ops(ops, config, context, color_space_transform, dir)
+        }
+        Transform::DisplayView(display_view_transform) => {
+            build_display_ops(ops, config, context, display_view_transform, dir)
+        }
         Transform::Exponent(exponent_transform) => {
             build_exponent_op(ops, config, exponent_transform, dir)
         }
@@ -507,7 +575,9 @@ pub(crate) fn build_ops(
         Transform::LogAffine(log_transform) => build_log_op(ops, log_transform.data(), dir),
         Transform::LogCamera(log_transform) => build_log_op(ops, log_transform.data(), dir),
         Transform::Log(log_transform) => build_log_op(ops, log_transform.data(), dir),
-        Transform::Look(_) => Err(not_ported_yet("LookTransform", "WP 3.2b")),
+        Transform::Look(look_transform) => {
+            build_look_ops(ops, config, context, look_transform, dir)
+        }
         Transform::Lut1D(lut_transform) => build_lut1d_op(ops, lut_transform, dir),
         Transform::Lut3D(lut_transform) => build_lut3d_op(ops, lut_transform, dir),
         Transform::Matrix(matrix_transform) => build_matrix_op(ops, matrix_transform, dir),
