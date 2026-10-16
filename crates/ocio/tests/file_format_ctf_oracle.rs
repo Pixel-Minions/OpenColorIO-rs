@@ -13,7 +13,7 @@ mod common;
 
 use common::lut_files::{file, file_case, write_files};
 use common::transforms::{Case, check_processors, direction_name};
-use ocio::{Interpolation, TransformDirection};
+use ocio::{Config, Interpolation, TransformDirection};
 
 /// The case of a set of one file, `name`, holding `bytes`.
 fn case(label: &str, name: &str, bytes: &[u8]) -> Case {
@@ -3710,4 +3710,184 @@ fn dynamic_curves_share_a_processor_as_in_the_wheel() {
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// A config of the search paths `paths` and the environment `env`, as the oracle's YAML and
+/// as the port's raw config with the same search paths and variables.
+fn search_path_config(
+    paths: &[&str],
+    env: &[(&str, &str)],
+) -> (serde_json::Value, std::sync::Arc<Config>) {
+    let mut yaml = String::from("ocio_profile_version: 2\n");
+    if !env.is_empty() {
+        let vars: Vec<String> = env.iter().map(|(k, v)| format!("{k}: \"{v}\"")).collect();
+        yaml.push_str(&format!("environment: {{{}}}\n", vars.join(", ")));
+    }
+    let quoted: Vec<String> = paths.iter().map(|p| format!("\"{p}\"")).collect();
+    yaml.push_str(&format!("search_path: [{}]\n", quoted.join(", ")));
+    yaml.push_str("roles: {default: raw}\ncolorspaces:\n  - !<ColorSpace> {name: raw}\n");
+    let mut config = Config::create_raw().unwrap();
+    let config_mut = std::sync::Arc::get_mut(&mut config).unwrap();
+    for (k, v) in env {
+        config_mut.add_environment_var(k, Some(v.as_bytes()));
+    }
+    for p in paths {
+        config_mut.add_search_path(p);
+    }
+    (serde_json::json!({ "yaml": yaml }), config)
+}
+
+/// The CTF files that reference others, through a config's search path: upstream's, and
+/// written ones (subdirectories, two search paths, context variables, nested inversions,
+/// other formats, cycles).
+fn resolution_cases() -> Vec<(
+    &'static str,
+    Vec<Case>,
+    serde_json::Value,
+    std::sync::Arc<Config>,
+)> {
+    let f32s = "inBitDepth=\"32f\" outBitDepth=\"32f\"";
+    let reference = |attrs: &str| format!("    <Reference {f32s} {attrs}/>\n");
+    let ctf_file = |body: &str| pl("id=\"a\" version=\"1.7\"", body).into_bytes();
+    let matrix = op(
+        "Matrix",
+        f32s,
+        "        <Array dim=\"3 3 3\">2 0 0 0 3 0 0 0 4</Array>\n",
+    );
+    let range = op(
+        "Range",
+        f32s,
+        "        <minInValue>0.1</minInValue>\n        <maxInValue>0.9</maxInValue>\n\
+         \x20       <minOutValue>0</minOutValue>\n        <maxOutValue>1</maxOutValue>\n",
+    );
+    let dir = write_files(&[
+        file(
+            "c.clf",
+            pl("id=\"c\" compCLFversion=\"3\"", &range).into_bytes(),
+        ),
+        file(
+            "a.ctf",
+            ctf_file(&format!(
+                "{}{matrix}",
+                reference("path=\"sub/b.ctf\" inverted=\"true\"")
+            )),
+        ),
+        file(
+            "sub/b.ctf",
+            ctf_file(&format!(
+                "{}{}",
+                reference("path=\"c.clf\" inverted=\"true\""),
+                reference("path=\"d.ctf\"")
+            )),
+        ),
+        file("sub/d.ctf", ctf_file(&matrix)),
+        file("env.ctf", ctf_file(&reference("path=\"$SUBDIR/d.ctf\""))),
+        file(
+            "spi.ctf",
+            ctf_file(&format!(
+                "{}{}",
+                reference("path=\"lut.spi1d\""),
+                reference("path=\"alias.ctf\"")
+            )),
+        ),
+        file(
+            "lut.spi1d",
+            b"Version 1\nFrom 0.0 1.0\nLength 3\nComponents 1\n{\n0.0\n0.25\n1.0\n}\n".to_vec(),
+        ),
+        file("alias.ctf", ctf_file(&reference("alias=\"a\""))),
+        file("self.ctf", ctf_file(&reference("path=\"./self.ctf\""))),
+        file("x.ctf", ctf_file(&reference("path=\"sub/y.ctf\""))),
+        file("sub/y.ctf", ctf_file(&reference("path=\"x.ctf\""))),
+        file(
+            "twice.ctf",
+            ctf_file(&format!(
+                "{}{}",
+                reference("path=\"c.clf\""),
+                reference("path=\"c.clf\" inverted=\"true\"")
+            )),
+        ),
+    ]);
+    let written = |name: &str| {
+        file_case(
+            name,
+            &format!("{dir}/{name}"),
+            Interpolation::Default,
+            TransformDirection::Forward,
+        )
+    };
+    let upstream = |name: &str| {
+        file_case(
+            name,
+            &upstream_file(name),
+            Interpolation::Default,
+            TransformDirection::Forward,
+        )
+    };
+    let upstream_dir = upstream_file("");
+    let upstream_dir = upstream_dir.trim_end_matches('/');
+    let sub = format!("{dir}/sub");
+
+    let mut groups = Vec::new();
+    // Upstream's files, with their directory as the search path (ReferenceOpData_tests.cpp).
+    let (spec, config) = search_path_config(&[upstream_dir], &[]);
+    groups.push((
+        "upstream's files",
+        [
+            "reference_path_missing_file.ctf",
+            "references_some_inverted.ctf",
+            "references_same_twice.ctf",
+            "reference_nested.ctf",
+            "reference_one_matrix.ctf",
+            "reference_cycle_itself.ctf",
+            "reference_cycle_2levels.ctf",
+            "reference_cycle_3levels.ctf",
+            "reference_cycle_path_not_equal.ctf",
+            "reference_utf8.ctf",
+            "reference_alias.ctf",
+        ]
+        .into_iter()
+        .map(upstream)
+        .collect(),
+        spec,
+        config,
+    ));
+    // The written files, with their directory as the search path.
+    let written_files = [
+        "a.ctf",
+        "sub/b.ctf",
+        "env.ctf",
+        "spi.ctf",
+        "self.ctf",
+        "x.ctf",
+        "twice.ctf",
+    ];
+    let (spec, config) = search_path_config(&[&dir], &[("SUBDIR", "sub")]);
+    groups.push((
+        "one search path",
+        written_files.into_iter().map(written).collect(),
+        spec,
+        config,
+    ));
+    // Its subdirectory too: d.ctf resolves from both.
+    let (spec, config) = search_path_config(&[&dir, &sub], &[("SUBDIR", "sub")]);
+    groups.push((
+        "two search paths",
+        written_files.into_iter().map(written).collect(),
+        spec,
+        config,
+    ));
+    // No variable: $SUBDIR stays unresolved.
+    let (spec, config) = search_path_config(&[&dir], &[]);
+    groups.push(("no variable", vec![written("env.ctf")], spec, config));
+    groups
+}
+
+/// The processors of CTF files that reference others, through a config's search path, in
+/// both directions.
+#[test]
+fn references_resolve_as_in_the_wheel() {
+    for (label, cases, spec, config) in resolution_cases() {
+        println!("{label}");
+        common::transforms::check_processors_in(&cases, Some(&spec), &config);
+    }
 }

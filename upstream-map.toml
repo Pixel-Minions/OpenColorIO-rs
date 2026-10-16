@@ -5055,9 +5055,9 @@ note = "create_transform and RangeTransform no_clamp_converts_to_matrix are in c
 [[file]]
 path = "tests/cpu/ops/reference/ReferenceOpData_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-ops/src/ops/reference/reference_op_data_tests.rs"]
-status = "partial"
-note = "accessors; the load_* tests read CTF files with references (the CTF reader and FileTransform, Phase 4)"
+target = ["crates/ocio-ops/src/ops/reference/reference_op_data_tests.rs", "crates/ocio/src/fileformats/reference_op_data_tests.rs"]
+status = "done"
+note = "accessors; p4-ctf-read-3 4.5h: the load_* tests (load_path_resolve_failing, load_multiple_resolve, load_same_twice_resolve, load_nested_resolve, load_cycle_itself/2/3/rel_resolve_failing, load_one_reference, load_multiple_resolve_internal, load_nested_resolve_internal), in the ocio crate, as they need the file transform and the CTF reader"
 
 [[file]]
 path = "tests/cpu/transforms/AllocationTransform_tests.cpp"
@@ -5077,8 +5077,8 @@ note = "p3-transforms (3.1b): creation, access; p2-aces2-cpu: color_matrix_helpe
 path = "tests/cpu/transforms/CDLTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/cdl_transform_tests.rs", "crates/ocio/tests/cdl_transform_files_tests.rs"]
-status = "partial"
-note = "p1-transforms-fam2 (1.8f): equality, buildops, description, style; p1-tests-catchup: apply_optimize_simplify. p4-cdl 4.4e: create_from_cc_file, create_from_ccc_file, create_from_cdl_file, escape_xml, clear_caches (a test target of their own, as clear_caches empties the global caches); faulty_file_content comes with the CTF reader (4.5), as its last case reads a CTF file"
+status = "done"
+note = "p1-transforms-fam2 (1.8f): equality, buildops, description, style; p1-tests-catchup: apply_optimize_simplify. p4-cdl 4.4e: create_from_cc_file, create_from_ccc_file, create_from_cdl_file, escape_xml, clear_caches (a test target of their own, as clear_caches empties the global caches); p4-ctf-read-3 4.5h: faulty_file_content (with them, as it empties the caches too)"
 
 [[file]]
 path = "tests/cpu/transforms/ColorSpaceTransform_tests.cpp"
