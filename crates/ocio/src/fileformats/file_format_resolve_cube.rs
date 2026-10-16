@@ -3,8 +3,7 @@
 
 //! The Resolve `.cube` format: a 1D LUT, a 3D LUT (red fastest), or a 1D shaper LUT then a 3D
 //! LUT, each with an optional input range. A port of
-//! `src/OpenColorIO/fileformats/FileFormatResolveCube.cpp` @ v2.5.2; its `bake` comes with the
-//! baker (WP 4.8).
+//! `src/OpenColorIO/fileformats/FileFormatResolveCube.cpp` @ v2.5.2.
 //!
 //! ```text
 //! # Comments, before the data only.
@@ -22,17 +21,27 @@ use std::any::Any;
 use std::ffi::c_ulong;
 use std::sync::Arc;
 
+use ocio_ops::cfmt::{Crt, FloatField, OStringStream};
 use ocio_ops::exception::{Exception, Result};
+use ocio_ops::image_desc::PackedImageDesc;
+use ocio_ops::math_utils::std_max;
 use ocio_ops::op::OpVec;
 use ocio_ops::open_color_types::{BitDepth, TransformDirection, combine_transform_directions};
 use ocio_ops::ops::lut1d::Lut1DOpData;
-use ocio_ops::ops::lut1d::lut1d_op::create_lut1d_op;
-use ocio_ops::ops::lut3d::lut3d_op::create_lut3d_op;
+use ocio_ops::ops::lut1d::lut1d_op::{
+    create_lut1d_op, generate_identity_lut1d, generate_linear_scale_lut1d,
+};
+use ocio_ops::ops::lut3d::lut3d_op::{Lut3DOrder, create_lut3d_op, generate_identity_lut3d};
 use ocio_ops::ops::lut3d::lut3d_op_data::{Interpolation, Lut3DOpData, MAX_3D_LUT_LENGTH};
 use ocio_ops::ops::matrix::matrix_op::create_min_max_op_f32;
 use ocio_ops::parse_utils::{string_to_float, string_to_int, string_vec_to_float_vec};
 use ocio_ops::utils::string_utils::{lower, split_by_white_spaces, starts_with_char, trim};
 
+use crate::baker::Baker;
+use crate::baking_utils::{
+    get_input_to_shaper_processor, get_input_to_target_processor, get_shaper_range,
+    get_shaper_to_target_processor,
+};
 use crate::config::Config;
 use crate::context::Context;
 use crate::fileformats::file_format_utils::{
@@ -392,6 +401,220 @@ impl FileFormat for LocalFileFormat {
         Ok(Arc::new(self.read_file(istream, file_name, interp)?))
     }
 
+    /// Bakes `baker`'s transform: a 1D LUT (4096 entries by default) where it has no channel
+    /// crosstalk, else a 3D LUT (64 per side by default), after a 1D shaper LUT (4096 by
+    /// default) when there is a shaper space; the metadata's children as comments first.
+    ///
+    /// Port of `LocalFileFormat::bake` (FileFormatResolveCube.cpp:523-742 @ v2.5.2).
+    fn bake(&self, baker: &Baker, format_name: &[u8], ostream: &mut OStringStream) -> Result<()> {
+        const DEFAULT_1D_SIZE: i32 = 4096;
+        const DEFAULT_SHAPER_SIZE: i32 = 4096;
+        const DEFAULT_3D_SIZE: i32 = 64;
+
+        if format_name != b"resolve_cube" {
+            let mut os = OStringStream::new(Crt::NATIVE);
+            os.put_str("Unknown cube format name, '");
+            os.put_bytes(format_name);
+            os.put_str("'.");
+            return Err(Exception::new(os.into_bytes()));
+        }
+
+        //
+        // Initialize config and data
+        //
+
+        let mut oned_size = baker.cube_size();
+        if oned_size == -1 {
+            oned_size = DEFAULT_1D_SIZE;
+        }
+
+        let mut cube_size = baker.cube_size();
+        if cube_size == -1 {
+            cube_size = DEFAULT_3D_SIZE;
+        }
+        cube_size = std_max(2, cube_size); // smallest cube is 2x2x2
+
+        let mut shaper_size = baker.shaper_size();
+        if shaper_size == -1 {
+            shaper_size = DEFAULT_SHAPER_SIZE;
+        }
+
+        // Get spaces from baker
+        let shaper_space = baker.shaper_space();
+
+        //
+        // Determine required LUT type
+        //
+
+        const CUBE_1D: i32 = 1; // 1D LUT version number
+        const CUBE_3D: i32 = 2; // 3D LUT version number
+        const CUBE_1D_3D: i32 = 3; // 3D LUT with 1D prelut
+
+        let input_to_target = get_input_to_target_processor(baker)?;
+
+        let required_lut = if input_to_target.has_channel_crosstalk() {
+            if shaper_space.is_empty() {
+                // Has crosstalk, but no shaper, so need 3D LUT
+                CUBE_3D
+            } else {
+                // Crosstalk with shaper-space
+                CUBE_1D_3D
+            }
+        } else {
+            CUBE_1D
+        };
+
+        //
+        // Generate Shaper
+        //
+
+        let mut shaper_data: Vec<f32> = Vec::new();
+
+        let mut from_in_start = 0.0f32;
+        let mut from_in_end = 1.0f32;
+
+        if required_lut == CUBE_1D_3D {
+            (from_in_start, from_in_end) = get_shaper_range(baker)?;
+
+            // Generate the identity shaper values, then apply the transform.
+            // Shaper is linearly sampled from fromInStart to fromInEnd
+            shaper_data.resize((shaper_size * 3) as usize, 0.0);
+            generate_linear_scale_lut1d(
+                &mut shaper_data,
+                shaper_size,
+                3,
+                from_in_start,
+                from_in_end,
+            );
+
+            let mut shaper_img =
+                PackedImageDesc::new(&mut shaper_data[..], shaper_size as usize, 1, 3)?;
+            let input_to_shaper = get_input_to_shaper_processor(baker)?;
+            input_to_shaper.apply(&mut shaper_img)?;
+        }
+
+        //
+        // Generate 3DLUT
+        //
+
+        let num_entries = cube_size * cube_size * cube_size;
+        let mut cube_data: Vec<f32> = Vec::new();
+        if required_lut == CUBE_3D || required_lut == CUBE_1D_3D {
+            cube_data.resize((num_entries * 3) as usize, 0.0);
+            generate_identity_lut3d(&mut cube_data, cube_size, 3, Lut3DOrder::FastRed)?;
+            let mut cube_img =
+                PackedImageDesc::new(&mut cube_data[..], num_entries as usize, 1, 3)?;
+
+            let cube_proc = if required_lut == CUBE_1D_3D {
+                get_shaper_to_target_processor(baker)?
+            } else {
+                // No shaper, so cube goes from input-to-target
+                input_to_target.clone()
+            };
+
+            cube_proc.apply(&mut cube_img)?;
+        }
+
+        //
+        // Generate 1DLUT
+        //
+
+        let mut oned_data: Vec<f32> = Vec::new();
+
+        if required_lut == CUBE_1D {
+            oned_data.resize((oned_size * 3) as usize, 0.0);
+
+            if !shaper_space.is_empty() {
+                (from_in_start, from_in_end) = get_shaper_range(baker)?;
+                generate_linear_scale_lut1d(
+                    &mut oned_data,
+                    oned_size,
+                    3,
+                    from_in_start,
+                    from_in_end,
+                );
+            } else {
+                generate_identity_lut1d(&mut oned_data, oned_size, 3);
+            }
+
+            let mut oned_img = PackedImageDesc::new(&mut oned_data[..], oned_size as usize, 1, 3)?;
+            input_to_target.apply(&mut oned_img)?;
+        }
+
+        //
+        // Write LUT
+        //
+
+        // Set to a fixed 6 decimal precision
+        ostream.float_field = FloatField::Fixed;
+        ostream.precision = 6;
+
+        // Comments
+        let metadata = baker.format_metadata();
+        let nb = metadata.get_num_children_elements();
+        for i in 0..nb {
+            let child = metadata.get_child_element(i)?;
+            ostream.put_str("# ");
+            ostream.put_bytes(child.get_element_value());
+            ostream.put_str("\n");
+        }
+        if nb > 0 {
+            ostream.put_str("\n");
+        }
+
+        // Header
+        // Note about LUT_ND_INPUT_RANGE tags :
+        // These tags are optional and will default to the 0..1 range,
+        // not writing them explicitly allows for wider compatibility
+        // with parser based on other cube specification (eg. Iridas_Itx)
+        if required_lut == CUBE_1D {
+            ostream.put_str("LUT_1D_SIZE ");
+            ostream.put_i32(oned_size);
+            ostream.put_str("\n");
+            if from_in_start != 0.0f32 || from_in_end != 1.0f32 {
+                ostream.put_str("LUT_1D_INPUT_RANGE ");
+                ostream.put_f32(from_in_start);
+                ostream.put_str(" ");
+                ostream.put_f32(from_in_end);
+                ostream.put_str("\n");
+            }
+        } else if required_lut == CUBE_1D_3D {
+            ostream.put_str("LUT_1D_SIZE ");
+            ostream.put_i32(shaper_size);
+            ostream.put_str("\n");
+            ostream.put_str("LUT_1D_INPUT_RANGE ");
+            ostream.put_f32(from_in_start);
+            ostream.put_str(" ");
+            ostream.put_f32(from_in_end);
+            ostream.put_str("\n");
+        }
+        if required_lut == CUBE_3D || required_lut == CUBE_1D_3D {
+            ostream.put_str("LUT_3D_SIZE ");
+            ostream.put_i32(cube_size);
+            ostream.put_str("\n");
+            //ostream << "LUT_3D_INPUT_RANGE 0.0 1.0\n";
+        }
+
+        // Write 1D data
+        if required_lut == CUBE_1D {
+            for i in 0..oned_size as usize {
+                write_triple(ostream, &oned_data[3 * i..3 * i + 3]);
+            }
+        } else if required_lut == CUBE_1D_3D {
+            for i in 0..shaper_size as usize {
+                write_triple(ostream, &shaper_data[3 * i..3 * i + 3]);
+            }
+        }
+
+        // Write 3D data
+        if required_lut == CUBE_3D || required_lut == CUBE_1D_3D {
+            for i in 0..num_entries as usize {
+                write_triple(ostream, &cube_data[3 * i..3 * i + 3]);
+            }
+        }
+        Ok(())
+    }
+
     /// Appends, forward, each LUT after the min/max op of its range, the 1D one first; inverse,
     /// each LUT then its range's inverse min/max op, the 3D one first.
     ///
@@ -480,6 +703,16 @@ impl FileFormat for LocalFileFormat {
         }
         Ok(())
     }
+}
+
+/// `ostream << v[0] << " " << v[1] << " " << v[2] << "\n"`.
+fn write_triple(ostream: &mut OStringStream, v: &[f32]) {
+    ostream.put_f32(v[0]);
+    ostream.put_str(" ");
+    ostream.put_f32(v[1]);
+    ostream.put_str(" ");
+    ostream.put_f32(v[2]);
+    ostream.put_str("\n");
 }
 
 #[cfg(test)]

@@ -2,8 +2,7 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! The Iridas `.itx` format: a 3D LUT, red fastest. A port of
-//! `src/OpenColorIO/fileformats/FileFormatIridasItx.cpp` @ v2.5.2; its `bake` comes with the
-//! baker (WP 4.8).
+//! `src/OpenColorIO/fileformats/FileFormatIridasItx.cpp` @ v2.5.2.
 //!
 //! ```text
 //! LUT_3D_SIZE M
@@ -18,14 +17,19 @@ use std::any::Any;
 use std::ffi::c_ulong;
 use std::sync::Arc;
 
+use ocio_ops::cfmt::{Crt, FloatField, OStringStream};
 use ocio_ops::exception::{Exception, Result};
+use ocio_ops::image_desc::PackedImageDesc;
+use ocio_ops::math_utils::std_max;
 use ocio_ops::op::OpVec;
 use ocio_ops::open_color_types::{BitDepth, TransformDirection, combine_transform_directions};
-use ocio_ops::ops::lut3d::lut3d_op::create_lut3d_op;
+use ocio_ops::ops::lut3d::lut3d_op::{Lut3DOrder, create_lut3d_op, generate_identity_lut3d};
 use ocio_ops::ops::lut3d::lut3d_op_data::{Interpolation, Lut3DOpData, MAX_3D_LUT_LENGTH};
 use ocio_ops::parse_utils::{string_to_int, string_vec_to_float_vec};
 use ocio_ops::utils::string_utils::{lower, split_by_white_spaces, starts_with_char, trim};
 
+use crate::baker::Baker;
+use crate::baking_utils::get_input_to_target_processor;
 use crate::config::Config;
 use crate::context::Context;
 use crate::fileformats::file_format_utils::{handle_lut3d, log_warning_interpolation_not_used};
@@ -216,6 +220,65 @@ impl FileFormat for LocalFileFormat {
         interp: Interpolation,
     ) -> Result<CachedFileRcPtr> {
         Ok(Arc::new(self.read_file(istream, file_name, interp)?))
+    }
+
+    /// Bakes `baker`'s transform into a 3D LUT of the cube size (64 by default, 2 at least),
+    /// red fastest, without shaper or metadata.
+    ///
+    /// Port of `LocalFileFormat::bake` (FileFormatIridasItx.cpp:251-301 @ v2.5.2).
+    fn bake(&self, baker: &Baker, format_name: &[u8], ostream: &mut OStringStream) -> Result<()> {
+        let default_cube_size: i32 = 64;
+
+        if format_name != b"iridas_itx" {
+            let mut os = OStringStream::new(Crt::NATIVE);
+            os.put_str("Unknown 3dl format name, '");
+            os.put_bytes(format_name);
+            os.put_str("'.");
+            return Err(Exception::new(os.into_bytes()));
+        }
+
+        let mut cube_size = baker.cube_size();
+        if cube_size == -1 {
+            cube_size = default_cube_size;
+        }
+        cube_size = std_max(2, cube_size); // smallest cube is 2x2x2
+
+        let num_entries = cube_size * cube_size * cube_size;
+        let mut cube_data = vec![0.0f32; (num_entries * 3) as usize];
+        generate_identity_lut3d(&mut cube_data, cube_size, 3, Lut3DOrder::FastRed)?;
+        let mut cube_img = PackedImageDesc::new(&mut cube_data[..], num_entries as usize, 1, 3)?;
+
+        // Apply our conversion from the input space to the output space.
+        let input_to_target = get_input_to_target_processor(baker)?;
+        input_to_target.apply(&mut cube_img)?;
+
+        // Write out the file.
+        // For for maximum compatibility with other apps, we will
+        // not utilize the shaper or output any metadata
+
+        ostream.put_str("LUT_3D_SIZE ");
+        ostream.put_i32(cube_size);
+        ostream.put_str("\n");
+        if cube_size < 2 {
+            return Err(Exception::new("Internal cube size exception."));
+        }
+
+        // Set to a fixed 6 decimal precision
+        ostream.float_field = FloatField::Fixed;
+        ostream.precision = 6;
+        for i in 0..num_entries as usize {
+            let r = cube_data[3 * i];
+            let g = cube_data[3 * i + 1];
+            let b = cube_data[3 * i + 2];
+            ostream.put_f32(r);
+            ostream.put_str(" ");
+            ostream.put_f32(g);
+            ostream.put_str(" ");
+            ostream.put_f32(b);
+            ostream.put_str("\n");
+        }
+        ostream.put_str("\n");
+        Ok(())
     }
 
     /// Appends the file's 3D LUT, with the file transform's interpolation where valid for it.

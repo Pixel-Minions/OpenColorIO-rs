@@ -78,6 +78,16 @@ colorspaces:
   to_reference: !<MatrixTransform> {offset: [-0.75, .nan, 0.5, 0]}
 
 - !<ColorSpace>
+  name: double
+  isdata: false
+  to_reference: !<MatrixTransform> {matrix: [2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 1]}
+
+- !<ColorSpace>
+  name: upper_half
+  isdata: false
+  to_reference: !<MatrixTransform> {matrix: [0.5, 0, 0, 0, 0, 0.5, 0, 0, 0, 0, 0.5, 0, 0, 0, 0, 1], offset: [0.5, 0.5, 0.5, 0]}
+
+- !<ColorSpace>
   name: negative
   isdata: false
   from_reference: !<MatrixTransform> {matrix: [-1, 0, 0, 0, 0, -1000, 0, 0, 0, 0, 0.5, 0, 0, 0, 0, 1], offset: [-0.5, 0.25, -1e-7, 0]}
@@ -251,6 +261,238 @@ fn spi3d() -> Vec<BakeCase> {
     cases
 }
 
+/// Iridas cube and itx: cubes of every size; the cube writes the metadata's children as
+/// comments.
+fn cube_and_itx() -> Vec<BakeCase> {
+    let mut cases = Vec::new();
+    for format in ["iridas_cube", "iridas_itx"] {
+        for target in PER_CHANNEL.iter().chain(["sat"].iter()) {
+            for size in [2, 3] {
+                cases.push(case(
+                    &format!("{format} to {target}, {size}"),
+                    &[
+                        InputSpace("lin"),
+                        TargetSpace(target),
+                        CubeSize(size),
+                        Format(format),
+                    ],
+                ));
+            }
+        }
+        cases.push(case(
+            &format!("{format} of the default size"),
+            &[InputSpace("lin"), TargetSpace("sat"), Format(format)],
+        ));
+        cases.push(
+            case(
+                &format!("{format} with metadata"),
+                &[
+                    InputSpace("lin"),
+                    TargetSpace("gamma"),
+                    CubeSize(2),
+                    Format(format),
+                ],
+            )
+            .with_metadata(&[
+                Metadata::Child("Description", "first"),
+                Metadata::Child("Other", "second\nline"),
+                Metadata::Child("Empty", ""),
+                Metadata::Name("a name"),
+                Metadata::Id("an id"),
+            ]),
+        );
+        cases.push(
+            case(
+                &format!("{format} with one metadata child"),
+                &[
+                    InputSpace("lin"),
+                    TargetSpace("gamma"),
+                    CubeSize(2),
+                    Format(format),
+                ],
+            )
+            .with_metadata(&[Metadata::Child("Description", "only")]),
+        );
+        cases.push(case(
+            &format!("{format} with a display and view"),
+            &[
+                InputSpace("lin"),
+                DisplayView("disp", "sat"),
+                Looks("brighten"),
+                CubeSize(4),
+                Format(format),
+            ],
+        ));
+    }
+    cases.push(case(
+        "iridas_cube named in capitals",
+        &[
+            InputSpace("lin"),
+            TargetSpace("sat"),
+            CubeSize(2),
+            Format("Iridas_Cube"),
+        ],
+    ));
+    cases.push(case(
+        "iridas_itx named in capitals",
+        &[
+            InputSpace("lin"),
+            TargetSpace("sat"),
+            CubeSize(2),
+            Format("IRIDAS_ITX"),
+        ],
+    ));
+    cases
+}
+
+/// Resolve cube: a 1D LUT without crosstalk (its input range written when not 0 to 1), a 3D
+/// LUT with crosstalk, a 1D shaper and a 3D LUT with crosstalk and a shaper space.
+fn resolve() -> Vec<BakeCase> {
+    let mut cases = Vec::new();
+    for target in PER_CHANNEL {
+        for size in [2, 3] {
+            cases.push(case(
+                &format!("resolve_cube 1D to {target}, {size}"),
+                &[
+                    InputSpace("lin"),
+                    TargetSpace(target),
+                    CubeSize(size),
+                    Format("resolve_cube"),
+                ],
+            ));
+        }
+        for shaper in [
+            "log2",
+            "nans",
+            "nans_green",
+            "negative",
+            "double",
+            "upper_half",
+        ] {
+            cases.push(case(
+                &format!("resolve_cube 1D to {target}, shaper {shaper}"),
+                &[
+                    InputSpace("lin"),
+                    TargetSpace(target),
+                    ShaperSpace(shaper),
+                    ShaperSize(9),
+                    CubeSize(5),
+                    Format("resolve_cube"),
+                ],
+            ));
+        }
+    }
+    for size in [2, 3] {
+        cases.push(case(
+            &format!("resolve_cube 3D, {size}"),
+            &[
+                InputSpace("lin"),
+                TargetSpace("sat"),
+                CubeSize(size),
+                Format("resolve_cube"),
+            ],
+        ));
+    }
+    for shaper in [
+        "lin",
+        "log2",
+        "gamma",
+        "big",
+        "nans",
+        "nans_green",
+        "negative",
+    ] {
+        for (shaper_size, cube_size) in [(2, 2), (5, 3)] {
+            cases.push(case(
+                &format!("resolve_cube 1D+3D, shaper {shaper}, {shaper_size} and {cube_size}"),
+                &[
+                    InputSpace("lin"),
+                    TargetSpace("sat"),
+                    ShaperSpace(shaper),
+                    ShaperSize(shaper_size),
+                    CubeSize(cube_size),
+                    Format("resolve_cube"),
+                ],
+            ));
+        }
+    }
+    cases.push(case(
+        "resolve_cube 1D with a shaper smaller than the LUT",
+        &[
+            InputSpace("lin"),
+            TargetSpace("gamma"),
+            ShaperSpace("double"),
+            ShaperSize(3),
+            CubeSize(6),
+            Format("resolve_cube"),
+        ],
+    ));
+    cases.push(case(
+        "resolve_cube 1D of the default size",
+        &[
+            InputSpace("lin"),
+            TargetSpace("gamma"),
+            Format("resolve_cube"),
+        ],
+    ));
+    cases.push(case(
+        "resolve_cube 3D of the default size",
+        &[
+            InputSpace("lin"),
+            TargetSpace("sat"),
+            Format("resolve_cube"),
+        ],
+    ));
+    cases.push(case(
+        "resolve_cube 1D+3D of the default sizes",
+        &[
+            InputSpace("lin"),
+            TargetSpace("sat"),
+            ShaperSpace("log2"),
+            Format("resolve_cube"),
+        ],
+    ));
+    cases.push(
+        case(
+            "resolve_cube with metadata",
+            &[
+                InputSpace("lin"),
+                TargetSpace("sat"),
+                ShaperSpace("gamma"),
+                ShaperSize(3),
+                CubeSize(2),
+                Format("resolve_cube"),
+            ],
+        )
+        .with_metadata(&[
+            Metadata::Child("Description", "first"),
+            Metadata::Child("Other", "second"),
+        ]),
+    );
+    cases.push(case(
+        "resolve_cube with a look and a display and view",
+        &[
+            InputSpace("lin"),
+            DisplayView("disp", "sat"),
+            Looks("brighten"),
+            ShaperSpace("log2"),
+            ShaperSize(4),
+            CubeSize(3),
+            Format("resolve_cube"),
+        ],
+    ));
+    cases.push(case(
+        "resolve_cube named in capitals",
+        &[
+            InputSpace("lin"),
+            TargetSpace("sat"),
+            CubeSize(2),
+            Format("Resolve_Cube"),
+        ],
+    ));
+    cases
+}
+
 #[test]
 fn spi1d_bakes_as_in_the_wheel() {
     check_bakes(&spi1d());
@@ -259,4 +501,14 @@ fn spi1d_bakes_as_in_the_wheel() {
 #[test]
 fn spi3d_bakes_as_in_the_wheel() {
     check_bakes(&spi3d());
+}
+
+#[test]
+fn cube_and_itx_bakes_as_in_the_wheel() {
+    check_bakes(&cube_and_itx());
+}
+
+#[test]
+fn resolve_bakes_as_in_the_wheel() {
+    check_bakes(&resolve());
 }

@@ -922,15 +922,15 @@ note = "p4-readers 4.7b; the SampleICC subset it reads with (ext/sampleicc/src/i
 path = "src/OpenColorIO/fileformats/FileFormatIridasCube.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/file_format_iridas_cube.rs"]
-status = "partial"
-note = "p4-readers 4.2c: the reader and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_cube_oracle.rs; bake comes with WP 4.8"
+status = "done"
+note = "p4-readers 4.2c: the reader and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_cube_oracle.rs; p4-baker 4.8b2: bake, against the wheel in crates/ocio/tests/bake_formats_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatIridasItx.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/file_format_iridas_itx.rs"]
-status = "partial"
-note = "p4-readers 4.2d: the reader and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_iridas_itx_oracle.rs; bake comes with WP 4.8"
+status = "done"
+note = "p4-readers 4.2d: the reader and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_iridas_itx_oracle.rs; p4-baker 4.8b2: bake, against the wheel in crates/ocio/tests/bake_formats_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatIridasLook.cpp"
@@ -950,8 +950,8 @@ note = "p4-readers 4.3d: checked against the wheel in crates/ocio/tests/file_for
 path = "src/OpenColorIO/fileformats/FileFormatResolveCube.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/file_format_resolve_cube.rs"]
-status = "partial"
-note = "p4-readers 4.2c: the reader and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_cube_oracle.rs; bake comes with WP 4.8"
+status = "done"
+note = "p4-readers 4.2c: the reader and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_cube_oracle.rs; p4-baker 4.8b2: bake, against the wheel in crates/ocio/tests/bake_formats_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatSpi1D.cpp"
@@ -4646,8 +4646,8 @@ note = "p4-readers 4.7a: types and endian (icc_profile_reader_tests.rs); 4.7b: t
 path = "tests/cpu/fileformats/FileFormatIridasCube_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/fileformats/file_format_iridas_cube_tests.rs"]
-status = "partial"
-note = "p4-readers 4.2c: format_info, read_failure, whitespace_handling, load_1d_op, load_3d_op; no_shaper bakes, and comes with WP 4.8"
+status = "done"
+note = "p4-readers 4.2c: format_info, read_failure, whitespace_handling, load_1d_op, load_3d_op; p4-baker 4.8b2: no_shaper"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatIridasItx_tests.cpp"
@@ -4674,8 +4674,8 @@ note = "p4-readers 4.3d"
 path = "tests/cpu/fileformats/FileFormatResolveCube_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/fileformats/file_format_resolve_cube_tests.rs"]
-status = "partial"
-note = "p4-readers 4.2c: format_info, read_1d, read_3d, read_1d_3d, read_default_range, read_failure, load_ops; bake_1d, bake_1d_shaper, bake_3d and bake_1d_3d come with WP 4.8"
+status = "done"
+note = "p4-readers 4.2c: format_info, read_1d, read_3d, read_1d_3d, read_default_range, read_failure, load_ops; p4-baker 4.8b2: bake_1d, bake_1d_shaper, bake_3d, bake_1d_3d"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatSpi1D_tests.cpp"
