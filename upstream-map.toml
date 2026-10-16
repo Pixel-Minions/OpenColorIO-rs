@@ -957,15 +957,15 @@ note = "p4-readers 4.2c: the reader and buildFileOps, checked against the wheel 
 path = "src/OpenColorIO/fileformats/FileFormatSpi1D.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/file_format_spi1d.rs"]
-status = "partial"
-note = "p4-registry 4.2a2: the reader (istream::getline, sscanf, from_chars) and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_spi1d_oracle.rs; bake comes with WP 4.8"
+status = "done"
+note = "p4-registry 4.2a2: the reader (istream::getline, sscanf, from_chars) and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_spi1d_oracle.rs; p4-baker 4.8b1: bake, against the wheel in crates/ocio/tests/bake_formats_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatSpi3D.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/file_format_spi3d.rs"]
-status = "partial"
-note = "p4-readers 4.2b: the reader (istream::getline, sscanf, from_chars) and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_spi3d_oracle.rs; bake comes with WP 4.8"
+status = "done"
+note = "p4-readers 4.2b: the reader (istream::getline, sscanf, from_chars) and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_spi3d_oracle.rs; p4-baker 4.8b1: bake, against the wheel in crates/ocio/tests/bake_formats_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatSpiMtx.cpp"
@@ -1792,7 +1792,7 @@ path = "src/OpenColorIO/ops/lut1d/Lut1DOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op.rs", "crates/ocio/src/transforms/lut1d_transform.rs", "crates/ocio-gpu/src/ops/lut1d/lut1d_op_gpu.rs"]
 status = "partial"
-note = "p1-optimizer B: Lut1DOp (clone, getInfo, isSameType, isInverse, canCombineWith, hasChannelCrosstalk, finalize, getCacheID, supportedByLegacyShader), CreateLut1DOp, GenerateIdentityLut1D; cache IDs and the optimizer's Lut1D rules against the wheel (tests/lut1d_op_oracle.rs). p2-lut1d-inv 2.1g: combineWith (Compose); p2-lut1d-fwd 2.1a: getCPUOp (GetLut1DRenderer, F32 to F32); p1-transforms-fam4: CreateLut1DTransform and BuildLut1DOp, in crates/ocio/src/transforms/lut1d_transform.rs. p2-lut1d-gpu 2.1h: extractGpuShaderInfo (an inverse LUT made fast, I-137), in crates/ocio-gpu/src/ops/lut1d/lut1d_op_gpu.rs. GenerateLinearScaleLut1D comes with the file formats (Phase 4)"
+note = "p1-optimizer B: Lut1DOp (clone, getInfo, isSameType, isInverse, canCombineWith, hasChannelCrosstalk, finalize, getCacheID, supportedByLegacyShader), CreateLut1DOp, GenerateIdentityLut1D; cache IDs and the optimizer's Lut1D rules against the wheel (tests/lut1d_op_oracle.rs). p2-lut1d-inv 2.1g: combineWith (Compose); p2-lut1d-fwd 2.1a: getCPUOp (GetLut1DRenderer, F32 to F32); p1-transforms-fam4: CreateLut1DTransform and BuildLut1DOp, in crates/ocio/src/transforms/lut1d_transform.rs. p2-lut1d-gpu 2.1h: extractGpuShaderInfo (an inverse LUT made fast, I-137), in crates/ocio-gpu/src/ops/lut1d/lut1d_op_gpu.rs. p4-baker 4.8b1: GenerateLinearScaleLut1D"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOp.h"
@@ -4681,15 +4681,15 @@ note = "p4-readers 4.2c: format_info, read_1d, read_3d, read_1d_3d, read_default
 path = "tests/cpu/fileformats/FileFormatSpi1D_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/fileformats/file_format_spi1d_tests.rs"]
-status = "partial"
-note = "p4-registry 4.2a2: format_info, test, read_failure, identity; bake_1d and bake_1d_shaper come with WP 4.8"
+status = "done"
+note = "p4-registry 4.2a2: format_info, test, read_failure, identity; p4-baker 4.8b1: bake_1d, bake_1d_shaper"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatSpi3D_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/fileformats/file_format_spi3d_tests.rs"]
-status = "partial"
-note = "p4-readers 4.2b: format_info, test, read_failure, lut_interpolation_option; bake_3d comes with WP 4.8"
+status = "done"
+note = "p4-readers 4.2b: format_info, test, read_failure, lut_interpolation_option; p4-baker 4.8b1: bake_3d"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatSpiMtx_tests.cpp"

@@ -18,6 +18,7 @@
 
 use super::lut1d_op_data::{ComposeMethod, Lut1DOpData};
 use crate::exception::{Exception, Result};
+use crate::math_utils::lerpf;
 use crate::op::{Op, OpVec};
 use crate::op_data::OpData;
 use crate::open_color_types::TransformDirection;
@@ -125,6 +126,35 @@ pub fn generate_identity_lut1d(img: &mut [f32], num_elements: i32, num_channels:
     for i in 0..num_elements {
         for c in 0..num_channels_to_fill {
             img[(num_channels * i + c) as usize] = scale * i as f32;
+        }
+    }
+}
+
+/// Fills `img`, `num_elements` pixels of `num_channels` channels, with a ramp from `start` to
+/// `end` on the first 3 channels: `lerpf(start, end, x)` at `x = i / (num_elements - 1)`,
+/// divided in `double` and rounded to `float`.
+///
+/// The Linux wheel computes `x * (end - start) + start`, the product first in the addition
+/// (`libOpenColorIO.so` 0x402bf0-0x402c79), as [`lerpf`] does: where `start` and `end` are both
+/// NaN, the result is `end`'s.
+///
+/// Port of `GenerateLinearScaleLut1D` (src/OpenColorIO/ops/lut1d/Lut1DOp.cpp:209-225 @
+/// v2.5.2).
+pub fn generate_linear_scale_lut1d(
+    img: &mut [f32],
+    num_elements: i32,
+    num_channels: i32,
+    start: f32,
+    end: f32,
+) {
+    let num_channels_to_fill = std::cmp::min(3, num_channels);
+
+    for i in 0..num_elements {
+        let x = (f64::from(i) / f64::from(num_elements - 1)) as f32;
+        let val = lerpf(start, end, x);
+
+        for c in 0..num_channels_to_fill {
+            img[(num_channels * i + c) as usize] = val;
         }
     }
 }

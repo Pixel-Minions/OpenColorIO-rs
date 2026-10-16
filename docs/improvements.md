@@ -2640,6 +2640,23 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   file_format_iridas_look.rs`); the oracle cases "no size and no data" and "no LUT"
   (`crates/ocio/tests/file_format_iridas_look_oracle.rs`).
 
+### I-199. A format named in other case is accepted by the baker, then refused by the bake
+
+- **Upstream:** `Baker::setFormat` finds the format by its name ignoring case
+  (`FormatRegistry::getFileFormatByName`, `transforms/FileTransform.cpp:358-365` @ v2.5.2) and
+  keeps the name as given (`Baker.cpp:118-139`); `Baker::bake` hands that name to the format
+  (`Baker.cpp:393-403`), and six formats' bakes compare it with their own name, case
+  included: `spi1d` (`FileFormatSpi1D.cpp:323-329`), `spi3d` (`FileFormatSpi3D.cpp:274-280`),
+  `iridas_cube`, `iridas_itx`, `resolve_cube` and `houdini`. So `setFormat("SPI1D")` succeeds
+  and `bake` fails with "Error baking SPI1D:Unknown spi format name, 'SPI1D'." (wheel probes,
+  Windows and Linux, 2026-10-16). The 3DL, cineSpace and Truelight bakes take the name in any
+  case.
+- **Who notices:** callers that name a format in other case than the registry's.
+- **A fix:** keep the registry's name in `setFormat`, or compare ignoring case in the bakes.
+- **Status:** matched in `p4-baker` (4.8b1: spi1d and spi3d, `crates/ocio/src/fileformats/
+  file_format_spi1d.rs`, `file_format_spi3d.rs`; the other bakes with their chunks); the
+  "named in capitals" cases of `crates/ocio/tests/bake_formats_oracle.rs`.
+
 ### I-201. A Reference by an alias other than currentMonitor adds no ops
 
 - **Upstream:** the Reference reader keeps an alias (`CTFReaderHelper.cpp:5047-5056` @ v2.5.2),
