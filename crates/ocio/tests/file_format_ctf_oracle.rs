@@ -2166,3 +2166,208 @@ fn lut3d_files_read_as_in_the_wheel() {
 fn lut3d_files_log_as_in_the_wheel() {
     cdl_common::check_logs(&op_cases_f2());
 }
+
+/// LUT files read with each FileTransform interpolation: a LUT without an interpolation of
+/// its own takes the FileTransform's if it allows it (`HandleLUT`).
+fn interpolation_cases() -> Vec<Case> {
+    let b10 = "inBitDepth=\"10i\" outBitDepth=\"10i\"";
+    let mut cases = Vec::new();
+    let mut files = Vec::new();
+    for (label, body) in [
+        ("a LUT3D", lut("LUT3D", b10, "", "2 2 2 3", &ramp(24))),
+        (
+            "a tetrahedral LUT3D",
+            lut(
+                "LUT3D",
+                &format!("{b10} interpolation=\"tetrahedral\""),
+                "",
+                "2 2 2 3",
+                &ramp(24),
+            ),
+        ),
+        (
+            "a trilinear LUT3D",
+            lut(
+                "LUT3D",
+                &format!("{b10} interpolation=\"trilinear\""),
+                "",
+                "2 2 2 3",
+                &ramp(24),
+            ),
+        ),
+        (
+            "an InverseLUT3D",
+            lut("InverseLUT3D", b10, "", "2 2 2 3", &ramp(24)),
+        ),
+        ("a LUT1D", lut("LUT1D", b10, "", "4 1", &ramp(4))),
+        (
+            "a linear LUT1D",
+            lut(
+                "LUT1D",
+                &format!("{b10} interpolation=\"linear\""),
+                "",
+                "4 1",
+                &ramp(4),
+            ),
+        ),
+        (
+            "an InverseLUT1D",
+            lut("InverseLUT1D", b10, "", "4 1", &ramp(4)),
+        ),
+        (
+            "a LUT1D and a LUT3D",
+            format!(
+                "{}{}",
+                lut("LUT1D", b10, "", "4 1", &ramp(4)),
+                lut("LUT3D", b10, "", "2 2 2 3", &ramp(24))
+            ),
+        ),
+    ] {
+        let dir = write_files(&[file(
+            "lut.ctf",
+            pl("id=\"a\" version=\"1.7\"", &body).as_bytes(),
+        )]);
+        files.push((label.to_owned(), format!("{dir}/lut.ctf")));
+    }
+    for name in [
+        "clf/lut3d_17x17x17_10i_12i.clf",
+        "clf/lut1d_example.clf",
+        "lut3d_example_Inv.ctf",
+    ] {
+        files.push((name.to_owned(), upstream_file(name)));
+    }
+    for (label, path) in &files {
+        for interp in [
+            Interpolation::Nearest,
+            Interpolation::Linear,
+            Interpolation::Tetrahedral,
+            Interpolation::Cubic,
+            Interpolation::Best,
+            Interpolation::Default,
+        ] {
+            cases.push(file_case(
+                format!("{label}, {interp:?}"),
+                path,
+                interp,
+                TransformDirection::Forward,
+            ));
+        }
+    }
+    cases
+}
+
+/// The processors of LUT files read with each FileTransform interpolation, in both
+/// directions.
+#[test]
+fn file_interpolations_read_as_in_the_wheel() {
+    check_processors(&interpolation_cases());
+}
+
+/// The warnings of reading LUT files with each FileTransform interpolation, message by
+/// message.
+#[test]
+fn file_interpolations_log_as_in_the_wheel() {
+    cdl_common::check_logs(&interpolation_cases());
+}
+
+/// Upstream's CLF examples, metadata text in parts, the versions that change a reader, and
+/// the limits of LUT and IndexMap dimensions.
+fn structure_cases() -> Vec<Case> {
+    let b10 = "inBitDepth=\"10i\" outBitDepth=\"10i\"";
+    let f32s = "inBitDepth=\"32f\" outBitDepth=\"32f\"";
+    let lut1 = lut("LUT1D", b10, "", "4 1", &ramp(4));
+    let im =
+        |dim: &str, values: &str| format!("        <IndexMap dim=\"{dim}\">{values}</IndexMap>\n");
+    let mut cases = Vec::new();
+
+    // Upstream's files.
+    for name in ["clf/lut1d_example.clf", "clf/matrix_3x4_example.clf"] {
+        cases.push(file_case(
+            name,
+            &upstream_file(name),
+            Interpolation::Default,
+            TransformDirection::Forward,
+        ));
+    }
+
+    // Text in parts: around an entity, on several lines, around an element.
+    cases.push(ctf(
+        "Info text in parts",
+        "id=\"a\" version=\"1.7\"",
+        &format!(
+            "    <Info><R> a &amp; b </R><S>x<T/>y</S>\n        <U>line 1\n  line 2</U></Info>\n{lut1}"
+        ),
+    ));
+    cases.push(ctf(
+        "descriptors in parts",
+        "id=\"a\" version=\"1.7\"",
+        &format!(
+            "    <InputDescriptor>a&amp;b</InputDescriptor>\n\
+             \x20   <InputDescriptor> c </InputDescriptor>\n\
+             \x20   <OutputDescriptor>d\ne</OutputDescriptor>\n\
+             \x20   <OutputDescriptor>f&lt;</OutputDescriptor>\n{lut1}"
+        ),
+    ));
+
+    // The Lut1D reader of each version: an IndexMap is a Range from CTF 1.5 on.
+    for version in ["1.3", "1.4", "1.5", "1.6", "1.7"] {
+        cases.push(ctf(
+            &format!("a LUT1D with an IndexMap in CTF {version}"),
+            &format!("id=\"a\" version=\"{version}\""),
+            &lut("LUT1D", b10, &im("2", "64@0 940@3"), "4 1", &ramp(4)),
+        ));
+    }
+
+    // The legacy Log reader up to CTF 1.8.
+    for version in ["1.7", "1.8"] {
+        cases.push(ctf(
+            &format!("a Log in CTF {version}"),
+            &format!("id=\"a\" version=\"{version}\""),
+            &op("Log", &format!("{f32s} style=\"log2\""), ""),
+        ));
+    }
+
+    // The limits of LUT dimensions.
+    for (tag, dim, values) in [
+        ("LUT1D", "300000 1", ramp(4)),
+        ("LUT1D", "300001 1", ramp(4)),
+        ("InverseLUT1D", "300000 1", ramp(4)),
+        ("InverseLUT1D", "300001 1", ramp(4)),
+        ("LUT3D", "129 129 129 3", ramp(24)),
+        ("LUT3D", "130 130 130 3", ramp(24)),
+        ("InverseLUT3D", "129 129 129 3", ramp(24)),
+        ("InverseLUT3D", "130 130 130 3", ramp(24)),
+    ] {
+        cases.push(ctf(
+            &format!("a {tag} of dimensions {dim}"),
+            "id=\"a\" version=\"1.7\"",
+            &lut(tag, f32s, "", dim, &values),
+        ));
+    }
+
+    // IndexMaps of 1 and 2 entries.
+    for (tag, dim, values) in [("LUT1D", "4 1", ramp(4)), ("LUT3D", "2 2 2 3", ramp(24))] {
+        for (im_dim, im_values) in [("1", "0@0"), ("2", "0@0 1023@1")] {
+            cases.push(ctf(
+                &format!("a {tag} with an IndexMap of dimension {im_dim}"),
+                "id=\"a\" version=\"1.7\"",
+                &lut(tag, b10, &im(im_dim, im_values), dim, &values),
+            ));
+        }
+    }
+    cases
+}
+
+/// The processors of upstream's CLF examples, metadata text in parts, the versions that
+/// change a reader and the limits of dimensions, in both directions.
+#[test]
+fn structure_files_read_as_in_the_wheel() {
+    check_processors(&structure_cases());
+}
+
+/// The warnings of reading upstream's CLF examples, metadata text in parts, the versions
+/// that change a reader and the limits of dimensions, message by message.
+#[test]
+fn structure_files_log_as_in_the_wheel() {
+    cdl_common::check_logs(&structure_cases());
+}

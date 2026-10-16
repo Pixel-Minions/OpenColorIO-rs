@@ -13,12 +13,16 @@ use crate::fileformats::ctf::ctf_transform::{
     CtfVersion, get_elements_values,
 };
 use crate::fileformats::input_stream::OpenMode;
-use crate::fileformats::test_utils::load_test_file;
+use crate::fileformats::test_utils::{get_test_files_dir, load_test_file};
+use crate::transform::Transform;
 use ocio_ops::bit_depth_utils::get_bit_depth_max_value;
 use ocio_ops::format_metadata::{METADATA_DESCRIPTION, METADATA_INFO};
+use ocio_ops::logging::{get_logging_level, set_logging_level};
 use ocio_ops::math_utils::convert_half_bits_to_float;
 use ocio_ops::op_data::OpDataType;
-use ocio_ops::open_color_types::{BitDepth, Interpolation, Lut1DHueAdjust, TransformDirection};
+use ocio_ops::open_color_types::{
+    BitDepth, Interpolation, LoggingLevel, Lut1DHueAdjust, TransformDirection,
+};
 use ocio_ops::ops::cdl::cdl_op_data::{CdlOpData, CdlOpStyle, ChannelParams};
 use ocio_ops::ops::gamma::gamma_op_data::{GammaOpData, GammaStyle};
 use ocio_ops::ops::log::log_op_data::{
@@ -2666,4 +2670,676 @@ fn index_map_test2_clfv2() {
     let p_l = as_lut3d(&op_list[1]);
     assert_eq!(p_l.get_array().get_length(), 2);
     assert_eq!(p_l.get_file_output_bit_depth(), BitDepth::Uint10);
+}
+
+/// Runs `f` at the warning logging level, and gives the lines OCIO logged on this thread
+/// meanwhile, right-trimmed and split by lines.
+///
+/// Port of the tests' use of `LogGuard` with `SetLoggingLevel(LOGGING_LEVEL_WARNING)` and
+/// `StringUtils::SplitByLines(StringUtils::RightTrim(guard.output()))`
+/// (tests/cpu/UnitTestLogUtils.cpp:17-67 @ v2.5.2).
+fn warning_lines<T>(f: impl FnOnce() -> T) -> (T, Vec<String>) {
+    let (out, log) = crate::test_env::capture_log(|| {
+        let level = get_logging_level();
+        set_logging_level(LoggingLevel::Warning);
+        let out = f();
+        set_logging_level(level);
+        out
+    });
+    let output = String::from_utf8_lossy(&log.concat()).into_owned();
+    let lines = output.trim_end().split('\n').map(str::to_owned).collect();
+    (out, lines)
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, difficult_syntax)` @ v2.5.2.
+#[test]
+fn difficult_syntax() {
+    // This file contains a lot of unusual (but still legal) ways of writing the XML. It is
+    // intended to stress test that the XML parsing is working robustly.
+
+    let ctf_file = "clf/difficult_syntax.clf";
+
+    let cached_file = load_clf_file(ctf_file).unwrap();
+
+    let clf_version = cached_file.transform.get_clf_version();
+    let ver = CtfVersion::new(3, 0, 0);
+    assert_eq!(clf_version, ver);
+
+    assert_eq!(cached_file.transform.get_id(), b"id1");
+
+    assert_eq!(cached_file.transform.get_descriptions().len(), 2);
+    assert_eq!(
+        cached_file.transform.get_descriptions()[0],
+        b"This is the ProcessList description."
+    );
+    assert_eq!(
+        cached_file.transform.get_descriptions()[1],
+        b"yet 'another' \"valid\" desc"
+    );
+
+    let info = cached_file.transform.get_info_metadata();
+    assert_eq!(info.get_element_name(), METADATA_INFO);
+    let items = info.get_children_elements();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].get_element_name(), b"Stuff");
+    assert_eq!(
+        items[0].get_element_value(),
+        b"This is a \"difficult\" but 'legal' color transform file."
+    );
+
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 2);
+    {
+        let p_matrix = as_matrix(&op_list[0]);
+
+        assert_eq!(op_list[0].get_id(), b"'mat-25'");
+        assert_eq!(op_list[0].get_name(), b"\"quote\"");
+
+        let desc = descriptions(&op_list[0]);
+        assert_eq!(desc.len(), 1);
+        assert_eq!(desc[0], b"third array dim value is ignored");
+
+        let array = p_matrix.get_array();
+        assert_eq!(array.get_length(), 4);
+        assert_eq!(array.get_num_color_components(), 4);
+        assert_eq!(
+            array.get_num_values(),
+            array.get_length() * array.get_length()
+        );
+
+        check_values(
+            array,
+            [
+                3.24,
+                -1.537,
+                -0.4985,
+                0.0,
+                -0.96930,
+                1.876,
+                0.04156,
+                0.0,
+                0.0556,
+                -0.204,
+                0.105730e+1,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+            ],
+        );
+    }
+    {
+        let p_lut = as_lut1d(&op_list[1]);
+
+        assert_eq!(op_list[1].get_name(), b"a multi-line  name");
+
+        let desc = descriptions(&op_list[1]);
+        assert_eq!(desc.len(), 3);
+        // the string here uses opt-dash
+        assert_eq!(desc[0], "the n\u{2013}dash description".as_bytes());
+        assert_eq!(desc[1], b"another valid description element    ");
+        assert_eq!(desc[2], b"& another <valid> desc");
+
+        let array2 = p_lut.get_array();
+        assert_eq!(array2.get_length(), 128);
+        assert_eq!(array2.get_num_color_components(), 3);
+        assert_eq!(
+            array2.get_num_values(),
+            array2.get_length() * p_lut.get_array().get_max_color_components()
+        );
+
+        assert_eq!(array2.get_values().len(), 384);
+        let values = array2.get_values();
+        assert_eq!(values[0], 0.0f32);
+        assert_eq!(values[1], 0.0f32);
+        assert_eq!(values[2], 0.0f32);
+        assert_eq!(values[3], 0.06780f32);
+        assert_eq!(values[4], 0.06441f32);
+        assert_eq!(values[5], 0.06102f32);
+        assert_eq!(values[6], 0.09965f32);
+        assert_eq!(values[378], 0.99562f32);
+        assert_eq!(values[379], 0.94584f32);
+        assert_eq!(values[380], 0.89606f32);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, difficult_xml_unknown_elements)` @ v2.5.2.
+#[test]
+fn difficult_xml_unknown_elements() {
+    let cached_file;
+
+    {
+        let error_outputs: [&str; 11] = [
+            "(10): Unrecognized element 'Ignore' where its parent is 'ProcessList' (8): Unknown element",
+            "(22): Unrecognized attribute 'id' of 'Array'",
+            "(22): Unrecognized attribute 'foo' of 'Array'",
+            "(27): Unrecognized element 'ProcessList' where its parent is 'ProcessList' (8): The Transform already exists",
+            "(30): Unrecognized element 'Array' where its parent is 'Matrix' (16): Only one Array allowed per op",
+            "(37): Unrecognized element 'just_ignore' where its parent is 'ProcessList' (8): Unknown element",
+            "(69): Unrecognized element 'just_ignore' where its parent is 'Description' (66)",
+            "(70): Unrecognized element 'just_ignore' where its parent is 'just_ignore' (69)",
+            "(75): Unrecognized element 'Matrix' where its parent is 'LUT1D' (", // Line number is expat library version dependent.
+            "(76): Unrecognized element 'Description' where its parent is 'Matrix' (75)",
+            "(77): Unrecognized element 'Array' where its parent is 'Matrix' (75)",
+        ];
+
+        let ctf_file = "difficult_test1_v1.ctf";
+        let (result, parts) = warning_lines(|| load_clf_file(ctf_file));
+        cached_file = result.unwrap();
+
+        assert_eq!(parts.len(), 11);
+
+        for (part, error_output) in parts.iter().zip(error_outputs) {
+            assert!(
+                part.contains(error_output),
+                "{part:?} holds {error_output:?}"
+            );
+        }
+    }
+
+    // Defaults to 1.2
+    let ctf_version = cached_file.transform.get_ctf_version();
+    assert!(CTF_PROCESS_LIST_VERSION_1_2 == ctf_version);
+
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 2);
+
+    let p_matrix = as_matrix(&op_list[0]);
+
+    let array = p_matrix.get_array();
+    assert_eq!(array.get_length(), 4);
+    assert_eq!(array.get_num_color_components(), 4);
+    assert_eq!(
+        array.get_num_values(),
+        array.get_length() * array.get_length()
+    );
+
+    check_values(
+        array,
+        [
+            3.24,
+            -1.537,
+            -0.4985,
+            0.0,
+            -0.96930,
+            1.876,
+            0.04156,
+            0.0,
+            0.0556,
+            -0.204,
+            0.105730e+1,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+        ],
+    );
+
+    let p_lut = as_lut1d(&op_list[1]);
+
+    let array2 = p_lut.get_array();
+    assert_eq!(array2.get_length(), 17);
+    assert_eq!(array2.get_num_color_components(), 3);
+    assert_eq!(
+        array2.get_num_values(),
+        array2.get_length() * p_lut.get_array().get_max_color_components()
+    );
+
+    assert_eq!(array2.get_values().len(), 51);
+    let values = array2.get_values();
+    assert_eq!(values[0], 0.0f32);
+    assert_eq!(values[1], 0.0f32);
+    assert_eq!(values[2], 0.0f32);
+    assert_eq!(values[3], 0.28358f32);
+    assert_eq!(values[4], 0.28358f32);
+    assert_eq!(values[5], 0.28358f32);
+    assert_eq!(values[6], 0.38860f32);
+    assert_eq!(values[45], 0.97109f32);
+    assert_eq!(values[46], 0.97109f32);
+    assert_eq!(values[47], 0.97109f32);
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, unknown_elements)` @ v2.5.2.
+#[test]
+fn unknown_elements() {
+    let cached_file;
+
+    {
+        let error_outputs: [&str; 3] = [
+            "(34): Unrecognized element 'B' where its parent is 'ProcessList' (2): Unknown element",
+            "(34): Unrecognized element 'C' where its parent is 'B' (34)",
+            "(36): Unrecognized element 'A' where its parent is 'Description' (36)",
+        ];
+
+        // NB: This file has some added unknown elements A, B, and C as a test.
+        let ctf_file = "clf/illegal/unknown_elements.clf";
+        let (result, parts) = warning_lines(|| load_clf_file(ctf_file));
+        cached_file = result.unwrap();
+
+        assert_eq!(parts.len(), 3);
+
+        for (part, error_output) in parts.iter().zip(error_outputs) {
+            assert!(
+                part.contains(error_output),
+                "{part:?} holds {error_output:?}"
+            );
+        }
+    }
+
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 4);
+
+    let p_matrix = as_matrix(&op_list[0]);
+
+    let a1 = p_matrix.get_array();
+    assert_eq!(a1.get_length(), 4);
+    assert_eq!(a1.get_num_color_components(), 4);
+    assert_eq!(a1.get_num_values(), a1.get_length() * a1.get_length());
+
+    assert_eq!(a1.get_values().len() as c_ulong, a1.get_num_values());
+    assert_eq!(a1.get_values()[0], 3.24);
+    assert_eq!(a1.get_values()[4], -0.96930);
+    assert_eq!(a1.get_values()[10], 1.0573);
+
+    let p_lut1 = as_lut1d(&op_list[1]);
+
+    let a2 = p_lut1.get_array();
+    assert_eq!(a2.get_length(), 17);
+    assert_eq!(a2.get_num_color_components(), 3);
+    assert_eq!(
+        a2.get_num_values(),
+        a2.get_length() * p_lut1.get_array().get_max_color_components()
+    );
+
+    assert_eq!(a2.get_values().len() as c_ulong, a2.get_num_values());
+    assert_eq!(a2.get_values()[3], 0.28358f32);
+    assert_eq!(a2.get_values()[4], 0.28358f32);
+    assert_eq!(a2.get_values()[5], 100.0f32);
+    assert_eq!(a2.get_values()[50], 1.0f32);
+
+    let p_lut2 = as_lut1d(&op_list[2]);
+    assert_eq!(p_lut2.get_file_output_bit_depth(), BitDepth::Uint10);
+
+    let array = p_lut2.get_array();
+    assert_eq!(array.get_length(), 32);
+    assert_eq!(array.get_num_color_components(), 1);
+    assert_eq!(
+        array.get_num_values(),
+        array.get_length() * p_lut2.get_array().get_max_color_components()
+    );
+
+    assert_eq!(array.get_values().len(), 96);
+    let values = array.get_values();
+    assert_eq!(values[0], 0.0f32);
+    assert_eq!(values[1], 0.0f32);
+    assert_eq!(values[2], 0.0f32);
+    assert_eq!(values[3], 215.0f32 / 1023.0f32);
+    assert_eq!(values[4], 215.0f32 / 1023.0f32);
+    assert_eq!(values[5], 215.0f32 / 1023.0f32);
+    assert_eq!(values[6], 294.0f32 / 1023.0f32);
+    // and many more
+    assert_eq!(values[92], 1008.0f32 / 1023.0f32);
+    assert_eq!(values[93], 1023.0f32 / 1023.0f32);
+    assert_eq!(values[94], 1023.0f32 / 1023.0f32);
+    assert_eq!(values[95], 1023.0f32 / 1023.0f32);
+
+    let p_lut3 = as_lut3d(&op_list[3]);
+    assert_eq!(p_lut3.get_file_output_bit_depth(), BitDepth::Uint10);
+
+    let a3 = p_lut3.get_array();
+    assert_eq!(a3.get_length(), 3);
+    assert_eq!(a3.get_num_color_components(), 3);
+    assert_eq!(
+        a3.get_num_values(),
+        a3.get_length()
+            * a3.get_length()
+            * a3.get_length()
+            * p_lut3.get_array().get_max_color_components()
+    );
+
+    assert_eq!(a3.get_values().len() as c_ulong, a3.get_num_values());
+    let values = a3.get_values();
+    assert_eq!(values[0], 0.0f32);
+    assert_eq!(values[1], 30.0f32 / 1023.0f32);
+    assert_eq!(values[2], 33.0f32 / 1023.0f32);
+    assert_eq!(values[3], 0.0f32);
+    assert_eq!(values[4], 0.0f32);
+    assert_eq!(values[5], 133.0f32 / 1023.0f32);
+
+    assert_eq!(values[78], 1023.0f32 / 1023.0f32);
+    assert_eq!(values[79], 1023.0f32 / 1023.0f32);
+    assert_eq!(values[80], 1023.0f32 / 1023.0f32);
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, clf3_index_map)` @ v2.5.2.
+#[test]
+fn clf3_index_map() {
+    // Same as previous, but setting compCLFversion=3.0.
+    let ctf_file = "clf/illegal/indexMap_test2.clf";
+    let warning = "Element 'IndexMap' is not valid since CLF 3 (or CTF 2)";
+
+    let (result, parts) = warning_lines(|| load_clf_file(ctf_file));
+    result.unwrap();
+    assert!(parts.join("\n").contains(warning));
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, multiple_ops)` @ v2.5.2.
+#[test]
+fn multiple_ops() {
+    let ctf_file = "clf/multiple_ops.clf";
+    let cached_file = load_clf_file(ctf_file).unwrap();
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 9);
+
+    {
+        // Op 0 == CDL.
+        let cdl_op_data = as_cdl(&op_list[0]);
+        let desc = descriptions(&op_list[0]);
+        assert_eq!(desc.len(), 1);
+        assert_eq!(desc[0], b"scene 1 exterior look");
+        assert_eq!(cdl_op_data.get_style(), CdlOpStyle::V1_2Rev);
+        assert!(*cdl_op_data.get_slope_params() == ChannelParams::new(1.1, 1., 0.8));
+        assert!(*cdl_op_data.get_offset_params() == ChannelParams::new(-0.01, 0., 0.05));
+        assert!(*cdl_op_data.get_power_params() == ChannelParams::new(1.05, 1.15, 0.8));
+        assert_eq!(cdl_op_data.get_saturation(), 0.85);
+    }
+    {
+        // Op 1 == Lut1D.
+        let l1_op_data = as_lut1d(&op_list[1]);
+        assert_eq!(l1_op_data.get_file_output_bit_depth(), BitDepth::Uint12);
+        let desc = descriptions(&op_list[1]);
+        assert_eq!(desc.len(), 0);
+        assert_eq!(l1_op_data.get_array().get_length(), 65);
+    }
+    {
+        // Op 2 == Range.
+        // Check that the noClamp style Range became a Matrix.
+        let mat_op_data = as_matrix(&op_list[2]);
+        assert_eq!(mat_op_data.get_file_input_bit_depth(), BitDepth::Uint12);
+        assert_eq!(mat_op_data.get_file_output_bit_depth(), BitDepth::Uint10);
+
+        let out_scale = get_bit_depth_max_value(BitDepth::Uint10).unwrap();
+        let mat_scale = out_scale / get_bit_depth_max_value(BitDepth::Uint12).unwrap();
+        let array = mat_op_data.get_array();
+        assert_eq!(array.get_length(), 4);
+        assert_eq!(array.get_num_color_components(), 4);
+        assert_eq!(
+            array.get_num_values(),
+            array.get_length() * array.get_length()
+        );
+
+        let scalef: f32 = (1200.0f32 - 20.0f32) / (3760.0f32 - 256.0f32);
+        let offsetf: f32 = 20.0f32 - scalef * 256.0f32;
+        let prec: f32 = 10000.0;
+        let scale = (prec * scalef) as i32;
+        let offset = (prec * offsetf) as i32;
+
+        assert!(mat_op_data.is_diagonal());
+
+        // Check values on the diagonal.
+        assert_eq!(array.get_values().len() as c_ulong, array.get_num_values());
+        let prec = f64::from(prec);
+        assert_eq!((prec * array.get_values()[0] * mat_scale) as i32, scale);
+        assert_eq!((prec * array.get_values()[5] * mat_scale) as i32, scale);
+        assert_eq!((prec * array.get_values()[10] * mat_scale) as i32, scale);
+        assert_eq!(array.get_values()[15], 1.0);
+
+        // Check the offsets.
+        let offsets = mat_op_data.get_offsets();
+        assert_eq!((prec * offsets[0] * out_scale) as i32, offset);
+        assert_eq!((prec * offsets[1] * out_scale) as i32, offset);
+        assert_eq!((prec * offsets[2] * out_scale) as i32, offset);
+        assert_eq!(offsets[3], f64::from(0.0f32));
+    }
+    {
+        // Op 3 == Range with Clamp.
+        let range_op_data = as_range(&op_list[3]);
+        assert_eq!(range_op_data.get_file_input_bit_depth(), BitDepth::Uint10);
+        assert_eq!(range_op_data.get_file_output_bit_depth(), BitDepth::Uint10);
+    }
+    {
+        // Op 4 == Range with Clamp.
+        // A range without style defaults to clamp.
+        let range_op_data = as_range(&op_list[4]);
+        assert_eq!(range_op_data.get_file_input_bit_depth(), BitDepth::Uint10);
+        assert_eq!(range_op_data.get_file_output_bit_depth(), BitDepth::Uint10);
+    }
+    {
+        // Op 5 == Log.
+        as_log(&op_list[5]);
+    }
+    {
+        // Op 6 == Matrix with offset.
+        let mat_op_data2 = as_matrix(&op_list[6]);
+        let array2 = mat_op_data2.get_array();
+        assert_eq!(array2.get_length(), 4);
+        assert_eq!(array2.get_values()[2], -0.2);
+        let offsets2 = mat_op_data2.get_offsets();
+        assert_eq!(offsets2[1], -0.11);
+    }
+    {
+        // Op 7 == Exponent.
+        as_gamma(&op_list[7]);
+    }
+    {
+        // Op 8 == Lut3D.
+        as_lut3d(&op_list[8]);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, clf_examples)` @ v2.5.2.
+#[test]
+fn clf_examples() {
+    {
+        let ctf_file = "clf/lut1d_example.clf";
+        let cached_file = load_clf_file(ctf_file).unwrap();
+        let transform = &cached_file.transform;
+        assert_eq!(transform.get_name(), b"transform example lut1d");
+        assert_eq!(transform.get_id(), b"exlut1");
+        assert_eq!(transform.get_descriptions().len(), 1);
+        assert_eq!(
+            transform.get_descriptions()[0],
+            b"1D LUT with legal out of range values"
+        );
+        let op_list = transform.get_ops();
+        assert_eq!(op_list.len(), 1);
+        assert_eq!(op_list[0].get_type(), OpDataType::Lut1D);
+        assert_eq!(op_list[0].get_name(), b"65valueLut");
+        assert_eq!(op_list[0].get_id(), b"lut-23");
+        let lut = as_lut1d(&op_list[0]);
+        assert_eq!(lut.get_file_output_bit_depth(), BitDepth::Uint12);
+        let desc = descriptions(&op_list[0]);
+        assert_eq!(desc.len(), 2);
+        assert_eq!(
+            desc[0],
+            b"Note that the bit-depth does not constrain the legal range of values."
+        );
+        assert_eq!(desc[1], b"Formula: flipud(1.25 - 1.5 * x^2.2)");
+    }
+
+    {
+        let ctf_file = "clf/lut3d_identity_12i_16f.clf";
+        let cached_file = load_clf_file(ctf_file).unwrap();
+        let transform = &cached_file.transform;
+        assert_eq!(transform.get_name(), b"transform example lut3d");
+        assert_eq!(transform.get_id(), b"exlut2");
+        assert_eq!(transform.get_descriptions().len(), 1);
+        assert_eq!(transform.get_descriptions()[0], b" 3D LUT example ");
+        let op_list = transform.get_ops();
+        assert_eq!(op_list.len(), 1);
+        assert_eq!(op_list[0].get_name(), b"identity");
+        assert_eq!(op_list[0].get_id(), b"lut-24");
+        let lut = as_lut3d(&op_list[0]);
+        assert_eq!(lut.get_interpolation(), Interpolation::Tetrahedral);
+        assert_eq!(lut.get_file_output_bit_depth(), BitDepth::F16);
+        let desc = descriptions(&op_list[0]);
+        assert_eq!(desc.len(), 1);
+        assert_eq!(desc[0], b" 3D LUT ");
+    }
+
+    {
+        let ctf_file = "clf/matrix_3x4_example.clf";
+        let cached_file = load_clf_file(ctf_file).unwrap();
+        let transform = &cached_file.transform;
+        assert_eq!(transform.get_name(), b"transform example matrix");
+        assert_eq!(transform.get_id(), b"exmat1");
+        assert_eq!(transform.get_descriptions().len(), 2);
+        assert_eq!(transform.get_descriptions()[0], b" Matrix example ");
+        assert_eq!(transform.get_descriptions()[1], b" Used by unit tests ");
+        let op_list = transform.get_ops();
+        assert_eq!(op_list.len(), 1);
+        assert_eq!(op_list[0].get_name(), b"colorspace conversion");
+        assert_eq!(op_list[0].get_id(), b"mat-25");
+        let mat = as_matrix(&op_list[0]);
+        assert_eq!(mat.get_file_input_bit_depth(), BitDepth::Uint10);
+        assert_eq!(mat.get_file_output_bit_depth(), BitDepth::Uint12);
+        let desc = descriptions(&op_list[0]);
+        assert_eq!(desc.len(), 1);
+        assert_eq!(desc[0], b" 3x4 Matrix , 4th column is offset ");
+
+        // In file, matrix is defined by a 4x4 array.
+        let array = mat.get_array();
+        assert_eq!(array.get_length(), 4);
+        assert_eq!(array.get_num_color_components(), 4);
+        assert_eq!(
+            array.get_num_values(),
+            array.get_length() * array.get_length()
+        );
+
+        let oscale = get_bit_depth_max_value(BitDepth::Uint12).unwrap();
+        let scale = oscale / get_bit_depth_max_value(BitDepth::Uint10).unwrap();
+
+        // Check matrix ...
+        let values = array.get_values();
+        assert_eq!(values.len() as c_ulong, array.get_num_values());
+        assert_eq!(values[0] * scale, 3.60);
+        assert_eq!(values[1] * scale, 0.10);
+        assert_eq!(values[2] * scale, -0.20);
+        assert_eq!(values[3], 0.0);
+
+        assert_eq!(values[4] * scale, 0.20);
+        assert_eq!(values[5] * scale, 3.50);
+        assert_eq!(values[6] * scale, 0.10);
+        assert_eq!(values[7], 0.0);
+
+        assert_eq!(values[8] * scale, 0.10);
+        assert_eq!(values[9] * scale, -0.30);
+        assert_eq!(values[10] * scale, 3.40);
+        assert_eq!(values[11], 0.0);
+
+        assert_eq!(values[12], 0.0);
+        assert_eq!(values[13], 0.0);
+        assert_eq!(values[14], 0.0);
+        assert_eq!(values[15], 1.0);
+
+        let offsets = mat.get_offsets();
+        // ... offsets.
+        assert_eq!(offsets[0] * oscale, 0.30);
+        assert_eq!(offsets[1] * oscale, -0.05);
+        assert_eq!(offsets[2] * oscale, -0.40);
+        assert_eq!(offsets[3], 0.0);
+    }
+
+    {
+        // Test two-entries IndexMap support.
+        let ctf_file = "indexMap_test_clfv2.clf";
+        let cached_file = load_clf_file(ctf_file).unwrap();
+        let transform = &cached_file.transform;
+        assert_eq!(transform.get_name(), b"transform example lut IndexMap");
+        assert_eq!(transform.get_id(), b"exlut3");
+        assert_eq!(transform.get_descriptions().len(), 1);
+        assert_eq!(
+            transform.get_descriptions()[0],
+            b" IndexMap LUT example from spec "
+        );
+        let op_list = transform.get_ops();
+        assert_eq!(op_list.len(), 2);
+        let p_r = as_range(&op_list[0]);
+        assert_eq!(p_r.get_file_input_bit_depth(), BitDepth::Uint10);
+        assert_eq!(p_r.get_file_output_bit_depth(), BitDepth::Uint10);
+        assert_eq!(p_r.get_min_in_value(), 64. / 1023.);
+        assert_eq!(p_r.get_max_in_value(), 940. / 1023.);
+        assert_eq!(p_r.get_min_out_value(), 0. / 1023.);
+        assert_eq!(p_r.get_max_out_value(), 1023. / 1023.);
+
+        assert_eq!(op_list[1].get_name(), b"IndexMap LUT");
+        assert_eq!(op_list[1].get_id(), b"lut-26");
+        let lut = as_lut1d(&op_list[1]);
+        assert_eq!(lut.get_file_output_bit_depth(), BitDepth::F16);
+        let desc = descriptions(&op_list[1]);
+        assert_eq!(desc.len(), 1);
+        assert_eq!(desc[0], b" 1D LUT with IndexMap ");
+    }
+}
+
+/// The interpolation of the group's only transform, a 3D LUT.
+fn lut3d_interpolation(config: &Config, file_transform: &FileTransform) -> Interpolation {
+    let proc = config
+        .processor(&Transform::File(file_transform.clone()))
+        .unwrap();
+    let group = proc.create_group_transform().unwrap();
+    assert_eq!(group.num_transforms(), 1);
+    match group.transform(0).unwrap() {
+        Transform::Lut3D(lut3d) => lut3d.interpolation(),
+        other => panic!("not a 3D LUT: {other:?}"),
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, lut_interpolation_option)` @ v2.5.2.
+#[test]
+fn lut_interpolation_option() {
+    // Create empty Config to use.
+    let mut config = Config::new().unwrap();
+    config.set_major_version(2).unwrap();
+
+    // CLF file containing a LUT3D that does not specifiy an interpolation.
+    let file_path = format!("{}/clf/lut3d_17x17x17_10i_12i.clf", get_test_files_dir());
+
+    let mut file_transform = FileTransform::new();
+    file_transform.set_direction(TransformDirection::Forward);
+    file_transform.set_src(&file_path);
+
+    // Get the processor corresponding to the transform with default interpolation. LUT3D is
+    // using default interpolation.
+    assert_eq!(
+        lut3d_interpolation(&config, &file_transform),
+        Interpolation::Default
+    );
+
+    // For LUTs that do not specify an interpolation, if the FileTransform interpolation may be
+    // used, it is.
+    file_transform.set_interpolation(Interpolation::Best);
+    assert_eq!(
+        lut3d_interpolation(&config, &file_transform),
+        Interpolation::Best
+    );
+
+    // If the FileTranform interpolation is not supported by the LUT, it is ignored and default
+    // interpolation is used.
+    file_transform.set_interpolation(Interpolation::Cubic);
+    assert_eq!(
+        lut3d_interpolation(&config, &file_transform),
+        Interpolation::Default
+    );
+
+    // CTF file containing a LUT3D that specifies tetrahedral interpolation.
+    let file_path2 = format!("{}/lut3d_example_Inv.ctf", get_test_files_dir());
+
+    file_transform.set_src(&file_path2);
+
+    // Whatever the file transform interpolation, LUT will keep its interpolation.
+    file_transform.set_interpolation(Interpolation::Default);
+    assert_eq!(
+        lut3d_interpolation(&config, &file_transform),
+        Interpolation::Tetrahedral
+    );
+
+    // (INTERP_LINEAR is trilinear for LUT3D.)
+    file_transform.set_interpolation(Interpolation::Linear);
+    assert_eq!(
+        lut3d_interpolation(&config, &file_transform),
+        Interpolation::Tetrahedral
+    );
 }
