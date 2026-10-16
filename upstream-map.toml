@@ -5119,7 +5119,7 @@ path = "tests/cpu/transforms/FileTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/file_transform_tests.rs"]
 status = "partial"
-note = "p3-transforms (3.1c): basic, validate; p4-registry 4.1a: all_formats, format_by_index, is_format_extension_supported and their helpers; 4.1b: load_file_fail, and context_variables' cases 1-3 in a test of their own (the test itself, which builds a CTF file's processor, comes with the CTF reader); the others read LUT files"
+note = "p3-transforms (3.1c): basic, validate; p4-registry 4.1a: all_formats, format_by_index, is_format_extension_supported and their helpers; 4.1b: load_file_fail, and context_variables' cases 1-3 in a test of their own; p4-ctf-read-3 (4.1b, 4.1c): load_file_ok, interpolation_validity, cc_file_with_different_file_extension; context_variables itself waits for the ExposureContrast reader (4.5i): its case 3 builds the processor of exposure_contrast_linear.ctf"
 
 [[file]]
 path = "tests/cpu/transforms/FixedFunctionTransform_tests.cpp"
