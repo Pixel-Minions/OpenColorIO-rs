@@ -2827,6 +2827,13 @@ fn op_cases_g() -> Vec<Case> {
             gamma("1.2"),
         ),
         (
+            "a second ACESParams without gamma",
+            "1.5",
+            "ACES",
+            format!("{f32s} style=\"Rec2100SurroundFwd\""),
+            format!("{}        <ACESParams/>\n", gamma("1.2")),
+        ),
+        (
             "an ACESParams before the style is known",
             "1.5",
             "ACES",
@@ -3251,6 +3258,48 @@ fn op_cases_g2() -> Vec<Case> {
             style("video"),
             String::new(),
         ),
+        // Dynamic curves: their cache IDs leave the curves out, so the identity's comes first,
+        // and the next ones share it.
+        (
+            "dynamic identity curves",
+            "2",
+            style("log"),
+            "        <DynamicParameter param=\"RGB_CURVE\"/>\n".to_owned(),
+        ),
+        (
+            "dyn after curves",
+            "2",
+            style("log"),
+            format!(
+                "{}        <DynamicParameter param=\"RGB_CURVE\"/>\n",
+                curve("Red", &points("0 0 0.5 0.7 1 1"))
+            ),
+        ),
+        (
+            "dyn before curves",
+            "2",
+            style("linearRev"),
+            format!(
+                "        <DynamicParameter param=\"rgb_curve\"/>\n{}",
+                curve("Master", &points("-1 -1 0 0.3 1 1.5"))
+            ),
+        ),
+        (
+            "dynamic twice, bypassLinToLog",
+            "2.5",
+            format!("{} bypassLinToLog=\"true\"", style("linear")),
+            format!(
+                "        <DynamicParameter param=\"RGB_CURVE\"/>\n{}\
+                 \x20       <DynamicParameter PARAM=\"RGB_CURVE\"/>\n",
+                curve("Green", &points("-1 -1 0 0.3 1 1.5"))
+            ),
+        ),
+        (
+            "another dynamic parameter",
+            "2",
+            style("video"),
+            "        <DynamicParameter param=\"PRIMARY\"/>\n".to_owned(),
+        ),
     ] {
         cases.push(ctf(
             &format!("a GradingRGBCurve: {label}"),
@@ -3329,10 +3378,13 @@ fn check_applied(cases: &[Case]) {
     // Pixels always run live: the kernels and the math library belong to the machine.
     let responses = Oracle::get().batch(&calls, false);
 
-    let config = Config::create_raw().unwrap();
     let mut failures = Vec::new();
     for (&(k, dir), response) in requests.iter().zip(responses) {
         let case = &cases[k];
+        // A config per case, as `cpu_apply` makes one per call: one config would hand a case
+        // the processor of an earlier one with the same cache ID (`docs/improvements.md`
+        // I-188).
+        let config = Config::create_raw().unwrap();
         let response = response.unwrap_or_else(|e| panic!("{e}"));
         let wheel = match response.result.get("exception") {
             Some(exception) => Err((
@@ -3577,4 +3629,85 @@ fn reference_files_read_as_in_the_wheel() {
 #[test]
 fn reference_files_log_as_in_the_wheel() {
     cdl_common::check_logs(&op_cases_h());
+}
+
+/// One config's processors of two CTF files whose dynamic GradingRGBCurves differ, and of a
+/// static one, the wheel's (`processor_cache`) against the port's: which are the same object,
+/// and their cache IDs. A dynamic op's cache ID leaves its curves out, so the second file gets
+/// the first's processor (`docs/improvements.md` I-188).
+#[test]
+fn dynamic_curves_share_a_processor_as_in_the_wheel() {
+    use std::sync::Arc;
+
+    use ocio::Config;
+    use ocio_testkit::Oracle;
+
+    let body = |extra: &str| {
+        op(
+            "GradingRGBCurve",
+            "inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\"",
+            extra,
+        )
+    };
+    let dynamic = "        <DynamicParameter param=\"RGB_CURVE\"/>\n";
+    let red = curve("Red", &points("0 0 0.5 0.7 1 1"));
+    let files = [
+        ("identity", body(dynamic)),
+        ("bent", body(&format!("{red}{dynamic}"))),
+        ("static", body(&red)),
+    ];
+    let cases: Vec<(&str, Case)> = files
+        .iter()
+        .map(|(name, body)| (*name, ctf(name, "id=\"a\" version=\"2\"", body)))
+        .collect();
+    let mut failures = Vec::new();
+    for order in [[0, 1, 2], [1, 0, 2], [2, 1, 0]] {
+        let mut steps = vec![serde_json::json!(["config"])];
+        for &i in &order {
+            let (name, case) = &cases[i];
+            steps.push(serde_json::json!([
+                "processor",
+                name,
+                case.spec,
+                "TRANSFORM_DIR_FORWARD"
+            ]));
+        }
+        let response = Oracle::get().call(
+            "processor_cache",
+            serde_json::json!({"cases": [{"env": {}, "steps": steps}]}),
+            &[],
+        );
+        let result = &response.result[0];
+        assert_eq!(result["returncode"], serde_json::json!(0), "{result}");
+        let wheel = &result["report"];
+
+        // The port, in the same order, on a raw config.
+        let config = Config::create_raw().unwrap();
+        let mut made: Vec<(&str, Arc<ocio::Processor>)> = Vec::new();
+        let mut port_steps = vec![serde_json::Value::Null];
+        let mut same = serde_json::Map::new();
+        let mut ids = serde_json::Map::new();
+        for &i in &order {
+            let (name, case) = &cases[i];
+            let processor = config
+                .processor_in_direction(&case.port, TransformDirection::Forward)
+                .unwrap();
+            port_steps.push(serde_json::Value::Null);
+            let first = made
+                .iter()
+                .find(|(_, p)| Arc::ptr_eq(p, &processor))
+                .map_or(*name, |(n, _)| *n);
+            same.insert((*name).to_owned(), serde_json::json!(first));
+            ids.insert(
+                (*name).to_owned(),
+                serde_json::json!(processor.cache_id().unwrap()),
+            );
+            made.push((name, processor));
+        }
+        let port = serde_json::json!({"steps": port_steps, "same": same, "cache_ids": ids});
+        if *wheel != port {
+            failures.push(format!("{order:?}\n  wheel {wheel}\n  port  {port}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

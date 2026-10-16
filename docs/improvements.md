@@ -2458,6 +2458,65 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `CtfReaderAcesParamsElt::start`; `crates/ocio/tests/file_format_ctf_oracle.rs` checks the
   message with the wheel).
 
+### I-188. One config gives two files' dynamic RGB curves the same processor
+
+- **Upstream:** `Config::getProcessor` (`Config.cpp:4849-4873` @ v2.5.2) reuses a cached
+  processor whose cache ID equals the new one's (the fallback that
+  `OCIO_DISABLE_CACHE_FALLBACK` turns off). A dynamic GradingRGBCurve op leaves its curves
+  out of its cache ID (`GradingRGBCurveOpData::getCacheID`,
+  `ops/gradingrgbcurve/GradingRGBCurveOpData.cpp:127-150`: only a static one writes them), so
+  two CTF files whose GradingRGBCurves are dynamic (`<DynamicParameter param="RGB_CURVE"/>`),
+  with the same style and direction but different curves, get the same cache ID, and the
+  second file's processor is the first's, with the first file's curves. With two such files,
+  identity curves (`a`) and a bent red curve (`b`), reading `a` then `b` in one raw config
+  gives `b` the identity: `applyRGBA([0.25, 0.25, 0.25, 1])` is `0.25` for both, against
+  `0.37524959` for `b` read first (the verifier's `dyn_cache.py`, 2026-10-16).
+- **Who notices:** an application that reads two such files through one config, without
+  setting the curves through the dynamic property afterwards.
+- **A fix:** keep the fallback to processors without dynamic properties, or put the dynamic
+  values in the cache ID.
+- **Status:** matched in `p4-ctf-read-3`: the port's processor cache does the same
+  (`crates/ocio/src/config.rs`, `processor_with_context`);
+  `dynamic_curves_share_a_processor_as_in_the_wheel`
+  (`crates/ocio/tests/file_format_ctf_oracle.rs`) checks which processors the wheel and the
+  port share, and their cache IDs, with the oracle's `processor_cache`.
+
+### I-189. A GradingRGBCurve's bypassLinToLog accepts only "true"
+
+- **Upstream:** `CTFReaderGradingRGBCurveElt::start`
+  (`fileformats/ctf/CTFReaderHelper.cpp:2592-2640` @ v2.5.2) refuses any `bypassLinToLog`
+  value other than `true` (ignoring case), `false` included, with "Unknown bypassLinToLog
+  value: 'false' while parsing RGBCurve.", where the attribute is a boolean.
+- **Who notices:** a CTF writer that spells out the default, `bypassLinToLog="false"`.
+- **A fix:** accept `false` as the default.
+- **Status:** matched in `p4-ctf-read-3`
+  (`crates/ocio/src/fileformats/ctf/ctf_reader_helper.rs`, `grading_rgb_curve_start`);
+  `op_cases_g2`'s "bypassLinToLog false" checks it with the wheel.
+
+### I-190. A curve's Slopes before its ControlPoints count the default curve's points
+
+- **Upstream:** `CTFReaderGradingCurveSlopesElt::end` (`CTFReaderHelper.cpp:2940-2954` @
+  v2.5.2) checks the number of slopes against the number of control points the curve has when
+  the Slopes element ends. Before the ControlPoints element, that is the style's default curve
+  (3 points for the log and video styles), so the same elements in the other order are
+  refused or accepted differently, and a later ControlPoints keeps the slopes it doesn't
+  replace (`setNumControlPoints` resizes them).
+- **Who notices:** a CTF file that writes a curve's Slopes before its ControlPoints.
+- **A fix:** keep the slopes until the curve ends, and check them against its final points.
+- **Status:** matched in `p4-ctf-read-3` (`ctf_reader_helper.rs`,
+  `CtfReaderGradingCurveSlopesElt`); `op_cases_g2`'s "slopes before the control points" and
+  "slopes of the default curve" check it with the wheel.
+
+### I-191. The ACES reader's missing-style message starts with a lower-case letter
+
+- **Upstream:** `CTFReaderACESElt::start` (`CTFReaderHelper.cpp:1209-1239` @ v2.5.2) refuses an
+  ACES element without a style with "style parameter for FixedFunction is missing.", where the
+  FixedFunction and Function readers (1427-1473, 1506-1534) say "Style parameter ...".
+- **Who notices:** a reader of the error of a deprecated CTF 1.x ACES element.
+- **A fix:** capitalize it as the others do.
+- **Status:** matched in `p4-ctf-read-3` (`ctf_reader_helper.rs`, `fixed_function_start`);
+  `op_cases_g`'s "a missing style" ACES case checks it with the wheel.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
