@@ -351,6 +351,18 @@ fn ctf_cases() -> Vec<Case> {
             "    <Description>&bad;</Description>\n",
         ),
         case("an empty file", "lut.ctf", b""),
+        // Text of another format: the format check reads its lines and finds no ProcessList.
+        case(
+            "a file of another format",
+            "lut.ctf",
+            b"3DMESH\nMesh 4 12\n0 64 128 1023\n",
+        ),
+        // The same through the readers of its own extension, which fail, then every format.
+        case(
+            "a .3dl that fails, read by every format",
+            "lut.3dl",
+            b"3DMESH\nMesh 4 12\nLUT8\ngamma 1.0\n",
+        ),
         // The format check's 5 KiB.
         case(
             "a ProcessList after 5 KiB of lines",
