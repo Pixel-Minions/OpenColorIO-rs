@@ -72,19 +72,22 @@ note = "S4: scalar profile. AVX512RGBAPack as per-value Load/Store, with LoadMas
 path = "src/OpenColorIO/Baker.cpp"
 kind = "src"
 target = ["crates/ocio/src/baker.rs"]
-status = "todo"
+status = "done"
+note = "p4-baker 4.8a: the settings, the format queries and bake's checks, against the wheel in crates/ocio/tests/baker_oracle.rs; the formats' bakes come in 4.8b-d"
 
 [[file]]
 path = "src/OpenColorIO/BakingUtils.cpp"
 kind = "src"
 target = ["crates/ocio/src/baking_utils.rs"]
-status = "todo"
+status = "done"
+note = "p4-baker 4.8a"
 
 [[file]]
 path = "src/OpenColorIO/BakingUtils.h"
 kind = "src"
 target = ["crates/ocio/src/baking_utils.rs"]
-status = "todo"
+status = "done"
+note = "p4-baker 4.8a"
 
 [[file]]
 path = "src/OpenColorIO/BitDepthUtils.cpp"

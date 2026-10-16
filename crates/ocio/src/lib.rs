@@ -5,6 +5,8 @@
 //! (PLAN.md §2): results, text output, errors and accepted configs.
 #![forbid(unsafe_code)]
 
+pub mod baker;
+pub mod baking_utils;
 pub mod builtinconfigs;
 pub mod caching;
 pub mod color_space;
@@ -37,6 +39,7 @@ mod file_tests;
 #[cfg(test)]
 mod test_env;
 
+pub use baker::Baker;
 pub use builtinconfigs::builtin_config_registry::{
     BuiltinConfigRegistry, OCIO_BUILTIN_URI_PREFIX, resolve_config_path,
 };
