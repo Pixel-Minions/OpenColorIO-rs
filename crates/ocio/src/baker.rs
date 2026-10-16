@@ -484,3 +484,7 @@ impl Baker {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "baker_tests.rs"]
+mod tests;

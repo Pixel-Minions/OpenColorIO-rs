@@ -88,6 +88,24 @@ colorspaces:
   to_reference: !<MatrixTransform> {matrix: [0.5, 0, 0, 0, 0, 0.5, 0, 0, 0, 0, 0.5, 0, 0, 0, 0, 1], offset: [0.5, 0.5, 0.5, 0]}
 
 - !<ColorSpace>
+  name: lin_lg2
+  isdata: false
+  allocation: lg2
+  allocationvars: [-8, 5, 0.00390625]
+
+- !<ColorSpace>
+  name: lin_lg2_two
+  isdata: false
+  allocation: lg2
+  allocationvars: [-4, 2]
+
+- !<ColorSpace>
+  name: lin_uniform_vars
+  isdata: false
+  allocation: uniform
+  allocationvars: [-0.5, 2]
+
+- !<ColorSpace>
   name: negative
   isdata: false
   from_reference: !<MatrixTransform> {matrix: [-1, 0, 0, 0, 0, -1000, 0, 0, 0, 0, 0.5, 0, 0, 0, 0, 1], offset: [-0.5, 0.25, -1e-7, 0]}
@@ -493,6 +511,311 @@ fn resolve() -> Vec<BakeCase> {
     cases
 }
 
+/// 3DL as flame and lustre: cubes of 12-bit codes after a 10-bit shaper of any size (a
+/// negative one is refused as the C++ library refuses the vector, I-200).
+fn tdl() -> Vec<BakeCase> {
+    let mut cases = Vec::new();
+    for format in ["flame", "lustre"] {
+        for target in PER_CHANNEL.iter().chain(["sat"].iter()) {
+            cases.push(case(
+                &format!("{format} to {target}, 3"),
+                &[
+                    InputSpace("lin"),
+                    TargetSpace(target),
+                    CubeSize(3),
+                    Format(format),
+                ],
+            ));
+        }
+        for size in [2, 5, 9, 17] {
+            cases.push(case(
+                &format!("{format} of size {size}"),
+                &[
+                    InputSpace("lin"),
+                    TargetSpace("gamma"),
+                    CubeSize(size),
+                    Format(format),
+                ],
+            ));
+        }
+        cases.push(case(
+            &format!("{format} of the default size"),
+            &[InputSpace("lin"), TargetSpace("sat"), Format(format)],
+        ));
+        for shaper in [-5, 0, 1, 2, 7] {
+            cases.push(case(
+                &format!("{format} with a shaper size of {shaper}"),
+                &[
+                    InputSpace("lin"),
+                    TargetSpace("sat"),
+                    ShaperSize(shaper),
+                    CubeSize(2),
+                    Format(format),
+                ],
+            ));
+        }
+    }
+    cases.push(case(
+        "lustre of size 33",
+        &[
+            InputSpace("lin"),
+            TargetSpace("gamma"),
+            CubeSize(33),
+            Format("lustre"),
+        ],
+    ));
+    cases.push(case(
+        "lustre of size 65",
+        &[
+            InputSpace("lin"),
+            TargetSpace("lin"),
+            CubeSize(65),
+            Format("lustre"),
+        ],
+    ));
+    cases.push(case(
+        "flame named in capitals",
+        &[
+            InputSpace("lin"),
+            TargetSpace("sat"),
+            CubeSize(2),
+            Format("Flame"),
+        ],
+    ));
+    cases
+}
+
+/// Truelight: a cube after an identity shaper over its indices.
+fn truelight() -> Vec<BakeCase> {
+    let mut cases = Vec::new();
+    for target in PER_CHANNEL.iter().chain(["sat"].iter()) {
+        cases.push(case(
+            &format!("truelight to {target}"),
+            &[
+                InputSpace("lin"),
+                TargetSpace(target),
+                ShaperSize(4),
+                CubeSize(3),
+                Format("truelight"),
+            ],
+        ));
+    }
+    for (shaper, cube) in [(-1, 2), (0, 2), (1, 2), (2, 2), (7, 4), (3, 9)] {
+        cases.push(case(
+            &format!("truelight with shaper {shaper} and cube {cube}"),
+            &[
+                InputSpace("lin"),
+                TargetSpace("gamma"),
+                ShaperSize(shaper),
+                CubeSize(cube),
+                Format("truelight"),
+            ],
+        ));
+    }
+    cases.push(case(
+        "truelight of the default sizes",
+        &[InputSpace("lin"), TargetSpace("sat"), Format("truelight")],
+    ));
+    cases.push(case(
+        "truelight named in capitals",
+        &[
+            InputSpace("lin"),
+            TargetSpace("sat"),
+            CubeSize(2),
+            Format("TrueLight"),
+        ],
+    ));
+    cases
+}
+
+/// Houdini: a 1D LUT without crosstalk, a 3D LUT with it, a prelut and a 3D LUT with a shaper.
+fn houdini() -> Vec<BakeCase> {
+    let mut cases = Vec::new();
+    for target in PER_CHANNEL {
+        cases.push(case(
+            &format!("houdini 1D to {target}"),
+            &[
+                InputSpace("lin"),
+                TargetSpace(target),
+                CubeSize(4),
+                Format("houdini"),
+            ],
+        ));
+        cases.push(case(
+            &format!("houdini 1D to {target}, shaper log2"),
+            &[
+                InputSpace("lin"),
+                TargetSpace(target),
+                ShaperSpace("log2"),
+                CubeSize(4),
+                Format("houdini"),
+            ],
+        ));
+    }
+    for size in [2, 3] {
+        cases.push(case(
+            &format!("houdini 3D, {size}"),
+            &[
+                InputSpace("lin"),
+                TargetSpace("sat"),
+                CubeSize(size),
+                Format("houdini"),
+            ],
+        ));
+    }
+    for shaper in [
+        "lin",
+        "log2",
+        "gamma",
+        "big",
+        "nans",
+        "nans_green",
+        "negative",
+        "double",
+    ] {
+        cases.push(case(
+            &format!("houdini 3D+1D, shaper {shaper}"),
+            &[
+                InputSpace("lin"),
+                TargetSpace("sat"),
+                ShaperSpace(shaper),
+                ShaperSize(5),
+                CubeSize(2),
+                Format("houdini"),
+            ],
+        ));
+    }
+    cases.push(case(
+        "houdini 1D of the default size",
+        &[InputSpace("lin"), TargetSpace("gamma"), Format("houdini")],
+    ));
+    cases.push(case(
+        "houdini 3D+1D of the default sizes",
+        &[
+            InputSpace("lin"),
+            TargetSpace("sat"),
+            ShaperSpace("log2"),
+            Format("houdini"),
+        ],
+    ));
+    cases.push(case(
+        "houdini with a look and a display and view",
+        &[
+            InputSpace("lin"),
+            DisplayView("disp", "sat"),
+            Looks("brighten"),
+            ShaperSpace("gamma"),
+            ShaperSize(3),
+            CubeSize(2),
+            Format("houdini"),
+        ],
+    ));
+    cases.push(case(
+        "houdini named in capitals",
+        &[
+            InputSpace("lin"),
+            TargetSpace("sat"),
+            CubeSize(2),
+            Format("Houdini"),
+        ],
+    ));
+    cases
+}
+
+/// cineSpace: a cube after the shaper space's prelut, or after one made from the input
+/// space's allocation; the metadata's children in its block.
+fn cinespace() -> Vec<BakeCase> {
+    let mut cases = Vec::new();
+    for target in PER_CHANNEL.iter().chain(["sat"].iter()) {
+        cases.push(case(
+            &format!("cinespace to {target}"),
+            &[
+                InputSpace("lin"),
+                TargetSpace(target),
+                CubeSize(2),
+                Format("cinespace"),
+            ],
+        ));
+    }
+    for shaper in [
+        "lin",
+        "log2",
+        "gamma",
+        "big",
+        "nans",
+        "nans_green",
+        "negative",
+        "double",
+    ] {
+        for size in [2, 5] {
+            cases.push(case(
+                &format!("cinespace, shaper {shaper}, {size}"),
+                &[
+                    InputSpace("lin"),
+                    TargetSpace("sat"),
+                    ShaperSpace(shaper),
+                    ShaperSize(size),
+                    CubeSize(2),
+                    Format("cinespace"),
+                ],
+            ));
+        }
+    }
+    for input in ["lin_lg2", "lin_lg2_two", "lin_uniform_vars", "log2"] {
+        for shaper_size in [-1, 0, 1, 4] {
+            cases.push(case(
+                &format!("cinespace from {input}, shaper size {shaper_size}"),
+                &[
+                    InputSpace(input),
+                    TargetSpace("sat"),
+                    ShaperSize(shaper_size),
+                    CubeSize(2),
+                    Format("cinespace"),
+                ],
+            ));
+        }
+    }
+    cases.push(case(
+        "cinespace of the default sizes",
+        &[InputSpace("lin"), TargetSpace("sat"), Format("cinespace")],
+    ));
+    cases.push(case(
+        "cinespace of the default sizes with a shaper",
+        &[
+            InputSpace("lin"),
+            TargetSpace("sat"),
+            ShaperSpace("log2"),
+            Format("cinespace"),
+        ],
+    ));
+    cases.push(
+        case(
+            "cinespace with metadata",
+            &[
+                InputSpace("lin"),
+                TargetSpace("gamma"),
+                CubeSize(2),
+                Format("cinespace"),
+            ],
+        )
+        .with_metadata(&[
+            Metadata::Child("Description", "first"),
+            Metadata::Child("Other", "END METADATA"),
+            Metadata::Child("Empty", ""),
+        ]),
+    );
+    cases.push(case(
+        "cinespace named in capitals",
+        &[
+            InputSpace("lin"),
+            TargetSpace("sat"),
+            CubeSize(2),
+            Format("CineSpace"),
+        ],
+    ));
+    cases
+}
+
 #[test]
 fn spi1d_bakes_as_in_the_wheel() {
     check_bakes(&spi1d());
@@ -511,4 +834,24 @@ fn cube_and_itx_bakes_as_in_the_wheel() {
 #[test]
 fn resolve_bakes_as_in_the_wheel() {
     check_bakes(&resolve());
+}
+
+#[test]
+fn tdl_bakes_as_in_the_wheel() {
+    check_bakes(&tdl());
+}
+
+#[test]
+fn truelight_bakes_as_in_the_wheel() {
+    check_bakes(&truelight());
+}
+
+#[test]
+fn houdini_bakes_as_in_the_wheel() {
+    check_bakes(&houdini());
+}
+
+#[test]
+fn cinespace_bakes_as_in_the_wheel() {
+    check_bakes(&cinespace());
 }

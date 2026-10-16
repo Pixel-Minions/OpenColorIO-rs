@@ -3,8 +3,7 @@
 
 //! The cineSpace `.csp` format: a per-channel prelut (resampled to a 65536-entry 1D LUT
 //! through a cubic interpolator) and a 1D or a 3D LUT (red fastest). A port of
-//! `src/OpenColorIO/fileformats/FileFormatCSP.cpp` @ v2.5.2; its `bake` comes with the baker
-//! (WP 4.8).
+//! `src/OpenColorIO/fileformats/FileFormatCSP.cpp` @ v2.5.2.
 //!
 //! ```text
 //! CSPLUTV100
@@ -32,18 +31,28 @@ use std::any::Any;
 use std::ffi::c_ulong;
 use std::sync::Arc;
 
+use ocio_ops::cfmt::{FloatField, OStringStream};
 use ocio_ops::exception::{Exception, Result};
-use ocio_ops::math_utils::{sse_add, sse_mul, sse_sub, vecs_equal_with_rel_error};
+use ocio_ops::image_desc::PackedImageDesc;
+use ocio_ops::math_utils::{sse_add, sse_mul, sse_sub, std_max, vecs_equal_with_rel_error};
 use ocio_ops::op::OpVec;
-use ocio_ops::open_color_types::{BitDepth, TransformDirection, combine_transform_directions};
+use ocio_ops::open_color_types::{
+    Allocation, BitDepth, OptimizationFlags, TransformDirection, combine_transform_directions,
+};
 use ocio_ops::ops::lut1d::Lut1DOpData;
-use ocio_ops::ops::lut1d::lut1d_op::create_lut1d_op;
-use ocio_ops::ops::lut3d::lut3d_op::{create_lut3d_op, get_lut3d_index_blue_fast};
+use ocio_ops::ops::lut1d::lut1d_op::{create_lut1d_op, generate_identity_lut1d};
+use ocio_ops::ops::lut3d::lut3d_op::{
+    Lut3DOrder, create_lut3d_op, generate_identity_lut3d, get_lut3d_index_blue_fast,
+};
 use ocio_ops::ops::lut3d::lut3d_op_data::{Interpolation, Lut3DOpData, MAX_3D_LUT_LENGTH};
 use ocio_ops::ops::matrix::matrix_op::create_min_max_op;
 use ocio_ops::parse_utils::{string_to_int, string_vec_to_float_vec, string_vec_to_int_vec};
 use ocio_ops::utils::string_utils::{split_by_white_spaces, starts_with, trim, upper};
 
+use crate::baker::Baker;
+use crate::baking_utils::{
+    get_input_to_target_processor, get_shaper_to_input_processor, get_shaper_to_target_processor,
+};
 use crate::config::Config;
 use crate::context::Context;
 use crate::fileformats::file_format_utils::{
@@ -52,6 +61,8 @@ use crate::fileformats::file_format_utils::{
 use crate::fileformats::input_stream::InputStream;
 use crate::lut_limits::MAX_1D_LUT_LENGTH;
 use crate::parse_utils::nextline;
+use crate::transform::Transform;
+use crate::transforms::allocation_transform::AllocationTransform;
 use crate::transforms::file_format::{
     CachedFile, CachedFileRcPtr, FileFormat, FormatBakeCapabilities, FormatCapabilities, FormatInfo,
 };
@@ -677,6 +688,181 @@ impl FileFormat for LocalFileFormat {
         interp: Interpolation,
     ) -> Result<CachedFileRcPtr> {
         Ok(Arc::new(self.read_file(istream, file_name, interp)?))
+    }
+
+    /// Bakes `baker`'s transform into a cube (32 per side by default, 2 at least), red
+    /// fastest, after a prelut: the shaper space's (1024 entries by default) when there is
+    /// one, else one made from the input space's allocation (2 entries for a uniform one).
+    /// The metadata's children go in the metadata block. The format name isn't checked.
+    ///
+    /// Port of `LocalFileFormat::bake` (FileFormatCSP.cpp:701-849 @ v2.5.2).
+    fn bake(&self, baker: &Baker, _format_name: &[u8], ostream: &mut OStringStream) -> Result<()> {
+        const DEFAULT_CUBE_SIZE: i32 = 32;
+        const DEFAULT_SHAPER_SIZE: i32 = 1024;
+
+        let config = baker
+            .config()
+            .expect("Baker::bake checks the config before a format bakes");
+
+        // TODO: Add 1D/3D LUT writing switch, using hasChannelCrosstalk.
+        let mut cube_size = baker.cube_size();
+        if cube_size == -1 {
+            cube_size = DEFAULT_CUBE_SIZE;
+        }
+        cube_size = std_max(2, cube_size); // smallest cube is 2x2x2
+
+        let num_entries = cube_size * cube_size * cube_size;
+        let mut cube_data = vec![0.0f32; (num_entries * 3) as usize];
+        generate_identity_lut3d(&mut cube_data, cube_size, 3, Lut3DOrder::FastRed)?;
+
+        let mut shaper_in_data: Vec<f32> = Vec::new();
+        let mut shaper_out_data: Vec<f32> = Vec::new();
+
+        // Use an explicitly shaper space.
+        // TODO: Use the optional allocation for the shaper space,
+        //       instead of the implied 0-1 uniform allocation.
+        let shaper_space = baker.shaper_space();
+        if !shaper_space.is_empty() {
+            let mut shaper_size = baker.shaper_size();
+            if shaper_size == -1 {
+                shaper_size = DEFAULT_SHAPER_SIZE;
+            }
+
+            shaper_out_data.resize((shaper_size * 3) as usize, 0.0);
+            shaper_in_data.resize((shaper_size * 3) as usize, 0.0);
+            generate_identity_lut1d(&mut shaper_out_data, shaper_size, 3);
+            generate_identity_lut1d(&mut shaper_in_data, shaper_size, 3);
+
+            let shaper_to_input = get_shaper_to_input_processor(baker)?;
+            let mut shaper_in_img =
+                PackedImageDesc::new(&mut shaper_in_data[..], shaper_size as usize, 1, 3)?;
+            shaper_to_input.apply(&mut shaper_in_img)?;
+
+            let shaper_to_target = get_shaper_to_target_processor(baker)?;
+            let mut cube_img =
+                PackedImageDesc::new(&mut cube_data[..], num_entries as usize, 1, 3)?;
+            shaper_to_target.apply(&mut cube_img)?;
+        } else {
+            // A shaper is not specified, let's fake one, using the input space allocation as
+            // our guide.
+
+            let input_color_space = config
+                .color_space(baker.input_space())
+                .expect("Baker::bake checks the input space");
+
+            // Let's make an allocation transform for this colorspace.
+            let mut allocation_transform = AllocationTransform::new();
+            allocation_transform.set_allocation(input_color_space.allocation());
+
+            // numVars may be '0'.
+            let num_vars = input_color_space.allocation_num_vars();
+            if num_vars > 0 {
+                let vars = input_color_space.allocation_vars().to_vec();
+                allocation_transform.set_vars(&vars);
+            } else {
+                allocation_transform.set_vars(&[]);
+            }
+
+            // What size shaper should we make?
+            let mut shaper_size = baker.shaper_size();
+            if shaper_size == -1 {
+                shaper_size = DEFAULT_SHAPER_SIZE;
+            }
+            shaper_size = std_max(2, shaper_size);
+            if input_color_space.allocation() == Allocation::Uniform {
+                // This is an awesome optimization.
+                // If we know it's a uniform scaling, only 2 points will suffice!
+                shaper_size = 2;
+            }
+            shaper_out_data.resize((shaper_size * 3) as usize, 0.0);
+            shaper_in_data.resize((shaper_size * 3) as usize, 0.0);
+            generate_identity_lut1d(&mut shaper_out_data, shaper_size, 3);
+            generate_identity_lut1d(&mut shaper_in_data, shaper_size, 3);
+
+            // Apply the forward to the allocation to the output shaper y axis, and the cube
+            let shaper_to_input = config
+                .processor_in_direction(
+                    &Transform::from(allocation_transform),
+                    TransformDirection::Inverse,
+                )?
+                .optimized_cpu_processor(OptimizationFlags::LOSSLESS)?;
+
+            let mut shaper_in_img =
+                PackedImageDesc::new(&mut shaper_in_data[..], shaper_size as usize, 1, 3)?;
+            shaper_to_input.apply(&mut shaper_in_img)?;
+            let mut cube_img =
+                PackedImageDesc::new(&mut cube_data[..], num_entries as usize, 1, 3)?;
+            shaper_to_input.apply(&mut cube_img)?;
+
+            // Apply the 3D LUT to the remainder (from the input to the output).
+            let input_to_target = get_input_to_target_processor(baker)?;
+            input_to_target.apply(&mut cube_img)?;
+        }
+
+        // Write out the file.
+        ostream.put_str("CSPLUTV100\n");
+        ostream.put_str("3D\n");
+        ostream.put_str("\n");
+        ostream.put_str("BEGIN METADATA\n");
+        let metadata = baker.format_metadata();
+        let nb = metadata.get_num_children_elements();
+        for i in 0..nb {
+            let child = metadata.get_child_element(i)?;
+            ostream.put_bytes(child.get_element_value());
+            ostream.put_str("\n");
+        }
+        ostream.put_str("END METADATA\n");
+        ostream.put_str("\n");
+
+        // Write out the 1D Prelut.
+        ostream.float_field = FloatField::Fixed;
+        ostream.precision = 6;
+
+        if shaper_out_data.len() != shaper_in_data.len() {
+            return Err(Exception::new("Internal shaper size exception."));
+        }
+
+        if !shaper_in_data.is_empty() {
+            let points = shaper_in_data.len() / 3;
+            for c in 0..3 {
+                ostream.put_u64(points as u64);
+                ostream.put_str("\n");
+                for i in 0..points {
+                    if i != 0 {
+                        ostream.put_str(" ");
+                    }
+                    ostream.put_f32(shaper_in_data[3 * i + c]);
+                }
+                ostream.put_str("\n");
+
+                for i in 0..points {
+                    if i != 0 {
+                        ostream.put_str(" ");
+                    }
+                    ostream.put_f32(shaper_out_data[3 * i + c]);
+                }
+                ostream.put_str("\n");
+            }
+        }
+        ostream.put_str("\n");
+
+        // Write out the 3D Cube.
+        ostream.put_i32(cube_size);
+        ostream.put_str(" ");
+        ostream.put_i32(cube_size);
+        ostream.put_str(" ");
+        ostream.put_i32(cube_size);
+        ostream.put_str("\n");
+        for i in 0..num_entries as usize {
+            ostream.put_f32(cube_data[3 * i]);
+            ostream.put_str(" ");
+            ostream.put_f32(cube_data[3 * i + 1]);
+            ostream.put_str(" ");
+            ostream.put_f32(cube_data[3 * i + 2]);
+            ostream.put_str("\n");
+        }
+        ostream.put_str("\n");
+        Ok(())
     }
 
     /// Appends, forward, the prelut's min/max op and the prelut, then the 1D or the 3D LUT;

@@ -2,9 +2,9 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Tests of the cineSpace format: `tests/cpu/fileformats/FileFormatCSP_tests.cpp` @ v2.5.2.
-//! Its `complete_3d`, `shaper_hdr` and `no_shaper` bake, and come with the baker (WP 4.8).
 
 use super::*;
+use ocio_ops::utils::string_utils::split_by_lines;
 use ocio_testkit::upstream::{check_close, check_throw_what};
 
 /// Reads `text` as upstream's tests do (`tester.read(stream, "file.name", interp)`).
@@ -784,5 +784,274 @@ fn a_metadata_block_never_closed_is_an_error() {
             read_csp(text, Interpolation::Default),
             "Metadata block of csp LUT file.name is not closed.",
         );
+    }
+}
+
+/// The floats of two lines are close: upstream's `compareFloats`.
+///
+/// Port of `compareFloats` (FileFormatCSP_tests.cpp:14-30 @ v2.5.2).
+fn compare_floats(floats1: &[u8], floats2: &[u8]) {
+    // Number comparison.
+    let strings1 = split_by_white_spaces(trim(floats1));
+    let mut numbers1 = Vec::new();
+    string_vec_to_float_vec(&mut numbers1, &strings1);
+
+    let strings2 = split_by_white_spaces(trim(floats2));
+    let mut numbers2 = Vec::new();
+    string_vec_to_float_vec(&mut numbers2, &strings2);
+
+    assert_eq!(numbers1.len(), numbers2.len());
+    for j in 0..numbers1.len() {
+        check_close(numbers1[j], numbers2[j], 1e-5f32);
+    }
+}
+
+/// A config with the `lnf` reference space, as the bake tests start.
+fn lnf_config() -> crate::Config {
+    let mut config = crate::Config::new().unwrap();
+    let mut cs = crate::ColorSpace::new();
+    cs.set_name("lnf");
+    cs.set_family("lnf");
+    config.add_color_space(&cs).unwrap();
+    config
+        .set_role(ocio_ops::parse_utils::ROLE_REFERENCE, Some(cs.name()))
+        .unwrap();
+    config
+}
+
+/// A color space `name` of a CDL with the offset `rgb`, from the reference.
+fn offset_space(name: &str, rgb: [f64; 3]) -> crate::ColorSpace {
+    let mut cs = crate::ColorSpace::new();
+    cs.set_name(name);
+    cs.set_family(name);
+    let mut transform1 = crate::CdlTransform::new();
+    transform1.set_offset(&rgb);
+    cs.set_transform(
+        Some(&crate::Transform::from(transform1)),
+        ocio_ops::open_color_types::ColorSpaceDirection::FromReference,
+    )
+    .unwrap();
+    cs
+}
+
+/// Adds a description child to the baker's metadata.
+fn describe(baker: &mut Baker, text: &[u8]) {
+    baker
+        .format_metadata_mut()
+        .add_child_element(
+            Some(ocio_ops::format_metadata::METADATA_DESCRIPTION),
+            Some(text),
+        )
+        .unwrap();
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCSP, complete_3d)` @ v2.5.2.
+#[test]
+fn complete_3d() {
+    // Check baker output.
+    let mut config = lnf_config();
+    {
+        let mut cs = crate::ColorSpace::new();
+        cs.set_name("shaper");
+        cs.set_family("shaper");
+        let mut transform1 = crate::ExponentTransform::new();
+        let test: [f64; 4] = [2.6, 2.6, 2.6, 1.0];
+        transform1.set_value(&test);
+        cs.set_transform(
+            Some(&crate::Transform::from(transform1)),
+            ocio_ops::open_color_types::ColorSpaceDirection::ToReference,
+        )
+        .unwrap();
+        config.add_color_space(&cs).unwrap();
+    }
+    config
+        .add_color_space(&offset_space("target", [0.1, 0.1, 0.1]))
+        .unwrap();
+
+    let bout = concat!(
+        "CSPLUTV100\n",
+        "3D\n",
+        "\n",
+        "BEGIN METADATA\n",
+        "date: 2011:02:21 15:22:55\n",
+        "Baked by OCIO\n",
+        "END METADATA\n",
+        "\n",
+        "10\n",
+        "0.000000 0.003303 0.020028 0.057476 0.121430 0.216916 0.348468 0.520265 0.736213 1.000000\n",
+        "0.000000 0.111111 0.222222 0.333333 0.444444 0.555556 0.666667 0.777778 0.888889 1.000000\n",
+        "10\n",
+        "0.000000 0.003303 0.020028 0.057476 0.121430 0.216916 0.348468 0.520265 0.736213 1.000000\n",
+        "0.000000 0.111111 0.222222 0.333333 0.444444 0.555556 0.666667 0.777778 0.888889 1.000000\n",
+        "10\n",
+        "0.000000 0.003303 0.020028 0.057476 0.121430 0.216916 0.348468 0.520265 0.736213 1.000000\n",
+        "0.000000 0.111111 0.222222 0.333333 0.444444 0.555556 0.666667 0.777778 0.888889 1.000000\n",
+        "\n",
+        "2 2 2\n",
+        "0.100000 0.100000 0.100000\n",
+        "1.100000 0.100000 0.100000\n",
+        "0.100000 1.100000 0.100000\n",
+        "1.100000 1.100000 0.100000\n",
+        "0.100000 0.100000 1.100000\n",
+        "1.100000 0.100000 1.100000\n",
+        "0.100000 1.100000 1.100000\n",
+        "1.100000 1.100000 1.100000\n",
+        "\n",
+    );
+
+    let mut baker = Baker::new();
+    baker.set_config(&config);
+    describe(&mut baker, b"date: 2011:02:21 15:22:55");
+    describe(&mut baker, b"Baked by OCIO");
+    baker.set_format("cinespace").unwrap();
+    baker.set_input_space("lnf");
+    baker.set_shaper_space("shaper");
+    baker.set_target_space("target");
+    baker.set_shaper_size(10);
+    baker.set_cube_size(2);
+    let mut output = Vec::new();
+    baker.bake(&mut output).unwrap();
+
+    //
+    let osvec = split_by_lines(&output);
+    let resvec = split_by_lines(bout.as_bytes());
+    assert_eq!(osvec.len(), resvec.len());
+    for i in 0..resvec.len() {
+        if i > 6 {
+            // Number comparison.
+            compare_floats(&osvec[i], &resvec[i]);
+        } else {
+            // text comparison
+            assert_eq!(osvec[i], resvec[i]);
+        }
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCSP, shaper_hdr)` @ v2.5.2.
+#[test]
+fn shaper_hdr() {
+    // Check baker output.
+    let mut config = lnf_config();
+    config
+        .add_color_space(&offset_space("lnf_tweak", [2.0, -2.0, 0.9]))
+        .unwrap();
+    config
+        .add_color_space(&offset_space("target", [0.1, 0.1, 0.1]))
+        .unwrap();
+
+    let bout = concat!(
+        "CSPLUTV100\n",
+        "3D\n",
+        "\n",
+        "BEGIN METADATA\n",
+        "date: 2011:02:21 15:22:55\n",
+        "END METADATA\n",
+        "\n",
+        "10\n",
+        "2.000000 2.111111 2.222222 2.333333 2.444444 2.555556 2.666667 2.777778 2.888889 3.000000\n",
+        "0.000000 0.111111 0.222222 0.333333 0.444444 0.555556 0.666667 0.777778 0.888889 1.000000\n",
+        "10\n",
+        "-2.000000 -1.888889 -1.777778 -1.666667 -1.555556 -1.444444 -1.333333 -1.222222 -1.111111 -1.000000\n",
+        "0.000000 0.111111 0.222222 0.333333 0.444444 0.555556 0.666667 0.777778 0.888889 1.000000\n",
+        "10\n",
+        "0.900000 1.011111 1.122222 1.233333 1.344444 1.455556 1.566667 1.677778 1.788889 1.900000\n",
+        "0.000000 0.111111 0.222222 0.333333 0.444444 0.555556 0.666667 0.777778 0.888889 1.000000\n",
+        "\n",
+        "2 2 2\n",
+        "0.100000 0.100000 0.100000\n",
+        "1.100000 0.100000 0.100000\n",
+        "0.100000 1.100000 0.100000\n",
+        "1.100000 1.100000 0.100000\n",
+        "0.100000 0.100000 1.100000\n",
+        "1.100000 0.100000 1.100000\n",
+        "0.100000 1.100000 1.100000\n",
+        "1.100000 1.100000 1.100000\n",
+        "\n",
+    );
+
+    let mut baker = Baker::new();
+    baker.set_config(&config);
+    describe(&mut baker, b"date: 2011:02:21 15:22:55");
+    baker.set_format("cinespace").unwrap();
+    baker.set_input_space("lnf_tweak");
+    baker.set_shaper_space("lnf");
+    baker.set_target_space("target");
+    baker.set_shaper_size(10);
+    baker.set_cube_size(2);
+    let mut output = Vec::new();
+    baker.bake(&mut output).unwrap();
+
+    //
+    let osvec = split_by_lines(&output);
+    let resvec = split_by_lines(bout.as_bytes());
+    assert_eq!(osvec.len(), resvec.len());
+    for i in 0..resvec.len() {
+        if i > 6 {
+            // Number comparison.
+            compare_floats(&osvec[i], &resvec[i]);
+        } else {
+            // text comparison
+            assert_eq!(osvec[i], resvec[i]);
+        }
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCSP, no_shaper)` @ v2.5.2.
+#[test]
+fn no_shaper() {
+    // Check baker output.
+    let mut config = lnf_config();
+    config
+        .add_color_space(&offset_space("target", [0.1, 0.1, 0.1]))
+        .unwrap();
+
+    let bout = concat!(
+        "CSPLUTV100\n",
+        "3D\n",
+        "\n",
+        "BEGIN METADATA\n",
+        "date: 2011:02:21 15:22:55\n",
+        "END METADATA\n",
+        "\n",
+        "2\n",
+        "0.000000 1.000000\n",
+        "0.000000 1.000000\n",
+        "2\n",
+        "0.000000 1.000000\n",
+        "0.000000 1.000000\n",
+        "2\n",
+        "0.000000 1.000000\n",
+        "0.000000 1.000000\n",
+        "\n",
+        "2 2 2\n",
+        "0.100000 0.100000 0.100000\n",
+        "1.100000 0.100000 0.100000\n",
+        "0.100000 1.100000 0.100000\n",
+        "1.100000 1.100000 0.100000\n",
+        "0.100000 0.100000 1.100000\n",
+        "1.100000 0.100000 1.100000\n",
+        "0.100000 1.100000 1.100000\n",
+        "1.100000 1.100000 1.100000\n",
+        "\n",
+    );
+
+    let mut baker = Baker::new();
+    baker.set_config(&config);
+    describe(&mut baker, b"date: 2011:02:21 15:22:55");
+    baker.set_format("cinespace").unwrap();
+    baker.set_input_space("lnf");
+    baker.set_target_space("target");
+    baker.set_shaper_size(10);
+    baker.set_cube_size(2);
+    let mut output = Vec::new();
+    baker.bake(&mut output).unwrap();
+
+    //
+    let osvec = split_by_lines(&output);
+    let resvec = split_by_lines(bout.as_bytes());
+
+    assert_eq!(osvec.len(), resvec.len());
+    for i in 0..resvec.len() {
+        assert_eq!(osvec[i], resvec[i]);
     }
 }

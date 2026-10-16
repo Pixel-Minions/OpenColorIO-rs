@@ -852,8 +852,8 @@ note = "p3-loading 3.10a: embedded by include_bytes! from the submodule (no copy
 path = "src/OpenColorIO/fileformats/FileFormat3DL.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/file_format_3dl.rs"]
-status = "partial"
-note = "p4-readers 4.3a: the reader (GetLikelyLutBitDepth, GetOCIOBitdepth, IsIdentity) and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_3dl_oracle.rs; bake (GetMaxValueFromIntegerBitDepth, GetClampedIntFromNormFloat, CubeDimensionLenToLustreBitDepth) comes with WP 4.8"
+status = "done"
+note = "p4-readers 4.3a: the reader (GetLikelyLutBitDepth, GetOCIOBitdepth, IsIdentity) and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_3dl_oracle.rs; p4-baker 4.8c: bake (GetMaxValueFromIntegerBitDepth, GetClampedIntFromNormFloat, CubeDimensionLenToLustreBitDepth), against the wheel in crates/ocio/tests/bake_formats_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatCC.cpp"
@@ -880,8 +880,8 @@ note = "p4-cdl 4.4e"
 path = "src/OpenColorIO/fileformats/FileFormatCSP.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/file_format_csp.rs"]
-status = "partial"
-note = "p4-readers 4.3e: the reader (the cubic prelut interpolator in each wheel's operand order) and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_csp_oracle.rs; a metadata block never closed is an error (U-72); bake comes with WP 4.8"
+status = "done"
+note = "p4-readers 4.3e: the reader (the cubic prelut interpolator in each wheel's operand order) and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_csp_oracle.rs; a metadata block never closed is an error (U-72); p4-baker 4.8c: bake, against the wheel in crates/ocio/tests/bake_formats_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatCTF.cpp"
@@ -901,8 +901,8 @@ note = "p4-registry 4.3d: the reader (getline, sscanf/sscanf_s, std::stoi, the d
 path = "src/OpenColorIO/fileformats/FileFormatHDL.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/file_format_hdl.rs"]
-status = "partial"
-note = "p4-readers 4.3b: the reader (readHeaders, findHeaderItem, readLuts, CachedFileHDL) and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_hdl_oracle.rs; a 3D+1D Length of one size is an error (U-71); bake comes with WP 4.8"
+status = "done"
+note = "p4-readers 4.3b: the reader (readHeaders, findHeaderItem, readLuts, CachedFileHDL) and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_hdl_oracle.rs; a 3D+1D Length of one size is an error (U-71); p4-baker 4.8c: bake, against the wheel in crates/ocio/tests/bake_formats_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatICC.cpp"
@@ -978,8 +978,8 @@ note = "p4-registry 4.2a1: the reader (istream::read of 1024 bytes, input_stream
 path = "src/OpenColorIO/fileformats/FileFormatTruelight.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/file_format_truelight.rs"]
-status = "partial"
-note = "p4-readers 4.3c: the reader and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_truelight_oracle.rs; bake comes with WP 4.8"
+status = "done"
+note = "p4-readers 4.3c: the reader and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_truelight_oracle.rs; p4-baker 4.8c: bake, against the wheel in crates/ocio/tests/bake_formats_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatUtils.cpp"
@@ -4271,7 +4271,8 @@ note = "S4: all 7 tests (bodies in sse2_tests.rs)"
 path = "tests/cpu/Baker_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/baker_tests.rs"]
-status = "todo"
+status = "done"
+note = "p4-baker 4.8c: bake_3dlut, baking_validation"
 
 [[file]]
 path = "tests/cpu/BitDepthUtils_tests.cpp"
@@ -4584,8 +4585,8 @@ note = "p3-loading 3.10a: basic, basic_impl, resolve_config_path; 3.10b: create_
 path = "tests/cpu/fileformats/FileFormat3DL_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/fileformats/file_format_3dl_tests.rs"]
-status = "partial"
-note = "p4-readers 4.3a: format_info, get_likely_lut_bitdepth, load, parse_1d; bake comes with WP 4.8"
+status = "done"
+note = "p4-readers 4.3a: format_info, get_likely_lut_bitdepth, load, parse_1d; p4-baker 4.8c: bake"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatCCC_tests.cpp"
@@ -4612,8 +4613,8 @@ note = "p4-cdl 4.4e: test_cdl, write"
 path = "tests/cpu/fileformats/FileFormatCSP_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/fileformats/file_format_csp_tests.rs"]
-status = "partial"
-note = "p4-readers 4.3e: simple_1d, simple_3d, less_strict_parse, failures_1d, failures_3d; complete_3d, shaper_hdr and no_shaper bake, and come with WP 4.8"
+status = "done"
+note = "p4-readers 4.3e: simple_1d, simple_3d, less_strict_parse, failures_1d, failures_3d; p4-baker 4.8c: complete_3d, shaper_hdr, no_shaper"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatCTF_tests.cpp"
@@ -4632,8 +4633,8 @@ status = "done"
 path = "tests/cpu/fileformats/FileFormatHDL_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/fileformats/file_format_hdl_tests.rs"]
-status = "partial"
-note = "p4-readers 4.3b: read_1d, read_3d, read_3d_1d; bake_1d, bake_1d_shaper, bake_3d, bake_3d_1d and look_test bake, and come with WP 4.8"
+status = "done"
+note = "p4-readers 4.3b: read_1d, read_3d, read_3d_1d; p4-baker 4.8c: bake_1d, bake_1d_shaper, bake_3d, bake_3d_1d, look_test"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatICC_tests.cpp"

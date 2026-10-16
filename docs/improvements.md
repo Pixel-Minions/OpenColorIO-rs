@@ -2645,18 +2645,36 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Upstream:** `Baker::setFormat` finds the format by its name ignoring case
   (`FormatRegistry::getFileFormatByName`, `transforms/FileTransform.cpp:358-365` @ v2.5.2) and
   keeps the name as given (`Baker.cpp:118-139`); `Baker::bake` hands that name to the format
-  (`Baker.cpp:393-403`), and six formats' bakes compare it with their own name, case
+  (`Baker.cpp:393-403`), and seven formats' bakes compare it with their own names, case
   included: `spi1d` (`FileFormatSpi1D.cpp:323-329`), `spi3d` (`FileFormatSpi3D.cpp:274-280`),
   `iridas_cube`, `iridas_itx` (whose message says "Unknown 3dl format name",
-  `FileFormatIridasItx.cpp:257-263`), `resolve_cube` and `houdini`. So `setFormat("SPI1D")` succeeds
-  and `bake` fails with "Error baking SPI1D:Unknown spi format name, 'SPI1D'." (wheel probes,
-  Windows and Linux, 2026-10-16). The 3DL, cineSpace and Truelight bakes take the name in any
-  case.
+  `FileFormatIridasItx.cpp:257-263`), `resolve_cube`, `houdini`, and `flame` and `lustre`
+  (`FileFormat3DL.cpp:509-522`). So `setFormat("SPI1D")` succeeds and `bake` fails with
+  "Error baking SPI1D:Unknown spi format name, 'SPI1D'." (wheel probes, Windows and Linux,
+  2026-10-16). The cineSpace and Truelight bakes take the name in any case.
 - **Who notices:** callers that name a format in other case than the registry's.
 - **A fix:** keep the registry's name in `setFormat`, or compare ignoring case in the bakes.
 - **Status:** matched in `p4-baker` (4.8b1: spi1d and spi3d; 4.8b2: Iridas cube, itx and
-  Resolve cube, in their `crates/ocio/src/fileformats/` files; Houdini with 4.8c); the "named
-  in capitals" cases of `crates/ocio/tests/bake_formats_oracle.rs`.
+  Resolve cube; 4.8c: 3DL and Houdini; in their `crates/ocio/src/fileformats/` files); the
+  "named in capitals" cases of `crates/ocio/tests/bake_formats_oracle.rs`.
+
+### I-200. A `.3dl` bake with a negative shaper size fails with each C++ library's own text
+
+- **Upstream:** the `.3dl` bake makes its shaper with `std::vector<float> shaperData(shaperSize)`
+  (`src/OpenColorIO/fileformats/FileFormat3DL.cpp:552-553` @ v2.5.2), and the baker checks the
+  shaper size only when a shaper space is set (`Baker.cpp:369-375`), which the 3DL formats
+  refuse. A negative size converts to a `size_t` past the vector's `max_size()`, and the
+  constructor throws `std::length_error`, which `Baker::bake` reports: "Error baking
+  flame:vector too long" on Windows (MSVC's STL) and "Error baking flame:cannot create
+  std::vector larger than max_size()" on Linux (libstdc++), after a lustre file's first two
+  lines are written (wheel probes, 2026-10-16). Sizes of 0 and 1 write an empty shaper line and
+  a lone `0` (a NaN step clamped to 0).
+- **Who notices:** callers of the `.3dl` bakes that set a negative shaper size.
+- **A fix:** check the shaper size whatever the shaper space, or ignore it for formats without
+  a shaper.
+- **Status:** matched in `p4-baker` (4.8c, `crates/ocio/src/fileformats/file_format_3dl.rs`,
+  `VECTOR_CONSTRUCTOR_TOO_LONG`); the "shaper size" cases of
+  `crates/ocio/tests/bake_formats_oracle.rs`.
 
 ### I-201. A Reference by an alias other than currentMonitor adds no ops
 
