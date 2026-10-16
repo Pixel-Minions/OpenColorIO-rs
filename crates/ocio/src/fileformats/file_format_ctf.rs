@@ -45,11 +45,11 @@ use ocio_ops::utils::string_utils::{c_str, lower};
 use crate::config::Config;
 use crate::context::Context;
 use crate::fileformats::ctf::ctf_reader_helper::{
-    CtfReaderArrayElt, CtfReaderDescriptorElt, CtfReaderDynamicParamElt, CtfReaderGammaParamsElt,
-    CtfReaderIndexMapElt, CtfReaderKind, CtfReaderLogParamsElt, CtfReaderMetadataElt,
-    CtfReaderOpElt, CtfReaderOpType, CtfReaderRangeValueElt, CtfReaderSatNodeElt,
-    CtfReaderSopNodeElt, CtfReaderTransformElt, CtfReaderTransformRc, Descriptor,
-    equal_ignoring_case, get_reader,
+    CtfReaderAcesParamsElt, CtfReaderArrayElt, CtfReaderDescriptorElt, CtfReaderDynamicParamElt,
+    CtfReaderGammaParamsElt, CtfReaderIndexMapElt, CtfReaderKind, CtfReaderLogParamsElt,
+    CtfReaderMetadataElt, CtfReaderOpElt, CtfReaderOpType, CtfReaderRangeValueElt,
+    CtfReaderSatNodeElt, CtfReaderSopNodeElt, CtfReaderTransformElt, CtfReaderTransformRc,
+    Descriptor, equal_ignoring_case, get_reader,
 };
 use crate::fileformats::ctf::ctf_reader_utils::{
     TAG_ACES, TAG_ACES_PARAMS, TAG_ARRAY, TAG_CDL, TAG_CURVE_CTRL_PNTS, TAG_CURVE_SLOPES,
@@ -765,7 +765,12 @@ fn push_element(st: &mut State, name: &[u8]) -> Result<()> {
     };
 
     let elt: ElementRcPtr = if supported_element(name, &p_elt, TAG_ACES_PARAMS, TAG_ACES, r) {
-        return Err(operator_part_not_ported(st, "CTFReaderACESParamsElt"));
+        Rc::new(RefCell::new(CtfReaderAcesParamsElt::new(
+            name,
+            p_container,
+            st.get_xm_line_number(),
+            st.get_xml_filename(),
+        )))
     } else if supported_element(name, &p_elt, TAG_ARRAY, TAG_LUT1D, r)
         || supported_element(name, &p_elt, TAG_ARRAY, TAG_INVLUT1D, r)
         || supported_element(name, &p_elt, TAG_ARRAY, TAG_LUT3D, r)

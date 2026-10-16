@@ -2530,3 +2530,445 @@ fn dynamic_parameter_files_read_as_in_the_wheel() {
 fn dynamic_parameter_files_log_as_in_the_wheel() {
     cdl_common::check_logs(&dynamic_parameter_cases());
 }
+
+/// The ACES, ACESParams, FixedFunction and Function readers' files.
+fn op_cases_g() -> Vec<Case> {
+    let f32s = "inBitDepth=\"32f\" outBitDepth=\"32f\"";
+    let i16 = "inBitDepth=\"16i\" outBitDepth=\"16i\"";
+    let gamma = |g: &str| format!("        <ACESParams gamma=\"{g}\"/>\n");
+    let mut cases = Vec::new();
+
+    // CTF files: (label, version, operator, its attributes, its body).
+    for (label, version, tag, attrs, body) in [
+        // FixedFunction.
+        (
+            "a style with a parameter",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"Rec2100SurroundFwd\" params=\"0.8\""),
+            String::new(),
+        ),
+        (
+            "a style of another case",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"rec2100surroundrev\" params=\" 1.2 \""),
+            String::new(),
+        ),
+        (
+            "a style without parameters",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"hsv_to_rgb\""),
+            String::new(),
+        ),
+        (
+            "the gamut compression",
+            "2.1",
+            "FixedFunction",
+            format!(
+                "{f32s} style=\"GamutComp13Fwd\" params=\"1.147 1.264 1.312 0.815 0.803 0.88 1.2\""
+            ),
+            String::new(),
+        ),
+        (
+            "a later style in CTF 2",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"Lin_TO_PQ\""),
+            String::new(),
+        ),
+        (
+            "the gamma log",
+            "2.4",
+            "FixedFunction",
+            format!(
+                "{f32s} style=\"Lin_TO_GammaLog\" \
+                 params=\"0 0.25 0.5 1 0 2.718 0.17883277 0.807825590164 1 -0.07116723\""
+            ),
+            String::new(),
+        ),
+        (
+            "an ACES 2 output transform",
+            "2.4",
+            "FixedFunction",
+            format!(
+                "{f32s} style=\"ACESOutputTransform20Inv\" \
+                 params=\"1000 0.68 0.32 0.265 0.69 0.15 0.06 0.3127 0.329\""
+            ),
+            String::new(),
+        ),
+        (
+            "an HSY style",
+            "2.5",
+            "FixedFunction",
+            format!("{f32s} style=\"RGB_TO_HSY_LOG\""),
+            String::new(),
+        ),
+        (
+            "params before the style",
+            "2",
+            "FixedFunction",
+            format!("{f32s} params=\"0.8\" style=\"Rec2100SurroundFwd\""),
+            String::new(),
+        ),
+        (
+            "two styles",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"HSV_to_RGB\" Style=\"RGB_to_HSV\""),
+            String::new(),
+        ),
+        (
+            "two params",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"Rec2100SurroundFwd\" params=\"0.8\" PARAMS=\"1.5\""),
+            String::new(),
+        ),
+        (
+            "too many parameters",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"Rec2100SurroundFwd\" params=\"0.8 2.0\""),
+            String::new(),
+        ),
+        (
+            "parameters a style doesn't take",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"RGB_TO_HSV\" params=\"0.8\""),
+            String::new(),
+        ),
+        (
+            "empty params",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"Rec2100SurroundFwd\" params=\"\""),
+            String::new(),
+        ),
+        (
+            "a parameter out of range",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"Rec2100SurroundFwd\" params=\"200\""),
+            String::new(),
+        ),
+        (
+            "a NaN parameter",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"Rec2100SurroundFwd\" params=\"nan\""),
+            String::new(),
+        ),
+        (
+            "an infinite parameter",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"Rec2100SurroundFwd\" params=\"inf\""),
+            String::new(),
+        ),
+        (
+            "illegal params",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"Rec2100SurroundFwd\" params=\"0.8 abc\""),
+            String::new(),
+        ),
+        (
+            "long illegal params",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"Rec2100SurroundFwd\" params=\"0.8 0.9 1.0 1.1 1.2 x\""),
+            String::new(),
+        ),
+        (
+            "a missing style",
+            "2",
+            "FixedFunction",
+            format!("{f32s} params=\"0.8\""),
+            String::new(),
+        ),
+        (
+            "an unknown style",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"UnknownStyle\""),
+            String::new(),
+        ),
+        (
+            "an empty style",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"\""),
+            String::new(),
+        ),
+        (
+            "an unknown attribute",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"HSV_to_RGB\" gamma=\"2\""),
+            String::new(),
+        ),
+        (
+            "a description and an ACESParams",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"Rec2100SurroundFwd\" params=\"0.8\""),
+            format!(
+                "        <Description>a surround</Description>\n{}",
+                gamma("1.2")
+            ),
+        ),
+        (
+            "a FixedFunction in CTF 1.8",
+            "1.8",
+            "FixedFunction",
+            format!("{f32s} style=\"HSV_to_RGB\""),
+            String::new(),
+        ),
+        // ACES.
+        (
+            "a style without parameters",
+            "1.5",
+            "ACES",
+            format!("{i16} style=\"RedMod03Rev\""),
+            String::new(),
+        ),
+        (
+            "a surround",
+            "1.5",
+            "ACES",
+            format!("{i16} style=\"Surround\""),
+            gamma("1.2"),
+        ),
+        (
+            "a Rec.2100 surround",
+            "2",
+            "ACES",
+            format!("{f32s} style=\"rec2100surroundfwd\""),
+            gamma("0.8"),
+        ),
+        (
+            "an inverse Rec.2100 surround",
+            "1.5",
+            "ACES",
+            format!("{f32s} style=\"Rec2100SurroundRev\""),
+            gamma("1.4"),
+        ),
+        (
+            "a surround without ACESParams",
+            "1.5",
+            "ACES",
+            format!("{i16} style=\"Surround\""),
+            String::new(),
+        ),
+        (
+            "two ACESParams",
+            "1.5",
+            "ACES",
+            format!("{i16} style=\"Surround\""),
+            format!("{}{}", gamma("1.2"), gamma("1.4")),
+        ),
+        (
+            "an ACESParams without gamma",
+            "1.5",
+            "ACES",
+            format!("{i16} style=\"Surround\""),
+            "        <ACESParams wrongParam=\"1.2\"/>\n".to_owned(),
+        ),
+        (
+            "an ACESParams without gamma, inverse",
+            "1.5",
+            "ACES",
+            format!("{i16} style=\"Rec2100SurroundRev\""),
+            "        <ACESParams/>\n".to_owned(),
+        ),
+        (
+            "an ACESParams with an unknown attribute",
+            "1.5",
+            "ACES",
+            format!("{i16} style=\"Surround\""),
+            "        <ACESParams Gamma=\"1.1\" offset=\"2\"/>\n".to_owned(),
+        ),
+        (
+            "a NaN gamma",
+            "1.5",
+            "ACES",
+            format!("{i16} style=\"Surround\""),
+            gamma("nan"),
+        ),
+        (
+            "an illegal gamma",
+            "1.5",
+            "ACES",
+            format!("{i16} style=\"Surround\""),
+            gamma("1.2 1.3"),
+        ),
+        (
+            "a gamma out of range",
+            "1.5",
+            "ACES",
+            format!("{i16} style=\"Surround\""),
+            gamma("0"),
+        ),
+        (
+            "an ACESParams with text",
+            "1.5",
+            "ACES",
+            format!("{i16} style=\"Surround\""),
+            "        <ACESParams gamma=\"1.2\">some text</ACESParams>\n".to_owned(),
+        ),
+        (
+            "an ACESParams a style doesn't take",
+            "1.5",
+            "ACES",
+            format!("{i16} style=\"Glow03Fwd\""),
+            gamma("1.2"),
+        ),
+        (
+            "an ACESParams before the style is known",
+            "1.5",
+            "ACES",
+            format!("{i16} style=\"DarkToDim10\""),
+            gamma("1.2"),
+        ),
+        (
+            "a missing style",
+            "1.5",
+            "ACES",
+            i16.to_owned(),
+            String::new(),
+        ),
+        (
+            "an unknown style",
+            "1.5",
+            "ACES",
+            format!("{i16} style=\"Surround2\""),
+            String::new(),
+        ),
+        (
+            "params",
+            "2",
+            "ACES",
+            format!("{i16} style=\"RedMod10Fwd\" params=\"1\""),
+            String::new(),
+        ),
+        (
+            "an ACES in CTF 1.4",
+            "1.4",
+            "ACES",
+            format!("{i16} style=\"RedMod03Rev\""),
+            String::new(),
+        ),
+        // Function.
+        (
+            "a style",
+            "1.6",
+            "Function",
+            "inBitDepth=\"16i\" outBitDepth=\"32f\" style=\"HSV_to_RGB\"".to_owned(),
+            String::new(),
+        ),
+        (
+            "an ACES style",
+            "2",
+            "Function",
+            format!("{f32s} style=\"GamutComp13Rev\""),
+            String::new(),
+        ),
+        (
+            "params",
+            "2",
+            "Function",
+            format!("{f32s} style=\"Rec2100SurroundFwd\" params=\"0.8\""),
+            String::new(),
+        ),
+        (
+            "an ACESParams",
+            "2",
+            "Function",
+            format!("{f32s} style=\"Rec2100SurroundFwd\""),
+            gamma("0.8"),
+        ),
+        (
+            "a missing style",
+            "1.6",
+            "Function",
+            f32s.to_owned(),
+            String::new(),
+        ),
+        (
+            "an unknown style",
+            "1.6",
+            "Function",
+            format!("{f32s} style=\"HSV\""),
+            String::new(),
+        ),
+        (
+            "a Function in CTF 1.5",
+            "1.5",
+            "Function",
+            format!("{f32s} style=\"HSV_to_RGB\""),
+            String::new(),
+        ),
+    ] {
+        cases.push(ctf(
+            &format!("a {tag}: {label}"),
+            &format!("id=\"a\" version=\"{version}\""),
+            &op(tag, &attrs, &body),
+        ));
+    }
+
+    // CLF files.
+    for (label, tag, attrs, body) in [
+        (
+            "a surround",
+            "ACES",
+            format!("{f32s} style=\"Surround\""),
+            gamma("1.2"),
+        ),
+        (
+            "a FixedFunction",
+            "FixedFunction",
+            format!("{f32s} style=\"HSV_to_RGB\""),
+            String::new(),
+        ),
+        (
+            "a Function",
+            "Function",
+            format!("{f32s} style=\"HSV_to_RGB\""),
+            String::new(),
+        ),
+    ] {
+        cases.push(clf(
+            &format!("a CLF {tag}: {label}"),
+            "id=\"a\" compCLFversion=\"3\"",
+            &op(tag, &attrs, &body),
+        ));
+    }
+
+    // Upstream's files.
+    for name in ["deprecated_ops.ctf", "fixed_function.ctf"] {
+        cases.push(file_case(
+            name,
+            &upstream_file(name),
+            Interpolation::Default,
+            TransformDirection::Forward,
+        ));
+    }
+    cases
+}
+
+/// The processors of the ACES, FixedFunction and Function readers' files, in both
+/// directions.
+#[test]
+fn fixed_function_files_read_as_in_the_wheel() {
+    check_processors(&op_cases_g());
+}
+
+/// The warnings of reading the ACES, FixedFunction and Function readers' files, message by
+/// message.
+#[test]
+fn fixed_function_files_log_as_in_the_wheel() {
+    cdl_common::check_logs(&op_cases_g());
+}

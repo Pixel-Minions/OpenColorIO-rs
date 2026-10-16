@@ -24,6 +24,9 @@ use ocio_ops::open_color_types::{
     BitDepth, Interpolation, LoggingLevel, Lut1DHueAdjust, TransformDirection,
 };
 use ocio_ops::ops::cdl::cdl_op_data::{CdlOpData, CdlOpStyle, ChannelParams};
+use ocio_ops::ops::fixedfunction::fixed_function_op_data::{
+    FixedFunctionOpData, FixedFunctionOpStyle,
+};
 use ocio_ops::ops::gamma::gamma_op_data::{GammaOpData, GammaStyle};
 use ocio_ops::ops::log::log_op_data::{
     LIN_SIDE_BREAK, LIN_SIDE_OFFSET, LIN_SIDE_SLOPE, LINEAR_SLOPE, LOG_SIDE_OFFSET, LOG_SIDE_SLOPE,
@@ -3342,4 +3345,168 @@ fn lut_interpolation_option() {
         lut3d_interpolation(&config, &file_transform),
         Interpolation::Tetrahedral
     );
+}
+
+/// The fixed function of a reader's op.
+fn as_fixed_function(op: &OpData) -> &FixedFunctionOpData {
+    match op {
+        OpData::FixedFunction(func) => func,
+        _ => panic!("not a FixedFunction"),
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, load_deprecated_ops_file)` @ v2.5.2.
+#[test]
+fn load_deprecated_ops_file() {
+    let file_name = "deprecated_ops.ctf";
+    let cached_file = load_clf_file(file_name).unwrap();
+    let file_ops = cached_file.transform.get_ops();
+
+    assert_eq!(file_ops.len(), 3);
+
+    // Test ACES RedMod03 (deprecated) conversion to the modern representation.
+    {
+        let func = as_fixed_function(&file_ops[0]);
+        assert_eq!(func.style(), FixedFunctionOpStyle::AcesRedMod03Inv);
+        func.validate().unwrap();
+        assert!(func.params().is_empty());
+    }
+
+    // Test ACES Surround (deprecated) conversion to the modern representation.
+    {
+        let func = as_fixed_function(&file_ops[1]);
+        assert_eq!(func.style(), FixedFunctionOpStyle::Rec2100SurroundFwd);
+        func.validate().unwrap();
+
+        let params = vec![1.2];
+        assert!(*func.params() == params);
+    }
+
+    // Test Function (deprecated) conversion to the modern representation.
+    {
+        let func = as_fixed_function(&file_ops[2]);
+        assert_eq!(func.style(), FixedFunctionOpStyle::HsvToRgb);
+        func.validate().unwrap();
+        assert!(func.params().is_empty());
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, load_fixed_function_file)` @ v2.5.2.
+#[test]
+fn load_fixed_function_file() {
+    let file_name = "fixed_function.ctf";
+    let cached_file = load_clf_file(file_name).unwrap();
+    let file_ops = cached_file.transform.get_ops();
+
+    assert_eq!(file_ops.len(), 2);
+
+    // Test FixedFunction with the REC2100_SURROUND_FWD style.
+    {
+        let func = as_fixed_function(&file_ops[0]);
+        assert_eq!(func.style(), FixedFunctionOpStyle::Rec2100SurroundFwd);
+        func.validate().unwrap();
+
+        let params = vec![0.8];
+        assert!(*func.params() == params);
+    }
+
+    // Test FixedFunction with the HSV_to_RGB style.
+    {
+        let func = as_fixed_function(&file_ops[1]);
+        assert_eq!(func.style(), FixedFunctionOpStyle::HsvToRgb);
+        func.validate().unwrap();
+        assert!(func.params().is_empty());
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, load_ff_fail_version)` @ v2.5.2.
+#[test]
+fn load_ff_fail_version() {
+    let mut strebuf = String::new();
+    strebuf.push_str("<?xml version='1.0' encoding='UTF-8'?>\n");
+    strebuf.push_str("<ProcessList id='none' version='1.5'>\n");
+    strebuf.push_str("    <FixedFunction inBitDepth='8i' outBitDepth='32f' ");
+    strebuf.push_str("params = '0.8' ");
+    strebuf.push_str("style = 'Rec2100SurroundFwd' />\n");
+    strebuf.push_str("</ProcessList>\n");
+
+    check_throw_what(
+        parse_string(&strebuf),
+        "CTF file version '1.5' does not support operator 'FixedFunction'",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, load_ff_fail_params)` @ v2.5.2.
+#[test]
+fn load_ff_fail_params() {
+    let mut strebuf = String::new();
+    strebuf.push_str("<?xml version='1.0' encoding='UTF-8'?>\n");
+    strebuf.push_str("<ProcessList id='none' version='2'>\n");
+    strebuf.push_str("    <FixedFunction inBitDepth='8i' outBitDepth='32f' ");
+    strebuf.push_str("params = '0.8 2.0' ");
+    strebuf.push_str("style = 'Rec2100SurroundFwd' />\n");
+    strebuf.push_str("</ProcessList>\n");
+
+    check_throw_what(
+        parse_string(&strebuf),
+        "must have one parameter but 2 found",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, load_ff_fail_style)` @ v2.5.2.
+#[test]
+fn load_ff_fail_style() {
+    let mut strebuf = String::new();
+    strebuf.push_str("<?xml version='1.0' encoding='UTF-8'?>\n");
+    strebuf.push_str("<ProcessList id='none' version='2.0'>\n");
+    strebuf.push_str(
+        "    <FixedFunction inBitDepth='16i' outBitDepth='32f' style='UnknownStyle' />\n",
+    );
+    strebuf.push_str("</ProcessList>\n");
+
+    check_throw_what(parse_string(&strebuf), "Unknown FixedFunction style");
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, load_ff_aces_fail_gamma_param)` @ v2.5.2. Upstream's
+/// `LogGuard` is the crate's `test_env::capture_log`.
+#[test]
+fn load_ff_aces_fail_gamma_param() {
+    let mut strebuf = String::new();
+    strebuf.push_str("<?xml version='1.0' encoding='UTF-8'?>\n");
+    strebuf.push_str("<ProcessList id='none' version='1.5'>\n");
+    strebuf.push_str("    <ACES inBitDepth='16i' outBitDepth='32f' style='Surround'>\n");
+    strebuf.push_str("        <ACESParams wrongParam='1.2' />\n");
+    strebuf.push_str("    </ACES>\n");
+    strebuf.push_str("</ProcessList>\n");
+
+    let (result, _log) = crate::test_env::capture_log(|| parse_string(&strebuf));
+    check_throw_what(result, "Missing required parameter");
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, load_ff_aces_fail_gamma_twice)` @ v2.5.2.
+#[test]
+fn load_ff_aces_fail_gamma_twice() {
+    let mut strebuf = String::new();
+    strebuf.push_str("<?xml version='1.0' encoding='UTF-8'?>\n");
+    strebuf.push_str("<ProcessList id='none' version='1.5'>\n");
+    strebuf.push_str("    <ACES inBitDepth='16i' outBitDepth='32f' style='Surround'>\n");
+    strebuf.push_str("        <ACESParams gamma='1.2' />\n");
+    strebuf.push_str("        <ACESParams gamma='1.4' />\n");
+    strebuf.push_str("    </ACES>\n");
+    strebuf.push_str("</ProcessList>\n");
+
+    check_throw_what(parse_string(&strebuf), "only 1 gamma parameter");
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, load_ff_aces_fail_missing_param)` @ v2.5.2.
+#[test]
+fn load_ff_aces_fail_missing_param() {
+    let mut strebuf = String::new();
+    strebuf.push_str("<?xml version='1.0' encoding='UTF-8'?>\n");
+    strebuf.push_str("<ProcessList id='none' version='1.5'>\n");
+    strebuf.push_str("    <ACES inBitDepth='16i' outBitDepth='32f' style='Surround'>\n");
+    strebuf.push_str("    </ACES>\n");
+    strebuf.push_str("</ProcessList>\n");
+
+    check_throw_what(parse_string(&strebuf), "must have one parameter");
 }

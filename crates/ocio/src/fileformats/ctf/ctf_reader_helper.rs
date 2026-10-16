@@ -40,6 +40,9 @@ use ocio_ops::open_color_types::{
     BitDepth, Interpolation, Lut1DHueAdjust, TransformDirection, bit_depth_to_string,
 };
 use ocio_ops::ops::cdl::cdl_op_data::{CdlOpData, CdlOpStyle};
+use ocio_ops::ops::fixedfunction::fixed_function_op_data::{
+    FixedFunctionOpData, FixedFunctionOpStyle,
+};
 use ocio_ops::ops::gamma::gamma_op_data::{GammaOpData, GammaStyle};
 use ocio_ops::ops::log::log_op_data::{
     LIN_SIDE_OFFSET, LIN_SIDE_SLOPE, LOG_SIDE_OFFSET, LOG_SIDE_SLOPE, LogOpData,
@@ -62,9 +65,9 @@ use super::ctf_reader_utils::{
     ATTR_BASE, ATTR_BITDEPTH_IN, ATTR_BITDEPTH_OUT, ATTR_BYPASS, ATTR_CHAN, ATTR_COMP_CLF_VERSION,
     ATTR_DIMENSION, ATTR_EXPONENT, ATTR_GAMMA, ATTR_HIGHLIGHT, ATTR_INVERSE_OF, ATTR_LINEARSLOPE,
     ATTR_LINSIDEBREAK, ATTR_LINSIDEOFFSET, ATTR_LINSIDESLOPE, ATTR_LOGSIDEOFFSET,
-    ATTR_LOGSIDESLOPE, ATTR_OFFSET, ATTR_REFBLACK, ATTR_REFWHITE, ATTR_SHADOW, ATTR_STYLE,
-    ATTR_VERSION, TAG_MAX_IN_VALUE, TAG_MAX_OUT_VALUE, TAG_MIN_IN_VALUE, TAG_MIN_OUT_VALUE,
-    TAG_PROCESS_LIST,
+    ATTR_LOGSIDESLOPE, ATTR_OFFSET, ATTR_PARAMS, ATTR_REFBLACK, ATTR_REFWHITE, ATTR_SHADOW,
+    ATTR_STYLE, ATTR_VERSION, TAG_MAX_IN_VALUE, TAG_MAX_OUT_VALUE, TAG_MIN_IN_VALUE,
+    TAG_MIN_OUT_VALUE, TAG_PROCESS_LIST,
 };
 use super::ctf_reader_utils::{
     ATTR_HALF_DOMAIN, ATTR_HUE_ADJUST, ATTR_INTERPOLATION, ATTR_PARAM, ATTR_RAW_HALFS,
@@ -986,8 +989,10 @@ pub struct CtfReaderOpElt {
 impl CtfReaderOpElt {
     /// The reader of `kind`, if ported (WP 4.5c-4.5i port the others).
     ///
-    /// Port of the constructors of the `CTFReaderOpElt` subclasses: `CTFReaderCDLElt`
-    /// (CTFReaderHelper.cpp:1327-1332), `CTFReaderGammaElt` (1862-1865), `CTFReaderInvLut1DElt`
+    /// Port of the constructors of the `CTFReaderOpElt` subclasses: `CTFReaderACESElt`
+    /// (CTFReaderHelper.cpp:1199-1203), `CTFReaderCDLElt` (1327-1332),
+    /// `CTFReaderFixedFunctionElt` (1417-1421), `CTFReaderFunctionElt` (1496-1500),
+    /// `CTFReaderGammaElt` (1862-1865), `CTFReaderInvLut1DElt`
     /// (3245-3248), `CTFReaderInvLut3DElt` (3433-3436), `CTFReaderLogElt` (3545-3549),
     /// `CTFReaderLut1DElt` (4085-4092), `CTFReaderLut3DElt` (4389-4396),
     /// `CTFReaderMatrixElt` (4561-4566) and `CTFReaderRangeElt` (4858-4862) @ v2.5.2.
@@ -1017,6 +1022,12 @@ impl CtfReaderOpElt {
             CtfReaderKind::InvLut3D => OpData::Lut3D(
                 Lut3DOpData::with_direction(2, TransformDirection::Inverse).expect("a grid of 2"),
             ),
+            CtfReaderKind::Aces | CtfReaderKind::FixedFunction | CtfReaderKind::Function => {
+                OpData::FixedFunction(
+                    FixedFunctionOpData::new(FixedFunctionOpStyle::AcesRedMod03Fwd)
+                        .expect("a style without parameters"),
+                )
+            }
             _ => return None,
         };
         let cdl = match &op {
@@ -1236,6 +1247,9 @@ impl CtfReaderOpElt {
     /// `CTFReaderInvLut1DElt::isOpParameterValid` (3322-3329),
     /// `CTFReaderLut1DElt::isOpParameterValid` (4149-4155),
     /// `CTFReaderLut1DElt_1_4::isOpParameterValid` (4344-4351),
+    /// `CTFReaderACESElt::isOpParameterValid` (1241-1245),
+    /// `CTFReaderFixedFunctionElt::isOpParameterValid` (1475-1480),
+    /// `CTFReaderFunctionElt::isOpParameterValid` (1537-1541),
     /// `CTFReaderInvLut3DElt::isOpParameterValid` (3471-3475),
     /// `CTFReaderLut3DElt::isOpParameterValid` (4431-4435) and
     /// `CTFReaderRangeElt_1_7::isOpParameterValid` (4917-4921) @ v2.5.2.
@@ -1254,7 +1268,13 @@ impl CtfReaderOpElt {
             | CtfReaderKind::GammaCtf2_0
             | CtfReaderKind::GammaClf3_0
             | CtfReaderKind::Log
-            | CtfReaderKind::Log2_0 => base || equal_ignoring_case(ATTR_STYLE, att),
+            | CtfReaderKind::Log2_0
+            | CtfReaderKind::Aces
+            | CtfReaderKind::Function => base || equal_ignoring_case(ATTR_STYLE, att),
+            CtfReaderKind::FixedFunction => {
+                base || equal_ignoring_case(ATTR_STYLE, att)
+                    || equal_ignoring_case(ATTR_PARAMS, att)
+            }
             CtfReaderKind::Lut1D => {
                 base || equal_ignoring_case(ATTR_INTERPOLATION, att)
                     || equal_ignoring_case(ATTR_HALF_DOMAIN, att)
@@ -2432,6 +2452,71 @@ impl CtfReaderOpElt {
     }
 }
 
+impl CtfReaderOpElt {
+    /// The fixed function of an ACES, FixedFunction or Function reader.
+    ///
+    /// Port of `CTFReaderACESElt::getFixedFunction` (CTFReaderHelper.h:394-397 @ v2.5.2).
+    pub fn fixed_function_mut(&mut self) -> &mut FixedFunctionOpData {
+        match &mut self.op {
+            OpData::FixedFunction(ff) => ff,
+            _ => panic!("not a fixed function reader"),
+        }
+    }
+
+    /// The style (required; unknown styles are errors) and, for a FixedFunction, its
+    /// parameters.
+    ///
+    /// Port of `CTFReaderACESElt::start` (CTFReaderHelper.cpp:1209-1239),
+    /// `CTFReaderFixedFunctionElt::start` (1427-1473) and `CTFReaderFunctionElt::start`
+    /// (1506-1534) @ v2.5.2, after `CTFReaderOpElt::start`.
+    fn fixed_function_start(&mut self, atts: &[&[u8]]) -> Result<()> {
+        let mut is_style_found = false;
+
+        let mut i = 0;
+        while i < atts.len() {
+            if equal_ignoring_case(ATTR_STYLE, atts[i]) {
+                // We need a valid style to parse the parameters. This will throw on
+                // unrecognized styles.
+                match FixedFunctionOpStyle::from_name(Some(utf8(atts[i + 1]))) {
+                    Ok(style) => {
+                        self.fixed_function_mut().set_style(style);
+                        is_style_found = true;
+                    }
+                    Err(ce) => return Err(self.throw_message(c_str(ce.what()))),
+                }
+            } else if self.kind == CtfReaderKind::FixedFunction
+                && equal_ignoring_case(ATTR_PARAMS, atts[i])
+            {
+                let params_str = atts[i + 1];
+                let len = params_str.len();
+                let data = match get_numbers::<f64>(params_str, len) {
+                    Ok(data) => data,
+                    Err(_ce) => {
+                        return Err(self.throw_m(&[
+                            b"Illegal '",
+                            self.get_type_name(),
+                            b"' params ",
+                            &truncate_string(params_str, len),
+                            b".",
+                        ]));
+                    }
+                };
+                self.fixed_function_mut().set_params(data);
+            }
+
+            i += 2;
+        }
+        if !is_style_found {
+            return Err(self.throw_message(if self.kind == CtfReaderKind::Aces {
+                b"style parameter for FixedFunction is missing."
+            } else {
+                b"Style parameter for FixedFunction is missing."
+            }));
+        }
+        Ok(())
+    }
+}
+
 /// The Range of a CTF LUT's 2-entry IndexMap: its first pair's halves, scaled to the LUT's
 /// input bit depth and to its `len` entries, as the minimums, the second pair's as the
 /// maximums.
@@ -2484,8 +2569,9 @@ impl XmlReaderElement for CtfReaderOpElt {
         &mut self.element
     }
 
-    /// Port of `CTFReaderOpElt::start` (CTFReaderHelper.cpp:837-924), `CTFReaderCDLElt::start`
-    /// (1338-1359), `CTFReaderGammaElt::start` (1871-1916), `CTFReaderLogElt::start`
+    /// Port of `CTFReaderOpElt::start` (CTFReaderHelper.cpp:837-924), `CTFReaderACESElt::start`
+    /// (1209-1239), `CTFReaderCDLElt::start` (1338-1359), `CTFReaderFixedFunctionElt::start`
+    /// (1427-1473), `CTFReaderFunctionElt::start` (1506-1534), `CTFReaderGammaElt::start` (1871-1916), `CTFReaderLogElt::start`
     /// (3555-3580) and `CTFReaderRangeElt_1_7::start` (4897-4915) @ v2.5.2.
     fn start(&mut self, atts: &[&[u8]]) -> Result<()> {
         self.op_start(atts)?;
@@ -2502,6 +2588,9 @@ impl XmlReaderElement for CtfReaderOpElt {
             | CtfReaderKind::InvLut1D => return self.lut1d_start(atts),
             CtfReaderKind::Lut3D | CtfReaderKind::Lut3D1_7 | CtfReaderKind::InvLut3D => {
                 return self.lut3d_start(atts);
+            }
+            CtfReaderKind::Aces | CtfReaderKind::FixedFunction | CtfReaderKind::Function => {
+                return self.fixed_function_start(atts);
             }
             _ => {}
         }
@@ -2522,8 +2611,9 @@ impl XmlReaderElement for CtfReaderOpElt {
         Ok(())
     }
 
-    /// Port of `CTFReaderOpElt::end` (CTFReaderHelper.cpp:926-928), `CTFReaderCDLElt::end`
-    /// (1367-1373), `CTFReaderGammaElt::end` (1924-1937), `CTFReaderLogElt::end` (3588-3622),
+    /// Port of `CTFReaderOpElt::end` (CTFReaderHelper.cpp:926-928), `CTFReaderACESElt::end`
+    /// (1247-1252), `CTFReaderCDLElt::end` (1367-1373), `CTFReaderFixedFunctionElt::end`
+    /// (1482-1487), `CTFReaderFunctionElt::end` (1543-1548), `CTFReaderGammaElt::end` (1924-1937), `CTFReaderLogElt::end` (3588-3622),
     /// `CTFReaderLogElt_2_0::end` (3664-3717), `CTFReaderMatrixElt::end` (4572-4583),
     /// `CTFReaderRangeElt::end` (4868-4879) and `CTFReaderRangeElt_1_7::end` (4923-4943) @
     /// v2.5.2.
@@ -2547,6 +2637,9 @@ impl XmlReaderElement for CtfReaderOpElt {
             | CtfReaderKind::InvLut1D => self.lut1d_end()?,
             CtfReaderKind::Lut3D | CtfReaderKind::Lut3D1_7 | CtfReaderKind::InvLut3D => {
                 self.lut3d_end()?
+            }
+            CtfReaderKind::Aces | CtfReaderKind::FixedFunction | CtfReaderKind::Function => {
+                self.fixed_function_mut().validate()?
             }
             _ => {}
         }
@@ -3754,6 +3847,145 @@ impl XmlReaderElement for CtfReaderDynamicParamElt {
 
 impl XmlReaderPlainElt for CtfReaderDynamicParamElt {
     /// Port of `CTFReaderDynamicParamElt::setRawData` (CTFReaderHelper.h:1243 @ v2.5.2).
+    fn set_raw_data(&mut self, _s: &[u8], _xml_line: u32) -> Result<()> {
+        Ok(())
+    }
+    fn get_parent(&self) -> &ContainerEltRcPtr {
+        self.plain.get_parent()
+    }
+}
+
+/// The parameter of an ACES (a deprecated FixedFunction): the gamma of the Rec.2100 surround
+/// styles.
+///
+/// Port of `CTFReaderACESParamsElt` (CTFReaderHelper.h:406-421, CTFReaderHelper.cpp:1259-1323
+/// @ v2.5.2).
+#[derive(Debug)]
+pub struct CtfReaderAcesParamsElt {
+    plain: XmlReaderPlainEltBase,
+}
+
+impl CtfReaderAcesParamsElt {
+    /// Port of `CTFReaderACESParamsElt::CTFReaderACESParamsElt` (CTFReaderHelper.cpp:
+    /// 1259-1266 @ v2.5.2).
+    pub fn new(
+        name: &[u8],
+        parent: ContainerEltRcPtr,
+        xml_line_number: u32,
+        xml_file: &[u8],
+    ) -> CtfReaderAcesParamsElt {
+        CtfReaderAcesParamsElt {
+            plain: XmlReaderPlainEltBase::new(name, parent, xml_line_number, xml_file),
+        }
+    }
+}
+
+impl XmlReaderElement for CtfReaderAcesParamsElt {
+    fn element(&self) -> &XmlReaderElementBase {
+        &self.plain.element
+    }
+    fn element_mut(&mut self) -> &mut XmlReaderElementBase {
+        &mut self.plain.element
+    }
+
+    /// The gamma, which only the Rec.2100 surround styles take, once.
+    ///
+    /// Port of `CTFReaderACESParamsElt::start` (CTFReaderHelper.cpp:1272-1323 @ v2.5.2). Its
+    /// message for a missing gamma lacks a space after the attribute's name, as upstream's
+    /// does (`docs/improvements.md` I-187).
+    fn start(&mut self, atts: &[&[u8]]) -> Result<()> {
+        // Attributes we want to extract.
+        let mut gamma = f64::NAN;
+
+        // Try extracting the attributes.
+        let mut i = 0;
+        while i < atts.len() {
+            if equal_ignoring_case(ATTR_GAMMA, atts[i]) {
+                gamma = self
+                    .plain
+                    .element
+                    .parse_scalar_attribute::<f64>(atts[i], atts[i + 1])?;
+            } else {
+                self.plain.element.log_parameter_warning(atts[i]);
+            }
+
+            i += 2;
+        }
+
+        let parent = self.plain.get_parent().clone();
+        let mut p_fixed_function = op_parent(&parent);
+
+        let style = p_fixed_function.fixed_function_mut().style();
+        let style_name = style.to_str(false).as_bytes();
+        if style == FixedFunctionOpStyle::Rec2100SurroundFwd
+            || style == FixedFunctionOpStyle::Rec2100SurroundInv
+        {
+            if !p_fixed_function.fixed_function_mut().params().is_empty() {
+                return Err(self.throw_message(
+                    &[
+                        b"ACES FixedFunction element with style ".as_slice(),
+                        style_name,
+                        b" expects only 1 gamma parameter.",
+                    ]
+                    .concat(),
+                ));
+            }
+            if gamma.is_nan() {
+                return Err(self.throw_message(
+                    &[
+                        b"Missing required parameter ".as_slice(),
+                        ATTR_GAMMA,
+                        b"for ACES FixedFunction element with style ",
+                        style_name,
+                        b".",
+                    ]
+                    .concat(),
+                ));
+            }
+            // Assign the parameters to the object.
+            p_fixed_function
+                .fixed_function_mut()
+                .set_params(vec![gamma]);
+        } else {
+            return Err(self.throw_message(
+                &[
+                    b"ACES FixedFunction element with style ".as_slice(),
+                    style_name,
+                    b" does not take any parameter.",
+                ]
+                .concat(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Port of `CTFReaderACESParamsElt::end` (CTFReaderHelper.h:418 @ v2.5.2).
+    fn end(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    fn is_container(&self) -> bool {
+        false
+    }
+    fn get_identifier(&self) -> &[u8] {
+        self.get_name()
+    }
+    fn get_type_name(&self) -> &[u8] {
+        self.get_name()
+    }
+    fn as_plain_mut(&mut self) -> Option<&mut dyn XmlReaderPlainElt> {
+        Some(self)
+    }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
+
+impl XmlReaderPlainElt for CtfReaderAcesParamsElt {
+    /// Port of `CTFReaderACESParamsElt::setRawData` (CTFReaderHelper.h:420 @ v2.5.2).
     fn set_raw_data(&mut self, _s: &[u8], _xml_line: u32) -> Result<()> {
         Ok(())
     }

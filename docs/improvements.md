@@ -2444,6 +2444,20 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   file_format_iridas_look.rs`); the "empty mask" oracle cases
   (`crates/ocio/tests/file_format_iridas_look_oracle.rs`).
 
+### I-187. A CTF ACESParams without a gamma names the attribute without a space
+
+- **Upstream:** `CTFReaderACESParamsElt::start` (`fileformats/ctf/CTFReaderHelper.cpp:1272-1323`
+  @ v2.5.2) refuses a Rec.2100 surround ACES element whose ACESParams has no `gamma` with
+  `"Missing required parameter ", ATTR_GAMMA, "for ACES FixedFunction element with style "`:
+  the message reads "Missing required parameter gammafor ACES FixedFunction element with
+  style Rec2100SurroundFwd.".
+- **Who notices:** a reader of the error of a deprecated CTF 1.x ACES element with a wrong
+  parameter.
+- **A fix:** add the space (`"for ACES ..."` becomes `" for ACES ..."`).
+- **Status:** matched in `p4-ctf-read-3` (`crates/ocio/src/fileformats/ctf/ctf_reader_helper.rs`,
+  `CtfReaderAcesParamsElt::start`; `crates/ocio/tests/file_format_ctf_oracle.rs` checks the
+  message with the wheel).
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
