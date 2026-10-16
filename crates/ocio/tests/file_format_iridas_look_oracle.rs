@@ -175,6 +175,20 @@ fn generated_cases() -> Vec<Case> {
         look("\n  \"2\"\n  ", &d2),
     );
     add("a size by a character reference", look("\"&#50;\"", &d2));
+    // The size is read from each piece of text expat delivers (I-195).
+    add("a pretty-printed size", look("\n      \"2\"\n    ", &d2));
+    add(
+        "a size split by a comment",
+        look("\"1<!-- -->7\"", &data(17)),
+    );
+    add("a size in quote references", look("&quot;2&quot;", &d2));
+    add(
+        "a size in apostrophe references",
+        look("&apos;2&apos;", &d2),
+    );
+    // A zero-padded size: 10 on Windows, 8 on Linux (I-185).
+    add("a size of 010, 10 per side", look("\"010\"", &data(10)));
+    add("a size of 010, 8 per side", look("\"010\"", &data(8)));
     add(
         "two size elements",
         root(&[
@@ -218,6 +232,32 @@ fn generated_cases() -> Vec<Case> {
     add(
         "a hex prefix",
         look("\"2\"", &[format!("0x{}", &d2_one_line[2..])]),
+    );
+    // Only spaces, quotes and line feeds are removed from the data (I-196).
+    add(
+        "a carriage return reference in the data",
+        look(
+            "\"2\"",
+            &[format!("{}&#13;{}", &d2_one_line[..16], &d2_one_line[16..])],
+        ),
+    );
+    add(
+        "a tab reference in the data",
+        look(
+            "\"2\"",
+            &[format!("{}&#9;{}", &d2_one_line[..16], &d2_one_line[16..])],
+        ),
+    );
+    add(
+        "a line feed reference in the data",
+        look(
+            "\"2\"",
+            &[format!("{}&#10;{}", &d2_one_line[..16], &d2_one_line[16..])],
+        ),
+    );
+    add(
+        "tab-indented data lines",
+        look("\"2\"", &d2).replace("\n      ", "\n\t"),
     );
     add(
         "the data by character references",

@@ -2425,7 +2425,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   subnormal on Windows while Linux refuses the file (wheel probes, 2026-10-15). The `.look`
   reader parses its size as a `long`: `"4294967298"` is out of range on Windows ("Invalid LUT
   size value: '"4294967298"'. Expected quoted integer") and too large on Linux ("... Expected
-  value between 2 and 129") (wheel probes, 2026-10-15).
+  value between 2 and 129") (wheel probes, 2026-10-15), and a zero-padded `"010"` is a size of
+  10 on Windows and 8 (octal) on Linux, so the same file reads as a LUT of 10 per side on one
+  and fails its entry count on the other (the `.look` verifier's probes, 2026-10-16).
 - **Who notices:** LUT files with hex floats, subnormal values, or other edge-case numbers,
   shared between Windows and Linux.
 - **A fix:** one parser on both platforms (`std::from_chars` where it exists, or a port of
@@ -2578,6 +2580,65 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p4-ctf-read-3` (`crates/ocio/src/fileformats/ctf/ctf_reader_helper.rs`,
   `reference_start`); `op_cases_h`'s "a path and a basePath" and "only a basePath" check it with
   the wheel.
+
+### I-195. A `.look` size is read from each piece of its text alone
+
+- **Upstream:** the `.look` parser reads the size in `CharacterDataHandler`
+  (`src/OpenColorIO/fileformats/FileFormatIridasLook.cpp:416-440` @ v2.5.2), once for each
+  piece of text expat delivers: each piece must parse on its own (but a lone line feed), and
+  the last one sets the size. expat delivers the text
+  of an element in pieces at line ends (the reader gives it a line at a time), around
+  comments and processing instructions, and at each character or entity reference. So a
+  pretty-printed `<size>` (the value on its own line between indented lines) is refused at its
+  white space ("Invalid LUT size value: '    '. Expected quoted integer"), `"1<!-- -->7"` is
+  refused as `'"1'` (between 2 and 129), and `&quot;2&quot;` as `'"'` (the `.look` verifier's
+  probes, both wheels, 2026-10-16).
+- **Who notices:** `.look` files written by tools that indent or split the size.
+- **A fix:** collect the size's text until the element ends, then parse it once.
+- **Status:** matched in `p4-look` (4.4f, `crates/ocio/src/fileformats/
+  file_format_iridas_look.rs`); the oracle cases of sizes on their own line, split by a
+  comment, and by `&quot;` (`crates/ocio/tests/file_format_iridas_look_oracle.rs`).
+
+### I-196. A `.look` file's data may not hold tabs or carriage returns
+
+- **Upstream:** the `.look` parser removes spaces, quotes and line feeds from the data
+  (`CharacterDataHandler`, `src/OpenColorIO/fileformats/FileFormatIridasLook.cpp:441-457` @
+  v2.5.2), though the format's description says "all whitespace and quotes" (52-53). A tab or
+  a carriage return (written `&#13;`, since expat turns CR LF into LF) stays in the data and
+  is refused: tab-indented data lines give "Number of characters in 'data' must be multiple
+  of 8. 193 elements found." (the `.look` verifier's probes, both wheels, 2026-10-16).
+- **Who notices:** `.look` files whose data lines are indented with tabs.
+- **A fix:** remove all XML white space from the data.
+- **Status:** matched in `p4-look` (4.4f, `crates/ocio/src/fileformats/
+  file_format_iridas_look.rs`); the oracle cases of tab-indented data and of `&#9;` and
+  `&#13;` in the data (`crates/ocio/tests/file_format_iridas_look_oracle.rs`).
+
+### I-197. Two `.look` data messages that mislead
+
+- **Upstream:** `getLut` (`src/OpenColorIO/fileformats/FileFormatIridasLook.cpp:193-235` @
+  v2.5.2) says "Number of characters in 'data' must be multiple of 8. N elements found."
+  where N counts characters (195-203), and "Non-hex characters found in 'data' block at index
+  'I'." where I is the start of the 8-character group holding the bad character, not its own
+  position (211-221).
+- **Who notices:** authors of malformed `.look` files.
+- **A fix:** say "characters", and give the bad character's index.
+- **Status:** matched in `p4-look` (4.4f, `crates/ocio/src/fileformats/
+  file_format_iridas_look.rs`); the oracle cases "a character missing" and "a character that
+  isn't hex" (`crates/ocio/tests/file_format_iridas_look_oracle.rs`).
+
+### I-198. A `.look` LUT without a size or data fails after the reader
+
+- **Upstream:** `getLut` expects `3 * size^3` values, with a size of 0 when no `<size>`
+  element was read (`src/OpenColorIO/fileformats/FileFormatIridasLook.cpp:205-233` @ v2.5.2),
+  so a `<LUT>` without size and data passes it, and `read` makes a 3D LUT of 0 entries per
+  side (538-548). The file reads, and the error comes when its op is validated: "Lut3D
+  content array issue: Array content is empty." (`Lut3DOpData::validate`,
+  `ops/lut3d/Lut3DOpData.cpp:371-381`; `OpArray.h:168`), with no file name.
+- **Who notices:** authors of `.look` files without a LUT section's content.
+- **A fix:** refuse a missing size in `getLut`, naming the file.
+- **Status:** matched in `p4-look` (4.4f, `crates/ocio/src/fileformats/
+  file_format_iridas_look.rs`); the oracle cases "no size and no data" and "no LUT"
+  (`crates/ocio/tests/file_format_iridas_look_oracle.rs`).
 
 ### I-201. A Reference by an alias other than currentMonitor adds no ops
 
