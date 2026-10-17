@@ -329,10 +329,14 @@ impl ProcessorDump {
 /// What OCIO raised, and where.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Raised {
-    /// The Python type: `Exception` for OCIO's.
+    /// The Python type: `Exception` for OCIO's; `UnicodeDecodeError` for an OCIO exception
+    /// whose message isn't UTF-8 (the binding loses its type).
     pub kind: String,
-    /// The message.
+    /// The message (for one that isn't UTF-8, its bytes decoded lossily, each invalid
+    /// sequence as U+FFFD).
     pub message: String,
+    /// The message's bytes, when they aren't UTF-8 (`{"undecodable": hex}`).
+    pub undecodable: Option<Vec<u8>>,
     /// `config`, `transform`, `processor`, `group`, `optimize` or `optimized_group`.
     pub stage: String,
 }
@@ -368,9 +372,21 @@ impl ProcessorOpsReply {
     pub fn raised(&self) -> Option<Raised> {
         let exception = self.result.get("exception")?;
         let text = |v: &Value| v.as_str().unwrap_or_default().to_string();
+        let undecodable = exception.get("undecodable").map(|hex| {
+            let hex = hex.as_str().expect("hex");
+            (0..hex.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).expect("hex"))
+                .collect::<Vec<u8>>()
+        });
+        let message = match &undecodable {
+            Some(bytes) => String::from_utf8_lossy(bytes).into_owned(),
+            None => text(&exception["message"]),
+        };
         Some(Raised {
             kind: text(&exception["type"]),
-            message: text(&exception["message"]),
+            message,
+            undecodable,
             stage: text(&self.result["stage"]),
         })
     }

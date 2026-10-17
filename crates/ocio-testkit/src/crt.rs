@@ -62,6 +62,7 @@ mod ffi {
         pub(super) fn exp2(x: c_double) -> c_double;
         pub(super) fn powf(x: c_float, y: c_float) -> c_float;
         pub(super) fn exp2f(x: c_float) -> c_float;
+        pub(super) fn lroundf(x: c_float) -> c_long;
     }
 
     #[cfg(windows)]
@@ -104,6 +105,7 @@ mod ffi {
             locale: *const c_char,
             base: *mut c_void,
         ) -> *mut c_void;
+        pub(super) fn uselocale(locale: *mut c_void) -> *mut c_void;
         pub(super) fn strtod_l(
             s: *const c_char,
             end: *mut *mut c_char,
@@ -378,6 +380,16 @@ pub fn exp2f_c(x: f32) -> f32 {
     let x = std::hint::black_box(x);
     // SAFETY: `exp2f` takes and returns plain values.
     unsafe { ffi::exp2f(x) }
+}
+
+/// `lroundf(x)`: `x` rounded to the nearest integer, halves away from zero, as a `long` (32
+/// bits on Windows, 64 on Linux), widened to `i64`; what each library returns for a NaN or a
+/// value out of range is its own.
+// `long` is already `i64` on Linux.
+#[allow(clippy::useless_conversion)]
+pub fn lroundf_c(x: f32) -> i64 {
+    // SAFETY: a plain function of a float.
+    i64::from(unsafe { ffi::lroundf(x) })
 }
 
 /// `strtoul(input, &end, base)` in the "C" locale. `unsigned long` is 32 bits on Windows and
@@ -785,6 +797,248 @@ pub fn c_runtime_environment() -> Vec<Vec<u8>> {
 /// The number of bits in C `long` on this platform (32 on Windows, 64 on Linux).
 pub const LONG_BITS: u32 = c_long::BITS;
 
+// ---------------------------------------------------------------------------------------------
+// Scanning (`sscanf`) and text-mode reading: the references of the LUT readers (card p4-oracle,
+// chunk T4.1).
+
+/// The raw declarations of the scanning and file functions. The safe wrappers below are the
+/// only callers.
+mod scan_ffi {
+    use std::ffi::{c_char, c_int, c_void};
+
+    // UCRT's `sscanf_s` is an inline function of <stdio.h> over this one
+    // (ucrt/corecrt_wstdio.h, ucrt/stdio.h `_vsscanf_s_l`): `_Options` is the local scanf
+    // options (0 unless legacy mode) with `_CRT_INTERNAL_SCANF_SECURECRT` (1) for the `_s`
+    // form, `_BufferCount` is `(size_t)-1`, `_Locale` is null (the thread's locale; the
+    // reference passes the "C" locale instead), and `_ArgList` is the variadic arguments as
+    // x64's `va_list`: a pointer to 8-byte slots.
+    #[cfg(windows)]
+    unsafe extern "C" {
+        pub(super) fn __stdio_common_vsscanf(
+            options: u64,
+            buffer: *const c_char,
+            buffer_count: usize,
+            format: *const c_char,
+            locale: *mut c_void,
+            arg_list: *const usize,
+        ) -> c_int;
+    }
+
+    // glibc's `sscanf@GLIBC_2.2.5`, the symbol the Linux wheel imports (not the ISO C99
+    // `__isoc99_sscanf`).
+    #[cfg(target_os = "linux")]
+    unsafe extern "C" {
+        pub(super) fn sscanf(s: *const c_char, format: *const c_char, ...) -> c_int;
+    }
+
+    unsafe extern "C" {
+        pub(super) fn fopen(path: *const c_char, mode: *const c_char) -> *mut c_void;
+        pub(super) fn fread(
+            buf: *mut c_void,
+            size: usize,
+            count: usize,
+            file: *mut c_void,
+        ) -> usize;
+        pub(super) fn fclose(file: *mut c_void) -> c_int;
+    }
+}
+
+/// A conversion of a scan format: what its argument is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScanArg {
+    /// `%d`: an `int`.
+    Int,
+    /// `%Ns`: a `char[N + 1]`.
+    Str(usize),
+    /// `%c`: one `char`.
+    Char,
+}
+
+/// What a conversion stored, or its initial value where it stored nothing: an `int` starts
+/// at 0, a string buffer and a `char` zero-filled, as the readers that look at them initialize
+/// them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Scanned {
+    /// `%d`.
+    Int(i32),
+    /// `%Ns`: the buffer's bytes up to its first NUL.
+    Str(Vec<u8>),
+    /// `%c`.
+    Char(u8),
+}
+
+/// The outcome of a scan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Scan {
+    /// The function's return value: the number of conversions assigned, or `EOF` (-1).
+    pub count: i32,
+    /// Every assigning conversion's argument after the call, in the format's order.
+    pub values: Vec<Scanned>,
+}
+
+/// The assigning conversions of `format`: `%d`, `%Ns` with a width, `%c`; `%*s`, `%%`, literal
+/// characters and whitespace assign nothing. Panics on anything else, so that the call can't
+/// read a mismatched argument.
+fn scan_args(format: &str) -> Vec<ScanArg> {
+    let mut args = Vec::new();
+    let bytes = format.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'%' {
+            i += 1;
+            continue;
+        }
+        i += 1;
+        let suppressed = bytes.get(i) == Some(&b'*');
+        if suppressed {
+            i += 1;
+        }
+        let start = i;
+        while i < bytes.len() && bytes[i].is_ascii_digit() {
+            i += 1;
+        }
+        let width: Option<usize> = format[start..i].parse().ok();
+        let conversion = *bytes.get(i).expect("a conversion after %");
+        i += 1;
+        match (conversion, suppressed, width) {
+            (b'%', false, None) => {}
+            (b's', true, None) => {}
+            (b'd', false, None) => args.push(ScanArg::Int),
+            (b's', false, Some(w)) if (1..=255).contains(&w) => args.push(ScanArg::Str(w)),
+            (b'c', false, None) => args.push(ScanArg::Char),
+            _ => panic!("unsupported conversion in scan format {format:?}"),
+        }
+    }
+    assert!(
+        args.len() <= 8,
+        "at most 8 assigning conversions: {format:?}"
+    );
+    args
+}
+
+/// The C runtime's scan of `input` (as a C string: up to its first NUL) with `format`, as each
+/// wheel calls it: `sscanf_s` on Windows (UCRT, each `%s` and `%c` given its buffer's size),
+/// `sscanf` on Linux (glibc). Formats are limited to what OCIO's LUT readers use: `%d`, `%Ns`,
+/// `%c`, `%*s`, `%%`, literal characters and whitespace.
+///
+/// The scan runs in the classic "C" locale, explicitly: on Windows through the call's locale
+/// argument, on Linux through `uselocale` for the call. White space is then `\t`, `\n`, `\v`,
+/// `\f`, `\r` and space. The wheels scan in their process's locale: under Python the Windows
+/// wheel runs in the ANSI code page's (1252), where the UCRT also takes 0xA0 for white space
+/// (format white space, and what `%d` and `%s` skip first; a `%s` word still doesn't end at
+/// it). The port follows the "C" locale, as OCIO in a C++ application does (deviation D-1).
+pub fn sscanf(input: &[u8], format: &str) -> Scan {
+    let kinds = scan_args(format);
+    let len = input.iter().position(|&b| b == 0).unwrap_or(input.len());
+    let mut text = Vec::with_capacity(len + 1);
+    text.extend_from_slice(&input[..len]);
+    text.push(0);
+    let mut fmt = format.as_bytes().to_vec();
+    fmt.push(0);
+
+    let mut ints = vec![0i32; kinds.len()];
+    let mut chars = vec![0u8; kinds.len()];
+    let mut strs: Vec<Vec<u8>> = kinds
+        .iter()
+        .map(|k| match k {
+            ScanArg::Str(w) => vec![0u8; w + 1],
+            _ => Vec::new(),
+        })
+        .collect();
+    // The variadic arguments, as 8-byte slots: a pointer per conversion, and on Windows the
+    // size of each `%s` and `%c` buffer after its pointer (an `unsigned`, zero-extended).
+    let mut slots = [0usize; 16];
+    let mut n = 0;
+    for (i, kind) in kinds.iter().enumerate() {
+        match kind {
+            ScanArg::Int => {
+                slots[n] = std::ptr::addr_of_mut!(ints[i]) as usize;
+                n += 1;
+            }
+            ScanArg::Str(w) => {
+                slots[n] = strs[i].as_mut_ptr() as usize;
+                n += 1;
+                if cfg!(windows) {
+                    slots[n] = w + 1;
+                    n += 1;
+                }
+            }
+            ScanArg::Char => {
+                slots[n] = std::ptr::addr_of_mut!(chars[i]) as usize;
+                n += 1;
+                if cfg!(windows) {
+                    slots[n] = 1;
+                    n += 1;
+                }
+            }
+        }
+    }
+    let s = text.as_ptr().cast::<c_char>();
+    let f = fmt.as_ptr().cast::<c_char>();
+    // SAFETY: `s` and `f` are NUL-terminated; `scan_args` checked that the format's assigning
+    // conversions are exactly `kinds`, and each slot points to storage of its conversion's
+    // type and size (strings N + 1 bytes for `%Ns`), followed on Windows by that size; the
+    // slots past `n` are never read.
+    #[cfg(windows)]
+    let count = unsafe {
+        scan_ffi::__stdio_common_vsscanf(1, s, usize::MAX, f, c_locale(), slots.as_ptr())
+    };
+    // SAFETY: as above; `uselocale` sets this thread's locale to the "C" locale object, which
+    // lives for the process, and puts the previous one back after the call.
+    #[cfg(target_os = "linux")]
+    let count = unsafe {
+        let previous = ffi::uselocale(c_locale());
+        let count = scan_ffi::sscanf(
+            s, f, slots[0], slots[1], slots[2], slots[3], slots[4], slots[5], slots[6], slots[7],
+        );
+        ffi::uselocale(previous);
+        count
+    };
+    let values = kinds
+        .iter()
+        .enumerate()
+        .map(|(i, kind)| match kind {
+            ScanArg::Int => Scanned::Int(ints[i]),
+            ScanArg::Str(_) => {
+                let end = strs[i]
+                    .iter()
+                    .position(|&b| b == 0)
+                    .unwrap_or(strs[i].len());
+                Scanned::Str(strs[i][..end].to_vec())
+            }
+            ScanArg::Char => Scanned::Char(chars[i]),
+        })
+        .collect();
+    Scan { count, values }
+}
+
+/// The bytes a text-mode `std::ifstream` reads from `path`, as the C runtime's text-mode
+/// stream gives them (`fopen(path, "r")` and `fread`): MSVC's `basic_filebuf` opens files
+/// through the CRT's `FILE` (`_Fiopen`), which in text mode reads `CR LF` as `LF`, and treats
+/// `0x1A` as the end of the file; on Linux text and binary mode are the same.
+pub fn read_text_mode(path: &std::path::Path) -> std::io::Result<Vec<u8>> {
+    let mut name = path.to_str().expect("a UTF-8 path").as_bytes().to_vec();
+    name.push(0);
+    // SAFETY: both strings are NUL-terminated.
+    let file = unsafe { scan_ffi::fopen(name.as_ptr().cast(), c"r".as_ptr()) };
+    if file.is_null() {
+        return Err(std::io::Error::last_os_error());
+    }
+    let mut out = Vec::new();
+    let mut buf = [0u8; 4096];
+    loop {
+        // SAFETY: `file` is an open stream and `buf` has room for `buf.len()` bytes.
+        let got = unsafe { scan_ffi::fread(buf.as_mut_ptr().cast(), 1, buf.len(), file) };
+        out.extend_from_slice(&buf[..got]);
+        if got < buf.len() {
+            break;
+        }
+    }
+    // SAFETY: `file` is open and closed once.
+    unsafe { scan_ffi::fclose(file) };
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     //! Self-checks of the FFI plumbing. They compare the C runtime with itself (round trips,
@@ -901,5 +1155,71 @@ mod tests {
     #[should_panic(expected = "unsupported conversion")]
     fn star_precision_is_rejected() {
         format_f64("%.*g", 1.0);
+    }
+
+    /// C17 7.21.6.2: `%d` reads an optionally signed decimal integer after skipping white
+    /// space (p8, p12); `%Ns` at most N non-white-space characters and a terminating NUL (p9,
+    /// p12); `%c` one character, without skipping white space (p8); a directive that fails
+    /// ends the scan, and the function returns the number of input items assigned, or `EOF`
+    /// when the input ends before the first conversion (p16).
+    #[test]
+    fn scans_follow_the_c_standard() {
+        let s = sscanf(b"  12 abcdef x", "%d %3s %c");
+        assert_eq!(s.count, 3);
+        assert_eq!(
+            s.values,
+            vec![
+                Scanned::Int(12),
+                Scanned::Str(b"abc".to_vec()),
+                Scanned::Char(b'd')
+            ]
+        );
+        let s = sscanf(b"Length 7", "Length %d");
+        assert_eq!((s.count, &s.values[..]), (1, &[Scanned::Int(7)][..]));
+        let s = sscanf(b"Lenght 7", "Length %d");
+        assert_eq!((s.count, &s.values[..]), (0, &[Scanned::Int(0)][..]));
+        let s = sscanf(b"", "%d");
+        assert_eq!(s.count, -1);
+        let s = sscanf(b"16f", "%d%c");
+        assert_eq!(s.values, vec![Scanned::Int(16), Scanned::Char(b'f')]);
+        let s = sscanf(b"LUT: 3 4096 16f", "%*s %d %d %15s");
+        assert_eq!(s.count, 3);
+        assert_eq!(s.values[2], Scanned::Str(b"16f".to_vec()));
+    }
+
+    /// The scan runs in the "C" locale, whose white space is `isspace`'s in C17 7.4.1.10p2:
+    /// space, `\f`, `\n`, `\r`, `\t`, `\v`. So 0xA0 (a no-break space in code page 1252) is
+    /// neither skipped nor matched by white space in the format.
+    #[test]
+    fn scans_run_in_the_c_locale() {
+        let s = sscanf(b"Length\x0b\x0c\r\t\n 7", "Length %d");
+        assert_eq!((s.count, &s.values[..]), (1, &[Scanned::Int(7)][..]));
+        let s = sscanf(b"Length\xa07", "Length %d");
+        assert_eq!((s.count, &s.values[..]), (0, &[Scanned::Int(0)][..]));
+        let s = sscanf(b"\xa07", "%d");
+        assert_eq!(s.count, 0);
+        let s = sscanf(b"\xa0ab", "%3s");
+        assert_eq!(s.values, vec![Scanned::Str(b"\xa0ab".to_vec())]);
+    }
+
+    #[test]
+    #[should_panic(expected = "unsupported conversion")]
+    fn a_string_without_width_is_rejected() {
+        sscanf(b"a", "%s");
+    }
+
+    /// A text-mode read: `CR LF` becomes `LF` on Windows (MSVC's text mode), and nothing
+    /// changes on Linux.
+    #[test]
+    fn text_mode_reads_line_ends() {
+        let path = std::env::temp_dir().join(format!("ocio-rs-crt-text-{}", std::process::id()));
+        std::fs::write(&path, b"a\r\nb\rc\n").unwrap();
+        let read = read_text_mode(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        if cfg!(windows) {
+            assert_eq!(read, b"a\nb\rc\n");
+        } else {
+            assert_eq!(read, b"a\r\nb\rc\n");
+        }
     }
 }

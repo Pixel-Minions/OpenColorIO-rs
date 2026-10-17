@@ -3,3 +3,6 @@
 
 //! File formats: a port of `src/OpenColorIO/fileformats/` from OpenColorIO 2.5.2.
 #![forbid(unsafe_code)]
+
+pub mod expat;
+pub mod fileformats;

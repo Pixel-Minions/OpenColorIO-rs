@@ -158,6 +158,21 @@ impl MatrixArray {
         self.array.get_length()
     }
 
+    /// Changes the length, and resizes the values to `length * length` when it changes.
+    ///
+    /// Port of `ArrayT::setLength` (src/OpenColorIO/ops/OpArray.h:64-71 @ v2.5.2) with
+    /// `MatrixArray::getNumValues`.
+    pub fn set_length(&mut self, length: c_ulong) {
+        self.array.set_length(length, length.wrapping_mul(length));
+    }
+
+    /// Sets the value at `index`.
+    ///
+    /// Port of `ArrayT::setDoubleValue` (src/OpenColorIO/ops/OpArray.h:73-76 @ v2.5.2).
+    pub fn set_double_value(&mut self, index: c_ulong, value: f64) {
+        self.array.set_double_value(index, value);
+    }
+
     /// Port of `ArrayT::getNumColorComponents` (OpArray.h:97-100 @ v2.5.2).
     pub fn get_num_color_components(&self) -> c_ulong {
         self.array.get_num_color_components()

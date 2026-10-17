@@ -9,6 +9,8 @@
 //! The oracle's process holds exactly the request's variables, set one by one; the port reads
 //! a `MapEnv` the same variables are set in, through OCIO's `Setenv`, on the test's own thread.
 
+mod common;
+
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::rc::Rc;
@@ -4030,4 +4032,228 @@ fn color_spaces_used_match_the_wheel() {
     let refs: Vec<&[u8]> = names.iter().map(|n| n.as_bytes()).collect();
     let probes = probes(&refs, &[]);
     check_items("color spaces used", "new", &[], items, &probes);
+}
+
+/// A display profile of the tags `tags` (signature, data), as `instantiateDisplayFromICCProfile`
+/// reads it: the header, the tag table, the tags' data.
+fn icc_profile(tags: &[(&[u8; 4], Vec<u8>)]) -> Vec<u8> {
+    let mut out = vec![0u8; 128];
+    out[12..16].copy_from_slice(b"mntr");
+    out[16..20].copy_from_slice(b"RGB ");
+    out[20..24].copy_from_slice(b"XYZ ");
+    out[36..40].copy_from_slice(b"acsp");
+    out.extend_from_slice(&(tags.len() as u32).to_be_bytes());
+    let mut offset = 128 + 4 + 12 * tags.len();
+    let mut data = Vec::new();
+    for (sig, d) in tags {
+        out.extend_from_slice(*sig);
+        out.extend_from_slice(&(offset as u32).to_be_bytes());
+        out.extend_from_slice(&(d.len() as u32).to_be_bytes());
+        data.extend_from_slice(d);
+        offset += d.len();
+    }
+    out.extend_from_slice(&data);
+    let size = out.len() as u32;
+    out[0..4].copy_from_slice(&size.to_be_bytes());
+    out
+}
+
+/// A `desc` tag of `text`.
+fn icc_desc(text: &[u8]) -> Vec<u8> {
+    let mut d = b"desc\0\0\0\0".to_vec();
+    d.extend_from_slice(&(text.len() as u32).to_be_bytes());
+    d.extend_from_slice(text);
+    d
+}
+
+/// `instantiateDisplayFromICCProfile` on a raw config: without a virtual display, then with
+/// one; the display and its color space named by the profile's description (`$` and `%` as
+/// `_`), or by the file's name without one; the same profile twice; active displays and views;
+/// a description naming an existing color space; files that don't open or read; and with
+/// `OCIO_ACTIVE_DISPLAYS` set.
+#[test]
+fn instantiate_display_from_icc_profile_matches_the_wheel() {
+    let xyz = b"XYZ \0\0\0\0\0\0\xf6\xd6\0\x01\0\0\0\0\xd3\x2d".to_vec();
+    let dir = common::lut_files::write_files(&[
+        common::lut_files::file(
+            "monitor.icc",
+            icc_profile(&[(b"desc", icc_desc(b"Monitor $1 %2\0"))]),
+        ),
+        common::lut_files::file("second.icc", icc_profile(&[(b"desc", icc_desc(b"Second"))])),
+        common::lut_files::file("nodesc.icc", icc_profile(&[(b"wtpt", xyz.clone())])),
+        common::lut_files::file("empty.icc", icc_profile(&[(b"desc", icc_desc(b"\0"))])),
+        common::lut_files::file("raw.icc", icc_profile(&[(b"desc", icc_desc(b"raw"))])),
+        common::lut_files::file("cafe.icc", icc_profile(&[(b"desc", icc_desc(b"Caf\xe9"))])),
+        common::lut_files::file(
+            "dscm.icc",
+            icc_profile(&[(b"desc", icc_desc(b"desc")), (b"dscm", xyz)]),
+        ),
+        common::lut_files::file("short.icc", vec![0u8; 100]),
+        common::lut_files::file("label.txt", "instantiate_display_from_icc_profile"),
+    ]);
+    let path = |name: &str| format!("{dir}/{name}").into_bytes();
+    let upstream = ocio_testkit::paths::upstream_dir()
+        .join("tests/data/files/icc-test-3.icm")
+        .to_string_lossy()
+        .replace('\\', "/")
+        .into_bytes();
+    let items: Vec<Item> = vec![
+        instantiate_display_from_icc_profile(&path("monitor.icc")).into(),
+        add_virtual_display_view(b"vv", b"", b"<USE_DISPLAY_NAME>").into(),
+        add_virtual_display_shared_view(b"sv").into(),
+        instantiate_display_from_icc_profile(&path("monitor.icc")).into(),
+        instantiate_display_from_icc_profile(&path("monitor.icc")).into(),
+        instantiate_display_from_icc_profile(&path("nodesc.icc")).into(),
+        instantiate_display_from_icc_profile(&path("empty.icc")).into(),
+        instantiate_display_from_icc_profile(&path("dscm.icc")).into(),
+        instantiate_display_from_icc_profile(&upstream).into(),
+        set_active_displays(b"Other").into(),
+        set_active_views(b"x").into(),
+        instantiate_display_from_icc_profile(&path("second.icc")).into(),
+        instantiate_display_from_icc_profile(&path("raw.icc")).into(),
+        instantiate_display_from_icc_profile(&path("cafe.icc")).into(),
+        Item::Copy,
+        instantiate_display_from_icc_profile(&path("missing.icc")).into(),
+        instantiate_display_from_icc_profile(&path("short.icc")).into(),
+        instantiate_display_from_icc_profile(&path("second.icc")).into(),
+    ];
+    let probes = probes_of(&[b"raw", b"Second", b"Monitor _1 _2"]).displays(
+        &[
+            b"Monitor _1 _2",
+            b"nodesc.icc",
+            b"empty.icc",
+            b"Second",
+            b"raw",
+            b"Other",
+        ],
+        &[b"vv", b"sv", b"x"],
+    );
+    check_items(
+        "instantiateDisplayFromICCProfile",
+        "raw",
+        &[],
+        items,
+        &probes,
+    );
+
+    let env: &[(&str, &[u8])] = &[("OCIO_ACTIVE_DISPLAYS", b"A, B")];
+    check_items(
+        "instantiateDisplayFromICCProfile, OCIO_ACTIVE_DISPLAYS",
+        "raw",
+        env,
+        vec![
+            add_virtual_display_view(b"vv", b"", b"<USE_DISPLAY_NAME>").into(),
+            instantiate_display_from_icc_profile(&path("second.icc")).into(),
+        ],
+        &probes,
+    );
+}
+
+/// An `mluc` record: language, country, UTF-16 units, and a change to the byte length it
+/// claims.
+type MlucRecord<'a> = (&'a [u8; 2], &'a [u8; 2], Vec<u16>, i32);
+
+/// An `mluc` tag of `records` whose records claim `rec_size` bytes each.
+fn icc_mluc(records: &[MlucRecord<'_>], rec_size: u32) -> Vec<u8> {
+    let mut d = b"mluc\0\0\0\0".to_vec();
+    d.extend_from_slice(&(records.len() as u32).to_be_bytes());
+    d.extend_from_slice(&rec_size.to_be_bytes());
+    for (lang, country, units, len_delta) in records {
+        d.extend_from_slice(*lang);
+        d.extend_from_slice(*country);
+        let len = (units.len() as i32 * 2 + len_delta) as u32;
+        d.extend_from_slice(&len.to_be_bytes());
+        d.extend_from_slice(&28u32.to_be_bytes());
+        for u in units {
+            d.extend_from_slice(&u.to_be_bytes());
+        }
+    }
+    d
+}
+
+/// The description `instantiateDisplayFromICCProfile` names its display after, from `mluc`
+/// tags (in `desc` or in `dscm`, before or after a `desc` tag): the US record, else the first
+/// UK one, else the first English one, else the first; records of another size; lengths off
+/// by a byte or two; characters past Latin-1 and NULs. 40 generated profiles (a fixed seed)
+/// and 4 written out, on a raw config with a virtual display.
+#[test]
+fn icc_descriptions_match_the_wheel() {
+    let mut seed: u64 = 7;
+    let mut next = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed
+    };
+    let langs: [&[u8; 2]; 4] = [b"en", b"fr", b"de", b"EN"];
+    let countries: [&[u8; 2]; 5] = [b"US", b"UK", b"CA", b"FR", b"us"];
+    let units_set = [0x41u16, 0x62, 0x20, 0x0141, 0x263A, 0x00E9, 0, 0x37, 0x4100];
+    let n = 40;
+    let mut files = Vec::new();
+    for k in 0..n {
+        let nrec = (next() % 5) as usize;
+        let mut recs = Vec::new();
+        for _ in 0..nrec {
+            let len = (next() % 12) as usize;
+            let units: Vec<u16> = (0..len).map(|_| units_set[(next() % 9) as usize]).collect();
+            let delta = [0i32, 0, 0, 0, 1, -1, -2][(next() % 7) as usize];
+            recs.push((
+                langs[(next() % 4) as usize],
+                countries[(next() % 5) as usize],
+                units,
+                delta,
+            ));
+        }
+        let rec_size = if next() % 10 == 0 { 16 } else { 12 };
+        let tag = icc_mluc(&recs, rec_size);
+        let tags: Vec<(&[u8; 4], Vec<u8>)> = match next() % 3 {
+            0 => vec![(b"desc", tag)],
+            1 => vec![(b"dscm", tag), (b"desc", icc_desc(b"fallback desc\0"))],
+            _ => vec![(b"desc", icc_desc(b"plain\0")), (b"dscm", tag)],
+        };
+        files.push(common::lut_files::file(
+            &format!("p{k}.icc"),
+            icc_profile(&tags),
+        ));
+    }
+    // Records the generated ones may miss: two UK records (the first one wins), an empty UK
+    // record then another, no English or UK record at all.
+    let units = |text: &str| -> Vec<u16> { text.encode_utf16().collect() };
+    let fixed: Vec<Vec<MlucRecord<'_>>> = vec![
+        vec![
+            (b"fr", b"UK", units("First UK"), 0),
+            (b"de", b"UK", units("Second UK"), 0),
+        ],
+        vec![
+            (b"fr", b"UK", vec![], 0),
+            (b"de", b"UK", units("Second UK"), 0),
+        ],
+        vec![
+            (b"fr", b"FR", units("Premier"), 0),
+            (b"de", b"DE", units("Zweite"), 0),
+        ],
+        vec![
+            (b"fr", b"FR", units("Premier"), 0),
+            (b"en", b"CA", units("Canada"), 0),
+        ],
+    ];
+    for (k, recs) in fixed.iter().enumerate() {
+        files.push(common::lut_files::file(
+            &format!("p{}.icc", n + k),
+            icc_profile(&[(b"desc", icc_mluc(recs, 12))]),
+        ));
+    }
+    let n = n + fixed.len();
+    files.push(common::lut_files::file(
+        "label.txt",
+        "icc_descriptions_match_the_wheel",
+    ));
+    let dir = common::lut_files::write_files(&files);
+    // The virtual display first: without it, instantiating fails before the profile matters.
+    let mut items: Vec<Item> =
+        vec![add_virtual_display_view(b"vv", b"", b"<USE_DISPLAY_NAME>").into()];
+    items.extend((0..n).map(|k| -> Item {
+        instantiate_display_from_icc_profile(format!("{dir}/p{k}.icc").as_bytes()).into()
+    }));
+    check_items("ICC descriptions", "raw", &[], items, &probes_of(&[b"raw"]));
 }

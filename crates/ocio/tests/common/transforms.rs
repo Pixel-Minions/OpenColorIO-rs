@@ -273,13 +273,18 @@ pub(crate) fn port_processors(
 
 /// The wheel's reply to a `processor_ops` request against the port's processors: `None` when
 /// they agree.
-fn compare_reply(
+pub(crate) fn compare_reply(
     reply: &ProcessorOpsReply,
     port: &Result<(ProcessorAndGroup, ProcessorAndGroup), (&'static str, ocio::Exception)>,
 ) -> Option<String> {
     match (reply.raised(), port) {
         (Some(raised), Err((stage, e))) => {
-            if raised.stage == *stage && raised.message == e.message() {
+            // A message that isn't UTF-8 compares by its bytes.
+            let same_message = match &raised.undecodable {
+                Some(bytes) => bytes.as_slice() == e.what(),
+                None => raised.message == e.message(),
+            };
+            if raised.stage == *stage && same_message {
                 None
             } else {
                 Some(format!("wheel {raised:?}\n  port  {stage} {e:?}"))

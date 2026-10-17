@@ -323,7 +323,7 @@ pub fn libstdcxx_extract_float(input: &[u8]) -> (Vec<u8>, usize) {
 
 // The rest of this section translates MSVC's STL (Microsoft STL, `stl/inc/xlocnum`, as in
 // MSVC 14.44), Copyright (c) Microsoft Corporation, licensed under the Apache License v2.0
-// with LLVM Exception (SPDX: Apache-2.0 WITH LLVM-exception); see NOTICE. The wheel runs the
+// with LLVM Exception (SPDX: Apache-2.0 WITH LLVM-exception); see THIRD-PARTY-NOTICES.md. The wheel runs the
 // `num_get<char>` of its msvcp140.dll; the translation reads every spelling of
 // `crates/ocio/tests/yaml_cpp_convert_oracle.rs` as the Windows wheel does.
 

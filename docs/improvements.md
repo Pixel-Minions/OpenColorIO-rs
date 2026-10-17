@@ -2015,6 +2015,434 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   the paths such globs send to each rule in `crates/ocio/tests/config_oracle.rs`
   (`sanitized_globs_on_a_config_match_the_wheel`).
 
+### I-160. A LUT header's `%d` out of `int`'s range
+
+- **Upstream:** the spi1d, Iridas cube and Discreet 1DL readers read their header numbers with
+  `sscanf`'s `%d` (`FileFormatSpi1D.cpp`, `FileFormatIridasCube.cpp`, `FileFormatDiscreet1DL.cpp`),
+  and C leaves a number outside `int`'s range undefined (C17 7.21.6.2p10). Both wheels' C
+  runtimes do the same: they read the number as `strtoll` would (saturating to the 64-bit
+  range) and store its low 32 bits, so `Length 4294967297` is a length of 1, and
+  `Length 9223372036854775808` one of -1.
+- **Who notices:** files with absurd sizes: they read as other sizes rather than failing.
+- **A fix:** read the numbers with a range check.
+- **Status:** matched in `p4-parse` (4.0b, `ocio-ops/src/utils/cscan.rs`), compared with both C
+  runtimes over generated scans (`crates/ocio-ops/tests/cscan_crt.rs`).
+
+### I-161. `sscanf` reads a lone sign and a 0xFF byte differently on Windows and Linux
+
+- **Upstream:** the same readers call `sscanf_s` on Windows (UCRT) and `sscanf` on Linux
+  (glibc). For `%d`:
+  - a `+` or `-` at the end of the line is an input failure in the UCRT (the call returns
+    `EOF`, -1, when nothing was stored before) and a matching failure in glibc (it returns 0);
+  - the UCRT reads a 0xFF byte as `EOF` (a signed `char` of -1) and consumes it: where a digit
+    or sign is needed it fails there (an input failure if it was the last byte), and after
+    digits it ends the number and is lost, so `12\xff34` reads as 12 then 34. glibc reads 0xFF
+    as any other byte.
+  The readers compare the count with the one they expect, so valid files, and most malformed
+  ones, read alike on both wheels; the port follows each runtime, so the rest do too. Both
+  scan in the "C" locale here; the Windows wheel under Python scans in code page 1252's, where
+  0xA0 is white space too (deviation D-1).
+- **Who notices:** malformed LUT files, read on both platforms.
+- **A fix:** none needed for valid files; a hand-written header parser would remove the
+  difference.
+- **Decided** (D12): the port does what each wheel does.
+- **Status:** matched in `p4-parse` (4.0b, `ocio-ops/src/utils/cscan.rs`), compared with each
+  platform's C runtime (`crates/ocio-ops/tests/cscan_crt.rs`).
+
+### I-162. Text LUT files read differently on Windows and Linux
+
+- **Upstream:** `getLutData` (`FileTransform.cpp:218-220`) opens the file of every format that
+  isn't binary in text mode (`std::ios_base::in`). On Windows, MSVC's `std::ifstream` reads
+  through the C runtime's text-mode `FILE`: `CR LF` reads as `LF`, a lone `CR` is kept (so
+  `CR CR LF` reads as `CR LF`), and a `0x1A` byte ends the file, whatever follows. On Linux the
+  reader gets the file's bytes, `CR` included. Through a `ConfigIOProxy` (a `std::stringstream`)
+  it gets the bytes on both. So a file with Windows line ends, or with a `0x1A` in it, can read
+  differently on the two platforms; a directory, which glibc opens, fails to read on Linux and
+  fails to open on Windows.
+- **Who notices:** LUT files with `CR LF` line ends whose readers keep the `CR` (in a name or a
+  last token), and files with a `0x1A` byte, shared between Windows and Linux.
+- **A fix:** open text formats in binary mode and treat `CR LF` as a line end on both platforms.
+- **Decided** (P4-6, D12): the port does what each wheel does.
+- **Status:** matched in `p4-registry` (`crates/ocio/src/fileformats/input_stream.rs`, the open
+  of 4.0c), compared with the platform's C runtime (`fopen` and `fread`) on generated files in
+  `crates/ocio/tests/input_stream_crt.rs`.
+
+### I-163. A file's LUT changes in the file cache once a processor uses it
+
+- **Upstream:** the file cache keeps what a reader read (`GetCachedFileAndFormat`,
+  `FileTransform.cpp:801-888`), and the spi1d reader's `buildFileOps` hands the cached
+  `Lut1DOpDataRcPtr` itself to the forward LUT op (`HandleLUT1D` never clones a 1D LUT, and
+  `CreateLut1DOp` shares the pointer forward). The processor then finalizes its ops in place:
+  `Lut1DOpData::finalize` calls `adjustColorComponentNumber`, which marks the cached LUT as one
+  component when its three channels are equal. A later inverse processor of the same file
+  clones that LUT, and `initializeFromForward` makes only its first channel monotonic; from a
+  fresh cache it makes all three. So the inverse of a non-monotonic LUT holds other values in
+  green and blue, and has another cache ID, once a forward processor of the file was made in
+  the process (probed 2026-10-08: for the entries `0, 1, 0.5, 1`, green and blue keep `0.5`
+  after a forward processor and become `1` from a fresh cache; the inverse processor's cache
+  ID is `91c3bdd33553011dfc45941c59ca1de5` after a forward processor and
+  `8caceefb8952f416f8747d8a34fc639a` from a fresh cache; the pixels agree, as the one-component
+  LUT renders from red). Every reader that builds its 1D LUT ops through `HandleLUT1D` hands
+  over the cached LUT the same way: the Discreet 1D LUT (`FileFormatDiscreet1DL.cpp:776-783`),
+  ICC (`FileFormatICC.cpp:793-862`), Iridas `.cube` (`FileFormatIridasCube.cpp:538-572`),
+  Resolve `.cube` (`FileFormatResolveCube.cpp:767-800`), `.3dl` shaper
+  (`FileFormat3DL.cpp:612-639`), Truelight shaper (`FileFormatTruelight.cpp:380-409`),
+  Houdini 1D and prelut (`FileFormatHDL.cpp:849-896`) and cineSpace prelut and 1D LUT
+  (`FileFormatCSP.cpp:875-918`) readers. The CTF and CLF readers, which share op data with
+  the cache too, likely do the same.
+- **Who notices:** applications that make processors of a non-monotonic LUT file in both
+  directions: the inverse's cache ID and data depend on the order.
+- **A fix:** clone the cached op data when building ops, or finalize copies.
+- **Decided** (owner, 2026-10-08, as for I-174): the port keeps copies. Its processors never
+  change the cached file, so they give what the wheel gives from a fresh cache, and differ from
+  the wheel's inverse processors made after a forward one in the same process (their cache ID
+  and the inverse LUT's green and blue entries). The oracle tests run every request after
+  `ClearAllCaches` (`crates/ocio/tests/common/lut_files.rs`).
+- **Status:** not reproduced (p4-registry 4.2a2).
+
+### I-164. The Discreet 1D LUT header check reads past the line's end
+
+- **Upstream:** `IMLutGet` checks the header with `std::string subStr(InString, 5)`
+  (`FileFormatDiscreet1DL.cpp:435`): the first 5 bytes of the 200-byte line buffer, whatever
+  the line's length. For a line shorter than 5 bytes it reads past the line's NUL, into bytes
+  of earlier lines or never written (an uninitialized `char` array, whose read is undefined).
+  Both wheels give the same result whatever those bytes are: the copy holds the line's NUL
+  among its 5 bytes, so it is never `"lut: "` in lower case, and the line is a syntax error.
+- **Who notices:** nobody: a header line shorter than 5 bytes is an error either way.
+- **A fix:** compare the line itself (`StartsWith`).
+- **Status:** matched in `p4-registry` (4.3d, `crates/ocio/src/fileformats/file_format_discreet1dl.rs`):
+  a line shorter than 5 bytes never matches; checked against the wheel with headers around
+  that length (`crates/ocio/tests/file_format_discreet1dl_oracle.rs`).
+
+### I-165. An ICC `mluc` string of 2^30 characters or more wraps its byte count
+
+- **Upstream:** SampleICC's `mluc` reader reads a record's string with
+  `Read16(istream, &unicodeStr[0], nNumChar)` (`ext/sampleicc/src/include/iccProfileReader.h:
+  366-369` @ OCIO v2.5.2), whose byte count is `num << 1` on an `icInt32Number`: for 2^30
+  characters or more the doubled count no longer fits. C++17 defines the shift there (the
+  value in the unsigned type, converted to `int`, which both compilers wrap), so it is a
+  negative count, which reads nothing (I-166). `Read16` then returns half that negative
+  count, never the length the record claims, and the tag's reader fails.
+- **Who notices:** nobody: such a record claims a string of 2 GiB or more.
+- **A fix:** check the length against the tag's size before reading.
+- **Status:** matched in `p4-readers` (4.7a, `crates/ocio/src/fileformats/icc/
+  icc_profile_reader.rs`): the count wraps as the wheels' does.
+
+### I-166. SampleICC reads a negative count differently on Windows and Linux
+
+- **Upstream:** `SampleICC::Read8` (`iccProfileReader.h:144-156` @ OCIO v2.5.2) passes its
+  `icInt32Number` count to `istream::read`, and the `desc` reader passes a 32-bit text size
+  of 2^31 or more there as a negative count (`iccProfileReader.h:259-264`), as the `mluc`
+  reader does a wrapped one (I-165). MSVC's `istream::read` reads nothing for a count below 1
+  and leaves the stream good, so `Read8` returns the count; libstdc++'s asks the buffer for no
+  bytes, finds it didn't get the count, and fails the stream. So on Windows a `desc` tag of
+  such a size reads as an empty description (after allocating up to 4 GiB, U-70), and the
+  profile reads on; on Linux the tag's reader fails, and so does every later read of the
+  profile (a failed stream doesn't seek), which gives `Illegal matrix tag in ICC profile.`
+  An `mluc` string of 2^30 characters or more fails its reader on both, but leaves the
+  stream good on Windows only.
+- **Who notices:** nobody but a corrupt profile: the size claims 2 GiB or more.
+- **A fix:** check the size against the tag's size before reading.
+- **Status:** matched in `p4-readers` (4.7a, `crates/ocio/src/fileformats/icc/
+  icc_profile_reader.rs`), per platform; checked against the wheel on both
+  (`crates/ocio/tests/file_format_icc_oracle.rs`, "a desc of size 2^32 - 1").
+
+### I-167. ICC parametric curves past a `long`'s range check differently on Windows and Linux
+
+- **Upstream:** `ValidateParametricCurve`'s `QuantizeF` (`src/OpenColorIO/fileformats/
+  FileFormatICC.cpp:298-302` @ v2.5.2) rounds with `std::lround(float)`, the C runtime's
+  `lroundf`, to a `long`: 32 bits on Windows, 64 on Linux. For a NaN (the power law of a
+  negative argument, checked only after the discontinuity check) or a value out of range,
+  the UCRT returns 0 (`LONG_MIN` for exactly 2^31) and glibc `LONG_MIN`. So a type 3 or 4
+  curve whose power law has a negative argument, and whose linear segment quantizes to 0 or
+  less at `d` (`c * d` of type 3, `c * d + f` of type 4: `c = 0`, or `d < 0`), fails with
+  `Expecting no negative arguments to the power law.` on Windows and `Expecting no negative
+  discontinuity at linear segment boundary.` on Linux; where the segment quantizes above 0
+  (`{2.4, 0.5, -0.6, 0.1, 0.5}`), both give the discontinuity error. A curve with a segment
+  past 2^31 / 1023 checks (and warns) differently too.
+- **Who notices:** nobody but malformed profiles: their curves are errors or out of any
+  display's range either way.
+- **A fix:** check the parameters before computing, and quantize in a type that holds them.
+- **Status:** matched in `p4-readers` (4.7b, `lround` in
+  `crates/ocio/src/fileformats/file_format_icc.rs`, checked against the platform's `lroundf`);
+  checked against the wheel on both (`crates/ocio/tests/file_format_icc_oracle.rs`).
+
+## File formats
+
+### I-170. expat counts a start tag's attribute values twice
+
+- **Upstream:** expat 2.7.2's billion laughs protection counts the bytes of each token it
+  reads, once. A start tag (`<e a='x&amp;y'>`, not an empty element) is counted as one token
+  in `doContent`, then `storeAtts` passes the same accounting class (`XML_ACCOUNT_DIRECT` in
+  the document) to `storeAttributeValue`, which counts the tokens of each value that needs
+  normalizing (a reference, or white space other than single spaces) again
+  (`expat/lib/xmlparse.c:3321-3326, 3508-3509, 3956-3958, 6567-6571` @ R_2_7_2). An empty
+  element's tag passes `XML_ACCOUNT_NONE` there ("token spans whole start tag"). The direct
+  count, the denominator of the amplification factor, grows by those values' bytes once more.
+- **Who notices:** documents over the protection's 8 MiB activation threshold whose
+  amplification by internal entities is near the limit of 100: start tags with such values
+  lower the factor, so a document that the limit would refuse can pass.
+- **A fix:** pass `XML_ACCOUNT_NONE` for start tags too, as for empty elements.
+- **Status:** matched in `p4-xml` (4.4b, `crates/ocio-formats/src/expat/xmlparse.rs`,
+  `do_content`).
+
+### I-171. The XML parser's memory limit is 40 bytes apart on Windows and Linux
+
+- **Upstream:** expat 2.7.2's allocation tracker fails an allocation, and with it the parse
+  (`XML_ERROR_NO_MEMORY`, "out of memory"), once the heap expat allocated reaches 64 MiB and
+  more than 100 times the document's direct bytes (`expat_heap_increase_tolerable`,
+  `expat_malloc`, `expat_realloc`, `expat/lib/xmlparse.c:812-1005` @ R_2_7_2; the defaults in
+  `internal.h:152-154`). It counts the sizes of expat's own blocks: its parser structure,
+  pools, hash tables, tags, attribute arrays, open entities and default attributes, each
+  with an 8-byte header. They are the same in both wheels but the parser structure's, which
+  holds `long` and `unsigned long` fields: 1,048 bytes as MSVC lays it out and 1,088 with GCC.
+  So a document within 40 bytes of the limit (a pool block of 32 MiB, say, filled to within
+  20 bytes of it) is refused on Linux and read on Windows.
+- **Who notices:** only documents at the limit: tens of MiB of parser memory from a document a
+  hundred times smaller, which no LUT or CDL file comes near.
+- **A fix:** none needed; dropping the parser structure from the count would make the
+  platforms agree.
+- **Status:** matched in `p4-cdl` (`crates/ocio-formats/src/expat/heap.rs`, which counts what
+  expat allocates block for block, with each platform's structure size;
+  `crates/ocio/tests/xml_memory_oracle.rs` finds where families of documents start being
+  refused, and both wheels agree to the byte). Before that chunk the port counted its own
+  structures (the owner's decision of 2026-10-08, superseded once the exact count worked).
+
+### I-172. The XML readers read a number out of range as 0 on Linux, and as infinity on Windows
+
+- **Upstream:** `ParseNumber` (`fileformats/xmlutils/XMLReaderUtils.h:150-205` @ v2.5.2)
+  checks `NumberUtils::from_chars`'s `invalid_argument` only: a `result_out_of_range` passes,
+  with the value `from_chars` left. On Windows (`std::from_chars`) that is the overflow's
+  infinity, the underflow's 0, and a subnormal read as such; on Linux (`strtod_l`, which sets
+  `ERANGE` for an overflow, an underflow and a subnormal result) the value is not stored, and
+  `ParseNumber`'s local stays 0. So a CTF matrix entry of `1e999` reads as `inf` on Windows
+  and `0` on Linux, `-1e999` as `-inf` and `0`, and `1e-310` as `1e-310` and `0` (wheel
+  probes of a CTF `Matrix` read through `FileTransform`, 2026-10-08).
+- **Who notices:** CTF, CLF and CDL files with numbers past the double range, or subnormal.
+- **A fix:** refuse `result_out_of_range`, or read it the same way on both platforms.
+- **Status:** matched in `p4-xml` (4.4c, `crates/ocio-formats/src/fileformats/xmlutils/
+  xml_reader_utils.rs`, `parse_number`); its oracle tests come with the CTF reader (4.5).
+
+### I-173. The CDL writers escape descriptions twice
+
+- **Upstream:** the CC, CCC and CDL writers collect the descriptions of the metadata already
+  escaped for XML (`ExtractCDLMetadata`, `fileformats/cdl/CDLWriter.cpp:24-56` @ v2.5.2), and
+  the formatter escapes them again as it writes them (`XmlFormatter::writeContentTag`,
+  `XMLWriterUtils.cpp:68-83, 124-127`). A description "x < y & z" is written
+  `x &amp;lt; y &amp;amp; z`, which reads back as "x &lt; y &amp; z" (probed 2026-10-08 with
+  `GroupTransform.write` in the three formats). The id and name attributes, and the numbers,
+  are escaped once.
+- **Who notices:** CC, CCC and CDL files written from transforms whose descriptions hold `<`,
+  `>`, `&`, `"` or `'`: each write and read adds a level of escaping.
+- **A fix:** collect the descriptions as they are, and let the formatter escape them; written
+  files of such descriptions change.
+- **Status:** matched in `p4-cdl` (4.4e, `crates/ocio/src/fileformats/cdl/cdl_writer.rs`).
+
+### I-174. A CDL read from a file is shared with the file cache
+
+- **Upstream:** `CDLTransform::CreateFromFile` and `CreateGroupFromFile` return the
+  transforms the file cache holds, not copies (`getCDLGroup` of the CC, CCC and CDL formats,
+  `FileFormatCC.cpp:29-34`, `FileFormatCCC.cpp:32-41`, `FileFormatCDL.cpp:55-64`;
+  `CDLTransform.cpp:34-118` @ v2.5.2). Editing one edits the cached file: later reads of the
+  file give the edited values, and so do the processors of file transforms of it, until
+  `ClearAllCaches` (probed 2026-10-08: `setSlope` on the CDL `CreateFromFile` gave, and a
+  second `CreateFromFile`, `CreateGroupFromFile` and a `FileTransform`'s processor all give
+  the new slope).
+- **Who notices:** applications that edit a CDL they read with `CreateFromFile` or
+  `CreateGroupFromFile`, and then read the file again or process it through a file
+  transform.
+- **A fix:** the port's `CdlTransform::from_file` and `group_from_file` return copies (the
+  owner's API, `docs/cards/phase4.md` P4-5 d), so the cache never changes, as a fix would
+  have it. Matching upstream would need transforms shared by handle; the Python binding
+  (`ocio-py`) decides whether its objects share the cached ones.
+- **Decided** (the owner, 2026-10-08): the port keeps copies; the Python binding decides later
+  whether its objects share the cached ones.
+- **Status:** not reproduced: the port gives copies (`p4-cdl` 4.4e,
+  `crates/ocio/src/transforms/cdl_transform.rs`), which differs from the wheel after such an
+  edit.
+
+### I-175. The CDL reader drops content in four places
+
+- **Upstream:** the CDL, CCC and CC parser (`fileformats/cdl/CDLParser.cpp` @ v2.5.2):
+  - ignores character data that is a single line feed (`CharacterDataHandler`, 896-897),
+    wherever it is: a description, a value or text where none belongs, which elsewhere is an
+    error ("... not allowed ...") or part of the value, as long as expat hands it over alone
+    (a line feed alone on its line);
+  - lets a second root element inside the first, while the first has no correction yet,
+    take the parsing info over (`HandleColorDecisionListStartElement`,
+    `HandleColorCorrectionCollectionStartElement`, 496-580): the outer root's descriptions
+    and the corrections after the inner root ends are lost (probed 2026-10-08: a collection
+    holding a collection with one correction, then a second correction, reads as the first
+    correction alone, with the inner collection's description);
+  - drops the descriptions of a `ColorDecision` (its element keeps none);
+  - does not know `ColorCorrectionRef`: a `ColorDecision` that refers to a correction holds
+    none, with an "Unknown element" warning (probed).
+- **Who notices:** CDL files with such content: corrections and descriptions go missing
+  without an error.
+- **A fix:** keep the line feed as data where the element takes data; refuse a nested root;
+  keep the decision's descriptions; resolve `ColorCorrectionRef` by id.
+- **Status:** matched in `p4-cdl` (4.4d, `crates/ocio/src/fileformats/cdl/cdl_parser.rs`,
+  `cdl_reader_helper.rs`); the oracle cases of `crates/ocio/tests/file_format_cc_oracle.rs`
+  and `file_format_ccc_cdl_oracle.rs`.
+
+### I-176. A CDL file's root element must be named in its first 5 KiB
+
+- **Upstream:** the CDL parser reads the lines of the first 5 KiB of the file to find the
+  root element's name ("<ColorDecisionList", "<ColorCorrectionCollection" or
+  "<ColorCorrection", in that order, anywhere in that text) and picks the schema from it
+  (`loadHeader`, `initializeHandlers`, `fileformats/cdl/CDLParser.cpp:177-195, 286-325` @
+  v2.5.2); a file whose root starts later (after a long comment or DOCTYPE) fails with
+  "Missing CDL tag".
+- **Who notices:** valid CDL, CCC and CC files with more than 5 KiB before their root.
+- **A fix:** pick the schema from the root element expat reports.
+- **Status:** matched in `p4-cdl` (4.4d, `crates/ocio/src/fileformats/cdl/cdl_parser.rs`);
+  the "past 5 KiB" cases of `crates/ocio/tests/file_format_cc_oracle.rs`.
+
+### I-177. The XML readers parse a line of 4 GiB or more modulo 2^32
+
+- **Upstream:** the CDL, Iridas look and CTF readers give expat each line with
+  `XML_Parse(parser, line.c_str(), (int)line.size(), done)` (`CDLParser.cpp:241-279`,
+  `FileFormatIridasLook.cpp:173-191`, `FileFormatCTF.cpp:238-274` @ v2.5.2). The cast keeps
+  the low 32 bits: a line of 2 GiB to 4 GiB has a negative length, which expat refuses
+  ("invalid argument"); one of 4 GiB or more is parsed as its first `size mod 2^32` bytes, and
+  the rest of the line is skipped.
+- **Who notices:** files with lines of 2 GiB or more (hostile files).
+- **A fix:** refuse lines longer than `INT_MAX`, or give expat long lines in pieces.
+- **Status:** matched in `p4-cdl` (`crates/ocio-formats/src/expat/xmlparse.rs`, `parse` and
+  `c_int_length`; `a_line_of_4_gib_or_more_parses_its_length_mod_2_32`).
+
+### I-178. `GroupTransform::write` ignores a failing output stream
+
+- **Upstream:** the writers write to the caller's `std::ostream`, whose failures set its
+  state bits without throwing; `GroupTransformImpl::write` (`transforms/GroupTransform.cpp:
+  114-139` @ v2.5.2) never checks them, so a write to a full disk or a closed stream
+  "succeeds".
+- **Who notices:** C++ callers that write to a file stream and don't check it, and the
+  port's callers, whose `std::io::Write` errors are dropped the same way.
+- **A fix:** raise an error when the stream fails.
+- **Status:** matched in `p4-cdl` (`crates/ocio/src/transforms/group_transform.rs`, `write`;
+  `a_failing_output_stream_is_not_an_error`).
+
+### I-180. The CTF format's info has no bake capabilities
+
+- **Upstream:** `LocalFileFormat::getFormatInfo` (`fileformats/FileFormatCTF.cpp:147-170` @
+  v2.5.2) sets the bake capabilities of its second info, "Color Transform Format", on its
+  first, the CLF one, a second time (`info.bake_capabilities = ...` after
+  `info2.capabilities`), so the CTF info has none.
+- **Who notices:** no one through the API: the baker reads a format's first info
+  (`Baker.cpp:249-251`), the CLF one, which has its capabilities, and no other code reads
+  them.
+- **A fix:** set `info2.bake_capabilities`.
+- **Status:** matched in `p4-ctf-read-1` (`crates/ocio/src/fileformats/file_format_ctf.rs`,
+  `format_info`).
+
+### I-181. A CTF LUT's raw halfs outside [0, 65536) keep the low 16 bits of their `int`
+
+- **Upstream:** with `rawHalfs="true"`, `CTFReaderLut1DElt::endArray` and
+  `CTFReaderInvLut1DElt::endArray` (`fileformats/ctf/CTFReaderHelper.cpp:4201-4246,
+  3378-3429` @ v2.5.2) read each value as `ConvertHalfBitsToFloat((unsigned short)value)`. The
+  cast of a `float` outside `[0, 65536)` (negative, too large, NaN) is undefined. Both wheels
+  compile it as `cvttss2si` to a 32-bit `int` (Windows `0x1800a76f3` and `0x1800a7d06`; Linux
+  `0x209ad0`), then keep its low 16 bits: `70000` reads as half `0x1170`, `-1` as `0xffff`,
+  NaN, infinities and values past the `int` range as `0x0000`.
+- **Who notices:** a CLF whose raw half values aren't half bit patterns, which no valid file
+  has.
+- **A fix:** reject values that aren't integers in `[0, 65535]`.
+- **Status:** matched in `p4-ctf-read-2` (`crates/ocio/src/fileformats/ctf/ctf_reader_helper.rs`,
+  `lut1d_end_array`; `crates/ocio/tests/file_format_ctf_oracle.rs` checks such values with
+  the wheel).
+
+### I-182. A `.3dl` line over 4095 bytes ends the file there
+
+- **Upstream:** the `.3dl` reader reads lines with `istream.getline(lineBuffer, 4096)`
+  (`src/OpenColorIO/fileformats/FileFormat3DL.cpp:247-258` @ v2.5.2). A longer line fills the
+  buffer with its first 4095 bytes and fails the stream: the reader parses those bytes, so the
+  value they cut is read cut (`1023` as `10`), and `while (istream.good())` stops, so nothing
+  after that line is read. Its bit-depth errors also lack a space: "Error parsing .3dl
+  file.The maximum 3D LUT value, ..." (`FileFormat3DL.cpp:438-457`; the shaper's messages
+  have it, 376-395).
+- **Who notices:** `.3dl` files with a line of 4096 bytes or more (a shaper of about 800
+  values or more on one line): their LUT is cut or refused with a misleading error.
+- **A fix:** read lines of any length; add the space.
+- **Status:** matched in `p4-readers` (4.3a, `crates/ocio/src/fileformats/file_format_3dl.rs`);
+  the oracle cases "a shaper line of 4094 bytes" to "4097 bytes" and "a line past the buffer"
+  (`crates/ocio/tests/file_format_3dl_oracle.rs`).
+
+### I-183. Four Houdini LUT messages and blocks that mislead
+
+- **Upstream:** the Houdini reader (`src/OpenColorIO/fileformats/FileFormatHDL.cpp` @ v2.5.2):
+  - reports a type `C` file without an `RGB` block as "3D+1D LUT should contain Pre{} LUT
+    section" (565-572);
+  - swaps the words of "Malformed LUT - Unknown word '<LUT name>' after LUT name '<next
+    word>'" (165-175);
+  - quotes the first size of the `Length` line when a later one doesn't parse: "Invalid
+    integer on 'Length' line: '<first size>'" (443-453);
+  - drops the rest of the `LUT:` line (`readHeaders`, 55-78), so `LUT: {` or `LUT: RGB {`
+    loses its brace or block name, and the block then reads as malformed.
+- **Who notices:** authors of malformed Houdini LUTs, whose errors name the wrong block or
+  word.
+- **A fix:** name the `RGB` block, swap the words back, quote the size that doesn't parse, and
+  read a block that starts on the `LUT:` line.
+- **Status:** matched in `p4-readers` (4.3b, `crates/ocio/src/fileformats/file_format_hdl.rs`);
+  the oracle cases "no RGB block", "a name not followed by {", "a second Length that doesn't
+  parse" and "the 3D block's brace on the LUT: line" (`crates/ocio/tests/
+  file_format_hdl_oracle.rs`).
+
+### I-184. Two cineSpace messages with a missing space and a stray quote
+
+- **Upstream:** the `.csp` reader's "Prelut does not specify the expected number of data
+  points. Expected: <n>.Found: <a>, <b>. In <file>." has no space after the period
+  (`src/OpenColorIO/fileformats/FileFormatCSP.cpp:449-455` @ v2.5.2), and "A csp 3D LUT with
+  invalid cube size (<n>): <line>' in <file>." closes a quote it never opened (573-579).
+- **Who notices:** readers of those errors.
+- **A fix:** add the space; quote the line on both sides.
+- **Status:** matched in `p4-readers` (4.3e, `crates/ocio/src/fileformats/file_format_csp.rs`);
+  the oracle cases of prelut counts and cube sizes (`crates/ocio/tests/
+  file_format_csp_oracle.rs`).
+
+### I-185. The line readers read some numbers differently on Windows and Linux
+
+- **Upstream:** `NumberUtils::from_chars` (`src/utils/NumberUtils.h:104-256` @ v2.5.2) is
+  `std::from_chars` where the compiler declares it (`__cpp_lib_to_chars`, 18-21), and
+  `strtod_l`, `strtof_l` and `strtol_l` in the C locale otherwise. The Windows wheel (MSVC)
+  compiled the first, the Linux wheel (GCC 14, whose `<charconv>` isn't included there) the
+  second. The two agree on ordinary numbers and differ on edge cases: a sign before `0x`, a
+  hex float, subnormal and out-of-range values, NaN payloads, octal integers, and the width of
+  `long`. The line readers parse their values with it (`StringToFloat`, `StringToInt`,
+  `ParseUtils.cpp:575-608`), so a file holding such a number reads differently: in an Iridas
+  `.cube`, `-0x1p-2` reads as `-0` on Windows and `-0.25` on Linux, and `1e-40` reads as that
+  subnormal on Windows while Linux refuses the file (wheel probes, 2026-10-15). The `.look`
+  reader parses its size as a `long`: `"4294967298"` is out of range on Windows ("Invalid LUT
+  size value: '"4294967298"'. Expected quoted integer") and too large on Linux ("... Expected
+  value between 2 and 129") (wheel probes, 2026-10-15).
+- **Who notices:** LUT files with hex floats, subnormal values, or other edge-case numbers,
+  shared between Windows and Linux.
+- **A fix:** one parser on both platforms (`std::from_chars` where it exists, or a port of
+  it).
+- **Decided** (PLAN.md D12): the port does what each wheel does.
+- **Status:** matched (`crates/ocio-ops/src/utils/number_utils.rs`, `Flavor`);
+  checked in every line reader against the wheel of each platform
+  (`crates/ocio/tests/file_format_number_forms_oracle.rs`), and in the `.look` reader's size
+  (`crates/ocio/tests/file_format_iridas_look_oracle.rs`).
+
+### I-186. A `.look` file's closed mask still refuses later skipped elements
+
+- **Upstream:** the `.look` parser sets `m_inMask` when a `<mask>` element starts, and skips
+  its content (`StartElementHandler`, `src/OpenColorIO/fileformats/FileFormatIridasLook.cpp:
+  303-315` @ v2.5.2). The mask's end only lowers the skip depth: `m_inMask` is cleared by the
+  `else if (pImpl->m_inMask)` branch of `EndElementHandler` (385-393), which the skip branch
+  before it always takes (343-346). So after any mask, empty or not, an element nested in a
+  later skipped element (`<shaders><base/></shaders>`) fails with "Cannot load .look LUT
+  containing mask" (272-276), though that element is no mask (wheel probes, Windows and Linux,
+  2026-10-15: `<mask/>` then `<shaders><base/></shaders>` is refused, `<mask/>` then
+  `<shaders/>` reads).
+- **Who notices:** `.look` files with an empty mask before shaders or other sections with
+  child elements: they are refused as files with a mask.
+- **A fix:** clear `m_inMask` when the mask element ends.
+- **Status:** matched in `p4-look` (4.4f, `crates/ocio/src/fileformats/
+  file_format_iridas_look.rs`); the "empty mask" oracle cases
+  (`crates/ocio/tests/file_format_iridas_look_oracle.rs`).
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
@@ -2699,3 +3127,81 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Status:** matched in `p2-lut3d-inv` (2.2d2), `InvLut3DRenderer::new`
   (`crates/ocio-ops/src/ops/lut3d/inv_lut3d.rs`, `GRID_SIZE_1_INVERSE`); `grid_size_1_is_refused`
   (`crates/ocio-ops/tests/lut3d_inv_oracle.rs`).
+
+### U-70. ICC description strings longer than the file
+
+- **Upstream:** SampleICC's `desc` and `mluc` readers allocate the string a tag claims before
+  reading it (`mText.resize(textSize + 1)`, `std::vector<icUInt16Number> unicodeStr(nNumChar)`,
+  `iccProfileReader.h:261-264, 366-369` @ OCIO v2.5.2): up to 4 GiB for a size the file can't
+  hold. Where the allocation succeeds, the read then fails and so does the tag's reader; where
+  it doesn't, `std::bad_alloc` escapes the reader and the load fails with its message, which
+  depends on the machine's memory.
+- **Who notices:** hostile or corrupt profiles.
+- **A fix:** check the size against the tag's size first.
+- **Decided** (P4-7, the general rule): the port never allocates what the tag claims. A
+  string `Read8` is asked for with a positive count (a `desc` size below 2^31 bytes, an
+  `mluc` string below 2^30 characters) is read in pieces as far as the file goes, and the
+  tag's reader fails as it does in the wheel when the allocation succeeds. A larger one is
+  read with a negative count, which reads nothing (I-165, I-166): the port allocates nothing
+  and gives the reader's result per platform.
+- **Status:** matched in `p4-readers` (4.7a, `read_bytes` in `crates/ocio/src/fileformats/icc/
+  icc_profile_reader.rs`); the wheel's results for such profiles are compared in 4.7b.
+
+### U-71. A Houdini `3D+1D` LUT without a prelut size
+
+- **Upstream:** the Houdini reader takes a `Length` line of one or two sizes, and for a
+  `3D+1D` LUT reads the second, `lut_sizes[1]` (`src/OpenColorIO/fileformats/
+  FileFormatHDL.cpp:488-490` @ v2.5.2), whether the line gave it or not: with one size, past
+  the end of the vector it read the sizes into.
+  The wheel reads whatever follows the vector's storage: four runs of the same file
+  (`Type 3D+1D`, `Length 2`) gave "Prelut size must be between 2 and 300000, found: 0" three
+  times and "found: 3241057" once (Windows, the p4-readers verifier, 2026-10-09).
+- **Who notices:** malformed files: a `3D+1D` LUT always has a prelut.
+- **A fix:** require two sizes for `3D+1D`.
+- **Decided** (the general rule): the port's error, "A 3D+1D Houdini LUT needs a prelut size
+  on the 'Length' line, after the cube size (...)".
+- **Status:** matched with an error in `p4-readers` (4.3b, `crates/ocio/src/fileformats/
+  file_format_hdl.rs`).
+
+### U-72. A cineSpace metadata block never closed
+
+- **Upstream:** the `.csp` reader reads its metadata block with
+  `while (!startswithU(line, "END METADATA") || !istream) { nextline(istream, line); ... }`
+  (`src/OpenColorIO/fileformats/FileFormatCSP.cpp:403-413` @ v2.5.2). At the end of the file
+  `nextline` returns an empty line, so a block without `END METADATA` never ends, and each turn
+  appends a line feed to the metadata string. Reading such a file runs until that allocation
+  fails or the system ends the process: the wheel's memory grew from 61 to 158 MB in 6 seconds
+  on a file of the lines `CSPLUTV100`, `3D`, an empty line, `BEGIN METADATA` and `foo`
+  (Windows, the p4-readers verifier, 2026-10-09).
+- **Who notices:** applications that read a truncated or malformed `.csp` file.
+- **A fix:** stop at the end of the file with an error.
+- **Decided** (the owner's general rule for endless loops, as U-5 and U-65): the port's error
+  "Metadata block of csp LUT <file> is not closed. Expected 'END METADATA' before the end of
+  the file.", raised where `nextline` finds the end of the file inside the block: the wheel
+  reads no file that gets there (it runs out of memory instead), and reads every other as
+  before.
+- **Status:** matched with an error in `p4-readers` (4.3e, `crates/ocio/src/fileformats/
+  file_format_csp.rs`); `a_metadata_block_never_closed_is_an_error`
+  (`file_format_csp_tests.rs`).
+
+### U-75. A CDL or CCC file whose root element never starts
+
+- **Upstream:** the CDL parser picks the schema from the first 5 KiB of the file: the first
+  of "<ColorDecisionList", "<ColorCorrectionCollection" and "<ColorCorrection" found anywhere
+  in it (`FindRootElement`, `fileformats/cdl/CDLParser.cpp:286-325` @ v2.5.2). A CDL or CCC
+  binds its parsing info when its root element starts (`CDLParser.cpp:496-580`); when the
+  text is found but the element never starts (in a comment, an attribute, a misspelled or
+  other root), `validateParsing` dereferences the null parsing info (`CDLParser.cpp:337`),
+  and the wheel crashes (Windows, probed 2026-10-08: `<!-- <ColorDecisionList --><Foo/>` as a
+  .cdl, and as a .ccc with the collection's name, end the process on a file transform's
+  processor). A CC creates its parsing info up front, but the schema is the first name found,
+  whatever the extension: a .cc whose first 5 KiB mention "<ColorDecisionList" or
+  "<ColorCorrectionCollection" (in a comment, say) before its "<ColorCorrection" root is
+  parsed as a CDL or a CCC, and takes the same path.
+- **Who notices:** malformed or hostile CDL, CCC and CC files.
+- **Decided** (the owner's general rule): the port refuses the file with the parser's message
+  "Error parsing <root> (<file>). Error is: CDL parsing error: the root element '<root>' is
+  missing. At line (<n>)", as its `validateParsing` (and its transform getters) find no
+  parsing info.
+- **Status:** matched in `p4-cdl` (4.4d, `crates/ocio/src/fileformats/cdl/cdl_parser.rs`,
+  `missing_root_error`; `a_cdl_or_ccc_without_its_root_element_is_refused`).

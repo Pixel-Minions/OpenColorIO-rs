@@ -2,8 +2,7 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Tests of the `Transform` dispatch: every arm's class, direction, validation and text through
-//! the enum, and the processors' refusal to build the ops of the classes whose builders are not
-//! ported yet.
+//! the enum.
 
 use super::*;
 use crate::{Allocation, FixedFunctionStyle, Interpolation, RangeStyle, TransformType};
@@ -244,33 +243,6 @@ fn every_arm_dispatches_to_its_class() {
                 .expect_err("the class fails, so the enum must");
             assert_eq!(error.message(), class_error, "{class:?}");
             assert_eq!(invalid.to_string(), class_text, "{class:?}");
-        }
-    }
-}
-
-/// The error a processor of `transform` returns, in the direction `dir`.
-fn processor_error(config: &Config, transform: &Transform, dir: TransformDirection) -> String {
-    match config.processor_in_direction(transform, dir) {
-        Ok(_) => panic!("{transform} {dir:?}: a processor was built"),
-        Err(error) => error.message().to_string(),
-    }
-}
-
-/// A processor of each class whose op builder is not ported yet is refused in both directions,
-/// with the error `build_ops` documents: the class and the work package that ports it.
-#[test]
-fn processors_of_the_classes_without_builders_are_refused() {
-    let config = Config::create_raw().unwrap();
-    let cases = [(TransformType::File, "FileTransform", "WP 4.1")];
-    let arms = arms();
-    for (class, name, work_package) in cases {
-        let arm = arms.iter().find(|arm| arm.class == class).unwrap();
-        for dir in [TransformDirection::Forward, TransformDirection::Inverse] {
-            assert_eq!(
-                processor_error(&config, &arm.valid, dir),
-                format!("{name}: building its ops is not ported yet ({work_package})."),
-                "{dir:?}"
-            );
         }
     }
 }

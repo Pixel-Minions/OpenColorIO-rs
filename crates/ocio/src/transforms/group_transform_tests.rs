@@ -207,3 +207,52 @@ fn build_ops_copies_the_metadata_of_the_groups_met_before_any_op() {
     assert_eq!(ops.len(), 3);
     assert_eq!(ops.get_format_metadata().get_num_attributes(), 0);
 }
+
+/// A writer whose writes all fail, as a C++ stream in a failed state.
+struct FailingWriter;
+
+impl std::io::Write for FailingWriter {
+    fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+        Err(std::io::Error::other("the stream failed"))
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Err(std::io::Error::other("the stream failed"))
+    }
+}
+
+/// A failure of the output stream goes unreported, as upstream's `std::ostream` keeps it in
+/// its state bits (I-178); the format's own errors are still raised.
+#[test]
+fn a_failing_output_stream_is_not_an_error() {
+    let config = Config::new().expect("a config");
+    let mut group = GroupTransform::new();
+    group.append_transform(crate::transforms::cdl_transform::CdlTransform::new().into());
+    group
+        .write(&config, "ColorCorrection", &mut FailingWriter)
+        .expect("the stream's failure is not reported");
+
+    let empty = GroupTransform::new();
+    let err = empty
+        .write(&config, "ColorCorrection", &mut FailingWriter)
+        .expect_err("the format's error");
+    assert!(err.to_string().contains("there should be a single CDL"));
+}
+
+/// The CLF and CTF writers aren't ported yet: writing them is the port's "not ported yet"
+/// error, not upstream's "does not support writing", which a format that doesn't write gives.
+#[test]
+fn the_unported_writers_say_so() {
+    let config = Config::new().expect("a config");
+    let mut group = GroupTransform::new();
+    group.append_transform(crate::transforms::cdl_transform::CdlTransform::new().into());
+    let mut out = Vec::new();
+    let err = group
+        .write(&config, "Color Transform Format", &mut out)
+        .expect_err("not ported yet");
+    assert_eq!(
+        err.to_string(),
+        "Error writing format 'Color Transform Format': The writer of the 'Color Transform \
+         Format' file format is not ported yet."
+    );
+}

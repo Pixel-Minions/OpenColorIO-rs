@@ -18,7 +18,7 @@
 //! - the Windows wheel, Microsoft's STL (`<regex>`, header-only templates, compiled into the
 //!   wheel with MSVC 14.44; its `regex_error` is thrown by `_Xregex_error` in `msvcp140.dll`).
 //!   It is translated here from the headers of MSVC 14.44.35207 (Apache-2.0 WITH
-//!   LLVM-exception, owner decision D3, notice in NOTICE): [`msvc`].
+//!   LLVM-exception, owner decision D3, notice in THIRD-PARTY-NOTICES.md): [`msvc`].
 //! - the Linux wheel, GCC 14's libstdc++, which is not translated (it is GPL with the runtime
 //!   exception): its behavior is reproduced from the C++ standard ([re.grammar], ECMA-262 3rd
 //!   edition) and the Linux wheel, black-box: [`libstdcxx`].

@@ -11,6 +11,7 @@ use std::fmt;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, RwLock};
 
+use ocio_ops::cfmt::{Crt, OStringStream};
 use ocio_ops::exception::{Exception, Result};
 use ocio_ops::image_desc::PackedImageDesc;
 use ocio_ops::logging::{log_error, log_info};
@@ -31,7 +32,8 @@ use ocio_ops::platform::strcasecmp;
 use ocio_ops::platform::{create_input_file_stream, getenv, is_env_present};
 use ocio_ops::utils::pystring::{self, os_path};
 use ocio_ops::utils::string_utils::{
-    StringVec, c_str, compare, contain, find, lower, remove, split, starts_with, trim,
+    StringVec, c_str, compare, contain, find, lower, remove, replace_in_place, split, starts_with,
+    trim,
 };
 
 use crate::builtinconfigs::builtin_config_registry::{
@@ -50,6 +52,7 @@ use crate::display::{
     find_display, find_view,
 };
 use crate::file_rules::{FileRules, update_file_rules_from_v1_to_v2};
+use crate::fileformats::file_format_icc::get_profile_description_from_icc_profile;
 use crate::look::Look;
 use crate::look_parse::LookParseResult;
 use crate::named_transform::NamedTransform;
@@ -58,6 +61,7 @@ use crate::processor::{Processor, ProcessorCacheFlags};
 use crate::transform::Transform;
 use crate::transforms::color_space_transform::ColorSpaceTransform;
 use crate::transforms::display_view_transform::DisplayViewTransform;
+use crate::transforms::file_transform::FileTransform;
 use crate::view_transform::ViewTransform;
 use crate::viewing_rules::{ViewingRules, find_rule};
 use crate::yaml_cpp::stream::IStream;
@@ -3396,8 +3400,8 @@ impl Config {
     }
 
     /// Makes a display from the virtual display for the monitor `monitor_name`. Its ICC
-    /// profile is found by `SystemMonitor` (Phase 9) and read by the ICC reader (WP 4.7), not
-    /// ported yet: past the check of the name, an error.
+    /// profile is found by `SystemMonitor` (Phase 9), not ported yet: past the check of the
+    /// name, an error.
     ///
     /// Port of `Config::instantiateDisplayFromMonitorName` (src/OpenColorIO/Config.cpp:
     /// 4104-4118 @ v2.5.2), in part.
@@ -3410,27 +3414,164 @@ impl Config {
             return Err(Exception::new("The system monitor name cannot be null."));
         }
         Err(Exception::new(
-            "Config::instantiateDisplayFromMonitorName: the system monitors and the ICC reader \
-             are not ported yet.",
+            "Config::instantiateDisplayFromMonitorName: the system monitors are not ported yet.",
         ))
     }
 
-    /// Makes a display from the virtual display for the ICC profile `icc_profile_filepath`.
-    /// The ICC reader (WP 4.7) is not ported yet: past the check of the path, an error.
+    /// Makes a display from the virtual display for the ICC profile `icc_profile_filepath`,
+    /// named by the profile's description (or its file's name): its views, and a display color
+    /// space reading the profile. Returns the display's index among the active displays.
     ///
     /// Port of `Config::instantiateDisplayFromICCProfile` (src/OpenColorIO/Config.cpp:
-    /// 4120-4131 @ v2.5.2), in part.
+    /// 4120-4131 @ v2.5.2).
     #[doc(alias = "instantiateDisplayFromICCProfile")]
     pub fn instantiate_display_from_icc_profile(
         &mut self,
         icc_profile_filepath: impl AsRef<[u8]>,
     ) -> Result<i32> {
-        if c_str(icc_profile_filepath.as_ref()).is_empty() {
+        let icc_profile_filepath = c_str(icc_profile_filepath.as_ref());
+        if icc_profile_filepath.is_empty() {
             return Err(Exception::new("The ICC profile filepath cannot be null."));
         }
-        Err(Exception::new(
-            "Config::instantiateDisplayFromICCProfile: the ICC reader is not ported yet.",
-        ))
+
+        let monitor_description = get_profile_description_from_icc_profile(icc_profile_filepath)?;
+
+        self.instantiate_display(b"", &monitor_description, icc_profile_filepath)
+    }
+
+    /// Makes (or replaces) the display `<monitor description>[ [<monitor name>]]` (`$` and `%`
+    /// as `_`) from the virtual display, with a display color space of that name reading the
+    /// ICC profile; makes the display and its views active where the config lists active ones;
+    /// returns its index among the active displays.
+    ///
+    /// Port of `Config::Impl::instantiateDisplay` (src/OpenColorIO/Config.cpp:951-1109 @
+    /// v2.5.2).
+    fn instantiate_display(
+        &mut self,
+        monitor_name: &[u8],
+        monitor_description: &[u8],
+        icc_profile_filepath: &[u8],
+    ) -> Result<i32> {
+        if icc_profile_filepath.is_empty() {
+            return Err(Exception::new("The ICC Profile filepath cannot be null."));
+        }
+
+        if monitor_description.is_empty() {
+            return Err(Exception::new("The monitor description cannot be null."));
+        }
+
+        if let Some(env_content) = getenv(OCIO_ACTIVE_DISPLAYS_ENVVAR) {
+            return Err(Exception::new(
+                [
+                    b"Cannot instantiate a virtual display because the list of active displays \
+                      is defined by "
+                        .as_slice(),
+                    OCIO_ACTIVE_DISPLAYS_ENVVAR.as_bytes(),
+                    b" = ",
+                    &env_content,
+                    b".",
+                ]
+                .concat(),
+            ));
+        }
+
+        let mut color_space_name = monitor_description.to_vec();
+        // The monitor name is null if the display is instantiated from an ICC filepath.
+        if !monitor_name.is_empty() {
+            color_space_name.extend_from_slice(b" [");
+            color_space_name.extend_from_slice(monitor_name);
+            color_space_name.extend_from_slice(b"]");
+        }
+
+        // The $ is forbidden for color space names i.e. reserved for context variables.
+        replace_in_place(&mut color_space_name, b"$", b"_");
+        // The % is forbidden for color space names i.e. reserved for context variables.
+        replace_in_place(&mut color_space_name, b"%", b"_");
+
+        // Check if the virtual display definition is present.
+        if self.virtual_display.views.is_empty() && self.virtual_display.shared_views.is_empty() {
+            return Err(Exception::new(
+                "The virtual display information to instantiate a display is missing.",
+            ));
+        }
+
+        // Create the (display, view) pairs with the display color space implemented using a
+        // FileTransform pointing to the ICC Profile.
+        let absolute_display_index = match find_display(&self.displays, &color_space_name) {
+            None => {
+                let cur_size = self.displays.len();
+                self.displays
+                    .push((color_space_name.clone(), self.virtual_display.clone()));
+                cur_size
+            }
+            Some(index) => {
+                self.displays[index].1 = self.virtual_display.clone();
+                index
+            }
+        };
+
+        // Add the corresponding display color space.
+        let mut cs = ColorSpace::with_reference_space(ReferenceSpaceType::Display);
+        cs.set_name(&color_space_name);
+        let mut file = FileTransform::new();
+        file.set_src(icc_profile_filepath);
+        cs.set_description([b"Profile description: ".as_slice(), monitor_description].concat());
+        let added = cs
+            .set_transform(
+                Some(&Transform::File(file)),
+                ColorSpaceDirection::FromReference,
+            )
+            .and_then(|()| {
+                cs.set_encoding("sdr-video");
+                // Note that it adds it or updates the existing one.
+                self.all_color_spaces.add_color_space(&cs)
+            });
+        if let Err(e) = added {
+            if let Some(index) = find_display(&self.displays, &color_space_name) {
+                self.displays.remove(index);
+            }
+            self.all_color_spaces.remove_color_space(&color_space_name);
+            return Err(e);
+        }
+
+        // The display must be active.
+        if !self.active_displays.is_empty()
+            && !self.active_displays[0].is_empty()
+            && !contain(&self.active_displays, &color_space_name)
+        {
+            self.active_displays.push(color_space_name.clone());
+        }
+
+        // The views must be active.
+        if !self.active_views.is_empty() && !self.active_views[0].is_empty() {
+            let display = self.displays[absolute_display_index].1.clone();
+            for view in &display.views {
+                if !contain(&self.active_views, &view.name) {
+                    self.active_views.push(view.name.clone());
+                }
+            }
+            for view_name in &display.shared_views {
+                if !contain(&self.active_views, view_name) {
+                    self.active_views.push(view_name.clone());
+                }
+            }
+        }
+
+        // Force to refresh of all caches.
+        self.clear_display_cache();
+        self.reset_cache_ids();
+        self.refresh_active_color_spaces();
+
+        // Find the relative display index i.e. the index in the active display list.
+        let display_cache = self.display_cache();
+        for (idx, name) in display_cache.iter().enumerate() {
+            if c_str(name) == color_space_name.as_slice() {
+                return Ok(idx as i32);
+            }
+        }
+
+        // That should never happen.
+        Ok(-1)
     }
 
     // Active displays and views ///////////////////////////////////////////////////////////////
@@ -6059,15 +6200,16 @@ impl Config {
         if let Some(mut cache) = self.processor_cache.lock() {
             // Note that the key includes a string description of the transform which does not
             // include all the LUT entries (just the arguments of the FileTransforms for LUTs).
-            // `oss << usedContext->getCacheID() << *transform << direction` (the cache ID only
-            // when the transform needs context variables): the direction prints as its value.
-            let mut text = Vec::new();
+            // `oss << usedContext->getCacheID() << *transform << direction` on one stream (the
+            // cache ID only when the transform needs context variables): the direction prints as
+            // its value, after whatever state the transform's text leaves on the stream.
+            let mut oss = OStringStream::new(Crt::NATIVE);
             if need_context_variables {
-                text.extend_from_slice(used_context.cache_id().as_bytes());
+                oss.put_str(&used_context.cache_id());
             }
-            text.extend_from_slice(&transform.to_bytes());
-            text.extend_from_slice((direction as i32).to_string().as_bytes());
-            let key = std_hash_string(&text);
+            transform.write_text(&mut oss);
+            oss.put_i32(direction as i32);
+            let key = std_hash_string(oss.str());
 
             // Upstream's `m_processorCache[key]` adds an empty entry before it creates the
             // processor, which stays empty when the creation throws; the fallback below skips
