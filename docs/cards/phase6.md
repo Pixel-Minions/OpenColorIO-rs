@@ -242,7 +242,7 @@ the same Python code over two modules.
 
 | Chunk | Command (module) | What |
 |---|---|---|
-| O6.1 | `py_surface` (`py_surface_api.py`) | The module's surface, recursively: each name's kind (module, class, function, method, static method, property, enum, enum member, constant), `__module__`, `__qualname__`, `__doc__`, bases and MRO, enum members with their values in order, property accessors, and the constants' values. A committed fixture group (`cargo xtask oracle regen py_surface`) where `oracle check-all` shows it the same on both platforms |
+| O6.1 | `py_surface` (`py_surface_api.py`) | The module's surface, recursively: each name's kind (module, class, function, method, static method, property, enum, enum member, constant), `__module__`, `__qualname__`, `__doc__`, bases and MRO, enum members with their values in order, property accessors, and the constants' values. Run live, not a committed fixture: the surface differs by platform (the module-local class `vector_of_uint8_t` holds a `__pybind11_module_local_...` capsule named after the compiler and its ABI) |
 | O6.2 | `py_eval` (`py_eval_api.py`) | Runs a script of steps (`import PyOpenColorIO as OCIO`, then calls on names and on the results of earlier steps), and reports each step's result: its type, `repr`, value (numbers by their bits, strings and bytes as bytes, arrays as dtype, shape and bytes, objects through a given list of getters), or the exception's type, MRO and message; the log; `id()` equalities between results (aliasing, P6-8) |
 | O6.3 | `py_suite` (`py_suite_api.py`) | Upstream's suite against the wheel, as 6.1b runs it against the port: each test's outcome and message. The baseline of 6.1b's list, per platform |
 
