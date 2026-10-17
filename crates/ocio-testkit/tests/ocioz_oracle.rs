@@ -371,7 +371,8 @@ fn extract_sorts_by_bytes() {
 
 /// A file the oracle may not read has null contents: one of mode 0 on Linux, unless this
 /// process can read such a file (as root can). On Windows every file the extraction writes can
-/// be read.
+/// be read. Both reference platforms run privileged (Rocky Linux 9 as root), so there the
+/// contents are read, and the oracle's branch for a refused read isn't reached.
 #[cfg(unix)]
 #[test]
 fn extract_reports_unreadable_files() {
@@ -429,7 +430,9 @@ fn link<'a>(name: &'a [u8], target: &'a [u8]) -> Entry<'a> {
 /// entry's contents its target (mz_zip_rw.c:691-724 @ 4.0.10). On Windows a link also has its
 /// attributes: a reparse point, and a directory where its target ends with a separator
 /// (`SYMBOLIC_LINK_FLAG_DIRECTORY`, mz_os_win32.c:516-517). On Windows a link needs a
-/// privilege the process may not have, and the extraction then fails.
+/// privilege the process may not have, and the extraction then fails: the links' assertions,
+/// their attributes among them, run only where the process can make links (elevated, as on
+/// GitHub's Windows runners).
 #[test]
 fn extract_reports_links() {
     let archive = zip(&[
@@ -499,17 +502,29 @@ fn extract_reports_what_is_written_outside() {
 
 /// Archives whose links could make the extraction write outside the request's temporary
 /// directory are refused: an absolute target, a target whose `..` leave it, a link inside
-/// another link, a target through another link, and one back into the destination.
+/// another link, a target through another link, and one back into the destination; a target
+/// that only the UNIX1 field gives (the entry's contents a safe one); and on Windows, whose
+/// file system ignores case, one back into `Extracted`.
 #[test]
 fn links_that_could_leave_are_refused() {
-    let cases: Vec<Vec<u8>> = vec![
+    let mut unix1 = vec![0x0d, 0x00, 22, 0];
+    unix1.extend_from_slice(&[0; 12]);
+    unix1.extend_from_slice(b"../../../x");
+    let mut cases: Vec<Vec<u8>> = vec![
         zip(&[link(b"abs", b"/tmp")]),
         zip(&[link(b"up", b"../../x")]),
         zip(&[link(b"a/up", b"../../../x")]),
         zip(&[link(b"esc", b".."), link(b"esc/up", b"..")]),
         zip(&[link(b"esc", b".."), link(b"through", b"esc/x")]),
         zip(&[link(b"back", b"../extracted/x")]),
+        zip(&[Entry {
+            extra: unix1,
+            ..link(b"unix1", b"safe.txt")
+        }]),
     ];
+    if cfg!(windows) {
+        cases.push(zip(&[link(b"back", b"../Extracted/x")]));
+    }
     for archive in cases {
         let refused = Oracle::get().try_call(
             "with_files",
