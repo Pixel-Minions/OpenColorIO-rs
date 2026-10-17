@@ -1,0 +1,888 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright Contributors to the OpenColorIO Project.
+
+//! The CLF/CTF writer: the ProcessList and its operators as XML.
+//!
+//! Port of the writers of `src/OpenColorIO/fileformats/ctf/CTFTransform.cpp` and
+//! `CTFTransform.h` (@ v2.5.2): the lowest version that fits the ops (`GetOpMinimumVersion`,
+//! `GetMinimumVersion`), the value formatting (`WriteValue`, `SetOStream`, `WriteValues`),
+//! `OpWriter` and its bit depths, the operators' writers, and `TransformWriter`. Upstream's
+//! writers hold their formatter; here each `write` is given it. The operators' writers come
+//! chunk by chunk (WP 4.6b-4.6d); until then [`TransformWriter`] refuses the others as not
+//! ported. The ExposureContrast and grading writers but the RGB curves' (WP 4.6f) come with
+//! their op data (Phase 5).
+
+use ocio_formats::fileformats::xmlutils::xml_reader_utils::{ATTR_ID, ATTR_NAME, TAG_DESCRIPTION};
+use ocio_formats::fileformats::xmlutils::xml_writer_utils::{
+    Attributes, XmlElementWriter, XmlFormatter, XmlScopeIndent,
+};
+use ocio_ops::bit_depth_utils::get_bit_depth_max_value;
+use ocio_ops::cfmt::{Crt, OStringStream};
+use ocio_ops::format_metadata::{
+    FormatMetadataImpl, METADATA_INPUT_DESCRIPTOR, METADATA_OUTPUT_DESCRIPTOR,
+};
+use ocio_ops::hash_utils::cache_id_hash;
+use ocio_ops::op_data::{OpData, OpDataRcPtr, OpDataType, get_type_name};
+use ocio_ops::open_color_types::{BitDepth, Lut1DHueAdjust, TransformDirection};
+use ocio_ops::ops::fixedfunction::fixed_function_op_data::FixedFunctionOpStyle;
+use ocio_ops::ops::gamma::gamma_op_data::GammaStyle;
+use ocio_ops::ops::matrix::matrix_op_data::MatrixOpData;
+use ocio_ops::{Exception, Result};
+
+use super::ctf_reader_utils::{
+    ATTR_BITDEPTH_IN, ATTR_BITDEPTH_OUT, ATTR_COMP_CLF_VERSION, ATTR_DIMENSION, ATTR_INVERSE_OF,
+    ATTR_VERSION, TAG_ARRAY, TAG_MATRIX, TAG_PROCESS_LIST,
+};
+use super::ctf_transform::{
+    CTF_PROCESS_LIST_VERSION_1_3, CTF_PROCESS_LIST_VERSION_1_4, CTF_PROCESS_LIST_VERSION_1_5,
+    CTF_PROCESS_LIST_VERSION_1_6, CTF_PROCESS_LIST_VERSION_1_7, CTF_PROCESS_LIST_VERSION_2_0,
+    CTF_PROCESS_LIST_VERSION_2_1, CTF_PROCESS_LIST_VERSION_2_4, CTF_PROCESS_LIST_VERSION_2_5,
+    CtfReaderTransform, CtfVersion, get_elements_values,
+};
+
+/// The precision of the doubles the writer formats (CTFTransform.cpp:39 @ v2.5.2).
+const DOUBLE_PRECISION: i64 = 15;
+
+/// The lowest CTF version that can hold `op`.
+///
+/// Port of `GetOpMinimumVersion` (CTFTransform.cpp:225-384 @ v2.5.2). The ExposureContrast and
+/// grading types but the RGB curves' have no op data yet (Phase 5); upstream's default,
+/// `CTF_PROCESS_LIST_VERSION`, is for none of the types the port has.
+fn get_op_minimum_version(op: &OpData) -> Result<CtfVersion> {
+    use FixedFunctionOpStyle as F;
+
+    let min_version = match op {
+        OpData::Cdl(_) => CTF_PROCESS_LIST_VERSION_1_7,
+        OpData::FixedFunction(ff) => match ff.style() {
+            F::AcesGamutComp13Fwd | F::AcesGamutComp13Inv => CTF_PROCESS_LIST_VERSION_2_1,
+            F::LinToPq
+            | F::PqToLin
+            | F::LinToGammaLog
+            | F::GammaLogToLin
+            | F::LinToDoubleLog
+            | F::DoubleLogToLin
+            | F::AcesOutputTransform20Fwd
+            | F::AcesOutputTransform20Inv
+            | F::AcesRgbToJmh20
+            | F::AcesJmhToRgb20
+            | F::AcesTonescaleCompress20Fwd
+            | F::AcesTonescaleCompress20Inv
+            | F::AcesGamutCompress20Fwd
+            | F::AcesGamutCompress20Inv => CTF_PROCESS_LIST_VERSION_2_4,
+            F::RgbToHsyLog
+            | F::HsyLogToRgb
+            | F::RgbToHsyLin
+            | F::HsyLinToRgb
+            | F::RgbToHsyVid
+            | F::HsyVidToRgb => CTF_PROCESS_LIST_VERSION_2_5,
+            _ => CTF_PROCESS_LIST_VERSION_2_0,
+        },
+        OpData::GradingRgbCurve(_) | OpData::Log(_) => CTF_PROCESS_LIST_VERSION_2_0,
+        OpData::Exponent(exp) => {
+            if exp.exp4[3] == 1. {
+                CTF_PROCESS_LIST_VERSION_1_3
+            } else {
+                CTF_PROCESS_LIST_VERSION_1_5
+            }
+        }
+        OpData::Gamma(gamma) => match gamma.style() {
+            GammaStyle::BasicFwd
+            | GammaStyle::BasicRev
+            | GammaStyle::MoncurveFwd
+            | GammaStyle::MoncurveRev => {
+                if gamma.is_alpha_component_identity() {
+                    CTF_PROCESS_LIST_VERSION_1_3
+                } else {
+                    CTF_PROCESS_LIST_VERSION_1_5
+                }
+            }
+            GammaStyle::BasicMirrorFwd
+            | GammaStyle::BasicMirrorRev
+            | GammaStyle::BasicPassThruFwd
+            | GammaStyle::BasicPassThruRev
+            | GammaStyle::MoncurveMirrorFwd
+            | GammaStyle::MoncurveMirrorRev => CTF_PROCESS_LIST_VERSION_2_0,
+        },
+        OpData::Lut1D(lut) => match lut.get_direction() {
+            TransformDirection::Forward => {
+                if lut.get_hue_adjust() != Lut1DHueAdjust::None {
+                    CTF_PROCESS_LIST_VERSION_1_4
+                } else {
+                    CTF_PROCESS_LIST_VERSION_1_3
+                }
+            }
+            TransformDirection::Inverse => {
+                if lut.get_hue_adjust() != Lut1DHueAdjust::None || lut.is_input_half_domain() {
+                    CTF_PROCESS_LIST_VERSION_1_6
+                } else {
+                    CTF_PROCESS_LIST_VERSION_1_3
+                }
+            }
+        },
+        OpData::Lut3D(lut) => match lut.get_direction() {
+            TransformDirection::Forward => CTF_PROCESS_LIST_VERSION_1_3,
+            TransformDirection::Inverse => CTF_PROCESS_LIST_VERSION_1_6,
+        },
+        OpData::Matrix(_) | OpData::Range(_) => CTF_PROCESS_LIST_VERSION_1_3,
+        OpData::Reference(_) => {
+            return Err(Exception::new(
+                "Reference ops should have been replaced by their content.",
+            ));
+        }
+        OpData::NoOp(_) => CTF_PROCESS_LIST_VERSION_1_3,
+    };
+    Ok(min_version)
+}
+
+/// The lowest CTF version that can hold every op of `transform`, 1.3 at least.
+///
+/// Port of `GetMinimumVersion` (CTFTransform.cpp:386-403 @ v2.5.2).
+fn get_minimum_version(transform: &CtfReaderTransform) -> Result<CtfVersion> {
+    let op_list = transform.get_ops();
+
+    // Need to specify the minimum version here. Some test transforms have no ops.
+    let mut minimum_version = CTF_PROCESS_LIST_VERSION_1_3;
+
+    for op in op_list {
+        let version = get_op_minimum_version(op)?;
+        if version > minimum_version {
+            minimum_version = version;
+        }
+    }
+
+    Ok(minimum_version)
+}
+
+/// Writes each description as a `tag` element.
+///
+/// Port of `WriteDescriptions` (CTFTransform.cpp:511-517 @ v2.5.2).
+fn write_descriptions(fmt: &mut XmlFormatter<'_>, tag: &[u8], descriptions: &[Vec<u8>]) {
+    for it in descriptions {
+        fmt.write_content_tag(tag, it);
+    }
+}
+
+/// A floating-point value the writer formats: `float` or `double`.
+pub(crate) trait WriteNum: Copy {
+    /// Whether it is a `double` (`SetOStream`'s specialization).
+    const IS_DOUBLE: bool;
+    /// `value * scale` in the value's type.
+    fn scaled(self, scale: Self) -> Self;
+    /// `os << value`.
+    fn put(self, os: &mut OStringStream);
+    /// `IsNan(value)`.
+    fn is_nan_value(self) -> bool;
+    /// `value == std::numeric_limits<T>::infinity()`.
+    fn is_pos_inf(self) -> bool;
+    /// `value == -std::numeric_limits<T>::infinity()`.
+    fn is_neg_inf(self) -> bool;
+}
+
+impl WriteNum for f32 {
+    const IS_DOUBLE: bool = false;
+    fn scaled(self, scale: f32) -> f32 {
+        self * scale
+    }
+    fn put(self, os: &mut OStringStream) {
+        os.put_f32(self);
+    }
+    fn is_nan_value(self) -> bool {
+        self.is_nan()
+    }
+    fn is_pos_inf(self) -> bool {
+        self == f32::INFINITY
+    }
+    fn is_neg_inf(self) -> bool {
+        self == f32::NEG_INFINITY
+    }
+}
+
+impl WriteNum for f64 {
+    const IS_DOUBLE: bool = true;
+    fn scaled(self, scale: f64) -> f64 {
+        self * scale
+    }
+    fn put(self, os: &mut OStringStream) {
+        os.put_f64(self);
+    }
+    fn is_nan_value(self) -> bool {
+        self.is_nan()
+    }
+    fn is_pos_inf(self) -> bool {
+        self == f64::INFINITY
+    }
+    fn is_neg_inf(self) -> bool {
+        self == f64::NEG_INFINITY
+    }
+}
+
+/// Writes a floating-point value: `nan`, `inf` and `-inf` for the special values.
+///
+/// Port of `WriteValue` for floating-point types (CTFTransform.cpp:519-539 @ v2.5.2).
+fn write_value<T: WriteNum>(value: T, stream: &mut OStringStream) {
+    if value.is_nan_value() {
+        stream.put_str("nan");
+    } else if value.is_pos_inf() {
+        stream.put_str("inf");
+    } else if value.is_neg_inf() {
+        stream.put_str("-inf");
+    } else {
+        value.put(stream);
+    }
+}
+
+/// The width and precision of the values of an `F32` array: 11 and 8 for a `float`, 19 and
+/// [`DOUBLE_PRECISION`] for a `double`.
+///
+/// Port of `SetOStream` (CTFTransform.cpp:547-559 @ v2.5.2).
+fn set_ostream<T: WriteNum>(xml: &mut OStringStream) {
+    if T::IS_DOUBLE {
+        xml.width = 19;
+        xml.precision = DOUBLE_PRECISION;
+    } else {
+        xml.width = 11;
+        xml.precision = 8;
+    }
+}
+
+/// Writes the values `values[0]`, `values[iter_step]`, ... times `scale`, `values_per_line` a
+/// line (counting every value, stepped over or not), formatted for `bit_depth`: each padded
+/// to the width of the value before it, the first to the bit depth's width.
+///
+/// Port of `WriteValues` (CTFTransform.cpp:561-673 @ v2.5.2). Upstream's iterator range is a
+/// slice. An `std::ostream`'s width resets after every value it writes, so `value.length() >
+/// oss.width()` always holds, and the width becomes the length of the value just written.
+pub(crate) fn write_values<T: WriteNum>(
+    formatter: &mut XmlFormatter<'_>,
+    values: &[T],
+    values_per_line: usize,
+    bit_depth: BitDepth,
+    iter_step: usize,
+    scale: T,
+) -> Result<()> {
+    // Method used to write an array of values of the same type.
+
+    let mut oss = OStringStream::new(Crt::NATIVE);
+
+    // The numbers in a CLF/CTF file may always contain fractional values, regardless of the
+    // bit-depth attributes. E.g., even if the bit-depth is 8i, the array could contain values
+    // such as [-0.1, 8, 100.234, 305]. However, we do use the bit-depth to initialize the most
+    // likely formatting to use when printing arrays with large numbers of values such as LUTs.
+    // And if the array really does only have integers, it is nicer to print those without
+    // decimal points.
+
+    match bit_depth {
+        BitDepth::Uint8 => oss.width = 3,
+        BitDepth::Uint10 => oss.width = 4,
+        BitDepth::Uint12 => oss.width = 4,
+        BitDepth::Uint16 => oss.width = 5,
+        BitDepth::F16 => {
+            oss.width = 11;
+            oss.precision = 5;
+        }
+        BitDepth::F32 => set_ostream::<T>(&mut oss),
+        BitDepth::Uint14 | BitDepth::Uint32 => {
+            return Err(Exception::new("Unsupported bitdepth."));
+        }
+        BitDepth::Unknown => return Err(Exception::new("Unknown bitdepth.")),
+    }
+
+    let float_values = bit_depth == BitDepth::F16 || bit_depth == BitDepth::F32;
+
+    let mut index = 0;
+    while index < values.len() {
+        oss.clear_str();
+
+        let value = values[index].scaled(scale);
+        if float_values {
+            write_value(value, &mut oss);
+        } else {
+            value.put(&mut oss);
+        }
+
+        let value = oss.str().to_vec();
+        if value.len() as i64 > oss.width {
+            // The imposed precision requires more characters so the code recomputes the width
+            // to better align the values for the next lines.
+            oss.width = value.len() as i64;
+        }
+
+        let xml = formatter.get_stream();
+        xml.put_bytes(&value);
+
+        if index % values_per_line == values_per_line - 1 {
+            // std::endln writes a newline and flushes the output buffer where '\n' only
+            // writes a newline. Flushing the buffer for all floats of large LUTs introduces a
+            // huge performance hit so only use '\n'.
+            xml.put_str("\n");
+        } else {
+            xml.put_str(" ");
+        }
+        index += iter_step;
+    }
+    Ok(())
+}
+
+/// The CLF name of a bit depth the writer validated.
+///
+/// Port of `BitDepthToCLFString` (CTFTransform.cpp:743-753 @ v2.5.2).
+fn bit_depth_to_clf_string(bit_depth: BitDepth) -> Result<&'static [u8]> {
+    Ok(match bit_depth {
+        BitDepth::Uint8 => b"8i",
+        BitDepth::Uint10 => b"10i",
+        BitDepth::Uint12 => b"12i",
+        BitDepth::Uint16 => b"16i",
+        BitDepth::F16 => b"16f",
+        BitDepth::F32 => b"32f",
+        _ => {
+            return Err(Exception::new(
+                "Bitdepth has not been validated before calling this.",
+            ));
+        }
+    })
+}
+
+/// The file bit depth to write for an op of `op_type` that prefers `bd`: `F32` for none, an
+/// error for the depths CLF/CTF don't have.
+///
+/// Port of `GetValidatedFileBitDepth` (CTFTransform.cpp:755-779 @ v2.5.2). The message
+/// streams the bit depth as its enum's integer.
+pub(crate) fn get_validated_file_bit_depth(bd: BitDepth, op_type: OpDataType) -> Result<BitDepth> {
+    // If we get BIT_DEPTH_UNKNOWN here, it means the client has not requested any specific
+    // bit-depth to write to the file, so we will use a default of F32.
+    if bd == BitDepth::Unknown {
+        return Ok(BitDepth::F32);
+    }
+    if matches!(
+        bd,
+        BitDepth::Uint8
+            | BitDepth::Uint10
+            | BitDepth::Uint12
+            | BitDepth::Uint16
+            | BitDepth::F16
+            | BitDepth::F32
+    ) {
+        return Ok(bd);
+    }
+
+    let type_name = get_type_name(op_type)?;
+    let mut oss = OStringStream::new(Crt::NATIVE);
+    oss.put_str("Op ");
+    oss.put_str(type_name);
+    oss.put_str(". Bit-depth: ");
+    oss.put_i32(bd as i32);
+    oss.put_str(" is not supported for writing to CLF/CTF.");
+    Err(Exception::new(oss.into_bytes()))
+}
+
+/// The writer of one operator: its element, with the op's id, name and bit depths, its
+/// descriptions, then its content.
+///
+/// Port of `OpWriter` (CTFTransform.cpp:675-811 @ v2.5.2). Each operator's writer implements
+/// the virtual functions; [`write`](Self::write) is upstream's `OpWriter::write`.
+trait OpWriter {
+    /// `getOp`.
+    fn get_op(&self) -> &OpData;
+    /// `getTagName`.
+    fn get_tag_name(&self) -> &[u8];
+    /// `m_inBitDepth`.
+    fn in_bit_depth(&self) -> BitDepth;
+    /// `m_outBitDepth`.
+    fn out_bit_depth(&self) -> BitDepth;
+    /// `writeContent`.
+    fn write_content(&self, formatter: &mut XmlFormatter<'_>) -> Result<()>;
+
+    /// The op's id and name when not empty, and its bit depths.
+    ///
+    /// Port of `OpWriter::getAttributes` (CTFTransform.cpp:781-811 @ v2.5.2).
+    fn get_attributes(&self, attributes: &mut Attributes) -> Result<()> {
+        let op = self.get_op();
+        let id = op.get_id();
+        if !id.is_empty() {
+            attributes.push((ATTR_ID.to_vec(), id.to_vec()));
+        }
+
+        let name = op.get_name();
+        if !name.is_empty() {
+            attributes.push((ATTR_NAME.to_vec(), name.to_vec()));
+        }
+
+        let in_bit_depth_name = bit_depth_to_clf_string(self.in_bit_depth())?;
+        attributes.push((ATTR_BITDEPTH_IN.to_vec(), in_bit_depth_name.to_vec()));
+
+        let out_bit_depth_name = bit_depth_to_clf_string(self.out_bit_depth())?;
+        attributes.push((ATTR_BITDEPTH_OUT.to_vec(), out_bit_depth_name.to_vec()));
+
+        // TODO: bypass implementation
+        Ok(())
+    }
+
+    /// The op's descriptions.
+    ///
+    /// Port of `OpWriter::writeFormatMetadata` (CTFTransform.cpp:734-741 @ v2.5.2).
+    fn write_format_metadata(&self, formatter: &mut XmlFormatter<'_>) -> Result<()> {
+        let op = self.get_op();
+        let mut desc = Vec::new();
+        get_elements_values(
+            op.get_format_metadata().get_children_elements(),
+            TAG_DESCRIPTION,
+            &mut desc,
+        );
+        write_descriptions(formatter, TAG_DESCRIPTION, &desc);
+        Ok(())
+    }
+
+    /// Port of `OpWriter::write` (CTFTransform.cpp:710-732 @ v2.5.2).
+    fn write(&self, formatter: &mut XmlFormatter<'_>) -> Result<()> {
+        let mut attributes = Attributes::new();
+        self.get_attributes(&mut attributes)?;
+
+        let tag_name = self.get_tag_name().to_vec();
+        formatter.write_start_tag_with(&tag_name, &attributes);
+        {
+            let mut scope_indent = XmlScopeIndent::new(formatter);
+            self.write_format_metadata(&mut scope_indent)?;
+
+            // TODO: Bypass Dynamic Property converts to Look Dynamic Property in ctf format.
+
+            self.write_content(&mut scope_indent)?;
+        }
+        formatter.write_end_tag(&tag_name);
+        Ok(())
+    }
+}
+
+/// The writer of a Matrix: its array of 3 or 4 rows, with or without its offsets, in the
+/// CTF 1.x `dim` of three numbers before 2.0.
+///
+/// Port of `MatrixWriter` (CTFTransform.cpp:2284-2430 @ v2.5.2).
+struct MatrixWriter<'a> {
+    /// `m_version`.
+    version: CtfVersion,
+    /// `m_matrix`.
+    matrix: &'a OpData,
+    in_bit_depth: BitDepth,
+    out_bit_depth: BitDepth,
+}
+
+impl OpWriter for MatrixWriter<'_> {
+    fn get_op(&self) -> &OpData {
+        self.matrix
+    }
+    fn get_tag_name(&self) -> &[u8] {
+        TAG_MATRIX
+    }
+    fn in_bit_depth(&self) -> BitDepth {
+        self.in_bit_depth
+    }
+    fn out_bit_depth(&self) -> BitDepth {
+        self.out_bit_depth
+    }
+
+    /// Port of `MatrixWriter::writeContent` (CTFTransform.cpp:2326-2430 @ v2.5.2).
+    fn write_content(&self, formatter: &mut XmlFormatter<'_>) -> Result<()> {
+        // Matrix Op supports 4 xml formats:
+        //   1) 4x5x4, matrix with alpha and offsets.
+        //   2) 4x4x4, matrix with alpha and no offsets.
+        //   3) 3x4x3, matrix only with offsets and no alpha.
+        //   4) 3x3x3, matrix with no alpha and no offsets.
+
+        let save_dim3 = self.version < CTF_PROCESS_LIST_VERSION_2_0;
+
+        let OpData::Matrix(matrix) = self.matrix else {
+            unreachable!("a Matrix writer writes a Matrix");
+        };
+        let forward;
+        let matrix: &MatrixOpData = if matrix.get_direction() == TransformDirection::Inverse {
+            forward = matrix.get_as_forward()?;
+            &forward
+        } else {
+            matrix
+        };
+
+        let has_alpha = matrix.has_alpha()?;
+        let dimension_attr: &[u8] = if has_alpha {
+            if matrix.has_offsets() {
+                if save_dim3 { b"4 5 4" } else { b"4 5" }
+            } else if save_dim3 {
+                b"4 4 4"
+            } else {
+                b"4 4"
+            }
+        } else if matrix.has_offsets() {
+            if save_dim3 { b"3 4 3" } else { b"3 4" }
+        } else if save_dim3 {
+            b"3 3 3"
+        } else {
+            b"3 3"
+        };
+
+        let attributes: Attributes = vec![(ATTR_DIMENSION.to_vec(), dimension_attr.to_vec())];
+
+        formatter.write_start_tag_with(TAG_ARRAY, &attributes);
+
+        let values = matrix.get_array().get_values();
+        let offsets = matrix.get_offsets();
+
+        let out_scale = get_bit_depth_max_value(self.out_bit_depth)?;
+        let in_out_scale = out_scale / get_bit_depth_max_value(self.in_bit_depth)?;
+
+        if has_alpha {
+            if matrix.has_offsets() {
+                // Write in 4x5x4 mode.
+                let v: [f64; 20] = [
+                    values[0] * in_out_scale,
+                    values[1] * in_out_scale,
+                    values[2] * in_out_scale,
+                    values[3] * in_out_scale,
+                    offsets[0] * out_scale,
+                    values[4] * in_out_scale,
+                    values[5] * in_out_scale,
+                    values[6] * in_out_scale,
+                    values[7] * in_out_scale,
+                    offsets[1] * out_scale,
+                    values[8] * in_out_scale,
+                    values[9] * in_out_scale,
+                    values[10] * in_out_scale,
+                    values[11] * in_out_scale,
+                    offsets[2] * out_scale,
+                    values[12] * in_out_scale,
+                    values[13] * in_out_scale,
+                    values[14] * in_out_scale,
+                    values[15] * in_out_scale,
+                    offsets[3] * out_scale,
+                ];
+
+                write_values(formatter, &v, 5, BitDepth::F32, 1, 1.0)?;
+            } else {
+                // Write in 4x4x4 compact mode.
+                let v: [f64; 16] = std::array::from_fn(|i| values[i] * in_out_scale);
+
+                write_values(formatter, &v, 4, BitDepth::F32, 1, 1.0)?;
+            }
+        } else if matrix.has_offsets() {
+            // Write in 3x4x3 compact mode.
+            let v: [f64; 12] = [
+                values[0] * in_out_scale,
+                values[1] * in_out_scale,
+                values[2] * in_out_scale,
+                offsets[0] * out_scale,
+                values[4] * in_out_scale,
+                values[5] * in_out_scale,
+                values[6] * in_out_scale,
+                offsets[1] * out_scale,
+                values[8] * in_out_scale,
+                values[9] * in_out_scale,
+                values[10] * in_out_scale,
+                offsets[2] * out_scale,
+            ];
+
+            write_values(formatter, &v, 4, BitDepth::F32, 1, 1.0)?;
+        } else {
+            // Write in 3x3x3 compact mode.
+            let v: [f64; 9] = [
+                values[0] * in_out_scale,
+                values[1] * in_out_scale,
+                values[2] * in_out_scale,
+                values[4] * in_out_scale,
+                values[5] * in_out_scale,
+                values[6] * in_out_scale,
+                values[8] * in_out_scale,
+                values[9] * in_out_scale,
+                values[10] * in_out_scale,
+            ];
+
+            write_values(formatter, &v, 3, BitDepth::F32, 1, 1.0)?;
+        }
+
+        formatter.write_end_tag(TAG_ARRAY);
+        Ok(())
+    }
+}
+
+/// The error of an op CLF can't hold.
+///
+/// Port of `ThrowWriteOp` (CTFTransform.cpp:2645-2651 @ v2.5.2).
+fn throw_write_op(op_type: &str) -> Exception {
+    let mut oss = OStringStream::new(Crt::NATIVE);
+    oss.put_str("Transform uses the '");
+    oss.put_str(op_type);
+    oss.put_str("' op which cannot be written as CLF.  Use CTF format or Bake the transform.");
+    Exception::new(oss.into_bytes())
+}
+
+/// The file input bit depth an op prefers: a Matrix's and a Range's, an inverse LUT's file
+/// output depth (which scales its array), `F32` for the others.
+///
+/// Port of `GetInputFileBD` (CTFTransform.cpp:2653-2693 @ v2.5.2).
+fn get_input_file_bd(op: &OpData) -> Result<BitDepth> {
+    let op_type = op.get_type();
+    match op {
+        OpData::Matrix(mat) => {
+            let bd = mat.get_file_input_bit_depth();
+            get_validated_file_bit_depth(bd, op_type)
+        }
+        OpData::Range(range) => {
+            let bd = range.get_file_input_bit_depth();
+            get_validated_file_bit_depth(bd, op_type)
+        }
+        // For an InverseLut1D, the file "out" depth, which determines the array scaling, must
+        // actually be set as the in-depth.
+        OpData::Lut1D(lut) if lut.get_direction() == TransformDirection::Inverse => {
+            let bd = lut.get_file_output_bit_depth();
+            get_validated_file_bit_depth(bd, op_type)
+        }
+        // For an InverseLut3D, the file "out" depth, which determines the array scaling, must
+        // actually be set as the in-depth.
+        OpData::Lut3D(lut) if lut.get_direction() == TransformDirection::Inverse => {
+            let bd = lut.get_file_output_bit_depth();
+            get_validated_file_bit_depth(bd, op_type)
+        }
+        _ => Ok(BitDepth::F32),
+    }
+}
+
+/// The error of an op whose writer isn't ported yet (WP 4.6b-4.6d).
+fn writer_not_ported(op_type: OpDataType) -> Result<()> {
+    Err(Exception::new(format!(
+        "The CTF writer of the '{}' op is not ported yet.",
+        get_type_name(op_type)?
+    )))
+}
+
+/// The writer of a ProcessList: its version (CLF 3, or the lowest CTF version that fits), id
+/// (the ops' cache IDs hashed when it has none), name, inverseOf, descriptions, descriptors
+/// and Info, then its ops (an identity matrix when it has none).
+///
+/// Port of `TransformWriter` (CTFTransform.h:266-289, CTFTransform.cpp:2518-3004 @ v2.5.2).
+#[derive(Debug)]
+pub struct TransformWriter<'t> {
+    /// `m_transform`.
+    transform: &'t CtfReaderTransform,
+    /// `m_isCLF`.
+    is_clf: bool,
+}
+
+impl<'t> TransformWriter<'t> {
+    /// Port of `TransformWriter::TransformWriter` (CTFTransform.cpp:2518-2525 @ v2.5.2).
+    pub fn new(transform: &'t CtfReaderTransform, is_clf: bool) -> TransformWriter<'t> {
+        TransformWriter { transform, is_clf }
+    }
+
+    /// The Info metadata `m` and its children.
+    ///
+    /// Port of `TransformWriter::writeProcessListMetadata` (CTFTransform.cpp:2612-2641 @
+    /// v2.5.2).
+    fn write_process_list_metadata(formatter: &mut XmlFormatter<'_>, m: &FormatMetadataImpl) {
+        if m.get_children_elements().is_empty() {
+            let info_value = m.get_element_value();
+            if m.get_num_attributes() != 0 || !info_value.is_empty() {
+                formatter.write_content_tag_with(
+                    m.get_element_name(),
+                    m.get_attributes(),
+                    m.get_element_value(),
+                );
+            }
+        } else {
+            formatter.write_start_tag_with(m.get_element_name(), m.get_attributes());
+            let value = m.get_element_value();
+            if !value.is_empty() {
+                formatter.write_content(m.get_element_value());
+            }
+
+            let items = m.get_children_elements();
+            for it in items {
+                let mut scope_indent = XmlScopeIndent::new(formatter);
+                Self::write_process_list_metadata(&mut scope_indent, it);
+            }
+
+            formatter.write_end_tag(m.get_element_name());
+        }
+    }
+
+    /// The ops, each with the file bit depths that keep its preferred ones where they can.
+    ///
+    /// Port of `TransformWriter::writeOps` (CTFTransform.cpp:2695-3004 @ v2.5.2).
+    fn write_ops(&self, formatter: &mut XmlFormatter<'_>, version: CtfVersion) -> Result<()> {
+        // If the ops have a specific file input/output bit-depth that was set (e.g., if the
+        // ops were originally read in from a CTF/CLF file), then we try to preserve those
+        // values on write. Otherwise, default to 32f.
+        let mut in_bd;
+        let mut out_bd = BitDepth::F32;
+
+        let ops: &[OpDataRcPtr] = self.transform.get_ops();
+        let num_ops = ops.len();
+        let mut num_saved_ops = 0;
+        if num_ops != 0 {
+            // Initialize the input bit-depth from the first op. Thereafter, the input depth
+            // will be determined from the output depth of the previous op that was written.
+            in_bd = get_input_file_bd(&ops[0])?;
+
+            for i in 0..num_ops {
+                let op = &ops[i];
+
+                // Each op is allowed to set its preferred output depth, so that is always
+                // respected. However, we try to honour preferred input depth too, where
+                // possible. If the next op has a preferred file input bit-depth, use that as
+                // the default out-depth for the current op. However, if the current op has a
+                // preferred file out depth, that will take precedence below. If an op's
+                // preferred file depth cannot be honoured, it still results in a perfectly
+                // valid CTF file, it's only that the scaling of array values may be adjusted
+                // relative to the original CTF file it was created from (if any).
+                if i + 1 < num_ops {
+                    let next_op = &ops[i + 1];
+                    // Return file input bit-depth for ops with a preference, F32 for others.
+                    out_bd = get_input_file_bd(next_op)?;
+                }
+
+                let op_type = op.get_type();
+
+                if op_type != OpDataType::NoOp {
+                    op.validate()?;
+                    num_saved_ops += 1;
+                }
+
+                match &**op {
+                    OpData::Cdl(_) => writer_not_ported(op_type)?,
+                    OpData::Exponent(_) => writer_not_ported(op_type)?,
+                    OpData::FixedFunction(_) => {
+                        if self.is_clf {
+                            return Err(throw_write_op("FixedFunction"));
+                        }
+                        writer_not_ported(op_type)?
+                    }
+                    OpData::Gamma(_) => writer_not_ported(op_type)?,
+                    OpData::GradingRgbCurve(_) => {
+                        if self.is_clf {
+                            return Err(throw_write_op("GradingRGBCurve"));
+                        }
+                        writer_not_ported(op_type)?
+                    }
+                    OpData::Log(_) => writer_not_ported(op_type)?,
+                    OpData::Lut1D(_) => writer_not_ported(op_type)?,
+                    OpData::Lut3D(_) => writer_not_ported(op_type)?,
+                    OpData::Matrix(mat_src) => {
+                        if self.is_clf && mat_src.has_alpha()? {
+                            return Err(throw_write_op("Matrix with alpha component"));
+                        }
+
+                        out_bd = get_validated_file_bit_depth(
+                            mat_src.get_file_output_bit_depth(),
+                            op_type,
+                        )?;
+                        // inBD has already been set at previous iteration. inBD can be:
+                        // - This op input file bit-depth if previous op does not define an
+                        //   output file bit-depth.
+                        // - Previous op output file bit-depth if previous op is a LUT, a
+                        //   Matrix or a Range.
+
+                        let op_writer = MatrixWriter {
+                            version,
+                            matrix: op,
+                            in_bit_depth: in_bd,
+                            out_bit_depth: out_bd,
+                        };
+                        op_writer.write(formatter)?;
+                    }
+                    OpData::Range(_) => writer_not_ported(op_type)?,
+                    OpData::Reference(_) => {
+                        return Err(Exception::new(
+                            "Reference ops should have been replaced by their content.",
+                        ));
+                    }
+                    OpData::NoOp(_) => {
+                        return Err(Exception::new("Noop ops should have been removed."));
+                    }
+                }
+
+                // For next op.
+                in_bd = out_bd;
+                out_bd = BitDepth::F32;
+            }
+        }
+        if num_saved_ops == 0 {
+            // When there are no ops, save an identity matrix.
+            let mat = OpData::Matrix(MatrixOpData::new());
+
+            let op_writer = MatrixWriter {
+                version,
+                matrix: &mat,
+                in_bit_depth: BitDepth::F32,
+                out_bit_depth: BitDepth::F32,
+            };
+            op_writer.write(formatter)?;
+        }
+        Ok(())
+    }
+}
+
+impl XmlElementWriter for TransformWriter<'_> {
+    /// Port of `TransformWriter::write` (CTFTransform.cpp:2531-2610 @ v2.5.2).
+    fn write(&self, formatter: &mut XmlFormatter<'_>) -> Result<()> {
+        let process_list_tag = TAG_PROCESS_LIST;
+
+        let mut attributes = Attributes::new();
+
+        let mut write_version = CTF_PROCESS_LIST_VERSION_2_0;
+
+        if self.is_clf {
+            // Save with CLF version 3.
+            attributes.push((ATTR_COMP_CLF_VERSION.to_vec(), b"3".to_vec()));
+        } else {
+            write_version = get_minimum_version(self.transform)?;
+            attributes.push((
+                ATTR_VERSION.to_vec(),
+                write_version.to_string().into_bytes(),
+            ));
+        }
+
+        let mut id = self.transform.get_id().to_vec();
+        if id.is_empty() {
+            for op in self.transform.get_ops() {
+                id.extend_from_slice(&op.get_cache_id()?);
+            }
+
+            id = cache_id_hash(&id).into_bytes();
+        }
+        attributes.push((ATTR_ID.to_vec(), id));
+
+        let name = self.transform.get_name();
+        if !name.is_empty() {
+            attributes.push((ATTR_NAME.to_vec(), name.to_vec()));
+        }
+
+        let inverse_of_id = self.transform.get_inverse_of_id();
+        if !inverse_of_id.is_empty() {
+            attributes.push((ATTR_INVERSE_OF.to_vec(), inverse_of_id.to_vec()));
+        }
+
+        formatter.write_start_tag_with(process_list_tag, &attributes);
+        {
+            let mut scope_indent = XmlScopeIndent::new(formatter);
+
+            write_descriptions(
+                &mut scope_indent,
+                TAG_DESCRIPTION,
+                self.transform.get_descriptions(),
+            );
+
+            let input_desc = self.transform.get_input_descriptor();
+            if !input_desc.is_empty() {
+                scope_indent.write_content_tag(METADATA_INPUT_DESCRIPTOR, input_desc);
+            }
+
+            let output_desc = self.transform.get_output_descriptor();
+            if !output_desc.is_empty() {
+                scope_indent.write_content_tag(METADATA_OUTPUT_DESCRIPTOR, output_desc);
+            }
+
+            let info = self.transform.get_info_metadata();
+            Self::write_process_list_metadata(&mut scope_indent, info);
+
+            self.write_ops(&mut scope_indent, write_version)?;
+        }
+
+        formatter.write_end_tag(process_list_tag);
+        Ok(())
+    }
+}

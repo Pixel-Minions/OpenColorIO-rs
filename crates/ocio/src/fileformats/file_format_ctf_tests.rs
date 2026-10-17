@@ -14,9 +14,11 @@ use crate::fileformats::ctf::ctf_transform::{
 };
 use crate::fileformats::input_stream::OpenMode;
 use crate::fileformats::test_utils::{get_test_files_dir, load_test_file};
+use crate::processor::Processor;
 use crate::transform::Transform;
+use crate::transforms::matrix_transform::MatrixTransform;
 use ocio_ops::bit_depth_utils::get_bit_depth_max_value;
-use ocio_ops::format_metadata::{METADATA_DESCRIPTION, METADATA_INFO};
+use ocio_ops::format_metadata::{METADATA_DESCRIPTION, METADATA_ID, METADATA_INFO, METADATA_NAME};
 use ocio_ops::logging::{get_logging_level, set_logging_level};
 use ocio_ops::math_utils::convert_half_bits_to_float;
 use ocio_ops::op_data::OpDataType;
@@ -41,6 +43,7 @@ use ocio_ops::ops::lut3d::lut3d_op_data::Lut3DOpData;
 use ocio_ops::ops::matrix::matrix_op_data::{MatrixArray, MatrixOpData};
 use ocio_ops::ops::range::range_op_data::RangeOpData;
 use ocio_ops::ops::reference::reference_op_data::{ReferenceOpData, ReferenceStyle};
+use ocio_testkit::compare::assert_text_eq;
 use ocio_testkit::upstream::{check_close, check_throw_what};
 
 /// Port of `LoadCLFFile` (FileFormatCTF_tests.cpp:25-29 @ v2.5.2).
@@ -3781,5 +3784,592 @@ fn reference_load_alias_path() {
     check_throw_what(
         load_clf_file(file_name),
         "alias & path attributes for Reference should not be both defined",
+    );
+}
+
+/// The processor of a file transform of the test file `file_name`, from an empty config.
+///
+/// Port of `CreateFileTransform` and `GetFileTransformProcessor` (tests/cpu/UnitTestUtils.cpp:
+/// 38-72 @ v2.5.2).
+fn get_file_transform_processor(file_name: &str) -> Result<std::sync::Arc<Processor>> {
+    let file_path = format!("{}/{file_name}", get_test_files_dir());
+
+    // Create a FileTransform
+    let mut file_transform = FileTransform::new();
+    file_transform.set_src(file_path);
+
+    // Create empty Config to use.
+    let config = Config::new()?;
+    // Get the processor corresponding to the transform.
+    config.processor(&Transform::File(file_transform))
+}
+
+/// Port of `WriteGroupCTF` (FileFormatCTF_tests.cpp:3795-3799 @ v2.5.2).
+fn write_group_ctf(group: &GroupTransform, output_transform: &mut Vec<u8>) -> Result<()> {
+    let cfg = Config::create_raw()?;
+    group.write(&cfg, FILEFORMAT_CTF, output_transform)
+}
+
+/// Port of `WriteGroupCLF` (FileFormatCTF_tests.cpp:3801-3805 @ v2.5.2).
+fn write_group_clf(group: &GroupTransform, output_transform: &mut Vec<u8>) -> Result<()> {
+    let cfg = Config::create_raw()?;
+    group.write(&cfg, FILEFORMAT_CLF, output_transform)
+}
+
+/// The group's transform `index`, a matrix.
+fn matrix_transform_mut(group: &mut GroupTransform, index: i32) -> &mut MatrixTransform {
+    match group.transform_mut(index).unwrap() {
+        Transform::Matrix(mat) => mat,
+        other => panic!("not a matrix: {other:?}"),
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, load_edit_save_matrix)` @ v2.5.2.
+#[test]
+fn load_edit_save_matrix() {
+    let ctf_file = "clf/matrix_example.clf";
+    let processor = get_file_transform_processor(ctf_file).unwrap();
+    let mut group = processor.create_group_transform().unwrap();
+
+    group
+        .format_metadata_mut()
+        .add_attribute(
+            Some(crate::fileformats::ctf::ctf_reader_utils::ATTR_INVERSE_OF),
+            Some(b"added inverseOf"),
+        )
+        .unwrap();
+    group
+        .format_metadata_mut()
+        .add_attribute(Some(b"Unknown"), Some(b"not saved"))
+        .unwrap();
+    group
+        .format_metadata_mut()
+        .add_child_element(Some(b"Unknown"), Some(b"not saved"))
+        .unwrap();
+    group
+        .format_metadata_mut()
+        .add_child_element(Some(METADATA_INFO), Some(b"Preserved"))
+        .unwrap();
+    let index_info = group.format_metadata().get_num_children_elements() - 1;
+    let info = group
+        .format_metadata_mut()
+        .get_child_element_mut(index_info)
+        .unwrap();
+    info.add_attribute(Some(b"attrib"), Some(b"value")).unwrap();
+    info.add_child_element(Some(b"Child"), Some(b"Preserved"))
+        .unwrap();
+
+    assert_eq!(group.num_transforms(), 1);
+    let mat_trans = matrix_transform_mut(&mut group, 0);
+
+    // Validate how escape characters are saved.
+    let short_name: &[u8] = br#"A ' short ' " name"#;
+    let description1: &[u8] = br#"A " short " description with a ' inside"#;
+    let description2: &[u8] = br#"<test"'&>"#;
+    mat_trans
+        .format_metadata_mut()
+        .add_child_element(Some(METADATA_DESCRIPTION), Some(description1))
+        .unwrap();
+    let index_desc = mat_trans.format_metadata().get_num_children_elements() - 1;
+    let desc = mat_trans
+        .format_metadata_mut()
+        .get_child_element_mut(index_desc)
+        .unwrap();
+    desc.add_attribute(Some(b"Unknown"), Some(b"not saved"))
+        .unwrap();
+    mat_trans
+        .format_metadata_mut()
+        .add_child_element(Some(METADATA_DESCRIPTION), Some(description2))
+        .unwrap();
+
+    mat_trans.format_metadata_mut().set_name(Some(short_name));
+
+    let offset = [0.1, 1.2, 2.3456789123456, 0.0];
+    mat_trans.set_offset(&offset);
+
+    let mut output_transform = Vec::new();
+    write_group_ctf(&group, &mut output_transform).unwrap();
+
+    // Output matrix array as '3 4 3'.
+    let expected_ctf = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="1.3" id="b5cc7aed-d405-4d8b-b64b-382b2341a378" name="matrix example" inverseOf="added inverseOf">
+    <Description>Basic matrix example using CLF v2 dim syntax</Description>
+    <InputDescriptor>RGB</InputDescriptor>
+    <OutputDescriptor>XYZ</OutputDescriptor>
+    <Info attrib="value">
+    Preserved
+        <Child>Preserved</Child>
+    </Info>
+    <Matrix id="c61daf06-539f-4254-81fc-9800e6d02a37" name="A &apos; short &apos; &quot; name" inBitDepth="32f" outBitDepth="32f">
+        <Description>Legacy matrix</Description>
+        <Description>Note that dim=&quot;3 3 3&quot; should be supported for CLF v2 compatibility</Description>
+        <Description>A &quot; short &quot; description with a &apos; inside</Description>
+        <Description>&lt;test&quot;&apos;&amp;&gt;</Description>
+        <Array dim="3 4 3">
+          0.4123908          0.35758434          0.18048079                 0.1
+         0.21263901          0.71516868          0.07219232                 1.2
+         0.01933082          0.01191948          0.95053215     2.3456789123456
+        </Array>
+    </Matrix>
+</ProcessList>
+"#;
+
+    assert_eq!(expected_ctf.len(), output_transform.len());
+    assert_text_eq(
+        "written",
+        expected_ctf,
+        std::str::from_utf8(&output_transform).unwrap(),
+    );
+
+    // Read the stream back.
+    let mut input_transform = InputStream::from_bytes(output_transform.clone());
+
+    let cached_file = LocalFileFormat
+        .read_file(&mut input_transform, b"")
+        .unwrap();
+
+    let file_ops = cached_file.transform.get_ops();
+    assert_eq!(file_ops.len(), 1);
+    let op = &file_ops[0];
+    as_matrix(op);
+    let md = op.get_format_metadata();
+    assert_eq!(md.get_num_attributes(), 2);
+    assert_eq!(METADATA_ID, md.get_attribute_name(0));
+    assert_eq!(METADATA_NAME, md.get_attribute_name(1));
+    assert_eq!(short_name, md.get_attribute_value(1));
+    assert_eq!(md.get_num_children_elements(), 4);
+    let desc0 = md.get_child_element(0).unwrap();
+    assert_eq!(METADATA_DESCRIPTION, desc0.get_element_name());
+    assert_eq!(b"Legacy matrix", desc0.get_element_value());
+    let desc1 = md.get_child_element(2).unwrap();
+    assert_eq!(METADATA_DESCRIPTION, desc1.get_element_name());
+    assert_eq!(description1, desc1.get_element_value());
+    let desc2 = md.get_child_element(3).unwrap();
+    assert_eq!(METADATA_DESCRIPTION, desc2.get_element_name());
+    assert_eq!(description2, desc2.get_element_value());
+}
+
+/// Writes `transform` as the one transform of a group, and reads it back.
+///
+/// Port of `WriteRead` (FileFormatCTF_tests.cpp:5040-5056 @ v2.5.2).
+fn write_read(transform: Transform) -> LocalCachedFile {
+    let mut group = GroupTransform::new();
+    group.append_transform(transform);
+
+    let mut output_transform = Vec::new();
+    write_group_ctf(&group, &mut output_transform).unwrap();
+
+    let mut input_transform = InputStream::from_bytes(output_transform.clone());
+
+    LocalFileFormat
+        .read_file(&mut input_transform, b"")
+        .unwrap()
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, save_matrix)` @ v2.5.2.
+#[test]
+fn save_matrix() {
+    let mut mat_transform = MatrixTransform::new();
+    let offset4 = [0.123456789123, 0.11, 0.111, 0.2];
+    mat_transform.set_offset(&offset4);
+    mat_transform.set_direction(TransformDirection::Forward);
+
+    let cached_file = write_read(Transform::Matrix(mat_transform));
+    let file_ops = cached_file.transform.get_ops();
+    assert_eq!(file_ops.len(), 1);
+    let mat = as_matrix(&file_ops[0]);
+    assert_eq!(mat.get_offset_value(0).unwrap(), offset4[0]);
+    assert_eq!(mat.get_offset_value(1).unwrap(), offset4[1]);
+    assert_eq!(mat.get_offset_value(2).unwrap(), offset4[2]);
+    assert_eq!(mat.get_offset_value(3).unwrap(), offset4[3]);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, load_save_matrix)` @ v2.5.2.
+#[test]
+fn load_save_matrix() {
+    let ctf_file = "clf/matrix_example.clf";
+    let processor = get_file_transform_processor(ctf_file).unwrap();
+    let group = processor.create_group_transform().unwrap();
+
+    let mut output_transform = Vec::new();
+    write_group_ctf(&group, &mut output_transform).unwrap();
+
+    // Output matrix array as '3 3 3'.
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="1.3" id="b5cc7aed-d405-4d8b-b64b-382b2341a378" name="matrix example">
+    <Description>Basic matrix example using CLF v2 dim syntax</Description>
+    <InputDescriptor>RGB</InputDescriptor>
+    <OutputDescriptor>XYZ</OutputDescriptor>
+    <Matrix id="c61daf06-539f-4254-81fc-9800e6d02a37" inBitDepth="32f" outBitDepth="32f">
+        <Description>Legacy matrix</Description>
+        <Description>Note that dim=&quot;3 3 3&quot; should be supported for CLF v2 compatibility</Description>
+        <Array dim="3 3 3">
+          0.4123908          0.35758434          0.18048079
+         0.21263901          0.71516868          0.07219232
+         0.01933082          0.01191948          0.95053215
+        </Array>
+    </Matrix>
+</ProcessList>
+"#;
+
+    assert_eq!(expected.len(), output_transform.len());
+    assert_text_eq(
+        "written",
+        expected,
+        std::str::from_utf8(&output_transform).unwrap(),
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, save_matrix_444)` @ v2.5.2.
+#[test]
+fn save_matrix_444() {
+    let config = Config::new().unwrap();
+
+    let mut mat = MatrixTransform::new();
+    let m = [
+        1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0.5, 0.5, 0., 1.,
+    ];
+    mat.set_matrix(&m);
+    let processor = config.processor(&Transform::Matrix(mat)).unwrap();
+
+    let group = processor.create_group_transform().unwrap();
+
+    assert_eq!(group.num_transforms(), 1);
+
+    let mut output_transform = Vec::new();
+    write_group_ctf(&group, &mut output_transform).unwrap();
+
+    // Output matrix array as '4 4 4'.
+    let output = String::from_utf8_lossy(&output_transform);
+    assert!(output.contains("\"4 4 4\""));
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, load_edit_save_matrix_clf)` @ v2.5.2.
+#[test]
+fn load_edit_save_matrix_clf() {
+    let ctf_file = "clf/matrix_example.clf";
+    let processor = get_file_transform_processor(ctf_file).unwrap();
+    let mut group = processor.create_group_transform().unwrap();
+    assert_eq!(group.num_transforms(), 1);
+    let mat_trans = matrix_transform_mut(&mut group, 0);
+    let new_description: &[u8] = b"Added description";
+    mat_trans
+        .format_metadata_mut()
+        .add_child_element(Some(METADATA_DESCRIPTION), Some(new_description))
+        .unwrap();
+    let offset = [0.1, 1.2, 2.3, 0.0];
+    mat_trans.set_offset(&offset);
+
+    let mut output_transform = Vec::new();
+    write_group_clf(&group, &mut output_transform).unwrap();
+
+    let expected_clf = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList compCLFversion="3" id="b5cc7aed-d405-4d8b-b64b-382b2341a378" name="matrix example">
+    <Description>Basic matrix example using CLF v2 dim syntax</Description>
+    <InputDescriptor>RGB</InputDescriptor>
+    <OutputDescriptor>XYZ</OutputDescriptor>
+    <Matrix id="c61daf06-539f-4254-81fc-9800e6d02a37" inBitDepth="32f" outBitDepth="32f">
+        <Description>Legacy matrix</Description>
+        <Description>Note that dim=&quot;3 3 3&quot; should be supported for CLF v2 compatibility</Description>
+        <Description>Added description</Description>
+        <Array dim="3 4">
+          0.4123908          0.35758434          0.18048079                 0.1
+         0.21263901          0.71516868          0.07219232                 1.2
+         0.01933082          0.01191948          0.95053215                 2.3
+        </Array>
+    </Matrix>
+</ProcessList>
+"#;
+
+    assert_eq!(expected_clf.len(), output_transform.len());
+    assert_text_eq(
+        "written",
+        expected_clf,
+        std::str::from_utf8(&output_transform).unwrap(),
+    );
+
+    let offset_alpha = [0.1, 1.2, 2.3, 0.9];
+    matrix_transform_mut(&mut group, 0).set_offset(&offset_alpha);
+
+    let mut output_transform_ctf = Vec::new();
+    write_group_ctf(&group, &mut output_transform_ctf).unwrap();
+
+    let expected_ctf = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="1.3" id="b5cc7aed-d405-4d8b-b64b-382b2341a378" name="matrix example">
+    <Description>Basic matrix example using CLF v2 dim syntax</Description>
+    <InputDescriptor>RGB</InputDescriptor>
+    <OutputDescriptor>XYZ</OutputDescriptor>
+    <Matrix id="c61daf06-539f-4254-81fc-9800e6d02a37" inBitDepth="32f" outBitDepth="32f">
+        <Description>Legacy matrix</Description>
+        <Description>Note that dim=&quot;3 3 3&quot; should be supported for CLF v2 compatibility</Description>
+        <Description>Added description</Description>
+        <Array dim="4 5 4">
+          0.4123908          0.35758434          0.18048079                   0                 0.1
+         0.21263901          0.71516868          0.07219232                   0                 1.2
+         0.01933082          0.01191948          0.95053215                   0                 2.3
+                  0                   0                   0                   1                 0.9
+        </Array>
+    </Matrix>
+</ProcessList>
+"#;
+
+    assert_eq!(expected_ctf.len(), output_transform_ctf.len());
+    assert_text_eq(
+        "written",
+        expected_ctf,
+        std::str::from_utf8(&output_transform_ctf).unwrap(),
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, matrix3x3_clf)` @ v2.5.2.
+#[test]
+fn matrix3x3_clf() {
+    let mut mat = MatrixTransform::new();
+    mat.set_file_input_bit_depth(BitDepth::Uint10);
+    mat.set_file_output_bit_depth(BitDepth::Uint10);
+
+    let m = [
+        1. / 3.,
+        10. / 3.,
+        100. / 3.,
+        0.,
+        3.,
+        4.,
+        5.,
+        0.,
+        6.,
+        7.,
+        8.,
+        0.,
+        0.,
+        0.,
+        0.,
+        1.,
+    ];
+    mat.set_matrix(&m);
+
+    let mut group = GroupTransform::new();
+    group
+        .format_metadata_mut()
+        .add_attribute(Some(METADATA_ID), Some(b"UID42"))
+        .unwrap();
+    group.append_transform(Transform::Matrix(mat));
+
+    let mut output_transform = Vec::new();
+    write_group_clf(&group, &mut output_transform).unwrap();
+
+    // In/out bit-depth equal, matrix not scaled.
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList compCLFversion="3" id="UID42">
+    <Matrix inBitDepth="10i" outBitDepth="10i">
+        <Array dim="3 3">
+  0.333333333333333    3.33333333333333    33.3333333333333
+                  3                   4                   5
+                  6                   7                   8
+        </Array>
+    </Matrix>
+</ProcessList>
+"#;
+
+    assert_eq!(expected.len(), output_transform.len());
+    assert_text_eq(
+        "written",
+        expected,
+        std::str::from_utf8(&output_transform).unwrap(),
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, matrix_offset_alpha_ctf)` @ v2.5.2.
+#[test]
+fn matrix_offset_alpha_ctf() {
+    let mut mat = MatrixTransform::new();
+    mat.set_file_input_bit_depth(BitDepth::Uint10);
+    mat.set_file_output_bit_depth(BitDepth::Uint10);
+
+    let m = [
+        1., 10., 20., 0.5, 3., 4., 5., 0.9, 6., 7., 8., 1.1, 2., 30., 11., 1.,
+    ];
+    mat.set_matrix(&m);
+
+    let o = [0.1, 0.2, 0.3, 1.0];
+    mat.set_offset(&o);
+
+    let mut group = GroupTransform::new();
+    group
+        .format_metadata_mut()
+        .add_attribute(Some(METADATA_ID), Some(b"UID42"))
+        .unwrap();
+    group.append_transform(Transform::Matrix(mat));
+
+    let mut output_transform = Vec::new();
+    write_group_ctf(&group, &mut output_transform).unwrap();
+
+    // Note that offset is scale by 1023 (for output bit-depth).
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="1.3" id="UID42">
+    <Matrix inBitDepth="10i" outBitDepth="10i">
+        <Array dim="4 5 4">
+                  1                  10                  20                 0.5               102.3
+                  3                   4                   5                 0.9               204.6
+                  6                   7                   8                 1.1               306.9
+                  2                  30                  11                   1                1023
+        </Array>
+    </Matrix>
+</ProcessList>
+"#;
+
+    assert_eq!(expected.len(), output_transform.len());
+    assert_text_eq(
+        "written",
+        expected,
+        std::str::from_utf8(&output_transform).unwrap(),
+    );
+
+    // Alpha not handled by CLF.
+    check_throw_what(
+        write_group_clf(&group, &mut output_transform),
+        "Transform uses the 'Matrix with alpha component' op which cannot be written as CLF",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, matrix_offset_alpha_bitdepth_ctf)` @ v2.5.2.
+#[test]
+fn matrix_offset_alpha_bitdepth_ctf() {
+    let mut mat = MatrixTransform::new();
+    mat.set_file_input_bit_depth(BitDepth::Uint8);
+    mat.set_file_output_bit_depth(BitDepth::Uint12);
+
+    let m = [
+        255. / 4095.,
+        0.,
+        0.,
+        0.,
+        0.,
+        510. / 4095.,
+        0.,
+        0.,
+        0.,
+        0.,
+        51. / 91.,
+        0.,
+        0.,
+        0.,
+        0.,
+        51. / 182.,
+    ];
+    mat.set_matrix(&m);
+
+    let o = [0.01, 0.02, 0.03, 0.001];
+    mat.set_offset(&o);
+
+    let mut group = GroupTransform::new();
+    group
+        .format_metadata_mut()
+        .add_attribute(Some(METADATA_ID), Some(b"UID42"))
+        .unwrap();
+    group.append_transform(Transform::Matrix(mat));
+
+    let mut output_transform = Vec::new();
+    write_group_ctf(&group, &mut output_transform).unwrap();
+
+    // Matrix scale following input bit-depth.
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="1.3" id="UID42">
+    <Matrix inBitDepth="8i" outBitDepth="12i">
+        <Array dim="4 5 4">
+                  1                   0                   0                   0               40.95
+                  0                   2                   0                   0                81.9
+                  0                   0                   9                   0              122.85
+                  0                   0                   0                 4.5               4.095
+        </Array>
+    </Matrix>
+</ProcessList>
+"#;
+
+    assert_eq!(expected.len(), output_transform.len());
+    assert_text_eq(
+        "written",
+        expected,
+        std::str::from_utf8(&output_transform).unwrap(),
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, matrix_offset_alpha_inverse_ctf)` @ v2.5.2.
+#[test]
+fn matrix_offset_alpha_inverse_ctf() {
+    let mut mat = MatrixTransform::new();
+    mat.set_file_input_bit_depth(BitDepth::F16);
+    mat.set_file_output_bit_depth(BitDepth::F32);
+
+    let m = [
+        2., 0., 0., 0., 0., 4., 0., 0., 0., 0., 8., 0., 0., 0., 0., 1.,
+    ];
+    mat.set_matrix(&m);
+
+    let o = [0.1, 0.2, 0.3, 1.0];
+    mat.set_offset(&o);
+
+    mat.set_direction(TransformDirection::Inverse);
+
+    let mut group = GroupTransform::new();
+    group
+        .format_metadata_mut()
+        .add_attribute(Some(METADATA_ID), Some(b"UID42"))
+        .unwrap();
+    group.append_transform(Transform::Matrix(mat));
+
+    let mut output_transform = Vec::new();
+    write_group_ctf(&group, &mut output_transform).unwrap();
+
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="1.3" id="UID42">
+    <Matrix inBitDepth="32f" outBitDepth="16f">
+        <Array dim="4 5 4">
+                0.5                   0                   0                   0               -0.05
+                  0                0.25                   0                   0               -0.05
+                  0                   0               0.125                   0             -0.0375
+                  0                   0                   0                   1                  -1
+        </Array>
+    </Matrix>
+</ProcessList>
+"#;
+
+    assert_eq!(expected.len(), output_transform.len());
+    assert_text_eq(
+        "written",
+        expected,
+        std::str::from_utf8(&output_transform).unwrap(),
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, no_ops_ctf)` @ v2.5.2.
+#[test]
+fn no_ops_ctf() {
+    let mut group = GroupTransform::new();
+    group
+        .format_metadata_mut()
+        .add_attribute(Some(METADATA_ID), Some(b"UIDEC42"))
+        .unwrap();
+
+    let mut output_transform = Vec::new();
+    write_group_ctf(&group, &mut output_transform).unwrap();
+
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="1.3" id="UIDEC42">
+    <Matrix inBitDepth="32f" outBitDepth="32f">
+        <Array dim="3 3 3">
+                  1                   0                   0
+                  0                   1                   0
+                  0                   0                   1
+        </Array>
+    </Matrix>
+</ProcessList>
+"#;
+
+    assert_eq!(expected.len(), output_transform.len());
+    assert_text_eq(
+        "written",
+        expected,
+        std::str::from_utf8(&output_transform).unwrap(),
     );
 }

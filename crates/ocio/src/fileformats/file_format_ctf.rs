@@ -27,18 +27,22 @@ use ocio_formats::fileformats::xmlutils::xml_reader_utils::{
     TAG_DESCRIPTION, TAG_OFFSET, TAG_POWER, TAG_SATNODE, TAG_SATNODEALT, TAG_SATURATION, TAG_SLOPE,
     TAG_SOPNODE, find_sub_string,
 };
+use ocio_formats::fileformats::xmlutils::xml_writer_utils::{XmlElementWriter, XmlFormatter};
 use ocio_ops::cfmt::{Crt, OStringStream};
 use ocio_ops::exception::{Exception, Result};
 use ocio_ops::format_metadata::{METADATA_INPUT_DESCRIPTOR, METADATA_OUTPUT_DESCRIPTOR};
 use ocio_ops::op::{OpVec, create_op_vec_from_op_data};
 use ocio_ops::op_data::{OpData, OpDataRcPtr};
-use ocio_ops::open_color_types::{TransformDirection, combine_transform_directions};
+use ocio_ops::open_color_types::{
+    OptimizationFlags, TransformDirection, combine_transform_directions,
+};
 use ocio_ops::ops::log::log_utils::LogStyle;
 use ocio_ops::ops::lut1d::lut1d_op_data::Lut1DOpData;
 use ocio_ops::ops::lut3d::lut3d_op_data::{
     Interpolation, Lut3DOpData, get_concrete_interpolation as lut3d_get_concrete_interpolation,
 };
 use ocio_ops::ops::reference::reference_op_data::ReferenceStyle;
+use ocio_ops::platform::strcasecmp;
 use ocio_ops::utils::pystring::os_path;
 use ocio_ops::utils::string_utils::{c_str, lower};
 
@@ -67,7 +71,8 @@ use crate::fileformats::ctf::ctf_reader_utils::{
     TAG_RGB_CURVE_GREEN, TAG_RGB_CURVE_MASTER, TAG_RGB_CURVE_RED, TAG_TONE, TAG_TONE_BLACKS,
     TAG_TONE_HIGHLIGHTS, TAG_TONE_MIDTONES, TAG_TONE_SCONTRAST, TAG_TONE_SHADOWS, TAG_TONE_WHITES,
 };
-use crate::fileformats::ctf::ctf_transform::CtfReaderTransformPtr;
+use crate::fileformats::ctf::ctf_transform::{CtfReaderTransform, CtfReaderTransformPtr};
+use crate::fileformats::ctf::ctf_writer::TransformWriter;
 use crate::fileformats::input_stream::InputStream;
 use crate::transforms::cdl_transform::{METADATA_INPUT_DESCRIPTION, METADATA_VIEWING_DESCRIPTION};
 use crate::transforms::file_format::{
@@ -75,7 +80,7 @@ use crate::transforms::file_format::{
     FormatBakeCapabilities, FormatCapabilities, FormatInfo,
 };
 use crate::transforms::file_transform::{FileTransform, build_file_transform_ops};
-use crate::transforms::group_transform::GroupTransform;
+use crate::transforms::group_transform::{GroupTransform, build_group_ops};
 
 /// A CTF/CLF file's transform.
 ///
@@ -161,23 +166,59 @@ impl FileFormat for LocalFileFormat {
         Ok(Arc::new(self.read_file(istream, file_name)?))
     }
 
-    /// The writer comes with WP 4.6.
+    /// The group's ops, finalized and without their no-ops, as a CLF (version 3) or a CTF (the
+    /// lowest version that fits), after the XML header.
+    ///
+    /// Port of `LocalFileFormat::write` (FileFormatCTF.cpp:1555-1590 @ v2.5.2).
     fn write(
         &self,
-        _config: &Config,
-        _context: &Context,
-        _group: &GroupTransform,
+        config: &Config,
+        context: &Context,
+        group: &GroupTransform,
         format_name: &[u8],
-        _ostream: &mut OStringStream,
+        ostream: &mut OStringStream,
     ) -> Result<()> {
-        Err(Exception::new(
-            [
-                b"The writer of the '".as_slice(),
-                format_name,
-                b"' file format is not ported yet.",
-            ]
-            .concat(),
-        ))
+        let is_clf = if strcasecmp(c_str(format_name), FILEFORMAT_CLF.as_bytes()).is_eq() {
+            true
+        } else if strcasecmp(c_str(format_name), FILEFORMAT_CTF.as_bytes()).is_ne() {
+            // Neither a clf nor a ctf.
+            let mut os = OStringStream::new(Crt::NATIVE);
+            os.put_str("Error: CLF/CTF writer does not also write format ");
+            os.put_bytes(format_name);
+            os.put_str(".");
+            return Err(Exception::new(os.into_bytes()));
+        } else {
+            false
+        };
+
+        let mut ops = OpVec::new();
+        build_group_ops(
+            &mut ops,
+            config,
+            context,
+            group,
+            TransformDirection::Forward,
+        )?;
+
+        ops.finalize()?;
+
+        // Call optimize to remove no-op types (e.g., allocation, file no-ops) since they do
+        // not have a CTF representation.
+        ops.optimize(OptimizationFlags::NONE)?;
+
+        let metadata = group.format_metadata();
+        let transform = CtfReaderTransform::from_ops(&ops, metadata)?;
+
+        // Write XML Header.
+        ostream.put_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
+        ostream.put_str(
+            "
+",
+        );
+        let mut fmt = XmlFormatter::new(ostream);
+
+        let writer = TransformWriter::new(&transform, is_clf);
+        writer.write(&mut fmt)
     }
 
     /// Appends the file's ops in the direction `dir` combined with the file transform's

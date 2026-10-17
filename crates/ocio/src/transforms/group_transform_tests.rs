@@ -238,21 +238,3 @@ fn a_failing_output_stream_is_not_an_error() {
         .expect_err("the format's error");
     assert!(err.to_string().contains("there should be a single CDL"));
 }
-
-/// The CLF and CTF writers aren't ported yet: writing them is the port's "not ported yet"
-/// error, not upstream's "does not support writing", which a format that doesn't write gives.
-#[test]
-fn the_unported_writers_say_so() {
-    let config = Config::new().expect("a config");
-    let mut group = GroupTransform::new();
-    group.append_transform(crate::transforms::cdl_transform::CdlTransform::new().into());
-    let mut out = Vec::new();
-    let err = group
-        .write(&config, "Color Transform Format", &mut out)
-        .expect_err("not ported yet");
-    assert_eq!(
-        err.to_string(),
-        "Error writing format 'Color Transform Format': The writer of the 'Color Transform \
-         Format' file format is not ported yet."
-    );
-}
