@@ -7,9 +7,11 @@
 //! `tests/cpu_processor_oracle.rs` (the debug log, the pass cap, the no-op types, the refused
 //! bit depths).
 //!
-//! The tests of that file that aren't here need what isn't ported yet:
-//! - files, through `BuildOpsTest` (a CTF or spi1d reader and `FileTransform`, Phase 4):
-//!   `optimization`, `optimization2`, `lut1d_identities`, `lut1d_identity_replacement_order`,
+//! The tests of that file that read files (`BuildOpsTest`: the readers and `FileTransform` of
+//! the `ocio` crate) are in `crates/ocio/src/file_tests/op_optimizers_tests.rs` (WP 4.10a):
+//! `optimization2`. The others that aren't here need what isn't ported yet:
+//! - files, through `BuildOpsTest` (WP 4.10a):
+//!   `optimization`, `lut1d_identities`, `lut1d_identity_replacement_order`,
 //!   `invlut_pair_identities`, `mntr_identities`, `gamma_comp`, `gamma_comp_test2`,
 //!   `log_identities`, `range_lut`, `prefer_pair_inverse_over_combine`, `opt_prefix_test1`;
 //! - the ExposureContrast op (Phase 5): `dynamic_ops`, `dyn_properties_prefix`.

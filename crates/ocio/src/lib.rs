@@ -33,6 +33,8 @@ pub mod viewing_rules;
 pub mod yaml_cpp;
 
 #[cfg(test)]
+mod file_tests;
+#[cfg(test)]
 mod test_env;
 
 pub use builtinconfigs::builtin_config_registry::{

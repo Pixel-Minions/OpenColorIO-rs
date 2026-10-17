@@ -22,8 +22,8 @@ use std::sync::{Arc, Mutex};
 
 use ocio::{
     BitDepth, CdlStyle, CdlTransform, Config, ExponentTransform, ExponentWithLinearTransform,
-    GroupTransform, LogAffineTransform, LogCameraTransform, LogTransform, MatrixTransform,
-    OptimizationFlags, RangeTransform, Transform, TransformDirection,
+    GroupTransform, LogAffineTransform, LogCameraTransform, LogTransform, Lut3DTransform,
+    MatrixTransform, OptimizationFlags, RangeTransform, Transform, TransformDirection,
 };
 use ocio_ops::logging::{
     LoggingFunction, get_logging_level, reset_to_default_logging_function, set_logging_function,
@@ -447,6 +447,84 @@ fn combinations_match_the_wheel() {
             v1: true,
             children: vec![exponent(2.2, Forward), exponent(1.5, Forward)],
             flags: flags(OptimizationFlags::COMP_EXPONENT),
+        },
+    ];
+    check(&cases);
+}
+
+/// A Lut3D transform of a grid of 2 whose values aren't an identity.
+fn lut3d(dir: TransformDirection) -> Built {
+    let mut t = Lut3DTransform::new();
+    t.set_grid_size(2).unwrap();
+    let mut calls = vec![json!(["setGridSize", 2])];
+    let mut v = 0.05_f32;
+    for r in 0..2u64 {
+        for g in 0..2u64 {
+            for b in 0..2u64 {
+                let rgb = [r as f32 * 0.9 + v, g as f32 * 0.8 + v, b as f32 * 0.7 + v];
+                t.set_value(r as _, g as _, b as _, rgb[0], rgb[1], rgb[2])
+                    .unwrap();
+                calls.push(json!([
+                    "setValue",
+                    r,
+                    g,
+                    b,
+                    f64_spec(f64::from(rgb[0])),
+                    f64_spec(f64::from(rgb[1])),
+                    f64_spec(f64::from(rgb[2]))
+                ]));
+                v += 0.01;
+            }
+        }
+    }
+    t.set_direction(dir);
+    calls.push(json!(["setDirection", dir_spec(dir)]));
+    (json!({"class": "Lut3DTransform", "calls": calls}), t.into())
+}
+
+/// A Range that is an identity clamp, `[0, 1]` to `[0, 1]`, before a forward Lut3D, which it
+/// combines into (the Lut3D clamps its input: `RangeOp::canCombineWith`, RangeOp.cpp:114-133
+/// @ v2.5.2), and before an inverse Lut3D, which it doesn't; a Range that isn't an identity
+/// stays before either. At each optimization level and with every flag but `COMP_RANGE`.
+#[test]
+fn identity_ranges_before_lut3ds_match_the_wheel() {
+    let flags = vec![
+        OptimizationFlags::NONE,
+        OptimizationFlags::LOSSLESS,
+        OptimizationFlags::VERY_GOOD,
+        OptimizationFlags::GOOD,
+        OptimizationFlags::DRAFT,
+        OptimizationFlags::DEFAULT,
+        all_but(OptimizationFlags::COMP_RANGE),
+    ];
+    let cases = vec![
+        Case {
+            label: "an identity range, a forward Lut3D",
+            v1: false,
+            children: vec![range(0.0, 1.0, 0.0, 1.0), lut3d(Forward)],
+            flags: flags.clone(),
+        },
+        Case {
+            label: "an identity range, an inverse Lut3D",
+            v1: false,
+            children: vec![range(0.0, 1.0, 0.0, 1.0), lut3d(Inverse)],
+            flags: flags.clone(),
+        },
+        Case {
+            label: "a range that isn't an identity, a forward Lut3D",
+            v1: false,
+            children: vec![range(0.0, 1.0, 0.1, 0.9), lut3d(Forward)],
+            flags: flags.clone(),
+        },
+        Case {
+            label: "an offset, an identity range, a forward Lut3D",
+            v1: false,
+            children: vec![
+                offset_matrix([0.1, 0.0, 0.0, 0.0], Forward),
+                range(0.0, 1.0, 0.0, 1.0),
+                lut3d(Forward),
+            ],
+            flags,
         },
     ];
     check(&cases);
