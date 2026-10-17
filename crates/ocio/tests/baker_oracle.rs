@@ -389,6 +389,14 @@ fn cases() -> Vec<BakeCase> {
                 Format("resolve_cube"),
             ],
         ),
+        // A baker without a config: the format is looked up first.
+        BakeCase::without_config("no config, no format", &[]),
+        BakeCase::without_config("no config, spi1d", &[Format("spi1d")]),
+        BakeCase::without_config("no config, Flame", &[Format("Flame")]),
+        BakeCase::without_config(
+            "no config, the spaces set",
+            &[InputSpace("lin"), TargetSpace("log"), Format("cinespace")],
+        ),
         // The raw config.
         BakeCase::new(
             "the raw config",

@@ -29,7 +29,7 @@ use ocio_ops::parse_utils::{string_to_int, string_vec_to_float_vec};
 use ocio_ops::utils::string_utils::{lower, split_by_white_spaces, starts_with_char, trim};
 
 use crate::baker::Baker;
-use crate::baking_utils::get_input_to_target_processor;
+use crate::baking_utils::{bake_buffer, cube_values, get_input_to_target_processor};
 use crate::config::Config;
 use crate::context::Context;
 use crate::fileformats::file_format_utils::{handle_lut3d, log_warning_interpolation_not_used};
@@ -243,8 +243,8 @@ impl FileFormat for LocalFileFormat {
         }
         cube_size = std_max(2, cube_size); // smallest cube is 2x2x2
 
+        let mut cube_data = bake_buffer(cube_values(cube_size))?;
         let num_entries = cube_size * cube_size * cube_size;
-        let mut cube_data = vec![0.0f32; (num_entries * 3) as usize];
         generate_identity_lut3d(&mut cube_data, cube_size, 3, Lut3DOrder::FastRed)?;
         let mut cube_img = PackedImageDesc::new(&mut cube_data[..], num_entries as usize, 1, 3)?;
 

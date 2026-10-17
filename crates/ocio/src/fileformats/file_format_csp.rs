@@ -51,7 +51,8 @@ use ocio_ops::utils::string_utils::{split_by_white_spaces, starts_with, trim, up
 
 use crate::baker::Baker;
 use crate::baking_utils::{
-    get_input_to_target_processor, get_shaper_to_input_processor, get_shaper_to_target_processor,
+    bake_buffer, cube_values, get_input_to_target_processor, get_shaper_to_input_processor,
+    get_shaper_to_target_processor,
 };
 use crate::config::Config;
 use crate::context::Context;
@@ -711,12 +712,12 @@ impl FileFormat for LocalFileFormat {
         }
         cube_size = std_max(2, cube_size); // smallest cube is 2x2x2
 
+        let mut cube_data = bake_buffer(cube_values(cube_size))?;
         let num_entries = cube_size * cube_size * cube_size;
-        let mut cube_data = vec![0.0f32; (num_entries * 3) as usize];
         generate_identity_lut3d(&mut cube_data, cube_size, 3, Lut3DOrder::FastRed)?;
 
-        let mut shaper_in_data: Vec<f32> = Vec::new();
-        let mut shaper_out_data: Vec<f32> = Vec::new();
+        let mut shaper_in_data: Vec<f32>;
+        let mut shaper_out_data: Vec<f32>;
 
         // Use an explicitly shaper space.
         // TODO: Use the optional allocation for the shaper space,
@@ -728,8 +729,8 @@ impl FileFormat for LocalFileFormat {
                 shaper_size = DEFAULT_SHAPER_SIZE;
             }
 
-            shaper_out_data.resize((shaper_size * 3) as usize, 0.0);
-            shaper_in_data.resize((shaper_size * 3) as usize, 0.0);
+            shaper_out_data = bake_buffer(i128::from(shaper_size) * 3)?;
+            shaper_in_data = bake_buffer(i128::from(shaper_size) * 3)?;
             generate_identity_lut1d(&mut shaper_out_data, shaper_size, 3);
             generate_identity_lut1d(&mut shaper_in_data, shaper_size, 3);
 
@@ -774,8 +775,8 @@ impl FileFormat for LocalFileFormat {
                 // If we know it's a uniform scaling, only 2 points will suffice!
                 shaper_size = 2;
             }
-            shaper_out_data.resize((shaper_size * 3) as usize, 0.0);
-            shaper_in_data.resize((shaper_size * 3) as usize, 0.0);
+            shaper_out_data = bake_buffer(i128::from(shaper_size) * 3)?;
+            shaper_in_data = bake_buffer(i128::from(shaper_size) * 3)?;
             generate_identity_lut1d(&mut shaper_out_data, shaper_size, 3);
             generate_identity_lut1d(&mut shaper_in_data, shaper_size, 3);
 

@@ -37,7 +37,7 @@ use ocio_ops::utils::number_utils::{Errc, Flavor, from_chars_f32};
 use ocio_ops::utils::string_utils::{c_str, starts_with, starts_with_char, trim};
 
 use crate::baker::Baker;
-use crate::baking_utils::{get_input_to_target_processor, get_shaper_range};
+use crate::baking_utils::{bake_buffer, get_input_to_target_processor, get_shaper_range};
 use crate::config::Config;
 use crate::context::Context;
 use crate::fileformats::file_format_utils::{handle_lut1d, log_warning_interpolation_not_used};
@@ -408,7 +408,7 @@ impl FileFormat for LocalFileFormat {
         // Generate 1DLUT
         //
 
-        let mut oned_data = vec![0.0f32; (oned_size * 3) as usize];
+        let mut oned_data = bake_buffer(i128::from(oned_size) * 3)?;
 
         if !shaper_space.is_empty() {
             (from_in_start, from_in_end) = get_shaper_range(baker)?;

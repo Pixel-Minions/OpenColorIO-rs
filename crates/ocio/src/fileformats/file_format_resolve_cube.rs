@@ -39,8 +39,8 @@ use ocio_ops::utils::string_utils::{lower, split_by_white_spaces, starts_with_ch
 
 use crate::baker::Baker;
 use crate::baking_utils::{
-    get_input_to_shaper_processor, get_input_to_target_processor, get_shaper_range,
-    get_shaper_to_target_processor,
+    bake_buffer, cube_entries, cube_values, get_input_to_shaper_processor,
+    get_input_to_target_processor, get_shaper_range, get_shaper_to_target_processor,
 };
 use crate::config::Config;
 use crate::context::Context;
@@ -478,7 +478,7 @@ impl FileFormat for LocalFileFormat {
 
             // Generate the identity shaper values, then apply the transform.
             // Shaper is linearly sampled from fromInStart to fromInEnd
-            shaper_data.resize((shaper_size * 3) as usize, 0.0);
+            shaper_data = bake_buffer(i128::from(shaper_size) * 3)?;
             generate_linear_scale_lut1d(
                 &mut shaper_data,
                 shaper_size,
@@ -497,13 +497,12 @@ impl FileFormat for LocalFileFormat {
         // Generate 3DLUT
         //
 
-        let num_entries = cube_size * cube_size * cube_size;
         let mut cube_data: Vec<f32> = Vec::new();
         if required_lut == CUBE_3D || required_lut == CUBE_1D_3D {
-            cube_data.resize((num_entries * 3) as usize, 0.0);
+            cube_data = bake_buffer(cube_values(cube_size))?;
             generate_identity_lut3d(&mut cube_data, cube_size, 3, Lut3DOrder::FastRed)?;
             let mut cube_img =
-                PackedImageDesc::new(&mut cube_data[..], num_entries as usize, 1, 3)?;
+                PackedImageDesc::new(&mut cube_data[..], cube_entries(cube_size), 1, 3)?;
 
             let cube_proc = if required_lut == CUBE_1D_3D {
                 get_shaper_to_target_processor(baker)?
@@ -522,7 +521,7 @@ impl FileFormat for LocalFileFormat {
         let mut oned_data: Vec<f32> = Vec::new();
 
         if required_lut == CUBE_1D {
-            oned_data.resize((oned_size * 3) as usize, 0.0);
+            oned_data = bake_buffer(i128::from(oned_size) * 3)?;
 
             if !shaper_space.is_empty() {
                 (from_in_start, from_in_end) = get_shaper_range(baker)?;
@@ -608,7 +607,7 @@ impl FileFormat for LocalFileFormat {
 
         // Write 3D data
         if required_lut == CUBE_3D || required_lut == CUBE_1D_3D {
-            for i in 0..num_entries as usize {
+            for i in 0..cube_entries(cube_size) {
                 write_triple(ostream, &cube_data[3 * i..3 * i + 3]);
             }
         }

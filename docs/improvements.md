@@ -161,14 +161,20 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Upstream:** a transform's text (`repr()`), error messages and op cache IDs print NaN as the
   platform's C++ library does: Windows writes `nan`, `-nan(ind)`, `nan(snan)`, `-nan(snan)` or
   `-nan`; Linux writes `nan` or `-nan`. A processor with a NaN parameter has a different cache
-  ID on each platform. Through the wheels, the oracle's commands show the same split in two
+  ID on each platform. Through the wheels, the oracle's commands show the same split in
   more places, for a negative NaN, `-nan(ind)` on Windows and `-nan` on Linux:
   - the messages of `validate()` that print a parameter's value (`transform_text`, over 247
     transforms of 13 classes holding special values; `oracle/ocio_oracle/transform_text.py`,
     c49a36e);
   - shader text, whose literals print the parameter (`getFloatString`,
     `GpuShaderUtils.cpp:21-35`; `gpu_shader`, over 1230 shaders in all 10 languages;
-    `oracle/ocio_oracle/gpu.py`, 470d0b7).
+    `oracle/ocio_oracle/gpu.py`, 470d0b7);
+  - baked LUTs, whose ranges and entries print NaN results with each library's spelling
+    (`-nan(ind)` on Windows and `-nan` on Linux for a negative NaN), and whose NaNs can even
+    differ in sign: a spi1d baked over the shaper range of a color space whose `from_reference`
+    offsets red by `.nan` writes `From nan nan` on Windows and `From -nan -nan` on Linux (the
+    port matches each; `bake`, `crates/ocio/tests/bake_formats_oracle.rs`, p4-baker; probed
+    2026-10-16);
   - the CLF/CTF writer (`fileformats/ctf/CTFTransform.cpp` @ v2.5.2), which streams most
     parameters as they are: a CDL's slope, offset and power and its saturation (`CDLWriter`,
     813-933), a gamma's or an exponent's parameters (`AddGammaParams`, 1181-1214), a log's
@@ -2658,23 +2664,29 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   Resolve cube; 4.8c: 3DL and Houdini; in their `crates/ocio/src/fileformats/` files); the
   "named in capitals" cases of `crates/ocio/tests/bake_formats_oracle.rs`.
 
-### I-200. A `.3dl` bake with a negative shaper size fails with each C++ library's own text
+### I-200. A `.3dl` bake with a shaper size below 1
 
 - **Upstream:** the `.3dl` bake makes its shaper with `std::vector<float> shaperData(shaperSize)`
-  (`src/OpenColorIO/fileformats/FileFormat3DL.cpp:552-553` @ v2.5.2), and the baker checks the
+  and fills it through `GenerateIdentityLut1D(&shaperData[0], shaperSize, 1)`
+  (`src/OpenColorIO/fileformats/FileFormat3DL.cpp:552-553` @ v2.5.2); the baker checks the
   shaper size only when a shaper space is set (`Baker.cpp:369-375`), which the 3DL formats
-  refuse. A negative size converts to a `size_t` past the vector's `max_size()`, and the
-  constructor throws `std::length_error`, which `Baker::bake` reports: "Error baking
-  flame:vector too long" on Windows (MSVC's STL) and "Error baking flame:cannot create
-  std::vector larger than max_size()" on Linux (libstdc++), after a lustre file's first two
-  lines are written (wheel probes, 2026-10-16). Sizes of 0 and 1 write an empty shaper line and
-  a lone `0` (a NaN step clamped to 0).
-- **Who notices:** callers of the `.3dl` bakes that set a negative shaper size.
+  refuse.
+  - A size of 0 makes `&shaperData[0]` index an empty vector: undefined behaviour, which both
+    wheels resolve the same way. An empty vector's storage is a null pointer, so the index
+    gives a null pointer, `GenerateIdentityLut1D` returns at its `if(!img) return;`
+    (`ops/lut1d/Lut1DOp.cpp:196`), and the shaper line is empty. A size of 1 writes a lone `0`
+    (a NaN step, clamped to 0).
+  - A negative size converts to a `size_t` past the vector's `max_size()`, and the constructor
+    throws `std::length_error`, which `Baker::bake` reports with each C++ library's text:
+    "Error baking flame:vector too long" on Windows (MSVC's STL) and "Error baking
+    flame:cannot create std::vector larger than max_size()" on Linux (libstdc++), after a
+    lustre file's first two lines are written (wheel probes, 2026-10-16).
+- **Who notices:** callers of the `.3dl` bakes that set a shaper size below 1.
 - **A fix:** check the shaper size whatever the shaper space, or ignore it for formats without
   a shaper.
 - **Status:** matched in `p4-baker` (4.8c, `crates/ocio/src/fileformats/file_format_3dl.rs`,
-  `VECTOR_CONSTRUCTOR_TOO_LONG`); the "shaper size" cases of
-  `crates/ocio/tests/bake_formats_oracle.rs`.
+  `VECTOR_CONSTRUCTOR_TOO_LONG`; an empty shaper writes an empty line); the "shaper size"
+  cases of `crates/ocio/tests/bake_formats_oracle.rs`, whose partial files are compared too.
 
 ### I-201. A Reference by an alias other than currentMonitor adds no ops
 
@@ -2724,6 +2736,22 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `crates/ocio/tests/file_format_ctf_write_oracle.rs` and
   `crates/ocio/src/fileformats/file_format_ctf_write_oracle_tests.rs`, check it with the
   wheel.
+
+### I-206. A LUT baked to a file has Windows line endings on Windows
+
+- **Upstream:** the Python binding's `Baker.bake(fileName)` writes through a text-mode
+  `std::ofstream`, so on Windows each line feed of the baked text is written as CR LF; on Linux
+  the file holds the text as it is (`bake()` returns it with line feeds on both). A bake that
+  fails leaves what it wrote before the failure in the file: lustre with a shaper size of -3
+  leaves `3DMESH` CR LF `Mesh 0 12` CR LF on Windows (the baker verifier's probe,
+  2026-10-16).
+- **Who notices:** applications that bake LUT files on Windows and compare them with files
+  baked on Linux, or read them with tools that keep the CR.
+- **A fix:** open the file in binary mode.
+- **Status:** the port's `Baker::bake` writes to any `std::io::Write` with line feeds, as
+  `bake()`'s text; the text-mode file belongs to the Python binding (`ocio-py`). The oracle's
+  `bake` reports the file and a failed bake's partial file, which the bake tests compare with
+  the port's text in text mode (`crates/ocio/tests/bake_common/mod.rs`).
 
 ## Undefined behaviour upstream
 
@@ -3533,3 +3561,36 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   release, and refuses 257; `references_resolve_as_in_the_wheel`'s "the longest chain"
   (`crates/ocio/tests/file_format_ctf_oracle.rs`) checks the 256-file processor with the
   wheel.
+
+### U-77. Bakes whose sizes overflow an `int`
+
+- **Upstream:** the bakes size their buffers with `int` products of the baker's sizes:
+  `cubeData.resize(cubeSize*cubeSize*cubeSize*3)` in every 3D bake, and `onedSize * 3` and
+  `shaperSize * 3` for the 1D LUTs and shapers (`FileFormatSpi3D.cpp:289`,
+  `FileFormatSpi1D.cpp:350`, `FileFormatResolveCube.cpp:609, 625, 651`,
+  `FileFormatHDL.cpp:680, 695, 720`, `FileFormatCSP.cpp:716, 732-733, 778-779` @ v2.5.2,
+  and the cubes of the Iridas cube, itx, 3DL and Truelight bakes).
+  From a cube size of 895 (`895^3 * 3 = 2,150,752,125`) or a 1D or shaper size of 715,827,883,
+  the product passes `INT_MAX`: undefined behaviour, which the wheels resolve differently.
+  - Windows (MSVC) wraps it to 32 bits. A negative result converts to a `size_t` past
+    `max_size()`, and `resize` throws "vector too long" before anything is written ("Error
+    baking spi3d:vector too long" for 895 and 1291, probed 2026-10-16). A positive result
+    (the cube size 1290: `6,440,067,000` wraps to `2,145,099,704`; the 1D size
+    `2^32 / 3 + 1`: wraps to 2) allocates fewer floats than the bake then writes: upstream
+    writes past its buffer.
+  - Linux (GCC) computes the product in 64 bits and asks for that much memory: "Error baking
+    spi3d:std::bad_alloc" for 1291 (25.8 GB, probed 2026-10-16), and a bake of tens of
+    gigabytes on a machine that has them.
+- **Who notices:** callers that set a cube, 1D or shaper size in the hundreds or millions.
+- **Decided** (the owner's general rule, 2026-09-30, as U-5 and U-65; confirmed for this case
+  2026-10-16): the port refuses every size whose product passes an `int` before it allocates.
+  On Windows it gives the wheel's "vector too long" where the wrapped size is negative, and its
+  own "The LUT's <n> values overflow the int that sizes its buffer." where it is positive; on
+  Linux, "std::bad_alloc". Sizes that fit are allocated as upstream does, and a failed
+  allocation is the C++ library's `std::bad_alloc` too, where Rust would abort.
+- **Status:** matched with errors in `p4-baker` (`crates/ocio/src/baking_utils.rs`,
+  `bake_buffer`, used by every bake); `overflowing_sizes_fail_as_in_the_windows_wheel`
+  (`crates/ocio/tests/bake_formats_oracle.rs`, Windows only: the Linux wheel's outcome
+  depends on the machine's memory), and `baking_utils_tests.rs`. The sizes one below the
+  overflow (894, 715,827,882) allocate 8.6 GB in both wheels and the positive wraps write past
+  the buffer, so no test runs them.

@@ -134,9 +134,11 @@ pub fn generate_identity_lut1d(img: &mut [f32], num_elements: i32, num_channels:
 /// `end` on the first 3 channels: `lerpf(start, end, x)` at `x = i / (num_elements - 1)`,
 /// divided in `double` and rounded to `float`.
 ///
-/// The Linux wheel computes `x * (end - start) + start`, the product first in the addition
-/// (`libOpenColorIO.so` 0x402bf0-0x402c79), as [`lerpf`] does: where `start` and `end` are both
-/// NaN, the result is `end`'s.
+/// Both wheels compute `x * (end - start) + start`, `end - start` with `end` first and the
+/// product first in the addition (`libOpenColorIO.so` 0x402bf0-0x402c79; the unnamed
+/// `OpenColorIO_2_5.dll` 0x18021b820-0x18021b8a0, `subss xmm2, xmm3; ...; mulss xmm1, xmm2;
+/// addss xmm1, xmm3`), as [`lerpf`] does: where `start` and `end` are both NaN, the result is
+/// `end`'s.
 ///
 /// Port of `GenerateLinearScaleLut1D` (src/OpenColorIO/ops/lut1d/Lut1DOp.cpp:209-225 @
 /// v2.5.2).

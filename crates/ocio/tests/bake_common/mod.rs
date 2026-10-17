@@ -42,12 +42,14 @@ pub(crate) enum Metadata {
     Id(&'static str),
 }
 
-/// A bake: the config's YAML (`None`: the raw config), then the metadata calls and the
-/// setters, in order.
+/// A bake: the config's YAML (`None`: the raw config), or no config at all, then the metadata
+/// calls and the setters, in order.
 #[derive(Debug, Clone)]
 pub(crate) struct BakeCase {
     pub label: String,
     pub yaml: Option<String>,
+    /// The baker never gets a config (`setConfig` isn't called).
+    pub no_config: bool,
     pub metadata: Vec<Metadata>,
     pub calls: Vec<Call>,
 }
@@ -57,8 +59,18 @@ impl BakeCase {
         BakeCase {
             label: label.to_owned(),
             yaml: yaml.map(str::to_owned),
+            no_config: false,
             metadata: Vec::new(),
             calls: calls.to_vec(),
+        }
+    }
+
+    /// A bake on a baker that never gets a config.
+    #[allow(dead_code)] // Only baker_oracle.rs bakes without a config.
+    pub(crate) fn without_config(label: &str, calls: &[Call]) -> BakeCase {
+        BakeCase {
+            no_config: true,
+            ..BakeCase::new(label, None, calls)
         }
     }
 
@@ -96,6 +108,9 @@ impl BakeCase {
             Some(yaml) => json!({ "yaml": yaml }),
             None => Value::Null,
         };
+        if self.no_config {
+            return json!({ "no_config": true, "metadata": metadata, "calls": calls });
+        }
         json!({ "config": config, "metadata": metadata, "calls": calls })
     }
 }
@@ -114,19 +129,21 @@ fn port_bake(case: &BakeCase) -> PortBake {
         text: Vec::new(),
         error: None,
     };
-    let config = match &case.yaml {
-        Some(yaml) => Config::create_from_stream(yaml.as_bytes()),
-        None => Config::create_raw(),
-    };
-    let config = match config {
-        Ok(config) => config,
-        Err(e) => {
-            out.error = Some(("config", e.what().to_vec()));
-            return out;
-        }
-    };
     let mut baker = Baker::new();
-    baker.set_config(&config);
+    if !case.no_config {
+        let config = match &case.yaml {
+            Some(yaml) => Config::create_from_stream(yaml.as_bytes()),
+            None => Config::create_raw(),
+        };
+        let config = match config {
+            Ok(config) => config,
+            Err(e) => {
+                out.error = Some(("config", e.what().to_vec()));
+                return out;
+            }
+        };
+        baker.set_config(&config);
+    }
     for m in &case.metadata {
         let md = baker.format_metadata_mut();
         let result = match m {
@@ -202,6 +219,18 @@ fn port_bake(case: &BakeCase) -> PortBake {
     out
 }
 
+/// `text` as a text-mode `std::ofstream` writes it: each line feed as CR LF on Windows.
+fn text_mode(text: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for &b in text {
+        if cfg!(target_os = "windows") && b == b'\n' {
+            out.push(b'\r');
+        }
+        out.push(b);
+    }
+    out
+}
+
 /// Each case in the wheel against the port: the getters, the text or the exception and its
 /// stage, and the log (at the default logging level, this thread's messages).
 pub(crate) fn check_bakes(cases: &[BakeCase]) {
@@ -263,6 +292,22 @@ pub(crate) fn check_bakes(cases: &[BakeCase]) {
         }
         match (wheel.get("exception"), &port.error) {
             (Some(exception), Some((stage, message))) => {
+                // What `bake(fileName)` left in its file: what the bake wrote before it failed,
+                // in text mode (each line feed a CR LF on Windows).
+                if let Some(partial) = wheel.get("partial_file") {
+                    let left = match partial["bytes"].as_str() {
+                        Some(hex) => oracle_values::bytes(&json!({ "bytes": hex })),
+                        None => Vec::new(),
+                    };
+                    if left != text_mode(&port.text) {
+                        failures.push(format!(
+                            "{}: partial file\n  wheel {:?}\n  port  {:?}",
+                            case.label,
+                            String::from_utf8_lossy(&left),
+                            String::from_utf8_lossy(&port.text)
+                        ));
+                    }
+                }
                 let wheel_message = exception["message"].as_str().expect("a message");
                 if wheel["stage"] != *stage || wheel_message.as_bytes() != message.as_slice() {
                     failures.push(format!(

@@ -27,12 +27,21 @@ displays:
   disp:
     - !<View> {name: log, colorspace: log2}
     - !<View> {name: sat, colorspace: sat}
+    - !<View> {name: looked, colorspace: log2, looks: brighten}
 
 looks:
   - !<Look>
     name: brighten
     process_space: lin
     transform: !<ExponentTransform> {value: [1.1, 0.9, 1.2, 1]}
+  - !<Look>
+    name: satlook
+    process_space: lin
+    transform: !<CDLTransform> {sat: 1.5}
+  - !<Look>
+    name: darken
+    process_space: lin
+    transform: !<ExponentTransform> {value: [1.3, 1.3, 1.3, 1]}
 
 colorspaces:
 - !<ColorSpace>
@@ -104,6 +113,16 @@ colorspaces:
   isdata: false
   allocation: uniform
   allocationvars: [-0.5, 2]
+
+- !<ColorSpace>
+  name: nans_red
+  isdata: false
+  to_reference: !<MatrixTransform> {offset: [.nan, 0, 0.25, 0]}
+
+- !<ColorSpace>
+  name: tiny_offset
+  isdata: false
+  from_reference: !<MatrixTransform> {offset: [0.0001221001148223877, 0.0001221001148223877, 0.0001221001148223877, 0]}
 
 - !<ColorSpace>
   name: negative
@@ -816,6 +835,62 @@ fn cinespace() -> Vec<BakeCase> {
     cases
 }
 
+/// Cases the baker's verifier found missing: a view with its own looks and the baker's looks;
+/// a shaper with NaN in red only (`From nan nan`); a 12-bit code just under a half (rounds to
+/// 0); the 1D Resolve and Houdini bakes at a cube size whose cube would overflow an `int`
+/// (only the 1D LUT is baked: no cube is computed).
+fn verifier_cases() -> Vec<BakeCase> {
+    let mut cases = Vec::new();
+    for format in ["spi3d", "resolve_cube", "houdini"] {
+        cases.push(case(
+            &format!("{format} with a view's looks and the baker's"),
+            &[
+                InputSpace("lin"),
+                DisplayView("disp", "looked"),
+                Looks("+satlook, -darken"),
+                CubeSize(3),
+                Format(format),
+            ],
+        ));
+    }
+    cases.push(case(
+        "spi1d with a shaper of NaN in red",
+        &[
+            InputSpace("lin"),
+            TargetSpace("log2"),
+            ShaperSpace("nans_red"),
+            CubeSize(4),
+            Format("spi1d"),
+        ],
+    ));
+    cases.push(case(
+        "flame of codes just under a half",
+        &[
+            InputSpace("lin"),
+            TargetSpace("tiny_offset"),
+            CubeSize(2),
+            Format("flame"),
+        ],
+    ));
+    for format in ["resolve_cube", "houdini"] {
+        cases.push(case(
+            &format!("{format} 1D of size 1291"),
+            &[
+                InputSpace("lin"),
+                TargetSpace("log2"),
+                CubeSize(1291),
+                Format(format),
+            ],
+        ));
+    }
+    cases
+}
+
+#[test]
+fn verifier_cases_bake_as_in_the_wheel() {
+    check_bakes(&verifier_cases());
+}
+
 #[test]
 fn spi1d_bakes_as_in_the_wheel() {
     check_bakes(&spi1d());
@@ -854,4 +929,77 @@ fn houdini_bakes_as_in_the_wheel() {
 #[test]
 fn cinespace_bakes_as_in_the_wheel() {
     check_bakes(&cinespace());
+}
+
+/// Sizes whose `int` buffer size overflows to a negative value in the Windows wheel, which
+/// then refuses them before it writes anything ("vector too long", docs/improvements.md,
+/// U-77): the smallest cube (895: 895^3 * 3 = 2,150,752,125 wraps to -2,144,215,171), 1291
+/// (where the cube's entries themselves pass an `int`), and the smallest 1D and shaper sizes
+/// (715,827,883 * 3 = 2,147,483,649 wraps to -2,147,483,647). Only Windows: the Linux wheel
+/// computes these sizes in 64 bits and asks for 8.6 GB or more, which may be had, so its
+/// outcome depends on the machine. The sizes one below (894, 715,827,882) fit and allocate
+/// that much in both wheels, and sizes that wrap to a positive value (1290: 6,440,067,000 wraps
+/// to 2,145,099,704) make upstream write past its buffer: neither is run.
+#[cfg(target_os = "windows")]
+#[test]
+fn overflowing_sizes_fail_as_in_the_windows_wheel() {
+    const ONE_D: i32 = 715_827_883;
+    let mut cases = Vec::new();
+    for format in [
+        "spi3d",
+        "iridas_cube",
+        "iridas_itx",
+        "resolve_cube",
+        "flame",
+        "truelight",
+        "houdini",
+        "cinespace",
+    ] {
+        for size in [895, 1291] {
+            cases.push(case(
+                &format!("{format} of cube size {size}"),
+                &[
+                    InputSpace("lin"),
+                    TargetSpace("sat"),
+                    CubeSize(size),
+                    Format(format),
+                ],
+            ));
+        }
+    }
+    for format in ["spi1d", "resolve_cube", "houdini"] {
+        cases.push(case(
+            &format!("{format} 1D of size {ONE_D}"),
+            &[
+                InputSpace("lin"),
+                TargetSpace("gamma"),
+                CubeSize(ONE_D),
+                Format(format),
+            ],
+        ));
+    }
+    for format in ["resolve_cube", "houdini", "cinespace"] {
+        cases.push(case(
+            &format!("{format} shaper of size {ONE_D}"),
+            &[
+                InputSpace("lin"),
+                TargetSpace("sat"),
+                ShaperSpace("log2"),
+                ShaperSize(ONE_D),
+                CubeSize(2),
+                Format(format),
+            ],
+        ));
+    }
+    cases.push(case(
+        &format!("cinespace allocation shaper of size {ONE_D}"),
+        &[
+            InputSpace("lin_lg2"),
+            TargetSpace("sat"),
+            ShaperSize(ONE_D),
+            CubeSize(2),
+            Format("cinespace"),
+        ],
+    ));
+    check_bakes(&cases);
 }

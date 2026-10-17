@@ -18,6 +18,57 @@ use crate::transforms::display_view_transform::DisplayViewTransform;
 use crate::transforms::group_transform::GroupTransform;
 use crate::transforms::look_transform::LookTransform;
 
+/// The `std::length_error` of MSVC's `std::vector::resize` past `max_size()`.
+const MSVC_VECTOR_TOO_LONG: &str = "vector too long";
+
+/// A bake's buffer of `count` floats, zeroed: `std::vector<float>::resize(n)` (or a vector of
+/// `n`) where `n` is an `int` expression of the baker's sizes (`cubeSize*cubeSize*cubeSize*3`,
+/// `shaperSize*3`) and `count` its exact value.
+///
+/// Where `count` fits an `int`, the vector is allocated, and a failed allocation is the C++
+/// library's `std::bad_alloc`. Where it doesn't, the `int` arithmetic overflows (undefined
+/// behaviour), and the wheels part ways (docs/improvements.md, U-77):
+/// - the Windows wheel wraps it to 32 bits: a negative size is past `max_size()`, "vector too
+///   long"; a positive one allocates fewer floats than the bake then writes, and upstream
+///   writes past the buffer, where the port returns its own error;
+/// - the Linux wheel computes it in 64 bits and asks for that much memory: "std::bad_alloc"
+///   wherever the memory isn't there, which the port gives for every such size.
+///
+/// Not an upstream function: the port's guard around the bakes' `resize` calls.
+pub(crate) fn bake_buffer(count: i128) -> Result<Vec<f32>> {
+    if count > i128::from(i32::MAX) {
+        if cfg!(target_os = "windows") {
+            let wrapped = count as u32 as i32;
+            if wrapped < 0 {
+                return Err(Exception::length_error(MSVC_VECTOR_TOO_LONG));
+            }
+            return Err(Exception::new(format!(
+                "The LUT's {count} values overflow the int that sizes its buffer."
+            )));
+        }
+        return Err(Exception::bad_alloc());
+    }
+    let count = usize::try_from(count).expect("the bakes' sizes are positive");
+    let mut buffer = Vec::new();
+    if buffer.try_reserve_exact(count).is_err() {
+        return Err(Exception::bad_alloc());
+    }
+    buffer.resize(count, 0.0f32);
+    Ok(buffer)
+}
+
+/// The exact value of `cubeSize*cubeSize*cubeSize*3`, for [`bake_buffer`].
+pub(crate) fn cube_values(cube_size: i32) -> i128 {
+    let n = i128::from(cube_size);
+    n * n * n * 3
+}
+
+/// `cubeSize*cubeSize*cubeSize`, the cube's entries, where its buffer was had (so
+/// `cubeSize*cubeSize*cubeSize*3` fits an `int`, [`bake_buffer`]).
+pub(crate) fn cube_entries(cube_size: i32) -> usize {
+    (cube_size * cube_size * cube_size) as usize
+}
+
 /// The baker's config: [`Baker::bake`] checks there is one before a format bakes.
 fn config(baker: &Baker) -> Result<&crate::config::Config> {
     baker
@@ -152,3 +203,7 @@ pub fn get_shaper_range(baker: &Baker) -> Result<(f32, f32)> {
 pub fn get_target_range(baker: &Baker) -> Result<(f32, f32)> {
     get_src_range(baker, baker.target_space())
 }
+
+#[cfg(test)]
+#[path = "baking_utils_tests.rs"]
+mod tests;
