@@ -11,18 +11,19 @@
 use ocio_ops::utils::string_utils::c_str;
 
 use super::mz_os::{
-    mz_os_get_file_attribs, mz_os_get_file_date, mz_os_get_file_size, mz_os_is_dir,
-    mz_os_is_symlink, system_path,
+    mz_dir_make, mz_os_get_file_attribs, mz_os_get_file_date, mz_os_get_file_size, mz_os_is_dir,
+    mz_os_is_dir_separator, mz_os_is_symlink, mz_os_make_symlink, mz_os_set_file_attribs,
+    mz_os_set_file_date, mz_path_combine, mz_path_remove_filename, mz_path_resolve, system_path,
 };
 use super::mz_strm::{
-    MZ_BUF_ERROR, MZ_EXIST_ERROR, MZ_OK, MZ_OPEN_ERROR, MZ_PARAM_ERROR, MZ_READ_ERROR,
-    MZ_STREAM_ERROR, MZ_WRITE_ERROR, MemStream, Origin, SplitStream, mz_stream_read_uint64,
-    mz_stream_seek,
+    MZ_BUF_ERROR, MZ_END_OF_LIST, MZ_EXIST_ERROR, MZ_OK, MZ_OPEN_ERROR, MZ_PARAM_ERROR,
+    MZ_READ_ERROR, MZ_STREAM_ERROR, MZ_WRITE_ERROR, MemStream, Origin, SplitStream,
+    mz_stream_read_uint64, mz_stream_seek,
 };
 use super::mz_zip::{
     CdStream, FileInfo, MZ_HOST_SYSTEM_MSDOS, MZ_HOST_SYSTEM_UNIX, MZ_HOST_SYSTEM_WINDOWS_NTFS,
     MZ_ZIP_EXTENSION_CDCD, Zip, ZipWrite, mz_host_system, mz_zip_attrib_convert,
-    mz_zip_attrib_is_dir, mz_zip_extrafield_find,
+    mz_zip_attrib_is_dir, mz_zip_attrib_is_symlink, mz_zip_extrafield_find,
 };
 
 /// The name of a zipped central directory's entry (`MZ_ZIP_CD_FILENAME`, mz_zip_rw.c:28 @
@@ -502,5 +503,193 @@ impl Writer {
         zip.version_madeby = MZ_VERSION_MADEBY;
         let _ = zip.close();
         zip.stream.bytes_at(0).to_vec()
+    }
+}
+
+impl Reader {
+    /// Saves the current entry's data to the file `path`, making its directory; a directory
+    /// entry makes a directory, a link entry a link. The file gets the entry's dates and
+    /// attributes.
+    ///
+    /// Port of `mz_zip_reader_entry_save_file` (mz_zip_rw.c:647-775 @ 4.0.10), without an entry
+    /// or overwrite callback.
+    pub(crate) fn entry_save_file(&mut self, path: &[u8]) -> i32 {
+        let Ok(file_info) = self.entry_get_info().cloned() else {
+            return MZ_PARAM_ERROR;
+        };
+        let mut pathwfs = c_str(path).to_vec();
+        let mut directory = pathwfs.clone();
+        mz_path_remove_filename(&mut directory);
+
+        let is_symlink = mz_zip_attrib_is_symlink(file_info.external_fa, file_info.version_madeby);
+
+        // If it is a directory entry then create a directory instead of writing file
+        if self.zip_entry_is_dir() && !is_symlink {
+            return mz_dir_make(&directory);
+        }
+
+        // If symbolic link then properly construct destination path and link path
+        if is_symlink && pathwfs.last().is_some_and(|&c| mz_os_is_dir_separator(c)) {
+            // mz_path_remove_slash
+            while pathwfs.last().is_some_and(|&c| mz_os_is_dir_separator(c)) {
+                pathwfs.pop();
+            }
+            mz_path_remove_filename(&mut directory);
+        }
+
+        // Create the output directory if it doesn't already exist
+        if !mz_os_is_dir(&directory) {
+            let err = mz_dir_make(&directory);
+            if err != MZ_OK {
+                return err;
+            }
+        }
+
+        // If it is a symbolic link then create symbolic link instead of writing file
+        if is_symlink {
+            if !file_info.linkname.is_empty() {
+                // Create symbolic link from UNIX1 extrafield
+                let _ = mz_os_make_symlink(&pathwfs, &file_info.linkname);
+            } else if file_info.uncompressed_size < i64::from(u16::MAX) {
+                // Create symbolic link from zip entry contents
+                let mut linkname = Vec::new();
+                if self.entry_save_to(&mut linkname) == MZ_OK {
+                    let _ = mz_os_make_symlink(&pathwfs, c_str(&linkname));
+                }
+            }
+            // Don't check return value because we aren't validating symbolic link target
+            return MZ_OK;
+        }
+
+        // Create the file on disk so we can save to it
+        let file = match std::fs::File::create(system_path(&pathwfs)) {
+            Ok(file) => file,
+            Err(_) => return MZ_OPEN_ERROR,
+        };
+        let mut file = std::io::BufWriter::new(file);
+        let mut err = self.entry_save_to(&mut file);
+        if std::io::Write::flush(&mut file).is_err() && err == MZ_OK {
+            err = MZ_WRITE_ERROR;
+        }
+        drop(file);
+
+        if err == MZ_OK {
+            // Set the time of the file that has been created
+            mz_os_set_file_date(
+                &pathwfs,
+                file_info.modified_date,
+                file_info.accessed_date,
+                file_info.creation_date,
+            );
+        }
+
+        if err == MZ_OK {
+            // Set file attributes for the correct system
+            if let Some(target_attrib) = mz_zip_attrib_convert(
+                mz_host_system(file_info.version_madeby),
+                file_info.external_fa,
+                mz_host_system(MZ_VERSION_MADEBY),
+            ) {
+                mz_os_set_file_attribs(&pathwfs, target_attrib);
+            }
+        }
+
+        err
+    }
+
+    /// Whether the current entry is a directory: its attributes say so, or its name ends with
+    /// a separator.
+    ///
+    /// Port of `mz_zip_entry_is_dir` (mz_zip.c:2287-2302 @ 4.0.10).
+    fn zip_entry_is_dir(&self) -> bool {
+        let Ok(info) = self.entry_get_info() else {
+            return false;
+        };
+        mz_zip_attrib_is_dir(info.external_fa, info.version_madeby)
+            || info
+                .filename
+                .last()
+                .is_some_and(|&c| mz_os_is_dir_separator(c))
+    }
+
+    /// Saves the current entry's data to `out`, as far as it is read.
+    ///
+    /// Port of `mz_zip_reader_entry_save` and `mz_zip_reader_entry_save_process`
+    /// (mz_zip_rw.c:601-645, 561-599 @ 4.0.10) with a stream that takes all it is given.
+    fn entry_save_to(&mut self, out: &mut dyn std::io::Write) -> i32 {
+        if !self.has_file_info {
+            return MZ_PARAM_ERROR;
+        }
+        let mut buffer = vec![0u8; READER_BUFFER_SIZE];
+        loop {
+            if !self.zip.entry_is_open() {
+                let err = self.entry_open();
+                if err != MZ_OK {
+                    return err;
+                }
+            }
+            let read = self.zip.entry_read(&mut buffer);
+            if read == 0 {
+                return self.entry_close();
+            }
+            if read < 0 {
+                return read;
+            }
+            if out.write_all(&buffer[..read as usize]).is_err() {
+                return MZ_WRITE_ERROR;
+            }
+        }
+    }
+
+    /// Saves every entry under `destination_dir`, at its name resolved (no `.`, `..` or
+    /// repeated separators): `MZ_END_OF_LIST` for an archive without entries.
+    ///
+    /// Port of `mz_zip_reader_save_all` (mz_zip_rw.c:818-907 @ 4.0.10), with the reader's
+    /// encoding 0 (names as they are).
+    pub(crate) fn save_all(&mut self, destination_dir: &[u8]) -> i32 {
+        let mut err = self.goto_first_entry();
+
+        if err == MZ_END_OF_LIST {
+            return err;
+        }
+
+        let destination_dir_len = c_str(destination_dir).len() + 1;
+        // The buffer mz_path_resolve writes to, which realloc keeps from entry to entry.
+        let mut resolved_name = Vec::new();
+
+        while err == MZ_OK {
+            let Ok(info) = self.entry_get_info() else {
+                break;
+            };
+            // Assume 4 bytes per character needed + 1 for terminating null
+            let utf8_name_size = usize::from(info.filename_size) * 4 + 1;
+            // +1 is for the "/" separator
+            let resolved_name_size = utf8_name_size + destination_dir_len;
+
+            let name = info.filename.clone();
+            let utf8_name = &name[..name.len().min(utf8_name_size - 1)];
+
+            err = mz_path_resolve(utf8_name, &mut resolved_name, resolved_name_size as i32);
+            if err != MZ_OK {
+                break;
+            }
+            let resolved = c_str(&resolved_name).to_vec();
+
+            let mut path = Vec::new();
+            mz_path_combine(&mut path, destination_dir, resolved_name_size);
+            mz_path_combine(&mut path, &resolved, resolved_name_size);
+
+            // Save file to disk
+            err = self.entry_save_file(&path);
+
+            if err == MZ_OK {
+                err = self.goto_next_entry();
+            }
+        }
+
+        if err == MZ_END_OF_LIST {
+            err = MZ_OK;
+        }
+        err
     }
 }

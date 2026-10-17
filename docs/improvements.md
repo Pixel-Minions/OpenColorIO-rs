@@ -2843,6 +2843,22 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `crates/ocio/src/minizip/mz_zip_rw.rs`); `crates/ocio/tests/ocioz_archive_oracle.rs`, the
   generated directory's links (Linux).
 
+### I-212. On Linux, extracting names with backslashes writes files whose names hold them
+
+- **Upstream:** `ExtractOCIOZArchive` saves each entry at its name joined to the destination
+  (`mz_zip_reader_save_all`, minizip-ng `mz_zip_rw.c:818-907` @ 4.0.10). minizip-ng takes `\`
+  for a separator when it resolves the name and finds the entry's directory
+  (`mz_os_is_dir_separator`, `mz_os_posix.c:292-302`), so it makes the directory, but it opens
+  the file at the name as it is: on Linux a name `shot1\lut1.clf` becomes a file of that name
+  in the destination, next to an empty directory `shot1`; on Windows, `shot1\lut1.clf` in that
+  directory. Archives written on Windows by older minizip versions hold such names: upstream's
+  own `missing_config.ocioz` extracts that way on Linux (the Linux wheel, probed 2026-10-17).
+- **Who notices:** applications extracting on Linux archives whose names use backslashes.
+- **A fix:** convert the separators of the name before saving the file.
+- **Status:** matched in `p4-baker` (4.9b2, `crates/ocio/src/minizip/mz_zip_rw.rs`);
+  `crates/ocio/tests/ocioz_extract_oracle.rs`, `missing_config` and the name `dirack.txt`, on
+  both platforms.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
@@ -3684,3 +3700,21 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   depends on the machine's memory), and `baking_utils_tests.rs`. The sizes one below the
   overflow (894, 715,827,882) allocate 8.6 GB in both wheels and the positive wraps write past
   the buffer, so no test runs them.
+
+### U-78. An archive entry named `..` reads uninitialized memory when extracted
+
+- **Upstream:** `ExtractOCIOZArchive` resolves each entry's name with minizip-ng's
+  `mz_path_resolve` (`mz_os.c:129-200` @ 4.0.10, called by `mz_zip_reader_save_all`,
+  `mz_zip_rw.c:818-907`) into a buffer it `realloc`s from entry to entry. A `..` at the start
+  of a name makes it test the buffer's first byte (`mz_os_is_dir_separator(*target)`), which
+  nothing may have written yet: on the first entry it is memory `malloc` left uninitialized.
+  Where the name goes on after the `..` the byte's value doesn't matter; where the name is only
+  `..`s, it decides whether the resolved name is empty or a separator, which both wheels then
+  fail to extract ("Could not extract: <archive>", probed 2026-10-17).
+- **Who notices:** applications extracting archives with an entry named `..`.
+- **Decided** (the owner's general rule, 2026-09-30): where the byte decides the result and
+  was never written, the port's `mz_path_resolve` fails (`MZ_INTERNAL_ERROR`), so the
+  extraction fails with the wheels' message; where an earlier entry wrote it, the port uses
+  that byte, as `realloc` keeps it.
+- **Status:** matched with an error in `p4-baker` (4.9b2, `crates/ocio/src/minizip/mz_os.rs`);
+  `crates/ocio/tests/ocioz_extract_oracle.rs`, the name "..".

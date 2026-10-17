@@ -227,3 +227,72 @@ fn archive_config_and_compare_to_original() {
         let _ = std::fs::remove_file(&path);
     }
 }
+
+/// Port of `OCIO_ADD_TEST(OCIOZArchive, extract_config_and_compare_to_original)` @ v2.5.2.
+#[test]
+fn extract_config_and_compare_to_original() {
+    /*
+     * This test is doing the following :
+     *
+     * 1 - Create a config object from context_test1_windows.ocioz.
+     * 2 - Extract the config context_test1_windows.ocioz.
+     * 3 - Create a config object using the extracted config in step 1.
+     * 4 - Compare different elements between the two configs.
+     *
+     * Testing CreateFromFile and ExtractOCIOZArchive on a successful path.
+     */
+    let _env = EnvGuard::new();
+    let archive_path = archive_path(&["configs", "context_test1", "context_test1_windows.ocioz"]);
+
+    {
+        // 1 - Create config from OCIOZ archive.
+        let config_from_archive = Config::create_from_file(&archive_path).unwrap();
+        config_from_archive.validate().unwrap();
+
+        // 2 - Extract the OCIOZ archive to temporary directory (DirectoryCreationGuard).
+        let directory = std::env::temp_dir().join(format!(
+            "OpenColorIO_Test_context_test1_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir(&directory).unwrap();
+        let directory_path = directory.to_str().unwrap().to_owned();
+
+        crate::ocioz_archive::extract_ocioz_archive(&archive_path, directory_path.as_bytes())
+            .unwrap();
+
+        // 3 - Create config from extracted OCIOZ archive.
+        let config_from_extracted_archive =
+            Config::create_from_file(os_path::join(directory_path.as_bytes(), b"config.ocio"))
+                .unwrap();
+        config_from_extracted_archive.validate().unwrap();
+
+        // 4 - Compare config cacheID - configFromArchive vs configFromExtractedArchive.
+        assert_eq!(
+            config_from_archive.cache_id_with_context(None).unwrap(),
+            config_from_extracted_archive
+                .cache_id_with_context(None)
+                .unwrap()
+        );
+
+        // 5 - Compare a processor cacheID - configFromArchive to configFromExtractedArchive.
+        let proc_config_from_archive = config_from_archive
+            .processor_between("plain_lut1_cs", "shot1_lut1_cs")
+            .unwrap();
+        let proc_config_from_extracted_archive = config_from_extracted_archive
+            .processor_between("plain_lut1_cs", "shot1_lut1_cs")
+            .unwrap();
+        assert_eq!(
+            proc_config_from_archive.cache_id().unwrap(),
+            proc_config_from_extracted_archive.cache_id().unwrap()
+        );
+
+        // 6 - Compare serialization - configFromArchive vs configFromExtractedArchive.
+        assert_eq!(
+            config_from_archive.serialize().unwrap(),
+            config_from_extracted_archive.serialize().unwrap()
+        );
+
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+}

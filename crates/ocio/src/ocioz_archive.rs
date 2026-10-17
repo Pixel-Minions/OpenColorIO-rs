@@ -17,7 +17,7 @@ use ocio_ops::utils::string_utils::c_str;
 use crate::config::{Config, OCIO_CONFIG_DEFAULT_FILE_EXT, OCIO_CONFIG_DEFAULT_NAME};
 use crate::config_io_proxy::ConfigIoProxy;
 use crate::minizip::mz_os::{mz_os_is_dir, mz_os_list_dir, mz_path_compare_wc};
-use crate::minizip::mz_strm::MZ_OK;
+use crate::minizip::mz_strm::{MZ_END_OF_LIST, MZ_OK};
 use crate::minizip::mz_zip::FileInfo;
 use crate::minizip::mz_zip_rw::{
     MZ_COMPRESS_LEVEL_BEST, MZ_COMPRESS_METHOD_DEFLATE, MZ_VERSION_MADEBY, MZ_ZIP_FLAG_UTF8,
@@ -327,6 +327,48 @@ pub(crate) fn archive_config(
     let buffer = archiver.close();
     // A write that fails sets the stream's badbit upstream, which nothing checks.
     let _ = ostream.write_all(&buffer);
+    Ok(())
+}
+
+/// Extracts the `.ocioz` archive `archive_path` into the directory `destination`: each entry
+/// at its name (without `.` and `..`, which don't go above `destination`), its directories
+/// made, with the dates and attributes the archive gives (deviation D-6 for those of a file
+/// on Windows).
+///
+/// The errors: "Could not open <archive_path> for reading.", "No files in archive." and
+/// "Could not extract: <archive_path>".
+///
+/// Port of `ExtractOCIOZArchive` (src/OpenColorIO/OCIOZArchive.cpp:335-388 @ v2.5.2).
+#[doc(alias = "ExtractOCIOZArchive")]
+pub fn extract_ocioz_archive(
+    archive_path: impl AsRef<[u8]>,
+    destination: impl AsRef<[u8]>,
+) -> Result<()> {
+    let archive_path = c_str(archive_path.as_ref());
+    // Normalize the path for the platform.
+    let output_destination = os_path::normpath(c_str(destination.as_ref()));
+
+    // Open the OCIOZ archive.
+    let Ok(mut extracter) = Reader::open_file(archive_path) else {
+        let mut os = b"Could not open ".to_vec();
+        os.extend_from_slice(archive_path);
+        os.extend_from_slice(b" for reading.");
+        return Err(Exception::new(os));
+    };
+
+    // Extract all entries to outputDestination directory.
+    let err = extracter.save_all(&output_destination);
+    if err == MZ_END_OF_LIST {
+        // The archive has no files.
+        return Err(Exception::new("No files in archive."));
+    } else if err != MZ_OK {
+        let mut os = b"Could not extract: ".to_vec();
+        os.extend_from_slice(archive_path);
+        return Err(Exception::new(os));
+    }
+
+    // Closing a reader that saved every entry doesn't fail ("Could not close <archive_path>
+    // after reading."): its entries are closed.
     Ok(())
 }
 

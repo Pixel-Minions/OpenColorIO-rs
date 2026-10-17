@@ -6,10 +6,10 @@
 //! minizip-ng's zip archive, opened for reading (`mz_zip.c`): the central directory, the
 //! headers of its entries, and an entry's data.
 
-use super::inflate::{Stop, inflate};
+use super::inflate::Inflater;
 use super::mz_crypt::mz_crypt_crc32_update;
 use super::mz_strm::{
-    MZ_BUF_ERROR, MZ_END_OF_LIST, MZ_END_OF_STREAM, MZ_EXIST_ERROR, MZ_FORMAT_ERROR, MZ_OK,
+    MZ_CRC_ERROR, MZ_END_OF_LIST, MZ_END_OF_STREAM, MZ_EXIST_ERROR, MZ_FORMAT_ERROR, MZ_OK,
     MZ_PARAM_ERROR, MZ_READ_ERROR, MZ_STREAM_ERROR, MZ_SUPPORT_ERROR, MemStream, Origin,
     SplitStream, Stream, mz_stream_find, mz_stream_find_reverse, mz_stream_read_int64,
     mz_stream_read_uint16, mz_stream_read_uint32, mz_stream_read_uint64, mz_stream_seek,
@@ -1085,14 +1085,10 @@ impl Zip {
         };
 
         self.entry = Some(Entry {
-            deflate: method == MZ_COMPRESS_METHOD_DEFLATE,
             max_total_in,
             total_in: 0,
-            // OpenColorIO's readers ask for at most the entry's size, as a C `int32_t`, and
-            // one more read past it (of 64 KiB at most).
-            bound: (self.file_info.uncompressed_size as i32).max(0) as usize + 65535,
-            inflated: None,
-            total_out: 0,
+            inflater: (method == MZ_COMPRESS_METHOD_DEFLATE).then(|| Inflater::new(max_total_in)),
+            crc32: 0,
         });
         MZ_OK
     }
@@ -1117,7 +1113,7 @@ impl Zip {
 
         // Read entire entry even if uncompressed_size = 0, otherwise
         // aes encryption validation will fail if compressed_size > 0
-        if !entry.deflate {
+        if entry.inflater.is_none() {
             let mut bytes_to_read = buf.len() as i64;
             if entry.max_total_in > 0 && bytes_to_read > entry.max_total_in - entry.total_in {
                 bytes_to_read = entry.max_total_in - entry.total_in;
@@ -1125,70 +1121,52 @@ impl Zip {
             let read = self.stream.read(&mut buf[..bytes_to_read.max(0) as usize]);
             if read > 0 {
                 entry.total_in += i64::from(read);
+                entry.crc32 = mz_crypt_crc32_update(entry.crc32, &buf[..read as usize]);
             }
             return read;
         }
 
-        if entry.inflated.is_none() {
-            // The input zlib reads, 32767 bytes at a time, up to the limit when there is one;
-            // a read that fails ends it, as the end of the stream does.
-            let mut input = Vec::new();
-            let mut chunk = vec![0u8; i16::MAX as usize];
-            loop {
-                let mut bytes_to_read = chunk.len() as i64;
-                if entry.max_total_in > 0 {
-                    bytes_to_read = bytes_to_read.min(entry.max_total_in - input.len() as i64);
-                }
-                let read = self
-                    .stream
-                    .read(&mut chunk[..bytes_to_read.max(0) as usize]);
-                if read <= 0 {
-                    break;
-                }
-                input.extend_from_slice(&chunk[..read as usize]);
-            }
-            entry.inflated = Some(inflate(&input, entry.bound));
+        let Some(inflater) = entry.inflater.as_mut() else {
+            return MZ_PARAM_ERROR;
+        };
+        let read = inflater.read(&mut self.stream, buf);
+        if read > 0 {
+            entry.crc32 = mz_crypt_crc32_update(entry.crc32, &buf[..read as usize]);
         }
-        let (out, stop) = entry.inflated.as_ref().expect("inflated");
-        let p = entry.total_out;
-        if p + buf.len() <= out.len() {
-            buf.copy_from_slice(&out[p..p + buf.len()]);
-            entry.total_out += buf.len();
-            return buf.len() as i32;
-        }
-        if *stop == Stop::End {
-            let n = out.len() - p;
-            buf[..n].copy_from_slice(&out[p..]);
-            entry.total_out += n;
-            return n as i32;
-        }
-        MZ_BUF_ERROR
+        read
     }
 
-    /// Closes the open entry. Without the out parameters, nothing is read or checked.
+    /// Closes the open entry: `MZ_CRC_ERROR` where all its data was read and its CRC isn't the
+    /// central directory's. Without the out parameters, the data descriptor isn't read.
     ///
     /// Port of `mz_zip_entry_close` (mz_zip.c:2268-2285 @ 4.0.10), through
     /// `mz_zip_entry_read_close` (mz_zip.c:2070-2134) with no out parameter.
     pub(crate) fn entry_close(&mut self) -> i32 {
-        if self.entry.take().is_none() {
+        let Some(entry) = self.entry.take() else {
             return MZ_PARAM_ERROR;
+        };
+        let total_in = match &entry.inflater {
+            Some(inflater) => inflater.total_in,
+            None => entry.total_in,
+        };
+        // If entire entry was not read verification will fail
+        if total_in == self.file_info.compressed_size && entry.crc32 != self.file_info.crc {
+            return MZ_CRC_ERROR;
         }
         MZ_OK
     }
 }
 
-/// The open entry's streams: the raw stream of its data, or the zlib stream over it.
+/// The open entry's streams: the raw stream of its data, or the zlib stream over it, and the
+/// CRC of what was read (`entry_crc32`).
 #[derive(Debug)]
 struct Entry {
-    deflate: bool,
     /// The raw stream's limit (`MZ_STREAM_PROP_TOTAL_IN_MAX`), 0 for none.
     max_total_in: i64,
     total_in: i64,
-    /// How many bytes of the deflate stream are decoded.
-    bound: usize,
-    /// The deflate stream decoded: the bytes before it ends or fails, and how it stopped.
-    inflated: Option<(Vec<u8>, Stop)>,
-    total_out: usize,
+    /// The zlib stream of a deflated entry.
+    inflater: Option<Inflater>,
+    crc32: u32,
 }
 
 /// Port of `mz_zip_extrafield_find` (mz_zip.c:2583-2612 @ 4.0.10): positions `stream` after
@@ -1379,6 +1357,17 @@ pub(crate) fn mz_zip_attrib_convert(src_sys: u8, src_attrib: u32, target_sys: u8
         }
     }
     None
+}
+
+/// Whether the attributes are a symbolic link's.
+///
+/// Port of `mz_zip_attrib_is_symlink` (mz_zip.c:2493-2505 @ 4.0.10).
+pub(crate) fn mz_zip_attrib_is_symlink(attrib: u32, version_madeby: u16) -> bool {
+    let system = mz_host_system(version_madeby);
+    match mz_zip_attrib_convert(system, attrib, MZ_HOST_SYSTEM_UNIX) {
+        Some(posix_attrib) => posix_attrib & 0o170000 == 0o120000,
+        None => false,
+    }
 }
 
 /// Whether the attributes are a directory's.

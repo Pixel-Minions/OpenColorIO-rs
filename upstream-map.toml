@@ -455,15 +455,15 @@ status = "todo"
 path = "src/OpenColorIO/OCIOZArchive.cpp"
 kind = "src"
 target = ["crates/ocio/src/ocioz_archive.rs", "crates/ocio/src/minizip/mod.rs"]
-status = "partial"
-note = "p4-baker 4.9a: reading archives (390-661: readEntryBuffer, getFileBufferByPath, getFileStringFromArchiveFile, getFileBufferFromArchive, getEntriesMappingFromArchiveFile, CIOPOciozArchive) through minizip-ng 4.0.10's reader, ported in crates/ocio/src/minizip/ (upstream/minizip-ng), checked against the wheel in crates/ocio/tests/ocioz_read_oracle.rs; getFileBufferByExtension and getFileBufferFromArchiveByExtension (441-451, 526-529) are called nowhere in OCIO 2.5.2 and aren't ported. 4.9a2: minizip-ng's recovery of a central directory it can't read (mz_zip_recover_cd, with mz_stream_find, mz_zip_entry_read_descriptor and the central mz_zip_entry_write_header). 4.9a3: its zipped central directory (mz_zip_reader_unzip_cd). 4.9b1: archiveConfig and addSupportedFiles (149-333) on minizip-ng's writer (mz_zip_writer_*, the writing half of mz_zip.c, its system functions) and flate2 at level 9, checked against the wheel in crates/ocio/tests/ocioz_archive_oracle.rs (deviation D-6). Later: ExtractOCIOZArchive (335-388) in 4.9b2"
+status = "done"
+note = "p4-baker 4.9a: reading archives (390-661: readEntryBuffer, getFileBufferByPath, getFileStringFromArchiveFile, getFileBufferFromArchive, getEntriesMappingFromArchiveFile, CIOPOciozArchive) through minizip-ng 4.0.10's reader, ported in crates/ocio/src/minizip/ (upstream/minizip-ng), checked against the wheel in crates/ocio/tests/ocioz_read_oracle.rs; getFileBufferByExtension and getFileBufferFromArchiveByExtension (441-451, 526-529) are called nowhere in OCIO 2.5.2 and aren't ported. 4.9a2: minizip-ng's recovery of a central directory it can't read (mz_zip_recover_cd, with mz_stream_find, mz_zip_entry_read_descriptor and the central mz_zip_entry_write_header). 4.9a3: its zipped central directory (mz_zip_reader_unzip_cd). 4.9b1: archiveConfig and addSupportedFiles (149-333) on minizip-ng's writer (mz_zip_writer_*, the writing half of mz_zip.c, its system functions) and flate2 at level 9, checked against the wheel in crates/ocio/tests/ocioz_archive_oracle.rs (deviation D-6). 4.9b2: ExtractOCIOZArchive (335-388) on mz_zip_reader_save_all and mz_zip_reader_entry_save_file, checked against the wheel in crates/ocio/tests/ocioz_extract_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/OCIOZArchive.h"
 kind = "src"
 target = ["crates/ocio/src/ocioz_archive.rs"]
-status = "partial"
-note = "p4-baker 4.9a: CIOPOciozArchive (77-107) and the reading functions; 4.9b1: archiveConfig. Later: ExtractOCIOZArchive with 4.9b2"
+status = "done"
+note = "p4-baker 4.9a: CIOPOciozArchive (77-107) and the reading functions; 4.9b1: archiveConfig; 4.9b2: ExtractOCIOZArchive (public, extract_ocioz_archive); getFileBufferFromArchiveByExtension is called nowhere and isn't ported"
 
 [[file]]
 path = "src/OpenColorIO/Op.cpp"
@@ -4414,8 +4414,8 @@ note = "basic and alias add named transforms to a config (3.4j) and call NamedTr
 path = "tests/cpu/OCIOZArchive_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/ocioz_archive_tests.rs", "crates/ocio/src/config_tests.rs"]
-status = "partial"
-note = "p3-loading 3.10c: is_config_archivable (Config::isArchivable) in config_tests.rs; p4-baker 4.9a: context_test_for_search_paths_and_filetransform_source_path in ocioz_archive_tests.rs; 4.9b1: archive_config_and_compare_to_original. Later: extract_config_and_compare_to_original (4.9b2)"
+status = "done"
+note = "p3-loading 3.10c: is_config_archivable (Config::isArchivable) in config_tests.rs; p4-baker 4.9a: context_test_for_search_paths_and_filetransform_source_path in ocioz_archive_tests.rs; 4.9b1: archive_config_and_compare_to_original; 4.9b2: extract_config_and_compare_to_original"
 
 [[file]]
 path = "tests/cpu/OpOptimizers_tests.cpp"
