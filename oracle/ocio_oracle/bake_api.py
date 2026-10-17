@@ -2,9 +2,10 @@
 # Copyright Contributors to the OpenColorIO Project.
 """Oracle command for the LUT baker (card p4-oracle, chunk O4.4).
 
-- bake: a Baker on a config, its setters and format metadata in order, then bake(): the
-  text it returns and the bytes of the file the other overload writes, the getters after the
-  setters, or what raised, and the log.
+- bake: a Baker on a config (or on none), its setters and format metadata in order, then
+  bake(): the text it returns and the bytes of the file the other overload writes, the getters
+  after the setters, or what raised (with what the file overload left in its file), and the
+  log.
 
 Configs that name files (LUTs, search paths) run through with_files (files_api.py), with
 {"file": "$FILES/config.ocio"} as the config.
@@ -75,6 +76,24 @@ def _baked_file(baker):
             return f.read().hex()
 
 
+def _partial_file(baker):
+    """bake(fileName) into a new temporary file where bake() raised: what it left in the file,
+    hex, or None where it left no file, with what it raised."""
+    with tempfile.TemporaryDirectory() as root:
+        path = os.path.join(root, "baked")
+        try:
+            baker.bake(path)
+            raised = None
+        except RAISED as exc:
+            if not wheel_raised(exc):
+                raise
+            raised = exception_result(exc)
+        if not os.path.exists(path):
+            return {"bytes": None, "exception": raised}
+        with open(path, "rb") as f:
+            return {"bytes": f.read().hex(), "exception": raised}
+
+
 @command
 def bake(args, blobs):
     """Bakes a LUT.
@@ -82,6 +101,8 @@ def bake(args, blobs):
     args:
       config      the config (spec.config: {"yaml": text}, {"builtin": name}, {"file": path},
                   or null for the raw config), given to setConfig first
+      no_config   optional: true to leave the baker without a config (setConfig isn't called;
+                  "config" must then be absent)
       metadata    optional: [[method, arg, ...], ...], FormatMetadata methods (__setitem__,
                   which is the binding's addAttribute, addChildElement, setElementName,
                   setElementValue, setName, setID, clear) called in order on the baker's
@@ -97,20 +118,27 @@ def bake(args, blobs):
                   Windows each LF is written as CR LF)
       exception, stage   when OCIO or the binding raised: {"type", "message"}, and where:
                   "config", "metadata", "setters" or "bake"
+      partial_file   when bake() raised: what bake(fileName) left in its new file,
+                  {"bytes": hex, or null where it left no file, "exception": what it raised,
+                  or null}
       log         OCIO's log messages
     blobs: none
 
     An unknown key, a method that isn't listed, or an argument it can't read, is refused.
     """
-    check_keys("bake", args, {"config", "metadata", "calls"})
+    check_keys("bake", args, {"config", "no_config", "metadata", "calls"})
+    no_config = args.get("no_config", False)
+    if not isinstance(no_config, bool) or (no_config and "config" in args):
+        raise RequestError(f"no_config must be true or false, and true only without a config: "
+                           f"{args!r}")
     metadata = _checked_calls("metadata", args.get("metadata", []), METADATA_METHODS)
     calls = _checked_calls("calls", args.get("calls", []), SETTERS)
     stage, result = ["config"], {}
     with captured_log() as log:
         try:
-            config = spec.config(args.get("config"))
             baker = OCIO.Baker()
-            baker.setConfig(config)
+            if not no_config:
+                baker.setConfig(spec.config(args.get("config")))
             stage[0] = "metadata"
             for method, values in metadata:
                 getattr(baker.getFormatMetadata(), method)(*values)
@@ -125,5 +153,7 @@ def bake(args, blobs):
             if not wheel_raised(exc):
                 raise
             result = {"exception": exception_result(exc), "stage": stage[0]}
+            if stage[0] == "bake":
+                result["partial_file"] = _partial_file(baker)
     result["log"] = log
     return result, []

@@ -140,10 +140,61 @@ fn refusals_report_their_stage() {
     assert_eq!(incomplete["stage"], "bake", "{incomplete}");
 }
 
+/// `baking_validation`'s "Missing configuration" (Baker_tests.cpp:334-340 @ v2.5.2): a baker
+/// that never had `setConfig` is refused by `bake` with "No OCIO config has been set.". With a
+/// config, the same request bakes.
+#[test]
+fn a_baker_without_a_config_is_refused() {
+    let calls = json!([
+        ["setFormat", "cinespace"],
+        ["setInputSpace", "lnh"],
+        ["setTargetSpace", "gamma22"]
+    ]);
+    let without = call(json!({"no_config": true, "calls": calls}));
+    assert_eq!(without["stage"], "bake", "{without}");
+    let message = without["exception"]["message"].as_str().unwrap();
+    assert!(
+        message.contains("No OCIO config has been set."),
+        "{without}"
+    );
+    let with = call(json!({"config": {"yaml": PROFILE}, "calls": calls}));
+    assert!(with.get("exception").is_none(), "{with}");
+}
+
+/// Where `bake()` raises, `partial_file` reports what `bake(fileName)` left in its file, and
+/// what that raised: lustre's header lines, written before its shaper of size -3 fails, are
+/// the start of the file the same bake writes with a shaper of size 2.
+#[test]
+fn a_failing_bake_reports_its_partial_file() {
+    let request = |shaper_size: i64| {
+        json!({
+            "config": {"yaml": PROFILE},
+            "calls": [["setFormat", "lustre"], ["setInputSpace", "lnh"],
+                      ["setTargetSpace", "gamma22"], ["setShaperSize", shaper_size],
+                      ["setCubeSize", 2]],
+        })
+    };
+    let failed = call(request(-3));
+    assert_eq!(failed["stage"], "bake", "{failed}");
+    let partial = &failed["partial_file"];
+    assert_eq!(partial["exception"], failed["exception"], "{failed}");
+    let partial = unhex(partial["bytes"].as_str().expect("a file"));
+    assert!(!partial.is_empty(), "{failed}");
+    let complete = call(request(2));
+    assert!(complete.get("partial_file").is_none(), "{complete}");
+    let full = unhex(complete["file"].as_str().unwrap());
+    assert!(full.len() > partial.len());
+    assert_eq!(&full[..partial.len()], partial.as_slice());
+    assert!(partial.ends_with(b"\n"));
+}
+
 /// Requests it can't read are refused.
 #[test]
 fn bad_requests_are_refused() {
     for args in [
+        json!({"no_config": true, "config": null}),
+        json!({"no_config": "yes"}),
+        json!({"no_config": 1}),
         json!({"calls": [["bake"]]}),
         json!({"calls": [["setCubeSize", true]]}),
         json!({"calls": [["setCubeSize", 1.5]]}),
