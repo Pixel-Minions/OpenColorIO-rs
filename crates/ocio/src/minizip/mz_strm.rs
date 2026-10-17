@@ -102,6 +102,74 @@ pub(crate) fn mz_stream_read_uint64(stream: &mut dyn Stream) -> Result<u64, i32>
 /// `MZ_STREAM_FIND_SIZE` (mz_strm.c:16 @ 4.0.10).
 const MZ_STREAM_FIND_SIZE: usize = 1024;
 
+/// Searches forwards from the stream's position, over at most `max_seek` bytes, for `find`:
+/// its position (and the stream left there), or `MZ_EXIST_ERROR`.
+///
+/// Port of `mz_stream_find` (mz_strm.c:234-292 @ 4.0.10), buffer for buffer.
+pub(crate) fn mz_stream_find(
+    stream: &mut dyn Stream,
+    find: &[u8],
+    max_seek: i64,
+) -> Result<i64, i32> {
+    let mut buf = [0u8; MZ_STREAM_FIND_SIZE];
+    let mut buf_pos: i32 = 0;
+    let mut read_size: i32 = MZ_STREAM_FIND_SIZE as i32;
+    let mut read_pos: i64 = 0;
+    let mut first = true;
+    let find_size = find.len() as i32;
+
+    let start_pos = stream.tell();
+
+    while read_pos < max_seek {
+        if read_size as i64 > max_seek - read_pos - buf_pos as i64
+            && (max_seek - read_pos - buf_pos as i64) < MZ_STREAM_FIND_SIZE as i64
+        {
+            read_size = (max_seek - read_pos - buf_pos as i64) as i32;
+        }
+
+        let start = buf_pos as usize;
+        let mut read = stream.read(&mut buf[start..start + read_size as usize]);
+        if read <= 0 || read + buf_pos < find_size {
+            break;
+        }
+
+        let mut i = 0;
+        while i <= read + buf_pos - find_size {
+            let at = i as usize;
+            if &buf[at..at + find.len()] != find {
+                i += 1;
+                continue;
+            }
+
+            let disk_pos = stream.tell();
+
+            // Seek to position on disk where the data was found
+            let err = mz_stream_seek(
+                stream,
+                disk_pos - (read as i64 + buf_pos as i64 - i as i64),
+                Origin::Set,
+            );
+            if err != MZ_OK {
+                return Err(MZ_EXIST_ERROR);
+            }
+
+            return Ok(start_pos + read_pos + i as i64);
+        }
+
+        if first {
+            read -= find_size;
+            read_size -= find_size;
+            buf_pos = find_size;
+            first = false;
+        }
+
+        buf.copy_within(read as usize..read as usize + find.len(), 0);
+        read_pos += read as i64;
+    }
+
+    Err(MZ_EXIST_ERROR)
+}
+
 /// Searches backwards from the stream's position, over at most `max_seek` bytes, for `find`:
 /// its position (and the stream left there), or `MZ_EXIST_ERROR`.
 ///
@@ -205,6 +273,25 @@ impl MemStream {
             position: 0,
             grows: true,
         }
+    }
+
+    /// A stream reading `buf`, whose limit is its size.
+    ///
+    /// Port of `mz_stream_mem_set_buffer` with `mz_stream_mem_open` for reading
+    /// (mz_strm_mem.c:199-204, 71-87 @ 4.0.10).
+    pub(crate) fn over(buf: &[u8]) -> MemStream {
+        MemStream {
+            data: buf.to_vec(),
+            position: 0,
+            grows: false,
+        }
+    }
+
+    /// Sets the limit reads stop at.
+    ///
+    /// Port of `mz_stream_mem_set_buffer_limit` (mz_strm_mem.c:228-231 @ 4.0.10).
+    pub(crate) fn set_buffer_limit(&mut self, limit: usize) {
+        self.data.resize(limit, 0);
     }
 
     /// The bytes from `at` up to the limit (`mz_stream_mem_get_buffer_at`).
@@ -449,6 +536,13 @@ impl SplitStream {
             }
         }
         err
+    }
+
+    /// The disk the operations go to (`MZ_STREAM_PROP_DISK_NUMBER`).
+    ///
+    /// Port of `mz_stream_split_get_prop_int64` (mz_strm_split.c:361-377 @ 4.0.10).
+    pub(crate) fn disk_number(&self) -> i64 {
+        i64::from(self.number_disk)
     }
 
     /// Sets the disk the next operations go to (`MZ_STREAM_PROP_DISK_NUMBER`).

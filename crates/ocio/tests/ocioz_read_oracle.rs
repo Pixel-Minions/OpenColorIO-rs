@@ -105,6 +105,10 @@ struct Entry {
     uncompressed_size: Option<u32>,
     cd_extra: Vec<u8>,
     disk: u16,
+    /// The local header's extra field.
+    local_extra: Vec<u8>,
+    /// The CRC and sizes in a data descriptor after the data, the local header's zeros.
+    descriptor: bool,
 }
 
 impl Entry {
@@ -120,6 +124,8 @@ impl Entry {
             uncompressed_size: None,
             cd_extra: Vec::new(),
             disk: 0,
+            local_extra: Vec::new(),
+            descriptor: false,
         }
     }
 
@@ -127,23 +133,31 @@ impl Entry {
     fn local_record(&self) -> Vec<u8> {
         let written = self.written();
         let mut out = Vec::new();
+        let crc = self.crc.unwrap_or_else(|| crc32(&self.data));
+        let csize = self.compressed_size.unwrap_or(written.len() as u32);
+        let usize_ = self.uncompressed_size.unwrap_or(self.data.len() as u32);
         put32(&mut out, 0x0403_4b50);
-        for v in [20u16, self.flag, self.method, 0, 0x0021] {
+        let flag = self.flag | if self.descriptor { 8 } else { 0 };
+        for v in [20u16, flag, self.method, 0, 0x0021] {
             put16(&mut out, v);
         }
-        put32(&mut out, self.crc.unwrap_or_else(|| crc32(&self.data)));
-        put32(
-            &mut out,
-            self.compressed_size.unwrap_or(written.len() as u32),
-        );
-        put32(
-            &mut out,
-            self.uncompressed_size.unwrap_or(self.data.len() as u32),
-        );
+        for v in if self.descriptor {
+            [0, 0, 0]
+        } else {
+            [crc, csize, usize_]
+        } {
+            put32(&mut out, v);
+        }
         put16(&mut out, self.name.len() as u16);
-        put16(&mut out, 0);
+        put16(&mut out, self.local_extra.len() as u16);
         out.extend_from_slice(&self.name);
+        out.extend_from_slice(&self.local_extra);
         out.extend_from_slice(&written);
+        if self.descriptor {
+            for v in [0x0807_4b50, crc, csize, usize_] {
+                put32(&mut out, v);
+            }
+        }
         out
     }
 
@@ -744,4 +758,98 @@ fn two_archives_in_one_process() {
     );
     // What the wheel shows: the second archive's processor is the first's.
     assert_eq!(wheel[0], wheel[2]);
+}
+
+/// Archives whose central directory minizip-ng can't read, which it rebuilds from the local
+/// headers (`mz_zip_recover_cd`, the reader's recovery): cut short, without their end record,
+/// with data descriptors, and with the local extra fields it rewrites.
+#[test]
+fn recovered_archives() {
+    let full = Archive::of(standard(8)).bytes();
+    let cd_start = {
+        let mut n = 0;
+        for e in standard(8) {
+            n += e.local_record().len();
+        }
+        n
+    };
+    let cut = |at: usize| {
+        let mut archive = Archive::of(standard(8));
+        archive.cut = Some(at);
+        archive
+    };
+    let mut cases = vec![
+        ("cut before the central directory", cut(cd_start)),
+        ("cut in the central directory", cut(cd_start + 30)),
+        ("cut before the end record", cut(full.len() - 22)),
+        ("cut in the last LUT", cut(cd_start - 20)),
+        ("cut in the first LUT", cut(400)),
+        ("cut after the config's header", cut(45)),
+    ];
+    let with = |change: &dyn Fn(&mut Vec<Entry>)| {
+        let mut entries = standard(8);
+        change(&mut entries);
+        let mut archive = Archive::of(entries);
+        archive.cut = Some(archive.bytes().len() - 22);
+        archive
+    };
+    cases.push((
+        "data descriptors",
+        with(&|es| {
+            for e in es.iter_mut() {
+                e.descriptor = true;
+            }
+        }),
+    ));
+    cases.push((
+        "a stored entry with a descriptor",
+        with(&|es| {
+            es[1].method = 0;
+            es[1].descriptor = true;
+        }),
+    ));
+    cases.push((
+        "backslashes",
+        with(&|es| {
+            es[1].name = b"luts\\a.spi1d".to_vec();
+            es[2].name = b"luts\\sub\\b.spi1d".to_vec();
+        }),
+    ));
+    cases.push((
+        "local NTFS times",
+        with(&|es| {
+            let mut extra = vec![0x0a, 0x00, 32, 0, 0, 0, 0, 0, 1, 0, 24, 0];
+            extra.extend_from_slice(&[0x11; 24]);
+            es[1].local_extra = extra;
+        }),
+    ));
+    cases.push((
+        "a local UNIX1 link",
+        with(&|es| {
+            let mut extra = vec![0x0d, 0x00, 16, 0];
+            extra.extend_from_slice(&[0; 12]);
+            extra.extend_from_slice(b"link");
+            es[1].local_extra = extra;
+        }),
+    ));
+    cases.push((
+        "a local zip64 field and another",
+        with(&|es| {
+            let mut extra = vec![0x01, 0x00, 16, 0];
+            extra.extend_from_slice(&[0; 16]);
+            extra.extend_from_slice(&[0x34, 0x12, 2, 0, 7, 7]);
+            es[1].local_extra = extra;
+        }),
+    ));
+    cases.push((
+        "repeated names",
+        with(&|es| {
+            es.push(Entry::new(b"luts/a.spi1d", &lut("4.0"), 8));
+        }),
+    ));
+    let mut only_local = Archive::default();
+    only_local.prefix = b"PK\x03\x04 and nothing else".to_vec();
+    only_local.cut = Some(only_local.prefix.len());
+    cases.push(("a local signature and nothing else", only_local));
+    check(&cases);
 }

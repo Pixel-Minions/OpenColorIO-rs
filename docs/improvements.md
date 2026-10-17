@@ -2809,6 +2809,24 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p4-baker` (4.9a): the port's caches are upstream's;
   `crates/ocio/tests/ocioz_read_oracle.rs`, `two_archives_in_one_process`.
 
+### I-210. An archive rebuilt from its local headers has other names on Windows
+
+- **Upstream:** where minizip-ng can't read an archive's central directory (a truncated
+  `.ocioz`, say), OpenColorIO's reader rebuilds it from the local headers (`mz_zip_recover_cd`,
+  minizip-ng mz_zip.c:1236-1406 @ 4.0.10, recovery being the reader's default), and the
+  archive still loads. The rebuilt headers are written by `mz_zip_entry_write_header`, which on
+  Windows only (`#if defined(_WIN32)`, mz_zip.c:792-805) writes each `\` of a name as `/`. The
+  names are compared ignoring the kind of slash, but the file hashes OpenColorIO builds from them
+  (`getFastLutFileHash`: the name and the CRC) differ, and with them the config's cache ID. Once
+  one entry's local header has a zip64 field, the data descriptors of all later entries are
+  read as zip64 (the flag is never reset in the loop).
+- **Who notices:** applications comparing cache IDs of configs read from damaged archives with
+  backslashes in their names across platforms.
+- **A fix:** keep the names as stored, and reset the zip64 flag for each entry.
+- **Status:** matched in `p4-baker` (4.9a2, `crates/ocio/src/minizip/mz_zip.rs`);
+  `crates/ocio/tests/ocioz_read_oracle.rs`, `recovered_archives` ("backslashes"), on both
+  platforms.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
