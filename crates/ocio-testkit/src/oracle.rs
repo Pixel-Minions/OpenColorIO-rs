@@ -19,7 +19,10 @@
 //! Responses are cached under `<target>/oracle-cache`, keyed by the request, the oracle's
 //! sources and lock file, upstream's test files (which requests name by path), and this
 //! machine's OS and CPU ([`machine_description`]). Set
-//! `OCIO_RS_ORACLE_NO_CACHE=1` to bypass the cache. Environment variables named `OCIO`,
+//! `OCIO_RS_ORACLE_NO_CACHE=1` to bypass the cache. Only what can't be transient is cached:
+//! never a failed call (the oracle's error, or its process dying), a batch in which a call
+//! raised, or a response that reports a process the oracle started dying ([`cacheable`]).
+//! Environment variables named `OCIO`,
 //! `OCIO_*` or `PYTHON*` are never passed to the oracle's processes ([`isolate`]), so their
 //! results and output don't depend on the caller's environment.
 //!
@@ -880,14 +883,37 @@ fn batch_request<'a>(calls: &[BatchCall<'a>]) -> (Value, Vec<&'a [u8]>) {
 }
 
 /// Whether a response may be cached, or replayed from the cache: every one but a batch in
-/// which a call raised, whose failure may be transient. (A command that raises outside a
-/// batch fails the whole call, and a failed call is never cached.)
+/// which a call raised, and one that reports a process the oracle started dying
+/// ([`reports_a_failed_child`]), whose failures may be transient. (A command that raises
+/// outside a batch, or an oracle process that dies, fails the whole call, and a failed call is
+/// never cached.)
 fn cacheable(cmd: &str, response: &Response) -> bool {
-    cmd != "batch"
-        || !response
+    let raised_in_batch = cmd == "batch"
+        && response
             .result
             .as_array()
-            .is_some_and(|calls| calls.iter().any(|call| call.get("error").is_some()))
+            .is_some_and(|calls| calls.iter().any(|call| call.get("error").is_some()));
+    !raised_in_batch && !reports_a_failed_child(&response.result)
+}
+
+/// Whether `result`, at any depth, reports a process the oracle started that died or failed:
+/// a `"crashed"` report (`context_env_calls`, `file_rules_match`'s isolated cases) or a
+/// `"returncode"` other than 0 (`processor_cache`, `logging_environment`). The death may be the
+/// wheel's, the same on every run (`_wputenv_s` stopping the process), or the machine's: when
+/// it was out of memory, a child failed to import the wheel ("DLL load failed while importing
+/// PyOpenColorIO: The paging file is too small for this operation to complete."), and that
+/// response, once cached, failed every later run. The response can't tell them apart, so the
+/// oracle runs again each time.
+fn reports_a_failed_child(result: &Value) -> bool {
+    match result {
+        Value::Object(map) => map.iter().any(|(key, value)| {
+            (key == "crashed" && !value.is_null())
+                || (key == "returncode" && value.as_i64() != Some(0))
+                || reports_a_failed_child(value)
+        }),
+        Value::Array(items) => items.iter().any(reports_a_failed_child),
+        _ => false,
+    }
 }
 
 fn frame(header: &Value, blobs: &[&[u8]]) -> Vec<u8> {
@@ -1474,6 +1500,117 @@ mod tests {
         assert!(results.iter().all(Result::is_ok), "{results:?}");
         let cached = parse_response(&std::fs::read(&passing_file).expect("cached")).unwrap();
         assert!(cacheable("batch", &cached), "{}", cached.result);
+    }
+
+    /// A response that reports a process the oracle started dying is never cached, at any
+    /// depth and in a batch too; a child's success is.
+    #[test]
+    fn a_failed_child_process_is_never_cached() {
+        let response = |result: Value| Response {
+            result,
+            blobs: Vec::new(),
+        };
+        let crashed = json!({"crashed": {"returncode": 1, "stderr": {"bytes": "00"}}});
+        for (cmd, result, expected) in [
+            ("context_env_calls", json!({"calls": [], "pid": 7}), true),
+            ("context_env_calls", crashed.clone(), false),
+            (
+                "context_env_calls",
+                json!({"crashed": null, "pid": 7}),
+                true,
+            ),
+            (
+                "file_rules_match",
+                json!({"cases": [{"pid": 7}, crashed.clone()]}),
+                false,
+            ),
+            (
+                "processor_cache",
+                json!([{"returncode": 0, "report": {}, "stderr": 0}]),
+                true,
+            ),
+            (
+                "processor_cache",
+                json!([{"returncode": 1, "report": "", "stderr": 0}]),
+                false,
+            ),
+            (
+                "logging_environment",
+                json!([{"returncode": -1073741819}]),
+                false,
+            ),
+            ("logging_environment", json!([{"returncode": null}]), false),
+            ("batch", json!([{"result": {"x": 1}, "blobs": []}]), true),
+            (
+                "batch",
+                json!([{"result": crashed.clone(), "blobs": []}]),
+                false,
+            ),
+        ] {
+            assert_eq!(
+                cacheable(cmd, &response(result.clone())),
+                expected,
+                "{cmd} {result}"
+            );
+        }
+    }
+
+    /// Through the oracle: a call whose child process died isn't written to the cache, nor
+    /// replayed from it (a stale entry of an earlier version is replaced), and a failed call
+    /// isn't cached; a child's success is. On Windows the wheel stops the child for a variable
+    /// of 32,767 UTF-16 units (`crates/ocio-testkit/tests/context_env_calls_oracle.rs`); Linux
+    /// takes it. (With `OCIO_RS_ORACLE_NO_CACHE` set there is no cache to check.)
+    #[test]
+    fn a_call_whose_child_died_is_asked_again() {
+        let oracle = Oracle::get();
+        let set = |value: String| {
+            json!({
+                "context": "new",
+                "calls": [{"call": "SetEnvVariable", "on": "OCIO",
+                           "args": ["OCIO_RS_CACHE_PROBE", value]}],
+            })
+        };
+        let file =
+            |args: &Value| oracle.cache_file(&request("context_env_calls", args.clone(), &[]));
+
+        // A child that succeeds: cached.
+        let short = set("x".to_string());
+        let Some(short_file) = file(&short) else {
+            return;
+        };
+        let _ = std::fs::remove_file(&short_file);
+        let result = oracle.call("context_env_calls", short.clone(), &[]).result;
+        assert!(result.get("crashed").is_none(), "{result}");
+        assert!(short_file.exists(), "a child's success wasn't cached");
+
+        // A child that dies (Windows): not cached.
+        let long = set("x".repeat(32_767));
+        let long_file = file(&long).expect("the cache is on");
+        let _ = std::fs::remove_file(&long_file);
+        let result = oracle.call("context_env_calls", long, &[]).result;
+        assert_eq!(result.get("crashed").is_some(), cfg!(windows), "{result}");
+        assert_eq!(long_file.exists(), !cfg!(windows), "{result}");
+
+        // A cached report of a dead child (an earlier version wrote them) isn't replayed: the
+        // oracle runs again, and its response replaces the entry.
+        let stale = json!({
+            "ok": true,
+            "result": {"crashed": {"returncode": 1, "stderr": {"bytes": "00"}}},
+            "blobs": [],
+        });
+        write_atomically(&short_file, &frame(&stale, &[]));
+        let result = oracle.call("context_env_calls", short, &[]).result;
+        assert!(result.get("crashed").is_none(), "{result}");
+        let cached = parse_response(&std::fs::read(&short_file).expect("cached")).unwrap();
+        assert!(cached.result.get("crashed").is_none(), "{}", cached.result);
+
+        // A failed call: not cached.
+        let refused =
+            json!({"context": "new", "calls": [{"call": "SetCurrentConfig", "on": "OCIO"}]});
+        let refused_file = file(&refused).expect("the cache is on");
+        let _ = std::fs::remove_file(&refused_file);
+        assert!(oracle.try_call("context_env_calls", refused, &[]).is_err());
+        assert!(!refused_file.exists(), "a failed call was cached");
     }
 
     /// The cache identity covers every file of the oracle's package, whatever its extension,
