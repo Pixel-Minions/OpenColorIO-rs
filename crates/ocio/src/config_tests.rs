@@ -7394,3 +7394,634 @@ fn inactive_color_space() {
     assert_eq!(name(&config, Ref::Scene, Vis::All, 10), b"");
     assert_eq!(name(&config, Ref::Display, Vis::All, 1), b"display1");
 }
+
+/// `pystring::os::path::normpath(pystring::os::path::join(paths))` of the test files directory
+/// and `parts` (Config_tests.cpp:10032-10040 @ v2.5.2).
+fn test_file_path(parts: &[&[u8]]) -> Vec<u8> {
+    use crate::fileformats::test_utils::get_test_files_dir;
+    use ocio_ops::utils::pystring::os_path;
+
+    let mut paths = vec![get_test_files_dir().into_bytes()];
+    paths.extend(parts.iter().map(|p| p.to_vec()));
+    let joined = if cfg!(windows) {
+        os_path::join_nt_all(&paths)
+    } else {
+        os_path::join_posix_all(&paths)
+    };
+    os_path::normpath(&joined)
+}
+
+/// Port of `OCIO_ADD_TEST(Config, context_variable_with_sanity_check)` @ v2.5.2.
+#[test]
+fn context_variable_with_sanity_check() {
+    use crate::fileformats::test_utils::get_test_files_dir;
+
+    let _env = EnvGuard::new();
+    // Add some extra tests for the environment section. If declared, the context is then
+    // in the predefined mode so it must be self-contained i.e. contains all needed context
+    // variables. It also means that sanity check must throw if at least one context variable
+    // used in the config, is missing.
+
+    const CONFIG: &str = "ocio_profile_version: 2\n\
+\n\
+search_path: luts\n\
+\n\
+environment: {CS2: lut1d_green.ctf}\n\
+\n\
+roles:\n  \
+default: cs1\n\
+\n\
+displays:\n  \
+disp1:\n    \
+- !<View> {name: view1, colorspace: cs2}\n\
+\n\
+\n\
+colorspaces:\n  \
+- !<ColorSpace>\n    \
+name: cs1\n\
+\n  \
+- !<ColorSpace>\n    \
+name: cs2\n    \
+from_scene_reference: !<FileTransform> {src: $CS2}\n";
+
+    let config = Config::create_from_stream(CONFIG.as_bytes()).unwrap();
+    config.validate().unwrap();
+
+    // Set the right search_path. Note that the ctf files used below already exist on that path.
+    let mut cfg = (*config).clone();
+    cfg.clear_search_paths();
+    cfg.add_search_path(get_test_files_dir());
+
+    cfg.processor_for_display_view("cs1", "disp1", "view1", TransformDirection::Forward)
+        .unwrap();
+
+    // Having an 'environment' section in a config means to only keep the listed context
+    // variables. The context is then in the predefined mode i.e. ENV_ENVIRONMENT_LOAD_PREDEFINED.
+
+    assert_eq!(cfg.num_environment_vars(), 1);
+    assert_eq!(cfg.current_context().get().num_string_vars(), 1);
+    assert_eq!(
+        cfg.current_context().get().environment_mode(),
+        EnvironmentMode::LoadPredefined
+    );
+
+    {
+        cfg.add_environment_var("CS2", Some(b"lut1d_green.ctf"));
+        assert_eq!(cfg.num_environment_vars(), 1);
+        cfg.validate().unwrap();
+    }
+
+    {
+        cfg.add_environment_var("CS2", Some(b"exposure_contrast_log.ctf"));
+        assert_eq!(cfg.num_environment_vars(), 1);
+        cfg.validate().unwrap();
+    }
+
+    {
+        // $TOTO is added but not used.
+        // Even if that's useless it does not break anything.
+
+        cfg.add_environment_var("TOTO", Some(b"exposure_contrast_log.ctf"));
+        assert_eq!(cfg.num_environment_vars(), 2);
+        cfg.validate().unwrap();
+    }
+
+    {
+        // Update $CS2 to use $TOTO. That's an invalid case because a context variable value can
+        // only be a string (i.e. "VAR: env") or the context variable itself (i.e. "VAR: $VAR").
+        cfg.add_environment_var("CS2", Some(b"$TOTO"));
+        assert_eq!(cfg.num_environment_vars(), 2);
+        check_throw_what(
+            cfg.validate(),
+            "Unresolved context variable in environment declaration 'CS2 = $TOTO'.",
+        );
+    }
+
+    {
+        // Remove $TOTO from the context. That's an invalid case as explained above.
+        cfg.add_environment_var("TOTO", None);
+        assert_eq!(cfg.num_environment_vars(), 1);
+
+        check_throw_what(
+            cfg.validate(),
+            "Unresolved context variable in environment declaration 'CS2 = $TOTO'.",
+        );
+        check_throw_what(
+            cfg.processor_for_display_view("cs1", "disp1", "view1", TransformDirection::Forward),
+            "The specified file reference '$CS2' could not be located",
+        );
+    }
+
+    {
+        // Remove $CS2 from the context. That's a faulty case because $CS2 is used so,
+        // the environment is not self-contained.
+        cfg.add_environment_var("CS2", None);
+        assert_eq!(cfg.num_environment_vars(), 0);
+
+        check_throw_what(
+            cfg.validate(),
+            "The file transform source cannot be resolved: '$CS2'.",
+        );
+        check_throw_what(
+            cfg.processor_for_display_view("cs1", "disp1", "view1", TransformDirection::Forward),
+            "The specified file reference '$CS2' could not be located",
+        );
+    }
+
+    {
+        cfg.add_environment_var("CS2", Some(b"lut1d_green.ctf"));
+
+        // Several faulty cases for the 'search_path'.
+
+        cfg.clear_search_paths();
+        check_throw_what(
+            cfg.validate(),
+            "The search_path must not be empty if there are FileTransforms.",
+        );
+
+        cfg.clear_search_paths();
+        // NB: Not sure this is desirable, but setting a nullptr is the same as setting "".
+        // In this case, getNumSearchtPaths == 1, which is potentially confusing.
+        cfg.set_search_path(b"");
+        check_throw_what(
+            cfg.validate(),
+            "The search_path must not be an empty string if there are FileTransforms.",
+        );
+
+        cfg.clear_search_paths();
+        cfg.set_search_path("");
+        check_throw_what(
+            cfg.validate(),
+            "The search_path must not be an empty string if there are FileTransforms.",
+        );
+
+        cfg.clear_search_paths();
+        cfg.set_search_path("$MYPATH");
+        check_throw_what(
+            cfg.validate(),
+            "The search_path '$MYPATH' cannot be resolved.",
+        );
+
+        // Note that search_path is mandatory only when at least one file transform is present
+        // in the config.
+
+        cfg.clear_search_paths();
+        cfg.set_search_path(b"");
+        cfg.add_display_view("disp1", "view1", "cs1", "").unwrap();
+        cfg.remove_color_space("cs2");
+        cfg.validate().unwrap();
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Config, context_variable_with_search_path_v1)` @ v2.5.2.
+#[test]
+fn context_variable_with_search_path_v1() {
+    use crate::fileformats::test_utils::get_test_files_dir;
+
+    let _env = EnvGuard::new();
+    // Test a search_path containing a context variable for a v1 config file.
+
+    // Note: The config validation does not check the path existence, it checks only if the path
+    // can be successfully resolved. But the processor creation needs to have at least one
+    // existing path. That's why the tests below check for the config validation and the
+    // processor creation.
+
+    const CONFIG: &str = "ocio_profile_version: 1\n\
+\n\
+search_path: $ENV1\n\
+\n\
+roles:\n  \
+default: cs1\n  \
+reference: cs1\n\
+\n\
+displays:\n  \
+disp1:\n    \
+- !<View> {name: view1, colorspace: cs2}\n\
+\n\
+colorspaces:\n  \
+- !<ColorSpace>\n    \
+name: cs1\n\
+\n  \
+- !<ColorSpace>\n    \
+name: cs2\n    \
+from_reference: !<FileTransform> {src: lut1d_green.ctf}\n";
+
+    // $ENV1 is missing.
+    let mut cfg = (*Config::create_from_stream(CONFIG.as_bytes()).unwrap()).clone();
+    check_throw_what(
+        cfg.validate(),
+        "The search_path '$ENV1' cannot be resolved.",
+    );
+    check_throw_what(
+        cfg.processor_between("cs1", "cs2"),
+        if cfg!(windows) {
+            "The specified file reference 'lut1d_green.ctf' could not be located. \
+             The following attempts were made: '$ENV1\\lut1d_green.ctf'."
+        } else {
+            "The specified file reference 'lut1d_green.ctf' could not be located. \
+             The following attempts were made: '$ENV1/lut1d_green.ctf'."
+        },
+    );
+
+    // $ENV1 now exists.
+    cfg.add_environment_var("ENV1", Some(get_test_files_dir().as_bytes()));
+    cfg.validate().unwrap();
+    cfg.processor_between("cs1", "cs2").unwrap();
+
+    // $ENV1 is faulty.
+    cfg.add_environment_var("ENV1", Some(b"faulty/path"));
+    cfg.validate().unwrap(); // Success because there is at least one resolved path.
+    check_throw_what(
+        cfg.processor_between("cs1", "cs2"),
+        if cfg!(windows) {
+            "The specified file reference 'lut1d_green.ctf' could not be located. \
+             The following attempts were made: 'faulty\\path\\lut1d_green.ctf'."
+        } else {
+            "The specified file reference 'lut1d_green.ctf' could not be located. \
+             The following attempts were made: 'faulty/path/lut1d_green.ctf'."
+        },
+    );
+
+    cfg.add_environment_var("ENV1", None);
+
+    {
+        // Change the search_path to have at least one successful path i.e. the first one.
+        let search_path = get_test_files_dir() + ":$ENV1";
+        cfg.set_search_path(search_path);
+        cfg.validate().unwrap();
+        cfg.processor_between("cs1", "cs2").unwrap();
+    }
+
+    {
+        // Change the search_path to have at least one successful path i.e. the second one.
+        let search_path = "$ENV1:".to_owned() + &get_test_files_dir();
+        cfg.set_search_path(search_path);
+        cfg.validate().unwrap();
+        cfg.processor_between("cs1", "cs2").unwrap();
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Config, context_variable_with_search_path_v2)` @ v2.5.2.
+#[test]
+fn context_variable_with_search_path_v2() {
+    use crate::fileformats::test_utils::get_test_files_dir;
+
+    let _env = EnvGuard::new();
+    // Test a search_path containing a context variable for a v2 config file.
+
+    // Note: The config validation does not check the path existence, it checks only if the path
+    // can be successfully resolved. But the processor creation needs to have at least one
+    // existing path. That's why the tests below check for the config validation and the
+    // processor creation.
+
+    let config = "ocio_profile_version: 2\n\
+\n\
+environment: {ENV1: "
+        .to_owned()
+        + &get_test_files_dir()
+        + "}\n\
+\n\
+search_path: $ENV1\n\
+\n\
+roles:\n  \
+default: cs1\n  \
+reference: cs1\n\
+\n\
+displays:\n  \
+disp1:\n    \
+- !<View> {name: view1, colorspace: cs2}\n\
+\n\
+colorspaces:\n  \
+- !<ColorSpace>\n    \
+name: cs1\n\
+\n  \
+- !<ColorSpace>\n    \
+name: cs2\n    \
+from_scene_reference: !<FileTransform> {src: lut1d_green.ctf}\n";
+
+    // $ENV1 exists in the config itself.
+    let mut cfg = (*Config::create_from_stream(config.as_bytes()).unwrap()).clone();
+    cfg.validate().unwrap();
+    cfg.processor_between("cs1", "cs2").unwrap();
+
+    // Remove the context variable so, there is no more successful path.
+    cfg.add_environment_var("ENV1", None);
+
+    check_throw_what(
+        cfg.validate(),
+        "The search_path '$ENV1' cannot be resolved.",
+    );
+
+    check_throw_what(
+        cfg.processor_between("cs1", "cs2"),
+        if cfg!(windows) {
+            "The specified file reference 'lut1d_green.ctf' could not be located. \
+             The following attempts were made: '$ENV1\\lut1d_green.ctf'."
+        } else {
+            "The specified file reference 'lut1d_green.ctf' could not be located. \
+             The following attempts were made: '$ENV1/lut1d_green.ctf'."
+        },
+    );
+
+    // The following tests validate that in a list of search paths at least one can be resolved.
+
+    {
+        // Change the search_path to have at least one successful path i.e. the first one.
+        let search_path = get_test_files_dir() + ":$ENV1";
+        cfg.set_search_path(search_path);
+        cfg.validate().unwrap();
+        cfg.processor_between("cs1", "cs2").unwrap();
+    }
+
+    {
+        // Change the search_path to have at least one successful path i.e. the second one.
+        let search_path = "$ENV1:".to_owned() + &get_test_files_dir();
+        cfg.set_search_path(search_path);
+        cfg.validate().unwrap();
+        cfg.processor_between("cs1", "cs2").unwrap();
+    }
+
+    {
+        // Change the search_path to have at least one successful path i.e. the first one.
+        let search_path = get_test_files_dir() + ":";
+        cfg.set_search_path(search_path);
+        cfg.validate().unwrap();
+        cfg.processor_between("cs1", "cs2").unwrap();
+    }
+
+    {
+        // Change the search_path to have at least one successful path i.e. the second one.
+        let search_path = ":".to_owned() + &get_test_files_dir();
+        cfg.set_search_path(search_path);
+        cfg.validate().unwrap();
+        cfg.processor_between("cs1", "cs2").unwrap();
+    }
+
+    // The following test highlights the difference between the validation and the processor
+    // creation related to the search paths i.e. resolved vs. existing search paths.
+
+    {
+        // Change the search_path to have at least one potentially successful path
+        // i.e. the second one.
+        let search_path = "$ENV1:faulty/path";
+        cfg.set_search_path(search_path);
+
+        // The validation succeeds because the first path does not resolve but the second path
+        // does.
+        cfg.validate().unwrap();
+
+        // The first path does not resolve and the second path does resolve but it does not
+        // exist so the processor creation fails.
+        check_throw_what(
+            cfg.processor_between("cs1", "cs2"),
+            if cfg!(windows) {
+                "The specified file reference 'lut1d_green.ctf' could not be located. \
+                 The following attempts were made: \
+                 '$ENV1\\lut1d_green.ctf' : 'faulty\\path\\lut1d_green.ctf'."
+            } else {
+                "The specified file reference 'lut1d_green.ctf' could not be located. \
+                 The following attempts were made: \
+                 '$ENV1/lut1d_green.ctf' : 'faulty/path/lut1d_green.ctf'."
+            },
+        );
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Config, look_fallback)` @ v2.5.2.
+#[test]
+fn look_fallback() {
+    use crate::fileformats::test_utils::get_test_files_dir;
+
+    let env = EnvGuard::new();
+    // Test that the look fallback syntax works for look with missing file.
+    // The fallback syntax allow to specify looks to try in order and use the
+    // first valid one. When the syntax "my_look | " is used, the fallback
+    // is empty and there will be no look applied (no-op) if my_look is invalid.
+    // This may happen if my_look relies on a missing environment variable.
+
+    {
+        let config_text = "ocio_profile_version: 1\n\
+\n\
+search_path: "
+            .to_owned()
+            + &get_test_files_dir()
+            + "\n\
+\n\
+roles:\n  \
+scene_linear: cs\n\
+\n\
+displays:\n  \
+disp1:\n    \
+- !<View>\n      \
+name: view1\n      \
+colorspace: cs\n      \
+looks: missing_file_look | \n\
+\n\
+looks:\n  \
+- !<Look>\n    \
+name: missing_file_look\n    \
+process_space: cs\n    \
+transform: !<FileTransform> {src: \"${LOOK_CDL}.cc\"}\n\
+\n\
+colorspaces:\n  \
+- !<ColorSpace>\n    \
+name: cs\n\
+\n";
+
+        // Check that the look is correctly used when file is present.
+
+        env.set(&[("LOOK_CDL", "cdl_test1")]);
+
+        let config = Config::create_from_stream(config_text.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        let proc = config
+            .processor_for_display_view("cs", "disp1", "view1", TransformDirection::Forward)
+            .unwrap();
+        assert!(!proc.is_no_op().unwrap());
+
+        // Now remove the variable pointing to the look file and check that we fallback to a
+        // no-op.
+
+        env.set(&[]);
+
+        let config = Config::create_from_stream(config_text.as_bytes()).unwrap();
+
+        let proc = config
+            .processor_for_display_view("cs", "disp1", "view1", TransformDirection::Forward)
+            .unwrap();
+        assert!(proc.is_no_op().unwrap());
+    }
+}
+
+/// The config of Config_tests.cpp's config I/O proxy tests: `configs/context_test1/config.ocio`
+/// of the test files.
+fn context_test1_config_path() -> Vec<u8> {
+    test_file_path(&[b"configs", b"context_test1", b"config.ocio"])
+}
+
+/// A proxy that reads the config and its LUTs from `configs/context_test1` of the test files.
+///
+/// Port of `CIOPTest` (Config_tests.cpp:10045-10119 @ v2.5.2).
+struct ContextTest1Proxy;
+
+impl crate::config_io_proxy::ConfigIoProxy for ContextTest1Proxy {
+    fn config_data(&self) -> Result<Vec<u8>> {
+        // Get config data from filesystem, database, memory, etc.
+        // In this example, the config is simply coming from the filesystem.
+        // Return a stream to the config.
+        let config_path = context_test1_config_path();
+        std::fs::read(String::from_utf8(config_path.clone()).unwrap()).map_err(|_| {
+            Exception::new(
+                [
+                    b"Error could not read config file : ".as_slice(),
+                    &config_path,
+                ]
+                .concat(),
+            )
+        })
+    }
+
+    fn lut_data(&self, filepath: &[u8]) -> Result<Vec<u8>> {
+        let lut_path = test_file_path(&[b"configs", b"context_test1", filepath]);
+        std::fs::read(String::from_utf8(lut_path.clone()).unwrap()).map_err(|_| {
+            Exception::new([b"Error could not read LUT file : ".as_slice(), &lut_path].concat())
+        })
+    }
+
+    fn fast_lut_file_hash(&self, filename: &[u8]) -> Result<Vec<u8>> {
+        let lut_path = test_file_path(&[b"configs", b"context_test1", filename]);
+
+        // Check if the file is present.
+        if std::fs::File::open(String::from_utf8(lut_path.clone()).unwrap()).is_ok() {
+            // This is a bad hash, simply using the filename as the hash for simplicity and
+            // demonstration purposes.
+            return Ok(lut_path);
+        }
+
+        // Return empty since the file couldn't be found.
+        Ok(Vec::new())
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Config, create_from_config_io_proxy)` @ v2.5.2.
+#[test]
+fn create_from_config_io_proxy() {
+    let _env = EnvGuard::new();
+
+    {
+        let ciop = std::sync::Arc::new(ContextTest1Proxy);
+
+        let config = Config::create_from_config_io_proxy(ciop).unwrap();
+        config.validate().unwrap();
+
+        // Simple check on the number of color spaces in the test config.
+        assert_eq!(config.num_color_spaces(), 13);
+
+        // Simple test to exercise ConfigIOProxy.
+        let proc = config
+            .processor_between("plain_lut1_cs", "shot1_lut1_cs")
+            .unwrap();
+        proc.default_cpu_processor().unwrap();
+    }
+}
+
+/// A proxy that serves every LUT as one CTF of an exponent, and no config.
+///
+/// Port of `CIOPTest` (Config_tests.cpp:10162-10197 @ v2.5.2).
+struct ExponentProxy;
+
+impl crate::config_io_proxy::ConfigIoProxy for ExponentProxy {
+    fn config_data(&self) -> Result<Vec<u8>> {
+        Err(Exception::new(
+            "getConfigData() should not be called when using setConfigIOProxy()",
+        ))
+    }
+
+    fn lut_data(&self, _filepath: &[u8]) -> Result<Vec<u8>> {
+        // For the purpose of this simple test, blindly replace any transform
+        // by an exponent which we can easily detect in the test below.
+        let new_lut = r#"
+<ProcessList version="2" id="UIDEC42">
+    <Exponent inBitDepth="32f" outBitDepth="32f" style="basicRev">
+        <ExponentParams gamma="2.2" />
+    </Exponent>
+</ProcessList>"#;
+
+        Ok(new_lut.as_bytes().to_vec())
+    }
+
+    fn fast_lut_file_hash(&self, filename: &[u8]) -> Result<Vec<u8>> {
+        // We don't care about the original file existence for the purpose of this test,
+        // a typical implementation may check that the requested filename is expected and
+        // generate a proper hash not only based on the filename.
+        Ok(filename.to_vec())
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(Config, set_config_io_proxy)` @ v2.5.2.
+#[test]
+fn set_config_io_proxy() {
+    let _env = EnvGuard::new();
+    let config_path = context_test1_config_path();
+
+    {
+        let ciop = std::sync::Arc::new(ExponentProxy);
+
+        let config = Config::create_from_file(&config_path).unwrap();
+        config.validate().unwrap();
+
+        // Simple check on the number of color spaces in the test config.
+        assert_eq!(config.num_color_spaces(), 13);
+
+        // Check the config behaviour before patching with IOProxy.
+        {
+            let proc = config
+                .processor_between("plain_lut1_cs", "shot1_lut1_cs")
+                .unwrap();
+            proc.default_cpu_processor().unwrap();
+            assert!(!proc.is_no_op().unwrap());
+
+            let group = proc.create_group_transform().unwrap();
+            assert_eq!(group.num_transforms(), 2);
+            assert_eq!(
+                group.transform(0).unwrap().transform_type(),
+                crate::transform::TransformType::Matrix
+            );
+            assert_eq!(
+                group.transform(1).unwrap().transform_type(),
+                crate::transform::TransformType::Matrix
+            );
+        }
+
+        // Required to clear the file cache and force OCIO to call the IOProxy methods.
+        crate::caching::clear_all_caches();
+
+        // Check the config behaviour after patching with IOProxy, any FileTransform
+        // gets replaced by an ExponentTransform.
+        {
+            let mut config_proxy = (*config).clone();
+            config_proxy.set_config_io_proxy(Some(ciop));
+
+            let proc = config_proxy
+                .processor_between("plain_lut1_cs", "shot1_lut1_cs")
+                .unwrap();
+            proc.default_cpu_processor().unwrap();
+            assert!(!proc.is_no_op().unwrap());
+
+            let group = proc.create_group_transform().unwrap();
+            assert_eq!(group.num_transforms(), 2);
+            assert_eq!(
+                group.transform(0).unwrap().transform_type(),
+                crate::transform::TransformType::Exponent
+            );
+            assert_eq!(
+                group.transform(1).unwrap().transform_type(),
+                crate::transform::TransformType::Exponent
+            );
+        }
+
+        // Clear cache for following unit tests.
+        crate::caching::clear_all_caches();
+    }
+}
