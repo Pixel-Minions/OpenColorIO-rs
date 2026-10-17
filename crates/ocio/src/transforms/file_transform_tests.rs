@@ -641,9 +641,10 @@ fn write_reference_chain(dir: &std::path::Path, n: usize) -> String {
     path.trim_start_matches("//?/").to_owned()
 }
 
-/// A chain of CTF references [`MAX_FILE_NESTING`] files long builds, on a 1 MiB thread at any
-/// optimization level; one more file is refused, where upstream overflows its stack
-/// (docs/improvements.md, U-76). The wheel's processor of the longest chain is compared in
+/// A chain of CTF references [`MAX_FILE_NESTING`] (256) files long builds on a 1 MiB thread;
+/// one more file is refused, where upstream overflows its stack (docs/improvements.md, U-76).
+/// On Windows a 1 MiB thread holds 370 files at opt-level 0 (about 2.7 KB a file) and 1,100
+/// at opt-level 1, the test profile's (measured 2026-10-17), so the chain fits at either. The wheel's processor of the longest chain is compared in
 /// `tests/file_format_ctf_oracle.rs`.
 #[test]
 fn chains_of_references_stop_at_the_limit() {
@@ -684,7 +685,7 @@ fn chains_of_references_stop_at_the_limit() {
     );
     assert!(
         err.ends_with(&format!(
-            "c{}.ctf {wrap}The CTF references nest more than 1000 files deep: upstream's stack \
+            "c{}.ctf {wrap}The CTF references nest more than 256 files deep: upstream's stack \
              overflows.",
             MAX_FILE_NESTING - 1
         )),

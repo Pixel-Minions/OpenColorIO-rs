@@ -1696,3 +1696,140 @@ fn write_formats_are_the_wheels() {
         .collect();
     assert_eq!(wheel, port);
 }
+
+/// NaN parameters, negative and with a payload, and infinities, in each writer: the CDL,
+/// gamma, exponent, log and range writers stream a `double` as it is (a negative NaN is
+/// `-nan(ind)` on Windows and `-nan` on Linux), while the FixedFunction params and the LUT
+/// arrays write NaN through `WriteValue`, `nan` on both (docs/improvements.md, I-7). The cases
+/// a writer's validation refuses compare their messages.
+#[test]
+fn nan_parameters_write_as_in_the_wheel() {
+    let neg_nan = f64::from_bits(0xfff8_0000_0000_0000);
+    let pay_nan = f64::from_bits(0x7ff8_0000_0000_1234);
+    let mut ops = vec![
+        cdl(
+            "a CDL of NaNs and infinities",
+            [
+                [neg_nan, 1., 1.],
+                [pay_nan, f64::NEG_INFINITY, 0.],
+                [1., neg_nan, f64::INFINITY],
+            ],
+            neg_nan,
+            CdlStyle::NoClamp,
+            Forward,
+        ),
+        cdl(
+            "a CDL of a negative NaN offset",
+            [[1.0, 1.0, 1.0], [neg_nan, 0.0, 0.0], [1.0, 1.0, 1.0]],
+            1.0,
+            CdlStyle::NoClamp,
+            Forward,
+        ),
+        exponent(
+            "an exponent of NaNs",
+            [neg_nan, pay_nan, f64::INFINITY, 1.0],
+            NegativeStyle::PassThru,
+            Forward,
+        ),
+        exponent(
+            "an exponent of a NaN alpha",
+            [2.0, 2.0, 2.0, neg_nan],
+            NegativeStyle::Mirror,
+            Forward,
+        ),
+        exponent_linear(
+            "an exponent with linear of NaNs",
+            [neg_nan, 2.4, 2.4, 1.],
+            [pay_nan, 0.05, f64::NEG_INFINITY, 0.],
+            NegativeStyle::Linear,
+            Forward,
+        ),
+        log("a log of a NaN base", neg_nan, Forward),
+        log("a log of an infinite base", f64::INFINITY, Inverse),
+        log_affine(
+            "a log affine of NaNs",
+            10.0,
+            [
+                [neg_nan, 1., 1.],
+                [pay_nan, 0., 0.],
+                [1., f64::INFINITY, 1.],
+                [0., 0., f64::NEG_INFINITY],
+            ],
+            Forward,
+        ),
+        range(
+            "a range of NaNs",
+            [Some(neg_nan), Some(1.0), Some(pay_nan), Some(f64::INFINITY)],
+            RangeStyle::Clamp,
+            (BitDepth::Uint10, BitDepth::F16),
+            Forward,
+        ),
+        range(
+            "a range of a negative NaN maximum",
+            [Some(0.0), Some(neg_nan), Some(0.0), Some(neg_nan)],
+            RangeStyle::NoClamp,
+            (BitDepth::F32, BitDepth::F32),
+            Forward,
+        ),
+        range(
+            "a range of a negative NaN output minimum",
+            [Some(0.0), Some(1.0), Some(neg_nan), Some(1.0)],
+            RangeStyle::Clamp,
+            (BitDepth::F32, BitDepth::F32),
+            Forward,
+        ),
+        range(
+            "a range of a minimum only",
+            [Some(-0.0), None, Some(5e-324), None],
+            RangeStyle::Clamp,
+            (BitDepth::Uint16, BitDepth::Uint8),
+            Forward,
+        ),
+    ];
+    ops.extend(fixed_function(
+        "a FixedFunction of a negative NaN power",
+        FixedFunctionStyle::AcesGamutComp13,
+        &[1.147, 1.264, 1.312, 0.815, 0.803, 0.880, neg_nan],
+        Forward,
+    ));
+    ops.extend(fixed_function(
+        "a FixedFunction of NaNs",
+        FixedFunctionStyle::AcesGamutComp13,
+        &[
+            neg_nan,
+            pay_nan,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            -0.0,
+            5e-324,
+            1.0,
+        ],
+        Forward,
+    ));
+    // The NaNs by their bits on both sides: an `f32` to `f64` conversion of a NaN the
+    // optimizer may fold (in release) doesn't keep the sign.
+    let neg_nan_f32 = f32::from_bits(0xffc0_0000);
+    let mut values = Lut1DTransform::new();
+    values.set_length(2).unwrap();
+    values
+        .set_value(0, neg_nan_f32, f32::from_bits(0x7fc0_0000), f32::INFINITY)
+        .unwrap();
+    let spec = json!({"class": "Lut1DTransform", "calls": [
+        ["setLength", 2],
+        ["setValue", 0, {"f64": 0xfff8_0000_0000_0000u64}, {"f64": 0x7ff8_0000_0000_0000u64},
+         f64_spec(f64::INFINITY)],
+    ]});
+    ops.push(Case::new("a 1D LUT of NaNs", spec, values));
+    let mut cases = Vec::new();
+    for case in &ops {
+        for format in [CTF, CLF] {
+            cases.push(group_case(
+                &case.label,
+                std::slice::from_ref(case),
+                &[],
+                format,
+            ));
+        }
+    }
+    check_writes(&cases);
+}

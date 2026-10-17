@@ -4718,8 +4718,8 @@ status = "done"
 path = "tests/cpu/fileformats/ctf/CTFTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/fileformats/ctf/ctf_transform_tests.rs"]
-status = "partial"
-note = "p4-ctf-read-1 4.5a: read_version, accessors; version_write comes with the writer (4.6e)"
+status = "done"
+note = "p4-ctf-read-1 4.5a: read_version, accessors; p4-ctf-read-3 4.6e: version_write"
 
 [[file]]
 path = "tests/cpu/fileformats/ctf/IndexMapping_tests.cpp"

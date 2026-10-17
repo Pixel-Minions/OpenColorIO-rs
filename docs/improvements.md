@@ -169,11 +169,21 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   - shader text, whose literals print the parameter (`getFloatString`,
     `GpuShaderUtils.cpp:21-35`; `gpu_shader`, over 1230 shaders in all 10 languages;
     `oracle/ocio_oracle/gpu.py`, 470d0b7).
+  - the CLF/CTF writer (`fileformats/ctf/CTFTransform.cpp` @ v2.5.2), which streams most
+    parameters as they are: a CDL's slope, offset and power and its saturation (`CDLWriter`,
+    813-933), a gamma's or an exponent's parameters (`AddGammaParams`, 1181-1214), a log's
+    (`AddLogParam`, 1967-1975) and a range's bounds (`WriteTag`, 2474-2480). A negative NaN
+    that validation lets through (a CDL's offset, an exponent's alpha, a log's base or
+    slopes) is written `-nan(ind)` on Windows and `-nan` on Linux; a range can't hold one, a
+    NaN bound being an unset one. The FixedFunction params and the LUT arrays go through
+    `WriteValue` (519-539 @ v2.5.2), which writes `nan` on both (`write_transform`, p4-ctf-read-3).
 - **Who notices:** anyone comparing text, messages, shaders or cache IDs across platforms for
   transforms with NaN parameters.
 - **A fix:** one spelling on both platforms.
 - **Status:** matched in `cfmt` (WP 0.5); each op's text, validation messages and shader
-  literals use it as the op lands (D12).
+  literals use it as the op lands (D12). The CLF/CTF writer's cases:
+  `nan_parameters_write_as_in_the_wheel` (`crates/ocio/tests/file_format_ctf_write_oracle.rs`),
+  checked on both platforms.
 
 ### I-8. Built-in configs have Windows line endings on Windows
 
@@ -2594,6 +2604,30 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `op_cases_h`'s "inverted other than true" and "inverted true, then false" check it with the
   wheel.
 
+### I-203. The CLF/CTF writer pads its arrays with a width that grows
+
+- **Upstream:** `WriteValues` (`fileformats/ctf/CTFTransform.cpp:561-671` @ v2.5.2) formats each
+  array value in an `ostringstream` whose width it set once, for the bit depth (3 for 8i, 4 for
+  10i and 12i, 5 for 16i, 11 for 16f and 32f floats). A stream's width resets to 0 after each
+  insertion, but the padding goes into the value's text first, and when a value's text is
+  longer than the width, the width becomes that length for the values after it. So each value
+  is padded to the longest text written before it in the array, not to the bit depth's width,
+  and one long value shifts every later column. Upstream's own expected text shows it: in
+  `OCIO_ADD_TEST(CTFTransform, lut1d_10i_ctf)` (`FileFormatCTF_tests.cpp:7894-7925`) the third
+  row is `   1023    1023    1023`, padded to the 7 characters of `4011.12` in the row above.
+  The GradingRGBCurve writer's `writeCurve` (`CTFTransform.cpp:1559-1603`) sets a width of 11
+  with `SetOStream` and then streams `x << " " << y`: only the first number of each control
+  point line, and only the first slope, is padded.
+- **Who notices:** readers of written CLF and CTF files, whose arrays don't line up in columns
+  once a value needs more digits.
+- **A fix:** set the width before each value, or pad all values to the widest one.
+- **Status:** matched in `p4-ctf-read-3` (`crates/ocio/src/fileformats/ctf/ctf_writer.rs`,
+  `write_values` and `GradingRgbCurveWriter::write_curve`); the ported `lut1d_10i_ctf` and
+  `bitdepth_ctf` check it against upstream's expected text, and the LUT and RGB curve cases of
+  `crates/ocio/tests/file_format_ctf_write_oracle.rs` and
+  `crates/ocio/src/fileformats/file_format_ctf_write_oracle_tests.rs`, check it with the
+  wheel.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
@@ -3374,24 +3408,31 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   | Linux | 9,000 files | 10,000 files |
 
   The depth varies with the caller's stack.
-- **Who notices:** a machine-made chain of thousands of CTF files; nothing hand-written.
-- **Decided** (the owner's general rule, refusing at about half the lowest measured crash, as
-  U-58 and U-60 do; coordinator, 2026-10-16): the port refuses a chain of more than 1,000
-  files (`MAX_FILE_NESTING`) with "The CTF references nest more than 1000 files deep:
-  upstream's stack overflows." Between that and the wheel's crash the port refuses what the
-  wheel builds. The port keeps each file's frames small (the file's loading and the
-  reference's file transform are out of line: about 880 bytes a file in a debug build on
-  Windows), so that a chain of 1,000 files builds on a 1 MiB stack: in debug on Windows, 1,100
-  files build there and 1,150 overflow it. The references recurse through the file transform
-  alone, never through `BuildOps`, so the two limits count apart: U-58's 256 levels of nested
-  transforms can only come before a chain of references on the stack, never between its
-  files. A test of that mixed chain (U-58's longest chain of color spaces, the last one's
-  transform a file transform starting a chain of 1,000 files) needs the color space
-  transform's ops, which this card's base doesn't build yet: it comes with the card's
-  re-application onto `phase0`.
+- **Who notices:** a machine-made chain of hundreds of CTF files; nothing hand-written.
+- **Decided** (the owner's general rule, refusing where the port's own stack still holds the
+  chain; owner, 2026-10-17, after the coordinator's first limit of 1,000 of 2026-10-16): the
+  port refuses a chain of more than 256 files (`MAX_FILE_NESTING`, U-58's limit) with "The CTF
+  references nest more than 256 files deep: upstream's stack overflows." Between that and the
+  wheel's crash the port refuses what the wheel builds. The port's frames per file (its
+  loading and the reference's file transform are kept out of line) decide what a thread
+  holds; a 1 MiB thread on Windows (measured 2026-10-17):
+
+  | Build | Builds | Overflows |
+  |---|---|---|
+  | opt-level 0 | 370 files | 380 files (about 2.7 KB a file) |
+  | opt-level 1, the test profile | 1,100 files | 1,150 files (about 880 bytes a file) |
+
+  So 256 files fit at every optimization level, with room for the caller's frames. The
+  references recurse through the file transform alone, never through `BuildOps`, so the two
+  limits count apart: U-58's 256 levels of nested transforms can only come before a chain of
+  references on the stack, never between its files. A test of that mixed chain (U-58's longest
+  chain of color spaces, the last one's transform a file transform starting a chain of 256
+  files, on a 1 MiB thread) needs the color space transform's ops, which this card's base
+  doesn't build yet: it comes with the card's re-application onto `phase0`, with U-58's own
+  limit checked at opt-level 0.
 - **Status:** done in `p4-ctf-read-3` (`crates/ocio/src/transforms/file_transform.rs`,
   `FileNesting`, in `build_file_transform_ops`). Tests: `chains_of_references_stop_at_the_limit`
-  (`file_transform_tests.rs`) builds a chain of 1,000 files on a 1 MiB thread, in debug and
-  release, and refuses 1,001; `references_resolve_as_in_the_wheel`'s "the longest chain"
-  (`crates/ocio/tests/file_format_ctf_oracle.rs`) checks the 1,000-file processor with the
+  (`file_transform_tests.rs`) builds a chain of 256 files on a 1 MiB thread, in debug and
+  release, and refuses 257; `references_resolve_as_in_the_wheel`'s "the longest chain"
+  (`crates/ocio/tests/file_format_ctf_oracle.rs`) checks the 256-file processor with the
   wheel.

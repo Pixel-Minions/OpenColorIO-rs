@@ -3986,7 +3986,7 @@ fn resolution_cases() -> Vec<(
 
 /// The number of files in the longest chain of CTF references the port follows
 /// (`MAX_FILE_NESTING`, docs/improvements.md U-76).
-const CHAIN_LIMIT: usize = 1000;
+const CHAIN_LIMIT: usize = 256;
 
 /// The processors of CTF files that reference others, through a config's search path, in
 /// both directions.

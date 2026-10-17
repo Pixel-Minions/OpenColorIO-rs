@@ -570,8 +570,10 @@ pub fn clear_file_transform_caches() {
 /// Upstream has no limit: a long chain of references recurses until the stack overflows,
 /// which ends the process (the wheel at 2,125 files on Windows and 10,000 on Linux,
 /// docs/improvements.md U-76). The port refuses deeper chains with an error instead (the
-/// owner's general rule), at about half the shallowest depth at which the wheel crashes.
-pub(crate) const MAX_FILE_NESTING: usize = 1000;
+/// owner's general rule), at 256 files, U-58's limit of nested transforms (owner, 2026-10-17):
+/// the port's own stack holds that many on a 1 MiB thread at every optimization level (370
+/// files fit at opt-level 0 on Windows, about 2.7 KB a file; 1,100 at opt-level 1).
+pub(crate) const MAX_FILE_NESTING: usize = 256;
 
 thread_local! {
     /// How deep [`build_file_transform_ops`] is nested on this thread.
