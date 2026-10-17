@@ -931,18 +931,17 @@ fn cinespace_bakes_as_in_the_wheel() {
     check_bakes(&cinespace());
 }
 
-/// Sizes whose `int` buffer size overflows to a negative value in the Windows wheel, which
-/// then refuses them before it writes anything ("vector too long", docs/improvements.md,
-/// U-77): the smallest cube (895: 895^3 * 3 = 2,150,752,125 wraps to -2,144,215,171), 1291
-/// (where the cube's entries themselves pass an `int`), and the smallest 1D and shaper sizes
-/// (715,827,883 * 3 = 2,147,483,649 wraps to -2,147,483,647). Only Windows: the Linux wheel
-/// computes these sizes in 64 bits and asks for 8.6 GB or more, which may be had, so its
-/// outcome depends on the machine. The sizes one below (894, 715,827,882) fit and allocate
-/// that much in both wheels, and sizes that wrap to a positive value (1290: 6,440,067,000 wraps
-/// to 2,145,099,704) make upstream write past its buffer: neither is run.
-#[cfg(target_os = "windows")]
+/// Sizes whose `int` buffer size wraps to a negative value in both wheels, which then refuse
+/// them before they write anything (docs/improvements.md, U-77): "vector too long" on Windows;
+/// on Linux libstdc++'s "vector::_M_default_append", or "std::bad_alloc" where GCC removed its
+/// size check. The sizes: the smallest cube (895: 895^3 * 3 = 2,150,752,125 wraps to
+/// -2,144,215,171), 1291 (where the cube's entries themselves pass an `int`), and the smallest
+/// 1D and shaper sizes (715,827,883 * 3 = 2,147,483,649 wraps to -2,147,483,647). The sizes one
+/// below (894, 715,827,882) fit and allocate 8.6 GB in both wheels, and sizes that wrap to a
+/// positive value (1290: 6,440,067,000 wraps to 2,145,099,704) make upstream write past its
+/// buffer: neither is run.
 #[test]
-fn overflowing_sizes_fail_as_in_the_windows_wheel() {
+fn overflowing_sizes_fail_as_in_the_wheel() {
     const ONE_D: i32 = 715_827_883;
     let mut cases = Vec::new();
     for format in [

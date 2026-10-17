@@ -3715,29 +3715,34 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `FileFormatHDL.cpp:680, 695, 720`, `FileFormatCSP.cpp:716, 732-733, 778-779` @ v2.5.2,
   and the cubes of the Iridas cube, itx, 3DL and Truelight bakes).
   From a cube size of 895 (`895^3 * 3 = 2,150,752,125`) or a 1D or shaper size of 715,827,883,
-  the product passes `INT_MAX`: undefined behaviour, which the wheels resolve differently.
-  - Windows (MSVC) wraps it to 32 bits. A negative result converts to a `size_t` past
-    `max_size()`, and `resize` throws "vector too long" before anything is written ("Error
-    baking spi3d:vector too long" for 895 and 1291, probed 2026-10-16). A positive result
-    (the cube size 1290: `6,440,067,000` wraps to `2,145,099,704`; the 1D size
-    `2^32 / 3 + 1`: wraps to 2) allocates fewer floats than the bake then writes: upstream
-    writes past its buffer.
-  - Linux (GCC) computes the product in 64 bits and asks for that much memory: "Error baking
-    spi3d:std::bad_alloc" for 1291 (25.8 GB, probed 2026-10-16), and a bake of tens of
-    gigabytes on a machine that has them.
+  the product passes `INT_MAX`: undefined behaviour. Both wheels wrap it to 32 bits (MSVC;
+  GCC multiplies 32-bit registers and sign-extends the result, `imul`, `movsxd` at
+  `libOpenColorIO.so` 0x2825df-0x2825eb in the Truelight bake), and `resize` takes the wrapped
+  `int` as a `size_t`.
+  - A negative result is past `max_size()`, and nothing is allocated or written. Windows:
+    "vector too long" ("Error baking spi3d:vector too long" for 895 and 1291, probed
+    2026-10-16). Linux: libstdc++'s "vector::_M_default_append" where `resize` checks the
+    size (the Resolve cube, Houdini and Cinespace bakes, their shapers, and the Spi1D,
+    Resolve and Houdini 1D LUTs), and "std::bad_alloc" where GCC removed the check (the
+    Spi3D, Iridas cube and itx, Flame 3DL and Truelight cubes: their cube size is at least 2,
+    so without overflow the product can't pass `max_size()`) and `operator new` is asked for
+    the wrapped size times 4 bytes (probed 2026-10-17).
+  - A positive result (the cube size 1290: `6,440,067,000` wraps to `2,145,099,704`; the 1D
+    size `2^32 / 3 + 1`: wraps to 2, and the buffer is resized to 2 floats) allocates fewer
+    floats than the bake then writes: upstream writes past its buffer, on both platforms.
 - **Who notices:** callers that set a cube, 1D or shaper size in the hundreds or millions.
 - **Decided** (the owner's general rule, 2026-09-30, as U-5 and U-65; confirmed for this case
   2026-10-16): the port refuses every size whose product passes an `int` before it allocates.
-  On Windows it gives the wheel's "vector too long" where the wrapped size is negative, and its
-  own "The LUT's <n> values overflow the int that sizes its buffer." where it is positive; on
-  Linux, "std::bad_alloc". Sizes that fit are allocated as upstream does, and a failed
-  allocation is the C++ library's `std::bad_alloc` too, where Rust would abort.
+  Where the wrapped size is negative it gives the wheel's error ("vector too long" on Windows;
+  on Linux "vector::_M_default_append" or "std::bad_alloc", bake by bake as above); where it
+  is positive, on both platforms, its own "The LUT's <n> values overflow the int that sizes
+  its buffer.". Sizes that fit are allocated as upstream does, and a failed allocation is the
+  C++ library's `std::bad_alloc` too, where Rust would abort.
 - **Status:** matched with errors in `p4-baker` (`crates/ocio/src/baking_utils.rs`,
-  `bake_buffer`, used by every bake); `overflowing_sizes_fail_as_in_the_windows_wheel`
-  (`crates/ocio/tests/bake_formats_oracle.rs`, Windows only: the Linux wheel's outcome
-  depends on the machine's memory), and `baking_utils_tests.rs`. The sizes one below the
-  overflow (894, 715,827,882) allocate 8.6 GB in both wheels and the positive wraps write past
-  the buffer, so no test runs them.
+  `bake_buffer`, used by every bake); `overflowing_sizes_fail_as_in_the_wheel`
+  (`crates/ocio/tests/bake_formats_oracle.rs`, both platforms), and `baking_utils_tests.rs`.
+  The sizes one below the overflow (894, 715,827,882) allocate 8.6 GB in both wheels and the
+  positive wraps write past the buffer, so no test runs them.
 
 ### U-78. An archive entry named `..` reads uninitialized memory when extracted
 

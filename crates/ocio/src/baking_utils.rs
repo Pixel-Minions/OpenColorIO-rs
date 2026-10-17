@@ -21,32 +21,51 @@ use crate::transforms::look_transform::LookTransform;
 /// The `std::length_error` of MSVC's `std::vector::resize` past `max_size()`.
 const MSVC_VECTOR_TOO_LONG: &str = "vector too long";
 
-/// A bake's buffer of `count` floats, zeroed: `std::vector<float>::resize(n)` (or a vector of
-/// `n`) where `n` is an `int` expression of the baker's sizes (`cubeSize*cubeSize*cubeSize*3`,
-/// `shaperSize*3`) and `count` its exact value.
+/// The `std::length_error` of libstdc++'s `std::vector::resize` past `max_size()`.
+const LIBSTDCXX_DEFAULT_APPEND: &str = "vector::_M_default_append";
+
+/// How the Linux wheel's `resize` of an empty vector takes a size past `max_size()`
+/// (docs/improvements.md, U-77).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum LinuxResize {
+    /// libstdc++'s check: `std::length_error("vector::_M_default_append")` before anything is
+    /// allocated.
+    Checked,
+    /// No check, where GCC removed it (the size is a product of sizes it knows are at least 2,
+    /// which can't pass `max_size()` without overflowing an `int`): `operator new` of the size
+    /// times 4 bytes, which can't be had, `std::bad_alloc`.
+    Unchecked,
+}
+
+/// A bake's buffer of `count` floats, zeroed: `std::vector<float>::resize(n)` where `n` is an
+/// `int` expression of the baker's sizes (`cubeSize*cubeSize*cubeSize*3`, `shaperSize*3`) and
+/// `count` its exact value.
 ///
 /// Where `count` fits an `int`, the vector is allocated, and a failed allocation is the C++
 /// library's `std::bad_alloc`. Where it doesn't, the `int` arithmetic overflows (undefined
-/// behaviour), and the wheels part ways (docs/improvements.md, U-77):
-/// - the Windows wheel wraps it to 32 bits: a negative size is past `max_size()`, "vector too
-///   long"; a positive one allocates fewer floats than the bake then writes, and upstream
-///   writes past the buffer, where the port returns its own error;
-/// - the Linux wheel computes it in 64 bits and asks for that much memory: "std::bad_alloc"
-///   wherever the memory isn't there, which the port gives for every such size.
+/// behaviour), which both wheels wrap to 32 bits (MSVC; GCC's `imul` of 32-bit registers, then
+/// `movsxd`), and `resize` takes the wrapped `int` as a `size_t` (docs/improvements.md, U-77):
+/// - a negative one is past `max_size()`: "vector too long" on Windows, and on Linux `linux`
+///   says which error;
+/// - a positive one allocates fewer floats than the bake then writes, and upstream writes past
+///   the buffer, where the port returns its own error.
 ///
 /// Not an upstream function: the port's guard around the bakes' `resize` calls.
-pub(crate) fn bake_buffer(count: i128) -> Result<Vec<f32>> {
+pub(crate) fn bake_buffer(count: i128, linux: LinuxResize) -> Result<Vec<f32>> {
     if count > i128::from(i32::MAX) {
-        if cfg!(target_os = "windows") {
-            let wrapped = count as u32 as i32;
-            if wrapped < 0 {
+        let wrapped = count as u32 as i32;
+        if wrapped < 0 {
+            if cfg!(target_os = "windows") {
                 return Err(Exception::length_error(MSVC_VECTOR_TOO_LONG));
             }
-            return Err(Exception::new(format!(
-                "The LUT's {count} values overflow the int that sizes its buffer."
-            )));
+            return Err(match linux {
+                LinuxResize::Checked => Exception::length_error(LIBSTDCXX_DEFAULT_APPEND),
+                LinuxResize::Unchecked => Exception::bad_alloc(),
+            });
         }
-        return Err(Exception::bad_alloc());
+        return Err(Exception::new(format!(
+            "The LUT's {count} values overflow the int that sizes its buffer."
+        )));
     }
     let count = usize::try_from(count).expect("the bakes' sizes are positive");
     let mut buffer = Vec::new();

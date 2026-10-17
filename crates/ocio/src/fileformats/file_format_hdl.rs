@@ -47,7 +47,7 @@ use ocio_ops::utils::string_utils::{lower, split_by_white_spaces, trim};
 
 use crate::baker::Baker;
 use crate::baking_utils::{
-    bake_buffer, cube_entries, cube_values, get_input_to_shaper_processor,
+    LinuxResize, bake_buffer, cube_entries, cube_values, get_input_to_shaper_processor,
     get_input_to_target_processor, get_shaper_range, get_shaper_to_target_processor,
 };
 use crate::config::Config;
@@ -670,7 +670,7 @@ impl FileFormat for LocalFileFormat {
 
             // Generate the identity prelut values, then apply the transform.
             // Prelut is linearly sampled from fromInStart to fromInEnd
-            prelut_data = bake_buffer(i128::from(shaper_size) * 3)?;
+            prelut_data = bake_buffer(i128::from(shaper_size) * 3, LinuxResize::Checked)?;
             generate_linear_scale_lut1d(
                 &mut prelut_data,
                 shaper_size,
@@ -690,7 +690,7 @@ impl FileFormat for LocalFileFormat {
         // Make 3D LUT
         let mut cube_data: Vec<f32> = Vec::new();
         if required_lut == HDL_3D || required_lut == HDL_3D1D {
-            cube_data = bake_buffer(cube_values(cube_size))?;
+            cube_data = bake_buffer(cube_values(cube_size), LinuxResize::Checked)?;
 
             generate_identity_lut3d(&mut cube_data, cube_size, 3, Lut3DOrder::FastRed)?;
             let mut cube_img =
@@ -710,7 +710,7 @@ impl FileFormat for LocalFileFormat {
         let mut oned_data: Vec<f32> = Vec::new();
 
         if required_lut == HDL_1D {
-            oned_data = bake_buffer(i128::from(oned_size) * 3)?;
+            oned_data = bake_buffer(i128::from(oned_size) * 3, LinuxResize::Checked)?;
 
             if !shaper_space.is_empty() {
                 (from_in_start, from_in_end) = get_shaper_range(baker)?;

@@ -42,7 +42,7 @@ use ocio_ops::parse_utils::string_vec_to_int_vec;
 use ocio_ops::utils::string_utils::{c_str, split_by_white_spaces, starts_with_char, trim};
 
 use crate::baker::Baker;
-use crate::baking_utils::{bake_buffer, cube_values, get_input_to_target_processor};
+use crate::baking_utils::{LinuxResize, bake_buffer, cube_values, get_input_to_target_processor};
 use crate::config::Config;
 use crate::context::Context;
 use crate::fileformats::file_format_utils::{
@@ -461,7 +461,7 @@ impl FileFormat for LocalFileFormat {
             shaper_size = cube_size;
         }
 
-        let mut cube_data = bake_buffer(cube_values(cube_size))?;
+        let mut cube_data = bake_buffer(cube_values(cube_size), LinuxResize::Unchecked)?;
         let num_entries = cube_size * cube_size * cube_size;
         generate_identity_lut3d(&mut cube_data, cube_size, 3, Lut3DOrder::FastBlue)?;
         let mut cube_img = PackedImageDesc::new(&mut cube_data[..], num_entries as usize, 1, 3)?;
@@ -486,7 +486,7 @@ impl FileFormat for LocalFileFormat {
         let Ok(shaper_len) = usize::try_from(shaper_size) else {
             return Err(Exception::length_error(VECTOR_CONSTRUCTOR_TOO_LONG));
         };
-        let mut shaper_data = bake_buffer(shaper_len as i128)?;
+        let mut shaper_data = bake_buffer(shaper_len as i128, LinuxResize::Checked)?;
         generate_identity_lut1d(&mut shaper_data, shaper_size, 1);
 
         let shaper_scale = get_max_value_from_integer_bit_depth(shaper_bit_depth) as f32;
