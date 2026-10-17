@@ -140,10 +140,14 @@ jobs:
           shared-key: stack-opt0
       - name: Oracle environment
         run: cargo xtask oracle info
+      # bash, so that the first command's failure fails the step (under pwsh only the last
+      # command's exit code counts).
       - name: Depth tests at opt-level 0
+        shell: bash
         run: |
-          cargo test -p ocio --test config_processors_oracle -- 1_mib_thread
-          cargo test -p ocio --lib -- chains_of_references_stop_at_the_limit
+          set -e
+          cargo test -p ocio --test config_processors_oracle -- 1_mib_thread groups_count_in
+          cargo test -p ocio --lib -- chains_of_references_stop_at_the_limit deep_groups_fit_a_small_stack the_nesting_weight_limit_is_exact
 
   stack-rocky9:
     name: Depth limits at opt-level 0 (Rocky Linux 9)
@@ -161,6 +165,6 @@ jobs:
           scripts/rocky9.sh bash -ec '
             export CARGO_PROFILE_DEV_OPT_LEVEL=0
             cargo xtask oracle info
-            cargo test -p ocio --test config_processors_oracle -- 1_mib_thread
-            cargo test -p ocio --lib -- chains_of_references_stop_at_the_limit
+            cargo test -p ocio --test config_processors_oracle -- 1_mib_thread groups_count_in
+            cargo test -p ocio --lib -- chains_of_references_stop_at_the_limit deep_groups_fit_a_small_stack the_nesting_weight_limit_is_exact
           '

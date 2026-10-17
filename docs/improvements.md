@@ -206,9 +206,18 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Upstream:** `Context::setSearchPath` splits a string at each `:` (`Context.cpp:202`), so a
   Windows path with a drive letter, `C:/luts`, becomes `C` and `/luts`. A config can avoid it
   by listing its paths as a YAML sequence.
-- **Who notices:** Windows configs with a drive letter in a string `search_path`.
+- **Who notices:** Windows configs with a drive letter in a string `search_path`. Such a path
+  still resolves when the working directory is on the same drive: `C` names a directory that
+  doesn't hold the file, and `/luts` is then `C:/luts`, a path relative to the current drive's
+  root. Upstream's tests rely on it: 9 of them set a string search path holding the test files'
+  absolute path (`GetTestFilesDir()`) and pass on Windows only from a working directory on the
+  checkout's drive, in the port as in upstream's CI: `FileTransform` `interpolation_validity`,
+  `cc_file_with_different_file_extension`; `Config` `look_fallback`,
+  `context_variable_with_search_path_v1` and `_v2`, `is_colorspace_linear`; `CPUProcessor`
+  `with_several_ops`, `image_desc`; `Caching` `processor_cache`.
 - **A fix:** don't split after a drive letter.
-- **Status:** to be matched in Phase 3.
+- **Status:** matched in `p3-context` (3.5, `Context::set_search_path`,
+  `crates/ocio/src/context.rs:169-178`).
 
 ### I-10. Some descriptions don't read back the same
 
@@ -2761,6 +2770,25 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p4-ctf-bake` (4.8d, `crates/ocio/src/fileformats/file_format_ctf.rs`);
   `invalid_shaper_ranges_as_in_the_wheel` (`crates/ocio/tests/ctf_bake_oracle.rs`).
 
+### I-205. Chains of looks through the color space before double their work per link
+
+- **Upstream:** a look transform converts to each look's process space and, after the looks,
+  to its destination (`transforms/LookTransform.cpp:291-297, 355-360` @ v2.5.2). In a chain of
+  color spaces where `c<i>` converts to the reference with a look transform from and to `c0`
+  through a look whose process space is `c<i-1>`, building `c<i>` builds `c<i-1>`'s ops twice,
+  once into the process space and once out of it: `T(n) = 2 T(n-1) + 1` ops, 2^n - 1 for `n`
+  links. The wheel's processor of 20 links holds 1,048,575 ops (3.9 s); of 21, 7.6 s; of 22,
+  more than 4 GB (the verifier's probes, 2026-10-17, under a memory cap). A chain where each
+  color space's transforms to and from the reference both name the space before does the same
+  in `CollectContextVariables`, in time only. The nesting limits (U-58) don't bound it: the
+  depth stays `n`.
+- **Who notices:** a machine-made config of such a chain, a few dozen links long; nothing
+  hand-written.
+- **A fix:** build each color space's conversion once per processor (a cache by color space and
+  direction), or refuse chains whose op count passes a bound.
+- **Status:** matched (the port takes the same time and memory, 8.1 s for 21 links): the owner
+  decides whether to bound it.
+
 ### I-206. A LUT baked to a file has Windows line endings on Windows
 
 - **Upstream:** the Python binding's `Baker.bake(fileName)` writes through a text-mode
@@ -3598,8 +3626,27 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 
   Groups multiply that depth, though: 255 color spaces, each a color space transform inside 5
   nested groups, needed 1,156 KiB of the port's stack at opt-level 1 (the verifier,
-  2026-10-17), and 20 groups 3.7 MiB. The wheel's crash depths, counting each group as a level
-  (Windows, Python's main thread, one process per chain, 2026-10-17):
+  2026-10-17), and 20 groups 3.7 MiB. And each kind of level costs the stack its own amount.
+  The shortest chains that crash the wheel's `getProcessor`, by the kind of each link (Windows,
+  Python's main thread, one process per length under a memory cap, 2026-10-17; "then files":
+  the first link's transform a file transform starting a chain of 256 CTF references, U-76):
+
+  | Each link | Crashes at | Half | A link's cost, in color space transforms |
+  |---|---|---|---|
+  | `ColorSpaceTransform` | 1,363 | 681 | 1 |
+  | `LookTransform` with a look, one option (`k`) or two (`k\|j`) | 618 | 309 | 2.21 |
+  | `DisplayViewTransform`, a view with a look, without or with a view transform, one option or two | 573 | 286 | 2.38 |
+  | `ColorSpaceTransform` in 1 group | 794 | 397 | 1.72 |
+  | `DisplayViewTransform` (a view with a look) in 1 group | 440 | 220 | 3.10 |
+  | `ColorSpaceTransform`, then files | 1,193 | 596 | |
+  | `LookTransform`, then files | 541 | 270 | |
+  | `DisplayViewTransform`, then files | 502 | 251 | |
+  | `ColorSpaceTransform` of a named transform holding a `ColorSpaceTransform` | 721 | 360 | 1.89 |
+  | `LookTransform` of a look holding a `ColorSpaceTransform` | 452 | 226 | 3.02 |
+  | `DisplayViewTransform` of a view whose look holds a `DisplayViewTransform` | 298 | 149 | 4.57 |
+
+  and with groups around each link, a group counting as a level (the verifier's measures, the
+  same day; the depth varies by a level with the caller's stack):
 
   | Groups around each link | Longest chain the wheel builds | Levels, groups included |
   |---|---|---|
@@ -3614,14 +3661,36 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   | 100 | 18 | 1,818 |
   | 200 | 9 | 1,809 |
 
-  So `BuildOps` and `CollectContextVariables` also refuse to nest more than 640 levels in all
-  (`MAX_TOTAL_NESTING`), counting groups and, for `BuildOps`, the files of a chain of CTF
-  references (U-76), with "The transforms nest more than 640 levels deep, counting groups and
-  CTF references: upstream's stack overflows." (coordinator, 2026-10-17, after the verifier's
-  finding): about half the shallowest of those depths, 1,363, and above the 592 levels of the
-  processor of the deepest group the loader reads (U-60). The 256 transforms and the 256 files
-  still count apart too. A chain of color spaces each inside 2 groups then reaches 213 links
-  where the wheel builds 559, inside 5 groups 106 where it builds 297.
+  A chain of CTF files alone crashes at 2,125 files (U-76).
+
+  So `BuildOps` and `CollectContextVariables` also weigh every level they nest, groups
+  included, and refuse a total past 68,150 (`MAX_NESTING_WEIGHT`), with "The transforms nest
+  too deep, counting groups and CTF references: upstream's stack overflows." (the verifier's
+  finding, 2026-10-17: a plain count of 640 levels, the first total, let a display view
+  transform in 1 group reach 254 links where the wheel crashes at 440). Each level weighs
+  what it costs the wheel's stack, from the crashes above, in hundredths of a color space
+  transform's, rounded up: a color space transform (and any transform that names nothing, which
+  ends the chain) 100, a look transform 221 (1,363 / 618), a display view transform 238
+  (1,363 / 573), a group 72 (1,363 / 794 - 1), a file transform and each CTF file of a chain of
+  references 67 (`(1,363 - 1,193) / 256`; 2,125 files alone give 0.64). The total is half the
+  wheel's 1,363 color space transforms: every kind of chain then stops at about half the wheel's
+  crash, or before. A file transform reached through `BuildOps` counts twice, as a transform and
+  as the first file of its chain. The 256 transforms and the 256 files still count apart too.
+  The deepest group the loader reads (590 groups and the transform they hold, 591 levels, U-60)
+  weighs 42,580, and its processor builds as in the wheel. The longest chains the port accepts:
+
+  | Each link | Port | Wheel |
+  |---|---|---|
+  | `ColorSpaceTransform`, alone or in 1 group | 255 (the 256 transforms) | crashes at 1,363, 794 |
+  | `ColorSpaceTransform` in 2 groups | 255 (the 256 transforms) | builds 559 |
+  | `ColorSpaceTransform` in 5 groups | 147 | builds 297 |
+  | `LookTransform`, one option or two | 254 (the 256 transforms) | crashes at 618 |
+  | `DisplayViewTransform`, any view | 254 (the 256 transforms) | crashes at 573 |
+  | `DisplayViewTransform` in 1 group, one option or two | 219 | crashes at 440 |
+  | `ColorSpaceTransform`, then files | 255 | crashes at 1,193 |
+  | `LookTransform`, then files | 231 | crashes at 541 |
+  | `DisplayViewTransform`, then files | 214 | crashes at 502 |
+  | A named transform, a look or a view whose transform links to the next | at most 128 (two transforms a link) | crashes at 721, 452, 298 |
 
   The limits must also hold on the port's own stack, at every optimization level, on a thread
   of 1 MiB (the main thread's on Windows). At opt-level 0 the first port didn't: an
@@ -3629,52 +3698,65 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   56-byte result), and a display view transform took about 11.7 KB a level, so only 86
   levels fit. The functions the build recurses through now keep their frames small (their
   lookups, errors and copies out of line, in `#[inline(never)]` and `#[cold]` helpers, the
-  transforms that name nothing in their own function, and the recursive calls' results
-  returned as they are, without `?`; the same for a chain of CTF references, U-76). What the
-  longest chain of each kind takes, both ways, alone and with its first link a chain of CTF
-  references (Windows, 2026-10-17; Windows rounds a thread's stack to 64 KiB, so each figure is
-  the smallest such stack that holds the chain, plus 1 KiB):
+  transforms that name nothing in their own function, the op list of a look's option boxed and
+  that option's loop inline, and the recursive calls' results returned as they are, without
+  `?`; the same for a chain of CTF references, U-76). What the longest chain of each kind
+  takes, both ways, alone and with its first link a chain of 256 CTF references, which
+  shortens the chain to what the total allows beside them (Windows, 2026-10-17; Windows rounds
+  a thread's stack to 64 KiB, so each figure is the smallest such stack that holds the chain,
+  plus 1 KiB):
 
-  | Each link | n | opt-level 0 | with files | opt-level 1 | with files |
-  |---|---|---|---|---|---|
-  | `ColorSpaceTransform` | 255 | 513 KiB | 641 KiB | 257 KiB | 321 KiB |
-  | `LookTransform` with a look | 254 | 641 KiB | 897 KiB | 385 KiB | 513 KiB |
-  | `GroupTransform` holding a `ColorSpaceTransform` | 255 | 705 KiB | 705 KiB | 321 KiB | 321 KiB |
-  | `DisplayViewTransform`, a view with a look | 254 | 769 KiB | 897 KiB | 392 KiB | 577 KiB |
-  | `DisplayViewTransform`, a view transform and a look | 254 | 769 KiB | 897 KiB | 400 KiB | 577 KiB |
-  | `ColorSpaceTransform` in 1 group | 255 | 705 KiB | 705 KiB | 321 KiB | 321 KiB |
-  | `ColorSpaceTransform` in 2 groups | 213 | 705 KiB | 641 KiB | 321 KiB | 321 KiB |
-  | `ColorSpaceTransform` in 5 groups | 106 | 577 KiB | 641 KiB | 257 KiB | 257 KiB |
-  | `ColorSpaceTransform` in 20 groups | 30 | 449 KiB | 577 KiB | 193 KiB | 257 KiB |
-  | `ColorSpaceTransform` in 200 groups | 3 | 513 KiB | 513 KiB | 193 KiB | 193 KiB |
-  | `LookTransform` in 2 groups | 212 | 769 KiB | 769 KiB | 449 KiB | 385 KiB |
-  | Group of a `ColorSpaceTransform` in 3 groups | 127 | 577 KiB | 641 KiB | 257 KiB | 321 KiB |
-  | `DisplayViewTransform` in 1 group | 254 | 897 KiB | 897 KiB | 513 KiB | 513 KiB |
-  | `DisplayViewTransform` in 3 groups | 159 | 769 KiB | 769 KiB | 385 KiB | 385 KiB |
-  | `DisplayViewTransform` (view transform) in 10 groups | 58 | 513 KiB | 641 KiB | 257 KiB | 321 KiB |
+  | Each link | n | opt-level 0 | n, then files | opt-level 0 | opt-level 1 | then files |
+  |---|---|---|---|---|---|---|
+  | `ColorSpaceTransform` | 255 | 577 KiB | 255 | 641 KiB | 257 KiB | 321 KiB |
+  | `LookTransform` with a look | 254 | 641 KiB | 231 | 769 KiB | 344 KiB | 449 KiB |
+  | `LookTransform`, two options | 254 | 705 KiB | 231 | 897 KiB | 324 KiB | 449 KiB |
+  | `GroupTransform` holding a `ColorSpaceTransform` | 255 | 705 KiB | 255 | 769 KiB | 321 KiB | 385 KiB |
+  | `DisplayViewTransform`, a view with a look | 254 | 769 KiB | 214 | 769 KiB | 385 KiB | 449 KiB |
+  | `DisplayViewTransform`, a view transform and a look | 254 | 769 KiB | 214 | 769 KiB | 385 KiB | 449 KiB |
+  | `DisplayViewTransform`, a view with two options | 254 | 769 KiB | 214 | 897 KiB | 385 KiB | 449 KiB |
+  | `DisplayViewTransform`, a view transform and two options | 254 | 769 KiB | 214 | 897 KiB | 385 KiB | 449 KiB |
+  | `ColorSpaceTransform` in 1 group | 255 | 705 KiB | 255 | 769 KiB | 321 KiB | 385 KiB |
+  | `ColorSpaceTransform` in 2 groups | 255 | 897 KiB | 209 | 833 KiB | 385 KiB | 449 KiB |
+  | `ColorSpaceTransform` in 5 groups | 147 | 833 KiB | 111 | 833 KiB | 385 KiB | 385 KiB |
+  | `ColorSpaceTransform` in 20 groups | 44 | 705 KiB | 34 | 769 KiB | 321 KiB | 385 KiB |
+  | `ColorSpaceTransform` in 200 groups | 4 | 577 KiB | 4 | 705 KiB | 257 KiB | 321 KiB |
+  | `LookTransform` in 2 groups | 186 | 705 KiB | 140 | 769 KiB | 385 KiB | 449 KiB |
+  | `LookTransform` in 1 group, two options | 231 | 769 KiB | 174 | 897 KiB | 385 KiB | 449 KiB |
+  | Group of a `ColorSpaceTransform` in 3 groups | 175 | 833 KiB | 132 | 833 KiB | 385 KiB | 385 KiB |
+  | `DisplayViewTransform` in 1 group | 219 | 769 KiB | 164 | 769 KiB | 448 KiB | 449 KiB |
+  | `DisplayViewTransform` in 1 group, two options | 219 | 769 KiB | 164 | 897 KiB | 392 KiB | 449 KiB |
+  | `DisplayViewTransform` in 3 groups | 149 | 769 KiB | 112 | 769 KiB | 385 KiB | 449 KiB |
+  | `DisplayViewTransform` (view transform) in 10 groups | 70 | 651 KiB | 54 | 769 KiB | 322 KiB | 385 KiB |
+  | `DisplayViewTransform` (view transform, two options) in 2 groups | 177 | 769 KiB | 134 | 839 KiB | 385 KiB | 449 KiB |
 
-  With files, the chains are as long as the total allows beside the 256 files (192 links of a
-  color space transform in 1 group, for example). On Rocky Linux 9 at opt-level 0, where a
-  thread's stack isn't rounded, the heaviest take 847 KiB (display view transforms then files)
-  and 859 KiB (display view transforms in 1 group).
+  On Rocky Linux 9 at opt-level 0, where a thread's stack isn't rounded, the heaviest take
+  851 KiB (color space transforms in 2 groups) and 829 KiB (display view transforms of two
+  options, then files).
 - **Status:** done in `p3-builders` (3.2d follow-up; `crates/ocio/src/transform.rs`, `Nesting`;
   `build_ops`, and `collect_context_variables` in `crates/ocio/src/context_variable_utils.rs`).
   The small frames in `group-5` (`transform.rs`, `transforms/color_space_transform.rs`,
   `look_transform.rs`, `display_view_transform.rs`, `group_transform.rs`,
-  `file_transform.rs`, `fileformats/file_format_ctf.rs`); the total, `MAX_TOTAL_NESTING`, in
-  `p4-ctf-bake` (`transform.rs`, `Level` and `Nesting`; the files' level in `file_transform.rs`).
-  Tests (`crates/ocio/tests/config_processors_oracle.rs`): a color space that names itself and
-  one that reaches itself through a look are refused in both directions where the wheel
-  crashes; the longest chain of each kind the port accepts (groups around the links included)
-  is the wheel's processor (on a test thread's stack, debug and release), and one link more
-  the wheel still builds while the port refuses; `groups_count_in_the_total_nesting` (the
-  verifier's 5 groups); `the_deepest_chains_build_on_a_1_mib_thread` and
+  `file_transform.rs`, `fileformats/file_format_ctf.rs`), and for two look options in
+  `p4-ctf-bake` (`look_transform.rs`, `build_first_look_option`); the total in `p4-ctf-bake`
+  (`transform.rs`, `MAX_NESTING_WEIGHT`, `Level` and `Nesting`; the files' level in
+  `file_transform.rs`). Tests (`crates/ocio/tests/config_processors_oracle.rs`): a color space
+  that names itself and one that reaches itself through a look are refused in both directions
+  where the wheel crashes; the longest chain of each kind the port accepts (groups around the
+  links and two look options included) is the wheel's processor (on a test thread's stack,
+  debug and release), and one link more the wheel still builds while the port refuses;
+  `groups_count_in_the_total_nesting` (the verifier's 5 groups) and
+  `groups_count_in_the_total_without_the_processor_cache` (the same refused by `BuildOps`
+  itself); `the_deepest_chains_build_on_a_1_mib_thread` and
   `the_deepest_chains_of_transforms_then_of_references_build_on_a_1_mib_thread` build the
   longest chain of each kind of the table both ways on a 1 MiB thread, and
   `a_chain_of_color_spaces_then_of_references_builds_on_a_1_mib_thread` checks that mixed
-  chain's processor with the wheel. A nightly job of `.github/workflows/sde.yml` runs them,
-  and `chains_of_references_stop_at_the_limit` (U-76), at opt-level 0 on Windows and Rocky
-  Linux 9.
+  chain's processor with the wheel; `the_nesting_weight_limit_is_exact`
+  (`crates/ocio/src/transform_tests.rs`) builds the heaviest group the total allows (945 groups
+  around a matrix: 68,140) and refuses one group more, with the processor cache
+  on and off. A nightly job of `.github/workflows/sde.yml` runs them, with
+  `chains_of_references_stop_at_the_limit` (U-76) and `deep_groups_fit_a_small_stack` (U-60),
+  at opt-level 0 on Windows and Rocky Linux 9.
 
 ### U-60. GroupTransforms nested deep enough to overflow the wheel's stack
 
@@ -3840,8 +3922,8 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   references on the stack, never between its files. That mixed chain (U-58's longest chain of
   color spaces, the last one's transform a file transform starting a chain of 256 files)
   builds on a 1 MiB thread at opt-level 0 in 641 KiB (U-58). The files also count in U-58's
-  total of 640 levels (`MAX_TOTAL_NESTING`, 2026-10-17), with the transforms and the groups
-  before them: one budget bounds every mix (U-58's table).
+  weighted total (`MAX_NESTING_WEIGHT`, 2026-10-17), 67 each, with the transforms and the
+  groups before them: one budget bounds every mix (U-58's tables).
 - **Status:** done in `p4-ctf-read-3` (`crates/ocio/src/transforms/file_transform.rs`,
   `FileNesting`, in `build_file_transform_ops`). Tests: `chains_of_references_stop_at_the_limit`
   (`file_transform_tests.rs`) builds a chain of 256 files on a 1 MiB thread, in debug and

@@ -594,7 +594,7 @@ pub fn clear_file_transform_caches() {
 /// owner's general rule), at 256 files, U-58's limit of nested transforms (owner, 2026-10-17):
 /// the port's own stack holds that many on a 1 MiB thread at every optimization level (759
 /// files fit at opt-level 0 on Windows, about 1.4 KB a file; 1,647 at opt-level 1). The files
-/// also count in [`MAX_TOTAL_NESTING`](crate::transform::MAX_TOTAL_NESTING), with the
+/// also count in [`MAX_NESTING_WEIGHT`](crate::transform::MAX_NESTING_WEIGHT), with the
 /// transforms and groups before them on the stack (U-58).
 pub(crate) const MAX_FILE_NESTING: usize = 256;
 

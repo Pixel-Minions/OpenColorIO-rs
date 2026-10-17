@@ -267,7 +267,16 @@ impl FileFormat for LocalFileFormat {
             };
             // Note: HandleLUT does nothing if opData is not a LUT.
             let op_data = lut_with_interpolation(&op_data_vec[index], file_interpolation);
-            let op = build_op(ops, config, context, &op_data, new_dir);
+            // BuildOp: a reference to a file builds the file's ops here, so that the recursion
+            // of a chain of references takes one frame less (docs/improvements.md, U-76).
+            let op = match reference_of(&op_data, new_dir) {
+                Some((file_transform, dir)) => {
+                    // This might call LocalFileFormat::buildFileOps if the file is a CTF.
+                    // BuildFileTransformOps is making sure there is no cycling recursion.
+                    build_file_transform_ops(ops, config, context, &file_transform, dir)
+                }
+                None => build_op(ops, &op_data, new_dir),
+            };
             if op.is_err() {
                 return op;
             }
@@ -557,37 +566,44 @@ pub(crate) fn write_ops(
     writer.write(&mut fmt)
 }
 
-/// Appends the ops of an op data: a reference to a file is resolved (the file's ops).
+/// The file transform of `op_data` if it is a reference to a file by its path, and the
+/// direction to build it in; `None` otherwise. Out of line, as [`LocalFileFormat::build_file_ops`]
+/// is part of the recursion of a chain of references (docs/improvements.md, U-76).
 ///
-/// Port of `BuildOp` (FileFormatCTF.cpp:1219-1249 @ v2.5.2). Its recursive call is a tail call, so
-/// that its frame stays small (docs/improvements.md, U-76).
-fn build_op(
-    ops: &mut OpVec,
-    config: &Config,
-    context: &Context,
+/// Part of the port of `BuildOp` (FileFormatCTF.cpp:1219-1243 @ v2.5.2).
+#[inline(never)]
+fn reference_of(
     op_data: &OpDataRcPtr,
     dir: TransformDirection,
-) -> Result<()> {
-    if let OpData::Reference(reference) = &**op_data {
+) -> Option<(Box<FileTransform>, TransformDirection)> {
+    if let OpData::Reference(reference) = &**op_data
         // Recursively resolve the op.
-        if reference.get_reference_style() == ReferenceStyle::Path {
-            let dir = combine_transform_directions(dir, reference.get_direction());
-            let file_transform = reference_file_transform(reference.get_path());
+        && reference.get_reference_style() == ReferenceStyle::Path
+    {
+        let dir = combine_transform_directions(dir, reference.get_direction());
+        return Some((reference_file_transform(reference.get_path()), dir));
+    }
+    None
+}
 
-            // This might call LocalFileFormat::buildFileOps if the file is a CTF.
-            // BuildFileTransformOps is making sure there is no cycling recursion.
-            build_file_transform_ops(ops, config, context, &file_transform, dir)
-        } else {
-            Ok(())
-        }
+/// Appends the ops of an op data that isn't a reference to a file by its path: none for a
+/// reference by an alias (I-201), else the op data's ops.
+///
+/// Part of the port of `BuildOp` (FileFormatCTF.cpp:1219-1249 @ v2.5.2); its references to
+/// files are built by [`LocalFileFormat::build_file_ops`], through [`reference_of`].
+#[inline(never)]
+fn build_op(ops: &mut OpVec, op_data: &OpDataRcPtr, dir: TransformDirection) -> Result<()> {
+    if let OpData::Reference(_) = &**op_data {
+        Ok(())
     } else {
         create_op_vec_from_op_data(ops, op_data, dir)
     }
 }
 
 /// The file transform of a reference to the file `path` (FileFormatCTF.cpp:1232-1235 @
-/// v2.5.2): the default interpolation, forward. Kept out of line, as [`build_op`] is part of
-/// the recursion of a chain of references (docs/improvements.md, U-76).
+/// v2.5.2): the default interpolation, forward. Kept out of line, as
+/// [`LocalFileFormat::build_file_ops`] is part of the recursion of a chain of references
+/// (docs/improvements.md, U-76).
 #[inline(never)]
 fn reference_file_transform(path: &[u8]) -> Box<FileTransform> {
     let mut file_transform = Box::new(FileTransform::new());

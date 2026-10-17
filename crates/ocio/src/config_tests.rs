@@ -7870,16 +7870,21 @@ impl crate::config_io_proxy::ConfigIoProxy for ContextTest1Proxy {
         // Get config data from filesystem, database, memory, etc.
         // In this example, the config is simply coming from the filesystem.
         // Return a stream to the config.
+        // A std::ifstream in text mode (std::ios_base::in), as upstream's.
+        use crate::fileformats::input_stream::{InputStream, OpenMode};
+
         let config_path = context_test1_config_path();
-        std::fs::read(String::from_utf8(config_path.clone()).unwrap()).map_err(|_| {
-            Exception::new(
+        let fstream = InputStream::open_file(&config_path, OpenMode::Text);
+        if fstream.fail() {
+            return Err(Exception::new(
                 [
                     b"Error could not read config file : ".as_slice(),
                     &config_path,
                 ]
                 .concat(),
-            )
-        })
+            ));
+        }
+        Ok(fstream.contents().to_vec())
     }
 
     fn lut_data(&self, filepath: &[u8]) -> Result<Vec<u8>> {

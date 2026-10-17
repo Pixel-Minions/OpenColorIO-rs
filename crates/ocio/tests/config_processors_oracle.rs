@@ -357,10 +357,10 @@ fn every_get_processor_overload_matches_the_wheel() {
 const TOO_DEEP: &str = "levels deep: a color space, look, view transform or named transform may \
                         refer to itself.";
 
-/// The port's error for transforms nested deeper than its limit counting groups and CTF
-/// references (docs/improvements.md, U-58).
-const TOO_DEEP_TOTAL: &str = "The transforms nest more than 640 levels deep, counting groups and \
-                              CTF references: upstream's stack overflows.";
+/// The port's error for transforms nested deeper than its limit weighing every level, groups
+/// and CTF references included (docs/improvements.md, U-58).
+const TOO_DEEP_TOTAL: &str = "The transforms nest too deep, counting groups and CTF references: \
+                              upstream's stack overflows.";
 
 /// Whether `message` is one of the port's errors for transforms nested too deep.
 fn too_deep(message: &str) -> bool {
@@ -418,8 +418,9 @@ fn transforms_that_refer_to_themselves_are_refused() {
 
 /// A config of `n` color spaces `c1`..`cn`, each converting from the one before by `kind`: a
 /// color space transform, a look transform, a group holding a color space transform, or a
-/// display view transform of a view with a look, without or with a view transform; with a
-/// suffix `:d`, that transform inside `d` nested groups.
+/// display view transform of a view with a look, without or with a view transform; `lookopt`,
+/// `dvopt` and `dvvtopt` with two look options (`k|j`) instead of one; with a suffix `:d`, that
+/// transform inside `d` nested groups.
 fn chain(kind: &str, n: usize) -> String {
     let (kind, depth) = match kind.split_once(':') {
         Some((kind, depth)) => (kind, depth.parse::<usize>().unwrap()),
@@ -435,12 +436,15 @@ displays:
     - !<View> {name: v, colorspace: c0}
     - !<View> {name: lk, colorspace: c0, looks: k}
     - !<View> {name: vt, view_transform: t, display_colorspace: dc, looks: k}
+    - !<View> {name: lkopt, colorspace: c0, looks: \"k|j\"}
+    - !<View> {name: vtopt, view_transform: t, display_colorspace: dc, looks: \"k|j\"}
 view_transforms:
   - !<ViewTransform> {name: t, from_scene_reference: !<MatrixTransform> {offset: [0, 0.1, 0, 0]}}
 display_colorspaces:
   - !<ColorSpace> {name: dc, from_display_reference: !<MatrixTransform> {offset: [0, 0, 0.1, 0]}}
 looks:
   - !<Look> {name: k, process_space: c0, transform: !<MatrixTransform> {offset: [0.1, 0, 0, 0]}}
+  - !<Look> {name: j, process_space: c0, transform: !<MatrixTransform> {offset: [0.2, 0, 0, 0]}}
 colorspaces:
   - !<ColorSpace>
     name: c0
@@ -451,11 +455,16 @@ colorspaces:
         let transform = match kind {
             "cst" => format!("!<ColorSpaceTransform> {{src: c{prev}, dst: c0}}"),
             "look" => format!("!<LookTransform> {{src: c{prev}, dst: c0, looks: k}}"),
+            "lookopt" => format!("!<LookTransform> {{src: c{prev}, dst: c0, looks: \"k|j\"}}"),
             "group" => format!(
                 "!<GroupTransform> {{children: [!<ColorSpaceTransform> {{src: c{prev}, dst: c0}}]}}"
             ),
             "dv" => format!("!<DisplayViewTransform> {{src: c{prev}, display: d, view: lk}}"),
             "dvvt" => format!("!<DisplayViewTransform> {{src: c{prev}, display: d, view: vt}}"),
+            "dvopt" => format!("!<DisplayViewTransform> {{src: c{prev}, display: d, view: lkopt}}"),
+            "dvvtopt" => {
+                format!("!<DisplayViewTransform> {{src: c{prev}, display: d, view: vtopt}}")
+            }
             _ => unreachable!("{kind}"),
         };
         let mut transform = transform;
@@ -479,7 +488,7 @@ fn port_chain(kind: &str, n: usize) -> ocio::Result<Arc<Processor>> {
 #[test]
 fn the_deepest_chains_below_the_limit_match_the_wheel() {
     for kind in [
-        "cst", "look", "group", "dv", "dvvt", "cst:3", "dv:2", "group:20",
+        "cst", "look", "group", "dv", "dvvt", "cst:3", "dv:2", "group:20", "lookopt", "dvopt:1",
     ] {
         // The longest chain the port accepts: a binary search for the first refused length.
         let refused = |n: usize| match port_chain(kind, n) {
@@ -628,9 +637,28 @@ fn on_a_1_mib_thread<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) 
 /// The chain kinds whose longest accepted chains the 1 MiB tests build: each kind of link, and
 /// links inside nested groups, which the limit counting groups bounds (docs/improvements.md,
 /// U-58).
-const STACK_KINDS: [&str; 15] = [
-    "cst", "look", "group", "dv", "dvvt", "cst:1", "cst:2", "cst:5", "cst:20", "cst:200", "look:2",
-    "group:3", "dv:1", "dv:3", "dvvt:10",
+const STACK_KINDS: [&str; 21] = [
+    "cst",
+    "look",
+    "group",
+    "dv",
+    "dvvt",
+    "cst:1",
+    "cst:2",
+    "cst:5",
+    "cst:20",
+    "cst:200",
+    "look:2",
+    "group:3",
+    "dv:1",
+    "dv:3",
+    "dvvt:10",
+    "lookopt",
+    "dvopt",
+    "dvvtopt",
+    "lookopt:1",
+    "dvopt:1",
+    "dvvtopt:2",
 ];
 
 /// The longest chain of each kind the port accepts builds on a 1 MiB thread, both ways: the
@@ -804,4 +832,21 @@ fn groups_count_in_the_total_nesting() {
         "{}",
         reply.result["processor"]
     );
+}
+
+/// The groups count in the limit of the total nesting of `BuildOps` itself, without the
+/// processor cache (which `CollectContextVariables`, which counts them too, fills first): the
+/// verifier's chain of 255 color spaces each inside 5 groups is refused by the build.
+#[test]
+fn groups_count_in_the_total_without_the_processor_cache() {
+    let config = Config::create_from_stream(chain("cst:5", 255).as_bytes()).unwrap();
+    config.set_processor_cache_flags(ocio::ProcessorCacheFlags::OFF);
+    let message = config
+        .processor_between("c255", "c0")
+        .unwrap_err()
+        .to_string();
+    assert!(message.ends_with(TOO_DEEP_TOTAL), "{message}");
+    let config = Config::create_from_stream(chain("cst:5", 100).as_bytes()).unwrap();
+    config.set_processor_cache_flags(ocio::ProcessorCacheFlags::OFF);
+    config.processor_between("c100", "c0").unwrap();
 }

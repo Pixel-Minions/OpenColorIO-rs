@@ -1406,7 +1406,8 @@ colorspaces:
     isdata: false
     to_scene_reference: !<GroupTransform>
       children:
-        - !<FileTransform> {src: clf/lut3d_as_matrix.clf, interpolation: linear}"#;
+        - !<FileTransform> {src: clf/lut3d_as_matrix.clf, interpolation: linear}
+"#;
 
     // Load config.
     let src_config = crate::Config::create_from_stream(TEST_CONFIG.as_bytes()).unwrap();

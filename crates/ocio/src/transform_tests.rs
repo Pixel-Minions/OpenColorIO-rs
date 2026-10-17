@@ -246,3 +246,44 @@ fn every_arm_dispatches_to_its_class() {
         }
     }
 }
+
+/// `depth` groups, each holding the next, around a matrix.
+fn nested_groups(depth: usize) -> Transform {
+    let mut transform = Transform::from(crate::MatrixTransform::new());
+    for _ in 0..depth {
+        let mut group = crate::GroupTransform::new();
+        group.append_transform(transform);
+        transform = Transform::from(group);
+    }
+    transform
+}
+
+/// The limit of the nesting's weight is exact: the deepest groups it holds around a matrix,
+/// `(MAX_NESTING_WEIGHT - COLOR_SPACE_WEIGHT) / GROUP_WEIGHT` of them, build, with the processor
+/// cache on (`CollectContextVariables` counts them first) and off (`BuildOps` alone); one group
+/// more is refused (docs/improvements.md, U-58).
+#[test]
+fn the_nesting_weight_limit_is_exact() {
+    let deepest = (MAX_NESTING_WEIGHT - COLOR_SPACE_WEIGHT) / GROUP_WEIGHT;
+    let message = "The transforms nest too deep, counting groups and CTF references: upstream's \
+                   stack overflows.";
+    let run = move || {
+        for cache in [
+            crate::ProcessorCacheFlags::DEFAULT,
+            crate::ProcessorCacheFlags::OFF,
+        ] {
+            let config = (*crate::Config::create_raw().unwrap()).clone();
+            config.set_processor_cache_flags(cache);
+            config.processor(&nested_groups(deepest)).unwrap();
+            let error = config.processor(&nested_groups(deepest + 1)).unwrap_err();
+            assert_eq!(error.what(), message.as_bytes(), "{cache:?}");
+        }
+    };
+    // Deeper than a test thread's default stack holds at opt-level 0.
+    std::thread::Builder::new()
+        .stack_size(8 << 20)
+        .spawn(run)
+        .unwrap()
+        .join()
+        .unwrap();
+}

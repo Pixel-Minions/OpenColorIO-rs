@@ -471,7 +471,7 @@ impl Transform {
 /// follow: a color space, look, view transform or named transform whose transform refers back
 /// to it nests without end. Group transforms don't count here: they name nothing, and the
 /// loader refuses groups nested more than 590 deep (docs/improvements.md, U-60); they count in
-/// [`MAX_TOTAL_NESTING`].
+/// [`MAX_NESTING_WEIGHT`].
 ///
 /// Upstream has no limit: it recurses until the stack overflows, which ends the process (the
 /// wheel at 573 nested display view transforms on Windows, docs/improvements.md U-58). The port
@@ -481,55 +481,91 @@ impl Transform {
 /// every optimization level (U-58).
 pub(crate) const MAX_TRANSFORM_NESTING: usize = 256;
 
-/// The deepest nesting of everything [`build_ops`] and
+/// A level's weight in [`MAX_NESTING_WEIGHT`], in hundredths of a color space transform's: what
+/// a level of each kind costs the wheel's stack, from the depths at which the Windows wheel
+/// crashes (docs/improvements.md, U-58): 1,363 color space transforms; 618 look transforms
+/// (2.21 times as much each); 573 display view transforms (2.38); 794 color space transforms
+/// each in a group (a group 0.72); 1,193 color space transforms before 256 CTF files (a file
+/// 0.66; 2,125 files alone, 0.64). Each is rounded up. A transform that names nothing weighs as
+/// a color space transform: it ends the chain.
+const COLOR_SPACE_WEIGHT: usize = 100;
+/// See [`COLOR_SPACE_WEIGHT`].
+const LOOK_WEIGHT: usize = 221;
+/// See [`COLOR_SPACE_WEIGHT`].
+const DISPLAY_VIEW_WEIGHT: usize = 238;
+/// See [`COLOR_SPACE_WEIGHT`].
+const GROUP_WEIGHT: usize = 72;
+/// See [`COLOR_SPACE_WEIGHT`]: a file of a chain of CTF references, and a file transform's own
+/// level of [`build_ops`]. A file transform reached through [`build_ops`] so counts twice: as a
+/// transform, and as the first file of its chain.
+const FILE_WEIGHT: usize = 67;
+
+/// The heaviest nesting of everything [`build_ops`] and
 /// [`collect_context_variables`](crate::context_variable_utils::collect_context_variables)
-/// recurse through, counting group transforms and (for [`build_ops`]) the files of a chain of
-/// CTF references too: within [`MAX_TRANSFORM_NESTING`] transforms, groups multiply the depth
-/// of a chain, and a chain of transforms can end in a chain of files.
+/// recurse through, each level weighed by its kind ([`COLOR_SPACE_WEIGHT`] and siblings),
+/// counting group transforms and (for [`build_ops`]) the files of a chain of CTF references
+/// too: within [`MAX_TRANSFORM_NESTING`] transforms, groups multiply the depth of a chain, and
+/// a chain of transforms can end in a chain of files.
 ///
-/// Upstream has no limit: the wheel's stack overflows on Windows at 1,363 nested color space
-/// transforms, and at 1,588 to 1,848 levels of them counting the groups that hold each one
-/// (docs/improvements.md, U-58). The port refuses deeper nesting with an error, at about half
-/// the shallowest of those depths, above the 591 levels of the deepest group the loader reads
-/// (U-60).
-pub(crate) const MAX_TOTAL_NESTING: usize = 640;
+/// Upstream has no limit: the wheel's stack overflows (docs/improvements.md, U-58). The port
+/// refuses deeper nesting with an error, at half the wheel's stack as the weights measure it
+/// (half of 1,363 color space transforms), so that every kind of chain, groups and files
+/// included, stops at about half the depth at which the wheel crashes, or before. The deepest
+/// group the loader reads (590 groups and the transform they hold, U-60) weighs 42,580.
+pub(crate) const MAX_NESTING_WEIGHT: usize = 1_363 * COLOR_SPACE_WEIGHT / 2;
+
+/// The weight of a level of `transform` (see [`COLOR_SPACE_WEIGHT`]).
+fn nesting_weight(transform: &Transform) -> usize {
+    match transform {
+        Transform::Group(_) => GROUP_WEIGHT,
+        Transform::Look(_) => LOOK_WEIGHT,
+        Transform::DisplayView(_) => DISPLAY_VIEW_WEIGHT,
+        Transform::File(_) => FILE_WEIGHT,
+        _ => COLOR_SPACE_WEIGHT,
+    }
+}
 
 thread_local! {
     /// How many transforms other than groups [`build_ops`] nests on this thread.
     static BUILD_NESTING: Cell<usize> = const { Cell::new(0) };
     /// How many transforms other than groups `collect_context_variables` nests on this thread.
     static COLLECT_NESTING: Cell<usize> = const { Cell::new(0) };
-    /// How many levels of [`build_ops`] (groups included) and of CTF references nest on this
-    /// thread.
-    static BUILD_TOTAL: Cell<usize> = const { Cell::new(0) };
-    /// How many levels of `collect_context_variables` (groups included) nest on this thread.
-    static COLLECT_TOTAL: Cell<usize> = const { Cell::new(0) };
+    /// The weight of the levels of [`build_ops`] (groups included) and of CTF references that
+    /// nest on this thread.
+    static BUILD_WEIGHT: Cell<usize> = const { Cell::new(0) };
+    /// The weight of the levels of `collect_context_variables` (groups included) that nest on
+    /// this thread.
+    static COLLECT_WEIGHT: Cell<usize> = const { Cell::new(0) };
 }
 
-/// One level of a nesting counter, given back when it is dropped.
-pub(crate) struct Level(&'static LocalKey<Cell<usize>>);
+/// One level of a nesting counter, of a weight, given back when it is dropped.
+pub(crate) struct Level(&'static LocalKey<Cell<usize>>, usize);
 
 impl Level {
-    /// One more level of `counter`; `None` past `limit`.
-    fn enter(counter: &'static LocalKey<Cell<usize>>, limit: usize) -> Option<Level> {
-        let depth = counter.get() + 1;
-        if depth > limit {
+    /// `weight` more of `counter`; `None` past `limit`.
+    fn enter(
+        counter: &'static LocalKey<Cell<usize>>,
+        weight: usize,
+        limit: usize,
+    ) -> Option<Level> {
+        let total = counter.get() + weight;
+        if total > limit {
             return None;
         }
-        counter.set(depth);
-        Some(Level(counter))
+        counter.set(total);
+        Some(Level(counter, weight))
     }
 
-    /// One more level of [`MAX_TOTAL_NESTING`]'s count of [`build_ops`], for a file of a chain
-    /// of CTF references; `None` past it, whose error is [`total_too_deep`].
+    /// One more file of a chain of CTF references in [`MAX_NESTING_WEIGHT`]'s count of
+    /// [`build_ops`]; `None` past it, whose error is [`total_too_deep`].
     pub(crate) fn file() -> Option<Level> {
-        Level::enter(&BUILD_TOTAL, MAX_TOTAL_NESTING)
+        Level::enter(&BUILD_WEIGHT, FILE_WEIGHT, MAX_NESTING_WEIGHT)
     }
 }
 
 impl Drop for Level {
     fn drop(&mut self) {
-        self.0.set(self.0.get() - 1);
+        self.0.set(self.0.get() - self.1);
     }
 }
 
@@ -538,7 +574,7 @@ impl Drop for Level {
 pub(crate) enum TooDeep {
     /// [`MAX_TRANSFORM_NESTING`].
     Transforms,
-    /// [`MAX_TOTAL_NESTING`].
+    /// [`MAX_NESTING_WEIGHT`].
     Total,
 }
 
@@ -557,45 +593,46 @@ impl TooDeep {
     }
 }
 
-/// The error of a level past [`MAX_TOTAL_NESTING`].
+/// The error of a level past [`MAX_NESTING_WEIGHT`].
 #[cold]
 #[inline(never)]
 pub(crate) fn total_too_deep<T>() -> Result<T> {
-    Err(Exception::new(format!(
-        "The transforms nest more than {MAX_TOTAL_NESTING} levels deep, counting groups and CTF \
-         references: upstream's stack overflows."
-    )))
+    Err(Exception::new(
+        "The transforms nest too deep, counting groups and CTF references: upstream's stack \
+         overflows.",
+    ))
 }
 
 /// One level of nesting of [`build_ops`] or `collect_context_variables`: of the transforms
-/// other than groups, and of the total, given back when it is dropped.
+/// other than groups, and of the weight, given back when it is dropped.
 pub(crate) struct Nesting {
     /// The level of [`MAX_TRANSFORM_NESTING`], but for a group.
     _transform: Option<Level>,
-    /// The level of [`MAX_TOTAL_NESTING`].
+    /// The level of [`MAX_NESTING_WEIGHT`].
     _total: Level,
 }
 
 impl Nesting {
-    /// One more level of `transforms` (unless `group`) and of `total`; the limit it passes,
-    /// [`MAX_TRANSFORM_NESTING`] first. Not a `Result` of an error, so that the frames of the
-    /// recursion don't hold an error's room (docs/improvements.md, U-58).
+    /// One more level of `transforms` (unless `transform` is a group) and its weight in
+    /// `total`; the limit it passes, [`MAX_TRANSFORM_NESTING`] first. Not a `Result` of an
+    /// error, so that the frames of the recursion don't hold an error's room
+    /// (docs/improvements.md, U-58).
     fn enter(
         transforms: &'static LocalKey<Cell<usize>>,
         total: &'static LocalKey<Cell<usize>>,
-        group: bool,
+        transform: &Transform,
     ) -> std::result::Result<Nesting, TooDeep> {
-        let transform = if group {
+        let level = if matches!(transform, Transform::Group(_)) {
             None
         } else {
-            match Level::enter(transforms, MAX_TRANSFORM_NESTING) {
+            match Level::enter(transforms, 1, MAX_TRANSFORM_NESTING) {
                 Some(level) => Some(level),
                 None => return Err(TooDeep::Transforms),
             }
         };
-        match Level::enter(total, MAX_TOTAL_NESTING) {
+        match Level::enter(total, nesting_weight(transform), MAX_NESTING_WEIGHT) {
             Some(total) => Ok(Nesting {
-                _transform: transform,
+                _transform: level,
                 _total: total,
             }),
             None => Err(TooDeep::Total),
@@ -604,20 +641,12 @@ impl Nesting {
 
     /// One more level of [`build_ops`], of `transform`.
     pub(crate) fn build(transform: &Transform) -> std::result::Result<Nesting, TooDeep> {
-        Nesting::enter(
-            &BUILD_NESTING,
-            &BUILD_TOTAL,
-            matches!(transform, Transform::Group(_)),
-        )
+        Nesting::enter(&BUILD_NESTING, &BUILD_WEIGHT, transform)
     }
 
     /// One more level of `collect_context_variables`, of `transform`.
     pub(crate) fn collect(transform: &Transform) -> std::result::Result<Nesting, TooDeep> {
-        Nesting::enter(
-            &COLLECT_NESTING,
-            &COLLECT_TOTAL,
-            matches!(transform, Transform::Group(_)),
-        )
+        Nesting::enter(&COLLECT_NESTING, &COLLECT_WEIGHT, transform)
     }
 }
 

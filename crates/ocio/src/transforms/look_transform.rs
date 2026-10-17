@@ -359,8 +359,10 @@ fn new_op_vec() -> Box<OpVec> {
 /// its process space (unless `skip_color_space_conversion`), which becomes the current color
 /// space.
 ///
-/// Part of the port of `RunLookTokens` (src/OpenColorIO/transforms/LookTransform.cpp:213-302
-/// @ v2.5.2), one look per call. Its errors are built out of line and its recursive calls
+/// Part of the port of `RunLookTokens` (src/OpenColorIO/transforms/LookTransform.cpp:203-305
+/// @ v2.5.2), one look per call: its loop over an option's looks is in its callers,
+/// [`build_look_ops_from`] for a single option and [`run_look_option`] for several, so that the
+/// recursion takes one frame less. Its errors are built out of line and its recursive calls
 /// return their results as they are, so that its frame stays small (docs/improvements.md,
 /// U-58).
 #[expect(
@@ -411,44 +413,6 @@ fn run_look_token<'c>(
     }
 
     ops.append(&tmp_ops)
-}
-
-/// Appends the ops of one option of looks, each after the conversion from the current color
-/// space to its process space (unless `skip_color_space_conversion`), which becomes the current
-/// color space. An empty name is skipped.
-///
-/// Port of `RunLookTokens` (src/OpenColorIO/transforms/LookTransform.cpp:203-305 @ v2.5.2),
-/// each look by [`run_look_token`] (docs/improvements.md, U-58).
-#[expect(
-    clippy::question_mark,
-    reason = "`?` takes several results' room in the frame of an unoptimized build (U-58)"
-)]
-fn run_look_tokens<'c>(
-    ops: &mut OpVec,
-    current_color_space: &mut Option<&'c ColorSpace>,
-    skip_color_space_conversion: bool,
-    config: &'c Config,
-    context: &Context,
-    look_tokens: &[Token],
-) -> Result<()> {
-    for token in look_tokens {
-        if token.name.is_empty() {
-            continue;
-        }
-
-        let result = run_look_token(
-            ops,
-            current_color_space,
-            skip_color_space_conversion,
-            config,
-            context,
-            token,
-        );
-        if result.is_err() {
-            return result;
-        }
-    }
-    Ok(())
 }
 
 /// What [`build_look_ops`] goes from, to and through: its source and destination color spaces
@@ -582,7 +546,7 @@ pub(crate) fn build_look_ops_from<'c>(
         Ok(())
     } else if options.len() == 1 {
         // As an optimization, if we only have a single look option, just push back onto the
-        // final location. The loop of `run_look_tokens`, here so that the recursion takes one
+        // final location. The loop of `RunLookTokens`, here so that the recursion takes one
         // frame less (docs/improvements.md, U-58).
         for token in &options[0] {
             if token.name.is_empty() {
@@ -614,14 +578,24 @@ pub(crate) fn build_look_ops_from<'c>(
     }
 }
 
-/// Adds to `os` the message of the option `option`, the `i`-th, whose file `e` is missing:
-/// "(<option>) <message>", after "  ...  " but for the first option. Out of line
+/// Whether `result` is an error of a missing file, which fails over to the next option. Out of
+/// line (docs/improvements.md, U-58).
+#[inline(never)]
+fn is_missing_file(result: &Result<()>) -> bool {
+    matches!(result, Err(e) if e.kind() == ExceptionKind::MissingFile)
+}
+
+/// Adds to `os` the message of the option `option`, the `i`-th, whose file is missing, the error
+/// `result`: "(<option>) <message>", after "  ...  " but for the first option. Out of line
 /// (docs/improvements.md, U-58).
 ///
 /// Part of the port of `BuildLookOps` (src/OpenColorIO/transforms/LookTransform.cpp:410-421 @
 /// v2.5.2).
 #[inline(never)]
-fn add_missing_file_message(os: &mut Vec<u8>, i: usize, option: &[Token], e: &Exception) {
+fn add_missing_file_message(os: &mut Vec<u8>, i: usize, option: &[Token], result: &Result<()>) {
+    let Err(e) = result else {
+        unreachable!("the error of a missing file");
+    };
     if i != 0 {
         os.extend_from_slice(b"  ...  ");
     }
@@ -632,11 +606,23 @@ fn add_missing_file_message(os: &mut Vec<u8>, i: usize, option: &[Token], e: &Ex
     os.extend_from_slice(e.what());
 }
 
+/// The error of looks none of whose options' files all exist: their messages, `os`. Out of line
+/// (docs/improvements.md, U-58).
+#[cold]
+#[inline(never)]
+fn missing_files(os: Vec<u8>) -> Result<()> {
+    Err(Exception::missing_file(os))
+}
+
 /// The several options' case of [`build_look_ops_from`].
 ///
 /// Part of the port of `BuildLookOps(OpRcPtrVec &, ConstColorSpaceRcPtr &, bool, const Config
 /// &, const ConstContextRcPtr &, const LookParseResult &)` (src/OpenColorIO/transforms/
-/// LookTransform.cpp:385-432 @ v2.5.2).
+/// LookTransform.cpp:385-432 @ v2.5.2). An option's looks build into an op list of their own,
+/// boxed, from a copy of `current_color_space`; on success, the copy replaces it and the ops
+/// are appended to `ops`. The loop over an option's looks (`RunLookTokens`'s) is here, by index,
+/// and the errors' checks and messages are out of line, so that the recursion's frame stays
+/// small (docs/improvements.md, U-58).
 fn build_first_look_option<'c>(
     ops: &mut OpVec,
     current_color_space: &mut Option<&'c ColorSpace>,
@@ -651,30 +637,43 @@ fn build_first_look_option<'c>(
 
     let mut os = Vec::new();
 
-    for (i, option) in options.iter().enumerate() {
+    let mut i = 0;
+    while i < options.len() {
+        let option = &options[i];
         let mut cs = *current_color_space;
-        let mut tmp_ops = OpVec::new();
+        let mut tmp_ops = new_op_vec();
 
-        match run_look_tokens(
-            &mut tmp_ops,
-            &mut cs,
-            skip_color_space_conversion,
-            config,
-            context,
-            option,
-        ) {
-            Ok(()) => {
-                *current_color_space = cs;
-                return ops.append(&tmp_ops);
+        let mut result = Ok(());
+        let mut j = 0;
+        while j < option.len() {
+            if !option[j].name.is_empty() {
+                result = run_look_token(
+                    &mut tmp_ops,
+                    &mut cs,
+                    skip_color_space_conversion,
+                    config,
+                    context,
+                    &option[j],
+                );
+                if result.is_err() {
+                    break;
+                }
             }
-            Err(e) if e.kind() == ExceptionKind::MissingFile => {
-                add_missing_file_message(&mut os, i, option, &e);
-            }
-            Err(e) => return Err(e),
+            j += 1;
         }
+
+        if result.is_ok() {
+            *current_color_space = cs;
+            return ops.append(&tmp_ops);
+        }
+        if !is_missing_file(&result) {
+            return result;
+        }
+        add_missing_file_message(&mut os, i, option, &result);
+        i += 1;
     }
 
-    Err(Exception::missing_file(os))
+    missing_files(os)
 }
 
 /// Whether `look` uses context variables, which it adds to `used_context_vars`: its source's
