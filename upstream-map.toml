@@ -4314,7 +4314,7 @@ path = "tests/cpu/ColorSpace_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/color_space_tests.rs"]
 status = "partial"
-note = "p3-model-objects (3.4a): basic, alias, category, interop_id, amf_transform_ids, icc_profile_name, unknown_interchange_attrib; interop_id_serialization and icc_profile_name_serialization with p3-yaml-save (3.7b), color_space_serialize and (Config, use_alias) with p3-validate (3.8); is_colorspace_linear with p3-after-p2 (Lut3D), the two processor_to_known_colorspace tests with ConfigUtils (Phase 9)"
+note = "p3-model-objects (3.4a): basic, alias, category, interop_id, amf_transform_ids, icc_profile_name, unknown_interchange_attrib; interop_id_serialization and icc_profile_name_serialization with p3-yaml-save (3.7b), color_space_serialize and (Config, use_alias) with p3-validate (3.8); is_colorspace_linear with p4-ctf-bake 4.10b (its color spaces read CLF files); the two processor_to_known_colorspace tests with ConfigUtils (Phase 9)"
 
 [[file]]
 path = "tests/cpu/ConfigUtils_tests.cpp"
@@ -4379,9 +4379,9 @@ status = "done"
 [[file]]
 path = "tests/cpu/GpuShader_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-gpu/src/gpu_shader_tests.rs"]
+target = ["crates/ocio-gpu/src/gpu_shader_tests.rs", "crates/ocio/tests/gpu_shader_tests.rs"]
 status = "partial"
-note = "1.7c: generic_shader (its uniform too). The Metal and Vulkan tests extract processors' shaders, and come with the ops' GPU writers; gpu_shader_class_wrapper_tests.rs checks the class wrapper's part of the Metal ones"
+note = "1.7c: generic_shader (its uniform too); gpu_shader_class_wrapper_tests.rs checks the class wrapper's part of the Metal ones. p4-ctf-bake 4.10b: MetalLutTest2, MetalSupport3-6 and VulkanSupport, which extract the shaders of config and LUT file processors (crates/ocio/tests/gpu_shader_tests.rs). Later: MetalLutTest uses the legacy GPU processor (Phase 7); MetalSupport7 an ExposureContrastTransform, MetalSupport8 a GradingRGBCurveTransform in a config and MetalSupport9 a dynamic one (Phase 5)"
 
 [[file]]
 path = "tests/cpu/Logging_tests.cpp"
@@ -5190,8 +5190,8 @@ note = "p1-transforms-fam2 (1.8e)"
 path = "tests/cpu/transforms/LookTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/look_transform_tests.rs"]
-status = "partial"
-note = "p3-transforms (3.1a): basic; p3-builders 3.2b: build_look_ops, context_variables, inverse_look_transform; build_look_options_ops builds a FileTransform whose file is missing (WP 4.1)"
+status = "done"
+note = "p3-transforms (3.1a): basic; p3-builders 3.2b: build_look_ops, context_variables, inverse_look_transform; p4-ctf-bake 4.10b: build_look_options_ops (a FileTransform whose file is missing)"
 
 [[file]]
 path = "tests/cpu/transforms/Lut1DTransform_tests.cpp"

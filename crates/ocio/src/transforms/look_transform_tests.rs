@@ -501,3 +501,149 @@ colorspaces:
         assert!(**ops[i].data() == **ops2[i].data());
     }
 }
+
+/// Port of `OCIO_ADD_TEST(LookTransform, build_look_options_ops)` @ v2.5.2.
+#[test]
+fn build_look_options_ops() {
+    let _env = EnvGuard::new();
+    const OCIO_CONFIG: &str = r#"
+ocio_profile_version: 2
+
+search_path: luts
+
+roles:
+  default: raw
+
+displays:
+  sRGB:
+    - !<View> {name: Raw, colorspace: raw}
+
+looks:
+  - !<Look>
+    name: look1
+    process_space: raw
+    transform: !<FileTransform> {src: missingfile}
+
+  - !<Look>
+    name: look2
+    process_space: look2_cs
+    transform: !<FixedFunctionTransform> {name: look2 trans, style: ACES_RedMod03}
+
+  - !<Look>
+    name: look3
+    process_space: look3_cs
+    transform: !<FixedFunctionTransform> {name: look3 trans, style: ACES_RedMod03}
+
+  - !<Look>
+    name: look4
+    process_space: look4_cs
+    transform: !<FixedFunctionTransform> {name: look4 trans, style: ACES_RedMod03}
+
+  - !<Look>
+    name: look5
+    process_space: raw
+    transform: !<FileTransform> {src: missingfile}
+
+colorspaces:
+  - !<ColorSpace>
+    name: raw
+    family: raw
+    bitdepth: 32f
+    description: |
+      A raw color space. Conversions to and from this space are no-ops.
+    isdata: true
+
+  - !<ColorSpace>
+    name: source
+    to_scene_reference: !<FixedFunctionTransform> {name: src, style: ACES_RedMod03}
+
+  - !<ColorSpace>
+    name: destination
+    from_scene_reference: !<FixedFunctionTransform> {name: dst, style: ACES_RedMod03}
+
+  - !<ColorSpace>
+    name: look2_cs
+    to_scene_reference: !<FixedFunctionTransform> {name: look2_cs trans, style: ACES_RedMod03}
+
+  - !<ColorSpace>
+    name: look3_cs
+    to_scene_reference: !<FixedFunctionTransform> {name: look3_cs trans, style: ACES_RedMod03}
+
+  - !<ColorSpace>
+    name: look4_cs
+    to_scene_reference: !<FixedFunctionTransform> {name: look4_cs trans, style: ACES_RedMod03}
+"#;
+
+    let config = Config::create_from_stream(OCIO_CONFIG.as_bytes()).unwrap();
+    config.validate().unwrap();
+
+    // LookTransform options test.  First option (1) gets missing file error,
+    // second option (2 & 3) works, third option (3 & 4) not needed.
+
+    let mut lt = LookTransform::new();
+    lt.set_src("source");
+    lt.set_dst("destination");
+    lt.set_looks("look1 | look2, look3 | look3, look4");
+
+    // First option fails with a missing file, second option is fine: look2, look3.
+    let mut ops = build(&config, &lt, TransformDirection::Forward).unwrap();
+    ops.validate().unwrap();
+    assert_eq!(ops.len(), 16);
+    assert!(ops[0].is_no_op_type());
+    // Src to ref.
+    validate_transform(&ops[1], "src", TransformDirection::Forward);
+    // Ref to look2_cs.
+    validate_transform(&ops[2], "look2_cs trans", TransformDirection::Inverse);
+    assert!(ops[3].is_no_op_type());
+    assert!(ops[4].is_no_op_type());
+    // Look2 transform.
+    validate_transform(&ops[5], "look2 trans", TransformDirection::Forward);
+    assert!(ops[6].is_no_op_type());
+    // Look2_cs to ref.
+    validate_transform(&ops[7], "look2_cs trans", TransformDirection::Forward);
+    // Ref to look3_cs.
+    validate_transform(&ops[8], "look3_cs trans", TransformDirection::Inverse);
+    assert!(ops[9].is_no_op_type());
+    assert!(ops[10].is_no_op_type());
+    // Look3 transform.
+    validate_transform(&ops[11], "look3 trans", TransformDirection::Forward);
+    assert!(ops[12].is_no_op_type());
+    // Look3_cs to ref.
+    validate_transform(&ops[13], "look3_cs trans", TransformDirection::Forward);
+    // Ref to dst.
+    validate_transform(&ops[14], "dst", TransformDirection::Forward);
+    assert!(ops[15].is_no_op_type());
+
+    // Test in inverse direction.
+    // Options are tried in the same order (3rd option is not tried before second one).
+    // Looks of the second option are reversed: look3, look2.
+    let mut ops = build(&config, &lt, TransformDirection::Inverse).unwrap();
+    ops.validate().unwrap();
+    assert_eq!(ops.len(), 16);
+    assert!(ops[0].is_no_op_type());
+    validate_transform(&ops[1], "dst", TransformDirection::Inverse);
+    validate_transform(&ops[2], "look3_cs trans", TransformDirection::Inverse);
+    assert!(ops[3].is_no_op_type());
+    assert!(ops[4].is_no_op_type());
+    validate_transform(&ops[5], "look3 trans", TransformDirection::Inverse);
+    assert!(ops[6].is_no_op_type());
+    validate_transform(&ops[7], "look3_cs trans", TransformDirection::Forward);
+    validate_transform(&ops[8], "look2_cs trans", TransformDirection::Inverse);
+    assert!(ops[9].is_no_op_type());
+    assert!(ops[10].is_no_op_type());
+    validate_transform(&ops[11], "look2 trans", TransformDirection::Inverse);
+    assert!(ops[12].is_no_op_type());
+    validate_transform(&ops[13], "look2_cs trans", TransformDirection::Forward);
+    validate_transform(&ops[14], "src", TransformDirection::Inverse);
+    assert!(ops[15].is_no_op_type());
+
+    // Replace look3 by look5 so that look options will fail, an exception will be thrown.
+    // Looks has three options, first one involves look1 and the other two involve look5.
+
+    lt.set_looks("look1 | look2, look5 | look5, look4");
+
+    check_throw_what(
+        build(&config, &lt, TransformDirection::Forward),
+        "The specified file reference 'missingfile' could not be located",
+    );
+}
