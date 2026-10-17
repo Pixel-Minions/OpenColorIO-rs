@@ -6291,8 +6291,7 @@ fn fixed_function_aces_gamut_comp_13_ctf() {
     check_written(expected, &output_transform);
 }
 
-/// Port of `OCIO_ADD_TEST(CTFTransform, fixed_function_aces_gamut_comp_13_inverse_ctf)` @
-/// v2.5.2.
+/// Port of `OCIO_ADD_TEST(CTFTransform, fixed_function_aces_gamut_comp_13_inverse_ctf)` @ v2.5.2.
 #[test]
 fn fixed_function_aces_gamut_comp_13_inverse_ctf() {
     let data = [1.147, 1.264, 1.312, 0.815, 0.803, 0.880, 1.2];
