@@ -2827,6 +2827,22 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `crates/ocio/tests/ocioz_read_oracle.rs`, `recovered_archives` ("backslashes"), on both
   platforms.
 
+### I-211. An archive leaves out linked LUT files, and takes every LUT file around the config
+
+- **Upstream:** `Config::archive` adds every file under the config's working directory whose
+  extension a LUT format reads (`addSupportedFiles`, `src/OpenColorIO/OCIOZArchive.cpp:149-202`
+  @ v2.5.2), whether the config uses it or not, following links to directories. It adds each
+  through minizip-ng's `mz_zip_writer_add_path` (mz_zip_rw.c:1649-1729 @ 4.0.10), which skips a
+  symbolic link to a file (neither storing nor following links, as OpenColorIO sets it up)
+  without an error: a config whose LUT is a link archives without it, and the archived config
+  fails to find it.
+- **Who notices:** applications archiving configs whose LUT files are links (common where LUTs
+  are shared between shows), or whose directories hold unrelated LUT files.
+- **A fix:** archive the files the config references, following links to files.
+- **Status:** matched in `p4-baker` (4.9b1, `crates/ocio/src/ocioz_archive.rs` and
+  `crates/ocio/src/minizip/mz_zip_rw.rs`); `crates/ocio/tests/ocioz_archive_oracle.rs`, the
+  generated directory's links (Linux).
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on

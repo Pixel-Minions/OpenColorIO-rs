@@ -3,17 +3,27 @@
 //
 // Ported from minizip-ng 4.0.10 (see `mod.rs` for its notice): an altered version.
 
-//! minizip-ng's archive reader (`mz_zip_rw.c`), as OpenColorIO uses it: an archive file
-//! opened with recovery on (the reader's default), its entries one after the other, and an
-//! entry's contents saved to a buffer.
+//! minizip-ng's archive reader and writer (`mz_zip_rw.c`), as OpenColorIO uses them: an
+//! archive file opened with recovery on (the reader's default), its entries one after the
+//! other, and an entry's contents saved to a buffer; an archive written into memory from a
+//! buffer and from files.
 
 use ocio_ops::utils::string_utils::c_str;
 
-use super::mz_strm::{
-    MZ_BUF_ERROR, MZ_EXIST_ERROR, MZ_OK, MZ_PARAM_ERROR, MZ_STREAM_ERROR, MZ_WRITE_ERROR,
-    MemStream, Origin, SplitStream, mz_stream_read_uint64, mz_stream_seek,
+use super::mz_os::{
+    mz_os_get_file_attribs, mz_os_get_file_date, mz_os_get_file_size, mz_os_is_dir,
+    mz_os_is_symlink, system_path,
 };
-use super::mz_zip::{CdStream, FileInfo, MZ_ZIP_EXTENSION_CDCD, Zip, mz_zip_extrafield_find};
+use super::mz_strm::{
+    MZ_BUF_ERROR, MZ_EXIST_ERROR, MZ_OK, MZ_OPEN_ERROR, MZ_PARAM_ERROR, MZ_READ_ERROR,
+    MZ_STREAM_ERROR, MZ_WRITE_ERROR, MemStream, Origin, SplitStream, mz_stream_read_uint64,
+    mz_stream_seek,
+};
+use super::mz_zip::{
+    CdStream, FileInfo, MZ_HOST_SYSTEM_MSDOS, MZ_HOST_SYSTEM_UNIX, MZ_HOST_SYSTEM_WINDOWS_NTFS,
+    MZ_ZIP_EXTENSION_CDCD, Zip, ZipWrite, mz_host_system, mz_zip_attrib_convert,
+    mz_zip_attrib_is_dir, mz_zip_extrafield_find,
+};
 
 /// The name of a zipped central directory's entry (`MZ_ZIP_CD_FILENAME`, mz_zip_rw.c:28 @
 /// 4.0.10).
@@ -267,5 +277,230 @@ impl Reader {
             }
             _ => MZ_PARAM_ERROR,
         }
+    }
+}
+
+/// `MZ_VERSION_MADEBY` (mz_os.h:20-40 @ 4.0.10): the host system (Windows NTFS on Windows,
+/// UNIX elsewhere) and zip version 4.5 (no LZMA, AES or bzip2 in OpenColorIO's minizip-ng).
+pub(crate) const MZ_VERSION_MADEBY: u16 = if cfg!(windows) {
+    ((MZ_HOST_SYSTEM_WINDOWS_NTFS as u16) << 8) | 45
+} else {
+    ((MZ_HOST_SYSTEM_UNIX as u16) << 8) | 45
+};
+
+/// `MZ_ZIP_FLAG_UTF8` (mz.h:84 @ 4.0.10).
+pub(crate) const MZ_ZIP_FLAG_UTF8: u16 = 1 << 11;
+
+/// `MZ_COMPRESS_METHOD_DEFLATE` and `MZ_COMPRESS_LEVEL_BEST` (mz.h:64, 74 @ 4.0.10).
+pub(crate) const MZ_COMPRESS_METHOD_DEFLATE: u16 = 8;
+pub(crate) const MZ_COMPRESS_LEVEL_BEST: i16 = 9;
+
+/// An archive writer, into memory.
+///
+/// Port of `mz_zip_writer` (mz_zip_rw.c:1052-1072 @ 4.0.10), with the fields OpenColorIO's use
+/// reaches: no password, AES, links, zipped central directory or callbacks.
+#[derive(Debug)]
+pub(crate) struct Writer {
+    zip: Option<ZipWrite>,
+    file_info: FileInfo,
+    compress_method: u16,
+    compress_level: i16,
+}
+
+impl Writer {
+    /// Port of `mz_zip_writer_create` (mz_zip_rw.c:1888-1907 @ 4.0.10).
+    pub(crate) fn create() -> Writer {
+        Writer {
+            zip: None,
+            file_info: FileInfo::default(),
+            compress_method: MZ_COMPRESS_METHOD_DEFLATE,
+            compress_level: MZ_COMPRESS_LEVEL_BEST,
+        }
+    }
+
+    /// Port of `mz_zip_writer_set_compress_method` (mz_zip_rw.c:1822-1825 @ 4.0.10).
+    pub(crate) fn set_compress_method(&mut self, compress_method: u16) {
+        self.compress_method = compress_method;
+    }
+
+    /// Port of `mz_zip_writer_set_compress_level` (mz_zip_rw.c:1827-1830 @ 4.0.10).
+    pub(crate) fn set_compress_level(&mut self, compress_level: i16) {
+        self.compress_level = compress_level;
+    }
+
+    /// Opens the writer on a new memory stream (`append` 0).
+    ///
+    /// Port of `mz_zip_writer_open` and `mz_zip_writer_open_int` (mz_zip_rw.c:1158-1168,
+    /// 1140-1156 @ 4.0.10).
+    pub(crate) fn open(&mut self) -> i32 {
+        self.zip = Some(ZipWrite::open());
+        MZ_OK
+    }
+
+    fn zip(&mut self) -> &mut ZipWrite {
+        self.zip.as_mut().expect("the writer is open")
+    }
+
+    /// Port of `mz_zip_writer_entry_open` (mz_zip_rw.c:1319-1363 @ 4.0.10), without a password
+    /// and without hashes (`MZ_ZIP_NO_CRYPTO`).
+    pub(crate) fn entry_open(&mut self, file_info: &FileInfo) -> i32 {
+        // Copy file info to access data upon close
+        self.file_info = file_info.clone();
+        let level = self.compress_level;
+        let file_info = self.file_info.clone();
+        self.zip().entry_write_open(&file_info, level)
+    }
+
+    /// Port of `mz_zip_writer_entry_write` (mz_zip_rw.c:1437-1446 @ 4.0.10).
+    pub(crate) fn entry_write(&mut self, buf: &[u8]) -> i32 {
+        self.zip().entry_write(buf)
+    }
+
+    /// Port of `mz_zip_writer_entry_close` (mz_zip_rw.c:1365-1435 @ 4.0.10), without hashes.
+    pub(crate) fn entry_close(&mut self) -> i32 {
+        self.zip().entry_close()
+    }
+
+    /// Adds the data `file` gives, read 64 KiB at a time, to the open entry.
+    ///
+    /// Port of `mz_zip_writer_add` and `mz_zip_writer_add_process` (mz_zip_rw.c:1478-1517,
+    /// 1449-1476 @ 4.0.10), without progress callbacks, reading with `mz_stream_os_read`
+    /// (`fread`'s full reads).
+    fn add(&mut self, file: &mut std::fs::File) -> i32 {
+        use std::io::Read;
+        let mut buffer = vec![0u8; u16::MAX as usize];
+        loop {
+            let mut read = 0;
+            while read < buffer.len() {
+                match file.read(&mut buffer[read..]) {
+                    Ok(0) => break,
+                    Ok(n) => read += n,
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                    Err(_) => return MZ_READ_ERROR,
+                }
+            }
+            if read == 0 {
+                return MZ_OK;
+            }
+            let written = self.entry_write(&buffer[..read]);
+            if written != read as i32 {
+                return MZ_WRITE_ERROR;
+            }
+        }
+    }
+
+    /// Adds an entry `file_info` with the data `file` gives (none for a directory).
+    ///
+    /// Port of `mz_zip_writer_add_info` (mz_zip_rw.c:1519-1544 @ 4.0.10).
+    fn add_info(&mut self, file: Option<&mut std::fs::File>, file_info: &FileInfo) -> i32 {
+        // Add to zip
+        let err = self.entry_open(file_info);
+        if err != MZ_OK {
+            return err;
+        }
+
+        if let Some(file) = file
+            && !mz_zip_attrib_is_dir(self.file_info.external_fa, self.file_info.version_madeby)
+        {
+            let err = self.add(file);
+            if err != MZ_OK {
+                return err;
+            }
+        }
+
+        self.entry_close()
+    }
+
+    /// Adds the file `path` as `filename_in_zip`, with its size, dates and attributes.
+    ///
+    /// Port of `mz_zip_writer_add_file` (mz_zip_rw.c:1570-1647 @ 4.0.10), without links
+    /// (OpenColorIO doesn't store them) or a zipped central directory.
+    pub(crate) fn add_file(&mut self, path: &[u8], filename_in_zip: &[u8]) -> i32 {
+        let path = c_str(path);
+        let mut filename = c_str(filename_in_zip);
+
+        // The path name saved, should not include a leading slash.
+        // If it did, windows/xp and dynazip couldn't read the zip file.
+        while let [b'\\' | b'/', rest @ ..] = filename {
+            filename = rest;
+        }
+
+        // Get information about the file on disk so we can store it in zip
+        let mut file_info = FileInfo {
+            version_madeby: MZ_VERSION_MADEBY,
+            compression_method: self.compress_method,
+            filename: filename.to_vec(),
+            uncompressed_size: mz_os_get_file_size(path),
+            flag: MZ_ZIP_FLAG_UTF8,
+            ..FileInfo::default()
+        };
+
+        if let Some((modified, accessed, creation)) = mz_os_get_file_date(path) {
+            file_info.modified_date = modified;
+            file_info.accessed_date = accessed;
+            file_info.creation_date = creation;
+        }
+        let src_attrib = mz_os_get_file_attribs(path);
+
+        let src_sys = mz_host_system(file_info.version_madeby);
+
+        if src_sys != MZ_HOST_SYSTEM_MSDOS && src_sys != MZ_HOST_SYSTEM_WINDOWS_NTFS {
+            // High bytes are OS specific attributes, low byte is always DOS attributes
+            if let Some(target_attrib) =
+                mz_zip_attrib_convert(src_sys, src_attrib, MZ_HOST_SYSTEM_MSDOS)
+            {
+                file_info.external_fa = target_attrib;
+            }
+            file_info.external_fa |= src_attrib << 16;
+        } else {
+            file_info.external_fa = src_attrib;
+        }
+
+        let mut file = None;
+        if !mz_os_is_dir(path) {
+            match std::fs::File::open(system_path(path)) {
+                Ok(f) => file = Some(f),
+                Err(_) => return MZ_OPEN_ERROR,
+            }
+        }
+
+        self.add_info(file.as_mut(), &file_info)
+    }
+
+    /// Adds the file `path`, named in the archive by its path from `root_path` (which `path`
+    /// starts with), unless it is a symbolic link (which isn't added).
+    ///
+    /// Port of `mz_zip_writer_add_path` (mz_zip_rw.c:1649-1729 @ 4.0.10) with `include_path` 0,
+    /// for a `path` that isn't a directory and has no `*`, as OpenColorIO calls it
+    /// (`addSupportedFiles` lists the directories itself): its branches for a directory and
+    /// for a wildcard aren't ported.
+    pub(crate) fn add_path_of_file(&mut self, path: &[u8], root_path: &[u8]) -> i32 {
+        let path = c_str(path);
+        // Should the file be stored with any path info at all?
+        let filenameinzip = path.get(c_str(root_path).len()..).unwrap_or(&[]);
+
+        // Neither links are stored nor followed.
+        if mz_os_is_symlink(path) {
+            return MZ_OK;
+        }
+
+        if !filenameinzip.is_empty() {
+            return self.add_file(path, filenameinzip);
+        }
+        MZ_OK
+    }
+
+    /// Closes the writer and its archive, and gives what its memory stream holds (OpenColorIO
+    /// ignores the result of closing).
+    ///
+    /// Port of `mz_zip_writer_close` (mz_zip_rw.c:1283-1315 @ 4.0.10), without a comment or a
+    /// zipped central directory.
+    pub(crate) fn close(&mut self) -> Vec<u8> {
+        let Some(mut zip) = self.zip.take() else {
+            return Vec::new();
+        };
+        zip.version_madeby = MZ_VERSION_MADEBY;
+        let _ = zip.close();
+        zip.stream.bytes_at(0).to_vec()
     }
 }

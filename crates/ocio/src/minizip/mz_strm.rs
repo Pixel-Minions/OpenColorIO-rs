@@ -315,7 +315,8 @@ impl MemStream {
         buf.len() as i32
     }
 
-    /// Port of `mz_stream_write_uint8` (mz_strm.c:133-135, through `mz_stream_write_value`, 112-131 @ 4.0.10).
+    /// Port of `mz_stream_write_uint8` (mz_strm.c:133-135, through `mz_stream_write_value`,
+    /// 112-131 @ 4.0.10).
     pub(crate) fn write_uint8(&mut self, value: u8) -> i32 {
         if self.write(&[value]) != 1 {
             return MZ_STREAM_ERROR;

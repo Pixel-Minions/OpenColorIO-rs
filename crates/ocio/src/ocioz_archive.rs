@@ -1,22 +1,29 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! `.ocioz` config archives: a config and its LUT files in a zip archive, read through
-//! minizip-ng's reader ([`crate::minizip`]), as OpenColorIO reads them.
+//! `.ocioz` config archives: a config and its LUT files in a zip archive, read and written
+//! through minizip-ng's reader and writer ([`crate::minizip`]), as OpenColorIO reads and
+//! writes them.
 
 use std::collections::BTreeMap;
+use std::io::Write;
 use std::sync::Arc;
 
 use ocio_ops::exception::{Exception, Result};
 use ocio_ops::platform::create_input_file_stream;
-use ocio_ops::utils::pystring::os_path;
+use ocio_ops::utils::pystring::{self, os_path};
 use ocio_ops::utils::string_utils::c_str;
 
 use crate::config::{Config, OCIO_CONFIG_DEFAULT_FILE_EXT, OCIO_CONFIG_DEFAULT_NAME};
 use crate::config_io_proxy::ConfigIoProxy;
-use crate::minizip::mz_os::mz_path_compare_wc;
+use crate::minizip::mz_os::{mz_os_is_dir, mz_os_list_dir, mz_path_compare_wc};
 use crate::minizip::mz_strm::MZ_OK;
-use crate::minizip::mz_zip_rw::Reader;
+use crate::minizip::mz_zip::FileInfo;
+use crate::minizip::mz_zip_rw::{
+    MZ_COMPRESS_LEVEL_BEST, MZ_COMPRESS_METHOD_DEFLATE, MZ_VERSION_MADEBY, MZ_ZIP_FLAG_UTF8,
+    Reader, Writer,
+};
+use crate::transforms::file_format::FormatRegistry;
 
 /// "256 MB is well above any realistic individual OCIO config or LUT file size."
 ///
@@ -202,6 +209,125 @@ pub(crate) fn create_from_archive(filename: &[u8]) -> Result<Arc<Config>> {
     // Build the entries map.
     ciop.build_entries()?;
     Config::create_from_config_io_proxy(Arc::new(ciop))
+}
+
+/// Adds the files under `path` whose extension a LUT format reads, directory by directory in
+/// the order the system lists them, each named by its path from `config_working_directory`.
+///
+/// Port of `addSupportedFiles` (src/OpenColorIO/OCIOZArchive.cpp:149-202 @ v2.5.2).
+fn add_supported_files(
+    archiver: &mut Writer,
+    path: &[u8],
+    config_working_directory: &[u8],
+) -> Result<()> {
+    let Some(names) = mz_os_list_dir(path) else {
+        return Ok(());
+    };
+    for name in names {
+        // Join the current path and the directory/file name to get the absolute path.
+        let abs_path = os_path::join(path, &name);
+        // Check if the absolute path is a directory.
+        if mz_os_is_dir(&abs_path) {
+            // Since mz_os_read_dir is listing the whole directory, "." and ".." must be
+            // ignored (the listing leaves them out).
+            add_supported_files(archiver, &abs_path, config_working_directory)?;
+        } else {
+            // Absolute path is a file.
+            let (_root, ext) = os_path::splitext(&name);
+            // Strip leading dot character in order to get the extension name only.
+            let ext = pystring::lstrip(&ext, b".");
+
+            // Check if the extension is supported. Using logic from LoadFileUncached().
+            let possible_formats = FormatRegistry::instance().file_formats_for_extension(&ext);
+            if !possible_formats.is_empty() {
+                // The extension is supported. Add the current file to the OCIOZ archive.
+                if archiver.add_path_of_file(&abs_path, config_working_directory) != MZ_OK {
+                    let mut os = b"Could not write LUT file ".to_vec();
+                    os.extend_from_slice(&abs_path);
+                    os.extend_from_slice(b" to in-memory archive.");
+                    return Err(Exception::new(os));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Writes the archive of `config`: its serialized text as `config.ocio`, then the LUT files
+/// under `config_working_directory`.
+///
+/// Its entries carry the time they are written (`time(NULL)` for the config) and the files'
+/// times, and the files come in the order the system lists them, so archives aren't
+/// reproducible byte for byte; the deflate streams are flate2's (deviation D-6).
+///
+/// Port of `archiveConfig` (src/OpenColorIO/OCIOZArchive.cpp:205-333 @ v2.5.2).
+pub(crate) fn archive_config(
+    ostream: &mut dyn Write,
+    config: &Config,
+    config_working_directory: &[u8],
+) -> Result<()> {
+    if !config.is_archivable() {
+        return Err(Exception::new("Config is not archivable."));
+    }
+
+    // Retrieve and store the config as string.
+    let config_str = config.serialize()?;
+
+    // Create the writer handle, deflating at the best level.
+    let mut archiver = Writer::create();
+    archiver.set_compress_method(MZ_COMPRESS_METHOD_DEFLATE);
+    archiver.set_compress_level(MZ_COMPRESS_LEVEL_BEST);
+
+    // Open the in-memory zip.
+    if archiver.open() == MZ_OK {
+        // Use a hardcoded name for the config's filename inside the archive.
+        let config_fullname = [OCIO_CONFIG_DEFAULT_NAME, OCIO_CONFIG_DEFAULT_FILE_EXT].concat();
+
+        // Get config string size.
+        let config_size = config_str.len() as i32;
+
+        // Initialize the config file information structure.
+        let file_info = FileInfo {
+            filename: config_fullname.into_bytes(),
+            modified_date: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs() as i64),
+            version_madeby: MZ_VERSION_MADEBY,
+            compression_method: MZ_COMPRESS_METHOD_DEFLATE,
+            flag: MZ_ZIP_FLAG_UTF8,
+            uncompressed_size: i64::from(config_size),
+            ..FileInfo::default()
+        };
+
+        // Opens an entry in the in-memory zip file for writing.
+        if archiver.entry_open(&file_info) == MZ_OK {
+            // Add config to the in-memory zip using buffer.
+            let written = archiver.entry_write(&config_str);
+            if written < MZ_OK {
+                return Err(Exception::new(
+                    "Could not write config to in-memory archive.",
+                ));
+            }
+            // Close the entry.
+            archiver.entry_close();
+        } else {
+            return Err(Exception::new("Could not prepare an entry for writing."));
+        }
+
+        // Add all supported files to in-memory zip from any directories under working
+        // directory. (recursive)
+        add_supported_files(
+            &mut archiver,
+            config_working_directory,
+            config_working_directory,
+        )?;
+    }
+
+    // Close in-memory zip, and write it to the stream.
+    let buffer = archiver.close();
+    // A write that fails sets the stream's badbit upstream, which nothing checks.
+    let _ = ostream.write_all(&buffer);
+    Ok(())
 }
 
 #[cfg(test)]

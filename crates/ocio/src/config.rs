@@ -996,6 +996,18 @@ impl Config {
         files.iter().all(|path| validate_path_for_archiving(path))
     }
 
+    /// Writes the config's `.ocioz` archive to `ostream`: its text as `config.ocio`, then the
+    /// LUT files under its working directory ([`crate::ocioz_archive`]). A config that isn't
+    /// archivable ([`Config::is_archivable`]) is refused with "Config is not archivable.".
+    ///
+    /// Port of `Config::archive` (src/OpenColorIO/Config.cpp:6084-6088 @ v2.5.2), into any
+    /// [`std::io::Write`] (owner decision P4-5).
+    pub fn archive(&self, ostream: &mut impl std::io::Write) -> Result<()> {
+        // Using utility functions in OCIOZArchive.cpp.
+        let working_dir = self.current_context().get().working_dir().to_vec();
+        crate::ocioz_archive::archive_config(ostream, self, &working_dir)
+    }
+
     /// The config's YAML text: checked against its version
     /// ([`Config::check_version_consistency`]), then written (`OCIOYaml::Write`). Either's
     /// error is "Error building YAML: " and its message. It is also the config's text as

@@ -158,3 +158,72 @@ fn context_test_for_search_paths_and_filetransform_source_path() {
     test_paths(&cfg_windows_archive, context_of(&cfg_windows_archive));
     test_paths(&cfg_linux_archive, context_of(&cfg_linux_archive));
 }
+
+/// Port of `OCIO_ADD_TEST(OCIOZArchive, archive_config_and_compare_to_original)` @ v2.5.2.
+#[test]
+fn archive_config_and_compare_to_original() {
+    /*
+     * This test is doing the following :
+     *
+     * 1 - Create a config object from tests/data/files/configs/context_test1/config.ocio.
+     * 2 - Archive the config in step 1 and save it in a temporary folder.
+     * 3 - Create a config object using the archived config from step 2.
+     * 4 - Compare different elements between the two configs.
+     *
+     * Testing CreateFromFile and archive method on a successful path.
+     */
+    let config_path = archive_path(&["configs", "context_test1", "config.ocio"]);
+
+    {
+        let env = EnvGuard::new();
+        env.set(&[("OCIO", std::str::from_utf8(&config_path).unwrap())]);
+
+        // 1 - Create a config from a OCIO file.
+        let config_from_ocio_file = Config::create_from_env().unwrap();
+        config_from_ocio_file.validate().unwrap();
+
+        // 2 - Archive the config of step 1.
+        let mut ostring_stream = Vec::new();
+        config_from_ocio_file.archive(&mut ostring_stream).unwrap();
+
+        // 3 - Verify that the binary data starts with "PK".
+        assert_eq!(b'P', ostring_stream[0]);
+        assert_eq!(b'K', ostring_stream[1]);
+
+        // 4 - Save the archive into a temporary file (FileCreationGuard).
+        let filename = ocio_ops::platform::create_temp_filename(b"");
+        let path = String::from_utf8(filename.clone()).unwrap();
+        std::fs::write(&path, &ostring_stream).unwrap();
+
+        // 5 - Create a config from the archived config of step 4.
+        let config_from_archive = Config::create_from_file(&filename).unwrap();
+        config_from_archive.validate().unwrap();
+
+        // 6 - Compare config cacheID - configFromOcioFile vs configFromArchive.
+        assert_eq!(
+            config_from_ocio_file.cache_id_with_context(None).unwrap(),
+            config_from_archive.cache_id_with_context(None).unwrap()
+        );
+
+        // 7 - Compare a processor cacheID - configFromOcioFile to configFromArchive.
+        let proc_config_from_ocio_file = config_from_ocio_file
+            .processor_between("plain_lut1_cs", "shot1_lut1_cs")
+            .unwrap();
+        let proc_config_from_archive = config_from_archive
+            .processor_between("plain_lut1_cs", "shot1_lut1_cs")
+            .unwrap();
+        assert_eq!(
+            proc_config_from_ocio_file.cache_id().unwrap(),
+            proc_config_from_archive.cache_id().unwrap()
+        );
+
+        // 8 - Compare serialization - configFromOcioFile vs configFromArchive.
+        assert_eq!(
+            config_from_ocio_file.serialize().unwrap(),
+            config_from_archive.serialize().unwrap()
+        );
+
+        // Even if not strictly required on most OSes, perform the cleanup.
+        let _ = std::fs::remove_file(&path);
+    }
+}

@@ -31,7 +31,8 @@
 //! A port of the parts of minizip-ng 4.0.10 that OpenColorIO 2.5.2 reaches when it reads an
 //! `.ocioz` archive (`src/OpenColorIO/OCIOZArchive.cpp`): which entries an archive lists, in
 //! what order and under what name and CRC, how a name is compared with a path, and what an
-//! entry's buffer holds, including where minizip-ng can't read all of it. OpenColorIO's
+//! entry's buffer holds, including where minizip-ng can't read all of it; and when it writes
+//! one (`Config::archive`): the entries' headers, attributes, extra fields and order. OpenColorIO's
 //! results depend on each.
 //!
 //! **The version.** OpenColorIO 2.5.2 builds minizip-ng 4.0.10 where it installs it
@@ -41,11 +42,13 @@
 //! build define `MZ_ZIP_NO_CRYPTO`). Its source is pinned as the submodule
 //! `upstream/minizip-ng` (tag `4.0.10`), so the citations can be checked.
 //!
-//! **What isn't minizip-ng's.** zlib's `inflate` is `flate2`'s on its `zlib-rs` backend, a
-//! port of zlib ([`inflate`], owner decision 2026-10-17); the system file streams read the
-//! file whole.
+//! **What isn't minizip-ng's.** zlib's `inflate` and `deflate` are `flate2`'s on its `zlib-rs`
+//! backend, a port of zlib ([`inflate`], owner decision 2026-10-17), whose deflate streams
+//! differ from zlib 1.3.1's past a few KiB (deviation D-6); the system file streams read the
+//! file whole; a DOS date is broken down in UTC (D-6).
 
 pub(crate) mod inflate;
+pub(crate) mod mz_crypt;
 pub(crate) mod mz_os;
 pub(crate) mod mz_strm;
 pub(crate) mod mz_zip;

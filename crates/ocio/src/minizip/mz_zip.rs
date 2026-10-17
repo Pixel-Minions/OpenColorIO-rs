@@ -7,6 +7,7 @@
 //! headers of its entries, and an entry's data.
 
 use super::inflate::{Stop, inflate};
+use super::mz_crypt::mz_crypt_crc32_update;
 use super::mz_strm::{
     MZ_BUF_ERROR, MZ_END_OF_LIST, MZ_END_OF_STREAM, MZ_EXIST_ERROR, MZ_FORMAT_ERROR, MZ_OK,
     MZ_PARAM_ERROR, MZ_READ_ERROR, MZ_STREAM_ERROR, MZ_SUPPORT_ERROR, MemStream, Origin,
@@ -1290,34 +1291,234 @@ fn mz_zip_extrafield_contains(extrafield: &[u8], extrafield_size: i32, type_: u1
     }
 }
 
-/// Whether a central header needs the zip64 extra field, for an entry whose `zip64` setting
-/// is `MZ_ZIP64_AUTO` (as a rebuilt entry's is).
-///
-/// Port of `mz_zip_entry_needs_zip64` (mz_zip.c:551-592 @ 4.0.10) for a central header.
-fn mz_zip_entry_needs_zip64(file_info: &FileInfo) -> bool {
-    let max_uncompressed_size = i64::from(u32::MAX);
-    let mut needs_zip64 = file_info.uncompressed_size >= max_uncompressed_size
-        || file_info.compressed_size >= i64::from(u32::MAX);
-    // Disk offset and number only used in central directory header
-    needs_zip64 |= file_info.disk_offset >= i64::from(u32::MAX)
-        || file_info.disk_number >= u32::from(u16::MAX);
-    needs_zip64
+/// `MZ_ZIP_UNCOMPR_SIZE64_CUSHION` (mz_zip.c:76 @ 4.0.10).
+const MZ_ZIP_UNCOMPR_SIZE64_CUSHION: i64 = 2 * 1024 * 1024;
+
+/// `MZ_ZIP_FLAG_MASK_LOCAL_INFO` (mz.h:85 @ 4.0.10).
+const MZ_ZIP_FLAG_MASK_LOCAL_INFO: u16 = 1 << 13;
+
+/// The host systems of the attributes (mz.h:103-107 @ 4.0.10).
+pub(crate) const MZ_HOST_SYSTEM_MSDOS: u8 = 0;
+pub(crate) const MZ_HOST_SYSTEM_UNIX: u8 = 3;
+pub(crate) const MZ_HOST_SYSTEM_WINDOWS_NTFS: u8 = 10;
+pub(crate) const MZ_HOST_SYSTEM_RISCOS: u8 = 13;
+pub(crate) const MZ_HOST_SYSTEM_OSX_DARWIN: u8 = 19;
+
+/// Port of `MZ_HOST_SYSTEM` (mz.h:102 @ 4.0.10).
+pub(crate) fn mz_host_system(version_madeby: u16) -> u8 {
+    (version_madeby >> 8) as u8
 }
 
-/// Writes `file_info`'s central header to `stream`.
+/// Port of `mz_zip_attrib_posix_to_win32` (mz_zip.c:2538-2558 @ 4.0.10).
+fn mz_zip_attrib_posix_to_win32(posix_attrib: u32) -> u32 {
+    let mut win32_attrib = 0;
+    // S_IWUSR | S_IWGRP | S_IWOTH | S_IXUSR | S_IXGRP | S_IXOTH
+    if posix_attrib & 0o000333 == 0 && posix_attrib & 0o000444 != 0 {
+        win32_attrib |= 0x01; // FILE_ATTRIBUTE_READONLY
+    }
+    if posix_attrib & 0o170000 == 0o120000 {
+        // S_IFLNK
+        win32_attrib |= 0x400; // FILE_ATTRIBUTE_REPARSE_POINT
+    } else if posix_attrib & 0o170000 == 0o040000 {
+        // S_IFDIR
+        win32_attrib |= 0x10; // FILE_ATTRIBUTE_DIRECTORY
+    } else {
+        // S_IFREG
+        win32_attrib |= 0x80; // FILE_ATTRIBUTE_NORMAL
+    }
+    win32_attrib
+}
+
+/// Port of `mz_zip_attrib_win32_to_posix` (mz_zip.c:2560-2580 @ 4.0.10).
+fn mz_zip_attrib_win32_to_posix(win32_attrib: u32) -> u32 {
+    let mut posix_attrib = 0o000444; // S_IRUSR | S_IRGRP | S_IROTH
+    // FILE_ATTRIBUTE_READONLY
+    if win32_attrib & 0x01 == 0 {
+        posix_attrib |= 0o000222; // S_IWUSR | S_IWGRP | S_IWOTH
+    }
+    if win32_attrib & 0x400 == 0x400 {
+        // FILE_ATTRIBUTE_REPARSE_POINT
+        posix_attrib |= 0o120000; // S_IFLNK
+    } else if win32_attrib & 0x10 == 0x10 {
+        // FILE_ATTRIBUTE_DIRECTORY
+        posix_attrib |= 0o040111; // S_IFDIR | S_IXUSR | S_IXGRP | S_IXOTH
+    } else {
+        posix_attrib |= 0o100000; // S_IFREG
+    }
+    posix_attrib
+}
+
+/// Converts attributes between host systems: `None` where minizip-ng can't
+/// (`MZ_SUPPORT_ERROR`).
 ///
-/// Port of `mz_zip_entry_write_header` (mz_zip.c:594-919 @ 4.0.10) for a central header of an
-/// entry minizip-ng rebuilt from its local header (no comment, no masking, no AES; its external
-/// attributes, 0, aren't a directory's). The DOS date and the NTFS times are written as zeros:
-/// minizip-ng reads them back without using them (`mz_zip_entry_read_header`).
-fn mz_zip_entry_write_header(stream: &mut MemStream, local: bool, file_info: &FileInfo) -> i32 {
+/// Port of `mz_zip_attrib_convert` (mz_zip.c:2507-2536 @ 4.0.10).
+pub(crate) fn mz_zip_attrib_convert(src_sys: u8, src_attrib: u32, target_sys: u8) -> Option<u32> {
+    let dos = |s| s == MZ_HOST_SYSTEM_MSDOS || s == MZ_HOST_SYSTEM_WINDOWS_NTFS;
+    let posix = |s| {
+        s == MZ_HOST_SYSTEM_UNIX || s == MZ_HOST_SYSTEM_OSX_DARWIN || s == MZ_HOST_SYSTEM_RISCOS
+    };
+    if dos(src_sys) {
+        if dos(target_sys) {
+            return Some(src_attrib);
+        }
+        if posix(target_sys) {
+            return Some(mz_zip_attrib_win32_to_posix(src_attrib));
+        }
+    } else if posix(src_sys) {
+        // If high bytes are set, it contains unix specific attributes
+        let src_attrib = if src_attrib >> 16 != 0 {
+            src_attrib >> 16
+        } else {
+            src_attrib
+        };
+        if posix(target_sys) {
+            return Some(src_attrib);
+        }
+        if dos(target_sys) {
+            return Some(mz_zip_attrib_posix_to_win32(src_attrib));
+        }
+    }
+    None
+}
+
+/// Whether the attributes are a directory's.
+///
+/// Port of `mz_zip_attrib_is_dir` (mz_zip.c:2479-2491 @ 4.0.10).
+pub(crate) fn mz_zip_attrib_is_dir(attrib: u32, version_madeby: u16) -> bool {
+    let system = mz_host_system(version_madeby);
+    match mz_zip_attrib_convert(system, attrib, MZ_HOST_SYSTEM_UNIX) {
+        Some(posix_attrib) => posix_attrib & 0o170000 == 0o040000,
+        None => false,
+    }
+}
+
+/// Port of `mz_zip_unix_to_ntfs_time` (mz_zip.c:2747-2750 @ 4.0.10).
+fn mz_zip_unix_to_ntfs_time(unix_time: i64) -> u64 {
+    (unix_time as u64)
+        .wrapping_mul(10_000_000)
+        .wrapping_add(116_444_736_000_000_000)
+}
+
+/// The broken-down time of `unix_time`: `(tm_year, tm_mon, tm_mday, tm_hour, tm_min,
+/// tm_sec)`, or `None` where `localtime_r` fails.
+///
+/// minizip-ng breaks the time down in the local time zone (`localtime_r`); the port, which
+/// has no time zone, breaks it down in UTC, so DOS dates differ by the zone's offset
+/// (deviation D-6: an archive's time stamps aren't the port's to match). MSVC's
+/// `localtime_s` refuses times before 1970, which the port refuses on Windows too.
+///
+/// Port of `mz_zip_time_t_to_tm` (mz_zip.c:2697-2708 @ 4.0.10).
+fn mz_zip_time_t_to_tm(unix_time: i64) -> Option<(i64, i64, i64, i64, i64, i64)> {
+    if cfg!(windows) && unix_time < 0 {
+        return None;
+    }
+    let days = unix_time.div_euclid(86_400);
+    let secs = unix_time.rem_euclid(86_400);
+    // The proleptic Gregorian date of a day count (Howard Hinnant's civil_from_days).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    Some((
+        year - 1900,
+        month - 1,
+        day,
+        secs / 3600,
+        secs / 60 % 60,
+        secs % 60,
+    ))
+}
+
+/// The DOS date and time of `unix_time` (0 for a date DOS can't hold).
+///
+/// Port of `mz_zip_time_t_to_dos_date`, `mz_zip_tm_to_dosdate` and `mz_zip_invalid_date`
+/// (mz_zip.c:2710-2740, 2652-2659 @ 4.0.10).
+fn mz_zip_time_t_to_dos_date(unix_time: i64) -> u32 {
+    // An invalid date stored is a zeroed tm.
+    let (mut year, mon, mday, hour, min, sec) =
+        mz_zip_time_t_to_tm(unix_time).unwrap_or((0, 0, 0, 0, 0, 0));
+    if year >= 1980 {
+        // range [1980, 2107]
+        year -= 1980;
+    } else if year >= 80 {
+        // range [80, 207]
+        year -= 80;
+    } else {
+        // range [00, 79]
+        year += 20;
+    }
+    let in_range = |min: i64, max: i64, v: i64| min <= v && v <= max;
+    if !in_range(0, 127 + 80, year)
+        || !in_range(0, 11, mon)
+        || !in_range(1, 31, mday)
+        || !in_range(0, 23, hour)
+        || !in_range(0, 59, min)
+        || !in_range(0, 59, sec)
+    {
+        return 0;
+    }
+    ((mday as u32 + 32 * (mon as u32 + 1) + 512 * year as u32) << 16)
+        | (sec as u32 / 2 + 32 * min as u32 + 2048 * hour as u32)
+}
+
+/// Whether a header needs the zip64 extra field, for an entry whose `zip64` setting is
+/// `MZ_ZIP64_AUTO` (as OpenColorIO's and rebuilt entries' are).
+///
+/// Port of `mz_zip_entry_needs_zip64` (mz_zip.c:551-592 @ 4.0.10).
+pub(crate) fn mz_zip_entry_needs_zip64(file_info: &FileInfo, local: bool) -> bool {
+    let mut max_uncompressed_size = i64::from(u32::MAX);
+    if local {
+        // At local header we might not know yet whether compressed size will overflow
+        // unsigned 32-bit integer which might happen for high entropy data so we give it some
+        // cushion
+        max_uncompressed_size -= MZ_ZIP_UNCOMPR_SIZE64_CUSHION;
+    }
+
+    let mut needs_zip64 = file_info.uncompressed_size >= max_uncompressed_size
+        || file_info.compressed_size >= i64::from(u32::MAX);
+
+    if !local {
+        // Disk offset and number only used in central directory header
+        needs_zip64 |= file_info.disk_offset >= i64::from(u32::MAX)
+            || file_info.disk_number >= u32::from(u16::MAX);
+    }
+
+    let mut zip64 = false;
+    // If uncompressed size is unknown, assume zip64 for 64-bit data descriptors
+    if local
+        && file_info.uncompressed_size == 0
+        && !mz_zip_attrib_is_dir(file_info.external_fa, file_info.version_madeby)
+    {
+        // Don't use zip64 for local header directory entries
+        zip64 = true;
+    }
+    zip64 | needs_zip64
+}
+
+/// Writes `file_info`'s local or central header to `stream`.
+///
+/// Port of `mz_zip_entry_write_header` (mz_zip.c:594-919 @ 4.0.10), without AES (not built in
+/// OpenColorIO's minizip-ng) and without a comment (neither OpenColorIO's entries nor the
+/// entries minizip-ng rebuilds have one). The DOS date breaks the time down in UTC (see
+/// [`mz_zip_time_t_to_tm`]).
+pub(crate) fn mz_zip_entry_write_header(
+    stream: &mut MemStream,
+    local: bool,
+    file_info: &FileInfo,
+) -> i32 {
     let w16 = |stream: &mut MemStream, v: u16| stream.write(&v.to_le_bytes());
     let w32 = |stream: &mut MemStream, v: u32| stream.write(&v.to_le_bytes());
     let w64 = |stream: &mut MemStream, v: u64| stream.write(&v.to_le_bytes());
-    debug_assert!(!local);
+
+    let mask = local && file_info.flag & MZ_ZIP_FLAG_MASK_LOCAL_INFO != 0;
 
     // Determine if zip64 extra field is necessary
-    let zip64 = mz_zip_entry_needs_zip64(file_info);
+    let zip64 = mz_zip_entry_needs_zip64(file_info, local);
 
     let mut extrafield_size: u16 = 0;
     let mut field_length_zip64: u16 = 0;
@@ -1328,7 +1529,7 @@ fn mz_zip_entry_write_header(stream: &mut MemStream, local: bool, file_info: &Fi
     if zip64 {
         // Both compressed and uncompressed sizes must be included (at least in local header)
         field_length_zip64 = 8 + 8;
-        if file_info.disk_offset >= i64::from(u32::MAX) {
+        if !local && file_info.disk_offset >= i64::from(u32::MAX) {
             field_length_zip64 += 8;
         }
 
@@ -1358,7 +1559,10 @@ fn mz_zip_entry_write_header(stream: &mut MemStream, local: bool, file_info: &Fi
     }
 
     // NTFS timestamps
-    if file_info.modified_date != 0 && file_info.accessed_date != 0 && file_info.creation_date != 0
+    if file_info.modified_date != 0
+        && file_info.accessed_date != 0
+        && file_info.creation_date != 0
+        && !mask
     {
         field_length_ntfs = 8 + 8 + 8 + 4 + 2 + 2;
         extrafield_size = extrafield_size.wrapping_add(4 + field_length_ntfs);
@@ -1373,8 +1577,12 @@ fn mz_zip_entry_write_header(stream: &mut MemStream, local: bool, file_info: &Fi
             .wrapping_add(field_length_unix1);
     }
 
-    w32(stream, MZ_ZIP_MAGIC_CENTRALHEADER);
-    w16(stream, file_info.version_madeby);
+    if local {
+        w32(stream, MZ_ZIP_MAGIC_LOCALHEADER);
+    } else {
+        w32(stream, MZ_ZIP_MAGIC_CENTRALHEADER);
+        w16(stream, file_info.version_madeby);
+    }
 
     // Calculate version needed to extract
     let mut version_needed = file_info.version_needed;
@@ -1387,35 +1595,60 @@ fn mz_zip_entry_write_header(stream: &mut MemStream, local: bool, file_info: &Fi
     w16(stream, version_needed);
     w16(stream, file_info.flag);
     w16(stream, file_info.compression_method);
-    // The DOS date.
-    w32(stream, 0);
+    let mut dos_date = 0;
+    if file_info.modified_date != 0 && !mask {
+        dos_date = mz_zip_time_t_to_dos_date(file_info.modified_date);
+    }
+    w32(stream, dos_date);
 
-    // mz_zip_entry_write_crc_sizes (mz_zip.c:522-549), unmasked
-    w32(stream, file_info.crc);
+    // mz_zip_entry_write_crc_sizes (mz_zip.c:522-549)
+    w32(stream, if mask { 0 } else { file_info.crc });
     // For backwards-compatibility with older zip applications we set all sizes to UINT32_MAX
     // when zip64 is needed, instead of only setting sizes larger than UINT32_MAX.
     if zip64 {
         w32(stream, u32::MAX);
-        w32(stream, u32::MAX);
     } else {
         w32(stream, file_info.compressed_size as u32);
+    }
+    if mask {
+        w32(stream, 0);
+    } else if zip64 {
+        w32(stream, u32::MAX);
+    } else {
         w32(stream, file_info.uncompressed_size as u32);
     }
 
-    let filename = &file_info.filename;
+    let masked_name;
+    let filename: &[u8] = if mask {
+        masked_name = format!("{:x}_{:x}", file_info.disk_number, file_info.disk_offset);
+        masked_name.as_bytes()
+    } else {
+        &file_info.filename
+    };
     let filename_length = filename.len() as u16;
-    w16(stream, filename_length);
+    let mut filename_size = filename_length;
+    let mut write_end_slash = false;
+    if mz_zip_attrib_is_dir(file_info.external_fa, file_info.version_madeby)
+        && filename.last().is_some_and(|&c| c != b'/' && c != b'\\')
+    {
+        filename_size += 1;
+        write_end_slash = true;
+    }
+
+    w16(stream, filename_size);
     w16(stream, extrafield_size);
 
-    // No comment.
-    w16(stream, 0);
-    w16(stream, file_info.disk_number as u16);
-    w16(stream, file_info.internal_fa);
-    w32(stream, file_info.external_fa);
-    if file_info.disk_offset >= i64::from(u32::MAX) {
-        w32(stream, u32::MAX);
-    } else {
-        w32(stream, file_info.disk_offset as u32);
+    if !local {
+        // No comment.
+        w16(stream, 0);
+        w16(stream, file_info.disk_number as u16);
+        w16(stream, file_info.internal_fa);
+        w32(stream, file_info.external_fa);
+        if file_info.disk_offset >= i64::from(u32::MAX) {
+            w32(stream, u32::MAX);
+        } else {
+            w32(stream, file_info.disk_offset as u32);
+        }
     }
 
     // Ensure all slashes are written as forward slashes according to 4.4.17.1 (on Windows
@@ -1431,16 +1664,25 @@ fn mz_zip_entry_write_header(stream: &mut MemStream, local: bool, file_info: &Fi
         stream.write(name);
     }
 
+    // Ensure that directories have a slash appended to them for compatibility
+    if write_end_slash {
+        stream.write_uint8(b'/');
+    }
+
     // Write ZIP64 extra field first so we can update sizes later if data descriptor not used
     if zip64 {
         w16(stream, MZ_ZIP_EXTENSION_ZIP64);
         w16(stream, field_length_zip64);
-        w64(stream, file_info.uncompressed_size as u64);
+        if mask {
+            w64(stream, 0);
+        } else {
+            w64(stream, file_info.uncompressed_size as u64);
+        }
         w64(stream, file_info.compressed_size as u64);
-        if file_info.disk_offset >= i64::from(u32::MAX) {
+        if !local && file_info.disk_offset >= i64::from(u32::MAX) {
             w64(stream, file_info.disk_offset as u64);
         }
-        if file_info.disk_number >= u32::from(u16::MAX) {
+        if !local && file_info.disk_number >= u32::from(u16::MAX) {
             w32(stream, file_info.disk_number);
         }
     }
@@ -1451,10 +1693,9 @@ fn mz_zip_entry_write_header(stream: &mut MemStream, local: bool, file_info: &Fi
         w32(stream, 0);
         w16(stream, 0x01);
         w16(stream, field_length_ntfs - 8);
-        // The modification, access and creation times.
-        for _ in 0..3 {
-            w64(stream, 0);
-        }
+        w64(stream, mz_zip_unix_to_ntfs_time(file_info.modified_date));
+        w64(stream, mz_zip_unix_to_ntfs_time(file_info.accessed_date));
+        w64(stream, mz_zip_unix_to_ntfs_time(file_info.creation_date));
     }
     // Write UNIX extra block extra field
     if field_length_unix1 > 0 {
@@ -1472,13 +1713,11 @@ fn mz_zip_entry_write_header(stream: &mut MemStream, local: bool, file_info: &Fi
     if file_info.extrafield_size > 0 {
         let mut err_mem = file_extra_stream.seek(0, Origin::Set);
         while err == MZ_OK && err_mem == MZ_OK {
-            let field_type = match mz_stream_read_uint16(&mut file_extra_stream) {
-                Ok(v) => v,
-                Err(_) => break,
+            let Ok(field_type) = mz_stream_read_uint16(&mut file_extra_stream) else {
+                break;
             };
-            let field_length = match mz_stream_read_uint16(&mut file_extra_stream) {
-                Ok(v) => v,
-                Err(_) => break,
+            let Ok(field_length) = mz_stream_read_uint16(&mut file_extra_stream) else {
+                break;
             };
 
             // Prefer our zip 64, ntfs, unix1 extensions over incoming
@@ -1497,4 +1736,385 @@ fn mz_zip_entry_write_header(stream: &mut MemStream, local: bool, file_info: &Fi
     }
 
     err
+}
+
+/// `MZ_ZIP_FLAG_DEFLATE_*` (mz.h:79-82 @ 4.0.10).
+const MZ_ZIP_FLAG_DEFLATE_MAX: u16 = 1 << 1;
+const MZ_ZIP_FLAG_DEFLATE_FAST: u16 = 1 << 2;
+const MZ_ZIP_FLAG_DEFLATE_SUPER_FAST: u16 = MZ_ZIP_FLAG_DEFLATE_FAST | MZ_ZIP_FLAG_DEFLATE_MAX;
+
+/// The open entry being written: its compress stream (stored, or deflated by zlib), the CRC
+/// of what was written, and the stream's totals.
+struct WriteEntry {
+    /// zlib's deflate stream (`mz_stream_zlib`), or `None` for the raw stream of a stored
+    /// entry.
+    deflate: Option<flate2::Compress>,
+    crc32: u32,
+    total_in: i64,
+    total_out: i64,
+}
+
+impl std::fmt::Debug for WriteEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WriteEntry")
+            .field("deflate", &self.deflate.is_some())
+            .field("crc32", &self.crc32)
+            .finish()
+    }
+}
+
+/// An archive opened for writing into a memory stream (`mz_zip_open` with
+/// `MZ_OPEN_MODE_WRITE | MZ_OPEN_MODE_CREATE`), as OpenColorIO writes one.
+///
+/// Port of the writing side of `mz_zip` (mz_zip.c:84-118 @ 4.0.10).
+#[derive(Debug)]
+pub(crate) struct ZipWrite {
+    /// The archive (`stream`): what minizip-ng writes, in order.
+    pub(crate) stream: MemStream,
+    cd_mem_stream: MemStream,
+    file_info: FileInfo,
+    entry: Option<WriteEntry>,
+    number_entry: u64,
+    disk_number_with_cd: u32,
+    pub(crate) version_madeby: u16,
+    /// `data_descriptor`, which `mz_zip_create` sets.
+    data_descriptor: bool,
+}
+
+/// Writes `buf` to the archive's stream.
+fn write_stream(stream: &mut MemStream, buf: &[u8]) {
+    stream.write(buf);
+}
+
+impl ZipWrite {
+    /// Port of `mz_zip_create` and `mz_zip_open` (mz_zip.c:1408-1413, 1424-1505 @ 4.0.10) for
+    /// writing into a new memory stream.
+    pub(crate) fn open() -> ZipWrite {
+        ZipWrite {
+            stream: MemStream::create(),
+            cd_mem_stream: MemStream::create(),
+            file_info: FileInfo::default(),
+            entry: None,
+            number_entry: 0,
+            disk_number_with_cd: 0,
+            version_madeby: 0,
+            data_descriptor: true,
+        }
+    }
+
+    /// Port of `mz_zip_entry_is_open` (mz_zip.c:1865-1872 @ 4.0.10).
+    pub(crate) fn entry_is_open(&self) -> bool {
+        self.entry.is_some()
+    }
+
+    /// Opens an entry for writing: writes its local header, and opens its compress stream.
+    ///
+    /// Port of `mz_zip_entry_write_open` (mz_zip.c:1914-2029 @ 4.0.10) with `raw` 0 and no
+    /// password, through `mz_zip_entry_open_int` (mz_zip.c:1682-1863) for writing.
+    pub(crate) fn entry_write_open(&mut self, file_info: &FileInfo, compress_level: i16) -> i32 {
+        if self.entry_is_open() {
+            let err = self.entry_close();
+            if err != MZ_OK {
+                return err;
+            }
+        }
+
+        self.file_info = file_info.clone();
+        self.file_info.filename = c_str_bytes(&file_info.filename);
+        self.file_info.linkname = c_str_bytes(&file_info.linkname);
+
+        if self.file_info.compression_method == MZ_COMPRESS_METHOD_DEFLATE {
+            if compress_level == 8 || compress_level == 9 {
+                self.file_info.flag |= MZ_ZIP_FLAG_DEFLATE_MAX;
+            }
+            if compress_level == 2 {
+                self.file_info.flag |= MZ_ZIP_FLAG_DEFLATE_FAST;
+            }
+            if compress_level == 1 {
+                self.file_info.flag |= MZ_ZIP_FLAG_DEFLATE_SUPER_FAST;
+            }
+        }
+
+        let is_dir =
+            mz_zip_attrib_is_dir(self.file_info.external_fa, self.file_info.version_madeby);
+
+        if !is_dir && self.data_descriptor {
+            self.file_info.flag |= MZ_ZIP_FLAG_DATA_DESCRIPTOR;
+        }
+
+        // A memory stream has no disk number (its property isn't set).
+        self.file_info.disk_number = 0;
+        self.file_info.disk_offset = self.stream.tell();
+
+        self.file_info.crc = 0;
+        self.file_info.compressed_size = 0;
+
+        if compress_level == 0 || is_dir {
+            self.file_info.compression_method = MZ_COMPRESS_METHOD_STORE;
+        }
+
+        let err = mz_zip_entry_write_header(&mut self.stream, true, &self.file_info);
+        if err != MZ_OK {
+            return err;
+        }
+
+        // mz_zip_entry_open_int
+        let deflate = match self.file_info.compression_method {
+            MZ_COMPRESS_METHOD_STORE => None,
+            MZ_COMPRESS_METHOD_DEFLATE => {
+                // MZ_COMPRESS_LEVEL_DEFAULT is zlib's Z_DEFAULT_COMPRESSION (6).
+                let level = if compress_level < 0 {
+                    6
+                } else {
+                    compress_level as u32
+                };
+                Some(flate2::Compress::new(
+                    flate2::Compression::new(level),
+                    false,
+                ))
+            }
+            _ => return MZ_SUPPORT_ERROR,
+        };
+        self.entry = Some(WriteEntry {
+            deflate,
+            crc32: 0,
+            total_in: 0,
+            total_out: 0,
+        });
+        MZ_OK
+    }
+
+    /// Compresses (or stores) `buf` into the archive.
+    ///
+    /// Port of `mz_zip_entry_write` (mz_zip.c:2056-2068 @ 4.0.10), through
+    /// `mz_stream_zlib_write` and `mz_stream_zlib_deflate` (mz_strm_zlib.c:203-264), which
+    /// deflate with `Z_NO_FLUSH`, or `mz_stream_raw_write` (mz_strm.c:462-472).
+    pub(crate) fn entry_write(&mut self, buf: &[u8]) -> i32 {
+        let Some(entry) = self.entry.as_mut() else {
+            return MZ_PARAM_ERROR;
+        };
+        match entry.deflate.as_mut() {
+            None => write_stream(&mut self.stream, buf),
+            Some(zstream) => {
+                deflate_into(zstream, buf, flate2::FlushCompress::None, &mut self.stream)
+            }
+        }
+        entry.total_in += buf.len() as i64;
+        if !buf.is_empty() {
+            entry.crc32 = mz_crypt_crc32_update(entry.crc32, buf);
+        }
+        buf.len() as i32
+    }
+
+    /// Closes the open entry: finishes its data, writes its data descriptor, and adds its
+    /// central header.
+    ///
+    /// Port of `mz_zip_entry_close` (mz_zip.c:2268-2285 @ 4.0.10), through
+    /// `mz_zip_entry_write_close` (mz_zip.c:2136-2233) with the sizes read from the compress
+    /// stream, and `mz_zip_entry_write_descriptor` (mz_zip.c:921-945).
+    pub(crate) fn entry_close(&mut self) -> i32 {
+        let Some(mut entry) = self.entry.take() else {
+            return MZ_PARAM_ERROR;
+        };
+
+        // mz_stream_close(zip->compress_stream): zlib finishes the stream.
+        if let Some(zstream) = entry.deflate.as_mut() {
+            deflate_into(
+                zstream,
+                &[],
+                flate2::FlushCompress::Finish,
+                &mut self.stream,
+            );
+            entry.total_out = zstream.total_out() as i64;
+        } else {
+            entry.total_out = entry.total_in;
+        }
+
+        let crc32 = entry.crc32;
+        // If sizes are not set, then read them from the compression stream
+        let compressed_size = entry.total_out;
+        let uncompressed_size = entry.total_in;
+
+        let zip64 = mz_zip_entry_needs_zip64(&self.file_info, true);
+
+        let mut err = MZ_OK;
+        if self.file_info.flag & MZ_ZIP_FLAG_DATA_DESCRIPTOR != 0 {
+            // Determine if we need to write data descriptor in zip64 format, if local
+            // extrafield was saved with zip64 extrafield
+            let w32 = |s: &mut MemStream, v: u32| s.write(&v.to_le_bytes());
+            let w64 = |s: &mut MemStream, v: i64| s.write(&v.to_le_bytes());
+            let (crc, usize_) = if self.file_info.flag & MZ_ZIP_FLAG_MASK_LOCAL_INFO != 0 {
+                (0, 0)
+            } else {
+                (crc32, uncompressed_size)
+            };
+            w32(&mut self.stream, MZ_ZIP_MAGIC_DATADESCRIPTOR);
+            w32(&mut self.stream, crc);
+            // Store data descriptor as 8 bytes if zip 64 extension enabled
+            if !zip64 {
+                w32(&mut self.stream, compressed_size as u32);
+                w32(&mut self.stream, usize_ as u32);
+            } else {
+                w64(&mut self.stream, compressed_size);
+                w64(&mut self.stream, usize_);
+            }
+        }
+
+        // Write file info to central directory
+        self.file_info.crc = crc32;
+        self.file_info.compressed_size = compressed_size;
+        self.file_info.uncompressed_size = uncompressed_size;
+
+        if err == MZ_OK {
+            err = mz_zip_entry_write_header(&mut self.cd_mem_stream, false, &self.file_info);
+        }
+
+        // Without a data descriptor (a directory's entry), minizip-ng goes back to the local
+        // header to write the CRC and the sizes.
+        if err == MZ_OK
+            && self.file_info.flag & MZ_ZIP_FLAG_DATA_DESCRIPTOR == 0
+            && self.file_info.flag & MZ_ZIP_FLAG_MASK_LOCAL_INFO == 0
+        {
+            let end_pos = self.stream.tell();
+            let at = self.file_info.disk_offset + MZ_ZIP_OFFSET_CRC_SIZES;
+            self.stream.seek(at, Origin::Set);
+            // mz_zip_entry_write_crc_sizes, unmasked
+            self.stream.write(&self.file_info.crc.to_le_bytes());
+            let (csize, usize_) = if zip64 {
+                (u32::MAX, u32::MAX)
+            } else {
+                (
+                    self.file_info.compressed_size as u32,
+                    self.file_info.uncompressed_size as u32,
+                )
+            };
+            self.stream.write(&csize.to_le_bytes());
+            self.stream.write(&usize_.to_le_bytes());
+            if zip64 {
+                // Since we write zip64 extension first we know its offset
+                let filename_size = self.file_info.filename.len() as i64;
+                self.stream.seek(2 + 2 + filename_size + 4, Origin::Cur);
+                self.stream
+                    .write(&self.file_info.uncompressed_size.to_le_bytes());
+                self.stream
+                    .write(&self.file_info.compressed_size.to_le_bytes());
+            }
+            self.stream.seek(end_pos, Origin::Set);
+        }
+
+        self.number_entry += 1;
+        err
+    }
+
+    /// Closes the archive: closes the open entry, and writes the central directory and its
+    /// end.
+    ///
+    /// Port of `mz_zip_close` (mz_zip.c:1507-1546 @ 4.0.10) and `mz_zip_write_cd`
+    /// (mz_zip.c:1102-1234), without a comment.
+    pub(crate) fn close(&mut self) -> i32 {
+        let mut err = MZ_OK;
+        if self.entry_is_open() {
+            err = self.entry_close();
+        }
+        if err != MZ_OK {
+            return err;
+        }
+
+        // A memory stream has no disk number or size.
+        let cd_offset = self.stream.tell();
+        let cd = self.cd_mem_stream.bytes_at(0).to_vec();
+        let cd_size = cd.len() as i64;
+        self.stream.write(&cd);
+
+        let w16 = |s: &mut MemStream, v: u16| s.write(&v.to_le_bytes());
+        let w32 = |s: &mut MemStream, v: u32| s.write(&v.to_le_bytes());
+        let w64 = |s: &mut MemStream, v: u64| s.write(&v.to_le_bytes());
+
+        if cd_size == 0 && self.number_entry > 0 {
+            // Zip does not contain central directory, open with recovery option
+            return MZ_FORMAT_ERROR;
+        }
+
+        // Write the ZIP64 central directory header
+        if cd_offset >= i64::from(u32::MAX) || self.number_entry >= u64::from(u16::MAX) {
+            let zip64_eocd_pos_inzip = self.stream.tell();
+
+            w32(&mut self.stream, MZ_ZIP_MAGIC_ENDHEADER64);
+            // Size of this 'zip64 end of central directory'
+            w64(&mut self.stream, 44);
+            w16(&mut self.stream, self.version_madeby);
+            // Version needed
+            w16(&mut self.stream, 45);
+            w32(&mut self.stream, self.disk_number_with_cd);
+            w32(&mut self.stream, self.disk_number_with_cd);
+            w64(&mut self.stream, self.number_entry);
+            w64(&mut self.stream, self.number_entry);
+            w64(&mut self.stream, cd_size as u64);
+            w64(&mut self.stream, cd_offset as u64);
+            w32(&mut self.stream, MZ_ZIP_MAGIC_ENDLOCHEADER64);
+            w32(&mut self.stream, self.disk_number_with_cd);
+            w64(&mut self.stream, zip64_eocd_pos_inzip as u64);
+            w32(&mut self.stream, self.disk_number_with_cd + 1);
+        }
+
+        // Write the central directory header
+        w32(&mut self.stream, MZ_ZIP_MAGIC_ENDHEADER);
+        w16(&mut self.stream, self.disk_number_with_cd as u16);
+        w16(&mut self.stream, self.disk_number_with_cd as u16);
+        let count = if self.number_entry >= u64::from(u16::MAX) {
+            u16::MAX
+        } else {
+            self.number_entry as u16
+        };
+        w16(&mut self.stream, count);
+        w16(&mut self.stream, count);
+        w32(&mut self.stream, cd_size as u32);
+        if cd_offset >= i64::from(u32::MAX) {
+            w32(&mut self.stream, u32::MAX);
+        } else {
+            w32(&mut self.stream, cd_offset as u32);
+        }
+        // No global comment
+        w16(&mut self.stream, 0);
+        MZ_OK
+    }
+}
+
+/// `MZ_ZIP_OFFSET_CRC_SIZES` (mz_zip.c:75 @ 4.0.10).
+const MZ_ZIP_OFFSET_CRC_SIZES: i64 = 14;
+
+/// The bytes of a C string: up to its first NUL.
+fn c_str_bytes(s: &[u8]) -> Vec<u8> {
+    s[..s.iter().position(|&b| b == 0).unwrap_or(s.len())].to_vec()
+}
+
+/// Deflates `input` with `flush` into `stream`, as `mz_stream_zlib_deflate` (mz_strm_zlib.c:
+/// 203-240 @ 4.0.10) calls `deflate` until the input is consumed (and, to finish, until the
+/// stream ends), writing its output buffer to the archive's stream when it fills and at the
+/// end (`mz_stream_zlib_flush`): the archive gets the deflate stream, in order.
+fn deflate_into(
+    zstream: &mut flate2::Compress,
+    input: &[u8],
+    flush: flate2::FlushCompress,
+    stream: &mut MemStream,
+) {
+    let mut buffer = vec![0u8; i16::MAX as usize];
+    let mut consumed = 0usize;
+    loop {
+        let before_in = zstream.total_in();
+        let before_out = zstream.total_out();
+        let status = zstream
+            .compress(&input[consumed..], &mut buffer, flush)
+            .expect("deflate of a valid stream");
+        consumed += (zstream.total_in() - before_in) as usize;
+        let produced = (zstream.total_out() - before_out) as usize;
+        stream.write(&buffer[..produced]);
+        let finishing = matches!(flush, flate2::FlushCompress::Finish);
+        if status == flate2::Status::StreamEnd {
+            break;
+        }
+        if consumed == input.len() && (!finishing && produced < buffer.len()) {
+            break;
+        }
+    }
 }
