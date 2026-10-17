@@ -58,22 +58,39 @@ def _checked_calls(what, calls, allowed):
     return out
 
 
+# The start of every OCIO log line (Logging.cpp:75-87, 176-195): "[OpenColorIO Warning]: ...".
+LOG_LINE = b"[OpenColorIO "
+
+
+def _not_a_log_line(exc):
+    """Refuses the request when the UnicodeDecodeError `exc` failed to decode an OCIO log line,
+    not a value or an exception's message: the oracle's logging callback (captured_log) can't
+    take a message that isn't UTF-8, and pybind11 raises the error where OCIO logged it, in place
+    of what the call does with the wheel's own logger."""
+    if bytes(exc.object).startswith(LOG_LINE):
+        raise RequestError(f"bake: OCIO logged a message that isn't UTF-8, which the oracle's "
+                           f"logging callback can't take: {bytes(exc.object)!r}")
+
+
 def _decoded(fn):
     """fn()'s text as {"bytes": hex}, or {"undecodable": hex} where the binding couldn't decode
-    it as UTF-8."""
+    it as UTF-8 (a log line that isn't UTF-8 refuses the request)."""
     try:
         value = fn()
     except UnicodeDecodeError as exc:
+        _not_a_log_line(exc)
         return {"undecodable": bytes(exc.object).hex()}
     return value if isinstance(value, int) else {"bytes": value.encode("utf-8").hex()}
 
 
 def _bake_to(baker, path):
-    """bake(fileName). It returns nothing, so a UnicodeDecodeError can only be the binding
-    failing to decode an exception's message that isn't UTF-8: raised as UndecodableMessage."""
+    """bake(fileName). It returns nothing, so a UnicodeDecodeError is the binding failing to
+    decode an exception's message that isn't UTF-8, raised as UndecodableMessage, or the
+    oracle's logging callback failing to decode a log line, which refuses the request."""
     try:
         baker.bake(path)
     except UnicodeDecodeError as exc:
+        _not_a_log_line(exc)
         raise UndecodableMessage(exc) from exc
 
 
@@ -136,7 +153,9 @@ def bake(args, blobs):
                   included
     blobs: none
 
-    An unknown key, a method that isn't listed, or an argument it can't read, is refused.
+    An unknown key, a method that isn't listed, or an argument it can't read, is refused, and so
+    is a bake while which OCIO logs a message that isn't UTF-8 (the oracle's logging callback
+    can't take it).
     """
     check_keys("bake", args, {"config", "no_config", "metadata", "calls"})
     no_config = check_bool("bake no_config", args.get("no_config", False))
