@@ -1660,3 +1660,39 @@ fn processors_of_fixed_function_files_write_as_in_the_wheel() {
     }
     check_writes(&cases);
 }
+
+/// The write formats' names and extensions, in order: the wheel's (`config_calls`:
+/// `GroupTransform.GetWriteFormats()`, the binding's iterator over `GetNumWriteFormats`,
+/// `GetFormatNameByIndex` and `GetFormatExtensionByIndex`) against the port's.
+#[test]
+fn write_formats_are_the_wheels() {
+    let calls = vec![json!({"call": "GetWriteFormats", "on": "GroupTransform"})];
+    let reply = Oracle::get()
+        .call(
+            "config_calls",
+            json!({"config": "raw", "calls": calls}),
+            &[],
+        )
+        .result;
+    let result = &reply["calls"][0];
+    let wheel: Vec<(Vec<u8>, Vec<u8>)> = result["result"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{result}"))
+        .iter()
+        .map(|pair| {
+            (
+                oracle_values::bytes(&pair[0]),
+                oracle_values::bytes(&pair[1]),
+            )
+        })
+        .collect();
+    let port: Vec<(Vec<u8>, Vec<u8>)> = (0..GroupTransform::num_write_formats())
+        .map(|i| {
+            (
+                GroupTransform::format_name_by_index(i).to_vec(),
+                GroupTransform::format_extension_by_index(i).to_vec(),
+            )
+        })
+        .collect();
+    assert_eq!(wheel, port);
+}

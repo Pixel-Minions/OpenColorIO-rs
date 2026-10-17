@@ -19,7 +19,7 @@ use ocio_ops::utils::string_utils::c_str;
 use crate::config::Config;
 use crate::context::Context;
 use crate::transform::{Transform, build_ops, validate_direction};
-use crate::transforms::file_format::FormatRegistry;
+use crate::transforms::file_format::{FormatCapabilities, FormatRegistry};
 
 /// A list of transforms, applied in order (in reverse order, each inverted, when the group is
 /// inverse), with format metadata.
@@ -234,6 +234,37 @@ impl GroupTransform {
             return Err(Exception::new(err.into_bytes()));
         }
         Ok(())
+    }
+}
+
+impl GroupTransform {
+    /// The number of format names a group writes.
+    ///
+    /// Port of `GroupTransform::GetNumWriteFormats` (GroupTransform.cpp:141-144 @ v2.5.2).
+    #[doc(alias = "GetNumWriteFormats")]
+    pub fn num_write_formats() -> i32 {
+        FormatRegistry::instance().num_formats(FormatCapabilities::WRITE)
+    }
+
+    /// The name of the write format at `index`; `""` outside the list.
+    ///
+    /// Port of `GroupTransform::GetFormatNameByIndex` (GroupTransform.cpp:146-149 @ v2.5.2).
+    #[doc(alias = "GetFormatNameByIndex")]
+    pub fn format_name_by_index(index: i32) -> &'static [u8] {
+        FormatRegistry::instance()
+            .format_name_by_index(FormatCapabilities::WRITE, index)
+            .as_bytes()
+    }
+
+    /// The extension of the write format at `index`; `""` outside the list.
+    ///
+    /// Port of `GroupTransform::GetFormatExtensionByIndex` (GroupTransform.cpp:151-154 @
+    /// v2.5.2).
+    #[doc(alias = "GetFormatExtensionByIndex")]
+    pub fn format_extension_by_index(index: i32) -> &'static [u8] {
+        FormatRegistry::instance()
+            .format_extension_by_index(FormatCapabilities::WRITE, index)
+            .as_bytes()
     }
 }
 

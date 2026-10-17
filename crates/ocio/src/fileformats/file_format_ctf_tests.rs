@@ -6426,3 +6426,161 @@ fn fixed_function_lin_to_doublelog_ctf() {
         check_written(expected, &output_transform);
     }
 }
+
+/// Reads a CTF file of one FixedFunction of `style` (and `params`) in the CTF `vers`, then
+/// writes the group of its op's transform: the text read and the text written are the same.
+///
+/// Port of `ValidateFixedFunctionStyle` (FileFormatCTF_tests.cpp:3807-3866 @ v2.5.2).
+#[track_caller]
+fn validate_fixed_function_style(style: FixedFunctionOpStyle, vers: &str, params: &str) {
+    // Validate the load & save for any FixedFunction style without parameters.
+
+    let mut ff_str = format!(
+        "<FixedFunction inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"{}\"",
+        style.to_str(false)
+    );
+
+    if !params.is_empty() {
+        ff_str.push_str(&format!(" params=\"{params}\""));
+    }
+    ff_str.push('>');
+
+    let strebuf = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+         <ProcessList version=\"{vers}\" id=\"ABCD\">\n    {ff_str}\n    </FixedFunction>\n\
+         </ProcessList>\n"
+    );
+
+    // Test parsing.
+    let cached_file = parse_string(&strebuf).unwrap();
+    let file_ops = cached_file.transform.get_ops();
+
+    assert_eq!(file_ops.len(), 1);
+    let OpData::FixedFunction(ff_op_data) = &*file_ops[0] else {
+        panic!("not a FixedFunction");
+    };
+    assert_eq!(ff_op_data.style(), style);
+
+    let cloned_op_data = ff_op_data.clone();
+    let mut ops = OpVec::new();
+    ocio_ops::ops::fixedfunction::fixed_function_op::create_fixed_function_op_from_data(
+        &mut ops,
+        cloned_op_data,
+        TransformDirection::Forward,
+    )
+    .unwrap();
+    assert_eq!(ops.len(), 1);
+
+    let mut group = GroupTransform::new();
+    group
+        .format_metadata_mut()
+        .add_attribute(Some(METADATA_ID), Some(b"ABCD"))
+        .unwrap();
+    let const_op = ops.iter().next().unwrap();
+    crate::transforms::fixed_function_transform::create_fixed_function_transform(
+        &mut group, const_op,
+    )
+    .unwrap();
+    assert_eq!(group.num_transforms(), 1);
+
+    // Test serialization.
+    let mut output_transform = Vec::new();
+    write_group_ctf(&group, &mut output_transform).unwrap();
+
+    assert_text_eq(
+        "written",
+        &strebuf,
+        std::str::from_utf8(&output_transform).unwrap(),
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, ff_load_save_ctf)` @ v2.5.2.
+#[test]
+fn ff_load_save_ctf() {
+    use FixedFunctionOpStyle::*;
+    validate_fixed_function_style(AcesRedMod03Fwd, "2", "");
+    validate_fixed_function_style(AcesRedMod03Inv, "2", "");
+    validate_fixed_function_style(AcesRedMod10Fwd, "2", "");
+    validate_fixed_function_style(AcesRedMod10Inv, "2", "");
+    validate_fixed_function_style(AcesGlow03Fwd, "2", "");
+    validate_fixed_function_style(AcesGlow03Inv, "2", "");
+    validate_fixed_function_style(AcesGlow10Fwd, "2", "");
+    validate_fixed_function_style(AcesGlow10Inv, "2", "");
+    validate_fixed_function_style(AcesDarkToDim10Fwd, "2", "");
+    validate_fixed_function_style(AcesDarkToDim10Inv, "2", "");
+    validate_fixed_function_style(
+        AcesGamutComp13Fwd,
+        "2.1",
+        "1.147 1.264 1.312 0.815 0.803 0.88 1.2",
+    );
+    validate_fixed_function_style(Rec2100SurroundFwd, "2", "1");
+    validate_fixed_function_style(Rec2100SurroundInv, "2", "1");
+    validate_fixed_function_style(RgbToHsv, "2", "");
+    validate_fixed_function_style(HsvToRgb, "2", "");
+    validate_fixed_function_style(XyzToXyy, "2", "");
+    validate_fixed_function_style(XyyToXyz, "2", "");
+    validate_fixed_function_style(XyzToUvy, "2", "");
+    validate_fixed_function_style(UvyToXyz, "2", "");
+    validate_fixed_function_style(XyzToLuv, "2", "");
+    validate_fixed_function_style(LuvToXyz, "2", "");
+    validate_fixed_function_style(LinToPq, "2.4", "");
+    validate_fixed_function_style(PqToLin, "2.4", "");
+    validate_fixed_function_style(
+        LinToGammaLog,
+        "2.4",
+        "0 0.25 0.5 1 0 2.718 0.17883277 0.807825590164 1 -0.07116723",
+    );
+    validate_fixed_function_style(
+        GammaLogToLin,
+        "2.4",
+        "0 0.25 0.5 1 0 2.718 0.17883277 0.807825590164 1 -0.07116723",
+    );
+    validate_fixed_function_style(
+        LinToDoubleLog,
+        "2.4",
+        "10 0.25 0.5 -1 0 -1 1.25 1 1 1 0.5 1 0",
+    );
+    validate_fixed_function_style(
+        DoubleLogToLin,
+        "2.4",
+        "10 0.25 0.5 -1 0 -1 1.25 1 1 1 0.5 1 0",
+    );
+    validate_fixed_function_style(
+        AcesOutputTransform20Fwd,
+        "2.4",
+        "1000 0.68 0.32 0.265 0.69 0.15 0.06 0.3127 0.329",
+    );
+    validate_fixed_function_style(
+        AcesOutputTransform20Inv,
+        "2.4",
+        "1000 0.68 0.32 0.265 0.69 0.15 0.06 0.3127 0.329",
+    );
+    validate_fixed_function_style(
+        AcesRgbToJmh20,
+        "2.4",
+        "0.68 0.32 0.265 0.69 0.15 0.06 0.3127 0.329",
+    );
+    validate_fixed_function_style(
+        AcesJmhToRgb20,
+        "2.4",
+        "0.68 0.32 0.265 0.69 0.15 0.06 0.3127 0.329",
+    );
+    validate_fixed_function_style(AcesTonescaleCompress20Fwd, "2.4", "1000");
+    validate_fixed_function_style(AcesTonescaleCompress20Inv, "2.4", "1000");
+    validate_fixed_function_style(
+        AcesGamutCompress20Fwd,
+        "2.4",
+        "1000 0.68 0.32 0.265 0.69 0.15 0.06 0.3127 0.329",
+    );
+    validate_fixed_function_style(
+        AcesGamutCompress20Inv,
+        "2.4",
+        "1000 0.68 0.32 0.265 0.69 0.15 0.06 0.3127 0.329",
+    );
+    validate_fixed_function_style(RgbToHsyLog, "2.5", "");
+    validate_fixed_function_style(HsyLogToRgb, "2.5", "");
+    validate_fixed_function_style(RgbToHsyLin, "2.5", "");
+    validate_fixed_function_style(HsyLinToRgb, "2.5", "");
+    validate_fixed_function_style(RgbToHsyVid, "2.5", "");
+    validate_fixed_function_style(HsyVidToRgb, "2.5", "");
+}
