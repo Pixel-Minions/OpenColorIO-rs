@@ -2,7 +2,7 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Port of `tests/cpu/ops/lut1d/Lut1DOpCPU_tests.cpp` @ v2.5.2, the tests that need no file
-//! (`BuildOpsTest`, Phase 4); tests of the renderers' dispatch,
+//! (those that read files are in `crates/ocio/src/file_tests/`, with the readers); tests of the renderers' dispatch,
 //! and of the 10- and 12-bit codes past the tables (docs/improvements.md, U-1). The pixels are
 //! compared with the wheel's in `tests/lut1d_op_cpu_oracle.rs` and
 //! `tests/lut1d_renderer_oracle.rs`.

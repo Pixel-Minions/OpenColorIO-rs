@@ -3,7 +3,7 @@
 
 //! Port of `tests/cpu/ops/lut3d/Lut3DOp_tests.cpp` @ v2.5.2: the tests of the op that need no
 //! file, inverse renderer or composition. `cpu_renderer_cloned`, `cpu_renderer_inverse` and
-//! `cpu_renderer_lut3d_with_nan` read files (Phase 4); `Lut3D/create_transform` and
+//! `cpu_renderer_lut3d_with_nan` read files: they are in `crates/ocio/src/file_tests/`, with the readers; `Lut3D/create_transform` and
 //! `Lut3DTransform/build_op` come with the transform (WP 2.2c); `performance_check` is
 //! commented out upstream.
 

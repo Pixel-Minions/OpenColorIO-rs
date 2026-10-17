@@ -2,7 +2,7 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Port of `tests/cpu/ops/lut1d/Lut1DOp_tests.cpp` @ v2.5.2: the tests that need no file
-//! (`lut_1d_compose_with_bit_depth` reads one, Phase 4).
+//! (`lut_1d_compose_with_bit_depth` reads one: it is in `crates/ocio/src/file_tests/`, with the readers).
 //!
 //! Upstream's test runner reruns every test in each SIMD mode the CPU supports
 //! (tests/cpu/UnitTestMain.cpp:104-153 @ v2.5.2); a test of a renderer with SIMD kernels runs

@@ -9,4 +9,9 @@
 //! these tests live here, one module per upstream file, next to the readers they need; the
 //! tests of the same upstream files that don't read files stay in `ocio-ops`.
 
+mod lut1d_op_cpu_tests;
+mod lut1d_op_data_tests;
+mod lut1d_op_tests;
+mod lut3d_op_data_tests;
+mod lut3d_op_tests;
 mod op_optimizers_tests;
