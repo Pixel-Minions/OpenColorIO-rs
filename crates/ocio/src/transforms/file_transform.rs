@@ -246,14 +246,35 @@ impl FileTransform {
     }
 }
 
-/// The stream of the LUT file at `filepath`, opened in `mode`.
+/// The stream of the LUT file at `filepath`, opened in `mode`: the config's I/O proxy's data
+/// (a `std::stringstream` of its bytes, whatever the mode), or the file system's stream, whose
+/// `failbit` is set when the file can't be opened. An absolute path the proxy can't serve (an
+/// error or no bytes) is read from the file system; the proxy's error for a relative path is
+/// the error.
 ///
-/// Port of `getLutData` (FileTransform.cpp:186-221 @ v2.5.2), without its `ConfigIOProxy`
-/// branch, which comes with the config's proxy (WP 3.10c): the file system's stream, whose
-/// `failbit` is set when the file can't be opened.
-pub(crate) fn get_lut_data(_config: &Config, filepath: &[u8], mode: OpenMode) -> InputStream {
+/// Port of `getLutData` (FileTransform.cpp:187-221 @ v2.5.2).
+pub(crate) fn get_lut_data(
+    config: &Config,
+    filepath: &[u8],
+    mode: OpenMode,
+) -> Result<InputStream> {
+    if let Some(proxy) = config.config_io_proxy() {
+        // Try to open through proxy.
+        let buffer = match proxy.lut_data(filepath) {
+            Ok(buffer) => buffer,
+            // If the path is absolute, we'll try the file system, but otherwise nothing to do.
+            Err(e) if !os_path::isabs(filepath) => return Err(e),
+            Err(_) => Vec::new(),
+        };
+
+        // If the buffer is empty, we'll try the file system for abs paths.
+        if !buffer.is_empty() || !os_path::isabs(filepath) {
+            return Ok(InputStream::from_bytes(buffer));
+        }
+    }
+
     // Default behavior. Return file stream.
-    InputStream::open_file(filepath, mode)
+    Ok(InputStream::open_file(filepath, mode))
 }
 
 /// A context with `context`'s search path, working directory and I/O proxy, and no variable.
@@ -471,7 +492,7 @@ fn open_and_read(
     } else {
         OpenMode::Text
     };
-    let mut stream = get_lut_data(config, filepath, mode);
+    let mut stream = get_lut_data(config, filepath, mode)?;
     if !stream.good() {
         return Err(Exception::new(
             [

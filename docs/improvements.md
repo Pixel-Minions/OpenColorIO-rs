@@ -2753,6 +2753,62 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `bake` reports the file and a failed bake's partial file, which the bake tests compare with
   the port's text in text mode (`crates/ocio/tests/bake_common/mod.rs`).
 
+### I-207. An archive entry's name is a wildcard
+
+- **Upstream:** a config read from an `.ocioz` archive finds its files by comparing names with
+  minizip-ng's `mz_path_compare_wc`, where a `*` matches any run of bytes, `/` matches `\`,
+  and case is ignored. `getFileBufferByPath` passes the entry's name as the wildcard and the
+  path asked for as the path (`src/OpenColorIO/OCIOZArchive.cpp:417-427` @ v2.5.2), and takes
+  the first entry that matches in the archive's order; `getFastLutFileHash` passes them the
+  other way round (`OCIOZArchive.cpp:622-639`) and takes the last match in the order of the
+  names. So an entry named `*` serves every file asked for (the config's `config.ocio`
+  included), and where an entry `luts/*.spi1d` comes before `luts/a.spi1d`, the data of
+  `luts/a.spi1d` comes from the first and its hash from the second.
+- **Who notices:** archives with a `*` in an entry's name, or entries whose names differ only
+  in case or in the kind of slash.
+- **A fix:** compare the names as paths, the same way in both functions.
+- **Status:** matched in `p4-baker` (4.9a, `crates/ocio/src/ocioz_archive.rs` and
+  `crates/ocio/src/minizip/mz_os.rs`); `crates/ocio/tests/ocioz_read_oracle.rs`, the
+  "wildcard names", "a wildcard before the name", "a lone star", "names in other cases" and
+  "backslashes" archives.
+
+### I-208. Archive entries that can't be read are read as zeros, and empty ones not at all
+
+- **Upstream:** `readEntryBuffer` (`OCIOZArchive.cpp:390-403` @ v2.5.2) sizes the buffer from
+  the central directory's uncompressed size, refuses a size of 0 or past 256 MB with "OCIOZ
+  archive entry size is invalid or exceeds maximum allowed size.", and ignores what
+  `mz_zip_reader_entry_save_buffer` returns. So:
+  - an empty file in the archive, a LUT or the config itself, fails with that message;
+  - an entry minizip-ng can't read leaves the buffer zeros, or zeros after what it read:
+    compressed with a method other than deflate (OpenColorIO builds minizip-ng with zlib
+    only), encrypted with AES, on another disk of a split archive, with corrupt deflate data
+    (minizip-ng drops the 64 KiB read it fails in), or with a size larger than its data; the
+    file's reader then fails on the zeros, with a message about the file's format;
+  - an entry flagged as encrypted is read as it is stored, without a password (OpenColorIO
+    builds minizip-ng without encryption, `MZ_PKCRYPT=OFF`), and a wrong CRC goes unnoticed.
+- **Who notices:** applications reading archives with empty files, or broken or unusual ones,
+  which get a misleading error or a config read from zeros instead of an error about the
+  archive.
+- **A fix:** accept empty entries, and fail with minizip-ng's error when an entry can't be
+  read whole.
+- **Status:** matched in `p4-baker` (4.9a, `crates/ocio/src/ocioz_archive.rs` and
+  `crates/ocio/src/minizip/`); `crates/ocio/tests/ocioz_read_oracle.rs`,
+  `entries_read_their_own_way` and the "an empty LUT" and "an empty config" archives.
+
+### I-209. A second archive's LUT files can be the first one's
+
+- **Upstream:** a config read from an archive asks its I/O proxy for its files by the paths
+  they have in the archive, relative ones such as `luts/a.spi1d`. OpenColorIO caches the hash
+  of a file by that path for the whole process (`GetFastFileHash`, `PathUtils.cpp:64-115` @
+  v2.5.2), whatever proxy answered, and its file cache by that hash. So once a config from one
+  archive has read `luts/a.spi1d`, a config from another archive that holds a different
+  `luts/a.spi1d` gets the first archive's LUT, until `ClearAllCaches`.
+- **Who notices:** applications that read several archives in one process whose files share
+  paths, such as two versions of the same config.
+- **A fix:** key the hash cache with the proxy as well as the path.
+- **Status:** matched in `p4-baker` (4.9a): the port's caches are upstream's;
+  `crates/ocio/tests/ocioz_read_oracle.rs`, `two_archives_in_one_process`.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on

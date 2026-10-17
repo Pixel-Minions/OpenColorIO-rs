@@ -5685,6 +5685,122 @@ impl crate::config_io_proxy::ConfigIoProxy for TextProxy {
     }
 }
 
+/// Port of `OCIO_ADD_TEST(Config, create_from_archive)` @ v2.5.2.
+#[test]
+fn create_from_archive() {
+    use crate::fileformats::test_utils::get_test_files_dir;
+    use ocio_ops::utils::pystring::os_path;
+
+    let _env = EnvGuard::new();
+
+    // pystring::os::path::normpath(pystring::os::path::join(paths))
+    let archive_path = |parts: &[&str]| {
+        let mut paths = vec![get_test_files_dir().into_bytes()];
+        paths.extend(parts.iter().map(|p| p.as_bytes().to_vec()));
+        let joined = if cfg!(windows) {
+            os_path::join_nt_all(&paths)
+        } else {
+            os_path::join_posix_all(&paths)
+        };
+        os_path::normpath(&joined)
+    };
+
+    {
+        // CreateFromFile using an archive built on Windows.
+        let archive_path =
+            archive_path(&["configs", "context_test1", "context_test1_windows.ocioz"]);
+
+        let config = Config::create_from_file(&archive_path).unwrap();
+        config.validate().unwrap();
+
+        // Simple check on the number of color spaces in the test config.
+        assert_eq!(config.num_color_spaces(), 13);
+
+        // Simple test to exercise ConfigIOProxy.
+        let proc = config
+            .processor_between("plain_lut1_cs", "shot1_lut1_cs")
+            .unwrap();
+        proc.default_cpu_processor().unwrap();
+    }
+
+    {
+        // CreateFromFile using an archive built with Unix-style path.
+        let archive_path = archive_path(&["configs", "context_test1", "context_test1_linux.ocioz"]);
+
+        let config = Config::create_from_file(&archive_path).unwrap();
+        config.validate().unwrap();
+
+        // Simple check on the number of color spaces in the test config.
+        assert_eq!(config.num_color_spaces(), 13);
+
+        // Simple test to exercise ConfigIOProxy.
+        let proc = config
+            .processor_between("plain_lut1_cs", "shot1_lut1_cs")
+            .unwrap();
+        proc.default_cpu_processor().unwrap();
+    }
+
+    // Scenario with incomplete OCIOZ archive.
+    {
+        // Empty OCIOZ archive.
+        let archive_path = archive_path(&["configs", "ocioz_archive_configs", "empty.ocioz"]);
+
+        check_throw_what(
+            Config::create_from_file(&archive_path),
+            "Loading the OCIO profile failed. At line 0, '' parsing failed: The specified OCIO \
+             configuration file from Archive/ConfigIOProxy does not appear to have a valid \
+             version <null>",
+        );
+    }
+
+    {
+        // Missing config file but contains LUT files.
+        let archive_path =
+            archive_path(&["configs", "ocioz_archive_configs", "missing_config.ocioz"]);
+
+        check_throw_what(
+            Config::create_from_file(&archive_path),
+            "Loading the OCIO profile failed. At line 0, '' parsing failed: The specified OCIO \
+             configuration file from Archive/ConfigIOProxy does not appear to have a valid \
+             version <null>",
+        );
+    }
+
+    {
+        // Missing LUT files but contains config file.
+        // FileTransform will requests a file that is not in the archive.
+        let archive_path = archive_path(&[
+            "configs",
+            "ocioz_archive_configs",
+            "config_missing_luts.ocioz",
+        ]);
+
+        let config = Config::create_from_file(&archive_path).unwrap();
+        // The following validation will succeed because validate() does not try to fetch the
+        // LUT files. It resolves the context variables in the paths string.
+        config.validate().unwrap();
+
+        // Trying to getProcessor from ocioz archive without any LUT files but the config needs
+        // them. Will throw in resolveFileLocation.
+        if cfg!(windows) {
+            check_throw_what(
+                config.processor_between("plain_lut11_cs", "shot1_lut11_cs"),
+                "The specified file reference 'lut11.clf' could not be located. The following \
+                 attempts were made: 'shot4\\lut11.clf' : 'shot1\\lut11.clf' : \
+                 'shot2\\lut11.clf' : 'shot3\\lut11.clf' : 'shot3\\subdir\\lut11.clf' : \
+                 '.\\lut11.clf'.",
+            );
+        } else {
+            check_throw_what(
+                config.processor_between("plain_lut11_cs", "shot1_lut11_cs"),
+                "The specified file reference 'lut11.clf' could not be located. The following \
+                 attempts were made: 'shot4/lut11.clf' : 'shot1/lut11.clf' : 'shot2/lut11.clf' : \
+                 'shot3/lut11.clf' : 'shot3/subdir/lut11.clf' : './lut11.clf'.",
+            );
+        }
+    }
+}
+
 /// `Config create_from_config_io_proxy`'s config and checks (Config_tests.cpp:10030-10145 @
 /// v2.5.2) through a proxy that serves no LUT file (the test's processor reads LUT files,
 /// Phase 4; no marker), and the proxy's other outcomes: the config keeps the proxy, the

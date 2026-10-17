@@ -125,10 +125,10 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 <https://github.com/zlib-ng/minizip-ng>, the zip library OpenColorIO 2.5.2 reads and writes
 `.ocioz` config archives with (`src/OpenColorIO/OCIOZArchive.cpp`; OpenColorIO's build
-recommends 4.0.10, `share/cmake/modules/FindExtPackages.cmake:114-116`). The port reads and
-writes the zip container with the `zip` crate; what OpenColorIO's results depend on in
-minizip-ng (how it compares an entry's path with the one asked for, for one) is ported where
-the port reads and writes archives, each function citing its source. Its source is pinned as
+recommends 4.0.10, `share/cmake/modules/FindExtPackages.cmake:114-116`). The parts
+OpenColorIO's archive code reaches are ported in `crates/ocio/src/minizip/`, each function
+citing its source; zlib's deflate and inflate, which minizip-ng calls, are the `flate2`
+crate's. Its source is pinned as
 the submodule `upstream/minizip-ng` (tag 4.0.10, commit
 f3ed731e27a97e30dffe076ed5e0537daae5c1bd), so that the citations can be checked. Its sources
 carry "Copyright (C) Nathan Moinvaziri" and the copyrights of the minizip code it grew from
