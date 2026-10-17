@@ -5,6 +5,7 @@
 //! `src/OpenColorIO/transforms/DisplayViewTransform.cpp` @ v2.5.2. Its op builder
 //! (`BuildDisplayOps`) and its `CollectContextVariables` come with WP 3.2.
 
+use std::borrow::Cow;
 use std::fmt;
 
 use ocio_ops::cfmt::{Crt, OStringStream};
@@ -24,7 +25,7 @@ use crate::display::View;
 use crate::look::collect_look_context_variables;
 use crate::look_parse::LookParseResult;
 use crate::named_transform::NamedTransform;
-use crate::transform::{build_ops, put_bool, put_c_str, validate_direction};
+use crate::transform::{Transform, build_ops, put_bool, put_c_str, validate_direction};
 use crate::transforms::color_space_transform::{
     build_color_space_from_reference_ops, build_color_space_ops_between,
     build_color_space_to_reference_ops, build_reference_conversion_ops,
@@ -248,12 +249,15 @@ impl fmt::Display for DisplayViewTransform {
     }
 }
 
-/// "View transform named '<name>' needs either a transform from or to reference."
-fn view_transform_without_transform(view_transform: &ViewTransform) -> Exception {
+/// "View transform named '<name>' needs either a transform from or to reference.", built out of
+/// line (docs/improvements.md, U-58).
+#[cold]
+#[inline(never)]
+fn view_transform_without_transform(view_transform: &ViewTransform) -> Result<()> {
     let mut os = b"View transform named '".to_vec();
     os.extend_from_slice(view_transform.name());
     os.extend_from_slice(b"' needs either a transform from or to reference.");
-    Exception::new(os)
+    Err(Exception::new(os))
 }
 
 /// The reference space type of the source color space of a view transform, which upstream reads
@@ -270,12 +274,40 @@ fn source_reference_space(source_cs: Option<&ColorSpace>) -> Result<ReferenceSpa
         })
 }
 
+/// Appends the ops of `view_transform`: its transform in the direction `first`, or else the
+/// inverse of its transform in the direction `second`; an error without either.
+///
+/// Part of the ports of `BuildSourceToDisplay` and `BuildDisplayToSource`
+/// (src/OpenColorIO/transforms/DisplayViewTransform.cpp:200-213, 231-244 @ v2.5.2). Its
+/// recursive calls are tail calls, so that its frame stays small (docs/improvements.md, U-58).
+fn build_view_transform_ops(
+    ops: &mut OpVec,
+    config: &Config,
+    context: &Context,
+    view_transform: &ViewTransform,
+    first: ViewTransformDirection,
+    second: ViewTransformDirection,
+) -> Result<()> {
+    if let Some(t) = view_transform.transform(first) {
+        build_ops(ops, config, context, t, TransformDirection::Forward)
+    } else if let Some(t) = view_transform.transform(second) {
+        build_ops(ops, config, context, t, TransformDirection::Inverse)
+    } else {
+        view_transform_without_transform(view_transform)
+    }
+}
+
 /// Appends the ops from `source_cs` to the display color space `display_cs` through
 /// `view_transform`: to the source's reference space, to the view transform's, the view
 /// transform, from the display reference space.
 ///
 /// Port of `BuildSourceToDisplay` (src/OpenColorIO/transforms/DisplayViewTransform.cpp:
-/// 177-218 @ v2.5.2).
+/// 177-218 @ v2.5.2). Its recursive calls return their results as they are, so that its frame
+/// stays small (docs/improvements.md, U-58).
+#[expect(
+    clippy::question_mark,
+    reason = "`?` takes several results' room in the frame of an unoptimized build (U-58)"
+)]
 fn build_source_to_display(
     ops: &mut OpVec,
     config: &Config,
@@ -288,20 +320,31 @@ fn build_source_to_display(
     // DisplayCS is display-referred.
 
     // Convert the current color space to its reference space.
-    build_color_space_to_reference_ops(ops, config, context, Some(source_cs), data_bypass)?;
+    let to_reference =
+        build_color_space_to_reference_ops(ops, config, context, Some(source_cs), data_bypass);
+    if to_reference.is_err() {
+        return to_reference;
+    }
 
     // If necessary, convert to the type of reference space used by the view transform.
     let vt_ref = view_transform.reference_space_type();
     let cur_cs_ref = source_cs.reference_space_type();
-    build_reference_conversion_ops(ops, config, context, cur_cs_ref, vt_ref)?;
+    let conversion = build_reference_conversion_ops(ops, config, context, cur_cs_ref, vt_ref);
+    if conversion.is_err() {
+        return conversion;
+    }
 
     // Apply view transform.
-    if let Some(t) = view_transform.transform(ViewTransformDirection::FromReference) {
-        build_ops(ops, config, context, t, TransformDirection::Forward)?;
-    } else if let Some(t) = view_transform.transform(ViewTransformDirection::ToReference) {
-        build_ops(ops, config, context, t, TransformDirection::Inverse)?;
-    } else {
-        return Err(view_transform_without_transform(view_transform));
+    let view = build_view_transform_ops(
+        ops,
+        config,
+        context,
+        view_transform,
+        ViewTransformDirection::FromReference,
+        ViewTransformDirection::ToReference,
+    );
+    if view.is_err() {
+        return view;
     }
 
     // Convert from the display-referred reference space to the displayCS.
@@ -312,7 +355,12 @@ fn build_source_to_display(
 /// of `view_transform`.
 ///
 /// Port of `BuildDisplayToSource` (src/OpenColorIO/transforms/DisplayViewTransform.cpp:
-/// 222-262 @ v2.5.2).
+/// 222-262 @ v2.5.2). Its recursive calls return their results as they are, so that its frame
+/// stays small (docs/improvements.md, U-58).
+#[expect(
+    clippy::question_mark,
+    reason = "`?` takes several results' room in the frame of an unoptimized build (U-58)"
+)]
 fn build_display_to_source(
     ops: &mut OpVec,
     config: &Config,
@@ -323,32 +371,86 @@ fn build_display_to_source(
     data_bypass: bool,
 ) -> Result<()> {
     // Convert to the display-referred reference space from the displayColorSpace.
-    build_color_space_to_reference_ops(ops, config, context, display_cs, data_bypass)?;
+    let to_reference =
+        build_color_space_to_reference_ops(ops, config, context, display_cs, data_bypass);
+    if to_reference.is_err() {
+        return to_reference;
+    }
 
     // Apply view transform inverted.
-    if let Some(t) = view_transform.transform(ViewTransformDirection::ToReference) {
-        build_ops(ops, config, context, t, TransformDirection::Forward)?;
-    } else if let Some(t) = view_transform.transform(ViewTransformDirection::FromReference) {
-        build_ops(ops, config, context, t, TransformDirection::Inverse)?;
-    } else {
-        return Err(view_transform_without_transform(view_transform));
+    let view = build_view_transform_ops(
+        ops,
+        config,
+        context,
+        view_transform,
+        ViewTransformDirection::ToReference,
+        ViewTransformDirection::FromReference,
+    );
+    if view.is_err() {
+        return view;
     }
 
     // If necessary, convert from the type of reference space used by the view transform to the
     // reference space of the source color space.
     let vt_ref = view_transform.reference_space_type();
-    let in_cs_ref = source_reference_space(source_cs)?;
-    build_reference_conversion_ops(ops, config, context, vt_ref, in_cs_ref)?;
+    let in_cs_ref = match source_reference_space(source_cs) {
+        Ok(in_cs_ref) => in_cs_ref,
+        Err(e) => return Err(e),
+    };
+    let conversion = build_reference_conversion_ops(ops, config, context, vt_ref, in_cs_ref);
+    if conversion.is_err() {
+        return conversion;
+    }
 
     // Convert from the reference space back to the source color space.
     build_color_space_from_reference_ops(ops, config, context, source_cs, data_bypass)
+}
+
+/// The transform of `named_transform` in the direction `dir`, boxed so that it doesn't weigh on
+/// the frame of [`build_named_transform_ops`] while its ops build (docs/improvements.md, U-58).
+#[inline(never)]
+fn named_transform_of(
+    named_transform: &NamedTransform,
+    dir: TransformDirection,
+) -> Result<Box<Cow<'_, Transform>>> {
+    NamedTransform::get_transform(named_transform, dir).map(Box::new)
+}
+
+/// Appends the ops of the transform of `named_transform` in the direction `dir`.
+///
+/// Part of the ports of `BuildNamedTransformToDisplay`, `BuildDisplayToNamedTransform` and
+/// `BuildDisplayOps` (src/OpenColorIO/transforms/DisplayViewTransform.cpp:271-273, 288-290,
+/// 446-448, 494-496 @ v2.5.2). Its recursive call is a tail call, so that its frame stays small
+/// (docs/improvements.md, U-58).
+fn build_named_transform_ops(
+    ops: &mut OpVec,
+    config: &Config,
+    context: &Context,
+    named_transform: &NamedTransform,
+    dir: TransformDirection,
+) -> Result<()> {
+    match named_transform_of(named_transform, dir) {
+        Ok(transform) => build_ops(
+            ops,
+            config,
+            context,
+            &transform,
+            TransformDirection::Forward,
+        ),
+        Err(e) => Err(e),
+    }
 }
 
 /// Appends the named transform of a view, forward, then the conversion from the display
 /// reference space to `display_cs`.
 ///
 /// Port of `BuildNamedTransformToDisplay` (src/OpenColorIO/transforms/
-/// DisplayViewTransform.cpp:264-277 @ v2.5.2).
+/// DisplayViewTransform.cpp:264-277 @ v2.5.2). Its recursive calls return their results as
+/// they are, so that its frame stays small (docs/improvements.md, U-58).
+#[expect(
+    clippy::question_mark,
+    reason = "`?` takes several results' room in the frame of an unoptimized build (U-58)"
+)]
 fn build_named_transform_to_display(
     ops: &mut OpVec,
     config: &Config,
@@ -358,15 +460,16 @@ fn build_named_transform_to_display(
     data_bypass: bool,
 ) -> Result<()> {
     // Apply view named transform.
-    let transform =
-        NamedTransform::get_transform(view_named_transform, TransformDirection::Forward)?;
-    build_ops(
+    let view = build_named_transform_ops(
         ops,
         config,
         context,
-        &transform,
+        view_named_transform,
         TransformDirection::Forward,
-    )?;
+    );
+    if view.is_err() {
+        return view;
+    }
 
     // Convert from the display-referred reference space to the displayCS.
     build_color_space_from_reference_ops(ops, config, context, display_cs, data_bypass)
@@ -376,7 +479,12 @@ fn build_named_transform_to_display(
 /// transform of a view, inverse.
 ///
 /// Port of `BuildDisplayToNamedTransform` (src/OpenColorIO/transforms/
-/// DisplayViewTransform.cpp:279-292 @ v2.5.2).
+/// DisplayViewTransform.cpp:279-292 @ v2.5.2). Its recursive calls return their results as
+/// they are, so that its frame stays small (docs/improvements.md, U-58).
+#[expect(
+    clippy::question_mark,
+    reason = "`?` takes several results' room in the frame of an unoptimized build (U-58)"
+)]
 fn build_display_to_named_transform(
     ops: &mut OpVec,
     config: &Config,
@@ -386,17 +494,19 @@ fn build_display_to_named_transform(
     data_bypass: bool,
 ) -> Result<()> {
     // Convert to the display-referred reference space from the displayColorSpace.
-    build_color_space_to_reference_ops(ops, config, context, display_cs, data_bypass)?;
+    let to_reference =
+        build_color_space_to_reference_ops(ops, config, context, display_cs, data_bypass);
+    if to_reference.is_err() {
+        return to_reference;
+    }
 
     // Apply view named transform.
-    let transform =
-        NamedTransform::get_transform(view_named_transform, TransformDirection::Inverse)?;
-    build_ops(
+    build_named_transform_ops(
         ops,
         config,
         context,
-        &transform,
-        TransformDirection::Forward,
+        view_named_transform,
+        TransformDirection::Inverse,
     )
 }
 
@@ -409,19 +519,35 @@ fn dvt_error(rest: &[&[u8]]) -> Exception {
     Exception::new(os)
 }
 
-/// Appends the ops of `display_view_transform` in the direction `dir`: from its source color
-/// space, through the view's looks, to the view's color space or through its view transform (or
-/// named transform) to its display color space; inverse, the other way.
+/// What [`build_display_ops`] builds from, through and to, found and validated.
+struct DisplayOps<'c> {
+    /// The source color space.
+    src_color_space: &'c ColorSpace,
+    /// The view's view transform, if it is one.
+    view_transform: Option<&'c ViewTransform>,
+    /// The view's view transform, if it is a named transform.
+    view_named_transform: Option<&'c NamedTransform>,
+    /// The display color space, if there is one.
+    display_color_space: Option<&'c ColorSpace>,
+    /// The view's color space, if it is a named transform.
+    cs_named_transform: Option<&'c NamedTransform>,
+    /// Whether data color spaces are left alone.
+    data_bypass: bool,
+    /// The view's looks, unless they are bypassed.
+    looks: LookParseResult,
+}
+
+/// What [`build_display_ops`] builds from, through and to, found and validated; `None` when a
+/// data color space is bypassed. Out of line, so that the names, lookups and errors aren't on
+/// the stack while the ops build (docs/improvements.md, U-58).
 ///
-/// Port of `BuildDisplayOps` (src/OpenColorIO/transforms/DisplayViewTransform.cpp:295-528 @
-/// v2.5.2).
-pub(crate) fn build_display_ops(
-    ops: &mut OpVec,
-    config: &Config,
-    context: &Context,
+/// Part of the port of `BuildDisplayOps` (src/OpenColorIO/transforms/
+/// DisplayViewTransform.cpp:295-427 @ v2.5.2).
+#[inline(never)]
+fn display_ops<'c>(
+    config: &'c Config,
     display_view_transform: &DisplayViewTransform,
-    dir: TransformDirection,
-) -> Result<()> {
+) -> Result<Option<DisplayOps<'c>>> {
     // There are two ways of specifying a DisplayViewTransform: either with a colorspace, or with
     // a view_transform plus display_colorspace.  It is permitted to substitute a named_transform
     // for either the colorspace or the view_transform.
@@ -525,7 +651,7 @@ pub(crate) fn build_display_ops(
     let src_data = src_color_space.is_data();
     let display_data = display_color_space.is_some_and(ColorSpace::is_data);
     if data_bypass && (src_data || display_data) {
-        return Ok(());
+        return Ok(None);
     }
 
     // Get looks to be applied, if specified.
@@ -534,141 +660,242 @@ pub(crate) fn build_display_ops(
         looks.parse(config.display_view_looks(display, view))?;
     }
 
+    Ok(Some(DisplayOps {
+        src_color_space,
+        view_transform,
+        view_named_transform,
+        display_color_space,
+        cs_named_transform,
+        data_bypass,
+        looks,
+    }))
+}
+
+/// Appends the ops of `display_view_transform` in the direction `dir`: from its source color
+/// space, through the view's looks, to the view's color space or through its view transform (or
+/// named transform) to its display color space; inverse, the other way.
+///
+/// Port of `BuildDisplayOps` (src/OpenColorIO/transforms/DisplayViewTransform.cpp:295-528 @
+/// v2.5.2). What it builds from, through and to comes from [`display_ops`], and each direction
+/// builds in its own function, so that the frames on the stack while the ops build are small
+/// (docs/improvements.md, U-58).
+pub(crate) fn build_display_ops(
+    ops: &mut OpVec,
+    config: &Config,
+    context: &Context,
+    display_view_transform: &DisplayViewTransform,
+    dir: TransformDirection,
+) -> Result<()> {
+    let mut display_ops = match display_ops(config, display_view_transform) {
+        Ok(Some(display_ops)) => display_ops,
+        Ok(None) => return Ok(()),
+        Err(e) => return Err(e),
+    };
+
     // Now that all the inputs are found and validated, the following code builds the list of
     // ops for the forward or the inverse direction.
 
     let combined_dir = combine_transform_directions(dir, display_view_transform.direction());
     match combined_dir {
         TransformDirection::Forward => {
-            // Start from src color space.
-            let mut current_cs = Some(src_color_space);
-
-            // Apply looks if needed.
-            if !looks.is_empty() {
-                // Note that this updates the currentCS to be the process space of the last look
-                // applied.
-                build_look_ops_from(ops, &mut current_cs, false, config, context, &looks)?;
-            }
-            let current_cs = current_cs.expect("the looks only replace it");
-
-            if let Some(cs_named_transform) = cs_named_transform {
-                // Ignore currentCS.  The forward direction NamedTransform is used for the
-                // forward direction DisplayViewTransform.
-                let transform =
-                    NamedTransform::get_transform(cs_named_transform, TransformDirection::Forward)?;
-                build_ops(
-                    ops,
-                    config,
-                    context,
-                    &transform,
-                    TransformDirection::Forward,
-                )?;
-            } else if let Some(view_named_transform) = view_named_transform {
-                build_named_transform_to_display(
-                    ops,
-                    config,
-                    context,
-                    view_named_transform,
-                    display_color_space,
-                    data_bypass,
-                )?;
-            } else if let Some(view_transform) = view_transform {
-                build_source_to_display(
-                    ops,
-                    config,
-                    context,
-                    current_cs,
-                    view_transform,
-                    display_color_space,
-                    data_bypass,
-                )?;
-            } else {
-                // This is the simple case where the View only had the "colorspace" attribute,
-                // which is referred to here as displayColorSpace.  Apply the conversion to there
-                // from the current color space (which may vary if a look was applied).
-                build_color_space_ops_between(
-                    ops,
-                    config,
-                    context,
-                    Some(current_cs),
-                    display_color_space,
-                    data_bypass,
-                )?;
-            }
+            build_display_ops_forward(ops, config, context, &display_ops)
         }
         TransformDirection::Inverse => {
-            // The source color space of the view transform might need to be computed. In
-            // forward, looks (if present) are applied and will change the current color space
-            // that is used as the starting point of the view transform. Looks need to be used in
-            // order to find what color space to use for the view transform in the inverse
-            // direction.
-            let mut vt_source_cs = Some(src_color_space);
-            if !looks.is_empty() {
-                // Get the result color space of applying the looks in the forward direction.
-                let cs_res = looks_result_color_space(config, context, &looks)?;
-                vt_source_cs = config.color_space(cs_res);
-            }
-
-            if let Some(cs_named_transform) = cs_named_transform {
-                // Ignore currentCS.
-                let transform =
-                    NamedTransform::get_transform(cs_named_transform, TransformDirection::Inverse)?;
-                build_ops(
-                    ops,
-                    config,
-                    context,
-                    &transform,
-                    TransformDirection::Forward,
-                )?;
-            } else if let Some(view_named_transform) = view_named_transform {
-                build_display_to_named_transform(
-                    ops,
-                    config,
-                    context,
-                    display_color_space,
-                    view_named_transform,
-                    data_bypass,
-                )?;
-            } else if let Some(view_transform) = view_transform {
-                build_display_to_source(
-                    ops,
-                    config,
-                    context,
-                    display_color_space,
-                    view_transform,
-                    vt_source_cs,
-                    data_bypass,
-                )?;
-            } else {
-                // Apply the conversion from the display color space to the vtSourceCS.
-                build_color_space_ops_between(
-                    ops,
-                    config,
-                    context,
-                    display_color_space,
-                    vt_source_cs,
-                    data_bypass,
-                )?;
-            }
-
-            if !looks.is_empty() {
-                // Apply looks in inverse direction.  Note that vtSourceCS is updated.
-                looks.reverse();
-                build_look_ops_from(ops, &mut vt_source_cs, false, config, context, &looks)?;
-
-                // End in srcColorSpace.
-                build_color_space_ops_between(
-                    ops,
-                    config,
-                    context,
-                    vt_source_cs,
-                    Some(src_color_space),
-                    data_bypass,
-                )?;
-            }
+            build_display_ops_inverse(ops, config, context, &mut display_ops)
         }
     }
-    Ok(())
+}
+
+/// The forward direction of [`build_display_ops`].
+///
+/// Part of the port of `BuildDisplayOps` (src/OpenColorIO/transforms/
+/// DisplayViewTransform.cpp:432-475 @ v2.5.2).
+#[expect(
+    clippy::question_mark,
+    reason = "`?` takes several results' room in the frame of an unoptimized build (U-58)"
+)]
+fn build_display_ops_forward<'c>(
+    ops: &mut OpVec,
+    config: &'c Config,
+    context: &Context,
+    display_ops: &DisplayOps<'c>,
+) -> Result<()> {
+    // Start from src color space.
+    let mut current_cs = Some(display_ops.src_color_space);
+
+    // Apply looks if needed.
+    if !display_ops.looks.is_empty() {
+        // Note that this updates the currentCS to be the process space of the last look
+        // applied.
+        let looks = build_look_ops_from(
+            ops,
+            &mut current_cs,
+            false,
+            config,
+            context,
+            &display_ops.looks,
+        );
+        if looks.is_err() {
+            return looks;
+        }
+    }
+    let current_cs = current_cs.expect("the looks only replace it");
+
+    if let Some(cs_named_transform) = display_ops.cs_named_transform {
+        // Ignore currentCS.  The forward direction NamedTransform is used for the forward
+        // direction DisplayViewTransform.
+        build_named_transform_ops(
+            ops,
+            config,
+            context,
+            cs_named_transform,
+            TransformDirection::Forward,
+        )
+    } else if let Some(view_named_transform) = display_ops.view_named_transform {
+        build_named_transform_to_display(
+            ops,
+            config,
+            context,
+            view_named_transform,
+            display_ops.display_color_space,
+            display_ops.data_bypass,
+        )
+    } else if let Some(view_transform) = display_ops.view_transform {
+        build_source_to_display(
+            ops,
+            config,
+            context,
+            current_cs,
+            view_transform,
+            display_ops.display_color_space,
+            display_ops.data_bypass,
+        )
+    } else {
+        // This is the simple case where the View only had the "colorspace" attribute, which is
+        // referred to here as displayColorSpace.  Apply the conversion to there from the
+        // current color space (which may vary if a look was applied).
+        build_color_space_ops_between(
+            ops,
+            config,
+            context,
+            Some(current_cs),
+            display_ops.display_color_space,
+            display_ops.data_bypass,
+        )
+    }
+}
+
+/// The color space applying `looks` forward ends in, out of line (docs/improvements.md, U-58).
+///
+/// Part of the port of `BuildDisplayOps` (src/OpenColorIO/transforms/
+/// DisplayViewTransform.cpp:483-488 @ v2.5.2).
+#[inline(never)]
+fn looks_result<'c>(
+    config: &'c Config,
+    context: &Context,
+    looks: &LookParseResult,
+) -> Result<Option<&'c ColorSpace>> {
+    // Get the result color space of applying the looks in the forward direction.
+    let cs_res = looks_result_color_space(config, context, looks)?;
+    Ok(config.color_space(cs_res))
+}
+
+/// The inverse direction of [`build_display_ops`], which reverses the looks of `display_ops`.
+///
+/// Part of the port of `BuildDisplayOps` (src/OpenColorIO/transforms/
+/// DisplayViewTransform.cpp:476-525 @ v2.5.2).
+#[expect(
+    clippy::question_mark,
+    reason = "`?` takes several results' room in the frame of an unoptimized build (U-58)"
+)]
+fn build_display_ops_inverse<'c>(
+    ops: &mut OpVec,
+    config: &'c Config,
+    context: &Context,
+    display_ops: &mut DisplayOps<'c>,
+) -> Result<()> {
+    // The source color space of the view transform might need to be computed. In forward,
+    // looks (if present) are applied and will change the current color space that is used as
+    // the starting point of the view transform. Looks need to be used in order to find what
+    // color space to use for the view transform in the inverse direction.
+    let mut vt_source_cs = Some(display_ops.src_color_space);
+    if !display_ops.looks.is_empty() {
+        vt_source_cs = match looks_result(config, context, &display_ops.looks) {
+            Ok(cs) => cs,
+            Err(e) => return Err(e),
+        };
+    }
+
+    let to_source = if let Some(cs_named_transform) = display_ops.cs_named_transform {
+        // Ignore currentCS.
+        build_named_transform_ops(
+            ops,
+            config,
+            context,
+            cs_named_transform,
+            TransformDirection::Inverse,
+        )
+    } else if let Some(view_named_transform) = display_ops.view_named_transform {
+        build_display_to_named_transform(
+            ops,
+            config,
+            context,
+            display_ops.display_color_space,
+            view_named_transform,
+            display_ops.data_bypass,
+        )
+    } else if let Some(view_transform) = display_ops.view_transform {
+        build_display_to_source(
+            ops,
+            config,
+            context,
+            display_ops.display_color_space,
+            view_transform,
+            vt_source_cs,
+            display_ops.data_bypass,
+        )
+    } else {
+        // Apply the conversion from the display color space to the vtSourceCS.
+        build_color_space_ops_between(
+            ops,
+            config,
+            context,
+            display_ops.display_color_space,
+            vt_source_cs,
+            display_ops.data_bypass,
+        )
+    };
+    if to_source.is_err() {
+        return to_source;
+    }
+
+    if display_ops.looks.is_empty() {
+        return Ok(());
+    }
+
+    // Apply looks in inverse direction.  Note that vtSourceCS is updated.
+    display_ops.looks.reverse();
+    let looks = build_look_ops_from(
+        ops,
+        &mut vt_source_cs,
+        false,
+        config,
+        context,
+        &display_ops.looks,
+    );
+    if looks.is_err() {
+        return looks;
+    }
+
+    // End in srcColorSpace.
+    build_color_space_ops_between(
+        ops,
+        config,
+        context,
+        vt_source_cs,
+        Some(display_ops.src_color_space),
+        display_ops.data_bypass,
+    )
 }
 
 /// Whether `tr` uses context variables, which it adds to `used_context_vars`: those of its

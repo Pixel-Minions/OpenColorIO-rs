@@ -174,7 +174,10 @@ pub(crate) fn collect_context_variables(
     // (U-60): only the transforms inside it count.
     let _nesting = match transform {
         Transform::Group(_) => None,
-        _ => Some(Nesting::collect()?),
+        _ => match Nesting::collect() {
+            Some(nesting) => Some(nesting),
+            None => return Nesting::too_deep(),
+        },
     };
     match transform {
         Transform::Group(tr) => {

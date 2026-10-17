@@ -576,3 +576,126 @@ colorspaces:
     assert_eq!(port, wheel);
     assert_ne!(port[0], port[1]);
 }
+
+/// The length of the longest chain the port accepts, of `refused(n)` false: a binary search
+/// for the first refused length below 1024.
+fn longest_accepted(refused: impl Fn(usize) -> bool, label: &str) -> usize {
+    let (mut ok, mut too_deep) = (1, 1024);
+    assert!(!refused(ok) && refused(too_deep), "{label}");
+    while too_deep - ok > 1 {
+        let mid = (ok + too_deep) / 2;
+        if refused(mid) {
+            too_deep = mid;
+        } else {
+            ok = mid;
+        }
+    }
+    ok
+}
+
+/// `f` on a thread of a 1 MiB stack, the smallest the port supports for its nesting limits
+/// (docs/improvements.md, U-58 and U-76).
+fn on_a_1_mib_thread<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+    std::thread::Builder::new()
+        .stack_size(1 << 20)
+        .spawn(f)
+        .unwrap()
+        .join()
+        .unwrap()
+}
+
+/// The longest chain of each kind the port accepts builds on a 1 MiB thread, both ways: the
+/// limit of nested transforms holds at the test profile's optimization level, and at opt-level
+/// 0 (the figures in docs/improvements.md, U-58).
+#[test]
+fn the_deepest_chains_build_on_a_1_mib_thread() {
+    for kind in ["cst", "look", "group", "dv", "dvvt"] {
+        let refused = |n: usize| port_chain(kind, n).is_err();
+        let ok = longest_accepted(refused, kind);
+        let built = on_a_1_mib_thread(move || {
+            let config = Config::create_from_stream(chain(kind, ok).as_bytes())?;
+            config.processor_between(format!("c{ok}"), "c0")?;
+            config.processor_between("c0", format!("c{ok}")).map(|_| ())
+        });
+        assert!(built.is_ok(), "{kind} {ok}: {built:?}");
+    }
+}
+
+/// A config of color spaces `c1`..`cn`: `c1` converts from `c0` with a file transform of the
+/// CTF file `c0.ctf` of `dir`, each other one from the one before with a color space
+/// transform; `dir` is the search path.
+fn mixed_chain(dir: &str, n: usize) -> String {
+    let yaml = chain("cst", n).replacen(
+        "ocio_profile_version: 2\n",
+        // A list, whose entries aren't split at colons (a Windows drive's, I-9).
+        &format!("ocio_profile_version: 2\nsearch_path: [\"{dir}\"]\n"),
+        1,
+    );
+    yaml.replacen(
+        "    name: c1\n    to_scene_reference: !<ColorSpaceTransform> {src: c0, dst: c0}\n",
+        "    name: c1\n    to_scene_reference: !<FileTransform> {src: c0.ctf}\n",
+        1,
+    )
+}
+
+/// The deepest stack of both limits: the longest chain of color space transforms the port
+/// accepts, whose first link is a file transform of a chain of CTF references as long as the
+/// port accepts (256 files): references never nest inside `BuildOps`, so the chain of color
+/// spaces comes first on the stack and the files after it. It builds on a 1 MiB thread, and
+/// its processor is the wheel's (docs/improvements.md, U-58 and U-76).
+#[test]
+fn a_chain_of_color_spaces_then_of_references_builds_on_a_1_mib_thread() {
+    use common::lut_files::{file, write_files};
+
+    const FILES: usize = 256;
+    let f32s = "inBitDepth=\"32f\" outBitDepth=\"32f\"";
+    let mut files = Vec::new();
+    for i in 0..FILES {
+        let body = if i == FILES - 1 {
+            format!(
+                "    <Matrix {f32s}>\n        <Array dim=\"3 3 3\">2 0 0 0 3 0 0 0 4</Array>\n    \
+                 </Matrix>\n"
+            )
+        } else {
+            format!("    <Reference {f32s} path=\"c{}.ctf\"/>\n", i + 1)
+        };
+        files.push(file(
+            &format!("c{i}.ctf"),
+            format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+                 <ProcessList id=\"a\" version=\"1.7\">\n{body}</ProcessList>\n"
+            )
+            .into_bytes(),
+        ));
+    }
+    let dir = write_files(&files);
+
+    let port = |n: usize| {
+        let yaml = mixed_chain(&dir, n);
+        Config::create_from_stream(yaml.as_bytes())
+            .and_then(|config| config.processor_between(format!("c{n}"), "c0"))
+    };
+    let n = longest_accepted(|n| port(n).is_err(), "mixed");
+
+    let yaml = mixed_chain(&dir, n);
+    let threaded = yaml.clone();
+    let built = on_a_1_mib_thread(move || {
+        Config::create_from_stream(threaded.as_bytes())
+            .and_then(|config| config.processor_between(format!("c{n}"), "c0"))
+            .map(|processor| processor.processor_metadata().num_files())
+    });
+    assert_eq!(built.map_err(|e| e.to_string()), Ok(FILES as i32));
+
+    let reply = Oracle::get().call(
+        "config_processor",
+        json!({
+            "config": {"yaml": yaml},
+            "overload": {"names": [format!("c{n}"), "c0"]},
+            "ops": {"optimization": "OPTIMIZATION_NONE"},
+        }),
+        &[],
+    );
+    if let Some(failure) = compare(&reply, &port_processors(port(n))) {
+        panic!("mixed {n}: {failure}");
+    }
+}

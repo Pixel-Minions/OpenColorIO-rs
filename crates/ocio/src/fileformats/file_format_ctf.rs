@@ -209,7 +209,14 @@ impl FileFormat for LocalFileFormat {
     /// (in reverse order for the inverse), with the ProcessList's metadata; a LUT without
     /// an interpolation of its own takes the file transform's, if valid for it.
     ///
-    /// Port of `LocalFileFormat::buildFileOps` (FileFormatCTF.cpp:1288-1341 @ v2.5.2).
+    /// Port of `LocalFileFormat::buildFileOps` (FileFormatCTF.cpp:1288-1341 @ v2.5.2). Its
+    /// cast, its metadata and its LUTs' copies are out of line, and the recursive calls return
+    /// their results as they are, so that its frame stays small: it is part of the recursion of
+    /// a chain of references (docs/improvements.md, U-58 and U-76).
+    #[expect(
+        clippy::question_mark,
+        reason = "`?` takes several results' room in the frame of an unoptimized build (U-58)"
+    )]
     fn build_file_ops(
         &self,
         ops: &mut OpVec,
@@ -219,18 +226,12 @@ impl FileFormat for LocalFileFormat {
         file_transform: &FileTransform,
         dir: TransformDirection,
     ) -> Result<()> {
-        let any: &dyn Any = untyped_cached_file.as_ref();
-        let Some(cached_file) = any.downcast_ref::<LocalCachedFile>() else {
-            // This should never happen.
-            return Err(Exception::new("Cannot build clf ops. Invalid cache type."));
+        let cached_file = match cached_ctf_file(ops, untyped_cached_file) {
+            Ok(cached_file) => cached_file,
+            Err(e) => return Err(e),
         };
 
         let new_dir = combine_transform_directions(dir, file_transform.direction());
-
-        // Put CTF processList information into the FormatMetadata.
-        cached_file
-            .transform
-            .to_metadata(ops.get_format_metadata_mut())?;
 
         // Resolve reference path using context and load referenced files.
         let op_data_vec = cached_file.transform.get_ops();
@@ -244,22 +245,61 @@ impl FileFormat for LocalFileFormat {
         match new_dir {
             TransformDirection::Forward => {
                 for op_data in op_data_vec {
-                    let mut op_data = op_data.clone();
                     // Note: HandleLUT does nothing if opData is not a LUT.
-                    handle_lut(&mut op_data, file_interpolation);
-                    build_op(ops, config, context, &op_data, new_dir)?;
+                    let op_data = lut_with_interpolation(op_data, file_interpolation);
+                    let op = build_op(ops, config, context, &op_data, new_dir);
+                    if op.is_err() {
+                        return op;
+                    }
                 }
             }
             TransformDirection::Inverse => {
                 for op_data in op_data_vec.iter().rev() {
-                    let mut op_data = op_data.clone();
-                    handle_lut(&mut op_data, file_interpolation);
-                    build_op(ops, config, context, &op_data, new_dir)?;
+                    let op_data = lut_with_interpolation(op_data, file_interpolation);
+                    let op = build_op(ops, config, context, &op_data, new_dir);
+                    if op.is_err() {
+                        return op;
+                    }
                 }
             }
         }
         Ok(())
     }
+}
+
+/// The CTF file of `untyped_cached_file`, whose ProcessList information goes into the metadata
+/// of `ops`. Out of line, as [`LocalFileFormat::build_file_ops`] is part of the recursion of a
+/// chain of references (docs/improvements.md, U-76).
+///
+/// Part of the port of `LocalFileFormat::buildFileOps` (FileFormatCTF.cpp:1295-1308 @ v2.5.2).
+#[inline(never)]
+fn cached_ctf_file<'f>(
+    ops: &mut OpVec,
+    untyped_cached_file: &'f CachedFileRcPtr,
+) -> Result<&'f LocalCachedFile> {
+    let any: &dyn Any = untyped_cached_file.as_ref();
+    let Some(cached_file) = any.downcast_ref::<LocalCachedFile>() else {
+        // This should never happen.
+        return Err(Exception::new("Cannot build clf ops. Invalid cache type."));
+    };
+
+    // Put CTF processList information into the FormatMetadata.
+    cached_file
+        .transform
+        .to_metadata(ops.get_format_metadata_mut())?;
+    Ok(cached_file)
+}
+
+/// `op_data`, or a copy of its LUT with the interpolation `file_interpolation` (see
+/// [`handle_lut`]). Out of line, as [`LocalFileFormat::build_file_ops`] is part of the
+/// recursion of a chain of references (docs/improvements.md, U-76).
+///
+/// Part of the port of `LocalFileFormat::buildFileOps` (FileFormatCTF.cpp:1321-1335 @ v2.5.2).
+#[inline(never)]
+fn lut_with_interpolation(op_data: &OpDataRcPtr, file_interpolation: Interpolation) -> OpDataRcPtr {
+    let mut op_data = op_data.clone();
+    handle_lut(&mut op_data, file_interpolation);
+    op_data
 }
 
 /// Writes `ops` as a CLF (`is_clf`) or CTF ProcessList with the group metadata `metadata`:
@@ -293,7 +333,8 @@ pub(crate) fn write_ops(
 
 /// Appends the ops of an op data: a reference to a file is resolved (the file's ops).
 ///
-/// Port of `BuildOp` (FileFormatCTF.cpp:1219-1249 @ v2.5.2).
+/// Port of `BuildOp` (FileFormatCTF.cpp:1219-1249 @ v2.5.2). Its recursive call is a tail call, so
+/// that its frame stays small (docs/improvements.md, U-76).
 fn build_op(
     ops: &mut OpVec,
     config: &Config,
@@ -309,9 +350,10 @@ fn build_op(
 
             // This might call LocalFileFormat::buildFileOps if the file is a CTF.
             // BuildFileTransformOps is making sure there is no cycling recursion.
-            build_file_transform_ops(ops, config, context, &file_transform, dir)?;
+            build_file_transform_ops(ops, config, context, &file_transform, dir)
+        } else {
+            Ok(())
         }
-        Ok(())
     } else {
         create_op_vec_from_op_data(ops, op_data, dir)
     }

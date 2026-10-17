@@ -3571,13 +3571,41 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   wheel does. The port accepts chains of 255 color space transforms (in groups or not) and of
   254 look or display view transforms. Between that and the wheel's crash the port refuses
   what the wheel builds.
+
+  The limit must also hold on the port's own stack, at every optimization level, on a thread
+  of 1 MiB (the main thread's on Windows). At opt-level 0 the first port didn't: an
+  unoptimized frame keeps a slot for every temporary (each `?` holds several copies of the
+  56-byte result), and a display view transform took about 11.7 KB a level, so only 86
+  levels fit. The functions the build recurses through now keep their frames small (their
+  lookups, errors and copies out of line, in `#[inline(never)]` and `#[cold]` helpers, and
+  their recursive calls' results returned as they are, without `?`; the same for a chain of
+  CTF references, U-76). What the longest chain of each kind takes, both ways (a binary
+  search of a thread's stack size, to 4 KiB, Windows, 2026-10-17):
+
+  | Each link | opt-level 0 | opt-level 1, the test profile |
+  |---|---|---|
+  | `ColorSpaceTransform` (255) | 514 KiB | 259 KiB |
+  | `LookTransform` with a look (254) | 641 KiB | 514 KiB |
+  | `GroupTransform` holding a `ColorSpaceTransform` (255) | 705 KiB | 450 KiB |
+  | `DisplayViewTransform`, a view with a look (254) | 705 KiB | 577 KiB |
+  | `DisplayViewTransform`, a view transform and a look (254) | 705 KiB | 577 KiB |
+
+  The deepest stack of both limits, 255 color space transforms whose last link starts a chain
+  of 256 CTF files, takes 600 to 650 KiB at opt-level 0.
 - **Status:** done in `p3-builders` (3.2d follow-up; `crates/ocio/src/transform.rs`, `Nesting`;
   `build_ops`, and `collect_context_variables` in `crates/ocio/src/context_variable_utils.rs`).
-  Tests (`crates/ocio/tests/config_processors_oracle.rs`): a color space that names itself and
+  The small frames in `group-5` (`transform.rs`, `transforms/color_space_transform.rs`,
+  `look_transform.rs`, `display_view_transform.rs`, `group_transform.rs`,
+  `file_transform.rs`, `fileformats/file_format_ctf.rs`). Tests
+  (`crates/ocio/tests/config_processors_oracle.rs`): a color space that names itself and
   one that reaches itself through a look are refused in both directions where the wheel
   crashes; the longest chain of each kind the port accepts is the wheel's processor (on a
   test thread's stack, debug and release), and one link more the wheel still builds while the
-  port refuses.
+  port refuses; `the_deepest_chains_build_on_a_1_mib_thread` builds the longest chain of each
+  kind both ways on a 1 MiB thread, and
+  `a_chain_of_color_spaces_then_of_references_builds_on_a_1_mib_thread` the deepest stack of
+  both limits, whose processor is the wheel's. Both pass at opt-level 0 too (checked by hand,
+  `CARGO_PROFILE_DEV_OPT_LEVEL=0`, 2026-10-17); no CI job builds at opt-level 0.
 
 ### U-60. GroupTransforms nested deep enough to overflow the wheel's stack
 
@@ -3728,28 +3756,29 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   port refuses a chain of more than 256 files (`MAX_FILE_NESTING`, U-58's limit) with "The CTF
   references nest more than 256 files deep: upstream's stack overflows." Between that and the
   wheel's crash the port refuses what the wheel builds. The port's frames per file (its
-  loading and the reference's file transform are kept out of line) decide what a thread
-  holds; a 1 MiB thread on Windows (measured 2026-10-17):
+  loading, its errors, the reference's file transform and the LUTs' copies are kept out of
+  line, and the recursive calls' results returned without `?`, as for U-58) decide what a
+  thread holds; a 1 MiB thread on Windows (measured 2026-10-17, `group-5`):
 
   | Build | Builds | Overflows |
   |---|---|---|
-  | opt-level 0 | 370 files | 380 files (about 2.7 KB a file) |
-  | opt-level 1, the test profile | 1,100 files | 1,150 files (about 880 bytes a file) |
+  | opt-level 0 | 759 files | 766 files (about 1.4 KB a file) |
+  | opt-level 1, the test profile | 1,647 files | 1,658 files (about 630 bytes a file) |
 
   So 256 files fit at every optimization level, with room for the caller's frames. The
   references recurse through the file transform alone, never through `BuildOps`, so the two
   limits count apart: U-58's 256 levels of nested transforms can only come before a chain of
-  references on the stack, never between its files. A test of that mixed chain (U-58's longest
-  chain of color spaces, the last one's transform a file transform starting a chain of 256
-  files, on a 1 MiB thread) needs the color space transform's ops, which this card's base
-  doesn't build yet: it comes with the card's re-application onto `phase0`, with U-58's own
-  limit checked at opt-level 0.
+  references on the stack, never between its files. That mixed chain (U-58's longest chain of
+  color spaces, the last one's transform a file transform starting a chain of 256 files)
+  builds on a 1 MiB thread at opt-level 0 in 600 to 650 KiB (U-58).
 - **Status:** done in `p4-ctf-read-3` (`crates/ocio/src/transforms/file_transform.rs`,
   `FileNesting`, in `build_file_transform_ops`). Tests: `chains_of_references_stop_at_the_limit`
   (`file_transform_tests.rs`) builds a chain of 256 files on a 1 MiB thread, in debug and
   release, and refuses 257; `references_resolve_as_in_the_wheel`'s "the longest chain"
   (`crates/ocio/tests/file_format_ctf_oracle.rs`) checks the 256-file processor with the
-  wheel.
+  wheel; `a_chain_of_color_spaces_then_of_references_builds_on_a_1_mib_thread`
+  (`crates/ocio/tests/config_processors_oracle.rs`, `group-5`) builds the mixed chain on a
+  1 MiB thread and checks its processor with the wheel.
 
 ### U-77. Bakes whose sizes overflow an `int`
 

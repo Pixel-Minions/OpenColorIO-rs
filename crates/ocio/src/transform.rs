@@ -475,7 +475,9 @@ impl Transform {
 /// Upstream has no limit: it recurses until the stack overflows, which ends the process (the
 /// wheel at 573 nested display view transforms on Windows, docs/improvements.md U-58). The port
 /// refuses deeper nesting with an error instead (the owner's general rule), about half the
-/// shallowest depth at which the wheel crashes.
+/// shallowest depth at which the wheel crashes. The functions [`build_ops`] recurses through
+/// keep their frames small, so that the longest chains it accepts build on a 1 MiB thread at
+/// every optimization level (in at most 705 KiB at opt-level 0 on Windows, U-58).
 pub(crate) const MAX_TRANSFORM_NESTING: usize = 256;
 
 thread_local! {
@@ -490,26 +492,35 @@ thread_local! {
 pub(crate) struct Nesting(&'static LocalKey<Cell<usize>>);
 
 impl Nesting {
-    fn enter(counter: &'static LocalKey<Cell<usize>>) -> Result<Nesting> {
+    /// One more level of `counter`; `None` past [`MAX_TRANSFORM_NESTING`], whose error is
+    /// [`too_deep`](Self::too_deep). An `Option`, not a `Result`, so that the frames of the
+    /// recursion don't hold an error's room (docs/improvements.md, U-58).
+    fn enter(counter: &'static LocalKey<Cell<usize>>) -> Option<Nesting> {
         let depth = counter.get() + 1;
         if depth > MAX_TRANSFORM_NESTING {
-            return Err(Exception::new(format!(
-                "The transforms nest more than {MAX_TRANSFORM_NESTING} levels deep: a color \
-                 space, look, view transform or named transform may refer to itself."
-            )));
+            return None;
         }
         counter.set(depth);
-        Ok(Nesting(counter))
+        Some(Nesting(counter))
     }
 
-    /// One more level of [`build_ops`]; an error past [`MAX_TRANSFORM_NESTING`].
-    pub(crate) fn build() -> Result<Nesting> {
+    /// The error of a level past [`MAX_TRANSFORM_NESTING`].
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn too_deep<T>() -> Result<T> {
+        Err(Exception::new(format!(
+            "The transforms nest more than {MAX_TRANSFORM_NESTING} levels deep: a color space, \
+             look, view transform or named transform may refer to itself."
+        )))
+    }
+
+    /// One more level of [`build_ops`]; `None` past [`MAX_TRANSFORM_NESTING`].
+    pub(crate) fn build() -> Option<Nesting> {
         Nesting::enter(&BUILD_NESTING)
     }
 
-    /// One more level of `collect_context_variables`; an error past
-    /// [`MAX_TRANSFORM_NESTING`].
-    pub(crate) fn collect() -> Result<Nesting> {
+    /// One more level of `collect_context_variables`; `None` past [`MAX_TRANSFORM_NESTING`].
+    pub(crate) fn collect() -> Option<Nesting> {
         Nesting::enter(&COLLECT_NESTING)
     }
 }
@@ -518,6 +529,15 @@ impl Drop for Nesting {
     fn drop(&mut self) {
         self.0.set(self.0.get() - 1);
     }
+}
+
+/// `Err` of an exception of `message`, built out of line: the functions [`build_ops`] recurses
+/// through keep their frames small, so that the deepest chains they accept fit the stack
+/// (docs/improvements.md, U-58).
+#[cold]
+#[inline(never)]
+pub(crate) fn build_error(message: &'static str) -> Result<()> {
+    Err(Exception::new(message))
 }
 
 /// Appends the ops of `transform` in the direction `dir`.
@@ -540,7 +560,10 @@ pub(crate) fn build_ops(
     // (U-60): only the transforms inside it count.
     let _nesting = match transform {
         Transform::Group(_) => None,
-        _ => Some(Nesting::build()?),
+        _ => match Nesting::build() {
+            Some(nesting) => Some(nesting),
+            None => return Nesting::too_deep(),
+        },
     };
     match transform {
         Transform::Allocation(allocation_transform) => {

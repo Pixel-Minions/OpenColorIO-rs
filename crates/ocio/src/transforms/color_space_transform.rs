@@ -6,6 +6,7 @@
 //! (`BuildColorSpaceOps`, the reference-space conversions) and its `CollectContextVariables`
 //! (and those of color spaces and named transforms).
 
+use std::borrow::Cow;
 use std::fmt;
 
 use ocio_ops::cfmt::{Crt, OStringStream};
@@ -24,7 +25,9 @@ use crate::config::Config;
 use crate::context::Context;
 use crate::context_variable_utils::collect_context_variables;
 use crate::named_transform::{NamedTransform, get_transform};
-use crate::transform::{build_ops, put_bool, put_c_str, validate_direction};
+use crate::transform::{
+    Transform, build_error, build_ops, put_bool, put_c_str, validate_direction,
+};
 
 /// A conversion from one of a config's color spaces to another, by name.
 ///
@@ -199,20 +202,30 @@ fn missing_cs(cs: &[u8]) -> Exception {
     Exception::new(os)
 }
 
-/// Appends the ops of `color_space_transform` in the direction `dir`: from its source to its
-/// destination (each a color space or a named transform of `config`, by its name with the
-/// context's variables resolved), or the reverse.
+/// What a color space transform converts between: two color spaces (either may be missing), or
+/// the transform of its named transforms, boxed so that it doesn't weigh on the frame of
+/// [`build_color_space_ops`] while the ops it names build (docs/improvements.md, U-58).
+enum ColorSpaceTransformEnds<'c> {
+    /// The source and the destination color spaces.
+    ColorSpaces(Option<&'c ColorSpace>, Option<&'c ColorSpace>),
+    /// The transform of the named transforms.
+    NamedTransforms(Box<Cow<'c, Transform>>),
+}
+
+/// The ends of `color_space_transform` in the direction `dir`, for [`build_color_space_ops`],
+/// out of line so that its names and lookups aren't on the stack while the ops of its color
+/// spaces build (docs/improvements.md, U-58).
 ///
-/// Port of `BuildColorSpaceOps(OpRcPtrVec &, const Config &, const ConstContextRcPtr &, const
-/// ColorSpaceTransform &, TransformDirection)` (src/OpenColorIO/transforms/
-/// ColorSpaceTransform.cpp:165-217 @ v2.5.2).
-pub(crate) fn build_color_space_ops(
-    ops: &mut OpVec,
-    config: &Config,
+/// Part of the port of `BuildColorSpaceOps(OpRcPtrVec &, const Config &, const
+/// ConstContextRcPtr &, const ColorSpaceTransform &, TransformDirection)`
+/// (src/OpenColorIO/transforms/ColorSpaceTransform.cpp:165-209 @ v2.5.2).
+#[inline(never)]
+fn color_space_transform_ends<'c>(
+    config: &'c Config,
     context: &Context,
     color_space_transform: &ColorSpaceTransform,
     dir: TransformDirection,
-) -> Result<()> {
+) -> Result<ColorSpaceTransformEnds<'c>> {
     let combined_dir = combine_transform_directions(dir, color_space_transform.direction());
     let forward = combined_dir == TransformDirection::Forward;
 
@@ -257,17 +270,42 @@ pub(crate) fn build_color_space_ops(
 
     if src_named_transform.is_some() || dst_named_transform.is_some() {
         let tr = get_transform(src_named_transform, dst_named_transform)?;
-        return build_ops(ops, config, context, &tr, TransformDirection::Forward);
+        return Ok(ColorSpaceTransformEnds::NamedTransforms(Box::new(tr)));
     }
 
-    build_color_space_ops_between(
-        ops,
-        config,
-        context,
-        src,
-        dst,
-        color_space_transform.data_bypass(),
-    )
+    Ok(ColorSpaceTransformEnds::ColorSpaces(src, dst))
+}
+
+/// Appends the ops of `color_space_transform` in the direction `dir`: from its source to its
+/// destination (each a color space or a named transform of `config`, by its name with the
+/// context's variables resolved), or the reverse.
+///
+/// Port of `BuildColorSpaceOps(OpRcPtrVec &, const Config &, const ConstContextRcPtr &, const
+/// ColorSpaceTransform &, TransformDirection)` (src/OpenColorIO/transforms/
+/// ColorSpaceTransform.cpp:165-217 @ v2.5.2). The ends come from
+/// [`color_space_transform_ends`], and the recursive calls are tail calls, so that the frame on
+/// the stack while they build is small (docs/improvements.md, U-58).
+pub(crate) fn build_color_space_ops(
+    ops: &mut OpVec,
+    config: &Config,
+    context: &Context,
+    color_space_transform: &ColorSpaceTransform,
+    dir: TransformDirection,
+) -> Result<()> {
+    match color_space_transform_ends(config, context, color_space_transform, dir) {
+        Ok(ColorSpaceTransformEnds::NamedTransforms(tr)) => {
+            build_ops(ops, config, context, &tr, TransformDirection::Forward)
+        }
+        Ok(ColorSpaceTransformEnds::ColorSpaces(src, dst)) => build_color_space_ops_between(
+            ops,
+            config,
+            context,
+            src,
+            dst,
+            color_space_transform.data_bypass(),
+        ),
+        Err(e) => Err(e),
+    }
 }
 
 /// Whether two color spaces are the same (by name: one may be a copy) or in the same non-empty
@@ -297,7 +335,13 @@ fn are_color_spaces_in_same_equality_group(csa: &ColorSpace, csb: &ColorSpace) -
 /// Port of `BuildColorSpaceOps(OpRcPtrVec &, const Config &, const ConstContextRcPtr &, const
 /// ConstColorSpaceRcPtr &, const ConstColorSpaceRcPtr &, bool)` (src/OpenColorIO/transforms/
 /// ColorSpaceTransform.cpp:236-270 @ v2.5.2): `None` is upstream's null color space, which a
-/// display view transform's inverse can pass.
+/// display view transform's inverse can pass. Its errors are built out of line and its
+/// recursive calls return their results as they are, so that its frame stays small
+/// (docs/improvements.md, U-58).
+#[expect(
+    clippy::question_mark,
+    reason = "`?` takes several results' room in the frame of an unoptimized build (U-58)"
+)]
 pub(crate) fn build_color_space_ops_between(
     ops: &mut OpVec,
     config: &Config,
@@ -307,14 +351,10 @@ pub(crate) fn build_color_space_ops_between(
     data_bypass: bool,
 ) -> Result<()> {
     let Some(src_color_space) = src_color_space else {
-        return Err(Exception::new(
-            "BuildColorSpaceOps failed, null srcColorSpace.",
-        ));
+        return build_error("BuildColorSpaceOps failed, null srcColorSpace.");
     };
     let Some(dst_color_space) = dst_color_space else {
-        return Err(Exception::new(
-            "BuildColorSpaceOps failed, null dstColorSpace.",
-        ));
+        return build_error("BuildColorSpaceOps failed, null dstColorSpace.");
     };
 
     if are_color_spaces_in_same_equality_group(src_color_space, dst_color_space) {
@@ -330,29 +370,44 @@ pub(crate) fn build_color_space_ops_between(
     // ever encountered in transit, we'd want to short circuit the result.
 
     // Go from the srcColorSpace to the reference space.
-    build_color_space_to_reference_ops(ops, config, context, Some(src_color_space), data_bypass)?;
+    let to_reference = build_color_space_to_reference_ops(
+        ops,
+        config,
+        context,
+        Some(src_color_space),
+        data_bypass,
+    );
+    if to_reference.is_err() {
+        return to_reference;
+    }
 
     // There are two possible reference spaces, the main (scene-referred) one and the
     // display-referred one.  If the src and dst use different reference spaces, use the
     // default ViewTransform to convert between them.
-    build_reference_conversion_ops(
+    let conversion = build_reference_conversion_ops(
         ops,
         config,
         context,
         src_color_space.reference_space_type(),
         dst_color_space.reference_space_type(),
-    )?;
+    );
+    if conversion.is_err() {
+        return conversion;
+    }
 
     // Go from the reference space to dstColorSpace.
     build_color_space_from_reference_ops(ops, config, context, Some(dst_color_space), data_bypass)
 }
 
-/// The allocation of `color_space`, for its GPU allocation no-op.
-fn allocation_of(color_space: &ColorSpace) -> AllocationData {
-    AllocationData {
+/// Appends the GPU allocation no-op of `color_space`, out of line so that its allocation's copy
+/// isn't on the stack while the ops of its transforms build (docs/improvements.md, U-58).
+#[inline(never)]
+fn push_allocation_no_op(ops: &mut OpVec, color_space: &ColorSpace) {
+    let allocation = AllocationData {
         allocation: color_space.allocation(),
         vars: color_space.allocation_vars().to_vec(),
-    }
+    };
+    create_gpu_allocation_no_op(ops, &allocation);
 }
 
 /// Appends the ops from `src_color_space` to its reference space: its allocation's no-op, then
@@ -360,7 +415,8 @@ fn allocation_of(color_space: &ColorSpace) -> AllocationData {
 /// with `data_bypass` for a data color space.
 ///
 /// Port of `BuildColorSpaceToReferenceOps` (src/OpenColorIO/transforms/
-/// ColorSpaceTransform.cpp:272-308 @ v2.5.2); `None` is upstream's null color space.
+/// ColorSpaceTransform.cpp:272-308 @ v2.5.2); `None` is upstream's null color space. Its
+/// recursive calls are tail calls, so that its frame stays small (docs/improvements.md, U-58).
 pub(crate) fn build_color_space_to_reference_ops(
     ops: &mut OpVec,
     config: &Config,
@@ -369,27 +425,26 @@ pub(crate) fn build_color_space_to_reference_ops(
     data_bypass: bool,
 ) -> Result<()> {
     let Some(src_color_space) = src_color_space else {
-        return Err(Exception::new(
-            "BuildColorSpaceOps failed, null colorSpace.",
-        ));
+        return build_error("BuildColorSpaceOps failed, null colorSpace.");
     };
 
     if data_bypass && src_color_space.is_data() {
         return Ok(());
     }
 
-    create_gpu_allocation_no_op(ops, &allocation_of(src_color_space));
+    push_allocation_no_op(ops, src_color_space);
 
     // Go to the reference space, either by using:
     // * cs->ref in the forward direction.
     // * ref->cs in the inverse direction.
     if let Some(t) = src_color_space.transform(ColorSpaceDirection::ToReference) {
-        build_ops(ops, config, context, t, TransformDirection::Forward)?;
+        build_ops(ops, config, context, t, TransformDirection::Forward)
     } else if let Some(t) = src_color_space.transform(ColorSpaceDirection::FromReference) {
-        build_ops(ops, config, context, t, TransformDirection::Inverse)?;
+        build_ops(ops, config, context, t, TransformDirection::Inverse)
+    } else {
+        // Otherwise, both are not defined so its a no-op. This is not an error condition.
+        Ok(())
     }
-    // Otherwise, both are not defined so its a no-op. This is not an error condition.
-    Ok(())
 }
 
 /// Appends the ops from the reference space to `dst_color_space`: its transform from the
@@ -397,7 +452,13 @@ pub(crate) fn build_color_space_to_reference_ops(
 /// None with `data_bypass` for a data color space.
 ///
 /// Port of `BuildColorSpaceFromReferenceOps` (src/OpenColorIO/transforms/
-/// ColorSpaceTransform.cpp:310-346 @ v2.5.2); `None` is upstream's null color space.
+/// ColorSpaceTransform.cpp:310-346 @ v2.5.2); `None` is upstream's null color space. Its
+/// recursive calls return their results as they are, so that its frame stays small
+/// (docs/improvements.md, U-58).
+#[expect(
+    clippy::question_mark,
+    reason = "`?` takes several results' room in the frame of an unoptimized build (U-58)"
+)]
 pub(crate) fn build_color_space_from_reference_ops(
     ops: &mut OpVec,
     config: &Config,
@@ -406,9 +467,7 @@ pub(crate) fn build_color_space_from_reference_ops(
     data_bypass: bool,
 ) -> Result<()> {
     let Some(dst_color_space) = dst_color_space else {
-        return Err(Exception::new(
-            "BuildColorSpaceOps failed, null colorSpace.",
-        ));
+        return build_error("BuildColorSpaceOps failed, null colorSpace.");
     };
 
     if data_bypass && dst_color_space.is_data() {
@@ -418,14 +477,20 @@ pub(crate) fn build_color_space_from_reference_ops(
     // Go from the reference space, either by using:
     // * ref->cs in the forward direction.
     // * cs->ref in the inverse direction.
-    if let Some(t) = dst_color_space.transform(ColorSpaceDirection::FromReference) {
-        build_ops(ops, config, context, t, TransformDirection::Forward)?;
-    } else if let Some(t) = dst_color_space.transform(ColorSpaceDirection::ToReference) {
-        build_ops(ops, config, context, t, TransformDirection::Inverse)?;
+    let from_reference =
+        if let Some(t) = dst_color_space.transform(ColorSpaceDirection::FromReference) {
+            build_ops(ops, config, context, t, TransformDirection::Forward)
+        } else if let Some(t) = dst_color_space.transform(ColorSpaceDirection::ToReference) {
+            build_ops(ops, config, context, t, TransformDirection::Inverse)
+        } else {
+            // Otherwise, both are not defined so its a no-op. This is not an error condition.
+            Ok(())
+        };
+    if from_reference.is_err() {
+        return from_reference;
     }
-    // Otherwise, both are not defined so its a no-op. This is not an error condition.
 
-    create_gpu_allocation_no_op(ops, &allocation_of(dst_color_space));
+    push_allocation_no_op(ops, dst_color_space);
     Ok(())
 }
 
@@ -435,7 +500,8 @@ pub(crate) fn build_color_space_from_reference_ops(
 /// it; display to scene the other way), or an error without one.
 ///
 /// Port of `BuildReferenceConversionOps` (src/OpenColorIO/transforms/
-/// ColorSpaceTransform.cpp:348-394 @ v2.5.2).
+/// ColorSpaceTransform.cpp:348-394 @ v2.5.2). Its recursive calls are tail calls, so that its
+/// frame stays small (docs/improvements.md, U-58).
 pub(crate) fn build_reference_conversion_ops(
     ops: &mut OpVec,
     config: &Config,
@@ -443,29 +509,31 @@ pub(crate) fn build_reference_conversion_ops(
     src_reference_space: ReferenceSpaceType,
     dst_reference_space: ReferenceSpaceType,
 ) -> Result<()> {
-    if src_reference_space != dst_reference_space {
-        let Some(view) = config.default_scene_to_display_view_transform() else {
-            // Can not be the case for a valid config.
-            return Err(Exception::new(
-                "There is no view transform between the main scene-referred space and the \
-                 display-referred space.",
-            ));
-        };
-        let from = view.transform(ViewTransformDirection::FromReference);
-        let to = view.transform(ViewTransformDirection::ToReference);
-        // convert scene-referred to display-referred, or display-referred to scene-referred
-        let (first, second) = if src_reference_space == ReferenceSpaceType::Scene {
-            (from, to)
-        } else {
-            (to, from)
-        };
-        if let Some(t) = first {
-            build_ops(ops, config, context, t, TransformDirection::Forward)?;
-        } else if let Some(t) = second {
-            build_ops(ops, config, context, t, TransformDirection::Inverse)?;
-        }
+    if src_reference_space == dst_reference_space {
+        return Ok(());
     }
-    Ok(())
+    let Some(view) = config.default_scene_to_display_view_transform() else {
+        // Can not be the case for a valid config.
+        return build_error(
+            "There is no view transform between the main scene-referred space and the \
+             display-referred space.",
+        );
+    };
+    let from = view.transform(ViewTransformDirection::FromReference);
+    let to = view.transform(ViewTransformDirection::ToReference);
+    // convert scene-referred to display-referred, or display-referred to scene-referred
+    let (first, second) = if src_reference_space == ReferenceSpaceType::Scene {
+        (from, to)
+    } else {
+        (to, from)
+    };
+    if let Some(t) = first {
+        build_ops(ops, config, context, t, TransformDirection::Forward)
+    } else if let Some(t) = second {
+        build_ops(ops, config, context, t, TransformDirection::Inverse)
+    } else {
+        Ok(())
+    }
 }
 
 /// Whether the named transform `nt` uses context variables, which it adds to
