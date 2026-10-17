@@ -2651,18 +2651,21 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Upstream:** `Baker::setFormat` finds the format by its name ignoring case
   (`FormatRegistry::getFileFormatByName`, `transforms/FileTransform.cpp:358-365` @ v2.5.2) and
   keeps the name as given (`Baker.cpp:118-139`); `Baker::bake` hands that name to the format
-  (`Baker.cpp:393-403`), and seven formats' bakes compare it with their own names, case
+  (`Baker.cpp:393-403`), and eight formats' bakes compare it with their own names, case
   included: `spi1d` (`FileFormatSpi1D.cpp:323-329`), `spi3d` (`FileFormatSpi3D.cpp:274-280`),
   `iridas_cube`, `iridas_itx` (whose message says "Unknown 3dl format name",
-  `FileFormatIridasItx.cpp:257-263`), `resolve_cube`, `houdini`, and `flame` and `lustre`
-  (`FileFormat3DL.cpp:509-522`). So `setFormat("SPI1D")` succeeds and `bake` fails with
+  `FileFormatIridasItx.cpp:257-263`), `resolve_cube`, `houdini`, `flame` and `lustre`
+  (`FileFormat3DL.cpp:509-522`), and the CLF and CTF ("Unknown CLF/CTF file format name,
+  '<name>'.", `FileFormatCTF.cpp:1358-1364`). So `setFormat("SPI1D")` succeeds and `bake` fails with
   "Error baking SPI1D:Unknown spi format name, 'SPI1D'." (wheel probes, Windows and Linux,
   2026-10-16). The cineSpace and Truelight bakes take the name in any case.
 - **Who notices:** callers that name a format in other case than the registry's.
 - **A fix:** keep the registry's name in `setFormat`, or compare ignoring case in the bakes.
 - **Status:** matched in `p4-baker` (4.8b1: spi1d and spi3d; 4.8b2: Iridas cube, itx and
-  Resolve cube; 4.8c: 3DL and Houdini; in their `crates/ocio/src/fileformats/` files); the
-  "named in capitals" cases of `crates/ocio/tests/bake_formats_oracle.rs`.
+  Resolve cube; 4.8c: 3DL and Houdini; in their `crates/ocio/src/fileformats/` files) and
+  `p4-ctf-bake` (4.8d: CLF and CTF, `file_format_ctf.rs`); the "named in capitals" cases of
+  `crates/ocio/tests/bake_formats_oracle.rs` and the "format named" cases of
+  `crates/ocio/tests/ctf_bake_oracle.rs`.
 
 ### I-200. A `.3dl` bake with a shaper size below 1
 
@@ -3817,10 +3820,10 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   (`crates/ocio/tests/bake_formats_oracle.rs`, both platforms), and `baking_utils_tests.rs`.
   The sizes one below the overflow (894, 715,827,882) allocate 8.6 GB in both wheels and the
   positive wraps write past the buffer, so no test runs them. The CLF/CTF bake
-  (`FileFormatCTF.cpp:1469, 1494`) wraps its sizes the same way and checks them in `resize`
-  (Linux 0x245914-0x24592f, 0x245e08-0x245e14): it takes `LinuxResize::Checked` where it
-  lands (card p4-ctf-write, not yet on this branch; fbefb23's message speaks of those sites as
-  if they were here).
+  (`FileFormatCTF.cpp:1469, 1494`, `p4-ctf-bake`) wraps its sizes the same way and checks them
+  in `resize` (Linux 0x245914-0x24592f, 0x245e08-0x245e14): it takes `LinuxResize::Checked`;
+  `overflowing_sizes_fail_as_in_the_windows_wheel` (`crates/ocio/tests/ctf_bake_oracle.rs`)
+  checks it on Windows.
 
 ### U-78. An archive entry named `..` reads uninitialized memory when extracted
 

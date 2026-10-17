@@ -59,7 +59,7 @@ use ocio_ops::ops::range::range_op_data::RangeOpData;
 use ocio_ops::ops::reference::reference_op_data::{ReferenceOpData, ReferenceStyle};
 use ocio_ops::utils::string_utils::trim;
 use ocio_testkit::compare::assert_text_eq;
-use ocio_testkit::upstream::{check_close, check_throw_what};
+use ocio_testkit::upstream::{check_close, check_str_float_vec_close, check_throw_what};
 
 /// Port of `LoadCLFFile` (FileFormatCTF_tests.cpp:25-29 @ v2.5.2).
 fn load_clf_file(file_name: &str) -> Result<LocalCachedFile> {
@@ -6583,4 +6583,432 @@ fn ff_load_save_ctf() {
     validate_fixed_function_style(HsyLinToRgb, "2.5", "");
     validate_fixed_function_style(RgbToHsyVid, "2.5", "");
     validate_fixed_function_style(HsyVidToRgb, "2.5", "");
+}
+
+///////////////////////////////////////////////////////////////////////////////
+//
+// BAKER TESTS
+//
+///////////////////////////////////////////////////////////////////////////////
+
+/// The lines of `text`, as `StringUtils::SplitByLines` splits them.
+fn lines(text: &[u8]) -> Vec<String> {
+    ocio_ops::utils::string_utils::split_by_lines(text)
+        .into_iter()
+        .map(|l| String::from_utf8(l).unwrap())
+        .collect()
+}
+
+/// A line and its floats, as `StringFloatVecClose` reads them.
+fn floats(line: &str) -> (&str, Option<Vec<f32>>) {
+    let parts = ocio_ops::utils::string_utils::split_by_white_spaces(line.as_bytes());
+    let mut values = Vec::new();
+    let ok = ocio_ops::parse_utils::string_vec_to_float_vec(&mut values, &parts);
+    (line, ok.then_some(values))
+}
+
+/// A color space `name` of the family `name`.
+fn bake_color_space(name: &str) -> crate::ColorSpace {
+    let mut cs = crate::ColorSpace::new();
+    cs.set_name(name);
+    cs.set_family(name);
+    cs
+}
+
+/// The config of the bake tests: an `input` reference space.
+fn bake_input_config() -> Config {
+    let mut config = Config::new().unwrap();
+    let cs = bake_color_space("input");
+    config.add_color_space(&cs).unwrap();
+    config
+        .set_role(ocio_ops::parse_utils::ROLE_REFERENCE, Some(cs.name()))
+        .unwrap();
+    config
+}
+
+/// A `target` color space whose saturation of 0.5 (in the CDL style `style`, when given)
+/// causes channel crosstalk.
+fn saturated_bake_target(style: Option<CdlStyle>) -> crate::ColorSpace {
+    let mut cs = bake_color_space("target");
+
+    // Set saturation to cause channel crosstalk, making a 3D LUT
+    let mut transform1 = CdlTransform::new();
+    if let Some(style) = style {
+        transform1.set_style(style);
+    }
+    transform1.set_sat(f64::from(0.5f32));
+    cs.set_transform(
+        Some(&Transform::from(transform1)),
+        ocio_ops::open_color_types::ColorSpaceDirection::FromReference,
+    )
+    .unwrap();
+    cs
+}
+
+/// The bake of `baker`.
+fn baked(baker: &crate::Baker) -> Vec<u8> {
+    let mut output = Vec::new();
+    baker.bake(&mut output).unwrap();
+    output
+}
+
+/// The ops of the CLF/CTF `text`, read back.
+fn read_back(text: &[u8]) -> Vec<OpDataRcPtr> {
+    let mut is = InputStream::from_bytes(text);
+    let tester = LocalFileFormat;
+    let file = tester.read_file(&mut is, b"").unwrap();
+    file.transform.get_ops().to_vec()
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, bake_1d)` @ v2.5.2.
+#[test]
+fn bake_1d() {
+    let mut config = bake_input_config();
+    config.add_color_space(&bake_color_space("target")).unwrap();
+
+    let mut baker = crate::Baker::new();
+    baker.set_config(&config);
+    baker.set_format(FILEFORMAT_CLF).unwrap();
+    baker.set_input_space("input");
+    baker.set_target_space("target");
+    baker
+        .format_metadata_mut()
+        .add_attribute(Some(METADATA_ID), Some(b"UID42"))
+        .unwrap();
+    baker.set_cube_size(2);
+    let output_clf = baked(&baker);
+
+    let expected_clf = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList compCLFversion="3" id="UID42">
+    <LUT1D inBitDepth="32f" outBitDepth="32f">
+        <Array dim="2 1">
+          0
+          1
+        </Array>
+    </LUT1D>
+</ProcessList>
+"#;
+    assert_eq!(expected_clf.len(), output_clf.len());
+    assert_eq!(expected_clf.as_bytes(), output_clf.as_slice());
+
+    baker.set_format(FILEFORMAT_CTF).unwrap();
+    let output_ctf = baked(&baker);
+    let expected_ctf = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="1.3" id="UID42">
+    <LUT1D inBitDepth="32f" outBitDepth="32f">
+        <Array dim="2 1">
+          0
+          1
+        </Array>
+    </LUT1D>
+</ProcessList>
+"#;
+    assert_eq!(expected_ctf.len(), output_ctf.len());
+    assert_eq!(expected_ctf.as_bytes(), output_ctf.as_slice());
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, bake_1d_shaper)` @ v2.5.2.
+#[test]
+fn bake_1d_shaper() {
+    let my_profile = r#"
+        ocio_profile_version: 1
+
+        colorspaces:
+        - !<ColorSpace>
+          name : Raw
+          isdata : false
+
+        - !<ColorSpace>
+          name: Log2
+          isdata: false
+          from_reference: !<GroupTransform>
+            children:
+              - !<MatrixTransform> {matrix: [5.55556, 0, 0, 0, 0, 5.55556, 0, 0, 0, 0, 5.55556, 0, 0, 0, 0, 1]}
+              - !<LogTransform> {base: 2}
+              - !<MatrixTransform> {offset: [6.5, 6.5, 6.5, 0]}
+              - !<MatrixTransform> {matrix: [0.076923, 0, 0, 0, 0, 0.076923, 0, 0, 0, 0, 0.076923, 0, 0, 0, 0, 1]}
+    "#;
+
+    let config = Config::create_from_stream(my_profile.as_bytes()).unwrap();
+
+    {
+        // Lin to Log
+        let mut baker = crate::Baker::new();
+        baker.set_config(&config);
+        baker.set_format(FILEFORMAT_CLF).unwrap();
+        baker.set_input_space("Raw");
+        baker.set_target_space("Log2");
+        baker.set_shaper_space("Log2");
+        baker
+            .format_metadata_mut()
+            .add_attribute(Some(METADATA_ID), Some(b"UID42"))
+            .unwrap();
+        baker.set_cube_size(10);
+        let output_ctf = baked(&baker);
+
+        let op_list = read_back(&output_ctf);
+        assert_eq!(op_list.len(), 2);
+
+        let OpData::Range(range) = &*op_list[0] else {
+            panic!("a range");
+        };
+        assert_eq!(range.get_min_in_value(), 0.00198873621411622);
+        assert_eq!(range.get_max_in_value(), 16.291877746582);
+        assert_eq!(range.get_min_out_value(), 0.);
+        assert_eq!(range.get_max_out_value(), 1.);
+
+        let OpData::Lut1D(lut) = &*op_list[1] else {
+            panic!("a LUT1D");
+        };
+        assert_eq!(lut.get_array().get_length(), 10);
+        check_close(lut.get_array()[0], 0., 1.0e-5f32);
+        check_close(lut.get_array()[3], 0.7562682, 1.0e-5f32);
+        check_close(lut.get_array()[6], 0.83313024, 1.0e-5f32);
+        check_close(lut.get_array()[9], 0.87810701, 1.0e-5f32);
+        check_close(lut.get_array()[12], 0.9100228, 1.0e-5f32);
+        check_close(lut.get_array()[15], 0.93478036, 1.0e-5f32);
+        check_close(lut.get_array()[18], 0.9550097, 1.0e-5f32);
+        check_close(lut.get_array()[21], 0.97211391, 1.0e-5f32);
+        check_close(lut.get_array()[24], 0.98693061, 1.0e-5f32);
+        check_close(lut.get_array()[27], 1., 1.0e-5f32);
+    }
+
+    {
+        // Log to Lin
+        let mut baker = crate::Baker::new();
+        baker.set_config(&config);
+        baker.set_format(FILEFORMAT_CLF).unwrap();
+        baker.set_input_space("Log2");
+        baker.set_target_space("Raw");
+        baker
+            .format_metadata_mut()
+            .add_attribute(Some(METADATA_ID), Some(b"UID42"))
+            .unwrap();
+        baker.set_cube_size(10);
+        let output_ctf = baked(&baker);
+
+        let op_list = read_back(&output_ctf);
+        assert_eq!(op_list.len(), 1);
+
+        let OpData::Lut1D(lut) = &*op_list[0] else {
+            panic!("a LUT1D");
+        };
+        assert_eq!(lut.get_array().get_length(), 10);
+        check_close(lut.get_array()[0], 0.0019887362, 1.0e-5f32);
+        check_close(lut.get_array()[3], 0.0054125111, 1.0e-5f32);
+        check_close(lut.get_array()[6], 0.014730596, 1.0e-5f32);
+        check_close(lut.get_array()[9], 0.040090535, 1.0e-5f32);
+        check_close(lut.get_array()[12], 0.10910972, 1.0e-5f32);
+        check_close(lut.get_array()[15], 0.29695117, 1.0e-5f32);
+        check_close(lut.get_array()[18], 0.80817699, 1.0e-5f32);
+        check_close(lut.get_array()[21], 2.1995215, 1.0e-5f32);
+        check_close(lut.get_array()[24], 5.9861789, 1.0e-5f32);
+        check_close(lut.get_array()[27], 16.291878, 1.0e-5f32);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, bake_3d)` @ v2.5.2.
+#[test]
+fn bake_3d() {
+    let mut config = bake_input_config();
+    config
+        .add_color_space(&saturated_bake_target(None))
+        .unwrap();
+
+    let mut baker = crate::Baker::new();
+    baker.set_config(&config);
+    let data = baker.format_metadata_mut();
+    data.add_attribute(Some(METADATA_ID), Some(b"TestID"))
+        .unwrap();
+    data.add_child_element(Some(METADATA_DESCRIPTION), Some(b"OpenColorIO Test Line 1"))
+        .unwrap();
+    data.add_child_element(Some(METADATA_DESCRIPTION), Some(b"OpenColorIO Test Line 2"))
+        .unwrap();
+    data.add_child_element(Some(b"Anything"), Some(b"Not Saved"))
+        .unwrap();
+    data.add_child_element(Some(METADATA_INPUT_DESCRIPTOR), Some(b"Input descriptor"))
+        .unwrap();
+    data.add_child_element(
+        Some(METADATA_INPUT_DESCRIPTOR),
+        Some(b"Only first is saved"),
+    )
+    .unwrap();
+    data.add_child_element(Some(METADATA_OUTPUT_DESCRIPTOR), Some(b"Output descriptor"))
+        .unwrap();
+    data.add_child_element(Some(METADATA_INFO), Some(b""))
+        .unwrap();
+    let info = data.get_child_element_mut(6).unwrap();
+    info.add_attribute(Some(b"attrib1"), Some(b"val1")).unwrap();
+    info.add_attribute(Some(b"attrib2"), Some(b"val2")).unwrap();
+    info.add_child_element(Some(b"anything"), Some(b"is saved"))
+        .unwrap();
+    info.add_child_element(Some(b"anything"), Some(b"is also saved"))
+        .unwrap();
+
+    baker.set_format(FILEFORMAT_CLF).unwrap();
+    baker.set_input_space("input");
+    baker.set_target_space("target");
+    baker.set_cube_size(2);
+    let output = baked(&baker);
+
+    let expected_clf = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList compCLFversion="3" id="TestID">
+    <Description>OpenColorIO Test Line 1</Description>
+    <Description>OpenColorIO Test Line 2</Description>
+    <InputDescriptor>Input descriptor</InputDescriptor>
+    <OutputDescriptor>Output descriptor</OutputDescriptor>
+    <Info attrib1="val1" attrib2="val2">
+        <anything>is saved</anything>
+        <anything>is also saved</anything>
+    </Info>
+    <LUT3D inBitDepth="32f" outBitDepth="32f">
+        <Array dim="2 2 2 3">
+          0           0           0
+     0.0361      0.0361  0.53609997
+     0.3576  0.85759997      0.3576
+     0.3937      0.8937      0.8937
+     0.6063      0.1063      0.1063
+ 0.64240003      0.1424  0.64239997
+ 0.96389997  0.96389997      0.4639
+          1           1           1
+        </Array>
+    </LUT3D>
+</ProcessList>
+"#;
+    assert_eq!(expected_clf.len(), output.len());
+    assert_eq!(expected_clf.as_bytes(), output.as_slice());
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatCTF, bake_1d_3d)` @ v2.5.2.
+#[test]
+fn bake_1d_3d() {
+    let mut config = bake_input_config();
+    {
+        let mut cs = bake_color_space("shaper");
+        let mut transform1 = MatrixTransform::new();
+        let mat: [f64; 16] = [
+            0.8, 0., 0., 0., 0., 0.8, 0., 0., 0., 0., 0.8, 0., 0., 0., 0., 1.,
+        ];
+        transform1.set_matrix(&mat);
+        let offset: [f64; 4] = [0.1, 0.1, 0.1, 0.];
+        transform1.set_offset(&offset);
+        cs.set_transform(
+            Some(&Transform::from(transform1)),
+            ocio_ops::open_color_types::ColorSpaceDirection::FromReference,
+        )
+        .unwrap();
+        config.add_color_space(&cs).unwrap();
+    }
+    config
+        .add_color_space(&saturated_bake_target(Some(CdlStyle::Asc)))
+        .unwrap();
+
+    let mut baker = crate::Baker::new();
+    baker.set_config(&config);
+    baker.set_format(FILEFORMAT_CLF).unwrap();
+    baker
+        .format_metadata_mut()
+        .add_attribute(Some(METADATA_ID), Some(b"UID42"))
+        .unwrap();
+    baker.set_input_space("input");
+    baker.set_shaper_space("shaper");
+    baker.set_target_space("target");
+    baker.set_cube_size(2);
+    let output = baked(&baker);
+
+    let op_list = read_back(&output);
+    assert_eq!(op_list.len(), 2);
+    let OpData::Lut1D(shaper_lut) = &*op_list[0] else {
+        panic!("a LUT1D");
+    };
+    assert!(shaper_lut.is_input_half_domain());
+    let shaper_array = shaper_lut.get_array();
+    // Calculate the index for 0.5 in a half-domain LUT1D. We'll test the value there.
+    let h05bits = float_to_half(0.5f32);
+    let index = usize::from(h05bits) * 3;
+    let res = 0.5f32 * 0.8f32 + 0.1f32;
+
+    check_close(shaper_array[index], res, 1e-5f32);
+    assert_eq!(shaper_array[index], shaper_array[index + 1]);
+    assert_eq!(shaper_array[index], shaper_array[index + 2]);
+
+    let OpData::Lut3D(lut) = &*op_list[1] else {
+        panic!("a LUT3D");
+    };
+    assert_eq!(lut.get_array().get_length(), 2);
+    assert_eq!(lut.get_array()[0], 0.0f32);
+    assert_eq!(lut.get_array()[1], 0.0f32);
+    assert_eq!(lut.get_array()[2], 0.0f32);
+    check_close(lut.get_array()[3], 0.0361f32, 1.0e-5f32);
+    check_close(lut.get_array()[4], 0.0361f32, 1.0e-5f32);
+    check_close(lut.get_array()[5], 0.5361f32, 1.0e-5f32);
+    check_close(lut.get_array()[6], 0.3576f32, 1.0e-5f32);
+    check_close(lut.get_array()[7], 0.8576f32, 1.0e-5f32);
+    check_close(lut.get_array()[8], 0.3576f32, 1.0e-5f32);
+    check_close(lut.get_array()[9], 0.3937f32, 1.0e-5f32);
+    check_close(lut.get_array()[10], 0.8937f32, 1.0e-5f32);
+    check_close(lut.get_array()[11], 0.8937f32, 1.0e-5f32);
+    check_close(lut.get_array()[12], 0.6063f32, 1.0e-5f32);
+    check_close(lut.get_array()[13], 0.1063f32, 1.0e-5f32);
+    check_close(lut.get_array()[14], 0.1063f32, 1.0e-5f32);
+    check_close(lut.get_array()[15], 0.6424f32, 1.0e-5f32);
+    check_close(lut.get_array()[16], 0.1424f32, 1.0e-5f32);
+    check_close(lut.get_array()[17], 0.6424f32, 1.0e-5f32);
+    check_close(lut.get_array()[18], 0.9639f32, 1.0e-5f32);
+    check_close(lut.get_array()[19], 0.9639f32, 1.0e-5f32);
+    check_close(lut.get_array()[20], 0.4639f32, 1.0e-5f32);
+    assert_eq!(lut.get_array()[21], 1.0f32);
+    assert_eq!(lut.get_array()[22], 1.0f32);
+    assert_eq!(lut.get_array()[23], 1.0f32);
+
+    baker.set_shaper_size(10);
+    let output1 = baked(&baker);
+
+    let expected_clf = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList compCLFversion="3" id="UID42">
+    <Range inBitDepth="32f" outBitDepth="32f">
+        <minInValue> -0.125 </minInValue>
+        <maxInValue> 1.125 </maxInValue>
+        <minOutValue> 0 </minOutValue>
+        <maxOutValue> 1 </maxOutValue>
+    </Range>
+    <LUT1D inBitDepth="32f" outBitDepth="32f">
+        <Array dim="10 1">
+          0
+ 0.11111112
+ 0.22222224
+ 0.33333334
+ 0.44444448
+ 0.55555558
+ 0.66666675
+ 0.77777779
+ 0.88888896
+          1
+        </Array>
+    </LUT1D>
+    <LUT3D inBitDepth="32f" outBitDepth="32f">
+        <Array dim="2 2 2 3">
+          0           0           0
+     0.0361      0.0361  0.53609997
+     0.3576  0.85759997      0.3576
+     0.3937      0.8937      0.8937
+     0.6063      0.1063      0.1063
+ 0.64240003      0.1424  0.64239997
+ 0.96389997  0.96389997      0.4639
+          1           1           1
+        </Array>
+    </LUT3D>
+</ProcessList>
+"#;
+
+    let osvec = lines(&output1);
+    let resvec = lines(expected_clf.as_bytes());
+    assert_eq!(osvec.len(), resvec.len());
+    for i in 0..resvec.len() {
+        if (10..=19).contains(&i) || (24..=31).contains(&i) {
+            check_str_float_vec_close(floats(&osvec[i]), floats(&resvec[i]), 1e-5f32);
+        } else {
+            assert_eq!(osvec[i], resvec[i]);
+        }
+    }
 }

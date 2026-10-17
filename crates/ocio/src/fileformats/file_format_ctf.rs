@@ -6,7 +6,7 @@
 //! as WP 4.5b: the format infos, the check that a file is a CTF/CLF, and the parser
 //! (`XMLParserHelper`: the line loop, expat's callbacks, the elements by tag, parent and
 //! version, the errors). The operators' readers (4.5c-4.5i), `buildFileOps` (4.5h), the
-//! baker (WP 4.8) and the writer (WP 4.6) come with their chunks.
+//! writer (WP 4.6) and the baker (4.8d) came with their chunks.
 //!
 //! Upstream's `XMLParserHelper` is expat's user data, and its static handlers reach it
 //! through a pointer. Here its state is shared (`Rc<RefCell<State>>`) between the helper and
@@ -15,6 +15,7 @@
 
 use std::any::Any;
 use std::cell::RefCell;
+use std::ffi::c_ulong;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -33,21 +34,33 @@ use ocio_ops::exception::{Exception, Result};
 use ocio_ops::format_metadata::{
     FormatMetadataImpl, METADATA_INPUT_DESCRIPTOR, METADATA_OUTPUT_DESCRIPTOR,
 };
+use ocio_ops::image_desc::PackedImageDesc;
+use ocio_ops::math_utils::std_max;
 use ocio_ops::op::{OpVec, create_op_vec_from_op_data};
 use ocio_ops::op_data::{OpData, OpDataRcPtr};
 use ocio_ops::open_color_types::{
     OptimizationFlags, TransformDirection, combine_transform_directions,
 };
 use ocio_ops::ops::log::log_utils::LogStyle;
-use ocio_ops::ops::lut1d::lut1d_op_data::Lut1DOpData;
+use ocio_ops::ops::lut1d::lut1d_op::{
+    create_lut1d_op, generate_identity_lut1d, generate_linear_scale_lut1d,
+};
+use ocio_ops::ops::lut1d::lut1d_op_data::{HalfFlags, Lut1DOpData};
+use ocio_ops::ops::lut3d::lut3d_op::{Lut3DOrder, create_lut3d_op, generate_identity_lut3d};
 use ocio_ops::ops::lut3d::lut3d_op_data::{
     Interpolation, Lut3DOpData, get_concrete_interpolation as lut3d_get_concrete_interpolation,
 };
+use ocio_ops::ops::range::range_op::create_range_op_from_values;
 use ocio_ops::ops::reference::reference_op_data::ReferenceStyle;
 use ocio_ops::platform::strcasecmp;
 use ocio_ops::utils::pystring::os_path;
 use ocio_ops::utils::string_utils::{c_str, lower};
 
+use crate::baker::Baker;
+use crate::baking_utils::{
+    LinuxResize, bake_buffer, cube_entries, cube_values, get_input_to_shaper_processor,
+    get_input_to_target_processor, get_shaper_range, get_shaper_to_target_processor,
+};
 use crate::config::Config;
 use crate::context::Context;
 use crate::fileformats::ctf::ctf_reader_helper::{
@@ -76,6 +89,7 @@ use crate::fileformats::ctf::ctf_reader_utils::{
 use crate::fileformats::ctf::ctf_transform::{CtfReaderTransform, CtfReaderTransformPtr};
 use crate::fileformats::ctf::ctf_writer::TransformWriter;
 use crate::fileformats::input_stream::InputStream;
+use crate::transform::create_transform;
 use crate::transforms::cdl_transform::{METADATA_INPUT_DESCRIPTION, METADATA_VIEWING_DESCRIPTION};
 use crate::transforms::file_format::{
     CachedFile, CachedFileRcPtr, FILEFORMAT_CLF, FILEFORMAT_CTF, FileFormat,
@@ -264,6 +278,222 @@ impl FileFormat for LocalFileFormat {
             }
         }
         Ok(())
+    }
+
+    /// Bakes `baker`'s transform as a CLF or CTF (by the exact name of either format): a 1D
+    /// LUT (4096 entries by default, after a Range from the shaper space's range when there is
+    /// a shaper space) where the transform has no channel crosstalk, else a 3D LUT (64 per side
+    /// by default), after a 1D shaper LUT when there is a shaper space: a half-domain LUT, or
+    /// one of the shaper size (after a Range from the shaper's range) when one is set. The
+    /// baker's metadata becomes the ProcessList's, and [`write`](Self::write) writes the ops.
+    ///
+    /// Port of `LocalFileFormat::bake` (FileFormatCTF.cpp:1349-1553 @ v2.5.2). The buffers
+    /// sized by `int` expressions of the baker's sizes are [`bake_buffer`]'s (U-77).
+    fn bake(&self, baker: &Baker, format_name: &[u8], ostream: &mut OStringStream) -> Result<()> {
+        const DEFAULT_1D_SIZE: i32 = 4096;
+        const DEFAULT_3D_SIZE: i32 = 64;
+
+        // NB: By default, the shaper uses a half-domain LUT1D, which is always 65536 entries.
+        // If the user requests some other size, a typical (non-half-domain) LUT1D will be used.
+        if format_name != FILEFORMAT_CTF.as_bytes() && format_name != FILEFORMAT_CLF.as_bytes() {
+            let mut os = OStringStream::new(Crt::NATIVE);
+            os.put_str("Unknown CLF/CTF file format name, '");
+            os.put_bytes(format_name);
+            os.put_str("'.");
+            return Err(Exception::new(os.into_bytes()));
+        }
+
+        //
+        // Initialize config and data.
+        //
+
+        let Some(config) = baker.config() else {
+            // Baker::bake checks there is one before a format bakes.
+            return Err(Exception::new("No OCIO config has been set."));
+        };
+
+        let mut oned_size = baker.cube_size();
+        if oned_size == -1 {
+            oned_size = DEFAULT_1D_SIZE;
+        }
+
+        let mut cube_size = baker.cube_size();
+        if cube_size == -1 {
+            cube_size = DEFAULT_3D_SIZE;
+        }
+        cube_size = std_max(2, cube_size); // smallest cube is 2x2x2
+
+        // Get spaces from baker.
+        let shaper_space = baker.shaper_space();
+
+        //
+        // Determine required LUT type.
+        //
+
+        const CTF_1D: i32 = 1; // 1D LUT version number
+        const CTF_3D: i32 = 2; // 3D LUT version number
+        const CTF_1D_3D: i32 = 3; // 3D LUT with 1D prelut
+
+        let input_to_target = get_input_to_target_processor(baker)?;
+
+        // Upstream's "Internal logic error, LUT type was not determined" can't happen: every
+        // branch sets the type.
+        let required_lut = if input_to_target.has_channel_crosstalk() {
+            if shaper_space.is_empty() {
+                // Has crosstalk, but no shaper, so need 3D LUT.
+                CTF_3D
+            } else {
+                // Crosstalk with shaper-space.
+                CTF_1D_3D
+            }
+        } else {
+            // No crosstalk
+            CTF_1D
+        };
+
+        //
+        // Generate Shaper.
+        //
+
+        let mut shaper_lut = None;
+        let mut from_in_start = 0.0f32;
+        let mut from_in_end = 1.0f32;
+
+        if required_lut == CTF_1D_3D {
+            let shaper_size_request = baker.shaper_size();
+            let mut lut = if shaper_size_request == -1 {
+                // Generate the identity shaper values, then apply the transform.
+                // Using a half-domain to accurately handle floating-point, linear-space inputs.
+                Lut1DOpData::with_half_flags(HalfFlags::INPUT_HALF_CODE, 65536, true)?
+            } else {
+                (from_in_start, from_in_end) = get_shaper_range(baker)?;
+
+                let mut lut = Lut1DOpData::new(shaper_size_request as c_ulong)?;
+
+                if from_in_start != 0.0f32 || from_in_end != 1.0f32 {
+                    generate_linear_scale_lut1d(
+                        lut.get_array_mut().get_values_mut(),
+                        shaper_size_request,
+                        3,
+                        from_in_start,
+                        from_in_end,
+                    );
+                }
+                lut
+            };
+            let shaper_size = lut.get_array().get_length() as usize;
+            let mut shaper_img = PackedImageDesc::new(
+                &mut lut.get_array_mut().get_values_mut()[..],
+                shaper_size,
+                1,
+                3,
+            )?;
+            let input_to_shaper = get_input_to_shaper_processor(baker)?;
+            input_to_shaper.apply(&mut shaper_img)?;
+            shaper_lut = Some(lut);
+        }
+
+        //
+        // Generate 3DLUT.
+        //
+
+        let mut cube_data: Vec<f32> = Vec::new();
+        if required_lut == CTF_3D || required_lut == CTF_1D_3D {
+            cube_data = bake_buffer(cube_values(cube_size), LinuxResize::Checked)?;
+            generate_identity_lut3d(&mut cube_data, cube_size, 3, Lut3DOrder::FastBlue)?;
+            let mut cube_img =
+                PackedImageDesc::new(&mut cube_data[..], cube_entries(cube_size), 1, 3)?;
+
+            let cube_proc = if required_lut == CTF_1D_3D {
+                get_shaper_to_target_processor(baker)?
+            } else {
+                input_to_target.clone()
+            };
+
+            cube_proc.apply(&mut cube_img)?;
+        }
+
+        //
+        // Generate 1DLUT
+        //
+
+        let mut oned_data: Vec<f32> = Vec::new();
+
+        if required_lut == CTF_1D {
+            oned_data = bake_buffer(i128::from(oned_size) * 3, LinuxResize::Checked)?;
+
+            if !shaper_space.is_empty() {
+                (from_in_start, from_in_end) = get_shaper_range(baker)?;
+                generate_linear_scale_lut1d(
+                    &mut oned_data,
+                    oned_size,
+                    3,
+                    from_in_start,
+                    from_in_end,
+                );
+            } else {
+                generate_identity_lut1d(&mut oned_data, oned_size, 3);
+            }
+
+            let mut oned_img = PackedImageDesc::new(&mut oned_data[..], oned_size as usize, 1, 3)?;
+            input_to_target.apply(&mut oned_img)?;
+        }
+
+        //
+        // Write.
+        //
+
+        let mut ops = OpVec::new();
+
+        // 1D data.
+        if required_lut == CTF_1D {
+            if from_in_start != 0.0f32 || from_in_end != 1.0f32 {
+                create_range_op_from_values(
+                    &mut ops,
+                    f64::from(from_in_start),
+                    f64::from(from_in_end),
+                    0.0,
+                    1.0,
+                    TransformDirection::Forward,
+                )?;
+            }
+            let mut lut1d = Lut1DOpData::new(oned_size as c_ulong)?;
+            *lut1d.get_array_mut().get_values_mut() = oned_data;
+            create_lut1d_op(&mut ops, lut1d, TransformDirection::Forward);
+        } else if let Some(shaper_lut) = shaper_lut {
+            if from_in_start != 0.0f32 || from_in_end != 1.0f32 {
+                create_range_op_from_values(
+                    &mut ops,
+                    f64::from(from_in_start),
+                    f64::from(from_in_end),
+                    0.0,
+                    1.0,
+                    TransformDirection::Forward,
+                )?;
+            }
+            create_lut1d_op(&mut ops, shaper_lut, TransformDirection::Forward);
+        }
+
+        // 3D data.
+        if required_lut == CTF_3D || required_lut == CTF_1D_3D {
+            let mut lut3d = Lut3DOpData::new(cube_size as c_ulong)?;
+            *lut3d.get_array_mut().get_values_mut() = cube_data;
+            create_lut3d_op(&mut ops, lut3d, TransformDirection::Forward);
+        }
+
+        let mut group = GroupTransform::new();
+        // Build transforms from ops.
+        for op in ops.iter() {
+            create_transform(&mut group, op)?;
+        }
+        *group.format_metadata_mut() = baker.format_metadata().clone();
+        self.write(
+            config,
+            &config.current_context().get(),
+            &group,
+            format_name,
+            ostream,
+        )
     }
 }
 
