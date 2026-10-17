@@ -6,22 +6,23 @@
 //! 4.6a-4.6d): matrices of every form, bit depth and value; the ProcessList's version, id,
 //! name, inverseOf, descriptions, descriptors and Info; CDLs, gammas and exponents (a version 1
 //! config's Exponent ops too), logs and ranges of each style, direction and bit depth; 1D and 3D
-//! LUTs of each bit depth, interpolation and direction; and the processors' groups of read
-//! files.
+//! LUTs of each bit depth, interpolation and direction; FixedFunctions of each style; and the
+//! processors' groups of read files. The GradingRGBCurve writer's cases are
+//! `src/fileformats/file_format_ctf_write_oracle_tests.rs`.
 
 mod common;
 
 use common::lut_files::{file, write_files};
 use common::transforms::{
-    BIT_DEPTHS, Case, bit_depth_spec, direction_name, direction_spec, interpolation_name,
-    negative_style_spec,
+    BIT_DEPTHS, Case, bit_depth_spec, direction_name, direction_spec, fixed_function_style_name,
+    interpolation_name, negative_style_spec,
 };
 use ocio::TransformDirection::{self, Forward, Inverse};
 use ocio::{
     BitDepth, CdlStyle, CdlTransform, Config, ExponentTransform, ExponentWithLinearTransform,
-    FileTransform, GroupTransform, Interpolation, LogAffineTransform, LogCameraTransform,
-    LogTransform, Lut1DHueAdjust, Lut1DTransform, Lut3DTransform, MatrixTransform, NegativeStyle,
-    RangeStyle, RangeTransform, Transform,
+    FileTransform, FixedFunctionStyle, FixedFunctionTransform, GroupTransform, Interpolation,
+    LogAffineTransform, LogCameraTransform, LogTransform, Lut1DHueAdjust, Lut1DTransform,
+    Lut3DTransform, MatrixTransform, NegativeStyle, RangeStyle, RangeTransform, Transform,
 };
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle::BatchCall;
@@ -1478,6 +1479,183 @@ fn processors_of_lut_files_write_as_in_the_wheel() {
             for format in [CTF, CLF] {
                 cases.push(processor_case(src, dir, format));
             }
+        }
+    }
+    check_writes(&cases);
+}
+
+/// Valid parameters of each FixedFunction style that takes some: upstream's test values
+/// (tests/cpu/ops/fixedfunction/FixedFunctionOpData_tests.cpp:71, 169, 219-220, 270-271,
+/// FixedFunctionOpCPU_tests.cpp:564-569, 773, 866 @ v2.5.2), as
+/// `tests/fixed_function_transform_oracle.rs` takes them.
+fn ff_valid_params(style: FixedFunctionStyle) -> Vec<f64> {
+    use FixedFunctionStyle::*;
+    match style {
+        AcesGamutComp13 => vec![1.147, 1.264, 1.312, 0.815, 0.803, 0.880, 1.2],
+        Rec2100Surround => vec![2.0],
+        LinToDoubleLog => vec![
+            10.0, 0.25, 0.5, -1.0, 0.0, -1.0, 1.25, 1.0, 1.0, 1.0, 0.5, 1.0, 0.0,
+        ],
+        LinToGammaLog => vec![
+            0.0,
+            0.25,
+            0.5,
+            1.0,
+            0.0,
+            2.718,
+            0.17883277,
+            0.807825590164,
+            1.0,
+            -0.07116723,
+        ],
+        AcesOutputTransform20 | AcesGamutCompress20 => vec![
+            100.0, 0.6400, 0.3300, 0.3000, 0.6000, 0.1500, 0.0600, 0.3127, 0.3290,
+        ],
+        AcesRgbToJmh20 => vec![
+            0.7347, 0.2653, 0.0000, 1.0000, 0.0001, -0.0770, 0.32168, 0.33767,
+        ],
+        AcesTonescaleCompress20 => vec![1000.0],
+        _ => Vec::new(),
+    }
+}
+
+/// Every FixedFunction style.
+const FF_STYLES: [FixedFunctionStyle; 23] = {
+    use FixedFunctionStyle::*;
+    [
+        AcesRedMod03,
+        AcesRedMod10,
+        AcesGlow03,
+        AcesGlow10,
+        AcesDarkToDim10,
+        Rec2100Surround,
+        RgbToHsv,
+        XyzToXyy,
+        XyzToUvy,
+        XyzToLuv,
+        AcesGamutMap02,
+        AcesGamutMap07,
+        AcesGamutComp13,
+        LinToPq,
+        LinToGammaLog,
+        LinToDoubleLog,
+        AcesOutputTransform20,
+        AcesRgbToJmh20,
+        AcesTonescaleCompress20,
+        AcesGamutCompress20,
+        RgbToHsyLin,
+        RgbToHsyLog,
+        RgbToHsyVid,
+    ]
+};
+
+/// A FixedFunction transform's case: the binding's constructor of `ACES_GLOW_03`, then
+/// `setStyle`, `setParams` and `setDirection`, none of which validates (the writer does).
+/// None when the port refuses the style (one upstream doesn't implement).
+fn fixed_function(
+    label: &str,
+    style: FixedFunctionStyle,
+    params: &[f64],
+    dir: TransformDirection,
+) -> Option<Case> {
+    let mut port = FixedFunctionTransform::new(FixedFunctionStyle::AcesGlow03, &[]).unwrap();
+    port.set_style(style).ok()?;
+    port.set_params(params);
+    port.set_direction(dir);
+    let style_spec = |s| json!({"enum": fixed_function_style_name(s)});
+    Some(Case::new(
+        label,
+        json!({"class": "FixedFunctionTransform",
+            "args": {"style": style_spec(FixedFunctionStyle::AcesGlow03)},
+            "calls": [["setStyle", style_spec(style)], ["setParams", f64s(params)],
+                ["setDirection", direction_spec(dir)]]}),
+        port,
+    ))
+}
+
+/// The FixedFunction transforms: every style in both directions with valid parameters, and
+/// parameters that need many digits or are special values, which the writer validates.
+fn ff_cases() -> Vec<Case> {
+    let mut cases = Vec::new();
+    for style in FF_STYLES {
+        for dir in [Forward, Inverse] {
+            cases.extend(fixed_function(
+                &format!("{style:?} {dir:?}"),
+                style,
+                &ff_valid_params(style),
+                dir,
+            ));
+        }
+    }
+    for (label, params) in [
+        ("a surround of many digits", vec![1.0 / 3.0]),
+        ("a surround of 1e-7", vec![1e-7]),
+        ("a surround of 17 digits", vec![0.123_456_789_012_345_68]),
+        ("a surround just under 100", vec![99.999_999_999_999_99]),
+        ("a surround of 0.01", vec![0.01]),
+        ("a surround of 123456.789012345", vec![123_456.789_012_345]),
+        ("a NaN surround", vec![f64::NAN]),
+        ("a negative NaN surround", vec![-f64::NAN]),
+        ("an infinite surround", vec![f64::INFINITY]),
+        ("two surrounds", vec![1.5, 2.5]),
+    ] {
+        cases.extend(fixed_function(
+            label,
+            FixedFunctionStyle::Rec2100Surround,
+            &params,
+            Forward,
+        ));
+    }
+    let mut digits = ff_valid_params(FixedFunctionStyle::LinToGammaLog);
+    digits[5] = std::f64::consts::E;
+    digits[6] = 1.0 / 7.0;
+    cases.extend(fixed_function(
+        "a gamma log of many digits",
+        FixedFunctionStyle::LinToGammaLog,
+        &digits,
+        Forward,
+    ));
+    cases
+}
+
+/// The FixedFunction transforms, alone in a group and after a matrix, as CTF and CLF (which
+/// refuses them).
+#[test]
+fn fixed_function_transforms_write_as_in_the_wheel() {
+    let mut cases = Vec::new();
+    let m = matrix(
+        "m",
+        IDENTITY,
+        [0.1, 0.2, 0.3, 0.],
+        Forward,
+        (BitDepth::Uint10, BitDepth::Uint12),
+    );
+    for case in ff_cases() {
+        for format in [CTF, CLF] {
+            cases.push(group_case(
+                &case.label,
+                std::slice::from_ref(&case),
+                &[],
+                format,
+            ));
+            cases.push(group_case(
+                &format!("{}, after a matrix", case.label),
+                &[m.clone(), case.clone()],
+                &[("setID", "UID", "")],
+                format,
+            ));
+        }
+    }
+    check_writes(&cases);
+}
+
+/// The processors of upstream's FixedFunction file, in both directions, as CTF and CLF.
+#[test]
+fn processors_of_fixed_function_files_write_as_in_the_wheel() {
+    let mut cases = Vec::new();
+    for dir in [Forward, Inverse] {
+        for format in [CTF, CLF] {
+            cases.push(processor_case("fixed_function.ctf", dir, format));
         }
     }
     check_writes(&cases);

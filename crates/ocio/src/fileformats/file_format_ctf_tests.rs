@@ -19,6 +19,7 @@ use crate::transform::Transform;
 use crate::transforms::cdl_transform::CdlTransform;
 use crate::transforms::exponent_transform::ExponentTransform;
 use crate::transforms::exponent_with_linear_transform::ExponentWithLinearTransform;
+use crate::transforms::fixed_function_transform::FixedFunctionTransform;
 use crate::transforms::log_affine_transform::LogAffineTransform;
 use crate::transforms::log_camera_transform::LogCameraTransform;
 use crate::transforms::log_transform::LogTransform;
@@ -36,8 +37,8 @@ use ocio_ops::logging::{get_logging_level, set_logging_level};
 use ocio_ops::math_utils::convert_half_bits_to_float;
 use ocio_ops::op_data::OpDataType;
 use ocio_ops::open_color_types::{
-    BitDepth, CdlStyle, GradingStyle, Interpolation, LoggingLevel, Lut1DHueAdjust, NegativeStyle,
-    RgbCurveType, TransformDirection,
+    BitDepth, CdlStyle, FixedFunctionStyle, GradingStyle, Interpolation, LoggingLevel,
+    Lut1DHueAdjust, NegativeStyle, RgbCurveType, TransformDirection,
 };
 use ocio_ops::ops::cdl::cdl_op_data::{CdlOpData, CdlOpStyle, ChannelParams};
 use ocio_ops::ops::fixedfunction::fixed_function_op_data::{
@@ -6262,4 +6263,166 @@ fn bitdepth_ctf() {
 "#;
 
     check_written(expected, &output_transform);
+}
+
+/// The group of `ff` with the id `UIDFF42`, written as CTF.
+fn write_ff_group(ff: &FixedFunctionTransform) -> Vec<u8> {
+    let group = group_of(b"UIDFF42", Transform::FixedFunction(ff.clone()));
+    let mut output_transform = Vec::new();
+    write_group_ctf(&group, &mut output_transform).unwrap();
+    output_transform
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, fixed_function_aces_gamut_comp_13_ctf)` @ v2.5.2.
+#[test]
+fn fixed_function_aces_gamut_comp_13_ctf() {
+    let data = [1.147, 1.264, 1.312, 0.815, 0.803, 0.880, 1.2];
+    let ff = FixedFunctionTransform::new(FixedFunctionStyle::AcesGamutComp13, &data).unwrap();
+
+    let output_transform = write_ff_group(&ff);
+
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2.1" id="UIDFF42">
+    <FixedFunction inBitDepth="32f" outBitDepth="32f" style="GamutComp13Fwd" params="1.147 1.264 1.312 0.815 0.803 0.88 1.2">
+    </FixedFunction>
+</ProcessList>
+"#;
+
+    check_written(expected, &output_transform);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, fixed_function_aces_gamut_comp_13_inverse_ctf)` @
+/// v2.5.2.
+#[test]
+fn fixed_function_aces_gamut_comp_13_inverse_ctf() {
+    let data = [1.147, 1.264, 1.312, 0.815, 0.803, 0.880, 1.2];
+    let mut ff = FixedFunctionTransform::new(FixedFunctionStyle::AcesGamutComp13, &data).unwrap();
+    ff.set_direction(TransformDirection::Inverse);
+
+    let output_transform = write_ff_group(&ff);
+
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2.1" id="UIDFF42">
+    <FixedFunction inBitDepth="32f" outBitDepth="32f" style="GamutComp13Rev" params="1.147 1.264 1.312 0.815 0.803 0.88 1.2">
+    </FixedFunction>
+</ProcessList>
+"#;
+
+    check_written(expected, &output_transform);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, fixed_function_rec2100_ctf)` @ v2.5.2.
+#[test]
+fn fixed_function_rec2100_ctf() {
+    let val = 0.5;
+    let ff = FixedFunctionTransform::new(FixedFunctionStyle::Rec2100Surround, &[val]).unwrap();
+
+    let output_transform = write_ff_group(&ff);
+
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2" id="UIDFF42">
+    <FixedFunction inBitDepth="32f" outBitDepth="32f" style="Rec2100SurroundFwd" params="0.5">
+    </FixedFunction>
+</ProcessList>
+"#;
+
+    check_written(expected, &output_transform);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, fixed_function_rec2100_inverse_ctf)` @ v2.5.2.
+#[test]
+fn fixed_function_rec2100_inverse_ctf() {
+    let val = 0.5;
+    let mut ff = FixedFunctionTransform::new(FixedFunctionStyle::Rec2100Surround, &[val]).unwrap();
+    ff.set_direction(TransformDirection::Inverse);
+
+    let output_transform = write_ff_group(&ff);
+
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2" id="UIDFF42">
+    <FixedFunction inBitDepth="32f" outBitDepth="32f" style="Rec2100SurroundRev" params="0.5">
+    </FixedFunction>
+</ProcessList>
+"#;
+
+    check_written(expected, &output_transform);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, fixed_function_lin_to_gammalog_ctf)` @ v2.5.2.
+#[test]
+fn fixed_function_lin_to_gammalog_ctf() {
+    let vals = [
+        0.0,
+        0.25,
+        0.5,
+        1.0,
+        0.0,
+        2.718,
+        0.17883277,
+        0.807825590164,
+        1.0,
+        -0.07116723,
+    ];
+    let mut ff = FixedFunctionTransform::new(FixedFunctionStyle::LinToGammaLog, &vals).unwrap();
+
+    {
+        let output_transform = write_ff_group(&ff);
+
+        let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2.4" id="UIDFF42">
+    <FixedFunction inBitDepth="32f" outBitDepth="32f" style="Lin_TO_GammaLog" params="0 0.25 0.5 1 0 2.718 0.17883277 0.807825590164 1 -0.07116723">
+    </FixedFunction>
+</ProcessList>
+"#;
+
+        check_written(expected, &output_transform);
+    }
+    {
+        ff.set_direction(TransformDirection::Inverse);
+        let output_transform = write_ff_group(&ff);
+
+        let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2.4" id="UIDFF42">
+    <FixedFunction inBitDepth="32f" outBitDepth="32f" style="GammaLog_TO_Lin" params="0 0.25 0.5 1 0 2.718 0.17883277 0.807825590164 1 -0.07116723">
+    </FixedFunction>
+</ProcessList>
+"#;
+
+        check_written(expected, &output_transform);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, fixed_function_lin_to_doublelog_ctf)` @ v2.5.2.
+#[test]
+fn fixed_function_lin_to_doublelog_ctf() {
+    let vals = [
+        10.0, 0.25, 0.5, -1.0, 0.0, -1.0, 1.25, 1.0, 1.0, 1.0, 0.5, 1.0, 0.0,
+    ];
+    let mut ff = FixedFunctionTransform::new(FixedFunctionStyle::LinToDoubleLog, &vals).unwrap();
+
+    {
+        let output_transform = write_ff_group(&ff);
+
+        let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2.4" id="UIDFF42">
+    <FixedFunction inBitDepth="32f" outBitDepth="32f" style="Lin_TO_DoubleLog" params="10 0.25 0.5 -1 0 -1 1.25 1 1 1 0.5 1 0">
+    </FixedFunction>
+</ProcessList>
+"#;
+
+        check_written(expected, &output_transform);
+    }
+    {
+        ff.set_direction(TransformDirection::Inverse);
+        let output_transform = write_ff_group(&ff);
+
+        let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2.4" id="UIDFF42">
+    <FixedFunction inBitDepth="32f" outBitDepth="32f" style="DoubleLog_TO_Lin" params="10 0.25 0.5 -1 0 -1 1.25 1 1 1 0.5 1 0">
+    </FixedFunction>
+</ProcessList>
+"#;
+
+        check_written(expected, &output_transform);
+    }
 }

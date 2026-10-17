@@ -30,7 +30,9 @@ use ocio_formats::fileformats::xmlutils::xml_reader_utils::{
 use ocio_formats::fileformats::xmlutils::xml_writer_utils::{XmlElementWriter, XmlFormatter};
 use ocio_ops::cfmt::{Crt, OStringStream};
 use ocio_ops::exception::{Exception, Result};
-use ocio_ops::format_metadata::{METADATA_INPUT_DESCRIPTOR, METADATA_OUTPUT_DESCRIPTOR};
+use ocio_ops::format_metadata::{
+    FormatMetadataImpl, METADATA_INPUT_DESCRIPTOR, METADATA_OUTPUT_DESCRIPTOR,
+};
 use ocio_ops::op::{OpVec, create_op_vec_from_op_data};
 use ocio_ops::op_data::{OpData, OpDataRcPtr};
 use ocio_ops::open_color_types::{
@@ -200,25 +202,7 @@ impl FileFormat for LocalFileFormat {
             TransformDirection::Forward,
         )?;
 
-        ops.finalize()?;
-
-        // Call optimize to remove no-op types (e.g., allocation, file no-ops) since they do
-        // not have a CTF representation.
-        ops.optimize(OptimizationFlags::NONE)?;
-
-        let metadata = group.format_metadata();
-        let transform = CtfReaderTransform::from_ops(&ops, metadata)?;
-
-        // Write XML Header.
-        ostream.put_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
-        ostream.put_str(
-            "
-",
-        );
-        let mut fmt = XmlFormatter::new(ostream);
-
-        let writer = TransformWriter::new(&transform, is_clf);
-        writer.write(&mut fmt)
+        write_ops(&mut ops, group.format_metadata(), is_clf, ostream)
     }
 
     /// Appends the file's ops in the direction `dir` combined with the file transform's
@@ -276,6 +260,35 @@ impl FileFormat for LocalFileFormat {
         }
         Ok(())
     }
+}
+
+/// Writes `ops` as a CLF (`is_clf`) or CTF ProcessList with the group metadata `metadata`:
+/// the ops finalized and without no-ops, after the XML header. The second half of
+/// [`LocalFileFormat::write`], apart so that a test can write the ops of a processor whose
+/// group the port can't build yet (`file_format_ctf_write_oracle_tests.rs`).
+///
+/// Port of `LocalFileFormat::write` (FileFormatCTF.cpp:1577-1591 @ v2.5.2).
+pub(crate) fn write_ops(
+    ops: &mut OpVec,
+    metadata: &FormatMetadataImpl,
+    is_clf: bool,
+    ostream: &mut OStringStream,
+) -> Result<()> {
+    ops.finalize()?;
+
+    // Call optimize to remove no-op types (e.g., allocation, file no-ops) since they do not
+    // have a CTF representation.
+    ops.optimize(OptimizationFlags::NONE)?;
+
+    let transform = CtfReaderTransform::from_ops(ops, metadata)?;
+
+    // Write XML Header.
+    ostream.put_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
+    ostream.put_str("\n");
+    let mut fmt = XmlFormatter::new(ostream);
+
+    let writer = TransformWriter::new(&transform, is_clf);
+    writer.write(&mut fmt)
 }
 
 /// Appends the ops of an op data: a reference to a file is resolved (the file's ops).
@@ -1348,3 +1361,7 @@ impl XmlParserHelper {
 #[cfg(test)]
 #[path = "file_format_ctf_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "file_format_ctf_write_oracle_tests.rs"]
+mod write_oracle_tests;

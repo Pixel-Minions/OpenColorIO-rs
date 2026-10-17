@@ -7,11 +7,10 @@
 //! `CTFTransform.h` (@ v2.5.2): the lowest version that fits the ops (`GetOpMinimumVersion`,
 //! `GetMinimumVersion`), the value formatting (`WriteValue`, `SetOStream`, `WriteValues`),
 //! `OpWriter` and its bit depths, the operators' writers, and `TransformWriter`. Upstream's
-//! writers hold their formatter; here each `write` is given it. The operators' writers come
+//! writers hold their formatter; here each `write` is given it. The operators' writers came
 //! chunk by chunk: the Matrix (WP 4.6a); the CDL, Gamma (and Exponent), Log and Range (WP
-//! 4.6b); the LUTs (WP 4.6c), FixedFunction and RGB curves (WP 4.6d). Until then
-//! [`TransformWriter`] refuses the others as not ported. The ExposureContrast and grading writers but the RGB curves' (WP 4.6f) come with
-//! their op data (Phase 5).
+//! 4.6b); the LUTs (WP 4.6c); the FixedFunction and RGB curves (WP 4.6d). The ExposureContrast
+//! and other grading writers (WP 4.6f) come with their op data (Phase 5).
 
 use ocio_formats::fileformats::xmlutils::xml_reader_helper::{
     METADATA_SAT_DESCRIPTION, METADATA_SOP_DESCRIPTION,
@@ -31,10 +30,15 @@ use ocio_ops::format_metadata::{
 use ocio_ops::hash_utils::cache_id_hash;
 use ocio_ops::imath_half::float_to_half;
 use ocio_ops::op_data::{OpData, OpDataRcPtr, OpDataType, get_type_name};
-use ocio_ops::open_color_types::{BitDepth, Lut1DHueAdjust, TransformDirection};
+use ocio_ops::open_color_types::{
+    BitDepth, GradingStyle, Lut1DHueAdjust, RgbCurveType, TransformDirection,
+};
 use ocio_ops::ops::cdl::cdl_op_data::CdlOpData;
 use ocio_ops::ops::fixedfunction::fixed_function_op_data::FixedFunctionOpStyle;
 use ocio_ops::ops::gamma::gamma_op_data::{GammaOpData, GammaStyle};
+use ocio_ops::ops::gradingrgbcurve::grading_b_spline_curve::GradingBSplineCurve;
+use ocio_ops::ops::gradingrgbcurve::grading_rgb_curve::{default_curve, default_lin_curve};
+use ocio_ops::ops::gradingrgbcurve::grading_rgb_curve_op_data::GradingRgbCurveOpData;
 use ocio_ops::ops::log::log_op_data::{
     LIN_SIDE_BREAK, LIN_SIDE_OFFSET, LIN_SIDE_SLOPE, LINEAR_SLOPE, LOG_SIDE_OFFSET, LOG_SIDE_SLOPE,
 };
@@ -48,14 +52,18 @@ use ocio_ops::ops::matrix::matrix_op_data::MatrixOpData;
 use ocio_ops::{Exception, Result};
 
 use super::ctf_reader_utils::{
-    ATTR_BASE, ATTR_BITDEPTH_IN, ATTR_BITDEPTH_OUT, ATTR_CHAN, ATTR_COMP_CLF_VERSION,
-    ATTR_DIMENSION, ATTR_EXPONENT, ATTR_GAMMA, ATTR_HALF_DOMAIN, ATTR_HUE_ADJUST,
-    ATTR_INTERPOLATION, ATTR_INVERSE_OF, ATTR_LINEARSLOPE, ATTR_LINSIDEBREAK, ATTR_LINSIDEOFFSET,
-    ATTR_LINSIDESLOPE, ATTR_LOGSIDEOFFSET, ATTR_LOGSIDESLOPE, ATTR_OFFSET, ATTR_RAW_HALFS,
-    ATTR_STYLE, ATTR_VERSION, TAG_ARRAY, TAG_CDL, TAG_EXPONENT, TAG_EXPONENT_PARAMS, TAG_GAMMA,
-    TAG_GAMMA_PARAMS, TAG_INVLUT1D, TAG_INVLUT3D, TAG_LOG, TAG_LOG_PARAMS, TAG_LUT1D, TAG_LUT3D,
-    TAG_MATRIX, TAG_MAX_IN_VALUE, TAG_MAX_OUT_VALUE, TAG_MIN_IN_VALUE, TAG_MIN_OUT_VALUE,
-    TAG_PROCESS_LIST, TAG_RANGE, get_interpolation_1d_name, get_interpolation_3d_name,
+    ATTR_BASE, ATTR_BITDEPTH_IN, ATTR_BITDEPTH_OUT, ATTR_BYPASS_LIN_TO_LOG, ATTR_CHAN,
+    ATTR_COMP_CLF_VERSION, ATTR_DIMENSION, ATTR_EXPONENT, ATTR_GAMMA, ATTR_HALF_DOMAIN,
+    ATTR_HUE_ADJUST, ATTR_INTERPOLATION, ATTR_INVERSE_OF, ATTR_LINEARSLOPE, ATTR_LINSIDEBREAK,
+    ATTR_LINSIDEOFFSET, ATTR_LINSIDESLOPE, ATTR_LOGSIDEOFFSET, ATTR_LOGSIDESLOPE, ATTR_OFFSET,
+    ATTR_PARAM, ATTR_PARAMS, ATTR_RAW_HALFS, ATTR_STYLE, ATTR_VERSION, TAG_ARRAY, TAG_CDL,
+    TAG_CURVE_CTRL_PNTS, TAG_CURVE_SLOPES, TAG_DYN_PROP_RGBCURVE, TAG_DYNAMIC_PARAMETER,
+    TAG_EXPONENT, TAG_EXPONENT_PARAMS, TAG_FIXED_FUNCTION, TAG_GAMMA, TAG_GAMMA_PARAMS,
+    TAG_INVLUT1D, TAG_INVLUT3D, TAG_LOG, TAG_LOG_PARAMS, TAG_LUT1D, TAG_LUT3D, TAG_MATRIX,
+    TAG_MAX_IN_VALUE, TAG_MAX_OUT_VALUE, TAG_MIN_IN_VALUE, TAG_MIN_OUT_VALUE, TAG_PROCESS_LIST,
+    TAG_RANGE, TAG_RGB_CURVE, TAG_RGB_CURVE_BLUE, TAG_RGB_CURVE_GREEN, TAG_RGB_CURVE_MASTER,
+    TAG_RGB_CURVE_RED, convert_grading_style_and_dir_to_string, get_interpolation_1d_name,
+    get_interpolation_3d_name,
 };
 use crate::transforms::cdl_transform::{METADATA_INPUT_DESCRIPTION, METADATA_VIEWING_DESCRIPTION};
 
@@ -620,6 +628,201 @@ impl OpWriter for CdlWriter<'_> {
         desc.clear();
         get_elements_values(elements, METADATA_VIEWING_DESCRIPTION, &mut desc);
         write_descriptions(formatter, METADATA_VIEWING_DESCRIPTION, &desc);
+        Ok(())
+    }
+}
+
+/// The writer of a FixedFunction (CTF only): its style and its parameters.
+///
+/// Port of `FixedFunctionWriter` (CTFTransform.cpp:1053-1119 @ v2.5.2).
+struct FixedFunctionWriter<'a> {
+    /// `m_ff`.
+    ff: &'a OpData,
+    in_bit_depth: BitDepth,
+    out_bit_depth: BitDepth,
+}
+
+impl OpWriter for FixedFunctionWriter<'_> {
+    fn get_op(&self) -> &OpData {
+        self.ff
+    }
+    fn get_tag_name(&self) -> &[u8] {
+        TAG_FIXED_FUNCTION
+    }
+    fn in_bit_depth(&self) -> BitDepth {
+        self.in_bit_depth
+    }
+    fn out_bit_depth(&self) -> BitDepth {
+        self.out_bit_depth
+    }
+
+    /// Port of `FixedFunctionWriter::getAttributes` (CTFTransform.cpp:1094-1115 @ v2.5.2).
+    fn get_attributes(&self, attributes: &mut Attributes) -> Result<()> {
+        op_writer_attributes(self, attributes)?;
+        let OpData::FixedFunction(ff) = self.ff else {
+            unreachable!("a FixedFunction writer writes a FixedFunction");
+        };
+        let style = ff.style().to_str(false);
+        attributes.push((ATTR_STYLE.to_vec(), style.as_bytes().to_vec()));
+        let params = ff.params();
+
+        let num_params = params.len();
+        if num_params != 0 {
+            let mut i = 0;
+            let mut ff_params = OStringStream::new(Crt::NATIVE);
+            ff_params.precision = DOUBLE_PRECISION;
+            write_value(params[i], &mut ff_params);
+            i += 1;
+            while i < num_params {
+                ff_params.put_str(" ");
+                write_value(params[i], &mut ff_params);
+                i += 1;
+            }
+            attributes.push((ATTR_PARAMS.to_vec(), ff_params.into_bytes()));
+        }
+        Ok(())
+    }
+
+    /// Port of `FixedFunctionWriter::writeContent` (CTFTransform.cpp:1117-1119 @ v2.5.2).
+    fn write_content(&self, _formatter: &mut XmlFormatter<'_>) -> Result<()> {
+        Ok(())
+    }
+}
+
+/// The writer of a GradingRGBCurve (CTF only): its style and direction, bypassLinToLog, the
+/// curves that differ from the style's default (their control points, and their slopes unless
+/// default), and whether it is dynamic.
+///
+/// Port of `GradingRGBCurveWriter` (CTFTransform.cpp:1502-1630 @ v2.5.2).
+struct GradingRgbCurveWriter<'a> {
+    /// `m_curves`.
+    curves: &'a OpData,
+    in_bit_depth: BitDepth,
+    out_bit_depth: BitDepth,
+}
+
+impl GradingRgbCurveWriter<'_> {
+    fn curves(&self) -> &GradingRgbCurveOpData {
+        let OpData::GradingRgbCurve(curves) = self.curves else {
+            unreachable!("a GradingRGBCurve writer writes a GradingRGBCurve");
+        };
+        curves
+    }
+
+    /// The element `tag` of `curve`: its control points, one "x y" a line, and its slopes
+    /// unless default.
+    ///
+    /// Port of `GradingRGBCurveWriter::writeCurve` (CTFTransform.cpp:1559-1603 @ v2.5.2).
+    fn write_curve(formatter: &mut XmlFormatter<'_>, tag: &[u8], curve: &GradingBSplineCurve) {
+        formatter.write_start_tag_with(tag, &Attributes::new());
+        {
+            let mut si0 = XmlScopeIndent::new(formatter);
+            si0.write_start_tag_with(TAG_CURVE_CTRL_PNTS, &Attributes::new());
+            {
+                let mut si1 = XmlScopeIndent::new(&mut si0);
+                let num_pnts = curve.num_control_points();
+
+                // Write 1 control point per line in the form of "X Y"
+                for ct_pt in &curve.control_points()[..num_pnts] {
+                    let mut oss = OStringStream::new(Crt::NATIVE);
+                    set_ostream::<f32>(&mut oss);
+                    oss.put_f32(ct_pt.x);
+                    oss.put_str(" ");
+                    oss.put_f32(ct_pt.y);
+                    si1.write_content(oss.str());
+                }
+            }
+            si0.write_end_tag(TAG_CURVE_CTRL_PNTS);
+
+            if !curve.slopes_are_default() {
+                si0.write_start_tag_with(TAG_CURVE_SLOPES, &Attributes::new());
+                {
+                    let mut si1 = XmlScopeIndent::new(&mut si0);
+                    // (Number of slopes is always the same as control points.)
+                    let num_slopes = curve.num_control_points();
+                    let mut oss = OStringStream::new(Crt::NATIVE);
+                    set_ostream::<f32>(&mut oss);
+                    for &val in &curve.slopes()[..num_slopes] {
+                        oss.put_f32(val);
+                        oss.put_str(" ");
+                    }
+                    si1.write_content(oss.str());
+                }
+                si0.write_end_tag(TAG_CURVE_SLOPES);
+            }
+        }
+
+        formatter.write_end_tag(tag);
+    }
+}
+
+impl OpWriter for GradingRgbCurveWriter<'_> {
+    fn get_op(&self) -> &OpData {
+        self.curves
+    }
+    fn get_tag_name(&self) -> &[u8] {
+        TAG_RGB_CURVE
+    }
+    fn in_bit_depth(&self) -> BitDepth {
+        self.in_bit_depth
+    }
+    fn out_bit_depth(&self) -> BitDepth {
+        self.out_bit_depth
+    }
+
+    /// Port of `GradingRGBCurveWriter::getAttributes` (CTFTransform.cpp:1543-1557 @ v2.5.2).
+    fn get_attributes(&self, attributes: &mut Attributes) -> Result<()> {
+        op_writer_attributes(self, attributes)?;
+
+        let curves = self.curves();
+        let style = curves.get_style();
+        let dir = curves.get_direction();
+
+        let style_str = convert_grading_style_and_dir_to_string(style, dir);
+        attributes.push((ATTR_STYLE.to_vec(), style_str.to_vec()));
+
+        if curves.get_bypass_lin_to_log() {
+            attributes.push((ATTR_BYPASS_LIN_TO_LOG.to_vec(), b"true".to_vec()));
+        }
+        Ok(())
+    }
+
+    /// Port of `GradingRGBCurveWriter::writeContent` (CTFTransform.cpp:1605-1630 @ v2.5.2).
+    fn write_content(&self, formatter: &mut XmlFormatter<'_>) -> Result<()> {
+        let curves = self.curves();
+        let vals = curves.get_value();
+
+        let def_curve = if curves.get_style() == GradingStyle::Lin {
+            default_lin_curve()
+        } else {
+            default_curve()
+        };
+
+        const CURVE_TAGS: [&[u8]; 4] = [
+            TAG_RGB_CURVE_RED,
+            TAG_RGB_CURVE_GREEN,
+            TAG_RGB_CURVE_BLUE,
+            TAG_RGB_CURVE_MASTER,
+        ];
+        for (c, tag) in [
+            RgbCurveType::Red,
+            RgbCurveType::Green,
+            RgbCurveType::Blue,
+            RgbCurveType::Master,
+        ]
+        .into_iter()
+        .zip(CURVE_TAGS)
+        {
+            let curve = vals.curve(c)?;
+            if *curve != def_curve || !curve.slopes_are_default() {
+                Self::write_curve(formatter, tag, curve);
+            }
+        }
+        if curves.is_dynamic() {
+            let attributes: Attributes =
+                vec![(ATTR_PARAM.to_vec(), TAG_DYN_PROP_RGBCURVE.to_vec())];
+            formatter.write_empty_tag(TAG_DYNAMIC_PARAMETER, &attributes);
+        }
         Ok(())
     }
 }
@@ -1361,14 +1564,6 @@ fn get_input_file_bd(op: &OpData) -> Result<BitDepth> {
     }
 }
 
-/// The error of an op whose writer isn't ported yet (WP 4.6d).
-fn writer_not_ported(op_type: OpDataType) -> Result<()> {
-    Err(Exception::new(format!(
-        "The CTF writer of the '{}' op is not ported yet.",
-        get_type_name(op_type)?
-    )))
-}
-
 /// The writer of a ProcessList: its version (CLF 3, or the lowest CTF version that fits), id
 /// (the ops' cache IDs hashed when it has none), name, inverseOf, descriptions, descriptors
 /// and Info, then its ops (an identity matrix when it has none).
@@ -1502,7 +1697,13 @@ impl<'t> TransformWriter<'t> {
                         if self.is_clf {
                             return Err(throw_write_op("FixedFunction"));
                         }
-                        writer_not_ported(op_type)?
+
+                        let op_writer = FixedFunctionWriter {
+                            ff: op,
+                            in_bit_depth: in_bd,
+                            out_bit_depth: out_bd,
+                        };
+                        op_writer.write(formatter)?;
                     }
                     OpData::Gamma(gamma) => {
                         if self.is_clf && !gamma.is_alpha_component_identity() {
@@ -1521,7 +1722,13 @@ impl<'t> TransformWriter<'t> {
                         if self.is_clf {
                             return Err(throw_write_op("GradingRGBCurve"));
                         }
-                        writer_not_ported(op_type)?
+
+                        let op_writer = GradingRgbCurveWriter {
+                            curves: op,
+                            in_bit_depth: in_bd,
+                            out_bit_depth: out_bd,
+                        };
+                        op_writer.write(formatter)?;
                     }
                     OpData::Log(_) => {
                         let op_writer = LogWriter {
