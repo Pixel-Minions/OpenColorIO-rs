@@ -1,7 +1,7 @@
 # Phase 6 cards: the Python module
 
-**Status: planned, 2026-10-17.** Owner items P6-1 to P6-12 are open (below, each with a
-recommendation). PLAN.md §10 starts this track after M1, which is done. It binds each part of
+**Status: planned, 2026-10-17.** The owner decided P6-1 to P6-12 on 2026-10-17, all as
+recommended. PLAN.md §10 starts this track after M1, which is done. It binds each part of
 the Rust API as it lands, and it finishes after Phase 5 (and Phase 9's two library parts that
 the suite reaches, P6-11).
 
@@ -251,9 +251,14 @@ the same Python code over two modules.
 
 ## Owner decisions
 
-**Open.** Each item has a recommendation; the cards that need it wait for it.
+**Decided by the owner on 2026-10-17, all twelve as recommended.** The Python version is
+3.13 only (`cp313`, not `abi3`); other versions are a Phase 10 question. The approved
+downloads are `py-port/`'s Python 3.13 and `numpy==2.3.5`, through uv as for the oracle,
+once; `pyo3` 0.29 and the `numpy` crate are pinned exactly. P6-7's default `repr` is a
+deviation, added to `docs/deviations.md` with the first chunk that binds a class without
+`__repr__`.
 
-| # | Decision | Recommendation |
+| # | Decision | Recommendation (decided) |
 |---|---|---|
 | P6-1 | **PyO3** (`dependency`) | **`pyo3`, at the version PLAN.md §9 names (0.29), pinned exactly (`=0.29.x`) in 6.1a**, with `extension-module` for the module and `auto-initialize` for 6.1c's embedding test only. 6.1a picks the latest 0.29 patch that builds with Rust 1.98.1 and Python 3.13 on both platforms, and reports it. No other crate of the PyO3 family (no `pyo3-log`, no `pyo3-build-config` overrides). The alternative is binding through the CPython C API by hand: far more `unsafe` and code, for no gain |
 | P6-2 | **NumPy** (`dependency`) | **The `numpy` crate, pinned to the version that matches `pyo3` (0.29, PLAN.md §9).** Upstream returns NumPy arrays in 11 places (`py::array`: Lut1D and Lut3D data, image descriptors' data, the GPU shader's uniforms and textures) and reads Python buffers (`py::buffer`, 55 uses) in the image descriptors, the CPU processor, the LUTs and the GPU shader. Inputs go through the buffer protocol (`pyo3`'s `PyBuffer`), as upstream's do, so any buffer works, as with the wheel; the crate makes the arrays. Like pybind11, it imports NumPy only when an array is made, so `import PyOpenColorIO` works without NumPy. The alternative: no crate, calling `numpy.frombuffer` through Python, which saves a dependency and costs more glue |
@@ -316,24 +321,24 @@ are made, without waiting for other Phase 6 cards.
 
 | Card | Chunks | Size | Who | Needs | Owner items |
 |---|---|---|---|---|---|
-| `p6-oracle` | O6.1–O6.3, each its own chunk | 3 | B | now | `oracle` (P6-12) |
-| `p6-skeleton` | 6.1a–6.1c | 3, ~700 | B | now | `dependency` (P6-1, P6-3, P6-4, P6-5), `api` (P6-6, P6-9), P6-10 |
-| `p6-core` | 6.2a, 6.2b, 6.4a | 3, ~1,800 | B | `p6-skeleton` | P6-7 |
-| `p6-transforms` | 6.3a–6.3c | 3, ~1,300 | B | `p6-core` | P6-8 |
-| `p6-objects` | 6.3d–6.3e | 2, ~1,450 | B | `p6-core` | P6-8 |
-| `p6-config` | 6.3f, 6.3g, 6.6a | 3, ~1,700 | B | `p6-objects` | P6-8 |
-| `p6-buffers` | 6.5a–6.5b | 2, ~1,000 | B or second | `p6-core` | `dependency` (P6-2) |
+| `p6-oracle` | O6.1–O6.3, each its own chunk | 3 | B | now | — (P6-12 decided: a verifier reviews each) |
+| `p6-skeleton` | 6.1a–6.1c | 3, ~700 | B | now | — (P6-1, P6-3 to P6-6, P6-9, P6-10 decided) |
+| `p6-core` | 6.2a, 6.2b, 6.4a | 3, ~1,800 | B | `p6-skeleton` | — (P6-7 decided) |
+| `p6-transforms` | 6.3a–6.3c | 3, ~1,300 | B | `p6-core` | `api` (each shared handle P6-8 adds) |
+| `p6-objects` | 6.3d–6.3e | 2, ~1,450 | B | `p6-core` | `api` (each shared handle P6-8 adds) |
+| `p6-config` | 6.3f, 6.3g, 6.6a | 3, ~1,700 | B | `p6-objects` | `api` (each shared handle P6-8 adds) |
+| `p6-buffers` | 6.5a–6.5b | 2, ~1,000 | B or second | `p6-core` | — (P6-2 decided) |
 | `p6-processors` | 6.3h | 1, ~600 | B or second | `p6-buffers` | — |
 | `p6-baker` | 6.3i | 1, ~150 | B | `p6-config`, 4.8 | — |
 | `p6-after-p5` | 6.7a–6.7c | 3, ~1,600 | B | Phase 5's library cards | — |
-| `p9-config-utils`, `p9-merge` | Phase 9's `ConfigUtils` and config merging, pulled forward (their chunks in a Phase 9 card file) | ~9 | second | Phase 3 | P6-11 |
+| `p9-config-utils`, `p9-merge` | Phase 9's `ConfigUtils` and config merging, pulled forward (P6-11, decided; their chunks in a Phase 9 card file) | ~9 | second | Phase 3 | — |
 | `p6-after-p9` | 6.8a | 1, ~300 | B | `p9-config-utils`, `p9-merge`, `p6-config` | — |
 | `p6-m4-parity` | The suite through `OpenColorIOTestSuite.py` on both platforms; every class's O6.1 and O6.2 sweeps complete | 1–2 | any | every card above | — |
 
 12 Phase 6 cards, about 27 chunks. When a card grows past about 6 chunks, it splits at a
 dependency boundary.
 
-**Can start now:** `p6-oracle`, then `p6-skeleton` once P6-1 and P6-3 to P6-6 are decided.
+**Can start now:** `p6-oracle` and `p6-skeleton` (their owner items are decided).
 
 **Waits for other phases:**
 - **Phase 4:** `GroupTransform::write` (4.6e), the baker (4.8), `.ocioz` archives (4.9).
