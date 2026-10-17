@@ -8,6 +8,8 @@
 
 use ocio_ops::utils::string_utils::c_str;
 
+#[cfg(windows)]
+use super::mz_strm::MZ_SYMLINK_ERROR;
 use super::mz_strm::{MZ_EXIST_ERROR, MZ_INTERNAL_ERROR, MZ_OK, MZ_PARAM_ERROR};
 
 /// Whether `path` matches `wildcard`, where a `*` in `wildcard` matches any run of bytes
@@ -584,18 +586,34 @@ pub(crate) fn mz_os_set_file_attribs(path: &[u8], attributes: u32) -> i32 {
     MZ_OK
 }
 
-/// Makes `path` a symbolic link to `target_path`.
+/// Makes `path` a symbolic link to `target_path`: `MZ_INTERNAL_ERROR` (Linux) or
+/// `MZ_SYMLINK_ERROR` (Windows) where the system refuses.
 ///
-/// Port of `mz_os_make_symlink` (mz_os_posix.c:326-330, mz_os_win32.c:483-530 @ 4.0.10), a
-/// file link on Windows (`CreateSymbolicLinkW` allowing an unprivileged creation).
+/// Port of `mz_os_make_symlink` (mz_os_posix.c:326-330, mz_os_win32.c:483-530 @ 4.0.10). On
+/// Windows it calls `CreateSymbolicLinkW` as upstream does (`os_windows_ffi`): a target that
+/// ends with a separator (`mz_path_has_slash`, mz_os.c:69-74; an empty one too) makes a
+/// directory link (`SYMBOLIC_LINK_FLAG_DIRECTORY`), and without
+/// `SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE` only a process with the privilege (an
+/// elevated one) makes links.
 pub(crate) fn mz_os_make_symlink(path: &[u8], target_path: &[u8]) -> i32 {
     #[cfg(unix)]
-    let made = std::os::unix::fs::symlink(system_path(target_path), system_path(path));
+    {
+        if std::os::unix::fs::symlink(system_path(target_path), system_path(path)).is_err() {
+            return MZ_INTERNAL_ERROR;
+        }
+        MZ_OK
+    }
     #[cfg(windows)]
-    let made = std::os::windows::fs::symlink_file(system_path(target_path), system_path(path));
-    if made.is_err() {
-        MZ_INTERNAL_ERROR
-    } else {
+    {
+        let target = c_str(target_path);
+        let directory = target.last().is_none_or(|&c| mz_os_is_dir_separator(c));
+        if !super::os_windows_ffi::create_symbolic_link(
+            &system_path(path),
+            &system_path(target),
+            directory,
+        ) {
+            return MZ_SYMLINK_ERROR;
+        }
         MZ_OK
     }
 }

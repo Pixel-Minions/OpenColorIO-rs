@@ -547,18 +547,21 @@ impl Reader {
 
         // If it is a symbolic link then create symbolic link instead of writing file
         if is_symlink {
+            let mut err = MZ_OK;
             if !file_info.linkname.is_empty() {
                 // Create symbolic link from UNIX1 extrafield
-                let _ = mz_os_make_symlink(&pathwfs, &file_info.linkname);
+                err = mz_os_make_symlink(&pathwfs, &file_info.linkname);
             } else if file_info.uncompressed_size < i64::from(u16::MAX) {
                 // Create symbolic link from zip entry contents
                 let mut linkname = Vec::new();
-                if self.entry_save_to(&mut linkname) == MZ_OK {
-                    let _ = mz_os_make_symlink(&pathwfs, c_str(&linkname));
+                err = self.entry_save_to(&mut linkname);
+                if err == MZ_OK {
+                    err = mz_os_make_symlink(&pathwfs, c_str(&linkname));
                 }
             }
             // Don't check return value because we aren't validating symbolic link target
-            return MZ_OK;
+            // (upstream's comment: the error of making the link is returned all the same)
+            return err;
         }
 
         // Create the file on disk so we can save to it

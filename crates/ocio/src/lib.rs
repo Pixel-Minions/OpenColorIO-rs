@@ -3,7 +3,7 @@
 
 //! OpenColorIO, ported to Rust. This release line matches OpenColorIO 2.5.2 exactly
 //! (PLAN.md §2): results, text output, errors and accepted configs.
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 
 pub mod baker;
 pub mod baking_utils;

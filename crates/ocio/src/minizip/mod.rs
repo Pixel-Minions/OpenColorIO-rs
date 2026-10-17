@@ -53,3 +53,5 @@ pub(crate) mod mz_os;
 pub(crate) mod mz_strm;
 pub(crate) mod mz_zip;
 pub(crate) mod mz_zip_rw;
+#[cfg(windows)]
+mod os_windows_ffi;

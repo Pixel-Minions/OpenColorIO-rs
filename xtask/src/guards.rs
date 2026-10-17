@@ -83,12 +83,15 @@ const FORBIDDEN: &[(&str, &str)] = &[
 /// upstream's own tolerance checks.
 const TOLERANCE: &[&str] = &[".abs() < ", ".abs() <= ", "f32::EPSILON", "f64::EPSILON"];
 
-/// Where `unsafe` may be allowed (PLAN.md D8): SIMD modules, the Python binding, and the
-/// test kit's FFI to the platform C runtime (the reference for C formatting and parsing).
+/// Where `unsafe` may be allowed (PLAN.md D8): SIMD modules, the Python binding, the test
+/// kit's FFI to the platform C runtime (the reference for C formatting and parsing), and the
+/// one file that calls `CreateSymbolicLinkW` as minizip-ng does (owner decision 2026-10-17:
+/// one function, named here by its file).
 fn unsafe_allowed(rel: &str) -> bool {
     let file = rel.rsplit('/').next().unwrap_or(rel);
     rel.starts_with("crates/ocio-py/")
         || rel == "crates/ocio-testkit/src/crt.rs"
+        || rel == "crates/ocio/src/minizip/os_windows_ffi.rs"
         || (rel.starts_with("crates/ocio-ops/")
             && (rel.contains("/simd/")
                 || file.contains("_sse")

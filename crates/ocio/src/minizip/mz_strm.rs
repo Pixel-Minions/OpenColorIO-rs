@@ -31,6 +31,8 @@ pub(crate) const MZ_OPEN_ERROR: i32 = -111;
 pub(crate) const MZ_SEEK_ERROR: i32 = -113;
 pub(crate) const MZ_READ_ERROR: i32 = -115;
 pub(crate) const MZ_WRITE_ERROR: i32 = -116;
+#[cfg(windows)]
+pub(crate) const MZ_SYMLINK_ERROR: i32 = -118;
 
 /// `MZ_SEEK_SET`, `MZ_SEEK_CUR` and `MZ_SEEK_END` (mz.h:58-60 @ 4.0.10).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

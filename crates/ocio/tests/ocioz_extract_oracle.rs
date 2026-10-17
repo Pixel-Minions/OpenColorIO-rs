@@ -44,13 +44,16 @@ fn deflate(data: &[u8]) -> Vec<u8> {
     out
 }
 
-/// An entry: its name, its data as written, its method, CRC and uncompressed size.
+/// An entry: its name, its data as written, its method, CRC and uncompressed size, and its
+/// made-by version and external attributes.
 struct Entry {
     name: Vec<u8>,
     written: Vec<u8>,
     method: u16,
     crc: u32,
     size: u32,
+    madeby: u16,
+    attributes: u32,
 }
 
 fn stored(name: &[u8], data: &[u8]) -> Entry {
@@ -60,6 +63,8 @@ fn stored(name: &[u8], data: &[u8]) -> Entry {
         method: 0,
         crc: crc32(data),
         size: data.len() as u32,
+        madeby: 20,
+        attributes: 0,
     }
 }
 
@@ -70,6 +75,8 @@ fn deflated(name: &[u8], data: &[u8]) -> Entry {
         method: 8,
         crc: crc32(data),
         size: data.len() as u32,
+        madeby: 20,
+        attributes: 0,
     }
 }
 
@@ -100,7 +107,7 @@ fn archive(entries: &[Entry]) -> Vec<u8> {
         out.extend_from_slice(&e.written);
 
         put32(&mut central, 0x0201_4b50);
-        for v in [20u16, 20, 0, e.method, 0, 0x0021] {
+        for v in [e.madeby, 20, 0, e.method, 0, 0x0021] {
             put16(&mut central, v);
         }
         for v in [e.crc, e.written.len() as u32, e.size] {
@@ -109,7 +116,7 @@ fn archive(entries: &[Entry]) -> Vec<u8> {
         for v in [e.name.len() as u16, 0, 0, 0, 0] {
             put16(&mut central, v);
         }
-        put32(&mut central, 0);
+        put32(&mut central, e.attributes);
         put32(&mut central, offset);
         central.extend_from_slice(&e.name);
     }
@@ -147,14 +154,19 @@ fn write_file(content: &[u8]) -> PathBuf {
     path
 }
 
-/// Every file under `dir`, by relative path with `/` between its components.
+/// Every file under `dir`, by relative path with `/` between its components (not the links,
+/// nor what they lead to).
 fn files_under(dir: &Path) -> BTreeMap<String, Vec<u8>> {
     let mut out = BTreeMap::new();
     let mut stack = vec![dir.to_path_buf()];
     while let Some(d) = stack.pop() {
         for entry in std::fs::read_dir(&d).unwrap() {
             let path = entry.unwrap().path();
-            if path.is_dir() {
+            let file_type = std::fs::symlink_metadata(&path).unwrap().file_type();
+            if file_type.is_symlink() {
+                continue;
+            }
+            if file_type.is_dir() {
                 stack.push(path);
             } else {
                 // The components joined with "/", as the oracle joins them (os.sep replaced):
@@ -333,4 +345,126 @@ fn built_archives() {
             files_dir("archives").join("does_not_exist.ocioz"),
         ),
     ]);
+}
+
+/// The links under `dir` and their targets, by relative path with `/` between its components.
+fn links_under(dir: &Path) -> BTreeMap<Vec<u8>, Vec<u8>> {
+    let mut out = BTreeMap::new();
+    let mut stack = vec![(dir.to_path_buf(), String::new())];
+    while let Some((d, prefix)) = stack.pop() {
+        for entry in std::fs::read_dir(&d).unwrap() {
+            let entry = entry.unwrap();
+            let relative = format!("{prefix}{}", entry.file_name().to_string_lossy());
+            let path = entry.path();
+            let file_type = std::fs::symlink_metadata(&path).unwrap().file_type();
+            if file_type.is_symlink() {
+                let target = std::fs::read_link(&path).unwrap();
+                out.insert(
+                    relative.into_bytes(),
+                    target.to_string_lossy().into_owned().into_bytes(),
+                );
+            } else if file_type.is_dir() {
+                stack.push((path, format!("{relative}/")));
+            }
+        }
+    }
+    out
+}
+
+/// Link entries of a Unix host (mode `0120777`, the entry's contents its target), extracted by
+/// the wheel and by the port in this process: a link to a file, one to a directory (its target
+/// ends with a separator, a directory link on Windows), and one repeated (making it again
+/// fails). On Linux both make the links. On Windows minizip-ng calls `CreateSymbolicLinkW`
+/// without `SYMBOLIC_LINK_FLAG_ALLOW_UNPRIVILEGED_CREATE`, as the port does (owner decision
+/// 2026-10-17, `crates/ocio/src/minizip/os_windows_ffi.rs`): both make the links where this
+/// process holds the privilege (elevated), and both fail where it doesn't, developer mode or
+/// not. The outcomes, the files and the links are compared.
+#[test]
+fn links() {
+    let link = |name: &[u8], target: &[u8]| Entry {
+        madeby: 3 << 8 | 20,
+        attributes: 0o120_777 << 16,
+        ..stored(name, target)
+    };
+    let archives = [
+        (
+            "a link to a file",
+            write_file(&archive(&[
+                stored(b"target.txt", b"T"),
+                link(b"l.txt", b"target.txt"),
+                stored(b"after.txt", b"a"),
+            ])),
+        ),
+        (
+            "a link to a directory",
+            write_file(&archive(&[
+                stored(b"d/", b""),
+                link(b"l", b"d/"),
+                stored(b"after.txt", b"a"),
+            ])),
+        ),
+        (
+            "a link twice",
+            write_file(&archive(&[
+                link(b"l.txt", b"target.txt"),
+                link(b"l.txt", b"target.txt"),
+                stored(b"after.txt", b"a"),
+            ])),
+        ),
+    ];
+    let calls: Vec<BatchCall<'_>> = archives
+        .iter()
+        .map(|(_, path)| BatchCall {
+            cmd: "ocioz",
+            args: json!({"extract": {"archive": path.to_str().unwrap()}}),
+            blobs: Vec::new(),
+        })
+        .collect();
+    let wheel = Oracle::get().batch(&calls, false);
+    let mut failures = Vec::new();
+    for (i, ((label, path), w)) in archives.iter().zip(wheel).enumerate() {
+        let w = w.expect("an oracle request");
+        let destination = files_dir("links").join(i.to_string());
+        let _ = std::fs::remove_dir_all(&destination);
+        std::fs::create_dir_all(&destination).unwrap();
+        let port = extract_ocioz_archive(
+            path.to_str().unwrap().as_bytes(),
+            destination.to_str().unwrap().as_bytes(),
+        );
+        let wheel_message = w
+            .result
+            .get("exception")
+            .map(|e| e["message"].as_str().unwrap().as_bytes().to_vec());
+        let port_message = port.as_ref().err().map(|e| e.what().to_vec());
+        if wheel_message != port_message {
+            failures.push(format!(
+                "{label}: wheel {:?}, port {port:?}",
+                w.result.get("exception")
+            ));
+        }
+        let wheel_files: BTreeMap<String, Vec<u8>> = w.result["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| {
+                (
+                    String::from_utf8_lossy(&bytes(&f["path"])).into_owned(),
+                    w.blobs[f["contents"].as_u64().unwrap() as usize].clone(),
+                )
+            })
+            .collect();
+        let wheel_links: BTreeMap<Vec<u8>, Vec<u8>> = w.result["links"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|l| (bytes(&l["path"]), bytes(&l["target"])))
+            .collect();
+        let (port_files, port_links) = (files_under(&destination), links_under(&destination));
+        if wheel_files != port_files || wheel_links != port_links {
+            failures.push(format!(
+                "{label}:\n  wheel {wheel_files:?} {wheel_links:?}\n  port  {port_files:?} {port_links:?}"
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }
