@@ -19,10 +19,11 @@ use common::transforms::{
 };
 use ocio::TransformDirection::{self, Forward, Inverse};
 use ocio::{
-    BitDepth, CdlStyle, CdlTransform, Config, ExponentTransform, ExponentWithLinearTransform,
-    FileTransform, FixedFunctionStyle, FixedFunctionTransform, GroupTransform, Interpolation,
-    LogAffineTransform, LogCameraTransform, LogTransform, Lut1DHueAdjust, Lut1DTransform,
-    Lut3DTransform, MatrixTransform, NegativeStyle, RangeStyle, RangeTransform, Transform,
+    BitDepth, CdlStyle, CdlTransform, ColorSpaceTransform, Config, ExponentTransform,
+    ExponentWithLinearTransform, FileTransform, FixedFunctionStyle, FixedFunctionTransform,
+    GroupTransform, Interpolation, LogAffineTransform, LogCameraTransform, LogTransform,
+    Lut1DHueAdjust, Lut1DTransform, Lut3DTransform, MatrixTransform, NegativeStyle, RangeStyle,
+    RangeTransform, Transform,
 };
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle::BatchCall;
@@ -1113,6 +1114,50 @@ fn exponents_of_a_version_1_config_write_as_in_the_wheel() {
             case.request["config"] = json!({"yaml": V1_CONFIG});
             case.config = Some(config.clone());
             cases.push(case);
+        }
+    }
+
+    // Named and described exponents of a version 1 config's color spaces: the Exponent op
+    // keeps the transform's metadata (`BuildExponentOp`), which the writer copies into the
+    // gamma it writes. The group is the processor's, from each color space to `raw`, written
+    // with the version 1 config.
+    let named = "ocio_profile_version: 1
+roles: {default: raw}
+colorspaces:
+  - !<ColorSpace> {name: raw}
+  - !<ColorSpace>
+    name: exp
+    to_reference: !<ExponentTransform> {value: [2, 2.2, 2.4, 1], name: \"exp <1> & q\"}
+  - !<ColorSpace>
+    name: exp_alpha
+    to_reference: !<ExponentTransform> {value: [2, 2, 2, 1.5], name: expalpha}
+";
+    let named_config = Config::create_from_stream(named.as_bytes()).unwrap();
+    for src in ["exp", "exp_alpha"] {
+        for dir in [Forward, Inverse] {
+            for format in [CTF, CLF] {
+                let mut transform = ColorSpaceTransform::new();
+                transform.set_src(src);
+                transform.set_dst("raw");
+                let port = named_config
+                    .processor_in_direction(&Transform::from(transform), dir)
+                    .and_then(|p| p.create_group_transform());
+                cases.push(WriteCase {
+                    label: format!("{src} to raw in a version 1 config, {dir:?}, as {format}"),
+                    request: json!({
+                        "processor": {
+                            "config": {"yaml": named},
+                            "transform": {"class": "ColorSpaceTransform",
+                                          "calls": [["setSrc", src], ["setDst", "raw"]]},
+                            "direction": direction_name(dir),
+                        },
+                        "config": {"yaml": named},
+                        "format": format,
+                    }),
+                    port,
+                    config: Some(named_config.clone()),
+                });
+            }
         }
     }
     check_writes(&cases);
