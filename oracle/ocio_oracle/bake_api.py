@@ -23,8 +23,9 @@ import tempfile
 import PyOpenColorIO as OCIO
 
 from . import spec
-from .checks import check_keys
-from .commands import RAISED, captured_log, command, exception_result, wheel_raised
+from .checks import check_bool, check_keys
+from .commands import (RAISED, UndecodableMessage, captured_log, command, exception_result,
+                       wheel_raised)
 from .config_api import RequestError, text
 
 # The Baker setters "calls" may use.
@@ -67,11 +68,20 @@ def _decoded(fn):
     return value if isinstance(value, int) else {"bytes": value.encode("utf-8").hex()}
 
 
+def _bake_to(baker, path):
+    """bake(fileName). It returns nothing, so a UnicodeDecodeError can only be the binding
+    failing to decode an exception's message that isn't UTF-8: raised as UndecodableMessage."""
+    try:
+        baker.bake(path)
+    except UnicodeDecodeError as exc:
+        raise UndecodableMessage(exc) from exc
+
+
 def _baked_file(baker):
     """bake(fileName) into a new temporary file (a std::ofstream in text mode): its bytes, hex."""
     with tempfile.TemporaryDirectory() as root:
         path = os.path.join(root, "baked")
-        baker.bake(path)
+        _bake_to(baker, path)
         with open(path, "rb") as f:
             return f.read().hex()
 
@@ -82,7 +92,7 @@ def _partial_file(baker):
     with tempfile.TemporaryDirectory() as root:
         path = os.path.join(root, "baked")
         try:
-            baker.bake(path)
+            _bake_to(baker, path)
             raised = None
         except RAISED as exc:
             if not wheel_raised(exc):
@@ -120,17 +130,18 @@ def bake(args, blobs):
                   "config", "metadata", "setters" or "bake"
       partial_file   when bake() raised: what bake(fileName) left in its new file,
                   {"bytes": hex, or null where it left no file, "exception": what it raised,
-                  or null}
-      log         OCIO's log messages
+                  or null}; the bytes are written in text mode, as "file"'s are (each line
+                  feed a CR LF on Windows)
+      log         OCIO's log messages, the file overloads' (and partial_file's second bake's)
+                  included
     blobs: none
 
     An unknown key, a method that isn't listed, or an argument it can't read, is refused.
     """
     check_keys("bake", args, {"config", "no_config", "metadata", "calls"})
-    no_config = args.get("no_config", False)
-    if not isinstance(no_config, bool) or (no_config and "config" in args):
-        raise RequestError(f"no_config must be true or false, and true only without a config: "
-                           f"{args!r}")
+    no_config = check_bool("bake no_config", args.get("no_config", False))
+    if no_config and "config" in args:
+        raise RequestError("bake: no_config and config can't both be given")
     metadata = _checked_calls("metadata", args.get("metadata", []), METADATA_METHODS)
     calls = _checked_calls("calls", args.get("calls", []), SETTERS)
     stage, result = ["config"], {}

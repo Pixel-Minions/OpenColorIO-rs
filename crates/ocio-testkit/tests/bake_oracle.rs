@@ -134,6 +134,7 @@ fn the_bake_formats_are_upstreams() {
 fn refusals_report_their_stage() {
     let unknown = call(json!({"config": {"yaml": PROFILE}, "calls": [["setFormat", "nope"]]}));
     assert_eq!(unknown["stage"], "setters", "{unknown}");
+    assert!(unknown.get("partial_file").is_none(), "{unknown}");
     assert_eq!(unknown["exception"]["type"], "Exception", "{unknown}");
     let incomplete = call(json!({"config": {"yaml": PROFILE},
                                  "calls": [["setFormat", "cinespace"]]}));
@@ -157,6 +158,10 @@ fn a_baker_without_a_config_is_refused() {
         message.contains("No OCIO config has been set."),
         "{without}"
     );
+    // The binding opens the file before `bake` checks anything (PyBaker.cpp:130): an empty
+    // file, and the same exception.
+    assert_eq!(without["partial_file"]["bytes"], "", "{without}");
+    assert_eq!(without["partial_file"]["exception"], without["exception"]);
     let with = call(json!({"config": {"yaml": PROFILE}, "calls": calls}));
     assert!(with.get("exception").is_none(), "{with}");
 }
@@ -180,12 +185,38 @@ fn a_failing_bake_reports_its_partial_file() {
     assert_eq!(partial["exception"], failed["exception"], "{failed}");
     let partial = unhex(partial["bytes"].as_str().expect("a file"));
     assert!(!partial.is_empty(), "{failed}");
+    // Lustre writes its two header lines (FileFormat3DL.cpp:548-549), then fails at the
+    // shaper's vector (:552).
+    assert_eq!(
+        partial.iter().filter(|&&b| b == b'\n').count(),
+        2,
+        "{failed}"
+    );
     let complete = call(request(2));
     assert!(complete.get("partial_file").is_none(), "{complete}");
     let full = unhex(complete["file"].as_str().unwrap());
     assert!(full.len() > partial.len());
     assert_eq!(&full[..partial.len()], partial.as_slice());
     assert!(partial.ends_with(b"\n"));
+}
+
+/// An exception whose message isn't UTF-8 (an input space of the byte 0xFF, which the
+/// message names): the bake stage reports it with its bytes, and so does the partial file.
+#[test]
+fn an_undecodable_message_is_reported() {
+    let result = call(json!({
+        "config": {"yaml": PROFILE},
+        "calls": [["setFormat", "cinespace"], ["setInputSpace", {"bytes": "ff"}],
+                  ["setTargetSpace", "gamma22"]],
+    }));
+    assert_eq!(result["stage"], "bake", "{result}");
+    assert_eq!(
+        result["exception"]["type"], "UnicodeDecodeError",
+        "{result}"
+    );
+    let message = unhex(result["exception"]["undecodable"].as_str().unwrap());
+    assert!(message.contains(&0xff), "{result}");
+    assert_eq!(result["partial_file"]["exception"], result["exception"]);
 }
 
 /// Requests it can't read are refused.
