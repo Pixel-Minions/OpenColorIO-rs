@@ -1,7 +1,7 @@
 # Phase 5 cards: dynamic properties, grading ops and app helpers
 
-**Status: planned, 2026-10-17.** Waiting for the owner's decisions P5-1 to P5-6. Phase 5 starts
-once M2's Phase 4 cards have landed; parts of it can start earlier, as "Order and parallelism"
+**Status: planned, 2026-10-17.** The owner decided P5-1 to P5-6 on 2026-10-17, all as
+recommended. Phase 5 starts once M2's Phase 4 cards have landed; parts of it can start earlier, as "Order and parallelism"
 says.
 
 **Goal: milestone M3** (PLAN.md §10, Phase 5, ~10 pw): OCIO 2.5.2's dynamic and grading
@@ -229,9 +229,10 @@ does; each call captures the log.
 
 ## Owner decisions
 
-To decide (owner): P5-1 to P5-6. Each lists the recommendation.
+**Decided by the owner on 2026-10-17, all six as recommended.** P5-1's race of a set beside an
+apply is listed as a `U-` entry with chunk 5.0a.
 
-| # | Decision | Recommendation |
+| # | Decision | Recommendation (decided) |
 |---|---|---|
 | P5-1 | **Dynamic property handles** (`api`). Upstream hands out `shared_ptr`s to mutable properties: the processor's renderers read the value at each `apply`, and an application sets it between applies, with no synchronization (setting while another thread applies is a data race, undefined behaviour) | **Keep 1.2b's `DynamicPropertyRcPtr` enum, with a variant per type: `Double` (the `AtomicU64` of 1.2b), `GradingPrimary`, `GradingRgbCurve`, `GradingHueCurve`, `GradingTone`.** The grading variants hold their value and its pre-render data behind a `Mutex`: a setter validates, precomputes and swaps both under the lock, and a renderer copies them once per `apply` where upstream reads them, so a single-threaded program sees upstream's values exactly, and a concurrent set gives one whole value or the other, never a torn one. The race is listed as a `U-` entry (the owner's general rule). `get_value`/`set_value` per variant, with upstream's `As*` casts as `as_grading_primary()` and siblings returning `Result` ("Dynamic property value is not a ...") |
 | P5-2 | **Grading values** (`api`) | **Plain Rust values with public fields, as upstream's structs:** `GradingRgbm`, `GradingPrimary` (`new(style)`, `validate()`, the defaults per style), `GradingRgbmsw`, `GradingTone`; `GradingHueCurve` and its `HueCurveType` as values like 2.6a's `GradingRgbCurve` (not shared pointers; `create_editable_copy` is `clone`). `NoClampBlack`/`NoClampWhite` as associated constants. Equality as upstream's `operator==` (exact on floats) |
@@ -281,21 +282,21 @@ all of the above ── p5-m3-parity (O5.3) ── M3 ────────�
 
 ## Cards
 
-Each card is one branch and one PR. "Now" means the card can start once its owner decisions
-are made, without waiting for other Phase 5 cards.
+Each card is one branch and one PR. "Now" means the card can start without waiting for other
+Phase 5 cards (its owner decisions are made).
 
 | Card | Chunks | Size | Who | Needs | Owner items |
 |---|---|---|---|---|---|
 | `p5-oracle` | O5.1, O5.2, each its own chunk | 2 | C | now | — (verifier-reviewed) |
-| `p5-values` | 5.0a–5.0d | 4, ~2,200 | A | now | `api` (P5-1, P5-2) |
+| `p5-values` | 5.0a–5.0d | 4, ~2,200 | A | now | — (P5-1, P5-2 decided) |
 | `p5-ec` | 5.1a–5.1c | 3, ~1,520 | A | `p5-values` (the double properties are 1.2b's: 5.1 can start beside 5.0) | — |
 | `p5-primary` | 5.2a–5.2d | 4, ~2,080 | B | 5.0a | — |
 | `p5-tone` | 5.3a–5.3e | 5, ~2,840 | B | 5.0b | — |
 | `p5-huecurve` | 5.4a–5.4c | 3, ~1,330 | C | 5.0c–d | — |
-| `p5-transforms` | 5.5a–5.5e | 5, ~2,240 | A | `p5-ec`, `p5-primary`, `p5-tone`, `p5-huecurve` (5.5a needs only `p5-ec`) | `api` (P5-4) |
+| `p5-transforms` | 5.5a–5.5e | 5, ~2,240 | A | `p5-ec`, `p5-primary`, `p5-tone`, `p5-huecurve` (5.5a needs only `p5-ec`) | — (P5-4 decided) |
 | `p5-dynamic` | 5.6a–5.6b | 2 | A | `p5-transforms` | — |
-| `p5-helpers-1` | 5.7a–5.7b | 2, ~1,340 | C | now | `api` (P5-3 a) |
-| `p5-helpers-2` | 5.7c–5.7e | 3, ~1,200 | C | `p5-helpers-1`; 5.5a for 5.7d | `api` (P5-3 b–d) |
+| `p5-helpers-1` | 5.7a–5.7b | 2, ~1,340 | C | now | — (P5-3 a decided) |
+| `p5-helpers-2` | 5.7c–5.7e | 3, ~1,200 | C | `p5-helpers-1`; 5.5a for 5.7d | — (P5-3 b–d decided) |
 | `p4-after-p5` | 4.5i, 4.6f | 2, ~1,400 | A | 5.1a–5.4a, `p5-transforms` (4.6f) | — |
 | `p5-m3-parity` | O5.3, then every op through the battery's `full` tier with dynamic sets, every shader and its uniforms in all 10 languages, the YAML and CTF text, and the app helpers over the built-in and test configs | 2–3 | any | every card above | — |
 
