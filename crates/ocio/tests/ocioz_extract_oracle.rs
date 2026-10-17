@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 use ocio::{Config, extract_ocioz_archive};
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle::BatchCall;
+use ocio_testkit::oracle_values::bytes;
 use ocio_testkit::paths::upstream_dir;
 use serde_json::json;
 
@@ -201,7 +202,7 @@ fn check(archives: &[(&str, PathBuf)]) {
                     .iter()
                     .map(|f| {
                         (
-                            f["path"].as_str().unwrap().to_owned(),
+                            String::from_utf8_lossy(&bytes(&f["path"])).into_owned(),
                             w.blobs[f["contents"].as_u64().unwrap() as usize].clone(),
                         )
                     })

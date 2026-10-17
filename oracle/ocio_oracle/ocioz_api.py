@@ -3,8 +3,8 @@
 """Oracle command for .ocioz archives (card p4-oracle, chunk O4.5).
 
 - ocioz: Config.archive of a config, reported entry by entry (its names, methods, flags,
-  sizes, CRCs and contents), or ExtractOCIOZArchive of an archive, reported as the files it
-  writes.
+  sizes, CRCs and contents), or ExtractOCIOZArchive of an archive, reported as the files,
+  directories and links it writes (also where it fails partway).
 
 Upstream's archives aren't reproducible byte for byte: each entry carries the time it was
 written (OCIOZArchive.cpp:272), and the files come in the file system's order. The port
@@ -17,6 +17,7 @@ values.
 """
 
 import os
+import stat
 import tempfile
 import zipfile
 
@@ -59,18 +60,54 @@ def _entries(path, out):
     return entries
 
 
+def _attributes(full):
+    """What the system says of the file or directory `full` itself: on Windows its
+    "attributes" (st_file_attributes), elsewhere its "mode" (the permission bits of
+    st_mode)."""
+    st = os.lstat(full)
+    if os.name == "nt":
+        return {"attributes": st.st_file_attributes}
+    return {"mode": stat.S_IMODE(st.st_mode)}
+
+
 def _written(root, out):
-    """The files under `root`, by relative path ("/" separated) in sorted order; their contents
-    go to `out` (blobs)."""
-    files = []
-    for directory, _, names in os.walk(root):
-        for name in names:
+    """What is under `root`: "files", "dirs" and "links", each sorted by its relative path's
+    bytes ("/" between the components; on Linux a backslash is part of a name).
+
+    A file is {"path": {"bytes": hex}, "contents": a blob index (its bytes go to `out`), or
+    null where it can't be read, "mtime_ns", and "attributes" or "mode" (_attributes)}; a
+    directory {"path", and "attributes" or "mode"}; a symbolic link {"path", "target":
+    {"bytes": hex}}. os.walk doesn't follow links to directories, and a link isn't read
+    through."""
+    files, dirs, links = [], [], []
+    for directory, dirnames, filenames in os.walk(root):
+        for name in dirnames + filenames:
             full = os.path.join(directory, name)
-            with open(full, "rb") as f:
-                out.append(f.read())
-            relative = os.path.relpath(full, root).replace(os.sep, "/")
-            files.append({"path": relative, "contents": len(out) - 1})
-    return sorted(files, key=lambda f: f["path"])
+            relative = os.fsencode(os.path.relpath(full, root))
+            relative = relative.replace(os.fsencode(os.sep), b"/")
+            entry = {"path": {"bytes": relative.hex()}}
+            if os.path.islink(full):
+                entry["target"] = {"bytes": os.fsencode(os.readlink(full)).hex()}
+                links.append(entry)
+            elif os.path.isdir(full):
+                entry.update(_attributes(full))
+                dirs.append(entry)
+            else:
+                try:
+                    with open(full, "rb") as f:
+                        out.append(f.read())
+                    entry["contents"] = len(out) - 1
+                except OSError:
+                    entry["contents"] = None
+                entry["mtime_ns"] = os.lstat(full).st_mtime_ns
+                entry.update(_attributes(full))
+                files.append(entry)
+
+    def by_path(e):
+        return bytes.fromhex(e["path"]["bytes"])
+
+    return {"files": sorted(files, key=by_path), "dirs": sorted(dirs, key=by_path),
+            "links": sorted(links, key=by_path)}
 
 
 @command
@@ -91,10 +128,15 @@ def ocioz(args, blobs):
                   again. Its bytes, the dates, and the compressed sizes aren't the port's to
                   match; the "extra" fields and "external_attr" come from the files' own
                   attributes and times (on Windows, NTFS times)
-      extract:    "files": every file written, by relative path ("/" separated, sorted),
-                  each {"path", "contents" (a blob index)}
+      extract:    "files", "dirs" and "links": everything written under the destination
+                  (see _written), each sorted by its relative path's bytes ("/" separated),
+                  "path" {"bytes": hex}; a file has "contents" (a blob index, or null
+                  where it can't be read), "mtime_ns" and "attributes" (Windows) or "mode"
+                  (elsewhere), a directory "attributes" or "mode", a link "target"
+                  {"bytes": hex}
       exception, stage   when OCIO or the binding raised: {"type", "message"}, and where:
-                  "config", "archive" or "extract"
+                  "config", "archive" or "extract"; at the "extract" stage, also "files",
+                  "dirs" and "links": what the extraction wrote before it failed
       log         OCIO's log messages
     blobs: the contents, as the result indexes them
 
@@ -123,10 +165,12 @@ def ocioz(args, blobs):
                 stage[0] = "extract"
                 destination = os.path.join(root, "extracted")
                 OCIO.ExtractOCIOZArchive(archive, destination)
-                result["files"] = _written(destination, out)
+                result.update(_written(destination, out))
         except RAISED as exc:
             if not wheel_raised(exc):
                 raise
             result, out = {"exception": exception_result(exc), "stage": stage[0]}, []
+            if stage[0] == "extract":
+                result.update(_written(destination, out))
     result["log"] = log
     return result, out

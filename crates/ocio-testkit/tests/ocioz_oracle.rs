@@ -5,8 +5,9 @@
 //! system and upstream's test data: archiving `tests/data/files/configs/context_test1` gives the
 //! config first and then every file of its directory the archiver takes, each entry's contents
 //! the file's; the entries are the archive's, in its order and with its flags; extracting that
-//! archive (through `with_files`) writes the same files; refusals
-//! report their stage; the requests it can't read are refused.
+//! archive (through `with_files`) writes the same files, in the directories they need;
+//! extracting reports directories, links, times and attributes, and what was written before a
+//! failure; refusals report their stage; the requests it can't read are refused.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -83,15 +84,282 @@ fn archive_and_extract_context_test1() {
                "args": {"extract": {"archive": "$FILES/a.ocioz"}}}),
         &[archive],
     );
-    let files = extracted.result["files"].as_array().unwrap();
+    let result = &extracted.result;
     let mut written = BTreeMap::new();
-    for f in files {
+    for f in result["files"].as_array().unwrap() {
         let contents = &extracted.blobs[f["contents"].as_u64().unwrap() as usize];
-        written.insert(f["path"].as_str().unwrap().to_string(), contents.clone());
+        let path = String::from_utf8(bytes(&f["path"])).unwrap();
+        written.insert(path, contents.clone());
     }
     let config_text = &response.blobs[entries[0]["contents"].as_u64().unwrap() as usize];
     assert_eq!(written.remove("config.ocio").as_ref(), Some(config_text));
     assert_eq!(written, archived);
+    // The directories are those the files are in (the archive has no empty one), sorted.
+    let mut parents = std::collections::BTreeSet::new();
+    for name in archived.keys() {
+        let mut path = name.as_str();
+        while let Some(i) = path.rfind('/') {
+            path = &path[..i];
+            parents.insert(path.as_bytes().to_vec());
+        }
+    }
+    assert_eq!(
+        paths(result, "dirs"),
+        parents.into_iter().collect::<Vec<_>>(),
+        "{result}"
+    );
+    assert_eq!(result["links"], json!([]), "{result}");
+}
+
+/// CRC-32 (ISO-HDLC, as zip uses) of the data this test archives.
+fn crc32(data: &[u8]) -> u32 {
+    let mut crc = 0xffff_ffffu32;
+    for &b in data {
+        crc ^= u32::from(b);
+        for _ in 0..8 {
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0xedb8_8320
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    !crc
+}
+
+/// A stored entry: its name, data, made-by version, external attributes, extra field and
+/// CRC.
+struct Entry<'a> {
+    name: &'a [u8],
+    data: &'a [u8],
+    madeby: u16,
+    attributes: u32,
+    extra: Vec<u8>,
+    crc: u32,
+}
+
+fn entry<'a>(name: &'a [u8], data: &'a [u8]) -> Entry<'a> {
+    Entry {
+        name,
+        data,
+        madeby: 20,
+        attributes: 0,
+        extra: Vec::new(),
+        crc: crc32(data),
+    }
+}
+
+/// An NTFS extra field (PKWARE APPNOTE 4.5.5) with the same three times.
+fn ntfs_times(time: u64) -> Vec<u8> {
+    let mut out = Vec::new();
+    for v in [0x000au16, 32, 0, 0, 1, 24] {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    for _ in 0..3 {
+        out.extend_from_slice(&time.to_le_bytes());
+    }
+    out
+}
+
+/// The zip archive of `entries`, each stored, its DOS date 2025-01-01 12:00.
+fn zip(entries: &[Entry<'_>]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut central = Vec::new();
+    for e in entries {
+        let offset = out.len() as u32;
+        let sizes = [e.crc, e.data.len() as u32, e.data.len() as u32];
+        out.extend_from_slice(&0x0403_4b50u32.to_le_bytes());
+        for v in [20u16, 0, 0, 0x6000, 0x5a21] {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        for v in sizes {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        for v in [e.name.len() as u16, e.extra.len() as u16] {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        out.extend_from_slice(e.name);
+        out.extend_from_slice(&e.extra);
+        out.extend_from_slice(e.data);
+
+        central.extend_from_slice(&0x0201_4b50u32.to_le_bytes());
+        for v in [e.madeby, 20, 0, 0, 0x6000, 0x5a21] {
+            central.extend_from_slice(&v.to_le_bytes());
+        }
+        for v in sizes {
+            central.extend_from_slice(&v.to_le_bytes());
+        }
+        for v in [e.name.len() as u16, e.extra.len() as u16, 0, 0, 0] {
+            central.extend_from_slice(&v.to_le_bytes());
+        }
+        for v in [e.attributes, offset] {
+            central.extend_from_slice(&v.to_le_bytes());
+        }
+        central.extend_from_slice(e.name);
+        central.extend_from_slice(&e.extra);
+    }
+    let cd_offset = out.len() as u32;
+    out.extend_from_slice(&central);
+    out.extend_from_slice(&0x0605_4b50u32.to_le_bytes());
+    let n = entries.len() as u16;
+    for v in [0u16, 0, n, n] {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    for v in [central.len() as u32, cd_offset] {
+        out.extend_from_slice(&v.to_le_bytes());
+    }
+    out.extend_from_slice(&[0, 0]);
+    out
+}
+
+/// The wheel extracting `archive`: its result and blobs.
+fn extract(archive: &[u8]) -> (Value, Vec<Vec<u8>>) {
+    let response = Oracle::get().call(
+        "with_files",
+        json!({"files": {"a.ocioz": {"blob": 0}}, "file_blobs": 1, "command": "ocioz",
+               "args": {"extract": {"archive": "$FILES/a.ocioz"}}}),
+        &[archive],
+    );
+    (response.result, response.blobs)
+}
+
+/// The paths of a listing ("files", "dirs" or "links").
+fn paths(result: &Value, key: &str) -> Vec<Vec<u8>> {
+    result[key]
+        .as_array()
+        .unwrap_or_else(|| panic!("{result}"))
+        .iter()
+        .map(|e| bytes(&e["path"]))
+        .collect()
+}
+
+/// Extracting reports directories, empty ones included, sorted by their paths' bytes; and
+/// each file's modification time and attributes as minizip-ng sets them: the entry's NTFS
+/// times (mz_zip.c:344-372 @ 4.0.10; 1,000,000,000 seconds after 1970 here), and its Windows
+/// attributes as they are on Windows (`SetFileAttributesW`, mz_os_win32.c:320-335) and as
+/// `mz_zip_attrib_win32_to_posix` gives them on Linux (mz_zip.c, read-only 0444, otherwise
+/// 0666).
+#[test]
+fn extract_reports_directories_times_and_attributes() {
+    let unix = 1_000_000_000u64;
+    let ntfs = unix * 10_000_000 + 116_444_736_000_000_000;
+    let windows_host = 10 << 8 | 20;
+    let archive = zip(&[
+        entry(b"zdir/", b""),
+        entry(b"adir/sub/", b""),
+        Entry {
+            madeby: windows_host,
+            attributes: 0x21,
+            extra: ntfs_times(ntfs),
+            ..entry(b"adir/ro.txt", b"read only")
+        },
+        Entry {
+            madeby: windows_host,
+            attributes: 0x20,
+            extra: ntfs_times(ntfs),
+            ..entry(b"rw.txt", b"read and write")
+        },
+    ]);
+    let (result, blobs) = extract(&archive);
+    assert_eq!(
+        paths(&result, "dirs"),
+        [&b"adir"[..], b"adir/sub", b"zdir"],
+        "{result}"
+    );
+    assert_eq!(
+        paths(&result, "files"),
+        [&b"adir/ro.txt"[..], b"rw.txt"],
+        "{result}"
+    );
+    assert_eq!(result["links"], json!([]), "{result}");
+    let files = result["files"].as_array().unwrap();
+    for (f, contents) in files.iter().zip([&b"read only"[..], b"read and write"]) {
+        assert_eq!(blobs[f["contents"].as_u64().unwrap() as usize], contents);
+        assert_eq!(
+            f["mtime_ns"].as_u64(),
+            Some(unix * 1_000_000_000),
+            "{result}"
+        );
+    }
+    if cfg!(windows) {
+        assert_eq!(files[0]["attributes"], 0x21, "{result}");
+        assert_eq!(files[1]["attributes"], 0x20, "{result}");
+        for d in result["dirs"].as_array().unwrap() {
+            assert_eq!(d["attributes"].as_u64().unwrap() & 0x10, 0x10, "{result}");
+        }
+    } else {
+        assert_eq!(files[0]["mode"], 0o444, "{result}");
+        assert_eq!(files[1]["mode"], 0o666, "{result}");
+        for d in result["dirs"].as_array().unwrap() {
+            assert!(d["mode"].is_u64(), "{result}");
+        }
+    }
+}
+
+/// A symbolic link is reported with its target, and isn't read through: minizip-ng makes one
+/// from an entry of a Unix host whose mode is a link's, the entry's contents its target
+/// (mz_zip_rw.c:691-724 @ 4.0.10). On Windows a link needs a privilege the process may not
+/// have, and the extraction then fails.
+#[test]
+fn extract_reports_links() {
+    let unix_host = 3 << 8 | 20;
+    let archive = zip(&[
+        entry(b"t.txt", b"target"),
+        Entry {
+            madeby: unix_host,
+            attributes: 0o120_777 << 16,
+            ..entry(b"l.txt", b"t.txt")
+        },
+        Entry {
+            madeby: unix_host,
+            attributes: 0o120_777 << 16,
+            ..entry(b"d", b"nowhere/")
+        },
+    ]);
+    let (result, _) = extract(&archive);
+    if cfg!(windows) && result.get("exception").is_some() {
+        assert_eq!(result["stage"], "extract", "{result}");
+        assert_eq!(paths(&result, "files"), [b"t.txt"], "{result}");
+        return;
+    }
+    assert_eq!(paths(&result, "files"), [b"t.txt"], "{result}");
+    let links: Vec<(Vec<u8>, Vec<u8>)> = result["links"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| (bytes(&l["path"]), bytes(&l["target"])))
+        .collect();
+    assert_eq!(
+        links,
+        [
+            (b"d".to_vec(), b"nowhere/".to_vec()),
+            (b"l.txt".to_vec(), b"t.txt".to_vec())
+        ],
+        "{result}"
+    );
+}
+
+/// Where extracting fails partway, what it wrote before is reported with the exception: here
+/// the first entry, and the second, whose CRC is wrong (minizip-ng checks it as it closes the
+/// entry, after writing its data).
+#[test]
+fn extract_failure_reports_what_was_written() {
+    let archive = zip(&[
+        entry(b"ok.txt", b"ok"),
+        Entry {
+            crc: 0,
+            ..entry(b"bad.txt", b"bad")
+        },
+        entry(b"never.txt", b"never"),
+    ]);
+    let (result, _) = extract(&archive);
+    assert_eq!(result["stage"], "extract", "{result}");
+    assert!(result["exception"].is_object(), "{result}");
+    assert_eq!(
+        paths(&result, "files"),
+        [&b"bad.txt"[..], b"ok.txt"],
+        "{result}"
+    );
 }
 
 /// The central directory of a zip archive: each entry's name and general purpose flags, in
