@@ -10,9 +10,14 @@
 use ocio_ops::utils::string_utils::c_str;
 
 use super::mz_strm::{
-    MZ_BUF_ERROR, MZ_EXIST_ERROR, MZ_OK, MZ_PARAM_ERROR, MZ_WRITE_ERROR, SplitStream,
+    MZ_BUF_ERROR, MZ_EXIST_ERROR, MZ_OK, MZ_PARAM_ERROR, MZ_STREAM_ERROR, MZ_WRITE_ERROR,
+    MemStream, Origin, SplitStream, mz_stream_read_uint64, mz_stream_seek,
 };
-use super::mz_zip::{FileInfo, Zip};
+use super::mz_zip::{CdStream, FileInfo, MZ_ZIP_EXTENSION_CDCD, Zip, mz_zip_extrafield_find};
+
+/// The name of a zipped central directory's entry (`MZ_ZIP_CD_FILENAME`, mz_zip_rw.c:28 @
+/// 4.0.10).
+const MZ_ZIP_CD_FILENAME: &[u8] = b"__cdcd__";
 
 /// The size of the reader's buffer (`uint8_t buffer[UINT16_MAX]`, mz_zip_rw.c:55 @ 4.0.10).
 const READER_BUFFER_SIZE: usize = u16::MAX as usize;
@@ -38,12 +43,81 @@ impl Reader {
         let stream = SplitStream::open(c_str(path))?;
         // The reader turns recovery on (reader->recover = 1).
         let zip = Zip::open(stream, true)?;
-        // mz_zip_reader_unzip_cd isn't ported yet: a zipped central directory is read as
-        // the archive's entry `__cdcd__`.
-        Ok(Reader {
+        let mut reader = Reader {
             zip,
             has_file_info: false,
-        })
+        };
+        let _ = reader.unzip_cd();
+        Ok(reader)
+    }
+
+    /// Decompresses the central directory when the first entry holds it, zipped.
+    ///
+    /// Port of `mz_zip_reader_unzip_cd` (mz_zip_rw.c:243-304 @ 4.0.10).
+    fn unzip_cd(&mut self) -> i32 {
+        let err = self.goto_first_entry();
+        if err != MZ_OK {
+            return err;
+        }
+        let cd_info = match self.entry_get_info() {
+            Ok(info) => info.clone(),
+            Err(err) => return err,
+        };
+
+        if c_str(&cd_info.filename) != MZ_ZIP_CD_FILENAME {
+            return self.goto_first_entry();
+        }
+
+        let err = self.entry_open();
+        if err != MZ_OK {
+            return err;
+        }
+
+        let mut file_extra_stream = MemStream::over(&cd_info.extrafield);
+        let number_entry =
+            match mz_zip_extrafield_find(&mut file_extra_stream, MZ_ZIP_EXTENSION_CDCD, i32::MAX)
+                .and_then(|_| mz_stream_read_uint64(&mut file_extra_stream))
+            {
+                Ok(number_entry) => number_entry,
+                Err(err) => return err,
+            };
+
+        let zip = &mut self.zip;
+        if !zip.cd_mem_open {
+            zip.cd_mem_stream = MemStream::create();
+            zip.cd_mem_open = true;
+        }
+
+        let mut err = mz_stream_seek(&mut zip.cd_mem_stream, 0, Origin::Set);
+        if err == MZ_OK {
+            // mz_stream_copy_stream(cd_mem_stream, NULL, handle, mz_zip_reader_entry_read,
+            //                       (int32_t)cd_info->uncompressed_size)
+            let mut len = cd_info.uncompressed_size as i32;
+            let mut buf = [0u8; 16384];
+            while len > 0 {
+                let bytes_to_copy = len.min(buf.len() as i32) as usize;
+                let read = zip.entry_read(&mut buf[..bytes_to_copy]);
+                if read <= 0 {
+                    err = MZ_STREAM_ERROR;
+                    break;
+                }
+                let written = zip.cd_mem_stream.write(&buf[..read as usize]);
+                if written != read {
+                    err = MZ_STREAM_ERROR;
+                    break;
+                }
+                len -= read;
+            }
+        }
+
+        if err == MZ_OK {
+            self.zip.set_cd_stream(0, CdStream::Memory);
+            self.zip.number_entry = number_entry;
+
+            err = self.goto_first_entry();
+        }
+
+        err
     }
 
     /// Port of `mz_zip_reader_goto_first_entry` (mz_zip_rw.c:316-336 @ 4.0.10), without a

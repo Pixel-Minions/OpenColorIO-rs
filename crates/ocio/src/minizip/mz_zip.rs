@@ -39,6 +39,7 @@ const MZ_ZIP_EOCD_MAX_BACK: i64 = 1 << 20;
 pub(crate) const MZ_ZIP_EXTENSION_ZIP64: u16 = 0x0001;
 pub(crate) const MZ_ZIP_EXTENSION_NTFS: u16 = 0x000a;
 pub(crate) const MZ_ZIP_EXTENSION_UNIX1: u16 = 0x000d;
+pub(crate) const MZ_ZIP_EXTENSION_CDCD: u16 = 0xcdcd;
 
 /// The compression methods (mz.h:63-64 @ 4.0.10): OpenColorIO's minizip-ng is built with
 /// deflate (zlib) only (Installminizip-ng.cmake:73-87 @ v2.5.2).
@@ -444,7 +445,7 @@ pub(crate) struct Zip {
     cd_current_pos: i64,
     cd_offset: i64,
     cd_size: i64,
-    number_entry: u64,
+    pub(crate) number_entry: u64,
     disk_number_with_cd: u32,
     disk_offset_shift: i64,
     cd_signature: u32,

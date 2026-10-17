@@ -263,6 +263,43 @@ impl Archive {
     }
 }
 
+/// An archive whose central directory is zipped, as minizip-ng writes one (`zip_cd`): the
+/// entries' central headers are the data of an entry `__cdcd__`, which its central directory
+/// lists first (the entries' own headers after it with `also_listed`), with the number of
+/// entries in its `0xcdcd` extra field when `count` is given.
+fn zipped_cd(entries: &[Entry], method: u16, count: Option<u64>, also_listed: bool) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut inner = Vec::new();
+    for e in entries {
+        let offset = out.len() as u32;
+        out.extend_from_slice(&e.local_record());
+        inner.extend_from_slice(&e.central_record(offset));
+    }
+    let mut cd_entry = Entry::new(b"__cdcd__", &inner, method);
+    if let Some(count) = count {
+        cd_entry.cd_extra = vec![0xcd, 0xcd, 8, 0];
+        cd_entry.cd_extra.extend_from_slice(&count.to_le_bytes());
+    }
+    let cd_entry_offset = out.len() as u32;
+    out.extend_from_slice(&cd_entry.local_record());
+    let mut central = cd_entry.central_record(cd_entry_offset);
+    let mut n = 1u16;
+    if also_listed {
+        central.extend_from_slice(&inner);
+        n += entries.len() as u16;
+    }
+    let cd_offset = out.len() as u32;
+    out.extend_from_slice(&central);
+    put32(&mut out, 0x0605_4b50);
+    for v in [0u16, 0, n, n] {
+        put16(&mut out, v);
+    }
+    put32(&mut out, central.len() as u32);
+    put32(&mut out, cd_offset);
+    put16(&mut out, 0);
+    out
+}
+
 /// The directory of the archives the tests write.
 fn files_dir() -> PathBuf {
     let dir = Path::new(env!("CARGO_TARGET_TMPDIR")).join("ocioz_read_oracle");
@@ -852,4 +889,28 @@ fn recovered_archives() {
     only_local.cut = Some(only_local.prefix.len());
     cases.push(("a local signature and nothing else", only_local));
     check(&cases);
+}
+
+/// Archives whose central directory is zipped, which minizip-ng reads instead of the archive's
+/// own when the zipped one decompresses whole.
+#[test]
+fn zipped_central_directories() {
+    let entries = standard(8);
+    let mut short = entries.clone();
+    short[1].uncompressed_size = Some(9);
+    check_files(&[
+        ("deflated", zipped_cd(&entries, 8, Some(3), false)),
+        ("stored", zipped_cd(&entries, 0, Some(3), false)),
+        ("also listed", zipped_cd(&entries, 8, Some(3), true)),
+        ("without its count", zipped_cd(&entries, 8, None, false)),
+        (
+            "without its count, also listed",
+            zipped_cd(&entries, 8, None, true),
+        ),
+        ("a count of 1", zipped_cd(&entries, 8, Some(1), false)),
+        (
+            "an entry's size wrong",
+            zipped_cd(&short, 8, Some(3), false),
+        ),
+    ]);
 }
