@@ -611,3 +611,84 @@ fn cc_file_with_different_file_extension() {
         cfg.processor(tr2).unwrap();
     }
 }
+
+/// A chain of `n` CTF files in `dir`, `c0.ctf` referencing `c1.ctf` and so on, the last a
+/// matrix; returns the path of `c0.ctf`.
+fn write_reference_chain(dir: &std::path::Path, n: usize) -> String {
+    std::fs::create_dir_all(dir).unwrap();
+    for i in 0..n {
+        let body = if i == n - 1 {
+            "    <Matrix inBitDepth=\"32f\" outBitDepth=\"32f\">\n\
+             \x20       <Array dim=\"3 3 3\">2 0 0 0 3 0 0 0 4</Array>\n    </Matrix>\n"
+                .to_owned()
+        } else {
+            format!(
+                "    <Reference inBitDepth=\"32f\" outBitDepth=\"32f\" path=\"c{}.ctf\"/>\n",
+                i + 1
+            )
+        };
+        let text = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+             <ProcessList id=\"a\" version=\"1.7\">\n{body}</ProcessList>\n"
+        );
+        let path = dir.join(format!("c{i}.ctf"));
+        if std::fs::read(&path).ok().as_deref() != Some(text.as_bytes()) {
+            std::fs::write(&path, text).unwrap();
+        }
+    }
+    let path = dir.join("c0.ctf");
+    let path = path.to_str().unwrap().replace('\\', "/");
+    path.trim_start_matches("//?/").to_owned()
+}
+
+/// A chain of CTF references [`MAX_FILE_NESTING`] files long builds, on a 1 MiB thread at any
+/// optimization level; one more file is refused, where upstream overflows its stack
+/// (docs/improvements.md, U-76). The wheel's processor of the longest chain is compared in
+/// `tests/file_format_ctf_oracle.rs`.
+#[test]
+fn chains_of_references_stop_at_the_limit() {
+    let root = ocio_testkit::paths::target_dir().join("reference-chains");
+    let processor = |n: usize| {
+        let src = write_reference_chain(&root.join(format!("n{n}")), n);
+        std::thread::Builder::new()
+            .stack_size(1 << 20)
+            .spawn(move || {
+                let mut config = (*crate::Config::create_raw().unwrap()).clone();
+                config.add_search_path(
+                    std::path::Path::new(&src)
+                        .parent()
+                        .unwrap()
+                        .to_str()
+                        .unwrap(),
+                );
+                let mut file = FileTransform::new();
+                file.set_src(&src);
+                config
+                    .processor(&crate::Transform::File(file))
+                    .map(|p| p.processor_metadata().num_files())
+                    .map_err(|e| e.to_string())
+            })
+            .unwrap()
+            .join()
+            .unwrap()
+    };
+    assert_eq!(processor(MAX_FILE_NESTING), Ok(MAX_FILE_NESTING as i32));
+    // Each file up the chain wraps the error of the one it references.
+    let err = processor(MAX_FILE_NESTING + 1).unwrap_err();
+    let wrap = "failed while building ops with this error: ";
+    assert_eq!(
+        err.matches(wrap).count(),
+        MAX_FILE_NESTING,
+        "{}",
+        &err[..500]
+    );
+    assert!(
+        err.ends_with(&format!(
+            "c{}.ctf {wrap}The CTF references nest more than 1000 files deep: upstream's stack \
+             overflows.",
+            MAX_FILE_NESTING - 1
+        )),
+        "{}",
+        &err[err.len() - 500..]
+    );
+}

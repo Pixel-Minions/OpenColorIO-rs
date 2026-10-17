@@ -3508,6 +3508,14 @@ fn op_cases_h() -> Vec<Case> {
             "2",
             reference(&format!("path=\"{matrix}\" inverted=\"false\"")),
         ),
+        // Only "true" sets the direction: a later "false" leaves it inverse (I-202).
+        (
+            "inverted true, then false",
+            "2",
+            reference(&format!(
+                "path=\"{matrix}\" inverted=\"true\" Inverted=\"false\""
+            )),
+        ),
         (
             "a path and a basePath",
             "1.7",
@@ -3879,8 +3887,106 @@ fn resolution_cases() -> Vec<(
     // No variable: $SUBDIR stays unresolved.
     let (spec, config) = search_path_config(&[&dir], &[]);
     groups.push(("no variable", vec![written("env.ctf")], spec, config));
+
+    // References to 3D LUTs without an interpolation: the reference's file transform asks for
+    // the default one (trilinear), which a CLF LUT without its own takes, and the other
+    // formats' readers too (`FileFormatCTF.cpp:1233`).
+    let lut3d = op(
+        "LUT3D",
+        f32s,
+        "        <Array dim=\"2 2 2 3\">\n0 0 0\n0 0 0.9\n0 0.7 0.1\n0.1 0.6 0.8\n\
+         0.8 0.1 0\n0.6 0.2 1\n0.9 0.9 0.2\n1 1 1\n</Array>\n",
+    );
+    let luts = write_files(&[
+        file(
+            "lut3d.clf",
+            pl("id=\"l\" compCLFversion=\"3\"", &lut3d).into_bytes(),
+        ),
+        file("clf3d.ctf", ctf_file(&reference("path=\"lut3d.clf\""))),
+        file(
+            "spi3d.ctf",
+            ctf_file(&reference("path=\"lut3d_bizarre.spi3d\"")),
+        ),
+        file("3dl.ctf", ctf_file(&reference("path=\"crosstalk.3dl\""))),
+    ]);
+    let (spec, config) = search_path_config(&[&luts, upstream_dir], &[]);
+    groups.push((
+        "references to 3D LUTs",
+        ["clf3d.ctf", "spi3d.ctf", "3dl.ctf"]
+            .into_iter()
+            .map(|name| {
+                file_case(
+                    name,
+                    &format!("{luts}/{name}"),
+                    Interpolation::Default,
+                    TransformDirection::Forward,
+                )
+            })
+            .collect(),
+        spec,
+        config,
+    ));
+
+    // The recursion check compares the resolved paths ignoring case, on every platform
+    // (I-192): a reference to the file itself in another case is a recursion on Windows and a
+    // missing file on Linux, and on Linux, where `Pair.ctf` and `pair.ctf` are two files, a
+    // reference from one to the other is refused as a recursion.
+    let mut entries = vec![file("Self.ctf", ctf_file(&reference("path=\"SELF.ctf\"")))];
+    let mut names = vec!["Self.ctf"];
+    if !cfg!(windows) {
+        entries.push(file("Pair.ctf", ctf_file(&reference("path=\"pair.ctf\""))));
+        entries.push(file("pair.ctf", ctf_file(&matrix)));
+        names.push("Pair.ctf");
+    }
+    let cases_dir = write_files(&entries);
+    let (spec, config) = search_path_config(&[&cases_dir], &[]);
+    groups.push((
+        "names that differ in case",
+        names
+            .into_iter()
+            .map(|name| {
+                file_case(
+                    name,
+                    &format!("{cases_dir}/{name}"),
+                    Interpolation::Default,
+                    TransformDirection::Forward,
+                )
+            })
+            .collect(),
+        spec,
+        config,
+    ));
+
+    // The longest chain of references the port follows (U-76): `c0.ctf` references `c1.ctf`,
+    // and so on to a matrix in the last file.
+    let mut chain = Vec::new();
+    for i in 0..CHAIN_LIMIT {
+        let body = if i == CHAIN_LIMIT - 1 {
+            matrix.clone()
+        } else {
+            reference(&format!("path=\"c{}.ctf\"", i + 1))
+        };
+        chain.push(file(&format!("c{i}.ctf"), ctf_file(&body)));
+    }
+    let chain_dir = write_files(&chain);
+    let (spec, config) = search_path_config(&[&chain_dir], &[]);
+    groups.push((
+        "the longest chain",
+        vec![file_case(
+            "c0.ctf",
+            &format!("{chain_dir}/c0.ctf"),
+            Interpolation::Default,
+            TransformDirection::Forward,
+        )],
+        spec,
+        config,
+    ));
     groups
 }
+
+/// The number of files in the longest chain of CTF references the port follows
+/// (`MAX_FILE_NESTING`, docs/improvements.md U-76).
+const CHAIN_LIMIT: usize = 1000;
 
 /// The processors of CTF files that reference others, through a config's search path, in
 /// both directions.
@@ -3890,4 +3996,114 @@ fn references_resolve_as_in_the_wheel() {
         println!("{label}");
         common::transforms::check_processors_in(&cases, Some(&spec), &config);
     }
+}
+
+/// One config's processors of a CTF file whose reference is a context variable, `$FILEVAR`,
+/// with two contexts that set it to two files, in both orders: the wheel's (`config_calls`)
+/// against the port's cache IDs and files. The processor cache doesn't key on the variables
+/// of a file's references, so the second context gets the first one's processor
+/// (`docs/improvements.md` I-193).
+#[test]
+fn context_variables_in_references_share_a_processor_as_in_the_wheel() {
+    use ocio::{Context, FileTransform, Transform};
+    use ocio_testkit::Oracle;
+    use serde_json::json;
+
+    let f32s = "inBitDepth=\"32f\" outBitDepth=\"32f\"";
+    let dir = write_files(&[
+        file(
+            "r_var.ctf",
+            pl(
+                "id=\"a\" version=\"1.7\"",
+                &format!("    <Reference {f32s} path=\"$FILEVAR\"/>\n"),
+            )
+            .into_bytes(),
+        ),
+        file(
+            "m.ctf",
+            pl(
+                "id=\"m\" version=\"1.7\"",
+                &op(
+                    "Matrix",
+                    f32s,
+                    "        <Array dim=\"3 3 3\">2 0 0 0 3 0 0 0 4</Array>\n",
+                ),
+            )
+            .into_bytes(),
+        ),
+        file(
+            "lut.spi1d",
+            b"Version 1\nFrom 0.0 1.0\nLength 3\nComponents 1\n{\n0.0\n0.25\n1.0\n}\n".to_vec(),
+        ),
+    ]);
+    let src = format!("{dir}/r_var.ctf");
+    let case = file_case(
+        "r_var.ctf",
+        &src,
+        Interpolation::Default,
+        TransformDirection::Forward,
+    );
+    let hex = |bytes: &[u8]| json!({"bytes": bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()});
+    let mut failures = Vec::new();
+    for order in [["m.ctf", "lut.spi1d"], ["lut.spi1d", "m.ctf"]] {
+        let (spec, config) = search_path_config(&[&dir], &[("FILEVAR", "m.ctf")]);
+        let mut calls = vec![json!({"call": "ClearAllCaches", "on": "OCIO"})];
+        for (k, value) in order.iter().enumerate() {
+            let (ctx, p, m) = (format!("ctx{k}"), format!("p{k}"), format!("m{k}"));
+            calls.extend([
+                json!({"new": "Context", "as": ctx}),
+                json!({"call": "addSearchPath", "on": ctx, "args": [dir]}),
+                json!({"call": "__setitem__", "on": ctx, "args": ["FILEVAR", value]}),
+                json!({"call": "getProcessor",
+                       "args": [{"ref": ctx}, {"transform": case.spec},
+                                {"enum": "TRANSFORM_DIR_FORWARD"}],
+                       "as": p}),
+                json!({"call": "getCacheID", "on": p}),
+                json!({"call": "getProcessorMetadata", "on": p, "as": m}),
+                json!({"call": "getFiles", "on": m}),
+            ]);
+        }
+        let reply = Oracle::get()
+            .call("config_calls", json!({"config": spec, "calls": calls}), &[])
+            .result;
+        let results = reply["calls"].as_array().expect("calls");
+        let mut wheel = Vec::new();
+        for (k, value) in order.iter().enumerate() {
+            let at = |i: usize| {
+                let r = &results[1 + 7 * k + i];
+                assert!(r.get("result").is_some(), "{value}: {r}");
+                r["result"].clone()
+            };
+            wheel.push(json!([value, at(4), at(6)]));
+        }
+
+        // The port, on one config, with the same contexts.
+        ocio::clear_all_caches();
+        let mut file_transform = FileTransform::new();
+        file_transform.set_src(&src);
+        let transform = Transform::File(file_transform);
+        let mut port = Vec::new();
+        for value in order {
+            let mut ctx = Context::new();
+            ctx.add_search_path(dir.as_bytes());
+            ctx.set_string_var("FILEVAR", Some(value.as_bytes()));
+            let processor = config
+                .processor_with_context(&ctx, &transform, TransformDirection::Forward)
+                .unwrap();
+            let metadata = processor.processor_metadata();
+            let files: Vec<serde_json::Value> = (0..metadata.num_files())
+                .map(|i| hex(metadata.file(i)))
+                .collect();
+            port.push(json!([
+                value,
+                hex(processor.cache_id().unwrap().as_bytes()),
+                files
+            ]));
+        }
+        let (wheel, port) = (json!(wheel), json!(port));
+        if wheel != port {
+            failures.push(format!("{order:?}\n  wheel {wheel}\n  port  {port}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

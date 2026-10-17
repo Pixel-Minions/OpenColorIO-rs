@@ -292,10 +292,7 @@ fn build_op(
         // Recursively resolve the op.
         if reference.get_reference_style() == ReferenceStyle::Path {
             let dir = combine_transform_directions(dir, reference.get_direction());
-            let mut file_transform = FileTransform::new();
-            file_transform.set_interpolation(Interpolation::Default);
-            file_transform.set_direction(TransformDirection::Forward);
-            file_transform.set_src(reference.get_path());
+            let file_transform = reference_file_transform(reference.get_path());
 
             // This might call LocalFileFormat::buildFileOps if the file is a CTF.
             // BuildFileTransformOps is making sure there is no cycling recursion.
@@ -305,6 +302,18 @@ fn build_op(
     } else {
         create_op_vec_from_op_data(ops, op_data, dir)
     }
+}
+
+/// The file transform of a reference to the file `path` (FileFormatCTF.cpp:1232-1235 @
+/// v2.5.2): the default interpolation, forward. Kept out of line, as [`build_op`] is part of
+/// the recursion of a chain of references (docs/improvements.md, U-76).
+#[inline(never)]
+fn reference_file_transform(path: &[u8]) -> Box<FileTransform> {
+    let mut file_transform = Box::new(FileTransform::new());
+    file_transform.set_interpolation(Interpolation::Default);
+    file_transform.set_direction(TransformDirection::Forward);
+    file_transform.set_src(path);
+    file_transform
 }
 
 /// The interpolation a Lut1D renders with: always linear.

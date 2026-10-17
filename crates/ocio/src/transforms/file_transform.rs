@@ -8,6 +8,7 @@
 //! cache (`GetCachedFileAndFormat`, `ClearFileTransformCaches`) and `BuildFileTransformOps`,
 //! and of its `CollectContextVariables`.
 
+use std::cell::Cell;
 use std::fmt;
 use std::sync::{Arc, LazyLock, Mutex};
 
@@ -15,7 +16,7 @@ use ocio_ops::cfmt::{Crt, OStringStream};
 use ocio_ops::exception::{Exception, Result};
 use ocio_ops::logging::{is_debug_logging_enabled, log_debug};
 use ocio_ops::op::OpVec;
-use ocio_ops::op_data::OpData;
+use ocio_ops::op_data::{OpData, OpDataRcPtr};
 use ocio_ops::open_color_types::{
     CdlStyle, TransformDirection, cdl_style_to_string, interpolation_to_string,
     transform_direction_to_string,
@@ -563,9 +564,48 @@ pub fn clear_file_transform_caches() {
     FILE_CACHE.clear();
 }
 
+/// The deepest nesting of file transforms that [`build_file_transform_ops`] follows: a CTF
+/// file's references load other files, whose references load others, and so on.
+///
+/// Upstream has no limit: a long chain of references recurses until the stack overflows,
+/// which ends the process (the wheel at 2,125 files on Windows and 10,000 on Linux,
+/// docs/improvements.md U-76). The port refuses deeper chains with an error instead (the
+/// owner's general rule), at about half the shallowest depth at which the wheel crashes.
+pub(crate) const MAX_FILE_NESTING: usize = 1000;
+
+thread_local! {
+    /// How deep [`build_file_transform_ops`] is nested on this thread.
+    static FILE_NESTING: Cell<usize> = const { Cell::new(0) };
+}
+
+/// One level of nesting of [`build_file_transform_ops`], given back when it is dropped.
+struct FileNesting;
+
+impl FileNesting {
+    /// One more level; an error past [`MAX_FILE_NESTING`].
+    fn enter() -> Result<FileNesting> {
+        let depth = FILE_NESTING.get() + 1;
+        if depth > MAX_FILE_NESTING {
+            return Err(Exception::new(format!(
+                "The CTF references nest more than {MAX_FILE_NESTING} files deep: upstream's \
+                 stack overflows."
+            )));
+        }
+        FILE_NESTING.set(depth);
+        Ok(FileNesting)
+    }
+}
+
+impl Drop for FileNesting {
+    fn drop(&mut self) {
+        FILE_NESTING.set(FILE_NESTING.get() - 1);
+    }
+}
+
 /// Appends the ops of the file `file_transform` names, in the direction `dir`: a `FileNoOp`
 /// for the file, then its format's ops. A file that is still being loaded further up (one
-/// that references itself, directly or not) is an error.
+/// that references itself, directly or not) is an error, and so are files nested more than
+/// [`MAX_FILE_NESTING`] deep, where upstream overflows the stack (docs/improvements.md, U-76).
 ///
 /// Port of `BuildFileTransformOps` (FileTransform.cpp:895-970 @ v2.5.2).
 pub(crate) fn build_file_transform_ops(
@@ -575,6 +615,42 @@ pub(crate) fn build_file_transform_ops(
     file_transform: &FileTransform,
     dir: TransformDirection,
 ) -> Result<()> {
+    let _nesting = FileNesting::enter()?;
+    let (format, cached_file, filepath, file_no_op) =
+        load_file_for_ops(ops, config, context, file_transform)?;
+
+    // CTF implementation of FileFormat::buildFileOps might call
+    // BuildFileTransformOps for References.
+    if let Err(e) = format.build_file_ops(ops, config, context, &cached_file, file_transform, dir) {
+        return Err(building_ops_error(&filepath, &e));
+    }
+
+    // File has been loaded completely. It may now be referenced again.
+    if let OpData::NoOp(data) = &*file_no_op
+        && let NoOpKind::File(file_data) = data.kind()
+    {
+        file_data.set_complete();
+    }
+    Ok(())
+}
+
+/// The first part of [`build_file_transform_ops`] (FileTransform.cpp:901-948 @ v2.5.2): the
+/// resolved path of the file, refused if it is still being loaded further up; its format and
+/// cached file; and the `FileNoOp` appended for it. Kept out of line, as is the error of
+/// [`building_ops_error`], so that each file of a chain of references takes as little of the
+/// stack as possible (docs/improvements.md, U-76).
+#[inline(never)]
+fn load_file_for_ops(
+    ops: &mut OpVec,
+    config: &Config,
+    context: &Context,
+    file_transform: &FileTransform,
+) -> Result<(
+    &'static dyn FileFormat,
+    CachedFileRcPtr,
+    Vec<u8>,
+    OpDataRcPtr,
+)> {
     let src = file_transform.src();
     if src.is_empty() {
         return Err(Exception::new("The transform file has not been specified."));
@@ -608,28 +684,23 @@ pub(crate) fn build_file_transform_ops(
     // Add FileNoOp and keep track of it.
     create_file_no_op(ops, &filepath);
     let file_no_op = ops.last().expect("the file no-op").data().clone();
+    Ok((format, cached_file, filepath, file_no_op))
+}
 
-    // CTF implementation of FileFormat::buildFileOps might call
-    // BuildFileTransformOps for References.
-    if let Err(e) = format.build_file_ops(ops, config, context, &cached_file, file_transform, dir) {
-        return Err(Exception::new(
-            [
-                b"The transform file: ".as_slice(),
-                &filepath,
-                b" failed while building ops with this error: ",
-                e.what(),
-            ]
-            .concat(),
-        ));
-    }
-
-    // File has been loaded completely. It may now be referenced again.
-    if let OpData::NoOp(data) = &*file_no_op
-        && let NoOpKind::File(file_data) = data.kind()
-    {
-        file_data.set_complete();
-    }
-    Ok(())
+/// The error of a file whose format failed to build its ops (FileTransform.cpp:962-969 @
+/// v2.5.2).
+#[cold]
+#[inline(never)]
+fn building_ops_error(filepath: &[u8], e: &Exception) -> Exception {
+    Exception::new(
+        [
+            b"The transform file: ".as_slice(),
+            filepath,
+            b" failed while building ops with this error: ",
+            e.what(),
+        ]
+        .concat(),
+    )
 }
 
 impl fmt::Display for FileTransform {

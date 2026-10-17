@@ -2467,7 +2467,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `ops/gradingrgbcurve/GradingRGBCurveOpData.cpp:127-150`: only a static one writes them), so
   two CTF files whose GradingRGBCurves are dynamic (`<DynamicParameter param="RGB_CURVE"/>`),
   with the same style and direction but different curves, get the same cache ID, and the
-  second file's processor is the first's, with the first file's curves. With two such files,
+  second file's processor is the first's, with the first file's curves (and, being the same
+  object, the first file's path in `getProcessorMetadata().getFiles()`). With two such files,
   identity curves (`a`) and a bent red curve (`b`), reading `a` then `b` in one raw config
   gives `b` the identity: `applyRGBA([0.25, 0.25, 0.25, 1])` is `0.25` for both, against
   `0.37524959` for `b` read first (the verifier's `dyn_cache.py`, 2026-10-16).
@@ -2516,6 +2517,82 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **A fix:** capitalize it as the others do.
 - **Status:** matched in `p4-ctf-read-3` (`ctf_reader_helper.rs`, `fixed_function_start`);
   `op_cases_g`'s "a missing style" ACES case checks it with the wheel.
+
+### I-192. A file reference's recursion check ignores case
+
+- **Upstream:** `BuildFileTransformOps` (`transforms/FileTransform.cpp:909-929` @ v2.5.2)
+  refuses a file it is still loading by comparing the resolved paths with
+  `Platform::Strcasecmp`, which ignores ASCII case on every platform. On Windows the file
+  system ignores case too, so a CTF file `CaseA.ctf` that references `casea.ctf` is a real
+  cycle there. On Linux the two names are two files: `Pair.ctf` referencing a separate
+  `pair.ctf` is refused with "Reference to: <dir>/pair.ctf is creating a recursion.", though
+  nothing recurses.
+- **Who notices:** a Linux user whose CTF references a file whose name differs from the
+  referencing file's only in case.
+- **A fix:** compare the paths as the file system does (case-sensitively on Linux).
+- **Status:** matched in `p4-ctf-read-3` (`crates/ocio/src/transforms/file_transform.rs`,
+  `build_file_transform_ops`); `references_resolve_as_in_the_wheel`'s "names that differ in
+  case" group (`crates/ocio/tests/file_format_ctf_oracle.rs`) checks a self-reference in
+  another case on both platforms, and the two files on Linux, with the wheel.
+
+### I-193. The processor cache ignores the context variables a CTF reference uses
+
+- **Upstream:** `Config::getProcessor` (`Config.cpp:4791-4873` @ v2.5.2) keys its processor
+  cache on the context variables `CollectContextVariables` finds in the transform. For a file
+  transform those are the variables of its `src`, of the search path that finds it and of its
+  CCC ID (`transforms/FileTransform.cpp:224-300`), not those of the references inside the CTF
+  file, which `BuildFileTransformOps` resolves with the same context. So with one config, a CTF
+  file whose reference is `path="$FILEVAR"` gets one processor for every value of `FILEVAR`:
+  the first one built (`FILEVAR=m.ctf`, a matrix) is returned for `FILEVAR=lut.spi1d` too,
+  with the same cache ID and the first file's `getFiles()` (the verifier's `ctxcache.py`,
+  2026-10-16).
+- **Who notices:** a config whose CTF files pick their references through context variables,
+  per shot for instance, used through one config object.
+- **A fix:** collect the context variables of the references when the file is read, or leave
+  file transforms whose files reference others out of the cache.
+- **Status:** matched in `p4-ctf-read-3`: the port's processor cache and its context variable
+  collection do the same (`crates/ocio/src/config.rs`, `processor_with_context`);
+  `context_variables_in_references_share_a_processor_as_in_the_wheel`
+  (`crates/ocio/tests/file_format_ctf_oracle.rs`) checks the cache IDs and files of both orders
+  with the oracle's `config_calls`.
+
+### I-194. A Reference's basePath is read and ignored
+
+- **Upstream:** `CTFReaderReferenceElt::start` (`fileformats/ctf/CTFReaderHelper.cpp:5025-5091`
+  @ v2.5.2) accepts a `basePath` attribute and drops its value ("Ignore BasePath for now"): the
+  path resolves through the context's search paths alone. Its only effect is the error when an
+  alias comes with it.
+- **Who notices:** a CTF file from another application that relies on `basePath` to find its
+  references.
+- **A fix:** resolve the path against the base path first, or warn that it is ignored.
+- **Status:** matched in `p4-ctf-read-3` (`crates/ocio/src/fileformats/ctf/ctf_reader_helper.rs`,
+  `reference_start`); `op_cases_h`'s "a path and a basePath" and "only a basePath" check it with
+  the wheel.
+
+### I-201. A Reference by an alias other than currentMonitor adds no ops
+
+- **Upstream:** the Reference reader keeps an alias (`CTFReaderHelper.cpp:5047-5056` @ v2.5.2),
+  refusing only `currentMonitor`, and `BuildOp` (`fileformats/FileFormatCTF.cpp:1218-1248`)
+  builds only references by path: a reference by any other alias, inverted or not, silently
+  adds nothing to the processor.
+- **Who notices:** a CTF file whose aliases name transforms the application is expected to
+  supply.
+- **A fix:** refuse unknown aliases, or log that they are skipped.
+- **Status:** matched in `p4-ctf-read-3` (`ctf_reader_helper.rs`, `reference_start`;
+  `crates/ocio/src/fileformats/file_format_ctf.rs`, `build_op`); `op_cases_h`'s "an alias" and
+  "an alias, inverted", and upstream's `reference_alias.ctf`, check it with the wheel.
+
+### I-202. A Reference's inverted attribute only ever sets the inverse
+
+- **Upstream:** the Reference reader sets the inverse direction when `inverted` is `true`,
+  ignoring case (`CTFReaderHelper.cpp:5058-5064` @ v2.5.2), and ignores any other value,
+  without a warning: `inverted="1"` or `"yes"` leaves the reference forward, and a later
+  `inverted="false"` (the attribute again, in another case) doesn't undo an earlier `"true"`.
+- **Who notices:** a CTF writer that spells booleans another way.
+- **A fix:** parse the value as a boolean and refuse what isn't one.
+- **Status:** matched in `p4-ctf-read-3` (`ctf_reader_helper.rs`, `reference_start`);
+  `op_cases_h`'s "inverted other than true" and "inverted true, then false" check it with the
+  wheel.
 
 ## Undefined behaviour upstream
 
@@ -3279,3 +3356,42 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   parsing info.
 - **Status:** matched in `p4-cdl` (4.4d, `crates/ocio/src/fileformats/cdl/cdl_parser.rs`,
   `missing_root_error`; `a_cdl_or_ccc_without_its_root_element_is_refused`).
+
+### U-76. Chains of CTF references long enough to overflow the stack
+
+- **Upstream:** a CTF Reference builds its file through `BuildFileTransformOps`
+  (`fileformats/FileFormatCTF.cpp:1218-1248` @ v2.5.2), which builds the referenced CTF file's
+  ops, references included (`transforms/FileTransform.cpp:895-970`): the build recurses once
+  per file of a chain. The recursion check stops cycles (a reference resolves to the same path
+  each time, so a cycle repeats a path within one turn), but nothing bounds a legal chain, each
+  file referencing the next. The wheel's `getProcessor` of a chain of CTF files crashes (the
+  process ends) at these lengths, in Python's main thread (the verifier's `deep.py`,
+  2026-10-16):
+
+  | | Builds | Crashes |
+  |---|---|---|
+  | Windows | 2,100 files | 2,125 files |
+  | Linux | 9,000 files | 10,000 files |
+
+  The depth varies with the caller's stack.
+- **Who notices:** a machine-made chain of thousands of CTF files; nothing hand-written.
+- **Decided** (the owner's general rule, refusing at about half the lowest measured crash, as
+  U-58 and U-60 do; coordinator, 2026-10-16): the port refuses a chain of more than 1,000
+  files (`MAX_FILE_NESTING`) with "The CTF references nest more than 1000 files deep:
+  upstream's stack overflows." Between that and the wheel's crash the port refuses what the
+  wheel builds. The port keeps each file's frames small (the file's loading and the
+  reference's file transform are out of line: about 880 bytes a file in a debug build on
+  Windows), so that a chain of 1,000 files builds on a 1 MiB stack: in debug on Windows, 1,100
+  files build there and 1,150 overflow it. The references recurse through the file transform
+  alone, never through `BuildOps`, so the two limits count apart: U-58's 256 levels of nested
+  transforms can only come before a chain of references on the stack, never between its
+  files. A test of that mixed chain (U-58's longest chain of color spaces, the last one's
+  transform a file transform starting a chain of 1,000 files) needs the color space
+  transform's ops, which this card's base doesn't build yet: it comes with the card's
+  re-application onto `phase0`.
+- **Status:** done in `p4-ctf-read-3` (`crates/ocio/src/transforms/file_transform.rs`,
+  `FileNesting`, in `build_file_transform_ops`). Tests: `chains_of_references_stop_at_the_limit`
+  (`file_transform_tests.rs`) builds a chain of 1,000 files on a 1 MiB thread, in debug and
+  release, and refuses 1,001; `references_resolve_as_in_the_wheel`'s "the longest chain"
+  (`crates/ocio/tests/file_format_ctf_oracle.rs`) checks the 1,000-file processor with the
+  wheel.
