@@ -11,9 +11,10 @@
 use ocio_ops::utils::string_utils::c_str;
 
 use super::mz_os::{
-    mz_dir_make, mz_os_get_file_attribs, mz_os_get_file_date, mz_os_get_file_size, mz_os_is_dir,
-    mz_os_is_dir_separator, mz_os_is_symlink, mz_os_make_symlink, mz_os_set_file_attribs,
-    mz_os_set_file_date, mz_path_combine, mz_path_remove_filename, mz_path_resolve, system_path,
+    mz_dir_make, mz_os_file_exists, mz_os_get_file_attribs, mz_os_get_file_date,
+    mz_os_get_file_size, mz_os_is_dir, mz_os_is_dir_separator, mz_os_is_symlink,
+    mz_os_make_symlink, mz_os_set_file_attribs, mz_os_set_file_date, mz_path_combine,
+    mz_path_remove_filename, mz_path_resolve, system_path,
 };
 use super::mz_strm::{
     MZ_BUF_ERROR, MZ_END_OF_LIST, MZ_EXIST_ERROR, MZ_OK, MZ_OPEN_ERROR, MZ_PARAM_ERROR,
@@ -472,11 +473,19 @@ impl Writer {
     /// starts with), unless it is a symbolic link (which isn't added).
     ///
     /// Port of `mz_zip_writer_add_path` (mz_zip_rw.c:1649-1729 @ 4.0.10) with `include_path` 0,
-    /// for a `path` that isn't a directory and has no `*`, as OpenColorIO calls it
-    /// (`addSupportedFiles` lists the directories itself): its branches for a directory and
-    /// for a wildcard aren't ported.
+    /// for a `path` that isn't a directory, as OpenColorIO calls it (`addSupportedFiles` lists
+    /// the directories itself): its branch for a directory isn't ported.
+    ///
+    /// A `path` with a `*` that doesn't exist (on Linux, a dangling link whose name has one)
+    /// takes upstream's wildcard branch, which lists the file's directory and adds each entry
+    /// that matches the name: the link itself among them, which takes the branch again, without
+    /// end, until the stack overflows (docs/improvements.md, U-80). The port returns
+    /// `MZ_EXIST_ERROR` instead.
     pub(crate) fn add_path_of_file(&mut self, path: &[u8], root_path: &[u8]) -> i32 {
         let path = c_str(path);
+        if path.contains(&b'*') && mz_os_file_exists(path) != MZ_OK {
+            return MZ_EXIST_ERROR;
+        }
         // Should the file be stored with any path info at all?
         let filenameinzip = path.get(c_str(root_path).len()..).unwrap_or(&[]);
 

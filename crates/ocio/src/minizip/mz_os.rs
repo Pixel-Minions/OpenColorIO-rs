@@ -236,12 +236,20 @@ pub(crate) fn mz_os_get_file_attribs(path: &[u8]) -> u32 {
 /// Linux; `.` and `..`, which minizip-ng lists too, are left out (OpenColorIO skips them).
 ///
 /// Port of `mz_os_open_dir`, `mz_os_read_dir` and `mz_os_close_dir` (mz_os_posix.c:274-290,
-/// mz_os_win32.c:362-435 @ 4.0.10). On Windows `mz_os_open_dir` builds `FindFirstFileW`'s
-/// pattern in a buffer of 320 bytes: a path that doesn't leave room for its separator and `*`
-/// isn't listed here (`None`).
+/// mz_os_win32.c:362-435 @ 4.0.10). On Windows:
+/// - `mz_os_open_dir` builds `FindFirstFileW`'s pattern in a buffer of 320 bytes, and a path
+///   of 318 bytes or more leaves no room for its separator (`mz_path_append_slash` fails): the
+///   pattern is then the path and a `*` without a separator, or the path cut to 319 bytes,
+///   which list other entries than the directory's. The port lists nothing (`None`).
+/// - `mz_os_read_dir` converts each name into a `d_name` of 256 bytes, which the byte
+///   `end` follows (0, and 1 once the last entry is read): a name of 256 UTF-8 bytes fills it
+///   and reads to `end`'s 0, but not as the last entry, where `end` is 1 and the read goes on
+///   into the uninitialized padding; a longer one doesn't fit, `WideCharToMultiByte` fails
+///   (docs/improvements.md, U-79). The port keeps a name of 256 bytes but the last, and leaves
+///   the others of 256 bytes or more out, as the wheel's archives do.
 pub(crate) fn mz_os_list_dir(path: &[u8]) -> Option<Vec<Vec<u8>>> {
     let path = c_str(path);
-    if cfg!(windows) && path.len() + 2 >= 319 {
+    if cfg!(windows) && path.len() + 2 >= 320 {
         return None;
     }
     let mut names = Vec::new();
@@ -250,18 +258,31 @@ pub(crate) fn mz_os_list_dir(path: &[u8]) -> Option<Vec<Vec<u8>>> {
             break;
         };
         #[cfg(windows)]
-        names.push(
-            entry
+        {
+            let name = entry
                 .file_name()
                 .to_string_lossy()
                 .into_owned()
-                .into_bytes(),
-        );
+                .into_bytes();
+            names.push(name);
+        }
         #[cfg(not(windows))]
         {
             use std::os::unix::ffi::OsStrExt;
             names.push(entry.file_name().as_bytes().to_vec());
         }
+    }
+    // What the names read as from `d_name` (docs/improvements.md, U-79): one of 256 bytes, its
+    // NUL the `end` flag after it, only where it isn't the last; a longer one never.
+    #[cfg(windows)]
+    {
+        let last = names.len().saturating_sub(1);
+        names = names
+            .into_iter()
+            .enumerate()
+            .filter(|(i, name)| name.len() < 256 || (name.len() == 256 && *i != last))
+            .map(|(_, name)| name)
+            .collect();
     }
     Some(names)
 }

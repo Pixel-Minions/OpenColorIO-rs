@@ -3781,3 +3781,39 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Status:** matched in `p4-baker` (`crates/ocio/src/minizip/mz_os.rs`);
   `crates/ocio/tests/ocioz_extract_oracle.rs`, the names `..`, `../`, `../..` and `..\` first
   in their archives.
+
+### U-79. A directory entry whose name is 256 UTF-8 bytes or longer, on Windows
+
+- **Upstream:** `Config::archive` lists the config's directory with minizip-ng's
+  `mz_os_read_dir` (`OCIOZArchive.cpp:150-201` @ v2.5.2; minizip-ng `mz_os_win32.c:401-421` @
+  4.0.10), which converts each name from UTF-16 into the 256 bytes of `d_name`
+  (`WideCharToMultiByte`); the byte after `d_name` is the listing's `end` flag (0, and 1 once
+  the last entry is read; `DIR_int`, `mz_os_win32.c:30-35`), then the structure's padding,
+  which `malloc` left uninitialized. A name of 256 bytes fills `d_name` without its NUL: read
+  as a C string, it ends at `end`'s 0, except for the last entry, where `end` is 1 and the
+  read goes on into the padding. A longer name doesn't fit, and the conversion fails. The
+  Windows wheel (probed 2026-10-17) archives a 256-byte name that isn't the last entry, and
+  leaves out a 256-byte name that is, and every longer one.
+- **Who notices:** applications archiving configs next to files with very long names.
+- **Decided** (the owner's general rule, 2026-09-30): the port keeps the names the wheel
+  reads whole (up to 255 bytes, and 256 but the last entry) and leaves the others out, as the
+  wheel's archives do.
+- **Status:** matched with a skip in `p4-baker` (`crates/ocio/src/minizip/mz_os.rs`,
+  `mz_os_list_dir`); `crates/ocio/tests/ocioz_archive_oracle.rs`, `long_names` (Windows).
+
+### U-80. Archiving a config next to a dangling link whose name holds `*` overflows the stack
+
+- **Upstream:** `Config::archive` adds each LUT file it lists with minizip-ng's
+  `mz_zip_writer_add_path` (`OCIOZArchive.cpp:183-187` @ v2.5.2; `mz_zip_rw.c:1649-1729` @
+  4.0.10). A path with a `*` that doesn't exist is taken for a wildcard: the function lists the
+  path's directory and adds each entry whose name matches it. On Linux a dangling link whose
+  name holds a `*` and a LUT extension is such a path, and it matches itself, so the function
+  calls itself on it again without end, until the stack overflows: the Linux wheel crashes
+  (SIGSEGV, probed 2026-10-17). On Windows names can't hold `*`.
+- **Who notices:** applications archiving a config whose directory holds such a link.
+- **Decided** (the owner's general rule, 2026-09-30): the port's `add_path` returns an error
+  for a path with a `*` that doesn't exist, and `Config::archive` fails with "Could not write
+  LUT file <path> to in-memory archive.".
+- **Status:** matched with an error in `p4-baker` (`crates/ocio/src/minizip/mz_zip_rw.rs`,
+  `add_path_of_file`); `crates/ocio/tests/ocioz_archive_oracle.rs`, `dangling_link_with_a_star`
+  (Linux, the port only).

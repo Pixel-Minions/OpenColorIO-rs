@@ -376,3 +376,106 @@ fn archives_as_the_wheel() {
         ("not archivable", not_archivable_config()),
     ]);
 }
+
+/// Names of LUT files around a config of 255, 256 and 276 UTF-8 bytes, a 256-byte name listed
+/// last and one listed before others: minizip-ng's `mz_os_read_dir` converts each name into
+/// the 256 bytes of `d_name`, which the listing's `end` flag follows, and the wheel archives
+/// the names it reads whole (docs/improvements.md, U-79). Windows lists a directory's names
+/// in the order of their upper case (U+20AC, then U+20AD). Windows only: on Linux `d_name` is
+/// the system's, and a name has at most 255 bytes.
+#[cfg(windows)]
+#[test]
+fn long_names() {
+    let config = b"ocio_profile_version: 2\nroles: {default: raw}\n\
+colorspaces:\n  - !<ColorSpace> {name: raw}\n";
+    let euros = "\u{20ac}".repeat(83);
+    let layouts: [(&str, Vec<String>); 3] = [
+        (
+            "long_names",
+            vec![
+                format!("{euros}.spi1d"),
+                format!("{euros}a.spi1d"),
+                format!("{euros}{}.spi1d", "\u{20ac}".repeat(7)),
+                "short.spi1d".to_owned(),
+            ],
+        ),
+        ("long_name_last", vec![format!("{euros}a.spi1d")]),
+        (
+            "long_names_before_another",
+            vec![
+                format!("{euros}a.spi1d"),
+                format!("{euros}{}.spi1d", "\u{20ac}".repeat(7)),
+                "\u{20ad}.spi1d".to_owned(),
+            ],
+        ),
+    ];
+    let mut configs = Vec::new();
+    for (label, names) in layouts {
+        let dir = files_dir(label);
+        put(&dir, "config.ocio", config, false);
+        for name in names {
+            put(&dir, &name, &lut(2), false);
+        }
+        configs.push((label, dir.join("config.ocio")));
+    }
+    check(&configs);
+}
+
+/// A dangling link whose name holds a `*` and a LUT extension, next to a config: upstream
+/// takes its path for a wildcard and calls itself on it without end, and the Linux wheel
+/// crashes (docs/improvements.md, U-80); the port fails with its error for a LUT file it can't
+/// add. The port only: the wheel can't be asked.
+#[cfg(unix)]
+#[test]
+fn dangling_link_with_a_star() {
+    let dir = files_dir("dangling_star");
+    let config = b"ocio_profile_version: 2\nroles: {default: raw}\n\
+colorspaces:\n  - !<ColorSpace> {name: raw}\n";
+    put(&dir, "config.ocio", config, false);
+    let link = dir.join("a*.spi1d");
+    if std::fs::symlink_metadata(&link).is_err() {
+        std::os::unix::fs::symlink("nowhere.spi1d", &link).unwrap();
+    }
+    let config =
+        Config::create_from_file(dir.join("config.ocio").to_str().unwrap().as_bytes()).unwrap();
+    let e = config.archive(&mut Vec::new()).unwrap_err();
+    let expected = format!(
+        "Could not write LUT file {} to in-memory archive.",
+        link.to_str().unwrap()
+    );
+    assert_eq!(e.what(), expected.as_bytes());
+}
+
+/// Subdirectories of the config's directory whose paths have 316, 317 and 318 bytes: minizip-ng's
+/// `mz_os_open_dir` builds `FindFirstFileW`'s pattern in 320 bytes, and the directory is listed
+/// where its path leaves room for a separator and the `*` (317 bytes or fewer). Windows only:
+/// on Linux `opendir` takes the path as it is.
+#[cfg(windows)]
+#[test]
+fn long_directory_paths() {
+    let config = b"ocio_profile_version: 2\nroles: {default: raw}\n\
+colorspaces:\n  - !<ColorSpace> {name: raw}\n";
+    let mut configs = Vec::new();
+    for target in [316usize, 317, 318] {
+        let label = format!("long_dir_{target}");
+        let dir = files_dir(&label);
+        put(&dir, "config.ocio", config, false);
+        // dir\ddd...\ddd...: components of up to 100 bytes, so that the path has `target` bytes.
+        let mut sub = dir.clone();
+        let mut left = target - dir.to_str().unwrap().len();
+        while left > 0 {
+            let n = (left - 1).min(100);
+            sub = sub.join("d".repeat(n));
+            left -= n + 1;
+        }
+        assert_eq!(sub.to_str().unwrap().len(), target);
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("in.spi1d"), lut(2)).unwrap();
+        configs.push((label, dir.join("config.ocio")));
+    }
+    let configs: Vec<(&str, PathBuf)> = configs
+        .iter()
+        .map(|(l, p)| (l.as_str(), p.clone()))
+        .collect();
+    check(&configs);
+}
