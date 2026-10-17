@@ -6,8 +6,9 @@
 //! minizip-ng's streams, as OpenColorIO reads an archive with them: the stream interface
 //! (`mz_strm.c`), the memory stream (`mz_strm_mem.c`), and the stack it opens an archive file
 //! with, a split stream over a buffered stream over the system's file (`mz_strm_split.c`,
-//! `mz_strm_buf.c`, `mz_strm_os_posix.c` and `mz_strm_os_win32.c`), whose reads and seeks give
-//! the file's bytes as one file with a position would: the buffered stream only caches them.
+//! `mz_strm_buf.c`, `mz_strm_os_posix.c` and `mz_strm_os_win32.c`). The buffered stream reads
+//! the file 32,767 bytes at a time and keeps its own idea of the file position, which a seek
+//! that fails leaves behind the file's (`mz_zip_recover_cd` reads on from there).
 
 use std::io::Read;
 
@@ -370,10 +371,9 @@ impl Stream for MemStream {
 /// A file opened for reading by the system stream: its bytes, read whole, and the position.
 /// A file that opens but can't be read (a directory on Linux) fails each read.
 ///
-/// Port of the reading of `mz_stream_os` (mz_strm_os_posix.c, mz_strm_os_win32.c @ 4.0.10),
-/// under `mz_stream_buffered` (mz_strm_buf.c), whose cache gives the same bytes. The file opens
-/// as OpenColorIO's own file streams do: through its UTF-16 conversion on Windows, as the bytes
-/// on Linux.
+/// Port of the reading of `mz_stream_os` (mz_strm_os_posix.c, mz_strm_os_win32.c @ 4.0.10).
+/// The file opens as OpenColorIO's own file streams do: through its UTF-16 conversion on
+/// Windows, as the bytes on Linux.
 #[derive(Debug)]
 struct OsFile {
     data: Option<Vec<u8>>,
@@ -434,6 +434,141 @@ impl OsFile {
     }
 }
 
+/// The size of the buffered stream's read buffer (`char readbuf[INT16_MAX]`, mz_strm_buf.c:37
+/// @ 4.0.10).
+const READBUF_SIZE: i32 = i16::MAX as i32;
+
+/// The buffered stream between the split stream and the system's file: what it last read of
+/// the file, where the reader is in it, and the file position it believes is at its end.
+///
+/// Port of `mz_stream_buffered` (mz_strm_buf.c:34-48 @ 4.0.10) as minizip-ng reads with it: no
+/// write buffer (`writebuf_len` stays 0, so the flushes write nothing), and no hit and miss
+/// counts, which only its debug output reads.
+#[derive(Debug)]
+struct Buffered {
+    base: OsFile,
+    readbuf: Vec<u8>,
+    readbuf_len: i32,
+    readbuf_pos: i32,
+    /// The file position at the end of the read buffer, as the stream keeps it: reads add to
+    /// it, a seek within the file sets it, a tell reads it from the file, and a seek forwards
+    /// past the buffer adds the offset to it, wrapping (docs/improvements.md, I-214).
+    position: i64,
+}
+
+impl Buffered {
+    /// Port of `mz_stream_buffered_open` (mz_strm_buf.c:72-77 @ 4.0.10), over the opened file:
+    /// `mz_stream_buffered_reset` (60-70).
+    fn open(base: OsFile) -> Buffered {
+        Buffered {
+            base,
+            readbuf: vec![0u8; READBUF_SIZE as usize],
+            readbuf_len: 0,
+            readbuf_pos: 0,
+            position: 0,
+        }
+    }
+
+    /// Port of `mz_stream_buffered_read` (mz_strm_buf.c:117-183 @ 4.0.10).
+    fn read(&mut self, buf: &mut [u8]) -> i32 {
+        let size = buf.len() as i32;
+        let mut buf_len = 0usize;
+        let mut bytes_left_to_read = size;
+
+        while bytes_left_to_read > 0 {
+            if self.readbuf_len == 0 || self.readbuf_pos == self.readbuf_len {
+                if self.readbuf_len == READBUF_SIZE {
+                    self.readbuf_pos = 0;
+                    self.readbuf_len = 0;
+                }
+
+                let bytes_to_read = READBUF_SIZE - (self.readbuf_len - self.readbuf_pos);
+                // Upstream reads `bytes_to_read` bytes at `readbuf + readbuf_pos`, which passes
+                // the buffer's end where a short read at the file's end left it partly filled
+                // and read; the file is then still at its end (every seek of the file empties
+                // the buffer), and reads nothing.
+                let start = self.readbuf_pos as usize;
+                let end = (start + bytes_to_read as usize).min(self.readbuf.len());
+                let bytes_read = self.base.read(&mut self.readbuf[start..end]);
+                if bytes_read < 0 {
+                    return bytes_read;
+                }
+
+                self.readbuf_len += bytes_read;
+                self.position = self.position.wrapping_add(i64::from(bytes_read));
+
+                if bytes_read == 0 {
+                    break;
+                }
+            }
+
+            if self.readbuf_len - self.readbuf_pos > 0 {
+                let bytes_to_copy = (self.readbuf_len - self.readbuf_pos).min(bytes_left_to_read);
+                let from = self.readbuf_pos as usize;
+                buf[buf_len..buf_len + bytes_to_copy as usize]
+                    .copy_from_slice(&self.readbuf[from..from + bytes_to_copy as usize]);
+
+                buf_len += bytes_to_copy as usize;
+                bytes_left_to_read -= bytes_to_copy;
+                self.readbuf_pos += bytes_to_copy;
+            }
+        }
+
+        size - bytes_left_to_read
+    }
+
+    /// Port of `mz_stream_buffered_tell` (mz_strm_buf.c:247-261 @ 4.0.10).
+    fn tell(&mut self) -> i64 {
+        let mut position = self.base.position;
+        self.position = position;
+        if self.readbuf_len > 0 {
+            position -= i64::from(self.readbuf_len - self.readbuf_pos);
+        }
+        position
+    }
+
+    /// Port of `mz_stream_buffered_seek` (mz_strm_buf.c:263-332 @ 4.0.10), with `mz_stream_seek`'s
+    /// check of the file's seek (mz_strm.c:223-232).
+    fn seek(&mut self, offset: i64, origin: Origin) -> i32 {
+        let mut offset = offset;
+        match origin {
+            Origin::Set => {
+                if self.readbuf_len > 0
+                    && offset < self.position
+                    && offset >= self.position.wrapping_sub(i64::from(self.readbuf_len))
+                {
+                    self.readbuf_pos = offset
+                        .wrapping_sub(self.position.wrapping_sub(i64::from(self.readbuf_len)))
+                        as i32;
+                    return MZ_OK;
+                }
+                self.position = offset;
+            }
+            Origin::Cur => {
+                if self.readbuf_len > 0 {
+                    let left = i64::from(self.readbuf_len - self.readbuf_pos);
+                    if offset <= left {
+                        // `readbuf_pos += (uint32_t)offset`
+                        self.readbuf_pos = self.readbuf_pos.wrapping_add(offset as u32 as i32);
+                        return MZ_OK;
+                    }
+                    offset -= left;
+                    self.position = self.position.wrapping_add(offset);
+                }
+            }
+            Origin::End => {}
+        }
+
+        self.readbuf_len = 0;
+        self.readbuf_pos = 0;
+
+        if origin == Origin::Set && offset < 0 {
+            return MZ_SEEK_ERROR;
+        }
+        self.base.seek(offset, origin)
+    }
+}
+
 /// `MZ_ZIP_MAGIC_DISKHEADER` (mz_strm_split.c:25 @ 4.0.10).
 const MZ_ZIP_MAGIC_DISKHEADER: u32 = 0x0807_4b50;
 
@@ -451,7 +586,9 @@ pub(crate) struct SplitStream {
     number_disk: i32,
     current_disk: i32,
     is_open: bool,
-    base: Option<OsFile>,
+    /// The size of the disk it is on, as the buffered stream tells it when it opens the disk.
+    current_disk_size: i64,
+    base: Option<Buffered>,
 }
 
 impl SplitStream {
@@ -467,6 +604,7 @@ impl SplitStream {
             number_disk: -1,
             current_disk: 0,
             is_open: false,
+            current_disk_size: 0,
             base: None,
         };
         match split.goto_disk(-1) {
@@ -506,7 +644,7 @@ impl SplitStream {
 
         if err == MZ_OK {
             match OsFile::open(&self.path_disk) {
-                Some(base) => self.base = Some(base),
+                Some(file) => self.base = Some(Buffered::open(file)),
                 None => err = MZ_OPEN_ERROR,
             }
         }
@@ -523,6 +661,13 @@ impl SplitStream {
         }
 
         if err == MZ_OK {
+            // Get the size of the current disk we are on
+            let base = self.base.as_mut().expect("the disk is open");
+            let position = base.tell();
+            base.seek(0, Origin::End);
+            self.current_disk_size = base.tell();
+            base.seek(position, Origin::Set);
+
             self.is_open = true;
         }
 
@@ -617,19 +762,20 @@ impl Stream for SplitStream {
 
         let mut offset = offset;
         if origin == Origin::Cur && self.number_disk != -1 {
-            let base = self.base.as_ref().expect("the disk is open");
-            let position = base.position;
-            let mut disk_left = base.size() - position;
+            let position = self.base.as_mut().expect("the disk is open").tell();
+            let mut disk_left = self.current_disk_size - position;
             while offset > disk_left {
                 let err = self.goto_disk(self.current_disk + 1);
                 if err != MZ_OK {
                     return err;
                 }
                 offset -= disk_left;
-                disk_left = self.base.as_ref().expect("the disk is open").size();
+                disk_left = self.current_disk_size;
             }
         }
         match self.base.as_mut() {
+            // mz_stream_seek
+            Some(_) if origin == Origin::Set && offset < 0 => MZ_SEEK_ERROR,
             Some(base) => base.seek(offset, origin),
             None => MZ_STREAM_ERROR,
         }
@@ -645,12 +791,13 @@ impl Stream for SplitStream {
             return i64::from(err);
         }
         self.base
-            .as_ref()
-            .map_or(i64::from(MZ_STREAM_ERROR), |b| b.position)
+            .as_mut()
+            .map_or(i64::from(MZ_STREAM_ERROR), Buffered::tell)
     }
 
     /// Port of `mz_stream_split_error` (mz_strm_split.c:356-359 @ 4.0.10).
     fn error(&self) -> i32 {
-        self.base.as_ref().map_or(0, |b| b.error)
+        // mz_stream_buffered_error: the file's
+        self.base.as_ref().map_or(0, |b| b.base.error)
     }
 }

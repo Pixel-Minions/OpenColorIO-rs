@@ -2782,8 +2782,12 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   - an entry minizip-ng can't read leaves the buffer zeros, or zeros after what it read:
     compressed with a method other than deflate (OpenColorIO builds minizip-ng with zlib
     only), encrypted with AES, on another disk of a split archive, with corrupt deflate data
-    (minizip-ng drops the 64 KiB read it fails in), or with a size larger than its data; the
-    file's reader then fails on the zeros, with a message about the file's format;
+    (minizip-ng drops the 64 KiB read it fails in; zlib decodes the next block's header in
+    the read that fills the buffer, so a bad block right after exactly 65,535 bytes fails
+    that read too, and a deflate stream that ends without a final block reads on into the
+    bytes after the entry, which minizip-ng doesn't limit for deflate), or with a size larger
+    than its data; the file's reader then fails on the zeros, with a message about the
+    file's format;
   - an entry flagged as encrypted is read as it is stored, without a password (OpenColorIO
     builds minizip-ng without encryption, `MZ_PKCRYPT=OFF`), and a wrong CRC goes unnoticed.
 - **Who notices:** applications reading archives with empty files, or broken or unusual ones,
@@ -2793,7 +2797,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   read whole.
 - **Status:** matched in `p4-baker` (4.9a, `crates/ocio/src/ocioz_archive.rs` and
   `crates/ocio/src/minizip/`); `crates/ocio/tests/ocioz_read_oracle.rs`,
-  `entries_read_their_own_way` and the "an empty LUT" and "an empty config" archives.
+  `entries_read_their_own_way` and the "an empty LUT" and "an empty config" archives,
+  `inflate_at_read_boundaries` and `entry_size_limit`.
 
 ### I-209. A second archive's LUT files can be the first one's
 
@@ -2824,8 +2829,8 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   backslashes in their names across platforms.
 - **A fix:** keep the names as stored, and reset the zip64 flag for each entry.
 - **Status:** matched in `p4-baker` (4.9a2, `crates/ocio/src/minizip/mz_zip.rs`);
-  `crates/ocio/tests/ocioz_read_oracle.rs`, `recovered_archives` ("backslashes"), on both
-  platforms.
+  `crates/ocio/tests/ocioz_read_oracle.rs`, `recovered_archives` ("backslashes") and
+  `zip64_descriptors_after_a_zip64_entry`, on both platforms.
 
 ### I-211. An archive leaves out linked LUT files, and takes every LUT file around the config
 
@@ -2858,6 +2863,39 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p4-baker` (4.9b2, `crates/ocio/src/minizip/mz_zip_rw.rs`);
   `crates/ocio/tests/ocioz_extract_oracle.rs`, `missing_config` and the name `dirack.txt`, on
   both platforms.
+
+### I-213. A zip extra field shorter than 4 bytes wraps minizip-ng's search limit
+
+- **Upstream:** `mz_zip_extrafield_find` (minizip-ng `mz_zip.c:2583-2612` @ 4.0.10) counts its
+  search limit down by each field's length less 4 (`max_seek -= field_length - 4`), so a field
+  shorter than 4 bytes counts it up. Its callers that read a zipped central directory and an
+  entry's hashes pass `INT32_MAX` (`mz_zip_rw.c:272, 487, 527`), and a short field then
+  overflows the `int`: undefined behaviour, which both wheels resolve the same way, wrapping
+  it to a negative limit and ending the search (`MZ_EXIST_ERROR`): Linux `sub ebx, eax; js`
+  (`libOpenColorIO.so` 0x5f81f2), Windows `add edi, ecx; js` (`OpenColorIO_2_5.dll`
+  0x180340248).
+- **Who notices:** applications reading archives whose zipped central directory entry has a
+  short extra field before its `CDCD` field.
+- **A fix:** compute the limit in 64 bits, or refuse a field shorter than its header.
+- **Status:** matched in `p4-baker` (`crates/ocio/src/minizip/mz_zip.rs`, `wrapping_sub`);
+  `crates/ocio/tests/ocioz_read_oracle.rs`, `more_zipped_central_directories`.
+
+### I-214. A seek past the end of an archive leaves minizip-ng's buffered position behind
+
+- **Upstream:** minizip-ng reads an archive through a buffered stream that keeps its own idea
+  of the file position (`mz_strm_buf.c` @ 4.0.10). A seek forwards past what it has read adds
+  the offset to that position (`buffered->position += offset`, `mz_strm_buf.c:301`) before it
+  seeks the file; where the file's seek fails, the buffer is emptied and the next read reads
+  on from where the file is, at the end of the last 32,767 bytes read, not where the seek
+  was asked to go. `mz_zip_recover_cd` seeks past an entry by its local header's size, and a
+  zip64 size near `INT64_MAX` makes the sum overflow the 64-bit position: undefined
+  behaviour, which both wheels resolve the same way, wrapping it (Linux
+  `add qword ptr [rdi + 0x10038], r12` at `libOpenColorIO.so` 0x5f6894, Windows
+  `add qword ptr [rbx + 0x10038], rdi` at `OpenColorIO_2_5.dll` 0x18033d179).
+- **Who notices:** applications reading damaged archives that minizip-ng recovers.
+- **A fix:** check the seek's result, and the sum for overflow.
+- **Status:** matched in `p4-baker` (`crates/ocio/src/minizip/mz_strm.rs`, the buffered
+  stream, `wrapping_add`); `crates/ocio/tests/ocioz_read_oracle.rs`, `recovery_after_failed_seeks`.
 
 ## Undefined behaviour upstream
 

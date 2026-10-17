@@ -13,6 +13,13 @@
 //! encrypted or is corrupt; central directories at a wrong offset or with a wrong count;
 //! extra fields that misalign the next one; entries on another disk.
 //!
+//! Many of the cases (from `inflate_at_read_boundaries` to `hashes_of_repeated_names`) are the
+//! probes of the verifier of WP 4.9a, adopted: deflate data around minizip-ng's 65,535-byte
+//! reads, end records, every cut of an archive, recoveries whose seeks fail, zipped central
+//! directories and split archives; and the cases after them pin what its mutants left open
+//! (comments, zip64 descriptors, the end record's search window, the header stream's stale
+//! bytes, the 256 MiB limit).
+//!
 //! Both sides read the same file, by the same absolute path. OCIO caches file hashes by path,
 //! so each request starts with its caches cleared, on both sides (`with_files` on the wheel's).
 
@@ -109,6 +116,12 @@ struct Entry {
     local_extra: Vec<u8>,
     /// The CRC and sizes in a data descriptor after the data, the local header's zeros.
     descriptor: bool,
+    /// The descriptor's sizes in 8 bytes each (zip64's).
+    descriptor64: bool,
+    /// The local header's name, where it isn't the central directory's.
+    local_name: Option<Vec<u8>>,
+    /// The central directory's comment.
+    comment: Vec<u8>,
 }
 
 impl Entry {
@@ -126,6 +139,9 @@ impl Entry {
             disk: 0,
             local_extra: Vec::new(),
             descriptor: false,
+            descriptor64: false,
+            local_name: None,
+            comment: Vec::new(),
         }
     }
 
@@ -148,14 +164,22 @@ impl Entry {
         } {
             put32(&mut out, v);
         }
-        put16(&mut out, self.name.len() as u16);
+        let name = self.local_name.as_ref().unwrap_or(&self.name);
+        put16(&mut out, name.len() as u16);
         put16(&mut out, self.local_extra.len() as u16);
-        out.extend_from_slice(&self.name);
+        out.extend_from_slice(name);
         out.extend_from_slice(&self.local_extra);
         out.extend_from_slice(&written);
         if self.descriptor {
-            for v in [0x0807_4b50, crc, csize, usize_] {
+            for v in [0x0807_4b50, crc] {
                 put32(&mut out, v);
+            }
+            for v in [csize, usize_] {
+                if self.descriptor64 {
+                    out.extend_from_slice(&u64::from(v).to_le_bytes());
+                } else {
+                    put32(&mut out, v);
+                }
             }
         }
         out
@@ -181,7 +205,7 @@ impl Entry {
         for v in [
             self.name.len() as u16,
             self.cd_extra.len() as u16,
-            0,
+            self.comment.len() as u16,
             self.disk,
             0,
         ] {
@@ -191,6 +215,7 @@ impl Entry {
         put32(&mut out, offset);
         out.extend_from_slice(&self.name);
         out.extend_from_slice(&self.cd_extra);
+        out.extend_from_slice(&self.comment);
         out
     }
 
@@ -913,4 +938,1147 @@ fn zipped_central_directories() {
             zipped_cd(&short, 8, Some(3), false),
         ),
     ]);
+}
+
+/// `CONFIG` padded with a YAML comment to exactly `n` bytes.
+fn padded_config(n: usize) -> Vec<u8> {
+    let mut c = CONFIG.to_vec();
+    c.extend_from_slice(b"#");
+    while c.len() < n - 1 {
+        c.push(b'x');
+    }
+    c.push(b'\n');
+    assert_eq!(c.len(), n);
+    c
+}
+
+/// Raw deflate of stored blocks (each <= 65535 bytes), then `tail` bytes.
+fn stored_blocks(data: &[u8], last_final: bool, tail: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let chunks: Vec<&[u8]> = data.chunks(65535).collect();
+    for (i, c) in chunks.iter().enumerate() {
+        let fin = last_final && i + 1 == chunks.len();
+        out.push(if fin { 1 } else { 0 });
+        out.extend_from_slice(&(c.len() as u16).to_le_bytes());
+        out.extend_from_slice(&(!(c.len() as u16)).to_le_bytes());
+        out.extend_from_slice(c);
+    }
+    out.extend_from_slice(tail);
+    out
+}
+
+fn with_entry(index: usize, change: &dyn Fn(&mut Entry)) -> Archive {
+    let mut entries = standard(8);
+    change(&mut entries[index]);
+    Archive::of(entries)
+}
+
+/// A config of 65,534 to 131,070 bytes in stored deflate blocks, followed by an invalid block type,
+/// by nothing (the last entry), or ended by a final block: minizip-ng reads it 65,535 bytes at a
+/// time, and zlib decodes the next block's header in the read that fills the buffer.
+#[test]
+fn inflate_at_read_boundaries() {
+    let mut cases = Vec::new();
+    for n in [65534usize, 65535, 65536, 131070] {
+        let data = padded_config(n);
+        let raw = stored_blocks(&data, false, &[0x06]);
+        let mut e = Entry::new(b"config.ocio", &data, 8);
+        e.raw = Some(raw);
+        let mut entries = standard(8);
+        entries[0] = e;
+        cases.push((
+            format!("stored blocks then a bad block type, {n}"),
+            Archive::of(entries),
+        ));
+        // Control: a valid final block.
+        let raw = stored_blocks(&data, true, &[]);
+        let mut e = Entry::new(b"config.ocio", &data, 8);
+        e.raw = Some(raw);
+        let mut entries = standard(8);
+        entries[0] = e;
+        cases.push((format!("stored blocks, final, {n}"), Archive::of(entries)));
+        // Truncated exactly at the end of the stored data (input runs out).
+        let raw = stored_blocks(&data, false, &[]);
+        let mut e = Entry::new(b"config.ocio", &data, 8);
+        e.raw = Some(raw);
+        let mut entries = standard(8);
+        entries[0] = e;
+        // put it last so that nothing follows it but the CD
+        entries.rotate_left(1);
+        cases.push((
+            format!("stored blocks, no final block, last entry, {n}"),
+            Archive::of(entries),
+        ));
+    }
+    let cases: Vec<(&str, Archive)> = cases.iter().map(|(l, a)| (l.as_str(), a.clone())).collect();
+    check(&cases);
+}
+
+/// End of central directory records: after trailing bytes (up to the 1 MiB minizip-ng searches),
+/// a comment longer than the file, a fake record in the comment, wrong counts, offsets and
+/// sizes, and zip64 end records with wrong fields.
+#[test]
+fn end_records() {
+    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+    let base = Archive::of(standard(8)).bytes();
+    // Trailing fake EOCD after the real one.
+    let mut f = base.clone();
+    f.extend_from_slice(&[0x50, 0x4b, 5, 6]);
+    f.extend_from_slice(&[0u8; 18]);
+    files.push(("trailing fake EOCD".into(), f));
+    // Trailing garbage with no signature.
+    let mut f = base.clone();
+    f.extend_from_slice(b"trailing garbage after the end record");
+    files.push(("trailing garbage".into(), f));
+    // Trailing garbage near the 1 MiB search window.
+    for t in [1_048_554usize, 1_048_555] {
+        let mut f = base.clone();
+        f.extend(std::iter::repeat_n(0u8, t));
+        files.push((format!("{t} trailing zeros"), f));
+    }
+    // A comment longer than declared bytes.
+    let mut a = Archive::of(standard(8));
+    a.comment = b"0123456789".to_vec();
+    let mut f = a.bytes();
+    let n = f.len();
+    f[n - 12] = 100; // comment length 100, only 10 bytes there
+    files.push(("comment length past the end".into(), f));
+    // A comment holding a fake end record pointing at the CD's second entry.
+    let entries = standard(8);
+    let mut locals = Vec::new();
+    let mut central = Vec::new();
+    let mut second_cd = 0usize;
+    for (i, e) in entries.iter().enumerate() {
+        let off = locals.len() as u32;
+        locals.extend_from_slice(&e.local_record());
+        if i == 1 {
+            second_cd = central.len();
+        }
+        central.extend_from_slice(&e.central_record(off));
+    }
+    let cd_off = locals.len();
+    let mut f = locals.clone();
+    f.extend_from_slice(&central);
+    let mut fake = Vec::new();
+    put32(&mut fake, 0x0605_4b50);
+    for v in [0u16, 0, 2, 2] {
+        put16(&mut fake, v);
+    }
+    put32(&mut fake, (central.len() - second_cd) as u32);
+    put32(&mut fake, (cd_off + second_cd) as u32);
+    put16(&mut fake, 0);
+    put32(&mut f, 0x0605_4b50);
+    for v in [0u16, 0, 3, 3] {
+        put16(&mut f, v);
+    }
+    put32(&mut f, central.len() as u32);
+    put32(&mut f, cd_off as u32);
+    put16(&mut f, fake.len() as u16);
+    f.extend_from_slice(&fake);
+    files.push(("fake end record in the comment".into(), f));
+    // Counts.
+    for (on, total) in [(0u16, 0u16), (0xffff, 0xffff), (5, 5), (0xffff, 3)] {
+        let mut a = Archive::of(standard(8));
+        a.count = Some((on, total));
+        files.push((format!("count {on} {total}"), a.bytes()));
+    }
+    // CD offset 0xFFFFFFFF without zip64.
+    let mut f = base.clone();
+    let n = f.len();
+    f[n - 6..n - 2].copy_from_slice(&u32::MAX.to_le_bytes());
+    files.push(("cd offset u32::MAX".into(), f));
+    // CD offset pointing at the second central header.
+    let mut f = locals.clone();
+    f.extend_from_slice(&central);
+    put32(&mut f, 0x0605_4b50);
+    for v in [0u16, 0, 3, 3] {
+        put16(&mut f, v);
+    }
+    put32(&mut f, central.len() as u32);
+    put32(&mut f, (cd_off + second_cd) as u32);
+    put16(&mut f, 0);
+    files.push(("cd offset at the second header".into(), f));
+    // CD size wrong (too big) and offset wrong.
+    for (dsize, doff) in [(10i64, 3i64), (-10, 3), (1000, 0), (0, 1), (-46, 7)] {
+        let mut f = locals.clone();
+        f.extend_from_slice(&central);
+        put32(&mut f, 0x0605_4b50);
+        for v in [0u16, 0, 3, 3] {
+            put16(&mut f, v);
+        }
+        put32(&mut f, (central.len() as i64 + dsize) as u32);
+        put32(&mut f, (cd_off as i64 + doff) as u32);
+        put16(&mut f, 0);
+        files.push((format!("cd size {dsize:+} offset {doff:+}"), f));
+    }
+    // Zip64 end records.
+    let zip64 = |num: u64, num_cd: u64, size: i64, off: i64, loc_delta: i64, eocd16: (u16, u32)| {
+        let mut f = locals.clone();
+        f.extend_from_slice(&central);
+        let z64_pos = f.len();
+        put32(&mut f, 0x0606_4b50);
+        f.extend_from_slice(&44u64.to_le_bytes());
+        put16(&mut f, 45);
+        put16(&mut f, 45);
+        put32(&mut f, 0);
+        put32(&mut f, 0);
+        f.extend_from_slice(&num.to_le_bytes());
+        f.extend_from_slice(&num_cd.to_le_bytes());
+        f.extend_from_slice(&size.to_le_bytes());
+        f.extend_from_slice(&off.to_le_bytes());
+        put32(&mut f, 0x0706_4b50);
+        put32(&mut f, 0);
+        f.extend_from_slice(&((z64_pos as i64 + loc_delta) as u64).to_le_bytes());
+        put32(&mut f, 1);
+        put32(&mut f, 0x0605_4b50);
+        for v in [0u16, 0, eocd16.0, eocd16.0] {
+            put16(&mut f, v);
+        }
+        put32(&mut f, central.len() as u32);
+        put32(&mut f, eocd16.1);
+        put16(&mut f, 0);
+        f
+    };
+    let cl = central.len() as i64;
+    let co = cd_off as i64;
+    files.push((
+        "zip64 end".into(),
+        zip64(3, 3, cl, co, 0, (0xffff, u32::MAX)),
+    ));
+    files.push((
+        "zip64 end, count only".into(),
+        zip64(3, 3, cl, co, 0, (0xffff, co as u32)),
+    ));
+    files.push((
+        "zip64 end, offset only".into(),
+        zip64(3, 3, cl, co, 0, (3, u32::MAX)),
+    ));
+    files.push((
+        "zip64 end, counts differ".into(),
+        zip64(3, 2, cl, co, 0, (0xffff, u32::MAX)),
+    ));
+    files.push((
+        "zip64 end, negative offset".into(),
+        zip64(3, 3, cl, -5, 0, (0xffff, u32::MAX)),
+    ));
+    files.push((
+        "zip64 end, negative size".into(),
+        zip64(3, 3, -1, co, 0, (0xffff, u32::MAX)),
+    ));
+    files.push((
+        "zip64 end, locator off by 4".into(),
+        zip64(3, 3, cl, co, 4, (0xffff, u32::MAX)),
+    ));
+    files.push((
+        "zip64 end, locator past the end".into(),
+        zip64(3, 3, cl, co, 1 << 40, (0xffff, u32::MAX)),
+    ));
+    files.push((
+        "zip64 end, big size".into(),
+        zip64(3, 3, 1 << 40, co, 0, (0xffff, u32::MAX)),
+    ));
+    files.push((
+        "zip64 end, wrong offset".into(),
+        zip64(3, 3, cl, co + 9, 0, (0xffff, u32::MAX)),
+    ));
+    files.push((
+        "zip64 end, count 0".into(),
+        zip64(0, 0, cl, co, 0, (0xffff, u32::MAX)),
+    ));
+    let cases: Vec<(&str, Vec<u8>)> = files.iter().map(|(l, a)| (l.as_str(), a.clone())).collect();
+    check_files(&cases);
+}
+
+fn cuts(label: &str, full: &[u8]) -> Vec<(String, Vec<u8>)> {
+    (0..full.len())
+        .map(|i| (format!("{label} cut at {i}"), full[..i].to_vec()))
+        .collect()
+}
+
+/// A stored archive cut at each of its bytes.
+#[test]
+fn every_cut_of_a_stored_archive() {
+    let full = Archive::of(standard(0)).bytes();
+    let files = cuts("stored", &full);
+    let cases: Vec<(&str, Vec<u8>)> = files.iter().map(|(l, a)| (l.as_str(), a.clone())).collect();
+    check_files(&cases);
+}
+
+/// A deflated archive cut at each of its bytes.
+#[test]
+fn every_cut_of_a_deflated_archive() {
+    let full = Archive::of(standard(8)).bytes();
+    let files = cuts("deflated", &full);
+    let cases: Vec<(&str, Vec<u8>)> = files.iter().map(|(l, a)| (l.as_str(), a.clone())).collect();
+    check_files(&cases);
+}
+
+/// An archive with data descriptors cut at each of its bytes.
+#[test]
+fn every_cut_of_an_archive_with_descriptors() {
+    let mut entries = standard(8);
+    for e in &mut entries {
+        e.descriptor = true;
+    }
+    entries[1].method = 0;
+    let full = Archive::of(entries).bytes();
+    let files = cuts("descriptors", &full);
+    let cases: Vec<(&str, Vec<u8>)> = files.iter().map(|(l, a)| (l.as_str(), a.clone())).collect();
+    check_files(&cases);
+}
+
+/// Names that resolve the way minizip-ng's wildcard comparison does (`./`, leading and double
+/// slashes, case, backslashes, trailing spaces, `*` and `?`, high bytes, empty names), configs
+/// found first or second, and LUT references with other bytes.
+#[test]
+fn more_names() {
+    let n = |names: [&[u8]; 3]| {
+        Archive::of(vec![
+            Entry::new(names[0], CONFIG, 8),
+            Entry::new(names[1], &lut("2.0"), 8),
+            Entry::new(names[2], &lut("3.0"), 8),
+        ])
+    };
+    let mut cases = vec![
+        (
+            "dot slash",
+            n([b"./config.ocio", b"./luts/a.spi1d", b"luts/sub/b.spi1d"]),
+        ),
+        (
+            "leading slash",
+            n([b"/config.ocio", b"/luts/a.spi1d", b"luts/sub/b.spi1d"]),
+        ),
+        (
+            "double slash",
+            n([b"config.ocio", b"luts//a.spi1d", b"luts/sub//b.spi1d"]),
+        ),
+        (
+            "dot in middle",
+            n([
+                b"config.ocio",
+                b"luts/./a.spi1d",
+                b"luts/sub/../sub/b.spi1d",
+            ]),
+        ),
+        (
+            "upper backslashes",
+            n([b"CONFIG.OCIO", b"LUTS\\A.SPI1D", b"LUTS\\SUB\\B.SPI1D"]),
+        ),
+        (
+            "trailing space",
+            n([b"config.ocio ", b"luts/a.spi1d ", b"luts/sub/b.spi1d"]),
+        ),
+        (
+            "star suffix",
+            n([b"config.ocio*", b"luts/a.spi1d**", b"luts/sub/b*"]),
+        ),
+        (
+            "star prefix",
+            n([b"*config.ocio", b"*a.spi1d", b"*/b.spi1d"]),
+        ),
+        (
+            "question marks",
+            n([b"config.oci?", b"luts/?.spi1d", b"luts/sub/b.spi1d"]),
+        ),
+        (
+            "high bytes",
+            n([b"config.ocio", b"luts/\xff\xfe.spi1d", b"luts/sub/b.spi1d"]),
+        ),
+        ("empty name", n([b"config.ocio", b"", b"luts/sub/b.spi1d"])),
+    ];
+    // A star entry first: the config comes from it.
+    cases.push((
+        "star first",
+        Archive::of(vec![
+            Entry::new(b"*", CONFIG, 8),
+            Entry::new(b"config.ocio", b"garbage: [", 8),
+            Entry::new(b"luts/a.spi1d", &lut("2.0"), 8),
+        ]),
+    ));
+    // Two configs, the first one empty (readEntryBuffer throws), the first one unreadable.
+    cases.push((
+        "empty config first",
+        Archive::of(vec![
+            Entry::new(b"config.ocio", b"", 0),
+            Entry::new(b"config.ocio", CONFIG, 8),
+            Entry::new(b"luts/a.spi1d", &lut("2.0"), 8),
+            Entry::new(b"luts/sub/b.spi1d", &lut("3.0"), 8),
+        ]),
+    ));
+    cases.push((
+        "unknown-method config first",
+        Archive::of(vec![
+            Entry::new(b"config.ocio", CONFIG, 12),
+            Entry::new(b"config.ocio", CONFIG, 8),
+            Entry::new(b"luts/a.spi1d", &lut("2.0"), 8),
+        ]),
+    ));
+    cases.push((
+        "config in upper case second",
+        Archive::of(vec![
+            Entry::new(b"luts/a.spi1d", &lut("2.0"), 8),
+            Entry::new(b"CONFIG.OCIO", CONFIG, 8),
+            Entry::new(b"config.ocio", b"x: [", 8),
+        ]),
+    ));
+    check(&cases);
+
+    // Configs whose src names hold other bytes.
+    let cfg = |src: &[u8]| {
+        let mut c = b"ocio_profile_version: 2\nroles: {default: raw}\ncolorspaces:\n  - !<ColorSpace> {name: raw}\n  - !<ColorSpace>\n    name: a\n    from_scene_reference: !<FileTransform> {src: \"".to_vec();
+        c.extend_from_slice(src);
+        c.extend_from_slice(b"\"}\n  - !<ColorSpace> {name: b}\n");
+        c
+    };
+    let mut files = Vec::new();
+    for (label, src, name) in [
+        // Not `\xc4\x9a` against `\xc4\x8a`, which the Windows wheel folds by code page 1252
+        // under Python and the port doesn't (deviation D-4).
+        ("utf8 same", &b"\xc3\xa9.spi1d"[..], &b"\xc3\xa9.spi1d"[..]),
+        (
+            "latin upper lower",
+            &b"\xc3\xa0.spi1d"[..],
+            &b"\xc3\x80.spi1d"[..],
+        ),
+        ("dir dotdot", &b"x/../a.spi1d"[..], &b"a.spi1d"[..]),
+        ("abs path", &b"/a.spi1d"[..], &b"a.spi1d"[..]),
+        ("backslash src", &b"sub\\\\a.spi1d"[..], &b"sub/a.spi1d"[..]),
+    ] {
+        let a = Archive::of(vec![
+            Entry::new(b"config.ocio", &cfg(src), 8),
+            Entry::new(name, &lut("2.0"), 8),
+        ]);
+        files.push((label, a.bytes()));
+    }
+    check_files(&files);
+}
+
+/// Entries whose local extra field, sizes, CRC, zip64, NTFS or UNIX1 fields, disk or local magic
+/// are unusual, and an archive after a prefix whose local offsets count it.
+#[test]
+fn more_entries() {
+    let mut cases = Vec::new();
+    // Local header names differ from the central ones.
+    let mut a = Archive::of(standard(8));
+    a.entries[1].local_extra = vec![0x34, 0x12, 3, 0, 1, 2, 3];
+    cases.push(("local extra only", a));
+    // Stored with a huge compressed size.
+    cases.push((
+        "stored, compressed size huge",
+        with_entry(1, &|e| {
+            e.method = 0;
+            e.compressed_size = Some(0xffff_fff0);
+        }),
+    ));
+    cases.push((
+        "deflated, compressed size huge",
+        with_entry(1, &|e| {
+            e.compressed_size = Some(0xffff_fff0);
+        }),
+    ));
+    cases.push((
+        "encrypted deflated, compressed size huge",
+        with_entry(1, &|e| {
+            e.flag = 1;
+            e.compressed_size = Some(0xffff_fff0);
+        }),
+    ));
+    cases.push((
+        "encrypted deflated, compressed size short",
+        with_entry(1, &|e| {
+            e.flag = 1;
+            e.compressed_size = Some(5);
+        }),
+    ));
+    cases.push((
+        "uncompressed size i32::MAX",
+        with_entry(1, &|e| e.uncompressed_size = Some(0x7fff_ffff)),
+    ));
+    cases.push((
+        "uncompressed size u32::MAX no zip64",
+        with_entry(1, &|e| e.uncompressed_size = Some(u32::MAX)),
+    ));
+    cases.push((
+        "config uncompressed 1",
+        with_entry(0, &|e| e.uncompressed_size = Some(1)),
+    ));
+    // zip64 extra with negative values.
+    cases.push((
+        "zip64 negative size",
+        with_entry(1, &|e| {
+            e.uncompressed_size = Some(u32::MAX);
+            let mut extra = vec![0x01, 0x00, 8, 0];
+            extra.extend_from_slice(&(-1i64).to_le_bytes());
+            e.cd_extra = extra;
+        }),
+    ));
+    cases.push((
+        "zip64 offset",
+        with_entry(1, &|e| {
+            let mut extra = vec![0x01, 0x00, 8, 0];
+            extra.extend_from_slice(&5u64.to_le_bytes());
+            e.cd_extra = extra;
+        }),
+    ));
+    cases.push((
+        "zip64 field of 4 bytes",
+        with_entry(1, &|e| {
+            e.uncompressed_size = Some(u32::MAX);
+            e.cd_extra = vec![0x01, 0x00, 4, 0, 9, 0, 0, 0];
+        }),
+    ));
+    cases.push((
+        "zip64 field reading past extra",
+        with_entry(1, &|e| {
+            e.uncompressed_size = Some(u32::MAX);
+            e.compressed_size = Some(u32::MAX);
+            let size = lut("2.0").len() as u64;
+            let mut extra = vec![0x01, 0x00, 8, 0];
+            extra.extend_from_slice(&size.to_le_bytes());
+            e.cd_extra = extra;
+        }),
+    ));
+    cases.push((
+        "ntfs short attribute",
+        with_entry(1, &|e| {
+            let mut extra = vec![0x0a, 0x00, 8, 0, 0, 0, 0, 0, 1, 0, 24, 0];
+            extra.extend_from_slice(&[0x11; 4]);
+            e.cd_extra = extra;
+        }),
+    ));
+    cases.push((
+        "unix1 short",
+        with_entry(1, &|e| {
+            e.cd_extra = vec![0x0d, 0x00, 12, 0, 1, 2, 3, 4];
+        }),
+    ));
+    cases.push((
+        "disk 0xffff with zip64 disk",
+        with_entry(1, &|e| {
+            e.disk = 0xffff;
+            let mut extra = vec![0x01, 0x00, 4, 0];
+            extra.extend_from_slice(&0u32.to_le_bytes());
+            e.cd_extra = extra;
+        }),
+    ));
+    // Local header magic wrong.
+    let mut a = Archive::of(standard(8));
+    a.entries[1].local_extra = Vec::new();
+    let mut bytes = a.bytes();
+    let off = a.entries[0].local_record().len();
+    bytes[off] = b'X';
+    let mut files: Vec<(String, Vec<u8>)> = cases
+        .iter()
+        .map(|(l, a)| (l.to_string(), a.bytes()))
+        .collect();
+    files.push(("local magic wrong".into(), bytes));
+    // Prefix with absolute local offsets but relative CD offset: the shift then fallback.
+    let mut a = Archive::of(standard(8));
+    let prefix = b"PK, a stub of 21 bytes".to_vec();
+    a.prefix = prefix.clone();
+    let mut f = Vec::new();
+    f.extend_from_slice(&prefix);
+    let mut central = Vec::new();
+    for e in &a.entries {
+        let off = f.len() as u32; // absolute
+        f.extend_from_slice(&e.local_record());
+        central.extend_from_slice(&e.central_record(off));
+    }
+    let cd_off = (f.len() - prefix.len()) as u32; // relative
+    f.extend_from_slice(&central);
+    put32(&mut f, 0x0605_4b50);
+    for v in [0u16, 0, 3, 3] {
+        put16(&mut f, v);
+    }
+    put32(&mut f, central.len() as u32);
+    put32(&mut f, cd_off);
+    put16(&mut f, 0);
+    files.push(("prefix, absolute local offsets".into(), f));
+    let cases: Vec<(&str, Vec<u8>)> = files.iter().map(|(l, a)| (l.as_str(), a.clone())).collect();
+    check_files(&cases);
+}
+
+/// Archives without an end record, recovered from their local headers: descriptors, magic
+/// numbers in the data, wrong local sizes, garbage between entries, local names with a NUL or
+/// empty, links, zip64 local fields, and a truncated archive.
+#[test]
+fn more_recoveries() {
+    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+    let strip_end = |a: &Archive| {
+        let b = a.bytes();
+        b[..b.len() - 22].to_vec()
+    };
+    // Descriptors whose data holds local header magic.
+    let mut entries = standard(8);
+    let mut data = lut("2.0");
+    data.extend_from_slice(b"# PK\x03\x04 inside\n");
+    entries[1] = Entry::new(b"luts/a.spi1d", &data, 0);
+    for e in &mut entries {
+        e.descriptor = true;
+    }
+    files.push((
+        "descriptors, magic in stored data".into(),
+        strip_end(&Archive::of(entries.clone())),
+    ));
+    // Same with the descriptor magic in data too.
+    let mut entries2 = entries.clone();
+    let mut data = lut("2.0");
+    data.extend_from_slice(b"# PK\x07\x08 inside PK\x03\x04\n");
+    entries2[1] = Entry::new(b"luts/a.spi1d", &data, 0);
+    entries2[1].descriptor = true;
+    files.push((
+        "descriptors, both magics in data".into(),
+        strip_end(&Archive::of(entries2)),
+    ));
+    // No descriptor, compressed size 0 in local header (deflate).
+    let mut entries3 = standard(8);
+    entries3[1].compressed_size = Some(0);
+    files.push((
+        "local compressed size 0".into(),
+        strip_end(&Archive::of(entries3)),
+    ));
+    // Huge local compressed size.
+    let mut entries4 = standard(8);
+    entries4[1].compressed_size = Some(0x7fff_0000);
+    files.push((
+        "local compressed size huge".into(),
+        strip_end(&Archive::of(entries4)),
+    ));
+    // Garbage between entries.
+    let a = Archive::of(standard(8));
+    let mut f = Vec::new();
+    for e in &a.entries {
+        f.extend_from_slice(&e.local_record());
+        f.extend_from_slice(b"garbage between the entries");
+    }
+    files.push(("garbage between entries".into(), f));
+    // A local extra field longer than its data (write_header's copy fails).
+    let mut entries5 = standard(8);
+    entries5[1].local_extra = vec![0x34, 0x12, 200, 0, 1, 2];
+    files.push((
+        "local field past extra".into(),
+        strip_end(&Archive::of(entries5)),
+    ));
+    // Local extra with a CDCD field and a name of __cdcd__? No: name with NUL in local header.
+    let mut entries6 = standard(8);
+    entries6[1].name = b"luts/a.spi1d\0junk".to_vec();
+    files.push((
+        "local name with NUL".into(),
+        strip_end(&Archive::of(entries6)),
+    ));
+    // Empty local name.
+    let mut entries7 = standard(8);
+    entries7.insert(1, Entry::new(b"", b"x", 0));
+    files.push(("empty local name".into(), strip_end(&Archive::of(entries7))));
+    // UNIX1 local link with NUL in the middle.
+    let mut entries8 = standard(8);
+    let mut extra = vec![0x0d, 0x00, 18, 0];
+    extra.extend_from_slice(&[0; 12]);
+    extra.extend_from_slice(b"li\0nk!");
+    entries8[1].local_extra = extra;
+    files.push((
+        "local link with NUL".into(),
+        strip_end(&Archive::of(entries8)),
+    ));
+    // zip64 local field then descriptors (64-bit descriptors for later entries).
+    let mut entries9 = standard(8);
+    let mut extra = vec![0x01, 0x00, 16, 0];
+    extra.extend_from_slice(&[0; 16]);
+    entries9[0].local_extra = extra;
+    entries9[0].descriptor = true;
+    entries9[1].descriptor = true;
+    files.push((
+        "zip64 local then descriptors".into(),
+        strip_end(&Archive::of(entries9)),
+    ));
+    // A central header magic within data, no EOCD.
+    let mut entries10 = standard(8);
+    let mut data = lut("2.0");
+    data.extend_from_slice(b"# PK\x01\x02\n");
+    entries10[2] = Entry::new(b"luts/sub/b.spi1d", &data, 0);
+    entries10[2].descriptor = true;
+    files.push((
+        "central magic in last data".into(),
+        strip_end(&Archive::of(entries10)),
+    ));
+    // Only a local header of the config, deflate truncated.
+    let full = Archive::of(standard(8)).bytes();
+    files.push(("first 100 bytes".into(), full[..100].to_vec()));
+    // No EOCD; the zipped CD as first local entry.
+    let cases: Vec<(&str, Vec<u8>)> = files.iter().map(|(l, a)| (l.as_str(), a.clone())).collect();
+    check_files(&cases);
+}
+
+/// Zipped central directories: a short `0xcdcd` field (which wraps minizip-ng's search limit,
+/// docs/improvements.md, I-213), one after another field, an unknown method, sizes that are
+/// negative as an `int` or wrong, names that aren't `__cdcd__` exactly, garbage after the inner
+/// directory, and a recovered archive whose first entry is `__cdcd__`.
+#[test]
+fn more_zipped_central_directories() {
+    let entries = standard(8);
+    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+    // CDCD field shorter than 8 bytes: only 2 bytes of data in the extra field.
+    files.push((
+        "cdcd field of 2".into(),
+        zipped_cd_extra(&entries, 8, vec![0xcd, 0xcd, 2, 0, 3, 0], true),
+    ));
+    files.push((
+        "cdcd field after another".into(),
+        zipped_cd_extra(
+            &entries,
+            8,
+            {
+                let mut x = vec![0x34, 0x12, 2, 0, 9, 9, 0xcd, 0xcd, 8, 0];
+                x.extend_from_slice(&3u64.to_le_bytes());
+                x
+            },
+            false,
+        ),
+    ));
+    // Unknown method.
+    let mut f = zipped_cd(&entries, 8, Some(3), true);
+    let first_c = outer_cd(&f);
+    f[first_c + 10] = 12;
+    files.push(("cdcd unknown method".into(), f));
+    // Big uncompressed size (negative as int32).
+    let mut f = zipped_cd(&entries, 8, Some(3), true);
+    let first_c = outer_cd(&f);
+    f[first_c + 24..first_c + 28].copy_from_slice(&0x8000_0000u32.to_le_bytes());
+    files.push(("cdcd size 2^31".into(), f));
+    // Uncompressed size larger than data.
+    let mut f = zipped_cd(&entries, 0, Some(3), true);
+    let first_c = outer_cd(&f);
+    let us = u32::from_le_bytes(f[first_c + 24..first_c + 28].try_into().unwrap());
+    f[first_c + 24..first_c + 28].copy_from_slice(&(us + 50).to_le_bytes());
+    files.push(("cdcd size +50 stored".into(), f));
+    let mut f = zipped_cd(&entries, 8, Some(3), true);
+    let first_c = outer_cd(&f);
+    let us = u32::from_le_bytes(f[first_c + 24..first_c + 28].try_into().unwrap());
+    f[first_c + 24..first_c + 28].copy_from_slice(&(us + 50).to_le_bytes());
+    files.push(("cdcd size +50 deflated".into(), f));
+    let mut f = zipped_cd(&entries, 8, Some(3), true);
+    let first_c = outer_cd(&f);
+    let us = u32::from_le_bytes(f[first_c + 24..first_c + 28].try_into().unwrap());
+    f[first_c + 24..first_c + 28].copy_from_slice(&(us - 50).to_le_bytes());
+    files.push(("cdcd size -50 deflated".into(), f));
+    // Name with a NUL after __cdcd__ and upper case.
+    let mut inner = Vec::new();
+    let mut out = Vec::new();
+    for e in &entries {
+        let off = out.len() as u32;
+        out.extend_from_slice(&e.local_record());
+        inner.extend_from_slice(&e.central_record(off));
+    }
+    for (label, name) in [
+        ("cdcd NUL name", &b"__cdcd__\0x"[..]),
+        ("cdcd upper", &b"__CDCD__"[..]),
+    ] {
+        let mut f = out.clone();
+        let mut cd = Entry::new(name, &inner, 8);
+        cd.cd_extra = vec![0xcd, 0xcd, 8, 0];
+        cd.cd_extra.extend_from_slice(&3u64.to_le_bytes());
+        let off = f.len() as u32;
+        f.extend_from_slice(&cd.local_record());
+        let central = cd.central_record(off);
+        let cdo = f.len() as u32;
+        f.extend_from_slice(&central);
+        put32(&mut f, 0x0605_4b50);
+        for v in [0u16, 0, 1, 1] {
+            put16(&mut f, v);
+        }
+        put32(&mut f, central.len() as u32);
+        put32(&mut f, cdo);
+        put16(&mut f, 0);
+        files.push((label.into(), f));
+    }
+    // Inner CD with garbage after, and inner CD listing __cdcd__ first again.
+    {
+        let mut f = out.clone();
+        let mut inner2 = inner.clone();
+        inner2.extend_from_slice(b"PK\x01\x02 garbage");
+        let mut cd = Entry::new(b"__cdcd__", &inner2, 8);
+        cd.cd_extra = vec![0xcd, 0xcd, 8, 0];
+        cd.cd_extra.extend_from_slice(&3u64.to_le_bytes());
+        let off = f.len() as u32;
+        f.extend_from_slice(&cd.local_record());
+        let central = cd.central_record(off);
+        let cdo = f.len() as u32;
+        f.extend_from_slice(&central);
+        put32(&mut f, 0x0605_4b50);
+        for v in [0u16, 0, 1, 1] {
+            put16(&mut f, v);
+        }
+        put32(&mut f, central.len() as u32);
+        put32(&mut f, cdo);
+        put16(&mut f, 0);
+        files.push(("cdcd inner garbage".into(), f));
+    }
+    // A recovered archive whose first local entry is __cdcd__ with the CDCD field in its
+    // local extra.
+    {
+        let mut f = Vec::new();
+        let mut inner3 = Vec::new();
+        let mut cd = Entry::new(b"__cdcd__", b"", 0);
+        cd.local_extra = vec![0xcd, 0xcd, 8, 0];
+        cd.local_extra.extend_from_slice(&3u64.to_le_bytes());
+        // The inner CD needs the offsets of the entries after it, so build twice.
+        let mut cd_len = 0;
+        for _ in 0..2 {
+            inner3.clear();
+            let mut off = cd_len as u32;
+            let mut locals = Vec::new();
+            for e in &entries {
+                inner3.extend_from_slice(&e.central_record(off));
+                let l = e.local_record();
+                off += l.len() as u32;
+                locals.extend_from_slice(&l);
+            }
+            cd.data = inner3.clone();
+            cd.raw = None;
+            let lr = cd.local_record();
+            cd_len = lr.len();
+            f = lr;
+            f.extend_from_slice(&locals);
+        }
+        files.push(("recovered with cdcd first".into(), f));
+    }
+    let cases: Vec<(&str, Vec<u8>)> = files.iter().map(|(l, a)| (l.as_str(), a.clone())).collect();
+    check_files(&cases);
+}
+
+fn outer_cd(f: &[u8]) -> usize {
+    let n = f.len();
+    u32::from_le_bytes(f[n - 6..n - 2].try_into().unwrap()) as usize
+}
+
+fn zipped_cd_extra(entries: &[Entry], method: u16, extra: Vec<u8>, also_listed: bool) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut inner = Vec::new();
+    for e in entries {
+        let offset = out.len() as u32;
+        out.extend_from_slice(&e.local_record());
+        inner.extend_from_slice(&e.central_record(offset));
+    }
+    let mut cd_entry = Entry::new(b"__cdcd__", &inner, method);
+    cd_entry.cd_extra = extra;
+    let cd_entry_offset = out.len() as u32;
+    out.extend_from_slice(&cd_entry.local_record());
+    let mut central = cd_entry.central_record(cd_entry_offset);
+    let mut n = 1u16;
+    if also_listed {
+        central.extend_from_slice(&inner);
+        n += entries.len() as u16;
+    }
+    let cd_offset = out.len() as u32;
+    out.extend_from_slice(&central);
+    put32(&mut out, 0x0605_4b50);
+    for v in [0u16, 0, n, n] {
+        put16(&mut out, v);
+    }
+    put32(&mut out, central.len() as u32);
+    put32(&mut out, cd_offset);
+    put16(&mut out, 0);
+    out
+}
+
+/// Recovered archives whose zip64 local sizes make minizip-ng's seek past the entry fail, the
+/// buffered stream's position wrapped (docs/improvements.md, I-214), first in the archive or
+/// after 40,000 bytes.
+#[test]
+fn recovery_after_failed_seeks() {
+    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+    let strip_end = |a: &Archive| {
+        let b = a.bytes();
+        b[..b.len() - 22].to_vec()
+    };
+    for (label, index, csize) in [
+        (
+            "config, zip64 csize overflowing",
+            0usize,
+            0x7fff_ffff_ffff_fff0i64,
+        ),
+        ("lut a, zip64 csize overflowing", 1, 0x7fff_ffff_ffff_fff0),
+        ("lut b, zip64 csize overflowing", 2, 0x7fff_ffff_ffff_fff0),
+        ("config, zip64 csize 2^40", 0, 1 << 40),
+        ("config, zip64 csize i64::MAX - 40", 0, i64::MAX - 40),
+        ("config, zip64 csize i64::MAX - 20000", 0, i64::MAX - 20000),
+    ] {
+        let mut entries = standard(8);
+        entries[index].compressed_size = Some(u32::MAX);
+        let mut extra = vec![0x01, 0x00, 8, 0];
+        extra.extend_from_slice(&csize.to_le_bytes());
+        entries[index].local_extra = extra;
+        let a = Archive::of(entries);
+        files.push((label.to_string(), strip_end(&a)));
+        // Also with a big first entry so the buffer doesn't reach the end of the file.
+        let mut entries = standard(8);
+        entries.insert(0, Entry::new(b"pad.bin", &vec![b'p'; 40000], 0));
+        let index = index + 1;
+        entries[index].compressed_size = Some(u32::MAX);
+        let mut extra = vec![0x01, 0x00, 8, 0];
+        extra.extend_from_slice(&csize.to_le_bytes());
+        entries[index].local_extra = extra;
+        let a = Archive::of(entries);
+        files.push((format!("{label}, after 40000 bytes"), strip_end(&a)));
+    }
+    let cases: Vec<(&str, Vec<u8>)> = files.iter().map(|(l, a)| (l.as_str(), a.clone())).collect();
+    check_files(&cases);
+}
+
+/// Writes `content` as `<stem>.ocioz` and each companion as `<stem><suffix>`; the archive's path.
+fn write_with(content: &[u8], companions: &[(&str, Vec<u8>)]) -> String {
+    let mut all = content.to_vec();
+    for (s, c) in companions {
+        all.extend_from_slice(s.as_bytes());
+        all.extend_from_slice(c);
+    }
+    let stem = format!("c{}_{:016x}", all.len(), ocio::caching::msvc_fnv1a(&all));
+    let dir = files_dir();
+    for (s, c) in companions {
+        std::fs::write(dir.join(format!("{stem}{s}")), c).unwrap();
+    }
+    let path = dir.join(format!("{stem}.ocioz"));
+    std::fs::write(&path, content).unwrap();
+    path.to_str().unwrap().replace('\\', "/")
+}
+
+/// A split archive's case: its label, the archive, and its parts (a suffix and the bytes).
+type SplitCase = (String, Vec<u8>, Vec<(&'static str, Vec<u8>)>);
+
+/// Split archives: the parts `.z01` and `.z02` next to the archive, with and without their
+/// disk header, an entry or the central directory on another disk.
+#[test]
+fn split_disks() {
+    let _lock = CACHES.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut cases: Vec<SplitCase> = Vec::new();
+    // C1: truncated archive + .z01 holding another archive's local entries.
+    let mine = Archive::of(standard(8)).bytes();
+    let mut other = vec![0x50, 0x4b, 7, 8];
+    let mut ents = standard(8);
+    ents[1] = Entry::new(b"luts/a.spi1d", &lut("9.0"), 8);
+    for e in &ents {
+        other.extend_from_slice(&e.local_record());
+    }
+    cases.push((
+        "truncated + z01 with magic".into(),
+        mine[..mine.len() - 22].to_vec(),
+        vec![(".z01", other.clone())],
+    ));
+    cases.push((
+        "truncated + z01 without magic".into(),
+        mine[..mine.len() - 22].to_vec(),
+        vec![(".z01", other[4..].to_vec())],
+    ));
+    cases.push((
+        "complete + z01 with magic".into(),
+        mine.clone(),
+        vec![(".z01", other.clone())],
+    ));
+    // C2: a LUT entry on disk 1, its local header in .z02 at offset 0.
+    let mut a = Archive::of(standard(8));
+    a.entries[1].disk = 1;
+    let lut_local = a.entries[1].local_record();
+    // The archive's own CD gives the LUT's offset as its offset in the main file; put the
+    // local record in z02 at that same offset.
+    let off = a.entries[0].local_record().len();
+    let mut z02 = vec![b'z'; off];
+    z02.extend_from_slice(&lut_local);
+    cases.push((
+        "lut on disk 1 with z02".into(),
+        a.bytes(),
+        vec![(".z02", z02.clone())],
+    ));
+    // C3: CD on disk 1, entries on disk 0 in z01 (with magic) at the same offsets + 4.
+    let mut b = Archive::of(standard(8));
+    b.disk_with_cd = 1;
+    let mut z01 = vec![0x50, 0x4b, 7, 8];
+    z01.extend_from_slice(&b.bytes());
+    cases.push((
+        "cd on disk 1, entries in z01".into(),
+        b.bytes(),
+        vec![(".z01", z01.clone())],
+    ));
+    // C4: z01 and z02 both, truncated main.
+    cases.push((
+        "truncated + z01 + z02".into(),
+        mine[..mine.len() - 22].to_vec(),
+        vec![(".z01", other.clone()), (".z02", ents[2].local_record())],
+    ));
+
+    let paths: Vec<String> = cases.iter().map(|(_, a, c)| write_with(a, c)).collect();
+    let mut calls = Vec::new();
+    for path in &paths {
+        calls.push(BatchCall {
+            cmd: "with_files",
+            args: json!({"files": {}, "command": "config_calls", "args": {
+                "config": {"file": path},
+                "calls": [{"call": "serialize"}, {"call": "getCacheID"}]}}),
+            blobs: Vec::new(),
+        });
+        for space in LUT_SPACES {
+            calls.push(BatchCall {
+                cmd: "with_files",
+                args: json!({"files": {}, "command": "config_processor", "args": {
+                    "config": {"file": path},
+                    "overload": {"names": ["raw", space]}}}),
+                blobs: Vec::new(),
+            });
+        }
+    }
+    let wheel = Oracle::get().batch(&calls, false);
+    let mut wheel = wheel
+        .into_iter()
+        .map(|w| w.expect("an oracle request").result);
+    let mut failures = Vec::new();
+    for ((label, _, _), path) in cases.iter().zip(&paths) {
+        let (wheel_outcome, _) = wheel_config(&wheel.next().unwrap());
+        clear_all_caches();
+        let port_outcome: Outcome = Config::create_from_file(path.as_bytes())
+            .and_then(|config| Ok(vec![config.serialize()?, config.cache_id()?.into_bytes()]))
+            .map_err(|e| e.what().to_vec());
+        if wheel_outcome != port_outcome {
+            failures.push(format!(
+                "{label}: config\n  wheel {}\n  port  {}",
+                show(&wheel_outcome),
+                show(&port_outcome)
+            ));
+        }
+        for space in LUT_SPACES {
+            let wheel_outcome = wheel_processor(&wheel.next().unwrap());
+            clear_all_caches();
+            let port_outcome = Config::create_from_file(path.as_bytes())
+                .and_then(|config| config.processor_between("raw", space))
+                .and_then(|processor| Ok(vec![processor.cache_id()?.into_bytes()]))
+                .map_err(|e| e.what().to_vec());
+            if wheel_outcome != port_outcome {
+                failures.push(format!(
+                    "{label}: raw to {space}\n  wheel {}\n  port  {}",
+                    show(&wheel_outcome),
+                    show(&port_outcome)
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// LUTs whose names repeat in other cases or with other slashes: which one's CRC the cache ID
+/// hashes.
+#[test]
+fn hashes_of_repeated_names() {
+    let cases = vec![
+        (
+            "two case variants of a LUT",
+            Archive::of(vec![
+                Entry::new(b"config.ocio", CONFIG, 8),
+                Entry::new(b"luts/a.spi1d", &lut("2.0"), 8),
+                Entry::new(b"LUTS/A.SPI1D", &lut("5.0"), 8),
+                Entry::new(b"luts/sub/b.spi1d", &lut("3.0"), 8),
+            ]),
+        ),
+        (
+            "slash variants of a LUT",
+            Archive::of(vec![
+                Entry::new(b"config.ocio", CONFIG, 8),
+                Entry::new(b"luts\\sub\\b.spi1d", &lut("6.0"), 8),
+                Entry::new(b"luts/a.spi1d", &lut("2.0"), 8),
+                Entry::new(b"luts/sub/b.spi1d", &lut("3.0"), 8),
+            ]),
+        ),
+    ];
+    check(&cases);
+}
+
+/// Entries with comments in the central directory: minizip-ng steps from header to header by
+/// the name's, extra field's and comment's sizes.
+#[test]
+fn entry_comments() {
+    let mut entries = standard(8);
+    entries[0].comment = b"the config".to_vec();
+    entries[1].comment = vec![b'c'; 300];
+    check(&[("entry comments", Archive::of(entries))]);
+}
+
+/// Recovered archives with data descriptors after an entry whose local header has a zip64
+/// field: minizip-ng reads every later descriptor as zip64's (its `zip64` isn't reset from
+/// entry to entry, docs/improvements.md, I-210), so a 32-bit descriptor is misread.
+#[test]
+fn zip64_descriptors_after_a_zip64_entry() {
+    let strip_end = |a: &Archive| {
+        let b = a.bytes();
+        b[..b.len() - 22].to_vec()
+    };
+    let mut entries = standard(8);
+    let mut pad = Entry::new(b"pad.txt", b"padding", 0);
+    pad.local_extra = vec![0x01, 0x00, 16, 0];
+    pad.local_extra.extend_from_slice(&[0; 16]);
+    pad.descriptor = true;
+    pad.descriptor64 = true;
+    entries.insert(1, pad);
+    entries[2].descriptor = true;
+    entries[3].descriptor = true;
+    let mut sixty_four = entries.clone();
+    sixty_four[2].descriptor64 = true;
+    sixty_four[3].descriptor64 = true;
+    check_files(&[
+        (
+            "32-bit descriptors after a zip64 one",
+            strip_end(&Archive::of(entries)),
+        ),
+        (
+            "zip64 descriptors throughout",
+            strip_end(&Archive::of(sixty_four)),
+        ),
+    ]);
+}
+
+/// The end record after 100 KiB of trailing bytes, within the 1 MiB minizip-ng searches (past
+/// the 64 KiB of a zip comment), in an archive whose local names aren't the central
+/// directory's: read from the central directory, the LUTs are found; recovered from the local
+/// headers, they wouldn't be.
+#[test]
+fn end_record_far_from_the_end() {
+    let mut a = Archive::of(standard(8));
+    a.entries[1].local_name = Some(b"luts/x.spi1d".to_vec());
+    let mut f = a.bytes();
+    f.extend(std::iter::repeat_n(b'.', 100 * 1024));
+    check_files(&[("100 KiB after the end record", f)]);
+}
+
+/// A header's fields read past its extra field: minizip-ng reads each header into the same
+/// memory stream, so a zip64 field of 8 bytes that both sizes are read from reads the second
+/// past the field, into what an earlier header's longer name left there (a fresh stream would
+/// end, and the read fail).
+#[test]
+fn stale_header_bytes() {
+    let mut entries = standard(8);
+    let pad_name = [b"pad/".as_slice(), &[b'7'; 60], b".txt"].concat();
+    entries.insert(1, Entry::new(&pad_name, b"padding", 0));
+    let size = entries[2].data.len() as u64;
+    entries[2].uncompressed_size = Some(u32::MAX);
+    entries[2].compressed_size = Some(u32::MAX);
+    entries[2].cd_extra = vec![0x01, 0x00, 8, 0];
+    entries[2].cd_extra.extend_from_slice(&size.to_le_bytes());
+    check(&[("a zip64 field read past its end", Archive::of(entries))]);
+}
+
+/// LUT entries whose sizes are at OpenColorIO's limit of 256 MiB and past it
+/// (`readEntryBuffer`, OCIOZArchive.cpp:390-403 @ v2.5.2): the first is read into a buffer of
+/// that size (its data short of it, the rest zeros), the second refused.
+#[test]
+fn entry_size_limit() {
+    let cases: Vec<(String, Archive)> = [256u32 << 20, (256 << 20) + 1]
+        .iter()
+        .map(|&size| {
+            (
+                format!("a LUT of {size} bytes"),
+                with_entry(1, &|e| {
+                    e.method = 0;
+                    e.uncompressed_size = Some(size);
+                }),
+            )
+        })
+        .collect();
+    let cases: Vec<(&str, Archive)> = cases.iter().map(|(l, a)| (l.as_str(), a.clone())).collect();
+    check(&cases);
 }

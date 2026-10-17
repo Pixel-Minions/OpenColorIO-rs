@@ -1170,7 +1170,8 @@ struct Entry {
 }
 
 /// Port of `mz_zip_extrafield_find` (mz_zip.c:2583-2612 @ 4.0.10): positions `stream` after
-/// the header of the first field of `type_` and returns its length.
+/// the header of the first field of `type_` and returns its length. `max_seek` counts down by
+/// each field's length less 4, so a field shorter than 4 bytes counts it up.
 pub(crate) fn mz_zip_extrafield_find(
     stream: &mut dyn Stream,
     type_: u16,
@@ -1190,7 +1191,9 @@ pub(crate) fn mz_zip_extrafield_find(
             return Ok(field_length);
         }
 
-        max_seek -= i32::from(field_length) - 4;
+        // An `int` that wraps where a field shorter than 4 bytes passes INT32_MAX: both wheels
+        // wrap it (docs/improvements.md, I-213).
+        max_seek = max_seek.wrapping_sub(i32::from(field_length) - 4);
         if max_seek < 0 {
             return Err(MZ_EXIST_ERROR);
         }
