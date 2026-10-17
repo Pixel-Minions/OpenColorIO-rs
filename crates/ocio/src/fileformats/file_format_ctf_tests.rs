@@ -16,15 +16,25 @@ use crate::fileformats::input_stream::OpenMode;
 use crate::fileformats::test_utils::{get_test_files_dir, load_test_file};
 use crate::processor::Processor;
 use crate::transform::Transform;
+use crate::transforms::cdl_transform::CdlTransform;
+use crate::transforms::exponent_transform::ExponentTransform;
+use crate::transforms::exponent_with_linear_transform::ExponentWithLinearTransform;
+use crate::transforms::log_affine_transform::LogAffineTransform;
+use crate::transforms::log_camera_transform::LogCameraTransform;
+use crate::transforms::log_transform::LogTransform;
 use crate::transforms::matrix_transform::MatrixTransform;
+use crate::transforms::range_transform::{RangeStyle, RangeTransform};
+use ocio_formats::fileformats::xmlutils::xml_reader_helper::{
+    METADATA_SAT_DESCRIPTION, METADATA_SOP_DESCRIPTION,
+};
 use ocio_ops::bit_depth_utils::get_bit_depth_max_value;
 use ocio_ops::format_metadata::{METADATA_DESCRIPTION, METADATA_ID, METADATA_INFO, METADATA_NAME};
 use ocio_ops::logging::{get_logging_level, set_logging_level};
 use ocio_ops::math_utils::convert_half_bits_to_float;
 use ocio_ops::op_data::OpDataType;
 use ocio_ops::open_color_types::{
-    BitDepth, GradingStyle, Interpolation, LoggingLevel, Lut1DHueAdjust, RgbCurveType,
-    TransformDirection,
+    BitDepth, CdlStyle, GradingStyle, Interpolation, LoggingLevel, Lut1DHueAdjust, NegativeStyle,
+    RgbCurveType, TransformDirection,
 };
 use ocio_ops::ops::cdl::cdl_op_data::{CdlOpData, CdlOpStyle, ChannelParams};
 use ocio_ops::ops::fixedfunction::fixed_function_op_data::{
@@ -4372,4 +4382,999 @@ fn no_ops_ctf() {
         expected,
         std::str::from_utf8(&output_transform).unwrap(),
     );
+}
+
+/// `OCIO_CHECK_EQUAL(expected.size(), output.size()); OCIO_CHECK_EQUAL(expected, output);`
+#[track_caller]
+fn check_written(expected: &str, output: &[u8]) {
+    assert_eq!(expected.len(), output.len());
+    assert_text_eq("written", expected, std::str::from_utf8(output).unwrap());
+}
+
+/// A group of `transform` whose id is `id`.
+fn group_of(id: &[u8], transform: impl Into<Transform>) -> GroupTransform {
+    let mut group = GroupTransform::new();
+    group
+        .format_metadata_mut()
+        .add_attribute(Some(METADATA_ID), Some(id))
+        .unwrap();
+    group.append_transform(transform.into());
+    group
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, save_cdl)` @ v2.5.2.
+#[test]
+fn save_cdl() {
+    let mut cdl_transform = CdlTransform::new();
+    cdl_transform.set_direction(TransformDirection::Forward);
+    let slope = [1.1, 1.2, 1.3];
+    cdl_transform.set_slope(&slope);
+    let offset = [2.1, 2.2, 2.3];
+    cdl_transform.set_offset(&offset);
+    let power = [3.1, 3.2, 3.3];
+    cdl_transform.set_power(&power);
+    let sat = 0.7;
+    cdl_transform.set_sat(sat);
+    let md = cdl_transform.format_metadata_mut();
+    md.add_attribute(Some(METADATA_ID), Some(b"test-cdl-1"))
+        .unwrap();
+    for (name, value) in [
+        (METADATA_DESCRIPTION, b"CDL description 1".as_slice()),
+        (METADATA_DESCRIPTION, b"CDL description 2"),
+        (METADATA_INPUT_DESCRIPTION, b"Input"),
+        (METADATA_VIEWING_DESCRIPTION, b"Viewing"),
+        (METADATA_SOP_DESCRIPTION, b"SOP description 1"),
+        (METADATA_SOP_DESCRIPTION, b"SOP description 2"),
+        (METADATA_SAT_DESCRIPTION, b"Sat description 1"),
+        (METADATA_SAT_DESCRIPTION, b"Sat description 2"),
+    ] {
+        md.add_child_element(Some(name), Some(value)).unwrap();
+    }
+
+    let cached_file = write_read(cdl_transform.into());
+    let file_ops = cached_file.transform.get_ops();
+    assert_eq!(file_ops.len(), 1);
+    let op = &file_ops[0];
+    let cdl = as_cdl(op);
+    assert_eq!(op.get_id(), b"test-cdl-1");
+    let metadata = op.get_format_metadata();
+    assert_eq!(metadata.get_num_children_elements(), 8);
+    for (i, name) in [
+        METADATA_DESCRIPTION,
+        METADATA_DESCRIPTION,
+        METADATA_INPUT_DESCRIPTION,
+        METADATA_VIEWING_DESCRIPTION,
+        METADATA_SOP_DESCRIPTION,
+        METADATA_SOP_DESCRIPTION,
+        METADATA_SAT_DESCRIPTION,
+        METADATA_SAT_DESCRIPTION,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        assert_eq!(
+            name,
+            metadata
+                .get_child_element(i as i32)
+                .unwrap()
+                .get_element_name()
+        );
+    }
+    let params = cdl.get_slope_params().get_rgb();
+    assert_eq!(params[0], slope[0]);
+    assert_eq!(params[1], slope[1]);
+    assert_eq!(params[2], slope[2]);
+    let params = cdl.get_offset_params().get_rgb();
+    assert_eq!(params[0], offset[0]);
+    assert_eq!(params[1], offset[1]);
+    assert_eq!(params[2], offset[2]);
+    let params = cdl.get_power_params().get_rgb();
+    assert_eq!(params[0], power[0]);
+    assert_eq!(params[1], power[1]);
+    assert_eq!(params[2], power[2]);
+    let val = cdl.get_saturation();
+    assert_eq!(val, sat);
+}
+
+/// Port of `TestSaveLog` (FileFormatCTF_tests.cpp:5142-5155 @ v2.5.2).
+#[track_caller]
+fn test_save_log(base: f64) {
+    let mut log_t = LogTransform::new();
+    log_t.set_base(base);
+
+    let cached_file = write_read(log_t.into());
+    let file_ops = cached_file.transform.get_ops();
+    assert_eq!(file_ops.len(), 1);
+    let log = as_log(&file_ops[0]);
+    assert_eq!(log.base(), base);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, save_log)` @ v2.5.2.
+#[test]
+fn save_log() {
+    test_save_log(2.0);
+    test_save_log(10.0);
+    test_save_log(8.0);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, save_log_affine)` @ v2.5.2.
+#[test]
+fn save_log_affine() {
+    let mut log_t = LogAffineTransform::new();
+    let base = 8.0;
+    log_t.set_base(base);
+    let vals = [0.9, 1.1, 1.2];
+    log_t.set_lin_side_slope_value(&vals);
+
+    let cached_file = write_read(log_t.into());
+    let file_ops = cached_file.transform.get_ops();
+    assert_eq!(file_ops.len(), 1);
+    let log = as_log(&file_ops[0]);
+    assert_eq!(log.base(), base);
+    assert_eq!(log.red_params()[LIN_SIDE_SLOPE], vals[0]);
+    assert_eq!(log.green_params()[LIN_SIDE_SLOPE], vals[1]);
+    assert_eq!(log.blue_params()[LIN_SIDE_SLOPE], vals[2]);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, save_log_camera)` @ v2.5.2.
+#[test]
+fn save_log_camera() {
+    let vals_break = [0.4, 0.5, 0.6];
+    let mut log_t = LogCameraTransform::new(&vals_break);
+    let base = 8.0;
+    log_t.set_base(base);
+    let vals = [0.9, 1.1, 1.2];
+    log_t.set_lin_side_slope_value(&vals);
+    let vals_ls = [1.2, 1.3, 1.4];
+    log_t.set_linear_slope_value(&vals_ls).unwrap();
+
+    let cached_file = write_read(log_t.into());
+    let file_ops = cached_file.transform.get_ops();
+    assert_eq!(file_ops.len(), 1);
+    let log = as_log(&file_ops[0]);
+    assert_eq!(log.base(), base);
+    assert_eq!(log.red_params()[LIN_SIDE_SLOPE], vals[0]);
+    assert_eq!(log.green_params()[LIN_SIDE_SLOPE], vals[1]);
+    assert_eq!(log.blue_params()[LIN_SIDE_SLOPE], vals[2]);
+    assert_eq!(log.red_params()[LIN_SIDE_BREAK], vals_break[0]);
+    assert_eq!(log.green_params()[LIN_SIDE_BREAK], vals_break[1]);
+    assert_eq!(log.blue_params()[LIN_SIDE_BREAK], vals_break[2]);
+    assert_eq!(log.red_params()[LINEAR_SLOPE], vals_ls[0]);
+    assert_eq!(log.green_params()[LINEAR_SLOPE], vals_ls[1]);
+    assert_eq!(log.blue_params()[LINEAR_SLOPE], vals_ls[2]);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, save_range)` @ v2.5.2.
+#[test]
+fn save_range() {
+    let mut range_t = RangeTransform::new();
+    range_t.set_direction(TransformDirection::Forward);
+    range_t.set_min_in_value(0.0);
+    range_t.set_max_in_value(0.5);
+    range_t.set_min_out_value(0.5);
+    range_t.set_max_out_value(1.5);
+
+    let cached_file = write_read(range_t.clone().into());
+    let file_ops = cached_file.transform.get_ops();
+    assert_eq!(file_ops.len(), 1);
+    let range = as_range(&file_ops[0]);
+    assert_eq!(range.get_min_in_value(), range_t.min_in_value());
+    assert_eq!(range.get_max_in_value(), range_t.max_in_value());
+    assert_eq!(range.get_min_out_value(), range_t.min_out_value());
+    assert_eq!(range.get_max_out_value(), range_t.max_out_value());
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, save_group)` @ v2.5.2.
+#[test]
+fn save_group() {
+    let mut range_t = RangeTransform::new();
+    range_t.set_direction(TransformDirection::Forward);
+    range_t.set_min_in_value(0.0f32 as f64);
+    range_t.set_max_in_value(0.5f32 as f64);
+    range_t.set_min_out_value(0.5f32 as f64);
+    range_t.set_max_out_value(1.5f32 as f64);
+
+    let mut mat_t = MatrixTransform::new();
+    let offset4 = [0.123456789123, 0.11, 0.111, 0.2];
+    mat_t.set_offset(&offset4);
+    mat_t.set_direction(TransformDirection::Forward);
+
+    let mut group_t = GroupTransform::new();
+    group_t.append_transform(range_t.into());
+    group_t.append_transform(mat_t.into());
+
+    let cached_file = write_read(group_t.into());
+    let file_ops = cached_file.transform.get_ops();
+    assert_eq!(file_ops.len(), 2);
+    as_range(&file_ops[0]);
+    as_matrix(&file_ops[1]);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, legacy_cdl)` @ v2.5.2.
+#[test]
+fn legacy_cdl() {
+    // Create empty legacy Config to use.
+    let mut config = Config::new().unwrap();
+    config.set_major_version(1).unwrap();
+
+    let mut cdl = CdlTransform::new();
+    let sop = [1.0, 1.1, 1.2, 0.2, 0.3, 0.4, 3.1, 3.2, 3.3];
+    cdl.set_sop(&sop);
+    cdl.set_sat(2.1);
+
+    // Need to specify an id so that it does not get generated.
+    let group = group_of(b"cdl0", cdl);
+
+    let mut output_transform = Vec::new();
+    group
+        .write(&config, FILEFORMAT_CTF, &mut output_transform)
+        .unwrap();
+
+    // For OCIO v1, an ASC CDL was implemented as a Matrix/Gamma/Matrix rather than as a
+    // dedicated op as in v2 and onward.
+    let expected = concat!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n",
+        "<ProcessList version=\"1.3\" id=\"cdl0\">\n",
+        "    <Matrix inBitDepth=\"32f\" outBitDepth=\"32f\">\n",
+        "        <Array dim=\"3 4 3\">\n",
+        "                  1                   0                   0                 0.2\n",
+        "                  0                 1.1                   0                 0.3\n",
+        "                  0                   0                 1.2                 0.4\n",
+        "        </Array>\n",
+        "    </Matrix>\n",
+        "    <Gamma inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"basicFwd\">\n",
+        "        <GammaParams channel=\"R\" gamma=\"3.1\" />\n",
+        "        <GammaParams channel=\"G\" gamma=\"3.2\" />\n",
+        "        <GammaParams channel=\"B\" gamma=\"3.3\" />\n",
+        "    </Gamma>\n",
+        // Output matrix array as '3 3 3'.
+        "    <Matrix inBitDepth=\"32f\" outBitDepth=\"32f\">\n",
+        "        <Array dim=\"3 3 3\">\n",
+        "            1.86614            -0.78672            -0.07942\n",
+        "           -0.23386             1.31328            -0.07942\n",
+        "           -0.23386            -0.78672             2.02058\n",
+        "        </Array>\n",
+        "    </Matrix>\n",
+        "</ProcessList>\n"
+    );
+
+    check_written(expected, &output_transform);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, cdl_clf)` @ v2.5.2.
+#[test]
+fn cdl_clf() {
+    let mut cdl = CdlTransform::new();
+    let sop = [1.0, 1.1, 1.2, 0.2, 0.3, 0.4, 3.1, 3.2, 3.3];
+    cdl.set_sop(&sop);
+    cdl.set_sat(2.1);
+    let md = cdl.format_metadata_mut();
+    md.add_attribute(Some(METADATA_NAME), Some(b"TestCDL"))
+        .unwrap();
+    md.add_attribute(Some(METADATA_ID), Some(b"CDL42")).unwrap();
+
+    for (name, value) in [
+        (METADATA_DESCRIPTION, b"CDL node for unit test".as_slice()),
+        (METADATA_DESCRIPTION, b"Adding another description"),
+        (METADATA_INPUT_DESCRIPTION, b"Input"),
+        (METADATA_VIEWING_DESCRIPTION, b"Viewing"),
+        (METADATA_SOP_DESCRIPTION, b"SOP description 1"),
+        (METADATA_SOP_DESCRIPTION, b"SOP description 2"),
+        (METADATA_SAT_DESCRIPTION, b"Sat description 1"),
+        (METADATA_SAT_DESCRIPTION, b"Sat description 2"),
+    ] {
+        md.add_child_element(Some(name), Some(value)).unwrap();
+    }
+
+    let mut group = GroupTransform::new();
+
+    // Need to specify an id so that it does not get generated.
+    let gmd = group.format_metadata_mut();
+    gmd.add_attribute(Some(METADATA_ID), Some(b"cdl1")).unwrap();
+    gmd.add_child_element(Some(METADATA_DESCRIPTION), Some(b"ProcessList description"))
+        .unwrap();
+    gmd.add_child_element(Some(METADATA_DESCRIPTION), Some(b"======================="))
+        .unwrap();
+
+    group.append_transform(cdl.into());
+
+    let gmd = group.format_metadata_mut();
+    gmd.add_child_element(Some(METADATA_INFO), Some(b""))
+        .unwrap();
+    let info = gmd.get_child_element_mut(2).unwrap();
+    info.add_child_element(Some(b"Release"), Some(b"2019"))
+        .unwrap();
+    info.add_child_element(Some(b"Directors"), Some(b""))
+        .unwrap();
+    let sub = info.get_child_element_mut(1).unwrap();
+    for (i, last_name) in [b"Cronenberg".as_slice(), b"Lynch", b"Fincher", b"Lean"]
+        .into_iter()
+        .enumerate()
+    {
+        sub.add_child_element(Some(b"Director"), Some(b"")).unwrap();
+        let sub_sub = sub.get_child_element_mut(i as i32).unwrap();
+        sub_sub
+            .add_attribute(Some(b"FirstName"), Some(b"David"))
+            .unwrap();
+        sub_sub
+            .add_attribute(Some(b"LastName"), Some(last_name))
+            .unwrap();
+    }
+
+    let mut output_transform = Vec::new();
+    write_group_clf(&group, &mut output_transform).unwrap();
+
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList compCLFversion="3" id="cdl1">
+    <Description>ProcessList description</Description>
+    <Description>=======================</Description>
+    <Info>
+        <Release>2019</Release>
+        <Directors>
+            <Director FirstName="David" LastName="Cronenberg"></Director>
+            <Director FirstName="David" LastName="Lynch"></Director>
+            <Director FirstName="David" LastName="Fincher"></Director>
+            <Director FirstName="David" LastName="Lean"></Director>
+        </Directors>
+    </Info>
+    <ASC_CDL id="CDL42" name="TestCDL" inBitDepth="32f" outBitDepth="32f" style="FwdNoClamp">
+        <Description>CDL node for unit test</Description>
+        <Description>Adding another description</Description>
+        <InputDescription>Input</InputDescription>
+        <ViewingDescription>Viewing</ViewingDescription>
+        <SOPNode>
+            <Description>SOP description 1</Description>
+            <Description>SOP description 2</Description>
+            <Slope>1 1.1 1.2</Slope>
+            <Offset>0.2 0.3 0.4</Offset>
+            <Power>3.1 3.2 3.3</Power>
+        </SOPNode>
+        <SatNode>
+            <Description>Sat description 1</Description>
+            <Description>Sat description 2</Description>
+            <Saturation>2.1</Saturation>
+        </SatNode>
+    </ASC_CDL>
+</ProcessList>
+"#;
+
+    check_written(expected, &output_transform);
+
+    // Now test if the read is working.
+
+    let mut ctf_stream = InputStream::from_bytes(expected.as_bytes().to_vec());
+
+    let cached_file = LocalFileFormat.read_file(&mut ctf_stream, b"").unwrap();
+
+    let op_list = cached_file.transform.get_ops();
+    assert_eq!(op_list.len(), 1);
+    let cdl_data = as_cdl(&op_list[0]);
+    assert_eq!(cdl_data.get_slope_params().get_rgb()[0], 1.);
+    assert_eq!(cdl_data.get_slope_params().get_rgb()[1], 1.1);
+    assert_eq!(cdl_data.get_slope_params().get_rgb()[2], 1.2);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, cdl_ctf)` @ v2.5.2.
+#[test]
+fn cdl_ctf() {
+    let mut cdl = CdlTransform::new();
+    cdl.set_style(CdlStyle::Asc);
+
+    let sop = [1.0, 1.1, 1.2, 0.2, 0.3, 0.4, 3.1, 3.2, 3.3];
+    cdl.set_sop(&sop);
+    cdl.set_sat(2.1);
+
+    // Need to specify an id so that it does not get generated.
+    let group = group_of(b"cdl2", cdl);
+
+    let mut output_transform = Vec::new();
+    write_group_ctf(&group, &mut output_transform).unwrap();
+
+    let expected = concat!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n",
+        "<ProcessList version=\"1.7\" id=\"cdl2\">\n",
+        "    <ASC_CDL inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"Fwd\">\n",
+        "        <SOPNode>\n",
+        "            <Slope>1 1.1 1.2</Slope>\n",
+        "            <Offset>0.2 0.3 0.4</Offset>\n",
+        "            <Power>3.1 3.2 3.3</Power>\n",
+        "        </SOPNode>\n",
+        "        <SatNode>\n",
+        "            <Saturation>2.1</Saturation>\n",
+        "        </SatNode>\n",
+        "    </ASC_CDL>\n",
+        "</ProcessList>\n"
+    );
+
+    check_written(expected, &output_transform);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, range_ctf)` @ v2.5.2.
+#[test]
+fn range_ctf() {
+    // Non-clamping range are converted to matrix.
+    let mut range = RangeTransform::new();
+    range.set_style(RangeStyle::NoClamp);
+    range.set_min_in_value(0.1);
+    range.set_max_in_value(0.9);
+    range.set_min_out_value(0.0);
+    range.set_max_out_value(1.2);
+    let md = range.format_metadata_mut();
+    md.add_child_element(
+        Some(METADATA_DESCRIPTION),
+        Some(b"Range node for unit test"),
+    )
+    .unwrap();
+    md.add_attribute(Some(METADATA_NAME), Some(b"TestRange"))
+        .unwrap();
+    md.add_attribute(Some(METADATA_ID), Some(b"Range42"))
+        .unwrap();
+
+    // Need to specify an id so that it does not get generated.
+    let mut group = group_of(b"mat0", range);
+    let gmd = group.format_metadata_mut();
+    gmd.add_child_element(Some(METADATA_INPUT_DESCRIPTOR), Some(b"Input descriptor"))
+        .unwrap();
+    gmd.add_child_element(Some(METADATA_OUTPUT_DESCRIPTOR), Some(b"Output descriptor"))
+        .unwrap();
+
+    let mut output_transform = Vec::new();
+    write_group_ctf(&group, &mut output_transform).unwrap();
+
+    let expected = concat!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n",
+        "<ProcessList version=\"1.3\" id=\"mat0\">\n",
+        "    <InputDescriptor>Input descriptor</InputDescriptor>\n",
+        "    <OutputDescriptor>Output descriptor</OutputDescriptor>\n",
+        "    <Matrix id=\"Range42\" name=\"TestRange\" inBitDepth=\"32f\" outBitDepth=\"32f\">\n",
+        "        <Description>Range node for unit test</Description>\n",
+        "        <Array dim=\"3 4 3\">\n",
+        "                1.5                   0                   0               -0.15\n",
+        "                  0                 1.5                   0               -0.15\n",
+        "                  0                   0                 1.5               -0.15\n",
+        "        </Array>\n",
+        "    </Matrix>\n",
+        "</ProcessList>\n"
+    );
+
+    check_written(expected, &output_transform);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, range1_clf)` @ v2.5.2.
+#[test]
+fn range1_clf() {
+    // Forward clamping range with all 4 values set and with metadata.
+    let mut range = RangeTransform::new();
+    range.set_file_input_bit_depth(BitDepth::Uint8);
+    range.set_style(RangeStyle::Clamp);
+    range.set_min_in_value(16.0 / 255.0);
+    range.set_max_in_value(235. / 255.0);
+    range.set_min_out_value(-0.5);
+    range.set_max_out_value(2.1);
+    let md = range.format_metadata_mut();
+    md.add_child_element(
+        Some(METADATA_DESCRIPTION),
+        Some(b"Range node for unit test"),
+    )
+    .unwrap();
+    md.add_attribute(Some(METADATA_NAME), Some(b"TestRange"))
+        .unwrap();
+    md.add_attribute(Some(METADATA_ID), Some(b"Range42"))
+        .unwrap();
+
+    let mut group = group_of(b"UID42", range);
+    let gmd = group.format_metadata_mut();
+    gmd.add_child_element(Some(METADATA_INPUT_DESCRIPTOR), Some(b"Input descriptor"))
+        .unwrap();
+    gmd.add_child_element(Some(METADATA_OUTPUT_DESCRIPTOR), Some(b"Output descriptor"))
+        .unwrap();
+
+    let mut output_transform = Vec::new();
+    write_group_clf(&group, &mut output_transform).unwrap();
+
+    let expected = concat!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n",
+        "<ProcessList compCLFversion=\"3\" id=\"UID42\">\n",
+        "    <InputDescriptor>Input descriptor</InputDescriptor>\n",
+        "    <OutputDescriptor>Output descriptor</OutputDescriptor>\n",
+        "    <Range id=\"Range42\" name=\"TestRange\" inBitDepth=\"8i\" outBitDepth=\"32f\">\n",
+        "        <Description>Range node for unit test</Description>\n",
+        "        <minInValue> 16 </minInValue>\n",
+        "        <maxInValue> 235 </maxInValue>\n",
+        "        <minOutValue> -0.5 </minOutValue>\n",
+        "        <maxOutValue> 2.1 </maxOutValue>\n",
+        "    </Range>\n",
+        "</ProcessList>\n"
+    );
+
+    check_written(expected, &output_transform);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, range2_clf)` @ v2.5.2.
+#[test]
+fn range2_clf() {
+    // Forward clamping range with just minValues set.
+    let mut range = RangeTransform::new();
+    range.set_file_input_bit_depth(BitDepth::Uint10);
+    range.set_file_output_bit_depth(BitDepth::Uint8);
+    range.set_min_in_value(0.1);
+    range.set_min_out_value(0.1);
+    range
+        .format_metadata_mut()
+        .add_attribute(Some(METADATA_ID), Some(b"Range42"))
+        .unwrap();
+
+    let group = group_of(b"UID42", range);
+
+    let mut output_transform = Vec::new();
+    write_group_clf(&group, &mut output_transform).unwrap();
+
+    let expected = concat!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n",
+        "<ProcessList compCLFversion=\"3\" id=\"UID42\">\n",
+        "    <Range id=\"Range42\" inBitDepth=\"10i\" outBitDepth=\"8i\">\n",
+        "        <minInValue> 102.3 </minInValue>\n",
+        "        <minOutValue> 25.5 </minOutValue>\n",
+        "    </Range>\n",
+        "</ProcessList>\n"
+    );
+
+    check_written(expected, &output_transform);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, range3_clf)` @ v2.5.2.
+#[test]
+fn range3_clf() {
+    // Forward clamping range with just minValues set.
+
+    // This will only do bit-depth conversion (with a clamp at 0).
+    let mut range = RangeTransform::new();
+    range.set_file_input_bit_depth(BitDepth::F16);
+    range.set_file_output_bit_depth(BitDepth::Uint12);
+    range.set_min_in_value(0.);
+    range.set_min_out_value(0.);
+    range
+        .format_metadata_mut()
+        .add_attribute(Some(METADATA_ID), Some(b"Range42"))
+        .unwrap();
+
+    let group = group_of(b"UID42", range);
+
+    let mut output_transform = Vec::new();
+    write_group_clf(&group, &mut output_transform).unwrap();
+
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList compCLFversion="3" id="UID42">
+    <Range id="Range42" inBitDepth="16f" outBitDepth="12i">
+        <minInValue> 0 </minInValue>
+        <minOutValue> 0 </minOutValue>
+    </Range>
+</ProcessList>
+"#;
+
+    check_written(expected, &output_transform);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, range4_clf)` @ v2.5.2.
+#[test]
+fn range4_clf() {
+    // Inverse clamping range with all 4 values set.
+    let mut range = RangeTransform::new();
+    range.set_file_input_bit_depth(BitDepth::F16);
+    range.set_file_output_bit_depth(BitDepth::Uint12);
+    // Set inverse direction.
+    range.set_direction(TransformDirection::Inverse);
+    range.set_min_in_value(0.);
+    range.set_min_out_value(0.5);
+    range.set_max_in_value(1.0);
+    range.set_max_out_value(1.0);
+    range
+        .format_metadata_mut()
+        .add_attribute(Some(METADATA_ID), Some(b"Range42"))
+        .unwrap();
+
+    let group = group_of(b"UID42", range);
+
+    let mut output_transform = Vec::new();
+    write_group_clf(&group, &mut output_transform).unwrap();
+
+    // Range is saved in the forward direction.
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList compCLFversion="3" id="UID42">
+    <Range id="Range42" inBitDepth="12i" outBitDepth="16f">
+        <minInValue> 2047.5 </minInValue>
+        <maxInValue> 4095 </maxInValue>
+        <minOutValue> 0 </minOutValue>
+        <maxOutValue> 1 </maxOutValue>
+    </Range>
+</ProcessList>
+"#;
+
+    check_written(expected, &output_transform);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, exponent_ctf)` @ v2.5.2.
+#[test]
+fn exponent_ctf() {
+    let mut exp = ExponentWithLinearTransform::new();
+    let gamma = [1.1, 1.2, 1.3, 1.0];
+    exp.set_gamma(&gamma);
+    let offset = [0.1, 0.2, 0.1, 0.0];
+    exp.set_offset(&offset);
+
+    let group = group_of(b"UID42", exp);
+
+    let mut output_transform = Vec::new();
+    write_group_ctf(&group, &mut output_transform).unwrap();
+
+    let expected = concat!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n",
+        "<ProcessList version=\"1.3\" id=\"UID42\">\n",
+        "    <Gamma inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"monCurveFwd\">\n",
+        "        <GammaParams channel=\"R\" gamma=\"1.1\" offset=\"0.1\" />\n",
+        "        <GammaParams channel=\"G\" gamma=\"1.2\" offset=\"0.2\" />\n",
+        "        <GammaParams channel=\"B\" gamma=\"1.3\" offset=\"0.1\" />\n",
+        "    </Gamma>\n",
+        "</ProcessList>\n"
+    );
+
+    check_written(expected, &output_transform);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, gamma1_ctf)` @ v2.5.2.
+#[test]
+fn gamma1_ctf() {
+    let mut exp = ExponentTransform::new();
+    exp.set_direction(TransformDirection::Inverse);
+    let gamma = [2.6, 2.6, 2.6, 1.0];
+    exp.set_value(&gamma);
+
+    let group = group_of(b"UID42", exp);
+
+    let mut output_transform = Vec::new();
+    write_group_ctf(&group, &mut output_transform).unwrap();
+
+    // Identity alpha. Transform written as version 1.3.
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="1.3" id="UID42">
+    <Gamma inBitDepth="32f" outBitDepth="32f" style="basicRev">
+        <GammaParams gamma="2.6" />
+    </Gamma>
+</ProcessList>
+"#;
+
+    check_written(expected, &output_transform);
+
+    let mut output_transform_clf = Vec::new();
+    write_group_clf(&group, &mut output_transform_clf).unwrap();
+
+    let expected_clf = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList compCLFversion="3" id="UID42">
+    <Exponent inBitDepth="32f" outBitDepth="32f" style="basicRev">
+        <ExponentParams exponent="2.6" />
+    </Exponent>
+</ProcessList>
+"#;
+
+    check_written(expected_clf, &output_transform_clf);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, gamma1_mirror_ctf)` @ v2.5.2.
+#[test]
+fn gamma1_mirror_ctf() {
+    let mut exp = ExponentTransform::new();
+    exp.set_direction(TransformDirection::Inverse);
+    exp.set_negative_style(NegativeStyle::Mirror).unwrap();
+    let gamma = [2.6, 2.6, 2.6, 1.0];
+    exp.set_value(&gamma);
+
+    let group = group_of(b"UID42", exp);
+
+    let mut output_transform = Vec::new();
+    write_group_ctf(&group, &mut output_transform).unwrap();
+
+    // Identity alpha. Transform written as version 2 because of new style.
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2" id="UID42">
+    <Exponent inBitDepth="32f" outBitDepth="32f" style="basicMirrorRev">
+        <ExponentParams exponent="2.6" />
+    </Exponent>
+</ProcessList>
+"#;
+
+    check_written(expected, &output_transform);
+
+    let mut output_transform_clf = Vec::new();
+    write_group_clf(&group, &mut output_transform_clf).unwrap();
+
+    let expected_clf = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList compCLFversion="3" id="UID42">
+    <Exponent inBitDepth="32f" outBitDepth="32f" style="basicMirrorRev">
+        <ExponentParams exponent="2.6" />
+    </Exponent>
+</ProcessList>
+"#;
+
+    check_written(expected_clf, &output_transform_clf);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, gamma1_pass_thru_ctf)` @ v2.5.2.
+#[test]
+fn gamma1_pass_thru_ctf() {
+    let mut exp = ExponentTransform::new();
+    exp.set_direction(TransformDirection::Inverse);
+    exp.set_negative_style(NegativeStyle::PassThru).unwrap();
+    let gamma = [2.6, 2.6, 2.6, 1.0];
+    exp.set_value(&gamma);
+
+    let group = group_of(b"UID42", exp);
+
+    let mut output_transform = Vec::new();
+    write_group_ctf(&group, &mut output_transform).unwrap();
+
+    // Identity alpha. Transform written as version 2.0 because of new style.
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2" id="UID42">
+    <Exponent inBitDepth="32f" outBitDepth="32f" style="basicPassThruRev">
+        <ExponentParams exponent="2.6" />
+    </Exponent>
+</ProcessList>
+"#;
+
+    check_written(expected, &output_transform);
+
+    let mut output_transform_clf = Vec::new();
+    write_group_clf(&group, &mut output_transform_clf).unwrap();
+
+    let expected_clf = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList compCLFversion="3" id="UID42">
+    <Exponent inBitDepth="32f" outBitDepth="32f" style="basicPassThruRev">
+        <ExponentParams exponent="2.6" />
+    </Exponent>
+</ProcessList>
+"#;
+
+    check_written(expected_clf, &output_transform_clf);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, gamma2_ctf)` @ v2.5.2.
+#[test]
+fn gamma2_ctf() {
+    let mut exp = ExponentWithLinearTransform::new();
+    exp.set_direction(TransformDirection::Inverse);
+    let gamma = [2.4, 2.2, 2.0, 1.8];
+    exp.set_gamma(&gamma);
+    let offset = [0.1, 0.2, 0.4, 0.8];
+    exp.set_offset(&offset);
+
+    let group = group_of(b"UID42", exp);
+
+    let mut output_transform = Vec::new();
+    write_group_ctf(&group, &mut output_transform).unwrap();
+
+    // Non-identity alpha. Transform written as version 1.5.
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="1.5" id="UID42">
+    <Gamma inBitDepth="32f" outBitDepth="32f" style="monCurveRev">
+        <GammaParams channel="R" gamma="2.4" offset="0.1" />
+        <GammaParams channel="G" gamma="2.2" offset="0.2" />
+        <GammaParams channel="B" gamma="2" offset="0.4" />
+        <GammaParams channel="A" gamma="1.8" offset="0.8" />
+    </Gamma>
+</ProcessList>
+"#;
+
+    check_written(expected, &output_transform);
+
+    // CLF does not allow alpha channel.
+    let mut output_transform_clf = Vec::new();
+    check_throw_what(
+        write_group_clf(&group, &mut output_transform_clf),
+        "Transform uses the 'Gamma with alpha component' op which cannot be written as CLF",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, gamma3_ctf)` @ v2.5.2.
+#[test]
+fn gamma3_ctf() {
+    let mut exp = ExponentWithLinearTransform::new();
+    let gamma = [2.42, 2.42, 2.42, 1.0];
+    exp.set_gamma(&gamma);
+    let offset = [0.099, 0.099, 0.099, 0.0];
+    exp.set_offset(&offset);
+
+    let group = group_of(b"UID42", exp);
+
+    let mut output_transform = Vec::new();
+    write_group_ctf(&group, &mut output_transform).unwrap();
+
+    // Identity alpha.  Transform written as version 1.3.
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="1.3" id="UID42">
+    <Gamma inBitDepth="32f" outBitDepth="32f" style="monCurveFwd">
+        <GammaParams gamma="2.42" offset="0.099" />
+    </Gamma>
+</ProcessList>
+"#;
+
+    check_written(expected, &output_transform);
+
+    // CLF does not allow alpha channel.
+    let mut output_transform_clf = Vec::new();
+    write_group_clf(&group, &mut output_transform_clf).unwrap();
+
+    let expected_clf = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList compCLFversion="3" id="UID42">
+    <Exponent inBitDepth="32f" outBitDepth="32f" style="monCurveFwd">
+        <ExponentParams exponent="2.42" offset="0.099" />
+    </Exponent>
+</ProcessList>
+"#;
+
+    check_written(expected_clf, &output_transform_clf);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, gamma4_ctf)` @ v2.5.2.
+#[test]
+fn gamma4_ctf() {
+    let mut exp = ExponentTransform::new();
+    let gamma = [2.6, 2.5, 2.4, 2.2];
+    exp.set_value(&gamma);
+
+    let group = group_of(b"UID42", exp);
+
+    let mut output_transform = Vec::new();
+    write_group_ctf(&group, &mut output_transform).unwrap();
+
+    // Non-identity alpha.  Transform written as version 1.5.
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="1.5" id="UID42">
+    <Gamma inBitDepth="32f" outBitDepth="32f" style="basicFwd">
+        <GammaParams channel="R" gamma="2.6" />
+        <GammaParams channel="G" gamma="2.5" />
+        <GammaParams channel="B" gamma="2.4" />
+        <GammaParams channel="A" gamma="2.2" />
+    </Gamma>
+</ProcessList>
+"#;
+
+    check_written(expected, &output_transform);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, gamma5_ctf)` @ v2.5.2.
+#[test]
+fn gamma5_ctf() {
+    let mut exp = ExponentWithLinearTransform::new();
+    let gamma = [1. / 0.45, 1. / 0.45, 1. / 0.45, 1. / 0.45];
+    exp.set_gamma(&gamma);
+    let offset = [0.099, 0.099, 0.099, 0.099];
+    exp.set_offset(&offset);
+
+    let group = group_of(b"UID42", exp);
+
+    let mut output_transform = Vec::new();
+    write_group_ctf(&group, &mut output_transform).unwrap();
+
+    // Non-identity alpha.  Transform written as version 1.5.
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="1.5" id="UID42">
+    <Gamma inBitDepth="32f" outBitDepth="32f" style="monCurveFwd">
+        <GammaParams channel="R" gamma="2.22222222222222" offset="0.099" />
+        <GammaParams channel="G" gamma="2.22222222222222" offset="0.099" />
+        <GammaParams channel="B" gamma="2.22222222222222" offset="0.099" />
+        <GammaParams channel="A" gamma="2.22222222222222" offset="0.099" />
+    </Gamma>
+</ProcessList>
+"#;
+
+    check_written(expected, &output_transform);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, gamma6_ctf)` @ v2.5.2.
+#[test]
+fn gamma6_ctf() {
+    let mut exp = ExponentTransform::new();
+    let gamma = [2.4, 2.5, 2.6, 1.0];
+    exp.set_value(&gamma);
+
+    let group = group_of(b"UID42", exp);
+
+    let mut output_transform = Vec::new();
+    write_group_ctf(&group, &mut output_transform).unwrap();
+
+    // R,G,B channels different, but alpha is identity. Transform written as version 1.3.
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="1.3" id="UID42">
+    <Gamma inBitDepth="32f" outBitDepth="32f" style="basicFwd">
+        <GammaParams channel="R" gamma="2.4" />
+        <GammaParams channel="G" gamma="2.5" />
+        <GammaParams channel="B" gamma="2.6" />
+    </Gamma>
+</ProcessList>
+"#;
+
+    check_written(expected, &output_transform);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, log_lin_to_log_ctf)` @ v2.5.2.
+#[test]
+fn log_lin_to_log_ctf() {
+    let mut log_t = LogAffineTransform::new();
+
+    let base = 2.0;
+    log_t.set_base(base);
+    let lins = [0.9, 1.1, 1.2];
+    log_t.set_lin_side_slope_value(&lins);
+    let lino = [0.1, 0.2, 0.3];
+    log_t.set_lin_side_offset_value(&lino);
+    let logs = [1.3, 1.4, 1.5];
+    log_t.set_log_side_slope_value(&logs);
+    let logo = [0.4, 0.5, 0.6];
+    log_t.set_log_side_offset_value(&logo);
+
+    let group = group_of(b"UIDLOG42", log_t);
+
+    let mut output_transform = Vec::new();
+    write_group_ctf(&group, &mut output_transform).unwrap();
+
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2" id="UIDLOG42">
+    <Log inBitDepth="32f" outBitDepth="32f" style="linToLog">
+        <LogParams channel="R" base="2" linSideSlope="0.9" linSideOffset="0.1" logSideSlope="1.3" logSideOffset="0.4" />
+        <LogParams channel="G" base="2" linSideSlope="1.1" linSideOffset="0.2" logSideSlope="1.4" logSideOffset="0.5" />
+        <LogParams channel="B" base="2" linSideSlope="1.2" linSideOffset="0.3" logSideSlope="1.5" logSideOffset="0.6" />
+    </Log>
+</ProcessList>
+"#;
+
+    check_written(expected, &output_transform);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, log_log_to_lin_ctf)` @ v2.5.2.
+#[test]
+fn log_log_to_lin_ctf() {
+    let mut log_t = LogAffineTransform::new();
+    log_t.set_direction(TransformDirection::Inverse);
+    let base = 2.0;
+    log_t.set_base(base);
+    let vals = [0.9, 0.9, 0.9];
+    log_t.set_lin_side_slope_value(&vals);
+
+    let group = group_of(b"UIDLOG42", log_t);
+
+    let mut output_transform = Vec::new();
+    write_group_ctf(&group, &mut output_transform).unwrap();
+
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2" id="UIDLOG42">
+    <Log inBitDepth="32f" outBitDepth="32f" style="logToLin">
+        <LogParams base="2" linSideSlope="0.9" linSideOffset="0" logSideSlope="1" logSideOffset="0" />
+    </Log>
+</ProcessList>
+"#;
+
+    check_written(expected, &output_transform);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, log_antilog2_ctf)` @ v2.5.2.
+#[test]
+fn log_antilog2_ctf() {
+    let mut log_t = LogAffineTransform::new();
+    log_t.set_direction(TransformDirection::Inverse);
+    let base = 2.0;
+    log_t.set_base(base);
+
+    let group = group_of(b"UIDLOG42", log_t);
+
+    let mut output_transform = Vec::new();
+    write_group_ctf(&group, &mut output_transform).unwrap();
+
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2" id="UIDLOG42">
+    <Log inBitDepth="32f" outBitDepth="32f" style="antiLog2">
+    </Log>
+</ProcessList>
+"#;
+
+    check_written(expected, &output_transform);
 }

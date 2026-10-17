@@ -8,31 +8,53 @@
 //! `GetMinimumVersion`), the value formatting (`WriteValue`, `SetOStream`, `WriteValues`),
 //! `OpWriter` and its bit depths, the operators' writers, and `TransformWriter`. Upstream's
 //! writers hold their formatter; here each `write` is given it. The operators' writers come
-//! chunk by chunk (WP 4.6b-4.6d); until then [`TransformWriter`] refuses the others as not
-//! ported. The ExposureContrast and grading writers but the RGB curves' (WP 4.6f) come with
+//! chunk by chunk: the Matrix (WP 4.6a); the CDL, Gamma (and Exponent), Log and Range (WP
+//! 4.6b); the LUTs (WP 4.6c), FixedFunction and RGB curves (WP 4.6d). Until then
+//! [`TransformWriter`] refuses the others as not ported. The ExposureContrast and grading writers but the RGB curves' (WP 4.6f) come with
 //! their op data (Phase 5).
 
-use ocio_formats::fileformats::xmlutils::xml_reader_utils::{ATTR_ID, ATTR_NAME, TAG_DESCRIPTION};
+use ocio_formats::fileformats::xmlutils::xml_reader_helper::{
+    METADATA_SAT_DESCRIPTION, METADATA_SOP_DESCRIPTION,
+};
+use ocio_formats::fileformats::xmlutils::xml_reader_utils::{
+    ATTR_ID, ATTR_NAME, TAG_DESCRIPTION, TAG_OFFSET, TAG_POWER, TAG_SATNODE, TAG_SATURATION,
+    TAG_SLOPE, TAG_SOPNODE,
+};
 use ocio_formats::fileformats::xmlutils::xml_writer_utils::{
     Attributes, XmlElementWriter, XmlFormatter, XmlScopeIndent,
 };
 use ocio_ops::bit_depth_utils::get_bit_depth_max_value;
 use ocio_ops::cfmt::{Crt, OStringStream};
 use ocio_ops::format_metadata::{
-    FormatMetadataImpl, METADATA_INPUT_DESCRIPTOR, METADATA_OUTPUT_DESCRIPTOR,
+    FormatMetadataImpl, METADATA_DESCRIPTION, METADATA_INPUT_DESCRIPTOR, METADATA_OUTPUT_DESCRIPTOR,
 };
 use ocio_ops::hash_utils::cache_id_hash;
 use ocio_ops::op_data::{OpData, OpDataRcPtr, OpDataType, get_type_name};
 use ocio_ops::open_color_types::{BitDepth, Lut1DHueAdjust, TransformDirection};
+use ocio_ops::ops::cdl::cdl_op_data::CdlOpData;
 use ocio_ops::ops::fixedfunction::fixed_function_op_data::FixedFunctionOpStyle;
-use ocio_ops::ops::gamma::gamma_op_data::GammaStyle;
+use ocio_ops::ops::gamma::gamma_op_data::{GammaOpData, GammaStyle};
+use ocio_ops::ops::log::log_op_data::{
+    LIN_SIDE_BREAK, LIN_SIDE_OFFSET, LIN_SIDE_SLOPE, LINEAR_SLOPE, LOG_SIDE_OFFSET, LOG_SIDE_SLOPE,
+};
+use ocio_ops::ops::log::log_utils::{
+    ANTI_LOG2_STR, ANTI_LOG10_STR, CAMERA_LIN_TO_LOG_STR, CAMERA_LOG_TO_LIN_STR, LIN_TO_LOG_STR,
+    LOG_TO_LIN_STR, LOG2_STR, LOG10_STR,
+};
 use ocio_ops::ops::matrix::matrix_op_data::MatrixOpData;
 use ocio_ops::{Exception, Result};
 
 use super::ctf_reader_utils::{
-    ATTR_BITDEPTH_IN, ATTR_BITDEPTH_OUT, ATTR_COMP_CLF_VERSION, ATTR_DIMENSION, ATTR_INVERSE_OF,
-    ATTR_VERSION, TAG_ARRAY, TAG_MATRIX, TAG_PROCESS_LIST,
+    ATTR_BASE, ATTR_BITDEPTH_IN, ATTR_BITDEPTH_OUT, ATTR_CHAN, ATTR_COMP_CLF_VERSION,
+    ATTR_DIMENSION, ATTR_EXPONENT, ATTR_GAMMA, ATTR_INVERSE_OF, ATTR_LINEARSLOPE,
+    ATTR_LINSIDEBREAK, ATTR_LINSIDEOFFSET, ATTR_LINSIDESLOPE, ATTR_LOGSIDEOFFSET,
+    ATTR_LOGSIDESLOPE, ATTR_OFFSET, ATTR_STYLE, ATTR_VERSION, TAG_ARRAY, TAG_CDL, TAG_EXPONENT,
+    TAG_EXPONENT_PARAMS, TAG_GAMMA, TAG_GAMMA_PARAMS, TAG_LOG, TAG_LOG_PARAMS, TAG_MATRIX,
+    TAG_MAX_IN_VALUE, TAG_MAX_OUT_VALUE, TAG_MIN_IN_VALUE, TAG_MIN_OUT_VALUE, TAG_PROCESS_LIST,
+    TAG_RANGE,
 };
+use crate::transforms::cdl_transform::{METADATA_INPUT_DESCRIPTION, METADATA_VIEWING_DESCRIPTION};
+
 use super::ctf_transform::{
     CTF_PROCESS_LIST_VERSION_1_3, CTF_PROCESS_LIST_VERSION_1_4, CTF_PROCESS_LIST_VERSION_1_5,
     CTF_PROCESS_LIST_VERSION_1_6, CTF_PROCESS_LIST_VERSION_1_7, CTF_PROCESS_LIST_VERSION_2_0,
@@ -375,6 +397,35 @@ pub(crate) fn get_validated_file_bit_depth(bd: BitDepth, op_type: OpDataType) ->
     Err(Exception::new(oss.into_bytes()))
 }
 
+/// The op's id and name when not empty, and its bit depths: `OpWriter::getAttributes`,
+/// which the writers that override it call first.
+///
+/// Port of `OpWriter::getAttributes` (CTFTransform.cpp:781-811 @ v2.5.2).
+fn op_writer_attributes<W: OpWriter + ?Sized>(
+    writer: &W,
+    attributes: &mut Attributes,
+) -> Result<()> {
+    let op = writer.get_op();
+    let id = op.get_id();
+    if !id.is_empty() {
+        attributes.push((ATTR_ID.to_vec(), id.to_vec()));
+    }
+
+    let name = op.get_name();
+    if !name.is_empty() {
+        attributes.push((ATTR_NAME.to_vec(), name.to_vec()));
+    }
+
+    let in_bit_depth_name = bit_depth_to_clf_string(writer.in_bit_depth())?;
+    attributes.push((ATTR_BITDEPTH_IN.to_vec(), in_bit_depth_name.to_vec()));
+
+    let out_bit_depth_name = bit_depth_to_clf_string(writer.out_bit_depth())?;
+    attributes.push((ATTR_BITDEPTH_OUT.to_vec(), out_bit_depth_name.to_vec()));
+
+    // TODO: bypass implementation
+    Ok(())
+}
+
 /// The writer of one operator: its element, with the op's id, name and bit depths, its
 /// descriptions, then its content.
 ///
@@ -396,25 +447,7 @@ trait OpWriter {
     ///
     /// Port of `OpWriter::getAttributes` (CTFTransform.cpp:781-811 @ v2.5.2).
     fn get_attributes(&self, attributes: &mut Attributes) -> Result<()> {
-        let op = self.get_op();
-        let id = op.get_id();
-        if !id.is_empty() {
-            attributes.push((ATTR_ID.to_vec(), id.to_vec()));
-        }
-
-        let name = op.get_name();
-        if !name.is_empty() {
-            attributes.push((ATTR_NAME.to_vec(), name.to_vec()));
-        }
-
-        let in_bit_depth_name = bit_depth_to_clf_string(self.in_bit_depth())?;
-        attributes.push((ATTR_BITDEPTH_IN.to_vec(), in_bit_depth_name.to_vec()));
-
-        let out_bit_depth_name = bit_depth_to_clf_string(self.out_bit_depth())?;
-        attributes.push((ATTR_BITDEPTH_OUT.to_vec(), out_bit_depth_name.to_vec()));
-
-        // TODO: bypass implementation
-        Ok(())
+        op_writer_attributes(self, attributes)
     }
 
     /// The op's descriptions.
@@ -448,6 +481,472 @@ trait OpWriter {
             self.write_content(&mut scope_indent)?;
         }
         formatter.write_end_tag(&tag_name);
+        Ok(())
+    }
+}
+
+/// `os << value` of a `double` at [`DOUBLE_PRECISION`], in a new stream.
+fn double_string(value: f64) -> Vec<u8> {
+    let mut oss = OStringStream::new(Crt::NATIVE);
+    oss.precision = DOUBLE_PRECISION;
+    oss.put_f64(value);
+    oss.into_bytes()
+}
+
+/// The writer of an ASC_CDL: its style, its descriptions of each kind, and its SOPNode and
+/// SatNode.
+///
+/// Port of `CDLWriter` (CTFTransform.cpp:813-933 @ v2.5.2).
+struct CdlWriter<'a> {
+    /// `m_cdl`.
+    cdl: &'a OpData,
+    in_bit_depth: BitDepth,
+    out_bit_depth: BitDepth,
+}
+
+impl CdlWriter<'_> {
+    fn cdl(&self) -> &CdlOpData {
+        let OpData::Cdl(cdl) = self.cdl else {
+            unreachable!("a CDL writer writes a CDL");
+        };
+        cdl
+    }
+}
+
+impl OpWriter for CdlWriter<'_> {
+    fn get_op(&self) -> &OpData {
+        self.cdl
+    }
+    fn get_tag_name(&self) -> &[u8] {
+        TAG_CDL
+    }
+    fn in_bit_depth(&self) -> BitDepth {
+        self.in_bit_depth
+    }
+    fn out_bit_depth(&self) -> BitDepth {
+        self.out_bit_depth
+    }
+
+    /// Port of `CDLWriter::getAttributes` (CTFTransform.cpp:856-861 @ v2.5.2).
+    fn get_attributes(&self, attributes: &mut Attributes) -> Result<()> {
+        op_writer_attributes(self, attributes)?;
+        let style = CdlOpData::get_style_name(self.cdl().get_style());
+        attributes.push((ATTR_STYLE.to_vec(), style.as_bytes().to_vec()));
+        Ok(())
+    }
+
+    /// Port of `CDLWriter::writeContent` (CTFTransform.cpp:863-916 @ v2.5.2).
+    fn write_content(&self, formatter: &mut XmlFormatter<'_>) -> Result<()> {
+        let attributes = Attributes::new();
+
+        let op = self.get_op();
+        let cdl = self.cdl();
+
+        let mut oss = OStringStream::new(Crt::NATIVE);
+        oss.precision = DOUBLE_PRECISION;
+
+        let triple = |oss: &mut OStringStream, params: [f64; 3]| {
+            oss.clear_str();
+            oss.put_f64(params[0]);
+            oss.put_str(" ");
+            oss.put_f64(params[1]);
+            oss.put_str(" ");
+            oss.put_f64(params[2]);
+            oss.str().to_vec()
+        };
+
+        // SOPNode.
+        formatter.write_start_tag_with(TAG_SOPNODE, &attributes);
+        {
+            let mut scope_indent = XmlScopeIndent::new(formatter);
+
+            let mut desc = Vec::new();
+            get_elements_values(
+                op.get_format_metadata().get_children_elements(),
+                METADATA_SOP_DESCRIPTION,
+                &mut desc,
+            );
+            write_descriptions(&mut scope_indent, TAG_DESCRIPTION, &desc);
+
+            let slope = triple(&mut oss, cdl.get_slope_params().get_rgb());
+            scope_indent.write_content_tag(TAG_SLOPE, &slope);
+
+            let offset = triple(&mut oss, cdl.get_offset_params().get_rgb());
+            scope_indent.write_content_tag(TAG_OFFSET, &offset);
+
+            let power = triple(&mut oss, cdl.get_power_params().get_rgb());
+            scope_indent.write_content_tag(TAG_POWER, &power);
+        }
+        formatter.write_end_tag(TAG_SOPNODE);
+
+        // SatNode.
+        formatter.write_start_tag_with(TAG_SATNODE, &attributes);
+        {
+            let mut scope_indent = XmlScopeIndent::new(formatter);
+
+            let mut desc = Vec::new();
+            get_elements_values(
+                op.get_format_metadata().get_children_elements(),
+                METADATA_SAT_DESCRIPTION,
+                &mut desc,
+            );
+            write_descriptions(&mut scope_indent, TAG_DESCRIPTION, &desc);
+
+            oss.clear_str();
+            oss.put_f64(cdl.get_saturation());
+            let saturation = oss.str().to_vec();
+            scope_indent.write_content_tag(TAG_SATURATION, &saturation);
+        }
+        formatter.write_end_tag(TAG_SATNODE);
+        Ok(())
+    }
+
+    /// The descriptions, then the input and viewing descriptions.
+    ///
+    /// Port of `CDLWriter::writeFormatMetadata` (CTFTransform.cpp:918-933 @ v2.5.2).
+    fn write_format_metadata(&self, formatter: &mut XmlFormatter<'_>) -> Result<()> {
+        let op = self.get_op();
+        let elements = op.get_format_metadata().get_children_elements();
+        let mut desc = Vec::new();
+        get_elements_values(elements, METADATA_DESCRIPTION, &mut desc);
+        write_descriptions(formatter, TAG_DESCRIPTION, &desc);
+        desc.clear();
+        get_elements_values(elements, METADATA_INPUT_DESCRIPTION, &mut desc);
+        write_descriptions(formatter, METADATA_INPUT_DESCRIPTION, &desc);
+        desc.clear();
+        get_elements_values(elements, METADATA_VIEWING_DESCRIPTION, &mut desc);
+        write_descriptions(formatter, METADATA_VIEWING_DESCRIPTION, &desc);
+        Ok(())
+    }
+}
+
+/// The writer of a Gamma (CTF before 2.0) or an Exponent: its style and its parameters, for
+/// all channels or each.
+///
+/// Port of `GammaWriter` (CTFTransform.cpp:1123-1276 @ v2.5.2).
+struct GammaWriter<'a> {
+    /// `m_version`.
+    version: CtfVersion,
+    /// `m_gamma`.
+    gamma: &'a OpData,
+    in_bit_depth: BitDepth,
+    out_bit_depth: BitDepth,
+}
+
+impl GammaWriter<'_> {
+    fn gamma(&self) -> &GammaOpData {
+        let OpData::Gamma(gamma) = self.gamma else {
+            unreachable!("a Gamma writer writes a Gamma");
+        };
+        gamma
+    }
+}
+
+/// Adds the attributes of a GammaParams (or ExponentParams) element: the gamma (or exponent),
+/// and the offset of the moncurve styles.
+///
+/// Port of `AddGammaParams` (CTFTransform.cpp:1181-1214 @ v2.5.2).
+fn add_gamma_params(
+    attributes: &mut Attributes,
+    params: &[f64],
+    style: GammaStyle,
+    use_gamma: bool,
+) {
+    attributes.push((
+        if use_gamma { ATTR_GAMMA } else { ATTR_EXPONENT }.to_vec(),
+        double_string(params[0]),
+    ));
+
+    match style {
+        GammaStyle::MoncurveFwd
+        | GammaStyle::MoncurveRev
+        | GammaStyle::MoncurveMirrorFwd
+        | GammaStyle::MoncurveMirrorRev => {
+            attributes.push((ATTR_OFFSET.to_vec(), double_string(params[1])));
+        }
+        GammaStyle::BasicFwd
+        | GammaStyle::BasicRev
+        | GammaStyle::BasicMirrorFwd
+        | GammaStyle::BasicMirrorRev
+        | GammaStyle::BasicPassThruFwd
+        | GammaStyle::BasicPassThruRev => {}
+    }
+}
+
+impl OpWriter for GammaWriter<'_> {
+    fn get_op(&self) -> &OpData {
+        self.gamma
+    }
+    /// Port of `GammaWriter::getTagName` (CTFTransform.cpp:1162-1169 @ v2.5.2).
+    fn get_tag_name(&self) -> &[u8] {
+        if self.version < CTF_PROCESS_LIST_VERSION_2_0 {
+            return TAG_GAMMA;
+        }
+        TAG_EXPONENT
+    }
+    fn in_bit_depth(&self) -> BitDepth {
+        self.in_bit_depth
+    }
+    fn out_bit_depth(&self) -> BitDepth {
+        self.out_bit_depth
+    }
+
+    /// Port of `GammaWriter::getAttributes` (CTFTransform.cpp:1171-1176 @ v2.5.2).
+    fn get_attributes(&self, attributes: &mut Attributes) -> Result<()> {
+        op_writer_attributes(self, attributes)?;
+        let style = GammaOpData::convert_style_to_string(self.gamma().style());
+        attributes.push((ATTR_STYLE.to_vec(), style.as_bytes().to_vec()));
+        Ok(())
+    }
+
+    /// Port of `GammaWriter::writeContent` (CTFTransform.cpp:1216-1276 @ v2.5.2).
+    fn write_content(&self, formatter: &mut XmlFormatter<'_>) -> Result<()> {
+        let use_gamma = self.version < CTF_PROCESS_LIST_VERSION_2_0;
+        let params_tag = if use_gamma {
+            TAG_GAMMA_PARAMS
+        } else {
+            TAG_EXPONENT_PARAMS
+        };
+        let gamma = self.gamma();
+        if gamma.is_non_channel_dependent() {
+            // RGB channels equal and A is identity, just write one element.
+            let mut attributes = Attributes::new();
+
+            add_gamma_params(
+                &mut attributes,
+                gamma.red_params(),
+                gamma.style(),
+                use_gamma,
+            );
+
+            formatter.write_empty_tag(params_tag, &attributes);
+        } else {
+            for (chan, params) in [
+                (b"R", gamma.red_params()),
+                (b"G", gamma.green_params()),
+                (b"B", gamma.blue_params()),
+            ] {
+                let mut attributes = Attributes::new();
+                attributes.push((ATTR_CHAN.to_vec(), chan.to_vec()));
+                add_gamma_params(&mut attributes, params, gamma.style(), use_gamma);
+
+                formatter.write_empty_tag(params_tag, &attributes);
+            }
+
+            if !gamma.is_alpha_component_identity() {
+                // Alpha
+                let mut attributes = Attributes::new();
+                attributes.push((ATTR_CHAN.to_vec(), b"A".to_vec()));
+                add_gamma_params(
+                    &mut attributes,
+                    gamma.alpha_params(),
+                    gamma.style(),
+                    use_gamma,
+                );
+
+                formatter.write_empty_tag(params_tag, &attributes);
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The writer of a Log: its style, and its parameters but for log2 and log10, for all
+/// channels or each.
+///
+/// Port of `LogWriter` (CTFTransform.cpp:1896-2037 @ v2.5.2).
+struct LogWriter<'a> {
+    /// `m_log`.
+    log: &'a OpData,
+    in_bit_depth: BitDepth,
+    out_bit_depth: BitDepth,
+}
+
+/// Adds the attribute `attr_name` of `attr_value`.
+///
+/// Port of `AddLogParam` (CTFTransform.cpp:1967-1975 @ v2.5.2).
+fn add_log_param(attributes: &mut Attributes, attr_name: &[u8], attr_value: f64) {
+    attributes.push((attr_name.to_vec(), double_string(attr_value)));
+}
+
+/// Adds the base and the params of a LogParams element.
+///
+/// Port of `AddLogParams` (CTFTransform.cpp:1977-1995 @ v2.5.2).
+fn add_log_params(attributes: &mut Attributes, params: &[f64], base: f64) {
+    // LogOpData::validate ensure that params size is between 4 & 6.
+    add_log_param(attributes, ATTR_BASE, base);
+    add_log_param(attributes, ATTR_LINSIDESLOPE, params[LIN_SIDE_SLOPE]);
+    add_log_param(attributes, ATTR_LINSIDEOFFSET, params[LIN_SIDE_OFFSET]);
+    add_log_param(attributes, ATTR_LOGSIDESLOPE, params[LOG_SIDE_SLOPE]);
+    add_log_param(attributes, ATTR_LOGSIDEOFFSET, params[LOG_SIDE_OFFSET]);
+    if params.len() > 4 {
+        add_log_param(attributes, ATTR_LINSIDEBREAK, params[LIN_SIDE_BREAK]);
+    }
+    if params.len() > 5 {
+        add_log_param(attributes, ATTR_LINEARSLOPE, params[LINEAR_SLOPE]);
+    }
+}
+
+impl LogWriter<'_> {
+    fn log(&self) -> &ocio_ops::ops::log::log_op_data::LogOpData {
+        let OpData::Log(log) = self.log else {
+            unreachable!("a Log writer writes a Log");
+        };
+        log
+    }
+}
+
+impl OpWriter for LogWriter<'_> {
+    fn get_op(&self) -> &OpData {
+        self.log
+    }
+    fn get_tag_name(&self) -> &[u8] {
+        TAG_LOG
+    }
+    fn in_bit_depth(&self) -> BitDepth {
+        self.in_bit_depth
+    }
+    fn out_bit_depth(&self) -> BitDepth {
+        self.out_bit_depth
+    }
+
+    /// Port of `LogWriter::getAttributes` (CTFTransform.cpp:1937-1962 @ v2.5.2).
+    fn get_attributes(&self, attributes: &mut Attributes) -> Result<()> {
+        op_writer_attributes(self, attributes)?;
+
+        let log = self.log();
+        let fwd = log.direction() == TransformDirection::Forward;
+        let style = if log.is_log2() {
+            if fwd { LOG2_STR } else { ANTI_LOG2_STR }
+        } else if log.is_log10() {
+            if fwd { LOG10_STR } else { ANTI_LOG10_STR }
+        } else if log.is_camera() {
+            if fwd {
+                CAMERA_LIN_TO_LOG_STR
+            } else {
+                CAMERA_LOG_TO_LIN_STR
+            }
+        } else if fwd {
+            LIN_TO_LOG_STR
+        } else {
+            LOG_TO_LIN_STR
+        };
+
+        attributes.push((ATTR_STYLE.to_vec(), style.as_bytes().to_vec()));
+        Ok(())
+    }
+
+    /// Port of `LogWriter::writeContent` (CTFTransform.cpp:1997-2037 @ v2.5.2).
+    fn write_content(&self, formatter: &mut XmlFormatter<'_>) -> Result<()> {
+        let log = self.log();
+        if log.is_log2() || log.is_log10() {
+            // No parameters to save.
+            return Ok(());
+        }
+
+        if log.all_components_equal() {
+            // All channels equal, just write one element.
+            let mut attributes = Attributes::new();
+
+            add_log_params(&mut attributes, log.red_params(), log.base());
+
+            formatter.write_empty_tag(TAG_LOG_PARAMS, &attributes);
+        } else {
+            for (chan, params) in [
+                (b"R", log.red_params()),
+                (b"G", log.green_params()),
+                (b"B", log.blue_params()),
+            ] {
+                let mut attributes = Attributes::new();
+                attributes.push((ATTR_CHAN.to_vec(), chan.to_vec()));
+                add_log_params(&mut attributes, params, log.base());
+
+                formatter.write_empty_tag(TAG_LOG_PARAMS, &attributes);
+            }
+        }
+        Ok(())
+    }
+}
+
+/// The writer of a Range: its bounds, scaled to the file bit depths.
+///
+/// Port of `RangeWriter` (CTFTransform.cpp:2434-2512 @ v2.5.2).
+struct RangeWriter<'a> {
+    /// `m_range`.
+    range: &'a OpData,
+    in_bit_depth: BitDepth,
+    out_bit_depth: BitDepth,
+}
+
+/// Writes `<tag> value </tag>`.
+///
+/// Port of `WriteTag` (CTFTransform.cpp:2474-2480 @ v2.5.2).
+fn write_tag(fmt: &mut XmlFormatter<'_>, tag: &[u8], value: f64) {
+    let content = [b" ".as_slice(), &double_string(value), b" "].concat();
+    fmt.write_content_tag(tag, &content);
+}
+
+impl OpWriter for RangeWriter<'_> {
+    fn get_op(&self) -> &OpData {
+        self.range
+    }
+    fn get_tag_name(&self) -> &[u8] {
+        TAG_RANGE
+    }
+    fn in_bit_depth(&self) -> BitDepth {
+        self.in_bit_depth
+    }
+    fn out_bit_depth(&self) -> BitDepth {
+        self.out_bit_depth
+    }
+
+    /// Port of `RangeWriter::writeContent` (CTFTransform.cpp:2482-2512 @ v2.5.2).
+    fn write_content(&self, formatter: &mut XmlFormatter<'_>) -> Result<()> {
+        let OpData::Range(range) = self.range else {
+            unreachable!("a Range writer writes a Range");
+        };
+        let forward;
+        let range = if range.get_direction() == TransformDirection::Inverse {
+            forward = range.get_as_forward()?;
+            &forward
+        } else {
+            range
+        };
+
+        let out_scale = get_bit_depth_max_value(self.out_bit_depth)?;
+        let in_scale = get_bit_depth_max_value(self.in_bit_depth)?;
+
+        if !range.min_is_empty() {
+            write_tag(
+                formatter,
+                TAG_MIN_IN_VALUE,
+                range.get_min_in_value() * in_scale,
+            );
+        }
+
+        if !range.max_is_empty() {
+            write_tag(
+                formatter,
+                TAG_MAX_IN_VALUE,
+                range.get_max_in_value() * in_scale,
+            );
+        }
+
+        if !range.min_is_empty() {
+            write_tag(
+                formatter,
+                TAG_MIN_OUT_VALUE,
+                range.get_min_out_value() * out_scale,
+            );
+        }
+
+        if !range.max_is_empty() {
+            write_tag(
+                formatter,
+                TAG_MAX_OUT_VALUE,
+                range.get_max_out_value() * out_scale,
+            );
+        }
         Ok(())
     }
 }
@@ -642,7 +1141,7 @@ fn get_input_file_bd(op: &OpData) -> Result<BitDepth> {
     }
 }
 
-/// The error of an op whose writer isn't ported yet (WP 4.6b-4.6d).
+/// The error of an op whose writer isn't ported yet (WP 4.6c-4.6d).
 fn writer_not_ported(op_type: OpDataType) -> Result<()> {
     Err(Exception::new(format!(
         "The CTF writer of the '{}' op is not ported yet.",
@@ -743,22 +1242,75 @@ impl<'t> TransformWriter<'t> {
                 }
 
                 match &**op {
-                    OpData::Cdl(_) => writer_not_ported(op_type)?,
-                    OpData::Exponent(_) => writer_not_ported(op_type)?,
+                    OpData::Cdl(_) => {
+                        let op_writer = CdlWriter {
+                            cdl: op,
+                            in_bit_depth: in_bd,
+                            out_bit_depth: out_bd,
+                        };
+                        op_writer.write(formatter)?;
+                    }
+                    OpData::Exponent(exp) => {
+                        let param_r = vec![exp.exp4[0]];
+                        let param_g = vec![exp.exp4[1]];
+                        let param_b = vec![exp.exp4[2]];
+                        let param_a = vec![exp.exp4[3]];
+
+                        let mut gamma_data = GammaOpData::new(
+                            GammaStyle::BasicFwd,
+                            param_r,
+                            param_g,
+                            param_b,
+                            param_a,
+                        );
+                        *gamma_data.get_format_metadata_mut() = exp.get_format_metadata().clone();
+
+                        if self.is_clf && !gamma_data.is_alpha_component_identity() {
+                            return Err(throw_write_op("Exponent with alpha"));
+                        }
+
+                        let gamma = OpData::Gamma(gamma_data);
+                        let op_writer = GammaWriter {
+                            version,
+                            gamma: &gamma,
+                            in_bit_depth: in_bd,
+                            out_bit_depth: out_bd,
+                        };
+                        op_writer.write(formatter)?;
+                    }
                     OpData::FixedFunction(_) => {
                         if self.is_clf {
                             return Err(throw_write_op("FixedFunction"));
                         }
                         writer_not_ported(op_type)?
                     }
-                    OpData::Gamma(_) => writer_not_ported(op_type)?,
+                    OpData::Gamma(gamma) => {
+                        if self.is_clf && !gamma.is_alpha_component_identity() {
+                            return Err(throw_write_op("Gamma with alpha component"));
+                        }
+
+                        let op_writer = GammaWriter {
+                            version,
+                            gamma: op,
+                            in_bit_depth: in_bd,
+                            out_bit_depth: out_bd,
+                        };
+                        op_writer.write(formatter)?;
+                    }
                     OpData::GradingRgbCurve(_) => {
                         if self.is_clf {
                             return Err(throw_write_op("GradingRGBCurve"));
                         }
                         writer_not_ported(op_type)?
                     }
-                    OpData::Log(_) => writer_not_ported(op_type)?,
+                    OpData::Log(_) => {
+                        let op_writer = LogWriter {
+                            log: op,
+                            in_bit_depth: in_bd,
+                            out_bit_depth: out_bd,
+                        };
+                        op_writer.write(formatter)?;
+                    }
                     OpData::Lut1D(_) => writer_not_ported(op_type)?,
                     OpData::Lut3D(_) => writer_not_ported(op_type)?,
                     OpData::Matrix(mat_src) => {
@@ -784,7 +1336,20 @@ impl<'t> TransformWriter<'t> {
                         };
                         op_writer.write(formatter)?;
                     }
-                    OpData::Range(_) => writer_not_ported(op_type)?,
+                    OpData::Range(range_src) => {
+                        out_bd = get_validated_file_bit_depth(
+                            range_src.get_file_output_bit_depth(),
+                            op_type,
+                        )?;
+                        // inBD has already been set at previous iteration.
+
+                        let op_writer = RangeWriter {
+                            range: op,
+                            in_bit_depth: in_bd,
+                            out_bit_depth: out_bd,
+                        };
+                        op_writer.write(formatter)?;
+                    }
                     OpData::Reference(_) => {
                         return Err(Exception::new(
                             "Reference ops should have been replaced by their content.",
