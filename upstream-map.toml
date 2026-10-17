@@ -4293,14 +4293,14 @@ path = "tests/cpu/CPUProcessor_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/cpu_processor_tests.rs", "crates/ocio/tests/cpu_processor_tests.rs"]
 status = "partial"
-note = "flag_composition; p3-config-1 3.4e: with_one_matrix, one_pixel, optimizations, planar_vs_packed and the 7 scanline_* tests, with Config::Create() (crates/ocio/tests/cpu_processor_tests.rs). dynamic_properties waits for ExposureContrastTransform (Phase 5), with_one_1d_lut for FileTransform's ops (Phase 4); image_desc and with_several_ops read a config with a FileTransform (Config::CreateFromStream, Phase 3, and the file formats, Phase 4)"
+note = "flag_composition; p3-config-1 3.4e: with_one_matrix, one_pixel, optimizations, planar_vs_packed and the 7 scanline_* tests, with Config::Create() (crates/ocio/tests/cpu_processor_tests.rs). dynamic_properties waits for ExposureContrastTransform (Phase 5), p4-ctf-bake 4.10b: with_one_1d_lut, with_several_ops and image_desc (crates/ocio/tests/cpu_processor_tests.rs, a cpu-tests target)"
 
 [[file]]
 path = "tests/cpu/Caching_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/caching_tests.rs"]
-status = "partial"
-note = "generic_cache ported; processor_cache's parts before its config ported unmarked (processor_cache_without_the_config), its marker comes with Config::CreateFromStream (Phase 3)"
+status = "done"
+note = "generic_cache; processor_cache (its config with a FileTransform, p4-ctf-bake 4.10b)"
 
 [[file]]
 path = "tests/cpu/ColorSpaceSet_tests.cpp"

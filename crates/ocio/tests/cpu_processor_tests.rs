@@ -2,12 +2,12 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Port of the tests of `tests/cpu/CPUProcessor_tests.cpp` @ v2.5.2 that get their processors
-//! from `Config::Create()`: `with_one_matrix`, `planar_vs_packed`, the `scanline_*` tests,
-//! `one_pixel` and `optimizations`, with their helpers (`ComputeValues`, `BuildProcessor`,
-//! `BuildCPUProcessor`, `Process`, `ComputeImage`). `flag_composition` is in
-//! `crates/ocio-ops/src/cpu_processor_tests.rs`. The others wait: `dynamic_properties` for
-//! `ExposureContrastTransform` (Phase 5), `with_one_1d_lut` for a `FileTransform` and
-//! `image_desc` and `with_several_ops` for configs with one (Phase 4).
+//! from configs: `with_one_matrix`, `with_one_1d_lut`, `with_several_ops`, `image_desc`,
+//! `planar_vs_packed`, the `scanline_*` tests, `one_pixel` and `optimizations`, with their
+//! helpers (`ComputeValues`, `BuildProcessor`, `BuildCPUProcessor`, `Process`, `ComputeImage`).
+//! `flag_composition` is in `crates/ocio-ops/src/cpu_processor_tests.rs`. `dynamic_properties`
+//! waits for `ExposureContrastTransform` (Phase 5). The 1D LUTs render with the machine's SIMD
+//! kernels, so this target is one of the `cpu-tests`.
 //!
 //! Upstream passes its buffers as `void *`; the port passes their bytes ([`Bytes`]), with
 //! [`At`] where upstream passes a pointer into a buffer. Its `std::vector`s stay `Vec`s.
@@ -15,7 +15,10 @@
 
 use std::sync::Arc;
 
-use ocio::{BitDepth, Config, GroupTransform, MatrixTransform, Processor, Transform};
+use ocio::{
+    BitDepth, Config, FileTransform, GroupTransform, Interpolation, MatrixTransform, Processor,
+    Transform,
+};
 use ocio::{OptimizationFlags, TransformDirection};
 use ocio_ops::bit_depth_utils::{
     BitDepthInfo, ChannelType, Converter, F32, Uint8, Uint10, Uint12, Uint16,
@@ -2366,5 +2369,822 @@ fn optimizations() {
         let mut out_buf = vec![0f32; WIDTH * HEIGHT * N_CHANNELS];
 
         compute_image::<F32, F32>(WIDTH, HEIGHT, N_CHANNELS, &in_buf, &mut out_buf);
+    }
+}
+
+/// The directory of upstream's test files.
+///
+/// Port of `GetTestFilesDir` (tests/cpu/UnitTestUtils.cpp:20-36 @ v2.5.2).
+fn get_test_files_dir() -> String {
+    let dir = ocio_testkit::paths::upstream_dir().join("tests/data/files");
+    let dir = dir.to_str().expect("a UTF-8 path").replace('\\', "/");
+    dir.trim_start_matches("//?/").to_owned()
+}
+
+/// The config of `with_several_ops` and `image_desc` before its second color space's
+/// transform (CPUProcessor_tests.cpp:738-760, 1089-1111 @ v2.5.2).
+fn simple_profile() -> String {
+    "ocio_profile_version: 2\n\
+     \n\
+     search_path: "
+        .to_owned()
+        + &get_test_files_dir()
+        + "\n\
+     strictparsing: true\n\
+     luma: [0.2126, 0.7152, 0.0722]\n\
+     \n\
+     roles:\n  \
+     default: cs1\n  \
+     scene_linear: cs2\n\
+     \n\
+     displays:\n  \
+     sRGB:\n    \
+     - !<View> {name: Raw, colorspace: cs1}\n\
+     \n\
+     colorspaces:\n  \
+     - !<ColorSpace>\n    \
+     name: cs1\n    \
+     allocation: uniform\n\
+     \n  \
+     - !<ColorSpace>\n    \
+     name: cs2\n    \
+     allocation: uniform\n"
+}
+
+/// Port of `OCIO_ADD_TEST(CPUProcessor, with_one_1d_lut)` @ v2.5.2.
+#[test]
+#[rustfmt::skip]
+fn with_one_1d_lut() {
+    // The unit test validates that pixel formats are correctly
+    // processed when the op list only contains one 1D LUT because it
+    // has a dedicated optimization when the input bit-depth is an integer type.
+
+    let file_path = get_test_files_dir() + "/lut1d_5.spi1d";
+
+    let mut transform = FileTransform::new();
+    transform.set_direction(TransformDirection::Forward);
+    transform.set_src(&file_path);
+    transform.set_interpolation(Interpolation::Linear);
+
+    let config = Config::new().unwrap();
+
+    let processor = config.processor(&Transform::from(transform)).unwrap();
+
+    const NB_PIXELS: usize = 4;
+
+    let f_in_img: Vec<f32> =
+            vec![  -1.0000, -0.8000, -0.1000,  0.0,
+            0.1002,  0.2509,  0.5009,  1.0,
+            0.5505,  0.7090,  0.9099,  1.0,
+            1.0000,  1.2500,  1.9900,  0.0  ];
+
+    {
+        let res_img: Vec<f32> =
+            vec![  0.0,            0.0,            0.0,            0.0,
+                 0.03728949,  0.10394855,  0.24695572,  1.0,
+                 0.29089212,  0.50935059,  1.91091322,  1.0,
+                64.0,           64.0,           64.0,            0.0 ];
+
+        compute_values::<F32, F32>(
+            &processor,
+            &f_in_img, ChannelOrdering::Rgba,
+            &res_img, ChannelOrdering::Rgba,
+            NB_PIXELS,
+            1e-7);
+    }
+
+    {
+        let res_img: Vec<u16> =
+            vec![     0,     0,     0,     0,
+                 2444,  6812, 16184, 65535,
+                19064, 33380, 65535, 65535,
+                65535, 65535, 65535,     0 ];
+
+        compute_values::<F32, Uint16>(
+            &processor,
+            &f_in_img, ChannelOrdering::Rgba,
+            &res_img, ChannelOrdering::Rgba,
+            NB_PIXELS,
+            f32::NAN);
+    }
+
+    let ui16_in_img: Vec<u16> =
+            vec![    0,      8,    32,     0,
+            64,    128,   256,    32,
+           512,   1024,  2048,    64,
+          5120,  20480, 65535,   512 ];
+
+    {
+        let res_img: Vec<f32> =
+            vec![  0.0,           0.00036166, 0.00144666, 0.0,
+                 0.00187417, 0.00271759, 0.00408672, 0.00048828,
+                 0.00601041, 0.00912247, 0.01456576, 0.00097657,
+                 0.03030112, 0.13105739, 64.0,          0.00781261 ];
+
+        compute_values::<Uint16, F32>(
+            &processor,
+            &ui16_in_img, ChannelOrdering::Rgba,
+            &res_img, ChannelOrdering::Rgba,
+            NB_PIXELS,
+            1e-7);
+    }
+
+    {
+        let res_img: Vec<u16> =
+            vec![     0,    24,    95,     0,
+                  123,   178,   268,    32,
+                  394,   598,   955,    64,
+                 1986,  8589, 65535,   512 ];
+
+        compute_values::<Uint16, Uint16>(
+            &processor,
+            &ui16_in_img, ChannelOrdering::Rgba,
+            &res_img, ChannelOrdering::Rgba,
+            NB_PIXELS,
+            f32::NAN);
+    }
+
+    {
+        let res_img: Vec<u16> =
+            vec![    95,    24,     0,     0,
+                  268,   178,   123,    32,
+                  955,   598,   394,    64,
+                65535,  8589,  1986,   512 ];
+
+        compute_values::<Uint16, Uint16>(
+            &processor,
+            &ui16_in_img, ChannelOrdering::Bgra,
+            &res_img, ChannelOrdering::Rgba,
+            NB_PIXELS,
+            f32::NAN);
+    }
+
+    {
+        let res_img: Vec<u16> =
+            vec![    95,    24,     0,     0,
+                  268,   178,   123,    32,
+                  955,   598,   394,    64,
+                65535,  8589,  1986,   512 ];
+
+        compute_values::<Uint16, Uint16>(
+            &processor,
+            &ui16_in_img, ChannelOrdering::Rgba,
+            &res_img, ChannelOrdering::Bgra,
+            NB_PIXELS,
+            f32::NAN);
+    }
+
+    {
+        let res_img: Vec<u16> =
+            vec![    95,    24,     0,
+                  268,   178,   123,
+                  955,   598,   394,
+                65535,  8589,  1986 ];
+
+        compute_values::<Uint16, Uint16>(
+            &processor,
+            &ui16_in_img, ChannelOrdering::Rgba,
+            &res_img, ChannelOrdering::Bgr,
+            NB_PIXELS,
+            f32::NAN);
+    }
+
+    {
+        let res_img: Vec<u16> =
+            vec![     0,    24,    95,     0,
+                  123,   178,   268,    32,
+                  394,   598,   955,    64,
+                 1986,  8589, 65535,    512 ];
+
+        compute_values::<Uint16, Uint16>(
+            &processor,
+            &ui16_in_img, ChannelOrdering::Bgra,
+            &res_img, ChannelOrdering::Bgra,
+            NB_PIXELS,
+            f32::NAN);
+    }
+
+    {
+        let my_i_in_img: Vec<u16> =
+            vec![    0,      8,    32,
+                64,    128,   256,
+               512,   1024,  2048,
+              5120,  20480, 65535  ];
+
+        let res_img: Vec<u16> =
+            vec![    95,    24,     0,     0,
+                  268,   178,   123,     0,
+                  955,   598,   394,     0,
+                65535,  8589,  1986,     0 ];
+
+        compute_values::<Uint16, Uint16>(
+            &processor,
+            &my_i_in_img, ChannelOrdering::Rgb,
+            &res_img, ChannelOrdering::Bgra,
+            NB_PIXELS,
+            f32::NAN);
+    }
+
+    // Test OCIO::BIT_DEPTH_UINT10.
+
+    {
+        let ui10_res_img: Vec<u16> =
+            vec![     0,     0,     1,     0,
+                    2,     3,     4,     0,
+                    6,     9,    15,     1,
+                   31,   134,  1023,     8 ];
+
+        compute_values::<Uint16, Uint10>(
+            &processor,
+            &ui16_in_img, ChannelOrdering::Rgba,
+            &ui10_res_img, ChannelOrdering::Rgba,
+            NB_PIXELS,
+            f32::NAN);
+    }
+
+    {
+        let ui10_in_img: Vec<u16> =
+            vec![     0,     8,    32,
+                   64,   128,   256,
+                   96,   256,   512,
+                  128,  1023,   640  ];
+
+        let ui10_res_img: Vec<u16> =
+            vec![     0,     6,    15,   0,
+                   26,    48,   106,   0,
+                   36,   106,   252,   0,
+                   48,  1023,   384,   0 ];
+
+        compute_values::<Uint10, Uint10>(
+            &processor,
+            &ui10_in_img, ChannelOrdering::Rgb,
+            &ui10_res_img, ChannelOrdering::Rgba,
+            NB_PIXELS,
+            f32::NAN);
+
+        let ui16_res_img: Vec<u16> =
+            vec![     0,   394,   955,   0,
+                 1656,  3092,  6794,   0,
+                 2301,  6794, 16162,   0,
+                 3092, 65535, 24593,   0 ];
+
+        compute_values::<Uint10, Uint16>(
+            &processor,
+            &ui10_in_img, ChannelOrdering::Rgb,
+            &ui16_res_img, ChannelOrdering::Rgba,
+            NB_PIXELS,
+            f32::NAN);
+    }
+
+    // Test OCIO::BIT_DEPTH_UINT12.
+
+    {
+        let ui12_res_img: Vec<u16> =
+            vec![     0,     1,     6,     0,
+                    8,    11,    17,     2,
+                   25,    37,    60,     4,
+                  124,   537,  4095,    32 ];
+
+        compute_values::<Uint16, Uint12>(
+            &processor,
+            &ui16_in_img, ChannelOrdering::Rgba,
+            &ui12_res_img, ChannelOrdering::Rgba,
+            NB_PIXELS,
+            f32::NAN);
+    }
+
+    {
+        let ui12_in_img: Vec<u16> =
+            vec![     0,     8,    32,
+                   64,   128,   256,
+                   96,   256,   512,
+                 1024,  2048,  4095  ];
+
+        let ui12_res_img: Vec<u16> =
+            vec![     0,    11,    25,   0,
+                   37,    60,   103,   0,
+                   49,   103,   193,   0,
+                  424,  1009,  4095,   0 ];
+
+        compute_values::<Uint12, Uint12>(
+            &processor,
+            &ui12_in_img, ChannelOrdering::Rgb,
+            &ui12_res_img, ChannelOrdering::Rgba,
+            NB_PIXELS,
+            f32::NAN);
+        let ui16_res_img: Vec<u16> =
+            vec![     0,   178,   394,   0,
+                  598,   955,  1655,   0,
+                  779,  1655,  3089,   0,
+                 6789, 16143, 65535,   0 ];
+
+        compute_values::<Uint12, Uint16>(
+            &processor,
+            &ui12_in_img, ChannelOrdering::Rgb,
+            &ui16_res_img, ChannelOrdering::Rgba,
+            NB_PIXELS,
+            f32::NAN);
+    }
+
+}
+
+/// Port of `OCIO_ADD_TEST(CPUProcessor, with_several_ops)` @ v2.5.2.
+#[test]
+#[rustfmt::skip]
+fn with_several_ops()
+{
+    // The unit test validates that pixel formats are correctly
+    // processed when the op list starts or ends with a 1D LUT because it
+    // has a dedicated optimization when the input bit-depth is an integer type.
+
+    let simple_profile = simple_profile();
+
+    // Step 1: The 1D LUT is the last Op.
+
+    {
+        let str_end = concat!(
+            "    from_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<MatrixTransform> { offset: [-0.19, 0.19, -0.00019, 0] }\n",
+            "        - !<FileTransform>   { src: lut1d_5.spi1d, interpolation: linear }\n",
+        );
+
+        let str = simple_profile.clone() + str_end;
+
+        let config = Config::create_from_stream(str.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        let processor = config.processor_between("cs1", "cs2").unwrap();
+
+        const NB_PIXELS: usize = 4;
+
+        let f_in_img: Vec<f32> =
+            vec![  -1.0000, -0.8000, -0.1000,  0.0,
+                0.1002,  0.2509,  0.5009,  1.0,
+                0.5505,  0.7090,  0.9099,  1.0,
+                1.0000,  1.2500,  1.9900,  0.0  ];
+
+        {
+            let res_img: Vec<f32> =
+            vec![  0.0,         0.0,         0.0,         0.0,
+                     0.0,         0.20273837,  0.24680146,  1.0,
+                     0.15488569,  1.69210147,  1.90666747,  1.0,
+                     0.81575858, 64.0,        64.0,         0.0 ];
+
+            compute_values::<F32, F32>(
+            &processor,
+            &f_in_img, ChannelOrdering::Rgba,
+            &res_img, ChannelOrdering::Rgba,
+            NB_PIXELS,
+            1e-7);
+        }
+
+        {
+            let res_img: Vec<u16> =
+            vec![     0,     0,     0,     0,
+                        0, 13286, 16174, 65535,
+                    10150, 65535, 65535, 65535,
+                    53461, 65535, 65535,     0 ];
+
+            compute_values::<F32, Uint16>(
+            &processor,
+            &f_in_img, ChannelOrdering::Rgba,
+            &res_img, ChannelOrdering::Rgba,
+            NB_PIXELS,
+            f32::NAN);
+        }
+
+        let i_in_img: Vec<u16> =
+            vec![    0,      8,    32,  0,
+                64,    128,   256,  65535,
+               512,   1024,  2048,  0,
+              5120,  20480, 65535,  65535  ];
+
+        {
+            let res_img: Vec<f32> =
+            vec![  0.0,  0.07789713,  0.00088374,  0.0,
+                     0.0,  0.07871927,  0.00396248,  1.0,
+                     0.0,  0.08474064,  0.01450117,  0.0,
+                     0.0,  0.24826171, 56.39490891,  1.0 ];
+
+            let cpu_processor = compute_values::<Uint16, F32>(
+            &processor,
+            &i_in_img, ChannelOrdering::Rgba,
+            &res_img, ChannelOrdering::Rgba,
+            NB_PIXELS,
+            1e-7);
+
+            // SSE2/AVX/AVX2 generate a slightly different LUT1D
+            // floating error below the absErrorThreshold, but cacheID hash will be different
+
+            let cache_id = String::from_utf8(cpu_processor.get_cache_id().to_vec()).unwrap();
+
+            let expected_id = "CPU Processor: from 16ui to 32f oFlags 263995331 ops\
+                :  <Lut1D d2f58fb9dbbf324478d9bdad54443ac7 forward default standard domain none>";
+
+            // Test integer optimization. The ops should be optimized into a single LUT
+            // when finalizing with an integer input bit-depth.
+            assert_eq!(cache_id.len(), expected_id.len());
+
+            // check everything but the cacheID hash
+            let to_check = [
+                "CPU Processor: from 16ui to 32f oFlags 263995331 ops:",
+                "<Lut1D",
+                "forward default standard domain none>" ];
+
+            for check in to_check
+            {
+                assert_eq!(cache_id.matches(check).count(), 1, "{check}");
+            }
+        }
+
+        {
+            let res_img: Vec<u16> =
+            vec![     0,  5105,    58,     0,
+                        0,  5159,   260,     65535,
+                        0,  5553,   950,     0,
+                        0, 16270, 65535,     65535 ];
+
+            compute_values::<Uint16, Uint16>(
+            &processor,
+            &i_in_img, ChannelOrdering::Rgba,
+            &res_img, ChannelOrdering::Rgba,
+            NB_PIXELS,
+            f32::NAN);
+        }
+
+        {
+            let res_img: Vec<u16> =
+            vec![     0,  5105,     0,     0,
+                        0,  5159,   112,     65535,
+                        0,  5553,   388,     0,
+                    53461, 16270,  1982,     65535 ];
+
+            compute_values::<Uint16, Uint16>(
+            &processor,
+            &i_in_img, ChannelOrdering::Bgra,
+            &res_img, ChannelOrdering::Rgba,
+            NB_PIXELS,
+            f32::NAN);
+        }
+
+        {
+            let res_img: Vec<u16> =
+            vec![    58,  5105,     0,     0,
+                      260,  5159,     0,     65535,
+                      950,  5553,     0,     0,
+                    65535, 16270,     0,     65535 ];
+
+            compute_values::<Uint16, Uint16>(
+            &processor,
+            &i_in_img, ChannelOrdering::Rgba,
+            &res_img, ChannelOrdering::Bgra,
+            NB_PIXELS,
+            f32::NAN);
+        }
+
+        {
+            let res_img: Vec<u16> =
+            vec![     0,  5105,     0,     0,
+                      112,  5159,     0,     65535,
+                      388,  5553,     0,     0,
+                     1982, 16270, 53461,     65535 ];
+
+            compute_values::<Uint16, Uint16>(
+            &processor,
+            &i_in_img, ChannelOrdering::Bgra,
+            &res_img, ChannelOrdering::Bgra,
+            NB_PIXELS,
+            f32::NAN);
+        }
+    }
+
+    // Step 2: The 1D LUT is the first Op.
+
+    {
+        let str_end = concat!(
+            "    from_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<FileTransform>   { src: lut1d_5.spi1d, interpolation: linear }\n",
+            "        - !<MatrixTransform> { offset: [-0.19, 0.19, -0.00019, 0] }\n",
+        );
+
+        let str = simple_profile.clone() + str_end;
+
+        let config = Config::create_from_stream(str.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        let processor = config.processor_between("cs1", "cs2").unwrap();
+
+        const NB_PIXELS: usize = 4;
+
+        let f_in_img: Vec<f32> =
+            vec![  -1.0000, -0.8000, -0.1000,  0.0,
+                0.1002,  0.2509,  0.5009,  1.0,
+                0.5505,  0.7090,  0.9099,  1.0,
+                1.0000,  1.2500,  1.9900,  0.0  ];
+
+        {
+            let res_img: Vec<f32> =
+            vec![ -0.18999999,  0.18999999, -0.00019000,  0.0,
+                    -0.15271049,  0.29394856,  0.24676571,  1.0,
+                     0.10089212,  0.69935059,  1.91072320,  1.0,
+                    63.81000137, 64.19000244, 63.99980927,  0.0 ];
+
+            compute_values::<F32, F32>(
+            &processor,
+            &f_in_img, ChannelOrdering::Rgba,
+            &res_img, ChannelOrdering::Rgba,
+            NB_PIXELS,
+            1e-7);
+        }
+
+        {
+            let res_img: Vec<u16> =
+            vec![     0, 12452,     0,     0,
+                        0, 19264, 16172, 65535,
+                     6612, 45832, 65535, 65535,
+                    65535, 65535, 65535,     0 ];
+
+            compute_values::<F32, Uint16>(
+            &processor,
+            &f_in_img, ChannelOrdering::Rgba,
+            &res_img, ChannelOrdering::Rgba,
+            NB_PIXELS,
+            f32::NAN);
+        }
+
+        let i_in_img: Vec<u16> =
+            vec![    0,      8,    32,  0,
+                64,    128,   256,  0,
+               512,   1024,  2048,  0,
+              5120,  20480, 65535,  0  ];
+        {
+            let res_img: Vec<f32> =
+            vec![ -0.18999999, 0.19036166,  0.00125666,  0.0,
+                    -0.18812581, 0.19271758,  0.00389672,  0.0,
+                    -0.18398958, 0.19912247,  0.01437576,  0.0,
+                    -0.15969887, 0.32105737, 63.99980927,  0.0 ];
+
+            compute_values::<Uint16, F32>(
+            &processor,
+            &i_in_img, ChannelOrdering::Rgba,
+            &res_img, ChannelOrdering::Rgba,
+            NB_PIXELS,
+            1e-7);
+        }
+
+        {
+            let res_img: Vec<u16> =
+            vec![     0, 12475,     0,     0,
+                      110, 12630,     0,     0,
+                      381, 13049,     0,     0,
+                     1973, 21040, 65535,     0 ];
+
+            compute_values::<Uint16, Uint16>(
+            &processor,
+            &i_in_img, ChannelOrdering::Bgra,
+            &res_img, ChannelOrdering::Bgra,
+            NB_PIXELS,
+            f32::NAN);
+        }
+    }
+
+    // Step 3: The 1D LUT is the first and the last Op.
+
+    {
+
+        let str_end = concat!(
+            "    from_reference: !<GroupTransform>\n",
+            "      children:\n",
+            "        - !<FileTransform>   { src: lut1d_5.spi1d, interpolation: linear }\n",
+            "        - !<MatrixTransform> { offset: [-0.19, 0.19, -0.00019, 0] }\n",
+            "        - !<FileTransform>   { src: lut1d_4.spi1d, interpolation: linear }\n",
+        );
+
+        let str = simple_profile.clone() + str_end;
+
+        let config = Config::create_from_stream(str.as_bytes()).unwrap();
+        config.validate().unwrap();
+
+        let processor = config.processor_between("cs1", "cs2").unwrap();
+
+        const NB_PIXELS: usize = 4;
+
+        let f_in_img: Vec<f32> =
+            vec![  -1.0000, -0.8000, -0.1000,  0.0,
+                0.1002,  0.2509,  0.5009,  1.0,
+                0.5505,  0.7090,  0.9099,  1.0,
+                1.0000,  1.2500,  1.9900,  0.0  ];
+
+        {
+            let res_img: Vec<f32> =
+            vec![ -0.79690927, -0.06224250, -0.42994320,  0.0,
+                    -0.72481626,  0.13872468,  0.04750441,  1.0,
+                    -0.23451784,  0.92250210,  3.26448941,  1.0,
+                     3.43709063,  3.43709063,  3.43709063,  0.0 ];
+
+            compute_values::<F32, F32>(
+            &processor,
+            &f_in_img, ChannelOrdering::Rgba,
+            &res_img, ChannelOrdering::Rgba,
+            NB_PIXELS,
+            1e-7);
+        }
+
+        let i_in_img: Vec<u16> =
+            vec![    0,      8,    32,  0,
+                64,    128,   256,  0,
+               512,   1024,  2048,  0,
+              5120,  20480, 65535,  0  ];
+
+        {
+            let res_img: Vec<u16> =
+            vec![     0,     0,     0,     0,
+                        0,     0,     0,     0,
+                        0,     0,     0,     0,
+                        0, 12526, 65535,     0 ];
+
+            compute_values::<Uint16, Uint16>(
+            &processor,
+            &i_in_img, ChannelOrdering::Bgra,
+            &res_img, ChannelOrdering::Bgra,
+            NB_PIXELS,
+            f32::NAN);
+        }
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(CPUProcessor, image_desc)` @ v2.5.2.
+#[test]
+#[rustfmt::skip]
+fn image_desc() {
+    // The tests validate the image description types when using the same buffer image.
+
+    let str_end = concat!(
+        "    from_reference: !<GroupTransform>\n",
+        "      children:\n",
+        "        - !<MatrixTransform> { offset: [-0.19, 0.19, -0.00019, 0.5] }\n",
+        "        - !<FileTransform>   { src: lut1d_5.spi1d, interpolation: linear }\n",
+    );
+
+    let str = simple_profile() + str_end;
+
+    let config = Config::create_from_stream(str.as_bytes()).unwrap();
+    config.validate().unwrap();
+
+    let processor = config.processor_between("cs1", "cs2").unwrap();
+
+    let f_r_in_img: Vec<f32> =
+        vec![  -1.0000,
+                0.1002,
+                0.5505,
+                1.0000,  ];
+
+    let f_g_in_img: Vec<f32> =
+        vec![            -0.8000,
+                          0.2509,
+                          0.7090,
+                          1.2500  ];
+
+    let f_b_in_img: Vec<f32> =
+        vec![                       -0.1000,
+                                     0.5009,
+                                     0.9099,
+                                     1.9900  ];
+
+    let f_a_in_img: Vec<f32> =
+        vec![                                   0.0,
+                                                1.0,
+                                                0.5,
+                                                0.0  ];
+
+    let f_r_out_img: Vec<f32>
+        = vec![  0.0,
+                 0.0,
+                 0.15488569,
+                 0.81575858 ];
+
+    let f_g_out_img: Vec<f32>
+        = vec![                0.0,
+                               0.20273837,
+                               1.69210147,
+                              64.0 ];
+
+    let f_b_out_img: Vec<f32>
+        = vec![                              0.0,
+                                             0.24680146,
+                                             1.90666747,
+                                            64.0 ];
+
+    let f_a_out_img: Vec<f32>
+        = vec![                                            0.5,
+                                                           1.5,
+                                                           1.0,
+                                                           0.5 ];
+
+    {
+        // Packed Image Description with RGBA image.
+
+        let mut img: Vec<f32> =
+            vec![  f_r_in_img[0], f_g_in_img[0], f_b_in_img[0], f_a_in_img[0],
+                   f_r_in_img[1], f_g_in_img[1], f_b_in_img[1], f_a_in_img[1],
+                   f_r_in_img[2], f_g_in_img[2], f_b_in_img[2], f_a_in_img[2],
+                   f_r_in_img[3], f_g_in_img[3], f_b_in_img[3], f_a_in_img[3] ];
+
+        let res: Vec<f32> =
+            vec![  f_r_out_img[0], f_g_out_img[0], f_b_out_img[0], f_a_out_img[0],
+                   f_r_out_img[1], f_g_out_img[1], f_b_out_img[1], f_a_out_img[1],
+                   f_r_out_img[2], f_g_out_img[2], f_b_out_img[2], f_a_out_img[2],
+                   f_r_out_img[3], f_g_out_img[3], f_b_out_img[3], f_a_out_img[3] ];
+
+        let cpu = processor.default_cpu_processor().unwrap();
+
+        {
+            let mut desc = PackedImageDesc::new(&mut img[..], 2, 2, 4).unwrap();
+            cpu.apply(&mut desc).unwrap();
+        }
+
+        for idx in 0..img.len()
+        {
+            check_close(img[idx], res[idx], 1e-7);
+        }
+    }
+
+    {
+        // Packed Image Description with RGB image.
+
+        let mut img: Vec<f32> =
+            vec![  f_r_in_img[0], f_g_in_img[0], f_b_in_img[0],
+                   f_r_in_img[1], f_g_in_img[1], f_b_in_img[1],
+                   f_r_in_img[2], f_g_in_img[2], f_b_in_img[2],
+                   f_r_in_img[3], f_g_in_img[3], f_b_in_img[3] ];
+
+        let res: Vec<f32> =
+            vec![  f_r_out_img[0], f_g_out_img[0], f_b_out_img[0],
+                   f_r_out_img[1], f_g_out_img[1], f_b_out_img[1],
+                   f_r_out_img[2], f_g_out_img[2], f_b_out_img[2],
+                   f_r_out_img[3], f_g_out_img[3], f_b_out_img[3] ];
+
+        let cpu = processor.default_cpu_processor().unwrap();
+
+        {
+            let mut desc = PackedImageDesc::new(&mut img[..], 4, 1, 3).unwrap();
+            cpu.apply(&mut desc).unwrap();
+        }
+
+        for idx in 0..img.len()
+        {
+            check_close(img[idx], res[idx], 1e-7);
+        }
+    }
+
+    {
+        // Planar Image Description with R/G/B/A.
+
+        let mut img_red   = f_r_in_img.clone();
+        let mut img_green = f_g_in_img.clone();
+        let mut img_blue  = f_b_in_img.clone();
+        let mut img_alpha = f_a_in_img.clone();
+
+        let cpu = processor.default_cpu_processor().unwrap();
+
+        {
+            let mut desc = PlanarImageDesc::new(
+                &mut img_red[..], &mut img_green[..], &mut img_blue[..],
+                Some(&mut img_alpha[..]), 2, 2).unwrap();
+            cpu.apply(&mut desc).unwrap();
+        }
+
+        for idx in 0..img_red.len()
+        {
+            check_close(img_red[idx],   f_r_out_img[idx], 1e-7);
+            check_close(img_green[idx], f_g_out_img[idx], 1e-7);
+            check_close(img_blue[idx],  f_b_out_img[idx], 1e-7);
+            check_close(img_alpha[idx], f_a_out_img[idx], 1e-7);
+        }
+    }
+
+    {
+        // Planar Image Description with R/G/B.
+
+        let mut img_red   = f_r_in_img.clone();
+        let mut img_green = f_g_in_img.clone();
+        let mut img_blue  = f_b_in_img.clone();
+
+        let cpu = processor.default_cpu_processor().unwrap();
+
+        {
+            let mut desc = PlanarImageDesc::new(
+                &mut img_red[..], &mut img_green[..], &mut img_blue[..], None, 1, 4).unwrap();
+            cpu.apply(&mut desc).unwrap();
+        }
+
+        for idx in 0..img_red.len()
+        {
+            check_close(img_red[idx],   f_r_out_img[idx], 1e-7);
+            check_close(img_green[idx], f_g_out_img[idx], 1e-7);
+            check_close(img_blue[idx],  f_b_out_img[idx], 1e-7);
+        }
     }
 }
