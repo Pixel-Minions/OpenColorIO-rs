@@ -797,6 +797,83 @@ pub fn c_runtime_environment() -> Vec<Vec<u8>> {
 /// The number of bits in C `long` on this platform (32 on Windows, 64 on Linux).
 pub const LONG_BITS: u32 = c_long::BITS;
 
+/// The raw declarations of `mktime`. The safe wrapper below is the only caller.
+mod time_ffi {
+    use std::ffi::c_int;
+
+    /// `struct tm`: UCRT's nine `int`s (ucrt/time.h); glibc's add `tm_gmtoff` and `tm_zone`
+    /// (bits/types/struct_tm.h), a `long` and a pointer on x86_64.
+    #[repr(C)]
+    #[derive(Default)]
+    pub(super) struct Tm {
+        pub(super) tm_sec: c_int,
+        pub(super) tm_min: c_int,
+        pub(super) tm_hour: c_int,
+        pub(super) tm_mday: c_int,
+        pub(super) tm_mon: c_int,
+        pub(super) tm_year: c_int,
+        pub(super) tm_wday: c_int,
+        pub(super) tm_yday: c_int,
+        pub(super) tm_isdst: c_int,
+        #[cfg(target_os = "linux")]
+        pub(super) tm_gmtoff: std::ffi::c_long,
+        #[cfg(target_os = "linux")]
+        pub(super) tm_zone: usize,
+    }
+
+    unsafe extern "C" {
+        /// `mktime` and `timegm` with a 64-bit `time_t` (UCRT's `mktime` is an inline wrapper
+        /// of `_mktime64`).
+        #[cfg(windows)]
+        pub(super) fn _mktime64(tm: *mut Tm) -> i64;
+        #[cfg(windows)]
+        pub(super) fn _mkgmtime64(tm: *mut Tm) -> i64;
+        #[cfg(target_os = "linux")]
+        pub(super) fn mktime(tm: *mut Tm) -> i64;
+        #[cfg(target_os = "linux")]
+        pub(super) fn timegm(tm: *mut Tm) -> i64;
+    }
+
+    /// A broken-down time whose daylight saving time is unknown (`tm_isdst = -1`).
+    pub(super) fn tm(year: i32, mon: i32, mday: i32, hour: i32, min: i32, sec: i32) -> Tm {
+        Tm {
+            tm_sec: sec,
+            tm_min: min,
+            tm_hour: hour,
+            tm_mday: mday,
+            tm_mon: mon,
+            tm_year: year,
+            tm_isdst: -1,
+            ..Default::default()
+        }
+    }
+}
+
+/// `mktime` of a broken-down local time whose daylight saving time is unknown
+/// (`tm_isdst = -1`): `year` counts from 1900 and `mon` from 0, and any field may be out of its
+/// range, which `mktime` normalizes. -1 where it fails.
+pub fn mktime_c(year: i32, mon: i32, mday: i32, hour: i32, min: i32, sec: i32) -> i64 {
+    let mut tm = time_ffi::tm(year, mon, mday, hour, min, sec);
+    // SAFETY: `tm` is a `struct tm` of this platform's C runtime, which `mktime` reads and
+    // normalizes in place.
+    #[cfg(windows)]
+    let t = unsafe { time_ffi::_mktime64(&mut tm) };
+    #[cfg(target_os = "linux")]
+    let t = unsafe { time_ffi::mktime(&mut tm) };
+    t
+}
+
+/// `mktime_c` in UTC: `_mkgmtime64` (UCRT) or `timegm` (glibc). -1 where it fails.
+pub fn mkgmtime_c(year: i32, mon: i32, mday: i32, hour: i32, min: i32, sec: i32) -> i64 {
+    let mut tm = time_ffi::tm(year, mon, mday, hour, min, sec);
+    // SAFETY: as in `mktime_c`.
+    #[cfg(windows)]
+    let t = unsafe { time_ffi::_mkgmtime64(&mut tm) };
+    #[cfg(target_os = "linux")]
+    let t = unsafe { time_ffi::timegm(&mut tm) };
+    t
+}
+
 // ---------------------------------------------------------------------------------------------
 // Scanning (`sscanf`) and text-mode reading: the references of the LUT readers (card p4-oracle,
 // chunk T4.1).

@@ -79,10 +79,10 @@ pub(crate) struct FileInfo {
     pub(crate) extrafield: Vec<u8>,
     /// The link name of a UNIX1 field: the C string at its place in the memory stream.
     pub(crate) linkname: Vec<u8>,
-    /// The dates the NTFS and UNIX1 fields give (`time_t`). The modification date starts as
-    /// the header's DOS date, which the port doesn't convert (`mktime`, of the local time
-    /// zone): what reads these dates only asks whether all three are nonzero, and the creation
-    /// date is nonzero only where an NTFS field set all three.
+    /// The dates (`time_t`): the modification date is the header's DOS date
+    /// ([`mz_zip_dosdate_to_time_t`]) unless an NTFS field gives the three; a UNIX1 field gives
+    /// the access date, and the modification date only where the DOS date gave 0 (which none
+    /// does, so never).
     pub(crate) modified_date: i64,
     pub(crate) accessed_date: i64,
     pub(crate) creation_date: i64,
@@ -180,8 +180,8 @@ pub(crate) fn mz_zip_entry_read_header(
             file_info.compression_method = read_into!(err, mz_stream_read_uint16(stream));
         }
         if err == MZ_OK {
-            // dos_date
-            let _: u32 = read_into!(err, mz_stream_read_uint32(stream));
+            let dos_date: u32 = read_into!(err, mz_stream_read_uint32(stream));
+            file_info.modified_date = mz_zip_dosdate_to_time_t(u64::from(dos_date));
         }
         if err == MZ_OK {
             file_info.crc = read_into!(err, mz_stream_read_uint32(stream));
@@ -1389,6 +1389,42 @@ fn mz_zip_unix_to_ntfs_time(unix_time: i64) -> u64 {
     (unix_time as u64)
         .wrapping_mul(10_000_000)
         .wrapping_add(116_444_736_000_000_000)
+}
+
+/// The days from 1970-01-01 to the first of `month` (1-12) of `year`, in the proleptic
+/// Gregorian calendar (Howard Hinnant's `days_from_civil`).
+fn days_from_civil(year: i64, month: i64) -> i64 {
+    let y = if month <= 2 { year - 1 } else { year };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let mp = (month + 9) % 12;
+    let doy = (153 * mp + 2) / 5;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    era * 146_097 + doe - 719_468
+}
+
+/// The `time_t` of a DOS date and time: its fields as a broken-down time, each as the DOS
+/// date holds it (a month 0 is the December before, a day 0 the last day of the month before,
+/// hours to 31, minutes to 63, seconds to 62), which `mktime` normalizes.
+///
+/// minizip-ng's `mktime` reads the broken-down time in the local time zone; the port, which
+/// has no time zone, in UTC (deviation D-6). Every DOS date is between 1979 and 2108, where
+/// `mktime` doesn't fail on either platform.
+///
+/// Port of `mz_zip_dosdate_to_time_t`, `mz_zip_dosdate_to_raw_tm` and `mz_zip_tm_to_time_t`
+/// (mz_zip.c:2687-2695, 2661-2671 @ 4.0.10).
+fn mz_zip_dosdate_to_time_t(dos_date: u64) -> i64 {
+    let date = dos_date >> 16;
+    let mday = (date & 0x1f) as i64;
+    let mon = ((date & 0x1E0) / 0x20) as i64 - 1;
+    let year = ((date & 0x0FE00) / 0x0200) as i64 + 80;
+    let hour = ((dos_date & 0xF800) / 0x800) as i64;
+    let min = ((dos_date & 0x7E0) / 0x20) as i64;
+    let sec = 2 * (dos_date & 0x1f) as i64;
+    // mktime's normalization of the month, then the rest counted from the month's first day
+    let year = 1900 + year + mon.div_euclid(12);
+    let month = mon.rem_euclid(12) + 1;
+    (days_from_civil(year, month) + mday - 1) * 86_400 + hour * 3600 + min * 60 + sec
 }
 
 /// The broken-down time of `unix_time`: `(tm_year, tm_mon, tm_mday, tm_hour, tm_min,

@@ -203,9 +203,9 @@ pub(crate) fn mz_os_get_file_date(path: &[u8]) -> Option<(i64, i64, i64)> {
     #[cfg(not(windows))]
     {
         use std::os::unix::fs::MetadataExt;
-        // Not all systems allow stat'ing a file with / appended
+        // Not all systems allow stat'ing a file with / appended (mz_path_remove_slash)
         let mut name = c_str(path).to_vec();
-        while name.last().is_some_and(|&c| c == b'/' || c == b'\\') {
+        while name.last().is_some_and(|&c| mz_os_is_dir_separator(c)) {
             name.pop();
         }
         let m = std::fs::metadata(system_path(&name)).ok()?;
@@ -269,12 +269,17 @@ pub(crate) fn mz_os_list_dir(path: &[u8]) -> Option<Vec<Vec<u8>>> {
 /// `MZ_PATH_SLASH_PLATFORM` (mz_os.h:42-48 @ 4.0.10).
 const MZ_PATH_SLASH_PLATFORM: u8 = if cfg!(windows) { b'\\' } else { b'/' };
 
-/// Whether `c` separates directories: `\` and `/` on both platforms (minizip-ng is built
-/// without `MZ_PRESERVE_NATIVE_STRUCTURE`).
+/// Whether `c` separates directories: `\` and `/` on Windows; on Linux only `/`, since
+/// `mz_os_posix.c` defaults `MZ_PRESERVE_NATIVE_STRUCTURE` to 1 (mz_os_posix.c:40-42) and a
+/// backslash is then part of a name.
 ///
 /// Port of `mz_os_is_dir_separator` (mz_os_posix.c:292-302, mz_os_win32.c:437-439 @ 4.0.10).
 pub(crate) fn mz_os_is_dir_separator(c: u8) -> bool {
-    c == b'\\' || c == b'/'
+    if cfg!(windows) {
+        c == b'\\' || c == b'/'
+    } else {
+        c == b'/'
+    }
 }
 
 /// Appends the platform's slash to `path` (a buffer of `max_path` bytes, its C string's NUL
@@ -315,8 +320,9 @@ pub(crate) fn mz_path_combine(path: &mut Vec<u8>, join: &[u8], max_path: usize) 
 ///
 /// Port of `mz_path_resolve` (mz_os.c:129-200 @ 4.0.10). A `..` at the start makes it read the
 /// output's first byte, which neither this call nor an earlier one may have written (memory
-/// `malloc` left uninitialized). Where that byte decides the result (a name that is only
-/// `..`s), the port returns `MZ_INTERNAL_ERROR` instead (docs/improvements.md, U-78).
+/// `malloc` left uninitialized). Its value decides whether the result of a name that is only
+/// `..`s is empty or a separator, which extracts the same way; the port takes it for one that
+/// isn't a separator (docs/improvements.md, U-78).
 pub(crate) fn mz_path_resolve(path: &[u8], output: &mut Vec<u8>, max_output: i32) -> i32 {
     let path = c_str(path);
     let at = |i: usize| path.get(i).copied().unwrap_or(0);
@@ -390,14 +396,15 @@ pub(crate) fn mz_path_resolve(path: &[u8], output: &mut Vec<u8>, max_output: i32
                             source += 1;
                         }
                         // Upstream reads the byte before it tests the source; the byte matters
-                        // only where the source ends.
-                        if at(source) == 0 {
-                            let Some(&c) = output.get(target) else {
-                                return MZ_INTERNAL_ERROR;
-                            };
-                            if mz_os_is_dir_separator(c) {
-                                target += 1;
-                            }
+                        // only where the source ends. A byte nothing wrote yet is taken for
+                        // one that isn't a separator: its value doesn't change the outcome
+                        // (docs/improvements.md, U-78).
+                        if at(source) == 0
+                            && output
+                                .get(target)
+                                .is_some_and(|&c| mz_os_is_dir_separator(c))
+                        {
+                            target += 1;
                         }
 
                         write_at(output, target, 0);
@@ -511,18 +518,47 @@ pub(crate) fn mz_dir_make(path: &[u8]) -> i32 {
     err
 }
 
+/// The time `unix_time` seconds after 1970, as the system takes it: on Windows the `FILETIME`
+/// of `mz_os_unix_to_file_time` (mz_os_win32.c:229-234 @ 4.0.10), whose `uint64_t` arithmetic
+/// wraps, so every `time_t` gives one (`None` for a `FILETIME` of 0, which `SetFileTime` takes
+/// for "leave this time"; no `time_t` the reader gives wraps to it); on Linux the `time_t`
+/// itself.
+fn system_time(unix_time: i64) -> Option<std::time::SystemTime> {
+    use std::time::{Duration, UNIX_EPOCH};
+    if cfg!(windows) {
+        // 100-nanosecond intervals since 1601: `UNIX_EPOCH` is 116,444,736,000,000,000 of them.
+        let epoch: i128 = 116_444_736_000_000_000;
+        let file_time = (unix_time as u64)
+            .wrapping_mul(10_000_000)
+            .wrapping_add(epoch as u64);
+        if file_time == 0 {
+            return None;
+        }
+        // A `SystemTime` holds the `FILETIME`'s bits as a signed count of intervals.
+        let intervals = i128::from(file_time as i64) - epoch;
+        let magnitude = intervals.unsigned_abs();
+        let duration = Duration::new(
+            (magnitude / 10_000_000) as u64,
+            (magnitude % 10_000_000) as u32 * 100,
+        );
+        if intervals >= 0 {
+            UNIX_EPOCH.checked_add(duration)
+        } else {
+            UNIX_EPOCH.checked_sub(duration)
+        }
+    } else if unix_time >= 0 {
+        UNIX_EPOCH.checked_add(Duration::from_secs(unix_time as u64))
+    } else {
+        UNIX_EPOCH.checked_sub(Duration::from_secs(unix_time.unsigned_abs()))
+    }
+}
+
 /// Sets the file's dates: on Linux, its access and modification times (`utime`); on Windows,
-/// those of the three that aren't 0.
+/// those of the three that aren't 0 (`SetFileTime`, which takes any `FILETIME` and refuses the
+/// ones it can't hold; it fails as a whole, and the file keeps its times).
 ///
 /// Port of `mz_os_set_file_date` (mz_os_posix.c:230-241, mz_os_win32.c:261-299 @ 4.0.10).
 pub(crate) fn mz_os_set_file_date(path: &[u8], modified: i64, accessed: i64, creation: i64) -> i32 {
-    let time = |t: i64| {
-        if t >= 0 {
-            std::time::UNIX_EPOCH + std::time::Duration::from_secs(t as u64)
-        } else {
-            std::time::UNIX_EPOCH - std::time::Duration::from_secs(t.unsigned_abs())
-        }
-    };
     let Ok(file) = std::fs::OpenOptions::new()
         .write(true)
         .open(system_path(path))
@@ -535,23 +571,30 @@ pub(crate) fn mz_os_set_file_date(path: &[u8], modified: i64, accessed: i64, cre
     };
     let mut times = std::fs::FileTimes::new();
     if cfg!(windows) {
-        if modified != 0 {
-            times = times.set_modified(time(modified));
+        if modified != 0
+            && let Some(t) = system_time(modified)
+        {
+            times = times.set_modified(t);
         }
-        if accessed != 0 {
-            times = times.set_accessed(time(accessed));
+        if accessed != 0
+            && let Some(t) = system_time(accessed)
+        {
+            times = times.set_accessed(t);
         }
         #[cfg(windows)]
-        if creation != 0 {
+        if creation != 0
+            && let Some(t) = system_time(creation)
+        {
             use std::os::windows::fs::FileTimesExt;
-            times = times.set_created(time(creation));
+            times = times.set_created(t);
         }
     } else {
         // Creation date not supported
         let _ = creation;
-        times = times
-            .set_modified(time(modified))
-            .set_accessed(time(accessed));
+        let (Some(m), Some(a)) = (system_time(modified), system_time(accessed)) else {
+            return MZ_INTERNAL_ERROR;
+        };
+        times = times.set_modified(m).set_accessed(a);
     }
     if file.set_times(times).is_err() {
         return MZ_INTERNAL_ERROR;
