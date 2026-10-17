@@ -29,6 +29,7 @@ use ocio_ops::format_metadata::{
     FormatMetadataImpl, METADATA_DESCRIPTION, METADATA_INPUT_DESCRIPTOR, METADATA_OUTPUT_DESCRIPTOR,
 };
 use ocio_ops::hash_utils::cache_id_hash;
+use ocio_ops::imath_half::float_to_half;
 use ocio_ops::op_data::{OpData, OpDataRcPtr, OpDataType, get_type_name};
 use ocio_ops::open_color_types::{BitDepth, Lut1DHueAdjust, TransformDirection};
 use ocio_ops::ops::cdl::cdl_op_data::CdlOpData;
@@ -41,17 +42,20 @@ use ocio_ops::ops::log::log_utils::{
     ANTI_LOG2_STR, ANTI_LOG10_STR, CAMERA_LIN_TO_LOG_STR, CAMERA_LOG_TO_LIN_STR, LIN_TO_LOG_STR,
     LOG_TO_LIN_STR, LOG2_STR, LOG10_STR,
 };
+use ocio_ops::ops::lut1d::lut1d_op_data::Lut1DOpData;
+use ocio_ops::ops::lut3d::lut3d_op_data::Lut3DOpData;
 use ocio_ops::ops::matrix::matrix_op_data::MatrixOpData;
 use ocio_ops::{Exception, Result};
 
 use super::ctf_reader_utils::{
     ATTR_BASE, ATTR_BITDEPTH_IN, ATTR_BITDEPTH_OUT, ATTR_CHAN, ATTR_COMP_CLF_VERSION,
-    ATTR_DIMENSION, ATTR_EXPONENT, ATTR_GAMMA, ATTR_INVERSE_OF, ATTR_LINEARSLOPE,
-    ATTR_LINSIDEBREAK, ATTR_LINSIDEOFFSET, ATTR_LINSIDESLOPE, ATTR_LOGSIDEOFFSET,
-    ATTR_LOGSIDESLOPE, ATTR_OFFSET, ATTR_STYLE, ATTR_VERSION, TAG_ARRAY, TAG_CDL, TAG_EXPONENT,
-    TAG_EXPONENT_PARAMS, TAG_GAMMA, TAG_GAMMA_PARAMS, TAG_LOG, TAG_LOG_PARAMS, TAG_MATRIX,
-    TAG_MAX_IN_VALUE, TAG_MAX_OUT_VALUE, TAG_MIN_IN_VALUE, TAG_MIN_OUT_VALUE, TAG_PROCESS_LIST,
-    TAG_RANGE,
+    ATTR_DIMENSION, ATTR_EXPONENT, ATTR_GAMMA, ATTR_HALF_DOMAIN, ATTR_HUE_ADJUST,
+    ATTR_INTERPOLATION, ATTR_INVERSE_OF, ATTR_LINEARSLOPE, ATTR_LINSIDEBREAK, ATTR_LINSIDEOFFSET,
+    ATTR_LINSIDESLOPE, ATTR_LOGSIDEOFFSET, ATTR_LOGSIDESLOPE, ATTR_OFFSET, ATTR_RAW_HALFS,
+    ATTR_STYLE, ATTR_VERSION, TAG_ARRAY, TAG_CDL, TAG_EXPONENT, TAG_EXPONENT_PARAMS, TAG_GAMMA,
+    TAG_GAMMA_PARAMS, TAG_INVLUT1D, TAG_INVLUT3D, TAG_LOG, TAG_LOG_PARAMS, TAG_LUT1D, TAG_LUT3D,
+    TAG_MATRIX, TAG_MAX_IN_VALUE, TAG_MAX_OUT_VALUE, TAG_MIN_IN_VALUE, TAG_MIN_OUT_VALUE,
+    TAG_PROCESS_LIST, TAG_RANGE, get_interpolation_1d_name, get_interpolation_3d_name,
 };
 use crate::transforms::cdl_transform::{METADATA_INPUT_DESCRIPTION, METADATA_VIEWING_DESCRIPTION};
 
@@ -951,6 +955,222 @@ impl OpWriter for RangeWriter<'_> {
     }
 }
 
+/// The writer of a Lut1D or an InverseLUT1D: its interpolation, half domain, raw halfs and hue
+/// adjust, and its array, scaled to the file bit depth of its values.
+///
+/// Port of `Lut1DWriter` (CTFTransform.cpp:2042-2179 @ v2.5.2).
+struct Lut1DWriter<'a> {
+    /// `m_lut`.
+    lut: &'a OpData,
+    in_bit_depth: BitDepth,
+    out_bit_depth: BitDepth,
+}
+
+impl Lut1DWriter<'_> {
+    fn lut(&self) -> &Lut1DOpData {
+        let OpData::Lut1D(lut) = self.lut else {
+            unreachable!("a Lut1D writer writes a Lut1D");
+        };
+        lut
+    }
+}
+
+impl OpWriter for Lut1DWriter<'_> {
+    fn get_op(&self) -> &OpData {
+        self.lut
+    }
+
+    /// Port of `Lut1DWriter::getTagName` (CTFTransform.cpp:2078-2088 @ v2.5.2).
+    fn get_tag_name(&self) -> &[u8] {
+        if self.lut().get_direction() == TransformDirection::Forward {
+            TAG_LUT1D
+        } else {
+            TAG_INVLUT1D
+        }
+    }
+    fn in_bit_depth(&self) -> BitDepth {
+        self.in_bit_depth
+    }
+    fn out_bit_depth(&self) -> BitDepth {
+        self.out_bit_depth
+    }
+
+    /// Port of `Lut1DWriter::getAttributes` (CTFTransform.cpp:2090-2120 @ v2.5.2).
+    fn get_attributes(&self, attributes: &mut Attributes) -> Result<()> {
+        op_writer_attributes(self, attributes)?;
+        let lut = self.lut();
+
+        // If the client requests INTERP_LINEAR, we want to write it to the attribute (even
+        // though linear is what CLF specifies as its default, some clients may want to lock
+        // down that behavior). INTERP_DEFAULT means "do not write the attribute".
+        let interpolation = lut.get_interpolation();
+        if let Some(interpolation_name) = get_interpolation_1d_name(interpolation)
+            && !interpolation_name.is_empty()
+        {
+            attributes.push((ATTR_INTERPOLATION.to_vec(), interpolation_name.to_vec()));
+        }
+
+        if lut.is_input_half_domain() {
+            attributes.push((ATTR_HALF_DOMAIN.to_vec(), b"true".to_vec()));
+        }
+
+        if lut.is_output_raw_halfs() {
+            attributes.push((ATTR_RAW_HALFS.to_vec(), b"true".to_vec()));
+        }
+
+        if lut.get_hue_adjust() == Lut1DHueAdjust::Dw3 {
+            attributes.push((ATTR_HUE_ADJUST.to_vec(), b"dw3".to_vec()));
+        }
+        Ok(())
+    }
+
+    /// Port of `Lut1DWriter::writeContent` (CTFTransform.cpp:2122-2179 @ v2.5.2). The raw
+    /// halfs, upstream's `unsigned` values times the `float` scale 1, are written as the
+    /// `float`s of that product.
+    fn write_content(&self, formatter: &mut XmlFormatter<'_>) -> Result<()> {
+        // Note: As of CTF v1.7 we support IndexMaps and that member of the LUT is populated,
+        // however, since we convert it to a Range on reading, we do not want to write out the
+        // IndexMap.
+
+        let lut = self.lut();
+        let array = lut.get_array();
+        let num_components = array.get_num_color_components() as usize;
+        let dimension = format!("{} {}", array.get_length(), num_components);
+
+        let attributes: Attributes = vec![(ATTR_DIMENSION.to_vec(), dimension.into_bytes())];
+
+        formatter.write_start_tag_with(TAG_ARRAY, &attributes);
+
+        // To avoid needing to duplicate the const objects, we scale the values on-the-fly
+        // while writing.
+        let array_bit_depth = if lut.get_direction() == TransformDirection::Inverse {
+            self.in_bit_depth
+        } else {
+            self.out_bit_depth
+        };
+        let scale = get_bit_depth_max_value(array_bit_depth)? as f32;
+        let iter_step = if num_components == 1 { 3 } else { 1 };
+
+        if lut.is_output_raw_halfs() {
+            let values: Vec<f32> = array
+                .get_values()
+                .iter()
+                .map(|&v| f32::from(float_to_half(v * scale)))
+                .collect();
+
+            write_values(
+                formatter,
+                &values,
+                num_components,
+                BitDepth::Uint16,
+                iter_step,
+                1.0f32,
+            )?;
+        } else {
+            write_values(
+                formatter,
+                array.get_values(),
+                num_components,
+                array_bit_depth,
+                iter_step,
+                scale,
+            )?;
+        }
+
+        formatter.write_end_tag(TAG_ARRAY);
+        Ok(())
+    }
+}
+
+/// The writer of a Lut3D or an InverseLUT3D: its interpolation, and its array, scaled to the
+/// file bit depth of its values.
+///
+/// Port of `Lut3DWriter` (CTFTransform.cpp:2183-2280 @ v2.5.2).
+struct Lut3DWriter<'a> {
+    /// `m_lut`.
+    lut: &'a OpData,
+    in_bit_depth: BitDepth,
+    out_bit_depth: BitDepth,
+}
+
+impl Lut3DWriter<'_> {
+    fn lut(&self) -> &Lut3DOpData {
+        let OpData::Lut3D(lut) = self.lut else {
+            unreachable!("a Lut3D writer writes a Lut3D");
+        };
+        lut
+    }
+}
+
+impl OpWriter for Lut3DWriter<'_> {
+    fn get_op(&self) -> &OpData {
+        self.lut
+    }
+
+    /// Port of `Lut3DWriter::getTagName` (CTFTransform.cpp:2219-2229 @ v2.5.2).
+    fn get_tag_name(&self) -> &[u8] {
+        if self.lut().get_direction() == TransformDirection::Forward {
+            TAG_LUT3D
+        } else {
+            TAG_INVLUT3D
+        }
+    }
+    fn in_bit_depth(&self) -> BitDepth {
+        self.in_bit_depth
+    }
+    fn out_bit_depth(&self) -> BitDepth {
+        self.out_bit_depth
+    }
+
+    /// Port of `Lut3DWriter::getAttributes` (CTFTransform.cpp:2231-2244 @ v2.5.2).
+    fn get_attributes(&self, attributes: &mut Attributes) -> Result<()> {
+        op_writer_attributes(self, attributes)?;
+
+        let interpolation = self.lut().get_interpolation();
+
+        // Please see comment in Lut1DWriter.
+        if let Some(interpolation_name) = get_interpolation_3d_name(interpolation)
+            && !interpolation_name.is_empty()
+        {
+            attributes.push((ATTR_INTERPOLATION.to_vec(), interpolation_name.to_vec()));
+        }
+        Ok(())
+    }
+
+    /// Port of `Lut3DWriter::writeContent` (CTFTransform.cpp:2246-2280 @ v2.5.2).
+    fn write_content(&self, formatter: &mut XmlFormatter<'_>) -> Result<()> {
+        // Note: As of CTF v1.7 we support IndexMaps and that member of the Lut is populated,
+        // however, since we convert it to a Range on reading, we do not want to write out the
+        // IndexMap.
+
+        let lut = self.lut();
+        let array = lut.get_array();
+        let length = array.get_length();
+        let dimension = format!(
+            "{length} {length} {length} {}",
+            array.get_num_color_components()
+        );
+
+        let attributes: Attributes = vec![(ATTR_DIMENSION.to_vec(), dimension.into_bytes())];
+
+        formatter.write_start_tag_with(TAG_ARRAY, &attributes);
+
+        // To avoid needing to duplicate the const objects, we scale the values on-the-fly
+        // while writing.
+        let array_bit_depth = if lut.get_direction() == TransformDirection::Inverse {
+            self.in_bit_depth
+        } else {
+            self.out_bit_depth
+        };
+        let scale = get_bit_depth_max_value(array_bit_depth)? as f32;
+
+        write_values(formatter, array.get_values(), 3, array_bit_depth, 1, scale)?;
+
+        formatter.write_end_tag(TAG_ARRAY);
+        Ok(())
+    }
+}
+
 /// The writer of a Matrix: its array of 3 or 4 rows, with or without its offsets, in the
 /// CTF 1.x `dim` of three numbers before 2.0.
 ///
@@ -1141,7 +1361,7 @@ fn get_input_file_bd(op: &OpData) -> Result<BitDepth> {
     }
 }
 
-/// The error of an op whose writer isn't ported yet (WP 4.6c-4.6d).
+/// The error of an op whose writer isn't ported yet (WP 4.6d).
 fn writer_not_ported(op_type: OpDataType) -> Result<()> {
     Err(Exception::new(format!(
         "The CTF writer of the '{}' op is not ported yet.",
@@ -1311,8 +1531,46 @@ impl<'t> TransformWriter<'t> {
                         };
                         op_writer.write(formatter)?;
                     }
-                    OpData::Lut1D(_) => writer_not_ported(op_type)?,
-                    OpData::Lut3D(_) => writer_not_ported(op_type)?,
+                    OpData::Lut1D(lut) => {
+                        if self.is_clf && lut.get_direction() != TransformDirection::Forward {
+                            return Err(throw_write_op("InverseLUT1D"));
+                        }
+                        // Avoid copying LUT, write will take bit-depth into account.
+                        if lut.get_direction() == TransformDirection::Forward {
+                            // For an inverse Lut1D, the fileOutDepth is used for the inBitDepth
+                            // above.
+                            out_bd = get_validated_file_bit_depth(
+                                lut.get_file_output_bit_depth(),
+                                op_type,
+                            )?;
+                        }
+                        let op_writer = Lut1DWriter {
+                            lut: op,
+                            in_bit_depth: in_bd,
+                            out_bit_depth: out_bd,
+                        };
+                        op_writer.write(formatter)?;
+                    }
+                    OpData::Lut3D(lut) => {
+                        if self.is_clf && lut.get_direction() != TransformDirection::Forward {
+                            return Err(throw_write_op("InverseLUT3D"));
+                        }
+                        // Avoid copying LUT, write will take bit-depth into account.
+                        if lut.get_direction() == TransformDirection::Forward {
+                            // For an inverse Lut3D, the fileOutDepth is used for the inBitDepth
+                            // above.
+                            out_bd = get_validated_file_bit_depth(
+                                lut.get_file_output_bit_depth(),
+                                op_type,
+                            )?;
+                        }
+                        let op_writer = Lut3DWriter {
+                            lut: op,
+                            in_bit_depth: in_bd,
+                            out_bit_depth: out_bd,
+                        };
+                        op_writer.write(formatter)?;
+                    }
                     OpData::Matrix(mat_src) => {
                         if self.is_clf && mat_src.has_alpha()? {
                             return Err(throw_write_op("Matrix with alpha component"));

@@ -22,6 +22,8 @@ use crate::transforms::exponent_with_linear_transform::ExponentWithLinearTransfo
 use crate::transforms::log_affine_transform::LogAffineTransform;
 use crate::transforms::log_camera_transform::LogCameraTransform;
 use crate::transforms::log_transform::LogTransform;
+use crate::transforms::lut1d_transform::Lut1DTransform;
+use crate::transforms::lut3d_transform::Lut3DTransform;
 use crate::transforms::matrix_transform::MatrixTransform;
 use crate::transforms::range_transform::{RangeStyle, RangeTransform};
 use ocio_formats::fileformats::xmlutils::xml_reader_helper::{
@@ -29,6 +31,7 @@ use ocio_formats::fileformats::xmlutils::xml_reader_helper::{
 };
 use ocio_ops::bit_depth_utils::get_bit_depth_max_value;
 use ocio_ops::format_metadata::{METADATA_DESCRIPTION, METADATA_ID, METADATA_INFO, METADATA_NAME};
+use ocio_ops::imath_half::{float_to_half, half_to_float};
 use ocio_ops::logging::{get_logging_level, set_logging_level};
 use ocio_ops::math_utils::convert_half_bits_to_float;
 use ocio_ops::op_data::OpDataType;
@@ -53,6 +56,7 @@ use ocio_ops::ops::lut3d::lut3d_op_data::Lut3DOpData;
 use ocio_ops::ops::matrix::matrix_op_data::{MatrixArray, MatrixOpData};
 use ocio_ops::ops::range::range_op_data::RangeOpData;
 use ocio_ops::ops::reference::reference_op_data::{ReferenceOpData, ReferenceStyle};
+use ocio_ops::utils::string_utils::trim;
 use ocio_testkit::compare::assert_text_eq;
 use ocio_testkit::upstream::{check_close, check_throw_what};
 
@@ -3963,17 +3967,20 @@ fn load_edit_save_matrix() {
 ///
 /// Port of `WriteRead` (FileFormatCTF_tests.cpp:5040-5056 @ v2.5.2).
 fn write_read(transform: Transform) -> LocalCachedFile {
+    try_write_read(transform).unwrap()
+}
+
+/// [`write_read`], or the error of writing or reading.
+fn try_write_read(transform: Transform) -> Result<LocalCachedFile> {
     let mut group = GroupTransform::new();
     group.append_transform(transform);
 
     let mut output_transform = Vec::new();
-    write_group_ctf(&group, &mut output_transform).unwrap();
+    write_group_ctf(&group, &mut output_transform)?;
 
     let mut input_transform = InputStream::from_bytes(output_transform.clone());
 
-    LocalFileFormat
-        .read_file(&mut input_transform, b"")
-        .unwrap()
+    LocalFileFormat.read_file(&mut input_transform, b"")
 }
 
 /// Port of `OCIO_ADD_TEST(CTFTransform, save_matrix)` @ v2.5.2.
@@ -5373,6 +5380,884 @@ fn log_antilog2_ctf() {
 <ProcessList version="2" id="UIDLOG42">
     <Log inBitDepth="32f" outBitDepth="32f" style="antiLog2">
     </Log>
+</ProcessList>
+"#;
+
+    check_written(expected, &output_transform);
+}
+
+/// The processor of the test file `file_name`'s group written as CTF.
+fn written_ctf_of_file(file_name: &str) -> String {
+    let processor = get_file_transform_processor(file_name).unwrap();
+    let group = processor.create_group_transform().unwrap();
+
+    let mut output_transform = Vec::new();
+    write_group_ctf(&group, &mut output_transform).unwrap();
+    String::from_utf8(output_transform).unwrap()
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, save_lut_1d_1component)` @ v2.5.2.
+#[test]
+fn save_lut_1d_1component() {
+    let result = written_ctf_of_file("clf/lut1d_32f_example.clf");
+    let expected = "<Array dim=\"65 1\">";
+    assert!(result.contains(expected));
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, save_lut_1d_3components)` @ v2.5.2.
+#[test]
+fn save_lut_1d_3components() {
+    let result = written_ctf_of_file("lut1d_green.ctf");
+    let expected = "<Array dim=\"32 3\">";
+    assert!(result.contains(expected));
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, save_invlut_1d_3components)` @ v2.5.2.
+#[test]
+fn save_invlut_1d_3components() {
+    let result = written_ctf_of_file("lut1d_inv.ctf");
+    let expected1 = "</InverseLUT1D>";
+    assert!(result.contains(expected1));
+    // Components are equal, so only 1 get saved.
+    let expected2 = "<Array dim=\"17 1\">";
+    assert!(result.contains(expected2));
+}
+
+/// Whether the half of `bits` is a NaN (`half::isNan`, Imath half.h @ v3.2.1).
+fn half_is_nan(bits: u16) -> bool {
+    (bits & 0x7c00) == 0x7c00 && (bits & 0x03ff) != 0
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, save_lut1d_halfdomain)` @ v2.5.2.
+#[test]
+fn save_lut1d_halfdomain() {
+    let mut lut_t = Lut1DTransform::new();
+    lut_t.set_file_output_bit_depth(BitDepth::Uint10);
+
+    let size = Lut1DOpData::get_lut_ideal_size(BitDepth::F16).unwrap();
+    lut_t.set_length(size).unwrap();
+    lut_t.set_input_half_domain(true);
+
+    for i in 0..size {
+        let val = half_to_float(i as u16);
+        lut_t.set_value(i, val, val, val).unwrap();
+    }
+
+    let cached_file = write_read(Transform::Lut1D(lut_t));
+    let file_ops = cached_file.transform.get_ops();
+    assert_eq!(file_ops.len(), 1);
+    let OpData::Lut1D(lut) = &*file_ops[0] else {
+        panic!("not a Lut1D");
+    };
+    assert_eq!(lut.get_file_output_bit_depth(), BitDepth::Uint10);
+    assert!(lut.is_input_half_domain());
+
+    assert_eq!(lut.get_array().get_length(), size);
+
+    let array = lut.get_array().get_values();
+    for i in 0..size as usize {
+        let expected = i as u16;
+        let loaded_val = array[3 * i];
+        let loaded = float_to_half(loaded_val);
+        if half_is_nan(expected) {
+            assert!(half_is_nan(loaded));
+            assert!(array[3 * i + 1].is_nan());
+            assert!(array[3 * i + 2].is_nan());
+        } else {
+            assert_eq!(loaded, expected);
+            assert_eq!(loaded_val, array[3 * i + 1]);
+            assert_eq!(loaded_val, array[3 * i + 2]);
+        }
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, save_lut1d_f16_raw)` @ v2.5.2. `HALF_MAX` and
+/// `HALF_NRM_MIN` are Imath's (half.h @ v3.2.1), the halfs of bits 0x7bff and 0x0400.
+#[test]
+fn save_lut1d_f16_raw() {
+    let mut lut_t = Lut1DTransform::new();
+    lut_t.set_file_output_bit_depth(BitDepth::F16);
+
+    lut_t.set_length(2).unwrap();
+    lut_t.set_output_raw_halfs(true);
+
+    let half = |f: f32| half_to_float(float_to_half(f));
+    let values = [
+        half(1.0f32 / 3.0f32),
+        half_to_float(0x7bff),
+        half_to_float(0x0400),
+        half(1.0f32 / 7.0f32),
+        half_to_float(0x7c00),
+        -half_to_float(0x7c00),
+    ];
+    lut_t.set_value(0, values[0], values[1], values[2]).unwrap();
+    lut_t.set_value(1, values[3], values[4], values[5]).unwrap();
+
+    let cached_file = write_read(Transform::Lut1D(lut_t));
+    let file_ops = cached_file.transform.get_ops();
+    assert_eq!(file_ops.len(), 1);
+    let OpData::Lut1D(lut) = &*file_ops[0] else {
+        panic!("not a Lut1D");
+    };
+    assert_eq!(lut.get_file_output_bit_depth(), BitDepth::F16);
+
+    assert_eq!(lut.get_array().get_length(), 2);
+
+    let array = lut.get_array().get_values();
+    for (i, value) in values.iter().enumerate() {
+        assert_eq!(*value, array[i]);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, save_lut1d_f32)` @ v2.5.2.
+#[test]
+fn save_lut1d_f32() {
+    let mut lut_t = Lut1DTransform::new();
+    lut_t.set_file_output_bit_depth(BitDepth::F32);
+
+    lut_t.set_length(8).unwrap();
+    let values = [
+        1.0f32 / 3.0f32,
+        0.0000000000000001f32,
+        0.9999999f32,
+        0.0,
+        f32::MAX,
+        -f32::MIN_POSITIVE,
+        f32::INFINITY,
+        f32::NEG_INFINITY,
+    ];
+
+    for (i, &v) in values.iter().enumerate() {
+        lut_t.set_value(i as c_ulong, v, v, v).unwrap();
+    }
+
+    let cached_file = write_read(Transform::Lut1D(lut_t));
+    let file_ops = cached_file.transform.get_ops();
+    assert_eq!(file_ops.len(), 1);
+    let OpData::Lut1D(lut) = &*file_ops[0] else {
+        panic!("not a Lut1D");
+    };
+    assert_eq!(lut.get_file_output_bit_depth(), BitDepth::F32);
+
+    assert_eq!(lut.get_array().get_length(), 8);
+
+    let array = lut.get_array().get_values();
+    for (i, value) in values.iter().enumerate() {
+        assert_eq!(array[3 * i], *value);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, save_lut1d_interpolation)` @ v2.5.2. Its config,
+/// created and set to version 2, isn't used.
+#[test]
+fn save_lut1d_interpolation() {
+    let mut lut = Lut1DTransform::new();
+    lut.set_interpolation(Interpolation::Default);
+
+    let mut group = GroupTransform::new();
+    group.append_transform(Transform::Lut1D(lut.clone()));
+
+    let mut output_transform = Vec::new();
+    write_group_clf(&group, &mut output_transform).unwrap();
+
+    {
+        let result = String::from_utf8(output_transform.clone()).unwrap();
+        let expected = r#"<LUT1D inBitDepth="32f" outBitDepth="32f">"#;
+        assert!(result.contains(expected));
+    }
+
+    output_transform.clear();
+    let mut group = GroupTransform::new();
+
+    lut.set_interpolation(Interpolation::Best);
+
+    group.append_transform(Transform::Lut1D(lut.clone()));
+    write_group_clf(&group, &mut output_transform).unwrap();
+
+    {
+        let result = String::from_utf8(output_transform.clone()).unwrap();
+        let expected = r#"<LUT1D inBitDepth="32f" outBitDepth="32f" interpolation="linear">"#;
+        assert!(result.contains(expected));
+    }
+
+    output_transform.clear();
+    let mut group = GroupTransform::new();
+
+    lut.set_interpolation(Interpolation::Linear);
+
+    group.append_transform(Transform::Lut1D(lut.clone()));
+    write_group_clf(&group, &mut output_transform).unwrap();
+
+    {
+        let result = String::from_utf8(output_transform.clone()).unwrap();
+        let expected = r#"<LUT1D inBitDepth="32f" outBitDepth="32f" interpolation="linear">"#;
+        assert!(result.contains(expected));
+    }
+
+    output_transform.clear();
+    let mut group = GroupTransform::new();
+
+    lut.set_interpolation(Interpolation::Cubic);
+    group.append_transform(Transform::Lut1D(lut));
+    check_throw_what(
+        write_group_clf(&group, &mut output_transform),
+        "1D LUT does not support interpolation algorithm: cubic",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, save_invalid_lut_1d)` @ v2.5.2.
+#[test]
+fn save_invalid_lut_1d() {
+    let mut lut_t = Lut1DTransform::new();
+    lut_t.set_file_output_bit_depth(BitDepth::F32);
+
+    lut_t.set_length(8).unwrap();
+    lut_t.set_input_half_domain(true);
+
+    check_throw_what(
+        try_write_read(Transform::Lut1D(lut_t)),
+        "65536 required for halfDomain 1D LUT",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, save_lut_3d)` @ v2.5.2.
+#[test]
+fn save_lut_3d() {
+    let result = written_ctf_of_file("clf/lut3d_identity_12i_16f.clf");
+    let expected = "<Array dim=\"2 2 2 3\">";
+    assert!(result.contains(expected));
+}
+
+/// A group of `transform` whose id is `UIDLUT42`, written as CTF or CLF.
+fn write_lut_group(transform: Transform, clf: bool) -> Result<Vec<u8>> {
+    let group = group_of(b"UIDLUT42", transform);
+    let mut output_transform = Vec::new();
+    if clf {
+        write_group_clf(&group, &mut output_transform)?;
+    } else {
+        write_group_ctf(&group, &mut output_transform)?;
+    }
+    Ok(output_transform)
+}
+
+/// `getFormatMetadata().addAttribute(METADATA_NAME, name)` and `(METADATA_ID, id)`.
+fn add_name_and_id(metadata: &mut ocio_ops::format_metadata::FormatMetadataImpl, name: &[u8]) {
+    metadata
+        .add_attribute(Some(METADATA_NAME), Some(name))
+        .unwrap();
+    metadata
+        .add_attribute(Some(METADATA_ID), Some(b"lut01"))
+        .unwrap();
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, lut1d_clf)` @ v2.5.2.
+#[test]
+fn lut1d_clf() {
+    let mut lut = Lut1DTransform::new();
+    lut.set_interpolation(Interpolation::Linear);
+
+    let output_transform = write_lut_group(Transform::Lut1D(lut), true).unwrap();
+
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList compCLFversion="3" id="UIDLUT42">
+    <LUT1D inBitDepth="32f" outBitDepth="32f" interpolation="linear">
+        <Array dim="2 1">
+          0
+          1
+        </Array>
+    </LUT1D>
+</ProcessList>
+"#;
+
+    check_written(expected, &output_transform);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, lut1d_inverse_clf)` @ v2.5.2.
+#[test]
+fn lut1d_inverse_clf() {
+    let mut lut = Lut1DTransform::new();
+    lut.set_direction(TransformDirection::Inverse);
+
+    check_throw_what(
+        write_lut_group(Transform::Lut1D(lut), true),
+        "Transform uses the 'InverseLUT1D' op which cannot be written as CLF",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, lut1d_ctf)` @ v2.5.2.
+#[test]
+fn lut1d_ctf() {
+    let mut lut = Lut1DTransform::new();
+    lut.set_interpolation(Interpolation::Default);
+
+    let output_transform = write_lut_group(Transform::Lut1D(lut), false).unwrap();
+
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="1.3" id="UIDLUT42">
+    <LUT1D inBitDepth="32f" outBitDepth="32f">
+        <Array dim="2 1">
+          0
+          1
+        </Array>
+    </LUT1D>
+</ProcessList>
+"#;
+
+    check_written(expected, &output_transform);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, lut1d_attributes_ctf)` @ v2.5.2.
+#[test]
+fn lut1d_attributes_ctf() {
+    let mut lut = Lut1DTransform::new();
+    add_name_and_id(lut.format_metadata_mut(), b"test-lut");
+    lut.set_file_output_bit_depth(BitDepth::Uint10);
+    lut.set_interpolation(Interpolation::Default);
+    lut.set_input_half_domain(true);
+    lut.set_output_raw_halfs(true);
+    lut.set_hue_adjust(Lut1DHueAdjust::Dw3).unwrap();
+    lut.set_length(65536).unwrap();
+    let [r, g, b] = lut.value(1000).unwrap();
+    lut.set_value(1000, r * 1.001f32, g * 1.002f32, b * 1.003f32)
+        .unwrap();
+
+    let output_transform = write_lut_group(Transform::Lut1D(lut), false).unwrap();
+
+    let input_transform = String::from_utf8(output_transform).unwrap();
+    let mut lines = input_transform.split('\n');
+
+    let mut line = lines.next().unwrap();
+    assert_eq!(line, "<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
+
+    line = lines.next().unwrap();
+    assert_eq!(line, r#"<ProcessList version="1.4" id="UIDLUT42">"#);
+
+    line = lines.next().unwrap();
+    assert_eq!(
+        trim(line.as_bytes()),
+        b"<LUT1D id=\"lut01\" name=\"test-lut\" inBitDepth=\"32f\" outBitDepth=\"10i\" \
+          halfDomain=\"true\" rawHalfs=\"true\" hueAdjust=\"dw3\">"
+    );
+
+    line = lines.next().unwrap();
+    assert_eq!(trim(line.as_bytes()), br#"<Array dim="65536 3">"#);
+
+    for _ in 0..=1000 {
+        line = lines.next().unwrap();
+    }
+    assert_eq!(trim(line.as_bytes()), b"11216 11218 11220");
+}
+
+/// The Lut1D of `lut1d_array_16x1_ctf`, `lut1d_array_16x3_ctf` and `lut1d_inverse_ctf`: 16
+/// entries of 10i values counting by 3 from 0, or by 1 over the three channels.
+fn lut1d_16(one_component: bool) -> Lut1DTransform {
+    let mut lut = Lut1DTransform::new();
+    lut.set_interpolation(Interpolation::Default);
+    add_name_and_id(lut.format_metadata_mut(), b"test-lut");
+    lut.set_file_output_bit_depth(BitDepth::Uint10);
+    lut.set_length(16).unwrap();
+    let mut rgb = 0.0f32;
+    for i in 0..16 {
+        if one_component {
+            let val = rgb / 1023.0f32;
+            lut.set_value(i, val, val, val).unwrap();
+        } else {
+            lut.set_value(
+                i,
+                rgb / 1023.0f32,
+                (rgb + 1.0f32) / 1023.0f32,
+                (rgb + 2.0f32) / 1023.0f32,
+            )
+            .unwrap();
+        }
+        rgb += 3.0f32;
+    }
+    lut
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, lut1d_array_16x1_ctf)` @ v2.5.2.
+#[test]
+fn lut1d_array_16x1_ctf() {
+    let lut = lut1d_16(true);
+
+    let output_transform = write_lut_group(Transform::Lut1D(lut), false).unwrap();
+
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="1.3" id="UIDLUT42">
+    <LUT1D id="lut01" name="test-lut" inBitDepth="32f" outBitDepth="10i">
+        <Array dim="16 1">
+   0
+   3
+   6
+   9
+  12
+  15
+  18
+  21
+  24
+  27
+  30
+  33
+  36
+  39
+  42
+  45
+        </Array>
+    </LUT1D>
+</ProcessList>
+"#;
+
+    check_written(expected, &output_transform);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, lut1d_array_16x3_ctf)` @ v2.5.2.
+#[test]
+fn lut1d_array_16x3_ctf() {
+    let lut = lut1d_16(false);
+
+    let output_transform = write_lut_group(Transform::Lut1D(lut), false).unwrap();
+
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="1.3" id="UIDLUT42">
+    <LUT1D id="lut01" name="test-lut" inBitDepth="32f" outBitDepth="10i">
+        <Array dim="16 3">
+   0    1    2
+   3    4    5
+   6    7    8
+   9   10   11
+  12   13   14
+  15   16   17
+  18   19   20
+  21   22   23
+  24   25   26
+  27   28   29
+  30   31   32
+  33   34   35
+  36   37   38
+  39   40   41
+  42   43   44
+  45   46   47
+        </Array>
+    </LUT1D>
+</ProcessList>
+"#;
+
+    check_written(expected, &output_transform);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, lut1d_10i_ctf)` @ v2.5.2.
+#[test]
+fn lut1d_10i_ctf() {
+    let mut lut = Lut1DTransform::new();
+    lut.set_interpolation(Interpolation::Default);
+    add_name_and_id(lut.format_metadata_mut(), b"test-lut");
+    lut.set_file_output_bit_depth(BitDepth::Uint10);
+    lut.set_length(3).unwrap();
+    lut.set_value(
+        1,
+        511.0f32 / 1023.0f32,
+        4011.12345f32 / 1023.0f32,
+        -24.10297f32 / 1023.0f32,
+    )
+    .unwrap();
+
+    let output_transform = write_lut_group(Transform::Lut1D(lut), false).unwrap();
+
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="1.3" id="UIDLUT42">
+    <LUT1D id="lut01" name="test-lut" inBitDepth="32f" outBitDepth="10i">
+        <Array dim="3 3">
+   0    0    0
+ 511 4011.12 -24.103
+   1023    1023    1023
+        </Array>
+    </LUT1D>
+</ProcessList>
+"#;
+
+    check_written(expected, &output_transform);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, lut1d_inverse_ctf)` @ v2.5.2.
+#[test]
+fn lut1d_inverse_ctf() {
+    let mut lut = lut1d_16(false);
+
+    lut.set_direction(TransformDirection::Inverse);
+
+    let output_transform = write_lut_group(Transform::Lut1D(lut), false).unwrap();
+
+    // Note the type of the node.
+    //
+    // For an InverseLUT1D, the scaling of array values is based on the inBitDepth.
+    //
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="1.3" id="UIDLUT42">
+    <InverseLUT1D id="lut01" name="test-lut" inBitDepth="10i" outBitDepth="32f">
+        <Array dim="16 3">
+   0    1    2
+   3    4    5
+   6    7    8
+   9   10   11
+  12   13   14
+  15   16   17
+  18   19   20
+  21   22   23
+  24   25   26
+  27   28   29
+  30   31   32
+  33   34   35
+  36   37   38
+  39   40   41
+  42   43   44
+  45   46   47
+        </Array>
+    </InverseLUT1D>
+</ProcessList>
+"#;
+
+    check_written(expected, &output_transform);
+}
+
+/// The Lut3D of `lut3d_array_ctf`, `lut3d_inverse_clf` and `lut3d_inverse_ctf`: a 3x3x3 grid
+/// of 10i values counting by 1 over the channels.
+fn lut3d_3() -> Lut3DTransform {
+    let mut lut = Lut3DTransform::new();
+    add_name_and_id(lut.format_metadata_mut(), b"test-lut3d");
+    lut.set_file_output_bit_depth(BitDepth::Uint10);
+    let gs: c_ulong = 3;
+    lut.set_grid_size(gs).unwrap();
+    let mut rgb = 0.0f32;
+    for r in 0..gs {
+        for g in 0..3 {
+            for b in 0..3 {
+                lut.set_value(
+                    r,
+                    g,
+                    b,
+                    rgb / 1023.0f32,
+                    (rgb + 1.0f32) / 1023.0f32,
+                    (rgb + 2.0f32) / 1023.0f32,
+                )
+                .unwrap();
+                rgb += 3.0f32;
+            }
+        }
+    }
+    lut
+}
+
+/// The array of `lut3d_3`, as `lut3d_array_ctf` and `lut3d_inverse_ctf` expect it.
+const LUT3D_3_ARRAY: &str = r#"        <Array dim="3 3 3 3">
+   0    1    2
+   3    4    5
+   6    7    8
+   9   10   11
+  12   13   14
+  15   16   17
+  18   19   20
+  21   22   23
+  24   25   26
+  27   28   29
+  30   31   32
+  33   34   35
+  36   37   38
+  39   40   41
+  42   43   44
+  45   46   47
+  48   49   50
+  51   52   53
+  54   55   56
+  57   58   59
+  60   61   62
+  63   64   65
+  66   67   68
+  69   70   71
+  72   73   74
+  75   76   77
+  78   79   80
+        </Array>
+"#;
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, lut3d_array_ctf)` @ v2.5.2.
+#[test]
+fn lut3d_array_ctf() {
+    let mut lut = Lut3DTransform::new();
+    add_name_and_id(lut.format_metadata_mut(), b"test-lut3d");
+    lut.set_file_output_bit_depth(BitDepth::Uint10);
+    lut.set_interpolation(Interpolation::Tetrahedral);
+    let gs: c_ulong = 3;
+    lut.set_grid_size(gs).unwrap();
+    let mut rgb = 0.0f32;
+    for r in 0..gs {
+        for g in 0..3 {
+            for b in 0..3 {
+                lut.set_value(
+                    r,
+                    g,
+                    b,
+                    rgb / 1023.0f32,
+                    (rgb + 1.0f32) / 1023.0f32,
+                    (rgb + 2.0f32) / 1023.0f32,
+                )
+                .unwrap();
+                rgb += 3.0f32;
+            }
+        }
+    }
+
+    let output_transform = write_lut_group(Transform::Lut3D(lut), false).unwrap();
+
+    let expected = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="1.3" id="UIDLUT42">
+    <LUT3D id="lut01" name="test-lut3d" inBitDepth="32f" outBitDepth="10i" interpolation="tetrahedral">
+{LUT3D_3_ARRAY}    </LUT3D>
+</ProcessList>
+"#
+    );
+
+    check_written(&expected, &output_transform);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, lut3d_inverse_clf)` @ v2.5.2.
+#[test]
+fn lut3d_inverse_clf() {
+    let mut lut = lut3d_3();
+
+    lut.set_direction(TransformDirection::Inverse);
+
+    check_throw_what(
+        write_lut_group(Transform::Lut3D(lut), true),
+        "Transform uses the 'InverseLUT3D' op which cannot be written as CLF",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, lut3d_inverse_ctf)` @ v2.5.2.
+#[test]
+fn lut3d_inverse_ctf() {
+    let mut lut = lut3d_3();
+
+    lut.set_direction(TransformDirection::Inverse);
+
+    let output_transform = write_lut_group(Transform::Lut3D(lut), false).unwrap();
+
+    // Note the type of the node.
+    //
+    // For an InverseLUT3D, the scaling of array values is based on the inBitDepth.
+    //
+    let expected = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="1.6" id="UIDLUT42">
+    <InverseLUT3D id="lut01" name="test-lut3d" inBitDepth="10i" outBitDepth="32f">
+{LUT3D_3_ARRAY}    </InverseLUT3D>
+</ProcessList>
+"#
+    );
+
+    check_written(&expected, &output_transform);
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, save_lut3d_interpolation)` @ v2.5.2. Its config,
+/// created and set to version 2, isn't used.
+#[test]
+fn save_lut3d_interpolation() {
+    let mut lut = Lut3DTransform::new();
+    lut.set_interpolation(Interpolation::Default);
+
+    let mut output_transform = Vec::new();
+    for (interpolation, expected) in [
+        (
+            Interpolation::Default,
+            r#"<LUT3D inBitDepth="32f" outBitDepth="32f">"#,
+        ),
+        // INTERP_BEST is not a valid CTF/CLF method, so write its concrete value, which is
+        // tetrahedral.
+        (
+            Interpolation::Best,
+            r#"<LUT3D inBitDepth="32f" outBitDepth="32f" interpolation="tetrahedral">"#,
+        ),
+        (
+            Interpolation::Linear,
+            r#"<LUT3D inBitDepth="32f" outBitDepth="32f" interpolation="trilinear">"#,
+        ),
+        (
+            Interpolation::Tetrahedral,
+            r#"<LUT3D inBitDepth="32f" outBitDepth="32f" interpolation="tetrahedral">"#,
+        ),
+    ] {
+        output_transform.clear();
+        lut.set_interpolation(interpolation);
+        let mut group = GroupTransform::new();
+        group.append_transform(Transform::Lut3D(lut.clone()));
+        write_group_ctf(&group, &mut output_transform).unwrap();
+
+        let result = String::from_utf8(output_transform.clone()).unwrap();
+        assert!(result.contains(expected), "{interpolation:?}");
+    }
+
+    output_transform.clear();
+    lut.set_interpolation(Interpolation::Cubic);
+    let mut group = GroupTransform::new();
+    group.append_transform(Transform::Lut3D(lut));
+    check_throw_what(
+        write_group_ctf(&group, &mut output_transform),
+        "Lut3D does not support interpolation algorithm: cubic",
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(CTFTransform, bitdepth_ctf)` @ v2.5.2.
+#[test]
+fn bitdepth_ctf() {
+    let mut mat = MatrixTransform::new();
+    mat.set_file_input_bit_depth(BitDepth::Uint8);
+    mat.set_file_output_bit_depth(BitDepth::Uint10);
+
+    let mut lut = Lut1DTransform::new();
+    lut.set_interpolation(Interpolation::Default);
+    lut.set_file_output_bit_depth(BitDepth::Uint10);
+    lut.set_length(3).unwrap();
+
+    let exp = ExponentTransform::new();
+
+    let mut range = RangeTransform::new();
+    range.set_file_input_bit_depth(BitDepth::F16);
+    range.set_file_output_bit_depth(BitDepth::Uint12);
+    range.set_min_in_value(0.1);
+    range.set_min_out_value(-0.1);
+    range.set_max_in_value(0.9);
+    range.set_max_out_value(1.1);
+
+    let log = LogTransform::new();
+
+    let mut invlut = Lut1DTransform::new();
+    invlut.set_direction(TransformDirection::Inverse);
+    invlut.set_file_output_bit_depth(BitDepth::Uint16);
+    invlut.set_length(3).unwrap();
+
+    let mut mat2 = MatrixTransform::new();
+    mat2.set_file_input_bit_depth(BitDepth::Uint8);
+    mat2.set_file_output_bit_depth(BitDepth::Uint10);
+    mat2.set_direction(TransformDirection::Inverse);
+
+    let mut group = GroupTransform::new();
+    group
+        .format_metadata_mut()
+        .add_attribute(Some(METADATA_ID), Some(b"UID42"))
+        .unwrap();
+
+    // Transforms are setup as follows:
+    //
+    // Matrix    fileIn =  8i, fileOut = 10i
+    // Lut1D                   fileOut = 10i
+    // Exponent
+    // Range     fileIn = 16f, fileOut = 12i
+    // Matrix    fileIn =  8i, fileOut = 10i
+    // Log
+    // InvLut1D                fileOut = 16i
+    // InvMatrix fileIn =  8i, fileOut = 10i
+    // InvLut1D                fileOut = 16i
+
+    // First op keeps its in & out bit-depth.
+    // <Matrix inBitDepth="8i" outBitDepth="10i">
+    group.append_transform(Transform::Matrix(mat.clone()));
+
+    // Previous op out bit-depth used for in bit-depth.
+    // <LUT1D inBitDepth="10i" outBitDepth="10i">
+    group.append_transform(Transform::Lut1D(lut));
+
+    // Previous op out bit-depth used for in bit-depth.
+    // And next op (range) in bit-depth used for out bit-depth.
+    // <Exponent inBitDepth="10i" outBitDepth="16f">
+    group.append_transform(Transform::Exponent(exp));
+
+    // In bit-depth preserved and has been used for out bit-depth of previous op.
+    // Next op is a matrix, but current op is range, first op out bit-depth
+    // is preserved and overrides the next op's in in bit-depth.
+    // <Range inBitDepth="16f" outBitDepth="12i">
+    group.append_transform(Transform::Range(range));
+
+    // Previous op out bit-depth used for in bit-depth.
+    // <Matrix inBitDepth="12i" outBitDepth="10i">
+    group.append_transform(Transform::Matrix(mat));
+
+    // Previous op out bit-depth used for in bit-depth. Out depth is set by preference
+    // of the next op.
+    // <Log inBitDepth="10i" outBitDepth="16i">
+    group.append_transform(Transform::Log(log));
+
+    // Preferred in bit-depth is preserved. Out depth is set by the next op.
+    // <InverseLUT1D inBitDepth="16i" outBitDepth="32f">
+    group.append_transform(Transform::Lut1D(invlut.clone()));
+
+    // Sets both its preferred in and out depth. Note that because the transform
+    // direction is inverse, the mapping of file depths is swapped.
+    // <Matrix inBitDepth="10i" outBitDepth="8i">
+    group.append_transform(Transform::Matrix(mat2));
+
+    // This time it doesn't get its preferred in depth, since the previous op has priority.
+    // The array values are scaled accordingly.
+    // <InverseLUT1D inBitDepth="8i" outBitDepth="32f">
+    group.append_transform(Transform::Lut1D(invlut));
+
+    let mut output_transform = Vec::new();
+    write_group_ctf(&group, &mut output_transform).unwrap();
+
+    let expected = r#"<?xml version="1.0" encoding="UTF-8"?>
+<ProcessList version="2" id="UID42">
+    <Matrix inBitDepth="8i" outBitDepth="10i">
+        <Array dim="3 3">
+   4.01176470588235                   0                   0
+                  0    4.01176470588235                   0
+                  0                   0    4.01176470588235
+        </Array>
+    </Matrix>
+    <LUT1D inBitDepth="10i" outBitDepth="10i">
+        <Array dim="3 1">
+   0
+511.5
+ 1023
+        </Array>
+    </LUT1D>
+    <Exponent inBitDepth="10i" outBitDepth="16f" style="basicFwd">
+        <ExponentParams exponent="1" />
+    </Exponent>
+    <Range inBitDepth="16f" outBitDepth="12i">
+        <minInValue> 0.1 </minInValue>
+        <maxInValue> 0.9 </maxInValue>
+        <minOutValue> -409.5 </minOutValue>
+        <maxOutValue> 4504.5 </maxOutValue>
+    </Range>
+    <Matrix inBitDepth="12i" outBitDepth="10i">
+        <Array dim="3 3">
+   0.24981684981685                   0                   0
+                  0    0.24981684981685                   0
+                  0                   0    0.24981684981685
+        </Array>
+    </Matrix>
+    <Log inBitDepth="10i" outBitDepth="16i" style="log2">
+    </Log>
+    <InverseLUT1D inBitDepth="16i" outBitDepth="10i">
+        <Array dim="3 1">
+    0
+32767.5
+  65535
+        </Array>
+    </InverseLUT1D>
+    <Matrix inBitDepth="10i" outBitDepth="8i">
+        <Array dim="3 3">
+  0.249266862170088                   0                   0
+                  0   0.249266862170088                   0
+                  0                   0   0.249266862170088
+        </Array>
+    </Matrix>
+    <InverseLUT1D inBitDepth="8i" outBitDepth="32f">
+        <Array dim="3 1">
+  0
+127.5
+  255
+        </Array>
+    </InverseLUT1D>
 </ProcessList>
 "#;
 

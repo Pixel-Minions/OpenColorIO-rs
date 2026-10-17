@@ -5,20 +5,23 @@
 //! as CTF and CLF, byte for byte, or its error. The operators come with their writers (WP
 //! 4.6a-4.6d): matrices of every form, bit depth and value; the ProcessList's version, id,
 //! name, inverseOf, descriptions, descriptors and Info; CDLs, gammas and exponents (a version 1
-//! config's Exponent ops too), logs and ranges of each style, direction and bit depth; and the
-//! processors' groups of read files.
+//! config's Exponent ops too), logs and ranges of each style, direction and bit depth; 1D and 3D
+//! LUTs of each bit depth, interpolation and direction; and the processors' groups of read
+//! files.
 
 mod common;
 
 use common::lut_files::{file, write_files};
 use common::transforms::{
-    BIT_DEPTHS, Case, bit_depth_spec, direction_name, direction_spec, negative_style_spec,
+    BIT_DEPTHS, Case, bit_depth_spec, direction_name, direction_spec, interpolation_name,
+    negative_style_spec,
 };
 use ocio::TransformDirection::{self, Forward, Inverse};
 use ocio::{
     BitDepth, CdlStyle, CdlTransform, Config, ExponentTransform, ExponentWithLinearTransform,
-    FileTransform, GroupTransform, LogAffineTransform, LogCameraTransform, LogTransform,
-    MatrixTransform, NegativeStyle, RangeStyle, RangeTransform, Transform,
+    FileTransform, GroupTransform, Interpolation, LogAffineTransform, LogCameraTransform,
+    LogTransform, Lut1DHueAdjust, Lut1DTransform, Lut3DTransform, MatrixTransform, NegativeStyle,
+    RangeStyle, RangeTransform, Transform,
 };
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle::BatchCall;
@@ -1109,6 +1112,372 @@ fn exponents_of_a_version_1_config_write_as_in_the_wheel() {
             case.request["config"] = json!({"yaml": V1_CONFIG});
             case.config = Some(config.clone());
             cases.push(case);
+        }
+    }
+    check_writes(&cases);
+}
+
+/// The values the LUT cases cycle through: fractions of the bit depths' ranges, values that
+/// need many digits, values outside [0, 1], and special values.
+const LUT_VALUES: [f32; 24] = [
+    0.0,
+    1.0,
+    0.5,
+    0.25,
+    1.0 / 3.0,
+    2.0 / 3.0,
+    511.0 / 1023.0,
+    511.5 / 1023.0,
+    4011.123 / 1023.0,
+    -24.10297 / 1023.0,
+    0.1,
+    0.000_123_456_79,
+    1.0e-7,
+    -0.5,
+    1.5,
+    123_456.79,
+    -0.0,
+    0.999_999_9,
+    f32::MIN_POSITIVE,
+    f32::MAX,
+    f32::INFINITY,
+    f32::NEG_INFINITY,
+    f32::NAN,
+    65504.0,
+];
+
+/// The `i`th value of the cycle starting at `start`.
+fn lut_value(start: usize, i: usize) -> f32 {
+    LUT_VALUES[(start + i) % LUT_VALUES.len()]
+}
+
+/// The settings of a LUT case.
+#[derive(Clone, Copy)]
+struct LutSettings {
+    /// The file output bit depth.
+    depth: BitDepth,
+    /// The interpolation.
+    interpolation: Interpolation,
+    /// The direction.
+    dir: TransformDirection,
+    /// Where the values start in [`LUT_VALUES`], or none for equal channels from the start.
+    start: usize,
+    /// Whether the channels are equal (a 1D LUT written with one component).
+    equal: bool,
+}
+
+/// A 1D LUT transform's case of `length` entries, with the hue adjust and raw halfs given.
+fn lut1d(
+    label: &str,
+    length: usize,
+    settings: LutSettings,
+    hue_dw3: bool,
+    raw_halfs: bool,
+) -> Case {
+    let mut port = Lut1DTransform::new();
+    port.set_length(length as std::ffi::c_ulong).unwrap();
+    let mut calls = vec![json!(["setLength", length])];
+    for i in 0..length {
+        let rgb = if settings.equal {
+            [lut_value(settings.start, i); 3]
+        } else {
+            [
+                lut_value(settings.start, 3 * i),
+                lut_value(settings.start, 3 * i + 1),
+                lut_value(settings.start, 3 * i + 2),
+            ]
+        };
+        port.set_value(i as std::ffi::c_ulong, rgb[0], rgb[1], rgb[2])
+            .unwrap();
+        calls.push(json!([
+            "setValue",
+            i,
+            f64_spec(f64::from(rgb[0])),
+            f64_spec(f64::from(rgb[1])),
+            f64_spec(f64::from(rgb[2]))
+        ]));
+    }
+    port.set_file_output_bit_depth(settings.depth);
+    port.set_interpolation(settings.interpolation);
+    port.set_direction(settings.dir);
+    calls.extend([
+        json!(["setFileOutputBitDepth", bit_depth_spec(settings.depth)]),
+        json!(["setInterpolation", {"enum": interpolation_name(settings.interpolation)}]),
+        json!(["setDirection", direction_spec(settings.dir)]),
+    ]);
+    if hue_dw3 {
+        port.set_hue_adjust(Lut1DHueAdjust::Dw3).unwrap();
+        calls.push(json!(["setHueAdjust", {"enum": "HUE_DW3"}]));
+    }
+    if raw_halfs {
+        port.set_output_raw_halfs(true);
+        calls.push(json!(["setOutputRawHalfs", true]));
+    }
+    Case::new(
+        label,
+        json!({"class": "Lut1DTransform", "calls": calls}),
+        port,
+    )
+}
+
+/// A 3D LUT transform's case of a grid of `size`.
+fn lut3d(label: &str, size: usize, settings: LutSettings) -> Case {
+    let mut port = Lut3DTransform::new();
+    port.set_grid_size(size as std::ffi::c_ulong).unwrap();
+    let mut calls = vec![json!(["setGridSize", size])];
+    let mut i = 0;
+    for r in 0..size {
+        for g in 0..size {
+            for b in 0..size {
+                let rgb = [
+                    lut_value(settings.start, 3 * i),
+                    lut_value(settings.start, 3 * i + 1),
+                    lut_value(settings.start, 3 * i + 2),
+                ];
+                port.set_value(
+                    r as std::ffi::c_ulong,
+                    g as std::ffi::c_ulong,
+                    b as std::ffi::c_ulong,
+                    rgb[0],
+                    rgb[1],
+                    rgb[2],
+                )
+                .unwrap();
+                calls.push(json!([
+                    "setValue",
+                    r,
+                    g,
+                    b,
+                    f64_spec(f64::from(rgb[0])),
+                    f64_spec(f64::from(rgb[1])),
+                    f64_spec(f64::from(rgb[2]))
+                ]));
+                i += 1;
+            }
+        }
+    }
+    port.set_file_output_bit_depth(settings.depth);
+    port.set_interpolation(settings.interpolation);
+    port.set_direction(settings.dir);
+    calls.extend([
+        json!(["setFileOutputBitDepth", bit_depth_spec(settings.depth)]),
+        json!(["setInterpolation", {"enum": interpolation_name(settings.interpolation)}]),
+        json!(["setDirection", direction_spec(settings.dir)]),
+    ]);
+    Case::new(
+        label,
+        json!({"class": "Lut3DTransform", "calls": calls}),
+        port,
+    )
+}
+
+/// The 1D and 3D LUTs: every file output bit depth and interpolation, both directions, equal
+/// and different channels, hue adjust, raw halfs, and the values of [`LUT_VALUES`] (special
+/// values included) from several starts.
+fn lut_cases() -> Vec<Case> {
+    let base = LutSettings {
+        depth: BitDepth::F32,
+        interpolation: Interpolation::Default,
+        dir: Forward,
+        start: 0,
+        equal: false,
+    };
+    let mut cases = Vec::new();
+    for &depth in &BIT_DEPTHS {
+        for dir in [Forward, Inverse] {
+            for equal in [false, true] {
+                for start in [0, 7] {
+                    let settings = LutSettings {
+                        depth,
+                        dir,
+                        equal,
+                        start,
+                        ..base
+                    };
+                    cases.push(lut1d(
+                        &format!("a 1D LUT, {depth:?} {dir:?}, equal {equal}, from {start}"),
+                        9,
+                        settings,
+                        false,
+                        false,
+                    ));
+                }
+            }
+            cases.push(lut3d(
+                &format!("a 3D LUT, {depth:?} {dir:?}"),
+                3,
+                LutSettings { depth, dir, ..base },
+            ));
+            cases.push(lut3d(
+                &format!("a 3D LUT of 2, {depth:?} {dir:?}, from 5"),
+                2,
+                LutSettings {
+                    depth,
+                    dir,
+                    start: 5,
+                    ..base
+                },
+            ));
+        }
+    }
+    for interpolation in [
+        Interpolation::Default,
+        Interpolation::Linear,
+        Interpolation::Best,
+        Interpolation::Nearest,
+        Interpolation::Cubic,
+        Interpolation::Tetrahedral,
+    ] {
+        for dir in [Forward, Inverse] {
+            let settings = LutSettings {
+                interpolation,
+                dir,
+                ..base
+            };
+            cases.push(lut1d(
+                &format!("a 1D LUT, {interpolation:?} {dir:?}"),
+                3,
+                settings,
+                false,
+                false,
+            ));
+            cases.push(lut3d(
+                &format!("a 3D LUT, {interpolation:?} {dir:?}"),
+                2,
+                settings,
+            ));
+        }
+    }
+    for dir in [Forward, Inverse] {
+        cases.push(lut1d(
+            &format!("a 1D LUT with hue adjust, {dir:?}"),
+            5,
+            LutSettings { dir, ..base },
+            true,
+            false,
+        ));
+        for depth in [BitDepth::F16, BitDepth::F32, BitDepth::Uint10] {
+            for equal in [false, true] {
+                cases.push(lut1d(
+                    &format!("a 1D LUT of raw halfs, {depth:?} {dir:?}, equal {equal}"),
+                    9,
+                    LutSettings {
+                        depth,
+                        dir,
+                        equal,
+                        ..base
+                    },
+                    false,
+                    true,
+                ));
+            }
+        }
+    }
+    cases
+}
+
+/// The 1D and 3D LUT transforms, alone in a group, as CTF and CLF.
+#[test]
+fn lut_transforms_write_as_in_the_wheel() {
+    let mut cases = Vec::new();
+    for case in lut_cases() {
+        for format in [CTF, CLF] {
+            cases.push(group_case(
+                &case.label,
+                std::slice::from_ref(&case),
+                &[],
+                format,
+            ));
+        }
+    }
+    check_writes(&cases);
+}
+
+/// Groups of LUTs with matrices and ranges: the file bit depths an inverse LUT takes from the
+/// op before it, and those it hands on.
+#[test]
+fn groups_of_lut_transforms_write_as_in_the_wheel() {
+    let l = lut_cases();
+    let find = |label: &str| {
+        l.iter()
+            .find(|c| c.label == label)
+            .unwrap_or_else(|| panic!("{label}"))
+            .clone()
+    };
+    let m = |label: &str, depths: (BitDepth, BitDepth)| {
+        matrix(label, IDENTITY, [0.1, 0.2, 0.3, 0.], Forward, depths)
+    };
+    let groups: Vec<(&str, Vec<Case>)> = vec![
+        (
+            "a matrix to 12i, then an inverse 1D LUT of 10i",
+            vec![
+                m("m", (BitDepth::Uint8, BitDepth::Uint12)),
+                find("a 1D LUT, Uint10 Inverse, equal false, from 0"),
+            ],
+        ),
+        (
+            "a 1D LUT of 16i, an inverse 3D LUT of 8i, a 1D LUT of 16f",
+            vec![
+                find("a 1D LUT, Uint16 Forward, equal true, from 7"),
+                find("a 3D LUT, Uint8 Inverse"),
+                find("a 1D LUT, F16 Forward, equal false, from 7"),
+            ],
+        ),
+        (
+            "two inverse 1D LUTs of 12i and 10i, then a 3D LUT of 10i",
+            vec![
+                find("a 1D LUT, Uint12 Inverse, equal true, from 0"),
+                find("a 1D LUT, Uint10 Inverse, equal true, from 7"),
+                find("a 3D LUT, Uint10 Forward"),
+            ],
+        ),
+    ];
+    let mut cases = Vec::new();
+    for (label, children) in &groups {
+        for format in [CTF, CLF] {
+            cases.push(group_case(label, children, &[("setID", "UID", "")], format));
+        }
+    }
+    check_writes(&cases);
+}
+
+/// The processors of upstream's 1D and 3D LUT files (half domains, raw halfs, hue adjust,
+/// inverses, 10i and 12i arrays), in both directions, as CTF and CLF.
+#[test]
+fn processors_of_lut_files_write_as_in_the_wheel() {
+    let mut cases = Vec::new();
+    for src in [
+        "clf/lut1d_32f_example.clf",
+        "clf/lut1d_comp.clf",
+        "clf/lut1d_example.clf",
+        "clf/lut1d_half_domain_raw_half_set.clf",
+        "clf/lut1d_long.clf",
+        "clf/lut1d_lut3d_lut1d.clf",
+        "clf/lut3d_17x17x17_10i_12i.clf",
+        "clf/lut3d_as_matrix.clf",
+        "clf/lut3d_bizarre.clf",
+        "clf/lut3d_identity_12i_16f.clf",
+        "clf/lut3d_preview_tier_test.clf",
+        "lut1d_1024_hue_adjust_test.ctf",
+        "lut1d_32_10i_10i.ctf",
+        "lut1d_green.ctf",
+        "lut1d_halfdom.ctf",
+        "lut1d_hd_16f_16i_1chan.ctf",
+        "lut1d_hd_hue_adjust.ctf",
+        "lut1d_hue_adjust_test.ctf",
+        "lut1d_identity_test.ctf",
+        "lut1d_infinity.ctf",
+        "lut1d_inv.ctf",
+        "lut1d_inverse_gpu.ctf",
+        "lut1d_inverse_halfdom_slog_fclut.ctf",
+        "lut1d_inverse_hd_hueAdjust.ctf",
+        "lut3d_example_Inv.ctf",
+        "lut_inv_pairs.ctf",
+    ] {
+        for dir in [Forward, Inverse] {
+            for format in [CTF, CLF] {
+                cases.push(processor_case(src, dir, format));
+            }
         }
     }
     check_writes(&cases);
