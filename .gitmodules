@@ -10,3 +10,6 @@
 [submodule "upstream/expat"]
 	path = upstream/expat
 	url = https://github.com/libexpat/libexpat
+[submodule "upstream/minizip-ng"]
+	path = upstream/minizip-ng
+	url = https://github.com/zlib-ng/minizip-ng
