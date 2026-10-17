@@ -224,8 +224,10 @@ unchanged.
 - `ocio-ops` SIMD modules (`sse*.rs`, `avx*.rs`, `*_sse*.rs`, `*_avx*.rs`, `*_f16c*.rs`, `simd/`) and `cpu_info.rs`;
 - `ocio-py`;
 - `ocio-testkit/src/crt.rs` (FFI to the C runtime as a test reference).
-- `ocio/src/minizip/os_windows_ffi.rs`: one call to `CreateSymbolicLinkW` with minizip-ng's
-  flags, which `std` can't make (owner decision 2026-10-17). The `ocio` crate denies
-  `unsafe_code` (instead of forbidding it) so that this file can allow it.
+- `ocio/src/minizip/os_windows_ffi.rs`: the Windows calls minizip-ng makes that `std` can't
+  make as it makes them: `CreateSymbolicLinkW` with minizip-ng's flags, and `FindFirstFileW`,
+  `FindNextFileW`, `FindClose` and `GetLastError` with minizip-ng's directory pattern, which
+  also matches 8.3 names (owner decisions 2026-10-17). The `ocio` crate denies `unsafe_code`
+  (instead of forbidding it) so that this file can allow it.
 
 `cargo xtask guards` enforces this.

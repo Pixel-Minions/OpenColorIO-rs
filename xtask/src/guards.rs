@@ -85,8 +85,8 @@ const TOLERANCE: &[&str] = &[".abs() < ", ".abs() <= ", "f32::EPSILON", "f64::EP
 
 /// Where `unsafe` may be allowed (PLAN.md D8): SIMD modules, the Python binding, the test
 /// kit's FFI to the platform C runtime (the reference for C formatting and parsing), and the
-/// one file that calls `CreateSymbolicLinkW` as minizip-ng does (owner decision 2026-10-17:
-/// one function, named here by its file).
+/// one file that calls `CreateSymbolicLinkW` and lists directories with `FindFirstFileW` as
+/// minizip-ng does (owner decisions 2026-10-17, named here by its file).
 fn unsafe_allowed(rel: &str) -> bool {
     let file = rel.rsplit('/').next().unwrap_or(rel);
     rel.starts_with("crates/ocio-py/")

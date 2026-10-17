@@ -479,3 +479,81 @@ colorspaces:\n  - !<ColorSpace> {name: raw}\n";
         .collect();
     check(&configs);
 }
+
+/// `dir` and directories under it of up to 100 `p`s, so that the path has `target` bytes
+/// (made).
+#[cfg(windows)]
+fn path_of_length(dir: &Path, target: usize) -> PathBuf {
+    let mut sub = dir.to_path_buf();
+    let mut left = target - dir.to_str().unwrap().len();
+    while left > 0 {
+        let n = (left - 1).clamp(1, 100);
+        sub = sub.join("p".repeat(n));
+        left -= n + 1;
+    }
+    assert_eq!(sub.to_str().unwrap().len(), target);
+    std::fs::create_dir_all(&sub).unwrap();
+    sub
+}
+
+/// Directories whose paths have 318 bytes or more, where minizip-ng's pattern isn't their
+/// listing (docs/improvements.md, I-221): `<path>*` lists the parent's entries whose long or
+/// 8.3 short name starts with the directory's name, and OpenColorIO looks for each in the
+/// directory itself; a path cut to 319 bytes lists the parent's entry of the cut name.
+/// - `abcdef` (318 bytes), next to a file `abcdef.spi1d`, holding one too: archived;
+/// - `abcdef` (318 bytes), next to `abcdefx.spi1d`, which it doesn't hold: the wheel fails;
+/// - `q.spi1dzzzz` (cut to `q.spi1d`), next to `q.spi1d`, holding one too: archived;
+/// - `ab` (318 bytes), next to `a b.spi1d`, holding one too, in the system's temporary
+///   directory: on a volume that makes 8.3 names (as this machine's C: does, `ABED1A~1.SPI`,
+///   where the target's D: doesn't), the short name starts with `ab` and the long one
+///   doesn't.
+///
+/// Windows only.
+#[cfg(windows)]
+#[test]
+fn long_directory_patterns() {
+    let config = b"ocio_profile_version: 2\nroles: {default: raw}\n\
+colorspaces:\n  - !<ColorSpace> {name: raw}\n";
+    let mut configs: Vec<(String, PathBuf)> = Vec::new();
+    // The parent of the long directories has 311 bytes: 311 + 1 + 6 = 318, and the cut of
+    // 319 bytes ends after `q.spi1d`.
+    let archived = files_dir("long_patterns_archived");
+    put(&archived, "config.ocio", config, false);
+    let parent = path_of_length(&archived, 311);
+    let long = parent.join("abcdef");
+    std::fs::create_dir_all(&long).unwrap();
+    std::fs::write(parent.join("abcdef.spi1d"), lut(2)).unwrap();
+    std::fs::write(long.join("abcdef.spi1d"), lut(3)).unwrap();
+    let cut = parent.join("q.spi1dzzzz");
+    std::fs::create_dir_all(&cut).unwrap();
+    std::fs::write(parent.join("q.spi1d"), lut(4)).unwrap();
+    std::fs::write(cut.join("q.spi1d"), lut(5)).unwrap();
+    configs.push(("long patterns".to_owned(), archived.join("config.ocio")));
+
+    let failing = files_dir("long_patterns_failing");
+    put(&failing, "config.ocio", config, false);
+    let parent = path_of_length(&failing, 311);
+    std::fs::create_dir_all(parent.join("abcdef")).unwrap();
+    std::fs::write(parent.join("abcdefx.spi1d"), lut(2)).unwrap();
+    configs.push((
+        "a match the directory lacks".to_owned(),
+        failing.join("config.ocio"),
+    ));
+
+    let short = std::env::temp_dir().join(format!("ocioz_archive_short_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&short);
+    put(&short, "config.ocio", config, false);
+    let parent = path_of_length(&short, 315);
+    let long = parent.join("ab");
+    std::fs::create_dir_all(&long).unwrap();
+    std::fs::write(parent.join("a b.spi1d"), lut(2)).unwrap();
+    std::fs::write(long.join("a b.spi1d"), lut(3)).unwrap();
+    configs.push(("an 8.3 name".to_owned(), short.join("config.ocio")));
+
+    let configs: Vec<(&str, PathBuf)> = configs
+        .iter()
+        .map(|(l, p)| (l.as_str(), p.clone()))
+        .collect();
+    check(&configs);
+    let _ = std::fs::remove_dir_all(&short);
+}

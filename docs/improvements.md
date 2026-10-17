@@ -2912,6 +2912,30 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p4-baker` (`crates/ocio/src/minizip/mz_zip_rw.rs`);
   `crates/ocio/tests/ocioz_extract_oracle.rs`, `links` (Linux).
 
+### I-221. Archiving lists a directory whose path has 318 bytes or more by the wrong pattern
+
+- **Upstream:** `Config::archive` lists the config's directory and its subdirectories with
+  minizip-ng's `mz_os_open_dir` (`OCIOZArchive.cpp:150-201` @ v2.5.2; minizip-ng
+  `mz_os_win32.c:362-399` @ 4.0.10), which builds `FindFirstFileW`'s pattern in a buffer of
+  320 bytes: the path cut to 319 bytes (`strncpy`), a separator only where
+  `mz_path_append_slash` has room (a path of 317 bytes or fewer), and the `*` only where
+  `mz_path_combine` has room. A path of 318 bytes gives `<path>*`, which lists the parent's
+  entries whose long or 8.3 short name starts with the directory's own name; a longer one
+  gives the path cut to 319 bytes (a character the cut splits becomes U+FFFD), which lists
+  the parent's entry of that name. OpenColorIO then looks for each name found in the
+  directory itself: a directory of that name is listed in turn; a file with a LUT extension
+  is archived where the directory holds one, and otherwise the archive fails ("Could not
+  write LUT file <path> to in-memory archive."). The directory's own files aren't archived.
+  Which 8.3 names match depends on the volume (whether it makes them, and their form).
+- **Who notices:** applications archiving configs in deep directories, on Windows.
+- **A fix:** size the pattern's buffer from the path.
+- **Status:** matched in `p4-baker` (`crates/ocio/src/minizip/mz_os.rs`, `mz_os_list_dir`,
+  through `FindFirstFileW` in `os_windows_ffi.rs`, owner decision 2026-10-17, which makes
+  the same 8.3 matches on every volume); `crates/ocio/tests/ocioz_archive_oracle.rs`,
+  `long_directory_paths` and `long_directory_patterns` (Windows). Past MAX_PATH the port
+  gives the system the pattern's long form (`\\?\`), as the wheel's call works under a
+  long-path-aware Python.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
