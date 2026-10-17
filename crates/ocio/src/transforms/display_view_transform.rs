@@ -538,8 +538,8 @@ struct DisplayOps<'c> {
 }
 
 /// What [`build_display_ops`] builds from, through and to, found and validated; `None` when a
-/// data color space is bypassed. Out of line, so that the names, lookups and errors aren't on
-/// the stack while the ops build (docs/improvements.md, U-58).
+/// data color space is bypassed. Out of line and boxed, so that the names, lookups and errors
+/// aren't on the stack while the ops build (docs/improvements.md, U-58).
 ///
 /// Part of the port of `BuildDisplayOps` (src/OpenColorIO/transforms/
 /// DisplayViewTransform.cpp:295-427 @ v2.5.2).
@@ -547,7 +547,7 @@ struct DisplayOps<'c> {
 fn display_ops<'c>(
     config: &'c Config,
     display_view_transform: &DisplayViewTransform,
-) -> Result<Option<DisplayOps<'c>>> {
+) -> Result<Option<Box<DisplayOps<'c>>>> {
     // There are two ways of specifying a DisplayViewTransform: either with a colorspace, or with
     // a view_transform plus display_colorspace.  It is permitted to substitute a named_transform
     // for either the colorspace or the view_transform.
@@ -660,7 +660,7 @@ fn display_ops<'c>(
         looks.parse(config.display_view_looks(display, view))?;
     }
 
-    Ok(Some(DisplayOps {
+    Ok(Some(Box::new(DisplayOps {
         src_color_space,
         view_transform,
         view_named_transform,
@@ -668,7 +668,7 @@ fn display_ops<'c>(
         cs_named_transform,
         data_bypass,
         looks,
-    }))
+    })))
 }
 
 /// Appends the ops of `display_view_transform` in the direction `dir`: from its source color

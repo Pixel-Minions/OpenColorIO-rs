@@ -31,7 +31,7 @@ use crate::caching::GenericCache;
 use crate::config::Config;
 use crate::context::Context;
 use crate::fileformats::input_stream::{InputStream, OpenMode};
-use crate::transform::{put_c_str, validate_direction};
+use crate::transform::{Level, put_c_str, total_too_deep, validate_direction};
 use crate::transforms::file_format::{
     CachedFileRcPtr, FileFormat, FormatCapabilities, FormatInfo, FormatRegistry,
 };
@@ -593,7 +593,9 @@ pub fn clear_file_transform_caches() {
 /// docs/improvements.md U-76). The port refuses deeper chains with an error instead (the
 /// owner's general rule), at 256 files, U-58's limit of nested transforms (owner, 2026-10-17):
 /// the port's own stack holds that many on a 1 MiB thread at every optimization level (759
-/// files fit at opt-level 0 on Windows, about 1.4 KB a file; 1,647 at opt-level 1).
+/// files fit at opt-level 0 on Windows, about 1.4 KB a file; 1,647 at opt-level 1). The files
+/// also count in [`MAX_TOTAL_NESTING`](crate::transform::MAX_TOTAL_NESTING), with the
+/// transforms and groups before them on the stack (U-58).
 pub(crate) const MAX_FILE_NESTING: usize = 256;
 
 thread_local! {
@@ -656,6 +658,11 @@ pub(crate) fn build_file_transform_ops(
 ) -> Result<()> {
     let Some(_nesting) = FileNesting::enter() else {
         return FileNesting::too_deep();
+    };
+    // The files count in the total of BuildOps too, which a chain of transforms can come
+    // before (U-58).
+    let Some(_total) = Level::file() else {
+        return total_too_deep();
     };
     let file = match load_file_for_ops(ops, config, context, file_transform) {
         Ok(file) => file,

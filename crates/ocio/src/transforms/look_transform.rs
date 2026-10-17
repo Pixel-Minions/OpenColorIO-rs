@@ -348,6 +348,13 @@ fn build_look_token_ops(
     }
 }
 
+/// A new empty op list, boxed and built out of line, so that it takes a pointer's room in the
+/// frame of [`run_look_token`] (docs/improvements.md, U-58).
+#[inline(never)]
+fn new_op_vec() -> Box<OpVec> {
+    Box::default()
+}
+
 /// Appends the ops of the look of `token`, after the conversion from the current color space to
 /// its process space (unless `skip_color_space_conversion`), which becomes the current color
 /// space.
@@ -374,7 +381,7 @@ fn run_look_token<'c>(
         return look_not_found(config, look_name);
     };
 
-    let mut tmp_ops = OpVec::new();
+    let mut tmp_ops = new_op_vec();
     let look_ops = build_look_token_ops(&mut tmp_ops, config, context, look, look_name, token.dir);
     if look_ops.is_err() {
         return look_ops;
@@ -556,6 +563,10 @@ pub(crate) fn build_look_ops(
 /// ConstContextRcPtr &, const LookParseResult &)` (src/OpenColorIO/transforms/
 /// LookTransform.cpp:363-435 @ v2.5.2). Several options go through
 /// [`build_first_look_option`], so that this frame stays small (docs/improvements.md, U-58).
+#[expect(
+    clippy::question_mark,
+    reason = "`?` takes several results' room in the frame of an unoptimized build (U-58)"
+)]
 pub(crate) fn build_look_ops_from<'c>(
     ops: &mut OpVec,
     current_color_space: &mut Option<&'c ColorSpace>,
@@ -571,15 +582,26 @@ pub(crate) fn build_look_ops_from<'c>(
         Ok(())
     } else if options.len() == 1 {
         // As an optimization, if we only have a single look option, just push back onto the
-        // final location.
-        run_look_tokens(
-            ops,
-            current_color_space,
-            skip_color_space_conversion,
-            config,
-            context,
-            &options[0],
-        )
+        // final location. The loop of `run_look_tokens`, here so that the recursion takes one
+        // frame less (docs/improvements.md, U-58).
+        for token in &options[0] {
+            if token.name.is_empty() {
+                continue;
+            }
+
+            let result = run_look_token(
+                ops,
+                current_color_space,
+                skip_color_space_conversion,
+                config,
+                context,
+                token,
+            );
+            if result.is_err() {
+                return result;
+            }
+        }
+        Ok(())
     } else {
         build_first_look_option(
             ops,

@@ -256,26 +256,22 @@ impl FileFormat for LocalFileFormat {
 
         let file_interpolation = file_transform.interpolation();
 
-        match new_dir {
-            TransformDirection::Forward => {
-                for op_data in op_data_vec {
-                    // Note: HandleLUT does nothing if opData is not a LUT.
-                    let op_data = lut_with_interpolation(op_data, file_interpolation);
-                    let op = build_op(ops, config, context, &op_data, new_dir);
-                    if op.is_err() {
-                        return op;
-                    }
-                }
+        // Forward in order, inverse in reverse order: one loop, so that the frame stays small
+        // (docs/improvements.md, U-76).
+        let count = op_data_vec.len();
+        let mut i = 0;
+        while i < count {
+            let index = match new_dir {
+                TransformDirection::Forward => i,
+                TransformDirection::Inverse => count - 1 - i,
+            };
+            // Note: HandleLUT does nothing if opData is not a LUT.
+            let op_data = lut_with_interpolation(&op_data_vec[index], file_interpolation);
+            let op = build_op(ops, config, context, &op_data, new_dir);
+            if op.is_err() {
+                return op;
             }
-            TransformDirection::Inverse => {
-                for op_data in op_data_vec.iter().rev() {
-                    let op_data = lut_with_interpolation(op_data, file_interpolation);
-                    let op = build_op(ops, config, context, &op_data, new_dir);
-                    if op.is_err() {
-                        return op;
-                    }
-                }
-            }
+            i += 1;
         }
         Ok(())
     }

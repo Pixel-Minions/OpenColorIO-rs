@@ -2740,6 +2740,27 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `crates/ocio/src/fileformats/file_format_ctf_write_oracle_tests.rs`, check it with the
   wheel.
 
+### I-204. The CLF/CTF bake fails on a shaper space whose range makes an invalid Range
+
+- **Upstream:** with a shaper space, the CLF/CTF bake's 1D LUT (no crosstalk) and its shaper
+  of a set size (crosstalk) come after a Range from the shaper space's range
+  (`FileFormatCTF.cpp:1445, 1498, 1517-1532` @ v2.5.2). The range is the smallest start and
+  the largest end of the three channels (`GetSrcRange`, `BakingUtils.cpp:53-73`), through
+  `std::min` and `std::max`, which pass a NaN in red on and drop one in green or blue. A
+  range that decreases (an inverted shaper space), whose ends are too close, or that starts
+  with a NaN makes a Range that the op refuses (`RangeOpData.cpp:236, 471`), and the bake
+  fails: "Error baking Academy/ASC Common LUT Format:Range maximum input value is less than
+  minimum input value", "...Range maxInValue is too close to minInValue", "...In and out
+  minimum limits must be both set or both missing in Range." (wheel probes, 2026-10-17). The
+  half-domain shaper, without a shaper size, bakes those spaces; and a NaN in green or blue
+  is ignored.
+- **Who notices:** bakes with a shaper space that inverts, narrows to almost nothing or gives
+  NaN.
+- **A fix:** order the range's ends, refuse an unusable shaper space with a message that names
+  it, and take a NaN in any channel alike.
+- **Status:** matched in `p4-ctf-bake` (4.8d, `crates/ocio/src/fileformats/file_format_ctf.rs`);
+  `invalid_shaper_ranges_as_in_the_wheel` (`crates/ocio/tests/ctf_bake_oracle.rs`).
+
 ### I-206. A LUT baked to a file has Windows line endings on Windows
 
 - **Upstream:** the Python binding's `Baker.bake(fileName)` writes through a text-mode
@@ -3575,40 +3596,85 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   254 look or display view transforms. Between that and the wheel's crash the port refuses
   what the wheel builds.
 
-  The limit must also hold on the port's own stack, at every optimization level, on a thread
+  Groups multiply that depth, though: 255 color spaces, each a color space transform inside 5
+  nested groups, needed 1,156 KiB of the port's stack at opt-level 1 (the verifier,
+  2026-10-17), and 20 groups 3.7 MiB. The wheel's crash depths, counting each group as a level
+  (Windows, Python's main thread, one process per chain, 2026-10-17):
+
+  | Groups around each link | Longest chain the wheel builds | Levels, groups included |
+  |---|---|---|
+  | 0 | 1,363 | 1,363 |
+  | 1 | 794 | 1,588 |
+  | 2 | 559 | 1,677 |
+  | 3 | 432 | 1,728 |
+  | 5 | 297 | 1,782 |
+  | 10 | 166 | 1,826 |
+  | 20 | 88 | 1,848 |
+  | 50 | 36 | 1,836 |
+  | 100 | 18 | 1,818 |
+  | 200 | 9 | 1,809 |
+
+  So `BuildOps` and `CollectContextVariables` also refuse to nest more than 640 levels in all
+  (`MAX_TOTAL_NESTING`), counting groups and, for `BuildOps`, the files of a chain of CTF
+  references (U-76), with "The transforms nest more than 640 levels deep, counting groups and
+  CTF references: upstream's stack overflows." (coordinator, 2026-10-17, after the verifier's
+  finding): about half the shallowest of those depths, 1,363, and above the 592 levels of the
+  processor of the deepest group the loader reads (U-60). The 256 transforms and the 256 files
+  still count apart too. A chain of color spaces each inside 2 groups then reaches 213 links
+  where the wheel builds 559, inside 5 groups 106 where it builds 297.
+
+  The limits must also hold on the port's own stack, at every optimization level, on a thread
   of 1 MiB (the main thread's on Windows). At opt-level 0 the first port didn't: an
   unoptimized frame keeps a slot for every temporary (each `?` holds several copies of the
   56-byte result), and a display view transform took about 11.7 KB a level, so only 86
   levels fit. The functions the build recurses through now keep their frames small (their
-  lookups, errors and copies out of line, in `#[inline(never)]` and `#[cold]` helpers, and
-  their recursive calls' results returned as they are, without `?`; the same for a chain of
-  CTF references, U-76). What the longest chain of each kind takes, both ways (a binary
-  search of a thread's stack size, to 4 KiB, Windows, 2026-10-17):
+  lookups, errors and copies out of line, in `#[inline(never)]` and `#[cold]` helpers, the
+  transforms that name nothing in their own function, and the recursive calls' results
+  returned as they are, without `?`; the same for a chain of CTF references, U-76). What the
+  longest chain of each kind takes, both ways, alone and with its first link a chain of CTF
+  references (Windows, 2026-10-17; Windows rounds a thread's stack to 64 KiB, so each figure is
+  the smallest such stack that holds the chain, plus 1 KiB):
 
-  | Each link | opt-level 0 | opt-level 1, the test profile |
-  |---|---|---|
-  | `ColorSpaceTransform` (255) | 514 KiB | 259 KiB |
-  | `LookTransform` with a look (254) | 641 KiB | 514 KiB |
-  | `GroupTransform` holding a `ColorSpaceTransform` (255) | 705 KiB | 450 KiB |
-  | `DisplayViewTransform`, a view with a look (254) | 705 KiB | 577 KiB |
-  | `DisplayViewTransform`, a view transform and a look (254) | 705 KiB | 577 KiB |
+  | Each link | n | opt-level 0 | with files | opt-level 1 | with files |
+  |---|---|---|---|---|---|
+  | `ColorSpaceTransform` | 255 | 513 KiB | 641 KiB | 257 KiB | 321 KiB |
+  | `LookTransform` with a look | 254 | 641 KiB | 897 KiB | 385 KiB | 513 KiB |
+  | `GroupTransform` holding a `ColorSpaceTransform` | 255 | 705 KiB | 705 KiB | 321 KiB | 321 KiB |
+  | `DisplayViewTransform`, a view with a look | 254 | 769 KiB | 897 KiB | 392 KiB | 577 KiB |
+  | `DisplayViewTransform`, a view transform and a look | 254 | 769 KiB | 897 KiB | 400 KiB | 577 KiB |
+  | `ColorSpaceTransform` in 1 group | 255 | 705 KiB | 705 KiB | 321 KiB | 321 KiB |
+  | `ColorSpaceTransform` in 2 groups | 213 | 705 KiB | 641 KiB | 321 KiB | 321 KiB |
+  | `ColorSpaceTransform` in 5 groups | 106 | 577 KiB | 641 KiB | 257 KiB | 257 KiB |
+  | `ColorSpaceTransform` in 20 groups | 30 | 449 KiB | 577 KiB | 193 KiB | 257 KiB |
+  | `ColorSpaceTransform` in 200 groups | 3 | 513 KiB | 513 KiB | 193 KiB | 193 KiB |
+  | `LookTransform` in 2 groups | 212 | 769 KiB | 769 KiB | 449 KiB | 385 KiB |
+  | Group of a `ColorSpaceTransform` in 3 groups | 127 | 577 KiB | 641 KiB | 257 KiB | 321 KiB |
+  | `DisplayViewTransform` in 1 group | 254 | 897 KiB | 897 KiB | 513 KiB | 513 KiB |
+  | `DisplayViewTransform` in 3 groups | 159 | 769 KiB | 769 KiB | 385 KiB | 385 KiB |
+  | `DisplayViewTransform` (view transform) in 10 groups | 58 | 513 KiB | 641 KiB | 257 KiB | 321 KiB |
 
-  The deepest stack of both limits, 255 color space transforms whose last link starts a chain
-  of 256 CTF files, takes 600 to 650 KiB at opt-level 0.
+  With files, the chains are as long as the total allows beside the 256 files (192 links of a
+  color space transform in 1 group, for example). On Rocky Linux 9 at opt-level 0, where a
+  thread's stack isn't rounded, the heaviest take 847 KiB (display view transforms then files)
+  and 859 KiB (display view transforms in 1 group).
 - **Status:** done in `p3-builders` (3.2d follow-up; `crates/ocio/src/transform.rs`, `Nesting`;
   `build_ops`, and `collect_context_variables` in `crates/ocio/src/context_variable_utils.rs`).
   The small frames in `group-5` (`transform.rs`, `transforms/color_space_transform.rs`,
   `look_transform.rs`, `display_view_transform.rs`, `group_transform.rs`,
-  `file_transform.rs`, `fileformats/file_format_ctf.rs`). Tests
-  (`crates/ocio/tests/config_processors_oracle.rs`): a color space that names itself and
+  `file_transform.rs`, `fileformats/file_format_ctf.rs`); the total, `MAX_TOTAL_NESTING`, in
+  `p4-ctf-bake` (`transform.rs`, `Level` and `Nesting`; the files' level in `file_transform.rs`).
+  Tests (`crates/ocio/tests/config_processors_oracle.rs`): a color space that names itself and
   one that reaches itself through a look are refused in both directions where the wheel
-  crashes; the longest chain of each kind the port accepts is the wheel's processor (on a
-  test thread's stack, debug and release), and one link more the wheel still builds while the
-  port refuses; `the_deepest_chains_build_on_a_1_mib_thread` builds the longest chain of each
-  kind both ways on a 1 MiB thread, and
-  `a_chain_of_color_spaces_then_of_references_builds_on_a_1_mib_thread` the deepest stack of
-  both limits, whose processor is the wheel's. Both pass at opt-level 0 too (checked by hand,
-  `CARGO_PROFILE_DEV_OPT_LEVEL=0`, 2026-10-17); no CI job builds at opt-level 0.
+  crashes; the longest chain of each kind the port accepts (groups around the links included)
+  is the wheel's processor (on a test thread's stack, debug and release), and one link more
+  the wheel still builds while the port refuses; `groups_count_in_the_total_nesting` (the
+  verifier's 5 groups); `the_deepest_chains_build_on_a_1_mib_thread` and
+  `the_deepest_chains_of_transforms_then_of_references_build_on_a_1_mib_thread` build the
+  longest chain of each kind of the table both ways on a 1 MiB thread, and
+  `a_chain_of_color_spaces_then_of_references_builds_on_a_1_mib_thread` checks that mixed
+  chain's processor with the wheel. A nightly job of `.github/workflows/sde.yml` runs them,
+  and `chains_of_references_stop_at_the_limit` (U-76), at opt-level 0 on Windows and Rocky
+  Linux 9.
 
 ### U-60. GroupTransforms nested deep enough to overflow the wheel's stack
 
@@ -3773,7 +3839,9 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   limits count apart: U-58's 256 levels of nested transforms can only come before a chain of
   references on the stack, never between its files. That mixed chain (U-58's longest chain of
   color spaces, the last one's transform a file transform starting a chain of 256 files)
-  builds on a 1 MiB thread at opt-level 0 in 600 to 650 KiB (U-58).
+  builds on a 1 MiB thread at opt-level 0 in 641 KiB (U-58). The files also count in U-58's
+  total of 640 levels (`MAX_TOTAL_NESTING`, 2026-10-17), with the transforms and the groups
+  before them: one budget bounds every mix (U-58's table).
 - **Status:** done in `p4-ctf-read-3` (`crates/ocio/src/transforms/file_transform.rs`,
   `FileNesting`, in `build_file_transform_ops`). Tests: `chains_of_references_stop_at_the_limit`
   (`file_transform_tests.rs`) builds a chain of 256 files on a 1 MiB thread, in debug and

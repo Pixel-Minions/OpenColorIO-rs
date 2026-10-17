@@ -469,65 +469,155 @@ impl Transform {
 /// The deepest nesting of transforms that [`build_ops`] and
 /// [`collect_context_variables`](crate::context_variable_utils::collect_context_variables)
 /// follow: a color space, look, view transform or named transform whose transform refers back
-/// to it nests without end. Group transforms don't count: they name nothing, and the loader
-/// refuses groups nested more than 590 deep (docs/improvements.md, U-60).
+/// to it nests without end. Group transforms don't count here: they name nothing, and the
+/// loader refuses groups nested more than 590 deep (docs/improvements.md, U-60); they count in
+/// [`MAX_TOTAL_NESTING`].
 ///
 /// Upstream has no limit: it recurses until the stack overflows, which ends the process (the
 /// wheel at 573 nested display view transforms on Windows, docs/improvements.md U-58). The port
 /// refuses deeper nesting with an error instead (the owner's general rule), about half the
 /// shallowest depth at which the wheel crashes. The functions [`build_ops`] recurses through
 /// keep their frames small, so that the longest chains it accepts build on a 1 MiB thread at
-/// every optimization level (in at most 705 KiB at opt-level 0 on Windows, U-58).
+/// every optimization level (U-58).
 pub(crate) const MAX_TRANSFORM_NESTING: usize = 256;
 
+/// The deepest nesting of everything [`build_ops`] and
+/// [`collect_context_variables`](crate::context_variable_utils::collect_context_variables)
+/// recurse through, counting group transforms and (for [`build_ops`]) the files of a chain of
+/// CTF references too: within [`MAX_TRANSFORM_NESTING`] transforms, groups multiply the depth
+/// of a chain, and a chain of transforms can end in a chain of files.
+///
+/// Upstream has no limit: the wheel's stack overflows on Windows at 1,363 nested color space
+/// transforms, and at 1,588 to 1,848 levels of them counting the groups that hold each one
+/// (docs/improvements.md, U-58). The port refuses deeper nesting with an error, at about half
+/// the shallowest of those depths, above the 591 levels of the deepest group the loader reads
+/// (U-60).
+pub(crate) const MAX_TOTAL_NESTING: usize = 640;
+
 thread_local! {
-    /// How deep [`build_ops`] is nested on this thread.
+    /// How many transforms other than groups [`build_ops`] nests on this thread.
     static BUILD_NESTING: Cell<usize> = const { Cell::new(0) };
-    /// How deep `collect_context_variables` is nested on this thread.
+    /// How many transforms other than groups `collect_context_variables` nests on this thread.
     static COLLECT_NESTING: Cell<usize> = const { Cell::new(0) };
+    /// How many levels of [`build_ops`] (groups included) and of CTF references nest on this
+    /// thread.
+    static BUILD_TOTAL: Cell<usize> = const { Cell::new(0) };
+    /// How many levels of `collect_context_variables` (groups included) nest on this thread.
+    static COLLECT_TOTAL: Cell<usize> = const { Cell::new(0) };
 }
 
-/// One level of nesting of [`build_ops`] or `collect_context_variables`, given back when it
-/// is dropped.
-pub(crate) struct Nesting(&'static LocalKey<Cell<usize>>);
+/// One level of a nesting counter, given back when it is dropped.
+pub(crate) struct Level(&'static LocalKey<Cell<usize>>);
 
-impl Nesting {
-    /// One more level of `counter`; `None` past [`MAX_TRANSFORM_NESTING`], whose error is
-    /// [`too_deep`](Self::too_deep). An `Option`, not a `Result`, so that the frames of the
-    /// recursion don't hold an error's room (docs/improvements.md, U-58).
-    fn enter(counter: &'static LocalKey<Cell<usize>>) -> Option<Nesting> {
+impl Level {
+    /// One more level of `counter`; `None` past `limit`.
+    fn enter(counter: &'static LocalKey<Cell<usize>>, limit: usize) -> Option<Level> {
         let depth = counter.get() + 1;
-        if depth > MAX_TRANSFORM_NESTING {
+        if depth > limit {
             return None;
         }
         counter.set(depth);
-        Some(Nesting(counter))
+        Some(Level(counter))
     }
 
-    /// The error of a level past [`MAX_TRANSFORM_NESTING`].
-    #[cold]
-    #[inline(never)]
-    pub(crate) fn too_deep<T>() -> Result<T> {
-        Err(Exception::new(format!(
-            "The transforms nest more than {MAX_TRANSFORM_NESTING} levels deep: a color space, \
-             look, view transform or named transform may refer to itself."
-        )))
-    }
-
-    /// One more level of [`build_ops`]; `None` past [`MAX_TRANSFORM_NESTING`].
-    pub(crate) fn build() -> Option<Nesting> {
-        Nesting::enter(&BUILD_NESTING)
-    }
-
-    /// One more level of `collect_context_variables`; `None` past [`MAX_TRANSFORM_NESTING`].
-    pub(crate) fn collect() -> Option<Nesting> {
-        Nesting::enter(&COLLECT_NESTING)
+    /// One more level of [`MAX_TOTAL_NESTING`]'s count of [`build_ops`], for a file of a chain
+    /// of CTF references; `None` past it, whose error is [`total_too_deep`].
+    pub(crate) fn file() -> Option<Level> {
+        Level::enter(&BUILD_TOTAL, MAX_TOTAL_NESTING)
     }
 }
 
-impl Drop for Nesting {
+impl Drop for Level {
     fn drop(&mut self) {
         self.0.set(self.0.get() - 1);
+    }
+}
+
+/// The limit a level passed.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum TooDeep {
+    /// [`MAX_TRANSFORM_NESTING`].
+    Transforms,
+    /// [`MAX_TOTAL_NESTING`].
+    Total,
+}
+
+impl TooDeep {
+    /// The error of a level past the limit.
+    #[cold]
+    #[inline(never)]
+    pub(crate) fn error<T>(self) -> Result<T> {
+        match self {
+            TooDeep::Transforms => Err(Exception::new(format!(
+                "The transforms nest more than {MAX_TRANSFORM_NESTING} levels deep: a color \
+                 space, look, view transform or named transform may refer to itself."
+            ))),
+            TooDeep::Total => total_too_deep(),
+        }
+    }
+}
+
+/// The error of a level past [`MAX_TOTAL_NESTING`].
+#[cold]
+#[inline(never)]
+pub(crate) fn total_too_deep<T>() -> Result<T> {
+    Err(Exception::new(format!(
+        "The transforms nest more than {MAX_TOTAL_NESTING} levels deep, counting groups and CTF \
+         references: upstream's stack overflows."
+    )))
+}
+
+/// One level of nesting of [`build_ops`] or `collect_context_variables`: of the transforms
+/// other than groups, and of the total, given back when it is dropped.
+pub(crate) struct Nesting {
+    /// The level of [`MAX_TRANSFORM_NESTING`], but for a group.
+    _transform: Option<Level>,
+    /// The level of [`MAX_TOTAL_NESTING`].
+    _total: Level,
+}
+
+impl Nesting {
+    /// One more level of `transforms` (unless `group`) and of `total`; the limit it passes,
+    /// [`MAX_TRANSFORM_NESTING`] first. Not a `Result` of an error, so that the frames of the
+    /// recursion don't hold an error's room (docs/improvements.md, U-58).
+    fn enter(
+        transforms: &'static LocalKey<Cell<usize>>,
+        total: &'static LocalKey<Cell<usize>>,
+        group: bool,
+    ) -> std::result::Result<Nesting, TooDeep> {
+        let transform = if group {
+            None
+        } else {
+            match Level::enter(transforms, MAX_TRANSFORM_NESTING) {
+                Some(level) => Some(level),
+                None => return Err(TooDeep::Transforms),
+            }
+        };
+        match Level::enter(total, MAX_TOTAL_NESTING) {
+            Some(total) => Ok(Nesting {
+                _transform: transform,
+                _total: total,
+            }),
+            None => Err(TooDeep::Total),
+        }
+    }
+
+    /// One more level of [`build_ops`], of `transform`.
+    pub(crate) fn build(transform: &Transform) -> std::result::Result<Nesting, TooDeep> {
+        Nesting::enter(
+            &BUILD_NESTING,
+            &BUILD_TOTAL,
+            matches!(transform, Transform::Group(_)),
+        )
+    }
+
+    /// One more level of `collect_context_variables`, of `transform`.
+    pub(crate) fn collect(transform: &Transform) -> std::result::Result<Nesting, TooDeep> {
+        Nesting::enter(
+            &COLLECT_NESTING,
+            &COLLECT_TOTAL,
+            matches!(transform, Transform::Group(_)),
+        )
     }
 }
 
@@ -557,49 +647,68 @@ pub(crate) fn build_ops(
     dir: TransformDirection,
 ) -> Result<()> {
     // A group names nothing, so it can't refer to itself, and the loader bounds its nesting
-    // (U-60): only the transforms inside it count.
-    let _nesting = match transform {
-        Transform::Group(_) => None,
-        _ => match Nesting::build() {
-            Some(nesting) => Some(nesting),
-            None => return Nesting::too_deep(),
-        },
+    // (U-60): it counts only in the total, which groups multiply.
+    let _nesting = match Nesting::build(transform) {
+        Ok(nesting) => nesting,
+        Err(too_deep) => return too_deep.error(),
     };
     match transform {
-        Transform::Allocation(allocation_transform) => {
-            build_allocation_op(ops, allocation_transform, dir)
-        }
-        Transform::Builtin(builtin_transform) => build_builtin_ops(ops, builtin_transform, dir),
-        Transform::Cdl(cdl_transform) => build_cdl_op(ops, config, cdl_transform, dir),
         Transform::ColorSpace(color_space_transform) => {
             build_color_space_ops(ops, config, context, color_space_transform, dir)
         }
         Transform::DisplayView(display_view_transform) => {
             build_display_ops(ops, config, context, display_view_transform, dir)
         }
+        Transform::File(file_transform) => {
+            build_file_transform_ops(ops, config, context, file_transform, dir)
+        }
+        Transform::Group(group_transform) => {
+            build_group_ops(ops, config, context, group_transform, dir)
+        }
+        Transform::Look(look_transform) => {
+            build_look_ops(ops, config, context, look_transform, dir)
+        }
+        _ => build_leaf_ops(ops, config, transform, dir),
+    }
+}
+
+/// Appends the ops of `transform`, one that names nothing, in the direction `dir`: the arms of
+/// [`build_ops`] that don't recurse, out of line so that its frame stays small
+/// (docs/improvements.md, U-58).
+///
+/// Part of the port of `BuildOps` (src/OpenColorIO/Transform.cpp:42-175 @ v2.5.2).
+#[inline(never)]
+fn build_leaf_ops(
+    ops: &mut OpVec,
+    config: &Config,
+    transform: &Transform,
+    dir: TransformDirection,
+) -> Result<()> {
+    match transform {
+        Transform::Allocation(allocation_transform) => {
+            build_allocation_op(ops, allocation_transform, dir)
+        }
+        Transform::Builtin(builtin_transform) => build_builtin_ops(ops, builtin_transform, dir),
+        Transform::Cdl(cdl_transform) => build_cdl_op(ops, config, cdl_transform, dir),
         Transform::Exponent(exponent_transform) => {
             build_exponent_op(ops, config, exponent_transform, dir)
         }
         Transform::ExponentWithLinear(exponent_transform) => {
             build_exponent_with_linear_op(ops, exponent_transform, dir)
         }
-        Transform::File(file_transform) => {
-            build_file_transform_ops(ops, config, context, file_transform, dir)
-        }
         Transform::FixedFunction(ff_transform) => build_fixed_function_op(ops, ff_transform, dir),
-        Transform::Group(group_transform) => {
-            build_group_ops(ops, config, context, group_transform, dir)
-        }
         Transform::LogAffine(log_transform) => build_log_op(ops, log_transform.data(), dir),
         Transform::LogCamera(log_transform) => build_log_op(ops, log_transform.data(), dir),
         Transform::Log(log_transform) => build_log_op(ops, log_transform.data(), dir),
-        Transform::Look(look_transform) => {
-            build_look_ops(ops, config, context, look_transform, dir)
-        }
         Transform::Lut1D(lut_transform) => build_lut1d_op(ops, lut_transform, dir),
         Transform::Lut3D(lut_transform) => build_lut3d_op(ops, lut_transform, dir),
         Transform::Matrix(matrix_transform) => build_matrix_op(ops, matrix_transform, dir),
         Transform::Range(range_transform) => build_range_op(ops, range_transform, dir),
+        Transform::ColorSpace(_)
+        | Transform::DisplayView(_)
+        | Transform::File(_)
+        | Transform::Group(_)
+        | Transform::Look(_) => unreachable!("build_ops builds the transforms that name others"),
     }
 }
 

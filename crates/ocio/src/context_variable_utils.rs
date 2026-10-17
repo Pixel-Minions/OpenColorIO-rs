@@ -171,13 +171,10 @@ pub(crate) fn collect_context_variables(
     used_context_vars: &mut Context,
 ) -> Result<bool> {
     // A group names nothing, so it can't refer to itself, and the loader bounds its nesting
-    // (U-60): only the transforms inside it count.
-    let _nesting = match transform {
-        Transform::Group(_) => None,
-        _ => match Nesting::collect() {
-            Some(nesting) => Some(nesting),
-            None => return Nesting::too_deep(),
-        },
+    // (U-60): it counts only in the total, which groups multiply.
+    let _nesting = match Nesting::collect(transform) {
+        Ok(nesting) => nesting,
+        Err(too_deep) => return too_deep.error(),
     };
     match transform {
         Transform::Group(tr) => {

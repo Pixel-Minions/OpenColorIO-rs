@@ -119,6 +119,26 @@ colorspaces:
   from_reference: !<MatrixTransform> {matrix: [0.8, 0, 0, 0, 0, 0.8, 0, 0, 0, 0, 0.8, 0, 0, 0, 0, 1], offset: [0.1, 0.1, 0.1, 0]}
 
 - !<ColorSpace>
+  name: inverted
+  isdata: false
+  to_reference: !<MatrixTransform> {matrix: [-1, 0, 0, 0, 0, -1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1]}
+
+- !<ColorSpace>
+  name: tiny
+  isdata: false
+  to_reference: !<MatrixTransform> {matrix: [1e-9, 0, 0, 0, 0, 1e-9, 0, 0, 0, 0, 1e-9, 0, 0, 0, 0, 1]}
+
+- !<ColorSpace>
+  name: nan_red
+  isdata: false
+  to_reference: !<MatrixTransform> {offset: [.nan, 0, 0, 0]}
+
+- !<ColorSpace>
+  name: nan_blue
+  isdata: false
+  to_reference: !<MatrixTransform> {offset: [0, 0, .nan, 0]}
+
+- !<ColorSpace>
   name: negative
   isdata: false
   from_reference: !<MatrixTransform> {matrix: [-1, 0, 0, 0, 0, -1000, 0, 0, 0, 0, 0.5, 0, 0, 0, 0, 1], offset: [-0.5, 0.25, -1e-7, 0]}
@@ -383,6 +403,104 @@ fn limits() -> Vec<BakeCase> {
         ));
     }
     cases
+}
+
+/// Shaper spaces whose range makes an invalid Range: decreasing, too narrow, a NaN
+/// at its start (red's); and a NaN in a later channel, which the range ignores. The 1D LUT and
+/// the shaper of a size fail on the Range, the half-domain shaper bakes them
+/// (docs/improvements.md, I-204). An invalid Range is refused before a LUT too large: its op
+/// comes first.
+fn invalid_shaper_ranges() -> Vec<BakeCase> {
+    let mut cases = Vec::new();
+    for format in [CLF, CTF] {
+        for shaper in ["inverted", "tiny", "nan_red", "nan_blue"] {
+            cases.push(case(
+                &format!("{format} 1D to log2, shaper {shaper}"),
+                &[
+                    InputSpace("lin"),
+                    TargetSpace("log2"),
+                    ShaperSpace(shaper),
+                    CubeSize(5),
+                    Format(format),
+                ],
+            ));
+            cases.push(case(
+                &format!("{format} 1D+3D to sat, shaper {shaper} of 5"),
+                &[
+                    InputSpace("lin"),
+                    TargetSpace("sat"),
+                    ShaperSpace(shaper),
+                    ShaperSize(5),
+                    CubeSize(2),
+                    Format(format),
+                ],
+            ));
+            cases.push(case(
+                &format!("{format} 1D+3D to sat, half-domain shaper {shaper}"),
+                &[
+                    InputSpace("lin"),
+                    TargetSpace("sat"),
+                    ShaperSpace(shaper),
+                    CubeSize(2),
+                    Format(format),
+                ],
+            ));
+        }
+        cases.push(case(
+            &format!("{format} 1D of 1048577, shaper inverted"),
+            &[
+                InputSpace("lin"),
+                TargetSpace("log2"),
+                ShaperSpace("inverted"),
+                CubeSize(1_048_577),
+                Format(format),
+            ],
+        ));
+        cases.push(case(
+            &format!("{format} 3D of 130, shaper inverted of 3"),
+            &[
+                InputSpace("lin"),
+                TargetSpace("sat"),
+                ShaperSpace("inverted"),
+                ShaperSize(3),
+                CubeSize(130),
+                Format(format),
+            ],
+        ));
+    }
+    cases
+}
+
+/// Shapers of a size whose range is 0 to 1: the identity LUT of that size, without a Range,
+/// where the values of a scale from 0 to 1 would differ in their last bits.
+fn identity_shapers() -> Vec<BakeCase> {
+    let mut cases = Vec::new();
+    for format in [CLF, CTF] {
+        for size in [1000, 4096] {
+            cases.push(case(
+                &format!("{format} 1D+3D to sat, shaper lin of {size}"),
+                &[
+                    InputSpace("lin"),
+                    TargetSpace("sat"),
+                    ShaperSpace("lin"),
+                    ShaperSize(size),
+                    CubeSize(2),
+                    Format(format),
+                ],
+            ));
+        }
+    }
+    cases
+}
+
+#[test]
+fn invalid_shaper_ranges_as_in_the_wheel() {
+    check_bakes(&invalid_shaper_ranges());
+}
+
+#[test]
+fn identity_shapers_as_in_the_wheel() {
+    check_bakes(&identity_shapers());
 }
 
 #[test]
