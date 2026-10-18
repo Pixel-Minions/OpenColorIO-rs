@@ -593,8 +593,16 @@ fn each_script_has_a_directory_of_its_own() {
                 "args": {"scripts": [
                     {"steps": [
                         read("in.bin"),
-                        call(on(0, "tofile"), json!([s("in.bin")])),
+                        {"eval": array},
+                        call(on(1, "tofile"), json!([s("in.bin")])),
+                        read("in.bin"),
                         call(name("numpy.save"), json!([s("leak.npy"), array])),
+                    ]},
+                    // Through the absolute path of with_files' own directory.
+                    {"steps": [
+                        call(name("str"), json!([{"bytes": hex(b"$FILES/in.bin")}, s("utf-8")])),
+                        {"eval": array},
+                        call(on(1, "tofile"), json!([{"ref": 0}])),
                     ]},
                     {"steps": [read("in.bin"), call(name("numpy.load"), json!([s("leak.npy")]))]},
                 ]},
@@ -603,16 +611,68 @@ fn each_script_has_a_directory_of_its_own() {
         )
         .result;
     let scripts = files["scripts"].as_array().unwrap();
-    for (script, step) in [(0, 0), (1, 0)] {
-        assert_eq!(
-            scripts[script]["steps"][step]["value"]["array"]["bytes"], "010203",
-            "{files}"
-        );
-    }
+    // The first script read the input as given, then what it wrote over it.
+    let bytes_of = |script: usize, step: usize| {
+        scripts[script]["steps"][step]["value"]["array"]["bytes"].clone()
+    };
+    assert_eq!(bytes_of(0, 0), "010203", "{files}");
+    assert_eq!(bytes_of(0, 3), "09", "{files}");
+    assert!(scripts[1]["steps"][2].get("value").is_some(), "{files}");
+    // The last script reads the input as the request gave it.
+    assert_eq!(bytes_of(2, 0), "010203", "{files}");
     assert_eq!(
-        scripts[1]["steps"][1]["raised"]["type"], "builtins.FileNotFoundError",
+        scripts[2]["steps"][1]["raised"]["type"], "builtins.FileNotFoundError",
         "{files}"
     );
+}
+
+/// Under with_files, the paths a script's report holds read "$FILES", whichever directory the
+/// script ran in: a config's working directory, in its value and its repr, and with "/" for
+/// "\", the path an ExceptionMissingFile names, and with_files' own directory in a repr, the
+/// same on every run.
+#[test]
+fn paths_under_with_files_read_files() {
+    let config = "ocio_profile_version: 2\nroles: {default: raw}\n\
+                  displays: {d: [!<View> {name: v, colorspace: raw}]}\n\
+                  colorspaces:\n  - !<ColorSpace> {name: raw}\n";
+    let report = Oracle::get()
+        .call(
+            "with_files",
+            json!({
+                "files": {"c.ocio": config},
+                "command": "py_eval",
+                "args": {"scripts": [{"steps": [
+                    call(name("OCIO.Config.CreateFromFile"), json!([s("c.ocio")])),
+                    call(on(0, "getWorkingDir"), json!([])),
+                    call(name("OCIO.FileTransform"), json!([s("missing.spi1d")])),
+                    call(on(0, "getProcessor"), json!([{"ref": 2}])),
+                    // The working directory with "/" for "\" (unchanged on Linux).
+                    call(name("str.replace"), json!([{"ref": 1}, s("\\"), s("/")])),
+                    // with_files' own directory, whose repr doubles its backslashes.
+                    call(name("str"), json!([{"bytes": hex(b"$FILES/c.ocio")}, s("utf-8")])),
+                ]}]},
+            }),
+            &[],
+        )
+        .result;
+    let steps = &report["scripts"][0]["steps"];
+    let text = |v: &Value| String::from_utf8(bytes(v)).unwrap();
+    assert_eq!(text(&steps[1]["value"]["str"]), "$FILES", "{report}");
+    assert_eq!(text(&steps[1]["value"]["repr"]), "'$FILES'", "{report}");
+    let message = text(&steps[3]["raised"]["message"]);
+    assert!(message.contains("'$FILES"), "{message}");
+    assert_eq!(
+        steps[3]["raised"]["type"],
+        "PyOpenColorIO.PyOpenColorIO.ExceptionMissingFile"
+    );
+    let all = report.to_string();
+    assert_eq!(text(&steps[4]["value"]["str"]), "$FILES", "{report}");
+    assert_eq!(
+        text(&steps[5]["value"]["repr"]),
+        "'$FILES/c.ocio'",
+        "{report}"
+    );
+    assert!(!all.contains("ocio-py-eval-"), "{all}");
 }
 
 /// The names a script reaches: exactly these modules and builtins (with every exception class

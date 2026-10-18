@@ -13,6 +13,7 @@ two reports compare step by step. Like every oracle command, it reports what the
 and never computes expected values.
 """
 
+import contextlib
 import json
 import os
 import shutil
@@ -22,6 +23,7 @@ import tempfile
 
 from .commands import command
 from .config_api import RequestError
+from .files_api import _restore
 
 _STEPS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "py_eval_steps.py")
 _ORACLE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -72,18 +74,44 @@ def py_eval(args, blobs):
     changes in its process reaches the next one, with the environment of environment(), in
     a new directory of its own, removed afterwards. That directory is empty; or, when the
     oracle runs elsewhere than its own directory (with_files makes the directory of its files
-    the working directory), it holds a copy of that directory's files, so that each script
-    reaches them by relative paths, as given, whatever the scripts before it wrote. (A path
-    with_files writes in for "$FILES" names its own directory, which the scripts share.)
+    the working directory), it holds a copy of that directory's files as they were when the
+    request began (copied once, before the first script), so that each script reaches them
+    by relative paths, as given, whatever the scripts before it wrote, even through the
+    absolute "$FILES" path, which names with_files' own directory. Under with_files, each
+    script's own directory reads "$FILES" in its report, as with_files' does, in every
+    spelling a path takes there (system separators, "/" and, in a repr, doubled
+    backslashes): paths come back the same on every run.
     A request the interpreter can't read is refused.
     """
     if set(args) != {"scripts"} or not isinstance(args["scripts"], list):
         raise RequestError(f"py_eval: expects {{\"scripts\": [...]}}, got {sorted(args)}")
     files = None if os.path.samefile(os.getcwd(), _ORACLE_DIR) else os.getcwd()
-    reports = []
-    for script in args["scripts"]:
-        with tempfile.TemporaryDirectory(prefix="ocio-py-eval-") as cwd:
-            if files is not None:
-                shutil.copytree(files, cwd, dirs_exist_ok=True)
-            reports.append(_run(script, cwd))
+    with contextlib.ExitStack() as stack:
+        snapshot = None
+        if files is not None:
+            snapshot = stack.enter_context(tempfile.TemporaryDirectory(prefix="ocio-py-eval-"))
+            shutil.copytree(files, snapshot, dirs_exist_ok=True)
+        reports = []
+        for script in args["scripts"]:
+            with tempfile.TemporaryDirectory(prefix="ocio-py-eval-") as cwd:
+                if snapshot is None:
+                    reports.append(_run(script, cwd))
+                    continue
+                shutil.copytree(snapshot, cwd, dirs_exist_ok=True)
+                report = _run(script, cwd)
+                reports.append(_restore(report, _spellings([cwd, files])))
     return {"scripts": reports}, []
+
+
+def _spellings(directories):
+    """Each spelling of `directories` that a report may hold, longest first: as the system
+    gives the path and with links resolved, and on Windows also with "/" (paths that OCIO and
+    pystring join) and with doubled backslashes (the repr of a str holding the path)."""
+    spellings = set()
+    for directory in directories:
+        for path in {directory, os.path.realpath(directory)}:
+            spellings.add(path)
+            if os.name == "nt":
+                spellings.add(path.replace("\\", "/"))
+                spellings.add(path.replace("\\", "\\\\"))
+    return sorted(spellings, key=len, reverse=True)
