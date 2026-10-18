@@ -36,6 +36,19 @@ fn name(n: &str) -> Value {
     json!({ "name": n })
 }
 
+/// `depth` lists (`[[...[1]...]]`) or dicts (`{"a": {"a": ... 1}}`) nested in each other.
+fn nest(kind: &str, depth: usize) -> Value {
+    let mut v = json!({"int": "1"});
+    for _ in 0..depth {
+        v = if kind == "list" {
+            json!({ "list": [v] })
+        } else {
+            json!({ "dict": [[s("a"), v]] })
+        };
+    }
+    v
+}
+
 /// The steps both sides run, in order (the independent script's `STEPS` mirror them).
 fn steps() -> Value {
     let mut config = call(name("OCIO.Config.CreateRaw"), json!([]));
@@ -92,6 +105,10 @@ fn steps() -> Value {
         call(name("tuple"), json!([])),                                      // 39
         {"eval": {"bytes": "00ff"}},                                         // 40
         call(name("OCIO.ColorSpace.__new__"), json!([name("OCIO.ColorSpace")])), // 41
+        {"eval": {"dict": []}},                                              // 42
+        call(name("operator.getitem"), json!([{"ref": 42}, {"ref": 41}])),  // 43
+        {"eval": nest("dict", 10)},                                         // 44
+        {"eval": nest("list", 10)},                                         // 45
     ])
 }
 
@@ -118,7 +135,7 @@ def masked(s):
 def out(i, fact, value):
     print(i, fact, value, sep="\t")
 
-def describe(i, prefix, v):
+def describe(i, prefix, v, depth=0):
     out(i, prefix + "type", q(type(v)))
     try:
         text = repr(v)
@@ -136,13 +153,13 @@ def describe(i, prefix, v):
         out(i, prefix + "str", h(v))
     elif type(v) is bytes:
         out(i, prefix + "bytes", v.hex())
-    elif type(v) in (list, tuple):
+    elif type(v) in (list, tuple) and depth < 8:
         for k, x in enumerate(v):
-            describe(i, f"{prefix}{k}.", x)
-    elif type(v) is dict:
+            describe(i, f"{prefix}{k}.", x, depth + 1)
+    elif type(v) is dict and depth < 8:
         for k, (key, x) in enumerate(v.items()):
-            describe(i, f"{prefix}{k}.0.", key)
-            describe(i, f"{prefix}{k}.1.", x)
+            describe(i, f"{prefix}{k}.0.", key, depth + 1)
+            describe(i, f"{prefix}{k}.1.", x, depth + 1)
     elif type(v).__module__ == "numpy" and type(v).__name__ == "ndarray":
         out(i, prefix + "array", f"{v.dtype.str} {list(v.shape)} {list(v.strides)} {v.tobytes().hex()}")
     elif type(v).__module__ == "numpy":
@@ -160,7 +177,12 @@ def step(i, f, getters=()):
         r.append(None)
         out(i, "raised", q(type(e)))
         out(i, "mro", ",".join(q(c) for c in type(e).__mro__))
-        out(i, "message", masked(str(e)))
+        try:
+            message = str(e)
+        except Exception as inner:
+            out(i, "message_raised", q(type(inner)))
+        else:
+            out(i, "message", masked(message))
     else:
         same = [] if isinstance(v, IMMUTABLE) else [j for j, w in enumerate(r) if w is v]
         r.append(v)
@@ -233,6 +255,15 @@ step(38, lambda: tuple())
 step(39, lambda: tuple())
 step(40, lambda: bytes.fromhex("00ff"))
 step(41, lambda: OCIO.ColorSpace.__new__(OCIO.ColorSpace))
+step(42, lambda: {})
+step(43, lambda: operator.getitem(r[42], r[41]))
+def nest(depth, make):
+    v = 1
+    for _ in range(depth):
+        v = make(v)
+    return v
+step(44, lambda: nest(10, lambda v: {"a": v}))
+step(45, lambda: nest(10, lambda v: [v]))
 # The wheel keeps the logging function in a static object, released after the interpreter
 # has finalized: a process that ends with a Python function set crashes on its way out.
 OCIO.ResetToDefaultLoggingFunction()
@@ -354,7 +385,11 @@ fn flatten(report: &Value) -> Vec<String> {
                 .map(|c| c.as_str().unwrap())
                 .collect();
             out.push(format!("{i}\tmro\t{}", mro.join(",")));
-            out.push(format!("{i}\tmessage\t{}", text_hex(&e["message"])));
+            if let Some(m) = e.get("message_raised") {
+                out.push(format!("{i}\tmessage_raised\t{}", m.as_str().unwrap()));
+            } else {
+                out.push(format!("{i}\tmessage\t{}", text_hex(&e["message"])));
+            }
         } else {
             let same: Vec<String> = step["same_as"]
                 .as_array()
@@ -424,6 +459,11 @@ fn reports_each_step_as_an_independent_script_sees_it() {
         steps[41]["value"].get("repr_raised").is_some(),
         "{}",
         steps[41]
+    );
+    assert!(
+        steps[43]["raised"].get("message_raised").is_some(),
+        "{}",
+        steps[43]
     );
     assert_eq!(
         report["scripts"][0]["interpreter"],
@@ -511,20 +551,96 @@ fn the_scripts_see_nothing_of_the_callers_environment() {
         .iter()
         .map(|n| String::from_utf8(bytes(&n["str"])).unwrap())
         .collect();
-    let (required, added): (&[&str], &[&str]) = if cfg!(windows) {
-        (&["SYSTEMROOT"], &["PYTHONHOME", "UV_INTERNAL__PYTHONHOME"])
+    let mut names = names;
+    names.sort();
+    let expected: &[&str] = if cfg!(windows) {
+        &["PYTHONHOME", "SYSTEMROOT", "UV_INTERNAL__PYTHONHOME"]
     } else {
-        (&[], &["LC_CTYPE"])
+        &["LC_CTYPE"]
     };
-    for n in &names {
-        assert!(
-            required.contains(&n.as_str()) || added.contains(&n.as_str()),
-            "{n} reached the scripts: {names:?}"
+    assert_eq!(names, expected);
+}
+
+/// Each script runs in a directory of its own: what one writes there the next doesn't find,
+/// and the oracle's own directory (with its pyproject.toml) isn't it. Under with_files, each
+/// script gets a copy of the files as given, whatever the scripts before it wrote.
+#[test]
+fn each_script_has_a_directory_of_its_own() {
+    let array = json!({"array": {"dtype": "|u1", "shape": [1], "bytes": "09"}});
+    let read = |file: &str| {
+        json!({"call": name("numpy.fromfile"), "args": [s(file)],
+               "kwargs": [["dtype", name("numpy.uint8")]]})
+    };
+    let report = eval(json!([
+        {"steps": [call(name("numpy.save"), json!([s("x.npy"), array]))]},
+        {"steps": [call(name("numpy.load"), json!([s("x.npy")])), read("pyproject.toml")]},
+    ]));
+    let scripts = report["scripts"].as_array().unwrap();
+    assert!(scripts[0]["steps"][0].get("value").is_some(), "{report}");
+    for step in scripts[1]["steps"].as_array().unwrap() {
+        assert_eq!(
+            step["raised"]["type"], "builtins.FileNotFoundError",
+            "{report}"
         );
     }
-    for n in required {
-        assert!(names.iter().any(|x| x == n), "no {n}: {names:?}");
+
+    let files = Oracle::get()
+        .call(
+            "with_files",
+            json!({
+                "files": {"in.bin": {"bytes": "010203"}},
+                "command": "py_eval",
+                "args": {"scripts": [
+                    {"steps": [
+                        read("in.bin"),
+                        call(on(0, "tofile"), json!([s("in.bin")])),
+                        call(name("numpy.save"), json!([s("leak.npy"), array])),
+                    ]},
+                    {"steps": [read("in.bin"), call(name("numpy.load"), json!([s("leak.npy")]))]},
+                ]},
+            }),
+            &[],
+        )
+        .result;
+    let scripts = files["scripts"].as_array().unwrap();
+    for (script, step) in [(0, 0), (1, 0)] {
+        assert_eq!(
+            scripts[script]["steps"][step]["value"]["array"]["bytes"], "010203",
+            "{files}"
+        );
     }
+    assert_eq!(
+        scripts[1]["steps"][1]["raised"]["type"], "builtins.FileNotFoundError",
+        "{files}"
+    );
+}
+
+/// The names a script reaches: exactly these modules and builtins (with every exception class
+/// of the builtins), as py_eval_steps.py lists them.
+#[test]
+fn scripts_reach_only_the_listed_names() {
+    let lines = Oracle::get().run_script(
+        r#"
+import builtins
+from ocio_oracle import py_eval_steps as steps
+exceptions = {n for n, v in vars(builtins).items()
+              if isinstance(v, type) and issubclass(v, BaseException)}
+print(",".join(steps.MODULES))
+print(",".join(sorted(steps.BUILTINS - exceptions)))
+print(exceptions <= steps.BUILTINS)
+"#,
+        &[],
+    );
+    assert_eq!(
+        lines,
+        [
+            "atexit,copy,math,numpy,operator",
+            "abs,bool,bytearray,bytes,complex,dict,divmod,enumerate,float,frozenset,getattr,\
+             hasattr,hash,int,isinstance,issubclass,iter,len,list,max,min,next,object,pow,range,\
+             repr,reversed,round,set,setattr,slice,sorted,str,sum,tuple,type,zip",
+            "True",
+        ]
+    );
 }
 
 /// A script's process that exits with a status other than 0 is reported as a crash, even
@@ -534,10 +650,15 @@ fn the_scripts_see_nothing_of_the_callers_environment() {
 #[test]
 fn reports_a_crash() {
     let ok = json!({"steps": [call(name("OCIO.CDLTransform"), json!([]))]});
-    let crash = json!({"steps": [call(
-        name("atexit.register"),
-        json!([name("OCIO.SetLoggingFunction"), name("str.upper")]),
-    )]});
+    // atexit runs the second registration first: its ValueError goes to stderr, then the
+    // logging function set again crashes the process.
+    let crash = json!({"steps": [
+        call(
+            name("atexit.register"),
+            json!([name("OCIO.SetLoggingFunction"), name("str.upper")]),
+        ),
+        call(name("atexit.register"), json!([name("int"), s("x")])),
+    ]});
     let report = eval(json!([ok, crash, ok]));
     let scripts = report["scripts"].as_array().unwrap();
     let crashed = &scripts[1]["crashed"];
@@ -546,6 +667,8 @@ fn reports_a_crash() {
         "{report}"
     );
     assert!(scripts[1].get("steps").is_none());
+    let stderr = String::from_utf8_lossy(&bytes(&crashed["stderr"])).into_owned();
+    assert!(stderr.contains("invalid literal for int()"), "{stderr}");
     for i in [0, 2] {
         assert_eq!(scripts[i]["steps"].as_array().unwrap().len(), 1, "{report}");
     }

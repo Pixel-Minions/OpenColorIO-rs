@@ -33,10 +33,11 @@ An expr is one of
   {"list": [expr, ...]}  {"tuple": [expr, ...]}  {"dict": [[key expr, value expr], ...]}
   {"array": {"dtype": "<f4", "shape": [...], "bytes": "<hex>"}}   a NumPy array (C order)
   {"scalar": {"dtype": "<f4", "bytes": "<hex>"}}                  a NumPy scalar
-The names reach only what is listed: no file, process or import function. This is not a
-sandbox against hostile scripts (attributes reach further); it keeps the tests' own scripts
-from touching the machine by accident. py_eval_api.py also runs them in an empty directory
-and an empty environment.
+The names reach only what is listed: no file, process or import function. That is a guard
+against mistakes in the tests' own scripts, not a sandbox: attributes reach much further
+(NumPy writes files, and dunder attributes reach the import machinery). py_eval_api.py also
+runs each script in a directory of its own, with an environment that holds nothing of the
+caller's (SYSTEMROOT only, on Windows).
 
 Report: {"interpreter": {"isolated", "dont_write_bytecode", "utf8_mode"} (sys.flags),
 "steps": [result, ...]}. A result is

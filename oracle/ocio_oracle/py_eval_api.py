@@ -15,6 +15,7 @@ and never computes expected values.
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -68,19 +69,21 @@ def py_eval(args, blobs):
     blobs:    none
 
     Each script runs in a new process (`python -I -B -X utf8`), so that nothing a script
-    changes in its process reaches the next one, with the environment of environment(). Its
-    working directory is a new empty directory, removed afterwards; or, when the oracle runs
-    elsewhere than its own directory (with_files makes the directory of its files the
-    working directory), that directory, so that scripts reach those files by relative paths.
+    changes in its process reaches the next one, with the environment of environment(), in
+    a new directory of its own, removed afterwards. That directory is empty; or, when the
+    oracle runs elsewhere than its own directory (with_files makes the directory of its files
+    the working directory), it holds a copy of that directory's files, so that each script
+    reaches them by relative paths, as given, whatever the scripts before it wrote. (A path
+    with_files writes in for "$FILES" names its own directory, which the scripts share.)
     A request the interpreter can't read is refused.
     """
     if set(args) != {"scripts"} or not isinstance(args["scripts"], list):
         raise RequestError(f"py_eval: expects {{\"scripts\": [...]}}, got {sorted(args)}")
+    files = None if os.path.samefile(os.getcwd(), _ORACLE_DIR) else os.getcwd()
     reports = []
     for script in args["scripts"]:
-        if os.path.samefile(os.getcwd(), _ORACLE_DIR):
-            with tempfile.TemporaryDirectory(prefix="ocio-py-eval-") as cwd:
-                reports.append(_run(script, cwd))
-        else:
-            reports.append(_run(script, os.getcwd()))
+        with tempfile.TemporaryDirectory(prefix="ocio-py-eval-") as cwd:
+            if files is not None:
+                shutil.copytree(files, cwd, dirs_exist_ok=True)
+            reports.append(_run(script, cwd))
     return {"scripts": reports}, []
