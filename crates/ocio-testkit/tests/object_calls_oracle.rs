@@ -224,7 +224,12 @@ fn stages_writes_and_order() {
         "{response}"
     );
     assert_eq!(c[2]["stage"], json!("arguments"), "{response}");
-    assert!(c[2]["exception"]["message"].is_object(), "{response}");
+    // The constructor's own exception, as when the same spec is one of the request's objects.
+    let made = call(json!({"objects": {"curve": bad_curve["object"]}}));
+    assert_eq!(
+        c[2]["exception"], made["config"]["exception"],
+        "{response}\n{made}"
+    );
     assert_eq!(c[3]["stage"], json!("call"), "{response}");
     assert!(c[3]["exception"]["message"].is_object(), "{response}");
     assert_eq!(c[7]["stage"], json!("write"), "{response}");
@@ -269,6 +274,51 @@ colorspaces:
     let c = calls(&response);
     assert_eq!(c[0]["log"], json!([]), "{response}");
     assert_eq!(c[1]["log"], *config_log, "{response}");
+}
+
+/// What happens while a call's arguments are built belongs to that call: a string the binding
+/// can't decode (a config's description "caf\u{e9}" in Latin-1) at stage "arguments", and the
+/// log of a config the arguments load, as config_log holds the same load. A call whose
+/// arguments raised stores nothing under "as".
+#[test]
+fn the_arguments_stage() {
+    let description =
+        b"ocio_profile_version: 2\ndescription: caf\xe9\n\nroles:\n  default: raw\n\n\
+                        colorspaces:\n  - !<ColorSpace>\n    name: raw\n";
+    let hex = |bytes: &[u8]| -> String { bytes.iter().map(|b| format!("{b:02x}")).collect() };
+    let config = json!({"object": {"class": "Config", "factory": ["CreateFromFile", "c.ocio"],
+                                   "calls": [["getDescription"]]}});
+    let response = call(json!({
+        "files": {"c.ocio": {"bytes": hex(description)}},
+        "calls": [{"new": "MixingColorSpaceManager", "args": [config]}],
+    }));
+    assert_eq!(
+        calls(&response)[0],
+        json!({"undecodable": hex(b"caf\xe9"), "stage": "arguments", "log": []}),
+        "{response}"
+    );
+
+    let bogus = "ocio_profile_version: 2\n\nroles:\n  default: raw\n\ncolorspaces:\n  - \
+                 !<ColorSpace>\n    name: raw\n    bogus: 1\n";
+    let loaded = call(json!({"config": {"yaml": bogus}}));
+    let response = call(
+        json!({"calls": [{"new": "MixingColorSpaceManager", "args": [
+        {"object": {"class": "Config", "factory": ["CreateFromStream", bogus]}}]}]}),
+    );
+    let log = &calls(&response)[0]["log"];
+    assert!(log.as_array().is_some_and(|l| !l.is_empty()), "{response}");
+    assert_eq!(*log, loaded["config_log"], "{response}");
+
+    let bad_curve = json!({"object": {"class": "GradingBSplineCurve", "args": [[0.0, 0.0, 0.5]]}});
+    let unbound = Oracle::get().try_call(
+        "object_calls",
+        json!({"calls": [
+            {"new": "GradingRGBCurveTransform", "args": [bad_curve], "as": "x"},
+            {"dump": "x"},
+        ]}),
+        &[],
+    );
+    assert!(unbound.is_err(), "{:?}", unbound.map(|r| r.result));
 }
 
 /// An exception a value object's constructor raises is the config's: no call runs.
@@ -332,6 +382,17 @@ fn bad_requests_are_refused() {
         json!({"calls": [{"new": "GroupTransform", "args": [[{"transform": {
             "class": "MatrixTransform", "calls": [[]]}}]]}]}),
         json!({"calls": [{"call": "getProcessor", "args": [{"transform": nested_groups(1000)}]}]}),
+        // Calls on Python's own values a call stored (a list, a string): what their methods
+        // raise is never the library's.
+        json!({"calls": [{"call": "getDefaultLumaCoefs", "as": "a"},
+                         {"call": "__getitem__", "on": "a", "args": [7]}]}),
+        json!({"calls": [{"call": "getDefaultLumaCoefs", "as": "a"},
+                         {"call": "getDefaultLumaCoefs", "as": "b"},
+                         {"call": "append", "on": "a", "args": [{"ref": "a"}]},
+                         {"call": "append", "on": "b", "args": [{"ref": "b"}]},
+                         {"call": "__eq__", "on": "a", "args": [{"ref": "b"}]}]}),
+        json!({"calls": [{"call": "getName", "as": "n"},
+                         {"call": "index", "on": "n", "args": ["zz"]}]}),
         // No overload takes the arguments (pybind11's TypeError).
         json!({"calls": [{"call": "getProcessor", "args": [1, 2, 3, 4, 5]}]}),
         // A value too deep for checks.dump to write out: the oracle's own error while writing.

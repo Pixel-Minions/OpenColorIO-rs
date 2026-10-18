@@ -20,6 +20,7 @@ values.
 """
 
 import copy
+import types
 
 import PyOpenColorIO as OCIO
 
@@ -84,6 +85,30 @@ def _write(value, blobs):
     return dump(value, blobs)
 
 
+# pybind11's translations of the C++ standard exceptions (std::invalid_argument, out_of_range,
+# ...), which a binding call raises as these exact types. Python's own subclasses of them
+# (RecursionError, a RuntimeError; UnicodeDecodeError, a ValueError, handled apart) never come
+# from the library.
+TRANSLATED = (RuntimeError, ValueError, IndexError, OverflowError, KeyError, StopIteration)
+
+
+def _call_raised(exc):
+    """Whether a call raised it in the library: OCIO's exceptions, or one of pybind11's
+    translations, of its exact type."""
+    return isinstance(exc, (OCIO.Exception, OCIO.ExceptionMissingFile)) or type(exc) in TRANSLATED
+
+
+def _binding_target(target):
+    """Whether a call may act on `target`: the PyOpenColorIO module, one of its helper modules,
+    one of its classes, or an object of one. Python's own values a call stored (lists, strings,
+    floats) aren't: what their methods raise is never the library's."""
+    if isinstance(target, types.ModuleType):
+        return target.__name__.startswith("PyOpenColorIO")
+    if isinstance(target, type):
+        return target.__module__.startswith("PyOpenColorIO")
+    return type(target).__module__.startswith("PyOpenColorIO")
+
+
 def _attempt(fn, stage, blobs):
     """{"result": fn() written out}, or what the library raised: {"exception", "stage"} or
     {"undecodable": hex, "stage"} ("call" when fn raised, "write" when writing the value out
@@ -92,9 +117,12 @@ def _attempt(fn, stage, blobs):
         value = fn()
     except UnicodeDecodeError as exc:
         return {"undecodable": bytes(exc.object).hex(), "stage": stage}, False, None
-    except REPORTED as exc:
-        # What config_calls reports as the library's: OCIO's exceptions and pybind11's
-        # translations of the C++ standard ones. The request's own errors aren't REPORTED.
+    except Exception as exc:  # noqa: BLE001 - sorted into the library's and the request's
+        # The library's: OCIO's exceptions and pybind11's translations of the C++ standard
+        # ones, of their exact types (a call acts on PyOpenColorIO targets only, so Python's
+        # list and str methods can't raise here). Anything else is the request's error.
+        if not _call_raised(exc):
+            raise
         return {"exception": raised(exc), "stage": stage}, False, None
     first = len(blobs)
     try:
@@ -110,10 +138,14 @@ def _attempt(fn, stage, blobs):
 
 
 def _arguments(args, kwargs, objects):
-    """A call's arguments, built from their value specs. What the library raises while building
-    them (a transform's or a value object's constructor or setters) goes on to the caller,
-    which reports it; anything else (a spec Python can't read, whatever it raises: IndexError,
-    RecursionError, ...) is the request's error."""
+    """A call's arguments, built from their value specs. What OCIO raises while building them (a
+    transform's or a value object's constructor or setters: OCIO's exceptions, and the binding's
+    std::runtime_error), and a string the binding can't decode, go on to the caller, which
+    reports them; anything else is the request's error: a spec Python can't read, whatever it
+    raises (IndexError, RecursionError, ...), and also pybind11's other translations of the C++
+    standard exceptions (KeyError, IndexError, StopIteration, ValueError), which can't be told
+    from Python's own here, so a request that makes the library raise one of them while its
+    arguments are built is refused rather than reported."""
     try:
         return _value(args, objects), {k: _value(v, objects) for k, v in kwargs.items()}
     except RequestError:
@@ -143,6 +175,9 @@ def _call_fn(i, call, objects):
 
     if kind == "call":
         target = _target(call.get("on", "config"), objects)
+        if not _binding_target(target):
+            raise RequestError(f"calls[{i}]: a call acts on a PyOpenColorIO module, class or "
+                               f"object, not a {type(target).__name__}")
         method = _method(target, call["call"])
 
         def invoke(call_args, call_kwargs):
@@ -226,7 +261,8 @@ def object_calls(args, blobs):
       calls     in order, each one of
                   {"call": method, "on": name (default "config"), "args": [values],
                    "kwargs": {name: value}, "as": name}
-                            on.method(*args, **kwargs): "on" names a stored object, a
+                            on.method(*args, **kwargs): "on" names a stored PyOpenColorIO
+                            object (not a list, string or number a call returned), a
                             PyOpenColorIO class (its static methods), "OCIO" (config_api's
                             MODULE_FUNCTIONS), "DisplayViewHelpers" or "ColorSpaceHelpers"
                             (those modules' functions)
@@ -252,9 +288,12 @@ def object_calls(args, blobs):
       calls       per call {"result": the value written out (see below)}, or {"exception":
                   {"type", "message": {"bytes": hex}}, "stage"} or {"undecodable": hex,
                   "stage"} where the library raised or a string couldn't be decoded: stage
-                  "arguments" (building the call's arguments: a transform's or a value
-                  object's constructor or setters), "call" (the call) or "write" (writing
-                  its value out; "as" still stores the value then); and "log"
+                  "arguments" (building the call's arguments: OCIO's exceptions and the
+                  binding's RuntimeError from a transform's or a value object's constructor
+                  or setters; pybind11's other translated exceptions there refuse the
+                  request), "call" (the call; "as" stores nothing when the arguments or the
+                  call raised) or "write" (writing its value out; "as" still stores the value
+                  then); and "log"
       processors  per name, {"processor": {"cache_id", "isNoOp", "hasChannelCrosstalk",
                   "isDynamic", "processor_metadata", "group"}}, or {"exception", "stage":
                   "group"}; and "log"
