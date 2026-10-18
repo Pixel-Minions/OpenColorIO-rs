@@ -99,14 +99,18 @@ def _call_raised(exc):
 
 
 def _binding_target(target):
-    """Whether a call may act on `target`: the PyOpenColorIO module, one of its helper modules,
-    one of its classes, or an object of one. Python's own values a call stored (lists, strings,
-    floats) aren't: what their methods raise is never the library's."""
+    """Whether a call may act on `target`, an allowlist: the PyOpenColorIO module or one of its
+    helper modules, one of the binding's classes (spec.BINDING_TYPE: transforms, value objects,
+    enums, iterators, vector_of_uint8_t), or an instance of one. Nothing else: Python's own
+    values a call stored (lists, strings, floats, tuples, dicts, NumPy arrays), Python's
+    classes the module holds (Exception, its module type), and their instances, whose methods'
+    errors are never the library's. (vector_of_uint8_t is the binding's own: what its pop and
+    remove raise comes from pybind11's bound vector, and is reported.)"""
     if isinstance(target, types.ModuleType):
-        return target.__name__.startswith("PyOpenColorIO")
+        return target is OCIO or any(target is getattr(OCIO, name) for name in HELPER_MODULES)
     if isinstance(target, type):
-        return target.__module__.startswith("PyOpenColorIO")
-    return type(target).__module__.startswith("PyOpenColorIO")
+        return type(target) is spec.BINDING_TYPE
+    return type(type(target)) is spec.BINDING_TYPE
 
 
 def _attempt(fn, stage, blobs):
@@ -178,6 +182,12 @@ def _call_fn(i, call, objects):
         if not _binding_target(target):
             raise RequestError(f"calls[{i}]: a call acts on a PyOpenColorIO module, class or "
                                f"object, not a {type(target).__name__}")
+        # An object's method comes from its class: an attribute set on the object (an object
+        # spec's "attrs") is no method of the binding's.
+        if (not isinstance(target, (type, types.ModuleType))
+                and not callable(getattr(type(target), call["call"], None))):
+            raise RequestError(f"calls[{i}]: {type(target).__name__} has no method "
+                               f"{call['call']!r}")
         method = _method(target, call["call"])
 
         def invoke(call_args, call_kwargs):
@@ -185,8 +195,8 @@ def _call_fn(i, call, objects):
             return method(*call_args, **call_kwargs)
     elif kind == "new":
         cls = getattr(OCIO, call["new"], None) if isinstance(call["new"], str) else None
-        if not isinstance(cls, type):
-            raise RequestError(f"calls[{i}]: {call['new']!r} isn't a PyOpenColorIO class")
+        if not isinstance(cls, type) or type(cls) is not spec.BINDING_TYPE:
+            raise RequestError(f"calls[{i}]: {call['new']!r} isn't a class of the binding")
 
         def invoke(call_args, call_kwargs):
             return cls(*call_args, **call_kwargs)

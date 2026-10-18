@@ -8,6 +8,7 @@
 //! asked, a constructor's exception stops before the calls, and bad requests are refused.
 
 use ocio_testkit::Oracle;
+use ocio_testkit::oracle::BatchCall;
 use serde_json::{Value, json};
 
 const STUDIO: &str = "studio-config-v2.1.0_aces-v1.3_ocio-v2.3";
@@ -321,6 +322,48 @@ fn the_arguments_stage() {
     assert!(unbound.is_err(), "{:?}", unbound.map(|r| r.result));
 }
 
+/// The library's exceptions of every kind a call can raise are reported at stage "call", as
+/// config_calls reports the same calls: KeyError (a context without the variable), IndexError
+/// (an iterator past its end), ExceptionMissingFile (a LUT that isn't there), RuntimeError and
+/// ValueError (pybind11's bound vector_of_uint8_t: a value past a byte, a value it doesn't
+/// hold).
+#[test]
+fn the_call_stage_reports_the_library_exceptions() {
+    let missing =
+        json!({"transform": {"class": "FileTransform", "args": {"src": "missing.spi1d"}}});
+    let args = json!({"config": "raw", "calls": [
+        {"new": "Context", "as": "context"},
+        {"call": "__getitem__", "on": "context", "args": ["nokey"]},
+        {"call": "getColorSpaceNames", "as": "names"},
+        {"call": "__getitem__", "on": "names", "args": [9]},
+        {"call": "getProcessor", "args": [missing]},
+        {"new": "vector_of_uint8_t", "as": "bytes"},
+        {"call": "extend", "on": "bytes", "args": [[300]]},
+        {"call": "remove", "on": "bytes", "args": [3]},
+    ]});
+    let response = call(args.clone());
+    let reference = Oracle::get().call("config_calls", args, &[]).result;
+    let (c, r) = (calls(&response), &reference["calls"]);
+    for i in [1, 3, 4, 6, 7] {
+        assert_eq!(c[i]["stage"], json!("call"), "call {i}: {response}");
+        assert!(
+            c[i]["exception"]["type"].is_string(),
+            "call {i}: {response}"
+        );
+        assert_eq!(
+            c[i]["exception"], r[i]["exception"],
+            "call {i}: {response}\n{reference}"
+        );
+    }
+    let types: Vec<&Value> = [1, 3, 4, 6, 7]
+        .iter()
+        .map(|&i| &c[i]["exception"]["type"])
+        .collect();
+    let distinct: std::collections::BTreeSet<String> =
+        types.iter().map(|t| t.to_string()).collect();
+    assert_eq!(distinct.len(), 5, "{response}");
+}
+
 /// An exception a value object's constructor raises is the config's: no call runs.
 #[test]
 fn a_constructor_exception_stops_before_the_calls() {
@@ -401,6 +444,61 @@ fn bad_requests_are_refused() {
     for args in &bad {
         refused(args);
     }
+    // Only the binding's own: an enum value that names a function or a dunder of the module,
+    // a class of Python's (Exception, the module's type), an attribute that is no method of the
+    // object's class, a NumPy array or Python's type as a target.
+    let primary_with = |attribute: Value| {
+        json!({"class": "GradingPrimary", "args": [{"enum": "GRADING_LOG"}],
+               "attrs": [["f", attribute]]})
+    };
+    let bypasses = [
+        json!({"calls": [{"call": "getProcessor", "args": [{"enum": "GetCurrentConfig"}]}]}),
+        // A module constant that isn't an enum member (a role's name, a string), in a spec.
+        json!({"calls": [{"call": "getProcessor", "args": [{"transform": {
+            "class": "ColorSpaceTransform",
+            "args": {"src": {"enum": "ROLE_DEFAULT"}, "dst": "raw"}}}]}]}),
+        json!({"objects": {"x": primary_with(json!({"enum": "SetLoggingLevel"}))}}),
+        json!({"objects": {"x": primary_with(json!({"enum": "SetEnvVariable"}))}}),
+        json!({"objects": {"x": primary_with(json!({"enum": "__reduce_ex__"}))}}),
+        json!({"objects": {"e": {"class": "Exception", "args": ["x"],
+                                 "attrs": [["f", {"enum": "__reduce_ex__"}]]}},
+               "calls": [{"call": "f", "on": "e", "args": [2]}]}),
+        json!({"objects": {"m": {"class": "__class__", "args": ["PyOpenColorIO.fake"]}}}),
+        json!({"calls": [{"new": "Exception", "args": ["x"]}]}),
+        json!({"calls": [{"new": "__class__", "args": ["PyOpenColorIO.fake"], "as": "m"}]}),
+        json!({"objects": {"gp": primary(0)}, "calls": [{"call": "saturation", "on": "gp"}]}),
+        json!({"calls": [{"new": "Lut1DTransform", "as": "l"},
+                         {"call": "getData", "on": "l", "as": "d"},
+                         {"call": "reshape", "on": "d", "args": [7]}]}),
+        json!({"calls": [{"call": "mro", "on": "__class__"}]}),
+    ];
+    for args in &bypasses {
+        refused(args);
+    }
+    // __setattr__ of the module, once a way to set OCIO.zz in the oracle's process: refused,
+    // and the next request of the same process (a batch) doesn't find the attribute (an enum
+    // value names it: refused too, where a mutated module would pass it on).
+    let mutate = json!({"objects": {"x": primary_with(json!({"enum": "__setattr__"}))},
+                        "calls": [{"call": "f", "on": "x", "args": ["zz_oracle_probe", 1]}]});
+    let probe = json!({"objects": {"x": {"class": "GradingPrimary",
+                                         "args": [{"enum": "GRADING_LOG"}],
+                                         "attrs": [["saturation", {"enum": "zz_oracle_probe"}]]}}});
+    let replies = Oracle::get().batch(
+        &[
+            BatchCall {
+                cmd: "object_calls",
+                args: mutate,
+                blobs: vec![],
+            },
+            BatchCall {
+                cmd: "object_calls",
+                args: probe,
+                blobs: vec![],
+            },
+        ],
+        false,
+    );
+    assert!(replies.iter().all(Result::is_err), "{replies:?}");
     // A stored object that isn't a Processor.
     let error = refused(&json!({
         "objects": {"p": primary(0)},
