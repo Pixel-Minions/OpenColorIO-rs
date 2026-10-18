@@ -333,8 +333,11 @@ def ocioz(args, blobs):
     args: one of
       archive     {"config": a config (spec.config, e.g. {"file": "$FILES/config.ocio"} through
                   with_files)}: Config.archive(path) into a new temporary file
-      extract     {"archive": path (text or {"bytes": hex})}: ExtractOCIOZArchive(archive,
-                  destination) into the directory "extracted" of a new temporary directory
+      extract     {"archive": path (text or {"bytes": hex}), "destination" (optional): how the
+                  destination is spelled, relative to the new temporary directory, a path that
+                  normalizes to "extracted" (default "extracted", e.g. "sub/../extracted")}:
+                  ExtractOCIOZArchive(archive, destination) into the directory "extracted" of
+                  a new temporary directory
     result:
       archive:    "entries": in the archive's order, each {"name": {"bytes": hex}, "method",
                   "flag_bits", "create_system", "create_version", "extract_version",
@@ -373,12 +376,18 @@ def ocioz(args, blobs):
     if ("archive" in args) == ("extract" in args):
         raise RequestError("ocioz takes archive or extract, not both or neither")
     if "extract" in args:
-        check_keys("ocioz: extract", args["extract"], {"archive"})
+        check_keys("ocioz: extract", args["extract"], {"archive", "destination"})
         archive = text("extract archive", args["extract"].get("archive"))
         _check_links(archive)
+        spelled = args["extract"].get("destination", "extracted")
+        if (not isinstance(spelled, str) or os.path.isabs(spelled)
+                or os.path.normpath(spelled) != "extracted"):
+            raise RequestError(f"ocioz: the destination {spelled!r} must be a spelling of "
+                               "\"extracted\" relative to the request's directory")
     stage, result, out = ["config"], {}, []
     with captured_log() as log, tempfile.TemporaryDirectory() as root:
         destination = os.path.join(root, "extracted")
+        spelled_destination = os.path.join(root, spelled) if "extract" in args else destination
 
         def written(out):
             found = _written(destination, out)
@@ -398,7 +407,7 @@ def ocioz(args, blobs):
                 result["archive"] = len(out) - 1
             else:
                 stage[0] = "extract"
-                OCIO.ExtractOCIOZArchive(archive, destination)
+                OCIO.ExtractOCIOZArchive(archive, spelled_destination)
                 result.update(written(out))
         except RAISED as exc:
             if not wheel_raised(exc):

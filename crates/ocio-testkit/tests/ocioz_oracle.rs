@@ -706,3 +706,84 @@ fn extract_reports_times_past_64_bits() {
     );
     assert!(result["files"][0]["atime_ns"].is_i64(), "{result}");
 }
+
+/// The destination can be spelled otherwise, as a path that normalizes to `extracted`: the
+/// wheel normalizes it (OCIOZArchive.cpp:341), so the files land in `extracted` and nothing is
+/// left outside it. Spellings that don't normalize to `extracted`, or are absolute, are
+/// refused.
+#[test]
+fn extract_takes_a_spelling_of_the_destination() {
+    let archive = zip(&[entry(b"a.txt", b"a")]);
+    let response = Oracle::get().call(
+        "with_files",
+        json!({"files": {"a.ocioz": {"blob": 0}}, "file_blobs": 1, "command": "ocioz",
+               "args": {"extract": {"archive": "$FILES/a.ocioz",
+                                    "destination": "sub/../extracted"}}}),
+        &[&archive],
+    );
+    let result = &response.result;
+    assert_eq!(paths(result, "files"), [b"a.txt"], "{result}");
+    assert_eq!(
+        result["outside"],
+        json!({"files": [], "dirs": [], "links": []}),
+        "{result}"
+    );
+    for destination in ["../extracted", "other", "/extracted", "extracted/x"] {
+        let refused = Oracle::get().try_call(
+            "with_files",
+            json!({"files": {"a.ocioz": {"blob": 0}}, "file_blobs": 1, "command": "ocioz",
+                   "args": {"extract": {"archive": "$FILES/a.ocioz",
+                                        "destination": destination}}}),
+            &[&archive],
+        );
+        assert!(refused.is_err(), "{destination}: {refused:?}");
+    }
+}
+
+/// Each time past 64 bits is reported by its own digits, the same value an integer would
+/// carry: a file whose three NTFS times are 9,000,000,000 seconds after 1970 (2255, 9.0e18 ns,
+/// an integer) and one whose times are 9,500,000,000 seconds (2271, 9.5e18 ns, past 2^63 ns)
+/// differ by 500,000,000 seconds in their modification, access and (Windows) creation times.
+#[test]
+fn extract_reports_all_times_past_64_bits_alike() {
+    let ntfs = |seconds: u64| seconds * 10_000_000 + 116_444_736_000_000_000;
+    let (a, b) = (9_000_000_000u64, 9_500_000_000u64);
+    let archive = zip(&[
+        Entry {
+            madeby: 10 << 8 | 20,
+            attributes: 0x20,
+            extra: ntfs_times(ntfs(a), ntfs(a), ntfs(a)),
+            ..entry(b"a.txt", b"a")
+        },
+        Entry {
+            madeby: 10 << 8 | 20,
+            attributes: 0x20,
+            extra: ntfs_times(ntfs(b), ntfs(b), ntfs(b)),
+            ..entry(b"b.txt", b"b")
+        },
+    ]);
+    let (result, _) = extract(&archive);
+    let (early, late) = (&result["files"][0], &result["files"][1]);
+    let mut keys = vec!["mtime_ns", "atime_ns"];
+    if cfg!(windows) {
+        keys.push("birthtime_ns");
+    }
+    for key in keys {
+        let early = i128::from(
+            early[key]
+                .as_i64()
+                .unwrap_or_else(|| panic!("{key}: {result}")),
+        );
+        let late: i128 = late[key]["decimal"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{key}: {result}"))
+            .parse()
+            .unwrap();
+        assert!(late > i128::from(i64::MAX), "{key}: {result}");
+        assert_eq!(
+            late - early,
+            i128::from(b - a) * 1_000_000_000,
+            "{key}: {result}"
+        );
+    }
+}
