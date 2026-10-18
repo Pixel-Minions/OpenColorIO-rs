@@ -897,10 +897,13 @@ fn cacheable(cmd: &str, response: &Response) -> bool {
 }
 
 /// Whether `result`, at any depth, reports a process the oracle started that died or failed:
-/// a `"crashed"` report (`context_env_calls`, `file_rules_match`'s isolated cases) or a
-/// `"returncode"` other than 0 (`processor_cache`, `logging_environment`). The death may be the
-/// wheel's, the same on every run (`_wputenv_s` stopping the process), or the machine's: when
-/// it was out of memory, a child failed to import the wheel ("DLL load failed while importing
+/// a `"crashed"` report (`context_env_calls`, `file_rules_match`'s isolated cases, whatever its
+/// return code: they report a child that exited with 0 but wrote no JSON as crashed too), or,
+/// from `processor_cache` and `logging_environment`, a `"returncode"` other than 0 or a
+/// `"report"` that is the child's raw stdout text (a string: their children write a JSON
+/// object, so a string is what they wrote instead, or nothing). The death may be the wheel's,
+/// the same on every run (`_wputenv_s` stopping the process), or the machine's: when it was
+/// out of memory, a child failed to import the wheel ("DLL load failed while importing
 /// PyOpenColorIO: The paging file is too small for this operation to complete."), and that
 /// response, once cached, failed every later run. The response can't tell them apart, so the
 /// oracle runs again each time.
@@ -909,6 +912,7 @@ fn reports_a_failed_child(result: &Value) -> bool {
         Value::Object(map) => map.iter().any(|(key, value)| {
             (key == "crashed" && !value.is_null())
                 || (key == "returncode" && value.as_i64() != Some(0))
+                || (key == "report" && value.is_string())
                 || reports_a_failed_child(value)
         }),
         Value::Array(items) => items.iter().any(reports_a_failed_child),
@@ -1519,6 +1523,13 @@ mod tests {
                 json!({"crashed": null, "pid": 7}),
                 true,
             ),
+            // A child that exited with 0 without writing JSON (env_api.py, file_rules_api.py).
+            (
+                "context_env_calls",
+                json!({"crashed": {"returncode": 0, "stderr": {"bytes": ""}}}),
+                false,
+            ),
+            ("context_env_calls", json!({"crashed": "a report"}), false),
             (
                 "file_rules_match",
                 json!({"cases": [{"pid": 7}, crashed.clone()]}),
@@ -1533,6 +1544,22 @@ mod tests {
                 "processor_cache",
                 json!([{"returncode": 1, "report": "", "stderr": 0}]),
                 false,
+            ),
+            // A child that exited with 0 but whose stdout wasn't JSON: its raw text.
+            (
+                "processor_cache",
+                json!([{"returncode": 0, "report": "Traceback", "stderr": 0}]),
+                false,
+            ),
+            (
+                "logging_environment",
+                json!([{"returncode": 0, "report": ""}]),
+                false,
+            ),
+            (
+                "logging_environment",
+                json!([{"returncode": 0, "report": {"first": "info"}}]),
+                true,
             ),
             (
                 "logging_environment",

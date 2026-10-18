@@ -420,11 +420,25 @@ fn transforms_that_refer_to_themselves_are_refused() {
 /// color space transform, a look transform, a group holding a color space transform, or a
 /// display view transform of a view with a look, without or with a view transform; `lookopt`,
 /// `dvopt` and `dvvtopt` with two look options (`k|j`) instead of one; with a suffix `:d`, that
-/// transform inside `d` nested groups.
+/// transform inside `d` nested groups; with a suffix `:d@k:e`, inside `d` groups for the first
+/// `k` links and `e` for the others.
 fn chain(kind: &str, n: usize) -> String {
-    let (kind, depth) = match kind.split_once(':') {
-        Some((kind, depth)) => (kind, depth.parse::<usize>().unwrap()),
-        None => (kind, 0),
+    let (kind, depths) = match kind.split_once(':') {
+        Some((kind, depths)) => (kind, depths),
+        None => (kind, "0"),
+    };
+    let depth_of = |i: usize| -> usize {
+        match depths.split_once('@') {
+            Some((first, rest)) => {
+                let (k, other) = rest.split_once(':').unwrap();
+                if i <= k.parse().unwrap() {
+                    first.parse().unwrap()
+                } else {
+                    other.parse().unwrap()
+                }
+            }
+            None => depths.parse().unwrap(),
+        }
     };
     let mut s = String::from(
         "ocio_profile_version: 2
@@ -468,7 +482,7 @@ colorspaces:
             _ => unreachable!("{kind}"),
         };
         let mut transform = transform;
-        for _ in 0..depth {
+        for _ in 0..depth_of(i) {
             transform = format!("!<GroupTransform> {{children: [{transform}]}}");
         }
         s += &format!("  - !<ColorSpace>\n    name: c{i}\n    to_scene_reference: {transform}\n");
@@ -482,67 +496,69 @@ fn port_chain(kind: &str, n: usize) -> ocio::Result<Arc<Processor>> {
     config.processor_between(format!("c{n}"), "c0")
 }
 
-/// The longest chains of each kind the port accepts match the wheel, processor and optimized
-/// processor, on the test thread's stack; one more link is the port's error (the wheel goes
-/// on to more than twice as deep before its stack overflows, docs/improvements.md U-58).
+/// The longest chain of each kind the port accepts ([`KINDS`]), alone and then the files, is
+/// the wheel's processor, on the test thread's stack; one link more is the port's error, and
+/// the wheel builds it too (it goes on to about twice as deep or more before its stack
+/// overflows, docs/improvements.md U-58). A change to a weight or to the limit changes a
+/// length.
 #[test]
 fn the_deepest_chains_below_the_limit_match_the_wheel() {
-    for kind in [
-        "cst", "look", "group", "dv", "dvvt", "cst:3", "dv:2", "group:20", "lookopt", "dvopt:1",
-    ] {
-        // The longest chain the port accepts: a binary search for the first refused length.
-        let refused = |n: usize| match port_chain(kind, n) {
-            Ok(_) => false,
-            Err(e) => {
-                assert!(too_deep(&e.to_string()), "{kind} {n}: {e}");
-                true
-            }
-        };
-        let (mut ok, mut too_deep) = (1, 1024);
-        assert!(!refused(ok) && refused(too_deep), "{kind}");
-        while too_deep - ok > 1 {
-            let mid = (ok + too_deep) / 2;
-            if refused(mid) {
-                too_deep = mid;
-            } else {
-                ok = mid;
-            }
-        }
-
-        let requests: Vec<(usize, Value)> = [ok, too_deep]
-            .into_iter()
-            .map(|n| {
-                let args = json!({
-                    "config": {"yaml": chain(kind, n)},
+    let dir = reference_chain_files();
+    let mut cases = Vec::new();
+    for (kind, alone, then_files) in KINDS {
+        cases.push((
+            kind,
+            false,
+            alone,
+            chain(kind, alone),
+            chain(kind, alone + 1),
+        ));
+        cases.push((
+            kind,
+            true,
+            then_files,
+            chain_with_files(kind, &dir, then_files),
+            chain_with_files(kind, &dir, then_files + 1),
+        ));
+    }
+    let port = |yaml: &str, n: usize| {
+        Config::create_from_stream(yaml.as_bytes())
+            .and_then(|config| config.processor_between(format!("c{n}"), "c0"))
+    };
+    let mut calls = Vec::new();
+    for (kind, files, n, longest, refused) in &cases {
+        let label = format!("{kind} files={files} {n}");
+        let error = port(refused, n + 1).map(|_| ()).unwrap_err().to_string();
+        assert!(too_deep(&error), "{label}: one link more: {error}");
+        for (yaml, n) in [(longest, *n), (refused, n + 1)] {
+            calls.push(BatchCall {
+                cmd: "config_processor",
+                args: json!({
+                    "config": {"yaml": yaml},
                     "overload": {"names": [format!("c{n}"), "c0"]},
                     "ops": {"optimization": "OPTIMIZATION_NONE"},
-                });
-                (n, args)
-            })
-            .collect();
-        let calls: Vec<BatchCall<'_>> = requests
-            .iter()
-            .map(|(_, args)| BatchCall {
-                cmd: "config_processor",
-                args: args.clone(),
+                }),
                 blobs: vec![],
-            })
-            .collect();
-        let replies: Vec<Response> = Oracle::get()
-            .batch(&calls, true)
-            .into_iter()
-            .map(|r| r.unwrap_or_else(|e| panic!("{kind}: {e}")))
-            .collect();
-
+            });
+        }
+    }
+    let replies = Oracle::get().batch(&calls, true);
+    for (i, (kind, files, n, longest, _)) in cases.iter().enumerate() {
+        let label = format!("{kind} files={files} {n}");
+        let reply = |r: usize| {
+            replies[2 * i + r]
+                .as_ref()
+                .unwrap_or_else(|e| panic!("{label}: {e}"))
+        };
         // The deepest chain the port accepts is the wheel's processor.
-        if let Some(failure) = compare(&replies[0], &port_processors(port_chain(kind, ok))) {
-            panic!("{kind} {ok}: {failure}");
+        if let Some(failure) = compare(reply(0), &port_processors(port(longest, *n))) {
+            panic!("{label}: {failure}");
         }
         // One link more, the wheel still makes a processor where the port refuses.
         assert!(
-            replies[1].result["processor"]["cache_id"].is_object(),
-            "{kind} {too_deep}: {}",
-            replies[1].result["processor"]
+            reply(1).result["processor"]["cache_id"].is_object(),
+            "{label}: {}",
+            reply(1).result["processor"]
         );
     }
 }
@@ -607,22 +623,6 @@ colorspaces:
     assert_ne!(port[0], port[1]);
 }
 
-/// The length of the longest chain the port accepts, of `refused(n)` false: a binary search
-/// for the first refused length below 1024.
-fn longest_accepted(refused: impl Fn(usize) -> bool, label: &str) -> usize {
-    let (mut ok, mut too_deep) = (1, 1024);
-    assert!(!refused(ok) && refused(too_deep), "{label}");
-    while too_deep - ok > 1 {
-        let mid = (ok + too_deep) / 2;
-        if refused(mid) {
-            too_deep = mid;
-        } else {
-            ok = mid;
-        }
-    }
-    ok
-}
-
 /// `f` on a thread of a 1 MiB stack, the smallest the port supports for its nesting limits
 /// (docs/improvements.md, U-58 and U-76).
 fn on_a_1_mib_thread<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
@@ -634,47 +634,66 @@ fn on_a_1_mib_thread<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) 
         .unwrap()
 }
 
-/// The chain kinds whose longest accepted chains the 1 MiB tests build: each kind of link, and
-/// links inside nested groups, which the limit counting groups bounds (docs/improvements.md,
-/// U-58).
-const STACK_KINDS: [&str; 21] = [
-    "cst",
-    "look",
-    "group",
-    "dv",
-    "dvvt",
-    "cst:1",
-    "cst:2",
-    "cst:5",
-    "cst:20",
-    "cst:200",
-    "look:2",
-    "group:3",
-    "dv:1",
-    "dv:3",
-    "dvvt:10",
-    "lookopt",
-    "dvopt",
-    "dvvtopt",
-    "lookopt:1",
-    "dvopt:1",
-    "dvvtopt:2",
+/// The chain kinds ([`chain`]) of the tests of the limits, and the longest chain of each the
+/// port accepts, alone and with its first link a file transform of 256 CTF files
+/// ([`chain_with_files`]): each kind of link, links inside nested groups, which the total
+/// counts, and two mixes of the heaviest chains of color spaces in groups, alone and then the
+/// files (docs/improvements.md, U-58).
+///
+/// The lengths follow from the weights of the levels, which follow from the wheel's crashes
+/// (U-58): the processor's own color space transform weighs 100, each link `w` (its transform
+/// 100, 221 for a look transform, 238 for a display view transform, and 72 for each group
+/// around it), and for the kinds of a look the look's matrix 100, at most 68,150 in all; then
+/// files, `100 + w (n - 1) + 67 + 256 x 67` (the first link's file transform and its files).
+/// And at most 256 transforms other than groups: the processor's, one a link, and the look's
+/// matrix or the file transform. So a color space transform in 5 groups, `w` = 460, reaches
+/// `100 + 460 n <= 68,150`: 147 links.
+const KINDS: [(&str, usize, usize); 26] = [
+    ("cst", 255, 255),
+    ("look", 254, 231),
+    ("group", 255, 255),
+    ("dv", 254, 214),
+    ("dvvt", 254, 214),
+    ("cst:1", 255, 255),
+    ("cst:2", 255, 209),
+    ("cst:3", 215, 161),
+    ("cst:5", 147, 111),
+    ("cst:20", 44, 34),
+    ("cst:200", 4, 4),
+    ("look:2", 186, 140),
+    ("group:3", 175, 132),
+    ("group:20", 42, 32),
+    ("dv:1", 219, 164),
+    ("dv:2", 177, 134),
+    ("dv:3", 149, 112),
+    ("dvvt:10", 70, 54),
+    ("lookopt", 254, 231),
+    ("dvopt", 254, 214),
+    ("dvvtopt", 254, 214),
+    ("lookopt:1", 231, 174),
+    ("dvopt:1", 219, 164),
+    ("dvvtopt:2", 177, 134),
+    // 255 links: the first 80 in 3 groups, the others in 2, 590 groups (68,080 alone; the
+    // verifier's heaviest mix, 2026-10-17).
+    ("cst:3@80:2", 255, 186),
+    // Then files, 255 links: 2 groups around links 2 to 99, 1 around the others (68,063).
+    ("cst:2@99:1", 255, 255),
 ];
 
-/// The longest chain of each kind the port accepts builds on a 1 MiB thread, both ways: the
-/// limits of nested transforms hold at the test profile's optimization level, and at opt-level
-/// 0 (the figures in docs/improvements.md, U-58).
+/// The longest chain of each kind the port accepts ([`KINDS`]) builds on a 1 MiB thread, both
+/// ways, and one link more is refused: the limits of nested transforms hold at the test
+/// profile's optimization level, and at opt-level 0 (the figures in docs/improvements.md, U-58).
 #[test]
 fn the_deepest_chains_build_on_a_1_mib_thread() {
-    for kind in STACK_KINDS {
-        let refused = |n: usize| port_chain(kind, n).is_err();
-        let ok = longest_accepted(refused, kind);
+    for (kind, n, _) in KINDS {
+        let refused = port_chain(kind, n + 1).map(|_| ()).unwrap_err().to_string();
+        assert!(too_deep(&refused), "{kind} {}: {refused}", n + 1);
         let built = on_a_1_mib_thread(move || {
-            let config = Config::create_from_stream(chain(kind, ok).as_bytes())?;
-            config.processor_between(format!("c{ok}"), "c0")?;
-            config.processor_between("c0", format!("c{ok}")).map(|_| ())
+            let config = Config::create_from_stream(chain(kind, n).as_bytes())?;
+            config.processor_between(format!("c{n}"), "c0")?;
+            config.processor_between("c0", format!("c{n}")).map(|_| ())
         });
-        assert!(built.is_ok(), "{kind} {ok}: {built:?}");
+        assert!(built.is_ok(), "{kind} {n}: {built:?}");
     }
 }
 
@@ -741,30 +760,30 @@ fn reference_chain_files() -> String {
 const FILES: usize = 256;
 
 /// The longest chain of each kind the port accepts whose first link is a file transform of the
-/// longest chain of CTF references it accepts builds on a 1 MiB thread, both ways: the chain of
-/// transforms comes first on the stack and the files after it (docs/improvements.md, U-58 and
-/// U-76).
+/// longest chain of CTF references it accepts ([`KINDS`]) builds on a 1 MiB thread, both ways,
+/// and one link more is refused: the chain of transforms comes first on the stack and the files
+/// after it (docs/improvements.md, U-58 and U-76).
 #[test]
 fn the_deepest_chains_of_transforms_then_of_references_build_on_a_1_mib_thread() {
     let dir = reference_chain_files();
-    for kind in STACK_KINDS {
-        let port = |n: usize| {
-            let yaml = chain_with_files(kind, &dir, n);
-            Config::create_from_stream(yaml.as_bytes())
-                .and_then(|config| config.processor_between(format!("c{n}"), "c0"))
-        };
-        let ok = longest_accepted(|n| port(n).is_err(), kind);
-        let yaml = chain_with_files(kind, &dir, ok);
+    for (kind, _, n) in KINDS {
+        let refused = Config::create_from_stream(chain_with_files(kind, &dir, n + 1).as_bytes())
+            .and_then(|config| config.processor_between(format!("c{}", n + 1), "c0"))
+            .map(|_| ())
+            .unwrap_err()
+            .to_string();
+        assert!(too_deep(&refused), "{kind} {}: {refused}", n + 1);
+        let yaml = chain_with_files(kind, &dir, n);
         let built = on_a_1_mib_thread(move || {
             let config = Config::create_from_stream(yaml.as_bytes())?;
-            let forward = config.processor_between(format!("c{ok}"), "c0")?;
-            config.processor_between("c0", format!("c{ok}"))?;
+            let forward = config.processor_between(format!("c{n}"), "c0")?;
+            config.processor_between("c0", format!("c{n}"))?;
             Ok::<_, ocio::Exception>(forward.processor_metadata().num_files())
         });
         assert_eq!(
             built.map_err(|e| e.to_string()),
             Ok(FILES as i32),
-            "{kind} {ok}"
+            "{kind} {n}"
         );
     }
 }
@@ -783,7 +802,9 @@ fn a_chain_of_color_spaces_then_of_references_builds_on_a_1_mib_thread() {
         Config::create_from_stream(yaml.as_bytes())
             .and_then(|config| config.processor_between(format!("c{n}"), "c0"))
     };
-    let n = longest_accepted(|n| port(n).is_err(), "mixed");
+    // The longest ([`KINDS`]).
+    let n = 255;
+    assert!(port(n + 1).is_err());
 
     let yaml = mixed_chain(&dir, n);
     let threaded = yaml.clone();
@@ -834,9 +855,10 @@ fn groups_count_in_the_total_nesting() {
     );
 }
 
-/// The groups count in the limit of the total nesting of `BuildOps` itself, without the
-/// processor cache (which `CollectContextVariables`, which counts them too, fills first): the
-/// verifier's chain of 255 color spaces each inside 5 groups is refused by the build.
+/// The groups count in the limit of the total nesting without the processor cache too: the
+/// verifier's chain of 255 color spaces each inside 5 groups is refused. (The processor still
+/// runs `CollectContextVariables` first, as upstream's does, `Config.cpp:4815`; the test of
+/// `BuildOps` alone is `the_nesting_weight_limit_is_exact`, `crates/ocio/src/transform_tests.rs`.)
 #[test]
 fn groups_count_in_the_total_without_the_processor_cache() {
     let config = Config::create_from_stream(chain("cst:5", 255).as_bytes()).unwrap();

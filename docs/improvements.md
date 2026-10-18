@@ -3729,10 +3729,15 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   | `DisplayViewTransform` in 3 groups | 149 | 769 KiB | 112 | 769 KiB | 385 KiB | 449 KiB |
   | `DisplayViewTransform` (view transform) in 10 groups | 70 | 651 KiB | 54 | 769 KiB | 322 KiB | 385 KiB |
   | `DisplayViewTransform` (view transform, two options) in 2 groups | 177 | 769 KiB | 134 | 839 KiB | 385 KiB | 449 KiB |
+  | `ColorSpaceTransform`, the first 80 links in 3 groups, the others in 2 | 255 | 961 KiB | 186 | 833 KiB | 385 KiB | 449 KiB |
+  | `ColorSpaceTransform`, links 2 to 99 in 2 groups, the others in 1 | 255 | 769 KiB | 255 | 833 KiB | 321 KiB | 449 KiB |
 
-  On Rocky Linux 9 at opt-level 0, where a thread's stack isn't rounded, the heaviest take
-  851 KiB (color space transforms in 2 groups) and 829 KiB (display view transforms of two
-  options, then files).
+  The heaviest is the verifier's mix (2026-10-17): 255 color space transforms, 80 in 3 groups
+  and 175 in 2, 590 groups in all, weigh 68,080 and take 961 KiB at opt-level 0; the second
+  mix is the heaviest then files (68,063). On Rocky Linux 9 at opt-level 0, where a thread's
+  stack isn't rounded, the heaviest take 902 KiB (that mix), 851 KiB (color space transforms
+  in 2 groups) and 829 KiB (display view transforms of two options, then files); the two mixes
+  then files 754 and 762 KiB.
 - **Status:** done in `p3-builders` (3.2d follow-up; `crates/ocio/src/transform.rs`, `Nesting`;
   `build_ops`, and `collect_context_variables` in `crates/ocio/src/context_variable_utils.rs`).
   The small frames in `group-5` (`transform.rs`, `transforms/color_space_transform.rs`,
@@ -3742,19 +3747,23 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   (`transform.rs`, `MAX_NESTING_WEIGHT`, `Level` and `Nesting`; the files' level in
   `file_transform.rs`). Tests (`crates/ocio/tests/config_processors_oracle.rs`): a color space
   that names itself and one that reaches itself through a look are refused in both directions
-  where the wheel crashes; the longest chain of each kind the port accepts (groups around the
-  links and two look options included) is the wheel's processor (on a test thread's stack,
-  debug and release), and one link more the wheel still builds while the port refuses;
+  where the wheel crashes; `the_deepest_chains_below_the_limit_match_the_wheel`: the longest
+  chain of each kind the port accepts, alone and then 256 CTF files (`KINDS`: groups around the
+  links, two look options and the two mixes of the table included), has the length the weights
+  give, written in the test, and is the wheel's processor (on a test thread's stack, debug and
+  release), and one link more the wheel still builds while the port refuses;
   `groups_count_in_the_total_nesting` (the verifier's 5 groups) and
-  `groups_count_in_the_total_without_the_processor_cache` (the same refused by `BuildOps`
-  itself); `the_deepest_chains_build_on_a_1_mib_thread` and
+  `groups_count_in_the_total_without_the_processor_cache` (the same with the processor cache
+  off; the processor still collects the context variables first, as upstream's does);
+  `the_deepest_chains_build_on_a_1_mib_thread` and
   `the_deepest_chains_of_transforms_then_of_references_build_on_a_1_mib_thread` build the
   longest chain of each kind of the table both ways on a 1 MiB thread, and
   `a_chain_of_color_spaces_then_of_references_builds_on_a_1_mib_thread` checks that mixed
   chain's processor with the wheel; `the_nesting_weight_limit_is_exact`
-  (`crates/ocio/src/transform_tests.rs`) builds the heaviest group the total allows (945 groups
-  around a matrix: 68,140) and refuses one group more, with the processor cache
-  on and off. A nightly job of `.github/workflows/sde.yml` runs them, with
+  (`crates/ocio/src/transform_tests.rs`) pins the limit and the weights of groups, file
+  transforms and files: 766 groups around a file transform of 193 CTF files weigh 68,150 and
+  build, 726 groups around one of 236 files weigh 68,151 and are refused, through `BuildOps`
+  alone and through the processor with its cache on and off, on a 1 MiB thread. A nightly job of `.github/workflows/sde.yml` runs them, with
   `chains_of_references_stop_at_the_limit` (U-76) and `deep_groups_fit_a_small_stack` (U-60),
   at opt-level 0 on Windows and Rocky Linux 9.
 
