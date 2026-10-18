@@ -61,14 +61,24 @@ def _entries(path, out):
     return entries
 
 
+def _ns(value):
+    """A time in nanoseconds since 1970: the integer where it fits 64 bits, else {"decimal":
+    its digits} (a FILETIME near 2^63 is a time of the year 30828, 9.1e20 ns, past what JSON
+    readers take as an integer)."""
+    if -(1 << 63) <= value < (1 << 63):
+        return value
+    return {"decimal": str(value)}
+
+
 def _stat(st):
     """What lstat says of a file, directory or link itself: its times ("mtime_ns", "atime_ns",
-    and on Windows "birthtime_ns", the three times minizip-ng sets) and on Windows its
-    "attributes" (st_file_attributes), elsewhere its "mode" (the permission bits of st_mode)."""
+    and on Windows "birthtime_ns", the three times minizip-ng sets; see _ns) and on Windows
+    its "attributes" (st_file_attributes), elsewhere its "mode" (the permission bits of
+    st_mode)."""
     if os.name == "nt":
-        return {"mtime_ns": st.st_mtime_ns, "atime_ns": st.st_atime_ns,
-                "birthtime_ns": st.st_birthtime_ns, "attributes": st.st_file_attributes}
-    return {"mtime_ns": st.st_mtime_ns, "atime_ns": st.st_atime_ns,
+        return {"mtime_ns": _ns(st.st_mtime_ns), "atime_ns": _ns(st.st_atime_ns),
+                "birthtime_ns": _ns(st.st_birthtime_ns), "attributes": st.st_file_attributes}
+    return {"mtime_ns": _ns(st.st_mtime_ns), "atime_ns": _ns(st.st_atime_ns),
             "mode": stat.S_IMODE(st.st_mode)}
 
 
@@ -338,6 +348,7 @@ def ocioz(args, blobs):
                   (see _written), each sorted by its relative path's bytes ("/" separated),
                   "path" {"bytes": hex}; a file has "contents" (a blob index, or null where
                   reading it is refused), "mtime_ns", "atime_ns", on Windows "birthtime_ns"
+                  (integers, or {"decimal": digits} past 64 bits)
                   and "attributes", elsewhere "mode"; a directory the same but "contents"; a
                   link "target" {"bytes": hex} and on Windows "attributes"; on Windows a file
                   or directory with alternate data streams "streams". "outside": the same, for

@@ -682,3 +682,27 @@ fn bad_requests_are_refused() {
         );
     }
 }
+
+/// A time past what 64 bits of nanoseconds hold is reported by its digits: an NTFS
+/// modification time near 2^63 intervals sets the year 30828 on Windows (9.1e20 ns), and on
+/// Linux the file system's own limit (ext4's year 2446, 1.5e19 ns), both past 2^63 ns.
+#[test]
+fn extract_reports_times_past_64_bits() {
+    let ordinary = 133_000_000_000_000_000u64;
+    let archive = zip(&[Entry {
+        madeby: 10 << 8 | 20,
+        attributes: 0x20,
+        extra: ntfs_times((1 << 63) + 5, ordinary, ordinary),
+        ..entry(b"far.txt", b"far")
+    }]);
+    let (result, _) = extract(&archive);
+    let mtime = &result["files"][0]["mtime_ns"];
+    let digits = mtime["decimal"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{result}"));
+    assert!(
+        digits.parse::<i128>().unwrap() > i128::from(i64::MAX),
+        "{result}"
+    );
+    assert!(result["files"][0]["atime_ns"].is_i64(), "{result}");
+}

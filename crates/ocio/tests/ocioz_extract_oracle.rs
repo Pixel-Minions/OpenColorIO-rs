@@ -401,8 +401,12 @@ fn wheel_tree(result: &Value, blobs: &[Vec<u8>], compared: Compared) -> Tree {
     };
     for f in result["files"].as_array().unwrap() {
         let contents = f["contents"].as_u64().map(|i| blobs[i as usize].clone());
+        // A time past 64 bits comes as {"decimal": digits}.
         let time = |key: &str| {
-            (f[key].as_i64().map(i128::from)).or_else(|| f[key].as_u64().map(i128::from))
+            let v = &f[key];
+            v.as_i64()
+                .map(i128::from)
+                .or_else(|| v["decimal"].as_str().and_then(|d| d.parse().ok()))
         };
         out.insert(
             bytes(&f["path"]),
