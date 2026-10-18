@@ -130,7 +130,7 @@ sys.stdout.write(json.dumps(file_rules_api.run_case(request["config"], request["
 def _run_isolated(source, case):
     oracle_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     request = {"oracle_path": oracle_path, "config": source, "case": case}
-    child = subprocess.run([sys.executable, "-I", "-c", _CHILD],
+    child = subprocess.run([sys.executable, "-I", "-B", "-c", _CHILD],
                            input=json.dumps(request).encode("utf-8"), capture_output=True,
                            env=allowed_environment(), timeout=600)
     if child.returncode == 0:

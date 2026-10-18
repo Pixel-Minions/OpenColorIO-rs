@@ -60,7 +60,7 @@ def context_env_calls(args, blobs):
     """
     oracle_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     request = {"oracle_path": oracle_path, "args": args}
-    child = subprocess.run([sys.executable, "-I", "-c", _CHILD],
+    child = subprocess.run([sys.executable, "-I", "-B", "-c", _CHILD],
                            input=json.dumps(request).encode("utf-8"), capture_output=True,
                            env={}, timeout=600, check=False)
     if child.returncode == 0:

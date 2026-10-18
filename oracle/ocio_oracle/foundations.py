@@ -366,7 +366,7 @@ def logging_environment(args, blobs):
                 _string(f"cases[{c}].{key}[]", message)
         env = allowed_environment(
             None if case["env"] is None else {"OCIO_LOGGING_LEVEL": case["env"]})
-        child = subprocess.run([sys.executable, "-I", "-c", _ENVIRONMENT_CHILD],
+        child = subprocess.run([sys.executable, "-I", "-B", "-c", _ENVIRONMENT_CHILD],
                                input=json.dumps(case).encode("utf-8"), env=env,
                                capture_output=True, timeout=120)
         try:

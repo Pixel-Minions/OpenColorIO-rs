@@ -199,7 +199,7 @@ def _run_cases(cases, blobs, blob_file, oracle_path):
         env = allowed_environment(case["env"])
         child_input = {"oracle_path": oracle_path, "steps": case["steps"],
                        "blob_file": blob_file, "blob_sizes": [len(blob) for blob in blobs]}
-        child = subprocess.run([sys.executable, "-I", "-c", _CHILD],
+        child = subprocess.run([sys.executable, "-I", "-B", "-c", _CHILD],
                                input=json.dumps(child_input).encode("utf-8"), env=env,
                                capture_output=True, timeout=120)
         try:

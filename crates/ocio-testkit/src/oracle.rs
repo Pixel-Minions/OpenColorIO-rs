@@ -680,7 +680,7 @@ fn uv_program() -> PathBuf {
 
 /// Hash of everything that determines the oracle's answers on this machine.
 fn identity(oracle_dir: &Path) -> Result<u128, String> {
-    identity_with(oracle_dir, &upstream_tests_dir())
+    identity_with(oracle_dir, &upstream_tests_dir(), &ALLOWED_VARIABLES)
 }
 
 /// Upstream's tests directory (`upstream/OpenColorIO/tests`), whose `data` and `python` the
@@ -690,8 +690,13 @@ fn upstream_tests_dir() -> PathBuf {
 }
 
 /// [`identity`], with upstream's tests in `upstream_tests` (its `data` and `python`
-/// directories).
-fn identity_with(oracle_dir: &Path, upstream_tests: &Path) -> Result<u128, String> {
+/// directories) and the variables `allowed` that the oracle's processes get ([`isolate`]):
+/// another allowlist can change what the oracle answers.
+fn identity_with(
+    oracle_dir: &Path,
+    upstream_tests: &Path,
+    allowed: &[&str],
+) -> Result<u128, String> {
     let mut files = Vec::new();
     for name in ["pyproject.toml", "uv.lock", ".python-version"] {
         files.push(oracle_dir.join(name));
@@ -709,6 +714,11 @@ fn identity_with(oracle_dir: &Path, upstream_tests: &Path) -> Result<u128, Strin
     }
     hash_test_data(&mut h, &upstream_tests.join("data"));
     hash_test_data(&mut h, &upstream_tests.join("python"));
+    h.update(b"allowed variables");
+    for name in allowed {
+        h.update(&(name.len() as u64).to_le_bytes());
+        h.update(name.as_bytes());
+    }
     h.update(machine_description().as_bytes());
     Ok(h.digest128())
 }
@@ -1712,6 +1722,29 @@ mod tests {
         );
     }
 
+    /// The cache identity takes the allowlist of the oracle's environment: another list of
+    /// variables, or another order, gives another identity.
+    #[test]
+    fn the_identity_covers_the_allowed_variables() {
+        let dir = paths::target_dir().join(format!("testkit-identity-env-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("ocio_oracle")).unwrap();
+        for name in ["pyproject.toml", "uv.lock", ".python-version"] {
+            std::fs::write(dir.join(name), "x").unwrap();
+        }
+        let tests = dir.join("tests");
+        let ids: Vec<u128> = [&["A", "B"][..], &["A"], &["B", "A"], &["AB"], &[]]
+            .iter()
+            .map(|allowed| identity_with(&dir, &tests, allowed).unwrap())
+            .collect();
+        let _ = std::fs::remove_dir_all(&dir);
+        for (i, a) in ids.iter().enumerate() {
+            for b in &ids[i + 1..] {
+                assert_ne!(a, b, "{ids:?}");
+            }
+        }
+    }
+
     /// The cache identity takes upstream's test files and Python tests: the same oracle with
     /// and without a test file, or with other bytes in it, has another identity, and so does
     /// one whose file is in the other directory.
@@ -1725,17 +1758,17 @@ mod tests {
         }
         let tests = dir.join("tests");
         let (data, python) = (tests.join("data"), tests.join("python"));
-        let missing = identity_with(&dir, &tests).unwrap();
+        let missing = identity_with(&dir, &tests, &ALLOWED_VARIABLES).unwrap();
         std::fs::create_dir_all(&data).unwrap();
         std::fs::create_dir_all(&python).unwrap();
         std::fs::write(data.join("a.clf"), "one").unwrap();
-        let one = identity_with(&dir, &tests).unwrap();
+        let one = identity_with(&dir, &tests, &ALLOWED_VARIABLES).unwrap();
         std::fs::write(data.join("a.clf"), "two").unwrap();
-        let two = identity_with(&dir, &tests).unwrap();
+        let two = identity_with(&dir, &tests, &ALLOWED_VARIABLES).unwrap();
         std::fs::rename(data.join("a.clf"), python.join("a.clf")).unwrap();
-        let moved = identity_with(&dir, &tests).unwrap();
+        let moved = identity_with(&dir, &tests, &ALLOWED_VARIABLES).unwrap();
         std::fs::write(python.join("a.clf"), "three").unwrap();
-        let three = identity_with(&dir, &tests).unwrap();
+        let three = identity_with(&dir, &tests, &ALLOWED_VARIABLES).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
         assert_ne!(missing, one, "a test file didn't change the identity");
         assert_ne!(one, two, "a test file's bytes didn't change the identity");

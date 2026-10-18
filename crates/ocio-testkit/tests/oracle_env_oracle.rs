@@ -7,8 +7,9 @@
 //! - the oracle's Python sees only the allowed variables, what the test sets
 //!   (`PYTHONDONTWRITEBYTECODE`) and what the interpreter adds itself;
 //! - the processes the oracle starts get the allowlisted environment: `child_env.py` gives the
-//!   oracle's allowed variables, plus the deliberate ones, and every `subprocess.run` of the
-//!   oracle's sources passes an `env`.
+//!   oracle's allowed variables, plus the deliberate ones; the oracle's sources start
+//!   processes only with `subprocess.run`, from the modules listed, each call with an `env`
+//!   of its own (never `os.environ` or `None`).
 
 use ocio_testkit::Oracle;
 use ocio_testkit::oracle::ALLOWED_VARIABLES;
@@ -17,7 +18,10 @@ use ocio_testkit::paths;
 /// What the interpreter adds to its own environment: uv's launcher on Windows
 /// (`PYTHONHOME`, `UV_INTERNAL__PYTHONHOME`), and Python's C-locale coercion on Linux
 /// (`LC_CTYPE`, PEP 538).
-const ADDED_BY_THE_INTERPRETER: [&str; 3] = ["PYTHONHOME", "UV_INTERNAL__PYTHONHOME", "LC_CTYPE"];
+#[cfg(windows)]
+const ADDED_BY_THE_INTERPRETER: &[&str] = &["PYTHONHOME", "UV_INTERNAL__PYTHONHOME"];
+#[cfg(not(windows))]
+const ADDED_BY_THE_INTERPRETER: &[&str] = &["LC_CTYPE"];
 
 /// The names of `os.environ` in the oracle's Python, and of `child_env.allowed_environment`
 /// with a deliberate variable, as `<where>\t<name>` lines. Names only: values are never
@@ -89,43 +93,94 @@ fn the_oracle_and_its_children_see_only_allowed_variables() {
     assert_eq!(child, expected);
 }
 
-/// Every `subprocess.run` of the oracle's sources passes an environment (`env=`): none
-/// inherits the oracle's own, and so none can inherit more than the allowlist.
+/// The modules of the oracle that start processes, each with `subprocess.run`.
+const STARTS_PROCESSES: [&str; 8] = [
+    "env_api.py",
+    "file_rules_api.py",
+    "foundations.py",
+    "numerics_lut.py",
+    "processor_cache.py",
+    "py_eval_api.py",
+    "py_suite_api.py",
+    "py_surface_api.py",
+];
+
+/// The other ways Python starts a process, which the oracle's sources never use.
+const OTHER_WAYS: [&str; 14] = [
+    "subprocess.Popen",
+    "subprocess.call",
+    "subprocess.check_call",
+    "subprocess.check_output",
+    "subprocess.getoutput",
+    "subprocess.getstatusoutput",
+    "from subprocess import",
+    "import subprocess as",
+    "os.system",
+    "os.popen",
+    "os.exec",
+    "os.spawn",
+    "os.posix_spawn",
+    "multiprocessing",
+];
+
+/// The arguments of the call whose text starts at `start` in `source`: up to its closing
+/// parenthesis.
+fn call_at(source: &str, start: usize) -> &str {
+    let mut depth = 0;
+    for (i, c) in source[start..].char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return &source[start..start + i];
+                }
+            }
+            _ => {}
+        }
+    }
+    panic!("an unclosed call at {start}")
+}
+
+/// The oracle's sources start processes only with `subprocess.run`, only in the modules
+/// listed, and every such call passes an environment of its own (`env=` that isn't the
+/// oracle's `os.environ`, a copy of it, or `None`, which inherits it): no process the oracle
+/// starts can inherit more than the allowlist.
 #[test]
 fn every_child_process_of_the_oracle_gets_an_environment() {
     let dir = paths::oracle_dir().join("ocio_oracle");
-    let mut calls = 0;
+    let mut starting = Vec::new();
     for entry in std::fs::read_dir(&dir).unwrap().flatten() {
         let path = entry.path();
         if path.extension().is_none_or(|e| e != "py") {
             continue;
         }
+        let file = path.file_name().unwrap().to_string_lossy().into_owned();
         let source = std::fs::read_to_string(&path).unwrap();
-        for (start, _) in source.match_indices("subprocess.run(") {
-            calls += 1;
-            // The call's arguments: up to its closing parenthesis.
-            let mut depth = 0;
-            let mut end = start;
-            for (i, c) in source[start..].char_indices() {
-                match c {
-                    '(' => depth += 1,
-                    ')' => {
-                        depth -= 1;
-                        if depth == 0 {
-                            end = start + i;
-                            break;
-                        }
-                    }
-                    _ => {}
-                }
+        for way in OTHER_WAYS {
+            assert!(!source.contains(way), "{file}: {way}");
+        }
+        let calls: Vec<&str> = source
+            .match_indices("subprocess.run(")
+            .map(|(start, _)| call_at(&source, start))
+            .collect();
+        if calls.is_empty() {
+            continue;
+        }
+        starting.push(file.clone());
+        for call in calls {
+            let env = call
+                .split_once("env=")
+                .unwrap_or_else(|| panic!("{file}: a subprocess.run without env=: {call}"))
+                .1;
+            for inherited in ["os.environ", "None", "dict(os", "{**os"] {
+                assert!(
+                    !env.trim_start().starts_with(inherited),
+                    "{file}: env={inherited}...: {call}"
+                );
             }
-            let call = &source[start..end];
-            assert!(
-                call.contains("env="),
-                "{}: a subprocess.run without env=: {call}",
-                path.display()
-            );
         }
     }
-    assert!(calls >= 8, "{calls} calls");
+    starting.sort();
+    assert_eq!(starting, STARTS_PROCESSES);
 }
