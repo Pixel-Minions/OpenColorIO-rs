@@ -26,6 +26,7 @@ import sys
 import tempfile
 
 from . import spec
+from .child_env import allowed_environment
 from .commands import RAISED, command, wheel_raised
 
 # The steps a case can take, with the number of arguments each takes.
@@ -141,8 +142,8 @@ def _check_case(c, case, blobs):
 def processor_cache(args, blobs):
     """Steps on a raw config and its processors, in a new Python process per case.
 
-    Each case starts `python -I -c` with this oracle's interpreter and environment, less every
-    OCIO_* variable, plus the case's "env". Isolated mode (-I) ignores every PYTHON* variable
+    Each case starts `python -I -c` with this oracle's interpreter and the allowlisted
+    environment (child_env.py), plus the case's "env". Isolated mode (-I) ignores every PYTHON* variable
     and the user's site-packages. The new process runs the steps in order; a step OCIO raises
     in is reported, and the next steps still run (one that needs the object it didn't make
     stops the process, which the result shows by its returncode).
@@ -195,8 +196,7 @@ def _run_cases(cases, blobs, blob_file, oracle_path):
     """Runs each case in a new process: the command's result and blobs."""
     results, out = [], []
     for case in cases:
-        env = {k: v for k, v in os.environ.items() if k != "OCIO" and not k.startswith("OCIO_")}
-        env.update(case["env"])
+        env = allowed_environment(case["env"])
         child_input = {"oracle_path": oracle_path, "steps": case["steps"],
                        "blob_file": blob_file, "blob_sizes": [len(blob) for blob in blobs]}
         child = subprocess.run([sys.executable, "-I", "-c", _CHILD],

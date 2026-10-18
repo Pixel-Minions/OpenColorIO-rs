@@ -28,6 +28,7 @@ import sys
 import PyOpenColorIO as OCIO
 
 from .checks import check_bool, check_keys
+from .child_env import allowed_environment
 from .commands import command
 from .config_api import (REPORTED, LogCapture, RequestError, attempt, call_out, check_source,
                          directory, dump_object, environment, make_config, raised, text)
@@ -131,7 +132,7 @@ def _run_isolated(source, case):
     request = {"oracle_path": oracle_path, "config": source, "case": case}
     child = subprocess.run([sys.executable, "-I", "-c", _CHILD],
                            input=json.dumps(request).encode("utf-8"), capture_output=True,
-                           timeout=600)
+                           env=allowed_environment(), timeout=600)
     if child.returncode == 0:
         try:
             return json.loads(child.stdout.decode("utf-8"))

@@ -22,9 +22,9 @@
 //! `OCIO_RS_ORACLE_NO_CACHE=1` to bypass the cache. Only what can't be transient is cached:
 //! never a failed call (the oracle's error, or its process dying), a batch in which a call
 //! raised, or a response that reports a process the oracle started dying ([`cacheable`]).
-//! Environment variables named `OCIO`,
-//! `OCIO_*` or `PYTHON*` are never passed to the oracle's processes ([`isolate`]), so their
-//! results and output don't depend on the caller's environment.
+//! The oracle's processes get only the allowlisted variables of the caller's environment
+//! ([`isolate`], [`ALLOWED_VARIABLES`]), so their results and output don't depend on it, and
+//! OCIO never prints it.
 //!
 //! Under Intel SDE (`scripts/sde.sh`), the test process and the oracle it starts both see the
 //! emulated CPU, so the wheel and the port dispatch to the SIMD kernels of that CPU. On
@@ -160,8 +160,8 @@ impl Oracle {
     }
 
     /// A command that runs the oracle environment's Python as the oracle runs: from the oracle's
-    /// directory, so `ocio_oracle` imports, in the caller's environment less what [`isolate`]
-    /// removes. Every process of the oracle starts this way.
+    /// directory, so `ocio_oracle` imports, with the environment [`isolate`] gives. Every
+    /// process of the oracle starts this way.
     pub fn command(&self) -> Command {
         let mut command = Command::new(&self.python);
         command.current_dir(paths::oracle_dir());
@@ -170,7 +170,7 @@ impl Oracle {
     }
 
     /// Runs `script` in the oracle's environment, as the oracle runs (from its directory, so
-    /// `ocio_oracle` imports, and without the caller's `OCIO` variables), with `args`, and
+    /// `ocio_oracle` imports, and with the allowlisted environment), with `args`, and
     /// returns the lines it prints. For tests that read the wheel independently of a command,
     /// or reach a check no request can. Panics if the script fails. Nothing is cached.
     #[track_caller]
@@ -327,25 +327,39 @@ impl Oracle {
     }
 }
 
-/// Removes from `command`'s environment the variables named `OCIO` or `OCIO_*`, which would
-/// change what OCIO does, and every `PYTHON*` variable, which would change what Python does or
-/// writes (`PYTHONPATH`, `PYTHONHOME`, `PYTHONVERBOSE`, `PYTHONWARNINGS`, ...); then sets
-/// `PYTHONDONTWRITEBYTECODE=1`, so the oracle leaves no `__pycache__` in the checkout.
+/// The variables of the caller's environment that the oracle's processes get: what Python and
+/// the wheel need, Windows' system directory (Python's `os.urandom`, sockets and the C runtime
+/// look it up) and the temporary directory (`tempfile`, under which `with_files` and the
+/// config commands write their files). The oracle gives its own child processes the same
+/// (`oracle/ocio_oracle/child_env.py`).
+pub const ALLOWED_VARIABLES: [&str; 4] = ["SYSTEMROOT", "TEMP", "TMP", "TMPDIR"];
+
+/// Gives `command` an environment of [`ALLOWED_VARIABLES`] only, with the caller's values,
+/// and `PYTHONDONTWRITEBYTECODE=1`, so the oracle leaves no `__pycache__` in the checkout.
+/// Nothing else of the caller's reaches the oracle: no `OCIO` or `OCIO_*` variable, which
+/// would change what OCIO does, no `PYTHON*` variable, which would change what Python does or
+/// writes, and none of the caller's own, which OCIO would print (a context that loads the
+/// whole environment lists every variable in its repr and its cache ID).
 pub fn isolate(command: &mut Command) -> &mut Command {
-    isolate_from(command, std::env::vars_os().map(|(key, _)| key))
+    isolate_from(command, std::env::vars_os())
 }
 
-/// [`isolate`], for the variable names `names`. Names compare in ASCII upper case: Windows
-/// looks variables up whatever their case (`pythonoptimize` sets Python's `-O` there), and on
-/// Linux removing a lower-case name changes nothing the oracle reads.
+/// [`isolate`], for the caller's variables `vars`. On Windows, names compare in ASCII upper
+/// case, as Windows looks variables up (`SystemRoot` is `SYSTEMROOT`); elsewhere exactly.
 fn isolate_from(
     command: &mut Command,
-    names: impl IntoIterator<Item = std::ffi::OsString>,
+    vars: impl IntoIterator<Item = (std::ffi::OsString, std::ffi::OsString)>,
 ) -> &mut Command {
-    for key in names {
-        let name = key.to_string_lossy().to_ascii_uppercase();
-        if name == "OCIO" || name.starts_with("OCIO_") || name.starts_with("PYTHON") {
-            command.env_remove(&key);
+    command.env_clear();
+    for (key, value) in vars {
+        let name = key.to_string_lossy();
+        let name = if cfg!(windows) {
+            name.to_ascii_uppercase()
+        } else {
+            name.into_owned()
+        };
+        if ALLOWED_VARIABLES.contains(&name.as_str()) {
+            command.env(&key, &value);
         }
     }
     command.env("PYTHONDONTWRITEBYTECODE", "1")
@@ -1735,24 +1749,39 @@ mod tests {
         );
     }
 
-    /// `isolate` removes `OCIO`, `OCIO_*` and `PYTHON*` in any case (Windows finds a variable
-    /// whatever its case), keeps the others, and sets `PYTHONDONTWRITEBYTECODE`.
+    /// `isolate` keeps only the allowed variables, with their values (`SystemRoot` is
+    /// `SYSTEMROOT` on Windows; elsewhere names compare exactly, so `tmpdir` isn't `TMPDIR`),
+    /// and sets `PYTHONDONTWRITEBYTECODE`; nothing else of the caller's (OCIO's and Python's
+    /// variables, `PATH`, `HOME`, a name holding an allowed one) is set.
     #[test]
-    fn isolate_removes_ocio_and_python_variables_in_any_case() {
-        let names = [
-            "OCIO",
-            "OCIO_LOGGING_LEVEL",
-            "ocio_lut_cache",
-            "PYTHONVERBOSE",
-            "pythonoptimize",
-            "PythonPath",
-            "OCIOX",
-            "PATH",
-            "MY_PYTHON",
+    fn isolate_keeps_only_the_allowed_variables() {
+        let systemroot = if cfg!(windows) {
+            "SystemRoot"
+        } else {
+            "SYSTEMROOT"
+        };
+        let mut vars = vec![
+            (systemroot, "/windows"),
+            ("TEMP", "/t1"),
+            ("TMP", "/t2"),
+            ("TMPDIR", "/t3"),
+            ("OCIO", "x"),
+            ("OCIO_LOGGING_LEVEL", "debug"),
+            ("PYTHONVERBOSE", "1"),
+            ("PATH", "/bin"),
+            ("HOME", "/home/x"),
+            ("MY_TEMP", "/t4"),
         ];
+        if !cfg!(windows) {
+            vars.push(("tmpdir", "/t5"));
+        }
         let mut command = Command::new("x");
-        isolate_from(&mut command, names.iter().map(std::ffi::OsString::from));
-        let envs: Vec<(String, Option<String>)> = command
+        isolate_from(
+            &mut command,
+            vars.iter()
+                .map(|(k, v)| (std::ffi::OsString::from(k), std::ffi::OsString::from(v))),
+        );
+        let mut envs: Vec<(String, Option<String>)> = command
             .get_envs()
             .map(|(k, v)| {
                 (
@@ -1761,18 +1790,14 @@ mod tests {
                 )
             })
             .collect();
-        let removed = |name: &str| envs.iter().any(|(k, v)| k == name && v.is_none());
-        for name in &names[..6] {
-            assert!(removed(name), "{name} was kept: {envs:?}");
-        }
-        for name in &names[6..] {
-            assert!(!removed(name), "{name} was removed: {envs:?}");
-        }
-        assert!(
-            envs.iter()
-                .any(|(k, v)| k == "PYTHONDONTWRITEBYTECODE" && v.as_deref() == Some("1")),
-            "{envs:?}"
-        );
+        envs.sort();
+        let mut expected: Vec<(String, Option<String>)> = vars[..4]
+            .iter()
+            .map(|(k, v)| (k.to_string(), Some(v.to_string())))
+            .chain([("PYTHONDONTWRITEBYTECODE".to_string(), Some("1".to_string()))])
+            .collect();
+        expected.sort();
+        assert_eq!(envs, expected);
     }
 
     /// A fresh directory for a [`prepare_venv`] test, with an environment `oracle-venv` in it

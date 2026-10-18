@@ -25,12 +25,12 @@ log_message restores the level it found, so later commands of a batch see the de
 """
 
 import json
-import os
 import subprocess
 import sys
 
 import PyOpenColorIO as OCIO
 
+from .child_env import allowed_environment
 from .commands import command, exception_result
 
 
@@ -323,8 +323,8 @@ def logging_environment(args, blobs):
 
     OCIO reads the variable once per process, the first time it needs the level, and the
     oracle's own environment has no OCIO_* variable. Each case starts `python -I -c` with this
-    oracle's interpreter and environment, less every OCIO_* variable, plus OCIO_LOGGING_LEVEL
-    when the case sets it. Isolated mode (-I) ignores every PYTHON* variable, which could change
+    oracle's interpreter and the allowlisted environment (child_env.py), plus
+    OCIO_LOGGING_LEVEL when the case sets it. Isolated mode (-I) ignores every PYTHON* variable, which could change
     the child's stderr bytes (PYTHONVERBOSE, PYTHONWARNINGS), and the user's site-packages. The
     new process:
       1. when "custom_function" is true, sets a logging function that collects the lines;
@@ -364,9 +364,8 @@ def logging_environment(args, blobs):
                 level, message = _pair(f"cases[{c}].{key}[]", item)
                 _level(level)
                 _string(f"cases[{c}].{key}[]", message)
-        env = {k: v for k, v in os.environ.items() if k != "OCIO" and not k.startswith("OCIO_")}
-        if case["env"] is not None:
-            env["OCIO_LOGGING_LEVEL"] = case["env"]
+        env = allowed_environment(
+            None if case["env"] is None else {"OCIO_LOGGING_LEVEL": case["env"]})
         child = subprocess.run([sys.executable, "-I", "-c", _ENVIRONMENT_CHILD],
                                input=json.dumps(case).encode("utf-8"), env=env,
                                capture_output=True, timeout=120)

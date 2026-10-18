@@ -13,6 +13,7 @@ import numpy as np
 import PyOpenColorIO as OCIO
 
 from . import spec
+from .child_env import allowed_environment
 from .commands import captured_log, command, exception_result
 
 
@@ -91,7 +92,7 @@ def cpu_info(args, blobs):
     """
     exe = "ociocpuinfo.exe" if os.name == "nt" else "ociocpuinfo"
     path = os.path.join(os.path.dirname(OCIO.__file__), "bin", exe)
-    run = subprocess.run([path], capture_output=True, check=True)
+    run = subprocess.run([path], capture_output=True, env=allowed_environment(), check=True)
     text = run.stdout.decode("latin-1")
     fields = {}
     for line in text.splitlines():
