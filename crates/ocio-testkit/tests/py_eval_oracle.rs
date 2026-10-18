@@ -75,6 +75,23 @@ fn steps() -> Value {
         call(on(3, "getSlope"), json!([])),                                  // 23
         call(name("bytes"), json!([{"bytes": "00ff41"}])),                   // 24
         call(name("tuple"), json!([{"list": [{"bool": true}, {"none": null}]}])), // 25
+        {"eval": {"dict": [[s("k"), {"int": "1"}]]}},                        // 26
+        {"setitem": {"ref": 26}, "index": s("k2"), "value": {"int": "2"}},   // 27
+        {"eval": {"ref": 26}},                                               // 28
+        {"setattr": name("OCIO"), "name": "Leak", "value": {"int": "1"}},    // 29
+        {"delattr": name("OCIO"), "name": "Leak"},                           // 30
+        call(name("hasattr"), json!([name("OCIO"), s("Leak")])),             // 31
+        {"eval": {"array": {"dtype": "<f4", "shape": [2, 2],
+                            "bytes": "0000803f000000400000404000008040"}}},  // 32
+        {"eval": {"list": [{"list": [{"list": [{"int": "1"}]}]}]}},          // 33
+        {"eval": {"scalar": {"dtype": "<f4", "bytes": "0100807f"}}},         // 34
+        {"call": name("OCIO.GradingRGBM"), "getters": ["red", "__repr__"]},  // 35
+        {"eval": {"str": "61eda080"}},                                       // 36
+        call(name("operator.getitem"), json!([{"ref": 26}, s("missing")])),  // 37
+        call(name("tuple"), json!([])),                                      // 38
+        call(name("tuple"), json!([])),                                      // 39
+        {"eval": {"bytes": "00ff"}},                                         // 40
+        call(name("OCIO.ColorSpace.__new__"), json!([name("OCIO.ColorSpace")])), // 41
     ])
 }
 
@@ -103,7 +120,12 @@ def out(i, fact, value):
 
 def describe(i, prefix, v):
     out(i, prefix + "type", q(type(v)))
-    out(i, prefix + "repr", masked(repr(v)))
+    try:
+        text = repr(v)
+    except Exception as e:
+        out(i, prefix + "repr_raised", q(type(e)) + " " + masked(str(e)))
+    else:
+        out(i, prefix + "repr", masked(text))
     if isinstance(v, bool):
         out(i, prefix + "bool", str(v))
     elif type(v) is int:
@@ -117,8 +139,14 @@ def describe(i, prefix, v):
     elif type(v) in (list, tuple):
         for k, x in enumerate(v):
             describe(i, f"{prefix}{k}.", x)
-    elif type(v).__module__ == "numpy":
+    elif type(v) is dict:
+        for k, (key, x) in enumerate(v.items()):
+            describe(i, f"{prefix}{k}.0.", key)
+            describe(i, f"{prefix}{k}.1.", x)
+    elif type(v).__module__ == "numpy" and type(v).__name__ == "ndarray":
         out(i, prefix + "array", f"{v.dtype.str} {list(v.shape)} {list(v.strides)} {v.tobytes().hex()}")
+    elif type(v).__module__ == "numpy":
+        out(i, prefix + "scalar", f"{v.dtype.str} {v.tobytes().hex()}")
     elif hasattr(type(v), "__members__"):
         out(i, prefix + "enum", f"{v.name}={int(v)}")
 
@@ -181,6 +209,30 @@ step(22, set_slope)
 step(23, lambda: r[3].getSlope())
 step(24, lambda: bytes(bytes.fromhex("00ff41")))
 step(25, lambda: tuple([True, None]))
+step(26, lambda: {"k": 1})
+def set_item():
+    r[26]["k2"] = 2
+step(27, set_item)
+step(28, lambda: r[26])
+def set_leak():
+    OCIO.Leak = 1
+step(29, set_leak)
+def del_leak():
+    del OCIO.Leak
+step(30, del_leak)
+step(31, lambda: hasattr(OCIO, "Leak"))
+import numpy
+step(32, lambda: numpy.array([[1.0, 2.0], [3.0, 4.0]], dtype="<f4"))
+step(33, lambda: [[[1]]])
+step(34, lambda: numpy.frombuffer(bytes.fromhex("0100807f"), dtype="<f4")[0])
+step(35, lambda: OCIO.GradingRGBM(), ["red", "__repr__"])
+step(36, lambda: "a" + chr(0xD800))
+import operator
+step(37, lambda: operator.getitem(r[26], "missing"))
+step(38, lambda: tuple())
+step(39, lambda: tuple())
+step(40, lambda: bytes.fromhex("00ff"))
+step(41, lambda: OCIO.ColorSpace.__new__(OCIO.ColorSpace))
 # The wheel keeps the logging function in a static object, released after the interpreter
 # has finalized: a process that ends with a Python function set crashes on its way out.
 OCIO.ResetToDefaultLoggingFunction()
@@ -213,7 +265,18 @@ fn text_hex(v: &Value) -> String {
 fn describe(i: usize, prefix: &str, v: &Value, out: &mut Vec<String>) {
     let mut line = |fact: &str, value: String| out.push(format!("{i}\t{prefix}{fact}\t{value}"));
     line("type", v["type"].as_str().unwrap().to_string());
-    line("repr", text_hex(&v["repr"]));
+    if let Some(e) = v.get("repr_raised") {
+        line(
+            "repr_raised",
+            format!(
+                "{} {}",
+                e["type"].as_str().unwrap(),
+                text_hex(&e["message"])
+            ),
+        );
+    } else {
+        line("repr", text_hex(&v["repr"]));
+    }
     if let Some(b) = v.get("bool") {
         line(
             "bool",
@@ -243,12 +306,26 @@ fn describe(i: usize, prefix: &str, v: &Value, out: &mut Vec<String>) {
                 a["bytes"].as_str().unwrap()
             ),
         );
+    } else if let Some(a) = v.get("scalar") {
+        line(
+            "scalar",
+            format!(
+                "{} {}",
+                a["dtype"].as_str().unwrap(),
+                a["bytes"].as_str().unwrap()
+            ),
+        );
     } else if let Some(e) = v.get("enum") {
         line("enum", format!("{}={}", e[0].as_str().unwrap(), e[1]));
     }
     if let Some(items) = v.get("items") {
         for (k, item) in items.as_array().unwrap().iter().enumerate() {
-            describe(i, &format!("{prefix}{k}."), item, out);
+            if let Some(pair) = item.as_array() {
+                describe(i, &format!("{prefix}{k}.0."), &pair[0], out);
+                describe(i, &format!("{prefix}{k}.1."), &pair[1], out);
+            } else {
+                describe(i, &format!("{prefix}{k}."), item, out);
+            }
         }
     }
 }
@@ -339,10 +416,22 @@ fn reports_each_step_as_an_independent_script_sees_it() {
     assert_eq!(steps[17]["log"].as_array().unwrap().len(), 1);
     assert_eq!(steps[18]["value"]["bool"], json!(false), "{}", steps[18]);
     assert!(steps[9]["value"]["array"]["dtype"] == "<f4");
+    assert_eq!(steps[28]["same_as"], json!([26]));
+    assert_eq!(steps[31]["value"]["bool"], json!(false));
+    assert_eq!(steps[38]["same_as"], json!([]));
+    assert_eq!(steps[39]["same_as"], json!([]));
+    assert!(
+        steps[41]["value"].get("repr_raised").is_some(),
+        "{}",
+        steps[41]
+    );
+    assert_eq!(
+        report["scripts"][0]["interpreter"],
+        json!({"isolated": 1, "dont_write_bytecode": 1, "utf8_mode": 1})
+    );
 }
 
-/// Scripts run one after another, each with its own results: a reference reaches only its
-/// own script's steps.
+/// Each script has its own results: a reference reaches only its own script's steps.
 #[test]
 fn scripts_have_their_own_results() {
     let report = eval(json!([
@@ -362,45 +451,120 @@ fn scripts_have_their_own_results() {
     assert!(Oracle::get().try_call("py_eval", args, &[]).is_err());
 }
 
-/// The scripts' process sees nothing of the caller's environment: not this test's (`PATH`,
-/// Cargo's `CARGO`), nor the oracle's own (its temporary directory); on Windows, only
-/// `SYSTEMROOT`, which Python needs.
+/// What a script changes in its process doesn't reach the next script: the second script of a
+/// request after one that sets the current config, the logging level, an environment
+/// variable, attributes of OCIO and of a module, and NumPy's print options reports what it
+/// reports alone.
+#[test]
+fn scripts_run_in_processes_of_their_own() {
+    let mut raw = call(name("OCIO.Config.CreateRaw"), json!([]));
+    raw["getters"] = json!([]);
+    let changes = json!({"steps": [
+        raw,
+        call(on(0, "setName"), json!([s("leaked")])),
+        call(name("OCIO.SetCurrentConfig"), json!([{"ref": 0}])),
+        call(name("OCIO.SetLoggingLevel"), json!([name("OCIO.LOGGING_LEVEL_NONE")])),
+        call(name("OCIO.SetEnvVariable"), json!([s("PY_EVAL_LEAK"), s("1")])),
+        {"setattr": name("OCIO"), "name": "Leak", "value": {"int": "1"}},
+        {"setattr": name("math"), "name": "pi", "value": {"float": "0x4008000000000000"}},
+        {"call": name("numpy.set_printoptions"), "kwargs": [["precision", {"int": "1"}]]},
+        call(name("OCIO.SetComputeHashFunction"), json!([name("str.upper")])),
+    ]});
+    let mut current = call(name("OCIO.GetCurrentConfig"), json!([]));
+    current["getters"] = json!(["getName"]);
+    let observe = json!({"steps": [
+        current,
+        call(name("OCIO.GetLoggingLevel"), json!([])),
+        call(name("OCIO.IsEnvVariablePresent"), json!([s("PY_EVAL_LEAK")])),
+        call(name("hasattr"), json!([name("OCIO"), s("Leak")])),
+        {"eval": name("math.pi")},
+        call(name("numpy.get_printoptions"), json!([])),
+    ]});
+    let after = eval(json!([changes, observe.clone()]));
+    let alone = eval(json!([observe]));
+    assert!(after["scripts"][0].get("crashed").is_none(), "{after}");
+    assert_eq!(after["scripts"][1], alone["scripts"][0]);
+    // The changes happened in the first script's process.
+    let first = &after["scripts"][0]["steps"];
+    assert!(
+        first[2]["raised"].is_null() && first[8]["raised"].is_null(),
+        "{first}"
+    );
+}
+
+/// The scripts' process sees nothing of the caller's environment: the environment a context
+/// loads holds only SYSTEMROOT on Windows (which Python needs) and what the interpreter adds
+/// itself (uv's launcher on Windows, LC_CTYPE on Linux, PEP 538). Names only: the values are
+/// never reported.
 #[test]
 fn the_scripts_see_nothing_of_the_callers_environment() {
     assert!(std::env::var_os("PATH").is_some() && std::env::var_os("CARGO").is_some());
-    let names = [
-        "PATH",
-        "CARGO",
-        "TEMP",
-        "TMP",
-        "TMPDIR",
-        "HOME",
-        "SYSTEMROOT",
-    ];
-    let steps: Vec<Value> = names
+    let report = eval(json!([{"steps": [
+        call(name("OCIO.Context"), json!([])),
+        call(on(0, "setEnvironmentMode"), json!([name("OCIO.ENV_ENVIRONMENT_LOAD_ALL")])),
+        call(on(0, "loadEnvironment"), json!([])),
+        call(name("list"), json!([{"ref": 0}])),
+    ]}]));
+    let names: Vec<String> = report["scripts"][0]["steps"][3]["value"]["items"]
+        .as_array()
+        .unwrap()
         .iter()
-        .map(|n| call(name("OCIO.IsEnvVariablePresent"), json!([s(n)])))
+        .map(|n| String::from_utf8(bytes(&n["str"])).unwrap())
         .collect();
-    let report = eval(json!([{ "steps": steps }]));
-    for (n, step) in names
-        .iter()
-        .zip(report["scripts"][0]["steps"].as_array().unwrap())
-    {
-        let present = step["value"]["bool"].as_bool().unwrap();
-        assert_eq!(present, *n == "SYSTEMROOT" && cfg!(windows), "{n}");
+    let (required, added): (&[&str], &[&str]) = if cfg!(windows) {
+        (&["SYSTEMROOT"], &["PYTHONHOME", "UV_INTERNAL__PYTHONHOME"])
+    } else {
+        (&[], &["LC_CTYPE"])
+    };
+    for n in &names {
+        assert!(
+            required.contains(&n.as_str()) || added.contains(&n.as_str()),
+            "{n} reached the scripts: {names:?}"
+        );
+    }
+    for n in required {
+        assert!(names.iter().any(|x| x == n), "no {n}: {names:?}");
     }
 }
 
-/// A step that ends the process (`exit(3)`, a `SystemExit`) is reported as a crash.
+/// A script's process that exits with a status other than 0 is reported as a crash, even
+/// after it wrote its report (here a logging function set again at exit, which the wheel
+/// releases after the interpreter has finalized); the other scripts still report. A script
+/// that leaves a logging or hash function set doesn't crash: the interpreter resets both.
 #[test]
 fn reports_a_crash() {
-    let report = eval(json!([{ "steps": [call(name("exit"), json!([{"int": "3"}]))] }]));
-    assert_eq!(report["crashed"]["returncode"], 3, "{report}");
+    let ok = json!({"steps": [call(name("OCIO.CDLTransform"), json!([]))]});
+    let crash = json!({"steps": [call(
+        name("atexit.register"),
+        json!([name("OCIO.SetLoggingFunction"), name("str.upper")]),
+    )]});
+    let report = eval(json!([ok, crash, ok]));
+    let scripts = report["scripts"].as_array().unwrap();
+    let crashed = &scripts[1]["crashed"];
+    assert!(
+        crashed["returncode"].as_i64().is_some_and(|c| c != 0),
+        "{report}"
+    );
+    assert!(scripts[1].get("steps").is_none());
+    for i in [0, 2] {
+        assert_eq!(scripts[i]["steps"].as_array().unwrap().len(), 1, "{report}");
+    }
+
+    let left_set = eval(json!([{"steps": [
+        call(name("OCIO.SetLoggingFunction"), json!([name("str.upper")])),
+        call(name("OCIO.SetComputeHashFunction"), json!([name("str.upper")])),
+    ]}]));
+    assert!(
+        left_set["scripts"][0].get("crashed").is_none(),
+        "{left_set}"
+    );
+    assert_eq!(left_set["scripts"][0]["steps"].as_array().unwrap().len(), 2);
 }
 
 /// Requests it can't read are refused: the request's, a script's and a step's keys,
-/// expressions of an unknown kind or name, bad literals, and references to a step that is
-/// later, missing or raised.
+/// expressions of an unknown kind or name (the builtins that reach files, imports or code,
+/// modules besides those listed), bad literals, and references to a step that is later,
+/// missing or raised.
 #[test]
 fn bad_requests_are_refused() {
     let ok = call(name("OCIO.CDLTransform"), json!([]));
@@ -411,6 +575,14 @@ fn bad_requests_are_refused() {
         json!([{ "steps": [{ "eval": name("OCIO"), "call": name("OCIO") }] }]),
         json!([{ "steps": [{ "setattr": { "ref": 0 }, "name": "x" }] }]),
         json!([{ "steps": [{ "eval": name("os.system") }] }]),
+        json!([{ "steps": [{ "eval": name("open") }] }]),
+        json!([{ "steps": [{ "eval": name("__import__") }] }]),
+        json!([{ "steps": [{ "eval": name("exec") }] }]),
+        json!([{ "steps": [{ "eval": name("eval") }] }]),
+        json!([{ "steps": [{ "eval": name("compile") }] }]),
+        json!([{ "steps": [{ "eval": name("globals") }] }]),
+        json!([{ "steps": [{ "eval": name("exit") }] }]),
+        json!([{ "steps": [{ "eval": name("pickle") }] }]),
         json!([{ "steps": [{ "eval": { "int": "0x10" } }] }]),
         json!([{ "steps": [{ "eval": { "int": 1 } }] }]),
         json!([{ "steps": [{ "eval": { "float": "1.0" } }] }]),

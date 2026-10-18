@@ -1,14 +1,17 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # Copyright Contributors to the OpenColorIO Project.
-"""Runs scripts of Python steps against PyOpenColorIO and reports each step's result as JSON.
+"""Runs a script of Python steps against PyOpenColorIO and reports each step's result as JSON.
 A plain script: it imports nothing of the oracle, so the port's environment runs the same file
 against the port's module (card p6-skeleton), and the two reports compare.
 
-usage: python -I -B -X utf8 py_eval_steps.py < request.json > report.json
+usage: python -I -B -X utf8 py_eval_steps.py < script.json > report.json
 
-Request: {"scripts": [script, ...]}; a script is {"steps": [step, ...]}, run in order, with
-`import PyOpenColorIO as OCIO` done first. The scripts share the process, one after another;
-each has its own results. A step is one of
+One script per process: whatever a script changes in the process (the current config, the
+logging level, environment variables, the working directory, attributes of modules, OCIO's
+caches, NumPy's print options) ends with it. py_eval_api.py starts one process per script.
+
+A script is {"steps": [step, ...]}, run in order, with `import PyOpenColorIO as OCIO` done
+first. A step is one of
   {"eval": expr}                                   the value of expr
   {"call": expr, "args": [expr, ...], "kwargs": [[name, expr], ...]}
                                                    expr(*args, **kwargs); args and kwargs
@@ -21,31 +24,38 @@ without arguments when callable) and reported as a value of its own.
 
 An expr is one of
   {"ref": i}                   the result of step i of this script (which must have succeeded)
-  {"name": "a.b.c"}            a dotted name: "OCIO" (the package PyOpenColorIO), a builtin
-                               ("len", "str", "TypeError", ...) or one of the modules copy,
-                               operator, pickle, math, numpy, then attributes
+  {"name": "a.b.c"}            a dotted name: "OCIO" (the package PyOpenColorIO), one of
+                               BUILTINS, or one of MODULES, then attributes
   {"ref": i, "attr": "b.c"}    attributes of step i's result
   {"int": "decimal"}  {"float": "0x<16 hex digits>", the IEEE 754 binary64 bits}
   {"str": "<hex>", UTF-8 with lone surrogates kept (surrogatepass)}  {"bytes": "<hex>"}
   {"bool": true|false}  {"none": null}
-  {"list": [expr, ...]}  {"tuple": [expr, ...]}  {"dict": [[expr, expr], ...]}
-  {"array": {"dtype": "float32", "shape": [...], "bytes": "<hex>"}}   a NumPy array
-  {"scalar": {"dtype": "float32", "bytes": "<hex>"}}                  a NumPy scalar
+  {"list": [expr, ...]}  {"tuple": [expr, ...]}  {"dict": [[key expr, value expr], ...]}
+  {"array": {"dtype": "<f4", "shape": [...], "bytes": "<hex>"}}   a NumPy array (C order)
+  {"scalar": {"dtype": "<f4", "bytes": "<hex>"}}                  a NumPy scalar
+The names reach only what is listed: no file, process or import function. This is not a
+sandbox against hostile scripts (attributes reach further); it keeps the tests' own scripts
+from touching the machine by accident. py_eval_api.py also runs them in an empty directory
+and an empty environment.
 
-Report: {"scripts": [{"steps": [result, ...]}, ...]}. A result is
-  {"value": value, "same_as": [i, ...], "log": [text, ...], "getters": [[name, outcome], ...]}
-or {"raised": exception, "log": [...]}: "same_as" lists the earlier steps of the script whose
-result is this very object (every result stays alive until the script ends, so identity is
-id() equality); "log" holds the library's messages during the step (through
-SetLoggingFunction, installed before each script); an outcome is {"value": value} or
-{"raised": exception}.
+Report: {"interpreter": {"isolated", "dont_write_bytecode", "utf8_mode"} (sys.flags),
+"steps": [result, ...]}. A result is
+  {"value": value, "same_as": [i, ...], "getters": [[name, outcome], ...], "log": [text, ...]}
+or {"raised": exception, "log": [...]}: "same_as" lists the earlier steps whose result is this
+very object (every result stays alive until the script ends, so identity is id() equality;
+immutable builtins, which the interpreter may share whoever made them, list none); "log" holds
+the library's messages during the step (SetLoggingFunction, set before the first step); an
+outcome is {"value": value} or {"raised": exception}.
 
-A value is {"type": qualified name, "repr": text} and, by type:
+A value is {"type": qualified name, "repr": text} (or "repr_raised": exception, when repr()
+raises) and, by type:
   bool: "bool"; int: "int" (decimal); float: "float" (binary64 bits); str: "str" (text);
-  bytes, bytearray: "bytes" (hex); list, tuple: "items" (values); dict: "items" ([key, value]
-  pairs); a pybind11 enum value: "enum": [name, int value]; a NumPy array: "array": {"dtype",
-  "shape", "strides", "bytes"}; a NumPy scalar: "scalar": {"dtype", "bytes"}.
-An exception is {"type", "mro" (qualified names), "message": text of str(exc)}.
+  bytes, bytearray: "bytes" (hex); list, tuple: "items" (values, 8 levels deep); dict:
+  "items" ([key, value] pairs); a pybind11 enum value: "enum": [name, int value]; a NumPy
+  array: "array": {"dtype", "shape", "strides", "bytes"}; a NumPy scalar: "scalar": {"dtype",
+  "bytes"}.
+An exception is {"type", "mro" (qualified names), "message": text of str(exc)} (or
+"message_raised": the type of what str() raised).
 Text is {"bytes": hex} of its UTF-8 (surrogatepass). In a repr or a message, a memory address
 (" at 0x...") reads " at 0x?", and "address" is true: the port prints its own (P6-7).
 """
@@ -56,7 +66,14 @@ import os
 import re
 import sys
 
-_MODULES = ("copy", "operator", "pickle", "math", "numpy")
+MODULES = ("atexit", "copy", "math", "numpy", "operator")
+BUILTINS = frozenset([
+    "abs", "bool", "bytearray", "bytes", "complex", "dict", "divmod", "enumerate", "float",
+    "frozenset", "getattr", "hasattr", "hash", "int", "isinstance", "issubclass", "iter", "len",
+    "list", "max", "min", "next", "object", "pow", "range", "repr", "reversed", "round", "set",
+    "setattr", "slice", "sorted", "str", "sum", "tuple", "type", "zip",
+] + [n for n, v in vars(builtins).items()
+     if isinstance(v, type) and issubclass(v, BaseException)])
 _ADDRESS = re.compile(r" at 0x[0-9A-Fa-f]+")
 _IMMUTABLE = (type(None), bool, int, float, complex, str, bytes, tuple, frozenset)
 
@@ -84,10 +101,16 @@ def _float_bits(x):
 
 
 def _value(v, depth=0):
-    r, address = _masked(repr(v))
-    out = {"type": _qualified(type(v)), "repr": _text(r)}
-    if address:
-        out["address"] = True
+    out = {"type": _qualified(type(v))}
+    try:
+        r = repr(v)
+    except Exception as exc:  # noqa: BLE001 - reported in place of the repr
+        out["repr_raised"] = _exception(exc)
+    else:
+        r, address = _masked(r)
+        out["repr"] = _text(r)
+        if address:
+            out["address"] = True
     if isinstance(v, bool):
         out["bool"] = v
     elif isinstance(v, int) and type(v).__module__ == "builtins":
@@ -116,11 +139,16 @@ def _value(v, depth=0):
 
 
 def _exception(exc):
-    message, address = _masked(str(exc))
-    out = {"type": _qualified(type(exc)), "mro": [_qualified(c) for c in type(exc).__mro__],
-           "message": _text(message)}
-    if address:
-        out["address"] = True
+    out = {"type": _qualified(type(exc)), "mro": [_qualified(c) for c in type(exc).__mro__]}
+    try:
+        message = str(exc)
+    except Exception as inner:  # noqa: BLE001 - reported in place of the message
+        out["message_raised"] = _qualified(type(inner))
+    else:
+        message, address = _masked(message)
+        out["message"] = _text(message)
+        if address:
+            out["address"] = True
     return out
 
 
@@ -171,9 +199,9 @@ class _Script:
     def _root(self, name):
         if name == "OCIO":
             return self.ocio
-        if name in _MODULES:
+        if name in MODULES:
             return __import__(name)
-        if hasattr(builtins, name):
+        if name in BUILTINS:
             return getattr(builtins, name)
         raise RequestError(f"unknown name {name!r}")
 
@@ -220,7 +248,6 @@ class _Script:
             return _literal(kind, arg)
         except (ValueError, TypeError, KeyError) as exc:
             raise RequestError(f"bad expression {e!r}: {exc}") from None
-
 
     @staticmethod
     def check(s):
@@ -269,12 +296,15 @@ class _Script:
         return None
 
 
-def _run_script(ocio, script, log):
+def run(script):
+    """The report of a script (a dict), or RequestError."""
     if not isinstance(script, dict) or set(script) != {"steps"} or not isinstance(
             script["steps"], list):
         raise RequestError(f"bad script {script!r}")
+    import PyOpenColorIO as ocio
     state = _Script(ocio)
     out = []
+    log = []
     ocio.SetLoggingFunction(log.append)
     try:
         for s in script["steps"]:
@@ -288,8 +318,6 @@ def _run_script(ocio, script, log):
                 state.results.append((False, exc))
                 out.append({"raised": _exception(exc), "log": [_text(m) for m in log]})
                 continue
-            # Immutable builtins (None, True, small ints, strings) may be shared by the
-            # interpreter whoever made them: only other objects report identity.
             same = [] if isinstance(v, _IMMUTABLE) else [
                 i for i, (ok, w) in enumerate(state.results) if ok and w is v]
             state.results.append((True, v))
@@ -307,21 +335,16 @@ def _run_script(ocio, script, log):
             result["log"] = [_text(m) for m in log]
             out.append(result)
     finally:
-        # Also needed for the process to end cleanly: the wheel keeps the logging function in
-        # a static object, released after the interpreter has finalized, and a Python
-        # function still set then crashes the process on its way out.
+        # Also needed for the process to end cleanly: the wheel keeps the logging function and
+        # the hash function in static objects, released after the interpreter has finalized,
+        # and a Python function still set then crashes the process on its way out.
         ocio.ResetToDefaultLoggingFunction()
-    return {"steps": out}
-
-
-def run(request):
-    """The report of a request (a dict), or RequestError."""
-    if not isinstance(request, dict) or set(request) != {"scripts"} or not isinstance(
-            request["scripts"], list):
-        raise RequestError("expects {\"scripts\": [...]}")
-    import PyOpenColorIO as ocio
-    log = []
-    return {"scripts": [_run_script(ocio, script, log) for script in request["scripts"]]}
+        ocio.ResetComputeHashFunction()
+    flags = sys.flags
+    return {"interpreter": {"isolated": flags.isolated,
+                            "dont_write_bytecode": flags.dont_write_bytecode,
+                            "utf8_mode": flags.utf8_mode},
+            "steps": out}
 
 
 def main():
@@ -330,9 +353,9 @@ def main():
     report = os.fdopen(os.dup(1), "w", encoding="utf-8")
     os.dup2(2, 1)
     sys.stdout = sys.stderr
-    request = json.loads(sys.stdin.buffer.read().decode("utf-8"))
+    script = json.loads(sys.stdin.buffer.read().decode("utf-8"))
     try:
-        out = run(request)
+        out = run(script)
     except RequestError as exc:
         out = {"request_error": str(exc)}
     report.write(json.dumps(out))
