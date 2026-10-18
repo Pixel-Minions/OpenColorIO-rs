@@ -245,12 +245,14 @@ class A(unittest.TestCase):
         self.assertEqual(os.listdir("."), [])
         with open("left-behind.txt", "w") as f:
             f.write("x")
-        # Only what the command sets, what the uv launcher of Windows adds, and what Python
-        # adds itself: LC_CTYPE on Linux, where it coerces the C locale (PEP 538).
+        # Only what the command sets, and what the interpreter adds itself: uv's launcher on
+        # Windows, LC_CTYPE on Linux, where Python coerces the C locale (PEP 538).
         expected = {"TEMP", "TMP", "TMPDIR", "TEST_DATAFILES_DIR"}
         if os.name == "nt":
             expected |= {"SYSTEMROOT"}
-        added = {"PYTHONHOME", "UV_INTERNAL__PYTHONHOME", "LC_CTYPE"}
+            added = {"PYTHONHOME", "UV_INTERNAL__PYTHONHOME"}
+        else:
+            added = {"LC_CTYPE"}
         self.assertEqual(set(os.environ) - added, expected)
         import tempfile
         self.assertTrue(os.path.samefile(tempfile.gettempdir(), os.environ["TMPDIR"]))
@@ -350,12 +352,14 @@ fn reports_each_outcome_of_a_synthetic_module() {
 }
 
 /// A module that fails to import is reported with its exception; one whose process ends is
-/// reported as a crash, with its exit status.
+/// reported as a crash, with its exit status, even when the runner wrote its report first (a
+/// handler that runs at exit).
 #[test]
 fn reports_an_import_error_and_a_crash() {
     let synthetic = Synthetic::new(&[
         ("BrokenTest", "raise ImportError('missing piece')\n"),
         ("CrashTest", "import os\nos._exit(3)\n"),
+        ("LateCrashTest", LATE_CRASH),
     ]);
     let broken = synthetic.run("BrokenTest");
     assert_eq!(broken["import_error"]["type"], "ImportError", "{broken}");
@@ -365,7 +369,22 @@ fn reports_an_import_error_and_a_crash() {
 
     let crashed = synthetic.run("CrashTest");
     assert_eq!(crashed["crashed"]["returncode"], 3, "{crashed}");
+
+    let late = synthetic.run("LateCrashTest");
+    assert_eq!(late["crashed"]["returncode"], 9, "{late}");
 }
+
+/// A module whose test passes, and whose process then ends with status 9, after the runner
+/// has written its report.
+const LATE_CRASH: &str = r#"
+import atexit, os, unittest
+
+atexit.register(os._exit, 9)
+
+class T(unittest.TestCase):
+    def test_passes(self):
+        pass
+"#;
 
 /// Requests it can't read are refused: missing or extra arguments, arguments of the wrong
 /// type, and modules that aren't a file of the tests' python directory.

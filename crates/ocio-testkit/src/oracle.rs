@@ -666,7 +666,13 @@ fn uv_program() -> PathBuf {
 
 /// Hash of everything that determines the oracle's answers on this machine.
 fn identity(oracle_dir: &Path) -> Result<u128, String> {
-    identity_with(oracle_dir, &paths::upstream_dir().join("tests"))
+    identity_with(oracle_dir, &upstream_tests_dir())
+}
+
+/// Upstream's tests directory (`upstream/OpenColorIO/tests`), whose `data` and `python` the
+/// cache key hashes.
+fn upstream_tests_dir() -> PathBuf {
+    paths::upstream_dir().join("tests")
 }
 
 /// [`identity`], with upstream's tests in `upstream_tests` (its `data` and `python`
@@ -1676,6 +1682,20 @@ mod tests {
             "a data file didn't change the identity"
         );
         assert_ne!(code_changed, before, "a module didn't change the identity");
+    }
+
+    /// The directory the cache identity hashes is upstream's tests directory: it holds the
+    /// test files requests name (`data/files`) and the Python suite
+    /// (`python/OpenColorIOTestSuite.py`).
+    #[test]
+    fn the_identity_hashes_upstreams_tests_directory() {
+        let dir = upstream_tests_dir();
+        assert!(dir.join("data").join("files").is_dir(), "{}", dir.display());
+        assert!(
+            dir.join("python").join("OpenColorIOTestSuite.py").is_file(),
+            "{}",
+            dir.display()
+        );
     }
 
     /// The cache identity takes upstream's test files and Python tests: the same oracle with

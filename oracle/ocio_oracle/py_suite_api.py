@@ -36,8 +36,11 @@ def py_suite(args, blobs):
               module of its python directory, such as "ConfigTest"}
     result:   the runner's report (py_suite_runner.py): {"module", "numpy", "import_error",
               "tests": [{"id", "outcome", "message"}, ...]}, with each message as
-              {"bytes": hex} of its UTF-8; or, when the process died,
-              {"crashed": {"returncode", "stderr": {"bytes": hex}}}
+              {"bytes": hex} of its UTF-8; or, when the process exited with a status other
+              than 0 (even after writing its report) or wrote no report,
+              {"crashed": {"returncode", "stderr": {"bytes": hex}}}; a process that runs
+              longer than 30 minutes raises (subprocess.TimeoutExpired), and the request
+              fails rather than return a result
     blobs:    none
 
     The module runs in a new process (`python -I -B -X utf8`), as OpenColorIOTestSuite.py
