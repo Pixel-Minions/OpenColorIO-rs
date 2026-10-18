@@ -157,12 +157,118 @@ fn the_app_helpers_run_on_the_config() {
         encodings.as_array().is_some_and(|e| !e.is_empty()),
         "{response}"
     );
+    // Every encoding, as the iterator's indices read them (iterating it raises, I-216).
+    let indexed = call(json!({
+        "config": {"builtin": STUDIO},
+        "calls": [
+            {"new": "MixingColorSpaceManager", "args": [{"ref": "config"}], "as": "mixing"},
+            {"call": "getMixingEncodings", "on": "mixing", "as": "encodings"},
+            {"call": "__len__", "on": "encodings"},
+            {"call": "__getitem__", "on": "encodings", "args": [0]},
+            {"call": "__getitem__", "on": "encodings", "args": [1]},
+        ],
+    }));
+    let i = calls(&indexed);
+    assert_eq!(i[2]["result"], json!(2), "{indexed}");
+    assert_eq!(
+        *encodings,
+        json!([i[3]["result"], i[4]["result"]]),
+        "{indexed}"
+    );
     assert!(c[9]["result"]["f64"].is_u64(), "{response}");
     assert_eq!(c[11]["result"], json!(false), "{response}");
     assert!(
         response["processors"][0]["processor"]["cache_id"].is_string(),
         "{response}"
     );
+}
+
+/// Where the library raised: building a call's arguments, the call, or writing its value out
+/// (a version 1 config with a view transform can't serialize); "as" still stores a value whose
+/// write failed. A config is written by serialize(), and the request's objects before the
+/// calls change them.
+#[test]
+fn stages_writes_and_order() {
+    let bad_curve = json!({"object": {"class": "GradingBSplineCurve", "args": [[0.0, 0.0, 0.5]]}});
+    let view_transform = json!({"referenceSpace": {"enum": "REFERENCE_SPACE_SCENE"},
+                                "name": "vt",
+                                "fromReference": {"transform": {"class": "MatrixTransform"}}});
+    let response = call(json!({
+        "objects": {"curve": {"class": "GradingBSplineCurve", "args": [[0.0, 0.0, 0.5, 0.5, 1.0, 1.0]]}},
+        "calls": [
+            {"dump": "config"},
+            {"call": "serialize"},
+            {"new": "GradingRGBCurveTransform", "args": [bad_curve]},
+            {"call": "getProcessor", "args": ["nowhere", "nothing"]},
+            {"call": "setMajorVersion", "args": [1]},
+            {"new": "ViewTransform", "kwargs": view_transform, "as": "vt"},
+            {"call": "addViewTransform", "args": [{"ref": "vt"}]},
+            {"copy": "config", "as": "v1"},
+            {"call": "getMajorVersion", "on": "v1"},
+            {"call": "getMajorVersion"},
+            {"call": "setSlopes", "on": "curve",
+             "args": [[{"f64": 0.5f64.to_bits()}, {"f64": 0.25f64.to_bits()},
+                       {"f64": 0.125f64.to_bits()}]]},
+            {"dump": "curve"},
+        ],
+    }));
+    let c = calls(&response);
+    assert_eq!(c[0]["result"]["class"], json!("Config"), "{response}");
+    let serialized = c[1]["result"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{response}"));
+    let hex: String = serialized.bytes().map(|b| format!("{b:02x}")).collect();
+    assert_eq!(
+        c[0]["result"]["serialize"],
+        json!({"bytes": hex}),
+        "{response}"
+    );
+    assert_eq!(c[2]["stage"], json!("arguments"), "{response}");
+    assert!(c[2]["exception"]["message"].is_object(), "{response}");
+    assert_eq!(c[3]["stage"], json!("call"), "{response}");
+    assert!(c[3]["exception"]["message"].is_object(), "{response}");
+    assert_eq!(c[7]["stage"], json!("write"), "{response}");
+    assert!(c[7]["exception"]["message"].is_object(), "{response}");
+    assert_eq!(c[8]["result"], c[9]["result"], "{response}");
+    // The object as it was made, before setSlopes.
+    assert_ne!(
+        response["objects"]["curve"]["result"], c[11]["result"],
+        "{response}"
+    );
+}
+
+/// OCIO's log goes where it was logged: loading the config to config_log, and the same load
+/// in a call to that call's log, as config_calls reports them.
+#[test]
+fn the_log_goes_where_it_was_logged() {
+    let yaml = "ocio_profile_version: 2
+
+roles:
+  default: raw
+
+colorspaces:
+  -                 !<ColorSpace>
+    name: raw
+    bogus: 1
+";
+    let args = json!({
+        "config": {"yaml": yaml},
+        "calls": [
+            {"call": "getName"},
+            {"call": "CreateFromStream", "on": "Config", "args": [yaml]},
+        ],
+    });
+    let response = call(args.clone());
+    let reference = Oracle::get().call("config_calls", args, &[]).result;
+    let config_log = &response["config_log"];
+    assert!(
+        config_log.as_array().is_some_and(|l| !l.is_empty()),
+        "{response}"
+    );
+    assert_eq!(*config_log, reference["config_log"], "{response}");
+    let c = calls(&response);
+    assert_eq!(c[0]["log"], json!([]), "{response}");
+    assert_eq!(c[1]["log"], *config_log, "{response}");
 }
 
 /// An exception a value object's constructor raises is the config's: no call runs.
@@ -177,6 +283,15 @@ fn a_constructor_exception_stops_before_the_calls() {
         "{response}"
     );
     assert_eq!(response["calls"], json!([]), "{response}");
+}
+
+/// A spec of `depth` groups, each holding the next.
+fn nested_groups(depth: usize) -> Value {
+    let mut spec = json!({"class": "GroupTransform"});
+    for _ in 0..depth {
+        spec = json!({"class": "GroupTransform", "children": [spec]});
+    }
+    spec
 }
 
 /// Requests the command can't run exactly are refused, with the oracle's own reason where it
@@ -205,6 +320,22 @@ fn bad_requests_are_refused() {
                           "args": [{"object": {"class": "GradingPrimary", "calls": [[]]}}]}]}),
         json!({"calls": [{"call": "NoSuchFunction", "on": "DisplayViewHelpers"}]}),
         json!({"calls": [{"dump": "nothing"}]}),
+        // Malformed transform specs in arguments, an object nested in one, and a group too deep
+        // for Python's recursion (1,000 levels: JSON reads them, the spec's builder can't): the
+        // request's errors, not the library's.
+        json!({"calls": [{"call": "getProcessor",
+                          "args": [{"transform": {"class": "MatrixTransform", "calls": [[]]}}]}]}),
+        json!({"calls": [{"call": "getProcessor", "args": [{"transform": {
+            "class": "GradingPrimaryTransform",
+            "args": [{"object": {"class": "GradingPrimary", "args": [{"enum": "GRADING_LOG"}],
+                                 "calls": [[]]}}]}}]}]}),
+        json!({"calls": [{"new": "GroupTransform", "args": [[{"transform": {
+            "class": "MatrixTransform", "calls": [[]]}}]]}]}),
+        json!({"calls": [{"call": "getProcessor", "args": [{"transform": nested_groups(1000)}]}]}),
+        // No overload takes the arguments (pybind11's TypeError).
+        json!({"calls": [{"call": "getProcessor", "args": [1, 2, 3, 4, 5]}]}),
+        // A value too deep for checks.dump to write out: the oracle's own error while writing.
+        json!({"calls": [{"new": "GroupTransform", "args": [[{"transform": nested_groups(10)}]]}]}),
     ];
     for args in &bad {
         refused(args);

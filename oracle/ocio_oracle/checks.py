@@ -87,7 +87,7 @@ def dump(value, blobs, depth=0):
       holding the array's bytes (little-endian, C order);
     - lists, tuples and the binding's iterators as lists (an iterator with __len__ and
       __getitem__ read by index: MixingColorSpaceManager's MixingEncodingIterator binds its
-      __next__ to the wrong class, PyMixingHelpers.cpp:146 @ v2.5.2, so iterating it raises
+      __next__ to the wrong class, PyMixingHelpers.cpp:147-151 @ v2.5.2, so iterating it raises
       TypeError, while its indices read the encodings);
     - any other object as {"class": its type's name, "getters": each method named get*, is* or
       has* that takes no argument, called, by name, "properties": each property, by name,

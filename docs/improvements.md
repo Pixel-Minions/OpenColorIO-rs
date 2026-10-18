@@ -2973,7 +2973,7 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 ### I-216. Iterating a mixing manager's encodings raises a TypeError in Python
 
 - **Upstream:** the binding's `MixingEncodingIterator` binds `__next__` with a
-  `MixingSpaceIterator &` parameter (`src/bindings/python/apphelpers/PyMixingHelpers.cpp:146-150`
+  `MixingSpaceIterator &` parameter (`src/bindings/python/apphelpers/PyMixingHelpers.cpp:147-151`
   @ v2.5.2), a class the encoding iterator isn't. So `list(manager.getMixingEncodings())` or a
   `for` loop over it raises pybind11's TypeError ("incompatible function arguments"), while
   `len()` and indexing read the encodings (wheel probe, Windows, 2026-10-18: a raw config's

@@ -109,8 +109,24 @@ def _attempt(fn, stage, blobs):
         return {"exception": raised(exc), "stage": "write"}, True, value
 
 
+def _arguments(args, kwargs, objects):
+    """A call's arguments, built from their value specs. What the library raises while building
+    them (a transform's or a value object's constructor or setters) goes on to the caller,
+    which reports it; anything else (a spec Python can't read, whatever it raises: IndexError,
+    RecursionError, ...) is the request's error."""
+    try:
+        return _value(args, objects), {k: _value(v, objects) for k, v in kwargs.items()}
+    except RequestError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - sorted into the library's and the request's
+        if _library(exc) or isinstance(exc, UnicodeDecodeError):
+            raise
+        raise RequestError(f"a call's arguments: {type(exc).__name__}: {exc}") from exc
+
+
 def _call_fn(i, call, objects):
-    """The function a call runs, and the name it stores its result as."""
+    """The functions of a call: build() its arguments, and invoke(args, kwargs) what it calls;
+    and the name it stores its result as."""
     kind = next((k for k in CALL_KEYS if isinstance(call, dict) and k in call), None)
     if kind is None:
         raise RequestError(f"calls[{i}]: {call!r} is none of {sorted(CALL_KEYS)}")
@@ -121,13 +137,15 @@ def _call_fn(i, call, objects):
     args, kwargs = call.get("args", []), call.get("kwargs", {})
     if not isinstance(args, list) or not isinstance(kwargs, dict):
         raise RequestError(f"calls[{i}]: args must be a list and kwargs an object")
+
+    def build():
+        return _arguments(args, kwargs, objects)
+
     if kind == "call":
         target = _target(call.get("on", "config"), objects)
         method = _method(target, call["call"])
 
-        def fn():
-            call_args = _value(args, objects)
-            call_kwargs = {k: _value(v, objects) for k, v in kwargs.items()}
+        def invoke(call_args, call_kwargs):
             _check_current_config(target, call["call"], call_args, call_kwargs)
             return method(*call_args, **call_kwargs)
     elif kind == "new":
@@ -135,19 +153,19 @@ def _call_fn(i, call, objects):
         if not isinstance(cls, type):
             raise RequestError(f"calls[{i}]: {call['new']!r} isn't a PyOpenColorIO class")
 
-        def fn():
-            return cls(*_value(args, objects), **{k: _value(v, objects) for k, v in kwargs.items()})
+        def invoke(call_args, call_kwargs):
+            return cls(*call_args, **call_kwargs)
     elif kind == "copy":
         source = _target(call["copy"], objects)
 
-        def fn():
+        def invoke(call_args, call_kwargs):
             return copy.deepcopy(source)
     else:
         source = _target(call["dump"], objects)
 
-        def fn():
+        def invoke(call_args, call_kwargs):
             return source
-    return fn, store
+    return build, invoke, store
 
 
 def _run_calls(calls, objects, log, blobs):
@@ -156,11 +174,20 @@ def _run_calls(calls, objects, log, blobs):
         raise RequestError(f"calls must be a list, not {calls!r}")
     results = []
     for i, call in enumerate(calls):
-        fn, store = _call_fn(i, call, objects)
+        build, invoke, store = _call_fn(i, call, objects)
         log.discard()
-        entry, returned, value = _attempt(fn, "call", blobs)
-        if returned and store is not None:
-            objects[store] = value
+        try:
+            built = build()
+        except UnicodeDecodeError as exc:
+            entry = {"undecodable": bytes(exc.object).hex(), "stage": "arguments"}
+        except Exception as exc:  # noqa: BLE001 - _arguments lets only the library's through
+            if not _library(exc):
+                raise
+            entry = {"exception": raised(exc), "stage": "arguments"}
+        else:
+            entry, returned, value = _attempt(lambda: invoke(*built), "call", blobs)
+            if returned and store is not None:
+                objects[store] = value
         entry["log"] = log.take()
         results.append(entry)
     return results
@@ -221,11 +248,13 @@ def object_calls(args, blobs):
                   object raised in the library (no call runs then)
       config_log  OCIO's log while making them: [{"bytes": hex}]
       objects     {name: {"result": the value object written out}, or the exception
-                  writing it out raised, as a call's}, when they were made
+                  writing it out raised, as a call's; and "log"}, when they were made
       calls       per call {"result": the value written out (see below)}, or {"exception":
                   {"type", "message": {"bytes": hex}}, "stage"} or {"undecodable": hex,
                   "stage"} where the library raised or a string couldn't be decoded: stage
-                  "call" (the call) or "write" (writing its value out); and "log"
+                  "arguments" (building the call's arguments: a transform's or a value
+                  object's constructor or setters), "call" (the call) or "write" (writing
+                  its value out; "as" still stores the value then); and "log"
       processors  per name, {"processor": {"cache_id", "isNoOp", "hasChannelCrosstalk",
                   "isDynamic", "processor_metadata", "group"}}, or {"exception", "stage":
                   "group"}; and "log"
@@ -271,8 +300,11 @@ def object_calls(args, blobs):
         if result["config"] is not None:
             result.update(objects={}, calls=[], processors=[])
             return result, out
-        result["objects"] = {name: _attempt(lambda o=objects[name]: o, "write", out)[0]
-                             for name in specs}
+        result["objects"] = {}
+        for name in specs:
+            entry = _attempt(lambda o=objects[name]: o, "write", out)[0]
+            entry["log"] = log.take()
+            result["objects"][name] = entry
         result["calls"] = _run_calls(args.get("calls", []), objects, log, out)
         result["processors"] = []
         for name in processors:

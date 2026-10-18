@@ -100,6 +100,8 @@ fn a_set_exposure_applies_as_a_fixed_one() {
         response.result
     );
     assert_eq!(s[0]["has"], json!(true), "{}", response.result);
+    // A set that succeeded has no stage.
+    assert_eq!(s[1].get("stage"), None, "{}", response.result);
     for (i, exposure) in exposures.into_iter().enumerate() {
         let read = &s[2 + 3 * i];
         assert_eq!(read["result"]["value"], f64_spec(exposure), "{read}");
