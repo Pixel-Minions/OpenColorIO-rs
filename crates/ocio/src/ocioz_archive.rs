@@ -227,7 +227,7 @@ fn add_supported_files(
         let name = match name {
             Ok(name) => name,
             Err(name) => {
-                // A name minizip-ng reads from memory it doesn't own (docs/improvements.md, U-79).
+                // A name minizip-ng reads into memory nothing wrote (docs/improvements.md, U-79).
                 let mut os = b"Could not archive ".to_vec();
                 os.extend_from_slice(&os_path::join(path, &name));
                 os.extend_from_slice(b": its name is longer than minizip-ng reads.");

@@ -2994,6 +2994,29 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   gives the system the pattern's long form (`\\?\`), as the wheel's call works under a
   long-path-aware Python.
 
+### I-222. Archiving reads a long name with the bytes earlier names left, on Windows
+
+- **Upstream:** `Config::archive` lists the config's directory with minizip-ng's
+  `mz_os_read_dir` (`OCIOZArchive.cpp:150-201` @ v2.5.2; minizip-ng `mz_os_win32.c:401-421` @
+  4.0.10), which converts each name into the same 256 bytes of `d_name`. A name longer than
+  255 UTF-8 bytes doesn't fit with its NUL: `WideCharToMultiByte` writes the whole characters
+  that fit and fails, and OpenColorIO reads `d_name` up to its first NUL, past the cut into
+  what earlier names of the listing wrote, or to the `end` flag's 0 where the 256 bytes hold
+  no NUL (U-79 covers the reads that reach memory nothing wrote). The name read isn't the
+  file's: a cut of 256 bytes is read as itself, and a shorter one (it falls inside a
+  character) with an earlier name's bytes after it. Where the name read has a LUT extension,
+  OpenColorIO looks for that file and the archive fails ("Could not write LUT file
+  <dir>\<name read> to in-memory archive."); any other is left out. A directory with
+  U+20AC x84 `-3dlzz`, then U+20AC x84 `.` U+1F600 `.spi1d` (cut to 253 bytes, then the
+  first name's `3dl`) fails with the LUT file U+20AC x84 `.3dl` (the Windows wheel, 3 runs
+  of 3, probed 2026-10-18).
+- **Who notices:** applications archiving configs next to files with very long names, on
+  Windows.
+- **A fix:** convert each name into a buffer sized from it, or refuse a name whose conversion
+  fails.
+- **Status:** matched in `group-5f` (`crates/ocio/src/minizip/mz_os.rs`, `mz_os_list_dir`);
+  `crates/ocio/tests/ocioz_archive_oracle.rs`, `long_names` (Windows, against the wheel).
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
@@ -4013,29 +4036,27 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 
 - **Upstream:** `Config::archive` lists the config's directory with minizip-ng's
   `mz_os_read_dir` (`OCIOZArchive.cpp:150-201` @ v2.5.2; minizip-ng `mz_os_win32.c:401-421` @
-  4.0.10), which converts each name from UTF-16 into the 256 bytes of `d_name`
-  (`WideCharToMultiByte`); the byte after `d_name` is the listing's `end` flag (0, and 1 once
-  the last entry is read; `DIR_int`, `mz_os_win32.c:30-35`), then the structure's padding,
-  which `malloc` left uninitialized. A name longer than 255 bytes doesn't fit with its NUL:
-  the conversion writes the whole characters that fit in the 256 bytes and fails, and
-  OpenColorIO reads `d_name` as a C string. Where those characters fill the 256 bytes, the
-  name read is that cut, ended by `end`'s 0, and OpenColorIO looks for it: a cut ending in a
-  LUT extension makes the archive fail ("Could not write LUT file <dir>/<cut> to in-memory
-  archive."), any other is left out. Where they don't (the cut falls inside a character), the
-  bytes after them are what an earlier entry left in `d_name`, or memory `malloc` left
-  uninitialized; and for the last entry, whose `end` is 1, the read goes on into the
-  padding. The name read then depends on that memory (the Windows wheel left such files out,
-  probed 2026-10-17).
+  4.0.10), which converts each name of the listing (`.` and `..` first) from UTF-16 into the
+  same 256 bytes of `d_name` (`WideCharToMultiByte`); the byte after `d_name` is the listing's
+  `end` flag (0, and 1 once the last entry is read; `DIR_int`, `mz_os_win32.c:30-35`), then
+  the structure's padding. `malloc` left all of it uninitialized. A name longer than 255
+  bytes doesn't fit with its NUL: the conversion writes the whole characters that fit in the
+  256 bytes and fails, and the bytes after them stay as they were. OpenColorIO reads
+  `d_name` as a C string: the cut, then what earlier entries wrote after it, up to a NUL, or
+  up to `end`'s 0 where the 256 bytes hold none (I-222). Where that read reaches a byte of
+  `d_name` no entry wrote, or, for the last entry, `end`'s 1 and the padding, the name read
+  depends on memory nothing wrote (the Windows wheel left such files out, probed
+  2026-10-17).
 - **Who notices:** applications archiving configs next to files with very long names.
-- **Decided** (the owner's general rule, 2026-09-30): the port reads a name of up to 255
-  bytes as it is and a longer one as its 256-byte cut where the cut fills `d_name` and the
-  entry isn't the last, as the wheel does; where the name read depends on memory upstream
-  doesn't own, `Config::archive` fails with "Could not archive <path>: its name is longer
-  than minizip-ng reads.".
-- **Status:** matched in `p4-baker`, with an error where upstream reads memory it doesn't own
-  (`crates/ocio/src/minizip/mz_os.rs`, `mz_os_list_dir`; `crates/ocio/src/ocioz_archive.rs`);
-  `crates/ocio/tests/ocioz_archive_oracle.rs`, `long_names` (Windows: against the wheel where
-  it reads whole names, the port alone where it doesn't).
+- **Decided** (the owner's general rule, 2026-09-30): the port reads each name as minizip-ng
+  leaves it in `d_name`, earlier entries' bytes included (I-222); where the read reaches a
+  byte nothing wrote, or the padding after the last entry, `Config::archive` fails with
+  "Could not archive <path>: its name is longer than minizip-ng reads.".
+- **Status:** matched in `p4-baker`, with an error where upstream reads memory nothing wrote
+  (`crates/ocio/src/minizip/mz_os.rs`, `mz_os_list_dir`, which keeps `d_name` across the
+  listing; `crates/ocio/src/ocioz_archive.rs`); `crates/ocio/tests/ocioz_archive_oracle.rs`,
+  `long_names` (Windows: against the wheel where the name read is fixed, the port alone where
+  it isn't).
 
 ### U-80. Archiving a config next to a dangling link whose name holds `*` overflows the stack
 

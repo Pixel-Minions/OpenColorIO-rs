@@ -391,15 +391,17 @@ fn archives_as_the_wheel() {
 }
 
 /// Names of LUT files around a config longer than 255 UTF-8 bytes: minizip-ng's
-/// `mz_os_read_dir` converts each name into the 256 bytes of `d_name`, the whole characters
-/// that fit, which the listing's `end` flag follows (docs/improvements.md, U-79). Windows
-/// lists a directory's names in the order of their upper case (U+20AC, then U+20AD), so a
-/// name with U+20AD comes after those of U+20AC.
-/// - Against the wheel, where it reads whole names: 255 bytes; 256 bytes not last; a cut
+/// `mz_os_read_dir` converts each name into the same 256 bytes of `d_name`, the whole
+/// characters that fit, leaving the bytes after them as earlier entries wrote them; the
+/// listing's `end` flag follows (docs/improvements.md, I-222 and U-79). Windows lists a
+/// directory's names in the order of their upper case (`-` before `.`, U+20AC before U+20AD),
+/// so a name with U+20AD comes after those of U+20AC.
+/// - Against the wheel, where the name read is fixed: 255 bytes; 256 bytes not last; a cut
 ///   that fills the 256 bytes, not last, ending in `.spi1d` (the wheel's error for the cut
-///   name) or not (left out).
-/// - The port alone, where the wheel reads memory it doesn't own: a 256-byte name listed last,
-///   and a cut that falls inside a character; the port fails.
+///   name) or not (left out); a cut inside a character followed by an earlier name's bytes,
+///   making a LUT name (U+20AC x84 `.3dl`: the wheel's error) or not (left out).
+/// - The port alone, where the wheel reads memory nothing wrote: a 256-byte name listed last,
+///   and a cut inside a character followed by bytes no entry wrote; the port fails.
 ///
 /// Windows only: on Linux `d_name` is the system's, and a name has at most 255 bytes.
 #[cfg(windows)]
@@ -410,7 +412,10 @@ colorspaces:\n  - !<ColorSpace> {name: raw}\n";
     // 83 euros are 249 UTF-8 bytes.
     let euros = "\u{20ac}".repeat(83);
     let after = "\u{20ad}.spi1d".to_owned();
-    let layouts: [(&str, Vec<String>); 3] = [
+    // 84 euros are 252 bytes: with `.` and U+1F600 the cut is 253 bytes, and an earlier
+    // name's `3dl` follows it.
+    let euros84 = "\u{20ac}".repeat(84);
+    let layouts: [(&str, Vec<String>); 5] = [
         (
             "long_names",
             vec![
@@ -427,6 +432,22 @@ colorspaces:\n  - !<ColorSpace> {name: raw}\n";
         (
             "long_name_cut_to_no_lut",
             vec![format!("{euros}abcdefgzz"), after.clone()],
+        ),
+        (
+            "long_name_stale_bytes_to_a_lut",
+            vec![
+                format!("{euros84}-3dlzz"),
+                format!("{euros84}.\u{1f600}.spi1d"),
+                after.clone(),
+            ],
+        ),
+        (
+            "long_name_stale_bytes_to_no_lut",
+            vec![
+                format!("{euros}abcdefgzz"),
+                format!("{}.spi1d", "\u{20ac}".repeat(90)),
+                after.clone(),
+            ],
         ),
     ];
     let mut configs = Vec::new();

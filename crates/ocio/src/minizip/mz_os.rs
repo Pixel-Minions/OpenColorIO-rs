@@ -246,16 +246,16 @@ pub(crate) fn mz_os_get_file_attribs(path: &[u8]) -> u32 {
 ///   8.3 short name starts with the directory's own name, and the cut path the one whose name
 ///   is the cut name (docs/improvements.md, I-221). OpenColorIO then looks for each name found
 ///   in the directory itself.
-/// - `mz_os_read_dir` converts each name into a `d_name` of 256 bytes, which the byte `end`
-///   follows (0, and 1 once the last entry is read), then the structure's uninitialized
-///   padding. A name of more than 255 UTF-8 bytes doesn't fit with its NUL:
-///   `WideCharToMultiByte` writes the whole characters that fit in the 256 bytes and fails,
-///   and the name read is that cut, ended by `end`'s 0. Where the cut is 256 bytes and `end`
-///   is 0, the cut name is the entry's name (`Ok`). Where the cut is shorter (it falls inside a
-///   character), the bytes after it are what an earlier entry left in `d_name` or memory
-///   `malloc` left uninitialized; and where `end` is 1, the read goes on into the padding: the
-///   name read depends on that memory, and the port gives the entry's name as `Err`
-///   (docs/improvements.md, U-79).
+/// - `mz_os_read_dir` converts each name, `.` and `..` included, into the same `d_name` of 256
+///   bytes, which the byte `end` follows (0, and 1 once the last entry is read), then the
+///   structure's padding; `malloc` left all of it uninitialized. A name of more than 255
+///   UTF-8 bytes doesn't fit with its NUL: `WideCharToMultiByte` writes the whole characters
+///   that fit in the 256 bytes and fails, and the bytes after them stay as earlier entries
+///   wrote them. OpenColorIO reads `d_name` as a C string: the cut, then those bytes up to a
+///   NUL, or up to `end`'s 0 where the 256 bytes hold none (docs/improvements.md, I-222). Where
+///   the read reaches a byte no entry wrote, or `end`'s 1 after the last entry and the padding,
+///   the name read depends on memory nothing wrote, and the port gives the entry's name as
+///   `Err` (docs/improvements.md, U-79).
 pub(crate) fn mz_os_list_dir(path: &[u8]) -> Option<Vec<Result<Vec<u8>, Vec<u8>>>> {
     let path = c_str(path);
     #[cfg(windows)]
@@ -287,31 +287,49 @@ pub(crate) fn mz_os_list_dir(path: &[u8]) -> Option<Vec<Result<Vec<u8>, Vec<u8>>
         }
         let listing = super::os_windows_ffi::find_files(&pattern)?;
         let last = listing.names.len().saturating_sub(1);
+        // d_name across the listing: `None` where no entry has written yet.
+        let mut d_name: [Option<u8>; 256] = [None; 256];
         let mut names = Vec::new();
         for (i, wide) in listing.names.iter().enumerate() {
             let name = ocio_ops::platform::utf16_to_utf8_lossy(wide);
-            if name == b"." || name == b".." {
-                continue;
-            }
-            if name.len() < 256 {
-                names.push(Ok(name));
-                continue;
-            }
-            // What d_name reads as (U-79): the whole characters that fit in 256 bytes, read to
-            // the `end` flag where they fill them and `end` is 0.
-            let s = String::from_utf8_lossy(&name).into_owned();
-            let mut cut = 0;
-            for (at, c) in s.char_indices() {
-                if at + c.len_utf8() > 256 {
-                    break;
-                }
-                cut = at + c.len_utf8();
-            }
-            if cut == 256 && !(listing.ended && i == last) {
-                names.push(Ok(name[..cut].to_vec()));
+            // WideCharToMultiByte: the name and its NUL where they fit, else the whole
+            // characters that fit in the 256 bytes.
+            let written = if name.len() < 256 {
+                name.len() + 1
             } else {
-                names.push(Err(name));
+                let s = String::from_utf8_lossy(&name).into_owned();
+                let mut cut = 0;
+                for (at, c) in s.char_indices() {
+                    if at + c.len_utf8() > 256 {
+                        break;
+                    }
+                    cut = at + c.len_utf8();
+                }
+                cut
+            };
+            for (byte, value) in d_name.iter_mut().zip(name.iter().chain(&[0])).take(written) {
+                *byte = Some(*value);
             }
+            // The C string OpenColorIO reads: up to d_name's first NUL, else up to `end`'s 0;
+            // `None` where it reaches a byte nothing wrote, or `end`'s 1 and the padding.
+            let mut read = Vec::new();
+            let mut ended = false;
+            for byte in d_name {
+                match byte {
+                    Some(0) => {
+                        ended = true;
+                        break;
+                    }
+                    Some(value) => read.push(value),
+                    None => break,
+                }
+            }
+            let at_end = listing.ended && i == last;
+            let read = (ended || (read.len() == 256 && !at_end)).then_some(read);
+            if read.as_deref() == Some(b".") || read.as_deref() == Some(b"..") {
+                continue;
+            }
+            names.push(read.ok_or(name));
         }
         Some(names)
     }
@@ -657,7 +675,9 @@ pub(crate) fn mz_os_set_file_date(path: &[u8], modified: i64, accessed: i64, cre
             let Some(time) =
                 file_time_to_system_time(file_time).filter(|_| file_time <= i64::MAX as u64)
             else {
-                // SetFileTime refuses it, and sets none of the three.
+                // SetFileTime refuses it, and sets none of the three. The filter states the
+                // limit itself: that std's SystemTime also overflows past 2^63 100-ns ticks
+                // is an implementation detail of std.
                 return MZ_INTERNAL_ERROR;
             };
             times = match which {
