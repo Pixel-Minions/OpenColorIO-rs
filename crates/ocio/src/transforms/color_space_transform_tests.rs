@@ -627,8 +627,7 @@ fn build_reference_conversion_ops_test() {
     }
 }
 
-/// Port of `OCIO_ADD_TEST(ColorSpaceTransform, build_colorspace_ops_with_reference_conversion)`
-/// @ v2.5.2.
+/// Port of `OCIO_ADD_TEST(ColorSpaceTransform, build_colorspace_ops_with_reference_conversion)` @ v2.5.2.
 #[test]
 fn build_colorspace_ops_with_reference_conversion() {
     let _env = EnvGuard::new();

@@ -1670,7 +1670,8 @@ fn internal_raw_profile() {
     Config::create_from_stream(INTERNAL_RAW_PROFILE.as_bytes()).unwrap();
 }
 
-/// Port of `OCIO_ADD_TEST(Config, compare_displays)` @ v2.5.2 (Display_tests.cpp).
+/// Port of `OCIO_ADD_TEST(Config, compare_displays)` @ v2.5.2.
+/// (Display_tests.cpp.)
 #[test]
 fn compare_displays() {
     let _env = EnvGuard::new();
@@ -1764,7 +1765,8 @@ colorspaces:
     check_compare_displays((*config1).clone(), (*config2).clone());
 }
 
-/// Port of `OCIO_ADD_TEST(Config, compare_virtual_displays)` @ v2.5.2 (Display_tests.cpp).
+/// Port of `OCIO_ADD_TEST(Config, compare_virtual_displays)` @ v2.5.2.
+/// (Display_tests.cpp.)
 #[test]
 fn compare_virtual_displays() {
     let _env = EnvGuard::new();
@@ -5478,9 +5480,9 @@ fn current_config() {
     assert_eq!(current.serialize().unwrap(), config.serialize().unwrap());
 }
 
-/// Port of `OCIO_ADD_TEST(OCIOZArchive, is_config_archivable)` @ v2.5.2
+/// Port of `OCIO_ADD_TEST(OCIOZArchive, is_config_archivable)` @ v2.5.2.
 /// (tests/cpu/OCIOZArchive_tests.cpp; it tests `Config::isArchivable` only, and the archive
-/// comes in Phase 4).
+/// comes in Phase 4.)
 #[test]
 fn is_config_archivable() {
     use crate::transforms::file_transform::FileTransform;

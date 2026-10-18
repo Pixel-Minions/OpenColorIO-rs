@@ -464,9 +464,9 @@ fn simd_modes() -> Vec<CpuInfo> {
     modes
 }
 
-/// Port of `OCIO_ADD_TEST(Lut1DRenderer, lut_1d_inv_hue_adjust)` @ v2.5.2, in each SIMD
-/// mode ([`simd_modes`]). Upstream's renderers write out of place (`apply(in, out, n)`); here
-/// they render a copy in place.
+/// Port of `OCIO_ADD_TEST(Lut1DRenderer, lut_1d_inv_hue_adjust)` @ v2.5.2.
+/// In each SIMD mode ([`simd_modes`]). Upstream's renderers write out of place
+/// (`apply(in, out, n)`); here they render a copy in place.
 #[test]
 fn lut_1d_inv_hue_adjust() {
     for cpu in simd_modes() {
