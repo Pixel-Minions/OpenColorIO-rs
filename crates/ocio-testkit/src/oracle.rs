@@ -666,14 +666,12 @@ fn uv_program() -> PathBuf {
 
 /// Hash of everything that determines the oracle's answers on this machine.
 fn identity(oracle_dir: &Path) -> Result<u128, String> {
-    identity_with(
-        oracle_dir,
-        &paths::upstream_dir().join("tests").join("data"),
-    )
+    identity_with(oracle_dir, &paths::upstream_dir().join("tests"))
 }
 
-/// [`identity`], with upstream's test files in `test_data`.
-fn identity_with(oracle_dir: &Path, test_data: &Path) -> Result<u128, String> {
+/// [`identity`], with upstream's tests in `upstream_tests` (its `data` and `python`
+/// directories).
+fn identity_with(oracle_dir: &Path, upstream_tests: &Path) -> Result<u128, String> {
     let mut files = Vec::new();
     for name in ["pyproject.toml", "uv.lock", ".python-version"] {
         files.push(oracle_dir.join(name));
@@ -689,16 +687,18 @@ fn identity_with(oracle_dir: &Path, test_data: &Path) -> Result<u128, String> {
         h.update(&(bytes.len() as u64).to_le_bytes());
         h.update(&bytes);
     }
-    hash_test_data(&mut h, test_data);
+    hash_test_data(&mut h, &upstream_tests.join("data"));
+    hash_test_data(&mut h, &upstream_tests.join("python"));
     h.update(machine_description().as_bytes());
     Ok(h.digest128())
 }
 
-/// Hashes upstream's test files (`upstream/OpenColorIO/tests/data`), which requests name by
-/// path (a CLF to load, a config's search path), into the cache key: each file's path, length
-/// and bytes, in path order. Without the submodule checked out, the key differs from any with
-/// it, so a response made then (an `ExceptionMissingFile`) is never replayed once the files
-/// are there. About 260 files, 33 MB, hashed once per process.
+/// Hashes a directory of upstream's tests into the cache key: `tests/data`, the files requests
+/// name by path (a CLF to load, a config's search path; about 260 files, 33 MB), or
+/// `tests/python`, the suite `py_suite` runs (54 files). The number of files, then each
+/// file's path, length and bytes, in path order. Without the submodule checked out, the key
+/// differs from any with it, so a response made then (an `ExceptionMissingFile`) is never
+/// replayed once the files are there. Hashed once per process.
 fn hash_test_data(h: &mut Xxh3, data: &Path) {
     let mut files = Vec::new();
     collect_files(data, &mut files);
@@ -1678,8 +1678,9 @@ mod tests {
         assert_ne!(code_changed, before, "a module didn't change the identity");
     }
 
-    /// The cache identity takes upstream's test files: the same oracle with and without a test
-    /// file, or with other bytes in it, has another identity.
+    /// The cache identity takes upstream's test files and Python tests: the same oracle with
+    /// and without a test file, or with other bytes in it, has another identity, and so does
+    /// one whose file is in the other directory.
     #[test]
     fn the_identity_covers_upstream_test_data() {
         let dir = paths::target_dir().join(format!("testkit-identity-data-{}", std::process::id()));
@@ -1688,16 +1689,30 @@ mod tests {
         for name in ["pyproject.toml", "uv.lock", ".python-version"] {
             std::fs::write(dir.join(name), "x").unwrap();
         }
-        let data = dir.join("data");
-        let missing = identity_with(&dir, &data).unwrap();
+        let tests = dir.join("tests");
+        let (data, python) = (tests.join("data"), tests.join("python"));
+        let missing = identity_with(&dir, &tests).unwrap();
         std::fs::create_dir_all(&data).unwrap();
+        std::fs::create_dir_all(&python).unwrap();
         std::fs::write(data.join("a.clf"), "one").unwrap();
-        let one = identity_with(&dir, &data).unwrap();
+        let one = identity_with(&dir, &tests).unwrap();
         std::fs::write(data.join("a.clf"), "two").unwrap();
-        let two = identity_with(&dir, &data).unwrap();
+        let two = identity_with(&dir, &tests).unwrap();
+        std::fs::rename(data.join("a.clf"), python.join("a.clf")).unwrap();
+        let moved = identity_with(&dir, &tests).unwrap();
+        std::fs::write(python.join("a.clf"), "three").unwrap();
+        let three = identity_with(&dir, &tests).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
         assert_ne!(missing, one, "a test file didn't change the identity");
         assert_ne!(one, two, "a test file's bytes didn't change the identity");
+        assert_ne!(
+            two, moved,
+            "a test file's directory didn't change the identity"
+        );
+        assert_ne!(
+            moved, three,
+            "a Python test's bytes didn't change the identity"
+        );
     }
 
     /// `isolate` removes `OCIO`, `OCIO_*` and `PYTHON*` in any case (Windows finds a variable
