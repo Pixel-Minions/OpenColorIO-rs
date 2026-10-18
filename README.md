@@ -8,11 +8,11 @@ project ports it to Rust one upstream release at a time. The current line matche
 2.5.2**: the same results, the same text output, the same errors and the same accepted configs,
 from Rust and, later, from Python.
 
-> **Status: under development, about 60% done.** Milestones M0 (the op engine and the analytic
-> transforms) and M1 (LUTs, fixed functions, ACES 2.0, built-ins and configs) are complete: all
-> of it is merged and matches the official library on the CPU and the GPU. File formats (M2):
-> every LUT reader is merged; the CLF/CTF writer, the baker and `.ocioz` archives are written and
-> land next. Python comes later. See [Progress](#progress).
+> **Status: under development, about 65% done.** Milestones M0 (the op engine and the analytic
+> transforms), M1 (LUTs, fixed functions, ACES 2.0, built-ins and configs) and M2 (every file
+> format, file-based configs, `.ocioz` archives and the baker) are complete: all of it is merged
+> and matches the official library on the CPU and the GPU. Next: dynamic properties, grading
+> and app helpers (M3), then the Python module (M4). See [Progress](#progress).
 
 ## How precise: byte for byte
 
@@ -86,15 +86,17 @@ one.
 
 ## Progress
 
-Status as of 2026-10-17: **milestones M0 and M1 are complete**, about 60% of the planned work.
-Phases 1 (the op engine and the analytic transforms), 2 and 3 are done. Phase 4 (file formats,
-toward M2) is mostly merged: the format registry and FileTransform's file loading and cache; an
-XML parser (a port of expat 2.7.2); the CDL, CC and CCC readers and writers; the spi1d, spi3d,
-spimtx, Discreet 1DL, Iridas and Resolve `.cube`, `.itx`, `.3dl`, Houdini, Truelight, Pandora,
-Nuke `.vf`, cineSpace, ICC and Iridas `.look` readers; and most of the CLF/CTF reader (versions,
-metadata, the Matrix, Range, Log, Gamma, CDL, Lut1D and Lut3D elements). Written and landing
-next: the rest of the CLF/CTF reader with references between files, the CLF/CTF writer, the
-baker, and `.ocioz` archives.
+Status as of 2026-10-18: **milestones M0, M1 and M2 are complete**, about 65% of the planned
+work. Phases 1 (the op engine and the analytic transforms), 2, 3 and 4 are done. Phase 4 (file
+formats, M2): the format registry and FileTransform's file loading and cache; an XML parser (a
+port of expat 2.7.2); the CDL, CC and CCC readers and writers; the spi1d, spi3d, spimtx,
+Discreet 1DL, Iridas and Resolve `.cube`, `.itx`, `.3dl`, Houdini, Truelight, Pandora, Nuke
+`.vf`, cineSpace, ICC and Iridas `.look` readers; the CLF/CTF reader with references between
+files, and the CLF/CTF writer; the baker, in every format the official library bakes, CLF and
+CTF included; and `.ocioz` archives, read, written and extracted through a port of minizip-ng
+4.0.10, as the official library does. The grading elements of CLF/CTF come with the grading
+ops in M3. Next: the Phase 5 (M3) and Phase 6 (M4) cards, whose oracle commands are written
+and reviewed.
 The phases toward milestone M1:
 - **Phase 2:** LUTs (1D and 3D, with their inverses), fixed functions, ACES 2.0 and the
   GradingRGBCurve op that the ACES 1.x built-ins use
@@ -210,7 +212,7 @@ instead. Every such case, and every upstream bug the port reproduces, is listed 
 
 | Suite | Ported | Total |
 |---|---:|---:|
-| C++ | 799 | 1,191 |
+| C++ | 982 | 1,191 |
 | GPU | 0 | 264 |
 | Python | 0 | 384 |
 
@@ -222,13 +224,13 @@ compared with the official library's, text for text.
 
 Each milestone is a complete section of OCIO, byte-exact on CPU and GPU:
 
-| Milestone | Section | Status (2026-10-17) | Version |
+| Milestone | Section | Status (2026-10-18) | Version |
 |---|---|---|---|
 | **M0** | Analytic transforms (matrix, range, exponent, log, CDL), the op engine and the processor API | **Done** | `0.1.0` |
 | **M1** | LUTs, fixed functions (including ACES 2.0), built-in transforms and configs, config read and write | **Done** | `0.2.0` |
-| **M2** | All 24 file formats, file-based configs and `.ocioz`, the baker | **Mostly merged.** Merged: the format registry and file loading, the XML parser (expat), the CDL/CC/CCC readers and writer, every other LUT reader (spimtx, spi1d, spi3d, Discreet 1DL, both `.cube`, ITX, 3DL, Houdini, Truelight, Pandora, Nuke `.vf`, cineSpace, ICC, Iridas `.look`) and most of CLF/CTF reading. Written, landing next: the rest of CLF/CTF reading, the CLF/CTF writer, the baker and `.ocioz` archives. Next: the CLF/CTF bake | `0.3.0` |
-| **M3** | Dynamic properties, grading ops, app helpers | Not started | `0.4.0` |
-| **M4** | The `PyOpenColorIO`-compatible Python module | Not started | `0.5.0` |
+| **M2** | All 24 file formats, file-based configs and `.ocioz`, the baker | **Done** (CLF/CTF's grading elements come with M3) | `0.3.0` |
+| **M3** | Dynamic properties, grading ops, app helpers | Started: its oracle commands are written and reviewed, landing next | `0.4.0` |
+| **M4** | The `PyOpenColorIO`-compatible Python module | Started: the oracle commands (the module's surface, upstream's Python suite, scripts on the official module) are written and reviewed, landing next | `0.5.0` |
 | **M5** | Full OCIO 2.5.2 parity | Not started | `1.0.0` |
 
 The full plan is in [`PLAN.md`](PLAN.md).
