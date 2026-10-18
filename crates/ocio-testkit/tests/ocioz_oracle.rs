@@ -741,49 +741,58 @@ fn extract_takes_a_spelling_of_the_destination() {
 }
 
 /// Each time past 64 bits is reported by its own digits, the same value an integer would
-/// carry: a file whose three NTFS times are 9,000,000,000 seconds after 1970 (2255, 9.0e18 ns,
-/// an integer) and one whose times are 9,500,000,000 seconds (2271, 9.5e18 ns, past 2^63 ns)
-/// differ by 500,000,000 seconds in their modification, access and (Windows) creation times.
+/// carry. The files' three NTFS times are, in seconds after 1970: 9,000,000,123 (2255,
+/// 9.000000123e18 ns, an integer), 9,500,000,123 (2271, past 2^63 ns: 19 digits that a double
+/// doesn't hold, its neighbours being 2048 ns apart) and, on Windows, 910,000,000,123 (30807,
+/// 21 digits; the FILETIME 9,216,444,737,230,000,000 is below 2^63, which SetFileTime takes;
+/// ext4 stops at 2446). The later files differ from the first by exactly their seconds apart
+/// in their modification, access and (Windows) creation times, so a digit off or cut, a float
+/// round trip or a missing wrapper fails.
 #[test]
 fn extract_reports_all_times_past_64_bits_alike() {
     let ntfs = |seconds: u64| seconds * 10_000_000 + 116_444_736_000_000_000;
-    let (a, b) = (9_000_000_000u64, 9_500_000_000u64);
-    let archive = zip(&[
-        Entry {
+    let early = 9_000_000_123u64;
+    let mut late = vec![9_500_000_123u64];
+    if cfg!(windows) {
+        late.push(910_000_000_123);
+    }
+    let names: Vec<Vec<u8>> = (0..=late.len())
+        .map(|i| format!("{i}.txt").into_bytes())
+        .collect();
+    let entries: Vec<Entry> = std::iter::once(early)
+        .chain(late.iter().copied())
+        .zip(&names)
+        .map(|(seconds, name)| Entry {
             madeby: 10 << 8 | 20,
             attributes: 0x20,
-            extra: ntfs_times(ntfs(a), ntfs(a), ntfs(a)),
-            ..entry(b"a.txt", b"a")
-        },
-        Entry {
-            madeby: 10 << 8 | 20,
-            attributes: 0x20,
-            extra: ntfs_times(ntfs(b), ntfs(b), ntfs(b)),
-            ..entry(b"b.txt", b"b")
-        },
-    ]);
+            extra: ntfs_times(ntfs(seconds), ntfs(seconds), ntfs(seconds)),
+            ..entry(name, b"a")
+        })
+        .collect();
+    let archive = zip(&entries);
     let (result, _) = extract(&archive);
-    let (early, late) = (&result["files"][0], &result["files"][1]);
     let mut keys = vec!["mtime_ns", "atime_ns"];
     if cfg!(windows) {
         keys.push("birthtime_ns");
     }
     for key in keys {
-        let early = i128::from(
-            early[key]
+        let first = i128::from(
+            result["files"][0][key]
                 .as_i64()
                 .unwrap_or_else(|| panic!("{key}: {result}")),
         );
-        let late: i128 = late[key]["decimal"]
-            .as_str()
-            .unwrap_or_else(|| panic!("{key}: {result}"))
-            .parse()
-            .unwrap();
-        assert!(late > i128::from(i64::MAX), "{key}: {result}");
-        assert_eq!(
-            late - early,
-            i128::from(b - a) * 1_000_000_000,
-            "{key}: {result}"
-        );
+        for (i, &seconds) in late.iter().enumerate() {
+            let time: i128 = result["files"][i + 1][key]["decimal"]
+                .as_str()
+                .unwrap_or_else(|| panic!("{key}: {result}"))
+                .parse()
+                .unwrap();
+            assert!(time > i128::from(i64::MAX), "{key}: {result}");
+            assert_eq!(
+                time - first,
+                i128::from(seconds - early) * 1_000_000_000,
+                "{key}: {result}"
+            );
+        }
     }
 }
