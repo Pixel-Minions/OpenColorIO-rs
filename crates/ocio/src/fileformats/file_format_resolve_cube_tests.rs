@@ -2,12 +2,12 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Tests of the Resolve `.cube` format:
-//! `tests/cpu/fileformats/FileFormatResolveCube_tests.cpp` @ v2.5.2. Its `bake_1d`,
-//! `bake_1d_shaper`, `bake_3d` and `bake_1d_3d` come with the baker (WP 4.8).
+//! `tests/cpu/fileformats/FileFormatResolveCube_tests.cpp` @ v2.5.2.
 
 use super::*;
 use crate::fileformats::test_utils::build_ops_test;
 use ocio_ops::op_data::OpData;
+use ocio_testkit::upstream::check_str_float_vec_close;
 
 /// Port of `ReadResolveCube` (FileFormatResolveCube_tests.cpp:15-26 @ v2.5.2).
 fn read_resolve_cube(file_content: &str) -> Result<LocalCachedFile> {
@@ -323,4 +323,301 @@ fn load_ops() {
     assert_eq!(lut4_array[60], 0.0f32);
     assert_eq!(lut4_array[61], 1.0f32);
     assert_eq!(lut4_array[62], 0.0f32);
+}
+
+/// The lines of `text`, as `StringUtils::SplitByLines` gives them.
+fn lines(text: &[u8]) -> Vec<String> {
+    ocio_ops::utils::string_utils::split_by_lines(text)
+        .into_iter()
+        .map(|l| String::from_utf8(l).unwrap())
+        .collect()
+}
+
+/// A line and its floats, as `StringFloatVecClose` reads them.
+fn floats(line: &str) -> (&str, Option<Vec<f32>>) {
+    let parts = ocio_ops::utils::string_utils::split_by_white_spaces(line.as_bytes());
+    let mut values = Vec::new();
+    let ok = ocio_ops::parse_utils::string_vec_to_float_vec(&mut values, &parts);
+    (line, ok.then_some(values))
+}
+
+/// The config of the bake tests: an `input` reference space and a `target` space.
+fn input_target_config() -> crate::Config {
+    let mut config = crate::Config::new().unwrap();
+    {
+        let mut cs = crate::ColorSpace::new();
+        cs.set_name("input");
+        cs.set_family("input");
+        config.add_color_space(&cs).unwrap();
+        config
+            .set_role(ocio_ops::parse_utils::ROLE_REFERENCE, Some(cs.name()))
+            .unwrap();
+    }
+    config
+}
+
+/// A `target` color space whose saturation of 0.5 causes channel crosstalk.
+fn saturated_target() -> crate::ColorSpace {
+    let mut cs = crate::ColorSpace::new();
+    cs.set_name("target");
+    cs.set_family("target");
+
+    // Set saturation to cause channel crosstalk, making a 3D LUT
+    let mut transform1 = crate::CdlTransform::new();
+    transform1.set_sat(f64::from(0.5f32));
+    cs.set_transform(
+        Some(&crate::Transform::from(transform1)),
+        ocio_ops::open_color_types::ColorSpaceDirection::FromReference,
+    )
+    .unwrap();
+    cs
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatResolveCube, bake_1d)` @ v2.5.2.
+#[test]
+fn bake_1d() {
+    let mut config = input_target_config();
+    {
+        let mut cs = crate::ColorSpace::new();
+        cs.set_name("target");
+        cs.set_family("target");
+        config.add_color_space(&cs).unwrap();
+    }
+
+    let bout = "LUT_1D_SIZE 2\n\
+                0.000000 0.000000 0.000000\n\
+                1.000000 1.000000 1.000000\n";
+
+    let mut baker = Baker::new();
+    baker.set_config(&config);
+    baker.set_format("resolve_cube").unwrap();
+    baker.set_input_space("input");
+    baker.set_target_space("target");
+    baker.set_cube_size(2);
+    let mut output = Vec::new();
+    baker.bake(&mut output).unwrap();
+
+    //
+    let osvec = lines(&output);
+    let resvec = lines(bout.as_bytes());
+    assert_eq!(osvec.len(), resvec.len());
+    for i in 0..resvec.len() {
+        assert_eq!(osvec[i], resvec[i]);
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatResolveCube, bake_1d_shaper)` @ v2.5.2.
+#[test]
+fn bake_1d_shaper() {
+    let my_profile = r#"
+        ocio_profile_version: 1
+
+        colorspaces:
+        - !<ColorSpace>
+          name : Raw
+          isdata : false
+
+        - !<ColorSpace>
+          name: Log2
+          isdata: false
+          from_reference: !<GroupTransform>
+            children:
+              - !<MatrixTransform> {matrix: [5.55556, 0, 0, 0, 0, 5.55556, 0, 0, 0, 0, 5.55556, 0, 0, 0, 0, 1]}
+              - !<LogTransform> {base: 2}
+              - !<MatrixTransform> {offset: [6.5, 6.5, 6.5, 0]}
+              - !<MatrixTransform> {matrix: [0.076923, 0, 0, 0, 0, 0.076923, 0, 0, 0, 0, 0.076923, 0, 0, 0, 0, 1]}
+    "#;
+
+    let config = crate::Config::create_from_stream(my_profile.as_bytes()).unwrap();
+
+    {
+        // Lin to Log
+        let bout = "LUT_1D_SIZE 10\n\
+                    LUT_1D_INPUT_RANGE 0.001989 16.291878\n\
+                    0.000000 0.000000 0.000000\n\
+                    0.756268 0.756268 0.756268\n\
+                    0.833130 0.833130 0.833130\n\
+                    0.878107 0.878107 0.878107\n\
+                    0.910023 0.910023 0.910023\n\
+                    0.934780 0.934780 0.934780\n\
+                    0.955010 0.955010 0.955010\n\
+                    0.972114 0.972114 0.972114\n\
+                    0.986931 0.986931 0.986931\n\
+                    1.000000 1.000000 1.000000\n";
+
+        let mut baker = Baker::new();
+        baker.set_config(&config);
+        baker.set_format("resolve_cube").unwrap();
+        baker.set_input_space("Raw");
+        baker.set_target_space("Log2");
+        baker.set_shaper_space("Log2");
+        baker.set_cube_size(10);
+        let mut output = Vec::new();
+        baker.bake(&mut output).unwrap();
+
+        //
+        let osvec = lines(&output);
+        let resvec = lines(bout.as_bytes());
+        assert_eq!(osvec.len(), resvec.len());
+        for i in 0..resvec.len() {
+            assert_eq!(osvec[i], resvec[i]);
+        }
+    }
+
+    {
+        // Log to Lin
+        let bout = "LUT_1D_SIZE 10\n\
+                    0.001989 0.001989 0.001989\n\
+                    0.005413 0.005413 0.005413\n\
+                    0.014731 0.014731 0.014731\n\
+                    0.040091 0.040091 0.040091\n\
+                    0.109110 0.109110 0.109110\n\
+                    0.296951 0.296951 0.296951\n\
+                    0.808177 0.808177 0.808177\n\
+                    2.199522 2.199522 2.199522\n\
+                    5.986179 5.986179 5.986179\n\
+                    16.291878 16.291878 16.291878\n";
+
+        let mut baker = Baker::new();
+        baker.set_config(&config);
+        baker.set_format("resolve_cube").unwrap();
+        baker.set_input_space("Log2");
+        baker.set_target_space("Raw");
+        baker.set_cube_size(10);
+        let mut output = Vec::new();
+        baker.bake(&mut output).unwrap();
+
+        //
+        let osvec = lines(&output);
+        let resvec = lines(bout.as_bytes());
+        assert_eq!(osvec.len(), resvec.len());
+        for i in 0..resvec.len() {
+            if i == 0 {
+                assert_eq!(osvec[i], resvec[i]);
+            } else {
+                check_str_float_vec_close(floats(&osvec[i]), floats(&resvec[i]), 1e-5f32);
+            }
+        }
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatResolveCube, bake_3d)` @ v2.5.2.
+#[test]
+fn bake_3d() {
+    let mut config = input_target_config();
+    config.add_color_space(&saturated_target()).unwrap();
+
+    let bout = "# OpenColorIO Test Line 1\n\
+                # OpenColorIO Test Line 2\n\
+                \n\
+                LUT_3D_SIZE 2\n\
+                0.000000 0.000000 0.000000\n\
+                0.606300 0.106300 0.106300\n\
+                0.357600 0.857600 0.357600\n\
+                0.963900 0.963900 0.463900\n\
+                0.036100 0.036100 0.536100\n\
+                0.642400 0.142400 0.642400\n\
+                0.393700 0.893700 0.893700\n\
+                1.000000 1.000000 1.000000\n";
+
+    let mut baker = Baker::new();
+    baker.set_config(&config);
+    baker
+        .format_metadata_mut()
+        .add_child_element(
+            Some(ocio_ops::format_metadata::METADATA_DESCRIPTION),
+            Some(b"OpenColorIO Test Line 1"),
+        )
+        .unwrap();
+    baker
+        .format_metadata_mut()
+        .add_child_element(
+            Some(ocio_ops::format_metadata::METADATA_DESCRIPTION),
+            Some(b"OpenColorIO Test Line 2"),
+        )
+        .unwrap();
+    baker.set_format("resolve_cube").unwrap();
+    baker.set_input_space("input");
+    baker.set_target_space("target");
+    baker.set_cube_size(2);
+    let mut output = Vec::new();
+    baker.bake(&mut output).unwrap();
+
+    //
+    let osvec = lines(&output);
+    let resvec = lines(bout.as_bytes());
+    assert_eq!(osvec.len(), resvec.len());
+    for i in 0..resvec.len() {
+        if i <= 3 {
+            assert_eq!(osvec[i], resvec[i]);
+        } else {
+            check_str_float_vec_close(floats(&osvec[i]), floats(&resvec[i]), 1e-5f32);
+        }
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatResolveCube, bake_1d_3d)` @ v2.5.2.
+#[test]
+fn bake_1d_3d() {
+    let mut config = input_target_config();
+    {
+        let mut cs = crate::ColorSpace::new();
+        cs.set_name("shaper");
+        cs.set_family("shaper");
+        let mut transform1 = crate::ExponentTransform::new();
+        let test: [f64; 4] = [2.2, 2.2, 2.2, 1.0];
+        transform1.set_value(&test);
+        cs.set_transform(
+            Some(&crate::Transform::from(transform1)),
+            ocio_ops::open_color_types::ColorSpaceDirection::ToReference,
+        )
+        .unwrap();
+        config.add_color_space(&cs).unwrap();
+    }
+    config.add_color_space(&saturated_target()).unwrap();
+
+    let bout = "LUT_1D_SIZE 10\n\
+                LUT_1D_INPUT_RANGE 0.000000 1.000000\n\
+                LUT_3D_SIZE 2\n\
+                0.000000 0.000000 0.000000\n\
+                0.368344 0.368344 0.368344\n\
+                0.504760 0.504760 0.504760\n\
+                0.606913 0.606913 0.606913\n\
+                0.691699 0.691699 0.691699\n\
+                0.765539 0.765539 0.765539\n\
+                0.831684 0.831684 0.831684\n\
+                0.892049 0.892049 0.892049\n\
+                0.947870 0.947870 0.947870\n\
+                1.000000 1.000000 1.000000\n\
+                0.000000 0.000000 0.000000\n\
+                0.606300 0.106300 0.106300\n\
+                0.357600 0.857600 0.357600\n\
+                0.963900 0.963900 0.463900\n\
+                0.036100 0.036100 0.536100\n\
+                0.642400 0.142400 0.642400\n\
+                0.393700 0.893700 0.893700\n\
+                1.000000 1.000000 1.000000\n";
+
+    let mut baker = Baker::new();
+    baker.set_config(&config);
+    baker.set_format("resolve_cube").unwrap();
+    baker.set_input_space("input");
+    baker.set_shaper_space("shaper");
+    baker.set_target_space("target");
+    baker.set_shaper_size(10);
+    baker.set_cube_size(2);
+    let mut output = Vec::new();
+    baker.bake(&mut output).unwrap();
+
+    //
+    let osvec = lines(&output);
+    let resvec = lines(bout.as_bytes());
+    assert_eq!(osvec.len(), resvec.len());
+    for i in 0..resvec.len() {
+        if i <= 2 {
+            assert_eq!(osvec[i], resvec[i]);
+        } else {
+            check_str_float_vec_close(floats(&osvec[i]), floats(&resvec[i]), 1e-5f32);
+        }
+    }
 }

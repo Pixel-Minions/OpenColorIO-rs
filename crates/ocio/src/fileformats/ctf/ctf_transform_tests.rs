@@ -85,6 +85,23 @@ fn read_version() {
     check_throw_what(CtfVersion::read_version(b"-1"), "is not a valid version");
 }
 
+/// Port of `OCIO_ADD_TEST(CTFVersion, version_write)` @ v2.5.2.
+#[test]
+fn version_write() {
+    for (major, minor, revision, expected) in [
+        (1, 2, 3, "1.2.3"),
+        (1, 0, 3, "1.0.3"),
+        (1, 2, 0, "1.2"),
+        (1, 20, 0, "1.20"),
+        (1, 0, 0, "1"),
+        (0, 0, 0, "0"),
+    ] {
+        let version = CtfVersion::new(major, minor, revision);
+        let ostream = version.to_string();
+        assert_eq!(ostream, expected);
+    }
+}
+
 /// Port of `OCIO_ADD_TEST(CTFReaderTransform, accessors)` @ v2.5.2.
 #[test]
 fn accessors() {

@@ -246,3 +246,121 @@ fn every_arm_dispatches_to_its_class() {
         }
     }
 }
+
+/// `depth` groups, each holding the next, around `inner`.
+fn in_groups(inner: Transform, depth: usize) -> Transform {
+    let mut transform = inner;
+    for _ in 0..depth {
+        let mut group = crate::GroupTransform::new();
+        group.append_transform(transform);
+        transform = Transform::from(group);
+    }
+    transform
+}
+
+/// A chain of `n` CTF files in `dir`, `c0.ctf` referencing `c1.ctf` and so on, the last a
+/// matrix; returns the path of `c0.ctf`.
+fn reference_chain(dir: &std::path::Path, n: usize) -> String {
+    std::fs::create_dir_all(dir).unwrap();
+    for i in 0..n {
+        let body = if i == n - 1 {
+            "    <Matrix inBitDepth=\"32f\" outBitDepth=\"32f\">\n\
+             \x20       <Array dim=\"3 3 3\">2 0 0 0 3 0 0 0 4</Array>\n    </Matrix>\n"
+                .to_owned()
+        } else {
+            format!(
+                "    <Reference inBitDepth=\"32f\" outBitDepth=\"32f\" path=\"c{}.ctf\"/>\n",
+                i + 1
+            )
+        };
+        let text = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+             <ProcessList id=\"a\" version=\"1.7\">\n{body}</ProcessList>\n"
+        );
+        let path = dir.join(format!("c{i}.ctf"));
+        if std::fs::read(&path).ok().as_deref() != Some(text.as_bytes()) {
+            std::fs::write(&path, text).unwrap();
+        }
+    }
+    let path = dir.join("c0.ctf");
+    let path = path.to_str().unwrap().replace('\\', "/");
+    path.trim_start_matches("//?/").to_owned()
+}
+
+/// The limit of the nesting's weight is exact, and so is each weight in it: `groups` groups
+/// around a file transform of a chain of `files` CTF files weigh `72 groups + 67 + 67 files`
+/// (each group 72, the file transform 67 and each of its files 67; docs/improvements.md,
+/// U-58). 766 groups around 193 files weigh 68,150, the limit, and build; 726 groups around
+/// 236 files weigh 68,151, one more, and are refused. Through `BuildOps` itself (which the
+/// processors reach only after `CollectContextVariables`, which counts the groups too), and
+/// through the processor with its cache on and off; on a 1 MiB thread, the smallest the port
+/// supports, at every optimization level.
+#[test]
+fn the_nesting_weight_limit_is_exact() {
+    const TOO_DEEP: &[u8] = b"The transforms nest too deep, counting groups and CTF references: \
+                              upstream's stack overflows.";
+    let root = ocio_testkit::paths::target_dir().join("nesting-weight");
+    let run = move || {
+        for (groups, files, accepted) in [(766, 193, true), (726, 236, false)] {
+            let src = reference_chain(&root.join(format!("n{files}")), files);
+            let mut config = (*crate::Config::create_raw().unwrap()).clone();
+            config.add_search_path(
+                std::path::Path::new(&src)
+                    .parent()
+                    .unwrap()
+                    .to_str()
+                    .unwrap(),
+            );
+            let mut file = FileTransform::new();
+            file.set_src(&src);
+            let transform = in_groups(Transform::File(file), groups);
+            let what = format!("{groups} groups, {files} files");
+
+            // BuildOps alone.
+            let context = config.current_context().get();
+            let mut ops = OpVec::new();
+            let built = build_ops(
+                &mut ops,
+                &config,
+                &context,
+                &transform,
+                TransformDirection::Forward,
+            );
+            match &built {
+                Ok(()) => assert!(accepted, "{what}: built"),
+                Err(e) => {
+                    assert!(!accepted && e.what().ends_with(TOO_DEEP), "{what}: {e}");
+                }
+            }
+            drop(ops);
+
+            // The processors.
+            for cache in [
+                crate::ProcessorCacheFlags::DEFAULT,
+                crate::ProcessorCacheFlags::OFF,
+            ] {
+                config.set_processor_cache_flags(cache);
+                match config.processor(&transform) {
+                    Ok(processor) => {
+                        assert!(accepted, "{what} {cache:?}: built");
+                        assert_eq!(
+                            processor.processor_metadata().num_files(),
+                            files as i32,
+                            "{what} {cache:?}"
+                        );
+                    }
+                    Err(e) => assert!(
+                        !accepted && e.what().ends_with(TOO_DEEP),
+                        "{what} {cache:?}: {e}"
+                    ),
+                }
+            }
+        }
+    };
+    std::thread::Builder::new()
+        .stack_size(1 << 20)
+        .spawn(run)
+        .unwrap()
+        .join()
+        .unwrap();
+}

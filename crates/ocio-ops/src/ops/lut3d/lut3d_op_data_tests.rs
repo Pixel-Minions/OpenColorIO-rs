@@ -2,8 +2,8 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Port of `tests/cpu/ops/lut3d/Lut3DOpData_tests.cpp` @ v2.5.2: the tests of the data. The
-//! tests that read files wait for the file readers (Phase 4: `compose`, `compose_2`,
-//! `inv_lut3d_lut_size`).
+//! tests that read files (`compose`, `compose_2`, `inv_lut3d_lut_size`) are in
+//! `crates/ocio/src/file_tests/`, with the readers.
 
 use ocio_testkit::upstream::{check_close, check_throw_what};
 

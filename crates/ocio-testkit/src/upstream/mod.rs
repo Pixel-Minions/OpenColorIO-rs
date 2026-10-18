@@ -181,6 +181,34 @@ pub fn check_throw_what<T: Debug, E: Display>(result: Result<T, E>, what: &str) 
     }
 }
 
+/// `OCIO_CHECK_STR_FLOAT_VEC_CLOSE(x, y, tol)` on the floats of the two strings, as the
+/// caller read them with OCIO's `StringVecToFloatVec(SplitByWhiteSpaces(s))` (`None` where
+/// that failed: the test kit doesn't depend on OCIO's parser). Passes when both parsed, have
+/// as many values, and no pair differs by `eps` or more (a NaN difference is no failure).
+///
+/// Port of `OCIO_CHECK_STR_FLOAT_VEC_CLOSE` and `StringFloatVecClose`
+/// (tests/testutils/UnitTest.h:223-232, UnitTest.cpp:44-64 @ v2.5.2).
+#[track_caller]
+pub fn check_str_float_vec_close(
+    x: (&str, Option<Vec<f32>>),
+    y: (&str, Option<Vec<f32>>),
+    eps: f32,
+) {
+    let close = match (&x.1, &y.1) {
+        (Some(a), Some(b)) if a.len() == b.len() => {
+            // `std::abs(a[i] - b[i]) >= eps` fails; a NaN difference doesn't.
+            !a.iter().zip(b).any(|(&a, &b)| (a - b).abs() >= eps)
+        }
+        _ => false,
+    };
+    if !close {
+        panic!(
+            "OCIO_CHECK_STR_FLOAT_VEC_CLOSE failed: values were '{}' and '{}'",
+            x.0, y.0
+        );
+    }
+}
+
 /// Port of `FloatForCompare` (src/OpenColorIO/MathUtils.cpp:397-400 @ v2.5.2): maps a float's
 /// bits to an ordered integer, keeping denormals.
 fn float_for_compare(float_bits: u32) -> u32 {

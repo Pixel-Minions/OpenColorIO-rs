@@ -134,16 +134,165 @@ fn the_bake_formats_are_upstreams() {
 fn refusals_report_their_stage() {
     let unknown = call(json!({"config": {"yaml": PROFILE}, "calls": [["setFormat", "nope"]]}));
     assert_eq!(unknown["stage"], "setters", "{unknown}");
+    assert!(unknown.get("partial_file").is_none(), "{unknown}");
     assert_eq!(unknown["exception"]["type"], "Exception", "{unknown}");
     let incomplete = call(json!({"config": {"yaml": PROFILE},
                                  "calls": [["setFormat", "cinespace"]]}));
     assert_eq!(incomplete["stage"], "bake", "{incomplete}");
 }
 
+/// `baking_validation`'s "Missing configuration" (Baker_tests.cpp:334-340 @ v2.5.2): a baker
+/// that never had `setConfig` is refused by `bake` with "No OCIO config has been set.". With a
+/// config, the same request bakes.
+#[test]
+fn a_baker_without_a_config_is_refused() {
+    let calls = json!([
+        ["setFormat", "cinespace"],
+        ["setInputSpace", "lnh"],
+        ["setTargetSpace", "gamma22"]
+    ]);
+    let without = call(json!({"no_config": true, "calls": calls}));
+    assert_eq!(without["stage"], "bake", "{without}");
+    let message = without["exception"]["message"].as_str().unwrap();
+    assert!(
+        message.contains("No OCIO config has been set."),
+        "{without}"
+    );
+    // The binding opens the file before `bake` checks anything (PyBaker.cpp:130): an empty
+    // file, and the same exception.
+    assert_eq!(without["partial_file"]["bytes"], "", "{without}");
+    assert_eq!(without["partial_file"]["exception"], without["exception"]);
+    let with = call(json!({"config": {"yaml": PROFILE}, "calls": calls}));
+    assert!(with.get("exception").is_none(), "{with}");
+}
+
+/// Where `bake()` raises, `partial_file` reports what `bake(fileName)` left in its file, and
+/// what that raised: lustre's header lines, written before its shaper of size -3 fails, are
+/// the start of the file the same bake writes with a shaper of size 2.
+#[test]
+fn a_failing_bake_reports_its_partial_file() {
+    let request = |shaper_size: i64| {
+        json!({
+            "config": {"yaml": PROFILE},
+            "calls": [["setFormat", "lustre"], ["setInputSpace", "lnh"],
+                      ["setTargetSpace", "gamma22"], ["setShaperSize", shaper_size],
+                      ["setCubeSize", 2]],
+        })
+    };
+    let failed = call(request(-3));
+    assert_eq!(failed["stage"], "bake", "{failed}");
+    let partial = &failed["partial_file"];
+    assert_eq!(partial["exception"], failed["exception"], "{failed}");
+    let partial = unhex(partial["bytes"].as_str().expect("a file"));
+    assert!(!partial.is_empty(), "{failed}");
+    // Lustre writes its two header lines (FileFormat3DL.cpp:548-549), then fails at the
+    // shaper's vector (:552).
+    assert_eq!(
+        partial.iter().filter(|&&b| b == b'\n').count(),
+        2,
+        "{failed}"
+    );
+    let complete = call(request(2));
+    assert!(complete.get("partial_file").is_none(), "{complete}");
+    let full = unhex(complete["file"].as_str().unwrap());
+    assert!(full.len() > partial.len());
+    assert_eq!(&full[..partial.len()], partial.as_slice());
+    assert!(partial.ends_with(b"\n"));
+}
+
+/// An exception whose message isn't UTF-8 (an input space of the byte 0xFF, which the
+/// message names): the bake stage reports it with its bytes, and so does the partial file.
+#[test]
+fn an_undecodable_message_is_reported() {
+    let result = call(json!({
+        "config": {"yaml": PROFILE},
+        "calls": [["setFormat", "cinespace"], ["setInputSpace", {"bytes": "ff"}],
+                  ["setTargetSpace", "gamma22"]],
+    }));
+    assert_eq!(result["stage"], "bake", "{result}");
+    assert_eq!(
+        result["exception"]["type"], "UnicodeDecodeError",
+        "{result}"
+    );
+    let message = unhex(result["exception"]["undecodable"].as_str().unwrap());
+    // The message names the input space (Baker.cpp:285-287): the same request with the input
+    // space "x" gives it with "x" in place of the byte.
+    let named_x = call(json!({
+        "config": {"yaml": PROFILE},
+        "calls": [["setFormat", "cinespace"], ["setInputSpace", "x"],
+                  ["setTargetSpace", "gamma22"]],
+    }));
+    assert_eq!(named_x["stage"], "bake", "{named_x}");
+    let with_x = named_x["exception"]["message"].as_str().unwrap();
+    let (before, after) = with_x.split_once("'x'").expect("the input space, named");
+    assert_eq!(
+        message,
+        [before.as_bytes(), b"'\xff'", after.as_bytes()].concat(),
+        "{result}"
+    );
+    assert_eq!(result["partial_file"]["bytes"], "", "{result}");
+    assert_eq!(result["partial_file"]["exception"], result["exception"]);
+}
+
+/// The directory of the files `a_log_line_that_isnt_utf8_is_refused` writes.
+fn files_dir() -> std::path::PathBuf {
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("bake_oracle");
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+/// A bake while which OCIO logs a line that isn't UTF-8 is refused: the oracle's logging
+/// callback can't take it, and pybind11 would raise its `UnicodeDecodeError` where OCIO logged
+/// (here `GetInputToTargetProcessor`, Baker.cpp:346, outside the bake's `try`), in place of the
+/// bake the wheel does with its own logger. The warning: a 1D LUT's FileTransform asks for
+/// tetrahedral interpolation (`LogWarningInterpolationNotUsed`), and names its `src`, which
+/// holds the byte 0xFF.
+#[test]
+fn a_log_line_that_isnt_utf8_is_refused() {
+    let dir = files_dir();
+    std::fs::write(
+        dir.join("lut.spi1d"),
+        "Version 1\nFrom 0.0 1.0\nLength 2\nComponents 1\n{\n0.0\n1.0\n}\n",
+    )
+    .unwrap();
+    // `\xff/../lut.spi1d`: Windows removes the `..` from the name, Linux needs the directory.
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        std::fs::create_dir_all(dir.join(std::ffi::OsStr::from_bytes(b"\xff"))).unwrap();
+    }
+    let mut config = b"ocio_profile_version: 2\nsearch_path: .\nroles: {default: raw}\n".to_vec();
+    config.extend_from_slice(b"colorspaces:\n  - !<ColorSpace>\n    name: raw\n");
+    config.extend_from_slice(b"  - !<ColorSpace>\n    name: lut\n    from_scene_reference: ");
+    config.extend_from_slice(
+        b"!<FileTransform> {src: \"\xff/../lut.spi1d\", interpolation: tetrahedral}\n",
+    );
+    std::fs::write(dir.join("config.ocio"), &config).unwrap();
+    let path = dir.join("config.ocio").to_str().unwrap().replace('\\', "/");
+    let args = json!({
+        "config": {"file": path},
+        "calls": [["setFormat", "spi1d"], ["setInputSpace", "raw"], ["setTargetSpace", "lut"]],
+    });
+    let refused = Oracle::get()
+        .try_call("bake", args, &[])
+        .expect_err("a log line that isn't UTF-8");
+    assert!(
+        refused.contains("OCIO logged a message that isn't UTF-8"),
+        "{refused}"
+    );
+    assert!(
+        refused.contains("[OpenColorIO Warning]: Interpolation"),
+        "{refused}"
+    );
+}
+
 /// Requests it can't read are refused.
 #[test]
 fn bad_requests_are_refused() {
     for args in [
+        json!({"no_config": true, "config": null}),
+        json!({"no_config": "yes"}),
+        json!({"no_config": 1}),
         json!({"calls": [["bake"]]}),
         json!({"calls": [["setCubeSize", true]]}),
         json!({"calls": [["setCubeSize", 1.5]]}),
@@ -156,4 +305,8 @@ fn bad_requests_are_refused() {
             "{args}"
         );
     }
+    let both = Oracle::get()
+        .try_call("bake", json!({"no_config": true, "config": null}), &[])
+        .expect_err("no_config with a config");
+    assert!(both.contains("no_config and config"), "{both}");
 }

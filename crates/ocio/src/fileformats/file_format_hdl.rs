@@ -2,8 +2,7 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! The Houdini `.lut` format: a 1D LUT (type `C`), a 3D LUT (red fastest), or a 3D LUT with a
-//! 1D prelut. A port of `src/OpenColorIO/fileformats/FileFormatHDL.cpp` @ v2.5.2; its `bake`
-//! comes with the baker (WP 4.8).
+//! 1D prelut. A port of `src/OpenColorIO/fileformats/FileFormatHDL.cpp` @ v2.5.2.
 //!
 //! ```text
 //! Version     3
@@ -30,18 +29,27 @@ use std::collections::BTreeMap;
 use std::ffi::c_ulong;
 use std::sync::Arc;
 
+use ocio_ops::cfmt::{Crt, FloatField, OStringStream};
 use ocio_ops::exception::{Exception, Result};
+use ocio_ops::image_desc::PackedImageDesc;
 use ocio_ops::op::OpVec;
 use ocio_ops::open_color_types::{BitDepth, TransformDirection, combine_transform_directions};
 use ocio_ops::ops::lut1d::Lut1DOpData;
-use ocio_ops::ops::lut1d::lut1d_op::create_lut1d_op;
-use ocio_ops::ops::lut3d::lut3d_op::create_lut3d_op;
+use ocio_ops::ops::lut1d::lut1d_op::{
+    create_lut1d_op, generate_identity_lut1d, generate_linear_scale_lut1d,
+};
+use ocio_ops::ops::lut3d::lut3d_op::{Lut3DOrder, create_lut3d_op, generate_identity_lut3d};
 use ocio_ops::ops::lut3d::lut3d_op_data::{Interpolation, Lut3DOpData, MAX_3D_LUT_LENGTH};
 use ocio_ops::ops::matrix::matrix_op::create_min_max_op_f32;
 use ocio_ops::parse_utils::{string_to_float, string_to_int};
 use ocio_ops::utils::number_utils::{Errc, Flavor, from_chars_f32};
 use ocio_ops::utils::string_utils::{lower, split_by_white_spaces, trim};
 
+use crate::baker::Baker;
+use crate::baking_utils::{
+    LinuxResize, bake_buffer, cube_entries, cube_values, get_input_to_shaper_processor,
+    get_input_to_target_processor, get_shaper_range, get_shaper_to_target_processor,
+};
 use crate::config::Config;
 use crate::context::Context;
 use crate::fileformats::file_format_utils::{
@@ -579,6 +587,259 @@ impl FileFormat for LocalFileFormat {
         interp: Interpolation,
     ) -> Result<CachedFileRcPtr> {
         Ok(Arc::new(self.read_file(istream, interp)?))
+    }
+
+    /// Bakes `baker`'s transform: a 1D LUT (1024 entries by default) where it has no channel
+    /// crosstalk, else a 3D LUT (64 per side by default), after a prelut (1024 by default) when
+    /// there is a shaper space.
+    ///
+    /// Port of `LocalFileFormat::bake` (FileFormatHDL.cpp:590-823 @ v2.5.2).
+    fn bake(&self, baker: &Baker, format_name: &[u8], ostream: &mut OStringStream) -> Result<()> {
+        if format_name != b"houdini" {
+            let mut os = OStringStream::new(Crt::NATIVE);
+            os.put_str("Unknown hdl format name, '");
+            os.put_bytes(format_name);
+            os.put_str("'.");
+            return Err(Exception::new(os.into_bytes()));
+        }
+
+        // setup the floating point precision
+        ostream.float_field = FloatField::Fixed;
+        ostream.precision = 6;
+
+        // Default sizes
+        const DEFAULT_SHAPER_SIZE: i32 = 1024;
+        // MPlay produces bad results with 32^3 cube (in a way
+        // that looks more quantised than even "nearest"
+        // interpolation in OCIOFileTransform)
+        const DEFAULT_CUBE_SIZE: i32 = 64;
+        const DEFAULT_1D_SIZE: i32 = 1024;
+
+        // Get configured sizes
+        let mut cube_size = baker.cube_size();
+        let mut shaper_size = baker.shaper_size();
+        let mut oned_size = baker.cube_size();
+
+        // Check defaults and cube size
+        if cube_size == -1 {
+            cube_size = DEFAULT_CUBE_SIZE;
+        }
+
+        // ..and same for shaper size
+        if shaper_size == -1 {
+            shaper_size = DEFAULT_SHAPER_SIZE;
+        }
+
+        // ..and finally, for the 1D LUT size
+        if oned_size == -1 {
+            oned_size = DEFAULT_1D_SIZE;
+        }
+
+        // Version numbers
+        const HDL_1D: i32 = 1; // 1D LUT version number
+        const HDL_3D: i32 = 2; // 3D LUT version number
+        const HDL_3D1D: i32 = 3; // 3D LUT with 1D prelut
+
+        // Get spaces from baker
+        let shaper_space = baker.shaper_space();
+
+        // Determine required LUT type
+        let input_to_target = get_input_to_target_processor(baker)?;
+
+        let required_lut = if input_to_target.has_channel_crosstalk() {
+            if shaper_space.is_empty() {
+                // Has crosstalk, but no prelut, so need 3D LUT
+                HDL_3D
+            } else {
+                // Crosstalk with shaper-space
+                HDL_3D1D
+            }
+        } else {
+            // No crosstalk
+            HDL_1D
+        };
+
+        // Make prelut
+        let mut prelut_data: Vec<f32> = Vec::new();
+
+        let mut from_in_start = 0.0f32;
+        let mut from_in_end = 1.0f32;
+
+        if required_lut == HDL_3D1D {
+            (from_in_start, from_in_end) = get_shaper_range(baker)?;
+
+            // Generate the identity prelut values, then apply the transform.
+            // Prelut is linearly sampled from fromInStart to fromInEnd
+            prelut_data = bake_buffer(i128::from(shaper_size) * 3, LinuxResize::Checked)?;
+            generate_linear_scale_lut1d(
+                &mut prelut_data,
+                shaper_size,
+                3,
+                from_in_start,
+                from_in_end,
+            );
+
+            let mut prelut_img =
+                PackedImageDesc::new(&mut prelut_data[..], shaper_size as usize, 1, 3)?;
+            let input_to_shaper = get_input_to_shaper_processor(baker)?;
+            input_to_shaper.apply(&mut prelut_img)?;
+        }
+
+        // TODO: Do same "auto prelut" input-space allocation as FileFormatCSP?
+
+        // Make 3D LUT
+        let mut cube_data: Vec<f32> = Vec::new();
+        if required_lut == HDL_3D || required_lut == HDL_3D1D {
+            cube_data = bake_buffer(cube_values(cube_size), LinuxResize::Checked)?;
+
+            generate_identity_lut3d(&mut cube_data, cube_size, 3, Lut3DOrder::FastRed)?;
+            let mut cube_img =
+                PackedImageDesc::new(&mut cube_data[..], cube_entries(cube_size), 1, 3)?;
+
+            let cube_proc = if required_lut == HDL_3D1D {
+                get_shaper_to_target_processor(baker)?
+            } else {
+                // No prelut, so cube goes from input-to-target
+                input_to_target.clone()
+            };
+
+            cube_proc.apply(&mut cube_img)?;
+        }
+
+        // Make 1D LUT
+        let mut oned_data: Vec<f32> = Vec::new();
+
+        if required_lut == HDL_1D {
+            oned_data = bake_buffer(i128::from(oned_size) * 3, LinuxResize::Checked)?;
+
+            if !shaper_space.is_empty() {
+                (from_in_start, from_in_end) = get_shaper_range(baker)?;
+                generate_linear_scale_lut1d(
+                    &mut oned_data,
+                    oned_size,
+                    3,
+                    from_in_start,
+                    from_in_end,
+                );
+            } else {
+                generate_identity_lut1d(&mut oned_data, oned_size, 3);
+            }
+
+            let mut oned_img = PackedImageDesc::new(&mut oned_data[..], oned_size as usize, 1, 3)?;
+            input_to_target.apply(&mut oned_img)?;
+        }
+
+        // Write the file contents
+        ostream.put_str("Version\t\t");
+        ostream.put_i32(required_lut);
+        ostream.put_str("\n");
+        ostream.put_str("Format\t\t");
+        ostream.put_str("any");
+        ostream.put_str("\n");
+
+        ostream.put_str("Type\t\t");
+        if required_lut == HDL_1D {
+            ostream.put_str("RGB");
+        }
+        if required_lut == HDL_3D {
+            ostream.put_str("3D");
+        }
+        if required_lut == HDL_3D1D {
+            ostream.put_str("3D+1D");
+        }
+        ostream.put_str("\n");
+
+        ostream.put_str("From\t\t");
+        ostream.put_f32(from_in_start);
+        ostream.put_str(" ");
+        ostream.put_f32(from_in_end);
+        ostream.put_str("\n");
+        ostream.put_str("To\t\t");
+        ostream.put_f32(0.0f32);
+        ostream.put_str(" ");
+        ostream.put_f32(1.0f32);
+        ostream.put_str("\n");
+        ostream.put_str("Black\t\t");
+        ostream.put_f32(0.0f32);
+        ostream.put_str("\n");
+        ostream.put_str("White\t\t");
+        ostream.put_f32(1.0f32);
+        ostream.put_str("\n");
+
+        if required_lut == HDL_3D1D {
+            ostream.put_str("Length\t\t");
+            ostream.put_i32(cube_size);
+            ostream.put_str(" ");
+            ostream.put_i32(shaper_size);
+            ostream.put_str("\n");
+        }
+        if required_lut == HDL_3D {
+            ostream.put_str("Length\t\t");
+            ostream.put_i32(cube_size);
+            ostream.put_str("\n");
+        }
+        if required_lut == HDL_1D {
+            ostream.put_str("Length\t\t");
+            ostream.put_i32(oned_size);
+            ostream.put_str("\n");
+        }
+
+        ostream.put_str("LUT:\n");
+
+        // Write prelut
+        if required_lut == HDL_3D1D {
+            ostream.put_str("Pre {\n");
+            for i in 0..shaper_size as usize {
+                // Grab green channel from RGB prelut
+                ostream.put_str("\t");
+                ostream.put_f32(prelut_data[i * 3 + 1]);
+                ostream.put_str("\n");
+            }
+            ostream.put_str("}\n");
+        }
+
+        // Write "3D {" part of output of 3D+1D LUT
+        if required_lut == HDL_3D1D {
+            ostream.put_str("3D {\n");
+        }
+
+        // Write the slightly-different "{" without line for the 3D-only LUT
+        if required_lut == HDL_3D {
+            ostream.put_str(" {\n");
+        }
+
+        // Write the cube data after the "{"
+        if required_lut == HDL_3D || required_lut == HDL_3D1D {
+            for i in 0..cube_entries(cube_size) {
+                // TODO: Original baker code clamped values to
+                // 1.0, was this necessary/desirable?
+
+                ostream.put_str("\t");
+                ostream.put_f32(cube_data[3 * i]);
+                ostream.put_str(" ");
+                ostream.put_f32(cube_data[3 * i + 1]);
+                ostream.put_str(" ");
+                ostream.put_f32(cube_data[3 * i + 2]);
+                ostream.put_str("\n");
+            }
+
+            // Write closing "}"
+            ostream.put_str(" }\n");
+        }
+
+        // Write out channels for 1D LUT
+        if required_lut == HDL_1D {
+            for (name, c) in ["R {\n", "G {\n", "B {\n"].iter().zip(0..3) {
+                ostream.put_str(name);
+                for i in 0..oned_size as usize {
+                    ostream.put_str("\t");
+                    ostream.put_f32(oned_data[i * 3 + c]);
+                    ostream.put_str("\n");
+                }
+                ostream.put_str("}\n");
+            }
+        }
+        Ok(())
     }
 
     /// Appends, forward, a type `C` file's min/max op and 1D LUT, a `3D` file's 3D LUT, a

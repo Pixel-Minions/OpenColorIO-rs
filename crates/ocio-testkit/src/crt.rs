@@ -6,7 +6,9 @@
 //! `ocio_ops::platform`'s case-insensitive comparisons are checked against.
 //!
 //! It is also the reference for the math library's `pow` and `exp2`, which an optimizing
-//! compiler may substitute for each other ([`pow_c`]).
+//! compiler may substitute for each other ([`pow_c`]); and for `mktime` and
+//! `_mkgmtime64`/`timegm` ([`mktime_c`], [`mkgmtime_c`]), which tell the extraction tests
+//! whether the local time zone is UTC (minizip-ng reads a DOS date with `mktime`).
 //!
 //! On Windows this is the Universal CRT (`ucrtbase.dll`); on Linux it is glibc. These are the
 //! libraries OCIO 2.5.2 itself calls: MSVC's `num_put` formats through UCRT `sprintf_s`, and
@@ -797,6 +799,83 @@ pub fn c_runtime_environment() -> Vec<Vec<u8>> {
 /// The number of bits in C `long` on this platform (32 on Windows, 64 on Linux).
 pub const LONG_BITS: u32 = c_long::BITS;
 
+/// The raw declarations of `mktime`. The safe wrapper below is the only caller.
+mod time_ffi {
+    use std::ffi::c_int;
+
+    /// `struct tm`: UCRT's nine `int`s (ucrt/time.h); glibc's add `tm_gmtoff` and `tm_zone`
+    /// (bits/types/struct_tm.h), a `long` and a pointer on x86_64.
+    #[repr(C)]
+    #[derive(Default)]
+    pub(super) struct Tm {
+        pub(super) tm_sec: c_int,
+        pub(super) tm_min: c_int,
+        pub(super) tm_hour: c_int,
+        pub(super) tm_mday: c_int,
+        pub(super) tm_mon: c_int,
+        pub(super) tm_year: c_int,
+        pub(super) tm_wday: c_int,
+        pub(super) tm_yday: c_int,
+        pub(super) tm_isdst: c_int,
+        #[cfg(target_os = "linux")]
+        pub(super) tm_gmtoff: std::ffi::c_long,
+        #[cfg(target_os = "linux")]
+        pub(super) tm_zone: usize,
+    }
+
+    unsafe extern "C" {
+        /// `mktime` and `timegm` with a 64-bit `time_t` (UCRT's `mktime` is an inline wrapper
+        /// of `_mktime64`).
+        #[cfg(windows)]
+        pub(super) fn _mktime64(tm: *mut Tm) -> i64;
+        #[cfg(windows)]
+        pub(super) fn _mkgmtime64(tm: *mut Tm) -> i64;
+        #[cfg(target_os = "linux")]
+        pub(super) fn mktime(tm: *mut Tm) -> i64;
+        #[cfg(target_os = "linux")]
+        pub(super) fn timegm(tm: *mut Tm) -> i64;
+    }
+
+    /// A broken-down time whose daylight saving time is unknown (`tm_isdst = -1`).
+    pub(super) fn tm(year: i32, mon: i32, mday: i32, hour: i32, min: i32, sec: i32) -> Tm {
+        Tm {
+            tm_sec: sec,
+            tm_min: min,
+            tm_hour: hour,
+            tm_mday: mday,
+            tm_mon: mon,
+            tm_year: year,
+            tm_isdst: -1,
+            ..Default::default()
+        }
+    }
+}
+
+/// `mktime` of a broken-down local time whose daylight saving time is unknown
+/// (`tm_isdst = -1`): `year` counts from 1900 and `mon` from 0, and any field may be out of its
+/// range, which `mktime` normalizes. -1 where it fails.
+pub fn mktime_c(year: i32, mon: i32, mday: i32, hour: i32, min: i32, sec: i32) -> i64 {
+    let mut tm = time_ffi::tm(year, mon, mday, hour, min, sec);
+    // SAFETY: `tm` is a `struct tm` of this platform's C runtime, which `mktime` reads and
+    // normalizes in place.
+    #[cfg(windows)]
+    let t = unsafe { time_ffi::_mktime64(&mut tm) };
+    #[cfg(target_os = "linux")]
+    let t = unsafe { time_ffi::mktime(&mut tm) };
+    t
+}
+
+/// `mktime_c` in UTC: `_mkgmtime64` (UCRT) or `timegm` (glibc). -1 where it fails.
+pub fn mkgmtime_c(year: i32, mon: i32, mday: i32, hour: i32, min: i32, sec: i32) -> i64 {
+    let mut tm = time_ffi::tm(year, mon, mday, hour, min, sec);
+    // SAFETY: as in `mktime_c`.
+    #[cfg(windows)]
+    let t = unsafe { time_ffi::_mkgmtime64(&mut tm) };
+    #[cfg(target_os = "linux")]
+    let t = unsafe { time_ffi::timegm(&mut tm) };
+    t
+}
+
 // ---------------------------------------------------------------------------------------------
 // Scanning (`sscanf`) and text-mode reading: the references of the LUT readers (card p4-oracle,
 // chunk T4.1).
@@ -1045,6 +1124,34 @@ mod tests {
     //! the locale and plain variants, the C standard's error conventions); the port is
     //! compared with the C runtime in `ocio-ops`.
     use super::*;
+
+    /// `mktime` and `timegm` normalize fields past their ranges the same way (a month -1 is
+    /// the December before, a day 0 the last of the month before, hours to 31, minutes to 63,
+    /// seconds to 62, as a DOS date holds them), and the local time zone's offset is a whole
+    /// number of quarter hours.
+    #[test]
+    fn mktime_normalizes_as_timegm() {
+        for (raw, normal) in [
+            ((80, -1, 0, 0, 0, 0), (79, 10, 30, 0, 0, 0)),
+            ((80, 1, 30, 31, 63, 62), (80, 2, 2, 8, 4, 2)),
+            ((207, 14, 31, 0, 0, 0), (208, 2, 31, 0, 0, 0)),
+        ] {
+            let (y, mo, d, h, mi, se) = raw;
+            let (ny, nmo, nd, nh, nmi, nse) = normal;
+            assert_eq!(
+                mkgmtime_c(y, mo, d, h, mi, se),
+                mkgmtime_c(ny, nmo, nd, nh, nmi, nse),
+                "{raw:?}"
+            );
+            assert_eq!(
+                mktime_c(y, mo, d, h, mi, se),
+                mktime_c(ny, nmo, nd, nh, nmi, nse),
+                "{raw:?}"
+            );
+            let offset = mktime_c(y, mo, d, h, mi, se) - mkgmtime_c(y, mo, d, h, mi, se);
+            assert_eq!(offset % 900, 0, "{raw:?}");
+        }
+    }
 
     /// `%.17g` keeps DBL_DECIMAL_DIG (17 for IEEE double) significant digits, enough for any
     /// double to come back unchanged (C17 5.2.4.2.2), and strtod rounds text of up to

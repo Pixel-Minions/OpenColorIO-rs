@@ -3,8 +3,10 @@
 
 //! OpenColorIO, ported to Rust. This release line matches OpenColorIO 2.5.2 exactly
 //! (PLAN.md §2): results, text output, errors and accepted configs.
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 
+pub mod baker;
+pub mod baking_utils;
 pub mod builtinconfigs;
 pub mod caching;
 pub mod color_space;
@@ -20,8 +22,10 @@ pub mod fileformats;
 pub mod look;
 pub(crate) mod look_parse;
 pub mod lut_limits;
+pub(crate) mod minizip;
 pub mod named_transform;
 pub(crate) mod ocio_yaml;
+pub mod ocioz_archive;
 pub mod parse_utils;
 pub mod path_utils;
 pub mod processor;
@@ -33,8 +37,11 @@ pub mod viewing_rules;
 pub mod yaml_cpp;
 
 #[cfg(test)]
+mod file_tests;
+#[cfg(test)]
 mod test_env;
 
+pub use baker::Baker;
 pub use builtinconfigs::builtin_config_registry::{
     BuiltinConfigRegistry, OCIO_BUILTIN_URI_PREFIX, resolve_config_path,
 };
@@ -65,6 +72,7 @@ pub use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 pub use ocio_ops::platform::{
     get_env_variable, is_env_variable_present, set_env_variable, unset_env_variable,
 };
+pub use ocioz_archive::extract_ocioz_archive;
 pub use processor::{Processor, ProcessorCacheFlags, ProcessorMetadata};
 pub use transform::{Transform, TransformType};
 pub use transforms::allocation_transform::AllocationTransform;

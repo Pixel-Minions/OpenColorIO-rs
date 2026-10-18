@@ -87,6 +87,21 @@ pub const OCIO_ACTIVE_VIEWS_ENVVAR: &str = "OCIO_ACTIVE_VIEWS";
 /// Port of `OCIO_INACTIVE_COLORSPACES_ENVVAR` (src/OpenColorIO/Config.cpp:51 @ v2.5.2).
 pub const OCIO_INACTIVE_COLORSPACES_ENVVAR: &str = "OCIO_INACTIVE_COLORSPACES";
 
+/// The name of a config's file, without its extension: an archive's config is `config.ocio`.
+///
+/// Port of `OCIO_CONFIG_DEFAULT_NAME` (src/OpenColorIO/Config.cpp:55 @ v2.5.2).
+pub const OCIO_CONFIG_DEFAULT_NAME: &str = "config";
+
+/// The extension of a config's file.
+///
+/// Port of `OCIO_CONFIG_DEFAULT_FILE_EXT` (src/OpenColorIO/Config.cpp:56 @ v2.5.2).
+pub const OCIO_CONFIG_DEFAULT_FILE_EXT: &str = ".ocio";
+
+/// The extension of an archived config's file.
+///
+/// Port of `OCIO_CONFIG_ARCHIVE_FILE_EXT` (src/OpenColorIO/Config.cpp:57 @ v2.5.2).
+pub const OCIO_CONFIG_ARCHIVE_FILE_EXT: &str = ".ocioz";
+
 /// The Rec.709 luma coefficients, as specified by the ASC.
 ///
 /// Port of `DEFAULT_LUMA_COEFF_R`, `_G` and `_B` (src/OpenColorIO/Config.cpp:68-70 @ v2.5.2).
@@ -817,8 +832,9 @@ impl Config {
     /// empty name, "Error could not read '<filename>' OCIO profile." for a file that can't be
     /// opened, and the reader's, which names the file.
     ///
-    /// A file that starts with `PK` is an OCIOZ archive, whose reader is not ported yet (WP
-    /// 4.x): an error. The file's bytes are read as `CreateFromFile`'s `std::ifstream` gives
+    /// A file that starts with `PK` is an OCIOZ archive: the config is read from its
+    /// `config.ocio`, and its LUT files from the archive ([`crate::ocioz_archive`]). The file's
+    /// bytes are read as `CreateFromFile`'s `std::ifstream` gives
     /// them to yaml-cpp ([`IStream::file`]): on Windows, a file of fewer than four bytes that
     /// makes yaml-cpp put back three of them reads as an empty document.
     ///
@@ -850,9 +866,7 @@ impl Config {
 
         if data.starts_with(b"PK") {
             // The file should be an OCIOZ archive file.
-            return Err(Exception::new(
-                "Config::CreateFromFile: reading an OCIOZ archive is not ported yet.",
-            ));
+            return crate::ocioz_archive::create_from_archive(filename);
         }
 
         // A read that fails ends MSVC's file stream, as the end of the file does. libstdc++'s
@@ -980,6 +994,18 @@ impl Config {
         // Check that FileTransform sources are not absolute nor have context variables outside
         // of config working directory.
         files.iter().all(|path| validate_path_for_archiving(path))
+    }
+
+    /// Writes the config's `.ocioz` archive to `ostream`: its text as `config.ocio`, then the
+    /// LUT files under its working directory ([`crate::ocioz_archive`]). A config that isn't
+    /// archivable ([`Config::is_archivable`]) is refused with "Config is not archivable.".
+    ///
+    /// Port of `Config::archive` (src/OpenColorIO/Config.cpp:6084-6088 @ v2.5.2), into any
+    /// [`std::io::Write`] (owner decision P4-5).
+    pub fn archive(&self, ostream: &mut impl std::io::Write) -> Result<()> {
+        // Using utility functions in OCIOZArchive.cpp.
+        let working_dir = self.current_context().get().working_dir().to_vec();
+        crate::ocioz_archive::archive_config(ostream, self, &working_dir)
     }
 
     /// The config's YAML text: checked against its version

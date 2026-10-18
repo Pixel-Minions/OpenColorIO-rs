@@ -84,11 +84,9 @@ fn generic_cache() {
     }
 }
 
-/// The parts of upstream's `Caching/processor_cache` test (tests/cpu/Caching_tests.cpp:110-159
-/// @ v2.5.2) before its config: the test's last part reads a config with a `FileTransform`,
-/// which comes with the config reader (Phase 3), and the test's port marker with it.
+/// Port of `OCIO_ADD_TEST(Caching, processor_cache)` @ v2.5.2.
 #[test]
-fn processor_cache_without_the_config() {
+fn processor_cache() {
     // A unit test to check the ProcessorCache class.
     let env = EnvGuard::new();
 
@@ -141,6 +139,94 @@ fn processor_cache_without_the_config() {
         // But the generic cache is still enabled.
         let cache2: GenericCache<String, DataRcPtr> = GenericCache::new();
         assert!(cache2.is_enabled());
+    }
+    // The end of the guard's scope.
+    env.set(&[]);
+
+    // Test the processor cache reset.
+    {
+        use crate::fileformats::test_utils::get_test_files_dir;
+        use crate::processor::ProcessorCacheFlags;
+        use ocio_ops::open_color_types::TransformDirection;
+
+        let config_text = "ocio_profile_version: 2
+
+search_path: "
+            .to_owned()
+            + &get_test_files_dir()
+            + "
+
+environment: {CS3: lut1d_green.ctf}
+
+roles:
+  default: cs1
+
+displays:
+  disp1:
+    - !<View> {name: view1, colorspace: cs3}
+
+colorspaces:
+  - !<ColorSpace>
+    name: cs1
+
+  - !<ColorSpace>
+    name: cs2
+    from_scene_reference: !<MatrixTransform> {offset: [0.11, 0.12, 0.13, 0]}
+
+  - !<ColorSpace>
+    name: cs3
+    from_scene_reference: !<FileTransform> {src: $CS3}
+";
+
+        let config = crate::Config::create_from_stream(config_text.as_bytes()).unwrap();
+
+        // Creating a editable config to clear the processor cache later in the test.
+        let cfg = (*config).clone();
+
+        {
+            // Test that clearProcessorCache clears the Processor cache.
+
+            // Create two processors and confirm that it is the same object as expected.
+            let proc_a = cfg
+                .processor_for_display_view("cs3", "disp1", "view1", TransformDirection::Forward)
+                .unwrap();
+            let proc_b = cfg
+                .processor_for_display_view("cs3", "disp1", "view1", TransformDirection::Forward)
+                .unwrap();
+
+            // Comparing the address of both Processor objects to confirm if they are the same or
+            // not.
+            assert!(Arc::ptr_eq(&proc_a, &proc_b));
+
+            cfg.clear_processor_cache();
+
+            // Create a third processor and confirm that it is different from the previous two as
+            // the processor cache was cleared.
+            let proc_c = cfg
+                .processor_for_display_view("cs3", "disp1", "view1", TransformDirection::Forward)
+                .unwrap();
+
+            assert!(!Arc::ptr_eq(&proc_c, &proc_a));
+        }
+
+        {
+            // Test that disable and re-enable the cache, using setProcessorCacheFlags, does not
+            // clear the Processor cache.
+
+            let proc_a = cfg
+                .processor_for_display_view("cs3", "disp1", "view1", TransformDirection::Forward)
+                .unwrap();
+
+            // Disable and re-enable the processor cache.
+            cfg.set_processor_cache_flags(ProcessorCacheFlags::OFF);
+            cfg.set_processor_cache_flags(ProcessorCacheFlags::ENABLED);
+
+            // Confirm that the processor is the same.
+            let proc_b = cfg
+                .processor_for_display_view("cs3", "disp1", "view1", TransformDirection::Forward)
+                .unwrap();
+            assert!(Arc::ptr_eq(&proc_a, &proc_b));
+        }
     }
 }
 

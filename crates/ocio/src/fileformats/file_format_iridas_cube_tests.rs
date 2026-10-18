@@ -2,7 +2,7 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Tests of the Iridas `.cube` format: `tests/cpu/fileformats/FileFormatIridasCube_tests.cpp`
-//! @ v2.5.2. Its `no_shaper` bakes, and comes with the baker (WP 4.8).
+//! @ v2.5.2.
 
 use super::*;
 use crate::fileformats::test_utils::build_ops_test;
@@ -286,5 +286,75 @@ fn load_3d_op() {
     ];
     for (i, &e) in expected.iter().enumerate() {
         assert_eq!(lut_array[i], e, "{i}");
+    }
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatIridasCube, no_shaper)` @ v2.5.2.
+#[test]
+fn no_shaper() {
+    // check baker output
+    let mut config = crate::Config::new().unwrap();
+    {
+        let mut cs = crate::ColorSpace::new();
+        cs.set_name("lnf");
+        cs.set_family("lnf");
+        config.add_color_space(&cs).unwrap();
+        config
+            .set_role(ocio_ops::parse_utils::ROLE_REFERENCE, Some(cs.name()))
+            .unwrap();
+    }
+    {
+        let mut cs = crate::ColorSpace::new();
+        cs.set_name("target");
+        cs.set_family("target");
+        config.add_color_space(&cs).unwrap();
+    }
+
+    let bout = "# Alexa conversion LUT, logc2video. Full in/full out.\n\
+                # created by alexalutconv (2.11)\n\
+                \n\
+                LUT_3D_SIZE 2\n\
+                0.000000 0.000000 0.000000\n\
+                1.000000 0.000000 0.000000\n\
+                0.000000 1.000000 0.000000\n\
+                1.000000 1.000000 0.000000\n\
+                0.000000 0.000000 1.000000\n\
+                1.000000 0.000000 1.000000\n\
+                0.000000 1.000000 1.000000\n\
+                1.000000 1.000000 1.000000\n";
+
+    let mut baker = Baker::new();
+    baker.set_config(&config);
+
+    baker
+        .format_metadata_mut()
+        .add_child_element(
+            Some(ocio_ops::format_metadata::METADATA_DESCRIPTION),
+            Some(b"Alexa conversion LUT, logc2video. Full in/full out."),
+        )
+        .unwrap();
+    baker
+        .format_metadata_mut()
+        .add_child_element(
+            Some(ocio_ops::format_metadata::METADATA_DESCRIPTION),
+            Some(b"created by alexalutconv (2.11)"),
+        )
+        .unwrap();
+    baker.set_format("iridas_cube").unwrap();
+    baker.set_input_space("lnf");
+    baker.set_target_space("target");
+    baker.set_cube_size(2);
+    let mut output = Vec::new();
+    baker.bake(&mut output).unwrap();
+
+    //
+    let osvec = ocio_ops::utils::string_utils::split_by_lines(&output);
+    let resvec = ocio_ops::utils::string_utils::split_by_lines(bout.as_bytes());
+    assert_eq!(osvec.len(), resvec.len());
+    for i in 0..resvec.len() {
+        assert_eq!(
+            String::from_utf8_lossy(&osvec[i]),
+            String::from_utf8_lossy(&resvec[i])
+        );
     }
 }

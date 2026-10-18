@@ -72,19 +72,22 @@ note = "S4: scalar profile. AVX512RGBAPack as per-value Load/Store, with LoadMas
 path = "src/OpenColorIO/Baker.cpp"
 kind = "src"
 target = ["crates/ocio/src/baker.rs"]
-status = "todo"
+status = "done"
+note = "p4-baker 4.8a: the settings, the format queries and bake's checks, against the wheel in crates/ocio/tests/baker_oracle.rs; the formats' bakes come in 4.8b-d"
 
 [[file]]
 path = "src/OpenColorIO/BakingUtils.cpp"
 kind = "src"
 target = ["crates/ocio/src/baking_utils.rs"]
-status = "todo"
+status = "done"
+note = "p4-baker 4.8a"
 
 [[file]]
 path = "src/OpenColorIO/BakingUtils.h"
 kind = "src"
 target = ["crates/ocio/src/baking_utils.rs"]
-status = "todo"
+status = "done"
+note = "p4-baker 4.8a"
 
 [[file]]
 path = "src/OpenColorIO/BitDepthUtils.cpp"
@@ -173,7 +176,7 @@ path = "src/OpenColorIO/Config.cpp"
 kind = "src"
 target = ["crates/ocio/src/config.rs"]
 status = "partial"
-note = "p1-transforms T0: CreateRaw's version and context, getMajorVersion, getMinorVersion, getCurrentContext; p1-transforms-fam2 (1.8d): setMajorVersion, which empties the processor cache (resetCacheIDs); 1.8g: the processor cache, its flags (get/setProcessorCacheFlags, clearProcessorCache, the copy) and getProcessor of a transform (with a context, a direction, or neither), its key and its fallback. p3-config-1 3.4d: Config::Create and Impl's constructor (the environment's active displays, views and inactive color spaces), the state, resetCacheIDs, the copy (createEditableCopy), LookupEnvironment, setMinorVersion, setVersion, name, description, family separator, environment variables and mode, loadEnvironment, search paths, working dir; CreateRaw built directly with its version and its environment (LOAD_ALL); p3-config-1 (C5): CreateRaw starts from Config::Create, so it reads the environment's lists and fails as Create does. p3-config-2: getCurrentContext returns a CurrentContext the config shares, so a context taken earlier sees later changes (owner decision 2026-10-06); a change through it (CurrentContext::update, hidden, for the Python binding, which casts the constness away) is the config's and keeps its processor cache, so getSearchPath, getSearchPath(index) and getWorkingDir return owned bytes. p3-rules 3.9f: getFileRules, setFileRules, getColorSpaceFromFilepath (both), filepathOnlyMatchesDefaultRule, parseColorSpaceFromString, upgradeToLatestVersion (fallible, U-55), isColorSpaceUsed, GetColorSpaceReferences, Impl::getAllInternalTransforms. p3-rules 3.9g: getViewingRules, setViewingRules. p3-rules: getFileRules and getViewingRules return a ConfigRules the config shares (owner decision 2026-10-07), whose hidden update, for the Python binding, changes the config's rules without emptying its processor cache; setFileRules and setViewingRules give the config new rules, and the upgrade changes them in place. p3-config-2 3.4h: the displays and views (3332-3815, 4388-4446: isViewShared, addSharedView, removeSharedView, clearSharedViews, getDefaultDisplay, getNumDisplays, getDisplay, getDefaultView both ways, getNumViews and getView by display, by color space and by type, AreViewsEqual, getDisplayView*, hasView, addDisplaySharedView, addDisplayView both ways, removeDisplayView, clearDisplays), GetViewNames, Impl::getViews, getView, getActiveViews, getFilteredViews (p3-rules 3.9g: its viewing-rule branch, docs/improvements.md I-136), updateDisplayCache; CreateRaw's display. p3-config-2 3.4i: the virtual display (3816-4102: hasVirtualView, isVirtualViewShared, addVirtualDisplayView, addVirtualDisplaySharedView, getVirtualDisplayNumViews, getVirtualDisplayView, AreVirtualViewsEqual, getVirtualDisplayView*, removeVirtualDisplayView, clearVirtualDisplay), the active displays and views (4133-4331), getNumDisplaysAll, getDisplayAll, getDisplayAllByName, isDisplayTemporary, setDisplayTemporary; instantiateDisplayFromMonitorName and instantiateDisplayFromICCProfile check their argument, then are not ported yet (SystemMonitor, Phase 9; the ICC reader, WP 4.7), with Impl::instantiateDisplay. p3-config-2 3.4j: the named transforms (3065-3325: getNumNamedTransforms, getNamedTransformNameByIndex both ways, getNamedTransform, getIndexForNamedTransform, addNamedTransform, removeNamedTransform with its early return (docs/improvements.md I-132), clearNamedTransforms), the looks (4473-4528, Impl::getLook), the view transforms and the default one (4532-4639, Impl::getViewTransform). p3-config-1 3.4f: the color spaces (getColorSpaces by category, getNumColorSpaces and getColorSpaceNameByIndex by reference type and visibility, getColorSpace, getCanonicalName, getIndexForColorSpace, addColorSpace, removeColorSpace, clearColorSpaces), the roles (setRole, getNumRoles, hasRole, getRoleName, getRoleColorSpace both ways), LookupRole, MatchReferenceType, Impl::getColorSpace, Impl::getNamedTransform and getNamedTransformIndex, buildInactiveNamesList and refreshActiveColorSpaces (5351-5460); CreateRaw's color space and role. p3-config-1 3.4g: setInactiveColorSpaces (Impl's too), getInactiveColorSpaces, isInactiveColorSpace, isStrictParsingEnabled, setStrictParsingEnabled, getDefaultLumaCoefs, setDefaultLumaCoefs, isColorSpaceLinear and Impl::getProcessorWithoutCaching; CreateRaw's strict parsing. Later: the key ignores the cache flags, a candidate I- entry once ExposureContrastTransform (dynamic properties) lands. p3-yaml-load-2 3.3l-m: CreateFromStream (1209-1212) and Impl::Read from a stream (5548-5562); checkVersionConsistency, both overloads (5586-5993, pulled forward from 3.8c; its ExposureContrast and grading arms come with those classes in Phase 5); the card's note on a 3-byte file `00 00 FE` (it loads as an empty document through CreateFromFile on Windows, MSVC filebuf putback after EOF, but fails through a stream) goes with CreateFromFile (3.10b), as the port reads only streams until then. p3-yaml-save 3.7c: Config::serialize (5317-5331) and operator<<(Config) (5236-5240), into a buffer; 3.7d: getCacheID with and without a context (5245-5312), GetFileReferences (154-171), and CreateRaw read from INTERNAL_RAW_PROFILE (74-92, 1127-1133) with CreateFromStream. p3-validate 3.8a-b: Config::validate (1359-2106) with Impl::validateView and validateSharedView (592-765), GetDisplayViewPrefixErrorMsg (222-243), Impl::hasColorSpace (480-483) and buildInactiveNamesList's INACTIVE_ALL (5398-5404); validate's kept message (I-147). p3-loading 3.10a: CreateFromBuiltinConfig (1233-1262) and OCIO_BUILTIN_URI_PREFIX (63). p3-loading 3.10b: GetCurrentConfig and SetCurrentConfig (110-132), CreateFromEnv (1135-1152), CreateFromFile (1154-1207: an OCIOZ archive, `PK`, is a not-ported error until its reader, Phase 4; the file's std::ifstream is IStream::file, I-157), OCIO_CONFIG_ENVVAR (47). p3-loading 3.10c: CreateFromConfigIOProxy (1214-1231) with Impl::Read from a proxy (5564-5584), setConfigIOProxy and getConfigIOProxy (5995-6006), isArchivable (6008-6082); archive (6084-6088) comes with the archive writer (Phase 4); p3-builders 3.2a: getProcessor by source and destination names, with and without a context (4706-4721), as processor_between; p3-builders 3.2c: getProcessor from a color space to a (display, view) pair, with and without a context (4724-4745), as processor_for_display_view; p3-builders 3.2d: getProcessor from two color spaces (4679-4704) and of a named transform or its name (4747-4777), with and without a context, as processor_between_color_spaces, processor_for_named_transform and processor_for_named_transform_by_name: all ten overloads; CreateRaw's strict parsing. Later: Impl::hasColorSpace and buildInactiveNamesList's INACTIVE_ALL with validate (3.8a); GetFileReferences with getCacheID (3.7d); p4-registry 4.1b: getProcessor's used context (the search path, working directory and I/O proxy) and its cache ID in the key, and the key from the transform's bytes; p4-readers 4.7b: instantiateDisplayFromICCProfile and Impl::instantiateDisplay (951-1109, 4120-4131)"
+note = "p1-transforms T0: CreateRaw's version and context, getMajorVersion, getMinorVersion, getCurrentContext; p1-transforms-fam2 (1.8d): setMajorVersion, which empties the processor cache (resetCacheIDs); 1.8g: the processor cache, its flags (get/setProcessorCacheFlags, clearProcessorCache, the copy) and getProcessor of a transform (with a context, a direction, or neither), its key and its fallback. p3-config-1 3.4d: Config::Create and Impl's constructor (the environment's active displays, views and inactive color spaces), the state, resetCacheIDs, the copy (createEditableCopy), LookupEnvironment, setMinorVersion, setVersion, name, description, family separator, environment variables and mode, loadEnvironment, search paths, working dir; CreateRaw built directly with its version and its environment (LOAD_ALL); p3-config-1 (C5): CreateRaw starts from Config::Create, so it reads the environment's lists and fails as Create does. p3-config-2: getCurrentContext returns a CurrentContext the config shares, so a context taken earlier sees later changes (owner decision 2026-10-06); a change through it (CurrentContext::update, hidden, for the Python binding, which casts the constness away) is the config's and keeps its processor cache, so getSearchPath, getSearchPath(index) and getWorkingDir return owned bytes. p3-rules 3.9f: getFileRules, setFileRules, getColorSpaceFromFilepath (both), filepathOnlyMatchesDefaultRule, parseColorSpaceFromString, upgradeToLatestVersion (fallible, U-55), isColorSpaceUsed, GetColorSpaceReferences, Impl::getAllInternalTransforms. p3-rules 3.9g: getViewingRules, setViewingRules. p3-rules: getFileRules and getViewingRules return a ConfigRules the config shares (owner decision 2026-10-07), whose hidden update, for the Python binding, changes the config's rules without emptying its processor cache; setFileRules and setViewingRules give the config new rules, and the upgrade changes them in place. p3-config-2 3.4h: the displays and views (3332-3815, 4388-4446: isViewShared, addSharedView, removeSharedView, clearSharedViews, getDefaultDisplay, getNumDisplays, getDisplay, getDefaultView both ways, getNumViews and getView by display, by color space and by type, AreViewsEqual, getDisplayView*, hasView, addDisplaySharedView, addDisplayView both ways, removeDisplayView, clearDisplays), GetViewNames, Impl::getViews, getView, getActiveViews, getFilteredViews (p3-rules 3.9g: its viewing-rule branch, docs/improvements.md I-136), updateDisplayCache; CreateRaw's display. p3-config-2 3.4i: the virtual display (3816-4102: hasVirtualView, isVirtualViewShared, addVirtualDisplayView, addVirtualDisplaySharedView, getVirtualDisplayNumViews, getVirtualDisplayView, AreVirtualViewsEqual, getVirtualDisplayView*, removeVirtualDisplayView, clearVirtualDisplay), the active displays and views (4133-4331), getNumDisplaysAll, getDisplayAll, getDisplayAllByName, isDisplayTemporary, setDisplayTemporary; instantiateDisplayFromMonitorName and instantiateDisplayFromICCProfile check their argument, then are not ported yet (SystemMonitor, Phase 9; the ICC reader, WP 4.7), with Impl::instantiateDisplay. p3-config-2 3.4j: the named transforms (3065-3325: getNumNamedTransforms, getNamedTransformNameByIndex both ways, getNamedTransform, getIndexForNamedTransform, addNamedTransform, removeNamedTransform with its early return (docs/improvements.md I-132), clearNamedTransforms), the looks (4473-4528, Impl::getLook), the view transforms and the default one (4532-4639, Impl::getViewTransform). p3-config-1 3.4f: the color spaces (getColorSpaces by category, getNumColorSpaces and getColorSpaceNameByIndex by reference type and visibility, getColorSpace, getCanonicalName, getIndexForColorSpace, addColorSpace, removeColorSpace, clearColorSpaces), the roles (setRole, getNumRoles, hasRole, getRoleName, getRoleColorSpace both ways), LookupRole, MatchReferenceType, Impl::getColorSpace, Impl::getNamedTransform and getNamedTransformIndex, buildInactiveNamesList and refreshActiveColorSpaces (5351-5460); CreateRaw's color space and role. p3-config-1 3.4g: setInactiveColorSpaces (Impl's too), getInactiveColorSpaces, isInactiveColorSpace, isStrictParsingEnabled, setStrictParsingEnabled, getDefaultLumaCoefs, setDefaultLumaCoefs, isColorSpaceLinear and Impl::getProcessorWithoutCaching; CreateRaw's strict parsing. Later: the key ignores the cache flags, a candidate I- entry once ExposureContrastTransform (dynamic properties) lands. p3-yaml-load-2 3.3l-m: CreateFromStream (1209-1212) and Impl::Read from a stream (5548-5562); checkVersionConsistency, both overloads (5586-5993, pulled forward from 3.8c; its ExposureContrast and grading arms come with those classes in Phase 5); the card's note on a 3-byte file `00 00 FE` (it loads as an empty document through CreateFromFile on Windows, MSVC filebuf putback after EOF, but fails through a stream) goes with CreateFromFile (3.10b), as the port reads only streams until then. p3-yaml-save 3.7c: Config::serialize (5317-5331) and operator<<(Config) (5236-5240), into a buffer; 3.7d: getCacheID with and without a context (5245-5312), GetFileReferences (154-171), and CreateRaw read from INTERNAL_RAW_PROFILE (74-92, 1127-1133) with CreateFromStream. p3-validate 3.8a-b: Config::validate (1359-2106) with Impl::validateView and validateSharedView (592-765), GetDisplayViewPrefixErrorMsg (222-243), Impl::hasColorSpace (480-483) and buildInactiveNamesList's INACTIVE_ALL (5398-5404); validate's kept message (I-147). p3-loading 3.10a: CreateFromBuiltinConfig (1233-1262) and OCIO_BUILTIN_URI_PREFIX (63). p3-loading 3.10b: GetCurrentConfig and SetCurrentConfig (110-132), CreateFromEnv (1135-1152), CreateFromFile (1154-1207: p4-baker 4.9a reads an OCIOZ archive, `PK`, through ocioz_archive.rs, with OCIO_CONFIG_DEFAULT_NAME, OCIO_CONFIG_DEFAULT_FILE_EXT and OCIO_CONFIG_ARCHIVE_FILE_EXT (55-57); the file's std::ifstream is IStream::file, I-157), OCIO_CONFIG_ENVVAR (47). p3-loading 3.10c: CreateFromConfigIOProxy (1214-1231) with Impl::Read from a proxy (5564-5584), setConfigIOProxy and getConfigIOProxy (5995-6006), isArchivable (6008-6082); p4-baker 4.9b1: archive (6084-6088), into any std::io::Write; p3-builders 3.2a: getProcessor by source and destination names, with and without a context (4706-4721), as processor_between; p3-builders 3.2c: getProcessor from a color space to a (display, view) pair, with and without a context (4724-4745), as processor_for_display_view; p3-builders 3.2d: getProcessor from two color spaces (4679-4704) and of a named transform or its name (4747-4777), with and without a context, as processor_between_color_spaces, processor_for_named_transform and processor_for_named_transform_by_name: all ten overloads; CreateRaw's strict parsing. Later: Impl::hasColorSpace and buildInactiveNamesList's INACTIVE_ALL with validate (3.8a); GetFileReferences with getCacheID (3.7d); p4-registry 4.1b: getProcessor's used context (the search path, working directory and I/O proxy) and its cache ID in the key, and the key from the transform's bytes; p4-readers 4.7b: instantiateDisplayFromICCProfile and Impl::instantiateDisplay (951-1109, 4120-4131)"
 
 [[file]]
 path = "src/OpenColorIO/ConfigUtils.cpp"
@@ -451,14 +454,16 @@ status = "todo"
 [[file]]
 path = "src/OpenColorIO/OCIOZArchive.cpp"
 kind = "src"
-target = ["crates/ocio/src/ocioz_archive.rs"]
-status = "todo"
+target = ["crates/ocio/src/ocioz_archive.rs", "crates/ocio/src/minizip/mod.rs"]
+status = "done"
+note = "p4-baker 4.9a: reading archives (390-661: readEntryBuffer, getFileBufferByPath, getFileStringFromArchiveFile, getFileBufferFromArchive, getEntriesMappingFromArchiveFile, CIOPOciozArchive) through minizip-ng 4.0.10's reader, ported in crates/ocio/src/minizip/ (upstream/minizip-ng), checked against the wheel in crates/ocio/tests/ocioz_read_oracle.rs; getFileBufferByExtension and getFileBufferFromArchiveByExtension (441-451, 526-529) are called nowhere in OCIO 2.5.2 and aren't ported. 4.9a2: minizip-ng's recovery of a central directory it can't read (mz_zip_recover_cd, with mz_stream_find, mz_zip_entry_read_descriptor and the central mz_zip_entry_write_header). 4.9a3: its zipped central directory (mz_zip_reader_unzip_cd). 4.9b1: archiveConfig and addSupportedFiles (149-333) on minizip-ng's writer (mz_zip_writer_*, the writing half of mz_zip.c, its system functions) and flate2 at level 9, checked against the wheel in crates/ocio/tests/ocioz_archive_oracle.rs (deviation D-6). 4.9b2: ExtractOCIOZArchive (335-388) on mz_zip_reader_save_all and mz_zip_reader_entry_save_file, checked against the wheel in crates/ocio/tests/ocioz_extract_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/OCIOZArchive.h"
 kind = "src"
 target = ["crates/ocio/src/ocioz_archive.rs"]
-status = "todo"
+status = "done"
+note = "p4-baker 4.9a: CIOPOciozArchive (77-107) and the reading functions; 4.9b1: archiveConfig; 4.9b2: ExtractOCIOZArchive (public, extract_ocioz_archive); getFileBufferFromArchiveByExtension is called nowhere and isn't ported"
 
 [[file]]
 path = "src/OpenColorIO/Op.cpp"
@@ -849,8 +854,8 @@ note = "p3-loading 3.10a: embedded by include_bytes! from the submodule (no copy
 path = "src/OpenColorIO/fileformats/FileFormat3DL.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/file_format_3dl.rs"]
-status = "partial"
-note = "p4-readers 4.3a: the reader (GetLikelyLutBitDepth, GetOCIOBitdepth, IsIdentity) and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_3dl_oracle.rs; bake (GetMaxValueFromIntegerBitDepth, GetClampedIntFromNormFloat, CubeDimensionLenToLustreBitDepth) comes with WP 4.8"
+status = "done"
+note = "p4-readers 4.3a: the reader (GetLikelyLutBitDepth, GetOCIOBitdepth, IsIdentity) and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_3dl_oracle.rs; p4-baker 4.8c: bake (GetMaxValueFromIntegerBitDepth, GetClampedIntFromNormFloat, CubeDimensionLenToLustreBitDepth), against the wheel in crates/ocio/tests/bake_formats_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatCC.cpp"
@@ -877,15 +882,15 @@ note = "p4-cdl 4.4e"
 path = "src/OpenColorIO/fileformats/FileFormatCSP.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/file_format_csp.rs"]
-status = "partial"
-note = "p4-readers 4.3e: the reader (the cubic prelut interpolator in each wheel's operand order) and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_csp_oracle.rs; a metadata block never closed is an error (U-72); bake comes with WP 4.8"
+status = "done"
+note = "p4-readers 4.3e: the reader (the cubic prelut interpolator in each wheel's operand order) and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_csp_oracle.rs; a metadata block never closed is an error (U-72); p4-baker 4.8c: bake, against the wheel in crates/ocio/tests/bake_formats_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatCTF.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/file_format_ctf.rs"]
 status = "partial"
-note = "p4-ctf-read-1 4.5b: 1-1216 (the format infos, I-180; isLoadableCTF; XMLParserHelper; read); 4.5c: BuildOp, HandleLUTInterpolation, HandleLUT, buildFileOps (1219-1341); 4.5e: the GammaParams, LogParams, SatNode, Saturation, SOPNode and SOP value elements; 4.5f: the IndexMap element; the operators' readers 4.5g-4.5i, bake WP 4.8, write WP 4.6"
+note = "p4-ctf-read-1 4.5b: 1-1216 (the format infos, I-180; isLoadableCTF; XMLParserHelper; read); 4.5c: BuildOp, HandleLUTInterpolation, HandleLUT, buildFileOps (1219-1341); 4.5e: the GammaParams, LogParams, SatNode, Saturation, SOPNode and SOP value elements; 4.5f: the IndexMap element; the operators' readers 4.5g-4.5i; p4-ctf-read-3 4.6a: write (1555-1590); 4.6d: its second half (1577-1591) apart as write_ops; p4-ctf-bake 4.8d: bake (1343-1553)"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatDiscreet1DL.cpp"
@@ -898,8 +903,8 @@ note = "p4-registry 4.3d: the reader (getline, sscanf/sscanf_s, std::stoi, the d
 path = "src/OpenColorIO/fileformats/FileFormatHDL.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/file_format_hdl.rs"]
-status = "partial"
-note = "p4-readers 4.3b: the reader (readHeaders, findHeaderItem, readLuts, CachedFileHDL) and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_hdl_oracle.rs; a 3D+1D Length of one size is an error (U-71); bake comes with WP 4.8"
+status = "done"
+note = "p4-readers 4.3b: the reader (readHeaders, findHeaderItem, readLuts, CachedFileHDL) and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_hdl_oracle.rs; a 3D+1D Length of one size is an error (U-71); p4-baker 4.8c: bake, against the wheel in crates/ocio/tests/bake_formats_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatICC.cpp"
@@ -919,15 +924,15 @@ note = "p4-readers 4.7b; the SampleICC subset it reads with (ext/sampleicc/src/i
 path = "src/OpenColorIO/fileformats/FileFormatIridasCube.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/file_format_iridas_cube.rs"]
-status = "partial"
-note = "p4-readers 4.2c: the reader and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_cube_oracle.rs; bake comes with WP 4.8"
+status = "done"
+note = "p4-readers 4.2c: the reader and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_cube_oracle.rs; p4-baker 4.8b2: bake, against the wheel in crates/ocio/tests/bake_formats_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatIridasItx.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/file_format_iridas_itx.rs"]
-status = "partial"
-note = "p4-readers 4.2d: the reader and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_iridas_itx_oracle.rs; bake comes with WP 4.8"
+status = "done"
+note = "p4-readers 4.2d: the reader and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_iridas_itx_oracle.rs; p4-baker 4.8b2: bake, against the wheel in crates/ocio/tests/bake_formats_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatIridasLook.cpp"
@@ -947,22 +952,22 @@ note = "p4-readers 4.3d: checked against the wheel in crates/ocio/tests/file_for
 path = "src/OpenColorIO/fileformats/FileFormatResolveCube.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/file_format_resolve_cube.rs"]
-status = "partial"
-note = "p4-readers 4.2c: the reader and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_cube_oracle.rs; bake comes with WP 4.8"
+status = "done"
+note = "p4-readers 4.2c: the reader and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_cube_oracle.rs; p4-baker 4.8b2: bake, against the wheel in crates/ocio/tests/bake_formats_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatSpi1D.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/file_format_spi1d.rs"]
-status = "partial"
-note = "p4-registry 4.2a2: the reader (istream::getline, sscanf, from_chars) and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_spi1d_oracle.rs; bake comes with WP 4.8"
+status = "done"
+note = "p4-registry 4.2a2: the reader (istream::getline, sscanf, from_chars) and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_spi1d_oracle.rs; p4-baker 4.8b1: bake, against the wheel in crates/ocio/tests/bake_formats_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatSpi3D.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/file_format_spi3d.rs"]
-status = "partial"
-note = "p4-readers 4.2b: the reader (istream::getline, sscanf, from_chars) and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_spi3d_oracle.rs; bake comes with WP 4.8"
+status = "done"
+note = "p4-readers 4.2b: the reader (istream::getline, sscanf, from_chars) and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_spi3d_oracle.rs; p4-baker 4.8b1: bake, against the wheel in crates/ocio/tests/bake_formats_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatSpiMtx.cpp"
@@ -975,8 +980,8 @@ note = "p4-registry 4.2a1: the reader (istream::read of 1024 bytes, input_stream
 path = "src/OpenColorIO/fileformats/FileFormatTruelight.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/file_format_truelight.rs"]
-status = "partial"
-note = "p4-readers 4.3c: the reader and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_truelight_oracle.rs; bake comes with WP 4.8"
+status = "done"
+note = "p4-readers 4.3c: the reader and buildFileOps, checked against the wheel in crates/ocio/tests/file_format_truelight_oracle.rs; p4-baker 4.8c: bake, against the wheel in crates/ocio/tests/bake_formats_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/FileFormatUtils.cpp"
@@ -1056,14 +1061,14 @@ path = "src/OpenColorIO/fileformats/ctf/CTFReaderHelper.cpp"
 kind = "src"
 target = ["crates/ocio/src/fileformats/ctf/ctf_reader_helper.rs"]
 status = "partial"
-note = "p4-ctf-read-1 4.5b: CTFReaderTransformElt (19-261), CTFReaderMetadataElt and CTFReaderInfoElt (675-798), GetReader's version table (997-1183); 4.5c: CTFReaderArrayElt and CTFArrayMgt (265-418), CTFReaderOpElt (802-957, 1185-1195), the Matrix and Range readers and CTFReaderRangeValueElt (4561-5010); p4-ctf-read-2 4.5e: the ASC_CDL reader and its SatNode and SOPNode (1327-1413), the Gamma readers and GammaParams (1862-2200), the Log readers and LogParams (3545-4081); 4.5f: CTFReaderIndexMapElt and CTFIndexMapMgt (433-671), the Lut1D readers (4085-4385) and CTFReaderInvLut1DElt (3245-3429), RangeOpData's constructor from an IndexMap (as range_from_index_mapping, I-181 for raw halfs), the Lut3D readers (4389-4557) and CTFReaderInvLut3DElt (3433-3541); the rest 4.5g-4.5i"
+note = "p4-ctf-read-1 4.5b: CTFReaderTransformElt (19-261), CTFReaderMetadataElt and CTFReaderInfoElt (675-798), GetReader's version table (997-1183); 4.5c: CTFReaderArrayElt and CTFArrayMgt (265-418), CTFReaderOpElt (802-957, 1185-1195), the Matrix and Range readers and CTFReaderRangeValueElt (4561-5010); p4-ctf-read-2 4.5e: the ASC_CDL reader and its SatNode and SOPNode (1327-1413), the Gamma readers and GammaParams (1862-2200), the Log readers and LogParams (3545-4081); 4.5f: CTFReaderIndexMapElt and CTFIndexMapMgt (433-671), the Lut1D readers (4085-4385) and CTFReaderInvLut1DElt (3245-3429), RangeOpData's constructor from an IndexMap (as range_from_index_mapping, I-181 for raw halfs), the Lut3D readers (4389-4557) and CTFReaderInvLut3DElt (3433-3541); p4-ctf-read-3 (verifier fix): CTFReaderDynamicParamElt (1556-1695), whose ExposureContrast and grading branches wait for their readers; 4.5g: the ACES reader and ACESParams (1199-1323), the FixedFunction and Function readers (1417-1548), the GradingRGBCurve reader (2580-2650) and its curve, control points and slopes elements (2738-2970); 4.5h: the Reference reader (5014-5109); the rest 4.5i"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/ctf/CTFReaderHelper.h"
 kind = "src"
 target = ["crates/ocio/src/fileformats/ctf/ctf_reader_helper.rs"]
 status = "partial"
-note = "p4-ctf-read-1 4.5b: the transform, metadata, info and descriptor elements, CTFReaderOpElt::Type; 4.5c: CTFReaderArrayElt, CTFArrayMgt, CTFReaderOpElt, the Matrix and Range readers, CTFReaderRangeValueElt; p4-ctf-read-2 4.5e: the CDL, Gamma and Log readers and their parameter elements; 4.5f: the IndexMap element and manager, the Lut1D, InverseLUT1D, Lut3D and InverseLUT3D readers; the rest 4.5g-4.5i"
+note = "p4-ctf-read-1 4.5b: the transform, metadata, info and descriptor elements, CTFReaderOpElt::Type; 4.5c: CTFReaderArrayElt, CTFArrayMgt, CTFReaderOpElt, the Matrix and Range readers, CTFReaderRangeValueElt; p4-ctf-read-2 4.5e: the CDL, Gamma and Log readers and their parameter elements; 4.5f: the IndexMap element and manager, the Lut1D, InverseLUT1D, Lut3D and InverseLUT3D readers; p4-ctf-read-3 (verifier fix): CTFReaderDynamicParamElt; 4.5g: the ACES reader and ACESParams, the FixedFunction and Function readers, the GradingRGBCurve reader and its curve, control points and slopes elements; 4.5h: the Reference reader; the rest 4.5i"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/ctf/CTFReaderUtils.cpp"
@@ -1082,16 +1087,16 @@ note = "p4-ctf-read-1 4.5a: the element and attribute names"
 [[file]]
 path = "src/OpenColorIO/fileformats/ctf/CTFTransform.cpp"
 kind = "src"
-target = ["crates/ocio/src/fileformats/ctf/ctf_transform.rs"]
+target = ["crates/ocio/src/fileformats/ctf/ctf_transform.rs", "crates/ocio/src/fileformats/ctf/ctf_writer.rs"]
 status = "partial"
-note = "p4-ctf-read-1 4.5a (1-505): CTFVersion, CTFReaderTransform, GetElementsValues, fromMetadata, toMetadata; the writers (505-3006, with GetOpMinimumVersion and GetMinimumVersion) come with WP 4.6"
+note = "p4-ctf-read-1 4.5a (1-505): CTFVersion, CTFReaderTransform, GetElementsValues, fromMetadata, toMetadata; p4-ctf-read-3 4.6a (ctf_writer.rs): GetOpMinimumVersion and GetMinimumVersion (225-403), WriteDescriptions, WriteValue, SetOStream, WriteValues, OpWriter, BitDepthToCLFString, GetValidatedFileBitDepth (509-811), MatrixWriter (2284-2430), TransformWriter (2518-3004); 4.6b: CDLWriter (813-933), GammaWriter and AddGammaParams (1123-1276, Exponent ops written as gammas), LogWriter, AddLogParam, AddLogParams (1896-2037), RangeWriter and WriteTag (2434-2512); 4.6c: Lut1DWriter (2042-2179), Lut3DWriter (2183-2280); 4.6d: FixedFunctionWriter (1053-1119), GradingRGBCurveWriter (1502-1630); the ExposureContrast and grading ones but the RGB curves' WP 4.6f"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/ctf/CTFTransform.h"
 kind = "src"
-target = ["crates/ocio/src/fileformats/ctf/ctf_transform.rs"]
-status = "partial"
-note = "p4-ctf-read-1 4.5a: CTFVersion, the versions, CTFReaderTransform, GetElementsValues; TransformWriter comes with WP 4.6"
+target = ["crates/ocio/src/fileformats/ctf/ctf_transform.rs", "crates/ocio/src/fileformats/ctf/ctf_writer.rs"]
+status = "done"
+note = "p4-ctf-read-1 4.5a: CTFVersion, the versions, CTFReaderTransform, GetElementsValues; p4-ctf-read-3 4.6a: TransformWriter (266-289)"
 
 [[file]]
 path = "src/OpenColorIO/fileformats/ctf/IndexMapping.cpp"
@@ -1789,7 +1794,7 @@ path = "src/OpenColorIO/ops/lut1d/Lut1DOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op.rs", "crates/ocio/src/transforms/lut1d_transform.rs", "crates/ocio-gpu/src/ops/lut1d/lut1d_op_gpu.rs"]
 status = "partial"
-note = "p1-optimizer B: Lut1DOp (clone, getInfo, isSameType, isInverse, canCombineWith, hasChannelCrosstalk, finalize, getCacheID, supportedByLegacyShader), CreateLut1DOp, GenerateIdentityLut1D; cache IDs and the optimizer's Lut1D rules against the wheel (tests/lut1d_op_oracle.rs). p2-lut1d-inv 2.1g: combineWith (Compose); p2-lut1d-fwd 2.1a: getCPUOp (GetLut1DRenderer, F32 to F32); p1-transforms-fam4: CreateLut1DTransform and BuildLut1DOp, in crates/ocio/src/transforms/lut1d_transform.rs. p2-lut1d-gpu 2.1h: extractGpuShaderInfo (an inverse LUT made fast, I-137), in crates/ocio-gpu/src/ops/lut1d/lut1d_op_gpu.rs. GenerateLinearScaleLut1D comes with the file formats (Phase 4)"
+note = "p1-optimizer B: Lut1DOp (clone, getInfo, isSameType, isInverse, canCombineWith, hasChannelCrosstalk, finalize, getCacheID, supportedByLegacyShader), CreateLut1DOp, GenerateIdentityLut1D; cache IDs and the optimizer's Lut1D rules against the wheel (tests/lut1d_op_oracle.rs). p2-lut1d-inv 2.1g: combineWith (Compose); p2-lut1d-fwd 2.1a: getCPUOp (GetLut1DRenderer, F32 to F32); p1-transforms-fam4: CreateLut1DTransform and BuildLut1DOp, in crates/ocio/src/transforms/lut1d_transform.rs. p2-lut1d-gpu 2.1h: extractGpuShaderInfo (an inverse LUT made fast, I-137), in crates/ocio-gpu/src/ops/lut1d/lut1d_op_gpu.rs. p4-baker 4.8b1: GenerateLinearScaleLut1D"
 
 [[file]]
 path = "src/OpenColorIO/ops/lut1d/Lut1DOp.h"
@@ -2082,8 +2087,8 @@ note = "1.2c: NoOpData, FileNoOpData, CreateFileNoOp, CreateLookNoOp; not yet: P
 path = "src/OpenColorIO/ops/range/RangeOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/range/range_op.rs", "crates/ocio-gpu/src/gpu_processor.rs", "crates/ocio/src/transforms/range_transform.rs"]
-status = "partial"
-note = "1.3r2: RangeOp (the op's behaviors on OpData::Range, its finalize in Op::finalize) and both CreateRangeOp; checked against the wheel through CPU processor cache IDs and pixels (tests/range_op_oracle.rs: combinations, identities, bit depths). p1-optimizer B: the Lut1D arms of canCombineWith and combineWith (an identity range before a forward standard-domain LUT goes). p1-transforms-fam1 (1.8c): BuildRangeOp and CreateRangeTransform, in crates/ocio/src/transforms/range_transform.rs. Not yet: the Lut3D arms. Its GPU part: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's Range arm with its finalize check (gpu_processor.rs, 1.3r3)"
+status = "done"
+note = "1.3r2: RangeOp (the op's behaviors on OpData::Range, its finalize in Op::finalize) and both CreateRangeOp; checked against the wheel through CPU processor cache IDs and pixels (tests/range_op_oracle.rs: combinations, identities, bit depths). p1-optimizer B: the Lut1D arms of canCombineWith and combineWith (an identity range before a forward standard-domain LUT goes). p1-transforms-fam1 (1.8c): BuildRangeOp and CreateRangeTransform, in crates/ocio/src/transforms/range_transform.rs. p4-ctf-read-3 (WP 4.10a, found by OpOptimizers optimization2): the Lut3D arms of canCombineWith and combineWith (RangeOp.cpp:126-133, 159-164: an identity range before a forward Lut3D goes). Its GPU part: extractGpuShaderInfo in ocio-gpu, as extract_op_gpu_shader_info's Range arm with its finalize check (gpu_processor.rs, 1.3r3)"
 
 [[file]]
 path = "src/OpenColorIO/ops/range/RangeOp.h"
@@ -2252,7 +2257,7 @@ path = "src/OpenColorIO/transforms/FileTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/file_transform.rs", "crates/ocio/src/transforms/file_format.rs"]
 status = "partial"
-note = "p3-transforms (3.1c): the class (28-144) and its operator<< (166-185), checked against the wheel in crates/ocio/tests/config_transforms_oracle.rs; p3-builders 3.2a: CollectContextVariables (224-298); p4-registry 4.1a: the format statics (146-164) and the format registry (315-554) and FileFormat's defaults (556-593) in file_format.rs, checked against the wheel in crates/ocio/tests/file_formats_registry_oracle.rs; 4.1b: getLutData (186-221; its ConfigIOProxy branch comes with 3.10c), CollectContextVariables (224-298; the one port of it, merged with 3.2a's in the Phase 4 group), LoadFileUncached (595-776), the file cache (778-893) and BuildFileTransformOps (895-970), the loader's errors and debug log checked against the wheel in crates/ocio/tests/file_transform_load_oracle.rs"
+note = "p3-transforms (3.1c): the class (28-144) and its operator<< (166-185), checked against the wheel in crates/ocio/tests/config_transforms_oracle.rs; p3-builders 3.2a: CollectContextVariables (224-298); p4-registry 4.1a: the format statics (146-164) and the format registry (315-554) and FileFormat's defaults (556-593) in file_format.rs, checked against the wheel in crates/ocio/tests/file_formats_registry_oracle.rs; 4.1b: getLutData (187-221; p4-baker 4.9a: its ConfigIOProxy branch), CollectContextVariables (224-298; the one port of it, merged with 3.2a's in the Phase 4 group), LoadFileUncached (595-776), the file cache (778-893) and BuildFileTransformOps (895-970), the loader's errors and debug log checked against the wheel in crates/ocio/tests/file_transform_load_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/transforms/FileTransform.h"
@@ -2328,7 +2333,7 @@ path = "src/OpenColorIO/transforms/GroupTransform.cpp"
 kind = "src"
 target = ["crates/ocio/src/transforms/group_transform.rs"]
 status = "partial"
-note = "p1-transforms T0: GroupTransform (Create, direction, validate, metadata, the children, operator<<) and BuildGroupOps; p1-transforms-fam1 (1.8b): operator<< writes the children on the group's stream (I-73); text and validation against the wheel (crates/ocio/tests/transform_oracle.rs). p4-cdl 4.4e: write (GroupTransform.cpp:114-139). Its format queries (4.6e) and CollectContextVariables (Phase 3) come later"
+note = "p1-transforms T0: GroupTransform (Create, direction, validate, metadata, the children, operator<<) and BuildGroupOps; p1-transforms-fam1 (1.8b): operator<< writes the children on the group's stream (I-73); text and validation against the wheel (crates/ocio/tests/transform_oracle.rs). p4-cdl 4.4e: write (GroupTransform.cpp:114-139). p4-ctf-read-3 4.6e: GetNumWriteFormats, GetFormatNameByIndex, GetFormatExtensionByIndex (141-154). CollectContextVariables (Phase 3) comes later"
 
 [[file]]
 path = "src/OpenColorIO/transforms/GroupTransform.h"
@@ -4268,7 +4273,8 @@ note = "S4: all 7 tests (bodies in sse2_tests.rs)"
 path = "tests/cpu/Baker_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/baker_tests.rs"]
-status = "todo"
+status = "done"
+note = "p4-baker 4.8c: bake_3dlut, baking_validation"
 
 [[file]]
 path = "tests/cpu/BitDepthUtils_tests.cpp"
@@ -4287,14 +4293,14 @@ path = "tests/cpu/CPUProcessor_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/cpu_processor_tests.rs", "crates/ocio/tests/cpu_processor_tests.rs"]
 status = "partial"
-note = "flag_composition; p3-config-1 3.4e: with_one_matrix, one_pixel, optimizations, planar_vs_packed and the 7 scanline_* tests, with Config::Create() (crates/ocio/tests/cpu_processor_tests.rs). dynamic_properties waits for ExposureContrastTransform (Phase 5), with_one_1d_lut for FileTransform's ops (Phase 4); image_desc and with_several_ops read a config with a FileTransform (Config::CreateFromStream, Phase 3, and the file formats, Phase 4)"
+note = "flag_composition; p3-config-1 3.4e: with_one_matrix, one_pixel, optimizations, planar_vs_packed and the 7 scanline_* tests, with Config::Create() (crates/ocio/tests/cpu_processor_tests.rs). dynamic_properties waits for ExposureContrastTransform (Phase 5), p4-ctf-bake 4.10b: with_one_1d_lut, with_several_ops and image_desc (crates/ocio/tests/cpu_processor_tests.rs, a cpu-tests target)"
 
 [[file]]
 path = "tests/cpu/Caching_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/caching_tests.rs"]
-status = "partial"
-note = "generic_cache ported; processor_cache's parts before its config ported unmarked (processor_cache_without_the_config), its marker comes with Config::CreateFromStream (Phase 3)"
+status = "done"
+note = "generic_cache; processor_cache (its config with a FileTransform, p4-ctf-bake 4.10b)"
 
 [[file]]
 path = "tests/cpu/ColorSpaceSet_tests.cpp"
@@ -4308,7 +4314,7 @@ path = "tests/cpu/ColorSpace_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/color_space_tests.rs"]
 status = "partial"
-note = "p3-model-objects (3.4a): basic, alias, category, interop_id, amf_transform_ids, icc_profile_name, unknown_interchange_attrib; interop_id_serialization and icc_profile_name_serialization with p3-yaml-save (3.7b), color_space_serialize and (Config, use_alias) with p3-validate (3.8); is_colorspace_linear with p3-after-p2 (Lut3D), the two processor_to_known_colorspace tests with ConfigUtils (Phase 9)"
+note = "p3-model-objects (3.4a): basic, alias, category, interop_id, amf_transform_ids, icc_profile_name, unknown_interchange_attrib; interop_id_serialization and icc_profile_name_serialization with p3-yaml-save (3.7b), color_space_serialize and (Config, use_alias) with p3-validate (3.8); is_colorspace_linear with p4-ctf-bake 4.10b (its color spaces read CLF files); the two processor_to_known_colorspace tests with ConfigUtils (Phase 9)"
 
 [[file]]
 path = "tests/cpu/ConfigUtils_tests.cpp"
@@ -4321,7 +4327,7 @@ path = "tests/cpu/Config_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/config_tests.rs"]
 status = "partial"
-note = "p1-transforms-fam2 (1.8d): the setMajorVersion checks of version (2065-2067, 2104-2107), set_major_version, without a marker. p3-yaml-load-2 3.3l-m: group A (roles, colorspace_duplicate, cdltransform_duplicate, searchpath_duplicate, key_value_error, unknown_key_error, faulty_config_file, display_color_spaces_errors); view, completed with its serialization checks in p3-yaml-save. p3-yaml-save 3.7: group C's serialize_group_transform, serialize_searchpath, serialize_environment, active_displayview_lists, file_transform_serialization_v1, transform_versions, description_and_name; internal_raw_profile (3.7d); p3-validate 3.8: simple_config, validation, version, version_validation, config_v1, not_case_sensitive, look_transform, add_remove_display, family_separator, alias_validation, colorspacename_with_reserved_token, serialize_colorspace_displayview_transforms, matrix_serialization, cdl_serialization, file_transform_serialization, add_color_space, remove_color_space, display_color_spaces_serialization, categories, display, display_view, display_view_order, view_transforms, is_colorspace_used, inactive_color_space_precedence, inactive_color_space_read_write, virtual_display_v2_only, virtual_display_exceptions, interchange_attributes; range_serialization, exponent_serialization, exponent_with_linear_serialization, log_serialization, fixed_function_serialization (with PROFILE_V21_START), required_roles_for_version_2_2. Later: virtual_display_with_active_displays and virtual_display (their Windows and macOS blocks instantiate a display from the machine's monitor, SystemMonitor, Phase 9; virtual_display's Linux block reads an ICC profile, WP 4.7). p3-loading 3.10a: is_inactive. p3-builders 3.2c: create_raw_config, look_is_noop; 3.2d: group D (context_variable_v1, context_variable_faulty_cases, context_variable, context_variable_unresolved, context_variable_with_role, context_variable_with_display_view, env_colorspace_name, exponent_vs_config_version, transform_with_roles, processor_cache_with_context_variables), context_variable_with_colorspacename, builtin_transforms, get_processor_alias, inactive_color_space. Later: config_context_cacheids, look_fallback, context_variable_with_sanity_check, context_variable_with_search_path_v1/v2, context_variables_typical_use_cases and optimization_with_bitdepths build file transforms (WP 4.1, a follow-up chunk after p4-registry); get_processor_from_two_configs needs Config::GetProcessorFromConfigs (ConfigUtils, Phase 9)"
+note = "p1-transforms-fam2 (1.8d): the setMajorVersion checks of version (2065-2067, 2104-2107), set_major_version, without a marker. p3-yaml-load-2 3.3l-m: group A (roles, colorspace_duplicate, cdltransform_duplicate, searchpath_duplicate, key_value_error, unknown_key_error, faulty_config_file, display_color_spaces_errors); view, completed with its serialization checks in p3-yaml-save. p3-yaml-save 3.7: group C's serialize_group_transform, serialize_searchpath, serialize_environment, active_displayview_lists, file_transform_serialization_v1, transform_versions, description_and_name; internal_raw_profile (3.7d); p3-validate 3.8: simple_config, validation, version, version_validation, config_v1, not_case_sensitive, look_transform, add_remove_display, family_separator, alias_validation, colorspacename_with_reserved_token, serialize_colorspace_displayview_transforms, matrix_serialization, cdl_serialization, file_transform_serialization, add_color_space, remove_color_space, display_color_spaces_serialization, categories, display, display_view, display_view_order, view_transforms, is_colorspace_used, inactive_color_space_precedence, inactive_color_space_read_write, virtual_display_v2_only, virtual_display_exceptions, interchange_attributes; range_serialization, exponent_serialization, exponent_with_linear_serialization, log_serialization, fixed_function_serialization (with PROFILE_V21_START), required_roles_for_version_2_2. Later: virtual_display_with_active_displays and virtual_display (their Windows and macOS blocks instantiate a display from the machine's monitor, SystemMonitor, Phase 9; virtual_display's Linux block reads an ICC profile, WP 4.7). p3-loading 3.10a: is_inactive. p3-builders 3.2c: create_raw_config, look_is_noop; p4-baker 4.9a: create_from_archive; 3.2d: group D (context_variable_v1, context_variable_faulty_cases, context_variable, context_variable_unresolved, context_variable_with_role, context_variable_with_display_view, env_colorspace_name, exponent_vs_config_version, transform_with_roles, processor_cache_with_context_variables), context_variable_with_colorspacename, builtin_transforms, get_processor_alias, inactive_color_space. p4-ctf-bake 4.10b: context_variable_with_sanity_check, context_variable_with_search_path_v1/v2, look_fallback, create_from_config_io_proxy, set_config_io_proxy. Later: config_context_cacheids and context_variables_typical_use_cases build processors of exposure_contrast_*.ctf files (the CTF ExposureContrast reader, Phase 5, 4.5i); optimization_with_bitdepths builds a dynamic ExposureContrastTransform (Phase 5); get_processor_from_two_configs needs Config::GetProcessorFromConfigs (ConfigUtils, Phase 9)"
 
 [[file]]
 path = "tests/cpu/ContextVariableUtils_tests.cpp"
@@ -4373,9 +4379,9 @@ status = "done"
 [[file]]
 path = "tests/cpu/GpuShader_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-gpu/src/gpu_shader_tests.rs"]
+target = ["crates/ocio-gpu/src/gpu_shader_tests.rs", "crates/ocio/tests/gpu_shader_tests.rs"]
 status = "partial"
-note = "1.7c: generic_shader (its uniform too). The Metal and Vulkan tests extract processors' shaders, and come with the ops' GPU writers; gpu_shader_class_wrapper_tests.rs checks the class wrapper's part of the Metal ones"
+note = "1.7c: generic_shader (its uniform too); gpu_shader_class_wrapper_tests.rs checks the class wrapper's part of the Metal ones. p4-ctf-bake 4.10b: MetalLutTest2, MetalSupport3-6 and VulkanSupport, which extract the shaders of config and LUT file processors (crates/ocio/tests/gpu_shader_tests.rs). Later: MetalLutTest uses the legacy GPU processor (Phase 7); MetalSupport7 an ExposureContrastTransform, MetalSupport8 a GradingRGBCurveTransform in a config and MetalSupport9 a dynamic one (Phase 5)"
 
 [[file]]
 path = "tests/cpu/Logging_tests.cpp"
@@ -4408,15 +4414,15 @@ note = "basic and alias add named transforms to a config (3.4j) and call NamedTr
 path = "tests/cpu/OCIOZArchive_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/ocioz_archive_tests.rs", "crates/ocio/src/config_tests.rs"]
-status = "partial"
-note = "p3-loading 3.10c: is_config_archivable (Config::isArchivable) in config_tests.rs; the others archive and extract configs (Phase 4)"
+status = "done"
+note = "p3-loading 3.10c: is_config_archivable (Config::isArchivable) in config_tests.rs; p4-baker 4.9a: context_test_for_search_paths_and_filetransform_source_path in ocioz_archive_tests.rs; 4.9b1: archive_config_and_compare_to_original; 4.9b2: extract_config_and_compare_to_original"
 
 [[file]]
 path = "tests/cpu/OpOptimizers_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-ops/src/op_optimizers_tests.rs"]
+target = ["crates/ocio-ops/src/op_optimizers_tests.rs", "crates/ocio/src/file_tests/op_optimizers_tests.rs"]
 status = "partial"
-note = "p1-optimizer: gamma_prefix; p1-tests-catchup: remove_leading_clamp_identity, remove_trailing_clamp_identity, combine_ops, non_optimizable, optimizable, lut1d_identity_replacement, range_composition, gamma_comp_identity, replace_ops; p2-ff-cpu 2.3e: remove_inverse_ops; p2-lut1d-inv 2.5a: lut1d_half_domain_keep_prior_range, multi_op_prefix. Not yet: the tests that read files through BuildOpsTest (optimization, optimization2, lut1d_identities, lut1d_identity_replacement_order, invlut_pair_identities, mntr_identities, gamma_comp, gamma_comp_test2, log_identities, range_lut, prefer_pair_inverse_over_combine, opt_prefix_test1: the CTF/CLF and spi1d readers, Phase 4); dynamic_ops and dyn_properties_prefix (the ExposureContrast op, Phase 5)"
+note = "p1-optimizer: gamma_prefix; p1-tests-catchup: remove_leading_clamp_identity, remove_trailing_clamp_identity, combine_ops, non_optimizable, optimizable, lut1d_identity_replacement, range_composition, gamma_comp_identity, replace_ops; p2-ff-cpu 2.3e: remove_inverse_ops; p2-lut1d-inv 2.5a: lut1d_half_domain_keep_prior_range, multi_op_prefix; p4-ctf-read-3 4.10a, with the readers in crates/ocio/src/file_tests/: optimization2, optimization, lut1d_identities, lut1d_identity_replacement_order, invlut_pair_identities, mntr_identities, gamma_comp, gamma_comp_test2, log_identities, range_lut, prefer_pair_inverse_over_combine. Not yet: opt_prefix_test1 (its file has an ExposureContrast op, Phase 5); dynamic_ops and dyn_properties_prefix (the ExposureContrast op, Phase 5)"
 
 [[file]]
 path = "tests/cpu/Op_tests.cpp"
@@ -4581,8 +4587,8 @@ note = "p3-loading 3.10a: basic, basic_impl, resolve_config_path; 3.10b: create_
 path = "tests/cpu/fileformats/FileFormat3DL_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/fileformats/file_format_3dl_tests.rs"]
-status = "partial"
-note = "p4-readers 4.3a: format_info, get_likely_lut_bitdepth, load, parse_1d; bake comes with WP 4.8"
+status = "done"
+note = "p4-readers 4.3a: format_info, get_likely_lut_bitdepth, load, parse_1d; p4-baker 4.8c: bake"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatCCC_tests.cpp"
@@ -4609,15 +4615,15 @@ note = "p4-cdl 4.4e: test_cdl, write"
 path = "tests/cpu/fileformats/FileFormatCSP_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/fileformats/file_format_csp_tests.rs"]
-status = "partial"
-note = "p4-readers 4.3e: simple_1d, simple_3d, less_strict_parse, failures_1d, failures_3d; complete_3d, shaper_hdr and no_shaper bake, and come with WP 4.8"
+status = "done"
+note = "p4-readers 4.3e: simple_1d, simple_3d, less_strict_parse, failures_1d, failures_3d; p4-baker 4.8c: complete_3d, shaper_hdr, no_shaper"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatCTF_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/fileformats/file_format_ctf_tests.rs"]
 status = "partial"
-note = "p4-ctf-read-1 4.5b: missing_file, wrong_format, binary_file, process_list_invalid_version, clf_process_list_bad_version, process_list_higher_version, clf_process_list_higher_version, process_list_missing, transform_missing, transform_missing_id, transform_empty, transform_id_empty; 4.5c: matrix4x4, matrix_with_offset, matrix_with_offset_1_3, matrix_1_3_3x3, matrix_1_3_4x4, matrix_1_3_offsets, matrix_1_3_alpha_offsets, matrix_identity, matrix_windows_eol, matrix_no_newlines, check_utf8, info_example, process_list_valid_version, process_list_version_revision, process_list_no_version, info_element_version_test, transform_element_end_missing, array_missing_values, array_bad_value, array_bad_dimension, array_too_many_values, matrix_end_missing, transform_bad_outdepth, transform_end_missing, transform_corrupted_tag, range_default, range_test1_clamp, range_test1_noclamp, range_test2, range_nonmatching_clamp, range_empty, range_bad_noclamp, range_bad_values; 4.5e: gamma_test1-6, gamma_alpha_test1-6, exponent_bad_value, exponent_bad_param, exponent_all_styles, clf2_exponent_parse, cdl_clamp_fwd, cdl_missing_style, cdl_all_styles, cdl_bad_slope, cdl_bad_sat, cdl_bad_power, cdl_missing_slope, cdl_missing_offset, cdl_missing_power, cdl_bad_style, cdl_missing_sop, cdl_missing_sat, cdl_various_in_ctf, log_all_styles, log_logtolin, log_logtolinv2, log_lintolog_3chan, log_bad_style, log_bad_version, log_bad_param, log_missing_breakpnt, log_ocio_params_channels, log_ocio_params_base_missmatch, log_default_params; 4.5f: lut_1d, lut1d_hue_adjust_invalid_style, lut_3by1d_with_nan_infinity, lut1d_half_domain_set_false, lut1d_raw_half_set_false, lut1d_half_domain_raw_half_set, lut1d_half_domain_missing_values, 3by1d_lut, lut1d_long_lut, lut1d_inv, lut1d_inv_scaling, invlut1d_clf, indexMap_test, indexMap_test1_clfv2, indexMap_test3, indexMap_test4_clfv2, transform_missing_inbitdepth, transform_missing_outbitdepth, transform_with_bitdepth_mismatch, inverse_of_id_test, lut3d, lut3d_inv, lut3d_unequal_size, tabluation_support, indexMap_test2_clfv2; the rest with the operators' readers and the writer"
+note = "p4-ctf-read-1 4.5b: missing_file, wrong_format, binary_file, process_list_invalid_version, clf_process_list_bad_version, process_list_higher_version, clf_process_list_higher_version, process_list_missing, transform_missing, transform_missing_id, transform_empty, transform_id_empty; 4.5c: matrix4x4, matrix_with_offset, matrix_with_offset_1_3, matrix_1_3_3x3, matrix_1_3_4x4, matrix_1_3_offsets, matrix_1_3_alpha_offsets, matrix_identity, matrix_windows_eol, matrix_no_newlines, check_utf8, info_example, process_list_valid_version, process_list_version_revision, process_list_no_version, info_element_version_test, transform_element_end_missing, array_missing_values, array_bad_value, array_bad_dimension, array_too_many_values, matrix_end_missing, transform_bad_outdepth, transform_end_missing, transform_corrupted_tag, range_default, range_test1_clamp, range_test1_noclamp, range_test2, range_nonmatching_clamp, range_empty, range_bad_noclamp, range_bad_values; 4.5e: gamma_test1-6, gamma_alpha_test1-6, exponent_bad_value, exponent_bad_param, exponent_all_styles, clf2_exponent_parse, cdl_clamp_fwd, cdl_missing_style, cdl_all_styles, cdl_bad_slope, cdl_bad_sat, cdl_bad_power, cdl_missing_slope, cdl_missing_offset, cdl_missing_power, cdl_bad_style, cdl_missing_sop, cdl_missing_sat, cdl_various_in_ctf, log_all_styles, log_logtolin, log_logtolinv2, log_lintolog_3chan, log_bad_style, log_bad_version, log_bad_param, log_missing_breakpnt, log_ocio_params_channels, log_ocio_params_base_missmatch, log_default_params; 4.5f: lut_1d, lut1d_hue_adjust_invalid_style, lut_3by1d_with_nan_infinity, lut1d_half_domain_set_false, lut1d_raw_half_set_false, lut1d_half_domain_raw_half_set, lut1d_half_domain_missing_values, 3by1d_lut, lut1d_long_lut, lut1d_inv, lut1d_inv_scaling, invlut1d_clf, indexMap_test, indexMap_test1_clfv2, indexMap_test3, indexMap_test4_clfv2, transform_missing_inbitdepth, transform_missing_outbitdepth, transform_with_bitdepth_mismatch, inverse_of_id_test, lut3d, lut3d_inv, lut3d_unequal_size, tabluation_support, indexMap_test2_clfv2; p4-ctf-read-3 (verifier fixes): difficult_syntax, difficult_xml_unknown_elements, unknown_elements, clf3_index_map, multiple_ops, clf_examples, lut_interpolation_option; 4.5g: load_deprecated_ops_file, load_fixed_function_file, load_ff_fail_version, load_ff_fail_params, load_ff_fail_style, load_ff_aces_fail_gamma_param, load_ff_aces_fail_gamma_twice, load_ff_aces_fail_missing_param, load_grading_rgbcurves_lin, load_grading_rgbcurves_log (load_grading_curves_errors reads GradingHueCurve elements, 4.5i); 4.5h: reference_load_alias, reference_load_path, reference_load_multiple, reference_load_path_utf8, reference_load_alias_path; 4.6a: CTFTransform load_edit_save_matrix, save_matrix, load_save_matrix, save_matrix_444, load_edit_save_matrix_clf, matrix3x3_clf, matrix_offset_alpha_ctf, matrix_offset_alpha_bitdepth_ctf, matrix_offset_alpha_inverse_ctf, no_ops_ctf; 4.6b: CTFTransform save_cdl, save_log, save_log_affine, save_log_camera, save_range, save_group, legacy_cdl, cdl_clf, cdl_ctf, range_ctf, range1_clf, range2_clf, range3_clf, range4_clf, exponent_ctf, gamma1_ctf, gamma1_mirror_ctf, gamma1_pass_thru_ctf, gamma2_ctf, gamma3_ctf, gamma4_ctf, gamma5_ctf, gamma6_ctf, log_lin_to_log_ctf, log_log_to_lin_ctf, log_antilog2_ctf; 4.6c: CTFTransform save_lut_1d_1component, save_lut_1d_3components, save_invlut_1d_3components, save_lut1d_halfdomain, save_lut1d_f16_raw, save_lut1d_f32, save_lut1d_interpolation, save_invalid_lut_1d, save_lut_3d, lut1d_clf, lut1d_inverse_clf, lut1d_ctf, lut1d_attributes_ctf, lut1d_array_16x1_ctf, lut1d_array_16x3_ctf, lut1d_10i_ctf, lut1d_inverse_ctf, lut3d_array_ctf, lut3d_inverse_clf, lut3d_inverse_ctf, save_lut3d_interpolation, bitdepth_ctf; 4.6d: CTFTransform fixed_function_aces_gamut_comp_13_ctf, fixed_function_aces_gamut_comp_13_inverse_ctf, fixed_function_rec2100_ctf, fixed_function_rec2100_inverse_ctf, fixed_function_lin_to_gammalog_ctf, fixed_function_lin_to_doublelog_ctf (grading_rgbcurve_log_ctf, grading_rgbcurve_video_ctf and grading_rgbcurve_lin_ctf, and a full-path oracle check of the GradingRGBCurve writer through GroupTransform::write, need GradingRGBCurveTransform, WP 3.1); 4.6e: FileFormatCTF ff_load_save_ctf; the rest with the operators' readers and the writer"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatDiscreet1DL_tests.cpp"
@@ -4629,8 +4635,8 @@ status = "done"
 path = "tests/cpu/fileformats/FileFormatHDL_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/fileformats/file_format_hdl_tests.rs"]
-status = "partial"
-note = "p4-readers 4.3b: read_1d, read_3d, read_3d_1d; bake_1d, bake_1d_shaper, bake_3d, bake_3d_1d and look_test bake, and come with WP 4.8"
+status = "done"
+note = "p4-readers 4.3b: read_1d, read_3d, read_3d_1d; p4-baker 4.8c: bake_1d, bake_1d_shaper, bake_3d, bake_3d_1d, look_test"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatICC_tests.cpp"
@@ -4643,8 +4649,8 @@ note = "p4-readers 4.7a: types and endian (icc_profile_reader_tests.rs); 4.7b: t
 path = "tests/cpu/fileformats/FileFormatIridasCube_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/fileformats/file_format_iridas_cube_tests.rs"]
-status = "partial"
-note = "p4-readers 4.2c: format_info, read_failure, whitespace_handling, load_1d_op, load_3d_op; no_shaper bakes, and comes with WP 4.8"
+status = "done"
+note = "p4-readers 4.2c: format_info, read_failure, whitespace_handling, load_1d_op, load_3d_op; p4-baker 4.8b2: no_shaper"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatIridasItx_tests.cpp"
@@ -4671,22 +4677,22 @@ note = "p4-readers 4.3d"
 path = "tests/cpu/fileformats/FileFormatResolveCube_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/fileformats/file_format_resolve_cube_tests.rs"]
-status = "partial"
-note = "p4-readers 4.2c: format_info, read_1d, read_3d, read_1d_3d, read_default_range, read_failure, load_ops; bake_1d, bake_1d_shaper, bake_3d and bake_1d_3d come with WP 4.8"
+status = "done"
+note = "p4-readers 4.2c: format_info, read_1d, read_3d, read_1d_3d, read_default_range, read_failure, load_ops; p4-baker 4.8b2: bake_1d, bake_1d_shaper, bake_3d, bake_1d_3d"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatSpi1D_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/fileformats/file_format_spi1d_tests.rs"]
-status = "partial"
-note = "p4-registry 4.2a2: format_info, test, read_failure, identity; bake_1d and bake_1d_shaper come with WP 4.8"
+status = "done"
+note = "p4-registry 4.2a2: format_info, test, read_failure, identity; p4-baker 4.8b1: bake_1d, bake_1d_shaper"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatSpi3D_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/fileformats/file_format_spi3d_tests.rs"]
-status = "partial"
-note = "p4-readers 4.2b: format_info, test, read_failure, lut_interpolation_option; bake_3d comes with WP 4.8"
+status = "done"
+note = "p4-readers 4.2b: format_info, test, read_failure, lut_interpolation_option; p4-baker 4.8b1: bake_3d"
 
 [[file]]
 path = "tests/cpu/fileformats/FileFormatSpiMtx_tests.cpp"
@@ -4718,8 +4724,8 @@ status = "done"
 path = "tests/cpu/fileformats/ctf/CTFTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/fileformats/ctf/ctf_transform_tests.rs"]
-status = "partial"
-note = "p4-ctf-read-1 4.5a: read_version, accessors; version_write comes with the writer (4.6e)"
+status = "done"
+note = "p4-ctf-read-1 4.5a: read_version, accessors; p4-ctf-read-3 4.6e: version_write"
 
 [[file]]
 path = "tests/cpu/fileformats/ctf/IndexMapping_tests.cpp"
@@ -4961,16 +4967,16 @@ status = "done"
 [[file]]
 path = "tests/cpu/ops/lut1d/Lut1DOpCPU_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu_tests.rs"]
-status = "partial"
-note = "p1-optimizer C: lut_1d_identity_half, lut_1d_identity_half_to_int, lut_1d_identity_half_code; p2-lut1d-fwd: order3_test, nan_test, nan_half_test, basic, nan, lut_1d_red; p2-lut1d-inv: bit_depth_support, half, lut_1d_green, lut_1d_blue, lut_1d_identity_int_to_half and the seven lut_1d_inv_* tests that need no file. The others read files (BuildOpsTest, Phase 4)"
+target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu_tests.rs", "crates/ocio/src/file_tests/lut1d_op_cpu_tests.rs"]
+status = "done"
+note = "p1-optimizer C: lut_1d_identity_half, lut_1d_identity_half_to_int, lut_1d_identity_half_code; p2-lut1d-fwd: order3_test, nan_test, nan_half_test, basic, nan, lut_1d_red; p2-lut1d-inv: bit_depth_support, half, lut_1d_green, lut_1d_blue, lut_1d_identity_int_to_half and the seven lut_1d_inv_* tests that need no file; p4-ctf-read-3 4.10a, with the readers in crates/ocio/src/file_tests/: lut_1d_special_values, lut_1d_hd_above_half_max, lut_1d_hue_adjust, lut_1d_half_domain_hue_adjust, lut_1d_inv_hue_adjust, lut_1d_inv_half_ctf, lut_1d_inv_half_fclut, lut_1d_inv_half_domain_hue_adjust"
 
 [[file]]
 path = "tests/cpu/ops/lut1d/Lut1DOpData_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_data_tests.rs"]
-status = "partial"
-note = "get_lut_ideal_size, constructor, accessors, is_identity, clone, equality_test, channel, interpolation; p2-lut1d-inv 2.1e: inverse_hueadjust, is_inverse, inverse_increasing_effective_domain, inverse_flatten_test, inverse_half_domain; 2.1g: lut_1d_compose, lut_1d_compose_sc, compose_inverse_luts. make_fast_from_inverse_* read files (Phase 4)"
+target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_data_tests.rs", "crates/ocio/src/file_tests/lut1d_op_data_tests.rs"]
+status = "done"
+note = "get_lut_ideal_size, constructor, accessors, is_identity, clone, equality_test, channel, interpolation; p2-lut1d-inv 2.1e: inverse_hueadjust, is_inverse, inverse_increasing_effective_domain, inverse_flatten_test, inverse_half_domain; 2.1g: lut_1d_compose, lut_1d_compose_sc, compose_inverse_luts; p4-ctf-read-3 4.10a, with the readers in crates/ocio/src/file_tests/: make_fast_from_inverse_gpu_extented_domain, make_fast_from_inverse_f32_opt, make_fast_from_inverse_half_domain"
 
 [[file]]
 path = "tests/cpu/ops/lut1d/Lut1DOpGPU_tests.cpp"
@@ -4982,9 +4988,9 @@ note = "p2-lut1d-gpu 2.1h: pad_lut_one_dimension, pad_lut_two_dimension_1, pad_l
 [[file]]
 path = "tests/cpu/ops/lut1d/Lut1DOp_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_tests.rs", "crates/ocio/src/transforms/lut1d_transform_tests.rs"]
-status = "partial"
-note = "gpu, identity_lut_1d; Lut1D create_transform and Lut1DTransform build_op need the transform: in crates/ocio/src/transforms/lut1d_transform_tests.rs (p1-transforms-fam4); p2-lut1d-fwd: extrapolation_errors; p2-lut1d-inv 2.1f: finite_value, Lut1D inverse_twice; 2.1g: Lut1DRenderer finite_value_hue_adjust, Lut1DOpData compose_only_forward, Lut1D compose_big_domain; 2.5a: inverse. lut_1d_compose_with_bit_depth reads a file (Phase 4)"
+target = ["crates/ocio-ops/src/ops/lut1d/lut1d_op_tests.rs", "crates/ocio/src/transforms/lut1d_transform_tests.rs", "crates/ocio/src/file_tests/lut1d_op_tests.rs"]
+status = "done"
+note = "gpu, identity_lut_1d; Lut1D create_transform and Lut1DTransform build_op need the transform: in crates/ocio/src/transforms/lut1d_transform_tests.rs (p1-transforms-fam4); p2-lut1d-fwd: extrapolation_errors; p2-lut1d-inv 2.1f: finite_value, Lut1D inverse_twice; 2.1g: Lut1DRenderer finite_value_hue_adjust, Lut1DOpData compose_only_forward, Lut1D compose_big_domain; 2.5a: inverse; p4-ctf-read-3 4.10a: lut_1d_compose_with_bit_depth, with the readers in crates/ocio/src/file_tests/"
 
 [[file]]
 path = "tests/cpu/ops/lut3d/Lut3DOpCPU_tests.cpp"
@@ -4996,16 +5002,16 @@ note = "S4: both tests, each run in every SIMD mode the CPU supports"
 [[file]]
 path = "tests/cpu/ops/lut3d/Lut3DOpData_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_data_tests.rs"]
-status = "partial"
-note = "p2-lut3d 2.2a: empty, accessors, clone, not_supported_length, equality, interpolation, is_inverse. compose_inverse_luts comes with 2.2e; compose, compose_2 and inv_lut3d_lut_size read files (Phase 4)"
+target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_data_tests.rs", "crates/ocio/src/file_tests/lut3d_op_data_tests.rs"]
+status = "done"
+note = "p2-lut3d 2.2a: empty, accessors, clone, not_supported_length, equality, interpolation, is_inverse. compose_inverse_luts comes with 2.2e; p4-ctf-read-3 4.10a, with the readers in crates/ocio/src/file_tests/: compose, compose_2, inv_lut3d_lut_size"
 
 [[file]]
 path = "tests/cpu/ops/lut3d/Lut3DOp_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_tests.rs", "crates/ocio/src/transforms/lut3d_transform_tests.rs"]
-status = "partial"
-note = "p2-lut3d 2.2b: inverse_comparison_check, GenerateIdentityLut3D throw_lut, Lut3DOpData create_op, cache_id, edge_len_from_num_pixels, Lut3DOpStruct lut3d_order, Lut3DOpData lut_order, lut_combine, cpu_renderer_lut3d. 2.2c: Lut3D create_transform and Lut3DTransform build_op, in crates/ocio/src/transforms/lut3d_transform_tests.rs; cpu_renderer_cloned, cpu_renderer_inverse and cpu_renderer_lut3d_with_nan read files (Phase 4); performance_check is commented out upstream"
+target = ["crates/ocio-ops/src/ops/lut3d/lut3d_op_tests.rs", "crates/ocio/src/transforms/lut3d_transform_tests.rs", "crates/ocio/src/file_tests/lut3d_op_tests.rs"]
+status = "done"
+note = "p2-lut3d 2.2b: inverse_comparison_check, GenerateIdentityLut3D throw_lut, Lut3DOpData create_op, cache_id, edge_len_from_num_pixels, Lut3DOpStruct lut3d_order, Lut3DOpData lut_order, lut_combine, cpu_renderer_lut3d. 2.2c: Lut3D create_transform and Lut3DTransform build_op, in crates/ocio/src/transforms/lut3d_transform_tests.rs; p4-ctf-read-3 4.10a, with the readers in crates/ocio/src/file_tests/: cpu_renderer_cloned, cpu_renderer_inverse, cpu_renderer_lut3d_with_nan; performance_check is commented out upstream"
 
 [[file]]
 path = "tests/cpu/ops/matrix/MatrixOpCPU_tests.cpp"
@@ -5055,9 +5061,9 @@ note = "create_transform and RangeTransform no_clamp_converts_to_matrix are in c
 [[file]]
 path = "tests/cpu/ops/reference/ReferenceOpData_tests.cpp"
 kind = "test-cpu"
-target = ["crates/ocio-ops/src/ops/reference/reference_op_data_tests.rs"]
-status = "partial"
-note = "accessors; the load_* tests read CTF files with references (the CTF reader and FileTransform, Phase 4)"
+target = ["crates/ocio-ops/src/ops/reference/reference_op_data_tests.rs", "crates/ocio/src/fileformats/reference_op_data_tests.rs"]
+status = "done"
+note = "accessors; p4-ctf-read-3 4.5h: the load_* tests (load_path_resolve_failing, load_multiple_resolve, load_same_twice_resolve, load_nested_resolve, load_cycle_itself/2/3/rel_resolve_failing, load_one_reference, load_multiple_resolve_internal, load_nested_resolve_internal), in the ocio crate, as they need the file transform and the CTF reader"
 
 [[file]]
 path = "tests/cpu/transforms/AllocationTransform_tests.cpp"
@@ -5077,8 +5083,8 @@ note = "p3-transforms (3.1b): creation, access; p2-aces2-cpu: color_matrix_helpe
 path = "tests/cpu/transforms/CDLTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/cdl_transform_tests.rs", "crates/ocio/tests/cdl_transform_files_tests.rs"]
-status = "partial"
-note = "p1-transforms-fam2 (1.8f): equality, buildops, description, style; p1-tests-catchup: apply_optimize_simplify. p4-cdl 4.4e: create_from_cc_file, create_from_ccc_file, create_from_cdl_file, escape_xml, clear_caches (a test target of their own, as clear_caches empties the global caches); faulty_file_content comes with the CTF reader (4.5), as its last case reads a CTF file"
+status = "done"
+note = "p1-transforms-fam2 (1.8f): equality, buildops, description, style; p1-tests-catchup: apply_optimize_simplify. p4-cdl 4.4e: create_from_cc_file, create_from_ccc_file, create_from_cdl_file, escape_xml, clear_caches (a test target of their own, as clear_caches empties the global caches); p4-ctf-read-3 4.5h: faulty_file_content (with them, as it empties the caches too)"
 
 [[file]]
 path = "tests/cpu/transforms/ColorSpaceTransform_tests.cpp"
@@ -5119,7 +5125,7 @@ path = "tests/cpu/transforms/FileTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/file_transform_tests.rs"]
 status = "partial"
-note = "p3-transforms (3.1c): basic, validate; p4-registry 4.1a: all_formats, format_by_index, is_format_extension_supported and their helpers; 4.1b: load_file_fail, and context_variables' cases 1-3 in a test of their own (the test itself, which builds a CTF file's processor, comes with the CTF reader); the others read LUT files"
+note = "p3-transforms (3.1c): basic, validate; p4-registry 4.1a: all_formats, format_by_index, is_format_extension_supported and their helpers; 4.1b: load_file_fail, and context_variables' cases 1-3 in a test of their own; p4-ctf-read-3 (4.1b, 4.1c): load_file_ok, interpolation_validity, cc_file_with_different_file_extension; context_variables itself waits for the ExposureContrast reader (4.5i): its case 3 builds the processor of exposure_contrast_linear.ctf"
 
 [[file]]
 path = "tests/cpu/transforms/FixedFunctionTransform_tests.cpp"
@@ -5156,8 +5162,8 @@ status = "todo"
 path = "tests/cpu/transforms/GroupTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/group_transform_tests.rs"]
-status = "partial"
-note = "p3-after-p2: basic; write_formats and write_with_noops need the file writers (Phase 4)"
+status = "done"
+note = "p3-after-p2: basic; p4-ctf-read-3 4.6e: write_formats, write_with_noops"
 
 [[file]]
 path = "tests/cpu/transforms/LogAffineTransform_tests.cpp"
@@ -5184,8 +5190,8 @@ note = "p1-transforms-fam2 (1.8e)"
 path = "tests/cpu/transforms/LookTransform_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio/src/transforms/look_transform_tests.rs"]
-status = "partial"
-note = "p3-transforms (3.1a): basic; p3-builders 3.2b: build_look_ops, context_variables, inverse_look_transform; build_look_options_ops builds a FileTransform whose file is missing (WP 4.1)"
+status = "done"
+note = "p3-transforms (3.1a): basic; p3-builders 3.2b: build_look_ops, context_variables, inverse_look_transform; p4-ctf-bake 4.10b: build_look_options_ops (a FileTransform whose file is missing)"
 
 [[file]]
 path = "tests/cpu/transforms/Lut1DTransform_tests.cpp"

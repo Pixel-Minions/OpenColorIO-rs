@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Tests of the file transform: `tests/cpu/transforms/FileTransform_tests.cpp` @ v2.5.2. Its
-//! other tests read files with the readers (WP 4.2-4.9). The text and the validation are
-//! compared with the wheel's in `tests/config_transforms_oracle.rs`, the loader's errors in
-//! `tests/file_transform_load_oracle.rs`.
+//! Tests of the file transform: `tests/cpu/transforms/FileTransform_tests.cpp` @ v2.5.2, but
+//! `context_variables`, which waits for the ExposureContrast reader (WP 4.5i). The text and
+//! the validation are compared with the wheel's in `tests/config_transforms_oracle.rs`, the
+//! loader's errors in `tests/file_transform_load_oracle.rs`.
 
 use super::*;
 use ocio_testkit::upstream::check_throw_what;
@@ -236,7 +236,9 @@ fn get_test_files_dir() -> String {
 ///
 /// Port of `CreateFileTransform` and `GetFileTransformProcessor` (tests/cpu/UnitTestUtils.cpp:
 /// 38-72 @ v2.5.2).
-fn get_file_transform_processor(file_name: &str) -> Result<()> {
+fn get_file_transform_processor(
+    file_name: &str,
+) -> Result<std::sync::Arc<crate::processor::Processor>> {
     let file_path = format!("{}/{file_name}", get_test_files_dir());
 
     // Create a FileTransform
@@ -246,9 +248,7 @@ fn get_file_transform_processor(file_name: &str) -> Result<()> {
     // Create empty Config to use.
     let config = Config::new()?;
     // Get the processor corresponding to the transform.
-    config
-        .processor(&Transform::File(file_transform))
-        .map(|_| ())
+    config.processor(&Transform::File(file_transform))
 }
 
 /// Port of `OCIO_ADD_TEST(FileTransform, load_file_fail)` @ v2.5.2.
@@ -306,8 +306,9 @@ fn load_file_fail() {
 
 /// The context variables a file transform uses: its path's, its search's and none for a path
 /// without any. Cases 1 to 3 of upstream's `context_variables` (FileTransform_tests.cpp:368-438
-/// @ v2.5.2), with its expected values; the test itself, whose case 3 builds the processor of
-/// a CTF file and whose case 4 loads a config, is ported with the CTF reader (WP 4.5h).
+/// @ v2.5.2), with its expected values. The test itself waits for the ExposureContrast reader
+/// (WP 4.5i, Phase 5): its case 3 builds the processor of `exposure_contrast_linear.ctf`, an
+/// ExposureContrast.
 #[test]
 fn context_variables_of_the_path_and_the_search_path() {
     use crate::context::Context;
@@ -392,5 +393,303 @@ fn context_variables_of_the_path_and_the_search_path() {
     assert_eq!(
         b"exposure_contrast_linear.ctf",
         used_context_vars.string_var_by_index(1)
+    );
+}
+
+/// Port of `OCIO_ADD_TEST(FileTransform, load_file_ok)` @ v2.5.2.
+#[test]
+fn load_file_ok() {
+    // Discreet 1D LUT.
+    let discreet_lut = "logtolin_8to8.lut";
+    let proc = get_file_transform_processor(discreet_lut).unwrap();
+    assert!(!proc.is_no_op().unwrap());
+
+    // Houdini 1D LUT.
+    let houdini_lut = "houdini.lut";
+    let proc = get_file_transform_processor(houdini_lut).unwrap();
+    assert!(!proc.is_no_op().unwrap());
+
+    // Discreet 3D LUT file.
+    let discree3_dt_lut = "discreet-3d-lut.3dl";
+    let proc = get_file_transform_processor(discree3_dt_lut).unwrap();
+    assert!(!proc.is_no_op().unwrap());
+
+    // 3D LUT file.
+    let crosstalk3_dt_lut = "crosstalk.3dl";
+    let proc = get_file_transform_processor(crosstalk3_dt_lut).unwrap();
+    assert!(!proc.is_no_op().unwrap());
+
+    // Lustre 3D LUT file.
+    let lustre3_dt_lut = "lustre_33x33x33.3dl";
+    let proc = get_file_transform_processor(lustre3_dt_lut).unwrap();
+    assert!(!proc.is_no_op().unwrap());
+
+    // Autodesk color transform format.
+    let ctf_transform = "matrix_example4x4.ctf";
+    let proc = get_file_transform_processor(ctf_transform).unwrap();
+    assert!(!proc.is_no_op().unwrap());
+
+    // Academy/ASC common LUT format.
+    let clf_range_transform = "clf/range.clf";
+    let proc = get_file_transform_processor(clf_range_transform).unwrap();
+    assert!(!proc.is_no_op().unwrap());
+
+    // Academy/ASC common LUT format.
+    let clf_mat_transform = "clf/matrix_example.clf";
+    let proc = get_file_transform_processor(clf_mat_transform).unwrap();
+    assert!(!proc.is_no_op().unwrap());
+
+    // Test other types of CLF/CTF elements.
+    let clf_cdl_transform = "clf/cdl_clamp_fwd.clf";
+    let proc = get_file_transform_processor(clf_cdl_transform).unwrap();
+    assert!(!proc.is_no_op().unwrap());
+
+    let clf_lut1_transform = "clf/lut1d_example.clf";
+    let proc = get_file_transform_processor(clf_lut1_transform).unwrap();
+    assert!(!proc.is_no_op().unwrap());
+
+    let clf_lut3_transform = "clf/lut3d_identity_12i_16f.clf";
+    let proc = get_file_transform_processor(clf_lut3_transform).unwrap();
+    assert!(!proc.is_no_op().unwrap());
+
+    let ct_f_ff_transform = "fixed_function.ctf";
+    let proc = get_file_transform_processor(ct_f_ff_transform).unwrap();
+    assert!(!proc.is_no_op().unwrap());
+
+    let ctf_gamma_transform = "gamma_test1.ctf";
+    let proc = get_file_transform_processor(ctf_gamma_transform).unwrap();
+    assert!(!proc.is_no_op().unwrap());
+
+    let ctf_log_transform = "log_logtolin.ctf";
+    let proc = get_file_transform_processor(ctf_log_transform).unwrap();
+    assert!(!proc.is_no_op().unwrap());
+
+    let ctf_inv_lut1_transform = "lut1d_inv.ctf";
+    let proc = get_file_transform_processor(ctf_inv_lut1_transform).unwrap();
+    assert!(!proc.is_no_op().unwrap());
+
+    let ctf_inv_lut3_transform = "lut3d_example_Inv.ctf";
+    let proc = get_file_transform_processor(ctf_inv_lut3_transform).unwrap();
+    assert!(!proc.is_no_op().unwrap());
+}
+
+/// The messages logged on this thread while `f` runs at the warning level.
+///
+/// Port of the tests' `LogGuard` with `SetLoggingLevel(LOGGING_LEVEL_WARNING)`
+/// (tests/cpu/UnitTestLogUtils.cpp:17-67 @ v2.5.2).
+fn warning_output<T>(f: impl FnOnce() -> T) -> (T, String) {
+    use ocio_ops::logging::{get_logging_level, set_logging_level};
+    use ocio_ops::open_color_types::LoggingLevel;
+
+    let (out, log) = crate::test_env::capture_log(|| {
+        let level = get_logging_level();
+        set_logging_level(LoggingLevel::Warning);
+        let out = f();
+        set_logging_level(level);
+        out
+    });
+    (out, String::from_utf8_lossy(&log.concat()).into_owned())
+}
+
+/// Port of `OCIO_ADD_TEST(FileTransform, interpolation_validity)` @ v2.5.2.
+#[test]
+fn interpolation_validity() {
+    let mut cfg = (*Config::create_raw().unwrap()).clone();
+    cfg.set_search_path(get_test_files_dir());
+    cfg.validate().unwrap();
+
+    let mut tr = FileTransform::new();
+    tr.set_src("lut1d_1.spi1d");
+
+    tr.validate().unwrap();
+
+    // File transform with format requiring a valid interpolation using default interpolation.
+    cfg.processor(&Transform::File(tr.clone())).unwrap();
+
+    // UNKNOWN can't be used by a LUT file, so the interp on the LUT is set to DEFAULT and a
+    // warning is logged.
+
+    tr.set_interpolation(Interpolation::Unknown);
+    tr.validate().unwrap();
+    {
+        let (proc, output) = warning_output(|| cfg.processor(&Transform::File(tr.clone())));
+        proc.unwrap();
+        assert_eq!(
+            output,
+            "[OpenColorIO Warning]: Interpolation specified by FileTransform 'unknown' is not \
+             allowed with the given file: 'lut1d_1.spi1d'.\n"
+        );
+    }
+
+    // TETRAHEDRAL can't be used for Spi1d, default is used instead (and a warning is logged).
+
+    tr.set_interpolation(Interpolation::Tetrahedral);
+    {
+        let (proc, output) = warning_output(|| cfg.processor(&Transform::File(tr.clone())));
+        proc.unwrap();
+        assert_eq!(
+            output,
+            "[OpenColorIO Warning]: Interpolation specified by FileTransform 'tetrahedral' is \
+             not allowed with the given file: 'lut1d_1.spi1d'.\n"
+        );
+    }
+
+    // Matrices ignore interpolation, so UNKNOWN is ignored and not even logged. Note that the
+    // spi example configs use interpolation=unknown for matrix files.
+
+    tr.set_interpolation(Interpolation::Unknown);
+    tr.set_src("camera_to_aces.spimtx");
+    cfg.processor(&Transform::File(tr.clone())).unwrap();
+}
+
+/// Port of `OCIO_ADD_TEST(FileTransform, cc_file_with_different_file_extension)` @ v2.5.2.
+#[test]
+fn cc_file_with_different_file_extension() {
+    use ocio_ops::open_color_types::ColorSpaceDirection;
+
+    let base_config = format!(
+        "ocio_profile_version: 1\n\
+         description: Minimal\n\
+         search_path: {}\n\
+         \n\
+         roles:\n\
+         \x20 default: basic\n\
+         \x20 scene_linear: basic\n\
+         \x20 data: basic\n\
+         \x20 reference: basic\n\
+         \x20 compositing_log: basic\n\
+         \x20 color_timing: basic\n\
+         \x20 color_picking: basic\n\
+         \x20 texture_paint: basic\n\
+         \x20 matte_paint: basic\n\
+         \x20 rendering: basic\n\
+         \x20 aces_interchange: basic\n\
+         \x20 cie_xyz_d65_interchange: basic\n\
+         \n\
+         displays:\n\
+         \x20 display:\n\
+         \x20   - !<View> {{name: basic, colorspace: basic }}\n\
+         \x20   - !<View> {{name: cdl, colorspace: basic_cdl }}\n\
+         \n\
+         colorspaces:\n\
+         \x20 - !<ColorSpace>\n\
+         \x20   name: basic\n\
+         \n\
+         \x20 - !<ColorSpace>\n\
+         \x20   name: basic_cdl\n",
+        get_test_files_dir()
+    );
+
+    {
+        let config = base_config.clone()
+            + "    from_reference: !<FileTransform> { src: cdl_test_cc_file_with_extension.cdl }\n";
+
+        let cfg = Config::create_from_stream(config.as_bytes()).unwrap();
+        cfg.validate().unwrap();
+
+        let tr1 = cfg
+            .color_space("basic_cdl")
+            .unwrap()
+            .transform(ColorSpaceDirection::FromReference)
+            .unwrap();
+        assert!(matches!(tr1, Transform::File(_)));
+        cfg.processor(tr1).unwrap();
+    }
+    {
+        let config = base_config.clone()
+            + "    from_reference: !<FileTransform> { src: cdl_test_cc_file_with_extension.ccc }\n";
+
+        let cfg = Config::create_from_stream(config.as_bytes()).unwrap();
+        cfg.validate().unwrap();
+
+        let tr2 = cfg
+            .color_space("basic_cdl")
+            .unwrap()
+            .transform(ColorSpaceDirection::FromReference)
+            .unwrap();
+        assert!(matches!(tr2, Transform::File(_)));
+        cfg.processor(tr2).unwrap();
+    }
+}
+
+/// A chain of `n` CTF files in `dir`, `c0.ctf` referencing `c1.ctf` and so on, the last a
+/// matrix; returns the path of `c0.ctf`.
+fn write_reference_chain(dir: &std::path::Path, n: usize) -> String {
+    std::fs::create_dir_all(dir).unwrap();
+    for i in 0..n {
+        let body = if i == n - 1 {
+            "    <Matrix inBitDepth=\"32f\" outBitDepth=\"32f\">\n\
+             \x20       <Array dim=\"3 3 3\">2 0 0 0 3 0 0 0 4</Array>\n    </Matrix>\n"
+                .to_owned()
+        } else {
+            format!(
+                "    <Reference inBitDepth=\"32f\" outBitDepth=\"32f\" path=\"c{}.ctf\"/>\n",
+                i + 1
+            )
+        };
+        let text = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+             <ProcessList id=\"a\" version=\"1.7\">\n{body}</ProcessList>\n"
+        );
+        let path = dir.join(format!("c{i}.ctf"));
+        if std::fs::read(&path).ok().as_deref() != Some(text.as_bytes()) {
+            std::fs::write(&path, text).unwrap();
+        }
+    }
+    let path = dir.join("c0.ctf");
+    let path = path.to_str().unwrap().replace('\\', "/");
+    path.trim_start_matches("//?/").to_owned()
+}
+
+/// A chain of CTF references [`MAX_FILE_NESTING`] (256) files long builds on a 1 MiB thread;
+/// one more file is refused, where upstream overflows its stack (docs/improvements.md, U-76).
+/// On Windows a 1 MiB thread holds 759 files at opt-level 0 (about 1.4 KB a file) and 1,647
+/// at opt-level 1, the test profile's (measured 2026-10-17), so the chain fits at either. The
+/// wheel's processor of the longest chain is compared in `tests/file_format_ctf_oracle.rs`.
+#[test]
+fn chains_of_references_stop_at_the_limit() {
+    let root = ocio_testkit::paths::target_dir().join("reference-chains");
+    let processor = |n: usize| {
+        let src = write_reference_chain(&root.join(format!("n{n}")), n);
+        std::thread::Builder::new()
+            .stack_size(1 << 20)
+            .spawn(move || {
+                let mut config = (*crate::Config::create_raw().unwrap()).clone();
+                config.add_search_path(
+                    std::path::Path::new(&src)
+                        .parent()
+                        .unwrap()
+                        .to_str()
+                        .unwrap(),
+                );
+                let mut file = FileTransform::new();
+                file.set_src(&src);
+                config
+                    .processor(&crate::Transform::File(file))
+                    .map(|p| p.processor_metadata().num_files())
+                    .map_err(|e| e.to_string())
+            })
+            .unwrap()
+            .join()
+            .unwrap()
+    };
+    assert_eq!(processor(MAX_FILE_NESTING), Ok(MAX_FILE_NESTING as i32));
+    // Each file up the chain wraps the error of the one it references.
+    let err = processor(MAX_FILE_NESTING + 1).unwrap_err();
+    let wrap = "failed while building ops with this error: ";
+    assert_eq!(
+        err.matches(wrap).count(),
+        MAX_FILE_NESTING,
+        "{}",
+        &err[..500]
+    );
+    assert!(
+        err.ends_with(&format!(
+            "c{}.ctf {wrap}The CTF references nest more than 256 files deep: upstream's stack \
+             overflows.",
+            MAX_FILE_NESTING - 1
+        )),
+        "{}",
+        &err[err.len() - 500..]
     );
 }

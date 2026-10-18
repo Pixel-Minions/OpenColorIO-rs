@@ -161,6 +161,21 @@ pub trait FileFormat: Send + Sync {
         interp: Interpolation,
     ) -> Result<CachedFileRcPtr>;
 
+    /// Bakes `baker`'s transform in the format `format_name` (the name the baker was given)
+    /// into `ostream`; formats that don't bake refuse.
+    ///
+    /// Port of `FileFormat::bake` (FileTransform.h:82-84, FileTransform.cpp:572-579 @
+    /// v2.5.2). Upstream bakes into the caller's `std::ostream`; the bakers format through an
+    /// [`OStringStream`], whose bytes [`Baker::bake`](crate::baker::Baker::bake) copies out.
+    fn bake(
+        &self,
+        _baker: &crate::baker::Baker,
+        format_name: &[u8],
+        _ostream: &mut OStringStream,
+    ) -> Result<()> {
+        Err(bake_not_supported(format_name))
+    }
+
     /// Writes `group` in the format `format_name` (one of this format's names) to `ostream`;
     /// formats that don't write refuse.
     ///

@@ -2,8 +2,7 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! The spi1d format: a 1D LUT of 1 to 3 components over a `From` range. A port of
-//! `src/OpenColorIO/fileformats/FileFormatSpi1D.cpp` @ v2.5.2; its `bake` comes with the baker
-//! (WP 4.8).
+//! `src/OpenColorIO/fileformats/FileFormatSpi1D.cpp` @ v2.5.2.
 //!
 //! ```text
 //! Version 1
@@ -21,11 +20,15 @@ use std::any::Any;
 use std::ffi::c_ulong;
 use std::sync::Arc;
 
+use ocio_ops::cfmt::{Crt, FloatField, OStringStream};
 use ocio_ops::exception::{Exception, Result};
+use ocio_ops::image_desc::PackedImageDesc;
 use ocio_ops::op::OpVec;
 use ocio_ops::open_color_types::{BitDepth, TransformDirection, combine_transform_directions};
 use ocio_ops::ops::lut1d::Lut1DOpData;
-use ocio_ops::ops::lut1d::lut1d_op::create_lut1d_op;
+use ocio_ops::ops::lut1d::lut1d_op::{
+    create_lut1d_op, generate_identity_lut1d, generate_linear_scale_lut1d,
+};
 use ocio_ops::ops::lut3d::lut3d_op_data::Interpolation;
 use ocio_ops::ops::matrix::matrix_op::create_min_max_op;
 use ocio_ops::platform::strcasecmp;
@@ -33,6 +36,10 @@ use ocio_ops::utils::cscan::{ScanArg, ScanCrt, sscanf};
 use ocio_ops::utils::number_utils::{Errc, Flavor, from_chars_f32};
 use ocio_ops::utils::string_utils::{c_str, starts_with, starts_with_char, trim};
 
+use crate::baker::Baker;
+use crate::baking_utils::{
+    LinuxResize, bake_buffer, get_input_to_target_processor, get_shaper_range,
+};
 use crate::config::Config;
 use crate::context::Context;
 use crate::fileformats::file_format_utils::{handle_lut1d, log_warning_interpolation_not_used};
@@ -368,6 +375,93 @@ impl FileFormat for LocalFileFormat {
         interp: Interpolation,
     ) -> Result<CachedFileRcPtr> {
         Ok(Arc::new(self.read_file(istream, interp)?))
+    }
+
+    /// Bakes `baker`'s transform into a 1D LUT of the cube size (4096 by default) over the
+    /// shaper space's range, or over 0 to 1 without one.
+    ///
+    /// Port of `LocalFileFormat::bake` (FileFormatSpi1D.cpp:316-392 @ v2.5.2).
+    fn bake(&self, baker: &Baker, format_name: &[u8], ostream: &mut OStringStream) -> Result<()> {
+        const DEFAULT_1D_SIZE: i32 = 4096;
+
+        if format_name != b"spi1d" {
+            let mut os = OStringStream::new(Crt::NATIVE);
+            os.put_str("Unknown spi format name, '");
+            os.put_bytes(format_name);
+            os.put_str("'.");
+            return Err(Exception::new(os.into_bytes()));
+        }
+
+        //
+        // Initialize config and data
+        //
+
+        let mut oned_size = baker.cube_size();
+        if oned_size == -1 {
+            oned_size = DEFAULT_1D_SIZE;
+        }
+
+        let shaper_space = baker.shaper_space();
+
+        let mut from_in_start = 0.0f32;
+        let mut from_in_end = 1.0f32;
+
+        //
+        // Generate 1DLUT
+        //
+
+        let mut oned_data = bake_buffer(i128::from(oned_size) * 3, LinuxResize::Checked)?;
+
+        if !shaper_space.is_empty() {
+            (from_in_start, from_in_end) = get_shaper_range(baker)?;
+            generate_linear_scale_lut1d(&mut oned_data, oned_size, 3, from_in_start, from_in_end);
+        } else {
+            generate_identity_lut1d(&mut oned_data, oned_size, 3);
+        }
+
+        let mut oned_img = PackedImageDesc::new(&mut oned_data[..], oned_size as usize, 1, 3)?;
+        let input_to_target = get_input_to_target_processor(baker)?;
+        input_to_target.apply(&mut oned_img)?;
+
+        //
+        // Write LUT
+        //
+
+        // Set to a fixed 6 decimal precision
+        ostream.float_field = FloatField::Fixed;
+        ostream.precision = 6;
+
+        // Header
+        ostream.put_str("Version 1");
+        ostream.put_str("\n");
+        ostream.put_str("From ");
+        ostream.put_f32(from_in_start);
+        ostream.put_str(" ");
+        ostream.put_f32(from_in_end);
+        ostream.put_str("\n");
+        ostream.put_str("Length ");
+        ostream.put_i32(oned_size);
+        ostream.put_str("\n");
+        ostream.put_str("Components 3");
+        ostream.put_str("\n");
+        ostream.put_str("{");
+        ostream.put_str("\n");
+
+        // Write 1D data
+        for i in 0..oned_size as usize {
+            ostream.put_str("    ");
+            ostream.put_f32(oned_data[3 * i]);
+            ostream.put_str(" ");
+            ostream.put_f32(oned_data[3 * i + 1]);
+            ostream.put_str(" ");
+            ostream.put_f32(oned_data[3 * i + 2]);
+            ostream.put_str("\n");
+        }
+
+        // Footer
+        ostream.put_str("}");
+        ostream.put_str("\n");
+        Ok(())
     }
 
     /// Appends the range's op and the LUT's, in the direction `dir` combined with the

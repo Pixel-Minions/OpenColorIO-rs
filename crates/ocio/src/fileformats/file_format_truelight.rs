@@ -3,8 +3,7 @@
 
 //! The Truelight `.cub` format: an optional 1D shaper (`InputLUT`) and a 3D LUT (`Cube`, red
 //! fastest), after `# Truelight Cube` and `#` tags. A port of
-//! `src/OpenColorIO/fileformats/FileFormatTruelight.cpp` @ v2.5.2; its `bake` comes with the
-//! baker (WP 4.8).
+//! `src/OpenColorIO/fileformats/FileFormatTruelight.cpp` @ v2.5.2.
 //!
 //! ```text
 //! # Truelight Cube v2.0
@@ -28,18 +27,23 @@ use std::any::Any;
 use std::ffi::c_ulong;
 use std::sync::Arc;
 
+use ocio_ops::cfmt::{FloatField, OStringStream};
 use ocio_ops::exception::{Exception, Result};
+use ocio_ops::image_desc::PackedImageDesc;
+use ocio_ops::math_utils::std_max;
 use ocio_ops::op::OpVec;
 use ocio_ops::open_color_types::{BitDepth, TransformDirection, combine_transform_directions};
 use ocio_ops::ops::lut1d::Lut1DOpData;
 use ocio_ops::ops::lut1d::lut1d_op::create_lut1d_op;
-use ocio_ops::ops::lut3d::lut3d_op::create_lut3d_op;
+use ocio_ops::ops::lut3d::lut3d_op::{Lut3DOrder, create_lut3d_op, generate_identity_lut3d};
 use ocio_ops::ops::lut3d::lut3d_op_data::{Interpolation, Lut3DOpData, MAX_3D_LUT_LENGTH};
 use ocio_ops::parse_utils::{string_to_int, string_vec_to_float_vec};
 use ocio_ops::utils::string_utils::{
     lower, split_by_white_spaces, starts_with, starts_with_char, trim,
 };
 
+use crate::baker::Baker;
+use crate::baking_utils::{LinuxResize, bake_buffer, cube_values, get_input_to_target_processor};
 use crate::config::Config;
 use crate::context::Context;
 use crate::fileformats::file_format_utils::{
@@ -277,6 +281,88 @@ impl FileFormat for LocalFileFormat {
         interp: Interpolation,
     ) -> Result<CachedFileRcPtr> {
         Ok(Arc::new(self.read_file(istream, interp)?))
+    }
+
+    /// Bakes `baker`'s transform into a cube (32 per side by default, 2 at least), red
+    /// fastest, after an identity shaper of the shaper size (1024 by default, 2 at least) over
+    /// the cube's indices. The format name isn't checked.
+    ///
+    /// Port of `LocalFileFormat::bake` (FileFormatTruelight.cpp:296-355 @ v2.5.2).
+    fn bake(&self, baker: &Baker, _format_name: &[u8], ostream: &mut OStringStream) -> Result<()> {
+        const DEFAULT_CUBE_SIZE: i32 = 32;
+        const DEFAULT_SHAPER_SIZE: i32 = 1024;
+
+        let mut cube_size = baker.cube_size();
+        if cube_size == -1 {
+            cube_size = DEFAULT_CUBE_SIZE;
+        }
+        cube_size = std_max(2, cube_size); // smallest cube is 2x2x2
+
+        let mut cube_data = bake_buffer(cube_values(cube_size), LinuxResize::Unchecked)?;
+        let num_entries = cube_size * cube_size * cube_size;
+        generate_identity_lut3d(&mut cube_data, cube_size, 3, Lut3DOrder::FastRed)?;
+        let mut cube_img = PackedImageDesc::new(&mut cube_data[..], num_entries as usize, 1, 3)?;
+
+        // Apply processor to LUT data
+        let input_to_target = get_input_to_target_processor(baker)?;
+        input_to_target.apply(&mut cube_img)?;
+
+        let mut shaper_size = baker.shaper_size();
+        if shaper_size == -1 {
+            shaper_size = DEFAULT_SHAPER_SIZE;
+        }
+        shaper_size = std_max(2, shaper_size); // smallest shaper is 2x2x2
+
+        // Write the header
+        ostream.put_str("# Truelight Cube v2.0\n");
+        ostream.put_str("# lutLength ");
+        ostream.put_i32(shaper_size);
+        ostream.put_str("\n");
+        ostream.put_str("# iDims     3\n");
+        ostream.put_str("# oDims     3\n");
+        ostream.put_str("# width     ");
+        ostream.put_i32(cube_size);
+        ostream.put_str(" ");
+        ostream.put_i32(cube_size);
+        ostream.put_str(" ");
+        ostream.put_i32(cube_size);
+        ostream.put_str("\n");
+        ostream.put_str("\n");
+
+        // Write the shaper LUT
+        // (We are just going to use a unity LUT)
+        ostream.put_str("# InputLUT\n");
+        ostream.precision = 6;
+        ostream.float_field = FloatField::Fixed;
+        let triple = |ostream: &mut OStringStream, v: f32| {
+            ostream.put_f32(v);
+            ostream.put_str(" ");
+            ostream.put_f32(v);
+            ostream.put_str(" ");
+            ostream.put_f32(v);
+            ostream.put_str("\n");
+        };
+        for i in 0..shaper_size - 1 {
+            let v = (i as f32 / (shaper_size - 1) as f32) * (cube_size - 1) as f32;
+            triple(ostream, v);
+        }
+        let v = (cube_size - 1) as f32;
+        triple(ostream, v); // ensure that the last value is spot on
+        ostream.put_str("\n");
+
+        // Write the cube
+        ostream.put_str("# Cube\n");
+        for i in 0..num_entries as usize {
+            ostream.put_f32(cube_data[3 * i]);
+            ostream.put_str(" ");
+            ostream.put_f32(cube_data[3 * i + 1]);
+            ostream.put_str(" ");
+            ostream.put_f32(cube_data[3 * i + 2]);
+            ostream.put_str("\n");
+        }
+
+        ostream.put_str("# end\n");
+        Ok(())
     }
 
     /// Appends, forward, the shaper then the 3D LUT; inverse, the 3D LUT then the shaper.

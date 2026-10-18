@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Tests of the `.3dl` format: `tests/cpu/fileformats/FileFormat3DL_tests.cpp` @ v2.5.2. Its
-//! `bake` comes with the baker (WP 4.8).
+//! Tests of the `.3dl` format: `tests/cpu/fileformats/FileFormat3DL_tests.cpp` @ v2.5.2.
 
 use super::*;
 use crate::fileformats::input_stream::OpenMode;
@@ -152,4 +151,89 @@ fn parse_1d() {
         let lut1d = lut_file.lut1d.as_ref().expect("a 1D LUT");
         assert_eq!(lut1d.get_file_output_bit_depth(), BitDepth::Uint10);
     }
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormat3DL, bake)` @ v2.5.2.
+#[test]
+fn bake() {
+    let mut config = crate::Config::new().unwrap();
+    {
+        let mut cs = crate::ColorSpace::new();
+        cs.set_name("lnf");
+        cs.set_family("lnf");
+        config.add_color_space(&cs).unwrap();
+        config
+            .set_role(ocio_ops::parse_utils::ROLE_REFERENCE, Some(cs.name()))
+            .unwrap();
+    }
+    {
+        let mut cs = crate::ColorSpace::new();
+        cs.set_name("target");
+        cs.set_family("target");
+        let mut transform1 = crate::CdlTransform::new();
+        let rgb: [f64; 3] = [0.0, 0.1, 0.2];
+        transform1.set_offset(&rgb);
+        cs.set_transform(
+            Some(&crate::Transform::from(transform1)),
+            ocio_ops::open_color_types::ColorSpaceDirection::FromReference,
+        )
+        .unwrap();
+        config.add_color_space(&cs).unwrap();
+    }
+
+    let mut baker = Baker::new();
+    baker.set_config(&config);
+    // TODO: Add support for comments in the writer.
+    baker
+        .format_metadata_mut()
+        .add_child_element(
+            Some(ocio_ops::format_metadata::METADATA_DESCRIPTION),
+            Some(b"MetaData not written"),
+        )
+        .unwrap();
+    baker.set_format("flame").unwrap();
+    baker.set_input_space("lnf");
+    baker.set_target_space("target");
+    baker.set_shaper_size(10);
+    baker.set_cube_size(2);
+    let mut output_flame = Vec::new();
+    baker.bake(&mut output_flame).unwrap();
+
+    let osvec_flame = ocio_ops::utils::string_utils::split_by_lines(&output_flame);
+
+    let mut output_lustre = Vec::new();
+    baker.set_format("lustre").unwrap();
+    baker.bake(&mut output_lustre).unwrap();
+    let osvec_lustre = ocio_ops::utils::string_utils::split_by_lines(&output_lustre);
+
+    let bout = concat!(
+        "3DMESH\n",
+        "Mesh 0 12\n",
+        "0 114 227 341 455 568 682 796 909 1023\n",
+        "0 410 819\n",
+        "0 410 4095\n",
+        "0 4095 819\n",
+        "0 4095 4095\n",
+        "4095 410 819\n",
+        "4095 410 4095\n",
+        "4095 4095 819\n",
+        "4095 4095 4095\n",
+        "\n",
+        "LUT8\n",
+        "gamma 1.0\n",
+    );
+
+    let resvec = ocio_ops::utils::string_utils::split_by_lines(bout.as_bytes());
+    assert_eq!(resvec.len(), osvec_lustre.len());
+    assert_eq!(resvec.len() - 4, osvec_flame.len());
+
+    assert_eq!(resvec[0], osvec_lustre[0]);
+    assert_eq!(resvec[1], osvec_lustre[1]);
+    for i in 0..osvec_flame.len() {
+        assert_eq!(resvec[i + 2], osvec_flame[i]);
+        assert_eq!(resvec[i + 2], osvec_lustre[i + 2]);
+    }
+    let last = resvec.len() - 2;
+    assert_eq!(resvec[last], osvec_lustre[last]);
+    assert_eq!(resvec[last + 1], osvec_lustre[last + 1]);
 }

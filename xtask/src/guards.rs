@@ -83,12 +83,15 @@ const FORBIDDEN: &[(&str, &str)] = &[
 /// upstream's own tolerance checks.
 const TOLERANCE: &[&str] = &[".abs() < ", ".abs() <= ", "f32::EPSILON", "f64::EPSILON"];
 
-/// Where `unsafe` may be allowed (PLAN.md D8): SIMD modules, the Python binding, and the
-/// test kit's FFI to the platform C runtime (the reference for C formatting and parsing).
+/// Where `unsafe` may be allowed (PLAN.md D8): SIMD modules, the Python binding, the test
+/// kit's FFI to the platform C runtime (the reference for C formatting and parsing), and the
+/// one file that calls `CreateSymbolicLinkW` and lists directories with `FindFirstFileW` as
+/// minizip-ng does (owner decisions 2026-10-17, named here by its file).
 fn unsafe_allowed(rel: &str) -> bool {
     let file = rel.rsplit('/').next().unwrap_or(rel);
     rel.starts_with("crates/ocio-py/")
         || rel == "crates/ocio-testkit/src/crt.rs"
+        || rel == "crates/ocio/src/minizip/os_windows_ffi.rs"
         || (rel.starts_with("crates/ocio-ops/")
             && (rel.contains("/simd/")
                 || file.contains("_sse")
@@ -199,6 +202,14 @@ fn check_files(
             problems.push(format!("{rel}: missing the SPDX / copyright header"));
         }
         problems.extend(check_internals_uses(rel, text));
+        if !(rel.starts_with("xtask/") && rel.ends_with("guards.rs")) && !unsafe_allowed(rel) {
+            for line in unsafe_code_relaxed(text) {
+                problems.push(format!(
+                    "{rel}:{line}: `unsafe` is allowed only in SIMD modules, ocio-py and the files \
+                     the allowlist names (PLAN.md D8)"
+                ));
+            }
+        }
         let is_test_file = rel.ends_with("_tests.rs") || rel.contains("/tests/");
         let is_xtask = rel.starts_with("xtask/");
         for (n, line) in text.lines().enumerate() {
@@ -212,12 +223,6 @@ fn check_files(
                 if code.contains(pattern) && !code.starts_with("//") && !waived(rel, pattern) {
                     problems.push(format!("{}: `{pattern}`: {why}", at()));
                 }
-            }
-            if code.contains("allow(unsafe_code)") && !unsafe_allowed(rel) {
-                problems.push(format!(
-                    "{}: `unsafe` is allowed only in SIMD modules and ocio-py (PLAN.md D8)",
-                    at()
-                ));
             }
             if is_test_file && !rel.starts_with("crates/ocio-testkit/src/upstream/") {
                 for pattern in TOLERANCE {
@@ -248,6 +253,60 @@ const INTERNALS_GATE: &str = "#[cfg(feature = \"internals\")]";
 const INTERNALS_USERS: &str = "crates/ocio/tests/";
 /// The only manifest that may enable the feature, in its dev-dependency on itself.
 const INTERNALS_MANIFEST: &str = "crates/ocio/Cargo.toml";
+
+/// The lines of the attributes in `text` that relax the `unsafe_code` lint: an `allow`,
+/// `expect` or `warn` of it, alone or among other lints, in an inner or outer attribute, on
+/// one line or several, or inside a `cfg_attr`. Attributes in comments don't count.
+fn unsafe_code_relaxed(text: &str) -> Vec<usize> {
+    let mut lines = Vec::new();
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while let Some(found) = text[i..].find('#') {
+        let start = i + found;
+        i = start + 1;
+        let mut at = start + 1;
+        if bytes.get(at) == Some(&b'!') {
+            at += 1;
+        }
+        if bytes.get(at) != Some(&b'[') {
+            continue;
+        }
+        // Skip attributes in a comment: the line up to the `#` starts a comment.
+        let line_start = text[..start].rfind('\n').map_or(0, |n| n + 1);
+        let before = text[line_start..start].trim_start();
+        if before.starts_with("//") || before.contains("/*") {
+            continue;
+        }
+        // The attribute's text, to its matching `]`.
+        let mut depth = 0usize;
+        let mut end = at;
+        for (k, &c) in bytes[at..].iter().enumerate() {
+            match c {
+                b'[' => depth += 1,
+                b']' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = at + k;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let attribute: String = text[at..=end.max(at)]
+            .chars()
+            .filter(|c| !c.is_whitespace())
+            .collect();
+        if attribute.contains("unsafe_code")
+            && ["allow(", "expect(", "warn("]
+                .iter()
+                .any(|level| attribute.contains(level))
+        {
+            lines.push(text[..start].matches('\n').count() + 1);
+        }
+    }
+    lines
+}
 
 /// `ocio::internals` is for the crate's own integration tests only. `cargo clippy --workspace
 /// --all-targets` and `cargo test --workspace` unify the feature that ocio's dev-dependency on
@@ -639,6 +698,30 @@ fn check_submodule(root: &Path, problems: &mut Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unsafe_code_relaxed_in_any_lint_attribute() {
+        let cases: [(&str, &[usize]); 9] = [
+            ("#![allow(unsafe_code)]\n", &[1]),
+            ("#[allow(dead_code, unsafe_code)]\nfn f() {}\n", &[1]),
+            ("#[expect(unsafe_code)]\nfn f() {}\n", &[1]),
+            ("#![warn(unsafe_code)]\n", &[1]),
+            (
+                "fn f() {}\n#[allow(\n    dead_code,\n    unsafe_code\n)]\nfn g() {}\n",
+                &[2],
+            ),
+            ("#[cfg_attr(windows, allow(unsafe_code))]\nmod m;\n", &[1]),
+            ("#![deny(unsafe_code)]\n#![forbid(unsafe_code)]\n", &[]),
+            (
+                "// #[allow(unsafe_code)]\n/// #![allow(unsafe_code)]\n",
+                &[],
+            ),
+            ("#[allow(dead_code)]\nfn unsafe_code() {}\n", &[]),
+        ];
+        for (text, lines) in cases {
+            assert_eq!(unsafe_code_relaxed(text), lines, "{text}");
+        }
+    }
 
     /// The lines `check_internals_uses` refuses in `text` at `rel`.
     fn refused(rel: &str, text: &str) -> Vec<usize> {

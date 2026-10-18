@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! Tests of the spi3d format: `tests/cpu/fileformats/FileFormatSpi3D_tests.cpp` @ v2.5.2. Its
-//! `bake_3d` comes with the baker (WP 4.8).
+//! Tests of the spi3d format: `tests/cpu/fileformats/FileFormatSpi3D_tests.cpp` @ v2.5.2.
 
 use super::*;
 use crate::fileformats::input_stream::OpenMode;
@@ -230,4 +229,67 @@ fn lut_interpolation_option() {
         String::from_utf8_lossy(&output)
     );
     assert_eq!(interp, Interpolation::Default);
+}
+
+/// Port of `OCIO_ADD_TEST(FileFormatSpi3D, bake_3d)` @ v2.5.2.
+#[test]
+fn bake_3d() {
+    let mut config = crate::Config::new().unwrap();
+    {
+        let mut cs = crate::ColorSpace::new();
+        cs.set_name("input");
+        cs.set_family("input");
+        config.add_color_space(&cs).unwrap();
+        config
+            .set_role(ocio_ops::parse_utils::ROLE_REFERENCE, Some(cs.name()))
+            .unwrap();
+    }
+    {
+        let mut cs = crate::ColorSpace::new();
+        cs.set_name("target");
+        cs.set_family("target");
+
+        // Set saturation to cause channel crosstalk, making a 3D LUT
+        let mut transform1 = crate::CdlTransform::new();
+        transform1.set_sat(f64::from(0.5f32));
+        cs.set_transform(
+            Some(&crate::Transform::from(transform1)),
+            ocio_ops::open_color_types::ColorSpaceDirection::FromReference,
+        )
+        .unwrap();
+
+        config.add_color_space(&cs).unwrap();
+    }
+
+    let bout = "SPILUT 1.0\n\
+                3 3\n\
+                2 2 2\n\
+                0 0 0 0.000000 0.000000 0.000000\n\
+                0 0 1 0.036100 0.036100 0.536100\n\
+                0 1 0 0.357600 0.857600 0.357600\n\
+                0 1 1 0.393700 0.893700 0.893700\n\
+                1 0 0 0.606300 0.106300 0.106300\n\
+                1 0 1 0.642400 0.142400 0.642400\n\
+                1 1 0 0.963900 0.963900 0.463900\n\
+                1 1 1 1.000000 1.000000 1.000000\n";
+
+    let mut baker = Baker::new();
+    baker.set_config(&config);
+    baker.set_format("spi3d").unwrap();
+    baker.set_input_space("input");
+    baker.set_target_space("target");
+    baker.set_cube_size(2);
+    let mut output = Vec::new();
+    baker.bake(&mut output).unwrap();
+
+    //
+    let osvec = ocio_ops::utils::string_utils::split_by_lines(&output);
+    let resvec = ocio_ops::utils::string_utils::split_by_lines(bout.as_bytes());
+    assert_eq!(osvec.len(), resvec.len());
+    for i in 0..resvec.len() {
+        assert_eq!(
+            String::from_utf8_lossy(&osvec[i]),
+            String::from_utf8_lossy(&resvec[i])
+        );
+    }
 }

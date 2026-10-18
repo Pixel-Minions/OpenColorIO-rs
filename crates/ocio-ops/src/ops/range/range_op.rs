@@ -58,8 +58,7 @@ impl RangeOpData {
     /// replaces it. "Op::finalize has to be called." if either Range op is still inverse. It
     /// validates this op's data first, which updates its scale and offset.
     ///
-    /// Port of `RangeOp::canCombineWith` (RangeOp.cpp:100-148 @ v2.5.2). The Lut3D arm comes
-    /// with its family; no op of that type exists before.
+    /// Port of `RangeOp::canCombineWith` (RangeOp.cpp:100-148 @ v2.5.2).
     pub(crate) fn can_combine_with(&self, op2: &Op) -> Result<bool> {
         let op_data2 = op2.data();
         let range1 = self;
@@ -83,15 +82,15 @@ impl RangeOpData {
             OpData::Lut1D(lut) => Ok(range1.is_identity()
                 && !lut.is_input_half_domain()
                 && lut.get_direction() == TransformDirection::Forward),
-            // `if (range1->isIdentity())`: the Lut3D type, whose op can replace an identity
-            // range, comes with its family.
+            OpData::Lut3D(lut) => {
+                Ok(range1.is_identity() && lut.get_direction() == TransformDirection::Forward)
+            }
             OpData::Log(_)
             | OpData::FixedFunction(_)
             | OpData::Cdl(_)
             | OpData::Gamma(_)
             | OpData::Exponent(_)
             | OpData::GradingRgbCurve(_)
-            | OpData::Lut3D(_)
             | OpData::Matrix(_)
             | OpData::Reference(_)
             | OpData::NoOp(_) => Ok(false),
@@ -117,8 +116,8 @@ impl RangeOpData {
                 create_range_op(ops, res_range, TransformDirection::Forward)
             }
             // Avoid clone (we actually want to use the second op): here the op shares its
-            // data. (The Lut3D type comes with its family.)
-            OpData::Lut1D(_) => {
+            // data.
+            OpData::Lut1D(_) | OpData::Lut3D(_) => {
                 ops.push_back(second_op.clone());
                 Ok(())
             }
@@ -128,11 +127,10 @@ impl RangeOpData {
             | OpData::Gamma(_)
             | OpData::Exponent(_)
             | OpData::GradingRgbCurve(_)
-            | OpData::Lut3D(_)
             | OpData::Matrix(_)
             | OpData::Reference(_)
             | OpData::NoOp(_) => {
-                unreachable!("can_combine_with accepts Range ops only")
+                unreachable!("can_combine_with accepts Range and LUT ops only")
             }
         }
     }

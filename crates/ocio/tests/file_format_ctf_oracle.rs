@@ -12,8 +12,8 @@ mod cdl_common;
 mod common;
 
 use common::lut_files::{file, file_case, write_files};
-use common::transforms::{Case, check_processors};
-use ocio::{Interpolation, TransformDirection};
+use common::transforms::{Case, check_processors, direction_name};
+use ocio::{Config, Interpolation, TransformDirection};
 
 /// The case of a set of one file, `name`, holding `bytes`.
 fn case(label: &str, name: &str, bytes: &[u8]) -> Case {
@@ -2165,4 +2165,1945 @@ fn lut3d_files_read_as_in_the_wheel() {
 #[test]
 fn lut3d_files_log_as_in_the_wheel() {
     cdl_common::check_logs(&op_cases_f2());
+}
+
+/// LUT files read with each FileTransform interpolation: a LUT without an interpolation of
+/// its own takes the FileTransform's if it allows it (`HandleLUT`).
+fn interpolation_cases() -> Vec<Case> {
+    let b10 = "inBitDepth=\"10i\" outBitDepth=\"10i\"";
+    let mut cases = Vec::new();
+    let mut files = Vec::new();
+    for (label, body) in [
+        ("a LUT3D", lut("LUT3D", b10, "", "2 2 2 3", &ramp(24))),
+        (
+            "a tetrahedral LUT3D",
+            lut(
+                "LUT3D",
+                &format!("{b10} interpolation=\"tetrahedral\""),
+                "",
+                "2 2 2 3",
+                &ramp(24),
+            ),
+        ),
+        (
+            "a trilinear LUT3D",
+            lut(
+                "LUT3D",
+                &format!("{b10} interpolation=\"trilinear\""),
+                "",
+                "2 2 2 3",
+                &ramp(24),
+            ),
+        ),
+        (
+            "an InverseLUT3D",
+            lut("InverseLUT3D", b10, "", "2 2 2 3", &ramp(24)),
+        ),
+        ("a LUT1D", lut("LUT1D", b10, "", "4 1", &ramp(4))),
+        (
+            "a linear LUT1D",
+            lut(
+                "LUT1D",
+                &format!("{b10} interpolation=\"linear\""),
+                "",
+                "4 1",
+                &ramp(4),
+            ),
+        ),
+        (
+            "an InverseLUT1D",
+            lut("InverseLUT1D", b10, "", "4 1", &ramp(4)),
+        ),
+        (
+            "a LUT1D and a LUT3D",
+            format!(
+                "{}{}",
+                lut("LUT1D", b10, "", "4 1", &ramp(4)),
+                lut("LUT3D", b10, "", "2 2 2 3", &ramp(24))
+            ),
+        ),
+    ] {
+        let dir = write_files(&[file(
+            "lut.ctf",
+            pl("id=\"a\" version=\"1.7\"", &body).as_bytes(),
+        )]);
+        files.push((label.to_owned(), format!("{dir}/lut.ctf")));
+    }
+    for name in [
+        "clf/lut3d_17x17x17_10i_12i.clf",
+        "clf/lut1d_example.clf",
+        "lut3d_example_Inv.ctf",
+    ] {
+        files.push((name.to_owned(), upstream_file(name)));
+    }
+    for (label, path) in &files {
+        for interp in [
+            Interpolation::Nearest,
+            Interpolation::Linear,
+            Interpolation::Tetrahedral,
+            Interpolation::Cubic,
+            Interpolation::Best,
+            Interpolation::Default,
+        ] {
+            cases.push(file_case(
+                format!("{label}, {interp:?}"),
+                path,
+                interp,
+                TransformDirection::Forward,
+            ));
+        }
+    }
+    cases
+}
+
+/// The processors of LUT files read with each FileTransform interpolation, in both
+/// directions.
+#[test]
+fn file_interpolations_read_as_in_the_wheel() {
+    check_processors(&interpolation_cases());
+}
+
+/// The warnings of reading LUT files with each FileTransform interpolation, message by
+/// message.
+#[test]
+fn file_interpolations_log_as_in_the_wheel() {
+    cdl_common::check_logs(&interpolation_cases());
+}
+
+/// Upstream's CLF examples, metadata text in parts, the versions that change a reader, and
+/// the limits of LUT and IndexMap dimensions.
+fn structure_cases() -> Vec<Case> {
+    let b10 = "inBitDepth=\"10i\" outBitDepth=\"10i\"";
+    let f32s = "inBitDepth=\"32f\" outBitDepth=\"32f\"";
+    let lut1 = lut("LUT1D", b10, "", "4 1", &ramp(4));
+    let im =
+        |dim: &str, values: &str| format!("        <IndexMap dim=\"{dim}\">{values}</IndexMap>\n");
+    let mut cases = Vec::new();
+
+    // Upstream's files.
+    for name in ["clf/lut1d_example.clf", "clf/matrix_3x4_example.clf"] {
+        cases.push(file_case(
+            name,
+            &upstream_file(name),
+            Interpolation::Default,
+            TransformDirection::Forward,
+        ));
+    }
+
+    // Text in parts: around an entity, on several lines, around an element.
+    cases.push(ctf(
+        "Info text in parts",
+        "id=\"a\" version=\"1.7\"",
+        &format!(
+            "    <Info><R> a &amp; b </R><S>x<T/>y</S>\n        <U>line 1\n  line 2</U></Info>\n{lut1}"
+        ),
+    ));
+    cases.push(ctf(
+        "descriptors in parts",
+        "id=\"a\" version=\"1.7\"",
+        &format!(
+            "    <InputDescriptor>a&amp;b</InputDescriptor>\n\
+             \x20   <InputDescriptor> c </InputDescriptor>\n\
+             \x20   <OutputDescriptor>d\ne</OutputDescriptor>\n\
+             \x20   <OutputDescriptor>f&lt;</OutputDescriptor>\n{lut1}"
+        ),
+    ));
+
+    // The Lut1D reader of each version: an IndexMap is a Range from CTF 1.5 on.
+    for version in ["1.3", "1.4", "1.5", "1.6", "1.7"] {
+        cases.push(ctf(
+            &format!("a LUT1D with an IndexMap in CTF {version}"),
+            &format!("id=\"a\" version=\"{version}\""),
+            &lut("LUT1D", b10, &im("2", "64@0 940@3"), "4 1", &ramp(4)),
+        ));
+    }
+
+    // The legacy Log reader up to CTF 1.8.
+    for version in ["1.7", "1.8"] {
+        cases.push(ctf(
+            &format!("a Log in CTF {version}"),
+            &format!("id=\"a\" version=\"{version}\""),
+            &op("Log", &format!("{f32s} style=\"log2\""), ""),
+        ));
+    }
+
+    // The limits of LUT dimensions.
+    for (tag, dim, values) in [
+        ("LUT1D", "300000 1", ramp(4)),
+        ("LUT1D", "300001 1", ramp(4)),
+        ("InverseLUT1D", "300000 1", ramp(4)),
+        ("InverseLUT1D", "300001 1", ramp(4)),
+        ("LUT3D", "129 129 129 3", ramp(24)),
+        ("LUT3D", "130 130 130 3", ramp(24)),
+        ("InverseLUT3D", "129 129 129 3", ramp(24)),
+        ("InverseLUT3D", "130 130 130 3", ramp(24)),
+    ] {
+        cases.push(ctf(
+            &format!("a {tag} of dimensions {dim}"),
+            "id=\"a\" version=\"1.7\"",
+            &lut(tag, f32s, "", dim, &values),
+        ));
+    }
+
+    // IndexMaps of 1 and 2 entries.
+    for (tag, dim, values) in [("LUT1D", "4 1", ramp(4)), ("LUT3D", "2 2 2 3", ramp(24))] {
+        for (im_dim, im_values) in [("1", "0@0"), ("2", "0@0 1023@1")] {
+            cases.push(ctf(
+                &format!("a {tag} with an IndexMap of dimension {im_dim}"),
+                "id=\"a\" version=\"1.7\"",
+                &lut(tag, b10, &im(im_dim, im_values), dim, &values),
+            ));
+        }
+    }
+    cases
+}
+
+/// The processors of upstream's CLF examples, metadata text in parts, the versions that
+/// change a reader and the limits of dimensions, in both directions.
+#[test]
+fn structure_files_read_as_in_the_wheel() {
+    check_processors(&structure_cases());
+}
+
+/// The warnings of reading upstream's CLF examples, metadata text in parts, the versions
+/// that change a reader and the limits of dimensions, message by message.
+#[test]
+fn structure_files_log_as_in_the_wheel() {
+    cdl_common::check_logs(&structure_cases());
+}
+
+/// DynamicParameter elements under the ported operators.
+fn dynamic_parameter_cases() -> Vec<Case> {
+    let b10 = "inBitDepth=\"10i\" outBitDepth=\"10i\"";
+    let f32s = "inBitDepth=\"32f\" outBitDepth=\"32f\"";
+    let dp = |attrs: &str| format!("        <DynamicParameter {attrs}/>\n");
+    let lut1 = |extra: &str| lut("LUT1D", b10, extra, "4 1", &ramp(4));
+    let mut cases = Vec::new();
+
+    // CTF files: (label, version, body).
+    let mut files = vec![
+        (
+            "LOOK_SWITCH on a LUT1D".to_owned(),
+            "2.0",
+            lut1(&dp("param=\"LOOK_SWITCH\"")),
+        ),
+        (
+            "LOOK_SWITCH of another case".to_owned(),
+            "2.0",
+            lut1(&dp("PARAM=\"look_switch\"")),
+        ),
+        (
+            "LOOK_SWITCH after the Array".to_owned(),
+            "2.0",
+            format!(
+                "    <LUT1D {b10}>\n        <Array dim=\"4 1\">{}</Array>\n{}    </LUT1D>\n",
+                ramp(4),
+                dp("param=\"LOOK_SWITCH\"")
+            ),
+        ),
+        (
+            "LOOK_SWITCH twice".to_owned(),
+            "1.7",
+            lut1(&format!(
+                "{}{}",
+                dp("param=\"LOOK_SWITCH\""),
+                dp("param=\"LOOK_SWITCH\" Param=\"LOOK_SWITCH\"")
+            )),
+        ),
+        (
+            "LOOK_SWITCH then EXPOSURE".to_owned(),
+            "2.0",
+            lut1(&dp("param=\"LOOK_SWITCH\" Param=\"EXPOSURE\"")),
+        ),
+        ("no param".to_owned(), "2.0", lut1(&dp("other=\"1\""))),
+        ("an empty param".to_owned(), "2.0", lut1(&dp("param=\"\""))),
+        (
+            "an unknown param".to_owned(),
+            "2.0",
+            lut1(&dp("param=\"FOO\"")),
+        ),
+        (
+            "text".to_owned(),
+            "2.0",
+            lut1("        <DynamicParameter param=\"LOOK_SWITCH\">text</DynamicParameter>\n"),
+        ),
+        (
+            "under an Array".to_owned(),
+            "2.0",
+            format!(
+                "    <LUT1D {b10}>\n        <Array dim=\"4 1\">{}{}</Array>\n    </LUT1D>\n",
+                ramp(4),
+                dp("param=\"LOOK_SWITCH\"")
+            ),
+        ),
+        (
+            "under the ProcessList".to_owned(),
+            "2.0",
+            format!("{}{}", dp("param=\"LOOK_SWITCH\""), lut1("")),
+        ),
+        (
+            "under a SOPNode".to_owned(),
+            "2.0",
+            op(
+                "ASC_CDL",
+                &format!("{f32s} style=\"Fwd\""),
+                &format!(
+                    "        <SOPNode>\n{}            <Slope>1 1 1</Slope>\n\
+                     \x20           <Offset>0 0 0</Offset>\n\
+                     \x20           <Power>1 1 1</Power>\n        </SOPNode>\n",
+                    dp("param=\"LOOK_SWITCH\"")
+                ),
+            ),
+        ),
+    ];
+    for param in [
+        "EXPOSURE",
+        "contrast",
+        "GAMMA",
+        "PRIMARY",
+        "RGB_CURVE",
+        "HUE_CURVE",
+        "TONE",
+    ] {
+        files.push((
+            format!("{param} on a LUT1D"),
+            "2.0",
+            lut1(&dp(&format!("param=\"{param}\""))),
+        ));
+    }
+    for (tag, attrs, body) in [
+        (
+            "Matrix",
+            f32s.to_owned(),
+            "        <Array dim=\"3 3 3\">1 0 0 0 1 0 0 0 1</Array>\n".to_owned(),
+        ),
+        ("Range", f32s.to_owned(), String::new()),
+        ("Log", format!("{f32s} style=\"log10\""), String::new()),
+        (
+            "Exponent",
+            format!("{f32s} style=\"basicFwd\""),
+            "        <ExponentParams exponent=\"2.2\"/>\n".to_owned(),
+        ),
+        ("ASC_CDL", format!("{f32s} style=\"Fwd\""), String::new()),
+        (
+            "LUT3D",
+            b10.to_owned(),
+            format!("        <Array dim=\"2 2 2 3\">{}</Array>\n", ramp(24)),
+        ),
+        (
+            "InverseLUT1D",
+            b10.to_owned(),
+            format!("        <Array dim=\"4 1\">{}</Array>\n", ramp(4)),
+        ),
+    ] {
+        for param in ["param=\"LOOK_SWITCH\"", "param=\"EXPOSURE\"", ""] {
+            files.push((
+                format!("[{param}] on a {tag}"),
+                "2.0",
+                op(tag, &attrs, &format!("{}{body}", dp(param))),
+            ));
+        }
+    }
+    for (label, version, body) in files {
+        cases.push(ctf(
+            &format!("a DynamicParameter: {label}"),
+            &format!("id=\"a\" version=\"{version}\""),
+            &body,
+        ));
+    }
+    cases.push(clf(
+        "a DynamicParameter in a CLF",
+        "id=\"a\" compCLFversion=\"3\"",
+        &lut1(&dp("param=\"LOOK_SWITCH\"")),
+    ));
+    cases
+}
+
+/// The processors of files with DynamicParameter elements, in both directions.
+#[test]
+fn dynamic_parameter_files_read_as_in_the_wheel() {
+    check_processors(&dynamic_parameter_cases());
+}
+
+/// The warnings of reading files with DynamicParameter elements, message by message.
+#[test]
+fn dynamic_parameter_files_log_as_in_the_wheel() {
+    cdl_common::check_logs(&dynamic_parameter_cases());
+}
+
+/// The ACES, ACESParams, FixedFunction and Function readers' files.
+fn op_cases_g() -> Vec<Case> {
+    let f32s = "inBitDepth=\"32f\" outBitDepth=\"32f\"";
+    let i16 = "inBitDepth=\"16i\" outBitDepth=\"16i\"";
+    let gamma = |g: &str| format!("        <ACESParams gamma=\"{g}\"/>\n");
+    let mut cases = Vec::new();
+
+    // CTF files: (label, version, operator, its attributes, its body).
+    for (label, version, tag, attrs, body) in [
+        // FixedFunction.
+        (
+            "a style with a parameter",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"Rec2100SurroundFwd\" params=\"0.8\""),
+            String::new(),
+        ),
+        (
+            "a style of another case",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"rec2100surroundrev\" params=\" 1.2 \""),
+            String::new(),
+        ),
+        (
+            "a style without parameters",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"hsv_to_rgb\""),
+            String::new(),
+        ),
+        (
+            "the gamut compression",
+            "2.1",
+            "FixedFunction",
+            format!(
+                "{f32s} style=\"GamutComp13Fwd\" params=\"1.147 1.264 1.312 0.815 0.803 0.88 1.2\""
+            ),
+            String::new(),
+        ),
+        (
+            "a later style in CTF 2",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"Lin_TO_PQ\""),
+            String::new(),
+        ),
+        (
+            "the gamma log",
+            "2.4",
+            "FixedFunction",
+            format!(
+                "{f32s} style=\"Lin_TO_GammaLog\" \
+                 params=\"0 0.25 0.5 1 0 2.718 0.17883277 0.807825590164 1 -0.07116723\""
+            ),
+            String::new(),
+        ),
+        (
+            "an ACES 2 output transform",
+            "2.4",
+            "FixedFunction",
+            format!(
+                "{f32s} style=\"ACESOutputTransform20Inv\" \
+                 params=\"1000 0.68 0.32 0.265 0.69 0.15 0.06 0.3127 0.329\""
+            ),
+            String::new(),
+        ),
+        (
+            "an HSY style",
+            "2.5",
+            "FixedFunction",
+            format!("{f32s} style=\"RGB_TO_HSY_LOG\""),
+            String::new(),
+        ),
+        (
+            "params before the style",
+            "2",
+            "FixedFunction",
+            format!("{f32s} params=\"0.8\" style=\"Rec2100SurroundFwd\""),
+            String::new(),
+        ),
+        (
+            "two styles",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"HSV_to_RGB\" Style=\"RGB_to_HSV\""),
+            String::new(),
+        ),
+        (
+            "two params",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"Rec2100SurroundFwd\" params=\"0.8\" PARAMS=\"1.5\""),
+            String::new(),
+        ),
+        (
+            "too many parameters",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"Rec2100SurroundFwd\" params=\"0.8 2.0\""),
+            String::new(),
+        ),
+        (
+            "parameters a style doesn't take",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"RGB_TO_HSV\" params=\"0.8\""),
+            String::new(),
+        ),
+        (
+            "empty params",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"Rec2100SurroundFwd\" params=\"\""),
+            String::new(),
+        ),
+        (
+            "a parameter out of range",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"Rec2100SurroundFwd\" params=\"200\""),
+            String::new(),
+        ),
+        (
+            "a NaN parameter",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"Rec2100SurroundFwd\" params=\"nan\""),
+            String::new(),
+        ),
+        (
+            "an infinite parameter",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"Rec2100SurroundFwd\" params=\"inf\""),
+            String::new(),
+        ),
+        (
+            "illegal params",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"Rec2100SurroundFwd\" params=\"0.8 abc\""),
+            String::new(),
+        ),
+        (
+            "long illegal params",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"Rec2100SurroundFwd\" params=\"0.8 0.9 1.0 1.1 1.2 x\""),
+            String::new(),
+        ),
+        (
+            "a missing style",
+            "2",
+            "FixedFunction",
+            format!("{f32s} params=\"0.8\""),
+            String::new(),
+        ),
+        (
+            "an unknown style",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"UnknownStyle\""),
+            String::new(),
+        ),
+        (
+            "an empty style",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"\""),
+            String::new(),
+        ),
+        (
+            "an unknown attribute",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"HSV_to_RGB\" gamma=\"2\""),
+            String::new(),
+        ),
+        (
+            "a description and an ACESParams",
+            "2",
+            "FixedFunction",
+            format!("{f32s} style=\"Rec2100SurroundFwd\" params=\"0.8\""),
+            format!(
+                "        <Description>a surround</Description>\n{}",
+                gamma("1.2")
+            ),
+        ),
+        (
+            "a FixedFunction in CTF 1.8",
+            "1.8",
+            "FixedFunction",
+            format!("{f32s} style=\"HSV_to_RGB\""),
+            String::new(),
+        ),
+        // ACES.
+        (
+            "a style without parameters",
+            "1.5",
+            "ACES",
+            format!("{i16} style=\"RedMod03Rev\""),
+            String::new(),
+        ),
+        (
+            "a surround",
+            "1.5",
+            "ACES",
+            format!("{i16} style=\"Surround\""),
+            gamma("1.2"),
+        ),
+        (
+            "a Rec.2100 surround",
+            "2",
+            "ACES",
+            format!("{f32s} style=\"rec2100surroundfwd\""),
+            gamma("0.8"),
+        ),
+        (
+            "an inverse Rec.2100 surround",
+            "1.5",
+            "ACES",
+            format!("{f32s} style=\"Rec2100SurroundRev\""),
+            gamma("1.4"),
+        ),
+        (
+            "a surround without ACESParams",
+            "1.5",
+            "ACES",
+            format!("{i16} style=\"Surround\""),
+            String::new(),
+        ),
+        (
+            "two ACESParams",
+            "1.5",
+            "ACES",
+            format!("{i16} style=\"Surround\""),
+            format!("{}{}", gamma("1.2"), gamma("1.4")),
+        ),
+        (
+            "an ACESParams without gamma",
+            "1.5",
+            "ACES",
+            format!("{i16} style=\"Surround\""),
+            "        <ACESParams wrongParam=\"1.2\"/>\n".to_owned(),
+        ),
+        (
+            "an ACESParams without gamma, inverse",
+            "1.5",
+            "ACES",
+            format!("{i16} style=\"Rec2100SurroundRev\""),
+            "        <ACESParams/>\n".to_owned(),
+        ),
+        (
+            "an ACESParams with an unknown attribute",
+            "1.5",
+            "ACES",
+            format!("{i16} style=\"Surround\""),
+            "        <ACESParams Gamma=\"1.1\" offset=\"2\"/>\n".to_owned(),
+        ),
+        (
+            "a NaN gamma",
+            "1.5",
+            "ACES",
+            format!("{i16} style=\"Surround\""),
+            gamma("nan"),
+        ),
+        (
+            "an illegal gamma",
+            "1.5",
+            "ACES",
+            format!("{i16} style=\"Surround\""),
+            gamma("1.2 1.3"),
+        ),
+        (
+            "a gamma out of range",
+            "1.5",
+            "ACES",
+            format!("{i16} style=\"Surround\""),
+            gamma("0"),
+        ),
+        (
+            "an ACESParams with text",
+            "1.5",
+            "ACES",
+            format!("{i16} style=\"Surround\""),
+            "        <ACESParams gamma=\"1.2\">some text</ACESParams>\n".to_owned(),
+        ),
+        (
+            "an ACESParams a style doesn't take",
+            "1.5",
+            "ACES",
+            format!("{i16} style=\"Glow03Fwd\""),
+            gamma("1.2"),
+        ),
+        (
+            "a second ACESParams without gamma",
+            "1.5",
+            "ACES",
+            format!("{f32s} style=\"Rec2100SurroundFwd\""),
+            format!("{}        <ACESParams/>\n", gamma("1.2")),
+        ),
+        (
+            "an ACESParams before the style is known",
+            "1.5",
+            "ACES",
+            format!("{i16} style=\"DarkToDim10\""),
+            gamma("1.2"),
+        ),
+        (
+            "a missing style",
+            "1.5",
+            "ACES",
+            i16.to_owned(),
+            String::new(),
+        ),
+        (
+            "an unknown style",
+            "1.5",
+            "ACES",
+            format!("{i16} style=\"Surround2\""),
+            String::new(),
+        ),
+        (
+            "params",
+            "2",
+            "ACES",
+            format!("{i16} style=\"RedMod10Fwd\" params=\"1\""),
+            String::new(),
+        ),
+        (
+            "an ACES in CTF 1.4",
+            "1.4",
+            "ACES",
+            format!("{i16} style=\"RedMod03Rev\""),
+            String::new(),
+        ),
+        // Function.
+        (
+            "a style",
+            "1.6",
+            "Function",
+            "inBitDepth=\"16i\" outBitDepth=\"32f\" style=\"HSV_to_RGB\"".to_owned(),
+            String::new(),
+        ),
+        (
+            "an ACES style",
+            "2",
+            "Function",
+            format!("{f32s} style=\"GamutComp13Rev\""),
+            String::new(),
+        ),
+        (
+            "params",
+            "2",
+            "Function",
+            format!("{f32s} style=\"Rec2100SurroundFwd\" params=\"0.8\""),
+            String::new(),
+        ),
+        (
+            "an ACESParams",
+            "2",
+            "Function",
+            format!("{f32s} style=\"Rec2100SurroundFwd\""),
+            gamma("0.8"),
+        ),
+        (
+            "a missing style",
+            "1.6",
+            "Function",
+            f32s.to_owned(),
+            String::new(),
+        ),
+        (
+            "an unknown style",
+            "1.6",
+            "Function",
+            format!("{f32s} style=\"HSV\""),
+            String::new(),
+        ),
+        (
+            "a Function in CTF 1.5",
+            "1.5",
+            "Function",
+            format!("{f32s} style=\"HSV_to_RGB\""),
+            String::new(),
+        ),
+    ] {
+        cases.push(ctf(
+            &format!("a {tag}: {label}"),
+            &format!("id=\"a\" version=\"{version}\""),
+            &op(tag, &attrs, &body),
+        ));
+    }
+
+    // CLF files.
+    for (label, tag, attrs, body) in [
+        (
+            "a surround",
+            "ACES",
+            format!("{f32s} style=\"Surround\""),
+            gamma("1.2"),
+        ),
+        (
+            "a FixedFunction",
+            "FixedFunction",
+            format!("{f32s} style=\"HSV_to_RGB\""),
+            String::new(),
+        ),
+        (
+            "a Function",
+            "Function",
+            format!("{f32s} style=\"HSV_to_RGB\""),
+            String::new(),
+        ),
+    ] {
+        cases.push(clf(
+            &format!("a CLF {tag}: {label}"),
+            "id=\"a\" compCLFversion=\"3\"",
+            &op(tag, &attrs, &body),
+        ));
+    }
+
+    // Upstream's files.
+    for name in ["deprecated_ops.ctf", "fixed_function.ctf"] {
+        cases.push(file_case(
+            name,
+            &upstream_file(name),
+            Interpolation::Default,
+            TransformDirection::Forward,
+        ));
+    }
+    cases
+}
+
+/// The processors of the ACES, FixedFunction and Function readers' files, in both
+/// directions.
+#[test]
+fn fixed_function_files_read_as_in_the_wheel() {
+    check_processors(&op_cases_g());
+}
+
+/// The warnings of reading the ACES, FixedFunction and Function readers' files, message by
+/// message.
+#[test]
+fn fixed_function_files_log_as_in_the_wheel() {
+    cdl_common::check_logs(&op_cases_g());
+}
+
+/// A curve element `tag` holding `body`.
+fn curve(tag: &str, body: &str) -> String {
+    format!("        <{tag}>\n{body}        </{tag}>\n")
+}
+
+/// A ControlPoints element of `values`.
+fn points(values: &str) -> String {
+    format!("            <ControlPoints>{values}</ControlPoints>\n")
+}
+
+/// A Slopes element of `values`.
+fn slopes(values: &str) -> String {
+    format!("            <Slopes>{values}</Slopes>\n")
+}
+
+/// The GradingRGBCurve reader's files.
+fn op_cases_g2() -> Vec<Case> {
+    let f32s = "inBitDepth=\"32f\" outBitDepth=\"32f\"";
+    let style = |s: &str| format!("{f32s} style=\"{s}\"");
+    let mut cases = Vec::new();
+
+    // CTF files: (label, version, the GradingRGBCurve's attributes, its body).
+    for (label, version, attrs, body) in [
+        ("the log defaults", "2", style("log"), String::new()),
+        ("the linear defaults", "2", style("linear"), String::new()),
+        (
+            "the video defaults, inverse",
+            "2",
+            style("videoRev"),
+            String::new(),
+        ),
+        (
+            "linear curves",
+            "2",
+            style("linear"),
+            format!(
+                "{}{}",
+                curve("Red", &points(" -7 -6\n 0 0\n 7 7 ")),
+                curve("Master", &points("-7 -7 0 0 7 7 16 10"))
+            ),
+        ),
+        (
+            "video curves with slopes",
+            "2",
+            style("video"),
+            curve(
+                "Master",
+                &format!("{}{}", points("0 0 1 1 1.5 1.4"), slopes(" 0 0.7 1.1 ")),
+            ),
+        ),
+        (
+            "every log curve, inverse",
+            "2",
+            style("logRev"),
+            format!(
+                "{}{}{}{}",
+                curve("Red", &points("0.015625 0 0.5 0.5 2 2")),
+                curve("Green", &points("0.015625 0.1 2.5 0.5 3.5 1.5")),
+                curve("Blue", &points("-4 -4 4.5 0.5 5 3")),
+                curve("Master", &points("11 11 12.5 11.5 13.5 12.5 26.5 15"))
+            ),
+        ),
+        (
+            "curve names of another case",
+            "2.5",
+            style("LOG"),
+            format!(
+                "{}{}",
+                curve("red", &points("0 0 1 2")),
+                curve("MASTER", &points("0 0 1 0.5"))
+            ),
+        ),
+        (
+            "bypassLinToLog",
+            "2",
+            format!("{} bypassLinToLog=\"true\"", style("linear")),
+            curve("Green", &points("-1 -1 0 0.5 1 1")),
+        ),
+        (
+            "bypassLinToLog of another case",
+            "2",
+            format!("{} BypassLinToLog=\"TRUE\"", style("linearRev")),
+            String::new(),
+        ),
+        (
+            "bypassLinToLog false",
+            "2",
+            format!("{} bypassLinToLog=\"false\"", style("linear")),
+            String::new(),
+        ),
+        (
+            "bypassLinToLog before the style",
+            "2",
+            format!("{f32s} bypassLinToLog=\"true\" style=\"video\""),
+            String::new(),
+        ),
+        ("an invalid style", "2", style("logx"), String::new()),
+        ("an empty style", "2", style(""), String::new()),
+        ("a missing style", "2", f32s.to_owned(), String::new()),
+        (
+            "two styles",
+            "2",
+            format!("{} Style=\"video\"", style("linear")),
+            curve("Master", &points("0 0 0.5 0.3 1 1")),
+        ),
+        (
+            "an unknown attribute",
+            "2",
+            format!("{} gamma=\"2\"", style("log")),
+            String::new(),
+        ),
+        (
+            "an odd number of values",
+            "2",
+            style("linear"),
+            curve("Red", &points("-7 -6 0 0 7")),
+        ),
+        (
+            "one control point",
+            "2",
+            style("linear"),
+            curve("Red", &points("0 1")),
+        ),
+        (
+            "no control point",
+            "2",
+            style("linear"),
+            curve("Red", "            <ControlPoints/>\n"),
+        ),
+        (
+            "decreasing x",
+            "2",
+            style("linear"),
+            curve("Red", &points("-7 -6 0 0 -1 7")),
+        ),
+        (
+            "decreasing y",
+            "2",
+            style("video"),
+            curve("Blue", &points("0 0.5 0.5 0.2 1 1")),
+        ),
+        // A NaN x coordinate is refused where upstream would read past the control points
+        // (`docs/improvements.md` U-35), so the files' tests leave it out.
+        (
+            "a NaN y coordinate",
+            "2",
+            style("video"),
+            curve("Blue", &points("0 0 0.5 nan 1 1")),
+        ),
+        (
+            "too many slopes",
+            "2",
+            style("linear"),
+            curve(
+                "Red",
+                &format!("{}{}", points("-7 -6 0 0 1 7"), slopes("1 1 1 1")),
+            ),
+        ),
+        (
+            "slopes before the control points",
+            "2",
+            style("log"),
+            curve(
+                "Red",
+                &format!("{}{}", slopes("1 1.5 2"), points("0 0 0.5 0.5 1 1 2 2")),
+            ),
+        ),
+        (
+            "slopes of the default curve",
+            "2",
+            style("video"),
+            curve("Red", &slopes("1 1")),
+        ),
+        (
+            "control points twice",
+            "2",
+            style("video"),
+            curve(
+                "Red",
+                &format!("{}{}", points("0 0 1 1 2 3"), points("0 0 2 1")),
+            ),
+        ),
+        (
+            "control points in two parts",
+            "2",
+            style("video"),
+            curve(
+                "Red",
+                "            <ControlPoints>0 0 1 1<!-- c -->1.5 1.6</ControlPoints>\n",
+            ),
+        ),
+        (
+            "a curve twice",
+            "2",
+            style("video"),
+            format!(
+                "{}{}",
+                curve("Red", &points("0 0 1 1 2 3")),
+                curve("Red", &slopes("1 1 1"))
+            ),
+        ),
+        (
+            "illegal values",
+            "2",
+            style("video"),
+            curve("Red", &points("0 0 1 x")),
+        ),
+        (
+            "long illegal values",
+            "2",
+            style("video"),
+            curve("Red", &points("0 0 0.25 0.25 0.5 0.5 1 1 x")),
+        ),
+        (
+            "illegal slopes",
+            "2",
+            style("video"),
+            curve("Red", &format!("{}{}", points("0 0 1 1"), slopes("1 1e"))),
+        ),
+        (
+            "an unknown curve",
+            "2",
+            style("linear"),
+            curve("Grn", &points("0 1 1 2 2 3")),
+        ),
+        (
+            "a hue curve",
+            "2",
+            style("linear"),
+            curve("HueHue", &points("0 1 1 2 2 3")),
+        ),
+        (
+            "control points in the operator",
+            "2",
+            style("linear"),
+            points("0 1 1 2 2 3"),
+        ),
+        (
+            "slopes in the operator",
+            "2",
+            style("linear"),
+            slopes("1 1"),
+        ),
+        (
+            "attributes and descriptions",
+            "2",
+            style("video"),
+            format!(
+                "        <Description>curves</Description>\n{}",
+                curve(
+                    "Red",
+                    "            <Description>red</Description>\n\
+                     \x20           <ControlPoints a=\"1\">0 0 1 1</ControlPoints>\n\
+                     \x20           <Slopes b=\"2\">1 1</Slopes>\n"
+                )
+            ),
+        ),
+        (
+            "text in a curve",
+            "2",
+            style("video"),
+            curve("Red", "            text\n"),
+        ),
+        (
+            "an element in the control points",
+            "2",
+            style("video"),
+            curve(
+                "Red",
+                "            <ControlPoints>0 0 1 1<Slopes>1 1</Slopes></ControlPoints>\n",
+            ),
+        ),
+        (
+            "a GradingRGBCurve in CTF 1.8",
+            "1.8",
+            style("video"),
+            String::new(),
+        ),
+        // Dynamic curves: their cache IDs leave the curves out, so the identity's comes first,
+        // and the next ones share it.
+        (
+            "dynamic identity curves",
+            "2",
+            style("log"),
+            "        <DynamicParameter param=\"RGB_CURVE\"/>\n".to_owned(),
+        ),
+        (
+            "dyn after curves",
+            "2",
+            style("log"),
+            format!(
+                "{}        <DynamicParameter param=\"RGB_CURVE\"/>\n",
+                curve("Red", &points("0 0 0.5 0.7 1 1"))
+            ),
+        ),
+        (
+            "dyn before curves",
+            "2",
+            style("linearRev"),
+            format!(
+                "        <DynamicParameter param=\"rgb_curve\"/>\n{}",
+                curve("Master", &points("-1 -1 0 0.3 1 1.5"))
+            ),
+        ),
+        (
+            "dynamic twice, bypassLinToLog",
+            "2.5",
+            format!("{} bypassLinToLog=\"true\"", style("linear")),
+            format!(
+                "        <DynamicParameter param=\"RGB_CURVE\"/>\n{}\
+                 \x20       <DynamicParameter PARAM=\"RGB_CURVE\"/>\n",
+                curve("Green", &points("-1 -1 0 0.3 1 1.5"))
+            ),
+        ),
+        (
+            "another dynamic parameter",
+            "2",
+            style("video"),
+            "        <DynamicParameter param=\"PRIMARY\"/>\n".to_owned(),
+        ),
+    ] {
+        cases.push(ctf(
+            &format!("a GradingRGBCurve: {label}"),
+            &format!("id=\"a\" version=\"{version}\""),
+            &op("GradingRGBCurve", &attrs, &body),
+        ));
+    }
+
+    cases.push(clf(
+        "a CLF GradingRGBCurve",
+        "id=\"a\" compCLFversion=\"3\"",
+        &op("GradingRGBCurve", &style("video"), ""),
+    ));
+    cases
+}
+
+/// The processors of the GradingRGBCurve reader's files, in both directions: their cache IDs
+/// and pixels (its transform, which `check_processors` compares, comes with Phase 3).
+#[test]
+fn grading_rgb_curve_files_read_as_in_the_wheel() {
+    check_applied(&op_cases_g2());
+}
+
+/// The warnings of reading the GradingRGBCurve reader's files, message by message.
+#[test]
+fn grading_rgb_curve_files_log_as_in_the_wheel() {
+    cdl_common::check_logs(&op_cases_g2());
+}
+
+/// RGBA probes for the processors' pixels: values across the log, linear and video ranges,
+/// distinct per channel, with two alphas.
+fn rgba_probes() -> Vec<f32> {
+    let values: [f32; 12] = [
+        -0.5, 0.0, 0.01, 0.1, 0.18, 0.5, 0.9, 1.0, 1.5, 4.0, 16.0, 100.0,
+    ];
+    let mut probes = Vec::new();
+    for (i, &v) in values.iter().enumerate() {
+        probes.extend_from_slice(&[
+            v,
+            values[(i + 4) % values.len()],
+            values[(i + 8) % values.len()],
+            if i % 2 == 0 { 1.0 } else { 0.5 },
+        ]);
+    }
+    probes
+}
+
+/// The processors of `cases` in both directions, the wheel's (`cpu_apply`, live) against the
+/// port's: the error and its stage, or the processor's and the CPU processor's cache IDs and
+/// the probes' pixels, bit for bit. For operators whose transform isn't ported yet
+/// (`createGroupTransform`), such as GradingRGBCurve's (Phase 3, WP 3.1), which
+/// `check_processors` compares.
+fn check_applied(cases: &[Case]) {
+    use ocio::Config;
+    use ocio_ops::image_desc::PackedImageDesc;
+    use ocio_testkit::Oracle;
+    use ocio_testkit::oracle::BatchCall;
+
+    let probes = rgba_probes();
+    let bytes: Vec<u8> = probes.iter().flat_map(|v| v.to_le_bytes()).collect();
+    let dirs = [TransformDirection::Forward, TransformDirection::Inverse];
+    let requests: Vec<(usize, TransformDirection)> = (0..cases.len())
+        .flat_map(|k| dirs.iter().map(move |&dir| (k, dir)))
+        .collect();
+    let calls: Vec<BatchCall<'_>> = requests
+        .iter()
+        .map(|&(k, dir)| BatchCall {
+            cmd: "cpu_apply",
+            args: serde_json::json!({
+                "transform": cases[k].spec,
+                "direction": direction_name(dir),
+            }),
+            blobs: vec![&bytes],
+        })
+        .collect();
+    // Pixels always run live: the kernels and the math library belong to the machine.
+    let responses = Oracle::get().batch(&calls, false);
+
+    let mut failures = Vec::new();
+    for (&(k, dir), response) in requests.iter().zip(responses) {
+        let case = &cases[k];
+        // A config per case, as `cpu_apply` makes one per call: one config would hand a case
+        // the processor of an earlier one with the same cache ID (`docs/improvements.md`
+        // I-188).
+        let config = Config::create_raw().unwrap();
+        let response = response.unwrap_or_else(|e| panic!("{e}"));
+        let wheel = match response.result.get("exception") {
+            Some(exception) => Err((
+                response.result["stage"].as_str().unwrap().to_owned(),
+                exception["message"].as_str().unwrap().to_owned(),
+            )),
+            None => Ok((
+                response.result["processor_cache_id"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned(),
+                response.result["cpu_cache_id"].as_str().unwrap().to_owned(),
+                response.blob_f32(0),
+            )),
+        };
+        let port = (|| {
+            let processor = config
+                .processor_in_direction(&case.port, dir)
+                .map_err(|e| ("processor".to_owned(), e.message().to_owned()))?;
+            let processor_cache_id = processor
+                .cache_id()
+                .map_err(|e| ("processor".to_owned(), e.message().to_owned()))?;
+            let cpu = processor
+                .default_cpu_processor()
+                .map_err(|e| ("cpu_processor".to_owned(), e.message().to_owned()))?;
+            // From one buffer to another, as `cpu_apply` does: in place, the linear style
+            // converts alpha (`docs/improvements.md` I-90).
+            let mut pixels = vec![0.0f32; probes.len()];
+            {
+                let src = PackedImageDesc::new(&probes[..], probes.len() / 4, 1, 4)
+                    .map_err(|e| ("apply".to_owned(), e.message().to_owned()))?;
+                let mut dst = PackedImageDesc::new(&mut pixels[..], probes.len() / 4, 1, 4)
+                    .map_err(|e| ("apply".to_owned(), e.message().to_owned()))?;
+                cpu.apply_src_dst(&src, &mut dst)
+                    .map_err(|e| ("apply".to_owned(), e.message().to_owned()))?;
+            }
+            let cpu_cache_id = String::from_utf8(cpu.get_cache_id().to_vec()).unwrap();
+            Ok((processor_cache_id, cpu_cache_id, pixels))
+        })();
+        let same = match (&wheel, &port) {
+            (Err(w), Err(p)) => w == p,
+            (Ok((wp, wc, wpix)), Ok((pp, pc, ppix))) => {
+                wp == pp
+                    && wc == pc
+                    && wpix.len() == ppix.len()
+                    && wpix
+                        .iter()
+                        .zip(ppix)
+                        .all(|(a, b)| a.to_bits() == b.to_bits())
+            }
+            _ => false,
+        };
+        if !same {
+            failures.push(format!(
+                "{} ({dir:?}):\n  wheel {wheel:?}\n  port  {port:?}",
+                case.label
+            ));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// The Reference reader's files. Every path is absolute: a relative one resolves against the
+/// process's working directory with the raw config, which the oracle's and the port's don't
+/// share (relative references and their resolution are R2's, with a config's search path).
+fn op_cases_h() -> Vec<Case> {
+    let f32s = "inBitDepth=\"32f\" outBitDepth=\"32f\"";
+    // The referenced files.
+    let dir = write_files(&[
+        file(
+            "matrix.ctf",
+            pl(
+                "id=\"m\" version=\"1.7\"",
+                &op(
+                    "Matrix",
+                    f32s,
+                    "        <Array dim=\"3 3 3\">2 0 0 0 3 0 0 0 4</Array>\n",
+                ),
+            )
+            .as_bytes(),
+        ),
+        file(
+            "range.clf",
+            pl(
+                "id=\"r\" compCLFversion=\"3\"",
+                &op(
+                    "Range",
+                    f32s,
+                    "        <minInValue>0.1</minInValue>\n        <maxInValue>0.9</maxInValue>\n\
+                     \x20       <minOutValue>0</minOutValue>\n        <maxOutValue>1</maxOutValue>\n",
+                ),
+            )
+            .as_bytes(),
+        ),
+    ]);
+    let matrix = format!("{dir}/matrix.ctf");
+    let range = format!("{dir}/range.clf");
+    let reference = |attrs: &str| format!("    <Reference {f32s} {attrs}/>\n");
+    let mut cases = Vec::new();
+
+    // CTF files: (label, version, body).
+    for (label, version, body) in [
+        ("a path", "1.7", reference(&format!("path=\"{matrix}\""))),
+        (
+            "a path to a CLF, inverted",
+            "1.7",
+            reference(&format!("path=\"{range}\" inverted=\"true\"")),
+        ),
+        (
+            "inverted of another case",
+            "2",
+            reference(&format!("PATH=\"{matrix}\" Inverted=\"TRUE\"")),
+        ),
+        (
+            "inverted other than true",
+            "2",
+            reference(&format!("path=\"{matrix}\" inverted=\"yes\"")),
+        ),
+        (
+            "inverted false",
+            "2",
+            reference(&format!("path=\"{matrix}\" inverted=\"false\"")),
+        ),
+        // Only "true" sets the direction: a later "false" leaves it inverse (I-202).
+        (
+            "inverted true, then false",
+            "2",
+            reference(&format!(
+                "path=\"{matrix}\" inverted=\"true\" Inverted=\"false\""
+            )),
+        ),
+        (
+            "a path and a basePath",
+            "1.7",
+            reference(&format!("path=\"{matrix}\" basePath=\"Shared\"")),
+        ),
+        (
+            "two paths",
+            "1.7",
+            reference(&format!("path=\"{matrix}\" Path=\"{range}\"")),
+        ),
+        (
+            "the same file twice, between other operators",
+            "1.7",
+            format!(
+                "{}{}{}",
+                reference(&format!("path=\"{matrix}\"")),
+                op(
+                    "Matrix",
+                    f32s,
+                    "        <Array dim=\"3 3 3\">1 0 0 0 1 0 0 0 1</Array>\n",
+                ),
+                reference(&format!("path=\"{matrix}\" inverted=\"true\""))
+            ),
+        ),
+        (
+            "an id, a name and descriptions",
+            "1.7",
+            format!(
+                "    <Reference id=\"uuid\" name=\"name\" {f32s} path=\"{matrix}\">\n\
+                 \x20       <Description>a reference</Description>\n    </Reference>\n"
+            ),
+        ),
+        ("an alias", "1.7", reference("alias=\"alias\"")),
+        (
+            "an alias, inverted",
+            "1.7",
+            reference("alias=\"alias\" inverted=\"true\""),
+        ),
+        (
+            "an alias and a path",
+            "1.7",
+            reference(&format!("alias=\"alias\" path=\"{matrix}\"")),
+        ),
+        (
+            "a path and an alias",
+            "1.7",
+            reference(&format!("path=\"{matrix}\" alias=\"alias\"")),
+        ),
+        (
+            "an alias and a basePath",
+            "1.7",
+            reference("alias=\"alias\" basePath=\"Shared\""),
+        ),
+        (
+            "an empty alias and a path",
+            "1.7",
+            reference(&format!("alias=\"\" path=\"{matrix}\"")),
+        ),
+        (
+            "the currentMonitor alias",
+            "1.7",
+            reference("alias=\"currentMonitor\""),
+        ),
+        (
+            "the currentMonitor alias of another case",
+            "1.7",
+            reference(&format!("path=\"{matrix}\" ALIAS=\"CURRENTMONITOR\"")),
+        ),
+        ("no path", "1.7", reference("")),
+        ("an empty path", "1.7", reference("path=\"\"")),
+        ("only a basePath", "1.7", reference("basePath=\"Shared\"")),
+        (
+            "a missing file",
+            "1.7",
+            reference(&format!("path=\"{dir}/missing.ctf\"")),
+        ),
+        (
+            "an unknown attribute",
+            "1.7",
+            reference(&format!("path=\"{matrix}\" style=\"x\"")),
+        ),
+        (
+            "a Reference in CTF 1.2",
+            "1.2",
+            reference(&format!("path=\"{matrix}\"")),
+        ),
+    ] {
+        cases.push(ctf(
+            &format!("a Reference: {label}"),
+            &format!("id=\"a\" version=\"{version}\""),
+            &body,
+        ));
+    }
+    cases.push(clf(
+        "a CLF Reference",
+        "id=\"a\" compCLFversion=\"3\"",
+        &reference(&format!("path=\"{matrix}\"")),
+    ));
+
+    // Upstream's files that don't resolve a relative path.
+    for name in ["reference_alias.ctf", "reference_alias_path.ctf"] {
+        cases.push(file_case(
+            name,
+            &upstream_file(name),
+            Interpolation::Default,
+            TransformDirection::Forward,
+        ));
+    }
+    cases
+}
+
+/// The processors of the Reference reader's files, in both directions.
+#[test]
+fn reference_files_read_as_in_the_wheel() {
+    check_processors(&op_cases_h());
+}
+
+/// The warnings of reading the Reference reader's files, message by message.
+#[test]
+fn reference_files_log_as_in_the_wheel() {
+    cdl_common::check_logs(&op_cases_h());
+}
+
+/// One config's processors of two CTF files whose dynamic GradingRGBCurves differ, and of a
+/// static one, the wheel's (`processor_cache`) against the port's: which are the same object,
+/// and their cache IDs. A dynamic op's cache ID leaves its curves out, so the second file gets
+/// the first's processor (`docs/improvements.md` I-188).
+#[test]
+fn dynamic_curves_share_a_processor_as_in_the_wheel() {
+    use std::sync::Arc;
+
+    use ocio::Config;
+    use ocio_testkit::Oracle;
+
+    let body = |extra: &str| {
+        op(
+            "GradingRGBCurve",
+            "inBitDepth=\"32f\" outBitDepth=\"32f\" style=\"log\"",
+            extra,
+        )
+    };
+    let dynamic = "        <DynamicParameter param=\"RGB_CURVE\"/>\n";
+    let red = curve("Red", &points("0 0 0.5 0.7 1 1"));
+    let files = [
+        ("identity", body(dynamic)),
+        ("bent", body(&format!("{red}{dynamic}"))),
+        ("static", body(&red)),
+    ];
+    let cases: Vec<(&str, Case)> = files
+        .iter()
+        .map(|(name, body)| (*name, ctf(name, "id=\"a\" version=\"2\"", body)))
+        .collect();
+    let mut failures = Vec::new();
+    for order in [[0, 1, 2], [1, 0, 2], [2, 1, 0]] {
+        let mut steps = vec![serde_json::json!(["config"])];
+        for &i in &order {
+            let (name, case) = &cases[i];
+            steps.push(serde_json::json!([
+                "processor",
+                name,
+                case.spec,
+                "TRANSFORM_DIR_FORWARD"
+            ]));
+        }
+        let response = Oracle::get().call(
+            "processor_cache",
+            serde_json::json!({"cases": [{"env": {}, "steps": steps}]}),
+            &[],
+        );
+        let result = &response.result[0];
+        assert_eq!(result["returncode"], serde_json::json!(0), "{result}");
+        let wheel = &result["report"];
+
+        // The port, in the same order, on a raw config.
+        let config = Config::create_raw().unwrap();
+        let mut made: Vec<(&str, Arc<ocio::Processor>)> = Vec::new();
+        let mut port_steps = vec![serde_json::Value::Null];
+        let mut same = serde_json::Map::new();
+        let mut ids = serde_json::Map::new();
+        for &i in &order {
+            let (name, case) = &cases[i];
+            let processor = config
+                .processor_in_direction(&case.port, TransformDirection::Forward)
+                .unwrap();
+            port_steps.push(serde_json::Value::Null);
+            let first = made
+                .iter()
+                .find(|(_, p)| Arc::ptr_eq(p, &processor))
+                .map_or(*name, |(n, _)| *n);
+            same.insert((*name).to_owned(), serde_json::json!(first));
+            ids.insert(
+                (*name).to_owned(),
+                serde_json::json!(processor.cache_id().unwrap()),
+            );
+            made.push((name, processor));
+        }
+        let port = serde_json::json!({"steps": port_steps, "same": same, "cache_ids": ids});
+        if *wheel != port {
+            failures.push(format!("{order:?}\n  wheel {wheel}\n  port  {port}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// A config of the search paths `paths` and the environment `env`, as the oracle's YAML and
+/// as the port's raw config with the same search paths and variables.
+fn search_path_config(
+    paths: &[&str],
+    env: &[(&str, &str)],
+) -> (serde_json::Value, std::sync::Arc<Config>) {
+    let mut yaml = String::from("ocio_profile_version: 2\n");
+    if !env.is_empty() {
+        let vars: Vec<String> = env.iter().map(|(k, v)| format!("{k}: \"{v}\"")).collect();
+        yaml.push_str(&format!("environment: {{{}}}\n", vars.join(", ")));
+    }
+    let quoted: Vec<String> = paths.iter().map(|p| format!("\"{p}\"")).collect();
+    yaml.push_str(&format!("search_path: [{}]\n", quoted.join(", ")));
+    yaml.push_str("roles: {default: raw}\ncolorspaces:\n  - !<ColorSpace> {name: raw}\n");
+    let mut config = Config::create_raw().unwrap();
+    let config_mut = std::sync::Arc::get_mut(&mut config).unwrap();
+    for (k, v) in env {
+        config_mut.add_environment_var(k, Some(v.as_bytes()));
+    }
+    for p in paths {
+        config_mut.add_search_path(p);
+    }
+    (serde_json::json!({ "yaml": yaml }), config)
+}
+
+/// The CTF files that reference others, through a config's search path: upstream's, and
+/// written ones (subdirectories, two search paths, context variables, nested inversions,
+/// other formats, cycles).
+fn resolution_cases() -> Vec<(
+    &'static str,
+    Vec<Case>,
+    serde_json::Value,
+    std::sync::Arc<Config>,
+)> {
+    let f32s = "inBitDepth=\"32f\" outBitDepth=\"32f\"";
+    let reference = |attrs: &str| format!("    <Reference {f32s} {attrs}/>\n");
+    let ctf_file = |body: &str| pl("id=\"a\" version=\"1.7\"", body).into_bytes();
+    let matrix = op(
+        "Matrix",
+        f32s,
+        "        <Array dim=\"3 3 3\">2 0 0 0 3 0 0 0 4</Array>\n",
+    );
+    let range = op(
+        "Range",
+        f32s,
+        "        <minInValue>0.1</minInValue>\n        <maxInValue>0.9</maxInValue>\n\
+         \x20       <minOutValue>0</minOutValue>\n        <maxOutValue>1</maxOutValue>\n",
+    );
+    let dir = write_files(&[
+        file(
+            "c.clf",
+            pl("id=\"c\" compCLFversion=\"3\"", &range).into_bytes(),
+        ),
+        file(
+            "a.ctf",
+            ctf_file(&format!(
+                "{}{matrix}",
+                reference("path=\"sub/b.ctf\" inverted=\"true\"")
+            )),
+        ),
+        file(
+            "sub/b.ctf",
+            ctf_file(&format!(
+                "{}{}",
+                reference("path=\"c.clf\" inverted=\"true\""),
+                reference("path=\"d.ctf\"")
+            )),
+        ),
+        file("sub/d.ctf", ctf_file(&matrix)),
+        file("env.ctf", ctf_file(&reference("path=\"$SUBDIR/d.ctf\""))),
+        file(
+            "spi.ctf",
+            ctf_file(&format!(
+                "{}{}",
+                reference("path=\"lut.spi1d\""),
+                reference("path=\"alias.ctf\"")
+            )),
+        ),
+        file(
+            "lut.spi1d",
+            b"Version 1\nFrom 0.0 1.0\nLength 3\nComponents 1\n{\n0.0\n0.25\n1.0\n}\n".to_vec(),
+        ),
+        file("alias.ctf", ctf_file(&reference("alias=\"a\""))),
+        file("self.ctf", ctf_file(&reference("path=\"./self.ctf\""))),
+        file("x.ctf", ctf_file(&reference("path=\"sub/y.ctf\""))),
+        file("sub/y.ctf", ctf_file(&reference("path=\"x.ctf\""))),
+        file(
+            "twice.ctf",
+            ctf_file(&format!(
+                "{}{}",
+                reference("path=\"c.clf\""),
+                reference("path=\"c.clf\" inverted=\"true\"")
+            )),
+        ),
+    ]);
+    let written = |name: &str| {
+        file_case(
+            name,
+            &format!("{dir}/{name}"),
+            Interpolation::Default,
+            TransformDirection::Forward,
+        )
+    };
+    let upstream = |name: &str| {
+        file_case(
+            name,
+            &upstream_file(name),
+            Interpolation::Default,
+            TransformDirection::Forward,
+        )
+    };
+    let upstream_dir = upstream_file("");
+    let upstream_dir = upstream_dir.trim_end_matches('/');
+    let sub = format!("{dir}/sub");
+
+    let mut groups = Vec::new();
+    // Upstream's files, with their directory as the search path (ReferenceOpData_tests.cpp).
+    let (spec, config) = search_path_config(&[upstream_dir], &[]);
+    groups.push((
+        "upstream's files",
+        [
+            "reference_path_missing_file.ctf",
+            "references_some_inverted.ctf",
+            "references_same_twice.ctf",
+            "reference_nested.ctf",
+            "reference_one_matrix.ctf",
+            "reference_cycle_itself.ctf",
+            "reference_cycle_2levels.ctf",
+            "reference_cycle_3levels.ctf",
+            "reference_cycle_path_not_equal.ctf",
+            "reference_utf8.ctf",
+            "reference_alias.ctf",
+        ]
+        .into_iter()
+        .map(upstream)
+        .collect(),
+        spec,
+        config,
+    ));
+    // The written files, with their directory as the search path.
+    let written_files = [
+        "a.ctf",
+        "sub/b.ctf",
+        "env.ctf",
+        "spi.ctf",
+        "self.ctf",
+        "x.ctf",
+        "twice.ctf",
+    ];
+    let (spec, config) = search_path_config(&[&dir], &[("SUBDIR", "sub")]);
+    groups.push((
+        "one search path",
+        written_files.into_iter().map(written).collect(),
+        spec,
+        config,
+    ));
+    // Its subdirectory too: d.ctf resolves from both.
+    let (spec, config) = search_path_config(&[&dir, &sub], &[("SUBDIR", "sub")]);
+    groups.push((
+        "two search paths",
+        written_files.into_iter().map(written).collect(),
+        spec,
+        config,
+    ));
+    // No variable: $SUBDIR stays unresolved.
+    let (spec, config) = search_path_config(&[&dir], &[]);
+    groups.push(("no variable", vec![written("env.ctf")], spec, config));
+
+    // References to 3D LUTs without an interpolation: the reference's file transform asks for
+    // the default one (trilinear), which a CLF LUT without its own takes, and the other
+    // formats' readers too (`FileFormatCTF.cpp:1233`).
+    let lut3d = op(
+        "LUT3D",
+        f32s,
+        "        <Array dim=\"2 2 2 3\">\n0 0 0\n0 0 0.9\n0 0.7 0.1\n0.1 0.6 0.8\n\
+         0.8 0.1 0\n0.6 0.2 1\n0.9 0.9 0.2\n1 1 1\n</Array>\n",
+    );
+    let luts = write_files(&[
+        file(
+            "lut3d.clf",
+            pl("id=\"l\" compCLFversion=\"3\"", &lut3d).into_bytes(),
+        ),
+        file("clf3d.ctf", ctf_file(&reference("path=\"lut3d.clf\""))),
+        file(
+            "spi3d.ctf",
+            ctf_file(&reference("path=\"lut3d_bizarre.spi3d\"")),
+        ),
+        file("3dl.ctf", ctf_file(&reference("path=\"crosstalk.3dl\""))),
+    ]);
+    let (spec, config) = search_path_config(&[&luts, upstream_dir], &[]);
+    groups.push((
+        "references to 3D LUTs",
+        ["clf3d.ctf", "spi3d.ctf", "3dl.ctf"]
+            .into_iter()
+            .map(|name| {
+                file_case(
+                    name,
+                    &format!("{luts}/{name}"),
+                    Interpolation::Default,
+                    TransformDirection::Forward,
+                )
+            })
+            .collect(),
+        spec,
+        config,
+    ));
+
+    // The recursion check compares the resolved paths ignoring case, on every platform
+    // (I-192): a reference to the file itself in another case is a recursion on Windows and a
+    // missing file on Linux, and on Linux, where `Pair.ctf` and `pair.ctf` are two files, a
+    // reference from one to the other is refused as a recursion.
+    let mut entries = vec![file("Self.ctf", ctf_file(&reference("path=\"SELF.ctf\"")))];
+    let mut names = vec!["Self.ctf"];
+    if !cfg!(windows) {
+        entries.push(file("Pair.ctf", ctf_file(&reference("path=\"pair.ctf\""))));
+        entries.push(file("pair.ctf", ctf_file(&matrix)));
+        names.push("Pair.ctf");
+    }
+    let cases_dir = write_files(&entries);
+    let (spec, config) = search_path_config(&[&cases_dir], &[]);
+    groups.push((
+        "names that differ in case",
+        names
+            .into_iter()
+            .map(|name| {
+                file_case(
+                    name,
+                    &format!("{cases_dir}/{name}"),
+                    Interpolation::Default,
+                    TransformDirection::Forward,
+                )
+            })
+            .collect(),
+        spec,
+        config,
+    ));
+
+    // The longest chain of references the port follows (U-76): `c0.ctf` references `c1.ctf`,
+    // and so on to a matrix in the last file.
+    let mut chain = Vec::new();
+    for i in 0..CHAIN_LIMIT {
+        let body = if i == CHAIN_LIMIT - 1 {
+            matrix.clone()
+        } else {
+            reference(&format!("path=\"c{}.ctf\"", i + 1))
+        };
+        chain.push(file(&format!("c{i}.ctf"), ctf_file(&body)));
+    }
+    let chain_dir = write_files(&chain);
+    let (spec, config) = search_path_config(&[&chain_dir], &[]);
+    groups.push((
+        "the longest chain",
+        vec![file_case(
+            "c0.ctf",
+            &format!("{chain_dir}/c0.ctf"),
+            Interpolation::Default,
+            TransformDirection::Forward,
+        )],
+        spec,
+        config,
+    ));
+    groups
+}
+
+/// The number of files in the longest chain of CTF references the port follows
+/// (`MAX_FILE_NESTING`, docs/improvements.md U-76).
+const CHAIN_LIMIT: usize = 256;
+
+/// The processors of CTF files that reference others, through a config's search path, in
+/// both directions.
+#[test]
+fn references_resolve_as_in_the_wheel() {
+    for (label, cases, spec, config) in resolution_cases() {
+        println!("{label}");
+        common::transforms::check_processors_in(&cases, Some(&spec), &config);
+    }
+}
+
+/// One config's processors of a CTF file whose reference is a context variable, `$FILEVAR`,
+/// with two contexts that set it to two files, in both orders: the wheel's (`config_calls`)
+/// against the port's cache IDs and files. The processor cache doesn't key on the variables
+/// of a file's references, so the second context gets the first one's processor
+/// (`docs/improvements.md` I-193).
+#[test]
+fn context_variables_in_references_share_a_processor_as_in_the_wheel() {
+    use ocio::{Context, FileTransform, Transform};
+    use ocio_testkit::Oracle;
+    use serde_json::json;
+
+    let f32s = "inBitDepth=\"32f\" outBitDepth=\"32f\"";
+    let dir = write_files(&[
+        file(
+            "r_var.ctf",
+            pl(
+                "id=\"a\" version=\"1.7\"",
+                &format!("    <Reference {f32s} path=\"$FILEVAR\"/>\n"),
+            )
+            .into_bytes(),
+        ),
+        file(
+            "m.ctf",
+            pl(
+                "id=\"m\" version=\"1.7\"",
+                &op(
+                    "Matrix",
+                    f32s,
+                    "        <Array dim=\"3 3 3\">2 0 0 0 3 0 0 0 4</Array>\n",
+                ),
+            )
+            .into_bytes(),
+        ),
+        file(
+            "lut.spi1d",
+            b"Version 1\nFrom 0.0 1.0\nLength 3\nComponents 1\n{\n0.0\n0.25\n1.0\n}\n".to_vec(),
+        ),
+    ]);
+    let src = format!("{dir}/r_var.ctf");
+    let case = file_case(
+        "r_var.ctf",
+        &src,
+        Interpolation::Default,
+        TransformDirection::Forward,
+    );
+    let hex = |bytes: &[u8]| json!({"bytes": bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()});
+    let mut failures = Vec::new();
+    for order in [["m.ctf", "lut.spi1d"], ["lut.spi1d", "m.ctf"]] {
+        let (spec, config) = search_path_config(&[&dir], &[("FILEVAR", "m.ctf")]);
+        let mut calls = vec![json!({"call": "ClearAllCaches", "on": "OCIO"})];
+        for (k, value) in order.iter().enumerate() {
+            let (ctx, p, m) = (format!("ctx{k}"), format!("p{k}"), format!("m{k}"));
+            calls.extend([
+                json!({"new": "Context", "as": ctx}),
+                json!({"call": "addSearchPath", "on": ctx, "args": [dir]}),
+                json!({"call": "__setitem__", "on": ctx, "args": ["FILEVAR", value]}),
+                json!({"call": "getProcessor",
+                       "args": [{"ref": ctx}, {"transform": case.spec},
+                                {"enum": "TRANSFORM_DIR_FORWARD"}],
+                       "as": p}),
+                json!({"call": "getCacheID", "on": p}),
+                json!({"call": "getProcessorMetadata", "on": p, "as": m}),
+                json!({"call": "getFiles", "on": m}),
+            ]);
+        }
+        let reply = Oracle::get()
+            .call("config_calls", json!({"config": spec, "calls": calls}), &[])
+            .result;
+        let results = reply["calls"].as_array().expect("calls");
+        let mut wheel = Vec::new();
+        for (k, value) in order.iter().enumerate() {
+            let at = |i: usize| {
+                let r = &results[1 + 7 * k + i];
+                assert!(r.get("result").is_some(), "{value}: {r}");
+                r["result"].clone()
+            };
+            wheel.push(json!([value, at(4), at(6)]));
+        }
+
+        // The port, on one config, with the same contexts.
+        ocio::clear_all_caches();
+        let mut file_transform = FileTransform::new();
+        file_transform.set_src(&src);
+        let transform = Transform::File(file_transform);
+        let mut port = Vec::new();
+        for value in order {
+            let mut ctx = Context::new();
+            ctx.add_search_path(dir.as_bytes());
+            ctx.set_string_var("FILEVAR", Some(value.as_bytes()));
+            let processor = config
+                .processor_with_context(&ctx, &transform, TransformDirection::Forward)
+                .unwrap();
+            let metadata = processor.processor_metadata();
+            let files: Vec<serde_json::Value> = (0..metadata.num_files())
+                .map(|i| hex(metadata.file(i)))
+                .collect();
+            port.push(json!([
+                value,
+                hex(processor.cache_id().unwrap().as_bytes()),
+                files
+            ]));
+        }
+        let (wheel, port) = (json!(wheel), json!(port));
+        if wheel != port {
+            failures.push(format!("{order:?}\n  wheel {wheel}\n  port  {port}"));
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

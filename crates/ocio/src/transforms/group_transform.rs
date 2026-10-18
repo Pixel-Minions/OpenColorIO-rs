@@ -19,7 +19,7 @@ use ocio_ops::utils::string_utils::c_str;
 use crate::config::Config;
 use crate::context::Context;
 use crate::transform::{Transform, build_ops, validate_direction};
-use crate::transforms::file_format::FormatRegistry;
+use crate::transforms::file_format::{FormatCapabilities, FormatRegistry};
 
 /// A list of transforms, applied in order (in reverse order, each inverted, when the group is
 /// inverse), with format metadata.
@@ -238,6 +238,37 @@ impl GroupTransform {
 }
 
 impl GroupTransform {
+    /// The number of format names a group writes.
+    ///
+    /// Port of `GroupTransform::GetNumWriteFormats` (GroupTransform.cpp:141-144 @ v2.5.2).
+    #[doc(alias = "GetNumWriteFormats")]
+    pub fn num_write_formats() -> i32 {
+        FormatRegistry::instance().num_formats(FormatCapabilities::WRITE)
+    }
+
+    /// The name of the write format at `index`; `""` outside the list.
+    ///
+    /// Port of `GroupTransform::GetFormatNameByIndex` (GroupTransform.cpp:146-149 @ v2.5.2).
+    #[doc(alias = "GetFormatNameByIndex")]
+    pub fn format_name_by_index(index: i32) -> &'static [u8] {
+        FormatRegistry::instance()
+            .format_name_by_index(FormatCapabilities::WRITE, index)
+            .as_bytes()
+    }
+
+    /// The extension of the write format at `index`; `""` outside the list.
+    ///
+    /// Port of `GroupTransform::GetFormatExtensionByIndex` (GroupTransform.cpp:151-154 @
+    /// v2.5.2).
+    #[doc(alias = "GetFormatExtensionByIndex")]
+    pub fn format_extension_by_index(index: i32) -> &'static [u8] {
+        FormatRegistry::instance()
+            .format_extension_by_index(FormatCapabilities::WRITE, index)
+            .as_bytes()
+    }
+}
+
+impl GroupTransform {
     /// Writes the group's text to `os`, its children's included, on the same stream: a child
     /// that changes the stream's state changes it for the children after it (a
     /// MatrixTransform's precision, docs/improvements.md, I-73).
@@ -271,11 +302,24 @@ impl fmt::Display for GroupTransform {
     }
 }
 
+/// Gives `ops` the metadata of `group_transform`, out of line so that the copy isn't on the
+/// stack while the children's ops build (docs/improvements.md, U-58).
+#[inline(never)]
+fn copy_group_metadata(ops: &mut OpVec, group_transform: &GroupTransform) {
+    *ops.get_format_metadata_mut() = group_transform.format_metadata().clone();
+}
+
 /// Appends the ops of `group_transform`'s children in the direction `dir` combined with the
 /// group's: in order forward, in reverse order inverted. The first group's metadata becomes the
 /// ops' metadata.
 ///
 /// Port of `BuildGroupOps` (src/OpenColorIO/transforms/GroupTransform.cpp:172-204 @ v2.5.2).
+/// The recursive calls return their results as they are, so that its frame stays small
+/// (docs/improvements.md, U-58).
+#[expect(
+    clippy::question_mark,
+    reason = "`?` takes several results' room in the frame of an unoptimized build (U-58)"
+)]
 pub(crate) fn build_group_ops(
     ops: &mut OpVec,
     config: &Config,
@@ -285,19 +329,25 @@ pub(crate) fn build_group_ops(
 ) -> Result<()> {
     if ops.is_empty() {
         // If group is the first transform, copy the group metadata.
-        *ops.get_format_metadata_mut() = group_transform.format_metadata().clone();
+        copy_group_metadata(ops, group_transform);
     }
 
     let combined_dir = combine_transform_directions(dir, group_transform.direction());
     match combined_dir {
         TransformDirection::Forward => {
             for child in &group_transform.transforms {
-                build_ops(ops, config, context, child, TransformDirection::Forward)?;
+                let child_ops = build_ops(ops, config, context, child, TransformDirection::Forward);
+                if child_ops.is_err() {
+                    return child_ops;
+                }
             }
         }
         TransformDirection::Inverse => {
             for child in group_transform.transforms.iter().rev() {
-                build_ops(ops, config, context, child, TransformDirection::Inverse)?;
+                let child_ops = build_ops(ops, config, context, child, TransformDirection::Inverse);
+                if child_ops.is_err() {
+                    return child_ops;
+                }
             }
         }
     }

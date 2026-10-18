@@ -2,8 +2,7 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! The spi3d format: a 3D LUT, one line per entry, in any order. A port of
-//! `src/OpenColorIO/fileformats/FileFormatSpi3D.cpp` @ v2.5.2; its `bake` comes with the baker
-//! (WP 4.8).
+//! `src/OpenColorIO/fileformats/FileFormatSpi3D.cpp` @ v2.5.2.
 //!
 //! ```text
 //! SPILUT 1.0
@@ -22,15 +21,22 @@ use std::any::Any;
 use std::ffi::c_ulong;
 use std::sync::Arc;
 
+use ocio_ops::cfmt::{Crt, FloatField, OStringStream};
 use ocio_ops::exception::{Exception, Result};
+use ocio_ops::image_desc::PackedImageDesc;
+use ocio_ops::math_utils::std_max;
 use ocio_ops::op::OpVec;
 use ocio_ops::open_color_types::{BitDepth, TransformDirection, combine_transform_directions};
-use ocio_ops::ops::lut3d::lut3d_op::{create_lut3d_op, get_lut3d_index_blue_fast};
+use ocio_ops::ops::lut3d::lut3d_op::{
+    Lut3DOrder, create_lut3d_op, generate_identity_lut3d, get_lut3d_index_blue_fast,
+};
 use ocio_ops::ops::lut3d::lut3d_op_data::{Interpolation, Lut3DOpData, MAX_3D_LUT_LENGTH};
 use ocio_ops::utils::cscan::{ScanArg, ScanCrt, sscanf};
 use ocio_ops::utils::number_utils::{Errc, Flavor, from_chars_f32};
 use ocio_ops::utils::string_utils::{c_str, lower, starts_with};
 
+use crate::baker::Baker;
+use crate::baking_utils::{LinuxResize, bake_buffer, cube_values, get_input_to_target_processor};
 use crate::config::Config;
 use crate::context::Context;
 use crate::fileformats::file_format_utils::{handle_lut3d, log_warning_interpolation_not_used};
@@ -301,6 +307,63 @@ impl FileFormat for LocalFileFormat {
         interp: Interpolation,
     ) -> Result<CachedFileRcPtr> {
         Ok(Arc::new(self.read_file(istream, file_name, interp)?))
+    }
+
+    /// Bakes `baker`'s transform into a 3D LUT of the cube size (32 by default, 2 at least),
+    /// one line per entry, blue fastest.
+    ///
+    /// Port of `LocalFileFormat::bake` (FileFormatSpi3D.cpp:267-311 @ v2.5.2).
+    fn bake(&self, baker: &Baker, format_name: &[u8], ostream: &mut OStringStream) -> Result<()> {
+        const DEFAULT_CUBE_SIZE: i32 = 32;
+
+        if format_name != b"spi3d" {
+            let mut os = OStringStream::new(Crt::NATIVE);
+            os.put_str("Unknown spi format name, '");
+            os.put_bytes(format_name);
+            os.put_str("'.");
+            return Err(Exception::new(os.into_bytes()));
+        }
+
+        let mut cube_size = baker.cube_size();
+        if cube_size == -1 {
+            cube_size = DEFAULT_CUBE_SIZE;
+        }
+        cube_size = std_max(2, cube_size); // smallest cube is 2x2x2
+
+        let mut cube_data = bake_buffer(cube_values(cube_size), LinuxResize::Unchecked)?;
+        let num_entries = cube_size * cube_size * cube_size;
+        generate_identity_lut3d(&mut cube_data, cube_size, 3, Lut3DOrder::FastBlue)?;
+        let mut cube_img = PackedImageDesc::new(&mut cube_data[..], num_entries as usize, 1, 3)?;
+        let input_to_target = get_input_to_target_processor(baker)?;
+        input_to_target.apply(&mut cube_img)?;
+
+        ostream.put_str("SPILUT 1.0\n");
+        ostream.put_str("3 3\n");
+        ostream.put_i32(cube_size);
+        ostream.put_str(" ");
+        ostream.put_i32(cube_size);
+        ostream.put_str(" ");
+        ostream.put_i32(cube_size);
+        ostream.put_str("\n");
+
+        // Set to a fixed 6 decimal precision
+        ostream.float_field = FloatField::Fixed;
+        ostream.precision = 6;
+        for i in 0..num_entries {
+            ostream.put_i32(((i / cube_size) / cube_size) % cube_size);
+            ostream.put_str(" ");
+            ostream.put_i32((i / cube_size) % cube_size);
+            ostream.put_str(" ");
+            ostream.put_i32(i % cube_size);
+            ostream.put_str(" ");
+            ostream.put_f32(cube_data[3 * i as usize]);
+            ostream.put_str(" ");
+            ostream.put_f32(cube_data[3 * i as usize + 1]);
+            ostream.put_str(" ");
+            ostream.put_f32(cube_data[3 * i as usize + 2]);
+            ostream.put_str("\n");
+        }
+        Ok(())
     }
 
     /// Appends the file's 3D LUT, with the file transform's interpolation where valid for it.

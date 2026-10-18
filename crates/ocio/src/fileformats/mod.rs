@@ -29,4 +29,7 @@ pub mod icc;
 pub mod input_stream;
 
 #[cfg(test)]
+mod reference_op_data_tests;
+
+#[cfg(test)]
 pub(crate) mod test_utils;

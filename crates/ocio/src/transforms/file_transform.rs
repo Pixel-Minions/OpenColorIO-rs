@@ -8,6 +8,7 @@
 //! cache (`GetCachedFileAndFormat`, `ClearFileTransformCaches`) and `BuildFileTransformOps`,
 //! and of its `CollectContextVariables`.
 
+use std::cell::Cell;
 use std::fmt;
 use std::sync::{Arc, LazyLock, Mutex};
 
@@ -15,7 +16,7 @@ use ocio_ops::cfmt::{Crt, OStringStream};
 use ocio_ops::exception::{Exception, Result};
 use ocio_ops::logging::{is_debug_logging_enabled, log_debug};
 use ocio_ops::op::OpVec;
-use ocio_ops::op_data::OpData;
+use ocio_ops::op_data::{OpData, OpDataRcPtr};
 use ocio_ops::open_color_types::{
     CdlStyle, TransformDirection, cdl_style_to_string, interpolation_to_string,
     transform_direction_to_string,
@@ -30,7 +31,7 @@ use crate::caching::GenericCache;
 use crate::config::Config;
 use crate::context::Context;
 use crate::fileformats::input_stream::{InputStream, OpenMode};
-use crate::transform::{put_c_str, validate_direction};
+use crate::transform::{Level, put_c_str, total_too_deep, validate_direction};
 use crate::transforms::file_format::{
     CachedFileRcPtr, FileFormat, FormatCapabilities, FormatInfo, FormatRegistry,
 };
@@ -245,14 +246,35 @@ impl FileTransform {
     }
 }
 
-/// The stream of the LUT file at `filepath`, opened in `mode`.
+/// The stream of the LUT file at `filepath`, opened in `mode`: the config's I/O proxy's data
+/// (a `std::stringstream` of its bytes, whatever the mode), or the file system's stream, whose
+/// `failbit` is set when the file can't be opened. An absolute path the proxy can't serve (an
+/// error or no bytes) is read from the file system; the proxy's error for a relative path is
+/// the error.
 ///
-/// Port of `getLutData` (FileTransform.cpp:186-221 @ v2.5.2), without its `ConfigIOProxy`
-/// branch, which comes with the config's proxy (WP 3.10c): the file system's stream, whose
-/// `failbit` is set when the file can't be opened.
-pub(crate) fn get_lut_data(_config: &Config, filepath: &[u8], mode: OpenMode) -> InputStream {
+/// Port of `getLutData` (FileTransform.cpp:187-221 @ v2.5.2).
+pub(crate) fn get_lut_data(
+    config: &Config,
+    filepath: &[u8],
+    mode: OpenMode,
+) -> Result<InputStream> {
+    if let Some(proxy) = config.config_io_proxy() {
+        // Try to open through proxy.
+        let buffer = match proxy.lut_data(filepath) {
+            Ok(buffer) => buffer,
+            // If the path is absolute, we'll try the file system, but otherwise nothing to do.
+            Err(e) if !os_path::isabs(filepath) => return Err(e),
+            Err(_) => Vec::new(),
+        };
+
+        // If the buffer is empty, we'll try the file system for abs paths.
+        if !buffer.is_empty() || !os_path::isabs(filepath) {
+            return Ok(InputStream::from_bytes(buffer));
+        }
+    }
+
     // Default behavior. Return file stream.
-    InputStream::open_file(filepath, mode)
+    Ok(InputStream::open_file(filepath, mode))
 }
 
 /// A context with `context`'s search path, working directory and I/O proxy, and no variable.
@@ -470,7 +492,7 @@ fn open_and_read(
     } else {
         OpenMode::Text
     };
-    let mut stream = get_lut_data(config, filepath, mode);
+    let mut stream = get_lut_data(config, filepath, mode)?;
     if !stream.good() {
         return Err(Exception::new(
             [
@@ -563,11 +585,70 @@ pub fn clear_file_transform_caches() {
     FILE_CACHE.clear();
 }
 
+/// The deepest nesting of file transforms that [`build_file_transform_ops`] follows: a CTF
+/// file's references load other files, whose references load others, and so on.
+///
+/// Upstream has no limit: a long chain of references recurses until the stack overflows,
+/// which ends the process (the wheel at 2,125 files on Windows and 10,000 on Linux,
+/// docs/improvements.md U-76). The port refuses deeper chains with an error instead (the
+/// owner's general rule), at 256 files, U-58's limit of nested transforms (owner, 2026-10-17):
+/// the port's own stack holds that many on a 1 MiB thread at every optimization level (759
+/// files fit at opt-level 0 on Windows, about 1.4 KB a file; 1,647 at opt-level 1). The files
+/// also count in [`MAX_NESTING_WEIGHT`](crate::transform::MAX_NESTING_WEIGHT), with the
+/// transforms and groups before them on the stack (U-58).
+pub(crate) const MAX_FILE_NESTING: usize = 256;
+
+thread_local! {
+    /// How deep [`build_file_transform_ops`] is nested on this thread.
+    static FILE_NESTING: Cell<usize> = const { Cell::new(0) };
+}
+
+/// One level of nesting of [`build_file_transform_ops`], given back when it is dropped.
+struct FileNesting;
+
+impl FileNesting {
+    /// One more level; `None` past [`MAX_FILE_NESTING`], whose error is
+    /// [`too_deep`](Self::too_deep). An `Option`, not a `Result`, so that the frames of the
+    /// recursion don't hold an error's room (docs/improvements.md, U-76).
+    fn enter() -> Option<FileNesting> {
+        let depth = FILE_NESTING.get() + 1;
+        if depth > MAX_FILE_NESTING {
+            return None;
+        }
+        FILE_NESTING.set(depth);
+        Some(FileNesting)
+    }
+
+    /// The error of a file past [`MAX_FILE_NESTING`].
+    #[cold]
+    #[inline(never)]
+    fn too_deep() -> Result<()> {
+        Err(Exception::new(format!(
+            "The CTF references nest more than {MAX_FILE_NESTING} files deep: upstream's stack \
+             overflows."
+        )))
+    }
+}
+
+impl Drop for FileNesting {
+    fn drop(&mut self) {
+        FILE_NESTING.set(FILE_NESTING.get() - 1);
+    }
+}
+
 /// Appends the ops of the file `file_transform` names, in the direction `dir`: a `FileNoOp`
 /// for the file, then its format's ops. A file that is still being loaded further up (one
-/// that references itself, directly or not) is an error.
+/// that references itself, directly or not) is an error, and so are files nested more than
+/// [`MAX_FILE_NESTING`] deep, where upstream overflows the stack (docs/improvements.md, U-76).
 ///
-/// Port of `BuildFileTransformOps` (FileTransform.cpp:895-970 @ v2.5.2).
+/// Port of `BuildFileTransformOps` (FileTransform.cpp:895-970 @ v2.5.2). Its loading, its
+/// errors and its marking of the file as complete are out of line, and the recursive call
+/// returns its result as it is, so that its frame stays small (docs/improvements.md, U-58 and
+/// U-76).
+#[expect(
+    clippy::question_mark,
+    reason = "`?` takes several results' room in the frame of an unoptimized build (U-58)"
+)]
 pub(crate) fn build_file_transform_ops(
     ops: &mut OpVec,
     config: &Config,
@@ -575,6 +656,59 @@ pub(crate) fn build_file_transform_ops(
     file_transform: &FileTransform,
     dir: TransformDirection,
 ) -> Result<()> {
+    let Some(_nesting) = FileNesting::enter() else {
+        return FileNesting::too_deep();
+    };
+    // The files count in the total of BuildOps too, which a chain of transforms can come
+    // before (U-58).
+    let Some(_total) = Level::file() else {
+        return total_too_deep();
+    };
+    let file = match load_file_for_ops(ops, config, context, file_transform) {
+        Ok(file) => file,
+        Err(e) => return Err(e),
+    };
+
+    // CTF implementation of FileFormat::buildFileOps might call
+    // BuildFileTransformOps for References.
+    let built =
+        file.format
+            .build_file_ops(ops, config, context, &file.cached_file, file_transform, dir);
+    if let Err(e) = built {
+        return building_ops_error(&file.filepath, &e);
+    }
+
+    // File has been loaded completely. It may now be referenced again.
+    set_file_complete(&file.file_no_op);
+    Ok(())
+}
+
+/// What [`load_file_for_ops`] gives [`build_file_transform_ops`]: the format and cached file,
+/// the resolved path, and the `FileNoOp` appended for the file.
+struct FileForOps {
+    /// The file's format.
+    format: &'static dyn FileFormat,
+    /// The file, as its format read it.
+    cached_file: CachedFileRcPtr,
+    /// The resolved path.
+    filepath: Vec<u8>,
+    /// The data of the `FileNoOp` appended for the file.
+    file_no_op: OpDataRcPtr,
+}
+
+/// The first part of [`build_file_transform_ops`] (FileTransform.cpp:901-948 @ v2.5.2): the
+/// resolved path of the file, refused if it is still being loaded further up; its format and
+/// cached file; and the `FileNoOp` appended for it. Kept out of line, as is the error of
+/// [`building_ops_error`], so that each file of a chain of references takes as little of the
+/// stack as possible (docs/improvements.md, U-76). Boxed, so that it takes a pointer's room in
+/// the frame of [`build_file_transform_ops`].
+#[inline(never)]
+fn load_file_for_ops(
+    ops: &mut OpVec,
+    config: &Config,
+    context: &Context,
+    file_transform: &FileTransform,
+) -> Result<Box<FileForOps>> {
     let src = file_transform.src();
     if src.is_empty() {
         return Err(Exception::new("The transform file has not been specified."));
@@ -608,28 +742,41 @@ pub(crate) fn build_file_transform_ops(
     // Add FileNoOp and keep track of it.
     create_file_no_op(ops, &filepath);
     let file_no_op = ops.last().expect("the file no-op").data().clone();
+    Ok(Box::new(FileForOps {
+        format,
+        cached_file,
+        filepath,
+        file_no_op,
+    }))
+}
 
-    // CTF implementation of FileFormat::buildFileOps might call
-    // BuildFileTransformOps for References.
-    if let Err(e) = format.build_file_ops(ops, config, context, &cached_file, file_transform, dir) {
-        return Err(Exception::new(
-            [
-                b"The transform file: ".as_slice(),
-                &filepath,
-                b" failed while building ops with this error: ",
-                e.what(),
-            ]
-            .concat(),
-        ));
-    }
-
-    // File has been loaded completely. It may now be referenced again.
-    if let OpData::NoOp(data) = &*file_no_op
+/// Marks the file of the `FileNoOp` data `file_no_op` as loaded completely, out of line
+/// (docs/improvements.md, U-58).
+///
+/// Part of the port of `BuildFileTransformOps` (FileTransform.cpp:954-960 @ v2.5.2).
+#[inline(never)]
+fn set_file_complete(file_no_op: &OpDataRcPtr) {
+    if let OpData::NoOp(data) = &**file_no_op
         && let NoOpKind::File(file_data) = data.kind()
     {
         file_data.set_complete();
     }
-    Ok(())
+}
+
+/// The error of a file whose format failed to build its ops (FileTransform.cpp:962-969 @
+/// v2.5.2).
+#[cold]
+#[inline(never)]
+fn building_ops_error(filepath: &[u8], e: &Exception) -> Result<()> {
+    Err(Exception::new(
+        [
+            b"The transform file: ".as_slice(),
+            filepath,
+            b" failed while building ops with this error: ",
+            e.what(),
+        ]
+        .concat(),
+    ))
 }
 
 impl fmt::Display for FileTransform {

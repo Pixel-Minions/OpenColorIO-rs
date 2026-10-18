@@ -161,19 +161,35 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Upstream:** a transform's text (`repr()`), error messages and op cache IDs print NaN as the
   platform's C++ library does: Windows writes `nan`, `-nan(ind)`, `nan(snan)`, `-nan(snan)` or
   `-nan`; Linux writes `nan` or `-nan`. A processor with a NaN parameter has a different cache
-  ID on each platform. Through the wheels, the oracle's commands show the same split in two
+  ID on each platform. Through the wheels, the oracle's commands show the same split in
   more places, for a negative NaN, `-nan(ind)` on Windows and `-nan` on Linux:
   - the messages of `validate()` that print a parameter's value (`transform_text`, over 247
     transforms of 13 classes holding special values; `oracle/ocio_oracle/transform_text.py`,
     c49a36e);
   - shader text, whose literals print the parameter (`getFloatString`,
     `GpuShaderUtils.cpp:21-35`; `gpu_shader`, over 1230 shaders in all 10 languages;
-    `oracle/ocio_oracle/gpu.py`, 470d0b7).
+    `oracle/ocio_oracle/gpu.py`, 470d0b7);
+  - baked LUTs, whose ranges and entries print NaN results with each library's spelling
+    (`-nan(ind)` on Windows and `-nan` on Linux for a negative NaN), and whose NaNs can even
+    differ in sign: a spi1d baked over the shaper range of a color space whose `from_reference`
+    offsets red by `.nan` writes `From nan nan` on Windows and `From -nan -nan` on Linux (the
+    port matches each; `bake`, `crates/ocio/tests/bake_formats_oracle.rs`, p4-baker; probed
+    2026-10-16);
+  - the CLF/CTF writer (`fileformats/ctf/CTFTransform.cpp` @ v2.5.2), which streams most
+    parameters as they are: a CDL's slope, offset and power and its saturation (`CDLWriter`,
+    813-933), a gamma's or an exponent's parameters (`AddGammaParams`, 1181-1214), a log's
+    (`AddLogParam`, 1967-1975) and a range's bounds (`WriteTag`, 2474-2480). A negative NaN
+    that validation lets through (a CDL's offset, an exponent's alpha, a log's base or
+    slopes) is written `-nan(ind)` on Windows and `-nan` on Linux; a range can't hold one, a
+    NaN bound being an unset one. The FixedFunction params and the LUT arrays go through
+    `WriteValue` (519-539 @ v2.5.2), which writes `nan` on both (`write_transform`, p4-ctf-read-3).
 - **Who notices:** anyone comparing text, messages, shaders or cache IDs across platforms for
   transforms with NaN parameters.
 - **A fix:** one spelling on both platforms.
 - **Status:** matched in `cfmt` (WP 0.5); each op's text, validation messages and shader
-  literals use it as the op lands (D12).
+  literals use it as the op lands (D12). The CLF/CTF writer's cases:
+  `nan_parameters_write_as_in_the_wheel` (`crates/ocio/tests/file_format_ctf_write_oracle.rs`),
+  checked on both platforms.
 
 ### I-8. Built-in configs have Windows line endings on Windows
 
@@ -190,9 +206,18 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Upstream:** `Context::setSearchPath` splits a string at each `:` (`Context.cpp:202`), so a
   Windows path with a drive letter, `C:/luts`, becomes `C` and `/luts`. A config can avoid it
   by listing its paths as a YAML sequence.
-- **Who notices:** Windows configs with a drive letter in a string `search_path`.
+- **Who notices:** Windows configs with a drive letter in a string `search_path`. Such a path
+  still resolves when the working directory is on the same drive: `C` names a directory that
+  doesn't hold the file, and `/luts` is then `C:/luts`, a path relative to the current drive's
+  root. Upstream's tests rely on it: 9 of them set a string search path holding the test files'
+  absolute path (`GetTestFilesDir()`) and pass on Windows only from a working directory on the
+  checkout's drive, in the port as in upstream's CI: `FileTransform` `interpolation_validity`,
+  `cc_file_with_different_file_extension`; `Config` `look_fallback`,
+  `context_variable_with_search_path_v1` and `_v2`, `is_colorspace_linear`; `CPUProcessor`
+  `with_several_ops`, `image_desc`; `Caching` `processor_cache`.
 - **A fix:** don't split after a drive letter.
-- **Status:** to be matched in Phase 3.
+- **Status:** matched in `p3-context` (3.5, `Context::set_search_path`,
+  `crates/ocio/src/context.rs:169-178`).
 
 ### I-10. Some descriptions don't read back the same
 
@@ -2343,8 +2368,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   3378-3429` @ v2.5.2) read each value as `ConvertHalfBitsToFloat((unsigned short)value)`. The
   cast of a `float` outside `[0, 65536)` (negative, too large, NaN) is undefined. Both wheels
   compile it as `cvttss2si` to a 32-bit `int` (Windows `0x1800a76f3` and `0x1800a7d06`; Linux
-  `0x209ad0`), then keep its low 16 bits: `70000` reads as half `0x1170`, `-1` as `0xffff`,
-  NaN, infinities and values past the `int` range as `0x0000`.
+  `0x209ad0` and `0x205750`, the Lut1D and InverseLUT1D sites), then keep its low 16 bits:
+  `70000` reads as half `0x1170`, `-1` as `0xffff`, NaN, infinities and values past the `int`
+  range as `0x0000`.
 - **Who notices:** a CLF whose raw half values aren't half bit patterns, which no valid file
   has.
 - **A fix:** reject values that aren't integers in `[0, 65535]`.
@@ -2414,7 +2440,9 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   subnormal on Windows while Linux refuses the file (wheel probes, 2026-10-15). The `.look`
   reader parses its size as a `long`: `"4294967298"` is out of range on Windows ("Invalid LUT
   size value: '"4294967298"'. Expected quoted integer") and too large on Linux ("... Expected
-  value between 2 and 129") (wheel probes, 2026-10-15).
+  value between 2 and 129") (wheel probes, 2026-10-15), and a zero-padded `"010"` is a size of
+  10 on Windows and 8 (octal) on Linux, so the same file reads as a LUT of 10 per side on one
+  and fails its entry count on the other (the `.look` verifier's probes, 2026-10-16).
 - **Who notices:** LUT files with hex floats, subnormal values, or other edge-case numbers,
   shared between Windows and Linux.
 - **A fix:** one parser on both platforms (`std::from_chars` where it exists, or a port of
@@ -2442,6 +2470,552 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p4-look` (4.4f, `crates/ocio/src/fileformats/
   file_format_iridas_look.rs`); the "empty mask" oracle cases
   (`crates/ocio/tests/file_format_iridas_look_oracle.rs`).
+
+### I-187. A CTF ACESParams without a gamma names the attribute without a space
+
+- **Upstream:** `CTFReaderACESParamsElt::start` (`fileformats/ctf/CTFReaderHelper.cpp:1272-1323`
+  @ v2.5.2) refuses a Rec.2100 surround ACES element whose ACESParams has no `gamma` with
+  `"Missing required parameter ", ATTR_GAMMA, "for ACES FixedFunction element with style "`:
+  the message reads "Missing required parameter gammafor ACES FixedFunction element with
+  style Rec2100SurroundFwd.".
+- **Who notices:** a reader of the error of a deprecated CTF 1.x ACES element with a wrong
+  parameter.
+- **A fix:** add the space (`"for ACES ..."` becomes `" for ACES ..."`).
+- **Status:** matched in `p4-ctf-read-3` (`crates/ocio/src/fileformats/ctf/ctf_reader_helper.rs`,
+  `CtfReaderAcesParamsElt::start`; `crates/ocio/tests/file_format_ctf_oracle.rs` checks the
+  message with the wheel).
+
+### I-188. One config gives two files' dynamic RGB curves the same processor
+
+- **Upstream:** `Config::getProcessor` (`Config.cpp:4849-4873` @ v2.5.2) reuses a cached
+  processor whose cache ID equals the new one's (the fallback that
+  `OCIO_DISABLE_CACHE_FALLBACK` turns off). A dynamic GradingRGBCurve op leaves its curves
+  out of its cache ID (`GradingRGBCurveOpData::getCacheID`,
+  `ops/gradingrgbcurve/GradingRGBCurveOpData.cpp:127-150`: only a static one writes them), so
+  two CTF files whose GradingRGBCurves are dynamic (`<DynamicParameter param="RGB_CURVE"/>`),
+  with the same style and direction but different curves, get the same cache ID, and the
+  second file's processor is the first's, with the first file's curves (and, being the same
+  object, the first file's path in `getProcessorMetadata().getFiles()`). With two such files,
+  identity curves (`a`) and a bent red curve (`b`), reading `a` then `b` in one raw config
+  gives `b` the identity: `applyRGBA([0.25, 0.25, 0.25, 1])` is `0.25` for both, against
+  `0.37524959` for `b` read first (the verifier's `dyn_cache.py`, 2026-10-16).
+- **Who notices:** an application that reads two such files through one config, without
+  setting the curves through the dynamic property afterwards.
+- **A fix:** keep the fallback to processors without dynamic properties, or put the dynamic
+  values in the cache ID.
+- **Status:** matched in `p4-ctf-read-3`: the port's processor cache does the same
+  (`crates/ocio/src/config.rs`, `processor_with_context`);
+  `dynamic_curves_share_a_processor_as_in_the_wheel`
+  (`crates/ocio/tests/file_format_ctf_oracle.rs`) checks which processors the wheel and the
+  port share, and their cache IDs, with the oracle's `processor_cache`.
+
+### I-189. A GradingRGBCurve's bypassLinToLog accepts only "true"
+
+- **Upstream:** `CTFReaderGradingRGBCurveElt::start`
+  (`fileformats/ctf/CTFReaderHelper.cpp:2592-2640` @ v2.5.2) refuses any `bypassLinToLog`
+  value other than `true` (ignoring case), `false` included, with "Unknown bypassLinToLog
+  value: 'false' while parsing RGBCurve.", where the attribute is a boolean.
+- **Who notices:** a CTF writer that spells out the default, `bypassLinToLog="false"`.
+- **A fix:** accept `false` as the default.
+- **Status:** matched in `p4-ctf-read-3`
+  (`crates/ocio/src/fileformats/ctf/ctf_reader_helper.rs`, `grading_rgb_curve_start`);
+  `op_cases_g2`'s "bypassLinToLog false" checks it with the wheel.
+
+### I-190. A curve's Slopes before its ControlPoints count the default curve's points
+
+- **Upstream:** `CTFReaderGradingCurveSlopesElt::end` (`CTFReaderHelper.cpp:2940-2954` @
+  v2.5.2) checks the number of slopes against the number of control points the curve has when
+  the Slopes element ends. Before the ControlPoints element, that is the style's default curve
+  (3 points for the log and video styles), so the same elements in the other order are
+  refused or accepted differently, and a later ControlPoints keeps the slopes it doesn't
+  replace (`setNumControlPoints` resizes them).
+- **Who notices:** a CTF file that writes a curve's Slopes before its ControlPoints.
+- **A fix:** keep the slopes until the curve ends, and check them against its final points.
+- **Status:** matched in `p4-ctf-read-3` (`ctf_reader_helper.rs`,
+  `CtfReaderGradingCurveSlopesElt`); `op_cases_g2`'s "slopes before the control points" and
+  "slopes of the default curve" check it with the wheel.
+
+### I-191. The ACES reader's missing-style message starts with a lower-case letter
+
+- **Upstream:** `CTFReaderACESElt::start` (`CTFReaderHelper.cpp:1209-1239` @ v2.5.2) refuses an
+  ACES element without a style with "style parameter for FixedFunction is missing.", where the
+  FixedFunction and Function readers (1427-1473, 1506-1534) say "Style parameter ...".
+- **Who notices:** a reader of the error of a deprecated CTF 1.x ACES element.
+- **A fix:** capitalize it as the others do.
+- **Status:** matched in `p4-ctf-read-3` (`ctf_reader_helper.rs`, `fixed_function_start`);
+  `op_cases_g`'s "a missing style" ACES case checks it with the wheel.
+
+### I-192. A file reference's recursion check ignores case
+
+- **Upstream:** `BuildFileTransformOps` (`transforms/FileTransform.cpp:909-929` @ v2.5.2)
+  refuses a file it is still loading by comparing the resolved paths with
+  `Platform::Strcasecmp`, which ignores ASCII case on every platform. On Windows the file
+  system ignores case too, so a CTF file `CaseA.ctf` that references `casea.ctf` is a real
+  cycle there. On Linux the two names are two files: `Pair.ctf` referencing a separate
+  `pair.ctf` is refused with "Reference to: <dir>/pair.ctf is creating a recursion.", though
+  nothing recurses.
+- **Who notices:** a Linux user whose CTF references a file whose name differs from the
+  referencing file's only in case.
+- **A fix:** compare the paths as the file system does (case-sensitively on Linux).
+- **Status:** matched in `p4-ctf-read-3` (`crates/ocio/src/transforms/file_transform.rs`,
+  `build_file_transform_ops`); `references_resolve_as_in_the_wheel`'s "names that differ in
+  case" group (`crates/ocio/tests/file_format_ctf_oracle.rs`) checks a self-reference in
+  another case on both platforms, and the two files on Linux, with the wheel.
+
+### I-193. The processor cache ignores the context variables a CTF reference uses
+
+- **Upstream:** `Config::getProcessor` (`Config.cpp:4791-4873` @ v2.5.2) keys its processor
+  cache on the context variables `CollectContextVariables` finds in the transform. For a file
+  transform those are the variables of its `src`, of the search path that finds it and of its
+  CCC ID (`transforms/FileTransform.cpp:224-300`), not those of the references inside the CTF
+  file, which `BuildFileTransformOps` resolves with the same context. So with one config, a CTF
+  file whose reference is `path="$FILEVAR"` gets one processor for every value of `FILEVAR`:
+  the first one built (`FILEVAR=m.ctf`, a matrix) is returned for `FILEVAR=lut.spi1d` too,
+  with the same cache ID and the first file's `getFiles()` (the verifier's `ctxcache.py`,
+  2026-10-16).
+- **Who notices:** a config whose CTF files pick their references through context variables,
+  per shot for instance, used through one config object.
+- **A fix:** collect the context variables of the references when the file is read, or leave
+  file transforms whose files reference others out of the cache.
+- **Status:** matched in `p4-ctf-read-3`: the port's processor cache and its context variable
+  collection do the same (`crates/ocio/src/config.rs`, `processor_with_context`);
+  `context_variables_in_references_share_a_processor_as_in_the_wheel`
+  (`crates/ocio/tests/file_format_ctf_oracle.rs`) checks the cache IDs and files of both orders
+  with the oracle's `config_calls`.
+
+### I-194. A Reference's basePath is read and ignored
+
+- **Upstream:** `CTFReaderReferenceElt::start` (`fileformats/ctf/CTFReaderHelper.cpp:5025-5091`
+  @ v2.5.2) accepts a `basePath` attribute and drops its value ("Ignore BasePath for now"): the
+  path resolves through the context's search paths alone. Its only effect is the error when an
+  alias comes with it.
+- **Who notices:** a CTF file from another application that relies on `basePath` to find its
+  references.
+- **A fix:** resolve the path against the base path first, or warn that it is ignored.
+- **Status:** matched in `p4-ctf-read-3` (`crates/ocio/src/fileformats/ctf/ctf_reader_helper.rs`,
+  `reference_start`); `op_cases_h`'s "a path and a basePath" and "only a basePath" check it with
+  the wheel.
+
+### I-195. A `.look` size is read from each piece of its text alone
+
+- **Upstream:** the `.look` parser reads the size in `CharacterDataHandler`
+  (`src/OpenColorIO/fileformats/FileFormatIridasLook.cpp:416-440` @ v2.5.2), once for each
+  piece of text expat delivers: each piece must parse on its own (but a lone line feed), and
+  the last one sets the size. expat delivers the text
+  of an element in pieces at line ends (the reader gives it a line at a time), around
+  comments and processing instructions, and at each character or entity reference. So a
+  pretty-printed `<size>` (the value on its own line between indented lines) is refused at its
+  white space ("Invalid LUT size value: '    '. Expected quoted integer"), `"1<!-- -->7"` is
+  refused as `'"1'` (between 2 and 129), and `&quot;2&quot;` as `'"'` (the `.look` verifier's
+  probes, both wheels, 2026-10-16).
+- **Who notices:** `.look` files written by tools that indent or split the size.
+- **A fix:** collect the size's text until the element ends, then parse it once.
+- **Status:** matched in `p4-look` (4.4f, `crates/ocio/src/fileformats/
+  file_format_iridas_look.rs`); the oracle cases of sizes on their own line, split by a
+  comment, and by `&quot;` (`crates/ocio/tests/file_format_iridas_look_oracle.rs`).
+
+### I-196. A `.look` file's data may not hold tabs or carriage returns
+
+- **Upstream:** the `.look` parser removes spaces, quotes and line feeds from the data
+  (`CharacterDataHandler`, `src/OpenColorIO/fileformats/FileFormatIridasLook.cpp:441-457` @
+  v2.5.2), though the format's description says "all whitespace and quotes" (52-53). A tab or
+  a carriage return (written `&#13;`, since expat turns CR LF into LF) stays in the data and
+  is refused: tab-indented data lines give "Number of characters in 'data' must be multiple
+  of 8. 193 elements found." (the `.look` verifier's probes, both wheels, 2026-10-16).
+- **Who notices:** `.look` files whose data lines are indented with tabs.
+- **A fix:** remove all XML white space from the data.
+- **Status:** matched in `p4-look` (4.4f, `crates/ocio/src/fileformats/
+  file_format_iridas_look.rs`); the oracle cases of tab-indented data and of `&#9;` and
+  `&#13;` in the data (`crates/ocio/tests/file_format_iridas_look_oracle.rs`).
+
+### I-197. Two `.look` data messages that mislead
+
+- **Upstream:** `getLut` (`src/OpenColorIO/fileformats/FileFormatIridasLook.cpp:193-235` @
+  v2.5.2) says "Number of characters in 'data' must be multiple of 8. N elements found."
+  where N counts characters (195-203), and "Non-hex characters found in 'data' block at index
+  'I'." where I is the start of the 8-character group holding the bad character, not its own
+  position (211-221).
+- **Who notices:** authors of malformed `.look` files.
+- **A fix:** say "characters", and give the bad character's index.
+- **Status:** matched in `p4-look` (4.4f, `crates/ocio/src/fileformats/
+  file_format_iridas_look.rs`); the oracle cases "a character missing" and "a character that
+  isn't hex" (`crates/ocio/tests/file_format_iridas_look_oracle.rs`).
+
+### I-198. A `.look` LUT without a size or data fails after the reader
+
+- **Upstream:** `getLut` expects `3 * size^3` values, with a size of 0 when no `<size>`
+  element was read (`src/OpenColorIO/fileformats/FileFormatIridasLook.cpp:205-233` @ v2.5.2),
+  so a `<LUT>` without size and data passes it, and `read` makes a 3D LUT of 0 entries per
+  side (538-548). The file reads, and the error comes when its op is validated: "Lut3D
+  content array issue: Array content is empty." (`Lut3DOpData::validate`,
+  `ops/lut3d/Lut3DOpData.cpp:371-381`; `OpArray.h:168`), with no file name.
+- **Who notices:** authors of `.look` files without a LUT section's content.
+- **A fix:** refuse a missing size in `getLut`, naming the file.
+- **Status:** matched in `p4-look` (4.4f, `crates/ocio/src/fileformats/
+  file_format_iridas_look.rs`); the oracle cases "no size and no data" and "no LUT"
+  (`crates/ocio/tests/file_format_iridas_look_oracle.rs`).
+
+### I-199. A format named in other case is accepted by the baker, then refused by the bake
+
+- **Upstream:** `Baker::setFormat` finds the format by its name ignoring case
+  (`FormatRegistry::getFileFormatByName`, `transforms/FileTransform.cpp:358-365` @ v2.5.2) and
+  keeps the name as given (`Baker.cpp:118-139`); `Baker::bake` hands that name to the format
+  (`Baker.cpp:393-403`), and eight formats' bakes compare it with their own names, case
+  included: `spi1d` (`FileFormatSpi1D.cpp:323-329`), `spi3d` (`FileFormatSpi3D.cpp:274-280`),
+  `iridas_cube`, `iridas_itx` (whose message says "Unknown 3dl format name",
+  `FileFormatIridasItx.cpp:257-263`), `resolve_cube`, `houdini`, `flame` and `lustre`
+  (`FileFormat3DL.cpp:509-522`), and the CLF and CTF ("Unknown CLF/CTF file format name,
+  '<name>'.", `FileFormatCTF.cpp:1358-1364`). So `setFormat("SPI1D")` succeeds and `bake` fails with
+  "Error baking SPI1D:Unknown spi format name, 'SPI1D'." (wheel probes, Windows and Linux,
+  2026-10-16). The cineSpace and Truelight bakes take the name in any case.
+- **Who notices:** callers that name a format in other case than the registry's.
+- **A fix:** keep the registry's name in `setFormat`, or compare ignoring case in the bakes.
+- **Status:** matched in `p4-baker` (4.8b1: spi1d and spi3d; 4.8b2: Iridas cube, itx and
+  Resolve cube; 4.8c: 3DL and Houdini; in their `crates/ocio/src/fileformats/` files) and
+  `p4-ctf-bake` (4.8d: CLF and CTF, `file_format_ctf.rs`); the "named in capitals" cases of
+  `crates/ocio/tests/bake_formats_oracle.rs` and the "format named" cases of
+  `crates/ocio/tests/ctf_bake_oracle.rs`.
+
+### I-200. A `.3dl` bake with a shaper size below 1
+
+- **Upstream:** the `.3dl` bake makes its shaper with `std::vector<float> shaperData(shaperSize)`
+  and fills it through `GenerateIdentityLut1D(&shaperData[0], shaperSize, 1)`
+  (`src/OpenColorIO/fileformats/FileFormat3DL.cpp:552-553` @ v2.5.2); the baker checks the
+  shaper size only when a shaper space is set (`Baker.cpp:369-375`), which the 3DL formats
+  refuse.
+  - A size of 0 makes `&shaperData[0]` index an empty vector: undefined behaviour, which both
+    wheels resolve the same way. An empty vector's storage is a null pointer, so the index
+    gives a null pointer, `GenerateIdentityLut1D` returns at its `if(!img) return;`
+    (`ops/lut1d/Lut1DOp.cpp:196`), and the shaper line is empty. A size of 1 writes a lone `0`
+    (a NaN step, clamped to 0).
+  - A negative size converts to a `size_t` past the vector's `max_size()`, and the constructor
+    throws `std::length_error`, which `Baker::bake` reports with each C++ library's text:
+    "Error baking flame:vector too long" on Windows (MSVC's STL) and "Error baking
+    flame:cannot create std::vector larger than max_size()" on Linux (libstdc++), after a
+    lustre file's first two lines are written (wheel probes, 2026-10-16).
+- **Who notices:** callers of the `.3dl` bakes that set a shaper size below 1.
+- **A fix:** check the shaper size whatever the shaper space, or ignore it for formats without
+  a shaper.
+- **Status:** matched in `p4-baker` (4.8c, `crates/ocio/src/fileformats/file_format_3dl.rs`,
+  `VECTOR_CONSTRUCTOR_TOO_LONG`; an empty shaper writes an empty line); the "shaper size"
+  cases of `crates/ocio/tests/bake_formats_oracle.rs`, whose partial files are compared too.
+
+### I-201. A Reference by an alias other than currentMonitor adds no ops
+
+- **Upstream:** the Reference reader keeps an alias (`CTFReaderHelper.cpp:5047-5056` @ v2.5.2),
+  refusing only `currentMonitor`, and `BuildOp` (`fileformats/FileFormatCTF.cpp:1218-1248`)
+  builds only references by path: a reference by any other alias, inverted or not, silently
+  adds nothing to the processor.
+- **Who notices:** a CTF file whose aliases name transforms the application is expected to
+  supply.
+- **A fix:** refuse unknown aliases, or log that they are skipped.
+- **Status:** matched in `p4-ctf-read-3` (`ctf_reader_helper.rs`, `reference_start`;
+  `crates/ocio/src/fileformats/file_format_ctf.rs`, `build_op`); `op_cases_h`'s "an alias" and
+  "an alias, inverted", and upstream's `reference_alias.ctf`, check it with the wheel.
+
+### I-202. A Reference's inverted attribute only ever sets the inverse
+
+- **Upstream:** the Reference reader sets the inverse direction when `inverted` is `true`,
+  ignoring case (`CTFReaderHelper.cpp:5058-5064` @ v2.5.2), and ignores any other value,
+  without a warning: `inverted="1"` or `"yes"` leaves the reference forward, and a later
+  `inverted="false"` (the attribute again, in another case) doesn't undo an earlier `"true"`.
+- **Who notices:** a CTF writer that spells booleans another way.
+- **A fix:** parse the value as a boolean and refuse what isn't one.
+- **Status:** matched in `p4-ctf-read-3` (`ctf_reader_helper.rs`, `reference_start`);
+  `op_cases_h`'s "inverted other than true" and "inverted true, then false" check it with the
+  wheel.
+
+### I-203. The CLF/CTF writer pads its arrays with a width that grows
+
+- **Upstream:** `WriteValues` (`fileformats/ctf/CTFTransform.cpp:561-671` @ v2.5.2) formats each
+  array value in an `ostringstream` whose width it set once, for the bit depth (3 for 8i, 4 for
+  10i and 12i, 5 for 16i, 11 for 16f and 32f floats). A stream's width resets to 0 after each
+  insertion, but the padding goes into the value's text first, and when a value's text is
+  longer than the width, the width becomes that length for the values after it. So each value
+  is padded to the longest text written before it in the array, not to the bit depth's width,
+  and one long value shifts every later column. Upstream's own expected text shows it: in
+  `OCIO_ADD_TEST(CTFTransform, lut1d_10i_ctf)` (`FileFormatCTF_tests.cpp:7894-7925`) the third
+  row is `   1023    1023    1023`, padded to the 7 characters of `4011.12` in the row above.
+  The GradingRGBCurve writer's `writeCurve` (`CTFTransform.cpp:1559-1603`) sets a width of 11
+  with `SetOStream` and then streams `x << " " << y`: only the first number of each control
+  point line, and only the first slope, is padded.
+- **Who notices:** readers of written CLF and CTF files, whose arrays don't line up in columns
+  once a value needs more digits.
+- **A fix:** set the width before each value, or pad all values to the widest one.
+- **Status:** matched in `p4-ctf-read-3` (`crates/ocio/src/fileformats/ctf/ctf_writer.rs`,
+  `write_values` and `GradingRgbCurveWriter::write_curve`); the ported `lut1d_10i_ctf` and
+  `bitdepth_ctf` check it against upstream's expected text, and the LUT and RGB curve cases of
+  `crates/ocio/tests/file_format_ctf_write_oracle.rs` and
+  `crates/ocio/src/fileformats/file_format_ctf_write_oracle_tests.rs`, check it with the
+  wheel.
+
+### I-204. The CLF/CTF bake fails on a shaper space whose range makes an invalid Range
+
+- **Upstream:** with a shaper space, the CLF/CTF bake's 1D LUT (no crosstalk) and its shaper
+  of a set size (crosstalk) come after a Range from the shaper space's range
+  (`FileFormatCTF.cpp:1445, 1498, 1517-1532` @ v2.5.2). The range is the smallest start and
+  the largest end of the three channels (`GetSrcRange`, `BakingUtils.cpp:53-73`), through
+  `std::min` and `std::max`, which pass a NaN in red on and drop one in green or blue. A
+  range that decreases (an inverted shaper space), whose ends are too close, or that starts
+  with a NaN makes a Range that the op refuses (`RangeOpData.cpp:236, 471`), and the bake
+  fails: "Error baking Academy/ASC Common LUT Format:Range maximum input value is less than
+  minimum input value", "...Range maxInValue is too close to minInValue", "...In and out
+  minimum limits must be both set or both missing in Range." (wheel probes, 2026-10-17). The
+  half-domain shaper, without a shaper size, bakes those spaces; and a NaN in green or blue
+  is ignored.
+- **Who notices:** bakes with a shaper space that inverts, narrows to almost nothing or gives
+  NaN.
+- **A fix:** order the range's ends, refuse an unusable shaper space with a message that names
+  it, and take a NaN in any channel alike.
+- **Status:** matched in `p4-ctf-bake` (4.8d, `crates/ocio/src/fileformats/file_format_ctf.rs`);
+  `invalid_shaper_ranges_as_in_the_wheel` (`crates/ocio/tests/ctf_bake_oracle.rs`).
+
+### I-205. Chains of looks through the color space before double their work per link
+
+- **Upstream:** a look transform converts to each look's process space and, after the looks,
+  to its destination (`transforms/LookTransform.cpp:291-297, 355-360` @ v2.5.2). In a chain of
+  color spaces where `c<i>` converts to the reference with a look transform from and to `c0`
+  through a look whose process space is `c<i-1>`, building `c<i>` builds `c<i-1>`'s ops twice,
+  once into the process space and once out of it: `T(n) = 2 T(n-1) + 1` ops, 2^n - 1 for `n`
+  links. The wheel's processor of 20 links holds 1,048,575 ops (3.9 s); of 21, 7.6 s; of 22,
+  more than 4 GB (the verifier's probes, 2026-10-17, under a memory cap). A chain where each
+  color space's transforms to and from the reference both name the space before does the same
+  in `CollectContextVariables`, in time only. The nesting limits (U-58) don't bound it: the
+  depth stays `n`.
+- **Who notices:** a machine-made config of such a chain, a few dozen links long; nothing
+  hand-written.
+- **A fix:** build each color space's conversion once per processor (a cache by color space and
+  direction), or refuse chains whose op count passes a bound.
+- **Status:** matched (the port takes the same time and memory, 8.1 s for 21 links): the owner
+  decides whether to bound it.
+
+### I-206. A LUT baked to a file has Windows line endings on Windows
+
+- **Upstream:** the Python binding's `Baker.bake(fileName)` writes through a text-mode
+  `std::ofstream`, so on Windows each line feed of the baked text is written as CR LF; on Linux
+  the file holds the text as it is (`bake()` returns it with line feeds on both). A bake that
+  fails leaves what it wrote before the failure in the file: lustre with a shaper size of -3
+  leaves `3DMESH` CR LF `Mesh 0 12` CR LF on Windows (the baker verifier's probe,
+  2026-10-16).
+- **Who notices:** applications that bake LUT files on Windows and compare them with files
+  baked on Linux, or read them with tools that keep the CR.
+- **A fix:** open the file in binary mode.
+- **Status:** the port's `Baker::bake` writes to any `std::io::Write` with line feeds, as
+  `bake()`'s text; the text-mode file belongs to the Python binding (`ocio-py`). The oracle's
+  `bake` reports the file and a failed bake's partial file, which the bake tests compare with
+  the port's text in text mode (`crates/ocio/tests/bake_common/mod.rs`).
+
+### I-207. An archive entry's name is a wildcard
+
+- **Upstream:** a config read from an `.ocioz` archive finds its files by comparing names with
+  minizip-ng's `mz_path_compare_wc`, where a `*` matches any run of bytes, `/` matches `\`,
+  and case is ignored. `getFileBufferByPath` passes the entry's name as the wildcard and the
+  path asked for as the path (`src/OpenColorIO/OCIOZArchive.cpp:417-427` @ v2.5.2), and takes
+  the first entry that matches in the archive's order; `getFastLutFileHash` passes them the
+  other way round (`OCIOZArchive.cpp:622-639`) and takes the last match in the order of the
+  names. So an entry named `*` serves every file asked for (the config's `config.ocio`
+  included), and where an entry `luts/*.spi1d` comes before `luts/a.spi1d`, the data of
+  `luts/a.spi1d` comes from the first and its hash from the second.
+- **Who notices:** archives with a `*` in an entry's name, or entries whose names differ only
+  in case or in the kind of slash.
+- **A fix:** compare the names as paths, the same way in both functions.
+- **Status:** matched in `p4-baker` (4.9a, `crates/ocio/src/ocioz_archive.rs` and
+  `crates/ocio/src/minizip/mz_os.rs`); `crates/ocio/tests/ocioz_read_oracle.rs`, the
+  "wildcard names", "a wildcard before the name", "a lone star", "names in other cases" and
+  "backslashes" archives.
+
+### I-208. Archive entries that can't be read are read as zeros, and empty ones not at all
+
+- **Upstream:** `readEntryBuffer` (`OCIOZArchive.cpp:390-403` @ v2.5.2) sizes the buffer from
+  the central directory's uncompressed size, refuses a size of 0 or past 256 MB with "OCIOZ
+  archive entry size is invalid or exceeds maximum allowed size.", and ignores what
+  `mz_zip_reader_entry_save_buffer` returns. So:
+  - an empty file in the archive, a LUT or the config itself, fails with that message;
+  - an entry minizip-ng can't read leaves the buffer zeros, or zeros after what it read:
+    compressed with a method other than deflate (OpenColorIO builds minizip-ng with zlib
+    only), encrypted with AES, on another disk of a split archive, with corrupt deflate data
+    (minizip-ng drops the 64 KiB read it fails in; zlib decodes the next block's header in
+    the read that fills the buffer, so a bad block right after exactly 65,535 bytes fails
+    that read too, and a deflate stream that ends without a final block reads on into the
+    bytes after the entry, which minizip-ng doesn't limit for deflate), or with a size larger
+    than its data; the file's reader then fails on the zeros, with a message about the
+    file's format;
+  - an entry flagged as encrypted is read as it is stored, without a password (OpenColorIO
+    builds minizip-ng without encryption, `MZ_PKCRYPT=OFF`), and a wrong CRC goes unnoticed.
+- **Who notices:** applications reading archives with empty files, or broken or unusual ones,
+  which get a misleading error or a config read from zeros instead of an error about the
+  archive.
+- **A fix:** accept empty entries, and fail with minizip-ng's error when an entry can't be
+  read whole.
+- **Status:** matched in `p4-baker` (4.9a, `crates/ocio/src/ocioz_archive.rs` and
+  `crates/ocio/src/minizip/`); `crates/ocio/tests/ocioz_read_oracle.rs`,
+  `entries_read_their_own_way` and the "an empty LUT" and "an empty config" archives,
+  `inflate_at_read_boundaries` and `entry_size_limit`.
+
+### I-209. A second archive's LUT files can be the first one's
+
+- **Upstream:** a config read from an archive asks its I/O proxy for its files by the paths
+  they have in the archive, relative ones such as `luts/a.spi1d`. OpenColorIO caches the hash
+  of a file by that path for the whole process (`GetFastFileHash`, `PathUtils.cpp:64-115` @
+  v2.5.2), whatever proxy answered, and its file cache by that hash. So once a config from one
+  archive has read `luts/a.spi1d`, a config from another archive that holds a different
+  `luts/a.spi1d` gets the first archive's LUT, until `ClearAllCaches`.
+- **Who notices:** applications that read several archives in one process whose files share
+  paths, such as two versions of the same config.
+- **A fix:** key the hash cache with the proxy as well as the path.
+- **Status:** matched in `p4-baker` (4.9a): the port's caches are upstream's;
+  `crates/ocio/tests/ocioz_read_oracle.rs`, `two_archives_in_one_process`.
+
+### I-210. An archive rebuilt from its local headers has other names on Windows
+
+- **Upstream:** where minizip-ng can't read an archive's central directory (a truncated
+  `.ocioz`, say), OpenColorIO's reader rebuilds it from the local headers (`mz_zip_recover_cd`,
+  minizip-ng mz_zip.c:1236-1406 @ 4.0.10, recovery being the reader's default), and the
+  archive still loads. The rebuilt headers are written by `mz_zip_entry_write_header`, which on
+  Windows only (`#if defined(_WIN32)`, mz_zip.c:792-805) writes each `\` of a name as `/`. The
+  names are compared ignoring the kind of slash, but the file hashes OpenColorIO builds from them
+  (`getFastLutFileHash`: the name and the CRC) differ, and with them the config's cache ID. Once
+  one entry's local header has a zip64 field, the data descriptors of all later entries are
+  read as zip64 (the flag is never reset in the loop).
+- **Who notices:** applications comparing cache IDs of configs read from damaged archives with
+  backslashes in their names across platforms.
+- **A fix:** keep the names as stored, and reset the zip64 flag for each entry.
+- **Status:** matched in `p4-baker` (4.9a2, `crates/ocio/src/minizip/mz_zip.rs`);
+  `crates/ocio/tests/ocioz_read_oracle.rs`, `recovered_archives` ("backslashes") and
+  `zip64_descriptors_after_a_zip64_entry`, on both platforms.
+
+### I-211. An archive leaves out linked LUT files, and takes every LUT file around the config
+
+- **Upstream:** `Config::archive` adds every file under the config's working directory whose
+  extension a LUT format reads (`addSupportedFiles`, `src/OpenColorIO/OCIOZArchive.cpp:149-202`
+  @ v2.5.2), whether the config uses it or not, following links to directories. It adds each
+  through minizip-ng's `mz_zip_writer_add_path` (mz_zip_rw.c:1649-1729 @ 4.0.10), which skips a
+  symbolic link to a file (neither storing nor following links, as OpenColorIO sets it up)
+  without an error: a config whose LUT is a link archives without it, and the archived config
+  fails to find it.
+- **Who notices:** applications archiving configs whose LUT files are links (common where LUTs
+  are shared between shows), or whose directories hold unrelated LUT files.
+- **A fix:** archive the files the config references, following links to files.
+- **Status:** matched in `p4-baker` (4.9b1, `crates/ocio/src/ocioz_archive.rs` and
+  `crates/ocio/src/minizip/mz_zip_rw.rs`); `crates/ocio/tests/ocioz_archive_oracle.rs`, the
+  generated directory's links (Linux).
+
+### I-212. On Linux, extracting names with backslashes writes files whose names hold them
+
+- **Upstream:** `ExtractOCIOZArchive` saves each entry at its name joined to the destination
+  (`mz_zip_reader_save_all`, minizip-ng `mz_zip_rw.c:818-907` @ 4.0.10). On Linux minizip-ng
+  is built with `MZ_PRESERVE_NATIVE_STRUCTURE` (its default, `mz_os_posix.c:40-42`), so only
+  `/` separates directories (`mz_os_is_dir_separator`, `mz_os_posix.c:292-302`) and a
+  backslash is part of a name: `shot1\lut1.clf` becomes a file of that name in the
+  destination, and no `shot1` directory is made. On Windows both are separators, and the file
+  is `lut1.clf` in the directory `shot1`. Archives written on Windows by older minizip
+  versions hold such names: upstream's own `missing_config.ocioz` extracts that way on Linux
+  (the Linux wheel, probed 2026-10-17).
+- **Who notices:** applications extracting on Linux archives whose names use backslashes.
+- **A fix:** convert the separators of the name before saving the file.
+- **Status:** matched in `p4-baker` (`crates/ocio/src/minizip/mz_os.rs`);
+  `crates/ocio/tests/ocioz_extract_oracle.rs`, `missing_config` and the name
+  `dir\back.txt`, on both platforms.
+
+### I-213. A zip extra field shorter than 4 bytes wraps minizip-ng's search limit
+
+- **Upstream:** `mz_zip_extrafield_find` (minizip-ng `mz_zip.c:2583-2612` @ 4.0.10) counts its
+  search limit down by each field's length less 4 (`max_seek -= field_length - 4`), so a field
+  shorter than 4 bytes counts it up. Its callers that read a zipped central directory and an
+  entry's hashes pass `INT32_MAX` (`mz_zip_rw.c:272, 487, 527`), and a short field then
+  overflows the `int`: undefined behaviour, which both wheels resolve the same way, wrapping
+  it to a negative limit and ending the search (`MZ_EXIST_ERROR`): Linux `sub ebx, eax; js`
+  (`libOpenColorIO.so` 0x5f81f2), Windows `add edi, ecx; js` (`OpenColorIO_2_5.dll`
+  0x180340248).
+- **Who notices:** applications reading archives whose zipped central directory entry has a
+  short extra field before its `CDCD` field.
+- **A fix:** compute the limit in 64 bits, or refuse a field shorter than its header.
+- **Status:** matched in `p4-baker` (`crates/ocio/src/minizip/mz_zip.rs`, `wrapping_sub`);
+  `crates/ocio/tests/ocioz_read_oracle.rs`, `more_zipped_central_directories`.
+
+### I-214. A seek past the end of an archive leaves minizip-ng's buffered position behind
+
+- **Upstream:** minizip-ng reads an archive through a buffered stream that keeps its own idea
+  of the file position (`mz_strm_buf.c` @ 4.0.10). A seek forwards past what it has read adds
+  the offset to that position (`buffered->position += offset`, `mz_strm_buf.c:301`) before it
+  seeks the file; where the file's seek fails, the buffer is emptied and the next read reads
+  on from where the file is, at the end of the last 32,767 bytes read, not where the seek
+  was asked to go. The file's seek fails where the position would pass what the file system
+  holds: on Linux `fseeko`'s `lseek` refuses a position past the largest file (16 TiB on
+  ext4, other limits on other file systems), so whether a zip64 size of, say, 2^45 bytes
+  makes it fail depends on the file system; Windows' `SetFilePointerEx` takes it.
+  `mz_zip_recover_cd` seeks past an entry by its local header's size, and a zip64 size near
+  `INT64_MAX` makes the sum overflow the 64-bit position: undefined
+  behaviour, which both wheels resolve the same way, wrapping it (Linux
+  `add qword ptr [rdi + 0x10038], r12` at `libOpenColorIO.so` 0x5f6894, Windows
+  `add qword ptr [rbx + 0x10038], rdi` at `OpenColorIO_2_5.dll` 0x18033d179).
+- **Who notices:** applications reading damaged archives that minizip-ng recovers.
+- **A fix:** check the seek's result, and the sum for overflow.
+- **Status:** matched in `p4-baker` (`crates/ocio/src/minizip/mz_strm.rs`, the buffered
+  stream, `wrapping_add`, and the file's own seek); `crates/ocio/tests/ocioz_read_oracle.rs`,
+  `recovery_after_failed_seeks`, `recovery_after_seeks_past_the_file_system` and its
+  `_long_tail`.
+
+### I-215. Extracting a link, then a file of the same name, writes outside the destination
+
+- **Upstream:** `ExtractOCIOZArchive` makes a link entry's link as its target says
+  (`mz_zip_reader_entry_save_file`, minizip-ng `mz_zip_rw.c:696-724` @ 4.0.10), with no check
+  of the target: `../outside.txt` and absolute targets are taken. A later file entry of the
+  same name opens the link and writes through it (`mz_stream_os_open`, `fopen(path, "wb")` on
+  Linux, `CreateFile` on Windows): on Linux an archive with a link `l.txt` to
+  `../outside.txt` and then a file `l.txt` writes `outside.txt` next to the destination (both
+  wheels where they make links, probed 2026-10-17).
+- **Who notices:** applications extracting archives from untrusted sources.
+- **A fix:** refuse link targets outside the destination, or don't write through links.
+- **Status:** matched in `p4-baker` (`crates/ocio/src/minizip/mz_zip_rw.rs`);
+  `crates/ocio/tests/ocioz_extract_oracle.rs`, `links` (Linux).
+
+### I-221. Archiving lists a directory whose path has 318 bytes or more by the wrong pattern
+
+- **Upstream:** `Config::archive` lists the config's directory and its subdirectories with
+  minizip-ng's `mz_os_open_dir` (`OCIOZArchive.cpp:150-201` @ v2.5.2; minizip-ng
+  `mz_os_win32.c:362-399` @ 4.0.10), which builds `FindFirstFileW`'s pattern in a buffer of
+  320 bytes: the path cut to 319 bytes (`strncpy`), a separator only where
+  `mz_path_append_slash` has room (a path of 317 bytes or fewer), and the `*` only where
+  `mz_path_combine` has room. A path of 318 bytes gives `<path>*`, which lists the parent's
+  entries whose long or 8.3 short name starts with the directory's own name; a longer one
+  gives the path cut to 319 bytes (a character the cut splits becomes U+FFFD), which lists
+  the parent's entry of that name. OpenColorIO then looks for each name found in the
+  directory itself: a directory of that name is listed in turn; a file with a LUT extension
+  is archived where the directory holds one, and otherwise the archive fails ("Could not
+  write LUT file <path> to in-memory archive."). The directory's own files aren't archived.
+  Which 8.3 names match depends on the volume (whether it makes them, and their form).
+- **Who notices:** applications archiving configs in deep directories, on Windows.
+- **A fix:** size the pattern's buffer from the path.
+- **Status:** matched in `p4-baker` (`crates/ocio/src/minizip/mz_os.rs`, `mz_os_list_dir`,
+  through `FindFirstFileW` in `os_windows_ffi.rs`, owner decision 2026-10-17, which makes
+  the same 8.3 matches on every volume); `crates/ocio/tests/ocioz_archive_oracle.rs`,
+  `long_directory_paths` and `long_directory_patterns` (Windows). Past MAX_PATH the port
+  gives the system the pattern's long form (`\\?\`), as the wheel's call works under a
+  long-path-aware Python.
+
+### I-222. Archiving reads a long name with the bytes earlier names left, on Windows
+
+- **Upstream:** `Config::archive` lists the config's directory with minizip-ng's
+  `mz_os_read_dir` (`OCIOZArchive.cpp:150-201` @ v2.5.2; minizip-ng `mz_os_win32.c:401-421` @
+  4.0.10), which converts each name into the same 256 bytes of `d_name`. A name longer than
+  255 UTF-8 bytes doesn't fit with its NUL: `WideCharToMultiByte` writes the whole characters
+  that fit and fails, and OpenColorIO reads `d_name` up to its first NUL, past the cut into
+  what earlier names of the listing wrote, or to the `end` flag's 0 where the 256 bytes hold
+  no NUL (U-79 covers the reads that reach memory nothing wrote). The name read isn't the
+  file's: a cut of 256 bytes is read as itself, and a shorter one (it falls inside a
+  character) with an earlier name's bytes after it. Where the name read has a LUT extension,
+  OpenColorIO looks for that file and the archive fails ("Could not write LUT file
+  <dir>\<name read> to in-memory archive."); any other is left out. A directory with
+  U+20AC x84 `-3dlzz`, then U+20AC x84 `.` U+1F600 `.spi1d` (cut to 253 bytes, then the
+  first name's `3dl`) fails with the LUT file U+20AC x84 `.3dl` (the Windows wheel, 3 runs
+  of 3, probed 2026-10-18).
+- **Who notices:** applications archiving configs next to files with very long names, on
+  Windows.
+- **A fix:** convert each name into a buffer sized from it, or refuse a name whose conversion
+  fails.
+- **Status:** matched in `group-5f` (`crates/ocio/src/minizip/mz_os.rs`, `mz_os_list_dir`);
+  `crates/ocio/tests/ocioz_archive_oracle.rs`, `long_names` (Windows, against the wheel).
 
 ## Undefined behaviour upstream
 
@@ -3072,13 +3646,149 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   wheel does. The port accepts chains of 255 color space transforms (in groups or not) and of
   254 look or display view transforms. Between that and the wheel's crash the port refuses
   what the wheel builds.
+
+  Groups multiply that depth, though: 255 color spaces, each a color space transform inside 5
+  nested groups, needed 1,156 KiB of the port's stack at opt-level 1 (the verifier,
+  2026-10-17), and 20 groups 3.7 MiB. And each kind of level costs the stack its own amount.
+  The shortest chains that crash the wheel's `getProcessor`, by the kind of each link (Windows,
+  Python's main thread, one process per length under a memory cap, 2026-10-17; "then files":
+  the first link's transform a file transform starting a chain of 256 CTF references, U-76):
+
+  | Each link | Crashes at | Half | A link's cost, in color space transforms |
+  |---|---|---|---|
+  | `ColorSpaceTransform` | 1,363 | 681 | 1 |
+  | `LookTransform` with a look, one option (`k`) or two (`k\|j`) | 618 | 309 | 2.21 |
+  | `DisplayViewTransform`, a view with a look, without or with a view transform, one option or two | 573 | 286 | 2.38 |
+  | `ColorSpaceTransform` in 1 group | 794 | 397 | 1.72 |
+  | `DisplayViewTransform` (a view with a look) in 1 group | 440 | 220 | 3.10 |
+  | `ColorSpaceTransform`, then files | 1,193 | 596 | |
+  | `LookTransform`, then files | 541 | 270 | |
+  | `DisplayViewTransform`, then files | 502 | 251 | |
+  | `ColorSpaceTransform` of a named transform holding a `ColorSpaceTransform` | 721 | 360 | 1.89 |
+  | `LookTransform` of a look holding a `ColorSpaceTransform` | 452 | 226 | 3.02 |
+  | `DisplayViewTransform` of a view whose look holds a `DisplayViewTransform` | 298 | 149 | 4.57 |
+
+  and with groups around each link, a group counting as a level (the verifier's measures, the
+  same day; the depth varies by a level with the caller's stack):
+
+  | Groups around each link | Longest chain the wheel builds | Levels, groups included |
+  |---|---|---|
+  | 0 | 1,363 | 1,363 |
+  | 1 | 794 | 1,588 |
+  | 2 | 559 | 1,677 |
+  | 3 | 432 | 1,728 |
+  | 5 | 297 | 1,782 |
+  | 10 | 166 | 1,826 |
+  | 20 | 88 | 1,848 |
+  | 50 | 36 | 1,836 |
+  | 100 | 18 | 1,818 |
+  | 200 | 9 | 1,809 |
+
+  A chain of CTF files alone crashes at 2,125 files (U-76).
+
+  So `BuildOps` and `CollectContextVariables` also weigh every level they nest, groups
+  included, and refuse a total past 68,150 (`MAX_NESTING_WEIGHT`), with "The transforms nest
+  too deep, counting groups and CTF references: upstream's stack overflows." (the verifier's
+  finding, 2026-10-17: a plain count of 640 levels, the first total, let a display view
+  transform in 1 group reach 254 links where the wheel crashes at 440). Each level weighs
+  what it costs the wheel's stack, from the crashes above, in hundredths of a color space
+  transform's, rounded up: a color space transform (and any transform that names nothing, which
+  ends the chain) 100, a look transform 221 (1,363 / 618), a display view transform 238
+  (1,363 / 573), a group 72 (1,363 / 794 - 1), a file transform and each CTF file of a chain of
+  references 67 (`(1,363 - 1,193) / 256`; 2,125 files alone give 0.64). The total is half the
+  wheel's 1,363 color space transforms: every kind of chain then stops at about half the wheel's
+  crash, or before. A file transform reached through `BuildOps` counts twice, as a transform and
+  as the first file of its chain. The 256 transforms and the 256 files still count apart too.
+  The deepest group the loader reads (590 groups and the transform they hold, 591 levels, U-60)
+  weighs 42,580, and its processor builds as in the wheel. The longest chains the port accepts:
+
+  | Each link | Port | Wheel |
+  |---|---|---|
+  | `ColorSpaceTransform`, alone or in 1 group | 255 (the 256 transforms) | crashes at 1,363, 794 |
+  | `ColorSpaceTransform` in 2 groups | 255 (the 256 transforms) | builds 559 |
+  | `ColorSpaceTransform` in 5 groups | 147 | builds 297 |
+  | `LookTransform`, one option or two | 254 (the 256 transforms) | crashes at 618 |
+  | `DisplayViewTransform`, any view | 254 (the 256 transforms) | crashes at 573 |
+  | `DisplayViewTransform` in 1 group, one option or two | 219 | crashes at 440 |
+  | `ColorSpaceTransform`, then files | 255 | crashes at 1,193 |
+  | `LookTransform`, then files | 231 | crashes at 541 |
+  | `DisplayViewTransform`, then files | 214 | crashes at 502 |
+  | A named transform, a look or a view whose transform links to the next | at most 128 (two transforms a link) | crashes at 721, 452, 298 |
+
+  The limits must also hold on the port's own stack, at every optimization level, on a thread
+  of 1 MiB (the main thread's on Windows). At opt-level 0 the first port didn't: an
+  unoptimized frame keeps a slot for every temporary (each `?` holds several copies of the
+  56-byte result), and a display view transform took about 11.7 KB a level, so only 86
+  levels fit. The functions the build recurses through now keep their frames small (their
+  lookups, errors and copies out of line, in `#[inline(never)]` and `#[cold]` helpers, the
+  transforms that name nothing in their own function, the op list of a look's option boxed and
+  that option's loop inline, and the recursive calls' results returned as they are, without
+  `?`; the same for a chain of CTF references, U-76). What the longest chain of each kind
+  takes, both ways, alone and with its first link a chain of 256 CTF references, which
+  shortens the chain to what the total allows beside them (Windows, 2026-10-17; Windows rounds
+  a thread's stack to 64 KiB, so each figure is the smallest such stack that holds the chain,
+  plus 1 KiB):
+
+  | Each link | n | opt-level 0 | n, then files | opt-level 0 | opt-level 1 | then files |
+  |---|---|---|---|---|---|---|
+  | `ColorSpaceTransform` | 255 | 577 KiB | 255 | 641 KiB | 257 KiB | 321 KiB |
+  | `LookTransform` with a look | 254 | 641 KiB | 231 | 769 KiB | 344 KiB | 449 KiB |
+  | `LookTransform`, two options | 254 | 705 KiB | 231 | 897 KiB | 324 KiB | 449 KiB |
+  | `GroupTransform` holding a `ColorSpaceTransform` | 255 | 705 KiB | 255 | 769 KiB | 321 KiB | 385 KiB |
+  | `DisplayViewTransform`, a view with a look | 254 | 769 KiB | 214 | 769 KiB | 385 KiB | 449 KiB |
+  | `DisplayViewTransform`, a view transform and a look | 254 | 769 KiB | 214 | 769 KiB | 385 KiB | 449 KiB |
+  | `DisplayViewTransform`, a view with two options | 254 | 769 KiB | 214 | 897 KiB | 385 KiB | 449 KiB |
+  | `DisplayViewTransform`, a view transform and two options | 254 | 769 KiB | 214 | 897 KiB | 385 KiB | 449 KiB |
+  | `ColorSpaceTransform` in 1 group | 255 | 705 KiB | 255 | 769 KiB | 321 KiB | 385 KiB |
+  | `ColorSpaceTransform` in 2 groups | 255 | 897 KiB | 209 | 833 KiB | 385 KiB | 449 KiB |
+  | `ColorSpaceTransform` in 5 groups | 147 | 833 KiB | 111 | 833 KiB | 385 KiB | 385 KiB |
+  | `ColorSpaceTransform` in 20 groups | 44 | 705 KiB | 34 | 769 KiB | 321 KiB | 385 KiB |
+  | `ColorSpaceTransform` in 200 groups | 4 | 577 KiB | 4 | 705 KiB | 257 KiB | 321 KiB |
+  | `LookTransform` in 2 groups | 186 | 705 KiB | 140 | 769 KiB | 385 KiB | 449 KiB |
+  | `LookTransform` in 1 group, two options | 231 | 769 KiB | 174 | 897 KiB | 385 KiB | 449 KiB |
+  | Group of a `ColorSpaceTransform` in 3 groups | 175 | 833 KiB | 132 | 833 KiB | 385 KiB | 385 KiB |
+  | `DisplayViewTransform` in 1 group | 219 | 769 KiB | 164 | 769 KiB | 448 KiB | 449 KiB |
+  | `DisplayViewTransform` in 1 group, two options | 219 | 769 KiB | 164 | 897 KiB | 392 KiB | 449 KiB |
+  | `DisplayViewTransform` in 3 groups | 149 | 769 KiB | 112 | 769 KiB | 385 KiB | 449 KiB |
+  | `DisplayViewTransform` (view transform) in 10 groups | 70 | 651 KiB | 54 | 769 KiB | 322 KiB | 385 KiB |
+  | `DisplayViewTransform` (view transform, two options) in 2 groups | 177 | 769 KiB | 134 | 839 KiB | 385 KiB | 449 KiB |
+  | `ColorSpaceTransform`, the first 80 links in 3 groups, the others in 2 | 255 | 961 KiB | 186 | 833 KiB | 385 KiB | 449 KiB |
+  | `ColorSpaceTransform`, links 2 to 99 in 2 groups, the others in 1 | 255 | 769 KiB | 255 | 833 KiB | 321 KiB | 449 KiB |
+
+  The heaviest is the verifier's mix (2026-10-17): 255 color space transforms, 80 in 3 groups
+  and 175 in 2, 590 groups in all, weigh 68,080 and take 961 KiB at opt-level 0; the second
+  mix is the heaviest then files (68,063). On Rocky Linux 9 at opt-level 0, where a thread's
+  stack isn't rounded, the heaviest take 902 KiB (that mix), 851 KiB (color space transforms
+  in 2 groups) and 829 KiB (display view transforms of two options, then files); the two mixes
+  then files 754 and 762 KiB.
 - **Status:** done in `p3-builders` (3.2d follow-up; `crates/ocio/src/transform.rs`, `Nesting`;
   `build_ops`, and `collect_context_variables` in `crates/ocio/src/context_variable_utils.rs`).
-  Tests (`crates/ocio/tests/config_processors_oracle.rs`): a color space that names itself and
-  one that reaches itself through a look are refused in both directions where the wheel
-  crashes; the longest chain of each kind the port accepts is the wheel's processor (on a
-  test thread's stack, debug and release), and one link more the wheel still builds while the
-  port refuses.
+  The small frames in `group-5` (`transform.rs`, `transforms/color_space_transform.rs`,
+  `look_transform.rs`, `display_view_transform.rs`, `group_transform.rs`,
+  `file_transform.rs`, `fileformats/file_format_ctf.rs`), and for two look options in
+  `p4-ctf-bake` (`look_transform.rs`, `build_first_look_option`); the total in `p4-ctf-bake`
+  (`transform.rs`, `MAX_NESTING_WEIGHT`, `Level` and `Nesting`; the files' level in
+  `file_transform.rs`). Tests (`crates/ocio/tests/config_processors_oracle.rs`): a color space
+  that names itself and one that reaches itself through a look are refused in both directions
+  where the wheel crashes; `the_deepest_chains_below_the_limit_match_the_wheel`: the longest
+  chain of each kind the port accepts, alone and then 256 CTF files (`KINDS`: groups around the
+  links, two look options and the two mixes of the table included), has the length the weights
+  give, written in the test, and is the wheel's processor (on a test thread's stack, debug and
+  release), and one link more the wheel still builds while the port refuses;
+  `groups_count_in_the_total_nesting` (the verifier's 5 groups) and
+  `groups_count_in_the_total_without_the_processor_cache` (the same with the processor cache
+  off; the processor still collects the context variables first, as upstream's does);
+  `the_deepest_chains_build_on_a_1_mib_thread` and
+  `the_deepest_chains_of_transforms_then_of_references_build_on_a_1_mib_thread` build the
+  longest chain of each kind of the table both ways on a 1 MiB thread, and
+  `a_chain_of_color_spaces_then_of_references_builds_on_a_1_mib_thread` checks that mixed
+  chain's processor with the wheel; `the_nesting_weight_limit_is_exact`
+  (`crates/ocio/src/transform_tests.rs`) pins the limit and the weights of groups, file
+  transforms and files: 766 groups around a file transform of 193 CTF files weigh 68,150 and
+  build, 726 groups around one of 236 files weigh 68,151 and are refused, through `BuildOps`
+  alone and through the processor with its cache on and off, on a 1 MiB thread. A nightly job of `.github/workflows/sde.yml` runs them, with
+  `chains_of_references_stop_at_the_limit` (U-76) and `deep_groups_fit_a_small_stack` (U-60),
+  at opt-level 0 on Windows and Rocky Linux 9.
 
 ### U-60. GroupTransforms nested deep enough to overflow the wheel's stack
 
@@ -3205,3 +3915,166 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   parsing info.
 - **Status:** matched in `p4-cdl` (4.4d, `crates/ocio/src/fileformats/cdl/cdl_parser.rs`,
   `missing_root_error`; `a_cdl_or_ccc_without_its_root_element_is_refused`).
+
+### U-76. Chains of CTF references long enough to overflow the stack
+
+- **Upstream:** a CTF Reference builds its file through `BuildFileTransformOps`
+  (`fileformats/FileFormatCTF.cpp:1218-1248` @ v2.5.2), which builds the referenced CTF file's
+  ops, references included (`transforms/FileTransform.cpp:895-970`): the build recurses once
+  per file of a chain. The recursion check stops cycles (a reference resolves to the same path
+  each time, so a cycle repeats a path within one turn), but nothing bounds a legal chain, each
+  file referencing the next. The wheel's `getProcessor` of a chain of CTF files crashes (the
+  process ends) at these lengths, in Python's main thread (the verifier's `deep.py`,
+  2026-10-16):
+
+  | | Builds | Crashes |
+  |---|---|---|
+  | Windows | 2,100 files | 2,125 files |
+  | Linux | 9,000 files | 10,000 files |
+
+  The depth varies with the caller's stack.
+- **Who notices:** a machine-made chain of hundreds of CTF files; nothing hand-written.
+- **Decided** (the owner's general rule, refusing where the port's own stack still holds the
+  chain; owner, 2026-10-17, after the coordinator's first limit of 1,000 of 2026-10-16): the
+  port refuses a chain of more than 256 files (`MAX_FILE_NESTING`, U-58's limit) with "The CTF
+  references nest more than 256 files deep: upstream's stack overflows." Between that and the
+  wheel's crash the port refuses what the wheel builds. The port's frames per file (its
+  loading, its errors, the reference's file transform and the LUTs' copies are kept out of
+  line, and the recursive calls' results returned without `?`, as for U-58) decide what a
+  thread holds; a 1 MiB thread on Windows (measured 2026-10-17, `group-5`):
+
+  | Build | Builds | Overflows |
+  |---|---|---|
+  | opt-level 0 | 759 files | 766 files (about 1.4 KB a file) |
+  | opt-level 1, the test profile | 1,647 files | 1,658 files (about 630 bytes a file) |
+
+  So 256 files fit at every optimization level, with room for the caller's frames. The
+  references recurse through the file transform alone, never through `BuildOps`, so the two
+  limits count apart: U-58's 256 levels of nested transforms can only come before a chain of
+  references on the stack, never between its files. That mixed chain (U-58's longest chain of
+  color spaces, the last one's transform a file transform starting a chain of 256 files)
+  builds on a 1 MiB thread at opt-level 0 in 641 KiB (U-58). The files also count in U-58's
+  weighted total (`MAX_NESTING_WEIGHT`, 2026-10-17), 67 each, with the transforms and the
+  groups before them: one budget bounds every mix (U-58's tables).
+- **Status:** done in `p4-ctf-read-3` (`crates/ocio/src/transforms/file_transform.rs`,
+  `FileNesting`, in `build_file_transform_ops`). Tests: `chains_of_references_stop_at_the_limit`
+  (`file_transform_tests.rs`) builds a chain of 256 files on a 1 MiB thread, in debug and
+  release, and refuses 257; `references_resolve_as_in_the_wheel`'s "the longest chain"
+  (`crates/ocio/tests/file_format_ctf_oracle.rs`) checks the 256-file processor with the
+  wheel; `a_chain_of_color_spaces_then_of_references_builds_on_a_1_mib_thread`
+  (`crates/ocio/tests/config_processors_oracle.rs`, `group-5`) builds the mixed chain on a
+  1 MiB thread and checks its processor with the wheel.
+
+### U-77. Bakes whose sizes overflow an `int`
+
+- **Upstream:** the bakes size their buffers with `int` products of the baker's sizes:
+  `cubeData.resize(cubeSize*cubeSize*cubeSize*3)` in every 3D bake, and `onedSize * 3` and
+  `shaperSize * 3` for the 1D LUTs and shapers (`FileFormatSpi3D.cpp:289`,
+  `FileFormatSpi1D.cpp:350`, `FileFormatResolveCube.cpp:609, 625, 651`,
+  `FileFormatHDL.cpp:680, 695, 720`, `FileFormatCSP.cpp:716, 732-733, 778-779`,
+  `FileFormatCTF.cpp:1469, 1494` @ v2.5.2, and the cubes of the Iridas cube, itx, 3DL and
+  Truelight bakes).
+  From a cube size of 895 (`895^3 * 3 = 2,150,752,125`) or a 1D or shaper size of 715,827,883,
+  the product passes `INT_MAX`: undefined behaviour. Both wheels wrap it to 32 bits (MSVC;
+  GCC multiplies 32-bit registers and sign-extends the result, `imul`, `movsxd` at
+  `libOpenColorIO.so` 0x2825df-0x2825eb in the Truelight bake), and `resize` takes the wrapped
+  `int` as a `size_t`.
+  - A negative result is past `max_size()`, and nothing is allocated or written. Windows:
+    "vector too long" ("Error baking spi3d:vector too long" for 895 and 1291, probed
+    2026-10-16). Linux: libstdc++'s "vector::_M_default_append" where `resize` checks the
+    size (the Resolve cube, Houdini, Cinespace and CLF/CTF bakes, their shapers, and the
+    Spi1D, Resolve, Houdini and CLF/CTF 1D LUTs; the CLF/CTF bake at `libOpenColorIO.so`
+    0x245914-0x24592f and 0x245e08-0x245e14, its errors probed 2026-10-18), and
+    "std::bad_alloc" where GCC removed the check (the Spi3D, Iridas cube and itx, Flame 3DL
+    and Truelight cubes: their cube size is at least 2, so without overflow the product can't
+    pass `max_size()`) and `operator new` is asked for the wrapped size times 4 bytes (probed
+    2026-10-17).
+  - A positive result (the cube size 1290: `6,440,067,000` wraps to `2,145,099,704`; the 1D
+    size `2^32 / 3 + 1`: wraps to 2, and the buffer is resized to 2 floats) allocates fewer
+    floats than the bake then writes: upstream writes past its buffer, on both platforms.
+- **Who notices:** callers that set a cube, 1D or shaper size in the hundreds or millions.
+- **Decided** (the owner's general rule, 2026-09-30, as U-5 and U-65; confirmed for this case
+  2026-10-16): the port refuses every size whose product passes an `int` before it allocates.
+  Where the wrapped size is negative it gives the wheel's error ("vector too long" on Windows;
+  on Linux "vector::_M_default_append" or "std::bad_alloc", bake by bake as above); where it
+  is positive, on both platforms, its own "The LUT's <n> values overflow the int that sizes
+  its buffer.". Sizes that fit are allocated as upstream does, and a failed allocation is the
+  C++ library's `std::bad_alloc` too, where Rust would abort.
+- **Status:** matched with errors in `p4-baker` (`crates/ocio/src/baking_utils.rs`,
+  `bake_buffer`, used by every bake); `overflowing_sizes_fail_as_in_the_wheel`
+  (`crates/ocio/tests/bake_formats_oracle.rs`, both platforms), and `baking_utils_tests.rs`.
+  The sizes one below the overflow (894, 715,827,882) allocate 8.6 GB in both wheels and the
+  positive wraps write past the buffer, so no test runs them. The CLF/CTF bake
+  (`p4-ctf-bake`) takes `LinuxResize::Checked` at both sites;
+  `overflowing_sizes_fail_as_in_the_wheel` (`crates/ocio/tests/ctf_bake_oracle.rs`, both
+  platforms) checks its cube, its cube after a shaper and its 1D LUT.
+
+### U-78. An archive entry named `..` reads uninitialized memory when extracted
+
+- **Upstream:** `ExtractOCIOZArchive` resolves each entry's name with minizip-ng's
+  `mz_path_resolve` (`mz_os.c:129-200` @ 4.0.10, called by `mz_zip_reader_save_all`,
+  `mz_zip_rw.c:818-907`) into a buffer it `realloc`s from entry to entry. A `..` at the start
+  of a name makes it test the buffer's first byte (`mz_os_is_dir_separator(*target)`), which
+  nothing may have written yet: on the first entry it is memory `malloc` left uninitialized.
+  Where the name goes on after the `..` the byte's value doesn't matter. Where the name is
+  only `..`s (`..`, `../`, `../..`, and on Windows `..\`), it decides whether the resolved
+  name is empty or a separator, and the entry is saved at the destination with one slash or
+  two after it, which extracts the same way: a directory entry (`../`, `..\`) makes the
+  destination, and the extraction goes on (the wheels extract the entries after it, probed
+  2026-10-17); a file entry (`..`, `../..`) can't be opened as a file, and both wheels fail
+  ("Could not extract: <archive>").
+- **Who notices:** applications extracting archives with an entry named `..`.
+- **Decided** (the owner's general rule, 2026-09-30, as the outcome doesn't depend on the
+  byte): the port's `mz_path_resolve` takes a byte nothing wrote for one that isn't a
+  separator, and extracts as both wheels do; where an earlier entry wrote the byte, the port
+  uses it, as `realloc` keeps it.
+- **Status:** matched in `p4-baker` (`crates/ocio/src/minizip/mz_os.rs`);
+  `crates/ocio/tests/ocioz_extract_oracle.rs`, the names `..`, `../`, `../..` and `..\` first
+  in their archives.
+
+### U-79. A directory entry whose name is longer than 255 UTF-8 bytes, on Windows
+
+- **Upstream:** `Config::archive` lists the config's directory with minizip-ng's
+  `mz_os_read_dir` (`OCIOZArchive.cpp:150-201` @ v2.5.2; minizip-ng `mz_os_win32.c:401-421` @
+  4.0.10), which converts each name of the listing (`.` and `..` first) from UTF-16 into the
+  same 256 bytes of `d_name` (`WideCharToMultiByte`); the byte after `d_name` is the listing's
+  `end` flag (0, and 1 once the last entry is read; `DIR_int`, `mz_os_win32.c:30-35`), then
+  the structure's padding. `malloc` left all of it uninitialized. A name longer than 255
+  bytes doesn't fit with its NUL: the conversion writes the whole characters that fit in the
+  256 bytes and fails, and the bytes after them stay as they were. OpenColorIO reads
+  `d_name` as a C string: the cut, then what earlier entries wrote after it, up to a NUL, or
+  up to `end`'s 0 where the 256 bytes hold none (I-222). Where that read reaches a byte of
+  `d_name` no entry wrote, or, for the last entry, `end`'s 1 and the padding, the name read
+  depends on memory nothing wrote (the Windows wheel left such files out, probed
+  2026-10-17).
+- **Who notices:** applications archiving configs next to files with very long names.
+- **Decided** (the owner's general rule, 2026-09-30): the port reads each name as minizip-ng
+  leaves it in `d_name`, earlier entries' bytes included (I-222); where the read reaches a
+  byte nothing wrote, or the padding after the last entry, `Config::archive` fails with
+  "Could not archive <path>: its name is longer than minizip-ng reads.".
+- **Status:** matched in `p4-baker`, with an error where upstream reads memory nothing wrote
+  (`crates/ocio/src/minizip/mz_os.rs`, `mz_os_list_dir`, which keeps `d_name` across the
+  listing; `crates/ocio/src/ocioz_archive.rs`); `crates/ocio/tests/ocioz_archive_oracle.rs`,
+  `long_names` (Windows: against the wheel where the name read is fixed, the port alone where
+  it isn't).
+
+### U-80. Archiving a config next to a dangling link whose name holds `*` overflows the stack
+
+- **Upstream:** `Config::archive` adds each LUT file it lists with minizip-ng's
+  `mz_zip_writer_add_path` (`OCIOZArchive.cpp:183-187` @ v2.5.2; `mz_zip_rw.c:1649-1729` @
+  4.0.10). A path with a `*` anywhere (in a directory's name too) that doesn't exist is taken
+  for a wildcard: the function lists the path's directory and adds each entry whose name
+  matches the path's last component. On Linux a dangling link with a LUT extension in a
+  directory whose name holds a `*`, or whose own name holds one, is such a path, and it
+  matches itself, so the function calls itself on it again without end, each call holding a
+  directory open, until the stack overflows: the Linux wheel crashes (SIGSEGV, probed
+  2026-10-17). Where the process may open few files (a low `ulimit -n`), the listing fails
+  first and the wheel throws "Could not write LUT file <path> to in-memory archive." instead.
+  On Windows names can't hold `*`.
+- **Who notices:** applications archiving a config whose directory holds such a link.
+- **Decided** (the owner's general rule, 2026-09-30): the port's `add_path` returns an error
+  for a path with a `*` anywhere that doesn't exist, and `Config::archive` fails with "Could
+  not write LUT file <path> to in-memory archive." (the low-limit outcome).
+- **Status:** matched with an error in `p4-baker` (`crates/ocio/src/minizip/mz_zip_rw.rs`,
+  `add_path_of_file`); `crates/ocio/tests/ocioz_archive_oracle.rs`, `dangling_link_with_a_star`
+  (Linux, the port only).

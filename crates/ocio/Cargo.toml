@@ -12,6 +12,7 @@ publish.workspace = true
 [dependencies]
 ocio-ops.workspace = true
 ocio-formats.workspace = true
+flate2.workspace = true
 ocio-gpu.workspace = true
 
 [dev-dependencies]

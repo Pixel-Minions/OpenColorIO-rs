@@ -3,8 +3,8 @@
 
 //! The tests of `tests/cpu/transforms/CDLTransform_tests.cpp` @ v2.5.2 that read CDL files
 //! (`CDLTransform::CreateFromFile`, `CreateGroupFromFile`). They are a test target of their
-//! own, as `clear_caches` empties the global caches, which other tests of the library rely on.
-//! `faulty_file_content` comes with the CTF reader (WP 4.5): its last case reads a CTF file.
+//! own, as `clear_caches` and `faulty_file_content` empty the global caches, which other tests
+//! of the library rely on.
 //! Upstream mutes the warnings `create_from_cdl_file` expects (`MuteLogging`); here they go to
 //! the default logging function.
 
@@ -305,4 +305,71 @@ fn clear_caches() {
     check_equal(slope[0], 1.1);
     check_equal(slope[1], 2.2);
     check_equal(slope[2], 3.3);
+}
+
+/// What OCIO logs while `f` runs, at the debug level.
+///
+/// Port of `LogGuard` (tests/cpu/UnitTestLogUtils.cpp:33-67 @ v2.5.2): the debug level and a
+/// logging function that keeps the messages, then the default function and the level again.
+fn log_guard<T>(f: impl FnOnce() -> T) -> (T, String) {
+    use std::sync::{Arc, Mutex};
+
+    use ocio_ops::logging::{
+        get_logging_level, reset_to_default_logging_function, set_logging_function,
+        set_logging_level,
+    };
+    use ocio_ops::open_color_types::LoggingLevel;
+
+    let log_level = get_logging_level();
+    set_logging_level(LoggingLevel::Debug);
+    let output = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&output);
+    set_logging_function(Some(Arc::new(move |m: &[u8]| {
+        sink.lock().unwrap().extend_from_slice(m);
+    })))
+    .unwrap();
+    let out = f();
+    reset_to_default_logging_function();
+    set_logging_level(log_level);
+    let output = String::from_utf8_lossy(&output.lock().unwrap()).into_owned();
+    (out, output)
+}
+
+/// Port of `OCIO_ADD_TEST(CDLTransform, faulty_file_content)` @ v2.5.2.
+#[test]
+fn faulty_file_content() {
+    let guard = FileGuard::new();
+
+    {
+        guard.write(&format!("{CONTENTS_A}Some Extra faulty information"));
+
+        // Detailed parsing error is part of the debug log.
+        check_throw_what(
+            CdlTransform::from_file(&guard.filename, "cc03343"),
+            "All formats have been tried",
+        );
+    }
+    clear_all_caches();
+    {
+        // Duplicated identifier.
+
+        let found = CONTENTS_A.find("cc03344");
+        assert!(found.is_some());
+        let faulty_content = CONTENTS_A.replacen("cc03344", "cc03343", 1);
+
+        guard.write(&faulty_content);
+
+        // Detailed parsing error is part of the debug log.
+        let (result, output) = log_guard(|| CdlTransform::from_file(&guard.filename, "cc03343"));
+        check_throw_what(result, "All formats have been tried");
+        assert!(output.contains("Error loading ccc xml. Duplicate elements with 'cc03343' found"));
+    }
+
+    {
+        let file_path = format!("{}/cdl_various.ctf", get_test_files_dir());
+        check_throw_what(
+            CdlTransform::from_file(&file_path, "0"),
+            "Not a CDL file format",
+        );
+    }
 }

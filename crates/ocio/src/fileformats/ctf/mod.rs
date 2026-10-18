@@ -7,4 +7,5 @@
 pub mod ctf_reader_helper;
 pub mod ctf_reader_utils;
 pub mod ctf_transform;
+pub mod ctf_writer;
 pub mod index_mapping;

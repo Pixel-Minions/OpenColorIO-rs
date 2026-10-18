@@ -3,8 +3,8 @@
 
 //! Tests of the group transform: `tests/cpu/transforms/GroupTransform_tests.cpp` @ v2.5.2.
 //! `basic` came with the FixedFunction transform (`p3-after-p2`); `write_formats` and
-//! `write_with_noops` need the file writers and come with them. The text and the validation
-//! are compared with the wheel's in `tests/transform_oracle.rs`.
+//! `write_with_noops` with the CLF/CTF writer (`p4-ctf-read-3`, WP 4.6e). The text and the
+//! validation are compared with the wheel's in `tests/transform_oracle.rs`.
 
 use super::*;
 
@@ -239,20 +239,89 @@ fn a_failing_output_stream_is_not_an_error() {
     assert!(err.to_string().contains("there should be a single CDL"));
 }
 
-/// The CLF and CTF writers aren't ported yet: writing them is the port's "not ported yet"
-/// error, not upstream's "does not support writing", which a format that doesn't write gives.
+/// The name of the write format of the extension `extension` (ignoring case), or `""`.
+///
+/// Port of `GetFormatName` (tests/cpu/transforms/GroupTransform_tests.cpp:55-68 @ v2.5.2).
+fn get_format_name(extension: &str) -> Vec<u8> {
+    // All extensions are lower case.
+    let requested_ext = extension.to_ascii_lowercase();
+    let num_formats = GroupTransform::num_write_formats();
+    for i in 0..num_formats {
+        let format_ext = GroupTransform::format_extension_by_index(i);
+        if requested_ext.as_bytes() == format_ext {
+            return GroupTransform::format_name_by_index(i).to_vec();
+        }
+    }
+    Vec::new()
+}
+
+/// Port of `OCIO_ADD_TEST(GroupTransform, write_formats)` @ v2.5.2.
 #[test]
-fn the_unported_writers_say_so() {
-    let config = Config::new().expect("a config");
-    let mut group = GroupTransform::new();
-    group.append_transform(crate::transforms::cdl_transform::CdlTransform::new().into());
-    let mut out = Vec::new();
-    let err = group
-        .write(&config, "Color Transform Format", &mut out)
-        .expect_err("not ported yet");
+fn write_formats() {
+    use crate::transforms::file_format::{
+        FILEFORMAT_CLF, FILEFORMAT_COLOR_CORRECTION, FILEFORMAT_COLOR_CORRECTION_COLLECTION,
+        FILEFORMAT_COLOR_DECISION_LIST, FILEFORMAT_CTF,
+    };
+
+    assert_eq!(GroupTransform::num_write_formats(), 5);
+
+    assert_eq!(get_format_name("CLF"), FILEFORMAT_CLF.as_bytes());
+    assert_eq!(get_format_name("CTF"), FILEFORMAT_CTF.as_bytes());
     assert_eq!(
-        err.to_string(),
-        "Error writing format 'Color Transform Format': The writer of the 'Color Transform \
-         Format' file format is not ported yet."
+        get_format_name("cc"),
+        FILEFORMAT_COLOR_CORRECTION.as_bytes()
     );
+    assert_eq!(
+        get_format_name("ccc"),
+        FILEFORMAT_COLOR_CORRECTION_COLLECTION.as_bytes()
+    );
+    assert_eq!(
+        get_format_name("cdl"),
+        FILEFORMAT_COLOR_DECISION_LIST.as_bytes()
+    );
+    assert!(get_format_name("XXX").is_empty());
+}
+
+/// Port of `OCIO_ADD_TEST(GroupTransform, write_with_noops)` @ v2.5.2.
+#[test]
+fn write_with_noops() {
+    use crate::fileformats::test_utils::get_test_files_dir;
+    use crate::transforms::file_format::FILEFORMAT_CLF;
+    use crate::transforms::file_transform::FileTransform;
+
+    // The unit test validates that the no-ops are transparent when writing to a lut file
+    // format.
+
+    let config = Config::new().unwrap();
+
+    // `CreateFileTransform` (tests/cpu/UnitTestUtils.cpp:39-48 @ v2.5.2).
+    let create_file_transform = |file_name: &str| {
+        let mut file = FileTransform::new();
+        file.set_src(format!("{}/{file_name}", get_test_files_dir()));
+        file
+    };
+
+    // Step 1 - Write to CLF from a group transform.
+
+    {
+        let file = create_file_transform("logtolin_8to8.lut");
+
+        let mut group = GroupTransform::new();
+        group.append_transform(Transform::File(file));
+
+        let mut oss = Vec::new();
+        group.write(&config, FILEFORMAT_CLF, &mut oss).unwrap();
+    }
+
+    // Step 2 - Write to CLF from a processor.
+
+    {
+        let file = create_file_transform("logtolin_8to8.lut");
+
+        let proc = config.processor(&Transform::File(file)).unwrap();
+        let group = proc.create_group_transform().unwrap();
+
+        let mut oss = Vec::new();
+        group.write(&config, FILEFORMAT_CLF, &mut oss).unwrap();
+    }
 }

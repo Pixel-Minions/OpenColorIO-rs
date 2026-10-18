@@ -2,8 +2,8 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Port of `tests/cpu/ops/lut1d/Lut1DOpData_tests.cpp` @ v2.5.2: the tests of the forward
-//! LUT, of the inverse's set-up and of composition. `make_fast_from_inverse_*` read files
-//! (Phase 4).
+//! LUT, of the inverse's set-up and of composition. `make_fast_from_inverse_*` read files:
+//! they are in `crates/ocio/src/file_tests/`, with the readers.
 
 use ocio_testkit::upstream::{check_close, check_throw_what};
 

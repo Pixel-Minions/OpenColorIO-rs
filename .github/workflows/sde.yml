@@ -115,3 +115,56 @@ jobs:
       - name: SDE logs
         if: failure()
         run: find . -name 'pin-*log.txt' -not -path './target/*' -exec tail -n 40 {} +
+
+  # The limits of nested transforms and CTF references (docs/improvements.md, U-58 and U-76)
+  # hold on a 1 MiB thread at every optimization level: the depth tests at opt-level 0, where
+  # the frames are largest. Nightly only: the test profile (opt-level 1) runs them on every PR.
+  stack-windows:
+    name: Depth limits at opt-level 0 (Windows)
+    if: github.event_name != 'pull_request'
+    runs-on: windows-2025
+    timeout-minutes: 120
+    env:
+      CARGO_PROFILE_DEV_OPT_LEVEL: "0"
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.11.7"
+      - name: Toolchain (rust-toolchain.toml)
+        run: rustup show active-toolchain || rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: stack-opt0
+      - name: Oracle environment
+        run: cargo xtask oracle info
+      # bash, so that the first command's failure fails the step (under pwsh only the last
+      # command's exit code counts).
+      - name: Depth tests at opt-level 0
+        shell: bash
+        run: |
+          set -e
+          cargo test -p ocio --test config_processors_oracle -- 1_mib_thread groups_count_in
+          cargo test -p ocio --lib -- chains_of_references_stop_at_the_limit deep_groups_fit_a_small_stack the_nesting_weight_limit_is_exact
+
+  stack-rocky9:
+    name: Depth limits at opt-level 0 (Rocky Linux 9)
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true
+      - name: Build the reference image
+        run: docker build -t ocio-rs-rocky9:1 docker/rocky9
+      - name: Depth tests at opt-level 0
+        run: |
+          scripts/rocky9.sh bash -ec '
+            export CARGO_PROFILE_DEV_OPT_LEVEL=0
+            cargo xtask oracle info
+            cargo test -p ocio --test config_processors_oracle -- 1_mib_thread groups_count_in
+            cargo test -p ocio --lib -- chains_of_references_stop_at_the_limit deep_groups_fit_a_small_stack the_nesting_weight_limit_is_exact
+          '

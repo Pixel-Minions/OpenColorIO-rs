@@ -2,9 +2,10 @@
 # Copyright Contributors to the OpenColorIO Project.
 """Oracle command for the LUT baker (card p4-oracle, chunk O4.4).
 
-- bake: a Baker on a config, its setters and format metadata in order, then bake(): the
-  text it returns and the bytes of the file the other overload writes, the getters after the
-  setters, or what raised, and the log.
+- bake: a Baker on a config (or on none), its setters and format metadata in order, then
+  bake(): the text it returns and the bytes of the file the other overload writes, the getters
+  after the setters, or what raised (with what the file overload left in its file), and the
+  log.
 
 Configs that name files (LUTs, search paths) run through with_files (files_api.py), with
 {"file": "$FILES/config.ocio"} as the config.
@@ -22,8 +23,9 @@ import tempfile
 import PyOpenColorIO as OCIO
 
 from . import spec
-from .checks import check_keys
-from .commands import RAISED, captured_log, command, exception_result, wheel_raised
+from .checks import check_bool, check_keys
+from .commands import (RAISED, UndecodableMessage, captured_log, command, exception_result,
+                       wheel_raised)
 from .config_api import RequestError, text
 
 # The Baker setters "calls" may use.
@@ -56,23 +58,67 @@ def _checked_calls(what, calls, allowed):
     return out
 
 
+# The start of every OCIO log line (Logging.cpp:75-87, 176-195): "[OpenColorIO Warning]: ...".
+LOG_LINE = b"[OpenColorIO "
+
+
+def _not_a_log_line(exc):
+    """Refuses the request when the UnicodeDecodeError `exc` failed to decode an OCIO log line,
+    not a value or an exception's message: the oracle's logging callback (captured_log) can't
+    take a message that isn't UTF-8, and pybind11 raises the error where OCIO logged it, in place
+    of what the call does with the wheel's own logger."""
+    if bytes(exc.object).startswith(LOG_LINE):
+        raise RequestError(f"bake: OCIO logged a message that isn't UTF-8, which the oracle's "
+                           f"logging callback can't take: {bytes(exc.object)!r}")
+
+
 def _decoded(fn):
     """fn()'s text as {"bytes": hex}, or {"undecodable": hex} where the binding couldn't decode
-    it as UTF-8."""
+    it as UTF-8 (a log line that isn't UTF-8 refuses the request)."""
     try:
         value = fn()
     except UnicodeDecodeError as exc:
+        _not_a_log_line(exc)
         return {"undecodable": bytes(exc.object).hex()}
     return value if isinstance(value, int) else {"bytes": value.encode("utf-8").hex()}
+
+
+def _bake_to(baker, path):
+    """bake(fileName). It returns nothing, so a UnicodeDecodeError is the binding failing to
+    decode an exception's message that isn't UTF-8, raised as UndecodableMessage, or the
+    oracle's logging callback failing to decode a log line, which refuses the request."""
+    try:
+        baker.bake(path)
+    except UnicodeDecodeError as exc:
+        _not_a_log_line(exc)
+        raise UndecodableMessage(exc) from exc
 
 
 def _baked_file(baker):
     """bake(fileName) into a new temporary file (a std::ofstream in text mode): its bytes, hex."""
     with tempfile.TemporaryDirectory() as root:
         path = os.path.join(root, "baked")
-        baker.bake(path)
+        _bake_to(baker, path)
         with open(path, "rb") as f:
             return f.read().hex()
+
+
+def _partial_file(baker):
+    """bake(fileName) into a new temporary file where bake() raised: what it left in the file,
+    hex, or None where it left no file, with what it raised."""
+    with tempfile.TemporaryDirectory() as root:
+        path = os.path.join(root, "baked")
+        try:
+            _bake_to(baker, path)
+            raised = None
+        except RAISED as exc:
+            if not wheel_raised(exc):
+                raise
+            raised = exception_result(exc)
+        if not os.path.exists(path):
+            return {"bytes": None, "exception": raised}
+        with open(path, "rb") as f:
+            return {"bytes": f.read().hex(), "exception": raised}
 
 
 @command
@@ -82,6 +128,8 @@ def bake(args, blobs):
     args:
       config      the config (spec.config: {"yaml": text}, {"builtin": name}, {"file": path},
                   or null for the raw config), given to setConfig first
+      no_config   optional: true to leave the baker without a config (setConfig isn't called;
+                  "config" must then be absent)
       metadata    optional: [[method, arg, ...], ...], FormatMetadata methods (__setitem__,
                   which is the binding's addAttribute, addChildElement, setElementName,
                   setElementValue, setName, setID, clear) called in order on the baker's
@@ -97,20 +145,30 @@ def bake(args, blobs):
                   Windows each LF is written as CR LF)
       exception, stage   when OCIO or the binding raised: {"type", "message"}, and where:
                   "config", "metadata", "setters" or "bake"
-      log         OCIO's log messages
+      partial_file   when bake() raised: what bake(fileName) left in its new file,
+                  {"bytes": hex, or null where it left no file, "exception": what it raised,
+                  or null}; the bytes are written in text mode, as "file"'s are (each line
+                  feed a CR LF on Windows)
+      log         OCIO's log messages, the file overloads' (and partial_file's second bake's)
+                  included
     blobs: none
 
-    An unknown key, a method that isn't listed, or an argument it can't read, is refused.
+    An unknown key, a method that isn't listed, or an argument it can't read, is refused, and so
+    is a bake while which OCIO logs a message that isn't UTF-8 (the oracle's logging callback
+    can't take it).
     """
-    check_keys("bake", args, {"config", "metadata", "calls"})
+    check_keys("bake", args, {"config", "no_config", "metadata", "calls"})
+    no_config = check_bool("bake no_config", args.get("no_config", False))
+    if no_config and "config" in args:
+        raise RequestError("bake: no_config and config can't both be given")
     metadata = _checked_calls("metadata", args.get("metadata", []), METADATA_METHODS)
     calls = _checked_calls("calls", args.get("calls", []), SETTERS)
     stage, result = ["config"], {}
     with captured_log() as log:
         try:
-            config = spec.config(args.get("config"))
             baker = OCIO.Baker()
-            baker.setConfig(config)
+            if not no_config:
+                baker.setConfig(spec.config(args.get("config")))
             stage[0] = "metadata"
             for method, values in metadata:
                 getattr(baker.getFormatMetadata(), method)(*values)
@@ -125,5 +183,7 @@ def bake(args, blobs):
             if not wheel_raised(exc):
                 raise
             result = {"exception": exception_result(exc), "stage": stage[0]}
+            if stage[0] == "bake":
+                result["partial_file"] = _partial_file(baker)
     result["log"] = log
     return result, []
