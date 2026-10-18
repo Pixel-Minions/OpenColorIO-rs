@@ -116,23 +116,27 @@ def _apply(cpu, proc, key, apply, descs, images, buffers):
     cpu.apply(*[descs[i] for i in apply])
 
 
-def _run_step(step, holders, props, descs, images, buffers, out):
-    """One step's result: what it returns, or the exception OCIO or the binding raised."""
+def _run_step(step, holders, props, descs, images, buffers, out, entry):
+    """One step's result. What it learns before it can raise goes in `entry`: a get step's
+    "has", and a set step's "stage" ("value" while it builds the value, "set" while the setter
+    runs)."""
     proc, cpu, key, desc = holders
     if "get" in step:
         source = {"processor": proc, "cpu": cpu, "gpu": desc}[step["from"]]
         kind = OCIO.DynamicPropertyType.__members__[step["get"]]
         props.pop(step["as"], None)
-        result = {"has": source.hasDynamicProperty(kind)}
+        entry["has"] = source.hasDynamicProperty(kind)
         prop = source.getDynamicProperty(kind)
         props[step["as"]] = prop
-        result.update(_property_value(prop))
-        return result
+        return _property_value(prop)
     if "set" in step:
         prop = props.get(step["set"])
         if prop is None:
             return {"unbound": True}
-        getattr(prop, step.get("call") or _default_setter(prop))(spec.value(step["value"]))
+        entry["stage"] = "value"
+        value = spec.value(step["value"])
+        entry["stage"] = "set"
+        getattr(prop, step.get("call") or _default_setter(prop))(value)
         return None
     if "read" in step:
         prop = props.get(step["read"])
@@ -197,13 +201,17 @@ def dynamic_apply(args, blobs):
       steps     per step, in order, {"result": ..., "log": OCIO's log messages during the
                 step} or {"exception": {"type", "message"}, "log": ...} when OCIO or the
                 binding raised; the results:
-                  get       {"has", "type", "value"}: the value as gpu_shader writes a dynamic
+                  get       {"type", "value"}: the value as gpu_shader writes a dynamic
                             property's (a double as {"f64": bits}, a grading value by
-                            checks.dump)
-                  set       null
+                            checks.dump); the entry's "has" is hasDynamicProperty's answer,
+                            also when getDynamicProperty raised
+                  set       null; when it raised, the entry's "stage" says where: "value"
+                            (building the value: an object spec's constructor or setters) or
+                            "set" (the property's setter)
                   read      {"type", "value"}
                   apply     {"buffers": the indices among the response blobs of every buffer,
-                            in order, after the apply}
+                            in order, after the apply}; when the apply raised, the entry's
+                            "buffers" are those indices, of the buffers as it left them
                   uniforms  the uniforms, in order, as gpu_shader writes them
                 A step on a property whose "get" step raised gives {"result": {"unbound": true}}.
       exception, stage   when OCIO or the binding raised before the steps: "config",
@@ -273,13 +281,20 @@ def dynamic_apply(args, blobs):
 
         holders, props, result["steps"] = (proc, cpu, key, desc), {}, []
         for step in steps:
-            logged = len(log)
+            logged, entry = len(log), {}
             try:
-                entry = {"result": _run_step(step, holders, props, descs, images, buffers, out)}
+                entry["result"] = _run_step(step, holders, props, descs, images, buffers, out,
+                                            entry)
+                entry.pop("stage", None)
             except RAISED as exc:
                 if not wheel_raised(exc):
                     raise
-                entry = {"exception": exception_result(exc)}
+                entry["exception"] = exception_result(exc)
+                if "apply" in step:
+                    # The buffers as the failed apply left them, as image_apply returns them.
+                    first = len(out)
+                    out.extend(memory.tobytes() for memory in buffers)
+                    entry["buffers"] = list(range(first, len(out)))
             entry["log"] = log[logged:]
             result["steps"].append(entry)
     return result, out

@@ -99,7 +99,7 @@ fn a_set_exposure_applies_as_a_fixed_one() {
         "{}",
         response.result
     );
-    assert_eq!(s[0]["result"]["has"], json!(true), "{}", response.result);
+    assert_eq!(s[0]["has"], json!(true), "{}", response.result);
     for (i, exposure) in exposures.into_iter().enumerate() {
         let read = &s[2 + 3 * i];
         assert_eq!(read["result"]["value"], f64_spec(exposure), "{read}");
@@ -208,11 +208,15 @@ fn steps_fail_one_at_a_time() {
         "{}",
         response.result
     );
+    // The setter raised, not the value's construction.
+    assert_eq!(s[1]["stage"], json!("set"), "{}", response.result);
     assert!(
         s[2]["exception"]["message"].is_string(),
         "{}",
         response.result
     );
+    // The processor has no contrast property, and says so.
+    assert_eq!(s[2]["has"], json!(false), "{}", response.result);
     assert_eq!(
         s[3]["result"],
         json!({"unbound": true}),
@@ -234,6 +238,102 @@ fn steps_fail_one_at_a_time() {
     // The failed set changed nothing: the apply is the transform's own.
     let expected = fixed_apply(json!({"class": "ExposureContrastTransform"}));
     assert_eq!(applied(&response, &s[7]), expected.as_slice());
+}
+
+/// A name whose get failed is unbound, even when an earlier get bound it; a value whose
+/// construction raises is told from a setter that raises; and a double reads back with
+/// getDouble to its last bit.
+#[test]
+fn names_values_and_bits() {
+    let bad_curve = json!({"object": {"class": "GradingBSplineCurve", "args": [[0.0, 0.0, 0.5]]}});
+    let odd = 1.0f64.to_bits() + 1;
+    let response = dynamic_apply(json!({
+        "transform": {"class": "ExposureContrastTransform", "calls": [["makeExposureDynamic"]]},
+        "steps": [
+            {"get": "DYNAMIC_PROPERTY_EXPOSURE", "from": "cpu", "as": "e"},
+            {"set": "e", "value": {"f64": odd}},
+            {"read": "e", "call": "getDouble"},
+            {"set": "e", "call": "setGradingRGBCurve", "value": bad_curve},
+            {"get": "DYNAMIC_PROPERTY_CONTRAST", "from": "cpu", "as": "e"},
+            {"read": "e"},
+        ],
+    }));
+    let s = steps(&response);
+    assert_eq!(
+        s[2]["result"]["value"],
+        json!({"f64": odd}),
+        "{}",
+        response.result
+    );
+    assert_eq!(s[3]["stage"], json!("value"), "{}", response.result);
+    assert!(
+        s[3]["exception"]["message"].is_string(),
+        "{}",
+        response.result
+    );
+    assert!(
+        s[4]["exception"]["message"].is_string(),
+        "{}",
+        response.result
+    );
+    assert_eq!(
+        s[5]["result"],
+        json!({"unbound": true}),
+        "{}",
+        response.result
+    );
+}
+
+/// What OCIO logs while the processors are made is the command's own log, as cpu_apply
+/// reports it for the same transform, and no step's: a group of two dynamic exposures.
+#[test]
+fn the_log_is_split_between_the_setup_and_the_steps() {
+    let exposure = json!({"class": "ExposureContrastTransform",
+                          "calls": [["makeExposureDynamic"]]});
+    let group = json!({"class": "GroupTransform", "children": [exposure, exposure]});
+    let response = dynamic_apply(with(
+        image_args(),
+        json!({
+            "transform": group,
+            "steps": [
+                {"get": "DYNAMIC_PROPERTY_EXPOSURE", "from": "cpu", "as": "e"},
+                {"set": "e", "value": f64_spec(1.0)},
+                {"apply": [0]},
+            ],
+        }),
+    ));
+    let fixed = Oracle::get().call("cpu_apply", json!({"transform": group}), &[&pixels()]);
+    let log = &response.result["log"];
+    assert!(
+        log.as_array().is_some_and(|l| !l.is_empty()),
+        "{}",
+        response.result
+    );
+    assert_eq!(*log, fixed.result["log"], "{}", response.result);
+    for step in steps(&response) {
+        assert_eq!(step["log"], json!([]), "{}", response.result);
+    }
+}
+
+/// An apply that raises still returns the buffers, as the failed apply left them: here an F32
+/// image for a 16-bit processor.
+#[test]
+fn a_failed_apply_returns_the_buffers() {
+    let response = dynamic_apply(with(
+        image_args(),
+        json!({
+            "transform": {"class": "ExposureContrastTransform",
+                          "calls": [["makeExposureDynamic"]]},
+            "in_bitdepth": "BIT_DEPTH_UINT16", "out_bitdepth": "BIT_DEPTH_UINT16",
+            "steps": [{"apply": [0]}],
+        }),
+    ));
+    let step = &steps(&response)[0];
+    assert!(step["exception"]["message"].is_string(), "{step}");
+    let index = step["buffers"][0]
+        .as_u64()
+        .unwrap_or_else(|| panic!("{step}")) as usize;
+    assert_eq!(response.blobs[index], pixels());
 }
 
 /// A failure before the steps (here a color space the config doesn't have) is reported with
@@ -266,6 +366,9 @@ fn bad_requests_are_refused() {
     let get = json!({"get": "DYNAMIC_PROPERTY_EXPOSURE", "from": "cpu", "as": "e"});
     let bad = [
         json!({"transform": transform, "unknown": 1}),
+        // An unknown key inside a step.
+        json!({"transform": transform, "steps": [{"get": "DYNAMIC_PROPERTY_EXPOSURE",
+                                                  "from": "cpu", "as": "e", "extra": 1}]}),
         json!({"transform": transform, "steps": [{"jump": 1}]}),
         json!({"transform": transform, "steps": [{"get": "DYNAMIC_PROPERTY_EXPOSURE",
                                                   "read": "e", "from": "cpu", "as": "e"}]}),
@@ -298,4 +401,37 @@ fn bad_requests_are_refused() {
             "{args}"
         );
     }
+}
+
+/// image_apply's checks of 10- and 12-bit sources hold inside dynamic_apply: a 10-bit code of
+/// 1024 for a processor that starts with a forward 1D LUT is refused (the wheel would look it
+/// up outside its table), 1023 applies.
+#[test]
+fn ten_bit_codes_are_checked() {
+    let group = json!({"class": "GroupTransform", "children": [
+        {"class": "MatrixTransform", "args": {"offset": [0.125, -0.25, 0.0625, 0.5]}},
+        {"class": "LogTransform", "args": {"base": 2.0}},
+    ]});
+    let args = json!({
+        "transform": group,
+        "in_bitdepth": "BIT_DEPTH_UINT10", "out_bitdepth": "BIT_DEPTH_UINT10",
+        "buffers": [{"blob": 0}],
+        "images": [{"kind": "packed", "data": {"buffer": 0}, "width": 1, "height": 1,
+                    "num_channels": 4, "bitdepth": "BIT_DEPTH_UINT10"}],
+        "steps": [{"apply": [0]}],
+    });
+    let codes = |green: u16| -> Vec<u8> {
+        [0u16, green, 0, 0]
+            .iter()
+            .flat_map(|c| c.to_le_bytes())
+            .collect()
+    };
+    let refused = Oracle::get().try_call("dynamic_apply", args.clone(), &[&codes(1024)]);
+    assert!(refused.is_err(), "{:?}", refused.map(|r| r.result));
+    let applied = Oracle::get().call("dynamic_apply", args, &[&codes(1023)]);
+    assert!(
+        steps(&applied)[0]["result"]["buffers"].is_array(),
+        "{}",
+        applied.result
+    );
 }
