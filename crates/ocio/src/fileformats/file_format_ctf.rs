@@ -293,7 +293,8 @@ impl FileFormat for LocalFileFormat {
     /// baker's metadata becomes the ProcessList's, and [`write`](Self::write) writes the ops.
     ///
     /// Port of `LocalFileFormat::bake` (FileFormatCTF.cpp:1349-1553 @ v2.5.2). The buffers
-    /// sized by `int` expressions of the baker's sizes are [`bake_buffer`]'s (U-77).
+    /// sized by `int` expressions of the baker's sizes are [`bake_buffer`]'s (U-77); the Linux
+    /// wheel's `resize` checks their wrapped sizes (`LinuxResize::Checked`).
     fn bake(&self, baker: &Baker, format_name: &[u8], ostream: &mut OStringStream) -> Result<()> {
         const DEFAULT_1D_SIZE: i32 = 4096;
         const DEFAULT_3D_SIZE: i32 = 64;

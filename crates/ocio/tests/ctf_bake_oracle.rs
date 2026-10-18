@@ -528,20 +528,36 @@ fn size_limits_as_in_the_wheel() {
     check_bakes(&limits());
 }
 
-/// Sizes whose `int` buffer size overflows to a negative value in the Windows wheel, which
-/// then refuses them before it writes anything ("vector too long", docs/improvements.md,
-/// U-77): the smallest such cube (895) and 1D LUT (715,827,883). Only Windows, as in
-/// `bake_formats_oracle.rs`.
-#[cfg(target_os = "windows")]
+/// Sizes whose `int` buffer size wraps to a negative value in both wheels, which then refuse
+/// them before they write anything (docs/improvements.md, U-77): "vector too long" on Windows,
+/// libstdc++'s "vector::_M_default_append" on Linux, where `resize` checks the size
+/// (`FileFormatCTF.cpp:1469, 1494`). The sizes: the smallest cube (895: 895^3 * 3 =
+/// 2,150,752,125 wraps to -2,144,215,171), on its own and after a shaper, 1291 (where the
+/// cube's entries themselves pass an `int`), and the smallest 1D size (715,827,883 * 3 =
+/// 2,147,483,649 wraps to -2,147,483,647). The sizes one below (894, 715,827,882) fit and
+/// allocate 8.6 GB in both wheels, and sizes that wrap to a positive value (1290) make
+/// upstream write past its buffer: neither is run, as in `bake_formats_oracle.rs`.
 #[test]
-fn overflowing_sizes_fail_as_in_the_windows_wheel() {
+fn overflowing_sizes_fail_as_in_the_wheel() {
     let mut cases = Vec::new();
     for format in [CLF, CTF] {
+        for size in [895, 1291] {
+            cases.push(case(
+                &format!("{format} of cube size {size}"),
+                &[
+                    InputSpace("lin"),
+                    TargetSpace("sat"),
+                    CubeSize(size),
+                    Format(format),
+                ],
+            ));
+        }
         cases.push(case(
-            &format!("{format} of cube size 895"),
+            &format!("{format} of cube size 895 after a shaper"),
             &[
                 InputSpace("lin"),
                 TargetSpace("sat"),
+                ShaperSpace("log2"),
                 CubeSize(895),
                 Format(format),
             ],

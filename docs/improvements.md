@@ -3948,8 +3948,9 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `cubeData.resize(cubeSize*cubeSize*cubeSize*3)` in every 3D bake, and `onedSize * 3` and
   `shaperSize * 3` for the 1D LUTs and shapers (`FileFormatSpi3D.cpp:289`,
   `FileFormatSpi1D.cpp:350`, `FileFormatResolveCube.cpp:609, 625, 651`,
-  `FileFormatHDL.cpp:680, 695, 720`, `FileFormatCSP.cpp:716, 732-733, 778-779` @ v2.5.2,
-  and the cubes of the Iridas cube, itx, 3DL and Truelight bakes).
+  `FileFormatHDL.cpp:680, 695, 720`, `FileFormatCSP.cpp:716, 732-733, 778-779`,
+  `FileFormatCTF.cpp:1469, 1494` @ v2.5.2, and the cubes of the Iridas cube, itx, 3DL and
+  Truelight bakes).
   From a cube size of 895 (`895^3 * 3 = 2,150,752,125`) or a 1D or shaper size of 715,827,883,
   the product passes `INT_MAX`: undefined behaviour. Both wheels wrap it to 32 bits (MSVC;
   GCC multiplies 32-bit registers and sign-extends the result, `imul`, `movsxd` at
@@ -3958,11 +3959,13 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   - A negative result is past `max_size()`, and nothing is allocated or written. Windows:
     "vector too long" ("Error baking spi3d:vector too long" for 895 and 1291, probed
     2026-10-16). Linux: libstdc++'s "vector::_M_default_append" where `resize` checks the
-    size (the Resolve cube, Houdini and Cinespace bakes, their shapers, and the Spi1D,
-    Resolve and Houdini 1D LUTs), and "std::bad_alloc" where GCC removed the check (the
-    Spi3D, Iridas cube and itx, Flame 3DL and Truelight cubes: their cube size is at least 2,
-    so without overflow the product can't pass `max_size()`) and `operator new` is asked for
-    the wrapped size times 4 bytes (probed 2026-10-17).
+    size (the Resolve cube, Houdini, Cinespace and CLF/CTF bakes, their shapers, and the
+    Spi1D, Resolve, Houdini and CLF/CTF 1D LUTs; the CLF/CTF bake at `libOpenColorIO.so`
+    0x245914-0x24592f and 0x245e08-0x245e14, its errors probed 2026-10-18), and
+    "std::bad_alloc" where GCC removed the check (the Spi3D, Iridas cube and itx, Flame 3DL
+    and Truelight cubes: their cube size is at least 2, so without overflow the product can't
+    pass `max_size()`) and `operator new` is asked for the wrapped size times 4 bytes (probed
+    2026-10-17).
   - A positive result (the cube size 1290: `6,440,067,000` wraps to `2,145,099,704`; the 1D
     size `2^32 / 3 + 1`: wraps to 2, and the buffer is resized to 2 floats) allocates fewer
     floats than the bake then writes: upstream writes past its buffer, on both platforms.
@@ -3979,10 +3982,9 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   (`crates/ocio/tests/bake_formats_oracle.rs`, both platforms), and `baking_utils_tests.rs`.
   The sizes one below the overflow (894, 715,827,882) allocate 8.6 GB in both wheels and the
   positive wraps write past the buffer, so no test runs them. The CLF/CTF bake
-  (`FileFormatCTF.cpp:1469, 1494`, `p4-ctf-bake`) wraps its sizes the same way and checks them
-  in `resize` (Linux 0x245914-0x24592f, 0x245e08-0x245e14): it takes `LinuxResize::Checked`;
-  `overflowing_sizes_fail_as_in_the_windows_wheel` (`crates/ocio/tests/ctf_bake_oracle.rs`)
-  checks it on Windows.
+  (`p4-ctf-bake`) takes `LinuxResize::Checked` at both sites;
+  `overflowing_sizes_fail_as_in_the_wheel` (`crates/ocio/tests/ctf_bake_oracle.rs`, both
+  platforms) checks its cube, its cube after a shaper and its 1D LUT.
 
 ### U-78. An archive entry named `..` reads uninitialized memory when extracted
 
