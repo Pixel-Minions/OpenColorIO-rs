@@ -6,44 +6,181 @@
   calls in order on them, on the objects the calls make or return (ColorSpaceMenuParameters,
   ColorSpaceMenuHelper, LegacyViewingPipeline, MixingColorSpaceManager, MixingSlider, ...) and
   on the module functions of DisplayViewHelpers and ColorSpaceHelpers; each call's result or
-  exception and log; and the processors the calls made, written out as processor_ops writes
-  them.
+  exception and log, every value written out exactly by checks.dump (a processor as
+  processor_ops writes it, a config by serialize()); and the processors the calls stored,
+  written out the same way.
 
-It runs on config_calls' engine (config_api.py): the same environment, files, values, calls and
-dumps.
+It takes config_calls' frame from config_api.py (the environment, the files, the config
+sources, the call targets and argument values, the log), with its own call loop, whose values
+go out through checks.dump: config_calls' value_out writes an object's getters and repr only,
+and a grading value's fields are properties.
 
 Like every oracle command, it reports what the library does and never computes expected
 values.
 """
 
+import copy
+
 import PyOpenColorIO as OCIO
 
 from . import spec
-from .commands import command
-from .config_api import RequestError, make_config, run_request
+from .checks import dump
+from .commands import command, wheel_raised
+from .config_api import (REPORTED, LogCapture, RequestError, _check_current_config, _method,
+                         _target, check_keys, check_source, directory, environment, hex_bytes,
+                         make_config, raised, value_in)
 from .processor_ops import _processor_dump
 
 # The binding's helper modules, which the calls reach by these names ("on").
 HELPER_MODULES = ("DisplayViewHelpers", "ColorSpaceHelpers")
 
+# The names the request's objects can't take.
+RESERVED = ("config", "OCIO", *HELPER_MODULES)
 
-def _value_objects(specs):
-    """The value objects of the request's "objects": {name: object spec} (spec.value_object).
-    A spec the oracle can't read is the request's error; what the binding's constructors and
-    setters raise is the library's, and fails the config's making (no call runs then)."""
-    if not isinstance(specs, dict):
-        raise RequestError(f"objects must be an object of name: object spec, not {specs!r}")
-    out = {}
-    for name, object_spec in specs.items():
-        if name in ("config", "OCIO", *HELPER_MODULES):
-            raise RequestError(f"objects can't be stored as {name!r}")
-        try:
-            out[name] = spec.value_object(object_spec)
-        except (OCIO.Exception, OCIO.ExceptionMissingFile):
+# The call kinds and the keys each takes.
+CALL_KEYS = {
+    "call": {"call", "on", "args", "kwargs", "as"},
+    "new": {"new", "args", "kwargs", "as"},
+    "copy": {"copy", "as"},
+    "dump": {"dump"},
+}
+
+
+def _library(exc):
+    """Whether an exception is the library's (OCIO's, or the binding's std::runtime_error), as
+    opposed to the oracle's own (a spec it can't read, pybind11 finding no overload)."""
+    return wheel_raised(exc)
+
+
+def _build_object(what, object_spec):
+    """The value object of an object spec (spec.value_object). What the library raises goes on
+    to the caller, which reports it; anything else is the request's error."""
+    try:
+        return spec.value_object(object_spec)
+    except Exception as exc:  # noqa: BLE001 - sorted into the library's and the request's
+        if _library(exc) or isinstance(exc, UnicodeDecodeError):
             raise
-        except (ValueError, KeyError, AttributeError, TypeError) as exc:
-            raise RequestError(f"objects[{name!r}]: {exc}") from exc
-    return out
+        raise RequestError(f"{what}: {exc!r}") from exc
+
+
+def _value(v, objects):
+    """A call argument: config_api.value_in's values, and {"object": spec}, a value object."""
+    if isinstance(v, dict) and set(v) == {"object"}:
+        return _build_object("an object value", v["object"])
+    if isinstance(v, list):
+        return [_value(x, objects) for x in v]
+    return value_in(v, objects)
+
+
+def _write(value, blobs):
+    """A value written out exactly: a processor as processor_ops writes it ({"class":
+    "Processor", "processor": ...}), a config by serialize() ({"class": "Config",
+    "serialize": {"bytes": hex}}), anything else by checks.dump (floats as their bits, objects
+    with their getters and properties, arrays among the response blobs)."""
+    if isinstance(value, OCIO.Processor):
+        return {"class": "Processor", "processor": _processor_dump(value, blobs)}
+    if isinstance(value, OCIO.Config):
+        return {"class": "Config", "serialize": hex_bytes(value.serialize())}
+    return dump(value, blobs)
+
+
+def _attempt(fn, stage, blobs):
+    """{"result": fn() written out}, or what the library raised: {"exception", "stage"} or
+    {"undecodable": hex, "stage"} ("call" when fn raised, "write" when writing the value out
+    did). Returns the entry, and whether fn returned (with its value)."""
+    try:
+        value = fn()
+    except UnicodeDecodeError as exc:
+        return {"undecodable": bytes(exc.object).hex(), "stage": stage}, False, None
+    except REPORTED as exc:
+        # What config_calls reports as the library's: OCIO's exceptions and pybind11's
+        # translations of the C++ standard ones. The request's own errors aren't REPORTED.
+        return {"exception": raised(exc), "stage": stage}, False, None
+    first = len(blobs)
+    try:
+        return {"result": _write(value, blobs)}, True, value
+    except UnicodeDecodeError as exc:
+        del blobs[first:]
+        return {"undecodable": bytes(exc.object).hex(), "stage": "write"}, True, value
+    except Exception as exc:  # noqa: BLE001 - sorted into the library's and the request's
+        if not _library(exc):
+            raise
+        del blobs[first:]
+        return {"exception": raised(exc), "stage": "write"}, True, value
+
+
+def _call_fn(i, call, objects):
+    """The function a call runs, and the name it stores its result as."""
+    kind = next((k for k in CALL_KEYS if isinstance(call, dict) and k in call), None)
+    if kind is None:
+        raise RequestError(f"calls[{i}]: {call!r} is none of {sorted(CALL_KEYS)}")
+    check_keys(f"calls[{i}]", call, CALL_KEYS[kind])
+    store = call.get("as")
+    if store is not None and (not isinstance(store, str) or store in ("OCIO", *HELPER_MODULES)):
+        raise RequestError(f"calls[{i}]: can't store as {store!r}")
+    args, kwargs = call.get("args", []), call.get("kwargs", {})
+    if not isinstance(args, list) or not isinstance(kwargs, dict):
+        raise RequestError(f"calls[{i}]: args must be a list and kwargs an object")
+    if kind == "call":
+        target = _target(call.get("on", "config"), objects)
+        method = _method(target, call["call"])
+
+        def fn():
+            call_args = _value(args, objects)
+            call_kwargs = {k: _value(v, objects) for k, v in kwargs.items()}
+            _check_current_config(target, call["call"], call_args, call_kwargs)
+            return method(*call_args, **call_kwargs)
+    elif kind == "new":
+        cls = getattr(OCIO, call["new"], None) if isinstance(call["new"], str) else None
+        if not isinstance(cls, type):
+            raise RequestError(f"calls[{i}]: {call['new']!r} isn't a PyOpenColorIO class")
+
+        def fn():
+            return cls(*_value(args, objects), **{k: _value(v, objects) for k, v in kwargs.items()})
+    elif kind == "copy":
+        source = _target(call["copy"], objects)
+
+        def fn():
+            return copy.deepcopy(source)
+    else:
+        source = _target(call["dump"], objects)
+
+        def fn():
+            return source
+    return fn, store
+
+
+def _run_calls(calls, objects, log, blobs):
+    """The calls in order (see object_calls); per call its entry and "log"."""
+    if not isinstance(calls, list):
+        raise RequestError(f"calls must be a list, not {calls!r}")
+    results = []
+    for i, call in enumerate(calls):
+        fn, store = _call_fn(i, call, objects)
+        log.discard()
+        entry, returned, value = _attempt(fn, "call", blobs)
+        if returned and store is not None:
+            objects[store] = value
+        entry["log"] = log.take()
+        results.append(entry)
+    return results
+
+
+def _dump_processor(proc, blobs):
+    """processor_ops' dump of a processor, field by field: {"processor": ...}, or the exception
+    the library raised and the stage it raised in ("group": the getters and
+    createGroupTransform, as processor_ops calls it)."""
+    first = len(blobs)
+    try:
+        return {"processor": _processor_dump(proc, blobs)}
+    except UnicodeDecodeError as exc:
+        del blobs[first:]
+        return {"undecodable": bytes(exc.object).hex(), "stage": "group"}
+    except Exception as exc:  # noqa: BLE001 - sorted into the library's and the request's
+        if not _library(exc):
+            raise
+        del blobs[first:]
+        return {"exception": raised(exc), "stage": "group"}
 
 
 @command
@@ -59,47 +196,91 @@ def object_calls(args, blobs):
       env, files
                 the environment and the directory of the whole request, as config_calls takes
                 them
-      calls     the calls (see config_api.run_calls), on "config" unless they say otherwise:
-                {"new": class, ...} makes ColorSpaceMenuParameters(config), ColorSpaceMenuHelper
-                (parameters), LegacyViewingPipeline(), MixingColorSpaceManager(config) and the
-                grading values; "on": "DisplayViewHelpers" or "ColorSpaceHelpers" calls those
-                modules' functions (GetProcessor, GetIdentityProcessor, AddDisplayView,
-                RemoveDisplayView; AddColorSpace); {"ref": name} passes a stored object
+      calls     in order, each one of
+                  {"call": method, "on": name (default "config"), "args": [values],
+                   "kwargs": {name: value}, "as": name}
+                            on.method(*args, **kwargs): "on" names a stored object, a
+                            PyOpenColorIO class (its static methods), "OCIO" (config_api's
+                            MODULE_FUNCTIONS), "DisplayViewHelpers" or "ColorSpaceHelpers"
+                            (those modules' functions)
+                  {"new": class, "args", "kwargs", "as"}
+                            a PyOpenColorIO class's constructor: ColorSpaceMenuParameters
+                            (config), ColorSpaceMenuHelper(parameters), LegacyViewingPipeline(),
+                            MixingColorSpaceManager(config), a grading value, ...
+                  {"copy": name, "as": name}   copy.deepcopy (createEditableCopy)
+                  {"dump": name}               the stored object, written out
+                values as config_api.value_in reads them ({"enum"}, {"transform"}, {"f64"},
+                {"bytes"}, {"ref": name}, {"map"}), and {"object": spec}, a value object; "as"
+                stores the result, also when writing it out raised
       processors
-                names of objects the calls stored ("as"), each a Processor, written out after
-                the calls as processor_ops writes a processor
+                names of Processors the calls stored, written out in this order after the
+                calls, as processor_ops writes a processor
     result:
-      dir, config, config_log, calls
-                as config_calls gives them; "config" also reports an exception the objects'
-                constructors or setters raised (no call runs then)
-      processors  per name, in order: {"cache_id", "isNoOp", "hasChannelCrosstalk", "isDynamic",
-                "processor_metadata", "group"}, its values as checks.dump writes them
-    blobs: the arrays the processors' dumps hold (checks.dump)
+      dir         the request directory's absolute path
+      config      null, or {"exception"} or {"undecodable"} when making the config or a value
+                  object raised in the library (no call runs then)
+      config_log  OCIO's log while making them: [{"bytes": hex}]
+      objects     {name: {"result": the value object written out}, or the exception
+                  writing it out raised, as a call's}, when they were made
+      calls       per call {"result": the value written out (see below)}, or {"exception":
+                  {"type", "message": {"bytes": hex}}, "stage"} or {"undecodable": hex,
+                  "stage"} where the library raised or a string couldn't be decoded: stage
+                  "call" (the call) or "write" (writing its value out); and "log"
+      processors  per name, {"processor": {"cache_id", "isNoOp", "hasChannelCrosstalk",
+                  "isDynamic", "processor_metadata", "group"}}, or {"exception", "stage":
+                  "group"}; and "log"
+    Values written out: a processor as {"class": "Processor", "processor": as above}, a
+    config as {"class": "Config", "serialize": {"bytes": hex}}, anything else as checks.dump
+    writes it: floats as {"f64": bits}, enums by name, objects as {"class", "getters",
+    "properties", "uncalled"} (a grading value's fields are properties), arrays as indices
+    among the response blobs.
+    blobs: the arrays the written values hold, in order
 
-    A request it can't run exactly is refused, as config_calls refuses it; so are a name in
-    processors that no call stored, or that holds something other than a Processor.
+    Every request the command can't run exactly is refused (the call fails): an unknown key or
+    call kind, a name no call stored, a value or object spec it can't read (whatever Python
+    raises reading it), arguments no overload takes (pybind11's TypeError), and a name in
+    processors that doesn't hold a Processor.
     """
+    check_keys("object_calls", args, {"config", "objects", "env", "files", "calls",
+                                      "processors"})
+    source = args.get("config", "raw")
+    check_source(source)
+    specs = args.get("objects", {})
+    if not isinstance(specs, dict) or any(name in RESERVED for name in specs):
+        raise RequestError(f"objects must be an object of name: object spec, without the "
+                           f"names {RESERVED}: {specs!r}")
     processors = args.get("processors", [])
     if not isinstance(processors, list) or not all(isinstance(n, str) for n in processors):
         raise RequestError(f"processors must be a list of names, not {processors!r}")
-    held = {}
 
-    def make_subject(source, objects):
-        held["objects"] = objects
-        for name in HELPER_MODULES:
-            objects[name] = getattr(OCIO, name)
-        config = make_config("raw" if source is None else source)
-        objects.update(_value_objects(args.get("objects", {})))
-        return config
-
-    result = run_request(args, "config", make_subject, extra_keys=("objects", "processors"))
-    objects, out = held.get("objects", {}), []
-    result["processors"] = []
-    if "config" not in objects:
-        return result, out
-    for name in processors:
-        proc = objects.get(name)
-        if not isinstance(proc, OCIO.Processor):
-            raise RequestError(f"processors: {name!r} isn't a Processor a call stored")
-        result["processors"].append(_processor_dump(proc, out))
+    result, out = {}, []
+    with directory(args.get("files")) as root, environment(args.get("env")), \
+            LogCapture() as log:
+        result["dir"] = root
+        objects = {name: getattr(OCIO, name) for name in HELPER_MODULES}
+        try:
+            objects["config"] = make_config(source)
+            for name, object_spec in specs.items():
+                objects[name] = _build_object(f"objects[{name!r}]", object_spec)
+            result["config"] = None
+        except UnicodeDecodeError as exc:
+            result["config"] = {"undecodable": bytes(exc.object).hex()}
+        except REPORTED as exc:
+            result["config"] = {"exception": raised(exc)}
+        result["config_log"] = log.take()
+        if result["config"] is not None:
+            result.update(objects={}, calls=[], processors=[])
+            return result, out
+        result["objects"] = {name: _attempt(lambda o=objects[name]: o, "write", out)[0]
+                             for name in specs}
+        result["calls"] = _run_calls(args.get("calls", []), objects, log, out)
+        result["processors"] = []
+        for name in processors:
+            proc = objects.get(name)
+            if not isinstance(proc, OCIO.Processor):
+                raise RequestError(f"processors: {name!r} isn't a Processor a call stored")
+            log.discard()
+            entry = _dump_processor(proc, out)
+            entry["log"] = log.take()
+            result["processors"].append(entry)
     return result, out

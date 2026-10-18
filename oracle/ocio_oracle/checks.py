@@ -85,7 +85,10 @@ def dump(value, blobs, depth=0):
       widened) as {"f64": their bits}; enums as {"enum": name};
     - numpy arrays as {"blob": index among the response blobs, "dtype", "shape"}, the blob
       holding the array's bytes (little-endian, C order);
-    - lists, tuples and the binding's iterators as lists;
+    - lists, tuples and the binding's iterators as lists (an iterator with __len__ and
+      __getitem__ read by index: MixingColorSpaceManager's MixingEncodingIterator binds its
+      __next__ to the wrong class, PyMixingHelpers.cpp:146 @ v2.5.2, so iterating it raises
+      TypeError, while its indices read the encodings);
     - any other object as {"class": its type's name, "getters": each method named get*, is* or
       has* that takes no argument, called, by name, "properties": each property, by name,
       "uncalled": the get*, is* and has* methods that need arguments}, and for a GroupTransform
@@ -100,7 +103,11 @@ def dump(value, blobs, depth=0):
     if isinstance(value, np.ndarray):
         blobs.append(np.ascontiguousarray(value).astype(value.dtype.newbyteorder("<")).tobytes())
         return {"blob": len(blobs) - 1, "dtype": value.dtype.name, "shape": list(value.shape)}
-    if isinstance(value, (list, tuple)) or hasattr(type(value), "__next__"):
+    if isinstance(value, (list, tuple)):
+        return [dump(item, blobs, depth + 1) for item in value]
+    if hasattr(type(value), "__next__"):
+        if hasattr(type(value), "__len__") and hasattr(type(value), "__getitem__"):
+            return [dump(value[i], blobs, depth + 1) for i in range(len(value))]
         return [dump(item, blobs, depth + 1) for item in value]
     if depth >= MAX_DEPTH and not isinstance(value, OCIO.FormatMetadata):
         raise ValueError(f"the dump refuses a {type(value).__name__} {depth} levels down: it "

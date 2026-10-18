@@ -2970,6 +2970,20 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p4-baker` (`crates/ocio/src/minizip/mz_zip_rw.rs`);
   `crates/ocio/tests/ocioz_extract_oracle.rs`, `links` (Linux).
 
+### I-216. Iterating a mixing manager's encodings raises a TypeError in Python
+
+- **Upstream:** the binding's `MixingEncodingIterator` binds `__next__` with a
+  `MixingSpaceIterator &` parameter (`src/bindings/python/apphelpers/PyMixingHelpers.cpp:146-150`
+  @ v2.5.2), a class the encoding iterator isn't. So `list(manager.getMixingEncodings())` or a
+  `for` loop over it raises pybind11's TypeError ("incompatible function arguments"), while
+  `len()` and indexing read the encodings (wheel probe, Windows, 2026-10-18: a raw config's
+  manager has 2 encodings, `[e[0], e[1]]` is `['RGB', 'HSV']`, `list(e)` raises).
+- **Who notices:** Python scripts that iterate the encodings; C++ callers don't go through the
+  binding.
+- **A fix:** bind `__next__` with `MixingEncodingIterator &`.
+- **Status:** open: the Python module (Phase 6) matches it. The oracle's `checks.dump` reads
+  the binding's iterators by index, so `object_calls` can write a manager out (`p5-oracle`).
+
 ### I-221. Archiving lists a directory whose path has 318 bytes or more by the wrong pattern
 
 - **Upstream:** `Config::archive` lists the config's directory and its subdirectories with
