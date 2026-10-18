@@ -282,6 +282,17 @@ from_scene_reference: !<FileTransform> {src: a.spi1d}\n";
     put(&dir, "luts/noext", b"not a LUT either\n", false);
     put(&dir, "luts/a.spi1d.bak", b"a backup\n", false);
     put(&dir, "other/c.clf", b"<not really a clf/>\n", false);
+    // A file with Windows' hidden attribute (minizip-ng stores the attributes as they are).
+    #[cfg(windows)]
+    {
+        put(&dir, "luts/hidden_attribute.spi1d", &lut(7), false);
+        let status = std::process::Command::new("attrib")
+            .arg("+h")
+            .arg(dir.join("luts").join("hidden_attribute.spi1d"))
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
     // Links: minizip-ng skips a link to a file; OpenColorIO follows a link to a directory.
     #[cfg(unix)]
     {
@@ -322,7 +333,9 @@ fn check(configs: &[(&str, PathBuf)]) {
             blobs: Vec::new(),
         })
         .collect();
-    let wheel = Oracle::get().batch(&calls, true);
+    // Not cached: an archive depends on the files around the config, which the cache key
+    // doesn't cover.
+    let wheel = Oracle::get().batch(&calls, false);
     let mut failures = Vec::new();
     for ((label, path), w) in configs.iter().zip(wheel) {
         let w = w.expect("an oracle request");
@@ -377,40 +390,49 @@ fn archives_as_the_wheel() {
     ]);
 }
 
-/// Names of LUT files around a config of 255, 256 and 276 UTF-8 bytes, a 256-byte name listed
-/// last and one listed before others: minizip-ng's `mz_os_read_dir` converts each name into
-/// the 256 bytes of `d_name`, which the listing's `end` flag follows, and the wheel archives
-/// the names it reads whole (docs/improvements.md, U-79). Windows lists a directory's names
-/// in the order of their upper case (U+20AC, then U+20AD). Windows only: on Linux `d_name` is
-/// the system's, and a name has at most 255 bytes.
+/// Names of LUT files around a config longer than 255 UTF-8 bytes: minizip-ng's
+/// `mz_os_read_dir` converts each name into the 256 bytes of `d_name`, the whole characters
+/// that fit, which the listing's `end` flag follows (docs/improvements.md, U-79). Windows
+/// lists a directory's names in the order of their upper case (U+20AC, then U+20AD), so a
+/// name with U+20AD comes after those of U+20AC.
+/// - Against the wheel, where it reads whole names: 255 bytes; 256 bytes not last; a cut
+///   that fills the 256 bytes, not last, ending in `.spi1d` (the wheel's error for the cut
+///   name) or not (left out).
+/// - The port alone, where the wheel reads memory it doesn't own: a 256-byte name listed last,
+///   and a cut that falls inside a character; the port fails.
+///
+/// Windows only: on Linux `d_name` is the system's, and a name has at most 255 bytes.
 #[cfg(windows)]
 #[test]
 fn long_names() {
     let config = b"ocio_profile_version: 2\nroles: {default: raw}\n\
 colorspaces:\n  - !<ColorSpace> {name: raw}\n";
+    // 83 euros are 249 UTF-8 bytes.
     let euros = "\u{20ac}".repeat(83);
+    let after = "\u{20ad}.spi1d".to_owned();
     let layouts: [(&str, Vec<String>); 3] = [
         (
             "long_names",
             vec![
                 format!("{euros}.spi1d"),
                 format!("{euros}a.spi1d"),
-                format!("{euros}{}.spi1d", "\u{20ac}".repeat(7)),
                 "short.spi1d".to_owned(),
+                after.clone(),
             ],
         ),
-        ("long_name_last", vec![format!("{euros}a.spi1d")]),
         (
-            "long_names_before_another",
-            vec![
-                format!("{euros}a.spi1d"),
-                format!("{euros}{}.spi1d", "\u{20ac}".repeat(7)),
-                "\u{20ad}.spi1d".to_owned(),
-            ],
+            "long_name_cut_to_a_lut",
+            vec![format!("{euros}a.spi1dzz"), after.clone()],
+        ),
+        (
+            "long_name_cut_to_no_lut",
+            vec![format!("{euros}abcdefgzz"), after.clone()],
         ),
     ];
     let mut configs = Vec::new();
     for (label, names) in layouts {
+        // Only this layout's files: an earlier run's may differ.
+        let _ = std::fs::remove_dir_all(files_dir(label));
         let dir = files_dir(label);
         put(&dir, "config.ocio", config, false);
         for name in names {
@@ -419,6 +441,32 @@ colorspaces:\n  - !<ColorSpace> {name: raw}\n";
         configs.push((label, dir.join("config.ocio")));
     }
     check(&configs);
+
+    for (label, names) in [
+        ("long_name_last", vec![format!("{euros}a.spi1d")]),
+        (
+            "long_name_cut_in_a_character",
+            vec![
+                format!("{euros}{}.spi1d", "\u{20ac}".repeat(7)),
+                after.clone(),
+            ],
+        ),
+    ] {
+        let _ = std::fs::remove_dir_all(files_dir(label));
+        let dir = files_dir(label);
+        put(&dir, "config.ocio", config, false);
+        for name in &names {
+            put(&dir, name, &lut(2), false);
+        }
+        let config =
+            Config::create_from_file(dir.join("config.ocio").to_str().unwrap().as_bytes()).unwrap();
+        let e = config.archive(&mut Vec::new()).unwrap_err();
+        let expected = format!(
+            "Could not archive {}: its name is longer than minizip-ng reads.",
+            dir.join(&names[0]).to_str().unwrap()
+        );
+        assert_eq!(e.what(), expected.as_bytes(), "{label}");
+    }
 }
 
 /// A dangling link whose name holds a `*` and a LUT extension, next to a config: upstream

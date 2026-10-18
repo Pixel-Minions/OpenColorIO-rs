@@ -368,14 +368,17 @@ impl Stream for MemStream {
     }
 }
 
-/// A file opened for reading by the system stream: its bytes, read whole, and the position.
-/// A file that opens but can't be read (a directory on Linux) fails each read.
+/// A file opened for reading by the system stream: its bytes, read whole, and the position,
+/// which a seek moves only where the system's own seek of the file succeeds (a position past
+/// the largest file the file system holds fails on Linux, as `fseeko`'s `lseek` does: 16 TiB
+/// on ext4). A file that opens but can't be read (a directory on Linux) fails each read.
 ///
 /// Port of the reading of `mz_stream_os` (mz_strm_os_posix.c, mz_strm_os_win32.c @ 4.0.10).
 /// The file opens as OpenColorIO's own file streams do: through its UTF-16 conversion on
 /// Windows, as the bytes on Linux.
 #[derive(Debug)]
 struct OsFile {
+    file: std::fs::File,
     data: Option<Vec<u8>>,
     position: i64,
     error: i32,
@@ -388,6 +391,7 @@ impl OsFile {
         let mut data = Vec::new();
         let data = file.read_to_end(&mut data).ok().map(|_| data);
         Some(OsFile {
+            file,
             data,
             position: 0,
             error: 0,
@@ -413,16 +417,25 @@ impl OsFile {
         size as i32
     }
 
-    /// Port of `mz_stream_os_seek` (mz_strm_os_posix.c:132-156 @ 4.0.10): a position before
-    /// the start fails; one past the end is allowed.
+    /// Port of `mz_stream_os_seek` (mz_strm_os_posix.c:132-156, mz_strm_os_win32.c:210-243 @
+    /// 4.0.10): a position before the start fails, and so does one the system refuses
+    /// (`fseeko`'s `lseek` past the file system's largest file, `SetFilePointerEx`), which the
+    /// port asks the system itself; one past the end is allowed.
     fn seek(&mut self, offset: i64, origin: Origin) -> i32 {
+        use std::io::Seek;
         let base = match origin {
             Origin::Set => 0,
             Origin::Cur => self.position,
             Origin::End => self.size(),
         };
         match base.checked_add(offset) {
-            Some(position) if position >= 0 => {
+            Some(position)
+                if position >= 0
+                    && self
+                        .file
+                        .seek(std::io::SeekFrom::Start(position as u64))
+                        .is_ok() =>
+            {
                 self.position = position;
                 MZ_OK
             }

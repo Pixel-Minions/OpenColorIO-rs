@@ -6,7 +6,9 @@
 //! `ocio_ops::platform`'s case-insensitive comparisons are checked against.
 //!
 //! It is also the reference for the math library's `pow` and `exp2`, which an optimizing
-//! compiler may substitute for each other ([`pow_c`]).
+//! compiler may substitute for each other ([`pow_c`]); and for `mktime` and
+//! `_mkgmtime64`/`timegm` ([`mktime_c`], [`mkgmtime_c`]), which tell the extraction tests
+//! whether the local time zone is UTC (minizip-ng reads a DOS date with `mktime`).
 //!
 //! On Windows this is the Universal CRT (`ucrtbase.dll`); on Linux it is glibc. These are the
 //! libraries OCIO 2.5.2 itself calls: MSVC's `num_put` formats through UCRT `sprintf_s`, and
@@ -1122,6 +1124,34 @@ mod tests {
     //! the locale and plain variants, the C standard's error conventions); the port is
     //! compared with the C runtime in `ocio-ops`.
     use super::*;
+
+    /// `mktime` and `timegm` normalize fields past their ranges the same way (a month -1 is
+    /// the December before, a day 0 the last of the month before, hours to 31, minutes to 63,
+    /// seconds to 62, as a DOS date holds them), and the local time zone's offset is a whole
+    /// number of quarter hours.
+    #[test]
+    fn mktime_normalizes_as_timegm() {
+        for (raw, normal) in [
+            ((80, -1, 0, 0, 0, 0), (79, 10, 30, 0, 0, 0)),
+            ((80, 1, 30, 31, 63, 62), (80, 2, 2, 8, 4, 2)),
+            ((207, 14, 31, 0, 0, 0), (208, 2, 31, 0, 0, 0)),
+        ] {
+            let (y, mo, d, h, mi, se) = raw;
+            let (ny, nmo, nd, nh, nmi, nse) = normal;
+            assert_eq!(
+                mkgmtime_c(y, mo, d, h, mi, se),
+                mkgmtime_c(ny, nmo, nd, nh, nmi, nse),
+                "{raw:?}"
+            );
+            assert_eq!(
+                mktime_c(y, mo, d, h, mi, se),
+                mktime_c(ny, nmo, nd, nh, nmi, nse),
+                "{raw:?}"
+            );
+            let offset = mktime_c(y, mo, d, h, mi, se) - mkgmtime_c(y, mo, d, h, mi, se);
+            assert_eq!(offset % 900, 0, "{raw:?}");
+        }
+    }
 
     /// `%.17g` keeps DBL_DECIMAL_DIG (17 for IEEE double) significant digits, enough for any
     /// double to come back unchanged (C17 5.2.4.2.2), and strtod rounds text of up to

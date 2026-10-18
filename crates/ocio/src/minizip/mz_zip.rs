@@ -80,9 +80,10 @@ pub(crate) struct FileInfo {
     /// The link name of a UNIX1 field: the C string at its place in the memory stream.
     pub(crate) linkname: Vec<u8>,
     /// The dates (`time_t`): the modification date is the header's DOS date
-    /// ([`mz_zip_dosdate_to_time_t`]) unless an NTFS field gives the three; a UNIX1 field gives
-    /// the access date, and the modification date only where the DOS date gave 0 (which none
-    /// does, so never).
+    /// ([`mz_zip_dosdate_to_time_t`], never 0) unless an NTFS field gives the three; a UNIX1
+    /// field after them gives the access date and the modification date where they are 0 (the
+    /// access date without an NTFS field, the modification date after an NTFS time of exactly
+    /// 1970).
     pub(crate) modified_date: i64,
     pub(crate) accessed_date: i64,
     pub(crate) creation_date: i64,

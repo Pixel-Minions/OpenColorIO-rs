@@ -10,10 +10,14 @@
 //! and repeats, names that aren't UTF-8; directory and link entries; NTFS, UNIX1 and DOS times;
 //! Windows and Unix attributes; and entries minizip-ng can't extract.
 //!
-//! Times: a file's time comes from its entry's NTFS field where it has one, and otherwise from
-//! its DOS date, which the wheel reads in the local time zone and the port in UTC (deviation
-//! D-6). The DOS times are compared where the local time zone is UTC (as on the reference
-//! platforms' CI), by the C runtime's `mktime` and `_mkgmtime64`/`timegm`.
+//! Times: a file's modification time comes from its entry's NTFS field where it has one, and
+//! otherwise from its DOS date, which the wheel reads in the local time zone and the port in
+//! UTC (deviation D-6); a UNIX1 field gives the access time, and the modification time where
+//! it is 0. The modification times from DOS dates are compared where the local time zone is
+//! UTC (as on the reference platforms' CI), by the C runtime's `mktime` and
+//! `_mkgmtime64`/`timegm`; the others always. A time minizip-ng doesn't set (Windows'
+//! SetFileTime refusing one of the three sets none) is the time the file was written at, which
+//! is compared as such: within a second of when the extraction ran.
 //!
 //! Attributes: on Linux a file's and a directory's mode; on Windows the read-only attribute,
 //! the only one the port sets (deviation D-6).
@@ -276,13 +280,13 @@ fn remove_tree(dir: &Path) {
 #[derive(Debug, PartialEq)]
 enum Node {
     /// A file: its contents (`None` where it can't be read), its modification, access and
-    /// creation (Windows) times in nanoseconds since 1970 (where they are compared), and its
-    /// mode (Linux) or read-only attribute (Windows).
+    /// creation (Windows) times (where they are compared), and its mode (Linux) or read-only
+    /// attribute (Windows).
     File {
         contents: Option<Vec<u8>>,
-        mtime_ns: Option<i128>,
-        atime_ns: Option<i128>,
-        birthtime_ns: Option<i128>,
+        mtime: Option<Time>,
+        atime: Option<Time>,
+        birthtime: Option<Time>,
         mode: u64,
     },
     /// A directory and its mode (Linux) or read-only attribute (Windows).
@@ -294,12 +298,36 @@ enum Node {
 /// Paths, as bytes with `/` between the components, and what is there.
 type Tree = BTreeMap<Vec<u8>, Node>;
 
-/// The times a case compares: modification, access, creation.
+/// The times a case compares: modification, access, creation; and when the extraction ran
+/// (nanoseconds since 1970).
 #[derive(Clone, Copy)]
 struct Compared {
     mtime: bool,
     atime: bool,
     birthtime: bool,
+    ran: (i128, i128),
+}
+
+/// A file's time: one the extraction gave it, in nanoseconds since 1970, or the time it was
+/// written at, which minizip-ng left (`Now`: a time from a second before the extraction ran to
+/// a second after; the archives' times are years away from it, and a file system's clock can
+/// lag the system's by a tick).
+#[derive(Debug, PartialEq)]
+enum Time {
+    At(i128),
+    Now,
+}
+
+impl Compared {
+    fn time(&self, compared: bool, ns: Option<i128>) -> Option<Time> {
+        let ns = ns.filter(|_| compared)?;
+        let second = 1_000_000_000;
+        Some(if self.ran.0 - second <= ns && ns <= self.ran.1 + second {
+            Time::Now
+        } else {
+            Time::At(ns)
+        })
+    }
 }
 
 /// Nanoseconds since 1970 of a system time.
@@ -377,9 +405,9 @@ fn port_tree(root: &Path, compared: Compared, skip: Option<&str>) -> Tree {
                 };
                 Node::File {
                     contents: std::fs::read(&path).ok(),
-                    mtime_ns: compared.mtime.then_some(mtime_ns),
-                    atime_ns: compared.atime.then_some(atime_ns),
-                    birthtime_ns: birthtime_ns.filter(|_| compared.birthtime),
+                    mtime: compared.time(compared.mtime, Some(mtime_ns)),
+                    atime: compared.time(compared.atime, Some(atime_ns)),
+                    birthtime: compared.time(compared.birthtime, birthtime_ns),
                     mode: mode_of(&m),
                 }
             };
@@ -412,9 +440,9 @@ fn wheel_tree(result: &Value, blobs: &[Vec<u8>], compared: Compared) -> Tree {
             bytes(&f["path"]),
             Node::File {
                 contents,
-                mtime_ns: time("mtime_ns").filter(|_| compared.mtime),
-                atime_ns: time("atime_ns").filter(|_| compared.atime),
-                birthtime_ns: time("birthtime_ns").filter(|_| compared.birthtime),
+                mtime: compared.time(compared.mtime, time("mtime_ns")),
+                atime: compared.time(compared.atime, time("atime_ns")),
+                birthtime: compared.time(compared.birthtime, time("birthtime_ns")),
                 mode: mode(f),
             },
         );
@@ -433,16 +461,14 @@ fn wheel_tree(result: &Value, blobs: &[Vec<u8>], compared: Compared) -> Tree {
     out
 }
 
-/// Where a case's files get their times.
+/// Where a case's files get their modification times.
 #[derive(Clone, Copy, PartialEq)]
 enum Times {
-    /// From NTFS fields, in every entry: compared.
+    /// From NTFS fields, in every entry that sets one (or none set, the time of writing):
+    /// compared.
     Ntfs,
     /// From DOS dates (in some entries at least): compared where the local time zone is UTC.
     Dos,
-    /// Not set (the system refuses them, and the files keep the time they were written at):
-    /// not compared.
-    NotSet,
 }
 
 /// Whether the local time zone is UTC, in winter and in summer, as the C runtime's `mktime`
@@ -458,6 +484,9 @@ struct Case {
     label: String,
     path: PathBuf,
     times: Times,
+    /// How the destination is spelled, relative to the extraction's own directory (a path that
+    /// normalizes to `extracted`, which minizip-ng's caller normalizes).
+    destination: &'static str,
 }
 
 fn case(label: impl Into<String>, entries: &[Entry], times: Times) -> Case {
@@ -465,6 +494,7 @@ fn case(label: impl Into<String>, entries: &[Entry], times: Times) -> Case {
         label: label.into(),
         path: write_file(&archive(entries)),
         times,
+        destination: "extracted",
     }
 }
 
@@ -475,29 +505,29 @@ fn check(cases: &[Case]) {
         .iter()
         .map(|c| BatchCall {
             cmd: "ocioz",
-            args: json!({"extract": {"archive": c.path.to_str().unwrap()}}),
+            args: json!({"extract": {"archive": c.path.to_str().unwrap(),
+                                     "destination": c.destination}}),
             blobs: Vec::new(),
         })
         .collect();
+    let before = nanos(std::time::SystemTime::now());
     let wheel = Oracle::get().batch(&calls, false);
+    let wheel_ran = (before, nanos(std::time::SystemTime::now()));
     let mut failures = Vec::new();
     for (i, (c, w)) in cases.iter().zip(wheel).enumerate() {
         let w = w.expect("an oracle request");
-        // On Windows minizip-ng sets the access and creation times only from NTFS times (a time
-        // of 0 is left alone); on Linux it sets the access time with the modification time.
+        // The modification time comes from a DOS date unless an NTFS field gives it, and the
+        // DOS date is read in the local time zone (the port's in UTC, D-6); the access and
+        // creation times come from NTFS and UNIX1 fields only, or aren't set.
         let mtime = match c.times {
             Times::Ntfs => true,
             Times::Dos => utc,
-            Times::NotSet => false,
         };
-        let compared = Compared {
+        let mut compared = Compared {
             mtime,
-            atime: if cfg!(windows) {
-                c.times == Times::Ntfs
-            } else {
-                mtime
-            },
-            birthtime: cfg!(windows) && c.times == Times::Ntfs,
+            atime: true,
+            birthtime: cfg!(windows),
+            ran: wheel_ran,
         };
         // As the oracle: the destination `extracted` in a directory of its own, one per test
         // (they run in parallel) and case.
@@ -508,14 +538,17 @@ fn check(cases: &[Case]) {
         let root = files_dir("extracted").join(format!("{test}_{i}"));
         remove_tree(&root);
         std::fs::create_dir_all(&root).unwrap();
-        let destination = root.join("extracted");
+        let destination = root.join(c.destination);
+        let before = nanos(std::time::SystemTime::now());
         let port = extract_ocioz_archive(
             c.path.to_str().unwrap().as_bytes(),
             destination.to_str().unwrap().as_bytes(),
         );
+        let port_ran = (before, nanos(std::time::SystemTime::now()));
         let wheel_written = wheel_tree(&w.result, &w.blobs, compared);
-        let port_written = port_tree(&destination, compared, None);
         let wheel_outside = wheel_tree(&w.result["outside"], &w.blobs, compared);
+        compared.ran = port_ran;
+        let port_written = port_tree(&root.join("extracted"), compared, None);
         let port_outside = port_tree(&root, compared, Some("extracted"));
         remove_tree(&root);
         let label = &c.label;
@@ -558,10 +591,14 @@ fn upstream_and_port_archives() {
         .unwrap()
         .archive(&mut port_archive)
         .unwrap();
+    // The archive's config entry carries the time it was written (whole seconds): let the
+    // extractions start well after it, so that it isn't taken for a time minizip-ng didn't set.
+    std::thread::sleep(std::time::Duration::from_millis(2100));
     let upstream = |label: &str, dir: &str, name: &str| Case {
         label: label.to_owned(),
         path: upstream_archive(dir, name),
         times: Times::Dos,
+        destination: "extracted",
     };
     check(&[
         upstream(
@@ -589,6 +626,7 @@ fn upstream_and_port_archives() {
             label: "the port's context_test1".to_owned(),
             path: write_file(&port_archive),
             times: Times::Dos,
+            destination: "extracted",
         },
     ]);
 }
@@ -671,12 +709,21 @@ fn names() {
     check(&cases);
 }
 
-/// Directory entries, by their names and by their attributes; repeated names, and names that
+/// A destination spelled with `..` (which OpenColorIO normalizes before minizip-ng makes it);
+/// directory entries, by their names and by their attributes; repeated names, and names that
 /// are a file's and a directory's; names that differ in case; `..` after a name whose first
 /// byte is a separator.
 #[test]
 fn structures() {
     check(&[
+        Case {
+            destination: "sub/../extracted",
+            ..case(
+                "a destination spelled with a directory that doesn't exist",
+                &[stored(b"a.txt", b"a"), stored(b"d/b.txt", b"b")],
+                Times::Dos,
+            )
+        },
         case(
             "directories",
             &[
@@ -771,39 +818,65 @@ fn structures() {
     ]);
 }
 
-/// The times files get: an entry's NTFS times (0, past what a `FILETIME` holds, all ones,
-/// ordinary), a UNIX1 field's (which minizip-ng takes only where the DOS date gave 0, which
-/// none does), and DOS dates with fields past their ranges, which `mktime` normalizes.
+/// The times files get: an entry's NTFS times, distinct for the three, among them ones that
+/// SetFileTime refuses (so that on Windows none of the three is set) and ones of 1970 (a
+/// `time_t` of 0, which isn't set); a UNIX1 field's (its access time, and its modification
+/// time where the date before it is 0); and DOS dates with fields past their ranges, which
+/// `mktime` normalizes.
 #[test]
 fn times() {
-    let ntfs_case = |label: &str, t: u64, times: Times| {
+    // NTFS times: 1970 exactly (`time_t` 0), ordinary ones, and extreme ones, mixed so that
+    // each of the three is the extreme one. On Windows the FILETIMEs that NTFS times of 0 and
+    // of all ones convert back to are past 2^63, which SetFileTime refuses (setting none of
+    // the three); one of 2^63 + 5 converts back below 2^63, the year 30828, which it sets.
+    let epoch = 116_444_736_000_000_000u64;
+    let [m, a, c] = [
+        133_000_000_000_000_000u64,
+        133_100_000_000_000_000,
+        133_200_000_000_000_000,
+    ];
+    let ntfs_case = |label: &str, times: [u64; 3]| {
+        let [tm, ta, tc] = times;
         case(
             label,
             &[
-                stored(b"t.txt", b"t").host(NTFS, 0x20).extra(ntfs(t, t, t)),
-                stored(b"after.txt", b"a").extra(ntfs(t, t, t)),
+                stored(b"t.txt", b"t")
+                    .host(NTFS, 0x20)
+                    .extra(ntfs(tm, ta, tc)),
+                stored(b"after.txt", b"a").extra(ntfs(m, a, c)),
             ],
-            times,
+            Times::Ntfs,
         )
     };
-    // The NTFS times that convert to a time_t that SetFileTime refuses on Windows, as the
-    // FILETIME minizip-ng converts it back to.
-    let refused = if cfg!(windows) {
-        Times::NotSet
-    } else {
-        Times::Ntfs
-    };
-    check(&[
-        ntfs_case("NTFS times of 0", 0, refused),
-        ntfs_case("huge NTFS times", (1 << 63) + 5, refused),
-        ntfs_case("NTFS times of all ones", u64::MAX, refused),
-        ntfs_case("ordinary NTFS times", 133_000_000_000_000_000, Times::Ntfs),
+    let mut cases = vec![
+        ntfs_case("ordinary NTFS times", [m, a, c]),
+        ntfs_case("NTFS times of 0", [0, 0, 0]),
+        ntfs_case("an NTFS modification time of 0", [0, a, c]),
+        ntfs_case("an NTFS access time of 0", [m, 0, c]),
+        ntfs_case("an NTFS creation time of 0", [m, a, 0]),
+        ntfs_case("a huge NTFS modification time", [(1 << 63) + 5, a, c]),
+        ntfs_case("a huge NTFS access time", [m, (1 << 63) + 5, c]),
+        ntfs_case("an NTFS creation time of all ones", [m, a, u64::MAX]),
+        ntfs_case("huge NTFS times", [(1 << 63) + 5; 3]),
+        ntfs_case("NTFS times of all ones", [u64::MAX; 3]),
+        ntfs_case("NTFS times of 1970", [epoch, epoch, epoch]),
+        ntfs_case("an NTFS modification time of 1970", [epoch, a, c]),
+    ];
+    cases.extend([
+        // A modification time of 1970 is 0, which a UNIX1 field after it replaces.
+        case(
+            "an NTFS modification time of 1970, then UNIX1 times",
+            &[stored(b"n.txt", b"n")
+                .host(NTFS, 0x20)
+                .extra([ntfs(epoch, a, c), unix1(1_000_000_000, 1_100_000_000, b"")].concat())],
+            Times::Ntfs,
+        ),
         case(
             "UNIX1 times",
             &[
                 stored(b"u.txt", b"u")
                     .host(UNIX, mode(0o100644))
-                    .extra(unix1(1_000_000_000, 1_000_000_000, b"")),
+                    .extra(unix1(1_000_000_000, 1_100_000_000, b"")),
                 stored(b"after.txt", b"a"),
             ],
             Times::Dos,
@@ -824,6 +897,7 @@ fn times() {
             Times::Dos,
         ),
     ]);
+    check(&cases);
 }
 
 /// The attributes files get: Windows ones (read-only, hidden, system) and Unix modes, set
@@ -950,39 +1024,37 @@ fn failures() {
         case(
             "a corrupt entry",
             &[stored(b"ok.txt", b"ok"), corrupt],
-            Times::NotSet,
+            Times::Dos,
         ),
         case(
             "a wrong CRC",
             &[stored(b"ok.txt", b"ok"), wrong_crc, after.clone()],
-            Times::NotSet,
+            Times::Dos,
         ),
-        case(
-            "an unknown method",
-            &[unknown, after.clone()],
-            Times::NotSet,
-        ),
+        case("an unknown method", &[unknown, after.clone()], Times::Dos),
         case(
             "a stored entry without its data",
             &[empty_data, after.clone()],
-            Times::NotSet,
+            Times::Dos,
         ),
         case(
             "a deflated entry with bytes after its end",
             &[trailing, after],
-            Times::NotSet,
+            Times::Dos,
         ),
-        case("no entries", &[], Times::NotSet),
+        case("no entries", &[], Times::Dos),
     ];
     cases.push(Case {
         label: "not an archive".to_owned(),
         path: write_file(b"PK, and no archive"),
-        times: Times::NotSet,
+        times: Times::Dos,
+        destination: "extracted",
     });
     cases.push(Case {
         label: "missing".to_owned(),
         path: files_dir("archives").join("does_not_exist.ocioz"),
-        times: Times::NotSet,
+        times: Times::Dos,
+        destination: "extracted",
     });
     check(&cases);
 }

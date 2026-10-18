@@ -2082,3 +2082,153 @@ fn entry_size_limit() {
     let cases: Vec<(&str, Archive)> = cases.iter().map(|(l, a)| (l.as_str(), a.clone())).collect();
     check(&cases);
 }
+
+/// Recovered archives whose zip64 local sizes (2^43 to 2^60 bytes) make minizip-ng's seek past
+/// the entry go past the largest file the file system holds: on Linux `fseeko`'s `lseek` fails
+/// there (16 TiB on ext4), and the reader reads on from the end of its last read
+/// (docs/improvements.md, I-214); on Windows `SetFilePointerEx` takes it. First in the archive
+/// or after 40,000 bytes. (The verifier's probe p13 of the fix review.)
+#[test]
+fn recovery_after_seeks_past_the_file_system() {
+    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+    let strip_end = |a: &Archive| {
+        let b = a.bytes();
+        b[..b.len() - 22].to_vec()
+    };
+    for csize in [1i64 << 43, 1i64 << 45, 1i64 << 50, 1i64 << 60] {
+        for index in [0usize, 1] {
+            let mut entries = standard(8);
+            entries[index].compressed_size = Some(u32::MAX);
+            let mut extra = vec![0x01, 0x00, 8, 0];
+            extra.extend_from_slice(&csize.to_le_bytes());
+            entries[index].local_extra = extra;
+            files.push((
+                format!("entry {index}, zip64 size {csize}"),
+                strip_end(&Archive::of(entries)),
+            ));
+            let mut entries = standard(8);
+            entries.insert(0, Entry::new(b"pad.bin", &[b'p'; 40000], 0));
+            entries[index + 1].compressed_size = Some(u32::MAX);
+            let mut extra = vec![0x01, 0x00, 8, 0];
+            extra.extend_from_slice(&csize.to_le_bytes());
+            entries[index + 1].local_extra = extra;
+            files.push((
+                format!("entry {index}, zip64 size {csize}, after 40000 bytes"),
+                strip_end(&Archive::of(entries)),
+            ));
+        }
+    }
+    let cases: Vec<(&str, Vec<u8>)> = files.iter().map(|(l, a)| (l.as_str(), a.clone())).collect();
+    check_files(&cases);
+}
+
+/// As `recovery_after_seeks_past_the_file_system`, with more than a read buffer (32,767
+/// bytes) of data after the entry whose size is huge, so that a seek that fails reads on
+/// before the end of the file. (The verifier's probe p14.)
+#[test]
+fn recovery_after_seeks_past_the_file_system_long_tail() {
+    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+    let strip_end = |a: &Archive| {
+        let b = a.bytes();
+        b[..b.len() - 22].to_vec()
+    };
+    for csize in [
+        1i64 << 43,
+        1i64 << 45,
+        1i64 << 50,
+        1i64 << 60,
+        0x7fff_ffff_ffff_fff0,
+    ] {
+        let mut entries = standard(8);
+        entries.insert(2, Entry::new(b"pad.bin", &[b'p'; 70000], 0));
+        entries[1].compressed_size = Some(u32::MAX);
+        let mut extra = vec![0x01, 0x00, 8, 0];
+        extra.extend_from_slice(&csize.to_le_bytes());
+        entries[1].local_extra = extra;
+        files.push((
+            format!("lut a, zip64 size {csize}, 70000 bytes after"),
+            strip_end(&Archive::of(entries)),
+        ));
+    }
+    let cases: Vec<(&str, Vec<u8>)> = files.iter().map(|(l, a)| (l.as_str(), a.clone())).collect();
+    check_files(&cases);
+}
+
+/// A recovered archive (no end record) whose stored entries hold a local header's magic
+/// number in their data, with their sizes in their local headers: minizip-ng seeks past each
+/// entry's data from where its header ends (within the buffered stream's read buffer) before
+/// it searches for the next header, so the magic in the data isn't taken for one.
+#[test]
+fn recovery_seeks_past_stored_data() {
+    let strip_end = |a: &Archive| {
+        let b = a.bytes();
+        b[..b.len() - 22].to_vec()
+    };
+    let mut entries = standard(0);
+    let mut data = b"padding PK\x03\x04 and more padding".to_vec();
+    data.extend_from_slice(&[b'.'; 100]);
+    entries.insert(1, Entry::new(b"pad.bin", &data, 0));
+    let mut lut_a = lut("2.0");
+    lut_a.extend_from_slice(b"# PK\x03\x04 in a comment\n");
+    entries[2] = Entry::new(b"luts/a.spi1d", &lut_a, 0);
+    check_files(&[(
+        "stored data holding PK\x03\x04",
+        strip_end(&Archive::of(entries)),
+    )]);
+}
+
+/// Search paths that aren't normalized (`./sub/../luts`, `luts/./`): OpenColorIO normalizes
+/// the path of a LUT it looks for in an archive (`getLutData`, OCIOZArchive.cpp:599 @ v2.5.2)
+/// before comparing it with the entries' names.
+#[test]
+fn lut_paths_are_normalized() {
+    let config = |search_path: &str| {
+        String::from_utf8(CONFIG.to_vec())
+            .unwrap()
+            .replace("search_path: luts", &format!("search_path: {search_path}"))
+            .into_bytes()
+    };
+    let cases: Vec<(String, Archive)> = ["./sub/../luts", "luts/./", "luts//"]
+        .iter()
+        .map(|search_path| {
+            let mut entries = standard(8);
+            entries[0] = Entry::new(b"config.ocio", &config(search_path), 8);
+            (format!("search path {search_path}"), Archive::of(entries))
+        })
+        .collect();
+    let cases: Vec<(&str, Archive)> = cases.iter().map(|(l, a)| (l.as_str(), a.clone())).collect();
+    check(&cases);
+}
+
+/// Where reading resumes after a seek fails: from the end of the buffered stream's last read
+/// of 32,767 bytes. The entry after the one whose zip64 size makes the seek fail holds local
+/// headers of `luts/sub/b.spi1d`, each with its own LUT, every few hundred bytes, so the LUT
+/// the recovered archive finds first tells where reading resumed.
+#[test]
+fn recovery_resumes_after_its_last_read() {
+    let strip_end = |a: &Archive| {
+        let b = a.bytes();
+        b[..b.len() - 22].to_vec()
+    };
+    let mut decoys = Vec::new();
+    for k in 0..400 {
+        decoys.extend_from_slice(
+            &Entry::new(b"luts/sub/b.spi1d", &lut(&format!("{k}.5")), 0).local_record(),
+        );
+    }
+    let mut files = Vec::new();
+    for csize in [0x7fff_ffff_ffff_fff0i64, 1 << 50] {
+        let mut entries = standard(8);
+        entries.insert(2, Entry::new(b"pad.bin", &decoys, 0));
+        entries[1].compressed_size = Some(u32::MAX);
+        let mut extra = vec![0x01, 0x00, 8, 0];
+        extra.extend_from_slice(&csize.to_le_bytes());
+        entries[1].local_extra = extra;
+        files.push((
+            format!("decoys after a zip64 size of {csize}"),
+            strip_end(&Archive::of(entries)),
+        ));
+    }
+    let cases: Vec<(&str, Vec<u8>)> = files.iter().map(|(l, a)| (l.as_str(), a.clone())).collect();
+    check_files(&cases);
+}

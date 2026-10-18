@@ -2888,15 +2888,21 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   the offset to that position (`buffered->position += offset`, `mz_strm_buf.c:301`) before it
   seeks the file; where the file's seek fails, the buffer is emptied and the next read reads
   on from where the file is, at the end of the last 32,767 bytes read, not where the seek
-  was asked to go. `mz_zip_recover_cd` seeks past an entry by its local header's size, and a
-  zip64 size near `INT64_MAX` makes the sum overflow the 64-bit position: undefined
+  was asked to go. The file's seek fails where the position would pass what the file system
+  holds: on Linux `fseeko`'s `lseek` refuses a position past the largest file (16 TiB on
+  ext4, other limits on other file systems), so whether a zip64 size of, say, 2^45 bytes
+  makes it fail depends on the file system; Windows' `SetFilePointerEx` takes it.
+  `mz_zip_recover_cd` seeks past an entry by its local header's size, and a zip64 size near
+  `INT64_MAX` makes the sum overflow the 64-bit position: undefined
   behaviour, which both wheels resolve the same way, wrapping it (Linux
   `add qword ptr [rdi + 0x10038], r12` at `libOpenColorIO.so` 0x5f6894, Windows
   `add qword ptr [rbx + 0x10038], rdi` at `OpenColorIO_2_5.dll` 0x18033d179).
 - **Who notices:** applications reading damaged archives that minizip-ng recovers.
 - **A fix:** check the seek's result, and the sum for overflow.
 - **Status:** matched in `p4-baker` (`crates/ocio/src/minizip/mz_strm.rs`, the buffered
-  stream, `wrapping_add`); `crates/ocio/tests/ocioz_read_oracle.rs`, `recovery_after_failed_seeks`.
+  stream, `wrapping_add`, and the file's own seek); `crates/ocio/tests/ocioz_read_oracle.rs`,
+  `recovery_after_failed_seeks`, `recovery_after_seeks_past_the_file_system` and its
+  `_long_tail`.
 
 ### I-215. Extracting a link, then a file of the same name, writes outside the destination
 
@@ -3781,7 +3787,11 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `bake_buffer`, used by every bake); `overflowing_sizes_fail_as_in_the_wheel`
   (`crates/ocio/tests/bake_formats_oracle.rs`, both platforms), and `baking_utils_tests.rs`.
   The sizes one below the overflow (894, 715,827,882) allocate 8.6 GB in both wheels and the
-  positive wraps write past the buffer, so no test runs them.
+  positive wraps write past the buffer, so no test runs them. The CLF/CTF bake
+  (`FileFormatCTF.cpp:1469, 1494`) wraps its sizes the same way and checks them in `resize`
+  (Linux 0x245914-0x24592f, 0x245e08-0x245e14): it takes `LinuxResize::Checked` where it
+  lands (card p4-ctf-write, not yet on this branch; fbefb23's message speaks of those sites as
+  if they were here).
 
 ### U-78. An archive entry named `..` reads uninitialized memory when extracted
 
@@ -3795,8 +3805,8 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   name is empty or a separator, and the entry is saved at the destination with one slash or
   two after it, which extracts the same way: a directory entry (`../`, `..\`) makes the
   destination, and the extraction goes on (the wheels extract the entries after it, probed
-  2026-10-17); a file entry (`..`) can't be opened as a file, and both wheels fail ("Could
-  not extract: <archive>").
+  2026-10-17); a file entry (`..`, `../..`) can't be opened as a file, and both wheels fail
+  ("Could not extract: <archive>").
 - **Who notices:** applications extracting archives with an entry named `..`.
 - **Decided** (the owner's general rule, 2026-09-30, as the outcome doesn't depend on the
   byte): the port's `mz_path_resolve` takes a byte nothing wrote for one that isn't a
@@ -3806,38 +3816,51 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `crates/ocio/tests/ocioz_extract_oracle.rs`, the names `..`, `../`, `../..` and `..\` first
   in their archives.
 
-### U-79. A directory entry whose name is 256 UTF-8 bytes or longer, on Windows
+### U-79. A directory entry whose name is longer than 255 UTF-8 bytes, on Windows
 
 - **Upstream:** `Config::archive` lists the config's directory with minizip-ng's
   `mz_os_read_dir` (`OCIOZArchive.cpp:150-201` @ v2.5.2; minizip-ng `mz_os_win32.c:401-421` @
   4.0.10), which converts each name from UTF-16 into the 256 bytes of `d_name`
   (`WideCharToMultiByte`); the byte after `d_name` is the listing's `end` flag (0, and 1 once
   the last entry is read; `DIR_int`, `mz_os_win32.c:30-35`), then the structure's padding,
-  which `malloc` left uninitialized. A name of 256 bytes fills `d_name` without its NUL: read
-  as a C string, it ends at `end`'s 0, except for the last entry, where `end` is 1 and the
-  read goes on into the padding. A longer name doesn't fit, and the conversion fails. The
-  Windows wheel (probed 2026-10-17) archives a 256-byte name that isn't the last entry, and
-  leaves out a 256-byte name that is, and every longer one.
+  which `malloc` left uninitialized. A name longer than 255 bytes doesn't fit with its NUL:
+  the conversion writes the whole characters that fit in the 256 bytes and fails, and
+  OpenColorIO reads `d_name` as a C string. Where those characters fill the 256 bytes, the
+  name read is that cut, ended by `end`'s 0, and OpenColorIO looks for it: a cut ending in a
+  LUT extension makes the archive fail ("Could not write LUT file <dir>/<cut> to in-memory
+  archive."), any other is left out. Where they don't (the cut falls inside a character), the
+  bytes after them are what an earlier entry left in `d_name`, or memory `malloc` left
+  uninitialized; and for the last entry, whose `end` is 1, the read goes on into the
+  padding. The name read then depends on that memory (the Windows wheel left such files out,
+  probed 2026-10-17).
 - **Who notices:** applications archiving configs next to files with very long names.
-- **Decided** (the owner's general rule, 2026-09-30): the port keeps the names the wheel
-  reads whole (up to 255 bytes, and 256 but the last entry) and leaves the others out, as the
-  wheel's archives do.
-- **Status:** matched with a skip in `p4-baker` (`crates/ocio/src/minizip/mz_os.rs`,
-  `mz_os_list_dir`); `crates/ocio/tests/ocioz_archive_oracle.rs`, `long_names` (Windows).
+- **Decided** (the owner's general rule, 2026-09-30): the port reads a name of up to 255
+  bytes as it is and a longer one as its 256-byte cut where the cut fills `d_name` and the
+  entry isn't the last, as the wheel does; where the name read depends on memory upstream
+  doesn't own, `Config::archive` fails with "Could not archive <path>: its name is longer
+  than minizip-ng reads.".
+- **Status:** matched in `p4-baker`, with an error where upstream reads memory it doesn't own
+  (`crates/ocio/src/minizip/mz_os.rs`, `mz_os_list_dir`; `crates/ocio/src/ocioz_archive.rs`);
+  `crates/ocio/tests/ocioz_archive_oracle.rs`, `long_names` (Windows: against the wheel where
+  it reads whole names, the port alone where it doesn't).
 
 ### U-80. Archiving a config next to a dangling link whose name holds `*` overflows the stack
 
 - **Upstream:** `Config::archive` adds each LUT file it lists with minizip-ng's
   `mz_zip_writer_add_path` (`OCIOZArchive.cpp:183-187` @ v2.5.2; `mz_zip_rw.c:1649-1729` @
-  4.0.10). A path with a `*` that doesn't exist is taken for a wildcard: the function lists the
-  path's directory and adds each entry whose name matches it. On Linux a dangling link whose
-  name holds a `*` and a LUT extension is such a path, and it matches itself, so the function
-  calls itself on it again without end, until the stack overflows: the Linux wheel crashes
-  (SIGSEGV, probed 2026-10-17). On Windows names can't hold `*`.
+  4.0.10). A path with a `*` anywhere (in a directory's name too) that doesn't exist is taken
+  for a wildcard: the function lists the path's directory and adds each entry whose name
+  matches the path's last component. On Linux a dangling link with a LUT extension in a
+  directory whose name holds a `*`, or whose own name holds one, is such a path, and it
+  matches itself, so the function calls itself on it again without end, each call holding a
+  directory open, until the stack overflows: the Linux wheel crashes (SIGSEGV, probed
+  2026-10-17). Where the process may open few files (a low `ulimit -n`), the listing fails
+  first and the wheel throws "Could not write LUT file <path> to in-memory archive." instead.
+  On Windows names can't hold `*`.
 - **Who notices:** applications archiving a config whose directory holds such a link.
 - **Decided** (the owner's general rule, 2026-09-30): the port's `add_path` returns an error
-  for a path with a `*` that doesn't exist, and `Config::archive` fails with "Could not write
-  LUT file <path> to in-memory archive.".
+  for a path with a `*` anywhere that doesn't exist, and `Config::archive` fails with "Could
+  not write LUT file <path> to in-memory archive." (the low-limit outcome).
 - **Status:** matched with an error in `p4-baker` (`crates/ocio/src/minizip/mz_zip_rw.rs`,
   `add_path_of_file`); `crates/ocio/tests/ocioz_archive_oracle.rs`, `dangling_link_with_a_star`
   (Linux, the port only).

@@ -246,13 +246,17 @@ pub(crate) fn mz_os_get_file_attribs(path: &[u8]) -> u32 {
 ///   8.3 short name starts with the directory's own name, and the cut path the one whose name
 ///   is the cut name (docs/improvements.md, I-221). OpenColorIO then looks for each name found
 ///   in the directory itself.
-/// - `mz_os_read_dir` converts each name into a `d_name` of 256 bytes, which the byte
-///   `end` follows (0, and 1 once the last entry is read): a name of 256 UTF-8 bytes fills it
-///   and reads to `end`'s 0, but not as the last entry, where `end` is 1 and the read goes on
-///   into the uninitialized padding; a longer one doesn't fit, `WideCharToMultiByte` fails
-///   (docs/improvements.md, U-79). The port keeps a name of 256 bytes but the last, and leaves
-///   the others of 256 bytes or more out, as the wheel's archives do.
-pub(crate) fn mz_os_list_dir(path: &[u8]) -> Option<Vec<Vec<u8>>> {
+/// - `mz_os_read_dir` converts each name into a `d_name` of 256 bytes, which the byte `end`
+///   follows (0, and 1 once the last entry is read), then the structure's uninitialized
+///   padding. A name of more than 255 UTF-8 bytes doesn't fit with its NUL:
+///   `WideCharToMultiByte` writes the whole characters that fit in the 256 bytes and fails,
+///   and the name read is that cut, ended by `end`'s 0. Where the cut is 256 bytes and `end`
+///   is 0, the cut name is the entry's name (`Ok`). Where the cut is shorter (it falls inside a
+///   character), the bytes after it are what an earlier entry left in `d_name` or memory
+///   `malloc` left uninitialized; and where `end` is 1, the read goes on into the padding: the
+///   name read depends on that memory, and the port gives the entry's name as `Err`
+///   (docs/improvements.md, U-79).
+pub(crate) fn mz_os_list_dir(path: &[u8]) -> Option<Vec<Result<Vec<u8>, Vec<u8>>>> {
     let path = c_str(path);
     #[cfg(windows)]
     {
@@ -282,20 +286,33 @@ pub(crate) fn mz_os_list_dir(path: &[u8]) -> Option<Vec<Vec<u8>>> {
             };
         }
         let listing = super::os_windows_ffi::find_files(&pattern)?;
-        // What the names read as from `d_name` (U-79): one of 256 bytes, its NUL the `end`
-        // flag after it, only where `end` is still 0; a longer one never.
         let last = listing.names.len().saturating_sub(1);
-        let names = listing
-            .names
-            .iter()
-            .enumerate()
-            .map(|(i, name)| (i, ocio_ops::platform::utf16_to_utf8_lossy(name)))
-            .filter(|(i, name)| {
-                name.len() < 256 || (name.len() == 256 && !(listing.ended && *i == last))
-            })
-            .map(|(_, name)| name)
-            .filter(|name| name != b"." && name != b"..")
-            .collect();
+        let mut names = Vec::new();
+        for (i, wide) in listing.names.iter().enumerate() {
+            let name = ocio_ops::platform::utf16_to_utf8_lossy(wide);
+            if name == b"." || name == b".." {
+                continue;
+            }
+            if name.len() < 256 {
+                names.push(Ok(name));
+                continue;
+            }
+            // What d_name reads as (U-79): the whole characters that fit in 256 bytes, read to
+            // the `end` flag where they fill them and `end` is 0.
+            let s = String::from_utf8_lossy(&name).into_owned();
+            let mut cut = 0;
+            for (at, c) in s.char_indices() {
+                if at + c.len_utf8() > 256 {
+                    break;
+                }
+                cut = at + c.len_utf8();
+            }
+            if cut == 256 && !(listing.ended && i == last) {
+                names.push(Ok(name[..cut].to_vec()));
+            } else {
+                names.push(Err(name));
+            }
+        }
         Some(names)
     }
     #[cfg(not(windows))]
@@ -306,7 +323,7 @@ pub(crate) fn mz_os_list_dir(path: &[u8]) -> Option<Vec<Vec<u8>>> {
             let Ok(entry) = entry else {
                 break;
             };
-            names.push(entry.file_name().as_bytes().to_vec());
+            names.push(Ok(entry.file_name().as_bytes().to_vec()));
         }
         Some(names)
     }
@@ -564,35 +581,39 @@ pub(crate) fn mz_dir_make(path: &[u8]) -> i32 {
     err
 }
 
-/// The time `unix_time` seconds after 1970, as the system takes it: on Windows the `FILETIME`
-/// of `mz_os_unix_to_file_time` (mz_os_win32.c:229-234 @ 4.0.10), whose `uint64_t` arithmetic
-/// wraps, so every `time_t` gives one (`None` for a `FILETIME` of 0, which `SetFileTime` takes
-/// for "leave this time"; no `time_t` the reader gives wraps to it); on Linux the `time_t`
-/// itself.
-fn system_time(unix_time: i64) -> Option<std::time::SystemTime> {
+/// The `FILETIME` of `mz_os_unix_to_file_time` (mz_os_win32.c:229-234 @ 4.0.10):
+/// 100-nanosecond intervals since 1601, in `uint64_t` arithmetic that wraps, so every `time_t`
+/// gives one.
+#[cfg(windows)]
+fn mz_os_unix_to_file_time(unix_time: i64) -> u64 {
+    (unix_time as u64)
+        .wrapping_mul(10_000_000)
+        .wrapping_add(116_444_736_000_000_000)
+}
+
+/// The system time of a `FILETIME` that is at most `0x7FFF_FFFF_FFFF_FFFF` (a `SystemTime`
+/// holds its intervals since 1601 as a signed count).
+#[cfg(windows)]
+fn file_time_to_system_time(file_time: u64) -> Option<std::time::SystemTime> {
     use std::time::{Duration, UNIX_EPOCH};
-    if cfg!(windows) {
-        // 100-nanosecond intervals since 1601: `UNIX_EPOCH` is 116,444,736,000,000,000 of them.
-        let epoch: i128 = 116_444_736_000_000_000;
-        let file_time = (unix_time as u64)
-            .wrapping_mul(10_000_000)
-            .wrapping_add(epoch as u64);
-        if file_time == 0 {
-            return None;
-        }
-        // A `SystemTime` holds the `FILETIME`'s bits as a signed count of intervals.
-        let intervals = i128::from(file_time as i64) - epoch;
-        let magnitude = intervals.unsigned_abs();
-        let duration = Duration::new(
-            (magnitude / 10_000_000) as u64,
-            (magnitude % 10_000_000) as u32 * 100,
-        );
-        if intervals >= 0 {
-            UNIX_EPOCH.checked_add(duration)
-        } else {
-            UNIX_EPOCH.checked_sub(duration)
-        }
-    } else if unix_time >= 0 {
+    let intervals = i128::from(file_time) - 116_444_736_000_000_000;
+    let magnitude = intervals.unsigned_abs();
+    let duration = Duration::new(
+        (magnitude / 10_000_000) as u64,
+        (magnitude % 10_000_000) as u32 * 100,
+    );
+    if intervals >= 0 {
+        UNIX_EPOCH.checked_add(duration)
+    } else {
+        UNIX_EPOCH.checked_sub(duration)
+    }
+}
+
+/// The system time of a `time_t` (Linux: every one is representable).
+#[cfg(not(windows))]
+fn time_t_to_system_time(unix_time: i64) -> Option<std::time::SystemTime> {
+    use std::time::{Duration, UNIX_EPOCH};
+    if unix_time >= 0 {
         UNIX_EPOCH.checked_add(Duration::from_secs(unix_time as u64))
     } else {
         UNIX_EPOCH.checked_sub(Duration::from_secs(unix_time.unsigned_abs()))
@@ -600,8 +621,14 @@ fn system_time(unix_time: i64) -> Option<std::time::SystemTime> {
 }
 
 /// Sets the file's dates: on Linux, its access and modification times (`utime`); on Windows,
-/// those of the three that aren't 0 (`SetFileTime`, which takes any `FILETIME` and refuses the
-/// ones it can't hold; it fails as a whole, and the file keeps its times).
+/// those of the three that aren't 0 (`SetFileTime` of the three `FILETIME`s, the others as
+/// `GetFileTime` read them).
+///
+/// `SetFileTime` (probed 2026-10-17) leaves a time whose `FILETIME` is 0, `0xFFFF_FFFF_FFFF_FFFF`
+/// or `0xFFFF_FFFF_FFFF_FFFE` as it is, and refuses one past `0x7FFF_FFFF_FFFF_FFFF`
+/// otherwise: the call then fails as a whole, and none of the times is set. A `time_t` after
+/// the year 30828 or before 1601 wraps to such a `FILETIME` (from an NTFS time of 0, say);
+/// the three special values aren't reachable from a `time_t`.
 ///
 /// Port of `mz_os_set_file_date` (mz_os_posix.c:230-241, mz_os_win32.c:261-299 @ 4.0.10).
 pub(crate) fn mz_os_set_file_date(path: &[u8], modified: i64, accessed: i64, creation: i64) -> i32 {
@@ -616,28 +643,38 @@ pub(crate) fn mz_os_set_file_date(path: &[u8], modified: i64, accessed: i64, cre
         };
     };
     let mut times = std::fs::FileTimes::new();
-    if cfg!(windows) {
-        if modified != 0
-            && let Some(t) = system_time(modified)
-        {
-            times = times.set_modified(t);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::FileTimesExt;
+        for (which, date) in [(0, modified), (1, accessed), (2, creation)] {
+            if date == 0 {
+                continue;
+            }
+            let file_time = mz_os_unix_to_file_time(date);
+            if matches!(file_time, 0 | u64::MAX | 0xFFFF_FFFF_FFFF_FFFE) {
+                continue;
+            }
+            let Some(time) =
+                file_time_to_system_time(file_time).filter(|_| file_time <= i64::MAX as u64)
+            else {
+                // SetFileTime refuses it, and sets none of the three.
+                return MZ_INTERNAL_ERROR;
+            };
+            times = match which {
+                0 => times.set_modified(time),
+                1 => times.set_accessed(time),
+                _ => times.set_created(time),
+            };
         }
-        if accessed != 0
-            && let Some(t) = system_time(accessed)
-        {
-            times = times.set_accessed(t);
-        }
-        #[cfg(windows)]
-        if creation != 0
-            && let Some(t) = system_time(creation)
-        {
-            use std::os::windows::fs::FileTimesExt;
-            times = times.set_created(t);
-        }
-    } else {
+    }
+    #[cfg(not(windows))]
+    {
         // Creation date not supported
         let _ = creation;
-        let (Some(m), Some(a)) = (system_time(modified), system_time(accessed)) else {
+        let (Some(m), Some(a)) = (
+            time_t_to_system_time(modified),
+            time_t_to_system_time(accessed),
+        ) else {
             return MZ_INTERNAL_ERROR;
         };
         times = times.set_modified(m).set_accessed(a);
