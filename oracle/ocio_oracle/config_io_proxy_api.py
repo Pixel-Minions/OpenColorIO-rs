@@ -33,7 +33,8 @@ def config_io_proxy(args, blobs):
       "proxy": whether the config has one (getConfigIOProxy() isn't None); where it has,
       "calls": per call, in order, {"data": a blob index} (getLutData's bytes),
       {"text": {"bytes": hex}} (the strings of getConfigData and getFastLutFileHash), or
-      {"exception": {"type", "message"}}
+      {"exception": {"type", "message"}}; a string that isn't UTF-8, which the binding can't
+      return, {"exception": {"type": "UnicodeDecodeError", "undecodable": hex of its bytes}}
       exception, stage   when reading the config raised: {"type", "message"}, "config"
       log         OCIO's log messages
     blobs: getLutData's bytes, as the result indexes them
@@ -74,6 +75,12 @@ def config_io_proxy(args, blobs):
                 for name, call_args in parsed:
                     try:
                         value = getattr(proxy, name)(*call_args)
+                    except UnicodeDecodeError as exc:
+                        # pybind11's conversion of a returned string that isn't UTF-8:
+                        # exc.object holds the string's bytes.
+                        reports.append({"exception": {"type": "UnicodeDecodeError",
+                                                      "undecodable": bytes(exc.object).hex()}})
+                        continue
                     except RAISED as exc:
                         if not wheel_raised(exc):
                             raise
