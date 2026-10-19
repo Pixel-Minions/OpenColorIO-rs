@@ -471,6 +471,17 @@ fn bad_requests_are_refused() {
                          {"call": "getData", "on": "l", "as": "d"},
                          {"call": "reshape", "on": "d", "args": [7]}]}),
         json!({"calls": [{"call": "mro", "on": "__class__"}]}),
+        // A transform spec of a value object's class, and Python's Exception as a target.
+        json!({"calls": [{"call": "getProcessor",
+                          "args": [{"transform": {"class": "GradingRGBM"}}]}]}),
+        json!({"calls": [{"call": "mro", "on": "Exception"}]}),
+        // GroupTransform.write in a spec's calls: it would write with the process's current
+        // config, which latches on first use, or write a file anywhere.
+        json!({"calls": [{"call": "getProcessor", "args": [{"transform": {
+            "class": "GroupTransform",
+            "calls": [["write", "Academy/ASC Common LUT Format"]]}}]}]}),
+        json!({"objects": {"t": {"class": "GradingPrimary", "args": [{"enum": "GRADING_LOG"}],
+                                 "calls": [["write", "x", "y"]]}}}),
     ];
     for args in &bypasses {
         refused(args);

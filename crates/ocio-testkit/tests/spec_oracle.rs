@@ -183,6 +183,29 @@ fn bad_factories_are_refused() {
     }
 }
 
+/// A spec's calls can't run GroupTransform.write: without a config it writes with the process's
+/// current config, which latches on first use, and its (format, file) form writes a file
+/// anywhere. Refused in both forms.
+#[test]
+fn write_in_a_spec_is_refused() {
+    let format = "Academy/ASC Common LUT Format";
+    let calls: Vec<BatchCall<'_>> = [
+        json!([["write", format]]),
+        json!([["write", format, "x.clf"]]),
+    ]
+    .into_iter()
+    .map(|calls| BatchCall {
+        cmd: "transform_text",
+        args: json!({"transforms": [{"class": "GroupTransform", "calls": calls}]}),
+        blobs: Vec::new(),
+    })
+    .collect();
+    for result in Oracle::get().batch(&calls, false) {
+        let error = result.expect_err("refused");
+        assert!(error.contains("can't run 'write'"), "{error}");
+    }
+}
+
 /// The values of a 7-entry 1D LUT, red, green and blue per entry, with -0.0, a subnormal, a
 /// large value, an infinity and NaNs among them: quiet and signalling, of both signs, with
 /// payloads, which a blob must carry bit for bit (NumPy or the binding converting the values

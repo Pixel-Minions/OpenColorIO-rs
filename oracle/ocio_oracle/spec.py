@@ -165,9 +165,20 @@ def _construct(what, cls, spec, blobs):
     return cls(**{k: value(v, blobs) for k, v in args.items()})
 
 
+# The methods a spec's "calls" may not run. GroupTransform.write without a config writes with
+# the process's current config (PyGroupTransform.cpp:89-92, 110-113 @ v2.5.2), which latches on
+# first use, so the result would depend on what ran earlier in the oracle's process; and its
+# (formatName, fileName) form writes a file anywhere. The write commands (write_api.py) and
+# config_calls (with a config) are the ways to write.
+REFUSED_CALLS = {"write"}
+
+
 def _call(obj, spec, blobs):
-    """Calls the methods of a spec's "calls" on `obj`, in order."""
+    """Calls the methods of a spec's "calls" on `obj`, in order. A method of REFUSED_CALLS is
+    refused."""
     for call in spec.get("calls") or []:
+        if call and call[0] in REFUSED_CALLS:
+            raise ValueError(f"a spec's calls can't run {call[0]!r}: {call!r}")
         getattr(obj, call[0])(*[value(a, blobs) for a in call[1:]])
 
 
