@@ -42,16 +42,23 @@ env:
   RUSTFLAGS: -D warnings
   # The battery's quick tier: SDE checks which kernels are dispatched; full is too slow emulated.
   OCIO_RS_TIER: quick
+  # Two tests of the API format sweep (crates/ocio/tests/api_formats_oracle.rs) run for hours
+  # emulated: every CPU job was cancelled at its time limit inside them from 2026-10-15 on, and
+  # the kernel tests queued behind them never ran. They run in jobs of their own (part
+  # lut-sweep, with a longer limit); the kernels part runs every other CPU test.
+  LUT_SWEEP: lut1d_transform_matches_the_wheel_at_every_format_and_level lut3d_transform_matches_the_wheel_at_every_format_and_level
+  SKIP_LUT_SWEEP: --skip lut1d_transform_matches_the_wheel_at_every_format_and_level --skip lut3d_transform_matches_the_wheel_at_every_format_and_level
 
 jobs:
   windows:
-    name: SDE ${{ matrix.cpu }} (Windows)
+    name: SDE ${{ matrix.cpu }}${{ matrix.part == 'lut-sweep' && ' LUT sweep' || '' }} (Windows)
     runs-on: windows-2025
-    timeout-minutes: 240
+    timeout-minutes: ${{ matrix.part == 'lut-sweep' && 360 || 240 }}
     strategy:
       fail-fast: false
       matrix:
         cpu: [nhm, snb, hsw, skl, skx]
+        part: [kernels, lut-sweep]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -75,20 +82,26 @@ jobs:
           cargo cpu-tests --release --no-run
       - name: CPU tests on an emulated ${{ matrix.cpu }}
         shell: bash
-        run: scripts/sde.sh ${{ matrix.cpu }} cargo cpu-tests --release --no-fail-fast
+        run: |
+          if [ "${{ matrix.part }}" = lut-sweep ]; then
+            scripts/sde.sh ${{ matrix.cpu }} cargo test --release -p ocio --test api_formats_oracle --no-fail-fast -- $LUT_SWEEP
+          else
+            scripts/sde.sh ${{ matrix.cpu }} cargo cpu-tests --release --no-fail-fast -- $SKIP_LUT_SWEEP
+          fi
       - name: SDE logs
         if: failure()
         shell: bash
         run: find . -name 'pin-*log.txt' -not -path './target/*' -exec tail -n 40 {} +
 
   rocky9:
-    name: SDE ${{ matrix.cpu }} (Rocky Linux 9)
+    name: SDE ${{ matrix.cpu }}${{ matrix.part == 'lut-sweep' && ' LUT sweep' || '' }} (Rocky Linux 9)
     runs-on: ubuntu-24.04
-    timeout-minutes: 240
+    timeout-minutes: ${{ matrix.part == 'lut-sweep' && 360 || 240 }}
     strategy:
       fail-fast: false
       matrix:
         cpu: [nhm, snb, hsw, skl, skx]
+        part: [kernels, lut-sweep]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -110,7 +123,11 @@ jobs:
             export OCIO_RS_TIER=quick
             cargo xtask oracle info
             cargo cpu-tests --release --no-run
-            scripts/sde.sh ${{ matrix.cpu }} cargo cpu-tests --release --no-fail-fast
+            if [ "${{ matrix.part }}" = lut-sweep ]; then
+              scripts/sde.sh ${{ matrix.cpu }} cargo test --release -p ocio --test api_formats_oracle --no-fail-fast -- ${{ env.LUT_SWEEP }}
+            else
+              scripts/sde.sh ${{ matrix.cpu }} cargo cpu-tests --release --no-fail-fast -- ${{ env.SKIP_LUT_SWEEP }}
+            fi
           '
       - name: SDE logs
         if: failure()
