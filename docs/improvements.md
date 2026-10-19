@@ -3018,17 +3018,21 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   what earlier names of the listing wrote, or to the `end` flag's 0 where the 256 bytes hold
   no NUL (U-79 covers the reads that reach memory nothing wrote). The name read isn't the
   file's: a cut of 256 bytes is read as itself, and a shorter one (it falls inside a
-  character) with an earlier name's bytes after it. Where the name read has a LUT extension,
-  OpenColorIO looks for that file and the archive fails ("Could not write LUT file
-  <dir>\<name read> to in-memory archive."); any other is left out. A directory with
-  U+20AC x84 `-3dlzz`, then U+20AC x84 `.` U+1F600 `.spi1d` (cut to 253 bytes, then the
-  first name's `3dl`) fails with the LUT file U+20AC x84 `.3dl` (the Windows wheel, 3 runs
-  of 3, probed 2026-10-18).
+  character) with an earlier name's bytes after it. The name read can be another entry's:
+  a directory of that name is listed again, and its LUT files are archived again (U+20AC x84
+  `.ab`, a directory holding `lut.spi1d`, then U+20AC x84 `.` U+1F600 `.spi1d`: the
+  archive holds U+20AC x84 `.ab/lut.spi1d` twice, the Windows wheel, probed 2026-10-18), and
+  a file of that name is taken as its own entry is. Where no entry has the name read and it
+  has a LUT extension, OpenColorIO looks for that file and the archive fails ("Could not
+  write LUT file <dir>\<name read> to in-memory archive."); any other is left out. A
+  directory with U+20AC x84 `-3dlzz`, then U+20AC x84 `.` U+1F600 `.spi1d` (cut to 253
+  bytes, then the first name's `3dl`) fails with the LUT file U+20AC x84 `.3dl` (the
+  Windows wheel, 3 runs of 3, probed 2026-10-18).
 - **Who notices:** applications archiving configs next to files with very long names, on
   Windows.
 - **A fix:** convert each name into a buffer sized from it, or refuse a name whose conversion
   fails.
-- **Status:** matched in `group-5f` (`crates/ocio/src/minizip/mz_os.rs`, `mz_os_list_dir`);
+- **Status:** matched in `p4-baker` (`crates/ocio/src/minizip/mz_os.rs`, `mz_os_list_dir`);
   `crates/ocio/tests/ocioz_archive_oracle.rs`, `long_names` (Windows, against the wheel).
 
 ## Undefined behaviour upstream

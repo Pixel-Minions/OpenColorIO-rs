@@ -2232,3 +2232,74 @@ fn recovery_resumes_after_its_last_read() {
     let cases: Vec<(&str, Vec<u8>)> = files.iter().map(|(l, a)| (l.as_str(), a.clone())).collect();
     check_files(&cases);
 }
+
+/// The archive's I/O proxy, called directly (`Config::getConfigIOProxy`, public): `getLutData`
+/// normalizes the path it is given (OCIOZArchive.cpp:599 @ v2.5.2), so `luts/./a.spi1d`,
+/// `x/../luts/a.spi1d` and `luts//a.spi1d` give the LUT; and `getFastLutFileHash` of the same
+/// paths, a path in other cases and slashes, and a file the archive doesn't hold.
+#[test]
+fn proxy_calls_as_in_the_wheel() {
+    let _lock = CACHES.lock().unwrap_or_else(PoisonError::into_inner);
+    let path = write_file(&Archive::of(standard(8)).bytes());
+    let lut_paths = [
+        "luts/a.spi1d",
+        "luts/./a.spi1d",
+        "x/../luts/a.spi1d",
+        "luts//a.spi1d",
+        "./luts/sub/b.spi1d",
+        r"LUTS\SUB\B.SPI1D",
+        "luts/c.spi1d",
+    ];
+    let mut calls = Vec::new();
+    for p in lut_paths {
+        calls.push(json!({"getLutData": p}));
+        calls.push(json!({"getFastLutFileHash": p}));
+    }
+    let response = Oracle::get().call(
+        "with_files",
+        json!({"files": {}, "command": "config_io_proxy",
+               "args": {"config": {"file": path}, "calls": calls}}),
+        &[],
+    );
+    let result = &response.result;
+    assert_eq!(result["proxy"], json!(true), "{result}");
+    let wheel = result["calls"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{result}"));
+
+    clear_all_caches();
+    let config = Config::create_from_file(path.as_bytes()).unwrap();
+    let proxy = config.config_io_proxy().expect("the archive's proxy");
+    let mut failures = Vec::new();
+    for (i, p) in lut_paths.iter().enumerate() {
+        let port = [
+            proxy.lut_data(p.as_bytes()).map_err(|e| e.what().to_vec()),
+            proxy
+                .fast_lut_file_hash(p.as_bytes())
+                .map_err(|e| e.what().to_vec()),
+        ];
+        for (j, port) in port.into_iter().enumerate() {
+            let call = &wheel[2 * i + j];
+            let wheel: Result<Vec<u8>, Vec<u8>> = if let Some(index) = call["data"].as_u64() {
+                Ok(response.blobs[index as usize].clone())
+            } else if call["text"].is_object() {
+                Ok(bytes(&call["text"]))
+            } else {
+                Err(call["exception"]["message"]
+                    .as_str()
+                    .unwrap_or_else(|| panic!("{call}"))
+                    .as_bytes()
+                    .to_vec())
+            };
+            if wheel != port {
+                failures.push(format!(
+                    "{p} ({}): wheel {:?}, port {:?}",
+                    ["getLutData", "getFastLutFileHash"][j],
+                    wheel.map(|w| String::from_utf8_lossy(&w).into_owned()),
+                    port.map(|w| String::from_utf8_lossy(&w).into_owned())
+                ));
+            }
+        }
+    }
+    assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
