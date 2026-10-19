@@ -206,6 +206,76 @@ fn write_in_a_spec_is_refused() {
     }
 }
 
+/// A transform spec's class must be a transform: a value object's class is refused with the
+/// spec's own message.
+#[test]
+fn a_transform_spec_of_a_value_class_is_refused() {
+    let error = Oracle::get()
+        .try_call(
+            "transform_text",
+            json!({"transforms": [{"class": "GradingRGBM"}]}),
+            &[],
+        )
+        .map(|r| r.result)
+        .unwrap_err();
+    assert!(
+        error.contains("a transform spec builds a transform"),
+        "{error}"
+    );
+}
+
+/// A spec's calls can't write files: Config.serialize(fileName), Config.archive(path) and
+/// Baker.bake(fileName) are refused, in an object spec and in one nested in a transform spec's
+/// arguments, and the file isn't created (archive and bake open it before they can throw).
+#[test]
+fn file_writes_in_a_spec_are_refused() {
+    let dir = ocio_testkit::paths::target_dir().join("spec-file-writes");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir
+        .join("written")
+        .to_str()
+        .unwrap()
+        .replace(std::path::MAIN_SEPARATOR, "/");
+    let _ = std::fs::remove_file(&path);
+    let config =
+        |call: Value| json!({"class": "Config", "factory": ["CreateRaw"], "calls": [call]});
+    let objects = [
+        config(json!(["serialize", path])),
+        config(json!(["archive", path])),
+        json!({"class": "Baker", "calls": [["bake", path]]}),
+    ];
+    let mut calls = Vec::new();
+    for object in &objects {
+        calls.push(BatchCall {
+            cmd: "object_calls",
+            args: json!({"objects": {"x": object}}),
+            blobs: Vec::new(),
+        });
+        // Nested in a transform spec's arguments.
+        calls.push(BatchCall {
+            cmd: "object_calls",
+            args: json!({"calls": [{"call": "getProcessor", "args": [{"transform": {
+                "class": "GradingPrimaryTransform",
+                "args": [{"object": {"class": "GradingPrimary",
+                                     "args": [{"enum": "GRADING_LOG"}],
+                                     "attrs": [["saturation", {"object": object}]]}}]}}]}]}),
+            blobs: Vec::new(),
+        });
+    }
+    for (i, result) in Oracle::get().batch(&calls, false).into_iter().enumerate() {
+        let error = result.expect_err("refused");
+        assert!(error.contains("a spec's calls can't run"), "{i}: {error}");
+    }
+    assert!(!std::path::Path::new(&path).exists(), "{path}");
+    // serialize() without a file is a spec's to call.
+    let text = Oracle::get().call(
+        "object_calls",
+        json!({"objects": {"x": config(json!(["serialize"]))}}),
+        &[],
+    );
+    assert_eq!(text.result["config"], Value::Null, "{}", text.result);
+}
+
 /// The values of a 7-entry 1D LUT, red, green and blue per entry, with -0.0, a subnormal, a
 /// large value, an infinity and NaNs among them: quiet and signalling, of both signs, with
 /// payloads, which a blob must carry bit for bit (NumPy or the binding converting the values

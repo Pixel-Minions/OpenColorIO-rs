@@ -314,6 +314,11 @@ def object_calls(args, blobs):
     among the response blobs.
     blobs: the arrays the written values hold, in order
 
+    A call (not a spec's calls) may write a file the request names, as config_calls' calls may:
+    Config.serialize(fileName), GroupTransform.write(format, fileName, config). The requests
+    are the project's own tests, and one needs it (file_transform_cache_oracle.rs rewrites the
+    LUT file it reads that way); a spec's calls can't (spec.REFUSED_CALLS).
+
     Every request the command can't run exactly is refused (the call fails): an unknown key or
     call kind, a name no call stored, a value or object spec it can't read (whatever Python
     raises reading it), arguments no overload takes (pybind11's TypeError), and a name in
