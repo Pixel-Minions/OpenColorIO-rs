@@ -28,7 +28,9 @@ with "factory" instead of "args" as for a transform (it must return an instance 
 than setters.
 
 Values inside "args", "factory", "attrs" and "calls" are converted recursively:
-- {"enum": "NAME"} becomes ``getattr(OCIO, "NAME")``;
+- {"enum": "NAME"} becomes the member of a PyOpenColorIO enum of that name,
+  ``getattr(OCIO, "NAME")``: any other attribute of the module (a function, a class, a
+  dunder) is refused;
 - {"transform": <spec>} becomes a transform;
 - {"object": <spec>} becomes a value object (an object spec);
 - {"f64": bits} becomes the float (a C double) with those bits, an unsigned 64-bit integer, as
@@ -99,11 +101,38 @@ def array_from_blob(v, blobs):
     return array
 
 
+# The metaclass of the binding's classes (pybind11_type): its transforms, value objects, enums
+# and iterators. Python's own classes (OCIO.Exception, the module's type) aren't of it.
+BINDING_TYPE = type(OCIO.Config)
+
+
+def enum_member(name):
+    """The member of a PyOpenColorIO enum named `name`. Anything else, such as a function of the
+    module (GetCurrentConfig, SetEnvVariable) or a dunder (__setattr__), is refused: a value
+    spec names an enum member, never a callable to hand to the library or to an object."""
+    member = getattr(OCIO, name, None) if isinstance(name, str) else None
+    members = getattr(type(member), "__members__", None)
+    if (member is None or type(type(member)) is not BINDING_TYPE or not isinstance(members, dict)
+            or members.get(name) is not member):
+        raise ValueError(f"{name!r} isn't a member of a PyOpenColorIO enum")
+    return member
+
+
+def binding_class(name, what):
+    """The PyOpenColorIO class named `name`: one of the binding's classes. Python's own classes
+    the module holds (Exception, ExceptionMissingFile, the module's type as __class__) are
+    refused."""
+    cls = getattr(OCIO, name, None) if isinstance(name, str) else None
+    if not isinstance(cls, type) or type(cls) is not BINDING_TYPE:
+        raise ValueError(f"{what} names a class of the binding, not {name!r}")
+    return cls
+
+
 def value(v, blobs=()):
     """The Python value of a value spec; `blobs` are the spec's blobs."""
     if isinstance(v, dict):
         if set(v) == {"enum"}:
-            return getattr(OCIO, v["enum"])
+            return enum_member(v["enum"])
         if set(v) == {"transform"}:
             return transform(v["transform"], blobs)
         if set(v) == {"object"}:
@@ -144,7 +173,10 @@ def _call(obj, spec, blobs):
 
 def transform(spec, blobs=()):
     """The transform of a transform spec; `blobs` are the spec's blobs."""
-    obj = _construct("a transform spec", getattr(OCIO, spec["class"]), spec, blobs)
+    cls = binding_class(spec["class"], "a transform spec")
+    if not issubclass(cls, OCIO.Transform):
+        raise ValueError(f"a transform spec builds a transform, not a {spec['class']!r}")
+    obj = _construct("a transform spec", cls, spec, blobs)
     _call(obj, spec, blobs)
     for child in spec.get("children") or []:
         obj.appendTransform(transform(child, blobs))
@@ -162,8 +194,8 @@ def value_object(spec, blobs=()):
     if not isinstance(spec, dict) or "class" not in spec or not set(spec) <= OBJECT_KEYS:
         raise ValueError(f"an object spec takes class and optionally args or factory, attrs and "
                          f"calls: {spec!r}")
-    cls = getattr(OCIO, spec["class"])
-    if not isinstance(cls, type) or issubclass(cls, OCIO.Transform):
+    cls = binding_class(spec["class"], "an object spec")
+    if issubclass(cls, OCIO.Transform):
         raise ValueError(f"an object spec builds an instance of a class that isn't a "
                          f"transform's, not {spec['class']!r}")
     obj = _construct("an object spec", cls, spec, blobs)

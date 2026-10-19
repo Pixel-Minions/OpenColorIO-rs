@@ -522,7 +522,7 @@ print(OCIO.__version__)                       # "2.5.2"
 | `.ocioz` archives | `zip` 8.x (deflate only), version pinned | Archives compared entry by entry; the deflate bytes are deviation D-6 (P4-3, decided 2026-10-07) |
 | Regex | `regex`, `fancy-regex` | — |
 | ICC | The subset of SampleICC 1.2.6 OCIO uses, translated, with its notice | OCIO reads only matrix/TRC profiles (P4-4, decided 2026-10-07) |
-| Python | `pyo3` 0.29, `numpy` 0.29, `maturin` 1.15 | Embedded via `append_to_inittab`; a standalone wheel for Python 3.13 |
+| Python | `pyo3` 0.29 and `numpy` 0.29, pinned exactly; `maturin` 1.15 for the release wheel (Phase 10) | Embedded via `append_to_inittab`; a standalone module for CPython 3.13 only (`cp313`, not `abi3`), built by `cargo xtask py-build` until the release (P6-1 to P6-5, decided 2026-10-17, `docs/cards/phase6.md`) |
 | GPU checks | naga + wgpu 30, glslang, DXC via `hassle-rs` | — |
 | Tests, benchmarks, CLI | `proptest`, `cargo-fuzz`, `cargo-mutants`, `criterion`, `clap` | No tolerance crates: comparisons are exact |
 
