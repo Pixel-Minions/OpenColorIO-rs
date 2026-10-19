@@ -95,8 +95,7 @@ Discreet 1DL, Iridas and Resolve `.cube`, `.itx`, `.3dl`, Houdini, Truelight, Pa
 files, and the CLF/CTF writer; the baker, in every format the official library bakes, CLF and
 CTF included; and `.ocioz` archives, read, written and extracted through a port of minizip-ng
 4.0.10, as the official library does. The grading elements of CLF/CTF come with the grading
-ops in M3. Next: the Phase 5 (M3) and Phase 6 (M4) cards, whose oracle commands are written
-and reviewed.
+ops in M3. Next: the Phase 5 (M3) and Phase 6 (M4) cards, whose oracle commands are merged.
 The phases toward milestone M1:
 - **Phase 2:** LUTs (1D and 3D, with their inverses), fixed functions, ACES 2.0 and the
   GradingRGBCurve op that the ACES 1.x built-ins use
@@ -229,8 +228,8 @@ Each milestone is a complete section of OCIO, byte-exact on CPU and GPU:
 | **M0** | Analytic transforms (matrix, range, exponent, log, CDL), the op engine and the processor API | **Done** | `0.1.0` |
 | **M1** | LUTs, fixed functions (including ACES 2.0), built-in transforms and configs, config read and write | **Done** | `0.2.0` |
 | **M2** | All 24 file formats, file-based configs and `.ocioz`, the baker | **Done** (CLF/CTF's grading elements come with M3) | `0.3.0` |
-| **M3** | Dynamic properties, grading ops, app helpers | Started: its oracle commands are written and reviewed, landing next | `0.4.0` |
-| **M4** | The `PyOpenColorIO`-compatible Python module | Started: the oracle commands (the module's surface, upstream's Python suite, scripts on the official module) are written and reviewed, landing next | `0.5.0` |
+| **M3** | Dynamic properties, grading ops, app helpers | Started: its oracle commands are merged | `0.4.0` |
+| **M4** | The `PyOpenColorIO`-compatible Python module | Started: the oracle commands (the module's surface, upstream's Python suite, scripts on the official module) are merged | `0.5.0` |
 | **M5** | Full OCIO 2.5.2 parity | Not started | `1.0.0` |
 
 The full plan is in [`PLAN.md`](PLAN.md).
