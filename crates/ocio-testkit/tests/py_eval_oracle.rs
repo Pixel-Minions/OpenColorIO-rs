@@ -553,12 +553,28 @@ fn the_scripts_see_nothing_of_the_callers_environment() {
         .collect();
     let mut names = names;
     names.sort();
-    let expected: &[&str] = if cfg!(windows) {
-        &["PYTHONHOME", "SYSTEMROOT", "UV_INTERNAL__PYTHONHOME"]
+    // The scripts get SYSTEMROOT on Windows and nothing else of their own. The interpreter adds
+    // its own names, which depend on how it was installed: uv's launcher adds PYTHONHOME and
+    // UV_INTERNAL__PYTHONHOME on this workstation but not on GitHub's Windows runner, and
+    // Python's C-locale coercion (PEP 538) adds LC_CTYPE on Linux. So those are allowed, not
+    // required, as in oracle_env_oracle.rs.
+    let (required, added_by_the_interpreter): (&[&str], &[&str]) = if cfg!(windows) {
+        (&["SYSTEMROOT"], &["PYTHONHOME", "UV_INTERNAL__PYTHONHOME"])
     } else {
-        &["LC_CTYPE"]
+        (&[], &["LC_CTYPE"])
     };
-    assert_eq!(names, expected);
+    for name in required {
+        assert!(
+            names.iter().any(|n| n == name),
+            "{name} is missing: {names:?}"
+        );
+    }
+    for name in &names {
+        assert!(
+            required.contains(&name.as_str()) || added_by_the_interpreter.contains(&name.as_str()),
+            "the scripts see {name}: {names:?}"
+        );
+    }
 }
 
 /// Each script runs in a directory of its own: what one writes there the next doesn't find,
