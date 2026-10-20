@@ -440,3 +440,48 @@ fn grading_primary_property_state() {
     );
     assert_eq!(dp.get_computed_value(), expected);
 }
+
+/// A GradingTone property's set validates the value, and a refused value leaves the property
+/// as it was; its pre-render form is the value's, for the property's style; the style resets
+/// the values to its defaults; a copy holds the same state; and equality follows the dynamic
+/// state as for the other grading properties.
+#[test]
+fn grading_tone_property_state() {
+    let dp = Arc::new(DynamicPropertyGradingToneImpl::new(
+        &GradingTone::new(GradingStyle::Lin),
+        GradingStyle::Lin,
+        false,
+    ));
+    assert!(dp.get_local_bypass());
+    let mut bad = GradingTone::new(GradingStyle::Lin);
+    bad.scontrast = 2.5;
+    assert!(dp.set_value(&bad).is_err());
+    assert_eq!(dp.get_value(), GradingTone::new(GradingStyle::Lin));
+
+    let mut value = GradingTone::new(GradingStyle::Lin);
+    value.midtones.master = 1.4;
+    value.scontrast = 1.3;
+    dp.set_value(&value).unwrap();
+    let mut expected = GradingTonePreRender::new(GradingStyle::Lin);
+    expected.update(&value);
+    assert_eq!(dp.get_computed_value(), expected);
+    assert!(!dp.get_local_bypass());
+
+    let copy = dp.create_editable_copy();
+    assert_eq!(copy.get_computed_value(), expected);
+    assert_eq!(copy.get_value(), value);
+    let (dp_any, copy_any) = (
+        DynamicPropertyRcPtr::from(Arc::clone(&dp)),
+        DynamicPropertyRcPtr::from(Arc::clone(&copy)),
+    );
+    assert!(dp_any == copy_any);
+    copy.make_dynamic();
+    assert!(!(dp_any == copy_any));
+
+    dp.set_style(GradingStyle::Video);
+    assert_eq!(dp.get_value(), GradingTone::new(GradingStyle::Video));
+    let mut video = GradingTonePreRender::new(GradingStyle::Video);
+    video.update(&GradingTone::new(GradingStyle::Video));
+    assert!(dp.get_local_bypass());
+    assert_eq!(dp.get_computed_value().top, video.top);
+}
