@@ -15,6 +15,7 @@ mod land;
 mod links;
 mod metadata;
 mod parity;
+mod py;
 mod register_merge;
 mod registers;
 mod scratch;
@@ -77,6 +78,10 @@ Guardrails:
   branch left phase0) or in <path>; without either, this checkout's own, which a branch
   could lower.
 
+Python (Phase 6):
+  py-build [--release]        build the port's PyOpenColorIO into target/py and the Python
+                              environment target/py-port (`cargo xtask py-build --help`)
+
 Upstream:
   upstream-map update         add new upstream files to upstream-map.toml (keeps edits)
   upstream-status             summary of upstream-map.toml
@@ -107,6 +112,11 @@ fn main() -> ExitCode {
             Ok(())
         }
         ["test-shard", rest @ ..] => shards::run(rest),
+        ["py-build", "--help" | "-h"] => {
+            print!("{}", py::USAGE);
+            Ok(())
+        }
+        ["py-build", rest @ ..] => py::py_build(rest),
         ["oracle", "info"] => fixtures::oracle_info(),
         ["oracle", "regen", group] => fixtures::regen(group),
         ["oracle", "check", group] => fixtures::check(group),

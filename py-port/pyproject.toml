@@ -1,0 +1,14 @@
+[project]
+name = "ocio-py-port"
+version = "0.0.0"
+description = "The Python environment of OpenColorIO-rs's own PyOpenColorIO module (Phase 6, P6-4)"
+# The oracle's interpreter and NumPy (oracle/pyproject.toml), without the wheel: `import
+# PyOpenColorIO` finds the port's module, which `cargo xtask py-build` lays out in
+# target/py and adds to this environment's path.
+requires-python = "==3.13.*"
+dependencies = [
+    "numpy==2.3.5",
+]
+
+[tool.uv]
+package = false

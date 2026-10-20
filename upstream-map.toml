@@ -3851,13 +3851,15 @@ status = "todo"
 path = "src/bindings/python/PyOpenColorIO.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_open_color_io.rs"]
-status = "todo"
+status = "partial"
+note = "6.1a: the module, its attributes, the two exceptions, the global functions on versions, caches and environment variables; the logging level, logging and hash callbacks and the bindPy* calls come with WP 6.2-6.7"
 
 [[file]]
 path = "src/bindings/python/PyOpenColorIO.h"
 kind = "binding"
 target = ["crates/ocio-py/src/py_open_color_io.rs"]
-status = "todo"
+status = "partial"
+note = "6.1a: the module's declarations; the classes it declares come with their chunks"
 
 [[file]]
 path = "src/bindings/python/PyPackedImageDesc.cpp"
@@ -3971,8 +3973,9 @@ status = "todo"
 [[file]]
 path = "src/bindings/python/package/__init__.py"
 kind = "binding"
-target = ["crates/ocio-py/src/package/init_.rs"]
-status = "todo"
+target = ["crates/ocio-py/python/PyOpenColorIO/__init__.py"]
+status = "done"
+note = "6.1a: upstream's file, verbatim (its Windows DLL search finds no bin/ next to the port's module and changes nothing)"
 
 [[file]]
 path = "src/bindings/python/package/command_line.py"

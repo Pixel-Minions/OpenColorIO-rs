@@ -11,9 +11,20 @@ publish.workspace = true
 
 [lib]
 name = "ocio_py"
+# cdylib: the extension module `cargo xtask py-build` lays out as PyOpenColorIO; rlib: the
+# embedding API for Rust applications (6.1c).
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# The bindings. Off by default, so that building the workspace needs no Python: PyO3's build
+# finds the interpreter (PYO3_PYTHON), which `cargo xtask py-build` points at target/py-port.
+python = ["dep:pyo3"]
+# The module as Python imports it (`cargo xtask py-build`): no link to libpython on Linux.
+extension-module = ["python", "pyo3/extension-module"]
 
 [dependencies]
 ocio.workspace = true
+pyo3 = { workspace = true, optional = true }
 
 [lints]
 workspace = true
