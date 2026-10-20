@@ -15,7 +15,12 @@ the library's, goes to stderr):
   {"module": name, "numpy": its version or null (without NumPy, several tests pass without
    checking anything), "import_error": null or {"type", "message"},
    "tests": [{"id": unittest id, "outcome": "pass" | "fail" | "error" | "skip"
-              | "expected_failure" | "unexpected_success", "message": text or null}]}
+              | "expected_failure" | "unexpected_success", "message": text or null,
+              "defined": where the test's method is defined, "File.py::Class.test_name"
+              (cargo xtask upstream-tests' names), or null for what isn't a test method
+              (a class whose setUpClass failed)}]}
+A test a class inherits (TransformsBaseTest's) runs once per class, each run with its own id
+and the same "defined".
 A message is the exception's type and text (traceback.format_exception_only, without the
 traceback and its paths); a skip's message is its reason. -B keeps the tests' bytecode out of
 upstream's checkout.
@@ -33,13 +38,24 @@ def _message(err):
     return "".join(traceback.format_exception_only(exc_type, exc))
 
 
+def _defined(test):
+    """Where `test`'s method is defined: the file of its module, and its qualified name."""
+    method = getattr(type(test), getattr(test, "_testMethodName", ""), None)
+    module = sys.modules.get(getattr(method, "__module__", None))
+    path = getattr(module, "__file__", None)
+    if method is None or path is None:
+        return None
+    return f"{os.path.basename(path)}::{method.__qualname__}"
+
+
 class _Result(unittest.TestResult):
     def __init__(self):
         super().__init__()
         self.outcomes = []
 
     def _add(self, test, outcome, message):
-        self.outcomes.append({"id": test.id(), "outcome": outcome, "message": message})
+        self.outcomes.append({"id": test.id(), "outcome": outcome, "message": message,
+                              "defined": _defined(test)})
 
     def addSuccess(self, test):
         self._add(test, "pass", None)
