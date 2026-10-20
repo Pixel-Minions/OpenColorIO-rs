@@ -132,3 +132,36 @@ fn grading_hue_curve_text_and_validate_match_the_wheel() {
         "{accepted} accepted, {refused} refused"
     );
 }
+
+/// Each style's defaults are the wheel's: the text of the binding's `GradingHueCurve(style)`.
+#[test]
+fn defaults_are_the_wheels() {
+    let styles = [
+        (GradingStyle::Log, "GRADING_LOG"),
+        (GradingStyle::Lin, "GRADING_LIN"),
+        (GradingStyle::Video, "GRADING_VIDEO"),
+    ];
+    let mut objects = serde_json::Map::new();
+    let mut calls = Vec::new();
+    for (style, name) in styles {
+        let key = format!("d{}", style as u32);
+        objects.insert(
+            key.clone(),
+            json!({"class": "GradingHueCurve", "args": [{"enum": name}]}),
+        );
+        calls.push(json!({"call": "__repr__", "on": key}));
+    }
+    let response = Oracle::get()
+        .call(
+            "object_calls",
+            json!({"objects": objects, "calls": calls}),
+            &[],
+        )
+        .result;
+    for (s, (style, _)) in styles.iter().enumerate() {
+        let wheel = response["calls"][s]["result"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{style:?}: {response}"));
+        assert_eq!(GradingHueCurve::new(*style).to_string(), wheel, "{style:?}");
+    }
+}

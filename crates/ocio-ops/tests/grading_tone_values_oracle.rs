@@ -137,7 +137,11 @@ fn grading_tone_text_and_validate_match_the_wheel() {
         assert_eq!(t.to_string(), wheel_text, "case {i}");
         let wheel = &results[2 * i + 1];
         match t.validate() {
-            Ok(()) => assert_eq!(wheel["result"], Value::Null, "case {i}: {wheel}"),
+            Ok(()) => {
+                // An exception's entry has a null result too: the wheel must not have raised.
+                assert!(wheel.get("exception").is_none(), "case {i}: {wheel}");
+                assert_eq!(wheel["result"], Value::Null, "case {i}: {wheel}");
+            }
             Err(e) => {
                 refused += 1;
                 assert_eq!(
@@ -150,4 +154,37 @@ fn grading_tone_text_and_validate_match_the_wheel() {
     }
     // The cases reach both answers.
     assert!(refused > 0 && refused < cases.len(), "{refused}");
+}
+
+/// Each style's defaults are the wheel's: the text of the binding's `GradingTone(style)`.
+#[test]
+fn defaults_are_the_wheels() {
+    let styles = [
+        (GradingStyle::Log, "GRADING_LOG"),
+        (GradingStyle::Lin, "GRADING_LIN"),
+        (GradingStyle::Video, "GRADING_VIDEO"),
+    ];
+    let mut objects = serde_json::Map::new();
+    let mut calls = Vec::new();
+    for (style, name) in styles {
+        let key = format!("d{}", style as u32);
+        objects.insert(
+            key.clone(),
+            json!({"class": "GradingTone", "args": [{"enum": name}]}),
+        );
+        calls.push(json!({"call": "__repr__", "on": key}));
+    }
+    let response = Oracle::get()
+        .call(
+            "object_calls",
+            json!({"objects": objects, "calls": calls}),
+            &[],
+        )
+        .result;
+    for (s, (style, _)) in styles.iter().enumerate() {
+        let wheel = response["calls"][s]["result"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{style:?}: {response}"));
+        assert_eq!(GradingTone::new(*style).to_string(), wheel, "{style:?}");
+    }
 }

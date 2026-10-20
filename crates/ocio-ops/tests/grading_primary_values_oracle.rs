@@ -86,6 +86,22 @@ fn cases() -> Vec<GradingPrimary> {
         }
         out.push(p);
     }
+    // validate's bound, 0.01 less 1e-6, and the doubles around it: at it, one below, one
+    // above, and halfway to 0.01 less 1.1e-6, on the gamma (log, video) and the contrast
+    // (linear), and as the white pivot over the black one.
+    let min = 0.01 - 0.000001_f64;
+    for v in [min, min.next_down(), min.next_up(), 0.00999895] {
+        for (style, _) in STYLES {
+            let mut p = GradingPrimary::new(style);
+            p.gamma.green = v;
+            p.contrast.blue = v;
+            out.push(p);
+            let mut p = GradingPrimary::new(style);
+            p.pivot_black = 0.25;
+            p.pivot_white = 0.25 + v;
+            out.push(p);
+        }
+    }
     out
 }
 
@@ -151,7 +167,14 @@ fn grading_primary_text_and_validate_match_the_wheel() {
         for (s, (style, _)) in STYLES.iter().enumerate() {
             let wheel = entry(1 + s);
             match p.validate(*style) {
-                Ok(()) => assert_eq!(wheel["result"], Value::Null, "case {i} {style:?}: {wheel}"),
+                Ok(()) => {
+                    // An exception's entry has a null result too: the wheel must not have raised.
+                    assert!(
+                        wheel.get("exception").is_none(),
+                        "case {i} {style:?}: {wheel}"
+                    );
+                    assert_eq!(wheel["result"], Value::Null, "case {i} {style:?}: {wheel}");
+                }
                 Err(e) => {
                     assert_eq!(
                         e.what(),
@@ -177,4 +200,32 @@ fn grading_primary_text_and_validate_match_the_wheel() {
         response["calls"][0]["result"].as_str().unwrap(),
         "{response}"
     );
+}
+
+/// Each style's defaults are the wheel's: the text of the binding's `GradingPrimary(style)`.
+#[test]
+fn defaults_are_the_wheels() {
+    let mut objects = serde_json::Map::new();
+    let mut calls = Vec::new();
+    for (style, name) in STYLES {
+        let key = format!("d{}", style as u32);
+        objects.insert(
+            key.clone(),
+            json!({"class": "GradingPrimary", "args": [{"enum": name}]}),
+        );
+        calls.push(json!({"call": "__repr__", "on": key}));
+    }
+    let response = Oracle::get()
+        .call(
+            "object_calls",
+            json!({"objects": objects, "calls": calls}),
+            &[],
+        )
+        .result;
+    for (s, (style, _)) in STYLES.iter().enumerate() {
+        let wheel = response["calls"][s]["result"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{style:?}: {response}"));
+        assert_eq!(GradingPrimary::new(*style).to_string(), wheel, "{style:?}");
+    }
 }

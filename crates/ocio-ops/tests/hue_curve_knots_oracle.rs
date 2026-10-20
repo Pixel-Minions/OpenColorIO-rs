@@ -149,6 +149,35 @@ fn hue_curve_knots_and_coefs_match_the_wheel() {
             .collect();
         cases.push((curves, i.is_multiple_of(5)));
     }
+    // Nearly flat horizontal curves, whose estimated slopes reach the minimum-value branch of
+    // the slope estimation: HUE_SAT or LUM_SAT (or both) at y = 1, 1.00001, 1.00002, 1.00003,
+    // the other curves identities.
+    let nearly_flat = [0.0, 1.0, 0.25, 1.00001, 0.5, 1.00002, 0.75, 1.00003];
+    for (sat, lum) in [(true, false), (false, true), (true, true)] {
+        for draw in [false, true] {
+            let curves: Vec<Curve> = HueCurveType::CURVES
+                .iter()
+                .map(|&t| {
+                    let xy = match t {
+                        HueCurveType::HueSat if sat => nearly_flat.to_vec(),
+                        HueCurveType::LumSat if lum => nearly_flat.to_vec(),
+                        HueCurveType::HueHue => vec![0.0, 0.0, 0.5, 0.5],
+                        HueCurveType::HueFx => vec![0.0, 0.0, 0.5, 0.0],
+                        HueCurveType::SatSat | HueCurveType::LumLum => {
+                            vec![0.0, 0.0, 0.5, 0.5, 1.0, 1.0]
+                        }
+                        _ => vec![0.0, 1.0, 0.5, 1.0, 1.0, 1.0],
+                    };
+                    Curve {
+                        curve_type: t,
+                        xy,
+                        slopes: None,
+                    }
+                })
+                .collect();
+            cases.push((curves, draw));
+        }
+    }
     let calls: Vec<BatchCall<'_>> = cases
         .iter()
         .map(|(curves, draw)| {
