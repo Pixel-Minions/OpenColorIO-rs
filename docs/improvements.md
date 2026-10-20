@@ -4114,5 +4114,5 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   a set during an apply gives the whole old value or the whole new one.
 - **Status:** matched in `p5-values` (5.0a, `crates/ocio-ops/src/dynamic_property.rs`:
   `DynamicPropertyGradingPrimaryImpl`; the RGB curve property, 2.6b, already held its value and
-  knots under a lock); `DynamicPropertyGradingToneImpl` in 5.0b; the hue curve property
-  follows in 5.0c.
+  knots under a lock); `DynamicPropertyGradingToneImpl` in 5.0b;
+  `DynamicPropertyGradingHueCurveImpl` in 5.0c.

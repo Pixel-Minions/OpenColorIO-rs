@@ -912,6 +912,9 @@ pub(crate) fn cannot_replace(prop: &DynamicPropertyRcPtr) -> Exception {
         DynamicPropertyRcPtr::GradingTone(_) => {
             Exception::new("Op does not implement grading tone dynamic property.")
         }
+        DynamicPropertyRcPtr::GradingHueCurve(_) => {
+            Exception::new("Op does not implement grading hue curve dynamic property.")
+        }
     }
 }
 
@@ -1196,6 +1199,7 @@ fn is_class_of(dp: &DynamicPropertyRcPtr, type_: DynamicPropertyType) -> bool {
         DynamicPropertyRcPtr::GradingRgbCurve(_) => type_ == DynamicPropertyType::GradingRgbCurve,
         DynamicPropertyRcPtr::GradingPrimary(_) => type_ == DynamicPropertyType::GradingPrimary,
         DynamicPropertyRcPtr::GradingTone(_) => type_ == DynamicPropertyType::GradingTone,
+        DynamicPropertyRcPtr::GradingHueCurve(_) => type_ == DynamicPropertyType::GradingHueCurve,
     }
 }
 

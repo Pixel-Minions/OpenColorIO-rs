@@ -485,3 +485,328 @@ fn grading_tone_property_state() {
     assert!(dp.get_local_bypass());
     assert_eq!(dp.get_computed_value().top, video.top);
 }
+
+/// Port of upstream's `checkKnotsAndCoefs` helper (tests/cpu/DynamicProperty_tests.cpp:
+/// 451-478 @ v2.5.2): curve `set`'s knots and coefficients, within upstream's tolerances.
+fn check_knots_and_coefs(
+    dp: &DynamicPropertyGradingHueCurveImpl,
+    set: usize,
+    true_knots: &[f32],
+    true_coefs_a: &[f32],
+    true_coefs_b: &[f32],
+    true_coefs_c: &[f32],
+) {
+    use ocio_testkit::upstream::check_close_f32_f64;
+    let state = dp.state();
+    let kc = &state.knots_coefs;
+    let num_knots = kc.knots_offsets[set * 2 + 1] as usize;
+    let knots_offset = kc.knots_offsets[set * 2] as usize;
+    for (i, true_knot) in true_knots.iter().enumerate().take(num_knots) {
+        check_close_f32_f64(kc.knots[knots_offset + i], *true_knot, 1e-6);
+    }
+    let num_coef_sets = (kc.coefs_offsets[set * 2 + 1] / 3) as usize;
+    let offset = kc.coefs_offsets[set * 2] as usize;
+    for i in 0..num_coef_sets {
+        check_close_f32_f64(kc.coefs[offset + i], true_coefs_a[i], 3e-4);
+        check_close_f32_f64(kc.coefs[offset + num_coef_sets + i], true_coefs_b[i], 1e-5);
+        check_close_f32_f64(
+            kc.coefs[offset + 2 * num_coef_sets + i],
+            true_coefs_c[i],
+            1e-5,
+        );
+    }
+}
+
+fn hue_points(xy: &[(f32, f32)]) -> Vec<GradingControlPoint> {
+    xy.iter()
+        .map(|&(x, y)| GradingControlPoint::new(x, y))
+        .collect()
+}
+
+/// Port of `OCIO_ADD_TEST(DynamicPropertyImpl, grading_hue_curve_knots_coefs)` @ v2.5.2.
+#[test]
+fn grading_hue_curve_knots_coefs() {
+    use crate::open_color_types::HueCurveType as H;
+    let curve = |xy: &[(f32, f32)], t| {
+        GradingBSplineCurve::with_points_and_hue_curve_type(&hue_points(xy), t)
+    };
+    let hh = curve(
+        &[
+            (0.1, 0.05),
+            (0.2, 0.3),
+            (0.5, 0.4),
+            (0.8, 0.7),
+            (0.9, 0.75),
+            (1.0, 0.9),
+        ],
+        H::HueHue,
+    );
+    let hs = curve(
+        &[
+            (-0.15, 1.25),
+            (0., 0.8),
+            (0.2, 0.9),
+            (0.4, 1.8),
+            (0.6, 1.4),
+            (0.8, 1.3),
+            (0.9, 1.1),
+            (1.1, 0.7),
+        ],
+        H::HueSat,
+    );
+    let hl = curve(
+        &[
+            (0., 0.),
+            (0.22, 0.077),
+            (0.36, 0.092),
+            (0.51, 0.27),
+            (0.67, 0.),
+            (0.83, 0.),
+        ],
+        H::HueLum,
+    );
+    // The rest are identities, but not the default curves.
+    let ls = curve(&[(0., 1.), (1., 1.)], H::LumSat);
+    let ss = curve(&[(0., 0.), (0.25, 0.25), (1., 1.)], H::SatSat);
+    let ll = curve(&[(0., 0.), (0.25, 0.25), (0.5, 0.5), (1., 1.)], H::LumLum);
+    let sl = curve(&[(0., 1.), (0.25, 1.), (0.5, 1.), (1., 1.)], H::SatLum);
+    let hfx = curve(
+        &[
+            (0., 0.),
+            (0.1, 0.),
+            (0.2, 0.),
+            (0.4, 0.),
+            (0.6, 0.),
+            (0.8, 0.),
+        ],
+        H::HueFx,
+    );
+
+    let mut curves = GradingHueCurve::with_curves(&hh, &hs, &hl, &ls, &ss, &ll, &sl, &hfx).unwrap();
+
+    {
+        // Fit the polynomials.
+        let dp = DynamicPropertyGradingHueCurveImpl::new(&curves, false).unwrap();
+
+        assert_eq!(46, dp.get_num_knots());
+        assert_eq!(129, dp.get_num_coefs());
+
+        // These are offset0, count0, offset1, count1, offset2, count2, ...
+        let true_knots_offsets = [0, 15, 15, 19, 34, 12, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0];
+        let true_coefs_offsets = [0, 42, 42, 54, 96, 33, -1, 0, -1, 0, -1, 0, -1, 0, -1, 0];
+        assert_eq!(16, DynamicPropertyGradingHueCurveImpl::NUM_OFFSET_VALUES);
+        let state = dp.state();
+        assert_eq!(state.knots_coefs.knots_offsets, true_knots_offsets);
+        assert_eq!(state.knots_coefs.coefs_offsets, true_coefs_offsets);
+    }
+
+    // Repeat the test in DrawCurveOnly mode. This will yield identity knots and coefs for the
+    // curves that are identities.
+    curves.set_draw_curve_only(true);
+
+    let dp = DynamicPropertyGradingHueCurveImpl::new(&curves, false).unwrap();
+
+    assert_eq!(56, dp.get_num_knots());
+    assert_eq!(144, dp.get_num_coefs());
+
+    let true_knots_offsets = [0, 15, 15, 19, 34, 12, 46, 2, 48, 2, 50, 2, 52, 2, 54, 2];
+    let true_coefs_offsets = [
+        0, 42, 42, 54, 96, 33, 129, 3, 132, 3, 135, 3, 138, 3, 141, 3,
+    ];
+    {
+        let state = dp.state();
+        assert_eq!(state.knots_coefs.knots_offsets, true_knots_offsets);
+        assert_eq!(state.knots_coefs.coefs_offsets, true_coefs_offsets);
+    }
+
+    // Hue-Hue
+    check_knots_and_coefs(
+        &dp,
+        0,
+        &[
+            -0.1,
+            -0.06928571,
+            0.0,
+            0.05642857,
+            0.1,
+            0.17549634,
+            0.2,
+            0.33714286,
+            0.5,
+            0.62499860,
+            0.8,
+            0.85261905,
+            0.9,
+            0.93071429,
+            1.,
+        ],
+        &[
+            15.95930233,
+            -1.66237113,
+            -1.44778481,
+            6.17827869,
+            10.39930009,
+            -58.70626575,
+            -1.54375789,
+            1.03834397,
+            3.7077401,
+            -2.12344738,
+            -3.54260935,
+            4.81365159,
+            15.95930233,
+            -1.66237113,
+        ],
+        &[
+            0.75, 1.73035714, 1.5, 1.33660714, 1.875, 3.44521825, 0.56818182, 0.14475108,
+            0.48295455, 1.40987919, 0.66666667, 0.29384921, 0.75, 1.73035714,
+        ],
+        &[
+            -0.25,
+            -0.2119088,
+            -0.1,
+            -0.01996716,
+            0.05,
+            0.25082851,
+            0.3,
+            0.34888683,
+            0.4,
+            0.51830078,
+            0.7,
+            0.72527072,
+            0.75,
+            0.7880912,
+        ],
+    );
+    // Hue-Sat
+    check_knots_and_coefs(
+        &dp,
+        1,
+        &[
+            -0.1,
+            -0.03071429,
+            0.,
+            0.0625,
+            0.1,
+            0.13333333,
+            0.2,
+            0.34913793,
+            0.4,
+            0.46896552,
+            0.6,
+            0.69,
+            0.8,
+            0.82770833,
+            0.85,
+            0.86535714,
+            0.9,
+            0.96928571,
+            1.,
+        ],
+        &[
+            -3.32474227,
+            31.91860465,
+            3.5,
+            14.16666667,
+            32.30769231,
+            4.61538462,
+            13.9662072,
+            -68.17470665,
+            -25.2,
+            10.21052632,
+            2.92592593,
+            -1.78787879,
+            -5.32581454,
+            -12.07165109,
+            -63.8372093,
+            6.64948454,
+            -3.32474227,
+            31.91860465,
+        ],
+        &[
+            -3.,
+            -3.46071429,
+            -1.5,
+            -1.0625,
+            0.,
+            2.15384615,
+            2.76923077,
+            6.93501326,
+            0.,
+            -3.47586207,
+            -0.8,
+            -0.27333333,
+            -0.66666667,
+            -0.96180556,
+            -1.5,
+            -3.46071429,
+            -3.,
+            -3.46071429,
+        ],
+        &[
+            1.1, 0.8761824, 0.8, 0.71992187, 0.7, 0.73589744, 0.9, 1.62363544, 1.8, 1.68014269,
+            1.4, 1.3517, 1.3, 1.27743887, 1.25, 1.2119088, 1.1, 0.8761824,
+        ],
+    );
+    // Hue-Lum: test for the "Adjust slopes that are not shape-preserving" path in
+    // EstimateHueSlopes.
+    check_knots_and_coefs(
+        &dp,
+        2,
+        &[
+            -0.17, 0., 0.07049104, 0.22, 0.29691485, 0.36, 0.435, 0.51, 0.59, 0.67, 0.83, 1.,
+        ],
+        &[
+            0.,
+            4.21997107,
+            -1.47264319,
+            -0.70657119,
+            1.10402357,
+            13.97025263,
+            -15.20489902,
+            -21.09375,
+            21.09375,
+            0.,
+            0.,
+        ],
+        &[
+            0., 0., 0.59494032, 0.15459362, 0.04590198, 0.18519696, 2.28073485, 0., -3.375, 0., 0.,
+        ],
+        &[
+            0., 0., 0.02096898, 0.077, 0.08471054, 0.092, 0.18447244, 0.27, 0.135, 0., 0.,
+        ],
+    );
+    // Horizontal identities: Lum-Sat, Sat-Lum, Hue-Fx.
+    check_knots_and_coefs(&dp, 3, &[0., 1.], &[0.], &[0.], &[1.]);
+    check_knots_and_coefs(&dp, 6, &[0., 1.], &[0.], &[0.], &[1.]);
+    check_knots_and_coefs(&dp, 7, &[0., 1.], &[0.], &[0.], &[0.]);
+    // Diagonal identities: Sat-Sat, Lum-Lum.
+    check_knots_and_coefs(&dp, 4, &[0., 1.], &[0.], &[1.], &[0.]);
+    check_knots_and_coefs(&dp, 5, &[0., 1.], &[0.], &[1.], &[0.]);
+}
+
+/// Port of `OCIO_ADD_TEST(DynamicPropertyImpl, get_as)` @ v2.5.2.
+#[test]
+fn get_as() {
+    let mut gplog = GradingPrimary::new(GradingStyle::Log);
+    gplog.saturation = 1.21;
+
+    let dp_impl0 = Arc::new(DynamicPropertyGradingPrimaryImpl::new(
+        GradingStyle::Log,
+        TransformDirection::Forward,
+        &gplog,
+        false,
+    ));
+
+    let dp0 = DynamicPropertyRcPtr::from(Arc::clone(&dp_impl0));
+    check_throw_what(dp0.as_double(), "Dynamic property value is not a double");
+    check_throw_what(
+        dp0.as_grading_tone(),
+        "Dynamic property value is not a grading tone",
+    );
+    let as_primary = dp0.as_grading_primary().unwrap();
+
+    assert_eq!(as_primary.get_value(), gplog);
+    gplog.pivot = 0.12;
+    as_primary.set_value(&gplog).unwrap();
+    assert_eq!(dp_impl0.get_value(), gplog);
+}

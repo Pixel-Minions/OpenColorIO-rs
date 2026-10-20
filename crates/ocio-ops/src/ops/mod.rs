@@ -8,6 +8,7 @@ pub mod cdl;
 pub mod exponent;
 pub mod fixedfunction;
 pub mod gamma;
+pub mod gradinghuecurve;
 pub mod gradingprimary;
 pub mod gradingrgbcurve;
 pub mod gradingtone;
