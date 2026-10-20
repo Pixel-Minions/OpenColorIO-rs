@@ -1,0 +1,2 @@
+OpenColorIOTest.py::OpenColorIOTest.test_attributes
+OpenColorIOTest.py::OpenColorIOTest.test_env_variable

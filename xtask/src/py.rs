@@ -14,6 +14,15 @@
 //!
 //! PyO3 builds against the environment's interpreter (`PYO3_PYTHON`). `target` is this
 //! platform's target directory (`CARGO_TARGET_DIR`; Rocky Linux 9 has its own).
+//!
+//! `cargo xtask py-suite` (chunk 6.1b) runs upstream's Python suite, unmodified, against that
+//! module: each module of upstream's driver (`OpenColorIOTestSuite.py`) in a new process,
+//! through the runner the oracle runs it with against the wheel
+//! (`oracle/ocio_oracle/py_suite_runner.py`, O6.3), in the same conditions. Each run's
+//! outcome goes to `<target>/py-suite.json`. A test function passes when every run of it does
+//! (a test a class inherits runs once per class). `py-port/passing.txt` lists the functions
+//! that pass: a listed function that doesn't fails the command; `--update` rewrites the list.
+//! The list only grows: `cargo xtask ci` holds its length to the base's docs/ratchet.toml.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -24,6 +33,17 @@ cargo xtask py-build [--release]
     target/py-port (made from py-port/ with `uv sync` if needed), lays it out as upstream's
     package in target/py/PyOpenColorIO/, and puts target/py on target/py-port's path
     (ocio-rs-port.pth). --release: an optimized build.
+
+cargo xtask py-suite [--update] [--release] [--no-build]
+    Builds the module (as py-build; --no-build: the one in target/py), runs upstream's Python
+    suite against it (each module of tests/python/OpenColorIOTestSuite.py in a new process of
+    target/py-port), writes each test's outcome to target/py-suite.json, and fails when a test
+    function py-port/passing.txt lists doesn't pass. --update: rewrite the list with the
+    functions that pass (it may only grow).
+
+cargo xtask py-check
+    CI's step for the Python module: clippy (-D warnings) and the tests of ocio-py with its
+    python feature, against target/py-port's Python, then py-suite.
 ";
 
 /// The name of the `.pth` file that puts the package's directory on the environment's path.
@@ -255,9 +275,274 @@ fn cdylib_from_messages(messages: &str) -> Option<PathBuf> {
     found
 }
 
+pub(crate) fn py_suite(args: &[&str]) -> Result<(), String> {
+    let (mut update, mut release, mut no_build) = (false, false, false);
+    for arg in args {
+        match *arg {
+            "--update" => update = true,
+            "--release" => release = true,
+            "--no-build" => no_build = true,
+            _ => return Err(format!("unknown argument `{arg}`\n\n{USAGE}")),
+        }
+    }
+    let layout = Layout::new();
+    if no_build {
+        sync_env(&layout)?;
+    } else {
+        build(&layout, release)?;
+    }
+    let tests = layout.root.join("upstream/OpenColorIO/tests");
+    let modules = driver_modules(&tests)?;
+    let scratch = layout.py.with_file_name("py-suite-tmp");
+    let mut reports = Vec::new();
+    for module in &modules {
+        reports.push(run_module(&layout, &tests, module, &scratch)?);
+    }
+    let _ = std::fs::remove_dir_all(&scratch);
+    let json = layout.py.with_file_name("py-suite.json");
+    let text = serde_json::to_string_pretty(&serde_json::json!({ "modules": reports }))
+        .map_err(|e| e.to_string())?;
+    std::fs::write(&json, text).map_err(|e| format!("{}: {e}", json.display()))?;
+
+    let runs = runs(&reports);
+    let passing = passing_functions(&runs);
+    let (listed, problems) = crate::parity::passing_python()?;
+    if !problems.is_empty() {
+        return Err(problems.join("\n"));
+    }
+    let failing: Vec<&String> = listed.iter().filter(|f| !passing.contains(*f)).collect();
+    let unlisted = passing.iter().filter(|f| !listed.contains(*f)).count();
+    let total = crate::parity::upstream_python_tests().len();
+    println!(
+        "py-suite: {} runs of {} modules; {} of {total} test functions pass, {} listed in {}; \
+         outcomes in {}",
+        runs.len(),
+        modules.len(),
+        passing.len(),
+        listed.len(),
+        crate::parity::PASSING_PYTHON,
+        crate::display_path(&json)
+    );
+    if !failing.is_empty() {
+        let mut why = format!(
+            "{} test functions {} lists don't pass:",
+            failing.len(),
+            crate::parity::PASSING_PYTHON
+        );
+        for f in failing {
+            let _ = std::fmt::Write::write_fmt(&mut why, format_args!("\n    {f}"));
+            for (defined, id, outcome, message) in &runs {
+                if defined.as_deref() == Some(f.as_str()) && outcome != "pass" {
+                    let _ = std::fmt::Write::write_fmt(
+                        &mut why,
+                        format_args!("\n        {id}: {outcome} {}", message.trim_end()),
+                    );
+                }
+            }
+        }
+        return Err(why);
+    }
+    if update {
+        let path = layout.root.join(crate::parity::PASSING_PYTHON);
+        let text: String = passing.iter().map(|f| format!("{f}\n")).collect();
+        std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
+        println!(
+            "py-suite: {} now lists {} test functions",
+            crate::parity::PASSING_PYTHON,
+            passing.len()
+        );
+    } else if unlisted > 0 {
+        println!(
+            "py-suite: {unlisted} test functions pass that {} doesn't list; \
+             `cargo xtask py-suite --update` adds them",
+            crate::parity::PASSING_PYTHON
+        );
+    }
+    Ok(())
+}
+
+pub(crate) fn py_check(args: &[&str]) -> Result<(), String> {
+    if !args.is_empty() {
+        return Err(format!("unknown arguments {args:?}\n\n{USAGE}"));
+    }
+    let layout = Layout::new();
+    let vars = cargo_vars(&layout)?;
+    for step in [
+        &[
+            "clippy",
+            "--package",
+            "ocio-py",
+            "--features",
+            "python",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings",
+        ][..],
+        &[
+            "test",
+            "--package",
+            "ocio-py",
+            "--features",
+            "python",
+            "--no-fail-fast",
+        ][..],
+    ] {
+        let status = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
+            .current_dir(&layout.root)
+            .args(step)
+            .envs(vars.iter().map(|(k, v)| (k, v)))
+            .stdin(Stdio::null())
+            .status()
+            .map_err(|e| format!("cargo {}: {e}", step[0]))?;
+        if !status.success() {
+            return Err(format!(
+                "cargo {} of ocio-py's python feature failed: {status}",
+                step[0]
+            ));
+        }
+    }
+    py_suite(&[])
+}
+
+/// The modules upstream's driver runs, in its order: the entries `("Name", Name),` of
+/// `get_test_modules` in `tests/python/OpenColorIOTestSuite.py`.
+fn driver_modules(tests: &Path) -> Result<Vec<String>, String> {
+    let path = tests.join("python").join("OpenColorIOTestSuite.py");
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let modules = modules_of_driver(&text);
+    if modules.is_empty() {
+        return Err(format!("{}: no test modules found", path.display()));
+    }
+    Ok(modules)
+}
+
+fn modules_of_driver(text: &str) -> Vec<String> {
+    text.lines()
+        .filter_map(|line| {
+            let entry = line.trim().strip_prefix("(\"")?.strip_suffix("),")?;
+            let (quoted, name) = entry.split_once("\", ")?;
+            (quoted == name).then(|| name.to_string())
+        })
+        .collect()
+}
+
+/// Runs one module of the suite as the oracle's py_suite does (py_suite_api.py): the runner in
+/// a new process (`-I -B -X utf8`), in an empty working directory, with an environment of only
+/// its own temporary directory (TEMP, TMP, TMPDIR) and, on Windows, SYSTEMROOT. The runner's
+/// report, or {"module", "crashed": {"returncode", "stderr"}} when the process died.
+fn run_module(
+    layout: &Layout,
+    tests: &Path,
+    module: &str,
+    scratch: &Path,
+) -> Result<serde_json::Value, String> {
+    let cwd = scratch.join(module).join("cwd");
+    let tmp = scratch.join(module).join("tmp");
+    for dir in [&cwd, &tmp] {
+        let _ = std::fs::remove_dir_all(dir);
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    let mut cmd = Command::new(layout.python());
+    cmd.args(["-I", "-B", "-X", "utf8"])
+        .arg(layout.root.join("oracle/ocio_oracle/py_suite_runner.py"))
+        .arg(tests.join("python"))
+        .arg(module)
+        .arg(tests.join("data").join("files"))
+        .current_dir(&cwd)
+        .env_clear()
+        .env("TEMP", &tmp)
+        .env("TMP", &tmp)
+        .env("TMPDIR", &tmp)
+        .stdin(Stdio::null());
+    if cfg!(windows)
+        && let Some(root) = std::env::var_os("SYSTEMROOT")
+    {
+        cmd.env("SYSTEMROOT", root);
+    }
+    let out = cmd
+        .output()
+        .map_err(|e| format!("{}: {e}", layout.python().display()))?;
+    let _ = std::fs::remove_dir_all(scratch.join(module));
+    if out.status.success()
+        && let Ok(report) = serde_json::from_slice::<serde_json::Value>(&out.stdout)
+    {
+        return Ok(report);
+    }
+    Ok(serde_json::json!({
+        "module": module,
+        "crashed": {
+            "returncode": out.status.code(),
+            "stderr": String::from_utf8_lossy(&out.stderr),
+        },
+    }))
+}
+
+/// Each run of the reports: where its test is defined, its id, its outcome and its message.
+type Run = (Option<String>, String, String, String);
+
+fn runs(reports: &[serde_json::Value]) -> Vec<Run> {
+    let mut out = Vec::new();
+    for report in reports {
+        for t in report["tests"].as_array().into_iter().flatten() {
+            out.push((
+                t["defined"].as_str().map(str::to_string),
+                t["id"].as_str().unwrap_or_default().to_string(),
+                t["outcome"].as_str().unwrap_or_default().to_string(),
+                t["message"].as_str().unwrap_or_default().to_string(),
+            ));
+        }
+    }
+    out
+}
+
+/// The test functions that pass: those with a run, every run of which passes.
+fn passing_functions(runs: &[Run]) -> std::collections::BTreeSet<String> {
+    let mut seen = std::collections::BTreeMap::new();
+    for (defined, _, outcome, _) in runs {
+        if let Some(defined) = defined {
+            let all = seen.entry(defined.clone()).or_insert(true);
+            *all &= outcome == "pass";
+        }
+    }
+    seen.into_iter()
+        .filter_map(|(f, pass)| pass.then_some(f))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_drivers_modules_are_its_entries() {
+        let text = "def get_test_modules():\n    return [\n        (\"ATest\", ATest),\n        \
+                    (\"BTest\", BTest),\n        (\"C\", D),\n    ]\nimport ATest\n";
+        assert_eq!(modules_of_driver(text), ["ATest", "BTest"]);
+    }
+
+    #[test]
+    fn a_function_passes_when_every_run_does() {
+        let run = |defined: Option<&str>, outcome: &str| {
+            (
+                defined.map(str::to_string),
+                String::new(),
+                outcome.to_string(),
+                String::new(),
+            )
+        };
+        let runs = [
+            run(Some("A.py::A.test_a"), "pass"),
+            run(Some("B.py::Base.test_b"), "pass"),
+            run(Some("B.py::Base.test_b"), "fail"),
+            run(Some("C.py::C.test_c"), "skip"),
+            run(Some("D.py::D.test_d"), "pass"),
+            run(Some("D.py::D.test_d"), "pass"),
+            run(None, "error"),
+        ];
+        let passing: Vec<String> = passing_functions(&runs).into_iter().collect();
+        assert_eq!(passing, ["A.py::A.test_a", "D.py::D.test_d"]);
+    }
 
     #[test]
     fn the_shared_library_is_found_in_cargos_messages() {

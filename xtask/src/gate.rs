@@ -28,6 +28,8 @@ Runs, in order, stopping at the first failure:
   test           cargo test --workspace --no-fail-fast (debug)
   test-py        cargo test -p ocio-py --features python, against target/py-port's Python,
                  when the tests cover the workspace or --crates names ocio-py
+  py-suite       then: cargo xtask py-suite (upstream's Python suite against the port's
+                 module; every test function py-port/passing.txt lists must pass)
   test-release   the same in release, with --release (and test-release-py)
   rocky          with --rocky: this gate, same options, in Rocky Linux 9 (scripts/rocky9.sh)
 
@@ -273,6 +275,9 @@ pub(crate) fn run(mut opts: Options) -> Result<(), String> {
             python_test_command(&root, &python, false, tier),
             Kind::Tests,
         )?;
+        let mut suite = Command::new(std::env::current_exe().map_err(|e| e.to_string())?);
+        suite.arg("py-suite").current_dir(&root);
+        runner.step("py-suite", suite, Kind::Plain)?;
     }
     if opts.release && tests {
         runner.step(

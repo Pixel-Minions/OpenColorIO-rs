@@ -81,6 +81,12 @@ Guardrails:
 Python (Phase 6):
   py-build [--release]        build the port's PyOpenColorIO into target/py and the Python
                               environment target/py-port (`cargo xtask py-build --help`)
+  py-suite [--update] [--release] [--no-build]
+                              run upstream's Python suite against it; fail when a test
+                              function py-port/passing.txt lists doesn't pass (--update
+                              rewrites the list)
+  py-check                    clippy and tests of the Python bindings, then py-suite (CI's
+                              step)
 
 Upstream:
   upstream-map update         add new upstream files to upstream-map.toml (keeps edits)
@@ -117,6 +123,16 @@ fn main() -> ExitCode {
             Ok(())
         }
         ["py-build", rest @ ..] => py::py_build(rest),
+        ["py-suite", "--help" | "-h"] => {
+            print!("{}", py::USAGE);
+            Ok(())
+        }
+        ["py-suite", rest @ ..] => py::py_suite(rest),
+        ["py-check", "--help" | "-h"] => {
+            print!("{}", py::USAGE);
+            Ok(())
+        }
+        ["py-check", rest @ ..] => py::py_check(rest),
         ["oracle", "info"] => fixtures::oracle_info(),
         ["oracle", "regen", group] => fixtures::regen(group),
         ["oracle", "check", group] => fixtures::check(group),
