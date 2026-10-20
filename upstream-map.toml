@@ -1258,7 +1258,7 @@ path = "src/OpenColorIO/ops/exposurecontrast/ExposureContrastOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/exposurecontrast/exposure_contrast_op.rs"]
 status = "partial"
-note = "p5-ec 5.1b: the op and CreateExposureContrastOp; extractGpuShaderInfo with 5.1c (ocio-gpu), CreateExposureContrastTransform and BuildExposureContrastOp with 5.5a"
+note = "p5-ec 5.1b: the op and CreateExposureContrastOp; 5.1c: extractGpuShaderInfo (ocio-gpu gpu_processor.rs); CreateExposureContrastTransform and BuildExposureContrastOp with 5.5a"
 
 [[file]]
 path = "src/OpenColorIO/ops/exposurecontrast/ExposureContrastOp.h"
@@ -1295,13 +1295,13 @@ status = "done"
 path = "src/OpenColorIO/ops/exposurecontrast/ExposureContrastOpGPU.cpp"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/exposurecontrast/exposure_contrast_op_gpu.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/ops/exposurecontrast/ExposureContrastOpGPU.h"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/exposurecontrast/exposure_contrast_op_gpu.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/ops/fixedfunction/ACES2/ColorLib.h"
