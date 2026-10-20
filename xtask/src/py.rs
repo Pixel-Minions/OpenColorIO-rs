@@ -134,6 +134,39 @@ fn pth_contents(dir: &Path) -> String {
     format!("{}\n", dir.display())
 }
 
+/// Makes the environment and gives the variables a cargo command needs to build `ocio-py`'s
+/// `python` feature against its interpreter (`PYO3_PYTHON`) and to run what links the
+/// interpreter's library: its directory on `PATH` (Windows, `python313.dll`) or
+/// `LD_LIBRARY_PATH` (Linux, `libpython3.13.so`), and `PYTHONHOME`, so that an interpreter
+/// embedded in a test binary finds its standard library. An error, never a silent skip, when
+/// the environment can't be made.
+pub(crate) fn cargo_vars(
+    layout: &Layout,
+) -> Result<Vec<(&'static str, std::ffi::OsString)>, String> {
+    sync_env(layout).map_err(|e| {
+        format!(
+            "ocio-py's `python` feature needs the port's Python environment {}, which \
+             `uv sync` of py-port/ makes (Python 3.13 and NumPy, from uv's cache or PyPI): {e}",
+            crate::display_path(&layout.env)
+        )
+    })?;
+    let python = layout.python();
+    let home = PathBuf::from(query(&python, "import sys; print(sys.base_prefix)")?);
+    let (var, dir) = if cfg!(windows) {
+        ("PATH", home.clone())
+    } else {
+        ("LD_LIBRARY_PATH", home.join("lib"))
+    };
+    let mut dirs = vec![dir];
+    dirs.extend(std::env::var_os(var).iter().flat_map(std::env::split_paths));
+    let joined = std::env::join_paths(dirs).map_err(|e| format!("{var}: {e}"))?;
+    Ok(vec![
+        ("PYO3_PYTHON", python.into_os_string()),
+        (var, joined),
+        ("PYTHONHOME", home.into_os_string()),
+    ])
+}
+
 /// `uv sync` of the project `py-port/` into the environment (from uv's cache when it holds
 /// Python 3.13 and NumPy already, as the oracle's environment leaves them).
 fn sync_env(layout: &Layout) -> Result<(), String> {

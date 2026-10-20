@@ -20,10 +20,15 @@ cargo xtask gate [--staged] [--crates a,b | --touched] [--release] [--rocky] [--
 Runs, in order, stopping at the first failure:
   fmt            cargo fmt --all --check
   clippy         cargo clippy --workspace --all-targets -- -D warnings
+  clippy-py      the same for ocio-py with its `python` feature (the PyOpenColorIO
+                 bindings), built against the Python of target/py-port, which `uv sync`
+                 makes from py-port/ (the gate fails if it can't)
   ci             cargo xtask ci (branch mode; with --main, cargo xtask ci --main)
   deny           with --main: cargo deny check, CI's third check (not in the Rocky pass)
   test           cargo test --workspace --no-fail-fast (debug)
-  test-release   the same in release, with --release
+  test-py        cargo test -p ocio-py --features python, against target/py-port's Python,
+                 when the tests cover the workspace or --crates names ocio-py
+  test-release   the same in release, with --release (and test-release-py)
   rocky          with --rocky: this gate, same options, in Rocky Linux 9 (scripts/rocky9.sh)
 
   --staged       gate exactly what is staged (`git add`), leaving unstaged changes and
@@ -213,6 +218,25 @@ pub(crate) fn run(mut opts: Options) -> Result<(), String> {
         ),
         Kind::Plain,
     )?;
+    // The bindings are behind ocio-py's `python` feature, which the workspace steps leave
+    // off (so that building the workspace needs no Python).
+    let python = crate::py::cargo_vars(&crate::py::Layout::new())?;
+    let mut clippy_py = cargo(
+        &root,
+        &[
+            "clippy",
+            "--package",
+            "ocio-py",
+            "--features",
+            "python",
+            "--all-targets",
+            "--",
+            "-D",
+            "warnings",
+        ],
+    );
+    clippy_py.envs(python.iter().map(|(k, v)| (k, v)));
+    runner.step("clippy-py", clippy_py, Kind::Plain)?;
     let mut ci = Command::new(std::env::current_exe().map_err(|e| e.to_string())?);
     ci.arg("ci").current_dir(&root);
     if opts.main {
@@ -230,6 +254,7 @@ pub(crate) fn run(mut opts: Options) -> Result<(), String> {
         )?;
     }
     let tier = if opts.full { "full" } else { "quick" };
+    let test_py = tests && (opts.crates.is_empty() || opts.crates.iter().any(|c| c == "ocio-py"));
     if tests {
         runner.step(
             "test",
@@ -242,12 +267,26 @@ pub(crate) fn run(mut opts: Options) -> Result<(), String> {
             println!("{}: {name:<NAME_WIDTH$} skipped (--touched)", runner.label);
         }
     }
+    if test_py {
+        runner.step(
+            "test-py",
+            python_test_command(&root, &python, false, tier),
+            Kind::Tests,
+        )?;
+    }
     if opts.release && tests {
         runner.step(
             "test-release",
             test_command(&root, &opts.crates, true, tier),
             Kind::Tests,
         )?;
+        if test_py {
+            runner.step(
+                "test-release-py",
+                python_test_command(&root, &python, true, tier),
+                Kind::Tests,
+            )?;
+        }
     }
     if opts.rocky {
         let mut rocky = Command::new(bash()?);
@@ -614,6 +653,19 @@ fn test_command(root: &Path, crates: &[String], release: bool, tier: &str) -> Co
     cmd
 }
 
+/// `cargo test -p ocio-py --features python`, with the variables of [`crate::py::cargo_vars`].
+fn python_test_command(
+    root: &Path,
+    python: &[(&str, std::ffi::OsString)],
+    release: bool,
+    tier: &str,
+) -> Command {
+    let mut cmd = test_command(root, &["ocio-py".to_string()], release, tier);
+    cmd.args(["--features", "python"]);
+    cmd.envs(python.iter().map(|(k, v)| (k, v)));
+    cmd
+}
+
 /// Git for Windows' bash on Windows (the `bash` on PATH there is often WSL's, which can't run
 /// `scripts/rocky9.sh` against Docker Desktop); `bash` elsewhere. `OCIO_RS_BASH` overrides.
 pub(crate) fn bash() -> Result<PathBuf, String> {
@@ -879,8 +931,8 @@ impl Runner {
     }
 }
 
-/// Width of the step names in summary lines (`rocky/test-release` fits).
-const NAME_WIDTH: usize = 18;
+/// Width of the step names in summary lines (`rocky/test-release-py` fits).
+const NAME_WIDTH: usize = 21;
 
 /// Runs `cmd` with stdout and stderr in `log`. For a nested gate, stdout is read line by line
 /// and its step summary lines are printed as they arrive, renamed `<step>/<its step>`.
