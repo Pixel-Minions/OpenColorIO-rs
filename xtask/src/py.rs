@@ -19,8 +19,9 @@
 //! module: each module of upstream's driver (`OpenColorIOTestSuite.py`) in a new process,
 //! through the runner the oracle runs it with against the wheel
 //! (`oracle/ocio_oracle/py_suite_runner.py`, O6.3), in the same conditions. Each run's
-//! outcome goes to `<target>/py-suite.json`. A test function passes when every run of it does
-//! (a test a class inherits runs once per class). `py-port/passing.txt` lists the functions
+//! outcome goes to `<target>/py-suite.json`. A test function passes when the port makes every
+//! run of it that the wheel makes (the oracle's py_suite of the same modules: a test a class
+//! inherits runs once per class), and each passes. `py-port/passing.txt` lists the functions
 //! that pass: a listed function that doesn't fails the command; `--update` rewrites the list.
 //! The list only grows: `cargo xtask ci` holds its length to the base's docs/ratchet.toml.
 
@@ -305,7 +306,8 @@ pub(crate) fn py_suite(args: &[&str]) -> Result<(), String> {
     std::fs::write(&json, text).map_err(|e| format!("{}: {e}", json.display()))?;
 
     let runs = runs(&reports);
-    let passing = passing_functions(&runs);
+    let expected = wheel_runs(&tests, &modules)?;
+    let passing = passing_functions(&expected, &runs);
     let (listed, problems) = crate::parity::passing_python()?;
     if !problems.is_empty() {
         return Err(problems.join("\n"));
@@ -496,17 +498,85 @@ fn runs(reports: &[serde_json::Value]) -> Vec<Run> {
     out
 }
 
-/// The test functions that pass: those with a run, every run of which passes.
-fn passing_functions(runs: &[Run]) -> std::collections::BTreeSet<String> {
-    let mut seen = std::collections::BTreeMap::new();
-    for (defined, _, outcome, _) in runs {
-        if let Some(defined) = defined {
-            let all = seen.entry(defined.clone()).or_insert(true);
-            *all &= outcome == "pass";
+/// The runs the wheel makes of each test function (the oracle's py_suite, O6.3, of the same
+/// modules): `defined` -> the runs' ids. With the wheel, every one of upstream's 384
+/// functions runs at least once.
+fn wheel_runs(
+    tests: &Path,
+    modules: &[String],
+) -> Result<std::collections::BTreeMap<String, Vec<String>>, String> {
+    let tests_dir = tests.to_string_lossy().into_owned();
+    let calls: Vec<ocio_testkit::oracle::BatchCall<'_>> = modules
+        .iter()
+        .map(|m| ocio_testkit::oracle::BatchCall {
+            cmd: "py_suite",
+            args: serde_json::json!({ "tests": tests_dir, "module": m }),
+            blobs: Vec::new(),
+        })
+        .collect();
+    let mut out: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    for (module, response) in modules
+        .iter()
+        .zip(ocio_testkit::Oracle::get().batch(&calls, true))
+    {
+        let report = response
+            .map_err(|e| format!("the wheel's {module}: {e}"))?
+            .result;
+        if report.get("crashed").is_some() || !report["import_error"].is_null() {
+            return Err(format!("the wheel's {module} didn't run: {report}"));
+        }
+        for t in report["tests"].as_array().into_iter().flatten() {
+            if let (Some(defined), Some(id)) = (t["defined"].as_str(), t["id"].as_str()) {
+                out.entry(defined.to_string())
+                    .or_default()
+                    .push(id.to_string());
+            }
         }
     }
-    seen.into_iter()
-        .filter_map(|(f, pass)| pass.then_some(f))
+    let functions = crate::parity::upstream_python_tests();
+    if out.len() != functions.len() || functions.iter().any(|f| !out.contains_key(f)) {
+        return Err(format!(
+            "the wheel's runs cover {} test functions, not upstream's {}",
+            out.len(),
+            functions.len()
+        ));
+    }
+    Ok(out)
+}
+
+/// The test functions that pass: each of `expected`'s (the wheel's runs of each function),
+/// every run of which the port makes, and passes, and no other run of which fails. A function
+/// the port doesn't run at all, or runs fewer times (a class whose setUpClass failed, a
+/// module that didn't import), doesn't pass.
+fn passing_functions(
+    expected: &std::collections::BTreeMap<String, Vec<String>>,
+    runs: &[Run],
+) -> std::collections::BTreeSet<String> {
+    let mut outcomes: std::collections::BTreeMap<&str, Vec<&str>> = Default::default();
+    let mut failed = std::collections::BTreeSet::new();
+    for (defined, id, outcome, _) in runs {
+        outcomes
+            .entry(id.as_str())
+            .or_default()
+            .push(outcome.as_str());
+        if outcome != "pass"
+            && let Some(defined) = defined
+        {
+            failed.insert(defined.as_str());
+        }
+    }
+    expected
+        .iter()
+        .filter(|(f, ids)| {
+            !ids.is_empty()
+                && !failed.contains(f.as_str())
+                && ids.iter().all(|id| {
+                    outcomes
+                        .get(id.as_str())
+                        .is_some_and(|o| o.iter().all(|o| *o == "pass"))
+                })
+        })
+        .map(|(f, _)| f.clone())
         .collect()
 }
 
@@ -522,25 +592,41 @@ mod tests {
     }
 
     #[test]
-    fn a_function_passes_when_every_run_does() {
-        let run = |defined: Option<&str>, outcome: &str| {
+    fn a_function_passes_when_every_run_the_wheel_makes_does() {
+        let run = |defined: Option<&str>, id: &str, outcome: &str| {
             (
                 defined.map(str::to_string),
-                String::new(),
+                id.to_string(),
                 outcome.to_string(),
                 String::new(),
             )
         };
+        let expected: std::collections::BTreeMap<String, Vec<String>> = [
+            ("A.py::A.test_a", &["A.A.test_a"][..]),
+            ("B.py::Base.test_b", &["B.X.test_b", "B.Y.test_b"]),
+            ("C.py::C.test_c", &["C.C.test_c"]),
+            ("D.py::D.test_d", &["D.D.test_d", "D.E.test_d"]),
+            // Its class's setUpClass failed: no run.
+            ("F.py::F.test_f", &["F.F.test_f"]),
+            // Run in one class only, where the wheel runs it in two.
+            ("G.py::Base.test_g", &["G.X.test_g", "G.Y.test_g"]),
+            // Never run (a module that didn't import).
+            ("H.py::H.test_h", &["H.H.test_h"]),
+        ]
+        .into_iter()
+        .map(|(f, ids)| (f.to_string(), ids.iter().map(|i| i.to_string()).collect()))
+        .collect();
         let runs = [
-            run(Some("A.py::A.test_a"), "pass"),
-            run(Some("B.py::Base.test_b"), "pass"),
-            run(Some("B.py::Base.test_b"), "fail"),
-            run(Some("C.py::C.test_c"), "skip"),
-            run(Some("D.py::D.test_d"), "pass"),
-            run(Some("D.py::D.test_d"), "pass"),
-            run(None, "error"),
+            run(Some("A.py::A.test_a"), "A.A.test_a", "pass"),
+            run(Some("B.py::Base.test_b"), "B.X.test_b", "pass"),
+            run(Some("B.py::Base.test_b"), "B.Y.test_b", "fail"),
+            run(Some("C.py::C.test_c"), "C.C.test_c", "skip"),
+            run(Some("D.py::D.test_d"), "D.D.test_d", "pass"),
+            run(Some("D.py::D.test_d"), "D.E.test_d", "pass"),
+            run(None, "setUpClass (F.F)", "error"),
+            run(Some("G.py::Base.test_g"), "G.X.test_g", "pass"),
         ];
-        let passing: Vec<String> = passing_functions(&runs).into_iter().collect();
+        let passing: Vec<String> = passing_functions(&expected, &runs).into_iter().collect();
         assert_eq!(passing, ["A.py::A.test_a", "D.py::D.test_d"]);
     }
 
