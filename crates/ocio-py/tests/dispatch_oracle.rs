@@ -53,6 +53,11 @@ fn calls() -> Vec<Value> {
     steps.extend([
         set(json!([var()]), json!([["value", s("by keyword")]])),
         get(),
+        // An empty name (None, "", one that starts with a NUL) gives the value the last call
+        // gave (I-224).
+        call(name("OCIO.GetEnvVariable"), json!([{ "none": null }])),
+        call(name("OCIO.GetEnvVariable"), json!([s("")])),
+        call(name("OCIO.GetEnvVariable"), json!([{ "str": "0078" }])),
         set(json!([]), json!([["value", s("both")], ["name", var()]])),
         get(),
         set(json!([var(), { "none": null }]), json!([])),

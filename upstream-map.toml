@@ -3915,7 +3915,7 @@ path = "src/bindings/python/PyTypes.cpp"
 kind = "binding"
 target = ["crates/ocio-py/src/py_types.rs"]
 status = "done"
-note = "6.2a: the enum machinery (enums.rs, pybind11.rs); 6.2b: the 63 class declarations, the 31 enums, the string-conversion functions and the string constants"
+note = "6.2a: the enum machinery (enums.rs, pybind11.rs); 6.2b: the 63 class declarations, the 31 enums, the string-conversion functions and the string constants. GpuLanguageFromString, GradingStyleFromString and ExposureContrastStyleToString/FromString (ParseUtils.cpp) are ported in py_types.rs until their library ports land in ocio-ops, where they then move"
 
 [[file]]
 path = "src/bindings/python/PyUtils.cpp"

@@ -2210,6 +2210,19 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `crates/ocio/src/fileformats/file_format_icc.rs`, checked against the platform's `lroundf`);
   checked against the wheel on both (`crates/ocio/tests/file_format_icc_oracle.rs`).
 
+### I-224. `GetEnvVariable` of an empty name returns the previous call's value
+
+- **Upstream:** `GetEnvVariable` (`Platform.cpp:23-28` @ v2.5.2) returns a `thread_local`
+  string that `Platform::Getenv` fills, and `Getenv` returns before touching it when the name
+  is null or empty (`Platform.cpp:50-53`). So `GetEnvVariable(nullptr)` or `("")` returns what
+  the last call on that thread returned: in Python, `OCIO.GetEnvVariable(None)` right after
+  `OCIO.GetEnvVariable("X")` gives the value of `X` (seen through the wheel in
+  `dispatch_oracle.rs`).
+- **Who notices:** code that asks for an empty variable name, such as a name read from
+  somewhere that turned out empty.
+- **A fix:** clear the string first, so an empty name gives "".
+- **Status:** matched in `p6-core` (6.2b follow-up); `dispatch_oracle.rs`.
+
 ## File formats
 
 ### I-170. expat counts a start tag's attribute values twice
