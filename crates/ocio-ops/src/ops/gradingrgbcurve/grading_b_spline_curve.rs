@@ -420,9 +420,9 @@ pub struct KnotsCoefs {
 }
 
 impl KnotsCoefs {
-    /// The most knots of all the curves together (GradingBSplineCurve.h:118).
+    /// The most knots of all the curves together (GradingBSplineCurve.h:103).
     pub const MAX_NUM_KNOTS: i32 = 120;
-    /// The most coefficients of all the curves together (GradingBSplineCurve.h:120).
+    /// The most coefficients of all the curves together (GradingBSplineCurve.h:105).
     pub const MAX_NUM_COEFS: i32 = 360;
 
     /// Room for `num_curves` curves. Upstream leaves `m_localBypass` uninitialized; its users
@@ -1188,6 +1188,18 @@ impl GradingBSplineCurve {
 
             const N_IDENTITY_KNOTS: i32 = 2;
             const N_IDENTITY_COEFS: i32 = 3;
+
+            // Upstream writes the identity's knots and coefficients after those of the curves
+            // before, unchecked: past the arrays' ends when they are nearly full (U-82). The
+            // port refuses before it changes anything, with the message of the fitted curves'
+            // own check.
+            if num_knots + N_IDENTITY_KNOTS > KnotsCoefs::MAX_NUM_KNOTS
+                || num_coefs + N_IDENTITY_COEFS > KnotsCoefs::MAX_NUM_COEFS
+            {
+                return Err(Exception::new(
+                    "Hue curve: maximum number of control points reached.",
+                ));
+            }
 
             knots_coefs.knots_offsets[curve_idx * 2] = num_knots;
             knots_coefs.knots_offsets[curve_idx * 2 + 1] = N_IDENTITY_KNOTS;

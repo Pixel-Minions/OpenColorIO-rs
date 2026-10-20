@@ -221,3 +221,100 @@ fn hue_curve_knots_and_coefs_match_the_wheel() {
         cases.len()
     );
 }
+
+/// A HUE_SAT curve whose fitting takes 107 or 108 knots, from a seeded search over 40 to 59
+/// points with y in [1, 1.5): with `drawCurveOnly`, the six identity curves before HUE_FX add 2
+/// knots each, which leaves 119 or 120 of the 120 knots taken when HUE_FX's identity comes.
+fn nearly_full_hue_sat() -> Vec<GradingControlPoint> {
+    for n in 40..60u32 {
+        for seed in 0..50u32 {
+            let points: Vec<GradingControlPoint> = (0..n)
+                .map(|k| {
+                    let x = k as f32 / n as f32;
+                    let h = k.wrapping_mul(2654435761).wrapping_add(seed * 977) % 1000;
+                    GradingControlPoint::new(x, 1.0 + 0.5 * h as f32 / 1000.0)
+                })
+                .collect();
+            let curve =
+                GradingBSplineCurve::with_points_and_hue_curve_type(&points, HueCurveType::HueSat);
+            let mut kc = KnotsCoefs::new(8);
+            if curve.compute_knots_and_coefs(&mut kc, 1, false).is_ok()
+                && (kc.num_knots == 107 || kc.num_knots == 108)
+                && kc.num_coefs + 3 + 18 <= KnotsCoefs::MAX_NUM_COEFS
+            {
+                return points;
+            }
+        }
+    }
+    panic!("no HUE_SAT curve of 107 or 108 knots");
+}
+
+/// U-82: with `drawCurveOnly`, an identity curve's two knots and three coefficients go after
+/// the curves before it unchecked, past the arrays' ends when they are nearly full. The wheel
+/// writes past them (undefined behavior: it reports HUE_FX at knot offset 119, count 2); the
+/// port refuses with the fitted curves' message, before it changes the curve's offsets, and the
+/// property neither panics nor keeps a half-written identity. The port only: the wheel's
+/// outcome is not one to compare.
+#[test]
+fn draw_curve_only_identities_past_the_full_arrays_are_refused() {
+    use ocio_ops::dynamic_property::DynamicPropertyGradingHueCurveImpl;
+    use ocio_ops::open_color_types::GradingStyle;
+    use ocio_ops::ops::gradinghuecurve::grading_hue_curve::GradingHueCurve;
+
+    const MESSAGE: &str = "Hue curve: maximum number of control points reached.";
+    let points = nearly_full_hue_sat();
+    let mut values = GradingHueCurve::new(GradingStyle::Log);
+    *values.curve_mut(HueCurveType::HueSat).unwrap() =
+        GradingBSplineCurve::with_points_and_hue_curve_type(&points, HueCurveType::HueSat);
+    values.set_draw_curve_only(true);
+
+    // Building the property.
+    let err = DynamicPropertyGradingHueCurveImpl::new(&values, true).unwrap_err();
+    assert_eq!(err.to_string(), MESSAGE);
+
+    // Setting the value: the curves before HUE_FX stay fitted, HUE_FX's offsets untouched.
+    let property =
+        DynamicPropertyGradingHueCurveImpl::new(&GradingHueCurve::new(GradingStyle::Log), true)
+            .unwrap();
+    let err = property.set_value(&values).unwrap_err();
+    assert_eq!(err.to_string(), MESSAGE);
+    let state = property.state();
+    let fx = HueCurveType::HueFx as usize;
+    let used = state.knots_coefs.num_knots;
+    assert!(used == 119 || used == 120, "{used}");
+    assert!(used + 2 > KnotsCoefs::MAX_NUM_KNOTS);
+    // The identity property's own HUE_FX entry: not drawn, so offset -1 and count 0.
+    assert_eq!(state.knots_coefs.knots_offsets[fx * 2..fx * 2 + 2], [-1, 0]);
+    assert_eq!(state.knots_coefs.coefs_offsets[fx * 2..fx * 2 + 2], [-1, 0]);
+    drop(state);
+
+    // The curve directly, past a full knot array.
+    let identity = GradingBSplineCurve::with_points_and_hue_curve_type(
+        &[
+            GradingControlPoint::new(0.0, 0.0),
+            GradingControlPoint::new(0.5, 0.0),
+        ],
+        HueCurveType::HueFx,
+    );
+    let mut kc = KnotsCoefs::new(8);
+    kc.num_knots = 119;
+    kc.num_coefs = 300;
+    let before = (kc.knots_offsets.clone(), kc.coefs_offsets.clone());
+    let err = identity
+        .compute_knots_and_coefs(&mut kc, fx, true)
+        .unwrap_err();
+    assert_eq!(err.to_string(), MESSAGE);
+    assert_eq!((kc.knots_offsets, kc.coefs_offsets), before);
+    assert_eq!((kc.num_knots, kc.num_coefs), (119, 300));
+    // And past full coefficients.
+    let mut kc = KnotsCoefs::new(8);
+    kc.num_knots = 10;
+    kc.num_coefs = 358;
+    assert!(identity.compute_knots_and_coefs(&mut kc, fx, true).is_err());
+    // One short of the limits still fits.
+    let mut kc = KnotsCoefs::new(8);
+    kc.num_knots = 118;
+    kc.num_coefs = 357;
+    identity.compute_knots_and_coefs(&mut kc, fx, true).unwrap();
+    assert_eq!((kc.num_knots, kc.num_coefs), (120, 360));
+}

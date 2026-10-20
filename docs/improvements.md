@@ -4116,3 +4116,23 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `DynamicPropertyGradingPrimaryImpl`; the RGB curve property, 2.6b, already held its value and
   knots under a lock); `DynamicPropertyGradingToneImpl` in 5.0b;
   `DynamicPropertyGradingHueCurveImpl` in 5.0c.
+
+### U-82. A drawn identity hue curve past nearly full knot arrays writes past their ends
+
+- **Upstream:** with `drawCurveOnly` set, `computeKnotsAndCoefsForHueCurve` gives each identity
+  curve two knots and three coefficients after those of the curves before it, with no check
+  against the arrays' sizes (`GradingBSplineCurve.cpp:890-928` @ v2.5.2; 120 knots and 360
+  coefficients for the eight curves, `GradingBSplineCurve.h:103-105`). The fitted curves check
+  ("Hue curve: maximum number of control points reached."), the identities don't: when the
+  curves before take 119 or 120 knots (a HUE_SAT curve of about 50 points with the six
+  identities before HUE_FX), the identity's writes go past the end of `m_knotsArray` (and of
+  `m_coefsArray` from 358 coefficients). The wheel then reports HUE_FX at knot offset 119,
+  count 2 (probed 2026-10-20), having written into memory it doesn't own.
+- **Who notices:** UIs drawing a hue curve of many control points.
+- **Decided** (the owner's general rule, 2026-09-30): the port refuses the identity with the
+  fitted curves' message before it changes the curve's offsets, so building the property or
+  setting the value fails, as it does for a fitted curve that doesn't fit.
+- **Status:** matched with an error in `p5-ec` (the fix of `p5-values` 5.0d,
+  `crates/ocio-ops/src/ops/gradingrgbcurve/grading_b_spline_curve.rs`,
+  `compute_knots_and_coefs_for_hue_curve`); `crates/ocio-ops/tests/hue_curve_knots_oracle.rs`,
+  `draw_curve_only_identities_past_the_full_arrays_are_refused` (the port only).
