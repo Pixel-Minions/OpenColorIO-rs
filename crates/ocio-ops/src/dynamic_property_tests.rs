@@ -329,3 +329,114 @@ fn max_ctrl_pnts() {
         "RGB curve: maximum number of control points reached",
     );
 }
+
+/// Port of `OCIO_ADD_TEST(DynamicPropertyImpl, equal_grading_primary)` @ v2.5.2.
+#[test]
+fn equal_grading_primary() {
+    use crate::ops::gradingprimary::grading_primary::GradingRgbm;
+
+    let mut gplog = GradingPrimary::new(GradingStyle::Log);
+    gplog.brightness = GradingRgbm::new(-10., 45., -5., 50.);
+    gplog.contrast = GradingRgbm::new(0.9, 1.4, 0.7, 0.75);
+    gplog.gamma = GradingRgbm::new(1.1, 0.7, 1.05, 1.15);
+    gplog.saturation = 1.21;
+    gplog.pivot = -0.3;
+    gplog.pivot_black = 0.05;
+    gplog.pivot_white = 0.9;
+    gplog.clamp_black = -0.05;
+    gplog.clamp_white = 1.5;
+
+    let dp_impl0 = Arc::new(DynamicPropertyGradingPrimaryImpl::new(
+        GradingStyle::Log,
+        TransformDirection::Forward,
+        &gplog,
+        false,
+    ));
+    let dp0 = DynamicPropertyRcPtr::from(Arc::clone(&dp_impl0));
+
+    let dp_impl1 = Arc::new(DynamicPropertyGradingPrimaryImpl::new(
+        GradingStyle::Log,
+        TransformDirection::Forward,
+        &gplog,
+        false,
+    ));
+    let dp1 = DynamicPropertyRcPtr::from(Arc::clone(&dp_impl1));
+
+    // Both not dynamic, same value.
+    assert!(dp0 == dp1);
+
+    // Both not dynamic, diff values.
+    gplog.clamp_white = 1.4;
+
+    dp_impl0.set_value(&gplog).unwrap();
+    assert!(!(dp0 == dp1));
+
+    // Same value.
+    dp_impl1.set_value(&gplog).unwrap();
+    assert!(dp0 == dp1);
+
+    // One dynamic, not the other, same value.
+    dp_impl0.make_dynamic();
+    assert!(!(dp0 == dp1));
+
+    // Both dynamic, same value.
+    dp_impl1.make_dynamic();
+    assert!(!(dp0 == dp1));
+
+    // Both dynamic, different values.
+    gplog.clamp_white = 1.3;
+    dp_impl1.set_value(&gplog).unwrap();
+    assert!(!(dp0 == dp1));
+
+    // Different value types.
+    let dp_impl_double: DynamicPropertyDoubleImplRcPtr = Arc::new(DynamicPropertyDoubleImpl::new(
+        DynamicPropertyType::Exposure,
+        1.0,
+        true,
+    ));
+
+    assert!(!(dp0 == DynamicPropertyRcPtr::from(dp_impl_double)));
+}
+
+/// A GradingPrimary property's set validates the value for the property's style, and a
+/// refused value leaves the property as it was; the style resets the values to its defaults,
+/// the direction recomputes the pre-render form, and a copy holds the same state.
+#[test]
+fn grading_primary_property_state() {
+    let dp = DynamicPropertyGradingPrimaryImpl::new(
+        GradingStyle::Lin,
+        TransformDirection::Forward,
+        &GradingPrimary::new(GradingStyle::Lin),
+        true,
+    );
+    let mut bad = GradingPrimary::new(GradingStyle::Lin);
+    bad.contrast.red = 0.;
+    assert!(dp.set_value(&bad).is_err());
+    assert_eq!(dp.get_value(), GradingPrimary::new(GradingStyle::Lin));
+
+    let mut value = GradingPrimary::new(GradingStyle::Lin);
+    value.exposure.master = 1.;
+    dp.set_value(&value).unwrap();
+    let mut expected = GradingPrimaryPreRender::default();
+    expected.update(GradingStyle::Lin, TransformDirection::Forward, &value);
+    assert_eq!(dp.get_computed_value(), expected);
+
+    dp.set_direction(TransformDirection::Inverse);
+    expected.update(GradingStyle::Lin, TransformDirection::Inverse, &value);
+    assert_eq!(dp.get_computed_value(), expected);
+    assert_eq!(dp.get_direction(), TransformDirection::Inverse);
+
+    let copy = dp.create_editable_copy();
+    assert_eq!(copy.get_computed_value(), expected);
+    assert_eq!(copy.get_value(), value);
+    assert!(copy.is_dynamic());
+
+    dp.set_style(GradingStyle::Log);
+    assert_eq!(dp.get_value(), GradingPrimary::new(GradingStyle::Log));
+    expected.update(
+        GradingStyle::Log,
+        TransformDirection::Inverse,
+        &GradingPrimary::new(GradingStyle::Log),
+    );
+    assert_eq!(dp.get_computed_value(), expected);
+}

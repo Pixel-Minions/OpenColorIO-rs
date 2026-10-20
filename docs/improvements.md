@@ -4096,3 +4096,22 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Status:** matched with an error in `p4-baker` (`crates/ocio/src/minizip/mz_zip_rw.rs`,
   `add_path_of_file`); `crates/ocio/tests/ocioz_archive_oracle.rs`, `dangling_link_with_a_star`
   (Linux, the port only).
+
+### U-81. Setting a grading value while another thread applies the processor
+
+- **Upstream:** a grading op's dynamic property holds its value and the pre-render values
+  computed from it, and the renderers read both at each `apply`; `setValue` writes them with no
+  lock (`DynamicPropertyGradingPrimaryImpl::setValue`, `src/OpenColorIO/DynamicProperty.cpp:
+  173-178` @ v2.5.2, and the RGB curve, tone and hue curve properties alike). An application
+  that sets a value through `getDynamicProperty` while another thread applies the processor has
+  a data race: the renderer can read a value half written, or pre-render values of one value
+  and the rest of another.
+- **Who notices:** applications that change a grading control while rendering on other
+  threads, such as a UI slider over a playing image.
+- **Decided** (owner decision P5-1, 2026-10-17): the port keeps each grading property's value
+  and its pre-render values under one lock; a set validates, computes and swaps them together,
+  and a renderer copies them once per `apply`. A single thread sees upstream's values exactly;
+  a set during an apply gives the whole old value or the whole new one.
+- **Status:** matched in `p5-values` (5.0a, `crates/ocio-ops/src/dynamic_property.rs`:
+  `DynamicPropertyGradingPrimaryImpl`; the RGB curve property, 2.6b, already held its value and
+  knots under a lock); the tone and hue curve properties follow in 5.0b-c.
