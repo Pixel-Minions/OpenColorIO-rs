@@ -2984,6 +2984,27 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** open: the Python module (Phase 6) matches it. The oracle's `checks.dump` reads
   the binding's iterators by index, so `object_calls` can write a manager out (`p5-oracle`).
 
+### I-218. A GradingPrimary's NaN values differ between Windows and Linux
+
+- **Upstream:** `GradingPrimaryPreRender::update` (`ops/gradingprimary/GradingPrimary.cpp:
+  108-269` @ v2.5.2) combines each RGBM's master value with each channel's (`b.m_master +
+  b.m_red`, `c.m_master * c.m_red`, ...) in double precision. Both wheels compile it with
+  their own operand orders, different per channel and per platform (Windows `sub_1801d34a0`,
+  Linux `0x3a67b0`, read with `tools/wheel-inspect`): for the log style's forward brightness
+  MSVC adds `master + red`, `green + master`, `blue + master`, GCC `red + master`, `green +
+  master`, `master + blue`; and so on for the contrast, gamma, offset, exposure, gain and the
+  inverse video slope. Where a master and a channel value are both NaN, the pre-render value
+  keeps a different NaN on each platform. MSVC also folds the inverse log brightness'
+  negation into the constant (`x * -6.25 / 1023.`), which keeps a NaN's sign, where GCC flips
+  it.
+- **Who notices:** anyone comparing the uniforms of a dynamic GradingPrimaryTransform with NaN
+  values between a Windows and a Linux machine (and the pixels, where the NaN reaches them).
+- **A fix:** one operand order on every platform, which changes NaN bits on at least one.
+- **Status:** matched in `p5-ec` (the fix of `p5-values` 5.0a,
+  `crates/ocio-ops/src/ops/gradingprimary/grading_primary.rs`, `ORDERS`); the NaN cases of
+  `crates/ocio-ops/tests/grading_pre_render_oracle.rs` (random sets of NaN values, each with
+  its own payload and sign) check it on both platforms.
+
 ### I-221. Archiving lists a directory whose path has 318 bytes or more by the wrong pattern
 
 - **Upstream:** `Config::archive` lists the config's directory and its subdirectories with

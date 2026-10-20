@@ -14,7 +14,7 @@ use std::fmt;
 
 use crate::cfmt::{Crt, OStringStream};
 use crate::exception::{Exception, Result};
-use crate::math_utils::{std_pow, std_powf};
+use crate::math_utils::{sse_add, sse_mul, sse_sub, std_pow, std_powf};
 use crate::open_color_types::{GradingStyle, TransformDirection};
 
 /// Three floats, the red, green and blue of a pre-render value.
@@ -280,8 +280,112 @@ pub struct GradingPrimaryPreRender {
     local_bypass: bool,
 }
 
+/// Which operand of `master op channel` the wheel's machine code puts first, where both can be
+/// NaN: the result is then the first one's NaN (`docs/improvements.md` I-91). MSVC and GCC
+/// chose differently, and differently per channel; `tools/wheel-inspect` read both
+/// (`docs/wheel-inspect.md`; Windows `sub_1801d34a0`, Linux 0x3a67b0).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum First {
+    /// The master value first.
+    M,
+    /// The channel's value first.
+    C,
+}
+
+/// The operand orders of `GradingPrimaryPreRender::update`, per channel (red, green, blue).
+struct Orders {
+    /// `b.master + b.channel`, forward log.
+    log_brightness_fwd: [First; 3],
+    /// `b.master + b.channel`, inverse log.
+    log_brightness_inv: [First; 3],
+    /// `c.master * c.channel`, forward log.
+    log_contrast_fwd: [First; 3],
+    /// `c.master * c.channel`, inverse log.
+    log_contrast_inv: [First; 3],
+    /// `g.master * g.channel`, log (both directions).
+    log_gamma: [First; 3],
+    /// `o.master + o.channel`, linear (both directions).
+    lin_offset: [First; 3],
+    /// `e.master + e.channel`, linear (both directions).
+    lin_exposure: [First; 3],
+    /// `c.master * c.channel`, linear (both directions).
+    lin_contrast: [First; 3],
+    /// `gain.master * gain.channel`, video.
+    video_gain: [First; 3],
+    /// `o.master + o.channel`, video (both directions); the sum then adds `l.master`, then
+    /// `l.channel`, on both wheels.
+    video_offset: [First; 3],
+    /// `g.master * g.channel`, video (both directions).
+    video_gamma: [First; 3],
+    /// `l.master + l.channel` of the inverse video slope.
+    video_slope_inv: [First; 3],
+    /// Whether the inverse log brightness `-(float)(x * 6.25 / 1023.)` keeps a NaN's sign:
+    /// MSVC folded the negation into the constant (`x * -6.25 / 1023.`), GCC flips the sign.
+    log_brightness_inv_folds: bool,
+}
+
+use First::{C, M};
+
+/// The Windows wheel's (MSVC) orders.
+#[cfg(windows)]
+const ORDERS: Orders = Orders {
+    log_brightness_fwd: [M, C, C],
+    log_brightness_inv: [M, C, C],
+    log_contrast_fwd: [M, C, C],
+    log_contrast_inv: [M, M, M],
+    log_gamma: [C, C, C],
+    lin_offset: [M, C, C],
+    lin_exposure: [M, C, C],
+    lin_contrast: [M, C, C],
+    video_gain: [M, M, M],
+    video_offset: [M, C, C],
+    video_gamma: [M, C, C],
+    video_slope_inv: [M, M, C],
+    log_brightness_inv_folds: true,
+};
+
+/// The Linux wheel's (GCC) orders.
+#[cfg(not(windows))]
+const ORDERS: Orders = Orders {
+    log_brightness_fwd: [C, C, M],
+    log_brightness_inv: [M, M, M],
+    log_contrast_fwd: [M, C, C],
+    log_contrast_inv: [C, C, M],
+    log_gamma: [C, C, M],
+    lin_offset: [M, M, M],
+    lin_exposure: [M, M, M],
+    lin_contrast: [C, C, M],
+    video_gain: [C, C, M],
+    video_offset: [C, C, M],
+    video_gamma: [C, C, M],
+    video_slope_inv: [C, C, M],
+    log_brightness_inv_folds: false,
+};
+
+/// `master + channel` in the order `first` says.
+fn add(first: First, master: f64, channel: f64) -> f64 {
+    match first {
+        M => sse_add(master, channel),
+        C => sse_add(channel, master),
+    }
+}
+
+/// `master * channel` in the order `first` says.
+fn mul(first: First, master: f64, channel: f64) -> f64 {
+    match first {
+        M => sse_mul(master, channel),
+        C => sse_mul(channel, master),
+    }
+}
+
+/// The red, green and blue values of an RGBM.
+fn channels(v: &GradingRgbm) -> [f64; 3] {
+    [v.red, v.green, v.blue]
+}
+
 impl GradingPrimaryPreRender {
-    /// Computes the values for `style` and `dir` from `v`.
+    /// Computes the values for `style` and `dir` from `v`, in the operand orders of the
+    /// wheel's machine code where two NaN values meet ([`ORDERS`]).
     ///
     /// Port of `GradingPrimaryPreRender::update` (src/OpenColorIO/ops/gradingprimary/
     /// GradingPrimary.cpp:108-269 @ v2.5.2).
@@ -289,37 +393,34 @@ impl GradingPrimaryPreRender {
         self.local_bypass = v.saturation == 1.
             && v.clamp_black == GradingPrimary::NO_CLAMP_BLACK
             && v.clamp_white == GradingPrimary::NO_CLAMP_WHITE;
+        let o = &ORDERS;
 
         match style {
             GradingStyle::Log => {
                 let b = &v.brightness;
                 let c = &v.contrast;
                 let g = &v.gamma;
-                match dir {
-                    TransformDirection::Forward => {
-                        self.brightness[0] = ((b.master + b.red) * 6.25 / 1023.) as f32;
-                        self.brightness[1] = ((b.master + b.green) * 6.25 / 1023.) as f32;
-                        self.brightness[2] = ((b.master + b.blue) * 6.25 / 1023.) as f32;
-                        self.contrast[0] = (c.master * c.red) as f32;
-                        self.contrast[1] = (c.master * c.green) as f32;
-                        self.contrast[2] = (c.master * c.blue) as f32;
-                        self.gamma[0] = (1. / (g.master * g.red)) as f32;
-                        self.gamma[1] = (1. / (g.master * g.green)) as f32;
-                        self.gamma[2] = (1. / (g.master * g.blue)) as f32;
-                    }
-                    TransformDirection::Inverse => {
-                        self.brightness[0] = -(((b.master + b.red) * 6.25 / 1023.) as f32);
-                        self.brightness[1] = -(((b.master + b.green) * 6.25 / 1023.) as f32);
-                        self.brightness[2] = -(((b.master + b.blue) * 6.25 / 1023.) as f32);
-                        let c0 = c.master * c.red;
-                        let c1 = c.master * c.green;
-                        let c2 = c.master * c.blue;
-                        self.contrast[0] = (1. / (if c0 == 0. { 1. } else { c0 })) as f32;
-                        self.contrast[1] = (1. / (if c1 == 0. { 1. } else { c1 })) as f32;
-                        self.contrast[2] = (1. / (if c2 == 0. { 1. } else { c2 })) as f32;
-                        self.gamma[0] = (g.master * g.red) as f32;
-                        self.gamma[1] = (g.master * g.green) as f32;
-                        self.gamma[2] = (g.master * g.blue) as f32;
+                for i in 0..3 {
+                    match dir {
+                        TransformDirection::Forward => {
+                            let sum = add(o.log_brightness_fwd[i], b.master, channels(b)[i]);
+                            self.brightness[i] = (sum * 6.25 / 1023.) as f32;
+                            self.contrast[i] =
+                                mul(o.log_contrast_fwd[i], c.master, channels(c)[i]) as f32;
+                            self.gamma[i] =
+                                (1. / mul(o.log_gamma[i], g.master, channels(g)[i])) as f32;
+                        }
+                        TransformDirection::Inverse => {
+                            let sum = add(o.log_brightness_inv[i], b.master, channels(b)[i]);
+                            self.brightness[i] = if o.log_brightness_inv_folds {
+                                (sum * -6.25 / 1023.) as f32
+                            } else {
+                                -((sum * 6.25 / 1023.) as f32)
+                            };
+                            let ci = mul(o.log_contrast_inv[i], c.master, channels(c)[i]);
+                            self.contrast[i] = (1. / (if ci == 0. { 1. } else { ci })) as f32;
+                            self.gamma[i] = mul(o.log_gamma[i], g.master, channels(g)[i]) as f32;
+                        }
                     }
                 }
                 self.is_power_identity =
@@ -335,33 +436,27 @@ impl GradingPrimaryPreRender {
                     && self.contrast[2] == 1.;
             }
             GradingStyle::Lin => {
-                let o = &v.offset;
+                let off = &v.offset;
                 let e = &v.exposure;
                 let c = &v.contrast;
-                match dir {
-                    TransformDirection::Forward => {
-                        self.offset[0] = (o.master + o.red) as f32;
-                        self.offset[1] = (o.master + o.green) as f32;
-                        self.offset[2] = (o.master + o.blue) as f32;
-                        // std::pow(float, float): powf.
-                        self.exposure[0] = std_powf(2.0, (e.master + e.red) as f32);
-                        self.exposure[1] = std_powf(2.0, (e.master + e.green) as f32);
-                        self.exposure[2] = std_powf(2.0, (e.master + e.blue) as f32);
-                        self.contrast[0] = (c.master * c.red) as f32;
-                        self.contrast[1] = (c.master * c.green) as f32;
-                        self.contrast[2] = (c.master * c.blue) as f32;
-                    }
-                    TransformDirection::Inverse => {
-                        self.offset[0] = -((o.master + o.red) as f32);
-                        self.offset[1] = -((o.master + o.green) as f32);
-                        self.offset[2] = -((o.master + o.blue) as f32);
-                        self.exposure[0] = 1. / std_powf(2.0, (e.master + e.red) as f32);
-                        self.exposure[1] = 1. / std_powf(2.0, (e.master + e.green) as f32);
-                        self.exposure[2] = 1. / std_powf(2.0, (e.master + e.blue) as f32);
-                        // Validate ensures contrast is above a threshold.
-                        self.contrast[0] = (1. / (c.master * c.red)) as f32;
-                        self.contrast[1] = (1. / (c.master * c.green)) as f32;
-                        self.contrast[2] = (1. / (c.master * c.blue)) as f32;
+                for i in 0..3 {
+                    let offset = add(o.lin_offset[i], off.master, channels(off)[i]) as f32;
+                    // std::pow(float, float): powf.
+                    let exposure =
+                        std_powf(2.0, add(o.lin_exposure[i], e.master, channels(e)[i]) as f32);
+                    let contrast = mul(o.lin_contrast[i], c.master, channels(c)[i]);
+                    match dir {
+                        TransformDirection::Forward => {
+                            self.offset[i] = offset;
+                            self.exposure[i] = exposure;
+                            self.contrast[i] = contrast as f32;
+                        }
+                        TransformDirection::Inverse => {
+                            self.offset[i] = -offset;
+                            self.exposure[i] = 1. / exposure;
+                            // Validate ensures contrast is above a threshold.
+                            self.contrast[i] = (1. / contrast) as f32;
+                        }
                     }
                 }
                 self.is_power_identity =
@@ -378,48 +473,43 @@ impl GradingPrimaryPreRender {
                     && self.offset[2] == 0.;
             }
             GradingStyle::Video => {
-                let o = &v.offset;
+                let off = &v.offset;
                 let l = &v.lift;
-                let gain = |g: f64| if g == 0. { 1. } else { g };
-                let gain0 = gain(v.gain.master * v.gain.red);
-                let gain1 = gain(v.gain.master * v.gain.green);
-                let gain2 = gain(v.gain.master * v.gain.blue);
                 let g = &v.gamma;
-                match dir {
-                    TransformDirection::Forward => {
-                        self.offset[0] = (o.master + o.red + l.master + l.red) as f32;
-                        self.offset[1] = (o.master + o.green + l.master + l.green) as f32;
-                        self.offset[2] = (o.master + o.blue + l.master + l.blue) as f32;
-                        let slope_den0 = v.pivot_white / gain0 + l.master + l.red - v.pivot_black;
-                        let slope_den1 = v.pivot_white / gain1 + l.master + l.green - v.pivot_black;
-                        let slope_den2 = v.pivot_white / gain2 + l.master + l.blue - v.pivot_black;
-                        let den = |d: f64| if d == 0. { 1. } else { d };
-                        self.slope[0] = ((v.pivot_white - v.pivot_black) / den(slope_den0)) as f32;
-                        self.slope[1] = ((v.pivot_white - v.pivot_black) / den(slope_den1)) as f32;
-                        self.slope[2] = ((v.pivot_white - v.pivot_black) / den(slope_den2)) as f32;
-                        self.gamma[0] = (1. / (g.master * g.red)) as f32;
-                        self.gamma[1] = (1. / (g.master * g.green)) as f32;
-                        self.gamma[2] = (1. / (g.master * g.blue)) as f32;
-                    }
-                    TransformDirection::Inverse => {
-                        self.offset[0] = -((o.master + o.red + l.master + l.red) as f32);
-                        self.offset[1] = -((o.master + o.green + l.master + l.green) as f32);
-                        self.offset[2] = -((o.master + o.blue + l.master + l.blue) as f32);
-                        self.slope[0] = ((v.pivot_white / gain0
-                            + (l.master + l.red - v.pivot_black))
-                            / (v.pivot_white - v.pivot_black))
-                            as f32;
-                        self.slope[1] = ((v.pivot_white / gain1
-                            + (l.master + l.green - v.pivot_black))
-                            / (v.pivot_white - v.pivot_black))
-                            as f32;
-                        self.slope[2] = ((v.pivot_white / gain2
-                            + (l.master + l.blue - v.pivot_black))
-                            / (v.pivot_white - v.pivot_black))
-                            as f32;
-                        self.gamma[0] = (g.master * g.red) as f32;
-                        self.gamma[1] = (g.master * g.green) as f32;
-                        self.gamma[2] = (g.master * g.blue) as f32;
+                for i in 0..3 {
+                    let gain = mul(o.video_gain[i], v.gain.master, channels(&v.gain)[i]);
+                    let gain = if gain == 0. { 1. } else { gain };
+                    let offset = sse_add(
+                        sse_add(
+                            add(o.video_offset[i], off.master, channels(off)[i]),
+                            l.master,
+                        ),
+                        channels(l)[i],
+                    ) as f32;
+                    let gamma = mul(o.video_gamma[i], g.master, channels(g)[i]);
+                    match dir {
+                        TransformDirection::Forward => {
+                            self.offset[i] = offset;
+                            let slope_den = sse_sub(
+                                sse_add(sse_add(v.pivot_white / gain, l.master), channels(l)[i]),
+                                v.pivot_black,
+                            );
+                            let den = if slope_den == 0. { 1. } else { slope_den };
+                            self.slope[i] = ((v.pivot_white - v.pivot_black) / den) as f32;
+                            self.gamma[i] = (1. / gamma) as f32;
+                        }
+                        TransformDirection::Inverse => {
+                            self.offset[i] = -offset;
+                            let lift = sse_sub(
+                                add(o.video_slope_inv[i], l.master, channels(l)[i]),
+                                v.pivot_black,
+                            );
+                            // Both wheels add the lift's part first.
+                            self.slope[i] = (sse_add(lift, v.pivot_white / gain)
+                                / (v.pivot_white - v.pivot_black))
+                                as f32;
+                            self.gamma[i] = gamma as f32;
+                        }
                     }
                 }
                 self.is_power_identity =
