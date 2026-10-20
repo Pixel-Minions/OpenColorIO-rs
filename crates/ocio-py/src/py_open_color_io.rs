@@ -8,53 +8,21 @@
 //! other `bindPy*` calls, and the global functions that take enums (the logging level) or
 //! Python callbacks (logging, hashing), come with their chunks (WP 6.2 to 6.7).
 //!
-//! Arguments: a `std::string` parameter takes a `str` (encoded as UTF-8) or `bytes`, as
-//! pybind11's string caster does; a returned `std::string` is decoded as strict UTF-8, so
-//! bytes that aren't UTF-8 raise `UnicodeDecodeError`. The `TypeError` texts of arguments no
-//! overload accepts are pybind11's dispatcher's, which chunk 6.4a brings: until then they are
-//! PyO3's.
+//! Every function goes through pybind11's dispatcher ([`crate::dispatch`]): arguments,
+//! errors and docstrings as the wheel's.
 
-use pyo3::exceptions::{PyException, PyMemoryError, PyRuntimeError, PyTypeError, PyValueError};
+use pyo3::exceptions::{PyException, PyMemoryError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
-use pyo3::types::{PyBytes, PyString, PyType};
+use pyo3::types::{PyDict, PyInt, PyString, PyTuple, PyType};
+
+use crate::arg;
+use crate::dispatch::{CharPtr, Function, Overload, Param, std_string_to_py};
 
 /// `OCIO.Exception`, made when the module is (`register_exception`).
 static EXCEPTION: PyOnceLock<Py<PyType>> = PyOnceLock::new();
 /// `OCIO.ExceptionMissingFile`.
 static EXCEPTION_MISSING_FILE: PyOnceLock<Py<PyType>> = PyOnceLock::new();
-
-/// pybind11's string caster for a `std::string` parameter: a `str`, encoded as UTF-8, or
-/// `bytes`, as they are.
-#[derive(Debug)]
-pub struct StdString(pub Vec<u8>);
-
-impl<'a, 'py> FromPyObject<'a, 'py> for StdString {
-    type Error = PyErr;
-
-    fn extract(obj: Borrowed<'a, 'py, PyAny>) -> PyResult<Self> {
-        if let Ok(s) = obj.cast::<PyString>() {
-            // PyUnicode_AsEncodedString(s, "utf-8", nullptr): strict, so a lone surrogate
-            // fails the conversion.
-            let encoded = s.encode_utf8().map_err(|_| {
-                PyTypeError::new_err("incompatible function arguments (a str that isn't UTF-8)")
-            })?;
-            return Ok(StdString(encoded.as_bytes().to_vec()));
-        }
-        if let Ok(b) = obj.cast::<PyBytes>() {
-            return Ok(StdString(b.as_bytes().to_vec()));
-        }
-        Err(PyTypeError::new_err(
-            "incompatible function arguments (expected str or bytes)",
-        ))
-    }
-}
-
-/// A returned `std::string` as pybind11 hands it to Python: decoded as strict UTF-8
-/// (`PyUnicode_DecodeUTF8`), so bytes that aren't UTF-8 raise `UnicodeDecodeError`.
-pub fn std_string_to_py<'py>(py: Python<'py>, bytes: &[u8]) -> PyResult<Bound<'py, PyString>> {
-    PyString::from_encoded_object(&PyBytes::new(py, bytes), Some(c"utf-8"), Some(c"strict"))
-}
 
 /// A Rust error as the Python exception the wheel raises for the C++ one: pybind11's
 /// translators (`register_exception` for OCIO's two classes, its own for the standard
@@ -87,63 +55,190 @@ fn py_result<T>(py: Python<'_>, r: ocio::Result<T>) -> PyResult<T> {
     r.map_err(|e| to_py_err(py, &e))
 }
 
-// m.def("ClearAllCaches", &ClearAllCaches) (PyOpenColorIO.cpp:41-42 @ v2.5.2).
-#[doc = "ClearAllCaches() -> None\n"]
-#[pyfunction(name = "ClearAllCaches")]
-#[pyo3(text_signature = None)]
-fn clear_all_caches() {
-    ocio::clear_all_caches();
+/// Defines the module function `$rust`, which Python calls `$name`: bound through
+/// [`crate::dispatch::dispatch`] with `$function`'s overloads, taking `*args` and `**kwargs`
+/// (`METH_VARARGS | METH_KEYWORDS`, as pybind11's functions do, so CPython gives it no
+/// `__text_signature__`), with the docstring `$doc`: pybind11's for `$function`'s overloads
+/// ([`crate::dispatch::docstring`]), which tests/dispatch_oracle.rs compares with the wheel's.
+macro_rules! py_def {
+    ($rust:ident, $name:literal, $doc:literal, $function:path) => {
+        #[doc = $doc]
+        #[pyfunction(name = $name, signature = (*args, **kwargs))]
+        #[pyo3(text_signature = None)]
+        fn $rust<'py>(
+            py: Python<'py>,
+            args: &Bound<'py, PyTuple>,
+            kwargs: Option<&Bound<'py, PyDict>>,
+        ) -> PyResult<Py<PyAny>> {
+            crate::dispatch::dispatch(py, &$function, args, kwargs)
+        }
+    };
 }
+
+/// A module function with one overload.
+const fn function(name: &'static str, overloads: &'static [Overload]) -> Function {
+    Function {
+        name,
+        constructor: false,
+        method: false,
+        overloads,
+    }
+}
+
+fn none(py: Python<'_>) -> PyResult<Option<Py<PyAny>>> {
+    Ok(Some(py.None()))
+}
+
+// m.def("ClearAllCaches", &ClearAllCaches) (PyOpenColorIO.cpp:41-42 @ v2.5.2).
+static CLEAR_ALL_CACHES: Function = function(
+    "ClearAllCaches",
+    &[Overload {
+        params: &[],
+        ret: "None",
+        call: |py, _, _| {
+            ocio::clear_all_caches();
+            none(py)
+        },
+    }],
+);
+py_def!(
+    clear_all_caches,
+    "ClearAllCaches",
+    "ClearAllCaches() -> None\n",
+    CLEAR_ALL_CACHES
+);
 
 // m.def("GetVersion", &GetVersion) (PyOpenColorIO.cpp:43-44 @ v2.5.2).
-#[doc = "GetVersion() -> str\n"]
-#[pyfunction(name = "GetVersion")]
-#[pyo3(text_signature = None)]
-fn get_version() -> &'static str {
-    ocio::version()
-}
+static GET_VERSION: Function = function(
+    "GetVersion",
+    &[Overload {
+        params: &[],
+        ret: "str",
+        call: |py, _, _| Ok(Some(PyString::new(py, ocio::version()).into_any().unbind())),
+    }],
+);
+py_def!(
+    get_version,
+    "GetVersion",
+    "GetVersion() -> str\n",
+    GET_VERSION
+);
 
 // m.def("GetVersionHex", &GetVersionHex) (PyOpenColorIO.cpp:45-46 @ v2.5.2).
-#[doc = "GetVersionHex() -> int\n"]
-#[pyfunction(name = "GetVersionHex")]
-#[pyo3(text_signature = None)]
-fn get_version_hex() -> i32 {
-    ocio::version_hex()
+static GET_VERSION_HEX: Function = function(
+    "GetVersionHex",
+    &[Overload {
+        params: &[],
+        ret: "int",
+        call: |py, _, _| {
+            Ok(Some(
+                PyInt::new(py, ocio::version_hex()).into_any().unbind(),
+            ))
+        },
+    }],
+);
+py_def!(
+    get_version_hex,
+    "GetVersionHex",
+    "GetVersionHex() -> int\n",
+    GET_VERSION_HEX
+);
+
+/// A `const char *` argument's bytes, a null pointer as the empty string: what upstream's
+/// environment functions (Platform.cpp's Getenv, Setenv, Unsetenv) do with it.
+fn c_str(s: CharPtr) -> Vec<u8> {
+    s.0.unwrap_or_default()
 }
 
+const NAME: Param = Param::new("name", "str");
+
 // m.def("GetEnvVariable", &GetEnvVariable, "name"_a) (PyOpenColorIO.cpp:61-62 @ v2.5.2).
-#[doc = "GetEnvVariable(name: str) -> str\n"]
-#[pyfunction(name = "GetEnvVariable")]
-#[pyo3(text_signature = None)]
-fn get_env_variable(py: Python<'_>, name: StdString) -> PyResult<Bound<'_, PyString>> {
-    std_string_to_py(py, &ocio::get_env_variable(&name.0))
-}
+static GET_ENV_VARIABLE: Function = function(
+    "GetEnvVariable",
+    &[Overload {
+        params: &[NAME],
+        ret: "str",
+        call: |py, a, convert| {
+            let name = arg!(a, 0, convert, CharPtr);
+            let value = ocio::get_env_variable(c_str(name));
+            Ok(Some(std_string_to_py(py, &value)?.into_any().unbind()))
+        },
+    }],
+);
+py_def!(
+    get_env_variable,
+    "GetEnvVariable",
+    "GetEnvVariable(name: str) -> str\n",
+    GET_ENV_VARIABLE
+);
 
 // m.def("SetEnvVariable", &SetEnvVariable, "name"_a, "value"_a)
 // (PyOpenColorIO.cpp:63-64 @ v2.5.2).
-#[doc = "SetEnvVariable(name: str, value: str) -> None\n"]
-#[pyfunction(name = "SetEnvVariable")]
-#[pyo3(text_signature = None)]
-fn set_env_variable(py: Python<'_>, name: StdString, value: StdString) -> PyResult<()> {
-    py_result(py, ocio::set_env_variable(&name.0, Some(&value.0)))
-}
+static SET_ENV_VARIABLE: Function = function(
+    "SetEnvVariable",
+    &[Overload {
+        params: &[NAME, Param::new("value", "str")],
+        ret: "None",
+        call: |py, a, convert| {
+            let name = arg!(a, 0, convert, CharPtr);
+            let value = arg!(a, 1, convert, CharPtr);
+            py_result(py, ocio::set_env_variable(c_str(name), value.0.as_deref()))?;
+            none(py)
+        },
+    }],
+);
+py_def!(
+    set_env_variable,
+    "SetEnvVariable",
+    "SetEnvVariable(name: str, value: str) -> None\n",
+    SET_ENV_VARIABLE
+);
 
 // m.def("UnsetEnvVariable", &UnsetEnvVariable, "name"_a) (PyOpenColorIO.cpp:65-66 @ v2.5.2).
-#[doc = "UnsetEnvVariable(name: str) -> None\n"]
-#[pyfunction(name = "UnsetEnvVariable")]
-#[pyo3(text_signature = None)]
-fn unset_env_variable(py: Python<'_>, name: StdString) -> PyResult<()> {
-    py_result(py, ocio::unset_env_variable(&name.0))
-}
+static UNSET_ENV_VARIABLE: Function = function(
+    "UnsetEnvVariable",
+    &[Overload {
+        params: &[NAME],
+        ret: "None",
+        call: |py, a, convert| {
+            let name = arg!(a, 0, convert, CharPtr);
+            py_result(py, ocio::unset_env_variable(c_str(name)))?;
+            none(py)
+        },
+    }],
+);
+py_def!(
+    unset_env_variable,
+    "UnsetEnvVariable",
+    "UnsetEnvVariable(name: str) -> None\n",
+    UNSET_ENV_VARIABLE
+);
 
 // m.def("IsEnvVariablePresent", &IsEnvVariablePresent, "name"_a)
 // (PyOpenColorIO.cpp:67-68 @ v2.5.2).
-#[doc = "IsEnvVariablePresent(name: str) -> bool\n"]
-#[pyfunction(name = "IsEnvVariablePresent")]
-#[pyo3(text_signature = None)]
-fn is_env_variable_present(name: StdString) -> bool {
-    ocio::is_env_variable_present(&name.0)
-}
+static IS_ENV_VARIABLE_PRESENT: Function = function(
+    "IsEnvVariablePresent",
+    &[Overload {
+        params: &[NAME],
+        ret: "bool",
+        call: |py, a, convert| {
+            let name = arg!(a, 0, convert, CharPtr);
+            let present = ocio::is_env_variable_present(c_str(name));
+            Ok(Some(
+                pyo3::types::PyBool::new(py, present)
+                    .to_owned()
+                    .into_any()
+                    .unbind(),
+            ))
+        },
+    }],
+);
+py_def!(
+    is_env_variable_present,
+    "IsEnvVariablePresent",
+    "IsEnvVariablePresent(name: str) -> bool\n",
+    IS_ENV_VARIABLE_PRESENT
+);
 
 /// An OCIO exception class as pybind11's `register_exception` makes it: a subclass of
 /// Python's `Exception` in the module (`PyErr_NewException`, without a docstring), whose

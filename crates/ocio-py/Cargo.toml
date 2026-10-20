@@ -26,5 +26,9 @@ extension-module = ["python", "pyo3/extension-module"]
 ocio.workspace = true
 pyo3 = { workspace = true, optional = true }
 
+[dev-dependencies]
+ocio-testkit.workspace = true
+serde_json.workspace = true
+
 [lints]
 workspace = true
