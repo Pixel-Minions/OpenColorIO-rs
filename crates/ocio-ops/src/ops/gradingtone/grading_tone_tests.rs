@@ -122,6 +122,8 @@ fn rgbmsw_channel() {
 
 /// Port of `OCIO_ADD_TEST(GradingTone, validate)` @ v2.5.2.
 #[test]
+// Upstream restores each field after its check, the last one too, which nothing reads after.
+#[allow(unused_assignments)]
 fn validate() {
     let mut tone = GradingTone::new(GradingStyle::Log);
     assert!(tone.validate().is_ok());
@@ -155,5 +157,4 @@ fn validate() {
     tone.scontrast = 2.;
     check_throw_what(tone.validate(), "is above upper bound");
     tone.scontrast = temp;
-    assert!(tone.validate().is_ok());
 }

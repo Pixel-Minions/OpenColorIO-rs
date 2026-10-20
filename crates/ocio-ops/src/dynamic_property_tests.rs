@@ -399,76 +399,104 @@ fn equal_grading_primary() {
 }
 
 /// A GradingPrimary property's set validates the value for the property's style, and a
-/// refused value leaves the property as it was; the style resets the values to its defaults,
-/// the direction recomputes the pre-render form, and a copy holds the same state.
+/// refused value leaves the property as it was; a set, the direction and the style (which
+/// resets the values to its defaults) leave the pre-render form a property built in the end
+/// state has; and a copy holds the same state. The wiring only: no expected number comes from
+/// the port, and the pre-render values themselves are the wheel's dynamic uniforms
+/// (`tests/grading_pre_render_oracle.rs`).
 #[test]
 fn grading_primary_property_state() {
+    let built = |style, dir, value: &GradingPrimary| {
+        DynamicPropertyGradingPrimaryImpl::new(style, dir, value, true).get_computed_value()
+    };
     let dp = DynamicPropertyGradingPrimaryImpl::new(
         GradingStyle::Lin,
         TransformDirection::Forward,
         &GradingPrimary::new(GradingStyle::Lin),
         true,
     );
+    let before = dp.get_computed_value();
     let mut bad = GradingPrimary::new(GradingStyle::Lin);
     bad.contrast.red = 0.;
     assert!(dp.set_value(&bad).is_err());
     assert_eq!(dp.get_value(), GradingPrimary::new(GradingStyle::Lin));
+    assert_eq!(dp.get_computed_value(), before);
 
     let mut value = GradingPrimary::new(GradingStyle::Lin);
     value.exposure.master = 1.;
     dp.set_value(&value).unwrap();
-    let mut expected = GradingPrimaryPreRender::default();
-    expected.update(GradingStyle::Lin, TransformDirection::Forward, &value);
-    assert_eq!(dp.get_computed_value(), expected);
+    let forward = built(GradingStyle::Lin, TransformDirection::Forward, &value);
+    assert_eq!(dp.get_computed_value(), forward);
+    assert_ne!(dp.get_computed_value(), before);
 
     dp.set_direction(TransformDirection::Inverse);
-    expected.update(GradingStyle::Lin, TransformDirection::Inverse, &value);
-    assert_eq!(dp.get_computed_value(), expected);
     assert_eq!(dp.get_direction(), TransformDirection::Inverse);
+    let inverse = built(GradingStyle::Lin, TransformDirection::Inverse, &value);
+    assert_eq!(dp.get_computed_value(), inverse);
+    assert_ne!(inverse, forward);
 
     let copy = dp.create_editable_copy();
-    assert_eq!(copy.get_computed_value(), expected);
+    assert_eq!(copy.get_computed_value(), inverse);
     assert_eq!(copy.get_value(), value);
     assert!(copy.is_dynamic());
 
+    // The log style's update leaves the linear style's fields as they were, as upstream's
+    // does: only the log style's own compare.
     dp.set_style(GradingStyle::Log);
     assert_eq!(dp.get_value(), GradingPrimary::new(GradingStyle::Log));
-    expected.update(
-        GradingStyle::Log,
-        TransformDirection::Inverse,
-        &GradingPrimary::new(GradingStyle::Log),
+    let log_fields = |pr: &GradingPrimaryPreRender| {
+        (
+            *pr.get_brightness(),
+            *pr.get_contrast(),
+            *pr.get_gamma(),
+            pr.get_pivot(),
+            pr.get_local_bypass(),
+        )
+    };
+    assert_eq!(
+        log_fields(&dp.get_computed_value()),
+        log_fields(&built(
+            GradingStyle::Log,
+            TransformDirection::Inverse,
+            &GradingPrimary::new(GradingStyle::Log)
+        ))
     );
-    assert_eq!(dp.get_computed_value(), expected);
 }
 
 /// A GradingTone property's set validates the value, and a refused value leaves the property
-/// as it was; its pre-render form is the value's, for the property's style; the style resets
-/// the values to its defaults; a copy holds the same state; and equality follows the dynamic
-/// state as for the other grading properties.
+/// as it was; a set and the style (which resets the values to its defaults) leave the
+/// pre-render form a property built in the end state has; a copy holds the same state; and
+/// equality follows the dynamic state as for the other grading properties. The wiring only, as
+/// for GradingPrimary above.
 #[test]
 fn grading_tone_property_state() {
+    let built = |value: &GradingTone, style| {
+        DynamicPropertyGradingToneImpl::new(value, style, false).get_computed_value()
+    };
     let dp = Arc::new(DynamicPropertyGradingToneImpl::new(
         &GradingTone::new(GradingStyle::Lin),
         GradingStyle::Lin,
         false,
     ));
     assert!(dp.get_local_bypass());
+    let before = dp.get_computed_value();
     let mut bad = GradingTone::new(GradingStyle::Lin);
     bad.scontrast = 2.5;
     assert!(dp.set_value(&bad).is_err());
     assert_eq!(dp.get_value(), GradingTone::new(GradingStyle::Lin));
+    assert_eq!(dp.get_computed_value(), before);
 
     let mut value = GradingTone::new(GradingStyle::Lin);
     value.midtones.master = 1.4;
     value.scontrast = 1.3;
     dp.set_value(&value).unwrap();
-    let mut expected = GradingTonePreRender::new(GradingStyle::Lin);
-    expected.update(&value);
-    assert_eq!(dp.get_computed_value(), expected);
+    let lin = built(&value, GradingStyle::Lin);
+    assert_eq!(dp.get_computed_value(), lin);
+    assert_ne!(lin, before);
     assert!(!dp.get_local_bypass());
 
     let copy = dp.create_editable_copy();
-    assert_eq!(copy.get_computed_value(), expected);
+    assert_eq!(copy.get_computed_value(), lin);
     assert_eq!(copy.get_value(), value);
     let (dp_any, copy_any) = (
         DynamicPropertyRcPtr::from(Arc::clone(&dp)),
@@ -478,12 +506,19 @@ fn grading_tone_property_state() {
     copy.make_dynamic();
     assert!(!(dp_any == copy_any));
 
+    // An identity value only sets the bypass and leaves the other constants as they were, as
+    // upstream's update does: the style's own constants (top, bottom, pivot) compare.
     dp.set_style(GradingStyle::Video);
     assert_eq!(dp.get_value(), GradingTone::new(GradingStyle::Video));
-    let mut video = GradingTonePreRender::new(GradingStyle::Video);
-    video.update(&GradingTone::new(GradingStyle::Video));
     assert!(dp.get_local_bypass());
-    assert_eq!(dp.get_computed_value().top, video.top);
+    let style_fields = |pr: &GradingTonePreRender| (pr.top, pr.top_sc, pr.bottom, pr.pivot);
+    assert_eq!(
+        style_fields(&dp.get_computed_value()),
+        style_fields(&built(
+            &GradingTone::new(GradingStyle::Video),
+            GradingStyle::Video
+        ))
+    );
 }
 
 /// Port of upstream's `checkKnotsAndCoefs` helper (tests/cpu/DynamicProperty_tests.cpp:
