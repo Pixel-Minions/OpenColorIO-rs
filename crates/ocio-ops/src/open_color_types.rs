@@ -531,6 +531,70 @@ pub enum BSplineType {
     Horizontal1BSpline,
 }
 
+/// The curves of a GradingHueCurve.
+///
+/// Port of `HueCurveType` (include/OpenColorIO/OpenColorTypes.h:590-602 @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HueCurveType {
+    /// `HUE_HUE`: input hue to output hue (a diagonal is the identity).
+    #[doc(alias = "HUE_HUE")]
+    HueHue = 0,
+    /// `HUE_SAT`: saturation as a function of hue (1 is the identity).
+    #[doc(alias = "HUE_SAT")]
+    HueSat,
+    /// `HUE_LUM`: luma as a function of hue (1 is the identity).
+    #[doc(alias = "HUE_LUM")]
+    HueLum,
+    /// `LUM_SAT`: saturation as a function of luma (1 is the identity).
+    #[doc(alias = "LUM_SAT")]
+    LumSat,
+    /// `SAT_SAT`: saturation as a function of saturation (a diagonal is the identity).
+    #[doc(alias = "SAT_SAT")]
+    SatSat,
+    /// `LUM_LUM`: luma as a function of luma (a diagonal is the identity).
+    #[doc(alias = "LUM_LUM")]
+    LumLum,
+    /// `SAT_LUM`: luma as a function of saturation (1 is the identity).
+    #[doc(alias = "SAT_LUM")]
+    SatLum,
+    /// `HUE_FX`: input hue to a delta of output hue (0 is the identity).
+    #[doc(alias = "HUE_FX")]
+    HueFx,
+    /// `HUE_NUM_CURVES`.
+    #[doc(alias = "HUE_NUM_CURVES")]
+    NumCurves,
+}
+
+impl HueCurveType {
+    /// The eight curves, in upstream's order.
+    pub const CURVES: [HueCurveType; 8] = [
+        HueCurveType::HueHue,
+        HueCurveType::HueSat,
+        HueCurveType::HueLum,
+        HueCurveType::LumSat,
+        HueCurveType::SatSat,
+        HueCurveType::LumLum,
+        HueCurveType::SatLum,
+        HueCurveType::HueFx,
+    ];
+
+    /// The kind of B-spline of each hue curve; `B_SPLINE` for the count.
+    ///
+    /// Port of `GradingHueCurve::GetBSplineTypeForHueCurveType`
+    /// (src/OpenColorIO/ops/gradinghuecurve/GradingHueCurve.cpp:254-279 @ v2.5.2).
+    #[doc(alias = "GetBSplineTypeForHueCurveType")]
+    pub fn b_spline_type(self) -> BSplineType {
+        match self {
+            HueCurveType::HueHue => BSplineType::HueHueBSpline,
+            HueCurveType::HueSat | HueCurveType::HueLum => BSplineType::Periodic1BSpline,
+            HueCurveType::LumSat | HueCurveType::SatLum => BSplineType::Horizontal1BSpline,
+            HueCurveType::SatSat | HueCurveType::LumLum => BSplineType::DiagonalBSpline,
+            HueCurveType::HueFx => BSplineType::Periodic0BSpline,
+            HueCurveType::NumCurves => BSplineType::BSpline,
+        }
+    }
+}
+
 /// The bit depth of a color space, or of the images a CPU processor reads and writes. The
 /// processor supports only `Uint8`, `Uint10`, `Uint12`, `Uint16`, `F16` and `F32`; the other
 /// enumerators exist for upstream's API and are rejected where a supported one is needed.

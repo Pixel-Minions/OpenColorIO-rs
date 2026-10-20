@@ -9,15 +9,17 @@
 //! Upstream hands curves around as shared pointers (`GradingBSplineCurveRcPtr`) and copies
 //! them with `createEditableCopy`; here a curve is a value, and `clone` is that copy.
 //!
-//! The hue curves' parts (`PrepHueCurveData`, `FitHueSpline`, `EstimateHueSlopes`, the hue
-//! knots, `evalCurveRevHue`, `AddShaderEvalRevHue`) come with GradingHueCurve, Phase 5.
+//! The hue curves' fitting (`PrepHueCurveData`, `CalcKsi`, `FitHueSpline`,
+//! `EstimateHueSlopes`, `computeKnotsAndCoefsForHueCurve`) and the `Create` overloads of a
+//! `HueCurveType` came with 5.0d; `KnotsCoefs::evalCurveRevHue` and `AddShaderEvalRevHue` come
+//! with the hue curve renderers (5.4), which compare their NaN results with each wheel.
 
 use std::fmt;
 
 use crate::cfmt::{Crt, OStringStream};
 use crate::exception::{Exception, Result};
-use crate::math_utils::{sse_add, sse_mul, std_max};
-use crate::open_color_types::BSplineType;
+use crate::math_utils::{sse_add, sse_mul, std_max, std_min};
+use crate::open_color_types::{BSplineType, HueCurveType};
 
 /// A 2D control point of a [`GradingBSplineCurve`]. `==` compares both coordinates as floats.
 ///
@@ -98,6 +100,27 @@ impl GradingBSplineCurve {
             slopes: vec![0.0; size],
             spline_type,
         }
+    }
+
+    /// A curve of `size` control points at (0, 0), of the spline type of `curve_type`.
+    ///
+    /// Port of `GradingBSplineCurve::Create(size_t, HueCurveType)` (GradingBSplineCurve.cpp:
+    /// 508-514 @ v2.5.2).
+    #[doc(alias = "Create")]
+    pub fn with_hue_curve_type(size: usize, curve_type: HueCurveType) -> Self {
+        GradingBSplineCurve::with_spline_type(size, curve_type.b_spline_type())
+    }
+
+    /// A curve through `points`, of the spline type of `curve_type`, with default slopes.
+    ///
+    /// Port of `GradingBSplineCurve::Create(std::initializer_list<GradingControlPoint>,
+    /// HueCurveType)` (GradingBSplineCurve.cpp:542-554 @ v2.5.2).
+    #[doc(alias = "Create")]
+    pub fn with_points_and_hue_curve_type(
+        points: &[GradingControlPoint],
+        curve_type: HueCurveType,
+    ) -> Self {
+        GradingBSplineCurve::with_points_and_spline_type(points, curve_type.b_spline_type())
     }
 
     /// A `B_SPLINE` curve through `points`, with default slopes.
@@ -365,10 +388,6 @@ impl GradingBSplineCurve {
     }
 }
 
-/// The error of the hue curves' spline fitting, which comes with GradingHueCurve (Phase 5).
-pub const HUE_CURVES_NOT_PORTED: &str =
-    "GradingBSplineCurve: fitting the hue curves' splines is not ported yet (Phase 5).";
-
 /// The error where upstream's `AdjustRGBSlopes` reads past the control points (a control
 /// point's x is NaN): `docs/improvements.md` U-35.
 pub const READS_PAST_THE_CONTROL_POINTS: &str =
@@ -615,6 +634,317 @@ impl KnotsCoefs {
 /// differently from the Linux wheel's (D12).
 const WINDOWS: bool = cfg!(target_os = "windows");
 
+/// Wraps periodic points into [0, 1), sorts the points by x, spaces them by at least 0.2% of
+/// the x span (and of the y span, unless the curve is horizontal), and, for a periodic curve,
+/// copies the last point before the first and the first after the last, shifted by 1.
+///
+/// Port of `PrepHueCurveData` (src/OpenColorIO/ops/gradingrgbcurve/GradingBSplineCurve.cpp:
+/// 22-96 @ v2.5.2).
+fn prep_hue_curve_data(
+    ctrl_pnts: &[GradingControlPoint],
+    out_ctrl_pnts: &mut Vec<GradingControlPoint>,
+    is_periodic: bool,
+    is_horizontal: bool,
+) {
+    let num_ctrl_pnts = ctrl_pnts.len();
+    for cp in ctrl_pnts {
+        let xval = cp.x;
+        let yval = cp.y;
+        // Wrap periodic x values into [0,1).
+        if is_periodic && xval < 0. {
+            out_ctrl_pnts.push(GradingControlPoint::new(
+                xval + 1.,
+                if is_horizontal { yval } else { yval + 1. },
+            ));
+        } else if is_periodic && xval >= 1. {
+            out_ctrl_pnts.push(GradingControlPoint::new(
+                xval - 1.,
+                if is_horizontal { yval } else { yval - 1. },
+            ));
+        } else {
+            out_ctrl_pnts.push(GradingControlPoint::new(xval, yval));
+        }
+    }
+
+    // Sort x and y based on x order.
+    for i in 0..num_ctrl_pnts {
+        let mut min_index = i;
+        let mut min_val = out_ctrl_pnts[i].x;
+        for (j, cp) in out_ctrl_pnts
+            .iter()
+            .enumerate()
+            .take(num_ctrl_pnts)
+            .skip(i + 1)
+        {
+            if cp.x < min_val {
+                min_val = cp.x;
+                min_index = j;
+            }
+        }
+        out_ctrl_pnts.swap(i, min_index);
+    }
+
+    // Ensure that there is a minimum space between the x values.
+    let tol = 2e-3f32;
+    let x_span = out_ctrl_pnts[num_ctrl_pnts - 1].x - out_ctrl_pnts[0].x;
+    for i in 1..out_ctrl_pnts.len() {
+        if (out_ctrl_pnts[i].x - out_ctrl_pnts[i - 1].x) < x_span * tol {
+            out_ctrl_pnts[i].x = out_ctrl_pnts[i - 1].x + x_span * tol;
+        }
+    }
+    if !is_horizontal {
+        // Ensure that there is a minimum space between the y values.
+        let y_span = out_ctrl_pnts[num_ctrl_pnts - 1].y - out_ctrl_pnts[0].y;
+        for i in 1..out_ctrl_pnts.len() {
+            if (out_ctrl_pnts[i].y - out_ctrl_pnts[i - 1].y) < y_span * tol {
+                out_ctrl_pnts[i].y = out_ctrl_pnts[i - 1].y + y_span * tol;
+            }
+        }
+    }
+
+    if is_periodic {
+        // Copy a value from each side and wrap it around to the other side.
+        let mut first_ctrl_pnt = out_ctrl_pnts[num_ctrl_pnts - 1];
+        first_ctrl_pnt.x -= 1.;
+        first_ctrl_pnt.y = if is_horizontal {
+            first_ctrl_pnt.y
+        } else {
+            first_ctrl_pnt.y - 1.
+        };
+        out_ctrl_pnts.insert(0, first_ctrl_pnt);
+
+        let mut last_ctrl_pnt = out_ctrl_pnts[1];
+        last_ctrl_pnt.x += 1.;
+        last_ctrl_pnt.y = if is_horizontal {
+            last_ctrl_pnt.y
+        } else {
+            last_ctrl_pnt.y + 1.
+        };
+        out_ctrl_pnts.push(last_ctrl_pnt);
+    }
+}
+
+/// The middle knot of segment `i`, from its secant and its end slopes.
+///
+/// Port of `CalcKsi` (src/OpenColorIO/ops/gradingrgbcurve/GradingBSplineCurve.cpp:100-174 @
+/// v2.5.2).
+fn calc_ksi(i: usize, out_ctrl_pnts: &[GradingControlPoint], slopes: &[f32]) -> f32 {
+    let p0 = &out_ctrl_pnts[i];
+    let p1 = &out_ctrl_pnts[i + 1];
+
+    let k = 0.2f32;
+    let dx = p1.x - p0.x;
+    let secant_slope = (p1.y - p0.y) / dx;
+    let mut secant = secant_slope;
+    let mut m0 = slopes[i];
+    let mut m1 = slopes[i + 1];
+    if secant < 0. {
+        m0 = -slopes[i];
+        m1 = -slopes[i + 1];
+        secant = -secant;
+    }
+
+    let x_mid = p0.x + 0.5f32 * dx;
+    let left_bnd = p0.x + dx * k;
+    let right_bnd = p1.x - dx * k;
+    let mut top_bnd = left_bnd;
+    let mut bottom_bnd = right_bnd;
+    let mut m_min = m0;
+    let mut m_max = m1;
+    if m0 > m1 {
+        m_max = m0;
+        m_min = m1;
+        top_bnd = right_bnd;
+        bottom_bnd = left_bnd;
+    }
+
+    let dm = m_max - m_min;
+    let b = 1. - 0.5f32 * k;
+    let b_high = m_min + b * dm;
+    let b_low = m_min + (1. - b) * dm;
+    let bbb = m_max * 4.;
+    let bb = m_max * 1.1f32;
+    let m_rel_diff = dm / std_max(0.01f32, m_max);
+    let alpha = std_max(
+        0.0f32,
+        std_min((m_rel_diff - 0.05f32) / (0.75f32 - 0.05f32), 1.0f32),
+    );
+    top_bnd = x_mid + alpha * (top_bnd - x_mid);
+    bottom_bnd = x_mid + alpha * (bottom_bnd - x_mid);
+
+    // Calculate the middle knot.
+    if secant >= bbb {
+        x_mid
+    } else if secant > bb {
+        let blend = (secant - bb) / (bbb - bb);
+        top_bnd + blend * (x_mid - top_bnd)
+    } else if secant >= b_high {
+        top_bnd
+    } else if (secant > b_low) && (b_high != b_low) {
+        let blend = (secant - b_low) / (b_high - b_low);
+        bottom_bnd + blend * (top_bnd - bottom_bnd)
+    } else {
+        bottom_bnd
+    }
+}
+
+/// Fits the quadratic segments of a hue curve through the prepared points with the slopes: one
+/// segment where the slopes match the secant, else two meeting at the middle knot.
+///
+/// Port of `FitHueSpline` (src/OpenColorIO/ops/gradingrgbcurve/GradingBSplineCurve.cpp:
+/// 178-219 @ v2.5.2).
+fn fit_hue_spline(
+    ctrl_pnts: &[GradingControlPoint],
+    slopes: &[f32],
+    knots: &mut Vec<f32>,
+    coefs_a: &mut Vec<f32>,
+    coefs_b: &mut Vec<f32>,
+    coefs_c: &mut Vec<f32>,
+) {
+    knots.push(ctrl_pnts[0].x);
+    let num_ctrl_pnts = ctrl_pnts.len();
+    for i in 0..num_ctrl_pnts - 1 {
+        let p0 = &ctrl_pnts[i];
+        let p1 = &ctrl_pnts[i + 1];
+
+        let dx = p1.x - p0.x;
+        let secant_slope = (p1.y - p0.y) / dx;
+
+        if ((slopes[i] + slopes[i + 1]) - 2. * secant_slope).abs() <= 1e-5f32 {
+            coefs_c.push(p0.y);
+            coefs_b.push(slopes[i]);
+            coefs_a.push(0.5f32 * (slopes[i + 1] - slopes[i]) / dx);
+        } else {
+            // Calculate the middle knot.
+            let ksi = calc_ksi(i, ctrl_pnts, slopes);
+
+            // Calculate the coefficients.
+            let m_bar = (2. * secant_slope - slopes[i + 1])
+                + (slopes[i + 1] - slopes[i]) * (ksi - p0.x) / (p1.x - p0.x);
+            let eta = (m_bar - slopes[i]) / (ksi - p0.x);
+            coefs_c.push(p0.y);
+            coefs_b.push(slopes[i]);
+            coefs_a.push(0.5f32 * eta);
+            coefs_c
+                .push(p0.y + slopes[i] * (ksi - p0.x) + 0.5f32 * eta * (ksi - p0.x) * (ksi - p0.x));
+            coefs_b.push(m_bar);
+            coefs_a.push(0.5f32 * (slopes[i + 1] - m_bar) / (p1.x - ksi));
+            knots.push(ksi);
+        }
+
+        knots.push(p1.x);
+    }
+}
+
+/// Estimates the slopes of a hue curve at its prepared points: harmonic means for horizontal
+/// curves (and the hue-hue curve), length-weighted means for the other diagonal ones, then
+/// adjusted to preserve the shape, and copied across the period for a periodic curve.
+///
+/// Port of `EstimateHueSlopes` (src/OpenColorIO/ops/gradingrgbcurve/GradingBSplineCurve.cpp:
+/// 223-326 @ v2.5.2). Upstream's `sqrt` of a `float` is the `float` overload.
+fn estimate_hue_slopes(
+    ctrl_pnts: &[GradingControlPoint],
+    slopes: &mut Vec<f32>,
+    is_periodic: bool,
+    is_horizontal: bool,
+) {
+    slopes.clear();
+    let num_ctrl_pnts = ctrl_pnts.len();
+    let mut secant_slope = Vec::new();
+    let mut secant_len = Vec::new();
+    for i in 0..num_ctrl_pnts - 1 {
+        let p0 = &ctrl_pnts[i];
+        let p1 = &ctrl_pnts[i + 1];
+
+        let del_x = p1.x - p0.x; // PrepHueCurveData ensures this is > 0
+        let del_y = p1.y - p0.y;
+        secant_slope.push(del_y / del_x);
+        secant_len.push((del_x * del_x + del_y * del_y).sqrt());
+    }
+
+    if num_ctrl_pnts == 2 {
+        slopes.push(secant_slope[0]);
+        slopes.push(secant_slope[0]);
+        return;
+    }
+
+    slopes.push(0.);
+
+    if is_horizontal {
+        // All horizontal curves and diagonal hue-hue.
+        for i in 1..num_ctrl_pnts - 1 {
+            let denom = secant_slope[i] + secant_slope[i - 1];
+            let mut s = if denom.abs() < 1e-3f32 {
+                let minval = if denom < 0. { -1e-3f32 } else { 1e-3f32 };
+                2. * secant_slope[i] * secant_slope[i - 1] / minval
+            } else {
+                2. * secant_slope[i] * secant_slope[i - 1] / denom
+            };
+            // Set slope to zero at flat areas or extrema.
+            if secant_slope[i] * secant_slope[i - 1] <= 0. {
+                s = 0.;
+            }
+            slopes.push(s);
+        }
+        slopes.push(0.5f32 * (3. * secant_slope[num_ctrl_pnts - 2] - slopes[num_ctrl_pnts - 2]));
+        slopes[0] = 0.5f32 * (3. * secant_slope[0] - slopes[1]);
+    } else {
+        // Diagonal curves except hue-hue (LvL and SvS).
+        let mut i = 0;
+        loop {
+            let mut j = i;
+            let mut dl = secant_len[i];
+            while j < num_ctrl_pnts - 2 && (secant_slope[j + 1] - secant_slope[j]).abs() < 1e-6f32 {
+                dl += secant_len[j + 1];
+                j += 1;
+            }
+            for len in &mut secant_len[i..=j] {
+                *len = dl;
+            }
+            if j >= num_ctrl_pnts - 3 {
+                break;
+            }
+            i = j + 1;
+        }
+
+        for k in 1..num_ctrl_pnts - 1 {
+            let s = (secant_len[k] * secant_slope[k] + secant_len[k - 1] * secant_slope[k - 1])
+                / (secant_len[k] + secant_len[k - 1]);
+            slopes.push(s);
+        }
+
+        let min_slope = 0.01f32;
+        slopes.push(std_max(
+            min_slope,
+            0.5f32 * (3. * secant_slope[num_ctrl_pnts - 2] - slopes[num_ctrl_pnts - 2]),
+        ));
+        slopes[0] = std_max(min_slope, 0.5f32 * (3. * secant_slope[0] - slopes[1]));
+    }
+
+    // Adjust slopes that are not shape-preserving.
+    for i in 0..num_ctrl_pnts - 1 {
+        let mut k = 0.2f32;
+        if slopes[i].abs() > slopes[i + 1].abs() {
+            k = 1. - k;
+        }
+        let m_near_min = slopes[i] + k * (slopes[i + 1] - slopes[i]);
+        let mut scale = 1.0f32;
+        if m_near_min != 0. {
+            scale = 0.75f32 * 2. * secant_slope[i] / m_near_min;
+        }
+        if scale < 1. {
+            slopes[i] *= scale;
+            slopes[i + 1] *= scale;
+        }
+    }
+
+    // Copy end slopes from the opposite side.
+    if is_periodic {
+        slopes[0] = slopes[num_ctrl_pnts - 2];
+        slopes[num_ctrl_pnts - 1] = slopes[1];
+    }
+}
+
 /// The slopes at the control points of an RGB curve, when the user gives none: weighted means
 /// of the secants on either side (by their lengths, over runs of equal secants), and at the
 /// ends a slope of at least 0.01.
@@ -808,8 +1138,7 @@ fn adjust_rgb_slopes(
 
 impl GradingBSplineCurve {
     /// Fits this curve (curve `curve_idx` of the op) and adds its knots and coefficients to
-    /// `knots_coefs`. Only `B_SPLINE` curves, the RGB curves' type, are fitted here; the hue
-    /// curves' types come with GradingHueCurve ([`HUE_CURVES_NOT_PORTED`]).
+    /// `knots_coefs`: an RGB curve's way for `B_SPLINE`, a hue curve's for the other types.
     ///
     /// Port of `GradingBSplineCurveImpl::computeKnotsAndCoefs` (GradingBSplineCurve.cpp:
     /// 1009-1019 @ v2.5.2).
@@ -819,12 +1148,168 @@ impl GradingBSplineCurve {
         curve_idx: usize,
         draw_curve_only: bool,
     ) -> Result<()> {
-        let _ = draw_curve_only;
         if self.spline_type == BSplineType::BSpline {
             self.compute_knots_and_coefs_for_rgb_curve(knots_coefs, curve_idx)
         } else {
-            Err(Exception::new(HUE_CURVES_NOT_PORTED))
+            self.compute_knots_and_coefs_for_hue_curve(knots_coefs, curve_idx, draw_curve_only)
         }
+    }
+
+    /// Fits a hue curve: an identity curve, or one of fewer than 2 points, gets offset -1 and
+    /// count 0 (or, to draw the curve, the two knots and three coefficients of an identity of
+    /// its type); any other is prepared (wrapped, sorted and spaced), given its slopes or
+    /// estimated ones, and fitted.
+    ///
+    /// Port of `GradingBSplineCurveImpl::computeKnotsAndCoefsForHueCurve`
+    /// (GradingBSplineCurve.cpp:864-1005 @ v2.5.2).
+    fn compute_knots_and_coefs_for_hue_curve(
+        &self,
+        knots_coefs: &mut KnotsCoefs,
+        curve_idx: usize,
+        draw_curve_only: bool,
+    ) -> Result<()> {
+        // Return 0 knots and coefficients when the curve is identity.
+        if self.control_points.len() < 2 || self.is_identity() {
+            if !draw_curve_only {
+                // In this case, do not add any knots or coefs. This will allow localBypass
+                // to be true if all the curves are identities.
+
+                // Identity curve: offset is -1 and count is 0.
+                knots_coefs.knots_offsets[curve_idx * 2] = -1;
+                knots_coefs.knots_offsets[curve_idx * 2 + 1] = 0;
+                knots_coefs.coefs_offsets[curve_idx * 2] = -1;
+                knots_coefs.coefs_offsets[curve_idx * 2 + 1] = 0;
+                return Ok(());
+            }
+            // DrawCurveOnly is set when drawing the splines for a UI: set knots and
+            // coefficients that represent an identity curve of this spline type.
+            let num_knots = knots_coefs.num_knots;
+            let num_coefs = knots_coefs.num_coefs;
+
+            const N_IDENTITY_KNOTS: i32 = 2;
+            const N_IDENTITY_COEFS: i32 = 3;
+
+            knots_coefs.knots_offsets[curve_idx * 2] = num_knots;
+            knots_coefs.knots_offsets[curve_idx * 2 + 1] = N_IDENTITY_KNOTS;
+            knots_coefs.coefs_offsets[curve_idx * 2] = knots_coefs.num_coefs;
+            knots_coefs.coefs_offsets[curve_idx * 2 + 1] = N_IDENTITY_COEFS;
+
+            let (nk, nc) = (num_knots as usize, num_coefs as usize);
+            knots_coefs.knots[nk] = 0.;
+            knots_coefs.knots[nk + 1] = 1.;
+
+            // Identity curve are linear or constant, so set the quadratic coefficient to zero.
+            knots_coefs.coefs[nc] = 0.;
+
+            // Set the linear coefficient to match the slope of the identity curve.
+            let linear_coef = if matches!(
+                self.spline_type,
+                BSplineType::DiagonalBSpline | BSplineType::HueHueBSpline
+            ) {
+                1.0
+            } else {
+                0.
+            };
+            knots_coefs.coefs[nc + 1] = linear_coef;
+
+            // Set the constant coefficient for an identity curve.
+            let constant_coef = if matches!(
+                self.spline_type,
+                BSplineType::Periodic1BSpline | BSplineType::Horizontal1BSpline
+            ) {
+                1.0
+            } else {
+                0.
+            };
+            knots_coefs.coefs[nc + 2] = constant_coef;
+
+            knots_coefs.num_knots += N_IDENTITY_KNOTS;
+            knots_coefs.num_coefs += N_IDENTITY_COEFS;
+            return Ok(());
+        }
+
+        let is_periodic = matches!(
+            self.spline_type,
+            BSplineType::Periodic1BSpline
+                | BSplineType::Periodic0BSpline
+                | BSplineType::HueHueBSpline
+        );
+        let mut is_horizontal = !matches!(
+            self.spline_type,
+            BSplineType::DiagonalBSpline | BSplineType::HueHueBSpline
+        );
+
+        let mut result_ctrl_pnts = Vec::new();
+        prep_hue_curve_data(
+            &self.control_points,
+            &mut result_ctrl_pnts,
+            is_periodic,
+            is_horizontal,
+        );
+
+        // For the purposes of slope estimation, consider the hue-hue spline to be horizontal.
+        if self.spline_type == BSplineType::HueHueBSpline {
+            is_horizontal = true;
+        }
+
+        let mut slopes = Vec::new();
+        if !self.slopes_are_default() && self.slopes.len() == self.control_points.len() {
+            // If the user-supplied slopes are non-zero, use those.
+            slopes.clone_from(&self.slopes);
+
+            // We need to ensure equal number of slopes and control points for the spline fit.
+            if is_periodic {
+                let first_slope = *slopes.last().expect("two slopes or more");
+                slopes.insert(0, first_slope);
+
+                let last_slope = slopes[0];
+                slopes.push(last_slope);
+            }
+        } else {
+            estimate_hue_slopes(&result_ctrl_pnts, &mut slopes, is_periodic, is_horizontal);
+        }
+
+        let mut knots = Vec::new();
+        let mut coefs_a = Vec::new();
+        let mut coefs_b = Vec::new();
+        let mut coefs_c = Vec::new();
+        fit_hue_spline(
+            &result_ctrl_pnts,
+            &slopes,
+            &mut knots,
+            &mut coefs_a,
+            &mut coefs_b,
+            &mut coefs_c,
+        );
+
+        let num_knots = knots_coefs.num_knots;
+        let new_knots = knots.len() as i32;
+        let num_coefs = knots_coefs.num_coefs;
+        let new_coefs = (coefs_a.len() * 3) as i32;
+
+        if num_knots + new_knots > KnotsCoefs::MAX_NUM_KNOTS
+            || num_coefs + new_coefs > KnotsCoefs::MAX_NUM_COEFS
+        {
+            return Err(Exception::new(
+                "Hue curve: maximum number of control points reached.",
+            ));
+        }
+
+        knots_coefs.knots_offsets[curve_idx * 2] = num_knots;
+        knots_coefs.knots_offsets[curve_idx * 2 + 1] = new_knots;
+        knots_coefs.coefs_offsets[curve_idx * 2] = num_coefs;
+        knots_coefs.coefs_offsets[curve_idx * 2 + 1] = new_coefs;
+
+        let coefs_size = coefs_a.len();
+        let (nk, nc) = (num_knots as usize, num_coefs as usize);
+        knots_coefs.knots[nk..nk + knots.len()].copy_from_slice(&knots);
+        knots_coefs.coefs[nc..nc + coefs_size].copy_from_slice(&coefs_a);
+        knots_coefs.coefs[nc + coefs_size..nc + 2 * coefs_size].copy_from_slice(&coefs_b);
+        knots_coefs.coefs[nc + 2 * coefs_size..nc + 3 * coefs_size].copy_from_slice(&coefs_c);
+
+        knots_coefs.num_knots += new_knots;
+        knots_coefs.num_coefs += new_coefs;
+        Ok(())
     }
 
     /// An identity curve, or one of fewer than 2 points, gets offset -1 and count 0; any other
