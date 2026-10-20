@@ -2984,6 +2984,22 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** open: the Python module (Phase 6) matches it. The oracle's `checks.dump` reads
   the binding's iterators by index, so `object_calls` can write a manager out (`p5-oracle`).
 
+### I-217. The reverse log ExposureContrast ignores the log exposure step
+
+- **Upstream:** each ExposureContrast renderer sets its pivot in `updateData`, and the forward
+  log renderer also its exposure step; `ECLogarithmicRevRenderer::updateData` doesn't, so the
+  reverse log style keeps the member's default, 0.088, whatever the op's log exposure step
+  (`src/OpenColorIO/ops/exposurecontrast/ExposureContrastOpCPU.cpp:39-40, 651-657, 661-662` @
+  v2.5.2). An op with a step other than 0.088 and a non-zero exposure isn't undone by its
+  inverse: the forward style adds `exposure * step`, the reverse subtracts
+  `exposure * 0.088`. Its pivot does use the step.
+- **Who notices:** applications using a logarithmic ExposureContrastTransform with a log
+  exposure step of their own, inverted (or the inverse direction).
+- **A fix:** set `m_logExposureStep` in `ECLogarithmicRevRenderer::updateData` too.
+- **Status:** matched in `p5-ec` (5.1b, `crates/ocio-ops/src/ops/exposurecontrast/
+  exposure_contrast_op_cpu.rs`, `EcLogarithmicRevRenderer`); the battery's log style cases
+  with a step of 0.07 or 0.1 (`crates/ocio-ops/tests/exposure_contrast_oracle.rs`), inverse.
+
 ### I-218. A GradingPrimary's NaN values differ between Windows and Linux
 
 - **Upstream:** `GradingPrimaryPreRender::update` (`ops/gradingprimary/GradingPrimary.cpp:

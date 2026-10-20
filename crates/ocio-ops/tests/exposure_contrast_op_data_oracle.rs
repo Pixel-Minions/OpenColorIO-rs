@@ -3,9 +3,9 @@
 
 //! `ExposureContrastOpData` against the wheel, through processors of an
 //! `ExposureContrastTransform` (`oracle processor_ops`):
-//! - the cache ID: the processor holds one ExposureContrast op, so its cache ID is
-//!   `CacheIDHash(" <ExposureContrastOp " + data cache ID + ">")` (Processor.cpp:331-348,
-//!   Op.cpp:448-465, ExposureContrastOp.cpp:120-129 @ v2.5.2); the data's text (the style, the
+//! - the cache ID: the processor holds one ExposureContrast op, so its cache ID is the hash of
+//!   its ops' cache ID, `" <ExposureContrastOp " + data cache ID + ">"` (Processor.cpp:331-348,
+//!   Op.cpp:448-465, ExposureContrastOp.cpp:121-130 @ v2.5.2); the data's text (the style, the
 //!   values that aren't dynamic, 7 significant digits) is compared through its hash;
 //! - the op data the processor built, in either direction: `createGroupTransform()` copies it
 //!   into a transform (`CreateExposureContrastTransform`, ExposureContrastOp.cpp:197-212),
@@ -14,13 +14,15 @@
 //! The transform's constructor sets the style, the values, the dynamic flags and then the
 //! direction (src/bindings/python/transforms/PyExposureContrastTransform.cpp:19-44), and the
 //! processor builds its op from a copy of the transform's data, inverted for an inverse
-//! processor (ExposureContrastOp.cpp:173-189, 214-222).
+//! processor (ExposureContrastOp.cpp:175-193, 212-222).
 
 use ocio_ops::hash_utils::cache_id_hash;
+use ocio_ops::op::OpVec;
 use ocio_ops::open_color_types::{
     DynamicPropertyType, ExposureContrastStyle, TransformDirection,
     exposure_contrast_style_to_string,
 };
+use ocio_ops::ops::exposurecontrast::exposure_contrast_op::create_exposure_contrast_op;
 use ocio_ops::ops::exposurecontrast::exposure_contrast_op_data::ExposureContrastOpData;
 use ocio_testkit::processor_ops::{Dumped, ProcessorOpsRequest};
 use ocio_testkit::transform_text::f64_spec;
@@ -223,9 +225,9 @@ fn cache_ids_and_built_data_are_the_wheels() {
         let data = case.port();
 
         // The cache ID.
-        let mut full = b" <ExposureContrastOp ".to_vec();
-        full.extend_from_slice(&data.get_cache_id());
-        full.push(b'>');
+        let mut ops = OpVec::new();
+        create_exposure_contrast_op(&mut ops, data.clone(), TransformDirection::Forward);
+        let full = ops.get_cache_id().unwrap();
         assert_eq!(
             cache_id_hash(&full),
             wheel.cache_id,

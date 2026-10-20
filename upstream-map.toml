@@ -1257,25 +1257,27 @@ note = "see ExponentOp.cpp"
 path = "src/OpenColorIO/ops/exposurecontrast/ExposureContrastOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/exposurecontrast/exposure_contrast_op.rs"]
-status = "todo"
+status = "partial"
+note = "p5-ec 5.1b: the op and CreateExposureContrastOp; extractGpuShaderInfo with 5.1c (ocio-gpu), CreateExposureContrastTransform and BuildExposureContrastOp with 5.5a"
 
 [[file]]
 path = "src/OpenColorIO/ops/exposurecontrast/ExposureContrastOp.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/exposurecontrast/exposure_contrast_op.rs"]
-status = "todo"
+status = "partial"
+note = "p5-ec 5.1b: CreateExposureContrastOp; CreateExposureContrastTransform with 5.5a"
 
 [[file]]
 path = "src/OpenColorIO/ops/exposurecontrast/ExposureContrastOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/exposurecontrast/exposure_contrast_op_cpu.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/ops/exposurecontrast/ExposureContrastOpCPU.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/exposurecontrast/exposure_contrast_op_cpu.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/ops/exposurecontrast/ExposureContrastOpData.cpp"
@@ -4431,14 +4433,14 @@ path = "tests/cpu/OpOptimizers_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/op_optimizers_tests.rs", "crates/ocio/src/file_tests/op_optimizers_tests.rs"]
 status = "partial"
-note = "p1-optimizer: gamma_prefix; p1-tests-catchup: remove_leading_clamp_identity, remove_trailing_clamp_identity, combine_ops, non_optimizable, optimizable, lut1d_identity_replacement, range_composition, gamma_comp_identity, replace_ops; p2-ff-cpu 2.3e: remove_inverse_ops; p2-lut1d-inv 2.5a: lut1d_half_domain_keep_prior_range, multi_op_prefix; p4-ctf-read-3 4.10a, with the readers in crates/ocio/src/file_tests/: optimization2, optimization, lut1d_identities, lut1d_identity_replacement_order, invlut_pair_identities, mntr_identities, gamma_comp, gamma_comp_test2, log_identities, range_lut, prefer_pair_inverse_over_combine. Not yet: opt_prefix_test1 (its file has an ExposureContrast op, Phase 5); dynamic_ops and dyn_properties_prefix (the ExposureContrast op, Phase 5)"
+note = "p1-optimizer: gamma_prefix; p1-tests-catchup: remove_leading_clamp_identity, remove_trailing_clamp_identity, combine_ops, non_optimizable, optimizable, lut1d_identity_replacement, range_composition, gamma_comp_identity, replace_ops; p2-ff-cpu 2.3e: remove_inverse_ops; p2-lut1d-inv 2.5a: lut1d_half_domain_keep_prior_range, multi_op_prefix; p4-ctf-read-3 4.10a, with the readers in crates/ocio/src/file_tests/: optimization2, optimization, lut1d_identities, lut1d_identity_replacement_order, invlut_pair_identities, mntr_identities, gamma_comp, gamma_comp_test2, log_identities, range_lut, prefer_pair_inverse_over_combine. p5-ec 5.1b: dynamic_ops. Not yet: opt_prefix_test1 (its file has an ExposureContrast op, read with 4.5i) and dyn_properties_prefix"
 
 [[file]]
 path = "tests/cpu/Op_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/op_tests.rs"]
 status = "partial"
-note = "all but OpRcPtrVec/is_noop and OpRcPtrVec/dynamic_property, which need the ExposureContrast op (Phase 5)"
+note = "all but OpRcPtrVec/is_noop; p5-ec 5.1b: OpRcPtrVec/dynamic_property"
 
 [[file]]
 path = "tests/cpu/ParseUtils_tests.cpp"
@@ -4781,7 +4783,7 @@ note = "1.3e1: every test but create_transform; p1-transforms-fam2 (1.8d): creat
 path = "tests/cpu/ops/exposurecontrast/ExposureContrastOpCPU_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/exposurecontrast/exposure_contrast_op_cpu_tests.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "tests/cpu/ops/exposurecontrast/ExposureContrastOpData_tests.cpp"
@@ -4793,7 +4795,8 @@ status = "done"
 path = "tests/cpu/ops/exposurecontrast/ExposureContrastOp_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/exposurecontrast/exposure_contrast_op_tests.rs"]
-status = "todo"
+status = "partial"
+note = "p5-ec 5.1b: create, inverse; create_transform with 5.5a"
 
 [[file]]
 path = "tests/cpu/ops/fixedfunction/FixedFunctionOpCPU_tests.cpp"

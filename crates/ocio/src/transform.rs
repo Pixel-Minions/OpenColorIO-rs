@@ -773,6 +773,12 @@ pub(crate) fn create_transform(group: &mut GroupTransform, op: &Op) -> Result<()
             "CreateGradingRGBCurveTransform is not ported yet (Phase 3).",
         )),
         OpData::Lut3D(_) => create_lut3d_transform(group, op),
+        // `CreateExposureContrastTransform` (src/OpenColorIO/ops/exposurecontrast/
+        // ExposureContrastOp.cpp:197-210 @ v2.5.2) comes with `ExposureContrastTransform` (WP
+        // 5.5a).
+        OpData::ExposureContrast(_) => Err(Exception::new(
+            "CreateExposureContrastTransform is not ported yet (WP 5.5a).",
+        )),
         // No op holds a reference (the file readers replace it with the file's ops), and the
         // no-op types returned above.
         OpData::Reference(_) | OpData::NoOp(_) => {

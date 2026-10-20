@@ -34,6 +34,7 @@ use ocio_ops::open_color_types::{
     BitDepth, GradingStyle, Lut1DHueAdjust, RgbCurveType, TransformDirection,
 };
 use ocio_ops::ops::cdl::cdl_op_data::CdlOpData;
+use ocio_ops::ops::exposurecontrast::exposure_contrast_op_data::ExposureContrastOpData;
 use ocio_ops::ops::fixedfunction::fixed_function_op_data::FixedFunctionOpStyle;
 use ocio_ops::ops::gamma::gamma_op_data::{GammaOpData, GammaStyle};
 use ocio_ops::ops::gradingrgbcurve::grading_b_spline_curve::GradingBSplineCurve;
@@ -79,14 +80,24 @@ const DOUBLE_PRECISION: i64 = 15;
 
 /// The lowest CTF version that can hold `op`.
 ///
-/// Port of `GetOpMinimumVersion` (CTFTransform.cpp:225-384 @ v2.5.2). The ExposureContrast and
-/// grading types but the RGB curves' have no op data yet (Phase 5); upstream's default,
+/// Port of `GetOpMinimumVersion` (CTFTransform.cpp:225-384 @ v2.5.2). The grading types but
+/// the RGB curves' have no op data yet (Phase 5); upstream's default,
 /// `CTF_PROCESS_LIST_VERSION`, is for none of the types the port has.
 fn get_op_minimum_version(op: &OpData) -> Result<CtfVersion> {
     use FixedFunctionOpStyle as F;
 
     let min_version = match op {
         OpData::Cdl(_) => CTF_PROCESS_LIST_VERSION_1_7,
+        // CTFTransform.cpp:237-248.
+        OpData::ExposureContrast(ec) => {
+            if ec.get_log_exposure_step() != ExposureContrastOpData::LOGEXPOSURESTEP_DEFAULT
+                || ec.get_log_mid_gray() != ExposureContrastOpData::LOGMIDGRAY_DEFAULT
+            {
+                CTF_PROCESS_LIST_VERSION_2_0
+            } else {
+                CTF_PROCESS_LIST_VERSION_1_3
+            }
+        }
         OpData::FixedFunction(ff) => match ff.style() {
             F::AcesGamutComp13Fwd | F::AcesGamutComp13Inv => CTF_PROCESS_LIST_VERSION_2_1,
             F::LinToPq
@@ -1717,6 +1728,15 @@ impl<'t> TransformWriter<'t> {
                             out_bit_depth: out_bd,
                         };
                         op_writer.write(formatter)?;
+                    }
+                    // CTFTransform.cpp:2776-2789: `ExposureContrastWriter` comes with WP 4.6f.
+                    OpData::ExposureContrast(_) => {
+                        if self.is_clf {
+                            return Err(throw_write_op("ExposureContrast"));
+                        }
+                        return Err(Exception::new(
+                            "ExposureContrastWriter is not ported yet (WP 4.6f).",
+                        ));
                     }
                     OpData::GradingRgbCurve(_) => {
                         if self.is_clf {

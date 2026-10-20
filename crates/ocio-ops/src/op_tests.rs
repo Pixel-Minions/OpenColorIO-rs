@@ -2,9 +2,8 @@
 // Copyright Contributors to the OpenColorIO Project.
 
 //! Tests of the op list: upstream's `Op`, `OpData`, `OpRcPtrVec` and `FinalizeOpVec` tests
-//! (tests/cpu/Op_tests.cpp @ v2.5.2), but for `OpRcPtrVec/is_noop` and
-//! `OpRcPtrVec/dynamic_property`, which need the ExposureContrast op (Phase 5). The tests
-//! that aren't upstream's use the no-ops.
+//! (tests/cpu/Op_tests.cpp @ v2.5.2), but for `OpRcPtrVec/is_noop`, not ported yet. The
+//! tests that aren't upstream's use the no-ops.
 
 use std::sync::Arc;
 
@@ -798,4 +797,38 @@ fn clone_invert() {
     assert_eq!(ops[0].get_info(), inverted[2].get_info());
     assert_eq!(ops[1].get_info(), inverted[1].get_info());
     assert_eq!(ops[2].get_info(), inverted[0].get_info());
+}
+
+/// Port of `OCIO_ADD_TEST(OpRcPtrVec, dynamic_property)` @ v2.5.2. Upstream's two ops share
+/// the op data; here each op holds a copy, the second taken after the exposure is made dynamic.
+#[test]
+fn op_vec_dynamic_property() {
+    use crate::ops::exposurecontrast::exposure_contrast_op::create_exposure_contrast_op;
+    use crate::ops::exposurecontrast::exposure_contrast_op_data::{
+        ExposureContrastOpData, ExposureContrastOpStyle,
+    };
+
+    let mut ops = OpVec::new();
+
+    let ec = ExposureContrastOpData::new(ExposureContrastOpStyle::Linear);
+    create_exposure_contrast_op(&mut ops, ec.clone(), TransformDirection::Forward);
+
+    assert!(!ops.has_dynamic_property(DynamicPropertyType::Exposure));
+    let err = ops
+        .get_dynamic_property(DynamicPropertyType::Exposure)
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("Cannot find dynamic property."),
+        "{err}"
+    );
+
+    ec.get_exposure_property().make_dynamic();
+    create_exposure_contrast_op(&mut ops, ec.clone(), TransformDirection::Forward);
+
+    assert!(ops.has_dynamic_property(DynamicPropertyType::Exposure));
+
+    let dyn_prop = ops
+        .get_dynamic_property(DynamicPropertyType::Exposure)
+        .unwrap();
+    assert_eq!(dyn_prop.get_type(), DynamicPropertyType::Exposure);
 }
