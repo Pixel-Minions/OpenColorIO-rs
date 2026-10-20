@@ -25,6 +25,7 @@ extension-module = ["python", "pyo3/extension-module"]
 [dependencies]
 ocio.workspace = true
 ocio-ops.workspace = true
+ocio-gpu.workspace = true
 pyo3 = { workspace = true, optional = true }
 
 [dev-dependencies]

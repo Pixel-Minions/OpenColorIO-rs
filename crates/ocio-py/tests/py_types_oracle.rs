@@ -7,11 +7,14 @@
 //! - every name of the port's module is one of the wheel's module, in the wheel's order (no
 //!   `__all__`, which would make the package's `import *` drop the rest);
 //! - the enums and their exported values, the string constants, the exceptions and the
-//!   module's functions report as the wheel's, entry for entry;
+//!   module's functions (the string conversions among them) report as the wheel's, entry for
+//!   entry;
 //! - the classes `bindPyTypes` declares have the wheel's metatype, module, name, docstring,
 //!   bases and MRO, and the members a declaration gives them: `_pybind11_conduit_v1_`, and
 //!   `__init__`, the slot wrapper that raises "No constructor defined!" (the wheel's, for a
-//!   class that never gets a constructor; until its card binds one, for the others).
+//!   class that never gets a constructor; until its card binds one, for the others), and then
+//!   the members bound so far (GpuShaderCreator's enums and their values), as the wheel's and
+//!   in its order.
 
 #![cfg(feature = "python")]
 
@@ -114,7 +117,7 @@ fn the_module_names_are_the_wheels_in_its_order() {
 fn the_module_members_report_as_the_wheels() {
     let theirs = wheel_members();
     let ours = port_members();
-    let (mut enums, mut classes, mut others) = (0, 0, 0);
+    let (mut enums, mut classes, mut others, mut bound) = (0, 0, 0, 0);
     for our in &ours {
         let n = entry_name(our);
         let their = theirs.iter().find(|t| entry_name(t) == n).unwrap();
@@ -140,7 +143,9 @@ fn the_module_members_report_as_the_wheels() {
             our["members"].as_array().unwrap(),
             their["members"].as_array().unwrap(),
         );
-        assert_eq!(our_members.len(), 2, "{n}");
+        // The declaration's members first, then those bound so far (GpuShaderCreator's
+        // enums and their values), each the wheel's, in the wheel's order.
+        assert!(our_members.len() >= 2, "{n}");
         assert_eq!(entry_name(&our_members[0]), "__init__", "{n}");
         assert_eq!(entry_name(&their_members[0]), "__init__", "{n}");
         if their_members[0]["kind"] == "wrapper_descriptor" {
@@ -148,11 +153,21 @@ fn the_module_members_report_as_the_wheels() {
         } else {
             assert_eq!(our_members[0]["kind"], "wrapper_descriptor", "{n}");
         }
-        assert_eq!(our_members[1], their_members[1], "{n}");
+        let in_order: Vec<&Value> = their_members[1..]
+            .iter()
+            .filter(|t| our_members.iter().any(|o| entry_name(o) == entry_name(t)))
+            .collect();
+        assert_eq!(our_members[1..].iter().collect::<Vec<_>>(), in_order, "{n}");
+        assert_eq!(entry_name(&our_members[1]), "_pybind11_conduit_v1_", "{n}");
+        bound += our_members.len() - 2;
     }
     assert_eq!(classes, 63);
     assert_eq!(enums, 31);
-    assert!(others >= 34 + 31, "{others}");
+    // The constants, the exported values and the functions of bindPyTypes and
+    // PyOpenColorIO.cpp.
+    assert!(others >= 34 + 31 + 32, "{others}");
+    // GpuShaderCreator's enums and their values.
+    assert_eq!(bound, 6);
 }
 
 /// A class without a constructor refuses to be constructed, as the wheel's does.

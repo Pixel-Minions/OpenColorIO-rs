@@ -12,8 +12,8 @@
 //!   `__setstate__`, copies, the class's and an instance's docstrings;
 //! - the arithmetic enums' comparisons and bitwise operators (on ints, strings `int()` parses
 //!   or doesn't, None, floats, other enums, reflected), and construction from values at the
-//!   edges of `int`, `unsigned int` and `unsigned long` (whose width the platform's wheel
-//!   sets). py_types_oracle.rs compares every enum's surface.
+//!   edges of `int`, `unsigned int`, `unsigned long` (whose width the platform's wheel sets)
+//!   and `unsigned char` (`GpuShaderCreator.TextureDimensions`). py_types_oracle.rs compares every enum's surface.
 //!
 //! Left out until the owner decides on the C-API module (`pybind11.rs`): the texts CPython
 //! writes with a class's C name (`'<' not supported between instances of ...`, an unknown
@@ -200,9 +200,16 @@ fn arithmetic_steps() -> Vec<Value> {
         steps.push(call(name("operator.invert"), json!([target])));
     }
     let c = |e: &str, arg: Value| call(name(&format!("OCIO.{e}")), json!([arg]));
-    for e in ["OptimizationFlags", "ProcessorCacheFlags", "LoggingLevel"] {
+    for e in [
+        "OptimizationFlags",
+        "ProcessorCacheFlags",
+        "LoggingLevel",
+        "GpuShaderCreator.TextureDimensions",
+    ] {
         for n in [
             "-1",
+            "255",
+            "256",
             "4294967295",
             "4294967296",
             "18446744073709551615",

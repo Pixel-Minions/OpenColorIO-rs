@@ -1849,6 +1849,24 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **A fix:** the repr its values give, like the other grading classes'.
 - **Status:** to be matched in Phase 6 (D13).
 
+### I-223. Python makes enum values that no enumerator has
+
+- **Upstream:** pybind11 constructs an enum from any integer its underlying type holds
+  (`OCIO.TransformDirection(5)`, `OCIO.BitDepth(99)`): `static_cast` of a value outside an
+  unscoped enum's range, undefined in C++17 for an enum without a fixed type, which both
+  wheels keep as the integer. The value reads as `???` (`<TransformDirection.???: 5>`), and
+  the string-conversion functions give what their last line gives
+  (`ParseUtils.cpp:113-519` @ v2.5.2): `TransformDirectionToString` "inverse",
+  `GetInverseTransformDirection` `TRANSFORM_DIR_FORWARD`, `CombineTransformDirections`
+  `TRANSFORM_DIR_INVERSE`, `BitDepthToString` "unknown", `BitDepthToInt` 0, `CDLStyleToString`
+  "asc", `RangeStyleToString` "Clamp"; `GpuLanguageToString`, `FixedFunctionStyleToString`,
+  `GradingStyleToString`, `ExposureContrastStyleToString` and `NegativeStyleToString` raise
+  (seen through the wheel in `conversions_oracle.rs`).
+- **Who notices:** Python code that makes an enum from a number outside its values.
+- **A fix:** refuse the number when the enum is constructed, as a `ValueError`.
+- **Status:** matched in `p6-core` (6.2b); `enums_oracle.rs`, `conversions_oracle.rs`. I-31
+  is one consequence of it.
+
 ## Platform, environment and paths
 
 ### I-110. `splitext` compares the rest of the name with "."

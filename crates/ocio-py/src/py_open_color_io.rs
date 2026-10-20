@@ -51,7 +51,7 @@ pub fn to_py_err(py: Python<'_>, e: &ocio::Exception) -> PyErr {
 }
 
 /// `Result<T, ocio::Exception>` as a Python result.
-fn py_result<T>(py: Python<'_>, r: ocio::Result<T>) -> PyResult<T> {
+pub(crate) fn py_result<T>(py: Python<'_>, r: ocio::Result<T>) -> PyResult<T> {
     r.map_err(|e| to_py_err(py, &e))
 }
 
@@ -76,7 +76,7 @@ macro_rules! py_def {
 }
 
 /// A module function with one overload.
-const fn function(name: &'static str, overloads: &'static [Overload]) -> Function {
+pub(crate) const fn function(name: &'static str, overloads: &'static [Overload]) -> Function {
     Function {
         name,
         constructor: false,
@@ -323,5 +323,8 @@ pub(crate) fn py_open_color_io(m: &Bound<'_, PyModule>) -> PyResult<()> {
     def(m, wrap_pyfunction!(set_env_variable, m)?)?;
     def(m, wrap_pyfunction!(unset_env_variable, m)?)?;
     def(m, wrap_pyfunction!(is_env_variable_present, m)?)?;
+
+    // The classes' bindings (PyOpenColorIO.cpp:70-103), those ported so far.
+    crate::py_gpu_shader_creator::bind_py_gpu_shader_creator(m)?;
     Ok(())
 }

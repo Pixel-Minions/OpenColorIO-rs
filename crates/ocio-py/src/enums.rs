@@ -70,6 +70,8 @@ pub enum Scalar {
     Int,
     /// `unsigned int`.
     UInt,
+    /// `unsigned char` (an enum `: uint8_t`).
+    UChar,
     /// `unsigned long` (32 bits in the Windows wheel, 64 in the Linux one).
     ULong,
 }
@@ -85,6 +87,7 @@ fn load_scalar<'py>(
     match scalar {
         Scalar::Int => <i32 as Cast>::load(obj, convert).map(|v| PyInt::new(py, v).into_any()),
         Scalar::UInt => <u32 as Cast>::load(obj, convert).map(|v| PyInt::new(py, v).into_any()),
+        Scalar::UChar => <u8 as Cast>::load(obj, convert).map(|v| PyInt::new(py, v).into_any()),
         Scalar::ULong => <crate::dispatch::CULong as Cast>::load(obj, convert)
             .map(|v| PyInt::new(py, v).into_any()),
     }
@@ -345,10 +348,23 @@ fn class_doc(cls: &Bound<'_, PyAny>) -> PyResult<String> {
     Ok(doc)
 }
 
-/// The enum `name` of `scope` (the module, or an enclosing class whose name `outer` prefixes
-/// the qualified name), with `entries` (name, value) in declaration order, its values exported
-/// into `scope` (`export_values`). The class, as `scope` holds it.
+/// The enum `def` of `scope` (the module, or an enclosing class whose name `outer` prefixes
+/// the qualified name), its values exported into `scope` (`export_values`). The class, as
+/// `scope` holds it.
 pub fn add_enum<'py>(
+    scope: &Bound<'py, PyAny>,
+    outer: Option<&str>,
+    def: &EnumDef,
+) -> PyResult<Bound<'py, PyType>> {
+    let cls = define_enum(scope, outer, def)?;
+    export_values(scope, &cls)?;
+    Ok(cls)
+}
+
+/// `py::enum_<T>(scope, name)` and its `.value(...)`s: the enum `def` as a class of `scope`
+/// (the module, or an enclosing class whose name `outer` prefixes the qualified name), its
+/// values in declaration order. The class, as `scope` holds it.
+pub fn define_enum<'py>(
     scope: &Bound<'py, PyAny>,
     outer: Option<&str>,
     def: &EnumDef,
@@ -357,6 +373,7 @@ pub fn add_enum<'py>(
         name,
         scalar,
         arithmetic,
+        value_docs,
         entries,
     } = *def;
     let py = scope.py();
@@ -527,15 +544,51 @@ pub fn add_enum<'py>(
         let instance = to_py(&cls, value)?;
         table.set_item(
             member,
-            PyTuple::new(py, [instance.clone(), PyString::new(py, "").into_any()])?,
+            PyTuple::new(
+                py,
+                [
+                    instance.clone(),
+                    if value_docs {
+                        PyString::new(py, "").into_any()
+                    } else {
+                        py.None().into_bound(py)
+                    },
+                ],
+            )?,
         )?;
         cls.setattr(member, &instance)?;
     }
-    // export_values: each value into the enclosing scope.
+    CLASSES
+        .lock()
+        .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("poisoned"))?
+        .push((qualified, cls.clone().unbind()));
+    Ok(cls)
+}
+
+/// `.export_values()`: each value of the enum `cls` into `scope`, in declaration order.
+pub fn export_values(scope: &Bound<'_, PyAny>, cls: &Bound<'_, PyType>) -> PyResult<()> {
+    let table = cls.getattr("__entries")?.cast_into::<PyDict>()?;
     for (member, entry) in table.iter() {
         scope.setattr(member.cast::<PyString>()?, entry.get_item(0)?)?;
     }
-    Ok(cls)
+    Ok(())
+}
+
+/// Each enum class the module made, by qualified name.
+static CLASSES: std::sync::Mutex<Vec<(&'static str, Py<PyType>)>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// The enum class named `qualified` (`module.qualname`): the one made last by that name.
+pub fn enum_class<'py>(py: Python<'py>, qualified: &str) -> PyResult<Bound<'py, PyType>> {
+    let classes = CLASSES
+        .lock()
+        .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("poisoned"))?;
+    classes
+        .iter()
+        .rev()
+        .find(|(name, _)| *name == qualified)
+        .map(|(_, cls)| cls.bind(py).clone())
+        .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err(qualified.to_string()))
 }
 
 /// An enum of the module, as `py::enum_` declares it: its name, its C++ scalar type, whether
@@ -545,6 +598,9 @@ pub struct EnumDef {
     pub name: &'static str,
     pub scalar: Scalar,
     pub arithmetic: bool,
+    /// Whether each `.value(name, value, doc)` gives a docstring (its entry's comment is then
+    /// that text, the wheel's empty one; without, `None`).
+    pub value_docs: bool,
     pub entries: &'static [(&'static str, i64)],
 }
 
