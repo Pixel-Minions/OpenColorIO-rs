@@ -399,7 +399,8 @@ fn archives_as_the_wheel() {
 /// - Against the wheel, where the name read is fixed: 255 bytes; 256 bytes not last; a cut
 ///   that fills the 256 bytes, not last, ending in `.spi1d` (the wheel's error for the cut
 ///   name) or not (left out); a cut inside a character followed by an earlier name's bytes,
-///   making a LUT name (U+20AC x84 `.3dl`: the wheel's error) or not (left out).
+///   making a LUT name (U+20AC x84 `.3dl`: the wheel's error) or not (left out); a long name
+///   listed last, read to an earlier name's NUL; bytes left by two earlier names.
 /// - The port alone, where the wheel reads memory nothing wrote: a 256-byte name listed last,
 ///   and a cut inside a character followed by bytes no entry wrote; the port fails.
 ///
@@ -415,7 +416,8 @@ colorspaces:\n  - !<ColorSpace> {name: raw}\n";
     // 84 euros are 252 bytes: with `.` and U+1F600 the cut is 253 bytes, and an earlier
     // name's `3dl` follows it.
     let euros84 = "\u{20ac}".repeat(84);
-    let layouts: [(&str, Vec<String>); 5] = [
+    let smile = "\u{1f600}";
+    let layouts: [(&str, Vec<String>); 7] = [
         (
             "long_names",
             vec![
@@ -446,6 +448,23 @@ colorspaces:\n  - !<ColorSpace> {name: raw}\n";
             vec![
                 format!("{euros}abcdefgzz"),
                 format!("{}.spi1d", "\u{20ac}".repeat(90)),
+                after.clone(),
+            ],
+        ),
+        // The 255-byte name leaves `cc` and its NUL after byte 253, and the long name listed
+        // last is read to that NUL, not to `end`'s 1: U+20AC x84 `.cc`.
+        (
+            "long_name_stale_bytes_last",
+            vec![format!("{euros84}-cc"), format!("{euros84}.{smile}.spi1d")],
+        ),
+        // Two earlier names each leave some of the bytes read: `-3dl` from the first, `c` at
+        // byte 253 from the second (cut there): U+20AC x84 `.cdl`.
+        (
+            "long_name_stale_bytes_of_two_names",
+            vec![
+                format!("{euros84}-3dlz"),
+                format!("{euros84}-c{smile}"),
+                format!("{euros84}.{smile}.spi1d"),
                 after.clone(),
             ],
         ),

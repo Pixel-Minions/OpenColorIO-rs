@@ -165,9 +165,29 @@ def _construct(what, cls, spec, blobs):
     return cls(**{k: value(v, blobs) for k, v in args.items()})
 
 
+# The methods a spec's "calls" may not run, as they write files or depend on the process:
+# - GroupTransform.write without a config writes with the process's current config
+#   (PyGroupTransform.cpp:89-92, 110-113 @ v2.5.2), which latches on first use, so the result
+#   would depend on what ran earlier in the oracle's process; its (formatName, fileName) form
+#   writes a file anywhere;
+# - Config.archive(path) (PyConfig.cpp:971-977) and Baker.bake(fileName) (PyBaker.cpp:128-133)
+#   write a file anywhere, and open it before they can throw, so they create or truncate it even
+#   when they fail.
+# The commands that write (write_api.py, bake_api.py, ocioz_api.py, config_calls) do it their
+# own way.
+REFUSED_CALLS = {"write", "archive", "bake"}
+
+# The methods whose forms with arguments a spec's "calls" may not run: Config.serialize(fileName)
+# writes the config to a file anywhere (PyConfig.cpp:243-249); serialize() returns the text.
+REFUSED_FILE_FORMS = {"serialize"}
+
+
 def _call(obj, spec, blobs):
-    """Calls the methods of a spec's "calls" on `obj`, in order."""
+    """Calls the methods of a spec's "calls" on `obj`, in order. A method of REFUSED_CALLS, or
+    of REFUSED_FILE_FORMS with arguments, is refused."""
     for call in spec.get("calls") or []:
+        if call and (call[0] in REFUSED_CALLS or call[0] in REFUSED_FILE_FORMS and call[1:]):
+            raise ValueError(f"a spec's calls can't run {call[0]!r}: {call!r}")
         getattr(obj, call[0])(*[value(a, blobs) for a in call[1:]])
 
 
