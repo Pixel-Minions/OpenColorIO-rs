@@ -171,9 +171,10 @@ fn the_enum_behaves_as_the_wheels() {
     assert_eq!(ours.len(), theirs.len());
 }
 
-/// The steps of the arithmetic enums' script: `LoggingLevel` and `BitDepth` (`int`),
-/// `OptimizationFlags` (`unsigned long`, 32 bits in the Windows wheel and 64 in the Linux one),
-/// and `ProcessorCacheFlags` (`unsigned int`, not arithmetic).
+/// The steps of the arithmetic enums' script: `LoggingLevel` and `BitDepth` (no fixed type:
+/// `int` in the Windows wheel, `unsigned int` in the Linux one, I-225), `OptimizationFlags`
+/// (`unsigned long`, 32 bits in the Windows wheel and 64 in the Linux one), and
+/// `ProcessorCacheFlags` (`unsigned int`, not arithmetic).
 fn arithmetic_steps() -> Vec<Value> {
     let v = |e: &str, n: &str| name(&format!("OCIO.{e}.{n}"));
     let info = || v("LoggingLevel", "LOGGING_LEVEL_INFO");

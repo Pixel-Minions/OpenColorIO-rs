@@ -66,8 +66,11 @@ fn ok<'py>(obj: impl IntoPyObject<'py>, py: Python<'py>) -> PyResult<Option<Py<P
 /// `__init__`'s and `__setstate__`'s argument.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Scalar {
-    /// `int`, an unscoped enum's without a fixed type.
-    Int,
+    /// The type the compiler gives an unscoped enum without a fixed type, none of whose
+    /// enumerators (OCIO's) is negative: `int` in the Windows wheel (MSVC), `unsigned int` in
+    /// the Linux one (GCC). So `OCIO.LoggingLevel(-1)` makes a value on Windows and raises a
+    /// TypeError on Linux (docs/improvements.md, I-225).
+    Unfixed,
     /// `unsigned int`.
     UInt,
     /// `unsigned char` (an enum `: uint8_t`).
@@ -85,7 +88,10 @@ fn load_scalar<'py>(
     convert: bool,
 ) -> Option<Bound<'py, PyAny>> {
     match scalar {
-        Scalar::Int => <i32 as Cast>::load(obj, convert).map(|v| PyInt::new(py, v).into_any()),
+        #[cfg(windows)]
+        Scalar::Unfixed => <i32 as Cast>::load(obj, convert).map(|v| PyInt::new(py, v).into_any()),
+        #[cfg(not(windows))]
+        Scalar::Unfixed => <u32 as Cast>::load(obj, convert).map(|v| PyInt::new(py, v).into_any()),
         Scalar::UInt => <u32 as Cast>::load(obj, convert).map(|v| PyInt::new(py, v).into_any()),
         Scalar::UChar => <u8 as Cast>::load(obj, convert).map(|v| PyInt::new(py, v).into_any()),
         Scalar::ULong => <crate::dispatch::CULong as Cast>::load(obj, convert)
@@ -100,7 +106,7 @@ fn scalar_of(o: &Overload) -> Scalar {
     scalars
         .iter()
         .find(|(name, _)| *name == o.params[0].ty)
-        .map_or(Scalar::Int, |(_, s)| *s)
+        .map_or(Scalar::Unfixed, |(_, s)| *s)
 }
 
 /// Each enum class's [`Scalar`], by qualified name.

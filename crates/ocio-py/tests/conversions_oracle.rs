@@ -164,9 +164,10 @@ const NAMES: &[&str] = &[
     "a\u{0}",
 ];
 
-/// The values each enum is made from: its own and others.
+/// The values each enum is made from: its own and others, those both wheels make (an enum
+/// without a fixed type is `unsigned int` in the Linux wheel and `int` in the Windows one:
+/// enums_oracle.rs constructs the others).
 const VALUES: &[&str] = &[
-    "-1",
     "0",
     "1",
     "2",
@@ -189,7 +190,6 @@ const VALUES: &[&str] = &[
     "255",
     "256",
     "2147483647",
-    "-2147483648",
 ];
 
 /// A script's steps.

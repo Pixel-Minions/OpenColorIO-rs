@@ -1867,6 +1867,22 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p6-core` (6.2b); `enums_oracle.rs`, `conversions_oracle.rs`. I-31
   is one consequence of it.
 
+### I-225. Python takes negative values for an enum on Windows only
+
+- **Upstream:** OCIO's enums without a fixed type (all but `OptimizationFlags`,
+  `ProcessorCacheFlags` and `GpuShaderCreator.TextureDimensions`) have no negative
+  enumerators, so their underlying type is the compiler's choice: MSVC's is `int`, GCC's
+  `unsigned int`. pybind11 converts the `int` passed to an enum's constructor (`__init__`,
+  `__setstate__`) to that type, so `OCIO.LoggingLevel(-1)` makes a value (`???`, -1) in the
+  Windows wheel and raises the constructor's TypeError in the Linux one, and
+  `OCIO.LoggingLevel(4294967295)` the other way round (seen through both wheels in
+  `enums_oracle.rs`).
+- **Who notices:** Python code that makes an enum from a number outside its values (I-223)
+  and runs on both platforms.
+- **A fix:** refuse every number that isn't one of the enum's values (I-223's fix), which
+  removes the difference.
+- **Status:** matched in `p6-core` (6.2b follow-up); `enums_oracle.rs`.
+
 ## Platform, environment and paths
 
 ### I-110. `splitext` compares the rest of the name with "."

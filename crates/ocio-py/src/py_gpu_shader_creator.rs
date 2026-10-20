@@ -14,7 +14,7 @@ use crate::enums::{EnumDef, Scalar, define_enum, export_values};
 /// with the values PyGpuShaderCreator.cpp:128-131 gives it.
 const TEXTURE_TYPE: EnumDef = EnumDef {
     name: "TextureType",
-    scalar: Scalar::Int,
+    scalar: Scalar::Unfixed,
     arithmetic: false,
     value_docs: false,
     entries: &[("TEXTURE_RED_CHANNEL", 0), ("TEXTURE_RGB_CHANNEL", 1)],
