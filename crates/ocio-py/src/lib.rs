@@ -19,4 +19,10 @@ pub mod dispatch;
 #[cfg(feature = "python")]
 pub mod embed;
 #[cfg(feature = "python")]
+pub mod enums;
+#[cfg(feature = "python")]
 pub mod py_open_color_io;
+#[cfg(feature = "python")]
+pub(crate) mod py_types;
+#[cfg(feature = "python")]
+pub mod pybind11;

@@ -95,10 +95,11 @@ static CLEAR_ALL_CACHES: Function = function(
     &[Overload {
         params: &[],
         ret: "None",
-        call: |py, _, _| {
+        call: |py, _, _, _| {
             ocio::clear_all_caches();
             none(py)
         },
+        pos_only: 0,
     }],
 );
 py_def!(
@@ -114,7 +115,8 @@ static GET_VERSION: Function = function(
     &[Overload {
         params: &[],
         ret: "str",
-        call: |py, _, _| Ok(Some(PyString::new(py, ocio::version()).into_any().unbind())),
+        call: |py, _, _, _| Ok(Some(PyString::new(py, ocio::version()).into_any().unbind())),
+        pos_only: 0,
     }],
 );
 py_def!(
@@ -130,11 +132,12 @@ static GET_VERSION_HEX: Function = function(
     &[Overload {
         params: &[],
         ret: "int",
-        call: |py, _, _| {
+        call: |py, _, _, _| {
             Ok(Some(
                 PyInt::new(py, ocio::version_hex()).into_any().unbind(),
             ))
         },
+        pos_only: 0,
     }],
 );
 py_def!(
@@ -158,11 +161,12 @@ static GET_ENV_VARIABLE: Function = function(
     &[Overload {
         params: &[NAME],
         ret: "str",
-        call: |py, a, convert| {
+        call: |py, _, a, convert| {
             let name = arg!(a, 0, convert, CharPtr);
             let value = ocio::get_env_variable(c_str(name));
             Ok(Some(std_string_to_py(py, &value)?.into_any().unbind()))
         },
+        pos_only: 0,
     }],
 );
 py_def!(
@@ -179,12 +183,13 @@ static SET_ENV_VARIABLE: Function = function(
     &[Overload {
         params: &[NAME, Param::new("value", "str")],
         ret: "None",
-        call: |py, a, convert| {
+        call: |py, _, a, convert| {
             let name = arg!(a, 0, convert, CharPtr);
             let value = arg!(a, 1, convert, CharPtr);
             py_result(py, ocio::set_env_variable(c_str(name), value.0.as_deref()))?;
             none(py)
         },
+        pos_only: 0,
     }],
 );
 py_def!(
@@ -200,11 +205,12 @@ static UNSET_ENV_VARIABLE: Function = function(
     &[Overload {
         params: &[NAME],
         ret: "None",
-        call: |py, a, convert| {
+        call: |py, _, a, convert| {
             let name = arg!(a, 0, convert, CharPtr);
             py_result(py, ocio::unset_env_variable(c_str(name)))?;
             none(py)
         },
+        pos_only: 0,
     }],
 );
 py_def!(
@@ -221,7 +227,7 @@ static IS_ENV_VARIABLE_PRESENT: Function = function(
     &[Overload {
         params: &[NAME],
         ret: "bool",
-        call: |py, a, convert| {
+        call: |py, _, a, convert| {
             let name = arg!(a, 0, convert, CharPtr);
             let present = ocio::is_env_variable_present(c_str(name));
             Ok(Some(
@@ -231,6 +237,7 @@ static IS_ENV_VARIABLE_PRESENT: Function = function(
                     .unbind(),
             ))
         },
+        pos_only: 0,
     }],
 );
 py_def!(
@@ -271,6 +278,8 @@ fn register_exception(
 #[doc = "OpenColorIO (OCIO) is a complete color management solution geared towards motion picture production"]
 #[pymodule(name = "PyOpenColorIO")]
 pub(crate) fn py_open_color_io(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    // OpenColorIOTypes (PyOpenColorIO.cpp:13-14).
+    crate::py_types::bind_py_types(m)?;
     register_exception(
         m,
         "Exception",

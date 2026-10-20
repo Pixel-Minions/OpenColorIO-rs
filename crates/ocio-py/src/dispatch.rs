@@ -69,10 +69,12 @@ impl Param {
     }
 }
 
-/// The C++ function behind an overload: called with the bound arguments (one per parameter,
-/// defaults filled in) and whether casters may convert. `Ok(None)` when an argument doesn't
-/// cast (pybind11's `PYBIND11_TRY_NEXT_OVERLOAD`): the dispatcher tries the next overload.
-pub type Call = for<'py> fn(Python<'py>, &[Bound<'py, PyAny>], bool) -> PyResult<Option<Py<PyAny>>>;
+/// The C++ function behind an overload: called with the overload (its parameters' types name
+/// the classes its class casters take), the bound arguments (one per parameter, defaults
+/// filled in) and whether casters may convert. `Ok(None)` when an argument doesn't cast
+/// (pybind11's `PYBIND11_TRY_NEXT_OVERLOAD`): the dispatcher tries the next overload.
+pub type Call =
+    for<'py> fn(Python<'py>, &Overload, &[Bound<'py, PyAny>], bool) -> PyResult<Option<Py<PyAny>>>;
 
 /// One overload: its parameters, its return type as the signature prints it, its function.
 #[derive(Debug, Clone, Copy)]
@@ -80,6 +82,9 @@ pub struct Overload {
     pub params: &'static [Param],
     pub ret: &'static str,
     pub call: Call,
+    /// How many leading parameters are positional-only (`py::pos_only()`): no keyword fills
+    /// them, and the signature marks them with `/`.
+    pub pos_only: usize,
 }
 
 /// A bound function (a `def`): its name and overloads.
@@ -97,7 +102,7 @@ pub struct Function {
 
 /// An overload's signature as pybind11 writes it: `(a: int, b: str = 'x') -> ret`.
 pub fn signature(o: &Overload) -> String {
-    let params: Vec<String> = o
+    let mut params: Vec<String> = o
         .params
         .iter()
         .map(|p| match p.default {
@@ -105,6 +110,9 @@ pub fn signature(o: &Overload) -> String {
             None => format!("{}: {}", p.name, p.ty),
         })
         .collect();
+    if o.pos_only > 0 {
+        params.insert(o.pos_only, "/".to_string());
+    }
     format!("({}) -> {}", params.join(", "), o.ret)
 }
 
@@ -140,10 +148,10 @@ fn bind<'py>(
     }
     let mut values: Vec<Bound<'py, PyAny>> = args.iter().collect();
     let mut used = 0;
-    for p in &o.params[values.len()..] {
+    for (i, p) in o.params.iter().enumerate().skip(values.len()) {
         let given = match kwargs {
-            Some(k) => k.get_item(p.name)?,
-            None => None,
+            Some(k) if i >= o.pos_only => k.get_item(p.name)?,
+            _ => None,
         };
         match (given, p.default) {
             (Some(v), _) => {
@@ -174,7 +182,7 @@ pub fn dispatch<'py>(
         let Some(values) = bind(py, o, args, kwargs)? else {
             continue;
         };
-        if let Some(result) = (o.call)(py, &values, !overloaded)? {
+        if let Some(result) = (o.call)(py, o, &values, !overloaded)? {
             return Ok(result);
         }
         // pybind11 tries again, with conversions, an overload with a positional parameter
@@ -184,7 +192,7 @@ pub fn dispatch<'py>(
         }
     }
     for (o, values) in second_pass {
-        if let Some(result) = (o.call)(py, &values, true)? {
+        if let Some(result) = (o.call)(py, o, &values, true)? {
             return Ok(result);
         }
     }

@@ -26,7 +26,7 @@ static START: Once = Once::new();
 /// interpreter importable, and target/py-port's site-packages (NumPy) on its path; and, until
 /// WP 6.6 binds them, stand-ins for the logging and hash functions the step interpreter sets
 /// and resets around each script (they do nothing: the scripts here log nothing).
-fn start() {
+pub(crate) fn start_python() {
     START.call_once(|| {
         ocio_py::embed::append_to_inittab();
         Python::initialize();
@@ -78,7 +78,7 @@ fn site_packages() -> Option<String> {
 /// The report of `script` ({"steps": [...]}) against the port's module, as
 /// `py_eval_steps.run` makes it, without its "interpreter" flags (an embedded interpreter's).
 pub(crate) fn port(script: &Value) -> Value {
-    start();
+    start_python();
     Python::attach(|py| {
         let json = py.import("json").unwrap();
         let steps = py.import("py_eval_steps").unwrap();
@@ -119,7 +119,7 @@ pub(crate) fn wheel(scripts: &[Value]) -> Vec<Value> {
 /// The object an expression of the step interpreter makes, in the embedded interpreter: the
 /// last step's result of the steps `steps` ({"eval": ...} or {"call": ...}).
 pub(crate) fn port_object<'py>(py: Python<'py>, steps: &Value) -> Bound<'py, PyAny> {
-    start();
+    start_python();
     let json = py.import("json").unwrap();
     let interpreter = py.import("py_eval_steps").unwrap();
     let ocio = py.import("PyOpenColorIO").unwrap();
