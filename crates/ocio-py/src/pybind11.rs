@@ -8,8 +8,10 @@
 //! class and enum of the module is made here, so that its metatype, MRO, dictionary (names,
 //! order, kinds, docstrings) and the reprs of its methods are the wheel's.
 //!
-//! A class's C++ value lives in a slot of `pybind11_object`, `_pybind11_value` (for an enum,
-//! the value as a Python `int`).
+//! `pybind11_object` is a Rust class ([`Pybind11Object`]): its `__init__` is a C slot, so a
+//! class without a constructor holds it in its dictionary as the wheel's do (a
+//! `wrapper_descriptor`, raising "No constructor defined!"), and an instance holds its class's
+//! C++ value ([`value`], [`set_value`]; for an enum, the value as a Python `int`).
 //!
 //! How the types are made: [`new_class`] and [`instance_method`] are the only two places that
 //! decide it. They make the classes with the metatype from Python (`type(name, bases, ns)`)
@@ -33,9 +35,6 @@ use crate::dispatch::{Function, dispatch};
 /// module has while it initializes (imported as `PyOpenColorIO`'s submodule).
 pub const MODULE: &str = "PyOpenColorIO.PyOpenColorIO";
 
-/// The slot of `pybind11_object` that holds a class's C++ value.
-pub const VALUE: &str = "_pybind11_value";
-
 /// pybind11_builtins, made once per interpreter: the metatype, the base class and the static
 /// property, as Python source run in a namespace of its own.
 const RUNTIME: &std::ffi::CStr = cr#"
@@ -43,18 +42,6 @@ class pybind11_type(type):
     pass
 
 pybind11_type.__module__ = 'pybind11_builtins'
-
-
-def _no_constructor(self, *args, **kwargs):
-    cls = type(self)
-    raise TypeError(cls.__module__ + '.' + cls.__qualname__ + ': No constructor defined!')
-
-
-pybind11_object = pybind11_type('pybind11_object', (object,), {
-    '__module__': 'pybind11_builtins',
-    '__slots__': ('_pybind11_value',),
-    '__init__': _no_constructor,
-})
 
 
 class pybind11_static_property(property):
@@ -94,9 +81,71 @@ fn runtime_item<'py>(py: Python<'py>, name: &str) -> PyResult<Bound<'py, PyAny>>
         .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err(name.to_string()))
 }
 
-/// `pybind11_builtins.pybind11_object`, the base of every class of the module.
+/// `pybind11_builtins.pybind11_object`, the base of every class of the module: the C++ value
+/// of an instance of a bound class.
+#[pyclass(
+    name = "pybind11_object",
+    module = "pybind11_builtins",
+    subclass,
+    frozen
+)]
+#[derive(Debug, Default)]
+pub struct Pybind11Object {
+    value: std::sync::Mutex<Option<Py<PyAny>>>,
+}
+
+#[pymethods]
+impl Pybind11Object {
+    #[new]
+    #[pyo3(signature = (*_args, **_kwargs))]
+    fn new(_args: &Bound<'_, PyTuple>, _kwargs: Option<&Bound<'_, PyDict>>) -> Self {
+        Pybind11Object::default()
+    }
+
+    // pybind11_object_init: a class with no constructor of its own.
+    #[pyo3(signature = (*_args, **_kwargs))]
+    fn __init__(
+        slf: &Bound<'_, Self>,
+        _args: &Bound<'_, PyTuple>,
+        _kwargs: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<()> {
+        let cls = slf.get_type();
+        Err(pyo3::exceptions::PyTypeError::new_err(format!(
+            "{}.{}: No constructor defined!",
+            cls.getattr("__module__")?,
+            cls.getattr("__qualname__")?
+        )))
+    }
+}
+
+/// `pybind11_builtins.pybind11_object`'s type.
 pub fn object_base(py: Python<'_>) -> PyResult<Bound<'_, PyType>> {
-    Ok(runtime_item(py, "pybind11_object")?.cast_into::<PyType>()?)
+    Ok(py.get_type::<Pybind11Object>())
+}
+
+/// The C++ value an instance of a bound class holds, if it has one.
+pub fn value<'py>(obj: &Bound<'py, PyAny>) -> Option<Bound<'py, PyAny>> {
+    let this = obj.cast::<Pybind11Object>().ok()?;
+    let guard = this.get().value.lock().ok()?;
+    guard.as_ref().map(|v| v.bind(obj.py()).clone())
+}
+
+/// Sets the C++ value of an instance of a bound class.
+pub fn set_value(obj: &Bound<'_, PyAny>, value: Bound<'_, PyAny>) -> PyResult<()> {
+    let this = obj.cast::<Pybind11Object>()?;
+    let mut guard = this
+        .get()
+        .value
+        .lock()
+        .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("poisoned"))?;
+    *guard = Some(value.unbind());
+    Ok(())
+}
+
+/// The `__init__` a class without a constructor holds in its dictionary: pybind11_object's
+/// slot wrapper.
+pub fn no_constructor(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
+    object_base(py)?.getattr("__dict__")?.get_item("__init__")
 }
 
 /// `pybind11_builtins.pybind11_static_property(fget, None, None, "")`.

@@ -179,6 +179,7 @@ name = "ocio-py"
 version = "0.0.0+ocio.2.5.2"
 dependencies = [
  "ocio",
+ "ocio-ops",
  "ocio-testkit",
  "pyo3",
  "serde_json",

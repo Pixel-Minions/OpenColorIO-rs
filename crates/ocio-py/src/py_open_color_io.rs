@@ -266,9 +266,16 @@ fn register_exception(
         None,
     )?;
     ty.bind(py).setattr("__doc__", "")?;
-    m.add(name, ty.bind(py))?;
+    m.setattr(name, ty.bind(py))?;
     let _ = cell.set(py, ty);
     Ok(())
+}
+
+/// `m.def(...)`: the function into the module's dictionary. (PyO3's `add_function` and `add`
+/// would also list the name in an `__all__`, which the wheel's module doesn't have; the
+/// package's `from .PyOpenColorIO import *` would then import only those names.)
+pub(crate) fn def(m: &Bound<'_, PyModule>, f: Bound<'_, pyo3::types::PyCFunction>) -> PyResult<()> {
+    m.setattr(f.getattr("__name__")?.cast_into::<PyString>()?, f)
 }
 
 // PYBIND11_MODULE(PyOpenColorIO, m) (PyOpenColorIO.cpp:9-104 @ v2.5.2), in its order: the
@@ -293,28 +300,28 @@ pub(crate) fn py_open_color_io(m: &Bound<'_, PyModule>) -> PyResult<()> {
         &EXCEPTION_MISSING_FILE,
     )?;
 
-    m.add("__author__", "OpenColorIO Contributors")?;
-    m.add("__email__", "ocio-dev@lists.aswf.io")?;
-    m.add("__license__", "SPDX-License-Identifier: BSD-3-Clause")?;
-    m.add(
+    m.setattr("__author__", "OpenColorIO Contributors")?;
+    m.setattr("__email__", "ocio-dev@lists.aswf.io")?;
+    m.setattr("__license__", "SPDX-License-Identifier: BSD-3-Clause")?;
+    m.setattr(
         "__copyright__",
         "Copyright Contributors to the OpenColorIO Project",
     )?;
-    m.add("__version__", ocio::version())?;
+    m.setattr("__version__", ocio::version())?;
     // OCIO_VERSION_STATUS_STR is empty in a release build: "Production".
-    m.add("__status__", "Production")?;
-    m.add(
+    m.setattr("__status__", "Production")?;
+    m.setattr(
         "__doc__",
         "OpenColorIO (OCIO) is a complete color management solution geared towards motion \
          picture production",
     )?;
 
-    m.add_function(wrap_pyfunction!(clear_all_caches, m)?)?;
-    m.add_function(wrap_pyfunction!(get_version, m)?)?;
-    m.add_function(wrap_pyfunction!(get_version_hex, m)?)?;
-    m.add_function(wrap_pyfunction!(get_env_variable, m)?)?;
-    m.add_function(wrap_pyfunction!(set_env_variable, m)?)?;
-    m.add_function(wrap_pyfunction!(unset_env_variable, m)?)?;
-    m.add_function(wrap_pyfunction!(is_env_variable_present, m)?)?;
+    def(m, wrap_pyfunction!(clear_all_caches, m)?)?;
+    def(m, wrap_pyfunction!(get_version, m)?)?;
+    def(m, wrap_pyfunction!(get_version_hex, m)?)?;
+    def(m, wrap_pyfunction!(get_env_variable, m)?)?;
+    def(m, wrap_pyfunction!(set_env_variable, m)?)?;
+    def(m, wrap_pyfunction!(unset_env_variable, m)?)?;
+    def(m, wrap_pyfunction!(is_env_variable_present, m)?)?;
     Ok(())
 }

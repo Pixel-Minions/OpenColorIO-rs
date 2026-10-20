@@ -1,0 +1,170 @@
+// SPDX-License-Identifier: BSD-3-Clause
+// Copyright Contributors to the OpenColorIO Project.
+
+//! `bindPyTypes` (chunk 6.2b) against the wheel, through the oracle's surface walk
+//! (py_surface_walk.py's `_members`, run on the port's module in the embedded interpreter,
+//! against the wheel's py_surface):
+//! - every name of the port's module is one of the wheel's module, in the wheel's order (no
+//!   `__all__`, which would make the package's `import *` drop the rest);
+//! - the enums and their exported values, the string constants, the exceptions and the
+//!   module's functions report as the wheel's, entry for entry;
+//! - the classes `bindPyTypes` declares have the wheel's metatype, module, name, docstring,
+//!   bases and MRO, and the members a declaration gives them: `_pybind11_conduit_v1_`, and
+//!   `__init__`, the slot wrapper that raises "No constructor defined!" (the wheel's, for a
+//!   class that never gets a constructor; until its card binds one, for the others).
+
+#![cfg(feature = "python")]
+
+mod common;
+
+use ocio_testkit::Oracle;
+use ocio_testkit::oracle_values::bytes;
+use pyo3::prelude::*;
+use serde_json::{Value, json};
+
+/// The stand-ins `common::start_python` adds to the port's module until WP 6.6 binds them.
+const STAND_INS: [&str; 3] = [
+    "SetLoggingFunction",
+    "ResetToDefaultLoggingFunction",
+    "ResetComputeHashFunction",
+];
+
+fn entry_name(e: &Value) -> String {
+    String::from_utf8(bytes(&e["name"])).unwrap()
+}
+
+/// The wheel's module members, as py_surface reports them.
+fn wheel_members() -> Vec<Value> {
+    let report = Oracle::get().call("py_surface", json!({}), &[]).result;
+    report["module"]["members"].as_array().unwrap().clone()
+}
+
+/// The port's module members, as py_surface_walk.py's `_members` reports them, without the
+/// stand-ins.
+fn port_members() -> Vec<Value> {
+    common::start_python();
+    Python::attach(|py| {
+        let walk = py.import("py_surface_walk").unwrap();
+        let module = py.import("PyOpenColorIO").unwrap();
+        // The walk's `seen`, keyed by id(), as py_surface_walk.surface() starts it.
+        let seen = py
+            .eval(c"lambda m: {id(m): 'PyOpenColorIO'}", None, None)
+            .unwrap()
+            .call1((&module,))
+            .unwrap();
+        let namespace = py
+            .eval(
+                c"lambda m, skip: {k: v for k, v in vars(m).items() if k not in skip}",
+                None,
+                None,
+            )
+            .unwrap()
+            .call1((&module, STAND_INS.to_vec()))
+            .unwrap();
+        let skip = walk.getattr("RUNTIME_NAMES").unwrap();
+        let skip = py
+            .import("builtins")
+            .unwrap()
+            .getattr("set")
+            .unwrap()
+            .call1((skip,))
+            .unwrap();
+        let members = walk
+            .call_method1("_members", (namespace, "PyOpenColorIO", seen, skip))
+            .unwrap();
+        let text: String = py
+            .import("json")
+            .unwrap()
+            .call_method1("dumps", (members,))
+            .unwrap()
+            .extract()
+            .unwrap();
+        serde_json::from_str::<Value>(&text)
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .clone()
+    })
+}
+
+/// Every name of the port's module is the wheel's, in the wheel's order.
+#[test]
+fn the_module_names_are_the_wheels_in_its_order() {
+    let theirs: Vec<String> = wheel_members().iter().map(entry_name).collect();
+    let ours: Vec<String> = port_members().iter().map(entry_name).collect();
+    for n in &ours {
+        assert!(theirs.contains(n), "{n} is not the wheel's");
+    }
+    let in_order: Vec<&String> = theirs.iter().filter(|n| ours.contains(n)).collect();
+    assert_eq!(ours.iter().collect::<Vec<_>>(), in_order);
+    // bindPyTypes' names are all there: 63 classes, 31 enums, 34 string constants.
+    for n in [
+        "Baker",
+        "ConfigMerger",
+        "ProcessorCacheFlags",
+        "OCIO_BUILTIN_URI_PREFIX",
+    ] {
+        assert!(ours.iter().any(|o| o == n), "{n}");
+    }
+}
+
+/// The enums, their values, the constants and the functions report as the wheel's; the
+/// declared classes as a declaration makes them.
+#[test]
+fn the_module_members_report_as_the_wheels() {
+    let theirs = wheel_members();
+    let ours = port_members();
+    let (mut enums, mut classes, mut others) = (0, 0, 0);
+    for our in &ours {
+        let n = entry_name(our);
+        let their = theirs.iter().find(|t| entry_name(t) == n).unwrap();
+        let is_enum = their.get("entries").is_some();
+        let declared = their["metatype"] == "pybind11_builtins.pybind11_type" && !is_enum;
+        if their["kind"] != "class" || !declared {
+            assert_eq!(our, their, "{n}");
+            if is_enum {
+                enums += 1;
+            } else {
+                others += 1;
+            }
+            continue;
+        }
+        classes += 1;
+        let strip = |v: &Value| {
+            let mut v = v.clone();
+            v.as_object_mut().unwrap().remove("members");
+            v
+        };
+        assert_eq!(strip(our), strip(their), "{n}");
+        let (our_members, their_members) = (
+            our["members"].as_array().unwrap(),
+            their["members"].as_array().unwrap(),
+        );
+        assert_eq!(our_members.len(), 2, "{n}");
+        assert_eq!(entry_name(&our_members[0]), "__init__", "{n}");
+        assert_eq!(entry_name(&their_members[0]), "__init__", "{n}");
+        if their_members[0]["kind"] == "wrapper_descriptor" {
+            assert_eq!(our_members[0], their_members[0], "{n}");
+        } else {
+            assert_eq!(our_members[0]["kind"], "wrapper_descriptor", "{n}");
+        }
+        assert_eq!(our_members[1], their_members[1], "{n}");
+    }
+    assert_eq!(classes, 63);
+    assert_eq!(enums, 31);
+    assert!(others >= 34 + 31, "{others}");
+}
+
+/// A class without a constructor refuses to be constructed, as the wheel's does.
+#[test]
+fn a_declared_class_has_no_constructor() {
+    let script = json!({ "steps": [
+        common::call(common::name("OCIO.Processor"), json!([])),
+        common::call(common::name("OCIO.CPUProcessor"), json!([{ "int": "1" }])),
+        json!({ "call": common::name("OCIO.GPUProcessor"), "kwargs": [["a", { "int": "1" }]] }),
+        json!({ "eval": common::name("OCIO.Processor.__init__.__doc__") }),
+    ]});
+    let ours = common::port(&script);
+    let theirs = common::wheel(std::slice::from_ref(&script)).remove(0);
+    assert_eq!(ours, theirs);
+}

@@ -10,15 +10,16 @@
 //! `== None` false), `__ne__` its negation (true for `None`), `__hash__` and `__getstate__` are
 //! `int(self)`. A value's name is looked up in the class's `__entries` by equality, `???` when
 //! none matches (`TransformDirection(5)`). Constructing from an `int` makes a new instance each
-//! time; there is no ordering and no arithmetic. The class docstring is `\n\nMembers:` and
-//! each member's `\n\n  NAME : ` (the wheel's docstrings are empty).
+//! time. An arithmetic enum (`py::arithmetic`) adds the comparisons and the bitwise operators,
+//! on `int(self)` and `int(other)`. The class docstring is `\n\nMembers:` and each member's
+//! `\n\n  NAME : ` (the wheel's docstrings are empty).
 
 use pyo3::BoundObject;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyInt, PyString, PyTuple, PyType};
 
 use crate::dispatch::{Cast, Function, Overload, Param};
-use crate::pybind11::{self, MODULE, VALUE};
+use crate::pybind11::{self, MODULE};
 
 /// `self` as an instance of the class the overload's first parameter names, or the next
 /// overload.
@@ -61,14 +62,46 @@ fn ok<'py>(obj: impl IntoPyObject<'py>, py: Python<'py>) -> PyResult<Option<Py<P
     ))
 }
 
-/// A C++ `int` argument as pybind11's caster loads it; its value as a Python `int`.
-fn c_int<'py>(
+/// The C++ type an enum converts to (`std::underlying_type`): the type of `value`, and of
+/// `__init__`'s and `__setstate__`'s argument.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scalar {
+    /// `int`, an unscoped enum's without a fixed type.
+    Int,
+    /// `unsigned int`.
+    UInt,
+    /// `unsigned long` (32 bits in the Windows wheel, 64 in the Linux one).
+    ULong,
+}
+
+/// An enum's scalar argument, loaded with the caster of `scalar`'s C++ type; its value as a
+/// Python `int`.
+fn load_scalar<'py>(
     py: Python<'py>,
+    scalar: Scalar,
     obj: &Bound<'py, PyAny>,
     convert: bool,
 ) -> Option<Bound<'py, PyAny>> {
-    <i32 as Cast>::load(obj, convert).map(|v| PyInt::new(py, v).into_any())
+    match scalar {
+        Scalar::Int => <i32 as Cast>::load(obj, convert).map(|v| PyInt::new(py, v).into_any()),
+        Scalar::UInt => <u32 as Cast>::load(obj, convert).map(|v| PyInt::new(py, v).into_any()),
+        Scalar::ULong => <crate::dispatch::CULong as Cast>::load(obj, convert)
+            .map(|v| PyInt::new(py, v).into_any()),
+    }
 }
+
+/// The scalar type an enum's parameters name (`value`, `state`) take, read back from the
+/// overload: its class's [`Scalar`] is recorded in [`SCALARS`] by qualified name.
+fn scalar_of(o: &Overload) -> Scalar {
+    let scalars = SCALARS.lock().expect("not poisoned");
+    scalars
+        .iter()
+        .find(|(name, _)| *name == o.params[0].ty)
+        .map_or(Scalar::Int, |(_, s)| *s)
+}
+
+/// Each enum class's [`Scalar`], by qualified name.
+static SCALARS: std::sync::Mutex<Vec<(&'static str, Scalar)>> = std::sync::Mutex::new(Vec::new());
 
 const SELF_OBJECT: Param = Param::new("self", "object");
 const OTHER: Param = Param::new("other", "object");
@@ -110,6 +143,85 @@ fn function(
 
 fn leak(params: Vec<Param>) -> &'static [Param] {
     Box::leak(params.into_boxed_slice())
+}
+
+/// pybind11's `PYBIND11_ENUM_OP_CONV`: `int(self) <op> int(other)` (`int()` converts the
+/// other operand as Python does, a `str` it parses), for an arithmetic enum (`py::arithmetic`).
+fn arithmetic_functions() -> Vec<&'static Function> {
+    // `int(self) <op> int(other)`, through the operator of Python's `int` (`a < b` and `a & b`
+    // in the C++ are PyObject_RichCompare and PyNumber_And on two `int`s); the reflected
+    // operators compute the same expression, `self` on the left.
+    macro_rules! conv {
+        ($name:literal, $ret:literal, $op:literal) => {
+            function(
+                $name,
+                vec![overload(
+                    &[SELF_OBJECT, OTHER],
+                    $ret,
+                    |_, _, a, _| {
+                        let me = int_of(&a[0])?;
+                        let other = int_of(&a[1])?;
+                        Ok(Some(me.call_method1($op, (other,))?.unbind()))
+                    },
+                    2,
+                )],
+                true,
+                false,
+            )
+        };
+    }
+    vec![
+        conv!("__lt__", "bool", "__lt__"),
+        conv!("__gt__", "bool", "__gt__"),
+        conv!("__le__", "bool", "__le__"),
+        conv!("__ge__", "bool", "__ge__"),
+        conv!("__and__", "object", "__and__"),
+        conv!("__rand__", "object", "__and__"),
+        conv!("__or__", "object", "__or__"),
+        conv!("__ror__", "object", "__or__"),
+        conv!("__xor__", "object", "__xor__"),
+        conv!("__rxor__", "object", "__xor__"),
+        // __invert__(self: object, /) -> object: `~int(self)`.
+        function(
+            "__invert__",
+            vec![overload(
+                &[SELF_OBJECT],
+                "object",
+                |_, _, a, _| Ok(Some(int_of(&a[0])?.call_method0("__invert__")?.unbind())),
+                1,
+            )],
+            true,
+            false,
+        ),
+    ]
+}
+
+/// The method `_pybind11_conduit_v1_` every class of the module has (`class_`'s and
+/// `enum_`'s constructors define it).
+pub fn conduit(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
+    // _pybind11_conduit_v1_(self: object, arg0: bytes, arg1: types.CapsuleType, arg2: bytes)
+    // -> object: pybind11's cross-module conduit, which answers None to any other ABI.
+    let f = function(
+        "_pybind11_conduit_v1_",
+        vec![overload(
+            CONDUIT_PARAMS,
+            "object",
+            |py, _, a, _| {
+                let capsule = a[2].get_type().name().is_ok_and(|n| n == "PyCapsule");
+                if !a[1].is_instance_of::<PyBytes>()
+                    || !capsule
+                    || !a[3].is_instance_of::<PyBytes>()
+                {
+                    return Ok(None);
+                }
+                Ok(Some(py.None()))
+            },
+            0,
+        )],
+        true,
+        false,
+    );
+    pybind11::instance_method(py, pybind11::builtin(py, f, false)?)
 }
 
 /// The methods every enum class has, whatever its C++ type (`enum_base::init`).
@@ -239,15 +351,24 @@ fn class_doc(cls: &Bound<'_, PyAny>) -> PyResult<String> {
 pub fn add_enum<'py>(
     scope: &Bound<'py, PyAny>,
     outer: Option<&str>,
-    name: &'static str,
-    entries: &[(&'static str, i32)],
+    def: &EnumDef,
 ) -> PyResult<Bound<'py, PyType>> {
+    let EnumDef {
+        name,
+        scalar,
+        arithmetic,
+        entries,
+    } = *def;
     let py = scope.py();
     let qualname = match outer {
         Some(outer) => format!("{outer}.{name}"),
         None => name.to_string(),
     };
     let qualified: &'static str = Box::leak(format!("{MODULE}.{qualname}").into_boxed_str());
+    SCALARS
+        .lock()
+        .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("poisoned"))?
+        .push((qualified, scalar));
     let self_typed = Param::new("self", qualified);
 
     // __init__(self: Name, value: typing.SupportsInt) -> None.
@@ -258,13 +379,13 @@ pub fn add_enum<'py>(
             "None",
             |py, o, a, convert| {
                 let this = this!(o, a);
-                let Some(value) = c_int(py, &a[1], convert) else {
+                let Some(value) = load_scalar(py, scalar_of(o), &a[1], convert) else {
                     return Ok(None);
                 };
                 // pybind11 constructs the value once: on an instance that has one, __init__
                 // changes nothing.
-                if !this.hasattr(VALUE)? {
-                    this.setattr(VALUE, value)?;
+                if pybind11::value(&this).is_none() {
+                    pybind11::set_value(&this, value)?;
                 }
                 Ok(Some(py.None()))
             },
@@ -304,28 +425,6 @@ pub fn add_enum<'py>(
         false,
         false,
     );
-    // _pybind11_conduit_v1_(self: object, arg0: bytes, arg1: types.CapsuleType, arg2: bytes)
-    // -> object: pybind11's cross-module conduit, which answers None to any other ABI.
-    let conduit = function(
-        "_pybind11_conduit_v1_",
-        vec![overload(
-            CONDUIT_PARAMS,
-            "object",
-            |py, _, a, _| {
-                let capsule = a[2].get_type().name().is_ok_and(|n| n == "PyCapsule");
-                if !a[1].is_instance_of::<PyBytes>()
-                    || !capsule
-                    || !a[3].is_instance_of::<PyBytes>()
-                {
-                    return Ok(None);
-                }
-                Ok(Some(py.None()))
-            },
-            0,
-        )],
-        true,
-        false,
-    );
     // The value: (arg0: Name) -> int, the getter of the property `value`.
     let value_getter = function(
         "",
@@ -334,7 +433,7 @@ pub fn add_enum<'py>(
             "int",
             |py, o, a, _| {
                 let this = this!(o, a);
-                ok(this.getattr(VALUE)?, py)
+                ok(pybind11::value(&this), py)
             },
             0,
         )],
@@ -349,7 +448,7 @@ pub fn add_enum<'py>(
                 "int",
                 |py, o, a, _| {
                     let this = this!(o, a);
-                    ok(this.getattr(VALUE)?, py)
+                    ok(pybind11::value(&this), py)
                 },
                 1,
             )],
@@ -365,10 +464,10 @@ pub fn add_enum<'py>(
             "None",
             |py, o, a, convert| {
                 let this = this!(o, a);
-                let Some(value) = c_int(py, &a[1], convert) else {
+                let Some(value) = load_scalar(py, scalar_of(o), &a[1], convert) else {
                     return Ok(None);
                 };
-                this.setattr(VALUE, value)?;
+                pybind11::set_value(&this, value)?;
                 Ok(Some(py.None()))
             },
             2,
@@ -395,10 +494,7 @@ pub fn add_enum<'py>(
     )?;
     scope.setattr(name, &cls)?;
     let [repr, name_fn, str_fn, eq, ne, getstate, hash] = shared_functions();
-    cls.setattr(
-        "_pybind11_conduit_v1_",
-        pybind11::instance_method(py, pybind11::builtin(py, conduit, false)?)?,
-    )?;
+    cls.setattr("_pybind11_conduit_v1_", conduit(py)?)?;
     cls.setattr("__entries", PyDict::new(py))?;
     cls.setattr("__repr__", pybind11::method(py, repr)?)?;
     cls.setattr("name", property.call1((pybind11::method(py, name_fn)?,))?)?;
@@ -406,6 +502,11 @@ pub fn add_enum<'py>(
     cls.setattr("__members__", static_property(members_getter)?)?;
     cls.setattr("__eq__", pybind11::method(py, eq)?)?;
     cls.setattr("__ne__", pybind11::method(py, ne)?)?;
+    if arithmetic {
+        for f in arithmetic_functions() {
+            cls.setattr(f.name, pybind11::method(py, f)?)?;
+        }
+    }
     cls.setattr("__getstate__", pybind11::method(py, getstate)?)?;
     cls.setattr("__hash__", pybind11::method(py, hash)?)?;
     cls.setattr(
@@ -423,8 +524,7 @@ pub fn add_enum<'py>(
 
     let table = cls.getattr("__entries")?.cast_into::<PyDict>()?;
     for &(member, value) in entries {
-        let instance = cls.call_method1("__new__", (&cls,))?;
-        instance.setattr(VALUE, value)?;
+        let instance = to_py(&cls, value)?;
         table.set_item(
             member,
             PyTuple::new(py, [instance.clone(), PyString::new(py, "").into_any()])?,
@@ -438,12 +538,22 @@ pub fn add_enum<'py>(
     Ok(cls)
 }
 
+/// An enum of the module, as `py::enum_` declares it: its name, its C++ scalar type, whether
+/// it is `py::arithmetic`, and its values in declaration order.
+#[derive(Debug, Clone, Copy)]
+pub struct EnumDef {
+    pub name: &'static str,
+    pub scalar: Scalar,
+    pub arithmetic: bool,
+    pub entries: &'static [(&'static str, i64)],
+}
+
 /// An enum argument: an instance of the enum class `qualified` (or of a subclass), its value.
 /// pybind11 takes no `int` for an enum; `None` it takes with conversions, as a null pointer
 /// its call then refuses (pybind11's `reference_cast_error`), so the next overload is tried.
-pub fn enum_value(obj: &Bound<'_, PyAny>, qualified: &str) -> Option<i32> {
+pub fn enum_value(obj: &Bound<'_, PyAny>, qualified: &str) -> Option<i64> {
     let this = pybind11::instance_of(obj, qualified)?;
-    this.getattr(VALUE).ok()?.extract().ok()
+    pybind11::value(&this)?.extract().ok()
 }
 
 /// Loads argument `i` of an overload's arguments as the enum its parameter names, returning
@@ -460,8 +570,8 @@ macro_rules! enum_arg {
 
 /// The enum instance of class `cls` for `value`, as pybind11 casts a returned C++ enum: a new
 /// instance.
-pub fn to_py<'py>(cls: &Bound<'py, PyType>, value: i32) -> PyResult<Bound<'py, PyAny>> {
+pub fn to_py<'py>(cls: &Bound<'py, PyType>, value: i64) -> PyResult<Bound<'py, PyAny>> {
     let instance = cls.call_method1("__new__", (cls,))?;
-    instance.setattr(VALUE, value)?;
+    pybind11::set_value(&instance, PyInt::new(cls.py(), value).into_any())?;
     Ok(instance)
 }

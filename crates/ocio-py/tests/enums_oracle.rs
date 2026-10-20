@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! pybind11's enums (chunk 6.2a), against the wheel, on `TransformDirection`:
+//! pybind11's enums (chunks 6.2a and 6.2b), against the wheel, on `TransformDirection`:
 //! - its surface as the oracle's walk reports it (py_surface_walk.py's `_class`, run on the
 //!   port's class in the embedded interpreter, against the wheel's py_surface): metatype, MRO,
 //!   bases, docstring, every member in order with its kind and docstrings, the entries, and
@@ -9,7 +9,11 @@
 //! - its behaviour, through the same scripts on both sides: repr, str, name, value, int,
 //!   index, hash, equality with ints, floats, None, strings and other enums, construction from
 //!   ints (in range or not) and its refusals, `__members__`, `__entries`, `__getstate__` and
-//!   `__setstate__`, copies, the class's and an instance's docstrings.
+//!   `__setstate__`, copies, the class's and an instance's docstrings;
+//! - the arithmetic enums' comparisons and bitwise operators (on ints, strings `int()` parses
+//!   or doesn't, None, floats, other enums, reflected), and construction from values at the
+//!   edges of `int`, `unsigned int` and `unsigned long` (whose width the platform's wheel
+//!   sets). py_types_oracle.rs compares every enum's surface.
 //!
 //! Left out until the owner decides on the C-API module (`pybind11.rs`): the texts CPython
 //! writes with a class's C name (`'<' not supported between instances of ...`, an unknown
@@ -18,7 +22,7 @@
 
 mod common;
 
-use common::{call, name, port, wheel};
+use common::{call, name, port, text, wheel};
 use ocio_testkit::Oracle;
 use pyo3::prelude::*;
 use serde_json::{Value, json};
@@ -155,6 +159,75 @@ fn steps() -> Vec<Value> {
 #[test]
 fn the_enum_behaves_as_the_wheels() {
     let script = json!({ "steps": steps() });
+    let ours = port(&script);
+    let theirs = wheel(std::slice::from_ref(&script)).remove(0);
+    let (ours, theirs) = (
+        ours["steps"].as_array().unwrap(),
+        theirs["steps"].as_array().unwrap(),
+    );
+    for (i, (a, b)) in ours.iter().zip(theirs).enumerate() {
+        assert_eq!(a, b, "step {i}: {}", script["steps"][i]);
+    }
+    assert_eq!(ours.len(), theirs.len());
+}
+
+/// The steps of the arithmetic enums' script: `LoggingLevel` and `BitDepth` (`int`),
+/// `OptimizationFlags` (`unsigned long`, 32 bits in the Windows wheel and 64 in the Linux one),
+/// and `ProcessorCacheFlags` (`unsigned int`, not arithmetic).
+fn arithmetic_steps() -> Vec<Value> {
+    let v = |e: &str, n: &str| name(&format!("OCIO.{e}.{n}"));
+    let info = || v("LoggingLevel", "LOGGING_LEVEL_INFO");
+    let f32 = || v("BitDepth", "BIT_DEPTH_F32");
+    let all = || v("OptimizationFlags", "OPTIMIZATION_ALL");
+    let lossless = || v("OptimizationFlags", "OPTIMIZATION_LOSSLESS");
+    let op = |f: &str, a: Value, b: Value| call(name(&format!("operator.{f}")), json!([a, b]));
+    let mut steps = vec![];
+    for f in ["lt", "gt", "le", "ge", "and_", "or_", "xor", "eq", "ne"] {
+        steps.push(op(f, info(), int("2")));
+        steps.push(op(f, info(), int("3")));
+        steps.push(op(f, int("1"), info()));
+        steps.push(op(f, info(), f32()));
+        steps.push(op(f, info(), text("33")));
+        steps.push(op(f, info(), text("x")));
+        steps.push(op(f, info(), json!({ "none": null })));
+        steps.push(op(f, info(), json!({ "float": "0x4000000000000000" })));
+        steps.push(op(f, all(), lossless()));
+        steps.push(op(f, int("-1"), all()));
+    }
+    // `~` on a non-arithmetic enum raises with the class's C name: left out with the other such
+    // texts (above).
+    for target in [info(), all()] {
+        steps.push(call(name("operator.invert"), json!([target])));
+    }
+    let c = |e: &str, arg: Value| call(name(&format!("OCIO.{e}")), json!([arg]));
+    for e in ["OptimizationFlags", "ProcessorCacheFlags", "LoggingLevel"] {
+        for n in [
+            "-1",
+            "4294967295",
+            "4294967296",
+            "18446744073709551615",
+            "18446744073709551616",
+            "2147483648",
+        ] {
+            steps.push(c(e, int(n)));
+        }
+        steps.push(c(e, json!({ "bool": true })));
+    }
+    steps.push(json!({ "eval": all(), "getters": ["name", "value", "__int__", "__hash__", "__repr__", "__str__"] }));
+    steps.push(json!({ "eval": name("OCIO.OptimizationFlags.__lt__.__doc__") }));
+    steps.push(json!({ "eval": name("OCIO.OptimizationFlags.__rand__.__doc__") }));
+    steps.push(json!({ "eval": name("OCIO.OptimizationFlags.__invert__.__doc__") }));
+    steps.push(json!({ "eval": name("OCIO.OptimizationFlags.__init__.__doc__") }));
+    steps.push(json!({ "eval": name("OCIO.ProcessorCacheFlags.__init__.__doc__") }));
+    steps.push(call(name("OCIO.OptimizationFlags.__lt__"), json!([all()])));
+    steps.push(json!({ "call": name("OCIO.BitDepth.__and__"), "args": [f32()], "kwargs": [["other", int("1")]] }));
+    steps
+}
+
+/// The arithmetic enums and the unsigned ones behave as the wheel's.
+#[test]
+fn arithmetic_and_unsigned_enums_behave_as_the_wheels() {
+    let script = json!({ "steps": arithmetic_steps() });
     let ours = port(&script);
     let theirs = wheel(std::slice::from_ref(&script)).remove(0);
     let (ours, theirs) = (
