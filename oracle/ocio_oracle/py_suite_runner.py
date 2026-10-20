@@ -18,7 +18,8 @@ the library's, goes to stderr):
               | "expected_failure" | "unexpected_success", "message": text or null,
               "defined": where the test's method is defined, "File.py::Class.test_name"
               (cargo xtask upstream-tests' names), or null for what isn't a test method
-              (a class whose setUpClass failed)}]}
+              (a failed setUpModule, setUpClass, tearDownClass or tearDownModule, which
+              unittest reports under names such as "setUpClass (Module.Class)")}]}
 A test a class inherits (TransformsBaseTest's) runs once per class, each run with its own id
 and the same "defined".
 A message is the exception's type and text (traceback.format_exception_only, without the

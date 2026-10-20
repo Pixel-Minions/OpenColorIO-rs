@@ -127,6 +127,7 @@ fn reports_each_module_as_upstreams_driver_runs_it() {
         .collect();
     let mut reported = BTreeMap::new();
     let mut defined = BTreeSet::new();
+    let functions = upstream_test_functions();
     for (module, response) in modules.iter().zip(Oracle::get().batch(&calls, true)) {
         let report = response.unwrap().result;
         assert_eq!(report["module"], json!(module), "{report}");
@@ -144,11 +145,22 @@ fn reports_each_module_as_upstreams_driver_runs_it() {
                 "{id}: {t}"
             );
             assert!(reported.insert(id.clone(), outcome).is_none(), "{id} twice");
-            defined.insert(t["defined"].as_str().unwrap().to_string());
+            let def = t["defined"].as_str().unwrap().to_string();
+            let (path, method) = id.rsplit_once('.').unwrap();
+            assert!(def.ends_with(&format!(".{method}")), "{id}: {def}");
+            let own = format!(
+                "{}.py::{}.{method}",
+                module,
+                path.strip_prefix(&format!("{module}.")).unwrap()
+            );
+            if functions.contains(&own) {
+                assert_eq!(def, own, "{id}");
+            }
+            defined.insert(def);
         }
     }
     // Where each run's method is defined: together, every test function of upstream's files.
-    assert_eq!(defined, upstream_test_functions());
+    assert_eq!(defined, functions);
 
     let (driven, ran) = run_driver();
     assert_eq!(ran, driven.len());
@@ -352,6 +364,14 @@ fn reports_each_outcome_of_a_synthetic_module() {
         ],
         "{report}"
     );
+    for t in report["tests"].as_array().unwrap() {
+        let id = t["id"].as_str().unwrap();
+        let want = id
+            .strip_prefix("SyntheticTest.")
+            .map(|m| json!(format!("SyntheticTest.py::{m}")))
+            .unwrap_or(Value::Null);
+        assert_eq!(t["defined"], want, "{id}");
+    }
     let message = |i: usize| tests[i].2.clone().unwrap_or_default();
     assert!(tests[0].2.is_none() && tests[5].2.is_none());
     for (i, needles) in [
@@ -392,11 +412,12 @@ fn reports_where_each_test_is_defined() {
              class C(Mixin, unittest.TestCase):\n    def test_own(self):\n        pass\n\n\
              class Outer:\n    class Inner(unittest.TestCase):\n        def test_nested(self):\n            pass\n\n\
              Inner = Outer.Inner\n\n\
-             class D(unittest.TestCase):\n    @classmethod\n    def setUpClass(cls):\n        raise RuntimeError('no')\n\n    def test_never(self):\n        pass\n",
+             class D(unittest.TestCase):\n    @classmethod\n    def setUpClass(cls):\n        raise RuntimeError('no')\n\n    def test_never(self):\n        pass\n\n\
+             class E(Mixin, unittest.TestCase):\n    def test_inherited(self):\n        pass\n",
         ),
         (
             "DefinedBase",
-            "class Mixin:\n    def test_inherited(self):\n        pass\n",
+            "class Mixin:\n    def test_inherited(self):\n        pass\n\n    def test_inherited_fail(self):\n        self.fail('x')\n",
         ),
     ]);
     let report = synthetic.run("DefinedTest");
@@ -414,10 +435,22 @@ fn reports_where_each_test_is_defined() {
                 json!("DefinedBase.py::Mixin.test_inherited")
             ),
             (
+                "DefinedTest.C.test_inherited_fail".to_string(),
+                json!("DefinedBase.py::Mixin.test_inherited_fail")
+            ),
+            (
                 "DefinedTest.C.test_own".to_string(),
                 json!("DefinedTest.py::C.test_own")
             ),
             ("setUpClass (DefinedTest.D)".to_string(), Value::Null),
+            (
+                "DefinedTest.E.test_inherited".to_string(),
+                json!("DefinedTest.py::E.test_inherited")
+            ),
+            (
+                "DefinedTest.E.test_inherited_fail".to_string(),
+                json!("DefinedBase.py::Mixin.test_inherited_fail")
+            ),
             (
                 "DefinedTest.Outer.Inner.test_nested".to_string(),
                 json!("DefinedTest.py::Outer.Inner.test_nested")
