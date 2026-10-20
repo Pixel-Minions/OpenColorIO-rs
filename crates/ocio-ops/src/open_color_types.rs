@@ -420,6 +420,35 @@ pub fn fixed_function_style_from_string(style: Option<&[u8]>) -> Result<FixedFun
     })
 }
 
+/// The kind of image an `ExposureContrastTransform` adjusts: it picks the algorithm.
+///
+/// Port of `ExposureContrastStyle` (include/OpenColorIO/OpenColorTypes.h:526-532 @ v2.5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ExposureContrastStyle {
+    /// `EXPOSURE_CONTRAST_LINEAR`: E/C to be applied to a linear space image.
+    #[doc(alias = "EXPOSURE_CONTRAST_LINEAR")]
+    Linear = 0,
+    /// `EXPOSURE_CONTRAST_VIDEO`: E/C to be applied to a video space image.
+    #[doc(alias = "EXPOSURE_CONTRAST_VIDEO")]
+    Video,
+    /// `EXPOSURE_CONTRAST_LOGARITHMIC`: E/C to be applied to a log space image.
+    #[doc(alias = "EXPOSURE_CONTRAST_LOGARITHMIC")]
+    Logarithmic,
+}
+
+/// The style's name: `video`, `log` or `linear`.
+///
+/// Port of `ExposureContrastStyleToString` (src/OpenColorIO/ParseUtils.cpp:458-476 @ v2.5.2).
+/// Its "Unknown exposure contrast style" for a value outside the enum can't happen.
+#[doc(alias = "ExposureContrastStyleToString")]
+pub fn exposure_contrast_style_to_string(style: ExposureContrastStyle) -> &'static str {
+    match style {
+        ExposureContrastStyle::Video => "video",
+        ExposureContrastStyle::Logarithmic => "log",
+        ExposureContrastStyle::Linear => "linear",
+    }
+}
+
 /// What a dynamic property holds: a double for the first three, a grading value for the
 /// others.
 ///

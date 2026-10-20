@@ -6,6 +6,7 @@
 pub mod allocation;
 pub mod cdl;
 pub mod exponent;
+pub mod exposurecontrast;
 pub mod fixedfunction;
 pub mod gamma;
 pub mod gradinghuecurve;
