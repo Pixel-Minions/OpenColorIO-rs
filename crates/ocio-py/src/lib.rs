@@ -15,4 +15,6 @@
 #![deny(unsafe_code)]
 
 #[cfg(feature = "python")]
+pub mod embed;
+#[cfg(feature = "python")]
 pub mod py_open_color_io;

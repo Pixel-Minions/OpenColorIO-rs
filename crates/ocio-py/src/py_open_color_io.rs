@@ -175,7 +175,7 @@ fn register_exception(
 // text.
 #[doc = "OpenColorIO (OCIO) is a complete color management solution geared towards motion picture production"]
 #[pymodule(name = "PyOpenColorIO")]
-fn py_open_color_io(m: &Bound<'_, PyModule>) -> PyResult<()> {
+pub(crate) fn py_open_color_io(m: &Bound<'_, PyModule>) -> PyResult<()> {
     register_exception(
         m,
         "Exception",
