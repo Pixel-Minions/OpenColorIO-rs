@@ -14,14 +14,10 @@
 //! C++ value ([`value`], [`set_value`]; for an enum, the value as a Python `int`).
 //!
 //! How the types are made: [`new_class`] and [`instance_method`] are the only two places that
-//! decide it. They make the classes with the metatype from Python (`type(name, bases, ns)`)
-//! and the methods with a stand-in for CPython's `instancemethod` ([`InstanceMethod`]), as no
-//! safe API makes either otherwise. Two differences remain from the wheel's types, pending the
-//! owner's decision on a C-API module (PyType_FromMetaclass, PyInstanceMethod_New): a class's
-//! C name (`tp_name`) is its short name, where pybind11's is the dotted
-//! `PyOpenColorIO.PyOpenColorIO.Name`, which CPython prints in some messages ("'Name' object
-//! has no attribute ..."); and the stand-in's type is a PyO3 class named `instancemethod` in
-//! `builtins`.
+//! decide it, through the C API ([`crate::type_object`]): a class is made by
+//! `PyType_FromMetaclass` with pybind11's metatype, its C name (`tp_name`) the dotted
+//! `PyOpenColorIO.PyOpenColorIO.Name` that CPython writes in some messages, and its `tp_init`
+//! `pybind11_object`'s; a method is CPython's `instancemethod`.
 
 use std::ffi::CString;
 
@@ -38,8 +34,35 @@ pub const MODULE: &str = "PyOpenColorIO.PyOpenColorIO";
 /// pybind11_builtins, made once per interpreter: the metatype, the base class and the static
 /// property, as Python source run in a namespace of its own.
 const RUNTIME: &std::ffi::CStr = cr#"
+# CPython's instancemethod type, set from Rust once the runtime runs.
+_instancemethod = None
+
+
+def _lookup(cls, name):
+    # _PyType_Lookup: the attribute in the dictionaries of the class's MRO, or None.
+    for klass in type.__getattribute__(cls, '__mro__'):
+        namespace = type.__getattribute__(klass, '__dict__')
+        if name in namespace:
+            return namespace[name]
+    return None
+
+
 class pybind11_type(type):
-    pass
+    # pybind11_meta_getattro: a method (an instancemethod) is returned as it is, not bound.
+    def __getattribute__(cls, name):
+        descr = _lookup(cls, name)
+        if descr is not None and type(descr) is _instancemethod:
+            return descr
+        return type.__getattribute__(cls, name)
+
+    # pybind11_meta_setattro: a static property's setter, unless the value is itself one.
+    def __setattr__(cls, name, value):
+        descr = _lookup(cls, name)
+        if (descr is not None and isinstance(descr, pybind11_static_property)
+                and not isinstance(value, pybind11_static_property)):
+            type(descr).__set__(descr, cls, value)
+            return
+        type.__setattr__(cls, name, value)
 
 pybind11_type.__module__ = 'pybind11_builtins'
 
@@ -70,6 +93,9 @@ fn runtime(py: Python<'_>) -> PyResult<&Bound<'_, PyDict>> {
     let ns = RUNTIME_NS.get_or_try_init(py, || -> PyResult<Py<PyDict>> {
         let ns = PyDict::new(py);
         py.run(RUNTIME, Some(&ns), None)?;
+        let len = py.import("builtins")?.getattr("len")?;
+        let instancemethod = crate::type_object::instance_method(&len)?.get_type();
+        ns.set_item("_instancemethod", instancemethod)?;
         Ok(ns.unbind())
     })?;
     Ok(ns.bind(py))
@@ -142,12 +168,6 @@ pub fn set_value(obj: &Bound<'_, PyAny>, value: Bound<'_, PyAny>) -> PyResult<()
     Ok(())
 }
 
-/// The `__init__` a class without a constructor holds in its dictionary: pybind11_object's
-/// slot wrapper.
-pub fn no_constructor(py: Python<'_>) -> PyResult<Bound<'_, PyAny>> {
-    object_base(py)?.getattr("__dict__")?.get_item("__init__")
-}
-
 /// `pybind11_builtins.pybind11_static_property(fget, None, None, "")`.
 pub fn static_property<'py>(
     py: Python<'py>,
@@ -156,10 +176,12 @@ pub fn static_property<'py>(
     runtime_item(py, "pybind11_static_property")?.call1((fget, py.None(), py.None(), ""))
 }
 
-/// A class of the module, made as pybind11 makes it: named `name`, its `__qualname__`
-/// `qualname` (the enclosing class's name first, for a nested class), in [`MODULE`], with the
-/// metatype and `bases` (`pybind11_object` when empty), its dictionary starting with `ns` in
-/// order (the names after `__module__` and `__doc__` come from the caller).
+/// A class of the module, made as pybind11 makes it (`make_new_python_type`): named `name`,
+/// its `__qualname__` `qualname` (the enclosing class's name first, for a nested class) and
+/// its C name `MODULE.qualname`, with the metatype and `bases` (`pybind11_object` when empty).
+/// Its dictionary starts with `__init__` (pybind11_object's slot wrapper, raising "No
+/// constructor defined!"), `__doc__` and `__module__`; `ns` then sets those of them a class
+/// gives otherwise (an enum's constructor, its docstring property), in place.
 pub fn new_class<'py>(
     py: Python<'py>,
     name: &str,
@@ -167,96 +189,43 @@ pub fn new_class<'py>(
     bases: &[Bound<'py, PyType>],
     ns: &[(&str, Bound<'py, PyAny>)],
 ) -> PyResult<Bound<'py, PyType>> {
-    let metatype = runtime_item(py, "pybind11_type")?;
+    let metatype = runtime_item(py, "pybind11_type")?.cast_into::<PyType>()?;
     let bases: Vec<Bound<'py, PyType>> = if bases.is_empty() {
         vec![object_base(py)?]
     } else {
         bases.to_vec()
     };
-    let dict = PyDict::new(py);
+    let cls = crate::type_object::from_metaclass(
+        &metatype,
+        &format!("{MODULE}.{qualname}"),
+        &PyTuple::new(py, bases)?,
+        object_init_slot(),
+    )?;
+    debug_assert_eq!(cls.name()?.to_string(), name);
     for (k, v) in ns {
-        dict.set_item(k, v)?;
+        cls.setattr(*k, v)?;
     }
-    // No instance dictionary, as pybind11's objects have none.
-    dict.set_item("__slots__", PyTuple::empty(py))?;
-    let cls = metatype
-        .call1((name, PyTuple::new(py, bases)?, dict))?
-        .cast_into::<PyType>()?;
-    cls.delattr("__slots__")?;
+    cls.setattr("__module__", MODULE)?;
     cls.setattr("__qualname__", qualname)?;
     Ok(cls)
 }
 
-// Stand-in for CPython's `instancemethod` (`PyInstanceMethod_New`), which pybind11 wraps each
-// method's builtin function in: a descriptor binding its function to the instance, with the
-// function's docstring and name. (No Rust doc comment: it would be the type's docstring, which
-// shadows the function's.)
-#[pyclass(name = "instancemethod", module = "builtins", frozen)]
-#[derive(Debug)]
-pub struct InstanceMethod {
-    func: Py<PyAny>,
+/// `pybind11_object`'s `tp_init` (PyO3's slot for [`Pybind11Object`]'s `__init__`), which
+/// pybind11 gives every class (`pybind11_object_init`): it raises "No constructor defined!"
+/// until the class's `__init__` is set.
+fn object_init_slot() -> *mut std::ffi::c_void {
+    use pyo3::impl_::pyclass::PyClassImpl;
+    <Pybind11Object as PyClassImpl>::items_iter()
+        .flat_map(|items| items.slots)
+        .find(|slot| slot.slot == pyo3::ffi::Py_tp_init)
+        .map_or(std::ptr::null_mut(), |slot| slot.pfunc)
 }
 
-#[pymethods]
-impl InstanceMethod {
-    #[getter]
-    fn __func__(&self, py: Python<'_>) -> Py<PyAny> {
-        self.func.clone_ref(py)
-    }
-
-    #[getter]
-    fn __doc__(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        self.func.getattr(py, "__doc__")
-    }
-
-    #[getter]
-    fn __name__(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
-        self.func.getattr(py, "__name__")
-    }
-
-    fn __get__(
-        &self,
-        py: Python<'_>,
-        obj: Option<Bound<'_, PyAny>>,
-        cls: Option<Bound<'_, PyAny>>,
-    ) -> PyResult<Py<PyAny>> {
-        let _ = cls;
-        match obj {
-            None => Ok(self.func.clone_ref(py)),
-            Some(obj) if obj.is_none() => Ok(self.func.clone_ref(py)),
-            Some(obj) => {
-                let method_type = py.import("types")?.getattr("MethodType")?;
-                Ok(method_type.call1((self.func.bind(py), obj))?.unbind())
-            }
-        }
-    }
-
-    #[pyo3(signature = (*args, **kwargs))]
-    fn __call__(
-        &self,
-        py: Python<'_>,
-        args: &Bound<'_, PyTuple>,
-        kwargs: Option<&Bound<'_, PyDict>>,
-    ) -> PyResult<Py<PyAny>> {
-        Ok(self.func.bind(py).call(args, kwargs)?.unbind())
-    }
-
-    fn __repr__(slf: &Bound<'_, Self>) -> PyResult<String> {
-        let name: String = slf
-            .get()
-            .func
-            .getattr(slf.py(), "__name__")?
-            .extract(slf.py())?;
-        Ok(format!(
-            "<instancemethod {name} at {:#018X}>",
-            slf.as_ptr() as usize
-        ))
-    }
-}
-
-/// `f` wrapped as a method (see [`InstanceMethod`]).
+/// `f` wrapped as a method, as pybind11 wraps each: CPython's `instancemethod`
+/// (`PyInstanceMethod_New`).
 pub fn instance_method<'py>(py: Python<'py>, f: Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    Ok(Bound::new(py, InstanceMethod { func: f.unbind() })?.into_any())
+    let _ = py;
+    crate::type_object::instance_method(&f)
 }
 
 /// A builtin function over `f` (`PyCFunction`, taking `*args` and `**kwargs` as pybind11's

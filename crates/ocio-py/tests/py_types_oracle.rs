@@ -178,6 +178,17 @@ fn a_declared_class_has_no_constructor() {
         common::call(common::name("OCIO.CPUProcessor"), json!([{ "int": "1" }])),
         json!({ "call": common::name("OCIO.GPUProcessor"), "kwargs": [["a", { "int": "1" }]] }),
         json!({ "eval": common::name("OCIO.Processor.__init__.__doc__") }),
+        // The class's own slot wrapper, named by its C name.
+        common::call(
+            common::name("repr"),
+            json!([common::name("OCIO.Processor.__init__")]),
+        ),
+        common::call(
+            common::name("repr"),
+            json!([common::name("OCIO.GpuShaderDesc.__init__")]),
+        ),
+        json!({ "eval": common::name("OCIO.Processor.nope") }),
+        common::call(common::name("type"), json!([common::name("OCIO.Processor")])),
     ]});
     let ours = common::port(&script);
     let theirs = common::wheel(std::slice::from_ref(&script)).remove(0);

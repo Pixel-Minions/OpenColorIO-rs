@@ -83,13 +83,15 @@ const FORBIDDEN: &[(&str, &str)] = &[
 /// upstream's own tolerance checks.
 const TOLERANCE: &[&str] = &[".abs() < ", ".abs() <= ", "f32::EPSILON", "f64::EPSILON"];
 
-/// Where `unsafe` may be allowed (PLAN.md D8): SIMD modules, the Python binding, the test
-/// kit's FFI to the platform C runtime (the reference for C formatting and parsing), and the
-/// one file that calls `CreateSymbolicLinkW` and lists directories with `FindFirstFileW` as
-/// minizip-ng does (owner decisions 2026-10-17, named here by its file).
+/// Where `unsafe` may be allowed (PLAN.md D8): SIMD modules, the test kit's FFI to the
+/// platform C runtime (the reference for C formatting and parsing), the one file that calls
+/// `CreateSymbolicLinkW` and lists directories with `FindFirstFileW` as minizip-ng does (owner
+/// decisions 2026-10-17), and, in the Python binding, the one file that calls
+/// `PyType_FromMetaclass` and `PyInstanceMethod_New` (owner decision 2026-10-20, option A),
+/// each named here by its file.
 fn unsafe_allowed(rel: &str) -> bool {
     let file = rel.rsplit('/').next().unwrap_or(rel);
-    rel.starts_with("crates/ocio-py/")
+    rel == "crates/ocio-py/src/type_object.rs"
         || rel == "crates/ocio-testkit/src/crt.rs"
         || rel == "crates/ocio/src/minizip/os_windows_ffi.rs"
         || (rel.starts_with("crates/ocio-ops/")
@@ -205,8 +207,8 @@ fn check_files(
         if !(rel.starts_with("xtask/") && rel.ends_with("guards.rs")) && !unsafe_allowed(rel) {
             for line in unsafe_code_relaxed(text) {
                 problems.push(format!(
-                    "{rel}:{line}: `unsafe` is allowed only in SIMD modules, ocio-py and the files \
-                     the allowlist names (PLAN.md D8)"
+                    "{rel}:{line}: `unsafe` is allowed only in SIMD modules and the files the \
+                     allowlist names (PLAN.md D8)"
                 ));
             }
         }
@@ -732,6 +734,19 @@ mod tests {
                 at[..at.find(':').unwrap()].parse().unwrap()
             })
             .collect()
+    }
+
+    #[test]
+    fn unsafe_allowed_in_the_python_binding_only_in_type_object_rs() {
+        assert!(unsafe_allowed("crates/ocio-py/src/type_object.rs"));
+        for rel in [
+            "crates/ocio-py/src/lib.rs",
+            "crates/ocio-py/src/pybind11.rs",
+            "crates/ocio-py/src/type_object/x.rs",
+            "crates/ocio-py/tests/t.rs",
+        ] {
+            assert!(!unsafe_allowed(rel), "{rel}");
+        }
     }
 
     #[test]

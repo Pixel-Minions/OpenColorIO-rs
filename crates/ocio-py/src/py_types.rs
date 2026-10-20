@@ -251,17 +251,7 @@ fn declare_class<'py>(
         Some(base) => vec![m.getattr(base)?.cast_into::<PyType>()?],
         None => vec![],
     };
-    let cls = pybind11::new_class(
-        py,
-        name,
-        name,
-        &bases,
-        &[
-            ("__init__", pybind11::no_constructor(py)?),
-            ("__doc__", PyString::new(py, "").into_any()),
-            ("__module__", PyString::new(py, MODULE).into_any()),
-        ],
-    )?;
+    let cls = pybind11::new_class(py, name, name, &bases, &[])?;
     cls.setattr("_pybind11_conduit_v1_", conduit(py)?)?;
     m.setattr(name, &cls)?;
     Ok(cls)

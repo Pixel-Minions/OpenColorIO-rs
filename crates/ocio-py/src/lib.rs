@@ -28,3 +28,5 @@ pub mod py_open_color_io;
 pub(crate) mod py_types;
 #[cfg(feature = "python")]
 pub mod pybind11;
+#[cfg(feature = "python")]
+pub(crate) mod type_object;

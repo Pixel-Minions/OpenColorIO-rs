@@ -13,11 +13,13 @@
 //! - the arithmetic enums' comparisons and bitwise operators (on ints, strings `int()` parses
 //!   or doesn't, None, floats, other enums, reflected), and construction from values at the
 //!   edges of `int`, `unsigned int`, `unsigned long` (whose width the platform's wheel sets)
-//!   and `unsigned char` (`GpuShaderCreator.TextureDimensions`). py_types_oracle.rs compares every enum's surface.
-//!
-//! Left out until the owner decides on the C-API module (`pybind11.rs`): the texts CPython
-//! writes with a class's C name (`'<' not supported between instances of ...`, an unknown
-//! attribute's AttributeError).
+//!   and `unsigned char` (`GpuShaderCreator.TextureDimensions`). py_types_oracle.rs compares
+//!   every enum's surface;
+//! - the texts CPython writes with a class's C name (`tp_name`, the dotted
+//!   `PyOpenColorIO.PyOpenColorIO.Name` since the classes are made by `PyType_FromMetaclass`):
+//!   an ordering between non-arithmetic enums, an unknown attribute's AttributeError, `~` on a
+//!   non-arithmetic enum; and the reprs of a method (CPython's `instancemethod`) and of a
+//!   class's `__init__` slot wrapper.
 #![cfg(feature = "python")]
 
 mod common;
@@ -152,6 +154,23 @@ fn steps() -> Vec<Value> {
         json!({ "eval": name("OCIO.TransformDirection.name.__doc__") }),
         json!({ "eval": name("OCIO.TransformDirection.value.__doc__") }),
         json!({ "eval": name("OCIO.TransformDirection.__init__.__doc__") }),
+        // Texts with the class's C name.
+        op("lt", inv(), fwd()),
+        op("lt", inv(), int("1")),
+        op("ge", int("1"), inv()),
+        json!({ "eval": name("OCIO.TransformDirection.TRANSFORM_DIR_INVERSE.nope") }),
+        json!({ "eval": name("OCIO.TransformDirection.nope") }),
+        call(
+            name("setattr"),
+            json!([inv(), { "str": "6e6f7065" }, int("1")]),
+        ),
+        call(name("operator.invert"), json!([inv()])),
+        call(name("operator.neg"), json!([inv()])),
+        json!({ "eval": name("OCIO.TransformDirection.__repr__") }),
+        json!({ "eval": name("OCIO.TransformDirection.__eq__") }),
+        json!({ "eval": name("OCIO.TransformDirection.__members__") }),
+        call(name("type"), json!([inv()])),
+        call(name("repr"), json!([name("OCIO.TransformDirection")])),
     ]
 }
 
@@ -195,9 +214,11 @@ fn arithmetic_steps() -> Vec<Value> {
         steps.push(op(f, all(), lossless()));
         steps.push(op(f, int("-1"), all()));
     }
-    // `~` on a non-arithmetic enum raises with the class's C name: left out with the other such
-    // texts (above).
-    for target in [info(), all()] {
+    for target in [
+        info(),
+        all(),
+        v("ProcessorCacheFlags", "PROCESSOR_CACHE_DEFAULT"),
+    ] {
         steps.push(call(name("operator.invert"), json!([target])));
     }
     let c = |e: &str, arg: Value| call(name(&format!("OCIO.{e}")), json!([arg]));
