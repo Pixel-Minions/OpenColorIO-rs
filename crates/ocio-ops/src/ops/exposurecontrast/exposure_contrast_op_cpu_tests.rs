@@ -401,3 +401,46 @@ fn log_params() {
     test_log_param_for_style(ExposureContrastOpStyle::Logarithmic, true);
     test_log_param_for_style(ExposureContrastOpStyle::LogarithmicRev, true);
 }
+
+/// Not an upstream test: `ECRendererBase`'s constructor decouples each dynamic property from
+/// the op data's by a copy (ExposureContrastOpCPU.cpp:43-62 @ v2.5.2), so setting a renderer's
+/// property leaves the op data's values alone, whose own properties are what other renderers
+/// of the same op data start from.
+#[test]
+fn setting_a_renderers_properties_leaves_the_op_data_alone() {
+    for style in [
+        ExposureContrastOpStyle::Linear,
+        ExposureContrastOpStyle::LinearRev,
+        ExposureContrastOpStyle::Video,
+        ExposureContrastOpStyle::VideoRev,
+        ExposureContrastOpStyle::Logarithmic,
+        ExposureContrastOpStyle::LogarithmicRev,
+    ] {
+        let ec = dynamic_ec(style);
+        ec.set_exposure(0.3);
+        ec.set_contrast(0.9);
+        ec.set_gamma(1.1);
+
+        let renderer = get_exposure_contrast_cpu_renderer(&ec);
+        let (contrast, exposure, gamma) = renderer_properties(&renderer);
+        exposure.set_value(-1.5);
+        contrast.set_value(2.5);
+        gamma.set_value(0.6);
+
+        // The renderer holds the values just set ...
+        assert_eq!(exposure.get_value(), -1.5, "{style:?}");
+        assert_eq!(contrast.get_value(), 2.5, "{style:?}");
+        assert_eq!(gamma.get_value(), 0.6, "{style:?}");
+        // ... and the op data still the ones it was given.
+        assert_eq!(ec.get_exposure(), 0.3, "{style:?}");
+        assert_eq!(ec.get_contrast(), 0.9, "{style:?}");
+        assert_eq!(ec.get_gamma(), 1.1, "{style:?}");
+
+        // A second renderer of the same op data starts from the op data's values.
+        let (contrast2, exposure2, gamma2) =
+            renderer_properties(&get_exposure_contrast_cpu_renderer(&ec));
+        assert_eq!(exposure2.get_value(), 0.3, "{style:?}");
+        assert_eq!(contrast2.get_value(), 0.9, "{style:?}");
+        assert_eq!(gamma2.get_value(), 1.1, "{style:?}");
+    }
+}

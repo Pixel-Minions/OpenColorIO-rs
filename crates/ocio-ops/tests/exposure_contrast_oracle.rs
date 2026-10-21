@@ -224,6 +224,12 @@ fn explicit_cases() -> Vec<Case<EcParams>> {
             format!("{s}, identity"),
             EcParams::new(style, DEFAULTS),
         ));
+        // Only the gamma isn't the identity's (fixed, not dynamic): the op isn't an identity,
+        // which the optimizer would remove.
+        cases.push(Case::new(
+            format!("{s}, gamma 1.3 alone"),
+            EcParams::new(style, with(&[(2, 1.3)])),
+        ));
         // The limits: a pivot below 0.001, a contrast times gamma below 0.001, a contrast
         // times gamma of 1 from two values that aren't.
         cases.push(Case::new(
@@ -331,6 +337,99 @@ impl Family for EcFamily {
 #[test]
 fn renderers_match_the_wheel() {
     battery::run(&EcFamily);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Inverse pairs.
+// ---------------------------------------------------------------------------------------------
+
+/// A forward and an inverse ExposureContrast transform in a group, at the default
+/// optimization (`OPTIMIZATION_PAIR_IDENTITY_EXPOSURE_CONTRAST` is on): the optimizer removes
+/// the pair where the second is the first's inverse (`ExposureContrastOpData::isInverse`,
+/// ExposureContrastOpData.cpp:210-218 @ v2.5.2, which compares the data with `equals`: the
+/// style, the pivot, the log exposure step and the log mid-gray, and the properties). A pair
+/// whose log mid-grays differ stays, and the wheel's pixels are not the input's.
+///
+/// Each case's pixels and CPU cache ID against the wheel's. The wheel's own answers pin what
+/// the case tests: the removed pair gives the input's bits, the kept pair doesn't.
+#[test]
+fn inverse_pairs_are_removed_as_the_wheels() {
+    let input = pixels();
+    let bytes = f32_to_bytes(&input);
+    let log = |mid_gray: f64| {
+        EcParams::new(
+            ExposureContrastStyle::Logarithmic,
+            with(&[(0, 0.5), (1, 0.8), (2, 1.1), (5, mid_gray)]),
+        )
+    };
+    let linear = EcParams::new(
+        ExposureContrastStyle::Linear,
+        with(&[(0, 0.5), (1, 0.8), (2, 1.1)]),
+    );
+    // (name, the pair, whether the wheel removes it)
+    let cases = [
+        ("log, same mid-gray", [log(0.435), log(0.435)], true),
+        ("log, mid-grays differ", [log(0.435), log(0.4)], false),
+        (
+            "log, mid-grays differ the other way",
+            [log(0.4), log(0.435)],
+            false,
+        ),
+        (
+            "linear, same values",
+            [linear.clone(), linear.clone()],
+            true,
+        ),
+    ];
+    for (name, [first, second], removed) in cases {
+        let response = Oracle::get().call(
+            "cpu_apply",
+            json!({
+                "transform": {"class": "GroupTransform", "children": [
+                    first.transform("TRANSFORM_DIR_FORWARD"),
+                    second.transform("TRANSFORM_DIR_INVERSE"),
+                ]},
+            }),
+            &[&bytes],
+        );
+        let result = &response.result;
+        assert!(result.get("exception").is_none(), "{name}: {result}");
+        let wheel = bytes_to_f32(&response.blobs[0]);
+        // (The input's signaling NaN comes back quieted either way.)
+        let same_as_input = wheel
+            .iter()
+            .zip(&input)
+            .all(|(w, i)| w.to_bits() == i.to_bits() || (w.is_nan() && i.is_nan()));
+        assert_eq!(
+            same_as_input, removed,
+            "{name}: the wheel's pixels {wheel:?}"
+        );
+
+        let mut raw = OpVec::new();
+        for (params, direction) in [
+            (&first, TransformDirection::Forward),
+            (&second, TransformDirection::Inverse),
+        ] {
+            create_exposure_contrast_op(
+                &mut raw,
+                std::hint::black_box(params.op_data(direction)),
+                TransformDirection::Forward,
+            );
+        }
+        raw.finalize().unwrap();
+        let cpu = CpuProcessor::new(&raw, BitDepth::F32, BitDepth::F32, flags(true)).unwrap();
+        let mut port = input.clone();
+        apply(&cpu, &mut port);
+        let differ: Vec<usize> = (0..port.len())
+            .filter(|&i| port[i].to_bits() != wheel[i].to_bits())
+            .collect();
+        assert!(differ.is_empty(), "{name}: pixels {differ:?} differ");
+        assert_eq!(
+            std::str::from_utf8(cpu.get_cache_id()).unwrap(),
+            result["cpu_cache_id"].as_str().unwrap(),
+            "{name}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------------------------

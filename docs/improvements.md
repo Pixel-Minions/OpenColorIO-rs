@@ -3027,9 +3027,15 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `EstimateHueSlopes`, `ops/gradingrgbcurve/GradingBSplineCurve.cpp:22-326` @ v2.5.2) is scalar
   `float` code that the two wheels compile with different operand orders: of its 31 additions
   and multiplications of the curve's values (where a NaN y coordinate, x coordinate or slope
-  can meet another NaN, or the default NaN of an invalid operation; two have an operand that
-  is never NaN), MSVC swaps the source's operands at 17 and GCC
-  at 13, not the same ones (Windows `sub_1801e7490`, `sub_1801e55d0`, `sub_1801e4cb0`,
+  can meet another NaN, or the default NaN of an invalid operation; seven of them show in no
+  output: six have an operand that is never NaN, namely `dx * K`, `k * (...)` with a constant,
+  `alpha * (...)`, `blend * (...)` and `scale * slopes[i]`, `scale * slopes[i + 1]`, which are
+  `KSI_DX_K`, `EST_NEAR_MIN_MUL`, `KSI_BOUND_MUL`, `KSI_BLEND_MUL`, `EST_SCALE0` and
+  `EST_SCALE1` in `hue_site` (`grading_b_spline_curve.rs`); and the seventh, the denominator
+  `len[k] + len[k - 1]` of the diagonal slopes, `EST_DIAG_DEN`, is NaN only where the
+  quotient's numerator is too, and `divss` keeps the numerator's NaN), MSVC swaps the
+  source's operands at 17 of them and GCC at 13, not the same ones (4 and 2 of those where
+  nothing shows; Windows `sub_1801e7490`, `sub_1801e55d0`, `sub_1801e4cb0`,
   `sub_1801e64d0`; Linux inlined in `computeKnotsAndCoefsForHueCurve`, `0x3bff10`, read with
   `tools/wheel-inspect`). For instance the second segment's constant `p0.y + slopes[i] *
   (ksi - p0.x) + ...` is `((ksi - x0) * s0 + y0) + ...` on Windows and `(s0 * (ksi - x0) +

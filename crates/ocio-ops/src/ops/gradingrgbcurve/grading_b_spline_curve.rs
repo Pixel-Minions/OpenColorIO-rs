@@ -754,7 +754,8 @@ mod hue_site {
     pub(super) const KSI_BOUND_MUL: u32 = 8;
     /// `CalcKsi`: `bnd + blend * (...)`, both blends.
     pub(super) const KSI_BLEND: u32 = 9;
-    /// `CalcKsi`: `blend * (...)`, both blends.
+    /// `CalcKsi`: `blend * (...)`, both blends (`blend` is never NaN: a branch that computes it
+    /// is taken only where `secant` compared above its lower bound and below its upper one).
     pub(super) const KSI_BLEND_MUL: u32 = 10;
     /// `FitHueSpline`: `slopes[i] + slopes[i + 1]`.
     pub(super) const FIT_SLOPES: u32 = 11;
@@ -786,15 +787,17 @@ mod hue_site {
     pub(super) const EST_DIAG_K: u32 = 24;
     /// `EstimateHueSlopes`: `len[k - 1] * s[k - 1]`.
     pub(super) const EST_DIAG_K1: u32 = 25;
-    /// `EstimateHueSlopes`: `len[k] + len[k - 1]`.
+    /// `EstimateHueSlopes`: `len[k] + len[k - 1]` (unobservable: the quotient's numerator is NaN
+    /// whenever this sum is, and `divss` keeps the numerator's NaN).
     pub(super) const EST_DIAG_DEN: u32 = 26;
     /// `EstimateHueSlopes`: `slopes[i] + k * (slopes[i + 1] - slopes[i])`.
     pub(super) const EST_NEAR_MIN: u32 = 27;
-    /// `EstimateHueSlopes`: `k * (slopes[i + 1] - slopes[i])`.
+    /// `EstimateHueSlopes`: `k * (slopes[i + 1] - slopes[i])` (`k` is a constant: never NaN).
     pub(super) const EST_NEAR_MIN_MUL: u32 = 28;
-    /// `EstimateHueSlopes`: `slopes[i] *= scale`.
+    /// `EstimateHueSlopes`: `scale * slopes[i]` (`scale` is never NaN: it is used only where
+    /// `scale < 1.f`, which a NaN fails).
     pub(super) const EST_SCALE0: u32 = 29;
-    /// `EstimateHueSlopes`: `slopes[i + 1] *= scale`.
+    /// `EstimateHueSlopes`: `scale * slopes[i + 1]` (never NaN `scale`, as above).
     pub(super) const EST_SCALE1: u32 = 30;
 }
 
