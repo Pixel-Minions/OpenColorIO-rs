@@ -16,18 +16,33 @@
 //! Each shard runs some of the groups on one platform in one profile, and each platform runs
 //! every group exactly once per profile (the tests below check that, simulating cargo's
 //! target selection, and that the workflow's matrices list every shard once). A shard that
-//! runs all three groups runs `cargo test --workspace --no-fail-fast` itself; the others add
-//! target filters to it (`--lib`, `--bin <name>`, `--test <name>`, or `--doc` in a run of its
-//! own), so features unify over the whole workspace and every test binary is built exactly as
-//! without filters.
+//! ran all three groups would run `cargo test --workspace --no-fail-fast` itself (none does
+//! now); the others add target filters to it (`--lib`, `--bin <name>`, `--test <name>`, or
+//! `--doc` in a run of its own), so features unify over the whole workspace and every test
+//! binary is built exactly as without filters.
 //!
-//! Measured on CI run 39496721649 (2026-10-20), minutes of test time, debug / release:
+//! Measured on CI run 39641166482 (PR #63, 2026-10-21, `OCIO_RS_TIER=full`, no oracle response
+//! reused between profiles), minutes of test binary time (the sum of each binary's "finished
+//! in"), debug / release:
 //!
 //! | group     | Windows       | Rocky Linux 9 |
 //! |-----------|---------------|---------------|
-//! | `formats` | 54.4 / 26.4   | 30.0 / 11.3   |
-//! | `heavy`   | 28.8 / 9.8    | 17.2 / 6.7    |
-//! | `rest`    | 29.5 / 9.1    | 18.5 / 6.6    |
+//! | `formats` | 68.9 / 38.5   | 30.8 / 41.5   |
+//! | `heavy`   | 36.1 / 32.9   | 16.3 / 24.9   |
+//! | `rest`    | 37.9 / 34.7   | 17.4 / 27.4   |
+//!
+//! A job also builds first (3 to 14 minutes; the most for `rest`, with its many small binaries).
+//! Jobs of the first run, in minutes: Windows debug `formats` 73, `heavy` 40, `rest` 49; Windows
+//! release `formats` 41, `heavy` + `rest` together 81; Rocky Linux 9 debug `formats` 33,
+//! `heavy` + `rest` 38; release `formats` + `heavy` + `rest` together 100. Expected from the
+//! table plus the build, release shards of the split: Windows `heavy` about 39 and `rest`
+//! about 47; Linux `formats` about 45 and `heavy` + `rest` about 58.
+//!
+//! `windows-debug-formats` stays over an hour, because of one test: the binary of its group
+//! runs its 15 tests in parallel, and `builtin_transform_matches_the_wheel_at_every_format_and_level`
+//! ends last, at 69 minutes (`lut3d_transform_...` at 51, the others by 28). It needs about 54
+//! minutes by itself on a Windows runner (run 39496721649) and more while the others share
+//! its four cores. The shards place whole test targets and don't split inside one.
 
 use std::path::Path;
 use std::process::Command;
@@ -76,10 +91,11 @@ impl Group {
     }
 }
 
-/// 54.4 minutes in debug on Windows (2026-10-20), of which `builtin_transform` alone runs 54.
+/// 68.9 minutes in debug on Windows (run 39641166482), dominated by one test: `builtin_transform`
+/// (see the module documentation).
 const FORMATS: &[(&str, &str)] = &[("ocio", "api_formats_oracle")];
 
-/// Windows debug minutes (2026-10-20): 12.3, 7.0, 6.6 and 2.9.
+/// Windows debug minutes (run 39641166482): 15.3, 9.0, 7.9 and 3.8.
 const HEAVY: &[(&str, &str)] = &[
     ("ocio-ops", "lut3d_inv_oracle"),
     ("ocio-ops", "lut1d_renderer_oracle"),
@@ -149,10 +165,16 @@ pub(crate) const SHARDS: &[Shard] = &[
         groups: &[Group::Formats],
     },
     Shard {
+        id: "windows-release-heavy",
+        platform: Platform::Windows,
+        release: true,
+        groups: &[Group::Heavy],
+    },
+    Shard {
         id: "windows-release-rest",
         platform: Platform::Windows,
         release: true,
-        groups: &[Group::Heavy, Group::Rest],
+        groups: &[Group::Rest],
     },
     Shard {
         id: "linux-debug-formats",
@@ -167,10 +189,16 @@ pub(crate) const SHARDS: &[Shard] = &[
         groups: &[Group::Heavy, Group::Rest],
     },
     Shard {
-        id: "linux-release-all",
+        id: "linux-release-formats",
         platform: Platform::Linux,
         release: true,
-        groups: &[Group::Formats, Group::Heavy, Group::Rest],
+        groups: &[Group::Formats],
+    },
+    Shard {
+        id: "linux-release-rest",
+        platform: Platform::Linux,
+        release: true,
+        groups: &[Group::Heavy, Group::Rest],
     },
 ];
 
