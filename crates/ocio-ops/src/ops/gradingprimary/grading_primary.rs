@@ -315,8 +315,10 @@ struct Orders {
     /// `o.master + o.channel`, video (both directions); the sum then adds `l.master`, then
     /// `l.channel`, on both wheels.
     video_offset: [First; 3],
-    /// `g.master * g.channel`, video (both directions).
-    video_gamma: [First; 3],
+    /// `g.master * g.channel`, forward video.
+    video_gamma_fwd: [First; 3],
+    /// `g.master * g.channel`, inverse video.
+    video_gamma_inv: [First; 3],
     /// `l.master + l.channel` of the inverse video slope.
     video_slope_inv: [First; 3],
     /// Whether the inverse log brightness `-(float)(x * 6.25 / 1023.)` keeps a NaN's sign:
@@ -339,7 +341,8 @@ const ORDERS: Orders = Orders {
     lin_contrast: [M, C, C],
     video_gain: [M, M, M],
     video_offset: [M, C, C],
-    video_gamma: [M, C, C],
+    video_gamma_fwd: [M, C, C],
+    video_gamma_inv: [M, C, C],
     video_slope_inv: [M, M, C],
     log_brightness_inv_folds: true,
 };
@@ -357,7 +360,8 @@ const ORDERS: Orders = Orders {
     lin_contrast: [C, C, M],
     video_gain: [C, C, M],
     video_offset: [C, C, M],
-    video_gamma: [C, C, M],
+    video_gamma_fwd: [C, C, C],
+    video_gamma_inv: [C, C, M],
     video_slope_inv: [C, C, M],
     log_brightness_inv_folds: false,
 };
@@ -375,6 +379,38 @@ fn mul(first: First, master: f64, channel: f64) -> f64 {
     match first {
         M => sse_mul(master, channel),
         C => sse_mul(channel, master),
+    }
+}
+
+/// `-x` as x86 computes the C++ `-static_cast<float>(...)`: `xorps` with the sign mask, which
+/// flips the sign bit of any value, NaNs included.
+fn negate(x: f32) -> f32 {
+    f32::from_bits(x.to_bits() ^ 0x8000_0000)
+}
+
+/// The inverse log brightness `-static_cast<float>(sum * 6.25 / 1023.)`: the sign flipped on
+/// Linux, kept on Windows, where MSVC computes `sum * -6.25 / 1023.` (`log_brightness_inv_folds`).
+///
+/// A NaN `sum` goes through the multiplication and the division unchanged on x86, so its arm
+/// narrows (and negates) `sum` itself. LLVM's LangRef leaves the sign of a NaN that `fdiv`
+/// returns unspecified, so in optimized builds LLVM folded the negation into the divisor
+/// (`x / -1023.`), whose NaN keeps its sign, even with the negation written on the bits (which
+/// LLVM turns into an `fneg`; Rocky Linux run, 2026-10-21). `fneg` and `fptrunc` applied to the
+/// NaN itself keep their sign semantics (`fneg` flips the sign bit, `fptrunc` keeps it), in
+/// any order. The unit test `inverse_negations_flip_the_sign_of_a_nan` guards it.
+fn inverse_log_brightness(sum: f64, o: &Orders) -> f32 {
+    if sum.is_nan() {
+        let narrowed = sum as f32;
+        return if o.log_brightness_inv_folds {
+            narrowed
+        } else {
+            negate(narrowed)
+        };
+    }
+    if o.log_brightness_inv_folds {
+        (sum * -6.25 / 1023.) as f32
+    } else {
+        negate((sum * 6.25 / 1023.) as f32)
     }
 }
 
@@ -412,11 +448,7 @@ impl GradingPrimaryPreRender {
                         }
                         TransformDirection::Inverse => {
                             let sum = add(o.log_brightness_inv[i], b.master, channels(b)[i]);
-                            self.brightness[i] = if o.log_brightness_inv_folds {
-                                (sum * -6.25 / 1023.) as f32
-                            } else {
-                                -((sum * 6.25 / 1023.) as f32)
-                            };
+                            self.brightness[i] = inverse_log_brightness(sum, o);
                             let ci = mul(o.log_contrast_inv[i], c.master, channels(c)[i]);
                             self.contrast[i] = (1. / (if ci == 0. { 1. } else { ci })) as f32;
                             self.gamma[i] = mul(o.log_gamma[i], g.master, channels(g)[i]) as f32;
@@ -452,7 +484,7 @@ impl GradingPrimaryPreRender {
                             self.contrast[i] = contrast as f32;
                         }
                         TransformDirection::Inverse => {
-                            self.offset[i] = -offset;
+                            self.offset[i] = negate(offset);
                             self.exposure[i] = 1. / exposure;
                             // Validate ensures contrast is above a threshold.
                             self.contrast[i] = (1. / contrast) as f32;
@@ -486,7 +518,6 @@ impl GradingPrimaryPreRender {
                         ),
                         channels(l)[i],
                     ) as f32;
-                    let gamma = mul(o.video_gamma[i], g.master, channels(g)[i]);
                     match dir {
                         TransformDirection::Forward => {
                             self.offset[i] = offset;
@@ -496,10 +527,11 @@ impl GradingPrimaryPreRender {
                             );
                             let den = if slope_den == 0. { 1. } else { slope_den };
                             self.slope[i] = ((v.pivot_white - v.pivot_black) / den) as f32;
+                            let gamma = mul(o.video_gamma_fwd[i], g.master, channels(g)[i]);
                             self.gamma[i] = (1. / gamma) as f32;
                         }
                         TransformDirection::Inverse => {
-                            self.offset[i] = -offset;
+                            self.offset[i] = negate(offset);
                             let lift = sse_sub(
                                 add(o.video_slope_inv[i], l.master, channels(l)[i]),
                                 v.pivot_black,
@@ -508,7 +540,8 @@ impl GradingPrimaryPreRender {
                             self.slope[i] = (sse_add(lift, v.pivot_white / gain)
                                 / (v.pivot_white - v.pivot_black))
                                 as f32;
-                            self.gamma[i] = gamma as f32;
+                            self.gamma[i] =
+                                mul(o.video_gamma_inv[i], g.master, channels(g)[i]) as f32;
                         }
                     }
                 }

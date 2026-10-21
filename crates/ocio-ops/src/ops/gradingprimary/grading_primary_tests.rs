@@ -157,3 +157,42 @@ fn precompute() {
     assert!(comp.is_gamma_identity());
     assert!(comp.get_local_bypass());
 }
+
+/// The negations of the inverse directions flip a NaN's sign, as the wheels' `xorps` does (on
+/// Windows the log brightness's negation is folded into `-6.25`, which keeps it): the same
+/// value through the forward and the inverse direction differs only in the sign bit. Run in
+/// debug and release builds, where an optimizer could fold the negation.
+#[test]
+fn inverse_negations_flip_the_sign_of_a_nan() {
+    let nan = f64::from_bits(0x7ff8_0000_1234_0000);
+    let mut v = GradingPrimary::new(GradingStyle::Lin);
+    v.offset.red = nan;
+    let mut fwd = GradingPrimaryPreRender::default();
+    let mut inv = GradingPrimaryPreRender::default();
+    fwd.update(GradingStyle::Lin, TransformDirection::Forward, &v);
+    inv.update(GradingStyle::Lin, TransformDirection::Inverse, &v);
+    assert!(fwd.get_offset()[0].is_nan());
+    assert_eq!(
+        inv.get_offset()[0].to_bits(),
+        fwd.get_offset()[0].to_bits() ^ 0x8000_0000
+    );
+
+    let mut v = GradingPrimary::new(GradingStyle::Video);
+    v.offset.red = nan;
+    fwd.update(GradingStyle::Video, TransformDirection::Forward, &v);
+    inv.update(GradingStyle::Video, TransformDirection::Inverse, &v);
+    assert_eq!(
+        inv.get_offset()[0].to_bits(),
+        fwd.get_offset()[0].to_bits() ^ 0x8000_0000
+    );
+
+    let mut v = GradingPrimary::new(GradingStyle::Log);
+    v.brightness.red = nan;
+    fwd.update(GradingStyle::Log, TransformDirection::Forward, &v);
+    inv.update(GradingStyle::Log, TransformDirection::Inverse, &v);
+    let flip = if cfg!(windows) { 0 } else { 0x8000_0000 };
+    assert_eq!(
+        inv.get_brightness()[0].to_bits(),
+        fwd.get_brightness()[0].to_bits() ^ flip
+    );
+}
