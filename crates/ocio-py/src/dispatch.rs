@@ -325,11 +325,6 @@ fn has_slot(obj: &Bound<'_, PyAny>, name: &str) -> bool {
     obj.get_type().hasattr(name).unwrap_or(false)
 }
 
-/// `PyIndex_Check`: the type has `__index__`.
-fn index_check(obj: &Bound<'_, PyAny>) -> bool {
-    has_slot(obj, "__index__")
-}
-
 /// `PyNumber_Check`: `__index__`, `__int__` or `__float__`, or a complex number.
 fn number_check(obj: &Bound<'_, PyAny>) -> bool {
     has_slot(obj, "__index__")
@@ -345,15 +340,15 @@ macro_rules! int_caster {
     ($t:ty, $signed:expr) => {
         impl<'py> Cast<'py> for $t {
             /// pybind11's integer caster: never a `float` (a subclass included); without
-            /// conversions, an `int` (a `bool` too) or an object with `__index__`; the value
-            /// through `PyLong_AsLong` (signed, which calls `__index__`) or
-            /// `PyLong_AsUnsignedLong` (unsigned, an `int` only), refused when it errs or
-            /// doesn't fit; with conversions, when that errs for an object `PyNumber_Check`
-            /// accepts, again with `int(obj)`.
+            /// conversions, an `int` only (a `bool` too: the wheel takes an object with
+            /// `__index__` only with conversions, so a `list` subclass with `__index__` goes to
+            /// a later overload's sequence in the first pass); the value through
+            /// `PyLong_AsLong` (signed, which calls `__index__`) or `PyLong_AsUnsignedLong`
+            /// (unsigned, an `int` only), refused when it errs or doesn't fit; with
+            /// conversions, when that errs for an object `PyNumber_Check` accepts, again with
+            /// `int(obj)`.
             fn load(obj: &Bound<'py, PyAny>, convert: bool) -> Option<Self> {
-                if obj.is_instance_of::<PyFloat>()
-                    || (!convert && !obj.is_instance_of::<PyInt>() && !index_check(obj))
-                {
+                if obj.is_instance_of::<PyFloat>() || (!convert && !obj.is_instance_of::<PyInt>()) {
                     return None;
                 }
                 let value: Result<Self, bool> = if $signed {

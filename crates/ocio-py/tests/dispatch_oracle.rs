@@ -9,7 +9,12 @@
 //! - each caster accepts exactly the values the wheel accepts for a parameter of its C++ type
 //!   (a wheel function with one such parameter, refusing with "incompatible function
 //!   arguments"), over values of every kind: booleans, integers in and out of range, floats,
-//!   NumPy scalars and arrays, strings, bytes, `None`, sequences, sets, iterators.
+//!   NumPy scalars and arrays, strings, bytes, `None`, sequences, sets, iterators;
+//! - an overloaded call tries each overload without conversions first, then again with them:
+//!   a function of the dispatcher with the overloads `(int)` and `(Sequence[float])` chooses,
+//!   for each value, the overload the wheel's `GradingBSplineCurve(value)` does (the first and
+//!   fourth of its five; the others take two arguments). The class chunks keep this as their
+//!   first check of the dispatcher.
 #![cfg(feature = "python")]
 
 mod common;
@@ -322,6 +327,165 @@ fn check<T: for<'py> Cast<'py>>(caster: &str, accepted: Vec<bool>) {
         "{caster}:\n{}",
         differences.join("\n")
     );
+}
+
+/// The port's overloaded function: `(size: int)` and `(points: Sequence[float])`, as
+/// `GradingBSplineCurve.__init__`'s first and fourth overloads. Each returns the arguments it
+/// took, as the wheel's call to make the same curve: `[n]` or `[[x, ...]]`.
+static PROBE: ocio_py::dispatch::Function = ocio_py::dispatch::Function {
+    name: "probe",
+    constructor: false,
+    method: false,
+    overloads: &[
+        ocio_py::dispatch::Overload {
+            params: &[ocio_py::dispatch::Param::new("size", "typing.SupportsInt")],
+            ret: "list",
+            call: |py, _, a, convert| {
+                let Some(n) = <i32 as Cast>::try_load(&a[0], convert)? else {
+                    return Ok(None);
+                };
+                Ok(Some(pyo3::types::PyList::new(py, [n])?.into_any().unbind()))
+            },
+            pos_only: 0,
+        },
+        ocio_py::dispatch::Overload {
+            params: &[ocio_py::dispatch::Param::new(
+                "points",
+                "collections.abc.Sequence[typing.SupportsFloat]",
+            )],
+            ret: "list",
+            call: |py, _, a, convert| {
+                let Some(points) = <Vec<f64> as Cast>::try_load(&a[0], convert)? else {
+                    return Ok(None);
+                };
+                Ok(Some(
+                    pyo3::types::PyList::new(py, [pyo3::types::PyList::new(py, points)?])?
+                        .into_any()
+                        .unbind(),
+                ))
+            },
+            pos_only: 0,
+        },
+    ],
+};
+
+/// Each overload's choice is the wheel's: for each value, the port's dispatcher picks an
+/// overload (or none), and the wheel's GradingBSplineCurve(value) makes the curve the wheel
+/// makes from the arguments that overload took (or refuses the value the same way).
+#[test]
+fn overloads_are_tried_without_conversions_first() {
+    let four = || json!({ "list": [f(1.0), f(2.0), f(3.0), f(4.0)] });
+    let with_index = |base: &str, items: Value| {
+        vec![
+            call(
+                name("type"),
+                json!([s("V"), { "tuple": [name(base)] }, { "dict": [[s("__module__"), s("probe")], [s("__index__"), name("numpy.size")]] }]),
+            ),
+            call(json!({ "ref": 0 }), json!([items])),
+        ]
+    };
+    let values: Vec<Vec<Value>> = vec![
+        vec![json!({ "eval": int("3") })],
+        vec![json!({ "eval": { "bool": true } })],
+        vec![call(name("numpy.int64"), json!([int("3")]))],
+        vec![call(name("numpy.float32"), json!([f(3.0)]))],
+        vec![json!({ "eval": f(3.5) })],
+        vec![json!({ "eval": four() })],
+        vec![json!({ "eval": { "list": [int("1"), int("2"), int("3"), int("4")] } })],
+        vec![json!({ "eval": { "tuple": [f(1.0), f(2.0), f(3.0), f(4.0)] } })],
+        vec![call(name("set"), json!([four()]))],
+        vec![call(name("numpy.array"), json!([four()]))],
+        // A list (or tuple) with __index__: a sequence of floats without conversions, an int
+        // only with them.
+        with_index("list", four()),
+        with_index("tuple", four()),
+        // An object with __index__ only: an int with conversions.
+        vec![
+            call(
+                name("type"),
+                json!([s("W"), { "tuple": [name("object")] }, { "dict": [[s("__module__"), s("probe")], [s("__index__"), name("numpy.size")]] }]),
+            ),
+            call(json!({ "ref": 0 }), json!([])),
+        ],
+        vec![json!({ "eval": s("abcd") })],
+        vec![json!({ "eval": { "none": null } })],
+    ];
+    // The port's choices: the arguments of the overload it took, or None (refused).
+    common::start_python();
+    let chosen: Vec<Option<Value>> = Python::attach(|py| {
+        values
+            .iter()
+            .map(|v| {
+                let obj = port_object(py, &json!(v));
+                let args = pyo3::types::PyTuple::new(py, [obj]).unwrap();
+                match ocio_py::dispatch::dispatch(py, &PROBE, &args, None) {
+                    Ok(taken) => {
+                        let text: String = py
+                            .import("json")
+                            .unwrap()
+                            .call_method1("dumps", (taken,))
+                            .unwrap()
+                            .extract()
+                            .unwrap();
+                        Some(serde_json::from_str(&text).unwrap())
+                    }
+                    Err(_) => None,
+                }
+            })
+            .collect()
+    });
+    // The wheel: GradingBSplineCurve(value), then from the arguments the port's overload took.
+    let mut steps = Vec::new();
+    let mut pairs = Vec::new();
+    for (v, taken) in values.iter().zip(&chosen) {
+        let base = steps.len();
+        for step in v {
+            steps.push(shift_refs(step, base));
+        }
+        let made = steps.len();
+        steps.push(call(
+            name("OCIO.GradingBSplineCurve"),
+            json!([{ "ref": made - 1 }]),
+        ));
+        let reference = taken.as_ref().map(|args| {
+            let args: Vec<Value> = args
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|a| match a {
+                    Value::Number(n) => int(&n.to_string()),
+                    Value::Array(xs) => json!({ "list": xs.iter().map(|x| f(x.as_f64().unwrap())).collect::<Vec<_>>() }),
+                    other => panic!("{other}"),
+                })
+                .collect();
+            steps.push(call(name("OCIO.GradingBSplineCurve"), json!(args)));
+            steps.len() - 1
+        });
+        pairs.push((made, reference));
+    }
+    let report = wheel(&[json!({ "steps": steps })]).remove(0);
+    for ((made, reference), v) in pairs.into_iter().zip(&values) {
+        let theirs = &report["steps"][made];
+        match reference {
+            Some(r) => assert_eq!(theirs, &report["steps"][r], "{}", json!(v)),
+            None => {
+                let message = String::from_utf8(ocio_testkit::oracle_values::bytes(
+                    &theirs["raised"]["message"],
+                ))
+                .unwrap_or_default();
+                assert!(
+                    message.contains("incompatible constructor arguments"),
+                    "{}: the port refused, the wheel: {theirs}",
+                    json!(v)
+                );
+            }
+        }
+    }
+}
+
+/// A float literal of the step interpreter.
+fn f(x: f64) -> Value {
+    json!({ "float": format!("0x{:016x}", x.to_bits()) })
 }
 
 /// Each caster accepts what the wheel accepts for a parameter of its C++ type.
