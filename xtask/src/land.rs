@@ -8,10 +8,13 @@
 //!    first without gates: a commit whose replay comes out empty, or that the replay drops,
 //!    although the original changed something, stops the land (a merge lost its changes); for
 //!    a branch with merge commits, the replay must also drop nothing they carry. Then with
-//!    `git rebase --exec "cargo xtask gate"`, which gates every commit in debug on this
-//!    platform (release and Rocky Linux 9 run once, on the merge commit, in step 4). Every
-//!    replay merges `docs/improvements.md` entry by entry (`xtask merge-register`, the
-//!    `ocio-register` merge driver that `.gitattributes` names);
+//!    `git rebase --exec "cargo xtask gate --touched"`, which gates every commit in debug on
+//!    this platform: fmt, clippy (the whole workspace, all targets) and `xtask ci`, and the
+//!    tests of only the packages the commit changes (the whole workspace for changes to the
+//!    oracle, fixtures, upstream, the test kit or the build; none for documentation;
+//!    `gate::touched_tests`). Release, Rocky Linux 9 and every test run once, on the merge
+//!    commit, in step 4. Every replay merges `docs/improvements.md` entry by entry
+//!    (`xtask merge-register`, the `ocio-register` merge driver that `.gitattributes` names);
 //! 2. merges the result with `--no-ff`, listing each chunk's subject, and checks that the
 //!    merged register equals the one rebuilt entry by entry from the branch's own commits;
 //! 3. regenerates `docs/parity.md` and `docs/ratchet.toml` into that merge commit;
@@ -48,9 +51,11 @@ Lands <branch> on phase0, from the main checkout on phase0 with a clean tree:
      commit that changes something replays as an empty one or is dropped (a merge lost its
      changes). The replays merge docs/improvements.md entry by entry (`xtask
      merge-register`). Then it replays them with
-     `git rebase --exec \"cargo xtask gate\"`: every commit is gated in debug on this
-     platform (each chunk already passed its own gate; release and Rocky Linux 9 run on
-     the merge commit, step 4); commits already on top of phase0 keep their hashes. For a branch with merge commits, a first
+     `git rebase --exec \"cargo xtask gate --touched\"`: every commit is gated in debug on
+     this platform, with fmt, clippy and ci over the whole workspace and the tests of the
+     packages it changes only (`cargo xtask gate --help`; each chunk already passed its own
+     gate; release, Rocky Linux 9 and every test run on the merge commit, step 4); commits
+     already on top of phase0 keep their hashes. For a branch with merge commits, a first
      replay without gates must give the tree that merging the branch as it is gives (a
      replay drops merge commits, and what only they carry); otherwise it stops at once.
   2. merges the result with --no-ff; the message lists each chunk's subject. The merged
@@ -204,12 +209,13 @@ pub(crate) fn run(branch: &str, rocky: bool) -> Result<(), String> {
     }
     crate::git(&wt, &["checkout", "--quiet", "--detach", &tip])?;
 
-    // 1. Replay, gating every commit lightly: fmt, clippy, ci and the debug tests on this
-    // platform. Each chunk already passed its own `gate --staged` (with --release --rocky when
-    // numeric), and step 4 runs the full gate, release and Rocky Linux 9 included, on the
-    // merged result (owner decision, 2026-10-01: the per-commit Rocky and release passes made
-    // lands the slowest step).
-    let exec = "cargo xtask gate";
+    // 1. Replay, gating every commit lightly: fmt, clippy, ci and the debug tests of the
+    // packages it changes (`gate --touched`), on this platform. Each chunk already passed its
+    // own `gate --staged` (with --release --rocky when numeric), and step 4 runs the full gate,
+    // every test, release and Rocky Linux 9 included, on the merged result (owner decision,
+    // 2026-10-01: the per-commit Rocky and release passes made lands the slowest step; and
+    // 2026-10-21: the per-commit tests of the whole workspace, about 20 minutes each).
+    let exec = "cargo xtask gate --touched";
     println!("land: git rebase --exec \"{exec}\" {}", short(&base));
     let mut rebase = Command::new("git");
     rebase

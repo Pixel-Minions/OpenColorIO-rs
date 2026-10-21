@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! The workspace's packages and their targets, from `cargo metadata --no-deps`
-//! (`cargo xtask test-shard`).
+//! The workspace's packages, their directories and their targets, from
+//! `cargo metadata --no-deps` (`cargo xtask test-shard`, `cargo xtask gate --touched`).
 
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -11,6 +11,9 @@ use std::process::{Command, Stdio};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Package {
     pub(crate) name: String,
+    /// Its directory relative to the workspace root, with `/` (`crates/ocio-ops`), or `""` for
+    /// a package at the root.
+    pub(crate) dir: String,
     pub(crate) targets: Vec<Target>,
 }
 
@@ -55,6 +58,7 @@ pub(crate) fn parse(json: &str) -> Result<Vec<Package>, String> {
             .map(String::from)
             .ok_or_else(|| format!("cargo metadata: no `{key}`"))
     };
+    let root = slashes(&str_of(&value, "workspace_root")?);
     let members: Vec<&str> = value
         .get("workspace_members")
         .and_then(|m| m.as_array())
@@ -72,6 +76,13 @@ pub(crate) fn parse(json: &str) -> Result<Vec<Package>, String> {
             continue;
         }
         let name = str_of(package, "name")?;
+        let manifest = slashes(&str_of(package, "manifest_path")?);
+        let dir = manifest
+            .strip_suffix("/Cargo.toml")
+            .and_then(|d| strip_dir_prefix(d, &root))
+            .ok_or_else(|| {
+                format!("cargo metadata: {name}'s manifest {manifest} is not under {root}")
+            })?;
         let mut targets = Vec::new();
         for target in package
             .get("targets")
@@ -94,9 +105,25 @@ pub(crate) fn parse(json: &str) -> Result<Vec<Package>, String> {
                 doctest: flag("doctest"),
             });
         }
-        packages.push(Package { name, targets });
+        packages.push(Package { name, dir, targets });
     }
     Ok(packages)
+}
+
+/// `path` with `/` separators.
+fn slashes(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
+/// `dir` relative to `root` (`""` for the root itself), when it is `root` or inside it.
+fn strip_dir_prefix(dir: &str, root: &str) -> Option<String> {
+    let root = root.trim_end_matches('/');
+    let rest = dir.strip_prefix(root)?;
+    if rest.is_empty() {
+        Some(String::new())
+    } else {
+        rest.strip_prefix('/').map(String::from)
+    }
 }
 
 #[cfg(test)]
@@ -131,7 +158,8 @@ mod tests {
         let packages = parse(SAMPLE).unwrap();
         assert_eq!(packages.len(), 2);
         assert_eq!(packages[0].name, "ocio-ops");
-        assert_eq!(packages[1].name, "xtask");
+        assert_eq!(packages[0].dir, "crates/ocio-ops");
+        assert_eq!(packages[1].dir, "xtask");
         assert_eq!(
             packages[0].targets[1],
             Target {
@@ -145,10 +173,26 @@ mod tests {
     }
 
     #[test]
+    fn package_directories() {
+        assert_eq!(
+            strip_dir_prefix("/w/crates/a", "/w"),
+            Some("crates/a".into())
+        );
+        assert_eq!(strip_dir_prefix("/w", "/w/"), Some(String::new()));
+        assert_eq!(strip_dir_prefix("/wx/a", "/w"), None);
+        assert_eq!(strip_dir_prefix("/v/a", "/w"), None);
+    }
+
+    #[test]
     fn reads_this_workspace() {
         let packages = workspace(&crate::root()).unwrap();
         let xtask = packages.iter().find(|p| p.name == "xtask").unwrap();
+        assert_eq!(xtask.dir, "xtask");
         assert!(xtask.targets.iter().any(|t| t.kinds == ["bin"] && t.test));
-        assert!(packages.iter().any(|p| p.name == "ocio-ops"));
+        assert!(
+            packages
+                .iter()
+                .any(|p| p.name == "ocio-ops" && p.dir == "crates/ocio-ops")
+        );
     }
 }

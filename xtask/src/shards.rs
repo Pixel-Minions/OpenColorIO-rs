@@ -475,6 +475,7 @@ mod tests {
         vec![
             Package {
                 name: "ocio-ops".into(),
+                dir: "crates/ocio-ops".into(),
                 targets: vec![
                     target("ocio_ops", "lib", true),
                     target("lut3d_inv_oracle", "test", false),
@@ -485,6 +486,7 @@ mod tests {
             },
             Package {
                 name: "ocio".into(),
+                dir: "crates/ocio".into(),
                 targets: vec![
                     target("ocio", "lib", true),
                     target("api_formats_oracle", "test", false),
@@ -495,6 +497,7 @@ mod tests {
             },
             Package {
                 name: "ocio-testkit".into(),
+                dir: "crates/ocio-testkit".into(),
                 targets: vec![
                     target("ocio_testkit", "lib", true),
                     // The same name as a test of `ocio`: shards select by package.
@@ -503,6 +506,7 @@ mod tests {
             },
             Package {
                 name: "xtask".into(),
+                dir: "xtask".into(),
                 targets: vec![target("xtask", "bin", false)],
             },
         ]
@@ -613,6 +617,7 @@ mod tests {
             .push(target("new_oracle", "test", false));
         packages.push(Package {
             name: "ocio-new".into(),
+            dir: "crates/ocio-new".into(),
             targets: vec![target("ocio_new", "lib", false)],
         });
         let units = units(&packages).unwrap();
