@@ -3,14 +3,16 @@
 
 //! The CPython calls that make pybind11's types and functions as the wheel has them, which no
 //! safe API makes (owner decisions 2026-10-20, "option A", and 2026-10-21: `unsafe` in this
-//! file only, limited to these three calls):
+//! file only, limited to these four calls):
 //! - `PyType_FromMetaclass`: a class with pybind11's metatype whose C name (`tp_name`) is the
 //!   dotted `PyOpenColorIO.PyOpenColorIO.Name`, as pybind11's are. CPython writes it in some
 //!   messages ("'<' not supported between instances of ...", "'...' object has no attribute
 //!   ...", "bad operand type for unary ~: ...").
 //! - `PyInstanceMethod_New`: CPython's `instancemethod`, which pybind11 wraps each method in;
 //! - `PyCFunction_NewEx`: a builtin function whose `__self__` is pybind11's function record,
-//!   which CPython names in the function's `__qualname__` and repr.
+//!   which CPython names in the function's `__qualname__` and repr;
+//! - `PySequence_Check`: whether an object is a sequence as pybind11's sequence casters ask it
+//!   (the type's `sq_item` slot), which no Python-level check answers exactly.
 #![allow(unsafe_code)]
 
 use std::ffi::{CStr, CString, c_void};
@@ -111,6 +113,17 @@ pub(crate) fn new_function<'py>(
     // SAFETY: `ptr` is the call's result: a new reference we own, or null with an exception
     // set.
     unsafe { Bound::from_owned_ptr_or_err(record.py(), ptr) }
+}
+
+/// `PySequence_Check(obj)`: whether `obj`'s type has the sequence slot `sq_item` and isn't a
+/// `dict` subclass, which pybind11's sequence casters check first, before any call into the
+/// object.
+pub(crate) fn sequence_check(obj: &Bound<'_, PyAny>) -> bool {
+    // SAFETY: the interpreter is attached (`obj` is bound to it) and `obj` is a live object;
+    // PySequence_Check only reads its type's flags and slots, takes no reference and can't
+    // fail.
+    let check = unsafe { ffi::PySequence_Check(obj.as_ptr()) };
+    check == 1
 }
 
 /// `PyInstanceMethod_New(f)`: `f` as a method, CPython's `instancemethod`.

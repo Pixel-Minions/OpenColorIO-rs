@@ -1883,6 +1883,28 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   removes the difference.
 - **Status:** matched in `p6-core` (6.2b follow-up); `enums_oracle.rs`.
 
+### I-236. A huge `len()` makes a list argument fail with the C++ runtime's texts
+
+- **Upstream:** pybind11's `std::vector` caster reserves the sequence's `len()` elements before
+  reading any (`list_caster::reserve_maybe`), and its `std::array` caster reserves a second
+  `len()` for its items. Through the wheels, a sequence whose `__len__` returns more than the
+  vector's `max_size()` makes the call raise `ValueError` "vector too long" on Windows (MSVC's
+  STL) and "vector::reserve" on Linux (libstdc++); one the allocator can't serve raises
+  `MemoryError` "bad allocation" or "std::bad_alloc"; and on Windows only, a size within 47
+  bytes of the address space raises `MemoryError` "bad array new length" (MSVC adds 47 bytes
+  of alignment to large allocations). The limits differ too: MSVC's `max_size()` is
+  `SIZE_MAX / sizeof(T)` capped at `PTRDIFF_MAX`, libstdc++'s `PTRDIFF_MAX / sizeof(T)`, so
+  `2**61` floats are "vector::reserve" on Linux and "bad allocation" on Windows (seen through
+  the wheel in `dispatch_oracle.rs`).
+- **Who notices:** Python code that passes a sequence whose `__len__` lies (or is huge) to a
+  function taking a list.
+- **A fix:** read the items without reserving, or refuse a `len()` beyond the items read, with
+  one text on both platforms.
+- **Status:** matched in `p6-core` (`crates/ocio-py/src/dispatch.rs`, `reserve`, which reserves
+  the same bytes through the same allocator and raises the platform's texts);
+  `dispatch_oracle.rs`, `vectors_load_sequences_as_the_wheels`,
+  `arrays_load_sequences_as_the_wheels`.
+
 ## Platform, environment and paths
 
 ### I-110. `splitext` compares the rest of the name with "."
@@ -4398,3 +4420,35 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   class has no instances (the wheel's process aborts)", in `p6-core`
   (`crates/ocio-py/src/pybind11.rs`, `Pybind11Object::new`); `constructors_oracle.rs`,
   `undefined_behaviour_raises_the_ports_errors` (the port only).
+
+### U-96. A sequence whose third `len()` raises is read with the exception set
+
+- **Upstream:** pybind11's `std::array` caster calls the sequence's `len()` three times: to
+  check the size, to reserve, and for the end of its index loop (`sequence::end()`, which
+  doesn't check `PySequence_Size`'s error). When the third raises, it reads the items with
+  that exception still set, which CPython doesn't allow: through the wheel,
+  `MatrixTransform().setOffset(x)` raised `SystemError` "<method 'append' of 'list' objects>
+  returned a result with an exception set" from whatever the item's `__getitem__` called
+  first (the p6-core-2 probes).
+- **Who notices:** Python code that passes a sequence whose `__len__` raises on its third call
+  to a function taking a fixed-size array.
+- **A fix:** none needed beyond the port's error.
+- **Status:** the port raises RuntimeError "the sequence's third len() raised, and pybind11
+  reads its items with that exception set (...)", the `len()` error as its cause, in
+  `p6-core` (`crates/ocio-py/src/dispatch.rs`, the `[T; N]` caster); `dispatch_oracle.rs`,
+  `arrays_refuse_what_the_wheel_reads_undefined` (the port only).
+
+### U-97. A sequence whose third `len()` shrinks leaves an array partly unread
+
+- **Upstream:** the same caster reads the items up to the third `len()` into a vector and then
+  copies the array's `N` values from it (`vector_to_array`), whether or not it holds `N`: a
+  third `len()` under `N` copies memory the vector reserved but never initialized (through
+  the wheel, `setOffset` of a sequence whose `len()`s were 4, 4, 2 gave `[0.0, 1.0, 0.0,
+  0.0]`, the last two whatever the memory held).
+- **Who notices:** Python code that passes a sequence whose `__len__` changes between calls to
+  a function taking a fixed-size array.
+- **A fix:** none needed beyond the port's error.
+- **Status:** the port raises RuntimeError "the sequence's third len() gave 2, and pybind11
+  reads the 4 values of the array from memory it didn't initialize (...)", in `p6-core`
+  (`crates/ocio-py/src/dispatch.rs`, the `[T; N]` caster); `dispatch_oracle.rs`,
+  `arrays_refuse_what_the_wheel_reads_undefined` (the port only).

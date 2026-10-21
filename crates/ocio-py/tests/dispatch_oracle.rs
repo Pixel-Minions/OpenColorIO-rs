@@ -14,7 +14,12 @@
 //!   a function of the dispatcher with the overloads `(int)` and `(Sequence[float])` chooses,
 //!   for each value, the overload the wheel's `GradingBSplineCurve(value)` does (the first and
 //!   fourth of its five; the others take two arguments). The class chunks keep this as their
-//!   first check of the dispatcher.
+//!   first check of the dispatcher;
+//! - the container casters (`std::vector<float>` through that function, `std::array<double,
+//!   4>` through `MatrixTransform.setOffset`) read sequences and iterables as the wheel's: the
+//!   same `len()` and item reads in the same order, stopping at the first item refused, the
+//!   errors those reads and the C++ runtime's reservation raise (I-236), generators, `map`,
+//!   `zip`, views and sets taken by their types.
 #![cfg(feature = "python")]
 
 mod common;
@@ -329,7 +334,7 @@ fn check<T: for<'py> Cast<'py>>(caster: &str, accepted: Vec<bool>) {
     );
 }
 
-/// The port's overloaded function: `(size: int)` and `(points: Sequence[float])`, as
+/// The port's overloaded function: `(size: int)` and `(points: std::vector<float>)`, as
 /// `GradingBSplineCurve.__init__`'s first and fourth overloads. Each returns the arguments it
 /// took, as the wheel's call to make the same curve: `[n]` or `[[x, ...]]`.
 static PROBE: ocio_py::dispatch::Function = ocio_py::dispatch::Function {
@@ -355,7 +360,7 @@ static PROBE: ocio_py::dispatch::Function = ocio_py::dispatch::Function {
             )],
             ret: "list",
             call: |py, _, a, convert| {
-                let Some(points) = <Vec<f64> as Cast>::try_load(&a[0], convert)? else {
+                let Some(points) = <Vec<f32> as Cast>::try_load(&a[0], convert)? else {
                     return Ok(None);
                 };
                 Ok(Some(
@@ -481,6 +486,440 @@ fn overloads_are_tried_without_conversions_first() {
             }
         }
     }
+}
+
+/// Steps that make an instance of a class `class` (of `base`), whose members are values of the
+/// steps `objects` makes first (`{"ref": i, "attr": ...}` of them), called with `args`.
+fn instance(
+    objects: Vec<Value>,
+    class: &str,
+    base: &str,
+    members: Vec<(&str, Value)>,
+    args: Value,
+) -> Vec<Value> {
+    let mut steps = objects;
+    let mut dict = vec![json!([s("__module__"), s("probe")])];
+    dict.extend(members.into_iter().map(|(k, v)| json!([s(k), v])));
+    steps.push(call(
+        name("type"),
+        json!([s(class), { "tuple": [name(base)] }, { "dict": dict }]),
+    ));
+    steps.push(call(json!({ "ref": steps.len() - 1 }), args));
+    steps
+}
+
+/// The attribute `attr` of step `i`'s result.
+fn attr(i: usize, attr: &str) -> Value {
+    json!({ "ref": i, "attr": attr })
+}
+
+fn ev(v: Value) -> Value {
+    json!({ "eval": v })
+}
+
+fn floats(xs: &[f64]) -> Value {
+    json!({ "list": xs.iter().map(|&x| f(x)).collect::<Vec<_>>() })
+}
+
+fn ints(xs: &[&str]) -> Value {
+    json!({ "list": xs.iter().map(|x| int(x)).collect::<Vec<_>>() })
+}
+
+/// An object whose `len()` is `n` (`n.__index__`, called without `self`) and whose items are
+/// 1.0 to 4.0.
+fn sized(n: &str) -> Vec<Value> {
+    instance(
+        vec![ev(int(n)), ev(floats(&[1.0, 2.0, 3.0, 4.0]))],
+        "Sized",
+        "object",
+        vec![
+            ("__len__", attr(0, "__index__")),
+            ("__getitem__", attr(1, "__getitem__")),
+        ],
+        json!([]),
+    )
+}
+
+/// An object whose successive `len()`s are `lens` (popped from their end) and whose item `i`
+/// is `i` as a float, for `i` up to 7.
+fn stateful(lens: &[&str]) -> Vec<Value> {
+    instance(
+        vec![
+            ev(ints(lens)),
+            ev(floats(&[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0])),
+        ],
+        "Stateful",
+        "object",
+        vec![
+            ("__len__", attr(0, "pop")),
+            ("__getitem__", attr(1, "__getitem__")),
+        ],
+        json!([]),
+    )
+}
+
+/// The sequences and iterables of the container casters' checks (verifier re-check 1).
+fn sequences() -> Vec<Vec<Value>> {
+    let four = || floats(&[1.0, 2.0, 3.0, 4.0]);
+    vec![
+        vec![ev(four())],
+        vec![ev(floats(&[1.0, 2.0, 3.0]))],
+        // __getitem__ without __len__: a sequence whose len() raises.
+        instance(
+            vec![ev(four())],
+            "N",
+            "object",
+            vec![("__getitem__", attr(0, "__getitem__"))],
+            json!([]),
+        ),
+        // len() 2, item 0 'x' (refused), item 1 a KeyError: refused before reading item 1.
+        instance(
+            vec![
+                ev(ints(&["0", "0"])),
+                ev(json!({ "dict": [[int("0"), s("x")]] })),
+            ],
+            "E",
+            "object",
+            vec![
+                ("__len__", attr(0, "__len__")),
+                ("__getitem__", attr(1, "__getitem__")),
+            ],
+            json!([]),
+        ),
+        // Items that raise an error whose text names 'Sequence': it goes through.
+        instance(
+            vec![
+                ev(ints(&["0", "0", "0", "0"])),
+                call(name("operator.methodcaller"), json!([s("'Sequence'")])),
+            ],
+            "T",
+            "object",
+            vec![
+                ("__len__", attr(0, "__len__")),
+                ("__getitem__", json!({ "ref": 1 })),
+            ],
+            json!([]),
+        ),
+        // list subclasses: __getitem__ 7.0, __iter__ 9.0, __len__ 2.
+        instance(
+            vec![ev(floats(&[7.0, 7.0, 7.0, 7.0]))],
+            "G",
+            "list",
+            vec![("__getitem__", attr(0, "__getitem__"))],
+            json!([four()]),
+        ),
+        instance(
+            vec![ev(floats(&[9.0, 9.0, 9.0, 9.0]))],
+            "L",
+            "list",
+            vec![("__iter__", attr(0, "__iter__"))],
+            json!([four()]),
+        ),
+        instance(
+            vec![ev(ints(&["0", "0"]))],
+            "K",
+            "list",
+            vec![("__len__", attr(0, "__len__"))],
+            json!([four()]),
+        ),
+        // len()s the C++ runtime can't reserve (I-236), and one that doesn't fit Py_ssize_t.
+        sized("4611686018427387904"),
+        sized("4611686018427387903"),
+        sized("4611686018427387892"),
+        sized("2305843009213693952"),
+        sized("1099511627776"),
+        sized("9223372036854775808"),
+        // Successive len()s 6, 4, 4 / 4, then an IndexError.
+        stateful(&["6", "4", "4"]),
+        stateful(&["4"]),
+        stateful(&["4", "4611686018427387904", "4"]),
+        // A real generator (numpy's), map, zip, a dict's keys, a set, a bytearray.
+        vec![call(
+            name("numpy._core.shape_base._block_dispatcher"),
+            json!([four()]),
+        )],
+        // `map`, which the step interpreter's names don't list, through the copy module's
+        // builtins.
+        vec![
+            ev(name("copy.__builtins__")),
+            call(attr(0, "get"), json!([s("map")])),
+            call(
+                json!({ "ref": 1 }),
+                json!([name("float"), ints(&["1", "2", "3", "4"])]),
+            ),
+        ],
+        vec![call(name("zip"), json!([]))],
+        vec![
+            ev(
+                json!({ "dict": [[f(1.0), int("0")], [f(2.0), int("0")], [f(3.0), int("0")], [f(4.0), int("0")]] }),
+            ),
+            call(attr(0, "keys"), json!([])),
+        ],
+        vec![call(name("set"), json!([four()]))],
+        // A set with __index__ (3): not taken as a sequence without conversions, so the
+        // `(size)` overload takes it in the second pass.
+        instance(
+            vec![ev(int("3"))],
+            "S",
+            "set",
+            vec![("__index__", attr(0, "__index__"))],
+            json!([four()]),
+        ),
+        vec![call(name("bytearray"), json!([{ "bytes": "01020304" }]))],
+        // An instance of a class named map (pybind11 compares the C name), one named x.map, and
+        // a class whose metaclass is named map (a class is never taken by its name).
+        instance(
+            vec![ev(four())],
+            "map",
+            "object",
+            vec![("__iter__", attr(0, "__iter__"))],
+            json!([]),
+        ),
+        instance(
+            vec![ev(four())],
+            "x.map",
+            "object",
+            vec![("__iter__", attr(0, "__iter__"))],
+            json!([]),
+        ),
+        vec![
+            call(
+                name("type"),
+                json!([s("map"), { "tuple": [name("type")] }, { "dict": [[s("__module__"), s("probe")]] }]),
+            ),
+            call(
+                json!({ "ref": 0 }),
+                json!([s("X"), { "tuple": [] }, { "dict": [] }]),
+            ),
+        ],
+    ]
+}
+
+/// What a call did: the value, a refusal ("incompatible ... arguments"), or another exception
+/// (its type's qualified name and message).
+#[derive(Debug, PartialEq)]
+enum Outcome {
+    Value(Value),
+    Refused,
+    Raised(String, String),
+}
+
+/// The port's outcome of `r`: `Err` with "incompatible" in a TypeError is a refusal.
+fn port_outcome(py: Python<'_>, r: PyResult<Option<Value>>) -> Outcome {
+    match r {
+        Ok(Some(v)) => Outcome::Value(v),
+        Ok(None) => Outcome::Refused,
+        Err(e) => {
+            let ty = e.get_type(py);
+            let qualified = format!("{}.{}", ty.module().unwrap(), ty.qualname().unwrap());
+            let message = e.value(py).str().unwrap().to_string();
+            if qualified == "builtins.TypeError" && message.contains("incompatible") {
+                Outcome::Refused
+            } else {
+                Outcome::Raised(qualified, message)
+            }
+        }
+    }
+}
+
+/// The wheel's outcome of a step's result: a value (whatever `value` makes of it), a refusal,
+/// or another exception.
+fn wheel_outcome(step: &Value, value: impl Fn(&Value) -> Value) -> Outcome {
+    match step.get("raised") {
+        None => Outcome::Value(value(&step["value"])),
+        Some(raised) => {
+            let ty = raised["type"].as_str().unwrap().to_string();
+            let message =
+                String::from_utf8(ocio_testkit::oracle_values::bytes(&raised["message"])).unwrap();
+            if ty == "builtins.TypeError" && message.contains("incompatible") {
+                Outcome::Refused
+            } else {
+                Outcome::Raised(ty, message)
+            }
+        }
+    }
+}
+
+/// `std::vector<float>` loads each value as the wheel's does: the dispatcher's choice for
+/// `GradingBSplineCurve(value)` (its `(size)` and `(points)` overloads), what the sequence
+/// gives, and the errors a sequence raises (its `len()`, its items, the C++ runtime's
+/// reservation), in the order pybind11 reads it.
+#[test]
+fn vectors_load_sequences_as_the_wheels() {
+    let values = sequences();
+    common::start_python();
+    let ours: Vec<Outcome> = Python::attach(|py| {
+        values
+            .iter()
+            .map(|v| {
+                let obj = port_object(py, &json!(v));
+                let args = pyo3::types::PyTuple::new(py, [obj]).unwrap();
+                let r = ocio_py::dispatch::dispatch(py, &PROBE, &args, None).map(|taken| {
+                    let text: String = py
+                        .import("json")
+                        .unwrap()
+                        .call_method1("dumps", (taken,))
+                        .unwrap()
+                        .extract()
+                        .unwrap();
+                    Some(serde_json::from_str::<Value>(&text).unwrap())
+                });
+                port_outcome(py, r)
+            })
+            .collect()
+    });
+    // The wheel: GradingBSplineCurve(value); and, where the port took an overload, the curve
+    // the wheel makes from the arguments the port took.
+    let mut steps = Vec::new();
+    let mut pairs = Vec::new();
+    for (v, our) in values.iter().zip(&ours) {
+        let base = steps.len();
+        for step in v {
+            steps.push(shift_refs(step, base));
+        }
+        let made = steps.len();
+        steps.push(call(
+            name("OCIO.GradingBSplineCurve"),
+            json!([{ "ref": made - 1 }]),
+        ));
+        let reference = match our {
+            Outcome::Value(args) => {
+                let args: Vec<Value> = args
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|a| match a {
+                        Value::Number(n) => int(&n.to_string()),
+                        Value::Array(xs) => {
+                            json!({ "list": xs.iter().map(|x| f(x.as_f64().unwrap())).collect::<Vec<_>>() })
+                        }
+                        other => panic!("{other}"),
+                    })
+                    .collect();
+                steps.push(call(name("OCIO.GradingBSplineCurve"), json!(args)));
+                Some(steps.len() - 1)
+            }
+            _ => None,
+        };
+        pairs.push((made, reference));
+    }
+    let report = wheel(&[json!({ "steps": steps })]).remove(0);
+    let mut differences = Vec::new();
+    let mut kinds = [0; 3];
+    for (((made, reference), v), our) in pairs.into_iter().zip(&values).zip(&ours) {
+        let theirs = &report["steps"][made];
+        let same = match (our, reference) {
+            // The curve (or error) the wheel makes from the port's arguments.
+            (Outcome::Value(_), Some(r)) => theirs == &report["steps"][r],
+            _ => wheel_outcome(theirs, Value::clone) == *our,
+        };
+        kinds[match our {
+            Outcome::Value(_) => 0,
+            Outcome::Refused => 1,
+            Outcome::Raised(..) => 2,
+        }] += 1;
+        if !same {
+            differences.push(format!("{}:\n  port {our:?}\n  wheel {theirs}", json!(v)));
+        }
+    }
+    assert!(differences.is_empty(), "{}", differences.join("\n"));
+    // Each kind of outcome is met.
+    assert!(kinds.iter().all(|&k| k >= 3), "{kinds:?}");
+}
+
+/// `std::array<double, 4>` (`MatrixTransform.setOffset`, one overload) loads each value as the
+/// wheel's does: the array taken (as `getOffset` gives it back), refused, or the error raised.
+#[test]
+fn arrays_load_sequences_as_the_wheels() {
+    let values = sequences();
+    common::start_python();
+    let ours: Vec<Outcome> = Python::attach(|py| {
+        values
+            .iter()
+            .map(|v| {
+                let obj = port_object(py, &json!(v));
+                let r = <[f64; 4] as Cast>::try_load(&obj, true).map(|a| {
+                    a.map(|a| {
+                        json!(
+                            a.iter()
+                                .map(|x| format!("0x{:016x}", x.to_bits()))
+                                .collect::<Vec<_>>()
+                        )
+                    })
+                });
+                port_outcome(py, r)
+            })
+            .collect()
+    });
+    let mut steps = vec![call(name("OCIO.MatrixTransform"), json!([]))];
+    let mut calls = Vec::new();
+    for v in &values {
+        let base = steps.len();
+        for step in v {
+            steps.push(shift_refs(step, base));
+        }
+        let set = steps.len();
+        steps.push(call(attr(0, "setOffset"), json!([{ "ref": set - 1 }])));
+        steps.push(call(attr(0, "getOffset"), json!([])));
+        calls.push(set);
+    }
+    let report = wheel(&[json!({ "steps": steps })]).remove(0);
+    let mut differences = Vec::new();
+    let mut kinds = [0; 3];
+    for ((set, v), our) in calls.into_iter().zip(&values).zip(&ours) {
+        let theirs = wheel_outcome(&report["steps"][set], |_| {
+            let offset = &report["steps"][set + 1]["value"]["items"];
+            json!(
+                offset
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|x| x["float"].clone())
+                    .collect::<Vec<_>>()
+            )
+        });
+        kinds[match our {
+            Outcome::Value(_) => 0,
+            Outcome::Refused => 1,
+            Outcome::Raised(..) => 2,
+        }] += 1;
+        if theirs != *our {
+            differences.push(format!("{}:\n  port {our:?}\n  wheel {theirs:?}", json!(v)));
+        }
+    }
+    assert!(differences.is_empty(), "{}", differences.join("\n"));
+    assert!(kinds.iter().all(|&k| k >= 3), "{kinds:?}");
+}
+
+/// pybind11 takes an iterable by its type's whole C name (`tp_name`), not by `__name__`, its
+/// last dotted part: an instance of a class whose C name is `PyOpenColorIO.PyOpenColorIO.map`
+/// isn't a `map` (no class of the wheel's has such a name, so this runs on the port only).
+#[test]
+fn iterables_are_taken_by_their_whole_c_name() {
+    common::start_python();
+    Python::attach(|py| {
+        let cls = ocio_py::pybind11::new_class(py, "map", "map", &[], &[]).unwrap();
+        assert_eq!(cls.name().unwrap().to_string(), "map");
+        let obj = cls.call_method1("__new__", (&cls,)).unwrap();
+        assert!(matches!(<Vec<f32> as Cast>::try_load(&obj, true), Ok(None)));
+    });
+}
+
+/// The array caster's reads the wheel leaves undefined (U-96, U-97) are the port's errors.
+#[test]
+fn arrays_refuse_what_the_wheel_reads_undefined() {
+    common::start_python();
+    Python::attach(|py| {
+        for (lens, text) in [(&["5", "4"][..], "U-96"), (&["2", "4", "4"][..], "U-97")] {
+            let obj = port_object(py, &json!(stateful(lens)));
+            let e = <[f64; 4] as Cast>::try_load(&obj, true).unwrap_err();
+            assert!(
+                e.is_instance_of::<pyo3::exceptions::PyRuntimeError>(py),
+                "{e}"
+            );
+            assert!(e.to_string().contains(text), "{e}");
+        }
+    });
 }
 
 /// A float literal of the step interpreter.

@@ -34,6 +34,7 @@ use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::{
     PyBool, PyByteArray, PyBytes, PyDict, PyFloat, PyFrozenSet, PyInt, PySet, PyString, PyTuple,
+    PyType,
 };
 
 /// A parameter of an overload, as pybind11's signature shows it.
@@ -296,6 +297,9 @@ fn constructor_signature(sig: &str) -> Option<String> {
 /// A pybind11 type caster: loads a Python value into a C++ parameter's type, or refuses it
 /// (`None`), with or without the conversions of the dispatcher's second pass.
 pub trait Cast<'py>: Sized {
+    /// `sizeof` of the C++ type the caster loads, which a container caster reserves room for.
+    const CPP_SIZE: usize;
+
     /// The value, or `None` when the caster refuses it. A Python error raised while loading is
     /// cleared, as pybind11 does.
     fn load(obj: &Bound<'py, PyAny>, convert: bool) -> Option<Self>;
@@ -339,6 +343,8 @@ fn number_check(obj: &Bound<'_, PyAny>) -> bool {
 macro_rules! int_caster {
     ($t:ty, $signed:expr) => {
         impl<'py> Cast<'py> for $t {
+            const CPP_SIZE: usize = std::mem::size_of::<$t>();
+
             /// pybind11's integer caster: never a `float` (a subclass included); without
             /// conversions, an `int` only (a `bool` too: the wheel takes an object with
             /// `__index__` only with conversions, so a `list` subclass with `__index__` goes to
@@ -400,6 +406,8 @@ pub type CULong = u64;
 macro_rules! float_caster {
     ($t:ty) => {
         impl<'py> Cast<'py> for $t {
+            const CPP_SIZE: usize = std::mem::size_of::<$t>();
+
             /// pybind11's floating-point caster: without conversions, a `float` or an `int`
             /// (a `bool` too); the value through `PyFloat_AsDouble` (which takes `__float__`
             /// and `__index__`); with conversions, any object, and when that fails with a
@@ -430,6 +438,8 @@ float_caster!(f64);
 float_caster!(f32);
 
 impl<'py> Cast<'py> for bool {
+    const CPP_SIZE: usize = 1;
+
     /// pybind11's `bool` caster: `True` and `False`; with conversions, or for a NumPy bool,
     /// `None` (as `false`) and any object whose type has `__bool__` (its result).
     fn load(obj: &Bound<'py, PyAny>, convert: bool) -> Option<Self> {
@@ -459,6 +469,9 @@ impl<'py> Cast<'py> for bool {
 pub struct StdString(pub Vec<u8>);
 
 impl<'py> Cast<'py> for StdString {
+    /// `std::string`: 32 bytes in MSVC's STL and in libstdc++.
+    const CPP_SIZE: usize = 32;
+
     fn load(obj: &Bound<'py, PyAny>, _convert: bool) -> Option<Self> {
         if let Ok(s) = obj.cast::<PyString>() {
             return s
@@ -482,6 +495,8 @@ impl<'py> Cast<'py> for StdString {
 pub struct CharPtr(pub Option<Vec<u8>>);
 
 impl<'py> Cast<'py> for CharPtr {
+    const CPP_SIZE: usize = 8;
+
     fn load(obj: &Bound<'py, PyAny>, convert: bool) -> Option<Self> {
         if obj.is_none() {
             return convert.then_some(CharPtr(None));
@@ -494,59 +509,129 @@ impl<'py> Cast<'py> for CharPtr {
     }
 }
 
-/// pybind11's `object_is_convertible_to_std_vector`: a sequence that isn't a `str` or `bytes`;
-/// a generator, a set or frozenset; or a `dict_keys`, `dict_values`, `dict_items`, `map` or
-/// `zip` (by its C name). The sequences are taken as they are; the others, with conversions
-/// only, through `tuple(obj)`. A Python error reading the items (a sequence without a length,
-/// a `tuple(obj)` that fails) goes through, as pybind11 lets it.
-fn sequence_items<'py>(
-    obj: &Bound<'py, PyAny>,
-    convert: bool,
-) -> PyResult<Option<Vec<Bound<'py, PyAny>>>> {
-    if obj.is_instance_of::<PyString>() || obj.is_instance_of::<PyBytes>() {
-        return Ok(None);
+/// pybind11's `object_is_convertible_to_std_vector`: a sequence (`PySequence_Check`) that isn't
+/// a `str` or `bytes`; else a generator (`PyGen_Check`, its exact type), a set or frozenset (or
+/// a subclass), or an instance (not a class) of a type whose C name (`tp_name`) is
+/// `dict_keys`, `dict_values`, `dict_items`, `map` or `zip`.
+fn convertible_to_vector(obj: &Bound<'_, PyAny>) -> bool {
+    if crate::type_object::sequence_check(obj) {
+        return !obj.is_instance_of::<PyString>() && !obj.is_instance_of::<PyBytes>();
     }
-    // PySequence_Check (the type's sq_item, not a dict), through PyO3's `Vec` extraction,
-    // which checks it first and refuses a non-sequence with a DowncastError to `Sequence`.
-    match obj.extract::<Vec<Bound<'py, PyAny>>>() {
-        Ok(items) => return Ok(Some(items)),
-        Err(e) if !e.to_string().contains("'Sequence'") => return Err(e),
-        Err(_) => {}
-    }
-    // PyGen_Check (the type), PyAnySet_Check, and the C names (`tp_name`) pybind11 compares.
     let generator = obj
         .py()
         .import("types")
         .and_then(|t| t.getattr("GeneratorType"))
         .is_ok_and(|g| obj.get_type().is(&g));
-    let other = generator
+    generator
         || obj.is_instance_of::<PySet>()
         || obj.is_instance_of::<PyFrozenSet>()
-        || crate::pybind11::tp_name(&obj.get_type()).is_ok_and(|n| {
-            ["dict_keys", "dict_values", "dict_items", "map", "zip"]
-                .iter()
-                .any(|t| n == *t)
-        });
-    if !other || !convert {
+        || (!obj.is_instance_of::<PyType>()
+            && c_name_is_one_of(
+                obj,
+                &["dict_keys", "dict_values", "dict_items", "map", "zip"],
+            ))
+}
+
+/// Whether the C name (`tp_name`) of `obj`'s type is one of `names`. A type's `__name__` is
+/// its C name's last dotted part, so it must be the name; the C name itself is what
+/// `object.__format__` writes in its error for a format it doesn't take (CPython's
+/// `object___format___impl`, "unsupported format string passed to %.200s.__format__"), which
+/// runs no code of the object's.
+fn c_name_is_one_of(obj: &Bound<'_, PyAny>, names: &[&str]) -> bool {
+    let py = obj.py();
+    let Some(name) = obj
+        .get_type()
+        .name()
+        .ok()
+        .and_then(|n| names.iter().find(|m| n == **m).copied())
+    else {
+        return false;
+    };
+    let expected = format!("unsupported format string passed to {name}.__format__");
+    match py
+        .get_type::<PyAny>()
+        .getattr("__format__")
+        .and_then(|f| f.call1((obj, "x")))
+    {
+        Ok(_) => false,
+        Err(e) => {
+            e.is_instance_of::<PyTypeError>(py)
+                && e.value(py).str().is_ok_and(|s| s == expected.as_str())
+        }
+    }
+}
+
+/// The object a container caster reads the items of: `obj` when it is a sequence; else, with
+/// conversions only, `tuple(obj)` (`PySequence_Tuple`, whose error goes through), as pybind11
+/// does for the generators, sets and views [`convertible_to_vector`] takes; else `None`.
+fn sequence_of<'py>(obj: &Bound<'py, PyAny>, convert: bool) -> PyResult<Option<Bound<'py, PyAny>>> {
+    if !convertible_to_vector(obj) {
         return Ok(None);
     }
-    let tuple = obj.py().get_type::<PyTuple>().call1((obj,))?;
-    Ok(Some(tuple.try_iter()?.collect::<PyResult<Vec<_>>>()?))
+    if crate::type_object::sequence_check(obj) {
+        return Ok(Some(obj.clone()));
+    }
+    if !convert {
+        return Ok(None);
+    }
+    Ok(Some(obj.py().get_type::<PyTuple>().call1((obj,))?))
+}
+
+/// `std::vector<T>::reserve(n)` of a C++ type of `size` bytes, as the wheel's C++ runtime runs
+/// it on an empty vector: more than `max_size()` elements throw `std::length_error` (pybind11's
+/// ValueError, "vector too long" from MSVC's STL, "vector::reserve" from libstdc++); an
+/// allocation that fails throws `std::bad_alloc` (MemoryError, "bad allocation" or
+/// "std::bad_alloc"); MSVC's, for 4096 bytes or more, first adds 47 bytes for its alignment
+/// (`_Allocate_manually_vector_aligned`), and throws `std::bad_array_new_length` ("bad array
+/// new length") when that overflows. The memory is reserved as the wheel's, and held while the
+/// items load (docs/improvements.md, I-236).
+fn reserve(n: usize, size: usize) -> PyResult<Vec<u8>> {
+    use pyo3::exceptions::{PyMemoryError, PyValueError};
+    let ptrdiff_max = isize::MAX.unsigned_abs();
+    // MSVC: min(PTRDIFF_MAX, SIZE_MAX / sizeof(T)); libstdc++: PTRDIFF_MAX / sizeof(T).
+    #[cfg(windows)]
+    let (max, too_long, bad_alloc) = (
+        ptrdiff_max.min(usize::MAX / size),
+        "vector too long",
+        "bad allocation",
+    );
+    #[cfg(not(windows))]
+    let (max, too_long, bad_alloc) = (ptrdiff_max / size, "vector::reserve", "std::bad_alloc");
+    if n > max {
+        return Err(PyValueError::new_err(too_long));
+    }
+    let mut bytes = n * size;
+    if cfg!(windows) && bytes >= 4096 {
+        bytes = bytes
+            .checked_add(47)
+            .ok_or_else(|| PyMemoryError::new_err("bad array new length"))?;
+    }
+    let mut reserved = Vec::new();
+    reserved
+        .try_reserve_exact(bytes)
+        .map_err(|_| PyMemoryError::new_err(bad_alloc))?;
+    Ok(reserved)
 }
 
 impl<'py, T: Cast<'py>> Cast<'py> for Vec<T> {
-    /// pybind11's `std::vector` caster: [`sequence_items`], each item through `T`'s caster.
+    const CPP_SIZE: usize = 24;
+
     fn load(obj: &Bound<'py, PyAny>, convert: bool) -> Option<Self> {
         Self::try_load(obj, convert).ok().flatten()
     }
 
+    /// pybind11's `std::vector` caster (`list_caster`): the sequence ([`sequence_of`]); its
+    /// `len()` (whose error goes through) reserved ([`reserve`]); then its items, read as
+    /// `iter()` gives them, each loaded by `T`'s caster before the next is read, up to the
+    /// first `T` refuses (the vector is then refused).
     fn try_load(obj: &Bound<'py, PyAny>, convert: bool) -> PyResult<Option<Self>> {
-        let Some(items) = sequence_items(obj, convert)? else {
+        let Some(seq) = sequence_of(obj, convert)? else {
             return Ok(None);
         };
-        let mut out = Vec::with_capacity(items.len());
-        for item in &items {
-            match T::try_load(item, convert)? {
+        let _reserved = reserve(seq.len()?, T::CPP_SIZE)?;
+        let mut out = Vec::new();
+        for item in seq.try_iter()? {
+            match T::try_load(&item?, convert)? {
                 Some(v) => out.push(v),
                 None => return Ok(None),
             }
@@ -556,21 +641,61 @@ impl<'py, T: Cast<'py>> Cast<'py> for Vec<T> {
 }
 
 impl<'py, T: Cast<'py>, const N: usize> Cast<'py> for [T; N] {
-    /// pybind11's `std::array` caster: as `std::vector`'s, with exactly `N` items.
+    const CPP_SIZE: usize = N * T::CPP_SIZE;
+
     fn load(obj: &Bound<'py, PyAny>, convert: bool) -> Option<Self> {
         Self::try_load(obj, convert).ok().flatten()
     }
 
+    /// pybind11's `std::array` caster (`array_caster`): the sequence ([`sequence_of`]), refused
+    /// unless its `len()` is `N`; a second `len()` reserved ([`reserve`]) for the items; then
+    /// the items by index (`PySequence_GetItem`), from 0 up to a third `len()`, each loaded by
+    /// `T`'s caster before the next is read, up to the first `T` refuses; the array is the
+    /// first `N`. Every `len()`'s and read's error goes through, but the third `len()`'s, which
+    /// pybind11 doesn't check (U-96), and a third `len()` under `N`, which leaves the array
+    /// partly unread (U-97): both are the port's errors.
     fn try_load(obj: &Bound<'py, PyAny>, convert: bool) -> PyResult<Option<Self>> {
-        let Some(items) = Vec::<T>::try_load(obj, convert)? else {
+        let Some(seq) = sequence_of(obj, convert)? else {
             return Ok(None);
         };
+        if seq.len()? != N {
+            return Ok(None);
+        }
+        let _reserved = reserve(seq.len()?, T::CPP_SIZE)?;
+        let end = match seq.len() {
+            Ok(end) => end,
+            Err(e) => {
+                let error = pyo3::exceptions::PyRuntimeError::new_err(
+                    "the sequence's third len() raised, and pybind11 reads its items with that \
+                     exception set (docs/improvements.md, U-96)",
+                );
+                error.set_cause(seq.py(), Some(e));
+                return Err(error);
+            }
+        };
+        let mut items = Vec::new();
+        for i in 0..end {
+            match T::try_load(&seq.get_item(i)?, convert)? {
+                Some(v) => items.push(v),
+                None => return Ok(None),
+            }
+        }
+        if items.len() < N {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "the sequence's third len() gave {end}, and pybind11 reads the {N} values of \
+                 the array from memory it didn't initialize (docs/improvements.md, U-97)"
+            )));
+        }
+        items.truncate(N);
         Ok(items.try_into().ok())
     }
 }
 
 /// Any Python object (`py::object`), as it is.
 impl<'py> Cast<'py> for Bound<'py, PyAny> {
+    /// `py::object`: a pointer.
+    const CPP_SIZE: usize = 8;
+
     fn load(obj: &Bound<'py, PyAny>, _convert: bool) -> Option<Self> {
         Some(obj.clone())
     }
