@@ -6,7 +6,10 @@
 //!   extraction writes (the shader's text, cache ID, uniforms with their values, and dynamic
 //!   properties with their values), or the error, byte for byte;
 //! - `dynamic_apply`: the uniforms' values after each value set on the description's dynamic
-//!   property (O5.1).
+//!   property (O5.1);
+//! - `shader_property_is_decoupled_from_the_op`: a set on the op data's property after the shader
+//!   program is written leaves the uniforms as they were (a unit-level test of
+//!   `get_grading_primary_gpu_shader_program`: the GPU processor clones its ops).
 //!
 //! The wheel builds `GradingPrimaryTransform`s in a group, and its processor's GPU processor.
 //! The port builds the op data as the binding's constructor does
@@ -19,6 +22,7 @@
 
 use ocio_gpu::gpu_processor::GpuProcessor;
 use ocio_gpu::gpu_shader::UniformData;
+use ocio_gpu::ops::gradingprimary::grading_primary_op_gpu::get_grading_primary_gpu_shader_program;
 use ocio_gpu::{GpuLanguage, GpuShaderDesc};
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -755,4 +759,101 @@ fn uniforms_read_the_values_set() {
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
     assert_eq!(compared, 3 * 2 * 7);
+}
+
+/// The shader description's property is a copy of the op's: after the shader program is
+/// written, a set on the op data's own property leaves the uniforms as they were, and a set on
+/// the description's property changes them. The wheel's copy (`createEditableCopy`,
+/// `AddGPLogProperties` and its siblings, GradingPrimaryOpGPU.cpp:79-154 @ v2.5.2) gives the
+/// uniforms' values before and after a set on the description's property, which the port's
+/// uniforms must follow; the set on the op data's property is the port's own step (the
+/// wheel's processor keeps its ops out of reach), expected to change nothing, as the copy
+/// guarantees.
+///
+/// The port's step is a unit-level test: the port's GPU processor clones its ops, so a set
+/// on the original property is out of the pipeline's reach, and the test writes the shader
+/// program of the op data directly (`get_grading_primary_gpu_shader_program`).
+#[test]
+fn shader_property_is_decoupled_from_the_op() {
+    let _serial = SERIAL.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut compared = 0;
+    for style in STYLES {
+        for inverse in [false, true] {
+            let mut op = Op::new(style, upstream_values(style)).dynamic();
+            if inverse {
+                op = op.inverse();
+            }
+            let case = Case {
+                label: format!("{style:?} inverse {inverse}"),
+                ops: vec![op.clone()],
+                flags: (None, OptimizationFlags::DEFAULT),
+                language: GpuLanguage::Glsl4_0,
+                oracle_language: oracle_gpu::GpuLanguage::Glsl40,
+            };
+            let after = extremes(style);
+            let mut args = case.processor();
+            args["gpu"] = json!({"shader": {"language": "GPU_LANGUAGE_GLSL_4_0"}});
+            args["buffers"] = json!([]);
+            args["images"] = json!([]);
+            args["steps"] = json!([
+                {"get": "DYNAMIC_PROPERTY_GRADING_PRIMARY", "from": "gpu", "as": "p"},
+                {"uniforms": true},
+                {"set": "p", "value": primary_spec(&after)},
+                {"uniforms": true},
+            ]);
+            let response = Oracle::get().call("dynamic_apply", args, &[]);
+            let result = &response.result;
+            assert!(result.get("exception").is_none(), "{result}");
+            let wheel_steps = result["steps"].as_array().unwrap();
+            assert_eq!(wheel_steps.len(), 4, "{result}");
+            let wheel_values = |step: &Value| -> Vec<Value> {
+                step["result"]
+                    .as_array()
+                    .unwrap_or_else(|| panic!("{step}"))
+                    .iter()
+                    .map(|u| json!([u["name"], u["value"]]))
+                    .collect()
+            };
+            let (wheel_before, wheel_after) =
+                (wheel_values(&wheel_steps[1]), wheel_values(&wheel_steps[3]));
+            assert!(!wheel_before.is_empty());
+            assert_ne!(
+                wheel_before, wheel_after,
+                "{}: the set changes no uniform",
+                case.label
+            );
+
+            let data = op.data();
+            let mut desc = GpuShaderDesc::new(case.language);
+            get_grading_primary_gpu_shader_program(&mut desc, &data).unwrap();
+            let uniform_values = |desc: &GpuShaderDesc| -> Vec<Value> {
+                port_uniforms(desc)
+                    .into_iter()
+                    .map(|(name, _, _, value)| uniform_json(&name, &value))
+                    .collect()
+            };
+            assert_eq!(uniform_values(&desc), wheel_before, "{}", case.label);
+
+            // A set on the op data's property: the description's uniforms keep their values.
+            data.get_dynamic_property_internal()
+                .set_value(&digits(style))
+                .unwrap();
+            assert_eq!(
+                uniform_values(&desc),
+                wheel_before,
+                "{}: the description's uniforms follow the op's property",
+                case.label
+            );
+
+            // A set on the description's property: the uniforms follow it, as the wheel's.
+            desc.dynamic_properties()[0]
+                .as_grading_primary()
+                .unwrap()
+                .set_value(&after)
+                .unwrap();
+            assert_eq!(uniform_values(&desc), wheel_after, "{}", case.label);
+            compared += 1;
+        }
+    }
+    assert_eq!(compared, 3 * 2);
 }

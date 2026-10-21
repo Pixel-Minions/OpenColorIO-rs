@@ -9,7 +9,10 @@
 //!   extreme, NaN and infinite parameters, on the tier's probes;
 //! - dynamic sets (`dynamic_sets_apply_as_the_wheels`): the CPU processor's property set one
 //!   value after another between applies (`dynamic_apply`), against the port's CPU processor
-//!   with the same steps.
+//!   with the same steps;
+//! - decoupling (`renderer_property_is_decoupled_from_the_op`): a set on the op data's property
+//!   after the renderer is built leaves the renderer's output as it was (a unit-level test of
+//!   `get_grading_primary_cpu_renderer`: the CPU processor clones its ops).
 //!
 //! The port's side is the CPU processor of the op the wheel builds (`CPUProcessor` of a
 //! processor of one GradingPrimary op): the optimizer removes an op that is an identity and
@@ -22,6 +25,7 @@ use ocio_ops::open_color_types::{
 };
 use ocio_ops::ops::gradingprimary::grading_primary::{GradingPrimary, GradingRgbm};
 use ocio_ops::ops::gradingprimary::grading_primary_op::create_grading_primary_op;
+use ocio_ops::ops::gradingprimary::grading_primary_op_cpu::get_grading_primary_cpu_renderer;
 use ocio_ops::ops::gradingprimary::grading_primary_op_data::GradingPrimaryOpData;
 use ocio_testkit::Oracle;
 use ocio_testkit::battery::params::{A, B, Case, Channels, G, Params, Precision, R, RGB, Slot};
@@ -804,4 +808,106 @@ fn dynamic_sets_apply_as_the_wheels() {
         STYLES.len() * 2 * (1 + sets(GradingStyle::Log).len())
     );
     assert_eq!(refused, STYLES.len() * 2);
+}
+
+/// The renderer's property is a copy of the op data's: a set on the op data's own property
+/// after the renderer is built leaves the renderer's output as it was, a set on the renderer's
+/// property changes it. The wheel (`GradingPrimaryOpCPU::GradingPrimaryOpCPU`, which decouples
+/// a dynamic property with `createEditableCopy`, GradingPrimaryOpCPU.cpp:36-44 @ v2.5.2) gives
+/// the output at the values the op was built with, at another set on the CPU processor's
+/// property, and at a third; the port's renderer must give the first after a set of its op
+/// data's property, and the second after the same set of its own.
+///
+/// The port's step is a unit-level test: the CPU processor clones its ops, so a set on the
+/// original property is out of the pipeline's reach, and the test builds the renderer of an op
+/// data directly (`get_grading_primary_cpu_renderer`).
+#[test]
+fn renderer_property_is_decoupled_from_the_op() {
+    let input = pixels();
+    let bytes = f32_to_bytes(&input);
+    let width = input.len() / 4;
+    let mut compared = 0;
+    for style in STYLES {
+        for direction in [TransformDirection::Forward, TransformDirection::Inverse] {
+            let params = GpParams::new(style, upstream_values(style)).dynamic();
+            // The set on the op data's property, and the set on the renderer's.
+            let on_op = loop_values(style, false, true);
+            let on_renderer = loop_values(style, true, true);
+            let response = Oracle::get().call(
+                "dynamic_apply",
+                json!({
+                    "transform": params.transform(direction),
+                    "buffers": [{"blob": 0}, {"size": bytes.len(), "fill": [0]}],
+                    "images": [
+                        {"kind": "packed", "data": {"buffer": 0}, "width": width,
+                         "height": 1, "num_channels": 4},
+                        {"kind": "packed", "data": {"buffer": 1}, "width": width,
+                         "height": 1, "num_channels": 4},
+                    ],
+                    "steps": [
+                        {"get": "DYNAMIC_PROPERTY_GRADING_PRIMARY", "from": "cpu", "as": "p"},
+                        {"apply": [0, 1]},
+                        {"set": "p", "value": primary_spec(&on_op)},
+                        {"apply": [0, 1]},
+                        {"set": "p", "value": primary_spec(&on_renderer)},
+                        {"apply": [0, 1]},
+                    ],
+                }),
+                &[&bytes],
+            );
+            let result = &response.result;
+            assert!(result.get("exception").is_none(), "{result}");
+            let wheel_steps = result["steps"].as_array().unwrap();
+            assert_eq!(wheel_steps.len(), 6, "{result}");
+            let wheel = |step: usize| -> Vec<u32> {
+                let index = wheel_steps[step]["result"]["buffers"][1]
+                    .as_u64()
+                    .unwrap_or_else(|| panic!("{}", wheel_steps[step]))
+                    as usize;
+                bytes_to_f32(&response.blobs[index])
+                    .iter()
+                    .map(|v| v.to_bits())
+                    .collect()
+            };
+            let (at_built, at_op_set, at_renderer_set) = (wheel(1), wheel(3), wheel(5));
+            // The sets change the output, so a renderer that followed the op would differ.
+            assert_ne!(at_built, at_op_set, "{style:?} {direction:?}");
+            assert_ne!(at_built, at_renderer_set, "{style:?} {direction:?}");
+
+            let data = params.op_data(direction).unwrap();
+            let renderer = get_grading_primary_cpu_renderer(&data).unwrap();
+            let render = || -> Vec<u32> {
+                let mut px = input.clone();
+                renderer.apply(&mut px);
+                px.iter().map(|v| v.to_bits()).collect()
+            };
+            assert_eq!(render(), at_built, "{style:?} {direction:?}: built");
+
+            // A set on the op data's property: the renderer keeps its values.
+            data.get_dynamic_property_internal()
+                .set_value(&on_op)
+                .unwrap();
+            assert_eq!(
+                render(),
+                at_built,
+                "{style:?} {direction:?}: the renderer follows the op's property"
+            );
+
+            // A set on the renderer's property.
+            renderer
+                .get_dynamic_property(DynamicPropertyType::GradingPrimary)
+                .unwrap()
+                .as_grading_primary()
+                .unwrap()
+                .set_value(&on_renderer)
+                .unwrap();
+            assert_eq!(
+                render(),
+                at_renderer_set,
+                "{style:?} {direction:?}: renderer set"
+            );
+            compared += 1;
+        }
+    }
+    assert_eq!(compared, STYLES.len() * 2);
 }
