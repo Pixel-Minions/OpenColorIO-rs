@@ -142,9 +142,19 @@ fn steps(module: &str, module_name: &str) -> Vec<Value> {
         s.push(call(json!({ "ref": i }), args));
     }
     s.push(call(name("OCIO.Processor"), json!([])));
-    // Layout and modules.
+    // Layout and modules (the weak reference offset: D-7, `weak_references_where_d7_puts_them`).
     for n in ["ViewType", "GpuShaderCreator", "GpuShaderDesc", "Processor"] {
-        s.push(json!({ "eval": name(&format!("OCIO.{n}")), "getters": ["__basicsize__", "__weakrefoffset__", "__dictoffset__", "__itemsize__"] }));
+        s.push(json!({ "eval": name(&format!("OCIO.{n}")), "getters": ["__basicsize__", "__dictoffset__", "__itemsize__", "__flags__"] }));
+    }
+    // pybind11_object (its metatype: D-7).
+    for a in [
+        "__basicsize__",
+        "__dictoffset__",
+        "__itemsize__",
+        "__flags__",
+        "__doc__",
+    ] {
+        s.push(json!({ "eval": name(&format!("OCIO.ViewType.__base__.{a}")) }));
     }
     s.push(call(name("OCIO.VIEW_SHARED.__sizeof__"), json!([])));
     s.push(json!({ "eval": name("OCIO.ViewType.__repr__.__module__") }));
@@ -221,7 +231,136 @@ fn steps(module: &str, module_name: &str) -> Vec<Value> {
     s.push(json!({ "delattr": name(module), "name": "__name__" }));
     s.push(reduce());
     s.push(setattr(name(module), "__name__", text(module_name)));
+    multiple_bases(&mut s);
     s
+}
+
+/// Python classes deriving from several classes of the module (verifier re-check 2): their
+/// layout, one value per class, each constructed by its own `__init__` or `__setstate__` and
+/// read by that class's methods and casters, pybind11's metatype naming the first class no
+/// constructor constructed, in the order pybind11 caches for each type (a base asked about
+/// before, when an instance of it was made, gives its cached classes; else its bases, breadth
+/// first).
+fn multiple_bases(s: &mut Vec<Value>) {
+    let r = |i: usize| json!({ "ref": i });
+    let new_class = |s: &mut Vec<Value>, n: &str, bases: Vec<Value>, init: Option<Value>| {
+        let mut ns = vec![json!([text("__module__"), text("probe")])];
+        ns.extend(init.map(|i| json!([text("__init__"), i])));
+        s.push(call(
+            name("type"),
+            json!([text(n), { "tuple": bases }, { "dict": ns }]),
+        ));
+        s.len() - 1
+    };
+    let td = || name("OCIO.TransformDirection");
+    let interp = || name("OCIO.Interpolation");
+    // M(TransformDirection, Interpolation): built, its MRO and size; M(1) constructs only
+    // TransformDirection's value.
+    let m = new_class(s, "M", vec![td(), interp()], None);
+    // (The MRO by its repr: pybind11_object's metatype is D-7's.)
+    s.push(call(name("repr"), json!([{ "ref": m, "attr": "__mro__" }])));
+    for a in ["__basicsize__", "__dictoffset__"] {
+        s.push(json!({ "eval": { "ref": m, "attr": a } }));
+    }
+    s.push(call(r(m), json!([int("1")])));
+    // Both constructed: type.__call__ (past pybind11's metatype check) runs M's __init__,
+    // TransformDirection's; then Interpolation's, by hand, twice (the second changes nothing).
+    // Each class's methods and casters read its own value.
+    let both = made(s, r(m), "1");
+    s.push(call(
+        name("OCIO.Interpolation.__init__"),
+        json!([r(both), int("2")]),
+    ));
+    s.push(call(
+        name("OCIO.Interpolation.__init__"),
+        json!([r(both), int("4")]),
+    ));
+    for f in [
+        "OCIO.InterpolationToString",
+        "OCIO.TransformDirectionToString",
+        "int",
+        "repr",
+        "hash",
+        "OCIO.Interpolation.__int__",
+        "OCIO.Interpolation.__index__",
+        "OCIO.Interpolation.__getstate__",
+        "OCIO.TransformDirection.__getstate__",
+        "OCIO.Interpolation.value.fget",
+        "OCIO.TransformDirection.value.fget",
+        "OCIO.Interpolation.name.fget",
+    ] {
+        s.push(call(name(f), json!([r(both)])));
+    }
+    s.push(call(name("operator.eq"), json!([r(both), int("1")])));
+    s.push(call(
+        name("OCIO.Interpolation.__eq__"),
+        json!([r(both), int("2")]),
+    ));
+    // __setstate__ constructs its class's value: S(Interpolation, TransformDirection), made
+    // with Interpolation's, then TransformDirection's by __setstate__.
+    let st = new_class(s, "S", vec![interp(), td()], None);
+    let state = made(s, r(st), "3");
+    s.push(call(
+        name("OCIO.TransformDirection.__setstate__"),
+        json!([r(state), int("1")]),
+    ));
+    for f in [
+        "OCIO.InterpolationToString",
+        "OCIO.TransformDirectionToString",
+        "OCIO.TransformDirection.__int__",
+    ] {
+        s.push(call(name(f), json!([r(state)])));
+    }
+    // A class of the module without a constructor first: "No constructor defined!" names the
+    // Python class.
+    let y = new_class(s, "Y", vec![name("OCIO.GpuShaderCreator"), td()], None);
+    s.push(call(name("repr"), json!([{ "ref": y, "attr": "__mro__" }])));
+    s.push(call(r(y), json!([int("1")])));
+    // The order pybind11 caches: B(A, Interpolation), A(TransformDirection), B's __init__
+    // constructing nothing (atexit.unregister, which takes one argument and returns None):
+    // with A asked about first (an instance of A made), B's classes are A's then
+    // Interpolation; else breadth first, Interpolation then TransformDirection.
+    for cached in [false, true] {
+        let a = new_class(s, "A", vec![td()], None);
+        if cached {
+            made(s, r(a), "0");
+        }
+        let b = new_class(
+            s,
+            "B",
+            vec![r(a), interp()],
+            Some(name("atexit.unregister")),
+        );
+        s.push(call(r(b), json!([int("5")])));
+        if !cached {
+            // B's classes stay those cached at its first instance, when A is asked about later.
+            made(s, r(a), "0");
+            s.push(call(r(b), json!([int("5")])));
+        }
+        // C(Interpolation, A): Interpolation's methods first.
+        let c = new_class(s, "C", vec![interp(), r(a)], None);
+        let one = made(s, r(c), "2");
+        s.push(call(
+            name("OCIO.TransformDirection.__init__"),
+            json!([r(one), int("1")]),
+        ));
+        for f in [
+            "repr",
+            "int",
+            "OCIO.TransformDirectionToString",
+            "OCIO.InterpolationToString",
+        ] {
+            s.push(call(name(f), json!([r(one)])));
+        }
+        s.push(call(r(c), json!([int("2")])));
+    }
+}
+
+/// `type.__call__(cls, value)`: an instance of `cls` its `__init__` made, without pybind11's
+/// metatype check; the step's index.
+fn made(s: &mut Vec<Value>, cls: Value, value: &str) -> usize {
+    s.push(call(name("type.__call__"), json!([cls, int(value)])));
+    s.len() - 1
 }
 
 /// Constructors, identity and layout as the wheel's.
@@ -285,17 +424,30 @@ fn undefined_behaviour_raises_the_ports_errors() {
             );
         }
         let base = cls.getattr("__mro__").unwrap().get_item(1).unwrap();
-        let no_instances = "pybind11_builtins.pybind11_object: pybind11's base class has no \
-                            instances (the wheel's process aborts)";
-        for attempt in [
-            base.call0(),
-            ocio.getattr("VIEW_SHARED")
-                .unwrap()
-                .call_method0("__reduce__"),
+        let no_instances = |c: &str| {
+            format!(
+                "{c}: pybind11 makes no instance of a class without a class of the module among \
+                 its bases (the wheel's process aborts)"
+            )
+        };
+        // A Python class deriving from pybind11_object only.
+        let z = py
+            .get_type::<pyo3::types::PyType>()
+            .call1(("Z", (&base,), pyo3::types::PyDict::new(py)))
+            .unwrap();
+        for (attempt, c) in [
+            (base.call0(), "pybind11_builtins.pybind11_object"),
+            (
+                ocio.getattr("VIEW_SHARED")
+                    .unwrap()
+                    .call_method0("__reduce__"),
+                "pybind11_builtins.pybind11_object",
+            ),
+            (z.call0(), "Z"),
         ] {
             let e = attempt.unwrap_err();
             assert!(e.is_instance_of::<pyo3::exceptions::PyTypeError>(py), "{e}");
-            assert_eq!(e.value(py).to_string(), no_instances);
+            assert_eq!(e.value(py).to_string(), no_instances(c));
         }
         // A function record made or initialized from Python (U-98).
         let record = ocio
@@ -382,4 +534,33 @@ fn undefined_behaviour_raises_the_ports_errors() {
             );
         }
     });
+}
+
+/// The module's classes and `pybind11_object` hold weak references 8 bytes past the wheel's:
+/// PyO3 places them after pybind11's 8 bytes of flags (docs/deviations.md, D-7).
+#[test]
+fn weak_references_where_d7_puts_them() {
+    let classes = [
+        "ViewType",
+        "ViewType.__base__",
+        "GpuShaderCreator",
+        "Processor",
+    ];
+    let script = json!({ "steps": classes
+        .iter()
+        .map(|n| json!({ "eval": name(&format!("OCIO.{n}.__weakrefoffset__")) }))
+        .collect::<Vec<_>>() });
+    let ours = port(&script);
+    let theirs = wheel(std::slice::from_ref(&script)).remove(0);
+    let offset = |r: &Value, i: usize| -> i64 {
+        r["steps"][i]["value"]["int"]
+            .as_str()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    for (i, n) in classes.iter().enumerate() {
+        assert!(offset(&theirs, i) > 0, "{n}");
+        assert_eq!(offset(&ours, i), offset(&theirs, i) + 8, "{n}");
+    }
 }

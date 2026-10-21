@@ -424,7 +424,7 @@ pub fn define_enum<'py>(
                     return Ok(None);
                 };
                 // A constructor: the dispatcher calls none on an instance constructed already.
-                pybind11::set_value(&this, value)?;
+                pybind11::set_value(&this, o.params[0].ty, value)?;
                 Ok(Some(py.None()))
             },
             0,
@@ -471,7 +471,7 @@ pub fn define_enum<'py>(
             "int",
             |py, o, a, _| {
                 let this = this!(o, a);
-                ok(pybind11::read_value(&this)?, py)
+                ok(pybind11::read_value(&this, o.params[0].ty)?, py)
             },
             0,
         )],
@@ -486,7 +486,7 @@ pub fn define_enum<'py>(
                 "int",
                 |py, o, a, _| {
                     let this = this!(o, a);
-                    ok(pybind11::read_value(&this)?, py)
+                    ok(pybind11::read_value(&this, o.params[0].ty)?, py)
                 },
                 1,
             )],
@@ -505,7 +505,7 @@ pub fn define_enum<'py>(
                 let Some(value) = load_scalar(py, scalar_of(o), &a[1], convert) else {
                     return Ok(None);
                 };
-                pybind11::set_value(&this, value)?;
+                pybind11::set_value(&this, o.params[0].ty, value)?;
                 Ok(Some(py.None()))
             },
             2,
@@ -620,7 +620,7 @@ pub fn enum_value(obj: &Bound<'_, PyAny>, qualified: &str) -> PyResult<Option<i6
     let Some(this) = pybind11::instance_of(obj, qualified) else {
         return Ok(None);
     };
-    Ok(Some(pybind11::read_value(&this)?.extract()?))
+    Ok(Some(pybind11::read_value(&this, qualified)?.extract()?))
 }
 
 /// Loads argument `i` of an overload's arguments as the enum its parameter names, returning
@@ -639,6 +639,10 @@ macro_rules! enum_arg {
 /// instance.
 pub fn to_py<'py>(cls: &Bound<'py, PyType>, value: i64) -> PyResult<Bound<'py, PyAny>> {
     let instance = cls.call_method1("__new__", (cls,))?;
-    pybind11::set_value(&instance, PyInt::new(cls.py(), value).into_any())?;
+    pybind11::set_value(
+        &instance,
+        &pybind11::tp_name(cls)?,
+        PyInt::new(cls.py(), value).into_any(),
+    )?;
     Ok(instance)
 }

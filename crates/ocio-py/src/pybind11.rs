@@ -10,8 +10,11 @@
 //!
 //! `pybind11_object` is a Rust class ([`Pybind11Object`]): its `__init__` is a C slot, so a
 //! class without a constructor holds it in its dictionary as the wheel's do (a
-//! `wrapper_descriptor`, raising "No constructor defined!"), and an instance holds its class's
-//! C++ value ([`value`], [`set_value`]; for an enum, the value as a Python `int`).
+//! `wrapper_descriptor`, raising "No constructor defined!"), and an instance holds one C++ value
+//! per class of the module among its type's bases, as pybind11's values and holders
+//! ([`all_type_info`], [`value`], [`set_value`]; for an enum, the value as a Python `int`), so
+//! that a Python class may derive from several. Its layout and metatype: docs/deviations.md,
+//! D-7.
 //!
 //! How the types are made: [`new_class`] and [`instance_method`] are the only two places that
 //! decide it, through the C API ([`crate::type_object`]): a class is made by
@@ -23,7 +26,7 @@ use std::ffi::CString;
 
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
-use pyo3::types::{PyCFunction, PyDict, PyModule, PyString, PyTuple, PyType};
+use pyo3::types::{PyCFunction, PyDict, PyModule, PyString, PyTuple, PyType, PyWeakrefReference};
 
 use crate::dispatch::{Function, dispatch};
 
@@ -31,8 +34,10 @@ use crate::dispatch::{Function, dispatch};
 /// module has while it initializes (imported as `PyOpenColorIO`'s submodule).
 pub const MODULE: &str = "PyOpenColorIO.PyOpenColorIO";
 
-/// pybind11_builtins, made once per interpreter: the metatype, the base class and the static
-/// property, as Python source run in a namespace of its own.
+/// pybind11_builtins, made once per interpreter: the metatype and the static property, made by
+/// `type(name, bases, namespace)` in the wheel's dictionary order (a class statement would add
+/// `__static_attributes__` and `__firstlineno__`), in a namespace without `__name__` so that
+/// `type()` sets no `__module__` until Rust sets it last.
 const RUNTIME: &std::ffi::CStr = cr#"
 # CPython's instancemethod type, set from Rust once the runtime runs.
 _instancemethod = None
@@ -47,52 +52,76 @@ def _lookup(cls, name):
     return None
 
 
-class pybind11_type(type):
-    # pybind11_meta_getattro: a method (an instancemethod) is returned as it is, not bound.
-    def __getattribute__(cls, name):
-        descr = _lookup(cls, name)
-        if descr is not None and type(descr) is _instancemethod:
-            return descr
-        return type.__getattribute__(cls, name)
-
-    # pybind11_meta_call: an instance of a class whose __init__ (a Python subclass's) didn't
-    # construct the bound class it derives from is refused.
-    def __call__(cls, *args, **kwargs):
-        self = type.__call__(cls, *args, **kwargs)
-        unconstructed = _unconstructed(self)
-        if unconstructed is not None:
-            raise TypeError(unconstructed + '.__init__() must be called when overriding __init__')
-        return self
-
-    # pybind11_meta_setattro: a static property's setter, unless the value is itself one.
-    def __setattr__(cls, name, value):
-        descr = _lookup(cls, name)
-        if (descr is not None and isinstance(descr, pybind11_static_property)
-                and not isinstance(value, pybind11_static_property)):
-            type(descr).__set__(descr, cls, value)
-            return
-        type.__setattr__(cls, name, value)
-
-pybind11_type.__module__ = 'pybind11_builtins'
+# pybind11_meta_call: an instance of a class whose __init__ (a Python subclass's) didn't
+# construct each bound class it derives from is refused.
+def __call__(cls, *args, **kwargs):
+    self = type.__call__(cls, *args, **kwargs)
+    unconstructed = _unconstructed(self)
+    if unconstructed is not None:
+        raise TypeError(unconstructed + '.__init__() must be called when overriding __init__')
+    return self
 
 
-class pybind11_static_property(property):
-    # pybind11_static_get: the class (the instance's class) is what the getter gets.
-    def __get__(self, obj, cls=None):
-        if obj is None:
-            target = cls
-        elif isinstance(obj, type):
-            target = obj
-        else:
-            target = type(obj)
-        return property.__get__(self, target, target)
-
-    def __set__(self, obj, value):
-        target = obj if isinstance(obj, type) else type(obj)
-        property.__set__(self, target, value)
+# pybind11_meta_getattro: a method (an instancemethod) is returned as it is, not bound.
+def __getattribute__(cls, name):
+    descr = _lookup(cls, name)
+    if descr is not None and type(descr) is _instancemethod:
+        return descr
+    return type.__getattribute__(cls, name)
 
 
-pybind11_static_property.__module__ = 'pybind11_builtins'
+# pybind11_meta_setattro: a static property's setter, unless the value is itself one; a
+# deletion is type's (the slot's other wrapper, __delattr__).
+def __setattr__(cls, name, value):
+    descr = _lookup(cls, name)
+    if (descr is not None and isinstance(descr, pybind11_static_property)
+            and not isinstance(value, pybind11_static_property)):
+        type(descr).__set__(descr, cls, value)
+        return
+    type.__setattr__(cls, name, value)
+
+
+def __delattr__(cls, name):
+    type.__delattr__(cls, name)
+
+
+pybind11_type = type('pybind11_type', (type,), {
+    '__call__': __call__, '__getattribute__': __getattribute__, '__setattr__': __setattr__,
+    '__delattr__': __delattr__, '__doc__': None})
+
+
+# pybind11_static_get: the class (the instance's class) is what the getter gets.
+def __get__(self, obj, cls=None):
+    if obj is None:
+        target = cls
+    elif isinstance(obj, type):
+        target = obj
+    else:
+        target = type(obj)
+    return property.__get__(self, target, target)
+
+
+# pybind11_static_set (both its wrappers, __set__ and __delete__): property's, on the class.
+def __set__(self, obj, value):
+    property.__set__(self, obj if isinstance(obj, type) else type(obj), value)
+
+
+def __delete__(self, obj):
+    property.__delete__(self, obj if isinstance(obj, type) else type(obj))
+
+
+# A __dict__ (property subclasses have one) and no weak references, as pybind11's.
+pybind11_static_property = type('pybind11_static_property', (property,), {
+    '__get__': __get__, '__set__': __set__, '__delete__': __delete__,
+    '__slots__': ('__dict__',)})
+del pybind11_static_property.__slots__
+for _f, _owner in ((__call__, 'pybind11_type'), (__getattribute__, 'pybind11_type'),
+                   (__setattr__, 'pybind11_type'), (__delattr__, 'pybind11_type'),
+                   (__get__, 'pybind11_static_property'), (__set__, 'pybind11_static_property'),
+                   (__delete__, 'pybind11_static_property')):
+    _f.__qualname__ = _owner + '.' + _f.__name__
+    _f.__module__ = 'pybind11_builtins'
+del __call__, __getattribute__, __setattr__, __delattr__, __get__, __set__, __delete__, _f, _owner
 "#;
 
 /// The runtime's namespace.
@@ -102,6 +131,11 @@ fn runtime(py: Python<'_>) -> PyResult<&Bound<'_, PyDict>> {
     let ns = RUNTIME_NS.get_or_try_init(py, || -> PyResult<Py<PyDict>> {
         let ns = PyDict::new(py);
         py.run(RUNTIME, Some(&ns), None)?;
+        for t in ["pybind11_type", "pybind11_static_property"] {
+            if let Some(t) = ns.get_item(t)? {
+                t.setattr("__module__", "pybind11_builtins")?;
+            }
+        }
         let len = py.import("builtins")?.getattr("len")?;
         let instancemethod = crate::type_object::instance_method(&len)?.get_type();
         ns.set_item("_instancemethod", instancemethod)?;
@@ -109,13 +143,7 @@ fn runtime(py: Python<'_>) -> PyResult<&Bound<'_, PyDict>> {
             py,
             Some(c"_unconstructed"),
             None,
-            |args, _| -> PyResult<Option<String>> {
-                let obj = args.get_item(0)?;
-                Ok(match bound_class_of(&obj) {
-                    Some((name, _)) if value(&obj).is_none() => Some(name),
-                    _ => None,
-                })
-            },
+            |args, _| -> PyResult<Option<String>> { unconstructed(&args.get_item(0)?) },
         )?;
         ns.set_item("_unconstructed", unconstructed)?;
         Ok(ns.unbind())
@@ -129,14 +157,19 @@ fn runtime_item<'py>(py: Python<'py>, name: &str) -> PyResult<Bound<'py, PyAny>>
         .ok_or_else(|| pyo3::exceptions::PyKeyError::new_err(name.to_string()))
 }
 
-/// The size of pybind11's `instance` before its `weakrefs` member, past the object header:
-/// its value-and-holder union, three pointers for OCIO's `shared_ptr` holders.
-const VALUES_SIZE: usize = 24;
+/// The values an instance holds: one per class of the module among its type's bases
+/// ([`all_type_info`], in that order), each set once, when a constructor of that class
+/// (`__init__`, `__setstate__`) constructs it (pybind11's values and holders).
+type Values = std::sync::Mutex<Vec<Option<Py<PyAny>>>>;
 
-/// `pybind11_builtins.pybind11_object`, the base of every class of the module: the C++ value
-/// of an instance of a bound class, set once, when a constructor (`__init__`, `__setstate__`)
-/// constructs it. Weak references go after it, at pybind11's offset (40): the module's
-/// classes have pybind11's instance size ([`INSTANCE_SIZE`]).
+// `pybind11_builtins.pybind11_object`, the base of every class of the module, with pybind11's
+// instance size (`sizeof(instance)`, 56: [`INSTANCE_SIZE`]) so that a Python class may derive
+// from several classes of the module, as from the wheel's (CPython refuses bases of different
+// sizes). PyO3 places weak references last (`__weakrefoffset__` 48, pybind11's 40), names the
+// type `pybind11_builtins.pybind11_object` (pybind11's C name is `pybind11_object`) and makes
+// it with the metatype `type` (pybind11's `pybind11_type`): docs/deviations.md, D-7 (owner
+// decision 2026-10-21). (No Rust doc comment: it would be the class's docstring, which the
+// wheel's hasn't.)
 #[pyclass(
     name = "pybind11_object",
     module = "pybind11_builtins",
@@ -146,34 +179,47 @@ const VALUES_SIZE: usize = 24;
 )]
 #[derive(Debug, Default)]
 pub struct Pybind11Object {
-    value: std::sync::OnceLock<Py<PyAny>>,
-    _pad: [u8; VALUES_SIZE - std::mem::size_of::<std::sync::OnceLock<Py<PyAny>>>()],
+    values: Values,
+    _pad: [u8; VALUES_SIZE - std::mem::size_of::<Values>()],
 }
 
+/// The size of the instance's contents before PyO3's weak reference slot: pybind11's 24-byte
+/// union of values and holders, its weak reference pointer and its flags.
+const VALUES_SIZE: usize = 32;
+
 /// pybind11's `sizeof(instance)`: what `__basicsize__` and `sys.getsizeof` give for an instance
-/// of the module's classes.
+/// of the module's classes, and of `pybind11_object`.
 pub const INSTANCE_SIZE: usize = 56;
 
 #[pymethods]
 impl Pybind11Object {
+    // pybind11_object_new (make_new_instance, instance::allocate_layout): one value per class
+    // of the module among the type's bases, none constructed.
     #[new]
     #[classmethod]
-    #[pyo3(signature = (*_args, **_kwargs))]
+    #[pyo3(signature = (*_args, **_kwargs), text_signature = None)]
     fn new(
         cls: &Bound<'_, PyType>,
         _args: &Bound<'_, PyTuple>,
         _kwargs: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Self> {
-        // pybind11_object itself: the wheel's process aborts (pybind11 allocates no value for
-        // a type it didn't register), and so does `__reduce__()` of an instance, which copyreg
-        // makes by calling it. The port refuses it (docs/improvements.md, U-87).
-        if cls.is(&object_base(cls.py())?) {
-            return Err(pyo3::exceptions::PyTypeError::new_err(
-                "pybind11_builtins.pybind11_object: pybind11's base class has no instances \
-                 (the wheel's process aborts)",
-            ));
+        let n = all_type_info(cls)?.len();
+        // A type without one (pybind11_object itself, a Python class deriving from it only):
+        // pybind11 fails ("instance allocation failed: new instance has no
+        // pybind11-registered base types") where no C++ exception may leave, and the wheel's
+        // process aborts. So does `__reduce__()` of an enum value, which copyreg makes by
+        // calling `pybind11_object`. The port refuses it (docs/improvements.md, U-87).
+        if n == 0 {
+            return Err(pyo3::exceptions::PyTypeError::new_err(format!(
+                "{}: pybind11 makes no instance of a class without a class of the module among \
+                 its bases (the wheel's process aborts)",
+                tp_name(cls)?
+            )));
         }
-        Ok(Pybind11Object::default())
+        Ok(Pybind11Object {
+            values: std::sync::Mutex::new((0..n).map(|_| None).collect()),
+            _pad: [0; VALUES_SIZE - std::mem::size_of::<Values>()],
+        })
     }
 
     // pybind11_object_init: a class with no constructor of its own.
@@ -195,36 +241,8 @@ pub fn object_base(py: Python<'_>) -> PyResult<Bound<'_, PyType>> {
     Ok(py.get_type::<Pybind11Object>())
 }
 
-/// The C++ value an instance of a bound class holds, if a constructor constructed it.
-pub fn value<'py>(obj: &Bound<'py, PyAny>) -> Option<Bound<'py, PyAny>> {
-    let this = obj.cast::<Pybind11Object>().ok()?;
-    this.get().value.get().map(|v| v.bind(obj.py()).clone())
-}
-
-/// The C++ value of `obj`, an instance a method reads. One that no constructor constructed
-/// (`OCIO.TransformDirection.__new__(OCIO.TransformDirection)`) holds uninitialized memory in
-/// the wheel, which its methods read; the port refuses it (docs/improvements.md, U-86).
-pub fn read_value<'py>(obj: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
-    match value(obj) {
-        Some(v) => Ok(v),
-        None => Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
-            "{}: the instance was never constructed (no __init__ or __setstate__ gave it a \
-             value; the wheel reads uninitialized memory)",
-            tp_name(&obj.get_type())?
-        ))),
-    }
-}
-
-/// Constructs the C++ value of an instance of a bound class: once, as a constructor
-/// (`__init__`, `__setstate__`) does; the dispatcher calls no constructor on an instance it
-/// constructed already.
-pub fn set_value(obj: &Bound<'_, PyAny>, value: Bound<'_, PyAny>) -> PyResult<()> {
-    let this = obj.cast::<Pybind11Object>()?;
-    let _ = this.get().value.set(value.unbind());
-    Ok(())
-}
-
-/// Each class of the module, by its C name (`tp_name`), as [`new_class`] made it.
+/// Each class of the module, by its C name (`tp_name`), as [`new_class`] made it: pybind11's
+/// registered types.
 static CLASSES: std::sync::Mutex<Vec<(String, Py<PyType>)>> = std::sync::Mutex::new(Vec::new());
 
 /// The class of the module whose C name is `qualified` (`MODULE.qualname`).
@@ -239,19 +257,244 @@ pub fn class<'py>(py: Python<'py>, qualified: &str) -> Option<Bound<'py, PyType>
         .map(|(_, cls)| cls.bind(py).clone())
 }
 
-/// The most derived class of the module `obj` is an instance of, with its C name: pybind11's
-/// type of the instance's value.
-fn bound_class_of(obj: &Bound<'_, PyAny>) -> Option<(String, Py<PyType>)> {
-    let ty = obj.get_type();
-    let classes = CLASSES
+/// Whether `ty` is a class of the module.
+fn registered(ty: &Bound<'_, PyType>) -> bool {
+    CLASSES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .any(|(_, cls)| ty.is(cls.bind(ty.py())))
+}
+
+/// pybind11's cache of [`all_type_info`] for the other types it was asked about (Python
+/// classes deriving from the module's), each entry held by a weak reference to its type whose
+/// callback removes it, as pybind11's `all_type_info_get_cache` holds it.
+static TYPE_INFO_CACHE: std::sync::Mutex<Vec<CachedTypeInfo>> = std::sync::Mutex::new(Vec::new());
+
+/// An entry of [`TYPE_INFO_CACHE`]: the weak reference to the type, its classes.
+type CachedTypeInfo = (Py<PyWeakrefReference>, Vec<Py<PyType>>);
+
+/// The cached classes of `ty`, a type [`all_type_info`] was asked about before.
+fn cached_type_info<'py>(ty: &Bound<'py, PyType>) -> Option<Vec<Bound<'py, PyType>>> {
+    let py = ty.py();
+    let cache = TYPE_INFO_CACHE
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    ty.mro().iter().find_map(|c| {
-        classes
-            .iter()
-            .find(|(_, cls)| c.is(cls.bind(obj.py())))
-            .map(|(name, cls)| (name.clone(), cls.clone_ref(obj.py())))
-    })
+    cache
+        .iter()
+        .find(|(wr, _)| wr.bind(py).upgrade().is_some_and(|t| t.is(ty)))
+        .map(|(_, infos)| infos.iter().map(|c| c.bind(py).clone()).collect())
+}
+
+/// pybind11's `all_type_info(type)`: the classes of the module whose values an instance of
+/// `ty` holds. A class of the module: itself. Another type: cached the first time it is asked
+/// (an instance's allocation), from its bases (`__bases__`) in breadth-first order (pybind11's
+/// `all_type_info_populate`), each a class of the module (itself) or a type asked about
+/// before (its cached classes), else its own bases in turn; each class once.
+pub fn all_type_info<'py>(ty: &Bound<'py, PyType>) -> PyResult<Vec<Bound<'py, PyType>>> {
+    let py = ty.py();
+    if registered(ty) {
+        return Ok(vec![ty.clone()]);
+    }
+    if let Some(infos) = cached_type_info(ty) {
+        return Ok(infos);
+    }
+    let mut check: Vec<Bound<'py, PyAny>> = ty.bases().iter().collect();
+    let mut infos: Vec<Bound<'py, PyType>> = Vec::new();
+    let mut i = 0;
+    while i < check.len() {
+        if let Ok(t) = check[i].cast::<PyType>() {
+            let known = if registered(t) {
+                Some(vec![t.clone()])
+            } else {
+                cached_type_info(t)
+            };
+            match known {
+                Some(known) => {
+                    for k in known {
+                        if !infos.iter().any(|c| c.is(&k)) {
+                            infos.push(k);
+                        }
+                    }
+                }
+                None => check.extend(t.bases().iter()),
+            }
+        }
+        i += 1;
+    }
+    let remove = PyCFunction::new_closure(py, None, None, |args, _| -> PyResult<()> {
+        let wr = args.get_item(0)?;
+        TYPE_INFO_CACHE
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|(w, _)| !w.bind(args.py()).is(&wr));
+        Ok(())
+    })?;
+    let wr = PyWeakrefReference::new_with(ty, remove)?;
+    TYPE_INFO_CACHE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push((
+            wr.unbind(),
+            infos.iter().map(|c| c.clone().unbind()).collect(),
+        ));
+    Ok(infos)
+}
+
+/// An instance and the classes of the module its values belong to.
+type InstanceValues<'a, 'py> = (&'a Bound<'py, Pybind11Object>, Vec<Bound<'py, PyType>>);
+
+/// `obj`'s values and the classes they belong to, when it is an instance of the module's
+/// classes.
+fn values_of<'a, 'py>(obj: &'a Bound<'py, PyAny>) -> PyResult<Option<InstanceValues<'a, 'py>>> {
+    let Ok(this) = obj.cast::<Pybind11Object>() else {
+        return Ok(None);
+    };
+    Ok(Some((this, all_type_info(&obj.get_type())?)))
+}
+
+/// The index of the value `obj` holds as an instance of `cls`, as pybind11's class caster
+/// finds it (`type_caster_generic::load_impl`): `obj`'s type itself, or a type with one class
+/// of the module, its value; with several, the first that is `cls` or derives from it.
+fn caster_index(obj: &Bound<'_, PyAny>, cls: &Bound<'_, PyType>) -> PyResult<Option<usize>> {
+    let ty = obj.get_type();
+    if ty.is(cls) {
+        return Ok(Some(0));
+    }
+    if !ty.is_subclass(cls)? {
+        return Ok(None);
+    }
+    let infos = all_type_info(&ty)?;
+    if infos.len() == 1 {
+        return Ok(Some(0));
+    }
+    for (i, info) in infos.iter().enumerate() {
+        if info.is_subclass(cls)? {
+            return Ok(Some(i));
+        }
+    }
+    Ok(None)
+}
+
+/// The C++ value `obj` holds as an instance of the class of the module whose C name is
+/// `qualified`, if a constructor constructed it.
+pub fn value<'py>(obj: &Bound<'py, PyAny>, qualified: &str) -> Option<Bound<'py, PyAny>> {
+    let cls = class(obj.py(), qualified)?;
+    let index = caster_index(obj, &cls).ok()??;
+    let this = obj.cast::<Pybind11Object>().ok()?;
+    let values = this
+        .get()
+        .values
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    values
+        .get(index)?
+        .as_ref()
+        .map(|v| v.bind(obj.py()).clone())
+}
+
+/// [`value`] of `obj`, an instance a method reads. One that no constructor constructed
+/// (`OCIO.TransformDirection.__new__(OCIO.TransformDirection)`) holds uninitialized memory in
+/// the wheel, which its methods read; the port refuses it (docs/improvements.md, U-86).
+pub fn read_value<'py>(obj: &Bound<'py, PyAny>, qualified: &str) -> PyResult<Bound<'py, PyAny>> {
+    match value(obj, qualified) {
+        Some(v) => Ok(v),
+        None => Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+            "{qualified}: the instance was never constructed (no __init__ or __setstate__ gave \
+             it a value; the wheel reads uninitialized memory)"
+        ))),
+    }
+}
+
+/// The index of the value a constructor of `cls` constructs in `obj`, as pybind11's
+/// `instance::get_value_and_holder(tinfo, true)` finds it: `obj`'s type itself, its first;
+/// else the one of `cls` exactly; else pybind11 fails (`pybind11_fail`, RuntimeError).
+fn constructor_index(obj: &Bound<'_, PyAny>, cls: &Bound<'_, PyType>) -> PyResult<usize> {
+    let ty = obj.get_type();
+    if ty.is(cls) {
+        return Ok(0);
+    }
+    all_type_info(&ty)?
+        .iter()
+        .position(|info| info.is(cls))
+        .ok_or_else(|| {
+            pyo3::exceptions::PyRuntimeError::new_err(
+                "pybind11::detail::instance::get_value_and_holder: type is not a pybind11 base \
+                 of the given instance (#define PYBIND11_DETAILED_ERROR_MESSAGES or compile in \
+                 debug mode for type details)",
+            )
+        })
+}
+
+/// Whether a constructor of the class of the module whose C name is `qualified` constructed
+/// its value in `obj` already (the dispatcher then calls none: pybind11's
+/// `instance_registered()`).
+pub fn constructed(obj: &Bound<'_, PyAny>, qualified: &str) -> PyResult<bool> {
+    let Some(cls) = class(obj.py(), qualified) else {
+        return Ok(false);
+    };
+    let index = constructor_index(obj, &cls)?;
+    let this = obj.cast::<Pybind11Object>()?;
+    let values = this
+        .get()
+        .values
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    Ok(values.get(index).is_some_and(Option::is_some))
+}
+
+/// Constructs the C++ value of `obj` as an instance of the class of the module whose C name is
+/// `qualified`: once, as a constructor (`__init__`, `__setstate__`) does; the dispatcher calls
+/// no constructor on a value constructed already.
+pub fn set_value(obj: &Bound<'_, PyAny>, qualified: &str, value: Bound<'_, PyAny>) -> PyResult<()> {
+    let cls = class(obj.py(), qualified)
+        .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err(qualified.to_string()))?;
+    let index = constructor_index(obj, &cls)?;
+    let this = obj.cast::<Pybind11Object>()?;
+    let mut values = this
+        .get()
+        .values
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(slot) = values.get_mut(index)
+        && slot.is_none()
+    {
+        *slot = Some(value.unbind());
+    }
+    Ok(())
+}
+
+/// pybind11_meta_call's check, after a class's `__call__` made `obj`: the C name of the first
+/// class of the module whose value no constructor constructed (a Python subclass's `__init__`
+/// that didn't call its `__init__`), skipping one a later class derives from and an earlier
+/// one already holds (`is_redundant_value_and_holder`).
+fn unconstructed(obj: &Bound<'_, PyAny>) -> PyResult<Option<String>> {
+    let Some((this, infos)) = values_of(obj)? else {
+        return Ok(None);
+    };
+    let constructed: Vec<bool> = this
+        .get()
+        .values
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .map(Option::is_some)
+        .collect();
+    for (i, info) in infos.iter().enumerate() {
+        if constructed.get(i).copied().unwrap_or(true) {
+            continue;
+        }
+        let mut redundant = false;
+        for earlier in &infos[..i] {
+            if earlier.is_subclass(info)? {
+                redundant = true;
+            }
+        }
+        if !redundant {
+            return Ok(Some(tp_name(info)?));
+        }
+    }
+    Ok(None)
 }
 
 /// A type's C name, as CPython's messages write it: a class of the module's, its dotted
@@ -264,6 +507,10 @@ pub fn tp_name(ty: &Bound<'_, PyType>) -> PyResult<String> {
         return Ok(name.clone());
     }
     drop(classes);
+    // pybind11_object: PyO3's C name (docs/deviations.md, D-7).
+    if ty.is(&object_base(ty.py())?) {
+        return Ok("pybind11_builtins.pybind11_object".to_string());
+    }
     Ok(ty.name()?.to_string())
 }
 

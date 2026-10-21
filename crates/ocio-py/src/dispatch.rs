@@ -190,7 +190,9 @@ pub fn dispatch<'py>(
                     "__init__(self, ...) called with invalid or missing `self` argument",
                 ));
             }
-            Some(this) if crate::pybind11::value(&this).is_some() => return Ok(py.None()),
+            Some(this) if crate::pybind11::constructed(&this, f.overloads[0].params[0].ty)? => {
+                return Ok(py.None());
+            }
             Some(_) => {}
         }
     }

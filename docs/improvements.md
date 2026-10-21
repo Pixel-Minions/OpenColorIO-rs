@@ -4423,14 +4423,18 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 ### U-87. Constructing `pybind11_object` itself aborts the process
 
 - **Upstream:** `pybind11_builtins.pybind11_object()` makes an instance of a type pybind11 never
-  registered, and the wheel's process aborts. `OCIO.TRANSFORM_DIR_INVERSE.__reduce__()` does the
-  same: copyreg's `_reduce_ex` calls the first base whose `__new__` is its own,
-  `pybind11_object` (the verifier's probes of p6-core).
+  registered, and the wheel's process aborts (pybind11 fails with "instance allocation failed:
+  new instance has no pybind11-registered base types" where no C++ exception may leave), as
+  does an instance of a Python class deriving from `pybind11_object` only (p6-core-2's
+  probes). `OCIO.TRANSFORM_DIR_INVERSE.__reduce__()` does the same: copyreg's `_reduce_ex`
+  calls the first base whose `__new__` is its own, `pybind11_object` (the verifier's probes of
+  p6-core).
 - **Who notices:** Python code that pickles an enum with protocol 0 or 1, or calls
   `__reduce__()` (protocol 2 and up, `copy` and `pickle`'s default, work).
 - **A fix:** none needed beyond the port's error.
-- **Status:** the port raises TypeError "pybind11_builtins.pybind11_object: pybind11's base
-  class has no instances (the wheel's process aborts)", in `p6-core`
+- **Status:** the port raises TypeError "pybind11_builtins.pybind11_object: pybind11 makes no
+  instance of a class without a class of the module among its bases (the wheel's process
+  aborts)" (the class's C name first), in `p6-core`
   (`crates/ocio-py/src/pybind11.rs`, `Pybind11Object::new`); `constructors_oracle.rs`,
   `undefined_behaviour_raises_the_ports_errors` (the port only).
 
