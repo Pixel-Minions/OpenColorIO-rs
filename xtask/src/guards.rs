@@ -87,8 +87,9 @@ const TOLERANCE: &[&str] = &[".abs() < ", ".abs() <= ", "f32::EPSILON", "f64::EP
 /// platform C runtime (the reference for C formatting and parsing), the one file that calls
 /// `CreateSymbolicLinkW` and lists directories with `FindFirstFileW` as minizip-ng does (owner
 /// decisions 2026-10-17), and, in the Python binding, the one file that calls
-/// `PyType_FromMetaclass` and `PyInstanceMethod_New` (owner decision 2026-10-20, option A),
-/// each named here by its file.
+/// `PyType_FromMetaclass`, `PyInstanceMethod_New` (owner decision 2026-10-20, option A) and
+/// `PyCFunction_NewEx` (2026-10-21), each named here by its file; [`check_type_object`] pins
+/// that file's calls.
 fn unsafe_allowed(rel: &str) -> bool {
     let file = rel.rsplit('/').next().unwrap_or(rel);
     rel == "crates/ocio-py/src/type_object.rs"
@@ -204,6 +205,9 @@ fn check_files(
             problems.push(format!("{rel}: missing the SPDX / copyright header"));
         }
         problems.extend(check_internals_uses(rel, text));
+        if rel == TYPE_OBJECT {
+            problems.extend(check_type_object(rel, text));
+        }
         if !(rel.starts_with("xtask/") && rel.ends_with("guards.rs")) && !unsafe_allowed(rel) {
             for line in unsafe_code_relaxed(text) {
                 problems.push(format!(
@@ -242,6 +246,75 @@ fn check_files(
     for (rel, text) in manifests {
         problems.extend(check_internals_feature(rel, text));
         problems.extend(check_unsafe_lint(rel, text));
+    }
+    problems
+}
+
+/// The Python binding's one file with `unsafe` (owner decisions 2026-10-20 and 2026-10-21).
+const TYPE_OBJECT: &str = "crates/ocio-py/src/type_object.rs";
+
+/// What each `unsafe { ... }` block of [`TYPE_OBJECT`] may be: one of the owner's three calls,
+/// or the wrapping of a call's result.
+const TYPE_OBJECT_CALLS: [&str; 4] = [
+    "ffi::PyType_FromMetaclass(",
+    "PyInstanceMethod_New(",
+    "ffi::PyCFunction_NewEx(",
+    "Bound::from_owned_ptr_or_err(",
+];
+
+/// [`TYPE_OBJECT`]'s `unsafe`: blocks that each make one of [`TYPE_OBJECT_CALLS`], one
+/// `unsafe extern "C"` block declaring `PyInstanceMethod_New` only, and no `unsafe fn`,
+/// `unsafe impl` or `unsafe trait`.
+fn check_type_object(rel: &str, text: &str) -> Vec<String> {
+    let mut problems = Vec::new();
+    let code: String = text
+        .lines()
+        .map(|l| l.split("//").next().unwrap_or_default())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let line_of = |at: usize| code[..at].matches('\n').count() + 1;
+    let mut i = 0;
+    while let Some(found) = code[i..].find("unsafe") {
+        let at = i + found;
+        i = at + "unsafe".len();
+        let rest = code[i..].trim_start();
+        if let Some(body) = rest.strip_prefix('{') {
+            let mut depth = 1;
+            let end = body
+                .char_indices()
+                .find(|&(_, c)| {
+                    match c {
+                        '{' => depth += 1,
+                        '}' => depth -= 1,
+                        _ => {}
+                    }
+                    depth == 0
+                })
+                .map_or(body.len(), |(e, _)| e);
+            let block = body[..end].trim();
+            if !TYPE_OBJECT_CALLS.iter().any(|c| block.starts_with(c)) {
+                problems.push(format!(
+                    "{rel}:{}: an `unsafe` block that isn't one of the owner's calls: {block}",
+                    line_of(at)
+                ));
+            }
+        } else if let Some(body) = rest.strip_prefix("extern \"C\"") {
+            let body = body.trim_start();
+            let end = body.find('}').unwrap_or(body.len());
+            let declared: Vec<&str> = body[..end]
+                .split("fn ")
+                .skip(1)
+                .map(|d| d.split('(').next().unwrap_or_default().trim())
+                .collect();
+            if declared != ["PyInstanceMethod_New"] {
+                problems.push(format!(
+                    "{rel}:{}: an `unsafe extern` block declaring {declared:?}",
+                    line_of(at)
+                ));
+            }
+        } else if rest.starts_with("fn ") || rest.starts_with("impl") || rest.starts_with("trait") {
+            problems.push(format!("{rel}:{}: `unsafe` {rest:.20}", line_of(at)));
+        }
     }
     problems
 }
@@ -794,6 +867,36 @@ mod tests {
                 "{text}"
             );
         }
+    }
+
+    #[test]
+    fn type_object_rs_makes_only_the_owners_calls() {
+        let good = "#[cfg_attr(windows, link(name = \"python313\", kind = \"raw-dylib\"))]\n\
+                    unsafe extern \"C\" {\n    fn PyInstanceMethod_New(f: *mut ffi::PyObject) \
+                    -> *mut ffi::PyObject;\n}\n\
+                    fn a() {\n    // SAFETY: unsafe { anything } in a comment.\n    \
+                    let p = unsafe { ffi::PyType_FromMetaclass(m, n, s, b) };\n    \
+                    let q = unsafe { PyInstanceMethod_New(f.as_ptr()) };\n    \
+                    let r = unsafe {\n        ffi::PyCFunction_NewEx(d, s, m)\n    };\n    \
+                    unsafe { Bound::from_owned_ptr_or_err(py, p) }\n}\n";
+        assert!(
+            check_type_object(TYPE_OBJECT, good).is_empty(),
+            "{:?}",
+            check_type_object(TYPE_OBJECT, good)
+        );
+        for bad in [
+            "fn a() { let x = unsafe { *p }; }",
+            "fn a() { unsafe { ffi::PyType_GetSlot(t, 1) } }",
+            "unsafe extern \"C\" {\n    fn PyInstanceMethod_New(f: *mut O) -> *mut O;\n    fn Py_Other() -> i32;\n}",
+            "unsafe extern \"C\" {\n    fn Py_Other() -> i32;\n}",
+            "unsafe fn f() {}",
+            "unsafe impl Send for X {}",
+        ] {
+            assert_eq!(check_type_object(TYPE_OBJECT, bad).len(), 1, "{bad}");
+        }
+        // The file itself.
+        let text = std::fs::read_to_string(paths::workspace_root().join(TYPE_OBJECT)).unwrap();
+        assert!(check_type_object(TYPE_OBJECT, &text).is_empty());
     }
 
     #[test]

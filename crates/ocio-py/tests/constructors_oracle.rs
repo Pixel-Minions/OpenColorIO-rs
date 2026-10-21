@@ -138,6 +138,26 @@ fn steps() -> Vec<Value> {
     s.push(json!({ "eval": name("OCIO.ViewType.__init__.__module__") }));
     s.push(json!({ "eval": name("OCIO.GetEnvVariable.__module__") }));
     s.push(json!({ "eval": name("OCIO.BitDepthToString.__module__") }));
+    // Functions: their `__self__` is pybind11's function record, whose class (named with
+    // pybind11's ABI tag, per platform) CPython writes in `__qualname__` and the repr.
+    for f in [
+        "OCIO.GetEnvVariable",
+        "OCIO.BitDepthToString",
+        "OCIO.ViewType.__repr__",
+        "OCIO.ViewType.__eq__",
+        "OCIO.ViewType.__init__",
+        "OCIO.ViewType._pybind11_conduit_v1_",
+        "OCIO.ViewType.name.fget",
+        "OCIO.ViewType.value.fget",
+        "OCIO.ViewType.__members__.fget",
+    ] {
+        s.push(json!({ "eval": name(f), "getters": ["__qualname__", "__name__", "__module__", "__self__", "__text_signature__"] }));
+        s.push(json!({ "eval": name(&format!("{f}.__self__.__class__")), "getters": ["__module__", "__qualname__", "__name__", "__doc__"] }));
+        s.push(call(
+            name("hasattr"),
+            json!([name(&format!("{f}.__self__")), text("dispatch_call")]),
+        ));
+    }
     s
 }
 

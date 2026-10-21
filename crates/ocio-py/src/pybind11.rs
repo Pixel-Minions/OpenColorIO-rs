@@ -23,7 +23,7 @@ use std::ffi::CString;
 
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
-use pyo3::types::{PyCFunction, PyDict, PyTuple, PyType};
+use pyo3::types::{PyCFunction, PyDict, PyString, PyTuple, PyType};
 
 use crate::dispatch::{Function, dispatch};
 
@@ -333,13 +333,92 @@ pub fn instance_method<'py>(py: Python<'py>, f: Bound<'py, PyAny>) -> PyResult<B
     crate::type_object::instance_method(&f)
 }
 
-/// A builtin function over `f` (`PyCFunction`, taking `*args` and `**kwargs` as pybind11's
-/// functions do): its name `f.name`, its docstring pybind11's for `f`'s overloads, or `None`
-/// for a function pybind11 gives none (an empty docstring here, pending the C-API module).
+// pybind11's function record (`detail::function_record`), the `__self__` of every function it
+// makes, as Python sees it: a class of pybind11_builtins whose name carries pybind11's ABI tag,
+// which differs between the Windows wheel (MSVC) and the Linux one (GCC, libstdc++); CPython
+// names it in a function's `__qualname__` and repr. Its one method, `dispatch_call`, is the C
+// function of every function (removed from the class's dictionary, which the wheel's has no
+// methods in). (No Rust doc comment: it would be the class's docstring.)
+#[cfg_attr(
+    windows,
+    pyclass(
+        name = "pybind11_detail_function_record_v1_msvc_md_mscver19",
+        module = "pybind11_builtins",
+        frozen
+    )
+)]
+#[cfg_attr(
+    not(windows),
+    pyclass(
+        name = "pybind11_detail_function_record_v1_system_libstdcpp_gxx_abi_1xxx_use_cxx11_abi_1",
+        module = "pybind11_builtins",
+        frozen
+    )
+)]
+#[derive(Debug)]
+pub struct FunctionRecord {
+    f: &'static Function,
+}
+
+#[pymethods]
+impl FunctionRecord {
+    #[pyo3(signature = (*args, **kwargs))]
+    fn dispatch_call(
+        slf: &Bound<'_, Self>,
+        args: &Bound<'_, PyTuple>,
+        kwargs: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Py<PyAny>> {
+        dispatch(slf.py(), slf.get().f, args, kwargs)
+    }
+}
+
+/// `dispatch_call`'s method definition (PyO3's trampoline and flags), once its class no longer
+/// shows it.
+static RECORD_METHOD: PyOnceLock<usize> = PyOnceLock::new();
+
+fn record_method(py: Python<'_>) -> PyResult<pyo3::ffi::PyMethodDef> {
+    use pyo3::impl_::pyclass::PyClassImpl;
+    use pyo3::impl_::pymethods::PyMethodDefType;
+    RECORD_METHOD.get_or_try_init(py, || -> PyResult<usize> {
+        py.get_type::<FunctionRecord>().delattr("dispatch_call")?;
+        Ok(0)
+    })?;
+    <FunctionRecord as PyClassImpl>::items_iter()
+        .flat_map(|items| items.methods)
+        .find_map(|m| match m {
+            PyMethodDefType::Method(def) => Some(def.into_raw()),
+            _ => None,
+        })
+        .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("no dispatch_call"))
+}
+
+/// A builtin function over `f`, as pybind11 makes it (taking `*args` and `**kwargs`): its name
+/// `f.name`, its docstring pybind11's for `f`'s overloads, or `None` for a function pybind11
+/// gives none (`doc` false), its `__self__` a function record of `f`, its `__module__`
+/// [`MODULE`] (a function with a scope: the module's, a class's method).
 pub fn builtin<'py>(
     py: Python<'py>,
     f: &'static Function,
     doc: bool,
+) -> PyResult<Bound<'py, PyAny>> {
+    function(py, f, doc, Some(MODULE))
+}
+
+/// [`builtin`] for a function pybind11 makes without a scope (the getters of an enum's
+/// `value`, `__doc__` and `__members__`): its `__module__` None.
+pub fn builtin_unscoped<'py>(
+    py: Python<'py>,
+    f: &'static Function,
+    doc: bool,
+) -> PyResult<Bound<'py, PyAny>> {
+    function(py, f, doc, None)
+}
+
+fn function<'py>(
+    py: Python<'py>,
+    f: &'static Function,
+    doc: bool,
+    module: Option<&str>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let name: &'static std::ffi::CStr = Box::leak(
         CString::new(f.name)
@@ -353,12 +432,20 @@ pub fn builtin<'py>(
                 .into_boxed_c_str(),
         )
     });
-    let function = PyCFunction::new_closure(py, Some(name), docstring, move |args, kwargs| {
-        dispatch(args.py(), f, args, kwargs)
-    })?;
-    // pybind11 gives every function the module's name (`m_module`).
-    function.setattr("__module__", MODULE)?;
-    Ok(function.into_any())
+    let mut def = record_method(py)?;
+    def.ml_name = name.as_ptr();
+    def.ml_doc = docstring.map_or(std::ptr::null(), std::ffi::CStr::as_ptr);
+    let record = Bound::new(py, FunctionRecord { f })?;
+    let module = match module {
+        Some(m) => PyString::new(py, m).into_any(),
+        None => py.None().into_bound(py),
+    };
+    crate::type_object::new_function(Box::leak(Box::new(def)), record.as_any(), &module)
+}
+
+/// `m.def(name, ...)`: [`builtin`] of `f` into the module's dictionary.
+pub fn def_function(m: &Bound<'_, PyModule>, f: &'static Function) -> PyResult<()> {
+    m.setattr(f.name, builtin(m.py(), f, true)?)
 }
 
 /// A method: [`instance_method`] of [`builtin`].

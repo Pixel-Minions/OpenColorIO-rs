@@ -33,7 +33,7 @@ use crate::arg;
 use crate::dispatch::{CharPtr, Function, Overload, Param};
 use crate::enums::{EnumDef, Scalar, add_enum, conduit, enum_class, enum_value, to_py};
 use crate::py_open_color_io::{function, py_result, to_py_err};
-use crate::pybind11::{self, MODULE};
+use crate::pybind11;
 
 /// Port of `OCIO_USER_CATEGORIES_ENVVAR` (src/OpenColorIO/Config.cpp:52 @ v2.5.2), which the
 /// library itself has not needed yet.
@@ -269,7 +269,7 @@ pub(crate) fn bind_py_types(m: &Bound<'_, PyModule>) -> PyResult<()> {
     }
     // The string-conversion functions (862-940).
     for f in &CONVERSIONS {
-        def_function(m, f)?;
+        pybind11::def_function(m, f)?;
     }
     // Env. variables (942-948).
     m.setattr("OCIO_CONFIG_ENVVAR", ocio::config::OCIO_CONFIG_ENVVAR)?;
@@ -928,11 +928,3 @@ static CONVERSIONS: [Function; 32] = [
         }
     ),
 ];
-
-/// `m.def(...)` of a function the dispatcher binds: a builtin function of the module, its
-/// docstring pybind11's for its overloads.
-fn def_function(m: &Bound<'_, PyModule>, f: &'static Function) -> PyResult<()> {
-    let function = pybind11::builtin(m.py(), f, true)?;
-    function.setattr("__module__", MODULE)?;
-    m.setattr(f.name, function)
-}

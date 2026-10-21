@@ -499,7 +499,7 @@ pub fn define_enum<'py>(
     );
 
     let static_property = |f: &'static Function| -> PyResult<Bound<'py, PyAny>> {
-        pybind11::static_property(py, pybind11::builtin(py, f, true)?)
+        pybind11::static_property(py, pybind11::builtin_unscoped(py, f, true)?)
     };
     let property = py.import("builtins")?.getattr("property")?;
 
@@ -534,7 +534,7 @@ pub fn define_enum<'py>(
     cls.setattr(
         "value",
         property.call1((
-            pybind11::builtin(py, value_getter, true)?,
+            pybind11::builtin_unscoped(py, value_getter, true)?,
             py.None(),
             py.None(),
             "",

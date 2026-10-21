@@ -1,14 +1,16 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // Copyright Contributors to the OpenColorIO Project.
 
-//! The two CPython calls that make pybind11's types as the wheel has them, which no safe API
-//! makes (owner decision 2026-10-20, "option A": `unsafe` in this file only, limited to these
-//! two calls):
+//! The CPython calls that make pybind11's types and functions as the wheel has them, which no
+//! safe API makes (owner decisions 2026-10-20, "option A", and 2026-10-21: `unsafe` in this
+//! file only, limited to these three calls):
 //! - `PyType_FromMetaclass`: a class with pybind11's metatype whose C name (`tp_name`) is the
 //!   dotted `PyOpenColorIO.PyOpenColorIO.Name`, as pybind11's are. CPython writes it in some
 //!   messages ("'<' not supported between instances of ...", "'...' object has no attribute
 //!   ...", "bad operand type for unary ~: ...").
-//! - `PyInstanceMethod_New`: CPython's `instancemethod`, which pybind11 wraps each method in.
+//! - `PyInstanceMethod_New`: CPython's `instancemethod`, which pybind11 wraps each method in;
+//! - `PyCFunction_NewEx`: a builtin function whose `__self__` is pybind11's function record,
+//!   which CPython names in the function's `__qualname__` and repr.
 #![allow(unsafe_code)]
 
 use std::ffi::{CStr, CString, c_void};
@@ -89,6 +91,26 @@ pub(crate) fn from_metaclass<'py>(
     // set, which `from_owned_ptr_or_err` turns into the error.
     let cls = unsafe { Bound::from_owned_ptr_or_err(py, ptr) }?;
     Ok(cls.cast_into::<PyType>()?)
+}
+
+/// `PyCFunction_NewEx(def, record, module)`: a builtin function, as pybind11 makes each (its
+/// `__self__` the function record `record`, its `__module__` `module`).
+pub(crate) fn new_function<'py>(
+    def: &'static mut ffi::PyMethodDef,
+    record: &Bound<'py, PyAny>,
+    module: &Bound<'py, PyAny>,
+) -> PyResult<Bound<'py, PyAny>> {
+    // SAFETY: the interpreter is attached (`record` is bound to it); `def` is leaked, so it
+    // outlives the function, which keeps a pointer to it, and its name, docstring and C
+    // function (PyO3's trampoline of a method of `record`'s class, with that method's flags)
+    // are valid; `record` and `module` are live objects, of which the function takes new
+    // references. The call returns a new reference, or null with an exception set.
+    let ptr = unsafe {
+        ffi::PyCFunction_NewEx(std::ptr::from_mut(def), record.as_ptr(), module.as_ptr())
+    };
+    // SAFETY: `ptr` is the call's result: a new reference we own, or null with an exception
+    // set.
+    unsafe { Bound::from_owned_ptr_or_err(record.py(), ptr) }
 }
 
 /// `PyInstanceMethod_New(f)`: `f` as a method, CPython's `instancemethod`.
