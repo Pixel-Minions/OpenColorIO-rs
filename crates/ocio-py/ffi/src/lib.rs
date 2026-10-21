@@ -9,7 +9,7 @@
 //! relax, so the compiler holds the binding to the safe functions of this crate.
 //! `cargo xtask guards` allows `unsafe` here only, refuses any other source file in this
 //! crate, pins this file's SHA-256 (a change shows in review as a change of the pin), and
-//! checks that each `unsafe` block is one of the four calls below, or the wrapping of the new
+//! checks that each `unsafe` block is one of the five calls below, or the wrapping of the new
 //! reference one of them returned in the statement just before:
 //! - `PyType_FromMetaclass`: a class with pybind11's metatype whose C name (`tp_name`) is the
 //!   dotted `PyOpenColorIO.PyOpenColorIO.Name`, as pybind11's are. CPython writes it in some
@@ -19,7 +19,12 @@
 //! - `PyCFunction_NewEx`: a builtin function whose `__self__` is pybind11's function record,
 //!   which CPython names in the function's `__qualname__` and repr;
 //! - `PySequence_Check`: whether an object is a sequence as pybind11's sequence casters ask it
-//!   (the type's `sq_item` slot), which no Python-level check answers exactly.
+//!   (the type's `sq_item` slot), which no Python-level check answers exactly;
+//! - `PyType_GetSlot`, compared only against null, for the number slots `nb_bool`, `nb_index`,
+//!   `nb_int` and `nb_float` only (owner decision 2026-10-21, p6-core re-check round 4): whether
+//!   a type has one, as pybind11's `bool` caster and `PyNumber_Check` ask it, which no
+//!   Python-level check answers exactly (a static type may show an inherited `__bool__` in its
+//!   MRO without the slot, as `numpy.bytes_`).
 //!
 //! Each function is sound whatever its arguments: what a call relies on (the types it is
 //! given, the instance size, the receiver PyO3's C functions take unchecked) is checked here,
@@ -37,6 +42,19 @@ use pyo3::ffi;
 use pyo3::impl_::pymethods::PyMethodDefType;
 use pyo3::prelude::*;
 use pyo3::types::{PyTuple, PyType};
+
+/// The number slots [`has_number_slot`] answers for, the only ones (owner decision 2026-10-21).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NumberSlot {
+    /// `nb_bool` (`__bool__`).
+    Bool,
+    /// `nb_index` (`__index__`).
+    Index,
+    /// `nb_int` (`__int__`).
+    Int,
+    /// `nb_float` (`__float__`).
+    Float,
+}
 
 // On Windows, linked as pyo3-ffi links the interpreter's other functions: from the DLL of
 // target/py-port's Python 3.13 (py-port/.python-version), by `raw-dylib`.
@@ -288,4 +306,22 @@ pub fn instance_method<'py>(f: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>
     // SAFETY: `ptr` is the call's result: a new reference we own, or null with an exception
     // set.
     unsafe { Bound::from_owned_ptr_or_err(f.py(), ptr) }
+}
+
+/// Whether `ty` has the number slot `slot`: `tp_as_number && tp_as_number->nb_...`, as
+/// pybind11's `bool` caster reads `nb_bool` and `PyNumber_Check` the others.
+pub fn has_number_slot(ty: &Bound<'_, PyType>, slot: NumberSlot) -> bool {
+    let id = match slot {
+        NumberSlot::Bool => ffi::Py_nb_bool,
+        NumberSlot::Index => ffi::Py_nb_index,
+        NumberSlot::Int => ffi::Py_nb_int,
+        NumberSlot::Float => ffi::Py_nb_float,
+    };
+    // SAFETY: the interpreter is attached (`ty` is bound to it) and `ty` is a live type object.
+    // Since Python 3.10 PyType_GetSlot reads any type's slot (static ones too); `id` is one of
+    // the number slots' ids, valid, so the call sets no exception: it returns the slot's
+    // function pointer, or null when the type has no number methods or not that one. The
+    // pointer is only compared against null, never called or read.
+    let pointer = unsafe { ffi::PyType_GetSlot(ty.as_type_ptr(), id) };
+    !pointer.is_null()
 }

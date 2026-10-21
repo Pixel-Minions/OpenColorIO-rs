@@ -237,6 +237,103 @@ fn values() -> Vec<Vec<Value>> {
             name("numpy.zeros"),
             json!([json!({ "tuple": [int("2"), int("2")] })]),
         )],
+        // The type's own number slots (re-check round 4): `nb_bool` for the bool caster,
+        // `nb_index`, `nb_int` and `nb_float` for PyNumber_Check, which an attribute lookup
+        // can find on the metaclass, or on a static type's base without the slot (numpy.bytes_
+        // and numpy.str_ share bytes' and str's number methods, generic's `__bool__`,
+        // `__int__` and `__float__` in their MRO); a Python subclass of them has the slots.
+        metaclass_instance("__bool__"),
+        metaclass_instance("__index__"),
+        metaclass_instance("__int__"),
+        metaclass_instance("__float__"),
+        vec![call(name("numpy.bytes_"), json!([{ "bytes": "61626364" }]))],
+        vec![call(name("numpy.bytes_"), json!([{ "bytes": "3132" }]))],
+        vec![call(name("numpy.str_"), json!([s("12")]))],
+        vec![call(name("numpy.str_"), json!([s("x")]))],
+        subclass_instance("numpy.bytes_", vec![], json!({ "bytes": "3132" })),
+        subclass_instance("numpy.str_", vec![], s("12")),
+        vec![call(name("numpy.void"), json!([{ "bytes": "6162" }]))],
+        vec![call(name("numpy.datetime64"), json!([s("2020-01-01")]))],
+        vec![call(name("numpy.timedelta64"), json!([int("3")]))],
+        vec![call(name("numpy.complex64"), json!([int("1")]))],
+        vec![call(name("numpy.float16"), json!([f(1.5f64.to_bits())]))],
+        vec![call(name("numpy.array"), json!([f(1.5f64.to_bits())]))],
+        // Classes with the slots, from a callable that isn't a function (called without
+        // `self`), or `None`.
+        subclass_instance("object", vec![[s("__bool__"), name("bool")]], json!(null)),
+        subclass_instance(
+            "object",
+            vec![[s("__bool__"), json!({ "none": null })]],
+            json!(null),
+        ),
+        subclass_instance("object", vec![[s("__index__"), name("int")]], json!(null)),
+        subclass_instance("object", vec![[s("__int__"), name("int")]], json!(null)),
+        subclass_instance("object", vec![[s("__float__"), name("float")]], json!(null)),
+        subclass_instance("object", vec![[s("__len__"), name("int")]], json!(null)),
+        // `nb_float` alone makes PyNumber_Check true, and then `int(obj)` parses a `str` or
+        // `bytes` subclass's text.
+        subclass_instance("str", vec![[s("__float__"), name("float")]], s("12")),
+        subclass_instance(
+            "bytes",
+            vec![[s("__float__"), name("float")]],
+            json!({ "bytes": "3132" }),
+        ),
+        // Built-in containers and their subclasses (the verifier's re-check round 4).
+        vec![call(name("bytearray"), json!([{ "bytes": "61626364" }]))],
+        vec![call(name("bytes"), json!([four()]))],
+        vec![
+            call(name("numpy.array"), json!([four()])),
+            call(json!({ "ref": 0, "attr": "tolist" }), json!([])),
+        ],
+        subclass_instance("bytes", vec![], json!({ "bytes": "61626364" })),
+        subclass_instance("bytes", vec![], json!({ "bytes": "3132" })),
+        subclass_instance("str", vec![], s("abcd")),
+        subclass_instance("str", vec![], s("12")),
+        subclass_instance("tuple", vec![], four()),
+        subclass_instance(
+            "dict",
+            vec![],
+            json!({ "dict": [[int("1"), int("1")], [int("2"), int("2")], [int("3"), int("3")], [int("4"), int("4")]] }),
+        ),
+        subclass_instance("int", vec![], int("1")),
+        subclass_instance("float", vec![], f(1.5f64.to_bits())),
+        subclass_instance("complex", vec![], int("1")),
+        subclass_instance("bytearray", vec![], int("4")),
+    ]
+}
+
+/// An instance of a class made by a metaclass (a `type` subclass) that has the special method
+/// `slot` (an int, never called): the class itself has no such slot.
+fn metaclass_instance(slot: &str) -> Vec<Value> {
+    vec![
+        call(
+            name("type"),
+            json!([s("M"), { "tuple": [name("type")] }, { "dict": [[s(slot), int("0")]] }]),
+        ),
+        call(
+            json!({ "ref": 0 }),
+            json!([s("C"), { "tuple": [] }, { "dict": [[s("__module__"), s("probe")]] }]),
+        ),
+        call(json!({ "ref": 1 }), json!([])),
+    ]
+}
+
+/// An instance of a Python subclass of `base` (named by `name`), with the class attributes
+/// `ns`, made from `arg` (none for null).
+fn subclass_instance(base: &str, ns: Vec<[Value; 2]>, arg: Value) -> Vec<Value> {
+    let mut ns: Vec<Value> = ns.into_iter().map(|kv| json!(kv)).collect();
+    ns.push(json!([s("__module__"), s("probe")]));
+    let args = if arg.is_null() {
+        json!([])
+    } else {
+        json!([arg])
+    };
+    vec![
+        call(
+            name("type"),
+            json!([s("X"), { "tuple": [name(base)] }, { "dict": ns }]),
+        ),
+        call(json!({ "ref": 0 }), args),
     ]
 }
 

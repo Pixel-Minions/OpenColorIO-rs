@@ -30,6 +30,7 @@
 //! - **Docstrings** ([`docstring`]): `name(params) -> ret` and a line end; for several
 //!   overloads, `name(*args, **kwargs)`, "Overloaded function." and each numbered.
 
+use ocio_py_ffi::NumberSlot;
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 use pyo3::types::{
@@ -345,16 +346,19 @@ macro_rules! arg {
     };
 }
 
-/// Whether `obj`'s type has the special method `name` (a number slot of CPython's).
-fn has_slot(obj: &Bound<'_, PyAny>, name: &str) -> bool {
-    obj.get_type().hasattr(name).unwrap_or(false)
+/// Whether `obj`'s type has the number slot `slot` (`Py_TYPE(obj)->tp_as_number->nb_...`), the
+/// C slot itself: not the special method an attribute lookup finds, which a metaclass's
+/// method or a static type's base can show without the slot (re-check round 4).
+fn has_slot(obj: &Bound<'_, PyAny>, slot: NumberSlot) -> bool {
+    ocio_py_ffi::has_number_slot(&obj.get_type(), slot)
 }
 
-/// `PyNumber_Check`: `__index__`, `__int__` or `__float__`, or a complex number.
+/// `PyNumber_Check` (Objects/abstract.c): the slot `nb_index`, `nb_int` or `nb_float`, or a
+/// complex number (`PyComplex_Check`, a subclass too).
 fn number_check(obj: &Bound<'_, PyAny>) -> bool {
-    has_slot(obj, "__index__")
-        || has_slot(obj, "__int__")
-        || has_slot(obj, "__float__")
+    has_slot(obj, NumberSlot::Index)
+        || has_slot(obj, NumberSlot::Int)
+        || has_slot(obj, NumberSlot::Float)
         || obj.is_instance_of::<pyo3::types::PyComplex>()
 }
 
@@ -462,7 +466,9 @@ impl<'py> Cast<'py> for bool {
     const CPP_SIZE: usize = 1;
 
     /// pybind11's `bool` caster: `True` and `False`; with conversions, or for a NumPy bool,
-    /// `None` (as `false`) and any object whose type has `__bool__` (its result).
+    /// `None` (as `false`) and any object whose type has the slot `nb_bool` (its result, which
+    /// `PyObject_IsTrue` calls the slot for once `True`, `False` and `None` are out of the
+    /// way; an error refuses the value).
     fn load(obj: &Bound<'py, PyAny>, convert: bool) -> Option<Self> {
         if let Ok(b) = obj.cast::<PyBool>() {
             return Some(b.is_true());
@@ -477,7 +483,7 @@ impl<'py> Cast<'py> for bool {
         if obj.is_none() {
             return Some(false);
         }
-        if !has_slot(obj, "__bool__") {
+        if !has_slot(obj, NumberSlot::Bool) {
             return None;
         }
         obj.is_truthy().ok()

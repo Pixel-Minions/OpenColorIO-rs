@@ -89,10 +89,11 @@ const TOLERANCE: &[&str] = &[".abs() < ", ".abs() <= ", "f32::EPSILON", "f64::EP
 /// `CreateSymbolicLinkW` and lists directories with `FindFirstFileW` as minizip-ng does (owner
 /// decisions 2026-10-17), and, for the Python binding, the crate `ocio-py-ffi`, one file that
 /// calls `PyType_FromMetaclass`, `PyInstanceMethod_New` (owner decision 2026-10-20, option A),
-/// `PyCFunction_NewEx` and `PySequence_Check` (2026-10-21), each named here by its file;
+/// `PyCFunction_NewEx` and `PySequence_Check` (2026-10-21), and `PyType_GetSlot` for four number
+/// slots (2026-10-21, p6-core re-check round 4), each named here by its file;
 /// [`check_py_ffi`] checks that file's calls and [`PY_FFI_SHA256`] pins it. The keyword
 /// `unsafe` appears nowhere else in the workspace's Rust sources ([`unsafe_tokens`]), and these
-/// files pull in no other source ([`allowlisted_file_sources`]).
+/// files pull in no other source ([`source_problems`]).
 fn unsafe_allowed(rel: &str) -> bool {
     let file = rel.rsplit('/').next().unwrap_or(rel);
     rel == PY_FFI
@@ -716,7 +717,7 @@ const PY_FFI_DIR: &str = "crates/ocio-py/ffi/";
 /// SHA-256 of [`PY_FFI`]'s bytes. Changing that file requires updating this pin, so that every
 /// change to the Python binding's `unsafe` code shows in review as a change of this line (the
 /// coordinator's decision, p6-core re-check round 3).
-const PY_FFI_SHA256: &str = "10ffda1bb6637b1d4a056566e779e8ee354775788c5f0e864085893d9f15667e";
+const PY_FFI_SHA256: &str = "81322615105ae41d0c5b3aa2175f1720a535b7137ae6132f5fd516667e472c9c";
 /// The Python binding's crate root, which must forbid `unsafe_code`: no attribute or macro
 /// inside the crate can relax a `forbid`, so the compiler holds the binding to safe code.
 const PY_ROOT: &str = "crates/ocio-py/src/lib.rs";
@@ -731,6 +732,11 @@ const PY_FFI_NEW: [&str; 3] = [
 ];
 /// The owner's other call, which returns an int.
 const PY_FFI_CHECK: &str = "ffi::PySequence_Check";
+/// The owner's call that reads a type's slot (owner decision 2026-10-21, p6-core re-check
+/// round 4), whose result, a function pointer, is only compared against null: the whole of an
+/// `unsafe` block bound by `let <name> = unsafe { <call> };`, followed by `!<name>.is_null()`,
+/// the end of the function's block, the pointer's only use.
+const PY_FFI_SLOT: &str = "ffi::PyType_GetSlot";
 /// The wrapping of a new reference, `Bound::from_owned_ptr_or_err(py, <name>)`: the whole of
 /// the `unsafe` block of the statement right after the binding of `<name>`.
 const PY_FFI_WRAP: &str = "Bound::from_owned_ptr_or_err";
@@ -786,7 +792,8 @@ const PY_FFI_EXTERN: [&str; 18] = [
 /// - each `unsafe` block is exactly one call whose arguments are plain values
 ///   ([`plain_argument`]): `let <name> = unsafe { <one of PY_FFI_NEW> };`, followed by the
 ///   statement `unsafe { Bound::from_owned_ptr_or_err(<py>, <name>) }` (alone or bound by
-///   `let`), its only wrapping; or a [`PY_FFI_CHECK`] anywhere.
+///   `let`), its only wrapping; a [`PY_FFI_SLOT`] bound by `let <name> = unsafe { .. };` and
+///   followed by `!<name>.is_null() }` only; or a [`PY_FFI_CHECK`] anywhere.
 fn check_py_ffi(rel: &str, text: &str) -> Vec<String> {
     let toks = tokenize(text).tokens;
     let mut problems = Vec::new();
@@ -899,6 +906,24 @@ fn check_py_ffi(rel: &str, text: &str) -> Vec<String> {
             let wraps = args.len() == 2 && args[1].len() == 1 && args[1][0].text == binding;
             if !wraps {
                 problem(format!("`{name}` of something else than `{binding}`"));
+            }
+        } else if name == PY_FFI_SLOT {
+            let binding = (k >= 3
+                && text_at(k - 3) == "let"
+                && toks[k - 2].kind == TokenKind::Ident
+                && text_at(k - 1) == "=")
+                .then(|| toks[k - 2].text.as_str());
+            let compared = binding.is_some_and(|b| {
+                (close + 1..close + 8)
+                    .map(text_at)
+                    .eq([";", "!", b, ".", "is_null", "(", ")"])
+                    && text_at(close + 8) == "}"
+            });
+            if !compared {
+                problem(format!(
+                    "`{name}` whose result isn't bound by `let <name> = unsafe {{ ... }};` and \
+                     only compared against null, `!<name>.is_null()` ending the function"
+                ));
             }
         } else if name != PY_FFI_CHECK {
             problem(format!("an `unsafe` call of `{name}`"));
@@ -1759,7 +1784,10 @@ mod tests {
                     unsafe { Bound::from_owned_ptr_or_err(f.py(), q) };\n    \
                     let c = unsafe { ffi::PySequence_Check(o.as_ptr()) };\n    \
                     let r = unsafe { ffi::PyCFunction_NewEx(d, s, m) };\n    \
-                    unsafe { Bound::from_owned_ptr_or_err(record.py(), r) }\n}\n";
+                    unsafe { Bound::from_owned_ptr_or_err(record.py(), r) }\n}\n\
+                    fn b(ty: &Bound<PyType>) -> bool {\n    \
+                    let pointer = unsafe { ffi::PyType_GetSlot(ty.as_type_ptr(), id) };\n    \
+                    !pointer.is_null()\n}\n";
         assert_eq!(ffi_problems(good), Vec::<String>::new());
         for bad in [
             "fn a() { let x = unsafe { *p }; }",
@@ -1826,6 +1854,18 @@ mod tests {
             "fn a(ptr: *mut O) { let q = unsafe { PyInstanceMethod_New(f) }; unsafe { Bound::from_owned_ptr_or_err(py, ptr) } }",
             "fn a() { let p = unsafe { PyInstanceMethod_New(f) }; unsafe { Bound::from_owned_ptr_or_err(py, p, q) } }",
             "fn a() { let p = unsafe { PyInstanceMethod_New(f) }; unsafe { Bound::from_owned_ptr_or_err(p) } }",
+            // A slot's pointer used otherwise than compared against null (p6-core re-check round
+            // 4), or not bound.
+            "fn b() -> bool { let p = unsafe { ffi::PyType_GetSlot(t, id) }; p.is_null() }",
+            "fn b() -> bool { let p = unsafe { ffi::PyType_GetSlot(t, id) }; !p.is_null() && x }",
+            "fn b() -> bool { let p = unsafe { ffi::PyType_GetSlot(t, id) }; !q.is_null() }",
+            "fn b() -> bool { let p = unsafe { ffi::PyType_GetSlot(t, id) }; let q = p; !q.is_null() }",
+            "fn b() -> bool { let p = unsafe { ffi::PyType_GetSlot(t, id) }; !p.is_null(); call(p) }",
+            "fn b() -> bool { !unsafe { ffi::PyType_GetSlot(t, id) }.is_null() }",
+            "fn b() { let p = unsafe { ffi::PyType_GetSlot(t, id) }; }",
+            "fn b() { let mut p = unsafe { ffi::PyType_GetSlot(t, id) }; !p.is_null() }",
+            "fn b() { p = unsafe { ffi::PyType_GetSlot(t, id) }; !p.is_null() }",
+            "fn b() { let p; unsafe { ffi::PyType_GetSlot(t, id) }; !p.is_null() }",
             // Not the next statement: a closure (callable twice), a use in between.
             "fn a() { let (p, _) = (unsafe { PyInstanceMethod_New(f) }, 1); }",
             // An earlier binding of the name elsewhere in the file, or a parameter of its name.
