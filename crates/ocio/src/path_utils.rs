@@ -67,6 +67,12 @@ fn hash_function() -> ComputeHashFunction {
 ///
 /// Port of `GetFastFileHash` (PathUtils.cpp:64-115 @ v2.5.2).
 pub fn get_fast_file_hash(filename: &[u8], context: &Context) -> Result<Vec<u8>> {
+    // In this crate's unit tests, which run in parallel in one process, no hash is computed
+    // and cached while a test has replaced the hash function ([`hash_function_change`]).
+    #[cfg(test)]
+    let _use = HASH_FUNCTION_USE
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let result = {
         let mut cache = FAST_FILE_HASH_CACHE
             .lock()
@@ -256,6 +262,23 @@ pub(crate) fn parse_color_space_from_string(config: &Config, str: &[u8]) -> i32 
 pub(crate) fn hash_function_lock() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: Mutex<()> = Mutex::new(());
     LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Read by every [`get_fast_file_hash`] of this crate's unit tests, written by
+/// [`hash_function_change`].
+#[cfg(test)]
+static HASH_FUNCTION_USE: RwLock<()> = RwLock::new(());
+
+/// Held by a unit test while it replaces the hash function: no other test computes a file's
+/// hash, which [`get_fast_file_hash`] would cache for the rest of the process, meanwhile. (A
+/// custom function hashes any name, so a file that doesn't exist would then exist: a search
+/// path's first candidate, `shot4/shot1/lut1.clf`, broke OCIOZArchive's
+/// extract_config_and_compare_to_original that way, in a CI run on Rocky Linux 9.)
+#[cfg(test)]
+pub(crate) fn hash_function_change() -> std::sync::RwLockWriteGuard<'static, ()> {
+    HASH_FUNCTION_USE
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 #[cfg(test)]
