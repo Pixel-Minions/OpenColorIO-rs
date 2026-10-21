@@ -177,10 +177,37 @@ fn values() -> Vec<Vec<Value>> {
         ],
         vec![call(name("bytearray"), json!([int("4")]))],
         vec![call(name("numpy.array"), json!([four()]))],
+        // A class named "generator" (PyGen_Check is a type check), one named "map" (pybind11
+        // compares that name), each without and with items.
+        named_instance("generator", None),
+        named_instance("map", None),
+        named_instance("generator", Some(four())),
+        named_instance("map", Some(four())),
+        // A mappingproxy: __getitem__ without a sequence slot.
+        one(name("int.__dict__")),
+        one(list(vec![s("a"), s("b"), s("c"), s("d")])),
+        vec![call(name("set"), json!([list(vec![s("a")])]))],
+        vec![call(name("zip"), json!([four()]))],
+        vec![call(name("reversed"), json!([four()]))],
         vec![call(
             name("numpy.zeros"),
             json!([json!({ "tuple": [int("2"), int("2")] })]),
         )],
+    ]
+}
+
+/// An instance of a class named `n` (an `object`, or a `list` of `items`).
+fn named_instance(n: &str, items: Option<Value>) -> Vec<Value> {
+    let base = if items.is_some() { "list" } else { "object" };
+    vec![
+        call(
+            name("type"),
+            json!([s(n), { "tuple": [name(base)] }, { "dict": [[s("__module__"), s("probe")]] }]),
+        ),
+        call(
+            json!({ "ref": 0 }),
+            json!(items.into_iter().collect::<Vec<_>>()),
+        ),
     ]
 }
 
@@ -217,6 +244,38 @@ fn wheel_accepts(setup: Value, target: Value, before: Vec<Value>, after: Vec<Val
         .collect()
 }
 
+/// For each value, whether the wheel's `target` refuses it as the keyword argument `keyword`
+/// ("incompatible ... arguments"), or accepts it.
+fn wheel_accepts_keyword(target: Value, keyword: &str) -> Vec<bool> {
+    let values = values();
+    let mut steps = vec![];
+    let mut calls = Vec::new();
+    for v in &values {
+        let base = steps.len();
+        for step in v {
+            steps.push(shift_refs(step, base));
+        }
+        calls.push(steps.len());
+        steps.push(
+            json!({ "call": target.clone(), "kwargs": [[keyword, { "ref": steps.len() - 1 }]] }),
+        );
+    }
+    let report = wheel(&[json!({ "steps": steps })]).remove(0);
+    calls
+        .into_iter()
+        .map(|i| {
+            let step = &report["steps"][i];
+            let refused = step["raised"]["type"] == "builtins.TypeError"
+                && String::from_utf8(ocio_testkit::oracle_values::bytes(
+                    &step["raised"]["message"],
+                ))
+                .unwrap()
+                .contains("incompatible");
+            !refused
+        })
+        .collect()
+}
+
 /// `step` with its references to earlier steps of its value moved past `base` steps.
 fn shift_refs(step: &Value, base: usize) -> Value {
     match step {
@@ -243,7 +302,8 @@ fn port_accepts<T: for<'py> Cast<'py>>() -> Vec<bool> {
     Python::attach(|py| {
         values()
             .iter()
-            .map(|v| T::load(&port_object(py, &json!(v)), true).is_some())
+            // A Python error the caster lets through isn't the dispatcher's refusal.
+            .map(|v| !matches!(T::try_load(&port_object(py, &json!(v)), true), Ok(None)))
             .collect()
     })
 }
@@ -318,6 +378,12 @@ fn casters_accept_what_the_wheel_accepts() {
             vec![],
             vec![],
         ),
+    );
+    // std::vector<std::string>: Context(searchPaths=...), the constructor's second overload
+    // (the first takes no argument), tried without then with conversions.
+    check::<Vec<StdString>>(
+        "std::vector<std::string>",
+        wheel_accepts_keyword(name("OCIO.Context"), "searchPaths"),
     );
     // std::array<double, 4>: MatrixTransform::setOffset.
     check::<[f64; 4]>(

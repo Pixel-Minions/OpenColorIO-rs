@@ -276,6 +276,13 @@ struct Ratchet {
     passing_python: usize,
 }
 
+/// Whether any count of `now` is below `base`'s.
+fn went_down(now: &Ratchet, base: &Ratchet) -> bool {
+    now.ported_cpu < base.ported_cpu
+        || now.ported_gpu < base.ported_gpu
+        || now.passing_python < base.passing_python
+}
+
 struct Counts {
     upstream: Vec<UpstreamTest>,
     ported: BTreeSet<(&'static str, String)>,
@@ -449,10 +456,7 @@ pub(crate) fn ratchet(mode: RatchetMode, baseline: &Baseline) -> Result<(), Stri
         (Baseline::Committed, RatchetMode::Update, None) => (Ratchet::default(), "none".into()),
         _ => baseline.load()?,
     };
-    if now.ported_cpu < base.ported_cpu
-        || now.ported_gpu < base.ported_gpu
-        || now.passing_python < base.passing_python
-    {
+    if went_down(&now, &base) {
         return Err(format!(
             "ported upstream tests went down: cpu {} -> {}, gpu {} -> {}, python {} -> {} \
              (baseline: {from})",
@@ -631,6 +635,21 @@ pub(crate) fn write_dashboard(check: bool) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_ratchet_goes_down_when_any_count_does() {
+        let r = |cpu, gpu, python| Ratchet {
+            ported_cpu: cpu,
+            ported_gpu: gpu,
+            passing_python: python,
+        };
+        let base = r(10, 5, 2);
+        assert!(!went_down(&r(10, 5, 2), &base));
+        assert!(!went_down(&r(11, 6, 3), &base));
+        assert!(went_down(&r(9, 5, 2), &base));
+        assert!(went_down(&r(10, 4, 2), &base));
+        assert!(went_down(&r(10, 5, 1), &base));
+    }
 
     #[test]
     fn the_passing_python_list_names_upstream_functions_in_order() {

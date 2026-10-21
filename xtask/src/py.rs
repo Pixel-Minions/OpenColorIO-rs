@@ -499,12 +499,12 @@ fn runs(reports: &[serde_json::Value]) -> Vec<Run> {
 }
 
 /// The runs the wheel makes of each test function (the oracle's py_suite, O6.3, of the same
-/// modules): `defined` -> the runs' ids. With the wheel, every one of upstream's 384
-/// functions runs at least once.
+/// modules): `defined` -> the runs' ids and outcomes. With the wheel, every one of upstream's
+/// 384 functions runs at least once.
 fn wheel_runs(
     tests: &Path,
     modules: &[String],
-) -> Result<std::collections::BTreeMap<String, Vec<String>>, String> {
+) -> Result<std::collections::BTreeMap<String, Vec<(String, String)>>, String> {
     let tests_dir = tests.to_string_lossy().into_owned();
     let calls: Vec<ocio_testkit::oracle::BatchCall<'_>> = modules
         .iter()
@@ -514,7 +514,7 @@ fn wheel_runs(
             blobs: Vec::new(),
         })
         .collect();
-    let mut out: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    let mut out: std::collections::BTreeMap<String, Vec<(String, String)>> = Default::default();
     for (module, response) in modules
         .iter()
         .zip(ocio_testkit::Oracle::get().batch(&calls, true))
@@ -527,29 +527,39 @@ fn wheel_runs(
         }
         for t in report["tests"].as_array().into_iter().flatten() {
             if let (Some(defined), Some(id)) = (t["defined"].as_str(), t["id"].as_str()) {
-                out.entry(defined.to_string())
-                    .or_default()
-                    .push(id.to_string());
+                out.entry(defined.to_string()).or_default().push((
+                    id.to_string(),
+                    t["outcome"].as_str().unwrap_or_default().to_string(),
+                ));
             }
         }
     }
-    let functions = crate::parity::upstream_python_tests();
-    if out.len() != functions.len() || functions.iter().any(|f| !out.contains_key(f)) {
-        return Err(format!(
-            "the wheel's runs cover {} test functions, not upstream's {}",
-            out.len(),
-            functions.len()
-        ));
-    }
+    covers(&out, &crate::parity::upstream_python_tests())?;
     Ok(out)
 }
 
-/// The test functions that pass: each of `expected`'s (the wheel's runs of each function),
-/// every run of which the port makes, and passes, and no other run of which fails. A function
-/// the port doesn't run at all, or runs fewer times (a class whose setUpClass failed, a
-/// module that didn't import), doesn't pass.
+/// That the wheel's runs (`defined` -> runs) are of exactly upstream's test functions.
+fn covers(
+    runs: &std::collections::BTreeMap<String, Vec<(String, String)>>,
+    functions: &[String],
+) -> Result<(), String> {
+    if runs.len() != functions.len() || functions.iter().any(|f| !runs.contains_key(f)) {
+        return Err(format!(
+            "the wheel's runs cover {} test functions, not upstream's {}",
+            runs.len(),
+            functions.len()
+        ));
+    }
+    Ok(())
+}
+
+/// The test functions that pass: each of `expected`'s (the wheel's runs of each function, and
+/// their outcomes) whose every run passes with the wheel, and every run of which the port
+/// makes, and passes, and no other run of which fails. A function the port doesn't run at
+/// all, or runs fewer times (a class whose setUpClass failed, a module that didn't import),
+/// doesn't pass; nor does one the wheel itself fails.
 fn passing_functions(
-    expected: &std::collections::BTreeMap<String, Vec<String>>,
+    expected: &std::collections::BTreeMap<String, Vec<(String, String)>>,
     runs: &[Run],
 ) -> std::collections::BTreeSet<String> {
     let mut outcomes: std::collections::BTreeMap<&str, Vec<&str>> = Default::default();
@@ -570,10 +580,11 @@ fn passing_functions(
         .filter(|(f, ids)| {
             !ids.is_empty()
                 && !failed.contains(f.as_str())
-                && ids.iter().all(|id| {
-                    outcomes
-                        .get(id.as_str())
-                        .is_some_and(|o| o.iter().all(|o| *o == "pass"))
+                && ids.iter().all(|(id, wheel)| {
+                    wheel == "pass"
+                        && outcomes
+                            .get(id.as_str())
+                            .is_some_and(|o| o.iter().all(|o| *o == "pass"))
                 })
         })
         .map(|(f, _)| f.clone())
@@ -601,20 +612,40 @@ mod tests {
                 String::new(),
             )
         };
-        let expected: std::collections::BTreeMap<String, Vec<String>> = [
-            ("A.py::A.test_a", &["A.A.test_a"][..]),
-            ("B.py::Base.test_b", &["B.X.test_b", "B.Y.test_b"]),
-            ("C.py::C.test_c", &["C.C.test_c"]),
-            ("D.py::D.test_d", &["D.D.test_d", "D.E.test_d"]),
+        let expected: std::collections::BTreeMap<String, Vec<(String, String)>> = [
+            ("A.py::A.test_a", &[("A.A.test_a", "pass")][..]),
+            (
+                "B.py::Base.test_b",
+                &[("B.X.test_b", "pass"), ("B.Y.test_b", "pass")],
+            ),
+            ("C.py::C.test_c", &[("C.C.test_c", "pass")]),
+            (
+                "D.py::D.test_d",
+                &[("D.D.test_d", "pass"), ("D.E.test_d", "pass")],
+            ),
             // Its class's setUpClass failed: no run.
-            ("F.py::F.test_f", &["F.F.test_f"]),
+            ("F.py::F.test_f", &[("F.F.test_f", "pass")]),
             // Run in one class only, where the wheel runs it in two.
-            ("G.py::Base.test_g", &["G.X.test_g", "G.Y.test_g"]),
+            (
+                "G.py::Base.test_g",
+                &[("G.X.test_g", "pass"), ("G.Y.test_g", "pass")],
+            ),
             // Never run (a module that didn't import).
-            ("H.py::H.test_h", &["H.H.test_h"]),
+            ("H.py::H.test_h", &[("H.H.test_h", "pass")]),
+            // The wheel fails it: the port's pass doesn't count.
+            ("I.py::I.test_i", &[("I.I.test_i", "fail")]),
+            // Passes where the wheel runs it, fails in a run the wheel doesn't make.
+            ("J.py::J.test_j", &[("J.J.test_j", "pass")]),
         ]
         .into_iter()
-        .map(|(f, ids)| (f.to_string(), ids.iter().map(|i| i.to_string()).collect()))
+        .map(|(f, ids)| {
+            (
+                f.to_string(),
+                ids.iter()
+                    .map(|(i, o)| (i.to_string(), o.to_string()))
+                    .collect(),
+            )
+        })
         .collect();
         let runs = [
             run(Some("A.py::A.test_a"), "A.A.test_a", "pass"),
@@ -625,9 +656,32 @@ mod tests {
             run(Some("D.py::D.test_d"), "D.E.test_d", "pass"),
             run(None, "setUpClass (F.F)", "error"),
             run(Some("G.py::Base.test_g"), "G.X.test_g", "pass"),
+            run(Some("I.py::I.test_i"), "I.I.test_i", "pass"),
+            run(Some("J.py::J.test_j"), "J.J.test_j", "pass"),
+            run(Some("J.py::J.test_j"), "J.K.test_j", "fail"),
         ];
         let passing: Vec<String> = passing_functions(&expected, &runs).into_iter().collect();
         assert_eq!(passing, ["A.py::A.test_a", "D.py::D.test_d"]);
+    }
+
+    #[test]
+    fn the_wheels_runs_cover_exactly_upstreams_functions() {
+        let functions: Vec<String> = ["A.py::A.t", "B.py::B.t"].map(String::from).to_vec();
+        let runs = |names: &[&str]| -> std::collections::BTreeMap<String, Vec<(String, String)>> {
+            names
+                .iter()
+                .map(|n| (n.to_string(), vec![(format!("{n}#1"), "pass".to_string())]))
+                .collect()
+        };
+        assert!(covers(&runs(&["A.py::A.t", "B.py::B.t"]), &functions).is_ok());
+        for names in [
+            &["A.py::A.t"][..],
+            &["A.py::A.t", "B.py::B.t", "C.py::C.t"],
+            &["A.py::A.t", "C.py::C.t"],
+            &[],
+        ] {
+            assert!(covers(&runs(names), &functions).is_err(), "{names:?}");
+        }
     }
 
     #[test]

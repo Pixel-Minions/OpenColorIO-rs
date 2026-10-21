@@ -299,6 +299,13 @@ pub trait Cast<'py>: Sized {
     /// The value, or `None` when the caster refuses it. A Python error raised while loading is
     /// cleared, as pybind11 does.
     fn load(obj: &Bound<'py, PyAny>, convert: bool) -> Option<Self>;
+
+    /// [`load`](Self::load), or the Python error the caster lets through instead of refusing
+    /// the value (the sequence casters: the length of a sequence that has none, `tuple(obj)`
+    /// of a convertible non-sequence that isn't iterable). The dispatcher loads through it.
+    fn try_load(obj: &Bound<'py, PyAny>, convert: bool) -> PyResult<Option<Self>> {
+        Ok(Self::load(obj, convert))
+    }
 }
 
 /// Loads argument `i` of `args` as `T`, returning `Ok(None)` from the enclosing [`Call`] when it
@@ -306,7 +313,7 @@ pub trait Cast<'py>: Sized {
 #[macro_export]
 macro_rules! arg {
     ($args:expr, $i:expr, $convert:expr, $t:ty) => {
-        match <$t as $crate::dispatch::Cast>::load(&$args[$i], $convert) {
+        match <$t as $crate::dispatch::Cast>::try_load(&$args[$i], $convert)? {
             Some(v) => v,
             None => return Ok(None),
         }
@@ -494,53 +501,76 @@ impl<'py> Cast<'py> for CharPtr {
 
 /// pybind11's `object_is_convertible_to_std_vector`: a sequence that isn't a `str` or `bytes`;
 /// a generator, a set or frozenset; or a `dict_keys`, `dict_values`, `dict_items`, `map` or
-/// `zip`. The sequences are taken as they are; the others, with conversions only, through
-/// `tuple(obj)`.
-fn sequence_items<'py>(obj: &Bound<'py, PyAny>, convert: bool) -> Option<Vec<Bound<'py, PyAny>>> {
+/// `zip` (by its C name). The sequences are taken as they are; the others, with conversions
+/// only, through `tuple(obj)`. A Python error reading the items (a sequence without a length,
+/// a `tuple(obj)` that fails) goes through, as pybind11 lets it.
+fn sequence_items<'py>(
+    obj: &Bound<'py, PyAny>,
+    convert: bool,
+) -> PyResult<Option<Vec<Bound<'py, PyAny>>>> {
     if obj.is_instance_of::<PyString>() || obj.is_instance_of::<PyBytes>() {
-        return None;
+        return Ok(None);
     }
-    // PySequence_Check: the type has `__getitem__` (its sequence slot), and isn't a dict.
-    let sequence = !obj.is_instance_of::<PyDict>() && has_slot(obj, "__getitem__");
-    if !sequence {
-        let other = obj.is_instance_of::<PySet>()
-            || obj.is_instance_of::<PyFrozenSet>()
-            || obj.get_type().name().is_ok_and(|n| {
-                [
-                    "generator",
-                    "dict_keys",
-                    "dict_values",
-                    "dict_items",
-                    "map",
-                    "zip",
-                ]
+    // PySequence_Check (the type's sq_item, not a dict), through PyO3's `Vec` extraction,
+    // which checks it first and refuses a non-sequence with a DowncastError to `Sequence`.
+    match obj.extract::<Vec<Bound<'py, PyAny>>>() {
+        Ok(items) => return Ok(Some(items)),
+        Err(e) if !e.to_string().contains("'Sequence'") => return Err(e),
+        Err(_) => {}
+    }
+    // PyGen_Check (the type), PyAnySet_Check, and the C names (`tp_name`) pybind11 compares.
+    let generator = obj
+        .py()
+        .import("types")
+        .and_then(|t| t.getattr("GeneratorType"))
+        .is_ok_and(|g| obj.get_type().is(&g));
+    let other = generator
+        || obj.is_instance_of::<PySet>()
+        || obj.is_instance_of::<PyFrozenSet>()
+        || crate::pybind11::tp_name(&obj.get_type()).is_ok_and(|n| {
+            ["dict_keys", "dict_values", "dict_items", "map", "zip"]
                 .iter()
                 .any(|t| n == *t)
-            });
-        if !other || !convert {
-            return None;
-        }
-        let tuple = obj.py().get_type::<PyTuple>().call1((obj,)).ok()?;
-        return tuple.try_iter().ok()?.collect::<PyResult<Vec<_>>>().ok();
+        });
+    if !other || !convert {
+        return Ok(None);
     }
-    obj.try_iter().ok()?.collect::<PyResult<Vec<_>>>().ok()
+    let tuple = obj.py().get_type::<PyTuple>().call1((obj,))?;
+    Ok(Some(tuple.try_iter()?.collect::<PyResult<Vec<_>>>()?))
 }
 
 impl<'py, T: Cast<'py>> Cast<'py> for Vec<T> {
     /// pybind11's `std::vector` caster: [`sequence_items`], each item through `T`'s caster.
     fn load(obj: &Bound<'py, PyAny>, convert: bool) -> Option<Self> {
-        sequence_items(obj, convert)?
-            .iter()
-            .map(|item| T::load(item, convert))
-            .collect()
+        Self::try_load(obj, convert).ok().flatten()
+    }
+
+    fn try_load(obj: &Bound<'py, PyAny>, convert: bool) -> PyResult<Option<Self>> {
+        let Some(items) = sequence_items(obj, convert)? else {
+            return Ok(None);
+        };
+        let mut out = Vec::with_capacity(items.len());
+        for item in &items {
+            match T::try_load(item, convert)? {
+                Some(v) => out.push(v),
+                None => return Ok(None),
+            }
+        }
+        Ok(Some(out))
     }
 }
 
 impl<'py, T: Cast<'py>, const N: usize> Cast<'py> for [T; N] {
     /// pybind11's `std::array` caster: as `std::vector`'s, with exactly `N` items.
     fn load(obj: &Bound<'py, PyAny>, convert: bool) -> Option<Self> {
-        let items: Vec<T> = Vec::load(obj, convert)?;
-        items.try_into().ok()
+        Self::try_load(obj, convert).ok().flatten()
+    }
+
+    fn try_load(obj: &Bound<'py, PyAny>, convert: bool) -> PyResult<Option<Self>> {
+        let Some(items) = Vec::<T>::try_load(obj, convert)? else {
+            return Ok(None);
+        };
+        Ok(items.try_into().ok())
     }
 }
 

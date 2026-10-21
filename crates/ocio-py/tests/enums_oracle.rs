@@ -243,6 +243,36 @@ fn arithmetic_steps() -> Vec<Value> {
         steps.push(c(e, json!({ "bool": true })));
     }
     steps.push(json!({ "eval": all(), "getters": ["name", "value", "__int__", "__hash__", "__repr__", "__str__"] }));
+    // An `int` subclass whose reflected operators answer first: pybind11 keeps an `int`
+    // operand as it is (`int_`), and `a < b` is PyObject_RichCompare.
+    let sub = steps.len();
+    steps.push(call(
+        name("type"),
+        json!([
+            text("I"),
+            { "tuple": [name("int")] },
+            { "dict": [
+                [text("__module__"), text("probe")],
+                [text("__gt__"), name("repr")],
+                [text("__rand__"), name("repr")],
+                [text("__ror__"), name("repr")]
+            ] }
+        ]),
+    ));
+    let one_ = steps.len();
+    steps.push(call(json!({ "ref": sub }), json!([int("1")])));
+    for f in ["lt", "gt", "and_", "or_", "xor", "eq", "ne"] {
+        steps.push(op(f, info(), json!({ "ref": one_ })));
+        steps.push(op(f, json!({ "ref": one_ }), info()));
+    }
+    steps.push(call(
+        name("OCIO.LoggingLevel.__lt__"),
+        json!([info(), { "ref": one_ }]),
+    ));
+    steps.push(call(
+        name("OCIO.LoggingLevel.__and__"),
+        json!([info(), { "ref": one_ }]),
+    ));
     steps.push(json!({ "eval": name("OCIO.OptimizationFlags.__lt__.__doc__") }));
     steps.push(json!({ "eval": name("OCIO.OptimizationFlags.__rand__.__doc__") }));
     steps.push(json!({ "eval": name("OCIO.OptimizationFlags.__invert__.__doc__") }));

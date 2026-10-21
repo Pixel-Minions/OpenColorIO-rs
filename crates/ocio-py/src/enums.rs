@@ -16,7 +16,8 @@
 
 use pyo3::BoundObject;
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyDict, PyInt, PyString, PyTuple, PyType};
+use pyo3::pyclass::CompareOp;
+use pyo3::types::{PyBool, PyBytes, PyDict, PyInt, PyString, PyTuple, PyType};
 
 use crate::dispatch::{Cast, Function, Overload, Param};
 use crate::pybind11::{self, MODULE};
@@ -35,6 +36,15 @@ macro_rules! this {
 /// `int(obj)`: Python's `int()`, which calls the enum's `__int__`.
 fn int_of<'py>(obj: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     obj.py().get_type::<PyInt>().call1((obj,))
+}
+
+/// pybind11's `int_(obj)`: an `int` (or an instance of a subclass) as it is, anything else
+/// through `int()` (PyNumber_Long).
+fn int_object<'py>(obj: &Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
+    if obj.is_instance_of::<PyInt>() {
+        return Ok(obj.clone());
+    }
+    int_of(obj)
 }
 
 /// pybind11's `enum_name`: the key of the class's `__entries` whose value equals `obj`, else
@@ -157,20 +167,24 @@ fn leak(params: Vec<Param>) -> &'static [Param] {
 /// pybind11's `PYBIND11_ENUM_OP_CONV`: `int(self) <op> int(other)` (`int()` converts the
 /// other operand as Python does, a `str` it parses), for an arithmetic enum (`py::arithmetic`).
 fn arithmetic_functions() -> Vec<&'static Function> {
-    // `int(self) <op> int(other)`, through the operator of Python's `int` (`a < b` and `a & b`
-    // in the C++ are PyObject_RichCompare and PyNumber_And on two `int`s); the reflected
-    // operators compute the same expression, `self` on the left.
+    // pybind11's PYBIND11_ENUM_OP_CONV: `int_ a(a_), b(b_); return a <op> b;`. `int_` keeps an
+    // `int` (a subclass, `bool`, included) as it is and converts anything else with `int()`;
+    // `a < b` is PyObject_RichCompareBool, `a & b` PyNumber_And, so an `int` subclass's
+    // reflected operator comes first. The reflected operators compute the same expression,
+    // `self` on the left.
     macro_rules! conv {
-        ($name:literal, $ret:literal, $op:literal) => {
+        ($name:literal, $ret:literal, $op:expr) => {
             function(
                 $name,
                 vec![overload(
                     &[SELF_OBJECT, OTHER],
                     $ret,
                     |_, _, a, _| {
-                        let me = int_of(&a[0])?;
-                        let other = int_of(&a[1])?;
-                        Ok(Some(me.call_method1($op, (other,))?.unbind()))
+                        let me = int_object(&a[0])?;
+                        let other = int_object(&a[1])?;
+                        let op: fn(&Bound<'_, PyAny>, &Bound<'_, PyAny>) -> PyResult<Py<PyAny>> =
+                            $op;
+                        Ok(Some(op(&me, &other)?))
                     },
                     2,
                 )],
@@ -179,17 +193,21 @@ fn arithmetic_functions() -> Vec<&'static Function> {
             )
         };
     }
+    fn compare(a: &Bound<'_, PyAny>, b: &Bound<'_, PyAny>, op: CompareOp) -> PyResult<Py<PyAny>> {
+        let result = a.rich_compare(b, op)?.is_truthy()?;
+        Ok(PyBool::new(a.py(), result).to_owned().into_any().unbind())
+    }
     vec![
-        conv!("__lt__", "bool", "__lt__"),
-        conv!("__gt__", "bool", "__gt__"),
-        conv!("__le__", "bool", "__le__"),
-        conv!("__ge__", "bool", "__ge__"),
-        conv!("__and__", "object", "__and__"),
-        conv!("__rand__", "object", "__and__"),
-        conv!("__or__", "object", "__or__"),
-        conv!("__ror__", "object", "__or__"),
-        conv!("__xor__", "object", "__xor__"),
-        conv!("__rxor__", "object", "__xor__"),
+        conv!("__lt__", "bool", |a, b| compare(a, b, CompareOp::Lt)),
+        conv!("__gt__", "bool", |a, b| compare(a, b, CompareOp::Gt)),
+        conv!("__le__", "bool", |a, b| compare(a, b, CompareOp::Le)),
+        conv!("__ge__", "bool", |a, b| compare(a, b, CompareOp::Ge)),
+        conv!("__and__", "object", |a, b| Ok(a.bitand(b)?.unbind())),
+        conv!("__rand__", "object", |a, b| Ok(a.bitand(b)?.unbind())),
+        conv!("__or__", "object", |a, b| Ok(a.bitor(b)?.unbind())),
+        conv!("__ror__", "object", |a, b| Ok(a.bitor(b)?.unbind())),
+        conv!("__xor__", "object", |a, b| Ok(a.bitxor(b)?.unbind())),
+        conv!("__rxor__", "object", |a, b| Ok(a.bitxor(b)?.unbind())),
         // __invert__(self: object, /) -> object: `~int(self)`.
         function(
             "__invert__",
