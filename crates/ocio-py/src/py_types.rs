@@ -388,7 +388,7 @@ macro_rules! def {
 /// The value of the enum argument `$a[$i]` of the class `$class`, or the next overload.
 macro_rules! enum_arg {
     ($a:expr, $i:expr, $class:expr) => {
-        match enum_value(&$a[$i], $class) {
+        match enum_value(&$a[$i], $class)? {
             Some(v) => v,
             None => return Ok(None),
         }

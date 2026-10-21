@@ -140,7 +140,7 @@ fn steps() -> Vec<Value> {
         ),
         call(
             name("OCIO.TransformDirection.__setstate__"),
-            json!([inv(), int("1")]),
+            json!([inv(), int("0")]),
         ),
         call(name("hash"), json!([inv()])),
         call(name("int"), json!([inv()])),

@@ -176,6 +176,23 @@ pub fn dispatch<'py>(
     args: &Bound<'py, PyTuple>,
     kwargs: Option<&Bound<'py, PyDict>>,
 ) -> PyResult<Py<PyAny>> {
+    // A constructor (`__init__`, `__setstate__`) checks `self` before loading any argument:
+    // an instance of its class, which it leaves alone when constructed already.
+    if f.constructor {
+        let this = args
+            .get_item(0)
+            .ok()
+            .and_then(|a| crate::pybind11::instance_of(&a, f.overloads[0].params[0].ty));
+        match this {
+            None => {
+                return Err(PyTypeError::new_err(
+                    "__init__(self, ...) called with invalid or missing `self` argument",
+                ));
+            }
+            Some(this) if crate::pybind11::value(&this).is_some() => return Ok(py.None()),
+            Some(_) => {}
+        }
+    }
     let overloaded = f.overloads.len() > 1;
     let mut second_pass = Vec::new();
     for o in f.overloads {
@@ -206,9 +223,11 @@ fn incompatible(
     kwargs: Option<&Bound<'_, PyDict>>,
 ) -> String {
     let mut msg = if f.constructor {
-        "__init__(): incompatible constructor arguments. The following argument types are \
-         supported:\n"
-            .to_string()
+        format!(
+            "{}(): incompatible constructor arguments. The following argument types are \
+             supported:\n",
+            f.name
+        )
     } else {
         format!(
             "{}(): incompatible function arguments. The following argument types are \

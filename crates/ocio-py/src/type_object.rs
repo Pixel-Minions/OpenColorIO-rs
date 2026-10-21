@@ -32,8 +32,8 @@ unsafe extern "C" {
 ///   last dot, and `__module__` from the part before it);
 /// - `tp_init` the slot function `init`, so that the type's dictionary starts with its own
 ///   `__init__` slot wrapper, as pybind11's do (it sets `tp_init` on every type);
-/// - `tp_doc` empty (the wheel's docstrings are), and the flags default and base type, the
-///   instance size and layout the base's.
+/// - `tp_doc` empty (the wheel's docstrings are), and the flags default and base type;
+/// - the instance size `basicsize` (pybind11's, at least the base's), the layout the base's.
 ///
 /// Its dictionary then holds `__init__`, `__doc__` and `__module__`, in that order.
 pub(crate) fn from_metaclass<'py>(
@@ -41,6 +41,7 @@ pub(crate) fn from_metaclass<'py>(
     name: &str,
     bases: &Bound<'py, PyTuple>,
     init: *mut c_void,
+    basicsize: usize,
 ) -> PyResult<Bound<'py, PyType>> {
     let py = metatype.py();
     let name: &'static CStr = Box::leak(
@@ -64,7 +65,8 @@ pub(crate) fn from_metaclass<'py>(
     ]));
     let spec: &'static mut ffi::PyType_Spec = Box::leak(Box::new(ffi::PyType_Spec {
         name: name.as_ptr(),
-        basicsize: 0,
+        basicsize: std::ffi::c_int::try_from(basicsize)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?,
         itemsize: 0,
         flags: (ffi::Py_TPFLAGS_DEFAULT | ffi::Py_TPFLAGS_BASETYPE) as std::ffi::c_uint,
         slots: slots.as_mut_ptr(),

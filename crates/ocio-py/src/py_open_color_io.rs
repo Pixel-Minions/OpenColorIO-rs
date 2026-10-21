@@ -275,6 +275,9 @@ fn register_exception(
 /// would also list the name in an `__all__`, which the wheel's module doesn't have; the
 /// package's `from .PyOpenColorIO import *` would then import only those names.)
 pub(crate) fn def(m: &Bound<'_, PyModule>, f: Bound<'_, pyo3::types::PyCFunction>) -> PyResult<()> {
+    // pybind11 gives every function the module's name (`m_module`), also embedded, where the
+    // module is named `PyOpenColorIO`.
+    f.setattr("__module__", crate::pybind11::MODULE)?;
     m.setattr(f.getattr("__name__")?.cast_into::<PyString>()?, f)
 }
 

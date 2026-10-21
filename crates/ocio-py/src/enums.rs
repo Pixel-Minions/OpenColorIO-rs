@@ -405,11 +405,8 @@ pub fn define_enum<'py>(
                 let Some(value) = load_scalar(py, scalar_of(o), &a[1], convert) else {
                     return Ok(None);
                 };
-                // pybind11 constructs the value once: on an instance that has one, __init__
-                // changes nothing.
-                if pybind11::value(&this).is_none() {
-                    pybind11::set_value(&this, value)?;
-                }
+                // A constructor: the dispatcher calls none on an instance constructed already.
+                pybind11::set_value(&this, value)?;
                 Ok(Some(py.None()))
             },
             0,
@@ -456,7 +453,7 @@ pub fn define_enum<'py>(
             "int",
             |py, o, a, _| {
                 let this = this!(o, a);
-                ok(pybind11::value(&this), py)
+                ok(pybind11::read_value(&this)?, py)
             },
             0,
         )],
@@ -471,7 +468,7 @@ pub fn define_enum<'py>(
                 "int",
                 |py, o, a, _| {
                     let this = this!(o, a);
-                    ok(pybind11::value(&this), py)
+                    ok(pybind11::read_value(&this)?, py)
                 },
                 1,
             )],
@@ -496,7 +493,9 @@ pub fn define_enum<'py>(
             2,
         )],
         true,
-        false,
+        // pybind11 binds `__setstate__` as a constructor (`py::pickle`'s `setstate` is a
+        // factory): on an instance constructed already it changes nothing.
+        true,
     );
 
     let static_property = |f: &'static Function| -> PyResult<Bound<'py, PyAny>> {
@@ -564,10 +563,6 @@ pub fn define_enum<'py>(
         )?;
         cls.setattr(member, &instance)?;
     }
-    CLASSES
-        .lock()
-        .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("poisoned"))?
-        .push((qualified, cls.clone().unbind()));
     Ok(cls)
 }
 
@@ -580,20 +575,9 @@ pub fn export_values(scope: &Bound<'_, PyAny>, cls: &Bound<'_, PyType>) -> PyRes
     Ok(())
 }
 
-/// Each enum class the module made, by qualified name.
-static CLASSES: std::sync::Mutex<Vec<(&'static str, Py<PyType>)>> =
-    std::sync::Mutex::new(Vec::new());
-
-/// The enum class named `qualified` (`module.qualname`): the one made last by that name.
+/// The enum class whose C name is `qualified` (`module.qualname`).
 pub fn enum_class<'py>(py: Python<'py>, qualified: &str) -> PyResult<Bound<'py, PyType>> {
-    let classes = CLASSES
-        .lock()
-        .map_err(|_| pyo3::exceptions::PyRuntimeError::new_err("poisoned"))?;
-    classes
-        .iter()
-        .rev()
-        .find(|(name, _)| *name == qualified)
-        .map(|(_, cls)| cls.bind(py).clone())
+    pybind11::class(py, qualified)
         .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err(qualified.to_string()))
 }
 
@@ -610,12 +594,15 @@ pub struct EnumDef {
     pub entries: &'static [(&'static str, i64)],
 }
 
-/// An enum argument: an instance of the enum class `qualified` (or of a subclass), its value.
-/// pybind11 takes no `int` for an enum; `None` it takes with conversions, as a null pointer
-/// its call then refuses (pybind11's `reference_cast_error`), so the next overload is tried.
-pub fn enum_value(obj: &Bound<'_, PyAny>, qualified: &str) -> Option<i64> {
-    let this = pybind11::instance_of(obj, qualified)?;
-    pybind11::value(&this)?.extract().ok()
+/// An enum argument: an instance of the enum class `qualified` (or of a subclass), its value
+/// (`Ok(None)`: not one, the next overload). pybind11 takes no `int` for an enum; `None` it
+/// takes with conversions, as a null pointer its call then refuses (pybind11's
+/// `reference_cast_error`), so the next overload is tried.
+pub fn enum_value(obj: &Bound<'_, PyAny>, qualified: &str) -> PyResult<Option<i64>> {
+    let Some(this) = pybind11::instance_of(obj, qualified) else {
+        return Ok(None);
+    };
+    Ok(Some(pybind11::read_value(&this)?.extract()?))
 }
 
 /// Loads argument `i` of an overload's arguments as the enum its parameter names, returning

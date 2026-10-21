@@ -4371,3 +4371,30 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   `crates/ocio-ops/src/ops/gradingrgbcurve/grading_b_spline_curve.rs`,
   `compute_knots_and_coefs_for_hue_curve`); `crates/ocio-ops/tests/hue_curve_knots_oracle.rs`,
   `draw_curve_only_identities_past_the_full_arrays_are_refused` (the port only).
+
+### U-86. An enum instance no constructor constructed reads uninitialized memory
+
+- **Upstream:** `OCIO.TransformDirection.__new__(OCIO.TransformDirection)` allocates an
+  instance whose value pybind11 never initializes (no `__init__` or `__setstate__` runs), and
+  its methods read it: through the wheel, `int(t)` gave 3 and `repr(t)` printed whatever the
+  memory held (the verifier's probes of p6-core).
+- **Who notices:** Python code that calls `__new__` of an enum directly, without `__init__`.
+- **A fix:** none needed beyond the port's error.
+- **Status:** the port raises RuntimeError "PyOpenColorIO.PyOpenColorIO.ViewType: the instance
+  was never constructed (...)" from every method that reads the value, in `p6-core`
+  (`crates/ocio-py/src/pybind11.rs`, `read_value`); `constructors_oracle.rs`,
+  `undefined_behaviour_raises_the_ports_errors` (the port only).
+
+### U-87. Constructing `pybind11_object` itself aborts the process
+
+- **Upstream:** `pybind11_builtins.pybind11_object()` makes an instance of a type pybind11 never
+  registered, and the wheel's process aborts. `OCIO.TRANSFORM_DIR_INVERSE.__reduce__()` does the
+  same: copyreg's `_reduce_ex` calls the first base whose `__new__` is its own,
+  `pybind11_object` (the verifier's probes of p6-core).
+- **Who notices:** Python code that pickles an enum with protocol 0 or 1, or calls
+  `__reduce__()` (protocol 2 and up, `copy` and `pickle`'s default, work).
+- **A fix:** none needed beyond the port's error.
+- **Status:** the port raises TypeError "pybind11_builtins.pybind11_object: pybind11's base
+  class has no instances (the wheel's process aborts)", in `p6-core`
+  (`crates/ocio-py/src/pybind11.rs`, `Pybind11Object::new`); `constructors_oracle.rs`,
+  `undefined_behaviour_raises_the_ports_errors` (the port only).
