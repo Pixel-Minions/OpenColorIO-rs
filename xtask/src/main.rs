@@ -13,10 +13,12 @@ mod gate;
 mod guards;
 mod land;
 mod links;
+mod metadata;
 mod parity;
 mod register_merge;
 mod registers;
 mod scratch;
+mod shards;
 mod upstream;
 
 const USAGE: &str = "\
@@ -39,6 +41,9 @@ Checking and landing chunks:
                               --unlabelled: also unlabelled volumes no checkout still uses;
                               links (symlinks, junctions) inside what it deletes are
                               unlinked first, never followed
+  test-shard <shard> [--dry-run] | --list
+                              one CI test job's share of `cargo test --workspace`
+                              (.github/workflows/ci.yml; `cargo xtask test-shard --help`)
   merge-register <base> <ours> <theirs>
                               git's merge driver for docs/improvements.md (.gitattributes:
                               merge=ocio-register): merges it entry by entry into <ours>, an
@@ -96,6 +101,11 @@ fn main() -> ExitCode {
             land::parse(rest).and_then(|(branch, rocky)| land::run(&branch, rocky))
         }
         ["clean-scratch", rest @ ..] => scratch::run(rest),
+        ["test-shard", "--help" | "-h"] => {
+            print!("{}", shards::USAGE);
+            Ok(())
+        }
+        ["test-shard", rest @ ..] => shards::run(rest),
         ["oracle", "info"] => fixtures::oracle_info(),
         ["oracle", "regen", group] => fixtures::regen(group),
         ["oracle", "check", group] => fixtures::check(group),
