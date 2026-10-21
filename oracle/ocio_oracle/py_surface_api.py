@@ -48,10 +48,16 @@ def py_surface(args, blobs):
                 class_ref: "target", the path where that class or module was first reported
                   (a class or a module reached twice);
                 property, pybind11_static_property: "doc", "getter", "setter", "deleter",
-                  and "getter_doc", "setter_doc" for the accessors it has;
-                staticmethod, classmethod: "function_kind", "doc";
+                  and "getter_doc", "getter_qualname", "setter_doc", "setter_qualname" for
+                  the accessors it has;
+                staticmethod, classmethod: "function_kind", "doc", "qualname" (its
+                  function's);
                 any other callable (instancemethod, builtin_function_or_method,
-                  wrapper_descriptor, ...): "doc";
+                  wrapper_descriptor, ...): "doc", "qualname".
+                A qualname is the callable's __qualname__ (null when it has none): a
+                builtin's names the class of its __self__, pybind11's function record, whose
+                name carries pybind11's ABI tag, which differs between the Windows and Linux
+                wheels.
                 value: "type", and "text" (str), "int" (int), nothing more (a capsule, whose
                   repr is an address), or "repr" (anything else; an enum value also has
                   "enum_value").

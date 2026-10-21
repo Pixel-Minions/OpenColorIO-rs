@@ -34,6 +34,10 @@ def h(s):
 def q(c):
     return c.__module__ + "." + c.__qualname__
 
+def qn(f):
+    n = getattr(f, "__qualname__", None)
+    return h(n if isinstance(n, str) else None)
+
 done = {id(M): "PyOpenColorIO"}
 RUNTIME = ["__builtins__", "__loader__", "__spec__", "__file__", "__cached__", "__path__",
            "__package__", "__name__", "__doc__"]
@@ -75,13 +79,17 @@ def walk(ns, path, skip):
                 "1" if f is not None else "0" for f in (v.fget, v.fset, v.fdel)), sep="\t")
             if v.fget is not None:
                 print(p, "getter_doc", h(v.fget.__doc__), sep="\t")
+                print(p, "getter_qualname", qn(v.fget), sep="\t")
             if v.fset is not None:
                 print(p, "setter_doc", h(v.fset.__doc__), sep="\t")
+                print(p, "setter_qualname", qn(v.fset), sep="\t")
         elif isinstance(v, (staticmethod, classmethod)):
             print(p, type(v).__name__, h(v.__func__.__doc__), sep="\t")
             print(p, "function_kind", type(v.__func__).__name__, sep="\t")
+            print(p, "qualname", qn(v.__func__), sep="\t")
         elif callable(v):
             print(p, type(v).__name__, h(v.__doc__), sep="\t")
+            print(p, "qualname", qn(v), sep="\t")
         elif isinstance(v, str):
             print(p, "str", h(v), sep="\t")
         elif type(v).__name__ == "PyCapsule":
@@ -162,15 +170,20 @@ fn flatten(members: &Value, path: &str, out: &mut Vec<String>) {
                     "accessors",
                     format!("{}{}{}", flag("getter"), flag("setter"), flag("deleter")),
                 );
-                for k in ["getter_doc", "setter_doc"] {
-                    if let Some(doc) = e.get(k) {
-                        line(k, h(doc));
+                for (doc, qualname) in [
+                    ("getter_doc", "getter_qualname"),
+                    ("setter_doc", "setter_qualname"),
+                ] {
+                    if let Some(d) = e.get(doc) {
+                        line(doc, h(d));
+                        line(qualname, h(&e[qualname]));
                     }
                 }
             }
             "staticmethod" | "classmethod" => {
                 line(kind, h(&e["doc"]));
                 line("function_kind", e["function_kind"].as_str().unwrap().into());
+                line("qualname", h(&e["qualname"]));
             }
             "value" => {
                 let ty = e["type"].as_str().unwrap();
@@ -187,7 +200,10 @@ fn flatten(members: &Value, path: &str, out: &mut Vec<String>) {
                     }
                 }
             }
-            _ => line(kind, h(&e["doc"])),
+            _ => {
+                line(kind, h(&e["doc"]));
+                line("qualname", h(&e["qualname"]));
+            }
         }
     }
 }
@@ -254,9 +270,14 @@ fn schema(kind: &str, e: &Value) -> (Vec<&'static str>, Vec<&'static str>) {
         "class_ref" => (vec!["target"], vec![]),
         "property" | "pybind11_static_property" => (
             vec!["doc", "getter", "setter", "deleter"],
-            vec!["getter_doc", "setter_doc"],
+            vec![
+                "getter_doc",
+                "getter_qualname",
+                "setter_doc",
+                "setter_qualname",
+            ],
         ),
-        "staticmethod" | "classmethod" => (vec!["function_kind", "doc"], vec![]),
+        "staticmethod" | "classmethod" => (vec!["function_kind", "doc", "qualname"], vec![]),
         "value" => {
             let ty = e["type"].as_str().unwrap();
             if ty == "builtins.str" {
@@ -269,7 +290,7 @@ fn schema(kind: &str, e: &Value) -> (Vec<&'static str>, Vec<&'static str>) {
                 (vec!["type", "repr"], vec!["enum_value"])
             }
         }
-        _ => (vec!["doc"], vec![]),
+        _ => (vec!["doc", "qualname"], vec![]),
     }
 }
 
@@ -289,8 +310,12 @@ fn check_schema(e: &Value, path: &str, kinds: &mut BTreeSet<String>) {
         );
     }
     if kind == "property" || kind == "pybind11_static_property" {
-        for (accessor, doc) in [("getter", "getter_doc"), ("setter", "setter_doc")] {
+        for (accessor, doc, qualname) in [
+            ("getter", "getter_doc", "getter_qualname"),
+            ("setter", "setter_doc", "setter_qualname"),
+        ] {
             assert_eq!(e[accessor].as_bool().unwrap(), keys.contains(doc), "{path}");
+            assert_eq!(keys.contains(doc), keys.contains(qualname), "{path}");
         }
     }
     if let Some(members) = e.get("members") {
@@ -377,6 +402,15 @@ fn reports_each_entry_with_its_documented_keys_and_no_address_or_path() {
 fn reports_what_the_binding_defines() {
     let report = surface();
     let members = &report["module"]["members"];
+
+    // A function's qualname names pybind11's function record (its __self__), whose class
+    // name starts with pybind11's internals tag (pybind11/detail/internals.h).
+    let qualname = String::from_utf8(bytes(&find(members, "GetEnvVariable")["qualname"])).unwrap();
+    assert!(
+        qualname.starts_with("pybind11_detail_function_record_v1_")
+            && qualname.ends_with(".GetEnvVariable"),
+        "{qualname}"
+    );
 
     // PyOpenColorIO.cpp:15-28: both exceptions, through register_exception, whose default
     // base is Python's Exception (so ExceptionMissingFile doesn't derive from OCIO's).
