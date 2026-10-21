@@ -4503,3 +4503,31 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   can't write in its error (the wheel's process aborts; ...)", the formatting error as its
   cause, in `p6-core` (`crates/ocio-py/src/dispatch.rs`, `incompatible`);
   `constructors_oracle.rs`, `undefined_behaviour_raises_the_ports_errors` (the port only).
+
+### U-100. Replacing or deleting an enum's `value` property corrupts the heap
+
+- **Upstream:** pybind11 makes each enum's `value` property (`def_property_readonly`, its
+  getter a function without a scope), and freeing that getter corrupts the wheel's heap:
+  `OCIO.TransformDirection.value = 3`, `del OCIO.TransformDirection.value`,
+  `type(OCIO.TransformDirection).__setattr__(OCIO.TransformDirection, 'value', 3)`,
+  `OCIO.Interpolation.value = 3`, or another enum's `value` property put in its place, end the
+  wheel's process: on Windows with 0xC0000374 (heap corruption), on Linux with glibc's abort
+  "free(): invalid pointer" (a pointer the heap never gave out freed); at once, or, while
+  another reference keeps the property or its getter alive, when that reference goes (at the
+  latest when the interpreter exits). Re-initializing the property
+  (`OCIO.TransformDirection.__dict__['value'].__init__(None)`) frees the getter too. The
+  enums' other properties and methods survive being replaced or deleted (the verifier's
+  probes of p6-core round 3, and the implementer's, on both platforms).
+- **Who notices:** Python code that monkeypatches or deletes an enum class's `value`.
+- **A fix:** none needed beyond the port's error.
+- **Status:** the port raises RuntimeError "PyOpenColorIO.PyOpenColorIO.TransformDirection:
+  replacing or deleting an enum's `value` property frees its getter, which corrupts the
+  wheel's heap (docs/improvements.md, U-100)" from the metatype's `__setattr__` and
+  `__delattr__` (`setattr`, `del`, `type(cls).__setattr__`, a `str` subclass's name too) when
+  the class's own dictionary holds the property and the new value isn't the property itself,
+  in `p6-core` (`crates/ocio-py/src/pybind11.rs`, `frees_value_getter`);
+  `metatype_oracle.rs`, `replacing_an_enum_value_property_raises_the_ports_error` (the port
+  only). What doesn't go through the metatype the port can't refuse, and returns normally:
+  `type.__setattr__(cls, 'value', ...)` (which the wheel refuses, D-7) and the property's own
+  `__init__`. It also refuses a replacement the wheel survives, when the property stays
+  reachable for the rest of the process (under another name of the class, say).

@@ -549,15 +549,14 @@ pub fn define_enum<'py>(
     }
     cls.setattr("__getstate__", pybind11::method(py, getstate)?)?;
     cls.setattr("__hash__", pybind11::method(py, hash)?)?;
-    cls.setattr(
-        "value",
-        property.call1((
-            pybind11::builtin_unscoped(py, value_getter, true)?,
-            py.None(),
-            py.None(),
-            "",
-        ))?,
-    )?;
+    let value = property.call1((
+        pybind11::builtin_unscoped(py, value_getter, true)?,
+        py.None(),
+        py.None(),
+        "",
+    ))?;
+    pybind11::guard_value_property(&value);
+    cls.setattr("value", value)?;
     cls.setattr("__int__", pybind11::method(py, as_int("__int__"))?)?;
     cls.setattr("__index__", pybind11::method(py, as_int("__index__"))?)?;
     cls.setattr("__setstate__", pybind11::method(py, setstate)?)?;

@@ -280,7 +280,8 @@ fn check_py_manifest(rel: &str, text: &str) -> Vec<String> {
         })
         .map(|(n, line)| {
             format!(
-                "{rel}:{n}: `{line}`: the Python binding's crates keep their default targets                  ({PY_ROOT}, {PY_FFI})"
+                "{rel}:{n}: `{line}`: the Python binding's crates keep their default targets \
+                 ({PY_ROOT}, {PY_FFI})"
             )
         })
         .collect()

@@ -40,20 +40,85 @@ const RUNTIME: &std::ffi::CStr = cr#"
 # CPython's instancemethod type, set from Rust once the runtime runs.
 _instancemethod = None
 
+# What CPython's C code checks with, which no metatype overrides: a type's MRO (tp_mro) and
+# dictionary (tp_dict), and _PyObject_RealIsSubclass(sub, cls) (`_real_subclass(cls, sub)`).
+_mro_of = type.__dict__['__mro__'].__get__
+_dict_of = type.__dict__['__dict__'].__get__
+_real_subclass = type.__dict__['__subclasscheck__']
+_missing = object()
+
 
 def _lookup(cls, name):
-    # _PyType_Lookup: the attribute in the dictionaries of the class's MRO, or None.
-    for klass in type.__getattribute__(cls, '__mro__'):
-        namespace = type.__getattribute__(klass, '__dict__')
-        if name in namespace:
-            return namespace[name]
+    # _PyType_Lookup: the attribute in the dictionaries of the class's MRO, or None; an error
+    # hashing or comparing the name is cleared (no attribute).
+    try:
+        for klass in _mro_of(cls):
+            descr = _dict_of(klass).get(name, _missing)
+            if descr is not _missing:
+                return descr
+    except BaseException:
+        pass
     return None
+
+
+# The C name (tp_name) of an object's type, as CPython writes it in messages ('%.100s'): read
+# from the refusal of a slot wrapper of bool, from which no class derives.
+_bool_repr = bool.__dict__['__repr__']
+_BOOL_REFUSAL = "descriptor '__repr__' requires a 'bool' object but received a '"
+
+
+def _type_name(obj):
+    if type(obj) is bool:
+        return 'bool'
+    try:
+        _bool_repr(obj)
+    except TypeError as e:
+        return str(e)[len(_BOOL_REFUSAL):-1]
+
+
+# The wheel's methods of pybind11_type and pybind11_static_property are the slot wrappers of
+# their C slots, which check their arguments as CPython 3.13's wrapperdescr_call
+# (Objects/descrobject.c) and wrap_* functions (Objects/typeobject.c) do, in this order: a
+# `self`, an instance of the wrapper's class by its type's MRO; no keyword arguments but
+# `__call__`'s; then the slot's arguments.
+def _slot_self(name, owner, args):
+    if not args:
+        raise TypeError("descriptor '%s' of '%s' object needs an argument"
+                        % (name, owner.__name__))
+    if not _real_subclass(owner, type(args[0])):
+        raise TypeError("descriptor '%s' requires a '%s' object but received a '%s'"
+                        % (name, owner.__name__, _type_name(args[0])))
+    return args[0]
+
+
+def _no_keywords(name, kwargs):
+    if kwargs:
+        raise TypeError('wrapper %s() takes no keyword arguments' % name)
+
+
+def _num_args(args, n):
+    # check_num_args
+    if len(args) != n:
+        raise TypeError('expected %d argument%s, got %d' % (n, '' if n == 1 else 's', len(args)))
+
+
+def _unpack(args, low, high):
+    # PyArg_UnpackTuple(args, "", low, high, ...): its name, empty, starts the message.
+    if len(args) < low:
+        raise TypeError(' expected %s%d argument%s, got %d'
+                        % ('' if low == high else 'at least ', low, '' if low == 1 else 's',
+                           len(args)))
+    if len(args) > high:
+        raise TypeError(' expected %s%d argument%s, got %d'
+                        % ('' if low == high else 'at most ', high, '' if high == 1 else 's',
+                           len(args)))
 
 
 # pybind11_meta_call: an instance of a class whose __init__ (a Python subclass's) didn't
 # construct each bound class it derives from is refused.
-def __call__(cls, *args, **kwargs):
-    self = type.__call__(cls, *args, **kwargs)
+def __call__(*args, **kwargs):
+    cls = _slot_self('__call__', pybind11_type, args)
+    self = type.__call__(cls, *args[1:], **kwargs)
     unconstructed = _unconstructed(self)
     if unconstructed is not None:
         raise TypeError(unconstructed + '.__init__() must be called when overriding __init__')
@@ -61,25 +126,42 @@ def __call__(cls, *args, **kwargs):
 
 
 # pybind11_meta_getattro: a method (an instancemethod) is returned as it is, not bound.
-def __getattribute__(cls, name):
+def __getattribute__(*args, **kwargs):
+    cls = _slot_self('__getattribute__', pybind11_type, args)
+    _no_keywords('__getattribute__', kwargs)
+    _num_args(args[1:], 1)
+    name = args[1]
     descr = _lookup(cls, name)
     if descr is not None and type(descr) is _instancemethod:
         return descr
     return type.__getattribute__(cls, name)
 
 
-# pybind11_meta_setattro: a static property's setter, unless the value is itself one; a
-# deletion is type's (the slot's other wrapper, __delattr__).
-def __setattr__(cls, name, value):
+# pybind11_meta_setattro: a static property's setter, unless the value is itself one; else
+# type's. Replacing an enum's `value` property frees its getter, which corrupts the wheel's
+# heap: the port's error (docs/improvements.md, U-100).
+def __setattr__(*args, **kwargs):
+    cls = _slot_self('__setattr__', pybind11_type, args)
+    _no_keywords('__setattr__', kwargs)
+    _unpack(args[1:], 2, 2)
+    name, value = args[1], args[2]
     descr = _lookup(cls, name)
     if (descr is not None and isinstance(descr, pybind11_static_property)
             and not isinstance(value, pybind11_static_property)):
         type(descr).__set__(descr, cls, value)
         return
+    _frees_value_getter(cls, name, value)
     type.__setattr__(cls, name, value)
 
 
-def __delattr__(cls, name):
+# The same slot, deleting: type's (U-100 as above).
+def __delattr__(*args, **kwargs):
+    cls = _slot_self('__delattr__', pybind11_type, args)
+    _no_keywords('__delattr__', kwargs)
+    _num_args(args[1:], 1)
+    name = args[1]
+    _lookup(cls, name)
+    _frees_value_getter(cls, name, _missing)
     type.__delattr__(cls, name)
 
 
@@ -88,24 +170,37 @@ pybind11_type = type('pybind11_type', (type,), {
     '__delattr__': __delattr__, '__doc__': None})
 
 
-# pybind11_static_get: the class (the instance's class) is what the getter gets.
-def __get__(self, obj, cls=None):
-    if obj is None:
-        target = cls
-    elif isinstance(obj, type):
-        target = obj
-    else:
-        target = type(obj)
-    return property.__get__(self, target, target)
+# pybind11_static_get: property's getter of the owner (the third argument, a class), whatever
+# the instance; without an owner, the property itself.
+def __get__(*args, **kwargs):
+    self = _slot_self('__get__', pybind11_static_property, args)
+    _no_keywords('__get__', kwargs)
+    _unpack(args[1:], 1, 2)
+    obj = args[1]
+    cls = args[2] if len(args) > 2 else None
+    if obj is None and cls is None:
+        raise TypeError('__get__(None, None) is invalid')
+    if cls is None:
+        return self
+    return property.__get__(self, cls, cls)
 
 
-# pybind11_static_set (both its wrappers, __set__ and __delete__): property's, on the class.
-def __set__(self, obj, value):
-    property.__set__(self, obj if isinstance(obj, type) else type(obj), value)
+# pybind11_static_set (both its wrappers, __set__ and __delete__): property's, on the class (the
+# instance itself when it is a type, by its type's MRO, else its type).
+def __set__(*args, **kwargs):
+    self = _slot_self('__set__', pybind11_static_property, args)
+    _no_keywords('__set__', kwargs)
+    _unpack(args[1:], 2, 2)
+    obj, value = args[1], args[2]
+    property.__set__(self, obj if _real_subclass(type, type(obj)) else type(obj), value)
 
 
-def __delete__(self, obj):
-    property.__delete__(self, obj if isinstance(obj, type) else type(obj))
+def __delete__(*args, **kwargs):
+    self = _slot_self('__delete__', pybind11_static_property, args)
+    _no_keywords('__delete__', kwargs)
+    _num_args(args[1:], 1)
+    obj = args[1]
+    property.__delete__(self, obj if _real_subclass(type, type(obj)) else type(obj))
 
 
 # A __dict__ (property subclasses have one) and no weak references, as pybind11's.
@@ -113,13 +208,27 @@ pybind11_static_property = type('pybind11_static_property', (property,), {
     '__get__': __get__, '__set__': __set__, '__delete__': __delete__,
     '__slots__': ('__dict__',)})
 del pybind11_static_property.__slots__
-for _f, _owner in ((__call__, 'pybind11_type'), (__getattribute__, 'pybind11_type'),
-                   (__setattr__, 'pybind11_type'), (__delattr__, 'pybind11_type'),
-                   (__get__, 'pybind11_static_property'), (__set__, 'pybind11_static_property'),
-                   (__delete__, 'pybind11_static_property')):
-    _f.__qualname__ = _owner + '.' + _f.__name__
+# The slot wrappers' names, docstrings, signatures and classes.
+for _f, _owner, _doc, _signature in (
+        (__call__, pybind11_type, 'Call self as a function.', '($self, /, *args, **kwargs)'),
+        (__getattribute__, pybind11_type, 'Return getattr(self, name).', '($self, name, /)'),
+        (__setattr__, pybind11_type, 'Implement setattr(self, name, value).',
+         '($self, name, value, /)'),
+        (__delattr__, pybind11_type, 'Implement delattr(self, name).', '($self, name, /)'),
+        (__get__, pybind11_static_property,
+         'Return an attribute of instance, which is of type owner.',
+         '($self, instance, owner=None, /)'),
+        (__set__, pybind11_static_property, 'Set an attribute of instance to value.',
+         '($self, instance, value, /)'),
+        (__delete__, pybind11_static_property, 'Delete an attribute of instance.',
+         '($self, instance, /)')):
+    _f.__qualname__ = _owner.__name__ + '.' + _f.__name__
     _f.__module__ = 'pybind11_builtins'
-del __call__, __getattribute__, __setattr__, __delattr__, __get__, __set__, __delete__, _f, _owner
+    _f.__doc__ = _doc
+    _f.__text_signature__ = _signature
+    _f.__objclass__ = _owner
+del __call__, __getattribute__, __setattr__, __delattr__, __get__, __set__, __delete__
+del _f, _owner, _doc, _signature
 "#;
 
 /// The runtime's namespace.
@@ -144,9 +253,71 @@ fn runtime(py: Python<'_>) -> PyResult<&Bound<'_, PyDict>> {
             |args, _| -> PyResult<Option<String>> { unconstructed(&args.get_item(0)?) },
         )?;
         ns.set_item("_unconstructed", unconstructed)?;
+        let frees_value_getter = PyCFunction::new_closure(
+            py,
+            Some(c"_frees_value_getter"),
+            None,
+            |args, _| -> PyResult<()> {
+                frees_value_getter(&args.get_item(0)?, &args.get_item(1)?, &args.get_item(2)?)
+            },
+        )?;
+        ns.set_item("_frees_value_getter", frees_value_getter)?;
         Ok(ns.unbind())
     })?;
     Ok(ns.bind(py))
+}
+
+/// The `value` properties of the module's enums: replacing or deleting one in its class's
+/// dictionary frees its getter, which corrupts the wheel's heap (its process dies with
+/// 0xC0000374 on Windows, at once, or when another reference to the property goes).
+static VALUE_PROPERTIES: std::sync::Mutex<Vec<Py<PyAny>>> = std::sync::Mutex::new(Vec::new());
+
+/// Registers `property`, an enum's `value` property, for [`frees_value_getter`].
+pub fn guard_value_property(property: &Bound<'_, PyAny>) {
+    VALUE_PROPERTIES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .push(property.clone().unbind());
+}
+
+/// The port's error, before pybind11's metatype replaces (`value`: the new value) or deletes
+/// (`value`: none of the properties) the attribute `name` of the class `cls`, when that is
+/// `value` and the class's own dictionary holds one of [`VALUE_PROPERTIES`] there, which the
+/// wheel's heap doesn't survive (docs/improvements.md, U-100). `name` as type's `__setattr__`
+/// takes it: a str's characters, whatever its class.
+fn frees_value_getter(
+    cls: &Bound<'_, PyAny>,
+    name: &Bound<'_, PyAny>,
+    value: &Bound<'_, PyAny>,
+) -> PyResult<()> {
+    let py = cls.py();
+    let is_value = name
+        .cast::<PyString>()
+        .is_ok_and(|n| n.to_str().is_ok_and(|n| n == "value"));
+    if !is_value {
+        return Ok(());
+    }
+    let dict = py
+        .get_type::<PyType>()
+        .getattr("__dict__")?
+        .get_item("__dict__")?
+        .call_method1("__get__", (cls,))?;
+    let Some(current) = dict.call_method1("get", ("value",)).ok() else {
+        return Ok(());
+    };
+    let guarded = VALUE_PROPERTIES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .iter()
+        .any(|p| p.bind(py).is(&current));
+    if !guarded || value.is(&current) {
+        return Ok(());
+    }
+    Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+        "{}: replacing or deleting an enum's `value` property frees its getter, which corrupts \
+         the wheel's heap (docs/improvements.md, U-100)",
+        cls.cast::<PyType>()?.fully_qualified_name()?
+    )))
 }
 
 fn runtime_item<'py>(py: Python<'py>, name: &str) -> PyResult<Bound<'py, PyAny>> {
@@ -166,7 +337,8 @@ type Values = std::sync::Mutex<Vec<Option<Py<PyAny>>>>;
 // sizes). PyO3 places weak references last (`__weakrefoffset__` 48, pybind11's 40), names the
 // type `pybind11_builtins.pybind11_object` (pybind11's C name is `pybind11_object`) and makes
 // it with the metatype `type` (pybind11's `pybind11_type`); the methods of the port's
-// `pybind11_type` and static property are Python functions: docs/deviations.md, D-7 (owner
+// `pybind11_type` and static property are Python functions that check their arguments as the
+// wheel's slot wrappers do (the runtime above): docs/deviations.md, D-7 (owner
 // decision 2026-10-21). (No Rust doc comment: it would be the class's docstring, which the
 // wheel's hasn't.)
 #[pyclass(
