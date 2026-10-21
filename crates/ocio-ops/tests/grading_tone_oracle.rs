@@ -500,6 +500,46 @@ fn explicit_cases() -> Vec<Case<GtParams>> {
                 ));
             }
         }
+        // A start whose pre-render form is infinite (or beyond a double's reach) while the
+        // blacks or whites move the master curve's decreasing path: the path meets NaN
+        // coefficients (the verifier's table flips of WB_FWD f3 lanes 0-2 `w9` and WB_REV
+        // scalar whites and f3 lanes 0-2 `v8` survived without these).
+        for (label, start) in [
+            ("shadows.start inf", f64::INFINITY),
+            ("shadows.start 1e300", 1e300),
+        ] {
+            let mut t = GradingTone::new(style);
+            t.blacks = with_rgbm(t.blacks, 1.6, 1.6, 1.6, 1.6);
+            t.shadows.start = start;
+            cases.push(Case::new(
+                format!("{s}, blacks 1.6, {label}"),
+                GtParams::new(style, t),
+            ));
+        }
+        for (label, start) in [
+            ("highlights.start -1e300", -1e300),
+            ("highlights.start -inf", f64::NEG_INFINITY),
+        ] {
+            let mut t = GradingTone::new(style);
+            t.whites = with_rgbm(t.whites, 0.55, 0.55, 0.55, 0.55);
+            t.highlights.start = start;
+            cases.push(Case::new(
+                format!("{s}, whites 0.55, {label}"),
+                GtParams::new(style, t),
+            ));
+        }
+        // The s-contrast alone at values where `t < x1` and `t <= x1` of the forward
+        // renderer's top segment differ in `float` (the verifier's mutant A24).
+        if style != GradingStyle::Lin {
+            for c in [0.7, 0.8918666442285068, 1.5222737455736959] {
+                let mut t = GradingTone::new(style);
+                t.scontrast = c;
+                cases.push(Case::new(
+                    format!("{s}, scontrast {c} alone"),
+                    GtParams::new(style, t),
+                ));
+            }
+        }
         // Midtones whose segments differ on a knot.
         for (k, midtones) in mids_knot_inputs(style).into_iter().enumerate() {
             let mut t = GradingTone::new(style);
