@@ -775,6 +775,32 @@ fn pixels() -> Vec<f32> {
         -0.05,
         0.45,
         f32::from_bits(0x7f80_0001),
+        // The three distinct payloads in the colors too, one at a time and together in each
+        // order: where two NaNs meet in a tone's arithmetic the result names its first operand.
+        f32::from_bits(0x7fa0_0000),
+        0.5,
+        0.5,
+        1.0,
+        0.5,
+        f32::from_bits(0xffc0_1234),
+        0.3,
+        0.2,
+        0.4,
+        0.6,
+        f32::from_bits(0x7f80_0001),
+        0.9,
+        f32::from_bits(0x7fa0_0000),
+        f32::from_bits(0xffc0_1234),
+        f32::from_bits(0x7f80_0001),
+        0.5,
+        f32::from_bits(0x7f80_0001),
+        f32::from_bits(0x7fa0_0000),
+        f32::from_bits(0xffc0_1234),
+        0.5,
+        f32::from_bits(0xffc0_1234),
+        f32::from_bits(0x7f80_0001),
+        f32::from_bits(0x7fa0_0000),
+        0.5,
     ]
 }
 
