@@ -58,6 +58,9 @@ pyo3 = "=0.29.3"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"
+# Every target of every crate and xtask: `unsafe` only in the files guards.rs allows, each
+# with `#![allow(unsafe_code)]` (PLAN.md D8).
+unsafe_code = "deny"
 missing_debug_implementations = "warn"
 unreachable_pub = "warn"
 

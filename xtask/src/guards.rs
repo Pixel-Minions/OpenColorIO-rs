@@ -241,8 +241,42 @@ fn check_files(
 
     for (rel, text) in manifests {
         problems.extend(check_internals_feature(rel, text));
+        problems.extend(check_unsafe_lint(rel, text));
     }
     problems
+}
+
+/// The manifests' part of the `unsafe` rule: the workspace denies the `unsafe_code` lint, and
+/// every crate and xtask takes the workspace's lints, so that `unsafe` anywhere (integration
+/// tests, benches, xtask included) needs an `allow`, which only the allowlisted files may hold
+/// ([`unsafe_allowed`]).
+fn check_unsafe_lint(rel: &str, text: &str) -> Vec<String> {
+    let lines: Vec<&str> = text.lines().map(str::trim).collect();
+    let has_after = |header: &str, line: &str| {
+        lines
+            .iter()
+            .position(|l| *l == header)
+            .is_some_and(|start| {
+                lines[start + 1..]
+                    .iter()
+                    .take_while(|l| !l.starts_with('['))
+                    .any(|l| *l == line)
+            })
+    };
+    if rel == "Cargo.toml" {
+        if has_after("[workspace.lints.rust]", "unsafe_code = \"deny\"") {
+            return vec![];
+        }
+        return vec![format!(
+            "{rel}: [workspace.lints.rust] must deny `unsafe_code` (PLAN.md D8)"
+        )];
+    }
+    if has_after("[lints]", "workspace = true") {
+        return vec![];
+    }
+    vec![format!(
+        "{rel}: [lints] must be `workspace = true`, the workspace's (they deny `unsafe_code`)"
+    )]
 }
 
 /// The module of `ocio`'s test-only internals (`ocio::internals`, under the crate's `internals`
@@ -737,6 +771,32 @@ mod tests {
     }
 
     #[test]
+    fn manifests_take_the_workspace_lints_which_deny_unsafe_code() {
+        let root = "[workspace.lints.rust]\nunsafe_code = \"deny\"\nunreachable_pub = \"warn\"\n";
+        assert!(check_unsafe_lint("Cargo.toml", root).is_empty());
+        for text in [
+            "[workspace.lints.rust]\nunreachable_pub = \"warn\"\n",
+            "[workspace.lints.rust]\nunsafe_code = \"warn\"\n",
+            "[workspace.lints.clippy]\nunsafe_code = \"deny\"\n",
+        ] {
+            assert_eq!(check_unsafe_lint("Cargo.toml", text).len(), 1, "{text}");
+        }
+        let krate = "[package]\nname = \"a\"\n\n[lints]\nworkspace = true\n";
+        assert!(check_unsafe_lint("crates/a/Cargo.toml", krate).is_empty());
+        for text in [
+            "[package]\nname = \"a\"\n",
+            "[lints]\n\n[dependencies]\nworkspace = true\n",
+            "[lints]\nworkspace = false\n",
+        ] {
+            assert_eq!(
+                check_unsafe_lint("xtask/Cargo.toml", text).len(),
+                1,
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
     fn unsafe_allowed_in_the_python_binding_only_in_type_object_rs() {
         assert!(unsafe_allowed("crates/ocio-py/src/type_object.rs"));
         for rel in [
@@ -940,11 +1000,13 @@ mod tests {
         let manifests = [
             file(
                 INTERNALS_MANIFEST,
-                "[dev-dependencies]\nocio = { workspace = true, features = [\"internals\"] }\n",
+                "[dev-dependencies]\nocio = { workspace = true, features = [\"internals\"] }\n\n\
+                 [lints]\nworkspace = true\n",
             ),
             file(
                 "crates/ocio-py/Cargo.toml",
-                "[dependencies]\nocio = { workspace = true, features = [\"internals\"] }\n",
+                "[dependencies]\nocio = { workspace = true, features = [\"internals\"] }\n\n\
+                 [lints]\nworkspace = true\n",
             ),
         ];
         let problems = check_files(&sources, &manifests, &|_, _| false);
