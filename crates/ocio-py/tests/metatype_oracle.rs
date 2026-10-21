@@ -510,6 +510,19 @@ fn d7_lists_what_still_differs() {
         "descriptor '__init__' requires a 'pybind11_builtins.pybind11_object' object but \
          received a 'type'",
     );
+    // CPython's layout check of a `__bases__` assignment names the C name too (re-check round
+    // 4). It fails in both, so the class is left as it was.
+    add(
+        &mut s,
+        json!({
+            "setattr": name("OCIO.TransformDirection"),
+            "name": "__bases__",
+            "value": { "tuple": [name("object")] },
+        }),
+        "__bases__ assignment: 'object' object layout differs from 'pybind11_object'",
+        "__bases__ assignment: 'object' object layout differs from \
+         'pybind11_builtins.pybind11_object'",
+    );
     // The weak reference offset, of the module's classes and Python classes deriving from
     // them (with `__slots__`, with several bases).
     add(
@@ -542,7 +555,7 @@ fn d7_lists_what_still_differs() {
     let script = json!({ "steps": s });
     let ours = port(&script);
     let theirs = wheel(std::slice::from_ref(&script)).remove(0);
-    assert_eq!(differ.len(), 19);
+    assert_eq!(differ.len(), 20);
     for (i, w, p) in differ {
         assert_eq!(
             shown(&theirs, i),
