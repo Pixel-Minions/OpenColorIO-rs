@@ -410,6 +410,51 @@ fn explicit_cases() -> Vec<Case<GpParams>> {
                 GpParams::new(style, p),
             ));
         }
+        // The forward styles' first addition (`pixel + coefficient`, or `coefficient + pixel`
+        // on Linux) of a pixel's NaN and a NaN coefficient (the sum of +Inf and -Inf): the
+        // sign of the NaN it keeps shows as a signed zero once `ApplyLinContrast` or
+        // `ApplyGamma` (gamma red 0.8 in `loop_values`) takes its power, which turns a NaN
+        // into 0 and keeps the sign. The black pivot of 0 of either sign makes the gamma's
+        // `pix - blackPivot` keep or change a zero's sign.
+        for (f, g) in [(0, 3), (12, 15), (20, 23)] {
+            for pivot_black in [0.0, -0.0] {
+                let mut p = loop_values(style, false, true);
+                *field(&mut p, f) = f64::INFINITY;
+                *field(&mut p, g) = f64::NEG_INFINITY;
+                p.pivot_black = pivot_black;
+                cases.push(Case::new(
+                    format!("{s}, infinite sums of slot {f}, power, pivot black {pivot_black:?}"),
+                    GpParams::new(style, p),
+                ));
+            }
+        }
+        // The reverse styles' last addition, where a pixel's default NaN meets a NaN
+        // coefficient on the same channel: an infinite sum on red, with a contrast of +Inf
+        // (log's and video's inverse slope), an exposure of -Inf and a gain of 0 (video's
+        // inverse gain) on red too, so that the NaNs of the contrast, the exposure and the sum
+        // meet on one channel.
+        for (f, g) in [(0, 3), (12, 15), (20, 23)] {
+            let mut p = loop_values(style, false, false);
+            *field(&mut p, f) = f64::INFINITY;
+            *field(&mut p, g) = f64::NEG_INFINITY;
+            p.contrast.red = f64::INFINITY;
+            p.exposure.red = f64::NEG_INFINITY;
+            p.gain.red = 0.0;
+            cases.push(Case::new(
+                format!("{s}, infinite sums of slot {f}, red contrast, exposure and gain"),
+                GpParams::new(style, p),
+            ));
+        }
+        // A contrast of 0 on the colors and Inf on the master, with a black pivot of -0.0:
+        // `ApplyContrast`'s multiplication `(pix - pivot) * contrast` of a zero and an
+        // infinity, and its addition of the pivot.
+        let mut p = loop_values(style, false, true);
+        p.contrast = rgbm(0.0, 0.0, 0.0, f64::INFINITY);
+        p.pivot_black = -0.0;
+        cases.push(Case::new(
+            format!("{s}, contrast 0 and master Inf, pivot black -0.0"),
+            GpParams::new(style, p),
+        ));
         // Gains of 0: video's forward slope and inverse gain fall back on 1.
         let mut p = loop_values(style, true, true);
         p.gain = rgbm(0.0, 1.0, -0.0, 1.0);

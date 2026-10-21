@@ -43,8 +43,18 @@
 //! NaN into 0, so a NaN that an addition gives before them leaves a signed zero; and the
 //! reverse styles' last addition, where a pixel's default NaN can meet a coefficient whose
 //! pre-render form negated one (`GradingPrimaryPreRender::update`'s inverse offsets, and its
-//! inverse log brightness on Linux). The battery checks those additions on both wheels; the
-//! saturation's sums meet only NaNs with the same bits, or none at all.
+//! inverse log brightness on Linux). The battery (`grading_primary_oracle`) checks, per style:
+//! - forward, the first addition: log's brightness, linear's and video's offset, with an
+//!   infinite sum (+Inf and -Inf) and a black pivot of 0.0 and -0.0, on both wheels;
+//! - reverse, the last addition: linear's and video's inverse offset on both wheels, log's
+//!   inverse brightness on Linux only (on Windows its NaN has the pixel's bits, so no output
+//!   shows that order);
+//! - the contrast's multiplication, `(pix - pivot) * contrast`, with contrasts of 0 and +Inf
+//!   (a mutant of its order is killed); its final addition, `+ pivot`, shows in no output
+//!   (the mutant of its order survives);
+//!
+//! The saturation's sums meet only NaNs with the same bits, or none at all: no output shows
+//! their orders.
 
 use std::sync::Arc;
 
