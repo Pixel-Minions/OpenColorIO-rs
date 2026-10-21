@@ -11,6 +11,7 @@
 
 use std::sync::Arc;
 
+use super::grading_tone_op_cpu::get_grading_tone_cpu_renderer;
 use super::grading_tone_op_data::GradingToneOpData;
 use crate::dynamic_property::DynamicPropertyRcPtr;
 use crate::exception::{Exception, Result};
@@ -133,12 +134,9 @@ impl GradingToneOpData {
 
     /// The renderer of the data, whatever the fast-math setting.
     ///
-    /// Port of `GradingToneOp::getCPUOp` (GradingToneOp.cpp:181-185 @ v2.5.2). The renderers
-    /// (`GetGradingToneCPURenderer`) come with WP 5.3b and 5.3c.
+    /// Port of `GradingToneOp::getCPUOp` (GradingToneOp.cpp:181-185 @ v2.5.2).
     pub(crate) fn get_cpu_op(&self) -> Result<Arc<dyn CpuOp>> {
-        Err(Exception::new(
-            "GetGradingToneCPURenderer is not ported yet (WP 5.3b).",
-        ))
+        get_grading_tone_cpu_renderer(self)
     }
 }
 

@@ -1690,7 +1690,7 @@ path = "src/OpenColorIO/ops/gradingtone/GradingToneOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingtone/grading_tone_op.rs"]
 status = "partial"
-note = "p5-tone 5.3a: the op and CreateGradingToneOp; getCPUOp with the renderers (5.3b, 5.3c); extractGpuShaderInfo with 5.3d-e (ocio-gpu gpu_processor.rs); CreateGradingToneTransform and BuildGradingToneOp with 5.5d"
+note = "p5-tone 5.3a: the op and CreateGradingToneOp; 5.3b: getCPUOp; extractGpuShaderInfo with 5.3d-e (ocio-gpu gpu_processor.rs); CreateGradingToneTransform and BuildGradingToneOp with 5.5d"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingtone/GradingToneOp.h"
@@ -1703,13 +1703,15 @@ note = "p5-tone 5.3a: CreateGradingToneOp; CreateGradingToneTransform with 5.5d"
 path = "src/OpenColorIO/ops/gradingtone/GradingToneOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingtone/grading_tone_op_cpu.rs"]
-status = "todo"
+status = "partial"
+note = "p5-tone 5.3b: GradingToneOpCPU, the forward and reverse renderers of the log and video styles (mids, highlightShadow, whiteBlack, scontrast, ComputeHS/WB templates, ClampMaxRGB) in each wheel's operand orders, GetGradingToneCPURenderer for them; the linear style's renderers (LinLog, LogLin) with 5.3c"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingtone/GradingToneOpCPU.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingtone/grading_tone_op_cpu.rs"]
-status = "todo"
+status = "partial"
+note = "p5-tone 5.3b: GetGradingToneCPURenderer (log and video; linear with 5.3c)"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingtone/GradingToneOpData.cpp"
@@ -4941,7 +4943,8 @@ note = "p2-rgbcurve 2.6a: basic and curves; 2.6b: max_ctrl_pnts, in dynamic_prop
 path = "tests/cpu/ops/gradingtone/GradingToneOpCPU_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/gradingtone/grading_tone_op_cpu_tests.rs"]
-status = "todo"
+status = "partial"
+note = "p5-tone 5.3b: log_midtones, log_highlights, video_shadows, video_white_details, log_black_details, log_scontrast; identity and lin_midtones with 5.3c"
 
 [[file]]
 path = "tests/cpu/ops/gradingtone/GradingToneOpData_tests.cpp"

@@ -3153,6 +3153,60 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `crates/ocio-ops/src/ops/gradingprimary/grading_primary_op_cpu.rs`, `LoopOrders`); the
   battery's infinite-sum cases with NaN probes check it on both platforms.
 
+### I-241. A channel's inverse midtones above the curve use the line below it
+
+- **Upstream:** the inverse midtones of the red, green or blue component
+  (`GradingToneRevOpCPU::mids`, `ops/gradingtone/GradingToneOpCPU.cpp:381-384` @ v2.5.2) give a
+  value at or above the curve's top, `t >= y5`, `x0 + (t - y0) / m0`: the line below the curve's
+  bottom, where the forward curve continues above its top with `y5 + (t - x5) * m5`, and the
+  master component's code uses the top line (`outR4 = x5 + (t - y5) / m5`, 441). The
+  pre-render makes `y0 = x0` and `m0 = m5 = 1`, so the bottom line gives the value back
+  unchanged, the top line `t - y5 + x5`; the curve's area-preserving slopes make `y5` equal to
+  `x5` only up to their rounding, so a value above the top comes back off by that rounding
+  (or exactly, where it rounds to nothing).
+- **Who notices:** nobody visibly: inverting a GradingToneTransform with a red, green or blue
+  midtones value other than 1, on values above the curve's top, gives the last bits of the
+  bottom line's answer.
+- **A fix:** `x5 + (t - y5) / m5`, as the master component's code.
+- **Status:** matched in `p5-tone` (5.3b, `crates/ocio-ops/src/ops/gradingtone/
+  grading_tone_op_cpu.rs`, `mids_rev_scalar`); the battery's midtones cases, inverse, with
+  values above 1 (`crates/ocio-ops/tests/grading_tone_oracle.rs`).
+
+### I-242. A channel and the master component take different midtones segments on a knot
+
+- **Upstream:** the forward midtones of the red, green or blue component choose the segment
+  with strict comparisons (`if (t > x2) res = fR;`, `GradingToneOpCPU.cpp:310-315` @ v2.5.2),
+  the master component's code with `setOnLimit` (`t < x2 ? res : fR`, 337-342): a value on
+  the knot `x2`, `x3` or `x4` takes the segment below it in the first, above it in the second
+  (the same value, up to the segments' rounding), and a NaN takes the middle segment `fM` in the
+  first and the line above the top in the second. The inverse midtones differ the same way
+  (an if/else chain on `t >= y5, y4, ...` for the components, `setOnLimit` for the master).
+- **Who notices:** nobody visibly: the segments meet at the knots, so only the last bits and a
+  NaN's payload differ.
+- **A fix:** one choice of segment for both.
+- **Status:** matched in `p5-tone` (5.3b, `grading_tone_op_cpu.rs`, `mids_fwd_scalar`,
+  `mids_fwd_f3`, `mids_rev_scalar`, `mids_rev_f3`); the battery probes the knots' neighbourhoods
+  (`breakpoints`).
+
+### I-243. A GradingTone's NaN pixels and NaN coefficients differ between Windows and Linux
+
+- **Upstream:** the log and video renderers (`GradingToneOpCPU.cpp:269-1061` @ v2.5.2) are
+  scalar `float` templates instantiated for a `float` and a `float3`, which the two wheels
+  compile with different operand orders: per platform, per instantiation, and with GCC per
+  lane of the `float3` (Windows `sub_1801f38f0` to `sub_1801f9b10`, Linux `ComputeHSFwd<float>`
+  and its siblings, read with `tools/wheel-inspect`). MSVC also computes some roots as `x0 -
+  ((c + c) / (d + b)) * w` for the source's `((-2.f * c) / (d + b)) * w + x0`. Where two NaNs
+  meet (a pixel's NaN and a NaN control point, which starts and widths that overflow a `float`
+  give, or the default NaN of an infinity's arithmetic and a control point the pre-render
+  negated), the result keeps a different NaN on each platform, and between the red, green,
+  blue and the master component on one.
+- **Who notices:** anyone comparing a GradingToneTransform with extreme starts or widths on NaN
+  or infinite pixels between a Windows and a Linux machine.
+- **A fix:** one operand order on every platform, which changes NaN bits on at least one.
+- **Status:** matched in `p5-tone` (5.3b, `grading_tone_op_cpu.rs`, the `HS_FWD` ... `SC_REV`
+  tables); the battery's overflowing cases with the distinct-NaN probes check it on both
+  platforms.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on
