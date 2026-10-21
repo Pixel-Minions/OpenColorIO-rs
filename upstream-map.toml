@@ -1556,15 +1556,15 @@ note = "p5-primary 5.2a: CreateGradingPrimaryOp; CreateGradingPrimaryTransform w
 path = "src/OpenColorIO/ops/gradingprimary/GradingPrimaryOpCPU.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingprimary/grading_primary_op_cpu.rs"]
-status = "partial"
-note = "p5-primary 5.2b: GradingPrimaryOpCPU, the SSE2 helpers and the log renderers (operand orders of both wheels' machine code), GetGradingPrimaryCPURenderer for the log style; checked by tests/grading_primary_oracle.rs; the linear and video renderers with 5.2c"
+status = "done"
+note = "p5-primary 5.2b-c: GradingPrimaryOpCPU, the SSE2 helpers, the six renderers (operand orders of both wheels' machine code, I-226, I-227, I-228) and GetGradingPrimaryCPURenderer; checked by tests/grading_primary_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingprimary/GradingPrimaryOpCPU.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingprimary/grading_primary_op_cpu.rs"]
-status = "partial"
-note = "p5-primary 5.2b: GradingPrimaryOpCPU, the SSE2 helpers and the log renderers (operand orders of both wheels' machine code), GetGradingPrimaryCPURenderer for the log style; checked by tests/grading_primary_oracle.rs; the linear and video renderers with 5.2c"
+status = "done"
+note = "p5-primary 5.2b-c: GradingPrimaryOpCPU, the SSE2 helpers, the six renderers (operand orders of both wheels' machine code, I-226, I-227, I-228) and GetGradingPrimaryCPURenderer; checked by tests/grading_primary_oracle.rs"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingprimary/GradingPrimaryOpData.cpp"
@@ -4880,8 +4880,7 @@ status = "todo"
 path = "tests/cpu/ops/gradingprimary/GradingPrimaryOpCPU_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/gradingprimary/grading_primary_op_cpu_tests.rs"]
-status = "partial"
-note = "p5-primary 5.2b: log; identity, lin and video with 5.2c"
+status = "done"
 
 [[file]]
 path = "tests/cpu/ops/gradingprimary/GradingPrimaryOpData_tests.cpp"

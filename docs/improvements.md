@@ -3136,6 +3136,23 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   NaN.
 - **Status:** matched in `p5-primary` (5.2b, 5.2c); the battery's NaN probes check it.
 
+### I-228. A GradingPrimary's NaN pixels can give zeros of another sign on Linux
+
+- **Upstream:** the forward GradingPrimary renderers start with `_mm_add_ps(pixel, offset)`
+  (or `brightness`; `ops/gradingprimary/GradingPrimaryOpCPU.cpp:304, 655, 999` and the other
+  loops @ v2.5.2). MSVC computes `pixel + offset`, GCC `offset + pixel` (`tools/wheel-inspect`:
+  Windows `GradingPrimaryLinFwdOpCPU::apply` 0x1801d4730, Linux 0x3a8500, and the log and video
+  ones), so where a NaN pixel meets a NaN offset (an offset whose master and channel are +Inf
+  and -Inf), Windows keeps the pixel's NaN and Linux the offset's. The linear style's contrast
+  then keeps the NaN's sign while `ssePower` makes it 0 (`ApplyLinContrast`, 135-142): the
+  output is a zero whose sign differs between the platforms.
+- **Who notices:** NaN pixels through a linear GradingPrimaryTransform with infinite offsets
+  of opposite signs, compared between a Windows and a Linux machine.
+- **A fix:** one operand order on every platform, which changes those zeros' signs on one.
+- **Status:** matched in `p5-primary` (5.2b, 5.2c:
+  `crates/ocio-ops/src/ops/gradingprimary/grading_primary_op_cpu.rs`, `LoopOrders`); the
+  battery's infinite-sum cases with NaN probes check it on both platforms.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on

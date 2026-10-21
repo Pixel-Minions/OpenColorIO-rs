@@ -31,8 +31,8 @@ use ocio_testkit::probe::ProbeSet;
 use ocio_testkit::transform_text::f64_spec;
 use serde_json::{Value, json};
 
-/// The styles the port renders.
-const STYLES: [GradingStyle; 1] = [GradingStyle::Log];
+/// The styles.
+const STYLES: [GradingStyle; 3] = [GradingStyle::Log, GradingStyle::Lin, GradingStyle::Video];
 
 /// The RGBM values, by name, as the slots name them.
 const RGBMS: [&str; 7] = [
@@ -443,6 +443,24 @@ fn explicit_cases() -> Vec<Case<GpParams>> {
             format!("{s}, contrast 0"),
             GpParams::new(style, p),
         ));
+        // Lifts that nearly cancel the gain's term of video's inverse slope: the slope's
+        // last bits depend on the order of its sum (found by a search in double precision).
+        if style == GradingStyle::Video {
+            for (lm, lr, gm, gr, pb, pw) in [
+                (0.37, -0.6766209, 2.85, 2.3, -0.18, 0.83),
+                (-0.66, 0.33819633, 1.43, 2.65, -0.05, 1.03),
+            ] {
+                let mut p = GradingPrimary::new(style);
+                p.lift = rgbm(lr, 0.0, 0.0, lm);
+                p.gain = rgbm(gr, 1.0, 1.0, gm);
+                p.pivot_black = pb;
+                p.pivot_white = pw;
+                cases.push(Case::new(
+                    format!("{s}, near-cancelling slope {lr}"),
+                    GpParams::new(style, p),
+                ));
+            }
+        }
         // A NaN value in the JSON route, which the wheel accepts.
         let mut p = loop_values(style, false, true);
         p.brightness.green = f64::NAN;

@@ -33,17 +33,18 @@
 //! each `apply` has four loops (with and without saturation, with and without its power), and
 //! the compilers ordered some additions and multiplications differently from the source and
 //! from each other ([`LoopOrders`]). The Windows wheel (MSVC) and the Linux wheel (GCC) differ
-//! in the forward styles' first addition and in the saturation's sums; every other operation
-//! is in the source's order on both.
+//! in the forward styles' first addition (I-228) and in the saturation's sums; every other
+//! operation is in the source's order on both.
 //!
-//! Few of these orders can show in an output. The clamp (`ApplyClamp`) turns every NaN into a
-//! clamp value (I-227): last in the forward styles, so no NaN that the forward operations
-//! meet reaches the output, and first in the reverse styles, so their operations meet only the
-//! NaNs that infinities make, the x86 default NaN, all with the same bits. The exceptions are
-//! a NaN clamp, which every lane then holds (W0002), and the reverse styles' last addition,
-//! where a pixel's default NaN can meet a coefficient whose pre-render form negated a default
-//! NaN (`GradingPrimaryPreRender::update`'s inverse brightness on Linux, offsets on both):
-//! that one is in the source's order on both wheels, and the battery checks it.
+//! Not all of these orders can show in an output. The clamp (`ApplyClamp`) turns every NaN
+//! into a clamp value (I-227): last in the forward styles, first in the reverse ones, whose
+//! operations then meet only the NaNs that infinities make. What can show is a NaN's sign:
+//! `ApplyLinContrast` and `ApplyGamma` keep the sign of their input while `ssePower` turns a
+//! NaN into 0, so a NaN that an addition gives before them leaves a signed zero; and the
+//! reverse styles' last addition, where a pixel's default NaN can meet a coefficient whose
+//! pre-render form negated one (`GradingPrimaryPreRender::update`'s inverse offsets, and its
+//! inverse log brightness on Linux). The battery checks those additions on both wheels; the
+//! saturation's sums meet only NaNs with the same bits, or none at all.
 
 use std::sync::Arc;
 
@@ -268,12 +269,61 @@ const LOG_REV: ApplyOrders = ApplyOrders {
     sat_power: with_sat(Src, Src, Src, Swap, Src),
 };
 
+/// The Windows wheel's forward linear loops (`GradingPrimaryLinFwdOpCPU::apply`, 0x1801d4730).
+#[cfg(windows)]
+const LIN_FWD: ApplyOrders = MSVC;
+
+/// The Windows wheel's reverse linear loops (`GradingPrimaryLinRevOpCPU::apply`, 0x1801d4f60).
+#[cfg(windows)]
+const LIN_REV: ApplyOrders = MSVC;
+
+/// The Windows wheel's forward video loops (`GradingPrimaryVidFwdOpCPU::apply`, 0x1801d6970).
+#[cfg(windows)]
+const VID_FWD: ApplyOrders = MSVC;
+
+/// The Windows wheel's reverse video loops (`GradingPrimaryVidRevOpCPU::apply`, 0x1801d7220).
+#[cfg(windows)]
+const VID_REV: ApplyOrders = MSVC;
+
+/// The Linux wheel's forward linear loops (`GradingPrimaryLinFwdOpCPU::apply`, 0x3a8500): the
+/// offset first, and the saturation as the forward log style's.
+#[cfg(not(windows))]
+const LIN_FWD: ApplyOrders = LOG_FWD;
+
+/// The Linux wheel's reverse linear loops (`GradingPrimaryLinRevOpCPU::apply`, 0x3a7b50): as
+/// the reverse log style's.
+#[cfg(not(windows))]
+const LIN_REV: ApplyOrders = LOG_REV;
+
+/// The Linux wheel's forward video loops (`GradingPrimaryVidFwdOpCPU::apply`, 0x3a94c0): as the
+/// forward log style's.
+#[cfg(not(windows))]
+const VID_FWD: ApplyOrders = LOG_FWD;
+
+/// The Linux wheel's reverse video loops (`GradingPrimaryVidRevOpCPU::apply`, 0x3aa530): as
+/// the reverse log style's.
+#[cfg(not(windows))]
+const VID_REV: ApplyOrders = LOG_REV;
+
 /// `ApplyContrast(pix, contrast, pivot)`: `(pix - pivot) * contrast + pivot`, in the source's
 /// order on both wheels.
 ///
 /// Port of `ApplyContrast` (GradingPrimaryOpCPU.cpp:130-133 @ v2.5.2).
 fn apply_contrast(pix: V4, contrast: V4, pivot: V4) -> V4 {
     add(Src, mul(Src, sub(pix, pivot), contrast), pivot)
+}
+
+/// `ApplyLinContrast(pix, contrast, pivot)`: `pix / pivot`, raised to the contrast
+/// (`ssePower`) with its sign, times the pivot; the multiplication in the source's order on
+/// both wheels.
+///
+/// Port of `ApplyLinContrast` (GradingPrimaryOpCPU.cpp:135-142 @ v2.5.2).
+fn apply_lin_contrast(pix: V4, contrast: V4, pivot: V4) -> V4 {
+    let pix = div(pix, pivot);
+    let sign_pix = and_bits(pix, ESIGN_MASK);
+    let abs_pix = and_bits(pix, EABS_MASK);
+    let pix = mul(Src, power(abs_pix, contrast), pivot);
+    xor(pix, sign_pix)
 }
 
 /// `ApplyGamma(pix, gamma, blackPivot, whitePivot)`: the distance to the black pivot, scaled
@@ -528,24 +578,257 @@ impl CpuOp for GradingPrimaryLogRevOpCpu {
     base_dynamic_properties!();
 }
 
+/// The forward linear style: offset, exposure, contrast around the pivot, saturation, clamps.
+///
+/// Port of `GradingPrimaryLinFwdOpCPU` (src/OpenColorIO/ops/gradingprimary/
+/// GradingPrimaryOpCPU.cpp:94-100, 607-779 @ v2.5.2).
+#[derive(Debug)]
+struct GradingPrimaryLinFwdOpCpu {
+    base: GradingPrimaryOpCpu,
+}
+
+impl CpuOp for GradingPrimaryLinFwdOpCpu {
+    /// Port of `GradingPrimaryLinFwdOpCPU::apply` (GradingPrimaryOpCPU.cpp:612-779 @ v2.5.2),
+    /// its `OCIO_USE_SSE2` branch.
+    fn apply(&self, rgba: &mut [f32]) {
+        let Some(state) = self.base.state() else {
+            return;
+        };
+        let v = &state.value;
+        let comp = &state.pre_render;
+
+        let is_contrast_identity = comp.is_contrast_identity();
+
+        let [o0, o1, o2] = *comp.get_offset();
+        let offset = [o0, o1, o2, 0.0];
+        let [e0, e1, e2] = *comp.get_exposure();
+        let exposure = [e0, e1, e2, 1.0];
+        let [c0, c1, c2] = *comp.get_contrast();
+        let contrast = [c0, c1, c2, 1.0];
+        let pivot = splat(comp.get_pivot() as f32);
+        let saturation = splat(v.saturation as f32);
+        let clamp_b = splat(v.clamp_black as f32);
+        let clamp_w = splat(v.clamp_white as f32);
+
+        let apply_sat = v.saturation != 1.0;
+        let o = LIN_FWD.of(apply_sat, !is_contrast_identity);
+        for px in pixels(rgba) {
+            let mut pixel = load(px);
+
+            pixel = add(o.pixel_add, pixel, offset);
+            pixel = mul(Src, pixel, exposure);
+            if !is_contrast_identity {
+                pixel = apply_lin_contrast(pixel, contrast, pivot);
+            }
+            if apply_sat {
+                pixel = apply_saturation(pixel, saturation, o);
+            }
+            pixel = apply_clamp(pixel, clamp_b, clamp_w);
+
+            store_rgb(px, pixel);
+        }
+    }
+
+    base_dynamic_properties!();
+}
+
+/// The reverse linear style: the forward steps undone in the reverse order. Its loops
+/// without saturation both apply the contrast, whether it is the identity or not.
+///
+/// Port of `GradingPrimaryLinRevOpCPU` (src/OpenColorIO/ops/gradingprimary/
+/// GradingPrimaryOpCPU.cpp:102-108, 781-947 @ v2.5.2).
+#[derive(Debug)]
+struct GradingPrimaryLinRevOpCpu {
+    base: GradingPrimaryOpCpu,
+}
+
+impl CpuOp for GradingPrimaryLinRevOpCpu {
+    /// Port of `GradingPrimaryLinRevOpCPU::apply` (GradingPrimaryOpCPU.cpp:786-947 @ v2.5.2),
+    /// its `OCIO_USE_SSE2` branch.
+    fn apply(&self, rgba: &mut [f32]) {
+        let Some(state) = self.base.state() else {
+            return;
+        };
+        let v = &state.value;
+        let comp = &state.pre_render;
+
+        let is_contrast_identity = comp.is_contrast_identity();
+
+        let [o0, o1, o2] = *comp.get_offset();
+        let offset_inv = [o0, o1, o2, 0.0];
+        let [e0, e1, e2] = *comp.get_exposure();
+        let exposure_inv = [e0, e1, e2, 1.0];
+        let [c0, c1, c2] = *comp.get_contrast();
+        let contrast_inv = [c0, c1, c2, 1.0];
+        let pivot = splat(comp.get_pivot() as f32);
+        let clamp_b = splat(v.clamp_black as f32);
+        let clamp_w = splat(v.clamp_white as f32);
+
+        let apply_sat = v.saturation != 1. && v.saturation != 0.;
+        let sat_inv = splat((1. / v.saturation) as f32);
+        // Without saturation, both of upstream's loops apply the contrast.
+        let apply_contrast = !apply_sat || !is_contrast_identity;
+        let o = LIN_REV.of(apply_sat, apply_contrast);
+        for px in pixels(rgba) {
+            let mut pixel = load(px);
+
+            pixel = apply_clamp(pixel, clamp_b, clamp_w);
+            if apply_sat {
+                pixel = apply_saturation(pixel, sat_inv, o);
+            }
+            if apply_contrast {
+                pixel = apply_lin_contrast(pixel, contrast_inv, pivot);
+            }
+            pixel = mul(Src, pixel, exposure_inv);
+            pixel = add(o.pixel_add, pixel, offset_inv);
+
+            store_rgb(px, pixel);
+        }
+    }
+
+    base_dynamic_properties!();
+}
+
+/// The forward video style: offset (with the lift), slope around the black pivot, gamma
+/// between the pivots, saturation, clamps.
+///
+/// Port of `GradingPrimaryVidFwdOpCPU` (src/OpenColorIO/ops/gradingprimary/
+/// GradingPrimaryOpCPU.cpp:110-116, 949-1127 @ v2.5.2).
+#[derive(Debug)]
+struct GradingPrimaryVidFwdOpCpu {
+    base: GradingPrimaryOpCpu,
+}
+
+impl CpuOp for GradingPrimaryVidFwdOpCpu {
+    /// Port of `GradingPrimaryVidFwdOpCPU::apply` (GradingPrimaryOpCPU.cpp:954-1127 @ v2.5.2),
+    /// its `OCIO_USE_SSE2` branch.
+    fn apply(&self, rgba: &mut [f32]) {
+        let Some(state) = self.base.state() else {
+            return;
+        };
+        let v = &state.value;
+        let comp = &state.pre_render;
+
+        let is_gamma_identity = comp.is_gamma_identity();
+
+        let [o0, o1, o2] = *comp.get_offset();
+        let offset = [o0, o1, o2, 0.0];
+        let [s0, s1, s2] = *comp.get_slope();
+        let slope = [s0, s1, s2, 1.0];
+        let [g0, g1, g2] = *comp.get_gamma();
+        let gamma = [g0, g1, g2, 1.0];
+
+        let saturation = splat(v.saturation as f32);
+        let pivot_black = splat(v.pivot_black as f32);
+        let pivot_white = splat(v.pivot_white as f32);
+        let clamp_b = splat(v.clamp_black as f32);
+        let clamp_w = splat(v.clamp_white as f32);
+
+        let apply_sat = v.saturation != 1.0;
+        let o = VID_FWD.of(apply_sat, !is_gamma_identity);
+        for px in pixels(rgba) {
+            let mut pixel = load(px);
+
+            pixel = add(o.pixel_add, pixel, offset);
+            pixel = apply_contrast(pixel, slope, pivot_black);
+            if !is_gamma_identity {
+                pixel = apply_gamma(pixel, gamma, pivot_black, pivot_white);
+            }
+            if apply_sat {
+                pixel = apply_saturation(pixel, saturation, o);
+            }
+            pixel = apply_clamp(pixel, clamp_b, clamp_w);
+
+            store_rgb(px, pixel);
+        }
+    }
+
+    base_dynamic_properties!();
+}
+
+/// The reverse video style: the forward steps undone in the reverse order.
+///
+/// Port of `GradingPrimaryVidRevOpCPU` (src/OpenColorIO/ops/gradingprimary/
+/// GradingPrimaryOpCPU.cpp:118-124, 1129-1297 @ v2.5.2).
+#[derive(Debug)]
+struct GradingPrimaryVidRevOpCpu {
+    base: GradingPrimaryOpCpu,
+}
+
+impl CpuOp for GradingPrimaryVidRevOpCpu {
+    /// Port of `GradingPrimaryVidRevOpCPU::apply` (GradingPrimaryOpCPU.cpp:1134-1297 @
+    /// v2.5.2), its `OCIO_USE_SSE2` branch.
+    fn apply(&self, rgba: &mut [f32]) {
+        let Some(state) = self.base.state() else {
+            return;
+        };
+        let v = &state.value;
+        let comp = &state.pre_render;
+
+        let is_gamma_identity = comp.is_gamma_identity();
+
+        let [o0, o1, o2] = *comp.get_offset();
+        let offset_inv = [o0, o1, o2, 0.0];
+        let [s0, s1, s2] = *comp.get_slope();
+        let slope_inv = [s0, s1, s2, 1.0];
+        let [g0, g1, g2] = *comp.get_gamma();
+        let gamma_inv = [g0, g1, g2, 1.0];
+
+        let pivot_black = splat(v.pivot_black as f32);
+        let pivot_white = splat(v.pivot_white as f32);
+        let clamp_b = splat(v.clamp_black as f32);
+        let clamp_w = splat(v.clamp_white as f32);
+
+        let apply_sat = v.saturation != 1. && v.saturation != 0.;
+        let sat_inv = splat((1. / v.saturation) as f32);
+        let o = VID_REV.of(apply_sat, !is_gamma_identity);
+        for px in pixels(rgba) {
+            let mut pixel = load(px);
+
+            pixel = apply_clamp(pixel, clamp_b, clamp_w);
+            if apply_sat {
+                pixel = apply_saturation(pixel, sat_inv, o);
+            }
+            if !is_gamma_identity {
+                pixel = apply_gamma(pixel, gamma_inv, pivot_black, pivot_white);
+            }
+            pixel = apply_contrast(pixel, slope_inv, pivot_black);
+            pixel = add(o.pixel_add, pixel, offset_inv);
+
+            store_rgb(px, pixel);
+        }
+    }
+
+    base_dynamic_properties!();
+}
+
 /// The renderer of `prim`'s style and direction.
 ///
 /// Port of `GetGradingPrimaryCPURenderer` (src/OpenColorIO/ops/gradingprimary/
-/// GradingPrimaryOpCPU.cpp:1302-1336 @ v2.5.2). The linear and video styles' renderers come
-/// with 5.2c.
+/// GradingPrimaryOpCPU.cpp:1302-1336 @ v2.5.2). Upstream's "Illegal GradingPrimary
+/// direction." can't happen: a direction is forward or inverse.
 pub fn get_grading_primary_cpu_renderer(prim: &GradingPrimaryOpData) -> Result<Arc<dyn CpuOp>> {
     let base = GradingPrimaryOpCpu::new(prim);
-    match (prim.get_direction(), prim.get_style()) {
+    Ok(match (prim.get_direction(), prim.get_style()) {
         (TransformDirection::Forward, GradingStyle::Log) => {
-            Ok(Arc::new(GradingPrimaryLogFwdOpCpu { base }))
+            Arc::new(GradingPrimaryLogFwdOpCpu { base })
+        }
+        (TransformDirection::Forward, GradingStyle::Lin) => {
+            Arc::new(GradingPrimaryLinFwdOpCpu { base })
+        }
+        (TransformDirection::Forward, GradingStyle::Video) => {
+            Arc::new(GradingPrimaryVidFwdOpCpu { base })
         }
         (TransformDirection::Inverse, GradingStyle::Log) => {
-            Ok(Arc::new(GradingPrimaryLogRevOpCpu { base }))
+            Arc::new(GradingPrimaryLogRevOpCpu { base })
         }
-        (_, GradingStyle::Lin | GradingStyle::Video) => Err(Exception::new(
-            "The GradingPrimary linear and video renderers are not ported yet (WP 5.2c).",
-        )),
-    }
+        (TransformDirection::Inverse, GradingStyle::Lin) => {
+            Arc::new(GradingPrimaryLinRevOpCpu { base })
+        }
+        (TransformDirection::Inverse, GradingStyle::Video) => {
+            Arc::new(GradingPrimaryVidRevOpCpu { base })
+        }
+    })
 }
 
 #[cfg(test)]
