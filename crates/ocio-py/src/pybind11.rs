@@ -167,7 +167,8 @@ type Values = std::sync::Mutex<Vec<Option<Py<PyAny>>>>;
 // from several classes of the module, as from the wheel's (CPython refuses bases of different
 // sizes). PyO3 places weak references last (`__weakrefoffset__` 48, pybind11's 40), names the
 // type `pybind11_builtins.pybind11_object` (pybind11's C name is `pybind11_object`) and makes
-// it with the metatype `type` (pybind11's `pybind11_type`): docs/deviations.md, D-7 (owner
+// it with the metatype `type` (pybind11's `pybind11_type`); the methods of the port's
+// `pybind11_type` and static property are Python functions: docs/deviations.md, D-7 (owner
 // decision 2026-10-21). (No Rust doc comment: it would be the class's docstring, which the
 // wheel's hasn't.)
 #[pyclass(
