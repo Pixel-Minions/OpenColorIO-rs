@@ -18,7 +18,7 @@ crate-type = ["cdylib", "rlib"]
 [features]
 # The bindings. Off by default, so that building the workspace needs no Python: PyO3's build
 # finds the interpreter (PYO3_PYTHON), which `cargo xtask py-build` points at target/py-port.
-python = ["dep:pyo3"]
+python = ["dep:pyo3", "ocio-py-ffi/python"]
 # The module as Python imports it (`cargo xtask py-build`): no link to libpython on Linux.
 extension-module = ["python", "pyo3/extension-module"]
 
@@ -26,6 +26,7 @@ extension-module = ["python", "pyo3/extension-module"]
 ocio.workspace = true
 ocio-ops.workspace = true
 ocio-gpu.workspace = true
+ocio-py-ffi.workspace = true
 pyo3 = { workspace = true, optional = true }
 
 [dev-dependencies]

@@ -43,8 +43,9 @@ cargo xtask py-suite [--update] [--release] [--no-build]
     functions that pass (it may only grow).
 
 cargo xtask py-check
-    CI's step for the Python module: clippy (-D warnings) and the tests of ocio-py with its
-    python feature, against target/py-port's Python, then py-suite.
+    CI's step for the Python module: clippy (-D warnings) of ocio-py and ocio-py-ffi and the
+    tests of ocio-py, with their python feature, against target/py-port's Python, then
+    py-suite.
 ";
 
 /// The name of the `.pth` file that puts the package's directory on the environment's path.
@@ -374,6 +375,8 @@ pub(crate) fn py_check(args: &[&str]) -> Result<(), String> {
             "clippy",
             "--package",
             "ocio-py",
+            "--package",
+            "ocio-py-ffi",
             "--features",
             "python",
             "--all-targets",

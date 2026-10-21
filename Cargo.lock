@@ -181,9 +181,17 @@ dependencies = [
  "ocio",
  "ocio-gpu",
  "ocio-ops",
+ "ocio-py-ffi",
  "ocio-testkit",
  "pyo3",
  "serde_json",
+]
+
+[[package]]
+name = "ocio-py-ffi"
+version = "0.0.0+ocio.2.5.2"
+dependencies = [
+ "pyo3",
 ]
 
 [[package]]

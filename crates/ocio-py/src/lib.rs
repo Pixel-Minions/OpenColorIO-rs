@@ -12,7 +12,11 @@
 //! A binding's Rust doc comment is its Python `__doc__`, which must be the wheel's (P6-7):
 //! pybind11's signature line. Citations of the upstream definitions are therefore `//`
 //! comments above each binding.
-#![deny(unsafe_code)]
+//!
+//! The binding has no `unsafe` code (the crate forbids it, which nothing inside it can relax):
+//! the C API calls it needs that no safe API makes are the safe functions of `ocio-py-ffi`
+//! (`crates/ocio-py/ffi`), whose one file `cargo xtask guards` pins.
+#![forbid(unsafe_code)]
 
 #[cfg(feature = "python")]
 pub mod dispatch;
@@ -28,5 +32,3 @@ pub mod py_open_color_io;
 pub(crate) mod py_types;
 #[cfg(feature = "python")]
 pub mod pybind11;
-#[cfg(feature = "python")]
-pub(crate) mod type_object;

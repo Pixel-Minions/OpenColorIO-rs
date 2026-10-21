@@ -20,9 +20,9 @@ cargo xtask gate [--staged] [--crates a,b | --touched] [--release] [--rocky] [--
 Runs, in order, stopping at the first failure:
   fmt            cargo fmt --all --check
   clippy         cargo clippy --workspace --all-targets -- -D warnings
-  clippy-py      the same for ocio-py with its `python` feature (the PyOpenColorIO
-                 bindings), built against the Python of target/py-port, which `uv sync`
-                 makes from py-port/ (the gate fails if it can't)
+  clippy-py      the same for ocio-py and ocio-py-ffi with their `python` feature (the
+                 PyOpenColorIO bindings), built against the Python of target/py-port, which
+                 `uv sync` makes from py-port/ (the gate fails if it can't)
   ci             cargo xtask ci (branch mode; with --main, cargo xtask ci --main)
   deny           with --main: cargo deny check, CI's third check (not in the Rocky pass)
   test           cargo test --workspace --no-fail-fast (debug)
@@ -229,6 +229,8 @@ pub(crate) fn run(mut opts: Options) -> Result<(), String> {
             "clippy",
             "--package",
             "ocio-py",
+            "--package",
+            "ocio-py-ffi",
             "--features",
             "python",
             "--all-targets",

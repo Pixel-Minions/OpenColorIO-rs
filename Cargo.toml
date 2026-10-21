@@ -6,6 +6,7 @@ members = [
     "crates/ocio-gpu",
     "crates/ocio",
     "crates/ocio-py",
+    "crates/ocio-py/ffi",
     "crates/ocio-tools",
     "crates/ocio-testkit",
     "xtask",
@@ -37,6 +38,8 @@ ocio-formats = { path = "crates/ocio-formats" }
 ocio-gpu = { path = "crates/ocio-gpu" }
 ocio = { path = "crates/ocio" }
 ocio-testkit = { path = "crates/ocio-testkit" }
+# The Python binding's C API calls that need `unsafe` (its only unsafe code, PLAN.md D8).
+ocio-py-ffi = { path = "crates/ocio-py/ffi" }
 
 # Third-party dependencies are pinned to exact versions: a dependency update is a reviewed change.
 half = "=2.7.1"

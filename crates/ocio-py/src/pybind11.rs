@@ -17,12 +17,10 @@
 //! D-7.
 //!
 //! How the types are made: [`new_class`] and [`instance_method`] are the only two places that
-//! decide it, through the C API ([`crate::type_object`]): a class is made by
+//! decide it, through the C API (`ocio_py_ffi`): a class is made by
 //! `PyType_FromMetaclass` with pybind11's metatype, its C name (`tp_name`) the dotted
 //! `PyOpenColorIO.PyOpenColorIO.Name` that CPython writes in some messages, and its `tp_init`
 //! `pybind11_object`'s; a method is CPython's `instancemethod`.
-
-use std::ffi::CString;
 
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
@@ -137,7 +135,7 @@ fn runtime(py: Python<'_>) -> PyResult<&Bound<'_, PyDict>> {
             }
         }
         let len = py.import("builtins")?.getattr("len")?;
-        let instancemethod = crate::type_object::instance_method(&len)?.get_type();
+        let instancemethod = ocio_py_ffi::instance_method(&len)?.get_type();
         ns.set_item("_instancemethod", instancemethod)?;
         let unconstructed = PyCFunction::new_closure(
             py,
@@ -543,11 +541,10 @@ pub fn new_class<'py>(
         bases.to_vec()
     };
     let tp_name = format!("{MODULE}.{qualname}");
-    let cls = crate::type_object::from_metaclass(
+    let cls = ocio_py_ffi::from_metaclass::<Pybind11Object>(
         &metatype,
         &tp_name,
         &PyTuple::new(py, bases)?,
-        object_init_slot(),
         INSTANCE_SIZE,
     )?;
     CLASSES
@@ -563,22 +560,11 @@ pub fn new_class<'py>(
     Ok(cls)
 }
 
-/// `pybind11_object`'s `tp_init` (PyO3's slot for [`Pybind11Object`]'s `__init__`), which
-/// pybind11 gives every class (`pybind11_object_init`): it raises "No constructor defined!"
-/// until the class's `__init__` is set.
-fn object_init_slot() -> *mut std::ffi::c_void {
-    use pyo3::impl_::pyclass::PyClassImpl;
-    <Pybind11Object as PyClassImpl>::items_iter()
-        .flat_map(|items| items.slots)
-        .find(|slot| slot.slot == pyo3::ffi::Py_tp_init)
-        .map_or(std::ptr::null_mut(), |slot| slot.pfunc)
-}
-
 /// `f` wrapped as a method, as pybind11 wraps each: CPython's `instancemethod`
 /// (`PyInstanceMethod_New`).
 pub fn instance_method<'py>(py: Python<'py>, f: Bound<'py, PyAny>) -> PyResult<Bound<'py, PyAny>> {
     let _ = py;
-    crate::type_object::instance_method(&f)
+    ocio_py_ffi::instance_method(&f)
 }
 
 // pybind11's function record (`detail::function_record`), the `__self__` of every function it
@@ -717,63 +703,9 @@ const RECORD_NAME: &str = "pybind11_builtins.pybind11_detail_function_record_v1_
 #[cfg(not(windows))]
 const RECORD_NAME: &str = "pybind11_builtins.pybind11_detail_function_record_v1_system_libstdcpp_gxx_abi_1xxx_use_cxx11_abi_1";
 
-/// `dispatch_call`'s method definition (PyO3's trampoline and flags), once its class no longer
-/// shows it: the index, among the class's method definitions, of the one whose function is
-/// named `dispatch_call` (a function made from each, with its own name, tells).
-static RECORD_METHOD: PyOnceLock<usize> = PyOnceLock::new();
-
-/// A function without overloads, for the records [`record_method`] makes to tell the method
-/// definitions apart.
-static NO_FUNCTION: Function = Function {
-    name: "",
-    constructor: false,
-    method: false,
-    overloads: &[],
-};
-
-fn record_methods() -> Vec<pyo3::ffi::PyMethodDef> {
-    use pyo3::impl_::pyclass::PyClassImpl;
-    use pyo3::impl_::pymethods::PyMethodDefType;
-    <FunctionRecord as PyClassImpl>::items_iter()
-        .flat_map(|items| items.methods)
-        .filter_map(|m| match m {
-            PyMethodDefType::Method(def) => Some(def.into_raw()),
-            _ => None,
-        })
-        .collect()
-}
-
-fn record_method(py: Python<'_>) -> PyResult<pyo3::ffi::PyMethodDef> {
-    let index = *RECORD_METHOD.get_or_try_init(py, || -> PyResult<usize> {
-        py.get_type::<FunctionRecord>().delattr("dispatch_call")?;
-        let record = Bound::new(
-            py,
-            FunctionRecord {
-                record: Box::leak(Box::new(Record {
-                    f: &NO_FUNCTION,
-                    module_scope: None,
-                })),
-            },
-        )?;
-        for (i, def) in record_methods().into_iter().enumerate() {
-            let function = crate::type_object::new_function(
-                Box::leak(Box::new(def)),
-                record.as_any(),
-                &py.None().into_bound(py),
-            )?;
-            if function.getattr("__name__")?.to_string() == "dispatch_call" {
-                return Ok(i);
-            }
-        }
-        Err(pyo3::exceptions::PyRuntimeError::new_err(
-            "no dispatch_call",
-        ))
-    })?;
-    record_methods()
-        .into_iter()
-        .nth(index)
-        .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("no dispatch_call"))
-}
+/// The record type once its dictionary no longer shows `dispatch_call`, the method whose C
+/// function every function is ([`function`]).
+static RECORD_TYPE_READY: PyOnceLock<()> = PyOnceLock::new();
 
 /// A builtin function over `f`, as pybind11 makes it (taking `*args` and `**kwargs`): its name
 /// `f.name`, its docstring pybind11's for `f`'s overloads, or `None` for a function pybind11
@@ -804,21 +736,10 @@ fn function<'py>(
     module: Option<&str>,
     module_scope: Option<&Bound<'py, PyModule>>,
 ) -> PyResult<Bound<'py, PyAny>> {
-    let name: &'static std::ffi::CStr = Box::leak(
-        CString::new(f.name)
-            .expect("no NUL in a name")
-            .into_boxed_c_str(),
-    );
-    let docstring: Option<&'static std::ffi::CStr> = doc.then(|| {
-        &*Box::leak(
-            CString::new(crate::dispatch::docstring(f))
-                .expect("no NUL in a docstring")
-                .into_boxed_c_str(),
-        )
-    });
-    let mut def = record_method(py)?;
-    def.ml_name = name.as_ptr();
-    def.ml_doc = docstring.map_or(std::ptr::null(), std::ffi::CStr::as_ptr);
+    RECORD_TYPE_READY.get_or_try_init(py, || {
+        py.get_type::<FunctionRecord>().delattr("dispatch_call")
+    })?;
+    let docstring = doc.then(|| crate::dispatch::docstring(f));
     let record = Bound::new(
         py,
         FunctionRecord {
@@ -832,7 +753,13 @@ fn function<'py>(
         Some(m) => PyString::new(py, m).into_any(),
         None => py.None().into_bound(py),
     };
-    crate::type_object::new_function(Box::leak(Box::new(def)), record.as_any(), &module)
+    ocio_py_ffi::new_function(
+        &record,
+        "dispatch_call",
+        f.name,
+        docstring.as_deref(),
+        &module,
+    )
 }
 
 /// `m.def(name, ...)`: [`builtin`] of `f` into the module's dictionary, its record's scope the

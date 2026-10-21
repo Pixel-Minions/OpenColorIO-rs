@@ -86,13 +86,13 @@ const TOLERANCE: &[&str] = &[".abs() < ", ".abs() <= ", "f32::EPSILON", "f64::EP
 /// Where `unsafe` may be allowed (PLAN.md D8): SIMD modules, the test kit's FFI to the
 /// platform C runtime (the reference for C formatting and parsing), the one file that calls
 /// `CreateSymbolicLinkW` and lists directories with `FindFirstFileW` as minizip-ng does (owner
-/// decisions 2026-10-17), and, in the Python binding, the one file that calls
-/// `PyType_FromMetaclass`, `PyInstanceMethod_New` (owner decision 2026-10-20, option A),
+/// decisions 2026-10-17), and, for the Python binding, the crate `ocio-py-ffi`, one file that
+/// calls `PyType_FromMetaclass`, `PyInstanceMethod_New` (owner decision 2026-10-20, option A),
 /// `PyCFunction_NewEx` and `PySequence_Check` (2026-10-21), each named here by its file;
-/// [`check_type_object`] pins that file's calls.
+/// [`check_py_ffi`] checks that file's calls and [`PY_FFI_SHA256`] pins it.
 fn unsafe_allowed(rel: &str) -> bool {
     let file = rel.rsplit('/').next().unwrap_or(rel);
-    rel == "crates/ocio-py/src/type_object.rs"
+    rel == PY_FFI
         || rel == "crates/ocio-testkit/src/crt.rs"
         || rel == "crates/ocio/src/minizip/os_windows_ffi.rs"
         || (rel.starts_with("crates/ocio-ops/")
@@ -205,10 +205,20 @@ fn check_files(
             problems.push(format!("{rel}: missing the SPDX / copyright header"));
         }
         problems.extend(check_internals_uses(rel, text));
-        if rel == TYPE_OBJECT {
-            problems.extend(check_type_object(rel, text));
+        if rel == PY_FFI {
+            problems.extend(check_py_ffi(rel, text));
+            problems.extend(py_ffi_pin_problem(text));
+        } else if rel.starts_with(PY_FFI_DIR) {
+            problems.push(format!(
+                "{rel}: the Python binding's unsafe code is the one file {PY_FFI}"
+            ));
         }
-        if !(rel.starts_with("xtask/") && rel.ends_with("guards.rs")) && !unsafe_allowed(rel) {
+        if rel == PY_ROOT && !forbids_unsafe_code(text) {
+            problems.push(format!(
+                "{rel}: the Python binding's crate root must hold `#![forbid(unsafe_code)]`"
+            ));
+        }
+        if !unsafe_allowed(rel) {
             for line in unsafe_code_relaxed(text) {
                 problems.push(format!(
                     "{rel}:{line}: `unsafe` is allowed only in SIMD modules and the files the \
@@ -246,64 +256,237 @@ fn check_files(
     for (rel, text) in manifests {
         problems.extend(check_internals_feature(rel, text));
         problems.extend(check_unsafe_lint(rel, text));
+        problems.extend(check_py_manifest(rel, text));
     }
     problems
 }
 
-/// The Python binding's one file with `unsafe` (owner decisions 2026-10-20 and 2026-10-21).
-const TYPE_OBJECT: &str = "crates/ocio-py/src/type_object.rs";
+/// The Python binding's manifests: `ocio-py`'s and its ffi crate's targets are the default
+/// ones (no `path`, no `build` script, no `[[...]]` target), so that [`PY_ROOT`] is the
+/// binding's crate root and [`PY_FFI`] the ffi crate's.
+fn check_py_manifest(rel: &str, text: &str) -> Vec<String> {
+    if rel != "crates/ocio-py/Cargo.toml" && rel != format!("{PY_FFI_DIR}Cargo.toml") {
+        return Vec::new();
+    }
+    text.lines()
+        .enumerate()
+        .map(|(n, line)| (n + 1, line.trim()))
+        .filter(|(_, line)| {
+            line.starts_with("[[")
+                || ["path", "build"].iter().any(|key| {
+                    line.strip_prefix(key)
+                        .is_some_and(|rest| rest.trim_start().starts_with('='))
+                })
+        })
+        .map(|(n, line)| {
+            format!(
+                "{rel}:{n}: `{line}`: the Python binding's crates keep their default targets                  ({PY_ROOT}, {PY_FFI})"
+            )
+        })
+        .collect()
+}
 
-/// The owner's calls, each the whole of an `unsafe { ... }` block of [`TYPE_OBJECT`].
-const TYPE_OBJECT_CALLS: [&str; 4] = [
+/// The Python binding's only `unsafe` code: the crate `ocio-py-ffi`, which is this one file
+/// (owner decisions 2026-10-20 and 2026-10-21; a crate of its own, which `ocio-py` reaches
+/// through safe functions only, since p6-core's re-check round 3).
+const PY_FFI: &str = "crates/ocio-py/ffi/src/lib.rs";
+/// The ffi crate's directory: [`PY_FFI`] is its only Rust source.
+const PY_FFI_DIR: &str = "crates/ocio-py/ffi/";
+/// SHA-256 of [`PY_FFI`]'s bytes. Changing that file requires updating this pin, so that every
+/// change to the Python binding's `unsafe` code shows in review as a change of this line (the
+/// coordinator's decision, p6-core re-check round 3).
+const PY_FFI_SHA256: &str = "10ffda1bb6637b1d4a056566e779e8ee354775788c5f0e864085893d9f15667e";
+/// The Python binding's crate root, which must forbid `unsafe_code`: no attribute or macro
+/// inside the crate can relax a `forbid`, so the compiler holds the binding to safe code.
+const PY_ROOT: &str = "crates/ocio-py/src/lib.rs";
+
+/// The owner's calls that return a new reference (or null with an exception set), each the
+/// whole of an `unsafe` block bound by `let <name> = unsafe { <call> };`, whose result the next
+/// statement wraps ([`PY_FFI_WRAP`]).
+const PY_FFI_NEW: [&str; 3] = [
     "ffi::PyType_FromMetaclass",
     "PyInstanceMethod_New",
     "ffi::PyCFunction_NewEx",
-    "ffi::PySequence_Check",
+];
+/// The owner's other call, which returns an int.
+const PY_FFI_CHECK: &str = "ffi::PySequence_Check";
+/// The wrapping of a new reference, `Bound::from_owned_ptr_or_err(py, <name>)`: the whole of
+/// the `unsafe` block of the statement right after the binding of `<name>`.
+const PY_FFI_WRAP: &str = "Bound::from_owned_ptr_or_err";
+/// Identifiers [`PY_FFI`] may not hold: other source files (`mod`, `include!`, `#[path]`),
+/// macros that could hide code, assembly, and the attributes that name or export a symbol.
+const PY_FFI_BANNED: [&str; 15] = [
+    "mod",
+    "include",
+    "include_str",
+    "include_bytes",
+    "macro_rules",
+    "macro",
+    "path",
+    "asm",
+    "global_asm",
+    "naked_asm",
+    "link_name",
+    "link_ordinal",
+    "export_name",
+    "no_mangle",
+    "link_section",
+];
+/// The one declaration [`PY_FFI`]'s `unsafe extern "C"` block holds (its parameter's name
+/// aside, `_` here), token by token.
+const PY_FFI_EXTERN: [&str; 18] = [
+    "fn",
+    "PyInstanceMethod_New",
+    "(",
+    "_",
+    ":",
+    "*",
+    "mut",
+    "ffi",
+    "::",
+    "PyObject",
+    ")",
+    "->",
+    "*",
+    "mut",
+    "ffi",
+    "::",
+    "PyObject",
+    ";",
 ];
 
-/// The one other `unsafe` block [`TYPE_OBJECT`] may hold: the wrapping of such a call's result,
-/// `Bound::from_owned_ptr_or_err(py, ptr)`, `ptr` bound by `let ptr = unsafe { <call> };`.
-const TYPE_OBJECT_WRAP: &str = "Bound::from_owned_ptr_or_err";
-
-/// [`TYPE_OBJECT`]'s `unsafe`: each `unsafe { ... }` block is exactly one call, of
-/// [`TYPE_OBJECT_CALLS`] or [`TYPE_OBJECT_WRAP`], whose arguments are plain values
-/// ([`plain_argument`]); one `unsafe extern` block (whatever its ABI) declaring
-/// `PyInstanceMethod_New` only; no other `unsafe` (`unsafe fn`, `unsafe impl`, `unsafe trait`,
-/// `#[unsafe(...)]` attributes).
-fn check_type_object(rel: &str, text: &str) -> Vec<String> {
+/// The guards of the Python binding's `unsafe` code, beyond its pin ([`py_ffi_pin_problem`]),
+/// on [`PY_FFI`]'s tokens (comments and literals are never code):
+/// - none of [`PY_FFI_BANNED`];
+/// - `ffi` is pyo3's: `use pyo3::ffi;` once, and every other `ffi` (but `std::ffi`) starts a path
+///   `ffi::...`;
+/// - each `unsafe` starts a block or the one `unsafe extern "C"` block ([`PY_FFI_EXTERN`]);
+///   nothing else (`unsafe fn`, `unsafe impl`, `unsafe trait`, `#[unsafe(...)]`);
+/// - each `unsafe` block is exactly one call whose arguments are plain values
+///   ([`plain_argument`]): `let <name> = unsafe { <one of PY_FFI_NEW> };`, followed by the
+///   statement `unsafe { Bound::from_owned_ptr_or_err(<py>, <name>) }` (alone or bound by
+///   `let`), its only wrapping; or a [`PY_FFI_CHECK`] anywhere.
+fn check_py_ffi(rel: &str, text: &str) -> Vec<String> {
+    let toks = tokenize(text).tokens;
     let mut problems = Vec::new();
-    let code: String = text
-        .lines()
-        .map(|l| l.split("//").next().unwrap_or_default())
-        .collect::<Vec<_>>()
-        .join("\n");
-    let line_of = |at: usize| code[..at].matches('\n').count() + 1;
-    let word = |c: char| c.is_alphanumeric() || c == '_';
-    let mut externs = 0;
-    let mut i = 0;
-    while let Some(found) = code[i..].find("unsafe") {
-        let at = i + found;
-        i = at + "unsafe".len();
-        if code[..at].chars().next_back().is_some_and(word)
-            || code[i..].chars().next().is_some_and(word)
+    let mut problem = |line: usize, why: String| problems.push(format!("{rel}:{line}: {why}"));
+    let text_at = |k: usize| toks.get(k).map_or("", |t| t.text.as_str());
+    for t in toks.iter().filter(|t| t.kind == TokenKind::Ident) {
+        if PY_FFI_BANNED.contains(&t.text.as_str()) {
+            problem(
+                t.line,
+                format!(
+                    "`{}`: the Python binding's unsafe code is this one file, all in sight",
+                    t.text
+                ),
+            );
+        }
+    }
+    let mut uses = 0;
+    for (k, t) in toks.iter().enumerate() {
+        if t.kind != TokenKind::Ident || t.text != "ffi" {
+            continue;
+        }
+        if k >= 3
+            && [
+                text_at(k - 3),
+                text_at(k - 2),
+                text_at(k - 1),
+                text_at(k + 1),
+            ] == ["use", "pyo3", "::", ";"]
         {
-            continue; // part of another word (`unsafe_code`)
+            uses += 1;
+        } else if k >= 2 && text_at(k - 1) == "::" && ["std", "core"].contains(&text_at(k - 2)) {
+            // The standard library's `std::ffi`.
+        } else if text_at(k + 1) != "::" || (k > 0 && text_at(k - 1) == "::") {
+            problem(
+                t.line,
+                "`ffi` must be pyo3's (`use pyo3::ffi;`)".to_string(),
+            );
         }
-        let rest = code[i..].trim_start();
-        let problem = if let Some(body) = rest.strip_prefix('{') {
-            let block = body[..closing(body, '{', '}')].trim();
-            unsafe_block_problem(&code[..at], block).map(|why| {
-                format!("an `unsafe` block that isn't one of the owner's calls ({why}): {block}")
-            })
-        } else if let Some(decl) = rest.strip_prefix("extern").filter(|r| !r.starts_with(word)) {
+    }
+    if uses != 1 {
+        problems.push(format!(
+            "{rel}: `use pyo3::ffi;` {uses} times (once is required)"
+        ));
+    }
+    // The wrappings due: the index of the `unsafe` of the statement after a binding, the
+    // binding's name and line.
+    let mut due: Vec<(usize, String, usize)> = Vec::new();
+    let mut externs = 0;
+    for (k, t) in toks.iter().enumerate() {
+        if t.kind != TokenKind::Ident || t.text != "unsafe" {
+            continue;
+        }
+        let mut problem = |why: String| problems.push(format!("{rel}:{}: {why}", t.line));
+        if text_at(k + 1) == "extern" {
             externs += 1;
-            extern_block_problem(decl)
-        } else {
-            Some(format!("`unsafe` {rest:.30}"))
-        };
-        if let Some(problem) = problem {
-            problems.push(format!("{rel}:{}: {problem}", line_of(at)));
+            if let Some(why) = extern_block_problem(&toks[k + 2..]) {
+                problem(why);
+            }
+            continue;
         }
+        if text_at(k + 1) != "{" {
+            problem(format!("`unsafe {}`", text_at(k + 1)));
+            continue;
+        }
+        let close = matching(&toks, k + 1);
+        let Some((name, args)) = single_call(&toks[k + 2..close]) else {
+            problem("an `unsafe` block that isn't exactly one call".to_string());
+            continue;
+        };
+        if let Some(bad) = args.iter().find(|a| !plain_argument(a)) {
+            let bad: Vec<&str> = bad.iter().map(|t| t.text.as_str()).collect();
+            problem(format!("`{name}`'s argument `{}`", bad.join(" ")));
+            continue;
+        }
+        if PY_FFI_NEW.contains(&name.as_str()) {
+            let bound = k >= 3
+                && text_at(k - 3) == "let"
+                && toks[k - 2].kind == TokenKind::Ident
+                && text_at(k - 1) == "="
+                && text_at(close + 1) == ";";
+            if !bound {
+                problem(format!(
+                    "`{name}` isn't bound alone by `let <name> = unsafe {{ ... }};`"
+                ));
+                continue;
+            }
+            let next = close + 2;
+            let wrap = if text_at(next) == "unsafe" {
+                next
+            } else if text_at(next) == "let"
+                && toks
+                    .get(next + 1)
+                    .is_some_and(|t| t.kind == TokenKind::Ident)
+                && text_at(next + 2) == "="
+            {
+                next + 3
+            } else {
+                next
+            };
+            due.push((wrap, toks[k - 2].text.clone(), t.line));
+        } else if name == PY_FFI_WRAP {
+            let Some(at) = due.iter().position(|(w, _, _)| *w == k) else {
+                problem(format!(
+                    "`{name}` that isn't the statement right after the binding of an owner's \
+                     call's result"
+                ));
+                continue;
+            };
+            let (_, binding, _) = due.remove(at);
+            let wraps = args.len() == 2 && args[1].len() == 1 && args[1][0].text == binding;
+            if !wraps {
+                problem(format!("`{name}` of something else than `{binding}`"));
+            }
+        } else if name != PY_FFI_CHECK {
+            problem(format!("an `unsafe` call of `{name}`"));
+        }
+    }
+    for (_, binding, line) in due {
+        problems.push(format!(
+            "{rel}:{line}: `{binding}`, a new reference, isn't wrapped by the next statement"
+        ));
     }
     if externs > 1 {
         problems.push(format!(
@@ -313,166 +496,136 @@ fn check_type_object(rel: &str, text: &str) -> Vec<String> {
     problems
 }
 
-/// The index in `s` of the `close` that closes an `open` already passed (`s.len()` if none).
-fn closing(s: &str, open: char, close: char) -> usize {
-    let mut depth = 1;
-    for (at, c) in s.char_indices() {
-        if c == open {
-            depth += 1;
-        } else if c == close {
-            depth -= 1;
-            if depth == 0 {
-                return at;
-            }
-        }
-    }
-    s.len()
+/// Why [`PY_FFI`]'s pin is wrong, if it is: the SHA-256 of `text` isn't [`PY_FFI_SHA256`].
+fn py_ffi_pin_problem(text: &str) -> Option<String> {
+    let digest = ocio_testkit::fixtures::sha256_hex(text.as_bytes());
+    (digest != PY_FFI_SHA256).then(|| {
+        format!(
+            "{PY_FFI}: its SHA-256 is {digest}, not the pinned {PY_FFI_SHA256} \
+             (xtask/src/guards.rs, PY_FFI_SHA256): a change of the Python binding's unsafe code \
+             updates the pin, in sight of review"
+        )
+    })
 }
 
-/// The name and arguments of `expr` when it is exactly one call `name(args)`.
-fn single_call(expr: &str) -> Option<(&str, Vec<&str>)> {
-    let open = expr.find('(')?;
-    let inner = &expr[open + 1..];
-    let close = closing(inner, '(', ')');
-    if close == inner.len() || !inner[close + 1..].trim().is_empty() {
+/// Whether the tokens of `text` hold the attribute `#![forbid(unsafe_code)]`.
+fn forbids_unsafe_code(text: &str) -> bool {
+    let toks = tokenize(text).tokens;
+    let want = ["#", "!", "[", "forbid", "(", "unsafe_code", ")", "]"];
+    toks.windows(want.len())
+        .any(|w| w.iter().map(|t| t.text.as_str()).eq(want))
+}
+
+/// The index of the token that closes the group `toks[open]` opens (`toks.len()` if none).
+fn matching(toks: &[Token], open: usize) -> usize {
+    let mut depth = 0usize;
+    for (k, t) in toks.iter().enumerate().skip(open) {
+        match t.text.as_str() {
+            "(" | "[" | "{" => depth += 1,
+            ")" | "]" | "}" => {
+                depth -= 1;
+                if depth == 0 {
+                    return k;
+                }
+            }
+            _ => {}
+        }
+    }
+    toks.len()
+}
+
+/// The path and arguments of `expr` when it is exactly one call `a::b(args)` (a trailing comma
+/// allowed).
+fn single_call(expr: &[Token]) -> Option<(String, Vec<&[Token]>)> {
+    let mut path = Vec::new();
+    let mut k = 0;
+    loop {
+        let t = expr.get(k)?;
+        if t.kind != TokenKind::Ident {
+            return None;
+        }
+        path.push(t.text.as_str());
+        k += 1;
+        if expr.get(k)?.text != "::" {
+            break;
+        }
+        k += 1;
+    }
+    if expr.get(k)?.text != "(" || matching(expr, k) != expr.len() - 1 {
         return None;
     }
-    let mut args: Vec<&str> = Vec::new();
-    let (mut depth, mut start) = (0, 0);
-    for (at, c) in inner[..close].char_indices() {
-        match c {
-            '(' => depth += 1,
-            ')' => depth -= 1,
-            ',' if depth == 0 => {
-                args.push(inner[start..at].trim());
+    let inner = &expr[k + 1..expr.len() - 1];
+    let mut args = Vec::new();
+    let (mut depth, mut start) = (0usize, 0);
+    for (at, t) in inner.iter().enumerate() {
+        match t.text.as_str() {
+            "(" | "[" | "{" => depth += 1,
+            ")" | "]" | "}" => depth = depth.saturating_sub(1),
+            "," if depth == 0 => {
+                args.push(&inner[start..at]);
                 start = at + 1;
             }
             _ => {}
         }
     }
-    let last = inner[start..close].trim();
-    if !last.is_empty() {
-        args.push(last);
+    if start < inner.len() {
+        args.push(&inner[start..]);
     }
-    Some((expr[..open].trim(), args))
+    Some((path.join("::"), args))
 }
 
 /// An argument the owner's calls may take: a variable, a pointer or the interpreter token
 /// of one (`x.as_ptr()`, `x.as_type_ptr()`, `x.py()`), `null_mut()`, or
 /// `std::ptr::from_mut(x)`; nothing that dereferences, calls into the C API or runs code.
-fn plain_argument(arg: &str) -> bool {
-    let ident = |s: &str| {
-        s.chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_lowercase() || c == '_')
-            && s.chars()
+fn plain_argument(arg: &[Token]) -> bool {
+    let variable = |t: &Token| {
+        t.kind == TokenKind::Ident
+            && t.text
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_lowercase() || c == '_')
+            && t.text
+                .chars()
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
     };
-    ident(arg)
-        || arg == "null_mut()"
-        || [".as_ptr()", ".as_type_ptr()", ".py()"]
-            .iter()
-            .any(|m| arg.strip_suffix(m).is_some_and(ident))
-        || arg
-            .strip_prefix("std::ptr::from_mut(")
-            .and_then(|a| a.strip_suffix(')'))
-            .is_some_and(ident)
-}
-
-/// Why the `unsafe` block `block` (after the code `before` it) isn't allowed, if it isn't.
-fn unsafe_block_problem(before: &str, block: &str) -> Option<String> {
-    let Some((name, args)) = single_call(block) else {
-        return Some("not exactly one call".to_string());
-    };
-    if let Some(bad) = args.iter().find(|a| !plain_argument(a)) {
-        return Some(format!("argument `{bad}`"));
-    }
-    if TYPE_OBJECT_CALLS.contains(&name) {
-        return None;
-    }
-    if name != TYPE_OBJECT_WRAP {
-        return Some(format!("`{name}`"));
-    }
-    // The wrapped pointer: bound last by `let ptr = unsafe { <one of the owner's calls> }`.
-    let [_, ptr] = args[..] else {
-        return Some("not two arguments".to_string());
-    };
-    let not_a_result = || {
-        Some(format!(
-            "`{ptr}` isn't the result of one of the owner's calls"
-        ))
-    };
-    let binding = format!("let {ptr} =");
-    let Some(at) = word_matches(before, &binding).last().copied() else {
-        return not_a_result();
-    };
-    let after = &before[at + binding.len()..];
-    if !word_matches(before, &format!("let mut {ptr}")).is_empty()
-        || !word_matches(after, &format!("{ptr} =")).is_empty()
-    {
-        return Some(format!("`{ptr}` is rebound"));
-    }
-    let Some(body) = after
-        .trim_start()
-        .strip_prefix("unsafe")
-        .map(str::trim_start)
-        .and_then(|b| b.strip_prefix('{'))
-    else {
-        return not_a_result();
-    };
-    match single_call(body[..closing(body, '{', '}')].trim()) {
-        Some((name, _)) if TYPE_OBJECT_NEW.contains(&name) => None,
-        _ => not_a_result(),
+    let texts: Vec<&str> = arg.iter().map(|t| t.text.as_str()).collect();
+    match texts[..] {
+        [_] => variable(&arg[0]),
+        [_, ".", method, "(", ")"] => {
+            variable(&arg[0]) && ["as_ptr", "as_type_ptr", "py"].contains(&method)
+        }
+        ["null_mut", "(", ")"] => true,
+        ["std", "::", "ptr", "::", "from_mut", "(", _, ")"] => variable(&arg[6]),
+        _ => false,
     }
 }
 
-/// The owner's calls that return a new reference (or null with an exception set).
-const TYPE_OBJECT_NEW: [&str; 3] = [
-    "ffi::PyType_FromMetaclass",
-    "PyInstanceMethod_New",
-    "ffi::PyCFunction_NewEx",
-];
-
-/// Where `pattern` starts in `hay` with no identifier character just before it.
-fn word_matches(hay: &str, pattern: &str) -> Vec<usize> {
-    hay.match_indices(pattern)
-        .map(|(at, _)| at)
-        .filter(|&at| {
-            !hay[..at]
-                .chars()
-                .next_back()
-                .is_some_and(|c| c.is_alphanumeric() || c == '_')
-        })
-        .collect()
-}
-
-/// Why the `unsafe extern` block whose declaration (after `extern`) starts `decl` isn't
-/// allowed, if it isn't: it may declare `PyInstanceMethod_New` and nothing else, whatever its
-/// ABI.
-fn extern_block_problem(decl: &str) -> Option<String> {
-    let Some(open) = decl.find('{') else {
+/// Why the `unsafe extern` block whose tokens after `extern` start `toks` isn't allowed, if it
+/// isn't: `extern "C" { <PY_FFI_EXTERN> }`, nothing else.
+fn extern_block_problem(toks: &[Token]) -> Option<String> {
+    if toks.first().map(|t| t.text.as_str()) != Some("\"C\"") {
+        return Some("an `unsafe extern` block without the ABI \"C\"".to_string());
+    }
+    if toks.get(1).map(|t| t.text.as_str()) != Some("{") {
         return Some("an `unsafe extern` without a block".to_string());
-    };
-    let abi = decl[..open].trim();
-    if !(abi.is_empty() || (abi.starts_with('"') && abi.ends_with('"') && abi.len() >= 2)) {
-        return Some(format!("an `unsafe extern {abi}`"));
     }
-    let body = &decl[open + 1..];
-    let body = &body[..closing(body, '{', '}')];
-    let items: Vec<&str> = body
-        .split(';')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .collect();
-    let declared: Vec<&str> = items
-        .iter()
-        .map(|d| match d.strip_prefix("fn ") {
-            Some(f) => f.split('(').next().unwrap_or_default().trim(),
-            None => d,
-        })
-        .collect();
-    (declared != ["PyInstanceMethod_New"])
-        .then(|| format!("an `unsafe extern` block declaring {declared:?}"))
+    let close = matching(toks, 1);
+    let items = &toks[2..close.min(toks.len())];
+    let declared = items.len() == PY_FFI_EXTERN.len()
+        && items.iter().zip(PY_FFI_EXTERN).all(|(t, want)| {
+            if want == "_" {
+                t.kind == TokenKind::Ident
+            } else {
+                t.text == want
+            }
+        });
+    (!declared).then(|| {
+        let items: Vec<&str> = items.iter().map(|t| t.text.as_str()).collect();
+        format!(
+            "an `unsafe extern` block that declares more or less than PyInstanceMethod_New: {}",
+            items.join(" ")
+        )
+    })
 }
 
 /// The manifests' part of the `unsafe` rule: the workspace denies the `unsafe_code` lint, and
@@ -519,55 +672,64 @@ const INTERNALS_USERS: &str = "crates/ocio/tests/";
 /// The only manifest that may enable the feature, in its dev-dependency on itself.
 const INTERNALS_MANIFEST: &str = "crates/ocio/Cargo.toml";
 
-/// The lines of the attributes in `text` that relax the `unsafe_code` lint: an `allow`,
-/// `expect` or `warn` of it, alone or among other lints, in an inner or outer attribute, on
-/// one line or several, or inside a `cfg_attr`. Attributes in comments don't count.
+/// The lines where `text` may relax the `unsafe_code` lint: each identifier `unsafe_code` in
+/// code (comments and literals aside) other than a lint of an attribute `#[deny(...)]`,
+/// `#![deny(...)]`, `#[forbid(...)]` or `#![forbid(...)]` outside any macro invocation or
+/// definition. That refuses an `allow`, `expect` or `warn` of it, alone or among other lints,
+/// in an inner or outer attribute, on one line or several, inside a `cfg_attr`, and the name
+/// handed to a macro that could make any of them (`allow_it!(unsafe_code)`, even
+/// `m!(#[deny(unsafe_code)])`): the identifier is reserved for denying the lint. The line is
+/// that of the attribute's `#` when the identifier is inside one, else its own.
 fn unsafe_code_relaxed(text: &str) -> Vec<usize> {
+    let toks = tokenize(text).tokens;
+    let text_at = |k: usize| toks.get(k).map_or("", |t| t.text.as_str());
+    let is_ident = |k: usize| toks.get(k).is_some_and(|t| t.kind == TokenKind::Ident);
+    // The open groups: (index of the opening token, an attribute's `[`, a macro's group).
+    let mut groups: Vec<(usize, bool, bool)> = Vec::new();
     let mut lines = Vec::new();
-    let bytes = text.as_bytes();
-    let mut i = 0;
-    while let Some(found) = text[i..].find('#') {
-        let start = i + found;
-        i = start + 1;
-        let mut at = start + 1;
-        if bytes.get(at) == Some(&b'!') {
-            at += 1;
-        }
-        if bytes.get(at) != Some(&b'[') {
-            continue;
-        }
-        // Skip attributes in a comment: the line up to the `#` starts a comment.
-        let line_start = text[..start].rfind('\n').map_or(0, |n| n + 1);
-        let before = text[line_start..start].trim_start();
-        if before.starts_with("//") || before.contains("/*") {
-            continue;
-        }
-        // The attribute's text, to its matching `]`.
-        let mut depth = 0usize;
-        let mut end = at;
-        for (k, &c) in bytes[at..].iter().enumerate() {
-            match c {
-                b'[' => depth += 1,
-                b']' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        end = at + k;
-                        break;
-                    }
-                }
-                _ => {}
+    for (k, t) in toks.iter().enumerate() {
+        match t.text.as_str() {
+            "(" | "[" | "{" if t.kind == TokenKind::Punct => {
+                let attribute = t.text == "["
+                    && (text_at(k.wrapping_sub(1)) == "#"
+                        || (text_at(k.wrapping_sub(1)) == "!"
+                            && text_at(k.wrapping_sub(2)) == "#"));
+                let invocation = k >= 2 && text_at(k - 1) == "!" && is_ident(k - 2);
+                let definition = k >= 3
+                    && is_ident(k - 1)
+                    && text_at(k - 2) == "!"
+                    && text_at(k - 3) == "macro_rules";
+                groups.push((k, attribute, invocation || definition));
             }
-        }
-        let attribute: String = text[at..=end.max(at)]
-            .chars()
-            .filter(|c| !c.is_whitespace())
-            .collect();
-        if attribute.contains("unsafe_code")
-            && ["allow(", "expect(", "warn("]
-                .iter()
-                .any(|level| attribute.contains(level))
-        {
-            lines.push(text[..start].matches('\n').count() + 1);
+            ")" | "]" | "}" if t.kind == TokenKind::Punct => {
+                groups.pop();
+            }
+            "unsafe_code" if t.kind == TokenKind::Ident => {
+                let in_macro = groups.iter().any(|g| g.2);
+                let denied = match groups[..] {
+                    [.., (attr, true, _), (lints, false, _)] => {
+                        lints == attr + 2
+                            && ["deny", "forbid"].contains(&text_at(attr + 1))
+                            && text_at(lints) == "("
+                    }
+                    _ => false,
+                };
+                if in_macro || !denied {
+                    let line = groups
+                        .iter()
+                        .find(|g| g.1)
+                        .map_or(t.line, |g| toks[g.0 - 1].line);
+                    let hash = groups.iter().find(|g| g.1).map(|g| {
+                        if text_at(g.0 - 1) == "!" {
+                            toks[g.0 - 2].line
+                        } else {
+                            toks[g.0 - 1].line
+                        }
+                    });
+                    lines.push(hash.unwrap_or(line));
+                }
+            }
+            _ => {}
         }
     }
     lines
@@ -646,38 +808,88 @@ struct Lexed {
 
 /// Lexes `text` just enough for the guards: see `Lexed`.
 fn lex(text: &str) -> Lexed {
-    let c: Vec<char> = text.chars().collect();
-    let mut code = c.clone();
-    let mut blank = |from: usize, to: usize| {
-        for ch in &mut code[from..to.min(c.len())] {
+    let Tokenized { tokens, comments } = tokenize(text);
+    let mut code: Vec<char> = text.chars().collect();
+    for (from, to) in comments {
+        for ch in &mut code[from..to] {
             if *ch != '\n' {
                 *ch = ' ';
             }
         }
-    };
-    let mut out = Vec::new();
+    }
+    Lexed {
+        idents: tokens
+            .into_iter()
+            .filter(|t| t.kind == TokenKind::Ident)
+            .map(|t| (t.text, t.line))
+            .collect(),
+        code: code.into_iter().collect(),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TokenKind {
+    /// An identifier or keyword (a raw identifier `r#x` is `x`).
+    Ident,
+    /// A string, byte-string, raw-string, C-string, character or byte literal (its text the
+    /// whole literal), or a number.
+    Literal,
+    /// A lifetime or label (`'a`).
+    Lifetime,
+    /// Punctuation: `::`, `->` and `=>` as one token, any other character alone.
+    Punct,
+}
+
+#[derive(Debug, Clone)]
+struct Token {
+    text: String,
+    kind: TokenKind,
+    /// 1-based.
+    line: usize,
+}
+
+/// Rust source as tokens, and where its comments are.
+struct Tokenized {
+    tokens: Vec<Token>,
+    /// The character ranges `[from, to)` of its comments (nested block comments as one).
+    comments: Vec<(usize, usize)>,
+}
+
+/// Rust's lexical structure, enough for the guards: comments (`//` to the end of the line,
+/// nested `/* */`) are no tokens, and a literal is one token whatever it holds (a `//` or `/*`
+/// in a string is no comment, a `"` in a character literal or a raw string ends nothing).
+fn tokenize(text: &str) -> Tokenized {
+    let c: Vec<char> = text.chars().collect();
+    let mut tokens = Vec::new();
+    let mut comments = Vec::new();
     let mut line = 1;
     let mut i = 0;
+    let push = |tokens: &mut Vec<Token>, from: usize, to: usize, kind, line| {
+        tokens.push(Token {
+            text: c[from..to].iter().collect(),
+            kind,
+            line,
+        });
+    };
     while i < c.len() {
         let ch = c[i];
         let next = c.get(i + 1).copied();
+        let start = i;
+        let start_line = line;
         if ch == '\n' {
             line += 1;
             i += 1;
+        } else if ch.is_whitespace() {
+            i += 1;
         } else if ch == '/' && next == Some('/') {
-            let start = i;
             while i < c.len() && c[i] != '\n' {
                 i += 1;
             }
-            blank(start, i);
+            comments.push((start, i));
         } else if ch == '/' && next == Some('*') {
-            // Block comments nest.
-            let start = i;
             let mut depth = 0;
-            loop {
-                if i >= c.len() {
-                    break;
-                } else if c[i] == '/' && c.get(i + 1) == Some(&'*') {
+            while i < c.len() {
+                if c[i] == '/' && c.get(i + 1) == Some(&'*') {
                     depth += 1;
                     i += 2;
                 } else if c[i] == '*' && c.get(i + 1) == Some(&'/') {
@@ -691,28 +903,48 @@ fn lex(text: &str) -> Lexed {
                     i += 1;
                 }
             }
-            blank(start, i);
+            comments.push((start, i.min(c.len())));
         } else if ch == '"' {
             i = skip_string(&c, i + 1, None, &mut line);
+            push(
+                &mut tokens,
+                start,
+                i.min(c.len()),
+                TokenKind::Literal,
+                start_line,
+            );
         } else if ch == '\'' {
-            // A character literal ('x', '\n', '\u{1F600}'), or a lifetime or label ('a).
             if next == Some('\\') {
+                // A character literal with an escape ('\n', '\'', '\u{1F600}').
                 i += 3;
                 while i < c.len() && c[i] != '\'' {
                     i += 1;
                 }
                 i += 1;
+                push(
+                    &mut tokens,
+                    start,
+                    i.min(c.len()),
+                    TokenKind::Literal,
+                    start_line,
+                );
             } else if c.get(i + 2) == Some(&'\'') {
                 i += 3;
+                push(&mut tokens, start, i, TokenKind::Literal, start_line);
             } else {
+                // A lifetime or label.
                 i += 1;
+                while i < c.len() && (c[i].is_alphanumeric() || c[i] == '_') {
+                    i += 1;
+                }
+                push(&mut tokens, start, i, TokenKind::Lifetime, start_line);
             }
         } else if ch.is_ascii_digit() {
             while i < c.len() && (c[i].is_alphanumeric() || c[i] == '_') {
                 i += 1;
             }
+            push(&mut tokens, start, i, TokenKind::Literal, start_line);
         } else if ch.is_alphabetic() || ch == '_' {
-            let start = i;
             while i < c.len() && (c[i].is_alphanumeric() || c[i] == '_') {
                 i += 1;
             }
@@ -726,25 +958,65 @@ fn lex(text: &str) -> Lexed {
                 // r"..", r#".."#, br"..", cr#".."#
                 "r" | "br" | "cr" if after == Some('"') => {
                     i = skip_string(&c, i + hashes + 1, Some(hashes), &mut line);
+                    push(
+                        &mut tokens,
+                        start,
+                        i.min(c.len()),
+                        TokenKind::Literal,
+                        start_line,
+                    );
                 }
                 // b"..", c".."
                 "b" | "c" if hashes == 0 && after == Some('"') => {
                     i = skip_string(&c, i + 1, None, &mut line);
+                    push(
+                        &mut tokens,
+                        start,
+                        i.min(c.len()),
+                        TokenKind::Literal,
+                        start_line,
+                    );
+                }
+                // b'x', b'\n'
+                "b" if hashes == 0 && after == Some('\'') => {
+                    // Past the quote, then the character (escaped after a backslash).
+                    i += 1;
+                    i += if c.get(i) == Some(&'\\') { 2 } else { 1 };
+                    while i < c.len() && c[i] != '\'' {
+                        i += 1;
+                    }
+                    i += 1;
+                    push(
+                        &mut tokens,
+                        start,
+                        i.min(c.len()),
+                        TokenKind::Literal,
+                        start_line,
+                    );
                 }
                 // r#ident: the identifier follows.
                 "r" if hashes == 1 && after.is_some_and(|a| a.is_alphabetic() || a == '_') => {
-                    i += 1;
+                    let from = i + 1;
+                    i = from;
+                    while i < c.len() && (c[i].is_alphanumeric() || c[i] == '_') {
+                        i += 1;
+                    }
+                    push(&mut tokens, from, i, TokenKind::Ident, start_line);
                 }
-                _ => out.push((word, line)),
+                _ => push(&mut tokens, start, i, TokenKind::Ident, start_line),
             }
         } else {
-            i += 1;
+            let two: String = c[i..(i + 2).min(c.len())].iter().collect();
+            let len = if ["::", "->", "=>"].contains(&two.as_str()) {
+                2
+            } else {
+                1
+            };
+            i += len;
+            push(&mut tokens, start, i, TokenKind::Punct, start_line);
         }
     }
-    Lexed {
-        idents: out,
-        code: code.into_iter().collect(),
-    }
+    Tokenized { tokens, comments }
 }
 
 /// Skips a string literal whose body starts at `i`: a raw string (`raw` holds its number of
@@ -966,7 +1238,7 @@ mod tests {
 
     #[test]
     fn unsafe_code_relaxed_in_any_lint_attribute() {
-        let cases: [(&str, &[usize]); 9] = [
+        let cases: [(&str, &[usize]); 17] = [
             ("#![allow(unsafe_code)]\n", &[1]),
             ("#[allow(dead_code, unsafe_code)]\nfn f() {}\n", &[1]),
             ("#[expect(unsafe_code)]\nfn f() {}\n", &[1]),
@@ -977,11 +1249,39 @@ mod tests {
             ),
             ("#[cfg_attr(windows, allow(unsafe_code))]\nmod m;\n", &[1]),
             ("#![deny(unsafe_code)]\n#![forbid(unsafe_code)]\n", &[]),
+            ("#[deny(dead_code, unsafe_code)]\nfn f() {}\n", &[]),
             (
                 "// #[allow(unsafe_code)]\n/// #![allow(unsafe_code)]\n",
                 &[],
             ),
-            ("#[allow(dead_code)]\nfn unsafe_code() {}\n", &[]),
+            (
+                "const A: &str = \"#[allow(unsafe_code)]\";\nconst B: &str = r#\"a \"q\" #[allow(unsafe_code)]\"#;\n",
+                &[],
+            ),
+            // The identifier is reserved for denying the lint (it was allowed as a name before
+            // p6-core's re-check round 3, which a macro could forward into an `allow`).
+            ("#[allow(dead_code)]\nfn unsafe_code() {}\n", &[2]),
+            ("fn r#unsafe_code() {}\n", &[1]),
+            // The verifier's bypasses of the line scan (p6-core re-check round 3): a `/*` in a
+            // string on the attribute's line, a `//` in a string before it, and a macro that
+            // forwards the name into an `allow`.
+            (
+                "const S: &str = \"/*\"; #[allow(unsafe_code)]\nmod m {}\n",
+                &[1],
+            ),
+            ("const S: &str = \"//\"; #![allow(unsafe_code)]\n", &[1]),
+            (
+                "macro_rules! allow_it {\n    ($l:ident) => {\n        #[allow($l)]\n        mod m {}\n    };\n}\nallow_it!(unsafe_code);\n",
+                &[7],
+            ),
+            (
+                "macro_rules! m {\n    (#[deny($l:ident)]) => { #[allow($l)] mod n {} };\n}\nm!(#[deny(unsafe_code)]);\n",
+                &[4],
+            ),
+            (
+                "macro_rules! m {\n    () => { #![deny(unsafe_code)] };\n}\n",
+                &[2],
+            ),
         ];
         for (text, lines) in cases {
             assert_eq!(unsafe_code_relaxed(text), lines, "{text}");
@@ -1025,82 +1325,299 @@ mod tests {
         }
     }
 
+    /// `check_py_ffi`'s problems with `text`, after `use pyo3::ffi;`.
+    fn ffi_problems(text: &str) -> Vec<String> {
+        check_py_ffi(PY_FFI, &format!("use pyo3::ffi;\n{text}"))
+    }
+
     #[test]
-    fn type_object_rs_makes_only_the_owners_calls() {
+    fn the_python_binding_s_ffi_crate_makes_only_the_owners_calls() {
         let good = "#![allow(unsafe_code)]\n\
                     #[cfg_attr(windows, link(name = \"python313\", kind = \"raw-dylib\"))]\n\
-                    unsafe extern \"C\" {\n    fn PyInstanceMethod_New(f: *mut ffi::PyObject) \
-                    -> *mut ffi::PyObject;\n}\n\
+                    unsafe extern \"C\" {\n    /// A doc comment: unsafe { x }.\n    \
+                    fn PyInstanceMethod_New(func: *mut ffi::PyObject) -> *mut ffi::PyObject;\n}\n\
                     fn a() {\n    // SAFETY: unsafe { anything } in a comment.\n    \
-                    let p = unsafe { ffi::PyType_FromMetaclass(m.as_type_ptr(), null_mut(), \
-                    std::ptr::from_mut(s), b.as_ptr(),) };\n    \
+                    let s = \"unsafe { *p } // /* mod m; include!\";\n    \
+                    let p = unsafe {\n        ffi::PyType_FromMetaclass(\n            \
+                    m.as_type_ptr(),\n            null_mut(),\n            \
+                    std::ptr::from_mut(s),\n            b.as_ptr(),\n        )\n    };\n    \
+                    let cls = unsafe { Bound::from_owned_ptr_or_err(py, p) }?;\n    \
                     let q = unsafe { PyInstanceMethod_New(f.as_ptr()) };\n    \
-                    let r = unsafe {\n        ffi::PyCFunction_NewEx(d, s, m)\n    };\n    \
+                    unsafe { Bound::from_owned_ptr_or_err(f.py(), q) };\n    \
                     let c = unsafe { ffi::PySequence_Check(o.as_ptr()) };\n    \
-                    unsafe { Bound::from_owned_ptr_or_err(py, p) };\n    \
-                    unsafe { Bound::from_owned_ptr_or_err(f.py(), q) }\n}\n";
-        assert!(
-            check_type_object(TYPE_OBJECT, good).is_empty(),
-            "{:?}",
-            check_type_object(TYPE_OBJECT, good)
-        );
+                    let r = unsafe { ffi::PyCFunction_NewEx(d, s, m) };\n    \
+                    unsafe { Bound::from_owned_ptr_or_err(record.py(), r) }\n}\n";
+        assert_eq!(ffi_problems(good), Vec::<String>::new());
         for bad in [
             "fn a() { let x = unsafe { *p }; }",
             "fn a() { unsafe { ffi::PyType_GetSlot(t, 1) } }",
-            "unsafe extern \"C\" {\n    fn PyInstanceMethod_New(f: *mut O) -> *mut O;\n    fn Py_Other() -> i32;\n}",
+            "unsafe extern \"C\" {\n    fn PyInstanceMethod_New(f: *mut ffi::PyObject) -> *mut ffi::PyObject;\n    fn Py_Other() -> i32;\n}",
             "unsafe extern \"C\" {\n    fn Py_Other() -> i32;\n}",
             "unsafe fn f() {}",
             "unsafe impl Send for X {}",
             "unsafe trait T {}",
-            "#[unsafe(no_mangle)]\nextern \"C\" fn f() {}",
-            // Any ABI is an extern block (verifier re-check 6).
-            "unsafe extern \"C-unwind\" {\n    fn Py_Other() -> i32;\n}",
-            "unsafe extern \"system\" {\n    fn Py_Other() -> i32;\n}",
-            "unsafe extern {\n    fn Py_Other() -> i32;\n}",
-            "unsafe extern \"C\" {\n    fn PyInstanceMethod_New(f: *mut O) -> *mut O;\n    static X: i32;\n}",
+            // Only the C ABI, only the one declaration, without attributes or qualifiers.
+            "unsafe extern \"C-unwind\" {\n    fn PyInstanceMethod_New(f: *mut ffi::PyObject) -> *mut ffi::PyObject;\n}",
+            "unsafe extern \"system\" {\n    fn PyInstanceMethod_New(f: *mut ffi::PyObject) -> *mut ffi::PyObject;\n}",
+            "unsafe extern {\n    fn PyInstanceMethod_New(f: *mut ffi::PyObject) -> *mut ffi::PyObject;\n}",
+            "unsafe extern \"C\" {\n    fn PyInstanceMethod_New(f: *mut ffi::PyObject) -> *mut ffi::PyObject;\n    static X: i32;\n}",
+            "unsafe extern \"C\" {\n    safe fn PyInstanceMethod_New(f: *mut ffi::PyObject) -> *mut ffi::PyObject;\n}",
+            "unsafe extern \"C\" {\n    pub fn PyInstanceMethod_New(f: *mut ffi::PyObject) -> *mut ffi::PyObject;\n}",
+            "unsafe extern \"C\" {\n    fn PyInstanceMethod_New(f: *mut ffi::PyObject, g: i32) -> *mut ffi::PyObject;\n}",
             // One call per block, nothing before or after it.
             "fn a() { let p = unsafe { ffi::PyType_FromMetaclass(m, n, s, b); *q }; }",
             "fn a() { let p = unsafe { other(); ffi::PyType_FromMetaclass(m, n, s, b) }; }",
             "fn a() { let p = unsafe { ffi::PyType_FromMetaclass(m, n, s, b).add(1) }; }",
+            "fn a() { let p = unsafe { ffi::PyType_FromMetaclass(m, n, s, b)(1) }; }",
             // Plain arguments only.
-            "fn a() { let p = unsafe { PyInstanceMethod_New(*f) }; }",
-            "fn a() { let p = unsafe { PyInstanceMethod_New(ffi::Py_None()) }; }",
-            "fn a() { let p = unsafe { PyInstanceMethod_New({ x() }) }; }",
-            // The wrapping takes an owner's call's result only.
+            "fn a() { let c = unsafe { ffi::PySequence_Check(*f) }; }",
+            "fn a() { let c = unsafe { ffi::PySequence_Check(ffi::Py_None()) }; }",
+            "fn a() { let c = unsafe { ffi::PySequence_Check({ x() }) }; }",
+            "fn a() { let c = unsafe { ffi::PySequence_Check(f.as_ptr().add(1)) }; }",
+            "fn a() { let c = unsafe { ffi::PySequence_Check(F) }; }",
+            "fn a() { let c = unsafe { ffi::PySequence_Check(f.read()) }; }",
+            "fn a() { let c = unsafe { ffi::PySequence_Check(std::ptr::read(f)) }; }",
+            // A name that merely contains an owner's call (N17b), or another path to it.
+            "fn a() { let c = unsafe { ffi::PySequence_CheckX(o) }; }",
+            "fn a() { let c = unsafe { PySequence_Check(o) }; }",
+            "fn a() { let c = unsafe { xffi::PySequence_Check(o) }; }",
+            // `ffi` is pyo3's.
+            "use other as ffi;",
+            "struct ffi;",
+            // The verifier's bypasses of the line scan (p6-core re-check round 3): a `//` in a
+            // string hid the rest of the line; a child module, an include or a path inherited
+            // the file's `allow(unsafe_code)`.
+            "fn a() { let s = \"//\"; let x = unsafe { *p }; }",
+            "fn a() { let s = '\"'; let x = unsafe { *p }; }",
+            "mod m;",
+            "#[path = \"x.rs\"]\nfn f() {}",
+            "include!(\"x.rs\");",
+            "const S: &str = include_str!(\"x.rs\");",
+            "macro_rules! m { () => {} }",
+            "core::arch::global_asm!(\"nop\");",
+            "#[link_name = \"Py_DecRef\"]\nfn f() {}",
+            // The wrapping takes the previous statement's owner's call result, once.
             "fn a(raw: *mut O) { unsafe { Bound::from_owned_ptr_or_err(py, raw) } }",
             "fn a() { let p = g(); unsafe { Bound::from_owned_ptr_or_err(py, p) } }",
-            "fn a() { let p = unsafe { ffi::PySequence_Check(o.as_ptr()) } ; unsafe { Bound::from_owned_ptr_or_err(py, p) } }",
-            "fn a() { let mut p = unsafe { PyInstanceMethod_New(f) }; p = q; unsafe { Bound::from_owned_ptr_or_err(py, p) } }",
-            "fn a() { let p = unsafe { PyInstanceMethod_New(f) }; let p = q; unsafe { Bound::from_owned_ptr_or_err(py, p) } }",
+            "fn a() { let p = unsafe { ffi::PySequence_Check(o) }; unsafe { Bound::from_owned_ptr_or_err(py, p) } }",
+            "fn a(ptr: *mut O) { let q = unsafe { PyInstanceMethod_New(f) }; unsafe { Bound::from_owned_ptr_or_err(py, ptr) } }",
+            "fn a() { let p = unsafe { PyInstanceMethod_New(f) }; unsafe { Bound::from_owned_ptr_or_err(py, p, q) } }",
+            "fn a() { let p = unsafe { PyInstanceMethod_New(f) }; unsafe { Bound::from_owned_ptr_or_err(p) } }",
+            // Not the next statement: a closure (callable twice), a use in between.
+            "fn a() { let (p, _) = (unsafe { PyInstanceMethod_New(f) }, 1); }",
+            // An earlier binding of the name elsewhere in the file, or a parameter of its name.
+            "fn x() { let ptr = unsafe { PyInstanceMethod_New(f) }; unsafe { Bound::from_owned_ptr_or_err(py, ptr) } }\n\
+             fn y(ptr: *mut O) { unsafe { Bound::from_owned_ptr_or_err(py, ptr) } }",
+            // Unwrapped.
+            "fn a() { let p = unsafe { PyInstanceMethod_New(f) }; drop(p); }",
         ] {
-            assert_eq!(
-                check_type_object(TYPE_OBJECT, bad).len(),
-                1,
-                "{bad}: {:?}",
-                check_type_object(TYPE_OBJECT, bad)
-            );
+            assert_eq!(ffi_problems(bad).len(), 1, "{bad}: {:?}", ffi_problems(bad));
         }
+        // Two problems each (the first one's text has the fragment): the attribute
+        // `no_mangle` and `unsafe(`; a path to another `ffi` and the call it makes; a call
+        // that isn't the wrapping (G3: a two-argument call of something else on an owner's
+        // call's result; a name that merely contains an owner's call, N17b) or a wrapping that
+        // isn't the next statement (a closure, callable twice; a copy in between; `let mut`;
+        // the result used before the statement ends), and the new reference left unwrapped.
+        for (bad, first) in [
+            (
+                "#[unsafe(no_mangle)]\nextern \"C\" fn f() {}",
+                "`no_mangle`",
+            ),
+            (
+                "fn a() { let c = unsafe { my::ffi::PySequence_Check(o) }; }",
+                "`ffi` must be pyo3's",
+            ),
+            (
+                "fn a() { let c = unsafe { self::ffi::PySequence_Check(o) }; }",
+                "`ffi` must be pyo3's",
+            ),
+            (
+                "fn a() { let p = unsafe { PyInstanceMethod_New(f) }; unsafe { Bound::from_owned_ptr(py, p) } }",
+                "call of `Bound::from_owned_ptr`",
+            ),
+            (
+                "fn a() { let p = unsafe { ffi::PyCFunction_NewExt(d, s, m) }; unsafe { Bound::from_owned_ptr_or_err(py, p) } }",
+                "call of `ffi::PyCFunction_NewExt`",
+            ),
+            (
+                "fn a() { let p = unsafe { PyInstanceMethod_New(f) }; let g = || unsafe { Bound::from_owned_ptr_or_err(py, p) }; }",
+                "isn't the statement right after",
+            ),
+            (
+                "fn a() { let p = unsafe { PyInstanceMethod_New(f) }; let ptr = p; unsafe { Bound::from_owned_ptr_or_err(py, ptr) } }",
+                "isn't the statement right after",
+            ),
+            (
+                "fn a() { let mut p = unsafe { PyInstanceMethod_New(f) }; unsafe { Bound::from_owned_ptr_or_err(py, p) } }",
+                "isn't bound alone",
+            ),
+            (
+                "fn a() { let p = unsafe { PyInstanceMethod_New(f) }.wrapping_add(1); unsafe { Bound::from_owned_ptr_or_err(py, p) } }",
+                "isn't bound alone",
+            ),
+        ] {
+            let problems = ffi_problems(bad);
+            assert_eq!(problems.len(), 2, "{bad}: {problems:?}");
+            assert!(problems[0].contains(first), "{bad}: {problems:?}");
+        }
+        // Wrapped twice: the second wrapping isn't the statement after the binding.
+        let twice = "fn a() { let p = unsafe { PyInstanceMethod_New(f) }; \
+                     let x = unsafe { Bound::from_owned_ptr_or_err(py, p) }; \
+                     let y = unsafe { Bound::from_owned_ptr_or_err(py, p) }; }";
+        assert_eq!(ffi_problems(twice).len(), 1, "{:?}", ffi_problems(twice));
         // Two extern blocks, each fine on its own.
-        let two = "unsafe extern \"C\" {\n    fn PyInstanceMethod_New(f: *mut O) -> *mut O;\n}\n\
-                   unsafe extern \"C\" {\n    fn PyInstanceMethod_New(f: *mut O) -> *mut O;\n}\n";
-        assert_eq!(check_type_object(TYPE_OBJECT, two).len(), 1);
-        // The file itself.
-        let text = std::fs::read_to_string(paths::workspace_root().join(TYPE_OBJECT)).unwrap();
-        assert!(
-            check_type_object(TYPE_OBJECT, &text).is_empty(),
-            "{:?}",
-            check_type_object(TYPE_OBJECT, &text)
+        let two = "unsafe extern \"C\" {\n    fn PyInstanceMethod_New(f: *mut ffi::PyObject) -> *mut ffi::PyObject;\n}\n\
+                   unsafe extern \"C\" {\n    fn PyInstanceMethod_New(f: *mut ffi::PyObject) -> *mut ffi::PyObject;\n}\n";
+        assert_eq!(ffi_problems(two).len(), 1);
+        // `use pyo3::ffi;` once.
+        assert_eq!(check_py_ffi(PY_FFI, "fn a() {}").len(), 1);
+        assert_eq!(
+            check_py_ffi(PY_FFI, "use pyo3::ffi;\nuse pyo3::ffi;\n").len(),
+            1
         );
+        // The file itself.
+        let text = std::fs::read_to_string(paths::workspace_root().join(PY_FFI)).unwrap();
+        assert_eq!(check_py_ffi(PY_FFI, &text), Vec::<String>::new());
     }
 
     #[test]
-    fn unsafe_allowed_in_the_python_binding_only_in_type_object_rs() {
-        assert!(unsafe_allowed("crates/ocio-py/src/type_object.rs"));
+    fn the_python_binding_s_ffi_file_is_pinned() {
+        let text = std::fs::read_to_string(paths::workspace_root().join(PY_FFI)).unwrap();
+        assert_eq!(py_ffi_pin_problem(&text), None);
+        let changed = text.replacen("check == 1", "check != 0", 1);
+        assert_ne!(changed, text);
+        assert!(py_ffi_pin_problem(&changed).is_some());
+        assert!(py_ffi_pin_problem(&format!("{text}\n")).is_some());
+    }
+
+    #[test]
+    fn the_python_binding_s_unsafe_code_is_one_file_and_its_root_forbids_unsafe_code() {
+        let file = |rel: &str, text: &str| (rel.to_string(), text.to_string());
+        let header = "// SPDX-License-Identifier: BSD-3-Clause\n\
+                      // Copyright Contributors to the OpenColorIO Project.\n";
+        let ffi = std::fs::read_to_string(paths::workspace_root().join(PY_FFI)).unwrap();
+        let root = format!("{header}#![forbid(unsafe_code)]\n");
+        let ok = [file(PY_FFI, &ffi), file(PY_ROOT, &root)];
+        assert_eq!(check_files(&ok, &[], &|_, _| false), Vec::<String>::new());
+        for (rel, text) in [
+            (
+                "crates/ocio-py/ffi/src/other.rs",
+                format!("{header}fn f() {{}}\n"),
+            ),
+            (
+                "crates/ocio-py/ffi/build.rs",
+                format!("{header}fn main() {{}}\n"),
+            ),
+            (
+                "crates/ocio-py/ffi/tests/t.rs",
+                format!("{header}fn f() {{}}\n"),
+            ),
+            (PY_ROOT, format!("{header}#![deny(unsafe_code)]\n")),
+            (PY_ROOT, format!("{header}// #![forbid(unsafe_code)]\n")),
+        ] {
+            let mut files = ok.to_vec();
+            files.retain(|(r, _)| r != rel);
+            files.push(file(rel, &text));
+            assert_eq!(
+                check_files(&files, &[], &|_, _| false).len(),
+                1,
+                "{rel}: {text}"
+            );
+        }
+        // A change of the pinned file.
+        let files = [file(PY_FFI, &format!("{ffi}\n")), file(PY_ROOT, &root)];
+        assert_eq!(check_files(&files, &[], &|_, _| false).len(), 1);
+        // Targets other than the default ones.
+        for manifest in [
+            "[package]
+name = \"ocio-py\"
+build = \"build.rs\"
+",
+            "[lib]
+name = \"ocio_py\"
+path = \"src/other.rs\"
+",
+            "[package]
+name = \"ocio-py\"
+
+[[bin]]
+name = \"x\"
+",
+        ] {
+            for rel in ["crates/ocio-py/Cargo.toml", "crates/ocio-py/ffi/Cargo.toml"] {
+                let manifests = [file(rel, manifest)];
+                let problems = check_files(&ok, &manifests, &|_, _| false);
+                // Its lints aren't the workspace's either.
+                assert_eq!(problems.len(), 2, "{rel}: {manifest}: {problems:?}");
+                assert!(problems[1].contains("default targets"), "{problems:?}");
+            }
+        }
+        let fine = "[package]
+name = \"ocio-py\"
+
+[dependencies]
+ocio-py-ffi.workspace = true
+
+[lints]
+workspace = true
+";
+        let manifests = [file("crates/ocio-py/Cargo.toml", fine)];
+        assert_eq!(
+            check_files(&ok, &manifests, &|_, _| false),
+            Vec::<String>::new()
+        );
+        // An `allow(unsafe_code)` in the binding's other files.
+        let files = [
+            file(PY_FFI, &ffi),
+            file(PY_ROOT, &root),
+            file(
+                "crates/ocio-py/src/x.rs",
+                &format!("{header}#![allow(unsafe_code)]\n"),
+            ),
+        ];
+        assert_eq!(check_files(&files, &[], &|_, _| false).len(), 1);
+    }
+
+    #[test]
+    fn unsafe_allowed_only_in_the_allowlisted_files() {
+        // The Python binding: its ffi crate's one file.
+        assert!(unsafe_allowed(PY_FFI));
         for rel in [
             "crates/ocio-py/src/lib.rs",
             "crates/ocio-py/src/pybind11.rs",
-            "crates/ocio-py/src/type_object/x.rs",
+            "crates/ocio-py/src/type_object.rs",
+            "crates/ocio-py/ffi/src/x.rs",
+            "crates/ocio-py/ffi/src/lib/x.rs",
+            "crates/ocio-py/ffi/build.rs",
             "crates/ocio-py/tests/t.rs",
+        ] {
+            assert!(!unsafe_allowed(rel), "{rel}");
+        }
+        // As before p6-core's re-check round 3: the SIMD modules, the test kit's C runtime and
+        // the Windows file of minizip-ng's port.
+        for rel in [
+            "crates/ocio-testkit/src/crt.rs",
+            "crates/ocio/src/minizip/os_windows_ffi.rs",
+            "crates/ocio-ops/src/sse.rs",
+            "crates/ocio-ops/src/sse2.rs",
+            "crates/ocio-ops/src/avx.rs",
+            "crates/ocio-ops/src/avx2.rs",
+            "crates/ocio-ops/src/avx512.rs",
+            "crates/ocio-ops/src/cpu_info.rs",
+            "crates/ocio-ops/src/ops/simd/x.rs",
+            "crates/ocio-ops/src/ops/lut1d/lut1d_op_cpu_sse2.rs",
+            "crates/ocio-ops/src/ops/lut3d/lut3d_op_cpu_avx2.rs",
+            "crates/ocio-ops/src/half_f16c.rs",
+        ] {
+            assert!(unsafe_allowed(rel), "{rel}");
+        }
+        for rel in [
+            "crates/ocio-ops/src/lib.rs",
+            "crates/ocio-gpu/src/sse2.rs",
+            "crates/ocio/src/minizip/os_windows.rs",
+            "crates/ocio-testkit/src/lib.rs",
+            "xtask/src/guards.rs",
         ] {
             assert!(!unsafe_allowed(rel), "{rel}");
         }

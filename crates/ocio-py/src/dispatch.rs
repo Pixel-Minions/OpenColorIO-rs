@@ -535,7 +535,7 @@ impl<'py> Cast<'py> for CharPtr {
 /// a subclass), or an instance (not a class) of a type whose C name (`tp_name`) is
 /// `dict_keys`, `dict_values`, `dict_items`, `map` or `zip`.
 fn convertible_to_vector(obj: &Bound<'_, PyAny>) -> bool {
-    if crate::type_object::sequence_check(obj) {
+    if ocio_py_ffi::sequence_check(obj) {
         return !obj.is_instance_of::<PyString>() && !obj.is_instance_of::<PyBytes>();
     }
     let generator = obj
@@ -589,7 +589,7 @@ fn sequence_of<'py>(obj: &Bound<'py, PyAny>, convert: bool) -> PyResult<Option<B
     if !convertible_to_vector(obj) {
         return Ok(None);
     }
-    if crate::type_object::sequence_check(obj) {
+    if ocio_py_ffi::sequence_check(obj) {
         return Ok(Some(obj.clone()));
     }
     if !convert {
