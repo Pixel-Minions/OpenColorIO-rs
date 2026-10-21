@@ -87,9 +87,9 @@ const TOLERANCE: &[&str] = &[".abs() < ", ".abs() <= ", "f32::EPSILON", "f64::EP
 /// platform C runtime (the reference for C formatting and parsing), the one file that calls
 /// `CreateSymbolicLinkW` and lists directories with `FindFirstFileW` as minizip-ng does (owner
 /// decisions 2026-10-17), and, in the Python binding, the one file that calls
-/// `PyType_FromMetaclass`, `PyInstanceMethod_New` (owner decision 2026-10-20, option A) and
-/// `PyCFunction_NewEx` (2026-10-21), each named here by its file; [`check_type_object`] pins
-/// that file's calls.
+/// `PyType_FromMetaclass`, `PyInstanceMethod_New` (owner decision 2026-10-20, option A),
+/// `PyCFunction_NewEx` and `PySequence_Check` (2026-10-21), each named here by its file;
+/// [`check_type_object`] pins that file's calls.
 fn unsafe_allowed(rel: &str) -> bool {
     let file = rel.rsplit('/').next().unwrap_or(rel);
     rel == "crates/ocio-py/src/type_object.rs"
@@ -253,18 +253,23 @@ fn check_files(
 /// The Python binding's one file with `unsafe` (owner decisions 2026-10-20 and 2026-10-21).
 const TYPE_OBJECT: &str = "crates/ocio-py/src/type_object.rs";
 
-/// What each `unsafe { ... }` block of [`TYPE_OBJECT`] may be: one of the owner's three calls,
-/// or the wrapping of a call's result.
+/// The owner's calls, each the whole of an `unsafe { ... }` block of [`TYPE_OBJECT`].
 const TYPE_OBJECT_CALLS: [&str; 4] = [
-    "ffi::PyType_FromMetaclass(",
-    "PyInstanceMethod_New(",
-    "ffi::PyCFunction_NewEx(",
-    "Bound::from_owned_ptr_or_err(",
+    "ffi::PyType_FromMetaclass",
+    "PyInstanceMethod_New",
+    "ffi::PyCFunction_NewEx",
+    "ffi::PySequence_Check",
 ];
 
-/// [`TYPE_OBJECT`]'s `unsafe`: blocks that each make one of [`TYPE_OBJECT_CALLS`], one
-/// `unsafe extern "C"` block declaring `PyInstanceMethod_New` only, and no `unsafe fn`,
-/// `unsafe impl` or `unsafe trait`.
+/// The one other `unsafe` block [`TYPE_OBJECT`] may hold: the wrapping of such a call's result,
+/// `Bound::from_owned_ptr_or_err(py, ptr)`, `ptr` bound by `let ptr = unsafe { <call> };`.
+const TYPE_OBJECT_WRAP: &str = "Bound::from_owned_ptr_or_err";
+
+/// [`TYPE_OBJECT`]'s `unsafe`: each `unsafe { ... }` block is exactly one call, of
+/// [`TYPE_OBJECT_CALLS`] or [`TYPE_OBJECT_WRAP`], whose arguments are plain values
+/// ([`plain_argument`]); one `unsafe extern` block (whatever its ABI) declaring
+/// `PyInstanceMethod_New` only; no other `unsafe` (`unsafe fn`, `unsafe impl`, `unsafe trait`,
+/// `#[unsafe(...)]` attributes).
 fn check_type_object(rel: &str, text: &str) -> Vec<String> {
     let mut problems = Vec::new();
     let code: String = text
@@ -273,50 +278,201 @@ fn check_type_object(rel: &str, text: &str) -> Vec<String> {
         .collect::<Vec<_>>()
         .join("\n");
     let line_of = |at: usize| code[..at].matches('\n').count() + 1;
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    let mut externs = 0;
     let mut i = 0;
     while let Some(found) = code[i..].find("unsafe") {
         let at = i + found;
         i = at + "unsafe".len();
+        if code[..at].chars().next_back().is_some_and(word)
+            || code[i..].chars().next().is_some_and(word)
+        {
+            continue; // part of another word (`unsafe_code`)
+        }
         let rest = code[i..].trim_start();
-        if let Some(body) = rest.strip_prefix('{') {
-            let mut depth = 1;
-            let end = body
-                .char_indices()
-                .find(|&(_, c)| {
-                    match c {
-                        '{' => depth += 1,
-                        '}' => depth -= 1,
-                        _ => {}
-                    }
-                    depth == 0
-                })
-                .map_or(body.len(), |(e, _)| e);
-            let block = body[..end].trim();
-            if !TYPE_OBJECT_CALLS.iter().any(|c| block.starts_with(c)) {
-                problems.push(format!(
-                    "{rel}:{}: an `unsafe` block that isn't one of the owner's calls: {block}",
-                    line_of(at)
-                ));
-            }
-        } else if let Some(body) = rest.strip_prefix("extern \"C\"") {
-            let body = body.trim_start();
-            let end = body.find('}').unwrap_or(body.len());
-            let declared: Vec<&str> = body[..end]
-                .split("fn ")
-                .skip(1)
-                .map(|d| d.split('(').next().unwrap_or_default().trim())
-                .collect();
-            if declared != ["PyInstanceMethod_New"] {
-                problems.push(format!(
-                    "{rel}:{}: an `unsafe extern` block declaring {declared:?}",
-                    line_of(at)
-                ));
-            }
-        } else if rest.starts_with("fn ") || rest.starts_with("impl") || rest.starts_with("trait") {
-            problems.push(format!("{rel}:{}: `unsafe` {rest:.20}", line_of(at)));
+        let problem = if let Some(body) = rest.strip_prefix('{') {
+            let block = body[..closing(body, '{', '}')].trim();
+            unsafe_block_problem(&code[..at], block).map(|why| {
+                format!("an `unsafe` block that isn't one of the owner's calls ({why}): {block}")
+            })
+        } else if let Some(decl) = rest.strip_prefix("extern").filter(|r| !r.starts_with(word)) {
+            externs += 1;
+            extern_block_problem(decl)
+        } else {
+            Some(format!("`unsafe` {rest:.30}"))
+        };
+        if let Some(problem) = problem {
+            problems.push(format!("{rel}:{}: {problem}", line_of(at)));
         }
     }
+    if externs > 1 {
+        problems.push(format!(
+            "{rel}: {externs} `unsafe extern` blocks (one is allowed)"
+        ));
+    }
     problems
+}
+
+/// The index in `s` of the `close` that closes an `open` already passed (`s.len()` if none).
+fn closing(s: &str, open: char, close: char) -> usize {
+    let mut depth = 1;
+    for (at, c) in s.char_indices() {
+        if c == open {
+            depth += 1;
+        } else if c == close {
+            depth -= 1;
+            if depth == 0 {
+                return at;
+            }
+        }
+    }
+    s.len()
+}
+
+/// The name and arguments of `expr` when it is exactly one call `name(args)`.
+fn single_call(expr: &str) -> Option<(&str, Vec<&str>)> {
+    let open = expr.find('(')?;
+    let inner = &expr[open + 1..];
+    let close = closing(inner, '(', ')');
+    if close == inner.len() || !inner[close + 1..].trim().is_empty() {
+        return None;
+    }
+    let mut args: Vec<&str> = Vec::new();
+    let (mut depth, mut start) = (0, 0);
+    for (at, c) in inner[..close].char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            ',' if depth == 0 => {
+                args.push(inner[start..at].trim());
+                start = at + 1;
+            }
+            _ => {}
+        }
+    }
+    let last = inner[start..close].trim();
+    if !last.is_empty() {
+        args.push(last);
+    }
+    Some((expr[..open].trim(), args))
+}
+
+/// An argument the owner's calls may take: a variable, a pointer or the interpreter token
+/// of one (`x.as_ptr()`, `x.as_type_ptr()`, `x.py()`), `null_mut()`, or
+/// `std::ptr::from_mut(x)`; nothing that dereferences, calls into the C API or runs code.
+fn plain_argument(arg: &str) -> bool {
+    let ident = |s: &str| {
+        s.chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_lowercase() || c == '_')
+            && s.chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+    };
+    ident(arg)
+        || arg == "null_mut()"
+        || [".as_ptr()", ".as_type_ptr()", ".py()"]
+            .iter()
+            .any(|m| arg.strip_suffix(m).is_some_and(ident))
+        || arg
+            .strip_prefix("std::ptr::from_mut(")
+            .and_then(|a| a.strip_suffix(')'))
+            .is_some_and(ident)
+}
+
+/// Why the `unsafe` block `block` (after the code `before` it) isn't allowed, if it isn't.
+fn unsafe_block_problem(before: &str, block: &str) -> Option<String> {
+    let Some((name, args)) = single_call(block) else {
+        return Some("not exactly one call".to_string());
+    };
+    if let Some(bad) = args.iter().find(|a| !plain_argument(a)) {
+        return Some(format!("argument `{bad}`"));
+    }
+    if TYPE_OBJECT_CALLS.contains(&name) {
+        return None;
+    }
+    if name != TYPE_OBJECT_WRAP {
+        return Some(format!("`{name}`"));
+    }
+    // The wrapped pointer: bound last by `let ptr = unsafe { <one of the owner's calls> }`.
+    let [_, ptr] = args[..] else {
+        return Some("not two arguments".to_string());
+    };
+    let not_a_result = || {
+        Some(format!(
+            "`{ptr}` isn't the result of one of the owner's calls"
+        ))
+    };
+    let binding = format!("let {ptr} =");
+    let Some(at) = word_matches(before, &binding).last().copied() else {
+        return not_a_result();
+    };
+    let after = &before[at + binding.len()..];
+    if !word_matches(before, &format!("let mut {ptr}")).is_empty()
+        || !word_matches(after, &format!("{ptr} =")).is_empty()
+    {
+        return Some(format!("`{ptr}` is rebound"));
+    }
+    let Some(body) = after
+        .trim_start()
+        .strip_prefix("unsafe")
+        .map(str::trim_start)
+        .and_then(|b| b.strip_prefix('{'))
+    else {
+        return not_a_result();
+    };
+    match single_call(body[..closing(body, '{', '}')].trim()) {
+        Some((name, _)) if TYPE_OBJECT_NEW.contains(&name) => None,
+        _ => not_a_result(),
+    }
+}
+
+/// The owner's calls that return a new reference (or null with an exception set).
+const TYPE_OBJECT_NEW: [&str; 3] = [
+    "ffi::PyType_FromMetaclass",
+    "PyInstanceMethod_New",
+    "ffi::PyCFunction_NewEx",
+];
+
+/// Where `pattern` starts in `hay` with no identifier character just before it.
+fn word_matches(hay: &str, pattern: &str) -> Vec<usize> {
+    hay.match_indices(pattern)
+        .map(|(at, _)| at)
+        .filter(|&at| {
+            !hay[..at]
+                .chars()
+                .next_back()
+                .is_some_and(|c| c.is_alphanumeric() || c == '_')
+        })
+        .collect()
+}
+
+/// Why the `unsafe extern` block whose declaration (after `extern`) starts `decl` isn't
+/// allowed, if it isn't: it may declare `PyInstanceMethod_New` and nothing else, whatever its
+/// ABI.
+fn extern_block_problem(decl: &str) -> Option<String> {
+    let Some(open) = decl.find('{') else {
+        return Some("an `unsafe extern` without a block".to_string());
+    };
+    let abi = decl[..open].trim();
+    if !(abi.is_empty() || (abi.starts_with('"') && abi.ends_with('"') && abi.len() >= 2)) {
+        return Some(format!("an `unsafe extern {abi}`"));
+    }
+    let body = &decl[open + 1..];
+    let body = &body[..closing(body, '{', '}')];
+    let items: Vec<&str> = body
+        .split(';')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect();
+    let declared: Vec<&str> = items
+        .iter()
+        .map(|d| match d.strip_prefix("fn ") {
+            Some(f) => f.split('(').next().unwrap_or_default().trim(),
+            None => d,
+        })
+        .collect();
+    (declared != ["PyInstanceMethod_New"])
+        .then(|| format!("an `unsafe extern` block declaring {declared:?}"))
 }
 
 /// The manifests' part of the `unsafe` rule: the workspace denies the `unsafe_code` lint, and
@@ -871,14 +1027,18 @@ mod tests {
 
     #[test]
     fn type_object_rs_makes_only_the_owners_calls() {
-        let good = "#[cfg_attr(windows, link(name = \"python313\", kind = \"raw-dylib\"))]\n\
+        let good = "#![allow(unsafe_code)]\n\
+                    #[cfg_attr(windows, link(name = \"python313\", kind = \"raw-dylib\"))]\n\
                     unsafe extern \"C\" {\n    fn PyInstanceMethod_New(f: *mut ffi::PyObject) \
                     -> *mut ffi::PyObject;\n}\n\
                     fn a() {\n    // SAFETY: unsafe { anything } in a comment.\n    \
-                    let p = unsafe { ffi::PyType_FromMetaclass(m, n, s, b) };\n    \
+                    let p = unsafe { ffi::PyType_FromMetaclass(m.as_type_ptr(), null_mut(), \
+                    std::ptr::from_mut(s), b.as_ptr(),) };\n    \
                     let q = unsafe { PyInstanceMethod_New(f.as_ptr()) };\n    \
                     let r = unsafe {\n        ffi::PyCFunction_NewEx(d, s, m)\n    };\n    \
-                    unsafe { Bound::from_owned_ptr_or_err(py, p) }\n}\n";
+                    let c = unsafe { ffi::PySequence_Check(o.as_ptr()) };\n    \
+                    unsafe { Bound::from_owned_ptr_or_err(py, p) };\n    \
+                    unsafe { Bound::from_owned_ptr_or_err(f.py(), q) }\n}\n";
         assert!(
             check_type_object(TYPE_OBJECT, good).is_empty(),
             "{:?}",
@@ -891,12 +1051,46 @@ mod tests {
             "unsafe extern \"C\" {\n    fn Py_Other() -> i32;\n}",
             "unsafe fn f() {}",
             "unsafe impl Send for X {}",
+            "unsafe trait T {}",
+            "#[unsafe(no_mangle)]\nextern \"C\" fn f() {}",
+            // Any ABI is an extern block (verifier re-check 6).
+            "unsafe extern \"C-unwind\" {\n    fn Py_Other() -> i32;\n}",
+            "unsafe extern \"system\" {\n    fn Py_Other() -> i32;\n}",
+            "unsafe extern {\n    fn Py_Other() -> i32;\n}",
+            "unsafe extern \"C\" {\n    fn PyInstanceMethod_New(f: *mut O) -> *mut O;\n    static X: i32;\n}",
+            // One call per block, nothing before or after it.
+            "fn a() { let p = unsafe { ffi::PyType_FromMetaclass(m, n, s, b); *q }; }",
+            "fn a() { let p = unsafe { other(); ffi::PyType_FromMetaclass(m, n, s, b) }; }",
+            "fn a() { let p = unsafe { ffi::PyType_FromMetaclass(m, n, s, b).add(1) }; }",
+            // Plain arguments only.
+            "fn a() { let p = unsafe { PyInstanceMethod_New(*f) }; }",
+            "fn a() { let p = unsafe { PyInstanceMethod_New(ffi::Py_None()) }; }",
+            "fn a() { let p = unsafe { PyInstanceMethod_New({ x() }) }; }",
+            // The wrapping takes an owner's call's result only.
+            "fn a(raw: *mut O) { unsafe { Bound::from_owned_ptr_or_err(py, raw) } }",
+            "fn a() { let p = g(); unsafe { Bound::from_owned_ptr_or_err(py, p) } }",
+            "fn a() { let p = unsafe { ffi::PySequence_Check(o.as_ptr()) } ; unsafe { Bound::from_owned_ptr_or_err(py, p) } }",
+            "fn a() { let mut p = unsafe { PyInstanceMethod_New(f) }; p = q; unsafe { Bound::from_owned_ptr_or_err(py, p) } }",
+            "fn a() { let p = unsafe { PyInstanceMethod_New(f) }; let p = q; unsafe { Bound::from_owned_ptr_or_err(py, p) } }",
         ] {
-            assert_eq!(check_type_object(TYPE_OBJECT, bad).len(), 1, "{bad}");
+            assert_eq!(
+                check_type_object(TYPE_OBJECT, bad).len(),
+                1,
+                "{bad}: {:?}",
+                check_type_object(TYPE_OBJECT, bad)
+            );
         }
+        // Two extern blocks, each fine on its own.
+        let two = "unsafe extern \"C\" {\n    fn PyInstanceMethod_New(f: *mut O) -> *mut O;\n}\n\
+                   unsafe extern \"C\" {\n    fn PyInstanceMethod_New(f: *mut O) -> *mut O;\n}\n";
+        assert_eq!(check_type_object(TYPE_OBJECT, two).len(), 1);
         // The file itself.
         let text = std::fs::read_to_string(paths::workspace_root().join(TYPE_OBJECT)).unwrap();
-        assert!(check_type_object(TYPE_OBJECT, &text).is_empty());
+        assert!(
+            check_type_object(TYPE_OBJECT, &text).is_empty(),
+            "{:?}",
+            check_type_object(TYPE_OBJECT, &text)
+        );
     }
 
     #[test]
