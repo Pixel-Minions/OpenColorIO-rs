@@ -1543,7 +1543,7 @@ path = "src/OpenColorIO/ops/gradingprimary/GradingPrimaryOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingprimary/grading_primary_op.rs"]
 status = "partial"
-note = "p5-primary 5.2a: the op and CreateGradingPrimaryOp; getCPUOp with the renderers (5.2b, 5.2c); extractGpuShaderInfo with 5.2d (ocio-gpu gpu_processor.rs); CreateGradingPrimaryTransform and BuildGradingPrimaryOp with 5.5b"
+note = "p5-primary 5.2a: the op and CreateGradingPrimaryOp; 5.2b-c: getCPUOp; 5.2d: extractGpuShaderInfo (ocio-gpu gpu_processor.rs); CreateGradingPrimaryTransform and BuildGradingPrimaryOp with 5.5b"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingprimary/GradingPrimaryOp.h"
@@ -1583,13 +1583,14 @@ status = "done"
 path = "src/OpenColorIO/ops/gradingprimary/GradingPrimaryOpGPU.cpp"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/gradingprimary/grading_primary_op_gpu.rs"]
-status = "todo"
+status = "done"
+note = "p5-primary 5.2d; checked against the wheel in the 10 languages (tests/grading_primary_op_gpu_oracle.rs: gpu_shader and the uniforms after dynamic sets)"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingprimary/GradingPrimaryOpGPU.h"
 kind = "src"
 target = ["crates/ocio-gpu/src/ops/gradingprimary/grading_primary_op_gpu.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingrgbcurve/GradingBSplineCurve.cpp"

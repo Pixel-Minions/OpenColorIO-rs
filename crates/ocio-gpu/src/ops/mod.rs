@@ -8,6 +8,7 @@ pub mod exponent;
 pub mod exposurecontrast;
 pub mod fixedfunction;
 pub mod gamma;
+pub mod gradingprimary;
 pub mod gradingrgbcurve;
 pub mod log;
 pub mod lut1d;
