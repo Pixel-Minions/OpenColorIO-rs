@@ -3104,6 +3104,38 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** matched in `p4-baker` (`crates/ocio/src/minizip/mz_os.rs`, `mz_os_list_dir`);
   `crates/ocio/tests/ocioz_archive_oracle.rs`, `long_names` (Windows, against the wheel).
 
+### I-226. An infinite or NaN alpha makes a GradingPrimary's colors NaN
+
+- **Upstream:** with a saturation other than 1, the GradingPrimary renderers compute the luma
+  as the dot product of all four lanes of the pixel with the weights `{0.2126, 0.7152,
+  0.0722, 0.0}` (`ops/gradingprimary/GradingPrimaryOpCPU.cpp:155-170` @ v2.5.2). Alpha's
+  weight is 0, but an infinite or NaN alpha (after the steps before the saturation, which
+  alpha's lane goes through with identity values) times 0 is NaN, so the luma, and every
+  color channel, become NaN. Alpha itself is restored. The scalar code (without SSE2) sums the
+  three color channels only.
+- **Who notices:** images with infinite or NaN alpha through a GradingPrimaryTransform with
+  saturation: the colors of those pixels become NaN (and then the black clamp, I-227).
+- **A fix:** a weight of 0 that leaves alpha out of the sum (mask alpha's lane before the
+  sums), which changes those pixels' colors to the graded values.
+- **Status:** matched in `p5-primary` (5.2b, 5.2c); the battery's probes with infinite and NaN
+  alphas check it.
+
+### I-227. A GradingPrimary turns NaN colors into -Inf
+
+- **Upstream:** the GradingPrimary renderers end (forward) or start (inverse) with
+  `ApplyClamp`, `_mm_min_ps(_mm_max_ps(pix, blackClamp), whiteClamp)`
+  (`ops/gradingprimary/GradingPrimaryOpCPU.cpp:172-175` @ v2.5.2), whose `maxps` returns its
+  second operand for a NaN first one. Without a clamp, the black clamp is `NoClampBlack`,
+  `-DBL_MAX`, which is -Inf as a float: a NaN color becomes -Inf (or the black clamp when there
+  is one), whenever the op isn't an identity. The scalar code (`std::max`) keeps the NaN; its
+  comment says that the default values that should not clamp change clamping.
+- **Who notices:** images with NaN colors through a GradingPrimaryTransform that changes
+  anything: the NaN become -Inf, or the black clamp, in forward; in inverse the clamp comes
+  first, and the -Inf goes through the rest.
+- **A fix:** a clamp that keeps NaN (the operands of `maxps` swapped), which keeps NaN pixels
+  NaN.
+- **Status:** matched in `p5-primary` (5.2b, 5.2c); the battery's NaN probes check it.
+
 ## Undefined behaviour upstream
 
 Out-of-bounds image layouts are decided: the port returns an error (D-2, approved on

@@ -12,6 +12,7 @@
 
 use std::sync::Arc;
 
+use super::grading_primary_op_cpu::get_grading_primary_cpu_renderer;
 use super::grading_primary_op_data::GradingPrimaryOpData;
 use crate::dynamic_property::DynamicPropertyRcPtr;
 use crate::exception::{Exception, Result};
@@ -139,12 +140,9 @@ impl GradingPrimaryOpData {
 
     /// The renderer of the data, whatever the fast-math setting.
     ///
-    /// Port of `GradingPrimaryOp::getCPUOp` (GradingPrimaryOp.cpp:187-191 @ v2.5.2). The
-    /// renderers come with 5.2b and 5.2c.
+    /// Port of `GradingPrimaryOp::getCPUOp` (GradingPrimaryOp.cpp:187-191 @ v2.5.2).
     pub(crate) fn get_cpu_op(&self) -> Result<Arc<dyn CpuOp>> {
-        Err(Exception::new(
-            "GetGradingPrimaryCPURenderer is not ported yet (WP 5.2b).",
-        ))
+        get_grading_primary_cpu_renderer(self)
     }
 }
 
