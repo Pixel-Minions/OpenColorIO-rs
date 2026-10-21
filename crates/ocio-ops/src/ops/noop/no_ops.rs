@@ -210,6 +210,7 @@ impl NoOpData {
             | OpData::Exponent(_)
             | OpData::GradingRgbCurve(_)
             | OpData::ExposureContrast(_)
+            | OpData::GradingPrimary(_)
             | OpData::Lut3D(_)
             | OpData::Reference(_) => false,
         }

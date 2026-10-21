@@ -58,6 +58,7 @@ fn no_op_data(op: &Op) -> &NoOpData {
         | OpData::Exponent(_)
         | OpData::GradingRgbCurve(_)
         | OpData::ExposureContrast(_)
+        | OpData::GradingPrimary(_)
         | OpData::Lut3D(_)
         | OpData::Reference(_) => {
             panic!("{op} isn't a no-op")
