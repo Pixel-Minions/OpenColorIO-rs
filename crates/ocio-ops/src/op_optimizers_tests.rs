@@ -9,8 +9,8 @@
 //!
 //! The tests of that file that read files (`BuildOpsTest`: the readers and `FileTransform` of
 //! the `ocio` crate) are in `crates/ocio/src/file_tests/op_optimizers_tests.rs` (WP 4.10a).
-//! The others that aren't here need the ExposureContrast op (Phase 5): `dynamic_ops`,
-//! `dyn_properties_prefix`, and `opt_prefix_test1`, whose file holds one.
+//! The others that aren't here aren't ported yet: `dyn_properties_prefix`, and
+//! `opt_prefix_test1`, whose file holds an ExposureContrast op.
 
 use ocio_testkit::upstream::check_close;
 
@@ -1034,4 +1034,70 @@ fn multi_op_prefix() {
     // Although finalized for UINT8, the transform may still be evaluated at 32f to verify that
     // it is a good approximation to the original.
     compare_render(&original_ops, &optimized_ops, 5e-5f32);
+}
+
+/// Port of `OCIO_ADD_TEST(OpOptimizers, dynamic_ops)` @ v2.5.2.
+#[test]
+fn dynamic_ops() {
+    use crate::ops::exposurecontrast::exposure_contrast_op::create_exposure_contrast_op;
+    use crate::ops::exposurecontrast::exposure_contrast_op_data::ExposureContrastOpData;
+
+    let fwd = TransformDirection::Forward;
+    // Non-identity matrix.
+    let mut matrix = MatrixOpData::new();
+    matrix.set_array_value(0, 2.);
+
+    // Identity exposure contrast.
+    let exposure = ExposureContrastOpData::default();
+
+    let exposure_dyn = exposure.clone();
+    exposure_dyn.get_exposure_property().make_dynamic();
+
+    // Test with non dynamic exposure contrast.
+    {
+        let mut ops = OpVec::new();
+        create_matrix_op(&mut ops, matrix.clone(), fwd);
+        create_exposure_contrast_op(&mut ops, exposure.clone(), fwd);
+        assert_eq!(ops.len(), 2);
+        assert!(!ops[0].is_identity().unwrap());
+        assert!(ops[1].is_identity().unwrap());
+
+        ops.finalize().unwrap();
+        ops.optimize(OptimizationFlags::DEFAULT).unwrap();
+        // It gets optimized.
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0].get_info(), "<MatrixOffsetOp>");
+    }
+
+    // Test with dynamic exposure contrast.
+    {
+        let mut ops = OpVec::new();
+        create_matrix_op(&mut ops, matrix.clone(), fwd);
+        create_exposure_contrast_op(&mut ops, exposure_dyn.clone(), fwd);
+        create_matrix_op(&mut ops, matrix.clone(), fwd);
+        assert_eq!(ops.len(), 3);
+        assert!(!ops[0].is_identity().unwrap());
+
+        // Exposure contrast is dynamic.
+        assert!(ops[1].is_dynamic());
+        assert!(!ops[1].is_identity().unwrap());
+
+        assert!(!ops[2].is_identity().unwrap());
+
+        // It does not get optimized with default flags (OPTIMIZATION_NO_DYNAMIC_PROPERTIES off).
+        ops.finalize().unwrap();
+        ops.optimize(OptimizationFlags::DEFAULT).unwrap();
+        assert_eq!(ops.len(), 3);
+        assert_eq!(ops[0].get_info(), "<MatrixOffsetOp>");
+        assert_eq!(ops[1].get_info(), "<ExposureContrastOp>");
+        assert_eq!(ops[2].get_info(), "<MatrixOffsetOp>");
+
+        // It does get optimized if flag is set.
+        // OPTIMIZATION_ALL includes OPTIMIZATION_NO_DYNAMIC_PROPERTIES.
+        // Exposure contrast will get optimized and the 2 matrix will be composed.
+        ops.finalize().unwrap();
+        ops.optimize(OptimizationFlags::ALL).unwrap();
+        assert_eq!(ops.len(), 1);
+        assert_eq!(ops[0].get_info(), "<MatrixOffsetOp>");
+    }
 }

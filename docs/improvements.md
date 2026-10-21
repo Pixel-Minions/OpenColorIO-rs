@@ -2984,6 +2984,75 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
 - **Status:** open: the Python module (Phase 6) matches it. The oracle's `checks.dump` reads
   the binding's iterators by index, so `object_calls` can write a manager out (`p5-oracle`).
 
+### I-217. The reverse log ExposureContrast ignores the log exposure step
+
+- **Upstream:** each ExposureContrast renderer sets its pivot in `updateData`, and the forward
+  log renderer also its exposure step; `ECLogarithmicRevRenderer::updateData` doesn't, so the
+  reverse log style keeps the member's default, 0.088, whatever the op's log exposure step
+  (`src/OpenColorIO/ops/exposurecontrast/ExposureContrastOpCPU.cpp:39-40, 651-657, 661-662` @
+  v2.5.2). An op with a step other than 0.088 and a non-zero exposure isn't undone by its
+  inverse: the forward style adds `exposure * step`, the reverse subtracts
+  `exposure * 0.088`. Its pivot does use the step.
+- **Who notices:** applications using a logarithmic ExposureContrastTransform with a log
+  exposure step of their own, inverted (or the inverse direction).
+- **A fix:** set `m_logExposureStep` in `ECLogarithmicRevRenderer::updateData` too.
+- **Status:** matched in `p5-ec` (5.1b, `crates/ocio-ops/src/ops/exposurecontrast/
+  exposure_contrast_op_cpu.rs`, `EcLogarithmicRevRenderer`); the battery's log style cases
+  with a step of 0.07 or 0.1 (`crates/ocio-ops/tests/exposure_contrast_oracle.rs`), inverse.
+
+### I-218. A GradingPrimary's NaN values differ between Windows and Linux
+
+- **Upstream:** `GradingPrimaryPreRender::update` (`ops/gradingprimary/GradingPrimary.cpp:
+  108-269` @ v2.5.2) combines each RGBM's master value with each channel's (`b.m_master +
+  b.m_red`, `c.m_master * c.m_red`, ...) in double precision. Both wheels compile it with
+  their own operand orders, different per channel and per platform (Windows `sub_1801d34a0`,
+  Linux `0x3a67b0`, read with `tools/wheel-inspect`): for the log style's forward brightness
+  MSVC adds `master + red`, `green + master`, `blue + master`, GCC `red + master`, `green +
+  master`, `master + blue`; and so on for the contrast, gamma, offset, exposure, gain and the
+  inverse video slope. Where a master and a channel value are both NaN, the pre-render value
+  keeps a different NaN on each platform. MSVC also folds the inverse log brightness'
+  negation into the constant (`x * -6.25 / 1023.`), which keeps a NaN's sign, where GCC flips
+  it.
+- **Who notices:** anyone comparing the uniforms of a dynamic GradingPrimaryTransform with NaN
+  values between a Windows and a Linux machine (and the pixels, where the NaN reaches them).
+- **A fix:** one operand order on every platform, which changes NaN bits on at least one.
+- **Status:** matched in `p5-ec` (the fix of `p5-values` 5.0a,
+  `crates/ocio-ops/src/ops/gradingprimary/grading_primary.rs`, `ORDERS`); the NaN cases of
+  `crates/ocio-ops/tests/grading_pre_render_oracle.rs` (random sets of NaN values, each with
+  its own payload and sign) check it on both platforms.
+
+### I-219. The hue curves' NaN knots and coefficients differ between Windows and Linux
+
+- **Upstream:** the hue curves' fitting (`PrepHueCurveData`, `CalcKsi`, `FitHueSpline` and
+  `EstimateHueSlopes`, `ops/gradingrgbcurve/GradingBSplineCurve.cpp:22-326` @ v2.5.2) is scalar
+  `float` code that the two wheels compile with different operand orders: of its 31 additions
+  and multiplications of the curve's values (where a NaN y coordinate, x coordinate or slope
+  can meet another NaN, or the default NaN of an invalid operation; seven of them show in no
+  output: six have an operand that is never NaN, namely `dx * K`, `k * (...)` with a constant,
+  `alpha * (...)`, `blend * (...)` and `scale * slopes[i]`, `scale * slopes[i + 1]`, which are
+  `KSI_DX_K`, `EST_NEAR_MIN_MUL`, `KSI_BOUND_MUL`, `KSI_BLEND_MUL`, `EST_SCALE0` and
+  `EST_SCALE1` in `hue_site` (`grading_b_spline_curve.rs`); and the seventh, the denominator
+  `len[k] + len[k - 1]` of the diagonal slopes, `EST_DIAG_DEN`, is NaN only where the
+  quotient's numerator is too, and `divss` keeps the numerator's NaN), MSVC swaps the
+  source's operands at 17 of them and GCC at 13, not the same ones (4 and 2 of those where
+  nothing shows; Windows `sub_1801e7490`, `sub_1801e55d0`, `sub_1801e4cb0`,
+  `sub_1801e64d0`; Linux inlined in `computeKnotsAndCoefsForHueCurve`, `0x3bff10`, read with
+  `tools/wheel-inspect`). For instance the second segment's constant `p0.y + slopes[i] *
+  (ksi - p0.x) + ...` is `((ksi - x0) * s0 + y0) + ...` on Windows and `(s0 * (ksi - x0) +
+  y0) + ...` on Linux, and a diagonal curve's slope numerator `len[k] * s[k] + len[k - 1] *
+  s[k - 1]` keeps the source's products on Windows but adds them the other way, where Linux
+  swaps the products' operands. A curve with NaN values gets knots and coefficients that keep
+  a different NaN on each platform: a dynamic op's uniforms, and the pixels where the NaN
+  reaches them.
+- **Who notices:** anyone comparing a GradingHueCurveTransform with NaN control points or
+  slopes between a Windows and a Linux machine.
+- **A fix:** one operand order on every platform, which changes NaN bits on at least one.
+- **Status:** matched in `p5-ec` (the fix of `p5-values` 5.0d,
+  `crates/ocio-ops/src/ops/gradingrgbcurve/grading_b_spline_curve.rs`, `HUE_SWAPS`, every
+  site from both wheels' machine code); `crates/ocio-ops/tests/hue_curve_nan_oracle.rs` (y,
+  x and slope NaNs each with its own payload and sign, and the verifier's specials) checks it
+  on both platforms.
+
 ### I-221. Archiving lists a directory whose path has 318 bytes or more by the wrong pattern
 
 - **Upstream:** `Config::archive` lists the config's directory and its subdirectories with
@@ -4096,3 +4165,43 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
 - **Status:** matched with an error in `p4-baker` (`crates/ocio/src/minizip/mz_zip_rw.rs`,
   `add_path_of_file`); `crates/ocio/tests/ocioz_archive_oracle.rs`, `dangling_link_with_a_star`
   (Linux, the port only).
+
+### U-81. Setting a grading value while another thread applies the processor
+
+- **Upstream:** a grading op's dynamic property holds its value and the pre-render values
+  computed from it, and the renderers read both at each `apply`; `setValue` writes them with no
+  lock (`DynamicPropertyGradingPrimaryImpl::setValue`, `src/OpenColorIO/DynamicProperty.cpp:
+  173-178` @ v2.5.2, and the RGB curve, tone and hue curve properties alike). An application
+  that sets a value through `getDynamicProperty` while another thread applies the processor has
+  a data race: the renderer can read a value half written, or pre-render values of one value
+  and the rest of another.
+- **Who notices:** applications that change a grading control while rendering on other
+  threads, such as a UI slider over a playing image.
+- **Decided** (owner decision P5-1, 2026-10-17): the port keeps each grading property's value
+  and its pre-render values under one lock; a set validates, computes and swaps them together,
+  and a renderer copies them once per `apply`. A single thread sees upstream's values exactly;
+  a set during an apply gives the whole old value or the whole new one.
+- **Status:** matched in `p5-values` (5.0a, `crates/ocio-ops/src/dynamic_property.rs`:
+  `DynamicPropertyGradingPrimaryImpl`; the RGB curve property, 2.6b, already held its value and
+  knots under a lock); `DynamicPropertyGradingToneImpl` in 5.0b;
+  `DynamicPropertyGradingHueCurveImpl` in 5.0c.
+
+### U-82. A drawn identity hue curve past nearly full knot arrays writes past their ends
+
+- **Upstream:** with `drawCurveOnly` set, `computeKnotsAndCoefsForHueCurve` gives each identity
+  curve two knots and three coefficients after those of the curves before it, with no check
+  against the arrays' sizes (`GradingBSplineCurve.cpp:890-928` @ v2.5.2; 120 knots and 360
+  coefficients for the eight curves, `GradingBSplineCurve.h:103-105`). The fitted curves check
+  ("Hue curve: maximum number of control points reached."), the identities don't: when the
+  curves before take 119 or 120 knots (a HUE_SAT curve of about 50 points with the six
+  identities before HUE_FX), the identity's writes go past the end of `m_knotsArray` (and of
+  `m_coefsArray` from 358 coefficients). The wheel then reports HUE_FX at knot offset 119,
+  count 2 (probed 2026-10-20), having written into memory it doesn't own.
+- **Who notices:** UIs drawing a hue curve of many control points.
+- **Decided** (the owner's general rule, 2026-09-30): the port refuses the identity with the
+  fitted curves' message before it changes the curve's offsets, so building the property or
+  setting the value fails, as it does for a fitted curve that doesn't fit.
+- **Status:** matched with an error in `p5-ec` (the fix of `p5-values` 5.0d,
+  `crates/ocio-ops/src/ops/gradingrgbcurve/grading_b_spline_curve.rs`,
+  `compute_knots_and_coefs_for_hue_curve`); `crates/ocio-ops/tests/hue_curve_knots_oracle.rs`,
+  `draw_curve_only_identities_past_the_full_arrays_are_refused` (the port only).

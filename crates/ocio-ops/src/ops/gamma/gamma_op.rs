@@ -56,6 +56,7 @@ impl GammaOpData {
             | OpData::Range(_)
             | OpData::Exponent(_)
             | OpData::GradingRgbCurve(_)
+            | OpData::ExposureContrast(_)
             | OpData::Lut3D(_)
             | OpData::Reference(_)
             | OpData::NoOp(_) => false,
@@ -77,6 +78,7 @@ impl GammaOpData {
             | OpData::Range(_)
             | OpData::Exponent(_)
             | OpData::GradingRgbCurve(_)
+            | OpData::ExposureContrast(_)
             | OpData::Lut3D(_)
             | OpData::Reference(_)
             | OpData::NoOp(_) => false,

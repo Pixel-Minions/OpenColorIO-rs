@@ -17,6 +17,7 @@ use crate::exception::{Exception, Result};
 use crate::format_metadata::{FormatMetadataImpl, METADATA_ID, METADATA_NAME};
 use crate::ops::cdl::CdlOpData;
 use crate::ops::exponent::ExponentOpData;
+use crate::ops::exposurecontrast::exposure_contrast_op_data::ExposureContrastOpData;
 use crate::ops::fixedfunction::fixed_function_op_data::FixedFunctionOpData;
 use crate::ops::gamma::GammaOpData;
 use crate::ops::gradingrgbcurve::grading_rgb_curve_op_data::GradingRgbCurveOpData;
@@ -120,6 +121,8 @@ pub enum OpData {
     FixedFunction(FixedFunctionOpData),
     /// `GradingRGBCurveOpData`.
     GradingRgbCurve(GradingRgbCurveOpData),
+    /// `ExposureContrastOpData`.
+    ExposureContrast(ExposureContrastOpData),
     /// `Lut3DOpData`.
     Lut3D(Lut3DOpData),
     /// `ReferenceOpData`.
@@ -149,6 +152,7 @@ impl OpData {
             OpData::Exponent(data) => data.get_type(),
             OpData::FixedFunction(data) => data.get_type(),
             OpData::GradingRgbCurve(data) => data.get_type(),
+            OpData::ExposureContrast(data) => data.get_type(),
             OpData::Lut3D(data) => data.get_type(),
             OpData::Reference(_) => OpDataType::Reference,
             OpData::NoOp(_) => OpDataType::NoOp,
@@ -175,6 +179,10 @@ impl OpData {
             }
             OpData::FixedFunction(data) => data.validate(),
             OpData::GradingRgbCurve(data) => data.validate(),
+            OpData::ExposureContrast(data) => {
+                data.validate();
+                Ok(())
+            }
             OpData::Lut3D(data) => data.validate(),
             OpData::Reference(data) => {
                 data.validate();
@@ -201,6 +209,7 @@ impl OpData {
             OpData::Exponent(data) => Ok(data.is_no_op()),
             OpData::FixedFunction(data) => Ok(data.is_no_op()),
             OpData::GradingRgbCurve(data) => Ok(data.is_no_op()),
+            OpData::ExposureContrast(data) => Ok(data.is_no_op()),
             OpData::Lut3D(data) => Ok(data.is_no_op()),
             OpData::Reference(data) => Ok(data.is_no_op()),
             OpData::NoOp(data) => Ok(data.is_no_op()),
@@ -222,6 +231,7 @@ impl OpData {
             OpData::Exponent(data) => Ok(data.is_identity()),
             OpData::FixedFunction(data) => Ok(data.is_identity()),
             OpData::GradingRgbCurve(data) => Ok(data.is_identity()),
+            OpData::ExposureContrast(data) => Ok(data.is_identity()),
             OpData::Lut3D(data) => Ok(data.is_identity()),
             OpData::Reference(data) => Ok(data.is_identity()),
             OpData::NoOp(data) => Ok(data.is_identity()),
@@ -249,6 +259,7 @@ impl OpData {
             | OpData::Range(_)
             | OpData::Exponent(_)
             | OpData::GradingRgbCurve(_)
+            | OpData::ExposureContrast(_)
             | OpData::Lut3D(_)
             | OpData::Reference(_)
             | OpData::NoOp(_) => Ok(()),
@@ -276,6 +287,7 @@ impl OpData {
             | OpData::Exponent(_)
             | OpData::FixedFunction(_)
             | OpData::GradingRgbCurve(_)
+            | OpData::ExposureContrast(_)
             | OpData::Reference(_)
             | OpData::NoOp(_) => Ok(OpData::Matrix(MatrixOpData::new())),
         }
@@ -297,6 +309,7 @@ impl OpData {
             OpData::Exponent(data) => data.has_channel_crosstalk(),
             OpData::FixedFunction(data) => data.has_channel_crosstalk(),
             OpData::GradingRgbCurve(data) => data.has_channel_crosstalk(),
+            OpData::ExposureContrast(data) => data.has_channel_crosstalk(),
             OpData::Lut3D(data) => data.has_channel_crosstalk(),
             OpData::Reference(data) => data.has_channel_crosstalk(),
             OpData::NoOp(data) => data.has_channel_crosstalk(),
@@ -321,6 +334,9 @@ impl OpData {
             }
             OpData::GradingRgbCurve(data) => {
                 matches!(other, OpData::GradingRgbCurve(other) if data.equals(other))
+            }
+            OpData::ExposureContrast(data) => {
+                matches!(other, OpData::ExposureContrast(other) if data.equals(other))
             }
             OpData::Lut3D(data) => matches!(other, OpData::Lut3D(other) if data.equals(other)),
             OpData::Reference(data) => {
@@ -347,6 +363,7 @@ impl OpData {
             OpData::Exponent(data) => Ok(data.get_cache_id()),
             OpData::FixedFunction(data) => Ok(data.get_cache_id()),
             OpData::GradingRgbCurve(data) => Ok(data.get_cache_id()),
+            OpData::ExposureContrast(data) => Ok(data.get_cache_id()),
             OpData::Lut3D(data) => Ok(data.get_cache_id()),
             OpData::Reference(data) => data.get_cache_id(),
             OpData::NoOp(data) => Ok(data.get_cache_id()),
@@ -367,6 +384,7 @@ impl OpData {
             OpData::Exponent(data) => data.get_format_metadata(),
             OpData::FixedFunction(data) => data.get_format_metadata(),
             OpData::GradingRgbCurve(data) => data.get_format_metadata(),
+            OpData::ExposureContrast(data) => data.get_format_metadata(),
             OpData::Lut3D(data) => data.get_format_metadata(),
             OpData::Reference(data) => data.get_format_metadata(),
             OpData::NoOp(data) => data.get_format_metadata(),
@@ -387,6 +405,7 @@ impl OpData {
             OpData::Exponent(data) => data.get_format_metadata_mut(),
             OpData::FixedFunction(data) => data.get_format_metadata_mut(),
             OpData::GradingRgbCurve(data) => data.get_format_metadata_mut(),
+            OpData::ExposureContrast(data) => data.get_format_metadata_mut(),
             OpData::Lut3D(data) => data.get_format_metadata_mut(),
             OpData::Reference(data) => data.get_format_metadata_mut(),
             OpData::NoOp(data) => data.get_format_metadata_mut(),

@@ -55,6 +55,7 @@ fn test_file(name: &str) -> Vec<u8> {
 #[test]
 fn compute_hash() {
     let _lock = hash_function_lock();
+    let _change = hash_function_change();
 
     let file1 = test_file("lut1d_4.spi1d");
     let file2 = test_file("lut1d_5.spi1d");

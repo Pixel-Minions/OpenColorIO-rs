@@ -8,18 +8,29 @@
 //! (`include/OpenColorIO/OpenColorTransforms.h:766-779, 810-824`).
 //!
 //! So far: the base (the type and whether the property is dynamic, and equality), the
-//! property that holds a double, and the GradingRGBCurve property (Phase 2, WP 2.6). The other
-//! grading properties and `DynamicPropertyValue::As*` come with the grading ops (Phase 5).
+//! property that holds a double, the GradingRGBCurve property (Phase 2, WP 2.6) and the
+//! GradingPrimary property (5.0a), the GradingTone property (5.0b), the GradingHueCurve property
+//! and `DynamicPropertyValue::As*` (5.0c).
 //!
 //! Upstream shares a property between the ops and processors that use it through a
 //! `std::shared_ptr`, and the application changes it through the same pointer. Here the
 //! handle is an [`Arc`], and the mutable state is atomic (PLAN.md §9), so a property can be
-//! changed through a shared handle. A renderer reads the value once per `apply`.
+//! changed through a shared handle. A renderer reads the value once per `apply`. A grading
+//! property's value and its pre-render form change together under a lock, so a renderer reads
+//! a consistent pair, where upstream's set races with a renderer's read (docs/improvements.md,
+//! U-81; owner decision P5-1).
 
-use crate::exception::Result;
-use crate::open_color_types::{DynamicPropertyType, RgbCurveType};
+use crate::exception::{Exception, Result};
+use crate::open_color_types::{
+    DynamicPropertyType, GradingStyle, HueCurveType, RgbCurveType, TransformDirection,
+};
+use crate::ops::gradinghuecurve::grading_hue_curve::GradingHueCurve;
+use crate::ops::gradingprimary::grading_primary::{
+    Float3, GradingPrimary, GradingPrimaryPreRender,
+};
 use crate::ops::gradingrgbcurve::grading_b_spline_curve::KnotsCoefs;
 use crate::ops::gradingrgbcurve::grading_rgb_curve::GradingRgbCurve;
+use crate::ops::gradingtone::grading_tone::{GradingTone, GradingTonePreRender};
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -382,6 +393,606 @@ impl PartialEq for DynamicPropertyGradingRgbCurveImpl {
     }
 }
 
+/// A shared GradingPrimary dynamic property.
+///
+/// Port of `DynamicPropertyGradingPrimaryImplRcPtr` (src/OpenColorIO/DynamicProperty.h:87 @
+/// v2.5.2).
+pub type DynamicPropertyGradingPrimaryImplRcPtr = Arc<DynamicPropertyGradingPrimaryImpl>;
+
+/// What a GradingPrimary property holds: the op's style and direction, the values, and their
+/// pre-render form for that style and direction.
+#[derive(Debug, Clone, Copy)]
+pub struct PrimaryState {
+    /// `m_style`.
+    pub style: GradingStyle,
+    /// `m_direction`.
+    pub direction: TransformDirection,
+    /// `m_value`.
+    pub value: GradingPrimary,
+    /// `m_preRenderValues`.
+    pub pre_render: GradingPrimaryPreRender,
+}
+
+/// The dynamic property of a GradingPrimary op: its values and their pre-render form, which
+/// the renderers use. It dereferences to its [`DynamicPropertyImpl`]. The values and their
+/// pre-render form change together under a lock (U-81).
+///
+/// Port of `DynamicPropertyGradingPrimaryImpl` (src/OpenColorIO/DynamicProperty.h:86-135,
+/// DynamicProperty.cpp:139-200 @ v2.5.2) and of the `DynamicPropertyGradingPrimary` interface
+/// (include/OpenColorIO/OpenColorTransforms.h).
+pub struct DynamicPropertyGradingPrimaryImpl {
+    base: DynamicPropertyImpl,
+    state: RwLock<PrimaryState>,
+}
+
+impl std::ops::Deref for DynamicPropertyGradingPrimaryImpl {
+    type Target = DynamicPropertyImpl;
+
+    fn deref(&self) -> &DynamicPropertyImpl {
+        &self.base
+    }
+}
+
+impl fmt::Debug for DynamicPropertyGradingPrimaryImpl {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DynamicPropertyGradingPrimaryImpl")
+            .field("is_dynamic", &self.is_dynamic())
+            .field("state", &*self.state())
+            .finish()
+    }
+}
+
+impl DynamicPropertyGradingPrimaryImpl {
+    /// A property of `value`, not validated, for `style` and `dir`, with its pre-render form.
+    ///
+    /// Port of `DynamicPropertyGradingPrimaryImpl::DynamicPropertyGradingPrimaryImpl(
+    /// GradingStyle, TransformDirection, const GradingPrimary &, bool)`
+    /// (src/OpenColorIO/DynamicProperty.cpp:139-149 @ v2.5.2).
+    pub fn new(
+        style: GradingStyle,
+        dir: TransformDirection,
+        value: &GradingPrimary,
+        dynamic: bool,
+    ) -> Self {
+        let mut pre_render = GradingPrimaryPreRender::default();
+        pre_render.update(style, dir, value);
+        Self::from_state(
+            PrimaryState {
+                style,
+                direction: dir,
+                value: *value,
+                pre_render,
+            },
+            dynamic,
+        )
+    }
+
+    /// A property holding `state` as it is, its pre-render form not computed again.
+    ///
+    /// Port of the copy constructor `DynamicPropertyGradingPrimaryImpl(GradingStyle,
+    /// TransformDirection, const GradingPrimary &, const GradingPrimaryPreRender &, bool)`
+    /// (src/OpenColorIO/DynamicProperty.cpp:151-162 @ v2.5.2).
+    pub fn from_state(state: PrimaryState, dynamic: bool) -> Self {
+        DynamicPropertyGradingPrimaryImpl {
+            base: DynamicPropertyImpl::new(DynamicPropertyType::GradingPrimary, dynamic),
+            state: RwLock::new(state),
+        }
+    }
+
+    /// The style, direction, values and pre-render form, read-locked.
+    pub fn state(&self) -> RwLockReadGuard<'_, PrimaryState> {
+        self.state.read().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn state_mut(&self) -> RwLockWriteGuard<'_, PrimaryState> {
+        self.state.write().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// A copy of the values.
+    ///
+    /// Port of `DynamicPropertyGradingPrimaryImpl::getValue` (DynamicProperty.h:104 @ v2.5.2).
+    pub fn get_value(&self) -> GradingPrimary {
+        self.state().value
+    }
+
+    /// Validates `value` for the property's style, then holds it and computes its pre-render
+    /// form.
+    ///
+    /// Port of `DynamicPropertyGradingPrimaryImpl::setValue` (DynamicProperty.cpp:173-178 @
+    /// v2.5.2).
+    pub fn set_value(&self, value: &GradingPrimary) -> Result<()> {
+        let mut state = self.state_mut();
+        value.validate(state.style)?;
+        state.value = *value;
+        let (style, direction) = (state.style, state.direction);
+        state.pre_render.update(style, direction, value);
+        Ok(())
+    }
+
+    /// Changes the style, and resets the values to the style's defaults.
+    ///
+    /// Port of `DynamicPropertyGradingPrimaryImpl::setStyle` (DynamicProperty.cpp:180-186 @
+    /// v2.5.2).
+    pub fn set_style(&self, style: GradingStyle) {
+        let mut state = self.state_mut();
+        state.style = style;
+        // Reset values to style defaults.
+        state.value = GradingPrimary::new(style);
+        let (direction, value) = (state.direction, state.value);
+        state.pre_render.update(style, direction, &value);
+    }
+
+    /// Changes the direction, and computes the pre-render form again when it changed.
+    ///
+    /// Port of `DynamicPropertyGradingPrimaryImpl::setDirection` (DynamicProperty.cpp:188-195
+    /// @ v2.5.2).
+    pub fn set_direction(&self, dir: TransformDirection) {
+        let mut state = self.state_mut();
+        if state.direction != dir {
+            state.direction = dir;
+            let (style, value) = (state.style, state.value);
+            state.pre_render.update(style, dir, &value);
+        }
+    }
+
+    /// Port of `DynamicPropertyGradingPrimaryImpl::getDirection` (DynamicProperty.h:109 @
+    /// v2.5.2).
+    pub fn get_direction(&self) -> TransformDirection {
+        self.state().direction
+    }
+
+    /// A copy of the pre-render form.
+    ///
+    /// Port of `DynamicPropertyGradingPrimaryImpl::getComputedValue` (DynamicProperty.h:110 @
+    /// v2.5.2).
+    pub fn get_computed_value(&self) -> GradingPrimaryPreRender {
+        self.state().pre_render
+    }
+
+    /// Port of `DynamicPropertyGradingPrimaryImpl::getBrightness` (DynamicProperty.h:112 @
+    /// v2.5.2).
+    pub fn get_brightness(&self) -> Float3 {
+        *self.state().pre_render.get_brightness()
+    }
+
+    /// Port of `DynamicPropertyGradingPrimaryImpl::getContrast` (DynamicProperty.h:113 @
+    /// v2.5.2).
+    pub fn get_contrast(&self) -> Float3 {
+        *self.state().pre_render.get_contrast()
+    }
+
+    /// Port of `DynamicPropertyGradingPrimaryImpl::getGamma` (DynamicProperty.h:114 @ v2.5.2).
+    pub fn get_gamma(&self) -> Float3 {
+        *self.state().pre_render.get_gamma()
+    }
+
+    /// Port of `DynamicPropertyGradingPrimaryImpl::getPivot` (DynamicProperty.h:115 @ v2.5.2).
+    pub fn get_pivot(&self) -> f64 {
+        self.state().pre_render.get_pivot()
+    }
+
+    /// Port of `DynamicPropertyGradingPrimaryImpl::getExposure` (DynamicProperty.h:117 @
+    /// v2.5.2).
+    pub fn get_exposure(&self) -> Float3 {
+        *self.state().pre_render.get_exposure()
+    }
+
+    /// Port of `DynamicPropertyGradingPrimaryImpl::getOffset` (DynamicProperty.h:118 @ v2.5.2).
+    pub fn get_offset(&self) -> Float3 {
+        *self.state().pre_render.get_offset()
+    }
+
+    /// Port of `DynamicPropertyGradingPrimaryImpl::getSlope` (DynamicProperty.h:120 @ v2.5.2).
+    pub fn get_slope(&self) -> Float3 {
+        *self.state().pre_render.get_slope()
+    }
+
+    /// Port of `DynamicPropertyGradingPrimaryImpl::getLocalBypass` (DynamicProperty.h:123 @
+    /// v2.5.2): the op changes nothing.
+    pub fn get_local_bypass(&self) -> bool {
+        self.state().pre_render.get_local_bypass()
+    }
+
+    /// A new property with the same style, direction, values, pre-render form and dynamic
+    /// state.
+    ///
+    /// Port of `DynamicPropertyGradingPrimaryImpl::createEditableCopy` (DynamicProperty.cpp:
+    /// 164-171 @ v2.5.2).
+    pub fn create_editable_copy(&self) -> DynamicPropertyGradingPrimaryImplRcPtr {
+        Arc::new(Self::from_state(*self.state(), self.is_dynamic()))
+    }
+
+    /// Whether two GradingPrimary properties are equal, as the optimizer sees it: a property
+    /// equals itself; two non-dynamic properties are equal when their values are (the style
+    /// and direction aren't compared); a dynamic property equals no other property.
+    ///
+    /// Port of `DynamicPropertyImpl::equals` (src/OpenColorIO/DynamicProperty.cpp:69-125 @
+    /// v2.5.2) for two GradingPrimary properties.
+    pub fn equals(&self, rhs: &DynamicPropertyGradingPrimaryImpl) -> bool {
+        if std::ptr::eq(self, rhs) {
+            return true;
+        }
+        if self.is_dynamic() == rhs.is_dynamic() {
+            if !self.is_dynamic() {
+                // Both not dynamic, same value or not.
+                return self.state().value == rhs.state().value;
+            }
+            // Both dynamic, may not be same.
+            return false;
+        }
+        // One dynamic, not the other.
+        false
+    }
+}
+
+/// Port of `operator==(const DynamicProperty &, const DynamicProperty &)`
+/// (src/OpenColorIO/DynamicProperty.cpp:50-61 @ v2.5.2) for two GradingPrimary properties.
+impl PartialEq for DynamicPropertyGradingPrimaryImpl {
+    fn eq(&self, other: &Self) -> bool {
+        self.equals(other)
+    }
+}
+
+/// A shared GradingTone dynamic property.
+///
+/// Port of `DynamicPropertyGradingToneImplRcPtr` (src/OpenColorIO/DynamicProperty.h:215 @
+/// v2.5.2).
+pub type DynamicPropertyGradingToneImplRcPtr = Arc<DynamicPropertyGradingToneImpl>;
+
+/// What a GradingTone property holds: the values and their pre-render form (which holds the
+/// style).
+#[derive(Debug, Clone, Copy)]
+pub struct ToneState {
+    /// `m_value`.
+    pub value: GradingTone,
+    /// `m_preRenderValues`.
+    pub pre_render: GradingTonePreRender,
+}
+
+/// The dynamic property of a GradingTone op: its values and their pre-render form, which the
+/// renderers use. It dereferences to its [`DynamicPropertyImpl`]. The values and their
+/// pre-render form change together under a lock (U-81).
+///
+/// Port of `DynamicPropertyGradingToneImpl` (src/OpenColorIO/DynamicProperty.h:214-243,
+/// DynamicProperty.cpp:399-441 @ v2.5.2) and of the `DynamicPropertyGradingTone` interface
+/// (include/OpenColorIO/OpenColorTransforms.h).
+pub struct DynamicPropertyGradingToneImpl {
+    base: DynamicPropertyImpl,
+    state: RwLock<ToneState>,
+}
+
+impl std::ops::Deref for DynamicPropertyGradingToneImpl {
+    type Target = DynamicPropertyImpl;
+
+    fn deref(&self) -> &DynamicPropertyImpl {
+        &self.base
+    }
+}
+
+impl fmt::Debug for DynamicPropertyGradingToneImpl {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DynamicPropertyGradingToneImpl")
+            .field("is_dynamic", &self.is_dynamic())
+            .field("state", &*self.state())
+            .finish()
+    }
+}
+
+impl DynamicPropertyGradingToneImpl {
+    /// A property of `value`, not validated, with its pre-render form for `style`.
+    ///
+    /// Port of `DynamicPropertyGradingToneImpl::DynamicPropertyGradingToneImpl(const
+    /// GradingTone &, GradingStyle, bool)` (src/OpenColorIO/DynamicProperty.cpp:401-409 @
+    /// v2.5.2).
+    pub fn new(value: &GradingTone, style: GradingStyle, dynamic: bool) -> Self {
+        let mut pre_render = GradingTonePreRender::new(style);
+        pre_render.update(value);
+        Self::from_state(
+            ToneState {
+                value: *value,
+                pre_render,
+            },
+            dynamic,
+        )
+    }
+
+    /// A property holding `state` as it is, its pre-render form not computed again.
+    ///
+    /// Port of the copy constructor `DynamicPropertyGradingToneImpl(const GradingTone &, const
+    /// GradingTonePreRender &, bool)` (src/OpenColorIO/DynamicProperty.cpp:411-418 @ v2.5.2).
+    pub fn from_state(state: ToneState, dynamic: bool) -> Self {
+        DynamicPropertyGradingToneImpl {
+            base: DynamicPropertyImpl::new(DynamicPropertyType::GradingTone, dynamic),
+            state: RwLock::new(state),
+        }
+    }
+
+    /// The values and pre-render form, read-locked.
+    pub fn state(&self) -> RwLockReadGuard<'_, ToneState> {
+        self.state.read().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn state_mut(&self) -> RwLockWriteGuard<'_, ToneState> {
+        self.state.write().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// A copy of the values.
+    ///
+    /// Port of `DynamicPropertyGradingToneImpl::getValue` (DynamicProperty.h:229 @ v2.5.2).
+    pub fn get_value(&self) -> GradingTone {
+        self.state().value
+    }
+
+    /// Validates `value`, then holds it and computes its pre-render form.
+    ///
+    /// Port of `DynamicPropertyGradingToneImpl::setValue` (DynamicProperty.cpp:425-431 @
+    /// v2.5.2).
+    pub fn set_value(&self, value: &GradingTone) -> Result<()> {
+        value.validate()?;
+        let mut state = self.state_mut();
+        state.value = *value;
+        state.pre_render.update(value);
+        Ok(())
+    }
+
+    /// Changes the style, and resets the values to the style's defaults.
+    ///
+    /// Port of `DynamicPropertyGradingToneImpl::setStyle` (DynamicProperty.cpp:433-439 @
+    /// v2.5.2).
+    pub fn set_style(&self, style: GradingStyle) {
+        let mut state = self.state_mut();
+        // Reset values to style defaults.
+        state.value = GradingTone::new(style);
+        state.pre_render.set_style(style);
+        let value = state.value;
+        state.pre_render.update(&value);
+    }
+
+    /// A copy of the pre-render form.
+    ///
+    /// Port of `DynamicPropertyGradingToneImpl::getComputedValue` (DynamicProperty.h:233 @
+    /// v2.5.2).
+    pub fn get_computed_value(&self) -> GradingTonePreRender {
+        self.state().pre_render
+    }
+
+    /// Port of `DynamicPropertyGradingToneImpl::getLocalBypass` (DynamicProperty.h:235 @
+    /// v2.5.2): the op changes nothing.
+    pub fn get_local_bypass(&self) -> bool {
+        self.state().pre_render.local_bypass
+    }
+
+    /// A new property with the same values, pre-render form and dynamic state.
+    ///
+    /// Port of `DynamicPropertyGradingToneImpl::createEditableCopy` (DynamicProperty.cpp:
+    /// 420-423 @ v2.5.2).
+    pub fn create_editable_copy(&self) -> DynamicPropertyGradingToneImplRcPtr {
+        Arc::new(Self::from_state(*self.state(), self.is_dynamic()))
+    }
+
+    /// Whether two GradingTone properties are equal, as the optimizer sees it: a property
+    /// equals itself; two non-dynamic properties are equal when their values are; a dynamic
+    /// property equals no other property.
+    ///
+    /// Port of `DynamicPropertyImpl::equals` (src/OpenColorIO/DynamicProperty.cpp:69-125 @
+    /// v2.5.2) for two GradingTone properties.
+    pub fn equals(&self, rhs: &DynamicPropertyGradingToneImpl) -> bool {
+        if std::ptr::eq(self, rhs) {
+            return true;
+        }
+        if self.is_dynamic() == rhs.is_dynamic() {
+            if !self.is_dynamic() {
+                // Both not dynamic, same value or not.
+                return self.state().value == rhs.state().value;
+            }
+            // Both dynamic, may not be same.
+            return false;
+        }
+        // One dynamic, not the other.
+        false
+    }
+}
+
+/// Port of `operator==(const DynamicProperty &, const DynamicProperty &)`
+/// (src/OpenColorIO/DynamicProperty.cpp:50-61 @ v2.5.2) for two GradingTone properties.
+impl PartialEq for DynamicPropertyGradingToneImpl {
+    fn eq(&self, other: &Self) -> bool {
+        self.equals(other)
+    }
+}
+
+/// A shared GradingHueCurve dynamic property.
+///
+/// Port of `DynamicPropertyGradingHueCurveImplRcPtr` (src/OpenColorIO/DynamicProperty.h:177 @
+/// v2.5.2).
+pub type DynamicPropertyGradingHueCurveImplRcPtr = Arc<DynamicPropertyGradingHueCurveImpl>;
+
+/// The value of a GradingHueCurve property and the knots and coefficients computed from it.
+#[derive(Debug, Clone)]
+pub struct HueCurveState {
+    /// `m_gradingHueCurve`.
+    pub value: GradingHueCurve,
+    /// `m_knotsCoefs`: the eight curves' knots and coefficients.
+    pub knots_coefs: KnotsCoefs,
+}
+
+/// The dynamic property of a GradingHueCurve op: its eight curves, and their knots and
+/// coefficients, which the renderers evaluate. It dereferences to its [`DynamicPropertyImpl`].
+/// The value and the knots change together under a lock (U-81).
+///
+/// Port of `DynamicPropertyGradingHueCurveImpl` (src/OpenColorIO/DynamicProperty.h:176-212,
+/// DynamicProperty.cpp:299-397 @ v2.5.2) and of the `DynamicPropertyGradingHueCurve` interface
+/// (include/OpenColorIO/OpenColorTransforms.h).
+pub struct DynamicPropertyGradingHueCurveImpl {
+    base: DynamicPropertyImpl,
+    state: RwLock<HueCurveState>,
+}
+
+impl std::ops::Deref for DynamicPropertyGradingHueCurveImpl {
+    type Target = DynamicPropertyImpl;
+
+    fn deref(&self) -> &DynamicPropertyImpl {
+        &self.base
+    }
+}
+
+impl fmt::Debug for DynamicPropertyGradingHueCurveImpl {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DynamicPropertyGradingHueCurveImpl")
+            .field("is_dynamic", &self.is_dynamic())
+            .field("state", &*self.state())
+            .finish()
+    }
+}
+
+impl DynamicPropertyGradingHueCurveImpl {
+    /// A property holding a copy of `value`, not validated, with its knots and coefficients;
+    /// the errors of fitting the curves (too many control points).
+    ///
+    /// Port of `DynamicPropertyGradingHueCurveImpl::DynamicPropertyGradingHueCurveImpl`
+    /// (src/OpenColorIO/DynamicProperty.cpp:301-308 @ v2.5.2).
+    pub fn new(value: &GradingHueCurve, dynamic: bool) -> Result<Self> {
+        let mut state = HueCurveState {
+            value: value.clone(),
+            knots_coefs: KnotsCoefs::new(8),
+        };
+        // Convert control points from the UI into knots and coefficients for the apply.
+        Self::precompute(&mut state)?;
+        Ok(DynamicPropertyGradingHueCurveImpl {
+            base: DynamicPropertyImpl::new(DynamicPropertyType::GradingHueCurve, dynamic),
+            state: RwLock::new(state),
+        })
+    }
+
+    /// The value and its knots and coefficients, read-locked.
+    pub fn state(&self) -> RwLockReadGuard<'_, HueCurveState> {
+        self.state.read().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn state_mut(&self) -> RwLockWriteGuard<'_, HueCurveState> {
+        self.state.write().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// A copy of the curves.
+    ///
+    /// Port of `DynamicPropertyGradingHueCurveImpl::getValue` (DynamicProperty.cpp:310-313 @
+    /// v2.5.2).
+    pub fn get_value(&self) -> GradingHueCurve {
+        self.state().value.clone()
+    }
+
+    /// Validates `value`, then holds a copy of it and computes its knots and coefficients.
+    /// When fitting the curves fails, the property keeps the new value and the knots of the
+    /// curves fitted before the failure, as upstream's does.
+    ///
+    /// Port of `DynamicPropertyGradingHueCurveImpl::setValue` (DynamicProperty.cpp:315-322 @
+    /// v2.5.2).
+    pub fn set_value(&self, value: &GradingHueCurve) -> Result<()> {
+        value.validate()?;
+        let mut state = self.state_mut();
+        state.value = value.clone();
+        // Convert control points from the UI into knots and coefficients for the apply.
+        Self::precompute(&mut state)
+    }
+
+    /// Port of `DynamicPropertyGradingHueCurveImpl::getLocalBypass` (DynamicProperty.cpp:
+    /// 324-327 @ v2.5.2).
+    pub fn get_local_bypass(&self) -> bool {
+        self.state().knots_coefs.local_bypass
+    }
+
+    /// Port of `DynamicPropertyGradingHueCurveImpl::getNumKnots` (DynamicProperty.cpp:329-332
+    /// @ v2.5.2).
+    pub fn get_num_knots(&self) -> i32 {
+        self.state().knots_coefs.num_knots
+    }
+
+    /// Port of `DynamicPropertyGradingHueCurveImpl::getNumCoefs` (DynamicProperty.cpp:334-337
+    /// @ v2.5.2).
+    pub fn get_num_coefs(&self) -> i32 {
+        self.state().knots_coefs.num_coefs
+    }
+
+    /// The offset and count of each of the eight curves.
+    ///
+    /// Port of `DynamicPropertyGradingHueCurveImpl::GetNumOffsetValues` (DynamicProperty.h:
+    /// 192 @ v2.5.2).
+    pub const NUM_OFFSET_VALUES: i32 = 16;
+
+    /// Port of `DynamicPropertyGradingHueCurveImpl::GetMaxKnots` (DynamicProperty.cpp:359-362
+    /// @ v2.5.2).
+    pub const MAX_KNOTS: u32 = KnotsCoefs::MAX_NUM_KNOTS as u32;
+
+    /// Port of `DynamicPropertyGradingHueCurveImpl::GetMaxCoefs` (DynamicProperty.cpp:364-367
+    /// @ v2.5.2).
+    pub const MAX_COEFS: u32 = KnotsCoefs::MAX_NUM_COEFS as u32;
+
+    /// Fits the eight curves, in order, packing their knots and coefficients.
+    ///
+    /// Port of `DynamicPropertyGradingHueCurveImpl::precompute` (DynamicProperty.cpp:369-390 @
+    /// v2.5.2). Its "unexpected curve implementation" can't happen.
+    fn precompute(state: &mut HueCurveState) -> Result<()> {
+        let knots_coefs = &mut state.knots_coefs;
+        knots_coefs.local_bypass = false;
+        knots_coefs.num_coefs = 0;
+        knots_coefs.num_knots = 0;
+
+        // Compute knots and coefficients for each control point and pack all knots and coefs
+        // of all curves in one knots array and one coef array, using an offset array to find
+        // specific curve data.
+        let draw_curve_only = state.value.get_draw_curve_only();
+        for (c, curve) in HueCurveType::CURVES.iter().zip(state.value.curves()) {
+            curve.compute_knots_and_coefs(knots_coefs, *c as usize, draw_curve_only)?;
+        }
+        if knots_coefs.num_knots <= 0 {
+            knots_coefs.local_bypass = true;
+        }
+        Ok(())
+    }
+
+    /// A new property with the same value, knots and dynamic state.
+    ///
+    /// Port of `DynamicPropertyGradingHueCurveImpl::createEditableCopy` (DynamicProperty.cpp:
+    /// 392-397 @ v2.5.2): it makes a property of the value, which fits the curves again, then
+    /// copies the knots over.
+    pub fn create_editable_copy(&self) -> Result<DynamicPropertyGradingHueCurveImplRcPtr> {
+        let state = self.state().clone();
+        let res = DynamicPropertyGradingHueCurveImpl::new(&state.value, self.is_dynamic())?;
+        res.state_mut().knots_coefs = state.knots_coefs;
+        Ok(Arc::new(res))
+    }
+
+    /// Whether two hue curve properties are equal, as the optimizer sees it: a property
+    /// equals itself; two non-dynamic properties are equal when their curves are; a dynamic
+    /// property equals no other property.
+    ///
+    /// Port of `DynamicPropertyImpl::equals` (src/OpenColorIO/DynamicProperty.cpp:69-125 @
+    /// v2.5.2) for two GradingHueCurve properties.
+    pub fn equals(&self, rhs: &DynamicPropertyGradingHueCurveImpl) -> bool {
+        if std::ptr::eq(self, rhs) {
+            return true;
+        }
+        if self.is_dynamic() == rhs.is_dynamic() {
+            if !self.is_dynamic() {
+                // Both not dynamic, same value or not.
+                return self.state().value == rhs.state().value;
+            }
+            // Both dynamic, may not be same.
+            return false;
+        }
+        // One dynamic, not the other.
+        false
+    }
+}
+
+/// Port of `operator==(const DynamicProperty &, const DynamicProperty &)`
+/// (src/OpenColorIO/DynamicProperty.cpp:50-61 @ v2.5.2) for two hue curve properties.
+impl PartialEq for DynamicPropertyGradingHueCurveImpl {
+    fn eq(&self, other: &Self) -> bool {
+        self.equals(other)
+    }
+}
+
 /// A shared handle to a dynamic property of any kind: what `Processor::getDynamicProperty`
 /// returns. `==` compares the properties, as upstream's `operator==` on `DynamicProperty`
 /// references does.
@@ -397,6 +1008,12 @@ pub enum DynamicPropertyRcPtr {
     Double(DynamicPropertyDoubleImplRcPtr),
     /// A GradingRGBCurve's curves.
     GradingRgbCurve(DynamicPropertyGradingRgbCurveImplRcPtr),
+    /// A GradingPrimary's values.
+    GradingPrimary(DynamicPropertyGradingPrimaryImplRcPtr),
+    /// A GradingTone's values.
+    GradingTone(DynamicPropertyGradingToneImplRcPtr),
+    /// A GradingHueCurve's curves.
+    GradingHueCurve(DynamicPropertyGradingHueCurveImplRcPtr),
 }
 
 impl DynamicPropertyRcPtr {
@@ -405,6 +1022,9 @@ impl DynamicPropertyRcPtr {
         match self {
             DynamicPropertyRcPtr::Double(p) => p,
             DynamicPropertyRcPtr::GradingRgbCurve(p) => p,
+            DynamicPropertyRcPtr::GradingPrimary(p) => p,
+            DynamicPropertyRcPtr::GradingTone(p) => p,
+            DynamicPropertyRcPtr::GradingHueCurve(p) => p,
         }
     }
 
@@ -423,8 +1043,90 @@ impl DynamicPropertyRcPtr {
                 DynamicPropertyRcPtr::GradingRgbCurve(l),
                 DynamicPropertyRcPtr::GradingRgbCurve(r),
             ) => l.equals(r),
+            (DynamicPropertyRcPtr::GradingPrimary(l), DynamicPropertyRcPtr::GradingPrimary(r)) => {
+                l.equals(r)
+            }
+            (DynamicPropertyRcPtr::GradingTone(l), DynamicPropertyRcPtr::GradingTone(r)) => {
+                l.equals(r)
+            }
+            (
+                DynamicPropertyRcPtr::GradingHueCurve(l),
+                DynamicPropertyRcPtr::GradingHueCurve(r),
+            ) => l.equals(r),
             (DynamicPropertyRcPtr::Double(_), _)
-            | (DynamicPropertyRcPtr::GradingRgbCurve(_), _) => false,
+            | (DynamicPropertyRcPtr::GradingRgbCurve(_), _)
+            | (DynamicPropertyRcPtr::GradingPrimary(_), _)
+            | (DynamicPropertyRcPtr::GradingTone(_), _)
+            | (DynamicPropertyRcPtr::GradingHueCurve(_), _) => false,
+        }
+    }
+
+    /// The property as a double property; "Dynamic property value is not a double." for
+    /// another kind.
+    ///
+    /// Port of `DynamicPropertyValue::AsDouble` (src/OpenColorIO/DynamicProperty.cpp:18-23 @
+    /// v2.5.2).
+    #[doc(alias = "AsDouble")]
+    pub fn as_double(&self) -> Result<DynamicPropertyDoubleImplRcPtr> {
+        match self {
+            DynamicPropertyRcPtr::Double(p) => Ok(Arc::clone(p)),
+            _ => Err(Exception::new("Dynamic property value is not a double.")),
+        }
+    }
+
+    /// The property as a GradingPrimary property; "Dynamic property value is not a grading
+    /// primary." for another kind.
+    ///
+    /// Port of `DynamicPropertyValue::AsGradingPrimary` (DynamicProperty.cpp:24-29 @ v2.5.2).
+    #[doc(alias = "AsGradingPrimary")]
+    pub fn as_grading_primary(&self) -> Result<DynamicPropertyGradingPrimaryImplRcPtr> {
+        match self {
+            DynamicPropertyRcPtr::GradingPrimary(p) => Ok(Arc::clone(p)),
+            _ => Err(Exception::new(
+                "Dynamic property value is not a grading primary.",
+            )),
+        }
+    }
+
+    /// The property as a GradingRGBCurve property; "Dynamic property value is not a grading
+    /// RGB curve." for another kind.
+    ///
+    /// Port of `DynamicPropertyValue::AsGradingRGBCurve` (DynamicProperty.cpp:30-35 @ v2.5.2).
+    #[doc(alias = "AsGradingRGBCurve")]
+    pub fn as_grading_rgb_curve(&self) -> Result<DynamicPropertyGradingRgbCurveImplRcPtr> {
+        match self {
+            DynamicPropertyRcPtr::GradingRgbCurve(p) => Ok(Arc::clone(p)),
+            _ => Err(Exception::new(
+                "Dynamic property value is not a grading RGB curve.",
+            )),
+        }
+    }
+
+    /// The property as a GradingHueCurve property; "Dynamic property value is not a grading
+    /// hue curve." for another kind.
+    ///
+    /// Port of `DynamicPropertyValue::AsGradingHueCurve` (DynamicProperty.cpp:36-41 @ v2.5.2).
+    #[doc(alias = "AsGradingHueCurve")]
+    pub fn as_grading_hue_curve(&self) -> Result<DynamicPropertyGradingHueCurveImplRcPtr> {
+        match self {
+            DynamicPropertyRcPtr::GradingHueCurve(p) => Ok(Arc::clone(p)),
+            _ => Err(Exception::new(
+                "Dynamic property value is not a grading hue curve.",
+            )),
+        }
+    }
+
+    /// The property as a GradingTone property; "Dynamic property value is not a grading
+    /// tone." for another kind.
+    ///
+    /// Port of `DynamicPropertyValue::AsGradingTone` (DynamicProperty.cpp:42-47 @ v2.5.2).
+    #[doc(alias = "AsGradingTone")]
+    pub fn as_grading_tone(&self) -> Result<DynamicPropertyGradingToneImplRcPtr> {
+        match self {
+            DynamicPropertyRcPtr::GradingTone(p) => Ok(Arc::clone(p)),
+            _ => Err(Exception::new(
+                "Dynamic property value is not a grading tone.",
+            )),
         }
     }
 }
@@ -438,6 +1140,24 @@ impl From<DynamicPropertyDoubleImplRcPtr> for DynamicPropertyRcPtr {
 impl From<DynamicPropertyGradingRgbCurveImplRcPtr> for DynamicPropertyRcPtr {
     fn from(p: DynamicPropertyGradingRgbCurveImplRcPtr) -> Self {
         DynamicPropertyRcPtr::GradingRgbCurve(p)
+    }
+}
+
+impl From<DynamicPropertyGradingPrimaryImplRcPtr> for DynamicPropertyRcPtr {
+    fn from(p: DynamicPropertyGradingPrimaryImplRcPtr) -> Self {
+        DynamicPropertyRcPtr::GradingPrimary(p)
+    }
+}
+
+impl From<DynamicPropertyGradingToneImplRcPtr> for DynamicPropertyRcPtr {
+    fn from(p: DynamicPropertyGradingToneImplRcPtr) -> Self {
+        DynamicPropertyRcPtr::GradingTone(p)
+    }
+}
+
+impl From<DynamicPropertyGradingHueCurveImplRcPtr> for DynamicPropertyRcPtr {
+    fn from(p: DynamicPropertyGradingHueCurveImplRcPtr) -> Self {
+        DynamicPropertyRcPtr::GradingHueCurve(p)
     }
 }
 
