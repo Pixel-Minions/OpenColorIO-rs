@@ -18,7 +18,7 @@ use std::fmt;
 
 use crate::cfmt::{Crt, OStringStream};
 use crate::exception::{Exception, Result};
-use crate::math_utils::{sse_add, sse_mul, std_max, std_min};
+use crate::math_utils::{sse_add, sse_mul, sse_sub, std_max, std_min};
 use crate::open_color_types::{BSplineType, HueCurveType};
 
 /// A 2D control point of a [`GradingBSplineCurve`]. `==` compares both coordinates as floats.
@@ -640,6 +640,8 @@ const WINDOWS: bool = cfg!(target_os = "windows");
 ///
 /// Port of `PrepHueCurveData` (src/OpenColorIO/ops/gradingrgbcurve/GradingBSplineCurve.cpp:
 /// 22-96 @ v2.5.2).
+///
+/// Its additions and multiplications are in each wheel's operand order ([`HUE_SWAPS`]).
 fn prep_hue_curve_data(
     ctrl_pnts: &[GradingControlPoint],
     out_ctrl_pnts: &mut Vec<GradingControlPoint>,
@@ -689,7 +691,7 @@ fn prep_hue_curve_data(
     let x_span = out_ctrl_pnts[num_ctrl_pnts - 1].x - out_ctrl_pnts[0].x;
     for i in 1..out_ctrl_pnts.len() {
         if (out_ctrl_pnts[i].x - out_ctrl_pnts[i - 1].x) < x_span * tol {
-            out_ctrl_pnts[i].x = out_ctrl_pnts[i - 1].x + x_span * tol;
+            out_ctrl_pnts[i].x = ad(PREP_X, out_ctrl_pnts[i - 1].x, x_span * tol);
         }
     }
     if !is_horizontal {
@@ -697,7 +699,7 @@ fn prep_hue_curve_data(
         let y_span = out_ctrl_pnts[num_ctrl_pnts - 1].y - out_ctrl_pnts[0].y;
         for i in 1..out_ctrl_pnts.len() {
             if (out_ctrl_pnts[i].y - out_ctrl_pnts[i - 1].y) < y_span * tol {
-                out_ctrl_pnts[i].y = out_ctrl_pnts[i - 1].y + y_span * tol;
+                out_ctrl_pnts[i].y = ad(PREP_Y, out_ctrl_pnts[i - 1].y, y_span * tol);
             }
         }
     }
@@ -724,10 +726,140 @@ fn prep_hue_curve_data(
     }
 }
 
+/// The sites of the hue curves' fitting where two NaN values can meet in an addition or a
+/// multiplication (a NaN y coordinate, x coordinate or slope, and the default NaN of an invalid
+/// operation): each is a bit of [`HUE_SWAPS`], set where the wheel's machine code computes
+/// `b op a` for the source's `a op b`. The two wheels differ (`docs/improvements.md` I-219).
+/// Read with `tools/wheel-inspect`: Windows `PrepHueCurveData` `sub_1801e7490`,
+/// `EstimateHueSlopes` `sub_1801e55d0`, `CalcKsi` `sub_1801e4cb0`, `FitHueSpline`
+/// `sub_1801e64d0`; Linux, all four inlined in `computeKnotsAndCoefsForHueCurve` (0x3bff10).
+mod hue_site {
+    /// `PrepHueCurveData`: `x[i - 1] + xSpan * tol`.
+    pub(super) const PREP_X: u32 = 0;
+    /// `PrepHueCurveData`: `y[i - 1] + ySpan * tol`.
+    pub(super) const PREP_Y: u32 = 1;
+    /// `CalcKsi`: `p0.x + 0.5f * dx`.
+    pub(super) const KSI_X_MID: u32 = 2;
+    /// `CalcKsi`: `p0.x + dx * K`.
+    pub(super) const KSI_LEFT: u32 = 3;
+    /// `CalcKsi`: `dx * K` (`K` is a constant: no two NaNs).
+    pub(super) const KSI_DX_K: u32 = 4;
+    /// `CalcKsi`: `mMin + B * dm`.
+    pub(super) const KSI_B_HIGH: u32 = 5;
+    /// `CalcKsi`: `mMin + (1.f - B) * dm`.
+    pub(super) const KSI_B_LOW: u32 = 6;
+    /// `CalcKsi`: `xMid + alpha * (bnd - xMid)`, the top and bottom bounds.
+    pub(super) const KSI_BOUND: u32 = 7;
+    /// `CalcKsi`: `alpha * (bnd - xMid)` (`alpha` is never NaN).
+    pub(super) const KSI_BOUND_MUL: u32 = 8;
+    /// `CalcKsi`: `bnd + blend * (...)`, both blends.
+    pub(super) const KSI_BLEND: u32 = 9;
+    /// `CalcKsi`: `blend * (...)`, both blends.
+    pub(super) const KSI_BLEND_MUL: u32 = 10;
+    /// `FitHueSpline`: `slopes[i] + slopes[i + 1]`.
+    pub(super) const FIT_SLOPES: u32 = 11;
+    /// `FitHueSpline`: `(2 * secant - s1) + (s1 - s0) * (ksi - x0) / dx`.
+    pub(super) const FIT_M_BAR: u32 = 12;
+    /// `FitHueSpline`: `(s1 - s0) * (ksi - x0)`.
+    pub(super) const FIT_M_BAR_MUL: u32 = 13;
+    /// `FitHueSpline`: `(y0 + s0 * d) + 0.5f * eta * d * d`.
+    pub(super) const FIT_C2: u32 = 14;
+    /// `FitHueSpline`: `y0 + s0 * d`.
+    pub(super) const FIT_C2_Y: u32 = 15;
+    /// `FitHueSpline`: `s0 * d`.
+    pub(super) const FIT_C2_S: u32 = 16;
+    /// `FitHueSpline`: `(0.5f * eta * d) * d`.
+    pub(super) const FIT_C2_DD: u32 = 17;
+    /// `FitHueSpline`: `(0.5f * eta) * d`.
+    pub(super) const FIT_C2_D: u32 = 18;
+    /// `EstimateHueSlopes`: `dx * dx + dy * dy`.
+    pub(super) const EST_LEN: u32 = 19;
+    /// `EstimateHueSlopes`: `secant[i] + secant[i - 1]`.
+    pub(super) const EST_DENOM: u32 = 20;
+    /// `EstimateHueSlopes`: `(2 * secant[i]) * secant[i - 1]`.
+    pub(super) const EST_NUM: u32 = 21;
+    /// `EstimateHueSlopes`: `DL + secantLen[j + 1]`.
+    pub(super) const EST_DL: u32 = 22;
+    /// `EstimateHueSlopes`: `len[k] * s[k] + len[k - 1] * s[k - 1]`.
+    pub(super) const EST_DIAG_NUM: u32 = 23;
+    /// `EstimateHueSlopes`: `len[k] * s[k]`.
+    pub(super) const EST_DIAG_K: u32 = 24;
+    /// `EstimateHueSlopes`: `len[k - 1] * s[k - 1]`.
+    pub(super) const EST_DIAG_K1: u32 = 25;
+    /// `EstimateHueSlopes`: `len[k] + len[k - 1]`.
+    pub(super) const EST_DIAG_DEN: u32 = 26;
+    /// `EstimateHueSlopes`: `slopes[i] + k * (slopes[i + 1] - slopes[i])`.
+    pub(super) const EST_NEAR_MIN: u32 = 27;
+    /// `EstimateHueSlopes`: `k * (slopes[i + 1] - slopes[i])`.
+    pub(super) const EST_NEAR_MIN_MUL: u32 = 28;
+    /// `EstimateHueSlopes`: `slopes[i] *= scale`.
+    pub(super) const EST_SCALE0: u32 = 29;
+    /// `EstimateHueSlopes`: `slopes[i + 1] *= scale`.
+    pub(super) const EST_SCALE1: u32 = 30;
+}
+
+use hue_site::*;
+
+/// The sites where the Windows wheel (MSVC) swaps the source's operands.
+#[cfg(windows)]
+const HUE_SWAPS: u64 = 1 << KSI_X_MID
+    | 1 << KSI_LEFT
+    | 1 << KSI_B_HIGH
+    | 1 << KSI_B_LOW
+    | 1 << KSI_BOUND
+    | 1 << KSI_BOUND_MUL
+    | 1 << KSI_BLEND
+    | 1 << FIT_M_BAR
+    | 1 << FIT_C2_Y
+    | 1 << FIT_C2_S
+    | 1 << FIT_C2_D
+    | 1 << EST_LEN
+    | 1 << EST_DIAG_NUM
+    | 1 << EST_DIAG_DEN
+    | 1 << EST_NEAR_MIN
+    | 1 << EST_NEAR_MIN_MUL
+    | 1 << EST_SCALE1;
+
+/// The sites where the Linux wheel (GCC) swaps the source's operands.
+#[cfg(not(windows))]
+const HUE_SWAPS: u64 = 1 << KSI_X_MID
+    | 1 << KSI_DX_K
+    | 1 << KSI_B_HIGH
+    | 1 << KSI_B_LOW
+    | 1 << KSI_BOUND
+    | 1 << KSI_BOUND_MUL
+    | 1 << KSI_BLEND
+    | 1 << FIT_M_BAR
+    | 1 << FIT_C2_Y
+    | 1 << EST_LEN
+    | 1 << EST_DIAG_K
+    | 1 << EST_DIAG_K1
+    | 1 << EST_NEAR_MIN;
+
+/// `a + b` at `site`, in the wheel's operand order.
+fn ad(site: u32, a: f32, b: f32) -> f32 {
+    if HUE_SWAPS >> site & 1 == 1 {
+        sse_add(b, a)
+    } else {
+        sse_add(a, b)
+    }
+}
+
+/// `a * b` at `site`, in the wheel's operand order.
+fn ml(site: u32, a: f32, b: f32) -> f32 {
+    if HUE_SWAPS >> site & 1 == 1 {
+        sse_mul(b, a)
+    } else {
+        sse_mul(a, b)
+    }
+}
+
 /// The middle knot of segment `i`, from its secant and its end slopes.
 ///
 /// Port of `CalcKsi` (src/OpenColorIO/ops/gradingrgbcurve/GradingBSplineCurve.cpp:100-174 @
 /// v2.5.2).
+///
+/// Its additions and multiplications are in each wheel's operand order ([`HUE_SWAPS`]).
 fn calc_ksi(i: usize, out_ctrl_pnts: &[GradingControlPoint], slopes: &[f32]) -> f32 {
     let p0 = &out_ctrl_pnts[i];
     let p1 = &out_ctrl_pnts[i + 1];
@@ -744,9 +876,9 @@ fn calc_ksi(i: usize, out_ctrl_pnts: &[GradingControlPoint], slopes: &[f32]) -> 
         secant = -secant;
     }
 
-    let x_mid = p0.x + 0.5f32 * dx;
-    let left_bnd = p0.x + dx * k;
-    let right_bnd = p1.x - dx * k;
+    let x_mid = ad(KSI_X_MID, p0.x, 0.5f32 * dx);
+    let left_bnd = ad(KSI_LEFT, p0.x, ml(KSI_DX_K, dx, k));
+    let right_bnd = sse_sub(p1.x, ml(KSI_DX_K, dx, k));
     let mut top_bnd = left_bnd;
     let mut bottom_bnd = right_bnd;
     let mut m_min = m0;
@@ -760,8 +892,8 @@ fn calc_ksi(i: usize, out_ctrl_pnts: &[GradingControlPoint], slopes: &[f32]) -> 
 
     let dm = m_max - m_min;
     let b = 1. - 0.5f32 * k;
-    let b_high = m_min + b * dm;
-    let b_low = m_min + (1. - b) * dm;
+    let b_high = ad(KSI_B_HIGH, m_min, b * dm);
+    let b_low = ad(KSI_B_LOW, m_min, (1. - b) * dm);
     let bbb = m_max * 4.;
     let bb = m_max * 1.1f32;
     let m_rel_diff = dm / std_max(0.01f32, m_max);
@@ -769,20 +901,36 @@ fn calc_ksi(i: usize, out_ctrl_pnts: &[GradingControlPoint], slopes: &[f32]) -> 
         0.0f32,
         std_min((m_rel_diff - 0.05f32) / (0.75f32 - 0.05f32), 1.0f32),
     );
-    top_bnd = x_mid + alpha * (top_bnd - x_mid);
-    bottom_bnd = x_mid + alpha * (bottom_bnd - x_mid);
+    top_bnd = ad(
+        KSI_BOUND,
+        x_mid,
+        ml(KSI_BOUND_MUL, alpha, sse_sub(top_bnd, x_mid)),
+    );
+    bottom_bnd = ad(
+        KSI_BOUND,
+        x_mid,
+        ml(KSI_BOUND_MUL, alpha, sse_sub(bottom_bnd, x_mid)),
+    );
 
     // Calculate the middle knot.
     if secant >= bbb {
         x_mid
     } else if secant > bb {
         let blend = (secant - bb) / (bbb - bb);
-        top_bnd + blend * (x_mid - top_bnd)
+        ad(
+            KSI_BLEND,
+            top_bnd,
+            ml(KSI_BLEND_MUL, blend, sse_sub(x_mid, top_bnd)),
+        )
     } else if secant >= b_high {
         top_bnd
     } else if (secant > b_low) && (b_high != b_low) {
         let blend = (secant - b_low) / (b_high - b_low);
-        bottom_bnd + blend * (top_bnd - bottom_bnd)
+        ad(
+            KSI_BLEND,
+            bottom_bnd,
+            ml(KSI_BLEND_MUL, blend, sse_sub(top_bnd, bottom_bnd)),
+        )
     } else {
         bottom_bnd
     }
@@ -793,6 +941,8 @@ fn calc_ksi(i: usize, out_ctrl_pnts: &[GradingControlPoint], slopes: &[f32]) -> 
 ///
 /// Port of `FitHueSpline` (src/OpenColorIO/ops/gradingrgbcurve/GradingBSplineCurve.cpp:
 /// 178-219 @ v2.5.2).
+///
+/// Its additions and multiplications are in each wheel's operand order ([`HUE_SWAPS`]).
 fn fit_hue_spline(
     ctrl_pnts: &[GradingControlPoint],
     slopes: &[f32],
@@ -810,7 +960,7 @@ fn fit_hue_spline(
         let dx = p1.x - p0.x;
         let secant_slope = (p1.y - p0.y) / dx;
 
-        if ((slopes[i] + slopes[i + 1]) - 2. * secant_slope).abs() <= 1e-5f32 {
+        if sse_sub(ad(FIT_SLOPES, slopes[i], slopes[i + 1]), 2. * secant_slope).abs() <= 1e-5f32 {
             coefs_c.push(p0.y);
             coefs_b.push(slopes[i]);
             coefs_a.push(0.5f32 * (slopes[i + 1] - slopes[i]) / dx);
@@ -819,16 +969,23 @@ fn fit_hue_spline(
             let ksi = calc_ksi(i, ctrl_pnts, slopes);
 
             // Calculate the coefficients.
-            let m_bar = (2. * secant_slope - slopes[i + 1])
-                + (slopes[i + 1] - slopes[i]) * (ksi - p0.x) / (p1.x - p0.x);
-            let eta = (m_bar - slopes[i]) / (ksi - p0.x);
+            let m_bar = ad(
+                FIT_M_BAR,
+                sse_sub(2. * secant_slope, slopes[i + 1]),
+                ml(FIT_M_BAR_MUL, sse_sub(slopes[i + 1], slopes[i]), ksi - p0.x) / (p1.x - p0.x),
+            );
+            let eta = sse_sub(m_bar, slopes[i]) / (ksi - p0.x);
             coefs_c.push(p0.y);
             coefs_b.push(slopes[i]);
             coefs_a.push(0.5f32 * eta);
-            coefs_c
-                .push(p0.y + slopes[i] * (ksi - p0.x) + 0.5f32 * eta * (ksi - p0.x) * (ksi - p0.x));
+            let d = ksi - p0.x;
+            coefs_c.push(ad(
+                FIT_C2,
+                ad(FIT_C2_Y, p0.y, ml(FIT_C2_S, slopes[i], d)),
+                ml(FIT_C2_DD, ml(FIT_C2_D, 0.5f32 * eta, d), d),
+            ));
             coefs_b.push(m_bar);
-            coefs_a.push(0.5f32 * (slopes[i + 1] - m_bar) / (p1.x - ksi));
+            coefs_a.push(0.5f32 * sse_sub(slopes[i + 1], m_bar) / (p1.x - ksi));
             knots.push(ksi);
         }
 
@@ -842,6 +999,8 @@ fn fit_hue_spline(
 ///
 /// Port of `EstimateHueSlopes` (src/OpenColorIO/ops/gradingrgbcurve/GradingBSplineCurve.cpp:
 /// 223-326 @ v2.5.2). Upstream's `sqrt` of a `float` is the `float` overload.
+///
+/// Its additions and multiplications are in each wheel's operand order ([`HUE_SWAPS`]).
 fn estimate_hue_slopes(
     ctrl_pnts: &[GradingControlPoint],
     slopes: &mut Vec<f32>,
@@ -859,7 +1018,7 @@ fn estimate_hue_slopes(
         let del_x = p1.x - p0.x; // PrepHueCurveData ensures this is > 0
         let del_y = p1.y - p0.y;
         secant_slope.push(del_y / del_x);
-        secant_len.push((del_x * del_x + del_y * del_y).sqrt());
+        secant_len.push(ad(EST_LEN, del_x * del_x, del_y * del_y).sqrt());
     }
 
     if num_ctrl_pnts == 2 {
@@ -873,12 +1032,12 @@ fn estimate_hue_slopes(
     if is_horizontal {
         // All horizontal curves and diagonal hue-hue.
         for i in 1..num_ctrl_pnts - 1 {
-            let denom = secant_slope[i] + secant_slope[i - 1];
+            let denom = ad(EST_DENOM, secant_slope[i], secant_slope[i - 1]);
             let mut s = if denom.abs() < 1e-3f32 {
                 let minval = if denom < 0. { -1e-3f32 } else { 1e-3f32 };
-                2. * secant_slope[i] * secant_slope[i - 1] / minval
+                ml(EST_NUM, 2. * secant_slope[i], secant_slope[i - 1]) / minval
             } else {
-                2. * secant_slope[i] * secant_slope[i - 1] / denom
+                ml(EST_NUM, 2. * secant_slope[i], secant_slope[i - 1]) / denom
             };
             // Set slope to zero at flat areas or extrema.
             if secant_slope[i] * secant_slope[i - 1] <= 0. {
@@ -886,8 +1045,14 @@ fn estimate_hue_slopes(
             }
             slopes.push(s);
         }
-        slopes.push(0.5f32 * (3. * secant_slope[num_ctrl_pnts - 2] - slopes[num_ctrl_pnts - 2]));
-        slopes[0] = 0.5f32 * (3. * secant_slope[0] - slopes[1]);
+        slopes.push(
+            0.5f32
+                * sse_sub(
+                    3. * secant_slope[num_ctrl_pnts - 2],
+                    slopes[num_ctrl_pnts - 2],
+                ),
+        );
+        slopes[0] = 0.5f32 * sse_sub(3. * secant_slope[0], slopes[1]);
     } else {
         // Diagonal curves except hue-hue (LvL and SvS).
         let mut i = 0;
@@ -895,7 +1060,7 @@ fn estimate_hue_slopes(
             let mut j = i;
             let mut dl = secant_len[i];
             while j < num_ctrl_pnts - 2 && (secant_slope[j + 1] - secant_slope[j]).abs() < 1e-6f32 {
-                dl += secant_len[j + 1];
+                dl = ad(EST_DL, dl, secant_len[j + 1]);
                 j += 1;
             }
             for len in &mut secant_len[i..=j] {
@@ -908,17 +1073,24 @@ fn estimate_hue_slopes(
         }
 
         for k in 1..num_ctrl_pnts - 1 {
-            let s = (secant_len[k] * secant_slope[k] + secant_len[k - 1] * secant_slope[k - 1])
-                / (secant_len[k] + secant_len[k - 1]);
+            let s = ad(
+                EST_DIAG_NUM,
+                ml(EST_DIAG_K, secant_len[k], secant_slope[k]),
+                ml(EST_DIAG_K1, secant_len[k - 1], secant_slope[k - 1]),
+            ) / ad(EST_DIAG_DEN, secant_len[k], secant_len[k - 1]);
             slopes.push(s);
         }
 
         let min_slope = 0.01f32;
         slopes.push(std_max(
             min_slope,
-            0.5f32 * (3. * secant_slope[num_ctrl_pnts - 2] - slopes[num_ctrl_pnts - 2]),
+            0.5f32
+                * sse_sub(
+                    3. * secant_slope[num_ctrl_pnts - 2],
+                    slopes[num_ctrl_pnts - 2],
+                ),
         ));
-        slopes[0] = std_max(min_slope, 0.5f32 * (3. * secant_slope[0] - slopes[1]));
+        slopes[0] = std_max(min_slope, 0.5f32 * sse_sub(3. * secant_slope[0], slopes[1]));
     }
 
     // Adjust slopes that are not shape-preserving.
@@ -927,14 +1099,18 @@ fn estimate_hue_slopes(
         if slopes[i].abs() > slopes[i + 1].abs() {
             k = 1. - k;
         }
-        let m_near_min = slopes[i] + k * (slopes[i + 1] - slopes[i]);
+        let m_near_min = ad(
+            EST_NEAR_MIN,
+            slopes[i],
+            ml(EST_NEAR_MIN_MUL, k, sse_sub(slopes[i + 1], slopes[i])),
+        );
         let mut scale = 1.0f32;
         if m_near_min != 0. {
             scale = 0.75f32 * 2. * secant_slope[i] / m_near_min;
         }
         if scale < 1. {
-            slopes[i] *= scale;
-            slopes[i + 1] *= scale;
+            slopes[i] = ml(EST_SCALE0, slopes[i], scale);
+            slopes[i + 1] = ml(EST_SCALE1, slopes[i + 1], scale);
         }
     }
 

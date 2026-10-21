@@ -3021,6 +3021,32 @@ in the series (`I-` or `U-`), whatever the section. An entry says:
   `crates/ocio-ops/tests/grading_pre_render_oracle.rs` (random sets of NaN values, each with
   its own payload and sign) check it on both platforms.
 
+### I-219. The hue curves' NaN knots and coefficients differ between Windows and Linux
+
+- **Upstream:** the hue curves' fitting (`PrepHueCurveData`, `CalcKsi`, `FitHueSpline` and
+  `EstimateHueSlopes`, `ops/gradingrgbcurve/GradingBSplineCurve.cpp:22-326` @ v2.5.2) is scalar
+  `float` code that the two wheels compile with different operand orders: of its 31 additions
+  and multiplications of the curve's values (where a NaN y coordinate, x coordinate or slope
+  can meet another NaN, or the default NaN of an invalid operation; two have an operand that
+  is never NaN), MSVC swaps the source's operands at 17 and GCC
+  at 13, not the same ones (Windows `sub_1801e7490`, `sub_1801e55d0`, `sub_1801e4cb0`,
+  `sub_1801e64d0`; Linux inlined in `computeKnotsAndCoefsForHueCurve`, `0x3bff10`, read with
+  `tools/wheel-inspect`). For instance the second segment's constant `p0.y + slopes[i] *
+  (ksi - p0.x) + ...` is `((ksi - x0) * s0 + y0) + ...` on Windows and `(s0 * (ksi - x0) +
+  y0) + ...` on Linux, and a diagonal curve's slope numerator `len[k] * s[k] + len[k - 1] *
+  s[k - 1]` keeps the source's products on Windows but adds them the other way, where Linux
+  swaps the products' operands. A curve with NaN values gets knots and coefficients that keep
+  a different NaN on each platform: a dynamic op's uniforms, and the pixels where the NaN
+  reaches them.
+- **Who notices:** anyone comparing a GradingHueCurveTransform with NaN control points or
+  slopes between a Windows and a Linux machine.
+- **A fix:** one operand order on every platform, which changes NaN bits on at least one.
+- **Status:** matched in `p5-ec` (the fix of `p5-values` 5.0d,
+  `crates/ocio-ops/src/ops/gradingrgbcurve/grading_b_spline_curve.rs`, `HUE_SWAPS`, every
+  site from both wheels' machine code); `crates/ocio-ops/tests/hue_curve_nan_oracle.rs` (y,
+  x and slope NaNs each with its own payload and sign, and the verifier's specials) checks it
+  on both platforms.
+
 ### I-221. Archiving lists a directory whose path has 318 bytes or more by the wrong pattern
 
 - **Upstream:** `Config::archive` lists the config's directory and its subdirectories with
