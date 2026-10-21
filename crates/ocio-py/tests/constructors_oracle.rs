@@ -11,10 +11,15 @@
 //!   refusal is the constructor's text, named by the function;
 //! - pybind11's metatype refuses an instance a Python subclass's `__init__` didn't construct,
 //!   and "No constructor defined!" names a Python subclass by its name;
-//! - the instance size and weak reference offset, and the module of methods and functions.
+//! - the instance size and weak reference offset, and the module of methods and functions;
+//! - the function record type (its dictionary, flags and size) and pickling: a module
+//!   function's record reduces to its module, read by name when called, others' aren't
+//!   pickleable.
 //!
-//! And, without the wheel (whose behaviour is undefined there, U-86 and U-87): an instance no
-//! constructor constructed, and `pybind11_object` itself, raise the port's errors.
+//! And, without the wheel (whose behaviour is undefined there, U-86, U-87, U-98, U-99): an
+//! instance no constructor constructed, `pybind11_object` itself, a function record made,
+//! initialized or failing to pickle from Python, and a keyword name pybind11 can't write in
+//! an error, raise the port's errors.
 #![cfg(feature = "python")]
 
 mod common;
@@ -47,10 +52,18 @@ fn subclass(n: &str, base: &str, init: Option<&str>) -> Value {
     )
 }
 
-fn steps() -> Vec<Value> {
+/// The script, `module` naming the extension module (the wheel's `OCIO.PyOpenColorIO`, the
+/// embedded port's `OCIO` itself), whose name is `module_name`: set to the wheel's while the
+/// script runs, so that records reduce to the same text.
+fn steps(module: &str, module_name: &str) -> Vec<Value> {
     let shared = || name("OCIO.VIEW_SHARED");
     let class = || name("OCIO.ViewType");
     let mut s = vec![
+        setattr(
+            name(module),
+            "__name__",
+            text("PyOpenColorIO.PyOpenColorIO"),
+        ),
         // Identity, not names.
         setattr(class(), "__module__", text("PyOpenColorIO")),
         call(name("operator.eq"), json!([shared(), int("0")])),
@@ -157,16 +170,69 @@ fn steps() -> Vec<Value> {
             name("hasattr"),
             json!([name(&format!("{f}.__self__")), text("dispatch_call")]),
         ));
+        // Pickling (verifier re-check 3): a module function's record reduces to the module,
+        // any other's raises "<repr> is not pickleable.", whatever the arguments.
+        for args in [json!([int("2")]), json!([]), json!([text("x"), none()])] {
+            s.push(call(name(&format!("{f}.__self__.__reduce_ex__")), args));
+        }
+        s.push(json!({ "call": name(&format!("{f}.__self__.__reduce_ex__")), "kwargs": [["protocol", int("4")]] }));
+        s.push(call(name(&format!("{f}.__self__.__reduce__")), json!([])));
+        s.push(call(name(&format!("{f}.__reduce_ex__")), json!([int("2")])));
     }
+    // The record type: its dictionary, flags and size, its __new__ refusing another type,
+    // copy of a record (through __reduce_ex__: the module).
+    for a in [
+        "__flags__",
+        "__basicsize__",
+        "__itemsize__",
+        "__weakrefoffset__",
+        "__doc__",
+    ] {
+        s.push(json!({ "eval": name(&format!("OCIO.GetVersion.__self__.__class__.{a}")) }));
+    }
+    s.push(call(
+        name("list"),
+        json!([name("OCIO.GetVersion.__self__.__class__.__dict__")]),
+    ));
+    for a in ["__new__", "__init__", "__reduce_ex__"] {
+        s.push(json!({ "eval": name(&format!("OCIO.GetVersion.__self__.__class__.{a}")), "getters": ["__text_signature__", "__doc__", "__qualname__"] }));
+    }
+    s.push(call(
+        name("OCIO.GetVersion.__self__.__class__.__new__"),
+        json!([name("int")]),
+    ));
+    s.push(call(
+        name("copy.deepcopy"),
+        json!([name("OCIO.GetVersion")]),
+    ));
+    // The module's name is read when reducing: __module__, else __name__, else none (not
+    // pickleable). (One that isn't a str aborts the wheel: U-98.)
+    let reduce = || {
+        call(
+            name("OCIO.GetVersion.__self__.__reduce_ex__"),
+            json!([int("2")]),
+        )
+    };
+    s.push(setattr(name(module), "__name__", text("renamed")));
+    s.push(reduce());
+    s.push(setattr(name(module), "__module__", text("moduled")));
+    s.push(reduce());
+    s.push(json!({ "delattr": name(module), "name": "__module__" }));
+    s.push(json!({ "delattr": name(module), "name": "__name__" }));
+    s.push(reduce());
+    s.push(setattr(name(module), "__name__", text(module_name)));
     s
 }
 
 /// Constructors, identity and layout as the wheel's.
 #[test]
 fn constructors_and_identity_as_the_wheels() {
-    let script = json!({ "steps": steps() });
+    let script = json!({ "steps": steps("OCIO", "PyOpenColorIO") });
     let ours = port(&script);
-    let theirs = wheel(std::slice::from_ref(&script)).remove(0);
+    let theirs = wheel(&[json!({
+        "steps": steps("OCIO.PyOpenColorIO", "PyOpenColorIO.PyOpenColorIO")
+    })])
+    .remove(0);
     let (ours, theirs) = (
         ours["steps"].as_array().unwrap(),
         theirs["steps"].as_array().unwrap(),
@@ -230,6 +296,61 @@ fn undefined_behaviour_raises_the_ports_errors() {
             let e = attempt.unwrap_err();
             assert!(e.is_instance_of::<pyo3::exceptions::PyTypeError>(py), "{e}");
             assert_eq!(e.value(py).to_string(), no_instances);
+        }
+        // A function record made or initialized from Python (U-98).
+        let record = ocio
+            .getattr("GetVersion")
+            .unwrap()
+            .getattr("__self__")
+            .unwrap();
+        let record_type = record.get_type();
+        let c_name = format!(
+            "{}.{}",
+            record_type.module().unwrap(),
+            record_type.name().unwrap()
+        );
+        for (attempt, verb) in [
+            (record_type.call0(), "made"),
+            (record_type.call_method1("__new__", (&record_type,)), "made"),
+            (
+                record.call_method0("__init__").map(|r| r.into_any()),
+                "initialized",
+            ),
+            (record.call_method1("__init__", (1, 2)), "initialized"),
+        ] {
+            let e = attempt.unwrap_err();
+            assert!(e.is_instance_of::<pyo3::exceptions::PyTypeError>(py), "{e}");
+            assert_eq!(
+                e.value(py).to_string(),
+                format!(
+                    "{c_name}: pybind11's function records are {verb} by pybind11 only (the \
+                     wheel's process aborts; docs/improvements.md, U-98)"
+                )
+            );
+        }
+        // Pickling a module function's record when its module's name isn't a str, or without
+        // `eval` among the builtins (U-98).
+        let module = ocio.clone();
+        let reduce = || record.call_method1("__reduce_ex__", (2,));
+        let pickling = format!(
+            "{c_name}: pickling a function record raised an error, which aborts the wheel's \
+             process (docs/improvements.md, U-98)"
+        );
+        let original = module.getattr("__name__").unwrap();
+        module.setattr("__name__", 5).unwrap();
+        let attempt = reduce();
+        module.setattr("__name__", &original).unwrap();
+        let builtins = py.import("builtins").unwrap();
+        let eval = builtins.getattr("eval").unwrap();
+        builtins.delattr("eval").unwrap();
+        let without_eval = reduce();
+        builtins.setattr("eval", eval).unwrap();
+        for (attempt, kind) in [(attempt, "TypeError"), (without_eval, "KeyError")] {
+            let e = attempt.unwrap_err();
+            assert!(e.is_instance_of::<pyo3::exceptions::PyTypeError>(py), "{e}");
+            assert_eq!(e.value(py).to_string(), pickling);
+            let cause = e.cause(py).unwrap();
+            assert_eq!(cause.get_type(py).name().unwrap().to_string(), kind);
         }
         // A keyword whose name isn't UTF-8, in the error of a call no overload takes (U-99).
         let kwargs = pyo3::types::PyDict::new(py);

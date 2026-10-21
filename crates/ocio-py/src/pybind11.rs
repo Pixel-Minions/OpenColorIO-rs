@@ -23,7 +23,7 @@ use std::ffi::CString;
 
 use pyo3::prelude::*;
 use pyo3::sync::PyOnceLock;
-use pyo3::types::{PyCFunction, PyDict, PyString, PyTuple, PyType};
+use pyo3::types::{PyCFunction, PyDict, PyModule, PyString, PyTuple, PyType};
 
 use crate::dispatch::{Function, dispatch};
 
@@ -336,9 +336,10 @@ pub fn instance_method<'py>(py: Python<'py>, f: Bound<'py, PyAny>) -> PyResult<B
 // pybind11's function record (`detail::function_record`), the `__self__` of every function it
 // makes, as Python sees it: a class of pybind11_builtins whose name carries pybind11's ABI tag,
 // which differs between the Windows wheel (MSVC) and the Linux one (GCC, libstdc++); CPython
-// names it in a function's `__qualname__` and repr. Its one method, `dispatch_call`, is the C
-// function of every function (removed from the class's dictionary, which the wheel's has no
-// methods in). (No Rust doc comment: it would be the class's docstring.)
+// names it in a function's `__qualname__` and repr. Its dictionary holds `__new__`, `__init__` and
+// `__reduce_ex__`, as the wheel's; its method `dispatch_call` is the C function of every
+// function, removed from the dictionary. (No Rust doc comment: it would be the class's
+// docstring.)
 #[cfg_attr(
     windows,
     pyclass(
@@ -357,38 +358,172 @@ pub fn instance_method<'py>(py: Python<'py>, f: Bound<'py, PyAny>) -> PyResult<B
 )]
 #[derive(Debug)]
 pub struct FunctionRecord {
+    // One pointer, as the wheel's record object holds (its `__basicsize__` 24).
+    record: &'static Record,
+}
+
+/// What a [`FunctionRecord`] holds: the function, and pybind11's `rec->scope` when it is a
+/// module (a function `m.def` defines), which makes the record pickleable.
+#[derive(Debug)]
+struct Record {
     f: &'static Function,
+    module_scope: Option<Py<PyModule>>,
 }
 
 #[pymethods]
 impl FunctionRecord {
+    // The record type's `tp_new` and `tp_init`, which the wheel's has (its dictionary holds
+    // `__new__` and `__init__`): constructing or initializing a record from Python aborts the
+    // wheel's process, so the port refuses both (docs/improvements.md, U-98).
+    #[new]
+    #[pyo3(signature = (*_args, **_kwargs), text_signature = None)]
+    fn new(_args: &Bound<'_, PyTuple>, _kwargs: Option<&Bound<'_, PyDict>>) -> PyResult<Self> {
+        Err(pyo3::exceptions::PyTypeError::new_err(format!(
+            "{RECORD_NAME}: pybind11's function records are made by pybind11 only (the wheel's \
+             process aborts; docs/improvements.md, U-98)"
+        )))
+    }
+
+    #[pyo3(signature = (*_args, **_kwargs))]
+    fn __init__(
+        _slf: &Bound<'_, Self>,
+        _args: &Bound<'_, PyTuple>,
+        _kwargs: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<()> {
+        Err(pyo3::exceptions::PyTypeError::new_err(format!(
+            "{RECORD_NAME}: pybind11's function records are initialized by pybind11 only (the \
+             wheel's process aborts; docs/improvements.md, U-98)"
+        )))
+    }
+
     #[pyo3(signature = (*args, **kwargs))]
     fn dispatch_call(
         slf: &Bound<'_, Self>,
         args: &Bound<'_, PyTuple>,
         kwargs: Option<&Bound<'_, PyDict>>,
     ) -> PyResult<Py<PyAny>> {
-        dispatch(slf.py(), slf.get().f, args, kwargs)
+        dispatch(slf.py(), slf.get().record.f, args, kwargs)
+    }
+
+    // pybind11's `function_record_PyTypeObject_methods::reduce_ex_impl` (pybind11 3,
+    // pybind11/detail/function_record_pyobject.h), its arguments ignored: a named function
+    // whose scope is a module pickles as `eval("__import__('importlib').import_module('<the
+    // scope's __module__, else its __name__>')")`, read when called; any other record raises
+    // RuntimeError "<repr> is not pickleable.". `eval` is the builtins module's (pybind11 takes
+    // the running frame's builtins, the same dictionary unless code runs with builtins of its
+    // own). A Python error on the way (a name that isn't a str, `eval` deleted) leaves the
+    // wheel's C function as a C++ exception and aborts its process: the port's error (U-98).
+    #[pyo3(signature = (*_args, **_kwargs), text_signature = None)]
+    fn __reduce_ex__(
+        slf: &Bound<'_, Self>,
+        _args: &Bound<'_, PyTuple>,
+        _kwargs: Option<&Bound<'_, PyDict>>,
+    ) -> PyResult<Py<PyAny>> {
+        let py = slf.py();
+        let record = slf.get().record;
+        let reduced = || -> PyResult<Option<Py<PyAny>>> {
+            let Some(scope) = record.module_scope.as_ref().map(|m| m.bind(py)) else {
+                return Ok(None);
+            };
+            if record.f.name.is_empty() {
+                return Ok(None);
+            }
+            let module = if scope.hasattr("__module__").unwrap_or(false) {
+                scope.getattr("__module__")?
+            } else if scope.hasattr("__name__").unwrap_or(false) {
+                scope.getattr("__name__")?
+            } else {
+                return Ok(None);
+            };
+            let source = PyString::new(py, "__import__('importlib').import_module('")
+                .add(module)?
+                .add("')")?;
+            let eval = py.import("builtins")?.dict().as_any().get_item("eval")?;
+            Ok(Some(
+                PyTuple::new(py, [eval, PyTuple::new(py, [source])?.into_any()])?
+                    .into_any()
+                    .unbind(),
+            ))
+        };
+        match reduced() {
+            Ok(Some(reduced)) => Ok(reduced),
+            Ok(None) => Err(pyo3::exceptions::PyRuntimeError::new_err(
+                slf.repr()?.add(" is not pickleable.")?.unbind(),
+            )),
+            Err(e) => {
+                let error = pyo3::exceptions::PyTypeError::new_err(format!(
+                    "{RECORD_NAME}: pickling a function record raised an error, which aborts the \
+                     wheel's process (docs/improvements.md, U-98)"
+                ));
+                error.set_cause(py, Some(e));
+                Err(error)
+            }
+        }
     }
 }
 
+/// The record type's C name.
+#[cfg(windows)]
+const RECORD_NAME: &str = "pybind11_builtins.pybind11_detail_function_record_v1_msvc_md_mscver19";
+/// The record type's C name.
+#[cfg(not(windows))]
+const RECORD_NAME: &str = "pybind11_builtins.pybind11_detail_function_record_v1_system_libstdcpp_gxx_abi_1xxx_use_cxx11_abi_1";
+
 /// `dispatch_call`'s method definition (PyO3's trampoline and flags), once its class no longer
-/// shows it.
+/// shows it: the index, among the class's method definitions, of the one whose function is
+/// named `dispatch_call` (a function made from each, with its own name, tells).
 static RECORD_METHOD: PyOnceLock<usize> = PyOnceLock::new();
 
-fn record_method(py: Python<'_>) -> PyResult<pyo3::ffi::PyMethodDef> {
+/// A function without overloads, for the records [`record_method`] makes to tell the method
+/// definitions apart.
+static NO_FUNCTION: Function = Function {
+    name: "",
+    constructor: false,
+    method: false,
+    overloads: &[],
+};
+
+fn record_methods() -> Vec<pyo3::ffi::PyMethodDef> {
     use pyo3::impl_::pyclass::PyClassImpl;
     use pyo3::impl_::pymethods::PyMethodDefType;
-    RECORD_METHOD.get_or_try_init(py, || -> PyResult<usize> {
-        py.get_type::<FunctionRecord>().delattr("dispatch_call")?;
-        Ok(0)
-    })?;
     <FunctionRecord as PyClassImpl>::items_iter()
         .flat_map(|items| items.methods)
-        .find_map(|m| match m {
+        .filter_map(|m| match m {
             PyMethodDefType::Method(def) => Some(def.into_raw()),
             _ => None,
         })
+        .collect()
+}
+
+fn record_method(py: Python<'_>) -> PyResult<pyo3::ffi::PyMethodDef> {
+    let index = *RECORD_METHOD.get_or_try_init(py, || -> PyResult<usize> {
+        py.get_type::<FunctionRecord>().delattr("dispatch_call")?;
+        let record = Bound::new(
+            py,
+            FunctionRecord {
+                record: Box::leak(Box::new(Record {
+                    f: &NO_FUNCTION,
+                    module_scope: None,
+                })),
+            },
+        )?;
+        for (i, def) in record_methods().into_iter().enumerate() {
+            let function = crate::type_object::new_function(
+                Box::leak(Box::new(def)),
+                record.as_any(),
+                &py.None().into_bound(py),
+            )?;
+            if function.getattr("__name__")?.to_string() == "dispatch_call" {
+                return Ok(i);
+            }
+        }
+        Err(pyo3::exceptions::PyRuntimeError::new_err(
+            "no dispatch_call",
+        ))
+    })?;
+    record_methods()
+        .into_iter()
+        .nth(index)
         .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("no dispatch_call"))
 }
 
@@ -401,7 +536,7 @@ pub fn builtin<'py>(
     f: &'static Function,
     doc: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
-    function(py, f, doc, Some(MODULE))
+    function(py, f, doc, Some(MODULE), None)
 }
 
 /// [`builtin`] for a function pybind11 makes without a scope (the getters of an enum's
@@ -411,7 +546,7 @@ pub fn builtin_unscoped<'py>(
     f: &'static Function,
     doc: bool,
 ) -> PyResult<Bound<'py, PyAny>> {
-    function(py, f, doc, None)
+    function(py, f, doc, None, None)
 }
 
 fn function<'py>(
@@ -419,6 +554,7 @@ fn function<'py>(
     f: &'static Function,
     doc: bool,
     module: Option<&str>,
+    module_scope: Option<&Bound<'py, PyModule>>,
 ) -> PyResult<Bound<'py, PyAny>> {
     let name: &'static std::ffi::CStr = Box::leak(
         CString::new(f.name)
@@ -435,7 +571,15 @@ fn function<'py>(
     let mut def = record_method(py)?;
     def.ml_name = name.as_ptr();
     def.ml_doc = docstring.map_or(std::ptr::null(), std::ffi::CStr::as_ptr);
-    let record = Bound::new(py, FunctionRecord { f })?;
+    let record = Bound::new(
+        py,
+        FunctionRecord {
+            record: Box::leak(Box::new(Record {
+                f,
+                module_scope: module_scope.map(|m| m.clone().unbind()),
+            })),
+        },
+    )?;
     let module = match module {
         Some(m) => PyString::new(py, m).into_any(),
         None => py.None().into_bound(py),
@@ -443,9 +587,10 @@ fn function<'py>(
     crate::type_object::new_function(Box::leak(Box::new(def)), record.as_any(), &module)
 }
 
-/// `m.def(name, ...)`: [`builtin`] of `f` into the module's dictionary.
+/// `m.def(name, ...)`: [`builtin`] of `f` into the module's dictionary, its record's scope the
+/// module (which makes it pickleable).
 pub fn def_function(m: &Bound<'_, PyModule>, f: &'static Function) -> PyResult<()> {
-    m.setattr(f.name, builtin(m.py(), f, true)?)
+    m.setattr(f.name, function(m.py(), f, true, Some(MODULE), Some(m))?)
 }
 
 /// A method: [`instance_method`] of [`builtin`].

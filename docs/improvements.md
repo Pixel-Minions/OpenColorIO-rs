@@ -4466,6 +4466,25 @@ Out-of-bounds image layouts are decided: the port returns an error (D-2, approve
   (`crates/ocio-py/src/dispatch.rs`, the `[T; N]` caster); `dispatch_oracle.rs`,
   `arrays_refuse_what_the_wheel_reads_undefined` (the port only).
 
+### U-98. pybind11's function record aborts the process when Python makes, initializes or fails to pickle one
+
+- **Upstream:** the type of every function's `__self__`, pybind11's function record
+  (`pybind11_builtins.pybind11_detail_function_record_v1_...`), has a `__new__` and an
+  `__init__` that pybind11 never means Python to call: `type(OCIO.GetVersion.__self__)()`,
+  `type(r).__new__(type(r))` and `r.__init__()` abort the wheel's process (exit 127 on
+  Windows). Its `__reduce_ex__` raises nothing Python can catch either: when the module's
+  `__module__` or `__name__` isn't a str (`"..." + 5`), or `eval` is gone from the builtins,
+  the Python error leaves the C function as a C++ exception and the process aborts (the
+  verifier's probes of p6-core, and p6-core-2's).
+- **Who notices:** Python code that instantiates the type of a function's `__self__`, or
+  pickles a module function after renaming its module to something that isn't a str.
+- **A fix:** none needed beyond the port's error.
+- **Status:** the port raises TypeError "<record type>: pybind11's function records are made
+  (initialized) by pybind11 only (the wheel's process aborts; ...)", and "<record type>:
+  pickling a function record raised an error, which aborts the wheel's process (...)" with
+  the error as its cause, in `p6-core` (`crates/ocio-py/src/pybind11.rs`, `FunctionRecord`);
+  `constructors_oracle.rs`, `undefined_behaviour_raises_the_ports_errors` (the port only).
+
 ### U-99. A keyword name that isn't UTF-8 in a refused call aborts the process
 
 - **Upstream:** when no overload takes a call, pybind11's dispatcher writes each keyword's name
