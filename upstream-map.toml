@@ -1689,13 +1689,15 @@ note = "p5-values 5.0b: GradingRGBMSW and GradingTone as plain values (P5-2) wit
 path = "src/OpenColorIO/ops/gradingtone/GradingToneOp.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingtone/grading_tone_op.rs"]
-status = "todo"
+status = "partial"
+note = "p5-tone 5.3a: the op and CreateGradingToneOp; getCPUOp with the renderers (5.3b, 5.3c); extractGpuShaderInfo with 5.3d-e (ocio-gpu gpu_processor.rs); CreateGradingToneTransform and BuildGradingToneOp with 5.5d"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingtone/GradingToneOp.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingtone/grading_tone_op.rs"]
-status = "todo"
+status = "partial"
+note = "p5-tone 5.3a: CreateGradingToneOp; CreateGradingToneTransform with 5.5d"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingtone/GradingToneOpCPU.cpp"
@@ -1713,13 +1715,14 @@ status = "todo"
 path = "src/OpenColorIO/ops/gradingtone/GradingToneOpData.cpp"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingtone/grading_tone_op_data.rs"]
-status = "todo"
+status = "done"
+note = "p5-tone 5.3a; checked against the wheel through processors of a GradingToneTransform (tests/grading_tone_op_data_oracle.rs: cache IDs, the built data, isNoOp, hasChannelCrosstalk, the removal of identities and inverse pairs)"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingtone/GradingToneOpData.h"
 kind = "src"
 target = ["crates/ocio-ops/src/ops/gradingtone/grading_tone_op_data.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "src/OpenColorIO/ops/gradingtone/GradingToneOpGPU.cpp"
@@ -4944,13 +4947,14 @@ status = "todo"
 path = "tests/cpu/ops/gradingtone/GradingToneOpData_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/gradingtone/grading_tone_op_data_tests.rs"]
-status = "todo"
+status = "done"
 
 [[file]]
 path = "tests/cpu/ops/gradingtone/GradingToneOp_tests.cpp"
 kind = "test-cpu"
 target = ["crates/ocio-ops/src/ops/gradingtone/grading_tone_op_tests.rs"]
-status = "todo"
+status = "partial"
+note = "p5-tone 5.3a: create; create_transform and build_ops with 5.5d"
 
 [[file]]
 path = "tests/cpu/ops/gradingtone/GradingTone_tests.cpp"
